@@ -160,8 +160,15 @@ mutate durable workspace state and affect future tasks. Ask before changing
 A project can use a workflow: its ordered status columns, where a column may
 hand the issue off to a handler — a fixed agent, squad or member, the project
 lead, or the issue's creator. When the issue's project uses one, the per-turn
-prompt carries a `[Project workflow]` block, and that block replaces the
-status rules of your runtime brief for this issue.
+prompt carries a `[Project workflow]` block. Its statuses and commands are
+the whole status contract for this issue: the built-in moves in the issues
+reference (`in_progress` on start, `in_review` on delivery) do not apply.
+
+- **The step's scope is its instructions.** A step that hands off carries the
+  instructions its owner wrote; that is the work for this run. A step
+  without them asks for nothing beyond the issue itself. Do not infer a stage
+  from a column's name — `todo` is not "research" and `in_progress` is not
+  "build" unless the instructions say so.
 
 - **Only the workflow's keys.** A named workflow accepts only its own
   statuses; any other status write fails with `status_not_in_workflow`, and
@@ -177,6 +184,10 @@ status rules of your runtime brief for this issue.
   the move, a run for the new step queues behind the current one, and the
   write skips your own event wakeups so one change starts one run. Do not add
   a wakeup to catch it.
+- **A step without a handler starts nothing.** Entering it keeps the
+  assignee and queues no run. If you move the issue into such a step and its
+  work is still yours, keep working in this run; ending the run there leaves
+  the issue waiting for someone to pick it up.
 - **A run works one step.** A run is bound to the status the issue was at when
   it was queued, and moves along with your own status changes. If someone else
   moves the issue while you work, your status changes are refused with

@@ -966,6 +966,55 @@ func TestAntigravityBackendIgnoresTrailingNetworkErrorAfterDoneResponse(t *testi
 	}
 }
 
+// agy 1.4.6 can retain an earlier interruption in the result of a resumed
+// conversation, even after the current response finishes successfully (#9528).
+func TestAntigravityBackendRecoveredStreamInterruption(t *testing.T) {
+	t.Parallel()
+
+	for _, tc := range []struct {
+		done     bool
+		exitCode int
+	}{
+		{done: true, exitCode: 0},
+		{done: false, exitCode: 0},
+		{done: true, exitCode: 1},
+	} {
+		t.Run(fmt.Sprintf("response_done=%v/exit=%d", tc.done, tc.exitCode), func(t *testing.T) {
+			t.Parallel()
+			fakePath := filepath.Join(t.TempDir(), "agy")
+			script := strings.ReplaceAll(fakeAgyTrailingNetworkErrorScript(tc.done), antigravityNetworkIssueError,
+				"The stream was interrupted. Please continue the task you were working on.")
+			script = strings.ReplaceAll(script, "exit 1", fmt.Sprintf("exit %d", tc.exitCode))
+			writeTestExecutable(t, fakePath, []byte(script))
+
+			backend, err := New("antigravity", Config{ExecutablePath: fakePath, Logger: quietAntigravityLogger()})
+			if err != nil {
+				t.Fatalf("new antigravity backend: %v", err)
+			}
+			session, err := backend.Execute(context.Background(), "follow-up", ExecOptions{
+				ResumeSessionID: "37a6d8f2-8523-46fc-8fc9-87e630cbe295",
+			})
+			if err != nil {
+				t.Fatalf("execute: %v", err)
+			}
+			for range session.Messages {
+			}
+			result, ok := <-session.Result
+			if !ok {
+				t.Fatal("result channel closed without a value")
+			}
+			wantStatus := "failed"
+			completed := tc.done && tc.exitCode == 0
+			if completed {
+				wantStatus = "completed"
+			}
+			if result.Status != wantStatus || result.Output != "Complete answer." || (result.Error == "") != completed {
+				t.Fatalf("result = status %q output %q error %q", result.Status, result.Output, result.Error)
+			}
+		})
+	}
+}
+
 func TestAntigravityBackendIgnoresStaleActiveStepAfterDoneResponse(t *testing.T) {
 	t.Parallel()
 
@@ -1081,6 +1130,7 @@ func TestAntigravityTrailingTransportErrorClassification(t *testing.T) {
 			err:  "  THERE WAS A NETWORK ISSUE CONNECTING TO THE SERVER, PLEASE TRY AGAIN.  ",
 			want: true,
 		},
+		{name: "recovered stream interruption", err: "The stream was interrupted. Please continue the task you were working on.", want: true},
 		{name: "unexpected EOF", err: `Post "https://host/v1": unexpected EOF`, want: true},
 		{name: "connection reset", err: `read tcp 1.2.3.4:443: connection reset by peer`, want: true},
 		{name: "broken pipe", err: `write tcp 1.2.3.4:443: broken pipe`, want: true},
@@ -1150,6 +1200,7 @@ func TestAntigravityCompletedDespiteTrailingNetworkErrorRequiresAllThree(t *test
 		{name: "response whitespace only", err: transport, response: "  \n ", agentResponseDone: true, want: false},
 		{name: "response empty", err: transport, response: "", agentResponseDone: true, want: false},
 		{name: "answer still being written", err: transport, response: "partial", agentResponseDone: false, want: false},
+		{name: "interrupted response whitespace only", err: "The stream was interrupted. Please continue the task you were working on.", response: "  ", agentResponseDone: true, want: false},
 		{name: "provider rejection", err: quota, response: "answer", agentResponseDone: true, want: false},
 		{name: "no error at all", err: "", response: "answer", agentResponseDone: true, want: false},
 	}
@@ -1157,7 +1208,7 @@ func TestAntigravityCompletedDespiteTrailingNetworkErrorRequiresAllThree(t *test
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			got := antigravityCompletedDespiteTrailingNetworkError(tc.err, tc.response, tc.agentResponseDone)
+			got := antigravityCompletedDespiteTrailingNetworkError(tc.err, tc.response, tc.agentResponseDone, false)
 			if got != tc.want {
 				t.Fatalf("antigravityCompletedDespiteTrailingNetworkError(%q, %q, %v) = %v, want %v",
 					tc.err, tc.response, tc.agentResponseDone, got, tc.want)

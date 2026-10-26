@@ -34,7 +34,7 @@ const mocks = vi.hoisted(() => ({
     scope: "all",
     sortField: "lastActive" as string,
     sortDirection: "desc" as string,
-    hiddenColumns: ["model", "created"] as string[],
+    hiddenColumns: ["created"] as string[],
     filters: {
       availability: [] as string[],
       runtimes: [] as string[],
@@ -42,6 +42,8 @@ const mocks = vi.hoisted(() => ({
       models: [] as string[],
       access: [] as string[],
     },
+    search: "",
+    setSearch: vi.fn(),
     setScope: vi.fn(),
     toggleSort: vi.fn(),
     setSortField: vi.fn(),
@@ -108,7 +110,7 @@ vi.mock("@multica/core/agents", () => ({
 vi.mock("@multica/core/agents/stores", () => ({
   useAgentsViewStore: (selector: (state: unknown) => unknown) =>
     selector(mocks.viewState),
-  AGENT_DEFAULT_HIDDEN_COLUMNS: ["model", "created"],
+  AGENT_DEFAULT_HIDDEN_COLUMNS: ["created"],
   AGENT_SCOPES: ["mine", "all", "archived"],
 }));
 
@@ -248,7 +250,8 @@ beforeEach(() => {
   mocks.viewState.scope = "all";
   mocks.viewState.sortField = "lastActive";
   mocks.viewState.sortDirection = "desc";
-  mocks.viewState.hiddenColumns = ["model", "created"];
+  mocks.viewState.hiddenColumns = ["created"];
+  mocks.viewState.search = "";
   mocks.viewState.filters = {
     availability: [],
     runtimes: [],
@@ -346,5 +349,28 @@ describe("AgentsPage docs link", () => {
     expect(
       screen.getByRole("link", { name: "En savoir plus →" }),
     ).toHaveAttribute("href", "https://multica.ai/docs/fr/agents");
+  });
+});
+
+describe("AgentsPage search + model column (GitHub #9500)", () => {
+  it("filters by the store's search query so it survives leaving the page", () => {
+    // The query comes from the view store, not page-local state: a remount
+    // (open agent → back) renders with the same query already applied.
+    mocks.viewState.sortField = "name";
+    mocks.viewState.search = "beta";
+
+    renderPage();
+
+    expect(screen.getByText("Beta Agent")).toBeInTheDocument();
+    expect(screen.queryByText("Alpha Agent")).not.toBeInTheDocument();
+  });
+
+  it("renders the model column by default", () => {
+    mocks.viewState.sortField = "name";
+
+    renderPage();
+
+    expect(screen.getByText("Model")).toBeInTheDocument();
+    expect(screen.getAllByTitle("claude").length).toBeGreaterThan(0);
   });
 });

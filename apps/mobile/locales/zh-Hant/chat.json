@@ -1,0 +1,170 @@
+{
+  "tabs": {
+    "title": "聊天"
+  },
+  "composer": {
+    "no_agent": "未選擇智慧體",
+    "revoked": "你已無法執行該智慧體",
+    "no_agents": "該工作區沒有智慧體",
+    "archived": "該聊天已歸檔",
+    "runtime_required": "智慧體需要執行時",
+    "replying_to": "回覆 {{name}}",
+    "cancel_reply": "取消回覆",
+    "mention": "提及成員或任務",
+    "upload_image": "上傳圖片",
+    "upload_file": "上傳檔案",
+    "send": "傳送",
+    "default_placeholder": "輸入訊息...",
+    "unavailable": "聊天不可用",
+    "stop_agent": "停止智慧體",
+    "file_too_large_title": "檔案過大",
+    "file_too_large_message": "檔案必須小於 100 MB。",
+    "working": "智慧體正在處理...",
+    "message": "訊息..."
+  },
+  "empty": {
+    "greeting": "你好，我是 {{name}}",
+    "no_agent_title": "與智慧體聊天",
+    "examples": "示例會填充輸入框，不會直接傳送。",
+    "starter_help_label": "你能幫我做什麼？",
+    "starter_help_prompt": "你最擅長幫我做什麼？請簡要概述。",
+    "starter_task_label": "建議第一個任務",
+    "starter_task_prompt": "建議三個適合委託給你的有用任務。",
+    "starter_action_label": "推薦一個操作",
+    "starter_action_prompt": "瞭解我的工作區後，推薦一個有用的首要操作。"
+  },
+  "picker": {
+    "title": "選擇智慧體",
+    "placeholder": "搜尋智慧體...",
+    "empty": "沒有可用智慧體。",
+    "needs_runtime": "需要執行時"
+  },
+  "banners": {
+    "no_agent": "沒有可用智慧體",
+    "runtime_required": "該智慧體需要先配置執行時才能執行。",
+    "offline": "{{name}} 已離線。訊息會等待其執行時恢復後傳送。",
+    "no_agent_action": "在 \"更多 → 智慧體\" 中新增或啟用智慧體即可開始聊天。",
+    "offline_unstable": "{{name}} 可能剛斷開連線，你的訊息會先排隊。",
+    "runtime_required_name": "{{name}} 需要先配置執行時才能執行。請在網頁端或桌面端繫結。"
+  },
+  "status": {
+    "offline": "離線",
+    "reconnecting": "重新連線中",
+    "queued": "排隊中",
+    "starting": "啟動中",
+    "thinking": "思考中",
+    "typing": "輸入中",
+    "working": "處理中",
+    "running_command": "正在執行命令",
+    "reading_files": "正在讀取檔案",
+    "searching_code": "正在搜尋程式碼",
+    "making_edits": "正在修改",
+    "searching_web": "正在搜尋網頁",
+    "retrying": "重試中"
+  },
+  "alerts": {
+    "no_permission_title": "無權執行該智慧體",
+    "no_permission_message": "你已無權執行該智慧體，訊息未傳送。請聯絡該智慧體的所有者申請權限。",
+    "runtime_title": "需要執行時",
+    "runtime_message": "傳送訊息前，請先在網頁端或桌面端為該智慧體繫結執行時。",
+    "not_sent": "訊息未傳送",
+    "delete_title": "刪除這個聊天？",
+    "delete_confirm": "刪除"
+  },
+  "failure": {
+    "invocation_not_allowed": "你已無權執行該智慧體，訊息未傳送。",
+    "agent_runtime_required": "傳送訊息前，請先為該智慧體繫結執行時。",
+    "runtime_access_denied": "訊息未傳送：{{detail}}",
+    "default": "訊息無法傳送，請重試。",
+    "runtime_access_recovery": "該智慧體無法在其私有執行時上執行。請將該執行時設為公開，或將智慧體重新繫結/複製到其所有者可用的執行時。"
+  },
+  "a11y": {
+    "suggested_followups": "建議的後續操作",
+    "show_error_details": "顯示錯誤詳情",
+    "no_agents": "沒有可用智慧體",
+    "session_actions": "聊天會話操作",
+    "new_chat": "新建聊天",
+    "sessions_agent_picker": "聊天會話和智慧體選擇器"
+  },
+  "title": {
+    "fallback": "聊天",
+    "this_agent": "該智慧體"
+  },
+  "elapsed": {
+    "replied": "用時 {{time}} 回覆",
+    "finished": "用時 {{time}} 完成",
+    "failed": "執行 {{time}} 後失敗"
+  },
+  "details": {
+    "show": "顯示詳情"
+  },
+  "sessions": {
+    "title": "聊天",
+    "empty": "還沒有聊天。",
+    "archived": "已歸檔",
+    "new_chat": "新建聊天"
+  },
+  "picker.title": "選擇智慧體",
+  "no_response": "本輪已結束，智慧體沒有返回文字回覆。",
+  "failure_reason": {
+    "default": "執行失敗",
+    "queued_expired": "排隊已過期",
+    "runtime_offline": "守護程序離線",
+    "runtime_reconnect_timeout": "守護程序未及時重新連線",
+    "runtime_recovery": "守護程序已重啟",
+    "timeout": "執行超時",
+    "iteration_limit": "達到迭代次數上限",
+    "agent_blocked": "等待人工輸入",
+    "api_invalid_request": "模型 API 拒絕了請求",
+    "skill_bundle_unavailable": "無法下載智慧體的 skill",
+    "runtime_cli_timeout": "本地執行時 CLI 超時",
+    "environment_prepare_failed": "無法準備執行環境",
+    "runtime_access_denied": "該智慧體無法在其私有執行時上執行，暫時無法回覆。請將該執行時設為公開，或將智慧體重新繫結/複製到其所有者可用的執行時。",
+    "runtime_access_revoked": "執行時訪問權限已被撤銷。再次執行前，請為智慧體繫結可用的執行時。",
+    "invalid_task_identity": "執行身份不匹配",
+    "agent_error_provider_auth_or_access": "提供商認證失敗",
+    "agent_error_provider_quota_limit": "提供商配額已用盡",
+    "agent_error_provider_capacity_or_rate_limit": "受到提供商速率限制",
+    "agent_error_provider_server_error": "提供商伺服器出錯",
+    "agent_error_provider_network": "連線提供商時網路出錯",
+    "agent_error_process_failure": "智慧體程序崩潰",
+    "agent_error_empty_or_unparseable_output": "智慧體未返回可用輸出",
+    "agent_error_agent_timeout": "智慧體執行超時",
+    "agent_error_context_overflow": "上下文視窗已超限",
+    "agent_error_missing_config": "缺少 API 金鑰或配置",
+    "agent_error_model_not_found_or_unavailable": "模型不可用",
+    "agent_error_runtime_version_unsupported": "執行器 CLI 版本不受支援",
+    "agent_error_runtime_missing_executable": "未安裝執行器 CLI",
+    "agent_error_unknown": "智慧體執行出錯",
+    "agent_fallback_message": "智慧體返回了兜底訊息",
+    "codex_resume_oversized": "會話過大，無法恢復",
+    "idle_watchdog": "智慧體長時間無活動，執行已停止",
+    "local_directory_error": "本地目錄出錯",
+    "cancelled": "系統已取消",
+    "agent_error": "智慧體執行出錯",
+    "codex_semantic_inactivity": "Codex 長時間沒有語義進展",
+    "manual": "使用者取消",
+    "user_cancelled": "使用者取消"
+  },
+  "timeline": {
+    "steps_count_other": "{{count}} 個步驟",
+    "tool": "工具",
+    "tool_result_named": "{{tool}} 結果：",
+    "tool_result_unnamed": "結果：",
+    "truncated": "…（已截斷）",
+    "error": "錯誤"
+  },
+  "empty.starter_help_prompt": "你最擅長幫我做什麼？請簡要概述。",
+  "status.reconnecting": "重新連線中",
+  "status.running_command": "正在執行命令",
+  "status.reading_files": "正在讀取檔案",
+  "status.searching_code": "正在搜尋程式碼",
+  "status.making_edits": "正在修改",
+  "status.searching_web": "正在搜尋網頁",
+  "elapsed.replied": "用時 {{time}} 回覆",
+  "elapsed.finished": "用時 {{time}} 完成",
+  "elapsed.failed": "執行 {{time}} 後失敗",
+  "alerts.no_permission_message": "你已無權執行該智慧體，訊息未傳送。請聯絡該智慧體的所有者申請權限。",
+  "failure.runtime_access_denied": "訊息未傳送：{{detail}}",
+  "banners.no_agent_action": "在 \"更多 → 智慧體\" 中新增或啟用智慧體即可開始聊天。"
+}

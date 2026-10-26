@@ -214,6 +214,12 @@ type TaskContextForEnv struct {
 	// cap dropped from IssueStatuses, so the brief can disclose truncation
 	// instead of presenting a partial catalog as complete.
 	IssueStatusesOmitted int
+	// HasProjectWorkflow is true when the claim carried a project workflow
+	// brief for this issue (MUL-7420). The brief then swaps its built-in
+	// in_progress / in_review rules for a pointer at that per-turn block, whose
+	// statuses and commands are the issue's real contract (MUL-8145). Servers
+	// that send no workflow leave it false and the brief unchanged.
+	HasProjectWorkflow bool
 	// ConnectedApps lists per-run external app capabilities mounted through
 	// MCP overlays. Rendered briefly so the agent can map app names such as
 	// Notion to the actual MCP server name (`composio`).

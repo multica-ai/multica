@@ -121,7 +121,7 @@ export function createJaDict(
           {
             title: "初回起動時に自動検出",
             description:
-              "Multica は Antigravity、Claude Code、CodeBuddy、CodeArts、Codex、Copilot、Cursor、DeepSeek Harness、DevEco Code、Dim、Grok、Hermes、Kimi、Kiro CLI、MiniMax Code、Muse Code、Oh-My-Pi、OpenClaw、OpenCode、Pi、Qoder、Qoder CN、Qwen Code、QwenPaw、Reasonix、Trae CLI、ZeroClaw という27種類の対応ツールをスキャンし、見つかったものをそれぞれランタイムとして登録します。",
+              "Multica は Antigravity、Claude Code、CodeBuddy、CodeArts、Codex、Copilot、Cursor、DeepSeek Harness、DevEco Code、Devin CLI、Dim、Grok、Hermes、Kimi、Kiro CLI、MiniMax Code、Muse Code、Oh-My-Pi、OpenClaw、OpenCode、Pi、Qoder、Qoder CN、Qwen Code、QwenPaw、Reasonix、Trae CLI、ZeroClaw という28種類の対応ツールをスキャンし、見つかったものをそれぞれランタイムとして登録します。",
           },
         ],
       },
@@ -142,7 +142,7 @@ export function createJaDict(
         {
           title: "CLI をインストールしてマシンを接続",
           description:
-            "multica setup を実行すると、OAuth の手順を案内し、デーモンを起動し、27種類の対応コーディングツール(Antigravity、Claude Code、CodeBuddy、CodeArts、Codex、Copilot、Cursor、DeepSeek Harness、DevEco Code、Dim、Grok、Hermes、Kimi、Kiro CLI、MiniMax Code、Muse Code、Oh-My-Pi、OpenClaw、OpenCode、Pi、Qoder、Qoder CN、Qwen Code、QwenPaw、Reasonix、Trae CLI、ZeroClaw)をスキャンします。すでにインストール済みのものは、自動的にランタイムとして登録されます。",
+            "multica setup を実行すると、OAuth の手順を案内し、デーモンを起動し、28種類の対応コーディングツール(Antigravity、Claude Code、CodeBuddy、CodeArts、Codex、Copilot、Cursor、DeepSeek Harness、DevEco Code、Devin CLI、Dim、Grok、Hermes、Kimi、Kiro CLI、MiniMax Code、Muse Code、Oh-My-Pi、OpenClaw、OpenCode、Pi、Qoder、Qoder CN、Qwen Code、QwenPaw、Reasonix、Trae CLI、ZeroClaw)をスキャンします。すでにインストール済みのものは、自動的にランタイムとして登録されます。",
         },
         {
           title: "最初のエージェントを作成",
@@ -197,7 +197,7 @@ export function createJaDict(
         {
           question: "Multica はどのコーディングエージェントに対応していますか?",
           answer:
-            "Multica は、Antigravity、Claude Code、CodeBuddy、CodeArts、Codex、Copilot、Cursor、DeepSeek Harness、DevEco Code、Dim、Grok、Hermes、Kimi、Kiro CLI、MiniMax Code、Muse Code、Oh-My-Pi、OpenClaw、OpenCode、Pi、Qoder、Qoder CN、Qwen Code、QwenPaw、Reasonix、Trae CLI、ZeroClaw の27種類のコーディングツールに標準対応しています。デーモンが、すでにインストール済みの CLI を自動検出し、それぞれをランタイムとして登録します。ソースコードが公開されているので、独自のバックエンドを追加することもできます。 セルフホストでは、QCA PAT と既存の QCA エージェントを使い、タスク実行用のマネージドリモートランタイムとして Qoder Cloud Agents を設定できます。",
+            "Multica は、Antigravity、Claude Code、CodeBuddy、CodeArts、Codex、Copilot、Cursor、DeepSeek Harness、DevEco Code、Devin CLI、Dim、Grok、Hermes、Kimi、Kiro CLI、MiniMax Code、Muse Code、Oh-My-Pi、OpenClaw、OpenCode、Pi、Qoder、Qoder CN、Qwen Code、QwenPaw、Reasonix、Trae CLI、ZeroClaw の28種類のコーディングツールに標準対応しています。デーモンが、すでにインストール済みの CLI を自動検出し、それぞれをランタイムとして登録します。ソースコードが公開されているので、独自のバックエンドを追加することもできます。 セルフホストでは、QCA PAT と既存の QCA エージェントを使い、タスク実行用のマネージドリモートランタイムとして Qoder Cloud Agents を設定できます。",
         },
         {
           question: "セルフホストが必須ですか、それともクラウド版もありますか?",

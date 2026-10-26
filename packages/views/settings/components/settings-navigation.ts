@@ -38,6 +38,8 @@ export function resolveSettingsLocation(
   const section = params.get("section");
   const integration = params.get("integration");
   switch (tab) {
+    case "issue-statuses":
+      return { tab: "workflows", section: null, integration: null };
     case "issue":
     case "chat":
       return { tab: "preferences", section: tab, integration: null };

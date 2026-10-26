@@ -304,6 +304,10 @@ func ListModels(ctx context.Context, providerType string, runtimeCmd Command) (C
 		// makes model selection session-scoped, restore a discovery helper
 		// here modelled on discoverTraecliModels.
 		return Catalog{Models: []Model{}}, nil
+	case "devin":
+		return cachedDiscovery(discoveryCacheKey(providerType, runtimeCmd), func() (Catalog, error) {
+			return discovered(discoverDevinModels(ctx, runtimeCmd))
+		})
 	case "mcode":
 		// MCode's ACP server does not expose session-scoped model selection or
 		// a model catalog. The configured MCode runtime owns the model choice.

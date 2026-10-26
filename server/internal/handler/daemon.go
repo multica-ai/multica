@@ -3001,6 +3001,12 @@ func (h *Handler) buildClaimedTaskResponse(r *http.Request, task *db.AgentTaskQu
 		RuntimeConfig:         runtimeConfig,
 		DisabledRuntimeSkills: disabledRuntimeSkillsFor(agent.DisabledRuntimeSkills, runtimeID, runtime.Provider),
 	}
+	// Snapshot the agent's persistent OpenClaw model override for this claim.
+	// It applies to every claim until changed or cleared; later edits do not
+	// affect payloads already delivered to the daemon.
+	if runtime.Provider == "openclaw" {
+		resp.ModelOverride = openclawModelOverride(agent.RuntimeConfig)
+	}
 	// System agents carry a product-owned instruction layer that ships with
 	// this binary instead of being copied into their row at creation. That
 	// is what makes it hot-updatable: editing the embedded file and
@@ -3114,6 +3120,11 @@ func (h *Handler) buildClaimedTaskResponse(r *http.Request, task *db.AgentTaskQu
 		// claim actually hands back — see resumeAnchor there.
 		var commentDeltaScope *commentCountScope
 		var resumeAnchor *resumedRunAnchor
+		// started_at of the run whose session this claim resumes, whatever its
+		// status. Unlike resumeAnchor it is set for failed/cancelled sources
+		// too: a cancelled run's transcript is exactly where an edited comment's
+		// earlier text survives (MUL-8218).
+		var resumedRunStartedAt pgtype.Timestamptz
 
 		// Squad-leader briefing injection: keyed off the task being a
 		// leader-task (is_leader_task) carrying a squad_id — NOT off the
@@ -3151,6 +3162,19 @@ func (h *Handler) buildClaimedTaskResponse(r *http.Request, task *db.AgentTaskQu
 		// (No FK on squad_id — see migration 127.) We append (not replace)
 		// so per-agent instructions stay authoritative; the squad briefing
 		// stacks on top as task-specific squad context.
+		// Project workflow (MUL-7420): best-effort, like the status catalog
+		// below — a failure degrades to the workspace-wide status rules.
+		// Resolved before the leader briefing, which words the owning
+		// leader's status moves by it (MUL-8145).
+		legacyRuntimeRules := !requestHasClientCapability(r, protocol.DaemonCapabilityWorkflowStatusRulesV1)
+		projectWorkflow := h.claimProjectWorkflow(r.Context(), issue, task, legacyRuntimeRules)
+		leaderWorkflow := leaderNoWorkflow
+		if projectWorkflow != nil {
+			leaderWorkflow = leaderWorkflowCurrentDaemon
+			if legacyRuntimeRules {
+				leaderWorkflow = leaderWorkflowLegacyDaemon
+			}
+		}
 		if task.IsLeaderTask {
 			injected := false
 			if resp.Agent != nil && task.SquadID.Valid {
@@ -3169,7 +3193,7 @@ func (h *Handler) buildClaimedTaskResponse(r *http.Request, task *db.AgentTaskQu
 					ownsIssueStatus := issue.AssigneeType.Valid &&
 						issue.AssigneeType.String == "squad" &&
 						uuidToString(issue.AssigneeID) == uuidToString(squad.ID)
-					briefing := buildSquadLeaderBriefing(r.Context(), h.Queries, squad, ownsIssueStatus)
+					briefing := buildSquadLeaderBriefing(r.Context(), h.Queries, squad, ownsIssueStatus, leaderWorkflow)
 					if strings.TrimSpace(resp.Agent.Instructions) == "" {
 						resp.Agent.Instructions = briefing
 					} else {
@@ -3215,9 +3239,7 @@ func (h *Handler) buildClaimedTaskResponse(r *http.Request, task *db.AgentTaskQu
 			}
 		}
 		projectCtx.applyTo(&resp)
-		// Project workflow (MUL-7420): best-effort, like the status catalog
-		// below — a failure degrades to the workspace-wide status rules.
-		resp.ProjectWorkflow = h.claimProjectWorkflow(r.Context(), issue, task)
+		resp.ProjectWorkflow = projectWorkflow
 
 		// Load every planned input as one chronological, de-duplicated set.
 		// The trigger is included here so the delivery receipt can only contain
@@ -3280,6 +3302,9 @@ func (h *Handler) buildClaimedTaskResponse(r *http.Request, task *db.AgentTaskQu
 		// was triggered by a human or by another agent — a signal used by the
 		// harness instructions to avoid mention loops between agents.
 		effectiveTriggerUUID := task.TriggerCommentID
+		// The loaded trigger row, kept for the edit check that runs once the
+		// resumed session is known (MUL-8218).
+		var loadedTrigger *db.Comment
 		if effectiveTriggerUUID.Valid {
 			// Scope by the runtime's workspace so a task row carrying a foreign
 			// comment UUID can never pull another workspace's comment text into
@@ -3290,6 +3315,7 @@ func (h *Handler) buildClaimedTaskResponse(r *http.Request, task *db.AgentTaskQu
 				ID:          effectiveTriggerUUID,
 				WorkspaceID: runtime.WorkspaceID,
 			}); err == nil && !comment.DeletedAt.Valid {
+				loadedTrigger = &comment
 				resp.TriggerCommentContent = comment.Content
 				resp.TriggerThreadID = uuidToString(comment.ID)
 				if comment.ParentID.Valid {
@@ -3402,6 +3428,7 @@ func (h *Handler) buildClaimedTaskResponse(r *http.Request, task *db.AgentTaskQu
 				if !service.ResumeUnsafeFailure(src.FailureReason.String, src.Error.String) &&
 					src.SessionID.Valid && src.RuntimeID == task.RuntimeID && !sourceSessionRetired {
 					resp.PriorSessionID = src.SessionID.String
+					resumedRunStartedAt = src.StartedAt
 					// The deltas date from the run we actually resume, which on
 					// this path is the operator-chosen source — routinely NOT
 					// the newest run on the issue. nil unless that run proved it
@@ -3437,6 +3464,7 @@ func (h *Handler) buildClaimedTaskResponse(r *http.Request, task *db.AgentTaskQu
 			}); err == nil && prior.SessionID.Valid {
 				if prior.RuntimeID == task.RuntimeID {
 					resp.PriorSessionID = prior.SessionID.String
+					resumedRunStartedAt = prior.StartedAt
 					// Same rule as the rerun path: date the deltas from the run
 					// this session belongs to. GetLastTaskSession skips poisoned
 					// and retired sessions, so `prior` can be an older run than
@@ -3466,6 +3494,26 @@ func (h *Handler) buildClaimedTaskResponse(r *http.Request, task *db.AgentTaskQu
 			// parent's workdir, never its session. A force_fresh task with no
 			// retry lineage still resumes nothing.
 			applyFreshSessionRetryWorkdir(*task, &resp, requestHasClientCapability(r, protocol.DaemonCapabilityCheckoutKeepsWorkV1))
+		}
+
+		// MUL-8218: a comment edit cancels the affected run and retriggers from
+		// the edited comment, but the new run resumes that run's session, whose
+		// history still quotes the pre-edit text. Tell the agent which version
+		// is current so it does not keep reasoning from the withdrawn one.
+		// Every comment this run delivers is checked, not only the trigger: an
+		// edited comment can be folded behind a newer, unchanged one.
+		if resp.PriorSessionID != "" {
+			if loadedTrigger != nil && triggerCommentEditedSince(*loadedTrigger, resumedRunStartedAt) {
+				resp.TriggerCommentEditedAt = loadedTrigger.UpdatedAt.Time.UTC().Format(time.RFC3339)
+				resp.TriggerCommentRevision = loadedTrigger.Revision
+			}
+			for i := range resp.CoalescedComments {
+				src := resp.CoalescedComments[i].source
+				if triggerCommentEditedSince(src, resumedRunStartedAt) {
+					resp.CoalescedComments[i].EditedAt = src.UpdatedAt.Time.UTC().Format(time.RFC3339)
+					resp.CoalescedComments[i].Revision = src.Revision
+				}
+			}
 		}
 
 		// Both deltas, now that the resume source is known (MUL-7344).
@@ -3968,7 +4016,7 @@ func (h *Handler) buildClaimedTaskResponse(r *http.Request, task *db.AgentTaskQu
 						// status to own on this turn. Once the leader opens the
 						// issue with the squad as assignee, the issue-bound
 						// claim path above grants ownership.
-						briefing := buildSquadLeaderBriefing(r.Context(), h.Queries, squad, false)
+						briefing := buildSquadLeaderBriefing(r.Context(), h.Queries, squad, false, leaderNoWorkflow)
 						if strings.TrimSpace(resp.Agent.Instructions) == "" {
 							resp.Agent.Instructions = briefing
 						} else {
@@ -5119,6 +5167,7 @@ func (h *Handler) buildCoalescedCommentData(ctx context.Context, workspaceID pgt
 			AuthorType: comment.AuthorType,
 			Content:    comment.Content,
 			CreatedAt:  timestampToString(comment.CreatedAt),
+			source:     comment,
 		}
 		if comment.ParentID.Valid {
 			root, err := h.Queries.GetCommentThreadRootID(ctx, comment.ID)

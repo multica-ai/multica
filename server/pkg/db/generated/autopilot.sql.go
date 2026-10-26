@@ -1979,6 +1979,29 @@ func (q *Queries) SelectAutopilotsExceedingFailureThreshold(ctx context.Context,
 	return items, nil
 }
 
+const setAutopilotRunDispatchTask = `-- name: SetAutopilotRunDispatchTask :execrows
+UPDATE autopilot_run
+SET task_id = $2
+WHERE id = $1 AND status = 'issue_created' AND task_id IS NULL
+`
+
+type SetAutopilotRunDispatchTaskParams struct {
+	ID     pgtype.UUID `json:"id"`
+	TaskID pgtype.UUID `json:"task_id"`
+}
+
+// Records the agent task a create_issue run actually enqueued, so lifecycle
+// sync can tell the run's own dispatch apart from mention/comment tasks on
+// the same issue. Status stays issue_created; only an unlinked active run is
+// written. (MUL-8200)
+func (q *Queries) SetAutopilotRunDispatchTask(ctx context.Context, arg SetAutopilotRunDispatchTaskParams) (int64, error) {
+	result, err := q.db.Exec(ctx, setAutopilotRunDispatchTask, arg.ID, arg.TaskID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
 const setAutopilotTriggerPublisher = `-- name: SetAutopilotTriggerPublisher :exec
 UPDATE autopilot_trigger
 SET published_by_type = $2, published_by_id = $3, updated_at = now()

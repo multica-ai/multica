@@ -27,7 +27,8 @@
     "title": "Language",
     "system": "System",
     "english": "English",
-    "chinese_simplified": "Simplified Chinese"
+    "chinese_simplified": "Simplified Chinese",
+    "chinese_traditional": "Traditional Chinese"
   },
   "notifications": {
     "title": "Notifications",

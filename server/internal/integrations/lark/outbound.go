@@ -143,6 +143,7 @@ func (defaultRenderer) Render(in RenderInput) (CardRender, error) {
 // needs. Declared as an interface so the patcher is unit-testable
 // without a real Postgres connection.
 type PatcherQueries interface {
+	mediaDeliveryQueries
 	GetAgentTask(ctx context.Context, id pgtype.UUID) (db.AgentTaskQueue, error)
 	TaskHasChannelIngestedMessages(ctx context.Context, taskID pgtype.UUID) (bool, error)
 	GetChannelTaskDelivery(ctx context.Context, taskID pgtype.UUID) (db.ChannelTaskDelivery, error)
@@ -153,6 +154,13 @@ type PatcherQueries interface {
 	GetLarkOutboundCardByTask(ctx context.Context, taskID pgtype.UUID) (OutboundCardMessage, error)
 	CreateLarkOutboundCardMessage(ctx context.Context, arg CreateOutboundCardMessageParams) (OutboundCardMessage, error)
 	UpdateLarkOutboundCardStatus(ctx context.Context, arg UpdateOutboundCardStatusParams) error
+	// ListAttachmentsByChatMessage reads the files an agent bound to one
+	// assistant message at task completion. Taken with the generated db
+	// params rather than a domain type because ChannelStore embeds
+	// *db.Queries and therefore already satisfies it — this list is the
+	// one seam where the narrow interface would cost a hand-written
+	// adapter for no gain. See outbound_media.go for the caller.
+	ListAttachmentsByChatMessage(ctx context.Context, arg db.ListAttachmentsByChatMessageParams) ([]db.Attachment, error)
 }
 
 // CredentialsResolver decrypts an installation's app_secret for the
@@ -213,19 +221,48 @@ type Patcher struct {
 	credentials     CredentialsResolver
 	client          APIClient
 	typingIndicator *TypingIndicatorManager
-	cfg             PatcherConfig
+	// media is the same client as `client`, narrowed to the four
+	// upload/send methods the attachment hop needs. It is nil for any
+	// APIClient that does not implement them (the stub, the test
+	// fakes), which is how "attachments are not deliverable in this
+	// deployment" is expressed — see outbound_media.go.
+	media mediaAPIClient
+	// objects is the deployment's object store, or nil when this
+	// deployment configured none. Set via SetAttachments. Both it and
+	// media must be non-nil before a file can be delivered.
+	objects        mediaObjectStore
+	mediaAdmission chan struct{}
+	mediaPending   chan struct{}
+	// mediaSlots bounds concurrent transfers. Per-patcher, like the two
+	// admission tiers above, so all three limits share one scope.
+	mediaSlots  chan struct{}
+	mediaBudget time.Duration
+	spawn       func(func())
+	cfg         PatcherConfig
 }
 
 // NewPatcher constructs a Patcher bound to its dependencies. The
 // patcher does not subscribe to the bus until Register is called.
 func NewPatcher(queries PatcherQueries, credentials CredentialsResolver, client APIClient, cfg PatcherConfig) *Patcher {
 	cfg = cfg.withDefaults()
-	return &Patcher{
-		queries:     queries,
-		credentials: credentials,
-		client:      client,
-		cfg:         cfg,
+	p := &Patcher{
+		queries:        queries,
+		credentials:    credentials,
+		client:         client,
+		cfg:            cfg,
+		mediaAdmission: make(chan struct{}, maxAdmittedAttachmentDeliveries),
+		mediaPending:   make(chan struct{}, maxPendingAttachmentDeliveries),
+		mediaSlots:     make(chan struct{}, maxConcurrentAttachmentDeliveries),
+		mediaBudget:    attachmentBudget,
+		spawn:          func(f func()) { go f() },
 	}
+	// A type assertion rather than a fifth constructor argument: the
+	// media methods are an optional capability of the transport, and
+	// the fakes that do not have them must keep compiling.
+	if m, ok := client.(mediaAPIClient); ok {
+		p.media = m
+	}
+	return p
 }
 
 // SetTypingIndicatorManager wires the typing-indicator manager into the
@@ -301,7 +338,8 @@ func (p *Patcher) processEvent(ctx context.Context, e events.Event) error {
 		return nil
 	}
 	binding := ChatSessionBinding{
-		ID: delivery.BindingID, InstallationID: delivery.InstallationID,
+		ChatSessionID: chatSessionID,
+		ID:            delivery.BindingID, InstallationID: delivery.InstallationID,
 		ChannelChatID: delivery.ChannelChatID, ChatType: delivery.ChatType, Config: delivery.Config,
 		LastMessageID: delivery.ChannelMessageID, LastThreadID: delivery.ChannelThreadID,
 		LastSenderID: delivery.ChannelSenderID,
@@ -346,7 +384,7 @@ func (p *Patcher) processEvent(ctx context.Context, e events.Event) error {
 
 	switch e.Type {
 	case protocol.EventChatDone:
-		return p.sendChatReply(ctx, creds, binding, mentionOpenID(binding), e.Payload)
+		return p.sendChatReply(ctx, creds, binding, mentionOpenID(binding), inst.WorkspaceID, e.Payload)
 	case protocol.EventTaskFailed:
 		return p.fail(ctx, creds, binding, taskID, agentName, e.Payload)
 	}
@@ -436,34 +474,32 @@ func mentionOpenID(binding ChatSessionBinding) string {
 // The wire shape is chosen per-reply based on whether the body
 // contains any markdown syntax:
 //
-//   - Plain prose (no markdown) → `msg_type=text`. A one-line "Hi!"
+//   - Plain prose without bound images → `msg_type=text`. A one-line "Hi!"
 //     reply should feel like a normal IM message, not a notification
 //     card with chrome around it.
 //
-//   - Anything with markdown (headings, lists, code blocks, tables,
+//   - Bound images or markdown (headings, lists, code blocks, tables,
 //     bold/italic, links) → schema-2.0 interactive card with a
-//     `tag: "markdown"` body element so Lark's client renders the
+//     `tag: "markdown"` body element; uploaded images update this same
+//     card at their Markdown positions. Lark's client renders the
 //     formatting instead of leaving raw `**bold**` characters in
 //     the transcript. The card is visually subtler than the legacy
 //     binding-prompt template — just a single markdown block, no
 //     header / icon / CTA buttons.
 //
-// Empty content is silently dropped: we'd rather show nothing than
-// "Done." (the prior card fallback that confused Bohan in the live
-// dev env). In practice an empty Content means the daemon completed
-// the task without producing visible output, which only happens for
-// edge cases like a chat task that just acknowledged a system event;
-// not emitting a message there is the right product call.
+// Empty content skips the REPLY, not the delivery. An agent that produced
+// only files writes a real 'message' outcome with empty text — task.go's
+// pendingAttachments branch exists precisely for that shape, "the
+// attachment cards ARE the response". Returning before the attachment hop
+// would make the one case where the files are the whole answer the one case
+// the user hears nothing at all.
 //
 // mentionOpenID, when non-empty, prefixes the body with a native mention of
 // that member (see mention.go). The wire shape is chosen from the agent's own
 // content BEFORE the mention is attached, so a mention can never flip a plain
 // prose answer onto the card path.
-func (p *Patcher) sendChatReply(ctx context.Context, creds InstallationCredentials, binding ChatSessionBinding, mentionOpenID string, payload any) error {
+func (p *Patcher) sendChatReply(ctx context.Context, creds InstallationCredentials, binding ChatSessionBinding, mentionOpenID string, workspaceID pgtype.UUID, payload any) error {
 	content := chatDoneContent(payload)
-	if content == "" {
-		return nil
-	}
 	if topicSendWithoutTrigger(binding) {
 		p.cfg.Logger.Warn("lark: no trigger for a topic-isolated session; skipping reply rather than posting it to the parent group",
 			"chat_session_id", uuidString(binding.ChatSessionID),
@@ -471,28 +507,104 @@ func (p *Patcher) sendChatReply(ctx context.Context, creds InstallationCredentia
 		return nil
 	}
 	target := threadReplyTarget(binding)
-	if containsMarkdown(content) {
-		markdown := prependMarkdownMention(mentionOpenID, content)
-		return sendWithReplyFallback(p.cfg.Logger, "send markdown card", target, func(t ReplyTarget) error {
-			_, err := p.client.SendMarkdownCard(ctx, SendMarkdownCardParams{
+	// Own the complete reply before any external write. The background file
+	// worker inherits this lease; duplicate events cannot repeat the text while
+	// waiting for the files or after the provider's UUID window has expired.
+	handedOff := false
+	if p.objects != nil && p.media != nil && chatDoneMessageID(payload) != "" {
+		taskID, err := util.ParseUUID(chatDoneTaskID(payload))
+		if err != nil || !taskID.Valid {
+			return errors.New("lark reply missing task identity")
+		}
+		var finish func()
+		var acquired bool
+		ctx, finish, acquired = p.claimMediaDelivery(ctx, taskID, binding)
+		if !acquired {
+			return nil
+		}
+		defer func() {
+			if !handedOff {
+				finish()
+			}
+		}()
+		ctx = context.WithValue(ctx, mediaWorkspaceContextKey{}, workspaceID)
+		if !p.markMediaSending(ctx) {
+			p.tellUser(ctx, creds, binding, target, mediaSendUnknownText)
+			return nil
+		}
+		if _, err := p.currentMediaCredentials(ctx, creds, binding, workspaceID); err != nil {
+			return err
+		}
+	}
+	if content == "" {
+		// Nothing to say, but there may be something to show. The
+		// delivery path no-ops on its own when the reply carried no
+		// files, so this costs one lookup and never a stray message.
+		handedOff = p.deliverAttachmentsAsync(ctx, creds, binding, target, workspaceID, payload)
+		return nil
+	}
+	// A plain answer with bound images also needs an updatable card. The
+	// bounded metadata probe does not read bytes or wait for an upload.
+	markdown := containsMarkdown(content) || p.replyNeedsMediaCard(ctx, workspaceID, payload)
+
+	// used records the target the send actually went out on. The whole
+	// point of sendWithReplyFallback is that it may retry without
+	// threading, and files must land in the same conversation the answer
+	// landed in — not in the topic the answer was bounced out of.
+	var used ReplyTarget
+	var cardID string
+	send := func(t ReplyTarget) error {
+		if _, owned := ctx.Value(mediaDeliveryContextKey{}).(*mediaDeliveryOwner); owned {
+			// Metadata lookup and reply fallback can outlive a revocation or
+			// takeover. Re-prove authority immediately before each send.
+			current, err := p.currentMediaCredentials(ctx, creds, binding, workspaceID)
+			if err != nil {
+				return err
+			}
+			creds = current
+		}
+		used = t
+		if markdown {
+			var err error
+			cardID, err = p.client.SendMarkdownCard(ctx, SendMarkdownCardParams{
 				InstallationID: creds,
 				ChatID:         outboundChatID(binding),
-				Markdown:       markdown,
+				Markdown:       prependMarkdownMention(mentionOpenID, content),
 				ReplyTarget:    t,
 			})
 			return err
-		})
-	}
-	text := prependTextMention(mentionOpenID, content)
-	return sendWithReplyFallback(p.cfg.Logger, "send text message", target, func(t ReplyTarget) error {
+		}
 		_, err := p.client.SendTextMessage(ctx, SendTextParams{
 			InstallationID: creds,
 			ChatID:         outboundChatID(binding),
-			Text:           text,
+			Text:           prependTextMention(mentionOpenID, content),
 			ReplyTarget:    t,
 		})
 		return err
-	})
+	}
+	op := "send text message"
+	if markdown {
+		op = "send markdown card"
+	}
+	if err := sendWithReplyFallback(p.cfg.Logger, op, target, send); err != nil {
+		return err
+	}
+	if markdown && p.objects != nil && p.media != nil {
+		if cardID == "" {
+			return errors.New("lark reply card identity unconfirmed")
+		}
+		ctx = context.WithValue(ctx, mediaReplyCardContextKey{}, &mediaReplyCard{
+			messageID: cardID, markdown: prependMarkdownMention(mentionOpenID, content),
+		})
+	}
+
+	// The answer is out; the files are the second hop. Spawned rather
+	// than awaited because this runs on the synchronous publish
+	// goroutine — see outbound_media.go for why the answer must never
+	// wait behind an upload. Best-effort by construction: the reply is
+	// already delivered, so nothing here can fail the reply.
+	handedOff = p.deliverAttachmentsAsync(ctx, creds, binding, used, workspaceID, payload)
+	return nil
 }
 
 // outboundChatID recovers the real Lark chat id from the chat binding. The
@@ -604,6 +716,12 @@ func sendWithReplyFallback(log *slog.Logger, op string, target ReplyTarget, send
 	err := send(target)
 	if err == nil {
 		return nil
+	}
+	// A later explicit refusal cannot disprove an earlier accepted send whose
+	// response was lost. Never move that uncertain reply to a new destination.
+	var uncertain *mediaSendUnconfirmed
+	if errors.As(err, &uncertain) {
+		return fmt.Errorf("%s: %w", op, err)
 	}
 	if target.IsSet() && isThreadReplyUnsupported(err) {
 		log.Warn("lark: reply target unusable, retrying at chat level",

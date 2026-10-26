@@ -63,6 +63,11 @@ multica skill import --url github.com/owner/repo/blob/main/path/to/SKILL.md --ou
 - A bare ClawHub slug (no host) is accepted and routed to ClawHub.
 - Any other host is rejected with a 400 naming the supported sources.
 
+URL imports and refreshes require every directory listing and eligible
+supporting-file download to succeed before saving the bundle. A failed refresh
+leaves the existing content, supporting files, and agent-skill bindings unchanged;
+a failed listing is not treated as an empty directory.
+
 ## Local archive import
 
 `multica skill import --file <path> --output json` imports a skill from a local

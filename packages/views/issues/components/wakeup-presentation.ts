@@ -242,7 +242,7 @@ export function useWakeupText() {
         };
       case "other_issue":
         return {
-          key: c.state === "ended" ? ("other_ended" as const) : c.state === "in_review" ? ("other_in_review" as const) : ("other_done" as const),
+          key: c.state === "ended" ? ("other_ended" as const) : c.state === "in_review" ? ("other_in_review" as const) : c.state === "blocked" ? ("other_blocked" as const) : ("other_done" as const),
           values: { issue: c.identifier || t(($) => $.wakeups.cond.another_issue) },
         };
     }

@@ -55,3 +55,18 @@ func TestBuildPromptQuotesEveryHandoffNoteLine(t *testing.T) {
 		t.Fatalf("every handoff note line must be quoted:\n%s", out)
 	}
 }
+
+// The runtime brief swaps its built-in status rules exactly when the per-turn
+// prompt carries the [Project workflow] block it points at (MUL-8145).
+func TestTaskHasProjectWorkflowMatchesTheRenderedBlock(t *testing.T) {
+	for name, task := range map[string]Task{
+		"none":        {IssueID: "issue-1"},
+		"blank brief": {IssueID: "issue-1", ProjectWorkflow: &ProjectWorkflowData{Brief: "  \n"}},
+		"brief":       {IssueID: "issue-1", ProjectWorkflow: &ProjectWorkflowData{Brief: deliveryBrief}},
+	} {
+		rendered := buildProjectWorkflowBlock(task) != ""
+		if got := taskHasProjectWorkflow(task); got != rendered {
+			t.Errorf("%s: taskHasProjectWorkflow = %v, block rendered = %v", name, got, rendered)
+		}
+	}
+}
