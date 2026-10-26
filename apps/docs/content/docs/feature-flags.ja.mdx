@@ -1,0 +1,99 @@
+---
+title: 機能フラグ
+description: セルフホスト環境で Multica の機能を有効化・無効化し、デフォルト値を確認します。
+---
+
+import { Callout } from "fumadocs-ui/components/callout";
+
+Multica の一部の機能は、サーバー側の機能フラグで制御されています。セルフホスト環境では安定した機能は有効、実験的な機能は無効、Cloud 専用の機能は利用できません。バックエンドは起動時にフラグを解決するため、変更後は再起動またはコンテナの再作成が必要です。完全なデプロイ手順は[セルフホストクイックスタート](/self-host-quickstart)を参照してください。
+
+## フラグの取得元
+
+サーバーは次の 3 つの取得元を順に確認し、最初に見つかった値を使います。
+
+1. `FF_<FLAG_KEY>` 環境変数（例: `FF_PROJECT_WORKFLOWS_V1=false`）。運用者が使う非常停止スイッチです。
+2. `MULTICA_FEATURE_FLAGS_FILE` で指定した YAML ルールファイル（設定時のみ）。許可リストと拒否リスト、バリアント、パーセントロールアウトに使います。
+3. 組み込みのデフォルト値。
+
+## セルフホストのデフォルト
+
+| フラグ | デフォルト | 制御する機能 |
+|---|---|---|
+| `project_workflows_v1` | 有効 | プロジェクトの[ワークフロー](/workflows): ステータスの流れ、引き継ぎ、**設定 → ワークフロー** |
+| `plugins_v1` | 無効 | プラグインのカタログとライフサイクル API。実験的。`MULTICA_PLUGIN_SECRET_KEY` と Cookie を使わない `MULTICA_PLUGIN_SURFACE_ORIGIN` も必要です |
+| `composio_mcp_apps` | 無効 | Composio アプリの接続。`COMPOSIO_API_KEY` も必要です |
+| `billing_workspace_subscriptions` | 無効 | Cloud のサブスクリプションと請求。管理された `MULTICA_CLOUD_URL` が必要です |
+| `local_search_index` | 有効 | Web とデスクトップのローカル検索インデックス同期 |
+
+ワークフローは v0.7.0 で正式提供になったため、セルフホスト環境ではデフォルトで有効です。フラグを無効にすると、**設定**には**タスクステータス**が表示され、プロジェクトのステータスは従来どおり動作します。
+
+## Docker Compose
+
+Compose ファイルは `MULTICA_FEATURE_FLAGS_FILE` と `FF_PROJECT_WORKFLOWS_V1`（デフォルト `true`）を転送します。`.env` でフラグを設定し、バックエンドを再作成します。
+
+```dotenv
+FF_PROJECT_WORKFLOWS_V1=false
+```
+
+```bash
+docker compose up -d backend
+```
+
+バックエンドの環境変数は許可リストです。他のフラグを変更するには、Compose ファイルと同じディレクトリの `docker-compose.override.yml` に追加します。Compose はこのファイルを自動でマージします。
+
+```yaml
+services:
+  backend:
+    environment:
+      FF_PLUGINS_V1: "true"
+```
+
+## Kubernetes（Helm）
+
+チャートは `backend.config.featureFlags` の各キーを `FF_<FLAG_KEY>` 環境変数としてレンダリングし、`project_workflows_v1` をデフォルトで有効にします。既存のリリースでフラグを変更します。
+
+```bash
+helm upgrade multica oci://ghcr.io/multica-ai/charts/multica \
+  --reuse-values \
+  --set backend.config.featureFlags.plugins_v1=true
+```
+
+`backend.config.featureFlags.project_workflows_v1=false` を設定するとワークフローを非表示にできます。レンダリングされた ConfigMap が変わると、`helm upgrade` がバックエンド Pod を再起動します。
+
+## 高度なルール
+
+許可リストやパーセントロールアウトが必要な場合は、YAML ファイルをマウントして `MULTICA_FEATURE_FLAGS_FILE` をそのファイルに向けます。
+
+```yaml
+# feature-flags.yaml
+project_workflows_v1:
+  default: true
+plugins_v1:
+  default: false
+  percent:
+    percent: 25
+    by: user_id
+```
+
+```yaml
+services:
+  backend:
+    environment:
+      MULTICA_FEATURE_FLAGS_FILE: /etc/multica/feature-flags.yaml
+    volumes:
+      - ./feature-flags.yaml:/etc/multica/feature-flags.yaml:ro
+```
+
+<Callout type="warning">
+環境変数はルールファイルより優先されます。Compose スタックは常に `FF_PROJECT_WORKFLOWS_V1` を設定し、Helm チャートは `backend.config.featureFlags` の各項目を設定するため、これらのフラグは YAML ファイルではなく環境ファイルまたは values で変更してください。
+</Callout>
+
+## 変更を確認する
+
+`/api/config` は実行中のバックエンドが解決したフラグを返します。
+
+```bash
+curl -s http://localhost:8080/api/config | jq '.feature_flags'
+```
+
+Web アプリはこのレスポンスを読むため、フロントエンドの再ビルドは不要です。実験的なフラグはリリース間で変更または削除されることがあります。機能を試す場合以外は無効のままにしてください。

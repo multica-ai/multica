@@ -50,6 +50,7 @@
     "---自托管---",
     "security-model",
     "environment-variables",
+    "feature-flags",
     "auth-setup",
     "troubleshooting",
     "---参考---",

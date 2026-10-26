@@ -1,0 +1,99 @@
+---
+title: Drapeaux de fonctionnalité
+description: Activez ou désactivez des fonctionnalités de Multica sur une instance auto-hébergée et vérifiez les valeurs par défaut.
+---
+
+import { Callout } from "fumadocs-ui/components/callout";
+
+Certaines fonctionnalités de Multica sont contrôlées par des drapeaux côté serveur. Un déploiement auto-hébergé active les fonctionnalités stables, laisse les fonctionnalités expérimentales désactivées et ne peut pas utiliser celles réservées au Cloud. Le backend résout les drapeaux au démarrage ; redémarrez-le ou recréez-le après une modification. Pour les étapes de déploiement complètes, consultez le [démarrage rapide de l'auto-hébergement](/self-host-quickstart).
+
+## Provenance d'un drapeau
+
+Le serveur consulte trois sources dans l'ordre et retient la première valeur trouvée :
+
+1. Les variables d'environnement `FF_<FLAG_KEY>`, par exemple `FF_PROJECT_WORKFLOWS_V1=false`. Ce sont les interrupteurs d'urgence de l'exploitant.
+2. Le fichier de règles YAML indiqué par `MULTICA_FEATURE_FLAGS_FILE`, lorsqu'il est défini. Il sert aux listes d'autorisation et d'exclusion, aux variantes et aux déploiements progressifs en pourcentage.
+3. La valeur par défaut intégrée.
+
+## Valeurs par défaut de l'auto-hébergement
+
+| Drapeau | Défaut | Contrôle |
+|---|---|---|
+| `project_workflows_v1` | activé | Les [Workflows](/workflows) des projets : étapes de statut, passations et **Paramètres → Workflows** |
+| `plugins_v1` | désactivé | Catalogue et API de cycle de vie des plugins. Expérimental ; nécessite aussi `MULTICA_PLUGIN_SECRET_KEY` et un `MULTICA_PLUGIN_SURFACE_ORIGIN` sans cookie |
+| `composio_mcp_apps` | désactivé | Connexions d'applications Composio. Nécessite aussi `COMPOSIO_API_KEY` |
+| `billing_workspace_subscriptions` | désactivé | Abonnements et facturation Cloud. Nécessite un `MULTICA_CLOUD_URL` géré |
+| `local_search_index` | activé | Synchronisation de l'index de recherche local pour le web et le bureau |
+
+Workflows est devenu généralement disponible dans la v0.7.0 : les déploiements auto-hébergés l'activent donc par défaut. Quand le drapeau est désactivé, **Paramètres** affiche **Statuts des tâches** et les statuts de projet continuent de fonctionner comme avant.
+
+## Docker Compose
+
+Le fichier Compose transmet `MULTICA_FEATURE_FLAGS_FILE` et `FF_PROJECT_WORKFLOWS_V1` (défaut `true`). Définissez le drapeau dans `.env`, puis recréez le backend :
+
+```dotenv
+FF_PROJECT_WORKFLOWS_V1=false
+```
+
+```bash
+docker compose up -d backend
+```
+
+L'environnement du backend est une liste blanche. Pour modifier un autre drapeau, ajoutez-le dans `docker-compose.override.yml` à côté du fichier Compose ; Compose fusionne automatiquement ce fichier :
+
+```yaml
+services:
+  backend:
+    environment:
+      FF_PLUGINS_V1: "true"
+```
+
+## Kubernetes (Helm)
+
+Le chart rend chaque clé de `backend.config.featureFlags` comme variable d'environnement `FF_<FLAG_KEY>` et active `project_workflows_v1` par défaut. Modifiez un drapeau sur une release existante :
+
+```bash
+helm upgrade multica oci://ghcr.io/multica-ai/charts/multica \
+  --reuse-values \
+  --set backend.config.featureFlags.plugins_v1=true
+```
+
+Définissez `backend.config.featureFlags.project_workflows_v1=false` pour masquer Workflows. `helm upgrade` redémarre le pod backend lorsque la ConfigMap rendue change.
+
+## Règles avancées
+
+Montez un fichier YAML et pointez `MULTICA_FEATURE_FLAGS_FILE` dessus lorsqu'un drapeau a besoin d'une liste d'autorisation ou d'un déploiement progressif :
+
+```yaml
+# feature-flags.yaml
+project_workflows_v1:
+  default: true
+plugins_v1:
+  default: false
+  percent:
+    percent: 25
+    by: user_id
+```
+
+```yaml
+services:
+  backend:
+    environment:
+      MULTICA_FEATURE_FLAGS_FILE: /etc/multica/feature-flags.yaml
+    volumes:
+      - ./feature-flags.yaml:/etc/multica/feature-flags.yaml:ro
+```
+
+<Callout type="warning">
+Les variables d'environnement ont priorité sur le fichier de règles. Le stack Compose définit toujours `FF_PROJECT_WORKFLOWS_V1` et le chart Helm définit chaque entrée de `backend.config.featureFlags` ; modifiez donc ces drapeaux via le fichier d'environnement ou les valeurs, pas via le fichier YAML.
+</Callout>
+
+## Vérifier une modification
+
+`/api/config` renvoie les drapeaux résolus par le backend en cours d'exécution :
+
+```bash
+curl -s http://localhost:8080/api/config | jq '.feature_flags'
+```
+
+L'application web lit cette réponse ; aucune reconstruction du frontend n'est nécessaire. Les drapeaux expérimentaux peuvent changer ou disparaître d'une version à l'autre ; laissez-les désactivés sauf si vous testez la fonctionnalité.

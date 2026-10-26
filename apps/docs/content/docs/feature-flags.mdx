@@ -1,0 +1,99 @@
+---
+title: Feature flags
+description: Turn Multica features on or off on a self-hosted instance, and review the self-host defaults.
+---
+
+import { Callout } from "fumadocs-ui/components/callout";
+
+Some Multica capabilities ship behind server-side feature flags. A self-hosted deployment enables the stable ones, leaves experimental ones off, and cannot use the Cloud-only ones. The backend resolves flags at startup; restart or recreate it after a change. For the complete deployment steps, see the [self-host quickstart](/self-host-quickstart).
+
+## Where a flag comes from
+
+The server checks three sources in order and uses the first value it finds:
+
+1. `FF_<FLAG_KEY>` environment variables, such as `FF_PROJECT_WORKFLOWS_V1=false`. These are the operator kill switches.
+2. The YAML rule file at `MULTICA_FEATURE_FLAGS_FILE`, when set. Use it for allow/deny lists, variants, and percentage rollouts.
+3. The built-in default.
+
+## Self-host defaults
+
+| Flag | Default | Controls |
+|---|---|---|
+| `project_workflows_v1` | on | Project [workflows](/workflows): status flows, handoffs, and **Settings → Workflows** |
+| `plugins_v1` | off | Plugin catalog and lifecycle APIs. Experimental; also needs `MULTICA_PLUGIN_SECRET_KEY` and a cookie-free `MULTICA_PLUGIN_SURFACE_ORIGIN` |
+| `composio_mcp_apps` | off | Composio app connections. Also needs `COMPOSIO_API_KEY` |
+| `billing_workspace_subscriptions` | off | Cloud subscriptions and billing. Requires a managed `MULTICA_CLOUD_URL` |
+| `local_search_index` | on | Local search index sync for the web and desktop apps |
+
+Workflows shipped generally available in v0.7.0, so self-hosted deployments enable them by default. With the flag off, **Settings** shows **Issue Statuses** instead, and project statuses keep working as before.
+
+## Docker Compose
+
+The Compose file forwards `MULTICA_FEATURE_FLAGS_FILE` and `FF_PROJECT_WORKFLOWS_V1` (default `true`). Set the flag in `.env`, then recreate the backend:
+
+```dotenv
+FF_PROJECT_WORKFLOWS_V1=false
+```
+
+```bash
+docker compose up -d backend
+```
+
+The backend environment is an allowlist. To change any other flag, add it in `docker-compose.override.yml` next to the Compose file; Compose merges that file automatically:
+
+```yaml
+services:
+  backend:
+    environment:
+      FF_PLUGINS_V1: "true"
+```
+
+## Kubernetes (Helm)
+
+The chart renders every `backend.config.featureFlags` key as an `FF_<FLAG_KEY>` environment variable and keeps `project_workflows_v1` on. Change a flag on an existing release:
+
+```bash
+helm upgrade multica oci://ghcr.io/multica-ai/charts/multica \
+  --reuse-values \
+  --set backend.config.featureFlags.plugins_v1=true
+```
+
+Set `backend.config.featureFlags.project_workflows_v1=false` to hide Workflows. `helm upgrade` restarts the backend pod when the rendered ConfigMap changes.
+
+## Advanced rules
+
+Mount a YAML file and point `MULTICA_FEATURE_FLAGS_FILE` at it when a flag needs an allowlist or a percentage rollout:
+
+```yaml
+# feature-flags.yaml
+project_workflows_v1:
+  default: true
+plugins_v1:
+  default: false
+  percent:
+    percent: 25
+    by: user_id
+```
+
+```yaml
+services:
+  backend:
+    environment:
+      MULTICA_FEATURE_FLAGS_FILE: /etc/multica/feature-flags.yaml
+    volumes:
+      - ./feature-flags.yaml:/etc/multica/feature-flags.yaml:ro
+```
+
+<Callout type="warning">
+Environment variables beat the rule file. The Compose stack always sets `FF_PROJECT_WORKFLOWS_V1`, and the Helm chart sets every `backend.config.featureFlags` entry, so change those flags through the env file or values instead of the YAML file.
+</Callout>
+
+## Verify a change
+
+`/api/config` returns the flags the running backend resolved:
+
+```bash
+curl -s http://localhost:8080/api/config | jq '.feature_flags'
+```
+
+The web app reads that response, so no frontend rebuild is needed. Experimental flags can change or disappear between releases; leave them off unless you are testing the feature.

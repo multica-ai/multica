@@ -1,0 +1,99 @@
+---
+title: 기능 플래그
+description: 셀프 호스팅 인스턴스에서 Multica 기능을 켜고 끄며 기본값을 확인합니다.
+---
+
+import { Callout } from "fumadocs-ui/components/callout";
+
+Multica의 일부 기능은 서버 측 기능 플래그로 제어됩니다. 셀프 호스팅 배포에서는 안정적인 기능은 켜져 있고 실험적 기능은 꺼져 있으며 Cloud 전용 기능은 사용할 수 없습니다. 백엔드는 시작할 때 플래그를 결정하므로 변경 후에는 다시 시작하거나 컨테이너를 다시 만들어야 합니다. 전체 배포 단계는 [셀프 호스팅 빠른 시작](/self-host-quickstart)을 참고하세요.
+
+## 플래그의 출처
+
+서버는 다음 세 소스를 순서대로 확인하고 처음 찾은 값을 사용합니다.
+
+1. `FF_<FLAG_KEY>` 환경 변수(예: `FF_PROJECT_WORKFLOWS_V1=false`). 운영자가 사용하는 비상 스위치입니다.
+2. `MULTICA_FEATURE_FLAGS_FILE`에 지정한 YAML 규칙 파일(설정한 경우). 허용 목록과 차단 목록, 배리언트, 비율 롤아웃에 사용합니다.
+3. 내장 기본값.
+
+## 셀프 호스팅 기본값
+
+| 플래그 | 기본값 | 제어 대상 |
+|---|---|---|
+| `project_workflows_v1` | 켜짐 | 프로젝트의 [워크플로](/workflows): 상태 흐름, 이어받기, **설정 → 워크플로** |
+| `plugins_v1` | 꺼짐 | 플러그인 카탈로그와 수명 주기 API. 실험적이며 `MULTICA_PLUGIN_SECRET_KEY`와 쿠키를 쓰지 않는 `MULTICA_PLUGIN_SURFACE_ORIGIN`도 필요합니다 |
+| `composio_mcp_apps` | 꺼짐 | Composio 앱 연결. `COMPOSIO_API_KEY`도 필요합니다 |
+| `billing_workspace_subscriptions` | 꺼짐 | Cloud 구독과 결제. 관리되는 `MULTICA_CLOUD_URL`이 필요합니다 |
+| `local_search_index` | 켜짐 | 웹과 데스크톱의 로컬 검색 인덱스 동기화 |
+
+워크플로는 v0.7.0에서 정식 출시되었으므로 셀프 호스팅 배포에서는 기본으로 켜져 있습니다. 플래그를 끄면 **설정**에 **태스크 상태**가 표시되고 프로젝트 상태는 이전처럼 동작합니다.
+
+## Docker Compose
+
+Compose 파일은 `MULTICA_FEATURE_FLAGS_FILE`과 `FF_PROJECT_WORKFLOWS_V1`(기본값 `true`)을 전달합니다. `.env`에서 플래그를 설정한 뒤 백엔드를 다시 만드세요.
+
+```dotenv
+FF_PROJECT_WORKFLOWS_V1=false
+```
+
+```bash
+docker compose up -d backend
+```
+
+백엔드 환경 변수는 허용 목록입니다. 다른 플래그를 바꾸려면 Compose 파일 옆의 `docker-compose.override.yml`에 추가하세요. Compose가 이 파일을 자동으로 병합합니다.
+
+```yaml
+services:
+  backend:
+    environment:
+      FF_PLUGINS_V1: "true"
+```
+
+## Kubernetes(Helm)
+
+차트는 `backend.config.featureFlags`의 각 키를 `FF_<FLAG_KEY>` 환경 변수로 렌더링하고 `project_workflows_v1`을 기본으로 켭니다. 기존 릴리스에서 플래그를 바꾸려면 다음과 같이 실행합니다.
+
+```bash
+helm upgrade multica oci://ghcr.io/multica-ai/charts/multica \
+  --reuse-values \
+  --set backend.config.featureFlags.plugins_v1=true
+```
+
+`backend.config.featureFlags.project_workflows_v1=false`를 설정하면 워크플로를 숨깁니다. 렌더링된 ConfigMap이 바뀌면 `helm upgrade`가 백엔드 Pod를 다시 시작합니다.
+
+## 고급 규칙
+
+허용 목록이나 비율 롤아웃이 필요하면 YAML 파일을 마운트하고 `MULTICA_FEATURE_FLAGS_FILE`을 그 파일로 지정하세요.
+
+```yaml
+# feature-flags.yaml
+project_workflows_v1:
+  default: true
+plugins_v1:
+  default: false
+  percent:
+    percent: 25
+    by: user_id
+```
+
+```yaml
+services:
+  backend:
+    environment:
+      MULTICA_FEATURE_FLAGS_FILE: /etc/multica/feature-flags.yaml
+    volumes:
+      - ./feature-flags.yaml:/etc/multica/feature-flags.yaml:ro
+```
+
+<Callout type="warning">
+환경 변수는 규칙 파일보다 우선합니다. Compose 스택은 항상 `FF_PROJECT_WORKFLOWS_V1`을 설정하고 Helm 차트는 `backend.config.featureFlags`의 모든 항목을 설정하므로, 이런 플래그는 YAML 파일이 아니라 env 파일이나 values에서 바꾸세요.
+</Callout>
+
+## 변경 확인
+
+`/api/config`는 실행 중인 백엔드가 결정한 플래그를 반환합니다.
+
+```bash
+curl -s http://localhost:8080/api/config | jq '.feature_flags'
+```
+
+웹 앱은 이 응답을 읽으므로 프런트엔드를 다시 빌드할 필요가 없습니다. 실험적 플래그는 릴리스마다 바뀌거나 사라질 수 있으므로 기능을 시험할 때가 아니면 꺼 두세요.

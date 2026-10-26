@@ -1,0 +1,99 @@
+---
+title: 功能开关
+description: 在自托管实例上开启或关闭 Multica 功能，并了解默认值。
+---
+
+import { Callout } from "fumadocs-ui/components/callout";
+
+Multica 的部分能力由服务端功能开关控制。自托管部署默认开启稳定功能、关闭实验性功能，Cloud 专属功能不可用。后端在启动时解析开关；修改后需要重启或重建后端。完整部署步骤见[自托管快速上手](/self-host-quickstart)。
+
+## 开关的来源
+
+服务端按顺序检查三个来源，取第一个找到的值：
+
+1. `FF_<FLAG_KEY>` 环境变量，例如 `FF_PROJECT_WORKFLOWS_V1=false`。这些是运维用的紧急关闭开关。
+2. `MULTICA_FEATURE_FLAGS_FILE` 指向的 YAML 规则文件（设置后生效）。用于白名单、黑名单、变体和按百分比灰度。
+3. 内置默认值。
+
+## 自托管默认值
+
+| 开关 | 默认值 | 控制的功能 |
+|---|---|---|
+| `project_workflows_v1` | 开启 | 项目的[工作流](/workflows)：状态流转、交接，以及**设置 → 工作流** |
+| `plugins_v1` | 关闭 | 插件目录和生命周期 API。实验性；还需要 `MULTICA_PLUGIN_SECRET_KEY` 和不带 cookie 的 `MULTICA_PLUGIN_SURFACE_ORIGIN` |
+| `composio_mcp_apps` | 关闭 | Composio 应用连接。还需要 `COMPOSIO_API_KEY` |
+| `billing_workspace_subscriptions` | 关闭 | Cloud 订阅与账单。需要配置托管的 `MULTICA_CLOUD_URL` |
+| `local_search_index` | 开启 | Web 和 Desktop 的本地搜索索引同步 |
+
+工作流在 v0.7.0 正式可用，因此自托管部署默认开启。关闭后，**设置**中显示的是**任务状态**，项目状态照常工作。
+
+## Docker Compose
+
+Compose 文件会转发 `MULTICA_FEATURE_FLAGS_FILE` 和 `FF_PROJECT_WORKFLOWS_V1`（默认 `true`）。在 `.env` 中设置开关，然后重建后端：
+
+```dotenv
+FF_PROJECT_WORKFLOWS_V1=false
+```
+
+```bash
+docker compose up -d backend
+```
+
+后端的环境变量是白名单。要修改其他开关，请加到 Compose 文件旁的 `docker-compose.override.yml`，Compose 会自动合并该文件：
+
+```yaml
+services:
+  backend:
+    environment:
+      FF_PLUGINS_V1: "true"
+```
+
+## Kubernetes（Helm）
+
+Helm chart 会把 `backend.config.featureFlags` 的每一项渲染为 `FF_<FLAG_KEY>` 环境变量，并默认开启 `project_workflows_v1`。在已有 release 上修改：
+
+```bash
+helm upgrade multica oci://ghcr.io/multica-ai/charts/multica \
+  --reuse-values \
+  --set backend.config.featureFlags.plugins_v1=true
+```
+
+设置 `backend.config.featureFlags.project_workflows_v1=false` 可以隐藏工作流。渲染出的 ConfigMap 变化后，`helm upgrade` 会重启后端 Pod。
+
+## 高级规则
+
+需要白名单或按百分比灰度时，挂载一个 YAML 文件，并把 `MULTICA_FEATURE_FLAGS_FILE` 指向它：
+
+```yaml
+# feature-flags.yaml
+project_workflows_v1:
+  default: true
+plugins_v1:
+  default: false
+  percent:
+    percent: 25
+    by: user_id
+```
+
+```yaml
+services:
+  backend:
+    environment:
+      MULTICA_FEATURE_FLAGS_FILE: /etc/multica/feature-flags.yaml
+    volumes:
+      - ./feature-flags.yaml:/etc/multica/feature-flags.yaml:ro
+```
+
+<Callout type="warning">
+环境变量优先于规则文件。Compose 栈始终设置 `FF_PROJECT_WORKFLOWS_V1`，Helm chart 会设置 `backend.config.featureFlags` 中的每一项，因此这些开关要通过 env 文件或 values 修改，而不是 YAML 文件。
+</Callout>
+
+## 验证修改
+
+`/api/config` 会返回运行中的后端解析出的开关：
+
+```bash
+curl -s http://localhost:8080/api/config | jq '.feature_flags'
+```
+
+Web 端读取该响应，不需要重建前端。实验性开关可能在不同版本间变化或消失；除非正在测试该功能，否则保持关闭。
