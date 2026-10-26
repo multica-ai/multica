@@ -281,8 +281,10 @@ func (h *Handler) RevokePersonalAccessToken(w http.ResponseWriter, r *http.Reque
 		// before the TTL would otherwise expire the cached lookup.
 		h.PATCache.Invalidate(r.Context(), hash)
 	case errors.Is(err, pgx.ErrNoRows):
-		// Token doesn't exist or doesn't belong to this user. Preserve the
-		// pre-existing idempotent 204 behavior — no cache entry to clear.
+		// Avoid revealing another user's token identifiers. This user cannot
+		// revoke the row, and no cache entry needs invalidation.
+		writeError(w, http.StatusNotFound, "personal access token not found")
+		return
 	default:
 		writeError(w, http.StatusInternalServerError, "failed to revoke token")
 		return

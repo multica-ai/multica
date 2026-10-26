@@ -584,6 +584,114 @@ func (h *Handler) DaemonRegister(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// ProvisionOwnerRuntime creates the offline runtime row and its daemon token
+// together from a human workspace owner's request. The raw token is returned
+// once; only its SHA-256 hash is persisted.
+func (h *Handler) ProvisionOwnerRuntime(w http.ResponseWriter, r *http.Request) {
+	if middleware.DaemonWorkspaceIDFromContext(r.Context()) != "" || r.Header.Get("X-Actor-Source") != "" {
+		writeError(w, http.StatusForbidden, "human workspace owner required")
+		return
+	}
+	var req struct {
+		WorkspaceID string `json:"workspace_id"`
+		DaemonID    string `json:"daemon_id"`
+		Provider    string `json:"provider"`
+		Name        string `json:"name"`
+		DeviceName  string `json:"device_name"`
+	}
+	decoder := json.NewDecoder(http.MaxBytesReader(w, r.Body, 4096))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+	req.WorkspaceID = strings.TrimSpace(req.WorkspaceID)
+	req.DaemonID = strings.TrimSpace(req.DaemonID)
+	req.Provider = normalizeProvider(req.Provider)
+	if req.Provider == "" {
+		req.Provider = "claude"
+	}
+	if req.Provider != "claude" && req.Provider != "codex" {
+		writeError(w, http.StatusBadRequest, "provider must be claude or codex")
+		return
+	}
+	wsUUID, ok := parseUUIDOrBadRequest(w, req.WorkspaceID, "workspace_id")
+	if !ok {
+		return
+	}
+	if _, ok := parseUUIDOrBadRequest(w, req.DaemonID, "daemon_id"); !ok {
+		return
+	}
+	member, ok := h.requireWorkspaceRole(w, r, req.WorkspaceID, "workspace not found", RoleOwner)
+	if !ok {
+		return
+	}
+	if req.Name == "" {
+		req.Name = "AIDO dedicated runtime"
+	}
+	rawToken, err := auth.GenerateDaemonToken()
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to generate daemon token")
+		return
+	}
+	meta, _ := json.Marshal(map[string]string{"provisioned_by": "workspace_owner"})
+	tx, err := h.TxStarter.Begin(r.Context())
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to provision runtime")
+		return
+	}
+	defer tx.Rollback(r.Context())
+	qtx := h.Queries.WithTx(tx)
+	if _, err := tx.Exec(r.Context(), `SELECT pg_advisory_xact_lock(hashtext($1), hashtext($2))`, req.WorkspaceID, req.DaemonID); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to lock runtime identity")
+		return
+	}
+	var alreadyProvisioned bool
+	if err := tx.QueryRow(r.Context(), `SELECT EXISTS (SELECT 1 FROM agent_runtime WHERE workspace_id=$1 AND daemon_id=$2) OR EXISTS (SELECT 1 FROM daemon_token WHERE workspace_id=$1 AND daemon_id=$2)`, wsUUID, req.DaemonID).Scan(&alreadyProvisioned); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to check runtime identity")
+		return
+	}
+	if alreadyProvisioned {
+		writeError(w, http.StatusConflict, "daemon identity is already provisioned")
+		return
+	}
+	runtime, err := qtx.UpsertAgentRuntime(r.Context(), db.UpsertAgentRuntimeParams{
+		WorkspaceID: wsUUID,
+		DaemonID:    pgtype.Text{String: req.DaemonID, Valid: true},
+		Name:        req.Name,
+		RuntimeMode: "local",
+		Provider:    req.Provider,
+		Status:      "offline",
+		DeviceInfo:  req.DeviceName,
+		Metadata:    meta,
+		OwnerID:     member.UserID,
+	})
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to create runtime")
+		return
+	}
+	expiresAt := pgtype.Timestamptz{Time: time.Now().Add(365 * 24 * time.Hour), Valid: true}
+	_, err = qtx.CreateDaemonToken(r.Context(), db.CreateDaemonTokenParams{
+		TokenHash:   auth.HashToken(rawToken),
+		WorkspaceID: wsUUID,
+		DaemonID:    req.DaemonID,
+		ExpiresAt:   expiresAt,
+	})
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to create daemon token")
+		return
+	}
+	if err := tx.Commit(r.Context()); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to provision runtime")
+		return
+	}
+	writeJSON(w, http.StatusCreated, map[string]any{
+		"runtime_id": uuidToString(runtime.ID), "workspace_id": req.WorkspaceID,
+		"daemon_id": req.DaemonID, "provider": req.Provider, "token": rawToken,
+		"expires_at": timestampToString(expiresAt),
+	})
+}
+
 // mergeLegacyRuntimes folds every runtime row keyed on a prior hostname-derived
 // daemon_id into the newly registered UUID-keyed row. For each legacy id the
 // lookup is case-insensitive and returns *all* matching rows — case-only drift

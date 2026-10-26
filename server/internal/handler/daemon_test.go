@@ -24,6 +24,65 @@ import (
 	"github.com/multica-ai/multica/server/pkg/protocol"
 )
 
+func TestProvisionOwnerRuntimeIssuesOneTimeTokenAndBootstraps(t *testing.T) {
+	if testHandler == nil || testPool == nil {
+		t.Skip("handler test database unavailable")
+	}
+	ctx := context.Background()
+	daemonID := uuid.NewString()
+	var nonOwnerID string
+	if err := testPool.QueryRow(ctx, `INSERT INTO "user"(name,email) VALUES('Provisioning regression',$1) RETURNING id`, fmt.Sprintf("provision-%s@example.test", daemonID)).Scan(&nonOwnerID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := testPool.Exec(ctx, `INSERT INTO member(workspace_id,user_id,role) VALUES($1,$2,'member')`, testWorkspaceID, nonOwnerID); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		_, _ = testPool.Exec(context.Background(), `DELETE FROM daemon_token WHERE daemon_id=$1`, daemonID)
+		_, _ = testPool.Exec(context.Background(), `DELETE FROM agent_runtime WHERE workspace_id=$1 AND daemon_id=$2`, testWorkspaceID, daemonID)
+		_, _ = testPool.Exec(context.Background(), `DELETE FROM "user" WHERE id=$1`, nonOwnerID)
+	})
+	deniedRequest := newRequest(http.MethodPost, "/api/daemon/provision-owner", map[string]string{
+		"workspace_id": testWorkspaceID, "daemon_id": uuid.NewString(), "provider": "claude",
+	})
+	deniedRequest.Header.Set("X-User-ID", nonOwnerID)
+	deniedResponse := httptest.NewRecorder()
+	testHandler.ProvisionOwnerRuntime(deniedResponse, deniedRequest)
+	if deniedResponse.Code != http.StatusForbidden {
+		t.Fatalf("non-owner provisioning status=%d body=%s", deniedResponse.Code, deniedResponse.Body.String())
+	}
+	req := newRequest(http.MethodPost, "/api/daemon/provision-owner", map[string]string{
+		"workspace_id": testWorkspaceID, "daemon_id": daemonID,
+		"provider": "claude", "name": "AIDO stage runtime",
+	})
+	w := httptest.NewRecorder()
+	testHandler.ProvisionOwnerRuntime(w, req)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("provision status=%d body=%s", w.Code, w.Body.String())
+	}
+	var issued struct {
+		RuntimeID string `json:"runtime_id"`
+		Token     string `json:"token"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &issued); err != nil || issued.Token == "" || issued.RuntimeID == "" {
+		t.Fatalf("invalid one-time token response: %v", err)
+	}
+	var tokenHash string
+	if err := testPool.QueryRow(ctx, `SELECT token_hash FROM daemon_token WHERE daemon_id=$1 ORDER BY created_at DESC LIMIT 1`, daemonID).Scan(&tokenHash); err != nil {
+		t.Fatal(err)
+	}
+	if tokenHash != auth.HashToken(issued.Token) || tokenHash == issued.Token {
+		t.Fatal("daemon credential was not stored as a hash")
+	}
+	bootstrap := httptest.NewRequest(http.MethodGet, "/api/daemon/workspaces", nil)
+	bootstrap.Header.Set("Authorization", "Bearer "+issued.Token)
+	bootstrapResponse := httptest.NewRecorder()
+	middleware.DaemonAuth(testHandler.Queries, nil, nil, nil)(http.HandlerFunc(testHandler.DaemonBoundWorkspace)).ServeHTTP(bootstrapResponse, bootstrap)
+	if bootstrapResponse.Code != http.StatusOK {
+		t.Fatalf("issued token bootstrap status=%d body=%s", bootstrapResponse.Code, bootstrapResponse.Body.String())
+	}
+}
+
 func TestLogClaimEndpointSlowIncludesPayloadFields(t *testing.T) {
 	var logs bytes.Buffer
 	prev := slog.Default()
