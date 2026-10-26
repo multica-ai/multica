@@ -43,8 +43,8 @@ func runningSteerableTask(t *testing.T, f supplementFixture, name string) (agent
 
 func completeTaskViaDaemon(t *testing.T, taskID string) {
 	t.Helper()
-	req := newDaemonTokenRequest(http.MethodPost, "/api/daemon/tasks/"+taskID+"/complete",
-		map[string]any{"output": "done"}, testWorkspaceID, "legit-daemon")
+	req := newOwnerDaemonRequest(http.MethodPost, "/api/daemon/tasks/"+taskID+"/complete",
+		map[string]any{"output": "done"})
 	testutil.Call(t, testHandler.CompleteTask, withURLParam(req, "taskId", taskID)).Want(http.StatusOK)
 }
 

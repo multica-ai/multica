@@ -18,7 +18,7 @@
  * are NOT edited here — they have dedicated chip pickers on the detail page.
  * This screen only owns the two free-text fields.
  */
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useMemo, useState } from "react";
 import {
   Alert,
   KeyboardAvoidingView,
@@ -54,22 +54,18 @@ export default function EditIssue() {
   const [initialDescription, setInitialDescription] = useState("");
   const description = useMentionInput();
   const [seeded, setSeeded] = useState(false);
-  // `useMentionInput` returns `setText` from `useState`, which is a stable
-  // identity across renders. Pulling it out of the hook return lets us list
-  // it explicitly in the seeding effect's dep array without the whole
-  // `description` object (which changes every render) re-triggering the
-  // seed and overwriting in-progress edits.
+  // Seed once when data arrives, before committing the form. Background
+  // refetches must not overwrite edits already in progress.
   const setDescriptionText = description.setText;
 
-  useEffect(() => {
-    if (!detail.data || seeded) return;
+  if (detail.data && !seeded) {
     setTitle(detail.data.title);
     setInitialTitle(detail.data.title);
     const initial = detail.data.description ?? "";
     setDescriptionText(stripChannelMediaMarkers(initial));
     setInitialDescription(initial);
     setSeeded(true);
-  }, [detail.data, seeded, setDescriptionText]);
+  }
 
   const currentDescription = description.serialize();
 

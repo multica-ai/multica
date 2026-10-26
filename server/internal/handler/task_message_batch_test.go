@@ -11,7 +11,6 @@ import (
 
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/multica-ai/multica/server/internal/events"
-	"github.com/multica-ai/multica/server/internal/middleware"
 	"github.com/multica-ai/multica/server/internal/testutil"
 	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
@@ -44,8 +43,9 @@ func batchMessagesRequest(t *testing.T, taskID string, messages []any) *http.Req
 	req := testutil.JSONRequest(http.MethodPost,
 		"/api/daemon/tasks/"+taskID+"/messages", map[string]any{"messages": messages})
 	req = testutil.WithURLParams(req, "taskId", taskID)
-	return req.WithContext(middleware.WithDaemonContext(
-		req.Context(), testWorkspaceID, "batch-messages-daemon"))
+	// The fixture runtime's owner, as a real daemon authenticates.
+	req.Header.Set("X-User-ID", testUserID)
+	return req
 }
 
 // TestReportTaskMessagesPersistsWholeBatch covers the multi-message shape of the

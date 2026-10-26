@@ -158,6 +158,19 @@ export function AgentConfigurationPanel({
               />
             </div>
           </DraftFieldRow>
+          {conversationStartersSupported && !qoderRuntime ? (
+            <DraftFieldRow
+              compact={compact}
+              align="start"
+              label={t(($) => $.conversation_starters.label)}
+              description={t(($) => $.conversation_starters.create_hint)}
+            >
+              <ConversationStartersEditor
+                value={draft.conversationStarters}
+                onChange={(value) => set("conversationStarters", value)}
+              />
+            </DraftFieldRow>
+          ) : null}
         </SettingsCard>
       </SettingsSection>
 
@@ -184,14 +197,6 @@ export function AgentConfigurationPanel({
               className="min-h-44 resize-y font-mono text-label leading-6"
             />
           </DraftFieldRow>
-          {conversationStartersSupported && !qoderRuntime ? (
-            <div className="px-4 py-4">
-              <ConversationStartersEditor
-                value={draft.conversationStarters}
-                onChange={(value) => set("conversationStarters", value)}
-              />
-            </div>
-          ) : null}
           {qoderRuntime ? (
             <p className="px-4 py-3 text-caption text-muted-foreground">
               {t(($) => $.creation_studio.cloud_fields_note)}
@@ -459,12 +464,14 @@ export function AgentExecutionOverrides({
 
 function DraftFieldRow({
   label,
+  description,
   children,
   compact = false,
   align = "center",
   htmlFor,
 }: {
   label: string;
+  description?: string;
   children: ReactNode;
   compact?: boolean;
   align?: "center" | "start";
@@ -480,13 +487,20 @@ function DraftFieldRow({
         !compact && (align === "center" ? "sm:items-center" : "sm:items-start"),
       )}
     >
-      {htmlFor ? (
-        <label htmlFor={htmlFor} className="text-body font-medium">
-          {label}
-        </label>
-      ) : (
-        <div className="text-body font-medium">{label}</div>
-      )}
+      <div className="min-w-0">
+        {htmlFor ? (
+          <label htmlFor={htmlFor} className="text-body font-medium">
+            {label}
+          </label>
+        ) : (
+          <div className="text-body font-medium">{label}</div>
+        )}
+        {description ? (
+          <p className="mt-0.5 text-caption leading-5 text-muted-foreground">
+            {description}
+          </p>
+        ) : null}
+      </div>
       <div className="min-w-0">{children}</div>
     </div>
   );

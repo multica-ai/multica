@@ -14,7 +14,7 @@ import {
   useQueryClient,
   type MutateOptions,
 } from "@tanstack/react-query";
-import { useCallback, useRef } from "react";
+import { useCallback, useLayoutEffect, useRef } from "react";
 import type {
   NotificationPreferenceResponse,
   NotificationPreferences,
@@ -82,9 +82,11 @@ export function useUpdateNotificationPreferences() {
   const workspaceSlug = useWorkspaceStore((s) => s.currentWorkspaceSlug);
   const key = notificationPreferenceKeys.all(wsId);
   const renderedPreferences =
-    qc.getQueryData<NotificationPreferenceResponse>(key)?.preferences ?? {};
+    qc.getQueryData<NotificationPreferenceResponse>(key)?.preferences;
   const renderedPreferencesRef = useRef(renderedPreferences);
-  renderedPreferencesRef.current = renderedPreferences;
+  useLayoutEffect(() => {
+    renderedPreferencesRef.current = renderedPreferences;
+  }, [renderedPreferences]);
 
   // Match Core's concurrency contract: serialize writes per workspace and
   // capture the slug so queued work cannot follow a later workspace switch.
@@ -145,7 +147,7 @@ export function useUpdateNotificationPreferences() {
       options?: ExternalMutationOptions,
     ) => {
       const patch = deriveNotificationPreferencePatch(
-        renderedPreferencesRef.current,
+        renderedPreferencesRef.current ?? {},
         preferences,
       );
       mutation.mutate(
@@ -162,7 +164,7 @@ export function useUpdateNotificationPreferences() {
       options?: ExternalMutationOptions,
     ) => {
       const patch = deriveNotificationPreferencePatch(
-        renderedPreferencesRef.current,
+        renderedPreferencesRef.current ?? {},
         preferences,
       );
       return mutation.mutateAsync(

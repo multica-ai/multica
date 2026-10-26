@@ -250,6 +250,9 @@ archived statuses remain readable via an explicit status filter.
   Squad leaders: dispatching members is not delivery — a dispatch turn
   leaves the parent `in_progress`, and it moves to `in_review` only when a
   later re-trigger confirms the overall goal is met.
+  An issue whose run carries a `[Project workflow]` block is the exception:
+  that block's statuses and commands are the whole status contract, and
+  none of the moves above apply to it.
 - **`in_review`** is an accepted issue status. Some workflows use it while a PR
   is open and awaiting review; moving to it is an explicit mutation.
 - **`done`** on a child issue can wake its parent's assignee (see Stages).

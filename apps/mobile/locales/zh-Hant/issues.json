@@ -1,0 +1,270 @@
+{
+  "tabs": {
+    "all": "全部",
+    "created": "我建立的",
+    "assigned": "我負責的",
+    "agents": "智慧體",
+    "members": "成員"
+  },
+  "status": {
+    "queued": "排隊中",
+    "deferred": "排隊中",
+    "dispatched": "啟動中",
+    "waiting_local_directory": "等待目錄",
+    "running": "執行中",
+    "completed": "完成",
+    "failed": "失敗",
+    "cancelled": "cancelled",
+    "backlog": "backlog",
+    "todo": "todo",
+    "in_progress": "in_progress",
+    "in_review": "in_review",
+    "done": "done",
+    "blocked": "blocked"
+  },
+  "category": {
+    "unstarted": "unstarted",
+    "started": "started",
+    "done": "done",
+    "closed": "closed"
+  },
+  "priority": {
+    "none": "無優先順序",
+    "low": "低",
+    "medium": "中",
+    "high": "高",
+    "urgent": "緊急"
+  },
+  "filters": {
+    "title": "篩選",
+    "status": "狀態",
+    "priority": "優先順序",
+    "assignee": "負責人",
+    "project": "專案",
+    "label": "標籤",
+    "clear": "清除篩選",
+    "apply": "應用",
+    "due_date": "截止日期"
+  },
+  "list": {
+    "empty": "沒有符合篩選條件的任務",
+    "count_other": "{{count}} 個任務",
+    "search_placeholder": "搜尋任務和專案"
+  },
+  "detail": {
+    "properties": "屬性",
+    "activity": "動態",
+    "comments": "評論",
+    "comment": "評論",
+    "reply": "回覆",
+    "add_comment": "新增評論...",
+    "description": "描述",
+    "add_description": "新增描述...",
+    "runs": "執行",
+    "copy_link": "複製連結",
+    "open_on_web": "在網頁開啟",
+    "delete_comment": "刪除評論",
+    "edit_comment": "編輯評論",
+    "no_runs": "暫無執行"
+  },
+  "new": {
+    "title": "新建任務",
+    "title_placeholder": "任務標題",
+    "create": "建立任務",
+    "creating": "建立中...",
+    "description_placeholder": "描述...（輸入 @ 提及）"
+  },
+  "edit": {
+    "title": "編輯任務",
+    "save": "儲存修改",
+    "saving": "儲存中..."
+  },
+  "activity": {
+    "created": "建立了任務",
+    "status_changed": "更改了狀態：{{from}} → {{to}}",
+    "priority_changed": "更改了優先順序：{{from}} → {{to}}",
+    "self_assigned": "指派給了自己",
+    "removed_assignee": "移除了負責人",
+    "assigned_to": "分配給 {{name}}",
+    "assignee_changed": "更改了負責人",
+    "start_date_set": "將開始日期設為 {{date}}",
+    "start_date_removed": "移除了開始日期",
+    "due_date_set": "將截止日期設為 {{date}}",
+    "due_date_removed": "移除了截止日期",
+    "title_changed": "重新命名：\"{{from}}\" → \"{{to}}\"",
+    "description_updated": "更新了描述",
+    "duplicate_marked": "把這個任務標記為 {{identifier}} 的重複",
+    "duplicate_unmarked": "取消了這個任務對 {{identifier}} 的重複標記",
+    "duplicate_unmarked_to": "取消了這個任務對 {{identifier}} 的重複標記，並移至 {{status}}",
+    "duplicate_unmarked_original_deleted": "移除了重複標記，{{identifier}} 已被刪除",
+    "duplicate_added": "把 {{identifier}} 標記為這個任務的重複",
+    "duplicate_removed": "取消了 {{identifier}} 對這個任務的重複標記",
+    "tasks_completed_other": "完成了 {{count}} 次執行",
+    "tasks_failed_other": "有 {{count}} 次執行失敗",
+    "squad_action_with_reason": "評估後執行操作：{{reason}}",
+    "squad_action": "評估後執行操作",
+    "squad_no_action_with_reason": "評估結果：無需操作（{{reason}}）",
+    "squad_no_action": "評估結果：無需操作",
+    "squad_failed_with_reason": "評估失敗：{{reason}}",
+    "squad_failed": "評估失敗",
+    "squad_evaluated": "評估了小隊觸發器",
+    "commented": "發表了評論"
+  },
+  "errors": {
+    "create_failed": "建立任務失敗",
+    "load_failed": "任務載入失敗：{{message}}"
+  },
+  "empty": {
+    "filtered": "沒有符合當前篩選條件的任務。",
+    "assigned": "沒有分配給你的任務。",
+    "created": "你還沒有建立任務。",
+    "agents": "沒有分配給智慧體或小隊的任務。",
+    "all": "該工作區還沒有任務。",
+    "members": "沒有分配給成員的任務。"
+  },
+  "menu": {
+    "pin": "固定",
+    "unpin": "取消固定",
+    "edit_details": "編輯詳情",
+    "copy_link": "複製連結",
+    "open_web": "在網頁開啟",
+    "delete_issue": "刪除任務",
+    "issue_actions": "任務操作"
+  },
+  "delete": {
+    "title": "刪除任務？",
+    "message": "{{identifier}} 及其評論、表情和附件將被永久刪除，且無法撤銷。"
+  },
+  "summary": {
+    "comment": "評論執行",
+    "autopilot": "自動化執行",
+    "chat": "聊天執行",
+    "quick_create": "快速建立",
+    "direct": "執行"
+  },
+  "cancel": {
+    "title": "取消執行？",
+    "message": "智慧體會在當前步驟結束後停止。",
+    "keep_running": "繼續執行",
+    "cancel_task": "取消執行"
+  },
+  "form": {
+    "discard_title": "放棄修改？",
+    "discard_message_issue": "你對這個任務的修改將會丟失。",
+    "keep_editing": "繼續編輯",
+    "save_failed": "儲存失敗"
+  },
+  "picker": {
+    "unassigned": "未分配",
+    "agent": "智慧體",
+    "needs_runtime": "需要執行時",
+    "leader_needs_runtime": "負責人需要執行時",
+    "squad": "小隊",
+    "no_matches": "沒有匹配結果。",
+    "no_project": "無專案",
+    "no_projects": "該工作區還沒有專案。\n請在網頁端建立。",
+    "no_labels": "該工作區還沒有標籤。",
+    "create_label": "建立 \"{{name}}\"",
+    "no_members_agents": "該工作區還沒有成員或智慧體。",
+    "people": "成員",
+    "agents": "智慧體",
+    "squads": "小隊",
+    "issues": "任務",
+    "everyone": "所有人（@all）",
+    "unknown": "未知",
+    "search_people": "搜尋成員",
+    "search_projects": "搜尋專案",
+    "search_labels": "搜尋標籤",
+    "search_members_agents": "搜尋成員或智慧體",
+    "search_people_issues": "搜尋成員或任務",
+    "reference_issue": "引用任務",
+    "clear": "清除"
+  },
+  "comments": {
+    "reply": "回覆",
+    "react": "回應...",
+    "copy": "複製",
+    "select_text": "選擇文字",
+    "copy_link": "複製連結",
+    "resolve": "解決討論",
+    "unresolve": "重新開啟討論",
+    "delete": "刪除",
+    "delete_title": "刪除評論？",
+    "delete_keep_replies": "該評論將被永久刪除。其回覆會保留在討論中。此操作無法撤銷。",
+    "delete_with_replies": "該評論將被永久刪除，討論中的回覆也會一併移除。此操作無法撤銷。",
+    "more_reactions": "更多表情...",
+    "fallback_actor": "評論",
+    "composer_placeholder": "新增評論...",
+    "composer_pill": "新增評論，輸入 @ 提及..."
+  },
+  "suggestions": {
+    "everyone": "所有人",
+    "all": "全部",
+    "member": "成員",
+    "recent": "最近",
+    "my_issues": "我的任務"
+  },
+  "resolved": {
+    "a11y_folded_other": "由 {{authors}} 解決的討論，{{count}} 條訊息。點按展開。",
+    "summary_other": "已解決 · {{count}} 條訊息，由 {{authors}} 處理",
+    "resolved_by": "由 {{name}} 解決",
+    "collapse": "收起",
+    "collapse_a11y": "收起已解決討論"
+  },
+  "failed": {
+    "send": "無法傳送",
+    "retry": "重試",
+    "retry_a11y": "重試傳送評論",
+    "discard": "放棄",
+    "discard_a11y": "放棄失敗的評論"
+  },
+  "resources": {
+    "title": "新增倉庫",
+    "url": "倉庫 URL",
+    "branch": "起始分支（可選）",
+    "label": "標籤（可選）",
+    "attach": "新增",
+    "attaching": "新增中...",
+    "branch_hint": "執行會從這個分支開始，並針對它建立 Pull Request。留空則使用倉庫預設分支。",
+    "commit": "這是提交 ID，不是分支。執行會回傳到起始分支。如需一次性修訂，請給 multica repo checkout 傳入 --ref。",
+    "too_long": "最多使用 255 個字元。",
+    "invalid_characters": "分支名不能包含空格或 ~ ^ : ? * [ \\",
+    "invalid": "不是有效的分支名。",
+    "failed": "新增資源失敗",
+    "error": "未知錯誤"
+  },
+  "runs": {
+    "active": "進行中",
+    "past": "歷史",
+    "title": "智慧體執行",
+    "status": {
+      "queued": "排隊中",
+      "deferred": "已延後",
+      "dispatched": "已交給智慧體",
+      "running": "執行中",
+      "waiting_local_directory": "等待本地目錄可用",
+      "completed": "執行成功",
+      "failed": "執行失敗",
+      "cancelled": "已取消"
+    }
+  },
+  "header_filter": "篩選",
+  "new_badge": "新",
+  "jump_a11y_other": "跳到 {{count}} 條新訊息",
+  "a11y": {
+    "agent_working": "智慧體處理中 — 開啟執行",
+    "remove_mention": "移除提及 {{name}}",
+    "retry_upload": "重試上傳 {{name}}",
+    "open_file": "開啟 {{name}}",
+    "remove_file": "移除 {{name}}"
+  },
+  "summary.comment": "評論執行",
+  "summary.chat": "聊天執行",
+  "summary.direct": "執行",
+  "cancel.title": "取消執行？",
+  "cancel.cancel_task": "取消執行",
+  "picker.create_label": "建立 \"{{name}}\"",
+  "comments.composer_pill": "新增評論，輸入 @ 提及...",
+  "resources.branch_hint": "執行會從這個分支開始，並針對它建立 Pull Request。留空則使用倉庫預設分支。",
+  "resources.commit": "這是提交 ID，不是分支。執行會回傳到起始分支。如需一次性修訂，請給 multica repo checkout 傳入 --ref。"
+}

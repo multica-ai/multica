@@ -304,6 +304,10 @@ func ListModels(ctx context.Context, providerType string, runtimeCmd Command) (C
 		// makes model selection session-scoped, restore a discovery helper
 		// here modelled on discoverTraecliModels.
 		return Catalog{Models: []Model{}}, nil
+	case "devin":
+		return cachedDiscovery(discoveryCacheKey(providerType, runtimeCmd), func() (Catalog, error) {
+			return discovered(discoverDevinModels(ctx, runtimeCmd))
+		})
 	case "mcode":
 		// MCode's ACP server does not expose session-scoped model selection or
 		// a model catalog. The configured MCode runtime owns the model choice.
@@ -1589,9 +1593,11 @@ func discoverHermesModels(ctx context.Context, runtimeCmd Command) ([]Model, err
 		// The same handshake carries an effort selector on jcode and carries
 		// none on Hermes Agent, so annotate is what tells the two apart —
 		// Hermes Agent models come back with a nil Thinking and show no
-		// picker. Only the session's current model is annotated; see
-		// annotateACPThinkingForSessionModel.
-		annotate: annotateACPThinkingForSessionModel,
+		// picker. annotate covers the session's current model; the probe
+		// switches the discovery session onto each remaining model for its
+		// own catalog. See probeACPModelEffort.
+		annotate:         annotateACPThinkingForSessionModel,
+		probeModelEffort: true,
 	})
 	if err != nil {
 		return nil, annotateHermesDiscoveryUnconfigured(err)
@@ -1911,7 +1917,7 @@ func acpConfigOptionCurrentValue(raw json.RawMessage, configID string) (string, 
 // Only the session's current model gets a catalog: reasonix derives the effort
 // vocabulary from the current model's provider entry, so the advertised list
 // describes that model alone. Every other model keeps a nil Thinking and shows
-// no picker until per-model probing exists. See
+// no picker until reasonix opts into probeModelEffort. See
 // annotateACPThinkingForSessionModel.
 func discoverReasonixModels(ctx context.Context, runtimeCmd Command) ([]Model, error) {
 	return discoverACPModels(ctx, runtimeCmd, acpDiscoveryProvider{
@@ -2030,6 +2036,9 @@ type acpDiscoveryProvider struct {
 	// ignores. CodeBuddy uses it to read its effort catalog out of the same
 	// handshake, which is why it needs no separate discovery call at all.
 	annotate func([]Model, json.RawMessage)
+	// probeModelEffort switches the throwaway session onto each non-current
+	// model to read that model's own effort catalog; see probeACPModelEffort.
+	probeModelEffort bool
 	// timeout bounds the whole handshake — spawn, initialize, session/new.
 	// Zero means acpDiscoveryDefaultTimeout.
 	//
@@ -2124,7 +2133,7 @@ func discoverACPModels(ctx context.Context, runtimeCmd Command, p acpDiscoveryPr
 	scanner := bufio.NewScanner(stdout)
 	scanner.Buffer(make([]byte, 0, 1024*1024), 4*1024*1024)
 	nextID := 1
-	requestACP := func(method string, params map[string]any) (json.RawMessage, error) {
+	requestACP := func(method string, params any) (json.RawMessage, error) {
 		id := nextID
 		nextID++
 		msg := map[string]any{
@@ -2248,6 +2257,14 @@ func discoverACPModels(ctx context.Context, runtimeCmd Command, p acpDiscoveryPr
 	}
 	if p.annotate != nil {
 		p.annotate(models, sessionResult)
+	}
+	if p.probeModelEffort {
+		probeACPModelEffort(runCtx, func(_ context.Context, method string, params any) (json.RawMessage, error) {
+			return requestACP(method, params)
+		}, sessionResult, models)
+		if err := runCtx.Err(); err != nil {
+			return fail("per-model effort discovery", err)
+		}
 	}
 	return models, nil
 }

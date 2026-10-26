@@ -202,6 +202,8 @@
     "grouping_section": "그룹화",
     "ordering_section": "정렬",
     "card_properties_section": "카드 속성",
+    "columns_section": "열",
+    "columns_locked_by_filter": "열을 표시하거나 숨기려면 상태 필터를 해제하세요.",
     "ascending_title": "오름차순",
     "descending_title": "내림차순",
     "newest_first": "최신순",
@@ -359,9 +361,7 @@
     "toggle_collapse": "레인 접기/펼치기"
   },
   "board": {
-    "hidden_columns_label": "숨긴 열",
     "hide_column": "열 숨기기",
-    "show_column": "열 표시",
     "add_issue_tooltip": "태스크 추가",
     "empty_column": "태스크 없음",
     "empty_grouping": "일치하는 태스크가 없습니다",
@@ -526,6 +526,7 @@
     "pr_auto_complete_disabled": "이 태스크가 PR 병합 시 상태를 유지하도록 설정했습니다",
     "pr_auto_complete_enabled": "이 태스크의 PR 병합 후 상태 변경을 다시 켰습니다",
     "wakeup_created": "깨우기를 추가했습니다: {{condition}} · {{agent}} 깨우기",
+    "wakeup_created_scheduled": "{{agent}} 깨우기를 추가했습니다: {{condition}}",
     "wakeup_triggered": "{{condition}} · {{agent}}을(를) 깨웠습니다",
     "wakeup_triggered_merged": "{{condition}} · {{agent}}의 대기 중인 실행에 합쳤습니다",
     "wakeup_triggered_acknowledged": "{{condition}} · {{agent}} 자신의 작업이라 다시 깨우지 않았습니다",
@@ -701,6 +702,7 @@
     "retry_failed": "실행을 다시 시도하지 못했습니다",
     "retry_blocked": "다시 시도되지 않음 — 이 에이전트를 사용할 권한이 없습니다",
     "transcript_tooltip": "트랜스크립트 보기",
+    "jump_to_run": "실행으로 이동",
     "cancel_failed": "실행을 취소하지 못했습니다",
     "trigger_retry": "다시 시도",
     "trigger_retry_attempt": "{{attempt}}번째 다시 시도",
@@ -1523,7 +1525,7 @@
       "target_squad": "스쿼드 · 리더가 배분",
       "target_member": "멤버",
       "instructions_hint": "이번 실행의 지침으로 처리자에게 전달되며, 태스크 설명·댓글과 함께 맥락이 됩니다.",
-      "next_hint": "두 선택 모두 처리자가 받는 설명에 적힙니다. 상태는 처리자가 바꿉니다. 단계가 끝나면 앞의 상태로, 받은 작업을 다시 해야 하면 뒤의 상태로 옮깁니다(막힌 경우에는 쓰지 않습니다). 실행이 끝나도 시스템이 상태를 자동으로 바꾸지 않습니다.",
+      "next_hint": "상태는 처리자가 직접 바꿉니다. 반려는 다시 해야 할 때만 쓰고, 막힌 경우에는 쓰지 않습니다. 실행이 끝나도 상태는 자동으로 바뀌지 않습니다.",
       "preview_brief": "에이전트가 받는 설명 미리 보기",
       "preview_title": "“{{status}}” 단계 설명",
       "preview_description": "태스크가 이 단계에 들어오면 처리자의 실행이 받는 내용입니다. 미리 보기에는 저장이 필요 없습니다.",
@@ -1614,8 +1616,7 @@
     },
     "detail": {
       "follows_project": "(프로젝트 기준)",
-      "card_title": "“{{workflow}}” · “{{project}}” 기준",
-      "card_hint": "이 열과 인계는 프로젝트의 워크플로가 정합니다."
+      "card_title": "“{{workflow}}” · “{{project}}” 기준"
     },
     "list_separator": ", ",
     "handoff": {

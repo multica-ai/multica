@@ -5,6 +5,7 @@ import {
   AlertTriangle,
   ExternalLink,
   Globe,
+  Users,
   Loader2,
   MoreHorizontal,
   Pencil,
@@ -262,19 +263,21 @@ function PendingRuntimeBadge({ runtime }: { runtime: AgentRuntime }) {
 // `🔒 Private` chip on every row turns the whole column into noise.
 function VisibilityBadge({ runtime }: { runtime: AgentRuntime }) {
   const { t } = useT("runtimes");
-  if (runtime.visibility !== "public") return null;
+  const scope = runtime.visibility === "public" ? "public" : "members";
+  if (scope === "members" && !runtime.shared_with?.length) return null;
+  const Icon = scope === "public" ? Globe : Users;
   return (
     <Tooltip>
       <TooltipTrigger
         render={
           <span className="inline-flex shrink-0 items-center gap-0.5 rounded-xs bg-info/10 px-1 text-micro font-medium text-info">
-            <Globe className="h-2.5 w-2.5" />
-            {t(($) => $.detail.visibility_label.public)}
+            <Icon className="h-2.5 w-2.5" />
+            {t(($) => $.detail.visibility_label[scope])}
           </span>
         }
       />
       <TooltipContent>
-        {t(($) => $.detail.visibility_hint.public)}
+        {t(($) => $.detail.visibility_hint_readonly[scope])}
       </TooltipContent>
     </Tooltip>
   );

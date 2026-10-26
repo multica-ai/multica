@@ -4,8 +4,13 @@ description: Diagnose common problems with connections, execution, realtime upda
 ---
 
 import { Callout } from "fumadocs-ui/components/callout";
+import { Tab, Tabs } from "fumadocs-ui/components/tabs";
+import { Accordion, Accordions } from "fumadocs-ui/components/accordion";
 
 First work out which layer the problem lives in: the Multica service, the daemon, the runtime, or the AI coding tool. These commands are usually enough to surface the first meaningful error:
+
+<Tabs items={["Any install", "Self-hosted service"]}>
+<Tab value="Any install">
 
 ```bash
 multica version
@@ -14,16 +19,23 @@ multica daemon status --output json
 multica daemon logs --lines 100
 ```
 
-Self-hosted instances can also check the service directly:
+</Tab>
+<Tab value="Self-hosted service">
 
 ```bash
 curl -i https://api.example.com/health
 curl -i https://api.example.com/readyz
 ```
 
+</Tab>
+</Tabs>
+
 `/health` only says the API process is responding; `/readyz` also checks the database and migrations. Include the error, relevant logs, CLI version, and operating system when reporting a problem; remove tokens, email addresses, and other sensitive details before submitting.
 
-## Daemon fails to connect
+## Connection and sign-in
+
+<Accordions>
+<Accordion title="Daemon fails to connect" id="daemon-fails-to-connect" value="daemon-fails-to-connect">
 
 Run these first:
 
@@ -54,11 +66,58 @@ Self-hosted deployments should also request the API's `/health` from the **execu
 multica config show
 ```
 
-## Issue does not start executing
+</Accordion>
+<Accordion title={<><code>multica setup</code> reports the server is not reachable</>} id="multica-setup-reports-the-server-is-not-reachable" value="multica-setup-reports-the-server-is-not-reachable">
+
+The CLI reachability probe GETs `<server-url>/health` and needs a 200. The backend serves this path. Current web releases forward `/health` to the backend, but older ones do not — a reverse proxy that forwards everything to such an older frontend returns 404, and the CLI concludes the server is down while the stack is healthy.
+
+Routing `/health` to the backend (port 8080) explicitly in your proxy works across all releases — both Caddy examples in the [self-host quickstart](/self-host-quickstart#remote-access) do this. Confirm with:
+
+```bash
+curl -fsS <server-url>/health
+```
+
+</Accordion>
+<Accordion title={<><code>multica login</code> fails with a TLS handshake timeout</>} id="multica-login-fails-with-a-tls-handshake-timeout" value="multica-login-fails-with-a-tls-handshake-timeout">
+
+`multica login` opens the browser and the web sign-in completes, but the CLI still fails with "Sign-in did not complete" or "TLS handshake timed out". `multica --debug login` shows `net/http: TLS handshake timeout` on `POST /api/tokens`, while `curl.exe -I https://api.multica.ai` or a browser on the same machine connects fine.
+
+The TCP connection opens, but the TLS handshake never completes. Go clients, including the Multica CLI and daemon, send a post-quantum key share in the TLS ClientHello by default, which makes it about 1.5 KB and splits it across two packets. Some security software, VPNs, routers, and firewalls drop such handshakes; curl sends a much smaller ClientHello and gets through.
+
+Confirm the cause by retrying with the post-quantum key share disabled:
+
+<Tabs groupId="os" persist items={["macOS / Linux", "Windows"]}>
+<Tab value="macOS / Linux">
+
+```bash
+GODEBUG=tlsmlkem=0 multica --debug login
+```
+
+</Tab>
+<Tab value="Windows">
+
+```powershell
+$env:GODEBUG = 'tlsmlkem=0'
+multica --debug login
+```
+
+</Tab>
+</Tabs>
+
+If that succeeds, set `GODEBUG=tlsmlkem=0` permanently for the user that runs the CLI and the daemon — on Windows, run `[Environment]::SetEnvironmentVariable('GODEBUG', 'tlsmlkem=0', 'User')` and open a new terminal — then restart the daemon or the desktop app. Raising `MULTICA_HTTP_TIMEOUT` does not help: it does not govern the handshake. The permanent fix is on the network side: update or reconfigure the device or software that drops split TLS handshakes.
+
+</Accordion>
+</Accordions>
+
+## Runs and AI coding tools
+
+<Accordions>
+<Accordion title="Issue does not start executing" id="issue-does-not-start-executing" value="issue-does-not-start-executing">
 
 Open the issue's **execution log** and check the run's current status and what it is waiting for.
 
-### `queued` status
+<Tabs items={["queued", "waiting_local_directory"]}>
+<Tab value="queued">
 
 `queued` means the run is still waiting for a runtime to claim it. Check in order:
 
@@ -77,7 +136,8 @@ multica issue runs <issue-id>
 
 If the runtime list is missing an expected tool, first confirm the tool runs and is signed in under the same system account and `PATH`, then run `multica daemon restart`.
 
-### `waiting_local_directory` status
+</Tab>
+<Tab value="waiting_local_directory">
 
 This means another in-flight run is using the same local directory. Multica waits for the directory lock to be released so two agents never modify the same files at once.
 
@@ -85,7 +145,11 @@ This wait only exists in the directory's `in_place` ("Direct") mode. If the dire
 
 Otherwise you just wait for the earlier run to finish. If it is stuck, stop it from its execution log, or pick a different local directory for the current agent. This directory mutex lives in the daemon's memory — no lock file is written to disk. If you suspect stale lock state, `multica daemon restart` releases it; there is nothing to delete manually.
 
-## AI coding tool fails to start
+</Tab>
+</Tabs>
+
+</Accordion>
+<Accordion title="AI coding tool fails to start" id="ai-coding-tool-fails-to-start" value="ai-coding-tool-fails-to-start">
 
 An online daemon does not mean the tool itself works. Open the run's detailed record and focus on:
 
@@ -97,7 +161,8 @@ An online daemon does not mean the tool itself works. Open the run's detailed re
 
 Run the same tool directly in a terminal on the executing computer first. If the tool cannot start on its own, fix its sign-in or configuration, then retry the run from the execution log.
 
-## Runs hang on macOS after a CLI upgrade
+</Accordion>
+<Accordion title="Runs hang on macOS after a CLI upgrade" id="runs-hang-on-macos-after-a-cli-upgrade" value="runs-hang-on-macos-after-a-cli-upgrade">
 
 After the Homebrew `multica` CLI is upgraded, by `brew upgrade`, `multica update`, **Update** on the Runtimes page, or the daemon's auto-update, a run that reads `~/Desktop`, `~/Documents`, `~/Downloads`, iCloud Drive, or another protected folder can stop making progress: the agent's process uses no CPU, and the run neither finishes nor fails.
 
@@ -111,7 +176,24 @@ To restore access:
 
 Repeat this after every CLI upgrade. Auto-update is on by default only for daemons connected to Multica Cloud; start the daemon with `--no-auto-update` so upgrades happen only when you run them. The CLI bundled with [Multica Desktop](/desktop-app) is signed with a Developer ID, so its grants survive upgrades.
 
-## Realtime updates stop working
+</Accordion>
+<Accordion title="Hermes runs reinstall dependencies after you use the Hermes CLI" id="hermes-runs-reinstall-dependencies-after-you-use-the-hermes-cli" value="hermes-runs-reinstall-dependencies-after-you-use-the-hermes-cli">
+
+If you alternate between the Hermes CLI (or the Hermes desktop app) and Multica Hermes runs, each switch can add 30–60 seconds to startup while Hermes rebuilds its shared Python dependency environment. Each rebuild also leaves a new environment generation on disk until Hermes cleans it up.
+
+This happens when your own Hermes home sets `memory.provider` to a plugin that has Python dependencies. Each Multica run uses its own Hermes home, shares your installed dependencies, and turns the external memory provider off so memory is not shared across runs. Hermes works out which dependencies it needs from the active home's plugins, so your home and the run's home disagree, and each one treats the other's install as out of date. The underlying behavior is tracked upstream in [NousResearch/hermes-agent#137726](https://github.com/NousResearch/hermes-agent/issues/137726).
+
+To confirm, look in the [daemon log](#log-locations) for `hermes is reinstalling its dependency environment before this task starts`. A follow-up `hermes dependency reinstall finished` entry reports, in `startup_delay_ms`, how long Hermes took from launch until it was ready, including the reinstall.
+
+Until Hermes fixes this upstream, you can avoid the rebuilds by setting `memory.provider: ""` in your own Hermes `config.yaml`, which turns that memory plugin off for the CLI as well. Otherwise, expect the one-time delay after each switch.
+
+</Accordion>
+</Accordions>
+
+## Web app and self-hosted service
+
+<Accordions>
+<Accordion title="Realtime updates stop working" id="realtime-updates-stop-working" value="realtime-updates-stop-working">
 
 If runs still execute but comments and status changes no longer appear live, the WebSocket is usually not connected.
 
@@ -132,38 +214,10 @@ Containers read `.env` only at creation time; recreate them after changes:
 docker compose -f docker-compose.selfhost.yml up -d
 ```
 
-For a complete reverse-proxy example, see the [self-host quickstart](/self-host-quickstart#3-choose-how-to-access).
+For a complete reverse-proxy example, see the [self-host quickstart](/self-host-quickstart#remote-access).
 
-## `multica setup` reports the server is not reachable
-
-The CLI reachability probe GETs `<server-url>/health` and needs a 200. The backend serves this path. Current web releases forward `/health` to the backend, but older ones do not — a reverse proxy that forwards everything to such an older frontend returns 404, and the CLI concludes the server is down while the stack is healthy.
-
-Routing `/health` to the backend (port 8080) explicitly in your proxy works across all releases — both Caddy examples in the [self-host quickstart](/self-host-quickstart#3-choose-how-to-access) do this. Confirm with:
-
-```bash
-curl -fsS <server-url>/health
-```
-
-## `multica login` fails with a TLS handshake timeout
-
-`multica login` opens the browser and the web sign-in completes, but the CLI still fails with "Sign-in did not complete" or "TLS handshake timed out". `multica --debug login` shows `net/http: TLS handshake timeout` on `POST /api/tokens`, while `curl.exe -I https://api.multica.ai` or a browser on the same machine connects fine.
-
-The TCP connection opens, but the TLS handshake never completes. Go clients, including the Multica CLI and daemon, send a post-quantum key share in the TLS ClientHello by default, which makes it about 1.5 KB and splits it across two packets. Some security software, VPNs, routers, and firewalls drop such handshakes; curl sends a much smaller ClientHello and gets through.
-
-Confirm the cause by retrying with the post-quantum key share disabled:
-
-```powershell
-$env:GODEBUG = 'tlsmlkem=0'
-multica --debug login
-```
-
-```bash
-GODEBUG=tlsmlkem=0 multica --debug login
-```
-
-If that succeeds, set `GODEBUG=tlsmlkem=0` permanently for the user that runs the CLI and the daemon — on Windows, run `[Environment]::SetEnvironmentVariable('GODEBUG', 'tlsmlkem=0', 'User')` and open a new terminal — then restart the daemon or the desktop app. Raising `MULTICA_HTTP_TIMEOUT` does not help: it does not govern the handshake. The permanent fix is on the network side: update or reconfigure the device or software that drops split TLS handshakes.
-
-## Verification code and invitation emails not delivered
+</Accordion>
+<Accordion title="Verification code and invitation emails not delivered" id="verification-code-and-invitation-emails-not-delivered" value="verification-code-and-invitation-emails-not-delivered">
 
 Check the backend startup log first. It states whether the server is using `SMTP relay`, `Resend API`, or `DEV mode`:
 
@@ -182,7 +236,8 @@ When `SMTP_HOST` and Resend are both configured, Multica prefers SMTP. For confi
 Do not rely on codes in the log in production, and do not enable the fixed local test code.
 </Callout>
 
-## Attachment uploads or downloads fail
+</Accordion>
+<Accordion title="Attachment uploads or downloads fail" id="attachment-uploads-or-downloads-fail" value="attachment-uploads-or-downloads-fail">
 
 Check the backend log and the response status code first. Common causes:
 
@@ -193,7 +248,8 @@ Check the backend log and the response status code first. Common causes:
 
 With Docker Compose, the default `backend_uploads` volume stores local attachments. Recreating containers does not delete it, but `docker compose down -v` deletes the data volume. For S3 configuration, see [Environment variables](/environment-variables#attachment-storage).
 
-## Usage shows zero
+</Accordion>
+<Accordion title="Usage shows zero" id="usage-shows-zero" value="usage-shows-zero">
 
 The Usage page reads hourly rollups, not each run's raw usage. Check the raw data and the rollup table first:
 
@@ -208,7 +264,7 @@ ORDER BY plan_time DESC
 LIMIT 20;
 ```
 
-If `task_usage` has rows, the rollup table is empty, and the scheduler records show failures, first confirm all migrations have been applied; if migration 103 rejected the upgrade, see the next section. You can also run one rollup by hand to separate SQL problems from scheduling problems:
+If `task_usage` has rows, the rollup table is empty, and the scheduler records show failures, first confirm all migrations have been applied; if migration 103 rejected the upgrade, see [Migration 103 blocks an upgrade](#migration-103-blocks-an-upgrade). You can also run one rollup by hand to separate SQL problems from scheduling problems:
 
 ```sql
 SELECT rollup_task_usage_hourly();
@@ -216,7 +272,8 @@ SELECT rollup_task_usage_hourly();
 
 If the numbers look right after a manual run, the rollup function works and the problem is the backend's built-in scheduling; manual SQL only fills in one rollup and does not restore scheduling. Hourly rollups are executed by the backend's built-in scheduler — you do not need to configure pg_cron yourself.
 
-## Migration 103 blocks an upgrade
+</Accordion>
+<Accordion title="Migration 103 blocks an upgrade" id="migration-103-blocks-an-upgrade" value="migration-103-blocks-an-upgrade">
 
 A normal upgrade needs no action for 103: `migrate up` automatically backfills historical usage data before applying it — an empty database passes straight through, and instances with history are backfilled month by month before continuing.
 
@@ -229,16 +286,32 @@ DATABASE_URL='postgres://...' go run ./cmd/backfill_task_usage_hourly
 
 Useful flags: `--dry-run` previews without writing; `--sleep-between-slices` adds a pause between slices to reduce read pressure on a busy instance. The command works in monthly slices and is idempotent — rerun it directly after an interruption. It holds an advisory lock and is mutually exclusive with the server's scheduled rollup, so it cannot produce duplicate or inconsistent rollup data. When it finishes, restart the backend and confirm `migrations` is `ok` on `/readyz`.
 
-## Port already in use
+</Accordion>
+<Accordion title="Port already in use" id="port-already-in-use" value="port-already-in-use">
 
 Common local ports are `8080` for the API, `3000` for the web app, and the daemon health-check port. Find the process holding the port first:
 
+<Tabs groupId="os" persist items={["macOS / Linux", "Windows"]}>
+<Tab value="macOS / Linux">
+
 ```bash
-lsof -nP -iTCP:8080 -sTCP:LISTEN   # macOS / Linux
-netstat -ano | findstr :8080       # Windows
+lsof -nP -iTCP:8080 -sTCP:LISTEN
 ```
 
+</Tab>
+<Tab value="Windows">
+
+```bash
+netstat -ano | findstr :8080
+```
+
+</Tab>
+</Tabs>
+
 If it is another Multica checkout, run `make stop` in that directory first. Otherwise stop the offending program normally, or change the current service's port. Public ports 80/443 are listened on by a reverse proxy such as Caddy or Nginx.
+
+</Accordion>
+</Accordions>
 
 ## Log locations
 

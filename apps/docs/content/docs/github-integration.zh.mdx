@@ -4,6 +4,8 @@ description: 把 pull request 与 Multica 任务关联，并在任务中查看�
 ---
 
 import { Callout } from "fumadocs-ui/components/callout";
+import { Step, Steps } from "fumadocs-ui/components/steps";
+import { PrLinkDemo } from "@/components/demos/pr-link-demo";
 
 连接 GitHub 后，Multica 根据任务编号自动关联 pull request。任务详情中可直接查看 PR 状态、改动规模、CI 结果和合并冲突。
 
@@ -15,10 +17,20 @@ GitHub 集成只读取安装时授权的仓库，不会提交代码、评论或 
 
 工作区 owner 或 admin 可以完成连接：
 
-1. 打开 **设置 → 代码**。
-2. 在 **GitHub** 一行点击 **连接 GitHub**。
-3. 在 GitHub 中选择账号或组织，并授权全部仓库或指定仓库。
-4. 安装完成后回到 Multica。
+<Steps>
+<Step>
+打开 **设置 → 代码**。
+</Step>
+<Step>
+在 **GitHub** 一行点击 **连接 GitHub**。
+</Step>
+<Step>
+在 GitHub 中选择账号或组织，并授权全部仓库或指定仓库。
+</Step>
+<Step>
+安装完成后回到 Multica。
+</Step>
+</Steps>
 
 连接状态会显示在同一页面。普通成员可以查看状态，但不能连接、断开或修改开关。
 
@@ -35,10 +47,8 @@ GitHub 集成只读取安装时授权的仓库，不会提交代码、评论或 
 | PR 侧栏 | 在任务详情中显示关联的 pull request。 |
 | Co-authored-by | 在智能体创建的 commit 中加入 `Co-authored-by: multica-agent <github@multica.ai>`。 |
 | 自动关联 PR | 分支名或标题含任务编号、或正文中关闭语句后写了任务编号的 PR，会关联到对应任务。 |
-| PR 合并后，任务状态改为 | 任务关联的 PR 全部合并后，把任务改成某个状态（默认 `Done`），或者不改。见下方 **PR 合并后怎样改状态**。 |
-| **PR 卡片 → CI 与可合并性** | 对每个关联的 PR，Multica 从 GitHub API 拉取一份经鉴权的快照，把它的 **CI 状态**和**可合并性**镜像到卡片上（见下方 **PR 卡片展示什么**）。 |
-
-
+| PR 合并后，任务状态改为 | 任务关联的 PR 全部合并后，把任务改成某个状态（默认 `Done`），或者不改。见[PR 合并后怎样改状态](#pr-合并后怎样改状态)。 |
+| PR 卡片 → CI 与可合并性 | 对每个关联的 PR，Multica 以 App 身份从 GitHub API 拉取快照，把 CI 状态和可合并性显示在卡片上，见[在任务中查看 PR](#在任务中查看-pr)。 |
 
 **PR 合并后，任务状态改为** 对所有代码托管平台生效，包括[自托管 Git 代码托管](/vcs-integration)。
 
@@ -78,22 +88,24 @@ Resolves MUL-123
 - CI 状态：全部通过（带计数）、若干个失败（点名失败的 check），或若干个进行中；没有配置任何 check 的 PR 不显示这一项，"没有 check"不会被当成通过；
 - 可合并性：可合并（仅当 GitHub 报告合并状态为 clean）、有冲突、blocked 或 behind。
 
-CI 状态和可合并性来自 Multica 从 GitHub API 拉取的快照，两者互相独立；已合并或已关闭的 PR 不再显示这两项。GitHub 暂时不可用时，卡片会保留上一次的快照并标记为过期，而不是清空。
+CI 状态和可合并性来自 Multica 从 GitHub API 拉取的快照，两者互相独立；已合并或已关闭的 PR 不再显示这两项。GitHub 暂时不可用时，卡片保留上一次的快照并标记为过期。
 
-列表下方有一行说明接下来会发生什么，例如「等待 #19 合并后改为 已完成」，或者哪个 PR 已关闭、未合并。工作区设置为不改变、或者任务已经是目标状态时，不显示这行说明。
+列表下方有一行说明接下来会发生什么，例如"等待 #19 合并后改为 已完成"，或者哪个 PR 已关闭、未合并。工作区设置为不改变、或者任务已经是目标状态时，不显示这行说明。
 
 点击记录可以打开 GitHub 上的 PR。关闭 **PR 侧栏** 只会隐藏这个区块，不会断开连接。
 
 ## PR 合并后怎样改状态
 
-PR 合并不一定代表任务已完成，所以由工作区决定合并后做什么：**设置 → 代码 → PR 合并后，任务状态改为**。可以选 `Done`（新工作区的默认值）、其他"已开始"或"已完成"类的状态（自定义状态也可以，例如「待回归」），或者**不改变**。这项设置出现之前就已存在的工作区保持原来的行为：如果以前的合并并不总会完成任务，初始值就是**不改变**。
+PR 合并不一定代表任务已完成，所以由工作区决定合并后做什么：**设置 → 代码 → PR 合并后，任务状态改为**。可以选 `Done`（新工作区的默认值）、其他"已开始"或"已完成"类的状态（也可以是自定义状态，例如"待回归"），或者**不改变**。这项设置出现之前就已存在的工作区保持原来的行为：如果以前的合并并不总会完成任务，初始值就是**不改变**。
 
 以下条件同时成立时，任务会改为选定的状态：
 
 1. 所有关联 PR 都是 `Merged`。仍为 `Open` 或 `Draft` 的 PR 会让任务继续等待；关闭但未合并的 PR 也一样，直到你把它从任务上移除；
 2. 任务当前不是 `done` 或 `cancelled`，不在 Triage 中，还不是目标状态，也没有单独设置合并后不改状态（**Pull requests → ⋯ → 此任务合并后不改状态**）。
 
-PR 怎么关联的不影响结果：标题、分支名和正文里的 `Closes MUL-123` 都只负责关联，不决定合并后做什么。如果一个 PR 只交付了任务的一部分，或者合并后还要发布、验证，就在这个任务的 **Pull requests** 菜单里设置合并后不改状态。
+<PrLinkDemo />
+
+PR 是怎么关联上的，不影响结果：标题、分支名和正文里的 `Closes MUL-123` 只负责关联。如果一个 PR 只交付了任务的一部分，或者合并后还要发布、验证，就在这个任务的 **Pull requests** 菜单里设置合并后不改状态。
 
 只有 PR 事件会触发判断：关联 PR 合并、新增关联或移除关联。重新打开任务后，它不会被改回去，下一个关联 PR 合并时才会。修改这项设置，也不会改动此前已合并的任务。
 
@@ -117,7 +129,10 @@ PR 怎么关联的不影响结果：标题、分支名和正文里的 `Closes MU
 
 Multica Cloud 无需执行本节。自托管需要先创建自己的 GitHub App。
 
-### 1. 创建 GitHub App
+<Steps>
+<Step>
+
+### 创建 GitHub App [#1-创建-github-app]
 
 在 GitHub 的 **Developer settings → GitHub Apps** 中创建 App，并填写：
 
@@ -149,7 +164,10 @@ PR 快照通过 Pull requests、Checks 和 Commit statuses 的 REST API 获取�
 这里需要的是 **Webhook secret**，不是 OAuth Client secret。两边填写的 Webhook secret 不一致时，GitHub delivery 会返回 `401 invalid signature`。
 </Callout>
 
-### 2. 配置环境变量
+</Step>
+<Step>
+
+### 配置环境变量 [#2-配置环境变量]
 
 从 App 的公开地址取得 slug。例如 `https://github.com/apps/multica-acme` 的 slug 是 `multica-acme`。
 
@@ -161,16 +179,19 @@ FRONTEND_ORIGIN=https://multica.example.com
 
 `GITHUB_APP_SLUG` 和 `GITHUB_WEBHOOK_SECRET` 缺少任意一个时，连接按钮会被禁用，webhook 接口也会拒绝处理事件。
 
-下面两个变量是 PR 卡片显示 CI 状态与可合并性的必要条件——Multica 用它们以 App 身份鉴权并拉取快照：
+PR 卡片要显示 CI 状态与可合并性，还需要下面两个变量，Multica 用它们以 App 身份鉴权并拉取快照：
 
 ```dotenv
 GITHUB_APP_ID=<GitHub App 的数字 ID>
 GITHUB_APP_PRIVATE_KEY=<完整 PEM 私钥，保留 BEGIN/END 行和换行>
 ```
 
-私钥在 GitHub App 的 **Private keys → Generate a private key** 中生成。不配置时集成会平稳降级：PR 照常镜像，任务照常自动关联并在合并时改状态，只是 PR 卡片不显示 CI 或合并状态。
+私钥在 GitHub App 的 **Private keys → Generate a private key** 中生成。不配置这两个变量时，PR 照常镜像，任务照常自动关联并在合并时改状态，只是 PR 卡片不显示 CI 或合并状态。
 
-### 3. 更新数据库并连接
+</Step>
+<Step>
+
+### 更新数据库并连接 [#3-更新数据库并连接]
 
 升级已有部署时，先执行常规数据库迁移：
 
@@ -179,6 +200,9 @@ make migrate-up
 ```
 
 重启 API 服务，再到 **设置 → 代码** 完成连接。
+
+</Step>
+</Steps>
 
 ## 常见问题
 

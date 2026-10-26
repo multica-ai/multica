@@ -300,6 +300,23 @@ func preserveMaskedGatewayToken(incoming any, persistedRuntimeConfig []byte) {
 	gw["token"] = prev.Gateway.Token
 }
 
+// openclawModelOverride reads the agent's persistent underlying-model override
+// from runtime_config. Every claim snapshots the current setting until it is
+// changed or cleared. Absent, malformed, or whitespace-only values return "".
+func openclawModelOverride(raw []byte) string {
+	trimmed := bytes.TrimSpace(raw)
+	if len(trimmed) == 0 || bytes.Equal(trimmed, []byte("null")) {
+		return ""
+	}
+	var rc struct {
+		ModelOverride string `json:"model_override"`
+	}
+	if err := json.Unmarshal(trimmed, &rc); err != nil {
+		return ""
+	}
+	return strings.TrimSpace(rc.ModelOverride)
+}
+
 // RepoData holds repository information included in claim responses so the
 // daemon can set up worktrees for each workspace repo.
 type RepoData struct {
@@ -435,6 +452,11 @@ type AgentTaskResponse struct {
 	CreatedAt          string                   `json:"created_at"`
 	PriorSessionID     string                   `json:"prior_session_id,omitempty"` // session ID from a previous task on same issue
 	PriorWorkDir       string                   `json:"prior_work_dir,omitempty"`   // work_dir from a previous task on same issue
+	// ModelOverride snapshots the agent's persistent OpenClaw model override at
+	// claim time. Later config edits affect subsequent claims, not this payload.
+	// Mirrors internal/daemon/types.go with the same JSON name; empty for other
+	// providers.
+	ModelOverride string `json:"model_override,omitempty"`
 	// PriorSessionResumeUnavailable is set when a more recent Codex session was
 	// withheld because its rollout was missing (MUL-5305); PriorSessionID (if
 	// any) is then an older fallback, and the daemon surfaces the continuity gap
@@ -482,6 +504,13 @@ type AgentTaskResponse struct {
 	TriggerAuthorName     string                 `json:"trigger_author_name,omitempty"`     // display name of the triggering comment author
 	NewCommentCount       int                    `json:"new_comment_count,omitempty"`       // ISSUE-WIDE comments since this agent's last run — every thread, not just the triggering one (CountNewCommentsSince); excludes the injected trigger and the agent's own comments; omitempty so old daemons ignore it
 	NewCommentsSince      string                 `json:"new_comments_since,omitempty"`      // RFC3339 anchor (last run's started_at) the count is measured from; omitempty so old daemons ignore it. Suppressed with the count when the delta is zero — NewCommentsDeltaKnown, not this field, is what says the server looked
+	// MUL-8218: set only when the trigger comment was edited AFTER the run
+	// whose session this claim resumes had started, so that session's history
+	// may still hold an earlier version of the text. EditedAt is RFC3339;
+	// Revision is the comment's current revision. omitempty so old daemons
+	// ignore both.
+	TriggerCommentEditedAt string `json:"trigger_comment_edited_at,omitempty"`
+	TriggerCommentRevision int64  `json:"trigger_comment_revision,omitempty"`
 	// NewCommentsDeltaKnown reports that the issue-wide delta above was
 	// actually COMPUTED this claim — both the anchor lookup and the count
 	// query succeeded. Without it, NewCommentCount == 0 is ambiguous: a true
@@ -744,6 +773,15 @@ type CoalescedCommentData struct {
 	AuthorName string `json:"author_name,omitempty"`
 	Content    string `json:"content"`
 	CreatedAt  string `json:"created_at,omitempty"`
+	// MUL-8218: set when this comment was edited after the run whose session
+	// this claim resumes had started (see triggerCommentEditedSince). omitempty
+	// so old daemons ignore both.
+	EditedAt string `json:"edited_at,omitempty"`
+	Revision int64  `json:"revision,omitempty"`
+
+	// source is the row this entry was read from, kept so the claim can run
+	// the edit check once the resumed session is known. Never serialized.
+	source db.Comment
 }
 
 // TaskUsageData is one (provider, model) slice of a single run's token usage.
@@ -1108,10 +1146,10 @@ func (h *Handler) loadAgentRuntimeAvailability(ctx context.Context, agents []db.
 			continue
 		}
 		// ListAgentRuntimes exposes every row to workspace owner/admin and only
-		// owner/public rows to regular members. Keep the coarse bridge for the
+		// owner/shared/public rows to regular members. Keep the coarse bridge for the
 		// rows that the viewer's runtime list cannot carry.
 		if runtime.Visibility == "public" ||
-			(runtime.OwnerID.Valid && uuidToString(runtime.OwnerID) == viewerID) {
+			service.RuntimeAllowsUser(runtime, parseUUID(viewerID)) {
 			continue
 		}
 		result[uuidToString(runtime.ID)] = deriveAgentRuntimeAvailability(runtime, now)
@@ -1467,7 +1505,7 @@ func (h *Handler) CreateAgent(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if !canUseRuntimeForAgent(member, runtime) {
-		writeError(w, http.StatusForbidden, "this runtime is private; only its owner can create agents on it")
+		writeError(w, http.StatusForbidden, "this runtime is private; ask its owner to grant you access before creating agents")
 		return
 	}
 
@@ -1610,7 +1648,7 @@ func (h *Handler) CreateAgent(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if !canUseRuntimeForAgent(member, runtime) {
-		writeError(w, http.StatusForbidden, "this runtime is private; only its owner can create agents on it")
+		writeError(w, http.StatusForbidden, "this runtime is private; ask its owner to grant you access before creating agents")
 		return
 	}
 
@@ -2033,14 +2071,14 @@ func (h *Handler) UpdateAgent(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		if !canUseRuntimeForAgent(member, runtime) {
-			writeError(w, http.StatusForbidden, "this runtime is private; only its owner can move agents onto it")
+			writeError(w, http.StatusForbidden, "this runtime is private; ask its owner to grant you access before moving agents onto it")
 			return
 		}
 		// Task delivery authorizes private runtimes against the agent owner,
 		// not the member making this update. Admin management permission must
 		// not save a binding that the existing delivery gate will reject.
-		if runtime.Visibility == "private" && runtime.OwnerID != existing.OwnerID {
-			writeError(w, http.StatusForbidden, "this runtime is private; its owner must match the agent owner")
+		if runtime.Visibility == "private" && !service.RuntimeAllowsUser(runtime, existing.OwnerID) {
+			writeError(w, http.StatusForbidden, "this runtime is private; its owner must grant the agent owner access")
 			return
 		}
 		params.RuntimeID = runtime.ID
@@ -2371,7 +2409,11 @@ func (h *Handler) UpdateAgent(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		if !canUseRuntimeForAgent(member, runtime) {
-			writeError(w, http.StatusForbidden, "this runtime is private; only its owner can move agents onto it")
+			writeError(w, http.StatusForbidden, "this runtime is private; ask its owner to grant you access before moving agents onto it")
+			return
+		}
+		if runtime.Visibility == "private" && !service.RuntimeAllowsUser(runtime, existing.OwnerID) {
+			writeError(w, http.StatusForbidden, "the agent owner does not have access to this runtime")
 			return
 		}
 		params.RuntimeMode = pgtype.Text{String: runtime.RuntimeMode, Valid: true}

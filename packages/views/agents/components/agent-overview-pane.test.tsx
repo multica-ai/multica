@@ -287,7 +287,7 @@ describe("AgentOverviewPane Environment tab visibility", () => {
   });
 });
 
-describe("AgentOverviewPane on a Qoder Cloud Agent runtime", () => {
+describe("AgentOverviewPane on a Qoder Cloud Agents runtime", () => {
   const tabNames = () =>
     screen
       .getAllByRole("tab")

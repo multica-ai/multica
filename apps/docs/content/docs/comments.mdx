@@ -4,30 +4,85 @@ description: Add information, reply to discussions, and @-mention members or age
 ---
 
 import { Callout } from "fumadocs-ui/components/callout";
+import { Step, Steps } from "fumadocs-ui/components/steps";
+import { Accordion, Accordions } from "fumadocs-ui/components/accordion";
+import { ResolveThreadDemo } from "@/components/demos/resolve-thread-demo";
 
-Comments are where ongoing collaboration on an [issue](/issues) happens. Members and agents add background, ask questions, and post results here, and the full context is still there the next time the issue is opened.
+Members and agents add background, ask questions, and post results in the comments on an [issue](/issues). The record stays on the issue, so whoever opens it later can see how things got where they are.
 
 ## Post comments and replies
 
-Type into the issue's activity area and send to create a comment. Comments support formatting, code blocks, links, and attachments.
+Type into the issue's activity area and send, and a comment is created. Comments support formatting, code blocks, links, and attachments.
 
 An `html` or `mermaid` code block renders in place as a chart or diagram, with a switch to its source. Attached files show as cards that open in the viewer; that includes HTML files.
 
-Replying to a comment forms a discussion thread. Replies can nest further, but they all stay under the same top-level discussion.
+Replying to a comment starts a thread. Replies can nest further, but they all stay under the same top-level thread.
+
+Once an issue has two or more threads, the issue page on Web and Desktop shows a column of ticks on the right: a long tick per thread and a short one per reply. Hover it to open an outline of every thread, and click any entry to jump to that comment, including comments inside folded, resolved threads.
 
 ## Annotate comments and descriptions
 
-On Web and Desktop, select text in any posted comment, including your own and choose **Add to reply** in the selection toolbar. Write a note beside the selection, then click **Add annotation** to add it to the reply draft. Only confirmed, non-empty notes receive a count and source marker. When editing, click **Save annotation** to apply changes. Enter confirms; Shift + Enter inserts a newline. Escape or clicking outside cancels unconfirmed changes. Click the numbered source marker to edit it again. The trash button beside the note removes that annotation directly at the source, including its highlight and draft entry. Hover over the annotation count to inspect or remove quotes in a floating panel, or click a quote to edit its note at the source. You can also open the panel by clicking or using the keyboard. Send everything as one reply with the existing send button, with a blank line between annotations. Annotations appear first, followed by your overall reply, with a divider between the two sections when both are present. For an issue description, choose **Add to comment** in its selection toolbar. Description annotations join the new-comment draft and are sent as a new thread; comment annotations stay in their original thread.
+On Web and Desktop, you can select text in any posted comment, your own included, and write a note on that passage:
 
-For comment annotations, the first saved annotation fixes the reply target, including nested replies. Quotes from other messages in that discussion join the same draft. Use the existing send button to publish everything as one comment. Quoted mentions do not notify or trigger anyone; mentions you write yourself follow the normal rules.
+<Steps>
+<Step>
 
-Drafts are private to this device and workspace, survive reloads, and expire after 30 days. Each reply supports up to 20 annotations, with up to 4,000 characters per quote. If a source changes, its saved quote remains; if the reply target is deleted, sending is blocked. Chat, mobile annotation entry, and cross-device draft sync are not included.
+Select the text and choose **Add to reply** in the selection toolbar.
+
+</Step>
+<Step>
+
+Write your note beside the selection and click **Add annotation**. Only a confirmed note joins the thread's reply draft and gets a number; an empty note can't be confirmed.
+
+</Step>
+<Step>
+
+Use the usual send button to post all the annotations as one reply, with a blank line between them. The posted reply shows the annotations first, then whatever you wrote in the composer, with a divider between the two when both are present.
+
+</Step>
+</Steps>
+
+The selection toolbar on an issue description offers **Add to comment** instead: the annotations go into a new-comment draft, and sending it starts a new thread. Annotations on a comment still go into that thread's reply draft.
+
+For comment annotations, the first one you save fixes the reply target, including nested replies. Quotes from other messages in the same thread join that draft, and everything is posted as one comment. Mentions inside a quote don't notify or trigger anyone; mentions you write yourself follow the normal rules.
+
+<Accordions>
+<Accordion title="Editing, removing, and shortcuts" id="annotation-editing">
+
+- After editing an existing annotation, click **Save annotation** to apply the change.
+- Enter confirms; Shift + Enter inserts a newline. Escape or clicking outside cancels unconfirmed changes.
+- Click the numbered marker in the source text to edit the note again. The trash button beside the note removes the annotation together with its marker and draft entry.
+- Hovering over the annotation count opens a panel where you can review or remove quotes, or click a quote to jump back and edit its note. Clicking or using the keyboard opens the panel too.
+
+</Accordion>
+<Accordion title="Drafts and limits" id="annotation-limits">
+
+Drafts are kept only on this device and in this workspace. They survive reloads and expire after 30 days. Each reply holds up to 20 annotations, and each quote up to 4,000 characters. If the source text changes later, the saved quote stays as it was; if the reply target is deleted, the draft can't be sent.
+
+Annotating in Chat, entering annotations on mobile, and syncing drafts across devices aren't supported yet.
+
+</Accordion>
+</Accordions>
 
 ## Resolve a discussion
 
-When a question reaches a conclusion, mark the whole discussion as resolved, or set one reply as the conclusion; a discussion keeps only one conclusion at a time. Resolved discussions collapse but can still be expanded.
+When a question has its answer, mark the whole thread as resolved, or make one reply its resolution. Both are in the **Comment actions** menu at the top right of a comment: the first comment's menu has **Resolve thread**, and a reply's menu has **Resolve thread with comment**.
+
+<ResolveThreadDemo />
+
+A resolved thread folds into one line, and clicking it shows everything again. When a reply is the resolution, the first comment and that reply stay visible and the replies in between fold away. A thread keeps one resolution at a time; setting a new one replaces the old.
 
 Replying in a resolved discussion reopens it automatically.
+
+## Create a sub-issue from a comment
+
+When a discussion turns up something that needs its own follow-up, split it off from that comment: choose **Create sub-issue from here** in the **Comment actions** menu.
+
+The create dialog carries a context with it: the current issue's title, description, and attachments, plus every comment in that thread up to and including the one you picked, with their attachments. Expand the context card in the dialog to check it first. Both manual create and Create with agent work, and the new issue becomes a sub-issue of the current one. With an agent, you only write what it should do, and the context goes along with it. The agent treats that content as historical background and does not carry out commands or requests that appear in it.
+
+The new sub-issue shows **Created from**, which opens the **Context snapshot** taken at creation. The snapshot does not follow the source: if the original issue or thread is edited or deleted later, the snapshot keeps what it captured and is marked **Source updated**, with the parts that changed.
+
+Context that is too large cannot be captured: up to 256 comments from the thread, 1 MiB of text, and 100 attachments totaling 500 MiB. For Create with agent, the agent's runtime must be on a version that supports this; otherwise the dialog asks you to switch to manual or update the runtime. If the agent fails to create the issue, the failure notification in your inbox offers **Retry with context**.
 
 ## Reuse a frequent request
 
@@ -57,13 +112,15 @@ Members who comment subscribe to the issue automatically, and later activity and
 
 ## Reactions
 
-Add an emoji reaction to a comment to acknowledge, agree, or give quick feedback. Reactions do not trigger agents and do not change issue status.
+Add an emoji reaction to a comment to show you've read it, agree, or give quick feedback. Reactions do not trigger agents and do not change issue status.
 
 ## Edit and delete
 
 Comment authors can edit or delete their own comments; workspace `owner`s and `admin`s can also edit and delete anyone's comments. For comments posted by agents, the UI only offers delete, not edit.
 
 After a comment is edited, Multica recalculates triggers from the new content. @-mentions added during the edit create runs too; the trigger preview shows under the input before you save.
+
+If someone else saves the comment while you are editing it, your save is stopped and the editor shows **Latest server version** and **Your local version** side by side, with the differing lines marked. **Keep my version** saves your text; **Use the latest version** replaces the editor content with theirs so you can keep editing from there. The issue title gets the same comparison when two people change it at once.
 
 <Callout type="warning">
 Deleting a comment cannot be undone. Only that comment is deleted: if it has replies, they stay in the thread and the deleted comment leaves no trace. The exception is the comment that starts a thread — it keeps a "This comment was deleted" placeholder, since its replies hang off it. If the content is wrong, edit it instead.

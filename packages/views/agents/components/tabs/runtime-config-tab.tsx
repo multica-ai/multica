@@ -25,6 +25,9 @@ import { useT } from "../../../i18n";
 // fail-soft default — but the union accepts it as a defensive belt.
 interface FormState {
   mode: OpenclawRoutingMode;
+  // Persistent agent model override. Empty uses the model bound to the
+  // selected OpenClaw agent. A string keeps the input controlled while typing.
+  modelOverride: string;
   host: string;
   port: string;
   token: string;
@@ -42,6 +45,7 @@ function configToForm(cfg: OpenclawRuntimeConfig): FormState {
   const masked = cfg.gateway?.token === OPENCLAW_GATEWAY_TOKEN_MASK;
   return {
     mode: cfg.mode ?? "local",
+    modelOverride: cfg.modelOverride ?? "",
     host: cfg.gateway?.host ?? "",
     port: cfg.gateway?.port ? String(cfg.gateway.port) : "",
     // Never display the mask sentinel in the input — that would let users
@@ -55,6 +59,9 @@ function configToForm(cfg: OpenclawRuntimeConfig): FormState {
 
 function formToConfig(state: FormState): OpenclawRuntimeConfig {
   const cfg: OpenclawRuntimeConfig = { mode: state.mode };
+  if (state.modelOverride.trim() !== "") {
+    cfg.modelOverride = state.modelOverride.trim();
+  }
   if (state.mode === "gateway") {
     const gw: NonNullable<OpenclawRuntimeConfig["gateway"]> = {};
     if (state.host.trim() !== "") gw.host = state.host.trim();
@@ -179,6 +186,26 @@ export function RuntimeConfigTab({
         </p>
       </fieldset>
 
+      <fieldset className="space-y-2">
+        <Label htmlFor="openclaw-model-override" className="text-caption font-medium">
+          {t(($) => $.tab_body.runtime_config.model_override_label)}
+        </Label>
+        <Input
+          id="openclaw-model-override"
+          value={state.modelOverride}
+          onChange={(e) =>
+            setState((s) => ({ ...s, modelOverride: e.target.value }))
+          }
+          placeholder={t(
+            ($) => $.tab_body.runtime_config.model_override_placeholder,
+          )}
+          className="font-mono text-caption"
+        />
+        <p className="text-caption text-muted-foreground">
+          {t(($) => $.tab_body.runtime_config.model_override_hint)}
+        </p>
+      </fieldset>
+
       <fieldset
         className={`space-y-3 rounded-md border p-3 ${isGateway ? "" : "opacity-50"}`}
         disabled={!isGateway}
@@ -295,6 +322,7 @@ export function RuntimeConfigTab({
 function formEquals(a: FormState, b: FormState): boolean {
   return (
     a.mode === b.mode &&
+    a.modelOverride === b.modelOverride &&
     a.host === b.host &&
     a.port === b.port &&
     a.token === b.token &&

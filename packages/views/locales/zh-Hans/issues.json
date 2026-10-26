@@ -202,6 +202,8 @@
     "grouping_section": "分组",
     "ordering_section": "排序",
     "card_properties_section": "卡片属性",
+    "columns_section": "列",
+    "columns_locked_by_filter": "清除状态筛选后才能显示或隐藏列。",
     "ascending_title": "升序",
     "descending_title": "降序",
     "newest_first": "最新优先",
@@ -359,9 +361,7 @@
     "toggle_collapse": "切换泳道"
   },
   "board": {
-    "hidden_columns_label": "隐藏的列",
     "hide_column": "隐藏列",
-    "show_column": "显示列",
     "add_issue_tooltip": "新建任务",
     "empty_column": "无任务",
     "empty_grouping": "没有匹配的任务",
@@ -526,6 +526,7 @@
     "pr_auto_complete_disabled": "设置此任务合并后不改状态",
     "pr_auto_complete_enabled": "恢复了此任务合并后改状态",
     "wakeup_created": "添加了唤醒：{{condition}}唤醒 {{agent}}",
+    "wakeup_created_scheduled": "为 {{agent}} 添加了唤醒：{{condition}}",
     "wakeup_triggered": "{{condition}}，唤醒了 {{agent}}",
     "wakeup_triggered_merged": "{{condition}}，并入了 {{agent}} 待开始的运行",
     "wakeup_triggered_acknowledged": "{{condition}}，由 {{agent}} 自己触发，未重复唤醒",
@@ -701,6 +702,7 @@
     "retry_failed": "重试运行失败",
     "retry_blocked": "未重试——你没有该智能体的使用权限",
     "transcript_tooltip": "查看记录",
+    "jump_to_run": "跳转到运行",
     "cancel_failed": "取消运行失败",
     "trigger_retry": "重试",
     "trigger_retry_attempt": "重试 #{{attempt}}",
@@ -1523,7 +1525,7 @@
       "target_squad": "小队 · 由 leader 分派",
       "target_member": "成员",
       "instructions_hint": "作为这次运行的说明发给处理人，和任务描述、评论一起作为上下文。",
-      "next_hint": "两项都会写进处理人收到的说明里，由处理人自己改状态：这一步完成时改为前者，收到的工作需要返工时改为后者（受阻不用这一项）。系统不会在运行结束后自动改状态。",
+      "next_hint": "由处理人自己改状态，只有需要返工时才退回，受阻不用退回。运行结束不会自动改状态。",
       "preview_brief": "预览智能体收到的说明",
       "preview_title": "「{{status}}」这一步的说明",
       "preview_description": "任务进入这一步时，处理人的运行会收到这段说明。预览不需要先保存。",
@@ -1614,8 +1616,7 @@
     },
     "detail": {
       "follows_project": "（跟随项目）",
-      "card_title": "「{{workflow}}」· 跟随项目「{{project}}」",
-      "card_hint": "这些列和交接由项目的工作流决定。"
+      "card_title": "「{{workflow}}」· 跟随项目「{{project}}」"
     },
     "list_separator": "、",
     "handoff": {

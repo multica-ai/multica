@@ -3,7 +3,9 @@ title: Concepts clés
 description: Tous les objets clés de Multica et leurs relations, sur une seule page.
 ---
 
-![Schéma des objets clés de Multica : dans un espace de travail, une tâche déclenche un agent par assignation ou par mention, l'agent crée une exécution, l'exécution s'effectue sur un runtime et les résultats sont réécrits dans la tâche ; la Discussion et l'automatisation sont deux autres sources de déclenchement, les skills et les squads se rattachent aux agents, les projets organisent les tâches, et les notifications arrivent dans la Boîte de réception](/images/docs/concepts-core-objects.webp)
+import { ConceptMapDemo } from "@/components/demos/concept-map-demo";
+
+<ConceptMapDemo />
 
 ## Objets de base
 
@@ -45,7 +47,7 @@ Un groupe d'agents et de membres dirigé par un agent chef. Assignez une tâche 
 
 ### Discussion
 
-Un moyen d'échanger qui n'est rattaché à aucune tâche — idéal pour les questions et les essais rapides. Chaque message déclenche une exécution. Voir [Discuter avec les agents](/chat).
+Un moyen d'échanger qui n'est rattaché à aucune tâche — idéal pour les questions et les essais rapides. Chaque message déclenche une exécution. Voir [Discuter avec des agents](/chat).
 
 ### Boîte de réception
 
@@ -61,10 +63,10 @@ Déclenche automatiquement des exécutions d'agents selon une planification ou �
 - Une **tâche** consigne un travail ; les tâches liées sont organisées en **projets**.
 - Une assignation, une @mention, une **discussion** ou une **automatisation** déclenche un agent et produit une **exécution**.
 - L'exécution s'effectue sur un **runtime**, et les résultats sont réécrits là où elle a été déclenchée.
-- Les **skills** permettent de réutiliser ce qui fonctionne d'un agent à l'autre ; les **squads** permettent à plusieurs agents de travailler ensemble.
+- Les **skills** se rattachent aux agents pour réutiliser ce qui fonctionne d'un agent à l'autre ; les **squads** permettent à plusieurs agents de travailler ensemble.
 - Chaque notification destinée aux humains en cours de route arrive dans la **Boîte de réception**.
 
 ## Étapes suivantes
 
-- [Mettre les agents au travail](/triggering-agents) — le point d'entrée des quatre méthodes de déclenchement.
+- [Mettre les agents au travail](/triggering-agents) — choisissez comment lancer un agent selon ce que vous voulez faire.
 - [Fonctionnement de Multica](/how-multica-works) — le parcours complet d'une exécution.

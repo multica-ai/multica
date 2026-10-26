@@ -6,7 +6,6 @@ import { configStore } from "@multica/core/config";
 import {
   BILLING_WORKSPACE_SUBSCRIPTIONS_FLAG,
   PLUGINS_V1_FLAG,
-  PROJECT_WORKFLOWS_V1_FLAG,
 } from "@multica/core/feature-flags";
 import { renderWithI18n } from "../../test/i18n";
 
@@ -24,7 +23,6 @@ vi.mock("./code-tab", stub("CodeTab"));
 vi.mock("./channels-tab", stub("ChannelsTab"));
 vi.mock("./notifications-tab", stub("NotificationsTab"));
 vi.mock("./labels-tab", stub("LabelsTab"));
-vi.mock("./issue-statuses-tab", stub("IssueStatusesTab"));
 vi.mock("../../workflows/workflows-tab", stub("WorkflowsTab"));
 vi.mock("./properties-tab", stub("PropertiesTab"));
 vi.mock("./quick-actions-tab", stub("QuickActionsTab"));
@@ -175,10 +173,9 @@ describe("SettingsPage Plugin feature flag", () => {
   });
 });
 
-describe("SettingsPage workflow feature flag", () => {
-  it("mounts workflows in workspace settings without losing wakeups", () => {
+describe("SettingsPage workflows", () => {
+  it("mounts workflows without feature flag configuration and keeps wakeups", () => {
     navigationState.search = "tab=workflows";
-    configStore.getState().setFeatureFlags({ [PROJECT_WORKFLOWS_V1_FLAG]: true });
 
     renderWithI18n(<SettingsPage />);
 
@@ -188,13 +185,13 @@ describe("SettingsPage workflow feature flag", () => {
     expect(screen.getByRole("link", { name: "Wakeups" })).toBeInTheDocument();
   });
 
-  it("keeps the status catalog when workflows are disabled", () => {
+  it("opens old status catalog links in workflows", () => {
     navigationState.search = "tab=issue-statuses";
 
     renderWithI18n(<SettingsPage />);
 
-    expect(screen.getByText("IssueStatusesTab")).toBeInTheDocument();
-    expect(screen.queryByRole("link", { name: "Workflows" })).not.toBeInTheDocument();
+    expect(screen.getByText("WorkflowsTab")).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Workflows" })).toHaveAttribute("aria-current", "page");
     expect(screen.getByRole("link", { name: "Wakeups" })).toBeInTheDocument();
   });
 });
@@ -236,7 +233,7 @@ describe("SettingsPage information architecture", () => {
     const workspace = within(nav()).getByRole("region", { name: /Acme/ });
     const issues = within(workspace).getByRole("group", { name: "Issues & workflow" });
     expect(
-      within(issues).getByRole("link", { name: "Issue Statuses" }),
+      within(issues).getByRole("link", { name: "Workflows" }),
     ).toBeInTheDocument();
     const connections = within(workspace).getByRole("group", {
       name: "Connections & extensions",

@@ -70,10 +70,10 @@ func TestTaskSupplementClaimStartReplay(t *testing.T) {
 	generation := time.Date(2026, 9, 23, 0, 0, 0, 0, time.UTC)
 	dbfx.Exec(t, `UPDATE agent_task_queue SET dispatched_at=$2 WHERE id=$1`, f.taskID, generation)
 	for range 2 {
-		req := withURLParam(newDaemonTokenRequest(http.MethodPost, "/start", map[string]any{
+		req := withURLParam(newOwnerDaemonRequest(http.MethodPost, "/start", map[string]any{
 			"runtime_id": f.runtimeID, "dispatched_at": generation.Format(time.RFC3339Nano),
 			"capabilities": []string{protocol.DaemonCapabilityTaskSupplementV1},
-		}, testWorkspaceID, "start-claim-test"), "taskId", f.taskID)
+		}), "taskId", f.taskID)
 		var started AgentTaskResponse
 		testutil.Call(t, testHandler.StartTask, req).Want(http.StatusOK).JSON(&started)
 		if started.SupplementCapability != protocol.DaemonCapabilityTaskSupplementV1 {
@@ -101,7 +101,7 @@ func TestTaskSupplementLateDeliveryAndDeletion(t *testing.T) {
 		t.Fatalf("complete task: status %d: %s", w.Code, w.Body.String())
 	}
 	for _, c := range []CommentResponse{sent, pending} {
-		req := withURLParams(newDaemonTokenRequest(http.MethodPost, "/ack", map[string]any{"delivered": true}, testWorkspaceID, "legit-daemon"), "taskId", f.taskID, "commentId", c.ID)
+		req := withURLParams(newOwnerDaemonRequest(http.MethodPost, "/ack", map[string]any{"delivered": true}), "taskId", f.taskID, "commentId", c.ID)
 		want := http.StatusOK
 		if c.ID == pending.ID {
 			want = http.StatusConflict
@@ -264,8 +264,8 @@ func TestTaskSupplementCompletionDoesNotReplayBoundComments(t *testing.T) {
 
 					// Drive the real completion handler: a direct SQL status update skips
 					// the reconciliation that previously replayed the supplement.
-					req := newDaemonTokenRequest(http.MethodPost, "/api/daemon/tasks/"+fixture.taskID+"/complete",
-						map[string]any{"output": "done"}, testWorkspaceID, "legit-daemon")
+					req := newOwnerDaemonRequest(http.MethodPost, "/api/daemon/tasks/"+fixture.taskID+"/complete",
+						map[string]any{"output": "done"})
 					testutil.Call(t, testHandler.CompleteTask, withURLParam(req, "taskId", fixture.taskID)).Want(http.StatusOK)
 					if status == "pending" || status == "delivering" {
 						receipt, err := testHandler.Queries.GetTaskSupplementForRun(t.Context(), db.GetTaskSupplementForRunParams{

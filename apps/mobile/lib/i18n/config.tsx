@@ -35,13 +35,11 @@ function matchSupportedLocale(candidates: string[]): SupportedLocale {
   for (const candidate of candidates) {
     if (!candidate) continue;
     const lowered = candidate.toLowerCase();
-    // Simplified Chinese is the only Chinese bundle today. Do not silently
-    // rewrite Traditional Chinese (zh-Hant/TW/HK/MO) to Simplified.
     if (
       lowered.startsWith("zh-hant") ||
       ["zh-tw", "zh-hk", "zh-mo"].includes(lowered)
     ) {
-      return DEFAULT_LOCALE;
+      return "zh-Hant";
     }
     if (lowered.startsWith("zh")) return "zh-Hans";
     if (lowered.startsWith("en")) return "en";
@@ -72,7 +70,12 @@ export function MobileI18nProvider({ children }: { children: ReactNode }) {
     void SecureStore.getItemAsync(LOCALE_STORAGE_KEY)
       .then((stored) => {
         if (cancelled || !stored) return;
-        if (stored !== "system" && stored !== "en" && stored !== "zh-Hans") {
+        if (
+          stored !== "system" &&
+          stored !== "en" &&
+          stored !== "zh-Hans" &&
+          stored !== "zh-Hant"
+        ) {
           return;
         }
         setPreferenceState(stored);

@@ -1,5 +1,6 @@
 import en from "./locales/en.json";
 import zh from "./locales/zh.json";
+import zhHant from "./locales/zh-Hant.json";
 import { productLocale, type LabLocale } from "./locale";
 import type {
   Issue,
@@ -96,7 +97,8 @@ export const memoryStorage = (): StorageAdapter => {
 // Only data is substituted. Views, hooks, stores and mutations are the production modules.
 // There is deliberately no fallback to ApiClient's network implementation.
 export function createFixtureApi(getLocale: () => LabLocale = () => "en") {
-  const messages = () => (getLocale() === "zh" ? zh.fixtures : en.fixtures);
+  const messages = () =>
+    ({ en, zh, "zh-Hant": zhHant })[getLocale()].fixtures;
   // Translate untouched fixtures at the data boundary; preserve user edits.
   const localizeIssue = (issue: Issue): Issue => {
     const index = issues.findIndex((original) => original.id === issue.id);

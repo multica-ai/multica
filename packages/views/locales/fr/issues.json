@@ -206,6 +206,8 @@
     "grouping_section": "Regroupement",
     "ordering_section": "Tri",
     "card_properties_section": "Propriétés des cartes",
+    "columns_section": "Colonnes",
+    "columns_locked_by_filter": "Retirez le filtre d’état pour afficher ou masquer des colonnes.",
     "ascending_title": "Croissant",
     "descending_title": "Décroissant",
     "newest_first": "Plus récents d'abord",
@@ -363,9 +365,7 @@
     "toggle_collapse": "Replier ou déplier le couloir"
   },
   "board": {
-    "hidden_columns_label": "Colonnes masquées",
     "hide_column": "Masquer la colonne",
-    "show_column": "Afficher la colonne",
     "add_issue_tooltip": "Ajouter une tâche",
     "empty_column": "Aucune tâche",
     "empty_grouping": "Aucune tâche correspondante",
@@ -537,6 +537,7 @@
     "pr_auto_complete_disabled": "a configuré cette tâche pour garder son statut à la fusion des PR",
     "pr_auto_complete_enabled": "a de nouveau fait changer le statut de cette tâche à la fusion des PR",
     "wakeup_created": "a ajouté un réveil : {{condition}} · réveiller {{agent}}",
+    "wakeup_created_scheduled": "a ajouté un réveil pour {{agent}} : {{condition}}",
     "wakeup_triggered": "{{condition}} · {{agent}} réveillé",
     "wakeup_triggered_merged": "{{condition}} · ajouté à l’exécution en attente de {{agent}}",
     "wakeup_triggered_acknowledged": "{{condition}} · déclenché par {{agent}} lui-même ; pas de nouveau réveil",
@@ -730,6 +731,7 @@
     "retry_failed": "Échec de la relance de l'exécution",
     "retry_blocked": "Non relancée — vous n'avez pas la permission d'utiliser cet agent",
     "transcript_tooltip": "Voir la transcription",
+    "jump_to_run": "Aller à l'exécution",
     "cancel_failed": "Échec de l'annulation de l'exécution",
     "trigger_retry": "Relance",
     "trigger_retry_attempt": "Relance n° {{attempt}}",
@@ -1580,7 +1582,7 @@
       "target_squad": "Squad · le leader répartit",
       "target_member": "Membre",
       "instructions_hint": "Envoyées au responsable avec cette exécution, avec la description et les commentaires de la tâche.",
-      "next_hint": "Les deux choix sont inscrits dans les consignes du responsable. C’est lui qui déplace le ticket : vers le premier quand son étape est terminée, vers le second quand le travail reçu doit être repris (pas pour un blocage). Le système ne change jamais l’état à la fin d’une exécution.",
+      "next_hint": "C’est le responsable qui déplace le ticket, et il ne le renvoie que pour une reprise, pas pour un blocage. La fin d’une exécution ne change jamais l’état.",
       "preview_brief": "Aperçu des consignes de l’agent",
       "preview_title": "Consignes de l’étape « {{status}} »",
       "preview_description": "Ce que reçoit l’exécution du responsable quand une tâche entre dans cette étape. Pas besoin d’enregistrer pour prévisualiser.",
@@ -1680,8 +1682,7 @@
     },
     "detail": {
       "follows_project": "(selon le projet)",
-      "card_title": "{{workflow}} · selon {{project}}",
-      "card_hint": "Le workflow du projet décide de ces colonnes et transferts."
+      "card_title": "{{workflow}} · selon {{project}}"
     },
     "list_separator": ", ",
     "handoff": {

@@ -4,8 +4,9 @@ description: "Un seul endroit pour les assignations, mentions, commentaires et �
 ---
 
 import { Callout } from "fumadocs-ui/components/callout";
+import { InboxDemo } from "@/components/demos/inbox-demo";
 
-La boîte de réception rassemble l'activité de travail qui vous concerne. Ce n'est pas un journal d'activité complet — elle signale les changements qui demandent votre attention ; le contexte complet reste sur la tâche correspondante.
+La boîte de réception rassemble l'activité de travail qui vous concerne et signale les changements qui demandent votre attention. Ce n'est pas un journal d'activité complet : le contexte reste sur la tâche correspondante.
 
 ## Ce qui arrive dans la boîte de réception
 
@@ -16,7 +17,7 @@ Les notifications courantes incluent :
 - quelqu'un vous @mentionne dans la description ou un commentaire d'une tâche ;
 - une tâche ou un commentaire que vous avez créé reçoit une réaction ;
 - une exécution d'agent échoue sur une tâche à laquelle vous êtes abonné ;
-- la création d'une tâche via un agent aboutit ou échoue ;
+- [la création d'une tâche via un agent](/issues#créer-avec-un-agent) aboutit ou échoue ;
 - une automatisation à laquelle vous êtes abonné crée une nouvelle tâche, ou est mise en pause après des échecs consécutifs.
 
 Vos propres actions ne vous notifient pas. Plusieurs notifications sur la même tâche sont fusionnées en une seule entrée ; ouvrez-la pour voir les changements récents de la tâche.
@@ -41,13 +42,17 @@ Lorsque le statut d'une sous-tâche change, les abonnés de la tâche parente so
 
 La boîte de réception est réservée aux membres de l'espace de travail. Même lorsqu'un agent est l'assigné ou un abonné, il ne lit jamais les notifications de la boîte de réception.
 
-@mentionner un agent dans un commentaire, lui assigner une tâche ou déclencher une automatisation crée directement une exécution au lieu de laisser une notification à l'agent. `@all` ne notifie que les membres.
+@mentionner un agent dans un commentaire, lui assigner une tâche ou déclencher une automatisation crée directement une exécution ; aucune notification n'est laissée à l'agent. `@all` ne notifie que les membres.
 
 ## Traiter les notifications
 
-Sélectionner une notification la marque comme lue. Archivez-la quand vous avez terminé ; l'archivage ne modifie ni ne supprime la tâche correspondante. Dès qu'une tâche atteint un statut qui la rend à une personne — `in_review`, un statut personnalisé de la catégorie `started`, ou tout statut des catégories `done` ou `closed` — ses notifications d'échec d'exécution sont archivées automatiquement. `blocked` fait exception : il transmet la tâche, mais le travail reste bloqué, donc les échecs passés restent utiles à lire.
+Sélectionner une notification la marque comme lue. Archivez-la quand vous avez terminé ; l'archivage ne modifie ni ne supprime la tâche correspondante.
 
-Faites un clic droit sur une notification pour **Marquer comme lu** / **Marquer comme non lu** et **Archiver** (**Désarchiver** dans la vue Archivées). Marquer comme non lu est l'action « j'ai regardé, mais je n'en ai pas fini » : la notification redevient non lue et fait remonter le compteur de non-lus, et elle reste non lue même tant que vous la gardez ouverte — la rouvrir plus tard la marque comme lue, comme d'habitude. Les notifications archivées conservent leur état de lecture : en restaurer une la rétablit exactement comme vous l'aviez laissée.
+<InboxDemo />
+
+Dès qu'une tâche atteint un statut qui la rend à une personne, ses notifications « Exécution en échec » sont archivées automatiquement. Ces statuts sont `in_review`, les statuts personnalisés de la catégorie `started` et tous les statuts des catégories `done` et `closed`. `blocked` fait exception : il rend aussi la tâche, mais le travail reste bloqué, donc les échecs précédents méritent encore d'être lus.
+
+Faites un clic droit sur une notification pour **Marquer comme lu** / **Marquer comme non lu** et **Archiver** (**Désarchiver** dans la vue Archivées). Marquer comme non lu est l'action « j'ai regardé, mais je n'en ai pas fini » : la notification redevient non lue et fait remonter le compteur de non-lus, et elle reste non lue même tant que vous la gardez ouverte ; la rouvrir plus tard la marque comme lue, comme d'habitude. Les notifications archivées conservent leur état de lecture : en restaurer une la rétablit exactement comme vous l'aviez laissée.
 
 Depuis le menu de la boîte de réception, vous pouvez aussi :
 

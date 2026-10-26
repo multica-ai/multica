@@ -58,7 +58,7 @@ describe("buildRuntimeChoiceGroups", () => {
       makeRuntime({
         id: "qoder",
         daemon_id: null,
-        name: "Qoder Cloud Agent",
+        name: "Qoder Cloud Agents",
         runtime_mode: "cloud",
         provider: "qoder_cloud",
         owner_id: "admin",

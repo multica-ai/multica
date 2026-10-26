@@ -129,6 +129,12 @@ type ExecOptions struct {
 	// ignore this field, mirroring ThinkingLevel's renderer-side fall-through
 	// pattern. See issue #3260.
 	OpenclawMode string
+	// OpenclawModelOverride is the claim-time snapshot of the agent's persistent
+	// underlying-model override. The setting applies to all newly claimed runs
+	// until changed or cleared. OpenClaw receives it as `--model <id>` alongside
+	// `--agent <id>`, preserving the identity, workspace, sessions, and memory
+	// selected by Model. Other backends ignore this field.
+	OpenclawModelOverride string
 	// ClaudeSettingsPath is a daemon-owned, task-local settings file passed
 	// through Claude Code's --settings flag. It currently carries restrictive
 	// runtime-skill overrides only; other providers ignore it.
@@ -397,6 +403,7 @@ var SupportedTypes = []string{
 	"mcode",
 	"muse",
 	"dim",
+	"devin",
 	"zeroclaw",
 }
 
@@ -501,6 +508,8 @@ func New(agentType string, cfg Config) (Backend, error) {
 		return &qwenpawBackend{cfg: cfg}, nil
 	case "mcode":
 		return &mcodeBackend{cfg: cfg}, nil
+	case "devin":
+		return &devinBackend{cfg: cfg}, nil
 	case "muse":
 		return &museBackend{cfg: cfg}, nil
 	case "zeroclaw":
@@ -550,6 +559,7 @@ var launchHeaders = map[string]string{
 	"qwen":        "qwen -p (stream-json)",
 	"qwenpaw":     "qwenpaw acp",
 	"dim":         "dim acp",
+	"devin":       "devin acp",
 	"mcode":       "mcode acp",
 	"muse":        "muse serve (msp)",
 	"zeroclaw":    "zeroclaw acp",

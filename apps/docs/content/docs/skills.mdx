@@ -4,6 +4,7 @@ description: Package recurring instructions, steps, and reference material into 
 ---
 
 import { Callout } from "fumadocs-ui/components/callout";
+import { SkillDemo } from "@/components/demos/skill-demo";
 
 A skill is a reusable set of working methods in a workspace. Its main file is `SKILL.md`, optionally accompanied by scripts, templates, and reference material.
 
@@ -48,10 +49,10 @@ multica skill refresh <skill-id>
 
 The skill is re-downloaded from its source and replaced in place:
 
-- **Preserved**: the skill's identity — agent assignments, labels, creator, and creation date. Agents keep the skill without re-adding it.
+- **Preserved**: the skill's identity, including agent assignments, labels, creator, and creation date. Agents keep the skill without re-adding it.
 - **Replaced**: name (if the source renamed it), description, `SKILL.md`, and all supporting files. Local edits to the skill are overwritten.
 
-The skill's creator and workspace `owner`s / `admin`s can update from source. Skills created manually, imported from an archive file, or copied from a runtime have no hosted source and cannot be updated this way — re-import them instead.
+The skill's creator and workspace `owner`s / `admin`s can update from source. Skills created manually, imported from an archive file, or copied from a runtime have no hosted source and can't be updated this way; re-import them instead.
 
 To update several skills at once, select them in the skills list and pick **Update** in the selection toolbar. Every selected skill with a hosted source is re-downloaded from its source; skills without one are skipped.
 
@@ -78,7 +79,9 @@ scripts/check.sh
 
 ## Attaching to an agent
 
-After creating or importing a skill, it still needs to be added to specific agents. Pick agents on the skill page, or manage bindings from the agent's **Skills** tab.
+After creating or importing a skill, you still need to add it to specific agents: choose **Add to agent** on the skill page, or open the agent's **Skills** tab and click **Add skill**. The agent decides when to load a skill from its description.
+
+<SkillDemo />
 
 - One agent can use multiple skills;
 - one skill can serve multiple agents;

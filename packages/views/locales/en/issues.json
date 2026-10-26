@@ -206,6 +206,8 @@
     "grouping_section": "Grouping",
     "ordering_section": "Ordering",
     "card_properties_section": "Card properties",
+    "columns_section": "Columns",
+    "columns_locked_by_filter": "Clear the status filter to show or hide columns.",
     "ascending_title": "Ascending",
     "descending_title": "Descending",
     "newest_first": "Newest first",
@@ -363,9 +365,7 @@
     "toggle_collapse": "Toggle lane"
   },
   "board": {
-    "hidden_columns_label": "Hidden columns",
     "hide_column": "Hide column",
-    "show_column": "Show column",
     "add_issue_tooltip": "Add issue",
     "empty_column": "No issues",
     "empty_grouping": "No matching issues",
@@ -537,6 +537,7 @@
     "pr_auto_complete_disabled": "set this issue to keep its status when PRs merge",
     "pr_auto_complete_enabled": "set this issue to change status when PRs merge again",
     "wakeup_created": "added a wakeup: {{condition}} · wake {{agent}}",
+    "wakeup_created_scheduled": "added a wakeup for {{agent}}: {{condition}}",
     "wakeup_triggered": "{{condition}} · woke {{agent}}",
     "wakeup_triggered_merged": "{{condition}} · joined {{agent}}'s waiting run",
     "wakeup_triggered_acknowledged": "{{condition}} · {{agent}} did this itself; not woken again",
@@ -730,6 +731,7 @@
     "retry_failed": "Failed to retry run",
     "retry_blocked": "Not retried — you don't have permission to use this agent",
     "transcript_tooltip": "View transcript",
+    "jump_to_run": "Go to run",
     "cancel_failed": "Failed to cancel run",
     "trigger_retry": "Retry",
     "trigger_retry_attempt": "Retry #{{attempt}}",
@@ -1580,7 +1582,7 @@
       "target_squad": "Squad · leader dispatches",
       "target_member": "Member",
       "instructions_hint": "Sent to the handler with this run, alongside the issue description and comments.",
-      "next_hint": "Both choices are written into the handler’s brief. The handler moves the issue: to the first when its step is done, to the second when the work it received needs rework (not for blockers). The system never moves the status when a run ends.",
+      "next_hint": "The handler moves the issue itself and sends it back only for rework, not blockers. A run ending never changes the status.",
       "preview_brief": "Preview the agent’s brief",
       "preview_title": "Brief for the “{{status}}” step",
       "preview_description": "What the handler’s run receives when an issue enters this step. Saved changes are not required to preview.",
@@ -1680,8 +1682,7 @@
     },
     "detail": {
       "follows_project": "(from project)",
-      "card_title": "{{workflow}} · from {{project}}",
-      "card_hint": "The project’s workflow decides these columns and handoffs."
+      "card_title": "{{workflow}} · from {{project}}"
     },
     "list_separator": ", ",
     "handoff": {

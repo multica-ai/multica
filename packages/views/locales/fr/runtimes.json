@@ -1,7 +1,6 @@
 {
   "page": {
     "title": "Runtimes",
-    "tagline": "Les machines et services cloud sur lesquels vos agents exécutent leurs tâches.",
     "learn_more": "En savoir plus →",
     "connect_remote": "Ajouter une machine",
     "search_placeholder": "Rechercher…",
@@ -175,28 +174,43 @@
     "diagnostics_visibility": "Visibilité",
     "visibility_label": {
       "private": "Privé",
-      "public": "Public"
+      "public": "Public",
+      "members": "Membres spécifiques"
+    },
+    "visibility_choice": {
+      "private": "Privé",
+      "public": "Public",
+      "members": "Membres"
     },
     "visibility_hint": {
       "private": "Vous seul pouvez créer des agents sur ce runtime.",
-      "public": "Tout membre de l'espace de travail peut créer des agents sur ce runtime."
+      "public": "Tout membre de l'espace de travail peut créer des agents sur ce runtime.",
+      "members": "Seuls vous et les membres sélectionnés pouvez créer des agents sur cet environnement."
     },
     "visibility_hint_readonly": {
       "private": "Seul le propriétaire du runtime peut y créer des agents, et lui seul peut le passer en Public.",
-      "public": "Tout membre de l'espace de travail peut créer des agents sur ce runtime. Seul son propriétaire peut le repasser en Privé."
+      "public": "Tout membre de l'espace de travail peut créer des agents sur ce runtime. Seul son propriétaire peut le repasser en Privé.",
+      "members": "Seuls le propriétaire et les membres sélectionnés peuvent créer des agents sur cet environnement."
     },
+    "visibility_members_title": "Partager avec des membres",
+    "visibility_members_search": "Rechercher des membres",
+    "visibility_members_none": "Aucun autre membre dans l’espace de travail.",
+    "visibility_members_no_match": "Aucun membre ne correspond.",
+    "visibility_members_edit": "Modifier",
+    "visibility_members_count_one": "{{count}} membre",
+    "visibility_members_count_other": "{{count}} membres",
     "visibility_toast_updated": "Visibilité définie sur {{visibility}}",
     "visibility_toast_failed": "Échec de la mise à jour de la visibilité",
     "visibility_revoke_dialog": {
-      "title": "Rendre ce runtime privé ?",
-      "description": "Rendre « {{name}} » privé dissociera {{count}} agents d'autres membres, annulera {{taskCount}} exécutions actives sur cette machine et mettra en pause les automatisations actives assignées à ces agents. Vos propres agents et exécutions ne seront pas affectés.",
+      "title": "Restreindre l’accès à cet environnement ?",
+      "description": "Restreindre l’accès à « {{name}} » détachera {{count}} agents concernés, annulera {{taskCount}} exécutions actives et suspendra leurs autopilotes actifs. Les agents et exécutions qui conservent l’accès ne sont pas affectés.",
       "warning": "L'accès est révoqué immédiatement sur le serveur. Les daemons connectés s'arrêtent lors de leur vérification habituelle des annulations. Une machine hors ligne ne recevra la demande d'arrêt qu'à sa reconnexion ; son processus local peut continuer entre-temps.",
       "plan_changed": "Le plan d'accès a changé pendant que cette boîte de dialogue était ouverte. Vérifiez-le et confirmez à nouveau.",
       "checkbox": "Je comprends que les agents des autres membres listés seront dissociés, leurs exécutions actives annulées et leurs automatisations actives mises en pause.",
       "cancel": "Annuler",
-      "confirm": "Rendre le runtime privé",
+      "confirm": "Restreindre l’accès",
       "submitting": "Révocation de l'accès...",
-      "toast_success": "Le runtime est désormais privé et l'accès des autres membres a été révoqué",
+      "toast_success": "Accès à l’environnement mis à jour",
       "toast_failed": "Échec de la révocation de l'accès au runtime"
     },
     "delete_dialog": {
@@ -526,7 +540,7 @@
   },
   "qoder": {
     "title": "Environnement QCA",
-    "description": "Connectez Qoder Cloud Agent. Multica gère l’exécution et chiffre les identifiants. Les administrateurs de l’espace de travail peuvent modifier cette configuration.",
+    "description": "Connectez Qoder Cloud Agents. Multica gère l’exécution et chiffre les identifiants. Les administrateurs de l’espace de travail peuvent modifier cette configuration.",
     "loading": "Chargement…",
     "unavailable": "Configuration serveur requise : définissez MULTICA_VCS_SECRET_KEY.",
     "online": "En ligne",
@@ -540,7 +554,7 @@
     "region_hint": "Choisissez le site où vous avez créé le PAT ; un PAT ne fonctionne que dans sa région.",
     "keep_secret": "Laissez vide pour conserver le jeton enregistré",
     "repositories": "Autorisation GitHub",
-    "repositories_hint": "Associez un jeton à chaque dépôt. Choisissez le dépôt et la branche de départ dans votre projet. Le serveur ne renvoie jamais les jetons.",
+    "repositories_hint": "Associez un jeton à chaque dépôt. Choisissez le dépôt et la branche de départ dans votre projet.",
     "remove": "Supprimer",
     "add_repository": "Ajouter un dépôt",
     "saved": "Enregistré. Le serveur démarrera automatiquement l’environnement d’exécution.",
@@ -564,7 +578,7 @@
     "save_agent": "Enregistrer l’association",
     "agent_saved": "Association de l’agent QCA enregistrée",
     "agent_save_failed": "Impossible d’enregistrer l’association de l’agent QCA",
-    "cloud_title": "Qoder Cloud Agent",
+    "cloud_title": "Qoder Cloud Agents",
     "managed": "Service géré",
     "cloud_description": "Exécutez des agents dans Qoder Cloud avec une connexion partagée, sans maintenir d’hôte local.",
     "configure_credentials": "Configurer les identifiants",
@@ -607,28 +621,27 @@
       "execution_summary": "Jusqu'à {{concurrency}} à la fois · délai de {{timeout}} min"
     },
     "stop_confirm": {
-      "title": "Mettre Qoder Cloud Agent en pause ?",
+      "title": "Mettre Qoder Cloud Agents en pause ?",
       "description": "Aucune nouvelle tâche ne sera envoyée à Qoder tant qu'il n'est pas relancé.",
       "cancel": "Annuler",
       "description_agents_one": "Cet agent garde ses instructions et son historique, mais ne peut plus prendre de tâches tant que Qoder n'est pas relancé ou qu'il n'est pas déplacé vers un autre environnement.",
       "description_agents_other": "Ces {{count}} agents gardent leurs instructions et leur historique, mais ne peuvent plus prendre de tâches tant que Qoder n'est pas relancé ou qu'ils ne sont pas déplacés vers un autre environnement."
     },
-    "connect_title": "Connecter Qoder Cloud Agent",
-    "connect_description": "Connectez-vous une fois avec un PAT Qoder. Multica exécute les tâches dans les sandboxes Qoder et chiffre les identifiants.",
+    "connect_title": "Connecter Qoder Cloud Agents",
+    "connect_description": "Multica exécute les tâches dans les sandboxes Qoder.",
     "page": {
       "configuration": "Configuration",
       "agents_title": "Agents",
       "pause_title": "Mettre Qoder en pause",
       "pause_hint": "Plus aucune nouvelle tâche n'est envoyée à Qoder. Les identifiants et les agents sont conservés, et vous pouvez relancer à tout moment.",
       "resume_title": "Relancer Qoder",
-      "resume_hint": "Reprendre les tâches avec la configuration enregistrée.",
       "resume": "Relancer",
       "resumed": "Qoder démarre.",
       "disconnect_title": "Déconnecter Qoder",
       "disconnect_hint": "Supprime le PAT et les jetons de dépôt enregistrés, et retire cet environnement. Les agents qui l'utilisent sont détachés et gardent leur historique.",
       "disconnect": "Déconnecter",
       "not_connected_title": "Qoder n'est pas connecté",
-      "not_connected_hint": "Demandez à un administrateur de l'espace de travail de connecter Qoder Cloud Agent.",
+      "not_connected_hint": "Demandez à un administrateur de l'espace de travail de connecter Qoder Cloud Agents.",
       "workload_idle": "Inactif",
       "connection_title": "Connexion",
       "edit": "Modifier",
@@ -652,7 +665,7 @@
       "minutes_other": "{{count}} minutes"
     },
     "disconnect_confirm": {
-      "title": "Déconnecter Qoder Cloud Agent ?",
+      "title": "Déconnecter Qoder Cloud Agents ?",
       "description": "Le PAT et les jetons de dépôt enregistrés sont supprimés et l'environnement Qoder est retiré. Pour réutiliser Qoder, il faudra le reconnecter depuis le début.",
       "description_agents_one": "Cet agent sera détaché. Il garde ses instructions et son historique et peut passer à un autre environnement.",
       "description_agents_other": "Ces {{count}} agents seront détachés. Ils gardent leurs instructions et leur historique et peuvent passer à un autre environnement.",

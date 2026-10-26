@@ -4,8 +4,12 @@ description: Une tâche regroupe le contexte, l'assigné, le statut et l'histori
 ---
 
 import { Callout } from "fumadocs-ui/components/callout";
+import { Tab, Tabs } from "fumadocs-ui/components/tabs";
+import { IssueStatusDemo } from "@/components/demos/issue-status-demo";
+import { IssueDraftDemo } from "@/components/demos/issue-draft-demo";
+import { DeliverablesDemo } from "@/components/demos/deliverables-demo";
 
-Une tâche est l'unité de base de Multica pour organiser le travail : une fonctionnalité, un bug, une investigation — tout ce qu'un membre ou un agent doit prendre en charge et faire avancer. La discussion qui l'entoure, ses changements de statut et chacune de ses exécutions restent au même endroit : inutile de reconstituer le contexte à partir d'historiques de discussion ou de sorties de terminal.
+Une tâche est l'unité de base de Multica pour organiser le travail : une fonctionnalité, un bug, une investigation — tout ce qu'un membre ou un agent doit prendre en charge et faire avancer. La discussion qui l'entoure, ses changements de statut et chacune de ses exécutions sont consignés dans la tâche : plus besoin de fouiller l'historique des discussions ou les sorties de terminal.
 
 ## Composantes d'une tâche
 
@@ -17,14 +21,27 @@ Une tâche est l'unité de base de Multica pour organiser le travail : une fonct
 | **Dates, étiquettes et propriétés personnalisées** | Planification, catégorisation et champs propres à votre équipe. |
 | **Projet et relations parent-enfant** | S'inscrit dans un ensemble de travail plus large, ou se découpe en sous-tâches. |
 | **Activité et journal d'exécution** | Commentaires, changements de statut, exécutions et résultats renvoyés par les agents. |
+| **Livrables** | Fichiers envoyés dans les commentaires ; un même fichier renvoyé devient une nouvelle version. |
 
 ![Détail d'une tâche : description, discussion, propriétés à droite et journal d'exécution](/images/docs/quickstart-run-result.webp)
 
 ## Créer une tâche
 
-Créez-en une depuis la page **Tâches** ou à l'intérieur d'un projet — un titre suffit, et toutes les autres propriétés peuvent être renseignées plus tard.
+Créez-en une depuis la page **Tâches** ou à l'intérieur d'un projet. **Nouvelle tâche** dans la barre latérale, ou `C`, ouvre la fenêtre de création dans le mode utilisé la dernière fois : avec **Créer manuellement**, vous remplissez vous-même le titre et les propriétés (un titre suffit, le reste peut attendre) ; avec **Créer avec un agent**, il suffit de décrire la demande. Le mode se change en bas de la fenêtre, sans perdre ce qui est déjà saisi.
 
 Chaque tâche porte un numéro, par exemple `MUL-123`. Les chiffres s'incrémentent au sein de l'espace de travail ; après qu'un administrateur a modifié le préfixe des tâches de l'espace de travail, les numéros s'affichent avec le nouveau préfixe. Voir [Espaces de travail](/workspaces#créer-un-espace-de-travail).
+
+### Créer avec un agent
+
+Décrivez le travail, choisissez un agent ou un squad dans **Créé par** et cliquez sur **Créer**. La fenêtre se ferme aussitôt : l'agent travaille en arrière-plan, met la demande en forme de titre et de description, puis crée la tâche. Succès ou échec, une notification arrive dans votre boîte de réception. Celle d'un échec propose **Modifier en mode avancé**, qui reporte votre demande d'origine dans le formulaire manuel.
+
+<IssueDraftDemo />
+
+- L'agent reprend fidèlement votre demande et n'ajoute ni exigence ni critère d'acceptation que vous n'avez pas formulés.
+- Si la demande nomme un assigné (« confie-la à Lei Li »), l'agent l'assigne. Sinon, l'assigné est ce que vous avez choisi dans **Créé par** : l'agent lui-même, ou le squad. Les nouvelles tâches démarrent en `todo` ; quand l'assigné est un agent, il commence donc à la traiter dès qu'elle existe.
+- Le projet, la priorité et la date d'échéance choisis dans la fenêtre sont repris tels quels ; l'agent n'en déduit pas d'autres du texte. Le projet est visible par défaut, la priorité et l'échéance sont dans le menu **⋯**. Les champs toujours affichés se règlent dans **Paramètres → Préférences → Champs affichés à la création de tâches**.
+- Avec **En créer un autre** activé, la fenêtre reste ouverte après chaque envoi pour enchaîner la demande suivante.
+- **Créé par** ne liste que les agents et squads que vous avez le droit d'assigner. Si la CLI multica du runtime de l'agent est trop ancienne, la fenêtre propose de mettre à jour le daemon ou de passer en création manuelle.
 
 ## Choisir l'assigné
 
@@ -40,7 +57,10 @@ L'assignation ne contourne pas l'**Accès** d'un agent ; lors d'une assignation 
 
 ## Statut
 
-Chaque espace de travail démarre avec sept statuts intégrés, regroupés en quatre catégories de cycle de vie :
+Chaque espace de travail démarre avec sept statuts intégrés, regroupés en quatre catégories de cycle de vie.
+
+<Tabs items={["Par catégorie", "Par statut"]}>
+<Tab value="Par catégorie" id="status-categories">
 
 | Catégorie | Statuts intégrés | Signification |
 |---|---|---|
@@ -49,7 +69,10 @@ Chaque espace de travail démarre avec sept statuts intégrés, regroupés en qu
 | `done` (Terminé) | `done` | Terminé avec succès ; état final. |
 | `closed` (Fermée) | `cancelled` | Abandonné ; état final, sans aboutissement réussi. |
 
-Les catégories simplifient le raisonnement sur le cycle de vie. Les tableaux, les listes, les filtres et les tris s'appuient tous sur le statut individuel, et les statuts concrets préservent le comportement de workflow plus spécifique sur lequel reposent les agents et les automatisations.
+La catégorie sert seulement à situer la tâche dans son cycle de vie. Les tableaux, les listes, les filtres et les tris s'appuient sur le statut précis, et les comportements particuliers dont dépendent les agents et les automatisations sont eux aussi attachés au statut précis.
+
+</Tab>
+<Tab value="Par statut" id="built-in-statuses">
 
 | Statut | Signification |
 |---|---|
@@ -61,9 +84,16 @@ Les catégories simplifient le raisonnement sur le cycle de vie. Les tableaux, l
 | `blocked` (Bloqué) | Ne peut pas continuer pour l'instant. |
 | `cancelled` (Annulé) | Abandonnée ; l'historique est conservé. |
 
+</Tab>
+</Tabs>
+
+La démonstration ci-dessous part d'une tâche déjà assignée à un agent et laissée en `backlog` :
+
+<IssueStatusDemo />
+
 Les membres et les agents peuvent modifier directement les statuts. Dans un projet avec un [workflow](/workflows), choisissez parmi ses étapes. Entrer dans une étape avec passage de relais peut aussi changer le responsable et demander à un agent de commencer.
 
-Les agents mettent à jour le statut au fil du travail. Par défaut, ils indiquent le travail en cours au démarrage et la relecture à la livraison. Si le projet utilise un workflow, ils suivent ses étapes et ses consignes. La fin d’une exécution ne termine pas la tâche à elle seule ; répondre à une question ne signifie pas que tout le travail est livré.
+Les agents mettent à jour le statut au fil du travail : par défaut, ils passent la tâche à `in_progress` en commençant et à `in_review` à la livraison. Si le projet utilise un workflow, ils suivent ses étapes et ses consignes de relais.
 
 <Callout type="info">
 Deux changements sont effectués par le système :
@@ -76,7 +106,7 @@ Deux changements sont effectués par le système :
 
 Un `owner` ou un `admin` peut ajouter des statuts comme **Revue de code**, **QA** ou **À corriger**. Si **Paramètres** contient **Workflows**, gérez-les dans la bibliothèque de statuts en dessous. Sinon, utilisez **Paramètres → États des tâches**.
 
-À la création, choisissez si le statut correspond à un travail non commencé, en cours, terminé ou annulé. Cette catégorie ne peut plus être changée ensuite. Un statut personnalisé ne reprend pas les comportements particuliers d’un statut intégré : l’appeler « En attente » ne met pas un agent en pause.
+À la création, choisissez sa catégorie : **Non démarré**, **Démarrage**, **Terminé** ou **Fermée**. Elle ne peut plus être changée ensuite. Un statut personnalisé ne reprend pas les comportements particuliers d’un statut intégré : l’appeler « En attente » ne met pas un agent en pause.
 
 - Les statuts intégrés ne peuvent être ni renommés, ni recolorés, ni archivés.
 - Les statuts personnalisés affichent le nom saisi. Modifier leur nom ou leur couleur les met à jour partout où ils sont utilisés.
@@ -84,9 +114,25 @@ Un `owner` ou un `admin` peut ajouter des statuts comme **Revue de code**, **QA*
 
 La bibliothèque contient les statuts disponibles. Le workflow d’un projet choisit ceux que ses tâches utilisent et leur ordre.
 
+## Propriétés personnalisées
+
+Les champs propres à votre équipe, comme la gravité, le client ou le budget, s'ajoutent sous forme de propriétés personnalisées. Un `owner` ou un `admin` de l'espace de travail les gère dans **Paramètres → Propriétés** ; un espace de travail peut avoir jusqu'à 20 propriétés actives.
+
+Les types disponibles sont texte, nombre, liste déroulante, sélection multiple, date, case à cocher, URL, membre, membres, liste de textes et liste d'URL. Le type ne peut plus être modifié après la création. Les propriétés servent dans les filtres ; un tableau peut aussi être regroupé par une propriété à liste déroulante, et les propriétés de type nombre ou date servent au tri.
+
+Archivez une propriété qui ne sert plus : elle disparaît des sélecteurs et des filtres, les valeurs déjà saisies sur les tâches restent, et vous pouvez la restaurer plus tard.
+
 ## Tâches et exécutions
 
-Une tâche est l'enregistrement durable d'un travail ; une [exécution](/tasks) est une intervention concrète d'un agent. Une même tâche peut produire plusieurs exécutions au fil du temps — une première implémentation, des modifications de suivi, une nouvelle vérification. Une exécution terminée signifie seulement que cette exécution a pris fin ; c'est le statut de la tâche qui détermine si la tâche est terminée.
+Une tâche est l'enregistrement durable d'un travail ; une [exécution](/tasks) est une intervention concrète d'un agent. Une même tâche peut produire plusieurs exécutions au fil du temps — une première implémentation, des modifications de suivi, une nouvelle vérification. Une exécution terminée signifie seulement que cette exécution a pris fin, et un agent qui a répondu à une question n'a pas pour autant livré le travail de la tâche ; c'est le statut de la tâche qui détermine si elle est terminée.
+
+## Livrables
+
+Les fichiers que les membres et les agents envoient dans les commentaires sont rassemblés dans la section **Livrables** du panneau latéral de la tâche. Elle affiche les 3 dernières images et les 4 derniers autres fichiers ; « Voir les livrables » ouvre l'ensemble, groupé par commentaire, avec des filtres images, documents, vidéos et autres. `G` dans la visionneuse ouvre la même page. Les pièces jointes de la description sont des éléments d'entrée et ne comptent pas.
+
+Envoyer de nouveau un fichier de même nom et de même type ajoute une version au même livrable. La section ne l'affiche qu'une fois, avec son numéro de version (par exemple `v2`), et chaque carte de fichier dans les commentaires indique sa version. Dans la visionneuse, cliquez sur le numéro de version pour passer à une version plus ancienne, et sur **Afficher dans les commentaires** pour revenir au commentaire qui l'a envoyée.
+
+<DeliverablesDemo />
 
 ## Projets et sous-tâches
 
@@ -94,11 +140,52 @@ Une tâche appartient à un [projet](/projects) au plus ; le projet fournit des 
 
 Un travail plus important peut être découpé en sous-tâches : la tâche parente conserve l'objectif global tandis que les sous-tâches avancent indépendamment. Les statuts de la tâche parente et des sous-tâches ne s'influencent pas.
 
-Les sous-tâches peuvent recevoir une **Étape** pour avancer par lots — 1, 2, 3. Lorsque toutes les sous-tâches de la première étape non terminée atteignent `done` ou `cancelled`, la tâche parente reçoit une notification « sous-tâches terminées » ; si l'assigné de la tâche parente est un agent, celui-ci se réveille et décide s'il lance l'étape suivante. Les sous-tâches sans étape forment un seul lot et ne déclenchent qu'une notification, lorsqu'elles sont toutes terminées.
+Les sous-tâches peuvent recevoir une **Étape** pour avancer par lots — 1, 2, 3. Lorsque toutes les sous-tâches de la première étape non terminée atteignent `done` ou `cancelled`, la tâche parente reçoit une notification « sous-tâches terminées » ; si l'assigné de la tâche parente est un agent, celui-ci se réveille et décide s'il lance l'étape suivante. Les sous-tâches sans étape forment un seul lot et ne déclenchent qu'une notification, lorsqu'elles sont toutes terminées. Ce réveil est déclenché par le système ; ses règles et les autres types de réveil sont décrits dans [Réveils de tâches](/issue-wakeups).
 
-## Changer de vue
+## Vues et affichage [#changer-de-vue]
 
-La page Tâches propose cinq vues — Liste, Tableau, Grille, Gantt et Couloirs — filtrables et triables par statut, assigné, projet et autres propriétés. Elles affichent toutes les mêmes tâches.
+La page Tâches propose cinq dispositions — Liste, Tableau, Grille, Gantt et Couloirs — filtrables par statut, assigné, projet et autres propriétés. Elles affichent toutes les mêmes tâches.
+
+Le menu **Affichage** règle la disposition en cours. Un tableau se regroupe par statut, assigné, projet ou propriété à liste déroulante, et les couloirs par tâche parente, projet ou assigné. Vous y choisissez aussi le tri, l'affichage des sous-tâches, les propriétés visibles sur les cartes et les colonnes du tableau (les colonnes sont verrouillées tant qu'un filtre de statut est actif).
+
+### Enregistrer une vue
+
+Une combinaison de filtres et d'affichage que vous utilisez souvent peut devenir une vue : cliquez sur le bouton **Vues** à côté de la barre des vues, choisissez **Nouvelle vue**, puis donnez-lui un nom et une visibilité.
+
+| Visibilité | Qui la voit | Qui peut la modifier et la supprimer |
+|---|---|---|
+| **Visible par moi seul** | Vous seul | Vous |
+| **Visible par les membres de l'espace de travail** | Tous les membres | Vous, ainsi que les `owner` et `admin` de l'espace de travail |
+
+Les réglages d'affichage enregistrés dans une vue sont son **Affichage par défaut** : les membres la voient ainsi à la première ouverture, puis l'ajustent chacun pour soi sans gêner les autres. Une vue appartient à la page où elle a été créée : celle créée dans un projet reste dans ce projet, et celles créées dans **Mes tâches** sont toujours privées.
+
+Faites glisser les vues dans la barre pour les réordonner ; l'ordre et la visibilité réglés dans **Gérer les vues** ne concernent que vous. Un clic droit sur une vue permet de la modifier, de la supprimer ou de l'**Épingler à la barre latérale**.
+
+### Aperçu latéral
+
+Un clic sur une carte ou une ligne ouvre par défaut la page complète. Choisissez **L'aperçu latéral** dans **Paramètres → Préférences → Ouverture des tâches** et les tâches s'ouvrent dans un panneau à droite de la page, l'en-tête et la barre d'outils restant utilisables. Dans les deux cas, Maj+clic ouvre l'autre mode. Ce réglage ne vaut que pour l'appareil utilisé.
+
+Quand l'aperçu est ouvert, `J` / `K` passent à la tâche suivante ou précédente, `H` / `L` passent d'une colonne à l'autre dans un tableau, et `Esc` le ferme. **Ouvrir la page complète** mène à la page de la tâche.
+
+## Modifications groupées
+
+Sélectionnez plusieurs tâches dans une liste, une grille ou une liste de sous-tâches : une barre d'outils apparaît en bas de l'écran pour changer d'un coup le statut, la priorité ou l'assigné, ou pour les supprimer. Dans une grille, Maj+clic sélectionne une plage.
+
+- Si la sélection couvre plusieurs projets, le menu des statuts ne propose que ceux que tous les workflows concernés autorisent. Une tâche qui n'accepte pas la modification garde sa valeur, les autres sont mises à jour.
+- Un changement de statut groupé s'applique directement. Les tâches assignées à un agent qui quittent `backlog` démarrent normalement une exécution.
+- Une assignation groupée à un agent ou à un squad demande d'abord de confirmer les exécutions qui vont démarrer ; si toutes les tâches sélectionnées sont en `backlog`, elle s'applique directement.
+
+## Marquer comme doublon
+
+Quand la même chose a été saisie deux fois, ouvrez la tâche en trop et choisissez **Marquer comme doublon** dans le menu des statuts ou dans **Relations** du menu d'actions de la tâche, puis sélectionnez la tâche d'origine. Le sélecteur propose d'abord les tâches au titre proche et celles que vous avez consultées récemment.
+
+La tâche passe en `cancelled` et garde le lien vers l'originale :
+
+- Un bandeau **Doublon de** au-dessus du titre renvoie à la tâche d'origine et affiche son statut actuel. Dans les listes, tableaux et grilles, une flèche avec le numéro de l'originale apparaît à côté de la tâche.
+- Le panneau latéral de l'originale gagne une section **Doublons** qui liste les tâches marquées comme ses doublons et leurs créateurs.
+- En cas d'erreur, cliquez sur **Pas un doublon** dans le bandeau : la tâche revient en `todo`. Passer la tâche à n'importe quel statut autre que `cancelled` retire aussi la marque.
+
+La relation n'a qu'un niveau : une tâche déjà marquée comme doublon ne peut pas servir d'originale, et une tâche qui a déjà des doublons ne peut pas être marquée comme doublon. Si le workflow du projet n'a pas de `cancelled`, le menu d'actions de la tâche ne propose pas cette option.
 
 ## Supprimer une tâche
 

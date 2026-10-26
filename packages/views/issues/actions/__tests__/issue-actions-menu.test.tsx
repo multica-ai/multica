@@ -214,10 +214,10 @@ describe("IssueActionsDropdown", () => {
     expect(screen.getByText("Rename issue")).toBeInTheDocument();
     expect(screen.getByText("Open in new tab")).toBeInTheDocument();
     expect(screen.getByText("Copy link")).toBeInTheDocument();
+    expect(screen.getByText("Create sub-issue")).toBeInTheDocument();
     expect(screen.getByText("Relations")).toBeInTheDocument();
     expect(screen.getByText("Delete issue")).toBeInTheDocument();
-    // Relationship actions are hidden inside the "Relations" submenu by default.
-    expect(screen.queryByText("Create sub-issue")).not.toBeInTheDocument();
+    // Linking to existing issues stays inside the "Relations" submenu.
     expect(screen.queryByText("Set parent issue...")).not.toBeInTheDocument();
     expect(screen.queryByText("Add sub-issue...")).not.toBeInTheDocument();
   });
@@ -300,6 +300,28 @@ describe("IssueActionsDropdown", () => {
       identifier: "TES-1",
       onDeletedFallbackPath: "/test/issues",
     });
+  });
+
+  it("clicking Create sub-issue opens the create modal parented to this issue", async () => {
+    render(
+      wrap(
+        <IssueActionsDropdown
+          issue={mockIssue}
+          trigger={<button data-testid="trigger">Menu</button>}
+        />,
+      ),
+    );
+
+    fireEvent.click(screen.getByTestId("trigger"));
+    fireEvent.click(await screen.findByText("Create sub-issue"));
+
+    expect(mockOpenModal).toHaveBeenCalledWith(
+      "create-issue",
+      expect.objectContaining({
+        parent_issue_id: "issue-1",
+        parent_issue_identifier: "TES-1",
+      }),
+    );
   });
 
   it("clicking Rename issue opens the rename modal with the current title", async () => {

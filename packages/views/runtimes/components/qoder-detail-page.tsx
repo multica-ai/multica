@@ -54,7 +54,7 @@ import { ServingAgentsCard } from "./runtime-detail";
 import { UsageSection } from "./usage-section";
 import { parseActiveAgentsConflict } from "./delete-runtime-dialog";
 
-/** Route locator of the workspace's Qoder Cloud Agent page. */
+/** Route locator of the workspace's Qoder Cloud Agents page. */
 export const QODER_RUNTIME_LOCATOR = "qoder";
 
 /**
@@ -75,7 +75,7 @@ export function isQoderLocator(
 }
 
 /**
- * The workspace's Qoder Cloud Agent: one shared connection, so the page
+ * The workspace's Qoder Cloud Agents: one shared connection, so the page
  * manages the connection directly instead of listing harnesses on a machine.
  */
 export function QoderDetailPage() {
@@ -347,7 +347,6 @@ function ManageCard({
         ) : (
           <ManageRow
             title={t(($) => $.qoder.page.resume_title)}
-            hint={t(($) => $.qoder.page.resume_hint)}
           >
             <Button
               variant="outline"
@@ -433,7 +432,7 @@ function ManageRow({
   children,
 }: {
   title: string;
-  hint: string;
+  hint?: string;
   destructive?: boolean;
   children: React.ReactNode;
 }) {
@@ -450,7 +449,7 @@ function ManageRow({
         </p>
         <div className="shrink-0">{children}</div>
       </div>
-      <p className="text-pretty text-caption text-muted-foreground">{hint}</p>
+      {hint ? <p className="text-pretty text-caption text-muted-foreground">{hint}</p> : null}
     </div>
   );
 }

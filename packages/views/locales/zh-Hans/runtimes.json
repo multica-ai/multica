@@ -1,7 +1,6 @@
 {
   "page": {
     "title": "运行时",
-    "tagline": "智能体在这些机器和云服务上执行任务。",
     "learn_more": "了解更多 →",
     "connect_remote": "添加机器",
     "search_placeholder": "搜索...",
@@ -170,28 +169,42 @@
     "diagnostics_visibility": "可见性",
     "visibility_label": {
       "private": "私有",
-      "public": "公开"
+      "public": "公开",
+      "members": "指定成员"
+    },
+    "visibility_choice": {
+      "private": "私有",
+      "public": "公开",
+      "members": "指定成员"
     },
     "visibility_hint": {
       "private": "仅你可以在此运行时上创建智能体。",
-      "public": "工作区内任何成员都可以在此运行时上创建智能体。"
+      "public": "工作区内任何成员都可以在此运行时上创建智能体。",
+      "members": "仅你和所选成员可以在此运行时上创建智能体。"
     },
     "visibility_hint_readonly": {
       "private": "仅运行时所有者可以在此运行时上创建智能体，也只有他们能切换为「公开」。",
-      "public": "工作区内任何成员都可以在此运行时上创建智能体。只有运行时所有者能切回「私有」。"
+      "public": "工作区内任何成员都可以在此运行时上创建智能体。只有运行时所有者能切回「私有」。",
+      "members": "仅所有者和所选成员可以在此运行时创建智能体。"
     },
+    "visibility_members_title": "共享给成员",
+    "visibility_members_search": "搜索成员",
+    "visibility_members_none": "工作区暂无其他成员。",
+    "visibility_members_no_match": "没有匹配的成员。",
+    "visibility_members_edit": "编辑",
+    "visibility_members_count_other": "{{count}} 位成员",
     "visibility_toast_updated": "可见性已设为\"{{visibility}}\"",
     "visibility_toast_failed": "更新可见性失败",
     "visibility_revoke_dialog": {
-      "title": "将此运行时设为私有？",
-      "description": "将 \"{{name}}\" 设为私有后，会解绑 {{count}} 个其他成员的智能体、取消此机器上的 {{taskCount}} 次活动运行，并暂停分配给这些智能体的已启用自动化。你自己的智能体和运行不受影响。",
+      "title": "限制运行时访问权限？",
+      "description": "限制 \"{{name}}\" 的访问权限将解绑 {{count}} 个受影响的智能体、取消 {{taskCount}} 次运行，并暂停分配给这些智能体的自动化。仍有权限的智能体和运行不受影响。",
       "warning": "服务端会立即撤销访问。已连接的守护进程会在常规取消检查时停止运行。离线机器需重新连接才能收到停止请求，本地进程在此期间可能继续执行。",
       "plan_changed": "弹窗打开期间，访问方案发生了变化。请重新确认。",
       "checkbox": "我已了解：列表中的其他成员智能体会被解绑，其活动运行会被取消，已启用的自动化会被暂停。",
       "cancel": "取消",
-      "confirm": "设为私有",
+      "confirm": "限制访问",
       "submitting": "正在撤销访问...",
-      "toast_success": "运行时已设为私有，其他成员的访问已撤销",
+      "toast_success": "已更新运行时访问权限",
       "toast_failed": "撤销运行时访问失败"
     },
     "delete_dialog": {
@@ -510,7 +523,7 @@
   },
   "qoder": {
     "title": "QCA 运行时",
-    "description": "连接 Qoder Cloud Agent，由 Multica 管理执行并加密保存凭证。工作区管理员可修改配置。",
+    "description": "连接 Qoder Cloud Agents，由 Multica 管理执行并加密保存凭证。工作区管理员可修改配置。",
     "loading": "加载中...",
     "unavailable": "请先在服务端配置 MULTICA_VCS_SECRET_KEY。",
     "online": "在线",
@@ -524,7 +537,7 @@
     "region_hint": "选择创建 PAT 的站点，PAT 只能在对应区域使用。",
     "keep_secret": "留空保留已保存的凭证",
     "repositories": "GitHub 仓库授权",
-    "repositories_hint": "为每个仓库绑定凭证，在项目中选择仓库和起始分支。服务端不会返回凭证明文。",
+    "repositories_hint": "为每个仓库绑定凭证，在项目中选择仓库和起始分支。",
     "remove": "移除",
     "add_repository": "添加仓库",
     "saved": "已保存，服务端将自动启动运行时。",
@@ -548,7 +561,7 @@
     "save_agent": "保存关联",
     "agent_saved": "已保存 QCA 智能体关联",
     "agent_save_failed": "无法保存 QCA 智能体关联",
-    "cloud_title": "Qoder Cloud Agent",
+    "cloud_title": "Qoder Cloud Agents",
     "managed": "托管服务",
     "cloud_description": "使用共享连接在 Qoder 云端运行智能体，无需维护本地主机。",
     "configure_credentials": "配置凭证",
@@ -589,27 +602,26 @@
       "execution_summary": "最多同时 {{concurrency}} 个 · 单次超时 {{timeout}} 分钟"
     },
     "stop_confirm": {
-      "title": "暂停 Qoder Cloud Agent？",
+      "title": "暂停 Qoder Cloud Agents？",
       "description": "恢复之前，新任务不会再发给 Qoder。",
       "cancel": "取消",
       "description_agents_other": "下面 {{count}} 个智能体会保留指令和历史，但在恢复 Qoder 或更换运行时之前无法接新任务。"
     },
-    "connect_title": "连接 Qoder Cloud Agent",
-    "connect_description": "用 Qoder PAT 连接一次。Multica 会在 Qoder 的沙箱里执行任务，凭证加密保存。",
+    "connect_title": "连接 Qoder Cloud Agents",
+    "connect_description": "Multica 会在 Qoder 的沙箱里执行任务。",
     "page": {
       "configuration": "配置",
       "agents_title": "智能体",
       "pause_title": "暂停 Qoder",
       "pause_hint": "不再向 Qoder 派发新任务。凭证和智能体都会保留，可以随时恢复。",
       "resume_title": "恢复 Qoder",
-      "resume_hint": "使用已保存的配置重新开始接任务。",
       "resume": "恢复",
       "resumed": "Qoder 正在启动。",
       "disconnect_title": "断开 Qoder",
       "disconnect_hint": "删除已保存的 PAT 和仓库令牌，并移除这个运行时。使用它的智能体会被解绑，历史保留。",
       "disconnect": "断开连接",
       "not_connected_title": "Qoder 尚未连接",
-      "not_connected_hint": "请工作区管理员连接 Qoder Cloud Agent。",
+      "not_connected_hint": "请工作区管理员连接 Qoder Cloud Agents。",
       "workload_idle": "空闲",
       "connection_title": "连接",
       "edit": "编辑",
@@ -632,7 +644,7 @@
       "minutes_other": "{{count}} 分钟"
     },
     "disconnect_confirm": {
-      "title": "断开 Qoder Cloud Agent？",
+      "title": "断开 Qoder Cloud Agents？",
       "description": "已保存的 PAT 和仓库令牌会被删除，Qoder 运行时会被移除。之后要再用 Qoder，需要重新连接。",
       "description_agents_other": "下面 {{count}} 个智能体会被解绑，保留指令和历史，之后可以换到其他运行时。",
       "plan_changed": "Qoder 上的智能体有变化，请确认最新列表后再操作。",

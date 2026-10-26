@@ -3,7 +3,10 @@ title: Actions rapides
 description: Enregistrez une demande fréquente pour l’utiliser dans une tâche sans la réécrire.
 ---
 
-Les actions rapides transforment vos demandes fréquentes en boutons sur une tâche. Enregistrez une fois qui appeler et quoi lui demander, puis réutilisez cette demande sur d’autres tâches.
+import { Step, Steps } from "fumadocs-ui/components/steps";
+import { QuickActionDemo } from "@/components/demos/quick-action-demo";
+
+Les actions rapides transforment vos demandes fréquentes en boutons sur une tâche. Enregistrez une fois qui appeler et quoi lui demander, puis réutilisez cette demande d’un clic sur d’autres tâches.
 
 Par exemple, créez **Revue de code** pour votre agent de revue avec cette consigne :
 
@@ -20,17 +23,41 @@ Dans l’application web ou de bureau, vous avez deux possibilités :
 | **Actions rapides** dans la barre latérale de la tâche | Un clic publie immédiatement la demande enregistrée. Si un agent ou un squad est choisi, vous lui demandez de travailler sur cette tâche. |
 | Saisir `/` dans le champ de commentaire | Choisissez une action pour insérer sa demande dans un brouillon. Adaptez-la à cette tâche, puis envoyez-la. La sélection seule ne publie rien. |
 
+<QuickActionDemo />
+
 Utiliser une action rapide ne change ni le responsable ni le statut de la tâche. Suivez les réponses dans la discussion et la progression de l’agent dans le [journal d’exécution](/tasks).
 
 Une action avec **Aucune cible** publie le message enregistré sans @mentionner qui que ce soit. Elle convient aux listes de vérification et aux réponses fréquentes.
 
 ## Créer une action rapide
 
-1. Ouvrez **Paramètres → Actions rapides**, puis **Nouvelle action rapide**.
-2. Donnez-lui un nom court qui décrit la demande, comme **Revue de code** ou **Résumer l’avancement**.
-3. Choisissez **Moi uniquement** pour un usage personnel ou **Équipe** pour la partager dans l’espace de travail. Créer et gérer les actions d’équipe demande le rôle `owner` ou `admin` ; les membres choisissent **Moi uniquement**.
-4. Dans **S’exécute en tant que**, choisissez un agent ou un squad, ou **Aucune cible** pour enregistrer un message sans mention.
-5. Rédigez la demande dans **Invite**, telle qu’elle doit être envoyée, puis enregistrez. Elle est envoyée telle quelle ; les variables ne sont pas prises en charge.
+<Steps>
+<Step>
+
+Ouvrez **Paramètres → Actions rapides**, puis **Nouvelle action rapide**.
+
+</Step>
+<Step>
+
+Donnez-lui un nom court qui décrit la demande, comme **Revue de code** ou **Résumer l’avancement**.
+
+</Step>
+<Step>
+
+Choisissez **Moi uniquement** pour un usage personnel ou **Équipe** pour la partager dans l’espace de travail. Créer et gérer les actions d’équipe demande le rôle `owner` ou `admin` ; les membres choisissent **Moi uniquement**.
+
+</Step>
+<Step>
+
+Dans **S’exécute en tant que**, choisissez un agent ou un squad, ou **Aucune cible** pour enregistrer un message sans mention.
+
+</Step>
+<Step>
+
+Rédigez la demande dans **Invite**, telle qu’elle doit être envoyée, puis enregistrez. Elle est envoyée telle quelle ; les variables ne sont pas prises en charge.
+
+</Step>
+</Steps>
 
 Une action d’équipe doit utiliser un agent que tous les membres peuvent appeler. Pour un squad, cette condition concerne son leader. Une action personnelle peut utiliser les agents que vous avez le droit d’appeler.
 
@@ -38,11 +65,11 @@ Une action d’équipe doit utiliser un agent que tous les membres peuvent appel
 
 ## Gérer les actions enregistrées
 
-Revenez dans **Paramètres → Actions rapides** pour modifier, archiver ou restaurer une action. Archivez-la si vous pensez la réutiliser plus tard. La suppression retire l’action enregistrée ; les commentaires et les exécutions précédentes restent.
+Dans **Paramètres → Actions rapides**, vous pouvez modifier, archiver ou restaurer une action. Archivez-la si vous n’en avez pas besoin maintenant mais pensez la réutiliser. La suppression retire l’action enregistrée ; les commentaires et les exécutions précédentes restent.
 
-Si aucune action personnelle ou d’équipe n’est disponible pour vous, la barre latérale de la tâche n’affiche pas la section Actions rapides.
+Si vous ne voyez aucune action personnelle ou d’équipe, la barre latérale de la tâche n’affiche pas la section Actions rapides. La liste de la barre latérale n’est pas filtrée selon les droits d’appel : ils sont vérifiés au moment du clic.
 
-Si une action ne peut pas appeler son agent, demandez à un administrateur de vérifier l’agent choisi et ses droits d’appel. Si l’ordinateur de l’agent est hors ligne, le travail n’a pas encore commencé ; consultez le [dépannage](/troubleshooting).
+Si un clic vous indique que l’action ne peut pas s’exécuter, demandez à un administrateur de vérifier l’agent de cette action et ses droits d’appel. Si l’ordinateur de l’agent est hors ligne, le travail commencera quand il sera de nouveau en ligne ; consultez le [dépannage](/troubleshooting).
 
 ## Guides associés
 

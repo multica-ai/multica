@@ -28,8 +28,7 @@ func TestClaimTaskByRuntime_OwnerlessAgentOnPrivateRuntimeFailsExplicitly(t *tes
 	dbfx.Exec(t, `UPDATE agent SET owner_id = NULL WHERE id = $1`, agentID)
 	taskID := seedQueuedIssueTask(t, ctx, agentID, runtimeID, issueID)
 
-	req := newDaemonTokenRequest(http.MethodPost, "/api/daemon/runtimes/"+runtimeID+"/tasks/claim", nil,
-		testWorkspaceID, "ownerless-agent-claim")
+	req := newOwnerDaemonRequest(http.MethodPost, "/api/daemon/runtimes/"+runtimeID+"/tasks/claim", nil)
 	req = withURLParam(req, "runtimeId", runtimeID)
 	w := testutil.Call(t, testHandler.ClaimTaskByRuntime, req).Want(http.StatusOK)
 	if strings.TrimSpace(w.Body.String()) != `{"task":null}` {
@@ -65,8 +64,7 @@ func TestClaimTaskByRuntime_SettlesPrivateOwnerMismatch(t *testing.T) {
 	dbfx.Exec(t, `UPDATE agent SET owner_id = $1 WHERE id = $2`, foreignOwnerID, agentID)
 	taskID := seedQueuedIssueTask(t, ctx, agentID, runtimeID, issueID)
 
-	req := newDaemonTokenRequest(http.MethodPost, "/api/daemon/runtimes/"+runtimeID+"/tasks/claim", nil,
-		testWorkspaceID, "mismatch-issue-claim")
+	req := newOwnerDaemonRequest(http.MethodPost, "/api/daemon/runtimes/"+runtimeID+"/tasks/claim", nil)
 	req = withURLParam(req, "runtimeId", runtimeID)
 	w := testutil.Call(t, testHandler.ClaimTaskByRuntime, req).Want(http.StatusOK)
 	if strings.TrimSpace(w.Body.String()) != `{"task":null}` {
@@ -97,8 +95,7 @@ func TestClaimTaskByRuntime_SettlesPrivateOwnerMismatchChatFailure(t *testing.T)
 	sessionID := createHandlerTestChatSession(t, agentID)
 	taskID := dbfx.Task(t, agentID, testutil.Cols{"runtime_id": runtimeID, "chat_session_id": sessionID, "issue_id": nil})
 
-	req := newDaemonTokenRequest(http.MethodPost, "/api/daemon/runtimes/"+runtimeID+"/tasks/claim", nil,
-		testWorkspaceID, "mismatch-chat-claim")
+	req := newOwnerDaemonRequest(http.MethodPost, "/api/daemon/runtimes/"+runtimeID+"/tasks/claim", nil)
 	req = withURLParam(req, "runtimeId", runtimeID)
 	w := testutil.Call(t, testHandler.ClaimTaskByRuntime, req).Want(http.StatusOK)
 	if strings.TrimSpace(w.Body.String()) != `{"task":null}` {
@@ -183,8 +180,7 @@ func TestBuildClaimedTaskResponseRejectsAgentOwnerChangedAfterClaim(t *testing.T
 	if err != nil {
 		t.Fatalf("load runtime: %v", err)
 	}
-	req := newDaemonTokenRequest(http.MethodPost, "/api/daemon/runtimes/"+runtimeID+"/tasks/claim", nil,
-		testWorkspaceID, "claim-then-owner-change")
+	req := newOwnerDaemonRequest(http.MethodPost, "/api/daemon/runtimes/"+runtimeID+"/tasks/claim", nil)
 	_, _, _, _, _, failure := testHandler.buildClaimedTaskResponse(
 		req, task, runtime, runtimeID, testWorkspaceID,
 	)
@@ -238,8 +234,7 @@ func TestBuildClaimedTaskResponseRejectsAgentReboundAfterClaim(t *testing.T) {
 	if err != nil {
 		t.Fatalf("load old runtime: %v", err)
 	}
-	req := newDaemonTokenRequest(http.MethodPost, "/api/daemon/runtimes/"+oldRuntimeID+"/tasks/claim", nil,
-		testWorkspaceID, "claim-then-rebind")
+	req := newOwnerDaemonRequest(http.MethodPost, "/api/daemon/runtimes/"+oldRuntimeID+"/tasks/claim", nil)
 	_, _, _, _, _, failure := testHandler.buildClaimedTaskResponse(
 		req, task, runtime, oldRuntimeID, testWorkspaceID,
 	)
@@ -368,8 +363,7 @@ func TestClaimTaskByRuntime_RuntimeOwnerChangedAfterClaimNeverDelivered(t *testi
 	}
 	dbfx.Exec(t, `UPDATE agent_runtime SET owner_id = $1 WHERE id = $2`, newOwnerID, runtimeID)
 
-	req := newDaemonTokenRequest(http.MethodPost, "/api/daemon/runtimes/"+runtimeID+"/tasks/claim", nil,
-		testWorkspaceID, "delivery-gate-owner-change")
+	req := newOwnerDaemonRequest(http.MethodPost, "/api/daemon/runtimes/"+runtimeID+"/tasks/claim", nil)
 	resp, deliveredCommentIDs, _, _, settledFailure, finalizeErr := testHandler.finalizeClaimDeliveryForTestWithRuntime(
 		req, task, runtimeSnapshot, runtimeID, testWorkspaceID,
 	)
@@ -409,9 +403,10 @@ func TestClaimTaskByRuntime_RuntimeOwnerChangedAfterClaimNeverDelivered(t *testi
 	}
 
 	// And the full HTTP claim surface stays an empty successful poll.
+	// The previous owner's credential no longer reaches this runtime
+	// (MUL-8154), so the post-settle poll comes from the new owner.
 	w := testutil.Call(t, testHandler.ClaimTaskByRuntime, func() *http.Request {
-		r := newDaemonTokenRequest(http.MethodPost, "/api/daemon/runtimes/"+runtimeID+"/tasks/claim", nil,
-			testWorkspaceID, "delivery-gate-poll")
+		r := newRequestAs(newOwnerID, http.MethodPost, "/api/daemon/runtimes/"+runtimeID+"/tasks/claim", nil)
 		return testutil.WithURLParams(r, "runtimeId", runtimeID)
 	}()).Want(http.StatusOK)
 	if strings.TrimSpace(w.Body.String()) != `{"task":null}` {
@@ -457,8 +452,7 @@ func TestFinalizeClaimDelivery_UsesCurrentRuntimeOwnerForTaskToken(t *testing.T)
 	dbfx.Exec(t, `UPDATE "user" SET profile_description = $1 WHERE id = $2`, currentProfile, newOwnerID)
 	dbfx.Exec(t, `UPDATE agent_runtime SET visibility = 'public', owner_id = $1 WHERE id = $2`, newOwnerID, runtimeID)
 
-	req := newDaemonTokenRequest(http.MethodPost, "/api/daemon/runtimes/"+runtimeID+"/tasks/claim", nil,
-		testWorkspaceID, "public-delivery-owner-change")
+	req := newOwnerDaemonRequest(http.MethodPost, "/api/daemon/runtimes/"+runtimeID+"/tasks/claim", nil)
 	resp, _, _, _, failure, finalizeErr := testHandler.finalizeClaimDeliveryForTestWithRuntime(
 		req, task, runtimeSnapshot, runtimeID, testWorkspaceID,
 	)
@@ -516,8 +510,7 @@ func TestFinalizeClaimDelivery_CurrentRuntimeOwnerMissingNeverMintsToken(t *test
 	}
 	dbfx.Exec(t, `UPDATE agent_runtime SET visibility = 'public', owner_id = NULL WHERE id = $1`, runtimeID)
 
-	req := newDaemonTokenRequest(http.MethodPost, "/api/daemon/runtimes/"+runtimeID+"/tasks/claim", nil,
-		testWorkspaceID, "ownerless-delivery")
+	req := newOwnerDaemonRequest(http.MethodPost, "/api/daemon/runtimes/"+runtimeID+"/tasks/claim", nil)
 	resp, _, _, _, failure, finalizeErr := testHandler.finalizeClaimDeliveryForTestWithRuntime(
 		req, task, runtimeSnapshot, runtimeID, testWorkspaceID,
 	)
@@ -618,8 +611,7 @@ func TestFinalizeClaimDelivery_SettlementFailureIsUnsettled(t *testing.T) {
 	injectRuntimeOwnerFlipAfterClaim(t, ctx, taskID, runtimeID, foreignOwnerID)
 	injectFailTaskSettlementFailure(t, ctx, taskID)
 
-	req := newDaemonTokenRequest(http.MethodPost, "/api/daemon/runtimes/"+runtimeID+"/tasks/claim", nil,
-		testWorkspaceID, "settlement-failure")
+	req := newOwnerDaemonRequest(http.MethodPost, "/api/daemon/runtimes/"+runtimeID+"/tasks/claim", nil)
 	req = withURLParam(req, "runtimeId", runtimeID)
 	w := testutil.Call(t, testHandler.ClaimTaskByRuntime, req).Want(http.StatusInternalServerError)
 	if strings.TrimSpace(w.Text()) == `{"task":null}` {

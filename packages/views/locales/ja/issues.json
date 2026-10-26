@@ -202,6 +202,8 @@
     "grouping_section": "グループ化",
     "ordering_section": "並び替え",
     "card_properties_section": "カードのプロパティ",
+    "columns_section": "列",
+    "columns_locked_by_filter": "列を表示・非表示にするには、ステータスの絞り込みを解除してください。",
     "ascending_title": "昇順",
     "descending_title": "降順",
     "newest_first": "新しい順",
@@ -359,9 +361,7 @@
     "toggle_collapse": "レーンの開閉"
   },
   "board": {
-    "hidden_columns_label": "非表示の列",
     "hide_column": "列を非表示",
-    "show_column": "列を表示",
     "add_issue_tooltip": "タスクを追加",
     "empty_column": "タスクなし",
     "empty_grouping": "一致するタスクがありません",
@@ -526,6 +526,7 @@
     "pr_auto_complete_disabled": "このタスクを PR マージでステータスを変えないように設定しました",
     "pr_auto_complete_enabled": "このタスクの PR マージ後のステータス変更を再開しました",
     "wakeup_created": "起動を追加しました：{{condition}} · {{agent}} を起こす",
+    "wakeup_created_scheduled": "{{agent}} の起動を追加しました：{{condition}}",
     "wakeup_triggered": "{{condition}} · {{agent}} を起こしました",
     "wakeup_triggered_merged": "{{condition}}（{{agent}} の開始待ちの実行に合流しました）",
     "wakeup_triggered_acknowledged": "{{condition}}（{{agent}} 自身の操作のため、再度は起こしていません）",
@@ -701,6 +702,7 @@
     "retry_failed": "実行を再試行できませんでした",
     "retry_blocked": "再試行されませんでした — このエージェントを使用する権限がありません",
     "transcript_tooltip": "トランスクリプトを表示",
+    "jump_to_run": "実行に移動",
     "cancel_failed": "実行をキャンセルできませんでした",
     "trigger_retry": "再試行",
     "trigger_retry_attempt": "再試行 #{{attempt}}",
@@ -1523,7 +1525,7 @@
       "target_squad": "スクワッド · リーダーが割り振り",
       "target_member": "メンバー",
       "instructions_hint": "今回の実行の指示として処理者に送られ、タスクの説明やコメントと一緒にコンテキストになります。",
-      "next_hint": "どちらも処理者が受け取る説明に書き込まれます。ステータスを変えるのは処理者です。ステップが終わったら前者へ、受け取った作業にやり直しが必要なら後者へ移します（ブロッカーには使いません）。実行が終わってもシステムはステータスを自動で変えません。",
+      "next_hint": "ステータスを変えるのは処理者です。差し戻しはやり直しが必要なときだけで、ブロッカーには使いません。実行が終わってもステータスは自動で変わりません。",
       "preview_brief": "エージェントが受け取る説明をプレビュー",
       "preview_title": "「{{status}}」ステップの説明",
       "preview_description": "タスクがこのステップに入ったとき、処理者の実行が受け取る内容です。プレビューに保存は不要です。",
@@ -1614,8 +1616,7 @@
     },
     "detail": {
       "follows_project": "（プロジェクトに従う）",
-      "card_title": "「{{workflow}}」· プロジェクト「{{project}}」に従う",
-      "card_hint": "これらの列と引き継ぎはプロジェクトのワークフローで決まります。"
+      "card_title": "「{{workflow}}」· プロジェクト「{{project}}」に従う"
     },
     "list_separator": "、",
     "handoff": {

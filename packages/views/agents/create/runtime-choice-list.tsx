@@ -47,7 +47,7 @@ export function qoderChoiceState(
   return runtimeOnline && connection.status === "online" ? "ready" : "starting";
 }
 
-const QODER_NAME = "Qoder Cloud Agent";
+const QODER_NAME = "Qoder Cloud Agents";
 
 const COMING_SOON = [
   { provider: "cursor", name: "Cursor Cloud Agents", vendor: "Cursor" },

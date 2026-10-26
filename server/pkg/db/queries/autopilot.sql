@@ -426,6 +426,15 @@ SET status = 'issue_created', issue_id = $2
 WHERE id = $1
 RETURNING *;
 
+-- name: SetAutopilotRunDispatchTask :execrows
+-- Records the agent task a create_issue run actually enqueued, so lifecycle
+-- sync can tell the run's own dispatch apart from mention/comment tasks on
+-- the same issue. Status stays issue_created; only an unlinked active run is
+-- written. (MUL-8200)
+UPDATE autopilot_run
+SET task_id = $2
+WHERE id = $1 AND status = 'issue_created' AND task_id IS NULL;
+
 -- name: UpdateAutopilotRunRunning :one
 UPDATE autopilot_run
 SET status = 'running', task_id = $2

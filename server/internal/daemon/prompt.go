@@ -64,6 +64,7 @@ func perTurnContextBlocks(task Task, opts promptOpts) string {
 	var b strings.Builder
 	b.WriteString(buildSharedLocalDirectoryBlock(opts.sharedLocalDirectory))
 	b.WriteString(buildWorktreeReplayConflictBlock(opts.worktreeReplayConflicts))
+	b.WriteString(buildWorktreeBranchBlock(opts.worktreeBranch, opts.worktreeBase))
 	if task.PriorSessionResumeUnavailable {
 		b.WriteString(sessionContinuityNoticeFor(task))
 	}
@@ -74,18 +75,22 @@ func perTurnContextBlocks(task Task, opts promptOpts) string {
 	return b.String()
 }
 
+// taskHasProjectWorkflow reports whether this run's prompt carries a
+// [Project workflow] block — the same condition buildProjectWorkflowBlock
+// renders on — so the runtime brief points at it instead of its built-in
+// status rules (MUL-8145).
+func taskHasProjectWorkflow(task Task) bool {
+	return task.ProjectWorkflow != nil && strings.TrimSpace(task.ProjectWorkflow.Brief) != ""
+}
+
 // buildProjectWorkflowBlock carries the issue's project workflow and current
 // step (MUL-7420). It varies by project and by step, so it lives here and not
 // in the cached brief (MUL-5377).
 func buildProjectWorkflowBlock(task Task) string {
-	if task.ProjectWorkflow == nil {
+	if !taskHasProjectWorkflow(task) {
 		return ""
 	}
-	brief := strings.TrimSpace(task.ProjectWorkflow.Brief)
-	if brief == "" {
-		return ""
-	}
-	return "[Project workflow]\n" + brief + "\n\n"
+	return "[Project workflow]\n" + strings.TrimSpace(task.ProjectWorkflow.Brief) + "\n\n"
 }
 
 // buildJoinedWakeupsBlock carries wakeups that fired while this run was
@@ -104,6 +109,8 @@ func buildJoinedWakeupsBlock(notes string) string {
 type promptOpts struct {
 	sharedLocalDirectory    bool
 	worktreeReplayConflicts []string
+	worktreeBranch          string
+	worktreeBase            string
 }
 
 // PromptOption tunes per-turn prompt copy with run-scoped context.
@@ -127,6 +134,60 @@ func WithSharedLocalDirectory() PromptOption {
 // resolves it (MUL-6881).
 func WithWorktreeReplayConflicts(files []string) PromptOption {
 	return func(o *promptOpts) { o.worktreeReplayConflicts = files }
+}
+
+// WithWorktreeBranch names the task branch a worktree-mode turn delivers on and
+// the commit it started from. The daemon refuses to record a delivery that is
+// not on that branch or no longer contains that commit (MUL-6881), and nothing
+// inside the worktree tells the agent so — squashing or switching branches is
+// ordinary git hygiene it would otherwise reach for (#9404).
+func WithWorktreeBranch(branch, base string) PromptOption {
+	return func(o *promptOpts) {
+		o.worktreeBranch = branch
+		o.worktreeBase = base
+	}
+}
+
+// buildWorktreeBranchBlock states the delivery contract of a worktree turn.
+// Branch names come from the daemon's own sanitised naming and the base is a
+// hex object id, so both are safe to render in code spans.
+func buildWorktreeBranchBlock(branch, base string) string {
+	if branch == "" || base == "" {
+		return ""
+	}
+	var b strings.Builder
+	b.WriteString("## Your task branch\n\n")
+	fmt.Fprintf(&b, "This run works in a private git worktree on branch `%s`, starting from commit `%s`. What that branch holds when you finish is what gets delivered, and the next turn continues from it.\n\n", branch, base)
+	fmt.Fprintf(&b, "- Keep HEAD on `%s` and only add commits on top of `%s`. Do not squash, amend, rebase or reset past `%s`, and do not check out another branch or a detached HEAD to do the work.\n", branch, base, base)
+	b.WriteString("- To publish the work under another name (for a pull request), push it without switching: `git push origin HEAD:<name>`.\n")
+	b.WriteString("- A delivery that is not on this branch, or no longer contains its starting commit, cannot be recorded: the task fails even though the work is done.\n\n")
+	return b.String()
+}
+
+// BuildWorktreeDeliveryRepairPrompt is the follow-up turn the daemon runs when
+// the agent finished with its work somewhere Finalize would refuse to record.
+// It is self-contained — the backend may not be able to resume the session, so
+// nothing here may depend on the agent remembering the turn it just ran.
+func BuildWorktreeDeliveryRepairPrompt(problem *execenv.DeliveryProblem) string {
+	var b strings.Builder
+	b.WriteString("Your previous turn in this git worktree finished, but its work cannot be delivered yet.\n\n")
+	fmt.Fprintf(&b, "Problem: %s.\n\n", problem.Reason)
+	fmt.Fprintf(&b, "The work has to end on branch `%s`, in commits on top of `%s` (the commit this turn started from), with HEAD on that branch. Your files are intact; only where they are committed is wrong.\n\n", problem.Branch, problem.BaseCommit)
+	b.WriteString("Fix it in this worktree. This sequence keeps every file exactly as it is now and puts it on the branch as one commit:\n\n```sh\n")
+	for _, step := range problem.RepairSteps() {
+		b.WriteString("git")
+		for _, arg := range step {
+			if strings.ContainsAny(arg, " '\"") {
+				arg = "'" + strings.ReplaceAll(arg, "'", `'\''`) + "'"
+			}
+			b.WriteString(" " + arg)
+		}
+		b.WriteString("\n")
+	}
+	b.WriteString("```\n\n")
+	fmt.Fprintf(&b, "Before the final commit, check `git diff --cached %s`: it should show only the changes you meant to make. If it undoes something `%s` contains that you did not intend to remove, restore it first. You may keep separate commits instead (for example by rebasing them onto `%s`), as long as the end state is the same.\n\n", problem.BaseCommit, problem.BaseCommit, problem.BaseCommit)
+	b.WriteString("Do only this — no other changes, no new comments or status updates. Reply with one line saying what you did.\n")
+	return b.String()
 }
 
 // buildSharedLocalDirectoryBlock warns an unlocked turn that its working
@@ -395,6 +456,9 @@ func buildCommentPrompt(task Task, provider string) string {
 	var b strings.Builder
 	b.WriteString("You are running as a local coding agent for a Multica workspace.\n\n")
 	fmt.Fprintf(&b, "Your assigned issue ID is: %s\n\n", task.IssueID)
+	// A real resume: the latest turn's session comes back. Shared by the
+	// edited-comment notes (MUL-8218) and the reading pointers below.
+	resumed := task.PriorSessionID != "" && !task.PriorSessionResumeUnavailable
 	if task.TriggerCommentContent != "" {
 		authorLabel := "A user"
 		if task.TriggerAuthorType == "system" {
@@ -406,8 +470,20 @@ func buildCommentPrompt(task Task, provider string) string {
 			}
 			authorLabel = fmt.Sprintf("Another agent (%s)", name)
 		}
-		fmt.Fprintf(&b, "[NEW COMMENT] %s just left a new comment. Focus on THIS comment — do not confuse it with previous ones:\n\n", authorLabel)
+		// MUL-8218: an edited trigger on a resumed session. The edit cancelled
+		// the run that read the old text and retriggered from the new one, but
+		// that run's transcript is what this session resumes. Say which version
+		// is current; the work already done is not undone by the edit.
+		editedSinceResume := resumed && task.TriggerCommentEditedAt != ""
+		if editedSinceResume {
+			fmt.Fprintf(&b, "[EDITED COMMENT] %s edited a comment after your previous run in this session started. Focus on THIS comment — do not confuse it with previous ones:\n\n", authorLabel)
+		} else {
+			fmt.Fprintf(&b, "[NEW COMMENT] %s just left a new comment. Focus on THIS comment — do not confuse it with previous ones:\n\n", authorLabel)
+		}
 		fmt.Fprintf(&b, "> %s\n\n", task.TriggerCommentContent)
+		if editedSinceResume {
+			b.WriteString(buildEditedTriggerNote(task))
+		}
 		// MUL-4195: comments that arrived before this run started were folded
 		// into it rather than dropped. The trigger above is the newest; the
 		// agent must ALSO address these earlier ones so no deliberate user
@@ -417,6 +493,7 @@ func buildCommentPrompt(task Task, provider string) string {
 		// a thread-agnostic issue-wide fetch hint for old servers that only send
 		// the ids.
 		if len(task.CoalescedComments) > 0 {
+			editedCoalesced := 0
 			fmt.Fprintf(&b, "This run also covers %d earlier comment(s) posted before it started — you must read and address them too, not just the one above. They may be in different threads, so each is reproduced here with its own thread:\n\n", len(task.CoalescedComments))
 			for _, cc := range task.CoalescedComments {
 				authorLabel := "A user"
@@ -440,8 +517,19 @@ func buildCommentPrompt(task Task, provider string) string {
 				if cc.ThreadID != "" {
 					fmt.Fprintf(&b, " [thread %s]", cc.ThreadID)
 				}
+				if resumed && cc.EditedAt != "" {
+					editedCoalesced++
+					fmt.Fprintf(&b, " [EDITED at %s", cc.EditedAt)
+					if cc.Revision > 0 {
+						fmt.Fprintf(&b, ", revision %d", cc.Revision)
+					}
+					b.WriteString(" — current version]")
+				}
 				b.WriteString(":\n")
 				fmt.Fprintf(&b, "  > %s\n", strings.ReplaceAll(strings.TrimSpace(cc.Content), "\n", "\n  > "))
+			}
+			if editedCoalesced > 0 {
+				fmt.Fprintf(&b, "\n%d comment(s) above marked EDITED changed after your previous run in this session started. Your session history may still contain earlier versions of them. %s\n", editedCoalesced, editedCommentGuidance)
 			}
 			fmt.Fprintf(&b, "\nIf you need the surrounding discussion for any of them, fetch its thread with `multica issue comment list %s --thread <thread-id> --tail 30 --compact --output json` using the thread id shown above.\n\n", task.IssueID)
 		} else if len(task.CoalescedCommentIDs) > 0 {
@@ -486,7 +574,6 @@ func buildCommentPrompt(task Task, provider string) string {
 	// session is warm enough to skip the issue read while treating it as cold
 	// for comments. On anything but a real resume with a server-computed
 	// comparison this renders the unconditional read, byte for byte.
-	resumed := task.PriorSessionID != "" && !task.PriorSessionResumeUnavailable
 	b.WriteString(execenv.BuildIssueStateHint(
 		task.IssueID, task.IssueStatus, task.IssueAssigneeType, task.IssueAssigneeID,
 		task.IssueChangedFields, task.IssueStateDeltaKnown, resumed,
@@ -862,3 +949,26 @@ func taskIsSquadLeader(task Task) bool {
 	}
 	return task.IsLeaderTask || task.SquadID != ""
 }
+
+// buildEditedTriggerNote explains an edited trigger comment to a resumed
+// session (MUL-8218). The session's history may quote the comment's earlier
+// text; only the version quoted in this prompt is an instruction. The note
+// deliberately does not call the previous run void: files it changed,
+// commands it ran and comments it posted still happened.
+func buildEditedTriggerNote(task Task) string {
+	var b strings.Builder
+	b.WriteString("This comment")
+	if task.TriggerCommentID != "" {
+		fmt.Fprintf(&b, " (%s", task.TriggerCommentID)
+		if task.TriggerCommentRevision > 0 {
+			fmt.Fprintf(&b, ", revision %d", task.TriggerCommentRevision)
+		}
+		b.WriteString(")")
+	}
+	fmt.Fprintf(&b, " was edited at %s. Your session history may still contain an earlier version of it. %s\n\n", task.TriggerCommentEditedAt, editedCommentGuidance)
+	return b.String()
+}
+
+// editedCommentGuidance is the shared instruction for any edited comment a
+// resumed session receives, trigger or folded-in (MUL-8218).
+const editedCommentGuidance = "The text quoted in this prompt is the current version and the only one to act on; treat any earlier wording, and plans that depended on it, as withdrawn. Work already done in this session (file changes, commands, posted comments) still happened and was not rolled back — re-evaluate what remains against the current text instead of repeating it or assuming it was undone."
