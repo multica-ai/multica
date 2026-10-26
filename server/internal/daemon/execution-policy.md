@@ -81,9 +81,41 @@ powerful; giving the relay an ordinary PAT bypasses the new boundary.
 
 Do not deploy this as a mitigation until AIDO's source/configuration is connected
 and an actual relay HTTP regression against this server is independently tested.
-`nexai` (the audit source's actual remote) is not configured in this workspace;
-the configured family-guardian-dashboard repository does not contain this relay.
-No AIDO source or production configuration has been changed in this candidate.
+AIDO relay source has since been published in family-guardian-dashboard at
+`relay-base/nex1565-prod-4d7d302`; its candidate PR #1 (`196170c`) connects the
+dedicated credential and passes a synthetic actual-relay HTTP regression.
+The nexai root repository is not the relay source. No production configuration
+has been changed. Both candidates remain unsuitable for activation because
+quarantining every AIDO session also parks authenticated owner conversation.
+
+### Message-level authority design gate
+
+See family-guardian-dashboard PR #1, `docs/NEX-1565-message-authority-design.md`.
+The current AIDO request authenticates a bearer but supplies a single content
+string; typed and pasted identical bytes have indistinguishable provenance.
+An owner principal, caller origin field, or device signature alone does not
+make embedded external instructions authoritative. A device signature proves
+the device sent a payload, not where all text inside it originated.
+
+Do not remove the sticky session/parent policy to implement turn toggling.
+External history, native resume state and workdirs must not flow into an
+unrestricted turn merely because the next message is authenticated as owner.
+The proposed replacement requires immutable message envelopes, registered
+device authentication with replay protection, exact single-use owner action
+grants checked at the side-effect sink, and separated execution contexts.
+Free-form arbitrary CLI automation cannot simultaneously be promised as
+unchanged and treated as an exact owner-authorized action without a new grant
+contract. This product/authentication scope needs a router decision first.
+
+External summaries require a separate capability-limited text-only worker,
+not an exception to the current daemon admission rejection. No such worker
+exists in this candidate. It must receive only scoped snapshots, lack host
+tools/filesystem/credentials and arbitrary network access, and return inert
+text that cannot mint tasks or trigger relay-local Gmail execution. Test real
+response completion, action count zero, and negative isolation cases before
+enabling it. This is a design proposal, not an implementation or a security
+proof. Keep existing SQL/daemon rejection and rollback guards until the new
+boundary is implemented and independently validated.
 
 Before activating, record affected relay session/task IDs (no message bodies or
 secrets), runtime SHA and PIDs. Pause inbound relay; drain/cancel its old queued,
