@@ -2,7 +2,8 @@
 
 import { useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { ChevronRight, Loader2, Zap } from "lucide-react";
+import { Loader2, Plus, Zap } from "lucide-react";
+import { IconButton } from "@multica/ui/components/common/icon-button";
 import { toast } from "sonner";
 import { dispatchReasonCode } from "@multica/core/api";
 import { useCurrentWorkspace } from "@multica/core/paths";
@@ -21,6 +22,9 @@ import {
 import { Tooltip, TooltipContent, TooltipTrigger } from "@multica/ui/components/ui/tooltip";
 import { cn } from "@multica/ui/lib/utils";
 import { ActorAvatar } from "../../common/actor-avatar";
+import { IssueSidebarSettingsMenu } from "./issue-sidebar-settings-menu";
+import { IssueSidebarSectionHeader } from "./issue-sidebar-section";
+import { CreateQuickActionDialog } from "../../quick-actions/components/quick-action-dialog";
 import { useT } from "../../i18n";
 
 // Quick Actions sidebar section (MUL-5465).
@@ -44,6 +48,8 @@ import { useT } from "../../i18n";
 
 export function QuickActionsSection({ issueId }: { issueId: string }) {
   const { t } = useT("issues");
+  const { t: tSettings } = useT("settings");
+  const [creating, setCreating] = useState(false);
   // Nullable read, not useWorkspaceId(): this section is an enhancement on the
   // sidebar and must degrade to "not rendered" outside a workspace route
   // rather than throwing and taking the whole issue detail down with it.
@@ -52,39 +58,30 @@ export function QuickActionsSection({ issueId }: { issueId: string }) {
   const [showAll, setShowAll] = useState(false);
   const [blocked, setBlocked] = useState<QuickAction | null>(null);
 
-  const { data = [], isLoading } = useQuery({
+  const { data = [], isLoading, isError, refetch } = useQuery({
     ...quickActionListOptions(wsId),
     enabled: wsId !== "",
   });
   const actions = useMemo(() => data.filter((a) => a.status === "active"), [data]);
 
-  // Nothing configured renders nothing at all: an empty section header in the
-  // sidebar is pure noise.
-  if (isLoading || actions.length === 0) return null;
+  // Keep the creation entry available even before the first action exists.
+  if (!wsId || isLoading) return null;
 
   const visible = showAll ? actions : actions.slice(0, QUICK_ACTION_SIDEBAR_LIMIT);
   const hiddenCount = actions.length - visible.length;
 
   return (
     <div>
-      <button
-        type="button"
-        className={cn(
-          "mb-2 flex w-full items-center gap-1 rounded-md px-2 py-1 text-caption font-medium transition-colors hover:bg-accent/70",
-          !open && "text-muted-foreground hover:text-foreground",
-        )}
-        onClick={() => setOpen(!open)}
-      >
-        {t(($) => $.detail.section_quick_actions)}
-        <ChevronRight
-          className={cn(
-            "!size-3 shrink-0 stroke-[2.5] text-muted-foreground transition-transform",
-            open && "rotate-90",
-          )}
-        />
-      </button>
-      {open ? (
-        <div className="space-y-0.5 pl-2">
+      <IssueSidebarSectionHeader title={t(($) => $.detail.section_quick_actions)} count={actions.length} collapsible={actions.length > 0 || isError === true} open={open} onOpenChange={setOpen}
+        actions={<>
+          <IconButton size="icon-xs" label={tSettings(($) => $.quick_actions.create_title)} onClick={() => setCreating(true)}><Plus /></IconButton>
+          <IssueSidebarSettingsMenu title={t(($) => $.detail.section_quick_actions)} label={t(($) => $.sidebar_settings.quick_actions)} tab="quick-actions" />
+        </>} />
+      {open && (actions.length > 0 || isError) ? (
+        <div className="space-y-0.5 px-2">
+          {isError && <button type="button" className="flex min-h-8 w-full items-center rounded-md px-2 py-1.5 text-left text-caption text-muted-foreground transition-colors hover:bg-accent/50 hover:text-foreground focus-visible:outline-2 focus-visible:outline-ring" onClick={() => void refetch()}>
+            {t(($) => $.detail.section_load_failed_retry)}
+          </button>}
           {visible.map((action) => (
             <QuickActionRow
               key={action.id}
@@ -93,17 +90,19 @@ export function QuickActionsSection({ issueId }: { issueId: string }) {
               onBlocked={() => setBlocked(action)}
             />
           ))}
-          {hiddenCount > 0 ? (
+          {hiddenCount > 0 && (
             <button
               type="button"
-              className="w-full rounded-md px-2 py-1 text-left text-caption text-muted-foreground transition-colors hover:bg-accent/70 hover:text-foreground"
               onClick={() => setShowAll(true)}
+              className="flex min-h-8 w-full items-center rounded-md px-2 text-left text-caption text-muted-foreground transition-colors hover:bg-accent/50 hover:text-foreground focus-visible:outline-2 focus-visible:outline-ring"
             >
               {t(($) => $.detail.quick_actions_more, { count: hiddenCount })}
             </button>
-          ) : null}
+          )}
         </div>
       ) : null}
+
+      {creating && <CreateQuickActionDialog onClose={() => setCreating(false)} />}
 
       {/* One message for every refusal. The person reading this dialog and the
           person who can fix the binding are different people — the clicker's
@@ -200,8 +199,8 @@ function QuickActionRow({
         disabled={running}
         onClick={() => void handleRun()}
         className={cn(
-          "group flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-body transition-colors",
-          "hover:bg-accent/70 disabled:cursor-default disabled:opacity-60",
+          "group flex w-full items-center gap-2 rounded-md px-2 py-2 text-left text-caption transition-colors",
+          "hover:bg-accent/50 disabled:cursor-default disabled:opacity-60",
         )}
       >
         {running ? (

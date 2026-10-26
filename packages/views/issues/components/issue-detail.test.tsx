@@ -1,6 +1,7 @@
 import { forwardRef, useEffect, useRef, useState, useImperativeHandle } from "react";
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import type { AgentTask, Attachment, Issue, IssueStatusEntry, Label, TimelineEntry } from "@multica/core/types";
 import { issueKeys } from "@multica/core/issues/queries";
@@ -116,6 +117,8 @@ vi.mock("@multica/core/paths", async () => {
   };
 });
 
+const settingsPush = vi.hoisted(() => vi.fn());
+
 // Mock navigation
 vi.mock("../../navigation", () => ({
   AppLink: ({ children, href, ...props }: any) => (
@@ -124,7 +127,7 @@ vi.mock("../../navigation", () => ({
     </a>
   ),
   useNavigation: () => ({
-    push: vi.fn(),
+    push: settingsPush,
     pathname: "/issues/issue-1",
     getShareableUrl: (p: string) => `https://app.multica.com${p}`,
   }),
@@ -1112,7 +1115,7 @@ describe("IssueDetail (shared)", () => {
     expect(screen.queryByText("Parent issue")).not.toBeInTheDocument();
     // The "+ Add property" affordance is always offered while any
     // optional field is still hidden.
-    expect(screen.getByText("Add property")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Add property" })).toBeInTheDocument();
   });
 
   it("hides every optional property row when none are set", async () => {
@@ -1137,7 +1140,39 @@ describe("IssueDetail (shared)", () => {
     expect(screen.getByTestId("project-picker")).toBeInTheDocument();
     // No parent → no standalone Parent issue section either.
     expect(screen.queryByText("Parent issue")).not.toBeInTheDocument();
-    expect(screen.getByText("Add property")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Add property" })).toBeInTheDocument();
+  });
+
+  it("opens property management independently while Properties is folded", async () => {
+    renderIssueDetail();
+    const disclosure = await screen.findByRole("button", { name: "Properties" });
+    fireEvent.click(disclosure);
+    fireEvent.click(screen.getByRole("button", { name: "Properties options" }));
+    expect(disclosure).toHaveAttribute("aria-expanded", "false");
+    fireEvent.click(await screen.findByRole("menuitem", { name: "Custom property settings" }));
+    expect(settingsPush).toHaveBeenCalledWith("/test/settings?tab=properties");
+  });
+
+  it("returns focus to Add property when the menu is dismissed without selecting a field", async () => {
+    const user = userEvent.setup();
+    renderIssueDetail();
+    const trigger = await screen.findByRole("button", { name: "Add property" });
+    await user.click(trigger);
+    expect(await screen.findByRole("menuitem", { name: "Start date" })).toBeVisible();
+    await user.keyboard("{Escape}");
+    await waitFor(() => expect(trigger).toHaveFocus());
+    expect(screen.queryByRole("menuitem", { name: "Start date" })).not.toBeInTheDocument();
+  });
+
+  it("keeps add-property available when folded and expands after choosing a field", async () => {
+    renderIssueDetail();
+    const disclosure = await screen.findByRole("button", { name: "Properties" });
+    fireEvent.click(disclosure);
+    expect(disclosure).toHaveAttribute("aria-expanded", "false");
+    fireEvent.click(screen.getByRole("button", { name: "Add property" }));
+    fireEvent.click(await screen.findByRole("menuitem", { name: "Start date" }));
+    await waitFor(() => expect(disclosure).toHaveAttribute("aria-expanded", "true"));
+    expect(within(disclosure.parentElement!.parentElement!).getAllByText("Start date")[0]).toBeVisible();
   });
 
   it("uses a non-resizable layout with the sidebar sheet closed by default on mobile", async () => {
@@ -1277,9 +1312,7 @@ describe("IssueDetail (shared)", () => {
     expect(scrollIntoViewSpy).not.toHaveBeenCalled();
   });
 
-  it("hides metadata content from the sidebar and shows a button when the bag has keys", async () => {
-    // Metadata is agent-facing; the sidebar only exposes a button that opens
-    // the raw JSON on demand. Keys are NOT rendered inline anywhere.
+  it("keeps metadata collapsed by default when the bag has keys", async () => {
     mockApiObj.getIssue.mockResolvedValue({
       ...mockIssue,
       metadata: {
@@ -1291,42 +1324,24 @@ describe("IssueDetail (shared)", () => {
     renderIssueDetail();
 
     await waitFor(() => {
-      // Trigger label includes a "· N" count so users can see payload size
-      // before clicking — accept any count via regex.
       expect(screen.getByRole("button", { name: /^Metadata\b/ })).toBeInTheDocument();
     });
 
-    // Key names are not rendered in the sidebar prior to opening the dialog.
+    // Keys stay hidden until the section is expanded.
     expect(screen.queryByText("pr_url")).not.toBeInTheDocument();
     expect(screen.queryByText("pipeline_status")).not.toBeInTheDocument();
   });
 
-  it("opens a dialog with formatted JSON when the Metadata button is clicked", async () => {
+  it("expands metadata inline from the shared sidebar header", async () => {
     mockApiObj.getIssue.mockResolvedValue({
       ...mockIssue,
-      metadata: {
-        pr_url: "https://example.com/pr/1",
-        pipeline_status: "running",
-      },
+      metadata: { pipeline_status: "running" },
     });
-
     renderIssueDetail();
-
-    const button = await screen.findByRole("button", { name: /^Metadata\b/ });
-    fireEvent.click(button);
-
-    // The dialog renders a <pre> containing the formatted JSON; checking the
-    // exact serialized payload also verifies the indent / structure.
-    const expected = JSON.stringify(
-      { pr_url: "https://example.com/pr/1", pipeline_status: "running" },
-      null,
-      2,
-    );
-    await waitFor(() => {
-      const pre = document.querySelector("pre");
-      expect(pre).not.toBeNull();
-      expect(pre!.textContent).toBe(expected);
-    });
+    fireEvent.click(await screen.findByRole("button", { name: /^Metadata\b/ }));
+    expect(screen.getByText("pipeline_status")).toBeVisible();
+    expect(screen.getByText("running")).toBeVisible();
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
   });
 
   it("hides the Metadata button entirely when the bag is empty", async () => {

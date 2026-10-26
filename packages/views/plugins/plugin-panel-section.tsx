@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { pluginInstallationsOptions } from "@multica/core/plugins";
 import { useCurrentWorkspace } from "@multica/core/paths";
@@ -8,6 +8,8 @@ import { useFeatureEnabled } from "@multica/core/config";
 import { PLUGINS_V1_FLAG } from "@multica/core/feature-flags";
 import { useT } from "../i18n";
 import { isDesktopShell } from "../platform/local-directory";
+import { IssueSidebarSettingsMenu } from "../issues/components/issue-sidebar-settings-menu";
+import { IssueSidebarSectionHeader } from "../issues/components/issue-sidebar-section";
 import { PluginSurfaceFrame } from "./plugin-surface-frame";
 
 /**
@@ -20,6 +22,7 @@ import { PluginSurfaceFrame } from "./plugin-surface-frame";
  */
 export function PluginPanelSection({ issueId }: { issueId: string }) {
   const { t } = useT("issues");
+  const [open, setOpen] = useState(true);
   const platform = isDesktopShell() ? "desktop" : "web";
   const workspace = useCurrentWorkspace();
   const wsId = workspace?.id ?? "";
@@ -44,17 +47,20 @@ export function PluginPanelSection({ issueId }: { issueId: string }) {
   if (!pluginsEnabled || panels.length === 0) return null;
 
   return (
-    <section className="space-y-3">
-      <h3 className="px-0.5 text-caption font-medium text-muted-foreground">{t(($) => $.plugins.panels)}</h3>
-      {panels.map(({ installation, surface }) => (
-        <PluginSurfaceFrame
-          key={`${installation.id}:${surface.key}`}
-          wsId={wsId}
-          installation={installation}
-          surface={surface}
-          issueId={issueId}
-        />
-      ))}
+    <section>
+      <IssueSidebarSectionHeader title={t(($) => $.plugins.panels)} open={open} onOpenChange={setOpen} count={panels.length}
+        actions={<IssueSidebarSettingsMenu title={t(($) => $.plugins.panels)} label={t(($) => $.sidebar_settings.plugins)} tab="plugins" />} />
+      <div hidden={!open} className="space-y-2 px-2">
+        {panels.map(({ installation, surface }) => (
+          <PluginSurfaceFrame
+            key={`${installation.id}:${surface.key}`}
+            wsId={wsId}
+            installation={installation}
+            surface={surface}
+            issueId={issueId}
+          />
+        ))}
+      </div>
     </section>
   );
 }

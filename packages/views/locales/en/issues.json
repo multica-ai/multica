@@ -1,4 +1,11 @@
 {
+  "sidebar_settings": {
+    "menu": "{{section}} options",
+    "quick_actions": "Quick action settings",
+    "wakeups": "Wakeup settings",
+    "properties": "Custom property settings",
+    "plugins": "Plugin settings"
+  },
   "inline_run": {
     "label": "{{name}} run",
     "stop": "Stop",
@@ -381,6 +388,15 @@
     "close": "Close preview"
   },
   "detail": {
+    "metadata_close": "Close metadata",
+    "metadata_copy": "Copy metadata",
+    "metadata_view": "View metadata",
+    "metadata_expand": "Expand dialog",
+    "metadata_restore": "Restore dialog size",
+    "metadata_copy_failed": "Failed to copy metadata",
+    "metadata_description": "Key-value data recorded by agents and integrations for workflow coordination.",
+
+    "section_load_failed_retry": "Could not load. Retry",
     "not_found": "This issue does not exist or has been deleted in this workspace.",
     "breadcrumb_project_unknown": "Unknown project",
     "back": "Back",
@@ -763,8 +779,8 @@
     "summary_runs_other": "{{count}} runs",
     "latest": "Latest",
     "open_timeline": "Open timeline",
-    "more_runs_one": "{{count}} more",
-    "more_runs_other": "{{count}} more",
+    "more_runs_one": "Show {{count}} more",
+    "more_runs_other": "Show {{count}} more",
     "strip_aria": "Cost per run — open the run timeline",
     "strip_no_usage": "No usage recorded",
     "sparkline_now": "Now"
@@ -1111,7 +1127,7 @@
     "wake_agent": "Wake {{agent}}",
     "needs_attention": "Needs attention",
     "turn_off": "Turn off",
-    "ended": "Wakeup history {{count}}",
+    "ended": "Wakeup history · {{count}}",
     "waiting_event": "Waiting for trigger",
     "triggered_by_wakeup": "Triggered by wakeup",
     "upcoming": "{{count}} enabled wakeup rules",

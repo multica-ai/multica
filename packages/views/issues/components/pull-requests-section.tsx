@@ -1,9 +1,12 @@
 "use client";
 
+import { IssueSidebarSettingsMenu } from "./issue-sidebar-settings-menu";
+import { IssueSidebarSectionHeader } from "./issue-sidebar-section";
+
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { ChevronRight, CircleSlash, MoreHorizontal, Plus, RotateCcw, Settings } from "lucide-react";
+import { CircleSlash, Plus, RotateCcw } from "lucide-react";
 import { ApiError } from "@multica/core/api";
 import {
   issuePullRequestsOptions,
@@ -11,19 +14,14 @@ import {
   useLinkIssuePullRequest,
   useSetIssuePRAutoComplete,
 } from "@multica/core/github";
-import { useWorkspacePaths } from "@multica/core/paths";
 import { Button } from "@multica/ui/components/ui/button";
 import { IconButton } from "@multica/ui/components/common/icon-button";
 import {
-  DropdownMenu,
-  DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuSeparator,
-  DropdownMenuTrigger,
 } from "@multica/ui/components/ui/dropdown-menu";
 import { Input } from "@multica/ui/components/ui/input";
 import { Popover, PopoverContent, PopoverTrigger } from "@multica/ui/components/ui/popover";
-import { useNavigation } from "../../navigation";
 import { useT } from "../../i18n";
 import { PullRequestList } from "./pull-request-list";
 
@@ -45,43 +43,25 @@ export function PullRequestsSection({
   onOpenChange: (open: boolean) => void;
 }) {
   const { t } = useT("issues");
-  const { data } = useQuery(issuePullRequestsOptions(issueId));
+  const { data, isLoading, isError } = useQuery(issuePullRequestsOptions(issueId));
   // Older backends have no link / auto-complete endpoints; keep the header
   // actions hidden until the server says it supports them.
   const supported = !!data?.auto_complete;
   const count = data?.pull_requests.length ?? 0;
 
+  if (!isLoading && !isError && count === 0 && !supported) return null;
+
   return (
     <div>
-      {/* Label and actions are siblings, not a button wrapping buttons. */}
-      <div className="mb-2 flex w-full items-center gap-0.5">
-        <button
-          type="button"
-          aria-expanded={open}
-          className={`flex min-w-0 flex-1 items-center gap-1 rounded-md px-2 py-1 text-caption font-medium transition-colors hover:bg-accent/70 ${open ? "" : "text-muted-foreground hover:text-foreground"}`}
-          onClick={() => onOpenChange(!open)}
-        >
-          <span className="truncate">{t(($) => $.detail.section_pull_requests)}</span>
-          {count > 0 ? (
-            <span className="shrink-0 rounded-xs bg-muted px-1 text-micro font-medium tabular-nums text-muted-foreground">
-              {count}
-            </span>
-          ) : null}
-          <ChevronRight className={`!size-3 shrink-0 stroke-[2.5] text-muted-foreground transition-transform ${open ? "rotate-90" : ""}`} />
-        </button>
-        {supported ? (
-          <>
-            <LinkPullRequestPopover issueId={issueId} identifier={identifier} onLinked={() => onOpenChange(true)} />
-            <AutoCompleteMenu
-              issueId={issueId}
-              disabled={data?.auto_complete?.issue_disabled ?? false}
-              workspaceEnabled={data?.auto_complete?.workspace_enabled ?? true}
-            />
-          </>
-        ) : null}
-      </div>
-      {open && (
-        <div className="pl-2">
+      <IssueSidebarSectionHeader
+        title={t(($) => $.detail.section_pull_requests)} open={open} onOpenChange={onOpenChange} count={count} collapsible={count > 0 || isLoading || isError}
+        actions={supported ? <>
+          <LinkPullRequestPopover issueId={issueId} identifier={identifier} onLinked={() => onOpenChange(true)} />
+          <AutoCompleteMenu issueId={issueId} disabled={data?.auto_complete?.issue_disabled ?? false} workspaceEnabled={data?.auto_complete?.workspace_enabled ?? true} />
+        </> : undefined}
+      />
+      {open && (count > 0 || isLoading || isError) && (
+        <div className="px-2">
           <PullRequestList issueId={issueId} identifier={identifier} />
         </div>
       )}
@@ -203,42 +183,32 @@ function AutoCompleteMenu({
   workspaceEnabled: boolean;
 }) {
   const { t } = useT("issues");
-  const paths = useWorkspacePaths();
-  const navigation = useNavigation();
   const setAutoComplete = useSetIssuePRAutoComplete(issueId);
 
   return (
-    <DropdownMenu>
-      <DropdownMenuTrigger
-        render={
-          <IconButton variant="ghost" size="icon-xs" label={t(($) => $.pr_automation.section_menu)}>
-            <MoreHorizontal />
-          </IconButton>
-        }
-      />
-      <DropdownMenuContent align="end" className="w-60">
-        {/* When the workspace leaves status alone, the issue switch changes nothing. */}
-        {workspaceEnabled ? (
-          <>
-            <DropdownMenuItem
-              disabled={setAutoComplete.isPending}
-              onClick={() =>
-                setAutoComplete.mutate(!disabled, {
-                  onError: () => toast.error(t(($) => $.pr_automation.update_failed)),
-                })
-              }
-            >
-              {disabled ? <RotateCcw /> : <CircleSlash />}
-              {disabled ? t(($) => $.pr_automation.enable) : t(($) => $.pr_automation.disable)}
-            </DropdownMenuItem>
-            <DropdownMenuSeparator />
-          </>
-        ) : null}
-        <DropdownMenuItem onClick={() => navigation.push(`${paths.settings()}?tab=code`)}>
-          <Settings />
-          {t(($) => $.pr_automation.settings)}
-        </DropdownMenuItem>
-      </DropdownMenuContent>
-    </DropdownMenu>
+    <IssueSidebarSettingsMenu
+      title={t(($) => $.detail.section_pull_requests)}
+      triggerLabel={t(($) => $.pr_automation.section_menu)}
+      label={t(($) => $.pr_automation.settings)}
+      tab="code"
+    >
+      {/* When the workspace leaves status alone, the issue switch changes nothing. */}
+      {workspaceEnabled ? (
+        <>
+          <DropdownMenuItem
+            disabled={setAutoComplete.isPending}
+            onClick={() =>
+              setAutoComplete.mutate(!disabled, {
+                onError: () => toast.error(t(($) => $.pr_automation.update_failed)),
+              })
+            }
+          >
+            {disabled ? <RotateCcw /> : <CircleSlash />}
+            {disabled ? t(($) => $.pr_automation.enable) : t(($) => $.pr_automation.disable)}
+          </DropdownMenuItem>
+          <DropdownMenuSeparator />
+        </>
+      ) : null}
+    </IssueSidebarSettingsMenu>
   );
 }
