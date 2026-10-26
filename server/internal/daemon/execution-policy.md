@@ -135,6 +135,31 @@ enabling it. This is a design proposal, not an implementation or a security
 proof. Keep existing SQL/daemon rejection and rollback guards until the new
 boundary is implemented and independently validated.
 
+### OS boundary stage 1 implementation status
+
+The router has now authorized a dedicated non-admin macOS identity as stage 1,
+with network egress restrictions deferred to stage 2. `_aido1565` UID/GID 490
+was created after the issue's operational impact comment. Production home/state
+permissions, relay and daemon were not changed. No launchd service was installed.
+`deploy/aido-stage` contains a disabled plist plus runtime configuration and
+rollback gates; it is not a running or registered Multica runtime.
+
+Relay PR #1 adds a private persistent NEX-1564 nonce bridge, send/write-only
+action service and explicit primary-user factory, bounded text/display adapter,
+calendar-note timestamp sanitization and a synchronous Unix-user/UDS staging
+probe. Real new-user access to 8 Gmail paths, main home, relay state and nonce DB
+was denied without reading credential bytes. Mock send: valid=1,
+forged/missing/replay=0. The mock text adapter returns a reply with no owner
+history injection. These are component proofs, not a connected production
+model/daemon/relay integration test.
+
+Dedicated agent/runtime registration, minimum task-token API scope, model login,
+restricted transport/display wiring and restored owner attachment/partial/stop
+integration are still release gates. Keep admission rejection unchanged. Do not
+hand the new user a broad PAT or assume the current default task token's scope
+has been narrowed by an OS user boundary. See relay
+`docs/NEX-1565-os-stage.md` for precise verified/unverified behavior.
+
 Before activating, record affected relay session/task IDs (no message bodies or
 secrets), runtime SHA and PIDs. Pause inbound relay; drain/cancel its old queued,
 dispatched and running tasks and revoke their task tokens. Existing records have

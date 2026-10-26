@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0"><dict>
+  <key>Label</key><string>co.nexai.aido1565.stage</string>
+  <key>UserName</key><string>_aido1565</string>
+  <key>GroupName</key><string>_aido1565</string>
+  <key>ProgramArguments</key><array>
+    <string>/usr/bin/env</string><string>-i</string>
+    <string>HOME=/private/var/nex1565-stage/home</string>
+    <string>PATH=/private/var/nex1565-stage/bin:/usr/bin:/bin</string>
+    <string>/private/var/nex1565-stage/bin/multica</string>
+    <string>daemon</string><string>start</string><string>--foreground</string>
+    <string>--no-auto-update</string><string>--max-concurrent-tasks</string><string>1</string>
+    <string>--daemon-id</string><string>aido1565-isolated-stage</string>
+    <string>--runtime-name</string><string>AIDO isolated staging</string>
+  </array>
+  <key>WorkingDirectory</key><string>/private/var/nex1565-stage/home</string>
+  <key>RunAtLoad</key><false/>
+  <key>KeepAlive</key><false/>
+  <key>Umask</key><integer>63</integer>
+  <key>StandardOutPath</key><string>/private/var/nex1565-stage/home/daemon.stdout.log</string>
+  <key>StandardErrorPath</key><string>/private/var/nex1565-stage/home/daemon.stderr.log</string>
+</dict></plist>
