@@ -90,6 +90,24 @@ quarantining every AIDO session also parks authenticated owner conversation.
 
 ### Message-level authority design gate
 
+The router subsequently declined device signing and per-action owner grants.
+The selected alternative is to remove external-reading capability from the
+owner lane while retaining automatic actions, and use a separate text-only
+worker for external material. Owner-pasted text is an explicitly accepted
+residual risk. The earlier grant proposal below is historical, not a new gate.
+
+Pre-implementation audit found a blocking capability: the current owner agent
+uses Claude's default built-in tools with bypassPermissions and no tool
+allowlist. Bash/file reads, inherited user environment and same-user filesystem
+access are not separated by strict MCP configuration or removal of custom env.
+Arbitrary Python/shell can implement both actions and external reads. Codex's
+auto-approval path does not supply an equivalent separation either. Do not
+relax restricted admission based on removing a named Gmail tool or env key.
+See relay PR #1 `docs/NEX-1565-capability-split-audit.md` for sanitized agent
+inventory, synthetic counterexample and the precise unverified acceptance
+criteria. Runtime implementation stopped per the router's explicit stop rule;
+an OS/service capability boundary needs a separate scope decision first.
+
 See family-guardian-dashboard PR #1, `docs/NEX-1565-message-authority-design.md`.
 The current AIDO request authenticates a bearer but supplies a single content
 string; typed and pasted identical bytes have indistinguishable provenance.
