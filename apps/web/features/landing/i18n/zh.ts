@@ -510,7 +510,7 @@ export function createZhDict(
       {
         version: "0.7.0",
         date: "2026-10-23",
-        title: "Qoder Cloud Agents、运行时按成员共享、PR 冲突唤醒、更安全",
+        title: "全面开放 workflow 功能、Qoder Cloud Agents、运行时按成员共享",
         changes: [],
         features: [
           "可以用 Qoder Cloud Agents 运行 Issue：创建智能体时先选机器或云服务，再关联 Qoder Cloud Agents 的智能体。",
