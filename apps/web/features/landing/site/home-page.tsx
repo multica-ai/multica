@@ -15,8 +15,7 @@ import {
   focusRing,
 } from "./primitives";
 import { CUSTOMER_LOGOS } from "./customer-logos";
-import { RuntimesVisual, WorkflowVisual } from "./demo/feature-visuals";
-import { AutopilotsFigure, ChatFigure, SkillsFigure } from "./demo/figure-visuals";
+import { AutopilotsVisual, ChatVisual, RuntimesVisual, SkillsVisual, WorkflowVisual } from "./demo/feature-visuals";
 import { HeroDemo } from "./demo/hero-demo";
 import { PROVIDER_MARKS, useStoryLoop } from "./demo/mock-kit";
 import { AgentVisual, ConnectVisual, ReviewVisual } from "./demo/how-it-works-visuals";
@@ -188,41 +187,48 @@ function LogoWall() {
   );
 }
 
-const FEATURES: { id: string; title: string; body: string; alt: string; visual: ComponentType }[] = [
+type Frost = "slate" | "ember" | "sage" | "dusk" | "sand";
+
+const FEATURES: { id: string; title: string; body: string; alt: string; visual: ComponentType; frost: Frost }[] = [
   {
     id: "runtimes",
-    title: "Runs on your machines, or in our cloud",
-    body: "Connect a laptop or a server with one command and Multica finds the coding agents installed on it. Or run them in managed cloud sandboxes.",
-    alt: "The Runtimes page listing a MacBook, a Linux server, and Multica Cloud with their coding agents and workloads, as a teammate's Mac mini connects and picks up work",
+    title: "Runtimes",
+    body: "Run agents on your laptop, your servers, or managed cloud sandboxes. One command connects a machine and finds the coding agents on it.",
+    alt: "The Runtimes list with a MacBook, a Linux server, and Multica Cloud online with their coding agents, and a note that a teammate's Mac mini just connected",
     visual: RuntimesVisual,
+    frost: "slate",
   },
   {
     id: "workflows",
-    title: "Workflows hand off every step",
-    body: "Lay out the steps a project’s issues follow and who owns each one. Moving an issue to the next step hands it to that step’s person or agent.",
-    alt: "The workflow editor for a Delivery workflow: Todo, In Progress handed to Backend Agent, In Review handed to QA Agent, and Done handed to Mia Chen, with each step's handoff shown in turn",
+    title: "Workflows",
+    body: "Give every status an owner. Moving an issue to the next step hands it to that step’s agent or teammate.",
+    alt: "A Ship a feature workflow: Spec handled by Lead Agent, Build by Backend Agent, Code review by QA Agent, Approve by Mia Chen, then Shipped, with an issue just handed to Backend Agent",
     visual: WorkflowVisual,
+    frost: "ember",
   },
   {
     id: "chat",
-    title: "Mention an agent in chat",
-    body: "From Slack, Lark, DingTalk, WeCom, or Telegram. The agent reads the thread, files the issue, and gets to work.",
-    alt: "A message panel beside a board: messages land one by one, the agent's reply becomes a card that hops onto the board, and that column's lamp comes on",
-    visual: ChatFigure,
+    title: "Chat",
+    body: "Mention an agent in Slack, Lark, or Telegram. It reads the thread, files the issue, and starts work.",
+    alt: "A chat message asking Backend Agent about failing CSV exports, the agent's reply, and the issue it filed",
+    visual: ChatVisual,
+    frost: "sage",
   },
   {
     id: "autopilots",
-    title: "Autopilots run on a schedule",
-    body: "Upgrades, triage, and reports file themselves and land with an agent, every hour or every Monday.",
-    alt: "A 24-hour dial with a peg at each scheduled hour; as it turns, each peg trips a lever and the dispenser beside it pushes out a ticket",
-    visual: AutopilotsFigure,
+    title: "Autopilots",
+    body: "Upgrades, triage, and reports file themselves on a schedule and land with the right agent.",
+    alt: "Three autopilots with their schedules and agents, and an issue one of them just filed",
+    visual: AutopilotsVisual,
+    frost: "dusk",
   },
   {
     id: "skills",
-    title: "Skills the whole team shares",
-    body: "Write down how your team does a thing once, and every agent follows it.",
-    alt: "A stack of sheets wired to four agent pucks; a line is added to the top sheet, a token runs to each puck, and every puck's lamp comes on",
-    visual: SkillsFigure,
+    title: "Skills",
+    body: "Write down how your team does something once. Every agent follows it.",
+    alt: "A Write release notes skill with three rules, used by four agents",
+    visual: SkillsVisual,
+    frost: "sand",
   },
 ];
 
@@ -231,14 +237,18 @@ function Features() {
     <Section>
       <Container>
         <SectionHeader title="Built for teams of people and agents" />
-        <div className="mt-site-block grid gap-x-site-grid-col gap-y-site-grid-row md:grid-cols-2">
+        <div className="mt-site-block grid gap-site-grid-col md:grid-cols-2">
           {FEATURES.slice(0, 2).map((feature) => (
-            <FeatureCard key={feature.id} {...feature} aspect="aspect-[4/3]" />
+            <FeatureCard key={feature.id} {...feature} className="min-h-[28rem] lg:min-h-[33rem]" />
           ))}
         </div>
-        <div className="mt-site-grid-row grid gap-x-site-grid-col gap-y-site-grid-row md:grid-cols-3">
-          {FEATURES.slice(2).map((feature) => (
-            <FeatureCard key={feature.id} {...feature} aspect="aspect-[3/2]" />
+        <div className="mt-site-grid-col grid gap-site-grid-col md:grid-cols-2 xl:grid-cols-3">
+          {FEATURES.slice(2).map((feature, index) => (
+            <FeatureCard
+              key={feature.id}
+              {...feature}
+              className={cn("min-h-[26rem]", index === 2 && "md:col-span-2 xl:col-span-1")}
+            />
           ))}
         </div>
       </Container>
@@ -251,15 +261,18 @@ function FeatureCard({
   body,
   visual: Visual,
   alt,
-  aspect,
-}: (typeof FEATURES)[number] & { aspect: string }) {
+  frost,
+  className,
+}: (typeof FEATURES)[number] & { className: string }) {
   return (
-    <div>
-      <div role="img" aria-label={alt} className={cn("relative overflow-hidden rounded-site-panel bg-site-sunken", aspect)}>
+    <div data-frost={frost} className={cn("site-frost flex flex-col rounded-site-panel", className)}>
+      <div role="img" aria-label={alt} className="relative flex flex-1 flex-col">
         <Visual />
       </div>
-      <h3 className="mt-4 text-site-card text-site-ink">{title}</h3>
-      <p className="mt-site-stack max-w-[32rem] text-site-body text-site-muted">{body}</p>
+      <div className="relative px-6 pb-6 lg:px-7 lg:pb-7">
+        <h3 className="text-site-small text-white/75">{title}</h3>
+        <p className="mt-1 max-w-[30rem] text-site-body text-white text-pretty">{body}</p>
+      </div>
     </div>
   );
 }

@@ -218,121 +218,67 @@
     }
 }
 
-/* Isometric figures: solid parts filled in the card's colour and painted back
-   to front, four side tones by facing, a lighter top, one lit part in ink,
-   and amber lamps for agents at work. */
-.site-iso {
-    --iso-paper: var(--site-sunken);
-    --iso-top: oklch(0.995 0 0);
-    --iso-shade-0: oklch(0.87 0.003 286);
-    --iso-shade-1: oklch(0.9 0.003 286);
-    --iso-shade-2: oklch(0.935 0.002 286);
-    --iso-shade-3: oklch(0.962 0.002 286);
-    --iso-lit-top: oklch(1 0 0);
-    --iso-lit-shade: oklch(0.925 0.003 286);
-    --iso-hi: var(--site-ink);
-    --iso-mid: oklch(0.6 0.01 286);
-    --iso-lo: oklch(0.74 0.008 286);
-    --iso-faint: oklch(0.84 0.005 286);
-    --iso-dot: oklch(0.3 0.01 286);
+/* Feature cards: a frosted colour field. Soft pools of light over a base
+   tone, a diagonal sheen, fine film grain on top, and a darker floor that
+   keeps the card's white copy readable. The noise tile is drawn at half its
+   size so each grain lands near one device pixel. Content inside must be
+   positioned to paint above the grain. */
+.site-frost {
+    position: relative;
+    overflow: hidden;
+    background-color: var(--frost-base);
+    background-image:
+        linear-gradient(to top, color-mix(in oklab, var(--frost-deep) 85%, transparent), transparent 42%),
+        linear-gradient(118deg, transparent 30%, rgb(255 255 255 / 0.16) 47%, transparent 62%),
+        radial-gradient(60% 55% at 12% 8%, var(--frost-light), transparent 75%),
+        radial-gradient(55% 70% at 95% 30%, var(--frost-mid), transparent 72%),
+        radial-gradient(70% 60% at 25% 100%, var(--frost-deep), transparent 75%);
 }
 
-.site-iso .iso-svg path,
-.site-iso .iso-svg circle {
-    vector-effect: non-scaling-stroke;
+.site-frost::before {
+    content: "";
+    position: absolute;
+    inset: 0;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='180' height='180'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='3' stitchTiles='stitch'/%3E%3CfeColorMatrix type='saturate' values='0'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+    background-size: 90px 90px;
+    mix-blend-mode: overlay;
+    opacity: 0.35;
+    pointer-events: none;
 }
 
-.site-iso .iso-fill {
-    fill: var(--iso-paper);
+.site-frost[data-frost="slate"] {
+    --frost-base: oklch(0.56 0.035 245);
+    --frost-light: oklch(0.82 0.03 220);
+    --frost-mid: oklch(0.64 0.05 265);
+    --frost-deep: oklch(0.3 0.04 262);
 }
 
-.site-iso .iso-shade[data-shade="0"] {
-    fill: var(--iso-shade-0);
+.site-frost[data-frost="ember"] {
+    --frost-base: oklch(0.62 0.1 45);
+    --frost-light: oklch(0.86 0.07 75);
+    --frost-mid: oklch(0.6 0.15 28);
+    --frost-deep: oklch(0.34 0.08 22);
 }
 
-.site-iso .iso-shade[data-shade="1"] {
-    fill: var(--iso-shade-1);
+.site-frost[data-frost="sage"] {
+    --frost-base: oklch(0.57 0.04 175);
+    --frost-light: oklch(0.83 0.035 150);
+    --frost-mid: oklch(0.62 0.05 205);
+    --frost-deep: oklch(0.31 0.035 195);
 }
 
-.site-iso .iso-shade[data-shade="2"] {
-    fill: var(--iso-shade-2);
+.site-frost[data-frost="dusk"] {
+    --frost-base: oklch(0.54 0.06 295);
+    --frost-light: oklch(0.82 0.04 325);
+    --frost-mid: oklch(0.6 0.08 268);
+    --frost-deep: oklch(0.29 0.05 285);
 }
 
-.site-iso .iso-shade[data-shade="3"] {
-    fill: var(--iso-shade-3);
-}
-
-.site-iso .iso-top {
-    fill: var(--iso-top);
-}
-
-.site-iso .iso-solid[data-lit] > .iso-fill,
-.site-iso .iso-solid[data-lit] > .iso-top {
-    fill: var(--iso-lit-top);
-}
-
-.site-iso .iso-solid[data-lit] > .iso-shade {
-    fill: var(--iso-lit-shade);
-}
-
-.site-iso .iso-halo {
-    fill: oklch(0.5 0.01 286);
-    filter: blur(9px);
-    opacity: 0.3;
-    transform: translateY(3px);
-}
-
-.site-iso .iso-line {
-    fill: none;
-    stroke: var(--iso-lo);
-    stroke-width: 0.6px;
-    stroke-linecap: round;
-    stroke-linejoin: round;
-}
-
-.site-iso .iso-line[data-tone="hi"],
-.site-iso .iso-solid[data-lit] > .iso-edge {
-    stroke: var(--iso-hi);
-}
-
-.site-iso .iso-line[data-tone="mid"] {
-    stroke: var(--iso-mid);
-}
-
-.site-iso .iso-line[data-tone="faint"] {
-    stroke: var(--iso-faint);
-}
-
-.site-iso .iso-dots circle {
-    fill: var(--iso-dot);
-    opacity: 0.32;
-}
-
-.site-iso .iso-dots[data-tone="hi"] circle {
-    opacity: 0.85;
-}
-
-.site-iso .iso-dots[data-tone="mid"] circle {
-    opacity: 0.45;
-}
-
-.site-iso .iso-dots[data-tone="lo"] circle {
-    opacity: 0.22;
-}
-
-.site-iso [data-lamp] .iso-top,
-.site-iso [data-lamp] .iso-lamp {
-    fill: var(--iso-shade-1);
-    transition: fill 300ms;
-}
-
-.site-iso [data-on="agent"] [data-lamp] .iso-top,
-.site-iso [data-on="agent"] [data-lamp] .iso-lamp {
-    fill: var(--site-agent);
-}
-
-.site-iso [data-on="agent"] [data-lamp] .iso-shade {
-    fill: color-mix(in oklab, var(--site-agent) 70%, var(--site-ink));
+.site-frost[data-frost="sand"] {
+    --frost-base: oklch(0.62 0.045 75);
+    --frost-light: oklch(0.87 0.035 90);
+    --frost-mid: oklch(0.6 0.06 50);
+    --frost-deep: oklch(0.33 0.035 55);
 }
 
 .site-agent-pill {
@@ -343,26 +289,6 @@
 @media (prefers-reduced-motion: reduce) {
     .site-agent-pill {
         transition: none;
-    }
-}
-
-@theme {
-    --animate-site-hop: site-hop 800ms cubic-bezier(0.45, 0, 0.25, 1) both;
-
-    @keyframes site-hop {
-        from {
-            translate: var(--site-from);
-            opacity: 0;
-        }
-        12% {
-            opacity: 1;
-        }
-        50% {
-            translate: var(--site-via);
-        }
-        to {
-            translate: 0 0;
-        }
     }
 }
 
