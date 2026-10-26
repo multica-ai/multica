@@ -15,11 +15,7 @@ import {
   ChevronRight,
   CircleUser,
   Columns3,
-  FilePen,
-  FileSearch,
   FolderKanban,
-  GitMerge,
-  GitPullRequest,
   Inbox,
   Layers,
   ListFilter,
@@ -32,7 +28,6 @@ import {
   Search,
   SlidersHorizontal,
   SquarePen,
-  SquareTerminal,
   Users,
   X,
   Zap,
@@ -42,14 +37,15 @@ import { cn } from "@multica/ui/lib/utils";
 import { ShimmerText } from "@multica/ui/components/common/shimmer-text";
 import { StatusIcon } from "@multica/views/issues/components/status-icon";
 import { PriorityIcon } from "@multica/views/issues/components/priority-icon";
-import { Avatar, BACKEND, FRONTEND, LEO, MIA, QA, SAM, usePrefersReducedMotion, type Actor } from "./mock-kit";
+import { Avatar, usePrefersReducedMotion, type Actor } from "./mock-kit";
 
 /*
  * Hero product mockup: the issue board, built from the product's own tokens
  * and glyphs at a fixed design width, then zoomed to fit its frame; the
  * height follows the frame so the app's inset panel always closes. Data is
- * fictional. It loops one story: an unassigned issue is handed to an agent,
- * which works it, opens a PR, gets it approved, and lands it in Done.
+ * fictional. It loops one workflow's story — a focus issue moving across the
+ * board while its side panel fills with activity — and calls `onLoop` each
+ * time the story comes back to the start.
  */
 
 const WIDE_WIDTH = 1360;
@@ -57,9 +53,9 @@ const NARROW_WIDTH = 540;
 const NARROW_BELOW = 600;
 const COLUMN_STRIDE = 232 + 12;
 
-type Priority = "urgent" | "high" | "medium" | "low";
-type ColumnId = "todo" | "in_progress" | "in_review" | "done";
-type Card = {
+export type Priority = "none" | "urgent" | "high" | "medium" | "low";
+export type StatusId = "backlog" | "todo" | "in_progress" | "in_review" | "done";
+export type Card = {
   id: string;
   title: string;
   priority: Priority;
@@ -67,94 +63,51 @@ type Card = {
   working?: boolean;
   updated: string;
 };
-type Column = { status: ColumnId; label: string; total: number; cards: Card[] };
+export type Column = { status: StatusId; label: string; total: number; cards: Card[] };
 
-const HERO_CARD: Card = { id: "ACM-142", title: "Add rate limiting to the public API", priority: "high", updated: "just now" };
-
-const COLUMNS: Column[] = [
-  {
-    status: "todo",
-    label: "Todo",
-    total: 11,
-    cards: [
-      { id: "ACM-140", title: "Dark mode for billing settings", priority: "medium", assignee: MIA, updated: "1h ago" },
-      { id: "ACM-138", title: "Upgrade the Postgres driver to v5", priority: "low", assignee: LEO, updated: "3h ago" },
-      { id: "ACM-135", title: "Add SAML login for enterprise workspaces", priority: "medium", updated: "5h ago" },
-      { id: "ACM-134", title: "Search results ignore archived projects", priority: "low", assignee: SAM, updated: "1d ago" },
-    ],
-  },
-  {
-    status: "in_progress",
-    label: "In Progress",
-    total: 4,
-    cards: [
-      { id: "ACM-136", title: "Move auth webhooks onto the job queue", priority: "high", assignee: BACKEND, working: true, updated: "2m ago" },
-      { id: "ACM-133", title: "Fix the flaky checkout test on CI", priority: "urgent", assignee: QA, working: true, updated: "just now" },
-      { id: "ACM-131", title: "Rewrite the onboarding emails", priority: "medium", assignee: SAM, updated: "40m ago" },
-      { id: "ACM-130", title: "Usage chart for the admin dashboard", priority: "medium", assignee: FRONTEND, updated: "1h ago" },
-    ],
-  },
-  {
-    status: "in_review",
-    label: "In Review",
-    total: 3,
-    cards: [
-      { id: "ACM-129", title: "Paginate the audit log endpoint", priority: "medium", assignee: BACKEND, updated: "12m ago" },
-      { id: "ACM-127", title: "Refresh the pricing page copy", priority: "low", assignee: MIA, updated: "2h ago" },
-      { id: "ACM-126", title: "Cache the plan lookup on checkout", priority: "medium", assignee: QA, updated: "4h ago" },
-    ],
-  },
-  {
-    status: "done",
-    label: "Done",
-    total: 28,
-    cards: [
-      { id: "ACM-125", title: "CSV export for reports", priority: "medium", assignee: FRONTEND, updated: "1h ago" },
-      { id: "ACM-122", title: "Retry failed Stripe webhooks", priority: "high", assignee: BACKEND, updated: "3h ago" },
-      { id: "ACM-120", title: "Update the SSO setup guide", priority: "low", assignee: LEO, updated: "5h ago" },
-      { id: "ACM-118", title: "Remove the legacy v1 export endpoint", priority: "medium", assignee: BACKEND, updated: "1d ago" },
-      { id: "ACM-117", title: "Fix timezone drift in weekly digests", priority: "high", assignee: QA, updated: "1d ago" },
-    ],
-  },
-];
-
-const COLUMN_ORDER: ColumnId[] = ["todo", "in_progress", "in_review", "done"];
-const BASE_WORKING = COLUMNS.flatMap((c) => c.cards).filter((card) => card.working).length;
-
-/** One beat of the story: where the issue is, what the panel shows, and how long to hold. */
-type Stage = {
-  column: ColumnId;
-  assigned: boolean;
+/** One beat of the story: where the focus issue is, what the panel shows, and how long to hold. */
+export type Stage = {
+  column: StatusId;
+  assignee?: Actor;
+  priority?: Priority;
   working: boolean;
   panel: boolean;
   entries: number;
   hold: number;
 };
 
-const STAGES: Stage[] = [
-  { column: "todo", assigned: false, working: false, panel: false, entries: 0, hold: 1800 },
-  { column: "todo", assigned: true, working: false, panel: false, entries: 0, hold: 900 },
-  { column: "in_progress", assigned: true, working: true, panel: true, entries: 1, hold: 1100 },
-  { column: "in_progress", assigned: true, working: true, panel: true, entries: 2, hold: 1000 },
-  { column: "in_progress", assigned: true, working: true, panel: true, entries: 3, hold: 1000 },
-  { column: "in_progress", assigned: true, working: true, panel: true, entries: 4, hold: 1300 },
-  { column: "in_review", assigned: true, working: false, panel: true, entries: 5, hold: 1700 },
-  { column: "in_review", assigned: true, working: false, panel: true, entries: 6, hold: 1300 },
-  { column: "done", assigned: true, working: false, panel: true, entries: 7, hold: 1500 },
-  { column: "done", assigned: true, working: false, panel: false, entries: 7, hold: 2200 },
-];
+export type Workflow = {
+  id: string;
+  label: string;
+  description: string;
+  columns: Column[];
+  focus: Card;
+  stages: Stage[];
+  /** Stage shown when motion is reduced. */
+  still: number;
+  Activity: (props: { stage: Stage }) => ReactNode;
+};
 
 const MOVE_EASE = "cubic-bezier(0.32, 0.72, 0, 1)";
 
-export function HeroBoard() {
+export function HeroBoard({ workflow, onLoop }: { workflow: Workflow; onLoop?: () => void }) {
   const windowRef = useRef<HTMLDivElement>(null);
   const boardRef = useRef<HTMLDivElement>(null);
-  const positions = useRef<{ zoom: number; at: Map<string, { x: number; y: number }> } | null>(null);
+  const positions = useRef<{ key: string; at: Map<string, { x: number; y: number }> } | null>(null);
   const [fit, setFit] = useState<{ zoom: number; narrow: boolean; height: number } | null>(null);
   const [visible, setVisible] = useState(false);
-  const [step, setStep] = useState(0);
+  const [shown, setShown] = useState({ id: workflow.id, step: 0 });
   const reducedMotion = usePrefersReducedMotion();
-  const stage = STAGES[step]!;
+
+  // A new workflow restarts its story from the first beat.
+  const step = shown.id === workflow.id ? shown.step : 0;
+  if (shown.id !== workflow.id) setShown({ id: workflow.id, step: 0 });
+  const stage = workflow.stages[reducedMotion ? workflow.still : step]!;
+
+  const onLoopRef = useRef(onLoop);
+  useLayoutEffect(() => {
+    onLoopRef.current = onLoop;
+  });
 
   useEffect(() => {
     const el = windowRef.current;
@@ -175,15 +128,20 @@ export function HeroBoard() {
 
   useEffect(() => {
     if (!visible || reducedMotion) return;
-    const timer = setTimeout(() => setStep((current) => (current + 1) % STAGES.length), stage.hold);
+    const timer = setTimeout(() => {
+      const next = (step + 1) % workflow.stages.length;
+      if (next === 0) onLoopRef.current?.();
+      setShown({ id: workflow.id, step: next });
+    }, stage.hold);
     return () => clearTimeout(timer);
-  }, [step, stage.hold, visible, reducedMotion]);
+  }, [step, stage.hold, visible, reducedMotion, workflow]);
 
   // FLIP: cards that changed place glide from where they were. Positions are
   // relative to the board, so panning it on narrow screens is not a move.
   useLayoutEffect(() => {
     const board = boardRef.current;
     if (!board || !fit) return;
+    const key = `${workflow.id}@${fit.zoom}`;
     const origin = board.getBoundingClientRect();
     const next = new Map<string, { x: number; y: number }>();
     const cards = board.querySelectorAll<HTMLElement>("[data-card]");
@@ -192,13 +150,13 @@ export function HeroBoard() {
       next.set(el.dataset.card!, { x: (rect.left - origin.left) / fit.zoom, y: (rect.top - origin.top) / fit.zoom });
     }
     const previous = positions.current;
-    if (previous && previous.zoom === fit.zoom && !reducedMotion) {
+    if (previous?.key === key && !reducedMotion) {
       for (const el of cards) {
         const id = el.dataset.card!;
         const from = previous.at.get(id);
         const to = next.get(id);
         if (!from || !to) continue;
-        if (id === HERO_CARD.id && step === 0) {
+        if (id === workflow.focus.id && step === 0) {
           el.animate([{ opacity: 0 }, { opacity: 1 }], { duration: 400, easing: "ease-out" });
           continue;
         }
@@ -206,27 +164,31 @@ export function HeroBoard() {
         const dy = from.y - to.y;
         if (Math.abs(dx) < 0.5 && Math.abs(dy) < 0.5) continue;
         el.animate([{ transform: `translate(${dx}px, ${dy}px)` }, { transform: "none" }], {
-          duration: id === HERO_CARD.id ? 650 : 450,
+          duration: id === workflow.focus.id ? 650 : 450,
           easing: MOVE_EASE,
         });
       }
     }
-    positions.current = { zoom: fit.zoom, at: next };
-  }, [step, fit, reducedMotion]);
+    positions.current = { key, at: next };
+  }, [step, fit, reducedMotion, workflow]);
 
   const narrow = fit?.narrow ?? false;
-  const heroCard: Card = {
-    ...HERO_CARD,
-    assignee: stage.assigned ? BACKEND : undefined,
+  const columns = workflow.columns;
+  const focus: Card = {
+    ...workflow.focus,
+    priority: stage.priority ?? workflow.focus.priority,
+    assignee: stage.assignee,
     working: stage.working,
   };
-  const pan = narrow ? Math.min(Math.max(COLUMN_ORDER.indexOf(stage.column) - 1, 0), 2) * COLUMN_STRIDE : 0;
+  const baseWorking = columns.flatMap((c) => c.cards).filter((card) => card.working).length;
+  const columnIndex = columns.findIndex((c) => c.status === stage.column);
+  const pan = narrow ? Math.min(Math.max(columnIndex - 1, 0), columns.length - 2) * COLUMN_STRIDE : 0;
 
   return (
     <div
       ref={windowRef}
       role="img"
-      aria-label="A Multica issue board: an issue is assigned to a coding agent, which works on it, opens a pull request, and moves it to done after review"
+      aria-label={workflow.description}
       className="absolute inset-0 overflow-hidden rounded-[12px] border border-site-line-strong bg-app-shell shadow-site-float"
     >
       <div
@@ -245,28 +207,31 @@ export function HeroBoard() {
             <ListTodo className="size-4 text-muted-foreground" />
             <span className="text-label font-medium">Issues</span>
           </div>
-          <Toolbar working={BASE_WORKING + (stage.working ? 1 : 0)} compact={narrow} />
-          <div className="min-h-0 flex-1 overflow-hidden">
+          <Toolbar working={baseWorking + (stage.working ? 1 : 0)} compact={narrow} />
+          <div
+            key={`board-${workflow.id}`}
+            className="min-h-0 flex-1 overflow-hidden animate-in fade-in duration-500 motion-reduce:animate-none"
+          >
             <div
               ref={boardRef}
               className="flex items-start gap-3 px-3 pb-3 transition-transform duration-700 ease-in-out motion-reduce:transition-none"
               style={{ transform: pan ? `translateX(${-pan}px)` : undefined }}
             >
-              {COLUMNS.map((column) => {
-                const holdsHero = column.status === stage.column;
+              {columns.map((column) => {
+                const holdsFocus = column.status === stage.column;
                 return (
                   <BoardColumn
                     key={column.status}
                     column={column}
-                    total={column.total + (holdsHero ? 1 : 0)}
-                    cards={holdsHero ? [heroCard, ...column.cards] : column.cards}
-                    peeked={stage.panel && !narrow ? HERO_CARD.id : undefined}
+                    total={column.total + (holdsFocus ? 1 : 0)}
+                    cards={holdsFocus ? [focus, ...column.cards] : column.cards}
+                    peeked={stage.panel && !narrow ? focus.id : undefined}
                   />
                 );
               })}
             </div>
           </div>
-          {narrow ? null : <IssuePanel stage={stage} />}
+          {narrow ? null : <IssuePanel key={`panel-${workflow.id}`} workflow={workflow} focus={focus} stage={stage} />}
         </main>
       </div>
     </div>
@@ -424,7 +389,7 @@ function BoardCard({ card, peeked }: { card: Card; peeked: boolean }) {
     >
       <div className="flex items-center justify-between gap-2">
         <div className="flex min-w-0 items-center gap-1.5">
-          <span className="inline-flex size-5 shrink-0 items-center justify-center">
+          <span key={card.priority} className="inline-flex size-5 shrink-0 items-center justify-center animate-in fade-in duration-300 motion-reduce:animate-none">
             <PriorityIcon priority={card.priority} />
           </span>
           <p className="truncate text-caption text-muted-foreground">{card.id}</p>
@@ -457,14 +422,24 @@ function WorkingBadge({ actor }: { actor: Actor }) {
   );
 }
 
-const STATUS_LABEL: Record<ColumnId, string> = {
+const STATUS_LABEL: Record<StatusId, string> = {
+  backlog: "Backlog",
   todo: "Todo",
   in_progress: "In Progress",
   in_review: "In Review",
   done: "Done",
 };
 
-function IssuePanel({ stage }: { stage: Stage }) {
+const PRIORITY_LABEL: Record<Priority, string> = {
+  none: "No priority",
+  urgent: "Urgent",
+  high: "High",
+  medium: "Medium",
+  low: "Low",
+};
+
+function IssuePanel({ workflow, focus, stage }: { workflow: Workflow; focus: Card; stage: Stage }) {
+  const { Activity } = workflow;
   return (
     <aside
       data-open={stage.panel}
@@ -476,7 +451,7 @@ function IssuePanel({ stage }: { stage: Stage }) {
     >
       <div className="flex h-11 shrink-0 items-center justify-between border-b border-border px-4">
         <span className="flex items-center gap-1 text-caption text-muted-foreground">
-          Acme Labs <ChevronRight className="size-3" /> <span className="text-foreground">{HERO_CARD.id}</span>
+          Acme Labs <ChevronRight className="size-3" /> <span className="text-foreground">{focus.id}</span>
         </span>
         <span className="flex items-center gap-3 text-muted-foreground">
           <Maximize2 className="size-3.5" />
@@ -484,7 +459,7 @@ function IssuePanel({ stage }: { stage: Stage }) {
         </span>
       </div>
       <div className="flex min-h-0 flex-1 flex-col gap-5 overflow-hidden px-5 py-4">
-        <p className="text-title font-semibold leading-snug">{HERO_CARD.title}</p>
+        <p className="text-title font-semibold leading-snug">{focus.title}</p>
         <dl className="grid grid-cols-[88px_1fr] items-center gap-y-2.5 text-caption">
           <dt className="text-muted-foreground">Status</dt>
           <dd key={stage.column} className="flex items-center gap-1.5 animate-in fade-in duration-300 motion-reduce:animate-none">
@@ -492,68 +467,34 @@ function IssuePanel({ stage }: { stage: Stage }) {
             {STATUS_LABEL[stage.column]}
           </dd>
           <dt className="text-muted-foreground">Priority</dt>
-          <dd className="flex items-center gap-1.5">
-            <PriorityIcon priority="high" />
-            High
+          <dd key={focus.priority} className="flex items-center gap-1.5 animate-in fade-in duration-300 motion-reduce:animate-none">
+            <PriorityIcon priority={focus.priority} />
+            {PRIORITY_LABEL[focus.priority]}
           </dd>
           <dt className="text-muted-foreground">Assignee</dt>
-          <dd className="flex items-center gap-1.5">
-            <Avatar actor={BACKEND} size={16} />
-            {BACKEND.name}
-          </dd>
+          {focus.assignee ? (
+            <dd key={focus.assignee.name} className="flex items-center gap-1.5 animate-in fade-in duration-300 motion-reduce:animate-none">
+              <Avatar actor={focus.assignee} size={16} />
+              {focus.assignee.name}
+            </dd>
+          ) : (
+            <dd className="text-muted-foreground">Unassigned</dd>
+          )}
         </dl>
         <div className="flex flex-col gap-3 border-t border-border pt-4">
           <p className="text-caption font-medium text-muted-foreground">Activity</p>
-          {stage.entries >= 1 ? (
-            <Entry>
-              <ActivityRow icon={<Avatar actor={BACKEND} size={16} />}>
-                <span className="font-medium text-foreground">Backend Agent</span> picked this up
-              </ActivityRow>
-            </Entry>
-          ) : null}
-          {stage.entries >= 2 ? (
-            <Entry>
-              <RunCard stage={stage} />
-            </Entry>
-          ) : null}
-          {stage.entries >= 5 ? (
-            <Entry>
-              <Comment actor={BACKEND}>
-                <p>Added a token bucket per API key: 100 requests a minute by default, 429 with Retry-After past that.</p>
-                <span className="mt-2 flex items-center gap-2 rounded-md border border-border px-2.5 py-1.5">
-                  <GitPullRequest className="size-3.5 text-muted-foreground" />
-                  <span className="min-w-0 flex-1 truncate font-medium">#318 Rate limit the public API</span>
-                  <span className="text-success tabular-nums">+184</span>
-                  <span className="text-destructive tabular-nums">−12</span>
-                </span>
-              </Comment>
-            </Entry>
-          ) : null}
-          {stage.entries >= 6 ? (
-            <Entry>
-              <Comment actor={MIA}>
-                <p>Reviewed, nice tests. Approved.</p>
-              </Comment>
-            </Entry>
-          ) : null}
-          {stage.entries >= 7 ? (
-            <Entry>
-              <ActivityRow icon={<GitMerge className="size-3.5 text-muted-foreground" />}>
-                <span className="font-medium text-foreground">Mia Chen</span> merged #318
-              </ActivityRow>
-            </Entry>
-          ) : null}
+          <Activity stage={stage} />
         </div>
       </div>
     </aside>
   );
 }
 
-function Entry({ children }: { children: ReactNode }) {
+export function Entry({ children }: { children: ReactNode }) {
   return <div className="animate-in fade-in slide-in-from-bottom-1 duration-300 motion-reduce:animate-none">{children}</div>;
 }
 
-function ActivityRow({ icon, children }: { icon: ReactNode; children: ReactNode }) {
+export function ActivityRow({ icon, children }: { icon: ReactNode; children: ReactNode }) {
   return (
     <p className="flex items-center gap-2 text-caption text-muted-foreground">
       <span className="flex size-4 items-center justify-center">{icon}</span>
@@ -563,48 +504,46 @@ function ActivityRow({ icon, children }: { icon: ReactNode; children: ReactNode 
   );
 }
 
-const RUN_STEPS: { icon: LucideIcon; text: ReactNode }[] = [
-  { icon: FileSearch, text: "Read 14 files in api/middleware" },
-  {
-    icon: FilePen,
-    text: (
-      <>
-        Edited 3 files <span className="text-success">+184</span> <span className="text-destructive">−12</span>
-      </>
-    ),
-  },
-  {
-    icon: SquareTerminal,
-    text: (
-      <>
-        go test ./... <span className="text-muted-foreground">212 passed</span>
-      </>
-    ),
-  },
-];
+export type RunStep = { icon: LucideIcon; text: ReactNode };
 
-function RunCard({ stage }: { stage: Stage }) {
-  const shown = Math.min(stage.entries - 1, RUN_STEPS.length);
+/** An agent run whose steps appear one per entry from `at`; it finishes once all are shown. */
+export function RunCard({
+  actor,
+  runtime,
+  steps,
+  at,
+  entries,
+  duration,
+}: {
+  actor: Actor;
+  runtime: string;
+  steps: RunStep[];
+  at: number;
+  entries: number;
+  duration: string;
+}) {
+  const shown = Math.min(entries - at + 1, steps.length);
+  const running = entries < at + steps.length;
   return (
     <div className="rounded-lg border border-border bg-muted/40 p-3">
       <div className="flex items-center justify-between text-caption">
         <span className="flex items-center gap-1.5 font-medium">
-          <Avatar actor={BACKEND} size={16} />
-          Run · Claude Code
+          <Avatar actor={actor} size={16} />
+          Run · {runtime}
         </span>
-        {stage.working ? (
+        {running ? (
           <span className="flex items-center gap-1.5">
             <span className="size-1.5 rounded-full bg-site-agent" />
             <ShimmerText className="text-micro text-muted-foreground">Working</ShimmerText>
           </span>
         ) : (
           <span className="flex items-center gap-1 text-micro text-muted-foreground">
-            <Check className="size-3" /> Finished in 3m 48s
+            <Check className="size-3" /> Finished in {duration}
           </span>
         )}
       </div>
       <ul className="mt-2.5 flex flex-col gap-1.5 font-mono text-micro">
-        {RUN_STEPS.slice(0, shown).map((runStep, index) => (
+        {steps.slice(0, shown).map((runStep, index) => (
           <li key={index} className="flex items-center gap-2 animate-in fade-in duration-300 motion-reduce:animate-none">
             <runStep.icon className="size-3.5 shrink-0 text-muted-foreground" />
             <span className="truncate">{runStep.text}</span>
@@ -615,7 +554,7 @@ function RunCard({ stage }: { stage: Stage }) {
   );
 }
 
-function Comment({ actor, children }: { actor: Actor; children: ReactNode }) {
+export function Comment({ actor, children }: { actor: Actor; children: ReactNode }) {
   return (
     <div className="rounded-lg border border-surface-border bg-surface p-3 text-caption shadow-[var(--surface-shadow)]">
       <div className="mb-1.5 flex items-center gap-1.5">

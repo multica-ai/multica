@@ -25,6 +25,8 @@ export const BACKEND: Actor = { kind: "agent", name: "Backend Agent", provider: 
 export const QA: Actor = { kind: "agent", name: "QA Agent", provider: "Codex" };
 export const FRONTEND: Actor = { kind: "agent", name: "Frontend Agent", provider: "Cursor" };
 export const LEAD: Actor = { kind: "agent", name: "Lead Agent", provider: "Claude Code" };
+export const CONTENT: Actor = { kind: "agent", name: "Content Agent", provider: "Hermes" };
+export const TRIAGE: Actor = { kind: "agent", name: "Triage Agent", provider: "OpenCode" };
 
 export const PROVIDER_MARKS = new Map<string, ComponentType<{ className?: string }>>(
   HERO_PROVIDERS.map((provider) => [provider.name, provider.Mark]),

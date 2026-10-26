@@ -17,7 +17,7 @@ import {
 import { CUSTOMER_LOGOS } from "./customer-logos";
 import { RuntimesVisual, WorkflowVisual } from "./demo/feature-visuals";
 import { AutopilotsFigure, ChatFigure, SkillsFigure } from "./demo/figure-visuals";
-import { HeroBoard } from "./demo/hero-board";
+import { HeroDemo } from "./demo/hero-demo";
 import { PROVIDER_MARKS, useStoryLoop } from "./demo/mock-kit";
 import { AgentVisual, ConnectVisual, ReviewVisual } from "./demo/how-it-works-visuals";
 import { CtaBand, SitePage } from "./site-page";
@@ -72,9 +72,7 @@ function Hero() {
         </div>
       </Container>
       <Container className="mt-10 lg:mt-12">
-        <div className="relative aspect-square sm:aspect-[16/10]">
-          <HeroBoard />
-        </div>
+        <HeroDemo />
       </Container>
     </section>
   );
