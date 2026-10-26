@@ -136,7 +136,7 @@
     --site-gutter: 1.25rem;
     --site-header: 3.25rem;
     --site-hero: 3rem;
-    --site-section: 3rem;
+    --site-section: 4.5rem;
     --site-block: 2.5rem;
     --site-stack: 0.5rem;
     --site-grid-row: 3rem;
@@ -152,7 +152,7 @@
     .landing-light {
         --site-gutter: 3.75rem;
         --site-hero: 4rem;
-        --site-section: 3.75rem;
+        --site-section: 7rem;
         --site-grid-row: 3.75rem;
         --site-step: 7.5rem;
     }

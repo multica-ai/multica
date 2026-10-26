@@ -1,8 +1,8 @@
 "use client";
 
-import { useEffect, useRef, useState, type ComponentType, type CSSProperties } from "react";
+import { useEffect, useRef, useState, type ComponentType, type CSSProperties, type ReactNode } from "react";
 import Link from "next/link";
-import { ArrowRight, Check } from "lucide-react";
+import { ArrowRight, Check, ChevronsLeftRight } from "lucide-react";
 import { cn } from "@multica/ui/lib/utils";
 import { BorderBeam } from "@multica/ui/components/common/border-beam";
 import { useAuthStore } from "@multica/core/auth";
@@ -18,12 +18,13 @@ import {
 import { CUSTOMER_LOGOS } from "./customer-logos";
 import { AutopilotsVisual, ChatVisual, RuntimesVisual, SkillsVisual, WorkflowVisual } from "./demo/feature-visuals";
 import { HeroDemo } from "./demo/hero-demo";
-import { PROVIDER_MARKS, useStoryLoop } from "./demo/mock-kit";
+import { PROVIDER_MARKS, ZoomCanvas, usePrefersReducedMotion, useStoryLoop } from "./demo/mock-kit";
 import {
   DigestAfter,
   DigestBefore,
   PipelineAfter,
   PipelineBefore,
+  STAGE_CANVAS,
   TabsAfter,
   TabsBefore,
 } from "./demo/before-after-visuals";
@@ -261,134 +262,214 @@ function FeatureCard({ id, title, body, visual: Visual, alt }: (typeof FEATURES)
   );
 }
 
-type Scene = { body: string; alt: string; visual: ComponentType };
-
-const STORIES: { id: string; title: string; metric: [string, string]; before: Scene; after: Scene }[] = [
+const STORIES: {
+  id: string;
+  title: string;
+  metric: [string, string];
+  before: string;
+  after: string;
+  scenes: [ComponentType, ComponentType];
+}[] = [
   {
     id: "board",
     title: "Thirty agents, thirty tabs",
     metric: ["30 tabs", "1 board"],
-    before: {
-      body: "Every agent runs in its own terminal tab. You spend the day cycling through them, and a question waits in the one you aren’t looking at.",
-      alt: "A terminal with four agent tabs open and 26 more hidden, and a two-hour-old prompt in another tab asking whether to apply a migration",
-      visual: TabsBefore,
-    },
-    after: {
-      body: "Every agent’s work is an issue on one shared board. You see who is on what, and anything waiting on you stands out.",
-      alt: "The Issues list grouped by status: one issue blocked and waiting for you, three in progress with agents working, one in review",
-      visual: TabsAfter,
-    },
+    before: "Every agent runs in its own terminal tab, and a question waits in the one you aren’t watching.",
+    after: "All their work sits on one board, and anything waiting on you lands in your inbox.",
+    scenes: [TabsBefore, TabsAfter],
   },
   {
     id: "digest",
     title: "The work nobody has time to do",
     metric: ["Spot checks", "every conversation"],
-    before: {
-      body: "Thousands of support conversations come in every day. Someone spot-checks a few dozen, and the rest are never read.",
-      alt: "A spreadsheet of 2,418 support conversations where only 40 are marked reviewed",
-      visual: DigestBefore,
-    },
-    after: {
-      body: "An autopilot reads every conversation overnight and files what needs fixing. You review the digest in the morning.",
-      alt: "A daily support digest where Content Agent read all 2,418 conversations, grouped them into three themes, and filed two issues, reviewed by Mia Chen at 09:12",
-      visual: DigestAfter,
-    },
+    before: "Someone spot-checks a few dozen support conversations a day. The rest are never read.",
+    after: "An autopilot reads every one overnight and files what needs fixing. You review the digest in the morning.",
+    scenes: [DigestBefore, DigestAfter],
   },
   {
     id: "pipeline",
     title: "A process that waits on people",
     metric: ["About 2 weeks", "about 3 days"],
-    before: {
-      body: "Analyze, fix, evaluate, release. Each step waits for someone to notice it’s their turn, so one fix takes about two weeks.",
-      alt: "A chat thread from Monday to the next Thursday where each step of a fix waits for the next person to pick it up",
-      visual: PipelineBefore,
-    },
-    after: {
-      body: "Agents hand each step to the next, and people step in only to approve. The same fix ships in about three days.",
-      alt: "An issue timeline where agents find the cause, open a pull request, and run 1,204 eval cases, then Mia Chen approves the release on day 3",
-      visual: PipelineAfter,
-    },
+    before: "Each step of a fix waits for someone to notice it’s their turn.",
+    after: "Agents hand each step to the next, and people step in only to approve.",
+    scenes: [PipelineBefore, PipelineAfter],
   },
 ];
 
 function BeforeAfter() {
+  const [active, setActive] = useState(0);
+  const story = STORIES[active]!;
+
   return (
     <Section>
       <Container>
         <SectionHeader
           title="What changes when agents join your team"
-          lead="Three stories from teams that moved their agent work into Multica."
+          lead="Three stories from teams that moved their agent work into Multica. Drag to compare."
         />
-        <ol className="mt-site-block flex flex-col gap-site-step">
-          {STORIES.map((story) => (
-            <Story key={story.id} {...story} />
-          ))}
-        </ol>
+        <div className="mt-site-block grid gap-8 xl:grid-cols-[minmax(0,21rem)_minmax(0,1fr)] xl:gap-14">
+          <ol className="order-2 flex flex-col xl:order-1">
+            {STORIES.map((item, index) => {
+              const selected = index === active;
+              return (
+                <li key={item.id} className="relative border-t border-site-line last:border-b">
+                  <span
+                    aria-hidden
+                    className={cn(
+                      "absolute -top-px left-0 h-px bg-site-ink transition-[width] duration-500 ease-out motion-reduce:transition-none",
+                      selected ? "w-full" : "w-0",
+                    )}
+                  />
+                  <button
+                    type="button"
+                    aria-pressed={selected}
+                    onClick={() => setActive(index)}
+                    className={cn("group w-full py-5 text-left", focusRing)}
+                  >
+                    <span
+                      className={cn(
+                        "block text-site-card transition-colors",
+                        selected ? "text-site-ink" : "text-site-muted group-hover:text-site-ink",
+                      )}
+                    >
+                      {item.title}
+                    </span>
+                    <span className="mt-1.5 block font-site-mono text-site-small text-site-muted tabular-nums">
+                      {item.metric[0]} <span aria-hidden>→</span>
+                      <span className="sr-only">to</span> <span className={cn(selected && "text-site-ink")}>{item.metric[1]}</span>
+                    </span>
+                    <span
+                      className={cn(
+                        "grid transition-[grid-template-rows,opacity] duration-500 ease-out motion-reduce:transition-none",
+                        selected ? "grid-rows-[1fr] opacity-100" : "grid-rows-[0fr] opacity-0",
+                      )}
+                    >
+                      <span className="flex flex-col gap-2 overflow-hidden text-site-body text-site-muted">
+                        <span className="pt-3">
+                          <span className="text-site-ink">Before.</span> {item.before}
+                        </span>
+                        <span>
+                          <span className="text-site-ink">With Multica.</span> {item.after}
+                        </span>
+                      </span>
+                    </span>
+                  </button>
+                </li>
+              );
+            })}
+          </ol>
+          <CompareStage key={story.id} story={story} className="order-1 xl:order-2" />
+        </div>
       </Container>
     </Section>
   );
 }
 
-function Story({ id, title, metric: [from, to], before, after }: (typeof STORIES)[number]) {
-  const ref = useRef<HTMLLIElement>(null);
-  const [seen, setSeen] = useState(false);
+function CompareStage({ story, className }: { story: (typeof STORIES)[number]; className?: string }) {
+  const [Before, After] = story.scenes;
+  const ref = useRef<HTMLDivElement>(null);
+  const [split, setSplit] = useState(100);
+  const [sweeping, setSweeping] = useState(false);
+  const reducedMotion = usePrefersReducedMotion();
 
   useEffect(() => {
     const el = ref.current;
     if (!el) return;
+    let timer: ReturnType<typeof setTimeout> | undefined;
     const intersection = new IntersectionObserver(
       ([entry]) => {
         if (!entry?.isIntersecting) return;
-        setSeen(true);
         intersection.disconnect();
+        if (reducedMotion) {
+          setSplit(50);
+          return;
+        }
+        timer = setTimeout(() => {
+          setSweeping(true);
+          setSplit(50);
+        }, 500);
       },
-      { threshold: 0.3 },
+      { threshold: 0.5 },
     );
     intersection.observe(el);
-    return () => intersection.disconnect();
-  }, []);
+    return () => {
+      intersection.disconnect();
+      clearTimeout(timer);
+    };
+  }, [reducedMotion]);
+
+  const motion = sweeping && "transition-[clip-path,left] duration-[1400ms] ease-[cubic-bezier(0.65,0,0.35,1)]";
 
   return (
-    <li ref={ref}>
-      <div className="flex flex-wrap items-baseline justify-between gap-x-6 gap-y-1">
-        <h3 className="font-site-display text-site-title text-site-ink">{title}</h3>
-        <p className="text-site-small text-site-muted tabular-nums">
-          {from} <span aria-hidden>→</span>
-          <span className="sr-only">to</span> <span className="text-site-ink">{to}</span>
-        </p>
+    <div
+      ref={ref}
+      role="group"
+      aria-label={story.title}
+      className={cn("relative aspect-[4/3] overflow-hidden rounded-site-panel select-none sm:aspect-[3/2]", className)}
+    >
+      <p className="sr-only">
+        Before: {story.before} With Multica: {story.after}
+      </p>
+      <div className="absolute inset-0">
+        <div data-frost={story.id} className="site-frost size-full">
+          <ZoomCanvas {...STAGE_CANVAS}>
+            <After />
+          </ZoomCanvas>
+        </div>
+        <StageLabel className="right-2.5 sm:right-4">With Multica</StageLabel>
       </div>
-      <div className="mt-6 grid gap-x-site-grid-col gap-y-8 md:grid-cols-2">
-        <StoryPanel label="Before" scene={before} />
-        <StoryPanel label="With Multica" scene={after} frost={id} revealed={seen} />
+      <div
+        className={cn("absolute inset-0", motion)}
+        style={{ clipPath: `inset(0 ${100 - split}% 0 0)` }}
+        onTransitionEnd={() => setSweeping(false)}
+      >
+        <div className="site-visual size-full">
+          <ZoomCanvas {...STAGE_CANVAS}>
+            <Before />
+          </ZoomCanvas>
+        </div>
+        <StageLabel className="left-2.5 sm:left-4">Before</StageLabel>
       </div>
-    </li>
+      <input
+        type="range"
+        min={0}
+        max={100}
+        value={split}
+        aria-label="Compare before and with Multica"
+        aria-valuetext={`${split}% before`}
+        onChange={(event) => {
+          setSweeping(false);
+          setSplit(Number(event.target.value));
+        }}
+        className="peer absolute inset-0 size-full cursor-ew-resize appearance-none opacity-0"
+      />
+      <div
+        aria-hidden
+        className={cn(
+          "pointer-events-none absolute inset-y-0 w-px bg-site-surface",
+          "peer-focus-visible:*:outline-2 peer-focus-visible:*:outline-offset-2 peer-focus-visible:*:outline-site-accent",
+          motion,
+        )}
+        style={{ left: `${split}%` }}
+      >
+        <span className="absolute top-1/2 left-1/2 flex size-9 -translate-x-1/2 -translate-y-1/2 items-center justify-center rounded-full bg-site-surface text-site-ink shadow-site-float ring-1 ring-site-line">
+          <ChevronsLeftRight className="size-4" />
+        </span>
+      </div>
+    </div>
   );
 }
 
-function StoryPanel({ label, scene, frost, revealed = true }: { label: string; scene: Scene; frost?: string; revealed?: boolean }) {
-  const Visual = scene.visual;
+function StageLabel({ className, children }: { className: string; children: ReactNode }) {
   return (
-    <figure>
-      <div
-        role="img"
-        aria-label={scene.alt}
-        data-frost={frost}
-        className={cn("relative aspect-[16/10] overflow-hidden rounded-site-panel", frost ? "site-frost" : "bg-site-sunken")}
-      >
-        <div
-          className={cn(
-            "absolute inset-0 transition-[opacity,translate] delay-150 duration-700 ease-out motion-reduce:transition-none",
-            !revealed && "translate-y-3 opacity-0 motion-reduce:translate-y-0 motion-reduce:opacity-100",
-          )}
-        >
-          <Visual />
-        </div>
-      </div>
-      <figcaption className="mt-4">
-        <p className={cn("font-site-mono text-site-label uppercase", frost ? "text-site-ink" : "text-site-muted")}>{label}</p>
-        <p className="mt-site-stack max-w-[32rem] text-site-body text-site-muted">{scene.body}</p>
-      </figcaption>
-    </figure>
+    <span
+      className={cn(
+        "absolute top-2.5 rounded-site-control bg-site-surface px-2 py-0.5 text-caption text-site-ink shadow-site-float sm:top-4 sm:px-2.5 sm:py-1 sm:text-site-small",
+        className,
+      )}
+    >
+      {children}
+    </span>
   );
 }
 
