@@ -282,17 +282,20 @@ describe("StatusPicker on an issue outside any project (MUL-8121)", () => {
     expect(checkOf("Todo")?.getAttribute("class")).toContain("invisible");
   });
 
-  it("still reaches every status through search", () => {
+  it("searches only the Default workflow's statuses", () => {
     catalogEntries = [TODO, IN_REVIEW, QA, MERGED, DONE];
     workspaceDefault = DEFAULT;
     const onUpdate = vi.fn();
     renderWithI18n(
       <StatusPicker status="todo" projectId={null} onUpdate={onUpdate} open onOpenChange={() => {}} />,
     );
-    fireEvent.change(screen.getByPlaceholderText("Search status..."), { target: { value: "merg" } });
-    expect(rows()).toEqual(["Merged"]);
-    fireEvent.click(optionRow("Merged"));
-    expect(onUpdate).toHaveBeenCalledWith({ status: "merged" });
+    const search = screen.getByPlaceholderText("Search status...");
+    fireEvent.change(search, { target: { value: "merg" } });
+    expect(rows()).toEqual([]);
+    fireEvent.change(search, { target: { value: "rev" } });
+    expect(rows()).toEqual(["In Review"]);
+    fireEvent.click(optionRow("In Review"));
+    expect(onUpdate).toHaveBeenCalledWith({ status: "in_review" });
   });
 
   it("offers the whole catalog when the surface spans projects", () => {

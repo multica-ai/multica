@@ -2,6 +2,7 @@ export {
   issueWorkflowKeys,
   issueWorkflowListOptions,
   resolveProjectWorkflow,
+  issueStatusWorkflow,
   sharedWorkflowStatusKeys,
   defaultWorkflow,
   isFixedWorkflowStatus,

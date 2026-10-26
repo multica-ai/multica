@@ -64,7 +64,7 @@ import { useActorName } from "@multica/core/workspace/hooks";
 import { useCurrentWorkspace, useWorkspacePaths } from "@multica/core/paths";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { useIssueStatuses } from "@multica/core/issue-statuses/hooks";
-import { useProjectWorkflow, workflowAllowsStatus, workflowStep } from "@multica/core/issue-workflows";
+import { useProjectWithWorkflow, useProjectWorkflow, workflowAllowsStatus, workflowStep } from "@multica/core/issue-workflows";
 import { projectListOptions } from "@multica/core/projects/queries";
 import { stepHandlerActor, useStepHandlerLabel } from "../workflows/step-handler";
 import { useIssueDraftStore, type IssueCreateDraft } from "@multica/core/issues/stores/draft-store";
@@ -415,9 +415,11 @@ export function ManualCreatePanel({
     setParentIssueId(id);
     setStage(null);
   };
-  // A project using a named workflow only accepts its columns: a status it
-  // does not list moves to todo, which every workflow keeps. (MUL-7420)
-  const createWorkflow = useProjectWorkflow(wsId, projectId);
+  // An issue only takes its workflow's columns — its project's, or Default's
+  // outside a project: a status it does not list moves to todo, which every
+  // workflow keeps. (MUL-7420, MUL-8250)
+  const { workflow: projectWorkflow, defaultWorkflow: workspaceDefault } = useProjectWithWorkflow(wsId, projectId);
+  const createWorkflow = projectId ? projectWorkflow : workspaceDefault;
   useEffect(() => {
     if (createWorkflow && !workflowAllowsStatus(createWorkflow, status)) {
       setStatus("todo");

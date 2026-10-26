@@ -14,8 +14,9 @@
 //
 // A project without a workflow uses the workspace Default workflow. Default
 // is a stored row once created; before that it is the built-in statuses.
-// Status writes on a Default project are never rejected: issues already on
-// statuses Default does not list keep them, as they always have.
+// Once stored, Default limits status writes like any workflow, on its
+// projects and on issues outside any project alike (MUL-8250). Issues already
+// on statuses Default does not list keep them until someone moves them.
 package issueworkflow
 
 import (
@@ -266,6 +267,14 @@ func stepsFor(keys []string) []Step {
 		steps[i] = Step{StatusKey: key, Handler: Handler{Type: HandlerNone}}
 	}
 	return steps
+}
+
+// Limits reports whether the workflow restricts the statuses its issues may
+// enter. Only a Default the workspace has not stored yet does not: it stands
+// for "the built-in statuses" before the workspace ever used workflows, and
+// limiting by it would strand custom statuses that workspace already uses.
+func (d Definition) Limits() bool {
+	return !d.IsDefault || d.ID.Valid
 }
 
 // Has reports whether the workflow lists the status key.
@@ -561,6 +570,25 @@ func ForProject(ctx context.Context, q Querier, workspaceID, projectID pgtype.UU
 	return def, project, err
 }
 
+// OutsideProject loads the workflow that limits the statuses of an issue
+// outside any project: the workspace's stored Default, or nil before the
+// workspace stores one. Nothing hands off outside a project, so it is only
+// for checking statuses; ForProject stays nil there. (MUL-8250)
+func OutsideProject(ctx context.Context, q Querier, workspaceID pgtype.UUID) (*Definition, error) {
+	row, err := q.GetDefaultIssueWorkflow(ctx, workspaceID)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	def, err := Decode(row)
+	if err != nil {
+		return nil, err
+	}
+	return &def, nil
+}
+
 // ForProjectRow loads the workflow of an already-loaded project. A dangling
 // workflow reference falls back to Default.
 func ForProjectRow(ctx context.Context, q Querier, project db.Project) (*Definition, error) {
@@ -631,9 +659,16 @@ type NotInWorkflowError struct {
 	StatusKey    string
 	WorkflowName string
 	Allowed      []string
+	// OutsideProject marks an issue outside any project, which takes the
+	// statuses of the workspace Default.
+	OutsideProject bool
 }
 
 func (e *NotInWorkflowError) Error() string {
+	if e.OutsideProject {
+		return fmt.Sprintf("status %q is not part of the workflow %q that issues outside a project use; use one of: %s",
+			e.StatusKey, e.WorkflowName, strings.Join(e.Allowed, ", "))
+	}
 	return fmt.Sprintf("status %q is not part of this project's workflow %q; use one of: %s",
 		e.StatusKey, e.WorkflowName, strings.Join(e.Allowed, ", "))
 }
@@ -670,14 +705,25 @@ func statusLabel(name, key string) string {
 	return fmt.Sprintf("%q (%s)", name, key)
 }
 
-// CheckStatus rejects a status a named workflow does not list. Default
-// accepts every status, so issues already on statuses it no longer lists
-// keep working.
+// CheckStatus rejects a status the workflow does not list. Callers skip it
+// when a write keeps the issue's current status, so an issue already on a
+// status its workflow no longer lists keeps working.
 func CheckStatus(def *Definition, key string) error {
-	if def == nil || def.IsDefault || def.Has(key) {
+	if def == nil || !def.Limits() || def.Has(key) {
 		return nil
 	}
 	return &NotInWorkflowError{StatusKey: key, WorkflowName: def.Name, Allowed: def.StatusKeys()}
+}
+
+// CheckStatusOutsideProject is CheckStatus for an issue outside any project,
+// against OutsideProject's workflow.
+func CheckStatusOutsideProject(def *Definition, key string) error {
+	err := CheckStatus(def, key)
+	var notIn *NotInWorkflowError
+	if errors.As(err, &notIn) {
+		notIn.OutsideProject = true
+	}
+	return err
 }
 
 // BriefInput carries what the handoff brief names.

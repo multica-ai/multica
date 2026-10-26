@@ -307,7 +307,7 @@ func TestDefaultWorkflowIsEditableButNotDeletable(t *testing.T) {
 	if updated.Name != "Default" || len(updated.Steps) != 6 {
 		t.Fatalf("updated Default = %+v, want its name kept and in_review removed", updated)
 	}
-	// Default accepts every status, so dropping one moves no issue.
+	// Editing Default maps no issue: one on a status it dropped keeps it.
 	if status, _, _ := issueStatusAndAssignee(t, issueID); status != "in_review" {
 		t.Fatalf("editing Default moved an issue to %q", status)
 	}
@@ -385,6 +385,58 @@ func TestUpdateIssueRejectsStatusOutsideNamedWorkflow(t *testing.T) {
 		t.Fatalf("error %q should list the allowed keys", msg)
 	}
 	updateIssueForTest(t, issueID, map[string]any{"status": "blocked"}).Want(http.StatusOK)
+}
+
+// A stored Default limits statuses on its projects and on issues outside any
+// project; an issue already on another status keeps it. (MUL-8250)
+func TestDefaultLimitsStatusesInAndOutsideProjects(t *testing.T) {
+	seedTestCatalog(t)
+	resetDefaultWorkflow(t)
+	testutil.Call(t, testHandler.ListIssueWorkflows, workflowRequest("GET", "/api/issue-workflows", nil)).Want(http.StatusOK)
+	statusName := "Ship " + workflowTestSuffix()[10:]
+	var wf IssueWorkflowResponse
+	testutil.Call(t, testHandler.CreateIssueWorkflow, workflowRequest("POST", "/api/issue-workflows", map[string]any{
+		"name":  "Ship " + workflowTestSuffix(),
+		"steps": []map[string]any{{"new_status": map[string]any{"name": statusName, "category": "started"}}},
+	})).Want(http.StatusCreated).JSON(&wf)
+	t.Cleanup(func() {
+		testPool.Exec(context.Background(), `DELETE FROM issue_workflow WHERE id = $1`, wf.ID)
+		testPool.Exec(context.Background(), `DELETE FROM issue_status WHERE workspace_id = $1 AND name = $2`, testWorkspaceID, statusName)
+	})
+	shipKey := ""
+	for _, s := range wf.Steps {
+		if lookupStatusName(t, s.StatusKey) == statusName {
+			shipKey = s.StatusKey
+		}
+	}
+	if shipKey == "" {
+		t.Fatalf("workflow steps %+v lack the new status", wf.Steps)
+	}
+
+	outside := dbfx.Issue(t, "outside a project", testutil.Cols{"status": "todo"})
+	body := updateIssueForTest(t, outside, map[string]any{"status": shipKey}).Want(http.StatusBadRequest).Map()
+	if body["code"] != "status_not_in_workflow" {
+		t.Fatalf("code = %v, want status_not_in_workflow", body["code"])
+	}
+	if msg, _ := body["error"].(string); !strings.Contains(msg, "issues outside a project") {
+		t.Fatalf("error %q should say the issue is outside a project", msg)
+	}
+	updateIssueForTest(t, outside, map[string]any{"status": "in_progress"}).Want(http.StatusOK)
+
+	projectID := createWorkflowTestProject(t, "Default limit project")
+	onDefault := dbfx.Issue(t, "on a Default project", testutil.Cols{"project_id": projectID, "status": "todo"})
+	updateIssueForTest(t, onDefault, map[string]any{"status": shipKey}).Want(http.StatusBadRequest)
+
+	kept := dbfx.Issue(t, "already shipped", testutil.Cols{"status": shipKey})
+	updateIssueForTest(t, kept, map[string]any{"title": "still shipped"}).Want(http.StatusOK)
+	updateIssueForTest(t, kept, map[string]any{"status": shipKey}).Want(http.StatusOK)
+	if status, _, _ := issueStatusAndAssignee(t, kept); status != shipKey {
+		t.Fatalf("an issue already on %q moved to %q", shipKey, status)
+	}
+
+	testutil.Call(t, testHandler.CreateIssue, newRequest("POST", "/api/issues?workspace_id="+testWorkspaceID, map[string]any{
+		"title": "created outside Default", "status": shipKey,
+	})).Want(http.StatusBadRequest)
 }
 
 func TestStatusChangeHandsOffOnDefaultProject(t *testing.T) {
