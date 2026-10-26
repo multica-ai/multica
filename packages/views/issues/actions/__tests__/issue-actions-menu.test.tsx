@@ -118,6 +118,8 @@ vi.mock("sonner", () => ({
 const { apiMocks, copyTextMock } = vi.hoisted(() => ({
   apiMocks: {
     listTasksByIssue: vi.fn(),
+    listIssueWorkflows: vi.fn(),
+    listProjects: vi.fn(),
   },
   copyTextMock: vi.fn(),
 }));
@@ -185,6 +187,10 @@ beforeEach(() => {
   toastSuccessMock.mockReset();
   listTasksByIssueMock.mockReset();
   listTasksByIssueMock.mockResolvedValue([]);
+  apiMocks.listIssueWorkflows.mockReset();
+  apiMocks.listIssueWorkflows.mockResolvedValue({ workflows: [] });
+  apiMocks.listProjects.mockReset();
+  apiMocks.listProjects.mockResolvedValue({ projects: [] });
 });
 
 describe("IssueActionsDropdown", () => {
@@ -205,12 +211,13 @@ describe("IssueActionsDropdown", () => {
     expect(screen.getByText("Priority")).toBeInTheDocument();
     expect(screen.getByText("Assignee")).toBeInTheDocument();
     expect(screen.getByText("Due date")).toBeInTheDocument();
+    expect(screen.getByText("Rename issue")).toBeInTheDocument();
     expect(screen.getByText("Open in new tab")).toBeInTheDocument();
     expect(screen.getByText("Copy link")).toBeInTheDocument();
+    expect(screen.getByText("Create sub-issue")).toBeInTheDocument();
     expect(screen.getByText("Relations")).toBeInTheDocument();
     expect(screen.getByText("Delete issue")).toBeInTheDocument();
-    // Relationship actions are hidden inside the "Relations" submenu by default.
-    expect(screen.queryByText("Create sub-issue")).not.toBeInTheDocument();
+    // Linking to existing issues stays inside the "Relations" submenu.
     expect(screen.queryByText("Set parent issue...")).not.toBeInTheDocument();
     expect(screen.queryByText("Add sub-issue...")).not.toBeInTheDocument();
   });
@@ -292,6 +299,48 @@ describe("IssueActionsDropdown", () => {
       issueId: "issue-1",
       identifier: "TES-1",
       onDeletedFallbackPath: "/test/issues",
+    });
+  });
+
+  it("clicking Create sub-issue opens the create modal parented to this issue", async () => {
+    render(
+      wrap(
+        <IssueActionsDropdown
+          issue={mockIssue}
+          trigger={<button data-testid="trigger">Menu</button>}
+        />,
+      ),
+    );
+
+    fireEvent.click(screen.getByTestId("trigger"));
+    fireEvent.click(await screen.findByText("Create sub-issue"));
+
+    expect(mockOpenModal).toHaveBeenCalledWith(
+      "create-issue",
+      expect.objectContaining({
+        parent_issue_id: "issue-1",
+        parent_issue_identifier: "TES-1",
+      }),
+    );
+  });
+
+  it("clicking Rename issue opens the rename modal with the current title", async () => {
+    render(
+      wrap(
+        <IssueActionsDropdown
+          issue={mockIssue}
+          trigger={<button data-testid="trigger">Menu</button>}
+        />,
+      ),
+    );
+
+    fireEvent.click(screen.getByTestId("trigger"));
+    fireEvent.click(await screen.findByText("Rename issue"));
+
+    expect(mockOpenModal).toHaveBeenCalledWith("issue-rename", {
+      issueId: "issue-1",
+      identifier: "TES-1",
+      title: "Example",
     });
   });
 
@@ -429,7 +478,58 @@ describe("IssueActionsContextMenu", () => {
     expect(await screen.findByText("Status")).toBeInTheDocument();
     // The right-click surface is what list rows, board cards, gantt bars and
     // sub-issue rows all share, so this one assertion covers them together.
+    expect(screen.getByText("Rename issue")).toBeInTheDocument();
     expect(screen.getByText("Open in new tab")).toBeInTheDocument();
     expect(screen.getByText("Delete issue")).toBeInTheDocument();
+  });
+});
+
+describe("Status in a workflow project (MUL-7420)", () => {
+  const workflowIssue = { ...mockIssue, project_id: "proj-1" } as Issue;
+
+  beforeEach(() => {
+    apiMocks.listProjects.mockResolvedValue({
+      projects: [{ id: "proj-1", title: "App", workflow_id: "wf-1", lead_type: null, lead_id: null }],
+    });
+    apiMocks.listIssueWorkflows.mockResolvedValue({
+      workflows: [
+        {
+          id: "wf-1",
+          name: "Delivery",
+          description: "",
+          is_default: false,
+          project_ids: ["proj-1"],
+          steps: [
+            { status_key: "todo", handler: { type: "none" }, instructions: "" },
+            { status_key: "in_progress", handler: { type: "agent", id: "agent-1" }, instructions: "" },
+            { status_key: "done", handler: { type: "none" }, instructions: "" },
+          ],
+        },
+      ],
+    });
+  });
+
+  it("offers only the workflow's statuses and confirms a handoff before applying it", async () => {
+    render(
+      wrap(
+        <IssueActionsDropdown
+          issue={workflowIssue}
+          trigger={<button data-testid="trigger">Menu</button>}
+        />,
+      ),
+    );
+
+    fireEvent.click(screen.getByTestId("trigger"));
+    fireEvent.click(await screen.findByText("Status"));
+
+    await waitFor(() => expect(screen.queryByText("Backlog")).not.toBeInTheDocument());
+    expect(screen.queryByText("In Review")).not.toBeInTheDocument();
+    fireEvent.click(await screen.findByText("In Progress"));
+
+    expect(mockOpenModal).toHaveBeenCalledWith("issue-workflow-handoff", {
+      issueId: "issue-1",
+      identifier: "TES-1",
+      status: "in_progress",
+    });
   });
 });

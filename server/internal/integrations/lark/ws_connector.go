@@ -13,52 +13,15 @@ import (
 	"github.com/gorilla/websocket"
 )
 
-// WSLongConnConnector is the production EventConnector that holds the
-// Lark long-conn WebSocket open, decodes the binary Frame envelope
-// the open-platform server pushes, and forwards normalized inbound
-// events to the Hub's Dispatcher.
+// WSLongConnConnector bootstraps and maintains the Lark WebSocket connection.
+// Use the returned service ID and application-level ping interval, not WebSocket
+// protocol PING frames. Data acknowledgements preserve inbound headers and report
+// dispatcher success or retryable failure.
 //
-// Protocol layer (aligned with `larksuite/oapi-sdk-go/v3/ws`):
-//
-//  1. EndpointFetcher does the POST /callback/ws/endpoint bootstrap.
-//     Lark returns a single-use wss URL with `device_id` + `service_id`
-//     query parameters acting as the credential. The `service_id` is
-//     extracted and used as Frame.Service on every outbound frame.
-//  2. Every WebSocket frame is a binary protobuf Frame. JSON envelopes
-//     are wrapped inside Frame.Payload for data events; control,
-//     ping, pong, ack frames are pure-binary.
-//  3. The client emits an app-layer ping frame (NewPingFrame) on the
-//     PingInterval the server returned in the bootstrap ClientConfig.
-//     WebSocket protocol-level PING is NOT used — Lark's server
-//     ignores it. The server can also push pings at any time; we
-//     reply with NewPongFrame.
-//  4. Every data frame requires an ACK back. The ACK reuses the
-//     inbound frame's Headers verbatim (Lark correlates by
-//     message_id) and writes a JSON Response{code:200, ...} as the
-//     Payload. We send ACK 200 on successful Dispatcher emit, 500
-//     when the Dispatcher reported an infra failure so Lark retries.
-//
-// Ownership of the §4.4 invariant (ctx cancel breaks blocking read):
-//
-// gorilla/websocket.ReadMessage blocks on the TCP socket and does NOT
-// observe a context. Cancelling our ctx flips ctx.Done but does not
-// touch the read syscall. We bridge ctx → read interrupt with a
-// watchdog goroutine that calls conn.Close once ctx fires;
-// gorilla.Close causes any in-flight Read to return immediately with
-// a "use of closed connection" error. The watchdog also runs on a
-// normal exit (so we never leak a goroutine) and is idempotent
-// because conn.Close is safe to call multiple times. This invariant
-// MUST be preserved by any future protocol change: without it,
-// renewLeaseUntil's cancelRun is meaningless and two replicas can
-// process the same installation during a healthy-but-silent socket.
-//
-// PersonalAgent compatibility risk: the official Feishu docs describe
-// long-conn as "supports 企业自建应用 only". PersonalAgent device-flow
-// apps are not listed as supported. If the bootstrap call returns a
-// structured error from Lark, this connector exits Run with the error
-// wrapped and the Hub's backoff loop logs it on every retry — making
-// the misconfiguration visible. See MUL-2671 review thread for the
-// smoke-test path.
+// ReadMessage does not observe context cancellation. A watchdog closes the socket
+// on cancellation so lease loss interrupts a silent connection before another
+// replica takes ownership. Stop that watchdog on normal exit as well.
+// Bootstrap failures return to the hub's backoff loop with their upstream error.
 type WSLongConnConnector struct {
 	cfg WSConnectorConfig
 }

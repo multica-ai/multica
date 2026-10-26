@@ -21,6 +21,31 @@ import (
 	"time"
 )
 
+// TestDiscoverHermesModelsProbesPerModelEffort covers a runtime whose set_model
+// response is empty: the non-default model's catalog must come from the options
+// re-read through the session's model selector.
+func TestDiscoverHermesModelsProbesPerModelEffort(t *testing.T) {
+	script := `#!/bin/sh
+while IFS= read -r line; do
+ id=$(printf '%s' "$line" | sed -n 's/.*"id":\([0-9]*\).*/\1/p')
+ case "$line" in
+  *'"method":"session/new"'*) printf '{"jsonrpc":"2.0","id":%s,"result":{"sessionId":"s","models":{"currentModelId":"a","availableModels":[{"modelId":"a"},{"modelId":"b"}]},"configOptions":[{"id":"model","currentValue":"a","options":[{"value":"a"},{"value":"b"}]},{"id":"effort","currentValue":"low","options":[{"value":"low"}]}]}}\n' "$id" ;;
+  *'"configId":"model"'*) printf '{"jsonrpc":"2.0","id":%s,"result":{"configOptions":[{"id":"effort","currentValue":"high","options":[{"value":"high"},{"value":"max"}]}]}}\n' "$id" ;;
+  *) printf '{"jsonrpc":"2.0","id":%s,"result":{}}\n' "$id" ;;
+ esac
+done
+`
+	fakePath := filepath.Join(t.TempDir(), "hermes")
+	writeTestExecutable(t, fakePath, []byte(script))
+	models, err := discoverHermesModels(context.Background(), Command{Path: fakePath})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(models) != 2 || models[1].Thinking == nil || models[1].Thinking.DefaultLevel != "high" || len(models[1].Thinking.SupportedLevels) != 2 {
+		t.Fatalf("models = %+v", models)
+	}
+}
+
 // hermesACPProviderUnconfiguredScript is a `hermes acp` stand-in that completes
 // initialize and then rejects session/new exactly as hermes 0.20.0 does when it
 // resolves no LLM provider — verified against the real binary by pointing it at

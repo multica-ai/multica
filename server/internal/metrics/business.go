@@ -46,6 +46,12 @@ type BusinessMetrics struct {
 	taskTotalSeconds  *prometheus.HistogramVec
 	taskInProgress    *prometheus.GaugeVec
 	taskIterations    *prometheus.HistogramVec
+	// taskClaimDecision counts claim-path decisions by the poll path that
+	// made them, the outcome, and the reason; one increment per claim
+	// attempt or per poll-level decision that never enters a claim attempt.
+	// See the funnel in internal/service/task_claim_decision.go and the
+	// prewarm table below.
+	taskClaimDecision *prometheus.CounterVec
 
 	llmTokens         *prometheus.CounterVec
 	llmCostUSD        *prometheus.CounterVec
@@ -165,6 +171,12 @@ func NewBusinessMetrics() *BusinessMetrics {
 			Help:      "Retry attempt count observed when an agent task reaches a terminal state.",
 			Buckets:   []float64{1, 2, 3, 4, 5, 10},
 		}, metricLabels("multica_agent_task_iteration_count")),
+		taskClaimDecision: prometheus.NewCounterVec(prometheus.CounterOpts{
+			Namespace: "multica",
+			Subsystem: "agent_task",
+			Name:      "claim_decision_total",
+			Help:      "Claim decisions by claim path, outcome, and reason; one increment per claim attempt or per poll-level decision that never enters a claim attempt.",
+		}, metricLabels("multica_agent_task_claim_decision_total")),
 		llmTokens: prometheus.NewCounterVec(prometheus.CounterOpts{
 			Namespace: "multica",
 			Subsystem: "llm",
@@ -301,6 +313,7 @@ func NewBusinessMetrics() *BusinessMetrics {
 		events:      newBusinessEventMetrics(),
 	}
 	m.prewarmFailureReasons()
+	m.prewarmClaimDecisions()
 	for _, reason := range []string{RuntimeGCSkipEligibilityChanged, RuntimeGCSkipNonTerminalTask, RuntimeGCSkipWorkspaceMismatch} {
 		m.runtimeGCSkipped.WithLabelValues(reason).Add(0)
 	}
@@ -329,6 +342,7 @@ func (m *BusinessMetrics) Collectors() []prometheus.Collector {
 		m.taskTotalSeconds,
 		m.taskInProgress,
 		m.taskIterations,
+		m.taskClaimDecision,
 		m.llmTokens,
 		m.llmCostUSD,
 		m.llmUnpricedTokens,
@@ -403,6 +417,17 @@ func (m *BusinessMetrics) RecordEntitlementDecision(gate, action, reason string)
 	if m != nil {
 		m.entitlementDecision.WithLabelValues(gate, action, reason).Inc()
 	}
+}
+
+// RecordClaimDecision counts one claim-path decision. Labels are normalized
+// upstream by the single funnel in internal/service/task_claim_decision.go;
+// this method deliberately does not re-normalize (same contract as
+// RecordEntitlementDecision).
+func (m *BusinessMetrics) RecordClaimDecision(claimPath, outcome, reason string) {
+	if m == nil {
+		return
+	}
+	m.taskClaimDecision.WithLabelValues(claimPath, outcome, reason).Inc()
 }
 
 // RecordAgentRuntimeLookup counts one logical agent_runtime lookup — one
@@ -760,4 +785,69 @@ func (m *BusinessMetrics) prewarmFailureReasons() {
 			}
 		}
 	}
+}
+
+// prewarmClaimDecisions seeds every (claim_path, outcome, reason) series the
+// claim paths can emit so an outcome that has not fired since this process
+// started reads as zero instead of as a missing series (same rationale as the
+// agent_runtime_lookup grid above). The table mirrors claimReasonFor in
+// internal/service/task_claim_decision.go; keep the two in sync when an
+// outcome is added.
+func (m *BusinessMetrics) prewarmClaimDecisions() {
+	for _, s := range claimDecisionSeries() {
+		m.taskClaimDecision.WithLabelValues(s.claimPath, s.outcome, s.reason).Add(0)
+	}
+}
+
+type claimDecisionSeriesKey struct{ claimPath, outcome, reason string }
+
+// claimDecisionSeries enumerates the closed set of legal label combinations:
+// the claimTask outcomes shared by every poll path, the no_tasks reason split
+// by whether the caller had a candidate list, and the poll exits (single
+// runtime and batch) that never enter claimTask. Values mirror the constants
+// in internal/service/task_claim_decision.go.
+func claimDecisionSeries() []claimDecisionSeriesKey {
+	claimTaskOutcomes := []claimDecisionSeriesKey{
+		{"", "claimed", "claimed"},
+		{"", "no_capacity", "agent_concurrency_cap"},
+		{"", "no_runtime", "agent_unbound"},
+		{"", "runtime_mismatch", "agent_rebound"},
+		{"", "error_get_agent", "error"},
+		{"", "error_count_running", "error"},
+		{"", "error_claim", "error"},
+		{"", "error_reanchor_chat_input", "error"},
+		{"", "error_transaction", "error"},
+	}
+	var series []claimDecisionSeriesKey
+	for _, claimPath := range []string{"agent", "runtime", "batch"} {
+		for _, o := range claimTaskOutcomes {
+			series = append(series, claimDecisionSeriesKey{claimPath, o.outcome, o.reason})
+		}
+	}
+	// The agent path has no candidate list, so its no_tasks can only say the
+	// cause is unknown; the runtime and batch paths see the candidate count.
+	series = append(series, claimDecisionSeriesKey{"agent", "no_tasks", "unknown_candidates"})
+	for _, claimPath := range []string{"runtime", "batch"} {
+		series = append(series,
+			claimDecisionSeriesKey{claimPath, "no_tasks", "candidates_unclaimed"},
+			claimDecisionSeriesKey{claimPath, "no_tasks", "no_visible_candidates"},
+		)
+	}
+	for _, s := range []claimDecisionSeriesKey{
+		{"runtime", "empty_cache_hit", "empty_cache"},
+		{"runtime", "empty_db", "no_visible_candidates"},
+		{"runtime", "reclaimed_dispatched", "stale_dispatch_recovered"},
+		{"runtime", "error_promote_deferred", "error"},
+		{"runtime", "error_reclaim_dispatched", "error"},
+		{"runtime", "error_list", "error"},
+		{"batch", "empty_cache_hit", "empty_cache"},
+		{"batch", "empty_db", "no_visible_candidates"},
+		{"batch", "reclaimed_dispatched", "stale_dispatch_recovered"},
+		{"batch", "error_promote_deferred", "error"},
+		{"batch", "error_reclaim_dispatched", "error"},
+		{"batch", "error_list", "error"},
+	} {
+		series = append(series, s)
+	}
+	return series
 }

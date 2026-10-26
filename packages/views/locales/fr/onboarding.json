@@ -106,10 +106,6 @@
       "other_placeholder": "ex. coordination d'un groupe d'étude"
     }
   },
-  "option_card": {
-    "other_label": "Autre",
-    "other_aria": "Décrire autre chose"
-  },
   "step_question": {
     "hint_pick": "Vous pouvez passer cette étape."
   },
@@ -135,28 +131,7 @@
     "success_toast": "Vous êtes sur la liste. Nous vous écrirons dès que les runtimes cloud seront actifs.",
     "failed_toast": "Échec de l'inscription à la liste d'attente"
   },
-  "welcome_after_onboarding": {
-    "skip": {
-      "loading": "Configuration de votre espace de travail…",
-      "title": "Bienvenue sur Multica !",
-      "subtitle": "Nous avons ajouté une tâche pour vous aider à connecter un runtime. Une fois prêt, commencez avec Mika depuis Runtimes.",
-      "got_it": "Compris",
-      "status_in_progress": "En cours",
-      "error_title": "Nous n'avons pas pu mettre cela en place",
-      "error_body": "Le guide de runtime n'a pas été créé. Vous pouvez réessayer, ou connecter un runtime depuis la page Runtimes quand vous le souhaitez.",
-      "retry": "Réessayer",
-      "dismiss": "Pas maintenant",
-      "cards": {
-        "install_runtime": {
-          "title": "Connecter un runtime",
-          "subtitle": "Installez Codex ou Kimi, puis démarrez la discussion guidée avec Mika depuis Runtimes."
-        }
-      }
-    }
-  },
   "step_workspace": {
-    "eyebrow_first": "Votre premier espace de travail",
-    "eyebrow_resume": "Reprendre ou repartir de zéro",
     "headline_first": "Nommez votre espace de travail.",
     "headline_resume": "Continuez avec {{name}}, ou créez-en un autre.",
     "lede_first": "Un espace de travail réunit vos tâches, vos agents et vos projets. Vous pourrez inviter des coéquipiers ou en créer d'autres plus tard.",
@@ -186,11 +161,9 @@
     "slug_reserved_error": "Cette URL d'espace de travail est réservée et ne peut pas être utilisée.",
     "slug_conflict_toast": "Choisissez une autre URL d'espace de travail",
     "create_failed_toast": "Échec de la création de l'espace de travail",
-    "creation_disabled_eyebrow": "La création d'espaces de travail est désactivée",
     "creation_disabled_headline": "Demandez une invitation à votre administrateur.",
     "creation_disabled_lede": "Cette instance Multica n'autorise pas la création de nouveaux espaces de travail. Dès qu'un administrateur vous invite, acceptez l'invitation et actualisez pour continuer.",
     "creation_disabled_logout": "Se déconnecter",
-    "creation_disabled_eyebrow_resume": "Votre espace de travail",
     "creation_disabled_headline_resume": "Continuez avec {{name}}.",
     "creation_disabled_lede_resume": "La création d'espaces de travail est désactivée sur cette instance : vous continuerez donc dans votre espace existant."
   },
@@ -204,8 +177,6 @@
     "status_all_online": "tous en ligne",
     "status_none_online": "aucun en ligne",
     "status_n_online": "{{count}} en ligne",
-    "online_label": "en ligne",
-    "offline_label": "hors ligne",
     "empty_headline": "Aucun runtime d'agent trouvé sur cet ordinateur pour l'instant.",
     "empty_lede_prefix": "Un runtime d'agent est un outil de codage IA auquel nous nous connectons — comme ",
     "empty_lede_suffix": ". Installez-en un et actualisez, ou choisissez une option ci-dessous.",
@@ -224,7 +195,6 @@
     "continue": "Commencer avec Mika"
   },
   "step_platform": {
-    "eyebrow": "Connecter un ordinateur",
     "headline": "Connectez un ordinateur pour exécuter votre agent.",
     "lede": "Connectez un ordinateur pour que Mika puisse travailler.",
     "hint_default": "Vous pouvez vous connecter plus tard.",
@@ -239,7 +209,6 @@
     "cloud_action": "Bientôt disponible",
     "cli_dialog_title": "Connecter depuis le terminal",
     "cli_dialog_pick_hint": "Choisissez un ordinateur ci-dessus.",
-    "cli_dialog_connect": "Connecter et continuer",
     "runtimes_connected_one": "{{count}} ordinateur connecté",
     "runtimes_connected_other": "{{count}} ordinateurs connectés",
     "live_listening": "En direct · En attente de votre ordinateur",
@@ -255,6 +224,7 @@
   },
   "errors": {
     "skip_failed": "Échec de la finalisation de la prise en main",
+    "guide_failed": "Le guide de runtime n'a pas été créé. Veuillez réessayer.",
     "mika_setup_failed": "Impossible de démarrer votre espace de travail Mika"
   },
   "mika_intro": {

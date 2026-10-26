@@ -61,9 +61,9 @@ Les catégories simplifient le raisonnement sur le cycle de vie. Les tableaux, l
 | `blocked` (Bloqué) | Ne peut pas continuer pour l'instant. |
 | `cancelled` (Annulé) | Abandonnée ; l'historique est conservé. |
 
-Il n'existe pas de flux imposé entre les statuts — membres et agents peuvent les modifier directement.
+Les membres et les agents peuvent modifier directement les statuts. Dans un projet avec un [workflow](/workflows), choisissez parmi ses étapes. Entrer dans une étape avec passage de relais peut aussi changer le responsable et demander à un agent de commencer.
 
-Les agents inscrivent le statut dans lequel se trouve la tâche à mesure que leur travail le fait évoluer : commencer ce que demande la tâche — quelle qu'en soit la forme : recherche, conception ou relecture demandée par la tâche elle-même — la fait passer immédiatement à `in_progress`, pour que le tableau montre le travail pendant son déroulement ; une livraison la fait passer à `in_review` ; un travail qui se poursuit au-delà du tour la maintient en `in_progress` ; un tour qui ne produit rien du livrable propre à la tâche — répondre à des questions, donner un avis sur un travail géré ailleurs — laisse le statut inchangé du début à la fin. Ces mises à jour sont écrites explicitement par l'agent via le CLI Multica pendant l'exécution — le serveur ne change pas le statut de la tâche au démarrage ou à la fin d'une exécution (hormis les deux exceptions système ci-dessous). `done` relève généralement d'une confirmation humaine, ou d'une intégration, par exemple la fusion d'une PR avec intention de clôture.
+Les agents mettent à jour le statut au fil du travail. Par défaut, ils indiquent le travail en cours au démarrage et la relecture à la livraison. Si le projet utilise un workflow, ils suivent ses étapes et ses consignes. La fin d’une exécution ne termine pas la tâche à elle seule ; répondre à une question ne signifie pas que tout le travail est livré.
 
 <Callout type="info">
 Deux changements sont effectués par le système :
@@ -74,27 +74,15 @@ Deux changements sont effectués par le système :
 
 ### Statuts personnalisés
 
-Un propriétaire ou un administrateur de l'espace de travail peut ajouter des statuts dans **Paramètres → États des tâches** — `Code Review`, `QA`, `Rework`. Chaque statut appartient à l'une des quatre catégories de cycle de vie :
+Un `owner` ou un `admin` peut ajouter des statuts comme **Revue de code**, **QA** ou **À corriger**. Si **Paramètres** contient **Workflows**, gérez-les dans la bibliothèque de statuts en dessous. Sinon, utilisez **Paramètres → États des tâches**.
 
-| Catégorie | Signification dans le cycle de vie |
-|---|---|
-| `unstarted` | Non démarré. Comprend les statuts intégrés À planifier et À faire. |
-| `started` | En cours, y compris la relecture et l'attente. |
-| `done` | Terminé avec succès ; état final. |
-| `closed` | Annulé ou abandonné ; état final, sans aboutissement réussi. |
+À la création, choisissez si le statut correspond à un travail non commencé, en cours, terminé ou annulé. Cette catégorie ne peut plus être changée ensuite. Un statut personnalisé ne reprend pas les comportements particuliers d’un statut intégré : l’appeler « En attente » ne met pas un agent en pause.
 
-Les statuts personnalisés n'héritent que de la sémantique du cycle de vie. Ils n'héritent ni de la mise en attente propre au statut intégré À planifier, ni de la finalisation des automatisations par En relecture, ni de l'échec signalé par Bloqué, ni de la récupération appliquée à En cours. Utilisez le statut intégré correspondant lorsque ce comportement est nécessaire. Les anciens statuts personnalisés suivent les mêmes règles : Awaiting Response correspond à un travail en cours, et non à une finalisation automatique de relecture. L'assignation et la création suivent toujours les règles générales de déclenchement des agents.
+- Les statuts intégrés ne peuvent être ni renommés, ni recolorés, ni archivés.
+- Les statuts personnalisés affichent le nom saisi. Modifier leur nom ou leur couleur les met à jour partout où ils sont utilisés.
+- Avant d’archiver un statut, déplacez toutes les tâches qui l’utilisent vers un autre statut adapté, y compris celles terminées ou annulées. Retirez-le aussi des workflows personnalisés. Il ne sera ensuite plus proposé.
 
-Pour les clients déjà installés, les champs de catégorie existants de l'API conservent l'énumération à sept valeurs transmise sur le réseau. Les nouveaux clients normalisent cette représentation en quatre catégories ; ces valeurs transmises ne confèrent jamais d'héritage de comportement. La base de données ne stocke que les quatre valeurs de cycle de vie.
-
-Quatre conséquences découlent de ce modèle :
-
-- **La catégorie d'un statut est figée dès sa création.** La modifier ensuite changerait le comportement de cycle de vie de toutes les tâches déjà dans ce statut ; l'éditeur la laisse donc en lecture seule. Choisissez d'abord l'étape du cycle de vie, puis nommez le statut.
-- **Le regroupement par statut utilise les statuts individuels.** Les colonnes de la vue Tableau, les sections de la vue Liste et les colonnes de statut de la vue Couloirs distinguent chacune les statuts intégrés et personnalisés. `Code Review` et `QA` ont des colonnes distinctes bien qu'ils appartiennent tous deux à la catégorie Démarrage. Les catégories sont des classifications internes du cycle de vie, pas des noms de colonnes de remplacement.
-- **Les statuts intégrés sont verrouillés.** Leur nom, leur couleur et leur catégorie ne peuvent pas être modifiés, et ils ne peuvent pas être archivés — un espace de travail qui n'ouvre jamais cette page conserve exactement le tableau qu'il avait.
-- **Archiver un statut le retire sans le supprimer.** Les tâches qui l'ont déjà le conservent, gardent son nom et sa couleur, et se comportent de la même manière. Il n'est simplement plus proposé la prochaine fois que quelqu'un définit un statut.
-
-Les statuts intégrés sont traduits dans la langue de l'interface ; un statut personnalisé affiche toujours le nom que vous avez saisi. L'API et le CLI le désignent par sa clé : `multica issue status MUL-42 code_review`. La page des paramètres dérive cette clé du nom ; l'API accepte une clé explicite et ne la dérive qu'à défaut. Dans tous les cas, la clé est figée à la création — renommer le statut ensuite ne la modifie pas.
+La bibliothèque contient les statuts disponibles. Le workflow d’un projet choisit ceux que ses tâches utilisent et leur ordre.
 
 ## Tâches et exécutions
 

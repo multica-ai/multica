@@ -3,6 +3,7 @@
 import type { ReactNode } from "react";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { TriangleAlert } from "lucide-react";
+import { toast } from "sonner";
 import { cn } from "@multica/ui/lib/utils";
 import {
   ContentEditor,
@@ -23,7 +24,8 @@ import { CHAT_COLUMN, CHAT_GUTTER } from "./chat-column";
 import { useChatStore, DRAFT_NEW_SESSION } from "@multica/core/chat";
 import { attachmentToDraftUpload, type DraftUpload } from "@multica/core/drafts";
 import { createLogger } from "@multica/core/logger";
-import { formatShortcut, useShortcut } from "@multica/core/shortcuts";
+import { useShortcut } from "@multica/core/shortcuts";
+import { ShortcutKeycaps } from "../../common/shortcut-keycaps";
 import type { MentionItem } from "../../editor/extensions/mention-suggestion";
 import type { Attachment, Project } from "@multica/core/types";
 import { ProjectPicker } from "../../projects/components/project-picker";
@@ -73,14 +75,14 @@ interface ChatInputProps {
      */
     sessionId?: string;
   } | null;
-  /** Explicit replacement requested by a conversation-starter button. Unlike a
-   * synchronized draft write, this may intentionally replace dirty editor
-   * content, so ChatInput adopts it after cancelling any pending debounce. */
+  /** One-click send requested by a conversation-starter button. ChatInput
+   * adopts the prompt only when there is no draft in progress, then uses the
+   * regular submit path for pending state, single-flight and failure recovery. */
   conversationStarterRequest?: {
     id: number;
     content: string;
   } | null;
-  /** Fired after the request has replaced both the stored and live draft. */
+  /** Consumes the request even when the composer cannot send right now. */
   onConversationStarterApplied?: () => void;
   /**
    * Fired when — and only when — the restore's content/attachments were written
@@ -377,32 +379,6 @@ export function ChatInput({
     editorRef.current?.focus();
   }, [focusRequest]);
 
-  // A conversation-starter click is an explicit replacement, not an ordinary
-  // external store sync. ContentEditor deliberately rejects external values
-  // while it has dirty local text, so adopting here prevents the old text's
-  // pending debounce from winning the race and overwriting the chosen prompt.
-  // Wait out active uploads: adopting content while an upload node is present
-  // would strand its completion callback.
-  useLayoutEffect(() => {
-    if (!conversationStarterRequest) return;
-    if (appliedConversationStarterIdRef.current === conversationStarterRequest.id) return;
-    if (editorDraftKeyRef.current !== draftKey) return;
-    if (editorRef.current?.hasActiveUploads() === true) return;
-
-    editorRef.current?.flushPendingUpdate();
-    appliedConversationStarterIdRef.current = conversationStarterRequest.id;
-    commitDraft(draftKey, conversationStarterRequest.content);
-    editorRef.current?.adoptContent(conversationStarterRequest.content);
-    setIsEmpty(!conversationStarterRequest.content.trim());
-    onConversationStarterApplied?.();
-  }, [
-    commitDraft,
-    draftKey,
-    onConversationStarterApplied,
-    conversationStarterRequest,
-    uploadGate.uploading,
-  ]);
-
   useEffect(() => {
     if (!restoreDraftRequest) {
       appliedRestoreIdRef.current = null;
@@ -578,6 +554,56 @@ export function ChatInput({
     },
   });
 
+  // Consume each click once, including clicks while sending or uploading:
+  // replaying later could send after the user switches session or agent.
+  // Keep existing text and attachments intact. Flush first so the draft check
+  // sees typing still in the debounce window. A rejected send keeps the
+  // starter prompt in the draft for manual retry.
+  useLayoutEffect(() => {
+    if (!conversationStarterRequest) return;
+    if (appliedConversationStarterIdRef.current === conversationStarterRequest.id) return;
+    appliedConversationStarterIdRef.current = conversationStarterRequest.id;
+    onConversationStarterApplied?.();
+    if (
+      submitting || disabled || noAgent ||
+      (isRunning && !allowSubmitWhileRunning) ||
+      editorDraftKeyRef.current !== draftKey
+    ) return;
+    if (gate.isBlocked()) {
+      toast.info(t(($) => $.conversation_starters.uploading));
+      return;
+    }
+
+    const pending = editorRef.current?.flushPendingUpdate();
+    if (pending != null) commitDraft(draftKey, pending);
+    const draft = useChatStore.getState();
+    if (
+      editorRef.current?.getMarkdown().trim() ||
+      (draft.inputDrafts[draftKey] ?? "").trim() ||
+      (draft.inputDraftAttachments[draftKey]?.length ?? 0) > 0
+    ) {
+      toast.info(t(($) => $.conversation_starters.draft_in_progress));
+      return;
+    }
+    commitDraft(draftKey, conversationStarterRequest.content);
+    editorRef.current?.adoptContent(conversationStarterRequest.content);
+    setIsEmpty(!conversationStarterRequest.content.trim());
+    void submit();
+  }, [
+    allowSubmitWhileRunning,
+    commitDraft,
+    conversationStarterRequest,
+    disabled,
+    draftKey,
+    gate,
+    isRunning,
+    noAgent,
+    onConversationStarterApplied,
+    submit,
+    submitting,
+    t,
+  ]);
+
   const placeholder = agentAccessRevoked
     ? t(($) => $.input.placeholder_access_revoked)
     : noAgent
@@ -669,7 +695,7 @@ export function ChatInput({
                     title={t(($) => $.input.change_project_context)}
                     onClear={() => onProjectChange?.(null)}
                     clearLabel={t(($) => $.input.remove_project_context)}
-                    className="h-6 border-surface-border bg-surface-raised font-medium text-foreground"
+                    className="border-surface-border bg-surface-raised font-medium text-foreground"
                   />
                 }
               />
@@ -748,13 +774,22 @@ export function ChatInput({
               (!allowSubmitWhileRunning || hasNothingToSend || gate.uploading)
             }
             onStop={onStop}
-            tooltip={gate.uploading
+            // While blocked, the placeholder copy is exactly the reason.
+            disabledReason={gate.uploading
               ? tEditor(($) => $.upload.in_progress)
-              : isRunning
-                ? t(($) => $.input.queue_send_tooltip)
-                : sendShortcut
-                  ? `${t(($) => $.input.send_tooltip)} · ${formatShortcut(sendShortcut)}`
-                  : t(($) => $.input.send_tooltip)}
+              : disabled || noAgent
+                ? placeholder
+                : undefined}
+            tooltip={isRunning
+              ? t(($) => $.input.queue_send_tooltip)
+              : sendShortcut
+                ? (
+                  <>
+                    {t(($) => $.input.send_tooltip)}
+                    <ShortcutKeycaps shortcut={sendShortcut} decorative />
+                  </>
+                )
+                : t(($) => $.input.send_tooltip)}
             ariaLabel={gate.uploading
               ? tEditor(($) => $.upload.in_progress)
               : isRunning

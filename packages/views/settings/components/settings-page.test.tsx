@@ -23,7 +23,7 @@ vi.mock("./code-tab", stub("CodeTab"));
 vi.mock("./channels-tab", stub("ChannelsTab"));
 vi.mock("./notifications-tab", stub("NotificationsTab"));
 vi.mock("./labels-tab", stub("LabelsTab"));
-vi.mock("./issue-statuses-tab", stub("IssueStatusesTab"));
+vi.mock("../../workflows/workflows-tab", stub("WorkflowsTab"));
 vi.mock("./properties-tab", stub("PropertiesTab"));
 vi.mock("./quick-actions-tab", stub("QuickActionsTab"));
 vi.mock("./keyboard-shortcuts-tab", stub("KeyboardShortcutsTab"));
@@ -173,6 +173,29 @@ describe("SettingsPage Plugin feature flag", () => {
   });
 });
 
+describe("SettingsPage workflows", () => {
+  it("mounts workflows without feature flag configuration and keeps wakeups", () => {
+    navigationState.search = "tab=workflows";
+
+    renderWithI18n(<SettingsPage />);
+
+    expect(screen.getByText("WorkflowsTab")).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Workflows" })).toHaveAttribute("aria-current", "page");
+    expect(screen.queryByRole("link", { name: "Issue Statuses" })).not.toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Wakeups" })).toBeInTheDocument();
+  });
+
+  it("opens old status catalog links in workflows", () => {
+    navigationState.search = "tab=issue-statuses";
+
+    renderWithI18n(<SettingsPage />);
+
+    expect(screen.getByText("WorkflowsTab")).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Workflows" })).toHaveAttribute("aria-current", "page");
+    expect(screen.getByRole("link", { name: "Wakeups" })).toBeInTheDocument();
+  });
+});
+
 describe("SettingsPage workspace subscription feature flag", () => {
   it("hides Billing and falls back to Workspace General from a direct URL", () => {
     navigationState.search = "tab=billing";
@@ -210,7 +233,7 @@ describe("SettingsPage information architecture", () => {
     const workspace = within(nav()).getByRole("region", { name: /Acme/ });
     const issues = within(workspace).getByRole("group", { name: "Issues & workflow" });
     expect(
-      within(issues).getByRole("link", { name: "Issue Statuses" }),
+      within(issues).getByRole("link", { name: "Workflows" }),
     ).toBeInTheDocument();
     const connections = within(workspace).getByRole("group", {
       name: "Connections & extensions",

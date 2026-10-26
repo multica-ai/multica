@@ -272,9 +272,7 @@ export function createSlashCommandSuggestion(qc: QueryClient): Omit<
   };
 }
 
-// ---------------------------------------------------------------------------
 // Built-in command menu (issue comments)
-// ---------------------------------------------------------------------------
 
 /**
  * Built-in slash commands offered in the issue comment composer. Unlike the

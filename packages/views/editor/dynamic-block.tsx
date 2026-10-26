@@ -32,10 +32,12 @@ import {
   CodeXml,
   Copy,
   Maximize2,
+  RotateCw,
   TriangleAlert,
   Workflow,
 } from "lucide-react";
 import { Button } from "@multica/ui/components/ui/button";
+import { IconButton } from "@multica/ui/components/common/icon-button";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@multica/ui/components/ui/tabs";
 import { Spinner } from "@multica/ui/components/ui/spinner";
 import { copyText } from "@multica/ui/lib/clipboard";
@@ -86,6 +88,10 @@ interface DynamicBlockProps {
   error?: DynamicBlockError | null;
   /** Shows the fullscreen button when set. */
   onFullscreen?: () => void;
+  /** Reloads the current preview when the kind supports it. */
+  onReload?: () => void;
+  /** Reveals the mounted preview while its surface is enlarged. */
+  fullscreen?: boolean;
   /** Focus returns here when the kind's fullscreen surface closes. */
   fullscreenButtonRef?: Ref<HTMLButtonElement>;
   /**
@@ -102,6 +108,8 @@ export function DynamicBlock({
   source,
   error,
   onFullscreen,
+  onReload,
+  fullscreen = false,
   fullscreenButtonRef,
   preview,
   className,
@@ -176,42 +184,58 @@ export function DynamicBlock({
               {t(($) => $.dynamic_block.source)}
             </TabsTrigger>
           </TabsList>
+          {onReload && (
+            <IconButton
+              type="button"
+              variant="ghost"
+              size="icon-xs"
+              className="text-muted-foreground"
+              disabled={view !== "preview"}
+              onClick={onReload}
+              label={t(($) => $.attachment.reload)}
+            >
+              <RotateCw />
+            </IconButton>
+          )}
           {onFullscreen && (
-            <Button
+            <IconButton
               ref={fullscreenButtonRef}
               type="button"
               variant="ghost"
               size="icon-xs"
               className="text-muted-foreground"
               onClick={onFullscreen}
-              title={t(($) => $.code_block.fullscreen)}
-              aria-label={t(($) => $.code_block.fullscreen)}
+              label={t(($) => $.code_block.fullscreen)}
             >
               <Maximize2 />
-            </Button>
+            </IconButton>
           )}
-          <Button
+          <IconButton
             type="button"
             variant="ghost"
             size="icon-xs"
             className="text-muted-foreground"
             onClick={handleCopy}
-            title={t(($) => $.dynamic_block.copy_source)}
-            aria-label={t(($) => $.dynamic_block.copy_source)}
+            label={t(($) => $.dynamic_block.copy_source)}
           >
             {copied ? <Check /> : <Copy />}
-          </Button>
+          </IconButton>
         </div>
       </div>
-      <TabsContent value="preview" keepMounted>
-        {error && (
+      <TabsContent
+        value="preview"
+        keepMounted
+        hidden={!fullscreen && view !== "preview"}
+        inert={!fullscreen && view !== "preview"}
+      >
+        {error && view === "preview" && (
           <DynamicBlockErrorPanel
             kind={kind}
             error={error}
             onViewSource={() => setView("source")}
           />
         )}
-        <div hidden={!!error}>
+        <div hidden={!!error && !fullscreen}>
           <CollapsibleBody>{preview({ active: view === "preview" && !error })}</CollapsibleBody>
         </div>
       </TabsContent>

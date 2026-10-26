@@ -16,6 +16,7 @@
     "priority": "优先级",
     "from": "来自",
     "unread_only": "只看未读",
+    "no_agents_working": "没有智能体在工作",
     "notification_count_other": "{{count}} 条通知",
     "clear": "清除筛选",
     "empty": "没有符合筛选条件的通知"

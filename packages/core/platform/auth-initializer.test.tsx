@@ -6,6 +6,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { setApiInstance } from "../api";
 import { ApiError, type ApiClient } from "../api/client";
+import { configStore } from "../config";
 import {
   createAuthStore,
   registerAuthStore,
@@ -121,6 +122,19 @@ afterEach(() => {
 });
 
 describe("AuthInitializer recovery", () => {
+  it("publishes the API origin used by persisted attachment links", async () => {
+    const api = makeApi({
+      getConfig: vi.fn().mockResolvedValue({
+        attachment_public_url: "https://api.example.test",
+      }),
+    });
+    renderInitializer({ api });
+
+    await waitFor(() => {
+      expect(configStore.getState().attachmentPublicUrl).toBe("https://api.example.test");
+    });
+  });
+
   it("keeps the token and recovers on the online event after a network failure", async () => {
     const storage = makeStorage({ multica_token: "token-1" });
     const getMe = vi

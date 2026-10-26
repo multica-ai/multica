@@ -1576,3 +1576,22 @@ describe("mergePersistedTabs (rehydration, MUL-4370)", () => {
     });
   });
 });
+
+describe("reserved workspace restoration", () => {
+  it("preserves matching saved tabs before the membership list loads", () => {
+    useTabStore.getState().switchWorkspace("acme");
+    const group = useTabStore.getState().byWorkspace.acme;
+    const tabs = group.tabs.map((tab) => ({
+      ...tab, url: "/dingtalk/issues", history: { stack: ["/dingtalk/issues"], index: 0 },
+    }));
+    const restored = mergePersistedTabs({
+      activeWorkspaceSlug: "dingtalk",
+      byWorkspace: { dingtalk: { ...group, tabs, browsingHistory: ["/dingtalk/issues"] } },
+    }, { activeWorkspaceSlug: null as string | null, byWorkspace: {} as Record<string, WorkspaceTabGroup> });
+    expect(restored.byWorkspace.dingtalk.tabs[0].url).toBe("/dingtalk/issues");
+    expect(restored.byWorkspace.dingtalk.browsingHistory).toEqual(["/dingtalk/issues"]);
+    useTabStore.setState(restored);
+    useTabStore.getState().validateWorkspaceSlugs(new Set(["acme"]));
+    expect(useTabStore.getState().byWorkspace.dingtalk).toBeUndefined();
+  });
+});

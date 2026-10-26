@@ -110,6 +110,7 @@
   },
   "code_block": {
     "html_preview": "HTML 미리보기",
+    "close_preview": "닫기",
     "copy_code": "코드 복사",
     "show_preview": "미리보기 표시",
     "show_source": "소스 표시",
@@ -164,5 +165,18 @@
     "commands": {
       "note": "메모 추가 — 에이전트를 트리거하지 않음"
     }
+  },
+  "table": {
+    "reset_widths": "열 너비 초기화",
+    "expand": "표 펼치기",
+    "copy_markdown": "Markdown으로 복사",
+    "copy_csv": "CSV로 복사",
+    "copied": "복사됨",
+    "resize_column": "'{{name}}' 열 너비 조정",
+    "expanded_title": "표",
+    "filter_placeholder": "행 필터",
+    "clear_filter": "필터 지우기",
+    "no_matches": "일치하는 행이 없습니다",
+    "close": "닫기"
   }
 }

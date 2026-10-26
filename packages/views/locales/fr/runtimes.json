@@ -1,10 +1,9 @@
 {
   "page": {
     "title": "Runtimes",
-    "tagline": "Machines et workers cloud qui exécutent des sessions CLI pour vos agents.",
     "learn_more": "En savoir plus →",
-    "connect_remote": "Ajouter un ordinateur",
-    "search_placeholder": "Rechercher des runtimes…",
+    "connect_remote": "Ajouter une machine",
+    "search_placeholder": "Rechercher…",
     "scope_mine": "Les miens",
     "scope_all": "Tous",
     "live": "En direct",
@@ -13,7 +12,7 @@
     "filter_all_description": "Tous les runtimes de cette vue",
     "empty": {
       "title": "Aucun runtime pour l'instant",
-      "hint": "Desktop détecte cet ordinateur automatiquement. Connectez d’autres ordinateurs ici."
+      "hint": "Desktop détecte cet ordinateur automatiquement. Ajoutez d’autres machines ici."
     },
     "no_matches": {
       "title": "Aucune correspondance",
@@ -25,6 +24,52 @@
     "bootstrapping": {
       "title": "Démarrage du runtime local…",
       "hint": "Connexion à l’espace de travail..."
+    },
+    "add": "Ajouter",
+    "add_menu": {
+      "machines": "Machines",
+      "this_computer": "Cet ordinateur",
+      "this_computer_connected": "Connecté · {{name}}",
+      "this_computer_download": "Téléchargez l’app de bureau pour le connecter",
+      "other_machine": "Autre machine ou serveur",
+      "other_machine_hint": "Exécutez deux commandes sur cette machine",
+      "cloud_services": "Services cloud",
+      "qoder_manage_hint": "Connecté · gérer la connexion",
+      "cloud_runtime_hint": "Créer un nœud cloud hébergé par Multica"
+    },
+    "columns": {
+      "name": "Nom",
+      "harness": "Harness",
+      "agents": "Agents",
+      "workload": "Charge",
+      "status": "Statut"
+    },
+    "groups": {
+      "machines": {
+        "title": "Machines"
+      },
+      "cloud": {
+        "title": "Services cloud",
+        "coming_soon": "Bientôt disponible"
+      }
+    },
+    "rows": {
+      "this_computer_title": "Exécuter sur cet ordinateur",
+      "this_computer_hint": "Téléchargez l’app de bureau et connectez-vous : Claude Code, Codex et les autres CLI de cet ordinateur apparaîtront ici",
+      "download_desktop": "Télécharger l’app",
+      "add_machine_title": "Ajouter une autre machine ou un serveur",
+      "add_machine_hint": "Exécutez deux commandes sur cette machine pour que les agents utilisent ses CLI",
+      "view_commands": "Voir les commandes",
+      "owner_you": "Vous",
+      "connect": "Connecter",
+      "not_connected": "Non connecté",
+      "provided_by": "Par {{vendor}}",
+      "no_matches": "Aucune machine ni aucun service cloud ne correspond"
+    },
+    "filters": {
+      "all": "Tous",
+      "online": "En ligne",
+      "offline": "Hors ligne"
     }
   },
   "mika_setup": {
@@ -79,7 +124,7 @@
     "rename": "Renommer la machine",
     "rename_dialog": {
       "title": "Renommer la machine",
-      "description": "Utilisé pour cet ordinateur et tous ses runtimes.",
+      "description": "Utilisé pour cette machine et tous ses runtimes.",
       "placeholder": "ex. MacBook de Bohan",
       "hint": "Laissez vide pour utiliser le nom par défaut de l'appareil.",
       "cancel": "Annuler",
@@ -129,18 +174,45 @@
     "diagnostics_visibility": "Visibilité",
     "visibility_label": {
       "private": "Privé",
-      "public": "Public"
+      "public": "Public",
+      "members": "Membres spécifiques"
+    },
+    "visibility_choice": {
+      "private": "Privé",
+      "public": "Public",
+      "members": "Membres"
     },
     "visibility_hint": {
       "private": "Vous seul pouvez créer des agents sur ce runtime.",
-      "public": "Tout membre de l'espace de travail peut créer des agents sur ce runtime."
+      "public": "Tout membre de l'espace de travail peut créer des agents sur ce runtime.",
+      "members": "Seuls vous et les membres sélectionnés pouvez créer des agents sur cet environnement."
     },
     "visibility_hint_readonly": {
       "private": "Seul le propriétaire du runtime peut y créer des agents, et lui seul peut le passer en Public.",
-      "public": "Tout membre de l'espace de travail peut créer des agents sur ce runtime. Seul son propriétaire peut le repasser en Privé."
+      "public": "Tout membre de l'espace de travail peut créer des agents sur ce runtime. Seul son propriétaire peut le repasser en Privé.",
+      "members": "Seuls le propriétaire et les membres sélectionnés peuvent créer des agents sur cet environnement."
     },
+    "visibility_members_title": "Partager avec des membres",
+    "visibility_members_search": "Rechercher des membres",
+    "visibility_members_none": "Aucun autre membre dans l’espace de travail.",
+    "visibility_members_no_match": "Aucun membre ne correspond.",
+    "visibility_members_edit": "Modifier",
+    "visibility_members_count_one": "{{count}} membre",
+    "visibility_members_count_other": "{{count}} membres",
     "visibility_toast_updated": "Visibilité définie sur {{visibility}}",
     "visibility_toast_failed": "Échec de la mise à jour de la visibilité",
+    "visibility_revoke_dialog": {
+      "title": "Restreindre l’accès à cet environnement ?",
+      "description": "Restreindre l’accès à « {{name}} » détachera {{count}} agents concernés, annulera {{taskCount}} exécutions actives et suspendra leurs autopilotes actifs. Les agents et exécutions qui conservent l’accès ne sont pas affectés.",
+      "warning": "L'accès est révoqué immédiatement sur le serveur. Les daemons connectés s'arrêtent lors de leur vérification habituelle des annulations. Une machine hors ligne ne recevra la demande d'arrêt qu'à sa reconnexion ; son processus local peut continuer entre-temps.",
+      "plan_changed": "Le plan d'accès a changé pendant que cette boîte de dialogue était ouverte. Vérifiez-le et confirmez à nouveau.",
+      "checkbox": "Je comprends que les agents des autres membres listés seront dissociés, leurs exécutions actives annulées et leurs automatisations actives mises en pause.",
+      "cancel": "Annuler",
+      "confirm": "Restreindre l’accès",
+      "submitting": "Révocation de l'accès...",
+      "toast_success": "Accès à l’environnement mis à jour",
+      "toast_failed": "Échec de la révocation de l'accès au runtime"
+    },
     "delete_dialog": {
       "self_heal_notice": "Ce runtime est géré par un daemon local en cours d'exécution. Sa suppression aboutira, mais le daemon en réenregistrera un nouveau en quelques secondes — arrêtez d'abord le processus du daemon pour le supprimer définitivement.",
       "profile_backed_notice": "Ce runtime a été enregistré depuis un profil de runtime personnalisé. Sa suppression ne retire que l'instance actuelle ; un daemon en cours d'exécution peut l'enregistrer de nouveau tant que le profil subsiste. Supprimez le profil dans Runtimes personnalisés pour l'éliminer définitivement.",
@@ -199,16 +271,16 @@
   "queued_one": "{{count}} en attente",
   "queued_other": "{{count}} en attente",
   "connect": {
-    "title": "Ajouter un ordinateur",
-    "description": "Exécutez ces deux commandes sur l'ordinateur à ajouter. Nous le détecterons dès que le daemon sera en ligne.",
+    "title": "Ajouter une machine",
+    "description": "Exécutez ces deux commandes sur la machine à ajouter. Nous la détecterons dès que le daemon sera en ligne.",
     "step1_label": "Installer le CLI Multica",
     "platform_group": "Choisissez votre système",
     "platform_macos_linux": "macOS / Linux",
     "platform_windows": "Windows",
     "step2_label": "Démarrer le daemon",
     "step2_hint": "Ouvre un navigateur pour la connexion, puis laisse le daemon tourner en arrière-plan.",
-    "live_listening": "En attente de votre ordinateur",
-    "troubleshooting": "Impossible d'ouvrir un navigateur sur cet ordinateur ?",
+    "live_listening": "En attente de votre machine",
+    "troubleshooting": "Impossible d'ouvrir un navigateur sur cette machine ?",
     "trouble_intro": "Utilisez un jeton plutôt que la connexion par navigateur. Cela remplace l'étape 2 et fonctionne partout où vous disposez d'un terminal.",
     "trouble_token_hint_prefix": "Créez un jeton dans ",
     "trouble_token_hint_destination": "Paramètres → Jetons",
@@ -217,8 +289,8 @@
     "trouble_view_logs": "Voir les journaux",
     "copy_aria": "Copier",
     "cancel": "Annuler",
-    "success_title": "Ordinateur connecté",
-    "success_description": "Ordinateur connecté. Vous pouvez maintenant créer un agent.",
+    "success_title": "Machine connectée",
+    "success_description": "Machine connectée. Vous pouvez maintenant créer un agent.",
     "view_runtime": "Voir le runtime",
     "create_agent": "Créer un agent"
   },
@@ -465,5 +537,143 @@
     "table_cache_r": "Cache L",
     "table_cache_w": "Cache É",
     "no_data": "Aucune donnée de consommation pour l'instant"
+  },
+  "qoder": {
+    "title": "Environnement QCA",
+    "description": "Connectez Qoder Cloud Agents. Multica gère l’exécution et chiffre les identifiants. Les administrateurs de l’espace de travail peuvent modifier cette configuration.",
+    "loading": "Chargement…",
+    "unavailable": "Configuration serveur requise : définissez MULTICA_VCS_SECRET_KEY.",
+    "online": "En ligne",
+    "error": "Erreur de connexion",
+    "starting": "Démarrage",
+    "not_configured": "Non configuré",
+    "name": "Nom de l’environnement d’exécution",
+    "region": "Région",
+    "region_global": "International (qoder.com)",
+    "region_cn": "Chine (qoder.com.cn)",
+    "region_hint": "Choisissez le site où vous avez créé le PAT ; un PAT ne fonctionne que dans sa région.",
+    "keep_secret": "Laissez vide pour conserver le jeton enregistré",
+    "repositories": "Autorisation GitHub",
+    "repositories_hint": "Associez un jeton à chaque dépôt. Choisissez le dépôt et la branche de départ dans votre projet.",
+    "remove": "Supprimer",
+    "add_repository": "Ajouter un dépôt",
+    "saved": "Enregistré. Le serveur démarrera automatiquement l’environnement d’exécution.",
+    "check": "Tester la connexion",
+    "working": "En cours…",
+    "stop": "Mettre en pause",
+    "stopped": "En pause",
+    "offline": "Hors ligne ; reconnexion en cours",
+    "checking": "Test de connexion...",
+    "check_passed": "Connexion réussie",
+    "check_failed": "Échec de la connexion",
+    "environment": "Environnement",
+    "select_environment": "Choisir un environnement",
+    "no_environments": "Aucun environnement disponible. Créez-en un dans Qoder, puis actualisez.",
+    "refresh_catalog": "Actualiser la liste",
+    "agent": "Agent QCA",
+    "select_agent": "Choisir un agent QCA",
+    "agent_hint": "Utilisez le PAT enregistré dans l’environnement distant pour associer un agent QCA. Gérez son modèle, ses outils et ses skills dans Qoder.",
+    "no_agents": "Aucun agent QCA disponible. Créez-en un dans Qoder, puis actualisez.",
+    "agent_unavailable": "L’agent QCA associé n’est pas disponible. Choisissez-en un autre.",
+    "save_agent": "Enregistrer l’association",
+    "agent_saved": "Association de l’agent QCA enregistrée",
+    "agent_save_failed": "Impossible d’enregistrer l’association de l’agent QCA",
+    "cloud_title": "Qoder Cloud Agents",
+    "managed": "Service géré",
+    "cloud_description": "Exécutez des agents dans Qoder Cloud avec une connexion partagée, sans maintenir d’hôte local.",
+    "configure_credentials": "Configurer les identifiants",
+    "add_agent": "Ajouter un agent",
+    "add_agent_description": "Créez un agent Multica associé à un agent QCA existant. Il utilisera l’environnement et les identifiants configurés pour Qoder Cloud.",
+    "agent_name": "Nom de l’agent",
+    "cancel": "Annuler",
+    "shared_credentials_hint": "Les identifiants sont partagés dans cet espace de travail. Les PAT sont chiffrés et ne sont plus affichés après l’enregistrement.",
+    "agent_count_one": "{{count}} agent",
+    "agent_count_other": "{{count}} agents",
+    "github_url": "URL GitHub",
+    "github_token": "Jeton GitHub",
+    "execution": "Exécution",
+    "concurrency": "Exécutions simultanées",
+    "concurrency_hint": "Au-delà de cette limite, les tâches attendent dans la file.",
+    "run_timeout": "Délai d'exécution (minutes)",
+    "run_timeout_hint": "Une exécution encore en cours après ce délai est annulée et marquée en échec.",
+    "data_disclosure_title": "Ce que Multica envoie à Qoder",
+    "data_disclosure": "Le titre et la description du ticket, les commentaires pertinents, le contexte du projet et les instructions de l'agent. Les jetons GitHub servent uniquement à monter le dépôt pendant une exécution.",
+    "usage": "{{active}} sur {{limit}} en cours · {{queued}} en attente",
+    "open_settings": "Ouvrir les paramètres",
+    "default_repository": "Dépôt par défaut",
+    "default_repository_hint": "Monté quand le projet du ticket n'a pas de dépôt. La connexion doit avoir un jeton GitHub pour ce dépôt.",
+    "default_branch": "Branche",
+    "default_branch_placeholder": "Branche par défaut",
+    "create_agent": "Créer un agent avec",
+    "connect": {
+      "submit": "Connecter",
+      "connected": "Qoder est connecté. Il sera prêt dans quelques secondes.",
+      "token": "Jeton d'accès personnel",
+      "token_rejected": "{{region}} n'accepte pas ce jeton. Un jeton ne fonctionne que sur le site qui l'a créé.",
+      "retry_cn": "Réessayer sur le site Chine",
+      "retry_global": "Réessayer sur le site international",
+      "verifying": "Vérification du jeton…",
+      "verified": "Jeton vérifié",
+      "environment_waiting": "Les environnements se chargent une fois le jeton vérifié",
+      "repo_count_one": "{{count}} dépôt",
+      "repo_count_other": "{{count}} dépôts",
+      "optional": "Facultatif",
+      "execution_summary": "Jusqu'à {{concurrency}} à la fois · délai de {{timeout}} min"
+    },
+    "stop_confirm": {
+      "title": "Mettre Qoder Cloud Agents en pause ?",
+      "description": "Aucune nouvelle tâche ne sera envoyée à Qoder tant qu'il n'est pas relancé.",
+      "cancel": "Annuler",
+      "description_agents_one": "Cet agent garde ses instructions et son historique, mais ne peut plus prendre de tâches tant que Qoder n'est pas relancé ou qu'il n'est pas déplacé vers un autre environnement.",
+      "description_agents_other": "Ces {{count}} agents gardent leurs instructions et leur historique, mais ne peuvent plus prendre de tâches tant que Qoder n'est pas relancé ou qu'ils ne sont pas déplacés vers un autre environnement."
+    },
+    "connect_title": "Connecter Qoder Cloud Agents",
+    "connect_description": "Multica exécute les tâches dans les sandboxes Qoder.",
+    "page": {
+      "configuration": "Configuration",
+      "agents_title": "Agents",
+      "pause_title": "Mettre Qoder en pause",
+      "pause_hint": "Plus aucune nouvelle tâche n'est envoyée à Qoder. Les identifiants et les agents sont conservés, et vous pouvez relancer à tout moment.",
+      "resume_title": "Relancer Qoder",
+      "resume": "Relancer",
+      "resumed": "Qoder démarre.",
+      "disconnect_title": "Déconnecter Qoder",
+      "disconnect_hint": "Supprime le PAT et les jetons de dépôt enregistrés, et retire cet environnement. Les agents qui l'utilisent sont détachés et gardent leur historique.",
+      "disconnect": "Déconnecter",
+      "not_connected_title": "Qoder n'est pas connecté",
+      "not_connected_hint": "Demandez à un administrateur de l'espace de travail de connecter Qoder Cloud Agents.",
+      "workload_idle": "Inactif",
+      "connection_title": "Connexion",
+      "edit": "Modifier",
+      "edit_connection_title": "Modifier la connexion",
+      "edit_connection_hint": "La connexion est testée avant d'être enregistrée.",
+      "test_and_save": "Tester et enregistrer",
+      "save": "Enregistrer",
+      "token_saved": "Enregistré",
+      "repositories_hint": "Les agents ne peuvent cloner que les dépôts autorisés ici.",
+      "repo_token_saved": "Jeton enregistré",
+      "repo_actions": "Actions pour {{repo}}",
+      "replace_token": "Remplacer le jeton",
+      "replace_token_title": "Remplacer le jeton de {{repo}}",
+      "open_on_github": "Ouvrir sur GitHub",
+      "remove_repository_title": "Retirer {{repo}} ?",
+      "remove_repository_description": "Son jeton est supprimé et les agents ne peuvent plus le cloner.",
+      "edit_limits": "Modifier les paramètres d'exécution",
+      "run_timeout": "Délai d'exécution",
+      "manage_title": "Gérer",
+      "minutes_one": "{{count}} minute",
+      "minutes_other": "{{count}} minutes"
+    },
+    "disconnect_confirm": {
+      "title": "Déconnecter Qoder Cloud Agents ?",
+      "description": "Le PAT et les jetons de dépôt enregistrés sont supprimés et l'environnement Qoder est retiré. Pour réutiliser Qoder, il faudra le reconnecter depuis le début.",
+      "description_agents_one": "Cet agent sera détaché. Il garde ses instructions et son historique et peut passer à un autre environnement.",
+      "description_agents_other": "Ces {{count}} agents seront détachés. Ils gardent leurs instructions et leur historique et peuvent passer à un autre environnement.",
+      "plan_changed": "Les agents sur Qoder ont changé. Vérifiez la liste et confirmez à nouveau.",
+      "confirm": "Déconnecter",
+      "working": "Déconnexion…",
+      "cancel": "Annuler",
+      "done": "Qoder déconnecté"
+    }
   }
 }

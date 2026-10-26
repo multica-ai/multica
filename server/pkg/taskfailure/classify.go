@@ -6,33 +6,43 @@ import (
 )
 
 // providerHTTP5xxRe matches a 3-digit number starting with 5 (5xx HTTP
-// status code) that isn't surrounded by other digits. Mirrors the SQL
-// regex `(^|[^0-9])5[0-9][0-9]([^0-9]|$)` from MUL-1949 — keeps phrases
-// like "1500ms" or "1.5.0" from accidentally landing in
+// status code) that isn't embedded in a longer run of digits OR letters.
+// Adapted from the SQL regex `(^|[^0-9])5[0-9][0-9]([^0-9]|$)` from
+// MUL-1949 (with the boundary widened below) — keeps phrases like
+// "1500ms" or "1.5.0" from accidentally landing in
 // provider_server_error.
+//
+// The boundary excludes letters as well as digits (#9146): workspace and
+// task IDs are hex, so a path like "...c429f4b/worktree" embeds "429"
+// between letters, and the digit-only guard let it fire. Any offline
+// backfill SQL regenerated from MUL-1949 needs the same widened boundary
+// (`[^0-9a-z]`) to stay in lock-step.
 //
 // Compiled at package init: the classifier is on the in-flight write
 // path for every failed task, so paying the regex compile cost at
 // startup rather than per-call matters.
-var providerHTTP5xxRe = regexp.MustCompile(`(^|[^0-9])5[0-9][0-9]([^0-9]|$)`)
+var providerHTTP5xxRe = regexp.MustCompile(`(^|[^0-9a-z])5[0-9][0-9]([^0-9a-z]|$)`)
 
 // httpAuthCodeRe / httpQuotaCodeRe / httpCapacityCodeRe match specific 3-digit
-// HTTP status codes only when they are NOT embedded in a longer number, using
-// the same digit-boundary guard as providerHTTP5xxRe. Without this guard the
-// bare substrings "401"/"402"/"403"/"429"/"529" fire on unrelated numbers —
-// e.g. "402913 tokens", "15290ms", "exit status 4030" — misclassifying process
-// or unknown failures as provider billing / rate-limit errors. That pollutes
-// failure observability: a genuine process crash gets filed under a provider
-// bucket, masking the real cause on failure dashboards. (A misfire here still
-// can't cause a spurious retry: the auth / quota / capacity buckets these
-// regexes guard are all non-retryable. The only agent_error.* reason on
-// internal/service/task.go's retryableReasons allowlist is provider_network
-// — MUL-4910 — and these regexes never route into it.) The 5xx bucket was
-// already anchored for exactly this reason (MUL-1949); these codes were not.
+// HTTP status codes only when they are NOT embedded in a longer number or an
+// identifier, using the same alphanumeric-boundary guard as providerHTTP5xxRe.
+// Without this guard the bare substrings "401"/"402"/"403"/"429"/"529" fire on
+// unrelated numbers — e.g. "402913 tokens", "15290ms", "exit status 4030" —
+// misclassifying process or unknown failures as provider billing / rate-limit
+// errors. That pollutes failure observability: a genuine process crash gets
+// filed under a provider bucket, masking the real cause on failure dashboards.
+// (A misfire here still can't cause a spurious retry: the auth / quota /
+// capacity buckets these regexes guard are all non-retryable. The only
+// agent_error.* reason on internal/service/task.go's retryableReasons
+// allowlist is provider_network — MUL-4910 — and these regexes never route
+// into it.) The 5xx bucket was already anchored for exactly this reason
+// (MUL-1949); these codes were not. #9146 widened every boundary from
+// digits-only to alphanumerics because hex workspace IDs put these digit runs
+// between letters ("...c429f4b...").
 var (
-	httpAuthCodeRe     = regexp.MustCompile(`(^|[^0-9])(401|403)([^0-9]|$)`)
-	httpQuotaCodeRe    = regexp.MustCompile(`(^|[^0-9])402([^0-9]|$)`)
-	httpCapacityCodeRe = regexp.MustCompile(`(^|[^0-9])(429|529)([^0-9]|$)`)
+	httpAuthCodeRe     = regexp.MustCompile(`(^|[^0-9a-z])(401|403)([^0-9a-z]|$)`)
+	httpQuotaCodeRe    = regexp.MustCompile(`(^|[^0-9a-z])402([^0-9a-z]|$)`)
+	httpCapacityCodeRe = regexp.MustCompile(`(^|[^0-9a-z])(429|529)([^0-9a-z]|$)`)
 )
 
 // concurrentRequestLimitWitness is emitted by Anthropic-compatible providers
@@ -43,7 +53,7 @@ var (
 // member-facing recovery guidance describe the actual failure.
 const concurrentRequestLimitWitness = "concurrent request limit"
 
-var httpForbiddenCodeRe = regexp.MustCompile(`(^|[^0-9])403([^0-9]|$)`)
+var httpForbiddenCodeRe = regexp.MustCompile(`(^|[^0-9a-z])403([^0-9a-z]|$)`)
 
 // isUsageLimit403 is shared by Classify and NormalizeDaemonReason so new and
 // old daemons land on the same reason.
@@ -85,6 +95,24 @@ func Classify(rawError string) Reason {
 		return ReasonAgentUnknown
 	}
 	lower := strings.ToLower(trimmed)
+	// Cursor's adapter adds event counts to known transport failures. Those
+	// numbers are not HTTP status codes (event_count=429 is not a rate limit).
+	// Apply the existing precedence to the provider stderr, keeping real auth
+	// or quota evidence there while excluding the adapter's diagnostics.
+	if isCursorProviderNetworkError(lower) {
+		if stderr, wrapped := cursorProviderStderr(lower); wrapped {
+			lower = stderr
+		}
+		// Node stack locations such as index.js:500:403 are not HTTP codes
+		// either. Keep non-frame error lines, including actual provider errors.
+		lines := strings.Split(lower, "\n")
+		for i, line := range lines {
+			if cursorStackFrame(line) {
+				lines[i] = ""
+			}
+		}
+		lower = strings.Join(lines, "\n")
+	}
 
 	switch {
 	// A concurrent-request rejection can contain both "access token" and HTTP
@@ -131,8 +159,9 @@ func Classify(rawError string) Reason {
 		return ReasonAgentMissingConfig
 
 	// 3. Auth / access. 401 / 403 / "Not logged in" / invalid token
-	//    / lacks access to the model. Status codes use a digit boundary
-	//    so "4030" / "1401ms" don't spuriously land here.
+	//    / lacks access to the model. Status codes use an alphanumeric
+	//    boundary so "4030" / "1401ms" / a hex ID containing "401"
+	//    don't spuriously land here.
 	case httpAuthCodeRe.MatchString(lower),
 		containsAny(lower,
 			"unauthorized",
@@ -227,9 +256,9 @@ func Classify(rawError string) Reason {
 	//    messages and the stable Pi/OMP exit composite, rather than treating
 	//    the same broad substrings from local tools or MCP servers as retryable.
 	//    Mirror these Pi message shapes into the MUL-1949 offline backfill SQL.
-	//    Cursor can exit before its first stream event with a Node connect
-	//    ETIMEDOUT error. Keep that failed resume network-safe instead of
-	//    letting the exit-status wrapper trigger a fresh-session retry.
+	//    Cursor reports connect ETIMEDOUT and mid-stream RetriableError:
+	//    Connection stalled failures. Keep those failed resumes network-safe
+	//    instead of letting the exit-status wrapper trigger a fresh-session retry.
 	case isPiProviderNetworkError(lower), isCursorProviderNetworkError(lower),
 		containsAny(lower,
 			"stream disconnected",
@@ -448,18 +477,72 @@ var legacyEnvironmentPrepareWitnesses = []string{
 	"reuse execution environment:",
 }
 
-// isCursorProviderNetworkError recognizes the captured Cursor provider error,
-// bare or in the adapter's process-failure wrapper. Do not match ETIMEDOUT
-// globally: a local tool or MCP connection timeout is not provider evidence.
+// isCursorProviderNetworkError recognizes captured Cursor provider errors,
+// bare or in the adapter's exit/prompt-write wrapper. Do not match transport
+// phrases globally: local tool or MCP failures are not provider evidence.
 func isCursorProviderNetworkError(lower string) bool {
-	if strings.HasPrefix(lower, "cursor-agent exited with error: ") {
-		_, stderr, ok := strings.Cut(lower, "; cursor stderr: ")
-		if !ok {
-			return false
-		}
-		lower = strings.TrimSpace(stderr)
+	if stderr, wrapped := cursorProviderStderr(lower); wrapped {
+		lower = stderr
 	}
-	return strings.HasPrefix(lower, "error: [unavailable] connect etimedout ")
+	if strings.HasPrefix(lower, "error: [unavailable] connect etimedout ") {
+		return true
+	}
+	// Node may append a stack trace. Match the exact first-line message, not
+	// an arbitrary RetriableError or a substring quoted by another tool.
+	firstLine, _, _ := strings.Cut(lower, "\n")
+	switch strings.TrimSpace(firstLine) {
+	case "retriableerror: connection stalled", "retriableerror: connection stalled repeatedly":
+		return true
+	}
+	return false
+}
+
+func cursorProviderStderr(lower string) (string, bool) {
+	if !strings.HasPrefix(lower, "cursor-agent exited with error: ") &&
+		!strings.HasPrefix(lower, "cursor-agent prompt write failed: ") {
+		return "", false
+	}
+	_, stderr, ok := strings.Cut(lower, "; cursor stderr: ")
+	return strings.TrimSpace(stderr), ok
+}
+
+func cursorStackFrame(line string) bool {
+	return (strings.HasPrefix(line, " ") || strings.HasPrefix(line, "\t")) &&
+		strings.HasPrefix(strings.TrimSpace(line), "at ")
+}
+
+// Refined status buckets can also be stale when an old daemon matched a count
+// or stack location. Require the same classification from that diagnostic text;
+// a plain transport message or a genuinely refined reason stays intact.
+func cursorDiagnosticReason(reason, lower string) bool {
+	switch Reason(reason) {
+	case ReasonAgentProviderAuthOrAccess, ReasonAgentProviderQuotaLimit,
+		ReasonAgentProviderCapacityOrRateLimit, ReasonAgentProviderServerError:
+	default:
+		return false
+	}
+	var diagnostics []string
+	if _, wrapped := cursorProviderStderr(lower); wrapped {
+		header, _, _ := strings.Cut(lower, "; cursor stderr: ")
+		if strings.Contains(header, " (result_seen=false, ") {
+			diagnostics = append(diagnostics, header)
+		}
+	}
+	for _, line := range strings.Split(lower, "\n") {
+		if cursorStackFrame(line) {
+			diagnostics = append(diagnostics, line)
+		}
+	}
+	return len(diagnostics) > 0 && Classify(strings.Join(diagnostics, "\n")) == Reason(reason)
+}
+
+// Older daemons report these Cursor transport failures as process_failure
+// (wrapped exit), unknown (bare stderr), or the coarse agent_error bucket.
+// Preserve more specific reasons such as auth, quota, and hard timeouts.
+var legacyCursorProviderNetworkReasons = map[string]bool{
+	string(ReasonAgentProcessFailure): true,
+	string(ReasonAgentUnknown):        true,
+	"agent_error":                     true,
 }
 
 func isPiProviderNetworkError(lower string) bool {
@@ -568,6 +651,13 @@ func NormalizeDaemonReason(reason, rawError string) Reason {
 	// flaky provider. Upgrading here makes the retry work the moment the server
 	// deploys, without waiting on the daemon fleet.
 	lowerError := strings.ToLower(strings.TrimSpace(rawError))
+	// Normalize before retry eligibility is evaluated so installed daemons
+	// receive the same bounded, resume-safe recovery as current ones. Retain
+	// Classify's precedence if a more specific provider failure is present.
+	if (legacyCursorProviderNetworkReasons[reason] || cursorDiagnosticReason(reason, lowerError)) &&
+		isCursorProviderNetworkError(lowerError) && Classify(rawError) == ReasonAgentProviderNetwork {
+		return ReasonAgentProviderNetwork
+	}
 	if legacyOpencodeStreamEndedReasons[reason] &&
 		(strings.HasPrefix(lowerError, opencodeStreamEndedPrefix) ||
 			strings.HasPrefix(lowerError, codeartsStreamEndedPrefix)) {

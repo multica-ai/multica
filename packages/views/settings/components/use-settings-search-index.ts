@@ -99,7 +99,6 @@ export function useSettingsSearchIndex(
         tab: "notifications",
         anchor: "system",
         title: t(($) => $.notifications.system.label),
-        description: t(($) => $.notifications.system.description),
       },
       {
         tab: "notifications",

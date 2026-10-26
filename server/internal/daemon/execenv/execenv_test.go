@@ -4872,8 +4872,8 @@ func TestPrepareCodexSeedsUserSkills(t *testing.T) {
 
 	if data, err := os.ReadFile(filepath.Join(env.CodexHome, "skills", "summarize", "SKILL.md")); err != nil {
 		t.Fatalf("user skill SKILL.md not seeded: %v", err)
-	} else if string(data) != "summarize" {
-		t.Errorf("summarize SKILL.md = %q, want %q", data, "summarize")
+	} else if !strings.HasSuffix(string(data), "summarize") || !strings.Contains(string(data), "name: summarize") || !strings.Contains(string(data), "description:") {
+		t.Errorf("summarize SKILL.md not normalized: %q", data)
 	}
 	if data, err := os.ReadFile(filepath.Join(env.CodexHome, "skills", "summarize", "examples", "ex.md")); err != nil {
 		t.Fatalf("user skill support file not seeded: %v", err)
@@ -4882,8 +4882,8 @@ func TestPrepareCodexSeedsUserSkills(t *testing.T) {
 	}
 	if data, err := os.ReadFile(filepath.Join(env.CodexHome, "skills", "translate", "SKILL.md")); err != nil {
 		t.Fatalf("second user skill not seeded: %v", err)
-	} else if string(data) != "translate" {
-		t.Errorf("translate SKILL.md = %q, want %q", data, "translate")
+	} else if !strings.HasSuffix(string(data), "translate") || !strings.Contains(string(data), "name: translate") || !strings.Contains(string(data), "description:") {
+		t.Errorf("translate SKILL.md not normalized: %q", data)
 	}
 	if _, err := os.Stat(filepath.Join(env.CodexHome, "skills", ".DS_Store")); !os.IsNotExist(err) {
 		t.Errorf("ignored dotfile leaked into codex-home/skills: err=%v", err)
@@ -4985,10 +4985,11 @@ func TestPrepareCodexResolvesUserSkillSymlinks(t *testing.T) {
 	t.Setenv("CODEX_HOME", sharedHome)
 
 	installerRoot := filepath.Join(t.TempDir(), "installer", "lark-mail")
+	const skillContent = "---\nname: lark-mail\ndescription: Mail instructions\n---\nlark"
 	if err := os.MkdirAll(installerRoot, 0o755); err != nil {
 		t.Fatalf("seed installer dir: %v", err)
 	}
-	if err := os.WriteFile(filepath.Join(installerRoot, "SKILL.md"), []byte("lark"), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(installerRoot, "SKILL.md"), []byte(skillContent), 0o644); err != nil {
 		t.Fatalf("seed installer SKILL.md: %v", err)
 	}
 
@@ -5032,8 +5033,8 @@ func TestPrepareCodexResolvesUserSkillSymlinks(t *testing.T) {
 	if err != nil {
 		t.Fatalf("seeded SKILL.md missing: %v", err)
 	}
-	if string(data) != "lark" {
-		t.Errorf("seeded SKILL.md = %q, want %q", data, "lark")
+	if string(data) != skillContent {
+		t.Errorf("seeded SKILL.md = %q, want %q", data, skillContent)
 	}
 }
 
@@ -5081,8 +5082,9 @@ func TestReuseSeedsUserSkillUpdates(t *testing.T) {
 	if err != nil {
 		t.Fatalf("user skill not refreshed on reuse: %v", err)
 	}
-	if string(data) != "v2" {
-		t.Errorf("after Reuse, user skill content = %q, want %q", data, "v2")
+	want := synthesizeFrontmatter("v2", "summarize", "Instructions for the summarize skill.")
+	if string(data) != want {
+		t.Errorf("after Reuse, user skill content = %q, want %q", data, want)
 	}
 }
 

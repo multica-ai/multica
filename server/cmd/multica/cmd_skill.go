@@ -172,9 +172,7 @@ func init() {
 	skillFilesUpsertCmd.Flags().String("output", "json", "Output format: table or json")
 }
 
-// ---------------------------------------------------------------------------
 // Skill commands
-// ---------------------------------------------------------------------------
 
 // newSkillAPIClient is newAPIClient with the transport swapped for the
 // stall-aware one (see internal/cli/stall.go). Skill payloads are the largest
@@ -679,9 +677,7 @@ func runSkillSearch(cmd *cobra.Command, args []string) error {
 	return nil
 }
 
-// ---------------------------------------------------------------------------
 // Skill file subcommands
-// ---------------------------------------------------------------------------
 
 func runSkillFilesList(cmd *cobra.Command, args []string) error {
 	client, err := newSkillAPIClient(cmd)

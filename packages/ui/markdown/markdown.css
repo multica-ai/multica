@@ -7,3 +7,10 @@
 .markdown-content .katex-display > .katex {
   white-space: nowrap;
 }
+
+/* Mixed RTL/LTR text: resolve each block's direction from its own content
+   (same rule as .rich-text-editor in prose.css). */
+.markdown-content :is(p, li) {
+  unicode-bidi: plaintext;
+  text-align: start;
+}

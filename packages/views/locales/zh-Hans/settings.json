@@ -79,7 +79,10 @@
       "cancelled": "决定不做。"
     },
     "pr_auto_complete_badge": "PR 合并后自动进入",
-    "built_in_locked": "内置状态驱动系统行为，不能编辑或归档，但可以调整顺序。"
+    "built_in_locked": "内置状态驱动系统行为，不能编辑或归档，但可以调整顺序。",
+    "builtin_badge": "内置",
+    "workflow_usage_other": "{{count}} 个工作流在用",
+    "workflow_usage_none": "未被工作流使用"
   },
   "wakeups": {
     "description": "平台对所有任务生效的规则。每个任务可以在自己的「唤醒」区域单独修改。",
@@ -138,6 +141,8 @@
     "field_name": "名称",
     "field_name_placeholder": "代码审查",
     "field_target": "执行者",
+    "no_target": "无目标",
+    "no_target_hint": "发布消息，不提及任何人。",
     "field_prompt": "提示词",
     "field_prompt_placeholder": "请审查这个任务关联的代码，重点关注正确性和边界情况。",
     "prompt_hint": "原样发送。智能体本来就能看到这个任务。",
@@ -404,7 +409,8 @@
       "billing": "账单与套餐",
       "code": "代码",
       "channels": "消息渠道",
-      "apps": "已连接应用"
+      "apps": "已连接应用",
+      "workflows": "工作流"
     },
     "groups": {
       "personal": "个人",
@@ -671,8 +677,7 @@
     },
     "system": {
       "title": "系统通知",
-      "description": "Multica 在后台时显示系统通知。",
-      "label": "显示系统通知"
+      "label": "Multica 在后台时显示系统通知"
     },
     "browser": {
       "label": "浏览器通知",
@@ -1213,6 +1218,15 @@
   "desktop": {
     "tabs": {
       "updates": "更新"
+    },
+    "tab_bar": {
+      "pin": "固定标签页",
+      "unpin": "取消固定标签页",
+      "close": "关闭标签页",
+      "close_others": "关闭其他标签页",
+      "open_window": "在新窗口打开",
+      "new": "新建标签页",
+      "pinned_name": "{{title}}（已固定）"
     },
     "updates": {
       "title": "更新",

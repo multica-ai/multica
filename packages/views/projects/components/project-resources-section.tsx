@@ -44,6 +44,7 @@ import {
   TooltipTrigger,
   TooltipContent,
 } from "@multica/ui/components/ui/tooltip";
+import { TooltipHint } from "@multica/ui/components/common/tooltip-hint";
 import {
   isDesktopShell,
   pickDirectory,
@@ -683,22 +684,26 @@ function ResourceRow({
               </span>
             )}
           </div>
-          <button
-            type="button"
-            onClick={() => onEditGithubRef(resource)}
-            className="opacity-0 group-hover:opacity-100 transition-opacity rounded-sm p-0.5 hover:bg-accent"
-            title={t(($) => $.resources.ref_edit_tooltip)}
-          >
-            <GitBranch className="size-3 text-muted-foreground" />
-          </button>
-          <button
-            type="button"
-            onClick={onRemove}
-            className="opacity-0 group-hover:opacity-100 transition-opacity rounded-sm p-0.5 hover:bg-accent"
-            title={t(($) => $.resources.remove_tooltip)}
-          >
-            <Trash2 className="size-3 text-muted-foreground" />
-          </button>
+          <TooltipHint label={t(($) => $.resources.ref_edit_tooltip)}>
+            <button
+              type="button"
+              onClick={() => onEditGithubRef(resource)}
+              className="opacity-0 group-hover:opacity-100 transition-opacity rounded-sm p-0.5 hover:bg-accent"
+              aria-label={t(($) => $.resources.ref_edit_tooltip)}
+            >
+              <GitBranch className="size-3 text-muted-foreground" />
+            </button>
+          </TooltipHint>
+          <TooltipHint label={t(($) => $.resources.remove_tooltip)}>
+            <button
+              type="button"
+              onClick={onRemove}
+              className="opacity-0 group-hover:opacity-100 transition-opacity rounded-sm p-0.5 hover:bg-accent"
+              aria-label={t(($) => $.resources.remove_tooltip)}
+            >
+              <Trash2 className="size-3 text-muted-foreground" />
+            </button>
+          </TooltipHint>
         </div>
         {/* Its own line rather than appended to the link text: a custom label
             takes that slot, and this panel is narrow enough that an inline
@@ -747,14 +752,16 @@ function ResourceRow({
       <span className="truncate flex-1">
         {resource.label || resource.resource_type}
       </span>
-      <button
-        type="button"
-        onClick={onRemove}
-        className="rounded-sm p-0.5 hover:bg-accent"
-        title={t(($) => $.resources.remove_tooltip)}
-      >
-        <Trash2 className="size-3" />
-      </button>
+      <TooltipHint label={t(($) => $.resources.remove_tooltip)}>
+        <button
+          type="button"
+          onClick={onRemove}
+          className="rounded-sm p-0.5 hover:bg-accent"
+          aria-label={t(($) => $.resources.remove_tooltip)}
+        >
+          <Trash2 className="size-3" />
+        </button>
+      </TooltipHint>
     </div>
   );
 }
@@ -836,22 +843,26 @@ function LocalDirectoryRow({
       {/* Not gated on `mismatch`: switching the mode only rewrites a field, so
           it works from the web app or another device, unlike the folder
           picker. */}
-      <button
-        type="button"
-        onClick={() => onEditMode(resource)}
-        className="opacity-0 group-hover:opacity-100 transition-opacity rounded-sm p-0.5 hover:bg-accent"
-        title={t(($) => $.resources.mode_edit_tooltip)}
-      >
-        <GitBranch className="size-3 text-muted-foreground" />
-      </button>
-      <button
-        type="button"
-        onClick={onRemove}
-        className="opacity-0 group-hover:opacity-100 transition-opacity rounded-sm p-0.5 hover:bg-accent"
-        title={t(($) => $.resources.remove_tooltip)}
-      >
-        <Trash2 className="size-3 text-muted-foreground" />
-      </button>
+      <TooltipHint label={t(($) => $.resources.mode_edit_tooltip)}>
+        <button
+          type="button"
+          onClick={() => onEditMode(resource)}
+          className="opacity-0 group-hover:opacity-100 transition-opacity rounded-sm p-0.5 hover:bg-accent"
+          aria-label={t(($) => $.resources.mode_edit_tooltip)}
+        >
+          <GitBranch className="size-3 text-muted-foreground" />
+        </button>
+      </TooltipHint>
+      <TooltipHint label={t(($) => $.resources.remove_tooltip)}>
+        <button
+          type="button"
+          onClick={onRemove}
+          className="opacity-0 group-hover:opacity-100 transition-opacity rounded-sm p-0.5 hover:bg-accent"
+          aria-label={t(($) => $.resources.remove_tooltip)}
+        >
+          <Trash2 className="size-3 text-muted-foreground" />
+        </button>
+      </TooltipHint>
     </div>
   );
 }

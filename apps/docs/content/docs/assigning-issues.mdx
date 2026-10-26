@@ -36,9 +36,9 @@ While executing, the agent can:
 
 What it can actually do is still limited by the agent's configuration, the runtime environment, and your permission to run it.
 
-During the run, the agent manages the issue's status by judging what its work changes: starting on the issue's own ask moves it to `in_progress` right away, delivery moves it to `in_review`, work continuing beyond the turn keeps it `in_progress`, and consultation or discussion leaves the status untouched — these actions appear under the agent's identity in the timeline. Run lifecycle and issue status are separate: a run completing does not by itself change the issue status.
+Agents update the issue’s status as work progresses. By default, they mark work in progress when they begin and ready for review when they deliver. When a project has a workflow, they follow its steps and handoff instructions instead. A run ending does not complete the issue by itself; answering a question does not mean the issue’s work is finished.
 
-When the assignee is a [squad](/squads), the same rule applies: Multica enqueues the leader, and dispatching members is not delivery — a dispatch turn leaves the parent issue `in_progress`, and the leader only moves it to `in_review` once the overall goal is met.
+For a project that repeatedly passes work between people or agents, use a [workflow](/workflows) to arrange the handoffs. To save a request you often send without changing the assignee, use a [quick action](/quick-actions).
 
 ## Assign without starting
 
@@ -65,7 +65,7 @@ Workspace owners and admins can manage agents, but being able to see one doesn't
 Switching the assignee to another agent starts a new run for the new assignee; picking a member only changes the assignee and doesn't invoke any AI coding tool. Removing the assignee doesn't create a run either.
 
 <Callout type="warning">
-Changing the assignee, unassigning, or changing the issue status doesn't stop a run that has already started. To interrupt it, stop the corresponding run in the execution log.
+Changing or removing an assignee does not normally stop a run already underway. Stop it in the execution log when needed. During a [workflow handoff](/workflows), the confirmation also lets you stop or cancel the previous agent’s run as you move the issue.
 </Callout>
 
 ## Use the CLI

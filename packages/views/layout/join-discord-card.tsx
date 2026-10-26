@@ -2,6 +2,7 @@
 
 import { X } from "lucide-react";
 import { useAuthStore } from "@multica/core/auth";
+import { TooltipHint } from "@multica/ui/components/common/tooltip-hint";
 import { DISCORD_URL, DiscordIcon } from "./discord";
 import { useDiscordCardDismissed } from "./use-discord-card-dismissed";
 import { useT } from "../i18n";
@@ -53,14 +54,16 @@ export function JoinDiscordCard() {
       </a>
       {/* Revealed on hover/focus so the resting row stays quiet. Coarse
           pointers get no hover, so keep it permanently visible there. */}
-      <button
-        type="button"
-        aria-label={t(($) => $.sidebar.discord_card.dismiss)}
-        onClick={dismiss}
-        className="absolute inset-y-0 right-1 my-auto flex size-6 cursor-pointer items-center justify-center rounded-sm text-muted-foreground opacity-0 ring-sidebar-ring transition-opacity hover:bg-sidebar-accent hover:text-foreground focus-visible:opacity-100 focus-visible:ring-2 group-hover/discord:opacity-100 [@media(hover:none)]:opacity-100"
-      >
-        <X className="size-3.5" />
-      </button>
+      <TooltipHint label={t(($) => $.sidebar.discord_card.dismiss)}>
+        <button
+          type="button"
+          aria-label={t(($) => $.sidebar.discord_card.dismiss)}
+          onClick={dismiss}
+          className="absolute inset-y-0 right-1 my-auto flex size-6 cursor-pointer items-center justify-center rounded-sm text-muted-foreground opacity-0 ring-sidebar-ring transition-opacity hover:bg-sidebar-accent hover:text-foreground focus-visible:opacity-100 focus-visible:ring-2 group-hover/discord:opacity-100 [@media(hover:none)]:opacity-100"
+        >
+          <X className="size-3.5" />
+        </button>
+      </TooltipHint>
     </div>
   );
 }

@@ -40,6 +40,13 @@
     "loading_workspace": "워크스페이스 로딩 중...",
     "loading_named_prefix": "로딩 중"
   },
+  "window": {
+    "go_back": "뒤로",
+    "go_forward": "앞으로",
+    "hold_for_history": "길게 눌러 기록 보기",
+    "back_history": "뒤로 기록",
+    "forward_history": "앞으로 기록"
+  },
   "sidebar": {
     "unpin_tooltip": "고정 해제",
     "workspaces_label": "워크스페이스",

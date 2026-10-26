@@ -1,0 +1,70 @@
+---
+title: Workflows
+description: Définissez les étapes des tâches d’un projet et qui prend le relais à chaque étape.
+---
+
+Un workflow donne aux tâches d’un projet un parcours commun. Choisissez les étapes, la personne ou l’agent qui s’en charge et le travail à effectuer.
+
+Par exemple, un workflow de livraison peut suivre ce parcours :
+
+| Étape | Responsable | Travail à effectuer |
+|---|---|---|
+| Développement | Un agent de développement | Réaliser les modifications et les préparer pour la revue. |
+| Revue | Un agent de revue | Vérifier le résultat, puis le transmettre à la QA ou le renvoyer pour correction. |
+| QA | Un membre de l’équipe | Essayer le résultat et décider s’il est prêt à être terminé. |
+
+Passer une tâche en revue la confie à l’agent de revue. La description, les échanges et les résultats précédents restent dans la même tâche pour que le prochain responsable puisse prendre la suite.
+
+C’est la structure du modèle **Livraison**. Les projets sans workflow choisi utilisent **Default** : tous les statuts sont disponibles et rien n’est confié automatiquement, comme auparavant.
+
+## Créer un workflow
+
+Un `owner` ou un `admin` de l’espace de travail peut créer des workflows dans l’application web ou de bureau :
+
+1. Ouvrez **Paramètres → Workflows**, puis **Nouveau workflow**. Partez de zéro ou utilisez le modèle **Livraison**, **Contenu** ou **Communauté**.
+2. Nommez le workflow et choisissez ses colonnes de statut. Faites glisser les colonnes du milieu dans l’ordre souhaité.
+3. Sélectionnez une colonne et décidez de garder le responsable ou de confier la tâche à un agent ou à un membre. Le sélecteur de membres propose aussi le responsable du projet.
+4. Pour une étape confiée à un agent, écrivez ce qu’il doit faire. Choisissez l’étape suivante une fois le travail terminé (la colonne suivante si vous ne choisissez rien) et l’étape de retour si l’étape rejette le travail reçu et qu’il doit être repris. Si l’étape ne peut pas continuer pour une raison extérieure, utilisez **Blocked** plutôt que le retour.
+5. Prévisualisez les consignes que l’agent recevra, puis enregistrez.
+
+Si vous avez ajouté un nouveau statut, enregistrez d’abord le workflow avant de configurer son passage de relais.
+
+Sans passage de relais, le responsable ne change pas. Confier la tâche à un membre change le responsable sans lancer d’agent. La confier à un agent lui demande de commencer cette étape. Vous devez avoir le droit de l’appeler et son ordinateur doit être en ligne pour l’exécuter.
+
+## L’utiliser dans un projet
+
+Ouvrez un projet et choisissez son **Workflow**. Les `owner`, les `admin` et le responsable du projet, s’il s’agit d’un membre, peuvent modifier ce choix.
+
+La confirmation indique quelles tâches gardent leur statut. Si certaines utilisent un statut absent du nouveau workflow, choisissez où les placer. Changer de workflow ne transmet pas les tâches à un autre responsable et ne lance pas d’agent.
+
+Le tableau du projet suit désormais les colonnes du workflow. Chaque tâche propose uniquement les étapes de ce workflow dans son choix de statut et indique qui prend le relais. Les projets sans autre workflow utilisent **Default** ; vous pouvez y revenir plus tard.
+
+## Passer à l’étape suivante
+
+Changez le statut d’une tâche ou faites glisser sa carte vers une autre colonne. Si cette étape prévoit un passage de relais, vérifiez le destinataire et, pour un agent, les consignes qu’il recevra.
+
+Si vous créez une tâche dans un projet sans choisir de responsable et que son statut prévoit un passage de relais, elle est confiée directement au responsable de cette étape ; un agent commence aussitôt. La fenêtre de création indique à qui elle sera confiée. Pour la créer sans rien lancer, placez-la dans Backlog.
+
+Si l’agent précédent a encore une exécution en cours ou en attente, la confirmation permet de l’arrêter ou de l’annuler. Cette option est sélectionnée par défaut. Gardez-la, sauf si vous voulez que les deux agents continuent à travailler. Les commentaires publiés et le travail déjà enregistré sont conservés.
+
+Les choix d’étape suivante et de retour indiquent à l’agent où déplacer la tâche. La fin d’une exécution ne fait pas avancer la tâche à elle seule : le membre ou l’agent responsable met à jour son statut.
+
+Le passage de relais et ses consignes restent dans l’historique de la tâche. Le menu du workflow sur le tableau du projet permet d’afficher le parcours complet.
+
+## Ajuster un workflow
+
+Plusieurs projets peuvent partager un workflow. Les modifications enregistrées dans **Paramètres → Workflows** s’appliquent à tous les projets qui l’utilisent. Pour changer le parcours d’un seul projet, dupliquez le workflow et choisissez la copie dans ce projet.
+
+Les administrateurs peuvent aussi configurer un passage de relais depuis le tableau du projet : survolez l’en-tête d’une colonne et cliquez sur **Confier à…**, ou sur le responsable déjà affiché. Si d’autres projets partagent le workflow, la question **Où appliquer cette modification ?** s’affiche. Choisir uniquement le projet actuel crée une copie du workflow pour lui, sans changer les autres projets.
+
+Retirer une colonne peut vous demander de choisir un nouveau statut pour les tâches qui s’y trouvent. Les autres restent en place et ce déplacement ne lance pas d’agent. La bibliothèque de statuts, sous la liste des workflows, permet de modifier les noms et les couleurs ; ces changements s’appliquent partout où le statut est utilisé.
+
+Pour supprimer un workflow, passez d’abord les projets qui l’utilisent à un autre workflow. Les tâches gardent leur statut actuel.
+
+Si **Paramètres** ne contient pas **Workflows**, la fonctionnalité n’est pas encore disponible dans cet espace de travail ; les statuts se gèrent toujours dans **Paramètres → États des tâches**.
+
+## Guides associés
+
+- [Projets](/projects) — regrouper les tâches qui suivent un workflow.
+- [Actions rapides](/quick-actions) — enregistrer une demande fréquente comme bouton sur une tâche.
+- [Automatisations](/autopilots) — commencer un travail selon un calendrier ou un événement extérieur.

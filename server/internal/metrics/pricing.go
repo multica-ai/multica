@@ -47,6 +47,11 @@ var modelPrices = map[string]ModelPrice{
 	// static table cannot schedule the published post-intro $3 / $15 change yet,
 	// so keep the intro rate here and update the row when catalog support exists.
 	"anthropic:claude-sonnet-5":   {Provider: "anthropic", Model: "claude-sonnet-5", InputPerM: 2.00, CacheReadPerM: 0.20, CacheWritePerM: 2.50, OutputPerM: 10.00},
+	"anthropic:claude-sonnet-5-5": {Provider: "anthropic", Model: "claude-sonnet-5-5", InputPerM: 2.00, CacheReadPerM: 0.10, CacheWritePerM: 2.50, OutputPerM: 10.00},
+	// Haiku 5.5 uses the <=100K prompt tier, matching the frontend estimate.
+	// Above 100K (including cache reads/writes), all four rates are 5x higher.
+	// Usage aggregates lack per-request prompt sizes, so long requests are underestimated.
+	"anthropic:claude-haiku-5-5":  {Provider: "anthropic", Model: "claude-haiku-5-5", InputPerM: 0.10, CacheReadPerM: 0.01, CacheWritePerM: 0.125, OutputPerM: 0.50},
 	"anthropic:claude-fable-5-1":  {Provider: "anthropic", Model: "claude-fable-5-1", InputPerM: 10.00, CacheReadPerM: 0.25, CacheWritePerM: 12.50, OutputPerM: 50.00},
 	"anthropic:claude-fable-5":    {Provider: "anthropic", Model: "claude-fable-5", InputPerM: 10.00, CacheReadPerM: 1.00, CacheWritePerM: 12.50, OutputPerM: 50.00},
 	"anthropic:claude-opus-5-5":   {Provider: "anthropic", Model: "claude-opus-5-5", InputPerM: 4.00, CacheReadPerM: 0.20, CacheWritePerM: 5.00, OutputPerM: 20.00},
@@ -62,10 +67,43 @@ var modelPrices = map[string]ModelPrice{
 	"deepseek:v4-flash":           {Provider: "deepseek", Model: "v4-flash", InputPerM: 0.56, CacheReadPerM: 0.0112, CacheWritePerM: 0.56, OutputPerM: 1.12},
 	"minimax:m2.7":                {Provider: "minimax", Model: "m2.7", InputPerM: 0.30, CacheReadPerM: 0.06, CacheWritePerM: 0.375, OutputPerM: 1.20},
 	"minimax:m2.7-highspeed":      {Provider: "minimax", Model: "m2.7-highspeed", InputPerM: 0.60, CacheReadPerM: 0.06, CacheWritePerM: 0.375, OutputPerM: 2.40},
-	"google:gemini-3-flash":       {Provider: "google", Model: "gemini-3-flash", InputPerM: 0.50, CacheReadPerM: 0.05, CacheWritePerM: 0.50, OutputPerM: 3.00},
-	"google:gemini-3.1-pro":       {Provider: "google", Model: "gemini-3.1-pro", InputPerM: 2.00, CacheReadPerM: 0.20, CacheWritePerM: 2.00, OutputPerM: 12.00},
-	"google:gemini-2.5-pro":       {Provider: "google", Model: "gemini-2.5-pro", InputPerM: 1.25, CacheReadPerM: 0.31, CacheWritePerM: 1.25, OutputPerM: 10.00},
-	"google:gemini-2.5-flash":     {Provider: "google", Model: "gemini-2.5-flash", InputPerM: 0.30, CacheReadPerM: 0.03, CacheWritePerM: 0.30, OutputPerM: 2.50},
+	// Google standard token prices: ai.google.dev/gemini-api/docs/pricing
+	// (2026-10-19). Mirror packages/views/runtimes/utils.ts.
+	// Argon's intro rate expires 2026-11-30; Flash 3.6/3.8, Robotics and
+	// 3.8 TTS promotions expire 2026-12-31. Update these static rows at expiry.
+	// As documented at ai.google.dev/gemini-api/docs/deprecations, 3.5 Flash
+	// routes to 3.6 and 3.7 routes to 3.8; use the destination's current rate.
+	// Pro estimates use the <=200K prompt tier; Flash/Lite use text/image/video
+	// rates. Request sizes, audio input and service tiers are not in aggregates.
+	// Cache writes estimate input processing, not storage. Unsupported cache
+	// buckets are 0. Speech-only SKUs have a fixed rate per input/output bucket.
+	// Mixed-modality Live/Image/Omni/Embedding, grounding and hourly cache
+	// storage cannot be inferred from these token totals.
+	"google:gemini-4-argon":                         {Provider: "google", Model: "gemini-4-argon", InputPerM: 2, CacheReadPerM: 0.1, CacheWritePerM: 2, OutputPerM: 10},
+	"google:gemini-3.8-flash":                       {Provider: "google", Model: "gemini-3.8-flash", InputPerM: 0.75, CacheReadPerM: 0.075, CacheWritePerM: 0.75, OutputPerM: 3.75},
+	"google:gemini-3.7-flash":                       {Provider: "google", Model: "gemini-3.7-flash", InputPerM: 0.75, CacheReadPerM: 0.075, CacheWritePerM: 0.75, OutputPerM: 3.75},
+	"google:gemini-3.6-flash":                       {Provider: "google", Model: "gemini-3.6-flash", InputPerM: 0.75, CacheReadPerM: 0.075, CacheWritePerM: 0.75, OutputPerM: 3.75},
+	"google:gemini-3.5-flash":                       {Provider: "google", Model: "gemini-3.5-flash", InputPerM: 0.75, CacheReadPerM: 0.075, CacheWritePerM: 0.75, OutputPerM: 3.75},
+	"google:gemini-3.5-flash-lite":                  {Provider: "google", Model: "gemini-3.5-flash-lite", InputPerM: 0.3, CacheReadPerM: 0.03, CacheWritePerM: 0.3, OutputPerM: 2.5},
+	"google:gemini-3.1-flash-lite":                  {Provider: "google", Model: "gemini-3.1-flash-lite", InputPerM: 0.25, CacheReadPerM: 0.025, CacheWritePerM: 0.25, OutputPerM: 1.5},
+	"google:gemini-3.1-pro":                         {Provider: "google", Model: "gemini-3.1-pro", InputPerM: 2, CacheReadPerM: 0.2, CacheWritePerM: 2, OutputPerM: 12},
+	"google:gemini-3.1-pro-preview":                 {Provider: "google", Model: "gemini-3.1-pro-preview", InputPerM: 2, CacheReadPerM: 0.2, CacheWritePerM: 2, OutputPerM: 12},
+	"google:gemini-3.1-pro-preview-customtools":     {Provider: "google", Model: "gemini-3.1-pro-preview-customtools", InputPerM: 2, CacheReadPerM: 0.2, CacheWritePerM: 2, OutputPerM: 12},
+	"google:gemini-3-flash":                         {Provider: "google", Model: "gemini-3-flash", InputPerM: 0.5, CacheReadPerM: 0.05, CacheWritePerM: 0.5, OutputPerM: 3},
+	"google:gemini-3-flash-preview":                 {Provider: "google", Model: "gemini-3-flash-preview", InputPerM: 0.5, CacheReadPerM: 0.05, CacheWritePerM: 0.5, OutputPerM: 3},
+	"google:gemini-2.5-pro":                         {Provider: "google", Model: "gemini-2.5-pro", InputPerM: 1.25, CacheReadPerM: 0.125, CacheWritePerM: 1.25, OutputPerM: 10},
+	"google:gemini-2.5-flash":                       {Provider: "google", Model: "gemini-2.5-flash", InputPerM: 0.3, CacheReadPerM: 0.03, CacheWritePerM: 0.3, OutputPerM: 2.5},
+	"google:gemini-2.5-flash-lite":                  {Provider: "google", Model: "gemini-2.5-flash-lite", InputPerM: 0.1, CacheReadPerM: 0.01, CacheWritePerM: 0.1, OutputPerM: 0.4},
+	"google:gemini-robotics-er-2-preview":           {Provider: "google", Model: "gemini-robotics-er-2-preview", InputPerM: 1, CacheReadPerM: 0.1, CacheWritePerM: 1, OutputPerM: 5},
+	"google:gemini-robotics-er-2-streaming-preview": {Provider: "google", Model: "gemini-robotics-er-2-streaming-preview", InputPerM: 1, CacheReadPerM: 0, CacheWritePerM: 0, OutputPerM: 5},
+	"google:gemini-3.8-flash-tts":                   {Provider: "google", Model: "gemini-3.8-flash-tts", InputPerM: 0.5, CacheReadPerM: 0, CacheWritePerM: 0, OutputPerM: 9},
+	"google:gemini-3.8-flash-lite-tts":              {Provider: "google", Model: "gemini-3.8-flash-lite-tts", InputPerM: 0.5, CacheReadPerM: 0, CacheWritePerM: 0, OutputPerM: 6},
+	"google:gemini-3.1-flash-tts-preview":           {Provider: "google", Model: "gemini-3.1-flash-tts-preview", InputPerM: 1, CacheReadPerM: 0, CacheWritePerM: 0, OutputPerM: 20},
+	"google:gemini-2.5-flash-preview-tts":           {Provider: "google", Model: "gemini-2.5-flash-preview-tts", InputPerM: 0.5, CacheReadPerM: 0, CacheWritePerM: 0, OutputPerM: 10},
+	"google:gemini-2.5-pro-preview-tts":             {Provider: "google", Model: "gemini-2.5-pro-preview-tts", InputPerM: 1, CacheReadPerM: 0, CacheWritePerM: 0, OutputPerM: 20},
+	"google:gemini-3.5-transcribe":                  {Provider: "google", Model: "gemini-3.5-transcribe", InputPerM: 2, CacheReadPerM: 0, CacheWritePerM: 0, OutputPerM: 12},
+	"google:gemini-3.5-transcribe-live":             {Provider: "google", Model: "gemini-3.5-transcribe-live", InputPerM: 3.5, CacheReadPerM: 0, CacheWritePerM: 0, OutputPerM: 21},
+	"google:gemini-3.5-live-translate-preview":      {Provider: "google", Model: "gemini-3.5-live-translate-preview", InputPerM: 3.5, CacheReadPerM: 0, CacheWritePerM: 0, OutputPerM: 21},
 	// xAI Grok (docs.x.ai/developers/pricing). Short-context tier: xAI bills
 	// a request at 2x once its prompt reaches 200K tokens, but a usage record
 	// aggregates every model call in a turn, so it cannot say which tier any
@@ -160,7 +198,11 @@ var modelAliasRules = []struct {
 	{regexp.MustCompile(`(^|/|:)gpt-5[.-]4-mini($|[^a-z0-9])`), "openai:gpt-5.4-mini"},
 	{regexp.MustCompile(`(^|/|:)gpt-5[.-]3-codex$`), "openai:gpt-5.3-codex"},
 	{regexp.MustCompile(`(^|/|:)gpt-5[.-]2-codex$`), "openai:gpt-5.2-codex"},
-	{regexp.MustCompile(`claude-sonnet-5|claude-5-sonnet`), "anthropic:claude-sonnet-5"},
+	// Sonnet 5.5 halves Sonnet 5's cache-read rate. End both rules at their
+	// own version so later SKUs cannot inherit either tier.
+	{regexp.MustCompile(`claude-sonnet-5[-.]5` + claudeVersionEnd), "anthropic:claude-sonnet-5-5"},
+	{regexp.MustCompile(`(?:claude-sonnet-5|claude-5-sonnet)` + claudeVersionEnd), "anthropic:claude-sonnet-5"},
+	{regexp.MustCompile(`claude-haiku-5[-.]5` + claudeVersionEnd), "anthropic:claude-haiku-5-5"},
 	// Fable 5.1 shares Fable 5's $10 / $50 and $12.50 cache write but prices
 	// cache reads at 0.025x input ($0.25) instead of the standard 0.1x, so it
 	// needs its own row, and both rules end at their own version
@@ -184,10 +226,33 @@ var modelAliasRules = []struct {
 	{regexp.MustCompile(`deepseek-v4-flash|^deepseek-chat$|^deepseek-reasoner$`), "deepseek:v4-flash"},
 	{regexp.MustCompile(`minimax-m2[.]7.*highspeed|highspeed.*minimax-m2[.]7`), "minimax:m2.7-highspeed"},
 	{regexp.MustCompile(`minimax-m2[.]7`), "minimax:m2.7"},
-	{regexp.MustCompile(`gemini-3-flash`), "google:gemini-3-flash"},
-	{regexp.MustCompile(`gemini-3[.]1-pro`), "google:gemini-3.1-pro"},
-	{regexp.MustCompile(`gemini-2[.]5-pro`), "google:gemini-2.5-pro"},
-	{regexp.MustCompile(`gemini-2[.]5-flash`), "google:gemini-2.5-flash"},
+	// Each Gemini SKU is exact: an image/audio/preview variant must never
+	// inherit the nearest text model rate. Known efforts normalize below.
+	{regexp.MustCompile(`(^|/|:)gemini-4-argon$`), "google:gemini-4-argon"},
+	{regexp.MustCompile(`(^|/|:)gemini-3\.8-flash$`), "google:gemini-3.8-flash"},
+	{regexp.MustCompile(`(^|/|:)gemini-3\.7-flash$`), "google:gemini-3.7-flash"},
+	{regexp.MustCompile(`(^|/|:)gemini-3\.6-flash$`), "google:gemini-3.6-flash"},
+	{regexp.MustCompile(`(^|/|:)gemini-3\.5-flash$`), "google:gemini-3.5-flash"},
+	{regexp.MustCompile(`(^|/|:)gemini-3\.5-flash-lite$`), "google:gemini-3.5-flash-lite"},
+	{regexp.MustCompile(`(^|/|:)gemini-3\.1-flash-lite$`), "google:gemini-3.1-flash-lite"},
+	{regexp.MustCompile(`(^|/|:)gemini-3\.1-pro$`), "google:gemini-3.1-pro"},
+	{regexp.MustCompile(`(^|/|:)gemini-3\.1-pro-preview$`), "google:gemini-3.1-pro-preview"},
+	{regexp.MustCompile(`(^|/|:)gemini-3\.1-pro-preview-customtools$`), "google:gemini-3.1-pro-preview-customtools"},
+	{regexp.MustCompile(`(^|/|:)gemini-3-flash$`), "google:gemini-3-flash"},
+	{regexp.MustCompile(`(^|/|:)gemini-3-flash-preview$`), "google:gemini-3-flash-preview"},
+	{regexp.MustCompile(`(^|/|:)gemini-2\.5-pro$`), "google:gemini-2.5-pro"},
+	{regexp.MustCompile(`(^|/|:)gemini-2\.5-flash$`), "google:gemini-2.5-flash"},
+	{regexp.MustCompile(`(^|/|:)gemini-2\.5-flash-lite$`), "google:gemini-2.5-flash-lite"},
+	{regexp.MustCompile(`(^|/|:)gemini-robotics-er-2-preview$`), "google:gemini-robotics-er-2-preview"},
+	{regexp.MustCompile(`(^|/|:)gemini-robotics-er-2-streaming-preview$`), "google:gemini-robotics-er-2-streaming-preview"},
+	{regexp.MustCompile(`(^|/|:)gemini-3\.8-flash-tts$`), "google:gemini-3.8-flash-tts"},
+	{regexp.MustCompile(`(^|/|:)gemini-3\.8-flash-lite-tts$`), "google:gemini-3.8-flash-lite-tts"},
+	{regexp.MustCompile(`(^|/|:)gemini-3\.1-flash-tts-preview$`), "google:gemini-3.1-flash-tts-preview"},
+	{regexp.MustCompile(`(^|/|:)gemini-2\.5-flash-preview-tts$`), "google:gemini-2.5-flash-preview-tts"},
+	{regexp.MustCompile(`(^|/|:)gemini-2\.5-pro-preview-tts$`), "google:gemini-2.5-pro-preview-tts"},
+	{regexp.MustCompile(`(^|/|:)gemini-3\.5-transcribe$`), "google:gemini-3.5-transcribe"},
+	{regexp.MustCompile(`(^|/|:)gemini-3\.5-transcribe-live$`), "google:gemini-3.5-transcribe-live"},
+	{regexp.MustCompile(`(^|/|:)gemini-3\.5-live-translate-preview$`), "google:gemini-3.5-live-translate-preview"},
 	// Anchored exact-match, dotted spelling only — same rule as the gpt-5.6
 	// rows above. The frontend resolver does not dash-normalize non-Anthropic
 	// ids, so a dashed `grok-4-5` must surface as unmapped on both sides
@@ -228,7 +293,15 @@ var modelAliasRules = []struct {
 // trailing brackets (`model[`) stay unmapped on both sides.
 var contextTagRe = regexp.MustCompile(`\[[^\]]+\]$`)
 
+// Antigravity reports a display label or an effort-suffixed model ID. Effort
+// selects reasoning, not a different SKU. Only strip known effort spellings;
+// unknown variants must remain unpriced instead of borrowing a family's rate.
+var geminiDisplayNameRe = regexp.MustCompile(`(^|/|:)gemini ([0-9]+(?:\.[0-9]+)?) (flash(?:-lite)?|pro|argon)(?: \((?:minimal|low|medium|high)\))?$`)
+var geminiEffortSuffixRe = regexp.MustCompile(`((?:^|/|:)gemini-[0-9]+(?:\.[0-9]+)?-(?:flash(?:-lite)?|pro|argon))-(?:minimal|low|medium|high)$`)
+
 func matchModelAlias(model string) (ModelPrice, bool) {
+	model = geminiDisplayNameRe.ReplaceAllString(model, "${1}gemini-${2}-${3}")
+	model = geminiEffortSuffixRe.ReplaceAllString(model, "${1}")
 	for _, rule := range modelAliasRules {
 		if rule.re.MatchString(model) {
 			price, ok := modelPrices[rule.priceKey]

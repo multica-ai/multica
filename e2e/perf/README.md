@@ -1,7 +1,7 @@
-# UI performance scenario
+# UI performance scenarios
 
-One browser scenario: typing a comment on a long issue thread while three agent
-runs stream progress. It exists because of MUL-7227, where a summary animation
+The comment-typing scenario models a long issue thread while three agent runs
+stream progress. It exists because of MUL-7227, where a summary animation
 replaced a DOM node per streamed message and typing a comment slowed to a crawl.
 Component tests could not see it — they run in jsdom, which has no style
 recalculation, no layout and no main-thread contention.
@@ -39,6 +39,17 @@ success, on failure and on cancellation.
 
 The ordinary e2e suite ignores this directory; it needs a production build and
 a machine that is not busy doing anything else.
+
+The floating-chat lifetime regression runs against the same production build:
+
+```bash
+pnpm exec playwright test --config=playwright.perf.config.ts floating-chat-lifetime.spec.ts
+```
+
+It checks that closing removes the message list, keeps the real composer and
+an in-flight upload alive, shows messages received while closed on reopen, and
+survives an interrupted exit. It also checks that the message list's ancestor
+is never scaled. HTTP and WebSocket traffic is synthetic; no backend is needed.
 
 ## When to run it
 

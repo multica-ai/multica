@@ -61,6 +61,7 @@
       "runtime_offline": "The agent is offline right now, so it couldn't reply. Please try again once it's back online.",
       "runtime_access_denied": "This agent can't run on its private runtime, so it couldn't reply. Make the runtime public, or rebind/copy the agent to a runtime its owner can use.",
       "runtime_recovery": "The agent restarted before it could finish. Please try again.",
+      "runtime_access_revoked": "Runtime access was revoked. Bind the agent to an accessible runtime before starting another run.",
       "manual": "This reply was cancelled.",
       "skill_bundle_unavailable": "The agent's skills couldn't be downloaded, so it never got started. This is usually a connection problem — please try again.",
       "runtime_cli_timeout": "The local OpenClaw CLI didn't answer in time, so this run never started. It's a local startup timeout, not a network problem — retrying won't help until the CLI gets faster or the timeout is raised (MULTICA_OPENCLAW_CLI_TIMEOUT).",
@@ -168,7 +169,9 @@
       "label": "Recommend an action",
       "prompt": "Review what you know about my workspace and recommend a useful first action."
     },
-    "customize": "Customize starters"
+    "customize": "Customize starters",
+    "uploading": "Wait for uploads to finish before using a starter.",
+    "draft_in_progress": "Send or clear your draft before using a starter."
   },
   "onboarding_cards": {
     "aria_label": "Ways to start",

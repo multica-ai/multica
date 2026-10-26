@@ -92,6 +92,18 @@ describe("ActiveTaskRow", () => {
     expect(screen.getByText("View transcript")).toBeInTheDocument();
     expect(mockState.taskMessagesOptions).not.toHaveBeenCalled();
   });
+
+  it("makes the trigger a jump button only when given a jump handler", () => {
+    const onJump = vi.fn();
+    const { rerender } = renderWithI18n(<ActiveTaskRow task={makeTask({})} issueId="issue-1" />);
+    expect(screen.queryByRole("button", { name: /Go to run/ })).not.toBeInTheDocument();
+
+    rerender(<ActiveTaskRow task={makeTask({})} issueId="issue-1" onJump={onJump} />);
+    const jump = screen.getByRole("button", { name: /Go to run/ });
+    expect(jump).toHaveTextContent("Started from comment");
+    fireEvent.click(jump);
+    expect(onJump).toHaveBeenCalledOnce();
+  });
 });
 
 describe("TaskCommentCoverage", () => {
@@ -439,41 +451,57 @@ describe("execution log past runs", () => {
     expect(screen.getByText("MUL-1 · Wakeups")).toBeInTheDocument();
   });
 
-  it("shows each past run's cost, not its token count", () => {
+  it("shows each past run's cost, and who ran it with what on a second line", () => {
     renderSection([past(1)]);
 
-    const row = screen.getByText("Past run 1").closest("div")!;
+    const row = screen.getByText("Past run 1").closest("[title]") as HTMLElement;
     expect(within(row).getByText("$2.00")).toBeInTheDocument();
-    expect(within(row).queryByText("892K")).not.toBeInTheDocument();
+    expect(row).toHaveTextContent("Lambda · 10m · 892K tokens · Opus 5");
+    // The exact model id stays one hover away.
+    expect(row.getAttribute("title")).toContain("claude-opus-5");
   });
 
-  it("draws the spend sparkline over a track of every run and sums the agent time", () => {
+  it("puts a failed run's reason where its duration would be", () => {
+    renderSection([past(1, { status: "failed", failure_reason: "agent_error.provider_quota_limit" })]);
+
+    const row = screen.getByText("Past run 1").closest("[title]") as HTMLElement;
+    expect(row).toHaveTextContent("Lambda · Provider quota exhausted · 892K tokens");
+    expect(row).not.toHaveTextContent("10m");
+  });
+
+  it("totals the spend, tokens and agent time", () => {
     renderSection([past(1), past(2), past(3, { status: "failed", usage: [] })]);
 
-    const chart = screen.getByRole("button", {
-      name: "Cumulative cost over time — open the run timeline",
-    });
-    expect(chart.querySelectorAll("[data-run]")).toHaveLength(3);
-    expect(screen.getByText(/30m agent time/)).toBeInTheDocument();
+    const term = (label: string) => screen.getByText(label, { selector: "dt" }).parentElement!;
+    expect(term("Spent")).toHaveTextContent("$4.00");
+    expect(term("Tokens")).toHaveTextContent("1.8M");
+    expect(term("Agent time")).toHaveTextContent("30m");
+  });
 
-    fireEvent.click(chart);
+  it("draws one bar per run and opens the Runs dialog from it", () => {
+    renderSection([past(1), past(2), past(3, { status: "failed", usage: [] })]);
+
+    const bars = screen.getByRole("button", { name: "Cost per run — open the run timeline" });
+    expect(Array.from(bars.querySelectorAll("[data-run]"), (el) => el.getAttribute("data-run"))).toEqual([
+      "past-1",
+      "past-2",
+      "past-3",
+    ]);
+    // The run without usage is a stub, not a bar sized like a cheap run.
+    expect((bars.querySelector('[data-run="past-3"]') as HTMLElement).className).toContain("bg-destructive");
+
+    fireEvent.click(bars);
     expect(screen.getByRole("heading", { name: "Runs" })).toBeInTheDocument();
   });
 
-  it("draws the sparkline from the first priced run", () => {
-    // Review repro (MUL-7780): the old bar strip waited for two runs and then
-    // drew them as two 12px bars in the corner of an empty strip.
+  it("draws the bars from the first priced run", () => {
     renderSection([past(1)]);
-    expect(
-      screen.getByRole("button", { name: /Cumulative cost over time/ }),
-    ).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /Cost per run/ })).toBeInTheDocument();
   });
 
-  it("skips the sparkline when no run recorded usage — there is no curve to draw", () => {
+  it("skips the bars when no run recorded usage — there is no cost to compare", () => {
     renderSection([past(1, { usage: [] }), past(2, { usage: [] })]);
-    expect(
-      screen.queryByRole("button", { name: /Cumulative cost over time/ }),
-    ).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /Cost per run/ })).not.toBeInTheDocument();
   });
 });
 

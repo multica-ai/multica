@@ -1033,6 +1033,40 @@ func TestScanCodexSessionUsageReadsPerTaskHome(t *testing.T) {
 	}
 }
 
+func TestCodexResultUsageMapUsesSessionModelForDefaultAgent(t *testing.T) {
+	t.Parallel()
+	taskHome := t.TempDir()
+	threadID := "default-model-thread"
+	startTime := time.Now().Add(-time.Minute)
+	dateDir := filepath.Join(taskHome, "sessions",
+		fmt.Sprintf("%04d", startTime.Year()),
+		fmt.Sprintf("%02d", int(startTime.Month())),
+		fmt.Sprintf("%02d", startTime.Day()),
+	)
+	if err := os.MkdirAll(dateDir, 0o755); err != nil {
+		t.Fatalf("mkdir date dir: %v", err)
+	}
+	content := fmt.Sprintf(
+		`{"timestamp":%q,"type":"turn_context","payload":{"model":"gpt-5.6-sol"}}`+"\n",
+		startTime.Add(time.Second).UTC().Format(time.RFC3339Nano),
+	)
+	if err := os.WriteFile(filepath.Join(dateDir, "rollout-2026-07-13T00-00-00-"+threadID+".jsonl"), []byte(content), 0o644); err != nil {
+		t.Fatalf("write session file: %v", err)
+	}
+
+	jsonRPCUsage := TokenUsage{
+		InputTokens:      321,
+		OutputTokens:     42,
+		CacheReadTokens:  1000,
+		CacheWriteTokens: 7,
+	}
+	got := codexResultUsageMap(startTime, taskHome, threadID, false, "", jsonRPCUsage)
+	want := map[string]TokenUsage{"gpt-5.6-sol": jsonRPCUsage}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("usage map = %#v, want session model with unchanged JSON-RPC usage %#v", got, want)
+	}
+}
+
 func TestScanCodexSessionUsageSubtractsResumeBaseline(t *testing.T) {
 	t.Parallel()
 	taskHome := t.TempDir()
@@ -1524,7 +1558,7 @@ func TestCodexRawItemAgentMessageReconciliation(t *testing.T) {
 				chunks = append(chunks, text)
 				return true
 			}
-			c.onAgentMessage = func(text string) { completed = text }
+			c.onAgentMessage = func(text, _ string) { completed = text }
 
 			for _, delta := range tt.deltas {
 				c.handleLine(fmt.Sprintf(`{"jsonrpc":"2.0","method":"item/agentMessage/delta","params":{"threadId":"thr-1","turnId":"turn-1","itemId":"msg-1","delta":%q}}`, delta))
@@ -1554,7 +1588,7 @@ func TestCodexRawAgentMessageBelowAggregationThresholdDefersTailUntilCompleted(t
 		return true
 	}
 	var authoritative string
-	c.onAgentMessage = func(text string) { authoritative = text }
+	c.onAgentMessage = func(text, _ string) { authoritative = text }
 
 	deltas := []string{"The ", "answer ", "is 42."}
 	completed := strings.Join(deltas, "")
@@ -1597,7 +1631,7 @@ func TestCodexRawAgentMessageMismatchRetriesRejectedPendingAtTerminal(t *testing
 		return trySend(messages, Message{Type: MessageText, Content: text})
 	}
 	var completed string
-	c.onAgentMessage = func(text string) { completed = text }
+	c.onAgentMessage = func(text, _ string) { completed = text }
 
 	c.handleLine(`{"jsonrpc":"2.0","method":"item/agentMessage/delta","params":{"itemId":"msg-1","delta":"Hx"}}`)
 	// Fill the remaining slot after Hx was accepted. The mismatch path's first
@@ -1784,43 +1818,102 @@ func TestCodexRawAgentMessageAbnormalEOFFlushesCompleteDeltas(t *testing.T) {
 // TestCodexDeliverableOutputExcludesNarration pins Result.Output to the turn's
 // deliverable. Codex used to concatenate every agent message, so a tool-using
 // run shipped its intermediate narration to Slack and Lark along with the answer
-// (GH #6006). The wiring mirrors executeOnce: onAgentMessage tracks the last
-// authoritative completed message, onFinalAnswer captures the phase-labelled one, and
-// codexDeliverableOutput picks between them.
+// (GH #6006). Later, an empty final_answer after a `commentary` message promoted
+// that commentary to Result.Output, which the server then posted as the run's
+// result comment. The wiring mirrors executeOnce: onAgentMessage
+// and onFinalAnswer feed a codexOutputSelection and codexDeliverableOutput picks
+// from it.
 func TestCodexDeliverableOutputExcludesNarration(t *testing.T) {
 	t.Parallel()
 
 	const (
 		rawNarration   = `{"jsonrpc":"2.0","method":"item/completed","params":{"item":{"type":"agentMessage","id":"m1","text":"Let me check the logs."}}}`
 		rawFinal       = `{"jsonrpc":"2.0","method":"item/completed","params":{"item":{"type":"agentMessage","id":"m2","text":"The retry loop is the cause.","phase":"final_answer"}}}`
+		rawCommentary  = `{"jsonrpc":"2.0","method":"item/completed","params":{"item":{"type":"agentMessage","id":"m1","text":"Let me check the logs.","phase":"commentary"}}}`
+		rawEmptyFinal  = `{"jsonrpc":"2.0","method":"item/completed","params":{"item":{"type":"agentMessage","id":"m3","text":"","phase":"final_answer"}}}`
+		rawBlankFinal  = `{"jsonrpc":"2.0","method":"item/completed","params":{"item":{"type":"agentMessage","id":"m3","text":" \n\t ","phase":"final_answer"}}}`
 		legacyFirst    = `{"jsonrpc":"2.0","method":"codex/event","params":{"msg":{"type":"agent_message","message":"Let me check the logs."}}}`
 		legacySecond   = `{"jsonrpc":"2.0","method":"codex/event","params":{"msg":{"type":"agent_message","message":"The retry loop is the cause."}}}`
+		narration      = "Let me check the logs."
 		wantDeliverabl = "The retry loop is the cause."
 	)
 
 	cases := []struct {
-		name     string
-		protocol string
-		lines    []string
-		want     string
+		name         string
+		protocol     string
+		lines        []string
+		want         string
+		wantStreamed []string
 	}{
 		{
-			name:     "raw protocol keeps only the labelled final answer",
-			protocol: "raw",
-			lines:    []string{rawNarration, rawFinal},
-			want:     wantDeliverabl,
+			name:         "raw protocol keeps only the labelled final answer",
+			protocol:     "raw",
+			lines:        []string{rawNarration, rawFinal},
+			want:         wantDeliverabl,
+			wantStreamed: []string{narration, wantDeliverabl},
 		},
 		{
-			name:     "raw protocol without a final_answer falls back to the last message",
-			protocol: "raw",
-			lines:    []string{rawNarration, `{"jsonrpc":"2.0","method":"item/completed","params":{"item":{"type":"agentMessage","id":"m2","text":"The retry loop is the cause."}}}`},
-			want:     wantDeliverabl,
+			name:         "raw protocol keeps the final answer after labelled commentary",
+			protocol:     "raw",
+			lines:        []string{rawCommentary, rawFinal},
+			want:         wantDeliverabl,
+			wantStreamed: []string{narration, wantDeliverabl},
 		},
 		{
-			name:     "legacy protocol carries no phase and falls back to the last message",
-			protocol: "legacy",
-			lines:    []string{legacyFirst, legacySecond},
-			want:     wantDeliverabl,
+			name:         "raw protocol without a final_answer falls back to the last message",
+			protocol:     "raw",
+			lines:        []string{rawNarration, `{"jsonrpc":"2.0","method":"item/completed","params":{"item":{"type":"agentMessage","id":"m2","text":"The retry loop is the cause."}}}`},
+			want:         wantDeliverabl,
+			wantStreamed: []string{narration, wantDeliverabl},
+		},
+		{
+			name:         "legacy protocol carries no phase and falls back to the last message",
+			protocol:     "legacy",
+			lines:        []string{legacyFirst, legacySecond},
+			want:         wantDeliverabl,
+			wantStreamed: []string{narration, wantDeliverabl},
+		},
+		{
+			name:         "empty final answer after commentary yields no output",
+			protocol:     "raw",
+			lines:        []string{rawCommentary, rawEmptyFinal},
+			want:         "",
+			wantStreamed: []string{narration},
+		},
+		{
+			name:         "whitespace-only final answer after commentary yields no output",
+			protocol:     "raw",
+			lines:        []string{rawCommentary, rawBlankFinal},
+			want:         "",
+			wantStreamed: []string{narration, " \n\t "},
+		},
+		{
+			name:         "empty final answer after a phase-less message yields no output",
+			protocol:     "raw",
+			lines:        []string{rawNarration, rawEmptyFinal},
+			want:         "",
+			wantStreamed: []string{narration},
+		},
+		{
+			name:         "commentary without a final answer is not the deliverable",
+			protocol:     "raw",
+			lines:        []string{rawCommentary},
+			want:         "",
+			wantStreamed: []string{narration},
+		},
+		{
+			name:         "a later empty final answer does not erase an earlier one",
+			protocol:     "raw",
+			lines:        []string{rawCommentary, rawFinal, rawEmptyFinal},
+			want:         wantDeliverabl,
+			wantStreamed: []string{narration, wantDeliverabl},
+		},
+		{
+			name:         "a repeated final answer event keeps the same deliverable",
+			protocol:     "raw",
+			lines:        []string{rawCommentary, rawFinal, rawFinal},
+			want:         wantDeliverabl,
+			wantStreamed: []string{narration, wantDeliverabl, wantDeliverabl},
 		},
 	}
 
@@ -1831,29 +1924,50 @@ func TestCodexDeliverableOutputExcludesNarration(t *testing.T) {
 			c, _, _ := newTestCodexClient(t)
 			c.notificationProtocol = tc.protocol
 
-			var finalAnswer, lastAgentMessage string
+			var output codexOutputSelection
 			var streamed []string
 			c.onMessage = func(msg Message) {
 				if msg.Type == MessageText {
 					streamed = append(streamed, msg.Content)
 				}
 			}
-			c.onAgentMessage = func(text string) { lastAgentMessage = text }
-			c.onFinalAnswer = func(text string) { finalAnswer = text }
+			c.onAgentMessage = output.observeAgentMessage
+			c.onFinalAnswer = output.observeFinalAnswer
 
 			for _, line := range tc.lines {
 				c.handleLine(line)
 			}
 
-			if got := codexDeliverableOutput(finalAnswer, lastAgentMessage); got != tc.want {
+			if got := codexDeliverableOutput(output); got != tc.want {
 				t.Fatalf("Result.Output = %q, want %q", got, tc.want)
 			}
-			// Narrowing delivery must not narrow the transcript: both messages
-			// still stream to the timeline the Multica UI renders.
-			if len(streamed) != 2 || streamed[0] != "Let me check the logs." {
-				t.Fatalf("expected both agent messages streamed, got %q", streamed)
+			// Narrowing delivery must not narrow the transcript: every agent
+			// message still streams to the timeline the Multica UI renders.
+			if !reflect.DeepEqual(streamed, tc.wantStreamed) {
+				t.Fatalf("streamed agent messages = %q, want %q", streamed, tc.wantStreamed)
 			}
 		})
+	}
+}
+
+// An empty final_answer from another thread must not mark this turn as having
+// ended without a deliverable: the thread guard keeps it out of the selection.
+func TestCodexDeliverableOutputIgnoresForeignThreadEmptyFinalAnswer(t *testing.T) {
+	t.Parallel()
+
+	c, _, _ := newTestCodexClient(t)
+	c.notificationProtocol = "raw"
+	c.threadID = "thr_main"
+
+	var output codexOutputSelection
+	c.onAgentMessage = output.observeAgentMessage
+	c.onFinalAnswer = output.observeFinalAnswer
+
+	c.handleLine(`{"jsonrpc":"2.0","method":"item/completed","params":{"threadId":"thr_main","item":{"type":"agentMessage","id":"m1","text":"Main answer"}}}`)
+	c.handleLine(`{"jsonrpc":"2.0","method":"item/completed","params":{"threadId":"thr_subagent","item":{"type":"agentMessage","id":"sub-1","text":"","phase":"final_answer"}}}`)
+
+	if got := codexDeliverableOutput(output); got != "Main answer" {
+		t.Fatalf("Result.Output = %q, want the main thread's message", got)
 	}
 }
 
@@ -4283,6 +4397,51 @@ func TestCodexExecutePhaseLessCompletedMessageRemainsAuthoritative(t *testing.T)
 	}
 	if result.Output != "Hello" {
 		t.Fatalf("phase-less Result.Output = %q, want authoritative Hello", result.Output)
+	}
+}
+
+// TestCodexExecuteEmptyFinalAnswerAfterCommentaryYieldsNoOutput replays the
+// reported event shape end to end: a `commentary` message, then a
+// `final_answer` item with empty text, then turn/completed. The run completes
+// with empty Result.Output so the server posts no comment built from narration,
+// while the commentary still reaches the transcript.
+func TestCodexExecuteEmptyFinalAnswerAfterCommentaryYieldsNoOutput(t *testing.T) {
+	t.Parallel()
+	if runtime.GOOS == "windows" {
+		t.Skip("shell-script fixture is POSIX-only")
+	}
+
+	fakePath := writeFakeCodexAppServer(t, ""+
+		`read line`+"\n"+
+		`echo '{"jsonrpc":"2.0","id":1,"result":{}}'`+"\n"+
+		`read line`+"\n"+
+		`read line`+"\n"+
+		`echo '{"jsonrpc":"2.0","id":2,"result":{"thread":{"id":"thr-empty-final"}}}'`+"\n"+
+		`read line`+"\n"+
+		`echo '{"jsonrpc":"2.0","id":3,"result":{}}'`+"\n"+
+		`echo '{"jsonrpc":"2.0","method":"turn/started","params":{"threadId":"thr-empty-final","turn":{"id":"turn-empty-final"}}}'`+"\n"+
+		`echo '{"jsonrpc":"2.0","method":"item/completed","params":{"threadId":"thr-empty-final","turnId":"turn-empty-final","item":{"type":"agentMessage","id":"msg-1","text":"Posted the report to the target issue.","phase":"commentary"}}}'`+"\n"+
+		`echo '{"jsonrpc":"2.0","method":"item/completed","params":{"threadId":"thr-empty-final","turnId":"turn-empty-final","item":{"type":"agentMessage","id":"msg-2","text":"","phase":"final_answer"}}}'`+"\n"+
+		`echo '{"jsonrpc":"2.0","method":"turn/completed","params":{"threadId":"thr-empty-final","turn":{"id":"turn-empty-final","status":"completed"}}}'`+"\n")
+
+	result, messages := executeFakeCodexCollectingMessages(t, fakePath, ExecOptions{
+		Timeout:                   5 * time.Second,
+		SemanticInactivityTimeout: 5 * time.Second,
+	}, 10*time.Second)
+	if result.Status != "completed" {
+		t.Fatalf("status = %q, want completed (error=%q)", result.Status, result.Error)
+	}
+	if result.Output != "" {
+		t.Fatalf("Result.Output = %q, want empty: commentary must not become the deliverable", result.Output)
+	}
+	var transcript []string
+	for _, msg := range messages {
+		if msg.Type == MessageText {
+			transcript = append(transcript, msg.Content)
+		}
+	}
+	if strings.Join(transcript, "") != "Posted the report to the target issue." {
+		t.Fatalf("transcript text = %q, want the commentary preserved", transcript)
 	}
 }
 

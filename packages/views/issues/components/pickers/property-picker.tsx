@@ -35,9 +35,7 @@ const isEmptyItem = (el: HTMLButtonElement | undefined) =>
 export const PICKER_TRIGGER_CLASS =
   "flex items-center gap-1.5 cursor-pointer rounded-xs px-1 -mx-1 hover:bg-accent/30 transition-colors overflow-hidden";
 
-// ---------------------------------------------------------------------------
 // PropertyPicker — generic Popover shell with optional search
-// ---------------------------------------------------------------------------
 
 export function PropertyPicker({
   open,
@@ -225,9 +223,7 @@ export function PropertyPicker({
   );
 }
 
-// ---------------------------------------------------------------------------
 // PickerItem — single selectable row
-// ---------------------------------------------------------------------------
 
 export function PickerItem({
   selected,
@@ -293,9 +289,7 @@ export function PickerItem({
   );
 }
 
-// ---------------------------------------------------------------------------
 // PickerSection — group header
-// ---------------------------------------------------------------------------
 
 export function PickerSection({
   label,
@@ -314,9 +308,7 @@ export function PickerSection({
   );
 }
 
-// ---------------------------------------------------------------------------
 // PickerEmpty — no results state
-// ---------------------------------------------------------------------------
 
 export function PickerEmpty() {
   const { t } = useT("issues");

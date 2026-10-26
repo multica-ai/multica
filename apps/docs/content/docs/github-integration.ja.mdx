@@ -131,7 +131,6 @@ Repository permissions:
 | 権限 | レベル |
 |---|---|
 | Metadata | Read-only |
-| Contents | Read-only。PR スナップショットのクエリが head commit・マージ可否・CI ロールアップをまとめて読み取るために必要 |
 | Pull requests | Read-only |
 | Checks | Read-only。CI の状態表示に使用 |
 | Commit statuses | Read-only。legacy status 形式の CI 集計に使用 |
@@ -141,7 +140,7 @@ Repository permissions:
 - **Pull request**
 - **Check suite**、**Check run**、**Status**。CI とマージ可能性を更新するために使用します。
 
-Multica で CI を表示しない場合は、Checks と Commit statuses の権限、および関連イベントの購読を省略できます。ただし Contents は必須です。付与しないとスナップショットのクエリ自体が失敗し、PR カードからマージ状態も消えます。
+PR スナップショットは Pull requests、Checks、Commit statuses の REST API から取得します。Contents 権限は不要です。
 
 <Callout type="warning">
 必要なのは **Webhook secret** であり、OAuth Client secret ではありません。GitHub と Multica に入力した Webhook secret が異なる場合、GitHub delivery は `401 invalid signature` を返します。
@@ -184,7 +183,7 @@ API サービスを再起動し、**設定 → コード** から接続します
 - **Webhook が 401 を返す**: GitHub App と API が同じ Webhook secret を使っていることを確認し、GitHub の **Recent Deliveries** から再配信します。
 - **PR が紐づかない**: リポジトリが App の許可範囲にあること、PR の自動紐づけが有効であること、番号が現在のワークスペースのものであること、誰かがタスクから外していないかを確認します。
 - **本文に番号を書いても紐づかない**: `Closes MUL-123` を使うか、番号をブランチ名または PR タイトルに入れるか、手動で紐づけます。
-- **CI の状態がない**: `GITHUB_APP_ID` と `GITHUB_APP_PRIVATE_KEY` が設定済みで、App に Contents、Checks、Commit statuses の read-only 権限があり、関連イベントを購読していることを確認します。Contents が欠けるとスナップショット全体が失敗し、PR カードには CI もマージ状態も表示されません。インストール済み App に権限を追加した場合は、各 installation の所有者が GitHub 上で承認するまで有効になりません。
+- **CI の状態がない**: `GITHUB_APP_ID` と `GITHUB_APP_PRIVATE_KEY` が設定済みで、App に Pull requests、Checks、Commit statuses の read-only 権限があり、関連イベントを購読していることを確認します。Contents 権限は不要です。インストール済み App に権限を追加した場合は、各 installation の所有者が GitHub 上で承認するまで有効になりません。
 - **PR のマージ後もタスクのステータスが変わらない**: タスクの **Pull requests** リストの下にある説明を確認します。まだマージされていない PR やマージされずにクローズされた PR、またはこのタスクが PR マージでステータスを変えない設定であることが表示されます。説明がない場合は、ワークスペースが **変更しない** に設定されているか、タスクがすでに変更先のステータスです。
 
 ## 次のステップ

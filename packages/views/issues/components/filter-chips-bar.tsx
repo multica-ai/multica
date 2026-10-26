@@ -17,6 +17,7 @@ import {
 } from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
 import { Button } from "@multica/ui/components/ui/button";
+import { TooltipHint } from "@multica/ui/components/common/tooltip-hint";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { memberListOptions, agentListOptions, squadListOptions } from "@multica/core/workspace/queries";
 import { projectListOptions } from "@multica/core/projects/queries";
@@ -594,6 +595,7 @@ function useFilterChips(
 
 function ChipSpan({ chip }: { chip: FilterChip }) {
   const { t } = useT("issues");
+  const removeLabel = t(($) => $.filters.chip_remove, { name: chip.label });
   return (
     // Keyed per dimension: the chip animates in once when its dimension
     // first gains a value; value changes inside it re-render without
@@ -608,14 +610,16 @@ function ChipSpan({ chip }: { chip: FilterChip }) {
         {chip.valueIcons}
         <span className="truncate font-medium">{chip.value}</span>
       </span>
-      <button
-        type="button"
-        aria-label={t(($) => $.filters.chip_remove, { name: chip.label })}
-        onClick={chip.onRemove}
-        className="flex size-4 shrink-0 items-center justify-center rounded-sm text-muted-foreground hover:bg-accent hover:text-foreground"
-      >
-        <X className="size-3" />
-      </button>
+      <TooltipHint label={removeLabel}>
+        <button
+          type="button"
+          aria-label={removeLabel}
+          onClick={chip.onRemove}
+          className="flex size-4 shrink-0 items-center justify-center rounded-sm text-muted-foreground hover:bg-accent hover:text-foreground"
+        >
+          <X className="size-3" />
+        </button>
+      </TooltipHint>
     </span>
   );
 }

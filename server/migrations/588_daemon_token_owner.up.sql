@@ -1,0 +1,14 @@
+-- MUL-8154: bind daemon tokens to the runtime owner they were issued for.
+-- A daemon_id can be re-registered by another member after its runtimes are
+-- deleted; a token bound only to (workspace_id, daemon_id) would then reach
+-- the new owner's runtimes. Daemon routes require owner_id to match the
+-- runtime's owner for every non-Qoder-managed token.
+--
+-- No backfill: the issuing owner of a pre-existing token cannot be recovered
+-- (the daemon's current owner may be a later re-registrant), so existing
+-- non-Qoder tokens stay NULL and are refused. They are short-lived Remote MCP
+-- credentials (24h) that are re-issued on the next claim. Qoder-managed
+-- tokens are governed by cloud_agent_connection and stay NULL by design.
+-- Plain column, no foreign key (repository rule): a token whose owner is
+-- deleted simply never matches a runtime owner again.
+ALTER TABLE daemon_token ADD COLUMN IF NOT EXISTS owner_id UUID;

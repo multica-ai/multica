@@ -41,3 +41,5 @@ export {
   useCurrentWorkspace,
   useWorkspacePaths,
 } from "./hooks";
+
+export { isKnownWorkspacePath, workspaceSlugForPath } from "./workspace-slugs";

@@ -60,6 +60,24 @@ func TestUnresumableHistory(t *testing.T) {
 			errMsg: "The final assistant message must not be empty.",
 			want:   true,
 		},
+		{
+			// MUL-8188, verbatim from the Kiro panic the backend surfaces.
+			name:   "kiro invalid conversation history panic",
+			errMsg: `kiro runtime panicked: The application panicked (crashed). | Message:  first agent loop request should never fail: AgentLoopResponse(Custom("invalid conversation history received")) | Location: crates/agent/src/agent/mod.rs:3744`,
+			want:   true,
+		},
+		{
+			name:   "invalid conversation history bare",
+			errMsg: "Invalid Conversation History received",
+			want:   true,
+		},
+		{
+			// A Kiro panic that says nothing about the transcript must not
+			// discard the session on its own.
+			name:   "kiro panic unrelated to history",
+			errMsg: "kiro runtime panicked: The application panicked (crashed). | Message:  index out of bounds",
+			want:   false,
+		},
 
 		// --- Negatives: emptiness complaints that are NOT about history. ---
 		{

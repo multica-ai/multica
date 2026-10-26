@@ -79,7 +79,10 @@
       "cancelled": "진행하지 않기로 함."
     },
     "pr_auto_complete_badge": "PR 병합 시 자동 설정",
-    "built_in_locked": "기본 상태는 시스템 동작에 쓰이므로 편집하거나 보관할 수 없습니다. 순서는 바꿀 수 있습니다."
+    "built_in_locked": "기본 상태는 시스템 동작에 쓰이므로 편집하거나 보관할 수 없습니다. 순서는 바꿀 수 있습니다.",
+    "builtin_badge": "기본 제공",
+    "workflow_usage_other": "워크플로 {{count}}개에서 사용 중",
+    "workflow_usage_none": "사용하는 워크플로 없음"
   },
   "wakeups": {
     "description": "모든 태스크에 적용되는 플랫폼 규칙입니다. 각 태스크의 깨우기 섹션에서 따로 바꿀 수 있습니다.",
@@ -138,6 +141,8 @@
     "field_name": "이름",
     "field_name_placeholder": "코드 리뷰",
     "field_target": "실행자",
+    "no_target": "대상 없음",
+    "no_target_hint": "아무도 멘션하지 않고 메시지를 게시합니다.",
     "field_prompt": "프롬프트",
     "field_prompt_placeholder": "이 태스크에 연결된 코드를 검토하고 정확성과 예외 상황을 중점적으로 확인하세요.",
     "prompt_hint": "작성한 그대로 전달됩니다. 에이전트는 태스크를 이미 읽을 수 있습니다.",
@@ -404,7 +409,8 @@
       "billing": "결제 및 요금제",
       "code": "코드",
       "channels": "메신저",
-      "apps": "연결된 앱"
+      "apps": "연결된 앱",
+      "workflows": "워크플로"
     },
     "groups": {
       "personal": "개인",
@@ -671,8 +677,7 @@
     },
     "system": {
       "title": "시스템 알림",
-      "description": "Multica가 백그라운드에 있을 때 시스템 알림을 표시합니다.",
-      "label": "시스템 알림 표시"
+      "label": "Multica가 백그라운드에 있을 때 시스템 알림 표시"
     },
     "browser": {
       "label": "브라우저 알림",
@@ -953,6 +958,15 @@
   "desktop": {
     "tabs": {
       "updates": "업데이트"
+    },
+    "tab_bar": {
+      "pin": "탭 고정",
+      "unpin": "탭 고정 해제",
+      "close": "탭 닫기",
+      "close_others": "다른 탭 닫기",
+      "open_window": "새 창에서 열기",
+      "new": "새 탭",
+      "pinned_name": "{{title}} (고정됨)"
     },
     "updates": {
       "title": "업데이트",

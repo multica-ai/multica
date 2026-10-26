@@ -9,6 +9,7 @@ import { runtimeListOptions } from "@multica/core/runtimes/queries";
 import { Skeleton } from "@multica/ui/components/ui/skeleton";
 import { RuntimeDetail } from "./runtime-detail";
 import { buildRuntimeMachines } from "./runtime-machines";
+import { QoderDetailPage } from "./qoder-detail-page";
 import { useT } from "../../i18n";
 
 export function RuntimeSettingsPage({
@@ -59,6 +60,7 @@ export function RuntimeSettingsPage({
     );
   }
   const { machine, runtime } = target;
+  if (runtime.provider === "qoder_cloud") return <QoderDetailPage />;
 
   return (
     <RuntimeDetail

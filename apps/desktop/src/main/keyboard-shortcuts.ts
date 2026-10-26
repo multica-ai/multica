@@ -26,28 +26,10 @@ const ZOOM_MIN = -3;
 const ZOOM_MAX = 4.5;
 
 /**
- * Inspect a `before-input-event` key and apply (or block) the matching
- * window-level shortcut. Returns `true` when the caller should call
- * `event.preventDefault()` — that both swallows the renderer keydown and
- * prevents the application menu accelerator from firing, so we don't
- * double-trigger zoom on macOS where the default menu also binds these
- * keys.
- *
- * Why we don't rely on the menu's `zoomIn` / `zoomOut` roles: on macOS the
- * default `Cmd+-` accelerator does not fire reliably across keyboard
- * layouts (issue MUL-2354 — Cmd+= zooms in but Cmd+- doesn't undo it).
- * Handling the shortcuts here gives identical behavior on every platform
- * and every layout.
- */
-/**
- * Result of handleAppShortcut:
- * - `false`: not handled, let Electron continue
- * - `true`: handled (preventDefault), no further action
- * - `"close-tab"`: Cmd/Ctrl+W intercepted — caller should send IPC to renderer
- * - `"open-settings"`: Cmd/Ctrl+, intercepted — caller should route the
- *   request to the tabbed main window
- * - `{ action: "select-tab", key }`: Cmd/Ctrl+1..9 intercepted — caller
- *   should route the requested browser-style tab position to the main window
+ * Window shortcut outcomes tell the caller whether to continue, preventDefault,
+ * or dispatch a renderer action. Prevent handled input from also firing the menu
+ * accelerator. Handle zoom here for consistent keyboard-layout behavior.
+ * close-tab, open-settings, and select-tab actions route to the main window.
  */
 export type ShortcutResult =
   | boolean

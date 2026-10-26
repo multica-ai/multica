@@ -32,8 +32,8 @@ export function selectConversationStarters(
  *
  *  - no agent, or an archived one: its conversations are read-only, so
  *    editing its starters changes nothing anyone will see,
- *  - a backend that does not persist conversation starters: the Instructions tab
- *    renders no editor there, so the link lands somewhere that cannot honour
+ *  - a backend that does not persist conversation starters: General settings
+ *    render no editor there, so the link lands somewhere that cannot honour
  *    it,
  *  - a viewer who cannot edit the agent: a reader would arrive at a page they
  *    have no write access to.

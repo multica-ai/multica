@@ -122,7 +122,6 @@ Permissions de dépôt (Repository permissions) :
 | Permission | Niveau |
 |---|---|
 | Metadata | Read-only |
-| Contents | Read-only ; requise par la requête d'instantané de PR, qui lit le commit de tête ainsi que la possibilité de fusion et le récapitulatif CI |
 | Pull requests | Read-only |
 | Checks | Read-only ; sert à afficher le statut CI |
 | Commit statuses | Read-only ; sert à agréger la CI basée sur les statuts hérités (legacy statuses) |
@@ -132,7 +131,7 @@ Abonnez-vous à ces événements :
 - **Pull request** ;
 - **Check suite**, **Check run** et **Status**, qui déclenchent l'actualisation de la CI et de la possibilité de fusion.
 
-Si vous n'avez pas besoin d'afficher la CI dans Multica, vous pouvez vous passer des permissions Checks et Commit statuses ainsi que de leurs événements. Contents reste obligatoire : sans elle, la requête d'instantané échoue complètement et la carte de PR perd aussi l'état de fusion.
+Les instantanés de PR utilisent les API REST Pull requests, Checks et Commit statuses. La permission Contents n'est pas nécessaire.
 
 <Callout type="warning">
 Il s'agit du **Webhook secret**, et non du Client secret OAuth. Si les deux côtés n'ont pas le même secret de webhook, les livraisons GitHub renvoient `401 invalid signature`.
@@ -175,7 +174,7 @@ Redémarrez le serveur API, puis effectuez la connexion dans **Paramètres → C
 - **Le webhook renvoie 401** : vérifiez que la GitHub App et l'API utilisent le même secret de webhook, puis relancez la livraison depuis **Recent Deliveries** sur GitHub.
 - **PR non associée** : vérifiez que le dépôt fait partie du périmètre autorisé de l'App, que l'association automatique est activée et que l'identifiant appartient à l'espace de travail courant.
 - **Identifiant dans la description, mais PR non associée** : utilisez plutôt `Closes MUL-123`, ou placez l'identifiant dans le nom de branche ou le titre de la PR.
-- **Aucun statut CI** : vérifiez que `GITHUB_APP_ID` et `GITHUB_APP_PRIVATE_KEY` sont configurées, et que l'App dispose des permissions Contents, Checks et Commit statuses en lecture seule, avec les événements correspondants souscrits. Sans Contents, tout l'instantané échoue : la carte de PR n'affiche alors ni CI ni état de fusion. Après l'ajout de permissions à une App déjà installée, le propriétaire de chaque installation doit aussi les approuver sur GitHub pour qu'elles prennent effet.
+- **Aucun statut CI** : vérifiez que `GITHUB_APP_ID` et `GITHUB_APP_PRIVATE_KEY` sont configurées, et que l'App dispose des permissions Pull requests, Checks et Commit statuses en lecture seule, avec les événements correspondants souscrits. La permission Contents n'est pas nécessaire. Après l'ajout de permissions à une App déjà installée, le propriétaire de chaque installation doit les approuver sur GitHub pour qu'elles prennent effet.
 - **Tâche non terminée après la fusion de la PR** : vérifiez que la PR a utilisé un mot-clé de clôture, et si d'autres PR associées sont encore Ouvertes ou en Brouillon.
 
 ## Étapes suivantes

@@ -55,6 +55,11 @@ type IssueTriggerInput struct {
 	IsCreate        bool
 	AssigneeChanged bool
 	StatusChanged   bool
+	// EnteredHandoffStep marks a write that moved the issue into a project
+	// workflow column with a handler (MUL-7420). The step is new work even
+	// when its handler is the agent whose run made the move, so the
+	// self-assignment suppression does not apply.
+	EnteredHandoffStep bool
 }
 
 // IssueRunTrigger is the resolved decision shared by preview and the write
@@ -151,11 +156,13 @@ func (s *IssueService) WillEnqueueRun(ctx context.Context, in IssueTriggerInput,
 		if !canAccess(agent) {
 			return IssueRunTrigger{}, false
 		}
-		if source == RunSourceAssign && !in.IsCreate && probe.SuppressActiveSelfAssignment != nil &&
+		if source == RunSourceAssign && !in.IsCreate && !in.EnteredHandoffStep && probe.SuppressActiveSelfAssignment != nil &&
 			probe.SuppressActiveSelfAssignment(issue.AssigneeID) {
 			return IssueRunTrigger{}, false
 		}
-		if source == RunSourceStatus && s.hasPendingRun(ctx, issue.ID, issue.AssigneeID) {
+		// A step entered under the agent's own run queues behind it; one
+		// already queued covers the new step too.
+		if (source == RunSourceStatus || in.EnteredHandoffStep) && s.hasPendingRun(ctx, issue.ID, issue.AssigneeID) {
 			return IssueRunTrigger{}, false
 		}
 		return IssueRunTrigger{

@@ -53,7 +53,6 @@ func TestResolveDaemonWorkspacesRootPrecedence(t *testing.T) {
 	envRoot := filepath.Join(t.TempDir(), "env")
 	configRoot := filepath.Join(t.TempDir(), "config")
 	redirectTestHome(t, home)
-	t.Setenv("USERPROFILE", home)
 	if err := cli.SaveCLIConfigForProfile(cli.CLIConfig{WorkspacesRoot: configRoot}, "dev"); err != nil {
 		t.Fatalf("SaveCLIConfigForProfile: %v", err)
 	}

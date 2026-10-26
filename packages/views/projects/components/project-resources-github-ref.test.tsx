@@ -131,7 +131,7 @@ describe("ProjectResourcesSection — github_repo checkout ref", () => {
   it("saves a new ref while preserving the rest of the stored ref", async () => {
     renderWithI18n(<ProjectResourcesSection projectId="p1" />);
 
-    fireEvent.click(screen.getAllByTitle(/change the branch tasks work on/i)[0]!);
+    fireEvent.click(screen.getAllByRole("button", { name: /change the branch tasks work on/i })[0]!);
     const input = screen.getByLabelText(/starting branch/i);
     fireEvent.change(input, { target: { value: "release/2026-10" } });
     fireEvent.click(screen.getByRole("button", { name: /^save$/i }));
@@ -154,7 +154,7 @@ describe("ProjectResourcesSection — github_repo checkout ref", () => {
   it("clearing the field drops the key so tasks fall back to the default branch", async () => {
     renderWithI18n(<ProjectResourcesSection projectId="p1" />);
 
-    fireEvent.click(screen.getAllByTitle(/change the branch tasks work on/i)[0]!);
+    fireEvent.click(screen.getAllByRole("button", { name: /change the branch tasks work on/i })[0]!);
     fireEvent.change(screen.getByLabelText(/starting branch/i), {
       target: { value: "" },
     });
@@ -173,7 +173,7 @@ describe("ProjectResourcesSection — github_repo checkout ref", () => {
   it("refuses to save a ref git could never resolve", async () => {
     renderWithI18n(<ProjectResourcesSection projectId="p1" />);
 
-    fireEvent.click(screen.getAllByTitle(/change the branch tasks work on/i)[0]!);
+    fireEvent.click(screen.getAllByRole("button", { name: /change the branch tasks work on/i })[0]!);
     fireEvent.change(screen.getByLabelText(/starting branch/i), {
       target: { value: "main..dev" },
     });
@@ -315,7 +315,7 @@ describe("ProjectResourcesSection — github_repo checkout ref", () => {
   it("declines a pasted commit id and points at the per-task escape hatch", () => {
     renderWithI18n(<ProjectResourcesSection projectId="p1" />);
 
-    fireEvent.click(screen.getAllByTitle(/change the branch tasks work on/i)[0]!);
+    fireEvent.click(screen.getAllByRole("button", { name: /change the branch tasks work on/i })[0]!);
     fireEvent.change(screen.getByLabelText(/starting branch/i), {
       target: { value: "5e0b1cfa0a7d6a1a0f4b3f2e1d0c9b8a7f6e5d4c" },
     });
@@ -330,7 +330,7 @@ describe("ProjectResourcesSection — github_repo checkout ref", () => {
   it("still accepts a tag-shaped name — it could be a branch, and only the remote knows", async () => {
     renderWithI18n(<ProjectResourcesSection projectId="p1" />);
 
-    fireEvent.click(screen.getAllByTitle(/change the branch tasks work on/i)[0]!);
+    fireEvent.click(screen.getAllByRole("button", { name: /change the branch tasks work on/i })[0]!);
     fireEvent.change(screen.getByLabelText(/starting branch/i), {
       target: { value: "v1.4.0" },
     });

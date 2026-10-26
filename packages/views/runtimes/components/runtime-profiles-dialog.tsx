@@ -26,6 +26,7 @@ import {
   useUpdateRuntimeProfile,
 } from "@multica/core/runtimes";
 import { Button } from "@multica/ui/components/ui/button";
+import { IconButton } from "@multica/ui/components/common/icon-button";
 import {
   Dialog,
   DialogClose,
@@ -147,17 +148,17 @@ export function RuntimeProfilesDialog({
               )}
               <DialogClose
                 render={
-                  <Button
+                  <IconButton
                     type="button"
                     variant="ghost"
                     size="icon-sm"
                     className="shrink-0"
-                    aria-label={t(($) => $.profiles.close)}
+                    label={t(($) => $.profiles.close)}
+                    tooltipSide="bottom"
                   />
                 }
               >
                 <X aria-hidden="true" className="h-4 w-4" />
-                <span className="sr-only">{t(($) => $.profiles.close)}</span>
               </DialogClose>
             </div>
           </div>
@@ -248,9 +249,7 @@ export function RuntimeProfilesDialog({
   );
 }
 
-// ---------------------------------------------------------------------------
 // Master list — custom profiles first, built-in families as collapsed reference.
-// ---------------------------------------------------------------------------
 
 function CatalogList({
   catalog,
@@ -472,10 +471,8 @@ function CatalogRow({
   );
 }
 
-// ---------------------------------------------------------------------------
 // Detail panel — adaptive: built-in is read-only, custom shows fields +
 // Edit / Delete.
-// ---------------------------------------------------------------------------
 
 function DetailPanel({
   entry,
@@ -636,9 +633,7 @@ function DetailRow({
   );
 }
 
-// ---------------------------------------------------------------------------
 // Create / edit form.
-// ---------------------------------------------------------------------------
 
 function ProfileFormView({
   wsId,
