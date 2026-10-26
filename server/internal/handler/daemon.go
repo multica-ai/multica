@@ -666,6 +666,25 @@ func (h *Handler) mergeLegacyRuntimes(r *http.Request, registered db.AgentRuntim
 	}
 }
 
+// DaemonBoundWorkspace bootstraps an mdt daemon without giving it user PAT
+// authority or enumerating any other workspace. PAT/JWT use the existing API.
+func (h *Handler) DaemonBoundWorkspace(w http.ResponseWriter, r *http.Request) {
+	if middleware.DaemonAuthPathFromContext(r.Context()) != middleware.DaemonAuthPathDaemonToken {
+		writeError(w, http.StatusForbidden, "dedicated daemon credential required")
+		return
+	}
+	id := middleware.DaemonWorkspaceIDFromContext(r.Context())
+	if !h.requireDaemonWorkspaceAccess(w, r, id) {
+		return
+	}
+	ws, err := h.Queries.GetWorkspace(r.Context(), parseUUID(id))
+	if err != nil {
+		writeError(w, http.StatusNotFound, "workspace not found")
+		return
+	}
+	writeJSON(w, http.StatusOK, []map[string]string{{"id": id, "name": ws.Name}})
+}
+
 func (h *Handler) GetDaemonWorkspaceRepos(w http.ResponseWriter, r *http.Request) {
 	workspaceID := strings.TrimSpace(chi.URLParam(r, "workspaceId"))
 	if !h.requireDaemonWorkspaceAccess(w, r, workspaceID) {
@@ -1266,6 +1285,13 @@ func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
 	runtime, ok := h.requireDaemonRuntimeAccess(w, r, runtimeID)
 	if !ok {
 		return
+	}
+	if middleware.DaemonAuthPathFromContext(r.Context()) == middleware.DaemonAuthPathDaemonToken {
+		daemonID := middleware.DaemonIDFromContext(r.Context())
+		if daemonID == "" || !runtime.DaemonID.Valid || runtime.DaemonID.String != daemonID {
+			writeError(w, http.StatusForbidden, "daemon token is not bound to this runtime")
+			return
+		}
 	}
 	runtimeWorkspaceID := uuidToString(runtime.WorkspaceID)
 	authMs = time.Since(start).Milliseconds()

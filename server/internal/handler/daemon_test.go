@@ -109,6 +109,21 @@ func setHandlerTestWorkspaceRepos(t *testing.T, repos []map[string]string) {
 // newDaemonTokenRequest creates an HTTP request with daemon token context set
 // (simulating DaemonAuth middleware for mdt_ tokens).
 func newDaemonTokenRequest(method, path string, body any, workspaceID, daemonID string) *http.Request {
+	// Claim tests should model the runtime bound to the presented daemon token.
+	// Cross-daemon denial is covered separately through the real auth middleware.
+	if testPool != nil && strings.HasPrefix(path, "/api/daemon/runtimes/") && strings.HasSuffix(path, "/claim") {
+		parts := strings.Split(path, "/")
+		if len(parts) > 4 {
+			var boundDaemonID string
+			if err := testPool.QueryRow(context.Background(), `SELECT COALESCE(daemon_id, '') FROM agent_runtime WHERE id = $1`, parts[4]).Scan(&boundDaemonID); err == nil {
+				if boundDaemonID == "" {
+					_, _ = testPool.Exec(context.Background(), `UPDATE agent_runtime SET daemon_id = $2 WHERE id = $1 AND daemon_id IS NULL`, parts[4], daemonID)
+					boundDaemonID = daemonID
+				}
+				daemonID = boundDaemonID
+			}
+		}
+	}
 	var buf bytes.Buffer
 	if body != nil {
 		json.NewEncoder(&buf).Encode(body)
