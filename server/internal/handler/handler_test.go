@@ -1823,7 +1823,9 @@ func TestBatchIssueGCCheckRejectsInvalidRequests(t *testing.T) {
 	}{
 		{name: "malformed workspace", workspaceID: "not-a-uuid", body: map[string]any{"issue_ids": []string{}}},
 		{name: "malformed issue", workspaceID: workspaceID, body: map[string]any{"issue_ids": []string{"not-a-uuid"}}},
+		{name: "malformed task", workspaceID: workspaceID, body: map[string]any{"task_ids": []string{"not-a-uuid"}}},
 		{name: "too many issues", workspaceID: workspaceID, body: map[string]any{"issue_ids": tooMany}},
+		{name: "too many tasks", workspaceID: workspaceID, body: map[string]any{"task_ids": tooMany}},
 	}
 
 	for _, tt := range tests {
