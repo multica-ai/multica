@@ -26,7 +26,9 @@ RUN cd server && CGO_ENABLED=0 go build -ldflags "-s -w" -o bin/backfill_codex_u
 # --- Runtime stage ---
 FROM alpine:3.21
 
-RUN apk add --no-cache ca-certificates tzdata
+# git is required by the code-changes endpoint, which diffs host repositories
+# mounted into this container (docker-compose.selfhost.yml).
+RUN apk add --no-cache ca-certificates tzdata git
 
 WORKDIR /app
 

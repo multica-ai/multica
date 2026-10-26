@@ -393,6 +393,7 @@
     "section_properties": "属性",
     "section_parent_issue": "父任务",
     "section_pull_requests": "Pull Request",
+    "section_code_changes": "代码改动",
     "section_metadata": "元数据",
     "section_details": "详情",
     "section_quick_actions": "快捷操作",
