@@ -336,12 +336,8 @@
 }
 
 .site-agent-pill {
-    background-color: oklch(0.965 0.022 var(--site-pill-hue));
-    border-color: oklch(0.89 0.05 var(--site-pill-hue));
-    color: oklch(0.45 0.12 var(--site-pill-hue));
-    transition-property: background-color, border-color, color;
-    transition-duration: 500ms;
-    transition-timing-function: cubic-bezier(0.22, 1, 0.36, 1);
+    background-color: oklch(0.93 0.05 var(--site-pill-hue));
+    transition: background-color 500ms cubic-bezier(0.22, 1, 0.36, 1);
 }
 
 @media (prefers-reduced-motion: reduce) {

@@ -81,7 +81,7 @@ function Hero() {
 }
 
 const HERO_AGENTS = ["Claude Code", "Codex", "Hermes", "OpenCode"] as const;
-const HERO_AGENT_HOLDS = HERO_AGENTS.map(() => 2400);
+const HERO_AGENT_HOLDS = HERO_AGENTS.map(() => 3600);
 // OKLCH hue per agent, in HERO_AGENTS order.
 const HERO_AGENT_HUES = [40, 255, 155, 300];
 
@@ -108,7 +108,7 @@ function HeroHeadline() {
         <span aria-hidden className="block text-balance">
           Turn{" "}
           <span
-            className="site-agent-pill inline-flex rounded-[0.18em] border px-[0.2em]"
+            className="site-agent-pill inline-flex rounded-full px-[0.36em]"
             style={{ "--site-pill-hue": HERO_AGENT_HUES[step] } as CSSProperties}
           >
             <span
@@ -144,7 +144,7 @@ function HeroHeadline() {
 
 function ProviderMark({ name }: { name: string }) {
   const Mark = PROVIDER_MARKS.get(name);
-  return Mark ? <Mark className="size-[0.78em] shrink-0" /> : null;
+  return Mark ? <Mark className="size-[0.72em] shrink-0" /> : null;
 }
 
 function LogoWall() {
