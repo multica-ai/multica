@@ -190,9 +190,9 @@ export function ChangelogPageClient() {
   return (
     <SitePage>
       <PageHero title={t.changelog.title} lead={t.changelog.subtitle} />
-      <Container className="pb-site-section lg:grid lg:grid-cols-[minmax(0,1fr)_minmax(0,2fr)] lg:gap-16">
+      <Container className="pb-site-section lg:grid lg:grid-cols-[10rem_minmax(0,1fr)] lg:gap-16 xl:gap-24">
         <aside className="hidden lg:block">
-          <nav aria-label={t.changelog.toc} className="sticky top-28 max-h-[calc(100vh-8rem)] overflow-y-auto pr-2 pb-8">
+          <nav aria-label={t.changelog.toc} className="sticky top-28 max-h-[calc(100vh-8rem)] overflow-y-auto pb-8 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
             <Eyebrow>{t.changelog.toc}</Eyebrow>
             <ol className="mt-5 flex flex-col gap-5 border-l border-site-line">
               {groups.map((group) => (
@@ -241,17 +241,17 @@ export function ChangelogPageClient() {
                   <span className="text-site-ink">v{release.version}</span>
                   <span className="text-site-muted">{fullDateLabel(release.date, locale)}</span>
                 </p>
-                <h2 className="mt-3 max-w-[40rem] font-site-display text-site-title text-site-ink text-balance">
+                <h2 className="mt-3 max-w-[46rem] font-site-display text-site-title text-site-ink text-balance">
                   {release.title}
                 </h2>
                 {hasCategorized ? (
-                  <div className="mt-6 flex max-w-[40rem] flex-col gap-6">
+                  <div className="mt-6 flex max-w-[46rem] flex-col gap-6">
                     <ChangeGroup label={categoryLabels.features} items={release.features} />
                     <ChangeGroup label={categoryLabels.improvements} items={release.improvements} />
                     <ChangeGroup label={categoryLabels.fixes} items={release.fixes} />
                   </div>
                 ) : (
-                  <div className="mt-6 max-w-[40rem]">
+                  <div className="mt-6 max-w-[46rem]">
                     <ChangeList items={release.changes} />
                   </div>
                 )}
