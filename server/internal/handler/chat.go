@@ -85,11 +85,17 @@ func (h *Handler) CreateChatSession(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Relay titles cannot carry attacker content into unrelated task lists.
+	isExternalRelay := r.Header.Get("X-Actor-Source") == "external_relay"
+	if isExternalRelay {
+		req.Title = "External relay (quarantined)"
+	}
 	session, err := h.Queries.CreateChatSession(r.Context(), db.CreateChatSessionParams{
-		WorkspaceID: workspaceUUID,
-		AgentID:     agentID,
-		CreatorID:   parseUUID(userID),
-		Title:       req.Title,
+		WorkspaceID:     workspaceUUID,
+		AgentID:         agentID,
+		CreatorID:       parseUUID(userID),
+		Title:           req.Title,
+		IsExternalRelay: isExternalRelay,
 	})
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to create chat session")
@@ -139,19 +145,24 @@ func (h *Handler) ListChatSessions(w http.ResponseWriter, r *http.Request) {
 		}
 		resp = make([]ChatSessionResponse, 0, len(rows))
 		for _, s := range rows {
+			if (r.Header.Get("X-Actor-Source") == "task_token" && s.IsExternalRelay) ||
+				(r.Header.Get("X-Actor-Source") == "external_relay" && !s.IsExternalRelay) {
+				continue
+			}
 			if _, ok := allowed[uuidToString(s.AgentID)]; !ok {
 				continue
 			}
 			resp = append(resp, ChatSessionResponse{
-				ID:          uuidToString(s.ID),
-				WorkspaceID: uuidToString(s.WorkspaceID),
-				AgentID:     uuidToString(s.AgentID),
-				CreatorID:   uuidToString(s.CreatorID),
-				Title:       s.Title,
-				Status:      s.Status,
-				HasUnread:   s.HasUnread,
-				CreatedAt:   timestampToString(s.CreatedAt),
-				UpdatedAt:   timestampToString(s.UpdatedAt),
+				ID:              uuidToString(s.ID),
+				IsExternalRelay: s.IsExternalRelay,
+				WorkspaceID:     uuidToString(s.WorkspaceID),
+				AgentID:         uuidToString(s.AgentID),
+				CreatorID:       uuidToString(s.CreatorID),
+				Title:           s.Title,
+				Status:          s.Status,
+				HasUnread:       s.HasUnread,
+				CreatedAt:       timestampToString(s.CreatedAt),
+				UpdatedAt:       timestampToString(s.UpdatedAt),
 			})
 		}
 	} else {
@@ -165,19 +176,24 @@ func (h *Handler) ListChatSessions(w http.ResponseWriter, r *http.Request) {
 		}
 		resp = make([]ChatSessionResponse, 0, len(rows))
 		for _, s := range rows {
+			if (r.Header.Get("X-Actor-Source") == "task_token" && s.IsExternalRelay) ||
+				(r.Header.Get("X-Actor-Source") == "external_relay" && !s.IsExternalRelay) {
+				continue
+			}
 			if _, ok := allowed[uuidToString(s.AgentID)]; !ok {
 				continue
 			}
 			resp = append(resp, ChatSessionResponse{
-				ID:          uuidToString(s.ID),
-				WorkspaceID: uuidToString(s.WorkspaceID),
-				AgentID:     uuidToString(s.AgentID),
-				CreatorID:   uuidToString(s.CreatorID),
-				Title:       s.Title,
-				Status:      s.Status,
-				HasUnread:   s.HasUnread,
-				CreatedAt:   timestampToString(s.CreatedAt),
-				UpdatedAt:   timestampToString(s.UpdatedAt),
+				ID:              uuidToString(s.ID),
+				IsExternalRelay: s.IsExternalRelay,
+				WorkspaceID:     uuidToString(s.WorkspaceID),
+				AgentID:         uuidToString(s.AgentID),
+				CreatorID:       uuidToString(s.CreatorID),
+				Title:           s.Title,
+				Status:          s.Status,
+				HasUnread:       s.HasUnread,
+				CreatedAt:       timestampToString(s.CreatedAt),
+				UpdatedAt:       timestampToString(s.UpdatedAt),
 			})
 		}
 	}
@@ -203,6 +219,11 @@ func (h *Handler) loadChatSessionForUser(w http.ResponseWriter, r *http.Request,
 	}
 	if uuidToString(session.CreatorID) != userID {
 		writeError(w, http.StatusForbidden, "not your chat session")
+		return db.ChatSession{}, false
+	}
+	if (session.IsExternalRelay && r.Header.Get("X-Actor-Source") == "task_token") ||
+		(!session.IsExternalRelay && r.Header.Get("X-Actor-Source") == "external_relay") {
+		writeError(w, http.StatusForbidden, "relay sessions cannot cross the execution trust boundary")
 		return db.ChatSession{}, false
 	}
 	return session, true
@@ -450,6 +471,10 @@ func (h *Handler) SendChatMessage(w http.ResponseWriter, r *http.Request) {
 	// can no longer reach. Agent senders bypass to preserve A2A collaboration.
 	session, ok := h.gateChatSessionForUser(w, r, userID, workspaceID, sessionID)
 	if !ok {
+		return
+	}
+	if session.IsExternalRelay && len(attachmentIDs) > 0 {
+		writeError(w, http.StatusForbidden, "attachments are unavailable in quarantined relay sessions")
 		return
 	}
 	// New archive flow doesn't exist anymore, but legacy rows with
@@ -990,12 +1015,13 @@ func (h *Handler) CancelTaskByUser(w http.ResponseWriter, r *http.Request) {
 // ---------------------------------------------------------------------------
 
 type ChatSessionResponse struct {
-	ID          string `json:"id"`
-	WorkspaceID string `json:"workspace_id"`
-	AgentID     string `json:"agent_id"`
-	CreatorID   string `json:"creator_id"`
-	Title       string `json:"title"`
-	Status      string `json:"status"`
+	IsExternalRelay bool   `json:"is_external_relay"`
+	ID              string `json:"id"`
+	WorkspaceID     string `json:"workspace_id"`
+	AgentID         string `json:"agent_id"`
+	CreatorID       string `json:"creator_id"`
+	Title           string `json:"title"`
+	Status          string `json:"status"`
 	// Only populated by list endpoints — single-session fetches return false.
 	HasUnread bool   `json:"has_unread"`
 	CreatedAt string `json:"created_at"`
@@ -1025,14 +1051,15 @@ type ChatMessageResponse struct {
 
 func chatSessionToResponse(s db.ChatSession) ChatSessionResponse {
 	return ChatSessionResponse{
-		ID:          uuidToString(s.ID),
-		WorkspaceID: uuidToString(s.WorkspaceID),
-		AgentID:     uuidToString(s.AgentID),
-		CreatorID:   uuidToString(s.CreatorID),
-		Title:       s.Title,
-		Status:      s.Status,
-		CreatedAt:   timestampToString(s.CreatedAt),
-		UpdatedAt:   timestampToString(s.UpdatedAt),
+		ID:              uuidToString(s.ID),
+		IsExternalRelay: s.IsExternalRelay,
+		WorkspaceID:     uuidToString(s.WorkspaceID),
+		AgentID:         uuidToString(s.AgentID),
+		CreatorID:       uuidToString(s.CreatorID),
+		Title:           s.Title,
+		Status:          s.Status,
+		CreatedAt:       timestampToString(s.CreatedAt),
+		UpdatedAt:       timestampToString(s.UpdatedAt),
 	}
 }
 

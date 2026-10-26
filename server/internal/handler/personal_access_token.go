@@ -28,12 +28,13 @@ const PATRenewThreshold = 7 * 24 * time.Hour
 const PATRenewExtension = 90 * 24 * time.Hour
 
 type PersonalAccessTokenResponse struct {
-	ID         string  `json:"id"`
-	Name       string  `json:"name"`
-	Prefix     string  `json:"token_prefix"`
-	ExpiresAt  *string `json:"expires_at"`
-	LastUsedAt *string `json:"last_used_at"`
-	CreatedAt  string  `json:"created_at"`
+	IsExternalRelay bool    `json:"is_external_relay"`
+	ID              string  `json:"id"`
+	Name            string  `json:"name"`
+	Prefix          string  `json:"token_prefix"`
+	ExpiresAt       *string `json:"expires_at"`
+	LastUsedAt      *string `json:"last_used_at"`
+	CreatedAt       string  `json:"created_at"`
 }
 
 type CreatePATResponse struct {
@@ -43,21 +44,27 @@ type CreatePATResponse struct {
 
 func patToResponse(pat db.PersonalAccessToken) PersonalAccessTokenResponse {
 	return PersonalAccessTokenResponse{
-		ID:         uuidToString(pat.ID),
-		Name:       pat.Name,
-		Prefix:     pat.TokenPrefix,
-		ExpiresAt:  timestampToPtr(pat.ExpiresAt),
-		LastUsedAt: timestampToPtr(pat.LastUsedAt),
-		CreatedAt:  timestampToString(pat.CreatedAt),
+		ID:              uuidToString(pat.ID),
+		IsExternalRelay: pat.IsExternalRelay,
+		Name:            pat.Name,
+		Prefix:          pat.TokenPrefix,
+		ExpiresAt:       timestampToPtr(pat.ExpiresAt),
+		LastUsedAt:      timestampToPtr(pat.LastUsedAt),
+		CreatedAt:       timestampToString(pat.CreatedAt),
 	}
 }
 
 type CreatePATRequest struct {
-	Name          string `json:"name"`
-	ExpiresInDays *int   `json:"expires_in_days"`
+	IsExternalRelay bool   `json:"is_external_relay"`
+	Name            string `json:"name"`
+	ExpiresInDays   *int   `json:"expires_in_days"`
 }
 
 func (h *Handler) CreatePersonalAccessToken(w http.ResponseWriter, r *http.Request) {
+	if r.Header.Get("X-Actor-Source") != "" {
+		writeError(w, http.StatusForbidden, "machine credentials cannot issue personal access tokens")
+		return
+	}
 	userID, ok := requireUserID(w, r)
 	if !ok {
 		return
@@ -93,11 +100,12 @@ func (h *Handler) CreatePersonalAccessToken(w http.ResponseWriter, r *http.Reque
 	}
 
 	pat, err := h.Queries.CreatePersonalAccessToken(r.Context(), db.CreatePersonalAccessTokenParams{
-		UserID:      parseUUID(userID),
-		Name:        req.Name,
-		TokenHash:   auth.HashToken(rawToken),
-		TokenPrefix: prefix,
-		ExpiresAt:   expiresAt,
+		UserID:          parseUUID(userID),
+		IsExternalRelay: req.IsExternalRelay,
+		Name:            req.Name,
+		TokenHash:       auth.HashToken(rawToken),
+		TokenPrefix:     prefix,
+		ExpiresAt:       expiresAt,
 	})
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to create token")

@@ -225,11 +225,12 @@ type ProjectResourceData struct {
 }
 
 type AgentTaskResponse struct {
-	ID          string `json:"id"`
-	AgentID     string `json:"agent_id"`
-	RuntimeID   string `json:"runtime_id"`
-	IssueID     string `json:"issue_id"`
-	WorkspaceID string `json:"workspace_id"`
+	ExecutionPolicy string `json:"execution_policy"`
+	ID              string `json:"id"`
+	AgentID         string `json:"agent_id"`
+	RuntimeID       string `json:"runtime_id"`
+	IssueID         string `json:"issue_id"`
+	WorkspaceID     string `json:"workspace_id"`
 	// WorkspaceContext is the workspace-level system prompt set in workspace
 	// settings (`workspace.context` DB column). Injected into the agent brief
 	// as `## Workspace Context` so every agent running in this workspace —
@@ -401,6 +402,7 @@ func taskToResponse(t db.AgentTaskQueue, workspaceID string) AgentTaskResponse {
 	}
 	return AgentTaskResponse{
 		ID:               uuidToString(t.ID),
+		ExecutionPolicy:  t.ExecutionPolicy,
 		AgentID:          uuidToString(t.AgentID),
 		RuntimeID:        uuidToString(t.RuntimeID),
 		IssueID:          uuidToString(t.IssueID),

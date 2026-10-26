@@ -12,17 +12,18 @@ import (
 )
 
 const createPersonalAccessToken = `-- name: CreatePersonalAccessToken :one
-INSERT INTO personal_access_token (user_id, name, token_hash, token_prefix, expires_at)
-VALUES ($1, $2, $3, $4, $5)
-RETURNING id, user_id, name, token_hash, token_prefix, expires_at, last_used_at, revoked, created_at
+INSERT INTO personal_access_token (user_id, name, token_hash, token_prefix, expires_at, is_external_relay)
+VALUES ($1, $2, $3, $4, $5, $6)
+RETURNING id, user_id, name, token_hash, token_prefix, expires_at, last_used_at, revoked, created_at, is_external_relay
 `
 
 type CreatePersonalAccessTokenParams struct {
-	UserID      pgtype.UUID        `json:"user_id"`
-	Name        string             `json:"name"`
-	TokenHash   string             `json:"token_hash"`
-	TokenPrefix string             `json:"token_prefix"`
-	ExpiresAt   pgtype.Timestamptz `json:"expires_at"`
+	UserID          pgtype.UUID        `json:"user_id"`
+	Name            string             `json:"name"`
+	TokenHash       string             `json:"token_hash"`
+	TokenPrefix     string             `json:"token_prefix"`
+	ExpiresAt       pgtype.Timestamptz `json:"expires_at"`
+	IsExternalRelay bool               `json:"is_external_relay"`
 }
 
 func (q *Queries) CreatePersonalAccessToken(ctx context.Context, arg CreatePersonalAccessTokenParams) (PersonalAccessToken, error) {
@@ -32,6 +33,7 @@ func (q *Queries) CreatePersonalAccessToken(ctx context.Context, arg CreatePerso
 		arg.TokenHash,
 		arg.TokenPrefix,
 		arg.ExpiresAt,
+		arg.IsExternalRelay,
 	)
 	var i PersonalAccessToken
 	err := row.Scan(
@@ -44,6 +46,7 @@ func (q *Queries) CreatePersonalAccessToken(ctx context.Context, arg CreatePerso
 		&i.LastUsedAt,
 		&i.Revoked,
 		&i.CreatedAt,
+		&i.IsExternalRelay,
 	)
 	return i, err
 }
@@ -84,7 +87,7 @@ func (q *Queries) ExtendPersonalAccessTokenExpiry(ctx context.Context, arg Exten
 }
 
 const getPersonalAccessTokenByHash = `-- name: GetPersonalAccessTokenByHash :one
-SELECT id, user_id, name, token_hash, token_prefix, expires_at, last_used_at, revoked, created_at FROM personal_access_token
+SELECT id, user_id, name, token_hash, token_prefix, expires_at, last_used_at, revoked, created_at, is_external_relay FROM personal_access_token
 WHERE token_hash = $1
   AND revoked = FALSE
   AND (expires_at IS NULL OR expires_at > now())
@@ -103,12 +106,13 @@ func (q *Queries) GetPersonalAccessTokenByHash(ctx context.Context, tokenHash st
 		&i.LastUsedAt,
 		&i.Revoked,
 		&i.CreatedAt,
+		&i.IsExternalRelay,
 	)
 	return i, err
 }
 
 const listPersonalAccessTokensByUser = `-- name: ListPersonalAccessTokensByUser :many
-SELECT id, user_id, name, token_hash, token_prefix, expires_at, last_used_at, revoked, created_at FROM personal_access_token
+SELECT id, user_id, name, token_hash, token_prefix, expires_at, last_used_at, revoked, created_at, is_external_relay FROM personal_access_token
 WHERE user_id = $1
   AND revoked = FALSE
 ORDER BY created_at DESC
@@ -133,6 +137,7 @@ func (q *Queries) ListPersonalAccessTokensByUser(ctx context.Context, userID pgt
 			&i.LastUsedAt,
 			&i.Revoked,
 			&i.CreatedAt,
+			&i.IsExternalRelay,
 		); err != nil {
 			return nil, err
 		}

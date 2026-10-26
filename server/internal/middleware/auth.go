@@ -178,6 +178,18 @@ func Auth(queries *db.Queries, patCache *auth.PATCache, cloudPAT *auth.CloudPATV
 					return
 				}
 
+				if pat.IsExternalRelay {
+					// Restricted credentials are never cached as human PATs.
+					if !externalRelayRoute(r) {
+						http.Error(w, `{"error":"external relay credential cannot access this endpoint"}`, http.StatusForbidden)
+						return
+					}
+					r.Header.Set("X-User-ID", uuidToString(pat.UserID))
+					r.Header.Set("X-Actor-Source", "external_relay")
+					next.ServeHTTP(w, r)
+					return
+				}
+
 				userID := uuidToString(pat.UserID)
 				r.Header.Set("X-User-ID", userID)
 
@@ -250,4 +262,20 @@ func extractToken(r *http.Request) (token string, fromCookie bool) {
 	}
 
 	return "", false
+}
+
+// externalRelayRoute deliberately allows no issue/comment/attachment writes,
+// owner credential issuance, daemon endpoints, or arbitrary API reads.
+func externalRelayRoute(r *http.Request) bool {
+	parts := strings.Split(strings.Trim(r.URL.Path, "/"), "/")
+	if len(parts) < 3 || parts[0] != "api" || parts[1] != "chat" || parts[2] != "sessions" {
+		return false
+	}
+	if len(parts) == 3 {
+		return r.Method == http.MethodGet || r.Method == http.MethodPost
+	}
+	if len(parts) == 4 {
+		return r.Method == http.MethodGet
+	}
+	return len(parts) == 5 && parts[4] == "messages" && (r.Method == http.MethodGet || r.Method == http.MethodPost)
 }

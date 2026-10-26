@@ -208,6 +208,10 @@ func DaemonAuth(queries *db.Queries, patCache *auth.PATCache, daemonCache *auth.
 					return
 				}
 
+				if pat.IsExternalRelay {
+					writeError(w, http.StatusForbidden, "external relay credentials cannot authenticate a daemon")
+					return
+				}
 				userID := uuidToString(pat.UserID)
 				r.Header.Set("X-User-ID", userID)
 

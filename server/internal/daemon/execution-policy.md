@@ -46,3 +46,60 @@ No daemon restart or binary replacement is part of this patch. Before rollout,
 record the target SHA/runtime/PID, affected queue, in-flight cancellation policy,
 and recovery procedure in the issue. Recovery parks restricted work; it must not
 route restricted claims to an older unrestricted daemon.
+
+## Server quarantine candidate (not activated)
+
+Migration 134 adds an immutable `is_external_relay` flag to newly issued PATs
+and newly created chat sessions, plus a sticky task `execution_policy`.
+A human credential can issue a relay-only PAT using the existing PAT API with
+`is_external_relay: true`; machine credentials cannot issue PATs. Auth stamps
+`external_relay` only after looking up that credential. Relay tokens cannot
+use daemon or WebSocket auth, populate the shared human PAT cache, write issues,
+comments or attachments, or mint replacement credentials.
+
+Relay tokens can create/list/read/send quarantined chat sessions only. They
+cannot use existing trusted sessions. New relay sessions have a constant title
+and do not accept attachments. Internal task-token requests cannot list/read
+these sessions. This prevents stored chat messages from being re-ingested by an
+unrestricted task through the chat API. The queue trigger inherits restricted
+policy from the session or parent, including retries and reruns, and never
+permits a downgrade. Restricted task credentials are rejected on lookup.
+Claim, stale-dispatch recovery, candidate enumeration, and start SQL exclude
+restricted tasks for **every** daemon. No capability claim opts them back in.
+They remain queued; no backend or action executor is available for them yet.
+Normal authenticated owner sessions keep existing automation behavior. Sending
+an owner message into a relay session does not upgrade it.
+
+This is whole-session quarantine, not content classification or OS isolation.
+The AIDO relay must use a dedicated relay PAT for **all** mixed-context traffic;
+there is no safe model-driven owner/external classifier. Owner actions must use
+a fresh normal authenticated session, without copying external instructions.
+There is no exact-action grant executor in this candidate. Ordinary PATs remain
+powerful; giving the relay an ordinary PAT bypasses the new boundary.
+
+### Cutover and recovery gate
+
+Do not deploy this as a mitigation until AIDO's source/configuration is connected
+and an actual relay HTTP regression against this server is independently tested.
+`nexai` (the audit source's actual remote) is not configured in this workspace;
+the configured family-guardian-dashboard repository does not contain this relay.
+No AIDO source or production configuration has been changed in this candidate.
+
+Before activating, record affected relay session/task IDs (no message bodies or
+secrets), runtime SHA and PIDs. Pause inbound relay; drain/cancel its old queued,
+dispatched and running tasks and revoke their task tokens. Existing records have
+no reliable origin and are **not** retroactively made safe by migration defaults.
+Revoke the old broad relay PAT, invalidate all PAT caches, configure only the new
+relay token, create fresh external sessions, discard old native resume IDs and
+workdirs, and verify owner tasks still run on clean sessions. Already executing
+processes cannot be stopped by claim SQL. Do not resume ingress before that
+reconciliation and independent review. This requires an explicit operational
+impact comment before daemon restart or binary replacement.
+
+On failure pause ingress and keep external work parked. Do not fall back to a
+broad PAT, trusted session or old server. Migration down refuses rollback while
+relay credentials, sessions or restricted tasks remain. Reconciliation must
+archive evidence securely and remove/revoke the affected data deliberately;
+deleting a session alone never downgrades its retained task policy. Generic
+human copy/paste and arbitrary host/shared filesystem reads are outside this
+quarantine proof; external tasks never obtain host execution in the first place.

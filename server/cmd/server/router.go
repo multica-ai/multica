@@ -1136,7 +1136,7 @@ func (pr *patResolver) ResolveToken(ctx context.Context, token string) (string, 
 	}
 
 	pat, err := pr.queries.GetPersonalAccessTokenByHash(ctx, hash)
-	if err != nil {
+	if err != nil || pat.IsExternalRelay {
 		return "", false
 	}
 

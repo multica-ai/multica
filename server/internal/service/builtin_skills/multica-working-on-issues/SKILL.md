@@ -230,3 +230,22 @@ contract above: the `pull-requests` CLI and route, the PR response field list,
 notify, the stage column / `stageBarrierClosed` barrier and the `--stage` /
 `issue children` CLI, and the metadata CLI. Re-derive before depending on an
 exact line.
+
+## External relay quarantine
+
+A server-issued relay-only PAT (`is_external_relay: true`) cannot write issues,
+comments or attachments, issue credentials, or authenticate daemon/WebSocket
+requests. Only new quarantined chat sessions are available to it. Their tasks
+remain queued with sticky `execution_policy: restricted`; claim/reclaim/start
+never dispatch them, regardless of advertised daemon capabilities. Machine task
+credentials cannot read these chat sessions or upgrade their authority. Owner
+messages sent into a relay session stay restricted. Do not unblock a relay by
+switching to a broad PAT, reusing a trusted session, deleting policy metadata,
+or copying external instructions into ordinary issue work. Current legacy
+sessions require explicit operational reconciliation before rollout.
+
+Source: `server/migrations/134_external_relay.up.sql`,
+`server/internal/middleware/{auth,daemon_auth}.go`,
+`server/pkg/db/queries/{agent,task_token}.sql`,
+`server/internal/handler/chat.go`. Operational gates and limitations:
+`server/internal/daemon/execution-policy.md`.
