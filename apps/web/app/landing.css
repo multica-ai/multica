@@ -218,31 +218,15 @@
     }
 }
 
-/* Feature cards: a frosted field in three layers under the content. A
-   heavily blurred crop of the brand illustrations, film grain blended over it
-   (the tile is drawn at 1:1 device pixels and never smoothed, so the grain
-   stays fine), and an eased scrim rising from the bottom that keeps the white
-   copy readable. Content inside must be positioned to paint above the layers. */
+/* Feature cards: a frosted field per card — a heavily blurred crop of one of
+   the brand illustrations — with film grain blended over it. The grain tile
+   is drawn at 1:1 device pixels and never smoothed, so it stays fine. Content
+   inside must be positioned to paint above the grain. */
 .site-frost {
     position: relative;
     overflow: hidden;
-    background-color: var(--site-inverse);
-    background-image:
-        linear-gradient(
-            to top,
-            rgb(0 0 0 / 0.42) 0%,
-            rgb(0 0 0 / 0.408) 10%,
-            rgb(0 0 0 / 0.376) 20%,
-            rgb(0 0 0 / 0.329) 30%,
-            rgb(0 0 0 / 0.272) 40%,
-            rgb(0 0 0 / 0.21) 50%,
-            rgb(0 0 0 / 0.148) 60%,
-            rgb(0 0 0 / 0.091) 70%,
-            rgb(0 0 0 / 0.044) 80%,
-            rgb(0 0 0 / 0.012) 90%,
-            transparent 100%
-        ),
-        var(--frost-image);
+    background-color: var(--site-sunken);
+    background-image: var(--frost-image);
     background-position: center;
     background-size: cover;
 }
@@ -255,7 +239,7 @@
     background-size: 256px 256px;
     image-rendering: pixelated;
     mix-blend-mode: overlay;
-    opacity: 0.4;
+    opacity: 0.35;
     pointer-events: none;
 }
 

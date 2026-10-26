@@ -190,37 +190,37 @@ function LogoWall() {
 const FEATURES: { id: string; title: string; body: string; alt: string; visual: ComponentType }[] = [
   {
     id: "runtimes",
-    title: "Runtimes",
-    body: "Run agents on your laptop, your servers, or managed cloud sandboxes. One command connects a machine and finds the coding agents on it.",
-    alt: "The Runtimes list with a MacBook, a Linux server, and Multica Cloud online with their coding agents, and a note that a teammate's Mac mini just connected",
+    title: "Runs on your machines, or in our cloud",
+    body: "Connect a laptop or a server with one command and Multica finds the coding agents installed on it. Or run them in managed cloud sandboxes.",
+    alt: "The Runtimes page listing three machines and Multica Cloud, all online, with the coding agents on each and what they are running",
     visual: RuntimesVisual,
   },
   {
     id: "workflows",
-    title: "Workflows",
+    title: "Workflows hand off every step",
     body: "Give every status an owner. Moving an issue to the next step hands it to that step’s agent or teammate.",
-    alt: "A Ship a feature workflow: Spec handled by Lead Agent, Build by Backend Agent, Code review by QA Agent, Approve by Mia Chen, then Shipped, with an issue just handed to Backend Agent",
+    alt: "The Ship a feature workflow: Spec handed to Lead Agent, Build to Backend Agent, Code review to QA Agent, Approve to Mia Chen, then Shipped, with the Build step's handoff settings open",
     visual: WorkflowVisual,
   },
   {
     id: "chat",
-    title: "Chat",
-    body: "Mention an agent in Slack, Lark, or Telegram. It reads the thread, files the issue, and starts work.",
-    alt: "A chat message asking Backend Agent about failing CSV exports, the agent's reply, and the issue it filed",
+    title: "Mention an agent in chat",
+    body: "From Slack, Lark, DingTalk, WeCom, or Telegram. The agent reads the thread, files the issue, and gets to work.",
+    alt: "A chat channel where Mia mentions Backend Agent about failing exports and the agent replies with the issue it filed and is working on",
     visual: ChatVisual,
   },
   {
     id: "autopilots",
-    title: "Autopilots",
-    body: "Upgrades, triage, and reports file themselves on a schedule and land with the right agent.",
-    alt: "Three autopilots with their schedules and agents, and an issue one of them just filed",
+    title: "Autopilots run on a schedule",
+    body: "Upgrades, triage, and reports file themselves and land with an agent, every hour or every Monday.",
+    alt: "The Autopilots list: four scheduled jobs, each with its schedule, its agent, and its next run",
     visual: AutopilotsVisual,
   },
   {
     id: "skills",
-    title: "Skills",
-    body: "Write down how your team does something once. Every agent follows it.",
-    alt: "A Write release notes skill with three rules, used by four agents",
+    title: "Skills the whole team shares",
+    body: "Write down how your team does a thing once, and every agent follows it.",
+    alt: "A Write release notes skill with its rules, used by four agents",
     visual: SkillsVisual,
   },
 ];
@@ -230,18 +230,14 @@ function Features() {
     <Section>
       <Container>
         <SectionHeader title="Built for teams of people and agents" />
-        <div className="mt-site-block grid gap-site-grid-col md:grid-cols-2">
+        <div className="mt-site-block grid gap-x-site-grid-col gap-y-site-grid-row md:grid-cols-2">
           {FEATURES.slice(0, 2).map((feature) => (
-            <FeatureCard key={feature.id} {...feature} className="min-h-[28rem] lg:min-h-[33rem]" />
+            <FeatureCard key={feature.id} {...feature} />
           ))}
         </div>
-        <div className="mt-site-grid-col grid gap-site-grid-col md:grid-cols-2 xl:grid-cols-3">
-          {FEATURES.slice(2).map((feature, index) => (
-            <FeatureCard
-              key={feature.id}
-              {...feature}
-              className={cn("min-h-[26rem]", index === 2 && "md:col-span-2 xl:col-span-1")}
-            />
+        <div className="mt-site-grid-row grid gap-x-site-grid-col gap-y-site-grid-row md:grid-cols-3">
+          {FEATURES.slice(2).map((feature) => (
+            <FeatureCard key={feature.id} {...feature} />
           ))}
         </div>
       </Container>
@@ -249,23 +245,14 @@ function Features() {
   );
 }
 
-function FeatureCard({
-  title,
-  body,
-  visual: Visual,
-  id,
-  alt,
-  className,
-}: (typeof FEATURES)[number] & { className: string }) {
+function FeatureCard({ id, title, body, visual: Visual, alt }: (typeof FEATURES)[number]) {
   return (
-    <div data-frost={id} className={cn("site-frost flex flex-col rounded-site-panel", className)}>
-      <div role="img" aria-label={alt} className="relative flex flex-1 flex-col">
+    <div>
+      <div role="img" aria-label={alt} data-frost={id} className="site-frost aspect-[4/3] rounded-site-panel">
         <Visual />
       </div>
-      <div className="relative px-6 pb-6 lg:px-7 lg:pb-7">
-        <h3 className="text-site-small text-white/75">{title}</h3>
-        <p className="mt-1 max-w-[30rem] text-site-body text-white text-pretty">{body}</p>
-      </div>
+      <h3 className="mt-4 text-site-card text-site-ink">{title}</h3>
+      <p className="mt-site-stack max-w-[32rem] text-site-body text-site-muted">{body}</p>
     </div>
   );
 }
