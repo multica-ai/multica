@@ -15,6 +15,7 @@ import {
   SectionHeader,
   focusRing,
 } from "./primitives";
+import { HERO_PROVIDERS } from "../components/provider-marks";
 import { CUSTOMER_LOGOS } from "./customer-logos";
 import { AutopilotsVisual, ChatVisual, RuntimesVisual, SkillsVisual, WorkflowVisual } from "./demo/feature-visuals";
 import { HeroDemo } from "./demo/hero-demo";
@@ -39,6 +40,7 @@ export function HomePage() {
       <div className="site-rails">
         <BeforeAfter />
         <Features />
+        <Agents />
         <Deploy />
         <Customers />
         <FAQSection />
@@ -245,6 +247,40 @@ function Features() {
             <FeatureCard key={feature.id} {...feature} />
           ))}
         </div>
+      </Container>
+    </Section>
+  );
+}
+
+const POPULAR_AGENTS = ["Claude Code", "Codex", "Cursor", "GitHub Copilot", "OpenCode", "Hermes", "Antigravity", "Qwen Code"];
+
+function Agents() {
+  const agents = POPULAR_AGENTS.map((name) => HERO_PROVIDERS.find((provider) => provider.name === name)!);
+  return (
+    <Section>
+      <Container>
+        <h2 className="max-w-[44rem] font-site-display text-site-heading text-balance">
+          <span className="block text-site-muted">No new agent to learn.</span>
+          <span className="block text-site-ink">Bring the ones you already use.</span>
+        </h2>
+        <ul className="mt-site-block grid grid-cols-2 gap-y-8 md:grid-cols-4 md:gap-y-10">
+          {agents.map(({ name, Mark, size }, index) => (
+            <li
+              key={name}
+              className={cn(
+                "flex flex-col gap-8 border-site-line px-4 md:gap-10 md:px-5",
+                index % 2 === 1 && "border-l",
+                index % 4 !== 0 && "md:border-l",
+                index % 4 === 2 && "max-md:border-l-0",
+              )}
+            >
+              <span className="flex size-7 items-center text-site-muted">
+                <Mark className={size ?? "size-6"} />
+              </span>
+              <span className="text-site-small text-site-muted">{name}</span>
+            </li>
+          ))}
+        </ul>
       </Container>
     </Section>
   );
