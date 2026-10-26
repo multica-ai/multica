@@ -1,0 +1,171 @@
+---
+title: Réveils de tâches
+description: Posez une règle de réveil sur une tâche pour qu'un agent y revienne à une heure donnée ou après un événement.
+---
+
+import { Step, Steps } from "fumadocs-ui/components/steps";
+import { WakeupDemo } from "@/components/demos/wakeup-demo";
+
+Certains travaux s'arrêtent à mi-chemin et attendent : le devis d'un fournisseur, la réponse d'un collègue, la fin des sous-tâches. Ajoutez alors un **réveil** à la tâche : une règle du type « quand ceci se produit, réveiller tel agent pour qu'il fasse cela ». Quand la condition est remplie, l'agent démarre une exécution ordinaire sur la tâche, lit où en sont les choses et publie son résultat en commentaire, comme d'habitude.
+
+La règle est enregistrée sur la tâche : rien ne tourne pendant l'attente. Les membres créent des réveils depuis la barre latérale de la tâche ; les agents programment eux-mêmes leur prochaine vérification pendant une exécution, avec le [CLI](#cli). Dans les deux cas, c'est la même règle.
+
+## Créer un réveil [#create]
+
+<Steps>
+<Step>
+
+Ouvrez la tâche et cliquez sur **+** à côté de **Réveils** dans la barre latérale.
+
+</Step>
+<Step>
+
+Après **Quand**, choisissez une condition et complétez ce qu'elle demande : une heure, la personne attendue, le statut attendu…
+
+</Step>
+<Step>
+
+Après **Réveiller**, choisissez l'agent. Si l'assigné de la tâche est un agent, il est déjà sélectionné. Seuls les agents liés à un runtime et que vous avez le droit d'exécuter sont proposés ; voir [Permissions et accès](/agents#permissions-et-accès).
+
+</Step>
+<Step>
+
+Sous **Action au réveil**, écrivez l'instruction, par exemple « Vérifie si tous les fournisseurs ont envoyé leur devis et, si oui, fais un tableau comparatif ». Elle peut atteindre 12 000 octets. Vous pourrez la modifier plus tard ; la modification ne vaut que pour les réveils suivants.
+
+</Step>
+<Step>
+
+Cliquez sur **Créer**.
+
+</Step>
+</Steps>
+
+Les exécutions lancées par un réveil agissent au nom de la personne qui l'a créé, et Multica vérifie de nouveau, avant que l'exécution ne démarre, que cette personne peut toujours exécuter l'agent.
+
+Dans la tâche ci-dessous, Assistant ops a demandé des devis et attend les réponses des fournisseurs. Ajoutez un réveil, puis avancez jusqu'à l'heure prévue. Avec « Vérifier régulièrement », vous verrez aussi comment l'agent termine une vérification sans commenter quand rien n'est encore arrivé.
+
+<WakeupDemo />
+
+## Ce que vous pouvez attendre [#conditions]
+
+| Groupe | Condition | Réveille l'agent quand |
+|---|---|---|
+| Temps | À une heure donnée | Dans 10 minutes, dans 1 heure, demain à 09:00 ou à l'heure choisie. Une seule fois. |
+| Temps | Vérifier régulièrement | Toutes les heures, chaque jour à 09:00 ou les jours ouvrés à 09:00, dans votre fuseau horaire. Une date de fin est obligatoire ; la règle s'arrête à la fin de ce jour-là. |
+| Collaboration | Quelqu’un répond | Un nouveau commentaire arrive sur la tâche ; vous pouvez le limiter à un membre ou à un agent. |
+| Collaboration | Un champ prend une valeur | Le statut, l'assigné, une étiquette ou une propriété personnalisée de la tâche prend la valeur choisie. |
+| Exécutions et sous-tâches | L’exécution d’un agent se termine | Une exécution d'un agent donné (ou de n'importe quel agent) sur cette tâche réussit, échoue ou est annulée. |
+| Exécutions et sous-tâches | Les sous-tâches se terminent | Toutes les sous-tâches sont closes (`done` ou `cancelled`), ou toutes celles jusqu'à l'étape choisie. Sans sous-tâche, la règle ne se déclenche jamais. |
+| Liés | La CI d’une PR liée se termine | Ou la PR est fusionnée, ou elle a des conflits de fusion. Seules les PR liées directement à cette tâche comptent ; s'il y en a plusieurs, une seule suffit. CI et conflits ne fonctionnent qu'avec les pull requests GitHub. |
+| Liés | Le statut d’une autre tâche | Une autre tâche est terminée, terminée ou annulée, ou passe en revue. |
+| | Événements personnalisés | Choisissez parmi 25 événements bruts : réactions, pièces jointes, commentaires modifiés, fils résolus… |
+
+Multica vérifie lui-même les conditions sur un champ, les sous-tâches, les PR et les autres tâches. Si la condition est déjà remplie à la création, la vérification suivante (dans les 30 secondes environ) réveille l'agent. La CI fait exception : seules les vérifications terminées après la création de la règle comptent.
+
+Toutes les conditions autres que le temps attendent un événement et ont trois réglages de plus :
+
+- **Déclenchements** : **Déclencher une fois** par défaut. Avec **Réveils répétés**, fixez aussi le nombre maximal avec **Au plus** (5, 10, 20 ou 50 fois ; 20 par défaut).
+- **Attendre au plus** : 1, 3, 7 ou 30 jours ; 7 par défaut.
+- **Ensuite** (ce qui se passe à l'échéance) : par défaut, l'agent est réveillé pour s'en occuper et apprend que l'événement attendu n'a pas eu lieu. **Terminer sans exécution** clôt la règle sans bruit.
+
+Quand l'assigné de la tâche est un agent, les commentaires des membres le déclenchent déjà. Un réveil « Quelqu’un répond » pour ce même agent n'ajoute pas d'exécution : il rejoint celle que lance le commentaire. Ne l'ajoutez que pour lui donner des instructions supplémentaires.
+
+## Après le réveil [#after-wake]
+
+- L'agent démarre une exécution ordinaire sur la tâche, lit la tâche, les commentaires et l'instruction du réveil, puis publie un commentaire. Ce commentaire porte l'étiquette « Réveil » avec la condition, et le [journal d'exécution](/tasks) affiche le même déclencheur.
+- Quand une vérification régulière ne trouve rien qui demande une réponse, l'agent peut terminer par une **vérification silencieuse** : pas de commentaire, seulement une note dans l'historique de la tâche et dans l'historique de la règle. Les vérifications silencieuses successives sont regroupées en une seule entrée.
+- Les commentaires et les modifications d'un agent ne le réveillent jamais lui-même.
+- Si le même agent a déjà une exécution en attente de démarrage sur la tâche, le réveil rejoint cette exécution au lieu d'en lancer une autre.
+- Tant qu'un réveil attend, l'en-tête de la tâche indique ce qu'elle attend, par exemple « Assistant ops : Attend une réponse ». Un clic mène à la section Réveils.
+
+## Consulter et gérer [#manage]
+
+La section Réveils de la barre latérale liste les règles de la tâche : la condition, qui est réveillé, le prochain réveil et le temps restant. Cliquez sur une règle pour voir sa source, son échéance, son instruction et son **historique** (les dernières exécutions, si chacune a commenté, et ce qu'a trouvé chaque vérification silencieuse).
+
+| Action | Effet |
+|---|---|
+| Désactiver l'interrupteur | Arrête les réveils suivants et retire les exécutions pas encore démarrées. Une exécution déjà lancée continue ; arrêtez-la depuis le journal d'exécution si besoin. |
+| **Réveiller maintenant** | Réveille l'agent une fois tout de suite, sans attendre la condition. |
+| Modifier l'instruction | Ne vaut que pour les réveils suivants ; une exécution en cours ne change pas. |
+| **Supprimer** | La règle ne réveille plus personne. Les exécutions pas encore démarrées sont retirées, celles qui ont démarré continuent. |
+| **Réactiver** / **Choisir une nouvelle heure** | Réactive une règle unique après son déclenchement. Une règle à heure fixe demande une nouvelle heure. |
+
+Les règles terminées passent dans l'**Historique des réveils**. Seuls le créateur de la règle et les owners et admins de l'espace de travail peuvent la gérer. Un réveil créé par un agent pendant une exécution appartient au membre qui a lancé cette exécution, et s'affiche ainsi : « Assistant ops, pour Lei Li ».
+
+Pour voir tous les réveils de l'espace de travail, ouvrez **Automatisation** et passez à l'onglet **Réveils de tâches**. Vous pouvez filtrer par état (En attente ou en cours, En pause, Désactivés, Terminés), type de déclencheur, source et agent, en désactiver plusieurs à la fois, ou créer un réveil après avoir choisi sa tâche.
+
+## Fins et pauses automatiques [#limits]
+
+- Quand une tâche est terminée ou annulée, tous ses réveils sont désactivés et les exécutions pas encore démarrées sont retirées. Rouvrir la tâche ne les rétablit pas. On ne peut pas créer de réveil sur une tâche terminée ou annulée.
+- Une règle d'attente qui atteint sa limite **Attendre au plus** applique son réglage **Ensuite** ; une vérification régulière s'arrête à sa date de fin.
+- Une règle répétée se met en pause quand elle atteint son nombre maximal de déclenchements. Les règles d'attente se mettent aussi en pause quand elles se déclenchent mutuellement avec d'autres réveils (la chaîne passe une troisième fois par la règle sans intervention humaine), ou quand elles se déclenchent plus de 12 fois en une heure. Une règle en pause reste désactivée jusqu'à ce que quelqu'un la réactive, et son compteur repart de zéro.
+- Une tâche peut avoir au plus 32 réveils actifs, un espace de travail au plus 1 000.
+
+## Réveiller le parent quand les sous-tâches se terminent [#child-done]
+
+Quand une tâche a des sous-tâches, sa section Réveils affiche une règle marquée **Système**. Personne n'a besoin de la créer :
+
+- Quand toutes les sous-tâches d'une étape sont closes alors qu'une étape suivante attend, elle réveille l'assigné du parent, puis une fois encore quand toutes les sous-tâches sont closes. Des sous-tâches sans étape réveillent le parent une fois, à la clôture de la dernière.
+- Un agent assigné est réveillé ; pour un squad, c'est son chef ; un membre assigné reçoit plutôt une notification dans sa boîte de réception. Sans assigné, personne n'est réveillé.
+- Tant que le parent est en `backlog`, rien n'est réveillé ; le réveil a lieu une fois le parent sorti de `backlog`.
+- L'instruction par défaut indique à l'agent quelle étape s'est close et laquelle suit : vérifier ses dépendances, puis sortir de `backlog` les sous-tâches de l'étape suivante. Quand tout est clos, il rassemble les résultats sur le parent.
+
+L'assigné du parent est déjà réveillé par cette règle : inutile d'ajouter un réveil « Les sous-tâches se terminent » pour la même chose. Pour définir des étapes, voir [Tâches](/issues#projets-et-sous-tâches).
+
+Sur une tâche donnée, tout membre de l'espace de travail peut désactiver cette règle ou réécrire son instruction (jusqu'à 4 000 octets) ; les agents ne peuvent pas la modifier. Une fois modifiée, la tâche ne suit plus la valeur par défaut de l'espace de travail.
+
+Les owners et admins règlent les valeurs par défaut dans **Paramètres → Réveils** : activée ou non par défaut (elle l'est) et l'instruction par défaut. Sans instruction par défaut, l'instruction intégrée s'applique. La page indique aussi combien de tâches en cours utilisent leur propre réglage.
+
+## Laisser les agents programmer leurs réveils [#cli]
+
+Pendant une exécution, un agent utilise `multica issue wakeup` pour programmer la prochaine exécution sur la tâche, puis termine l'exécution en cours. Sans `--agent-id`, le réveil vise l'agent qui lance la commande. Vous pouvez utiliser les mêmes commandes depuis votre terminal ; indiquez alors l'agent avec `--agent-id`.
+
+```bash
+# Revoir demain à 09:00 (heure de Shanghai)
+multica issue wakeup create OPS-56 --kind at --at 2026-10-21T09:00:00+08:00 \
+  --instruction "Vérifier si tous les fournisseurs ont envoyé leur devis ; si oui, faire un tableau comparatif"
+
+# Vérifier chaque jour ouvré à 09:00 pendant une semaine
+multica issue wakeup create OPS-56 --kind cron --cron "0 9 * * 1-5" --timezone Asia/Shanghai \
+  --expires-in 168h --instruction "Consulter les e-mails de devis et mettre à jour le tableau"
+
+# Attendre jusqu'à 3 jours la réponse de Lei Li ; réveiller quand même à l'échéance
+multica issue wakeup create OPS-56 --event comment.created \
+  --filter-actor-type member --filter-actor-id <id-utilisateur-de-Lei-Li> \
+  --expires-in 72h --on-timeout wake --instruction "Poursuivre selon la réponse de Lei Li"
+
+# Attendre que la tâche passe en revue
+multica issue wakeup create OPS-56 --until-status in_review --instruction "Vérifier les livrables et faire la synthèse"
+```
+
+- **Temps** : `--kind at` avec `--after 10m` ou `--at <heure RFC3339>` ; `--kind every --every 1h` pour un intervalle fixe d'au moins 1 minute ; `--kind cron --cron "<expression à 5 champs>"` avec `--timezone` (UTC par défaut).
+- **Événements** : indiquez les noms d'événements après `--event`, séparés par des virgules. `multica issue wakeup events` liste tous les événements et filtres. `--mode continuous` rend la règle répétée.
+- **Conditions** : `--until-status`, `--until-assignee`, `--until-label`, `--until-property`, `--until-children-done [--stage N]`, `--until-pr checks|merged|conflicts` et `--until-issue <tâche> --until-issue-state done|ended|in_review|blocked`. Un seul `--until-*` par réveil, et jamais avec `--event`.
+- **Fin** : le CLI n'ajoute pas d'échéance à votre place. Utilisez `--expires-in 72h` ou `--expires-at <heure RFC3339>` ; `--on-timeout wake` fait qu'une règle d'événement réveille l'agent une dernière fois à l'échéance. `--max-fires N` (1–1000) limite le nombre d'exécutions d'une règle répétée.
+- **Où va la réponse** : `--parent <id-de-commentaire>` garde la réponse de l'exécution réveillée dans le fil d'origine.
+
+Pour gérer les règles existantes :
+
+| Commande | Rôle |
+|---|---|
+| `multica issue wakeup list <tâche>` | Lister les réveils de la tâche |
+| `multica issue wakeup get <tâche> <id-réveil>` | Afficher toute la configuration d'un réveil |
+| `multica issue wakeup runs <tâche> <id-réveil>` | Dernières exécutions, leur déclencheur, notes de vérification silencieuse et commentaire publié ou non |
+| `multica issue wakeup update <tâche> <id-réveil>` | Remplacer toute la configuration avec les mêmes options que `create`, et la réactiver |
+| `multica issue wakeup disable <tâche> <id-réveil>` | Désactiver et retirer les exécutions pas encore démarrées |
+| `multica issue wakeup trigger <tâche> <id-réveil>` | Réveiller l'agent une fois tout de suite |
+| `multica issue wakeup delete <tâche> <id-réveil>` | Supprimer la règle et retirer les exécutions pas encore démarrées |
+| `multica issue wakeup checkin <tâche> <id-réveil> --note "..."` | Terminer en silence une vérification régulière qui n'a rien trouvé ; seule une exécution lancée par cette règle peut l'appeler |
+
+`list`, `get` et `runs` affichent un tableau avec `--output table`. Pour les autres commandes, voir [Utiliser le CLI](/cli).
+
+## Réveils et automatisations [#vs-autopilots]
+
+Une [automatisation](/autopilots) lance du travail nouveau, encore et encore, à partir d'un calendrier ou d'un webhook, et peut créer une tâche à chaque fois. Un réveil appartient à une tâche existante : il ramène un agent vers cette tâche après une heure ou un événement donnés, et se termine avec elle.
+
+## Étapes suivantes
+
+- [Mettre les agents au travail](/triggering-agents) — les autres façons de lancer le travail.
+- [Automatisations](/autopilots) — lancer du travail récurrent par calendrier ou webhook.
+- [Exécutions](/tasks) — voir les exécutions lancées par un réveil.
+- [Tâches](/issues) — sous-tâches et étapes.

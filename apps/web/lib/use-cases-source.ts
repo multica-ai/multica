@@ -17,7 +17,7 @@ export const i18n = defineI18n({
 export type UseCaseLang = (typeof i18n.languages)[number];
 
 export function getUseCaseLangForLocale(locale: SupportedLocale): UseCaseLang {
-  if (locale === "zh-Hans") return "zh";
+  if (locale === "zh-Hans" || locale === "zh-Hant") return "zh";
   if (locale === "ko") return "ko";
   if (locale === "ja") return "ja";
   return "en";

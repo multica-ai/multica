@@ -26,8 +26,22 @@ The parser accepts exactly four `<type>` values plus the `all` sentinel, and the
     (member|agent|squad|issue|all)/([0-9a-fA-F-]+|all)
 
 So the link target is a real entity UUID (or `all`), never a display name. The
-label between the brackets is free text — that is where the human-readable name
-goes.
+label between the brackets must contain visible text. Put the human-readable
+name there. The `@` prefix is optional; issue references commonly omit it:
+
+    [MUL-123](mention://issue/<uuid>)
+
+Only canonical inline links with visible label text count as mentions. Empty
+or invisible labels, reference links, images, autolinks, titles, and
+angle-bracket destinations are not mention triggers. Use the shape above.
+Text removed by HTML sanitization, such as script contents, and inert template
+contents do not make a label visible; neither does an `@` prefix on its own.
+
+Code examples are inert as mentions. This includes inline code, multiline code
+spans, indented code, and backtick or tilde fenced blocks inside lists,
+blockquotes, or `<details>`. A fenced `diff` of agent instructions cannot invoke
+its mention targets. Copy the mention syntax out of code and paste it into
+ordinary prose to trigger it. Prose mentions in blockquotes still count.
 
 One `mention://` form deliberately sits OUTSIDE this parser:
 `[Label](mention://project/<uuid>)`. `project` is absent from the type group

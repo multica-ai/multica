@@ -24,6 +24,14 @@ WHERE id = $1;
 SELECT * FROM project_resource
 WHERE id = $1 AND workspace_id = $2;
 
+-- name: GetProjectResourceInWorkspaceForUpdate :one
+-- Same row as GetProjectResourceInWorkspace, but takes a row lock held until
+-- the caller's transaction ends, serializing the read-decide-write flow in
+-- UpdateProjectResource against competing partial updates (#9238).
+SELECT * FROM project_resource
+WHERE id = $1 AND workspace_id = $2
+FOR UPDATE;
+
 -- name: CreateProjectResource :one
 INSERT INTO project_resource (
     project_id, workspace_id, resource_type, resource_ref, label, position, created_by

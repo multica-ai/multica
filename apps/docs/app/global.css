@@ -1,4 +1,5 @@
 @import "tailwindcss";
+@import "tw-animate-css";
 @import "fumadocs-ui/css/preset.css";
 @import "../../../packages/ui/styles/tokens.css";
 
@@ -156,6 +157,77 @@ html[lang|="ja"] {
   --color-fd-ring: var(--ring);
 }
 
+/* Fumadocs 16 moved these slots out of preset.css into its color themes
+ * (neutral.css etc.). We don't import a theme — its `.dark` block would
+ * override the bridge above — so declare the remaining slots with the
+ * Fumadocs defaults. */
+@theme static {
+  --color-fd-overlay: hsla(0, 0%, 0%, 0.2);
+  --color-fd-info: oklch(62.3% 0.214 259.815);
+  --color-fd-warning: oklch(76.9% 0.188 70.08);
+  --color-fd-error: oklch(63.7% 0.237 25.331);
+  --color-fd-success: oklch(72.3% 0.219 149.579);
+  --color-fd-idea: oklch(70.5% 0.209 60.849);
+  --color-fd-diff-remove: rgba(200, 10, 100, 0.12);
+  --color-fd-diff-remove-symbol: rgb(230, 10, 100);
+  --color-fd-diff-add: rgba(14, 180, 100, 0.1);
+  --color-fd-diff-add-symbol: rgb(10, 200, 100);
+}
+
+/* Interactive demos: the pulse around the control a reader should use next. */
+@keyframes demo-halo {
+  from {
+    box-shadow: 0 0 0 0 color-mix(in oklab, var(--brand) 45%, transparent);
+  }
+  to {
+    box-shadow: 0 0 0 10px color-mix(in oklab, var(--brand) 0%, transparent);
+  }
+}
+
+.demo-halo {
+  animation: demo-halo 1.4s ease-out infinite;
+}
+
+/* The coach-mark arrow nudges toward the control it points at. */
+@keyframes demo-nudge {
+  50% {
+    translate: var(--demo-nudge);
+  }
+}
+
+.demo-nudge-top,
+.demo-nudge-bottom,
+.demo-nudge-left,
+.demo-nudge-right {
+  animation: demo-nudge 1s ease-in-out infinite;
+}
+
+.demo-nudge-top {
+  --demo-nudge: 0 3px;
+}
+
+.demo-nudge-bottom {
+  --demo-nudge: 0 -3px;
+}
+
+.demo-nudge-left {
+  --demo-nudge: 3px 0;
+}
+
+.demo-nudge-right {
+  --demo-nudge: -3px 0;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .demo-halo,
+  .demo-nudge-top,
+  .demo-nudge-bottom,
+  .demo-nudge-left,
+  .demo-nudge-right {
+    animation: none;
+  }
+}
+
 /* Sidebar uses dedicated --sidebar-* tokens so it sits a hair off the main
  * canvas. Fumadocs renders it as #nd-sidebar (desktop) and
  * #nd-sidebar-mobile (mobile drawer); both IDs need the override. */
@@ -269,7 +341,7 @@ article > p.text-lg {
   margin-top: 0 !important;
 }
 
-.prose h2 {
+.prose h2:not(.not-prose) {
   font-family: var(--font-serif), ui-serif, serif;
   font-size: 1.625rem; /* 26px */
   font-weight: 400;
@@ -282,7 +354,7 @@ article > p.text-lg {
 }
 
 /* h3 = small uppercase sans label, ruled-bottom — v2 editorial signature */
-.prose h3 {
+.prose h3:not(.not-prose) {
   font-family: var(--font-sans), system-ui, sans-serif;
   font-size: 0.8125rem; /* 13px */
   font-weight: 700;
@@ -295,7 +367,7 @@ article > p.text-lg {
   border-bottom: 1px solid var(--border);
 }
 
-.prose h4 {
+.prose h4:not(.not-prose) {
   font-family: var(--font-serif), ui-serif, serif;
   font-size: 1.0625rem; /* 17px */
   font-weight: 500;
@@ -486,7 +558,7 @@ article > p.text-lg {
  * (NumberedCards is the showpiece; this keeps non-showpiece pages on tone)
  * ------------------------------------------------------------------------- */
 
-.prose [data-card]:not(.peer) {
+.prose [data-card]:not(.peer, :is(h1, h2, h3, h4, h5, h6) > *) {
   border-radius: 4px !important;
   border: 1px solid var(--border) !important;
   background: var(--card);
@@ -494,12 +566,12 @@ article > p.text-lg {
   transition: border-color 150ms, background-color 150ms !important;
 }
 
-.prose [data-card]:not(.peer):hover {
+.prose [data-card]:not(.peer, :is(h1, h2, h3, h4, h5, h6) > *):hover {
   border-color: var(--primary) !important;
   background: var(--card) !important;
 }
 
-.prose [data-card]:not(.peer) > div:first-child {
+.prose [data-card]:not(.peer, :is(h1, h2, h3, h4, h5, h6) > *) > div:first-child {
   box-shadow: none !important;
   border-radius: 0 !important;
   padding: 0 !important;
@@ -509,11 +581,11 @@ article > p.text-lg {
   margin-bottom: 0.75rem !important;
 }
 
-.prose [data-card]:not(.peer) > div:first-child svg {
+.prose [data-card]:not(.peer, :is(h1, h2, h3, h4, h5, h6) > *) > div:first-child svg {
   color: var(--accent-foreground);
 }
 
-.prose [data-card]:not(.peer) h3 {
+.prose [data-card]:not(.peer, :is(h1, h2, h3, h4, h5, h6) > *) h3 {
   font-family: var(--font-serif), serif !important;
   font-size: 1.125rem !important;
   font-weight: 500 !important;
@@ -527,7 +599,7 @@ article > p.text-lg {
   color: var(--foreground) !important;
 }
 
-.prose [data-card]:not(.peer) p {
+.prose [data-card]:not(.peer, :is(h1, h2, h3, h4, h5, h6) > *) p {
   color: var(--muted-foreground) !important;
   line-height: 1.6;
   font-size: 0.9375rem !important;
@@ -734,4 +806,39 @@ article figure.shiki button {
 article figure.shiki button:hover {
   color: var(--foreground) !important;
   background: var(--muted) !important;
+}
+
+/* Accordion ids exist so links can open an entry; the "copy link" button
+ * Fumadocs adds next to each title only adds noise, so it is hidden. */
+[data-accordion-value] > button[aria-live] {
+  display: none;
+}
+
+/* A Steps item is at least as tall as its number badge plus a gap, so
+ * consecutive one-line steps never stack their badges. */
+.fd-step {
+  min-height: 2.5rem;
+}
+
+/* Fumadocs Tabs: a hairline closes the tab bar and the active underline sits
+ * on it, so the indicator never meets the panel's rounded corner. The hairline
+ * is an inset shadow because the tab bar scrolls horizontally: anything that
+ * reaches past its edge adds a scrollbar. The panel's own radius is dropped;
+ * the outer frame already clips the corners. A lone code block keeps its inset
+ * and border instead of bleeding to the edges, so every tab group reads the
+ * same. */
+[dir][data-orientation="horizontal"]:has(> [role="tablist"]) {
+  > [role="tablist"] {
+    box-shadow: inset 0 -1px 0 var(--border);
+  }
+  > [role="tablist"] > [role="tab"] {
+    border-bottom-width: 2px;
+  }
+  > [role="tabpanel"] {
+    border-radius: 0;
+  }
+  > [role="tabpanel"] > figure:only-child {
+    margin: 0;
+    border-style: solid;
+  }
 }

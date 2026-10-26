@@ -4,6 +4,7 @@ description: Organisez les tâches liées en projets et donnez-leur un objectif,
 ---
 
 import { Callout } from "fumadocs-ui/components/callout";
+import { ProjectDemo } from "@/components/demos/project-demo";
 
 Les projets organisent un travail qui nécessite plusieurs [tâches](/issues) — un lancement de produit, une migration ou une fonctionnalité livrée par étapes.
 
@@ -22,8 +23,6 @@ Un travail qu'une seule tâche suffit à décrire n'a pas besoin de projet. Les 
 | **Ressources** | Dépôts GitHub rattachés ou répertoires locaux sur des ordinateurs précis. |
 | **Workflow** | Les étapes des tâches et qui prend le relais à chacune. |
 
-![Détail d'un projet : tâches regroupées par statut, avancement et description du projet](/images/docs/project-detail.webp)
-
 ## Projets et tâches
 
 Un projet peut contenir un nombre quelconque de tâches ; une tâche appartient à un projet au plus. Créez des tâches directement dans le projet, ou choisissez ou changez le projet depuis les propriétés de la tâche.
@@ -31,14 +30,18 @@ Un projet peut contenir un nombre quelconque de tâches ; une tâche appartient 
 L'avancement du projet est calculé automatiquement à partir des tâches liées :
 
 ```text
-avancement = tâches en done ou cancelled ÷ toutes les tâches du projet
+avancement = tâches dont le statut appartient à la catégorie done ou closed ÷ toutes les tâches du projet
 ```
 
-`cancelled` signifie que ce travail a été retiré du périmètre du projet ; il compte donc dans l'avancement. Le statut du projet et celui des tâches sont indépendants : terminer toutes les tâches ne fait pas passer automatiquement le projet à `completed`, et modifier le statut du projet ne modifie pas ses tâches en masse.
+Parmi les statuts intégrés, ce sont `done` et `cancelled` ; les statuts personnalisés rangés dans ces deux catégories comptent de la même façon. `cancelled` signifie que ce travail a été retiré du périmètre du projet, il compte donc dans l'avancement.
+
+Le statut du projet et celui des tâches sont indépendants : terminer toutes les tâches ne fait pas passer le projet à `completed`, et modifier le statut du projet ne touche pas à ses tâches.
+
+<ProjectDemo />
 
 ## Description du projet et contexte d'exécution
 
-Lorsqu'un agent traite une tâche d'un projet, le nom et la description du projet sont ajoutés au contexte de cette exécution. La description est l'endroit où placer les informations dont toutes les tâches liées ont besoin : l'objectif, les limites techniques, les conventions de livraison. Les exigences propres à une seule tâche ont leur place dans cette tâche.
+Lorsqu'un agent traite une tâche d'un projet, le nom et la description du projet sont ajoutés au contexte de cette exécution. Placez dans la description ce que toutes les exécutions liées doivent savoir : l'objectif, les limites techniques, les conventions de livraison. Une exigence propre à une seule tâche s'écrit dans cette tâche.
 
 ## Ajouter des ressources
 
@@ -55,7 +58,7 @@ Le **Workflow** du projet définit les colonnes du tableau et qui prend le relai
 
 ## Responsable du projet
 
-Le responsable peut être un membre ou un agent et coordonne le projet. Un membre responsable peut aussi changer le workflow du projet. Désigner un responsable ne lui assigne pas toutes les tâches et ne lance pas de travail automatiquement. Pour lui confier une étape, choisissez le responsable du projet dans le workflow.
+Le responsable peut être un membre ou un agent ; un membre responsable peut aussi changer le workflow du projet. Désigner un responsable ne lui assigne aucune tâche et ne lance aucun travail. Pour lui confier une étape, choisissez **Responsable du projet** pour cette étape dans le workflow.
 
 ## Épingler à la barre latérale
 

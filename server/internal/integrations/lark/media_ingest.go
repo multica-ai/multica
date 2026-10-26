@@ -306,8 +306,8 @@ func mediaResourcesFromPost(lm InboundMessage) []larkMediaResource {
 	if lm.Content == "" {
 		return nil
 	}
-	var doc larkPostContent
-	if err := json.Unmarshal([]byte(lm.Content), &doc); err != nil {
+	doc, err := decodePostContent(lm.Content)
+	if err != nil {
 		return nil
 	}
 	var out []larkMediaResource
@@ -334,14 +334,18 @@ func mediaResourcesFromPost(lm InboundMessage) []larkMediaResource {
 					mimeType:  span.MimeType,
 					messageID: lm.MessageID,
 				})
-			case "media":
-				if span.FileKey == "" || seen["file\x00"+span.FileKey] {
+			case "media", "file":
+				if span.IsFolder || span.FileKey == "" || seen["file\x00"+span.FileKey] {
 					continue
 				}
 				seen["file\x00"+span.FileKey] = true
+				kind := channel.MsgTypeVideo
+				if span.Tag == "file" {
+					kind = channel.MsgTypeFile
+				}
 				out = append(out, larkMediaResource{
 					key:       span.FileKey,
-					kind:      channel.MsgTypeVideo,
+					kind:      kind,
 					fetchType: "file",
 					filename:  firstNonEmpty(span.FileName, span.Name),
 					mimeType:  span.MimeType,

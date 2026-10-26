@@ -39,7 +39,6 @@ const { defaultWithoutBlocked } = vi.hoisted(() => ({
   },
 }));
 
-vi.mock("@multica/core/config", () => ({ useFeatureEnabled: () => true }));
 vi.mock("@multica/core/issue-workflows", () => ({
   defaultWorkflow: () => defaultWithoutBlocked,
   useIssueWorkflows: () => ({ workflows: [defaultWithoutBlocked] }),
@@ -67,6 +66,10 @@ describe("workflowColumns (MUL-7420)", () => {
 });
 
 describe("useColumnWorkflow (MUL-7420)", () => {
+  it("follows Default outside a project without feature flag configuration", () => {
+    expect(useColumnWorkflow("ws-1", null, false).workflow).toBe(defaultWithoutBlocked);
+  });
+
   it("follows the project's workflow on a project board", () => {
     expect(useColumnWorkflow("ws-1", "project-1", false).workflow).toBe(defaultWithoutBlocked);
   });

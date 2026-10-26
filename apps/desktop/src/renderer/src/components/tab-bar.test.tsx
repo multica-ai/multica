@@ -617,6 +617,15 @@ describe("TabBar locale", () => {
       newTab: "新建标签页",
       pinned: "Issues（已固定）",
     },
+    "zh-Hant": {
+      pin: "固定標籤頁",
+      unpin: "取消固定標籤頁",
+      close: "關閉標籤頁",
+      closeOthers: "關閉其他標籤頁",
+      openWindow: "在新視窗開啟",
+      newTab: "新建標籤頁",
+      pinned: "Issues（已固定）",
+    },
     ja: {
       pin: "タブをピン留め",
       unpin: "タブのピン留めを解除",
