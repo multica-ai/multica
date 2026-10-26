@@ -287,6 +287,22 @@
     --frost-image: url("/images/frost/cloud.webp");
 }
 
+.site-frost[data-frost="desktop"] {
+    --frost-image: url("/images/frost/desktop.webp");
+}
+
+.site-frost[data-frost="cli"] {
+    --frost-image: url("/images/frost/cli.webp");
+}
+
+.site-frost[data-frost="chat-page"] {
+    --frost-image: url("/images/frost/chat-page.webp");
+}
+
+.site-frost[data-frost="mobile"] {
+    --frost-image: url("/images/frost/mobile.webp");
+}
+
 .site-frost[data-frost="board"] {
     --frost-image: url("/images/frost/board.webp");
 }

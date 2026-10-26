@@ -1,16 +1,26 @@
 "use client";
 
-import type { ComponentType, ReactNode } from "react";
-import { ArrowUpRight, Check, GitPullRequest, Laptop, ListOrdered, MessageSquareReply, Pause, type LucideIcon } from "lucide-react";
+import type { ReactNode } from "react";
+import { ArrowUpRight, GitPullRequest, Laptop, ListOrdered, MessageSquareReply, Pause } from "lucide-react";
 import { cn } from "@multica/ui/lib/utils";
 import { useAuthStore } from "@multica/core/auth";
 import { ProviderLogo } from "@multica/views/runtimes/components/provider-logo";
 import { useDashboardCtaHref } from "../utils/use-dashboard-cta";
 import { docsHrefForLocale, useLocale } from "../i18n";
-import { ActionLink, Container, Eyebrow, Section, SectionHeader, focusRing } from "./primitives";
+import { ActionLink, Container, Section, SectionHeader } from "./primitives";
 import { AssignVisual, CloudScene, ConnectVisual, LinkAgentVisual } from "./demo/cloud-visuals";
 import { CtaBand, SitePage } from "./site-page";
-import { AdvanceLine, useAutoAdvance } from "./auto-advance";
+import {
+  CheckList,
+  CompareTable,
+  FeatureGrid,
+  IconTile,
+  SurfaceHero,
+  WalkthroughTabs,
+  type CompareRow,
+  type Feature,
+  type Walkthrough,
+} from "./surface-kit";
 
 export function CloudPage() {
   return (
@@ -37,20 +47,14 @@ function Hero() {
   const user = useAuthStore((s) => s.user);
   const ctaHref = useDashboardCtaHref();
   const guideHref = useSetupGuideHref();
-
   return (
-    <section className="pt-site-hero pb-site-section">
-      <Container className="max-w-site-wide">
-        <Eyebrow>Multica Cloud</Eyebrow>
-        <h1 className="mt-4 font-site-display text-site-heading text-balance">
-          <span className="block text-site-ink">Agents that run in the cloud.</span>
-          <span className="block text-site-muted">Assigned like any teammate.</span>
-        </h1>
-        <p className="mt-3 max-w-[38rem] text-site-body text-site-muted text-pretty">
-          Connect a cloud agent service as a runtime, and your agents take issues without a computer of yours staying
-          on. Qoder Cloud Agents works today, with Cursor and Claude next.
-        </p>
-        <div className="mt-6 flex flex-wrap gap-2.5">
+    <SurfaceHero
+      eyebrow="Multica Cloud"
+      title="Agents that run in the cloud."
+      subtitle="Assigned like any teammate."
+      lead="Connect a cloud agent service as a runtime, and your agents take issues without a computer of yours staying on. Qoder Cloud Agents works today, with Cursor and Claude next."
+      actions={
+        <>
           <ActionLink href={ctaHref} size="lg">
             {user ? "Open dashboard" : "Get started"}
           </ActionLink>
@@ -58,23 +62,17 @@ function Hero() {
             Setup guide
             <ArrowUpRight className="size-4" aria-hidden />
           </ActionLink>
-        </div>
-      </Container>
-      <Container className="mt-10 max-w-site-wide lg:mt-12">
-        <div
-          role="img"
-          aria-label="The Runtimes page at multica.ai: Qoder Cloud Agents online with two runs going and one queued, Cursor Cloud Agents and Claude Managed Agents coming soon, and two of the team's machines. Over it, Backend Agent works an issue on Qoder Cloud Agents and opens a linked pull request."
-          data-frost="cloud"
-          className="site-frost overflow-hidden rounded-site-panel"
-        >
-          <CloudScene />
-        </div>
-      </Container>
-    </section>
+        </>
+      }
+      frost="cloud"
+      label="The Runtimes page at multica.ai: Qoder Cloud Agents online with two runs going and one queued, Cursor Cloud Agents and Claude Managed Agents coming soon, and two of the team's machines. Over it, Backend Agent works an issue on Qoder Cloud Agents and opens a linked pull request."
+    >
+      <CloudScene />
+    </SurfaceHero>
   );
 }
 
-const STEPS: { title: string; body: string; visual: ComponentType }[] = [
+const STEPS: Walkthrough[] = [
   {
     title: "Connect Qoder",
     body: "On the Runtimes page, add Qoder Cloud Agents, paste a personal access token, and pick an environment.",
@@ -92,80 +90,20 @@ const STEPS: { title: string; body: string; visual: ComponentType }[] = [
   },
 ];
 
-const STEP_HOLD = 5000;
-
 function Steps() {
-  const cycle = useAutoAdvance(STEPS.length);
-  const active = cycle.active;
   return (
     <Section>
       <Container>
         <SectionHeader title="Set up in three steps" />
-        <div
-          ref={cycle.ref}
-          className="mt-site-block grid gap-8 lg:grid-cols-[minmax(0,1fr)_minmax(0,22rem)] lg:gap-14"
-        >
-          <div className="site-visual relative h-[23rem] overflow-hidden rounded-site-panel sm:h-[26rem] lg:h-[30rem]">
-            {STEPS.map((step, index) => (
-              <div
-                key={step.title}
-                aria-hidden={index !== active}
-                inert={index !== active}
-                className={cn(
-                  "absolute inset-0 flex items-center justify-center text-foreground transition-[opacity,translate] duration-500 ease-[cubic-bezier(0.32,0.72,0,1)] motion-reduce:transition-none",
-                  index === active ? "opacity-100" : "translate-y-2 opacity-0",
-                )}
-              >
-                <div className="sm:scale-110 lg:scale-[1.2]">
-                  <step.visual />
-                </div>
-              </div>
-            ))}
-          </div>
-          <ol {...cycle.holdProps} className="flex flex-col lg:justify-center">
-            {STEPS.map((step, index) => {
-              const selected = index === active;
-              return (
-                <li key={step.title} className="relative border-t border-site-line last:border-b">
-                  <AdvanceLine
-                    selected={selected}
-                    playing={cycle.playing}
-                    running={cycle.running}
-                    duration={STEP_HOLD}
-                    onDone={cycle.advance}
-                  />
-                  <button
-                    type="button"
-                    aria-pressed={selected}
-                    onClick={() => cycle.select(index)}
-                    className={cn("group flex w-full gap-4 py-5 text-left", focusRing)}
-                  >
-                    <span className="pt-1 font-site-mono text-site-label text-site-muted tabular-nums">
-                      {String(index + 1).padStart(2, "0")}
-                    </span>
-                    <span className="min-w-0 flex-1">
-                      <span
-                        className={cn(
-                          "block text-site-card transition-colors",
-                          selected ? "text-site-ink" : "text-site-muted group-hover:text-site-ink",
-                        )}
-                      >
-                        {step.title}
-                      </span>
-                      <span className="mt-site-stack block text-site-body text-site-muted text-pretty">{step.body}</span>
-                    </span>
-                  </button>
-                </li>
-              );
-            })}
-          </ol>
+        <div className="mt-site-block">
+          <WalkthroughTabs steps={STEPS} />
         </div>
       </Container>
     </Section>
   );
 }
 
-const UNATTENDED: { icon: LucideIcon; title: string; body: string }[] = [
+const UNATTENDED: Feature[] = [
   {
     icon: ListOrdered,
     title: "Runs queue up",
@@ -193,27 +131,9 @@ function Unattended() {
     <Section>
       <Container>
         <SectionHeader title="Built for work nobody watches" />
-        <ul className="mt-site-block grid border-y border-site-line sm:grid-cols-2">
-          {UNATTENDED.map((item, index) => (
-            <li
-              key={item.title}
-              className={cn(
-                "flex gap-5 border-site-line py-8 sm:py-10",
-                index > 0 && "max-sm:border-t",
-                index > 1 && "sm:border-t",
-                index % 2 === 0 ? "sm:pr-8 lg:pr-14" : "sm:border-l sm:pl-8 lg:pl-14",
-              )}
-            >
-              <span className="flex size-10 shrink-0 items-center justify-center rounded-site-inner border border-site-line bg-site-surface text-site-ink-secondary">
-                <item.icon className="size-5" aria-hidden />
-              </span>
-              <span className="min-w-0">
-                <h3 className="text-site-card text-site-ink">{item.title}</h3>
-                <p className="mt-site-stack max-w-[26rem] text-site-body text-site-muted text-pretty">{item.body}</p>
-              </span>
-            </li>
-          ))}
-        </ul>
+        <div className="mt-site-block">
+          <FeatureGrid items={UNATTENDED} />
+        </div>
       </Container>
     </Section>
   );
@@ -247,14 +167,7 @@ function Boundary() {
           {BOUNDARY.map((side, index) => (
             <div key={side.title} className={cn("p-6 sm:p-8", index === 1 && "border-site-line max-md:border-t md:border-l")}>
               <h3 className="text-site-card text-site-ink">{side.title}</h3>
-              <ul className="mt-5 flex flex-col gap-3">
-                {side.items.map((item) => (
-                  <li key={item} className="flex gap-2.5 text-site-body text-site-ink-secondary">
-                    <Check className="mt-1 size-4 shrink-0 text-site-muted" aria-hidden />
-                    {item}
-                  </li>
-                ))}
-              </ul>
+              <CheckList items={side.items} className="mt-5" />
             </div>
           ))}
         </div>
@@ -304,14 +217,7 @@ function Services() {
 function ServiceRow({ icon, name, detail, available }: { icon: ReactNode; name: string; detail: string; available: boolean }) {
   return (
     <li className="flex items-center gap-4 py-4">
-      <span
-        className={cn(
-          "flex size-10 shrink-0 items-center justify-center rounded-site-inner border border-site-line bg-site-surface text-site-ink-secondary",
-          !available && "opacity-60",
-        )}
-      >
-        {icon}
-      </span>
+      <IconTile muted={!available}>{icon}</IconTile>
       <span className="min-w-0 flex-1">
         <span className={cn("block text-site-body", available ? "text-site-ink" : "text-site-muted")}>{name}</span>
         <span className="block text-site-small text-site-muted">{detail}</span>
@@ -335,12 +241,12 @@ function Availability({ available }: { available: boolean }) {
   );
 }
 
-const COMPARE: { label: string; cloud: string; local: string }[] = [
-  { label: "A computer left on", cloud: "Not needed", local: "Needed while agents run" },
-  { label: "Model, tools, and skills", cloud: "Set up in the cloud service", local: "Set on the agent in Multica" },
-  { label: "Code it can reach", cloud: "GitHub repositories you authorize", local: "Anything on that computer" },
-  { label: "Chat with the agent", cloud: "Not yet", local: "Supported" },
-  { label: "Local files and attachments", cloud: "Not supported", local: "Supported" },
+const COMPARE: CompareRow[] = [
+  { label: "A computer left on", values: ["Not needed", "Needed while agents run"] },
+  { label: "Model, tools, and skills", values: ["Set up in the cloud service", "Set on the agent in Multica"] },
+  { label: "Code it can reach", values: ["GitHub repositories you authorize", "Anything on that computer"] },
+  { label: "Chat with the agent", values: ["Not yet", "Supported"] },
+  { label: "Local files and attachments", values: ["Not supported", "Supported"] },
 ];
 
 function Compare() {
@@ -353,23 +259,7 @@ function Compare() {
           lead="Most teams use both: cloud agents for work that should run unattended, and their own machines for work that needs local files."
         />
         <div className="mt-site-block">
-          <div className="grid grid-cols-2 gap-x-4 border-b border-site-ink pb-3 text-site-small sm:grid-cols-3">
-            <span className="max-sm:hidden" />
-            <span className="text-site-ink">Cloud service</span>
-            <span className="text-site-ink">Your computer</span>
-          </div>
-          <dl>
-            {COMPARE.map((row) => (
-              <div
-                key={row.label}
-                className="grid grid-cols-2 gap-x-4 gap-y-1.5 border-b border-site-line py-4 text-site-body sm:grid-cols-3"
-              >
-                <dt className="text-site-muted max-sm:col-span-2 max-sm:text-site-small">{row.label}</dt>
-                <dd className="text-site-ink">{row.cloud}</dd>
-                <dd className="text-site-ink">{row.local}</dd>
-              </div>
-            ))}
-          </dl>
+          <CompareTable columns={["Cloud service", "Your computer"]} rows={COMPARE} />
         </div>
         <ActionLink href={guideHref} tone="ghost" className="mt-8 -ml-3 md:mt-10">
           Read the setup guide
