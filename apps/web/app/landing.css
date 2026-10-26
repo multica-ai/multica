@@ -44,8 +44,8 @@
     --radius-site-panel: var(--site-radius-panel);
 
     --container-site: var(--site-container);
+    --container-site-wide: var(--site-container-wide);
     --spacing-site-gutter: var(--site-gutter);
-    --spacing-site-gutter-hero: var(--site-gutter-hero);
     --spacing-site-header: var(--site-header);
     --spacing-site-hero: var(--site-hero);
     --spacing-site-section: var(--site-section);
@@ -136,10 +136,11 @@
     --site-radius-card: 12px;
     --site-radius-panel: 16px;
 
+    /* On desktop the page body sits in a narrower frame than the header and
+       hero, which keep the wide one. */
     --site-container: 87.5rem;
-    /* Sections sit inside a wider gutter than the header and hero on desktop. */
+    --site-container-wide: 87.5rem;
     --site-gutter: 1.25rem;
-    --site-gutter-hero: 1.25rem;
     --site-header: 3.25rem;
     --site-hero: 3rem;
     --site-section: 4.5rem;
@@ -157,8 +158,8 @@
 
 @media (min-width: 64rem) {
     .landing-light {
-        --site-gutter: clamp(5rem, 8vw, 7.5rem);
-        --site-gutter-hero: 3.75rem;
+        --site-container: min(80rem, 100% - 10vw);
+        --site-gutter: 3.75rem;
         --site-hero: 4rem;
         --site-section: 7rem;
         --site-grid-row: 3.75rem;
@@ -183,14 +184,14 @@
     background-position: 8px 8px;
 }
 
-/* Page frame: on wide screens two hairline rails run down the page on the
-   hero's content edges, outside the narrower section content, and a dot
-   marks each place a section's top hairline crosses them. `100%` resolves
-   against each full-bleed box, so the rails and dots land on the same x. The
-   1px border sits just above the padding box the dots are placed in. */
+/* Page frame: on wide screens two hairline rails run down the page halfway
+   into the gutter, and a dot marks each place a section's top hairline
+   crosses them. `100%` resolves against each full-bleed box, so the rails
+   and dots land on the same x. The 1px border sits just above the padding
+   box the dots are placed in. */
 @media (min-width: 64rem) {
     .site-rails {
-        --site-rail: calc((100% - min(100%, var(--site-container))) / 2 + var(--site-gutter-hero));
+        --site-rail: calc((100% - min(100%, var(--site-container))) / 2 + var(--site-gutter) / 2);
         position: relative;
     }
 

@@ -10,6 +10,7 @@ import { docsHrefForLocale, useLocale } from "../i18n";
 import { useDashboardCtaHref } from "../utils/use-dashboard-cta";
 import { formatStarCount, useGithubStars } from "../utils/use-github-stars";
 import { GitHubMark, githubUrl } from "../components/shared";
+import { HERO_PROVIDERS } from "../components/provider-marks";
 import { BrandLogo } from "./brand-logo";
 import { ActionLink, SiteTextLink, focusRing } from "./primitives";
 import { TOP_LINKS, buildMenus, type SiteLink, type SiteLinkGroup, type SiteMenu, type SiteMenuId } from "./sitemap";
@@ -106,7 +107,7 @@ export function SiteHeader() {
       >
         <div
           ref={barRef}
-          className="relative mx-auto flex h-site-header w-full max-w-site items-center justify-between gap-6 px-site-gutter-hero"
+          className="relative mx-auto flex h-site-header w-full max-w-site-wide items-center justify-between gap-6 px-site-gutter"
         >
           <div className="flex min-w-0 items-center gap-8">
             <Link
@@ -303,24 +304,18 @@ function MenuPanel({
           ref={contentRef}
           key={menu.id}
           className={cn(
-            "flex w-max gap-5 p-4 xl:gap-6",
+            "flex w-max gap-4 p-3",
             sliding && "animate-in fade-in duration-300 motion-reduce:animate-none",
             switchDir > 0 && "slide-in-from-right-6",
             switchDir < 0 && "slide-in-from-left-6",
           )}
         >
           {menuColumns(menu.groups).map((column) => (
-            <div
-              key={column[0]!.title}
-              className={cn(
-                "flex flex-col gap-4",
-                column.some((group) => group.links.some((link) => link.description)) ? "w-56" : "min-w-28 whitespace-nowrap",
-              )}
-            >
+            <div key={column[0]!.title} className="flex min-w-36 flex-col gap-4">
               {column.map((group) => (
                 <div key={group.title}>
-                  <p className="px-2 pt-1 text-[0.8125rem] text-site-muted">{group.title}</p>
-                  <ul className="mt-2 flex flex-col">
+                  <p className="px-2 pt-1 pb-1.5 text-[0.8125rem] text-site-muted">{group.title}</p>
+                  <ul className="flex flex-col">
                     {group.links.map((link) => (
                       <li key={`${group.title}-${link.label}`}>
                         <MenuLink link={link} onNavigate={onNavigate} />
@@ -349,25 +344,30 @@ function menuColumns(groups: SiteLinkGroup[]): SiteLinkGroup[][] {
 }
 
 function MenuLink({ link, onNavigate }: { link: SiteLink; onNavigate: () => void }) {
+  const Mark = PROVIDER_MARKS.get(link.label);
   return (
     <Link
       href={link.href}
       onClick={onNavigate}
       {...(link.external ? { target: "_blank", rel: "noreferrer" } : {})}
-      className={cn("block rounded-site-inner px-2 py-1.5 transition-colors hover:bg-site-hover", focusRing)}
+      className={cn(
+        "group/link flex items-center gap-2 rounded-site-inner px-2 py-1.5 text-site-small whitespace-nowrap text-site-ink transition-colors hover:bg-site-hover",
+        focusRing,
+      )}
     >
-      <span className="flex items-center gap-1 text-site-small text-site-ink">
-        {link.label}
-        {link.external ? <ArrowUpRight className="size-3.5 text-site-muted" aria-hidden /> : null}
-      </span>
-      {link.description ? (
-        <span className="mt-0.5 block text-[0.8125rem] leading-snug text-site-muted text-pretty">
-          {link.description}
-        </span>
+      {Mark ? <Mark className="size-4 shrink-0" /> : null}
+      {link.label}
+      {link.external ? (
+        <ArrowUpRight
+          aria-hidden
+          className="-ml-1 size-3.5 text-site-muted opacity-0 transition-opacity group-hover/link:opacity-100 group-focus-visible/link:opacity-100"
+        />
       ) : null}
     </Link>
   );
 }
+
+const PROVIDER_MARKS = new Map(HERO_PROVIDERS.map((provider) => [provider.name, provider.Mark]));
 
 function MobileMenu({
   open,

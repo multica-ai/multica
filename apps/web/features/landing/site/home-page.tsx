@@ -58,7 +58,7 @@ function Hero() {
 
   return (
     <section className="pt-site-hero pb-site-section">
-      <Container className="px-site-gutter-hero">
+      <Container className="max-w-site-wide">
         <Link
           href={`/${PLACEHOLDER_PAGES.blog.slug}`}
           className={cn(
@@ -83,7 +83,7 @@ function Hero() {
           </ActionLink>
         </div>
       </Container>
-      <Container className="mt-10 px-site-gutter-hero lg:mt-12">
+      <Container className="mt-10 max-w-site-wide lg:mt-12">
         <HeroDemo />
       </Container>
     </section>
@@ -156,7 +156,7 @@ function ProviderMark({ name }: { name: string }) {
 function LogoWall() {
   return (
     <section aria-labelledby="logo-wall-title" className="pb-site-section">
-      <Container className="px-site-gutter-hero">
+      <Container className="max-w-site-wide">
         <h2 id="logo-wall-title" className="text-center text-site-small text-site-muted">
           Used by engineers at
         </h2>
