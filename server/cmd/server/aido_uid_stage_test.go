@@ -134,6 +134,16 @@ func TestAIDOUidStage(t *testing.T) {
 	if err := cli.SaveCLIConfigForProfile(cli.CLIConfig{Token: raw, ServerURL: testServer.URL, WorkspaceID: testWorkspaceID}, profile); err != nil {
 		t.Fatal(err)
 	}
+	// Stage-only Seatbelt boundary: the daemon and every provider child inherit
+	// this profile. Production PostgreSQL configuration is never touched.
+	pgSandbox := os.Getenv("NEX1565_PG_PROFILE")
+	if pgSandbox == "" {
+		pgSandbox = filepath.Join(root, "pg-boundary.sb")
+	}
+	pgPolicy := `(version 1) (allow default) (deny network-outbound (remote ip "localhost:5432")) (deny network-outbound (local unix-socket))`
+	if err := os.WriteFile(pgSandbox, []byte(pgPolicy), 0600); err != nil {
+		t.Fatal(err)
+	}
 	profileHash := 0
 	for _, b := range []byte(profile) {
 		profileHash += int(b)
@@ -149,7 +159,7 @@ func TestAIDOUidStage(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer dlog.Close()
-	d := exec.CommandContext(ctx, filepath.Join(root, "multica-stage"), "--profile", profile, "daemon", "start", "--foreground", "--no-auto-update", "--daemon-id", daemonID, "--device-name", "NEX1565 UID490", "--poll-interval", "100ms", "--heartbeat-interval", "1s", "--max-concurrent-tasks", "1")
+	d := exec.CommandContext(ctx, "/usr/bin/sandbox-exec", "-f", pgSandbox, filepath.Join(root, "multica-stage"), "--profile", profile, "daemon", "start", "--foreground", "--no-auto-update", "--daemon-id", daemonID, "--device-name", "NEX1565 UID490", "--poll-interval", "100ms", "--heartbeat-interval", "1s", "--max-concurrent-tasks", "1")
 	d.Env = append(os.Environ(), "PATH=/usr/bin:/bin", "SHELL=/usr/bin/false", "MULTICA_CLAUDE_PATH="+filepath.Join(root, "mock-model.py"), "MULTICA_WORKSPACES_ROOT="+filepath.Join(root, "workspaces"), "MULTICA_KEEP_ENV_AFTER_TASK=true", "MULTICA_GC_ENABLED=false")
 	d.Stdout, d.Stderr = dlog, dlog
 	if err := d.Start(); err != nil {
