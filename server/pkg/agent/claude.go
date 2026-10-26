@@ -98,7 +98,7 @@ func (b *claudeBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 	if opts.ResumeSessionID != "" {
 		snapshot, snapshotErr := captureClaudeUsageSnapshot(cmd.Env, cmd.Dir, opts.ResumeSessionID)
 		if snapshotErr != nil {
-			b.cfg.Logger.Warn("claude usage baseline unavailable; falling back to reported totals", "error", snapshotErr)
+			b.cfg.Logger.Warn("claude usage baseline unavailable; ignoring reported session totals, keeping per-run stream usage", "error", snapshotErr)
 		} else {
 			usageSnapshot = snapshot
 		}
@@ -282,14 +282,26 @@ func (b *claudeBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 				resultIsError = msg.IsError
 				terminalReasonError = claudeTerminalReasonFailure(msg.TerminalReason, msg.ResultText)
 				sessionID = msg.SessionID
+				// A resume whose baseline capture failed cannot trust the
+				// result's modelUsage: newer Claude Code restores the session's
+				// cumulative counters on resume, so the reported total may span
+				// every prior task (GH #9564), and without a baseline there is
+				// no way to verify it is per-run. Keep the stream-derived
+				// per-run usage in that case; the reported totals are recorded
+				// in lastUsageResult only for the resume-rejected recapture
+				// below, where the run is known to have started a fresh session
+				// whose totals are its own.
+				unverifiableBaseline := usageSnapshot == nil && opts.ResumeSessionID != ""
 				var baseline map[string]TokenUsage
 				if usageSnapshot != nil {
 					baseline = usageSnapshot.baseline
 				}
 				if resultUsage, authoritative := claudeResultUsageSince(msg, opts.Model, baseline); authoritative {
-					usage = resultUsage
 					usageMsg := msg
 					lastUsageResult = &usageMsg
+					if !unverifiableBaseline {
+						usage = resultUsage
+					}
 				}
 				closeStdin()
 			case "log":
