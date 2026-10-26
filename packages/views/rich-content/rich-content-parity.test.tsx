@@ -421,6 +421,94 @@ describe("live → persisted row identity", () => {
   });
 });
 
+describe("alert callout parity across the five surfaces", () => {
+  const FIXTURE = [
+    "> [!IMPORTANT]",
+    "> Needs a decision.",
+    "",
+    "> [!WARNING]",
+    "> Breaks on deploy.",
+    "",
+    "> A plain quote.",
+  ].join("\n");
+
+  const SURFACES: ReadonlyArray<[string, () => HTMLElement]> = [
+    ["an Issue description", () => render(<ReadonlyContent content={FIXTURE} />).container],
+    [
+      "a Comment",
+      () => render(<ReadonlyContent content={FIXTURE} attachments={[]} />).container,
+    ],
+    [
+      "a Chat user message",
+      () =>
+        render(
+          withClient(
+            <ChatMessageList
+              messages={[userMessage(FIXTURE)] as never}
+              pendingTask={null}
+              availability={undefined}
+            />,
+            makeClient(),
+          ),
+        ).container,
+    ],
+    [
+      "a persisted Chat assistant message",
+      () => {
+        const client = makeClient();
+        seedTimeline(client, FIXTURE);
+        return render(
+          withClient(
+            <ChatMessageList
+              messages={[assistantMessage(FIXTURE)] as never}
+              pendingTask={null}
+              availability={undefined}
+            />,
+            client,
+          ),
+        ).container;
+      },
+    ],
+    [
+      "a live (streaming) Chat assistant row",
+      () => {
+        const client = makeClient();
+        seedTimeline(client, FIXTURE);
+        return render(
+          withClient(
+            <ChatMessageList
+              messages={[]}
+              pendingTask={{ task_id: TASK_ID, status: "running" } as never}
+              availability={undefined}
+            />,
+            client,
+          ),
+        ).container;
+      },
+    ],
+  ];
+
+  it.each(SURFACES)("renders the same callouts in %s", async (_, renderSurface) => {
+    const container = renderSurface();
+
+    await waitFor(() => {
+      expect(container.querySelector(".markdown-alert")).not.toBeNull();
+    });
+    const blocks = Array.from(
+      container.querySelectorAll<HTMLElement>(".markdown-alert, blockquote"),
+    ).map((el) =>
+      el.tagName === "BLOCKQUOTE"
+        ? `quote: ${el.textContent?.trim()}`
+        : `${el.dataset.alert}: ${Array.from(el.children, (child) => child.textContent).join(" | ")}`,
+    );
+    expect(blocks).toEqual([
+      "important: Important | Needs a decision.",
+      "warning: Warning | Breaks on deploy.",
+      "quote: A plain quote.",
+    ]);
+  });
+});
+
 describe("semantic parity beyond Mermaid", () => {
   const FIXTURE = [
     "A [link](https://example.com) and a mention [MUL-7](mention://issue/MUL-7).",
