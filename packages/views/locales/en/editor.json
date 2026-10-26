@@ -64,6 +64,7 @@
     "preview_too_large": "File is too large to preview. Please download.",
     "preview_unsupported": "This file type can't be previewed.",
     "close": "Close",
+    "back": "Back",
     "open_in_new_tab": "Open in new tab",
     "remove": "Remove attachment",
     "previous": "Previous",

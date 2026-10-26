@@ -31,9 +31,12 @@ import { useCallback, useEffect } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Loader2 } from "@multica/ui/icons";
 import { api } from "@multica/core/api";
+import { issueRouteRef, paths, useWorkspaceSlug } from "@multica/core/paths";
 import { getPreviewKind } from "../editor/utils/preview";
 import { useT } from "../i18n";
+import { useBackOrReplace } from "../navigation";
 import { useRestoredViewState, useViewStateWriter } from "../platform";
+import { useIsStandalonePwa } from "../platform/standalone";
 import {
   AttachmentPreviewStandalone,
   type HtmlFrameRenderer,
@@ -83,6 +86,21 @@ export function AttachmentPreviewPage({
     if (title) document.title = title;
   }, [title]);
 
+  // An installed PWA has no browser back button, so the page brings its own.
+  // It returns to wherever the reader came from; a cold open (shared link,
+  // fresh launch) has no history, and lands on the attachment's issue instead.
+  const standalonePwa = useIsStandalonePwa();
+  const slug = useWorkspaceSlug();
+  const backOrReplace = useBackOrReplace();
+  const issueId = attachment?.issue_id;
+  const leave = useCallback(() => {
+    if (!slug) return;
+    const workspace = paths.workspace(slug);
+    backOrReplace(
+      issueId ? workspace.issueDetail(issueRouteRef({ id: issueId, identifier: null })) : workspace.issues(),
+    );
+  }, [slug, issueId, backOrReplace]);
+
   const restoredAddress = useRestoredViewState(HTML_PREVIEW_ADDRESS_KEY);
   const writeViewState = useViewStateWriter();
   const keepAddress = useCallback(
@@ -100,6 +118,7 @@ export function AttachmentPreviewPage({
           restoredAddress ?? initialAddress ?? "",
         )}
         onHtmlAddressChange={keepAddress}
+        onBack={standalonePwa && slug ? leave : undefined}
       />
     );
   }
