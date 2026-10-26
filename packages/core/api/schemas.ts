@@ -946,8 +946,15 @@ const ReactionSchema = z.object({
 // Nested attachments embedded in timeline/comment responses stay lenient on
 // purpose: a single malformed attachment must not knock the whole timeline
 // into the fallback `[]`.
+const AttachmentImageFields = {
+  width: z.number().positive().optional().catch(undefined),
+  height: z.number().positive().optional().catch(undefined),
+  preview_url: z.string().optional().catch(undefined),
+};
+
 const AttachmentSchema = z.object({
   id: z.string(),
+  ...AttachmentImageFields,
 }).loose();
 
 const ChatQuickActionSchema = z.object({
@@ -1013,6 +1020,9 @@ export const AttachmentResponseSchema = z.object({
   filename: z.string(),
   chat_session_id: z.string().nullable().optional(),
   chat_message_id: z.string().nullable().optional(),
+  // Image metadata is optional and degrades on its own: a malformed value
+  // means "no preview", never a lost attachment.
+  ...AttachmentImageFields,
 }).loose();
 
 export const EMPTY_ATTACHMENT: Attachment = {

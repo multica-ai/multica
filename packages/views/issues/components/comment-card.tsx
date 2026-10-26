@@ -56,7 +56,7 @@ import { CommentsFoldBar } from "./resolved-thread-bar";
 import { deriveThreadResolution } from "./thread-utils";
 import { RevisionConflictCompare } from "./revision-conflict-compare";
 import { InlineCommentRun, PlacedInlineCommentRun, useInlineCommentRunState, type InlineCommentRunState } from "./inline-comment-run";
-import { EMPTY_COMMENT_RUNS, isRunFailureNotice, orderThreadWithRuns, type CommentRun, type ThreadRunSlot } from "./comment-runs";
+import { EMPTY_COMMENT_RUNS, foldLongThread, isRunFailureNotice, orderThreadWithRuns, type CommentRun, type ThreadRunSlot } from "./comment-runs";
 import { descriptionPreview } from "./description-preview";
 import { useCommentAnnotations } from "./use-comment-annotations";
 import { useAttachmentVersions } from "./deliverables/attachment-versions";
@@ -158,6 +158,14 @@ interface CommentCardProps {
    */
   expandedResolvedIds?: ReadonlySet<string>;
   onResolvedExpandChange?: (rootId: string, expand: boolean) => void;
+  /**
+   * Fold the middle of a long thread behind a bar (see `foldLongThread`). The
+   * parent turns it off when every comment must be in the DOM (deep link,
+   * in-page find) and once the reader opens the thread through
+   * `onExpandLongThread`.
+   */
+  foldLongThread?: boolean;
+  onExpandLongThread?: (rootId: string) => void;
   /** ID of the comment to highlight (flash animation). */
   highlightedCommentId?: string | null;
 }
@@ -1032,6 +1040,8 @@ function CommentCardImpl({
   onCollapseResolved,
   expandedResolvedIds,
   onResolvedExpandChange,
+  foldLongThread: foldLongThreadProp = false,
+  onExpandLongThread,
   highlightedCommentId,
 }: CommentCardProps) {
   const { t } = useT("issues");
@@ -1161,6 +1171,10 @@ function CommentCardImpl({
     ? orderThreadWithRuns(entry, resolutionReply ? [resolutionReply] : [], runs.filter((run) => !run.hasReply
       && (run.anchorCommentId === entry.id || run.anchorCommentId === replyResolutionId)))
     : orderThreadWithRuns(entry, allNestedReplies, runs);
+  // A thread the reader opened from a resolution fold already shows in full.
+  const longFold = foldLongThreadProp && onExpandLongThread && replyResolutionId == null && !onCollapseResolved
+    ? foldLongThread(threadRows, highlightedCommentId)
+    : null;
 
   // Pin the root comment's header to the timeline's scroll parent while the
   // thread is open, so a LONG root comment keeps its author + actions visible
@@ -1518,7 +1532,18 @@ function CommentCardImpl({
                 </button>
               )}
               {/* Replies — chronological; the resolution keeps its place with a badge */}
-              {threadRows.map(renderThreadRow)}
+              {longFold && onExpandLongThread ? (
+                <>
+                  {longFold.head.map(renderThreadRow)}
+                  <div className="border-t border-border/50 px-4 max-md:px-3 py-2.5">
+                    <CommentsFoldBar
+                      replies={longFold.folded}
+                      onExpand={() => onExpandLongThread(entry.id)}
+                    />
+                  </div>
+                  {longFold.tail.map(renderThreadRow)}
+                </>
+              ) : threadRows.map(renderThreadRow)}
 
               {/* Reply input */}
               <div className="border-t border-border/50 px-4 max-md:px-3 py-2.5">

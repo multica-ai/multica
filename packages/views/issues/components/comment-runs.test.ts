@@ -1,7 +1,7 @@
 // @vitest-environment node
 import { describe, expect, it } from "vitest";
 import type { AgentTask, TimelineEntry } from "@multica/core/types";
-import { commentRunOutput, buildCommentRunView, isRunFailureNotice, orderThreadWithRuns, orderTimelineWithRuns, type CommentRun } from "./comment-runs";
+import { commentRunOutput, buildCommentRunView, foldLongThread, isRunFailureNotice, orderThreadWithRuns, orderTimelineWithRuns, type CommentRun } from "./comment-runs";
 import { collectThreadReplies } from "./thread-utils";
 
 const groupCommentRuns = (...args: Parameters<typeof buildCommentRunView>) => buildCommentRunView(...args).runs;
@@ -568,5 +568,42 @@ describe("orderThreadWithRuns", () => {
     const run = asked("run", ask);
     const timeline = [root, ask, comment("kept", { parent_id: ask.id, created_at: at("10:02:00") }), answer("answer", run, at("10:05:00"))];
     expect(thread([run], timeline)).toEqual(["ask", "kept", "answer"]);
+  });
+});
+
+describe("foldLongThread", () => {
+  const replies = (n: number) => Array.from({ length: n }, (_, i) => comment(`r${i + 1}`, { parent_id: "root" }));
+  const ids = (rows: readonly (TimelineEntry | { run: CommentRun; reply?: TimelineEntry })[]) =>
+    rows.map((row) => ("run" in row ? `run:${row.run.task.id}` : row.id));
+
+  it("keeps the first reply and the latest three, folding the rest", () => {
+    const fold = foldLongThread(replies(8))!;
+    expect(ids(fold.head)).toEqual(["r1"]);
+    expect(fold.folded.map((entry) => entry.id)).toEqual(["r2", "r3", "r4", "r5"]);
+    expect(ids(fold.tail)).toEqual(["r6", "r7", "r8"]);
+  });
+
+  it("does not fold a thread that would hide fewer than two replies", () => {
+    expect(foldLongThread(replies(5))).toBeNull();
+    expect(foldLongThread(replies(6))?.folded.map((entry) => entry.id)).toEqual(["r2", "r3"]);
+  });
+
+  it("does not count tombstones, which render nothing", () => {
+    const rows = replies(6);
+    rows[2] = { ...rows[2]!, deleted_at: "2026-09-07T00:00:00Z" };
+    expect(foldLongThread(rows)).toBeNull();
+  });
+
+  it("keeps the whole thread when the highlighted comment is in the middle", () => {
+    expect(foldLongThread(replies(8), "r3")).toBeNull();
+    expect(foldLongThread(replies(8), "r8")).not.toBeNull();
+  });
+
+  it("keeps the whole thread when a run in the middle is still working", () => {
+    const rows: (TimelineEntry | { run: CommentRun; reply?: TimelineEntry })[] = replies(8);
+    rows.splice(3, 0, { run: { task: task("working", { status: "running" }), hasReply: false } });
+    expect(foldLongThread(rows)).toBeNull();
+    rows[3] = { run: { task: task("done", { status: "completed" }), hasReply: true }, reply: comment("answer") };
+    expect(foldLongThread(rows)?.folded.map((entry) => entry.id)).toEqual(["r2", "r3", "answer", "r4", "r5"]);
   });
 });

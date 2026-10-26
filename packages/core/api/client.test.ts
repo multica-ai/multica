@@ -1671,6 +1671,58 @@ describe("ApiClient", () => {
       expect(att.id).toBe("");
       expect(att.download_url).toBe("");
     });
+
+    it("keeps the attachment when its image metadata is malformed", async () => {
+      vi.stubGlobal(
+        "fetch",
+        vi.fn().mockResolvedValue(
+          new Response(
+            JSON.stringify({
+              id: "att-1",
+              url: "https://static.example.test/ws/att-1.png",
+              download_url: "/api/attachments/att-1/download",
+              filename: "shot.png",
+              width: "wide",
+              height: -3,
+              preview_url: 42,
+            }),
+            { status: 200, headers: { "Content-Type": "application/json" } },
+          ),
+        ),
+      );
+
+      const att = await new ApiClient("https://api.example.test").getAttachment("att-1");
+
+      expect(att.id).toBe("att-1");
+      expect(att.width).toBeUndefined();
+      expect(att.height).toBeUndefined();
+      expect(att.preview_url).toBeUndefined();
+    });
+
+    it("parses image dimensions and the preview URL", async () => {
+      vi.stubGlobal(
+        "fetch",
+        vi.fn().mockResolvedValue(
+          new Response(
+            JSON.stringify({
+              id: "att-1",
+              url: "https://static.example.test/ws/att-1.png",
+              download_url: "/api/attachments/att-1/download",
+              filename: "shot.png",
+              width: 3200,
+              height: 2000,
+              preview_url: "/api/attachments/att-1/download?variant=preview",
+            }),
+            { status: 200, headers: { "Content-Type": "application/json" } },
+          ),
+        ),
+      );
+
+      const att = await new ApiClient("https://api.example.test").getAttachment("att-1");
+
+      expect([att.width, att.height]).toEqual([3200, 2000]);
+      expect(att.preview_url).toBe("/api/attachments/att-1/download?variant=preview");
+    });
   });
 
   describe("getAttachmentTextContent", () => {

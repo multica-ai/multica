@@ -40,6 +40,20 @@ success, on failure and on cancellation.
 The ordinary e2e suite ignores this directory; it needs a production build and
 a machine that is not busy doing anything else.
 
+The image-heavy thread scenario (MUL-8182) types a comment while a long thread
+of large screenshots loads in the viewport. Image responses are held until the
+first keystroke, so fetching, decoding and laying out the images all land in
+the measured window, which runs with the CPU throttled 4× — a fast workstation
+absorbs this page without dropping a frame. Besides the typing numbers it reports the summed layout
+shift, how many images mounted, and how many originals and previews were
+fetched. It shares the report path with the live-runs scenario, so it only
+runs when selected:
+
+```bash
+PERF_SCENARIO=image-thread pnpm exec playwright test --config=playwright.perf.config.ts image-heavy-thread.spec.ts
+node scripts/perf-compare.mjs --base origin/main --head HEAD --out perf-report --scenario image-thread
+```
+
 The floating-chat lifetime regression runs against the same production build:
 
 ```bash
