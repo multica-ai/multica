@@ -9,7 +9,7 @@ import { discordUrl, githubUrl, twitterUrl } from "../components/shared";
  * Copy is English-only placeholder text while positioning is being settled.
  */
 
-export type SiteLink = { label: string; href: string; external?: boolean };
+export type SiteLink = { label: string; href: string; external?: boolean; description?: string };
 export type SiteLinkGroup = { title: string; links: SiteLink[] };
 export type SiteMenuId = "product" | "solutions" | "resources";
 export type SiteMenu = { id: SiteMenuId; label: string; groups: SiteLinkGroup[] };
@@ -19,6 +19,8 @@ export type SitePage = {
   title: string;
   /** One sentence shown under the page title and used as its meta description. */
   summary: string;
+  /** A few words shown under the title in the header menu. */
+  tagline?: string;
 };
 
 export type PageGroup = { title: string; pages: SitePage[] };
@@ -27,32 +29,32 @@ export const PRODUCT_GROUPS: PageGroup[] = [
   {
     title: "Surfaces",
     pages: [
-      { slug: "cloud", title: "Multica Cloud", summary: "The hosted workspace for your human and agent team." },
-      { slug: "desktop", title: "Multica Desktop", summary: "A native app for macOS, Windows, and Linux." },
-      { slug: "cli", title: "Multica CLI", summary: "Connect your machine and run agents from the terminal." },
-      { slug: "chat", title: "Chat integrations", summary: "Work with agents from Slack, Lark, DingTalk, WeCom, and Telegram." },
-      { slug: "mobile", title: "Mobile", summary: "Follow and steer your team's work from your phone." },
+      { slug: "cloud", title: "Multica Cloud", summary: "The hosted workspace for your human and agent team.", tagline: "The hosted team workspace" },
+      { slug: "desktop", title: "Multica Desktop", summary: "A native app for macOS, Windows, and Linux.", tagline: "Native app for every desktop" },
+      { slug: "cli", title: "Multica CLI", summary: "Connect your machine and run agents from the terminal.", tagline: "Run agents from your terminal" },
+      { slug: "chat", title: "Chat integrations", summary: "Work with agents from Slack, Lark, DingTalk, WeCom, and Telegram.", tagline: "Slack, Lark, Telegram, and more" },
+      { slug: "mobile", title: "Mobile", summary: "Follow and steer your team's work from your phone.", tagline: "Steer work from your phone" },
     ],
   },
   {
     title: "Workforce",
     pages: [
-      { slug: "agents", title: "Agents", summary: "Coding agents that take issues, report progress, and open PRs." },
-      { slug: "squads", title: "Squads", summary: "A leader agent that routes work across a team." },
-      { slug: "skills", title: "Skills", summary: "Reusable know-how every agent on the team can use." },
-      { slug: "autopilots", title: "Autopilots", summary: "Recurring work that runs on a schedule." },
-      { slug: "workflows", title: "Workflows", summary: "The steps a project's issues follow, and who owns each one." },
+      { slug: "agents", title: "Agents", summary: "Coding agents that take issues, report progress, and open PRs.", tagline: "Take issues and open PRs" },
+      { slug: "squads", title: "Squads", summary: "A leader agent that routes work across a team.", tagline: "A lead agent routes the work" },
+      { slug: "skills", title: "Skills", summary: "Reusable know-how every agent on the team can use.", tagline: "Know-how shared by every agent" },
+      { slug: "autopilots", title: "Autopilots", summary: "Recurring work that runs on a schedule.", tagline: "Recurring work on a schedule" },
+      { slug: "workflows", title: "Workflows", summary: "The steps a project's issues follow, and who owns each one.", tagline: "Steps and owners for each issue" },
     ],
   },
   {
     title: "Platform",
     pages: [
-      { slug: "issues", title: "Issues & Projects", summary: "One board for work done by people and agents." },
-      { slug: "runtimes", title: "Runtimes", summary: "Local and cloud compute for your agents, in one panel." },
-      { slug: "self-hosting", title: "Self-hosting", summary: "Run Multica on infrastructure you control." },
-      { slug: "integrations", title: "Integrations", summary: "GitHub, GitLab, and the tools your team already uses." },
-      { slug: "analytics", title: "Analytics", summary: "See what your agents shipped and what it cost." },
-      { slug: "api", title: "API & SDK", summary: "Build on Multica from your own code." },
+      { slug: "issues", title: "Issues & Projects", summary: "One board for work done by people and agents.", tagline: "One board for people and agents" },
+      { slug: "runtimes", title: "Runtimes", summary: "Local and cloud compute for your agents, in one panel.", tagline: "Local and cloud compute" },
+      { slug: "self-hosting", title: "Self-hosting", summary: "Run Multica on infrastructure you control.", tagline: "Your servers, your control" },
+      { slug: "integrations", title: "Integrations", summary: "GitHub, GitLab, and the tools your team already uses.", tagline: "GitHub, GitLab, and your tools" },
+      { slug: "analytics", title: "Analytics", summary: "See what your agents shipped and what it cost.", tagline: "What agents shipped and cost" },
+      { slug: "api", title: "API & SDK", summary: "Build on Multica from your own code.", tagline: "Build on Multica in code" },
     ],
   },
 ];
@@ -61,33 +63,33 @@ export const SOLUTION_GROUPS: PageGroup[] = [
   {
     title: "Use cases",
     pages: [
-      { slug: "software-delivery", title: "Software delivery", summary: "From issue to merged PR with agents doing the legwork." },
-      { slug: "code-review", title: "Code review", summary: "Every PR gets a careful first review." },
-      { slug: "bug-triage", title: "Bug triage & on-call", summary: "Agents that pick up alerts and propose fixes." },
-      { slug: "data-analysis", title: "Data analysis", summary: "A data analyst that answers questions around the clock." },
+      { slug: "software-delivery", title: "Software delivery", summary: "From issue to merged PR with agents doing the legwork.", tagline: "From issue to merged PR" },
+      { slug: "code-review", title: "Code review", summary: "Every PR gets a careful first review.", tagline: "A careful first pass on every PR" },
+      { slug: "bug-triage", title: "Bug triage & on-call", summary: "Agents that pick up alerts and propose fixes.", tagline: "Alerts picked up, fixes proposed" },
+      { slug: "data-analysis", title: "Data analysis", summary: "A data analyst that answers questions around the clock.", tagline: "Answers around the clock" },
     ],
   },
   {
     title: "Teams",
     pages: [
-      { slug: "engineering", title: "Engineering", summary: "Ship more with the same headcount." },
-      { slug: "product-teams", title: "Product", summary: "Turn specs into working software faster." },
-      { slug: "operations", title: "Operations", summary: "Hand routine operational work to agents." },
-      { slug: "agencies", title: "Agencies", summary: "Deliver more client work with a hybrid team." },
+      { slug: "engineering", title: "Engineering", summary: "Ship more with the same headcount.", tagline: "Ship more with the same team" },
+      { slug: "product-teams", title: "Product", summary: "Turn specs into working software faster.", tagline: "Specs into working software" },
+      { slug: "operations", title: "Operations", summary: "Hand routine operational work to agents.", tagline: "Hand off routine ops work" },
+      { slug: "agencies", title: "Agencies", summary: "Deliver more client work with a hybrid team.", tagline: "More client work, same team" },
     ],
   },
   {
     title: "Company",
     pages: [
-      { slug: "startups", title: "Startups", summary: "Move like a team ten times your size." },
-      { slug: "enterprise", title: "Enterprise", summary: "Security, control, and support for large organizations." },
+      { slug: "startups", title: "Startups", summary: "Move like a team ten times your size.", tagline: "Move like a bigger team" },
+      { slug: "enterprise", title: "Enterprise", summary: "Security, control, and support for large organizations.", tagline: "Security, control, and support" },
     ],
   },
   {
     title: "Programs",
     pages: [
-      { slug: "open-source", title: "Open source", summary: "Multica for open-source maintainers." },
-      { slug: "partners", title: "Partners", summary: "Build, resell, or implement Multica with us." },
+      { slug: "open-source", title: "Open source", summary: "Multica for open-source maintainers.", tagline: "For open-source maintainers" },
+      { slug: "partners", title: "Partners", summary: "Build, resell, or implement Multica with us.", tagline: "Build, resell, or implement" },
     ],
   },
 ];
@@ -117,7 +119,7 @@ export const productHref = (slug: string) => `/product/${slug}`;
 export const solutionHref = (slug: string) => `/solutions/${slug}`;
 
 const toLinks = (pages: SitePage[], href: (slug: string) => string): SiteLink[] =>
-  pages.map((page) => ({ label: page.title, href: href(page.slug) }));
+  pages.map((page) => ({ label: page.title, href: href(page.slug), description: page.tagline }));
 
 export function findPage(groups: PageGroup[], slug: string): SitePage | undefined {
   return groups.flatMap((group) => group.pages).find((page) => page.slug === slug);

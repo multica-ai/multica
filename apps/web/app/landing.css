@@ -45,6 +45,7 @@
 
     --container-site: var(--site-container);
     --spacing-site-gutter: var(--site-gutter);
+    --spacing-site-gutter-hero: var(--site-gutter-hero);
     --spacing-site-header: var(--site-header);
     --spacing-site-hero: var(--site-hero);
     --spacing-site-section: var(--site-section);
@@ -57,6 +58,7 @@
     --spacing-site-control: var(--site-control);
 
     --shadow-site-float: var(--site-shadow-float);
+    --shadow-site-menu: var(--site-shadow-menu);
 
     --font-site-sans: var(--site-font-sans);
     --font-site-display: var(--site-font-display);
@@ -135,7 +137,9 @@
     --site-radius-panel: 16px;
 
     --site-container: 87.5rem;
+    /* Sections sit inside a wider gutter than the header and hero on desktop. */
     --site-gutter: 1.25rem;
+    --site-gutter-hero: 1.25rem;
     --site-header: 3.25rem;
     --site-hero: 3rem;
     --site-section: 4.5rem;
@@ -148,11 +152,13 @@
     --site-control: 2.625rem;
 
     --site-shadow-float: 0 1px 2px rgb(15 23 42 / 0.04), 0 6px 16px -6px rgb(15 23 42 / 0.08);
+    --site-shadow-menu: 0 2px 6px -2px rgb(15 23 42 / 0.06), 0 16px 40px -12px rgb(15 23 42 / 0.16);
 }
 
 @media (min-width: 64rem) {
     .landing-light {
-        --site-gutter: 3.75rem;
+        --site-gutter: clamp(5rem, 8vw, 7.5rem);
+        --site-gutter-hero: 3.75rem;
         --site-hero: 4rem;
         --site-section: 7rem;
         --site-grid-row: 3.75rem;
@@ -177,14 +183,14 @@
     background-position: 8px 8px;
 }
 
-/* Page frame: on wide screens two hairline rails run down the page halfway
-   into the gutter, and a dot marks each place a section's top hairline
-   crosses them. `100%` resolves against each full-bleed box, so the rails
-   and dots land on the same x. The 1px border sits just above the padding
-   box the dots are placed in. */
+/* Page frame: on wide screens two hairline rails run down the page on the
+   hero's content edges, outside the narrower section content, and a dot
+   marks each place a section's top hairline crosses them. `100%` resolves
+   against each full-bleed box, so the rails and dots land on the same x. The
+   1px border sits just above the padding box the dots are placed in. */
 @media (min-width: 64rem) {
     .site-rails {
-        --site-rail: calc((100% - min(100%, var(--site-container))) / 2 + var(--site-gutter) / 2);
+        --site-rail: calc((100% - min(100%, var(--site-container))) / 2 + var(--site-gutter-hero));
         position: relative;
     }
 

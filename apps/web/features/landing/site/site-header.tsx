@@ -1,8 +1,8 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, type RefObject } from "react";
 import Link from "next/link";
-import { ChevronDown, Menu, X } from "lucide-react";
+import { ArrowUpRight, ChevronDown, Menu, X } from "lucide-react";
 import { Sheet, SheetContent, SheetTitle } from "@multica/ui/components/ui/sheet";
 import { cn } from "@multica/ui/lib/utils";
 import { useAuthStore } from "@multica/core/auth";
@@ -12,7 +12,7 @@ import { formatStarCount, useGithubStars } from "../utils/use-github-stars";
 import { GitHubMark, githubUrl } from "../components/shared";
 import { BrandLogo } from "./brand-logo";
 import { ActionLink, SiteTextLink, focusRing } from "./primitives";
-import { TOP_LINKS, buildMenus, type SiteMenu, type SiteMenuId } from "./sitemap";
+import { TOP_LINKS, buildMenus, type SiteLink, type SiteLinkGroup, type SiteMenu, type SiteMenuId } from "./sitemap";
 
 const HOVER_OPEN_DELAY = 60;
 const HOVER_CLOSE_DELAY = 140;
@@ -66,10 +66,21 @@ export function SiteHeader() {
 
   const openMenu = menus.find((menu) => menu.id === openId) ?? null;
   // The panel stays mounted so it can animate out; it keeps showing the last
-  // menu while it fades.
+  // menu while it fades. Moving straight from one menu to another slides the
+  // open panel over instead of reopening it.
   const [lastId, setLastId] = useState<SiteMenuId>(menus[0]!.id);
-  if (openId && openId !== lastId) setLastId(openId);
+  const [prevOpenId, setPrevOpenId] = useState<SiteMenuId | null>(null);
+  const [switchDir, setSwitchDir] = useState(0);
+  if (openId !== prevOpenId) {
+    setPrevOpenId(openId);
+    if (openId) {
+      const index = (id: SiteMenuId) => menus.findIndex((menu) => menu.id === id);
+      setSwitchDir(prevOpenId ? Math.sign(index(openId) - index(prevOpenId)) : 0);
+      setLastId(openId);
+    }
+  }
   const panelMenu = openMenu ?? menus.find((menu) => menu.id === lastId) ?? menus[0]!;
+  const barRef = useRef<HTMLDivElement>(null);
   const ctaLabel = user ? "Dashboard" : "Get started";
 
   return (
@@ -78,7 +89,7 @@ export function SiteHeader() {
       <header
         className={cn(
           "sticky top-0 z-40 border-b bg-site-canvas transition-colors",
-          scrolled || openMenu ? "border-site-line" : "border-transparent",
+          scrolled ? "border-site-line" : "border-transparent",
         )}
         onPointerLeave={(event) => {
           if (event.pointerType === "mouse") scheduleOpen(null, HOVER_CLOSE_DELAY);
@@ -93,7 +104,10 @@ export function SiteHeader() {
           if (!event.currentTarget.contains(event.relatedTarget as Node | null)) close();
         }}
       >
-        <div className="mx-auto flex h-site-header w-full max-w-site items-center justify-between gap-6 px-site-gutter">
+        <div
+          ref={barRef}
+          className="relative mx-auto flex h-site-header w-full max-w-site items-center justify-between gap-6 px-site-gutter-hero"
+        >
           <div className="flex min-w-0 items-center gap-8">
             <Link
               href="/"
@@ -180,21 +194,17 @@ export function SiteHeader() {
               <Menu className="size-5" aria-hidden />
             </button>
           </div>
+
+          <MenuPanel
+            menu={panelMenu}
+            open={openMenu != null}
+            switchDir={switchDir}
+            barRef={barRef}
+            triggerRefs={triggerRefs}
+            onNavigate={() => close()}
+          />
         </div>
-
-        <MegaPanel menu={panelMenu} open={openMenu != null} onNavigate={() => close()} />
       </header>
-
-      <div
-        aria-hidden
-        data-open={openMenu != null}
-        onClick={() => close()}
-        className={cn(
-          "fixed inset-x-0 top-site-header bottom-0 z-30 hidden bg-site-canvas/40 backdrop-blur-[2px] lg:block",
-          menuMotion,
-          openMenu ? "opacity-100" : "pointer-events-none opacity-0",
-        )}
-      />
 
       <MobileMenu
         open={mobileOpen}
@@ -213,66 +223,149 @@ const navItemClassName = cn(
   focusRing,
 );
 
-// Enter eases out over 200ms; exit is quicker and quieter. Switching menus
-// resizes the open panel and cross-fades its content.
-const menuMotion = cn(
-  "transition-[opacity,translate] duration-150 ease-in",
-  "data-[open=true]:duration-200 data-[open=true]:ease-[cubic-bezier(0.32,0.72,0,1)]",
-  "motion-reduce:transition-none",
-);
+const EASE_OUT = "ease-[cubic-bezier(0.32,0.72,0,1)]";
 
-function MegaPanel({ menu, open, onNavigate }: { menu: SiteMenu; open: boolean; onNavigate: () => void }) {
+// A dropdown under its trigger: it opens with a short fade and scale from the
+// trigger and closes faster. Moving to another menu slides and resizes the
+// open panel while the new content fades in from that side.
+function MenuPanel({
+  menu,
+  open,
+  switchDir,
+  barRef,
+  triggerRefs,
+  onNavigate,
+}: {
+  menu: SiteMenu;
+  open: boolean;
+  switchDir: number;
+  barRef: RefObject<HTMLDivElement | null>;
+  triggerRefs: RefObject<Map<SiteMenuId, HTMLButtonElement>>;
+  onNavigate: () => void;
+}) {
+  const wrapRef = useRef<HTMLDivElement>(null);
+  const cardRef = useRef<HTMLDivElement>(null);
   const contentRef = useRef<HTMLDivElement>(null);
-  const [height, setHeight] = useState<number | null>(null);
+  const sliding = open && switchDir !== 0;
 
-  useEffect(() => {
-    const content = contentRef.current;
-    if (!content) return;
-    const observer = new ResizeObserver(() => setHeight(content.offsetHeight));
-    observer.observe(content);
-    return () => observer.disconnect();
-  }, []);
+  useLayoutEffect(() => {
+    const place = () => {
+      const bar = barRef.current;
+      const wrap = wrapRef.current;
+      const card = cardRef.current;
+      const content = contentRef.current;
+      const trigger = triggerRefs.current.get(menu.id);
+      if (!bar || !wrap || !card || !content || !trigger) return;
+      const barRect = bar.getBoundingClientRect();
+      const triggerRect = trigger.getBoundingClientRect();
+      const inset = parseFloat(getComputedStyle(bar).paddingLeft) || 0;
+      const width = content.offsetWidth;
+      const center = triggerRect.left + triggerRect.width / 2 - barRect.left;
+      const left = Math.max(inset, Math.min(center - width / 2, barRect.width - Math.min(inset, 16) - width));
+      wrap.style.left = `${left}px`;
+      card.style.width = `${width}px`;
+      card.style.height = `${content.offsetHeight}px`;
+      card.style.transformOrigin = `${center - left}px top`;
+    };
+    place();
+    const observer = new ResizeObserver(place);
+    if (contentRef.current) observer.observe(contentRef.current);
+    window.addEventListener("resize", place);
+    return () => {
+      observer.disconnect();
+      window.removeEventListener("resize", place);
+    };
+  }, [menu.id, barRef, triggerRefs]);
 
   return (
     <div
+      ref={wrapRef}
       id={`site-menu-${menu.id}`}
-      data-open={open}
       inert={!open}
-      style={height == null ? undefined : { height }}
       className={cn(
-        "absolute inset-x-0 top-full hidden overflow-hidden border-b border-site-line bg-site-canvas lg:block",
-        menuMotion,
-        open ? "translate-y-0 opacity-100" : "pointer-events-none -translate-y-1 opacity-0",
-        open && "transition-[opacity,translate,height] motion-reduce:transition-none",
+        "absolute top-full hidden pt-2 lg:block",
+        !open && "pointer-events-none",
+        sliding && `transition-[left] duration-300 ${EASE_OUT} motion-reduce:transition-none`,
       )}
     >
-      <div ref={contentRef}>
+      <div
+        ref={cardRef}
+        className={cn(
+          "overflow-hidden rounded-site-card border border-site-line bg-site-surface shadow-site-menu",
+          "transition-[opacity,scale,translate] motion-reduce:transition-none",
+          open
+            ? `translate-y-0 scale-100 opacity-100 duration-200 ${EASE_OUT}`
+            : "-translate-y-1 scale-[0.97] opacity-0 duration-150 ease-in",
+          sliding && "transition-[opacity,scale,translate,width,height] duration-300",
+        )}
+      >
         <div
+          ref={contentRef}
           key={menu.id}
-          className="mx-auto grid w-full max-w-site grid-cols-5 gap-8 px-site-gutter pt-6 pb-10 animate-in fade-in duration-200 motion-reduce:animate-none"
+          className={cn(
+            "flex w-max gap-5 p-4 xl:gap-6",
+            sliding && "animate-in fade-in duration-300 motion-reduce:animate-none",
+            switchDir > 0 && "slide-in-from-right-6",
+            switchDir < 0 && "slide-in-from-left-6",
+          )}
         >
-          {menu.groups.map((group) => (
-            <div key={group.title}>
-              <p className="text-site-small text-site-muted">{group.title}</p>
-              <ul className="mt-3 flex flex-col">
-                {group.links.map((link) => (
-                  <li key={`${group.title}-${link.label}`}>
-                    <SiteTextLink
-                      href={link.href}
-                      external={link.external}
-                      onClick={onNavigate}
-                      className="py-1.5 text-site-body text-site-ink hover:text-site-ink-secondary"
-                    >
-                      {link.label}
-                    </SiteTextLink>
-                  </li>
-                ))}
-              </ul>
+          {menuColumns(menu.groups).map((column) => (
+            <div
+              key={column[0]!.title}
+              className={cn(
+                "flex flex-col gap-4",
+                column.some((group) => group.links.some((link) => link.description)) ? "w-56" : "min-w-28 whitespace-nowrap",
+              )}
+            >
+              {column.map((group) => (
+                <div key={group.title}>
+                  <p className="px-2 pt-1 text-[0.8125rem] text-site-muted">{group.title}</p>
+                  <ul className="mt-2 flex flex-col">
+                    {group.links.map((link) => (
+                      <li key={`${group.title}-${link.label}`}>
+                        <MenuLink link={link} onNavigate={onNavigate} />
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              ))}
             </div>
           ))}
         </div>
       </div>
     </div>
+  );
+}
+
+/** Groups of two links or fewer share a column with the next short group. */
+function menuColumns(groups: SiteLinkGroup[]): SiteLinkGroup[][] {
+  const columns: SiteLinkGroup[][] = [];
+  for (const group of groups) {
+    const last = columns.at(-1);
+    if (last?.length === 1 && last[0]!.links.length <= 2 && group.links.length <= 2) last.push(group);
+    else columns.push([group]);
+  }
+  return columns;
+}
+
+function MenuLink({ link, onNavigate }: { link: SiteLink; onNavigate: () => void }) {
+  return (
+    <Link
+      href={link.href}
+      onClick={onNavigate}
+      {...(link.external ? { target: "_blank", rel: "noreferrer" } : {})}
+      className={cn("block rounded-site-inner px-2 py-1.5 transition-colors hover:bg-site-hover", focusRing)}
+    >
+      <span className="flex items-center gap-1 text-site-small text-site-ink">
+        {link.label}
+        {link.external ? <ArrowUpRight className="size-3.5 text-site-muted" aria-hidden /> : null}
+      </span>
+      {link.description ? (
+        <span className="mt-0.5 block text-[0.8125rem] leading-snug text-site-muted text-pretty">
+          {link.description}
+        </span>
+      ) : null}
+    </Link>
   );
 }
 
