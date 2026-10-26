@@ -201,7 +201,6 @@ describe("Board drag with nested sub-issues", () => {
               <BoardView
                 issues={ISSUES}
                 visibleStatuses={["todo", "done"]}
-                hiddenStatuses={[]}
                 onMoveIssue={onMoveIssue}
               />
             </IssueContextMenuProvider>

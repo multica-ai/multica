@@ -155,7 +155,6 @@ describe("Board sub-issue nesting", () => {
             <BoardView
               issues={ISSUES}
               visibleStatuses={["todo", "done"]}
-              hiddenStatuses={[]}
               onMoveIssue={() => {}}
             />
           </IssueContextMenuProvider>
