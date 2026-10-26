@@ -140,7 +140,7 @@
     --site-block: 2.5rem;
     --site-stack: 0.5rem;
     --site-grid-row: 3rem;
-    --site-grid-col: 0.5rem;
+    --site-grid-col: 1.25rem;
     --site-step: 4rem;
     --site-control-sm: 1.75rem;
     --site-control: 2.625rem;
@@ -154,6 +154,7 @@
         --site-hero: 4rem;
         --site-section: 7rem;
         --site-grid-row: 3.75rem;
+        --site-grid-col: 2rem;
         --site-step: 7.5rem;
     }
 }
@@ -219,7 +220,8 @@
 }
 
 /* Feature and story cards: a frosted field per card — a heavily blurred crop of one of
-   the brand illustrations — with film grain blended over it. The grain tile
+   the brand illustrations for features, a pale warm wash for the before-and-after
+   stage so it stays behind the product — with film grain blended over it. The grain tile
    is drawn at 1:1 device pixels and never smoothed, so it stays fine. Content
    inside must be positioned to paint above the grain. */
 .site-frost {

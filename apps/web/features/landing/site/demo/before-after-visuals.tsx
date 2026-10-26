@@ -431,7 +431,7 @@ const WAIT = "repeating-linear-gradient(135deg, var(--site-line-strong) 0 1px, t
 const TRACK: { step: string; owner: Actor; wait?: [number, number]; work: [number, number] }[] = [
   { step: "Analyze", owner: MIA, work: [0, 1] },
   { step: "Fix", owner: LEO, wait: [1, 2], work: [2, 5] },
-  { step: "Evaluate", owner: SAM, wait: [5, 6], work: [6, 7] },
+  { step: "Test", owner: SAM, wait: [5, 6], work: [6, 7] },
   { step: "Release", owner: SAM, wait: [7, 8], work: [8, 9] },
 ];
 
@@ -510,7 +510,7 @@ export function PipelineBefore() {
 const STAGES: { step: string; actor: Actor; when: string; human?: boolean }[] = [
   { step: "Analyze", actor: RESEARCH, when: "Day 1" },
   { step: "Fix", actor: BACKEND, when: "Day 1" },
-  { step: "Evaluate", actor: QA, when: "Day 2" },
+  { step: "Test", actor: QA, when: "Day 2" },
   { step: "Approve", actor: MIA, when: "Day 3", human: true },
   { step: "Ship", actor: BACKEND, when: "Day 3" },
 ];
@@ -518,7 +518,7 @@ const STAGES: { step: string; actor: Actor; when: string; human?: boolean }[] = 
 const ACTIVITY: { actor: Actor; when: string; text: ReactNode }[] = [
   { actor: RESEARCH, when: "Day 1 · 09:20", text: "Found the cause and handed the issue to Fix." },
   { actor: BACKEND, when: "Day 1 · 15:05", text: "Opened a pull request. Checks are passing." },
-  { actor: QA, when: "Day 2 · 11:40", text: "Ran 1,204 eval cases with no regressions." },
+  { actor: QA, when: "Day 2 · 11:40", text: "Ran 1,204 test cases with no regressions." },
   {
     actor: MIA,
     when: "Day 3 · 10:30",

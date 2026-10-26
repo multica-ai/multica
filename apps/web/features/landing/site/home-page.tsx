@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState, type ComponentType, type CSSProperties, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ComponentType, type CSSProperties } from "react";
 import Link from "next/link";
 import { ArrowRight, Check, ChevronsLeftRight } from "lucide-react";
 import { cn } from "@multica/ui/lib/utils";
@@ -262,10 +262,12 @@ function FeatureCard({ id, title, body, visual: Visual, alt }: (typeof FEATURES)
   );
 }
 
+type Outcome = { value: string; caption: string };
+
 const STORIES: {
   id: string;
   title: string;
-  metric: [string, string];
+  outcomes: [Outcome, Outcome];
   before: string;
   after: string;
   scenes: [ComponentType, ComponentType];
@@ -273,7 +275,10 @@ const STORIES: {
   {
     id: "board",
     title: "Thirty agents, thirty tabs",
-    metric: ["30 tabs", "1 board"],
+    outcomes: [
+      { value: "30 tabs", caption: "to check for the agent that’s stuck" },
+      { value: "1 inbox", caption: "tells you which agent needs you" },
+    ],
     before: "Every agent runs in its own terminal tab, and a question waits in the one you aren’t watching.",
     after: "All their work sits on one board, and anything waiting on you lands in your inbox.",
     scenes: [TabsBefore, TabsAfter],
@@ -281,7 +286,10 @@ const STORIES: {
   {
     id: "digest",
     title: "The work nobody has time to do",
-    metric: ["Spot checks", "every conversation"],
+    outcomes: [
+      { value: "2%", caption: "of support conversations get read" },
+      { value: "100%", caption: "read every night by an agent" },
+    ],
     before: "Someone spot-checks a few dozen support conversations a day. The rest are never read.",
     after: "An autopilot reads every one overnight and files what needs fixing. You review the digest in the morning.",
     scenes: [DigestBefore, DigestAfter],
@@ -289,12 +297,17 @@ const STORIES: {
   {
     id: "pipeline",
     title: "A process that waits on people",
-    metric: ["About 2 weeks", "about 3 days"],
+    outcomes: [
+      { value: "9 days", caption: "per fix, 4 of them spent waiting" },
+      { value: "3 days", caption: "agents hand off, people approve" },
+    ],
     before: "Each step of a fix waits for someone to notice it’s their turn.",
     after: "Agents hand each step to the next, and people step in only to approve.",
     scenes: [PipelineBefore, PipelineAfter],
   },
 ];
+
+const OUTCOME_LABELS = ["Before", "With Multica"] as const;
 
 function BeforeAfter() {
   const [active, setActive] = useState(0);
@@ -305,9 +318,9 @@ function BeforeAfter() {
       <Container>
         <SectionHeader
           title="What changes when agents join your team"
-          lead="Three stories from teams that moved their agent work into Multica. Drag to compare."
+          lead="Three stories from teams that moved their agent work into Multica."
         />
-        <div className="mt-site-block grid gap-8 xl:grid-cols-[minmax(0,21rem)_minmax(0,1fr)] xl:gap-14">
+        <div className="mt-site-block grid gap-8 xl:grid-cols-[minmax(0,19rem)_minmax(0,1fr)] xl:gap-14">
           <ol className="order-2 flex flex-col xl:order-1">
             {STORIES.map((item, index) => {
               const selected = index === active;
@@ -324,41 +337,37 @@ function BeforeAfter() {
                     type="button"
                     aria-pressed={selected}
                     onClick={() => setActive(index)}
-                    className={cn("group w-full py-5 text-left", focusRing)}
+                    className={cn(
+                      "w-full py-5 text-left text-site-card transition-colors",
+                      selected ? "text-site-ink" : "text-site-muted hover:text-site-ink",
+                      focusRing,
+                    )}
                   >
-                    <span
-                      className={cn(
-                        "block text-site-card transition-colors",
-                        selected ? "text-site-ink" : "text-site-muted group-hover:text-site-ink",
-                      )}
-                    >
-                      {item.title}
-                    </span>
-                    <span className="mt-1.5 block font-site-mono text-site-small text-site-muted tabular-nums">
-                      {item.metric[0]} <span aria-hidden>→</span>
-                      <span className="sr-only">to</span> <span className={cn(selected && "text-site-ink")}>{item.metric[1]}</span>
-                    </span>
-                    <span
-                      className={cn(
-                        "grid transition-[grid-template-rows,opacity] duration-500 ease-out motion-reduce:transition-none",
-                        selected ? "grid-rows-[1fr] opacity-100" : "grid-rows-[0fr] opacity-0",
-                      )}
-                    >
-                      <span className="flex flex-col gap-2 overflow-hidden text-site-body text-site-muted">
-                        <span className="pt-3">
-                          <span className="text-site-ink">Before.</span> {item.before}
-                        </span>
-                        <span>
-                          <span className="text-site-ink">With Multica.</span> {item.after}
-                        </span>
-                      </span>
-                    </span>
+                    {item.title}
                   </button>
                 </li>
               );
             })}
           </ol>
-          <CompareStage key={story.id} story={story} className="order-1 xl:order-2" />
+          <div className="order-1 xl:order-2">
+            <dl className="grid grid-cols-2">
+              {story.outcomes.map((outcome, index) => (
+                <div key={OUTCOME_LABELS[index]} className={index === 0 ? "pr-4 sm:pr-6" : "border-l border-site-line pl-4 sm:pl-6"}>
+                  <dt className="text-site-small text-site-muted">{OUTCOME_LABELS[index]}</dt>
+                  <dd
+                    className={cn(
+                      "mt-2 font-site-display text-site-heading tabular-nums",
+                      index === 0 ? "text-site-muted" : "text-site-ink",
+                    )}
+                  >
+                    {outcome.value}
+                  </dd>
+                  <dd className="mt-1.5 text-site-small text-site-muted text-pretty">{outcome.caption}</dd>
+                </div>
+              ))}
+            </dl>
+            <CompareStage key={story.id} story={story} className="mt-6 sm:mt-8" />
+          </div>
         </div>
       </Container>
     </Section>
@@ -416,7 +425,6 @@ function CompareStage({ story, className }: { story: (typeof STORIES)[number]; c
             <After />
           </ZoomCanvas>
         </div>
-        <StageLabel className="right-2.5 sm:right-4">With Multica</StageLabel>
       </div>
       <div
         className={cn("absolute inset-0", motion)}
@@ -428,7 +436,6 @@ function CompareStage({ story, className }: { story: (typeof STORIES)[number]; c
             <Before />
           </ZoomCanvas>
         </div>
-        <StageLabel className="left-2.5 sm:left-4">Before</StageLabel>
       </div>
       <input
         type="range"
@@ -457,19 +464,6 @@ function CompareStage({ story, className }: { story: (typeof STORIES)[number]; c
         </span>
       </div>
     </div>
-  );
-}
-
-function StageLabel({ className, children }: { className: string; children: ReactNode }) {
-  return (
-    <span
-      className={cn(
-        "absolute top-2.5 rounded-site-control bg-site-surface px-2 py-0.5 text-caption text-site-ink shadow-site-float sm:top-4 sm:px-2.5 sm:py-1 sm:text-site-small",
-        className,
-      )}
-    >
-      {children}
-    </span>
   );
 }
 
