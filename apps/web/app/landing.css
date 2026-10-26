@@ -325,6 +325,17 @@
     }
 }
 
+/* Auto-advancing tabs: the active tab's rule fills, and its animationend
+   brings up the next tab. Set inline with a per-section duration. */
+@keyframes site-advance {
+    from {
+        scale: 0 1;
+    }
+    to {
+        scale: 1 1;
+    }
+}
+
 /* Logo wall: the track holds the list twice, so sliding it by half loops
    seamlessly. */
 @theme {

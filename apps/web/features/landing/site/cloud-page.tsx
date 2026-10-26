@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, type ComponentType, type ReactNode } from "react";
+import type { ComponentType, ReactNode } from "react";
 import { ArrowUpRight, Check, GitPullRequest, Laptop, ListOrdered, MessageSquareReply, Pause, type LucideIcon } from "lucide-react";
 import { cn } from "@multica/ui/lib/utils";
 import { useAuthStore } from "@multica/core/auth";
@@ -10,6 +10,7 @@ import { docsHrefForLocale, useLocale } from "../i18n";
 import { ActionLink, Container, Eyebrow, Section, SectionHeader, focusRing } from "./primitives";
 import { AssignVisual, CloudScene, ConnectVisual, LinkAgentVisual } from "./demo/cloud-visuals";
 import { CtaBand, SitePage } from "./site-page";
+import { AdvanceLine, useAutoAdvance } from "./auto-advance";
 
 export function CloudPage() {
   return (
@@ -91,13 +92,19 @@ const STEPS: { title: string; body: string; visual: ComponentType }[] = [
   },
 ];
 
+const STEP_HOLD = 5000;
+
 function Steps() {
-  const [active, setActive] = useState(0);
+  const cycle = useAutoAdvance(STEPS.length);
+  const active = cycle.active;
   return (
     <Section>
       <Container>
         <SectionHeader title="Set up in three steps" />
-        <div className="mt-site-block grid gap-8 lg:grid-cols-[minmax(0,1fr)_minmax(0,22rem)] lg:gap-14">
+        <div
+          ref={cycle.ref}
+          className="mt-site-block grid gap-8 lg:grid-cols-[minmax(0,1fr)_minmax(0,22rem)] lg:gap-14"
+        >
           <div className="site-visual relative h-[23rem] overflow-hidden rounded-site-panel sm:h-[26rem] lg:h-[30rem]">
             {STEPS.map((step, index) => (
               <div
@@ -115,22 +122,22 @@ function Steps() {
               </div>
             ))}
           </div>
-          <ol className="flex flex-col lg:justify-center">
+          <ol {...cycle.holdProps} className="flex flex-col lg:justify-center">
             {STEPS.map((step, index) => {
               const selected = index === active;
               return (
                 <li key={step.title} className="relative border-t border-site-line last:border-b">
-                  <span
-                    aria-hidden
-                    className={cn(
-                      "absolute -top-px left-0 h-px bg-site-ink transition-[width] duration-500 ease-out motion-reduce:transition-none",
-                      selected ? "w-full" : "w-0",
-                    )}
+                  <AdvanceLine
+                    selected={selected}
+                    playing={cycle.playing}
+                    running={cycle.running}
+                    duration={STEP_HOLD}
+                    onDone={cycle.advance}
                   />
                   <button
                     type="button"
                     aria-pressed={selected}
-                    onClick={() => setActive(index)}
+                    onClick={() => cycle.select(index)}
                     className={cn("group flex w-full gap-4 py-5 text-left", focusRing)}
                   >
                     <span className="pt-1 font-site-mono text-site-label text-site-muted tabular-nums">

@@ -33,6 +33,7 @@ import {
   TabsBefore,
 } from "./demo/before-after-visuals";
 import { CtaBand, SitePage } from "./site-page";
+import { AdvanceLine, useAutoAdvance } from "./auto-advance";
 import { PLACEHOLDER_PAGES } from "./sitemap";
 
 export function HomePage() {
@@ -426,9 +427,13 @@ const STORIES: {
 
 const OUTCOME_LABELS = ["Before", "With Multica"] as const;
 
+const STORY_ENTER = "animate-in fade-in duration-500 motion-reduce:animate-none";
+
+const STORY_HOLD = 8000;
+
 function BeforeAfter() {
-  const [active, setActive] = useState(0);
-  const story = STORIES[active]!;
+  const cycle = useAutoAdvance(STORIES.length);
+  const story = STORIES[cycle.active]!;
 
   return (
     <Section>
@@ -437,23 +442,26 @@ function BeforeAfter() {
           title="What changes when agents join your team"
           lead="Three stories from teams that moved their agent work into Multica."
         />
-        <div className="mt-site-block grid gap-8 xl:grid-cols-[minmax(0,19rem)_minmax(0,1fr)] xl:gap-14">
-          <ol className="order-2 flex flex-col xl:order-1">
+        <div
+          ref={cycle.ref}
+          className="mt-site-block grid gap-8 xl:grid-cols-[minmax(0,19rem)_minmax(0,1fr)] xl:gap-14"
+        >
+          <ol {...cycle.holdProps} className="order-2 flex flex-col xl:order-1">
             {STORIES.map((item, index) => {
-              const selected = index === active;
+              const selected = index === cycle.active;
               return (
                 <li key={item.id} className="relative border-t border-site-line last:border-b">
-                  <span
-                    aria-hidden
-                    className={cn(
-                      "absolute -top-px left-0 h-px bg-site-ink transition-[width] duration-500 ease-out motion-reduce:transition-none",
-                      selected ? "w-full" : "w-0",
-                    )}
+                  <AdvanceLine
+                    selected={selected}
+                    playing={cycle.playing}
+                    running={cycle.running}
+                    duration={STORY_HOLD}
+                    onDone={cycle.advance}
                   />
                   <button
                     type="button"
                     aria-pressed={selected}
-                    onClick={() => setActive(index)}
+                    onClick={() => cycle.select(index)}
                     className={cn(
                       "w-full py-5 text-left text-site-card transition-colors",
                       selected ? "text-site-ink" : "text-site-muted hover:text-site-ink",
@@ -466,7 +474,7 @@ function BeforeAfter() {
               );
             })}
           </ol>
-          <div className="order-1 xl:order-2">
+          <div key={story.id} className={cn("order-1 xl:order-2", STORY_ENTER)}>
             <dl className="grid grid-cols-2">
               {story.outcomes.map((outcome, index) => (
                 <div key={OUTCOME_LABELS[index]} className={index === 0 ? "pr-4 sm:pr-6" : "border-l border-site-line pl-4 sm:pl-6"}>
@@ -483,7 +491,7 @@ function BeforeAfter() {
                 </div>
               ))}
             </dl>
-            <CompareStage key={story.id} story={story} className="mt-6 sm:mt-8" />
+            <CompareStage story={story} onDrag={cycle.stop} className="mt-6 sm:mt-8" />
           </div>
         </div>
       </Container>
@@ -491,7 +499,7 @@ function BeforeAfter() {
   );
 }
 
-function CompareStage({ story, className }: { story: (typeof STORIES)[number]; className?: string }) {
+function CompareStage({ story, onDrag, className }: { story: (typeof STORIES)[number]; onDrag: () => void; className?: string }) {
   const [Before, After] = story.scenes;
   const ref = useRef<HTMLDivElement>(null);
   const [split, setSplit] = useState(100);
@@ -562,6 +570,7 @@ function CompareStage({ story, className }: { story: (typeof STORIES)[number]; c
         aria-label="Compare before and with Multica"
         aria-valuetext={`${split}% before`}
         onChange={(event) => {
+          onDrag();
           setSweeping(false);
           setSplit(Number(event.target.value));
         }}
