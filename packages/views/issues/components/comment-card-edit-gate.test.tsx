@@ -4,7 +4,7 @@ import { forwardRef, useEffect, useImperativeHandle, useRef, type ComponentProps
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import type { Attachment, TimelineEntry } from "@multica/core/types";
 import type { UploadResult } from "@multica/core/hooks/use-file-upload";
-import { useCommentDraftStore } from "@multica/core/issues/stores";
+import { useCommentDraftStore, useCommentComposerStore } from "@multica/core/issues/stores";
 import { renderWithI18n } from "../../test/i18n";
 
 const apiUploadFile = vi.hoisted(() => vi.fn());
@@ -413,5 +413,20 @@ describe("comment thread — selection reply", () => {
     });
     expect(useCommentDraftStore.getState().drafts["new:issue-1"]).toBe(taskDraft);
     expect(useCommentDraftStore.getState().getDraft("reply:issue-1:other-thread")).toBe("Other thread draft");
+  });
+
+  it("renders the reply input with sticky styling when sticky composer is enabled", () => {
+    useCommentComposerStore.setState({ sticky: true });
+    const { container } = renderCard();
+    const replyWrapper = container.querySelector(".sticky.bottom-0");
+    expect(replyWrapper).toBeInTheDocument();
+    expect(replyWrapper?.className).toContain("bg-card");
+  });
+
+  it("renders the reply input without sticky styling when sticky composer is disabled", () => {
+    useCommentComposerStore.setState({ sticky: false });
+    const { container } = renderCard();
+    const replyWrapper = container.querySelector(".sticky.bottom-0");
+    expect(replyWrapper).toBeNull();
   });
 });

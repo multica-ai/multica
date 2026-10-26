@@ -1284,6 +1284,29 @@ describe("sticky composer preference", () => {
     activateComposer("comment-composer-shell");
     expect(screen.getByTestId("editor").parentElement?.className).not.toContain("max-h-[40vh]");
   });
+
+  it("caps the reply editor height while sticky preference is on (default)", () => {
+    renderReplyInput();
+
+    activateComposer("reply-composer-shell");
+    expect(screen.getByTestId("editor").parentElement?.className).toContain("max-h-[40vh]");
+  });
+
+  it("lets the reply editor grow when sticky preference is off", () => {
+    useCommentComposerStore.setState({ sticky: false });
+    renderReplyInput();
+
+    activateComposer("reply-composer-shell");
+    expect(screen.getByTestId("editor").parentElement?.className).not.toContain("max-h-[40vh]");
+  });
+
+  it("lets the reply editor grow below mobile breakpoint", () => {
+    Object.defineProperty(window, "innerWidth", { configurable: true, value: 390 });
+    renderReplyInput();
+
+    activateComposer("reply-composer-shell");
+    expect(screen.getByTestId("editor").parentElement?.className).not.toContain("max-h-[40vh]");
+  });
 });
 
 describe.each(["reply", "description"])("annotations in %s drafts", (source) => {

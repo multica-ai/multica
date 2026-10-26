@@ -39,6 +39,7 @@ import { ReplyInput } from "./reply-input";
 import { CommentTriggerChips } from "./comment-trigger-chips";
 import { useCommentTriggerPreview } from "../hooks/use-comment-trigger-preview";
 import { useRecipientActions } from "../hooks/use-recipient-actions";
+import { useStickyComposer } from "../hooks/use-sticky-composer";
 import { SteerBadge, SteerReceipts } from "./steer-receipts";
 import type { AgentTask, TimelineEntry, Attachment } from "@multica/core/types";
 import { contentReferencesAttachment } from "@multica/core/types";
@@ -1039,6 +1040,7 @@ function CommentCardImpl({
   const timeAgo = useTimeAgo();
   const { getActorName } = useActorName();
   const replyTarget = useCommentDraftStore((s) => s.drafts[`reply:${issueId}:${entry.id}`]?.replyTarget);
+  const stickyComposer = useStickyComposer();
   const replyTargetId = replyTarget?.commentId ?? entry.id;
   // A deleted target's tombstone is as gone as a removed row.
   const replyTargetMissing = !!replyTarget && replyTargetId !== entry.id
@@ -1521,7 +1523,10 @@ function CommentCardImpl({
               {threadRows.map(renderThreadRow)}
 
               {/* Reply input */}
-              <div className="border-t border-border/50 px-4 max-md:px-3 py-2.5">
+              <div className={cn(
+                "border-t border-border/50 px-4 max-md:px-3 py-2.5",
+                stickyComposer && "sticky bottom-0 z-10 bg-card before:pointer-events-none before:absolute before:inset-x-0 before:bottom-full before:h-4 before:bg-gradient-to-t before:from-card before:to-transparent",
+              )}>
                 <ReplyInput
                   issueId={issueId}
                   parentId={replyTargetId}

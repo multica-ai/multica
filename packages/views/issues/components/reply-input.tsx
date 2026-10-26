@@ -22,6 +22,7 @@ import { SteerAttachmentNotice } from "./steer-attachment-notice";
 import { useStopRunsBeforeSend } from "./use-stop-runs-before-send";
 import { useCommentUploads } from "./use-comment-uploads";
 import { useQuickActionMenu } from "../hooks/use-quick-action-menu";
+import { useStickyComposer } from "../hooks/use-sticky-composer";
 
 // Types
 
@@ -126,6 +127,8 @@ function ReplyInput({
   const { isDragOver, dropZoneProps } = useFileDropZone({
     onDrop: lazy.uploadOrQueue,
   });
+  const sticky = useStickyComposer();
+
 
   // Flush on tab close / mobile background — same rationale as CommentInput.
   useEffect(() => {
@@ -254,6 +257,7 @@ function ReplyInput({
         <div
           className={cn(
             "flex-1 min-h-0 overflow-y-auto",
+            sticky && "max-h-[40vh]",
             submitting && "pointer-events-none opacity-60",
             !lazy.ready && "hidden",
           )}
