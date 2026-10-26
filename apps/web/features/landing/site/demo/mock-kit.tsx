@@ -1,7 +1,18 @@
 "use client";
 
 import { useEffect, useRef, useState, useSyncExternalStore, type ComponentType, type ReactNode } from "react";
-import { Bot, type LucideIcon } from "lucide-react";
+import {
+  BookOpenText,
+  Bot,
+  CircleUser,
+  FolderKanban,
+  Inbox,
+  ListTodo,
+  MessageSquare,
+  Monitor,
+  Zap,
+  type LucideIcon,
+} from "lucide-react";
 import { cn } from "@multica/ui/lib/utils";
 import { ActorAvatar } from "@multica/ui/components/common/actor-avatar";
 import { ShimmerText } from "@multica/ui/components/common/shimmer-text";
@@ -132,15 +143,66 @@ export function useStoryLoop(holds: readonly number[], still: number) {
 
 export const ENTER = "animate-in fade-in slide-in-from-bottom-1 duration-300 motion-reduce:animate-none";
 
-export function Window({ className, children }: { className: string; children: ReactNode }) {
+/** Elevation steps from the product: a card raised off a muted column, and a panel floating over the page. */
+export const RAISED = "rounded-lg border-[0.5px] border-surface-border bg-surface shadow-[var(--surface-shadow)]";
+export const FLOATING = "rounded-xl bg-background shadow-[var(--floating-shadow)] ring-1 ring-surface-border";
+
+const APP_NAV: { key: string; icon: LucideIcon; badge?: boolean }[] = [
+  { key: "inbox", icon: Inbox, badge: true },
+  { key: "mine", icon: CircleUser },
+  { key: "chat", icon: MessageSquare },
+  { key: "issues", icon: ListTodo },
+  { key: "projects", icon: FolderKanban },
+  { key: "autopilots", icon: Zap },
+  { key: "agents", icon: Bot },
+  { key: "skills", icon: BookOpenText },
+  { key: "runtimes", icon: Monitor },
+];
+
+/**
+ * The Multica app as a window, in the same two layers as the hero: the grey
+ * app shell with a collapsed sidebar, and the page on an inset panel. A
+ * window that runs off the right and bottom of its frame passes `bleed` (in
+ * px), and the page keeps its content out of the cropped strip so nothing is
+ * cut mid-word.
+ */
+export function AppWindow({
+  className,
+  active,
+  bleed = 0,
+  children,
+}: {
+  className: string;
+  active: string;
+  bleed?: number;
+  children: ReactNode;
+}) {
   return (
     <div
-      className={cn(
-        "absolute flex flex-col overflow-hidden rounded-xl border border-site-line-strong bg-background shadow-site-float",
-        className,
-      )}
+      className={cn("absolute flex overflow-hidden rounded-xl border border-site-line-strong bg-app-shell shadow-site-float", className)}
     >
-      {children}
+      <div className="flex w-11 shrink-0 flex-col items-center gap-1 py-2.5">
+        <span className="mb-1.5 flex size-6 items-center justify-center rounded-md bg-surface text-micro font-semibold shadow-[var(--surface-shadow)]">
+          A
+        </span>
+        {APP_NAV.map((item) => (
+          <span
+            key={item.key}
+            className={cn(
+              "relative flex size-7 shrink-0 items-center justify-center rounded-md",
+              item.key === active ? "bg-surface-selected text-foreground" : "text-muted-foreground",
+            )}
+          >
+            <item.icon className="size-3.5" />
+            {item.badge ? <span className="absolute top-1 right-1 size-1.5 rounded-full bg-brand" /> : null}
+          </span>
+        ))}
+      </div>
+      <div className="relative my-1.5 mr-1.5 flex min-w-0 flex-1 overflow-hidden rounded-lg border border-surface-border bg-background">
+        <div className="relative flex min-w-0 flex-1 flex-col" style={{ marginRight: bleed, marginBottom: bleed }}>
+          {children}
+        </div>
+      </div>
     </div>
   );
 }

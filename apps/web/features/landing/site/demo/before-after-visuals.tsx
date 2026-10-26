@@ -16,7 +16,9 @@ import { cn } from "@multica/ui/lib/utils";
 import { StatusIcon } from "@multica/views/issues/components/status-icon";
 import { GroupBand } from "./feature-visuals";
 import {
+  AppWindow,
   Avatar,
+  FLOATING,
   BACKEND,
   CONTENT,
   FRONTEND,
@@ -100,35 +102,11 @@ const PROMPT = "rounded bg-[#fdf3c4] px-1.5 py-1 whitespace-normal! text-[#6b5a1
 
 // --- After: the Multica app ---------------------------------------------------
 
-const NAV: { key: string; icon: LucideIcon; badge?: boolean }[] = [
-  { key: "inbox", icon: Inbox, badge: true },
-  { key: "mine", icon: CircleUser },
-  { key: "issues", icon: ListTodo },
-  { key: "agents", icon: Bot },
-  { key: "autopilots", icon: Zap },
-  { key: "runtimes", icon: Server },
-];
-
 function App({ active, children }: { active: string; children: ReactNode }) {
   return (
-    <div className="absolute top-[12%] right-[4%] -bottom-6 left-[52%] flex overflow-hidden rounded-xl border border-site-line-strong bg-background shadow-site-float">
-      <div className="flex w-11 shrink-0 flex-col items-center gap-1 border-r border-border bg-muted/40 py-2.5">
-        <span className="mb-1.5 flex size-6 items-center justify-center rounded-md bg-foreground text-micro font-semibold text-background">A</span>
-        {NAV.map((item) => (
-          <span
-            key={item.key}
-            className={cn(
-              "relative flex size-7 items-center justify-center rounded-md",
-              item.key === active ? "bg-accent text-foreground" : "text-muted-foreground",
-            )}
-          >
-            <item.icon className="size-3.5" />
-            {item.badge ? <span className="absolute top-1 right-1 size-1.5 rounded-full bg-brand" /> : null}
-          </span>
-        ))}
-      </div>
-      <div className="flex min-w-0 flex-1 flex-col">{children}</div>
-    </div>
+    <AppWindow className="top-[12%] right-[4%] -bottom-6 left-[52%]" active={active}>
+      {children}
+    </AppWindow>
   );
 }
 
@@ -143,7 +121,7 @@ function Side({ children }: { children: ReactNode }) {
 
 function Card({ icon: Icon, title, aside, children }: { icon?: LucideIcon; title: ReactNode; aside?: ReactNode; children: ReactNode }) {
   return (
-    <div className="rounded-xl border border-border bg-background p-3 shadow-site-float">
+    <div className={cn(FLOATING, "p-3")}>
       <p className="flex items-center gap-1.5 text-caption text-muted-foreground">
         {Icon ? <Icon className="size-3.5 shrink-0" /> : null}
         <span className="min-w-0 truncate">{title}</span>
