@@ -394,6 +394,7 @@
     }
   },
   "usage": {
+    "peak_range_hint": "DeepSeek Flash 的 token 费用按谷价至峰价显示估算区间，因为用量记录没有逐次调用的计费时段。已上报的费用保持原值，其他模型沿用现有估算。图表和单值明细采用区间下限；此区间并非账单。",
     "period_label": "时间范围",
     "dimension_label": "维度",
     "kpi_cost_label": "费用 · {{days}} 天",

@@ -407,6 +407,7 @@
     }
   },
   "usage": {
+    "peak_range_hint": "DeepSeek Flash token charges are estimated between off-peak and peak rates because usage has no per-call billing window. Reported charges stay fixed; other models keep their existing estimates. Charts and single-value breakdowns use the lower estimate. This range is not an invoice.",
     "period_label": "Period",
     "dimension_label": "Dimension",
     "kpi_cost_label": "Cost · {{days}}D",

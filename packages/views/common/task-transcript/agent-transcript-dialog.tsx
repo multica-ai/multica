@@ -96,9 +96,9 @@ import {
 } from "./detail-surfaces";
 import { languageForPath } from "./diff-highlight";
 import { useLocale, useT } from "../../i18n";
+import { CostEstimate } from "../../runtimes/components/cost-estimate";
 import {
   formatTokens,
-  formatUsd,
   summarizeTaskUsage,
 } from "../../runtimes/utils";
 import "../../editor/styles/code.css";
@@ -220,7 +220,7 @@ function RunDetailRow({
   copyTitle,
 }: {
   label: string;
-  value: string;
+  value: React.ReactNode;
   mono?: boolean;
   onCopy?: () => void;
   copied?: boolean;
@@ -912,7 +912,7 @@ export function AgentTranscriptDialog({
                 <Coins aria-hidden="true" className="h-3 w-3 text-muted-foreground" />
                 <span className="font-medium">{formatTokens(usage.tokens)}</span>
                 <span className="text-faint-foreground">·</span>
-                <span className="text-muted-foreground">{formatUsd(usage.cost)}</span>
+                <span className="text-muted-foreground"><CostEstimate usage={task.usage ?? []} /></span>
               </span>
             )}
 
@@ -1045,7 +1045,7 @@ export function AgentTranscriptDialog({
                           )}
                           <RunDetailRow
                             label={t(($) => $.transcript.details_cost)}
-                            value={formatUsd(usage.cost)}
+                            value={<CostEstimate usage={task.usage ?? []} />}
                           />
                         </>
                       )}

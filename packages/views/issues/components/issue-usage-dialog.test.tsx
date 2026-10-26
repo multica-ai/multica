@@ -56,6 +56,19 @@ beforeEach(() => {
 afterEach(cleanup);
 
 describe("IssueUsageDialog", () => {
+  it("shows the DSH peak/off-peak range in the total and run row with an explanation", () => {
+    open([makeTask({ usage: [usage({
+      provider: "dsh",
+      model: "deepseek-official/deepseek-flash",
+      input_tokens: 1_000_000,
+      output_tokens: 1_000_000,
+      cache_read_tokens: 1_000_000,
+    })] })]);
+
+    expect(screen.getAllByText("$0.75–$1.51")).toHaveLength(3);
+    expect(screen.getByText(/Charts and single-value breakdowns use the lower estimate/)).toBeInTheDocument();
+  });
+
   it("floors the cache hit rate instead of rounding it up to 100%", () => {
     // 99.55% — rounding would print "100% hit rate" and claim every token came
     // from cache on an issue that plainly read some fresh input.

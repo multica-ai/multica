@@ -36,6 +36,7 @@ import {
   formatTokens,
   todayIso,
 } from "../../runtimes/utils";
+import { CostEstimate, CostRangeNotice } from "../../runtimes/components/cost-estimate";
 import { useT } from "../../i18n";
 import {
   aggregateAgentFailures,
@@ -533,12 +534,17 @@ export function DashboardPage() {
               <DashboardEmpty />
             ) : (
               <>
+                <CostRangeNotice usage={dailyUsageInWindow} />
                 {/* KPI row — same 3-divide-x card grid the runtime usage
                     section uses, expanded to four tiles. */}
                 <div className="grid grid-cols-1 divide-y rounded-lg border bg-card sm:grid-cols-2 sm:divide-x sm:divide-y-0 lg:grid-cols-4">
                   <KpiCard
                     label={t(($) => $.kpi.cost_label, { days })}
-                    value={<CurrencyNumberFlow value={totals.cost} locales={locales} />}
+                    value={
+                      <CostEstimate usage={dailyUsageInWindow}>
+                        <CurrencyNumberFlow value={totals.cost} locales={locales} />
+                      </CostEstimate>
+                    }
                   />
                   <KpiCard
                     label={t(($) => $.kpi.tokens_label, { days })}

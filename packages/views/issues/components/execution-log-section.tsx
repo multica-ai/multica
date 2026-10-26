@@ -19,9 +19,9 @@ import { formatDuration } from "../../agents/components/agent-activity-hover-con
 import { TranscriptButton } from "../../common/task-transcript";
 import { cancelReasonLabel, failureReasonLabel } from "../../agents/components/tabs/task-failure";
 import { useT } from "../../i18n";
+import { CostEstimate } from "../../runtimes/components/cost-estimate";
 import {
   formatTokens,
-  formatUsd,
   summarizeTaskUsage,
   summarizeTaskUsageAcross,
 } from "../../runtimes/utils";
@@ -274,7 +274,7 @@ export function IssueUsageTotal({
           {formatTokens(total.tokens)}
         </span>
         <span className={`text-faint-foreground ${narrowTier}`}>·</span>
-        <span className="text-muted-foreground">{formatUsd(total.cost)}</span>
+        <span className="text-muted-foreground"><CostEstimate usage={tasks.flatMap((task) => task.usage ?? [])} /></span>
       </TooltipTrigger>
       <TooltipContent>{t(($) => $.execution_log.usage_total_tooltip)}</TooltipContent>
     </Tooltip>

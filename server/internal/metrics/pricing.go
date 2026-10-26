@@ -168,6 +168,9 @@ var modelAliasRules = []struct {
 	{regexp.MustCompile(`deepseek-v4-pro`), "deepseek:v4-pro"},
 	// DeepSeek V4.1 Flash's static row follows models.dev's published off-peak
 	// rate because usage records do not carry the peak/off-peak billing window.
+	// Peak token charges are 2x this estimate (Mon-Fri 01:00-04:00 and
+	// 06:00-10:00 UTC, excluding Chinese public holidays).
+	// Source: https://api-docs.deepseek.com/quick_start/pricing/
 	// Provider-qualified forms arrive from routed runtimes. Anchor the current
 	// ID so a future suffixed SKU cannot silently borrow this tier.
 	{regexp.MustCompile(`(^|/|:)deepseek-flash$`), "deepseek:flash"},

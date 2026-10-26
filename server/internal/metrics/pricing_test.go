@@ -15,6 +15,8 @@ func TestPriceForModelAliasDeepSeekFlash(t *testing.T) {
 		"deepseek-flash",
 		"deepseek/deepseek-flash",
 		"deepseek:deepseek-flash",
+		"deepseek-official/deepseek-flash",
+		"dsh/deepseek-official/deepseek-flash",
 	} {
 		got, ok := PriceForModelAlias(model)
 		if !ok {
@@ -22,6 +24,14 @@ func TestPriceForModelAliasDeepSeekFlash(t *testing.T) {
 		}
 		if got != want {
 			t.Fatalf("PriceForModelAlias(%q) = %+v, want %+v", model, got, want)
+		}
+	}
+}
+
+func TestDeepSeekFlashDoesNotBorrowPriceForUnknownSKU(t *testing.T) {
+	for _, model := range []string{"deepseek-flash-preview", "deepseek-official/deepseek-flash-extra", "not-deepseek-flash"} {
+		if _, ok := PriceForModelAlias(model); ok {
+			t.Errorf("PriceForModelAlias(%q) unexpectedly resolved", model)
 		}
 	}
 }

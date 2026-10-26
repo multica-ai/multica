@@ -255,7 +255,9 @@ const MODEL_PRICING: Record<
   // -- DeepSeek (api-docs.deepseek.com/quick_start/pricing; models.dev).
   //    `deepseek-flash` is the current V4.1 Flash ID. Its static row uses the
   //    published off-peak rate because usage records do not carry the billing
-  //    window. Retired IDs keep their existing rows for historical estimates.
+  //    window. Peak rates are 2x these rates: this estimate is 50% below
+  //    peak token charges. Peak: Mon-Fri 01:00-04:00 / 06:00-10:00 UTC,
+  //    excluding Chinese public holidays. Retired IDs retain historical rates.
   //    `deepseek-v4-pro` is currently under a 75%-off promo that ends
   //    2026-05-31 15:59 UTC; we price at the post-promo standard rate
   //    ($1.74/$3.48) so the dashboard does not jump 4× on June 1 — accept
@@ -670,6 +672,26 @@ export function estimateCost(usage: Priceable): number {
       uncosted.cacheWrite * pricing.cacheWrite) /
       1_000_000
   );
+}
+
+/** Bounds for token charges under the maintained tariff, not a provider bill.
+ * Aggregates carry no request billing windows. Keep provider-reported charges
+ * fixed and vary only the uncosted DeepSeek Flash portion. Other models retain
+ * their existing estimates; this is not a bound for every possible surcharge.
+ */
+export function estimateCostRange(rows: readonly Priceable[]): { min: number; max: number } {
+  let min = 0;
+  let max = 0;
+  for (const row of rows) {
+    const cost = estimateCost(row);
+    min += cost;
+    max += cost;
+    if (resolvePricing(row.model, row.provider) === MODEL_PRICING["deepseek-flash"]) {
+      const authoritative = (row.cost_usd_ticks ?? 0) / COST_USD_TICKS_PER_USD;
+      max += Math.max(0, cost - authoritative);
+    }
+  }
+  return { min, max };
 }
 
 export interface CostBreakdown {

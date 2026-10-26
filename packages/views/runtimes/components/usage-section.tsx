@@ -19,6 +19,7 @@ import {
 } from "@multica/core/runtimes/queries";
 import { useCustomPricingStore } from "@multica/core/runtimes/custom-pricing-store";
 import { useViewingTimezone } from "../../common/use-viewing-timezone";
+import { CostEstimate, CostRangeNotice } from "./cost-estimate";
 import {
   formatTokens,
   formatUsd,
@@ -223,16 +224,19 @@ export function UsageSection({ runtime }: { runtime: AgentRuntime }) {
           contribute $0 to totals. Stays reachable once every model is priced
           if the user has saved overrides, so those rates remain editable. */}
       <CustomPricingBar usage={filtered} />
+      <CostRangeNotice usage={filtered} />
 
       <div className="grid grid-cols-3 divide-x rounded-lg border bg-card">
         <KpiCard
           label={t(($) => $.usage.kpi_cost_label, { days })}
           value={
-            <CurrencyNumberFlow
-              value={totals.cost}
-              locales={locales}
-              aria-label={formatUsd(totals.cost)}
-            />
+            <CostEstimate usage={filtered}>
+              <CurrencyNumberFlow
+                value={totals.cost}
+                locales={locales}
+                aria-label={formatUsd(totals.cost)}
+              />
+            </CostEstimate>
           }
           hint={
             costDelta == null ? undefined : (

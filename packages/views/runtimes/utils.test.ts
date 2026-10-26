@@ -10,6 +10,7 @@ import {
   collectUnmappedModels,
   computeCostInWindow,
   estimateCost,
+  estimateCostRange,
   estimateCostBreakdown,
   formatTokens,
   isModelPriced,
@@ -552,6 +553,25 @@ describe("estimateCost", () => {
     expect(
       estimateCost({ ...usage, model: "deepseek/deepseek-flash" }),
     ).toBeCloseTo(0.15 + 0.6 + 0.003, 5);
+  });
+
+  it("prices DSH nested vendor usage with explicit uncosted tokens", () => {
+    const usage = {
+      ...zeroUsage,
+      provider: "dsh",
+      model: "deepseek-official/deepseek-flash",
+      input_tokens: 1_000_000,
+      output_tokens: 1_000_000,
+      cache_read_tokens: 1_000_000,
+      cost_usd_ticks: 0,
+      uncosted_input_tokens: 1_000_000,
+      uncosted_output_tokens: 1_000_000,
+      uncosted_cache_read_tokens: 1_000_000,
+      uncosted_cache_write_tokens: 0,
+    };
+    expect(isModelPriced(usage.model, usage.provider)).toBe(true);
+    expect(collectUnmappedModels([usage])).toEqual([]);
+    expect(estimateCost(usage)).toBeCloseTo(0.753, 5);
   });
 
   it("prices the deepseek-chat / deepseek-reasoner aliases at the same rate as deepseek-v4-flash", () => {
@@ -1684,5 +1704,33 @@ describe("formatTokens", () => {
     expect(formatTokens(999_949)).toBe("999.9K");
     expect(formatTokens(999_950)).toBe("1M");
     expect(formatTokens(999_999_999)).toBe("1B");
+  });
+});
+
+
+describe("estimateCostRange", () => {
+  const flash = { ...zeroUsage, provider: "dsh", model: "deepseek-official/deepseek-flash", input_tokens: 1_000_000, output_tokens: 1_000_000, cache_read_tokens: 1_000_000, cache_write_tokens: 1_000_000 };
+
+  it("bounds every uncosted Flash token bucket and leaves fixed-rate models unchanged", () => {
+    expect(estimateCostRange([flash])).toEqual({ min: 0.903, max: 1.806 });
+    const other = { ...zeroUsage, model: "gpt-4o", input_tokens: 1_000_000 };
+    expect(estimateCostRange([other])).toEqual({ min: 2.5, max: 2.5 });
+    const mixed = estimateCostRange([flash, other]);
+    expect(mixed.min).toBeCloseTo(3.403);
+    expect(mixed.max).toBeCloseTo(4.306);
+  });
+
+  it("does not multiply provider charges, including legacy rows without a token split", () => {
+    expect(estimateCostRange([{ ...flash, cost_usd_ticks: 20_000_000_000 }])).toEqual({ min: 2, max: 2 });
+    const range = estimateCostRange([{ ...flash, cost_usd_ticks: 20_000_000_000, uncosted_input_tokens: 1_000_000, uncosted_output_tokens: 0, uncosted_cache_read_tokens: 0, uncosted_cache_write_tokens: 0 }]);
+    expect(range.min).toBeCloseTo(2.15);
+    expect(range.max).toBeCloseTo(2.30);
+  });
+
+  it("does not invent ranges for unknown variants or custom prices", () => {
+    useCustomPricingStore.setState({ pricings: { "custom-model": { input: 1, output: 2, cacheRead: 0, cacheWrite: 1 } } });
+    expect(estimateCostRange([{ ...zeroUsage, model: "custom-model", input_tokens: 1_000_000 }])).toEqual({ min: 1, max: 1 });
+    expect(estimateCostRange([{ ...flash, model: "deepseek-flash-preview" }])).toEqual({ min: 0, max: 0 });
+    expect(estimateCostRange([])).toEqual({ min: 0, max: 0 });
   });
 });

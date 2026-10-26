@@ -14,6 +14,7 @@ import { useCustomPricingStore } from "@multica/core/runtimes/custom-pricing-sto
 import { ActorAvatar } from "../../common/actor-avatar";
 import { useT } from "../../i18n";
 import { formatDuration } from "../../agents/components/agent-activity-hover-content";
+import { CostEstimate, CostRangeNotice } from "../../runtimes/components/cost-estimate";
 import {
   collectUnmappedModels,
   formatTokens,
@@ -127,7 +128,7 @@ export function IssueUsageDialog({
             <div className="grid grid-cols-3 divide-x rounded-lg border bg-card">
               <KpiCard
                 label={t(($) => $.usage_detail.kpi_cost)}
-                value={formatUsd(total.cost)}
+                value={<CostEstimate usage={priced.flatMap((task) => task.usage ?? [])} />}
                 hint={<CostConcentrationHint tasks={priced} total={total} />}
               />
               <KpiCard
@@ -154,6 +155,7 @@ export function IssueUsageDialog({
             )}
 
             <RunTable tasks={priced} total={total} />
+            <CostRangeNotice usage={priced.flatMap((task) => task.usage ?? [])} />
 
             <div className="space-y-1 text-micro text-muted-foreground">
               {unpricedCount > 0 && (
@@ -315,7 +317,7 @@ function RunTable({ tasks, total }: { tasks: AgentTask[]; total: TaskUsageSummar
             <td>{formatTokens(total.cacheRead)}</td>
             <td>{formatTokens(total.cacheWrite)}</td>
             <td className="!pr-16">{formatTokens(total.tokens)}</td>
-            <td className="!pr-0">{formatUsd(total.cost)}</td>
+            <td className="!pr-0"><CostEstimate usage={tasks.flatMap((task) => task.usage ?? [])} /></td>
           </tr>
         </tfoot>
       </table>
@@ -386,7 +388,7 @@ function RunRow({ task, maxTokens }: { task: AgentTask; maxTokens: number }) {
           </span>
         </div>
       </td>
-      <td className="!pr-0 font-medium">{formatUsd(summary.cost)}</td>
+      <td className="!pr-0 font-medium"><CostEstimate usage={task.usage ?? []} /></td>
     </tr>
   );
 }
