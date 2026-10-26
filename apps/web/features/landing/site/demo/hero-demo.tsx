@@ -1,428 +1,372 @@
 "use client";
 
-import { useState, type ReactNode } from "react";
-import {
-  CalendarClock,
-  FilePen,
-  FileSearch,
-  FileText,
-  GitMerge,
-  GitPullRequest,
-  Inbox,
-  Megaphone,
-  MessageSquare,
-  Rows3,
-  SquareTerminal,
-  Zap,
-  type LucideIcon,
-} from "lucide-react";
+import { useState } from "react";
+import { GitPullRequest, Inbox, Megaphone, UserRound, Zap } from "lucide-react";
 import { cn } from "@multica/ui/lib/utils";
 import { focusRing } from "../primitives";
-import {
-  ActivityRow,
-  Comment,
-  Entry,
-  HeroBoard,
-  RunCard,
-  type RunStep,
-  type Stage,
-  type Workflow,
-} from "./hero-board";
-import { Avatar, BACKEND, CONTENT, FRONTEND, LEO, MIA, QA, SAM, TRIAGE } from "./mock-kit";
+import { BarList, Checklist, DocPreview, LoadChart, PullRequest, Replies, ReportCluster, TimeoutChart } from "./hero-blocks";
+import { HeroBoard, type Workflow } from "./hero-board";
+import { BACKEND, CONTENT, FRONTEND, LEAD, LEO, MIA, QA, RESEARCH, SAM, TRIAGE } from "./mock-kit";
 
 /*
- * The hero demo: three workflows played on the same board, with tabs above
- * it. Tabs advance on their own each time a story finishes, until a visitor
- * picks one — then that workflow loops.
+ * The hero demo: three workflows, each with its own custom statuses and
+ * handoffs, played on the same board. The switcher advances on its own each
+ * time a story finishes, until a visitor picks one — then that one loops.
  */
-
-const SHIP_RUN: RunStep[] = [
-  { icon: FileSearch, text: "Read 14 files in api/middleware" },
-  {
-    icon: FilePen,
-    text: (
-      <>
-        Edited 3 files <span className="text-success">+184</span> <span className="text-destructive">−12</span>
-      </>
-    ),
-  },
-  {
-    icon: SquareTerminal,
-    text: (
-      <>
-        go test ./... <span className="text-muted-foreground">212 passed</span>
-      </>
-    ),
-  },
-];
 
 const SHIP: Workflow = {
   id: "ship",
   label: "Ship a feature",
   description:
-    "A Multica issue board: an issue is assigned to a coding agent, which works on it, opens a pull request, and moves it to done after review",
-  focus: { id: "ACM-142", title: "Add rate limiting to the public API", priority: "high", updated: "just now" },
-  columns: [
-    {
-      status: "todo",
-      label: "Todo",
-      total: 11,
-      cards: [
-        { id: "ACM-140", title: "Dark mode for billing settings", priority: "medium", assignee: MIA, updated: "1h ago" },
-        { id: "ACM-138", title: "Upgrade the Postgres driver to v5", priority: "low", assignee: LEO, updated: "3h ago" },
-        { id: "ACM-135", title: "Add SAML login for enterprise workspaces", priority: "medium", updated: "5h ago" },
-        { id: "ACM-134", title: "Search results ignore archived projects", priority: "low", assignee: SAM, updated: "1d ago" },
-      ],
-    },
-    {
-      status: "in_progress",
-      label: "In Progress",
+    "A Multica project board run by a workflow: an issue moves from Spec to Build, Code review, Approve and Shipped, handed to a planning agent, a coding agent, a review agent and a teammate in turn",
+  project: "API Platform",
+  statuses: [
+    { key: "spec", name: "Spec", category: "unstarted", icon: "circle", color: "#8b5cf6", handler: LEAD },
+    { key: "build", name: "Build", category: "started", icon: "half", color: "#f97316", handler: BACKEND },
+    { key: "review", name: "Code review", category: "started", icon: "three_quarters", color: "#3b82f6", handler: QA },
+    { key: "approve", name: "Approve", category: "started", icon: "three_quarters", color: "#ec4899", handler: MIA },
+    { key: "shipped", name: "Shipped", category: "done", icon: "check", color: "#22c55e" },
+  ],
+  cards: {
+    spec: {
       total: 4,
       cards: [
-        { id: "ACM-136", title: "Move auth webhooks onto the job queue", priority: "high", assignee: BACKEND, working: true, updated: "2m ago" },
-        { id: "ACM-133", title: "Fix the flaky checkout test on CI", priority: "urgent", assignee: QA, working: true, updated: "just now" },
-        { id: "ACM-131", title: "Rewrite the onboarding emails", priority: "medium", assignee: SAM, updated: "40m ago" },
-        { id: "ACM-130", title: "Usage chart for the admin dashboard", priority: "medium", assignee: FRONTEND, updated: "1h ago" },
+        { id: "ACM-145", title: "SAML login for enterprise workspaces", priority: "medium", assignee: LEAD, updated: "1h ago" },
+        { id: "ACM-144", title: "Usage alerts for billing admins", priority: "low", assignee: LEAD, updated: "3h ago" },
       ],
     },
-    {
-      status: "in_review",
-      label: "In Review",
+    build: {
       total: 3,
       cards: [
-        { id: "ACM-129", title: "Paginate the audit log endpoint", priority: "medium", assignee: BACKEND, updated: "12m ago" },
-        { id: "ACM-127", title: "Refresh the pricing page copy", priority: "low", assignee: MIA, updated: "2h ago" },
-        { id: "ACM-126", title: "Cache the plan lookup on checkout", priority: "medium", assignee: QA, updated: "4h ago" },
+        { id: "ACM-136", title: "Move auth webhooks onto the job queue", priority: "high", assignee: BACKEND, working: true, updated: "2m ago" },
+        { id: "ACM-138", title: "Upgrade the Postgres driver to v5", priority: "low", assignee: BACKEND, updated: "40m ago" },
       ],
     },
-    {
-      status: "done",
-      label: "Done",
+    review: {
+      total: 2,
+      cards: [
+        { id: "ACM-133", title: "Fix the flaky checkout test on CI", priority: "urgent", assignee: QA, working: true, updated: "just now" },
+        { id: "ACM-131", title: "Paginate the audit log endpoint", priority: "medium", assignee: QA, updated: "1h ago" },
+      ],
+    },
+    approve: {
+      total: 1,
+      cards: [{ id: "ACM-129", title: "Cache the plan lookup on checkout", priority: "medium", assignee: MIA, updated: "2h ago" }],
+    },
+    shipped: {
       total: 28,
       cards: [
-        { id: "ACM-125", title: "CSV export for reports", priority: "medium", assignee: FRONTEND, updated: "1h ago" },
-        { id: "ACM-122", title: "Retry failed Stripe webhooks", priority: "high", assignee: BACKEND, updated: "3h ago" },
-        { id: "ACM-120", title: "Update the SSO setup guide", priority: "low", assignee: LEO, updated: "5h ago" },
-        { id: "ACM-118", title: "Remove the legacy v1 export endpoint", priority: "medium", assignee: BACKEND, updated: "1d ago" },
-        { id: "ACM-117", title: "Fix timezone drift in weekly digests", priority: "high", assignee: QA, updated: "1d ago" },
+        { id: "ACM-125", title: "CSV export for reports", priority: "medium", assignee: MIA, updated: "1h ago" },
+        { id: "ACM-122", title: "Retry failed Stripe webhooks", priority: "high", assignee: LEO, updated: "3h ago" },
+        { id: "ACM-120", title: "Remove the legacy v1 export endpoint", priority: "medium", assignee: MIA, updated: "1d ago" },
       ],
     },
+  },
+  focus: {
+    id: "ACM-142",
+    title: "Add rate limiting to the public API",
+    priority: "high",
+    description:
+      "Public endpoints have no limits, so one noisy key can slow everyone down. Add per-key limits with sane defaults and a clear 429.",
+    label: "api",
+    due: "Jun 12",
+  },
+  timeline: [
+    { kind: "created", by: "Mia Chen", icon: <UserRound className="size-3.5" />, handoff: LEAD },
+    {
+      kind: "comment",
+      actor: LEAD,
+      body: (
+        <>
+          Here is the plan.
+          <Checklist
+            title="Build plan"
+            items={["Token bucket per API key", "Shared counters in Redis", "429 with a Retry-After header"]}
+          />
+        </>
+      ),
+    },
+    { kind: "status", actor: LEAD, from: "spec", to: "build", handoff: BACKEND },
+    {
+      kind: "comment",
+      actor: BACKEND,
+      body: (
+        <>
+          Limiter and tests are in.
+          <PullRequest number={318} title="Rate limit the public API" added={184} removed={12} checks={["Build", "212 tests", "Lint"]} />
+        </>
+      ),
+    },
+    { kind: "status", actor: BACKEND, from: "build", to: "review", handoff: QA },
+    {
+      kind: "comment",
+      actor: QA,
+      body: (
+        <>
+          Load-tested on staging.
+          <LoadChart />
+        </>
+      ),
+    },
+    { kind: "status", actor: QA, from: "review", to: "approve", handoff: MIA },
+    { kind: "comment", actor: MIA, body: "Looks good. Merging." },
+    { kind: "status", actor: MIA, from: "approve", to: "shipped" },
   ],
   stages: [
-    { column: "todo", working: false, panel: false, entries: 0, hold: 1800 },
-    { column: "todo", assignee: BACKEND, working: false, panel: false, entries: 0, hold: 900 },
-    { column: "in_progress", assignee: BACKEND, working: true, panel: true, entries: 1, hold: 1100 },
-    { column: "in_progress", assignee: BACKEND, working: true, panel: true, entries: 2, hold: 1000 },
-    { column: "in_progress", assignee: BACKEND, working: true, panel: true, entries: 3, hold: 1000 },
-    { column: "in_progress", assignee: BACKEND, working: true, panel: true, entries: 4, hold: 1300 },
-    { column: "in_review", assignee: BACKEND, working: false, panel: true, entries: 5, hold: 1700 },
-    { column: "in_review", assignee: BACKEND, working: false, panel: true, entries: 6, hold: 1300 },
-    { column: "done", assignee: BACKEND, working: false, panel: true, entries: 7, hold: 1500 },
-    { column: "done", assignee: BACKEND, working: false, panel: false, entries: 7, hold: 2200 },
+    { status: "spec", panel: false, entries: 1, working: true, hold: 2400 },
+    { status: "spec", panel: true, entries: 1, working: true, hold: 1500 },
+    { status: "spec", panel: true, entries: 2, working: true, hold: 2600 },
+    { status: "build", panel: true, entries: 3, working: true, hold: 2000 },
+    { status: "build", panel: true, entries: 4, working: true, hold: 2700 },
+    { status: "review", panel: true, entries: 5, working: true, hold: 2000 },
+    { status: "review", panel: true, entries: 6, working: true, hold: 2700 },
+    { status: "approve", panel: true, entries: 7, working: false, hold: 2000 },
+    { status: "approve", panel: true, entries: 8, working: false, hold: 1800 },
+    { status: "shipped", panel: true, entries: 9, working: false, hold: 2600 },
+    { status: "shipped", panel: false, entries: 9, working: false, hold: 3000 },
   ],
-  still: 7,
-  Activity: ShipActivity,
+  still: 6,
 };
-
-function ShipActivity({ stage }: { stage: Stage }) {
-  return (
-    <>
-      {stage.entries >= 1 ? (
-        <Entry>
-          <ActivityRow icon={<Avatar actor={BACKEND} size={16} />}>
-            <span className="font-medium text-foreground">Backend Agent</span> picked this up
-          </ActivityRow>
-        </Entry>
-      ) : null}
-      {stage.entries >= 2 ? (
-        <Entry>
-          <RunCard actor={BACKEND} runtime="Claude Code" steps={SHIP_RUN} at={2} entries={stage.entries} duration="3m 48s" />
-        </Entry>
-      ) : null}
-      {stage.entries >= 5 ? (
-        <Entry>
-          <Comment actor={BACKEND}>
-            <p>Added a token bucket per API key: 100 requests a minute by default, 429 with Retry-After past that.</p>
-            <Attachment icon={GitPullRequest} title="#318 Rate limit the public API">
-              <span className="text-success tabular-nums">+184</span>
-              <span className="text-destructive tabular-nums">−12</span>
-            </Attachment>
-          </Comment>
-        </Entry>
-      ) : null}
-      {stage.entries >= 6 ? (
-        <Entry>
-          <Comment actor={MIA}>
-            <p>Reviewed, nice tests. Approved.</p>
-          </Comment>
-        </Entry>
-      ) : null}
-      {stage.entries >= 7 ? (
-        <Entry>
-          <ActivityRow icon={<GitMerge className="size-3.5 text-muted-foreground" />}>
-            <span className="font-medium text-foreground">Mia Chen</span> merged #318
-          </ActivityRow>
-        </Entry>
-      ) : null}
-    </>
-  );
-}
-
-const LAUNCH_RUN: RunStep[] = [
-  { icon: FileSearch, text: "Read the Autopilots spec and 6 changelogs" },
-  {
-    icon: FilePen,
-    text: (
-      <>
-        Drafted autopilots-launch.md <span className="text-muted-foreground">1,180 words</span>
-      </>
-    ),
-  },
-  { icon: Megaphone, text: "Wrote 3 social posts and a newsletter blurb" },
-];
 
 const LAUNCH: Workflow = {
   id: "launch",
   label: "Launch content",
   description:
-    "A Multica issue board for marketing: a content agent drafts a launch post and social copy, a teammate reviews it, and the post is scheduled",
-  focus: { id: "ACM-212", title: "Launch post for Autopilots", priority: "high", updated: "just now" },
-  columns: [
-    {
-      status: "todo",
-      label: "Todo",
-      total: 9,
-      cards: [
-        { id: "ACM-210", title: "Customer story: Northwind Robotics", priority: "medium", assignee: MIA, updated: "1h ago" },
-        { id: "ACM-208", title: "Webinar invite email for June", priority: "low", updated: "3h ago" },
-        { id: "ACM-207", title: "Comparison page: Multica vs. spreadsheets", priority: "medium", assignee: CONTENT, updated: "5h ago" },
-        { id: "ACM-205", title: "Refresh the pricing page FAQ", priority: "low", assignee: SAM, updated: "1d ago" },
-      ],
-    },
-    {
-      status: "in_progress",
-      label: "In Progress",
-      total: 4,
-      cards: [
-        { id: "ACM-204", title: "Changelog for v0.9", priority: "high", assignee: CONTENT, working: true, updated: "2m ago" },
-        { id: "ACM-203", title: "SEO audit of the docs site", priority: "medium", assignee: QA, working: true, updated: "just now" },
-        { id: "ACM-201", title: "Product Hunt launch kit", priority: "high", assignee: SAM, updated: "30m ago" },
-        { id: "ACM-199", title: "Translate the homepage into Japanese", priority: "medium", assignee: CONTENT, updated: "2h ago" },
-      ],
-    },
-    {
-      status: "in_review",
-      label: "In Review",
+    "A Multica project board for marketing run by a workflow: a launch post moves from Brief to Research, Draft, Edit and Published, handed to a research agent, a writing agent and an editor in turn",
+  project: "Autopilots launch",
+  statuses: [
+    { key: "brief", name: "Brief", category: "unstarted", icon: "circle", color: "#64748b", handler: SAM },
+    { key: "research", name: "Research", category: "started", icon: "half", color: "#06b6d4", handler: RESEARCH },
+    { key: "draft", name: "Draft", category: "started", icon: "half", color: "#8b5cf6", handler: CONTENT },
+    { key: "edit", name: "Edit", category: "started", icon: "three_quarters", color: "#ec4899", handler: SAM },
+    { key: "published", name: "Published", category: "done", icon: "check", color: "#22c55e" },
+  ],
+  cards: {
+    brief: {
       total: 3,
       cards: [
-        { id: "ACM-198", title: "Newsletter: May product roundup", priority: "medium", assignee: CONTENT, updated: "20m ago" },
-        { id: "ACM-196", title: "Case study: Acme Robotics", priority: "medium", assignee: MIA, updated: "3h ago" },
-        { id: "ACM-195", title: "Launch thread for the desktop app", priority: "low", assignee: CONTENT, updated: "5h ago" },
+        { id: "ACM-213", title: "Webinar invite email for June", priority: "low", assignee: SAM, updated: "2h ago" },
+        { id: "ACM-211", title: "Comparison page: Multica vs. spreadsheets", priority: "medium", assignee: SAM, updated: "5h ago" },
       ],
     },
-    {
-      status: "done",
-      label: "Done",
+    research: {
+      total: 2,
+      cards: [
+        { id: "ACM-209", title: "Customer story: Northwind Robotics", priority: "medium", assignee: RESEARCH, working: true, updated: "3m ago" },
+      ],
+    },
+    draft: {
+      total: 3,
+      cards: [
+        { id: "ACM-204", title: "Changelog for v0.9", priority: "high", assignee: CONTENT, working: true, updated: "just now" },
+        { id: "ACM-199", title: "Translate the homepage into Japanese", priority: "medium", assignee: CONTENT, updated: "1h ago" },
+      ],
+    },
+    edit: {
+      total: 2,
+      cards: [
+        { id: "ACM-198", title: "Newsletter: May product roundup", priority: "medium", assignee: SAM, updated: "20m ago" },
+        { id: "ACM-196", title: "Case study: Acme Robotics", priority: "medium", assignee: SAM, updated: "3h ago" },
+      ],
+    },
+    published: {
       total: 36,
       cards: [
-        { id: "ACM-193", title: "Autopilots one-pager for sales", priority: "medium", assignee: CONTENT, updated: "1h ago" },
-        { id: "ACM-190", title: "Q2 messaging framework", priority: "high", assignee: SAM, updated: "4h ago" },
-        { id: "ACM-188", title: "Script for the getting started video", priority: "low", assignee: LEO, updated: "6h ago" },
-        { id: "ACM-187", title: "Social cards for the v0.8 release", priority: "medium", assignee: CONTENT, updated: "1d ago" },
-        { id: "ACM-185", title: "Rewrite the onboarding emails", priority: "medium", assignee: SAM, updated: "1d ago" },
+        { id: "ACM-193", title: "Autopilots one-pager for sales", priority: "medium", assignee: SAM, updated: "1h ago" },
+        { id: "ACM-190", title: "Q2 messaging framework", priority: "high", assignee: MIA, updated: "4h ago" },
+        { id: "ACM-187", title: "Social cards for the v0.8 release", priority: "medium", assignee: SAM, updated: "1d ago" },
       ],
     },
+  },
+  focus: {
+    id: "ACM-212",
+    title: "Launch post for Autopilots",
+    priority: "high",
+    description:
+      "Announce Autopilots: what it is, who it is for, and three real examples. Blog post first, then social and newsletter copy.",
+    label: "launch",
+    due: "Jun 18",
+  },
+  timeline: [
+    { kind: "created", by: "Sam Rivera", icon: <UserRound className="size-3.5" /> },
+    { kind: "status", actor: SAM, from: "brief", to: "research", handoff: RESEARCH },
+    {
+      kind: "comment",
+      actor: RESEARCH,
+      body: (
+        <>
+          What customers ask for most.
+          <BarList
+            title="Use cases mentioned"
+            aside="40 calls"
+            bars={[
+              { label: "Nightly triage", value: 18 },
+              { label: "Weekly digests", value: 12 },
+              { label: "Dependency bumps", value: 9 },
+            ]}
+          />
+        </>
+      ),
+    },
+    { kind: "status", actor: RESEARCH, from: "research", to: "draft", handoff: CONTENT },
+    {
+      kind: "comment",
+      actor: CONTENT,
+      body: (
+        <>
+          Draft is ready, with social posts and a newsletter blurb.
+          <DocPreview title="autopilots-launch.md" meta="1,180 words" />
+        </>
+      ),
+    },
+    { kind: "status", actor: CONTENT, from: "draft", to: "edit", handoff: SAM },
+    { kind: "comment", actor: SAM, body: "Tightened the intro. Scheduled for Tuesday 9:00." },
+    { kind: "status", actor: SAM, from: "edit", to: "published" },
   ],
   stages: [
-    { column: "todo", working: false, panel: false, entries: 0, hold: 1800 },
-    { column: "todo", assignee: CONTENT, working: false, panel: false, entries: 0, hold: 900 },
-    { column: "in_progress", assignee: CONTENT, working: true, panel: true, entries: 1, hold: 1100 },
-    { column: "in_progress", assignee: CONTENT, working: true, panel: true, entries: 2, hold: 1000 },
-    { column: "in_progress", assignee: CONTENT, working: true, panel: true, entries: 3, hold: 1000 },
-    { column: "in_progress", assignee: CONTENT, working: true, panel: true, entries: 4, hold: 1300 },
-    { column: "in_review", assignee: CONTENT, working: false, panel: true, entries: 5, hold: 1700 },
-    { column: "in_review", assignee: CONTENT, working: false, panel: true, entries: 6, hold: 1300 },
-    { column: "done", assignee: CONTENT, working: false, panel: true, entries: 7, hold: 1500 },
-    { column: "done", assignee: CONTENT, working: false, panel: false, entries: 7, hold: 2200 },
+    { status: "brief", panel: false, entries: 1, working: false, hold: 2400 },
+    { status: "brief", panel: true, entries: 1, working: false, hold: 1600 },
+    { status: "research", panel: true, entries: 2, working: true, hold: 2000 },
+    { status: "research", panel: true, entries: 3, working: true, hold: 2700 },
+    { status: "draft", panel: true, entries: 4, working: true, hold: 2000 },
+    { status: "draft", panel: true, entries: 5, working: true, hold: 2700 },
+    { status: "edit", panel: true, entries: 6, working: false, hold: 2000 },
+    { status: "edit", panel: true, entries: 7, working: false, hold: 2000 },
+    { status: "published", panel: true, entries: 8, working: false, hold: 2600 },
+    { status: "published", panel: false, entries: 8, working: false, hold: 3000 },
   ],
-  still: 7,
-  Activity: LaunchActivity,
+  still: 5,
 };
-
-function LaunchActivity({ stage }: { stage: Stage }) {
-  return (
-    <>
-      {stage.entries >= 1 ? (
-        <Entry>
-          <ActivityRow icon={<Avatar actor={CONTENT} size={16} />}>
-            <span className="font-medium text-foreground">Content Agent</span> picked this up
-          </ActivityRow>
-        </Entry>
-      ) : null}
-      {stage.entries >= 2 ? (
-        <Entry>
-          <RunCard actor={CONTENT} runtime="Hermes" steps={LAUNCH_RUN} at={2} entries={stage.entries} duration="6m 12s" />
-        </Entry>
-      ) : null}
-      {stage.entries >= 5 ? (
-        <Entry>
-          <Comment actor={CONTENT}>
-            <p>Draft is ready in the brand voice: the launch post, 3 social posts and a newsletter blurb.</p>
-            <Attachment icon={FileText} title="autopilots-launch.md">
-              <span className="text-muted-foreground tabular-nums">1,180 words</span>
-            </Attachment>
-          </Comment>
-        </Entry>
-      ) : null}
-      {stage.entries >= 6 ? (
-        <Entry>
-          <Comment actor={SAM}>
-            <p>Tightened the intro. Ship it Tuesday morning.</p>
-          </Comment>
-        </Entry>
-      ) : null}
-      {stage.entries >= 7 ? (
-        <Entry>
-          <ActivityRow icon={<CalendarClock className="size-3.5 text-muted-foreground" />}>
-            <span className="font-medium text-foreground">Sam Rivera</span> scheduled it for Tue 9:00
-          </ActivityRow>
-        </Entry>
-      ) : null}
-    </>
-  );
-}
-
-const TRIAGE_RUN: RunStep[] = [
-  { icon: Inbox, text: "Scanned 46 new messages from Intercom and Discord" },
-  { icon: Rows3, text: "Grouped 3 reports: exports over 10k rows" },
-  {
-    icon: SquareTerminal,
-    text: (
-      <>
-        Reproduced on staging <span className="text-muted-foreground">timeout at 30s</span>
-      </>
-    ),
-  },
-];
 
 const FEEDBACK: Workflow = {
   id: "triage",
   label: "Triage feedback",
   description:
-    "A Multica issue board for support: an autopilot files an issue from user reports, a triage agent reproduces it, sets the priority, hands it to an engineering agent and replies to the customers",
-  focus: { id: "ACM-151", title: "CSV export times out on large workspaces", priority: "none", updated: "just now" },
-  columns: [
-    {
-      status: "backlog",
-      label: "Backlog",
-      total: 14,
-      cards: [
-        { id: "ACM-150", title: "Request: Slack alerts for mentions", priority: "low", updated: "2h ago" },
-        { id: "ACM-148", title: "Board columns are hard to scroll on mobile", priority: "medium", updated: "4h ago" },
-        { id: "ACM-147", title: "Typo in the workspace invite email", priority: "low", updated: "1d ago" },
-        { id: "ACM-145", title: "Dark mode resets after a reload", priority: "low", assignee: FRONTEND, updated: "1d ago" },
-      ],
-    },
-    {
-      status: "todo",
-      label: "Todo",
+    "A Multica project board for support run by a workflow: an autopilot files user reports into Inbox, and the issue moves to Reproduce, Fix, Reply and Resolved, handed to a triage agent, a QA agent and a coding agent in turn",
+  project: "Customer feedback",
+  statuses: [
+    { key: "inbox", name: "Inbox", category: "unstarted", icon: "dotted", color: "#64748b", handler: TRIAGE },
+    { key: "repro", name: "Reproduce", category: "started", icon: "half", color: "#f97316", handler: QA },
+    { key: "fix", name: "Fix", category: "started", icon: "half", color: "#3b82f6", handler: BACKEND },
+    { key: "reply", name: "Reply", category: "started", icon: "three_quarters", color: "#8b5cf6", handler: TRIAGE },
+    { key: "resolved", name: "Resolved", category: "done", icon: "check", color: "#22c55e" },
+  ],
+  cards: {
+    inbox: {
       total: 6,
       cards: [
-        { id: "ACM-144", title: "Webhook retries show the wrong status", priority: "high", assignee: BACKEND, updated: "1h ago" },
-        { id: "ACM-143", title: "Invite links expire after one hour", priority: "medium", updated: "3h ago" },
-        { id: "ACM-141", title: "Search ignores archived projects", priority: "low", assignee: SAM, updated: "6h ago" },
+        { id: "ACM-150", title: "Request: Slack alerts for mentions", priority: "low", assignee: TRIAGE, updated: "2h ago" },
+        { id: "ACM-148", title: "Board columns are hard to scroll on mobile", priority: "medium", assignee: TRIAGE, updated: "4h ago" },
       ],
     },
-    {
-      status: "in_progress",
-      label: "In Progress",
-      total: 4,
+    repro: {
+      total: 2,
+      cards: [
+        { id: "ACM-146", title: "Invite links expire after one hour", priority: "medium", assignee: QA, working: true, updated: "5m ago" },
+      ],
+    },
+    fix: {
+      total: 3,
       cards: [
         { id: "ACM-139", title: "Billing page shows the old plan after upgrade", priority: "high", assignee: FRONTEND, working: true, updated: "4m ago" },
-        { id: "ACM-137", title: "Fix the flaky checkout test on CI", priority: "urgent", assignee: QA, working: true, updated: "just now" },
-        { id: "ACM-132", title: "Rate limit errors miss Retry-After", priority: "medium", assignee: LEO, updated: "1h ago" },
+        { id: "ACM-137", title: "Webhook retries show the wrong status", priority: "high", assignee: BACKEND, updated: "1h ago" },
       ],
     },
-    {
-      status: "done",
-      label: "Done",
+    reply: {
+      total: 1,
+      cards: [{ id: "ACM-132", title: "Dark mode resets after a reload", priority: "low", assignee: TRIAGE, updated: "30m ago" }],
+    },
+    resolved: {
       total: 52,
       cards: [
-        { id: "ACM-128", title: "Login loop on Safari 17", priority: "urgent", assignee: FRONTEND, updated: "2h ago" },
-        { id: "ACM-124", title: "Duplicate notifications on mention", priority: "high", assignee: BACKEND, updated: "5h ago" },
+        { id: "ACM-128", title: "Login loop on Safari 17", priority: "urgent", assignee: TRIAGE, updated: "2h ago" },
+        { id: "ACM-124", title: "Duplicate notifications on mention", priority: "high", assignee: TRIAGE, updated: "5h ago" },
         { id: "ACM-121", title: "Broken link in the SSO guide", priority: "low", assignee: TRIAGE, updated: "8h ago" },
-        { id: "ACM-119", title: "Export button hidden on small screens", priority: "medium", assignee: FRONTEND, updated: "1d ago" },
-        { id: "ACM-116", title: "Weekly digest sent twice", priority: "high", assignee: BACKEND, updated: "1d ago" },
       ],
     },
+  },
+  focus: {
+    id: "ACM-151",
+    title: "CSV export times out on large workspaces",
+    priority: "none",
+    description: "Filed by the Feedback sweep autopilot from 3 reports: 2 in Intercom, 1 in Discord.",
+    label: "bug",
+    due: "Jun 10",
+  },
+  timeline: [
+    { kind: "created", by: "Feedback sweep", icon: <Zap className="size-3.5" />, handoff: TRIAGE },
+    {
+      kind: "comment",
+      actor: TRIAGE,
+      body: (
+        <>
+          Not a duplicate. Set to Urgent.
+          <ReportCluster
+            reports={[
+              { source: "Intercom", from: "Northwind", quote: "Export spins forever on 14k rows" },
+              { source: "Intercom", from: "Globex", quote: "CSV download just fails" },
+              { source: "Discord", from: "@dana", quote: "anyone else get export timeouts?" },
+            ]}
+          />
+        </>
+      ),
+    },
+    { kind: "status", actor: TRIAGE, from: "inbox", to: "repro", handoff: QA },
+    {
+      kind: "comment",
+      actor: QA,
+      body: (
+        <>
+          Reproduced: the export runs inside the request.
+          <TimeoutChart />
+        </>
+      ),
+    },
+    { kind: "status", actor: QA, from: "repro", to: "fix", handoff: BACKEND },
+    {
+      kind: "comment",
+      actor: BACKEND,
+      body: (
+        <>
+          Exports now run as a background job.
+          <PullRequest number={326} title="Stream large CSV exports" added={96} removed={31} checks={["Build", "148 tests", "Lint"]} />
+        </>
+      ),
+    },
+    { kind: "status", actor: BACKEND, from: "fix", to: "reply", handoff: TRIAGE },
+    {
+      kind: "comment",
+      actor: TRIAGE,
+      body: (
+        <>
+          Told everyone who reported it.
+          <Replies
+            people={[
+              { initials: "NR", name: "Northwind" },
+              { initials: "GX", name: "Globex" },
+              { initials: "DA", name: "@dana" },
+            ]}
+          />
+        </>
+      ),
+    },
+    { kind: "status", actor: TRIAGE, from: "reply", to: "resolved" },
   ],
   stages: [
-    { column: "backlog", working: false, panel: false, entries: 0, hold: 1800 },
-    { column: "backlog", assignee: TRIAGE, working: true, panel: true, entries: 1, hold: 1200 },
-    { column: "backlog", assignee: TRIAGE, working: true, panel: true, entries: 2, hold: 1000 },
-    { column: "backlog", assignee: TRIAGE, working: true, panel: true, entries: 3, hold: 1000 },
-    { column: "backlog", assignee: TRIAGE, working: true, panel: true, entries: 4, hold: 1300 },
-    { column: "todo", assignee: BACKEND, priority: "urgent", working: false, panel: true, entries: 5, hold: 1900 },
-    { column: "in_progress", assignee: BACKEND, priority: "urgent", working: true, panel: true, entries: 6, hold: 1300 },
-    { column: "in_progress", assignee: BACKEND, priority: "urgent", working: true, panel: true, entries: 7, hold: 1700 },
-    { column: "in_progress", assignee: BACKEND, priority: "urgent", working: true, panel: false, entries: 7, hold: 2200 },
+    { status: "inbox", panel: false, entries: 1, working: true, hold: 2400 },
+    { status: "inbox", panel: true, entries: 1, working: true, hold: 1500 },
+    { status: "inbox", panel: true, entries: 2, working: true, priority: "urgent", hold: 2700 },
+    { status: "repro", panel: true, entries: 3, working: true, priority: "urgent", hold: 2000 },
+    { status: "repro", panel: true, entries: 4, working: true, priority: "urgent", hold: 2600 },
+    { status: "fix", panel: true, entries: 5, working: true, priority: "urgent", hold: 2000 },
+    { status: "fix", panel: true, entries: 6, working: true, priority: "urgent", hold: 2700 },
+    { status: "reply", panel: true, entries: 7, working: true, priority: "urgent", hold: 2000 },
+    { status: "reply", panel: true, entries: 8, working: true, priority: "urgent", hold: 2200 },
+    { status: "resolved", panel: true, entries: 9, working: false, priority: "urgent", hold: 2600 },
+    { status: "resolved", panel: false, entries: 9, working: false, priority: "urgent", hold: 3000 },
   ],
-  still: 7,
-  Activity: TriageActivity,
+  still: 6,
 };
-
-function TriageActivity({ stage }: { stage: Stage }) {
-  return (
-    <>
-      {stage.entries >= 1 ? (
-        <Entry>
-          <ActivityRow icon={<Zap className="size-3.5 text-muted-foreground" />}>
-            <span className="font-medium text-foreground">Feedback sweep</span> filed this from 3 reports
-          </ActivityRow>
-        </Entry>
-      ) : null}
-      {stage.entries >= 2 ? (
-        <Entry>
-          <RunCard actor={TRIAGE} runtime="OpenCode" steps={TRIAGE_RUN} at={2} entries={stage.entries} duration="1m 54s" />
-        </Entry>
-      ) : null}
-      {stage.entries >= 5 ? (
-        <Entry>
-          <Comment actor={TRIAGE}>
-            <p>
-              Confirmed bug, not a duplicate. Exports run inside the request and time out above ~10k rows. Set to
-              Urgent and handed to Backend Agent.
-            </p>
-          </Comment>
-        </Entry>
-      ) : null}
-      {stage.entries >= 6 ? (
-        <Entry>
-          <ActivityRow icon={<Avatar actor={BACKEND} size={16} />}>
-            <span className="font-medium text-foreground">Backend Agent</span> picked this up
-          </ActivityRow>
-        </Entry>
-      ) : null}
-      {stage.entries >= 7 ? (
-        <Entry>
-          <ActivityRow icon={<MessageSquare className="size-3.5 text-muted-foreground" />}>
-            <span className="font-medium text-foreground">Triage Agent</span> replied to 3 customers
-          </ActivityRow>
-        </Entry>
-      ) : null}
-    </>
-  );
-}
-
-function Attachment({ icon: Icon, title, children }: { icon: LucideIcon; title: string; children: ReactNode }) {
-  return (
-    <span className="mt-2 flex items-center gap-2 rounded-md border border-border px-2.5 py-1.5">
-      <Icon className="size-3.5 text-muted-foreground" />
-      <span className="min-w-0 flex-1 truncate font-medium">{title}</span>
-      {children}
-    </span>
-  );
-}
 
 const WORKFLOWS = [
   { workflow: SHIP, icon: GitPullRequest, short: "Ship" },
@@ -437,37 +381,39 @@ export function HeroDemo() {
 
   return (
     <>
-      <div
-        role="group"
-        aria-label="Workflow"
-        className="inline-flex items-center gap-0.5 rounded-full border border-site-line bg-site-sunken p-0.5"
-      >
-        {WORKFLOWS.map(({ workflow: item, icon: Icon, short }, index) => {
-          const selected = index === active;
-          return (
-            <button
-              key={item.id}
-              type="button"
-              aria-pressed={selected}
-              aria-label={item.label}
-              onClick={() => {
-                setActive(index);
-                setPinned(true);
-              }}
-              className={cn(
-                "flex h-8 items-center gap-1.5 rounded-full px-3 text-site-small transition-[color,background-color,box-shadow] duration-200",
-                focusRing,
-                selected
-                  ? "bg-site-surface text-site-ink shadow-[0_1px_2px_rgb(0_0_0/0.06),0_0_0_1px_var(--site-line)]"
-                  : "text-site-muted hover:text-site-ink",
-              )}
-            >
-              <Icon className="size-3.5 shrink-0" aria-hidden />
-              <span className="sm:hidden">{short}</span>
-              <span className="hidden sm:inline">{item.label}</span>
-            </button>
-          );
-        })}
+      <div className="flex justify-center">
+        <div
+          role="group"
+          aria-label="Workflow"
+          className="inline-flex items-center gap-0.5 rounded-full border border-site-line bg-site-sunken p-0.5"
+        >
+          {WORKFLOWS.map(({ workflow: item, icon: Icon, short }, index) => {
+            const selected = index === active;
+            return (
+              <button
+                key={item.id}
+                type="button"
+                aria-pressed={selected}
+                aria-label={item.label}
+                onClick={() => {
+                  setActive(index);
+                  setPinned(true);
+                }}
+                className={cn(
+                  "flex h-7 items-center gap-1.5 rounded-full px-2.5 text-[13px] transition-[color,background-color,box-shadow] duration-200",
+                  focusRing,
+                  selected
+                    ? "bg-site-surface text-site-ink shadow-[0_1px_2px_rgb(0_0_0/0.06),0_0_0_1px_var(--site-line)]"
+                    : "text-site-muted hover:text-site-ink",
+                )}
+              >
+                <Icon className="size-3.5 shrink-0" aria-hidden />
+                <span className="sm:hidden">{short}</span>
+                <span className="hidden sm:inline">{item.label}</span>
+              </button>
+            );
+          })}
+        </div>
       </div>
       <div className="relative mt-3 aspect-square sm:aspect-[16/10]">
         <HeroBoard

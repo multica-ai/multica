@@ -8,13 +8,16 @@ import {
   type ReactNode,
 } from "react";
 import {
+  ArrowUp,
   BookOpenText,
   Bot,
-  Check,
+  Calendar,
   ChevronDown,
   ChevronRight,
+  CircleCheck,
   CircleUser,
   Columns3,
+  CornerDownRight,
   FolderKanban,
   Inbox,
   Layers,
@@ -24,6 +27,8 @@ import {
   MessageSquare,
   Monitor,
   MoreHorizontal,
+  Paperclip,
+  Pin,
   Plus,
   Search,
   SlidersHorizontal,
@@ -40,21 +45,38 @@ import { PriorityIcon } from "@multica/views/issues/components/priority-icon";
 import { Avatar, usePrefersReducedMotion, type Actor } from "./mock-kit";
 
 /*
- * Hero product mockup: the issue board, built from the product's own tokens
- * and glyphs at a fixed design width, then zoomed to fit its frame; the
- * height follows the frame so the app's inset panel always closes. Data is
- * fictional. It loops one workflow's story — a focus issue moving across the
- * board while its side panel fills with activity — and calls `onLoop` each
- * time the story comes back to the start.
+ * Hero product mockup: a project board run by a workflow, built from the
+ * product's own tokens and glyphs at a fixed design width, then zoomed to fit
+ * its frame. Every column is one of the workflow's custom statuses and names
+ * the agent or member it hands off to. The story follows one issue through
+ * the workflow: it moves column to column while the issue peek floats over
+ * the board and fills with handoffs and comments, and the board pans so the
+ * issue is never under the peek. Data is fictional.
  */
 
 const WIDE_WIDTH = 1360;
 const NARROW_WIDTH = 540;
 const NARROW_BELOW = 600;
-const COLUMN_STRIDE = 232 + 12;
+const SIDEBAR_WIDTH = 200;
+const COLUMN_WIDTH = 280;
+const COLUMN_GAP = 16;
+const BOARD_PAD = 8;
+const PEEK_WIDTH = 520;
+const PEEK_INSET = 8;
 
 export type Priority = "none" | "urgent" | "high" | "medium" | "low";
-export type StatusId = "backlog" | "todo" | "in_progress" | "in_review" | "done";
+type Category = "unstarted" | "started" | "done";
+type StatusGlyph = "dotted" | "circle" | "half" | "three_quarters" | "check";
+
+export type Status = {
+  key: string;
+  name: string;
+  category: Category;
+  icon: StatusGlyph;
+  color: string;
+  handler?: Actor;
+};
+
 export type Card = {
   id: string;
   title: string;
@@ -63,16 +85,19 @@ export type Card = {
   working?: boolean;
   updated: string;
 };
-export type Column = { status: StatusId; label: string; total: number; cards: Card[] };
 
-/** One beat of the story: where the focus issue is, what the panel shows, and how long to hold. */
+export type TimelineItem =
+  | { kind: "created"; by: string; icon: ReactNode; handoff?: Actor }
+  | { kind: "status"; actor: Actor; from: string; to: string; handoff?: Actor }
+  | { kind: "comment"; actor: Actor; body: ReactNode };
+
+/** One beat of the story: where the issue is, how much of its timeline shows, and how long to hold. */
 export type Stage = {
-  column: StatusId;
-  assignee?: Actor;
-  priority?: Priority;
-  working: boolean;
+  status: string;
   panel: boolean;
   entries: number;
+  working: boolean;
+  priority?: Priority;
   hold: number;
 };
 
@@ -80,12 +105,14 @@ export type Workflow = {
   id: string;
   label: string;
   description: string;
-  columns: Column[];
-  focus: Card;
+  project: string;
+  statuses: Status[];
+  cards: Record<string, { total: number; cards: Card[] }>;
+  focus: { id: string; title: string; priority: Priority; description: string; label: string; due: string };
+  timeline: TimelineItem[];
   stages: Stage[];
   /** Stage shown when motion is reduced. */
   still: number;
-  Activity: (props: { stage: Stage }) => ReactNode;
 };
 
 const MOVE_EASE = "cubic-bezier(0.32, 0.72, 0, 1)";
@@ -137,7 +164,7 @@ export function HeroBoard({ workflow, onLoop }: { workflow: Workflow; onLoop?: (
   }, [step, stage.hold, visible, reducedMotion, workflow]);
 
   // FLIP: cards that changed place glide from where they were. Positions are
-  // relative to the board, so panning it on narrow screens is not a move.
+  // relative to the board, so panning it is not a move.
   useLayoutEffect(() => {
     const board = boardRef.current;
     if (!board || !fit) return;
@@ -164,7 +191,7 @@ export function HeroBoard({ workflow, onLoop }: { workflow: Workflow; onLoop?: (
         const dy = from.y - to.y;
         if (Math.abs(dx) < 0.5 && Math.abs(dy) < 0.5) continue;
         el.animate([{ transform: `translate(${dx}px, ${dy}px)` }, { transform: "none" }], {
-          duration: id === workflow.focus.id ? 650 : 450,
+          duration: id === workflow.focus.id ? 700 : 450,
           easing: MOVE_EASE,
         });
       }
@@ -173,16 +200,33 @@ export function HeroBoard({ workflow, onLoop }: { workflow: Workflow; onLoop?: (
   }, [step, fit, reducedMotion, workflow]);
 
   const narrow = fit?.narrow ?? false;
-  const columns = workflow.columns;
+  const statuses = workflow.statuses;
+  const statusIndex = statuses.findIndex((s) => s.key === stage.status);
+  const assignee = assigneeAt(workflow, statusIndex);
   const focus: Card = {
-    ...workflow.focus,
+    id: workflow.focus.id,
+    title: workflow.focus.title,
     priority: stage.priority ?? workflow.focus.priority,
-    assignee: stage.assignee,
-    working: stage.working,
+    assignee,
+    working: stage.working && assignee?.kind === "agent",
+    updated: "just now",
   };
-  const baseWorking = columns.flatMap((c) => c.cards).filter((card) => card.working).length;
-  const columnIndex = columns.findIndex((c) => c.status === stage.column);
-  const pan = narrow ? Math.min(Math.max(columnIndex - 1, 0), columns.length - 2) * COLUMN_STRIDE : 0;
+  const peekOpen = stage.panel && !narrow;
+  const working =
+    Object.values(workflow.cards).flatMap((column) => column.cards).filter((card) => card.working).length +
+    (focus.working ? 1 : 0);
+
+  // Pan so the focus column is fully in view: right of the sidebar, left of
+  // the peek when it is open.
+  const canvasWidth = narrow ? NARROW_WIDTH : WIDE_WIDTH;
+  const mainWidth = canvasWidth - (narrow ? 12 : SIDEBAR_WIDTH + 6);
+  const viewport = mainWidth - (peekOpen ? PEEK_WIDTH + PEEK_INSET * 2 : 0);
+  const stride = COLUMN_WIDTH + COLUMN_GAP;
+  const boardWidth = statuses.length * stride - COLUMN_GAP + BOARD_PAD * 2;
+  const pan = Math.min(
+    Math.max(0, (statusIndex + 1) * stride - COLUMN_GAP + BOARD_PAD - viewport),
+    Math.max(0, boardWidth - viewport),
+  );
 
   return (
     <div
@@ -194,7 +238,7 @@ export function HeroBoard({ workflow, onLoop }: { workflow: Workflow; onLoop?: (
       <div
         aria-hidden
         className={cn("flex text-foreground", !fit && "opacity-0")}
-        style={{ width: narrow ? NARROW_WIDTH : WIDE_WIDTH, height: fit?.height, zoom: fit?.zoom }}
+        style={{ width: canvasWidth, height: fit?.height, zoom: fit?.zoom }}
       >
         {narrow ? null : <Sidebar />}
         <main
@@ -203,44 +247,60 @@ export function HeroBoard({ workflow, onLoop }: { workflow: Workflow; onLoop?: (
             narrow ? "m-1.5" : "my-1.5 mr-1.5",
           )}
         >
-          <div className="flex h-11 shrink-0 items-center gap-2 border-b border-border px-4">
-            <ListTodo className="size-4 text-muted-foreground" />
-            <span className="text-label font-medium">Issues</span>
+          <div className="flex h-11 shrink-0 items-center gap-1.5 border-b border-border px-4 text-label">
+            <span className="text-muted-foreground">Projects</span>
+            <ChevronRight className="size-3.5 text-muted-foreground" />
+            <FolderKanban className="size-4 text-muted-foreground" />
+            <span key={workflow.project} className="font-medium animate-in fade-in duration-300 motion-reduce:animate-none">
+              {workflow.project}
+            </span>
           </div>
-          <Toolbar working={baseWorking + (stage.working ? 1 : 0)} compact={narrow} />
+          <Toolbar working={working} compact={narrow} />
           <div
             key={`board-${workflow.id}`}
             className="min-h-0 flex-1 overflow-hidden animate-in fade-in duration-500 motion-reduce:animate-none"
           >
             <div
               ref={boardRef}
-              className="flex items-start gap-3 px-3 pb-3 transition-transform duration-700 ease-in-out motion-reduce:transition-none"
-              style={{ transform: pan ? `translateX(${-pan}px)` : undefined }}
+              className="flex items-start gap-4 p-2 transition-transform duration-700 ease-[cubic-bezier(0.32,0.72,0,1)] motion-reduce:transition-none"
+              style={{ width: boardWidth, transform: pan ? `translateX(${-pan}px)` : undefined }}
             >
-              {columns.map((column) => {
-                const holdsFocus = column.status === stage.column;
+              {statuses.map((status) => {
+                const column = workflow.cards[status.key] ?? { total: 0, cards: [] };
+                const holdsFocus = status.key === stage.status;
                 return (
                   <BoardColumn
-                    key={column.status}
-                    column={column}
+                    key={status.key}
+                    status={status}
                     total={column.total + (holdsFocus ? 1 : 0)}
                     cards={holdsFocus ? [focus, ...column.cards] : column.cards}
-                    peeked={stage.panel && !narrow ? focus.id : undefined}
+                    peeked={peekOpen ? focus.id : undefined}
                   />
                 );
               })}
             </div>
           </div>
-          {narrow ? null : <IssuePanel key={`panel-${workflow.id}`} workflow={workflow} focus={focus} stage={stage} />}
+          {narrow ? null : (
+            <IssuePeek key={`peek-${workflow.id}`} workflow={workflow} focus={focus} stage={stage} open={peekOpen} />
+          )}
         </main>
       </div>
     </div>
   );
 }
 
+/** Who holds the issue at a status: that step's handler, else whoever held it before. */
+function assigneeAt(workflow: Workflow, index: number): Actor | undefined {
+  for (let i = index; i >= 0; i--) {
+    const handler = workflow.statuses[i]?.handler;
+    if (handler) return handler;
+  }
+  return undefined;
+}
+
 function Sidebar() {
   return (
-    <aside className="flex w-[200px] shrink-0 flex-col px-2 py-2.5">
+    <aside className="flex shrink-0 flex-col px-2 py-2.5" style={{ width: SIDEBAR_WIDTH }}>
       <div className="flex h-8 items-center gap-2 px-2">
         <span className="flex size-5 items-center justify-center rounded-md bg-surface text-micro font-semibold shadow-[var(--surface-shadow)]">
           A
@@ -258,8 +318,8 @@ function Sidebar() {
         <NavRow icon={MessageSquare} label="Chat" />
       </div>
       <NavGroup label="Work">
-        <NavRow icon={ListTodo} label="Issues" active />
-        <NavRow icon={FolderKanban} label="Projects" />
+        <NavRow icon={ListTodo} label="Issues" />
+        <NavRow icon={FolderKanban} label="Projects" active />
         <NavRow icon={Zap} label="Autopilot" />
       </NavGroup>
       <NavGroup label="AI Team">
@@ -343,30 +403,41 @@ function ToolbarButton({ icon: Icon, children }: { icon?: LucideIcon; children: 
   );
 }
 
+function CustomStatusIcon({ status, className }: { status: Status; className: string }) {
+  return (
+    <StatusIcon status={status.key} category={status.category} color={status.color} icon={status.icon} className={className} />
+  );
+}
+
 function BoardColumn({
-  column,
+  status,
   total,
   cards,
   peeked,
 }: {
-  column: Column;
+  status: Status;
   total: number;
   cards: Card[];
   peeked?: string;
 }) {
   return (
-    <section className="flex w-[232px] shrink-0 flex-col rounded-xl bg-muted/40 p-2">
+    <section className="flex shrink-0 flex-col rounded-xl bg-muted/40 p-2" style={{ width: COLUMN_WIDTH }}>
       <div className="mb-2 flex items-center justify-between gap-2 px-1.5">
-        <div className="flex items-center gap-2">
-          <span className="inline-flex items-center gap-1.5 text-caption font-semibold">
-            <StatusIcon status={column.status} className="h-3 w-3" />
-            {column.label}
+        <div className="flex min-w-0 items-center gap-2">
+          <span className="inline-flex items-center gap-1.5 truncate text-caption font-semibold">
+            <CustomStatusIcon status={status} className="h-3 w-3 shrink-0" />
+            {status.name}
           </span>
           <span className="text-caption text-muted-foreground tabular-nums">{total}</span>
         </div>
-        <div className="flex items-center gap-2 text-muted-foreground">
-          <MoreHorizontal className="size-3.5" />
-          <Plus className="size-3.5" />
+        <div className="flex min-w-0 items-center gap-1">
+          {status.handler ? (
+            <span className="inline-flex min-w-0 max-w-32 items-center gap-1 rounded-full border border-surface-border bg-background/70 py-0.5 pr-2 pl-0.5 text-caption">
+              <Avatar actor={status.handler} size={16} />
+              <span className="truncate">{status.handler.name}</span>
+            </span>
+          ) : null}
+          <Plus className="size-3.5 shrink-0 text-muted-foreground" />
         </div>
       </div>
       <div className="flex flex-col gap-2 p-1">
@@ -394,7 +465,7 @@ function BoardCard({ card, peeked }: { card: Card; peeked: boolean }) {
           </span>
           <p className="truncate text-caption text-muted-foreground">{card.id}</p>
         </div>
-        {card.working && card.assignee ? <WorkingBadge actor={card.assignee} /> : null}
+        {card.working && card.assignee ? <WorkingBadge key={card.assignee.name} actor={card.assignee} /> : null}
       </div>
       <p className="mt-1 line-clamp-2 text-body leading-snug font-medium">{card.title}</p>
       <div className="mt-2 flex items-center justify-between gap-2">
@@ -422,14 +493,6 @@ function WorkingBadge({ actor }: { actor: Actor }) {
   );
 }
 
-const STATUS_LABEL: Record<StatusId, string> = {
-  backlog: "Backlog",
-  todo: "Todo",
-  in_progress: "In Progress",
-  in_review: "In Review",
-  done: "Done",
-};
-
 const PRIORITY_LABEL: Record<Priority, string> = {
   none: "No priority",
   urgent: "Urgent",
@@ -438,131 +501,162 @@ const PRIORITY_LABEL: Record<Priority, string> = {
   low: "Low",
 };
 
-function IssuePanel({ workflow, focus, stage }: { workflow: Workflow; focus: Card; stage: Stage }) {
-  const { Activity } = workflow;
+/** The product's issue peek: a floating panel over the board's right edge. */
+function IssuePeek({ workflow, focus, stage, open }: { workflow: Workflow; focus: Card; stage: Stage; open: boolean }) {
+  const scrollRef = useRef<HTMLDivElement>(null);
+  const status = workflow.statuses.find((s) => s.key === stage.status)!;
+  const items = workflow.timeline.slice(0, stage.entries);
+
+  // The newest entry stays in view, the way a reader following along would scroll.
+  useEffect(() => {
+    const el = scrollRef.current;
+    if (!el) return;
+    el.scrollTo({ top: el.scrollHeight, behavior: open ? "smooth" : "auto" });
+  }, [stage.entries, open]);
+
   return (
     <aside
-      data-open={stage.panel}
+      data-open={open}
       className={cn(
-        "absolute inset-y-0 right-0 z-10 flex w-[380px] flex-col border-l border-border bg-background shadow-[var(--floating-shadow)]",
-        "transition-[translate,box-shadow] duration-500 ease-[cubic-bezier(0.32,0.72,0,1)] motion-reduce:transition-none",
-        "data-[open=false]:translate-x-full data-[open=false]:shadow-none data-[open=false]:duration-300 data-[open=false]:ease-in",
+        "absolute top-2 right-2 bottom-2 z-30 flex flex-col overflow-hidden rounded-xl bg-background shadow-[var(--floating-shadow)] ring-1 ring-surface-border",
+        "transition-[opacity,translate] duration-300 ease-out motion-reduce:transition-none",
+        "data-[open=false]:pointer-events-none data-[open=false]:translate-x-2 data-[open=false]:opacity-0 data-[open=false]:duration-200",
       )}
+      style={{ width: PEEK_WIDTH }}
     >
-      <div className="flex h-11 shrink-0 items-center justify-between border-b border-border px-4">
-        <span className="flex items-center gap-1 text-caption text-muted-foreground">
-          Acme Labs <ChevronRight className="size-3" /> <span className="text-foreground">{focus.id}</span>
+      <div className="flex h-12 shrink-0 items-center gap-2 border-b border-border px-4">
+        <span className="flex min-w-0 flex-1 items-center gap-1 text-caption text-muted-foreground">
+          {workflow.project} <ChevronRight className="size-3" />
+          <span className="font-medium text-foreground">{focus.id}</span>
         </span>
+        {focus.working && focus.assignee ? (
+          <span key={focus.assignee.name} className="inline-flex items-center gap-1.5 rounded-full bg-muted px-2 py-0.5 text-caption animate-in fade-in duration-300 motion-reduce:animate-none">
+            <Avatar actor={focus.assignee} size={16} />
+            <ShimmerText className="text-caption text-muted-foreground">Working</ShimmerText>
+          </span>
+        ) : null}
         <span className="flex items-center gap-3 text-muted-foreground">
+          <CircleCheck className="size-4" />
+          <Pin className="size-4" />
+          <MoreHorizontal className="size-4" />
           <Maximize2 className="size-3.5" />
-          <X className="size-3.5" />
+          <X className="size-4" />
         </span>
       </div>
-      <div className="flex min-h-0 flex-1 flex-col gap-5 overflow-hidden px-5 py-4">
-        <p className="text-title font-semibold leading-snug">{focus.title}</p>
-        <dl className="grid grid-cols-[88px_1fr] items-center gap-y-2.5 text-caption">
-          <dt className="text-muted-foreground">Status</dt>
-          <dd key={stage.column} className="flex items-center gap-1.5 animate-in fade-in duration-300 motion-reduce:animate-none">
-            <StatusIcon status={stage.column} className="h-3.5 w-3.5" />
-            {STATUS_LABEL[stage.column]}
-          </dd>
-          <dt className="text-muted-foreground">Priority</dt>
-          <dd key={focus.priority} className="flex items-center gap-1.5 animate-in fade-in duration-300 motion-reduce:animate-none">
-            <PriorityIcon priority={focus.priority} />
-            {PRIORITY_LABEL[focus.priority]}
-          </dd>
-          <dt className="text-muted-foreground">Assignee</dt>
-          {focus.assignee ? (
-            <dd key={focus.assignee.name} className="flex items-center gap-1.5 animate-in fade-in duration-300 motion-reduce:animate-none">
-              <Avatar actor={focus.assignee} size={16} />
-              {focus.assignee.name}
-            </dd>
-          ) : (
-            <dd className="text-muted-foreground">Unassigned</dd>
-          )}
-        </dl>
-        <div className="flex flex-col gap-3 border-t border-border pt-4">
-          <p className="text-caption font-medium text-muted-foreground">Activity</p>
-          <Activity stage={stage} />
+      <div ref={scrollRef} className="min-h-0 flex-1 overflow-hidden">
+        <div className="px-6 py-5">
+          <p className="text-title-lg leading-snug font-semibold tracking-tight">{focus.title}</p>
+          <div className="mt-3 flex flex-wrap items-center gap-1.5">
+            <Pill key={status.key}>
+              <CustomStatusIcon status={status} className="h-3.5 w-3.5" />
+              {status.name}
+            </Pill>
+            <Pill key={focus.priority}>
+              <PriorityIcon priority={focus.priority} />
+              {PRIORITY_LABEL[focus.priority]}
+            </Pill>
+            {focus.assignee ? (
+              <Pill key={focus.assignee.name}>
+                <Avatar actor={focus.assignee} size={16} />
+                {focus.assignee.name}
+              </Pill>
+            ) : null}
+            <Pill>
+              <FolderKanban className="size-3.5 text-muted-foreground" />
+              {workflow.project}
+            </Pill>
+            <Pill>
+              <Calendar className="size-3.5 text-muted-foreground" />
+              {workflow.focus.due}
+            </Pill>
+            <Pill>
+              <span className="size-2 rounded-full bg-brand" />
+              {workflow.focus.label}
+            </Pill>
+          </div>
+          <p className="mt-5 text-body leading-relaxed">{workflow.focus.description}</p>
+          <div className="mt-8 border-t border-border pt-6">
+            <h2 className="text-title-sm font-semibold">Activity</h2>
+            <div className="mt-4 flex flex-col gap-3">
+              {items.map((item, index) => (
+                <Entry key={index}>
+                  <TimelineRow item={item} statuses={workflow.statuses} />
+                </Entry>
+              ))}
+            </div>
+          </div>
+        </div>
+      </div>
+      <div className="shrink-0 px-6 pt-2 pb-4">
+        <div className="flex items-center justify-between rounded-lg border border-border px-3 py-2.5 text-body text-muted-foreground">
+          Leave a comment…
+          <span className="flex items-center gap-2">
+            <Paperclip className="size-3.5" />
+            <span className="flex size-6 items-center justify-center rounded-md bg-muted">
+              <ArrowUp className="size-3.5" />
+            </span>
+          </span>
         </div>
       </div>
     </aside>
   );
 }
 
-export function Entry({ children }: { children: ReactNode }) {
+function Pill({ children }: { children: ReactNode }) {
+  return (
+    <span className="inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-caption animate-in fade-in duration-300 motion-reduce:animate-none">
+      {children}
+    </span>
+  );
+}
+
+function Entry({ children }: { children: ReactNode }) {
   return <div className="animate-in fade-in slide-in-from-bottom-1 duration-300 motion-reduce:animate-none">{children}</div>;
 }
 
-export function ActivityRow({ icon, children }: { icon: ReactNode; children: ReactNode }) {
-  return (
-    <p className="flex items-center gap-2 text-caption text-muted-foreground">
-      <span className="flex size-4 items-center justify-center">{icon}</span>
-      <span>{children}</span>
-      <span className="ml-auto">just now</span>
-    </p>
-  );
-}
-
-export type RunStep = { icon: LucideIcon; text: ReactNode };
-
-/** An agent run whose steps appear one per entry from `at`; it finishes once all are shown. */
-export function RunCard({
-  actor,
-  runtime,
-  steps,
-  at,
-  entries,
-  duration,
-}: {
-  actor: Actor;
-  runtime: string;
-  steps: RunStep[];
-  at: number;
-  entries: number;
-  duration: string;
-}) {
-  const shown = Math.min(entries - at + 1, steps.length);
-  const running = entries < at + steps.length;
-  return (
-    <div className="rounded-lg border border-border bg-muted/40 p-3">
-      <div className="flex items-center justify-between text-caption">
-        <span className="flex items-center gap-1.5 font-medium">
-          <Avatar actor={actor} size={16} />
-          Run · {runtime}
-        </span>
-        {running ? (
-          <span className="flex items-center gap-1.5">
-            <span className="size-1.5 rounded-full bg-site-agent" />
-            <ShimmerText className="text-micro text-muted-foreground">Working</ShimmerText>
-          </span>
-        ) : (
-          <span className="flex items-center gap-1 text-micro text-muted-foreground">
-            <Check className="size-3" /> Finished in {duration}
-          </span>
-        )}
+function TimelineRow({ item, statuses }: { item: TimelineItem; statuses: Status[] }) {
+  if (item.kind === "comment") {
+    return (
+      <div className="overflow-clip rounded-xl border border-border bg-card">
+        <div className="flex items-center gap-2.5 px-4 pt-3 pb-2">
+          <Avatar actor={item.actor} size={24} />
+          <span className="text-body font-medium">{item.actor.name}</span>
+          <span className="text-caption text-muted-foreground">just now</span>
+        </div>
+        <div className="px-4 pb-3 text-body leading-relaxed">{item.body}</div>
       </div>
-      <ul className="mt-2.5 flex flex-col gap-1.5 font-mono text-micro">
-        {steps.slice(0, shown).map((runStep, index) => (
-          <li key={index} className="flex items-center gap-2 animate-in fade-in duration-300 motion-reduce:animate-none">
-            <runStep.icon className="size-3.5 shrink-0 text-muted-foreground" />
-            <span className="truncate">{runStep.text}</span>
-          </li>
-        ))}
-      </ul>
-    </div>
-  );
-}
-
-export function Comment({ actor, children }: { actor: Actor; children: ReactNode }) {
+    );
+  }
+  const byName = item.kind === "created" ? item.by : item.actor.name;
+  const lead =
+    item.kind === "created" ? (
+      item.icon
+    ) : (
+      <CustomStatusIcon status={statuses.find((s) => s.key === item.to)!} className="h-4 w-4 shrink-0" />
+    );
+  const text =
+    item.kind === "created"
+      ? "created this issue"
+      : `changed status from ${statuses.find((s) => s.key === item.from)?.name} to ${statuses.find((s) => s.key === item.to)?.name}`;
   return (
-    <div className="rounded-lg border border-surface-border bg-surface p-3 text-caption shadow-[var(--surface-shadow)]">
-      <div className="mb-1.5 flex items-center gap-1.5">
-        <Avatar actor={actor} size={16} />
-        <span className="font-medium">{actor.name}</span>
-        <span className="text-muted-foreground">just now</span>
+    <div className="text-caption text-muted-foreground">
+      <div className="flex items-center">
+        <div className="mr-2 flex w-4 shrink-0 justify-center">{lead}</div>
+        <div className="flex min-w-0 flex-1 items-center gap-1">
+          <span className="shrink-0 font-medium">{byName}</span>
+          <span className="truncate">{text}</span>
+          <span className="ml-auto shrink-0">just now</span>
+        </div>
       </div>
-      {children}
+      {item.handoff ? (
+        <div className="mt-1 ml-6 flex flex-wrap items-center gap-1.5">
+          <CornerDownRight className="size-3 shrink-0" />
+          <span>Handed to</span>
+          <Avatar actor={item.handoff} size={16} />
+          <span className="font-medium text-foreground">{item.handoff.name}</span>
+          <span>{item.handoff.kind === "member" ? "(member, no run)" : "and started a run"}</span>
+        </div>
+      ) : null}
     </div>
   );
 }

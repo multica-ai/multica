@@ -366,6 +366,32 @@
     }
 }
 
+/* Charts in the hero's issue peek: bars grow and lines draw in once, staggered
+   by an inline animation-delay. */
+@theme {
+    --animate-site-grow-x: site-grow-x 700ms cubic-bezier(0.22, 1, 0.36, 1) both;
+    --animate-site-grow-y: site-grow-y 600ms cubic-bezier(0.22, 1, 0.36, 1) both;
+    --animate-site-draw: site-draw 1200ms cubic-bezier(0.45, 0, 0.25, 1) both;
+
+    @keyframes site-grow-x {
+        from {
+            scale: 0 1;
+        }
+    }
+
+    @keyframes site-grow-y {
+        from {
+            scale: 1 0;
+        }
+    }
+
+    @keyframes site-draw {
+        from {
+            stroke-dashoffset: 1;
+        }
+    }
+}
+
 /* Logo wall: the track holds the list twice, so sliding it by half loops
    seamlessly. */
 @theme {
