@@ -269,17 +269,6 @@
     --frost-image: url("/images/frost/skills.webp");
 }
 
-.site-agent-pill {
-    background-color: oklch(0.93 0.05 var(--site-pill-hue));
-    transition: background-color 500ms cubic-bezier(0.22, 1, 0.36, 1);
-}
-
-@media (prefers-reduced-motion: reduce) {
-    .site-agent-pill {
-        transition: none;
-    }
-}
-
 /* Charts in the hero's issue peek: bars grow and lines draw in once, staggered
    by an inline animation-delay. */
 @theme {

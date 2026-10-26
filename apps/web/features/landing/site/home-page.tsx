@@ -4,6 +4,7 @@ import { useEffect, useRef, useState, type ComponentType, type CSSProperties } f
 import Link from "next/link";
 import { ArrowRight, Check, ChevronRight } from "lucide-react";
 import { cn } from "@multica/ui/lib/utils";
+import { BorderBeam } from "@multica/ui/components/common/border-beam";
 import { useAuthStore } from "@multica/core/auth";
 import { useDashboardCtaHref } from "../utils/use-dashboard-cta";
 import { FAQSection } from "../components/faq-section";
@@ -79,8 +80,6 @@ function Hero() {
 
 const HERO_AGENTS = ["Claude Code", "Codex", "Hermes", "OpenCode"] as const;
 const HERO_AGENT_HOLDS = HERO_AGENTS.map(() => 3600);
-// OKLCH hue per agent, in HERO_AGENTS order.
-const HERO_AGENT_HUES = [40, 255, 155, 300];
 
 function HeroHeadline() {
   const { ref, step } = useStoryLoop(HERO_AGENT_HOLDS, 0);
@@ -104,10 +103,7 @@ function HeroHeadline() {
         </span>
         <span aria-hidden className="block text-balance">
           Turn{" "}
-          <span
-            className="site-agent-pill inline-flex rounded-full px-[0.36em]"
-            style={{ "--site-pill-hue": HERO_AGENT_HUES[step] } as CSSProperties}
-          >
+          <span className="relative inline-flex rounded-full bg-brand/5 px-[0.36em]">
             <span
               className="inline-grid overflow-hidden transition-[width] duration-500 ease-[cubic-bezier(0.22,1,0.36,1)] motion-reduce:transition-none"
               style={{ width: widths?.[step] }}
@@ -128,6 +124,7 @@ function HeroHeadline() {
                 </span>
               ))}
             </span>
+            <BorderBeam />
           </span>{" "}
           into a teammate.
         </span>
