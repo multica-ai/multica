@@ -164,6 +164,15 @@ services:
       MULTICA_LLM_DEFAULT_MODEL: ${MULTICA_LLM_DEFAULT_MODEL:-}
       MULTICA_LLM_MAX_RETRIES: ${MULTICA_LLM_MAX_RETRIES:-}
       MULTICA_LLM_DISABLE_THINKING: ${MULTICA_LLM_DISABLE_THINKING:-}
+      # Feature flags. Workflows are GA and enabled by default for self-hosted
+      # deployments; experimental and Cloud-only flags stay off unless an
+      # operator opts in. Set MULTICA_FEATURE_FLAGS_FILE to a YAML rule file
+      # mounted into the container to configure any flag (including allowlists
+      # and percentage rollouts), or override a single flag with
+      # FF_<FLAG_KEY>. FF_* values beat the file. Only variables listed in this
+      # service reach the container; see SELF_HOSTING_ADVANCED.md#feature-flags.
+      MULTICA_FEATURE_FLAGS_FILE: ${MULTICA_FEATURE_FLAGS_FILE:-}
+      FF_PROJECT_WORKFLOWS_V1: ${FF_PROJECT_WORKFLOWS_V1:-true}
       # Lark / Feishu bot integration. MULTICA_LARK_SECRET_KEY is the
       # opt-in: unset = integration disabled. Mainland 飞书 and international
       # Lark are auto-detected per installation and served side by side, so

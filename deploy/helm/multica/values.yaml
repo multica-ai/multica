@@ -160,6 +160,19 @@ backend:
     # MULTICA_VCS_SECRET_KEY through existingSecret before connections work.
     # Set false to hide and reject the integration for this deployment.
     vcsIntegrationEnabled: true
+    # Self-host feature flags, rendered as FF_<FLAG_KEY> env entries on the
+    # backend. Keys are flag names (snake_case); values are passed as strings,
+    # so boolean switches and percentage strings such as "25%" both work.
+    # Workflows are GA and enabled by default; experimental and Cloud-only
+    # flags stay off unless added here. Flags absent from this map keep their
+    # built-in default. These are env overrides, so they take precedence over
+    # featureFlagsFile.
+    featureFlags:
+      project_workflows_v1: true
+    # Optional path to a YAML feature-flag rule file inside the backend
+    # container. Mount the file yourself and point this value at it; empty
+    # disables the file provider.
+    featureFlagsFile: ""
     # Managed multica-cloud connection. Empty keeps self-hosting independent.
     # Fleet, Billing, entitlement policy and strict seat capacity share it.
     cloud:

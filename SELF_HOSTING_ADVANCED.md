@@ -111,6 +111,90 @@ Things to know:
 
 > Note: setting `ALLOW_SIGNUP=false` enables invite-only account creation. A new user with a live pending workspace invitation can create an account with the invited email; users without an allowlist match or a valid invitation remain blocked. Invitations also permit emails outside configured allowlists when `ALLOW_SIGNUP=true`. Revocation does not delete accounts already created using an invitation or prevent those accounts from signing in. Combine this with `DISABLE_WORKSPACE_CREATION=true` when invitees must join an existing workspace instead of creating their own.
 
+### Feature Flags
+
+The server reads feature flags from two optional sources; the first match wins:
+
+1. `FF_<FLAG_KEY>` environment variables, for example `FF_PROJECT_WORKFLOWS_V1=false`. These are the operator kill switches and beat the file.
+2. The YAML rule file at `MULTICA_FEATURE_FLAGS_FILE`, when set. It supports `default`, a `variant` label, allow/deny entries, and percentage rollouts; see `server/pkg/featureflag` for the schema.
+3. The built-in default for the flag.
+
+Self-hosted deployments turn on the flags that are generally available and leave experimental or Cloud-only features off:
+
+| Flag | Self-host default | Controls |
+| --- | --- | --- |
+| `project_workflows_v1` | on | Workflows: project status flows, handoffs, and `Settings → Workflows` |
+| `plugins_v1` | off | Plugin catalog and lifecycle APIs (experimental; also needs `MULTICA_PLUGIN_SECRET_KEY` and `MULTICA_PLUGIN_SURFACE_ORIGIN`) |
+| `composio_mcp_apps` | off | Composio app connections (also needs `COMPOSIO_API_KEY`) |
+| `billing_workspace_subscriptions` | off | Cloud subscription and billing proxying (requires `MULTICA_CLOUD_URL`) |
+| `local_search_index` | on | Web/Desktop local search index sync |
+
+#### Docker Compose
+
+`docker-compose.selfhost.yml` forwards `FF_PROJECT_WORKFLOWS_V1` (default `true`) and `MULTICA_FEATURE_FLAGS_FILE`. Set the flag in `.env` to hide Workflows:
+
+```dotenv
+FF_PROJECT_WORKFLOWS_V1=false
+```
+
+Compose only passes variables listed in its backend service. To set any other flag, add it to a `docker-compose.override.yml` next to the compose file; Compose merges that file automatically:
+
+```yaml
+services:
+  backend:
+    environment:
+      FF_PLUGINS_V1: "true"
+```
+
+For allowlists or percentage rollouts, mount a rule file and point `MULTICA_FEATURE_FLAGS_FILE` at it:
+
+```yaml
+services:
+  backend:
+    environment:
+      MULTICA_FEATURE_FLAGS_FILE: /etc/multica/feature-flags.yaml
+    volumes:
+      - ./feature-flags.yaml:/etc/multica/feature-flags.yaml:ro
+```
+
+```yaml
+# feature-flags.yaml
+project_workflows_v1:
+  default: true
+plugins_v1:
+  default: true
+```
+
+An `FF_*` environment variable beats the file. The Compose stack sets
+`FF_PROJECT_WORKFLOWS_V1` (default `true`) and the Helm chart sets every entry
+in `backend.config.featureFlags`, so those flags never reach the file — change
+them through the env/values instead. Use the file for the remaining flags and
+for allowlist or percentage rules.
+
+Restart the backend after changing the file or environment: `docker compose up -d backend`.
+
+#### Kubernetes (Helm)
+
+The chart renders `backend.config.featureFlags` as `FF_<FLAG_KEY>` environment entries and keeps Workflows on by default. For example, to enable Plugins on an existing release:
+
+```bash
+helm upgrade multica oci://ghcr.io/multica-ai/charts/multica \
+  --reuse-values \
+  --set backend.config.featureFlags.plugins_v1=true
+```
+
+Set `backend.config.featureFlags.project_workflows_v1=false` to hide Workflows, and `backend.config.featureFlagsFile` when you mount your own YAML rule file. `helm upgrade` rolls the backend pod when the ConfigMap changes.
+
+#### Verify
+
+`/api/config` reports the flags the running process resolved:
+
+```bash
+curl -s http://localhost:8080/api/config | jq '.feature_flags'
+```
+
+The web UI reads that response, so no frontend rebuild is needed. Enabling `plugins_v1` or `composio_mcp_apps` is not sufficient on its own: the related secrets and URLs must be configured as well.
+
 ### File Storage (Optional)
 
 Uploads and attachments are written to local disk by default. Set `S3_BUCKET` to

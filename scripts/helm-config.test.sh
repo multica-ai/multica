@@ -37,6 +37,39 @@ require_rendered_value "$default_config" 'MULTICA_CLOUD_URL: ""'
 require_rendered_value "$default_config" 'MULTICA_DATABASE_STARTUP_TIMEOUT: "3m"'
 require_rendered_value "$default_config" 'MULTICA_DATABASE_CONNECT_TIMEOUT: "5s"'
 
+# Feature flags are part of the self-host contract: Workflows are GA and on by
+# default, and operators can flip any flag through values without editing
+# templates. A chart that silently drops these keys leaves the shipped default
+# in place, so assert the rendered env entries themselves.
+require_rendered_value "$default_config" 'MULTICA_FEATURE_FLAGS_FILE: ""'
+require_rendered_value "$default_config" 'FF_PROJECT_WORKFLOWS_V1: "true"'
+workflows_disabled_config="$(
+  helm template multica "$CHART_DIR" \
+    --show-only templates/configmap.yaml \
+    --set backend.config.featureFlags.project_workflows_v1=false
+)"
+require_rendered_value "$workflows_disabled_config" 'FF_PROJECT_WORKFLOWS_V1: "false"'
+plugins_enabled_config="$(
+  helm template multica "$CHART_DIR" \
+    --show-only templates/configmap.yaml \
+    --set backend.config.featureFlags.plugins_v1=true
+)"
+require_rendered_value "$plugins_enabled_config" 'FF_PLUGINS_V1: "true"'
+flags_file_config="$(
+  helm template multica "$CHART_DIR" \
+    --show-only templates/configmap.yaml \
+    --set backend.config.featureFlagsFile=/etc/multica/feature-flags.yaml
+)"
+require_rendered_value "$flags_file_config" 'MULTICA_FEATURE_FLAGS_FILE: "/etc/multica/feature-flags.yaml"'
+# `helm upgrade --reuse-values` from a release that predates featureFlags
+# carries no map at all; the chart must still keep Workflows on.
+reuse_values_config="$(
+  helm template multica "$CHART_DIR" \
+    --show-only templates/configmap.yaml \
+    --set backend.config.featureFlags=null
+)"
+require_rendered_value "$reuse_values_config" 'FF_PROJECT_WORKFLOWS_V1: "true"'
+
 require_rendered_value "$default_config" 'MAINTENANCE_PORT: ""'
 maintenance_config="$(helm template multica "$CHART_DIR" --show-only templates/configmap.yaml --set-string backend.config.maintenancePort=6061)"
 require_rendered_value "$maintenance_config" 'MAINTENANCE_PORT: "6061"'

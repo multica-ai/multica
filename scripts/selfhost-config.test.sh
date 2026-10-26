@@ -70,6 +70,14 @@ require_config "$config" 'DATABASE_REPLICA_URL: postgres://reader:secret@replica
 require_config "$config" 'DATABASE_REPLICA_MAX_CONNS: "12"'
 require_config "$config" 'DATABASE_REPLICA_MIN_CONNS: "1"'
 
+# Feature flags are part of the self-host contract. Workflows are GA, so the
+# Compose stack turns them on unless the env file says otherwise; a deployment
+# that leaves the flag at the server default hides the feature silently.
+require_config "$config" 'MULTICA_FEATURE_FLAGS_FILE: ""'
+require_config "$config" 'FF_PROJECT_WORKFLOWS_V1: "true"'
+workflows_disabled_config="$(FF_PROJECT_WORKFLOWS_V1=false docker compose --env-file "$tmp_env" -f docker-compose.selfhost.yml config)"
+require_config "$workflows_disabled_config" 'FF_PROJECT_WORKFLOWS_V1: "false"'
+
 # The backend environment is an explicit allowlist, so a variable documented in
 # .env.example but missing here silently never reaches the container: the
 # operator configures it, the server never sees it, and nothing reports the gap.
@@ -87,6 +95,16 @@ while IFS= read -r llm_var; do
     exit 1
   fi
 done < <(grep -oE '^MULTICA_LLM_[A-Z_]+' .env.example)
+
+# Same drift check for feature flags: every FF_* the env template advertises
+# must reach the backend service, or setting it in .env is a no-op.
+while IFS= read -r flag_var; do
+  if ! grep -Eq "^[[:space:]]+${flag_var}: \\\$\{${flag_var}:-" docker-compose.selfhost.yml; then
+    echo "$flag_var is documented in .env.example but not mapped into the backend"
+    echo "service in docker-compose.selfhost.yml, so self-hosted deployments cannot set it."
+    exit 1
+  fi
+done < <(grep -oE '^FF_[A-Z0-9_]+' .env.example)
 
 # The same drift for integration encryption keys, keyed on the server rather
 # than on .env.example: each secretbox.LoadKey() gates an integration that
