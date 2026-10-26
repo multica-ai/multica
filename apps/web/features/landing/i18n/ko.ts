@@ -281,7 +281,7 @@ export function createKoDict(
         {
           version: "0.7.0",
           date: "2026-10-23",
-          title: "Qoder Cloud Agents 지원, 지정한 멤버와 런타임 공유, PR 충돌 시 깨우기, 더 안전한 실행",
+          title: "워크플로 기능 전면 개방, Qoder Cloud Agents 지원, 지정한 멤버와 런타임 공유",
           changes: [],
           features: [
             "Qoder Cloud Agents로 Issue를 실행할 수 있습니다. 에이전트를 만들 때 머신이나 클라우드 서비스를 고른 뒤 Qoder Cloud Agents의 에이전트를 연결합니다.",

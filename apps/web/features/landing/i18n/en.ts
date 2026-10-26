@@ -525,7 +525,7 @@ export function createEnDict(
       {
         version: "0.7.0",
         date: "2026-10-23",
-        title: "Qoder Cloud Agents, runtimes shared with chosen members, PR conflict wakeups, and safer runs",
+        title: "Workflows open to everyone, Qoder Cloud Agents, and runtimes shared with chosen members",
         changes: [],
         features: [
           "Run Issues on Qoder Cloud Agents: when creating an agent, pick a machine or a cloud service, then link a Qoder Cloud Agents agent.",
