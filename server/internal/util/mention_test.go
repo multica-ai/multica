@@ -98,6 +98,64 @@ func TestParseMentions(t *testing.T) {
 			content: "[<span></span>](mention://agent/aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa)",
 		},
 		{
+			name:    "script content removed by sanitization is not a visible label",
+			content: "[<script>Agent</script>](mention://agent/aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa)",
+		},
+		{
+			name:    "script content cannot turn an at prefix into a visible label",
+			content: "[<script>Agent</script>@](mention://agent/aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa)",
+		},
+		{
+			name:    "uppercase script with attributes is ignored",
+			content: `[<SCRIPT type="text/plain">Agent</SCRIPT>](mention://agent/aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa)`,
+		},
+		{
+			name:    "self closing script still hides following label text",
+			content: "[<script/>Agent](mention://agent/aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa)",
+		},
+		{
+			name:    "nested script opener does not hide the real closing tag",
+			content: "[<script>outer<script>inner</script>@](mention://agent/aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa)",
+		},
+		{
+			name:    "formatted script text is still hidden",
+			content: "[<script>**Agent**</script>](mention://agent/aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa)",
+		},
+		{
+			name:    "text moved outside the mention by raw HTML does not validate its label",
+			content: "[</a>Bob](mention://agent/aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa)",
+		},
+		{
+			name:    "visible span label still triggers",
+			content: "[<span>Bob</span>](mention://agent/aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa)",
+			want:    []Mention{{Type: "agent", ID: "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"}},
+		},
+		{
+			name:    "visible label after script still triggers",
+			content: "[<script>hidden</script><span>Bob</span>](mention://agent/aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa)",
+			want:    []Mention{{Type: "agent", ID: "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"}},
+		},
+		{
+			name:    "visible label before script still triggers",
+			content: "[Bob<script>hidden</script>](mention://agent/aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa)",
+			want:    []Mention{{Type: "agent", ID: "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"}},
+		},
+		{
+			name:    "style text unwrapped by sanitization stays visible",
+			content: "[<style>Agent</style>](mention://agent/aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa)",
+			want:    []Mention{{Type: "agent", ID: "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"}},
+		},
+		{
+			name:    "literal script in code label stays visible",
+			content: "[`<script>Agent</script>`](mention://agent/aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa)",
+			want:    []Mention{{Type: "agent", ID: "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"}},
+		},
+		{
+			name:    "escaped script label stays visible",
+			content: "[&lt;script&gt;Agent&lt;/script&gt;](mention://agent/aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa)",
+			want:    []Mention{{Type: "agent", ID: "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"}},
+		},
+		{
 			name:    "full reference link is ignored",
 			content: "[@Agent][target]\n\n[target]: mention://agent/aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa",
 		},

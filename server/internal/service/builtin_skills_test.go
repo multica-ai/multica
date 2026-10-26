@@ -459,6 +459,7 @@ func TestPlatformSkillCoversPlatformContracts(t *testing.T) {
 			want: []string{
 				"(member|agent|squad|issue|all)/([0-9a-fA-F-]+|all)",
 				"canonical inline links with visible label text",
+				"Text removed by HTML sanitization",
 				"reference links, images, autolinks, titles",
 				"Code examples are inert as mentions",
 				"A fenced `diff` of agent instructions cannot invoke",
@@ -682,6 +683,10 @@ func TestPlatformSkillTeachesTheParserContract(t *testing.T) {
 		{
 			name:    "empty label cannot trigger an agent",
 			content: "[](mention://agent/" + uuid + ")",
+		},
+		{
+			name:    "script content cannot make an agent label visible",
+			content: "[<script>Agent</script>@](mention://agent/" + uuid + ")",
 		},
 		{
 			name:    "reference link cannot trigger an agent",

@@ -1,15 +1,19 @@
 package util
 
 import (
+	"bytes"
 	"html"
 	"regexp"
 	"strings"
 	"unicode"
 
+	"github.com/yuin/goldmark"
 	"github.com/yuin/goldmark/ast"
 	"github.com/yuin/goldmark/parser"
+	goldmarkhtml "github.com/yuin/goldmark/renderer/html"
 	"github.com/yuin/goldmark/text"
 	goldmarkutil "github.com/yuin/goldmark/util"
+	nethtml "golang.org/x/net/html"
 )
 
 // Mention represents a parsed @mention from markdown content.
@@ -122,10 +126,14 @@ func parseMentionLink(link *ast.Link, span text.Segment, source []byte) (Mention
 	}
 
 	var label strings.Builder
+	hasRawHTML := false
 	_ = ast.Walk(link, func(n ast.Node, entering bool) (ast.WalkStatus, error) {
 		if entering {
 			if _, ok := n.(*ast.Image); ok {
 				return ast.WalkSkipChildren, nil
+			}
+			if _, ok := n.(*ast.RawHTML); ok {
+				hasRawHTML = true
 			}
 			if node, ok := n.(*ast.Text); ok {
 				value := node.Segment.Value(source)
@@ -139,8 +147,12 @@ func parseMentionLink(link *ast.Link, span text.Segment, source []byte) (Mention
 		}
 		return ast.WalkContinue, nil
 	})
+	labelText := label.String()
+	if hasRawHTML {
+		labelText = renderedMentionLabelText(link, source)
+	}
 	firstVisible := true
-	for _, r := range label.String() {
+	for _, r := range labelText {
 		if unicode.Is(unicode.Other_Default_Ignorable_Code_Point, r) || r == '\u2800' {
 			continue
 		}
@@ -153,6 +165,46 @@ func parseMentionLink(link *ast.Link, span text.Segment, source []byte) (Mention
 		}
 	}
 	return Mention{}, false
+}
+
+// Raw HTML changes which text survives the frontend's rehype-raw/sanitize
+// pipeline. Parse the rendered fragment so script raw-text rules (including
+// case, attributes, and self-closing syntax) match HTML rather than Markdown.
+// This HTML is only inspected in memory; it is never served or executed.
+func renderedMentionLabelText(link *ast.Link, source []byte) string {
+	var rendered bytes.Buffer
+	markdown := goldmark.New(goldmark.WithRendererOptions(goldmarkhtml.WithUnsafe()))
+	if err := markdown.Renderer().Render(&rendered, source, link); err != nil {
+		return ""
+	}
+	doc, err := nethtml.Parse(&rendered)
+	if err != nil {
+		return ""
+	}
+	var label strings.Builder
+	var collect func(*nethtml.Node)
+	collect = func(n *nethtml.Node) {
+		// markdownSanitizeSchema inherits defaultSchema.strip = ["script"].
+		// Other disallowed tags, such as style, are unwrapped, keeping text.
+		if n.Type == nethtml.ElementNode && n.Data == "script" {
+			return
+		}
+		if n.Type == nethtml.TextNode {
+			label.WriteString(n.Data)
+		}
+		for child := n.FirstChild; child != nil; child = child.NextSibling {
+			collect(child)
+		}
+	}
+	// Only the generated anchor is the mention label. Raw closing tags can
+	// move text outside it; that text must not validate an empty mention.
+	for node := range doc.Descendants() {
+		if node.Type == nethtml.ElementNode && node.Data == "a" {
+			collect(node)
+			break
+		}
+	}
+	return label.String()
 }
 
 // HasMentionAll returns true if any mention in the slice is an @all mention.
