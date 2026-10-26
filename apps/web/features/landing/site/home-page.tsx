@@ -215,7 +215,7 @@ const FEATURES: { id: string; title: string; body: string; alt: string; visual: 
     id: "chat",
     title: "Mention an agent in chat",
     body: "From Slack, Lark, DingTalk, WeCom, or Telegram. The agent reads the thread, files the issue, and gets to work.",
-    alt: "A chat channel where Mia mentions Backend Agent about failing exports and the agent replies with the issue it filed and is working on",
+    alt: "A team chat channel where Mia mentions Backend Agent about failing exports, and the agent replies in the channel with a link to the Multica issue it filed and is working on",
     visual: ChatVisual,
   },
   {
