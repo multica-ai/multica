@@ -82,6 +82,10 @@ func Auth(queries *db.Queries, patCache *auth.PATCache, cloudPAT *auth.CloudPATV
 					http.Error(w, `{"error":"invalid token"}`, http.StatusUnauthorized)
 					return
 				}
+				if tt.IsAidoOwner && !aidoOwnerRequestAllowed(r, queries, tt) {
+					http.Error(w, `{"error":"AIDO task capability denied"}`, http.StatusForbidden)
+					return
+				}
 				r.Header.Set("X-User-ID", uuidToString(tt.UserID))
 				r.Header.Set("X-Agent-ID", uuidToString(tt.AgentID))
 				r.Header.Set("X-Task-ID", uuidToString(tt.TaskID))

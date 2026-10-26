@@ -160,6 +160,17 @@ hand the new user a broad PAT or assume the current default task token's scope
 has been narrowed by an OS user boundary. See relay
 `docs/NEX-1565-os-stage.md` for precise verified/unverified behavior.
 
+Subsequent candidate code implements the API scope gate in migration 135:
+immutable agent/runtime binding, sticky is_aido_owner task-token flag, human
+admin binding API/CLI, current-task message reads and same-session attachment
+download only. Existing internal tokens retain their behavior. Binding removal,
+runtime movement, token downgrade and unsafe rollback are guarded. This is a
+server capability policy, not OS UID attestation. No live binding was created.
+Relay's isolated owner mode and external display transport are opt-in and
+disabled in production. See `docs/NEX-1565-owner-integration.md` in relay PR #1.
+The remaining gate is real provisioning plus the connected UID490 daemon/DB
+regression, rather than treating component tests as that full proof.
+
 Before activating, record affected relay session/task IDs (no message bodies or
 secrets), runtime SHA and PIDs. Pause inbound relay; drain/cancel its old queued,
 dispatched and running tasks and revoke their task tokens. Existing records have

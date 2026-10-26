@@ -12,7 +12,12 @@ pointing to the main user's home, and no shared history/resume/workdir.
 Do not give the agent a broad PAT or copy provider credentials from the main
 account. A runtime credential is held by its daemon; task credentials must be
 reviewed for the minimal AIDO API scope before enabling any real owner task.
-The current default task-token permissions are not claimed to satisfy that gate.
+Migration 135 and the human-admin `agent bind-aido-owner` command now provide
+an immutable binding and persistent minimum API scope: only the current task's
+messages and its chat session's attachments are readable. No API writes or
+issue/history/credential enumeration are permitted. The new dedicated agent
+must be bound **before** its first claim. The server's binding does not attest
+the OS identity; independent UID/credential verification remains required.
 
 `env -i` avoids inherited secrets. HOME, binaries, logs and workdir are specific
 to the new user. The model's own fresh login/configuration must live there;
@@ -21,7 +26,7 @@ staging tests use mock model output and never read provider/Google token bytes.
 
 The plist is deliberately RunAtLoad=false and KeepAlive=false and was only
 linted. Do not install/bootstrap it until the complete relay lane integration,
-task token scope, independent validation and cutover decision are available.
+actual scoped-credential provisioning, independent validation and cutover decision are available.
 
 Before a future install, record the binary SHA, credential provisioning method,
 new runtime/agent UUIDs, final plist path/label, permissions and affected PIDs in
