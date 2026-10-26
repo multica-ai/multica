@@ -219,9 +219,8 @@
     }
 }
 
-/* Feature and story cards: a frosted field per card — a heavily blurred crop of one of
-   the brand illustrations for features, a pale warm wash for the before-and-after
-   stage so it stays behind the product — with film grain blended over it. The grain tile
+/* Feature and story cards: a frosted field per card — a pale, low-chroma warm wash, so
+   the product screen inside stays the focus — with film grain blended over it. The grain tile
    is drawn at 1:1 device pixels and never smoothed, so it stays fine. Content
    inside must be positioned to paint above the grain. */
 .site-frost {
