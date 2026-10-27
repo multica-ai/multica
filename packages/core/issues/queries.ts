@@ -413,8 +413,10 @@ async function fetchProjectGanttIssues(
     if (res.issues.length === 0) break;
     if (issues.length >= res.total) break;
     if (res.issues.length < PROJECT_GANTT_PAGE_LIMIT) break;
-    // Advance by what the server actually returned, so a server-side page
-    // cap smaller than the requested limit can't skip issues.
+    // Advance by what the server actually returned. This does not make the
+    // loop tolerate a server cap below PROJECT_GANTT_PAGE_LIMIT — a capped
+    // page is short and ends the loop above — so the constant must stay in
+    // sync with the server's ListIssues page-size cap.
     offset += res.issues.length;
   }
   return issues;
