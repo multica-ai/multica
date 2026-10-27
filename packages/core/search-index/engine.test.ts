@@ -7,6 +7,7 @@ import {
   extractSnippet,
   splitSearchTerms,
   timestampMicros,
+  toSearchChatMessageResult,
   toSearchIssueResult,
   toSearchProjectResult,
 } from "./engine";
@@ -378,5 +379,73 @@ describe("text budget accounting", () => {
     expect(engine.textBytes).toBe(1 + 2);
     engine.clear();
     expect(engine.textBytes).toBe(0);
+  });
+});
+
+describe("SearchIndexEngine.searchMessages", () => {
+  function chatEngine() {
+    const engine = new SearchIndexEngine();
+    engine.upsertChatSession({ id: "s1", agent_id: "a1", title: "Deploy chat", status: "active" });
+    return engine;
+  }
+
+  function message(id: string, content: string, createdAt: string) {
+    return { id, chat_session_id: "s1", role: "user" as const, content, created_at: createdAt };
+  }
+
+  it("orders phrase hits above scattered terms, then newest first, then id", () => {
+    const engine = chatEngine();
+    engine.upsertChatMessage(message("m0000001", "please rotate keys now", "2026-01-01T00:00:01.000001Z"));
+    engine.upsertChatMessage(message("m0000002", "keys for the rotate job", "2026-01-01T00:00:02.000002Z"));
+    engine.upsertChatMessage(message("m0000003", "rotate keys tonight", "2026-01-01T00:00:03.000003Z"));
+    // Same tier and timestamp: the later id wins, mirroring PostgreSQL's uuid
+    // byte order.
+    engine.upsertChatMessage(message("m0000004", "rotate keys again", "2026-01-01T00:00:03.000003Z"));
+
+    expect(engine.searchMessages({ q: "rotate keys" }).map((h) => h.id)).toEqual([
+      "m0000004",
+      "m0000003",
+      "m0000001",
+      "m0000002",
+    ]);
+  });
+
+  it("needs every word of a multi-word query", () => {
+    const engine = chatEngine();
+    engine.upsertChatMessage(message("m0000001", "deploy api", "2026-01-01T00:00:00Z"));
+    engine.upsertChatMessage(message("m0000002", "only deploy mentioned", "2026-01-01T00:00:01Z"));
+    expect(engine.searchMessages({ q: "deploy api" }).map((h) => h.id)).toEqual(["m0000001"]);
+  });
+
+  it("drops a session's messages with the session", () => {
+    const engine = chatEngine();
+    engine.upsertChatMessage(message("m0000001", "unique needle", "2026-01-01T00:00:00Z"));
+    engine.deleteChatSession("s1");
+    expect(engine.searchMessages({ q: "needle" })).toEqual([]);
+  });
+
+  it("counts message bytes in the budget", () => {
+    const engine = chatEngine();
+    engine.upsertChatMessage(message("m0000001", "abc", "2026-01-01T00:00:00Z"));
+    expect(engine.textBytes).toBe(3);
+    engine.deleteChatMessage("m0000001");
+    expect(engine.textBytes).toBe(0);
+  });
+});
+
+describe("toSearchChatMessageResult", () => {
+  it("returns the server row shape with a snippet and session metadata", () => {
+    const result = toSearchChatMessageResult(
+      { id: "m1", chat_session_id: "s1", role: "assistant", content: "the deploy finished", created_at: "2026-01-01T00:00:00.5Z" },
+      { id: "s1", agent_id: "a1", title: "Deploy chat", status: "active" },
+      "deploy",
+    );
+    expect(result).toMatchObject({
+      id: "m1",
+      chat_session_id: "s1",
+      match_source: "content",
+      matched_snippet: "the deploy finished",
+      session: { title: "Deploy chat" },
+    });
   });
 });

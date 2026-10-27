@@ -21,6 +21,8 @@ import enSearch from "../locales/en/search.json";
 import enLayout from "../locales/en/layout.json";
 import enProjects from "../locales/en/projects.json";
 import zhHansProjects from "../locales/zh-Hans/projects.json";
+// The chat row falls back to the chat namespace's untitled/archived labels.
+import enChat from "../locales/en/chat.json";
 
 const TEST_RESOURCES = {
   en: {
@@ -30,6 +32,7 @@ const TEST_RESOURCES = {
     search: enSearch,
     layout: enLayout,
     projects: enProjects,
+    chat: enChat,
   },
 };
 
@@ -46,6 +49,7 @@ const ZH_TEST_RESOURCES = {
     search: enSearch,
     layout: enLayout,
     projects: zhHansProjects,
+    chat: enChat,
   },
 };
 
@@ -74,6 +78,7 @@ const {
   mockPush,
   mockSearchIssues,
   mockSearchProjects,
+  mockSearchChatMessages,
   mockRecentItems,
   mockAllIssues,
   mockSetTheme,
@@ -97,6 +102,7 @@ const {
   mockPush: vi.fn(),
   mockSearchIssues: vi.fn(),
   mockSearchProjects: vi.fn(),
+  mockSearchChatMessages: vi.fn(),
   mockRecentItems: { current: [] as Array<{ id: string; visitedAt: number }> },
   mockAllIssues: { current: [] as Array<Record<string, unknown>> },
   mockSetTheme: vi.fn(),
@@ -156,6 +162,7 @@ vi.mock("@multica/core/api", () => ({
     getBaseUrl: () => "http://127.0.0.1:8080",
     searchIssues: mockSearchIssues,
     searchProjects: mockSearchProjects,
+    searchChatMessages: mockSearchChatMessages,
   },
 }));
 
@@ -340,6 +347,7 @@ describe("SearchCommand", () => {
     mockPush.mockReset();
     mockSearchIssues.mockReset().mockResolvedValue({ issues: [] });
     mockSearchProjects.mockReset().mockResolvedValue({ projects: [] });
+    mockSearchChatMessages.mockReset().mockResolvedValue({ messages: [] });
     mockRecentItems.current = [];
     mockAllIssues.current = [];
     mockAgents.current = [];
@@ -1451,5 +1459,54 @@ describe("SearchCommand", () => {
       expect(mockPush).not.toHaveBeenCalled();
       expect(useSearchStore.getState().open).toBe(true);
     });
+  });
+
+  it("lists chat message hits and navigates to the conversation on the message", async () => {
+    const user = userEvent.setup();
+    mockSearchChatMessages.mockResolvedValue({
+      messages: [
+        {
+          id: "msg-1",
+          chat_session_id: "sess-1",
+          role: "user",
+          content: "deploy the payment service",
+          created_at: "2026-01-01T00:00:00Z",
+          match_source: "content",
+          matched_snippet: "deploy the payment service",
+          session: { id: "sess-1", agent_id: "agent-1", title: "Deploy chat", status: "active" },
+        },
+        {
+          id: "msg-2",
+          chat_session_id: "sess-2",
+          role: "assistant",
+          content: "the payment plan is ready",
+          created_at: "2026-01-01T00:00:01Z",
+          match_source: "content",
+          matched_snippet: "the payment plan is ready",
+          session: { id: "sess-2", agent_id: "agent-1", title: "", status: "archived" },
+        },
+      ],
+    });
+    renderSearch();
+
+    const input = screen.getByPlaceholderText("Type a command or search...");
+    await user.type(input, "payment");
+
+    await waitFor(() => {
+      expect(screen.getByText("Chats")).toBeInTheDocument();
+    });
+    expect(screen.getByText("Deploy chat")).toBeInTheDocument();
+    // An untitled session falls back to the chat namespace's label, the same
+    // one the thread list uses.
+    expect(screen.getByText("New chat")).toBeInTheDocument();
+    expect(screen.getByText("Archived")).toBeInTheDocument();
+    expect(
+      screen.getByText((_, el) => el?.textContent === "deploy the payment service" && el?.tagName === "SPAN"),
+    ).toBeInTheDocument();
+
+    await user.click(screen.getByText("Deploy chat"));
+
+    expect(mockPush).toHaveBeenCalledWith("/ws-test/chat?session=sess-1&message=msg-1");
+    expect(useSearchStore.getState().open).toBe(false);
   });
 });

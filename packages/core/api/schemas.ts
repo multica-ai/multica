@@ -81,6 +81,7 @@ import type {
   PluginSurfaceLaunch,
   ResourceLabelsResponse,
   RuntimeModelListRequest,
+  SearchChatMessagesResponse,
   SearchIssuesResponse,
   SearchProjectsResponse,
   ShareLink,
@@ -1564,6 +1565,30 @@ export const EMPTY_SEARCH_PROJECTS_RESPONSE: SearchProjectsResponse = {
   projects: [],
 };
 
+const SearchChatMessageResultSchema = z.object({
+  id: z.string(),
+  chat_session_id: z.string(),
+  role: z.string(),
+  content: z.string(),
+  created_at: z.string(),
+  match_source: z.string(),
+  matched_snippet: z.string().optional(),
+  session: z.object({
+    id: z.string(),
+    agent_id: z.string(),
+    title: z.string(),
+    status: z.string(),
+  }).loose(),
+}).loose();
+
+export const SearchChatMessagesResponseSchema = z.object({
+  messages: z.array(SearchChatMessageResultSchema).default([]),
+}).loose();
+
+export const EMPTY_SEARCH_CHAT_MESSAGES_RESPONSE: SearchChatMessagesResponse = {
+  messages: [],
+};
+
 // Local search index sync (MUL-7754). Callers reject a response that fails
 // these schemas instead of degrading to an empty value: an empty snapshot page
 // or change set would be applied to the local copy as truth.
@@ -1582,6 +1607,21 @@ const SearchIndexCommentSchema = z.object({
   created_at: z.string(),
 }).loose();
 
+const SearchIndexChatSessionSchema = z.object({
+  id: z.string().min(1),
+  agent_id: z.string().min(1),
+  title: z.string(),
+  status: z.string(),
+}).loose();
+
+const SearchIndexChatMessageSchema = z.object({
+  id: z.string().min(1),
+  chat_session_id: z.string().min(1),
+  role: z.string(),
+  content: z.string(),
+  created_at: z.string(),
+}).loose();
+
 export const SearchIndexManifestSchema = z.object({
   cursor: z.string().min(1),
   issue_count: z.number(),
@@ -1590,11 +1630,17 @@ export const SearchIndexManifestSchema = z.object({
   text_bytes: z.number(),
 }).loose();
 
+// The chat arrays default so an older backend (local index before chat, or a
+// server without migration 589) still parses: the copy then simply holds no
+// chat text instead of failing the whole snapshot.
 export const SearchIndexSnapshotPageSchema = z.object({
   issues: z.array(SearchIndexIssueSchema),
   comments: z.array(SearchIndexCommentSchema),
   projects: z.array(SearchIndexProjectSchema),
+  sessions: z.array(SearchIndexChatSessionSchema).default([]),
+  messages: z.array(SearchIndexChatMessageSchema).default([]),
   next_after_number: z.number(),
+  next_after_message_id: z.string().default(""),
   done: z.boolean(),
 }).loose();
 
@@ -1602,10 +1648,14 @@ export const SearchIndexChangesSchema = z.object({
   issues: z.array(SearchIndexIssueSchema),
   comments: z.array(SearchIndexCommentSchema),
   projects: z.array(SearchIndexProjectSchema),
+  sessions: z.array(SearchIndexChatSessionSchema).default([]),
+  messages: z.array(SearchIndexChatMessageSchema).default([]),
   deleted: z.object({
     issues: z.array(z.string()),
     comments: z.array(z.string()),
     projects: z.array(z.string()),
+    sessions: z.array(z.string()).default([]),
+    messages: z.array(z.string()).default([]),
   }).loose(),
   cursor: z.string().min(1),
   has_more: z.boolean(),

@@ -559,6 +559,31 @@ export interface SearchProjectsResponse {
   projects: SearchProjectResult[];
 }
 
+/** Session metadata attached to a chat message hit so the row can name and
+ *  open its conversation without another request. */
+export interface SearchChatMessageSession {
+  id: string;
+  agent_id: string;
+  title: string;
+  status: string;
+}
+
+export interface SearchChatMessageResult {
+  id: string;
+  chat_session_id: string;
+  role: string;
+  content: string;
+  /** RFC 3339 with sub-second precision, the field ranking ties break on. */
+  created_at: string;
+  match_source: "content";
+  matched_snippet?: string;
+  session: SearchChatMessageSession;
+}
+
+export interface SearchChatMessagesResponse {
+  messages: SearchChatMessageResult[];
+}
+
 // Local search index sync (MUL-7754): GET /api/search-index/manifest,
 // GET /api/search-index/snapshot, POST /api/search-index/changes.
 
@@ -581,6 +606,25 @@ export interface SearchIndexComment {
   created_at: string;
 }
 
+/** Chat session as the local index stores it: just the display metadata of a
+ *  hit's conversation. */
+export interface SearchIndexChatSession {
+  id: string;
+  agent_id: string;
+  title: string;
+  status: string;
+}
+
+/** Chat message as the local index stores it. */
+export interface SearchIndexChatMessage {
+  id: string;
+  chat_session_id: string;
+  role: string;
+  content: string;
+  /** Sub-second RFC 3339 timestamp. */
+  created_at: string;
+}
+
 export interface SearchIndexManifest {
   /** Opaque catch-up cursor for the snapshot the new copy starts from. */
   cursor: string;
@@ -596,7 +640,12 @@ export interface SearchIndexSnapshotPage {
   comments: SearchIndexComment[];
   /** Every project, on the first page only. */
   projects: SearchIndexProject[];
+  /** Every chat session of the requesting member, on the first page only. */
+  sessions: SearchIndexChatSession[];
+  messages: SearchIndexChatMessage[];
   next_after_number: number;
+  /** Cursor of the chat message page; empty on the first page. */
+  next_after_message_id: string;
   done: boolean;
 }
 
@@ -604,10 +653,15 @@ export interface SearchIndexChanges {
   issues: SearchIndexIssue[];
   comments: SearchIndexComment[];
   projects: SearchIndexProject[];
+  sessions: SearchIndexChatSession[];
+  messages: SearchIndexChatMessage[];
   deleted: {
     issues: string[];
     comments: string[];
     projects: string[];
+    /** A deleted session takes every message under it with it. */
+    sessions: string[];
+    messages: string[];
   };
   cursor: string;
   has_more: boolean;

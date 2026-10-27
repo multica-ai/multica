@@ -66,6 +66,14 @@ interface ChatMessageListProps {
   active?: boolean;
   messages: ChatMessage[];
   /**
+   * A deep link (`?message=<id>` from search and notifications) asking to land
+   * on one message. Consumed by this list: it loads older pages until the
+   * message is in view or history runs out, then scrolls to it and flashes it.
+   */
+  locateMessageId?: string | null;
+  /** The locate finished (found or history exhausted); the caller drops the param. */
+  onLocateSettled?: () => void;
+  /**
    * Server-authoritative pending-task snapshot. `null` / undefined means
    * no in-flight task — list renders without StatusPill.
    */
@@ -180,6 +188,8 @@ const LIST_COMPONENTS: Components<ChatRenderItem, ChatListContext> = {
 export function ChatMessageList({
   active = true,
   messages,
+  locateMessageId = null,
+  onLocateSettled,
   pendingTask,
   availability,
   firstItemIndex = 0,
@@ -284,6 +294,44 @@ export function ChatMessageList({
   const firstIndex = renderItems.length > 0 ? firstItemIndex : 0;
   const liveEndKey = renderItems[renderItems.length - 1]?.key ?? null;
 
+  // ─── Deep-link locate (?message=<id>) ────────────────────────────────────
+  // Chat history pages from the newest window backwards, so the target may be
+  // several pages up: keep loading older pages until it mounts or history runs
+  // out, then land on it and flash it the way issue deep-links flash comments.
+  const [highlightMessageId, setHighlightMessageId] = useState<string | null>(null);
+  const highlightTimerRef = useRef<number | null>(null);
+  useEffect(
+    () => () => {
+      if (highlightTimerRef.current !== null) window.clearTimeout(highlightTimerRef.current);
+    },
+    [],
+  );
+
+  const locateIndex = locateMessageId
+    ? renderItems.findIndex(
+        (item) => item.kind === "message" && item.message.id === locateMessageId,
+      )
+    : -1;
+  useEffect(() => {
+    if (!locateMessageId) return;
+    if (locateIndex >= 0) {
+      virtuosoRef.current?.scrollToIndex({ index: locateIndex, align: "center", behavior: "auto" });
+      setHighlightMessageId(locateMessageId);
+      if (highlightTimerRef.current !== null) window.clearTimeout(highlightTimerRef.current);
+      highlightTimerRef.current = window.setTimeout(() => setHighlightMessageId(null), 2000);
+      onLocateSettled?.();
+      return;
+    }
+    // Not loaded yet: pull one more page of history. When history is exhausted
+    // the id is not in this conversation (stale link); settle without a jump.
+    if (hasOlderMessages && !isFetchingOlderMessages) {
+      onLoadOlderMessages?.();
+    } else if (!hasOlderMessages && !isFetchingOlderMessages) {
+      onLocateSettled?.();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- re-run as pages land, not on every keystroke elsewhere
+  }, [locateMessageId, locateIndex, hasOlderMessages, isFetchingOlderMessages]);
+
   const listContext: ChatListContext = {
     isFetchingOlderMessages,
     showStatusPill,
@@ -378,7 +426,13 @@ export function ChatMessageList({
         components={LIST_COMPONENTS}
         itemContent={(_, item) => (
           <div
-            className={cn(CHAT_COLUMN, "py-2")}
+            className={cn(
+              CHAT_COLUMN,
+              "py-2 rounded-xl transition-colors duration-700",
+              item.kind === "message" &&
+                item.message.id === highlightMessageId &&
+                "bg-[color-mix(in_srgb,var(--card)_95%,var(--brand)_5%)]",
+            )}
             {...(item.key === liveEndKey ? { [LIVE_END_ROW_ATTR]: "" } : {})}
           >
             <MessageBubble

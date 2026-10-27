@@ -16,6 +16,7 @@ import type {
   IssueDuplicates,
   GroupedIssuesResponse,
   ListIssuesResponse,
+  SearchChatMessagesResponse,
   SearchIssuesResponse,
   SearchProjectsResponse,
   SearchIndexManifest,
@@ -309,6 +310,7 @@ import {
   EMPTY_LIST_ISSUES_RESPONSE,
   EMPTY_SEARCH_ISSUES_RESPONSE,
   EMPTY_SEARCH_PROJECTS_RESPONSE,
+  EMPTY_SEARCH_CHAT_MESSAGES_RESPONSE,
   EMPTY_SQUAD,
   EMPTY_SQUAD_LIST,
   EMPTY_SQUAD_MEMBER_STATUS_LIST,
@@ -345,6 +347,7 @@ import {
   RuntimeUsageListSchema,
   SearchIssuesResponseSchema,
   SearchProjectsResponseSchema,
+  SearchChatMessagesResponseSchema,
   SearchIndexManifestSchema,
   SearchIndexSnapshotPageSchema,
   SearchIndexChangesSchema,
@@ -1267,6 +1270,19 @@ export class ApiClient {
     });
   }
 
+  async searchChatMessages(params: { q: string; limit?: number; offset?: number; signal?: AbortSignal }): Promise<SearchChatMessagesResponse> {
+    const search = new URLSearchParams({ q: params.q });
+    if (params.limit !== undefined) search.set("limit", String(params.limit));
+    if (params.offset !== undefined) search.set("offset", String(params.offset));
+    const raw = await this.fetch<unknown>(
+      `/api/chat/sessions/search?${search}`,
+      params.signal ? { signal: params.signal } : undefined,
+    );
+    return parseWithFallback(raw, SearchChatMessagesResponseSchema, EMPTY_SEARCH_CHAT_MESSAGES_RESPONSE, {
+      endpoint: "GET /api/chat/sessions/search",
+    });
+  }
+
   // Local search index sync (MUL-7754). Each call names its workspace so a
   // request issued for one workspace cannot be answered for whichever one the
   // tab has switched to since. A body that fails its schema rejects rather
@@ -1282,10 +1298,13 @@ export class ApiClient {
   async getSearchIndexSnapshot(params: {
     workspaceSlug: string;
     afterNumber: number;
+    /** Cursor of the chat message page; omit (or pass "") to start it. */
+    afterMessageId?: string;
     limit?: number;
     signal?: AbortSignal;
   }): Promise<SearchIndexSnapshotPage> {
     const search = new URLSearchParams({ after_number: String(params.afterNumber) });
+    if (params.afterMessageId) search.set("after_message_id", params.afterMessageId);
     if (params.limit !== undefined) search.set("limit", String(params.limit));
     const raw = await this.fetch<unknown>(`/api/search-index/snapshot?${search}`, {
       headers: { "X-Workspace-Slug": params.workspaceSlug },

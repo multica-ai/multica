@@ -2,6 +2,9 @@
 // worker, and the issues/search barrels pull in React and the API client.
 import { BUILT_IN_STATUS_CATEGORY, normalizeIssueStatusCategory } from "../issues/config/status";
 import type {
+  SearchChatMessageResult,
+  SearchIndexChatMessage,
+  SearchIndexChatSession,
   SearchIndexComment,
   SearchIndexIssue,
   SearchIndexProject,
@@ -44,6 +47,12 @@ export interface ProjectHit {
   matchSource: SearchProjectResult["match_source"];
 }
 
+export type ChatSearchParams = IssueSearchParams;
+
+export interface ChatMessageHit {
+  id: string;
+}
+
 interface IssueEntry {
   id: string;
   number: number;
@@ -69,6 +78,21 @@ interface ProjectEntry {
   title: string;
   description: string;
   updatedAt: number;
+  bytes: number;
+}
+
+interface ChatSessionEntry {
+  id: string;
+  agentId: string;
+  title: string;
+  status: string;
+}
+
+interface ChatMessageEntry {
+  id: string;
+  sessionId: string;
+  content: string;
+  createdAt: number;
   bytes: number;
 }
 
@@ -153,11 +177,18 @@ export class SearchIndexEngine {
   private readonly issues = new Map<string, IssueEntry>();
   private readonly comments = new Map<string, CommentEntry>();
   private readonly projects = new Map<string, ProjectEntry>();
+  private readonly chatSessions = new Map<string, ChatSessionEntry>();
+  private readonly chatMessages = new Map<string, ChatMessageEntry>();
 
   private bytes = 0;
 
-  get size(): { issues: number; comments: number; projects: number } {
-    return { issues: this.issues.size, comments: this.comments.size, projects: this.projects.size };
+  get size(): { issues: number; comments: number; projects: number; messages: number } {
+    return {
+      issues: this.issues.size,
+      comments: this.comments.size,
+      projects: this.projects.size,
+      messages: this.chatMessages.size,
+    };
   }
 
   /**
@@ -173,6 +204,8 @@ export class SearchIndexEngine {
     this.issues.clear();
     this.comments.clear();
     this.projects.clear();
+    this.chatSessions.clear();
+    this.chatMessages.clear();
     this.bytes = 0;
   }
 
@@ -218,6 +251,27 @@ export class SearchIndexEngine {
     this.projects.set(project.id, entry);
   }
 
+  upsertChatSession(session: SearchIndexChatSession): void {
+    this.chatSessions.set(session.id, {
+      id: session.id,
+      agentId: session.agent_id,
+      title: session.title,
+      status: session.status,
+    });
+  }
+
+  upsertChatMessage(message: SearchIndexChatMessage): void {
+    const entry: ChatMessageEntry = {
+      id: message.id,
+      sessionId: message.chat_session_id,
+      content: message.content.toLowerCase(),
+      createdAt: timestampMicros(message.created_at),
+      bytes: utf8Length(message.content),
+    };
+    this.bytes += entry.bytes - (this.chatMessages.get(message.id)?.bytes ?? 0);
+    this.chatMessages.set(message.id, entry);
+  }
+
   /** Removes the issues and every comment on them. */
   deleteIssues(ids: readonly string[]): void {
     if (ids.length === 0) return;
@@ -242,6 +296,22 @@ export class SearchIndexEngine {
   deleteProject(id: string): void {
     this.bytes -= this.projects.get(id)?.bytes ?? 0;
     this.projects.delete(id);
+  }
+
+  /** Removes the session and every message under it. */
+  deleteChatSession(id: string): void {
+    this.chatSessions.delete(id);
+    for (const [messageId, message] of this.chatMessages) {
+      if (message.sessionId === id) {
+        this.bytes -= message.bytes;
+        this.chatMessages.delete(messageId);
+      }
+    }
+  }
+
+  deleteChatMessage(id: string): void {
+    this.bytes -= this.chatMessages.get(id)?.bytes ?? 0;
+    this.chatMessages.delete(id);
   }
 
   searchIssues(params: IssueSearchParams): IssueHit[] {
@@ -431,6 +501,47 @@ export class SearchIndexEngine {
     const { offset, limit } = page(params);
     return candidates.slice(offset, offset + limit).map((c) => c.hit);
   }
+
+  /**
+   * Port of the server's chat message search: phrase or (for several words)
+   * every word in the message content, ordered phrase tier first, then newest
+   * first, then id descending — buildChatMessageSearchQuery in
+   * server/internal/handler. UUID strings compare the same way PostgreSQL's
+   * uuid byte order does, so the id tie-breaker agrees.
+   */
+  searchMessages(params: ChatSearchParams): ChatMessageHit[] {
+    const phrase = params.q.toLowerCase();
+    if (phrase === "") return [];
+    const terms = splitSearchTerms(phrase);
+    const multi = terms.length > 1;
+
+    interface Candidate {
+      id: string;
+      rank: number;
+      createdAt: number;
+    }
+    const candidates: Candidate[] = [];
+    for (const message of this.chatMessages.values()) {
+      const content = message.content;
+      const hasPhrase = content.includes(phrase);
+      const allTerms = multi && terms.every((term) => content.includes(term));
+      if (!hasPhrase && !allTerms) continue;
+      candidates.push({
+        id: message.id,
+        rank: hasPhrase ? 0 : 1,
+        createdAt: message.createdAt,
+      });
+    }
+
+    candidates.sort(
+      (a, b) =>
+        a.rank - b.rank ||
+        b.createdAt - a.createdAt ||
+        (a.id < b.id ? 1 : a.id > b.id ? -1 : 0),
+    );
+    const { offset, limit } = page(params);
+    return candidates.slice(offset, offset + limit).map((c) => ({ id: c.id }));
+  }
 }
 
 interface IssueCandidate extends IssueHit {
@@ -584,5 +695,25 @@ export function toSearchProjectResult(
   if (hit.matchSource === "description" && description !== "") {
     result.matched_snippet = extractSnippet(description, q);
   }
+  return result;
+}
+
+/** Builds the response row the server would return for one chat message hit. */
+export function toSearchChatMessageResult(
+  message: SearchIndexChatMessage,
+  session: SearchIndexChatSession | null,
+  q: string,
+): SearchChatMessageResult {
+  const result: SearchChatMessageResult = {
+    id: message.id,
+    chat_session_id: message.chat_session_id,
+    role: message.role,
+    content: message.content,
+    created_at: message.created_at,
+    match_source: "content",
+    matched_snippet: extractSnippet(message.content, q),
+    session:
+      session ?? { id: message.chat_session_id, agent_id: "", title: "", status: "active" },
+  };
   return result;
 }

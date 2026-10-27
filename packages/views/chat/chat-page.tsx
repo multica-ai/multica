@@ -82,6 +82,17 @@ export function ChatPage() {
   const regenerateQuickActions = useRegenerateChatQuickActions();
   const urlSession = searchParams.get("session") || null;
   const urlAgent = searchParams.get("agent") || null;
+  // One-shot locate deep link (`?message=<id>`, from the search palette):
+  // consumed by ChatMessageList, then dropped here so refresh and the session
+  // sync effects don't replay it.
+  const urlMessage = searchParams.get("message") || null;
+  const settleMessageLocate = () => {
+    if (urlSession) {
+      replace(`${wsPaths.chat()}?session=${urlSession}`);
+    } else {
+      replace(wsPaths.chat());
+    }
+  };
 
   // "Composing a brand-new chat" — the user hit ⊕ but hasn't sent yet, so no
   // session exists. At compact widths this decides list-vs-conversation; on desktop the
@@ -269,6 +280,8 @@ export function ChatPage() {
         <ChatMessageList
           key={c.activeSessionId}
           messages={c.messages}
+          locateMessageId={urlMessage}
+          onLocateSettled={settleMessageLocate}
           pendingTask={c.pendingTask}
           availability={c.availability}
           firstItemIndex={c.firstItemIndex}

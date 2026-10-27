@@ -1,4 +1,10 @@
-import type { SearchIndexComment, SearchIndexIssue, SearchIndexProject } from "../types";
+import type {
+  SearchIndexChatMessage,
+  SearchIndexChatSession,
+  SearchIndexComment,
+  SearchIndexIssue,
+  SearchIndexProject,
+} from "../types";
 
 /**
  * Persistence for one workspace's local search index (MUL-7754): IndexedDB in
@@ -10,7 +16,7 @@ import type { SearchIndexComment, SearchIndexIssue, SearchIndexProject } from ".
  */
 
 /** Bump to discard every local copy, e.g. after changing what a record holds. */
-export const SEARCH_INDEX_SCHEMA_VERSION = 1;
+export const SEARCH_INDEX_SCHEMA_VERSION = 2;
 
 const DB_PREFIX = "multica-search-index";
 
@@ -19,7 +25,7 @@ export interface IndexMeta {
   /** Catch-up cursor; set once the copy is complete. */
   cursor: string | null;
   /** Progress of an unfinished bootstrap, so a reload resumes it. */
-  bootstrap: { cursor: string; afterNumber: number } | null;
+  bootstrap: { cursor: string; afterNumber: number; afterMessageId: string } | null;
   /** When the workspace last exceeded the memory budget, in epoch ms. */
   tooLargeAt: number | null;
 }
@@ -32,10 +38,15 @@ export interface IndexBatch {
   issues?: SearchIndexIssue[];
   comments?: SearchIndexComment[];
   projects?: SearchIndexProject[];
+  sessions?: SearchIndexChatSession[];
+  messages?: SearchIndexChatMessage[];
   /** Deleting an issue also deletes its comments. */
   deletedIssues?: string[];
   deletedComments?: string[];
   deletedProjects?: string[];
+  /** Deleting a session also deletes its messages. */
+  deletedSessions?: string[];
+  deletedMessages?: string[];
   meta?: IndexMeta;
 }
 
@@ -43,6 +54,8 @@ export interface IndexRecords {
   issues: SearchIndexIssue[];
   comments: SearchIndexComment[];
   projects: SearchIndexProject[];
+  sessions: SearchIndexChatSession[];
+  messages: SearchIndexChatMessage[];
 }
 
 export interface IndexStore {
@@ -55,6 +68,8 @@ export interface IndexStore {
   getIssues(ids: string[]): Promise<Map<string, SearchIndexIssue>>;
   getComments(ids: string[]): Promise<Map<string, SearchIndexComment>>;
   getProjects(ids: string[]): Promise<Map<string, SearchIndexProject>>;
+  getSessions(ids: string[]): Promise<Map<string, SearchIndexChatSession>>;
+  getMessages(ids: string[]): Promise<Map<string, SearchIndexChatMessage>>;
   /** Deletes the underlying database. The store is unusable afterwards. */
   destroy(): Promise<void>;
 }
@@ -91,13 +106,18 @@ export class IdbIndexStore implements IndexStore {
     if (this.destroyed) return Promise.reject(new Error("search index store was destroyed"));
     if (!this.db) {
       this.db = new Promise((resolve, reject) => {
-        const request = indexedDB.open(this.name, 1);
+        // Version 2 added the sessions and messages stores (chat search).
+        // A v1 database upgrades in place; its meta's older schemaVersion then
+        // makes the sync rebuild the copy with chat text included.
+        const request = indexedDB.open(this.name, 2);
         request.onupgradeneeded = () => {
           const db = request.result;
           db.createObjectStore("meta");
           db.createObjectStore("issues", { keyPath: "id" });
           db.createObjectStore("comments", { keyPath: "id" }).createIndex("issue_id", "issue_id");
           db.createObjectStore("projects", { keyPath: "id" });
+          db.createObjectStore("sessions", { keyPath: "id" });
+          db.createObjectStore("messages", { keyPath: "id" }).createIndex("chat_session_id", "chat_session_id");
         };
         request.onsuccess = () => {
           const db = request.result;
@@ -127,31 +147,40 @@ export class IdbIndexStore implements IndexStore {
 
   async loadAll(): Promise<IndexRecords> {
     const db = await this.open();
-    const tx = db.transaction(["issues", "comments", "projects"]);
-    const [issues, comments, projects] = await Promise.all([
+    const tx = db.transaction(["issues", "comments", "projects", "sessions", "messages"]);
+    const [issues, comments, projects, sessions, messages] = await Promise.all([
       requestResult(tx.objectStore("issues").getAll()),
       requestResult(tx.objectStore("comments").getAll()),
       requestResult(tx.objectStore("projects").getAll()),
+      requestResult(tx.objectStore("sessions").getAll()),
+      requestResult(tx.objectStore("messages").getAll()),
     ]);
     return {
       issues: issues as SearchIndexIssue[],
       comments: comments as SearchIndexComment[],
       projects: projects as SearchIndexProject[],
+      sessions: sessions as SearchIndexChatSession[],
+      messages: messages as SearchIndexChatMessage[],
     };
   }
 
   async write(batch: IndexBatch): Promise<void> {
     const db = await this.open();
-    const tx = db.transaction(["meta", "issues", "comments", "projects"], "readwrite");
+    const tx = db.transaction(["meta", "issues", "comments", "projects", "sessions", "messages"], "readwrite");
     const done = transactionDone(tx);
     const issues = tx.objectStore("issues");
     const comments = tx.objectStore("comments");
     const projects = tx.objectStore("projects");
+    const sessions = tx.objectStore("sessions");
+    const messages = tx.objectStore("messages");
     batch.issues?.forEach((record) => issues.put(record));
     batch.comments?.forEach((record) => comments.put(record));
     batch.projects?.forEach((record) => projects.put(record));
+    batch.sessions?.forEach((record) => sessions.put(record));
+    batch.messages?.forEach((record) => messages.put(record));
     batch.deletedComments?.forEach((id) => comments.delete(id));
     batch.deletedProjects?.forEach((id) => projects.delete(id));
+    batch.deletedMessages?.forEach((id) => messages.delete(id));
     const byIssue = comments.index("issue_id");
     batch.deletedIssues?.forEach((id) => {
       issues.delete(id);
@@ -163,17 +192,30 @@ export class IdbIndexStore implements IndexStore {
         current.continue();
       };
     });
+    const bySession = messages.index("chat_session_id");
+    batch.deletedSessions?.forEach((id) => {
+      sessions.delete(id);
+      const cursor = bySession.openKeyCursor(IDBKeyRange.only(id));
+      cursor.onsuccess = () => {
+        const current = cursor.result;
+        if (!current) return;
+        messages.delete(current.primaryKey);
+        current.continue();
+      };
+    });
     if (batch.meta) tx.objectStore("meta").put(batch.meta, META_KEY);
     await done;
   }
 
   async reset(meta: IndexMeta): Promise<void> {
     const db = await this.open();
-    const tx = db.transaction(["meta", "issues", "comments", "projects"], "readwrite");
+    const tx = db.transaction(["meta", "issues", "comments", "projects", "sessions", "messages"], "readwrite");
     const done = transactionDone(tx);
     tx.objectStore("issues").clear();
     tx.objectStore("comments").clear();
     tx.objectStore("projects").clear();
+    tx.objectStore("sessions").clear();
+    tx.objectStore("messages").clear();
     tx.objectStore("meta").put(meta, META_KEY);
     await done;
   }
@@ -188,6 +230,14 @@ export class IdbIndexStore implements IndexStore {
 
   getProjects(ids: string[]): Promise<Map<string, SearchIndexProject>> {
     return this.getMany<SearchIndexProject>("projects", ids);
+  }
+
+  getSessions(ids: string[]): Promise<Map<string, SearchIndexChatSession>> {
+    return this.getMany<SearchIndexChatSession>("sessions", ids);
+  }
+
+  getMessages(ids: string[]): Promise<Map<string, SearchIndexChatMessage>> {
+    return this.getMany<SearchIndexChatMessage>("messages", ids);
   }
 
   private async getMany<T extends { id: string }>(store: string, ids: string[]): Promise<Map<string, T>> {
@@ -271,6 +321,8 @@ export class MemoryIndexStore implements IndexStore {
   readonly issues = new Map<string, SearchIndexIssue>();
   readonly comments = new Map<string, SearchIndexComment>();
   readonly projects = new Map<string, SearchIndexProject>();
+  readonly sessions = new Map<string, SearchIndexChatSession>();
+  readonly messages = new Map<string, SearchIndexChatMessage>();
   destroyed = false;
 
   async readMeta(): Promise<IndexMeta | null> {
@@ -282,6 +334,8 @@ export class MemoryIndexStore implements IndexStore {
       issues: [...this.issues.values()],
       comments: [...this.comments.values()],
       projects: [...this.projects.values()],
+      sessions: [...this.sessions.values()],
+      messages: [...this.messages.values()],
     };
   }
 
@@ -289,12 +343,21 @@ export class MemoryIndexStore implements IndexStore {
     batch.issues?.forEach((record) => this.issues.set(record.id, record));
     batch.comments?.forEach((record) => this.comments.set(record.id, record));
     batch.projects?.forEach((record) => this.projects.set(record.id, record));
+    batch.sessions?.forEach((record) => this.sessions.set(record.id, record));
+    batch.messages?.forEach((record) => this.messages.set(record.id, record));
     batch.deletedComments?.forEach((id) => this.comments.delete(id));
     batch.deletedProjects?.forEach((id) => this.projects.delete(id));
+    batch.deletedMessages?.forEach((id) => this.messages.delete(id));
     for (const id of batch.deletedIssues ?? []) {
       this.issues.delete(id);
       for (const [commentId, comment] of this.comments) {
         if (comment.issue_id === id) this.comments.delete(commentId);
+      }
+    }
+    for (const id of batch.deletedSessions ?? []) {
+      this.sessions.delete(id);
+      for (const [messageId, message] of this.messages) {
+        if (message.chat_session_id === id) this.messages.delete(messageId);
       }
     }
     if (batch.meta) this.meta = { ...batch.meta };
@@ -304,6 +367,8 @@ export class MemoryIndexStore implements IndexStore {
     this.issues.clear();
     this.comments.clear();
     this.projects.clear();
+    this.sessions.clear();
+    this.messages.clear();
     this.meta = { ...meta };
   }
 
@@ -319,12 +384,22 @@ export class MemoryIndexStore implements IndexStore {
     return pick(this.projects, ids);
   }
 
+  async getSessions(ids: string[]) {
+    return pick(this.sessions, ids);
+  }
+
+  async getMessages(ids: string[]) {
+    return pick(this.messages, ids);
+  }
+
   async destroy(): Promise<void> {
     this.destroyed = true;
     this.meta = null;
     this.issues.clear();
     this.comments.clear();
     this.projects.clear();
+    this.sessions.clear();
+    this.messages.clear();
   }
 }
 

@@ -1,5 +1,8 @@
 import type {
+  SearchChatMessagesResponse,
   SearchIndexChanges,
+  SearchIndexChatMessage,
+  SearchIndexChatSession,
   SearchIndexComment,
   SearchIndexIssue,
   SearchIndexManifest,
@@ -10,8 +13,10 @@ import type {
 } from "../types";
 import {
   SearchIndexEngine,
+  toSearchChatMessageResult,
   toSearchIssueResult,
   toSearchProjectResult,
+  type ChatSearchParams,
   type IssueSearchParams,
   type ProjectSearchParams,
 } from "./engine";
@@ -36,7 +41,11 @@ const CHANGES_PAGE_SIZE = 500;
 
 export interface IndexFetcher {
   manifest(): Promise<SearchIndexManifest>;
-  snapshot(afterNumber: number, limit: number): Promise<SearchIndexSnapshotPage>;
+  /**
+   * One page of the first copy. The two cursors advance independently: issues
+   * by number, the member's chat messages by id.
+   */
+  snapshot(afterNumber: number, afterMessageId: string, limit: number): Promise<SearchIndexSnapshotPage>;
   changes(cursor: string, limit: number): Promise<SearchIndexChanges>;
 }
 
@@ -205,6 +214,26 @@ export class WorkspaceIndex {
     return { projects: results };
   }
 
+  async searchMessages(params: ChatSearchParams): Promise<SearchChatMessagesResponse | null> {
+    if (!this.isServing()) return null;
+    const hits = this.engine.searchMessages(params);
+    const messages = await this.store.getMessages(hits.map((hit) => hit.id));
+    const sessionIds = new Set<string>();
+    for (const hit of hits) {
+      const message = messages.get(hit.id);
+      if (message) sessionIds.add(message.chat_session_id);
+    }
+    const sessions = await this.store.getSessions([...sessionIds]);
+    const results = [];
+    for (const hit of hits) {
+      const message = messages.get(hit.id);
+      // Deleted between the scan and the read; the next search drops it too.
+      if (!message) continue;
+      results.push(toSearchChatMessageResult(message, sessions.get(message.chat_session_id) ?? null, params.q));
+    }
+    return { messages: results };
+  }
+
   /** Stops syncing and releases memory. The stored copy stays unless `destroy`. */
   async dispose(destroy = false): Promise<void> {
     this.setState("disposed");
@@ -267,7 +296,7 @@ export class WorkspaceIndex {
     } else {
       const manifest = await this.fetcher.manifest();
       if (manifest.text_bytes > this.options.maxTextBytes) throw new OverBudgetError();
-      progress = { cursor: manifest.cursor, afterNumber: 0 };
+      progress = { cursor: manifest.cursor, afterNumber: 0, afterMessageId: "" };
       await this.store.reset({ ...emptyIndexMeta(), bootstrap: progress });
       this.forgetLoaded();
     }
@@ -275,12 +304,26 @@ export class WorkspaceIndex {
 
     for (;;) {
       if (this.state === "disposed") return meta;
-      const page = await this.fetcher.snapshot(progress.afterNumber, SNAPSHOT_PAGE_SIZE);
+      const page = await this.fetcher.snapshot(progress.afterNumber, progress.afterMessageId, SNAPSHOT_PAGE_SIZE);
       const next: IndexMeta = page.done
         ? { ...emptyIndexMeta(), cursor: progress.cursor }
-        : { ...emptyIndexMeta(), bootstrap: { cursor: progress.cursor, afterNumber: page.next_after_number } };
-      await this.store.write({ issues: page.issues, comments: page.comments, projects: page.projects, meta: next });
-      this.applyUpserts(page.issues, page.comments, page.projects);
+        : {
+            ...emptyIndexMeta(),
+            bootstrap: {
+              cursor: progress.cursor,
+              afterNumber: page.next_after_number,
+              afterMessageId: page.next_after_message_id,
+            },
+          };
+      await this.store.write({
+        issues: page.issues,
+        comments: page.comments,
+        projects: page.projects,
+        sessions: page.sessions,
+        messages: page.messages,
+        meta: next,
+      });
+      this.applyUpserts(page.issues, page.comments, page.projects, page.sessions, page.messages);
       this.checkBudget();
       if (page.done) {
         this.loadedCursor = progress.cursor;
@@ -299,15 +342,23 @@ export class WorkspaceIndex {
         issues: changes.issues,
         comments: changes.comments,
         projects: changes.projects,
+        sessions: changes.sessions,
+        messages: changes.messages,
         deletedIssues: changes.deleted.issues,
         deletedComments: changes.deleted.comments,
         deletedProjects: changes.deleted.projects,
+        deletedSessions: changes.deleted.sessions,
+        deletedMessages: changes.deleted.messages,
         meta: { ...emptyIndexMeta(), cursor: changes.cursor },
       });
       this.engine.deleteIssues(changes.deleted.issues);
       changes.deleted.comments.forEach((id) => this.engine.deleteComment(id));
       changes.deleted.projects.forEach((id) => this.engine.deleteProject(id));
-      this.applyUpserts(changes.issues, changes.comments, changes.projects);
+      // A session delete takes its messages with it; the change log records
+      // only the session tombstone for them (migration 589).
+      changes.deleted.sessions.forEach((id) => this.engine.deleteChatSession(id));
+      changes.deleted.messages.forEach((id) => this.engine.deleteChatMessage(id));
+      this.applyUpserts(changes.issues, changes.comments, changes.projects, changes.sessions, changes.messages);
       this.checkBudget();
       cursor = changes.cursor;
       this.loadedCursor = cursor;
@@ -315,16 +366,24 @@ export class WorkspaceIndex {
     }
   }
 
-  private applyUpserts(issues: SearchIndexIssue[], comments: SearchIndexComment[], projects: SearchIndexProject[]): void {
+  private applyUpserts(
+    issues: SearchIndexIssue[],
+    comments: SearchIndexComment[],
+    projects: SearchIndexProject[],
+    sessions: SearchIndexChatSession[],
+    messages: SearchIndexChatMessage[],
+  ): void {
     issues.forEach((issue) => this.engine.upsertIssue(issue));
     comments.forEach((comment) => this.engine.upsertComment(comment));
     projects.forEach((project) => this.engine.upsertProject(project));
+    sessions.forEach((session) => this.engine.upsertChatSession(session));
+    messages.forEach((message) => this.engine.upsertChatMessage(message));
   }
 
   private async reloadFromStore(): Promise<void> {
     const records = await this.store.loadAll();
     this.engine.clear();
-    this.applyUpserts(records.issues, records.comments, records.projects);
+    this.applyUpserts(records.issues, records.comments, records.projects, records.sessions, records.messages);
   }
 
   /**

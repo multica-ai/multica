@@ -33,7 +33,7 @@ func (q *Queries) GetSearchIndexCurrentSnapshot(ctx context.Context) (string, er
 
 const getSearchIndexManifest = `-- name: GetSearchIndexManifest :one
 
-WITH ws AS (SELECT $1::uuid AS id)
+WITH ws AS (SELECT $2::uuid AS id)
 SELECT
     pg_current_snapshot()::text AS snapshot,
     (SELECT count(*) FROM issue i, ws WHERE i.workspace_id = ws.id)::bigint AS issue_count,
@@ -45,29 +45,47 @@ SELECT
         WHERE c.workspace_id = ws.id AND c.deleted_at IS NULL)::bigint AS comment_bytes,
     (SELECT count(*) FROM project p, ws WHERE p.workspace_id = ws.id)::bigint AS project_count,
     (SELECT COALESCE(sum(octet_length(p.title) + COALESCE(octet_length(p.description), 0)), 0)
-        FROM project p, ws WHERE p.workspace_id = ws.id)::bigint AS project_bytes
+        FROM project p, ws WHERE p.workspace_id = ws.id)::bigint AS project_bytes,
+    (SELECT count(*) FROM chat_message m
+        JOIN chat_session s ON s.id = m.chat_session_id, ws
+        WHERE s.workspace_id = ws.id AND s.creator_id = $1::uuid
+          AND m.message_kind <> 'onboarding_kickoff')::bigint AS chat_message_count,
+    (SELECT COALESCE(sum(octet_length(m.content)), 0) FROM chat_message m
+        JOIN chat_session s ON s.id = m.chat_session_id, ws
+        WHERE s.workspace_id = ws.id AND s.creator_id = $1::uuid
+          AND m.message_kind <> 'onboarding_kickoff')::bigint AS chat_message_bytes
 `
 
+type GetSearchIndexManifestParams struct {
+	CreatorID   pgtype.UUID `json:"creator_id"`
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
+}
+
 type GetSearchIndexManifestRow struct {
-	Snapshot     string `json:"snapshot"`
-	IssueCount   int64  `json:"issue_count"`
-	IssueBytes   int64  `json:"issue_bytes"`
-	CommentCount int64  `json:"comment_count"`
-	CommentBytes int64  `json:"comment_bytes"`
-	ProjectCount int64  `json:"project_count"`
-	ProjectBytes int64  `json:"project_bytes"`
+	Snapshot         string `json:"snapshot"`
+	IssueCount       int64  `json:"issue_count"`
+	IssueBytes       int64  `json:"issue_bytes"`
+	CommentCount     int64  `json:"comment_count"`
+	CommentBytes     int64  `json:"comment_bytes"`
+	ProjectCount     int64  `json:"project_count"`
+	ProjectBytes     int64  `json:"project_bytes"`
+	ChatMessageCount int64  `json:"chat_message_count"`
+	ChatMessageBytes int64  `json:"chat_message_bytes"`
 }
 
 // Local search index sync (MUL-7754). Web and Desktop copy the issue, comment,
 // and project text of a workspace, then catch up through search_index_change.
-// Snapshots are exchanged as pg_snapshot text; see migration 561.
+// Snapshots are exchanged as pg_snapshot text; see migration 561. Chat sessions
+// and their messages (migration 589) are copied per creator: a session is
+// readable only by its creator (loadChatSessionForUser), so chat queries take
+// creator_id alongside workspace_id.
 // Taken before any snapshot page, so every write the pages might miss is newer
 // than this snapshot and reaches the client through the change log. The byte
 // totals let the client reject a workspace too large for its memory budget
 // before downloading it; octet_length reads the stored length, so TOASTed
 // bodies are not decompressed.
-func (q *Queries) GetSearchIndexManifest(ctx context.Context, workspaceID pgtype.UUID) (GetSearchIndexManifestRow, error) {
-	row := q.db.QueryRow(ctx, getSearchIndexManifest, workspaceID)
+func (q *Queries) GetSearchIndexManifest(ctx context.Context, arg GetSearchIndexManifestParams) (GetSearchIndexManifestRow, error) {
+	row := q.db.QueryRow(ctx, getSearchIndexManifest, arg.CreatorID, arg.WorkspaceID)
 	var i GetSearchIndexManifestRow
 	err := row.Scan(
 		&i.Snapshot,
@@ -77,6 +95,8 @@ func (q *Queries) GetSearchIndexManifest(ctx context.Context, workspaceID pgtype
 		&i.CommentBytes,
 		&i.ProjectCount,
 		&i.ProjectBytes,
+		&i.ChatMessageCount,
+		&i.ChatMessageBytes,
 	)
 	return i, err
 }
@@ -132,6 +152,206 @@ func (q *Queries) ListSearchIndexChanges(ctx context.Context, arg ListSearchInde
 	for rows.Next() {
 		var i ListSearchIndexChangesRow
 		if err := rows.Scan(&i.EntityType, &i.EntityID, &i.ChangeXid); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listSearchIndexChatMessagesByIDs = `-- name: ListSearchIndexChatMessagesByIDs :many
+SELECT m.id, m.chat_session_id, m.role, m.content, m.created_at
+FROM chat_message m
+JOIN chat_session s ON s.id = m.chat_session_id
+WHERE s.workspace_id = $1 AND s.creator_id = $2
+  AND m.message_kind <> 'onboarding_kickoff'
+  AND m.id = ANY($3::uuid[])
+`
+
+type ListSearchIndexChatMessagesByIDsParams struct {
+	WorkspaceID pgtype.UUID   `json:"workspace_id"`
+	CreatorID   pgtype.UUID   `json:"creator_id"`
+	Ids         []pgtype.UUID `json:"ids"`
+}
+
+type ListSearchIndexChatMessagesByIDsRow struct {
+	ID            pgtype.UUID        `json:"id"`
+	ChatSessionID pgtype.UUID        `json:"chat_session_id"`
+	Role          string             `json:"role"`
+	Content       string             `json:"content"`
+	CreatedAt     pgtype.Timestamptz `json:"created_at"`
+}
+
+func (q *Queries) ListSearchIndexChatMessagesByIDs(ctx context.Context, arg ListSearchIndexChatMessagesByIDsParams) ([]ListSearchIndexChatMessagesByIDsRow, error) {
+	rows, err := q.db.Query(ctx, listSearchIndexChatMessagesByIDs, arg.WorkspaceID, arg.CreatorID, arg.Ids)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListSearchIndexChatMessagesByIDsRow{}
+	for rows.Next() {
+		var i ListSearchIndexChatMessagesByIDsRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.ChatSessionID,
+			&i.Role,
+			&i.Content,
+			&i.CreatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listSearchIndexChatMessagesPage = `-- name: ListSearchIndexChatMessagesPage :many
+SELECT m.id, m.chat_session_id, m.role, m.content, m.created_at
+FROM chat_message m
+JOIN chat_session s ON s.id = m.chat_session_id
+WHERE s.workspace_id = $1 AND s.creator_id = $2
+  AND m.message_kind <> 'onboarding_kickoff'
+  AND m.id > $3
+ORDER BY m.id
+LIMIT $4
+`
+
+type ListSearchIndexChatMessagesPageParams struct {
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
+	CreatorID   pgtype.UUID `json:"creator_id"`
+	AfterID     pgtype.UUID `json:"after_id"`
+	PageLimit   int32       `json:"page_limit"`
+}
+
+type ListSearchIndexChatMessagesPageRow struct {
+	ID            pgtype.UUID        `json:"id"`
+	ChatSessionID pgtype.UUID        `json:"chat_session_id"`
+	Role          string             `json:"role"`
+	Content       string             `json:"content"`
+	CreatedAt     pgtype.Timestamptz `json:"created_at"`
+}
+
+// Pages by the primary key so the copy is a full scan in bounded pages,
+// independent of message timestamps. The kind filter hides product-authored
+// context the conversation itself never shows (visibleChatMessages).
+func (q *Queries) ListSearchIndexChatMessagesPage(ctx context.Context, arg ListSearchIndexChatMessagesPageParams) ([]ListSearchIndexChatMessagesPageRow, error) {
+	rows, err := q.db.Query(ctx, listSearchIndexChatMessagesPage,
+		arg.WorkspaceID,
+		arg.CreatorID,
+		arg.AfterID,
+		arg.PageLimit,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListSearchIndexChatMessagesPageRow{}
+	for rows.Next() {
+		var i ListSearchIndexChatMessagesPageRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.ChatSessionID,
+			&i.Role,
+			&i.Content,
+			&i.CreatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listSearchIndexChatSessions = `-- name: ListSearchIndexChatSessions :many
+SELECT id, agent_id, title, status FROM chat_session
+WHERE workspace_id = $1 AND creator_id = $2
+ORDER BY id
+`
+
+type ListSearchIndexChatSessionsParams struct {
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
+	CreatorID   pgtype.UUID `json:"creator_id"`
+}
+
+type ListSearchIndexChatSessionsRow struct {
+	ID      pgtype.UUID `json:"id"`
+	AgentID pgtype.UUID `json:"agent_id"`
+	Title   string      `json:"title"`
+	Status  string      `json:"status"`
+}
+
+// Every session of the creator, on the first snapshot page (like projects): a
+// member's session count is bounded, and the client needs each hit's session
+// for its title and agent.
+func (q *Queries) ListSearchIndexChatSessions(ctx context.Context, arg ListSearchIndexChatSessionsParams) ([]ListSearchIndexChatSessionsRow, error) {
+	rows, err := q.db.Query(ctx, listSearchIndexChatSessions, arg.WorkspaceID, arg.CreatorID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListSearchIndexChatSessionsRow{}
+	for rows.Next() {
+		var i ListSearchIndexChatSessionsRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.AgentID,
+			&i.Title,
+			&i.Status,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listSearchIndexChatSessionsByIDs = `-- name: ListSearchIndexChatSessionsByIDs :many
+SELECT id, agent_id, title, status FROM chat_session
+WHERE workspace_id = $1 AND creator_id = $2 AND id = ANY($3::uuid[])
+`
+
+type ListSearchIndexChatSessionsByIDsParams struct {
+	WorkspaceID pgtype.UUID   `json:"workspace_id"`
+	CreatorID   pgtype.UUID   `json:"creator_id"`
+	Ids         []pgtype.UUID `json:"ids"`
+}
+
+type ListSearchIndexChatSessionsByIDsRow struct {
+	ID      pgtype.UUID `json:"id"`
+	AgentID pgtype.UUID `json:"agent_id"`
+	Title   string      `json:"title"`
+	Status  string      `json:"status"`
+}
+
+// Creator-scoped like the page reads: a change row for another member's
+// session resolves to nothing and is reported as deleted, a no-op there.
+func (q *Queries) ListSearchIndexChatSessionsByIDs(ctx context.Context, arg ListSearchIndexChatSessionsByIDsParams) ([]ListSearchIndexChatSessionsByIDsRow, error) {
+	rows, err := q.db.Query(ctx, listSearchIndexChatSessionsByIDs, arg.WorkspaceID, arg.CreatorID, arg.Ids)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListSearchIndexChatSessionsByIDsRow{}
+	for rows.Next() {
+		var i ListSearchIndexChatSessionsByIDsRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.AgentID,
+			&i.Title,
+			&i.Status,
+		); err != nil {
 			return nil, err
 		}
 		items = append(items, i)

@@ -1,5 +1,6 @@
 import { ApiError } from "../api/client";
 import type {
+  SearchChatMessagesResponse,
   SearchIndexChanges,
   SearchIndexManifest,
   SearchIndexSnapshotPage,
@@ -21,7 +22,12 @@ import { deleteAllSearchIndexDatabases, deleteSearchIndexDatabases } from "./sto
 /** The API calls the worker delegates to this tab. */
 export interface SearchIndexApi {
   getSearchIndexManifest(params: { workspaceSlug: string }): Promise<SearchIndexManifest>;
-  getSearchIndexSnapshot(params: { workspaceSlug: string; afterNumber: number; limit?: number }): Promise<SearchIndexSnapshotPage>;
+  getSearchIndexSnapshot(params: {
+    workspaceSlug: string;
+    afterNumber: number;
+    afterMessageId?: string;
+    limit?: number;
+  }): Promise<SearchIndexSnapshotPage>;
   getSearchIndexChanges(params: { workspaceSlug: string; cursor: string; limit?: number }): Promise<SearchIndexChanges>;
 }
 
@@ -42,7 +48,7 @@ export class LocalSearchIndexClient {
   private target: IndexTarget | null = null;
   private serving = false;
   private nextId = 1;
-  private readonly searches = new Map<number, (result: SearchIssuesResponse | SearchProjectsResponse | null) => void>();
+  private readonly searches = new Map<number, (result: SearchIssuesResponse | SearchProjectsResponse | SearchChatMessagesResponse | null) => void>();
   private readonly wipes = new Map<number, () => void>();
 
   constructor(
@@ -90,6 +96,10 @@ export class LocalSearchIndexClient {
 
   searchProjects(params: IssueSearchParams): Promise<SearchProjectsResponse | null> {
     return this.search("projects", params) as Promise<SearchProjectsResponse | null>;
+  }
+
+  searchMessages(params: IssueSearchParams): Promise<SearchChatMessagesResponse | null> {
+    return this.search("messages", params) as Promise<SearchChatMessagesResponse | null>;
   }
 
   /**
@@ -150,11 +160,11 @@ export class LocalSearchIndexClient {
     return this.helloReceived && !this.failed ? this.channel : null;
   }
 
-  private search(kind: "issues" | "projects", params: IssueSearchParams) {
+  private search(kind: "issues" | "projects" | "messages", params: IssueSearchParams) {
     const channel = this.channel;
     if (!channel || !this.target || !this.isServing()) return Promise.resolve(null);
     const id = this.nextId++;
-    return new Promise<SearchIssuesResponse | SearchProjectsResponse | null>((resolve) => {
+    return new Promise<SearchIssuesResponse | SearchProjectsResponse | SearchChatMessagesResponse | null>((resolve) => {
       const timer = setTimeout(() => {
         this.searches.delete(id);
         resolve(null);
@@ -236,7 +246,12 @@ export class LocalSearchIndexClient {
           data = await api.getSearchIndexManifest({ workspaceSlug });
           break;
         case "snapshot":
-          data = await api.getSearchIndexSnapshot({ workspaceSlug, afterNumber: params.afterNumber ?? 0, limit: params.limit });
+          data = await api.getSearchIndexSnapshot({
+            workspaceSlug,
+            afterNumber: params.afterNumber ?? 0,
+            afterMessageId: params.afterMessageId || undefined,
+            limit: params.limit,
+          });
           break;
         case "changes":
           data = await api.getSearchIndexChanges({ workspaceSlug, cursor: params.cursor ?? "", limit: params.limit });

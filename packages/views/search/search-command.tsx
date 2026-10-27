@@ -25,11 +25,12 @@ import { toast } from "sonner";
 import type {
   InboxWorkspaceUnread,
   MemberWithUser,
+  SearchChatMessageResult,
   SearchIssueResult,
   SearchProjectResult,
   Workspace,
 } from "@multica/core/types";
-import { isLocalSearchReady, searchIssues, searchProjects } from "@multica/core/search-index";
+import { isLocalSearchReady, searchChatMessages, searchIssues, searchProjects } from "@multica/core/search-index";
 import { partitionAggregatedSearchResults } from "@multica/core/search/cancelled-rank";
 import {
   openCreateIssueWithPreference,
@@ -299,6 +300,51 @@ function IssueResultRow({
   );
 }
 
+// A chat message hit names its conversation; selecting it opens that
+// conversation and locates the message.
+function ChatResultRow({
+  message,
+  query,
+  disabled,
+  onSelect,
+}: {
+  message: SearchChatMessageResult;
+  query: string;
+  disabled?: boolean;
+  onSelect: (value: string) => void;
+}) {
+  const { t: tChat } = useT("chat");
+  const title = message.session.title.trim() || tChat(($) => $.window.untitled);
+  return (
+    <CommandPrimitive.Item
+      key={`chat:${message.id}`}
+      value={`chat:${message.chat_session_id}:${message.id}`}
+      disabled={disabled}
+      onSelect={onSelect}
+      className="flex cursor-default select-none flex-col gap-1 rounded-lg px-3 py-2.5 text-body outline-none data-[disabled=true]:pointer-events-none data-[disabled=true]:opacity-50 data-selected:bg-accent"
+    >
+      <div className="flex items-center gap-2.5">
+        <MessageSquare className="size-4 shrink-0 text-muted-foreground" />
+        <span className="min-w-0 flex-1 truncate">
+          <HighlightText text={title} query={query} />
+        </span>
+        {message.session.status === "archived" && (
+          <span className="text-caption shrink-0 text-muted-foreground">
+            {tChat(($) => $.list.archived_title)}
+          </span>
+        )}
+      </div>
+      {message.matched_snippet && (
+        <div className="flex items-start gap-2 pl-[26px]">
+          <span className="text-caption text-muted-foreground truncate">
+            <HighlightText text={message.matched_snippet} query={query} />
+          </span>
+        </div>
+      )}
+    </CommandPrimitive.Item>
+  );
+}
+
 interface CommandItem {
   key: string;
   label: string;
@@ -318,9 +364,10 @@ interface SearchResults {
   query: string;
   issues: SearchIssueResult[];
   projects: SearchProjectResult[];
+  messages: SearchChatMessageResult[];
 }
 
-const NO_RESULTS: SearchResults = { query: "", issues: [], projects: [] };
+const NO_RESULTS: SearchResults = { query: "", issues: [], projects: [], messages: [] };
 
 // One heading treatment for every group. Headings go through cmdk's `heading`
 // prop rather than a hand-rolled div: cmdk renders it into a
@@ -598,6 +645,7 @@ export function SearchCommand() {
   const hasResults =
     results.issues.length > 0 ||
     results.projects.length > 0 ||
+    results.messages.length > 0 ||
     filteredMembers.length > 0 ||
     filteredWorkspaces.length > 0;
 
@@ -672,7 +720,7 @@ export function SearchCommand() {
       const controller = new AbortController();
       abortRef.current = controller;
       try {
-        const [issueRes, projectRes] = await Promise.all([
+        const [issueRes, projectRes, messageRes] = await Promise.all([
           searchIssues({
             q: q.trim(),
             limit: 20,
@@ -685,12 +733,18 @@ export function SearchCommand() {
             include_closed: true,
             signal: controller.signal,
           }),
+          searchChatMessages({
+            q: q.trim(),
+            limit: 10,
+            signal: controller.signal,
+          }),
         ]);
         if (!controller.signal.aborted) {
           setResults({
             query: q.trim(),
             issues: issueRes.issues,
             projects: projectRes.projects,
+            messages: messageRes.messages,
           });
           setIsLoading(false);
         }
@@ -699,7 +753,7 @@ export function SearchCommand() {
           // Drop the previous query's rows rather than leaving them on screen
           // permanently greyed out: the request that would have replaced them
           // is never coming. The list falls through to the empty state.
-          setResults({ query: q.trim(), issues: [], projects: [] });
+          setResults({ query: q.trim(), issues: [], projects: [], messages: [] });
           setIsLoading(false);
         }
       }
@@ -720,7 +774,11 @@ export function SearchCommand() {
       const href = value.startsWith("project:")
         ? // value is "project:<id>" — slice off the 8-char prefix to extract the id.
           p.projectDetail(value.slice(8))
-        : p.issueDetail(value);
+        : value.startsWith("chat:")
+          ? // value is "chat:<session id>:<message id>" — open the conversation on
+            // that message; the chat page consumes and strips the params.
+            `${p.chat()}?session=${value.slice(5, value.lastIndexOf(":"))}&message=${value.slice(value.lastIndexOf(":") + 1)}`
+          : p.issueDetail(value);
       intentNavigate(href, consumeIntent());
     },
     [intentNavigate, consumeIntent, setOpen, p],
@@ -975,6 +1033,23 @@ export function SearchCommand() {
                   <IssueResultRow
                     key={issue.id}
                     issue={issue}
+                    query={results.query}
+                    disabled={resultsAreStale}
+                    onSelect={handleSelect}
+                  />
+                ))}
+              </CommandPrimitive.Group>
+            )}
+
+            {results.messages.length > 0 && (
+              <CommandPrimitive.Group
+                heading={t(($) => $.groups.chats)}
+                className={GROUP_CLASS}
+              >
+                {results.messages.map((message) => (
+                  <ChatResultRow
+                    key={`chat:${message.id}`}
+                    message={message}
                     query={results.query}
                     disabled={resultsAreStale}
                     onSelect={handleSelect}
