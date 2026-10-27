@@ -125,11 +125,13 @@ multica issue comment add MUL-123 --content-stdin < review.md
 multica issue comment update <comment-id> --expected-revision 2 --content-file revised-review.md
 ```
 
-查看某次运行的消息，或停止运行：
+查看某次运行的消息、停止运行或重试：
 
 ```bash
 multica issue run-messages <task-id> --issue MUL-123
 multica issue cancel-task <task-id> --issue MUL-123
+multica issue rerun-task <run-id> --issue MUL-123
+multica issue rerun-task <run-id> --issue MUL-123 --fresh
 ```
 
 同一项目、同一父任务下已有标题相同（不区分大小写，忽略多余空格）且未关闭的任务时，`issue create` 会拒绝创建并给出那个任务。确实要再建一个，加 `--allow-duplicate`；要把一个任务标为另一个的重复，用 `multica issue status MUL-124 cancelled --duplicate-of MUL-123`。
@@ -357,7 +359,7 @@ CLI 配置文件包含可代表你访问 Multica 的令牌。不要提交到仓�
 | | `runs <issue-id>` | 查看执行历史 | `--full-id` |
 | | `run-messages <task-id>` | 查看单次执行的消息 | `--since`、`--issue` |
 | | `usage <issue-id>` | 查看聚合 token 用量 | |
-| | `rerun <id>` | 按当前指派重新入队执行 | |
+| | `rerun-task <run-id>` | 沿用原智能体和触发上下文，重跑指定运行 | `--issue`, `--fresh` |
 | | `cancel-task <task-id>` | 取消进行中或排队中的运行 | `--issue` |
 | `project` | `list/get/create/update/delete` | 管理项目 | `create`：`--title`（必填）、`--lead`、`--status`、`--icon`、`--start-date`、`--due-date`、`--repo`（可重复） |
 | | `status <id> <status>` | 修改项目状态 | |

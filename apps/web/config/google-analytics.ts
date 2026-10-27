@@ -1,3 +1,5 @@
+import { RESERVED_SLUGS } from "@multica/core/paths";
+
 type RuntimeEnv = Record<string, string | undefined>;
 
 // GA4 Measurement IDs look like `G-RQVF209EHD`. The value is interpolated
@@ -63,6 +65,65 @@ export function isSensitiveAnalyticsUrl(raw: string | undefined | null): boolean
   if (!raw) return false;
   const parts = analyticsUrlParts(raw);
   return !parts || parts.sensitive;
+}
+
+// Top-level routes that are not workspace slugs. RESERVED_SLUGS covers most of
+// them; the IM bind and join routes predate it and are listed here directly.
+const GLOBAL_ROUTES_OUTSIDE_RESERVED = new Set(["join", "lark", "slack", "telegram", "wecom"]);
+
+// Sections under /{workspaceSlug}/. Anything else is reported as a generic
+// workspace page rather than echoing an unknown segment.
+const WORKSPACE_SECTIONS = new Set([
+  "agents",
+  "attachments",
+  "autopilots",
+  "billing",
+  "chat",
+  "inbox",
+  "issues",
+  "members",
+  "my-issues",
+  "projects",
+  "runtimes",
+  "settings",
+  "skills",
+  "squads",
+  "usage",
+]);
+
+/**
+ * The page_title reported to Google Analytics for a URL.
+ *
+ * GA4 sends `document.title` as page_title on every event by default, and in
+ * a workspace that title is user content (Issue titles, project names, agent
+ * names). This returns a fixed label built only from route names Multica
+ * defines — never from IDs, slugs, or the live title — so the reported title
+ * carries nothing a workspace member wrote. The path itself is still reported
+ * via page_location.
+ */
+export function analyticsPageTitle(raw: string | undefined | null): string {
+  let pathname: string;
+  try {
+    pathname = new URL(raw ?? "").pathname;
+  } catch {
+    return "Multica";
+  }
+  const segments = pathname.split("/").filter(Boolean);
+  const first = segments[0]?.toLowerCase();
+  if (!first) return "Home";
+  if (RESERVED_SLUGS.has(first) || GLOBAL_ROUTES_OUTSIDE_RESERVED.has(first)) {
+    return humanizeRouteSegment(first);
+  }
+  const section = segments[1]?.toLowerCase();
+  if (!section) return "Workspace";
+  if (!WORKSPACE_SECTIONS.has(section)) return "Workspace · Page";
+  const label = `Workspace · ${humanizeRouteSegment(section)}`;
+  return segments.length > 2 ? `${label} · Detail` : label;
+}
+
+function humanizeRouteSegment(segment: string): string {
+  const words = segment.replace(/-/g, " ");
+  return words.charAt(0).toUpperCase() + words.slice(1);
 }
 
 function analyticsUrlParts(

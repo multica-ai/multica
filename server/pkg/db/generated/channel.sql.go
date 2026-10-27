@@ -336,12 +336,7 @@ func (q *Queries) ClaimChannelMediaPendingObjectsForBind(ctx context.Context, ar
 }
 
 const claimNextChannelMediaPendingObjectForReconcile = `-- name: ClaimNextChannelMediaPendingObjectForReconcile :one
-UPDATE channel_media_pending_object AS obj
-SET state = CASE WHEN obj.state = 'tombstoned' THEN 'tombstoned' ELSE 'deleting' END,
-    lease_token = $1,
-    lease_expires_at = now() + $2::interval,
-    attempt = obj.attempt + 1
-FROM (
+WITH due AS MATERIALIZED (
     SELECT cand.storage_key FROM channel_media_pending_object AS cand
     WHERE cand.next_attempt_at <= now()
       AND (
@@ -352,7 +347,13 @@ FROM (
     ORDER BY cand.next_attempt_at
     LIMIT 1
     FOR UPDATE SKIP LOCKED
-) AS due
+)
+UPDATE channel_media_pending_object AS obj
+SET state = CASE WHEN obj.state = 'tombstoned' THEN 'tombstoned' ELSE 'deleting' END,
+    lease_token = $1,
+    lease_expires_at = now() + $2::interval,
+    attempt = obj.attempt + 1
+FROM due
 WHERE obj.storage_key = due.storage_key
 RETURNING obj.storage_key, obj.workspace_id, obj.chat_message_id, obj.storage_url, obj.installation_id, obj.state, obj.lease_token, obj.lease_expires_at, obj.attempt, obj.next_attempt_at, obj.last_error, obj.tombstone_pass, obj.created_at
 `
@@ -369,6 +370,8 @@ type ClaimNextChannelMediaPendingObjectForReconcileParams struct {
 // while earlier rows ran, and could expire and be reclaimed before its own
 // DELETE was ever tried, inflating attempt/backoff for work that never
 // happened. One row per claim means attempt counts attempts.
+// MATERIALIZED pins the bounded candidate set so a nested-loop rescan cannot
+// move the LIMIT window to another row after an update.
 //
 // Due means (a) 'pending' rows older than the settle delay — an operational
 // buffer only; correctness comes from the state flip, after which a bind can

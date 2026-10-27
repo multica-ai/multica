@@ -125,11 +125,13 @@ multica issue comment add MUL-123 --content-stdin < review.md
 multica issue comment update <comment-id> --expected-revision 2 --content-file revised-review.md
 ```
 
-1 回の実行のメッセージを表示する、または実行を停止する:
+1 回の実行のメッセージを表示、実行を停止、または再試行する:
 
 ```bash
 multica issue run-messages <task-id> --issue MUL-123
 multica issue cancel-task <task-id> --issue MUL-123
+multica issue rerun-task <run-id> --issue MUL-123
+multica issue rerun-task <run-id> --issue MUL-123 --fresh
 ```
 
 同じプロジェクト・同じ親タスクの下に、タイトルが同じ（大文字小文字と余分な空白は区別しない）未完了のタスクがすでにあると、`issue create` は作成を拒否してそのタスクを示します。それでも作る場合は `--allow-duplicate` を付けます。あるタスクを別のタスクの重複にするには `multica issue status MUL-124 cancelled --duplicate-of MUL-123` を使います。
@@ -357,7 +359,7 @@ CLI の設定ファイルには、あなたとして Multica にアクセスで�
 | | `runs <issue-id>` | 実行履歴を表示 | `--full-id` |
 | | `run-messages <task-id>` | 1 回の実行のメッセージを表示 | `--since`、`--issue` |
 | | `usage <issue-id>` | 集計されたトークン使用量を表示 | |
-| | `rerun <id>` | 現在の担当者で実行を再キューイング | |
+| | `rerun-task <run-id>` | 元のエージェントとトリガーのコンテキストで指定した実行を再試行 | `--issue`, `--fresh` |
 | | `cancel-task <task-id>` | 進行中またはキュー中の実行をキャンセル | `--issue` |
 | `project` | `list/get/create/update/delete` | プロジェクトを管理 | `create`: `--title`（必須）、`--lead`、`--status`、`--icon`、`--start-date`、`--due-date`、`--repo`（繰り返し可） |
 | | `status <id> <status>` | プロジェクトのステータスを変更 | |
