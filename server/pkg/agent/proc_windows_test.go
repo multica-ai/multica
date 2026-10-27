@@ -20,12 +20,17 @@ import (
 	"golang.org/x/sys/windows"
 )
 
-// TestHideAgentWindowSetsCreateNewConsole guards against a regression where
-// hideAgentWindow reverts to CREATE_NO_WINDOW. CREATE_NO_WINDOW strips the
-// console entirely, which forces Windows to allocate a new visible console
-// per grandchild that doesn't itself pass CREATE_NO_WINDOW — the popup
-// storm reported in #1521.
-func TestHideAgentWindowSetsCreateNewConsole(t *testing.T) {
+const createNoWindow = 0x08000000
+
+// TestHideAgentWindowSetsCreateNewConsoleWithoutConsole guards the #1521
+// contract: with no console to inherit, hideAgentWindow must allocate a
+// hidden CREATE_NEW_CONSOLE — never CREATE_NO_WINDOW, which strips the
+// console and forces each grandchild to open its own visible window.
+func TestHideAgentWindowSetsCreateNewConsoleWithoutConsole(t *testing.T) {
+	prev := currentConsoleWindow
+	currentConsoleWindow = func() windows.HWND { return 0 }
+	t.Cleanup(func() { currentConsoleWindow = prev })
+
 	cmd := exec.Command("cmd.exe", "/c", "echo", "hi")
 	hideAgentWindow(cmd)
 
@@ -39,10 +44,37 @@ func TestHideAgentWindowSetsCreateNewConsole(t *testing.T) {
 		t.Errorf("CreationFlags should include CREATE_NEW_CONSOLE (0x%x), got 0x%x",
 			createNewConsole, cmd.SysProcAttr.CreationFlags)
 	}
-	const createNoWindow = 0x08000000
 	if cmd.SysProcAttr.CreationFlags&createNoWindow != 0 {
 		t.Errorf("CreationFlags must NOT include CREATE_NO_WINDOW (0x%x), got 0x%x — "+
 			"see #1521 for why this causes grandchild popups",
+			createNoWindow, cmd.SysProcAttr.CreationFlags)
+	}
+}
+
+// TestHideAgentWindowInheritsExistingConsole guards #9446: when the process
+// already owns a console (daemon after EnsureHiddenConsole), CREATE_NEW_CONSOLE
+// must not be set — under Windows Terminal as the default terminal it opens
+// a visible WT window even with HideWindow.
+func TestHideAgentWindowInheritsExistingConsole(t *testing.T) {
+	prev := currentConsoleWindow
+	currentConsoleWindow = func() windows.HWND { return 1 }
+	t.Cleanup(func() { currentConsoleWindow = prev })
+
+	cmd := exec.Command("cmd.exe", "/c", "echo", "hi")
+	hideAgentWindow(cmd)
+
+	if cmd.SysProcAttr == nil {
+		t.Fatal("SysProcAttr should be initialized")
+	}
+	if !cmd.SysProcAttr.HideWindow {
+		t.Error("HideWindow should be true")
+	}
+	if cmd.SysProcAttr.CreationFlags&createNewConsole != 0 {
+		t.Errorf("CreationFlags must NOT include CREATE_NEW_CONSOLE when a console is already attached, got 0x%x",
+			cmd.SysProcAttr.CreationFlags)
+	}
+	if cmd.SysProcAttr.CreationFlags&createNoWindow != 0 {
+		t.Errorf("CreationFlags must NOT include CREATE_NO_WINDOW (0x%x), got 0x%x",
 			createNoWindow, cmd.SysProcAttr.CreationFlags)
 	}
 }
@@ -57,6 +89,10 @@ func TestHideAgentWindowSetsCreateNewConsole(t *testing.T) {
 // which Windows silently ignores when combined with CREATE_NEW_CONSOLE), so
 // a surviving bit here is semantically meaningful, not just bitwise intact.
 func TestHideAgentWindowPreservesExistingSysProcAttr(t *testing.T) {
+	prev := currentConsoleWindow
+	currentConsoleWindow = func() windows.HWND { return 0 }
+	t.Cleanup(func() { currentConsoleWindow = prev })
+
 	const createUnicodeEnvironment = 0x00000400
 	cmd := exec.Command("cmd.exe", "/c", "echo", "hi")
 	cmd.SysProcAttr = &syscall.SysProcAttr{
@@ -72,7 +108,7 @@ func TestHideAgentWindowPreservesExistingSysProcAttr(t *testing.T) {
 		t.Error("existing CreationFlags bits (CREATE_UNICODE_ENVIRONMENT) should be preserved")
 	}
 	if cmd.SysProcAttr.CreationFlags&createNewConsole == 0 {
-		t.Error("CREATE_NEW_CONSOLE should be OR'd into existing flags")
+		t.Error("CREATE_NEW_CONSOLE should be OR'd into existing flags when no console is attached")
 	}
 }
 

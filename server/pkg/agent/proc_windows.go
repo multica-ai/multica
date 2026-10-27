@@ -24,22 +24,40 @@ import (
 // which forces Windows to allocate a new visible console per grandchild
 // when the grandchild is a console-subsystem program that doesn't itself
 // pass CREATE_NO_WINDOW — the exact popup storm reported in #1521.
+//
+// Prefer inheriting an existing console when one is already attached (the
+// daemon calls util.EnsureHiddenConsole before any spawn). CREATE_NEW_CONSOLE
+// under Windows Terminal-as-default opens a visible WT window even with
+// HideWindow set — the empty Terminal pop-ups reported in #9446.
 const createNewConsole = 0x00000010
 
 // createSuspended starts the child with its initial thread suspended, so it can
 // be placed in a Job Object before it executes a single instruction.
 const createSuspended = 0x00000004
 
+// currentConsoleWindow reports the calling process's console HWND, or 0 when
+// none is attached. Overridable in tests so hideAgentWindow's inherit-vs-allocate
+// branch can be exercised without attaching a real console.
+var currentConsoleWindow = windows.GetConsoleWindow
+
 // hideAgentWindow configures cmd to suppress the console window on Windows
 // while still giving descendant processes a hidden console to inherit.
 // Stdio pipes set via cmd.StdoutPipe/StdinPipe keep working because
 // STARTF_USESTDHANDLES takes precedence over the new console's stdio.
+//
+// When this process already owns a console (daemon path after
+// EnsureHiddenConsole), children inherit it and CREATE_NEW_CONSOLE is skipped
+// so Windows Terminal is not asked to host a new window (#9446). When no
+// console is attached, CREATE_NEW_CONSOLE + HideWindow still allocates a
+// hidden console for descendants — the #1521 contract.
 func hideAgentWindow(cmd *exec.Cmd) {
 	if cmd.SysProcAttr == nil {
 		cmd.SysProcAttr = &syscall.SysProcAttr{}
 	}
 	cmd.SysProcAttr.HideWindow = true
-	cmd.SysProcAttr.CreationFlags |= createNewConsole
+	if currentConsoleWindow() == 0 {
+		cmd.SysProcAttr.CreationFlags |= createNewConsole
+	}
 }
 
 // configureProcessGroup is a no-op on Windows: there is no Setpgid equivalent,
