@@ -7,18 +7,17 @@ import { cn } from "@multica/ui/lib/utils";
 import { ActorAvatar } from "@multica/ui/components/common/actor-avatar";
 import { resolvePublicFileUrl } from "@multica/core/workspace/avatar-url";
 import { useT, useTimeAgo } from "../../i18n";
+import { ProgressRing } from "./progress-ring";
 
-// ThreadMinimap — quick-jump rail with a complete comment outline.
-// Every thread is a long tick and every reply a short tick beneath it, so the
-// rail doubles as a map of where the conversation runs long. Hovering or
-// focusing any tick opens one stationary, scrollable outline of every thread
-// with its replies listed under it. Rows jump to the same timeline anchors as
-// the ticks, including replies inside collapsed or resolved threads.
+// ThreadMinimap — quick-jump rail with a complete issue outline.
+// The outline opens with the issue itself (title + description) and, when the
+// issue has children, its sub-issues overview; every thread follows as a long
+// tick with each reply a short tick beneath it, so the rail doubles as a map
+// of where the conversation runs long. Hovering or focusing any tick opens one
+// stationary, scrollable outline of those destinations. Rows jump to the same
+// anchors as the ticks, including replies inside collapsed or resolved threads.
 // Resolved threads start folded to their root row, on the rail and in the
 // outline alike, until the reader expands them from the outline.
-
-/** Minimum number of threads before the rail is worth its pixels. */
-const MIN_THREADS = 2;
 
 /**
  * Most ticks the rail draws before it drops the reply ticks and keeps one per
@@ -120,6 +119,10 @@ export interface ThreadMinimapThread {
 }
 
 interface ThreadMinimapProps {
+  /** The issue title + description section; always the first destination. */
+  description: { targetId: string; title: string; onJump: () => void };
+  /** The sub-issues overview; omitted when the issue has no children. */
+  subIssues?: { targetId: string; done: number; total: number; onJump: () => void };
   threads: ThreadMinimapThread[];
   /** The issue detail scroll container; null until its callback ref populates. */
   scrollContainerEl: HTMLElement | null;
@@ -129,10 +132,20 @@ interface ThreadMinimapProps {
   className?: string;
 }
 
-/** One rail tick / outline row: a thread root or one of its replies. */
-interface MinimapItem {
-  kind: "thread" | "reply";
+/** An issue section ahead of the discussion: the description or the sub-issues overview. */
+interface MinimapSectionItem<K extends "description" | "subIssues"> {
+  kind: K;
+  /** The section's DOM id — both its item identity and its scroll anchor. */
   id: string;
+  anchorId: string;
+}
+
+/** A thread root or one of its replies. */
+interface MinimapCommentItem<K extends "thread" | "reply"> {
+  kind: K;
+  /** Comment id; its DOM anchor is `comment-${id}`. */
+  id: string;
+  anchorId: string;
   entry: TimelineEntry;
   /** The thread itself for a root, the enclosing thread for a reply. */
   thread: ThreadMinimapThread;
@@ -140,32 +153,53 @@ interface MinimapItem {
   threadIndex: number;
 }
 
+/** One rail tick / outline row. */
+type MinimapItem =
+  | MinimapSectionItem<"description">
+  | MinimapSectionItem<"subIssues">
+  | MinimapCommentItem<"thread">
+  | MinimapCommentItem<"reply">;
+
 function isThreadFolded(thread: ThreadMinimapThread, expandedResolvedIds: ReadonlySet<string>) {
   return thread.resolved && thread.replies.length > 0 && !expandedResolvedIds.has(thread.id);
 }
 
-function flattenThreads(
+function buildItems(
+  descriptionId: string,
+  subIssuesId: string | undefined,
   threads: readonly ThreadMinimapThread[],
   expandedResolvedIds: ReadonlySet<string>,
 ): MinimapItem[] {
-  const items: MinimapItem[] = [];
+  const items: MinimapItem[] = [
+    { kind: "description", id: descriptionId, anchorId: descriptionId },
+  ];
+  if (subIssuesId) items.push({ kind: "subIssues", id: subIssuesId, anchorId: subIssuesId });
   for (const thread of threads) {
     const threadIndex = items.length;
-    items.push({ kind: "thread", id: thread.id, entry: thread.entry, thread, threadIndex });
+    items.push({
+      kind: "thread", id: thread.id, anchorId: `comment-${thread.id}`,
+      entry: thread.entry, thread, threadIndex,
+    });
     if (isThreadFolded(thread, expandedResolvedIds)) continue;
     for (const reply of thread.replies) {
-      items.push({ kind: "reply", id: reply.id, entry: reply, thread, threadIndex });
+      items.push({
+        kind: "reply", id: reply.id, anchorId: `comment-${reply.id}`,
+        entry: reply, thread, threadIndex,
+      });
     }
   }
   return items;
 }
 
-// useVisibleCommentIds — "which rail comments are on screen right now"
+const EMPTY_PREVIEW = { title: "", body: "" };
+
+// useVisibleAnchorIds — "which rail destinations are on screen right now"
 //
-// Which ticked comments intersect the scroll viewport, so the rail can darken
-// their ticks. A thread root's anchor wraps its whole card, so a thread tick
-// stays dark while any of the thread is on screen; a reply's anchor is its own
-// row. Deliberately the rail's alone: "on screen" is a set, not a point, and
+// Which ticked destinations intersect the scroll viewport, so the rail can
+// darken their ticks. A thread root's anchor wraps its whole card, so a thread
+// tick stays dark while any of the thread is on screen; a reply's anchor is its
+// own row; the description and sub-issues anchors wrap their sections.
+// Deliberately the rail's alone: "on screen" is a set, not a point, and
 // only a column of ticks can show a span without suggesting multiple selection.
 //
 // Computed from DOM rects on scroll/resize instead of an IntersectionObserver
@@ -180,8 +214,8 @@ function sameIdSet(a: Set<string>, b: Set<string>): boolean {
   return true;
 }
 
-function useVisibleCommentIds(
-  commentIds: readonly string[],
+function useVisibleAnchorIds(
+  anchorIds: readonly string[],
   scrollContainerEl: HTMLElement | null,
 ): Set<string> {
   const [visibleIds, setVisibleIds] = useState<Set<string>>(() => new Set());
@@ -195,8 +229,8 @@ function useVisibleCommentIds(
       raf = 0;
       const rect = container.getBoundingClientRect();
       const next = new Set<string>();
-      for (const id of commentIds) {
-        const el = document.getElementById(`comment-${id}`);
+      for (const id of anchorIds) {
+        const el = document.getElementById(id);
         if (!el) continue;
         const r = el.getBoundingClientRect();
         if (r.bottom > rect.top && r.top < rect.bottom) next.add(id);
@@ -219,28 +253,31 @@ function useVisibleCommentIds(
       ro.disconnect();
       if (raf) cancelAnimationFrame(raf);
     };
-  }, [commentIds, scrollContainerEl]);
+  }, [anchorIds, scrollContainerEl]);
 
   return visibleIds;
 }
 
-/** The item currently highlighted in the outline and rail. */
+/**
+ * The item currently highlighted in the outline and rail. Keyed by item id, not
+ * position, so sub-issues appearing or a thread folding doesn't shift the
+ * highlight onto a different row.
+ */
 interface PreviewAnchor {
-  /** Index into the flattened items (threads and replies). */
-  index: number;
+  id: string;
 }
 
 function MinimapTick({
   kind,
-  index,
+  itemId,
   label,
   inViewport,
   isHighlighted,
   onClick,
 }: {
   kind: MinimapItem["kind"];
-  /** Item index — how pointer and focus handlers map a tick back to its row. */
-  index: number;
+  /** Item id — how pointer and focus handlers map a tick back to its row. */
+  itemId: string;
   label: string;
   inViewport: boolean;
   /** The corresponding outline row is active. */
@@ -252,7 +289,7 @@ function MinimapTick({
     <button
       type="button"
       aria-label={label}
-      data-index={index}
+      data-item-id={itemId}
       // Reply ticks stay out of the tab order: dozens of stops on a 6px rail
       // would bury the thread ticks. Keyboard users reach every reply through
       // the outline, which opens as soon as a thread tick takes focus.
@@ -296,6 +333,8 @@ function MinimapTick({
 }
 
 export function ThreadMinimap({
+  description,
+  subIssues,
   threads,
   scrollContainerEl,
   onJump,
@@ -314,28 +353,39 @@ export function ThreadMinimap({
       return next;
     });
   }, []);
+  const descriptionId = description.targetId;
+  const subIssuesId = subIssues?.targetId;
   const items = useMemo(
-    () => flattenThreads(threads, expandedResolvedIds),
-    [threads, expandedResolvedIds],
+    () => buildItems(descriptionId, subIssuesId, threads, expandedResolvedIds),
+    [descriptionId, subIssuesId, threads, expandedResolvedIds],
   );
-  // Item indexes that get a rail tick: every comment while they fit, one per
-  // thread beyond MAX_RAIL_TICKS.
+  const indexById = useMemo(
+    () => new Map(items.map((item, i) => [item.id, i] as const)),
+    [items],
+  );
+  // Item indexes that get a rail tick: every destination while they fit;
+  // beyond MAX_RAIL_TICKS the reply ticks drop and sections + threads remain.
   const railIndexes = useMemo(
     () =>
       items.length <= MAX_RAIL_TICKS
         ? items.map((_, i) => i)
-        : items.flatMap((item, i) => (item.kind === "thread" ? [i] : [])),
+        : items.flatMap((item, i) => (item.kind === "reply" ? [] : [i])),
     [items],
   );
-  const railIds = useMemo(() => railIndexes.map((i) => items[i]!.id), [items, railIndexes]);
-  const visibleIds = useVisibleCommentIds(railIds, scrollContainerEl);
+  const railAnchorIds = useMemo(
+    () => railIndexes.map((i) => items[i]!.anchorId),
+    [items, railIndexes],
+  );
+  const visibleIds = useVisibleAnchorIds(railAnchorIds, scrollContainerEl);
 
   // Flattened previews, cached per comment by content so an unrelated timeline
   // update (reaction, new reply elsewhere) doesn't re-flatten every comment.
+  // Section items have no comment body; their titles come from props.
   const prevPreviewsRef = useRef<Map<string, { content: string | undefined; preview: { title: string; body: string } }>>(new Map());
   const previews = useMemo(() => {
     const next = new Map<string, { content: string | undefined; preview: { title: string; body: string } }>();
     const arr = items.map((item) => {
+      if (item.kind === "description" || item.kind === "subIssues") return EMPTY_PREVIEW;
       const cached = prevPreviewsRef.current.get(item.id);
       const preview =
         cached && cached.content === item.entry.content
@@ -369,7 +419,7 @@ export function ThreadMinimap({
   const showPreview = useCallback((anchor: PreviewAnchor | null) => {
     previewRef.current = anchor;
     setPreview((prev) =>
-      prev?.index === anchor?.index ? prev : anchor,
+      prev?.id === anchor?.id ? prev : anchor,
     );
   }, []);
 
@@ -388,6 +438,22 @@ export function ThreadMinimap({
       closeTimerRef.current = null;
     }
   }, []);
+
+  // The active row can disappear under the reader: sub-issues all removed, a
+  // reply deleted, a thread folded. Removing a focused row does not reliably
+  // emit blur, so close the outline explicitly instead of highlighting nothing.
+  const previewIndex = preview ? indexById.get(preview.id) : undefined;
+  useEffect(() => {
+    if (!preview || previewIndex !== undefined) return;
+    cancelClose();
+    if (openTimerRef.current !== null) {
+      window.clearTimeout(openTimerRef.current);
+      openTimerRef.current = null;
+    }
+    pendingAnchorRef.current = null;
+    showPreview(null);
+  }, [preview, previewIndex, cancelClose, showPreview]);
+
   const scheduleClose = useCallback(() => {
     cancelClose();
     if (openTimerRef.current !== null) {
@@ -400,7 +466,9 @@ export function ThreadMinimap({
     }, PREVIEW_CLOSE_DELAY_MS);
   }, [cancelClose, showPreview]);
 
-  const handleJump = useCallback((commentId: string, event: React.MouseEvent<HTMLButtonElement>) => {
+  const descriptionJump = description.onJump;
+  const subIssuesJump = subIssues?.onJump;
+  const handleJump = useCallback((item: MinimapItem, event: React.MouseEvent<HTMLButtonElement>) => {
     // Mouse clicks must not pin a hover outline through leftover button focus.
     // Keyboard activation keeps focus so the reader can continue navigating.
     if (event.detail > 0) {
@@ -408,8 +476,10 @@ export function ThreadMinimap({
       // Blur schedules a close; keep the card until the pointer actually leaves.
       cancelClose();
     }
-    onJump(commentId);
-  }, [cancelClose, onJump]);
+    if (item.kind === "description") descriptionJump();
+    else if (item.kind === "subIssues") subIssuesJump?.();
+    else onJump(item.id);
+  }, [cancelClose, descriptionJump, subIssuesJump, onJump]);
 
   const runWave = useCallback(() => {
     waveRafRef.current = 0;
@@ -420,7 +490,7 @@ export function ThreadMinimap({
     const buttons = nav.querySelectorAll<HTMLButtonElement>("button");
     // Read pass, then write pass — never interleaved, one reflow at most.
     const scales: string[] = [];
-    let nearest: { index: number; dist: number } | null = null;
+    let nearest: { id: string; dist: number } | null = null;
     buttons.forEach((b) => {
       if (y === null) {
         scales.push("");
@@ -431,7 +501,8 @@ export function ThreadMinimap({
       const dist = Math.abs(y - centerY);
       const s = reducedMotionRef.current ? 1 : waveScale(y - centerY);
       scales.push(s > 1.001 ? `${s.toFixed(3)} 1` : "");
-      if (!nearest || dist < nearest.dist) nearest = { index: Number(b.dataset.index), dist };
+      const id = b.dataset.itemId;
+      if (id && (!nearest || dist < nearest.dist)) nearest = { id, dist };
     });
     buttons.forEach((b, i) => {
       const tick = b.firstElementChild as HTMLElement | null;
@@ -444,8 +515,8 @@ export function ThreadMinimap({
     });
 
     if (y === null || !nearest) return;
-    const { index } = nearest as { index: number };
-    const anchor: PreviewAnchor = { index };
+    const { id } = nearest as { id: string };
+    const anchor: PreviewAnchor = { id };
     pendingAnchorRef.current = anchor;
     if (previewRef.current) {
       // Already open: gliding highlights the matching row without moving the card.
@@ -481,39 +552,47 @@ export function ThreadMinimap({
       const btn = (e.target as HTMLElement).closest("button");
       if (!btn) return;
       cancelClose();
-      const index = Number(btn.dataset.index);
-      if (Number.isNaN(index)) return;
-      showPreview({ index });
+      const id = btn.dataset.itemId;
+      if (!id) return;
+      showPreview({ id });
     },
     [cancelClose, showPreview],
   );
 
   useEffect(() => {
     const card = cardRef.current;
-    if (!card || !preview) return;
+    if (!card || previewIndex === undefined) return;
     // Rail navigation should reveal its row in a long outline. Moving within
     // the list itself must leave its scroll position under the reader's control.
     if (pointerYRef.current === null && !navRef.current?.contains(document.activeElement)) return;
-    const row = card.querySelectorAll("li")[preview.index];
+    const row = card.querySelectorAll("li")[previewIndex];
     if (!row) return;
     if (row.offsetTop < card.scrollTop) card.scrollTop = row.offsetTop;
     else if (row.offsetTop + row.offsetHeight > card.scrollTop + card.clientHeight) {
       card.scrollTop = row.offsetTop + row.offsetHeight - card.clientHeight;
     }
-  }, [preview]);
+  }, [previewIndex]);
 
-  if (threads.length < MIN_THREADS) return null;
+  // The description is always present, so it alone is no reason to draw a
+  // rail; one more destination (a thread or the sub-issues) makes it useful.
+  if (threads.length === 0 && !subIssues) return null;
 
   const actorName = (entry: TimelineEntry) =>
     entry.actor_name || getActorName(entry.actor_type, entry.actor_id);
-  const itemTitle = (item: MinimapItem, index: number) =>
-    isDeletedComment(item.entry)
+  const itemTitle = (item: MinimapItem, index: number) => {
+    if (item.kind === "description") return description.title.slice(0, PREVIEW_TITLE_MAX);
+    if (item.kind === "subIssues") return t(($) => $.detail.sub_issues_label);
+    return isDeletedComment(item.entry)
       ? t(($) => $.comment.deleted_placeholder)
       : previews[index]!.title || actorName(item.entry);
-  // Accessible name shared by a tick and its outline row: resolution is
-  // announced on thread ticks, a reply names its author up front.
+  };
+  // Accessible name shared by a tick and its outline row: the description row
+  // shows the issue title but is announced as the description, resolution is
+  // announced on thread ticks, and a reply names its author up front.
   const itemLabel = (item: MinimapItem, index: number) => {
+    if (item.kind === "description") return t(($) => $.detail.description_nav_label);
     const title = itemTitle(item, index);
+    if (item.kind === "subIssues") return title;
     if (item.kind === "reply") {
       return t(($) => $.detail.thread_nav_reply_label, { author: actorName(item.entry), title });
     }
@@ -535,11 +614,15 @@ export function ThreadMinimap({
     );
   };
   // With reply ticks dropped, a highlighted reply row lights its thread's tick.
-  const highlightedTick = preview
-    ? items.length <= MAX_RAIL_TICKS
-      ? preview.index
-      : items[preview.index]?.threadIndex
-    : undefined;
+  const previewItem = previewIndex === undefined ? undefined : items[previewIndex];
+  const highlightedTick =
+    previewItem === undefined
+      ? undefined
+      : items.length > MAX_RAIL_TICKS && previewItem.kind === "reply"
+        ? previewItem.threadIndex
+        : previewIndex;
+  const rowClassName =
+    "flex min-w-0 flex-1 items-center gap-3 rounded-md px-3 py-2 text-left text-body text-muted-foreground transition-colors hover:bg-surface-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring data-active:font-medium data-active:text-brand";
 
   return (
     // Positioning shim; only the nav and the card take pointer events so the
@@ -550,12 +633,16 @@ export function ThreadMinimap({
         if (event.key !== "Escape") return;
         event.preventDefault();
         event.stopPropagation();
-        const activeIndex = previewRef.current?.index;
+        const activeId = previewRef.current?.id;
+        const activeIndex = activeId === undefined ? undefined : indexById.get(activeId);
         if (cardRef.current?.contains(document.activeElement) && activeIndex !== undefined) {
-          const nav = navRef.current;
+          // A reply whose tick was dropped returns focus to its thread's tick.
+          const active = items[activeIndex]!;
+          const fallbackId = active.kind === "reply" ? active.thread.id : undefined;
+          const ticks = [...(navRef.current?.querySelectorAll<HTMLButtonElement>("button") ?? [])];
           const tick =
-            nav?.querySelector<HTMLButtonElement>(`button[data-index="${activeIndex}"]`) ??
-            nav?.querySelector<HTMLButtonElement>(`button[data-index="${items[activeIndex]?.threadIndex}"]`);
+            ticks.find((b) => b.dataset.itemId === active.id) ??
+            ticks.find((b) => b.dataset.itemId === fallbackId);
           tick?.focus();
         }
         cancelClose();
@@ -572,7 +659,7 @@ export function ThreadMinimap({
     >
       <nav
         ref={navRef}
-        aria-label={t(($) => $.detail.thread_nav_label)}
+        aria-label={t(($) => $.detail.quick_jump_label)}
         onPointerMove={handleWaveMove}
         onPointerLeave={handleWaveLeave}
         onFocusCapture={handleFocus}
@@ -587,17 +674,17 @@ export function ThreadMinimap({
             <MinimapTick
               key={item.id}
               kind={item.kind}
-              index={i}
+              itemId={item.id}
               label={itemLabel(item, i)}
-              inViewport={visibleIds.has(item.id)}
+              inViewport={visibleIds.has(item.anchorId)}
               isHighlighted={highlightedTick === i}
-              onClick={(event) => handleJump(item.id, event)}
+              onClick={(event) => handleJump(item, event)}
             />
           );
         })}
       </nav>
 
-      {preview && (
+      {previewIndex !== undefined && (
         <div
           ref={cardRef}
           onPointerEnter={cancelClose}
@@ -606,18 +693,55 @@ export function ThreadMinimap({
           onBlurCapture={scheduleClose}
           className="pointer-events-auto absolute right-8 top-1/2 max-h-[calc(100%-3rem)] w-80 max-w-[calc(100vw-4rem)] -translate-y-1/2 overflow-y-auto overscroll-contain rounded-xl bg-popover p-2 text-body text-popover-foreground shadow-lg ring-1 ring-foreground/10"
         >
-          {/* One <li> per item, replies included, so row index === item index. */}
+          {/* One <li> per item, sections and replies included, so row index === item index. */}
           <ul>
             {items.map((item, index) => {
               const title = itemTitle(item, index);
               const rowProps = {
                 type: "button" as const,
-                onPointerEnter: () => showPreview({ index }),
-                onFocus: () => showPreview({ index }),
-                onClick: (event: React.MouseEvent<HTMLButtonElement>) => handleJump(item.id, event),
-                "data-active": preview.index === index || undefined,
+                onPointerEnter: () => showPreview({ id: item.id }),
+                onFocus: () => showPreview({ id: item.id }),
+                onClick: (event: React.MouseEvent<HTMLButtonElement>) => handleJump(item, event),
+                "data-active": previewIndex === index || undefined,
                 "aria-label": itemLabel(item, index),
               };
+
+              if (item.kind === "description") {
+                return (
+                  <li key={item.id} className="flex items-center">
+                    <button {...rowProps} className={rowClassName}>
+                      <span className="min-w-0 flex-1 truncate">{title}</span>
+                    </button>
+                  </li>
+                );
+              }
+
+              if (item.kind === "subIssues") {
+                const progress = subIssues
+                  ? t(($) => $.detail.sub_issues_nav_progress, { done: subIssues.done, total: subIssues.total })
+                  : undefined;
+                return (
+                  <li key={item.id} className="flex items-center">
+                    <button {...rowProps} aria-description={progress} className={rowClassName}>
+                      <span className="min-w-0 flex-1 truncate">{title}</span>
+                      {subIssues && (
+                        <span
+                          role="progressbar"
+                          aria-label={title}
+                          aria-valuemin={0}
+                          aria-valuemax={subIssues.total}
+                          aria-valuenow={subIssues.done}
+                          aria-valuetext={progress}
+                          className="inline-flex shrink-0 items-center gap-1.5 text-caption tabular-nums text-muted-foreground"
+                        >
+                          <ProgressRing done={subIssues.done} total={subIssues.total} />
+                          <span>{subIssues.done}/{subIssues.total}</span>
+                        </span>
+                      )}
+                    </button>
+                  </li>
+                );
+              }
 
               if (item.kind === "reply") {
                 return (
@@ -658,7 +782,7 @@ export function ThreadMinimap({
                   <button
                     {...rowProps}
                     aria-description={participantNames.join(", ") || undefined}
-                    className="flex min-w-0 flex-1 items-center gap-3 rounded-md px-3 py-2 text-left text-body text-muted-foreground transition-colors hover:bg-surface-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring data-active:font-medium data-active:text-brand"
+                    className={rowClassName}
                   >
                     <span className="flex min-w-0 flex-1 items-center gap-1.5">
                       <span className="truncate">{title}</span>
@@ -698,8 +822,8 @@ export function ThreadMinimap({
                           ? t(($) => $.detail.thread_nav_show_replies, { count: thread.replies.length })
                           : t(($) => $.detail.thread_nav_hide_replies)
                       }
-                      onPointerEnter={() => showPreview({ index })}
-                      onFocus={() => showPreview({ index })}
+                      onPointerEnter={() => showPreview({ id: item.id })}
+                      onFocus={() => showPreview({ id: item.id })}
                       onClick={(event) => {
                         if (event.detail > 0) {
                           event.currentTarget.blur();
