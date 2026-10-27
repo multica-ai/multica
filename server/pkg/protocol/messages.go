@@ -81,6 +81,11 @@ const (
 	// the server leave out the workflow brief's lines that override those
 	// rules; an older daemon still states them, so it keeps getting them.
 	DaemonCapabilityWorkflowStatusRulesV1 = "workflow-status-rules-v1"
+	// DaemonCapabilityTaskSupplementAuthorV1 is sent when claiming a
+	// supplement: the daemon renders the claim's author_type, so an agent's
+	// message is presented as an agent's. Without it the server marks an
+	// agent's message in its content instead.
+	DaemonCapabilityTaskSupplementAuthorV1 = "task-supplement-author-v1"
 
 	TaskSupplementFailureTurnNotStarted   = "turn_not_started"
 	TaskSupplementFailureProviderRejected = "provider_rejected"

@@ -147,7 +147,7 @@ type BindCommentTaskSupplementRow struct {
 	RuntimeID       pgtype.UUID        `json:"runtime_id"`
 }
 
-// Binds an ordinary member comment, already created through the normal comment
+// Binds an ordinary comment, already created through the normal comment
 // path, to the exact running turn its author chose. Locking the task
 // serializes against terminal transitions: when that turn ended first nothing
 // is bound — never a later turn of the same agent — and the caller keeps the
@@ -205,17 +205,20 @@ WITH next AS MATERIALIZED (
       AND s.task_id = next.task_id
     RETURNING s.task_id, s.workspace_id, s.issue_id, s.comment_id, s.author_id, s.client_request_id, s.status, s.failure_reason, s.attempt_count, s.created_at, s.updated_at, s.delivered_at
 )
-SELECT claimed.comment_id, claimed.attempt_count, c.content,
-       COALESCE(NULLIF(btrim(u.name), ''), 'a user')::text AS author_name
+SELECT claimed.comment_id, claimed.attempt_count, c.content, c.author_type,
+       COALESCE(NULLIF(btrim(COALESCE(u.name, a.name)), ''),
+                CASE WHEN c.author_type = 'agent' THEN 'an agent' ELSE 'a user' END)::text AS author_name
 FROM claimed
 JOIN comment c ON c.id = claimed.comment_id
-LEFT JOIN "user" u ON u.id = claimed.author_id
+LEFT JOIN "user" u ON u.id = claimed.author_id AND c.author_type = 'member'
+LEFT JOIN agent a ON a.id = claimed.author_id AND c.author_type = 'agent'
 `
 
 type ClaimNextTaskSupplementRow struct {
 	CommentID    pgtype.UUID `json:"comment_id"`
 	AttemptCount int32       `json:"attempt_count"`
 	Content      string      `json:"content"`
+	AuthorType   string      `json:"author_type"`
 	AuthorName   string      `json:"author_name"`
 }
 
@@ -226,6 +229,7 @@ func (q *Queries) ClaimNextTaskSupplement(ctx context.Context, taskID pgtype.UUI
 		&i.CommentID,
 		&i.AttemptCount,
 		&i.Content,
+		&i.AuthorType,
 		&i.AuthorName,
 	)
 	return i, err

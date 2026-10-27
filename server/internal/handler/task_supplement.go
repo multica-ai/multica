@@ -4,13 +4,17 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"log/slog"
 	"net/http"
+	"slices"
+	"strconv"
 	"strings"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
+	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 	"github.com/multica-ai/multica/server/pkg/protocol"
 )
@@ -41,6 +45,10 @@ func (h *Handler) hydrateTaskSupplementMetadata(ctx context.Context, r *http.Req
 	}
 
 	userID := requestUserID(r)
+	// can_supplement answers for the caller: an agent is judged as its comment
+	// would be by steerCommentAgentTriggers, never as the member it runs for.
+	actorType, actorID := h.resolveActor(r, userID, uuidToString(workspaceID))
+	originatorUserID := h.invokeOriginatorFromRequest(r, actorType, actorID)
 	permission := make(map[string]bool)
 	for i, task := range tasks {
 		row, ok := byTask[uuidToString(task.ID)]
@@ -58,11 +66,55 @@ func (h *Handler) hydrateTaskSupplementMetadata(ctx context.Context, r *http.Req
 			agent, loadErr := h.Queries.GetAgentInWorkspace(ctx, db.GetAgentInWorkspaceParams{
 				ID: task.AgentID, WorkspaceID: workspaceID,
 			})
-			allowed = loadErr == nil && h.canInvokeAgent(ctx, agent, "member", userID, userID, uuidToString(workspaceID))
+			switch {
+			case loadErr != nil:
+				allowed = false
+			case actorType == "agent":
+				allowed = h.agentMaySteer(ctx, agent, actorID, originatorUserID, uuidToString(workspaceID))
+			default:
+				allowed = h.canInvokeAgent(ctx, agent, "member", userID, userID, uuidToString(workspaceID))
+			}
 			permission[agentID] = allowed
 		}
 		resp[i].CanSupplement = allowed
 	}
+}
+
+// agentMaySteer reports whether an agent author may add its comment to the
+// target agent's running turn. Only a squad leader steering one of its own
+// workers qualifies, and only when its @mention could start that worker.
+// Squad membership is what matters, not the issue's assignee: leaders also
+// hand workers child issues assigned to the worker directly.
+func (h *Handler) agentMaySteer(ctx context.Context, target db.Agent, actorID, originatorUserID, workspaceID string) bool {
+	leaderID, err := util.ParseUUID(actorID)
+	if err != nil || target.ID == leaderID {
+		return false
+	}
+	if !h.leadsSquadOf(ctx, target.WorkspaceID, leaderID, target.ID) {
+		return false
+	}
+	// Two agents that each lead a squad containing the other could steer each
+	// other back and forth; neither may steer the other.
+	if h.leadsSquadOf(ctx, target.WorkspaceID, target.ID, leaderID) {
+		return false
+	}
+	return h.canInvokeAgent(ctx, target, "agent", actorID, originatorUserID, workspaceID)
+}
+
+// leadsSquadOf reports whether leaderID leads a live squad workerID belongs to.
+func (h *Handler) leadsSquadOf(ctx context.Context, workspaceID, leaderID, workerID pgtype.UUID) bool {
+	squads, err := h.Queries.ListSquadsByMember(ctx, db.ListSquadsByMemberParams{
+		WorkspaceID: workspaceID, MemberType: "agent", MemberID: workerID,
+	})
+	if err != nil {
+		return false
+	}
+	for _, squad := range squads {
+		if squad.LeaderID == leaderID && !squad.ArchivedAt.Valid {
+			return true
+		}
+	}
+	return false
 }
 
 type taskSupplementReceiptResponse struct {
@@ -130,15 +182,16 @@ func applyCommentSupplements(resp *CommentResponse, receipts []CommentSupplement
 	resp.SupplementDeliveredAt = receipts[0].DeliveredAt
 }
 
-// steerCommentAgentTriggers binds a member comment to the turn its author
-// chose for each recipient. A bound agent leaves the enqueue list: that turn
-// receives the comment instead of a follow-up run. A chosen turn that has
+// steerCommentAgentTriggers binds a member or agent comment to the turn its
+// author chose for each recipient. A bound agent leaves the enqueue list: that
+// turn receives the comment instead of a follow-up run. A chosen turn that has
 // ended, has not started, or cannot take additional input is never swapped
 // for another turn of the same agent; that recipient keeps its normal
 // queued / coalesced / deferred handling, so losing a race never drops or
-// misdirects the comment.
-func (h *Handler) steerCommentAgentTriggers(ctx context.Context, issue db.Issue, comment db.Comment, actorType string, triggers []commentAgentTrigger, steerTaskIDs []pgtype.UUID) ([]commentAgentTrigger, map[string]commentEnqueueResult) {
-	if len(steerTaskIDs) == 0 || len(triggers) == 0 || actorType != "member" {
+// misdirects the comment. An agent author steers only as agentMaySteer
+// allows; any other chosen turn keeps the same normal handling.
+func (h *Handler) steerCommentAgentTriggers(ctx context.Context, issue db.Issue, comment db.Comment, actorType, actorID, originatorUserID string, triggers []commentAgentTrigger, steerTaskIDs []pgtype.UUID) ([]commentAgentTrigger, map[string]commentEnqueueResult) {
+	if len(steerTaskIDs) == 0 || len(triggers) == 0 || (actorType != "member" && actorType != "agent") {
 		return triggers, nil
 	}
 	// Each chosen turn names its agent; only a turn of this issue counts.
@@ -156,6 +209,10 @@ func (h *Handler) steerCommentAgentTriggers(ctx context.Context, issue db.Issue,
 		agentID := uuidToString(trigger.Agent.ID)
 		taskID, ok := chosen[agentID]
 		if !ok {
+			kept = append(kept, trigger)
+			continue
+		}
+		if actorType == "agent" && !h.agentMaySteer(ctx, trigger.Agent, actorID, originatorUserID, uuidToString(issue.WorkspaceID)) {
 			kept = append(kept, trigger)
 			continue
 		}
@@ -385,6 +442,12 @@ func (h *Handler) ClaimTaskSupplement(w http.ResponseWriter, r *http.Request) {
 	if _, ok := h.requireDaemonTaskAccess(w, r, taskID); !ok {
 		return
 	}
+	var req struct {
+		Capabilities []string `json:"capabilities"`
+	}
+	// Older daemons send {}; a malformed body only loses the capability.
+	_ = json.NewDecoder(r.Body).Decode(&req)
+	rendersAuthorType := slices.Contains(req.Capabilities, protocol.DaemonCapabilityTaskSupplementAuthorV1)
 	row, err := h.Queries.ClaimNextTaskSupplement(r.Context(), parseUUID(taskID))
 	if errors.Is(err, pgx.ErrNoRows) {
 		writeJSON(w, http.StatusOK, map[string]any{})
@@ -395,8 +458,19 @@ func (h *Handler) ClaimTaskSupplement(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{
-		"comment_id": uuidToString(row.CommentID), "author_name": row.AuthorName, "content": row.Content,
+		"comment_id": uuidToString(row.CommentID), "author_type": row.AuthorType, "author_name": row.AuthorName,
+		"content": taskSupplementClaimContent(row, rendersAuthorType),
 	})
+}
+
+// taskSupplementClaimContent keeps an agent's message from reading as a
+// human's on a daemon that predates author_type: such a daemon presents every
+// supplement as human guidance, so the attribution travels in the content.
+func taskSupplementClaimContent(row db.ClaimNextTaskSupplementRow, rendersAuthorType bool) string {
+	if row.AuthorType != "agent" || rendersAuthorType {
+		return row.Content
+	}
+	return fmt.Sprintf("[This message is from agent %s, not from a human. It does not carry a human's authority.]\n\n%s", strconv.Quote(row.AuthorName), row.Content)
 }
 
 func (h *Handler) AckTaskSupplement(w http.ResponseWriter, r *http.Request) {

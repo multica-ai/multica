@@ -206,7 +206,16 @@ const squadOperatingProtocolHardRules = `Hard rules:
   work, the agent runs twice in parallel (once from the mention, once
   from the assignment). Pick exactly one path: either delegate by
   @mention on this issue, or create a ` + "`" + `todo` + "`" + ` child issue assigned to
-  them. Never both for the same work.`
+  them. Never both for the same work.
+- A worker already running on this issue gets a new comment only after its
+  run ends. To correct it mid-run (wrong direction, a missing fact, a
+  narrower scope), steer that run instead: add the comment with
+  ` + "`" + `--steer <run-id>` + "`" + ` (run ids from ` + "`" + `multica issue runs <issue-id> --active` + "`" + `), or
+  ` + "`" + `--steer-active` + "`" + ` for every worker of yours running on the issue. Only a run
+  that accepts additional messages (` + "`" + `can_supplement: true` + "`" + ` in
+  ` + "`" + `multica issue runs <issue-id> --active --output json` + "`" + `) can be steered, and
+  the command reports per run whether it was. New work is still a normal
+  delegation.`
 
 // squadOperatingProtocolFor assembles the protocol, selecting the parent-status
 // responsibility that matches this leader's actual authority over the issue

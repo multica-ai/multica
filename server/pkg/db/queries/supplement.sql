@@ -96,7 +96,7 @@ WHERE s.task_id = @task_id
   AND s.client_request_id = @client_request_id;
 
 -- name: BindCommentTaskSupplement :one
--- Binds an ordinary member comment, already created through the normal comment
+-- Binds an ordinary comment, already created through the normal comment
 -- path, to the exact running turn its author chose. Locking the task
 -- serializes against terminal transitions: when that turn ended first nothing
 -- is bound — never a later turn of the same agent — and the caller keeps the
@@ -200,11 +200,13 @@ WITH next AS MATERIALIZED (
       AND s.task_id = next.task_id
     RETURNING s.*
 )
-SELECT claimed.comment_id, claimed.attempt_count, c.content,
-       COALESCE(NULLIF(btrim(u.name), ''), 'a user')::text AS author_name
+SELECT claimed.comment_id, claimed.attempt_count, c.content, c.author_type,
+       COALESCE(NULLIF(btrim(COALESCE(u.name, a.name)), ''),
+                CASE WHEN c.author_type = 'agent' THEN 'an agent' ELSE 'a user' END)::text AS author_name
 FROM claimed
 JOIN comment c ON c.id = claimed.comment_id
-LEFT JOIN "user" u ON u.id = claimed.author_id;
+LEFT JOIN "user" u ON u.id = claimed.author_id AND c.author_type = 'member'
+LEFT JOIN agent a ON a.id = claimed.author_id AND c.author_type = 'agent';
 
 -- name: AckTaskSupplementDelivered :one
 -- The provider can accept input before completion while its HTTP acknowledgement

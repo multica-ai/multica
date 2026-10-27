@@ -440,13 +440,16 @@ func (c *Client) ExtendTaskPrepareLease(ctx context.Context, runtimeID, taskID s
 
 type TaskSupplement struct {
 	CommentID  string `json:"comment_id"`
+	AuthorType string `json:"author_type"`
 	AuthorName string `json:"author_name"`
 	Content    string `json:"content"`
 }
 
 func (c *Client) ClaimTaskSupplement(ctx context.Context, taskID string) (*TaskSupplement, error) {
 	var supplement TaskSupplement
-	if err := c.postJSON(ctx, fmt.Sprintf("/api/daemon/tasks/%s/supplements/claim", taskID), map[string]any{}, &supplement); err != nil {
+	if err := c.postJSON(ctx, fmt.Sprintf("/api/daemon/tasks/%s/supplements/claim", taskID), map[string]any{
+		"capabilities": []string{protocol.DaemonCapabilityTaskSupplementAuthorV1},
+	}, &supplement); err != nil {
 		return nil, err
 	}
 	if supplement.CommentID == "" {
