@@ -702,6 +702,10 @@
     "cancel_failed": "실행을 취소하지 못했습니다"
   },
   "execution_log": {
+    "include_children": "하위 태스크 포함",
+    "loading": "실행 기록 불러오는 중...",
+    "load_failed_retry": "실행 기록을 불러올 수 없습니다. 다시 시도",
+    "empty": "이 범위에 실행 기록이 없습니다.",
     "section": "실행 로그",
     "cancel_task_tooltip": "실행 취소",
     "cancel_task_aria": "실행 취소",

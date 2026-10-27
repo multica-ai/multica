@@ -769,6 +769,55 @@ func (q *Queries) ListIssueTaskUsage(ctx context.Context, issueID pgtype.UUID) (
 	return items, nil
 }
 
+const listTaskUsageByIDs = `-- name: ListTaskUsageByIDs :many
+SELECT task_id, provider, model, input_tokens, output_tokens,
+       cache_read_tokens, cache_write_tokens, cost_usd_ticks
+FROM task_usage
+WHERE task_id = ANY($1::uuid[])
+ORDER BY task_id, model
+`
+
+type ListTaskUsageByIDsRow struct {
+	TaskID           pgtype.UUID `json:"task_id"`
+	Provider         string      `json:"provider"`
+	Model            string      `json:"model"`
+	InputTokens      int64       `json:"input_tokens"`
+	OutputTokens     int64       `json:"output_tokens"`
+	CacheReadTokens  int64       `json:"cache_read_tokens"`
+	CacheWriteTokens int64       `json:"cache_write_tokens"`
+	CostUsdTicks     pgtype.Int8 `json:"cost_usd_ticks"`
+}
+
+// Only called with task IDs selected through an authorized issue scope.
+func (q *Queries) ListTaskUsageByIDs(ctx context.Context, taskIds []pgtype.UUID) ([]ListTaskUsageByIDsRow, error) {
+	rows, err := q.db.Query(ctx, listTaskUsageByIDs, taskIds)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListTaskUsageByIDsRow{}
+	for rows.Next() {
+		var i ListTaskUsageByIDsRow
+		if err := rows.Scan(
+			&i.TaskID,
+			&i.Provider,
+			&i.Model,
+			&i.InputTokens,
+			&i.OutputTokens,
+			&i.CacheReadTokens,
+			&i.CacheWriteTokens,
+			&i.CostUsdTicks,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const upsertTaskUsage = `-- name: UpsertTaskUsage :exec
 INSERT INTO task_usage (task_id, provider, model, input_tokens, output_tokens, cache_read_tokens, cache_write_tokens, cost_usd_ticks, updated_at)
 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, now())

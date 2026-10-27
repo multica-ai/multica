@@ -133,6 +133,81 @@ func TestListTasksByIssueDefaultsToFullHistory(t *testing.T) {
 	}
 }
 
+func TestListTasksByIssueSubtreeIncludesAllDescendantsAndUsage(t *testing.T) {
+	if testHandler == nil || testPool == nil {
+		t.Skip("database not available")
+	}
+	f := newFamilyFixture(t)
+	grandchild := dbfx.Issue(t, "grandchild", testutil.Cols{"parent_issue_id": f.childA})
+	greatGrandchild := dbfx.Issue(t, "great-grandchild", testutil.Cols{"parent_issue_id": grandchild})
+	rootRun := f.task(t, f.parentID, "completed")
+	childRun := f.task(t, f.childA, "failed")
+	grandchildRun := f.task(t, grandchild, "cancelled")
+	deepRun := f.task(t, greatGrandchild, "running")
+	siblingRun := f.task(t, f.childB, "queued")
+	f.task(t, f.unrelated, "completed")
+	// A malformed cross-workspace parent pointer must not widen authorization.
+	otherWorkspace := dbfx.Workspace(t, "other subtree workspace", "other-subtree")
+	foreignChild := dbfx.Issue(t, "foreign child", testutil.Cols{"workspace_id": otherWorkspace, "parent_issue_id": f.parentID})
+	f.task(t, foreignChild, "completed")
+	if _, err := testPool.Exec(context.Background(), `
+		INSERT INTO task_usage (task_id, provider, model, input_tokens, output_tokens, cache_read_tokens, cache_write_tokens, cost_usd_ticks)
+		VALUES ($1, 'openai', 'subtree-test-model', 100, 50, 20, 10, 2000000000)
+	`, grandchildRun); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		testPool.Exec(context.Background(), `DELETE FROM task_usage WHERE task_id = $1`, grandchildRun)
+	})
+
+	resp := runsRequest(t, f.parentID, "scope=subtree")
+	if got, want := taskIDs(resp), sortedCopy(rootRun, childRun, grandchildRun, deepRun, siblingRun); !sameIDs(got, want) {
+		t.Fatalf("subtree runs = %v, want %v", got, want)
+	}
+	for _, run := range resp {
+		if run.IssueIdentifier == "" || run.IssueTitle == "" {
+			t.Errorf("missing owning issue labels: %+v", run)
+		}
+		if run.ID == grandchildRun {
+			if len(run.Usage) != 1 || run.Usage[0].InputTokens != 100 || run.Usage[0].CostUsdTicks == nil || *run.Usage[0].CostUsdTicks != 2000000000 {
+				t.Errorf("grandchild usage missing or changed: %+v", run.Usage)
+			}
+		}
+	}
+	// Opening the same scope on a child must exclude its parent and siblings.
+	if got, want := taskIDs(runsRequest(t, f.childA, "scope=subtree")), sortedCopy(childRun, grandchildRun, deepRun); !sameIDs(got, want) {
+		t.Fatalf("child subtree = %v, want %v", got, want)
+	}
+	if got, want := taskIDs(runsRequest(t, f.parentID, "scope=subtree&active=true")), sortedCopy(deepRun, siblingRun); !sameIDs(got, want) {
+		t.Fatalf("active subtree = %v, want %v", got, want)
+	}
+	if got, want := taskIDs(runsRequest(t, f.parentID, "")), sortedCopy(rootRun); !sameIDs(got, want) {
+		t.Fatalf("default scope changed: %v, want %v", got, want)
+	}
+}
+
+func TestListTasksByIssueSubtreeIsUncappedAndCycleSafe(t *testing.T) {
+	if testHandler == nil || testPool == nil {
+		t.Skip("database not available")
+	}
+	f := newFamilyFixture(t)
+	want := []string{}
+	for range familyActiveRunCap + 3 {
+		want = append(want, f.task(t, f.childA, "completed"))
+	}
+	// UNION on IDs must visit each node only once even in a corrupt cycle.
+	if _, err := testPool.Exec(context.Background(), `UPDATE issue SET parent_issue_id = $1 WHERE id = $2`, f.childA, f.parentID); err != nil {
+		t.Fatal(err)
+	}
+	sort.Strings(want)
+	response := runsResponse(t, f.parentID, "scope=subtree").Want(http.StatusOK)
+	var runs []AgentTaskResponse
+	response.JSON(&runs)
+	if got := taskIDs(runs); !sameIDs(got, want) {
+		t.Fatalf("uncapped cycle-safe subtree = %v, want %v", got, want)
+	}
+}
+
 func TestTaskHistoryOmitsUnusedAssigneeFallbacks(t *testing.T) {
 	if testHandler == nil || testPool == nil {
 		t.Skip("database not available")

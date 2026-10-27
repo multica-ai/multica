@@ -6175,6 +6175,8 @@ type ActiveRunSummary struct {
 //     child of that parent. Implies active=true, because a full execution
 //     history across a whole family is unbounded and answers no question anyone
 //     asked.
+//   - scope=subtree — full execution history for this issue and all descendants.
+//     Unlike family, it never includes ancestors or siblings and is not capped.
 func (h *Handler) ListTasksByIssue(w http.ResponseWriter, r *http.Request) {
 	issueID := chi.URLParam(r, "id")
 	issue, ok := h.loadIssueForUser(w, r, issueID)
@@ -6183,8 +6185,8 @@ func (h *Handler) ListTasksByIssue(w http.ResponseWriter, r *http.Request) {
 	}
 
 	scope := r.URL.Query().Get("scope")
-	if scope != "" && scope != "issue" && scope != "family" {
-		writeError(w, http.StatusBadRequest, "scope must be 'issue' or 'family'")
+	if scope != "" && scope != "issue" && scope != "family" && scope != "subtree" {
+		writeError(w, http.StatusBadRequest, "scope must be 'issue', 'family', or 'subtree'")
 		return
 	}
 	// Parse rather than compare. `active=tru` answering with the full history
@@ -6254,7 +6256,20 @@ func (h *Handler) ListTasksByIssue(w http.ResponseWriter, r *http.Request) {
 
 	var tasks []db.AgentTaskQueue
 	var err error
-	if activeOnly {
+	type issueLabel struct{ identifier, title string }
+	labels := make(map[string]issueLabel)
+	if scope == "subtree" {
+		rows, queryErr := h.Queries.ListTasksByIssueSubtree(r.Context(), db.ListTasksByIssueSubtreeParams{
+			RootIssueID: issue.ID, WorkspaceID: issue.WorkspaceID, ActiveOnly: activeOnly,
+		})
+		err = queryErr
+		for _, row := range rows {
+			tasks = append(tasks, row.AgentTaskQueue)
+			labels[uuidToString(row.AgentTaskQueue.IssueID)] = issueLabel{
+				identifier: service.IssueIdentifier(row.IssuePrefix, row.IssueNumber), title: row.IssueTitle,
+			}
+		}
+	} else if activeOnly {
 		tasks, err = h.Queries.ListActiveTasksByIssue(r.Context(), issue.ID)
 	} else {
 		tasks, err = h.Queries.ListTasksByIssue(r.Context(), issue.ID)
@@ -6268,6 +6283,10 @@ func (h *Handler) ListTasksByIssue(w http.ResponseWriter, r *http.Request) {
 	resp := make([]AgentTaskResponse, len(tasks))
 	for i, t := range tasks {
 		resp[i] = taskToResponse(t, workspaceID)
+		if label, ok := labels[resp[i].IssueID]; ok {
+			resp[i].IssueIdentifier = label.identifier
+			resp[i].IssueTitle = label.title
+		}
 	}
 	h.hydrateTaskSupplementMetadata(r.Context(), r, issue.WorkspaceID, tasks, resp)
 	// Execution-log rows render the "on behalf of <member>" badge, so this
@@ -6280,10 +6299,36 @@ func (h *Handler) ListTasksByIssue(w http.ResponseWriter, r *http.Request) {
 	// paying the full-history cost this filter exists to remove — and pay it
 	// for a column that is near-empty on runs that have not finished.
 	if !activeOnly {
-		h.hydrateTaskUsage(r.Context(), issue.ID, resp)
+		if scope == "subtree" {
+			h.hydrateSubtreeTaskUsage(r.Context(), tasks, resp)
+		} else {
+			h.hydrateTaskUsage(r.Context(), issue.ID, resp)
+		}
 	}
 
 	writeJSON(w, http.StatusOK, resp)
+}
+
+// Usage is fetched only for the authorized, visible subtree runs in one batch.
+func (h *Handler) hydrateSubtreeTaskUsage(ctx context.Context, tasks []db.AgentTaskQueue, resp []AgentTaskResponse) {
+	if len(tasks) == 0 {
+		return
+	}
+	ids := make([]pgtype.UUID, len(tasks))
+	for i, task := range tasks {
+		ids[i] = task.ID
+	}
+	rows, err := h.Queries.ListTaskUsageByIDs(ctx, ids)
+	if err != nil {
+		return
+	}
+	byTask := make(map[string][]TaskUsageData, len(resp))
+	for _, row := range rows {
+		appendTaskUsage(byTask, row.TaskID, row.Provider, row.Model,
+			row.InputTokens, row.OutputTokens, row.CacheReadTokens,
+			row.CacheWriteTokens, row.CostUsdTicks)
+	}
+	attachTaskUsage(resp, byTask)
 }
 
 // hydrateTaskUsage attaches each run's own token usage to the execution-log

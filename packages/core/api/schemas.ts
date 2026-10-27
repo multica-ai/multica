@@ -2036,6 +2036,8 @@ export const AgentTaskSchema = z.object({
   agent_id: z.string().default(""),
   runtime_id: z.string().default(""),
   issue_id: z.string().default(""),
+  issue_identifier: z.string().optional().catch(undefined),
+  issue_title: z.string().optional().catch(undefined),
   status: z.string().default("cancelled"),
   priority: z.number().default(0),
   dispatched_at: z.string().nullable().default(null),

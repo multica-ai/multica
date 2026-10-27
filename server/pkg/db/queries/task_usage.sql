@@ -49,6 +49,14 @@ JOIN agent_task_queue atq ON atq.id = tu.task_id
 WHERE atq.issue_id = $1
 ORDER BY tu.task_id, tu.model;
 
+-- name: ListTaskUsageByIDs :many
+-- Only called with task IDs selected through an authorized issue scope.
+SELECT task_id, provider, model, input_tokens, output_tokens,
+       cache_read_tokens, cache_write_tokens, cost_usd_ticks
+FROM task_usage
+WHERE task_id = ANY(sqlc.arg(task_ids)::uuid[])
+ORDER BY task_id, model;
+
 -- name: ListAgentTaskUsage :many
 -- Per-(task, provider, model) usage rows for one agent's explicitly requested
 -- task history. ListAgentTasks is already access-gated before this query runs;

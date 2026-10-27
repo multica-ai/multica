@@ -702,6 +702,10 @@
     "cancel_failed": "実行をキャンセルできませんでした"
   },
   "execution_log": {
+    "include_children": "サブタスクを含める",
+    "loading": "実行履歴を読み込み中...",
+    "load_failed_retry": "実行履歴を読み込めませんでした。再試行",
+    "empty": "この範囲には実行履歴がありません。",
     "section": "実行ログ",
     "cancel_task_tooltip": "実行をキャンセル",
     "cancel_task_aria": "実行をキャンセル",

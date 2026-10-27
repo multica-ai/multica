@@ -958,6 +958,21 @@ describe("ApiClient Inbox response schemas", () => {
 });
 
 describe("ApiClient", () => {
+  it("requests recursive issue history and tolerates malformed issue labels", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify([
+      { id: "child-run", issue_id: "child", issue_identifier: "MUL-2", issue_title: "Child", usage: [{ model: "test", input_tokens: 10 }] },
+      { id: "deep-run", issue_id: "grandchild", issue_identifier: 42, issue_title: { malformed: true } },
+    ]), { status: 200, headers: { "Content-Type": "application/json" } }));
+    vi.stubGlobal("fetch", fetchMock);
+    const client = new ApiClient("https://api.example.test");
+    const tasks = await client.listTasksByIssue("parent", true);
+    expect(fetchMock.mock.calls[0]?.[0]).toBe("https://api.example.test/api/issues/parent/task-runs?scope=subtree");
+    expect(tasks).toHaveLength(2);
+    expect(tasks[0]).toMatchObject({ issue_id: "child", issue_identifier: "MUL-2", issue_title: "Child" });
+    expect(tasks[0]?.usage?.[0]?.input_tokens).toBe(10);
+    expect(tasks[1]?.issue_identifier).toBeUndefined();
+    expect(tasks[1]?.issue_title).toBeUndefined();
+  });
   it("preserves HTTP status on failed requests", async () => {
     vi.stubGlobal(
       "fetch",

@@ -282,6 +282,17 @@ archived statuses remain readable via an explicit status filter.
 
 ## Who else is running right now
 
+The issue sidebar's **Include sub-issues** checkbox uses
+`GET /api/issues/{id}/task-runs?scope=subtree` to show the current issue and
+every descendant at any depth. This is full, uncapped execution history with
+per-run usage and owning issue labels, never ancestors or siblings. It drives
+the sidebar totals, status indicators, spend chart, and complete Runs timeline.
+The Runs dialog inherits the sidebar scope when opened and provides its own
+checkbox beside the issue title. Changing it updates only the dialog; reopening
+the dialog inherits the sidebar selection again.
+The default endpoint still returns only the current issue. The subtree scope
+is separate from the active-only family coordination read below.
+
 Nothing about concurrent runs is pushed into your prompt: the answer changes
 while a turn is running, and most turns never need it. Ask the server on the
 turns that do — before opening a PR against code a sibling issue also touches:

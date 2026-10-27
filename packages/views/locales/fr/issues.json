@@ -729,6 +729,10 @@
     "cancel_failed": "Échec de l'annulation de l'exécution"
   },
   "execution_log": {
+    "include_children": "Inclure les sous-tâches",
+    "loading": "Chargement des exécutions...",
+    "load_failed_retry": "Impossible de charger les exécutions. Réessayer",
+    "empty": "Aucune exécution dans ce périmètre.",
     "section": "Journal d'exécution",
     "cancel_task_tooltip": "Annuler l'exécution",
     "cancel_task_aria": "Annuler l'exécution",

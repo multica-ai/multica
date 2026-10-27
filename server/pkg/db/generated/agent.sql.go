@@ -6350,6 +6350,124 @@ func (q *Queries) ListTasksByIssue(ctx context.Context, issueID pgtype.UUID) ([]
 	return items, nil
 }
 
+const listTasksByIssueSubtree = `-- name: ListTasksByIssueSubtree :many
+WITH RECURSIVE subtree(id) AS (
+    SELECT root.id FROM issue root
+    WHERE root.id = $2 AND root.workspace_id = $3
+    UNION
+    SELECT child.id FROM issue child
+    JOIN subtree parent ON child.parent_issue_id = parent.id
+    WHERE child.workspace_id = $3
+)
+SELECT atq.id, atq.agent_id, atq.issue_id, atq.status, atq.priority, atq.dispatched_at, atq.started_at, atq.completed_at, atq.result, atq.error, atq.created_at, atq.context, atq.runtime_id, atq.session_id, atq.work_dir, atq.trigger_comment_id, atq.chat_session_id, atq.autopilot_run_id, atq.attempt, atq.max_attempts, atq.parent_task_id, atq.failure_reason, atq.trigger_summary, atq.force_fresh_session, atq.is_leader_task, atq.wait_reason, atq.initiator_user_id, atq.handoff_note, atq.prepare_lease_expires_at, atq.squad_id, atq.runtime_mcp_overlay, atq.escalation_for_task_id, atq.fire_at, atq.originator_user_id, atq.runtime_connected_apps, atq.coalesced_comment_ids, atq.delivered_comment_ids, atq.chat_input_task_id, atq.chat_finalize_deferred_at, atq.originator_source, atq.delegated_from_task_id, atq.retry_of_task_id, atq.rerun_of_task_id, atq.rule_version_id, atq.trigger_evidence_kind, atq.trigger_evidence_ref_id, atq.accountable_user_id, atq.session_rollout_missing, atq.retired_session_id, atq.quick_actions_disabled, atq.regenerate_quick_actions_for, atq.branch_name, atq.durable_work_dir, atq.channel_context_revision, atq.comment_thread_id, atq.cancelled_by_type, atq.cancelled_by_id, atq.cancelled_by_name, atq.issue_snapshot, atq.workflow_step, i.title AS issue_title, i.number AS issue_number, w.issue_prefix
+FROM agent_task_queue atq
+JOIN subtree ON subtree.id = atq.issue_id
+JOIN issue i ON i.id = atq.issue_id
+JOIN workspace w ON w.id = i.workspace_id
+WHERE NOT $1::boolean
+   OR atq.status IN ('queued', 'dispatched', 'waiting_local_directory', 'running')
+ORDER BY atq.created_at DESC, atq.id
+`
+
+type ListTasksByIssueSubtreeParams struct {
+	ActiveOnly  bool        `json:"active_only"`
+	RootIssueID pgtype.UUID `json:"root_issue_id"`
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
+}
+
+type ListTasksByIssueSubtreeRow struct {
+	AgentTaskQueue AgentTaskQueue `json:"agent_task_queue"`
+	IssueTitle     string         `json:"issue_title"`
+	IssueNumber    int32          `json:"issue_number"`
+	IssuePrefix    string         `json:"issue_prefix"`
+}
+
+// UNION deduplicates IDs, so even a corrupt parent cycle terminates.
+// Constrain every recursive step to the authorized root's workspace.
+func (q *Queries) ListTasksByIssueSubtree(ctx context.Context, arg ListTasksByIssueSubtreeParams) ([]ListTasksByIssueSubtreeRow, error) {
+	rows, err := q.db.Query(ctx, listTasksByIssueSubtree, arg.ActiveOnly, arg.RootIssueID, arg.WorkspaceID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListTasksByIssueSubtreeRow{}
+	for rows.Next() {
+		var i ListTasksByIssueSubtreeRow
+		if err := rows.Scan(
+			&i.AgentTaskQueue.ID,
+			&i.AgentTaskQueue.AgentID,
+			&i.AgentTaskQueue.IssueID,
+			&i.AgentTaskQueue.Status,
+			&i.AgentTaskQueue.Priority,
+			&i.AgentTaskQueue.DispatchedAt,
+			&i.AgentTaskQueue.StartedAt,
+			&i.AgentTaskQueue.CompletedAt,
+			&i.AgentTaskQueue.Result,
+			&i.AgentTaskQueue.Error,
+			&i.AgentTaskQueue.CreatedAt,
+			&i.AgentTaskQueue.Context,
+			&i.AgentTaskQueue.RuntimeID,
+			&i.AgentTaskQueue.SessionID,
+			&i.AgentTaskQueue.WorkDir,
+			&i.AgentTaskQueue.TriggerCommentID,
+			&i.AgentTaskQueue.ChatSessionID,
+			&i.AgentTaskQueue.AutopilotRunID,
+			&i.AgentTaskQueue.Attempt,
+			&i.AgentTaskQueue.MaxAttempts,
+			&i.AgentTaskQueue.ParentTaskID,
+			&i.AgentTaskQueue.FailureReason,
+			&i.AgentTaskQueue.TriggerSummary,
+			&i.AgentTaskQueue.ForceFreshSession,
+			&i.AgentTaskQueue.IsLeaderTask,
+			&i.AgentTaskQueue.WaitReason,
+			&i.AgentTaskQueue.InitiatorUserID,
+			&i.AgentTaskQueue.HandoffNote,
+			&i.AgentTaskQueue.PrepareLeaseExpiresAt,
+			&i.AgentTaskQueue.SquadID,
+			&i.AgentTaskQueue.RuntimeMcpOverlay,
+			&i.AgentTaskQueue.EscalationForTaskID,
+			&i.AgentTaskQueue.FireAt,
+			&i.AgentTaskQueue.OriginatorUserID,
+			&i.AgentTaskQueue.RuntimeConnectedApps,
+			&i.AgentTaskQueue.CoalescedCommentIds,
+			&i.AgentTaskQueue.DeliveredCommentIds,
+			&i.AgentTaskQueue.ChatInputTaskID,
+			&i.AgentTaskQueue.ChatFinalizeDeferredAt,
+			&i.AgentTaskQueue.OriginatorSource,
+			&i.AgentTaskQueue.DelegatedFromTaskID,
+			&i.AgentTaskQueue.RetryOfTaskID,
+			&i.AgentTaskQueue.RerunOfTaskID,
+			&i.AgentTaskQueue.RuleVersionID,
+			&i.AgentTaskQueue.TriggerEvidenceKind,
+			&i.AgentTaskQueue.TriggerEvidenceRefID,
+			&i.AgentTaskQueue.AccountableUserID,
+			&i.AgentTaskQueue.SessionRolloutMissing,
+			&i.AgentTaskQueue.RetiredSessionID,
+			&i.AgentTaskQueue.QuickActionsDisabled,
+			&i.AgentTaskQueue.RegenerateQuickActionsFor,
+			&i.AgentTaskQueue.BranchName,
+			&i.AgentTaskQueue.DurableWorkDir,
+			&i.AgentTaskQueue.ChannelContextRevision,
+			&i.AgentTaskQueue.CommentThreadID,
+			&i.AgentTaskQueue.CancelledByType,
+			&i.AgentTaskQueue.CancelledByID,
+			&i.AgentTaskQueue.CancelledByName,
+			&i.AgentTaskQueue.IssueSnapshot,
+			&i.AgentTaskQueue.WorkflowStep,
+			&i.IssueTitle,
+			&i.IssueNumber,
+			&i.IssuePrefix,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listUserAgentIDsByRuntime = `-- name: ListUserAgentIDsByRuntime :many
 SELECT id FROM agent
 WHERE runtime_id = $1 AND kind = 'user'
