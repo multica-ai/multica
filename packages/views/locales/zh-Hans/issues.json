@@ -143,7 +143,8 @@
   },
   "stage": {
     "none": "无阶段",
-    "value": "阶段 {{n}}"
+    "value": "阶段 {{n}}",
+    "add": "添加阶段"
   },
   "scope": {
     "all_label": "全部",
