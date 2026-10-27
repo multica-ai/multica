@@ -4182,8 +4182,9 @@ func TestExecuteAndDrain_IdleWatchdog_FiresOnInactivity(t *testing.T) {
 // the production watchdog window or relying on child-process scheduling speed.
 type waitForAgentMessageBackend struct {
 	agent.Backend
-	match   func(agent.Message) bool
-	onMatch func()
+	match      func(agent.Message) bool
+	onMatch    func()
+	resultGate <-chan struct{}
 }
 
 func (b waitForAgentMessageBackend) Execute(ctx context.Context, prompt string, opts agent.ExecOptions) (*agent.Session, error) {
@@ -4213,12 +4214,25 @@ func (b waitForAgentMessageBackend) Execute(ctx context.Context, prompt string, 
 					messages <- msg
 				}
 			}()
+			result := session.Result
+			if b.resultGate != nil {
+				// Keep Result unavailable until the daemon enters the branch under test.
+				gatedResult := make(chan agent.Result, 1)
+				go func() {
+					defer close(gatedResult)
+					<-b.resultGate
+					if final, ok := <-session.Result; ok {
+						gatedResult <- final
+					}
+				}()
+				result = gatedResult
+			}
 			return &agent.Session{
 				ToolActivity:             session.ToolActivity,
 				InterruptBackgroundTools: session.InterruptBackgroundTools,
 				TerminalObserved:         session.TerminalObserved,
 				Messages:                 messages,
-				Result:                   session.Result,
+				Result:                   result,
 			}, nil
 		}
 	}
@@ -4403,11 +4417,19 @@ func TestExecuteAndDrain_PiWithoutTurnErrorKeepsUpstreamCancellation(t *testing.
 	if err != nil {
 		t.Fatalf("new pi backend: %v", err)
 	}
+	probe := &handoffProbe{
+		gate:   make(chan struct{}),
+		prefix: "waiting for the backend to hand over its result after cancellation",
+	}
+	defer func() { probe.once.Do(func() { close(probe.gate) }) }()
 	matched := make(chan struct{})
 	backend = waitForAgentMessageBackend{
 		Backend: backend,
 		match:   func(msg agent.Message) bool { return msg.Type == agent.MessageStatus },
 		onMatch: func() { close(matched) },
+		// Both Done and Result can become ready on cancellation. Pin the drain
+		// arm rather than requiring select to choose it over an aborted Result.
+		resultGate: probe.gate,
 	}
 	d := newTestDaemon(t)
 	ctx, cancel := context.WithCancel(context.Background())
@@ -4425,7 +4447,7 @@ func TestExecuteAndDrain_PiWithoutTurnErrorKeepsUpstreamCancellation(t *testing.
 			backend,
 			"prompt-ignored",
 			agent.ExecOptions{ResumeSessionID: sessionPath},
-			slog.Default(),
+			slog.New(probe),
 			"t-pi-no-provider-error-upstream-cancel",
 			"",
 			new(atomic.Int32),
@@ -4444,6 +4466,9 @@ func TestExecuteAndDrain_PiWithoutTurnErrorKeepsUpstreamCancellation(t *testing.
 	case got := <-done:
 		if got.err != nil {
 			t.Fatalf("executeAndDrain: %v", got.err)
+		}
+		if !probe.seen.Load() {
+			t.Fatal("upstream cancellation hand-off was not exercised")
 		}
 		if got.result.Status != "cancelled" || !strings.Contains(got.result.Error, "task cancelled by upstream context") {
 			t.Fatalf("result = %+v, want existing upstream cancellation", got.result)

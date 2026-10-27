@@ -1303,6 +1303,8 @@ RETURNING storage_key;
 -- while earlier rows ran, and could expire and be reclaimed before its own
 -- DELETE was ever tried, inflating attempt/backoff for work that never
 -- happened. One row per claim means attempt counts attempts.
+-- MATERIALIZED pins the bounded candidate set so a nested-loop rescan cannot
+-- move the LIMIT window to another row after an update.
 --
 -- Due means (a) 'pending' rows older than the settle delay — an operational
 -- buffer only; correctness comes from the state flip, after which a bind can
@@ -1313,12 +1315,7 @@ RETURNING storage_key;
 -- FOR UPDATE SKIP LOCKED keeps replicas off each other's row; the
 -- object-storage DELETE happens outside any transaction, gated by the lease
 -- token. No row (ErrNoRows) means nothing is due — the sweep is done.
-UPDATE channel_media_pending_object AS obj
-SET state = CASE WHEN obj.state = 'tombstoned' THEN 'tombstoned' ELSE 'deleting' END,
-    lease_token = @lease_token,
-    lease_expires_at = now() + @lease::interval,
-    attempt = obj.attempt + 1
-FROM (
+WITH due AS MATERIALIZED (
     SELECT cand.storage_key FROM channel_media_pending_object AS cand
     WHERE cand.next_attempt_at <= now()
       AND (
@@ -1329,7 +1326,13 @@ FROM (
     ORDER BY cand.next_attempt_at
     LIMIT 1
     FOR UPDATE SKIP LOCKED
-) AS due
+)
+UPDATE channel_media_pending_object AS obj
+SET state = CASE WHEN obj.state = 'tombstoned' THEN 'tombstoned' ELSE 'deleting' END,
+    lease_token = @lease_token,
+    lease_expires_at = now() + @lease::interval,
+    attempt = obj.attempt + 1
+FROM due
 WHERE obj.storage_key = due.storage_key
 RETURNING obj.*;
 

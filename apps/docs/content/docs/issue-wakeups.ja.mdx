@@ -140,7 +140,7 @@ multica issue wakeup create OPS-56 --until-status in_review --instruction "成�
 
 - **時間**：`--kind at` に `--after 10m` または `--at <RFC3339 の時刻>`。`--kind every --every 1h` で一定間隔（最短 1 分）。`--kind cron --cron "<5 フィールドの式>"` には `--timezone` を付けます（既定は UTC）。
 - **イベント**：`--event` のあとにイベント名をカンマ区切りで書きます。`multica issue wakeup events` ですべてのイベントとフィルターを一覧できます。`--mode continuous` で繰り返し起動になります。
-- **条件**：`--until-status`、`--until-assignee`、`--until-label`、`--until-property`、`--until-children-done [--stage N]`、`--until-pr checks|merged|conflicts`、`--until-issue <タスク> --until-issue-state done|ended|in_review`。1 つのウェイクアップに使える `--until-*` は 1 つだけで、`--event` とは併用できません。
+- **条件**：`--until-status`、`--until-assignee`、`--until-label`、`--until-property`、`--until-children-done [--stage N]`、`--until-pr checks|merged|conflicts`、`--until-issue <タスク> --until-issue-state done|ended|in_review|blocked`。1 つのウェイクアップに使える `--until-*` は 1 つだけで、`--event` とは併用できません。
 - **終わり方**：CLI は待つ期限を自動では付けません。`--expires-in 72h` か `--expires-at <RFC3339 の時刻>` で終わりを決めます。`--on-timeout wake` を付けると、イベントのルールは期限が来たときにもう一度起こします。`--max-fires N`（1〜1000）で繰り返すルールの実行回数に上限を付けます。
 - **返信先**：`--parent <コメント ID>` を付けると、起動後の返信が元のスレッドに入ります。
 

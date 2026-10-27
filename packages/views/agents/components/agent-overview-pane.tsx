@@ -192,7 +192,7 @@ export function AgentOverviewPane({
 
   // The Qoder bridge fails every task carrying skills, MCP, connected apps,
   // env, args or a model override, and runs issues only (no chat). Those
-  // editors are not offered; the QCA agent in Qoder owns that configuration.
+  // editors are not offered; the agent in Qoder Cloud Agents owns that configuration.
   const qoderRuntime = runtime?.provider === "qoder_cloud";
 
   const visibleCapabilityTabs = useMemo(() => {

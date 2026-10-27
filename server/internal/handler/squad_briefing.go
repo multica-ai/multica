@@ -18,8 +18,9 @@ import (
 //
 // Keep this text English-only (matches existing agent-harness conventions)
 // and keep the mention syntax exactly aligned with util.MentionRe — the
-// "Squad Roster" block below renders concrete examples that round-trip
-// through util.ParseMentions, and the protocol text refers to that format.
+// "Squad Roster" block below renders copyable examples as inline code so the
+// briefing itself does not trigger, and the pasted syntax round-trips
+// through util.ParseMentions. The protocol text refers to that format.
 //
 // Responsibility 5 is the single statement of the no_action rule (MUL-6984).
 // The runtime brief's workflow step 4 and ## Output, and the per-turn reply

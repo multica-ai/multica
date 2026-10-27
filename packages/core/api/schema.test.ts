@@ -901,6 +901,36 @@ describe("ApiClient schema fallback", () => {
   });
 
   describe("getConfig", () => {
+    it("preserves an omitted daemon setup target for legacy self-host detection", async () => {
+      stubFetchJson({
+        daemon_server_url: "https://api.example.com",
+        daemon_app_url: "https://app.example.com",
+      });
+      const config = await new ApiClient("https://api.example.test").getConfig();
+      expect(config.daemon_setup_target).toBeUndefined();
+      expect(config.daemon_server_url).toBe("https://api.example.com");
+      expect(config.daemon_app_url).toBe("https://app.example.com");
+    });
+
+    it.each([null, 123, {}, "unexpected", "unknown"])(
+      "does not infer Cloud from an unrecognized daemon setup target: %j",
+      async (target) => {
+        stubFetchJson({
+          daemon_setup_target: target,
+          daemon_server_url: "https://api.example.com",
+          daemon_app_url: "https://app.example.com",
+        });
+        const config = await new ApiClient("https://api.example.test").getConfig();
+        expect(config.daemon_setup_target).toBe("unknown");
+      },
+    );
+
+    it.each(["cloud", "self_host"])("preserves the confirmed daemon setup target %s", async (target) => {
+      stubFetchJson({ cdn_domain: "", daemon_setup_target: target });
+      const config = await new ApiClient("https://api.example.test").getConfig();
+      expect(config.daemon_setup_target).toBe(target);
+    });
+
     it("drops malformed daemon setup URLs instead of throwing", async () => {
       stubFetchJson({
         cdn_domain: "cdn.example.com",

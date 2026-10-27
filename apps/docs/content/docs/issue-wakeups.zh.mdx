@@ -140,7 +140,7 @@ multica issue wakeup create OPS-56 --until-status in_review --instruction "检�
 
 - **时间**：`--kind at` 配 `--after 10m` 或 `--at <RFC3339 时间>`；`--kind every --every 1h` 按固定间隔，最短 1 分钟；`--kind cron --cron "<5 段表达式>"` 配 `--timezone`，时区默认 UTC。
 - **事件**：`--event` 后面写事件名，多个用逗号分隔，`multica issue wakeup events` 列出全部事件和过滤参数。`--mode continuous` 改成重复唤醒。
-- **条件**：`--until-status`、`--until-assignee`、`--until-label`、`--until-property`、`--until-children-done [--stage N]`、`--until-pr checks|merged|conflicts`、`--until-issue <任务> --until-issue-state done|ended|in_review`。一条唤醒只能用一个 `--until-*`，不能和 `--event` 同时用。
+- **条件**：`--until-status`、`--until-assignee`、`--until-label`、`--until-property`、`--until-children-done [--stage N]`、`--until-pr checks|merged|conflicts`、`--until-issue <任务> --until-issue-state done|ended|in_review|blocked`。一条唤醒只能用一个 `--until-*`，不能和 `--event` 同时用。
 - **结束方式**：CLI 不会自动给等待加期限，用 `--expires-in 72h` 或 `--expires-at <RFC3339 时间>` 设结束时间；`--on-timeout wake` 让事件规则在超时时再唤醒一次。`--max-fires N`（1–1000）限制重复规则最多运行几次。
 - **结果放在哪**：`--parent <评论 ID>` 让唤醒后的回复留在原来的评论串里。
 

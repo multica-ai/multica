@@ -144,7 +144,7 @@ export function AgentDetailInspector({
     isEqual: profileDraftsEqual,
   });
 
-  // A Qoder agent is bound to a QCA agent, and the model lives there. Moving
+  // A Qoder agent is bound to an agent in Qoder Cloud Agents, and the model lives there. Moving
   // between Qoder and any other runtime would need a different configuration
   // the server either rejects or the bridge refuses, so neither direction is
   // offered here. It also never opens a chat, so nothing chat-facing applies.

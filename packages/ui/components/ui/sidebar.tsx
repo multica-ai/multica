@@ -33,10 +33,10 @@ const SIDEBAR_WIDTH_STORAGE_KEY = "sidebar_width"
 const SIDEBAR_WIDTH_MOBILE = "18rem"
 const SIDEBAR_WIDTH_ICON = "3rem"
 const SIDEBAR_DRAG_THRESHOLD = 2
-// Tailwind `lg`–`xl`: wide enough to keep a two-pane list/detail surface, too
-// narrow to also spend 256px on the nav. The nav starts collapsed here and the
-// header's trigger brings it back.
-const SIDEBAR_AUTO_COLLAPSE_QUERY = "(min-width: 1024px) and (max-width: 1279px)"
+// Tailwind `md`–`xl`: wide enough to keep a two-pane list/detail surface, too
+// narrow to also spend 256px on the nav by default. The nav starts collapsed
+// here and the header's trigger docks it back.
+const SIDEBAR_AUTO_COLLAPSE_QUERY = "(min-width: 768px) and (max-width: 1279px)"
 
 /**
  * Paints an element with whatever the sidebar wrapper is currently filled with.
@@ -66,8 +66,7 @@ type SidebarContextProps = {
   setOpenMobile: (open: boolean) => void
   /**
    * The sidebar is an overlay sheet rather than a column in the main flow.
-   * True below the compact breakpoint, which covers tablets and folded inner
-   * screens as well as phones, not phones alone.
+   * True below the compact breakpoint (`md`).
    */
   isCompact: boolean
   toggleSidebar: () => void
@@ -166,7 +165,7 @@ function SidebarProvider({
   // because nothing ever read it, and restoring the pair would be a bug rather
   // than a feature: the auto-collapse below drives `setOpen(false)` from the
   // viewport, so persisting its result would carry a collapse the user never
-  // asked for out of the `lg`–`xl` band and into their next session on a wider
+  // asked for out of the `md`–`xl` band and into their next session on a wider
   // display. Persisting this needs a source that distinguishes a user toggle
   // from an automated one — not a cookie on this callback.
   const [_open, _setOpen] = React.useState(defaultOpen)
@@ -183,7 +182,7 @@ function SidebarProvider({
     [setOpenProp, open]
   )
 
-  // Auto-collapse across the `lg`–`xl` band. Only the two crossings are
+  // Auto-collapse across the `md`–`xl` band. Only the two crossings are
   // automated: entering it parks the state we came in with and closes the nav,
   // leaving it restores that state. Anything the user does in between — most
   // of all re-opening the nav — is left alone until the next crossing.
@@ -335,19 +334,26 @@ function Sidebar({
             <SheetTitle>Sidebar</SheetTitle>
             <SheetDescription>Displays the mobile sidebar.</SheetDescription>
           </SheetHeader>
-          <div className="flex h-full w-full flex-col">{children}</div>
+          {/*
+            On a short screen (phone landscape, a foldable's outer display) a
+            pinned header and footer leave the nav list only a few rows, so
+            the whole sheet scrolls as one column instead.
+          */}
+          <div className="flex h-full w-full flex-col [@media(max-height:640px)]:overflow-y-auto [@media(max-height:640px)]:[&>[data-slot=sidebar-content]]:flex-none">
+            {children}
+          </div>
         </SheetContent>
       </Sheet>
     )
   }
 
-  // `lg`, not `md`: this CSS gate has to agree with the `useIsCompact()` gate
-  // that chose the in-flow branch over the sheet above. While they disagreed,
+  // `md`: this CSS gate has to agree with the `useIsCompact()` gate that
+  // chose the in-flow branch over the sheet above. While they disagreed,
   // every load between the two breakpoints painted a 256px sidebar for one
   // frame before the hook resolved and collapsed it into a sheet.
   return (
     <div
-      className="group peer hidden text-sidebar-foreground lg:block"
+      className="group peer hidden text-sidebar-foreground md:block"
       data-state={state}
       data-collapsible={state === "collapsed" ? collapsible : ""}
       data-variant={variant}
@@ -370,7 +376,7 @@ function Sidebar({
         data-slot="sidebar-container"
         data-side={side}
         className={cn(
-          "fixed inset-y-0 z-10 hidden h-svh w-(--sidebar-width) transition-[left,right,width] duration-200 ease-out motion-reduce:transition-none lg:flex",
+          "fixed inset-y-0 z-10 hidden h-svh w-(--sidebar-width) transition-[left,right,width] duration-200 ease-out motion-reduce:transition-none md:flex",
           "data-[side=left]:left-0 data-[side=left]:group-data-[collapsible=offcanvas]:left-[calc(var(--sidebar-width)*-1)] data-[side=right]:right-0 data-[side=right]:group-data-[collapsible=offcanvas]:right-[calc(var(--sidebar-width)*-1)]",
           // Adjust the padding for floating and inset variants.
           variant === "floating" || variant === "inset"
@@ -587,7 +593,7 @@ function SidebarInset({ className, ...props }: React.ComponentProps<"main">) {
     <main
       data-slot="sidebar-inset"
       className={cn(
-        "relative flex w-full flex-1 flex-col bg-page-canvas lg:peer-data-[variant=inset]:m-2 lg:peer-data-[variant=inset]:ml-0 lg:peer-data-[variant=inset]:rounded-xl lg:peer-data-[variant=inset]:ring-1 lg:peer-data-[variant=inset]:ring-surface-border lg:peer-data-[variant=inset]:shadow-[var(--surface-shadow)] lg:peer-data-[variant=inset]:peer-data-[state=collapsed]:ml-2",
+        "relative flex w-full flex-1 flex-col bg-page-canvas md:peer-data-[variant=inset]:m-2 md:peer-data-[variant=inset]:ml-0 md:peer-data-[variant=inset]:rounded-xl md:peer-data-[variant=inset]:ring-1 md:peer-data-[variant=inset]:ring-surface-border md:peer-data-[variant=inset]:shadow-[var(--surface-shadow)] md:peer-data-[variant=inset]:peer-data-[state=collapsed]:ml-2",
         className
       )}
       {...props}

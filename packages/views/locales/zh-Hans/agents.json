@@ -161,7 +161,7 @@
   "inspector": {
     "section_profile": "资料",
     "section_execution": "执行配置",
-    "qoder_execution_note": "模型、工具和 skill 在 Qoder 的 QCA 智能体上设置。",
+    "qoder_execution_note": "模型、工具和 skill 在 Qoder Cloud Agents 中的智能体上设置。",
     "section_access": "访问权限",
     "section_properties": "属性",
     "section_details": "详情",
@@ -269,7 +269,7 @@
     "composio_mcp": "MCP 应用",
     "integrations": "集成",
     "runtime_config": "路由",
-    "qoder_agent": "QCA 智能体",
+    "qoder_agent": "Qoder Cloud Agents",
     "discard_dialog_title": "放弃未保存的修改？",
     "discard_dialog_description": "当前 tab 有未保存的修改，离开会丢弃这些修改。",
     "discard_keep": "继续编辑",

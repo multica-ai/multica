@@ -322,6 +322,83 @@ func (d Definition) NextStatus(key string) string {
 	return ""
 }
 
+// handlerlessSpan is the stretch of work an assignee owns from a step that
+// has no handler: entering such steps reassigns nothing and starts no run, so
+// the same assignee carries the issue until it reaches a step that hands off
+// (or the end of the board).
+type handlerlessSpan struct {
+	// ok is set when the current step has no handler and the span applies.
+	ok bool
+	// start is the status that marks the work as started — in_progress when
+	// the span passes through it — or empty.
+	start string
+	// deliver is the status to set once all of the work is done.
+	deliver string
+	// until is where the span ends: the next step that hands off, done or
+	// cancelled, or empty when the board ends first.
+	until string
+}
+
+// handlerlessSpan walks from key along NextStatus over the steps without a
+// handler. When the walk reaches a step that hands off, delivering moves the
+// issue there. Otherwise it reaches the end of the board, and delivering sets
+// the last status before done other than in_progress, leaving done to a
+// human as without a workflow; only when no such status exists does it set
+// what follows (done).
+func (d Definition) handlerlessSpan(key string) handlerlessSpan {
+	current, ok := d.Step(key)
+	if !ok || current.HandsOff() {
+		return handlerlessSpan{}
+	}
+	switch key {
+	case issuestatus.Blocked, issuestatus.Done, issuestatus.Cancelled:
+		return handlerlessSpan{}
+	}
+	var span handlerlessSpan
+	span.ok = true
+	var passed []string
+	seen := map[string]bool{key: true}
+	for at := key; ; {
+		next := d.NextStatus(at)
+		if next == "" || seen[next] {
+			break
+		}
+		seen[next] = true
+		step, _ := d.Step(next)
+		if step.HandsOff() || next == issuestatus.Done || next == issuestatus.Cancelled {
+			span.until = next
+			break
+		}
+		passed = append(passed, next)
+		at = next
+	}
+	for _, k := range passed {
+		if k == issuestatus.InProgress {
+			span.start = k
+		}
+	}
+	if target, ok := d.Step(span.until); ok && target.HandsOff() {
+		span.deliver = span.until
+		return span
+	}
+	for i := len(passed) - 1; i >= 0; i-- {
+		if passed[i] != issuestatus.InProgress {
+			span.deliver = passed[i]
+			return span
+		}
+	}
+	// Nothing but done lies ahead. From a step where work starts, done is the
+	// only way out; from a delivery status such as in_review the work is
+	// already handed in, and done stays a human's call as without a workflow.
+	switch key {
+	case issuestatus.Backlog, issuestatus.Todo, issuestatus.InProgress:
+	default:
+		return span
+	}
+	span.deliver = span.until
+	return span
+}
+
 // CatalogEntry is the slice of an issue_status row validation needs.
 type CatalogEntry struct {
 	Key      string
@@ -660,6 +737,24 @@ func Brief(in BriefInput) string {
 		title = fmt.Sprintf("%s (%s)", title, project)
 	}
 	fmt.Fprintf(&b, "This project's workflow — %s\n", title)
+	// Each move names who the target step hands off to, so the list needs no
+	// preamble about handoffs.
+	handsOffTo := func(key string) string {
+		target, ok := in.Workflow.Step(key)
+		if !ok || in.HandlerName == nil {
+			return ""
+		}
+		if who := briefLine(in.HandlerName(target)); who != "" {
+			return " — hands off to " + who
+		}
+		return ""
+	}
+	// An older daemon still states the built-in rules itself, so its brief
+	// keeps the per-step wording rather than add a second in_progress rule.
+	var span handlerlessSpan
+	if !in.Observer && !in.LegacyRuntimeRules {
+		span = in.Workflow.handlerlessSpan(in.StatusKey)
+	}
 	if in.LegacyRuntimeRules {
 		b.WriteString("This workflow replaces the status rules in your runtime instructions: use only the status keys below")
 		if !in.Workflow.Has(issuestatus.InReview) {
@@ -674,6 +769,16 @@ func Brief(in BriefInput) string {
 		}
 		fmt.Fprintf(&b, "%s is at the %q step and %s. You are not its assignee: leave the status to them unless you are explicitly asked to change it.\n",
 			in.IssueIdentifier, name(in.StatusKey), assignee)
+	} else if span.ok {
+		// A step without a handler is a progress marker, not a stage: naming
+		// it "the step you handle" made agents split one task across columns
+		// and stop after the first half (MUL-8231).
+		fmt.Fprintf(&b, "You are handling %s. Its %q step has no handler, so the work the issue asks for is yours ", in.IssueIdentifier, name(in.StatusKey))
+		if target, ok := in.Workflow.Step(span.until); ok && target.HandsOff() {
+			fmt.Fprintf(&b, "until it reaches the %q step%s.\n", name(span.until), handsOffTo(span.until))
+		} else {
+			b.WriteString("to finish.\n")
+		}
 	} else {
 		fmt.Fprintf(&b, "You are handling the %q step of %s.\n", name(in.StatusKey), in.IssueIdentifier)
 		if instructions := briefText(step.Instructions); instructions != "" {
@@ -706,21 +811,21 @@ func Brief(in BriefInput) string {
 		b.WriteString("\nMoving the issue into a step that hands off reassigns it to that step's handler and starts their run.\n")
 		return b.String()
 	}
-	// Each move names who the target step hands off to, so the list needs no
-	// preamble about handoffs.
-	handsOffTo := func(key string) string {
-		target, ok := in.Workflow.Step(key)
-		if !ok || in.HandlerName == nil {
-			return ""
-		}
-		if who := briefLine(in.HandlerName(target)); who != "" {
-			return " — hands off to " + who
-		}
-		return ""
-	}
 	b.WriteString("\nYour moves:\n")
-	if next := in.Workflow.NextStatus(in.StatusKey); next != "" {
-		fmt.Fprintf(&b, "Step done      → multica issue status %s %s%s\n", in.IssueIdentifier, next, handsOffTo(next))
+	switch {
+	case span.ok:
+		if span.start != "" {
+			fmt.Fprintf(&b, "Starting work  → multica issue status %s %s\n", in.IssueIdentifier, span.start)
+		}
+		if span.deliver != "" {
+			fmt.Fprintf(&b, "Step done      → multica issue status %s %s%s\n", in.IssueIdentifier, span.deliver, handsOffTo(span.deliver))
+		} else {
+			fmt.Fprintf(&b, "Step done      → leave the issue at `%s`; `done` is set by a human\n", in.StatusKey)
+		}
+	default:
+		if next := in.Workflow.NextStatus(in.StatusKey); next != "" {
+			fmt.Fprintf(&b, "Step done      → multica issue status %s %s%s\n", in.IssueIdentifier, next, handsOffTo(next))
+		}
 	}
 	if step.BackStatusKey != "" {
 		fmt.Fprintf(&b, "Needs changes  → multica issue status %s %s%s\n", in.IssueIdentifier, step.BackStatusKey, handsOffTo(step.BackStatusKey))
@@ -732,6 +837,9 @@ func Brief(in BriefInput) string {
 		b.WriteString("Can't proceed  → comment why, then run Needs changes\n")
 	default:
 		b.WriteString("Can't proceed  → comment why and leave the status as it is\n")
+	}
+	if span.ok {
+		b.WriteString("Steps without a handler hand nothing off and start no run: finish all of the issue's work in this run before Step done.\n")
 	}
 	if in.LegacyRuntimeRules {
 		// An older daemon's brief still says to set in_progress first and

@@ -53,16 +53,16 @@ func fetchQoderCatalog(ctx context.Context, baseURL, token, kind string) ([]qode
 		}
 		req, err := http.NewRequestWithContext(ctx, http.MethodGet, baseURL+"/"+kind+"?"+query.Encode(), nil)
 		if err != nil {
-			return nil, fmt.Errorf("invalid QCA catalog request")
+			return nil, fmt.Errorf("invalid Qoder Cloud Agents catalog request")
 		}
 		req.Header.Set("Authorization", "Bearer "+token)
 		res, err := client.Do(req)
 		if err != nil {
-			return nil, fmt.Errorf("QCA connection failed")
+			return nil, fmt.Errorf("Qoder Cloud Agents connection failed")
 		}
 		if res.StatusCode != http.StatusOK {
 			res.Body.Close()
-			return nil, fmt.Errorf("QCA catalog returned HTTP %d", res.StatusCode)
+			return nil, fmt.Errorf("Qoder Cloud Agents catalog returned HTTP %d", res.StatusCode)
 		}
 		var result struct {
 			Data []struct {
@@ -76,7 +76,7 @@ func fetchQoderCatalog(ctx context.Context, baseURL, token, kind string) ([]qode
 		raw, err := io.ReadAll(io.LimitReader(res.Body, (2<<20)+1))
 		res.Body.Close()
 		if err != nil || len(raw) > 2<<20 || json.Unmarshal(raw, &result) != nil || result.Data == nil {
-			return nil, fmt.Errorf("invalid QCA catalog response")
+			return nil, fmt.Errorf("invalid Qoder Cloud Agents catalog response")
 		}
 		for _, item := range result.Data {
 			prefix := "env_"
@@ -84,7 +84,7 @@ func fetchQoderCatalog(ctx context.Context, baseURL, token, kind string) ([]qode
 				prefix = "agent_"
 			}
 			if !strings.HasPrefix(item.ID, prefix) {
-				return nil, fmt.Errorf("invalid QCA catalog identity")
+				return nil, fmt.Errorf("invalid Qoder Cloud Agents catalog identity")
 			}
 			if item.ArchivedAt != nil || seen[item.ID] {
 				continue
@@ -100,11 +100,11 @@ func fetchQoderCatalog(ctx context.Context, baseURL, token, kind string) ([]qode
 			return items, nil
 		}
 		if result.LastID == "" || result.LastID == cursor || len(result.Data) == 0 {
-			return nil, fmt.Errorf("invalid QCA pagination")
+			return nil, fmt.Errorf("invalid Qoder Cloud Agents pagination")
 		}
 		cursor = result.LastID
 	}
-	return nil, fmt.Errorf("QCA catalog exceeds pagination limit")
+	return nil, fmt.Errorf("Qoder Cloud Agents catalog exceeds pagination limit")
 }
 
 func (h *Handler) ListQoderAgents(w http.ResponseWriter, r *http.Request) {
@@ -114,22 +114,22 @@ func (h *Handler) ListQoderAgents(w http.ResponseWriter, r *http.Request) {
 	}
 	if h.QoderRateLimiter != nil && !h.QoderRateLimiter.Allow(r.Context(), "qoder-catalog:"+uuidToString(ws)) {
 		w.Header().Set("Retry-After", "60")
-		writeError(w, http.StatusTooManyRequests, "QCA catalog request limit reached")
+		writeError(w, http.StatusTooManyRequests, "Qoder Cloud Agents catalog request limit reached")
 		return
 	}
 
 	cfg, _, _, _, err := h.readQoderSettings(r.Context(), uuidToString(ws))
 	if errors.Is(err, pgx.ErrNoRows) {
-		writeError(w, 409, "configure a QCA connection first")
+		writeError(w, 409, "configure a Qoder Cloud Agents connection first")
 		return
 	}
 	if err != nil {
-		writeError(w, 500, "cannot read QCA configuration")
+		writeError(w, 500, "cannot read Qoder Cloud Agents configuration")
 		return
 	}
 	base, ok := qoderBaseURL(cfg.BaseURL)
 	if !ok {
-		writeError(w, 409, "unsupported QCA API URL")
+		writeError(w, 409, "unsupported Qoder Cloud Agents API URL")
 		return
 	}
 	items, err := fetchQoderCatalog(r.Context(), base, cfg.QoderToken, "agents")
@@ -147,7 +147,7 @@ func (h *Handler) ListQoderEnvironments(w http.ResponseWriter, r *http.Request) 
 	}
 	if h.QoderRateLimiter != nil && !h.QoderRateLimiter.Allow(r.Context(), "qoder-catalog:"+uuidToString(ws)) {
 		w.Header().Set("Retry-After", "60")
-		writeError(w, http.StatusTooManyRequests, "QCA catalog request limit reached")
+		writeError(w, http.StatusTooManyRequests, "Qoder Cloud Agents catalog request limit reached")
 		return
 	}
 
@@ -158,7 +158,7 @@ func (h *Handler) ListQoderEnvironments(w http.ResponseWriter, r *http.Request) 
 	dec := json.NewDecoder(http.MaxBytesReader(w, r.Body, 16<<10))
 	dec.DisallowUnknownFields()
 	if dec.Decode(&input) != nil {
-		writeError(w, 400, "invalid QCA token request")
+		writeError(w, 400, "invalid Qoder PAT request")
 		return
 	}
 	var extra any
@@ -168,7 +168,7 @@ func (h *Handler) ListQoderEnvironments(w http.ResponseWriter, r *http.Request) 
 	}
 	cfg, _, _, _, err := h.readQoderSettings(r.Context(), uuidToString(ws))
 	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
-		writeError(w, 500, "cannot read QCA configuration")
+		writeError(w, 500, "cannot read Qoder Cloud Agents configuration")
 		return
 	}
 	requested := input.BaseURL
@@ -177,7 +177,7 @@ func (h *Handler) ListQoderEnvironments(w http.ResponseWriter, r *http.Request) 
 	}
 	base, ok := qoderBaseURL(requested)
 	if !ok {
-		writeError(w, 400, "unsupported QCA API URL")
+		writeError(w, 400, "unsupported Qoder Cloud Agents API URL")
 		return
 	}
 	token := strings.TrimSpace(input.Token)
@@ -185,7 +185,7 @@ func (h *Handler) ListQoderEnvironments(w http.ResponseWriter, r *http.Request) 
 		token = cfg.QoderToken
 	}
 	if token == "" || strings.ContainsAny(token, "\r\n\t ") {
-		writeError(w, 400, "QCA token is required")
+		writeError(w, 400, "Qoder PAT is required")
 		return
 	}
 	items, err := fetchQoderCatalog(r.Context(), base, token, "environments")
@@ -247,7 +247,7 @@ func validateQoderAgentConfig(raw []byte) error {
 		if strings.HasPrefix(err.Error(), "default repository") {
 			return err
 		}
-		return fmt.Errorf("select a QCA Agent in the agent runtime configuration")
+		return fmt.Errorf("select an agent from Qoder Cloud Agents in the agent runtime configuration")
 	}
 	return nil
 }

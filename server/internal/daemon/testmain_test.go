@@ -17,6 +17,9 @@ import (
 // LOCALAPPDATA on Windows. Process-wide redirection isolates tests that forget
 // their own redirect; per-test t.Setenv overrides still take precedence.
 func TestMain(m *testing.M) {
+	if testutil.RunPiCleanupFixture() {
+		os.Exit(0)
+	}
 	for _, key := range []string{
 		"MULTICA_AGENT_ID",
 		"MULTICA_TASK_ID",

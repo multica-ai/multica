@@ -462,6 +462,26 @@ describe("projectGanttIssuesOptions", () => {
     expect(data).toHaveLength(total);
   });
 
+  it("loads every page when the server caps the page size at 100 (#9572)", async () => {
+    // The server clamps `limit` to 100 regardless of what the client asks for.
+    const SERVER_PAGE_CAP = 100;
+    const total = 334;
+    const all = Array.from({ length: total }, (_, i) => makeIssue(i));
+    const listIssues = vi
+      .fn<(params?: ListIssuesParams) => Promise<ListIssuesResponse>>()
+      .mockImplementation(async (params) => {
+        const offset = params?.offset ?? 0;
+        const limit = Math.min(params?.limit ?? SERVER_PAGE_CAP, SERVER_PAGE_CAP);
+        return { issues: all.slice(offset, offset + limit), total };
+      });
+    installFakeApi(listIssues);
+
+    const data = await qc.fetchQuery(projectGanttIssuesOptions(WS_ID, PROJECT_ID));
+
+    expect(data).toHaveLength(total);
+    expect(listIssues.mock.calls.map(([p]) => p?.offset)).toEqual([0, 100, 200, 300]);
+  });
+
   it("stops looping when the server reports a smaller-than-limit page (safety net for total drift)", async () => {
     // Server says `total` is huge but only ever returns short pages — the
     // loop must terminate on the first short page to avoid an infinite fetch.

@@ -64,9 +64,14 @@ var modelPrices = map[string]ModelPrice{
 	"anthropic:claude-sonnet-4.5": {Provider: "anthropic", Model: "claude-sonnet-4.5", InputPerM: 3.00, CacheReadPerM: 0.30, CacheWritePerM: 3.75, OutputPerM: 15.00},
 	"anthropic:claude-haiku-4.5":  {Provider: "anthropic", Model: "claude-haiku-4.5", InputPerM: 1.00, CacheReadPerM: 0.10, CacheWritePerM: 1.25, OutputPerM: 5.00},
 	"deepseek:v4-pro":             {Provider: "deepseek", Model: "v4-pro", InputPerM: 1.74, CacheReadPerM: 0.0145, CacheWritePerM: 1.74, OutputPerM: 3.48},
-	"deepseek:v4-flash":           {Provider: "deepseek", Model: "v4-flash", InputPerM: 0.56, CacheReadPerM: 0.0112, CacheWritePerM: 0.56, OutputPerM: 1.12},
-	"minimax:m2.7":                {Provider: "minimax", Model: "m2.7", InputPerM: 0.30, CacheReadPerM: 0.06, CacheWritePerM: 0.375, OutputPerM: 1.20},
-	"minimax:m2.7-highspeed":      {Provider: "minimax", Model: "m2.7-highspeed", InputPerM: 0.60, CacheReadPerM: 0.06, CacheWritePerM: 0.375, OutputPerM: 2.40},
+	// DeepSeek Flash: api-docs.deepseek.com/quick_start/pricing/ (2026-10-27).
+	// The English sheet supplies USD; the Chinese sheet lists CNY. Use peak
+	// USD rates because rollups lack each request's pricing window. Off-peak
+	// costs half as much; reseller prices can also differ. Cache writes bill
+	// as ordinary input. Mirror packages/views/runtimes/utils.ts.
+	"deepseek:v4.1-flash":    {Provider: "deepseek", Model: "v4.1-flash", InputPerM: 0.30, CacheReadPerM: 0.006, CacheWritePerM: 0.30, OutputPerM: 1.20},
+	"minimax:m2.7":           {Provider: "minimax", Model: "m2.7", InputPerM: 0.30, CacheReadPerM: 0.06, CacheWritePerM: 0.375, OutputPerM: 1.20},
+	"minimax:m2.7-highspeed": {Provider: "minimax", Model: "m2.7-highspeed", InputPerM: 0.60, CacheReadPerM: 0.06, CacheWritePerM: 0.375, OutputPerM: 2.40},
 	// Google standard token prices: ai.google.dev/gemini-api/docs/pricing
 	// (2026-10-19). Mirror packages/views/runtimes/utils.ts.
 	// Argon's intro rate expires 2026-11-30; Flash 3.6/3.8, Robotics and
@@ -222,8 +227,11 @@ var modelAliasRules = []struct {
 	{regexp.MustCompile(`claude-sonnet-4[-.]6|claude-4[-.]6-sonnet`), "anthropic:claude-sonnet-4.6"},
 	{regexp.MustCompile(`claude-sonnet-4[-.]5|claude-4[-.]5-sonnet`), "anthropic:claude-sonnet-4.5"},
 	{regexp.MustCompile(`claude-haiku-4[-.]5`), "anthropic:claude-haiku-4.5"},
+	// The official Flash name and retired v4 aliases serve V4.1-Flash-1017.
+	// Preserve chat/reasoner's existing Flash routing. Only known spellings
+	// and the 1017 snapshot resolve, matching the frontend's exact keys.
+	{regexp.MustCompile(`(^|/|:)deepseek-(?:flash|v4-flash(?:-vision-exp)?|v4\.1-flash(?:-1017)?|chat|reasoner)$`), "deepseek:v4.1-flash"},
 	{regexp.MustCompile(`deepseek-v4-pro`), "deepseek:v4-pro"},
-	{regexp.MustCompile(`deepseek-v4-flash|^deepseek-chat$|^deepseek-reasoner$`), "deepseek:v4-flash"},
 	{regexp.MustCompile(`minimax-m2[.]7.*highspeed|highspeed.*minimax-m2[.]7`), "minimax:m2.7-highspeed"},
 	{regexp.MustCompile(`minimax-m2[.]7`), "minimax:m2.7"},
 	// Each Gemini SKU is exact: an image/audio/preview variant must never
@@ -311,8 +319,32 @@ func matchModelAlias(model string) (ModelPrice, bool) {
 	return ModelPrice{}, false
 }
 
+// Bedrock Anthropic ids may follow routing prefixes such as `custom:bedrock/`.
+// Accept the same routing segments as the frontend's stripProvider, and only
+// normalize Claude ids under the recognized Bedrock vendor/region prefixes.
+var bedrockAnthropicIDRe = regexp.MustCompile(`^(?:[a-z][a-z0-9_-]*[/:])*(?:(?:us|eu|apac|global)\.)?anthropic\.(claude-)`)
+
+// Preserve a single context tag for the existing matcher while removing the
+// Bedrock version (`...-v1:0[1m]`). Multiple tags remain unrecognized.
+var bedrockVersionSuffixRe = regexp.MustCompile(`-v\d+:\d+(\[[^\]]+\])?$`)
+
+// normalizeBedrockID rewrites a Bedrock-served Anthropic id into the bare
+// catalog id the price rows are keyed by, so `us.anthropic.claude-sonnet-5`
+// prices as `claude-sonnet-5` — the same SKU. It is a no-op for every other id,
+// including non-Anthropic Bedrock models (`us.amazon.nova-*`), which stay
+// unmapped rather than inheriting a Claude rate. Keep in step with
+// `stripBedrock` in packages/views/runtimes/utils.ts: the dashboard and this
+// metric must agree on what is priced.
+func normalizeBedrockID(model string) string {
+	if !bedrockAnthropicIDRe.MatchString(model) {
+		return model
+	}
+	model = bedrockAnthropicIDRe.ReplaceAllString(model, "${1}")
+	return bedrockVersionSuffixRe.ReplaceAllString(model, "${1}")
+}
+
 func PriceForModelAlias(model string) (ModelPrice, bool) {
-	model = strings.ToLower(strings.TrimSpace(model))
+	model = normalizeBedrockID(strings.ToLower(strings.TrimSpace(model)))
 	if price, ok := matchModelAlias(model); ok {
 		return price, true
 	}
