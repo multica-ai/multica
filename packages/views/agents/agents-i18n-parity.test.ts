@@ -179,14 +179,69 @@ describe("access-scope i18n parity across all 4 locales", () => {
 });
 
 /**
+ * Bulk change-runtime keys must ship in every locale with the same key set,
+ * mirroring the access-scope parity guard above. The bulk dialog gates on
+ * these strings, so a missing translation would silently fall back to the raw
+ * key in one locale while looking fine in the other three.
+ */
+describe("change-runtime bulk keys i18n parity across all 4 locales", () => {
+  const runtimeKeys = [
+    "row_actions.change_runtime",
+    "row_actions.change_runtime_dialog_title",
+    "row_actions.change_runtime_applies_to",
+    "row_actions.change_runtime_skipped",
+    "row_actions.change_runtime_dialog_confirm",
+    "row_actions.change_runtime_bulk_partial",
+  ];
+
+  const read = (loc: object, key: string): unknown =>
+    key.split(".").reduce<unknown>(
+      (node, part) =>
+        node !== null && typeof node === "object"
+          ? (node as Record<string, unknown>)[part]
+          : undefined,
+      loc,
+    );
+
+  it("all change-runtime keys are present in all 4 locales", () => {
+    for (const [name, loc] of Object.entries(LOCALES)) {
+      for (const key of runtimeKeys) {
+        const node = read(loc, key);
+        expect(node, `${name}: ${key} missing`).toBeDefined();
+        expect(typeof node, `${name}: ${key} not a string`).toBe("string");
+        expect(String(node).length > 0, `${name}: ${key} is empty`).toBe(true);
+      }
+    }
+  });
+
+  it("interpolation tokens use double-brace {{count}} everywhere", () => {
+    for (const [name, loc] of Object.entries(LOCALES)) {
+      for (const key of [
+        "row_actions.change_runtime_applies_to",
+        "row_actions.change_runtime_skipped",
+        "row_actions.change_runtime_bulk_partial",
+      ]) {
+        const node = read(loc, key);
+        if (
+          typeof node === "string" &&
+          /\{count\}/.test(node) &&
+          !/\{\{count\}\}/.test(node)
+        ) {
+          throw new Error(`${name}: ${key} uses {count} instead of {{count}}`);
+        }
+      }
+    }
+  });
+});
+
+/**
  * The transcript's multi-file patch summary is handed the number of files
  * *beyond* the named one. A translation that phrases this as a total silently
  * under-reports by one — "a.go 等 2 个文件" reads as two files including a.go
  * when three changed. English hides the distinction ("+2 more"), so it has to
  * be pinned per locale.
  */
-describe("transcript patch summary i18n", () => {
-  const KEY = "transcript.patch_summary_more";
+describe("transcript patch summary i18n", () => {  const KEY = "transcript.patch_summary_more";
 
   const read = (loc: object): unknown =>
     KEY.split(".").reduce<unknown>(
