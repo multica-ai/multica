@@ -140,7 +140,7 @@ multica issue wakeup create OPS-56 --until-status in_review --instruction "결�
 
 - **시간**: `--kind at`에 `--after 10m` 또는 `--at <RFC3339 시간>`. `--kind every --every 1h`는 고정 간격(최소 1분). `--kind cron --cron "<5개 필드 표현식>"`에는 `--timezone`을 붙입니다(기본 UTC).
 - **이벤트**: `--event` 뒤에 이벤트 이름을 쉼표로 구분해 씁니다. `multica issue wakeup events`가 모든 이벤트와 필터를 보여 줍니다. `--mode continuous`는 반복 깨우기로 만듭니다.
-- **조건**: `--until-status`, `--until-assignee`, `--until-label`, `--until-property`, `--until-children-done [--stage N]`, `--until-pr checks|merged|conflicts`, `--until-issue <태스크> --until-issue-state done|ended|in_review`. 깨우기 하나에 `--until-*`는 하나만 쓸 수 있고 `--event`와 함께 쓸 수 없습니다.
+- **조건**: `--until-status`, `--until-assignee`, `--until-label`, `--until-property`, `--until-children-done [--stage N]`, `--until-pr checks|merged|conflicts`, `--until-issue <태스크> --until-issue-state done|ended|in_review|blocked`. 깨우기 하나에 `--until-*`는 하나만 쓸 수 있고 `--event`와 함께 쓸 수 없습니다.
 - **끝내는 방법**: CLI는 대기 기한을 자동으로 붙이지 않습니다. `--expires-in 72h`나 `--expires-at <RFC3339 시간>`으로 끝을 정하세요. `--on-timeout wake`를 붙이면 이벤트 규칙이 기한이 되었을 때 한 번 더 깨웁니다. `--max-fires N`(1–1000)은 반복 규칙의 실행 횟수에 상한을 둡니다.
 - **답이 남는 곳**: `--parent <댓글 ID>`를 붙이면 깨운 뒤의 답글이 원래 스레드에 남습니다.
 

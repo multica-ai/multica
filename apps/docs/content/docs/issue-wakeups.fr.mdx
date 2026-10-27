@@ -140,7 +140,7 @@ multica issue wakeup create OPS-56 --until-status in_review --instruction "Véri
 
 - **Temps** : `--kind at` avec `--after 10m` ou `--at <heure RFC3339>` ; `--kind every --every 1h` pour un intervalle fixe d'au moins 1 minute ; `--kind cron --cron "<expression à 5 champs>"` avec `--timezone` (UTC par défaut).
 - **Événements** : indiquez les noms d'événements après `--event`, séparés par des virgules. `multica issue wakeup events` liste tous les événements et filtres. `--mode continuous` rend la règle répétée.
-- **Conditions** : `--until-status`, `--until-assignee`, `--until-label`, `--until-property`, `--until-children-done [--stage N]`, `--until-pr checks|merged|conflicts` et `--until-issue <tâche> --until-issue-state done|ended|in_review`. Un seul `--until-*` par réveil, et jamais avec `--event`.
+- **Conditions** : `--until-status`, `--until-assignee`, `--until-label`, `--until-property`, `--until-children-done [--stage N]`, `--until-pr checks|merged|conflicts` et `--until-issue <tâche> --until-issue-state done|ended|in_review|blocked`. Un seul `--until-*` par réveil, et jamais avec `--event`.
 - **Fin** : le CLI n'ajoute pas d'échéance à votre place. Utilisez `--expires-in 72h` ou `--expires-at <heure RFC3339>` ; `--on-timeout wake` fait qu'une règle d'événement réveille l'agent une dernière fois à l'échéance. `--max-fires N` (1–1000) limite le nombre d'exécutions d'une règle répétée.
 - **Où va la réponse** : `--parent <id-de-commentaire>` garde la réponse de l'exécution réveillée dans le fil d'origine.
 

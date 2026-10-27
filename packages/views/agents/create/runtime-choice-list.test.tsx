@@ -169,6 +169,17 @@ describe("RuntimeChoiceList", () => {
     expect(screen.getByText("Ask an admin to connect")).toBeInTheDocument();
   });
 
+  it("keeps Qoder discoverable but unselectable without server encryption setup", () => {
+    const qoder = { ...unconnectedQoder, available: false };
+    const props = mount({ qoder, qoderState: qoderChoiceState(qoder, false) });
+    expect(screen.getByText("Qoder Cloud Agents")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Connect" }));
+    expect(props.onConnectQoder).toHaveBeenCalledOnce();
+    expect(props.onSelectQoder).not.toHaveBeenCalled();
+    expect(qoderChoiceState({ ...qoder, configured: true, enabled: true, status: "online" }, true))
+      .toBe("not_configured");
+  });
+
   it("says so when nothing matches the search", () => {
     mount({ query: "zzz" });
     expect(screen.getByText("Nothing matches “zzz”")).toBeInTheDocument();

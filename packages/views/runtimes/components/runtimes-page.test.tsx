@@ -215,10 +215,10 @@ describe("RuntimesPage", () => {
       });
       expect(screen.getByText("dev-machine.local")).toBeInTheDocument();
       expect(screen.queryAllByText("Qoder Cloud Agents")).toHaveLength(
-        connection.available ? 1 : 0,
+        1,
       );
       expect(screen.getByRole("button", { name: /^All/ })).toHaveTextContent(
-        connection.available ? "2" : "1",
+        connection.configured ? "2" : "1",
       );
       unmount();
     }

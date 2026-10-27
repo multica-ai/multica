@@ -91,6 +91,9 @@ describe("platform conditions", () => {
     expect(input({ condition: "other_issue", otherIssue: { id: "i2", identifier: "MUL-2" }, otherState: "ended" })).toMatchObject({
       input: { condition: { type: "other_issue", issue_id: "i2", state: "ended" } },
     });
+    expect(input({ condition: "other_issue", otherIssue: { id: "i2", identifier: "MUL-2" }, otherState: "blocked" })).toMatchObject({
+      input: { condition: { type: "other_issue", issue_id: "i2", state: "blocked" } },
+    });
     // Conditions never send raw events.
     const children = input({ condition: "children" });
     expect("input" in children && children.input.event_types).toBeUndefined();

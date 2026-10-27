@@ -9,6 +9,9 @@ const updateSystem = vi.fn();
 const trigger = vi.fn();
 const remove = vi.fn();
 let runs: unknown[] = [];
+let empty = false;
+let systemError = false;
+const refetch = vi.fn();
 let systemRules: SystemWakeup[] = [];
 let pending = false;
 let wakeup: IssueWakeup;
@@ -17,7 +20,10 @@ let viewTZ = "UTC";
 vi.mock("./wakeup-condition-names", () => ({
   useConditionNames: () => ({ status: (key: string) => key, label: () => undefined, property: () => undefined, actor: (_type: string, id: string) => id }),
 }));
+const settingsPush = vi.hoisted(() => vi.fn());
+vi.mock("../../navigation", () => ({ useNavigation: () => ({ push: settingsPush }) }));
 vi.mock("@multica/core/paths", () => ({
+  useWorkspacePaths: () => ({ settings: () => "/acme/settings" }),
   useCurrentWorkspace: () => ({ id: "ws" }),
 }));
 vi.mock("@multica/core/issues", () => ({
@@ -34,9 +40,11 @@ vi.mock("@multica/core/issues", () => ({
 }));
 vi.mock("@tanstack/react-query", () => ({
   useQuery: ({ queryKey }: { queryKey: string[] }) => ({
+    isError: queryKey[0] === "system" && systemError,
+    refetch,
     data:
       queryKey[0] === "wakeups"
-        ? [wakeup]
+        ? empty ? [] : [wakeup]
         : queryKey[0] === "system"
           ? systemRules
           : queryKey[0] === "tasks"
@@ -60,6 +68,9 @@ beforeEach(() => {
   trigger.mockReset();
   remove.mockReset();
   runs = [];
+  empty = false;
+  systemError = false;
+  refetch.mockReset();
   updateSystem.mockReset().mockResolvedValue(undefined);
   systemRules = [];
   enable.mockReset().mockResolvedValue(undefined);
@@ -89,6 +100,30 @@ beforeEach(() => {
   };
 });
 describe("Wakeups sidebar", () => {
+  it("keeps the header to the add action without a settings-only menu", () => {
+    renderWithI18n(<WakeupsSection issueId="issue" />);
+    expect(screen.getByRole("button", { name: "Wakeups 1" })).toBeVisible();
+    expect(screen.queryByRole("button", { name: "Wakeups options" })).not.toBeInTheDocument();
+  });
+  it("shows an empty static title with creation available", () => {
+    empty = true;
+    renderWithI18n(<WakeupsSection issueId="issue" />);
+    expect(screen.getByText("Wakeups")).toBeVisible();
+    expect(screen.queryByRole("button", { name: "Wakeups" })).not.toBeInTheDocument();
+  });
+  it("keeps history accessible even without current rules", () => {
+    wakeup.enabled = false;
+    status = "completed";
+    renderWithI18n(<WakeupsSection issueId="issue" />);
+    expect(screen.getByRole("button", { name: "Wakeups" })).toHaveAttribute("aria-expanded", "true");
+  });
+  it("shows retry when system rules fail instead of treating the section as empty", () => {
+    empty = true;
+    systemError = true;
+    renderWithI18n(<WakeupsSection issueId="issue" />);
+    fireEvent.click(screen.getByRole("button", { name: "Could not load wakeups. Retry" }));
+    expect(refetch).toHaveBeenCalledTimes(2);
+  });
   it("describes hourly schedules without exposing interval seconds", () => {
     renderWithI18n(<WakeupsSection issueId="issue" />, { locale: "zh-Hans" });
     expect(screen.getByRole("button", { name: /唤醒 Emacs/ })).toHaveTextContent("每小时唤醒");
@@ -170,7 +205,7 @@ describe("Wakeups sidebar", () => {
     renderWithI18n(<WakeupsSection issueId="issue" />);
     expect(screen.queryByRole("button", { name: /Wake Emacs/ })).toBeNull();
     expect(screen.queryByRole("switch")).toBeNull();
-    fireEvent.click(screen.getByRole("button", { name: "Wakeup history 1" }));
+    fireEvent.click(screen.getByRole("button", { name: "Wakeup history · 1" }));
     expect(screen.getByRole("button", { name: /Wake Emacs/ })).toBeVisible();
   });
   it("uses server run status while the run detail query is still incomplete", () => {
@@ -190,7 +225,7 @@ it("re-enables a manually disabled recurring configuration with its revision", a
   wakeup.disabled_at = "2026-09-16T00:00:00Z";
   status = "completed";
   renderWithI18n(<WakeupsSection issueId="issue" />);
-  fireEvent.click(screen.getByRole("button", { name: "Wakeup history 1" }));
+  fireEvent.click(screen.getByRole("button", { name: "Wakeup history · 1" }));
   const toggle = screen.getByRole("switch", { name: "Wakeup for Emacs" });
   expect(toggle).not.toBeChecked();
   fireEvent.click(toggle);
@@ -203,7 +238,7 @@ it("blocks re-enabling on terminal issues", () => {
   wakeup.enabled = false;
   status = "completed";
   renderWithI18n(<WakeupsSection issueId="issue" closed />);
-  fireEvent.click(screen.getByRole("button", { name: "Wakeup history 1" }));
+  fireEvent.click(screen.getByRole("button", { name: "Wakeup history · 1" }));
   expect(screen.getByRole("switch")).toHaveAttribute("aria-disabled", "true");
   fireEvent.click(screen.getByRole("switch"));
   expect(enable).not.toHaveBeenCalled();
@@ -218,7 +253,7 @@ it("requires a new future time for an expired one-shot", async () => {
   wakeup.next_fire_at = "2020-01-01T00:00:00Z";
   status = "completed";
   renderWithI18n(<WakeupsSection issueId="issue" />);
-  fireEvent.click(screen.getByRole("button", { name: "Wakeup history 1" }));
+  fireEvent.click(screen.getByRole("button", { name: "Wakeup history · 1" }));
   expect(screen.queryByRole("switch")).toBeNull();
   fireEvent.click(screen.getByRole("button", { name: "Set a new time" }));
   const input = await screen.findByLabelText(/Time \(/);
@@ -245,7 +280,7 @@ it("uses explicit resubscribe for a completed one-shot event", async () => {
   wakeup.mode = "once";
   status = "completed";
   renderWithI18n(<WakeupsSection issueId="issue" />);
-  fireEvent.click(screen.getByRole("button", { name: "Wakeup history 1" }));
+  fireEvent.click(screen.getByRole("button", { name: "Wakeup history · 1" }));
   expect(screen.queryByRole("switch")).toBeNull();
   fireEvent.click(screen.getByRole("button", { name: "Enable again" }));
   await waitFor(() =>
@@ -286,7 +321,7 @@ it("shows a disabled rule independently from its last successful execution", () 
   wakeup.disabled_at = "2026-09-16T00:00:00Z";
   status = "completed";
   renderWithI18n(<WakeupsSection issueId="issue" />);
-  fireEvent.click(screen.getByRole("button", { name: "Wakeup history 1" }));
+  fireEvent.click(screen.getByRole("button", { name: "Wakeup history · 1" }));
   const row = screen.getByRole("button", { name: /Wake Emacs/ });
   expect(row).toHaveTextContent("Turned off");
   expect(row).toHaveTextContent("Last execution: Run succeeded");
@@ -299,7 +334,7 @@ it("keeps a failed one-shot triggered without calling the rule completed", () =>
   wakeup.event_types = ["comment.created"];
   status = "failed";
   renderWithI18n(<WakeupsSection issueId="issue" />);
-  fireEvent.click(screen.getByRole("button", { name: "Wakeup history 1" }));
+  fireEvent.click(screen.getByRole("button", { name: "Wakeup history · 1" }));
   const row = screen.getByRole("button", { name: /Wake Emacs/ });
   expect(row).toHaveTextContent("Triggered");
   expect(row).toHaveTextContent("This execution: Run failed");
@@ -367,7 +402,7 @@ describe("v2 sidebar", () => {
     });
     status = "completed";
     renderWithI18n(<WakeupsSection issueId="issue" />);
-    fireEvent.click(screen.getByRole("button", { name: "Wakeup history 1" }));
+    fireEvent.click(screen.getByRole("button", { name: "Wakeup history · 1" }));
     expect(screen.getByRole("button", { name: /Wake Emacs/ })).toHaveTextContent("Timed out");
   });
 
@@ -434,7 +469,7 @@ describe("conditions, limits and history", () => {
     });
     status = "completed";
     renderWithI18n(<WakeupsSection issueId="issue" />);
-    fireEvent.click(screen.getByRole("button", { name: "Wakeup history 1" }));
+    fireEvent.click(screen.getByRole("button", { name: "Wakeup history · 1" }));
     const row = screen.getByRole("button", { name: /Wake Emacs/ });
     expect(row).toHaveTextContent("Paused automatically");
     expect(row).toHaveTextContent("Stopped after reaching 5 runs");

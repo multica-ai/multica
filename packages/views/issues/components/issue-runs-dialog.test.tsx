@@ -257,6 +257,8 @@ describe("IssueRunsDialog", () => {
     const plot = plotOf();
     layOut(plot);
 
+    expect(screen.getByRole("button", { name: "Cost" })).toHaveAttribute("aria-pressed", "true");
+    expect(screen.getByRole("button", { name: "Tokens" })).toHaveAttribute("aria-pressed", "false");
     fireEvent.click(screen.getByRole("button", { name: "Tokens" }));
     expect(screen.getByText("per run · by token type")).toBeInTheDocument();
     // In the token view the hover splits the run's tokens by type.

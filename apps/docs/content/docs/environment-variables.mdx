@@ -258,6 +258,12 @@ For the internal context that the daemon injects into agent tasks, see [Task run
 
 Precedence is command-line flag → environment variable → `~/.multica/config.json` → built-in default. For watchdog behavior, see [Daemon and runtimes](/daemon-runtimes).
 
+On Linux and macOS, Pi and omp cancellation gives the runtime two seconds to stop its tools before forced termination, with a ten-second cleanup budget. The daemon also retains identities of observed descendant processes, including detached tools. Windows uses the existing owned Job Object cleanup. The daemon releases output pipes and publishes the result after cleanup. Identity checks require Linux pidfds (kernel 5.3 or newer) or supported macOS kernel identity signalling. A failed final cleanup check or a surviving process produces `cleanup_unconfirmed`. Normal completion releases pipes and tracking handles without terminating background services on Linux and macOS; interruption, watchdog expiry, provider-error grace expiry, and a runtime exit with an unfinished tool use the joined cleanup path. Transient observation errors are logged and rechecked during cleanup.
+
+An unconfirmed cleanup blocks automatic retries and subsequent starts for the same agent on that runtime. Check for remaining background processes, then explicitly rerun the task; successful completion of that manual run releases the block. For tasks that negotiated `pi-process-cleanup-v1` when starting, the server waits for an explicit cleanup acknowledgement during user cancellation; a missing acknowledgement remains unconfirmed after 30 seconds. Older daemons do not negotiate this capability and retain their existing cancellation behavior without acquiring this new acknowledgement block. A newer daemon still performs local cleanup against an older server, which cannot enforce the continuation block. No coordinated rollout is required; other runtimes keep their existing cancellation behavior. No new environment variable is required, and watchdog thresholds retain their existing meaning.
+
+Descendant discovery is best effort: a process that forks and reparents between observations can escape discovery. It is not operating-system containment such as a Linux cgroup.
+
 ### Cleanup and retention [#gc]
 
 The daemon periodically cleans up run directories, repository caches, session records, and temporary directories; what is removed when is described in [Cleanup and retention](/daemon-runtimes#cleanup). Durations accept Go duration syntax plus `d` for days (for example `14d` or `1d12h`).

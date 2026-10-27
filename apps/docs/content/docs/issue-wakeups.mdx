@@ -140,7 +140,7 @@ multica issue wakeup create OPS-56 --until-status in_review --instruction "Check
 
 - **Time**: `--kind at` with `--after 10m` or `--at <RFC3339 time>`; `--kind every --every 1h` for a fixed interval of at least 1 minute; `--kind cron --cron "<5-field expression>"` with `--timezone` (UTC by default).
 - **Events**: list event names after `--event`, separated by commas. `multica issue wakeup events` lists every event and filter. `--mode continuous` makes the rule repeat.
-- **Conditions**: `--until-status`, `--until-assignee`, `--until-label`, `--until-property`, `--until-children-done [--stage N]`, `--until-pr checks|merged|conflicts`, and `--until-issue <issue> --until-issue-state done|ended|in_review`. Use one `--until-*` per wakeup, and not together with `--event`.
+- **Conditions**: `--until-status`, `--until-assignee`, `--until-label`, `--until-property`, `--until-children-done [--stage N]`, `--until-pr checks|merged|conflicts`, and `--until-issue <issue> --until-issue-state done|ended|in_review|blocked`. Use one `--until-*` per wakeup, and not together with `--event`.
 - **Endings**: the CLI does not add a deadline for you. Use `--expires-in 72h` or `--expires-at <RFC3339 time>`; `--on-timeout wake` makes an event rule wake the agent once more at the deadline. `--max-fires N` (1–1000) caps how many runs a repeating rule starts.
 - **Where results go**: `--parent <comment-id>` keeps the woken run's reply in the original thread.
 
