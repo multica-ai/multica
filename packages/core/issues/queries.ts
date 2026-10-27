@@ -380,8 +380,12 @@ export function issueListOptions(wsId: string, sort?: IssueSortParam) {
  * Page size for the scheduled-issue fetch. The Gantt view always pulls every
  * scheduled issue (no client pagination), so this is just the chunk size we
  * use to walk the server's `(limit, offset)` window until we hit `total`.
+ *
+ * Must not exceed the server's `ListIssues` page-size cap (100): the server
+ * silently clamps larger values, and a clamped page would otherwise look like
+ * a short final page.
  */
-export const PROJECT_GANTT_PAGE_LIMIT = 500;
+export const PROJECT_GANTT_PAGE_LIMIT = 100;
 
 /**
  * Paranoia cap on the loop in {@link fetchProjectGanttIssues}. Real projects
@@ -406,9 +410,12 @@ async function fetchProjectGanttIssues(
       offset,
     });
     issues.push(...res.issues);
-    if (res.issues.length < PROJECT_GANTT_PAGE_LIMIT) break;
+    if (res.issues.length === 0) break;
     if (issues.length >= res.total) break;
-    offset += PROJECT_GANTT_PAGE_LIMIT;
+    if (res.issues.length < PROJECT_GANTT_PAGE_LIMIT) break;
+    // Advance by what the server actually returned, so a server-side page
+    // cap smaller than the requested limit can't skip issues.
+    offset += res.issues.length;
   }
   return issues;
 }
