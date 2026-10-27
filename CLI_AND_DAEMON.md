@@ -742,6 +742,12 @@ multica issue comment add <issue-id> --content "Looks good, merging now"
 # Reply to a specific comment
 multica issue comment add <issue-id> --parent <comment-id> --content "Thanks!"
 
+# Add the comment to an agent's running turn instead of queueing a
+# follow-up run (--steer is repeatable; --steer-active picks every running
+# run you may steer). Agents can steer only their own squad workers' runs.
+# Prints per run whether it was steered.
+multica issue comment add <issue-id> --content-file note.md --steer <run-id>
+
 # Delete a comment
 multica issue comment delete <comment-id>
 ```

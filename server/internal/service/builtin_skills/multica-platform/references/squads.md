@@ -211,6 +211,45 @@ Current behavior: resolve the squad, read `leader_id`, enqueue a leader task,
 and use the current comment as the trigger comment. It does not enqueue every
 squad member.
 
+## Steering a worker's running turn
+
+A comment to a worker that is already running reaches it only after that run
+ends. A leader can put the comment into the run instead:
+
+    multica issue comment add <issue-id> --parent <your trigger comment> \
+      --content-file ./note.md --steer <run-id>
+
+`--steer` takes a run id from `multica issue runs <issue-id> --active`
+(repeatable; short prefixes resolve on this issue). `--steer-active` steers
+every running run on the issue that reports `can_supplement: true`, which for
+an agent caller means its own squad workers. The CLI mentions each steered
+agent in the comment.
+
+Steer when a worker is mid-task and your input changes what it is doing now: a
+correction, a missing fact, a narrower scope. Delegate new work the normal way.
+
+Only a squad leader can steer, and only these runs:
+
+- runs of agents in a non-archived squad it leads, on any issue, not just
+  squad-assigned ones;
+- not its own runs;
+- not a worker that also leads a squad containing this leader (agents that
+  lead each other cannot steer each other);
+- only workers its mention could start (the same invoke gate as a mention);
+- only runs that are running now and accept additional messages
+  (`can_supplement: true` in `multica issue runs <issue-id> --active --output json`);
+- only comments without attachments. The CLI refuses `--steer` with
+  `--attachment`.
+
+Any other agent's `--steer` is ignored and the comment takes its normal
+trigger. The CLI prints one line per run on stderr: `Steered run …` means the
+running turn receives the comment. `queued`, `coalesced`, `deferred` or
+`blocked` means the comment went through the normal mention path instead; do
+not re-post it.
+
+The worker sees the message labelled as coming from an agent, not a human, so
+it cannot cancel or replace the worker's objective.
+
 ## Autopilot behavior
 
 Autopilots can be assigned to squads. For `assignee_type = "squad"`:
