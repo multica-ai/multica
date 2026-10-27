@@ -490,7 +490,9 @@
     "pull_requests_empty_title": "Aucune pull request associée."
   },
   "timeline": {
-    "loading": "Chargement..."
+    "loading": "Chargement...",
+    "activity_order_oldest": "Activité : plus ancienne d’abord",
+    "activity_order_newest": "Activité : plus récente d’abord"
   },
   "activity": {
     "created": "a créé cette tâche",

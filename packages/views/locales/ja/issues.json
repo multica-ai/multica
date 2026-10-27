@@ -484,7 +484,9 @@
     "pull_requests_empty_title": "関連する PR はありません。"
   },
   "timeline": {
-    "loading": "読み込み中..."
+    "loading": "読み込み中...",
+    "activity_order_oldest": "アクティビティ：古い順",
+    "activity_order_newest": "アクティビティ：新しい順"
   },
   "activity": {
     "created": "このタスクを作成しました",

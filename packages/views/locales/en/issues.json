@@ -490,7 +490,9 @@
     "pull_requests_empty_title": "No linked pull requests."
   },
   "timeline": {
-    "loading": "Loading..."
+    "loading": "Loading...",
+    "activity_order_oldest": "Activity: Oldest first",
+    "activity_order_newest": "Activity: Newest first"
   },
   "activity": {
     "created": "created this issue",

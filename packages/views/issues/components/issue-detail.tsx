@@ -16,6 +16,7 @@ import { AppLink, useBackOrReplace } from "../../navigation";
 import { IssueDuplicateBanner, IssueDuplicatesSection, isDuplicateIssue } from "./issue-duplicates";
 import {
   Archive,
+  ArrowUpDown,
   Calendar,
   CalendarClock,
   CalendarDays,
@@ -102,6 +103,7 @@ import { LocalDirectoryHint } from "../../projects/components/local-directory-hi
 import { useNewRunIds } from "./use-run-comment-motion";
 import { AgentRunComment, CommentCard } from "./comment-card";
 import { EMPTY_COMMENT_RUNS, buildCommentRunView, orderTimelineWithRuns, type CommentRun } from "./comment-runs";
+import { orderActivitySlots } from "./issue-activity-order";
 import { issueTasksOptions } from "@multica/core/issues/queries";
 import { SourceContextBadge } from "./source-context-viewer";
 import { RevisionConflictCompare } from "./revision-conflict-compare";
@@ -147,6 +149,7 @@ import { memberListOptions, agentListOptions } from "@multica/core/workspace/que
 import {
   selectExpandedResolved,
   useCommentCollapseStore,
+  useIssueDetailViewStore,
   useRecentIssuesStore,
   useResolvedExpandStore,
   useSubIssuesCollapseStore,
@@ -632,10 +635,9 @@ function TimelineSkeleton() {
   );
 }
 
-// When the trailing block is expanded, we still truncate its body to the most
-// recent N entries — a single block of 50 status flips drowns the comment area
-// as badly as N blocks of 1 would. Older entries fold behind a "Show N more
-// activities" line that expands in place.
+// When the block containing the newest activity is expanded, we still truncate
+// its body to the most recent N entries — a single block of 50 status flips
+// drowns the comment area as badly as N blocks of 1 would.
 const LAST_ACTIVITY_BLOCK_VISIBLE_LIMIT = 8;
 
 // Collapsible wrapper for an activity block. Older blocks default to a single
@@ -648,6 +650,7 @@ function ActivityBlock({
   expanded,
   onToggle,
   truncateOlder,
+  newestFirst,
   showOlder,
   onToggleShowOlder,
   getActorName,
@@ -662,10 +665,11 @@ function ActivityBlock({
   entries: TimelineEntry[];
   expanded: boolean;
   onToggle: () => void;
-  // Trailing block only: when true, the body shows only the most recent
+  // Newest block only: when true, the body shows only the most recent
   // LAST_ACTIVITY_BLOCK_VISIBLE_LIMIT entries with the older ones folded
   // behind a "Show N more activities" inline toggle.
   truncateOlder: boolean;
+  newestFirst: boolean;
   showOlder: boolean;
   onToggleShowOlder: () => void;
   getActorName: (type: string, id: string) => string;
@@ -699,7 +703,11 @@ function ActivityBlock({
       ? entries.length - LAST_ACTIVITY_BLOCK_VISIBLE_LIMIT
       : 0;
   const visibleEntries =
-    hiddenOlderCount > 0 ? entries.slice(-LAST_ACTIVITY_BLOCK_VISIBLE_LIMIT) : entries;
+    hiddenOlderCount > 0
+      ? newestFirst
+        ? entries.slice(0, LAST_ACTIVITY_BLOCK_VISIBLE_LIMIT)
+        : entries.slice(-LAST_ACTIVITY_BLOCK_VISIBLE_LIMIT)
+      : entries;
   // Hide the "v N activities" collapse header while we're in the truncated
   // default state. The "Show N more" link is the only control users need
   // when they're glancing at recent activity — stacking two chevron rows
@@ -707,6 +715,16 @@ function ActivityBlock({
   // user explicitly reveals older entries, the header reappears so they can
   // fold the whole block back to a single count line.
   const showHeader = hiddenOlderCount === 0;
+  const showMoreButton = hiddenOlderCount > 0 && (
+    <button
+      type="button"
+      onClick={onToggleShowOlder}
+      className="flex items-center gap-1.5 text-caption text-muted-foreground transition-colors hover:text-foreground"
+    >
+      <ChevronRight className="h-3 w-3 shrink-0" />
+      <span>{t(($) => $.activity.show_more_activities, { count: hiddenOlderCount })}</span>
+    </button>
+  );
   return (
     <div className="pb-3 px-4 max-md:px-3 flex flex-col gap-3">
       {showHeader && (
@@ -719,16 +737,7 @@ function ActivityBlock({
           <span>{t(($) => $.activity.activity_count, { count: entries.length })}</span>
         </button>
       )}
-      {hiddenOlderCount > 0 && (
-        <button
-          type="button"
-          onClick={onToggleShowOlder}
-          className="flex items-center gap-1.5 text-caption text-muted-foreground transition-colors hover:text-foreground"
-        >
-          <ChevronRight className="h-3 w-3 shrink-0" />
-          <span>{t(($) => $.activity.show_more_activities, { count: hiddenOlderCount })}</span>
-        </button>
-      )}
+      {!newestFirst && showMoreButton}
       {visibleEntries.map((entry) => {
         const details = (entry.details ?? {}) as Record<string, string>;
         // Duplicate rows replace the status rows of the same write, so they
@@ -819,6 +828,7 @@ function ActivityBlock({
           </div>
         );
       })}
+      {newestFirst && showMoreButton}
     </div>
   );
 }
@@ -1300,6 +1310,9 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
   const locale = useLocale();
   const timeAgo = useTimeAgo();
   const id = issueId;
+  const activityOrder = useIssueDetailViewStore((s) => s.activityOrder);
+  const setActivityOrder = useIssueDetailViewStore((s) => s.setActivityOrder);
+  const newestActivityFirst = activityOrder === "newest";
   const user = useAuthStore((s) => s.user);
   const paths = useWorkspacePaths();
   const openModal = useModalStore((state) => state.open);
@@ -1460,7 +1473,8 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
   }, [id, setResolvedExpanded]);
 
   // Per-session activity-block expansion overrides. The default rule is
-  // "only the trailing block is expanded" (computed from timelineView.groups
+  // "only the block containing the newest activity is expanded" (computed
+  // from timelineView.groups
   // below); these two sets capture user clicks that diverge from the default.
   // Two sets are needed because "default" can flip when a new activity block
   // appends — without an explicit collapse override, a manually-collapsed
@@ -1469,10 +1483,10 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
   const [expandedActivityIds, setExpandedActivityIds] = useState<Set<string>>(() => new Set());
   const [collapsedActivityIds, setCollapsedActivityIds] = useState<Set<string>>(() => new Set());
   // Block IDs where the user has explicitly chosen to also reveal the older
-  // (pre-last-8) entries within the trailing block. Kept independent of the
+  // entries hidden by the newest block's eight-row limit. Kept independent of the
   // expanded/collapsed sets so collapsing then re-expanding preserves the
   // "show all" choice, and so the choice survives the block losing its
-  // trailing position when a new comment lands after it.
+  // default position when a new comment lands after it.
   const [showOlderActivityIds, setShowOlderActivityIds] = useState<Set<string>>(() => new Set());
   const toggleActivityBlock = useCallback((id: string, currentlyExpanded: boolean) => {
     if (currentlyExpanded) {
@@ -1719,9 +1733,15 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
       coalesced.push(entry);
     }
 
+    const ordered = orderActivitySlots(
+      coalesced,
+      activityOrder,
+      (entry) => !("task" in entry) && entry.type === "activity",
+    );
+
     // Group consecutive activities together so the connector line works
     const groups: RawTimelineGroup[] = [];
-    for (const entry of coalesced) {
+    for (const entry of ordered) {
       if ("task" in entry) {
         groups.push({ type: "run", run: entry, entry: entry.hasReply && entry.commentId ? entryById.get(entry.commentId) : undefined });
       } else if (entry.type === "activity") {
@@ -1737,7 +1757,7 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
     }
 
     return { threadReplies, groups };
-  }, [displayTimeline, standaloneRuns]);
+  }, [activityOrder, displayTimeline, standaloneRuns]);
 
   // Flat array consumed by <Virtuoso>. Recomputed when timelineView.groups
   // changes (timeline events) or expandedResolved flips (user toggles a
@@ -1764,14 +1784,18 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
     closeFind();
   }, [id, closeFind]);
 
-  // ID of the trailing activity block — the only one expanded by default.
-  const lastActivityGroupId = useMemo(() => {
-    for (let i = timelineView.groups.length - 1; i >= 0; i--) {
+  // ID of the block containing the newest activity — the only one expanded
+  // by default. It sits first when the preference is newest-first.
+  const newestActivityGroupId = useMemo(() => {
+    const start = newestActivityFirst ? 0 : timelineView.groups.length - 1;
+    const end = newestActivityFirst ? timelineView.groups.length : -1;
+    const step = newestActivityFirst ? 1 : -1;
+    for (let i = start; i !== end; i += step) {
       const g = timelineView.groups[i]!;
       if (g.type === "activities") return g.entries[0]!.id;
     }
     return null;
-  }, [timelineView.groups]);
+  }, [newestActivityFirst, timelineView.groups]);
 
   // Map of reply-comment id → root-comment id, so a deep-link to a reply
   // (which lives inside a CommentCard, not in the flat items array) can fall
@@ -3151,8 +3175,8 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
       ? true
       : collapsedActivityIds.has(item.id)
         ? false
-        : item.id === lastActivityGroupId;
-    const truncateOlder = item.id === lastActivityGroupId;
+        : item.id === newestActivityGroupId;
+    const truncateOlder = item.id === newestActivityGroupId;
     const showOlder = showOlderActivityIds.has(item.id);
     return (
       <ActivityBlock
@@ -3160,6 +3184,7 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
         expanded={expanded}
         onToggle={() => toggleActivityBlock(item.id, expanded)}
         truncateOlder={truncateOlder}
+        newestFirst={newestActivityFirst}
         showOlder={showOlder}
         onToggleShowOlder={() => showOlderActivities(item.id)}
         getActorName={getActorName}
@@ -3855,6 +3880,25 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
                 doesn't compete with sticky banners in this content column.
                 The per-task timeline + past runs live in the right panel
                 via ExecutionLogSection. */}
+
+            {timelineView.groups.some((group) => group.type === "activities") && (
+              <div className="mt-2 flex justify-end px-4 max-md:px-3">
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="xs"
+                  aria-pressed={newestActivityFirst}
+                  onClick={() =>
+                    setActivityOrder(newestActivityFirst ? "oldest" : "newest")
+                  }
+                >
+                  <ArrowUpDown />
+                  {newestActivityFirst
+                    ? t(($) => $.timeline.activity_order_newest)
+                    : t(($) => $.timeline.activity_order_oldest)}
+                </Button>
+              </div>
+            )}
 
             {/* Timeline entries — virtualized via react-virtuoso to keep
                 first-paint cost O(viewport) instead of O(N). On a 500-comment

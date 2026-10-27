@@ -23,6 +23,10 @@ export {
 } from "./issues-scope-store";
 export { useCommentCollapseStore } from "./comment-collapse-store";
 export {
+  useIssueDetailViewStore,
+  type IssueActivityOrder,
+} from "./issue-detail-view-store";
+export {
   useResolvedExpandStore,
   selectExpandedResolved,
 } from "./resolved-expand-store";

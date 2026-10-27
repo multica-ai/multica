@@ -484,7 +484,9 @@
     "pull_requests_empty_title": "暫無關聯 PR。"
   },
   "timeline": {
-    "loading": "載入中…"
+    "loading": "載入中…",
+    "activity_order_oldest": "動態：最早優先",
+    "activity_order_newest": "動態：最新優先"
   },
   "activity": {
     "created": "建立了這個任務",

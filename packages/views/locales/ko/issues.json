@@ -484,7 +484,9 @@
     "pull_requests_empty_title": "연결된 PR이 없습니다."
   },
   "timeline": {
-    "loading": "불러오는 중..."
+    "loading": "불러오는 중...",
+    "activity_order_oldest": "활동: 오래된 항목 먼저",
+    "activity_order_newest": "활동: 최신 항목 먼저"
   },
   "activity": {
     "created": "이 태스크를 만들었습니다",

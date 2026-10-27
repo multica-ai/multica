@@ -8,7 +8,10 @@ import { issueStatusKeys } from "@multica/core/issue-statuses";
 import { I18nProvider } from "@multica/core/i18n/react";
 import { toast } from "sonner";
 import { useResolvedExpandStore } from "@multica/core/issues/stores/resolved-expand-store";
-import { useCommentCollapseStore } from "@multica/core/issues/stores";
+import {
+  useCommentCollapseStore,
+  useIssueDetailViewStore,
+} from "@multica/core/issues/stores";
 import {
   DEFAULT_SUB_ISSUE_ROW_PROPERTIES,
   useSubIssueDisplayStore,
@@ -383,6 +386,9 @@ vi.mock("@multica/core/issues/stores", async () => ({
   ...(await vi.importActual<
     typeof import("@multica/core/issues/stores/sub-issues-collapse-store")
   >("@multica/core/issues/stores/sub-issues-collapse-store")),
+  ...(await vi.importActual<
+    typeof import("@multica/core/issues/stores/issue-detail-view-store")
+  >("@multica/core/issues/stores/issue-detail-view-store")),
   useRecentIssuesStore: Object.assign(
     (selector?: any) => {
       const state = { byWorkspace: {}, recordVisit: mockRecordVisit, pruneWorkspaces: vi.fn() };
@@ -724,6 +730,7 @@ describe("IssueDetail (shared)", () => {
     readonlyContentRenders.length = 0;
     descriptionSelectionAction.current = undefined;
     mockViewport.isMobile = false;
+    useIssueDetailViewStore.setState({ activityOrder: "oldest" });
     // Default: issue loads successfully
     mockApiObj.getIssue.mockResolvedValue(mockIssue);
     // /timeline returns the entries flat in chronological order (oldest first).
@@ -1985,6 +1992,55 @@ describe("IssueDetail (shared)", () => {
 
     await screen.findByText("System coordination update.");
     expect(screen.queryByRole("button", { name: "Retry run" })).not.toBeInTheDocument();
+  });
+
+  it("toggles only activity rows to newest first and persists the preference", async () => {
+    mockApiObj.listTimeline.mockResolvedValue([
+      {
+        type: "activity",
+        id: "act-oldest",
+        actor_type: "member",
+        actor_id: "user-1",
+        action: "status_changed",
+        details: { from: "backlog", to: "todo" },
+        created_at: "2026-01-14T00:00:00Z",
+      },
+      {
+        type: "activity",
+        id: "act-newest",
+        actor_type: "member",
+        actor_id: "user-1",
+        action: "priority_changed",
+        details: { from: "none", to: "high" },
+        created_at: "2026-01-15T00:00:00Z",
+      },
+      ...mockTimeline,
+    ]);
+
+    const { container } = renderIssueDetail();
+    const orderButton = await screen.findByRole("button", {
+      name: "Activity: Oldest first",
+    });
+    await screen.findByText(/changed status from Backlog to Todo/i);
+
+    const oldestText = "changed status from Backlog to Todo";
+    const newestText = "changed priority from No priority to High";
+    expect(container.textContent!.indexOf(oldestText)).toBeLessThan(
+      container.textContent!.indexOf(newestText),
+    );
+
+    fireEvent.click(orderButton);
+
+    await screen.findByRole("button", { name: "Activity: Newest first" });
+    await waitFor(() => {
+      expect(container.textContent!.indexOf(newestText)).toBeLessThan(
+        container.textContent!.indexOf(oldestText),
+      );
+    });
+    expect(container.textContent!.indexOf("Started working on this")).toBeLessThan(
+      container.textContent!.indexOf("I can help with this"),
+    );
+    expect(useIssueDetailViewStore.getState().activityOrder).toBe("newest");
   });
 
   it("collapses non-trailing activity blocks and expands the last one by default", async () => {
