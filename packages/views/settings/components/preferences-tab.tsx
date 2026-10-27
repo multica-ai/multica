@@ -32,6 +32,11 @@ import {
 } from "@multica/core/i18n";
 import { useLocaleAdapter } from "@multica/core/i18n/react";
 import { useAuthStore } from "@multica/core/auth";
+import {
+  useMobileAppearanceStore,
+  type MobileContentWidth,
+  type MobileFontSize,
+} from "@multica/core/appearance";
 import { useChatStore } from "@multica/core/chat";
 import {
   useCommentComposerStore,
@@ -88,6 +93,8 @@ export function PreferencesTab() {
       >
         <SettingsCard>
           <ThemeRow />
+          <MobileFontSizeRow />
+          <MobileContentWidthRow />
         </SettingsCard>
       </SettingsSection>
 
@@ -140,6 +147,62 @@ function ThemeRow() {
             ["light", t(($) => $.preferences.theme.light)],
             ["dark", t(($) => $.preferences.theme.dark)],
             ["system", t(($) => $.preferences.theme.system)],
+          ]}
+        />
+      </div>
+    </SettingsRow>
+  );
+}
+
+/**
+ * Mobile-only text size. Scales the typography tokens below the `sm`
+ * breakpoint. The Appearance section's device scope badge already says this
+ * is stored on this device only, so the row carries no second hint.
+ */
+function MobileFontSizeRow() {
+  const { t } = useT("settings");
+  const value = useMobileAppearanceStore((s) => s.fontSize);
+  const setValue = useMobileAppearanceStore((s) => s.setFontSize);
+  const label = t(($) => $.preferences.mobile_font_size.title);
+  return (
+    <SettingsRow
+      anchor="mobile-font-size"
+      label={label}
+    >
+      <div role="group" aria-label={label}>
+        <SegmentedToggle<MobileFontSize>
+          value={value}
+          onChange={setValue}
+          buttonClassName="px-3 py-1 text-label"
+          options={[
+            ["small", t(($) => $.preferences.mobile_font_size.small)],
+            ["default", t(($) => $.preferences.mobile_font_size.default)],
+            ["large", t(($) => $.preferences.mobile_font_size.large)],
+          ]}
+        />
+      </div>
+    </SettingsRow>
+  );
+}
+
+function MobileContentWidthRow() {
+  const { t } = useT("settings");
+  const value = useMobileAppearanceStore((s) => s.contentWidth);
+  const setValue = useMobileAppearanceStore((s) => s.setContentWidth);
+  const label = t(($) => $.preferences.mobile_content_width.title);
+  return (
+    <SettingsRow
+      anchor="mobile-content-width"
+      label={label}
+    >
+      <div role="group" aria-label={label}>
+        <SegmentedToggle<MobileContentWidth>
+          value={value}
+          onChange={setValue}
+          buttonClassName="px-3 py-1 text-label"
+          options={[
+            ["standard", t(($) => $.preferences.mobile_content_width.standard)],
+            ["full", t(($) => $.preferences.mobile_content_width.full)],
           ]}
         />
       </div>

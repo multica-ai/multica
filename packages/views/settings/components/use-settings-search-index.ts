@@ -53,6 +53,16 @@ export function useSettingsSearchIndex(
       { tab: "preferences", anchor: "theme", title: t(($) => $.preferences.theme.title) },
       {
         tab: "preferences",
+        anchor: "mobile-font-size",
+        title: t(($) => $.preferences.mobile_font_size.title),
+      },
+      {
+        tab: "preferences",
+        anchor: "mobile-content-width",
+        title: t(($) => $.preferences.mobile_content_width.title),
+      },
+      {
+        tab: "preferences",
         anchor: "sticky-comment-bar",
         title: t(($) => $.preferences.sticky_comment_bar.title),
       },
