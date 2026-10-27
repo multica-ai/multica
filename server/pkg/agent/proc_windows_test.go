@@ -28,7 +28,7 @@ const createNoWindow = 0x08000000
 // console and forces each grandchild to open its own visible window.
 func TestHideAgentWindowSetsCreateNewConsoleWithoutConsole(t *testing.T) {
 	prev := currentConsoleWindow
-	currentConsoleWindow = func() windows.HWND { return 0 }
+	currentConsoleWindow = func() uintptr { return 0 }
 	t.Cleanup(func() { currentConsoleWindow = prev })
 
 	cmd := exec.Command("cmd.exe", "/c", "echo", "hi")
@@ -57,7 +57,7 @@ func TestHideAgentWindowSetsCreateNewConsoleWithoutConsole(t *testing.T) {
 // a visible WT window even with HideWindow.
 func TestHideAgentWindowInheritsExistingConsole(t *testing.T) {
 	prev := currentConsoleWindow
-	currentConsoleWindow = func() windows.HWND { return 1 }
+	currentConsoleWindow = func() uintptr { return 1 }
 	t.Cleanup(func() { currentConsoleWindow = prev })
 
 	cmd := exec.Command("cmd.exe", "/c", "echo", "hi")
@@ -90,7 +90,7 @@ func TestHideAgentWindowInheritsExistingConsole(t *testing.T) {
 // a surviving bit here is semantically meaningful, not just bitwise intact.
 func TestHideAgentWindowPreservesExistingSysProcAttr(t *testing.T) {
 	prev := currentConsoleWindow
-	currentConsoleWindow = func() windows.HWND { return 0 }
+	currentConsoleWindow = func() uintptr { return 0 }
 	t.Cleanup(func() { currentConsoleWindow = prev })
 
 	const createUnicodeEnvironment = 0x00000400

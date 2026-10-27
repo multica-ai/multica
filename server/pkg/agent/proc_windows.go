@@ -35,10 +35,20 @@ const createNewConsole = 0x00000010
 // be placed in a Job Object before it executes a single instruction.
 const createSuspended = 0x00000004
 
+var (
+	agentKernel32            = syscall.NewLazyDLL("kernel32.dll")
+	procGetConsoleWindowHWND = agentKernel32.NewProc("GetConsoleWindow")
+)
+
+func getConsoleWindowHWND() uintptr {
+	hwnd, _, _ := procGetConsoleWindowHWND.Call()
+	return hwnd
+}
+
 // currentConsoleWindow reports the calling process's console HWND, or 0 when
 // none is attached. Overridable in tests so hideAgentWindow's inherit-vs-allocate
 // branch can be exercised without attaching a real console.
-var currentConsoleWindow = windows.GetConsoleWindow
+var currentConsoleWindow = getConsoleWindowHWND
 
 // hideAgentWindow configures cmd to suppress the console window on Windows
 // while still giving descendant processes a hidden console to inherit.
