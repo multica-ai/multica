@@ -140,7 +140,7 @@ export function AnimatedRightSidebar({
       // so wheeling past the end of the comments scrolled the whole issue
       // detail up and left a blank band at the bottom (MUL-8100).
       className={cn(
-        "relative h-full overflow-x-hidden overflow-y-auto border-l",
+        "relative h-full overflow-x-hidden overflow-y-auto [scrollbar-gutter:stable] border-l",
         !open && "pointer-events-none",
         className,
       )}

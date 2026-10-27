@@ -106,7 +106,6 @@ export function WakeupCreate({
           <IconButton
             variant="ghost"
             size="icon-xs"
-            className="text-muted-foreground"
             label={t(($) => $.wakeups.create.open)}
           />
         }

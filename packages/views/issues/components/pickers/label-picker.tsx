@@ -229,6 +229,7 @@ export function LabelPicker({
         searchPlaceholder={t(($) => $.pickers.label.search_placeholder)}
         onSearchChange={setFilter}
         triggerRender={resolvedTriggerRender}
+        nativeButton={!!triggerRender || !hasLabels}
         tooltip={tooltip}
         trigger={
           hasLabels ? (

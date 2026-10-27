@@ -153,7 +153,7 @@
   "inspector": {
     "section_profile": "プロフィール",
     "section_execution": "実行設定",
-    "qoder_execution_note": "モデル、ツール、Skills は Qoder の QCA エージェントで設定します。",
+    "qoder_execution_note": "モデル、ツール、スキルは Qoder Cloud Agents のエージェントで設定します。",
     "section_access": "アクセス",
     "section_properties": "プロパティ",
     "section_details": "詳細",
@@ -261,7 +261,7 @@
     "composio_mcp": "MCP アプリ",
     "integrations": "連携",
     "runtime_config": "ルーティング",
-    "qoder_agent": "QCA エージェント",
+    "qoder_agent": "Qoder Cloud Agents",
     "discard_dialog_title": "保存していない変更を破棄しますか？",
     "discard_dialog_description": "このタブに保存していない変更があります。今移動すると変更は破棄されます。",
     "discard_keep": "編集を続ける",

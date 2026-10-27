@@ -261,12 +261,12 @@ Editing a profile only affects runs claimed afterwards. Before deleting a profil
 
 ## Qoder Cloud Agents remote runtime
 
-Qoder Cloud Agents runs assigned issues through remote QCA sessions. The Multica server supervises a bridge that uses the existing daemon task protocol; no user-operated local daemon is needed for this runtime.
+Qoder Cloud Agents runs assigned issues through remote sessions. The Multica server supervises a bridge that uses the existing daemon task protocol; no user-operated local daemon is needed for this runtime.
 
 ### Before you start
 
 - You need to be a workspace administrator. Each workspace has one Qoder connection.
-- In Qoder, create a personal access token (PAT), at least one environment, and the QCA Agents you want to use. Models, tools, and skills are configured on the QCA Agent in Qoder, not in Multica.
+- Create a Qoder personal access token (PAT), at least one environment, and the agents you want to use in Qoder Cloud Agents. Models, tools, and skills are configured on the remote agent in Qoder Cloud Agents, not in Multica.
 - Self-hosted installations must set `MULTICA_VCS_SECRET_KEY` on the server: a base64-encoded 32-byte key that stays the same across restarts. Without it, Qoder Cloud Agents does not appear in the **Add** menu.
 
 ### Connect Qoder
@@ -280,9 +280,9 @@ Qoder Cloud Agents runs assigned issues through remote QCA sessions. The Multica
 
 ### Add an agent
 
-Open Qoder Cloud Agents from the Runtimes page and click **Create an agent with it**, or create an agent as usual and choose the Qoder runtime. In the agent form, select the remote agent under **QCA Agent**. For an existing agent, change the QCA Agent or its default repository in the agent's **Routing** tab. Several Multica agents can share one connection, each linked to a different QCA Agent.
+Open Qoder Cloud Agents from the Runtimes page and click **Create an agent with it**, or create an agent as usual and choose the Qoder runtime. In the agent form, select the remote agent under **Remote agent**. For an existing agent, change the linked agent or its default repository in the agent's **Qoder Cloud Agents** tab. Several Multica agents can share one connection, each linked to a different agent in Qoder Cloud Agents.
 
-Connection credentials are encrypted and shared within the workspace. Administrators manage the connection; members can select accessible QCA agents. Projects choose the repository and starting branch; the repository's token is passed to QCA when a coding session is created. PAT values are never returned to the browser after saving.
+Connection credentials are encrypted and shared within the workspace. Administrators manage the connection; members can select accessible agents in Qoder Cloud Agents. Projects choose the repository and starting branch; the repository's token is passed to Qoder Cloud Agents when a coding session is created. PAT values are never returned to the browser after saving.
 
 On the Qoder Cloud Agents page, administrators can edit the connection and repositories, **Pause** to stop sending new tasks while keeping credentials and agents, or **Disconnect** to delete the saved tokens, remove the runtime, and unbind its agents.
 
@@ -290,7 +290,7 @@ On the Qoder Cloud Agents page, administrators can edit the connection and repos
 
 Runs beyond the concurrency limit wait in the queue. A follow-up on the same issue continues the agent's previous Qoder session when it is idle. An agent can set a default repository, used when the issue's project has none. The agent is asked to push a branch named after the issue identifier and to prefix the pull request title with it, so the pull request is linked to the issue.
 
-This first version supports issue runs, progress reporting, cancellation, and recovery from a persisted run journal. Configure models, tools, and skills in Qoder. Interactive chat, local directories, attachments, and creating remote QCA agents from Multica are not supported. The Runtimes page separates remote runtimes from connected computers.
+This first version supports issue runs, progress reporting, cancellation, and recovery from a persisted run journal. Configure models, tools, and skills in Qoder. Interactive chat, local directories, attachments, and creating agents in Qoder Cloud Agents from Multica are not supported. The Runtimes page separates remote runtimes from connected computers.
 
 For standalone bridge setup and operational limitations, see the [Qoder runtime README](https://github.com/multica-ai/multica/blob/main/server/cmd/qoder-runtime/README.md).
 

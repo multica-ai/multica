@@ -57,3 +57,31 @@ it("stops before a signed download click, but not for clean or blob links", () =
   click("https://cdn.example.invalid/a.pdf?Signature=s");
   expect(disabled()).toBe(true);
 });
+
+// Each queued gtag call, as a plain array.
+const gtagCalls = () => ((w.dataLayer as IArguments[] | undefined) ?? []).map((a) => Array.from(a));
+const pageTitles = () =>
+  gtagCalls().flatMap((c) =>
+    c[0] === "set" ? [(c[1] as { page_title?: string }).page_title] : [],
+  );
+
+it("pins page_title to route labels instead of the workspace document title", () => {
+  document.title = "Fix the secret launch · Multica";
+  start("/acme/issues/MUL-1");
+  window.history.pushState(null, "", "/acme/projects");
+  window.history.replaceState(null, "", "/changelog");
+  window.history.pushState(null, "", "/acme/inbox");
+  window.dispatchEvent(new PopStateEvent("popstate"));
+  expect(pageTitles()).toEqual([
+    "Workspace · Issues · Detail",
+    "Workspace · Projects",
+    "Changelog",
+    "Workspace · Inbox",
+    "Workspace · Inbox",
+  ]);
+  expect(JSON.stringify(gtagCalls())).not.toContain("secret launch");
+  // config parameters outrank `set`, so a page_title in config would pin the
+  // first label for every later page view.
+  const config = gtagCalls().find((c) => c[0] === "config");
+  expect(config?.[2]).not.toHaveProperty("page_title");
+});

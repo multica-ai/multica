@@ -125,11 +125,13 @@ multica issue comment add MUL-123 --content-stdin < review.md
 multica issue comment update <comment-id> --expected-revision 2 --content-file revised-review.md
 ```
 
-Afficher les messages d'une exécution, ou l'arrêter :
+Consulter, arrêter ou relancer une exécution :
 
 ```bash
 multica issue run-messages <task-id> --issue MUL-123
 multica issue cancel-task <task-id> --issue MUL-123
+multica issue rerun-task <run-id> --issue MUL-123
+multica issue rerun-task <run-id> --issue MUL-123 --fresh
 ```
 
 Si une tâche ouverte portant le même titre (sans tenir compte de la casse ni des espaces en trop) existe déjà sous le même projet et le même parent, `issue create` refuse et indique cette tâche. Pour en créer une autre malgré tout, ajoutez `--allow-duplicate`. Pour marquer une tâche comme doublon d'une autre, utilisez `multica issue status MUL-124 cancelled --duplicate-of MUL-123`.
@@ -365,7 +367,7 @@ Les tableaux ci-dessous couvrent toutes les commandes de premier niveau actuelle
 | | `runs <issue-id>` | Afficher l'historique des exécutions | `--full-id` |
 | | `run-messages <task-id>` | Afficher les messages d'une exécution | `--since`, `--issue` |
 | | `usage <issue-id>` | Afficher la consommation de tokens agrégée | |
-| | `rerun <id>` | Remettre en file une exécution pour l'assigné actuel | |
+| | `rerun-task <run-id>` | Relancer une exécution précise avec son agent et son contexte de déclenchement d’origine | `--issue`, `--fresh` |
 | | `cancel-task <task-id>` | Annuler une exécution en cours ou en file d'attente | `--issue` |
 | `project` | `list/get/create/update/delete` | Gérer les projets | `create` : `--title` (obligatoire), `--lead`, `--status`, `--icon`, `--start-date`, `--due-date`, `--repo` (répétable) |
 | | `status <id> <status>` | Changer le statut d'un projet | |

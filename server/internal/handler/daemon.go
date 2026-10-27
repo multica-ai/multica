@@ -3391,11 +3391,11 @@ func (h *Handler) buildClaimedTaskResponse(r *http.Request, task *db.AgentTaskQu
 		}
 
 		// Resolve the prior agent session / workdir to resume.
-		if task.RerunOfTaskID.Valid {
+		if task.RerunOfTaskID.Valid && !service.IsFreshRerun(*task) {
 			// Manual retry: resume precisely from the source task the user
 			// clicked, NOT the most-recent (agent, issue) row — a parallel task
 			// on the same issue must never hijack the resume (MUL-4869). The
-			// workdir is ALWAYS reused when it still exists; the session is
+			// workdir is reused unless fresh was explicitly requested; the session is
 			// resumed only when the source failure did not poison the
 			// conversation AND the source ran on this runtime.
 			//
@@ -4602,7 +4602,7 @@ func (h *Handler) StartTask(w http.ResponseWriter, r *http.Request) {
 	taskID := chi.URLParam(r, "taskId")
 
 	// Verify the caller owns this task's workspace.
-	_, workspaceID, ok := h.requireDaemonTaskAccessWithWorkspace(w, r, taskID)
+	startTask, workspaceID, ok := h.requireDaemonTaskAccessWithWorkspace(w, r, taskID)
 	if !ok {
 		return
 	}
@@ -4618,15 +4618,9 @@ func (h *Handler) StartTask(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	enableTaskSupplement := slices.Contains(req.Capabilities, protocol.DaemonCapabilityTaskSupplementV1)
-	var task *db.AgentTaskQueue
-	var err error
 	legacy := req.RuntimeID == "" && req.DispatchedAt == ""
-	if legacy {
-		// Older daemons send {}. Keep their single-winner behavior; in
-		// particular, they cannot acknowledge an already-running task.
-		task, err = h.TaskService.StartTask(r.Context(), parseUUID(taskID), enableTaskSupplement)
-	} else {
+	var claim db.LockAgentTaskStartClaimParams
+	if !legacy {
 		runtimeID, ok := parseUUIDOrBadRequest(w, req.RuntimeID, "runtime_id")
 		if !ok {
 			return
@@ -4636,10 +4630,55 @@ func (h *Handler) StartTask(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusBadRequest, "dispatched_at must be a PostgreSQL claim timestamp")
 			return
 		}
-		task, err = h.TaskService.StartTaskForClaim(r.Context(), db.LockAgentTaskStartClaimParams{
-			ID: parseUUID(taskID), RuntimeID: runtimeID,
+		if startTask.RuntimeID != runtimeID || !startTask.DispatchedAt.Valid || !startTask.DispatchedAt.Time.Equal(generation) {
+			writeError(w, http.StatusConflict, "task claim is stale")
+			return
+		}
+		claim = db.LockAgentTaskStartClaimParams{
+			ID: startTask.ID, RuntimeID: runtimeID,
 			DispatchedAt: pgtype.Timestamptz{Time: generation, Valid: true},
-		}, enableTaskSupplement)
+		}
+	}
+	// Check the requested generation before a cleanup guard can mutate a claim.
+	waiting, waitErr := h.Queries.TaskWaitingForProcessCleanup(r.Context(), startTask.ID)
+	if waitErr != nil {
+		writeError(w, http.StatusInternalServerError, "could not verify pending process cleanup")
+		return
+	}
+	if waiting {
+		if _, err := h.TaskService.RequeueTaskAfterClaimFailure(r.Context(), startTask); err != nil {
+			writeError(w, http.StatusInternalServerError, "failed to defer task until process cleanup")
+			return
+		}
+		writeError(w, http.StatusConflict, "previous run is still stopping; task was requeued")
+		return
+	}
+	blocked, blockErr := h.Queries.TaskBlockedByProcessCleanup(r.Context(), startTask.ID)
+	if blockErr != nil {
+		writeError(w, http.StatusInternalServerError, "could not verify prior process cleanup")
+		return
+	}
+	if blocked {
+		if _, err := h.TaskService.FailTask(r.Context(), startTask.ID,
+			"A previous run's process cleanup is unconfirmed. Check background processes, then manually rerun the task to resume this agent.",
+			"", "", "", taskfailure.ReasonProcessCleanupBlocked.String(), false, "", ""); err != nil {
+			writeError(w, http.StatusInternalServerError, "failed to record process cleanup block")
+			return
+		}
+		writeError(w, http.StatusConflict, "task blocked by unconfirmed process cleanup; manual rerun required")
+		return
+	}
+	offered := service.TaskStartCapabilities{
+		Supplement:     slices.Contains(req.Capabilities, protocol.DaemonCapabilityTaskSupplementV1),
+		ProcessCleanup: slices.Contains(req.Capabilities, protocol.DaemonCapabilityPiProcessCleanupV1),
+	}
+	var task *db.AgentTaskQueue
+	var err error
+	if legacy {
+		// Older daemons send {} and retain their single-winner behavior.
+		task, err = h.TaskService.StartTask(r.Context(), startTask.ID, offered)
+	} else {
+		task, err = h.TaskService.StartTaskForClaim(r.Context(), claim, offered)
 	}
 	if err != nil {
 		slog.Warn("start task failed", "task_id", taskID, "error", err)
@@ -4657,6 +4696,12 @@ func (h *Handler) StartTask(w http.ResponseWriter, r *http.Request) {
 
 	slog.Info("task started", "task_id", taskID, "agent_id", uuidToString(task.AgentID))
 	resp := taskToResponse(*task, workspaceID)
+	var result struct {
+		ProcessCleanupCapability string `json:"process_cleanup_capability"`
+	}
+	if json.Unmarshal(task.Result, &result) == nil {
+		resp.ProcessCleanupCapability = result.ProcessCleanupCapability
+	}
 	// Echo the capability the server actually committed for this exact run.
 	// A daemon must use this response rather than its own offer: an old server
 	// ignores the offer and omits the field, which keeps daemon-first rollouts
@@ -5764,6 +5809,8 @@ func (h *Handler) ReportTaskMessages(w http.ResponseWriter, r *http.Request) {
 // transcript (#5219); idempotent when nothing was deferred.
 // TaskCancelAckRequest is the body of the daemon's cancel acknowledgement.
 type TaskCancelAckRequest struct {
+	// Absent on older daemons: a pending Pi cleanup cannot be assumed clean.
+	ProcessCleanupConfirmed *bool `json:"process_cleanup_confirmed,omitempty"`
 	// BranchName: a cancelled worktree task has already committed whatever the
 	// agent produced — the worktree is finalized before the daemon learns of
 	// the cancellation. The rest of the result is discarded on this path, so
@@ -5841,7 +5888,7 @@ func (h *Handler) AckTaskCancelled(w http.ResponseWriter, r *http.Request) {
 		}
 		delivered = true
 	}
-	if msg := strings.TrimSpace(req.ErrorMessage); msg != "" {
+	if msg := strings.TrimSpace(req.ErrorMessage); msg != "" && req.FailureReason != taskfailure.ReasonProcessCleanupUnconfirmed.String() {
 		reason := strings.TrimSpace(req.FailureReason)
 		if err := h.Queries.SetAgentTaskErrorIfEmpty(r.Context(), db.SetAgentTaskErrorIfEmptyParams{
 			ID:            task.ID,
@@ -5865,6 +5912,24 @@ func (h *Handler) AckTaskCancelled(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusInternalServerError, "failed to retire session")
 			return
 		}
+	}
+	var cancellationResult map[string]any
+	_ = json.Unmarshal(task.Result, &cancellationResult)
+	needsConfirmation, _ := cancellationResult["process_cleanup_pending"].(bool)
+	if req.FailureReason == taskfailure.ReasonProcessCleanupUnconfirmed.String() || (needsConfirmation && (req.ProcessCleanupConfirmed == nil || !*req.ProcessCleanupConfirmed)) {
+		msg := strings.TrimSpace(req.ErrorMessage)
+		if msg == "" {
+			msg = "Process cleanup is unconfirmed; background processes may still be running. Check them before manually rerunning the task."
+		}
+		_, err := h.TaskService.FailTask(r.Context(), task.ID, msg, "", "", "", taskfailure.ReasonProcessCleanupUnconfirmed.String(), false, "", "")
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "failed to record process cleanup failure")
+			return
+		}
+	}
+	if err := h.Queries.ClearTaskProcessCleanupPending(r.Context(), task.ID); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to acknowledge process cleanup")
+		return
 	}
 	if delivered {
 		// The task:cancelled broadcast fired at cancel time, before this ack —

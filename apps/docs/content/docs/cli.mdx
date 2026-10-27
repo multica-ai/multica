@@ -125,11 +125,13 @@ multica issue comment add MUL-123 --content-stdin < review.md
 multica issue comment update <comment-id> --expected-revision 2 --content-file revised-review.md
 ```
 
-View the messages of a single run, or stop one:
+Inspect, stop, or retry a single run:
 
 ```bash
 multica issue run-messages <task-id> --issue MUL-123
 multica issue cancel-task <task-id> --issue MUL-123
+multica issue rerun-task <run-id> --issue MUL-123
+multica issue rerun-task <run-id> --issue MUL-123 --fresh
 ```
 
 If an open issue with the same title (case-insensitive, extra spaces ignored) already exists under the same project and parent, `issue create` refuses and points to that issue. To create another one anyway, add `--allow-duplicate`. To mark an issue as a duplicate of another, run `multica issue status MUL-124 cancelled --duplicate-of MUL-123`.
@@ -380,7 +382,7 @@ The tables below cover every current top-level command, grouped the way the CLI 
 | | `runs <issue-id>` | View run history | `--full-id` |
 | | `run-messages <task-id>` | View the messages of a single run | `--since`, `--issue` |
 | | `usage <issue-id>` | View aggregated token usage | |
-| | `rerun <id>` | Re-enqueue a run for the current assignee | |
+| | `rerun-task <run-id>` | Repeat a specific run with its original agent and trigger context | `--issue`, `--fresh` |
 | | `cancel-task <task-id>` | Cancel a running or queued run | `--issue` |
 | `project` | `list/get/create/update/delete` | Manage projects | `create`: `--title` (required), `--lead`, `--status`, `--icon`, `--start-date`, `--due-date`, `--repo` (repeatable) |
 | | `status <id> <status>` | Change project status | |

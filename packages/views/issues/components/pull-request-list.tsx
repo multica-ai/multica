@@ -80,7 +80,7 @@ export function PullRequestList({
 }) {
   const { t } = useT("issues");
   const [expanded, setExpanded] = useState(false);
-  const { data, isLoading } = useQuery(issuePullRequestsOptions(issueId));
+  const { data, isLoading, isError, refetch } = useQuery(issuePullRequestsOptions(issueId));
   const prs = data?.pull_requests ?? [];
   // Older backends send no auto-complete block and have no link/unlink
   // endpoints, so the row actions stay hidden with it.
@@ -90,12 +90,13 @@ export function PullRequestList({
   if (isLoading) {
     return <p className="text-caption text-muted-foreground px-2">{t(($) => $.detail.pull_requests_loading)}</p>;
   }
+  if (isError) {
+    return <button type="button" className="flex min-h-8 w-full items-center rounded-md px-2 py-1.5 text-left text-caption text-muted-foreground transition-colors hover:bg-accent/50 hover:text-foreground focus-visible:outline-2 focus-visible:outline-ring" onClick={() => void refetch()}>
+      {t(($) => $.detail.section_load_failed_retry)}
+    </button>;
+  }
   if (prs.length === 0) {
-    return (
-      <p className="px-2 text-caption text-muted-foreground">
-        {t(($) => $.detail.pull_requests_empty_title)}
-      </p>
-    );
+    return null;
   }
 
   // Render rule:
@@ -124,7 +125,7 @@ export function PullRequestList({
           <button
             type="button"
             onClick={() => setExpanded((v) => !v)}
-            className="block w-[calc(100%+1rem)] -mx-2 rounded-md px-2 py-1.5 text-left text-micro text-muted-foreground hover:bg-accent/50 hover:text-foreground transition-colors"
+            className="block w-full rounded-md px-2 py-2 text-left text-caption text-muted-foreground hover:bg-accent/50 hover:text-foreground transition-colors"
           >
             {expanded
               ? t(($) => $.detail.pull_request_card_show_less)
@@ -215,13 +216,13 @@ function PullRequestRowMenu({ pr, actions }: { pr: GitHubPullRequest; actions: R
             variant="ghost"
             size="icon-xs"
             label={t(($) => $.pr_automation.row_menu)}
-            className="absolute top-0.5 right-0 opacity-0 group-hover/pr:opacity-100 group-focus-within/pr:opacity-100 data-popup-open:opacity-100 [@media(pointer:coarse)]:opacity-100"
+            className="absolute top-0.5 right-0 opacity-0 group-hover/pr:opacity-100 group-has-[:focus-visible]/pr:opacity-100 data-popup-open:opacity-100 [@media(pointer:coarse)]:opacity-100"
           >
             <MoreHorizontal />
           </IconButton>
         }
       />
-      <DropdownMenuContent align="end" className="w-56">
+      <DropdownMenuContent align="end" className="w-max max-w-(--available-width)">
         <DropdownMenuGroup>
           <DropdownMenuLabel className="font-normal">
             {linkSourceLabel(pr, actions.identifier, t)}
@@ -279,9 +280,9 @@ function AutoCompleteLine({
   const withTarget = (sentence: string) => {
     const [before, after = ""] = sentence.split(STATUS_SLOT);
     return (
-      <>
+      <span>
         {before}
-        <span className="inline-flex items-center gap-1 align-[-2px] font-medium text-foreground">
+        <span className="inline-flex items-center gap-1 whitespace-nowrap align-middle font-medium text-foreground">
           <StatusIcon
             status={target}
             category={catalog.categoryOf(target)}
@@ -292,7 +293,7 @@ function AutoCompleteLine({
           {statusLabel(target)}
         </span>
         {after}
-      </>
+      </span>
     );
   };
 
@@ -339,7 +340,7 @@ function AutoCompleteLine({
   return (
     <p
       data-testid="pr-auto-complete-line"
-      className="mt-1 flex items-start gap-1.5 border-t border-border pt-2 text-caption text-muted-foreground [&>svg]:mt-0.5 [&>svg]:size-3.5 [&>svg]:shrink-0"
+      className="mx-2 mt-1 flex items-start gap-1.5 border-t border-border py-2 text-caption text-muted-foreground [&>svg]:mt-px [&>svg]:size-3.5 [&>svg]:shrink-0"
     >
       {icon}
       <span className="min-w-0">{body}</span>
@@ -431,7 +432,7 @@ function PullRequestRow({
   // The row link and its menu are siblings: a button inside an anchor is
   // invalid HTML, and the menu must not open the PR.
   return (
-    <div className="group/pr relative -mx-2 rounded-md transition-colors hover:bg-accent/50">
+    <div className="group/pr relative rounded-md transition-colors hover:bg-accent/50">
       <Tooltip>
         <TooltipTrigger
           render={
@@ -440,7 +441,7 @@ function PullRequestRow({
               href={pr.html_url}
               target="_blank"
               rel="noreferrer noopener"
-              className="flex items-start gap-2 rounded-md px-2 py-1.5"
+              className="flex items-start gap-2 rounded-md px-2 py-2"
             />
           }
         >

@@ -377,6 +377,15 @@
     "close": "미리보기 닫기"
   },
   "detail": {
+    "metadata_close": "메타데이터 닫기",
+    "metadata_copy": "메타데이터 복사",
+    "metadata_view": "메타데이터 확대 보기",
+    "metadata_expand": "대화상자 확대",
+    "metadata_restore": "대화상자 크기 복원",
+    "metadata_copy_failed": "메타데이터를 복사하지 못했습니다",
+    "metadata_description": "에이전트와 연동 기능이 작업 흐름을 이어가기 위해 기록하는 키와 값 데이터입니다.",
+
+    "section_load_failed_retry": "불러오지 못했습니다. 다시 시도",
     "not_found": "이 워크스페이스에 해당 태스크가 없거나 삭제되었습니다.",
     "breadcrumb_project_unknown": "알 수 없는 프로젝트",
     "back": "뒤로",
@@ -459,6 +468,9 @@
     "archive_tooltip": "보관",
     "pin_tooltip": "사이드바에 고정",
     "unpin_tooltip": "사이드바 고정 해제",
+    "quick_jump_label": "빠른 탐색",
+    "description_nav_label": "태스크 설명",
+    "sub_issues_nav_progress": "{{done}}/{{total}} 완료",
     "thread_nav_label": "스레드로 이동",
     "thread_nav_resolved_label": "{{title}} (해결됨)",
     "thread_nav_reply_label": "{{author}}: {{title}}",
@@ -733,7 +745,7 @@
     "summary_runs_other": "실행 {{count}}회",
     "latest": "최근",
     "open_timeline": "타임라인 열기",
-    "more_runs_other": "{{count}}개 더",
+    "more_runs_other": "{{count}}개 더 보기",
     "strip_aria": "실행별 비용 — 실행 타임라인 열기",
     "strip_no_usage": "사용량 기록 없음",
     "sparkline_now": "지금"
@@ -1069,7 +1081,7 @@
     "wake_agent": "{{agent}} 깨우기",
     "needs_attention": "확인 필요",
     "turn_off": "끄기",
-    "ended": "깨우기 기록 {{count}}",
+    "ended": "깨우기 기록 · {{count}}",
     "waiting_event": "트리거 대기 중",
     "triggered_by_wakeup": "자동 깨우기로 시작됨",
     "upcoming": "활성 깨우기 규칙 {{count}}개",

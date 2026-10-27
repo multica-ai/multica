@@ -5,8 +5,9 @@ import { act, render, waitFor } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { setApiInstance } from "../api";
-import { ApiError, type ApiClient } from "../api/client";
+import { ApiClient, ApiError } from "../api/client";
 import { configStore } from "../config";
+import { daemonCommands } from "../runtimes/commands";
 import {
   createAuthStore,
   registerAuthStore,
@@ -75,6 +76,12 @@ function makeApi(overrides: Partial<ApiClient> = {}): ApiClient {
   } as unknown as ApiClient;
 }
 
+function makeApiWithConfigResponse(config: unknown): ApiClient {
+  vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(JSON.stringify(config))));
+  const configApi = new ApiClient("https://api.example.test");
+  return makeApi({ getConfig: () => configApi.getConfig() });
+}
+
 function renderInitializer({
   api,
   storage = makeStorage({ multica_token: "token-1" }),
@@ -114,14 +121,155 @@ function renderInitializer({
 
 beforeEach(() => {
   vi.clearAllMocks();
+  configStore.setState({
+    daemonConfigStatus: "loading",
+    daemonSetupTarget: "unknown",
+    daemonServerUrl: "",
+    daemonAppUrl: "",
+  });
   __clearDraftCleanupRegistryForTest();
 });
 
 afterEach(() => {
+  vi.unstubAllGlobals();
   vi.useRealTimers();
 });
 
 describe("AuthInitializer recovery", () => {
+  it("keeps self-host commands available when an older API omits the target", async () => {
+    renderInitializer({ api: makeApiWithConfigResponse({
+      daemon_server_url: " https://api.example.com/// ",
+      daemon_app_url: "https://app.example.com/",
+    }) });
+
+    await waitFor(() => {
+      expect(configStore.getState().daemonConfigStatus).toBe("ready");
+    });
+    const config = configStore.getState();
+    expect(config.daemonSetupTarget).toBe("self_host");
+    const commands = daemonCommands({
+      status: config.daemonConfigStatus,
+      target: config.daemonSetupTarget,
+      serverUrl: config.daemonServerUrl,
+      appUrl: config.daemonAppUrl,
+    });
+    expect(commands).toMatchObject({
+      status: "ready",
+      setupCmd: "multica setup self-host --server-url https://api.example.com --app-url https://app.example.com",
+    });
+    if (commands.status !== "ready") throw new Error("expected self-host commands");
+    expect(commands.tokenCmd).toContain("server_url https://api.example.com");
+    expect(commands.tokenCmd).toContain("app_url https://app.example.com");
+    expect(commands.tokenCmd).not.toContain("multica.ai");
+  });
+
+  it.each([
+    { name: "both URLs absent", response: {} },
+    { name: "app URL absent", response: { daemon_server_url: "https://api.example.com" } },
+    { name: "server URL absent", response: { daemon_app_url: "https://app.example.com" } },
+    {
+      name: "blank server URL",
+      response: { daemon_server_url: " / ", daemon_app_url: "https://app.example.com" },
+    },
+    {
+      name: "blank app URL",
+      response: { daemon_server_url: "https://api.example.com", daemon_app_url: "  " },
+    },
+    {
+      name: "malformed server URL",
+      response: { daemon_server_url: {}, daemon_app_url: "https://app.example.com" },
+    },
+    {
+      name: "malformed app URL",
+      response: { daemon_server_url: "https://api.example.com", daemon_app_url: 123 },
+    },
+    ...["unknown", "future_target", null].map((target) => ({
+      name: `explicit target ${JSON.stringify(target)}`,
+      response: {
+        daemon_setup_target: target,
+        daemon_server_url: "https://api.example.com",
+        daemon_app_url: "https://app.example.com",
+      },
+    })),
+    {
+      name: "unreadable config",
+      response: {
+        cdn_domain: 123,
+        daemon_server_url: "https://api.example.com",
+        daemon_app_url: "https://app.example.com",
+      },
+    },
+  ])("keeps commands unavailable for $name", async ({ response }) => {
+    renderInitializer({ api: makeApiWithConfigResponse(response) });
+    await waitFor(() => {
+      expect(configStore.getState().daemonConfigStatus).toBe("ready");
+    });
+    const config = configStore.getState();
+    expect(config.daemonSetupTarget).toBe("unknown");
+    expect(daemonCommands({
+      status: config.daemonConfigStatus,
+      target: config.daemonSetupTarget,
+      serverUrl: config.daemonServerUrl,
+      appUrl: config.daemonAppUrl,
+    })).toEqual({ status: "unknown" });
+  });
+
+  it("honors an explicit Cloud target even when both URLs are present", async () => {
+    renderInitializer({ api: makeApiWithConfigResponse({
+      daemon_setup_target: "cloud",
+      daemon_server_url: "https://api.example.com",
+      daemon_app_url: "https://app.example.com",
+    }) });
+    await waitFor(() => {
+      expect(configStore.getState().daemonConfigStatus).toBe("ready");
+    });
+    expect(configStore.getState().daemonSetupTarget).toBe("cloud");
+  });
+
+  it("keeps setup unavailable until a delayed config response confirms the target", async () => {
+    let resolveConfig!: (config: Awaited<ReturnType<ApiClient["getConfig"]>>) => void;
+    const getConfig = vi.fn(() => new Promise<Awaited<ReturnType<ApiClient["getConfig"]>>>(
+      (resolve) => { resolveConfig = resolve; },
+    ));
+    renderInitializer({ api: makeApi({ getConfig }) });
+    expect(configStore.getState().daemonConfigStatus).toBe("loading");
+    expect(configStore.getState().daemonSetupTarget).toBe("unknown");
+    await act(async () => resolveConfig({
+      cdn_domain: "",
+      allow_signup: true,
+      daemon_setup_target: "self_host",
+      daemon_server_url: "https://api.example.com",
+      daemon_app_url: "https://app.example.com",
+    }));
+    expect(configStore.getState()).toMatchObject({
+      daemonConfigStatus: "ready",
+      daemonSetupTarget: "self_host",
+      daemonServerUrl: "https://api.example.com",
+      daemonAppUrl: "https://app.example.com",
+    });
+  });
+
+  it("exposes config failure and recovers the setup target on the existing retry", async () => {
+    vi.useFakeTimers();
+    const getConfig = vi.fn()
+      .mockRejectedValueOnce(new TypeError("network unavailable"))
+      .mockResolvedValue({ daemon_setup_target: "cloud" });
+    renderInitializer({ api: makeApi({ getConfig }) });
+    await act(async () => {
+      await Promise.resolve();
+    });
+    expect(configStore.getState().daemonConfigStatus).toBe("error");
+    expect(configStore.getState().daemonSetupTarget).toBe("unknown");
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(1_000);
+    });
+    expect(getConfig).toHaveBeenCalledTimes(2);
+    expect(configStore.getState()).toMatchObject({
+      daemonConfigStatus: "ready",
+      daemonSetupTarget: "cloud",
+    });
+  });
+
   it("publishes the API origin used by persisted attachment links", async () => {
     const api = makeApi({
       getConfig: vi.fn().mockResolvedValue({

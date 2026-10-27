@@ -449,10 +449,23 @@ var issueUsageCmd = &cobra.Command{
 }
 
 var issueRerunCmd = &cobra.Command{
-	Use:   "rerun <id>",
-	Short: "Re-enqueue an issue's current agent assignment as a fresh run",
-	Args:  exactArgs(1),
-	RunE:  runIssueRerun,
+	Use:        "rerun <id>",
+	Short:      "Re-enqueue an issue's current agent assignment as a fresh run",
+	Deprecated: "use `multica issue rerun-task <run-id>` instead; find run IDs with `multica issue runs <issue-id> --full-id`",
+	Hidden:     true,
+	Args:       exactArgs(1),
+	RunE:       runIssueRerun,
+}
+
+var issueRerunTaskCmd = &cobra.Command{
+	Use:   "rerun-task <run-id>",
+	Short: "Repeat a specific run using its original agent and trigger context",
+	Long: "Repeat a specific run, even if the issue has since been reassigned. " +
+		"Pass a full run UUID, or a short prefix with --issue <issue-id>. " +
+		"By default, reuse the source working directory and resume its session when safe. " +
+		"Use --fresh to start with a new session and working directory.",
+	Args: exactArgs(1),
+	RunE: runIssueRerunTask,
 }
 
 var issueCancelTaskCmd = &cobra.Command{
@@ -591,6 +604,7 @@ func init() {
 	issueCmd.AddCommand(issueRunMessagesCmd)
 	issueCmd.AddCommand(issueUsageCmd)
 	issueCmd.AddCommand(issueRerunCmd)
+	issueCmd.AddCommand(issueRerunTaskCmd)
 	issueCmd.AddCommand(issueCancelTaskCmd)
 	issueCmd.AddCommand(issueSearchCmd)
 
@@ -713,6 +727,10 @@ func init() {
 
 	// issue rerun
 	issueRerunCmd.Flags().String("output", "json", "Output format: table or json")
+	// issue rerun-task
+	issueRerunTaskCmd.Flags().String("output", "json", "Output format: table or json")
+	issueRerunTaskCmd.Flags().String("issue", "", "Issue ID/key to scope short run ID prefix resolution")
+	issueRerunTaskCmd.Flags().Bool("fresh", false, "Start with a new session and working directory")
 	// issue cancel-task
 	issueCancelTaskCmd.Flags().String("output", "json", "Output format: table or json")
 	issueCancelTaskCmd.Flags().String("issue", "", "Issue ID/key to scope short run ID prefix resolution")
@@ -2940,6 +2958,40 @@ func runIssueRunMessages(cmd *cobra.Command, args []string) error {
 }
 
 // Search command
+
+func runIssueRerunTask(cmd *cobra.Command, args []string) error {
+	client, err := newAPIClient(cmd)
+	if err != nil {
+		return err
+	}
+	ctx, cancel := cli.APIContext(context.Background())
+	defer cancel()
+
+	issueScope := ""
+	if issueInput, _ := cmd.Flags().GetString("issue"); issueInput != "" {
+		issueRef, err := resolveIssueRef(ctx, client, issueInput)
+		if err != nil {
+			return fmt.Errorf("resolve issue: %w", err)
+		}
+		issueScope = issueRef.ID
+	}
+	taskRef, err := resolveTaskRunID(ctx, client, issueScope, args[0])
+	if err != nil {
+		return fmt.Errorf("resolve run: %w", err)
+	}
+	fresh, _ := cmd.Flags().GetBool("fresh")
+	var task map[string]any
+	if err := client.PostJSON(ctx, "/api/tasks/"+url.PathEscape(taskRef.ID)+"/rerun", map[string]any{"fresh": fresh}, &task); err != nil {
+		return fmt.Errorf("rerun run: %w", err)
+	}
+	output, _ := cmd.Flags().GetString("output")
+	if output == "json" {
+		return cli.PrintJSON(os.Stdout, task)
+	}
+	agent := loadActorDisplayLookup(ctx, client).agent(strVal(task, "agent_id"))
+	fmt.Fprintf(os.Stdout, "Re-enqueued run %s on agent %s\n", strVal(task, "id"), agent)
+	return nil
+}
 
 func runIssueRerun(cmd *cobra.Command, args []string) error {
 	client, err := newAPIClient(cmd)

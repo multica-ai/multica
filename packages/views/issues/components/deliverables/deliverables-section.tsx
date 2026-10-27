@@ -1,8 +1,11 @@
 "use client";
 
+import { IssueSidebarSectionHeader } from "../issue-sidebar-section";
+
 import { useState } from "react";
-import { ChevronRight, LayoutGrid } from "lucide-react";
+import { LayoutGrid } from "lucide-react";
 import type { DeliverableFile } from "@multica/core/attachments/deliverables";
+import { IconButton } from "@multica/ui/components/common/icon-button";
 import { TooltipHint } from "@multica/ui/components/common/tooltip-hint";
 import { useT } from "../../../i18n";
 import { formatBytes } from "../../../common/format-bytes";
@@ -48,22 +51,13 @@ export function DeliverablesSection({
 
   return (
     <div>
-      <button
-        type="button"
-        className={`flex w-full items-center gap-1 rounded-md px-2 py-1 text-caption font-medium transition-colors mb-2 hover:bg-accent/70 ${open ? "" : "text-muted-foreground hover:text-foreground"}`}
-        onClick={() => setOpen(!open)}
-        aria-expanded={open}
-      >
-        {t(($) => $.deliverables.section_title)}{" "}
-        <span className="rounded-xs bg-muted px-1 text-micro font-medium tabular-nums text-muted-foreground">
-          {files.length}
-        </span>
-        <ChevronRight className={`!size-3 shrink-0 stroke-[2.5] text-muted-foreground transition-transform ${open ? "rotate-90" : ""}`} />
-      </button>
+      <IssueSidebarSectionHeader title={t(($) => $.deliverables.section_title)} open={open} onOpenChange={setOpen} count={files.length} actions={
+        <IconButton size="icon-xs" label={t(($) => $.deliverables.view_all, { count: files.length })} onClick={onOpenOverview}><LayoutGrid /></IconButton>
+      } />
       {open && (
-        <div className="pl-2">
+        <div className="px-2">
           {images.length > 0 && (
-            <div className="mb-1.5 grid grid-cols-3 gap-1.5">
+            <div className="mx-2 mb-1.5 grid grid-cols-3 gap-1.5">
               {images.map((file) => (
                 <TooltipHint key={file.key} label={file.latest.filename}>
                   <button
@@ -89,14 +83,7 @@ export function DeliverablesSection({
               onOpen={() => openAttachment(file.latest)}
             />
           ))}
-          <button
-            type="button"
-            className="mt-0.5 flex w-[calc(100%+1rem)] -mx-2 items-center gap-2 rounded-md px-2 py-1 text-left text-caption text-muted-foreground transition-colors hover:bg-accent/50 hover:text-foreground"
-            onClick={onOpenOverview}
-          >
-            <LayoutGrid className="size-3.5 shrink-0" />
-            {t(($) => $.deliverables.view_all, { count: files.length })}
-          </button>
+
         </div>
       )}
       {modal}
@@ -122,7 +109,7 @@ function FileRow({ file, onOpen }: { file: DeliverableFile; onOpen: () => void }
   return (
     <button
       type="button"
-      className="group flex w-[calc(100%+1rem)] -mx-2 items-center gap-2 rounded-md px-2 py-1 text-left text-caption transition-colors hover:bg-accent/50"
+      className="group flex w-full items-center gap-2 rounded-md px-2 py-2 text-left text-caption transition-colors hover:bg-accent/50"
       title={latest.filename}
       aria-label={versionedName(file, t)}
       onClick={onOpen}

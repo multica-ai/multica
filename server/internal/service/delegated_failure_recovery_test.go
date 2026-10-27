@@ -836,7 +836,7 @@ func TestManualRerunKeepsDelegatedFailureRecoveryReplayable(t *testing.T) {
 		util.MustParseUUID(f.issueID),
 		util.MustParseUUID(f.sourceTask),
 		pgtype.UUID{},
-		util.MustParseUUID(f.userID),
+		util.MustParseUUID(f.userID), false,
 		nil,
 	)
 	if err != nil {

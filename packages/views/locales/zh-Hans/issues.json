@@ -377,6 +377,15 @@
     "close": "关闭预览"
   },
   "detail": {
+    "metadata_close": "关闭元数据",
+    "metadata_copy": "复制元数据",
+    "metadata_view": "放大查看元数据",
+    "metadata_expand": "放大弹窗",
+    "metadata_restore": "恢复弹窗大小",
+    "metadata_copy_failed": "复制元数据失败",
+    "metadata_description": "智能体和集成记录的键值数据，用于衔接工作流程。",
+
+    "section_load_failed_retry": "加载失败，点击重试",
     "not_found": "这个任务不存在或已在该工作区被删除。",
     "breadcrumb_project_unknown": "未知项目",
     "back": "返回",
@@ -457,6 +466,9 @@
     "archive_tooltip": "归档",
     "pin_tooltip": "固定到侧边栏",
     "unpin_tooltip": "从侧边栏取消固定",
+    "quick_jump_label": "快捷跳转",
+    "description_nav_label": "任务描述",
+    "sub_issues_nav_progress": "已完成 {{done}}/{{total}}",
     "thread_nav_label": "快速跳转到讨论",
     "thread_nav_resolved_label": "{{title}}（已解决）",
     "thread_nav_reply_label": "{{author}}：{{title}}",
@@ -733,7 +745,7 @@
     "summary_runs_other": "{{count}} 次运行",
     "latest": "最近",
     "open_timeline": "打开时间线",
-    "more_runs_other": "还有 {{count}} 次",
+    "more_runs_other": "显示其余 {{count}} 次运行",
     "strip_aria": "每次运行的费用——打开运行时间线",
     "strip_no_usage": "没有用量记录",
     "sparkline_now": "现在"
@@ -1069,7 +1081,7 @@
     "wake_agent": "唤醒 {{agent}}",
     "needs_attention": "需要处理",
     "turn_off": "关闭",
-    "ended": "历史唤醒 {{count}}",
+    "ended": "历史唤醒 · {{count}}",
     "waiting_event": "等待触发",
     "triggered_by_wakeup": "由唤醒触发",
     "upcoming": "已开启 {{count}} 条唤醒规则",

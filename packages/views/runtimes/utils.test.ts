@@ -807,8 +807,7 @@ describe("estimateCost", () => {
   // header comment. Pinning them in tests is what catches a future edit
   // that copies a price from a near-named neighbour by accident — the
   // mistake the previous attempt (PR #3170, closed) made.
-  it("prices deepseek-v4-flash at the official $0.14/$0.28 with ~50× cache-hit discount", () => {
-    // 1M input × $0.14 + 1M output × $0.28 + 1M cache read × $0.0028 = $0.4228.
+  it("prices the retired deepseek-v4-flash alias at the current Flash peak rate", () => {
     const cost = estimateCost({
       ...zeroUsage,
       model: "deepseek-v4-flash",
@@ -816,12 +815,11 @@ describe("estimateCost", () => {
       output_tokens: 1_000_000,
       cache_read_tokens: 1_000_000,
     });
-    expect(cost).toBeCloseTo(0.14 + 0.28 + 0.0028, 5);
+    expect(cost).toBeCloseTo(0.30 + 1.20 + 0.006, 5);
   });
 
   it("prices the deepseek-chat / deepseek-reasoner aliases at the same rate as deepseek-v4-flash", () => {
-    // The DeepSeek docs explicitly route both legacy names to v4-flash —
-    // they must hit the same numbers, not the older $0.27/$1.10 tier.
+    // Preserve the existing Flash routing for these historical aliases.
     const flash = estimateCost({
       ...zeroUsage,
       model: "deepseek-v4-flash",
@@ -841,6 +839,106 @@ describe("estimateCost", () => {
         input_tokens: 1_000_000,
       }),
     ).toBeCloseTo(flash, 5);
+  });
+
+  it("prices documented Flash aliases and the 1017 snapshot at the official peak rate", () => {
+    const want = { input: 0.30, output: 1.20, cacheRead: 0.006, cacheWrite: 0.30 };
+    for (const model of [
+      "deepseek-flash",
+      "deepseek/deepseek-flash",
+      "custom:deepseek/deepseek-flash[1m]",
+      "deepseek-v4-flash",
+      "deepseek-v4-flash-vision-exp",
+      "deepseek/deepseek-v4-flash-vision-exp",
+      "deepseek-chat",
+      "deepseek-reasoner",
+      "deepseek-v4.1-flash",
+      "deepseek/deepseek-v4.1-flash",
+      "deepseek/deepseek-v4.1-flash-1017",
+      "deepseek-v4.1-flash-1017",
+    ]) {
+      const usage = {
+        ...zeroUsage,
+        model,
+        input_tokens: 1_000_000,
+        output_tokens: 1_000_000,
+        cache_read_tokens: 1_000_000,
+        cache_write_tokens: 1_000_000,
+      };
+      expect(estimateCostBreakdown(usage), model).toEqual(want);
+      expect(estimateCost(usage), model).toBeCloseTo(1.806, 5);
+      expect(collectUnmappedModels([usage]), model).toEqual([]);
+    }
+  });
+
+  it("leaves unknown Flash variants unpriced", () => {
+    for (const model of [
+      "deepseek-v4.1-pro", "deepseek-v4.1-flash-preview",
+      "deepseek-v4-1-flash", "deepseek-v4.1-flash-1020",
+      "deepseek-v4.1-flash-1017-preview", "deepseek-flash-preview",
+      "deepseek-v4-flash-preview", "deepseek-v4-flash-vision-exp-extra",
+    ]) {
+      expect(isModelPriced(model), model).toBe(false);
+      expect(estimateCost({ ...zeroUsage, model, input_tokens: 1_000_000 }), model).toBe(0);
+    }
+  });
+
+  it("prices Bedrock-served Anthropic ids like their bare catalog SKUs", () => {
+    // Bedrock reports `us.anthropic.<id>` (region family + vendor prefix) and
+    // appends the inference-profile version to snapshots. Before the prefix
+    // strip none of these matched a table key, so a Bedrock runtime showed
+    // $0.00 for every turn while the tokens were still counted.
+    const tokens = {
+      input_tokens: 1_000_000,
+      output_tokens: 1_000_000,
+      cache_read_tokens: 1_000_000,
+      cache_write_tokens: 1_000_000,
+    };
+    const bareSonnet5 = estimateCost({
+      ...zeroUsage,
+      model: "claude-sonnet-5",
+      ...tokens,
+    });
+    for (const model of [
+      "us.anthropic.claude-sonnet-5",
+      "eu.anthropic.claude-sonnet-5",
+      "global.anthropic.claude-sonnet-5",
+      "anthropic.claude-sonnet-5",
+      "custom:bedrock/us.anthropic.claude-sonnet-5-v1:0[1m]",
+    ]) {
+      expect(estimateCost({ ...zeroUsage, provider: "claude", model, ...tokens })).toBeCloseTo(
+        bareSonnet5,
+        5,
+      );
+    }
+    // Snapshot + profile version suffix resolves to the same family tier.
+    expect(
+      estimateCost({
+        ...zeroUsage,
+        provider: "claude",
+        model: "us.anthropic.claude-sonnet-4-5-20250929-v1:0",
+        input_tokens: 1_000_000,
+      }),
+    ).toBeCloseTo(3, 5);
+    // A non-Anthropic Bedrock model must stay unmapped instead of borrowing a
+    // Claude rate.
+    expect(isModelPriced("us.amazon.nova-pro-v1:0", "amazon")).toBe(false);
+  });
+
+  it("only strips Bedrock versions from recognized Anthropic model ids", () => {
+    for (const model of [
+      "us.anthropic.claude-sonnet-6",
+      "us.anthropic.claude-sonnet-5-preview",
+      "global.anthropic.claude-opus-5-mini",
+      "us.anthropic.claude-sonnet-5-preview-v1:0",
+      "us.anthropic.claude-sonnet-5-v1:0junk",
+      "us.anthropic.claude-sonnet-5-v1:0[1m][2m]",
+      "gpt-6.1-sol-v1:0",
+      "claude-sonnet-5-v1:0",
+      "us.anthropic.gpt-6.1-sol-v1:0",
+    ]) {
+      expect(isModelPriced(model), model).toBe(false);
+    }
   });
 
   it("prices kimi-k2.6 at the official $0.95 / $4.00 tier (not the K2 tier)", () => {
