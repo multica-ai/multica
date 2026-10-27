@@ -6168,6 +6168,80 @@ func (s *TaskService) FailStaleTasks(ctx context.Context, arg db.FailStaleTasksP
 	})
 }
 
+// FailHardTimedOutTasks fails running tasks that exceeded an absolute wall-clock
+// cap, regardless of runtime liveness. This is the server-side backstop for a
+// wedged agent loop whose daemon keeps heartbeating (FIN-611): the existing
+// FailStaleTasks running branch is AND-gated on daemon liveness, so such a task
+// is otherwise immortal.
+//
+// It is deliberately separate from FailStaleTasks so the liveness-aware path
+// keeps its semantics; this one is a blunt cap and should be configured well
+// above the expected duration of healthy work.
+func (s *TaskService) FailHardTimedOutTasks(ctx context.Context, timeoutSecs float64, limit int) ([]db.AgentTaskQueue, error) {
+	if s.TxStarter == nil {
+		return nil, nil
+	}
+	tx, err := s.TxStarter.Begin(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("begin tx: %w", err)
+	}
+	defer tx.Rollback(ctx)
+
+	rows, err := tx.Query(ctx, `
+SELECT id FROM agent_task_queue
+WHERE status = 'running'
+  AND started_at < now() - make_interval(secs => $1::double precision)
+ORDER BY started_at
+LIMIT $2
+FOR UPDATE SKIP LOCKED`, timeoutSecs, limit)
+	if err != nil {
+		return nil, fmt.Errorf("select hard timed-out tasks: %w", err)
+	}
+	var ids []pgtype.UUID
+	for rows.Next() {
+		var id pgtype.UUID
+		if err := rows.Scan(&id); err != nil {
+			rows.Close()
+			return nil, fmt.Errorf("scan hard timed-out task: %w", err)
+		}
+		ids = append(ids, id)
+	}
+	rows.Close()
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	if len(ids) == 0 {
+		return nil, nil
+	}
+	if _, err := tx.Exec(ctx, `
+UPDATE agent_task_queue
+SET status = 'failed',
+    completed_at = now(),
+    error = 'task exceeded hard run timeout',
+    failure_reason = 'timeout',
+    prepare_lease_expires_at = NULL
+WHERE id = ANY($1::uuid[])`, ids); err != nil {
+		return nil, fmt.Errorf("fail hard timed-out tasks: %w", err)
+	}
+
+	qtx := s.Queries.WithTx(tx)
+	failed := make([]db.AgentTaskQueue, 0, len(ids))
+	for _, id := range ids {
+		task, err := qtx.GetAgentTask(ctx, id)
+		if err != nil {
+			return nil, fmt.Errorf("reload hard timed-out task: %w", err)
+		}
+		failed = append(failed, task)
+	}
+	if err := SettleTerminalTaskState(ctx, qtx, failed...); err != nil {
+		return nil, err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return nil, fmt.Errorf("commit hard timed-out tasks: %w", err)
+	}
+	return failed, nil
+}
+
 // ExpireStaleQueuedTasks fails queued work whose runtime never came back.
 func (s *TaskService) ExpireStaleQueuedTasks(ctx context.Context, arg db.ExpireStaleQueuedTasksParams) ([]db.AgentTaskQueue, error) {
 	return s.terminateTasksInTx(ctx, func(qtx *db.Queries) ([]db.AgentTaskQueue, error) {
