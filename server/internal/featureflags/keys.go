@@ -30,6 +30,11 @@ const (
 	// either way. Turning it off stops new intake and triage runs but leaves
 	// existing Triage issues workable.
 	TriageV1 = "triage_v1"
+	// LocalSearchIndex gates the sync endpoints behind Web/Desktop local search
+	// (MUL-7754). On by default. Turning it off (FF_LOCAL_SEARCH_INDEX=off)
+	// makes those endpoints answer 404, so clients stop syncing and search
+	// through the server again without a client release.
+	LocalSearchIndex = "local_search_index"
 	// agentBuilderCompat is no longer a release flag. Keep publishing the key
 	// as enabled so installed desktop clients that still gate the AI creation
 	// entry on this config decision receive the permanently enabled behavior.
@@ -45,6 +50,9 @@ const (
 	// gate remained in every such client and fails closed (default false) if
 	// the key stops being published.
 	resourceLabelsCompat = "settings_resource_labels"
+	// projectWorkflowsCompat keeps workflow UI available in installed desktop
+	// clients that still gate it on this config decision and default to false.
+	projectWorkflowsCompat = "project_workflows_v1"
 )
 
 var frontendPublicFlags = []string{
@@ -69,13 +77,18 @@ func TriageV1Enabled(ctx context.Context, flags *featureflag.Service) bool {
 	return flags.IsEnabled(ctx, TriageV1, false)
 }
 
+func LocalSearchIndexEnabled(ctx context.Context, flags *featureflag.Service) bool {
+	return flags.IsEnabled(ctx, LocalSearchIndex, true)
+}
+
 func EvaluateFrontendPublicFlags(ctx context.Context, flags *featureflag.Service) map[string]bool {
-	out := make(map[string]bool, len(frontendPublicFlags)+3)
+	out := make(map[string]bool, len(frontendPublicFlags)+4)
 	for _, key := range frontendPublicFlags {
 		out[key] = flags.IsEnabled(ctx, key, false)
 	}
 	out[agentBuilderCompat] = true
 	out[agentSkillTogglesCompat] = true
 	out[resourceLabelsCompat] = true
+	out[projectWorkflowsCompat] = true
 	return out
 }

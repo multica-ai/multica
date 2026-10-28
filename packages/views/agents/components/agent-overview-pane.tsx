@@ -2,11 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import type {
-  Agent,
-  AgentRuntime,
-  MemberWithUser,
-} from "@multica/core/types";
+import type { Agent, AgentRuntime, MemberWithUser } from "@multica/core/types";
 import { providerSupportsMcpConfig } from "@multica/core/agents";
 import { useFeatureEnabled } from "@multica/core/config";
 import { COMPOSIO_MCP_APPS_FLAG } from "@multica/core/feature-flags";
@@ -36,6 +32,7 @@ import { CustomArgsTab } from "./tabs/custom-args-tab";
 import { McpConfigTab } from "./tabs/mcp-config-tab";
 import { AgentMcpTab } from "./tabs/agent-mcp-tab";
 import { IntegrationsTab } from "./tabs/integrations-tab";
+import { QoderAgentTab } from "./tabs/qoder-agent-tab";
 import { RuntimeConfigTab } from "./tabs/runtime-config-tab";
 import { AgentDetailInspector } from "./agent-detail-inspector";
 import { AgentAccessSettings } from "./agent-access-settings";
@@ -72,7 +69,8 @@ type SecondaryTab = {
     | "access"
     | "environment"
     | "custom_args"
-    | "runtime_config";
+    | "runtime_config"
+    | "qoder_agent";
 };
 
 const CAPABILITY_TABS: SecondaryTab[] = [
@@ -98,9 +96,7 @@ const TOP_TABS: { id: DetailSection; labelKey: DetailSection }[] = [
   { id: "settings", labelKey: "settings" },
 ];
 
-const CAPABILITY_IDS = new Set<DetailTab>(
-  CAPABILITY_TABS.map((tab) => tab.id),
-);
+const CAPABILITY_IDS = new Set<DetailTab>(CAPABILITY_TABS.map((tab) => tab.id));
 const SETTINGS_IDS = new Set<DetailTab>(SETTINGS_TABS.map((tab) => tab.id));
 const DETAIL_VIEWS = new Set<DetailTab>([
   "overview",
@@ -194,7 +190,15 @@ export function AgentOverviewPane({
     wecomListing?.configured === true ||
     telegramListing?.configured === true;
 
+  // The Qoder bridge fails every task carrying skills, MCP, connected apps,
+  // env, args or a model override, and runs issues only (no chat). Those
+  // editors are not offered; the agent in Qoder Cloud Agents owns that configuration.
+  const qoderRuntime = runtime?.provider === "qoder_cloud";
+
   const visibleCapabilityTabs = useMemo(() => {
+    if (qoderRuntime) {
+      return CAPABILITY_TABS.filter((tab) => tab.id === "instructions");
+    }
     const showMcp = runtime
       ? providerSupportsMcpConfig(runtime.provider)
       : true;
@@ -215,12 +219,14 @@ export function AgentOverviewPane({
     composioMCPAppsEnabled,
     currentUserId,
     integrationsConfigured,
+    qoderRuntime,
     runtime,
   ]);
 
   const visibleSettingsTabs = useMemo(
     () =>
       SETTINGS_TABS.filter((tab) => {
+        if (qoderRuntime) return tab.id !== "env" && tab.id !== "custom_args";
         // Env is the only settings tab backed by a secret-bearing endpoint.
         // GET/PUT /api/agents/{id}/env admits the agent owner or a workspace
         // owner/admin (MUL-5438) — the same rule `canEdit` encodes — so
@@ -229,8 +235,12 @@ export function AgentOverviewPane({
         if (tab.id === "env") return canEdit;
         if (tab.id === "runtime_config") return runtime?.provider === "openclaw";
         return true;
-      }),
-    [canEdit, runtime?.provider],
+      }).map((tab) =>
+        qoderRuntime && tab.id === "runtime_config"
+          ? { ...tab, labelKey: "qoder_agent" as const }
+          : tab,
+      ),
+    [canEdit, qoderRuntime, runtime?.provider],
   );
 
   const visibleViews = useMemo(
@@ -323,7 +333,8 @@ export function AgentOverviewPane({
   const activeSecondaryTab = secondaryTabs.find(
     (tab) => tab.id === effectiveView,
   );
-  const isSecondaryLayout = secondaryTabs.length > 0 && activeSecondaryTab != null;
+  const isSecondaryLayout =
+    secondaryTabs.length > 0 && activeSecondaryTab != null;
 
   return (
     <div className="flex min-h-0 flex-1 flex-col bg-background">
@@ -440,7 +451,14 @@ export function AgentOverviewPane({
             </aside>
 
             <section className="min-w-0 flex-1 md:overflow-y-auto">
-              <div className="w-full max-w-3xl p-4 sm:p-6 md:p-8">
+              {/* General is wider: its profile sits beside a preview of the
+                  new chat it produces. */}
+              <div
+                className={cn(
+                  "w-full p-4 sm:p-6 md:p-8",
+                  effectiveView === "general" ? "max-w-5xl" : "max-w-3xl",
+                )}
+              >
                 <header>
                   <h2 className="text-title-sm font-medium text-balance">
                     {t(($) => $.tabs[activeSecondaryTab.labelKey])}
@@ -510,13 +528,22 @@ export function AgentOverviewPane({
                       onDirtyChange={setActiveDirty}
                     />
                   )}
-                  {effectiveView === "runtime_config" && (
-                    <RuntimeConfigTab
-                      agent={agent}
-                      onSave={(updates) => onUpdate(agent.id, updates)}
-                      onDirtyChange={setActiveDirty}
-                    />
-                  )}
+                  {effectiveView === "runtime_config" &&
+                    (qoderRuntime ? (
+                      <QoderAgentTab
+                        canEdit={canEdit}
+                        key={agent.id}
+                        agent={agent}
+                        onSave={(updates) => onUpdate(agent.id, updates)}
+                        onDirtyChange={setActiveDirty}
+                      />
+                    ) : (
+                      <RuntimeConfigTab
+                        agent={agent}
+                        onSave={(updates) => onUpdate(agent.id, updates)}
+                        onDirtyChange={setActiveDirty}
+                      />
+                    ))}
                 </div>
               </div>
             </section>

@@ -35,15 +35,14 @@ const isEmptyItem = (el: HTMLButtonElement | undefined) =>
 export const PICKER_TRIGGER_CLASS =
   "flex items-center gap-1.5 cursor-pointer rounded-xs px-1 -mx-1 hover:bg-accent/30 transition-colors overflow-hidden";
 
-// ---------------------------------------------------------------------------
 // PropertyPicker — generic Popover shell with optional search
-// ---------------------------------------------------------------------------
 
 export function PropertyPicker({
   open,
   onOpenChange,
   trigger,
   triggerRender,
+  nativeButton = true,
   width = "w-48",
   align = "end",
   side = "bottom",
@@ -59,6 +58,8 @@ export function PropertyPicker({
   onOpenChange: (v: boolean) => void;
   trigger: React.ReactNode;
   triggerRender?: React.ReactElement;
+  /** False when a compound trigger renders a non-button element. */
+  nativeButton?: boolean;
   width?: string;
   align?: "start" | "center" | "end";
   side?: React.ComponentProps<typeof PopoverContent>["side"];
@@ -182,6 +183,7 @@ export function PropertyPicker({
 
   const popoverTrigger = (
     <PopoverTrigger
+      nativeButton={nativeButton}
       className={triggerRender ? undefined : PICKER_TRIGGER_CLASS}
       render={triggerRender}
     >
@@ -225,9 +227,7 @@ export function PropertyPicker({
   );
 }
 
-// ---------------------------------------------------------------------------
 // PickerItem — single selectable row
-// ---------------------------------------------------------------------------
 
 export function PickerItem({
   selected,
@@ -293,9 +293,7 @@ export function PickerItem({
   );
 }
 
-// ---------------------------------------------------------------------------
 // PickerSection — group header
-// ---------------------------------------------------------------------------
 
 export function PickerSection({
   label,
@@ -314,9 +312,7 @@ export function PickerSection({
   );
 }
 
-// ---------------------------------------------------------------------------
 // PickerEmpty — no results state
-// ---------------------------------------------------------------------------
 
 export function PickerEmpty() {
   const { t } = useT("issues");

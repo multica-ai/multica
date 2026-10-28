@@ -1,7 +1,6 @@
 {
   "page": {
     "title": "Skills",
-    "tagline": "Des instructions que n'importe quel agent de cet espace de travail peut utiliser.",
     "learn_more": "En savoir plus →",
     "new_skill": "Nouveau skill",
     "search_placeholder": "Rechercher des skills…",
@@ -120,7 +119,9 @@
     "sort_by": "Trier par",
     "direction_asc": "Croissant",
     "direction_desc": "Décroissant",
-    "section_columns": "Colonnes"
+    "section_columns": "Colonnes",
+    "manage_labels": "Gérer les étiquettes...",
+    "manage_labels_title": "Étiquettes des skills"
   },
   "detail": {
     "all_skills": "Tous les skills",

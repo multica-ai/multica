@@ -4,12 +4,18 @@ description: 安装并登录一款受支持的 AI 编程工具，让 Multica 在
 ---
 
 import { Callout } from "fumadocs-ui/components/callout";
+import { Step, Steps } from "fumadocs-ui/components/steps";
+import { Tab, Tabs } from "fumadocs-ui/components/tabs";
+import { Accordion, Accordions } from "fumadocs-ui/components/accordion";
 
-本地运行时由两部分组成：Multica 守护进程，以及它能够调用的一款 AI 编程工具。只需要安装你准备使用的工具，不必安装全部工具。
+本地运行时由两部分组成：Multica 守护进程，和它能调用的一款 AI 编程工具。只装你准备用的那一款就行，不必全部安装。
 
-## 1. 选择一款工具
+<Steps>
+<Step>
 
-已经安装并登录的工具不需要额外配置。工具之间的模型、MCP、会话恢复和 skill 支持有所不同，详细差异见 [AI 编程工具对照](/providers)。
+## 选择一款工具 [#1-选择一款工具]
+
+已经安装并登录的工具不需要额外配置。各工具在模型、MCP、会话恢复和 skill 支持上有差异，见 [AI 编程工具对照](/providers)。
 
 Multica 当前会检测以下命令：
 
@@ -29,6 +35,8 @@ Multica 当前会检测以下命令：
 | Kimi CLI | `kimi` | [Kimi CLI](https://github.com/MoonshotAI/kimi-cli) |
 | Kiro CLI | `kiro-cli` | [安装 Kiro CLI](https://kiro.dev/docs/cli/installation/) |
 | MiniMax Code | `mcode` | [安装 MiniMax Code CLI](https://www.npmjs.com/package/@minimax-ai/code) |
+| Muse Code | `muse` | [安装 Muse Code](https://dev.meta.ai/docs/muse-code) |
+| Devin CLI | `devin` | [安装 Devin CLI](https://docs.devin.ai/cli/quickstart)（3000.3.22+）；本机 ACP，先运行 `devin auth login` |
 | OpenClaw | `openclaw` | [安装 OpenClaw](https://docs.openclaw.ai/install) |
 | OpenCode | `opencode` | [OpenCode 快速开始](https://opencode.ai/en/docs) |
 | Pi coding agent | `pi` | [Pi coding agent](https://github.com/earendil-works/pi) |
@@ -40,30 +48,88 @@ Multica 当前会检测以下命令：
 | Reasonix | `reasonix` | [Reasonix](https://github.com/esengine/DeepSeek-Reasonix) |
 | TRAE CLI | `traecli` | [TRAE 官方站](https://www.trae.cn/) |
 | Dim | `dim` | [DimCode](https://dimagent.cn/docs/cli) |
+| ZeroClaw | `zeroclaw` | [ZeroClaw 快速开始](https://github.com/zeroclaw-labs/zeroclaw/blob/master/docs/book/src/getting-started/quickstart.md#install) |
 
 "受支持"表示 Multica 能够调用对应 CLI，不代表 Multica 会替你提供该工具的账号、订阅或模型额度。
 
-## 2. 在本机完成登录
+</Step>
+<Step>
 
-安装后，先在终端中单独启动一次工具，并按照它自己的流程登录或配置模型服务。工具在终端中无法完成请求时，守护进程调用它同样会失败。
+## 在本机完成登录 [#2-在本机完成登录]
 
-使用 CodeArts 时，请用 `codearts run --model provider/model "只回复 OK"` 验证非交互模式，而不只是验证 TUI。当前 CodeArts CLI 可能允许自定义 provider 在 TUI 中工作，但 `run`、`models` 和 `serve` 仍要求配置 [`CODEARTS_CLI_AK` / `CODEARTS_CLI_SK`](https://support.huaweicloud.com/usermanual-cli/codeartsagent_cli_0026.html)。Multica 可以从 `~/.codeartsdoer/codearts_cli.json` 或 `.jsonc` 发现自定义模型，但每次运行都会使用 `codearts run`，因此仍遵循该命令的授权要求。
-
-使用 Reasonix 时，请先运行 `reasonix setup`，配置默认的模型服务和模型，再启动守护进程。
-
-使用 QwenPaw 时，请在 QwenPaw 自身的配置里选择模型服务和模型。Multica 无法在执行时覆盖 QwenPaw 的模型。
-
-使用 MiniMax Code 时，请安装受支持的 Node.js 版本（`>=22.19 <23` 或 `>=24 <27`），并运行 `npm install --global @minimax-ai/code@latest`。全局 npm 安装会把 `mcode` 放入 npm 的全局可执行目录；如果 `command -v mcode` 或 `Get-Command mcode` 找不到它，请将该目录加入 `PATH`。然后运行 `mcode login`。模型由 MiniMax Code 管理，Multica 无法通过 ACP 覆盖它。
-
-使用 DeepSeek Harness 时，请先安装 Node.js 20+ 并运行 `npm install -g @deepseek-ai/dsh`，然后为它安装 Multica 运行时 profile —— 这个 bundle 实现了 Multica 驱动的 `--stdio` 协议，也是单独的 `dsh` 无法直接使用的原因。把 `MULTICA_DSH_PROFILE_BUNDLE` 设为要安装的 bundle，守护进程会替你安装；也可以自己执行 `dsh plugin --profile multica add <bundle>`。`<bundle>` 可以是 `dsh plugin` 接受的任意形式——npm 包名、目录，或打包好的 tarball——Multica 自己的桥接实现在 [multica-ai/dsh-multica-runtime](https://github.com/multica-ai/dsh-multica-runtime)。它目前还没有发布到公共 npm registry（[multica#6936](https://github.com/multica-ai/multica/issues/6936)），所以现阶段自托管团队的做法是：从该仓库自行构建，然后把变量指向构建产物目录；如果运行守护进程的机器和构建机器不是同一台，就指向 `npm pack` 产出的 tarball。等桥接发布之后，直接填包名是最省事的选择。无论选哪种，都优先用你们自己发布或构建的产物：这个值会在没有二次确认的情况下被装进每一台守护进程宿主的 DSH 家目录，填一个未经审查的第三方包是供应链决策，不是图方便。如果你装的是 DeepSeek Harness Desktop 而不是 npm 包，守护进程也会去找这个应用生成的 CLI shim，位置在它自己的用户级数据目录下：macOS 是 `~/Library/Application Support/DSH Desktop`，Windows 是 `%APPDATA%\DSH Desktop`。Windows 上这是漫游应用数据目录，不是安装目录：应用本身装在 Program Files 或 `%LOCALAPPDATA%\Programs`，但它驱动的 CLI 和其他用户级状态放在一起。这些路径里的版本层是生成出来的 id，所以守护进程会枚举并优先取最新的一份。不需要 PATH 上有别的东西——生成的 shim 会用绝对路径调用应用自带的运行时。如果 DSH Desktop 装在非默认位置，请用 `MULTICA_DSH_PATH` 指向那个 shim。守护进程只有在 `dsh --profile multica --probe` 成功后才注册 DeepSeek Harness；失败时会在 `/health` 报告缺少 profile。启动守护进程前请设置 `DEEPSEEK_API_KEY`（或在 dsh 自身设置中保存）。
+安装后，先在终端里单独启动一次工具，按它自己的流程登录或配置模型服务。工具在终端中完成不了请求，守护进程调用它也会失败。
 
 这些登录凭据由工具保存在本机。Multica 不会接收 Claude、Codex、Cursor 或其他 CLI 的登录 token。
 
-<Callout type="info">
-Antigravity 需要 1.1.10 或更高版本，Claude Code 需要 2.0.0 或更高版本，Codex 需要 0.100.0 或更高版本，Copilot 需要 1.0.0 或更高版本，Grok 需要 0.2.89 或更高版本，Qwen Code 需要 0.20.0 或更高版本，MiniMax Code 需要 0.1.2 或更高版本，OpenCode 需要 1.1.54 或更高版本。低于最低版本时，守护进程不会注册对应运行时。
+低于最低版本时，守护进程不会注册对应运行时：
+
+| 工具 | 最低版本 |
+| --- | --- |
+| Antigravity | 1.1.10 |
+| Claude Code | 2.0.0 |
+| Codex | 0.100.0 |
+| Copilot | 1.0.0 |
+| Grok | 0.2.89 |
+| Qwen Code | 0.20.0 |
+| MiniMax Code | 0.1.2 |
+| OpenCode | 1.1.54 |
+| Dim | 0.3.10 |
+| ZeroClaw | 0.8.0 |
+
+以下工具除了登录，还要额外配置：
+
+<Accordions type="multiple">
+<Accordion title="CodeArts" id="codearts">
+
+用 `codearts run --model provider/model "只回复 OK"` 验证非交互模式，只验证 TUI 不够。当前 CodeArts CLI 可能允许自定义 provider 在 TUI 中工作，但 `run`、`models` 和 `serve` 仍要求配置 [`CODEARTS_CLI_AK` / `CODEARTS_CLI_SK`](https://support.huaweicloud.com/usermanual-cli/codeartsagent_cli_0026.html)。Multica 可以从 `~/.codeartsdoer/codearts_cli.json` 或 `.jsonc` 发现自定义模型，但每次运行都使用 `codearts run`，因此仍遵循该命令的授权要求。
+
+</Accordion>
+<Accordion title="DeepSeek Harness" id="deepseek-harness">
+
+先安装 Node.js 20+ 并运行 `npm install -g @deepseek-ai/dsh`，再为它安装 Multica 运行时 profile。这个 bundle 实现了 Multica 驱动的 `--stdio` 协议，单独的 `dsh` 因此无法直接使用。启动守护进程前，设置 `DEEPSEEK_API_KEY`（或保存在 dsh 自身的设置中）。
+
+**安装 profile。** 把 `MULTICA_DSH_PROFILE_BUNDLE` 设为要安装的 bundle，守护进程会替你安装；也可以自己执行 `dsh plugin --profile multica add <bundle>`。`<bundle>` 可以是 `dsh plugin` 接受的任意形式：npm 包名、目录，或打包好的 tarball。Multica 自己的桥接实现在 [multica-ai/dsh-multica-runtime](https://github.com/multica-ai/dsh-multica-runtime)，目前还没有发布到公共 npm registry（[multica#6936](https://github.com/multica-ai/multica/issues/6936)）。现阶段自托管团队从该仓库自行构建，把变量指向构建产物目录；运行守护进程的机器和构建机器不是同一台时，指向 `npm pack` 产出的 tarball。桥接发布之后，直接填包名最省事。
+
+<Callout type="warning">
+优先使用你们自己发布或构建的产物。这个值会在没有二次确认的情况下装进每一台守护进程宿主的 DSH 家目录，填一个未经审查的第三方包，就是做了一次供应链决策。
 </Callout>
 
-## 3. 确认守护进程能够找到命令
+**DSH Desktop。** 装的是 DeepSeek Harness Desktop 而不是 npm 包时，守护进程也会去找这个应用生成的 CLI shim，位置在它自己的用户级数据目录下：macOS 是 `~/Library/Application Support/DSH Desktop`，Windows 是 `%APPDATA%\DSH Desktop`。Windows 上这是漫游应用数据目录，不是安装目录：应用本身装在 Program Files 或 `%LOCALAPPDATA%\Programs`，它驱动的 CLI 则和其他用户级状态放在一起。这些路径里的版本层是生成的 id，守护进程会逐个枚举，优先取最新的一份。PATH 上不需要别的东西，生成的 shim 会用绝对路径调用应用自带的运行时。DSH Desktop 装在非默认位置时，用 `MULTICA_DSH_PATH` 指向那个 shim。
+
+守护进程只有在 `dsh --profile multica --probe` 成功后才注册 DeepSeek Harness；失败时会在 `/health` 报告缺少 profile。
+
+</Accordion>
+<Accordion title="MiniMax Code" id="minimax-code">
+
+安装受支持的 Node.js 版本（`>=22.19 <23` 或 `>=24 <27`），并运行 `npm install --global @minimax-ai/code@latest`。全局 npm 安装会把 `mcode` 放进 npm 的全局可执行目录；`command -v mcode` 或 `Get-Command mcode` 找不到它时，把该目录加入 `PATH`。然后运行 `mcode login`。模型由 MiniMax Code 管理，Multica 无法通过 ACP 覆盖。
+
+</Accordion>
+<Accordion title="Muse Code" id="muse-code">
+
+Muse Code 需要 1.4.10 或更高版本。按[官方安装和登录指南](https://dev.meta.ai/docs/muse-code)操作，并确认 `muse` 已加入 `PATH`。Multica 通过 MSP 获取模型列表，支持继续已有会话。
+
+</Accordion>
+<Accordion title="QwenPaw" id="qwenpaw">
+
+在 QwenPaw 自身的配置里选择模型服务和模型。Multica 无法在执行时覆盖 QwenPaw 的模型。
+
+</Accordion>
+<Accordion title="Reasonix" id="reasonix">
+
+先运行 `reasonix setup`，配置默认的模型服务和模型，再启动守护进程。
+
+</Accordion>
+</Accordions>
+
+</Step>
+<Step>
+
+## 确认守护进程能够找到命令 [#3-确认守护进程能够找到命令]
+
+把 `<command>` 换成表格中的命令，例如 `claude`、`codex` 或 `cursor-agent`。第一条命令返回可执行文件路径。
+
+<Tabs groupId="os" persist items={["macOS / Linux", "Windows"]}>
+<Tab value="macOS / Linux">
 
 在 macOS、Linux 或 WSL 中运行：
 
@@ -72,6 +138,9 @@ command -v <command>
 <command> --version
 ```
 
+</Tab>
+<Tab value="Windows">
+
 在 Windows PowerShell 中运行：
 
 ```powershell
@@ -79,31 +148,47 @@ Get-Command <command>
 <command> --version
 ```
 
-把 `<command>` 换成表格中的命令，例如 `claude`、`codex` 或 `cursor-agent`。第一条命令返回可执行文件路径。
+</Tab>
+</Tabs>
 
-如果终端能够找到工具，但 Desktop 或后台守护进程找不到，通常是两者使用的 `PATH` 不同。可以重启应用，或通过对应的 `MULTICA_<PROVIDER>_PATH` 环境变量指定绝对路径；完整配置见[环境变量](/environment-variables#守护进程配置)。
+终端能找到工具，Desktop 或后台守护进程却找不到，通常是两者用的 `PATH` 不同。可以重启应用，或通过对应的 `MULTICA_<PROVIDER>_PATH` 环境变量指定绝对路径；完整配置见[环境变量](/environment-variables#守护进程配置)。
 
-## 4. 重新检测并确认上线
+</Step>
+<Step>
 
-使用 CLI 启动守护进程：
+## 重新检测并确认上线 [#4-重新检测并确认上线]
+
+<Tabs items={["CLI", "Desktop"]}>
+<Tab value="CLI">
+
+启动守护进程：
 
 ```bash
 multica daemon start
 ```
 
-如果守护进程已经运行，安装新工具后重新启动：
+守护进程已经在运行时，安装新工具后重新启动：
 
 ```bash
 multica daemon restart
 ```
 
-使用 Multica Desktop 时，退出并重新打开应用即可。
+</Tab>
+<Tab value="Desktop">
 
-然后打开 Multica 的**运行时**页面。目标电脑下面会出现对应工具，并显示为在线。现在可以在创建或编辑智能体时选择这条运行时。
+退出并重新打开 Multica Desktop。
+
+</Tab>
+</Tabs>
+
+然后打开 Multica 的**运行时**页面，目标电脑下面会出现对应工具，并显示为在线。之后创建或编辑智能体时，就可以选这条运行时。
 
 <Callout type="warning">
-守护进程启动时必须先检测到至少一款内置支持的 CLI。自定义运行时配置会在守护进程启动后同步，因此不能作为一台空白机器上的唯一启动条件。只有一个例外：当守护进程刚开始自行安装 DSH 运行时 profile（`MULTICA_DSH_PROFILE_BUNDLE`）时，它会在没有任何运行时的情况下启动，并在安装完成后注册 DeepSeek Harness。否则，一台只装了需要该 profile 的 DSH 的机器永远装不完——守护进程会在安装结束前退出，并把安装进程一起带走。
+守护进程启动时必须先检测到至少一款内置支持的 CLI。自定义运行时配置在守护进程启动后才同步，所以在一台空白机器上不能只靠它启动。只有一个例外：守护进程刚开始自行安装 DSH 运行时 profile（`MULTICA_DSH_PROFILE_BUNDLE`）时，会在没有任何运行时的情况下启动，安装完成后再注册 DeepSeek Harness。否则，一台只装了需要该 profile 的 DSH 的机器永远装不完：守护进程会在安装结束前退出，把安装进程一起带走。
 </Callout>
+
+</Step>
+</Steps>
 
 ## 未检测到工具
 
@@ -115,7 +200,7 @@ multica daemon restart
 4. 重启守护进程，让它重新读取当前环境。
 5. 回到**运行时**页面，确认电脑和工具都已上线。
 
-工具已经显示在线，但执行仍然失败时，打开任务的执行记录查看 CLI 返回的具体错误，或继续阅读[故障排查](/troubleshooting)。
+工具显示在线、执行却仍然失败时，打开任务的执行记录查看 CLI 返回的具体错误，或继续看[故障排查](/troubleshooting)。
 
 ## 接下来
 

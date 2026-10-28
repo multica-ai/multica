@@ -1,9 +1,10 @@
 import type { InfiniteData, QueryClient } from "@tanstack/react-query";
 import type { ArchivedInboxPage } from "../types/inbox";
-import { EMPTY_INBOX_FILTERS, type InboxFilters } from "./filter-store";
+import { EMPTY_INBOX_FILTERS, type ArchivedInboxFilters } from "./filter-store";
 import { infiniteQueryOptions, queryOptions, useQuery } from "@tanstack/react-query";
 import { api } from "../api";
 import type { InboxItem, InboxWorkspaceUnread } from "../types";
+import { focusManager } from "@tanstack/react-query";
 
 export const inboxKeys = {
   all: (wsId: string) => ["inbox", wsId] as const,
@@ -36,12 +37,14 @@ export function archivedInboxListOptions(wsId: string) {
   });
 }
 
-function normalizedInboxFilters(filters: InboxFilters): InboxFilters {
+// Lists the archived dimensions explicitly, so an `idleOnly` carried in from
+// the active inbox never changes the key or refetches the archive.
+function normalizedInboxFilters(filters: ArchivedInboxFilters): ArchivedInboxFilters {
   return { statuses: [...filters.statuses].sort(), priorities: [...filters.priorities].sort(),
     actors: [...filters.actors].sort(), unreadOnly: filters.unreadOnly };
 }
 
-export function archivedInboxPagesOptions(wsId: string, filters: InboxFilters) {
+export function archivedInboxPagesOptions(wsId: string, filters: ArchivedInboxFilters) {
   return infiniteQueryOptions({
     queryKey: [...inboxKeys.pages(wsId), normalizedInboxFilters(filters)],
     initialPageParam: null as string | null,
@@ -51,7 +54,7 @@ export function archivedInboxPagesOptions(wsId: string, filters: InboxFilters) {
   });
 }
 
-export function archivedInboxLookupOptions(wsId: string, groupId: string, filters: InboxFilters = EMPTY_INBOX_FILTERS) {
+export function archivedInboxLookupOptions(wsId: string, groupId: string, filters: ArchivedInboxFilters = EMPTY_INBOX_FILTERS) {
   return queryOptions({
     queryKey: [...inboxKeys.lookup(wsId), groupId, normalizedInboxFilters(filters)],
     queryFn: ({ signal }) => api.listArchivedInboxPage(filters, { groupId, signal }),
@@ -60,7 +63,7 @@ export function archivedInboxLookupOptions(wsId: string, groupId: string, filter
   });
 }
 
-export function archivedInboxFacetsOptions(wsId: string, filters: InboxFilters) {
+export function archivedInboxFacetsOptions(wsId: string, filters: ArchivedInboxFilters) {
   return queryOptions({
     queryKey: [...inboxKeys.facets(wsId), normalizedInboxFilters(filters)],
     queryFn: ({ signal }) => api.getArchivedInboxFacets(filters, signal),
@@ -88,12 +91,38 @@ export function patchArchivedInboxCaches(qc: QueryClient, wsId: string, patch: (
  * Cross-workspace unread inbox summary. One cache entry shared across all
  * workspaces — the data is account-level, so switching workspaces does not
  * refetch it; only the derived "is this for another workspace" view changes.
+ *
+ * Visibility gating is the default, including for direct observers such as
+ * the search palette. `refetchOnWindowFocus` re-reads an invalidated summary
+ * once when the page is shown again; with `staleTime: Infinity` a page that
+ * missed no event is not stale and makes no request. The dock badge overrides
+ * `enabled` through `inboxUnreadSummaryEnabled` to stay live while hidden.
  */
 export function inboxUnreadSummaryOptions() {
   return queryOptions({
     queryKey: inboxKeys.unreadSummary(),
     queryFn: () => api.getInboxUnreadSummary(),
+    enabled: () => focusManager.isFocused(),
+    refetchOnWindowFocus: true,
   });
+}
+
+/**
+ * `enabled` for an observer of the unread summary: fetch only while the page
+ * is on screen. Every open tab is its own client and receives every inbox
+ * event, so each event cost one summary request per open tab, and each request
+ * recomputes the newest item per issue over the user's whole active inbox. A
+ * hidden tab renders nothing that reads the summary, and with no enabled
+ * observer left an invalidation marks the query without refetching it.
+ *
+ * `whileHidden` is for a reader that stays on screen while the page is hidden:
+ * the desktop dock badge of a minimized window.
+ */
+export function inboxUnreadSummaryEnabled(
+  wsId: string | null | undefined,
+  { whileHidden = false }: { whileHidden?: boolean } = {},
+) {
+  return () => !!wsId && (whileHidden || focusManager.isFocused());
 }
 
 /**
@@ -147,10 +176,13 @@ export function unreadCountForWorkspace(
  * endpoint applies the same newest-per-issue rule `deduplicateInboxItems`
  * applies client-side, so this number matches the list the user sees.
  */
-export function useInboxUnreadCount(wsId: string | null | undefined): number {
+export function useInboxUnreadCount(
+  wsId: string | null | undefined,
+  options?: { whileHidden?: boolean },
+): number {
   const { data } = useQuery({
     ...inboxUnreadSummaryOptions(),
-    enabled: !!wsId,
+    enabled: inboxUnreadSummaryEnabled(wsId, options),
     select: (summary: InboxWorkspaceUnread[]) =>
       unreadCountForWorkspace(summary, wsId),
   });

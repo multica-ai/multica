@@ -9,6 +9,7 @@ import { api } from "@multica/core/api";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { workspaceKeys } from "@multica/core/workspace/queries";
 import { Button } from "@multica/ui/components/ui/button";
+import { TooltipHint } from "@multica/ui/components/common/tooltip-hint";
 import {
   UI_EASE_OUT,
   UI_MOTION_DURATION,
@@ -175,14 +176,16 @@ export function AgentBatchToolbar({
           <span className="text-body font-medium">
             {t(($) => $.actions.selected, { count: rows.length })}
           </span>
-          <button
-            type="button"
-            aria-label={t(($) => $.actions.clear_selection)}
-            onClick={onClear}
-            className="rounded-xs p-0.5 transition-colors hover:bg-accent"
-          >
-            <X className="size-3.5 text-muted-foreground" />
-          </button>
+          <TooltipHint label={t(($) => $.actions.clear_selection)}>
+            <button
+              type="button"
+              aria-label={t(($) => $.actions.clear_selection)}
+              onClick={onClear}
+              className="rounded-xs p-0.5 transition-colors hover:bg-accent"
+            >
+              <X className="size-3.5 text-muted-foreground" />
+            </button>
+          </TooltipHint>
         </div>
 
         {anyArchived && (
@@ -233,7 +236,7 @@ export function AgentBatchToolbar({
       {rows.length > 0 && <Dialog open={confirmArchive} onOpenChange={setConfirmArchive}>
         <DialogContent className="sm:max-w-md">
           <DialogHeader>
-            <DialogTitle>
+            <DialogTitle className="break-all">
               {t(($) => $.row_actions.archive_dialog_title, {
                 name:
                   rows.length === 1 && rows[0]

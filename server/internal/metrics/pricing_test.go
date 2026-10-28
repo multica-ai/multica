@@ -58,7 +58,7 @@ func TestPriceForModelAliasAnthropicCurrentGeneration(t *testing.T) {
 	}
 }
 
-func TestPriceForModelAliasCodexGPT56(t *testing.T) {
+func TestPriceForModelAliasCodexCurrentGeneration(t *testing.T) {
 	// Official rates from OpenAI's GPT-5.6 announcement: cache read = 0.1x
 	// input (90% cached-input discount), cache write = 1.25x input.
 	cases := []struct {
@@ -72,6 +72,22 @@ func TestPriceForModelAliasCodexGPT56(t *testing.T) {
 		{
 			model: "gpt-5.6-sol",
 			want:  ModelPrice{Provider: "openai", Model: "gpt-5.6-sol", InputPerM: 5, CacheReadPerM: 0.5, CacheWritePerM: 6.25, OutputPerM: 30},
+		},
+		{
+			model: "gpt-6.1-sol",
+			want:  ModelPrice{Provider: "openai", Model: "gpt-6.1-sol", InputPerM: 2, CacheReadPerM: 0.1, CacheWritePerM: 2.5, OutputPerM: 10},
+		},
+		{
+			model: "openai:gpt-6.1-sol[1m]",
+			want:  ModelPrice{Provider: "openai", Model: "gpt-6.1-sol", InputPerM: 2, CacheReadPerM: 0.1, CacheWritePerM: 2.5, OutputPerM: 10},
+		},
+		{
+			model: "openai:gpt-6-sol",
+			want:  ModelPrice{Provider: "openai", Model: "gpt-6-sol", InputPerM: 2, CacheReadPerM: 0.2, CacheWritePerM: 2.5, OutputPerM: 10},
+		},
+		{
+			model: "openai/gpt-6-luna",
+			want:  ModelPrice{Provider: "openai", Model: "gpt-6-luna", InputPerM: 0.1, CacheReadPerM: 0.01, CacheWritePerM: 0.125, OutputPerM: 0.5},
 		},
 		{
 			model: "openai:gpt-5.6-terra",
@@ -100,6 +116,10 @@ func TestPriceForModelAliasCodexGPT56(t *testing.T) {
 	// sides surface these as unmapped instead of silently pricing them.
 	for _, model := range []string{
 		"gpt-6-astra-pro",
+		"gpt-6.1-sol-pro",
+		"gpt-6-1-sol",
+		"gpt-6-sol-high",
+		"gpt-6-luna-pro",
 		"gpt-6-astra/unknown",
 		"gpt-6-astra-high",
 		"gpt-5.6-luna-pro",
@@ -497,6 +517,85 @@ func TestPriceForModelAliasAnthropicFable51(t *testing.T) {
 	}
 }
 
+func TestPriceForModelAliasAnthropicSonnetAndHaiku55(t *testing.T) {
+	cases := []struct {
+		aliases []string
+		want    ModelPrice
+	}{
+		{
+			aliases: []string{
+				"claude-sonnet-5",
+				"claude-5-sonnet",
+				"anthropic/claude-sonnet-5",
+				"claude-sonnet-5[1m]",
+				"claude-sonnet-5-20261001",
+				"claude-sonnet-5-latest",
+			},
+			want: ModelPrice{Provider: "anthropic", Model: "claude-sonnet-5", InputPerM: 2, CacheReadPerM: 0.2, CacheWritePerM: 2.5, OutputPerM: 10},
+		},
+		{
+			aliases: []string{
+				"claude-sonnet-5-5",
+				"claude-sonnet-5.5",
+				"anthropic/claude-sonnet-5-5",
+				"anthropic:claude-sonnet-5.5",
+				"claude-sonnet-5-5[1m]",
+				"claude-sonnet-5-5-20261001",
+				"claude-sonnet-5-5-2026-10-01[1m]",
+				"claude-sonnet-5-5-latest",
+			},
+			want: ModelPrice{Provider: "anthropic", Model: "claude-sonnet-5-5", InputPerM: 2, CacheReadPerM: 0.1, CacheWritePerM: 2.5, OutputPerM: 10},
+		},
+		{
+			aliases: []string{
+				"claude-haiku-5-5",
+				"claude-haiku-5.5",
+				"anthropic/claude-haiku-5-5",
+				"anthropic:claude-haiku-5.5",
+				"claude-haiku-5-5[1m]",
+				"claude-haiku-5-5-20261001",
+				"claude-haiku-5-5-2026-10-01[1m]",
+				"claude-haiku-5-5-latest",
+			},
+			want: ModelPrice{Provider: "anthropic", Model: "claude-haiku-5-5", InputPerM: 0.1, CacheReadPerM: 0.01, CacheWritePerM: 0.125, OutputPerM: 0.5},
+		},
+	}
+	for _, tc := range cases {
+		for _, model := range tc.aliases {
+			t.Run(model, func(t *testing.T) {
+				got, ok := PriceForModelAlias(model)
+				if !ok || got != tc.want {
+					t.Fatalf("PriceForModelAlias(%q) = %+v, %v; want %+v, true", model, got, ok, tc.want)
+				}
+			})
+		}
+	}
+}
+
+func TestPriceForModelAliasAnthropicSonnetAndHaikuUnknownVariants(t *testing.T) {
+	for _, model := range []string{
+		"claude-sonnet-5-6",
+		"claude-sonnet-5.6",
+		"claude-sonnet-5-55",
+		"claude-haiku-5-6",
+		"claude-haiku-5.6",
+		"claude-haiku-5-55",
+		"claude-5-sonnet-preview",
+	} {
+		if got, ok := PriceForModelAlias(model); ok {
+			t.Errorf("PriceForModelAlias(%q) resolved to %+v; want unmapped", model, got)
+		}
+	}
+	for _, base := range []string{"claude-sonnet-5", "claude-sonnet-5-5", "claude-haiku-5-5"} {
+		for _, suffix := range []string{"x", "-preview", "-latest-preview", "-20261001x", "[1m]junk", "[1m][2m]", "[]"} {
+			model := base + suffix
+			if got, ok := PriceForModelAlias(model); ok {
+				t.Errorf("PriceForModelAlias(%q) resolved to %+v; want unmapped", model, got)
+			}
+		}
+	}
+}
+
 func TestPriceForModelAliasAnthropicOpus55(t *testing.T) {
 	// Opus 5.5 is its own SKU at $4 / $20 with cache reads at 0.05x input
 	// ($0.20). An Opus 5 alias that did not stop at the version would swallow
@@ -551,6 +650,116 @@ func TestPriceForModelAliasAnthropicOpus55(t *testing.T) {
 	} {
 		if got, ok := PriceForModelAlias(model); ok {
 			t.Errorf("PriceForModelAlias(%q) resolved to %+v; want unmapped", model, got)
+		}
+	}
+}
+
+// TestPriceForModelAliasBedrockAnthropicIDs pins the Bedrock shapes. Bedrock
+// reports Anthropic ids with a region family and vendor prefix plus a version
+// suffix. Newer Claude rules reject that suffix until it is normalized.
+func TestPriceForModelAliasBedrockAnthropicIDs(t *testing.T) {
+	cases := []struct {
+		model string
+		want  ModelPrice
+	}{
+		{
+			model: "us.anthropic.claude-sonnet-5",
+			want:  ModelPrice{Provider: "anthropic", Model: "claude-sonnet-5", InputPerM: 2, CacheReadPerM: 0.2, CacheWritePerM: 2.5, OutputPerM: 10},
+		},
+		{
+			// Europe / APAC / global profiles are the same SKU at the same rate.
+			model: "eu.anthropic.claude-sonnet-5",
+			want:  ModelPrice{Provider: "anthropic", Model: "claude-sonnet-5", InputPerM: 2, CacheReadPerM: 0.2, CacheWritePerM: 2.5, OutputPerM: 10},
+		},
+		{
+			model: "global.anthropic.claude-opus-5",
+			want:  ModelPrice{Provider: "anthropic", Model: "claude-opus-5", InputPerM: 5, CacheReadPerM: 0.5, CacheWritePerM: 6.25, OutputPerM: 25},
+		},
+		{
+			// Vendor prefix without a region family.
+			model: "anthropic.claude-haiku-5-5",
+			want:  ModelPrice{Provider: "anthropic", Model: "claude-haiku-5-5", InputPerM: 0.1, CacheReadPerM: 0.01, CacheWritePerM: 0.125, OutputPerM: 0.5},
+		},
+		{
+			// Snapshot id with the inference-profile version suffix.
+			model: "us.anthropic.claude-sonnet-4-5-20250929-v1:0",
+			want:  ModelPrice{Provider: "anthropic", Model: "claude-sonnet-4.5", InputPerM: 3, CacheReadPerM: 0.3, CacheWritePerM: 3.75, OutputPerM: 15},
+		},
+		{
+			model: "custom:bedrock/us.anthropic.claude-sonnet-5-v1:0[1m]",
+			want:  ModelPrice{Provider: "anthropic", Model: "claude-sonnet-5", InputPerM: 2, CacheReadPerM: 0.2, CacheWritePerM: 2.5, OutputPerM: 10},
+		},
+	}
+
+	for _, tc := range cases {
+		got, ok := PriceForModelAlias(tc.model)
+		if !ok {
+			t.Fatalf("PriceForModelAlias(%q) did not resolve", tc.model)
+		}
+		if got != tc.want {
+			t.Fatalf("PriceForModelAlias(%q) = %+v, want %+v", tc.model, got, tc.want)
+		}
+	}
+
+	// Normalising the prefix must not invent a rate: a later SKU, a
+	// non-Anthropic Bedrock model, or a qualifier that is its own SKU all stay
+	// unmapped rather than borrowing the nearest Claude tier.
+	for _, model := range []string{
+		"us.anthropic.claude-sonnet-6",
+		"us.anthropic.claude-sonnet-5-preview",
+		"us.amazon.nova-pro-v1:0",
+		"global.anthropic.claude-opus-5-mini",
+		"us.anthropic.claude-sonnet-5-preview-v1:0",
+		"us.anthropic.claude-sonnet-5-v1:0junk",
+		"us.anthropic.claude-sonnet-5-v1:0[1m][2m]",
+		"gpt-6.1-sol-v1:0",
+		"claude-sonnet-5-v1:0",
+		"us.anthropic.gpt-6.1-sol-v1:0",
+	} {
+		if got, ok := PriceForModelAlias(model); ok {
+			t.Fatalf("PriceForModelAlias(%q) unexpectedly resolved to %+v; want unmapped", model, got)
+		}
+	}
+}
+
+// TestPriceForModelAliasDeepSeekV41Flash pins the V4.1 Flash row, including the
+// dated OpenRouter snapshot that DeepSeek documents as the served model for the
+// undated id (same SKU, same rate — one row, not two).
+func TestPriceForModelAliasDeepSeekV41Flash(t *testing.T) {
+	want := ModelPrice{Provider: "deepseek", Model: "v4.1-flash", InputPerM: 0.30, CacheReadPerM: 0.006, CacheWritePerM: 0.30, OutputPerM: 1.20}
+	for _, model := range []string{
+		"deepseek-flash",
+		"deepseek/deepseek-flash",
+		"custom:deepseek/deepseek-flash[1m]",
+		"deepseek-v4-flash",
+		"deepseek-v4-flash-vision-exp",
+		"deepseek/deepseek-v4-flash-vision-exp",
+		"deepseek-chat",
+		"deepseek-reasoner",
+		"deepseek-v4.1-flash",
+		"deepseek/deepseek-v4.1-flash",
+		"deepseek/deepseek-v4.1-flash-1017",
+		"deepseek-v4.1-flash-1017",
+	} {
+		got, ok := PriceForModelAlias(model)
+		if !ok {
+			t.Errorf("PriceForModelAlias(%q) did not resolve", model)
+			continue
+		}
+		if got != want {
+			t.Errorf("PriceForModelAlias(%q) = %+v, want %+v", model, got, want)
+		}
+	}
+
+	// Only documented Flash aliases and the known 1017 snapshot are priced.
+	for _, model := range []string{
+		"deepseek-v4.1-pro", "deepseek-v4.1-flash-preview",
+		"deepseek-v4-1-flash", "deepseek-v4.1-flash-1020",
+		"deepseek-v4.1-flash-1017-preview", "deepseek-flash-preview",
+		"deepseek-v4-flash-preview", "deepseek-v4-flash-vision-exp-extra",
+	} {
+		if got, ok := PriceForModelAlias(model); ok {
+			t.Errorf("PriceForModelAlias(%q) unexpectedly resolved to %+v; want unmapped", model, got)
 		}
 	}
 }

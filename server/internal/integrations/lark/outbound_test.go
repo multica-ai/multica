@@ -40,6 +40,27 @@ type fakePatcherQueries struct {
 	deliveriesByTask map[string]db.ChannelTaskDelivery
 	// tasksByID overrides `task` per task_id; empty falls back to `task`.
 	tasksByID map[string]db.AgentTaskQueue
+	// attachments is what the assistant message's files resolve to, and
+	// attachmentsErr forces the lookup to fail. attachmentLookups records
+	// every lookup so a test can assert what the delivery path asked for
+	// (and that it did not ask at all when it had nothing to do).
+	attachments       []db.Attachment
+	attachmentsErr    error
+	attachmentLookups []db.ListAttachmentsByChatMessageParams
+	mediaLedger       map[string]db.ChannelReplyDelivery
+	mediaLedgerErr    error
+	mediaSession      *db.ChatSession
+}
+
+// ListAttachmentsByChatMessage reads the fake's seeded rows. Unlike the
+// generated query it ignores the workspace scoping — tests seed rows and
+// ids together, so a workspace mismatch is not a shape any test needs to
+// express.
+func (f *fakePatcherQueries) ListAttachmentsByChatMessage(_ context.Context, arg db.ListAttachmentsByChatMessageParams) ([]db.Attachment, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.attachmentLookups = append(f.attachmentLookups, arg)
+	return f.attachments, f.attachmentsErr
 }
 
 func (f *fakePatcherQueries) GetAgentTask(ctx context.Context, id pgtype.UUID) (db.AgentTaskQueue, error) {
@@ -71,7 +92,10 @@ func (f *fakePatcherQueries) GetChannelTaskDelivery(_ context.Context, taskID pg
 	return f.delivery, f.deliveryErr
 }
 func (f *fakePatcherQueries) GetChatSession(ctx context.Context, id pgtype.UUID) (db.ChatSession, error) {
-	return db.ChatSession{}, nil
+	if f.mediaSession != nil {
+		return *f.mediaSession, nil
+	}
+	return db.ChatSession{ID: id, Status: "active", WorkspaceID: f.installation.WorkspaceID}, nil
 }
 func (f *fakePatcherQueries) GetAgent(ctx context.Context, id pgtype.UUID) (db.Agent, error) {
 	return f.agent, f.agentErr
@@ -866,7 +890,7 @@ func TestPatcherClearsTypingOnTaskCancelled(t *testing.T) {
 	bus := events.New()
 	p.Register(bus)
 
-	typing.Add(context.Background(), q.installation, q.binding.ChatSessionID, "om_trigger", "")
+	typing.Add(context.Background(), q.installation, q.binding.ChatSessionID, "om_trigger", "", q.binding.ChatSessionID)
 	if len(typingAPI.addCalled) != 1 {
 		t.Fatalf("setup: expected the Typing reaction to be added, got %d", len(typingAPI.addCalled))
 	}
@@ -928,7 +952,7 @@ func TestPatcherClearsTypingAfterSessionDeleteRemovedTheBinding(t *testing.T) {
 	p.Register(bus)
 
 	sessionID := q.binding.ChatSessionID
-	typing.Add(context.Background(), q.installation, sessionID, "om_trigger", "")
+	typing.Add(context.Background(), q.installation, sessionID, "om_trigger", "", sessionID)
 	if len(typingAPI.addCalled) != 1 {
 		t.Fatalf("setup: expected the Typing reaction to be added, got %d", len(typingAPI.addCalled))
 	}
@@ -964,6 +988,137 @@ func TestPatcherClearsTypingAfterSessionDeleteRemovedTheBinding(t *testing.T) {
 	defer api.mu.Unlock()
 	if len(api.sent) != 0 || len(api.textSent) != 0 || len(api.patched) != 0 {
 		t.Errorf("a cancelled run must post nothing; sent=%d textSent=%d patched=%d",
+			len(api.sent), len(api.textSent), len(api.patched))
+	}
+}
+
+// ---- the stateless sweep: restart- and replica-proof clearing ----
+
+// The in-memory state lives and dies with the process that ran Add. A restart
+// between the question and the answer — or a second replica handling the
+// completion event — empties the map while the badge is still on screen, and
+// the reply that follows clears nothing. The sweep closes that hole: it finds
+// the Typing reaction through Lark alone, on the trigger message the delivery
+// row froze, so the reply landing is enough to take the badge off.
+func TestPatcherSweepsTypingOnChatDoneAfterRestartEmptiedTheState(t *testing.T) {
+	p, q, api := newTestPatcher(t)
+	q.binding.LastMessageID = pgtype.Text{String: "om_trigger", Valid: true}
+	taskID := uuidFromString(t, "ee777777-ee77-ee77-ee77-eeeeeeeeeeee")
+	q.task = db.AgentTaskQueue{ChatInputTaskID: taskID}
+	q.taskChannelIngested = true
+
+	// A fresh manager: no Add ever ran in this process, the map is empty.
+	typingAPI := &fakeTypingAPIClient{
+		listReturn: []MessageReaction{
+			{ReactionID: "r-stale", OperatorType: "app", OperatorID: "cli_test_app", EmojiType: typingEmoji},
+		},
+	}
+	typing := NewTypingIndicatorManager(typingAPI, fakeTypingCreds{secret: "shh"},
+		&fakeTypingQueries{binding: q.binding, installation: q.installation}, newDiscardLogger())
+	p.SetTypingIndicatorManager(typing)
+
+	p.handleEvent(events.Event{
+		Type:          protocol.EventChatDone,
+		TaskID:        uuidString(taskID),
+		ChatSessionID: uuidString(q.binding.ChatSessionID),
+		Payload:       protocol.ChatDonePayload{Content: "the reply arrived"},
+	})
+
+	api.mu.Lock()
+	defer api.mu.Unlock()
+	if len(api.textSent) != 1 {
+		t.Fatalf("the reply itself must still go out; textSent=%d", len(api.textSent))
+	}
+	if len(typingAPI.listCalled) != 1 || typingAPI.listCalled[0] != "om_trigger" {
+		t.Fatalf("the trigger message's reactions were not listed; lists=%v", typingAPI.listCalled)
+	}
+	if len(typingAPI.deleteCalled) != 1 ||
+		typingAPI.deleteCalled[0].messageID != "om_trigger" ||
+		typingAPI.deleteCalled[0].reactionID != "r-stale" {
+		t.Fatalf("the reply arrived but the Typing badge is still on om_trigger — "+
+			"the user sees a processing spinner under an answered question "+
+			"(deletes=%+v)", typingAPI.deleteCalled)
+	}
+}
+
+// The same hole on the cancellation path: a user pressing cancel on another
+// replica (or after a restart) must still take the badge off, through the
+// delivery row's frozen trigger message.
+func TestPatcherSweepsTypingOnTaskCancelledThroughTheDeliveryRow(t *testing.T) {
+	p, q, api := newTestPatcher(t)
+	q.binding.LastMessageID = pgtype.Text{String: "om_trigger", Valid: true}
+	taskID := uuidFromString(t, "ee666666-ee66-ee66-ee66-eeeeeeeeeeee")
+	q.task = db.AgentTaskQueue{ChatInputTaskID: taskID}
+	q.taskChannelIngested = false
+
+	typingAPI := &fakeTypingAPIClient{
+		listReturn: []MessageReaction{
+			{ReactionID: "r-stale", OperatorType: "app", OperatorID: "cli_test_app", EmojiType: typingEmoji},
+		},
+	}
+	typing := NewTypingIndicatorManager(typingAPI, fakeTypingCreds{secret: "shh"},
+		&fakeTypingQueries{binding: q.binding, installation: q.installation}, newDiscardLogger())
+	p.SetTypingIndicatorManager(typing)
+
+	p.handleEvent(events.Event{
+		Type:          protocol.EventTaskCancelled,
+		TaskID:        uuidString(taskID),
+		ChatSessionID: uuidString(q.binding.ChatSessionID),
+		Payload: map[string]any{
+			"task_id":         uuidString(taskID),
+			"chat_session_id": uuidString(q.binding.ChatSessionID),
+			"status":          "cancelled",
+		},
+	})
+
+	if len(typingAPI.deleteCalled) != 1 || typingAPI.deleteCalled[0].reactionID != "r-stale" {
+		t.Fatalf("the run was cancelled with no state on file and the badge stayed on "+
+			"om_trigger; deletes=%+v", typingAPI.deleteCalled)
+	}
+	api.mu.Lock()
+	defer api.mu.Unlock()
+	if len(api.sent) != 0 || len(api.textSent) != 0 || len(api.patched) != 0 {
+		t.Errorf("a cancelled run must post nothing; sent=%d textSent=%d patched=%d",
+			len(api.sent), len(api.textSent), len(api.patched))
+	}
+}
+
+// A web-UI turn shares the session with Lark turns but delivers nothing to
+// Lark, so its early return sits before the send path. The in-memory clear
+// must run on the way out anyway: it is the only thing that can take a badge
+// off in this process, and skipping it lets a stranded badge ride until some
+// later Lark turn.
+func TestPatcherClearsTypingStateWhenTaskIsNotChannelIngested(t *testing.T) {
+	p, q, api := newTestPatcher(t)
+	taskID := uuidFromString(t, "ee555555-ee55-ee55-ee55-eeeeeeeeeeee")
+	q.task = db.AgentTaskQueue{ChatInputTaskID: taskID}
+	q.taskChannelIngested = false
+
+	typingAPI := &fakeTypingAPIClient{addReturn: "reaction-web-turn"}
+	typing := NewTypingIndicatorManager(typingAPI, fakeTypingCreds{secret: "shh"},
+		&fakeTypingQueries{binding: q.binding, installation: q.installation}, newDiscardLogger())
+	p.SetTypingIndicatorManager(typing)
+
+	typing.Add(context.Background(), q.installation, q.binding.ChatSessionID, "om_earlier_turn", "", q.binding.ChatSessionID)
+	if len(typingAPI.addCalled) != 1 {
+		t.Fatalf("setup: expected the Typing reaction to be added, got %d", len(typingAPI.addCalled))
+	}
+
+	p.handleEvent(events.Event{
+		Type:          protocol.EventChatDone,
+		TaskID:        uuidString(taskID),
+		ChatSessionID: uuidString(q.binding.ChatSessionID),
+		Payload:       protocol.ChatDonePayload{Content: "answered in Multica only"},
+	})
+
+	if len(typingAPI.deleteCalled) != 1 || typingAPI.deleteCalled[0].reactionID != "reaction-web-turn" {
+		t.Fatalf("a web-UI turn on a Lark-bound session skipped the clear; deletes=%+v",
+			typingAPI.deleteCalled)
+	}
+	api.mu.Lock()
+	defer api.mu.Unlock()
+	if len(api.sent) != 0 || len(api.textSent) != 0 || len(api.patched) != 0 {
+		t.Errorf("a non-channel-ingested turn must not deliver to Lark; sent=%d textSent=%d patched=%d",
 			len(api.sent), len(api.textSent), len(api.patched))
 	}
 }

@@ -17,13 +17,14 @@ import {
 } from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
 import { Button } from "@multica/ui/components/ui/button";
+import { TooltipHint } from "@multica/ui/components/common/tooltip-hint";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { memberListOptions, agentListOptions, squadListOptions } from "@multica/core/workspace/queries";
 import { projectListOptions } from "@multica/core/projects/queries";
 import { PROJECT_STATUS_CONFIG } from "@multica/core/projects/config";
 import { labelListOptions } from "@multica/core/labels/queries";
 import { propertyListOptions } from "@multica/core/properties";
-import { isActorPropertyType, isScalarPropertyType, parseActorRef, propertyFilterValueKey, PROPERTY_FILTER_OP_SYMBOLS, type PropertyFilterValue } from "@multica/core/types";
+import { isActorPropertyType, isListPropertyType, isScalarPropertyType, parseActorRef, propertyFilterValueKey, PROPERTY_FILTER_OP_SYMBOLS, type PropertyFilterValue } from "@multica/core/types";
 import {
   type ActorFilterValue,
   type FilterDimension,
@@ -531,8 +532,9 @@ function useFilterChips(
           ? t(($) => $.pickers.custom_property.true_label)
           : t(($) => $.pickers.custom_property.false_label);
       }
-      // Scalar properties have no option list — the filter value IS the label.
-      if (isScalarPropertyType(definition.type)) {
+      // Scalar and list properties have no option list — the filter value IS
+      // the label (for lists it is one matched element).
+      if (isScalarPropertyType(definition.type) || isListPropertyType(definition.type)) {
         return member;
       }
       return definition.config.options?.find((o) => o.id === member)?.name;
@@ -593,6 +595,7 @@ function useFilterChips(
 
 function ChipSpan({ chip }: { chip: FilterChip }) {
   const { t } = useT("issues");
+  const removeLabel = t(($) => $.filters.chip_remove, { name: chip.label });
   return (
     // Keyed per dimension: the chip animates in once when its dimension
     // first gains a value; value changes inside it re-render without
@@ -607,14 +610,16 @@ function ChipSpan({ chip }: { chip: FilterChip }) {
         {chip.valueIcons}
         <span className="truncate font-medium">{chip.value}</span>
       </span>
-      <button
-        type="button"
-        aria-label={t(($) => $.filters.chip_remove, { name: chip.label })}
-        onClick={chip.onRemove}
-        className="flex size-4 shrink-0 items-center justify-center rounded-sm text-muted-foreground hover:bg-accent hover:text-foreground"
-      >
-        <X className="size-3" />
-      </button>
+      <TooltipHint label={removeLabel}>
+        <button
+          type="button"
+          aria-label={removeLabel}
+          onClick={chip.onRemove}
+          className="flex size-4 shrink-0 items-center justify-center rounded-sm text-muted-foreground hover:bg-accent hover:text-foreground"
+        >
+          <X className="size-3" />
+        </button>
+      </TooltipHint>
     </span>
   );
 }

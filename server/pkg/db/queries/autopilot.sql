@@ -426,6 +426,15 @@ SET status = 'issue_created', issue_id = $2
 WHERE id = $1
 RETURNING *;
 
+-- name: SetAutopilotRunDispatchTask :execrows
+-- Records the agent task a create_issue run actually enqueued, so lifecycle
+-- sync can tell the run's own dispatch apart from mention/comment tasks on
+-- the same issue. Status stays issue_created; only an unlinked active run is
+-- written. (MUL-8200)
+UPDATE autopilot_run
+SET task_id = $2
+WHERE id = $1 AND status = 'issue_created' AND task_id IS NULL;
+
 -- name: UpdateAutopilotRunRunning :one
 UPDATE autopilot_run
 SET status = 'running', task_id = $2
@@ -622,6 +631,15 @@ LIMIT 1;
 -- name: GetAutopilotRunByIssue :one
 SELECT * FROM autopilot_run
 WHERE issue_id = $1 AND status IN ('issue_created', 'running')
+LIMIT 1;
+
+-- name: GetLatestAutopilotRunForIssueAttribution :one
+-- Attribution survives run completion; lifecycle callers still use the active-run lookup.
+SELECT r.* FROM autopilot_run r
+JOIN autopilot a ON a.id = r.autopilot_id
+WHERE r.issue_id = sqlc.arg(issue_id) AND r.autopilot_id = sqlc.arg(autopilot_id)
+  AND a.workspace_id = sqlc.arg(workspace_id)
+ORDER BY r.created_at DESC, r.id DESC
 LIMIT 1;
 
 -- name: FailAutopilotRunsByIssue :many

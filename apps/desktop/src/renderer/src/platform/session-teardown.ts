@@ -25,8 +25,6 @@ export interface SessionTeardown {
   resetTabs: () => void;
   /** Any pre-workspace overlay left open (invite, onboarding, …). */
   closeOverlay: () => void;
-  /** The one-shot post-onboarding welcome signal. */
-  resetWelcome: () => void;
   /** Credential the local daemon authenticates with. */
   clearDaemonToken: () => Promise<unknown>;
   /** The local daemon process itself. Resolves to an IPC result we ignore —
@@ -47,7 +45,6 @@ export async function tearDownOnLogout(t: SessionTeardown): Promise<void> {
   t.reportAuthSession(null);
   t.resetTabs();
   t.closeOverlay();
-  t.resetWelcome();
   try {
     await t.clearDaemonToken();
   } catch {
@@ -75,5 +72,4 @@ export function tearDownOnSessionExpiry(t: SessionTeardown): void {
   t.reportAuthSession(null);
   t.resetTabs();
   t.closeOverlay();
-  t.resetWelcome();
 }

@@ -330,88 +330,18 @@ var (
 	commentThreadMaxDepth      = 64
 )
 
-// ListComments returns comments for an issue. The default path returns the
-// newest commentHardCap comments in chronological order. If that defensive cap
-// fires, completeCommentThreads restores each affected thread within a bounded
-// context budget (or drops that thread as a unit), and the response sets
-// HeaderCommentsTruncated. Optional query params give agent-style readers
-// bounded views that scale to long issues without dragging every prior reply
-// into context:
+// ListComments returns chronological comments with bounded thread-aware reads.
+// The default newest-comment cap restores complete threads within a context budget
+// or drops each incomplete thread as a unit and sets HeaderCommentsTruncated.
 //
-//   - roots_only=true — return only top-level comments (parent_id IS NULL),
-//     each annotated with reply_count + last_activity_at so the caller can
-//     triage which thread to drill into. May combine with since for incremental
-//     polling of newly created roots, but is exclusive with thread/recent/tail/
-//     cursor modes because those have their own grouping or pagination semantics.
+// roots_only provides activity metadata; summary clips bodies. thread accepts a
+// root or descendant anchor; tail limits replies while retaining the root. recent
+// limits whole active threads, not individual comments. Resolved-thread folding
+// requires complete threads and cannot combine with partial-thread projections.
 //
-//   - summary=true — orthogonal content projection. Clips each returned
-//     comment's content to a fixed budget and sets content_truncated, so an
-//     agent can scan a list cheaply before pulling a full body. Composes with
-//     every mode (default, since, thread, recent, roots_only).
-//
-//   - fold=true — resolve-aware thread projection. Collapses each resolved
-//     thread to root + conclusion (reply-resolved) or root only (root-resolved),
-//     reusing the human timeline fold so an agent does not pay tokens for
-//     settled discussion. The resolved thread's root carries thread_resolved +
-//     folded_count; `--full` (no fold param) brings the dropped comments back.
-//     Needs whole threads to compute a resolution, so it is rejected with since,
-//     tail, and roots_only (partial-thread / reply-less reads) and composes with
-//     the default list, recent, untailed thread, and summary.
-//
-//   - thread=<comment-uuid> — return the root of the thread containing this
-//     comment plus every descendant. The anchor may be a root or any reply;
-//     the server walks up to the root via a recursive CTE, so callers do not
-//     need to know whether the id they have is a root.
-//
-//   - tail=<N> — only valid with thread. Cap the reply count at the N most
-//     recent replies (per (created_at, id)). The thread root is always
-//     returned, even when N=0, so the reader keeps the "what is this thread
-//     about" context. Without tail, thread returns the entire thread (the
-//     pre-MUL-2421 behavior).
-//
-//   - recent=<N> — return the N most recently active threads (root + every
-//     descendant per thread). A thread's recency is MAX(created_at) across
-//     the whole subtree, so a stale-but-recently-replied thread ranks ahead
-//     of an active-but-quiet one. Row-based "newest N comments" is
-//     deliberately NOT exposed — it surfaces unrelated thread tails and
-//     hides relevant history (#2340).
-//
-//   - before=<RFC3339> + before-id=<uuid> — cursor. The pair's meaning is
-//     context-dependent so the flag surface stays small:
-//
-//   - with recent: a *thread* cursor — (last_activity_at, root_id) — and
-//     the next page returns threads strictly less recent.
-//
-//   - with thread + tail: a *reply* cursor — (created_at, id) — and the
-//     next page returns replies in the same thread strictly older than
-//     that reply.
-//
-// Both values must be set together so the cursor can tie-break entries
-// landing in the same microsecond. The cursor for the next page is
-// emitted via the X-Multica-Next-Before / X-Multica-Next-Before-Id
-// response headers.
-//
-// Combination rules (kept narrow on purpose — Elon flagged the matrix risk):
-//
-//   - roots_only is exclusive with thread, recent, tail, and before/before-id.
-//     It may combine with since. This keeps "list issue roots" separate from
-//     "read a specific thread" and "read recently active threads".
-//   - thread is exclusive with recent. Asking for "the most recent N within
-//     thread X" mixes two different navigation models and is rejected.
-//   - thread + before/before-id requires tail. Without tail, thread returns
-//     the entire thread and a cursor would be ignored — reject loudly so
-//     the documented "cursor scrolls within a tailed window" rule holds.
-//   - tail requires thread (it is a thread-scoped limit; outside of thread
-//     it has no defined behavior).
-//   - thread may combine with since (incremental polling of one thread),
-//     and the since filter is applied after the tail/cursor cut so the
-//     thread root is still emitted but stale rows drop out.
-//   - recent may combine with before/before-id (scroll older threads) and
-//     with since (recent activity in a window).
-//
-// The response body is always chronological (oldest → newest); under recent
-// that means threads are listed oldest-active first and the freshest thread
-// sits at the tail, closest to "now" in an agent prompt.
+// Cursors pair a timestamp with an ID for tie-breaking: recent pages by thread
+// activity, while thread+tail pages by reply creation. Since filtering follows
+// the thread window. The validation below enforces supported combinations.
 func (h *Handler) ListComments(w http.ResponseWriter, r *http.Request) {
 	issueID := chi.URLParam(r, "id")
 	issue, ok := h.loadIssueForUser(w, r, issueID)
@@ -1922,7 +1852,7 @@ func (h *Handler) CreateComment(w http.ResponseWriter, r *http.Request) {
 		tx, beginErr := h.beginWakeupWrite(r.Context())
 		if beginErr != nil {
 			slog.Warn("create comment failed", append(logger.RequestAttrs(r), "error", beginErr, "issue_id", issueID)...)
-			writeError(w, http.StatusInternalServerError, "failed to create comment: "+beginErr.Error())
+			writeError(w, http.StatusInternalServerError, "failed to create comment")
 			return
 		}
 		defer tx.Rollback(r.Context())
@@ -1958,7 +1888,7 @@ func (h *Handler) CreateComment(w http.ResponseWriter, r *http.Request) {
 	}
 	if err != nil {
 		slog.Warn("create comment failed", append(logger.RequestAttrs(r), "error", err, "issue_id", issueID)...)
-		writeError(w, http.StatusInternalServerError, "failed to create comment: "+err.Error())
+		writeError(w, http.StatusInternalServerError, "failed to create comment")
 		return
 	}
 	comment := created.Comment()
@@ -2517,6 +2447,9 @@ func (h *Handler) mergeCommentIntoPendingTask(ctx context.Context, issue db.Issu
 		"agent_id", uuidToString(trigger.Agent.ID),
 		"new_trigger_comment_id", uuidToString(newTriggerCommentID),
 		"coalesced_count", len(row.CoalescedCommentIds))
+	// The fold re-attributes the queued run to this comment's author; record that
+	// human's action now, since the run row keeps no history of who acted.
+	h.TaskService.RecordHumanDelegation(ctx, attr)
 	return commentMergeSucceeded
 }
 

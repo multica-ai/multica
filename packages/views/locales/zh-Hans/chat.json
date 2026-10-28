@@ -59,6 +59,7 @@
       "runtime_offline": "智能体当前离线，暂时无法回复。等它恢复在线后再试。",
       "runtime_access_denied": "该智能体无法在其私有运行时上运行，暂时无法回复。请将该运行时设为公开，或将智能体重新绑定/复制到其所有者可用的运行时。",
       "runtime_recovery": "智能体在完成前重启了。请重试。",
+      "runtime_access_revoked": "运行时访问已撤销。请先将智能体绑定到可用的运行时，再开始新的运行。",
       "manual": "这次回复已取消。",
       "skill_bundle_unavailable": "没能下载到智能体的 skill，这次回复没有启动。通常是网络连接问题，请重试。",
       "runtime_cli_timeout": "本机 OpenClaw CLI 没能在超时时间内响应，这次运行没有启动。这是本地启动超时，不是网络问题——除非 CLI 变快或调大超时（MULTICA_OPENCLAW_CLI_TIMEOUT），否则重试也不会成功。",
@@ -164,7 +165,9 @@
       "label": "推荐一个操作",
       "prompt": "根据你对我的工作区的了解，推荐一个有用的初始操作。"
     },
-    "customize": "自定义开场建议"
+    "customize": "自定义开场建议",
+    "uploading": "请等待附件上传完成后再使用开场建议。",
+    "draft_in_progress": "请先发送或清空草稿，再使用开场建议。"
   },
   "onboarding_cards": {
     "aria_label": "开始方式",

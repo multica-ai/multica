@@ -65,6 +65,13 @@ type IssueStatusData struct {
 	Description string `json:"description,omitempty"`
 }
 
+// ProjectWorkflowData mirrors the claim payload's project workflow (MUL-7420).
+// Brief is rendered by the server for this run — the assignee's or an
+// observer's — and goes into the per-turn prompt as is.
+type ProjectWorkflowData struct {
+	Brief string `json:"brief"`
+}
+
 // Task represents a claimed task from the server.
 // Agent data (name, skills) is populated by the claim endpoint.
 type Task struct {
@@ -98,8 +105,10 @@ type Task struct {
 	// the built-in-only form. IssueStatusesOmitted is the cap overflow count.
 	IssueStatuses                 []IssueStatusData      `json:"issue_statuses,omitempty"`
 	IssueStatusesOmitted          int                    `json:"issue_statuses_omitted,omitempty"`
+	ProjectWorkflow               *ProjectWorkflowData   `json:"project_workflow,omitempty"`
 	ThreadName                    string                 `json:"thread_name,omitempty"` // semantic title for provider-native session/thread history
 	Agent                         *AgentData             `json:"agent,omitempty"`
+	ModelOverride                 string                 `json:"model_override,omitempty"` // claim-time snapshot of the agent's persistent OpenClaw model override
 	ConnectedApps                 []ConnectedAppData     `json:"connected_apps,omitempty"` // per-run app capabilities mounted through runtime MCP overlays
 	Repos                         []RepoData             `json:"repos,omitempty"`
 	ProjectID                     string                 `json:"project_id,omitempty"`                       // active project for this task, when present
@@ -118,6 +127,8 @@ type Task struct {
 	TriggerCommentContent         string                 `json:"trigger_comment_content,omitempty"`          // content of the triggering comment
 	TriggerAuthorType             string                 `json:"trigger_author_type,omitempty"`              // "agent" or "member" — author kind for the triggering comment
 	TriggerAuthorName             string                 `json:"trigger_author_name,omitempty"`              // display name of the triggering comment author
+	TriggerCommentEditedAt        string                 `json:"trigger_comment_edited_at,omitempty"`        // MUL-8218: set when the trigger comment was edited after the resumed session's run started, so the resumed history may quote an earlier version. Empty on old servers / unedited comments
+	TriggerCommentRevision        int64                  `json:"trigger_comment_revision,omitempty"`         // MUL-8218: current revision of the trigger comment; sent alongside TriggerCommentEditedAt
 	NewCommentCount               int                    `json:"new_comment_count,omitempty"`                // issue-wide comments since this agent's last run (excludes its own and the injected trigger); 0/omitted for old daemons or cold start
 	NewCommentsSince              string                 `json:"new_comments_since,omitempty"`               // RFC3339 anchor (last run's started_at) the count is measured from; empty on cold start
 	NewCommentsDeltaKnown         bool                   `json:"new_comments_delta_known,omitempty"`         // the server actually computed the issue-wide delta this claim (both reads succeeded). A zero NewCommentCount means "nothing was said" only when this is true; otherwise the zero is a failed read, a cold start, or an old server, and the prompt must not present it as the comment scan's answer (MUL-6984)
@@ -147,7 +158,9 @@ type Task struct {
 	QuickCreateAttachmentIDs      []string               `json:"quick_create_attachment_ids,omitempty"`      // attachments uploaded in the quick-create prompt and bound by issue create
 	QuickCreateSourceContext      json.RawMessage        `json:"quick_create_source_context,omitempty"`      // immutable historical context, separate from the new instruction
 	WakeupID                      string                 `json:"wakeup_id,omitempty"`
-	HandoffNote                   string                 `json:"handoff_note,omitempty"` // legacy assignment handoff instruction; rendered only in the per-turn prompt
+	WakeupSystemRule              string                 `json:"wakeup_system_rule,omitempty"` // a platform rule (e.g. child_done) started the run
+	WakeupJoined                  string                 `json:"wakeup_joined,omitempty"`      // wakeups that joined this run instead of queuing their own
+	HandoffNote                   string                 `json:"handoff_note,omitempty"`       // legacy assignment handoff instruction; rendered only in the per-turn prompt
 
 	SquadID               string `json:"squad_id,omitempty"`                // when the picker was a squad, the squad's UUID; Agent is still the resolved leader
 	SquadName             string `json:"squad_name,omitempty"`              // display name for the picker squad, used in prompt text
@@ -200,6 +213,8 @@ type CoalescedCommentData struct {
 	AuthorName string `json:"author_name,omitempty"`
 	Content    string `json:"content"`
 	CreatedAt  string `json:"created_at,omitempty"`
+	EditedAt   string `json:"edited_at,omitempty"` // MUL-8218: set when this comment was edited after the resumed session's run started; empty on old servers / unedited comments
+	Revision   int64  `json:"revision,omitempty"`  // MUL-8218: current revision, sent alongside EditedAt
 }
 
 // AgentData holds agent details returned by the claim endpoint.

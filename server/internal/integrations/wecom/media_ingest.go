@@ -184,7 +184,7 @@ func (r *wecomMediaResolver) ingestOne(ctx context.Context, inst engine.Resolved
 	streamer, canStream := r.storage.(mediaStreamStorage)
 	if canStream {
 		// The memory-flat path: ciphertext streams from the socket into the
-		// decrypt, the plaintext lands in an unlinked temp file, and the
+		// decrypt, the plaintext lands in a private temp file, and the
 		// upload reads from there. Nothing holds a whole attachment.
 		ref, err := r.ingestStreaming(ctx, streamer, wm, index, m, key, link)
 		if err == nil || !errors.Is(err, errStreamingUnavailable) {
@@ -209,14 +209,14 @@ func (r *wecomMediaResolver) ingestOne(ctx context.Context, inst engine.Resolved
 		// reorder with it. The intent row covers the object either way.
 		return channel.MediaRef{}, fmt.Errorf("upload media: %w", err)
 	}
-	return channel.MediaRef{
+	return m.inline(channel.MediaRef{
 		Type:       m.Kind,
 		StorageKey: key,
 		StorageURL: link,
 		Filename:   filename,
 		MimeType:   contentType,
 		SizeBytes:  int64(len(plain)),
-	}, nil
+	}), nil
 }
 
 // mediaObjectKey names the object. It is derived from the CHAT message rather
@@ -422,14 +422,14 @@ func (r *wecomMediaResolver) tellTheSender(inst engine.ResolvedInstallation, wm 
 }
 
 // errStreamingUnavailable says the memory-flat path could not be taken for a
-// reason that is not the attachment's fault — no temp space, a backend that
-// advertises UploadStream and rejects it. The caller falls back to the
-// buffered path rather than failing an attachment over an optimisation.
+// reason that is not the attachment's fault, such as no temp space.
+// The caller falls back to the buffered path rather than failing an
+// attachment over an optimisation.
 var errStreamingUnavailable = errors.New("wecom: streaming media ingest unavailable")
 
 // ingestStreaming carries one attachment without ever holding it whole:
 // ciphertext streams from the response body into the decrypt, the plaintext
-// lands in an unlinked temp file, and the upload reads from that file with
+// lands in a private temp file, and the upload reads from that file with
 // the exact length it now knows.
 func (r *wecomMediaResolver) ingestStreaming(
 	ctx context.Context,
@@ -450,9 +450,9 @@ func (r *wecomMediaResolver) ingestStreaming(
 	if err != nil {
 		// A decrypt failure is the attachment's problem and must be reported
 		// as one; only a failure to make the temp file is grounds to fall
-		// back, and decryptToFile says so in its message.
-		if strings.Contains(err.Error(), "media temp file") {
-			return channel.MediaRef{}, fmt.Errorf("%w: %v", errStreamingUnavailable, err)
+		// back.
+		if errors.Is(err, errMediaTempFile) {
+			return channel.MediaRef{}, fmt.Errorf("%w: %w", errStreamingUnavailable, err)
 		}
 		return channel.MediaRef{}, err
 	}
@@ -469,12 +469,12 @@ func (r *wecomMediaResolver) ingestStreaming(
 	if _, err := streamer.UploadStream(ctx, key, plain, size, contentType, filename); err != nil {
 		return channel.MediaRef{}, fmt.Errorf("upload media: %w", err)
 	}
-	return channel.MediaRef{
+	return m.inline(channel.MediaRef{
 		Type:       m.Kind,
 		StorageKey: key,
 		StorageURL: link,
 		Filename:   filename,
 		MimeType:   contentType,
 		SizeBytes:  size,
-	}, nil
+	}), nil
 }

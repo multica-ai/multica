@@ -4,7 +4,9 @@ import { describe, expect, it } from "vitest";
 import chatEn from "../locales/en/chat.json";
 import chatZh from "../locales/zh-Hans/chat.json";
 import { failureReasonKey, REASONS } from "./failure-reason-label";
-describe("failureReasonLabel", () => {
+import { runFailureBadgeLabel } from "./run-failure-badge";
+
+describe("failureReasonKey", () => {
   it("maps known reasons to i18n keys", () => {
     expect(failureReasonKey("runtime_access_denied")).toBe(
       "failure_reason.runtime_access_denied",
@@ -14,11 +16,22 @@ describe("failureReasonLabel", () => {
     ).toBe("failure_reason.agent_error_provider_auth_or_access");
   });
 
+  it("explains revoked access with a rebind action", () => {
+    expect(failureReasonKey("runtime_access_revoked")).toBe(
+      "failure_reason.runtime_access_revoked",
+    );
+    expect(chatEn.failure_reason.runtime_access_revoked).toBe(
+      "Runtime access was revoked. Bind the agent to an accessible runtime before starting another run.",
+    );
+    expect(runFailureBadgeLabel("runtime_access_revoked")).toBe("Access revoked");
+  });
+
   it("falls back to a user-friendly unknown reason", () => {
     expect(failureReasonKey("not_known_yet")).toBe(
       "failure_reason.default",
     );
     expect(failureReasonKey(null)).toBe("failure_reason.default");
+    expect(runFailureBadgeLabel("not_known_yet")).toBeUndefined();
   });
 
   // The REASONS set and the locale bundles drifted once before: keys existed

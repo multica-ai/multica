@@ -8,8 +8,6 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
-	"os"
-	"path/filepath"
 	"sort"
 	"sync"
 	"testing"
@@ -119,13 +117,7 @@ func TestDshRuntimeProfileMismatch(t *testing.T) {
 	}
 
 	// Installing the profile makes the two agree.
-	dir := filepath.Join(home, "profiles", dshMulticaProfileName)
-	if err := os.MkdirAll(dir, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(dir, "package.json"), []byte("{}\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
+	installMulticaProfile(t, home)
 	if d.dshRuntimeProfileMismatch() != dshMismatchNone {
 		t.Fatal("a registered dsh with its profile installed was judged inconsistent")
 	}

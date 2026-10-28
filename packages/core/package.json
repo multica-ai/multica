@@ -14,6 +14,7 @@
     "./types": "./types/index.ts",
     "./types/*": "./types/*.ts",
     "./attachments": "./attachments/index.ts",
+    "./attachments/deliverables": "./attachments/deliverables.ts",
     "./attachments/image-sequence": "./attachments/image-sequence.ts",
     "./api": "./api/index.ts",
     "./api/client": "./api/client.ts",
@@ -33,6 +34,10 @@
     "./issue-statuses/queries": "./issue-statuses/queries.ts",
     "./issue-statuses/hooks": "./issue-statuses/hooks.ts",
     "./issue-statuses/mutations": "./issue-statuses/mutations.ts",
+    "./issue-workflows": "./issue-workflows/index.ts",
+    "./issue-workflows/queries": "./issue-workflows/queries.ts",
+    "./issue-workflows/hooks": "./issue-workflows/hooks.ts",
+    "./issue-workflows/mutations": "./issue-workflows/mutations.ts",
     "./issues": "./issues/index.ts",
     "./issues/batch": "./issues/batch.ts",
     "./issues/canonical-id": "./issues/canonical-id.ts",
@@ -84,6 +89,7 @@
     "./squads/stores": "./squads/stores/index.ts",
     "./permissions": "./permissions/index.ts",
     "./search/cancelled-rank": "./search/cancelled-rank.ts",
+    "./search-index": "./search-index/index.ts",
     "./projects": "./projects/index.ts",
     "./projects/queries": "./projects/queries.ts",
     "./projects/mutations": "./projects/mutations.ts",
@@ -162,7 +168,8 @@
     "./skills/frontmatter": "./skills/frontmatter.ts",
     "./skills/pack-archive": "./skills/pack-archive.ts",
     "./skills/stores": "./skills/stores/index.ts",
-    "./autopilots/stores": "./autopilots/stores/index.ts"
+    "./autopilots/stores": "./autopilots/stores/index.ts",
+    "./runtimes/qoder": "./runtimes/qoder.ts"
   },
   "dependencies": {
     "@formatjs/intl-localematcher": "catalog:",

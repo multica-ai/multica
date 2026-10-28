@@ -112,6 +112,7 @@ services:
       ALLOWED_EMAILS: ${ALLOWED_EMAILS:-}
       ALLOWED_EMAIL_DOMAINS: ${ALLOWED_EMAIL_DOMAINS:-}
       DISABLE_WORKSPACE_CREATION: ${DISABLE_WORKSPACE_CREATION:-}
+      WORKSPACE_CREATION_ALLOWED_EMAILS: ${WORKSPACE_CREATION_ALLOWED_EMAILS:-}
       DO_NOT_TRACK: ${DO_NOT_TRACK:-}
       # Managed Cloud stays off for self-hosting. All managed Cloud clients use
       # this single URL when it is configured.
@@ -231,6 +232,7 @@ services:
       DOCS_URL: ${DOCS_URL:-}
       NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-}
       NEXT_PUBLIC_WS_URL: ${NEXT_PUBLIC_WS_URL:-}
+      GOOGLE_ANALYTICS_ID: ${GOOGLE_ANALYTICS_ID:-}
     restart: unless-stopped
 
 volumes:

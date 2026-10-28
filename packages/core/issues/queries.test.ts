@@ -1,5 +1,5 @@
 // @vitest-environment node
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi, type Mock } from "vitest";
 import { QueryClient, QueryObserver } from "@tanstack/react-query";
 
 import { setApiInstance } from "../api";
@@ -8,21 +8,27 @@ import type {
   Issue,
   IssueTableRowsRequest,
   IssueTableRowsResponse,
+  ListIssuesCache,
   ListIssuesParams,
   ListIssuesResponse,
 } from "../types";
+import { pruneDeletedIssueFromListCaches } from "./delete-cache";
 import {
   CHILDREN_BY_PARENTS_CHUNK_SIZE,
+  ISSUE_PAGE_SIZE,
   PROJECT_GANTT_MAX_ISSUES,
   PROJECT_GANTT_PAGE_LIMIT,
   childrenByParentsOptions,
   childIssuesOptions,
+  flattenIssueBuckets,
   issueIdentifierOptions,
   issueKeys,
+  issueListOptions,
   issueTableRowPageOptions,
   projectGanttIssuesOptions,
   sourceContextPreviewOptions,
 } from "./queries";
+import { onIssueUpdated } from "./ws-updaters";
 
 const WS_ID = "ws-1";
 const PROJECT_ID = "project-1";
@@ -315,6 +321,84 @@ describe("issueTableRowPageOptions", () => {
   });
 });
 
+describe("issueListOptions", () => {
+  const todoIssue = makeIssue(1, { status: "todo", status_category: "unstarted" });
+  const startedIssue = makeIssue(2, { status: "in_progress", status_category: "started" });
+  const doneIssue = makeIssue(3, { status: "done", status_category: "done" });
+  // A custom status the server did not resolve to a category.
+  const customIssue = makeIssue(4, { status: "qa" });
+
+  let qc: QueryClient;
+  let listIssues: Mock<(params?: ListIssuesParams) => Promise<ListIssuesResponse>>;
+
+  beforeEach(() => {
+    qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    // Like the real client, the fake ignores `status_category`: every call
+    // returns the same first page.
+    listIssues = vi.fn<(params?: ListIssuesParams) => Promise<ListIssuesResponse>>().mockResolvedValue({
+      issues: [todoIssue, startedIssue, doneIssue, customIssue],
+      total: 120,
+    });
+    installFakeApi(listIssues);
+  });
+
+  afterEach(() => {
+    qc.clear();
+  });
+
+  async function fetchList() {
+    const options = issueListOptions(WS_ID);
+    await qc.fetchQuery(options);
+    return () => qc.getQueryData<ListIssuesCache>(options.queryKey)!;
+  }
+
+  it("sends one list request per fetch", async () => {
+    await fetchList();
+
+    expect(listIssues).toHaveBeenCalledTimes(1);
+    expect(listIssues).toHaveBeenCalledWith({ limit: ISSUE_PAGE_SIZE, offset: 0 });
+  });
+
+  it("puts each issue in its own category's bucket only", async () => {
+    const cache = (await fetchList())();
+
+    expect(cache.byStatus).toEqual({
+      unstarted: { issues: [todoIssue, customIssue], total: 2 },
+      started: { issues: [startedIssue], total: 1 },
+      done: { issues: [doneIssue], total: 1 },
+      closed: { issues: [], total: 0 },
+    });
+    expect(flattenIssueBuckets(cache).map((issue) => issue.id)).toEqual([
+      todoIssue.id,
+      customIssue.id,
+      startedIssue.id,
+      doneIssue.id,
+    ]);
+  });
+
+  it("drops a deleted issue from every bucket", async () => {
+    const readCache = await fetchList();
+
+    pruneDeletedIssueFromListCaches(qc, WS_ID, todoIssue.id);
+
+    expect(flattenIssueBuckets(readCache()).map((issue) => issue.id)).not.toContain(todoIssue.id);
+  });
+
+  it("keeps only the updated copy of an issue moved to done", async () => {
+    const readCache = await fetchList();
+
+    onIssueUpdated(
+      qc,
+      WS_ID,
+      { id: todoIssue.id, status: "done", status_category: "done" },
+      { statusChanged: true },
+    );
+
+    const copies = flattenIssueBuckets(readCache()).filter((issue) => issue.id === todoIssue.id);
+    expect(copies).toEqual([{ ...todoIssue, status: "done", status_category: "done" }]);
+  });
+});
+
 describe("projectGanttIssuesOptions", () => {
   let qc: QueryClient;
 
@@ -376,6 +460,26 @@ describe("projectGanttIssuesOptions", () => {
 
     expect(listIssues).toHaveBeenCalledTimes(2);
     expect(data).toHaveLength(total);
+  });
+
+  it("loads every page when the server caps the page size at 100 (#9572)", async () => {
+    // The server clamps `limit` to 100 regardless of what the client asks for.
+    const SERVER_PAGE_CAP = 100;
+    const total = 334;
+    const all = Array.from({ length: total }, (_, i) => makeIssue(i));
+    const listIssues = vi
+      .fn<(params?: ListIssuesParams) => Promise<ListIssuesResponse>>()
+      .mockImplementation(async (params) => {
+        const offset = params?.offset ?? 0;
+        const limit = Math.min(params?.limit ?? SERVER_PAGE_CAP, SERVER_PAGE_CAP);
+        return { issues: all.slice(offset, offset + limit), total };
+      });
+    installFakeApi(listIssues);
+
+    const data = await qc.fetchQuery(projectGanttIssuesOptions(WS_ID, PROJECT_ID));
+
+    expect(data).toHaveLength(total);
+    expect(listIssues.mock.calls.map(([p]) => p?.offset)).toEqual([0, 100, 200, 300]);
   });
 
   it("stops looping when the server reports a smaller-than-limit page (safety net for total drift)", async () => {

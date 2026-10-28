@@ -4,6 +4,7 @@ import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { I18nProvider } from "@multica/core/i18n/react";
 import { configStore } from "@multica/core/config";
+import type { DaemonConfigStatus, DaemonSetupTarget } from "@multica/core/runtimes";
 import enCommon from "../../locales/en/common.json";
 import enRuntimes from "../../locales/en/runtimes.json";
 import { ConnectRemoteDialog } from "./connect-remote-dialog";
@@ -58,6 +59,8 @@ function resetConfigStore() {
     googleClientId: "",
     daemonServerUrl: "",
     daemonAppUrl: "",
+    daemonConfigStatus: "loading",
+    daemonSetupTarget: "unknown",
     workspaceCreationDisabled: false,
   });
 }
@@ -65,11 +68,11 @@ function resetConfigStore() {
 function renderDialog(config?: {
   daemonServerUrl?: string;
   daemonAppUrl?: string;
-}) {
+  daemonSetupTarget?: DaemonSetupTarget;
+}, status: DaemonConfigStatus = "ready") {
   resetConfigStore();
-  if (config) {
-    configStore.getState().setDaemonConfig(config);
-  }
+  configStore.getState().setDaemonConfig(config ?? { daemonSetupTarget: "cloud" });
+  configStore.getState().setDaemonConfigStatus(status);
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   return render(
     <QueryClientProvider client={qc}>
@@ -101,6 +104,7 @@ describe("ConnectRemoteDialog", () => {
 
   it("uses self-host daemon URLs from runtime config", () => {
     const { baseElement } = renderDialog({
+      daemonSetupTarget: "self_host",
       daemonServerUrl: "https://api.example.com/",
       daemonAppUrl: "https://app.example.com/",
     });
@@ -114,6 +118,43 @@ describe("ConnectRemoteDialog", () => {
     expect(baseElement).toHaveTextContent(
       "multica config set app_url https://app.example.com",
     );
+  });
+
+  it("withholds setup and token commands until config recovers", () => {
+    const { baseElement } = renderDialog({}, "loading");
+    expect(screen.getByRole("status")).toHaveTextContent(
+      "Loading connection settings",
+    );
+    expect(baseElement).not.toHaveTextContent("multica setup");
+    expect(baseElement).not.toHaveTextContent("multica config set");
+    act(() => configStore.getState().setDaemonConfigStatus("error"));
+    expect(screen.getByRole("alert")).toHaveTextContent(
+      "Couldn't load connection settings",
+    );
+    expect(baseElement).not.toHaveTextContent("multica setup");
+    expect(baseElement).not.toHaveTextContent("multica config set");
+    act(() => configStore.getState().setDaemonConfig({
+      daemonSetupTarget: "self_host",
+      daemonServerUrl: "https://api.example.com",
+      daemonAppUrl: "https://app.example.com",
+    }));
+    expect(baseElement).toHaveTextContent(
+      "multica setup self-host --server-url https://api.example.com --app-url https://app.example.com",
+    );
+    expect(baseElement).toHaveTextContent(
+      "multica config set server_url https://api.example.com",
+    );
+  });
+
+  it.each([
+    { daemonSetupTarget: "unknown" as const },
+    { daemonSetupTarget: "self_host" as const, daemonServerUrl: "https://api.example.com" },
+  ])("withholds both command paths for unresolved config %j", (config) => {
+    const { baseElement } = renderDialog(config);
+    expect(screen.getByRole("alert")).toBeInTheDocument();
+    expect(baseElement).not.toHaveTextContent("multica setup");
+    expect(baseElement).not.toHaveTextContent("multica config set");
+    expect(screen.getAllByRole("button", { name: "Copy" })).toHaveLength(1);
   });
 
   // The install command is OS-specific, so the dialog can't hardcode one.
@@ -142,7 +183,7 @@ describe("ConnectRemoteDialog", () => {
     });
 
     await waitFor(() => {
-      expect(screen.getByText("Computer connected")).toBeInTheDocument();
+      expect(screen.getByText("Machine connected")).toBeInTheDocument();
       expect(
         screen.getByRole("button", { name: "Create an agent" }),
       ).toBeInTheDocument();

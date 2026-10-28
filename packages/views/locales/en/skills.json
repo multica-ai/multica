@@ -1,7 +1,6 @@
 {
   "page": {
     "title": "Skills",
-    "tagline": "Instructions any agent in this workspace can use.",
     "learn_more": "Learn more →",
     "new_skill": "New skill",
     "search_placeholder": "Search skills…",
@@ -120,7 +119,9 @@
     "sort_by": "Sort by",
     "direction_asc": "Ascending",
     "direction_desc": "Descending",
-    "section_columns": "Columns"
+    "section_columns": "Columns",
+    "manage_labels": "Manage labels...",
+    "manage_labels_title": "Skill labels"
   },
   "detail": {
     "all_skills": "All skills",

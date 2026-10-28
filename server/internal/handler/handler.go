@@ -76,6 +76,13 @@ type Config struct {
 	// invitation only. The public /api/config endpoint mirrors this flag so
 	// the UI can hide every "Create workspace" affordance — see #3433.
 	DisableWorkspaceCreation bool
+	// WorkspaceCreationAllowedEmails, when non-empty, restricts
+	// POST /api/workspaces to callers whose account email matches one of
+	// the entries (case-insensitive). Empty means every signed-in user may
+	// create workspaces. DisableWorkspaceCreation takes precedence. This only
+	// decides who may create a workspace; it grants no cross-workspace
+	// visibility or admin rights (#9400).
+	WorkspaceCreationAllowedEmails []string
 	// VCSIntegrationEnabled gates the self-hosted Git provider integration
 	// (Forgejo / Gitea / GitLab) at the deployment level, independent of whether
 	// MULTICA_VCS_SECRET_KEY is set. It is the product boundary: the feature is
@@ -155,6 +162,11 @@ type Config struct {
 	// Surfaced through /api/config so self-hosted operators can confirm which
 	// server build is deployed. Empty in dev builds.
 	ServerVersion string
+	// GitExtraCACerts is the PEM of the private CAs the operator added to the
+	// backend's trust store through SSL_CERT_DIR (see internal/gitca). It is
+	// handed to daemons with the workspace repos so their git can reach a
+	// repository host the backend already trusts. Empty when none are set.
+	GitExtraCACerts []byte
 }
 
 type cloudRuntimeProxy interface {
@@ -259,6 +271,7 @@ type Handler struct {
 	PATCache                     *auth.PATCache
 	DaemonTokenCache             *auth.DaemonTokenCache
 	MembershipCache              *auth.MembershipCache
+	QoderRateLimiter             WebhookRateLimiter
 	WebhookRateLimiter           WebhookRateLimiter
 	WebhookIPRateLimiter         WebhookRateLimiter
 	WebhookAbsoluteIPRateLimiter WebhookRateLimiter
@@ -318,6 +331,8 @@ type Handler struct {
 	// where the storage backend exists; main.go starts it as an independent
 	// worker goroutine. Nil when no storage backend is configured.
 	ChannelMediaReconciler *service.ChannelMediaReconciler
+	// LarkTyping owns the durable reaction cleanup worker, started under sweepCtx.
+	LarkTyping *lark.TypingIndicatorManager
 	// SlackInstall owns the bring-your-own-app Slack install lifecycle (register
 	// pasted tokens / list / revoke) and the at-rest encryption of each app's bot
 	// + app tokens (MUL-3666). Nil unless MULTICA_SLACK_SECRET_KEY is set.
@@ -506,6 +521,7 @@ func New(queries *db.Queries, txStarter txStarter, hub *realtime.Hub, bus *event
 		Storage:                      store,
 		CFSigner:                     cfSigner,
 		Analytics:                    analyticsClient,
+		QoderRateLimiter:             NewMemoryWebhookRateLimiter(WebhookRateLimit{Limit: 6, Window: time.Minute}),
 		WebhookRateLimiter:           NewMemoryWebhookRateLimiter(DefaultWebhookRateLimit()),
 		WebhookIPRateLimiter:         NewMemoryWebhookIPRateLimiter(DefaultWebhookIPRateLimit()),
 		WebhookAbsoluteIPRateLimiter: NewMemoryWebhookAbsoluteIPRateLimiter(DefaultWebhookAbsoluteIPRateLimit()),
@@ -534,6 +550,7 @@ func New(queries *db.Queries, txStarter txStarter, hub *realtime.Hub, bus *event
 		slog.Warn("github: PR snapshot pipeline disabled (invalid App private key)", "err", err)
 	}
 	h.PRRefresh = ghsnapshot.NewManager(ghClient, queries, txStarter, h.broadcastPRSnapshotApplied)
+	taskSvc.PRSnapshotsEnabled = h.PRRefresh.Enabled()
 
 	return h
 }

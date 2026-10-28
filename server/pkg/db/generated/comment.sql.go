@@ -1366,6 +1366,25 @@ WHERE c.issue_id = $1
       WHERE s.comment_id = c.id AND s.workspace_id = c.workspace_id
         AND bound.agent_id = $4
   )
+  -- An explicit member/agent cancellation acknowledges the planned input for
+  -- this agent only for completing tasks already in flight at cancellation;
+  -- automatic cancellations deliberately remain replayable.
+  AND NOT EXISTS (
+      SELECT 1
+      FROM agent_task_queue cancelled
+      WHERE cancelled.issue_id = c.issue_id
+        AND cancelled.agent_id = $4
+        AND cancelled.status = 'cancelled'
+        AND cancelled.cancelled_by_type IN ('member', 'agent')
+        AND cancelled.cancelled_by_id IS NOT NULL
+        AND cancelled.completed_at IS NOT NULL
+        AND cancelled.completed_at >= $5
+        AND c.updated_at <= cancelled.completed_at
+        AND (
+            cancelled.trigger_comment_id = c.id
+            OR c.id = ANY(cancelled.coalesced_comment_ids)
+        )
+  )
   -- Nor does a comment whose author chose not to start this agent for it.
   AND NOT COALESCE($4::uuid = ANY(c.suppressed_agent_ids), false)
   AND (

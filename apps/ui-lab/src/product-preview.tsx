@@ -42,7 +42,11 @@ registerAuthStore(auth);
 registerChatStore(createChatStore({ storage }));
 setCurrentWorkspace(workspace.slug, workspace.id);
 getIssueSurfaceViewStore("workspace:all").setState({ viewMode: "list" });
-const resources = { en: RESOURCES.en, "zh-Hans": RESOURCES["zh-Hans"] };
+const resources = {
+  en: RESOURCES.en,
+  "zh-Hans": RESOURCES["zh-Hans"],
+  "zh-Hant": RESOURCES["zh-Hant"],
+};
 
 export function ProductPreview({
   scene,

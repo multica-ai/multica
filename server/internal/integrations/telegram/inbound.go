@@ -26,9 +26,11 @@ type telegramRawEvent struct {
 	// SenderName is the sender's Telegram display name, carried for
 	// group-context attribution.
 	SenderName string `json:"sender_name,omitempty"`
-	// Media is the one file this message carries, for the media resolver to
-	// fetch off the ACK path. Nil for text-only messages.
-	Media *inboundMedia `json:"media,omitempty"`
+	// Media lists the files this message carries for the media resolver to
+	// fetch off the ACK path, in the order their placeholders appear in the
+	// body: the file of a quoted message first, then the sender's own. Empty
+	// for text-only messages.
+	Media []inboundMedia `json:"media,omitempty"`
 }
 
 // inboundMedia is what the media resolver needs to fetch a message's file:
@@ -44,8 +46,8 @@ type inboundMedia struct {
 	// attachment replaces with its Markdown link. It stays as plain text when
 	// the fetch fails, so the agent still knows a file was there.
 	Placeholder string `json:"placeholder"`
-	// PlaceholderIndex is which occurrence of Placeholder in the body is the
-	// sender's: quoted and recent context go in front of it, and a member
+	// PlaceholderIndex is which occurrence of Placeholder in the body is this
+	// file's: context goes in front of the sender's own marker, and a member
 	// who typed the same marker there must not receive the file.
 	PlaceholderIndex int `json:"placeholder_index,omitempty"`
 }
@@ -60,6 +62,9 @@ func mediaFromMessage(m *Message) *inboundMedia {
 			if p.Width*p.Height >= best.Width*best.Height {
 				best = p
 			}
+		}
+		if best.FileID == "" {
+			return nil
 		}
 		return &inboundMedia{Kind: channel.MsgTypeImage, FileID: best.FileID, FileUniqueID: best.FileUniqueID,
 			MimeType: "image/jpeg", FileSize: best.FileSize, Placeholder: "[Image]"}
@@ -85,6 +90,16 @@ func fileRefMedia(kind channel.MsgType, f *FileRef, placeholder string) *inbound
 	}
 	return &inboundMedia{Kind: kind, FileID: f.FileID, FileUniqueID: f.FileUniqueID,
 		FileName: f.FileName, MimeType: f.MimeType, FileSize: f.FileSize, Placeholder: placeholder}
+}
+
+// leadWithPlaceholder puts a file's marker above its caption, so the caption
+// reads as the caption of the file once the resolver swaps the marker for the
+// attachment link. A file without a caption is the marker alone.
+func leadWithPlaceholder(placeholder, caption string) string {
+	if strings.TrimSpace(caption) == "" {
+		return placeholder
+	}
+	return placeholder + "\n" + caption
 }
 
 // inboundFromUpdate normalizes one Telegram update without any recent group
@@ -149,27 +164,45 @@ func inboundFromUpdateWithContext(u Update, botID int64, botUsername string, rec
 		// The placeholder leads the sender's own text, so a caption reads as
 		// the caption of the file above it once the resolver swaps the marker
 		// for the attachment link. Quoted and recent context still go in front.
-		own = media.Placeholder
-		if cleaned != "" {
-			own += "\n" + cleaned
-		}
+		own = leadWithPlaceholder(media.Placeholder, cleaned)
 		agentText = own
 	}
+	// A quoted file is selected context in every chat and whoever sent it, as
+	// long as the reply addresses the bot at all: which of several files a
+	// reply means can only be read off the quote, and the file is one getFile
+	// away. A quoted text is selected context only for a group member who
+	// replied and mentioned the bot: in a private chat the earlier text is
+	// already part of the one continuous session, and the bot's own text is
+	// its own reply.
+	var quotedMedia *inboundMedia
+	if m.ReplyToMessage != nil && addressed {
+		quotedMedia = mediaFromMessage(m.ReplyToMessage)
+	}
 	quotedHuman := m.ReplyToMessage != nil && m.ReplyToMessage.From != nil && !m.ReplyToMessage.From.IsBot
-	hasSelectedContext := chatType == channel.ChatTypeGroup && mentioned && quotedHuman
+	hasSelectedContext := (chatType == channel.ChatTypeGroup && mentioned && quotedHuman) || quotedMedia != nil
+	fromQuote := ""
 	if hasSelectedContext {
-		agentText = enrichWithQuotedHumanMessage(agentText, m.Chat.ID, m.ReplyToMessage)
+		agentText = enrichWithQuotedMessage(agentText, m.Chat.ID, m.ReplyToMessage, quotedMedia)
+		fromQuote = agentText
 	}
 	if recent != nil && chatType == channel.ChatTypeGroup && addressed && !startChat {
 		agentText = enrichWithRecentContext(agentText, m, recent)
 	}
+	// The engine replaces a placeholder by occurrence, and the context
+	// enrichers only ever prepend, so each segment is a suffix of the final
+	// text: the sender's own segment last, the quoted block ahead of it. Count
+	// every occurrence before a marker — user-typed literals included — so a
+	// member who wrote "[Image]" in the window does not receive the file.
+	// Same rule as DingTalk's quoted block.
 	if media != nil {
-		// The engine replaces the placeholder by occurrence, and the context
-		// enrichers only ever prepend, so the sender's own segment is the
-		// suffix. Count every occurrence ahead of it — user-typed literals
-		// included — so a member who wrote "[Image]" in the window does not
-		// receive the sender's file. Same rule as DingTalk's quoted block.
 		media.PlaceholderIndex = strings.Count(agentText[:len(agentText)-len(own)], media.Placeholder)
+	}
+	if quotedMedia != nil {
+		// The quoted file's marker opens the block body, right after the
+		// one-line header.
+		start := len(agentText) - len(fromQuote)
+		body := start + strings.IndexByte(agentText[start:], '\n') + 1
+		quotedMedia.PlaceholderIndex = strings.Count(agentText[:body], quotedMedia.Placeholder)
 	}
 
 	senderID := strconv.FormatInt(m.From.ID, 10)
@@ -179,11 +212,18 @@ func inboundFromUpdateWithContext(u Update, botID int64, botUsername string, rec
 		threadID = strconv.FormatInt(m.MessageThreadID, 10)
 	}
 
+	var files []inboundMedia
+	if quotedMedia != nil {
+		files = append(files, *quotedMedia)
+	}
+	if media != nil {
+		files = append(files, *media)
+	}
 	raw, _ := json.Marshal(telegramRawEvent{
 		BotID:      strconv.FormatInt(botID, 10),
 		EventType:  "message",
 		SenderName: senderDisplayName(m.From),
-		Media:      media,
+		Media:      files,
 	})
 
 	var reply *channel.ReplyCtx
@@ -302,16 +342,20 @@ func normalizeText(text, botUsername string) string {
 	return strings.TrimSpace(cleaned)
 }
 
-// enrichWithQuotedHumanMessage prepends only the message a group member
-// explicitly selected by replying and mentioning the bot. Ambient group
-// history never enters the agent context. CommandText remains the sender's own
-// cleaned instruction so commands inside the quoted message stay historical.
-func enrichWithQuotedHumanMessage(instruction string, chatID int64, quoted *Message) string {
+// enrichWithQuotedMessage prepends the one message the sender explicitly
+// selected by replying; ambient group history never enters the agent context
+// this way. A quoted file leads its caption as the placeholder the resolver
+// swaps for the attachment link, the same way the sender's own file leads
+// their text. CommandText remains the sender's own cleaned instruction so
+// commands inside the quoted message stay historical.
+func enrichWithQuotedMessage(instruction string, chatID int64, quoted *Message, media *inboundMedia) string {
 	quotedText := quoted.Text
 	if quotedText == "" {
 		quotedText = quoted.Caption
 	}
-	if strings.TrimSpace(quotedText) == "" {
+	if media != nil {
+		quotedText = leadWithPlaceholder(media.Placeholder, quotedText)
+	} else if strings.TrimSpace(quotedText) == "" {
 		quotedText = "[empty or non-text message]"
 	}
 	sender := "Unknown user"

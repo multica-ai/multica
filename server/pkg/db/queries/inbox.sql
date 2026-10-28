@@ -90,11 +90,19 @@ SELECT * FROM inbox_item
 WHERE id = $1 AND workspace_id = $2;
 
 -- name: CreateInboxItem :one
+-- A missing recipient is a quiet skip (pgx.ErrNoRows), not a delivery failure.
+-- Check the insertion snapshot without adding recipient row locks.
 INSERT INTO inbox_item (
     workspace_id, recipient_type, recipient_id,
     type, severity, issue_id, title, body,
     actor_type, actor_id, details, id
-) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, COALESCE(sqlc.narg('id')::uuid, gen_random_uuid()))
+)
+SELECT $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, COALESCE(sqlc.narg('id')::uuid, gen_random_uuid())
+WHERE ($2::text = 'member' AND EXISTS (
+    SELECT 1 FROM member WHERE workspace_id = $1 AND user_id = $3
+)) OR ($2::text = 'agent' AND EXISTS (
+    SELECT 1 FROM agent WHERE workspace_id = $1 AND id = $3
+))
 RETURNING *;
 
 -- name: MarkInboxRead :one

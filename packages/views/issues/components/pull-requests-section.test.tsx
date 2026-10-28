@@ -9,6 +9,7 @@ import enIssues from "../../locales/en/issues.json";
 
 const TEST_RESOURCES = { en: { common: enCommon, issues: enIssues } };
 
+let queryFails = false;
 let mockAutoComplete: PRAutoComplete | null = null;
 vi.mock("@multica/core/github/queries", async () => {
   const actual = await vi.importActual<typeof import("@multica/core/github/queries")>(
@@ -18,7 +19,10 @@ vi.mock("@multica/core/github/queries", async () => {
     ...actual,
     issuePullRequestsOptions: (issueId: string) => ({
       queryKey: ["github", "pull-requests", issueId],
-      queryFn: async () => ({ pull_requests: [], auto_complete: mockAutoComplete }),
+      queryFn: async () => {
+        if (queryFails) throw new Error("Offline");
+        return { pull_requests: [], auto_complete: mockAutoComplete };
+      },
       enabled: !!issueId,
     }),
   };
@@ -36,15 +40,21 @@ vi.mock("../../navigation", () => ({
   useNavigation: () => ({ push: navigatePush }),
   AppLink: ({ href, children }: { href: string; children: React.ReactNode }) => <a href={href}>{children}</a>,
 }));
+vi.mock("@multica/core/hooks", () => ({ useWorkspaceId: () => "ws-1" }));
+let mockWorkspaceSettings: Record<string, unknown> = {};
 vi.mock("@multica/core/paths", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@multica/core/paths")>()),
   useWorkspacePaths: () => ({ settings: () => "/acme/settings" }),
+  useCurrentWorkspace: () => ({ id: "ws-1", slug: "acme", settings: mockWorkspaceSettings }),
 }));
 
 import { PullRequestsSection } from "./pull-requests-section";
 
-function renderSection() {
+function renderSection(cachedDecision?: PRAutoComplete) {
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  if (cachedDecision) {
+    qc.setQueryData(["github", "pull-requests", "issue-1"], { pull_requests: [], auto_complete: cachedDecision });
+  }
   return render(
     <QueryClientProvider client={qc}>
       <I18nProvider resources={TEST_RESOURCES} locale="en">
@@ -63,10 +73,33 @@ const decision: PRAutoComplete = {
 
 describe("PullRequestsSection (MUL-7429)", () => {
   beforeEach(() => {
+    queryFails = false;
     mockAutoComplete = decision;
+    mockWorkspaceSettings = {};
     apiMock.linkIssuePullRequest.mockReset();
     apiMock.setIssuePRAutoComplete.mockReset();
     navigatePush.mockReset();
+  });
+
+  it("keeps the empty title static and retains linking without redundant copy", async () => {
+    renderSection();
+    expect(await screen.findByRole("button", { name: "Link pull request" })).toBeVisible();
+    expect(screen.queryByRole("button", { name: "Pull requests" })).not.toBeInTheDocument();
+    expect(screen.queryByText(enIssues.detail.pull_requests_empty_title)).not.toBeInTheDocument();
+  });
+
+  it("keeps a retry entry when loading fails with no cached PRs", async () => {
+    queryFails = true;
+    renderSection();
+    expect(await screen.findByRole("button", { name: "Could not load. Retry" })).toBeVisible();
+    expect(screen.queryByRole("button", { name: "Link pull request" })).not.toBeInTheDocument();
+  });
+
+  it("retains linking after a failed refresh when cached data confirms backend support", async () => {
+    queryFails = true;
+    renderSection(decision);
+    expect(await screen.findByRole("button", { name: "Could not load. Retry" })).toBeVisible();
+    expect(screen.getByRole("button", { name: "Link pull request" })).toBeVisible();
   });
 
   it("links a pasted PR URL", async () => {
@@ -111,18 +144,41 @@ describe("PullRequestsSection (MUL-7429)", () => {
     );
   });
 
-  it("turns auto-complete off for this issue from the section menu", async () => {
+  it("keeps this issue's status on merge from the section menu", async () => {
     apiMock.setIssuePRAutoComplete.mockResolvedValue({ pull_requests: [], auto_complete: { ...decision, issue_disabled: true } });
     renderSection();
     fireEvent.click(await screen.findByRole("button", { name: "Pull request automation" }));
-    fireEvent.click(await screen.findByRole("menuitem", { name: "Turn off auto-complete" }));
+    fireEvent.click(await screen.findByRole("menuitem", { name: "Keep status when PRs merge" }));
     await waitFor(() => expect(apiMock.setIssuePRAutoComplete).toHaveBeenCalledWith("issue-1", true));
+  });
+
+  it("opens the GitHub setting from the section menu", async () => {
+    renderSection();
+    fireEvent.click(await screen.findByRole("button", { name: "Pull request automation" }));
+    fireEvent.click(await screen.findByRole("menuitem", { name: "PR merge settings" }));
+    expect(navigatePush).toHaveBeenCalledWith("/acme/settings?tab=code");
+  });
+
+  it("offers only the settings link while the workspace leaves status alone", async () => {
+    mockAutoComplete = { ...decision, workspace_enabled: false };
+    renderSection();
+    fireEvent.click(await screen.findByRole("button", { name: "Pull request automation" }));
+    expect(await screen.findByRole("menuitem", { name: "PR merge settings" })).toBeInTheDocument();
+    expect(screen.queryByRole("menuitem", { name: "Keep status when PRs merge" })).toBeNull();
+  });
+
+  it("drops the auto-link hint when the workspace does not auto-link PRs", async () => {
+    mockWorkspaceSettings = { github_auto_link_prs_enabled: false };
+    renderSection();
+    fireEvent.click(await screen.findByRole("button", { name: "Link pull request" }));
+    await screen.findByRole("textbox", { name: "Link pull request" });
+    expect(screen.queryByText("PRs with MUL-1 in the title or branch name link automatically.")).toBeNull();
   });
 
   it("hides the actions on a backend without auto-complete", async () => {
     mockAutoComplete = null;
     renderSection();
-    await screen.findByText("No linked pull requests.");
+    await waitFor(() => expect(screen.queryByText("Pull requests")).not.toBeInTheDocument());
     expect(screen.queryByRole("button", { name: "Link pull request" })).toBeNull();
     expect(screen.queryByRole("button", { name: "Pull request automation" })).toBeNull();
   });

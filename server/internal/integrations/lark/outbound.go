@@ -12,6 +12,7 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/multica-ai/multica/server/internal/events"
 	"github.com/multica-ai/multica/server/internal/integrations/channel/engine"
+	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 	"github.com/multica-ai/multica/server/pkg/protocol"
 )
@@ -142,6 +143,7 @@ func (defaultRenderer) Render(in RenderInput) (CardRender, error) {
 // needs. Declared as an interface so the patcher is unit-testable
 // without a real Postgres connection.
 type PatcherQueries interface {
+	mediaDeliveryQueries
 	GetAgentTask(ctx context.Context, id pgtype.UUID) (db.AgentTaskQueue, error)
 	TaskHasChannelIngestedMessages(ctx context.Context, taskID pgtype.UUID) (bool, error)
 	GetChannelTaskDelivery(ctx context.Context, taskID pgtype.UUID) (db.ChannelTaskDelivery, error)
@@ -152,6 +154,13 @@ type PatcherQueries interface {
 	GetLarkOutboundCardByTask(ctx context.Context, taskID pgtype.UUID) (OutboundCardMessage, error)
 	CreateLarkOutboundCardMessage(ctx context.Context, arg CreateOutboundCardMessageParams) (OutboundCardMessage, error)
 	UpdateLarkOutboundCardStatus(ctx context.Context, arg UpdateOutboundCardStatusParams) error
+	// ListAttachmentsByChatMessage reads the files an agent bound to one
+	// assistant message at task completion. Taken with the generated db
+	// params rather than a domain type because ChannelStore embeds
+	// *db.Queries and therefore already satisfies it — this list is the
+	// one seam where the narrow interface would cost a hand-written
+	// adapter for no gain. See outbound_media.go for the caller.
+	ListAttachmentsByChatMessage(ctx context.Context, arg db.ListAttachmentsByChatMessageParams) ([]db.Attachment, error)
 }
 
 // CredentialsResolver decrypts an installation's app_secret for the
@@ -212,19 +221,48 @@ type Patcher struct {
 	credentials     CredentialsResolver
 	client          APIClient
 	typingIndicator *TypingIndicatorManager
-	cfg             PatcherConfig
+	// media is the same client as `client`, narrowed to the four
+	// upload/send methods the attachment hop needs. It is nil for any
+	// APIClient that does not implement them (the stub, the test
+	// fakes), which is how "attachments are not deliverable in this
+	// deployment" is expressed — see outbound_media.go.
+	media mediaAPIClient
+	// objects is the deployment's object store, or nil when this
+	// deployment configured none. Set via SetAttachments. Both it and
+	// media must be non-nil before a file can be delivered.
+	objects        mediaObjectStore
+	mediaAdmission chan struct{}
+	mediaPending   chan struct{}
+	// mediaSlots bounds concurrent transfers. Per-patcher, like the two
+	// admission tiers above, so all three limits share one scope.
+	mediaSlots  chan struct{}
+	mediaBudget time.Duration
+	spawn       func(func())
+	cfg         PatcherConfig
 }
 
 // NewPatcher constructs a Patcher bound to its dependencies. The
 // patcher does not subscribe to the bus until Register is called.
 func NewPatcher(queries PatcherQueries, credentials CredentialsResolver, client APIClient, cfg PatcherConfig) *Patcher {
 	cfg = cfg.withDefaults()
-	return &Patcher{
-		queries:     queries,
-		credentials: credentials,
-		client:      client,
-		cfg:         cfg,
+	p := &Patcher{
+		queries:        queries,
+		credentials:    credentials,
+		client:         client,
+		cfg:            cfg,
+		mediaAdmission: make(chan struct{}, maxAdmittedAttachmentDeliveries),
+		mediaPending:   make(chan struct{}, maxPendingAttachmentDeliveries),
+		mediaSlots:     make(chan struct{}, maxConcurrentAttachmentDeliveries),
+		mediaBudget:    attachmentBudget,
+		spawn:          func(f func()) { go f() },
 	}
+	// A type assertion rather than a fifth constructor argument: the
+	// media methods are an optional capability of the transport, and
+	// the fakes that do not have them must keep compiling.
+	if m, ok := client.(mediaAPIClient); ok {
+		p.media = m
+	}
+	return p
 }
 
 // SetTypingIndicatorManager wires the typing-indicator manager into the
@@ -235,51 +273,14 @@ func (p *Patcher) SetTypingIndicatorManager(m *TypingIndicatorManager) {
 	p.typingIndicator = m
 }
 
-// Register subscribes the patcher to the task-lifecycle events it
-// cares about on the supplied bus. Idempotent only if you call it
-// against a fresh bus; call sites should invoke it exactly once
-// during server boot (after the bus + patcher are constructed and
-// before HTTP traffic starts).
+// Register attaches the patcher once during boot, before traffic starts.
+// ChatDone sends the reply, TaskFailed sends an error, and TaskCancelled clears
+// typing state without an answer. Every cancellation path must publish its event
+// after commit, including deletion paths whose workspace must come from the caller.
 //
-// Subscriptions are deliberately minimal:
-//
-//   - EventChatDone — the agent finished replying. The Patcher sends
-//     the reply as a plain text IM message (Lark's `msg_type=text`),
-//     not as an interactive card. The earlier card-based design (with
-//     thinking → running → final patches) made every reply look like
-//     a system notification nested in card chrome; flipping to plain
-//     text makes free-form chat feel native.
-//
-//   - EventTaskFailed — the run failed; surface a short error card
-//     so the failure is visually distinct from a successful reply.
-//
-//   - EventTaskCancelled — the run ended without an answer. Nothing is
-//     sent for it; the subscription exists so the Typing reaction comes
-//     off. A cancellation publishes no chat-done and no task-failed, so
-//     without this the badge sits on the user's message for good.
-//     task:cancelled is broadcast once per cancelled row by CancelTask,
-//     the queued follow-up cancel behind it, the agent- and issue-level
-//     bulk cancels, the runtime and member revocations, and deleting the
-//     chat session. The delete is the one that used to publish nothing:
-//     BroadcastCancelledTasks resolved each task's workspace through its
-//     chat_session, the same row its transaction had just deleted, and an
-//     event with no workspace is dropped before it reaches the bus. It now
-//     takes the workspace from its caller. Archiving an agent also publishes
-//     task:cancelled for chat tasks after commit, clearing their reactions
-//     through this subscription. An ending during Add can still clear
-//     nothing, because Add records its state only after the Lark call
-//     returns, so the badge lands after the clear with nothing left to
-//     take it off. This race predates task:cancelled — chat-done
-//     and task-failed race the add the same way — and closing it needs a
-//     per-session generation the add can check when its call returns.
-//
-// We deliberately do NOT subscribe to EventTaskQueued / EventTaskRunning
-// (no thinking-card lifecycle anymore — adds noise without value) or to
-// EventTaskCompleted (chat tasks always emit EventChatDone first, which
-// is what we care about; non-chat tasks have no Lark binding anyway and
-// would early-return). Leaving EventTaskCompleted unsubscribed also
-// avoids the prior "Done." overwrite regression where the no-content
-// EventTaskCompleted payload would wipe the real reply.
+// Do not subscribe to TaskCompleted: chat tasks already emit ChatDone, and the
+// empty completion payload must not overwrite the reply. Queued/running events
+// do not drive a thinking-card lifecycle.
 func (p *Patcher) Register(bus *events.Bus) {
 	bus.Subscribe(protocol.EventTaskFailed, p.handleEvent)
 	bus.Subscribe(protocol.EventChatDone, p.handleEvent)
@@ -311,37 +312,24 @@ func (p *Patcher) processEvent(ctx context.Context, e events.Event) error {
 		// Issue / autopilot tasks have no chat_session.
 		return nil
 	}
-	// A cancelled run has no reply to place, so the only thing owed to the user
-	// is taking the Typing badge off. That runs before every lookup below,
-	// because each of them can answer "no" for a run that still has a badge on
-	// screen:
-	//
-	//   - the binding is gone by the time a session delete's cancels are
-	//     broadcast (they fire after the transaction that dropped it commits);
-	//
-	//   - the origin classification answers "does this answer belong on Lark",
-	//     and a task cancelled for owning an empty input batch — the failure
-	//     #6611 fixed the cause of — reports no channel-ingested messages, so a
-	//     clear behind it would be skipped on exactly the run that most needs
-	//     it. A cancellation has no answer to misroute, so the question does not
-	//     arise.
-	//
-	// Nothing is posted here, so neither gate is protecting anything: the badge
-	// is Lark's own, and Clear only touches sessions this process put one on.
-	// The clear is keyed by session rather than by turn, so cancelling one of
-	// two turns in a session takes the badge off both; the worst that costs is a
-	// missing badge on a turn still running.
+	// Cleanup runs after reply delivery (including failed sends and early
+	// returns), with its own budget. A slow reaction API cannot consume the
+	// reply's context deadline. The bus still waits for bounded cleanup.
+	if p.typingIndicator != nil {
+		defer func() {
+			cleanupCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), typingCleanupTimeout)
+			defer cancel()
+			covered := p.typingIndicator.Reconcile(cleanupCtx, chatSessionID)
+			p.sweepTypingForTask(cleanupCtx, taskID, e.ChannelReactionTarget, covered)
+		}()
+	}
 	if e.Type == protocol.EventTaskCancelled {
-		if p.typingIndicator != nil {
-			p.typingIndicator.Clear(ctx, chatSessionID)
-		}
 		return nil
 	}
 
 	delivery, err := p.queries.GetChannelTaskDelivery(ctx, taskID)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
-			// Direct Multica task or violated snapshot invariant — fail closed.
 			return nil
 		}
 		return fmt.Errorf("lookup lark task delivery: %w", err)
@@ -350,7 +338,8 @@ func (p *Patcher) processEvent(ctx context.Context, e events.Event) error {
 		return nil
 	}
 	binding := ChatSessionBinding{
-		ID: delivery.BindingID, InstallationID: delivery.InstallationID,
+		ChatSessionID: chatSessionID,
+		ID:            delivery.BindingID, InstallationID: delivery.InstallationID,
 		ChannelChatID: delivery.ChannelChatID, ChatType: delivery.ChatType, Config: delivery.Config,
 		LastMessageID: delivery.ChannelMessageID, LastThreadID: delivery.ChannelThreadID,
 		LastSenderID: delivery.ChannelSenderID,
@@ -393,20 +382,62 @@ func (p *Patcher) processEvent(ctx context.Context, e events.Event) error {
 		agentName = agent.Name
 	}
 
-	// Clear the "processing" reaction before the reply is visible so the
-	// user sees a clean transition. Best-effort: a failure here is logged
-	// but does not block the actual reply.
-	if p.typingIndicator != nil {
-		p.typingIndicator.Clear(ctx, chatSessionID)
-	}
-
 	switch e.Type {
 	case protocol.EventChatDone:
-		return p.sendChatReply(ctx, creds, binding, mentionOpenID(binding), e.Payload)
+		return p.sendChatReply(ctx, creds, binding, mentionOpenID(binding), inst.WorkspaceID, e.Payload)
 	case protocol.EventTaskFailed:
 		return p.fail(ctx, creds, binding, taskID, agentName, e.Payload)
 	}
 	return nil
+}
+
+// sweepTypingForTask uses the frozen trigger message. Session deletion carries
+// that anchor on the internal event before deleting the delivery row.
+func (p *Patcher) sweepTypingForTask(ctx context.Context, taskID pgtype.UUID, target *events.ChannelReactionTarget, covered map[string]bool) {
+	delivery, err := p.queries.GetChannelTaskDelivery(ctx, taskID)
+	if errors.Is(err, pgx.ErrNoRows) && target != nil {
+		installationID, parseErr := util.ParseUUID(target.InstallationID)
+		if parseErr != nil {
+			return
+		}
+		delivery = db.ChannelTaskDelivery{
+			ChannelType: target.ChannelType, InstallationID: installationID,
+			ChannelMessageID: pgtype.Text{String: target.MessageID, Valid: target.MessageID != ""},
+		}
+		err = nil
+	}
+	if err != nil {
+		if !errors.Is(err, pgx.ErrNoRows) {
+			p.cfg.Logger.Warn("lark patcher: typing sweep delivery lookup failed",
+				"task_id", uuidString(taskID),
+				"error", err,
+			)
+		}
+		return
+	}
+	if delivery.ChannelType != channelTypeFeishu || !delivery.ChannelMessageID.Valid || delivery.ChannelMessageID.String == "" {
+		return
+	}
+	if covered[uuidString(delivery.InstallationID)+"/"+delivery.ChannelMessageID.String] {
+		return
+	}
+	inst, err := p.queries.GetLarkInstallation(ctx, delivery.InstallationID)
+	if err != nil {
+		p.cfg.Logger.Warn("lark patcher: typing sweep installation lookup failed",
+			"task_id", uuidString(taskID),
+			"error", err,
+		)
+		return
+	}
+	creds, err := p.installationCredentials(inst)
+	if err != nil {
+		p.cfg.Logger.Warn("lark patcher: typing sweep credentials resolution failed",
+			"task_id", uuidString(taskID),
+			"error", err,
+		)
+		return
+	}
+	p.typingIndicator.SweepMessage(ctx, creds, delivery.ChannelMessageID.String)
 }
 
 // mentionOpenID returns the Feishu open_id to @-mention on this reply, or ""
@@ -443,34 +474,32 @@ func mentionOpenID(binding ChatSessionBinding) string {
 // The wire shape is chosen per-reply based on whether the body
 // contains any markdown syntax:
 //
-//   - Plain prose (no markdown) → `msg_type=text`. A one-line "Hi!"
+//   - Plain prose without bound images → `msg_type=text`. A one-line "Hi!"
 //     reply should feel like a normal IM message, not a notification
 //     card with chrome around it.
 //
-//   - Anything with markdown (headings, lists, code blocks, tables,
+//   - Bound images or markdown (headings, lists, code blocks, tables,
 //     bold/italic, links) → schema-2.0 interactive card with a
-//     `tag: "markdown"` body element so Lark's client renders the
+//     `tag: "markdown"` body element; uploaded images update this same
+//     card at their Markdown positions. Lark's client renders the
 //     formatting instead of leaving raw `**bold**` characters in
 //     the transcript. The card is visually subtler than the legacy
 //     binding-prompt template — just a single markdown block, no
 //     header / icon / CTA buttons.
 //
-// Empty content is silently dropped: we'd rather show nothing than
-// "Done." (the prior card fallback that confused Bohan in the live
-// dev env). In practice an empty Content means the daemon completed
-// the task without producing visible output, which only happens for
-// edge cases like a chat task that just acknowledged a system event;
-// not emitting a message there is the right product call.
+// Empty content skips the REPLY, not the delivery. An agent that produced
+// only files writes a real 'message' outcome with empty text — task.go's
+// pendingAttachments branch exists precisely for that shape, "the
+// attachment cards ARE the response". Returning before the attachment hop
+// would make the one case where the files are the whole answer the one case
+// the user hears nothing at all.
 //
 // mentionOpenID, when non-empty, prefixes the body with a native mention of
 // that member (see mention.go). The wire shape is chosen from the agent's own
 // content BEFORE the mention is attached, so a mention can never flip a plain
 // prose answer onto the card path.
-func (p *Patcher) sendChatReply(ctx context.Context, creds InstallationCredentials, binding ChatSessionBinding, mentionOpenID string, payload any) error {
+func (p *Patcher) sendChatReply(ctx context.Context, creds InstallationCredentials, binding ChatSessionBinding, mentionOpenID string, workspaceID pgtype.UUID, payload any) error {
 	content := chatDoneContent(payload)
-	if content == "" {
-		return nil
-	}
 	if topicSendWithoutTrigger(binding) {
 		p.cfg.Logger.Warn("lark: no trigger for a topic-isolated session; skipping reply rather than posting it to the parent group",
 			"chat_session_id", uuidString(binding.ChatSessionID),
@@ -478,28 +507,104 @@ func (p *Patcher) sendChatReply(ctx context.Context, creds InstallationCredentia
 		return nil
 	}
 	target := threadReplyTarget(binding)
-	if containsMarkdown(content) {
-		markdown := prependMarkdownMention(mentionOpenID, content)
-		return sendWithReplyFallback(p.cfg.Logger, "send markdown card", target, func(t ReplyTarget) error {
-			_, err := p.client.SendMarkdownCard(ctx, SendMarkdownCardParams{
+	// Own the complete reply before any external write. The background file
+	// worker inherits this lease; duplicate events cannot repeat the text while
+	// waiting for the files or after the provider's UUID window has expired.
+	handedOff := false
+	if p.objects != nil && p.media != nil && chatDoneMessageID(payload) != "" {
+		taskID, err := util.ParseUUID(chatDoneTaskID(payload))
+		if err != nil || !taskID.Valid {
+			return errors.New("lark reply missing task identity")
+		}
+		var finish func()
+		var acquired bool
+		ctx, finish, acquired = p.claimMediaDelivery(ctx, taskID, binding)
+		if !acquired {
+			return nil
+		}
+		defer func() {
+			if !handedOff {
+				finish()
+			}
+		}()
+		ctx = context.WithValue(ctx, mediaWorkspaceContextKey{}, workspaceID)
+		if !p.markMediaSending(ctx) {
+			p.tellUser(ctx, creds, binding, target, mediaSendUnknownText)
+			return nil
+		}
+		if _, err := p.currentMediaCredentials(ctx, creds, binding, workspaceID); err != nil {
+			return err
+		}
+	}
+	if content == "" {
+		// Nothing to say, but there may be something to show. The
+		// delivery path no-ops on its own when the reply carried no
+		// files, so this costs one lookup and never a stray message.
+		handedOff = p.deliverAttachmentsAsync(ctx, creds, binding, target, workspaceID, payload)
+		return nil
+	}
+	// A plain answer with bound images also needs an updatable card. The
+	// bounded metadata probe does not read bytes or wait for an upload.
+	markdown := containsMarkdown(content) || p.replyNeedsMediaCard(ctx, workspaceID, payload)
+
+	// used records the target the send actually went out on. The whole
+	// point of sendWithReplyFallback is that it may retry without
+	// threading, and files must land in the same conversation the answer
+	// landed in — not in the topic the answer was bounced out of.
+	var used ReplyTarget
+	var cardID string
+	send := func(t ReplyTarget) error {
+		if _, owned := ctx.Value(mediaDeliveryContextKey{}).(*mediaDeliveryOwner); owned {
+			// Metadata lookup and reply fallback can outlive a revocation or
+			// takeover. Re-prove authority immediately before each send.
+			current, err := p.currentMediaCredentials(ctx, creds, binding, workspaceID)
+			if err != nil {
+				return err
+			}
+			creds = current
+		}
+		used = t
+		if markdown {
+			var err error
+			cardID, err = p.client.SendMarkdownCard(ctx, SendMarkdownCardParams{
 				InstallationID: creds,
 				ChatID:         outboundChatID(binding),
-				Markdown:       markdown,
+				Markdown:       prependMarkdownMention(mentionOpenID, content),
 				ReplyTarget:    t,
 			})
 			return err
-		})
-	}
-	text := prependTextMention(mentionOpenID, content)
-	return sendWithReplyFallback(p.cfg.Logger, "send text message", target, func(t ReplyTarget) error {
+		}
 		_, err := p.client.SendTextMessage(ctx, SendTextParams{
 			InstallationID: creds,
 			ChatID:         outboundChatID(binding),
-			Text:           text,
+			Text:           prependTextMention(mentionOpenID, content),
 			ReplyTarget:    t,
 		})
 		return err
-	})
+	}
+	op := "send text message"
+	if markdown {
+		op = "send markdown card"
+	}
+	if err := sendWithReplyFallback(p.cfg.Logger, op, target, send); err != nil {
+		return err
+	}
+	if markdown && p.objects != nil && p.media != nil {
+		if cardID == "" {
+			return errors.New("lark reply card identity unconfirmed")
+		}
+		ctx = context.WithValue(ctx, mediaReplyCardContextKey{}, &mediaReplyCard{
+			messageID: cardID, markdown: prependMarkdownMention(mentionOpenID, content),
+		})
+	}
+
+	// The answer is out; the files are the second hop. Spawned rather
+	// than awaited because this runs on the synchronous publish
+	// goroutine — see outbound_media.go for why the answer must never
+	// wait behind an upload. Best-effort by construction: the reply is
+	// already delivered, so nothing here can fail the reply.
+	handedOff = p.deliverAttachmentsAsync(ctx, creds, binding, used, workspaceID, payload)
+	return nil
 }
 
 // outboundChatID recovers the real Lark chat id from the chat binding. The
@@ -611,6 +716,12 @@ func sendWithReplyFallback(log *slog.Logger, op string, target ReplyTarget, send
 	err := send(target)
 	if err == nil {
 		return nil
+	}
+	// A later explicit refusal cannot disprove an earlier accepted send whose
+	// response was lost. Never move that uncertain reply to a new destination.
+	var uncertain *mediaSendUnconfirmed
+	if errors.As(err, &uncertain) {
+		return fmt.Errorf("%s: %w", op, err)
 	}
 	if target.IsSet() && isThreadReplyUnsupported(err) {
 		log.Warn("lark: reply target unusable, retrying at chat level",

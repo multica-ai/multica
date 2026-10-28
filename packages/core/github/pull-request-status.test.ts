@@ -2,7 +2,10 @@ import { describe, expect, it } from "vitest";
 import {
   deriveChecksStatus,
   deriveMergeStatus,
+  derivePullRequestVerdict,
+  formatPullRequestDiffCount,
   shouldShowPullRequestStats,
+  stripIssueKeyFromTitle,
 } from "./pull-request-status";
 
 describe("deriveChecksStatus", () => {
@@ -166,5 +169,114 @@ describe("shouldShowPullRequestStats", () => {
     expect(shouldShowPullRequestStats({ deletions: 1 })).toBe(true);
     expect(shouldShowPullRequestStats({ changed_files: 1 })).toBe(true);
     expect(shouldShowPullRequestStats({ additions: 437, deletions: 6, changed_files: 6 })).toBe(true);
+  });
+});
+
+describe("derivePullRequestVerdict", () => {
+  const open = { state: "open" as const, snapshot_available: true };
+
+  it("ends at merged / closed whatever the snapshot says", () => {
+    const failing = { checks_rollup: "failure" as const, checks_failed: 2, mergeable: "conflicting" as const };
+    expect(derivePullRequestVerdict({ ...failing, state: "merged" })).toEqual({ kind: "merged" });
+    expect(derivePullRequestVerdict({ ...failing, state: "closed" })).toEqual({ kind: "closed" });
+  });
+
+  it("leads with a failure and keeps the names and a conflict alongside it", () => {
+    expect(
+      derivePullRequestVerdict({
+        ...open,
+        checks_rollup: "failure",
+        checks_total: 19,
+        checks_failed: 2,
+        failed_check_names: ["frontend", "backend"],
+        mergeable: "conflicting",
+      }),
+    ).toEqual({ kind: "failed", failed: 2, total: 19, names: ["frontend", "backend"], conflicting: true });
+  });
+
+  it("does not let `unstable` add anything to a failure", () => {
+    expect(
+      derivePullRequestVerdict({ ...open, checks_rollup: "failure", checks_failed: 1, merge_state_status: "unstable" }),
+    ).toMatchObject({ kind: "failed", conflicting: false });
+  });
+
+  it("puts a conflict ahead of running checks", () => {
+    expect(
+      derivePullRequestVerdict({ ...open, checks_rollup: "pending", checks_running: 3, mergeable: "conflicting" }).kind,
+    ).toBe("conflicting");
+  });
+
+  it("reports running checks with their progress", () => {
+    expect(
+      derivePullRequestVerdict({ ...open, checks_rollup: "pending", checks_total: 19, checks_passed: 11, checks_running: 8 }),
+    ).toEqual({ kind: "running", passed: 11, total: 19, running: 8 });
+  });
+
+  it.each([
+    ["behind", "behind"],
+    ["blocked", "blocked"],
+    ["clean", "ready"],
+    ["has_hooks", "ready"],
+  ] as const)("maps passing checks with merge state %s to %s", (merge_state_status, kind) => {
+    expect(
+      derivePullRequestVerdict({ ...open, checks_rollup: "success", checks_total: 3, merge_state_status }).kind,
+    ).toBe(kind);
+  });
+
+  it("never calls a draft ready, but still surfaces its problems", () => {
+    const draft = { ...open, state: "draft" as const };
+    expect(derivePullRequestVerdict({ ...draft, checks_rollup: "success", merge_state_status: "clean" }).kind).toBe("draft");
+    expect(derivePullRequestVerdict({ ...draft, checks_rollup: "failure", checks_failed: 1 }).kind).toBe("failed");
+  });
+
+  it("falls back to the checks verdict when GitHub has not decided mergeability", () => {
+    expect(derivePullRequestVerdict({ ...open, checks_rollup: "success", checks_total: 4 })).toEqual({ kind: "passed", total: 4 });
+    expect(derivePullRequestVerdict({ ...open, checks_rollup: "success", merge_state_status: "unstable" }).kind).toBe("passed");
+    expect(derivePullRequestVerdict({ ...open, checks_rollup: null }).kind).toBe("no_checks");
+  });
+
+  it("says nothing when there is no current snapshot", () => {
+    expect(
+      derivePullRequestVerdict({ state: "open", snapshot_available: false, checks_rollup: "failure", mergeable: "conflicting" }),
+    ).toEqual({ kind: "unknown" });
+    expect(derivePullRequestVerdict({ state: "open" })).toEqual({ kind: "unknown" });
+  });
+});
+
+describe("stripIssueKeyFromTitle", () => {
+  it.each([
+    ["MUL-7732: regroup settings", "regroup settings"],
+    ["MUL-7732 regroup settings", "regroup settings"],
+    ["mul-7732: regroup settings", "regroup settings"],
+    ["fix(chat): keep tool rows (MUL-7732)", "fix(chat): keep tool rows"],
+  ])("strips the issue's own key from %j", (title, expected) => {
+    expect(stripIssueKeyFromTitle(title, "MUL-7732")).toBe(expected);
+  });
+
+  it.each([
+    ["MUL-77321: another issue"],
+    ["MUL-7700: another issue"],
+    ["regroup MUL-7732 settings"],
+    ["MUL-7732"],
+  ])("leaves %j as written", (title) => {
+    expect(stripIssueKeyFromTitle(title, "MUL-7732")).toBe(title);
+  });
+
+  it("leaves the title alone without an identifier", () => {
+    expect(stripIssueKeyFromTitle("MUL-1: x", "")).toBe("MUL-1: x");
+  });
+});
+
+describe("formatPullRequestDiffCount", () => {
+  it.each([
+    [0, "0"],
+    [999, "999"],
+    [1000, "1k"],
+    [6743, "6.7k"],
+    [4557, "4.6k"],
+    [99_960, "100k"],
+    [123_456, "123k"],
+  ])("formats %d as %s", (count, expected) => {
+    expect(formatPullRequestDiffCount(count)).toBe(expected);
   });
 });

@@ -2236,3 +2236,21 @@ func TestBuildPromptIssueStateFallsBackToTheRead(t *testing.T) {
 		})
 	}
 }
+
+// A wakeup the server folded into this run reaches the agent whatever started
+// the run, and nothing is added when none joined.
+func TestPromptCarriesJoinedWakeups(t *testing.T) {
+	note := "Wakeup w1 fired while this run was waiting to start. Instruction:\nSummarize the discussion"
+	for name, task := range map[string]Task{
+		"assignment": {IssueID: "issue-1", WakeupJoined: note},
+		"comment":    {IssueID: "issue-1", TriggerCommentID: "c1", TriggerCommentContent: "please look", WakeupJoined: note},
+	} {
+		out := BuildPrompt(task, "claude")
+		if !strings.Contains(out, "[WAKEUP — joined this run]\n"+note) {
+			t.Errorf("%s prompt lacks the joined wakeup:\n%s", name, out)
+		}
+	}
+	if out := BuildPrompt(Task{IssueID: "issue-1"}, "claude"); strings.Contains(out, "joined this run") {
+		t.Errorf("prompt without joined wakeups mentions them:\n%s", out)
+	}
+}

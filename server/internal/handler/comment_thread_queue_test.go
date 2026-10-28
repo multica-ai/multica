@@ -92,7 +92,7 @@ func TestCommentThreadQueuesMergeAndExecuteIndependently(t *testing.T) {
 		t.Fatalf("completion duplicated another thread: got %d tasks", len(tasks))
 	}
 	// A row-specific rerun replaces only A's pending successor.
-	rerun, err := testHandler.TaskService.RerunIssue(ctx, issue.ID, a.ID, pgtype.UUID{}, parseUUID(testUserID), nil)
+	rerun, err := testHandler.TaskService.RerunIssue(ctx, issue.ID, a.ID, pgtype.UUID{}, parseUUID(testUserID), false, nil)
 	if err != nil {
 		t.Fatal(err)
 	}

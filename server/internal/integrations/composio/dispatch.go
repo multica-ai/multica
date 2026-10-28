@@ -180,17 +180,8 @@ func normaliseAllowlistToSet(allow []string) map[string]struct{} {
 	return out
 }
 
-// pinConnectedAccounts intersects the originator's active connection rows
-// with the allowlist set and returns the `connected_accounts` map shape the
-// Composio /tool_router/session endpoint expects: one entry per allowlisted
-// toolkit slug, value = array of the originator's connected account ids for
-// that toolkit. The product currently permits one active account per toolkit,
-// so each array has one element.
-//
-// Newest-wins on duplicates: rows arrive ordered by connected_at DESC
-// (see ListActiveUserComposioConnections), so the first row seen for a
-// given slug is the most recently connected account, matching the
-// single-account-per-toolkit invariant CreateMCPSession already documents.
+// pinConnectedAccounts intersects active connection rows with allowed toolkits.
+// Rows must be ordered newest first; the first account per toolkit wins.
 func pinConnectedAccounts(rows []db.UserComposioConnection, allowSet map[string]struct{}) map[string]any {
 	pinned := make(map[string]any, len(rows))
 	for _, row := range rows {

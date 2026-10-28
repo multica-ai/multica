@@ -104,6 +104,17 @@ type MediaRef struct {
 	// partial media failure cannot shift later attachments into the wrong place.
 	InlinePlaceholder string
 	InlineIndex       int
+	// InlineIDOnly makes that replacement name the attachment instead of
+	// embedding it: the marker becomes itself carrying the attachment's id,
+	// "[Image: 019fe1d3-…]", rather than a Markdown link to the object.
+	//
+	// Set it when the marker REFERS to an attachment rather than carrying
+	// one — a picture the message quotes belongs to a message somebody else
+	// sent, and rendering it inline would state this sender attached it. The
+	// id is the point either way: it is what joins the marker to the entry
+	// the agent sees in the attachment list, and what it passes to
+	// `multica attachment download`.
+	InlineIDOnly bool
 }
 
 // ReplyCtx describes the message an inbound message quotes / replies to.

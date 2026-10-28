@@ -46,6 +46,7 @@ import {
 } from "@multica/ui/components/ui/dropdown-menu";
 import { Popover, PopoverTrigger, PopoverContent } from "@multica/ui/components/ui/popover";
 import { Tooltip, TooltipTrigger, TooltipContent } from "@multica/ui/components/ui/tooltip";
+import { TooltipHint } from "@multica/ui/components/common/tooltip-hint";
 import { Button } from "@multica/ui/components/ui/button";
 import { EmojiPicker } from "@multica/ui/components/common/emoji-picker";
 import { ContentEditor, type ContentEditorRef, TitleEditor } from "../editor";
@@ -61,6 +62,7 @@ import {
 import { ProjectStartDatePicker } from "../projects/components/project-start-date-picker";
 import { ProjectDueDatePicker } from "../projects/components/project-due-date-picker";
 import { PillButton } from "../common/pill-button";
+import { WorkflowPill } from "../workflows/workflow-pill";
 import { githubShortLabel } from "../common/github-url";
 import {
   GithubRefField,
@@ -110,17 +112,25 @@ export function buildLocalDirectoryResourceRef({
 
 function RepoUrlText({
   url,
+  description,
   className,
 }: {
   url: string;
+  description?: string;
   className?: string;
 }) {
+  const label = description?.trim();
   return (
     <Tooltip>
       <TooltipTrigger
         render={
-          <span className={cn("truncate flex-1 text-left", className)}>
-            {githubShortLabel(url)}
+          <span className={cn("min-w-0 flex-1 text-left", className)}>
+            <span className="block truncate">{githubShortLabel(url)}</span>
+            {label && (
+              <span className="block truncate text-micro text-muted-foreground">
+                {label}
+              </span>
+            )}
           </span>
         }
       />
@@ -303,6 +313,8 @@ export function CreateProjectModal({ onClose }: { onClose: () => void }) {
     setLocalMode(null);
   };
 
+  const [workflowId, setWorkflowId] = useState<string | null>(null);
+
   // Sync field changes to draft store
   const updateTitle = (v: string) => { setTitle(v); setDraft({ title: v }); };
   const updateStatus = (v: ProjectStatus) => { setStatus(v); setDraft({ status: v }); };
@@ -387,6 +399,7 @@ export function CreateProjectModal({ onClose }: { onClose: () => void }) {
         lead_id: leadId,
         start_date: startDate || undefined,
         due_date: dueDate || undefined,
+        ...(workflowId ? { workflow_id: workflowId } : {}),
         // Server attaches these in the same transaction as the project.
         resources,
       });
@@ -515,17 +528,19 @@ export function CreateProjectModal({ onClose }: { onClose: () => void }) {
 
         <div className="px-5 pb-2 shrink-0">
           <Popover open={iconPickerOpen} onOpenChange={setIconPickerOpen}>
-            <PopoverTrigger
-              render={
-                <button
-                  type="button"
-                  className="text-display-sm cursor-pointer rounded-lg p-1 -ml-1 hover:bg-accent/60 transition-colors"
-                  title={t(($) => $.create_project.icon_tooltip)}
-                >
-                  {icon || "📁"}
-                </button>
-              }
-            />
+            <TooltipHint label={t(($) => $.create_project.icon_tooltip)}>
+              <PopoverTrigger
+                render={
+                  <button
+                    type="button"
+                    className="text-display-sm cursor-pointer rounded-lg p-1 -ml-1 hover:bg-accent/60 transition-colors"
+                    aria-label={t(($) => $.create_project.icon_tooltip)}
+                  >
+                    {icon || "📁"}
+                  </button>
+                }
+              />
+            </TooltipHint>
             <PopoverContent align="start" className="w-auto p-0">
               <EmojiPicker
                 onSelect={(emoji) => {
@@ -602,6 +617,8 @@ export function CreateProjectModal({ onClose }: { onClose: () => void }) {
               ))}
             </DropdownMenuContent>
           </DropdownMenu>
+
+          <WorkflowPill value={workflowId} onChange={setWorkflowId} />
 
           <Popover
             open={leadOpen}
@@ -830,7 +847,7 @@ export function CreateProjectModal({ onClose }: { onClose: () => void }) {
                                 className="size-3.5"
                               />
                               <GithubIcon className="size-3.5" />
-                              <RepoUrlText url={repo.url} />
+                              <RepoUrlText url={repo.url} description={repo.description} />
                             </button>
                           );
                         })}
@@ -887,7 +904,10 @@ export function CreateProjectModal({ onClose }: { onClose: () => void }) {
                         <div key={url} className="space-y-1">
                           <div className="flex items-center gap-2 text-caption">
                             <GithubIcon className="size-3 shrink-0 text-muted-foreground" />
-                            <RepoUrlText url={url} />
+                            <RepoUrlText
+                              url={url}
+                              description={workspaceRepos.find((repo) => repo.url === url)?.description}
+                            />
                             {/* The ref rides beside the repo it belongs to,
                                 not in one field for the whole list: each repo
                                 can start somewhere different. */}
@@ -968,14 +988,16 @@ export function CreateProjectModal({ onClose }: { onClose: () => void }) {
                             {selectedLocalPath}
                           </div>
                         </div>
-                        <button
-                          type="button"
-                          onClick={clearLocalDirectory}
-                          className="text-muted-foreground hover:text-foreground"
-                          aria-label={t(($) => $.create_project.local_clear)}
-                        >
-                          <XIcon className="size-3" />
-                        </button>
+                        <TooltipHint label={t(($) => $.create_project.local_clear)}>
+                          <button
+                            type="button"
+                            onClick={clearLocalDirectory}
+                            className="text-muted-foreground hover:text-foreground"
+                            aria-label={t(($) => $.create_project.local_clear)}
+                          >
+                            <XIcon className="size-3" />
+                          </button>
+                        </TooltipHint>
                       </div>
                       <div className="flex items-center gap-1.5">
                         <Popover open={localModeOpen} onOpenChange={setLocalModeOpen}>

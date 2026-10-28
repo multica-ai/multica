@@ -6,6 +6,7 @@ import {
   indexOfImageKey,
   isImageAttachment,
   matchAttachmentByURL,
+  orderStandaloneAttachments,
   selectStandaloneAttachments,
 } from "./image-sequence";
 
@@ -292,12 +293,55 @@ describe("collectAttachmentSequence", () => {
     ]);
   });
 
+  it("tags each item with the block it first appeared in", () => {
+    const shared = attachment({ id: UUID_A });
+    const own = attachment({ id: UUID_B, filename: "own.png" });
+    const sequence = collectAttachmentSequence(
+      [
+        {
+          id: "description",
+          content: `![](/api/attachments/${UUID_A}/download)`,
+          attachments: [shared],
+          standalone: false,
+        },
+        { id: "comment-1", content: `![](/api/attachments/${UUID_A}/download)`, attachments: [shared, own] },
+        { content: "![untagged](https://cdn/x.png)" },
+      ],
+      previewable,
+    );
+    expect(sequence.map((i) => [i.key, i.blockId])).toEqual([
+      [UUID_A, "description"],
+      [UUID_B, "comment-1"],
+      ["https://cdn/x.png", undefined],
+    ]);
+  });
+
   it("keeps markdown images even when the rule would reject their caption", () => {
     const sequence = collectAttachmentSequence(
       [{ content: "![报告图表](https://cdn/chart)" }],
       () => false,
     );
     expect(sequence.map((i) => i.key)).toEqual(["https://cdn/chart"]);
+  });
+});
+
+describe("orderStandaloneAttachments", () => {
+  it("puts images first, then every other file — HTML included — keeping order within each", () => {
+    const md = attachment({ id: "md", filename: "notes.md", content_type: "text/markdown" });
+    const shot1 = attachment({ id: "s1", filename: "a.png" });
+    const page = attachment({ id: "h", filename: "report.html", content_type: "text/html; charset=utf-8" });
+    const csv = attachment({ id: "csv", filename: "data.csv", content_type: "text/csv" });
+    const shot2 = attachment({ id: "s2", filename: "b.jpg", content_type: "" });
+    expect(orderStandaloneAttachments([md, shot1, page, csv, shot2]).map((a) => a.id)).toEqual([
+      "s1", "s2", "md", "h", "csv",
+    ]);
+  });
+
+  it("is the order the sequence walks a block's standalone files in", () => {
+    const md = attachment({ id: UUID_A, filename: "notes.md", content_type: "text/markdown" });
+    const shot = attachment({ id: UUID_B, filename: "a.png" });
+    const sequence = collectAttachmentSequence([{ attachments: [md, shot] }], () => true);
+    expect(sequence.map((i) => i.key)).toEqual([UUID_B, UUID_A]);
   });
 });
 

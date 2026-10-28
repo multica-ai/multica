@@ -76,7 +76,7 @@ import type {
   ProjectStatus,
   WorkingAgentSummary,
 } from "@multica/core/types";
-import { formatActorRef, isActorPropertyType, isFilterablePropertyType, isScalarPropertyType, propertyFilterValueKey, PROPERTY_FILTER_OP_SYMBOLS, PROPERTY_FILTER_OPS_BY_TYPE, type PropertyFilterOp, type PropertyFilterValue } from "@multica/core/types";
+import { formatActorRef, isActorPropertyType, isFilterablePropertyType, isListPropertyType, isScalarPropertyType, propertyFilterValueKey, PROPERTY_FILTER_OP_SYMBOLS, PROPERTY_FILTER_OPS_BY_TYPE, type PropertyFilterOp, type PropertyFilterValue } from "@multica/core/types";
 import { ProjectIcon } from "../../projects/components/project-icon";
 import { useProjectStatusLabels } from "../../projects/components/labels";
 import { ActorAvatar } from "../../common/actor-avatar";
@@ -122,6 +122,7 @@ import { cn } from "@multica/ui/lib/utils";
 import { PAGE_GUTTER } from "../../layout/page-header";
 import { useT } from "../../i18n";
 import { useStatusOptions } from "../utils/status-options";
+import { useColumnStatuses } from "../surface/column-statuses-context";
 import { NO_PROPERTY_VALUE } from "../utils/filter";
 import { matchesPinyin } from "../../editor/extensions/pinyin-match";
 import { FILTER_ITEM_CLASS, HoverCheck } from "../../common/hover-check";
@@ -133,9 +134,7 @@ type LocalDateRange = {
   to?: Date;
 };
 
-// ---------------------------------------------------------------------------
 // Helpers
-// ---------------------------------------------------------------------------
 
 function getActiveFilterCount(
   state: {
@@ -305,15 +304,11 @@ function useIssueCounts(
   }, [allIssues, serverFacets]);
 }
 
-// ---------------------------------------------------------------------------
 // Scope config
-// ---------------------------------------------------------------------------
 
 const SCOPE_VALUES: IssuesScope[] = ["all", "members", "agents"];
 
-// ---------------------------------------------------------------------------
 // Actor sub-menu content (shared between Assignee and Creator)
-// ---------------------------------------------------------------------------
 
 function ActorSubContent({
   counts,
@@ -498,9 +493,7 @@ function ActorSubContent({
   );
 }
 
-// ---------------------------------------------------------------------------
 // Project sub-menu content
-// ---------------------------------------------------------------------------
 
 function ProjectSubContent({
   counts,
@@ -599,9 +592,7 @@ function ProjectSubContent({
   );
 }
 
-// ---------------------------------------------------------------------------
 // Project status sub-menu content
-// ---------------------------------------------------------------------------
 
 function ProjectStatusSubContent({
   selected,
@@ -641,9 +632,7 @@ function ProjectStatusSubContent({
   );
 }
 
-// ---------------------------------------------------------------------------
 // Label sub-menu content
-// ---------------------------------------------------------------------------
 
 function LabelSubContent({
   counts,
@@ -785,10 +774,11 @@ function PropertyFilterOptions({
     actorId: undefined as string | undefined,
   };
   // Scalar value state lives at the top level so the hooks stay unconditional
-  // (Rules of Hooks): it is only rendered for text / number / date / url, but
-  // must be declared regardless of which branch runs. The draft syncs to the
-  // committed scalar member whenever that changes, so a filter cleared or
-  // rewritten elsewhere cannot be written back from a stale input.
+  // (Rules of Hooks): it is only rendered for text / number / date / url and
+  // the list types (equality-only input), but must be declared regardless of
+  // which branch runs. The draft syncs to the committed scalar member whenever
+  // that changes, so a filter cleared or rewritten elsewhere cannot be written
+  // back from a stale input.
   const committedMember = selected.find((member) => member !== NO_PROPERTY_VALUE);
   const committedScalar =
     typeof committedMember === "object" ? committedMember.value : (committedMember ?? "");
@@ -833,9 +823,9 @@ function PropertyFilterOptions({
     noValueOption,
   ];
 
-  if (isScalarPropertyType(property.type)) {
+  if (isScalarPropertyType(property.type) || isListPropertyType(property.type)) {
     const placeholder =
-      property.type === "url"
+      property.type === "url" || property.type === "multi_url"
         ? t(($) => $.pickers.custom_property.url_placeholder)
         : property.type === "number"
           ? t(($) => $.pickers.custom_property.number_placeholder)
@@ -855,6 +845,12 @@ function PropertyFilterOptions({
       if (op === "after") return t(($) => $.pickers.custom_property.op_after);
       return PROPERTY_FILTER_OP_SYMBOLS[op] ?? op;
     };
+    // List types are equality-only: their PROPERTY_FILTER_OPS_BY_TYPE entry is
+    // empty by design, and looking it up needs the scalar narrowing anyway
+    // (IssueProperty.type is a lenient string).
+    const scalarOps = isScalarPropertyType(property.type)
+      ? (PROPERTY_FILTER_OPS_BY_TYPE[property.type] ?? [])
+      : [];
     const opButtons: { op: PropertyFilterOp | "is"; label: string }[] = [
       {
         op: "is",
@@ -863,7 +859,7 @@ function PropertyFilterOptions({
             ? "="
             : t(($) => $.pickers.custom_property.op_is),
       },
-      ...(PROPERTY_FILTER_OPS_BY_TYPE[property.type] ?? []).map((op) => ({
+      ...scalarOps.map((op) => ({
         op,
         label: scalarOperatorLabel(op),
       })),
@@ -1033,9 +1029,7 @@ function PropertyFilterOptions({
   );
 }
 
-// ---------------------------------------------------------------------------
 // Date sub-menu content
-// ---------------------------------------------------------------------------
 
 function DateSubContent({
   value,
@@ -1157,9 +1151,7 @@ function DateSubContent({
   );
 }
 
-// ---------------------------------------------------------------------------
 // ViewRefreshIndicator
-// ---------------------------------------------------------------------------
 
 /**
  * Neutral "view is revalidating" slot for the header controls cluster.
@@ -1184,9 +1176,7 @@ export function ViewRefreshIndicator({ active }: { active: boolean }) {
   );
 }
 
-// ---------------------------------------------------------------------------
 // IssuesHeader
-// ---------------------------------------------------------------------------
 
 export function IssuesHeader({
   scopedIssues,
@@ -1263,10 +1253,7 @@ export function IssuesHeader({
   );
   // The save dialog's default variant: while a saved view is open the view's
   // own variant wins (the rows on screen ARE that variant — a copy must not
-  // silently widen to the page tab); otherwise the page tab applies. Memoized
-  // on primitives: the dialog resets its draft when this prop's identity
-  // changes, so a fresh object per header render would wipe a half-typed
-  // name on any background refetch.
+  // silently widen to the page tab); otherwise the page tab applies.
   const dialogActorKind = activeView
     ? actorKindForViewVariant(activeView.scope_variant)
     : scope;
@@ -1937,8 +1924,19 @@ export function IssueDisplayControls({
   const tableGrouping = useViewStore((s) => s.tableGrouping ?? "none");
   const tableHierarchy = useViewStore((s) => s.tableHierarchy ?? true);
   const showSubIssues = useViewStore((s) => s.showSubIssues);
+  const hiddenStatuses = useViewStore((s) => s.hiddenStatuses);
   const act = useViewStoreApi().getState();
   const headerWsId = useWorkspaceId();
+  const columnStatuses = useColumnStatuses();
+  const statusOptions = useStatusOptions(headerWsId);
+  const columnOptions = useMemo(() => {
+    if (!columnStatuses) return [];
+    const optionByKey = new Map(statusOptions.map((option) => [option.key, option]));
+    return columnStatuses.flatMap((key) => optionByKey.get(key) ?? []);
+  }, [columnStatuses, statusOptions]);
+  const showColumnToggles =
+    columnOptions.length > 0 &&
+    (viewMode === "list" || viewMode === "swimlane" || (viewMode === "board" && grouping === "status"));
   // Active custom-property catalog: drives the filter sections, dynamic
   // sort/grouping options, and the card-property toggles below.
   const { data: workspaceProperties = [] } = useQuery(propertyListOptions(headerWsId));
@@ -2268,6 +2266,45 @@ export function IssueDisplayControls({
                   </Select>
                 </div>
               )}
+              {showColumnToggles && (
+                <div>
+                  <span className="text-caption font-medium text-muted-foreground">
+                    {t(($) => $.display.columns_section)}
+                  </span>
+                  {/* Same chip grammar as Card properties: pressed = column shown.
+                      A status filter picks the columns itself and overrides
+                      these, so the chips lock rather than flip to no effect. */}
+                  <div className="mt-2 flex flex-wrap gap-1">
+                    {columnOptions.map((option) => (
+                      <Toggle
+                        key={option.key}
+                        size="sm"
+                        variant="outline"
+                        pressed={!hiddenStatuses.includes(option.key)}
+                        disabled={statusFilters.length > 0}
+                        onPressedChange={(pressed) =>
+                          pressed ? act.showStatus(option.key) : act.hideStatus(option.key)
+                        }
+                        className="h-6 max-w-40 gap-1.5 rounded-md px-2 text-caption text-muted-foreground hover:bg-muted/60 aria-pressed:border-transparent aria-pressed:bg-accent aria-pressed:text-accent-foreground aria-pressed:hover:bg-accent/80"
+                      >
+                        <StatusIcon
+                          status={option.key}
+                          category={option.category}
+                          color={option.color}
+                          icon={option.icon}
+                          className="size-3 shrink-0"
+                        />
+                        <span className="truncate">{option.label}</span>
+                      </Toggle>
+                    ))}
+                  </div>
+                  {statusFilters.length > 0 && (
+                    <p className="mt-1.5 text-caption text-faint-foreground">
+                      {t(($) => $.display.columns_locked_by_filter)}
+                    </p>
+                  )}
+                </div>
+              )}
               {viewMode === "table" && (
                 <label className="flex cursor-pointer items-center justify-between gap-3">
                   <span className="min-w-0">
@@ -2336,7 +2373,6 @@ export function IssueDisplayControls({
                         act.setSortDirection(sortDirection === "asc" ? "desc" : "asc")
                       }
                       aria-label={sortDirectionLabel}
-                      title={sortDirectionLabel}
                     >
                       {sortDirectionLabel}
                     </Button>

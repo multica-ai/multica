@@ -479,7 +479,6 @@
     "scope": "Scope",
     "issue": "Issue",
     "trigger": "Trigger",
-    "next": "Wakeup state",
     "enabled": "Enabled",
     "all_triggers": "All triggers",
     "event": "Event",
@@ -487,7 +486,6 @@
     "recurring": "Recurring",
     "all_agents": "All agents",
     "search": "Search issues or agents",
-    "search_action": "Search",
     "running": "Running",
     "active_runs": "{{count}} active runs",
     "issue_closed": "Issue closed",
@@ -513,13 +511,32 @@
       "active": "Waiting or executing",
       "all": "All",
       "disabled": "Turned off",
-      "ended": "Ended"
+      "ended": "Ended",
+      "paused": "Paused"
     },
     "target_agent": "Wake agent",
-    "wakeup_run": "Runs from wakeup",
     "empty_filtered": "No matching wakeups",
     "clear_filters": "Clear filters",
     "batch_success": "Turned off {{count}} wakeup rules",
-    "batch_partial": "Turned off {{succeeded}}; {{failed}} failed. Failed items remain selected for retry."
+    "batch_partial": "Turned off {{succeeded}}; {{failed}} failed. Failed items remain selected for retry.",
+    "source": "Source",
+    "sources": {
+      "all": "Source: All",
+      "member": "Members",
+      "agent": "Agents",
+      "system": "System"
+    },
+    "runs_7d": "Runs (7 days)",
+    "ends": "Ends",
+    "until_issue_ends": "Until the issue ends",
+    "fires_once": "Triggers once",
+    "assignee_target": "Assignee · {{name}}",
+    "no_target": "No agent assignee",
+    "banner_one": "{{count}} wakeup was paused automatically: {{issue}} “{{condition}}” — {{reason}}",
+    "banner_other": "{{count}} wakeups were paused automatically. Latest: {{issue}} “{{condition}}” — {{reason}}",
+    "banner_view": "View",
+    "create": "New wakeup",
+    "create_pick_issue": "Choose the issue to add a wakeup to",
+    "create_pick_issue_description": "The wakeup belongs to this issue and ends with it."
   }
 }

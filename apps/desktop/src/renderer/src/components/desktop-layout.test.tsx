@@ -155,20 +155,20 @@ describe("DesktopShell sidebar trigger", () => {
     expect(mainTopBar).toHaveClass("transition-[padding-left]");
     expect(mainTopBar).toHaveStyle({
       paddingLeft:
-        "max(0px, calc(256px - var(--sidebar-live-width, var(--sidebar-width))))",
+        "max(0px, calc(200px - var(--sidebar-live-width, var(--sidebar-width))))",
     });
 
     fireEvent.click(
       container.querySelector('[data-slot="sidebar-trigger"]')!,
     );
-    expect(mainTopBar).toHaveStyle({ paddingLeft: "256px" });
+    expect(mainTopBar).toHaveStyle({ paddingLeft: "200px" });
     expect(queryByRole("status", { name: /loading workspace/i })).toBeNull();
   });
 
   it("keeps full clearance for compact layouts in either sidebar state", () => {
     Object.defineProperty(window, "innerWidth", {
       configurable: true,
-      value: 800,
+      value: 700,
     });
 
     const { container, getByRole, getByTestId } = renderShell();
@@ -179,20 +179,20 @@ describe("DesktopShell sidebar trigger", () => {
       "data-sidebar-state",
       "expanded",
     );
-    expect(mainTopBar).toHaveStyle({ paddingLeft: "256px" });
+    expect(mainTopBar).toHaveStyle({ paddingLeft: "200px" });
 
     fireEvent.click(getByRole("button", { name: "Collapse sidebar" }));
     expect(getByTestId("page-content")).toHaveAttribute(
       "data-sidebar-state",
       "collapsed",
     );
-    expect(mainTopBar).toHaveStyle({ paddingLeft: "256px" });
+    expect(mainTopBar).toHaveStyle({ paddingLeft: "200px" });
 
     fireEvent.click(getByRole("button", { name: "Expand sidebar" }));
     expect(getByTestId("page-content")).toHaveAttribute(
       "data-sidebar-state",
       "expanded",
     );
-    expect(mainTopBar).toHaveStyle({ paddingLeft: "256px" });
+    expect(mainTopBar).toHaveStyle({ paddingLeft: "200px" });
   });
 });

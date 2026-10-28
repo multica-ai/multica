@@ -61,11 +61,26 @@ const (
 	// work, so such a daemon keeps getting a fresh directory and the parent's
 	// stays untouched on disk.
 	DaemonCapabilityCheckoutKeepsWorkV1 = "checkout-keeps-work-v1"
+	// DaemonCapabilityJoinedWakeupsV1 advertises that the daemon renders the
+	// claim's wakeup_joined field into the prompt. Only such a claim takes
+	// along the inputs of wakeup rules that waited for this run; for any other
+	// daemon those rules keep their inputs and start a run of their own.
+	DaemonCapabilityJoinedWakeupsV1 = "joined-wakeups-v1"
 	// DaemonCapabilityTaskSupplementV1 advertises that this provider run can accept
 	// an additional text instruction without cancelling or starting a task.
 	// It is persisted when this exact task enters running; absence always means
 	// unsupported so mixed server/daemon versions fail closed.
 	DaemonCapabilityTaskSupplementV1 = "task-supplement-v1"
+	// DaemonCapabilityPiProcessCleanupV1 promises that this Pi/omp run joins
+	// descendant cleanup and explicitly confirms its cancellation outcome.
+	// Persist only at start; old daemons must retain their cancellation contract.
+	DaemonCapabilityPiProcessCleanupV1 = "pi-process-cleanup-v1"
+	// DaemonCapabilityWorkflowStatusRulesV1 advertises that the daemon's
+	// runtime brief drops its built-in in_progress / in_review rules for an
+	// issue whose claim carries a project workflow (MUL-8145). Only then may
+	// the server leave out the workflow brief's lines that override those
+	// rules; an older daemon still states them, so it keeps getting them.
+	DaemonCapabilityWorkflowStatusRulesV1 = "workflow-status-rules-v1"
 
 	TaskSupplementFailureTurnNotStarted   = "turn_not_started"
 	TaskSupplementFailureProviderRejected = "provider_rejected"

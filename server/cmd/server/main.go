@@ -694,6 +694,9 @@ func main() {
 		LLMMaxRetries:       llmMaxRetries,
 		LLMDisableThinking:  llmDisableThinking,
 	})
+	// member_delegation_day exists only for self-host telemetry; DO_NOT_TRACK
+	// stops writing it as well as sending the snapshot.
+	h.TaskService.RecordMemberActivity = telemetryConfig.Enabled
 	var replicaQueries *db.Queries
 	if replicaPool != nil {
 		replicaQueries = db.New(replicaPool)
@@ -748,6 +751,7 @@ func main() {
 	// Queued work now expires on the same runtime-liveness signal as in-flight
 	// work, so there is no separate queue TTL to tune: a busy runtime keeps its
 	// backlog, and a departed one retires everything it owned at once.
+	go h.RunQoderConnections(sweepCtx, pool, "http://localhost:"+port)
 	go runRuntimeSweeper(sweepCtx, queries, liveness, taskSvc, bus, runtimeReconnectGrace)
 	if telemetryWorker != nil {
 		go telemetryWorker.Run(sweepCtx)
@@ -793,6 +797,10 @@ func main() {
 		go h.ChannelSupervisor.Run(sweepCtx)
 	}
 
+	if h.LarkTyping != nil {
+		go h.LarkTyping.Run(sweepCtx)
+	}
+
 	// Media intent-ledger reconciler (PR #5580): settles uploaded-but-unbound
 	// channel media objects. An independent worker so object-storage latency
 	// spikes cannot starve any other sweeper's cadence.
@@ -825,8 +833,14 @@ func main() {
 	// not fit). Crash recovery, occurrence-level idempotency, lease
 	// theft, and retry are all reused from the manager + sys_cron_executions
 	// — there is no separate goroutine for scheduled Autopilot anymore.
+	if err := schedulerMgr.Register(scheduler.SearchIndexChangePruneJob(queries)); err != nil {
+		slog.Warn("scheduler: failed to register search index change prune job", "error", err)
+	}
 	if err := schedulerMgr.Register(scheduler.IssueWakeupJob(&service.IssueWakeupService{Tasks: taskSvc})); err != nil {
 		slog.Error("scheduler: register issue wakeups", "error", err)
+	}
+	if err := schedulerMgr.Register(scheduler.ChildEventSweepJob(&service.IssueWakeupService{Tasks: taskSvc})); err != nil {
+		slog.Error("scheduler: register child-done sweep", "error", err)
 	}
 	if err := schedulerMgr.Register(scheduler.AutopilotScheduleDispatchJob(pool, queries, autopilotSvc)); err != nil {
 		slog.Warn("scheduler: failed to register autopilot_schedule_dispatch job", "error", err)

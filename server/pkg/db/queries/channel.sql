@@ -564,6 +564,39 @@ WHERE b.workspace_id = sqlc.arg('workspace_id')
 ORDER BY b.bound_at DESC
 LIMIT 1;
 
+-- name: FindChannelBindingForMemberOnAgentInstallation :one
+-- Agent-attributed notification lookup: the same member lookup as
+-- FindChannelBindingForMember, pinned to the ONE installation the agent whose
+-- activity raised the notification owns.
+--
+-- Why this exists. FindChannelBindingForMember answers by the
+-- RECIPIENT alone, so in a multi-bot org — one bot per agent, several of them
+-- bound by the same person — every notification a member receives is pushed
+-- through whichever bot they bound most recently, no matter which agent the
+-- notification is about. The recipient reads three agents' activity as if it
+-- all came from one of them. Pinning the lookup to the acting agent's bot is
+-- what makes the notification follow the bot↔agent mapping the sender is
+-- reading.
+--
+-- The tiebreak stays for the case where one member holds two channel users on
+-- the same bot (two WeCom accounts, one Multica account): both rows answer,
+-- and `:one` cannot take more than one, so the newest binding wins here
+-- exactly as it does in the recipient-wide lookup.
+--
+-- channel_type is named once and used for both columns: the installation's
+-- own discriminator and the binding's must agree, or installs of two
+-- platforms could cross-answer here.
+SELECT b.* FROM channel_user_binding b
+JOIN channel_installation ci ON ci.id = b.installation_id
+WHERE b.workspace_id = sqlc.arg('workspace_id')
+  AND b.multica_user_id = sqlc.arg('multica_user_id')
+  AND b.channel_type = sqlc.arg('channel_type')
+  AND ci.channel_type = sqlc.arg('channel_type')
+  AND ci.agent_id = sqlc.arg('agent_id')
+  AND ci.status = 'active'
+ORDER BY b.bound_at DESC
+LIMIT 1;
+
 -- name: FindReusableChannelUserBinding :one
 -- Cross-installation account-link reuse (MUL-3911). When a platform user
 -- messages an installation they have NOT linked, but the SAME user id is already
@@ -1270,6 +1303,8 @@ RETURNING storage_key;
 -- while earlier rows ran, and could expire and be reclaimed before its own
 -- DELETE was ever tried, inflating attempt/backoff for work that never
 -- happened. One row per claim means attempt counts attempts.
+-- MATERIALIZED pins the bounded candidate set so a nested-loop rescan cannot
+-- move the LIMIT window to another row after an update.
 --
 -- Due means (a) 'pending' rows older than the settle delay — an operational
 -- buffer only; correctness comes from the state flip, after which a bind can
@@ -1280,12 +1315,7 @@ RETURNING storage_key;
 -- FOR UPDATE SKIP LOCKED keeps replicas off each other's row; the
 -- object-storage DELETE happens outside any transaction, gated by the lease
 -- token. No row (ErrNoRows) means nothing is due — the sweep is done.
-UPDATE channel_media_pending_object AS obj
-SET state = CASE WHEN obj.state = 'tombstoned' THEN 'tombstoned' ELSE 'deleting' END,
-    lease_token = @lease_token,
-    lease_expires_at = now() + @lease::interval,
-    attempt = obj.attempt + 1
-FROM (
+WITH due AS MATERIALIZED (
     SELECT cand.storage_key FROM channel_media_pending_object AS cand
     WHERE cand.next_attempt_at <= now()
       AND (
@@ -1296,7 +1326,13 @@ FROM (
     ORDER BY cand.next_attempt_at
     LIMIT 1
     FOR UPDATE SKIP LOCKED
-) AS due
+)
+UPDATE channel_media_pending_object AS obj
+SET state = CASE WHEN obj.state = 'tombstoned' THEN 'tombstoned' ELSE 'deleting' END,
+    lease_token = @lease_token,
+    lease_expires_at = now() + @lease::interval,
+    attempt = obj.attempt + 1
+FROM due
 WHERE obj.storage_key = due.storage_key
 RETURNING obj.*;
 
@@ -1518,3 +1554,34 @@ WHERE channel_reply_delivery.phase <> 'settled'
   -- would be dropped as "already settled".
   AND EXCLUDED.attempt_depth >= channel_reply_delivery.attempt_depth
 RETURNING *;
+
+-- name: IsChannelMessageTypingActive :one
+-- Revalidate the exact input after a remote reaction Add. A pending debounce
+-- input has no task yet; a sealed input follows its immutable owning task.
+-- Do not use the binding's latest message or another turn's active task.
+SELECT EXISTS (
+    SELECT 1 FROM chat_message AS message
+    JOIN chat_session AS session ON session.id = message.chat_session_id
+    JOIN channel_chat_session_binding AS binding ON binding.chat_session_id = session.id
+    JOIN channel_installation AS installation ON installation.id = binding.installation_id
+    LEFT JOIN agent_task_queue AS task ON task.id = message.task_id
+    LEFT JOIN agent AS task_agent ON task_agent.id = task.agent_id
+    WHERE message.id = @message_id
+      AND session.id = @chat_session_id
+      AND session.workspace_id = @workspace_id
+      AND installation.workspace_id = @workspace_id
+      AND installation.id = @installation_id
+      AND installation.channel_type = @channel_type
+      AND binding.channel_type = @channel_type
+      AND installation.status = 'active'
+      AND session.status = 'active'
+      AND binding.retired_at IS NULL
+      AND message.role = 'user'
+      AND message.channel_ingested
+      AND NOT message.channel_typing_settled
+      AND (message.task_id IS NULL OR (
+          task_agent.workspace_id = @workspace_id
+          AND task.chat_session_id = session.id
+          AND task.status IN ('queued', 'dispatched', 'running', 'waiting_local_directory', 'deferred')
+      ))
+);

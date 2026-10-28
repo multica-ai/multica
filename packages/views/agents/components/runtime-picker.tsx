@@ -21,6 +21,7 @@ import {
   filterRuntimeMachines,
   runtimeRowLabel,
 } from "../../runtimes/components/runtime-machines";
+import { TooltipHint } from "@multica/ui/components/common/tooltip-hint";
 
 export type RuntimeFilter = "mine" | "all";
 
@@ -37,6 +38,7 @@ export function RuntimePicker({
   selectedRuntimeId,
   onSelect,
   disabled = false,
+  autoSelect = true,
 }: {
   runtimes: RuntimeDevice[];
   runtimesLoading?: boolean;
@@ -47,6 +49,8 @@ export function RuntimePicker({
   /** Blocks opening the picker while the selection cannot be honoured yet
    *  (e.g. a builder reply or a runtime rebind is in flight). */
   disabled?: boolean;
+  /** False when selecting also changes a live session's server-side binding. */
+  autoSelect?: boolean;
 }) {
   const { t } = useT("agents");
   const [open, setOpen] = useState(false);
@@ -83,25 +87,26 @@ export function RuntimePicker({
   const selectedRuntime =
     runtimes.find((d) => d.id === selectedRuntimeId) ?? null;
 
-  // Sole source of truth for seeding the parent's selection when it's empty
+  // With autoSelect, seed the parent's selection when it's empty
   // — first mount with no template runtime, runtimes arriving later over
   // WS, or filter toggle clearing to a set with no usable item. Only fires
   // when `selectedRuntimeId === ""` so a duplicate-mode pre-fill (template
   // runtime) is never silently overwritten.
   useEffect(() => {
-    if (selectedRuntimeId !== "") return;
+    if (!autoSelect || selectedRuntimeId !== "") return;
     const firstUsable = filteredRuntimes.find((r) =>
       isRuntimeUsableForUser(r, currentUserId),
     );
     if (firstUsable) onSelect(firstUsable.id);
-  }, [filteredRuntimes, selectedRuntimeId, currentUserId, onSelect]);
+  }, [autoSelect, filteredRuntimes, selectedRuntimeId, currentUserId, onSelect]);
 
-  // On filter toggle, recompute the picker's selection to a usable item
+  // With autoSelect, a filter toggle recomputes the selection to a usable item
   // in the new filter set. Pushes `""` when nothing matches; the seeding
   // effect above is a no-op in that case (correct: no usable item to pick).
   const handleFilterChange = (next: RuntimeFilter) => {
     if (next === filter) return;
     setFilter(next);
+    if (!autoSelect) return;
     const nextList = computeFilteredRuntimes(runtimes, next, currentUserId);
     const firstUsable = nextList.find((r) =>
       isRuntimeUsableForUser(r, currentUserId),
@@ -176,7 +181,9 @@ export function RuntimePicker({
                   ? t(($) => $.create_dialog.runtime_loading)
                   : selectedRuntime
                     ? runtimeDisplayName(selectedRuntime)
-                    : t(($) => $.create_dialog.runtime_none)}
+                    : !autoSelect && runtimes.length > 0
+                      ? t(($) => $.model_dropdown.select_runtime_first)
+                      : t(($) => $.create_dialog.runtime_none)}
               </span>
               {selectedRuntime?.runtime_mode === "cloud" && (
                 <span className="shrink-0 rounded-xs bg-info/10 px-1.5 py-0.5 text-caption font-medium text-info">
@@ -245,72 +252,72 @@ export function RuntimePicker({
                       ? t(($) => $.create_dialog.runtime_private_locked_tooltip)
                       : undefined;
                     return (
-                      <button
-                        key={device.id}
-                        type="button"
-                        disabled={disabled}
-                        title={disabledTitle}
-                        onClick={() => {
-                          if (disabled) return;
-                          onSelect(device.id);
-                          setOpen(false);
-                        }}
-                        className={`flex w-full items-center gap-3 rounded-md px-3 py-2.5 text-left text-body transition-colors ${
-                          disabled
-                            ? "cursor-not-allowed opacity-50"
-                            : device.id === selectedRuntimeId
-                              ? "bg-accent"
-                              : "hover:bg-accent/50"
-                        }`}
-                      >
-                        <ProviderLogo
-                          provider={device.provider}
-                          className="h-4 w-4 shrink-0"
-                        />
-                        <div className="min-w-0 flex-1">
-                          <div className="flex items-center gap-2">
-                            <span className="truncate font-medium">
-                              {runtimeRowLabel(device, machine.title)}
-                            </span>
-                            {device.runtime_mode === "cloud" && (
-                              <span className="shrink-0 rounded-xs bg-info/10 px-1.5 py-0.5 text-caption font-medium text-info">
-                                {t(($) => $.create_dialog.runtime_cloud_badge)}
-                              </span>
-                            )}
-                            {disabled && (
-                              <span className="shrink-0 inline-flex items-center gap-1 rounded-xs bg-muted px-1.5 py-0.5 text-micro font-medium text-muted-foreground">
-                                <Lock className="h-3 w-3" />
-                                {t(($) => $.create_dialog.runtime_private_badge)}
-                              </span>
-                            )}
-                          </div>
-                          <div className="mt-0.5 flex items-center gap-1 text-caption text-muted-foreground">
-                            {ownerMember ? (
-                              <>
-                                <ActorAvatar
-                                  actorType="member"
-                                  actorId={ownerMember.user_id}
-                                  size="xs"
-                                />
-                                <span className="truncate">
-                                  {ownerMember.name}
-                                </span>
-                              </>
-                            ) : (
-                              <span className="truncate">
-                                {device.device_info}
-                              </span>
-                            )}
-                          </div>
-                        </div>
-                        <span
-                          className={`h-2 w-2 shrink-0 rounded-full ${
-                            device.status === "online"
-                              ? "bg-success"
-                              : "bg-muted-foreground/40"
+                      <TooltipHint key={device.id} label={disabledTitle}>
+                        <button
+                          type="button"
+                          aria-disabled={disabled || undefined}
+                          onClick={() => {
+                            if (disabled) return;
+                            onSelect(device.id);
+                            setOpen(false);
+                          }}
+                          className={`flex w-full items-center gap-3 rounded-md px-3 py-2.5 text-left text-body transition-colors ${
+                            disabled
+                              ? "cursor-not-allowed opacity-50"
+                              : device.id === selectedRuntimeId
+                                ? "bg-accent"
+                                : "hover:bg-accent/50"
                           }`}
-                        />
-                      </button>
+                        >
+                          <ProviderLogo
+                            provider={device.provider}
+                            className="h-4 w-4 shrink-0"
+                          />
+                          <div className="min-w-0 flex-1">
+                            <div className="flex items-center gap-2">
+                              <span className="truncate font-medium">
+                                {runtimeRowLabel(device, machine.title)}
+                              </span>
+                              {device.runtime_mode === "cloud" && (
+                                <span className="shrink-0 rounded-xs bg-info/10 px-1.5 py-0.5 text-caption font-medium text-info">
+                                  {t(($) => $.create_dialog.runtime_cloud_badge)}
+                                </span>
+                              )}
+                              {disabled && (
+                                <span className="shrink-0 inline-flex items-center gap-1 rounded-xs bg-muted px-1.5 py-0.5 text-micro font-medium text-muted-foreground">
+                                  <Lock className="h-3 w-3" />
+                                  {t(($) => $.create_dialog.runtime_private_badge)}
+                                </span>
+                              )}
+                            </div>
+                            <div className="mt-0.5 flex items-center gap-1 text-caption text-muted-foreground">
+                              {ownerMember ? (
+                                <>
+                                  <ActorAvatar
+                                    actorType="member"
+                                    actorId={ownerMember.user_id}
+                                    size="xs"
+                                  />
+                                  <span className="truncate">
+                                    {ownerMember.name}
+                                  </span>
+                                </>
+                              ) : (
+                                <span className="truncate">
+                                  {device.device_info}
+                                </span>
+                              )}
+                            </div>
+                          </div>
+                          <span
+                            className={`h-2 w-2 shrink-0 rounded-full ${
+                              device.status === "online"
+                                ? "bg-success"
+                                : "bg-muted-foreground/40"
+                            }`}
+                          />
+                        </button>
+                      </TooltipHint>
                     );
                   })}
                 </div>

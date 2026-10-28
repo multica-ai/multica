@@ -17,7 +17,8 @@ export function ComponentRules({
   component: keyof typeof rules;
 }) {
   const { t, i18n } = useTranslation("uiLab");
-  const locale = i18n.language === "zh-Hans" ? "zh" : "en";
+  // The rule docs have no Traditional Chinese variant; zh-Hant reads zh.
+  const locale = i18n.language.startsWith("zh") ? "zh" : "en";
   const content = rules[component][locale];
   return (
     <details className="component-rules">

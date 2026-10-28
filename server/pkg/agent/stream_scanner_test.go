@@ -3,6 +3,7 @@ package agent
 import (
 	"bufio"
 	"errors"
+	"io"
 	"strings"
 	"testing"
 )
@@ -49,5 +50,46 @@ func TestAgentStreamScannerStillFailsClosedAboveCap(t *testing.T) {
 	}
 	if err := scanner.Err(); !errors.Is(err, bufio.ErrTooLong) {
 		t.Fatalf("expected bufio.ErrTooLong, got %v", err)
+	}
+}
+
+// TestReadAgentStreamLineSkipsOversizedAndContinues covers the review on
+// #9057: the log-walking companion to newAgentStreamScanner must do what
+// the Scanner cannot — discard a record beyond agentStreamMaxLineBytes and
+// keep the later records readable.
+func TestReadAgentStreamLineSkipsOversizedAndContinues(t *testing.T) {
+	t.Parallel()
+
+	oversized := strings.Repeat("x", agentStreamMaxLineBytes+16)
+	r := bufio.NewReaderSize(strings.NewReader(oversized+"\nafter\n"), agentStreamInitialBufferBytes)
+
+	line, err := readAgentStreamLine(r)
+	if line != nil || !errors.Is(err, bufio.ErrTooLong) {
+		t.Fatalf("expected ErrTooLong with no line, got %d bytes err=%v", len(line), err)
+	}
+	line, err = readAgentStreamLine(r)
+	if err != nil || string(line) != "after" {
+		t.Fatalf("expected the record after the oversized one, got %q err=%v", line, err)
+	}
+	if _, err := readAgentStreamLine(r); !errors.Is(err, io.EOF) {
+		t.Fatalf("expected io.EOF after the last record, got %v", err)
+	}
+}
+
+// TestReadAgentStreamLineReturnsUnterminatedTail: a live log can end
+// mid-write; the final unterminated line is still returned, matching
+// bufio.Scanner's behavior, and an exhausted reader reports io.EOF.
+func TestReadAgentStreamLineReturnsUnterminatedTail(t *testing.T) {
+	t.Parallel()
+
+	r := bufio.NewReaderSize(strings.NewReader("first\npartial-tail"), agentStreamInitialBufferBytes)
+	if line, err := readAgentStreamLine(r); err != nil || string(line) != "first" {
+		t.Fatalf("expected the first line, got %q err=%v", line, err)
+	}
+	if line, err := readAgentStreamLine(r); err != nil || string(line) != "partial-tail" {
+		t.Fatalf("expected the unterminated tail, got %q err=%v", line, err)
+	}
+	if _, err := readAgentStreamLine(r); !errors.Is(err, io.EOF) {
+		t.Fatalf("expected io.EOF, got %v", err)
 	}
 }

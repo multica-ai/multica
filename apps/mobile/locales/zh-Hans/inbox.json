@@ -64,6 +64,7 @@
     "quick_create_failed": "快速创建失败",
     "quick_create_unconfirmed": "快速创建需要确认",
     "autopilot_paused": "自动化已暂停",
+    "children_done": "子任务已全部结束",
     "autopilot_quota_exceeded": "自动化运行次数已达上限",
     "set_status": "状态设为",
     "set_priority": "优先级设为",

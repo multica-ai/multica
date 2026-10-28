@@ -23,11 +23,13 @@ import { Command as CommandPrimitive } from "cmdk";
 import { useQueries, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import type {
+  InboxWorkspaceUnread,
   MemberWithUser,
   SearchIssueResult,
   SearchProjectResult,
+  Workspace,
 } from "@multica/core/types";
-import { api } from "@multica/core/api";
+import { isLocalSearchReady, searchIssues, searchProjects } from "@multica/core/search-index";
 import { partitionAggregatedSearchResults } from "@multica/core/search/cancelled-rank";
 import {
   openCreateIssueWithPreference,
@@ -39,15 +41,17 @@ import {
 import { issueDetailOptions, issueTimelineOptions } from "@multica/core/issues/queries";
 import { useWorkspaceId } from "@multica/core";
 import { useIssueStatuses } from "@multica/core/issue-statuses/hooks";
-import { useWorkspacePaths, WORKSPACE_PAGES } from "@multica/core/paths";
+import { paths, useWorkspacePaths, WORKSPACE_PAGES } from "@multica/core/paths";
 import type { WorkspacePageKey, WorkspacePaths } from "@multica/core/paths";
 import { useModalStore } from "@multica/core/modals";
 import { createShortcutChord } from "@multica/core/shortcuts";
-import { memberListOptions } from "@multica/core/workspace/queries";
+import { memberListOptions, workspaceListOptions } from "@multica/core/workspace/queries";
+import { inboxUnreadSummaryOptions, unreadWorkspaceIds } from "@multica/core/inbox/queries";
 import { resolvePublicFileUrl } from "@multica/core/workspace/avatar-url";
 import { StatusIcon } from "../issues/components";
 import { resolvedThreadRootIds, rootCommentIds } from "../issues/components/thread-utils";
 import { ProjectIcon } from "../projects/components/project-icon";
+import { WorkspaceAvatar } from "../workspace/workspace-avatar";
 import { useProjectStatusLabels } from "../projects/components/labels";
 import { routeIconForPath } from "../layout/route-icon-components";
 import { PROJECT_STATUS_CONFIG } from "@multica/core/projects/config";
@@ -143,6 +147,20 @@ function matchesRow(label: string, keywords: string[], query: string) {
     matchesPinyin(label, query)
   );
 }
+
+// Hidden aliases for the Workspaces group, prefix-matched like page keywords:
+// typing "workspace" lists every workspace the user can switch to.
+const WORKSPACE_KEYWORDS = ["switch", "workspace"];
+
+function matchesWorkspace(workspace: Workspace, query: string) {
+  return (
+    matchesRow(workspace.name, WORKSPACE_KEYWORDS, query) ||
+    workspace.slug.toLowerCase().includes(query)
+  );
+}
+
+const EMPTY_WORKSPACES: Workspace[] = [];
+const EMPTY_UNREAD_SUMMARY: InboxWorkspaceUnread[] = [];
 
 function matchesMember(member: MemberWithUser, query: string) {
   return (
@@ -353,6 +371,13 @@ export function SearchCommand() {
   const p: WorkspacePaths = useWorkspacePaths();
   const { theme, setTheme } = useTheme();
   const { data: members = [] } = useQuery(memberListOptions(wsId));
+  // Both are account-level cache entries the sidebar's workspace switcher
+  // already holds, so the Workspaces group adds no requests of its own.
+  const { data: workspaces = EMPTY_WORKSPACES } = useQuery(workspaceListOptions());
+  const { data: unreadSummary = EMPTY_UNREAD_SUMMARY } = useQuery(
+    inboxUnreadSummaryOptions(),
+  );
+  const unreadWsIds = useMemo(() => unreadWorkspaceIds(unreadSummary), [unreadSummary]);
 
   // Resolve each recent issue via its cached detail entry. Recent items are
   // typically already in the detail cache because the user has opened them;
@@ -430,7 +455,7 @@ export function SearchCommand() {
     ];
 
     if (currentIssueId && currentIssue) {
-      const identifier = currentIssue.identifier;
+      const { id: issueId, identifier } = currentIssue;
       items.push(
         {
           key: "copy-issue-link",
@@ -467,12 +492,12 @@ export function SearchCommand() {
             // still can't load, no comments are on screen — dropping the
             // action matches the visible state.
             void queryClient
-              .ensureQueryData(issueTimelineOptions(currentIssueId))
+              .ensureQueryData(issueTimelineOptions(issueId))
               .then((entries) => {
                 useCommentCollapseStore
                   .getState()
-                  .collapseAll(currentIssueId, rootCommentIds(entries));
-                useResolvedExpandStore.getState().collapseAll(currentIssueId);
+                  .collapseAll(issueId, rootCommentIds(entries));
+                useResolvedExpandStore.getState().collapseAll(issueId);
               })
               .catch(() => {});
             setOpen(false);
@@ -485,12 +510,12 @@ export function SearchCommand() {
           keywords: ["unfold", "expand", "comments", "展开", "评论"],
           onSelect: () => {
             void queryClient
-              .ensureQueryData(issueTimelineOptions(currentIssueId))
+              .ensureQueryData(issueTimelineOptions(issueId))
               .then((entries) => {
-                useCommentCollapseStore.getState().expandAll(currentIssueId);
+                useCommentCollapseStore.getState().expandAll(issueId);
                 useResolvedExpandStore
                   .getState()
-                  .expandAll(currentIssueId, resolvedThreadRootIds(entries));
+                  .expandAll(issueId, resolvedThreadRootIds(entries));
               })
               .catch(() => {});
             setOpen(false);
@@ -561,10 +586,20 @@ export function SearchCommand() {
       .slice(0, 10);
   }, [members, query]);
 
+  // The current workspace is never a switch target, so a single-workspace user
+  // never sees the group. The list keeps the server's created_at order, the
+  // same order as the sidebar switcher.
+  const filteredWorkspaces = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    if (!q) return [];
+    return workspaces.filter((ws) => ws.id !== wsId && matchesWorkspace(ws, q));
+  }, [workspaces, wsId, query]);
+
   const hasResults =
     results.issues.length > 0 ||
     results.projects.length > 0 ||
-    filteredMembers.length > 0;
+    filteredMembers.length > 0 ||
+    filteredWorkspaces.length > 0;
 
   // Rows answering an earlier query are still painted while the next request
   // is in flight — that is what keeps the list from strobing on every
@@ -630,18 +665,21 @@ export function SearchCommand() {
     }
 
     setIsLoading(true);
+    // The debounce spares the server a request per keystroke; the local index
+    // answers in milliseconds, so it searches on every keystroke.
+    const delay = isLocalSearchReady() ? 0 : 300;
     debounceRef.current = setTimeout(async () => {
       const controller = new AbortController();
       abortRef.current = controller;
       try {
         const [issueRes, projectRes] = await Promise.all([
-          api.searchIssues({
+          searchIssues({
             q: q.trim(),
             limit: 20,
             include_closed: true,
             signal: controller.signal,
           }),
-          api.searchProjects({
+          searchProjects({
             q: q.trim(),
             limit: 10,
             include_closed: true,
@@ -665,7 +703,7 @@ export function SearchCommand() {
           setIsLoading(false);
         }
       }
-    }, 300);
+    }, delay);
   }, []);
 
   const handleValueChange = useCallback(
@@ -702,6 +740,16 @@ export function SearchCommand() {
       setOpen(false);
     },
     [intentNavigate, consumeIntent, setOpen, p],
+  );
+
+  // Web lands on the target's Issues; the desktop adapter reads this same
+  // push as "resume the workspace's last active tab".
+  const handleWorkspaceSelect = useCallback(
+    (slug: string) => {
+      intentNavigate(paths.workspace(slug).issues(), consumeIntent());
+      setOpen(false);
+    },
+    [intentNavigate, consumeIntent, setOpen],
   );
 
   return (
@@ -831,6 +879,35 @@ export function SearchCommand() {
                         <HighlightText text={member.email} query={query} />
                       </div>
                     </div>
+                  </CommandPrimitive.Item>
+                ))}
+              </CommandPrimitive.Group>
+            )}
+
+            {filteredWorkspaces.length > 0 && (
+              <CommandPrimitive.Group
+                heading={t(($) => $.groups.workspaces)}
+                className={GROUP_CLASS}
+              >
+                {filteredWorkspaces.map((ws) => (
+                  <CommandPrimitive.Item
+                    key={ws.id}
+                    value={`workspace:${ws.id}`}
+                    onSelect={() => handleWorkspaceSelect(ws.slug)}
+                    className="flex cursor-default select-none items-center gap-2.5 rounded-lg px-3 py-2.5 text-body outline-none data-[disabled=true]:pointer-events-none data-[disabled=true]:opacity-50 data-selected:bg-accent"
+                  >
+                    <WorkspaceAvatar name={ws.name} avatarUrl={ws.avatar_url} size="sm" />
+                    <span className="min-w-0 flex-1 truncate">
+                      <HighlightText text={ws.name} query={query} />
+                    </span>
+                    {/* Same dot the sidebar switcher puts on a workspace with
+                        unread inbox items. */}
+                    {unreadWsIds.has(ws.id) && (
+                      <span
+                        data-testid="workspace-unread-dot"
+                        className="size-2 shrink-0 rounded-full bg-brand"
+                      />
+                    )}
                   </CommandPrimitive.Item>
                 ))}
               </CommandPrimitive.Group>

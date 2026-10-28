@@ -300,7 +300,7 @@ SELECT
     $11,
     COALESCE($12::uuid, gen_random_uuid())
 WHERE lock_task_owner_rows($1, NULL, $2)
-RETURNING id, agent_id, issue_id, status, priority, dispatched_at, started_at, completed_at, result, error, created_at, context, runtime_id, session_id, work_dir, trigger_comment_id, chat_session_id, autopilot_run_id, attempt, max_attempts, parent_task_id, failure_reason, trigger_summary, force_fresh_session, is_leader_task, wait_reason, initiator_user_id, handoff_note, prepare_lease_expires_at, squad_id, runtime_mcp_overlay, escalation_for_task_id, fire_at, originator_user_id, runtime_connected_apps, coalesced_comment_ids, delivered_comment_ids, chat_input_task_id, chat_finalize_deferred_at, originator_source, delegated_from_task_id, retry_of_task_id, rerun_of_task_id, rule_version_id, trigger_evidence_kind, trigger_evidence_ref_id, accountable_user_id, session_rollout_missing, retired_session_id, quick_actions_disabled, regenerate_quick_actions_for, branch_name, durable_work_dir, channel_context_revision, comment_thread_id, cancelled_by_type, cancelled_by_id, cancelled_by_name, issue_snapshot
+RETURNING id, agent_id, issue_id, status, priority, dispatched_at, started_at, completed_at, result, error, created_at, context, runtime_id, session_id, work_dir, trigger_comment_id, chat_session_id, autopilot_run_id, attempt, max_attempts, parent_task_id, failure_reason, trigger_summary, force_fresh_session, is_leader_task, wait_reason, initiator_user_id, handoff_note, prepare_lease_expires_at, squad_id, runtime_mcp_overlay, escalation_for_task_id, fire_at, originator_user_id, runtime_connected_apps, coalesced_comment_ids, delivered_comment_ids, chat_input_task_id, chat_finalize_deferred_at, originator_source, delegated_from_task_id, retry_of_task_id, rerun_of_task_id, rule_version_id, trigger_evidence_kind, trigger_evidence_ref_id, accountable_user_id, session_rollout_missing, retired_session_id, quick_actions_disabled, regenerate_quick_actions_for, branch_name, durable_work_dir, channel_context_revision, comment_thread_id, cancelled_by_type, cancelled_by_id, cancelled_by_name, issue_snapshot, workflow_step
 `
 
 type CreateAutopilotTaskParams struct {
@@ -413,6 +413,7 @@ func (q *Queries) CreateAutopilotTask(ctx context.Context, arg CreateAutopilotTa
 		&i.CancelledByID,
 		&i.CancelledByName,
 		&i.IssueSnapshot,
+		&i.WorkflowStep,
 	)
 	return i, err
 }
@@ -938,7 +939,7 @@ func (q *Queries) GetAutopilotRunByWebhookDelivery(ctx context.Context, webhookD
 }
 
 const getAutopilotTaskByRun = `-- name: GetAutopilotTaskByRun :one
-SELECT id, agent_id, issue_id, status, priority, dispatched_at, started_at, completed_at, result, error, created_at, context, runtime_id, session_id, work_dir, trigger_comment_id, chat_session_id, autopilot_run_id, attempt, max_attempts, parent_task_id, failure_reason, trigger_summary, force_fresh_session, is_leader_task, wait_reason, initiator_user_id, handoff_note, prepare_lease_expires_at, squad_id, runtime_mcp_overlay, escalation_for_task_id, fire_at, originator_user_id, runtime_connected_apps, coalesced_comment_ids, delivered_comment_ids, chat_input_task_id, chat_finalize_deferred_at, originator_source, delegated_from_task_id, retry_of_task_id, rerun_of_task_id, rule_version_id, trigger_evidence_kind, trigger_evidence_ref_id, accountable_user_id, session_rollout_missing, retired_session_id, quick_actions_disabled, regenerate_quick_actions_for, branch_name, durable_work_dir, channel_context_revision, comment_thread_id, cancelled_by_type, cancelled_by_id, cancelled_by_name, issue_snapshot FROM agent_task_queue
+SELECT id, agent_id, issue_id, status, priority, dispatched_at, started_at, completed_at, result, error, created_at, context, runtime_id, session_id, work_dir, trigger_comment_id, chat_session_id, autopilot_run_id, attempt, max_attempts, parent_task_id, failure_reason, trigger_summary, force_fresh_session, is_leader_task, wait_reason, initiator_user_id, handoff_note, prepare_lease_expires_at, squad_id, runtime_mcp_overlay, escalation_for_task_id, fire_at, originator_user_id, runtime_connected_apps, coalesced_comment_ids, delivered_comment_ids, chat_input_task_id, chat_finalize_deferred_at, originator_source, delegated_from_task_id, retry_of_task_id, rerun_of_task_id, rule_version_id, trigger_evidence_kind, trigger_evidence_ref_id, accountable_user_id, session_rollout_missing, retired_session_id, quick_actions_disabled, regenerate_quick_actions_for, branch_name, durable_work_dir, channel_context_revision, comment_thread_id, cancelled_by_type, cancelled_by_id, cancelled_by_name, issue_snapshot, workflow_step FROM agent_task_queue
 WHERE autopilot_run_id = $1
 ORDER BY created_at
 LIMIT 1
@@ -1009,6 +1010,7 @@ func (q *Queries) GetAutopilotTaskByRun(ctx context.Context, autopilotRunID pgty
 		&i.CancelledByID,
 		&i.CancelledByName,
 		&i.IssueSnapshot,
+		&i.WorkflowStep,
 	)
 	return i, err
 }
@@ -1088,6 +1090,48 @@ func (q *Queries) GetAutopilotTriggerForAutopilot(ctx context.Context, arg GetAu
 		&i.PublishedByID,
 		&i.CreatedByType,
 		&i.CreatedByID,
+	)
+	return i, err
+}
+
+const getLatestAutopilotRunForIssueAttribution = `-- name: GetLatestAutopilotRunForIssueAttribution :one
+SELECT r.id, r.autopilot_id, r.trigger_id, r.source, r.status, r.issue_id, r.task_id, r.triggered_at, r.completed_at, r.failure_reason, r.trigger_payload, r.result, r.created_at, r.squad_id, r.planned_at, r.webhook_delivery_id, r.quota_reservation_id, r.reason_code FROM autopilot_run r
+JOIN autopilot a ON a.id = r.autopilot_id
+WHERE r.issue_id = $1 AND r.autopilot_id = $2
+  AND a.workspace_id = $3
+ORDER BY r.created_at DESC, r.id DESC
+LIMIT 1
+`
+
+type GetLatestAutopilotRunForIssueAttributionParams struct {
+	IssueID     pgtype.UUID `json:"issue_id"`
+	AutopilotID pgtype.UUID `json:"autopilot_id"`
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
+}
+
+// Attribution survives run completion; lifecycle callers still use the active-run lookup.
+func (q *Queries) GetLatestAutopilotRunForIssueAttribution(ctx context.Context, arg GetLatestAutopilotRunForIssueAttributionParams) (AutopilotRun, error) {
+	row := q.db.QueryRow(ctx, getLatestAutopilotRunForIssueAttribution, arg.IssueID, arg.AutopilotID, arg.WorkspaceID)
+	var i AutopilotRun
+	err := row.Scan(
+		&i.ID,
+		&i.AutopilotID,
+		&i.TriggerID,
+		&i.Source,
+		&i.Status,
+		&i.IssueID,
+		&i.TaskID,
+		&i.TriggeredAt,
+		&i.CompletedAt,
+		&i.FailureReason,
+		&i.TriggerPayload,
+		&i.Result,
+		&i.CreatedAt,
+		&i.SquadID,
+		&i.PlannedAt,
+		&i.WebhookDeliveryID,
+		&i.QuotaReservationID,
+		&i.ReasonCode,
 	)
 	return i, err
 }
@@ -1933,6 +1977,29 @@ func (q *Queries) SelectAutopilotsExceedingFailureThreshold(ctx context.Context,
 		return nil, err
 	}
 	return items, nil
+}
+
+const setAutopilotRunDispatchTask = `-- name: SetAutopilotRunDispatchTask :execrows
+UPDATE autopilot_run
+SET task_id = $2
+WHERE id = $1 AND status = 'issue_created' AND task_id IS NULL
+`
+
+type SetAutopilotRunDispatchTaskParams struct {
+	ID     pgtype.UUID `json:"id"`
+	TaskID pgtype.UUID `json:"task_id"`
+}
+
+// Records the agent task a create_issue run actually enqueued, so lifecycle
+// sync can tell the run's own dispatch apart from mention/comment tasks on
+// the same issue. Status stays issue_created; only an unlinked active run is
+// written. (MUL-8200)
+func (q *Queries) SetAutopilotRunDispatchTask(ctx context.Context, arg SetAutopilotRunDispatchTaskParams) (int64, error) {
+	result, err := q.db.Exec(ctx, setAutopilotRunDispatchTask, arg.ID, arg.TaskID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
 }
 
 const setAutopilotTriggerPublisher = `-- name: SetAutopilotTriggerPublisher :exec

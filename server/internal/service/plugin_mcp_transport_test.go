@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
+	"github.com/multica-ai/multica/server/pkg/plugincontract"
 	"github.com/multica-ai/multica/server/pkg/remotemcp"
 )
 
@@ -98,6 +99,49 @@ func TestApprovedMCPHookBecomesABrokerConnection(t *testing.T) {
 	want := remotemcp.PluginContributionPrefix + uuidString(mcpInstallation(t, "{}").ID) + ":toolbox"
 	if connection.ContributionID != want {
 		t.Fatalf("contribution id = %q, want %q", connection.ContributionID, want)
+	}
+}
+
+func TestApprovedMCPHooksKeepDistinctContributionKeys(t *testing.T) {
+	installation := mcpInstallation(t, "{}")
+	manifest, err := ParseInstallationManifest(installation)
+	if err != nil {
+		t.Fatal(err)
+	}
+	first, second := manifest.Contributes.Hooks[0], manifest.Contributes.Hooks[0]
+	first.Key, second.Key = "check-status", "check_status"
+	first.Transport.URL = "https://tools.example.com/first"
+	second.Transport.URL = "https://tools.example.com/second"
+	manifest.Contributes.Hooks = []plugincontract.Hook{first, second}
+	installation.Manifest, err = json.Marshal(manifest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	installation.McpApprovals, err = json.Marshal(PluginMCPApprovals{
+		first.Key:  {Tools: []remotemcp.Tool{{Name: "search", SchemaDigest: "sha256:aaa"}}},
+		second.Key: {Tools: []remotemcp.Tool{{Name: "search", SchemaDigest: "sha256:bbb"}}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	connections := mcpConnectionsFor(installation)
+	if len(connections) != 2 {
+		t.Fatalf("got %d connections, want both approved hooks", len(connections))
+	}
+	if connections[0].ContributionKey == connections[1].ContributionKey {
+		t.Errorf("approved hooks share the broker key %q", connections[0].ContributionKey)
+	}
+	for i, hook := range manifest.Contributes.Hooks {
+		connection := connections[i]
+		if want := remotemcp.PluginContributionPrefix + uuidString(installation.ID) + ":" + hook.Key; connection.ContributionID != want {
+			t.Errorf("contribution id = %q, want %q", connection.ContributionID, want)
+		}
+		if connection.Endpoint != hook.Transport.URL {
+			t.Errorf("endpoint = %q, want %q", connection.Endpoint, hook.Transport.URL)
+		}
+		if len(connection.ApprovedTools) != 1 || connection.ApprovedTools[0].SchemaDigest != []string{"sha256:aaa", "sha256:bbb"}[i] {
+			t.Errorf("hook %q lost its own approved tools: %v", hook.Key, connection.ApprovedTools)
+		}
 	}
 }
 

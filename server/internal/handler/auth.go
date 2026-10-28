@@ -56,6 +56,7 @@ const devVerificationCodeEnv = "MULTICA_DEV_VERIFICATION_CODE"
 var supportedLanguages = map[string]struct{}{
 	"en":      {},
 	"zh-Hans": {},
+	"zh-Hant": {},
 	"ko":      {},
 	"ja":      {},
 	"fr":      {},
@@ -71,7 +72,6 @@ type UserResponse struct {
 	Timezone                *string         `json:"timezone"`
 	OnboardedAt             *string         `json:"onboarded_at"`
 	OnboardingQuestionnaire json.RawMessage `json:"onboarding_questionnaire"`
-	StarterContentState     *string         `json:"starter_content_state"`
 	ProfileDescription      string          `json:"profile_description"`
 	CreatedAt               string          `json:"created_at"`
 	UpdatedAt               string          `json:"updated_at"`
@@ -100,7 +100,6 @@ func (h *Handler) userToResponse(u db.User) UserResponse {
 		Timezone:                textToPtr(u.Timezone),
 		OnboardedAt:             timestampToPtr(u.OnboardedAt),
 		OnboardingQuestionnaire: json.RawMessage(q),
-		StarterContentState:     textToPtr(u.StarterContentState),
 		ProfileDescription:      u.ProfileDescription,
 		CreatedAt:               timestampToString(u.CreatedAt),
 		UpdatedAt:               timestampToString(u.UpdatedAt),
@@ -747,7 +746,15 @@ func (h *Handler) GoogleLogin(w http.ResponseWriter, r *http.Request) {
 // IssueCliToken returns a fresh JWT for the authenticated user.
 // This allows cookie-authenticated browser sessions to obtain a bearer token
 // that can be handed off to the CLI via the cli_callback redirect.
+//
+// Machine credentials (mat_ task tokens, mcn_ cloud-node PATs) are refused
+// here as well as at the router (MUL-8154), so a route refactor cannot turn
+// a scoped agent credential into a long-lived session.
 func (h *Handler) IssueCliToken(w http.ResponseWriter, r *http.Request) {
+	if isMachineCredentialActor(r) {
+		writeError(w, http.StatusForbidden, "this endpoint is only available to human actors")
+		return
+	}
 	userID, ok := requireUserID(w, r)
 	if !ok {
 		return

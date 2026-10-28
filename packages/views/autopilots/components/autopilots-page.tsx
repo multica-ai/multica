@@ -50,7 +50,7 @@ import {
   TabsTrigger,
   TabsContent,
 } from "@multica/ui/components/ui/tabs";
-import { WorkspaceWakeups } from "./workspace-wakeups";
+import { WorkspaceWakeupCreate, WorkspaceWakeups } from "./workspace-wakeups";
 import { useNavigation, useRowLink } from "../../navigation";
 import { ActorAvatar } from "../../common/actor-avatar";
 import { formatInTimeZone } from "../../common/format-in-time-zone";
@@ -128,11 +128,9 @@ function columnTrackVars(
   } as React.CSSProperties;
 }
 
-// ---------------------------------------------------------------------------
 // Templates for the empty state (unchanged from the previous page version).
 // Prompts stay raw English because they're injected directly into the
 // agent's task input.
-// ---------------------------------------------------------------------------
 
 type TemplateId =
   | "daily_news"
@@ -219,9 +217,7 @@ const TEMPLATES: AutopilotTemplate[] = [
   },
 ];
 
-// ---------------------------------------------------------------------------
 // Cells
-// ---------------------------------------------------------------------------
 
 function CheckboxCell({
   checked,
@@ -439,9 +435,7 @@ function CreatorCell({ autopilot }: { autopilot: Autopilot }) {
   );
 }
 
-// ---------------------------------------------------------------------------
 // Header row
-// ---------------------------------------------------------------------------
 
 function AutopilotListHeader({
   sortField,
@@ -615,9 +609,7 @@ function LoadingSkeleton() {
   );
 }
 
-// ---------------------------------------------------------------------------
 // Page
-// ---------------------------------------------------------------------------
 
 export function AutopilotsPage() {
   const navigation = useNavigation();
@@ -639,6 +631,7 @@ export function AutopilotsPage() {
   });
 
   const [createOpen, setCreateOpen] = useState(false);
+  const [wakeupCreateOpen, setWakeupCreateOpen] = useState(false);
   const [selectedTemplate, setSelectedTemplate] =
     useState<AutopilotTemplate | null>(null);
   const [selectedIds, setSelectedIds] = useState<ReadonlySet<string>>(
@@ -809,11 +802,17 @@ export function AutopilotsPage() {
         title={t(($) => $.page.title)}
         count={tab === "autopilots" ? totalCount : undefined}
         actions={
-          tab === "autopilots" && (
+          tab === "autopilots" ? (
             <CollectionPageHeaderAction
               icon={Plus}
               label={t(($) => $.page.new_autopilot)}
               onClick={() => openCreate()}
+            />
+          ) : (
+            <CollectionPageHeaderAction
+              icon={Plus}
+              label={t(($) => $.wakeups.create)}
+              onClick={() => setWakeupCreateOpen(true)}
             />
           )
         }
@@ -830,6 +829,7 @@ export function AutopilotsPage() {
         className="flex min-h-0 flex-col data-hidden:hidden"
       >
         <WorkspaceWakeups key={wsId} />
+        <WorkspaceWakeupCreate open={wakeupCreateOpen} onOpenChange={setWakeupCreateOpen} />
       </TabsContent>
       <TabsContent
         value="autopilots"

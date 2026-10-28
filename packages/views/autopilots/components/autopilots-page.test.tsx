@@ -14,6 +14,7 @@ vi.mock("@multica/core/paths", () => ({
 }));
 vi.mock("./workspace-wakeups", () => ({
   WorkspaceWakeups: () => <div>Wakeup inventory</div>,
+  WorkspaceWakeupCreate: ({ open }: { open: boolean }) => (open ? <div>Wakeup create</div> : null),
 }));
 vi.mock("./autopilot-dialog", () => ({ AutopilotDialog: () => null }));
 
@@ -59,6 +60,8 @@ it.each(["empty", "error"])(
     fireEvent.click(screen.getByRole("tab", { name: "Issue wakeups" }));
     expect(await screen.findByText("Wakeup inventory")).toBeVisible();
     expect(screen.queryByRole("button", { name: "New autopilot" })).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "New wakeup" }));
+    expect(await screen.findByText("Wakeup create")).toBeVisible();
     fireEvent.click(
       screen.getByRole("tab", { name: "Autopilot" }),
     );

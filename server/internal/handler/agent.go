@@ -11,11 +11,13 @@ import (
 	"net/http"
 	"regexp"
 	"slices"
+	"strconv"
 	"strings"
 	"time"
 	"unicode/utf8"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/multica-ai/multica/server/internal/analytics"
@@ -298,6 +300,23 @@ func preserveMaskedGatewayToken(incoming any, persistedRuntimeConfig []byte) {
 	gw["token"] = prev.Gateway.Token
 }
 
+// openclawModelOverride reads the agent's persistent underlying-model override
+// from runtime_config. Every claim snapshots the current setting until it is
+// changed or cleared. Absent, malformed, or whitespace-only values return "".
+func openclawModelOverride(raw []byte) string {
+	trimmed := bytes.TrimSpace(raw)
+	if len(trimmed) == 0 || bytes.Equal(trimmed, []byte("null")) {
+		return ""
+	}
+	var rc struct {
+		ModelOverride string `json:"model_override"`
+	}
+	if err := json.Unmarshal(trimmed, &rc); err != nil {
+		return ""
+	}
+	return strings.TrimSpace(rc.ModelOverride)
+}
+
 // RepoData holds repository information included in claim responses so the
 // daemon can set up worktrees for each workspace repo.
 type RepoData struct {
@@ -345,6 +364,15 @@ type TaskIssueStatusData struct {
 	Name        string `json:"name"`
 	Category    string `json:"category"`
 	Description string `json:"description,omitempty"`
+}
+
+// TaskProjectWorkflowData is the workflow of the project a task's issue
+// belongs to (MUL-7420), sent only when that workflow says more than the
+// runtime's status rules: a named workflow, or a Default that hands off.
+// Brief is the server-rendered text (issueworkflow.Brief); the daemon puts it
+// in the per-turn prompt, never in the cached runtime brief.
+type TaskProjectWorkflowData struct {
+	Brief string `json:"brief"`
 }
 
 // TaskCancellationActor is the point-in-time actor snapshot attached to a
@@ -396,31 +424,39 @@ type AgentTaskResponse struct {
 	// IssueStatusesOmitted is how many active custom statuses were dropped by
 	// the cap, so the brief can say the list is incomplete instead of
 	// presenting a truncated catalog as the whole one.
-	IssueStatusesOmitted int                   `json:"issue_statuses_omitted,omitempty"`
-	ThreadName           string                `json:"thread_name,omitempty"` // semantic title for provider-native session/thread history
-	Status               string                `json:"status"`
-	Priority             int32                 `json:"priority"`
-	DispatchedAt         *string               `json:"dispatched_at"`
-	StartedAt            *string               `json:"started_at"`
-	CompletedAt          *string               `json:"completed_at"`
-	Result               any                   `json:"result"`
-	Error                *string               `json:"error"`
-	FailureReason        string                `json:"failure_reason,omitempty"` // see TaskService.MaybeRetryFailedTask
-	Attempt              int32                 `json:"attempt"`
-	MaxAttempts          int32                 `json:"max_attempts"`
-	ParentTaskID         *string               `json:"parent_task_id,omitempty"`
-	IsLeaderTask         bool                  `json:"is_leader_task,omitempty"`
-	LeaderRoleResolved   bool                  `json:"leader_role_resolved,omitempty"` // claim-only capability, always true here: IsLeaderTask/SquadID authoritatively answer "is this a leader run", so the daemon must not infer the role from briefing text. Servers predating it make no such promise — before #4951 they sent no is_leader_task at all, after it they sent the flag without guaranteeing a briefing — so a daemon seeing no capability keeps the legacy inference. Never rendered into a prompt; see daemon.taskIsSquadLeader (MUL-5811). Mirror field: internal/daemon/types.go, same JSON name
-	Agent                *TaskAgentData        `json:"agent,omitempty"`
-	ConnectedApps        []ConnectedAppData    `json:"connected_apps,omitempty"` // daemon-claim only: per-run app capabilities mounted through runtime MCP overlays
-	Repos                []RepoData            `json:"repos,omitempty"`
-	ProjectID            string                `json:"project_id,omitempty"`          // issue's project, when present
-	ProjectTitle         string                `json:"project_title,omitempty"`       // for surfacing in agent context
-	ProjectDescription   string                `json:"project_description,omitempty"` // durable project-level context injected into the brief
-	ProjectResources     []ProjectResourceData `json:"project_resources,omitempty"`   // resources attached to the project
-	CreatedAt            string                `json:"created_at"`
-	PriorSessionID       string                `json:"prior_session_id,omitempty"` // session ID from a previous task on same issue
-	PriorWorkDir         string                `json:"prior_work_dir,omitempty"`   // work_dir from a previous task on same issue
+	IssueStatusesOmitted int `json:"issue_statuses_omitted,omitempty"`
+	// ProjectWorkflow is the issue's project workflow, when it has one other
+	// than the Default (MUL-7420). Absent keeps the brief unchanged.
+	ProjectWorkflow    *TaskProjectWorkflowData `json:"project_workflow,omitempty"`
+	ThreadName         string                   `json:"thread_name,omitempty"` // semantic title for provider-native session/thread history
+	Status             string                   `json:"status"`
+	Priority           int32                    `json:"priority"`
+	DispatchedAt       *string                  `json:"dispatched_at"`
+	StartedAt          *string                  `json:"started_at"`
+	CompletedAt        *string                  `json:"completed_at"`
+	Result             any                      `json:"result"`
+	Error              *string                  `json:"error"`
+	FailureReason      string                   `json:"failure_reason,omitempty"` // see TaskService.MaybeRetryFailedTask
+	Attempt            int32                    `json:"attempt"`
+	MaxAttempts        int32                    `json:"max_attempts"`
+	ParentTaskID       *string                  `json:"parent_task_id,omitempty"`
+	IsLeaderTask       bool                     `json:"is_leader_task,omitempty"`
+	LeaderRoleResolved bool                     `json:"leader_role_resolved,omitempty"` // claim-only capability, always true here: IsLeaderTask/SquadID authoritatively answer "is this a leader run", so the daemon must not infer the role from briefing text. Servers predating it make no such promise — before #4951 they sent no is_leader_task at all, after it they sent the flag without guaranteeing a briefing — so a daemon seeing no capability keeps the legacy inference. Never rendered into a prompt; see daemon.taskIsSquadLeader (MUL-5811). Mirror field: internal/daemon/types.go, same JSON name
+	Agent              *TaskAgentData           `json:"agent,omitempty"`
+	ConnectedApps      []ConnectedAppData       `json:"connected_apps,omitempty"` // daemon-claim only: per-run app capabilities mounted through runtime MCP overlays
+	Repos              []RepoData               `json:"repos,omitempty"`
+	ProjectID          string                   `json:"project_id,omitempty"`          // issue's project, when present
+	ProjectTitle       string                   `json:"project_title,omitempty"`       // for surfacing in agent context
+	ProjectDescription string                   `json:"project_description,omitempty"` // durable project-level context injected into the brief
+	ProjectResources   []ProjectResourceData    `json:"project_resources,omitempty"`   // resources attached to the project
+	CreatedAt          string                   `json:"created_at"`
+	PriorSessionID     string                   `json:"prior_session_id,omitempty"` // session ID from a previous task on same issue
+	PriorWorkDir       string                   `json:"prior_work_dir,omitempty"`   // work_dir from a previous task on same issue
+	// ModelOverride snapshots the agent's persistent OpenClaw model override at
+	// claim time. Later config edits affect subsequent claims, not this payload.
+	// Mirrors internal/daemon/types.go with the same JSON name; empty for other
+	// providers.
+	ModelOverride string `json:"model_override,omitempty"`
 	// PriorSessionResumeUnavailable is set when a more recent Codex session was
 	// withheld because its rollout was missing (MUL-5305); PriorSessionID (if
 	// any) is then an older fallback, and the daemon surfaces the continuity gap
@@ -468,6 +504,16 @@ type AgentTaskResponse struct {
 	TriggerAuthorName     string                 `json:"trigger_author_name,omitempty"`     // display name of the triggering comment author
 	NewCommentCount       int                    `json:"new_comment_count,omitempty"`       // ISSUE-WIDE comments since this agent's last run — every thread, not just the triggering one (CountNewCommentsSince); excludes the injected trigger and the agent's own comments; omitempty so old daemons ignore it
 	NewCommentsSince      string                 `json:"new_comments_since,omitempty"`      // RFC3339 anchor (last run's started_at) the count is measured from; omitempty so old daemons ignore it. Suppressed with the count when the delta is zero — NewCommentsDeltaKnown, not this field, is what says the server looked
+
+	ProcessCleanupCapability string `json:"process_cleanup_capability,omitempty"`
+
+	// MUL-8218: set only when the trigger comment was edited AFTER the run
+	// whose session this claim resumes had started, so that session's history
+	// may still hold an earlier version of the text. EditedAt is RFC3339;
+	// Revision is the comment's current revision. omitempty so old daemons
+	// ignore both.
+	TriggerCommentEditedAt string `json:"trigger_comment_edited_at,omitempty"`
+	TriggerCommentRevision int64  `json:"trigger_comment_revision,omitempty"`
 	// NewCommentsDeltaKnown reports that the issue-wide delta above was
 	// actually COMPUTED this claim — both the anchor lookup and the count
 	// query succeeded. Without it, NewCommentCount == 0 is ambiguous: a true
@@ -511,6 +557,8 @@ type AgentTaskResponse struct {
 	QuickCreateAttachmentIDs []string             `json:"quick_create_attachment_ids,omitempty"` // attachment ids uploaded in the quick-create prompt and bound on issue create
 	QuickCreateSourceContext json.RawMessage      `json:"quick_create_source_context,omitempty"` // immutable historical context for source-context quick-create
 	WakeupID                 string               `json:"wakeup_id,omitempty"`
+	WakeupSystemRule         string               `json:"wakeup_system_rule,omitempty"`      // set when a platform rule (e.g. child_done) started the run
+	WakeupJoined             string               `json:"wakeup_joined,omitempty"`           // wakeups that fired while this run waited to start and joined it instead of queuing their own
 	HandoffNote              string               `json:"handoff_note,omitempty"`            // legacy assignment handoff instruction retained for installed clients; rendered by the daemon only in the per-turn prompt
 	SquadID                  string               `json:"squad_id,omitempty"`                // for quick-create tasks where the picker was a squad; Agent is still the resolved leader
 	SquadName                string               `json:"squad_name,omitempty"`              // display name for the picker squad
@@ -728,6 +776,15 @@ type CoalescedCommentData struct {
 	AuthorName string `json:"author_name,omitempty"`
 	Content    string `json:"content"`
 	CreatedAt  string `json:"created_at,omitempty"`
+	// MUL-8218: set when this comment was edited after the run whose session
+	// this claim resumes had started (see triggerCommentEditedSince). omitempty
+	// so old daemons ignore both.
+	EditedAt string `json:"edited_at,omitempty"`
+	Revision int64  `json:"revision,omitempty"`
+
+	// source is the row this entry was read from, kept so the claim can run
+	// the edit check once the resumed session is known. Never serialized.
+	source db.Comment
 }
 
 // TaskUsageData is one (provider, model) slice of a single run's token usage.
@@ -777,6 +834,7 @@ type TaskAgentData struct {
 // Dispatch only begins preparation, so a fallback cancelled before StartTask
 // is still unused. Keep started fallbacks and ordinary cancellations visible,
 // and retain the underlying scheduling records for audit.
+// Keep this predicate in sync with ListAgentTasks in pkg/db/queries/agent.sql.
 func visibleTaskHistory(tasks []db.AgentTaskQueue) []db.AgentTaskQueue {
 	return slices.DeleteFunc(tasks, func(task db.AgentTaskQueue) bool {
 		return task.EscalationForTaskID.Valid &&
@@ -817,7 +875,8 @@ func taskToResponse(t db.AgentTaskQueue, workspaceID string) AgentTaskResponse {
 		branchName = t.BranchName.String
 	}
 	var wakeupContext struct {
-		ID string `json:"wakeup_id"`
+		ID         string `json:"wakeup_id"`
+		SystemRule string `json:"wakeup_system"`
 	}
 	_ = json.Unmarshal(t.Context, &wakeupContext)
 	handoffNote := ""
@@ -854,6 +913,8 @@ func taskToResponse(t db.AgentTaskQueue, workspaceID string) AgentTaskResponse {
 		TriggerSummary:         textToPtr(t.TriggerSummary),
 		HandoffNote:            handoffNote,
 		WakeupID:               wakeupContext.ID,
+		WakeupSystemRule:       wakeupContext.SystemRule,
+		WakeupJoined:           service.JoinedWakeupNotes(t.Context),
 		WorkDir:                workDir,
 		RelativeWorkDir:        relativeWorkDir(workDir, workspaceID, uuidToString(t.ID)),
 		DurableWorkDir:         durableWorkDir,
@@ -1088,10 +1149,10 @@ func (h *Handler) loadAgentRuntimeAvailability(ctx context.Context, agents []db.
 			continue
 		}
 		// ListAgentRuntimes exposes every row to workspace owner/admin and only
-		// owner/public rows to regular members. Keep the coarse bridge for the
+		// owner/shared/public rows to regular members. Keep the coarse bridge for the
 		// rows that the viewer's runtime list cannot carry.
 		if runtime.Visibility == "public" ||
-			(runtime.OwnerID.Valid && uuidToString(runtime.OwnerID) == viewerID) {
+			service.RuntimeAllowsUser(runtime, parseUUID(viewerID)) {
 			continue
 		}
 		result[uuidToString(runtime.ID)] = deriveAgentRuntimeAvailability(runtime, now)
@@ -1447,10 +1508,26 @@ func (h *Handler) CreateAgent(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if !canUseRuntimeForAgent(member, runtime) {
-		writeError(w, http.StatusForbidden, "this runtime is private; only its owner can create agents on it")
+		writeError(w, http.StatusForbidden, "this runtime is private; ask its owner to grant you access before creating agents")
 		return
 	}
 
+	if err := agent.ValidateCustomArgs(runtime.Provider, req.CustomArgs); err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	if runtime.Provider == "qoder_cloud" {
+		raw, _ := json.Marshal(req.RuntimeConfig)
+		if err := validateQoderAgentConfig(raw); err != nil {
+			writeError(w, 400, err.Error())
+			return
+		}
+		overrides := qoderOverrides{skills: len(req.SkillIDs), customEnv: len(req.CustomEnv), customArgs: len(req.CustomArgs), mcpConfig: req.McpConfig, model: req.Model, thinkingLevel: req.ThinkingLevel, serviceTier: req.ServiceTier}
+		if err := overrides.validate(); err != nil {
+			writeError(w, 400, err.Error())
+			return
+		}
+	}
 	// thinking_level validation: fixed-enum providers reject unknown literals;
 	// dynamic-catalog providers (Codex/OpenCode) reject malformed tokens here.
 	// Pi has a fixed token universe and a daemon-discovered per-model subset.
@@ -1561,6 +1638,27 @@ func (h *Handler) CreateAgent(w http.ResponseWriter, r *http.Request) {
 	defer tx.Rollback(r.Context())
 	qtx := h.Queries.WithTx(tx)
 
+	// The preflight runtime can become private while validation is in flight.
+	// Serialize with revocation and keep the authorization lock through INSERT.
+	// Workspace teardown takes workspace -> runtime/agent locks in that order.
+	if _, err := qtx.LockWorkspaceForChatSessionCreate(r.Context(), wsUUID); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			writeError(w, http.StatusNotFound, "workspace not found")
+		} else {
+			writeError(w, http.StatusInternalServerError, "failed to lock workspace")
+		}
+		return
+	}
+	runtime, err = qtx.LockAgentRuntimeForAccessChange(r.Context(), runtimeUUID)
+	if err != nil || runtime.WorkspaceID != wsUUID {
+		writeError(w, http.StatusBadRequest, "invalid runtime_id")
+		return
+	}
+	if !canUseRuntimeForAgent(member, runtime) {
+		writeError(w, http.StatusForbidden, "this runtime is private; ask its owner to grant you access before creating agents")
+		return
+	}
+
 	created, err := qtx.CreateAgent(r.Context(), db.CreateAgentParams{
 		WorkspaceID:              wsUUID,
 		Name:                     req.Name,
@@ -1592,7 +1690,7 @@ func (h *Handler) CreateAgent(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		slog.Warn("create agent failed", append(logger.RequestAttrs(r), "error", err, "workspace_id", workspaceID)...)
-		writeError(w, http.StatusInternalServerError, "failed to create agent: "+err.Error())
+		writeError(w, http.StatusInternalServerError, "failed to create agent")
 		return
 	}
 	if err := replaceInvocationTargetsWithQueries(r.Context(), qtx, created.ID, parseUUID(ownerID), perm.targets); err != nil {
@@ -1980,13 +2078,90 @@ func (h *Handler) UpdateAgent(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		if !canUseRuntimeForAgent(member, runtime) {
-			writeError(w, http.StatusForbidden, "this runtime is private; only its owner can move agents onto it")
+			writeError(w, http.StatusForbidden, "this runtime is private; ask its owner to grant you access before moving agents onto it")
+			return
+		}
+		// Task delivery authorizes private runtimes against the agent owner,
+		// not the member making this update. Admin management permission must
+		// not save a binding that the existing delivery gate will reject.
+		if runtime.Visibility == "private" && !service.RuntimeAllowsUser(runtime, existing.OwnerID) {
+			writeError(w, http.StatusForbidden, "this runtime is private; its owner must grant the agent owner access")
 			return
 		}
 		params.RuntimeID = runtime.ID
 		params.RuntimeMode = pgtype.Text{String: runtime.RuntimeMode, Valid: true}
 		targetRuntimeID = runtime.ID
 		targetProvider = runtime.Provider
+	}
+	// Validate the settings the agent will have after this update, not only the
+	// fields in the request: a Qoder agent must never be left with settings the
+	// bridge refuses at run time.
+	runtimeChange := req.RuntimeConfig != nil || req.RuntimeID != nil
+	if runtimeChange || req.CustomArgs != nil || req.McpConfig != nil || req.Model != nil || req.ThinkingLevel != nil || req.ServiceTier != nil {
+		provider := targetProvider
+		if provider == "" {
+			var ok bool
+			provider, ok = h.resolveAgentProvider(r, existing.WorkspaceID, targetRuntimeID)
+			if !ok {
+				writeError(w, 400, "cannot resolve agent runtime")
+				return
+			}
+		}
+		if req.CustomArgs != nil || req.RuntimeID != nil {
+			var customArgs []string
+			if req.CustomArgs != nil {
+				customArgs = *req.CustomArgs
+			} else if len(existing.CustomArgs) > 0 {
+				if err := json.Unmarshal(existing.CustomArgs, &customArgs); err != nil {
+					writeError(w, http.StatusInternalServerError, "failed to read existing custom_args")
+					return
+				}
+			}
+			if err := agent.ValidateCustomArgs(provider, customArgs); err != nil {
+				writeError(w, http.StatusBadRequest, err.Error())
+				return
+			}
+		}
+		if provider == "qoder_cloud" {
+			if runtimeChange {
+				raw := existing.RuntimeConfig
+				if req.RuntimeConfig != nil {
+					raw, _ = json.Marshal(req.RuntimeConfig)
+				}
+				if err := validateQoderAgentConfig(raw); err != nil {
+					writeError(w, 400, err.Error())
+					return
+				}
+			}
+			overrides := storedQoderOverrides(existing)
+			if req.RuntimeID != nil {
+				skills, err := h.Queries.ListAgentSkills(r.Context(), existing.ID)
+				if err != nil {
+					writeError(w, http.StatusInternalServerError, "failed to load agent skills")
+					return
+				}
+				overrides.skills = len(skills)
+			}
+			if req.CustomArgs != nil {
+				overrides.customArgs = len(*req.CustomArgs)
+			}
+			if req.McpConfig != nil {
+				overrides.mcpConfig = *req.McpConfig
+			}
+			if req.Model != nil {
+				overrides.model = *req.Model
+			}
+			if req.ThinkingLevel != nil {
+				overrides.thinkingLevel = *req.ThinkingLevel
+			}
+			if req.ServiceTier != nil {
+				overrides.serviceTier = *req.ServiceTier
+			}
+			if err := overrides.validate(); err != nil {
+				writeError(w, 400, err.Error())
+				return
+			}
+		}
 	}
 	// Invocation permission (MUL-3963). OWNER-ONLY write: access is the one
 	// agent property a workspace admin may NOT change (only the owner decides
@@ -2225,7 +2400,47 @@ func (h *Handler) UpdateAgent(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	updated, err := h.Queries.UpdateAgent(r.Context(), params)
+	// Only binding writes need this transaction. Hold the same runtime lock as
+	// revocation until the new binding commits; a preflight-only check is stale
+	// as soon as a public runtime becomes private.
+	updateQueries := h.Queries
+	var bindingTx pgx.Tx
+	if req.RuntimeID != nil {
+		member, ok := h.workspaceMember(w, r, uuidToString(existing.WorkspaceID))
+		if !ok {
+			return
+		}
+		bindingTx, err = h.TxStarter.Begin(r.Context())
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "failed to start agent binding transaction")
+			return
+		}
+		defer bindingTx.Rollback(r.Context())
+		updateQueries = h.Queries.WithTx(bindingTx)
+		if _, err := updateQueries.LockWorkspaceForChatSessionCreate(r.Context(), existing.WorkspaceID); err != nil {
+			if errors.Is(err, pgx.ErrNoRows) {
+				writeError(w, http.StatusNotFound, "workspace not found")
+			} else {
+				writeError(w, http.StatusInternalServerError, "failed to lock workspace")
+			}
+			return
+		}
+		runtime, err := updateQueries.LockAgentRuntimeForAccessChange(r.Context(), params.RuntimeID)
+		if err != nil || runtime.WorkspaceID != existing.WorkspaceID {
+			writeError(w, http.StatusBadRequest, "invalid runtime_id")
+			return
+		}
+		if !canUseRuntimeForAgent(member, runtime) {
+			writeError(w, http.StatusForbidden, "this runtime is private; ask its owner to grant you access before moving agents onto it")
+			return
+		}
+		if runtime.Visibility == "private" && !service.RuntimeAllowsUser(runtime, existing.OwnerID) {
+			writeError(w, http.StatusForbidden, "the agent owner does not have access to this runtime")
+			return
+		}
+		params.RuntimeMode = pgtype.Text{String: runtime.RuntimeMode, Valid: true}
+	}
+	updated, err := updateQueries.UpdateAgent(r.Context(), params)
 	if err != nil {
 		// Unique constraint on (workspace_id, name) — mirror CreateAgent and
 		// return a clear conflict instead of a 500 that leaks the raw
@@ -2243,8 +2458,15 @@ func (h *Handler) UpdateAgent(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		slog.Warn("update agent failed", append(logger.RequestAttrs(r), "error", err, "agent_id", id)...)
-		writeError(w, http.StatusInternalServerError, "failed to update agent: "+err.Error())
+		writeError(w, http.StatusInternalServerError, "failed to update agent")
 		return
+	}
+
+	if bindingTx != nil {
+		if err := bindingTx.Commit(r.Context()); err != nil {
+			writeError(w, http.StatusInternalServerError, "failed to commit agent binding")
+			return
+		}
 	}
 
 	// Nullable runtime overrides: null/empty in the request means explicitly
@@ -2254,7 +2476,7 @@ func (h *Handler) UpdateAgent(w http.ResponseWriter, r *http.Request) {
 		updated, err = h.Queries.ClearAgentMcpConfig(r.Context(), updated.ID)
 		if err != nil {
 			slog.Warn("clear agent mcp_config failed", append(logger.RequestAttrs(r), "error", err, "agent_id", id)...)
-			writeError(w, http.StatusInternalServerError, "failed to clear mcp_config: "+err.Error())
+			writeError(w, http.StatusInternalServerError, "failed to clear mcp_config")
 			return
 		}
 	}
@@ -2262,7 +2484,7 @@ func (h *Handler) UpdateAgent(w http.ResponseWriter, r *http.Request) {
 		updated, err = h.Queries.ClearAgentThinkingLevel(r.Context(), updated.ID)
 		if err != nil {
 			slog.Warn("clear agent thinking_level failed", append(logger.RequestAttrs(r), "error", err, "agent_id", id)...)
-			writeError(w, http.StatusInternalServerError, "failed to clear thinking_level: "+err.Error())
+			writeError(w, http.StatusInternalServerError, "failed to clear thinking_level")
 			return
 		}
 	}
@@ -2270,7 +2492,7 @@ func (h *Handler) UpdateAgent(w http.ResponseWriter, r *http.Request) {
 		updated, err = h.Queries.ClearAgentServiceTier(r.Context(), updated.ID)
 		if err != nil {
 			slog.Warn("clear agent service_tier failed", append(logger.RequestAttrs(r), "error", err, "agent_id", id)...)
-			writeError(w, http.StatusInternalServerError, "failed to clear service_tier: "+err.Error())
+			writeError(w, http.StatusInternalServerError, "failed to clear service_tier")
 			return
 		}
 	}
@@ -2278,7 +2500,7 @@ func (h *Handler) UpdateAgent(w http.ResponseWriter, r *http.Request) {
 		updated, err = h.Queries.ClearAgentComposioToolkitAllowlist(r.Context(), updated.ID)
 		if err != nil {
 			slog.Warn("clear agent composio_toolkit_allowlist failed", append(logger.RequestAttrs(r), "error", err, "agent_id", id)...)
-			writeError(w, http.StatusInternalServerError, "failed to clear composio_toolkit_allowlist: "+err.Error())
+			writeError(w, http.StatusInternalServerError, "failed to clear composio_toolkit_allowlist")
 			return
 		}
 	}
@@ -2289,7 +2511,7 @@ func (h *Handler) UpdateAgent(w http.ResponseWriter, r *http.Request) {
 	if replacePermissionTargets {
 		if err := h.replaceInvocationTargets(r.Context(), updated.ID, parseUUID(requestUserID(r)), resolvedPerm.targets); err != nil {
 			slog.Warn("update agent: persist invocation targets failed", append(logger.RequestAttrs(r), "error", err, "agent_id", id)...)
-			writeError(w, http.StatusInternalServerError, "failed to update invocation targets: "+err.Error())
+			writeError(w, http.StatusInternalServerError, "failed to update invocation targets")
 			return
 		}
 	}
@@ -2667,6 +2889,13 @@ func (h *Handler) CancelAgentTasks(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, cancelAgentTasksResponse{Cancelled: len(cancelled)})
 }
 
+// HeaderAgentTasksNextCursor preserves the array response used by installed clients.
+// An absent header means this is the last page.
+const HeaderAgentTasksNextCursor = "X-Agent-Tasks-Next-Cursor"
+
+const defaultAgentTasksLimit = 200
+const maxAgentTasksLimit = 200
+
 func (h *Handler) ListAgentTasks(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
 	agent, ok := h.loadAgentForUser(w, r, id)
@@ -2692,13 +2921,41 @@ func (h *Handler) ListAgentTasks(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	tasks, err := h.Queries.ListAgentTasks(r.Context(), agent.ID)
+	limit := defaultAgentTasksLimit
+	if raw := r.URL.Query().Get("limit"); raw != "" {
+		n, err := strconv.Atoi(raw)
+		if err != nil || n < 1 {
+			writeError(w, http.StatusBadRequest, "limit must be a positive integer")
+			return
+		}
+		limit = min(n, maxAgentTasksLimit)
+	}
+	// An infinite upper bound gives both first and subsequent pages an indexed
+	// tuple comparison, without an optional-cursor OR in the query plan.
+	beforeCreatedAt := pgtype.Timestamptz{InfinityModifier: pgtype.Infinity, Valid: true}
+	beforeID := agent.ID
+	if raw := r.URL.Query().Get("before"); raw != "" {
+		beforeCreatedAt, beforeID = parseTranscriptCursor(raw)
+		if !beforeCreatedAt.Valid || !beforeID.Valid {
+			writeError(w, http.StatusBadRequest, "invalid before cursor")
+			return
+		}
+	}
+	tasks, err := h.Queries.ListAgentTasks(r.Context(), db.ListAgentTasksParams{
+		AgentID: agent.ID, BeforeCreatedAt: beforeCreatedAt, BeforeID: beforeID,
+		PageLimit: int32(limit + 1),
+	})
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to list agent tasks")
 		return
 	}
 
-	tasks = visibleTaskHistory(tasks)
+	nextCursor := ""
+	if len(tasks) > limit {
+		tasks = tasks[:limit]
+		last := tasks[len(tasks)-1]
+		nextCursor = transcriptCursor(last.CreatedAt.Time, last.ID)
+	}
 	resp := make([]AgentTaskResponse, len(tasks))
 	var taskIDs []pgtype.UUID
 	if includeUsage {
@@ -2720,18 +2977,23 @@ func (h *Handler) ListAgentTasks(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	if nextCursor != "" {
+		w.Header().Set(HeaderAgentTasksNextCursor, nextCursor)
+	}
 	writeJSON(w, http.StatusOK, resp)
 }
 
 // AgentActivityBucket is one day-bucketed throughput sample for the
 // Agents-list ACTIVITY sparkline. bucket_at is midnight UTC of the day.
 type AgentActivityBucket struct {
-	AgentID        string `json:"agent_id"`
-	BucketAt       string `json:"bucket_at"`
-	TaskCount      int32  `json:"task_count"`
-	FailedCount    int32  `json:"failed_count"`
-	CompletedCount int32  `json:"completed_count"`
-	CancelledCount int32  `json:"cancelled_count"`
+	AgentID        string  `json:"agent_id"`
+	BucketAt       string  `json:"bucket_at"`
+	TaskCount      int32   `json:"task_count"`
+	FailedCount    int32   `json:"failed_count"`
+	CompletedCount int32   `json:"completed_count"`
+	CancelledCount int32   `json:"cancelled_count"`
+	DurationMs     float64 `json:"duration_ms"`
+	DurationCount  int32   `json:"duration_count"`
 }
 
 // AgentRunCount is the trailing-30-day total task run count per agent,
@@ -2953,6 +3215,8 @@ func (h *Handler) GetWorkspaceAgentActivity30d(w http.ResponseWriter, r *http.Re
 			FailedCount:    row.FailedCount,
 			CompletedCount: row.CompletedCount,
 			CancelledCount: row.CancelledCount,
+			DurationMs:     row.DurationMs,
+			DurationCount:  row.DurationCount,
 		})
 	}
 

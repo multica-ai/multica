@@ -1,4 +1,10 @@
 {
+  "daemon_setup": {
+    "loading": "Loading connection settings...",
+    "error": "Couldn't load connection settings. Check your connection; retrying automatically.",
+    "unknown": "This server hasn't confirmed its connection settings. Ask your administrator to update the server.",
+    "incomplete": "Connection settings are incomplete. Ask your administrator to configure this server's public URLs."
+  },
   "avatar_upload": {
     "change": "Change avatar",
     "remove": "Remove",
@@ -35,6 +41,7 @@
   "cancel": "Cancel",
   "delete": "Delete",
   "confirm": "Confirm",
+  "more_actions": "More actions",
   "loading": "Loading...",
   "time": {
     "just_now": "just now",
