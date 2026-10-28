@@ -49,6 +49,7 @@ func TestOpencodeV2ExecuteExitIsTerminal(t *testing.T) {
 				ExecutablePath: fakePath,
 				CLIVersion:     "opencode v2.1.3",
 				BuiltinRuntime: true,
+				Env:            map[string]string{opencodeTransportEnv: "run"},
 				Logger:         slog.Default(),
 			})
 			if err != nil {

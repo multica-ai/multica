@@ -35,6 +35,7 @@ vi.mock("electron", () => ({
     getPath: () => "/review-only/user-data",
     getAppPath: () => "/review-only/app",
     getVersion: () => "0.7.0",
+    getPreferredSystemLanguages: () => ["en"],
   },
   BrowserWindow: class {},
   ipcMain: {

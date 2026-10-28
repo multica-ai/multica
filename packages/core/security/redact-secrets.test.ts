@@ -1,6 +1,6 @@
 // @vitest-environment node
 import { describe, it, expect } from "vitest";
-import { redactSecrets } from "./redact";
+import { redactSecrets } from "./redact-secrets";
 
 describe("redactSecrets", () => {
   it("redacts AWS access key", () => {

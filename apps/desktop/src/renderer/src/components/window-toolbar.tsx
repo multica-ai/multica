@@ -23,6 +23,7 @@ import {
   TooltipContent,
   TooltipTrigger,
 } from "@multica/ui/components/ui/tooltip";
+import { TruncatedTooltip } from "@multica/ui/components/common/truncated-tooltip";
 import {
   ResourceLeadingVisual,
   useTabPresentation,
@@ -167,9 +168,11 @@ function HistoryMenuItem({
       onClick={onSelect}
     >
       <ResourceLeadingVisual visual={visual} />
-      <span className="min-w-0 flex-1 truncate" title={title}>
-        {title}
-      </span>
+      <TruncatedTooltip content={title}>
+        <span className="min-w-0 flex-1 truncate">
+          {title}
+        </span>
+      </TruncatedTooltip>
     </DropdownMenuItem>
   );
 }

@@ -3,9 +3,17 @@ package remotemcp
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"io"
+	"net/http"
 	"net/netip"
+	"net/url"
 	"strings"
+	"sync/atomic"
 	"testing"
+	"time"
+
+	"github.com/multica-ai/multica/server/internal/testutil"
 )
 
 type staticResolver map[string][]netip.Addr
@@ -44,6 +52,65 @@ func TestHostAllowedWildcardDoesNotMatchApex(t *testing.T) {
 	}
 	if hostAllowed("example.com", []string{"*.example.com"}) {
 		t.Fatal("wildcard matched apex")
+	}
+}
+
+func TestSecureHTTPClientRecoversBlackholedHTTP2Connection(t *testing.T) {
+	started := make(chan struct{}, 1)
+	var interrupted atomic.Int32
+	server, connections := testutil.NewBlackholeHTTP2Server(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.ProtoMajor != 2 {
+			t.Errorf("expected HTTP/2, got %s", r.Proto)
+		}
+		if r.URL.Path == "/blocked" {
+			interrupted.Add(1)
+			started <- struct{}{}
+			<-r.Context().Done()
+			return
+		}
+		_, _ = io.WriteString(w, `{"jsonrpc":"2.0","id":1,"result":{}}`)
+	}))
+	t.Setenv(DevOriginsEnv, server.URL)
+	endpoint, err := url.Parse(server.URL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	client := NewSecureHTTPClient(endpoint)
+	testutil.TrustHTTP2Server(t, client, server)
+	client.Timeout = 2 * time.Second
+	ctx, cancel := context.WithTimeout(context.Background(), 6*time.Second)
+	defer cancel()
+	if _, _, err := call(ctx, client, endpoint, nil, "", nil); err != nil {
+		t.Fatal(err)
+	}
+	conn := <-connections
+	defer conn.Close()
+	blocked := *endpoint
+	blocked.Path = "/blocked"
+	done := make(chan error, 1)
+	go func() {
+		_, _, err := call(ctx, client, &blocked, nil, "", nil)
+		done <- err
+	}()
+	select {
+	case <-started:
+	case <-ctx.Done():
+		t.Fatal("MCP call did not reach server")
+	}
+	conn.Drop.Store(true)
+	if err := <-done; err == nil || errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("expected connection loss before request timeout, got %v", err)
+	}
+	if _, _, err := call(ctx, client, endpoint, nil, "", nil); err != nil {
+		t.Fatalf("MCP client reused the dead connection: %v", err)
+	}
+	select {
+	case <-connections:
+	default:
+		t.Fatal("MCP recovery did not open a new connection")
+	}
+	if count := interrupted.Load(); count != 1 {
+		t.Fatalf("interrupted MCP call was replayed %d times", count)
 	}
 }
 

@@ -502,7 +502,8 @@
     "pull_requests_empty_title": "No linked pull requests."
   },
   "timeline": {
-    "loading": "Loading..."
+    "loading": "Loading...",
+    "jump_to_latest": "Jump to latest"
   },
   "activity": {
     "created": "created this issue",

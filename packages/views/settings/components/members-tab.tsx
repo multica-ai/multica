@@ -66,6 +66,7 @@ import {
   DropdownMenuSubTrigger,
   DropdownMenuSubContent,
 } from "@multica/ui/components/ui/dropdown-menu";
+import { TruncatedTooltip } from "@multica/ui/components/common/truncated-tooltip";
 import { toast } from "sonner";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useAuthStore } from "@multica/core/auth";
@@ -375,12 +376,13 @@ function ShareLinkRow({
           <span>{t(($) => $.members.share_link_uses, { used: link.use_count, max: link.max_uses ?? "∞" })}</span>
           {link.expires_at && <span>· {t(($) => $.members.share_link_expires, { date: new Date(link.expires_at).toLocaleDateString(locale) })}</span>}
         </div>
-        <div
-          className="truncate font-mono text-caption text-muted-foreground"
-          title={joinUrl}
-        >
-          {joinUrl}
-        </div>
+        <TruncatedTooltip content={joinUrl}>
+          <div
+            className="truncate font-mono text-caption text-muted-foreground"
+          >
+            {joinUrl}
+          </div>
+        </TruncatedTooltip>
       </div>
       <span className="w-24 shrink-0 text-body">{rc.label}</span>
       <IconButton

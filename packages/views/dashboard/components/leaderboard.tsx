@@ -14,6 +14,7 @@ import {
 } from "../utils";
 import { Segmented } from "./dashboard-shared";
 import "./leaderboard.css";
+import { TruncatedTooltip } from "@multica/ui/components/common/truncated-tooltip";
 
 // Which metric ranks the leaderboard. Drives row order, progress bar
 // width, and which column header is emphasised — keeping the three in
@@ -253,12 +254,13 @@ export function Leaderboard({
                                 : t(($) => $.leaderboard.other_agents)}
                             </span>
                             {coverageText ? (
-                              <span
-                                className="block truncate text-caption text-muted-foreground"
-                                title={coverageText}
-                              >
-                                {coverageText}
-                              </span>
+                              <TruncatedTooltip content={coverageText}>
+                                <span
+                                  className="block truncate text-caption text-muted-foreground"
+                                >
+                                  {coverageText}
+                                </span>
+                              </TruncatedTooltip>
                             ) : null}
                           </span>
                         </>
@@ -275,12 +277,13 @@ export function Leaderboard({
                               {agent?.name ?? row.agentId}
                             </span>
                             {coverageText ? (
-                              <span
-                                className="block truncate text-caption text-muted-foreground"
-                                title={coverageText}
-                              >
-                                {coverageText}
-                              </span>
+                              <TruncatedTooltip content={coverageText}>
+                                <span
+                                  className="block truncate text-caption text-muted-foreground"
+                                >
+                                  {coverageText}
+                                </span>
+                              </TruncatedTooltip>
                             ) : null}
                           </span>
                         </>

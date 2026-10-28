@@ -13,9 +13,19 @@ import (
 // that forgets to plumb the slug through loses its link loudly, instead of
 // silently shipping the unroutable legacy /issues/{identifier} form again.
 func IssueWebLink(appURL, workspaceSlug, identifier string) string {
-	if appURL == "" || workspaceSlug == "" || identifier == "" {
+	return ReferenceWebLink(appURL, workspaceSlug, "issue", identifier)
+}
+
+// ReferenceWebLink builds detail links for the navigable mention types.
+// Member references address users, not workspace membership rows.
+func ReferenceWebLink(appURL, workspaceSlug, kind, id string) string {
+	route := map[string]string{
+		"issue": "issues", "project": "projects", "agent": "agents",
+		"squad": "squads", "member": "members",
+	}[kind]
+	if appURL == "" || workspaceSlug == "" || id == "" || route == "" {
 		return ""
 	}
 	return strings.TrimRight(appURL, "/") + "/" + url.PathEscape(workspaceSlug) +
-		"/issues/" + url.PathEscape(identifier)
+		"/" + route + "/" + url.PathEscape(id)
 }

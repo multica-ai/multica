@@ -11,6 +11,8 @@ import (
 	"net/url"
 	"strings"
 	"time"
+
+	"github.com/multica-ai/multica/server/pkg/httptransport"
 )
 
 type api struct {
@@ -32,7 +34,13 @@ func newAPI(base, token, workspace string) (*api, error) {
 	if strings.TrimSpace(token) == "" {
 		return nil, fmt.Errorf("API token is required")
 	}
-	return &api{base: strings.TrimRight(base, "/"), token: token, workspace: workspace, client: &http.Client{Timeout: 30 * time.Second, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}}, nil
+	return &api{
+		base: strings.TrimRight(base, "/"), token: token, workspace: workspace,
+		client: &http.Client{
+			Timeout: 30 * time.Second, Transport: httptransport.CloneDefault(),
+			CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse },
+		},
+	}, nil
 }
 
 // Errors deliberately omit remote bodies and URLs, which may echo credentials or task content.

@@ -136,6 +136,8 @@ When `S3_BUCKET` is unset, Multica uses local disk.
 | `ATTACHMENT_DOWNLOAD_MODE` | `auto` | `auto`, `cloudfront`, `presign`, or `proxy` |
 | `ATTACHMENT_DOWNLOAD_URL_TTL` | `30m` | Lifetime of signed download URLs |
 
+When `AWS_ENDPOINT_URL` points to Google Cloud Storage, `Accept-Encoding` is automatically excluded from request signing.
+
 Use `ATTACHMENT_DOWNLOAD_MODE=proxy` when the endpoint — an internal MinIO, for example — is not reachable from the browser.
 
 ### Local disk
