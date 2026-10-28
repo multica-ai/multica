@@ -511,6 +511,8 @@ func TestNewRuntimeVerdict_DshProfileCarriesAStructuredCause(t *testing.T) {
 		verdict    builtinProbeVerdict
 		installing bool
 	}{
+		{name: "migration, no install", verdict: builtinProbeProfileMigration},
+		{name: "migration ignores install wait", verdict: builtinProbeProfileMigration, installing: true},
 		{name: "missing, no install", verdict: builtinProbeMissingProfile},
 		{name: "missing, install running", verdict: builtinProbeMissingProfile, installing: true},
 	} {
@@ -522,7 +524,7 @@ func TestNewRuntimeVerdict_DshProfileCarriesAStructuredCause(t *testing.T) {
 			if got.offline.Code != RuntimeOfflineCodeDshProfile {
 				t.Fatalf("code = %q, want %q", got.offline.Code, RuntimeOfflineCodeDshProfile)
 			}
-			if got.offline.Installing != tc.installing {
+			if got.offline.Installing != (tc.installing && tc.verdict != builtinProbeProfileMigration) {
 				t.Fatalf("installing = %v, want %v", got.offline.Installing, tc.installing)
 			}
 			// A repair that NAMES what is missing, and deliberately carries no
@@ -544,5 +546,45 @@ func TestNewRuntimeVerdict_DshProfileCarriesAStructuredCause(t *testing.T) {
 	if demotableBuiltinProbeVerdict(builtinProbeIncompatibleProfile) {
 		t.Fatal("an incompatible profile can demote a live runtime; " +
 			"the daemon may be the stale side of that protocol skew")
+	}
+}
+
+func TestProbeBuiltinRuntime_DshLegacyProfile(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("shell fixture")
+	}
+	for _, manifest := range []string{
+		`{"dsh":{"profile":{"bundles":["dsh-profile-multica"]}}}`,
+		`{"dependencies":{"@multica-ai/dsh-runtime":"0.0.0-local"},"dsh":{"profile":{"bundles":["dsh-profile-multica"]}}}`,
+		`{"dependencies":{"@multica-ai/dsh-runtime":"0.0.0-local"}}`,
+		`{"dsh":{"profile":{"bundles":["@multica-ai/dsh-runtime","dsh-profile-multica"]}}}`,
+	} {
+		t.Run(manifest, func(t *testing.T) {
+			path := dshProbeFixture(t, dshProbeOKFrame, true)
+			home := os.Getenv("DSH_HOME")
+			writeDshProfileManifest(t, home, manifest)
+			t.Setenv(dshProfileBundleEnv, "@multica-ai/dsh-runtime")
+			d := &Daemon{logger: slog.New(slog.NewTextHandler(io.Discard, nil)), agentVersions: map[string]string{}}
+			_, reason, verdict := d.probeBuiltinRuntime(context.Background(), "dsh", AgentEntry{Path: path, Command: "dsh"})
+			if verdict != builtinProbeProfileMigration || !demotableBuiltinProbeVerdict(verdict) {
+				t.Fatalf("profile verdict = %v, want demotable migration", verdict)
+			}
+			if !strings.Contains(reason, "dsh.profile.bundles") {
+				t.Fatalf("missing migration guidance: %s", reason)
+			}
+			if err := provisionDshMulticaProfile(context.Background(), path, d.logger); err == nil {
+				t.Fatal("explicit provisioning did not refuse the existing bridge")
+			}
+			if d.dshInstallInFlight.Load() {
+				t.Fatal("migration started automatic provisioning")
+			}
+			if dshMulticaProfilePresent() {
+				t.Fatal("invalid profile will not force a discovery round")
+			}
+			data, err := os.ReadFile(filepath.Join(home, "profiles", dshMulticaProfileName, "package.json"))
+			if err != nil || string(data) != manifest {
+				t.Fatalf("profile changed: %s, %v", data, err)
+			}
+		})
 	}
 }

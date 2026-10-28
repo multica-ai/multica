@@ -392,6 +392,8 @@ type dshProbeVerdict int
 const (
 	// dshProbeOK: the profile answered with the protocol version this backend drives.
 	dshProbeOK dshProbeVerdict = iota
+	// A configured bridge must be migrated manually, never provisioned over.
+	dshProbeNeedsMigration
 	// dshProbeMissingProfile: the manifest does not name the Multica runtime.
 	// A file that merely exists is not enough — a refused install leaves one.
 	// This is the only verdict that may install a bundle or condemn the runtime.
@@ -447,6 +449,9 @@ func probeDshMulticaProfile(ctx context.Context, executablePath string) dshProbe
 	// before the manifest: a shutdown is not evidence the profile is missing.
 	if ctx.Err() != nil {
 		return dshProbeUnavailable
+	}
+	if dshMulticaProfileNeedsMigration() {
+		return dshProbeNeedsMigration
 	}
 	// A manifest that does not name the runtime is missing. Decide that before
 	// starting dsh: on current DSH, --probe against the skeleton a refused
