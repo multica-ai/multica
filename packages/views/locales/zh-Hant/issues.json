@@ -367,7 +367,11 @@
     "empty_grouping": "沒有匹配的任務",
     "no_value": "未設定",
     "ordered_by": "按{{field}}排序",
-    "manual_reorder_hint": "切換到“手動”排序後，才能調整同一列內的順序。"
+    "manual_reorder_hint": "切換到“手動”排序後，才能調整同一列內的順序。",
+    "sub_issue_count_other": "{{count}} 個子任務",
+    "filter_to_status": "按此狀態篩選",
+    "outside_workflow": "不在目前看板的工作流裡",
+    "workflow_columns_note": "看板的列由工作流決定，專案外的檢視使用 Default 工作流。"
   },
   "peek": {
     "panel_label": "任務預覽",

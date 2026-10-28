@@ -367,7 +367,11 @@
     "empty_grouping": "一致するタスクがありません",
     "no_value": "値なし",
     "ordered_by": "{{field}} 順に並べたボード",
-    "manual_reorder_hint": "列内の順序を変更するには、並び順を「手動」に切り替えてください。"
+    "manual_reorder_hint": "列内の順序を変更するには、並び順を「手動」に切り替えてください。",
+    "sub_issue_count_other": "サブタスク {{count}} 件",
+    "filter_to_status": "このステータスで絞り込む",
+    "outside_workflow": "このボードのワークフローにはありません",
+    "workflow_columns_note": "ボードの列はワークフローで決まります。プロジェクト外のビューは Default を使います。"
   },
   "peek": {
     "panel_label": "タスクのプレビュー",
