@@ -92,3 +92,48 @@ func TestZcodeExplicitProviderRepositoryRemainsAuthoritative(t *testing.T) {
 		t.Fatal("explicit repository was replaced")
 	}
 }
+
+func TestCleanupStaleZcodeProviderSnapshotsRemovesLeftovers(t *testing.T) {
+	base := t.TempDir()
+	t.Setenv("TMPDIR", base)
+	// os.TempDir on Unix reads TMPDIR; recreate the leftover layout.
+	leftover := filepath.Join(base, zcodeProvidersTempPrefix+"orphan123")
+	if err := os.MkdirAll(leftover, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	secret := filepath.Join(leftover, "providers.json")
+	if err := os.WriteFile(secret, []byte(`{"apiKey":"x"}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	// Unrelated temp dir must survive.
+	keep := filepath.Join(base, "unrelated-temp")
+	if err := os.MkdirAll(keep, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	removed := CleanupStaleZcodeProviderSnapshots()
+	if removed != 1 {
+		t.Fatalf("removed = %d, want 1", removed)
+	}
+	if _, err := os.Stat(leftover); !os.IsNotExist(err) {
+		t.Fatalf("leftover still present: %v", err)
+	}
+	if _, err := os.Stat(keep); err != nil {
+		t.Fatalf("unrelated dir was removed: %v", err)
+	}
+}
+
+func TestRequireNodeForZcodeScript(t *testing.T) {
+	if err := requireNodeForZcodeScript("/usr/local/bin/zcode"); err != nil {
+		t.Fatalf("native path should pass: %v", err)
+	}
+	origPath := os.Getenv("PATH")
+	t.Cleanup(func() { os.Setenv("PATH", origPath) })
+	t.Setenv("PATH", t.TempDir()) // empty of node
+	err := requireNodeForZcodeScript("/Applications/ZCode.app/Contents/Resources/glm/zcode.cjs")
+	if err == nil {
+		t.Fatal("expected error when node is missing")
+	}
+	if !strings.Contains(err.Error(), "Node.js") || !strings.Contains(err.Error(), "node was not found") {
+		t.Fatalf("error = %q, want clear Node.js message", err)
+	}
+}

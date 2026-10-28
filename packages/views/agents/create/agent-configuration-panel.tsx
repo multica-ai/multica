@@ -1,9 +1,9 @@
 "use client";
 
 import { useEffect, useRef, type ReactNode } from "react";
- import {useQuery} from "@tanstack/react-query";
- import {runtimeModelsOptions} from "@multica/core/runtimes";
- import {findModelCapabilityEntry,thinkingLevelRequiredForProvider} from "../components/inspector/model-capability";
+import {useQuery} from "@tanstack/react-query";
+import {runtimeModelsOptions} from "@multica/core/runtimes";
+import {findModelCapabilityEntry,thinkingLevelRequiredForProvider} from "../components/inspector/model-capability";
 import {
   AGENT_DESCRIPTION_MAX_LENGTH,
   applyDraftModelChange,

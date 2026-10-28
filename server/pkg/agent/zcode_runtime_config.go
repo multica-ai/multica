@@ -11,7 +11,10 @@ import (
 	"strings"
 )
 
-const zcodePersonalConfigEnv = "ZCODE_PERSONAL_PROVIDER_CONFIG_FILE"
+const (
+	zcodePersonalConfigEnv   = "ZCODE_PERSONAL_PROVIDER_CONFIG_FILE"
+	zcodeProvidersTempPrefix = "multica-zcode-providers-"
+)
 
 type zcodeDesktopProvider struct {
 	Name    string            `json:"name"`
@@ -56,9 +59,12 @@ func readZcodeConfig(path string, into any) error {
 }
 
 // prepareZcodeRuntimeEnv adapts Desktop's enabled API-key connections into a
-// private, process-owned native provider repository. It never edits Desktop's
-// repositories, reads shared credential stores, or converts Start Plan identity
-// tokens into API keys. Explicit native repositories remain authoritative.
+// private, process-owned native provider repository snapshot under the process
+// temp dir (multica-zcode-providers-*). It reads Desktop's enabled connections
+// to build that snapshot, but never edits Desktop's repositories or converts
+// Start Plan identity tokens into API keys. Explicit native repositories remain
+// authoritative. Call CleanupStaleZcodeProviderSnapshots on daemon startup so
+// crash leftovers do not linger.
 func prepareZcodeRuntimeEnv(executable string, env []string) ([]string, func(), error) {
 	noop := func() {}
 	if zcodeEnvValue(env, zcodePersonalConfigEnv) != "" {
@@ -182,7 +188,7 @@ func prepareZcodeRuntimeEnv(executable string, env []string) ([]string, func(), 
 	if err != nil {
 		return nil, noop, fmt.Errorf("encode process-owned ZCode provider repository: %w", err)
 	}
-	temp, err := os.MkdirTemp("", "multica-zcode-providers-")
+	temp, err := os.MkdirTemp("", zcodeProvidersTempPrefix)
 	if err != nil {
 		return nil, noop, err
 	}
@@ -194,4 +200,30 @@ func prepareZcodeRuntimeEnv(executable string, env []string) ([]string, func(), 
 	}
 	env = zcodeRuntimeEnv(executable, env)
 	return append(env, zcodePersonalConfigEnv+"="+file), cleanup, nil
+}
+
+// CleanupStaleZcodeProviderSnapshots removes orphaned process-private provider
+// repository directories left under the process temp dir when a prior daemon
+// exited without running the per-session cleanup defer (crash / SIGKILL).
+// Best-effort: failures to remove individual matches are ignored; the count of
+// removed directories is returned for logging.
+func CleanupStaleZcodeProviderSnapshots() int {
+	matches, err := filepath.Glob(filepath.Join(os.TempDir(), zcodeProvidersTempPrefix+"*"))
+	if err != nil {
+		return 0
+	}
+	removed := 0
+	for _, dir := range matches {
+		info, err := os.Stat(dir)
+		if err != nil || !info.IsDir() {
+			continue
+		}
+		if !strings.HasPrefix(filepath.Base(dir), zcodeProvidersTempPrefix) {
+			continue
+		}
+		if err := os.RemoveAll(dir); err == nil {
+			removed++
+		}
+	}
+	return removed
 }

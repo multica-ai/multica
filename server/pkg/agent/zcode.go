@@ -133,6 +133,9 @@ func (b *zcodeBackend) Execute(ctx context.Context, prompt string, opts ExecOpti
 	if err != nil {
 		return nil, fmt.Errorf("zcode executable not found at %q: %w", execPath, err)
 	}
+	if err := requireNodeForZcodeScript(lookedUp); err != nil {
+		return nil, err
+	}
 	runtimeEnv, cleanupConfig, err := prepareZcodeRuntimeEnv(lookedUp, buildEnv(b.cfg.Env))
 	if err != nil {
 		return nil, err
@@ -396,6 +399,11 @@ func (b *zcodeBackend) Execute(ctx context.Context, prompt string, opts ExecOpti
 		if opts.ResumeSessionID != "" {
 			params := map[string]any{
 				"sessionId": opts.ResumeSessionID,
+				// Headless execution cannot answer permission prompts. Create
+				// already pins mode "yolo"; resume must restate it in case the
+				// server does not restore the persisted mode (fail-closed
+				// requestPermission would otherwise deny every tool call).
+				"mode": "yolo",
 			}
 			if opts.ThinkingLevel != "" {
 				params["thoughtLevel"] = opts.ThinkingLevel

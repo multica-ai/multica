@@ -1196,3 +1196,83 @@ func TestZcodeEmptyThinkingLevelResolvesDefault(t *testing.T) {
 		})
 	}
 }
+
+// TestZcodeResumeSendsYoloMode captures the session/resume frame and asserts
+// mode "yolo" is restated — create already pins it; resume must too in case the
+// server does not restore the persisted mode.
+func TestZcodeResumeSendsYoloMode(t *testing.T) {
+	capture := filepath.Join(t.TempDir(), "resume.txt")
+	t.Setenv("ZCODE_RESUME_CAPTURE", capture)
+	bin := writeFakeZcodeScript(t, `#!/bin/sh
+while IFS= read -r line; do
+  id=$(printf '%s' "$line" | sed -n 's/.*"id":\([0-9][0-9]*\).*/\1/p')
+  case "$line" in
+    *'"method":"session/resume"'*)
+      printf '%s\n' "$line" >> "$ZCODE_RESUME_CAPTURE"
+      printf '{"id":%s,"result":{"session":{"sessionId":"ses_old"}}}\n' "$id"
+      ;;
+    *'"method":"session/subscribe"'*)
+      printf '{"id":%s,"result":{"sessionId":"ses_old","eventSeq":5,"events":[]}}\n' "$id"
+      ;;
+    *'"method":"session/send"'*)
+      printf '{"id":%s,"result":{"sessionId":"ses_old","accepted":true,"stateRevision":2}}\n' "$id"
+`+zcodeEventFrame(6, "turn.completed", `{"response":"ok","resultType":"success","tokenCount":0,"toolCallCount":0,"duration":1}`)+`      ;;
+  esac
+done
+`)
+	session, err := newZcodeTestBackend(t, bin).Execute(context.Background(), "next", ExecOptions{
+		Cwd:             t.TempDir(),
+		ResumeSessionID: "ses_old",
+	})
+	if err != nil {
+		t.Fatalf("Execute error: %v", err)
+	}
+	if _, res := collectZcodeSession(t, session); res.Status != "completed" {
+		t.Fatalf("expected completed, got %q error=%q", res.Status, res.Error)
+	}
+	raw, err := os.ReadFile(capture)
+	if err != nil {
+		t.Fatalf("session/resume frame not captured: %v", err)
+	}
+	var frame struct {
+		Params struct {
+			Mode string `json:"mode"`
+		} `json:"params"`
+	}
+	if err := json.Unmarshal(raw, &frame); err != nil {
+		t.Fatalf("parse captured frame: %v", err)
+	}
+	if frame.Params.Mode != "yolo" {
+		t.Fatalf("session/resume mode = %q, want yolo; frame=%s", frame.Params.Mode, raw)
+	}
+}
+
+// TestZcodeExecuteRequiresNodeForDesktopBundle asserts Execute fails with a
+// clear Node.js message when the resolved path is a .cjs Desktop entry and
+// node is absent from PATH — not the vague exec: "node": not found form.
+func TestZcodeExecuteRequiresNodeForDesktopBundle(t *testing.T) {
+	dir := t.TempDir()
+	script := filepath.Join(dir, "zcode.cjs")
+	if err := os.WriteFile(script, []byte("console.log('noop')\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", dir) // no node binary
+	b, err := New("zcode", Config{
+		ExecutablePath: script,
+		Logger:         zcodeTestLogger(),
+		TaskID:         "task-1",
+	})
+	if err != nil {
+		t.Fatalf("New(zcode): %v", err)
+	}
+	_, err = b.Execute(context.Background(), "hi", ExecOptions{Cwd: t.TempDir()})
+	if err == nil {
+		t.Fatal("expected Execute to fail when node is missing")
+	}
+	if !strings.Contains(err.Error(), "Node.js") || !strings.Contains(err.Error(), "node was not found") {
+		t.Fatalf("error = %q, want clear Node.js message", err)
+	}
+	if strings.Contains(err.Error(), `exec: "node": executable file not found`) {
+		t.Fatalf("error still uses vague exec form: %v", err)
+	}
+}
