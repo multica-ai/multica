@@ -412,6 +412,7 @@ const ContentEditor = forwardRef<ContentEditorRef, ContentEditorProps>(
     // set is built once at mount, so a directly-captured options object would
     // freeze whatever closures existed then and stop seeing new quick actions.
     const quickActionMenuRef = useRef<BuiltinCommandSuggestionOptions | undefined>(quickActionMenu);
+    const quickActionMenuListeners = useRef(new Set<() => void>());
     const lastEmittedRef = useRef<string | null>(null);
     // `content` already consumes the initial synchronized value when Tiptap
     // mounts. Track later changes separately so the sync effect does not parse
@@ -617,6 +618,10 @@ const ContentEditor = forwardRef<ContentEditorRef, ContentEditorProps>(
         slashCommandMode,
         quickActionMenu: {
           getQuickActions: () => quickActionMenuRef.current?.getQuickActions?.() ?? [],
+          subscribeQuickActions: (refresh) => {
+            quickActionMenuListeners.current.add(refresh);
+            return () => { quickActionMenuListeners.current.delete(refresh); };
+          },
           renderQuickAction: (id: string) =>
             quickActionMenuRef.current?.renderQuickAction?.(id) ?? Promise.resolve(""),
           onRenderError: (error: unknown) =>
@@ -689,6 +694,12 @@ const ContentEditor = forwardRef<ContentEditorRef, ContentEditorProps>(
         },
       },
     });
+
+    // Catalog queries can settle after the last keystroke. Refresh the active
+    // popup without changing the document, selection or editor instance.
+    useEffect(() => {
+      quickActionMenuListeners.current.forEach((refresh) => refresh());
+    }, [quickActionMenu]);
 
     // Signal hosts that the deferred editor instance now exists. Fired from a
     // passive effect (not `onCreate`) so it runs after the commit in which

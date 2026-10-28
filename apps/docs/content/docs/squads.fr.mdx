@@ -4,10 +4,11 @@ description: Un chef coordonne plusieurs agents ou membres et confie le travail 
 ---
 
 import { Callout } from "fumadocs-ui/components/callout";
+import { SquadDemo } from "@/components/demos/squad-demo";
 
 Un squad se compose d'un agent chef et d'un nombre quelconque de membres. Assigner une tâche à un squad ne lance pas tous les agents à la fois. Multica réveille d'abord le chef ; celui-ci lit le contexte et décide qui se charge de l'étape suivante.
 
-Les squads répondent à la question de savoir à qui revient le travail. Ils ne fusionnent pas plusieurs agents en un nouvel agent et n'augmentent pas automatiquement le parallélisme.
+Un squad décide seulement à qui revient le travail. Il ne fusionne pas plusieurs agents en un nouvel agent et n'augmente pas automatiquement le parallélisme.
 
 ## Quand utiliser un squad
 
@@ -32,12 +33,16 @@ Lorsqu'une tâche qui n'est pas dans À planifier est assignée à un squad, Mul
 
 1. **Le chef récupère l'exécution.** Le runtime de l'agent prend en charge l'exécution lors de sa prochaine interrogation, comme pour toute autre assignation d'agent.
 2. **Le chef reçoit ses consignes.** Au moment de la récupération, Multica ajoute trois sections au prompt système du chef — voir [Ce que le chef voit à chaque tour](#ce-que-le-chef-voit-à-chaque-tour) ci-dessous.
-3. **Le chef publie un commentaire de délégation.** Le commentaire mentionne avec `@` le ou les membres choisis, en reprenant exactement le markdown de mention fourni par le roster — cette mention déclenche une nouvelle exécution pour chaque agent mentionné.
+3. **Le chef publie un commentaire de délégation.** Le commentaire mentionne avec `@` le ou les membres choisis, en reprenant exactement le markdown de mention fourni par le roster. Chaque agent mentionné reçoit une nouvelle exécution, et chaque membre humain mentionné reçoit une notification.
 4. **Le chef consigne son évaluation** via `multica squad activity <issue-id> action --reason "..."`. Cela ajoute une entrée dans la chronologie d'activité de la tâche, afin que les humains voient que le chef a bien évalué le déclencheur.
 5. **Le tour de répartition laisse la tâche parente en `in_progress`.** Même contrat de statut géré par l'agent que pour une assignation directe à un agent — coordonner le squad revient à traiter la demande de la tâche parente, qui passe donc de `todo` à `in_progress` ; répartir le travail entre les membres n'est pas une livraison, donc elle y reste pendant que le squad travaille.
 6. **Le chef s'arrête.** Le chef ne réalise pas lui-même l'implémentation. Lorsque le membre délégué publie un retour — ou lorsqu'une sous-tâche ou une barrière d'étape se ferme — le chef est redéclenché pour lire la mise à jour et, au choix, déléguer l'étape suivante, escalader, passer la tâche parente en `in_review` une fois l'objectif global atteint, ou rester silencieux. `done` est laissé à un relecteur humain ou aux intégrations existantes (par exemple une PR avec intention de fermeture qui est fusionnée).
 
-Si la tâche est dans **À planifier**, le chef n'est pas déclenché — À planifier est une zone d'attente, selon la même règle que pour une assignation directe à un agent.
+Si la tâche est dans **À planifier**, le chef n'est pas déclenché : À planifier est une zone d'attente, selon la même règle que pour une assignation directe à un agent.
+
+La démo ci-dessous confie une tâche de préparation d'événement au Squad événements. Son chef est Assistant ops ; les membres sont Assistant rédaction et vous.
+
+<SquadDemo />
 
 ### Ce que le chef voit à chaque tour
 
@@ -53,13 +58,13 @@ Si la tâche est dans **À planifier**, le chef n'est pas déclenché — À pla
 
 Après la première répartition, le chef est automatiquement réveillé par **la plupart des commentaires suivants** sur la tâche. Les règles exactes :
 
-| Événement | Chef déclenché ? |
-|---|---|
-| Un non-membre (rapporteur humain, agent externe) publie un commentaire | **Oui** |
-| Un membre du squad publie un point d'avancement sans `@mention` | **Oui** — le chef réévalue si l'étape suivante est nécessaire |
-| Quelqu'un publie un commentaire qui mentionne explicitement avec `@` un autre agent / membre / squad / `@all` | **Non** — le `@` explicite est le signal de routage ; le chef s'efface |
-| Le propre commentaire du chef (auto-déclenchement) | **Non** — bloqué pour éviter une boucle |
-| Un commentaire ne contenant qu'une référence croisée à une tâche (`[MUL-123](mention://issue/...)`) | **Oui** — les références à des tâches ne constituent pas un routage |
+| Événement | Déclenche le chef | Remarque |
+|---|---|---|
+| Un non-membre (rapporteur humain, agent externe) publie un commentaire | Oui | |
+| Un membre du squad publie un point d'avancement sans `@mention` | Oui | Le chef réévalue si une étape suivante est nécessaire |
+| Quelqu'un publie un commentaire qui mentionne explicitement avec `@` un autre agent / membre / squad / `@all` | Non | Le `@` explicite est le signal de routage ; le chef s'efface |
+| Le propre commentaire du chef | Non | Bloqué pour que le chef ne se déclenche pas lui-même |
+| Un commentaire ne contenant qu'une référence croisée à une tâche (`[MUL-123](mention://issue/...)`) | Oui | Les références à des tâches ne constituent pas un routage |
 
 La déduplication s'ajoute à ces règles : si le chef a déjà une exécution `queued` ou `dispatched` sur cette tâche, un nouveau déclencheur ne met pas de doublon en file.
 
@@ -74,7 +79,7 @@ La déduplication s'ajoute à ces règles : si le chef a déjà une exécution `
 | **Assigner une tâche à un squad** | Oui | Le squad devient l'assigné et le chef est déclenché. |
 | **@mentionner un squad dans un commentaire** | Non | Le chef traite uniquement ce commentaire ; l'assigné actuel reste inchangé. |
 
-@mentionner directement un membre précis lui confie le travail. Multica déduplique également les déclenchements répétés et empêche les commentaires du chef de le redéclencher lui-même, ce qui évite les boucles d'exécution.
+@mentionner directement un membre précis lui confie le travail.
 
 ## Squads et Accès
 

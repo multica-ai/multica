@@ -4,6 +4,8 @@ description: Put an agent in charge of an issue and decide whether it starts wor
 ---
 
 import { Callout } from "fumadocs-ui/components/callout";
+import { Step, Steps } from "fumadocs-ui/components/steps";
+import { AssignDemo } from "@/components/demos/assign-demo";
 
 When a piece of work needs an agent to own it over time, assign the issue to it. The agent reads the issue's description and discussion, does the work with its own configuration and skills, and writes progress and results back to the same issue.
 
@@ -11,13 +13,27 @@ When you only need the agent to handle one specific request without changing own
 
 ## Assign and start a run
 
-1. Open an issue and click **Assignee**.
-2. Pick an agent or a squad.
-3. Review the agent about to start in the confirmation dialog, then choose **Start**.
+<Steps>
+<Step>
 
-![Assignment confirmation dialog: confirm the assignment, or choose not to start yet](/images/docs/assign-confirm-dialog.webp)
+Open an issue and click **Assignee**.
 
-Everything the agent should know about this work belongs in the issue itself — its description, its discussion, or the project description and agent instructions.
+</Step>
+<Step>
+
+Pick an agent or a squad.
+
+</Step>
+<Step>
+
+Review the agent about to start in the confirmation dialog, then choose **Confirm assignment**.
+
+</Step>
+</Steps>
+
+<AssignDemo />
+
+Whatever the agent needs to know for this work goes in the issue's description and discussion, or in the project description and agent instructions.
 
 When you assign to a squad, the squad becomes the issue's assignee and the squad leader starts first. It decides whether to hand work to other members, following how the squad operates.
 
@@ -36,7 +52,7 @@ While executing, the agent can:
 
 What it can actually do is still limited by the agent's configuration, the runtime environment, and your permission to run it.
 
-Agents update the issue’s status as work progresses. By default, they mark work in progress when they begin and ready for review when they deliver. When a project has a workflow, they follow its steps and handoff instructions instead. A run ending does not complete the issue by itself; answering a question does not mean the issue’s work is finished.
+Agents update the issue’s status as work progresses. By default, they move the issue to In Progress when they begin and to In Review when they deliver. When a project has a workflow, they follow its steps and handoff instructions instead. A run ending does not complete the issue by itself; answering a question does not mean the issue’s work is finished.
 
 For a project that repeatedly passes work between people or agents, use a [workflow](/workflows) to arrange the handoffs. To save a request you often send without changing the assignee, use a [quick action](/quick-actions).
 
@@ -46,9 +62,9 @@ For a project that repeatedly passes work between people or agents, use a [workf
 
 `backlog` doesn't start a run on assignment either. Execution only follows after you move the issue out of `backlog`, or ask the assignee for something in a follow-up comment.
 
-When the issue already has an agent or squad owner, moving it out of `backlog` opens the same dialog: that status change is what starts the run, so it offers the same **Don't start yet**, which moves the issue without waking the agent. The dialog appears for every target other than `backlog` itself and any status in the `done` or `closed` category.
+When the issue already has an agent or squad owner, moving it out of `backlog` opens the same dialog, because that status change is what starts the run. It offers the same **Don't start yet**, which changes the status without waking the agent. The dialog appears for every target other than `backlog` itself and any status in the `done` or `closed` category.
 
-Only the fixed `backlog` status works this way. A [custom status](/issues#custom-statuses) in the `unstarted` category does **not** park work — assigning an agent to an issue there starts a run right away. Issues already in `done` or `cancelled` still start a run immediately when assigned or reassigned to an agent.
+Only the fixed `backlog` status works this way. A [custom status](/issues#custom-statuses) in the `unstarted` category does **not** park work: assigning an agent to an issue there starts a run right away. Issues already in `done` or `cancelled` still start a run immediately when assigned or reassigned to an agent.
 
 ## Assignment permissions
 

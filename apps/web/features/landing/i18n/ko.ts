@@ -121,7 +121,7 @@ export function createKoDict(
           {
             title: "처음 실행할 때 자동 등록",
             description:
-              "Multica는 Antigravity, Claude Code, CodeBuddy, CodeArts, Codex, Copilot, Cursor, DeepSeek Harness, DevEco Code, Dim, Grok, Hermes, Kimi, Kiro CLI, MiniMax Code, Muse Code, Oh-My-Pi, OpenClaw, OpenCode, Pi, Qoder, Qoder CN, Qwen Code, QwenPaw, Reasonix, Trae CLI, ZeroClaw 등 27개 지원 도구를 스캔해 이미 설치된 것을 런타임으로 자동 등록합니다.",
+              "Multica는 Antigravity, Claude Code, CodeBuddy, CodeArts, Codex, Copilot, Cursor, DeepSeek Harness, DevEco Code, Devin CLI, Dim, Grok, Hermes, Kimi, Kiro CLI, MiniMax Code, Muse Code, Oh-My-Pi, OpenClaw, OpenCode, Pi, Qoder, Qoder CN, Qwen Code, QwenPaw, Reasonix, Trae CLI, ZeroClaw 등 28개 지원 도구를 스캔해 이미 설치된 것을 런타임으로 자동 등록합니다.",
           },
         ],
       },
@@ -197,7 +197,7 @@ export function createKoDict(
         {
           question: "Multica는 어떤 코딩 에이전트를 지원하나요?",
           answer:
-            "Multica는 Antigravity, Claude Code, CodeBuddy, CodeArts, Codex, Copilot, Cursor, DeepSeek Harness, DevEco Code, Dim, Grok, Hermes, Kimi, Kiro CLI, MiniMax Code, Muse Code, Oh-My-Pi, OpenClaw, OpenCode, Pi, Qoder, Qoder CN, Qwen Code, QwenPaw, Reasonix, Trae CLI, ZeroClaw 등 27개 코딩 도구를 기본 지원합니다. 데몬이 이미 설치된 CLI를 자동으로 찾아 각각 런타임으로 등록합니다. 소스 코드가 공개되어 있으므로 직접 백엔드를 추가할 수도 있습니다. 셀프 호스팅에서는 QCA PAT와 기존 QCA 에이전트를 사용하여 태스크 실행용 관리형 원격 런타임으로 Qoder Cloud Agents를 설정할 수 있습니다.",
+            "Multica는 Antigravity, Claude Code, CodeBuddy, CodeArts, Codex, Copilot, Cursor, DeepSeek Harness, DevEco Code, Devin CLI, Dim, Grok, Hermes, Kimi, Kiro CLI, MiniMax Code, Muse Code, Oh-My-Pi, OpenClaw, OpenCode, Pi, Qoder, Qoder CN, Qwen Code, QwenPaw, Reasonix, Trae CLI, ZeroClaw 등 28개 코딩 도구를 기본 지원합니다. 데몬이 이미 설치된 CLI를 자동으로 찾아 각각 런타임으로 등록합니다. 소스 코드가 공개되어 있으므로 직접 백엔드를 추가할 수도 있습니다. 셀프 호스팅에서는 Qoder PAT와 Qoder Cloud Agents의 기존 에이전트를 사용하여 태스크 실행용 관리형 원격 런타임으로 Qoder Cloud Agents를 설정할 수 있습니다.",
         },
         {
           question: "셀프 호스팅만 가능한가요, 클라우드 버전도 있나요?",
@@ -279,9 +279,58 @@ export function createKoDict(
       },
       entries: [
         {
+          version: "0.7.1",
+          date: "2026-10-27",
+          title: "에이전트 작업 규칙 통일, 문서 전면 개선, Devin CLI 지원",
+          changes: [],
+          features: [
+            "내 컴퓨터의 Devin CLI로 태스크를 실행할 수 있고, 세션 이어가기, 프로젝트 스킬, MCP를 지원합니다.",
+            "Lark 답글에 첨부 파일을 붙일 수 있습니다.",
+            "모든 앱이 번체 중국어를 지원합니다.",
+            "OpenClaw 에이전트에 별도 모델을 설정할 수 있고, 정체성과 메모리는 그대로입니다.",
+            "--until-issue-state blocked로 다른 Issue가 막힘 상태가 되면 에이전트를 깨울 수 있습니다.",
+            "셀프 호스팅 웹 앱에서 Google Analytics 4를 선택적으로 켤 수 있습니다.",
+          ],
+          improvements: [
+            "에이전트가 하나의 워크플로 규칙을 따라 다음 인계까지 계속 작업하고, Issue를 저장해도 워크플로가 고른 담당자를 덮어쓰지 않습니다.",
+            "문서를 전면 개선해 인터랙티브 데모 32개와 새 페이지를 추가하고, 번역을 보강하고 검색을 되살렸습니다.",
+            "Issue 사이드바가 통일되고, 실행 로그가 비용, 토큰, 소요 시간 요약부터 보여 줍니다.",
+            "긴 토론의 개요에서 설명과 하위 Issue로 돌아갈 수 있습니다.",
+            "설정에서 만든 빠른 작업은 기본적으로 나에게만 보입니다.",
+            "폴더블과 태블릿에서 내비게이션을 고정할 수 있고, 받은 항목과 채팅이 두 칸으로 나뉩니다.",
+            "에이전트 목록에 모델이 기본으로 보이고, 돌아와도 검색이 유지됩니다.",
+            "셀프 호스팅을 포함한 모든 배포에서 워크플로를 쓸 수 있습니다.",
+            "첨부 파일 미리보기가 어디서나 같은 파일 형식을 지원합니다.",
+            "암호화 키가 없어도 Qoder Cloud Agents 설정 안내가 보입니다.",
+          ],
+          fixes: [
+            "Lark에서 텍스트와 파일을 함께 보내면 둘 다 들어옵니다.",
+            "Windows 데스크톱 업데이트 후 데몬 파일이 잠긴 채 남지 않습니다.",
+            "Pi와 Oh-My-Pi 실행을 취소하면 정리를 마친 뒤 다음 실행으로 넘어갑니다.",
+            "댓글이 수정되면 에이전트가 최신 내용을 따릅니다.",
+            "코드 안의 멘션은 에이전트를 실행하지 않습니다.",
+            "Codex가 진행 메모를 최종 답글로 올리지 않습니다.",
+            "완료된 Antigravity 응답이 실패로 표시되지 않습니다.",
+            "Claude 세션을 이어가도 사용량이 중복 집계되지 않습니다.",
+            "Bedrock Claude와 DeepSeek Flash에 예상 비용이 표시됩니다.",
+            "런타임이 무시하는 실행 인수는 저장할 때 거부됩니다.",
+            "정리와 태스크 복구 때문에 태스크가 리스 만료까지 묶여 있지 않습니다.",
+            "세션 브랜치가 사용 중이어도 다시 배정한 로컬 태스크가 실패하지 않습니다.",
+            "스킬 파일이 없으면 가져오기가 분명히 실패하고, 새로 고쳐도 기존 스킬이 유지됩니다.",
+            "긴 HTML 블록이 덜 깜박이고, 슬래시 메뉴가 빠른 작업을 불러오는 대로 갱신됩니다.",
+            "프로젝트 리소스를 동시에 수정해도 서로 덮어쓰지 않습니다.",
+            "셀프 호스팅 사용자에게 Cloud 설정 명령이 보이지 않습니다.",
+            "Issue가 100개를 넘어도 간트에 날짜가 있는 모든 Issue가 표시됩니다.",
+            "데스크톱의 작업 폴더 안내가 담당 에이전트의 머신을 따릅니다.",
+            "아주 긴 숫자로 검색해도 서버 오류가 나지 않습니다.",
+            "Issue가 나중에 막힘 상태가 되어도 그 Issue를 만든 Autopilot 실행은 실패로 표시되지 않습니다.",
+            "시간 기반 깨우기 기록에 '깨우기'가 겹쳐 나오지 않습니다.",
+          ],
+        },
+        {
           version: "0.7.0",
           date: "2026-10-23",
-          title: "Qoder Cloud Agents 지원, 지정한 멤버와 런타임 공유, PR 충돌 시 깨우기, 더 안전한 실행",
+          title: "워크플로 기능 전면 개방, Qoder Cloud Agents 지원, 지정한 멤버와 런타임 공유",
           changes: [],
           features: [
             "Qoder Cloud Agents로 Issue를 실행할 수 있습니다. 에이전트를 만들 때 머신이나 클라우드 서비스를 고른 뒤 Qoder Cloud Agents의 에이전트를 연결합니다.",

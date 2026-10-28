@@ -121,7 +121,7 @@ export function createJaDict(
           {
             title: "初回起動時に自動検出",
             description:
-              "Multica は Antigravity、Claude Code、CodeBuddy、CodeArts、Codex、Copilot、Cursor、DeepSeek Harness、DevEco Code、Dim、Grok、Hermes、Kimi、Kiro CLI、MiniMax Code、Muse Code、Oh-My-Pi、OpenClaw、OpenCode、Pi、Qoder、Qoder CN、Qwen Code、QwenPaw、Reasonix、Trae CLI、ZeroClaw という27種類の対応ツールをスキャンし、見つかったものをそれぞれランタイムとして登録します。",
+              "Multica は Antigravity、Claude Code、CodeBuddy、CodeArts、Codex、Copilot、Cursor、DeepSeek Harness、DevEco Code、Devin CLI、Dim、Grok、Hermes、Kimi、Kiro CLI、MiniMax Code、Muse Code、Oh-My-Pi、OpenClaw、OpenCode、Pi、Qoder、Qoder CN、Qwen Code、QwenPaw、Reasonix、Trae CLI、ZeroClaw という28種類の対応ツールをスキャンし、見つかったものをそれぞれランタイムとして登録します。",
           },
         ],
       },
@@ -142,7 +142,7 @@ export function createJaDict(
         {
           title: "CLI をインストールしてマシンを接続",
           description:
-            "multica setup を実行すると、OAuth の手順を案内し、デーモンを起動し、27種類の対応コーディングツール(Antigravity、Claude Code、CodeBuddy、CodeArts、Codex、Copilot、Cursor、DeepSeek Harness、DevEco Code、Dim、Grok、Hermes、Kimi、Kiro CLI、MiniMax Code、Muse Code、Oh-My-Pi、OpenClaw、OpenCode、Pi、Qoder、Qoder CN、Qwen Code、QwenPaw、Reasonix、Trae CLI、ZeroClaw)をスキャンします。すでにインストール済みのものは、自動的にランタイムとして登録されます。",
+            "multica setup を実行すると、OAuth の手順を案内し、デーモンを起動し、28種類の対応コーディングツール(Antigravity、Claude Code、CodeBuddy、CodeArts、Codex、Copilot、Cursor、DeepSeek Harness、DevEco Code、Devin CLI、Dim、Grok、Hermes、Kimi、Kiro CLI、MiniMax Code、Muse Code、Oh-My-Pi、OpenClaw、OpenCode、Pi、Qoder、Qoder CN、Qwen Code、QwenPaw、Reasonix、Trae CLI、ZeroClaw)をスキャンします。すでにインストール済みのものは、自動的にランタイムとして登録されます。",
         },
         {
           title: "最初のエージェントを作成",
@@ -197,7 +197,7 @@ export function createJaDict(
         {
           question: "Multica はどのコーディングエージェントに対応していますか?",
           answer:
-            "Multica は、Antigravity、Claude Code、CodeBuddy、CodeArts、Codex、Copilot、Cursor、DeepSeek Harness、DevEco Code、Dim、Grok、Hermes、Kimi、Kiro CLI、MiniMax Code、Muse Code、Oh-My-Pi、OpenClaw、OpenCode、Pi、Qoder、Qoder CN、Qwen Code、QwenPaw、Reasonix、Trae CLI、ZeroClaw の27種類のコーディングツールに標準対応しています。デーモンが、すでにインストール済みの CLI を自動検出し、それぞれをランタイムとして登録します。ソースコードが公開されているので、独自のバックエンドを追加することもできます。 セルフホストでは、QCA PAT と既存の QCA エージェントを使い、タスク実行用のマネージドリモートランタイムとして Qoder Cloud Agents を設定できます。",
+            "Multica は、Antigravity、Claude Code、CodeBuddy、CodeArts、Codex、Copilot、Cursor、DeepSeek Harness、DevEco Code、Devin CLI、Dim、Grok、Hermes、Kimi、Kiro CLI、MiniMax Code、Muse Code、Oh-My-Pi、OpenClaw、OpenCode、Pi、Qoder、Qoder CN、Qwen Code、QwenPaw、Reasonix、Trae CLI、ZeroClaw の28種類のコーディングツールに標準対応しています。デーモンが、すでにインストール済みの CLI を自動検出し、それぞれをランタイムとして登録します。ソースコードが公開されているので、独自のバックエンドを追加することもできます。 セルフホストでは、Qoder PAT と Qoder Cloud Agents の既存エージェントを使い、タスク実行用のマネージドリモートランタイムとして Qoder Cloud Agents を設定できます。",
         },
         {
           question: "セルフホストが必須ですか、それともクラウド版もありますか?",
@@ -280,9 +280,58 @@ export function createJaDict(
       },
       entries: [
         {
+          version: "0.7.1",
+          date: "2026-10-27",
+          title: "エージェントの作業ルールを統一、ドキュメントを全面改善、Devin CLI に対応",
+          changes: [],
+          features: [
+            "手元の Devin CLI でタスクを実行でき、セッションの再開、プロジェクトのスキル、MCP に対応します。",
+            "Lark の返信に添付ファイルを付けられます。",
+            "各アプリが繁体字中国語に対応しました。",
+            "OpenClaw のエージェントに別のモデルを設定でき、ID と記憶はそのままです。",
+            "--until-issue-state blocked で、別の Issue がブロック中になったときにエージェントを再開できます。",
+            "セルフホストの Web 版で Google Analytics 4 を任意で有効にできます。",
+          ],
+          improvements: [
+            "エージェントはワークフローの共通ルールに従い、次の引き継ぎまで作業を続けます。Issue を保存しても、ワークフローが選んだ担当者は上書きされません。",
+            "ドキュメントを全面的に改善し、操作できるデモ 32 個と新しいページを追加、翻訳を充実させ、検索も戻りました。",
+            "Issue のサイドバーの表示がそろい、実行ログの先頭に費用、トークン、所要時間のまとめが出ます。",
+            "長い議論のアウトラインから、説明と子 Issue に戻れます。",
+            "設定で作るクイック アクションは、既定で自分だけに表示されます。",
+            "折りたたみ端末とタブレットで、ナビゲーションを固定でき、受信トレイとチャットが 2 ペインになります。",
+            "エージェント一覧にモデルが既定で表示され、戻っても検索が残ります。",
+            "セルフホストを含むすべての環境でワークフローを使えます。",
+            "添付ファイルのプレビューの対応形式が、どこでも同じになりました。",
+            "暗号化キーが未設定でも、Qoder Cloud Agents の設定ガイドが表示されます。",
+          ],
+          fixes: [
+            "Lark でテキストとファイルを一緒に送ると、両方が届きます。",
+            "Windows のデスクトップ版を更新しても、デーモンのファイルがロックされたまま残りません。",
+            "Pi と Oh-My-Pi の実行を取り消すと、後片付けを終えてから次の実行に進みます。",
+            "コメントが編集されると、エージェントは最新の内容に従います。",
+            "コード内のメンションで、エージェントが動き出さなくなりました。",
+            "Codex が途中経過のメモを最終的な返信にしなくなりました。",
+            "Antigravity の完了した応答が、失敗と判定されなくなりました。",
+            "Claude のセッションを再開しても、使用量が二重に計上されません。",
+            "Bedrock の Claude と DeepSeek Flash で、費用の見積もりが表示されます。",
+            "ランタイムが無視する起動引数は、保存時に拒否されます。",
+            "後片付けとタスクの復旧で、タスクがリース切れまで待たされなくなりました。",
+            "セッションのブランチが使用中でも、再割り当てしたローカルタスクが失敗しません。",
+            "スキルのファイルがないとインポートがはっきり失敗し、更新しても元のスキルが残ります。",
+            "長い HTML ブロックのちらつきが減り、スラッシュメニューがクイック アクションの読み込みに合わせて更新されます。",
+            "プロジェクトのリソースを同時に編集しても、互いに上書きしません。",
+            "セルフホストの利用者に Cloud のセットアップコマンドが表示されなくなりました。",
+            "100 件を超えても、ガントに日付のあるすべての Issue が表示されます。",
+            "デスクトップ版の作業フォルダーの表示が、担当エージェントのマシンに対応します。",
+            "とても長い数字で検索しても、サーバーエラーになりません。",
+            "Issue が後でブロック中になっても、それを作成した Autopilot の実行は失敗と表示されません。",
+            "時刻による再開の記録に、「再開」が重ねて表示されません。",
+          ],
+        },
+        {
           version: "0.7.0",
           date: "2026-10-23",
-          title: "Qoder Cloud Agents への対応、指定したメンバーとのランタイム共有、PR の競合での再開、より安全な実行",
+          title: "ワークフロー機能を全面開放、Qoder Cloud Agents への対応、指定したメンバーとのランタイム共有",
           changes: [],
           features: [
             "Qoder Cloud Agents で Issue を実行できます。エージェントの作成時にマシンかクラウドサービスを選び、Qoder Cloud Agents のエージェントと連携します。",

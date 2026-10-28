@@ -3,8 +3,6 @@
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { ChevronDown, ChevronRight, ListTree, Settings, Workflow } from "lucide-react";
-import { useFeatureEnabled } from "@multica/core/config";
-import { PROJECT_WORKFLOWS_V1_FLAG } from "@multica/core/feature-flags";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { useIssueStatuses } from "@multica/core/issue-statuses/hooks";
 import {
@@ -42,22 +40,20 @@ import { stepHandlerActor, useStepHandlerLabel } from "./step-handler";
 
 /**
  * The project board's "Workflow" menu (MUL-7420): open the full flow or switch
- * workflows; workflows themselves are made in settings. Shown while workflows
- * are on, or when the project already names one.
+ * workflows; workflows themselves are made in settings.
  */
 export function ProjectWorkflowMenu({ project }: { project: Project }) {
   const { t } = useT("issues");
   const wsId = useWorkspaceId();
   const navigation = useNavigation();
   const paths = useWorkspacePaths();
-  const enabled = useFeatureEnabled(PROJECT_WORKFLOWS_V1_FLAG, false);
   const { workflows } = useIssueWorkflows(wsId);
   const { canManageProject, canCreateWorkflow } = useWorkflowPermissions(project);
   const { choose, busy, dialog } = useProjectWorkflowSwitch(project);
   const [flowOpen, setFlowOpen] = useState(false);
   const workflow = resolveProjectWorkflow(workflows, project);
 
-  if (!workflow || (!enabled && !project.workflow_id)) return null;
+  if (!workflow) return null;
 
   return (
     <>
@@ -91,7 +87,7 @@ export function ProjectWorkflowMenu({ project }: { project: Project }) {
               </DropdownMenuSubContent>
             </DropdownMenuSub>
           )}
-          {canCreateWorkflow && enabled && (
+          {canCreateWorkflow && (
             <>
               <DropdownMenuSeparator />
               <DropdownMenuItem onClick={() => navigation.push(`${paths.settings()}?tab=workflows`)}>

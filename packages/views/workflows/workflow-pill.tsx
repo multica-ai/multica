@@ -1,8 +1,6 @@
 "use client";
 
 import { Check, Workflow } from "lucide-react";
-import { useFeatureEnabled } from "@multica/core/config";
-import { PROJECT_WORKFLOWS_V1_FLAG } from "@multica/core/feature-flags";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { useIssueWorkflows } from "@multica/core/issue-workflows";
 import {
@@ -17,9 +15,8 @@ import { PillButton } from "../common/pill-button";
 import { useT } from "../i18n";
 
 /**
- * The workflow a new project starts on (MUL-7420); null is Default. Shown
- * while workflows are on, so the choice is visible even before the workspace
- * has more than Default.
+ * The workflow a new project starts on (MUL-7420); null is Default. The choice
+ * stays visible even before the workspace has more than Default.
  */
 export function WorkflowPill({
   value,
@@ -30,10 +27,8 @@ export function WorkflowPill({
 }) {
   const { t } = useT("issues");
   const wsId = useWorkspaceId();
-  const enabled = useFeatureEnabled(PROJECT_WORKFLOWS_V1_FLAG, false);
   const { workflows } = useIssueWorkflows(wsId);
   const named = workflows.filter((w) => !w.is_default);
-  if (!enabled) return null;
   const defaultName = workflows.find((w) => w.is_default)?.name ?? t(($) => $.workflows.default_name);
   const current = named.find((w) => w.id === value);
   const options = [{ id: null as string | null, name: defaultName, columns: workflows.find((w) => w.is_default)?.steps.length }, ...named.map((w) => ({ id: w.id as string | null, name: w.name, columns: w.steps.length }))];

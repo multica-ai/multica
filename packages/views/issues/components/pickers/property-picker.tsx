@@ -42,6 +42,7 @@ export function PropertyPicker({
   onOpenChange,
   trigger,
   triggerRender,
+  nativeButton = true,
   width = "w-48",
   align = "end",
   side = "bottom",
@@ -57,6 +58,8 @@ export function PropertyPicker({
   onOpenChange: (v: boolean) => void;
   trigger: React.ReactNode;
   triggerRender?: React.ReactElement;
+  /** False when a compound trigger renders a non-button element. */
+  nativeButton?: boolean;
   width?: string;
   align?: "start" | "center" | "end";
   side?: React.ComponentProps<typeof PopoverContent>["side"];
@@ -180,6 +183,7 @@ export function PropertyPicker({
 
   const popoverTrigger = (
     <PopoverTrigger
+      nativeButton={nativeButton}
       className={triggerRender ? undefined : PICKER_TRIGGER_CLASS}
       render={triggerRender}
     >

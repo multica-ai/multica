@@ -88,7 +88,7 @@ export function ChooseRuntimePage({
   const ownerName = (ownerId: string | null) =>
     members.find((m) => m.user_id === ownerId)?.name ?? null;
 
-  const qoder = qoderConnection?.available ? qoderConnection : null;
+  const qoder = qoderConnection ?? null;
   const qoderRuntime = groups.qoderRuntime;
   const qoderState = qoder
     ? qoderChoiceState(qoder, qoderRuntime?.status === "online")

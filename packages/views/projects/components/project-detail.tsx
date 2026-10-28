@@ -8,8 +8,6 @@ import { cn } from "@multica/ui/lib/utils";
 import { copyText } from "@multica/ui/lib/clipboard";
 import { toast } from "sonner";
 import type { Project, ProjectStatus, ProjectPriority } from "@multica/core/types";
-import { useFeatureEnabled } from "@multica/core/config";
-import { PROJECT_WORKFLOWS_V1_FLAG } from "@multica/core/feature-flags";
 import { useAuthStore } from "@multica/core/auth";
 import { projectDetailOptions } from "@multica/core/projects/queries";
 import { useUpdateProject, useDeleteProject } from "@multica/core/projects/mutations";
@@ -99,12 +97,9 @@ function PropRow({
   );
 }
 
-// The project's workflow (MUL-7420). Hidden while workflows are off, unless the
-// project already uses one — it can always switch back to Default.
+// The project's workflow (MUL-7420).
 function ProjectWorkflowPropRow({ project }: { project: Project }) {
   const { t } = useT("issues");
-  const enabled = useFeatureEnabled(PROJECT_WORKFLOWS_V1_FLAG, false);
-  if (!enabled && !project.workflow_id) return null;
   return (
     <PropRow label={t(($) => $.workflows.project.label)}>
       <ProjectWorkflowControl project={project} />

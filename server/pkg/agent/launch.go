@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"log/slog"
 	"os/exec"
 	"strings"
@@ -455,6 +456,8 @@ var launchPrefixBlockedArgs = map[string]map[string]blockedArgMode{
 	"hermes":      hermesBlockedArgs,
 	"kimi":        kimiBlockedArgs,
 	"kiro":        kiroBlockedArgs,
+	"mcode":       mcodeBlockedArgs,
+	"muse":        museBlockedArgs,
 	"opencode":    opencodeBlockedArgs,
 	"openclaw":    openclawBlockedArgs,
 	"pi":          piBlockedArgs,
@@ -465,7 +468,32 @@ var launchPrefixBlockedArgs = map[string]map[string]blockedArgMode{
 	"reasonix":    reasonixBlockedArgs,
 	"traecli":     traecliBlockedArgs,
 	"dim":         dimBlockedArgs,
+	"devin":       devinBlockedArgs,
 	"zeroclaw":    zeroclawBlockedArgs,
+}
+
+// ValidateCustomArgs rejects arguments that the runtime always discards at launch.
+func ValidateCustomArgs(agentType string, args []string) error {
+	protocolFamily := agentType
+	if family, ok := RuntimeProtocolFamily(agentType); ok {
+		protocolFamily = family
+	}
+	blocked := launchPrefixBlockedArgs[protocolFamily]
+	for _, arg := range args {
+		flag := unshellQuoteArg(arg)
+		if idx := strings.Index(flag, "="); idx > 0 {
+			flag = flag[:idx]
+		}
+		_, isBlocked := blocked[flag]
+		if agentType == "omp" {
+			_, sessionArg := ompSessionArgs[flag]
+			isBlocked = isBlocked || sessionArg
+		}
+		if isBlocked {
+			return fmt.Errorf("custom_args: %q is managed by Multica for runtime %q and cannot be overridden; remove it from custom_args", flag, agentType)
+		}
+	}
+	return nil
 }
 
 // FilterLaunchPrefix is the exported form for callers outside this package —

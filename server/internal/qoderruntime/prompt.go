@@ -28,7 +28,7 @@ func (b *Bridge) prepare(ctx context.Context, t *claimedTask) (*run, error) {
 		return nil, fmt.Errorf("configure skills, tools, credentials and model on the Qoder Agent; Multica execution overrides are not supported by this bridge")
 	}
 	if t.Agent == nil {
-		return nil, fmt.Errorf("associate a QCA Agent in the Multica agent runtime configuration")
+		return nil, fmt.Errorf("associate an agent from Qoder Cloud Agents in the Multica agent runtime configuration")
 	}
 	binding, err := ParseAgentConfig(t.Agent.RuntimeConfig)
 	if err != nil {
@@ -130,7 +130,7 @@ type AgentConfig struct {
 func ParseAgentConfig(raw json.RawMessage) (AgentConfig, error) {
 	var cfg AgentConfig
 	if err := json.Unmarshal(raw, &cfg); err != nil || !ValidAgentID(cfg.AgentID) {
-		return cfg, fmt.Errorf("associate a QCA Agent in the Multica agent runtime configuration")
+		return cfg, fmt.Errorf("associate an agent from Qoder Cloud Agents in the Multica agent runtime configuration")
 	}
 	if cfg.Repository != nil && cfg.Repository.URL != "" {
 		if _, err := repositoryResource(*cfg.Repository); err != nil {
@@ -189,7 +189,7 @@ func hasCustomSkills(skills []claimedSkill) bool {
 	return false
 }
 
-// ValidAgentID validates the public QCA identifier without accepting URL fragments.
+// ValidAgentID validates the public Qoder Cloud Agents identifier without accepting URL fragments.
 func ValidAgentID(id string) bool {
 	return regexp.MustCompile(`^agent_[a-zA-Z0-9_-]{1,128}$`).MatchString(id)
 }

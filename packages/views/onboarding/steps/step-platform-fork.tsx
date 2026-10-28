@@ -12,7 +12,10 @@ import {
 } from "@multica/ui/components/ui/dialog";
 import { cn } from "@multica/ui/lib/utils";
 import type { AgentRuntime } from "@multica/core/types";
-import { runtimeDisplayLabel } from "@multica/core/runtimes";
+import {
+  runtimeDisplayLabel,
+  useDaemonSetupCommands,
+} from "@multica/core/runtimes";
 import {
   StepFooter,
   StepHeading,
@@ -396,10 +399,11 @@ function formatElapsed(seconds: number) {
  */
 function CliWaitingStatus({ dialogOpen }: { dialogOpen: boolean }) {
   const { t } = useT("onboarding");
+  const commands = useDaemonSetupCommands();
   const [elapsed, setElapsed] = useState(0);
 
   useEffect(() => {
-    if (!dialogOpen) {
+    if (!dialogOpen || commands.status !== "ready") {
       setElapsed(0);
       return;
     }
@@ -407,7 +411,9 @@ function CliWaitingStatus({ dialogOpen }: { dialogOpen: boolean }) {
       setElapsed((e) => e + 1);
     }, 1000);
     return () => window.clearInterval(id);
-  }, [dialogOpen]);
+  }, [dialogOpen, commands.status]);
+
+  if (commands.status !== "ready") return null;
 
   // Stage thresholds are rough — `multica setup` typical flow is
   //   ~1s save config → browser-tab auth (user-driven, 5–30s) →
@@ -451,21 +457,21 @@ function CliWaitingStatus({ dialogOpen }: { dialogOpen: boolean }) {
         {stage === "normal" && (
           <>
             {t(($) => $.step_platform.stage_normal_prefix)}
-            <span className="font-mono">{"multica setup"}</span>
+            <span className="font-mono break-all">{commands.setupCmd}</span>
             {t(($) => $.step_platform.stage_normal_suffix)}
           </>
         )}
         {stage === "midway" && (
           <>
             {t(($) => $.step_platform.stage_midway_prefix)}
-            <span className="font-mono">{"multica setup"}</span>
+            <span className="font-mono break-all">{commands.setupCmd}</span>
             {t(($) => $.step_platform.stage_midway_suffix)}
           </>
         )}
         {stage === "slow" && (
           <>
             {t(($) => $.step_platform.stage_slow_prefix)}
-            <span className="font-mono">{"multica setup"}</span>
+            <span className="font-mono break-all">{commands.setupCmd}</span>
             {t(($) => $.step_platform.stage_slow_suffix)}
           </>
         )}

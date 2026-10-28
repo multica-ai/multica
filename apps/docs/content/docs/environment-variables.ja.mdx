@@ -3,11 +3,12 @@ title: 環境変数
 description: セルフホスト Multica でよく使うサーバー、ストレージ、連携、ランタイムの設定。
 ---
 
+import { Accordion, Accordions } from "fumadocs-ui/components/accordion";
 import { Callout } from "fumadocs-ui/components/callout";
 
 Multica はプロセス起動時に環境変数を読み込みます。変更後は、該当する API・Web・デーモンのプロセスを再起動してください。Docker Compose の `docker compose restart` は `.env` を再読み込みしません。`up -d` でコンテナを再作成して初めて反映されます。
 
-このページにはデプロイ運用者向けの設定のみを載せています。テスト用変数や内部実行用の変数は扱いません。グループ別のリファレンスとして使い、完全なデプロイ手順は[セルフホストクイックスタート](/self-host-quickstart)を参照してください。
+このページでは、デプロイ運用者向けの設定をグループ別にまとめています。テスト用変数や内部実行用の変数は扱いません。完全なデプロイ手順は[セルフホストクイックスタート](/self-host-quickstart)を参照してください。
 
 ## プロダクションの最小構成
 
@@ -67,7 +68,7 @@ primary とレプリカの接続上限は独立しています。全 API プロ�
 `MULTICA_DAEMON_SERVER_URL` は認証なしの `/api/config` エンドポイントから返され、クライアントが読み取れます。公開設定として扱い、認証情報・トークンなどのシークレットを含めないでください。
 </Callout>
 
-フロントエンドと API が異なる host を使い、ブラウザが API ドメインへ直接アクセスする構成では、`COOKIE_DOMAIN` の設定が必須です。設定しないとブラウザが CSRF cookie を読めず、すべての書き込みリクエストが `403 CSRF validation failed` を返す一方、読み取りは正常に動きます。値には、両方の host を同時にカバーできる最も狭い親ドメインを使ってください（`.example.com` より `.agent.example.com`）。この設定はログインセッション cookie をそのドメイン配下のすべての host に広げるため、それらの host がすべて同一の信頼できる運用主体のものである場合にのみ使えます。変更後は両方の host で古い cookie を削除し、再ログインしてください。[セルフホストクイックスタート](/self-host-quickstart#3-アクセス方法を選ぶ)の同一オリジン構成（ブラウザは app ドメインのみアクセス）に従う場合は、空のままで構いません。IP アドレスは指定しないでください。ブラウザは Domain が IP の cookie を無視します。
+フロントエンドと API が異なる host を使い、ブラウザが API ドメインへ直接アクセスする構成では、`COOKIE_DOMAIN` の設定が必須です。設定しないとブラウザが CSRF cookie を読めず、すべての書き込みリクエストが `403 CSRF validation failed` を返す一方、読み取りは正常に動きます。値には、両方の host を同時にカバーできる最も狭い親ドメインを使ってください（`.example.com` より `.agent.example.com`）。この設定はログインセッション cookie をそのドメイン配下のすべての host に広げるため、それらの host がすべて同一の信頼できる運用主体のものである場合にのみ使えます。変更後は両方の host で古い cookie を削除し、再ログインしてください。[セルフホストクイックスタート](/self-host-quickstart#remote-access)の同一オリジン構成（ブラウザは app ドメインのみアクセス）に従う場合は、空のままで構いません。IP アドレスは指定しないでください。ブラウザは Domain が IP の cookie を無視します。
 
 <Callout type="warning">
 セルフホストのデプロイでは `FRONTEND_ORIGIN` の設定が必須です。設定しないと、招待リンク、cookie のセキュリティ属性、WebSocket の origin 検証が実際のドメインと食い違うおそれがあります。
@@ -244,30 +245,115 @@ API key と base URL の両方が空の場合、このレイヤーは無効に�
 | `MULTICA_CODEX_SEMANTIC_INACTIVITY_TIMEOUT` | `MULTICA_AGENT_IDLE_WATCHDOG` と同じ | Codex のセマンティック静穏しきい値。Codex 自身のタイマーはツール実行中かどうかを判別できないため、独自の短い上限を持たず idle / tool 予算の大きい方に追従します |
 | `MULTICA_CODEX_FIRST_TURN_TIMEOUT` | `0` | Codex 初回ターンの無進捗上限を明示的に上書き；`0` はデフォルトを維持。実効の初回ターン待機は依然として `MULTICA_CODEX_SEMANTIC_INACTIVITY_TIMEOUT` と全体の実行タイムアウトに制限される——`MULTICA_CODEX_SEMANTIC_INACTIVITY_TIMEOUT` をこの値より厳密に大きく（余裕を持たせて）設定すること。さもないと待機はその値で打ち切られ、モデルカタログの起動リトライがスキップされる。同値では不十分：セマンティックタイマーが先に起動するため、同値の場合でもリトライが失われることがある |
 | `MULTICA_CODEX_HANDSHAKE_TIMEOUT` | `30s`、`thread/start`・`thread/resume`：`60s` | Codex app-server 起動ハンドシェイクの上限。明示的な値は両方の予算を一括で上書きします |
+| `MULTICA_CODEX_MEMORY` | オフ | `1`、`true`、`yes`、`on` のいずれかにすると、デーモンが管理する Codex の実行で Codex ネイティブのメモリを残します。既定では実行ごとにオフになります。[Codex のネイティブメモリとサブエージェント](/daemon-runtimes#codex-memory)を参照 |
+| `MULTICA_CODEX_MULTI_AGENT` | オフ | 値は同上。Codex ネイティブのサブエージェントを残します。親スレッドが終わった時点で実行は終了扱いになり、サブエージェントがまだ返していない結果は失われます |
 | `MULTICA_CODEX_TURN_INTERRUPT_TIMEOUT` | `2s` | キャンセル後に Codex app-server が `turn/interrupt` を確認し `turn/completed` を送信するまでの猶予時間。プロセスを強制終了する前に最終トークン使用量を保持します。特に遅いホストでは daemon ログに記録された割り込み遅延を基に調整できます |
 | `MULTICA_DAEMON_AUTO_UPDATE` | Cloud は `true`、セルフホストは `false` | CLI の更新を自動でチェックして適用するか |
 | `MULTICA_DAEMON_AUTO_UPDATE_INTERVAL` | `6h` | 更新チェックの間隔 |
 | `MULTICA_DAEMON_AUTO_RELOAD` | `true` | 帯域外で置き換えられた `multica` バイナリ（`brew upgrade`、再ダウンロード、ローカルビルド）へ再起動して追従するかどうか。`MULTICA_DAEMON_AUTO_UPDATE` とは独立 |
 | `MULTICA_WORKSPACES_ROOT` | `~/multica_workspaces` | 実行用作業ディレクトリのルート |
 | `MULTICA_AGENT_TEMP_BASE` | `/tmp`（Linux/macOS） | Linux/macOS 専用。作業ごとのプライベート一時ディレクトリの親ディレクトリ。既存かつ書き込み可能な絶対パスである必要があり、無効な値の場合は `/tmp` にフォールバックせず作業の開始に失敗します。短いパスを選んでください。子ツールがその配下に AF_UNIX ソケットを作成する場合があり、`sun_path` の上限は Linux で 108 バイト、macOS で 104 バイトです |
-| `MULTICA_KEEP_ENV_AFTER_TASK` | `false` | デバッグ用に実行ディレクトリを保持 |
 
-デーモンがエージェント作業に注入する内部コンテキストについては、[作業ランタイム環境](/daemon-runtimes#作業ランタイム環境)を参照してください。
+デーモンがエージェント作業に注入する内部コンテキストについては、[作業ランタイム環境](/daemon-runtimes#作業ランタイム環境)を参照してください。`MULTICA_REPO_CHECKOUT_MODE` もその一つです。デーモンは Linux と Windows の Codex 実行でだけ `isolated` を設定し、手動では設定できません。デーモン自身の環境にある `MULTICA_*` 変数は実行に引き継がれません。
 
-各 AI コーディングツールは `MULTICA_<PROVIDER>_PATH` でコマンドパスを上書きでき、モデル上書き対応ツールでは `MULTICA_<PROVIDER>_MODEL` も利用できます。QwenPaw と MiniMax Code にはモデル変数がなく、MiniMax Code のパス変数は `MULTICA_MCODE_PATH` です。詳しくは [AI コーディングツール比較](/providers#モデルの取得元) を参照してください。DeepSeek Harness は `MULTICA_DSH_PATH` と `MULTICA_DSH_MODEL` に対応しています（値は dsh のモデルカタログにあるモデル ID、例: `deepseek-official/deepseek-chat`）。 DeepSeek Harness はさらに `MULTICA_DSH_PROFILE_BUNDLE` に対応しています。`multica` プロファイルが存在しない場合にインストールするバンドルを指定するもので、カンマ区切りで複数の候補を順に試します。各項目は npm のパッケージ名、ディレクトリ、またはパック済み tarball です。既定では未設定です。Multica が利用する `--stdio` プロトコルはこのプロファイルが提供するため、未設定の場合は DSH のインストールには手を加えず、デーモンは使用できないランタイムを登録する代わりにプロファイルの欠落を報告します。Multica 自身のブリッジはまだ公開 npm レジストリにないため、値の選び方は[エージェントランタイムのインストール](/install-agent-runtime)を参照してください。ここに設定した値は追加の確認なしに各デーモンホストの DSH ホームへインストールされるので、サプライチェーンの判断として扱ってください。`MULTICA_DSH_PROFILE_BUNDLE` が有効にするインストールは範囲を意図的に限定しています。実行はデーモンのライフタイムにつき最大 1 回、プローブがプロファイルの不在を確認できた場合のみです。失敗時はパッケージマネージャー自身の出力をログに記録し、再試行はデーモンの再起動後のみ行います。プローブがタイムアウトした場合や、このデーモンが扱わないプロトコルバージョンを返した場合は報告のみで、上書きインストールは行いません。意図して用意されたプロファイルをデーモンが上書きすることはありません。調査はデーモンログで `DSH runtime profile` を検索してください。取り消す場合は `$DSH_HOME/profiles/multica`（既定は `~/.dsh/profiles/multica`）を削除します。`MULTICA_DSH_PLUGIN_PATH` はインストール時に pnpm を解決するディレクトリを上書きします。`dsh plugin` が転送する pnpm は macOS でも Windows でも DSH Desktop 独自の runtime-commands ディレクトリに置かれており、デーモンはそれを自動で見つけて PATH の先頭に追加します（新しい Desktop が使うバージョン付きの構成も含みます）。したがってこの変数が必要なのは、デーモンが見つけられない場所にインストールされている場合か、独自の pnpm を使わせたい場合だけです。設定すると自動探索は完全に置き換わり、指定したディレクトリが存在しなければ、インストールは同梱の pnpm ではなくデーモンの `PATH` 上の pnpm にフォールバックします。Linux には DSH Desktop がないため、常に `PATH` が使われます。ZeroClaw は `MULTICA_ZEROCLAW_PATH` に対応しますが、モデル変数はありません。モデルは ZeroClaw のエージェント設定で管理します。マシン全体のデフォルト引数 `MULTICA_<PROVIDER>_ARGS` は、現在 Claude Code、Codex、CodeBuddy、Qwen Code、QwenPaw の 5 ツールに対応しています。対応する変数は `MULTICA_CLAUDE_ARGS`、`MULTICA_CODEX_ARGS`、`MULTICA_CODEBUDDY_ARGS`、`MULTICA_QWEN_ARGS`、`MULTICA_QWENPAW_ARGS` です。例:
+優先順位はコマンドラインフラグ → 環境変数 → `~/.multica/config.json` → 組み込みデフォルトです。watchdog の動作は[デーモンとランタイム](/daemon-runtimes)を参照してください。
+
+### クリーンアップと保持 [#gc]
+
+デーモンは実行ディレクトリ、リポジトリキャッシュ、セッション記録、一時ディレクトリを定期的に片付けます。何がいつ削除されるかは[クリーンアップと保持](/daemon-runtimes#cleanup)を参照してください。期間は Go の duration 形式に加えて、日数の `d`（`14d`、`1d12h` など）も使えます。
+
+| 変数 | デフォルト | 説明 |
+|---|---|---|
+| `MULTICA_GC_ENABLED` | `true` | `false` または `0` でクリーンアップ全体を止める |
+| `MULTICA_GC_INTERVAL` | `2h` | クリーンアップの間隔。デーモン起動の約 30 秒後に最初の 1 回を実行 |
+| `MULTICA_GC_TTL` | `24h` | タスクが `done` または `closed` カテゴリに入ってから、またはチャットセッションがアーカイブされてから、実行ディレクトリを削除するまでの時間 |
+| `MULTICA_GC_COMPLETED_TASK_TTL` | Multica Cloud は `14d`、セルフホストは `0` | タスクの実行が完了してからディレクトリ全体を削除するまでの時間。タスクが閉じているかどうかは問わない。`0` で無効。プロジェクトのローカルディレクトリでの実行には適用されない |
+| `MULTICA_GC_ORPHAN_TTL` | `72h` | 持ち主が見つからないディレクトリを、変更がないまま何時間経ったら削除するか |
+| `MULTICA_GC_ARTIFACT_TTL` | `12h` | 実行完了後、再生成できる内容（次の行のディレクトリと、デーモンが Codex 用に用意するキャッシュ）を削除するまでの時間。`0` で削除しない |
+| `MULTICA_GC_ARTIFACT_PATTERNS` | `node_modules,.next,.turbo` | 再生成できるとみなすディレクトリ名（カンマ区切り）。設定するとデフォルトの一覧を**置き換える**ため、デフォルトも残したいなら一緒に書く。`/` や `\` を含む項目は無視される |
+| `MULTICA_GC_REPO_TTL` | `30d` | どこからも参照されず worktree も残っていないベアリポジトリキャッシュを、チェックアウトがないまま何日経ったら削除するか。`0` で削除しない |
+| `MULTICA_GC_REPO_MAINTENANCE_ENABLED` | `true` | 古いエージェントブランチを消したあと、リポジトリキャッシュに `git reflog expire` と `git gc` を実行するか。`false` でこの手順だけを止める |
+| `MULTICA_GC_CODEX_SESSION_TTL` | `14d` | 使われていない Codex セッション記録を削除するまでの時間。`0` で削除しない |
+| `MULTICA_GC_HERMES_SESSION_TTL` | `14d` | 使われていない Hermes セッション記録を削除するまでの時間。`0` で削除しない |
+| `MULTICA_GC_HERMES_MEMORY_TTL` | `90d` | 使われていない Hermes メモリを削除するまでの時間。`0` で削除しない |
+| `MULTICA_GC_TASK_TEMP_LEGACY_TTL` | `0` | 古いデーモンが残した、実行ロックのない一時ディレクトリだけが対象。変更がないまま何時間経ったら削除するか。`0` で削除しない。実行ロックのある一時ディレクトリは実行終了時に削除され、この設定の影響を受けない |
+
+### デーモンのログ [#daemon-logs]
+
+デーモンがバックグラウンドで（ターミナルにつながずに）動いているとき、ログは `~/.multica/daemon.log`（名前付きプロファイルでは `~/.multica/profiles/<name>/daemon.log`）に書かれ、サイズでローテーションされます。ローテーション後のファイルは gzip で圧縮されます。
+
+| 変数 | デフォルト | 説明 |
+|---|---|---|
+| `MULTICA_DAEMON_LOG_MAX_SIZE_MB` | `20` | `daemon.log` をローテーションするサイズ（MB） |
+| `MULTICA_DAEMON_LOG_MAX_BACKUPS` | `5` | 残すローテーション済みファイルの最大数 |
+| `MULTICA_DAEMON_LOG_MAX_AGE_DAYS` | `30` | ローテーション済みファイルを残す日数 |
+
+3 つとも正の整数を取ります。`0`、負の数、解釈できない値はデフォルトとして扱われ、「無制限」にはなりません。ローテーション済みファイルは、個数と日数のどちらかの上限に先に達した時点で削除されます。クラッシュ時の出力は同じディレクトリの `daemon.err.log` に書かれ、起動時に 5 MB を超えていれば `daemon.err.log.1` に名前が変わります。
+
+### ツールごとのパス、モデル、引数
+
+組み込みの各ツールにはパス変数 `MULTICA_<PREFIX>_PATH` があります。設定すると、デーモンは `PATH` からコマンドを探す代わりにそのパスを使います。パスが存在しない場合、そのツールは登録されず、`PATH` 上の同名コマンドに切り替わることもありません。多くのツールにはモデル変数 `MULTICA_<PREFIX>_MODEL` もあり、エージェントでモデルが選ばれていないときにこのコンピューターの既定モデルとして使われます。どちらも空ならモデルは渡されず、ツール自身が決めます。
+
+<Accordions>
+<Accordion title="ツールごとの変数プレフィックス" id="tool-env-prefixes" value="tool-env-prefixes">
+
+| ツール | プレフィックス | モデル変数 |
+|---|---|---|
+| Antigravity | `MULTICA_ANTIGRAVITY` | ✓（値は `agy models` が表示する名前そのもの） |
+| Claude Code | `MULTICA_CLAUDE` | ✓ |
+| CodeArts | `MULTICA_CODEARTS` | ✓ |
+| CodeBuddy | `MULTICA_CODEBUDDY` | ✓ |
+| Codex | `MULTICA_CODEX` | ✓ |
+| Cursor Agent | `MULTICA_CURSOR` | ✓ |
+| DeepSeek Harness | `MULTICA_DSH` | ✓（値は dsh のモデルカタログにある ID。例: `deepseek-official/deepseek-chat`） |
+| DevEco Code | `MULTICA_DEVECO` | ✓ |
+| Dim | `MULTICA_DIM` | ✓（値は dim のモデルカタログにある ID） |
+| GitHub Copilot CLI | `MULTICA_COPILOT` | ✓ |
+| Grok | `MULTICA_GROK` | ✓ |
+| Hermes | `MULTICA_HERMES` | ✓ |
+| Kimi CLI | `MULTICA_KIMI` | ✓ |
+| Kiro CLI | `MULTICA_KIRO` | ✓ |
+| MiniMax Code | `MULTICA_MCODE` | — |
+| Muse Code | `MULTICA_MUSE` | ✓（値はランタイムのモデル一覧にある ID） |
+| Oh-My-Pi | `MULTICA_OMP` | ✓ |
+| OpenClaw | `MULTICA_OPENCLAW` | ✓ |
+| OpenCode | `MULTICA_OPENCODE` | ✓ |
+| Pi | `MULTICA_PI` | ✓ |
+| Qoder CLI | `MULTICA_QODER` | ✓ |
+| Qoder CN CLI | `MULTICA_QODERCLICN` | ✓ |
+| Qwen Code | `MULTICA_QWEN` | ✓ |
+| QwenPaw | `MULTICA_QWENPAW` | — |
+| Reasonix | `MULTICA_REASONIX` | ✓ |
+| Trae CLI | `MULTICA_TRAECLI` | ✓ |
+| ZeroClaw | `MULTICA_ZEROCLAW` | —（モデルは ZeroClaw のエージェント設定で管理） |
+
+</Accordion>
+</Accordions>
+
+QwenPaw と MiniMax Code には、Multica がモデルを渡さないためモデル変数がありません。詳しくは [AI コーディングツール比較](/providers#モデルの取得元)を参照してください。DeepSeek Harness には `MULTICA_DSH_PROFILE_BUNDLE` と `MULTICA_DSH_PLUGIN_PATH` もあり、次のセクションで説明します。
+
+マシン全体のデフォルト引数 `MULTICA_<PREFIX>_ARGS` は、現在 Claude Code、Codex、CodeBuddy、Qwen Code、QwenPaw の 5 ツールに対応しています。対応する変数は `MULTICA_CLAUDE_ARGS`、`MULTICA_CODEX_ARGS`、`MULTICA_CODEBUDDY_ARGS`、`MULTICA_QWEN_ARGS`、`MULTICA_QWENPAW_ARGS` です。例:
 
 ```dotenv
 MULTICA_CLAUDE_PATH=/opt/bin/claude
 MULTICA_CLAUDE_ARGS=--max-turns 40
 ```
 
-Muse Code は `MULTICA_MUSE_PATH` と `MULTICA_MUSE_MODEL` に対応しています。モデルにはランタイムの一覧にある ID を指定してください。
+### DeepSeek Harness のプロファイルのインストール
+
+`MULTICA_DSH_PROFILE_BUNDLE` は、`multica` プロファイルが存在しない場合にインストールするバンドルを指定します。カンマ区切りで複数の候補を順に試し、各項目は npm のパッケージ名、ディレクトリ、またはパック済み tarball です。既定では未設定です。Multica が利用する `--stdio` プロトコルはこのプロファイルが提供するため、未設定の場合は DSH のインストールには手を加えず、デーモンは使用できないランタイムを登録せずにプロファイルの欠落を報告します。
+
+Multica 自身のブリッジはまだ公開 npm レジストリにないため、値の選び方は[エージェントランタイムのインストール](/install-agent-runtime)を参照してください。ここに設定した値は追加の確認なしに各デーモンホストの DSH ホームへインストールされるので、サプライチェーンの判断として扱ってください。
+
+このインストールは範囲を意図的に限定しています。実行はデーモンのライフタイムにつき最大 1 回、プローブがプロファイルの不在を確認できた場合のみです。失敗時はパッケージマネージャー自身の出力をログに記録し、再試行はデーモンの再起動後のみ行います。プローブがタイムアウトした場合や、このデーモンが扱わないプロトコルバージョンを返した場合は報告のみで、上書きインストールは行いません。意図して用意されたプロファイルをデーモンが上書きすることはありません。調査はデーモンログで `DSH runtime profile` を検索してください。取り消す場合は `$DSH_HOME/profiles/multica`（既定は `~/.dsh/profiles/multica`）を削除します。
+
+`MULTICA_DSH_PLUGIN_PATH` はインストール時に pnpm を解決するディレクトリを上書きします。`dsh plugin` が転送する pnpm は macOS でも Windows でも DSH Desktop 独自の runtime-commands ディレクトリに置かれており、デーモンはそれを自動で見つけて PATH の先頭に追加します（新しい Desktop が使うバージョン付きの構成も含みます）。したがってこの変数が必要なのは、デーモンが見つけられない場所にインストールされている場合か、独自の pnpm を使わせたい場合だけです。設定すると自動探索は完全に置き換わり、指定したディレクトリが存在しなければ、インストールは同梱の pnpm ではなくデーモンの `PATH` 上の pnpm にフォールバックします。Linux には DSH Desktop がないため、常に `PATH` が使われます。
+
+### Cursor のバックグラウンドプロセスのクリーンアップ
 
 Cursor の検証済みバックグラウンドクリーンアップには、Linux 6.9 以降（プロセスグループ pidfd）、macOS カーネルによるプロセス識別子の照会と audit token を用いたシグナル送信のサポート、または Windows で正常に割り当てられた入れ子の Job Object が必要です。macOS では各プロセスへのシグナル送信にカーネルが検証する PID version を用いるため、同一セッションのグループに参加する必要はありません。これらの macOS API は非公開であり、プロセス捕捉時に確認されます。所有権を確保できなかったバックグラウンドプロセスは元のツール結果を返し、ツール watchdog が `0` の場合も含めて通常の idle watchdog に従います。すでに所有している作業は、クリーンアップを確認できない場合も実行中のままです。ツール watchdog を `0` にした場合はこの境界自体が存在せず、所有済みのバックグラウンド作業が生きている限り実行は継続します。その場合の実行は `MULTICA_AGENT_TIMEOUT` だけに制限され、これも既定値は `0` です。
 
 所有している Cursor のバックグラウンドプロセスは、実行が正常に完了したときにも停止されます。したがって、その実行が起動したバックグラウンドサーバーが意図的に終了処理後まで生き残ることはありません。macOS は保持された元の親プロセスの識別子によって後から生まれた子プロセスを認識できますが、観測前に中間プロセスが消えた連鎖は証明できません。そのようなプロセス、追跡対象のグループから外れた作業、および継続的な所有権や送信のエラーは、バックグラウンド作業を残す可能性があります。確認できなかったクリーンアップはログに記録され、「クリーンアップ成功」による回復ウィンドウを与えることはありません。数値の PID やプロセスグループだけを根拠に未知のプロセスを終了させることはありません。
-
-優先順位はコマンドラインフラグ → 環境変数 → `~/.multica/config.json` → 組み込みデフォルトです。watchdog の動作は[デーモンとランタイム](/daemon-runtimes)を参照してください。
 
 ### デーモン設定の永続化
 

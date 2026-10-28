@@ -41,7 +41,7 @@ export function qoderChoiceState(
   connection: QoderConnection,
   runtimeOnline: boolean,
 ): QoderChoiceState {
-  if (!connection.configured) return "not_configured";
+  if (!connection.available || !connection.configured) return "not_configured";
   if (!connection.enabled) return "stopped";
   if (connection.status === "error") return "error";
   return runtimeOnline && connection.status === "online" ? "ready" : "starting";

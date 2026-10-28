@@ -1,8 +1,10 @@
 "use client";
 
+import { IssueSidebarSectionHeader } from "./issue-sidebar-section";
+
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { ArrowRight, ChevronRight } from "lucide-react";
+import { ArrowRight } from "lucide-react";
 import type { Issue, IssueDuplicateOf } from "@multica/core/types";
 import { issueStatusCategory } from "@multica/core/issues";
 import { issueDuplicatesOptions } from "@multica/core/issues/queries";
@@ -99,24 +101,14 @@ export function IssueDuplicatesSection({ issueId }: { issueId: string }) {
 
   return (
     <div>
-      <button
-        type="button"
-        className={`flex w-full items-center gap-1 rounded-md px-2 py-1 text-caption font-medium transition-colors mb-2 hover:bg-accent/70 ${open ? "" : "text-muted-foreground hover:text-foreground"}`}
-        onClick={() => setOpen(!open)}
-      >
-        {t(($) => $.duplicates.section_title)}{" "}
-        <span className="rounded-xs bg-muted px-1 text-micro font-medium tabular-nums text-muted-foreground">
-          {duplicates.length}
-        </span>
-        <ChevronRight className={`!size-3 shrink-0 stroke-[2.5] text-muted-foreground transition-transform ${open ? "rotate-90" : ""}`} />
-      </button>
+      <IssueSidebarSectionHeader title={t(($) => $.duplicates.section_title)} open={open} onOpenChange={setOpen} count={duplicates.length} />
       {open && (
-        <div className="pl-2">
+        <div className="px-2">
           {duplicates.map((duplicate) => (
             <AppLink
               key={duplicate.id}
               href={paths.issueDetail(duplicate.id)}
-              className="group flex items-center gap-1.5 rounded-md px-2 -mx-2 py-1.5 text-caption hover:bg-accent/50 transition-colors"
+              className="group flex items-center gap-1.5 rounded-md px-2 py-2 text-caption hover:bg-accent/50 transition-colors"
             >
               <ActorAvatar
                 actorType={duplicate.creator_type}

@@ -168,7 +168,7 @@ describe("DesktopShell sidebar trigger", () => {
   it("keeps full clearance for compact layouts in either sidebar state", () => {
     Object.defineProperty(window, "innerWidth", {
       configurable: true,
-      value: 800,
+      value: 700,
     });
 
     const { container, getByRole, getByTestId } = renderShell();

@@ -3,7 +3,10 @@ title: Quick Actions
 description: Save a frequent request and use it from an issue without writing it again.
 ---
 
-Quick Actions turn requests you use often into buttons on an issue. Save who to ask and what to say once, then use the same request on other issues.
+import { Step, Steps } from "fumadocs-ui/components/steps";
+import { QuickActionDemo } from "@/components/demos/quick-action-demo";
+
+Quick Actions turn requests you use often into buttons on an issue. Save who to ask and what to say once, and reuse it on other issues with a click.
 
 For example, create **Code Review** for your review agent with this prompt:
 
@@ -20,17 +23,41 @@ In the web or desktop app, there are two ways to use an action:
 | **Quick Actions** in the issue sidebar | Click an action to post its saved request immediately. If it has an agent or squad, it asks them to work on this issue. |
 | Type `/` in the comment box | Choose an action to insert its request as a draft. Edit it for this issue, then send when ready. Nothing is posted just by choosing it. |
 
+<QuickActionDemo />
+
 Using a quick action does not change the issue's assignee or status. Follow the reply in the issue's discussion and check the [execution log](/tasks) for the agent's progress.
 
 An action with **No target** posts the saved message without @mentioning anyone. Use it for a checklist or a response you often write.
 
 ## Create a quick action
 
-1. Open **Settings → Quick Actions** and choose **New quick action**.
-2. Give it a short name that describes the request, such as **Code Review** or **Summarize progress**.
-3. Choose **Just me** for your own use, or **Team** to share it with the workspace. Creating and managing Team actions requires `owner` or `admin` permissions; members should choose **Just me**.
-4. Choose an agent or squad under **Runs as**, or choose **No target** to save a message without a mention.
-5. Write the **Prompt** as you want it sent, then save. It is sent as written; variables are not supported.
+<Steps>
+<Step>
+
+Open **Settings → Quick Actions** and choose **New quick action**.
+
+</Step>
+<Step>
+
+Give it a short name that describes the request, such as **Code Review** or **Summarize progress**.
+
+</Step>
+<Step>
+
+Choose **Just me** for your own use, or **Team** to share it with the workspace. Creating and managing Team actions requires `owner` or `admin` permissions; members should choose **Just me**.
+
+</Step>
+<Step>
+
+Choose an agent or squad under **Runs as**, or choose **No target** to save a message without a mention.
+
+</Step>
+<Step>
+
+Write the **Prompt** as you want it sent, then save. It is sent as written; variables are not supported.
+
+</Step>
+</Steps>
 
 Team actions that call an agent must use one everyone in the workspace can run. For a squad, this applies to its leader. Personal actions can use agents you have permission to run.
 
@@ -38,11 +65,11 @@ Team actions that call an agent must use one everyone in the workspace can run. 
 
 ## Manage saved actions
 
-Return to **Settings → Quick Actions** to edit an action, archive it, or restore an archived one. Archive an action to remove it from everyday use while keeping it for later. Deleting it removes the saved action; past comments and run records stay.
+In **Settings → Quick Actions** you can edit an action, archive it, or restore an archived one. Archive an action you don't need now but may want later. Deleting it removes the saved action; past comments and run records stay.
 
-If no actions have been created for you or your team, the issue sidebar does not show a Quick Actions section.
+When there are no personal or Team actions you can see, the issue sidebar does not show a Quick Actions section. The sidebar list is not filtered by who can run each action; permission is checked when you click one.
 
-If an action cannot call its agent, ask an admin to check the selected agent and who can run it. An agent that is waiting for its computer to come online has not started yet; see [Troubleshooting](/troubleshooting).
+If clicking an action tells you it can't run, ask an admin to check the action's agent and who can run it. If the agent's computer is offline, the work starts once it comes back online; see [Troubleshooting](/troubleshooting).
 
 ## Related guides
 
