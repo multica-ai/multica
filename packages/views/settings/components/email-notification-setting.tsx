@@ -56,6 +56,7 @@ export function EmailNotificationSetting() {
   return (
     <SettingsCard>
       <SettingsRow
+        anchor="email"
         label={t(($) => $.notifications.email.label)}
         description={hint}
       >
