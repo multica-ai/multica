@@ -481,7 +481,18 @@
     "project_directory_path_copied_with_branch": "Đã sao chép đường dẫn thư mục dự án — công việc đang ở nhánh {{branch}}",
     "workdir_path_copy_failed": "Sao chép đường dẫn workdir thất bại",
     "workdir_path_unavailable": "Chưa có workdir cục bộ — công việc chưa được agent cục bộ chạy",
-    "pull_requests_empty_title": "Không có pull request nào được liên kết."
+    "pull_requests_empty_title": "Không có pull request nào được liên kết.",
+    "metadata_close": "Đóng siêu dữ liệu",
+    "metadata_copy": "Sao chép siêu dữ liệu",
+    "metadata_view": "Xem siêu dữ liệu",
+    "metadata_expand": "Mở rộng hộp thoại",
+    "metadata_restore": "Khôi phục kích thước hộp thoại",
+    "metadata_copy_failed": "Không sao chép được siêu dữ liệu",
+    "metadata_description": "Dữ liệu dạng khóa-giá trị do agent và các tích hợp ghi lại để phối hợp workflow.",
+    "section_load_failed_retry": "Không tải được. Thử lại",
+    "quick_jump_label": "Điều hướng nhanh",
+    "description_nav_label": "Mô tả công việc",
+    "sub_issues_nav_progress": "Đã hoàn thành {{done}}/{{total}}"
   },
   "timeline": {
     "loading": "Đang tải..."
@@ -538,7 +549,8 @@
     "wakeup_checkin": "kiểm tra âm thầm: {{note}}",
     "wakeup_checkin_coalesced_other": "{{count}} lần kiểm tra âm thầm · mới nhất: {{note}}",
     "wakeup_chip_created_by": "Wakeup của {{name}}",
-    "wakeup_chip_system": "Quy tắc hệ thống"
+    "wakeup_chip_system": "Quy tắc hệ thống",
+    "wakeup_created_scheduled": "đã thêm một wakeup cho {{agent}}: {{condition}}"
   },
   "comment": {
     "add_reaction": "Thêm biểu cảm",
@@ -732,7 +744,7 @@
     "summary_runs_other": "{{count}} lần chạy",
     "latest": "Mới nhất",
     "open_timeline": "Mở dòng thời gian",
-    "more_runs_other": "thêm {{count}}",
+    "more_runs_other": "Hiện thêm {{count}}",
     "strip_aria": "Chi phí lũy kế theo thời gian — mở dòng thời gian của lần chạy",
     "strip_no_usage": "Chưa ghi nhận mức sử dụng",
     "sparkline_now": "Hiện tại"
@@ -1068,7 +1080,7 @@
     "wake_agent": "Đánh thức {{agent}}",
     "needs_attention": "Cần chú ý",
     "turn_off": "Tắt",
-    "ended": "Lịch sử wakeup {{count}}",
+    "ended": "Lịch sử wakeup · {{count}}",
     "waiting_event": "Đang chờ kích hoạt",
     "triggered_by_wakeup": "Được kích hoạt bởi wakeup",
     "upcoming": "{{count}} quy tắc wakeup đang bật",
@@ -1265,7 +1277,8 @@
       "missing_issue": "Hãy chọn một công việc.",
       "checked": "Đã chọn",
       "unchecked": "Chưa chọn",
-      "assignee_comment_hint": "{{name}} là người được giao và đã chạy khi một thành viên bình luận. Quy tắc này tham gia lần chạy đó thay vì bắt đầu lần chạy khác; chỉ thêm nó để đưa thêm hướng dẫn cho lần chạy đó."
+      "assignee_comment_hint": "{{name}} là người được giao và đã chạy khi một thành viên bình luận. Quy tắc này tham gia lần chạy đó thay vì bắt đầu lần chạy khác; chỉ thêm nó để đưa thêm hướng dẫn cho lần chạy đó.",
+      "other_blocked": "chuyển sang Bị chặn"
     },
     "system": {
       "badge": "Hệ thống",
@@ -1316,7 +1329,8 @@
       "unknown_label": "một nhãn đã bị xóa",
       "unknown_property": "một thuộc tính đã bị xóa",
       "checked": "đã chọn",
-      "unchecked": "chưa chọn"
+      "unchecked": "chưa chọn",
+      "other_blocked": "Khi {{issue}} chuyển sang Bị chặn"
     },
     "wait": {
       "reply_from": "Đang chờ {{name}} trả lời",
@@ -1338,7 +1352,8 @@
       "time": "{{time}} · đánh thức {{agent}}",
       "header": "{{agent}}: {{what}}",
       "paused": "Wakeup đã tạm dừng",
-      "open": "Hiện wakeup"
+      "open": "Hiện wakeup",
+      "other_blocked": "Đang chờ {{issue}} chuyển sang Bị chặn"
     },
     "paused": {
       "max_fires": "Đã dừng sau khi đạt {{count}} lần chạy",

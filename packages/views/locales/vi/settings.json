@@ -166,12 +166,13 @@
     "language": {
       "title": "Ngôn ngữ",
       "english": "English",
-      "chinese": "中文",
+      "chinese": "简体中文",
       "korean": "한국어",
       "japanese": "日本語",
       "french": "Français",
       "vietnamese": "Tiếng Việt",
-      "sync_failed": "Đã lưu ngôn ngữ trên thiết bị này nhưng đồng bộ lên tài khoản thất bại. Các thiết bị khác có thể vẫn hiển thị ngôn ngữ trước đó."
+      "sync_failed": "Đã lưu ngôn ngữ trên thiết bị này nhưng đồng bộ lên tài khoản thất bại. Các thiết bị khác có thể vẫn hiển thị ngôn ngữ trước đó.",
+      "chinese_traditional": "繁體中文"
     },
     "timezone": {
       "title": "Múi giờ",

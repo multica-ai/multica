@@ -129,5 +129,11 @@
   },
   "navigation": {
     "open_in_new_tab": "Mở trong tab mới"
+  },
+  "daemon_setup": {
+    "loading": "Đang tải cài đặt kết nối...",
+    "error": "Không tải được cài đặt kết nối. Kiểm tra kết nối của bạn; đang tự thử lại.",
+    "unknown": "Máy chủ này chưa xác nhận cài đặt kết nối của nó. Hãy nhờ quản trị viên cập nhật máy chủ.",
+    "incomplete": "Cài đặt kết nối chưa đầy đủ. Hãy nhờ quản trị viên cấu hình URL công khai của máy chủ này."
   }
 }

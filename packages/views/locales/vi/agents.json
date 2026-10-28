@@ -161,7 +161,7 @@
   "inspector": {
     "section_profile": "Hồ sơ",
     "section_execution": "Thực thi",
-    "qoder_execution_note": "Model, công cụ và skill được đặt trên QCA agent trong Qoder.",
+    "qoder_execution_note": "Model, công cụ và skill được đặt trên agent trong Qoder Cloud Agents.",
     "section_access": "Quyền truy cập",
     "section_properties": "Thuộc tính",
     "section_details": "Chi tiết",
@@ -269,7 +269,7 @@
     "composio_mcp": "Ứng dụng MCP",
     "integrations": "Tích hợp",
     "runtime_config": "Định tuyến",
-    "qoder_agent": "QCA Agent",
+    "qoder_agent": "Qoder Cloud Agents",
     "discard_dialog_title": "Hủy các thay đổi chưa lưu?",
     "discard_dialog_description": "Bạn có thay đổi chưa lưu trong tab này. Rời đi bây giờ sẽ hủy chúng.",
     "discard_keep": "Tiếp tục chỉnh sửa",
@@ -712,7 +712,10 @@
       "tls_label": "Dùng TLS",
       "tls_hint": "Quay số qua https:// thay vì http://",
       "saved_toast": "Đã lưu cấu hình định tuyến",
-      "save_failed_toast": "Lưu cấu hình định tuyến thất bại"
+      "save_failed_toast": "Lưu cấu hình định tuyến thất bại",
+      "model_override_label": "Ghi đè model nền",
+      "model_override_hint": "Áp dụng cho mọi lần chạy mà agent này nhận cho tới khi thay đổi hoặc xoá. Xoá sẽ dùng model gắn với OpenClaw agent đã chọn; danh tính của nó giữ nguyên.",
+      "model_override_placeholder": "openrouter/@preset/agent-reasoning"
     },
     "skills": {
       "assigned_title": "Đã gán cho agent",
