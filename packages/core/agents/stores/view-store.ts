@@ -12,7 +12,9 @@ import type { AccessScope } from "../effective-access";
 // View preferences for the agents list page: scope, sort, column visibility,
 // and filters. Persisted per workspace, per user/device. Row selection is
 // session-scoped on purpose (same rationale as the skills/autopilots view
-// stores).
+// stores). The search query lives here too but is session-only (never
+// persisted): it must survive opening an agent and coming back to the list,
+// yet a stale query restored days later would read as "my agents vanished".
 
 // Scope mixes the ownership lens (mine/all) with the archived lifecycle
 // stage. Impure on paper, but the three are mutually exclusive in practice
@@ -76,12 +78,13 @@ export type AgentColumnKey =
   | "model"
   | "created";
 
-/** Model and created are opt-in: hidden until the user enables them. Owner
- *  is shown by default (the user wants to see who owns each agent). */
-export const AGENT_DEFAULT_HIDDEN_COLUMNS: AgentColumnKey[] = [
-  "model",
-  "created",
-];
+/** Created is opt-in: hidden until the user enables it. Owner and model are
+ *  shown by default — comparing which model each agent runs is a core use of
+ *  the list (GitHub #9500). */
+export const AGENT_DEFAULT_HIDDEN_COLUMNS: AgentColumnKey[] = ["created"];
+
+/** Persist schema version. v0 hid the model column by default; v1 shows it. */
+const AGENT_VIEW_STORE_VERSION = 1;
 
 export interface AgentsViewState {
   scope: AgentsScope;
@@ -89,6 +92,9 @@ export interface AgentsViewState {
   sortDirection: AgentSortDirection;
   hiddenColumns: AgentColumnKey[];
   filters: AgentListFilters;
+  /** Free-text list search. Session-only — excluded from persistence. */
+  search: string;
+  setSearch: (search: string) => void;
   setScope: (scope: AgentsScope) => void;
   /** Header click: toggles direction on the active field, otherwise switches
    *  to the field with its default direction. */
@@ -109,12 +115,14 @@ const DEFAULTS = {
   sortDirection: AGENT_SORT_DEFAULT_DIRECTION.lastActive,
   hiddenColumns: AGENT_DEFAULT_HIDDEN_COLUMNS,
   filters: EMPTY_AGENT_FILTERS,
+  search: "",
 };
 
 export const useAgentsViewStore = create<AgentsViewState>()(
   persist(
     (set) => ({
       ...DEFAULTS,
+      setSearch: (search) => set({ search }),
       // "Mine" is the clean personal view: entering it clears all filters,
       // so Mine never carries filters. Switching to all/archived leaves
       // filters intact (you can carry "owner = Bob" between them).
@@ -163,6 +171,7 @@ export const useAgentsViewStore = create<AgentsViewState>()(
     }),
     {
       name: "multica_agents_view",
+      version: AGENT_VIEW_STORE_VERSION,
       storage: createJSONStorage(() =>
         createWorkspaceAwareStorage(defaultStorage),
       ),
@@ -173,11 +182,27 @@ export const useAgentsViewStore = create<AgentsViewState>()(
         hiddenColumns: state.hiddenColumns,
         filters: state.filters,
       }),
+      // v0 → v1: model went from hidden-by-default to shown-by-default.
+      // Every v0 payload carried "model" in hiddenColumns unless the user
+      // had turned it on, so un-hide it once; the user can re-hide it from
+      // the Display panel. Other persisted prefs pass through untouched.
+      migrate: (persisted, version) => {
+        const p = (persisted ?? {}) as Partial<AgentsViewState>;
+        if (version < 1 && Array.isArray(p.hiddenColumns)) {
+          return {
+            ...p,
+            hiddenColumns: p.hiddenColumns.filter((k) => k !== "model"),
+          } as AgentsViewState;
+        }
+        return p as AgentsViewState;
+      },
       // On rehydrate, if the new workspace has no persisted value, reset to
       // the defaults instead of leaving the previous workspace's in-memory
       // view state in place. Default merge keeps current state when
       // persisted is undefined, which would leak state across workspaces.
       merge: (persisted, current) => {
+        // `search` is session-only and must not leak across workspaces, so
+        // every rehydrate (i.e. workspace switch) clears it.
         if (!persisted) return { ...current, ...DEFAULTS };
         const p = persisted as Partial<AgentsViewState>;
         // Deep-merge filters so a payload persisted before a new filter
@@ -187,6 +212,7 @@ export const useAgentsViewStore = create<AgentsViewState>()(
           ...current,
           ...p,
           filters: { ...EMPTY_AGENT_FILTERS, ...(p.filters ?? {}) },
+          search: "",
         };
       },
     },

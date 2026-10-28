@@ -1,0 +1,37 @@
+{
+  "back": "返回",
+  "tabs": {
+    "inbox": "收件箱",
+    "my_issues": "我的任務",
+    "chat": "聊天",
+    "more": "更多"
+  },
+  "more_menu": {
+    "pinned": "已固定",
+    "issues": "任務",
+    "projects": "專案",
+    "account_settings": "帳號設定"
+  },
+  "routes": {
+    "issues": "任務",
+    "projects": "專案",
+    "settings": "設定",
+    "profile": "個人資料",
+    "notifications": "通知",
+    "search": "搜尋",
+    "issue": "任務",
+    "project": "專案",
+    "assignee": "負責人",
+    "mention": "提及",
+    "agents": "智慧體",
+    "pinned": "已固定",
+    "switch_workspace": "切換工作區",
+    "new_issue": "新建任務",
+    "new_project": "新建專案",
+    "edit_issue": "編輯任務",
+    "edit_project": "編輯專案",
+    "runs": "執行",
+    "add_resource": "新增資源",
+    "recent": "最近"
+  }
+}

@@ -10,7 +10,6 @@ import (
 	"unicode/utf8"
 
 	"github.com/jackc/pgx/v5/pgtype"
-	"github.com/multica-ai/multica/server/internal/featureflags"
 	"github.com/multica-ai/multica/server/internal/issueworkflow"
 	"github.com/multica-ai/multica/server/internal/service"
 	"github.com/multica-ai/multica/server/internal/testutil"
@@ -48,7 +47,6 @@ func createTestWorkflow(t *testing.T, name string, middle ...string) IssueWorkfl
 
 func createTestWorkflowSteps(t *testing.T, name string, steps []map[string]any) IssueWorkflowResponse {
 	t.Helper()
-	withFeatureFlag(t, testHandler, featureflags.ProjectWorkflowsV1, true)
 	var created IssueWorkflowResponse
 	testutil.Call(t, testHandler.CreateIssueWorkflow, workflowRequest("POST", "/api/issue-workflows", map[string]any{
 		"name":  name,
@@ -101,7 +99,6 @@ func projectWorkflowID(t *testing.T, projectID string) string {
 		return *id
 	}
 	resetDefaultWorkflow(t)
-	withFeatureFlag(t, testHandler, featureflags.ProjectWorkflowsV1, true)
 	var list struct {
 		Workflows []IssueWorkflowResponse `json:"workflows"`
 	}
@@ -111,7 +108,6 @@ func projectWorkflowID(t *testing.T, projectID string) string {
 
 func setWorkflowHandoff(t *testing.T, workflowID, statusKey string, body map[string]any) *testutil.Response {
 	t.Helper()
-	withFeatureFlag(t, testHandler, featureflags.ProjectWorkflowsV1, true)
 	req := withURLParams(workflowRequest("PUT", "/api/issue-workflows/"+workflowID+"/handoffs/"+statusKey, body),
 		"id", workflowID, "status", statusKey)
 	return testutil.Call(t, testHandler.SetIssueWorkflowHandoff, req)
@@ -157,12 +153,69 @@ func deliveryProject(t *testing.T, title, agentID string) string {
 	return projectID
 }
 
-func TestCreateIssueWorkflowRequiresFlag(t *testing.T) {
-	withFeatureFlag(t, testHandler, featureflags.ProjectWorkflowsV1, false)
-	testutil.Call(t, testHandler.CreateIssueWorkflow, workflowRequest("POST", "/api/issue-workflows", map[string]any{
-		"name":  "Flag off " + workflowTestSuffix(),
-		"steps": statusSteps(),
-	})).Want(http.StatusForbidden)
+func TestProjectWorkflowsAvailableWithoutFlag(t *testing.T) {
+	seedTestCatalog(t)
+	resetDefaultWorkflow(t)
+	withFeatureFlag(t, testHandler, "project_workflows_v1", false)
+
+	var list struct {
+		Workflows []IssueWorkflowResponse `json:"workflows"`
+	}
+	testutil.Call(t, testHandler.ListIssueWorkflows, workflowRequest("GET", "/api/issue-workflows", nil)).Want(http.StatusOK).JSON(&list)
+	if len(list.Workflows) == 0 || !list.Workflows[0].IsDefault {
+		t.Fatalf("list = %+v, want Default without feature flag configuration", list.Workflows)
+	}
+
+	wf := createTestWorkflow(t, "Available "+workflowTestSuffix(), "in_progress")
+	projectID := createWorkflowTestProject(t, "Workflow available project")
+	setProjectWorkflow(t, projectID, map[string]any{"workflow_id": wf.ID}).Want(http.StatusOK)
+	agentID := seededReadyAgentID(t)
+	setWorkflowHandoff(t, wf.ID, "in_progress", handToAgent(agentID, "")).Want(http.StatusOK)
+
+	var project ProjectResponse
+	testutil.Call(t, testHandler.CreateProject, workflowRequest("POST", "/api/projects", map[string]any{
+		"title": "Created with workflow", "workflow_id": wf.ID,
+	})).Want(http.StatusCreated).JSON(&project)
+	t.Cleanup(func() {
+		testPool.Exec(context.Background(), `DELETE FROM project WHERE id = $1`, project.ID)
+	})
+	if project.WorkflowID == nil || *project.WorkflowID != wf.ID {
+		t.Fatalf("workflow_id = %v, want %s", project.WorkflowID, wf.ID)
+	}
+}
+
+func TestProjectWorkflowsKeepWorkspaceIsolation(t *testing.T) {
+	seedTestCatalog(t)
+	resetDefaultWorkflow(t)
+	wf := createTestWorkflow(t, "Isolated "+workflowTestSuffix(), "in_progress")
+	projectID := createWorkflowTestProject(t, "Isolated workflow project")
+	outsiderID := dbfx.User(t, "Workflow outsider", "workflow-outsider-"+workflowTestSuffix()+"@example.com")
+	for _, method := range []string{http.MethodGet, http.MethodPost} {
+		req := workflowRequest(method, "/api/issue-workflows", map[string]any{"name": "Unauthorized", "steps": statusSteps()})
+		req.Header.Set("X-User-ID", outsiderID)
+		if method == http.MethodGet {
+			testutil.Call(t, testHandler.ListIssueWorkflows, req).Want(http.StatusNotFound)
+		} else {
+			testutil.Call(t, testHandler.CreateIssueWorkflow, req).Want(http.StatusNotFound)
+		}
+	}
+
+	otherWorkspaceID := dbfx.Workspace(t, "Other workflow workspace", "wf-isolated-"+workflowTestSuffix())
+	dbfx.Member(t, otherWorkspaceID, testUserID, "owner")
+	otherRequest := func(method, path string, body any) *http.Request {
+		req := newRequest(method, path, body)
+		req.Header.Set("X-Workspace-ID", otherWorkspaceID)
+		return req
+	}
+	get := withURLParam(otherRequest("GET", "/api/issue-workflows/"+wf.ID, nil), "id", wf.ID)
+	testutil.Call(t, testHandler.GetIssueWorkflow, get).Want(http.StatusNotFound)
+	switchReq := withURLParam(otherRequest("POST", "/api/projects/"+projectID+"/workflow", map[string]any{"workflow_id": wf.ID}), "id", projectID)
+	testutil.Call(t, testHandler.SetProjectWorkflow, switchReq).Want(http.StatusNotFound)
+	handoff := withURLParams(otherRequest("PUT", "/api/issue-workflows/"+wf.ID+"/handoffs/in_progress", map[string]any{"handler": map[string]any{"type": "none"}}), "id", wf.ID, "status", "in_progress")
+	testutil.Call(t, testHandler.SetIssueWorkflowHandoff, handoff).Want(http.StatusNotFound)
+	testutil.Call(t, testHandler.CreateProject, otherRequest("POST", "/api/projects", map[string]any{
+		"title": "Cross-workspace workflow", "workflow_id": wf.ID,
+	})).Want(http.StatusBadRequest)
 }
 
 func TestCreateIssueWorkflowPlacesFixedStatusesAndValidates(t *testing.T) {
@@ -197,7 +250,6 @@ func TestCreateIssueWorkflowCreatesNewStatusesOutsideDefault(t *testing.T) {
 	seedTestCatalog(t)
 	resetDefaultWorkflow(t)
 	statusName := "Spec " + workflowTestSuffix()[10:]
-	withFeatureFlag(t, testHandler, featureflags.ProjectWorkflowsV1, true)
 	var created IssueWorkflowResponse
 	testutil.Call(t, testHandler.CreateIssueWorkflow, workflowRequest("POST", "/api/issue-workflows", map[string]any{
 		"name":  "Template " + workflowTestSuffix(),
@@ -236,7 +288,6 @@ func lookupStatusName(t *testing.T, key string) string {
 func TestDefaultWorkflowIsEditableButNotDeletable(t *testing.T) {
 	seedTestCatalog(t)
 	resetDefaultWorkflow(t)
-	withFeatureFlag(t, testHandler, featureflags.ProjectWorkflowsV1, true)
 	var list struct {
 		Workflows []IssueWorkflowResponse `json:"workflows"`
 	}
@@ -314,8 +365,7 @@ func TestSetProjectWorkflowMapsOnlyUnlistedStatuses(t *testing.T) {
 		t.Fatalf("a workflow switch handed the issue off (assignee type %q)", assigneeType)
 	}
 
-	// Switching back to Default needs no mapping and works with the flag off.
-	withFeatureFlag(t, testHandler, featureflags.ProjectWorkflowsV1, false)
+	// Switching back to Default needs no mapping.
 	setProjectWorkflow(t, projectID, map[string]any{"workflow_id": nil}).Want(http.StatusOK)
 }
 
@@ -445,7 +495,6 @@ func addWorkflowTestMember(t *testing.T, label string) (string, func(*http.Reque
 func TestWorkflowOwnerPermissions(t *testing.T) {
 	seedTestCatalog(t)
 	agentID := seededReadyAgentID(t)
-	withFeatureFlag(t, testHandler, featureflags.ProjectWorkflowsV1, true)
 	ownerID, asOwner := addWorkflowTestMember(t, "owner")
 	_, asOther := addWorkflowTestMember(t, "other")
 
@@ -674,7 +723,6 @@ func TestMoveIntoWorkflowProjectKeepsEquivalentStatusWithoutHandoff(t *testing.T
 func TestWorkflowHandoffCopyForProject(t *testing.T) {
 	seedTestCatalog(t)
 	agentID := seededReadyAgentID(t)
-	withFeatureFlag(t, testHandler, featureflags.ProjectWorkflowsV1, true)
 	wf := createTestWorkflow(t, "Shared "+workflowTestSuffix(), "in_progress")
 	mine := createWorkflowTestProject(t, "Workflow copy mine")
 	theirs := createWorkflowTestProject(t, "Workflow copy theirs")
@@ -786,7 +834,7 @@ func TestClaimCarriesProjectWorkflow(t *testing.T) {
 	quietProject := createWorkflowTestProject(t, "Workflow quiet project")
 	quiet := dbfx.Issue(t, "no handoffs", testutil.Cols{"project_id": quietProject, "status": "todo"})
 	quietIssue, _ := testHandler.Queries.GetIssue(context.Background(), util.MustParseUUID(quiet))
-	if testHandler.claimProjectWorkflow(context.Background(), quietIssue, nil) != nil {
+	if testHandler.claimProjectWorkflow(context.Background(), quietIssue, nil, false) != nil {
 		t.Fatal("a Default project without handoffs must not carry a workflow")
 	}
 
@@ -817,7 +865,7 @@ func TestClaimCarriesProjectWorkflow(t *testing.T) {
 
 	plain := dbfx.Issue(t, "no workflow", testutil.Cols{"status": "todo"})
 	plainIssue, _ := testHandler.Queries.GetIssue(context.Background(), util.MustParseUUID(plain))
-	if testHandler.claimProjectWorkflow(context.Background(), plainIssue, nil) != nil {
+	if testHandler.claimProjectWorkflow(context.Background(), plainIssue, nil, false) != nil {
 		t.Fatal("an issue outside a project must not carry a workflow")
 	}
 }
@@ -830,7 +878,7 @@ func claimBriefForTest(t *testing.T, issueID string, task db.AgentTaskQueue) str
 	if err != nil {
 		t.Fatalf("load issue: %v", err)
 	}
-	got := testHandler.claimProjectWorkflow(context.Background(), issue, &task)
+	got := testHandler.claimProjectWorkflow(context.Background(), issue, &task, false)
 	if got == nil {
 		t.Fatalf("claim of %s carries no workflow", issueID)
 	}
@@ -1189,5 +1237,69 @@ func TestHandoffDoesNotAlsoWakeTheHandler(t *testing.T) {
 	}
 	if n := pending(watcherWakeup); n == 0 {
 		t.Fatal("another agent's wakeup missed the assignment")
+	}
+}
+
+func TestDescriptionUpdatePreservesWorkflowHandoff(t *testing.T) {
+	seedTestCatalog(t)
+	targetAgent := seededReadyAgentID(t)
+	sourceAgent := dbfx.Agent(t, "Description handoff Agent A", handlerTestRuntimeID(t))
+	projectID := deliveryProject(t, "Description handoff project", targetAgent)
+	setColumnHandoff(t, projectID, "in_review", handToAgent(targetAgent, "Process the saved description.")).Want(http.StatusOK)
+	issueID := dbfx.Issue(t, "Saved result handoff", testutil.Cols{
+		"project_id": projectID, "status": "in_progress", "assignee_type": "agent", "assignee_id": sourceAgent,
+	})
+
+	updateIssueForTest(t, issueID, map[string]any{"status": "in_review", "description": "Updated description."}).Want(http.StatusOK)
+	_, kind, id := issueStatusAndAssignee(t, issueID)
+	if kind != "agent" || id != targetAgent {
+		t.Fatalf("saved assignee = %s/%s, want workflow-selected agent %s", kind, id, targetAgent)
+	}
+	if n := taskCountFor(t, issueID, targetAgent); n != 1 {
+		t.Fatalf("target agent runs = %d, want one without any follow-up comment", n)
+	}
+	if n := taskCountFor(t, issueID, sourceAgent); n != 0 {
+		t.Fatalf("source agent runs = %d, want none", n)
+	}
+	issue, err := testHandler.Queries.GetIssue(context.Background(), util.MustParseUUID(issueID))
+	if err != nil || issue.Description.String != "Updated description." {
+		t.Fatalf("saved result = %q, err = %v", issue.Description.String, err)
+	}
+	updateIssueForTest(t, issueID, map[string]any{"status": "in_review", "description": "Updated description."}).Want(http.StatusOK)
+	if n := taskCountFor(t, issueID, targetAgent); n != 1 {
+		t.Fatalf("unchanged-status retry created %d target agent runs, want one", n)
+	}
+}
+
+func TestBatchDescriptionUpdatePreservesWorkflowHandoff(t *testing.T) {
+	seedTestCatalog(t)
+	targetAgent := seededReadyAgentID(t)
+	sourceAgent := dbfx.Agent(t, "Batch description handoff Agent A", handlerTestRuntimeID(t))
+	projectID := deliveryProject(t, "Batch description handoff project", targetAgent)
+	setColumnHandoff(t, projectID, "in_review", handToAgent(targetAgent, "Process the saved description.")).Want(http.StatusOK)
+	issueID := dbfx.Issue(t, "Batch saved result handoff", testutil.Cols{
+		"project_id": projectID, "status": "in_progress", "assignee_type": "agent", "assignee_id": sourceAgent,
+	})
+	testutil.Call(t, testHandler.BatchUpdateIssues, workflowRequest(http.MethodPost, "/api/issues/batch", map[string]any{
+		"issue_ids": []string{issueID}, "updates": map[string]any{"status": "in_review", "description": "Batch updated description."},
+	})).Want(http.StatusOK)
+	_, kind, id := issueStatusAndAssignee(t, issueID)
+	if kind != "agent" || id != targetAgent || taskCountFor(t, issueID, targetAgent) != 1 || taskCountFor(t, issueID, sourceAgent) != 0 {
+		t.Fatalf("batch saved assignee = %s/%s; want target agent %s and one target-agent-only run", kind, id, targetAgent)
+	}
+}
+
+func TestDescriptionHandoffExplicitMemberOverride(t *testing.T) {
+	seedTestCatalog(t)
+	targetAgent := seededReadyAgentID(t)
+	projectID := deliveryProject(t, "Description explicit member project", targetAgent)
+	setColumnHandoff(t, projectID, "in_review", handToAgent(targetAgent, "Process the saved description.")).Want(http.StatusOK)
+	issueID := dbfx.Issue(t, "Explicit member assignment", testutil.Cols{"project_id": projectID, "status": "in_progress"})
+	updateIssueForTest(t, issueID, map[string]any{
+		"status": "in_review", "description": "Updated description for the assigned member.", "assignee_type": "member", "assignee_id": testUserID,
+	}).Want(http.StatusOK)
+	_, kind, id := issueStatusAndAssignee(t, issueID)
+	if kind != "member" || id != testUserID || taskCountFor(t, issueID, targetAgent) != 0 {
+		t.Fatalf("explicit member overridden: assignee=%s/%s", kind, id)
 	}
 }

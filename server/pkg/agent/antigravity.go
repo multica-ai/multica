@@ -190,6 +190,10 @@ type antigravityStreamEvent struct {
 // has to stay a literal match alongside the transport patterns below.
 const antigravityNetworkIssueError = "There was a network issue connecting to the server, please try again."
 
+// agy 1.4.6 may carry this historical/recovered stream error into a resumed
+// turn's result even when the current final response is DONE (#9528).
+const antigravityStreamInterruptedError = "The stream was interrupted. Please continue the task you were working on."
+
 // antigravityTransportErrorRe matches the causes Go's http client reports when
 // a round trip never produced a response: socket, DNS and TLS failures. These
 // are the strings that appear inside the `*url.Error` agy wraps as
@@ -217,7 +221,7 @@ func antigravityTrailingTransportError(providerError string) bool {
 	if trimmed == "" {
 		return false
 	}
-	if strings.EqualFold(trimmed, antigravityNetworkIssueError) {
+	if strings.EqualFold(trimmed, antigravityNetworkIssueError) || strings.EqualFold(trimmed, antigravityStreamInterruptedError) {
 		return true
 	}
 	return antigravityTransportErrorRe.MatchString(trimmed)
@@ -273,8 +277,13 @@ func antigravityResultStatus(status string) string {
 // provider-side rejection is a real failure), agy has to have handed back a
 // non-empty canonical response, and the latest agent_response step has to have
 // reached DONE — an ACTIVE step means the answer was still being written when
-// the connection went away.
-func antigravityCompletedDespiteTrailingNetworkError(providerError, response string, agentResponseDone bool) bool {
+// the connection went away. The stream-interrupted sentence also requires a
+// successful process exit, since a DONE step can precede a genuinely interrupted
+// tool call in the same turn.
+func antigravityCompletedDespiteTrailingNetworkError(providerError, response string, agentResponseDone, exitedSuccessfully bool) bool {
+	if strings.EqualFold(strings.TrimSpace(providerError), antigravityStreamInterruptedError) && !exitedSuccessfully {
+		return false
+	}
 	return antigravityTrailingTransportError(providerError) &&
 		strings.TrimSpace(response) != "" &&
 		agentResponseDone
@@ -497,7 +506,7 @@ func (b *antigravityBackend) Execute(ctx context.Context, prompt string, opts Ex
 			finalStatus = "aborted"
 			finalError = "execution cancelled"
 		} else if status := antigravityResultStatus(streamResultStatus); finalStatus == "completed" && status != "completed" {
-			if antigravityCompletedDespiteTrailingNetworkError(streamResultError, streamResponse, streamLatestAgentResponseDone) {
+			if antigravityCompletedDespiteTrailingNetworkError(streamResultError, streamResponse, streamLatestAgentResponseDone, waitErr == nil) {
 				// agy can emit a complete DONE response and only then fail a
 				// follow-up network operation. Preserve the finished answer instead
 				// of presenting that trailing transport error as a failed turn.

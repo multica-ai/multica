@@ -4,17 +4,19 @@ description: 워크스페이스마다 자체 호스팅 Forgejo, Gitea, GitLab �
 ---
 
 import { Callout } from "fumadocs-ui/components/callout";
+import { Step, Steps } from "fumadocs-ui/components/steps";
+import { Tab, Tabs } from "fumadocs-ui/components/tabs";
 
 <Callout type="warn">
-**자체 배포한 Multica에서만 사용할 수 있습니다.** 이 연동은 Multica를 **직접 배포해 운영할 때만** 제공되며 Multica Cloud에서는 사용할 수 없습니다. 여기서 "자체 호스팅"은 **Multica 자체를 배포하는 것**을 뜻합니다. 일반적으로 자체 네트워크의 Git 인스턴스에 접근하기 위해 사용합니다. 서버 운영자가 `MULTICA_VCS_INTEGRATION_ENABLED=true`로 기능을 켜고 `MULTICA_VCS_SECRET_KEY`도 설정해야 합니다. 그전에는 설정 → 코드에 이 행이 표시되지 않습니다.
+**자체 배포한 Multica에서만 사용할 수 있습니다.** 이 연동은 Multica를 직접 배포해 운영할 때만 제공되며 Multica Cloud에서는 사용할 수 없습니다. 자체 배포는 보통 Multica가 내부 네트워크의 Git 인스턴스에 접근하게 하려는 목적입니다. 서버에서 `MULTICA_VCS_INTEGRATION_ENABLED=true`를 켜고 `MULTICA_VCS_SECRET_KEY`를 설정해야 하며, 그전에는 **설정 → 코드**에 이 행이 표시되지 않습니다.
 </Callout>
 
-Multica는 워크스페이스별로 자체 호스팅 Git 코드 호스팅인 **Forgejo**, **Gitea**, **GitLab** 중 하나에 연결합니다. 연결하면 브랜치 이름이나 제목에 태스크 번호(예: `MUL-123`)가 포함되거나 본문의 종료 키워드 뒤에 태스크 번호(`Closes MUL-123`)가 있는 Pull Request(GitLab에서는 Merge Request)가 해당 [태스크](/issues)에 **자동으로 연결**되고 태스크 사이드바의 **Pull requests**에 표시됩니다. 태스크에 연결된 PR이 모두 merge되면 태스크가 워크스페이스가 정한 상태(기본값 완료)로 이동합니다. head commit의 CI는 카드에 check bar로 표시됩니다.
+Multica는 워크스페이스별로 자체 호스팅 Git 코드 호스팅인 Forgejo, Gitea, GitLab 중 하나에 연결합니다. 연결하면 브랜치 이름이나 제목에 태스크 번호(예: `MUL-123`)가 포함되거나 본문의 종료 키워드 뒤에 태스크 번호(`Closes MUL-123`)가 있는 Pull Request(GitLab에서는 Merge Request)가 해당 [태스크](/issues)에 자동으로 연결되고 태스크 사이드바의 **Pull requests**에 표시됩니다. 태스크에 연결된 PR이 모두 merge되면 태스크가 워크스페이스가 정한 상태(기본값 완료)로 이동합니다. head commit의 CI는 카드에 check bar로 표시됩니다.
 
-이 코드 호스팅은 GitHub와 동시에 사용할 수 있으며 워크스페이스 하나에서 원하는 대로 조합할 수 있습니다.
+이 코드 호스팅은 GitHub와 함께 사용할 수 있으며, 워크스페이스 하나에 여러 개를 연결할 수 있습니다.
 
 <Callout type="info">
-GitHub와 달리 이 코드 호스팅에는 "App" 모델이 없습니다. 워크스페이스마다 인스턴스 URL과 액세스 token을 저장하고 저장소 또는 조직에 Webhook을 등록합니다. Token과 Webhook secret은 모두 암호화되어 저장됩니다.
+GitHub와 달리 이 코드 호스팅에는 App 모델이 없습니다. 워크스페이스마다 인스턴스 URL과 액세스 token을 저장하고 저장소 또는 조직에 Webhook을 등록합니다. Token과 Webhook secret은 모두 암호화되어 저장됩니다.
 </Callout>
 
 ## 사전 조건(서버)
@@ -43,12 +45,23 @@ MULTICA_VCS_SECRET_KEY=<base64 32바이트 키>
 
 ## 워크스페이스 연결
 
-1. Git 코드 호스팅에서 저장소 읽기 권한이 있는 액세스 token을 만듭니다.
-   - **Forgejo / Gitea**: 설정 → 애플리케이션.
-   - **GitLab**: `read_api` 권한이 있는 개인(또는 그룹/프로젝트) 액세스 token.
-2. Multica에서 **설정 → 코드**를 열고 **셀프 호스팅 Git** 행에서 **연결**을 클릭합니다.
-3. **제공자**를 선택하고 인스턴스 URL(예: `https://forgejo.example.com`)과 액세스 token을 입력한 뒤 **연결**을 클릭합니다. Multica는 저장하기 전에 해당 token으로 인스턴스에 접근해 검증합니다.
-4. 연결 후 표시되는 **Webhook URL**과 **Webhook secret**을 복사합니다.
+<Steps>
+<Step>
+Git 코드 호스팅에서 저장소 읽기 권한이 있는 액세스 token을 만듭니다.
+
+- **Forgejo / Gitea**: 설정 → 애플리케이션.
+- **GitLab**: `read_api` 권한이 있는 개인(또는 그룹/프로젝트) 액세스 token.
+</Step>
+<Step>
+Multica에서 **설정 → 코드**를 열고 **셀프 호스팅 Git** 행에서 **연결**을 클릭합니다.
+</Step>
+<Step>
+**제공자**를 선택하고 인스턴스 URL(예: `https://forgejo.example.com`)과 액세스 token을 입력한 뒤 **연결**을 클릭합니다. Multica는 저장하기 전에 해당 token으로 인스턴스에 접근해 검증합니다.
+</Step>
+<Step>
+연결 후 표시되는 **Webhook URL**과 **Webhook secret**을 복사합니다.
+</Step>
+</Steps>
 
 <Callout type="warn">
 Webhook secret은 한 번만 표시됩니다. 페이지를 떠나기 전에 복사하세요. 같은 인스턴스에 다시 연결하면 token과 secret이 교체됩니다.
@@ -62,20 +75,29 @@ Webhook secret은 한 번만 표시됩니다. 페이지를 떠나기 전에 복�
 
 ## Webhook 등록
 
-저장소에서 설정합니다. 모든 저장소를 포함하려면 조직 또는 그룹에서 설정할 수도 있습니다.
+저장소에 등록합니다. 모든 저장소를 포함하려면 조직이나 그룹에 등록합니다.
 
-**Forgejo / Gitea** — 설정 → Webhook → Webhook 추가 → Forgejo/Gitea:
+<Tabs items={["Forgejo / Gitea", "GitLab"]}>
+<Tab value="Forgejo / Gitea" id="forgejo-gitea">
+
+설정 → Webhook → Webhook 추가 → Forgejo/Gitea:
 
 - **대상 URL**: 이전 단계의 Webhook URL.
 - **HTTP 메서드** `POST`, **콘텐츠 유형** `application/json`.
 - **secret**: Webhook secret(`X-Gitea-Signature` HMAC 검증에 사용).
 - **트리거 이벤트**: **Pull Request**를 선택하고 CI를 미러링하려면 **Commit Status**도 선택합니다.
 
-**GitLab** — 설정 → Webhooks:
+</Tab>
+<Tab value="GitLab" id="gitlab">
+
+설정 → Webhooks:
 
 - **URL**: Webhook URL.
 - **Secret token**: Webhook secret(`X-Gitlab-Token`으로 전송되고 문자열 그대로 비교).
 - **트리거**: **Merge request events**를 활성화하고 CI를 미러링하려면 **Pipeline events**도 활성화합니다.
+
+</Tab>
+</Tabs>
 
 Multica는 저장된 secret으로 모든 delivery를 검증하므로 일치하는 secret이 없는 Webhook은 거부됩니다.
 

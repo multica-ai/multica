@@ -4,8 +4,13 @@ description: 接続、実行、リアルタイム更新、メール、セルフ�
 ---
 
 import { Callout } from "fumadocs-ui/components/callout";
+import { Tab, Tabs } from "fumadocs-ui/components/tabs";
+import { Accordion, Accordions } from "fumadocs-ui/components/accordion";
 
-まず、問題がどの層で起きているかを切り分けます。Multica サービス、デーモン、ランタイム、AI コーディングツールのどれかです。多くの場合、次のコマンドだけで最初の有効なエラーが見つかります:
+まず、問題がどの層で起きているかを切り分けます。Multica サービス、デーモン、ランタイム、AI コーディングツールのどれかです。多くの場合、次のコマンドだけで最初の有効なエラーが見つかります。
+
+<Tabs items={["すべてのインストール方法", "セルフホストサービス"]}>
+<Tab value="すべてのインストール方法">
 
 ```bash
 multica version
@@ -14,18 +19,25 @@ multica daemon status --output json
 multica daemon logs --lines 100
 ```
 
-セルフホストインスタンスでは、サービスを直接確認することもできます:
+</Tab>
+<Tab value="セルフホストサービス">
 
 ```bash
 curl -i https://api.example.com/health
 curl -i https://api.example.com/readyz
 ```
 
+</Tab>
+</Tabs>
+
 `/health` は API プロセスが応答していることだけを示します。`/readyz` はデータベースと migration も確認します。問題を報告するときは、エラー、関連ログ、CLI バージョン、OS を含め、トークンやメールアドレスなどの機微情報は提出前に取り除いてください。
 
-## デーモンが接続できない
+## 接続とログイン
 
-まず次を実行します:
+<Accordions>
+<Accordion title="デーモンが接続できない" id="daemon-fails-to-connect" value="daemon-fails-to-connect">
+
+まず次を実行します。
 
 ```bash
 multica auth status
@@ -41,33 +53,80 @@ multica daemon logs --lines 100
 - 現在のアカウントが対象ワークスペースのメンバーではなくなっている。
 - サポートされている AI コーディングツールがこのマシンに 1 つもインストールされておらず、デーモンが起動できない。
 
-再ログインしてデーモンを再起動します:
+再ログインしてデーモンを再起動します。
 
 ```bash
 multica login
 multica daemon restart
 ```
 
-セルフホストのデプロイでは、さらに**実行用コンピューター**から API の `/health` をリクエストしてください。サーバー本体でのテストでは、実行用コンピューター側の DNS、TLS、ファイアウォールの問題は見えません。アドレスを変更する場合は `multica setup self-host` を再実行するか、現在のプロファイルの `server_url` を確認します:
+セルフホストのデプロイでは、さらに**実行用コンピューター**から API の `/health` をリクエストしてください。サーバー本体でのテストでは、実行用コンピューター側の DNS、TLS、ファイアウォールの問題は見えません。アドレスを変更する場合は `multica setup self-host` を再実行するか、現在のプロファイルの `server_url` を確認します。
 
 ```bash
 multica config show
 ```
 
-## タスクの実行が始まらない
+</Accordion>
+<Accordion title={<><code>multica setup</code> がサーバーに到達できないと報告する</>} id="multica-setup-reports-the-server-is-not-reachable" value="multica-setup-reports-the-server-is-not-reachable">
+
+CLI の到達確認は `<server-url>/health` に GET を送り、200 を要求します。backend はこのパスを提供します。現在の web リリースは `/health` を backend へ転送しますが、古いリリースは転送しません。すべてのトラフィックを古い frontend へ転送するリバースプロキシでは 404 が返り、CLI は稼働中のサーバーを到達不能と判断します。
+
+プロキシで `/health` を backend（ポート 8080）へ明示的に転送すれば、すべてのリリースで動作します。[セルフホストクイックスタート](/self-host-quickstart#remote-access)の 2 つの Caddy 例に含まれています。確認方法:
+
+```bash
+curl -fsS <server-url>/health
+```
+
+</Accordion>
+<Accordion title={<><code>multica login</code> が TLS ハンドシェイクのタイムアウトで失敗する</>} id="multica-login-fails-with-a-tls-handshake-timeout" value="multica-login-fails-with-a-tls-handshake-timeout">
+
+`multica login` でブラウザが開き、Web 側のサインインは完了するのに、CLI は「Sign-in did not complete」または「TLS handshake timed out」で失敗します。`multica --debug login` では `POST /api/tokens` に `net/http: TLS handshake timeout` と表示され、同じマシンの `curl.exe -I https://api.multica.ai` やブラウザは問題なく接続できます。
+
+TCP 接続は確立されますが、TLS ハンドシェイクが完了しません。Multica CLI とデーモンを含む Go クライアントは、既定で TLS ClientHello にポスト量子鍵交換を含めるため、ClientHello が約 1.5 KB になり 2 つのパケットに分割されます。一部のセキュリティソフト、VPN、ルーター、ファイアウォールはこのようなハンドシェイクを破棄します。curl の ClientHello はずっと小さいため通過します。
+
+ポスト量子鍵交換を無効にして再試行し、原因を確認します。
+
+<Tabs groupId="os" persist items={["macOS / Linux", "Windows"]}>
+<Tab value="macOS / Linux">
+
+```bash
+GODEBUG=tlsmlkem=0 multica --debug login
+```
+
+</Tab>
+<Tab value="Windows">
+
+```powershell
+$env:GODEBUG = 'tlsmlkem=0'
+multica --debug login
+```
+
+</Tab>
+</Tabs>
+
+これで成功する場合は、CLI とデーモンを実行するユーザーに対して `GODEBUG=tlsmlkem=0` を恒久的に設定し（Windows では `[Environment]::SetEnvironmentVariable('GODEBUG', 'tlsmlkem=0', 'User')` を実行して新しいターミナルを開く）、デーモンまたはデスクトップアプリを再起動してください。`MULTICA_HTTP_TIMEOUT` を大きくしても効果はありません。ハンドシェイクはこの設定の対象外です。根本的な解決はネットワーク側で行います。分割された TLS ハンドシェイクを破棄する機器やソフトウェアを更新または再設定してください。
+
+</Accordion>
+</Accordions>
+
+## 実行と AI コーディングツール
+
+<Accordions>
+<Accordion title="タスクの実行が始まらない" id="issue-does-not-start-executing" value="issue-does-not-start-executing">
 
 タスクの**実行ログ**を開き、まず実行の現在のステータスと待機理由を確認します。
 
-### `queued` ステータス
+<Tabs items={["queued", "waiting_local_directory"]}>
+<Tab value="queued">
 
-`queued` は、実行がまだランタイムに引き受けられるのを待っている状態です。順に確認します:
+`queued` は、実行がまだランタイムに引き受けられるのを待っている状態です。順に確認します。
 
 1. エージェントに紐付いたランタイムはオンラインか。
 2. ランタイムは、そのエージェントに設定された AI コーディングツールを検出しているか。
 3. エージェントに利用可能な同時実行枠が残っているか。
 4. デーモンに全体の実行キャパシティが残っているか。
 
-エージェントはデフォルトで最大 6 件、1 つのデーモンはデフォルトで最大 20 件の実行を同時に処理します。上限に達すると、新しい実行は進行中のものが終わるまでキューに残ります。ランタイムがオフラインの間も実行はキューに残り続け、そのランタイムが再接続猶予を超えてハートビートを停止し、かつ実行自体も同じ時間待った場合にのみ失敗します。取り込み中のランタイムの後ろに長い待ち行列ができても待ち時間を理由に失効することはなく、すでにオフラインのマシンに割り当てた場合も復帰させるための猶予がまるまる 1 回分残ります。
+エージェントはデフォルトで最大 6 件、1 つのデーモンはデフォルトで最大 20 件の実行を同時に処理します。上限に達すると、新しい実行は進行中のものが終わるまでキューに残ります。ランタイムがオフラインの間も実行はキューに残り続け、そのランタイムが再接続猶予を超えてハートビートを停止し、かつ実行自体も同じ時間待った場合にのみ失敗します。そのため、取り込み中のランタイムの後ろに長い待ち行列ができても待ち時間を理由に失効することはなく、すでにオフラインのマシンに割り当てた場合も復帰させるための猶予がまるまる 1 回分残ります。
 
 ```bash
 multica daemon status --output json
@@ -77,7 +136,8 @@ multica issue runs <issue-id>
 
 ランタイム一覧に期待するツールが表示されない場合は、まず同じシステムアカウントと `PATH` でツールが実行でき、ログイン済みであることを確認してから、`multica daemon restart` を実行してください。
 
-### `waiting_local_directory` ステータス
+</Tab>
+<Tab value="waiting_local_directory">
 
 これは、進行中の別の実行が同じローカルディレクトリを使っていることを意味します。2 つのエージェントが同じファイルを同時に変更しないよう、Multica はディレクトリロックの解放を待ちます。
 
@@ -85,9 +145,13 @@ multica issue runs <issue-id>
 
 そうでなければ、通常は前の実行が終わるのを待つだけで十分です。前の実行が固まっている場合は、その実行ログから停止するか、現在のエージェントに別のローカルディレクトリを選んでください。このディレクトリの排他はデーモンがメモリ内で管理しており、ディスクにロックファイルは書き込まれません。ロック状態が異常だと疑われる場合は `multica daemon restart` で解放されます。手動で削除すべきファイルはありません。
 
-## AI コーディングツールが起動しない
+</Tab>
+</Tabs>
 
-デーモンがオンラインでも、ツール自体が使えるとは限りません。その実行の詳細記録を開き、次を重点的に確認します:
+</Accordion>
+<Accordion title="AI コーディングツールが起動しない" id="ai-coding-tool-fails-to-start" value="ai-coding-tool-fails-to-start">
+
+デーモンがオンラインでも、ツール自体が使えるとは限りません。その実行の詳細記録を開き、次を重点的に確認します。
 
 - ツールのログインが完了しているか。
 - API key、クォータ、モデルの権限が利用可能か。
@@ -97,7 +161,8 @@ multica issue runs <issue-id>
 
 まず実行用コンピューターのターミナルで、同じツールを直接実行してください。ツール単体でも起動できない場合は、先にツールのログインや設定を修復してから、実行ログから実行を再試行します。
 
-## CLI のアップグレード後に macOS で実行が止まる
+</Accordion>
+<Accordion title="CLI のアップグレード後に macOS で実行が止まる" id="runs-hang-on-macos-after-a-cli-upgrade" value="runs-hang-on-macos-after-a-cli-upgrade">
 
 Homebrew でインストールした `multica` CLI が `brew upgrade`、`multica update`、**ランタイム**ページの**更新**、またはデーモンの自動更新でアップグレードされた後、`~/Desktop`、`~/Documents`、`~/Downloads`、iCloud Drive などの保護されたフォルダーを読み取る実行が進まなくなることがあります。エージェントのプロセスは CPU を使わず、実行は完了も失敗もしません。
 
@@ -111,61 +176,39 @@ Homebrew でインストールした `multica` CLI が `brew upgrade`、`multica
 
 CLI をアップグレードするたびにこの手順を繰り返してください。自動更新がデフォルトで有効なのは Multica Cloud に接続したデーモンだけです。`--no-auto-update` を付けてデーモンを起動すると、手動で実行したときだけアップグレードされます。[Multica Desktop](/desktop-app) に同梱の CLI は Developer ID で署名されているため、アップグレード後も許可が維持されます。
 
-## リアルタイム更新が届かない
+</Accordion>
+</Accordions>
+
+## Web アプリとセルフホストサービス
+
+<Accordions>
+<Accordion title="リアルタイム更新が届かない" id="realtime-updates-stop-working" value="realtime-updates-stop-working">
 
 実行は進むのに、コメントやステータスがリアルタイムに反映されない場合は、たいてい WebSocket がつながっていません。
 
-ブラウザ開発者ツールの **Network → WS** で `/ws` 接続を確認します。セルフホストのデプロイでは、次を重点的に確認します:
+ブラウザ開発者ツールの **Network → WS** で `/ws` 接続を確認します。セルフホストのデプロイでは、次を重点的に確認します。
 
 - `FRONTEND_ORIGIN` が、ブラウザで実際に開いているアドレスと一致しているか。
 - HTTPS のページが `wss://` で接続しているか。
 - リバースプロキシが WebSocket の Upgrade リクエストを転送しているか。
 - ブラウザのログインが期限切れになっていないか。
 
-`curl` で `/ws` にアクセスして HTTP 400 が返るのは正常な動作です: このエンドポイントは workspace を指定するクエリパラメータを要求し、それらがないハンドシェイクは WebSocket アップグレードの前に拒否されます。したがって backend ログに 400/401 の記録があっても、通常の HTTP ルーティングが backend まで届いたことしか証明しません — プロキシが WebSocket `Upgrade` ヘッダーを保持していることの証明にはなりません。実際の接続を確認するには、ブラウザの DevTools → Network → WS タブ（または WebSocket 対応クライアント）で `101` ハンドシェイクが成立しているかを見てください。
+`curl` で `/ws` にアクセスして HTTP 400 が返るのは正常な動作です。このエンドポイントは workspace を指定するクエリパラメータを要求し、それらがないハンドシェイクは WebSocket アップグレードの前に拒否されます。したがって backend ログに 400/401 の記録があっても、それが証明するのは通常の HTTP ルーティングが backend まで届いたことだけで、プロキシが WebSocket `Upgrade` ヘッダーを保持していることの証明にはなりません。実際の接続を確認するには、ブラウザの DevTools → Network → WS タブ（または WebSocket 対応クライアント）で `101` ハンドシェイクが成立しているかを見てください。
 
-セルフホストの注意: デーモンの長時間接続は `/api/daemon/ws` に向かいます（`/ws` ではありません）。同じように backend へ転送してください。ハンドシェイクが失敗するとデーモンは通知なくポーリングへフォールバックし、backend ログでこのパスに `status=400` が繰り返し現れるのがその兆候です。
+セルフホストでは、デーモンの長時間接続が `/api/daemon/ws` に向かう点（`/ws` ではありません）にも注意してください。同じように backend へ転送する必要があります。ここでハンドシェイクが失敗するとデーモンは通知なくポーリングへフォールバックし、backend ログでこのパスに `status=400` が繰り返し現れます。
 
-コンテナは作成時にしか `.env` を読み込みません。変更後は再作成してください:
+コンテナは作成時にしか `.env` を読み込みません。変更後は再作成してください。
 
 ```bash
 docker compose -f docker-compose.selfhost.yml up -d
 ```
 
-完全なリバースプロキシの例は[セルフホストクイックスタート](/self-host-quickstart#3-アクセス方法を選ぶ)を参照してください。
+完全なリバースプロキシの例は[セルフホストクイックスタート](/self-host-quickstart#remote-access)を参照してください。
 
-## `multica setup` がサーバーに到達できないと報告する
+</Accordion>
+<Accordion title="認証コードや招待メールが届かない" id="verification-code-and-invitation-emails-not-delivered" value="verification-code-and-invitation-emails-not-delivered">
 
-CLI の到達確認は `<server-url>/health` に GET を送り、200 を要求します。backend はこのパスを提供します。現在の web リリースは `/health` を backend へ転送しますが、古いリリースはそうではないため、すべてのトラフィックを古い frontend へ転送するリバースプロキシでは 404 が返り、CLI は稼働中のサーバーを到達不能と誤判定します。
-
-プロキシで `/health` を backend（ポート 8080）へ明示的に転送すれば、すべてのリリースで動作します。[セルフホストクイックスタート](/self-host-quickstart#3-アクセス方法を選ぶ)の 2 つの Caddy 例に含まれています。確認方法:
-
-```bash
-curl -fsS <server-url>/health
-```
-
-## `multica login` が TLS ハンドシェイクのタイムアウトで失敗する
-
-`multica login` でブラウザが開き、Web 側のサインインは完了するのに、CLI は「Sign-in did not complete」または「TLS handshake timed out」で失敗します。`multica --debug login` では `POST /api/tokens` に `net/http: TLS handshake timeout` と表示され、同じマシンの `curl.exe -I https://api.multica.ai` やブラウザは問題なく接続できます。
-
-TCP 接続は確立されますが、TLS ハンドシェイクが完了しません。Multica CLI とデーモンを含む Go クライアントは、既定で TLS ClientHello にポスト量子鍵交換を含めるため、ClientHello が約 1.5 KB になり 2 つのパケットに分割されます。一部のセキュリティソフト、VPN、ルーター、ファイアウォールはこのようなハンドシェイクを破棄します。curl の ClientHello はずっと小さいため通過します。
-
-ポスト量子鍵交換を無効にして再試行し、原因を確認します:
-
-```powershell
-$env:GODEBUG = 'tlsmlkem=0'
-multica --debug login
-```
-
-```bash
-GODEBUG=tlsmlkem=0 multica --debug login
-```
-
-これで成功する場合は、CLI とデーモンを実行するユーザーに対して `GODEBUG=tlsmlkem=0` を恒久的に設定し（Windows では `[Environment]::SetEnvironmentVariable('GODEBUG', 'tlsmlkem=0', 'User')` を実行して新しいターミナルを開く）、デーモンまたはデスクトップアプリを再起動してください。`MULTICA_HTTP_TIMEOUT` を大きくしても効果はありません。ハンドシェイクはこの設定の対象外です。根本的な解決はネットワーク側で行います。分割された TLS ハンドシェイクを破棄する機器やソフトウェアを更新または再設定してください。
-
-## 認証コードや招待メールが届かない
-
-まず backend の起動ログを確認します。ログには、現在使っているのが `SMTP relay`、`Resend API`、`DEV mode` のどれかが表示されます:
+まず backend の起動ログを確認します。ログには、現在使っているのが `SMTP relay`、`Resend API`、`DEV mode` のどれかが表示されます。
 
 ```bash
 docker compose -f docker-compose.selfhost.yml logs backend \
@@ -182,7 +225,8 @@ docker compose -f docker-compose.selfhost.yml logs backend \
 プロダクションではログ内の認証コードに依存せず、固定のローカルテスト認証コードも有効にしないでください。
 </Callout>
 
-## 添付ファイルのアップロードやダウンロードが失敗する
+</Accordion>
+<Accordion title="添付ファイルのアップロードやダウンロードが失敗する" id="attachment-uploads-or-downloads-fail" value="attachment-uploads-or-downloads-fail">
 
 まず backend ログとレスポンスのステータスコードを確認します。よくある原因:
 
@@ -193,9 +237,10 @@ docker compose -f docker-compose.selfhost.yml logs backend \
 
 Docker Compose では、デフォルトの `backend_uploads` volume がローカル添付ファイルを保存します。コンテナの再作成では削除されませんが、`docker compose down -v` はデータボリュームを削除します。S3 関連の設定は[環境変数](/environment-variables#添付ファイルストレージ)を参照してください。
 
-## 使用量（Usage）が 0 のまま
+</Accordion>
+<Accordion title="使用量（Usage）が 0 のまま" id="usage-shows-zero" value="usage-shows-zero">
 
-Usage ページは 1 時間ごとのロールアップを読み取り、各実行の生の使用量を直接読みません。まず生データとロールアップテーブルを確認します:
+Usage ページは 1 時間ごとのロールアップを読み取り、各実行の生の使用量を直接読みません。まず生データとロールアップテーブルを確認します。
 
 ```sql
 SELECT count(*) FROM task_usage;
@@ -208,7 +253,7 @@ ORDER BY plan_time DESC
 LIMIT 20;
 ```
 
-`task_usage` にデータがあり、ロールアップテーブルが空で、スケジューラーの記録が失敗を示している場合は、まず migration がすべて適用されていることを確認してください。migration 103 に拒否されてアップグレードできない場合は、次のセクションを参照してください。SQL の問題とスケジューリングの問題を切り分けるため、手動でロールアップを 1 回実行することもできます:
+`task_usage` にデータがあり、ロールアップテーブルが空で、スケジューラーの記録が失敗を示している場合は、まず migration がすべて適用されていることを確認してください。migration 103 に拒否されてアップグレードできない場合は、[Migration 103 がアップグレードを妨げる](#migration-103-blocks-an-upgrade)を参照してください。SQL の問題とスケジューリングの問題を切り分けるため、手動でロールアップを 1 回実行することもできます。
 
 ```sql
 SELECT rollup_task_usage_hourly();
@@ -216,11 +261,12 @@ SELECT rollup_task_usage_hourly();
 
 手動実行後に数値が正しければ、ロールアップ関数は動作しており、問題は backend の定期スケジューリング側にあります。手動 SQL は 1 回分のロールアップを補うだけで、スケジューリングを復旧させません。1 時間ごとのロールアップは backend 内蔵のスケジューラーが実行するため、pg_cron を自分で設定する必要はありません。
 
-## Migration 103 の失敗
+</Accordion>
+<Accordion title="Migration 103 がアップグレードを妨げる" id="migration-103-blocks-an-upgrade" value="migration-103-blocks-an-upgrade">
 
 通常のアップグレードでは、103 のために何かをする必要はありません。`migrate up` は適用前に過去の使用量データを自動でバックフィルします。空のデータベースはそのまま通過し、履歴のあるインスタンスは月ごとに補完されてから続行します。
 
-それでも backend の起動が `refusing to drop legacy daily rollups` で失敗する場合は、自動バックフィルが完了していません（途中で失敗した、または `migrate up` を通さず SQL を直接適用した、など）。その場合はバックフィルコマンドを手動で実行し、完了後に backend を再起動します:
+それでも backend の起動が `refusing to drop legacy daily rollups` で失敗する場合は、自動バックフィルが完了していません（途中で失敗した、または `migrate up` を通さず SQL を直接適用した、など）。その場合はバックフィルコマンドを手動で実行し、完了後に backend を再起動します。
 
 ```bash
 cd server
@@ -229,16 +275,32 @@ DATABASE_URL='postgres://...' go run ./cmd/backfill_task_usage_hourly
 
 よく使うフラグ: `--dry-run` は書き込まずプレビューのみ、`--sleep-between-slices` はスライスの間に間隔を挟み、負荷の高いインスタンスへの読み取り圧力を下げます。コマンドは月単位のスライスで動作し、冪等なので、中断してもそのまま再実行できます。advisory lock を保持してサーバー側の定期ロールアップと相互排他になるため、重複や不整合なロールアップデータは生じません。完了後は backend を再起動し、`/readyz` で `migrations` が `ok` になっていることを確認してください。
 
-## ポートが使用中
+</Accordion>
+<Accordion title="ポートが使用中" id="port-already-in-use" value="port-already-in-use">
 
-ローカルでよく使うポートは、API の `8080`、Web の `3000`、デーモンのヘルスチェックポートです。まず占有しているプロセスを特定します:
+ローカルでよく使うポートは、API の `8080`、Web の `3000`、デーモンのヘルスチェックポートです。まず占有しているプロセスを特定します。
+
+<Tabs groupId="os" persist items={["macOS / Linux", "Windows"]}>
+<Tab value="macOS / Linux">
 
 ```bash
-lsof -nP -iTCP:8080 -sTCP:LISTEN   # macOS / Linux
-netstat -ano | findstr :8080       # Windows
+lsof -nP -iTCP:8080 -sTCP:LISTEN
 ```
 
+</Tab>
+<Tab value="Windows">
+
+```bash
+netstat -ano | findstr :8080
+```
+
+</Tab>
+</Tabs>
+
 それが別の Multica チェックアウトであれば、まずそのディレクトリで `make stop` を実行してください。そうでなければ、占有しているプログラムを通常の方法で停止するか、現在のサービスのポートを変更します。公開ポートの 80/443 は、Caddy や Nginx などのリバースプロキシがリッスンします。
+
+</Accordion>
+</Accordions>
 
 ## ログの場所
 
@@ -252,9 +314,9 @@ netstat -ano | findstr :8080       # Windows
 | Docker backend | `docker compose -f docker-compose.selfhost.yml logs -f backend` |
 | ブラウザ | 開発者ツールの Console と Network |
 
-どのファイルが現在有効なログかは、デーモンを起動したプロファイルによって決まります。以前のデーモンが残した古いログもそのまま読めてしまうため、誤ったファイルを調べてしまいがちです。当て推量でファイルを開かないでください: `multica daemon logs` は内容を流す前に、解決した絶対パスを表示します。名前付きプロファイルのログを読むときは `--profile <name>` を付けます。
+どのファイルが現在有効なログかは、デーモンを起動したプロファイルによって決まります。以前のデーモンが残した古いログもそのまま読めてしまうため、誤ったファイルを調べてしまいがちです。当て推量でファイルを開かないでください。`multica daemon logs` は内容を流す前に、解決した絶対パスを表示します。名前付きプロファイルのログを読むときは `--profile <name>` を付けます。
 
-デーモンの起動過程を直接観察したい場合は、フォアグラウンドで実行します:
+デーモンの起動過程を直接観察したい場合は、フォアグラウンドで実行します。
 
 ```bash
 multica daemon stop

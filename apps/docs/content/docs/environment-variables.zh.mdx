@@ -3,11 +3,12 @@ title: 环境变量
 description: 自托管 Multica 常用的服务端、存储、集成和运行时配置。
 ---
 
+import { Accordion, Accordions } from "fumadocs-ui/components/accordion";
 import { Callout } from "fumadocs-ui/components/callout";
 
 Multica 在进程启动时读取环境变量。修改后通常需要重启对应的 API、Web 或守护进程。Docker Compose 的 `docker compose restart` 不会重新读取 `.env`，要用 `up -d` 重建容器才能生效。
 
-本页只列面向部署者的配置；测试变量和内部运行变量不在这里展开。本页是分组参考；完整部署步骤见[自托管快速上手](/self-host-quickstart)。
+本页按分组列出面向部署者的配置，测试变量和内部运行变量不在这里展开。完整部署步骤见[自托管快速上手](/self-host-quickstart)。
 
 ## 生产环境最小配置
 
@@ -67,7 +68,7 @@ MULTICA_PUBLIC_URL=https://api.multica.example.com
 `MULTICA_DAEMON_SERVER_URL` 会由无需认证的 `/api/config` 接口返回，客户端可以读取。请将它视为公开配置，切勿填入凭据、令牌或其他密钥。
 </Callout>
 
-前端和 API 使用不同 host、且浏览器直接访问 API 域时，必须设置 `COOKIE_DOMAIN`，否则浏览器读不到 CSRF cookie——所有写请求返回 `403 CSRF validation failed`，而读请求一切正常。取值用能同时覆盖两个 host 的最窄父域（`.agent.example.com` 优于 `.example.com`）。它会把登录会话 cookie 扩散到该域下的所有 host，只有这些 host 都由同一可信主体运维时才可用。修改后需要在两个 host 上清除旧 cookie 并重新登录。若采用[自托管快速上手](/self-host-quickstart#3-选择访问方式)的同源配方（浏览器只访问 app 域），保持为空即可。不要填写 IP 地址，浏览器会忽略带 IP Domain 的 cookie。
+前端和 API 使用不同 host、且浏览器直接访问 API 域时，必须设置 `COOKIE_DOMAIN`，否则浏览器读不到 CSRF cookie——所有写请求返回 `403 CSRF validation failed`，而读请求一切正常。取值用能同时覆盖两个 host 的最窄父域（`.agent.example.com` 优于 `.example.com`）。它会把登录会话 cookie 扩散到该域下的所有 host，只有这些 host 都由同一可信主体运维时才可用。修改后需要在两个 host 上清除旧 cookie 并重新登录。若采用[自托管快速上手](/self-host-quickstart#remote-access)的同源配方（浏览器只访问 app 域），保持为空即可。不要填写 IP 地址，浏览器会忽略带 IP Domain 的 cookie。
 
 <Callout type="warning">
 自托管部署需要设置 `FRONTEND_ORIGIN`。缺少它时，邀请链接、cookie 安全属性和 WebSocket origin 校验都可能与实际域名不一致。
@@ -209,7 +210,7 @@ MULTICA_PUBLIC_URL=https://api.multica.example.com
 | `MULTICA_LLM_MAX_RETRIES` | `2` | 单次调用的重试上限；`0` 表示禁用重试，`1`–`5` 表示最多重试 N 次 |
 | `MULTICA_LLM_DISABLE_THINKING` | `false` | 在每个请求中附带 `chat_template_kwargs: {"enable_thinking": false}`，供支持该字段的网关关闭模型思考 |
 
-`MULTICA_LLM_MAX_RETRIES` 是重试策略的唯一配置源。不设置时使用默认的 2 次；设为 `0` 表示每次调用只发一个请求；设为 1–5 表示最多重试这么多次。它是上限而不是配额：只有可重试的失败才会消耗它，请求成功或调用方自身的超时都会让调用提前结束。其它取值（负数、非数字、大于 5）会让服务启动失败，而不是被静默纠正。上限是一个延迟预算：退避从 0.5s 开始翻倍，上限 8s，更大的预算会超出调用方自身的超时，把可重试的失败变成超时失败。重试覆盖连接失败以及 HTTP 408、409、429 和 5xx；其余 4xx 直接返回。服务启动时会以 `llm retry policy` 打印生效策略，其中不包含任何凭据。
+`MULTICA_LLM_MAX_RETRIES` 是重试策略的唯一配置源。不设置时使用默认的 2 次；设为 `0` 表示每次调用只发一个请求；设为 1–5 表示最多重试这么多次。它是上限而不是配额：只有可重试的失败才会消耗它，请求成功或调用方自身的超时都会让调用提前结束。其它取值（负数、非数字、大于 5）会让服务启动失败，不会被静默纠正。上限是一个延迟预算：退避从 0.5s 开始翻倍，上限 8s，更大的预算会超出调用方自身的超时，把可重试的失败变成超时失败。重试覆盖连接失败以及 HTTP 408、409、429 和 5xx；其余 4xx 直接返回。服务启动时会以 `llm retry policy` 打印生效策略，其中不包含任何凭据。
 
 `MULTICA_LLM_DISABLE_THINKING` 面向"模型会先跑一段推理（thinking）并吃掉辅助调用延迟预算"的网关。设为 `true`（或 `1`）时，服务端会在每个请求体中附带 `chat_template_kwargs: {"enable_thinking": false}`；支持透传该字段的网关（vLLM/sglang 类部署、部分 GLM/Qwen 系的 LiteLLM 路由）会因此跳过思考阶段。标准 OpenAI 端点会拒绝未知的请求体字段，所以仅在上游接受时启用。GPT-5.6 系模型和 GPT-6 Luna 在后续提问建议请求中已由服务端附带 `reasoning_effort: none`。会话自动命名不发送推理字段；只有当所配置的上游接受 `chat_template_kwargs` 时，此项才会影响它。可接受的取值为 `true`/`false` 和 `1`/`0`（不区分大小写）；其它取值会让服务启动失败。启动日志会在重试策略旁打印生效状态。
 
@@ -244,30 +245,115 @@ API key 与 base URL 都为空时，这一层关闭，不会发出任何上游�
 | `MULTICA_CODEX_SEMANTIC_INACTIVITY_TIMEOUT` | 同 `MULTICA_AGENT_IDLE_WATCHDOG` | Codex 语义静默阈值。Codex 自己的计时器看不到工具是否在执行，因此跟随 idle / tool 预算中较大的那个，而不再单独保留一个更短的上限 |
 | `MULTICA_CODEX_FIRST_TURN_TIMEOUT` | `0` | 显式覆盖 Codex 首轮无进展上限；`0` 保持默认值。实际首轮等待仍受 `MULTICA_CODEX_SEMANTIC_INACTIVITY_TIMEOUT` 和总执行超时限制——需将 `MULTICA_CODEX_SEMANTIC_INACTIVITY_TIMEOUT` 设为严格大于此值（并留出余量），否则等待会被截断至该值，且会跳过模型目录启动重试。设为相等还不够：语义计时器先启动，两者相等时仍可能丢失该重试 |
 | `MULTICA_CODEX_HANDSHAKE_TIMEOUT` | `30s`；`thread/start`、`thread/resume`：`60s` | Codex app-server 启动握手上限；显式设置后会统一覆盖两类预算 |
+| `MULTICA_CODEX_MEMORY` | 关闭 | 设为 `1`、`true`、`yes` 或 `on` 时，在守护进程管理的 Codex 运行中保留 Codex 原生记忆；默认按运行关闭，见 [Codex 原生记忆与子智能体](/daemon-runtimes#codex-memory) |
+| `MULTICA_CODEX_MULTI_AGENT` | 关闭 | 取值同上，保留 Codex 原生子智能体。父线程结束时运行即判为结束，子智能体未交回的结果会丢失 |
 | `MULTICA_CODEX_TURN_INTERRUPT_TIMEOUT` | `2s` | 任务取消后等待 Codex app-server 确认 `turn/interrupt` 并发出 `turn/completed` 的宽限期，以便在强制清理进程前保留最终 token 用量。主机异常缓慢时，可根据 daemon 日志记录的中断延迟调整 |
 | `MULTICA_DAEMON_AUTO_UPDATE` | Cloud `true`；自托管 `false` | 是否自动检查并更新 CLI |
 | `MULTICA_DAEMON_AUTO_UPDATE_INTERVAL` | `6h` | 检查更新的间隔 |
 | `MULTICA_DAEMON_AUTO_RELOAD` | `true` | 是否在 `multica` 二进制被带外替换（`brew upgrade`、重新下载、本地构建）后重启到新二进制。与 `MULTICA_DAEMON_AUTO_UPDATE` 相互独立 |
 | `MULTICA_WORKSPACES_ROOT` | `~/multica_workspaces` | 执行工作目录的根目录 |
 | `MULTICA_AGENT_TEMP_BASE` | `/tmp`（Linux/macOS） | 仅适用于 Linux/macOS。每次运行的私有临时目录的父目录；必须是现有、可写的绝对路径，无效值会使运行启动失败，不会回退到 `/tmp`。请选择较短的路径——子工具可能会在其中绑定 AF_UNIX socket；Linux 的 `sun_path` 上限为 108 字节，macOS 为 104 字节 |
-| `MULTICA_KEEP_ENV_AFTER_TASK` | `false` | 保留运行目录用于调试 |
 
-守护进程注入智能体 task 的内部上下文见 [Task 运行时环境](/daemon-runtimes#task-运行时环境)。
+守护进程注入智能体 task 的内部上下文见 [Task 运行时环境](/daemon-runtimes#task-运行时环境)。`MULTICA_REPO_CHECKOUT_MODE` 也属于这类变量：守护进程只在 Linux 和 Windows 的 Codex 运行中把它设为 `isolated`，不需要也无法手动配置。守护进程自身环境里的 `MULTICA_*` 变量不会传进运行。
 
-各 AI 编程工具可以使用 `MULTICA_<PROVIDER>_PATH` 覆盖命令路径；支持模型覆盖的工具还可以使用 `MULTICA_<PROVIDER>_MODEL`。QwenPaw 和 MiniMax Code 没有模型变量，因为 Multica 不会向它们传模型；MiniMax Code 的路径变量是 `MULTICA_MCODE_PATH`。详见 [AI 编程工具对比](/providers#模型来源)。DeepSeek Harness 支持 `MULTICA_DSH_PATH` 和 `MULTICA_DSH_MODEL`（取值为 dsh 模型目录中的模型 id，例如 `deepseek-official/deepseek-chat`）。 DeepSeek Harness 另外支持 `MULTICA_DSH_PROFILE_BUNDLE`：当 `multica` profile 缺失时，用它指定要安装的 bundle，多个候选用逗号分隔、按序尝试，每项可以是 npm 包名、目录或打包好的 tarball。该变量默认不设置；Multica 驱动的 `--stdio` 协议正是由这个 profile 提供，所以不设置时不会改动 DSH 的安装，守护进程会报告缺少 profile，而不是注册一个不可用的运行时。Multica 自己的桥接还没有发布到公共 npm registry，如何选取值见[安装智能体运行时](/install-agent-runtime)；这里填的东西会在没有二次确认的情况下装进每一台守护进程宿主的 DSH 家目录，请当作供应链决策来对待。`MULTICA_DSH_PROFILE_BUNDLE` 开启的安装被刻意限制了范围：每个守护进程生命周期最多执行一次，只在探测确认 profile 确实缺失时执行；失败时会把包管理器自身的输出记入日志，且只有重启守护进程后才会重试。探测超时、或返回本守护进程不支持的协议版本时，只做报告，绝不覆盖安装——守护进程不会覆盖一个明显是刻意装上去的 profile。排查时在守护进程日志中搜索 `DSH runtime profile`；要撤销安装，删除 `$DSH_HOME/profiles/multica`（默认 `~/.dsh/profiles/multica`）。`MULTICA_DSH_PLUGIN_PATH` 用于覆盖安装时解析 pnpm 的目录。`dsh plugin` 转发到的那个 pnpm 由 DSH Desktop 放在它私有的 runtime-commands 目录里，macOS 和 Windows 都是如此，守护进程会自动找到并加到 PATH 最前——包括较新版 Desktop 采用的带版本号目录结构。所以只有守护进程找不到的安装位置、或者你想让安装使用自己的 pnpm 时，才需要这个变量。一旦设置就完全取代自动查找：目录不存在时，安装会退回使用守护进程 `PATH` 上的 pnpm，而不是内置的那个。Linux 上没有 DSH Desktop，安装始终使用 `PATH`。ZeroClaw 支持 `MULTICA_ZEROCLAW_PATH`，但没有模型变量；模型由 ZeroClaw 的智能体配置管理。全机默认参数 `MULTICA_<PROVIDER>_ARGS` 目前支持 Claude Code、Codex、CodeBuddy、Qwen Code 和 QwenPaw 五款工具。对应变量是 `MULTICA_CLAUDE_ARGS`、`MULTICA_CODEX_ARGS`、`MULTICA_CODEBUDDY_ARGS`、`MULTICA_QWEN_ARGS` 和 `MULTICA_QWENPAW_ARGS`。例如：
+优先级为命令行 flag → 环境变量 → `~/.multica/config.json` → 内置默认。watchdog 的行为见[守护进程与运行时](/daemon-runtimes)。
+
+### 清理与保留 [#gc]
+
+守护进程定期清理执行工作目录、仓库缓存、会话记录和临时目录，各类数据的删除条件见[清理与保留](/daemon-runtimes#cleanup)。时长接受 Go duration，另外支持 `d` 表示天（如 `14d`、`1d12h`）。
+
+| 变量 | 默认值 | 说明 |
+|---|---|---|
+| `MULTICA_GC_ENABLED` | `true` | 设为 `false` 或 `0` 关闭整个清理循环 |
+| `MULTICA_GC_INTERVAL` | `2h` | 两轮清理之间的间隔；守护进程启动约 30 秒后先清理一次 |
+| `MULTICA_GC_TTL` | `24h` | 任务进入 `done` 或 `closed` 分类、或聊天会话归档后，再过多久删除对应运行目录 |
+| `MULTICA_GC_COMPLETED_TASK_TTL` | Multica Cloud `14d`；自托管 `0` | 任务运行完成多久后删除整个目录，不论任务是否关闭；`0` 表示关闭。不作用于项目本地目录上的运行 |
+| `MULTICA_GC_ORPHAN_TTL` | `72h` | 找不到归属的目录多久没有改动后删除 |
+| `MULTICA_GC_ARTIFACT_TTL` | `12h` | 运行完成多久后删除可再生成的内容（下一行的目录和守护进程为 Codex 准备的缓存）；`0` 表示不删 |
+| `MULTICA_GC_ARTIFACT_PATTERNS` | `node_modules,.next,.turbo` | 按目录名匹配的可再生成内容，逗号分隔。设置后**替换**默认列表，要保留默认项就一并写上；含 `/` 或 `\` 的项会被忽略 |
+| `MULTICA_GC_REPO_TTL` | `30d` | 不再被引用、也没有 worktree 的裸仓库缓存，多久没有检出后删除；`0` 表示不删 |
+| `MULTICA_GC_REPO_MAINTENANCE_ENABLED` | `true` | 删掉过期的智能体分支后，是否对仓库缓存运行 `git reflog expire` 和 `git gc`；设为 `false` 只关掉这一步 |
+| `MULTICA_GC_CODEX_SESSION_TTL` | `14d` | Codex 会话记录多久未使用后删除；`0` 表示不删 |
+| `MULTICA_GC_HERMES_SESSION_TTL` | `14d` | Hermes 会话记录多久未使用后删除；`0` 表示不删 |
+| `MULTICA_GC_HERMES_MEMORY_TTL` | `90d` | Hermes 记忆多久未使用后删除；`0` 表示不删 |
+| `MULTICA_GC_TASK_TEMP_LEGACY_TTL` | `0` | 只针对旧版守护进程留下、没有运行锁的临时目录：多久没有改动后删除。`0` 表示不删。带运行锁的临时目录在运行结束后就会删除，不受它影响 |
+
+### 守护进程日志 [#daemon-logs]
+
+守护进程在后台运行（不连着终端）时，日志写入 `~/.multica/daemon.log`，命名 profile 为 `~/.multica/profiles/<name>/daemon.log`，并按大小轮转，轮转出的文件用 gzip 压缩。
+
+| 变量 | 默认值 | 说明 |
+|---|---|---|
+| `MULTICA_DAEMON_LOG_MAX_SIZE_MB` | `20` | `daemon.log` 达到多少 MB 时轮转 |
+| `MULTICA_DAEMON_LOG_MAX_BACKUPS` | `5` | 最多保留几个轮转文件 |
+| `MULTICA_DAEMON_LOG_MAX_AGE_DAYS` | `30` | 轮转文件保留的天数 |
+
+三个变量都要求正整数；`0`、负数或无法解析的值按默认值处理，不会变成"不限制"。保留数量和天数哪个先到就按哪个删除。崩溃输出写在同目录的 `daemon.err.log`，启动时超过 5 MB 就改名为 `daemon.err.log.1`。
+
+### 各 AI 编程工具的路径、模型与参数
+
+每款内置工具都有路径变量 `MULTICA_<前缀>_PATH`。设置后，守护进程用这个路径代替在 `PATH` 中查找命令；路径不存在时这款工具不会注册，也不会退回 `PATH` 里的同名命令。多数工具还有模型变量 `MULTICA_<前缀>_MODEL`：智能体没有选择模型时，用它作为这台电脑的默认模型；两者都为空时不传模型，由工具自己决定。
+
+<Accordions>
+<Accordion title="各工具的变量前缀" id="tool-env-prefixes" value="tool-env-prefixes">
+
+| 工具 | 前缀 | 有模型变量 |
+|---|---|---|
+| Antigravity | `MULTICA_ANTIGRAVITY` | ✓（取值是 `agy models` 显示的完整名称） |
+| Claude Code | `MULTICA_CLAUDE` | ✓ |
+| CodeArts | `MULTICA_CODEARTS` | ✓ |
+| CodeBuddy | `MULTICA_CODEBUDDY` | ✓ |
+| Codex | `MULTICA_CODEX` | ✓ |
+| Cursor Agent | `MULTICA_CURSOR` | ✓ |
+| DeepSeek Harness | `MULTICA_DSH` | ✓（取值是 dsh 模型目录中的 id，例如 `deepseek-official/deepseek-chat`） |
+| DevEco Code | `MULTICA_DEVECO` | ✓ |
+| Dim | `MULTICA_DIM` | ✓（取值是 dim 模型目录中的 id） |
+| GitHub Copilot CLI | `MULTICA_COPILOT` | ✓ |
+| Grok | `MULTICA_GROK` | ✓ |
+| Hermes | `MULTICA_HERMES` | ✓ |
+| Kimi CLI | `MULTICA_KIMI` | ✓ |
+| Kiro CLI | `MULTICA_KIRO` | ✓ |
+| MiniMax Code | `MULTICA_MCODE` | — |
+| Muse Code | `MULTICA_MUSE` | ✓（取值用运行时模型列表中的 ID） |
+| Oh-My-Pi | `MULTICA_OMP` | ✓ |
+| OpenClaw | `MULTICA_OPENCLAW` | ✓ |
+| OpenCode | `MULTICA_OPENCODE` | ✓ |
+| Pi | `MULTICA_PI` | ✓ |
+| Qoder CLI | `MULTICA_QODER` | ✓ |
+| Qoder CN CLI | `MULTICA_QODERCLICN` | ✓ |
+| Qwen Code | `MULTICA_QWEN` | ✓ |
+| QwenPaw | `MULTICA_QWENPAW` | — |
+| Reasonix | `MULTICA_REASONIX` | ✓ |
+| Trae CLI | `MULTICA_TRAECLI` | ✓ |
+| ZeroClaw | `MULTICA_ZEROCLAW` | —（模型由 ZeroClaw 的智能体配置管理） |
+
+</Accordion>
+</Accordions>
+
+QwenPaw 和 MiniMax Code 没有模型变量，因为 Multica 不会向它们传模型，详见 [AI 编程工具对比](/providers#模型来源)。DeepSeek Harness 另有 `MULTICA_DSH_PROFILE_BUNDLE` 和 `MULTICA_DSH_PLUGIN_PATH`，见下一节。
+
+全机默认参数 `MULTICA_<前缀>_ARGS` 目前支持 Claude Code、Codex、CodeBuddy、Qwen Code 和 QwenPaw 五款工具，对应变量是 `MULTICA_CLAUDE_ARGS`、`MULTICA_CODEX_ARGS`、`MULTICA_CODEBUDDY_ARGS`、`MULTICA_QWEN_ARGS` 和 `MULTICA_QWENPAW_ARGS`。例如：
 
 ```dotenv
 MULTICA_CLAUDE_PATH=/opt/bin/claude
 MULTICA_CLAUDE_ARGS=--max-turns 40
 ```
 
-Muse Code 支持 `MULTICA_MUSE_PATH` 和 `MULTICA_MUSE_MODEL`；模型值应使用运行时模型列表中的 ID。
+### DeepSeek Harness 的 profile 安装
+
+`MULTICA_DSH_PROFILE_BUNDLE` 指定 `multica` profile 缺失时要安装的 bundle，多个候选用逗号分隔、按序尝试，每项可以是 npm 包名、目录或打包好的 tarball。该变量默认不设置。Multica 驱动的 `--stdio` 协议正是由这个 profile 提供，所以不设置时不会改动 DSH 的安装，守护进程会报告缺少 profile，不会注册一个不可用的运行时。
+
+Multica 自己的桥接还没有发布到公共 npm registry，如何选取值见[安装智能体运行时](/install-agent-runtime)。这里填的东西会在没有二次确认的情况下装进每一台守护进程宿主的 DSH 家目录，请当作供应链决策来对待。
+
+这项安装被刻意限制了范围：每个守护进程生命周期最多执行一次，只在探测确认 profile 确实缺失时执行；失败时会把包管理器自身的输出记入日志，且只有重启守护进程后才会重试。探测超时、或返回本守护进程不支持的协议版本时，只做报告，绝不覆盖安装：守护进程不会覆盖一个明显是刻意装上去的 profile。排查时在守护进程日志中搜索 `DSH runtime profile`；要撤销安装，删除 `$DSH_HOME/profiles/multica`（默认 `~/.dsh/profiles/multica`）。
+
+`MULTICA_DSH_PLUGIN_PATH` 用于覆盖安装时解析 pnpm 的目录。`dsh plugin` 转发到的那个 pnpm 由 DSH Desktop 放在它私有的 runtime-commands 目录里，macOS 和 Windows 都是如此，守护进程会自动找到并加到 PATH 最前，较新版 Desktop 采用的带版本号目录结构也能找到。所以只有守护进程找不到的安装位置、或者你想让安装使用自己的 pnpm 时，才需要这个变量。一旦设置就完全取代自动查找：目录不存在时，安装会退回使用守护进程 `PATH` 上的 pnpm，不会用内置的那个。Linux 上没有 DSH Desktop，安装始终使用 `PATH`。
+
+### Cursor 后台进程清理
 
 Cursor 已验证的后台清理需要 Linux 6.9 及以上（进程组 pidfd）、macOS 内核对进程身份查询与 audit token 发信号的支持，或 Windows 上成功分配的嵌套 Job Object。在 macOS 上，每个进程都按内核校验的 PID version 发信号，不需要加入同一 session 的进程组；这些 macOS 接口是私有的，会在捕获时做探测。无法认领的后台启动会返回它原本的工具结果并回到普通的 idle watchdog，工具 watchdog 为 `0` 时同样如此。已经认领的工作在清理无法确认时会继续算作执行中。当工具 watchdog 设为 `0` 时则完全没有这个边界：已认领的后台工作只要还活着就一直让运行处于执行中，此时运行仅受 `MULTICA_AGENT_TIMEOUT` 约束，而它默认也是 `0`。
 
-运行正常结束时，被认领的 Cursor 后台进程同样会被停止，因此该次运行启动的后台服务不会有意地在收尾之后继续存活。macOS 可以通过保留的原始父进程身份识别后期产生的子进程，但无法证明中间进程在被观察到之前就已消失的那条链路。这类进程、离开被追踪进程组的工作，以及持续的归属或发信号错误，都可能留下残余的后台工作。未确认的清理会被记录下来，且永远不会换取一次「清理成功」的恢复窗口；不会仅凭数字 PID 或进程组就去杀掉未知进程。
-
-优先级为命令行 flag → 环境变量 → `~/.multica/config.json` → 内置默认。watchdog 的行为见[守护进程与运行时](/daemon-runtimes)。
+运行正常结束时，被认领的 Cursor 后台进程同样会被停止，因此该次运行启动的后台服务不会有意留到收尾之后。macOS 可以通过保留的原始父进程身份识别后期产生的子进程，但无法证明中间进程在被观察到之前就已消失的那条链路。这类进程、离开被追踪进程组的工作，以及持续的归属或发信号错误，都可能留下残余的后台工作。未确认的清理会被记录下来，且永远不会换取一次"清理成功"的恢复窗口；不会仅凭数字 PID 或进程组就去杀掉未知进程。
 
 ### 守护进程配置的持久化
 

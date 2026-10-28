@@ -74,6 +74,7 @@
     ".github/ci-paths.json"
   ],
   "scripts": [
+    "scripts/generate-attachment-text-preview.mjs",
     "scripts/generate-reserved-slugs.mjs",
     "scripts/selfhost-config.test.sh",
     "scripts/drop-database.sh",
@@ -101,7 +102,9 @@
     "docker-compose.selfhost.yml",
     "docker-compose.selfhost.build.yml",
     "Makefile",
+    "server/internal/handler/attachment_text_preview.json",
     "server/internal/handler/reserved_slugs.json",
+    "packages/views/editor/utils/text-preview-whitelist.generated.ts",
     "packages/core/paths/reserved-slugs.ts",
     "server/cmd/server/router.go",
     ".github/workflows/ci.yml",

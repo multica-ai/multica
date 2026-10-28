@@ -275,6 +275,9 @@ var probeAgentCLIs = func() map[string]AgentEntry {
 	if e, ok := probe("MULTICA_MUSE_PATH", "muse", "MULTICA_MUSE_MODEL"); ok {
 		agents["muse"] = e
 	}
+	if e, ok := probe("MULTICA_DEVIN_PATH", "devin", "MULTICA_DEVIN_MODEL"); ok {
+		agents["devin"] = e
+	}
 	// Qoder CLI ships as the `qodercli` binary (Qoder Desktop does not put it
 	// on PATH; users install it separately, often via an npm global prefix).
 	// It must go through probe() like every other provider so the login-shell

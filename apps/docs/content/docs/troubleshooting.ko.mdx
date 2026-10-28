@@ -4,8 +4,13 @@ description: 연결, 실행, 실시간 업데이트, 이메일, 자체 호스팅
 ---
 
 import { Callout } from "fumadocs-ui/components/callout";
+import { Tab, Tabs } from "fumadocs-ui/components/tabs";
+import { Accordion, Accordions } from "fumadocs-ui/components/accordion";
 
 먼저 문제가 Multica 서비스, 데몬, 런타임, AI 코딩 도구 중 어느 계층에서 발생하는지 확인하세요. 다음 명령만으로도 첫 번째 유효한 오류를 찾을 수 있는 경우가 많습니다.
+
+<Tabs items={["모든 설치 방식", "자체 호스팅 서비스"]}>
+<Tab value="모든 설치 방식">
 
 ```bash
 multica version
@@ -14,16 +19,23 @@ multica daemon status --output json
 multica daemon logs --lines 100
 ```
 
-자체 호스팅 인스턴스에서는 서비스를 직접 확인할 수도 있습니다.
+</Tab>
+<Tab value="자체 호스팅 서비스">
 
 ```bash
 curl -i https://api.example.com/health
 curl -i https://api.example.com/readyz
 ```
 
+</Tab>
+</Tabs>
+
 `/health`는 API 프로세스가 응답한다는 것만 확인하고, `/readyz`는 데이터베이스와 migration도 확인합니다. 문제를 신고할 때는 오류, 관련 로그, CLI 버전, 운영체제를 포함하고 token과 이메일 같은 민감 정보는 제출 전에 제거하세요.
 
-## 데몬 연결 실패
+## 연결과 로그인
+
+<Accordions>
+<Accordion title="데몬 연결 실패" id="daemon-fails-to-connect" value="daemon-fails-to-connect">
 
 먼저 다음을 실행합니다.
 
@@ -54,11 +66,58 @@ multica daemon restart
 multica config show
 ```
 
-## 태스크 실행이 시작되지 않음
+</Accordion>
+<Accordion title={<><code>multica setup</code>이 서버에 도달할 수 없다고 보고함</>} id="multica-setup-reports-the-server-is-not-reachable" value="multica-setup-reports-the-server-is-not-reachable">
+
+CLI 도달 확인은 `<server-url>/health`에 GET을 보내 200을 기대합니다. backend는 이 경로를 제공합니다. 최신 web 릴리스는 `/health`를 backend로 전달하지만 구버전은 그렇지 않습니다. 모든 트래픽을 구버전 frontend로 전달하는 reverse proxy에서는 404가 반환되고, CLI는 정상 동작 중인 서버를 도달 불가로 판단합니다.
+
+프록시에서 `/health`를 backend(포트 8080)로 명시적으로 전달하면 모든 릴리스에서 동작합니다. [자체 호스팅 빠른 시작](/self-host-quickstart#remote-access)의 두 Caddy 예시에 모두 포함되어 있습니다. 확인 방법:
+
+```bash
+curl -fsS <server-url>/health
+```
+
+</Accordion>
+<Accordion title={<><code>multica login</code>이 TLS 핸드셰이크 시간 초과로 실패함</>} id="multica-login-fails-with-a-tls-handshake-timeout" value="multica-login-fails-with-a-tls-handshake-timeout">
+
+`multica login`이 브라우저를 열고 웹 로그인은 완료되지만 CLI는 "Sign-in did not complete" 또는 "TLS handshake timed out"으로 실패합니다. `multica --debug login`은 `POST /api/tokens`에서 `net/http: TLS handshake timeout`을 표시하며, 같은 컴퓨터의 `curl.exe -I https://api.multica.ai`나 브라우저는 정상적으로 연결됩니다.
+
+TCP 연결은 열리지만 TLS 핸드셰이크가 끝나지 않습니다. Multica CLI와 데몬을 포함한 Go 클라이언트는 기본적으로 TLS ClientHello에 양자내성 키 교환을 포함하므로 ClientHello가 약 1.5 KB가 되어 두 패킷으로 나뉩니다. 일부 보안 소프트웨어, VPN, 라우터, 방화벽은 이런 핸드셰이크를 버립니다. curl의 ClientHello는 훨씬 작아서 통과합니다.
+
+양자내성 키 교환을 끄고 다시 시도해 원인을 확인합니다.
+
+<Tabs groupId="os" persist items={["macOS / Linux", "Windows"]}>
+<Tab value="macOS / Linux">
+
+```bash
+GODEBUG=tlsmlkem=0 multica --debug login
+```
+
+</Tab>
+<Tab value="Windows">
+
+```powershell
+$env:GODEBUG = 'tlsmlkem=0'
+multica --debug login
+```
+
+</Tab>
+</Tabs>
+
+이렇게 해서 성공하면 CLI와 데몬을 실행하는 사용자에게 `GODEBUG=tlsmlkem=0`을 영구적으로 설정하고(Windows에서는 `[Environment]::SetEnvironmentVariable('GODEBUG', 'tlsmlkem=0', 'User')`를 실행한 뒤 새 터미널을 여세요) 데몬 또는 데스크톱 앱을 다시 시작하세요. `MULTICA_HTTP_TIMEOUT`을 늘려도 도움이 되지 않습니다. 핸드셰이크는 이 설정의 영향을 받지 않습니다. 근본적인 해결은 네트워크 쪽에서 해야 합니다. 분할된 TLS 핸드셰이크를 버리는 장비나 소프트웨어를 업데이트하거나 재구성하세요.
+
+</Accordion>
+</Accordions>
+
+## 실행과 AI 코딩 도구
+
+<Accordions>
+<Accordion title="태스크 실행이 시작되지 않음" id="issue-does-not-start-executing" value="issue-does-not-start-executing">
 
 태스크의 **실행 로그**를 열고 실행의 현재 상태와 대기 이유를 먼저 확인합니다.
 
-### `queued` 상태
+<Tabs items={["queued", "waiting_local_directory"]}>
+<Tab value="queued">
 
 `queued`는 실행이 런타임에 수령되기를 기다리고 있다는 뜻입니다. 다음 순서로 확인하세요.
 
@@ -77,7 +136,8 @@ multica issue runs <issue-id>
 
 런타임 목록에 예상한 도구가 없다면 같은 시스템 계정과 `PATH`에서 도구가 실행되고 로그인되어 있는지 확인한 뒤 `multica daemon restart`를 실행합니다.
 
-### `waiting_local_directory` 상태
+</Tab>
+<Tab value="waiting_local_directory">
 
 다른 진행 중인 실행이 같은 로컬 디렉터리를 사용하고 있다는 뜻입니다. Multica는 두 에이전트가 같은 파일을 동시에 수정하지 않도록 디렉터리 잠금이 해제되기를 기다립니다.
 
@@ -85,7 +145,11 @@ multica issue runs <issue-id>
 
 그렇지 않으면 일반적으로 앞선 실행이 끝날 때까지 기다리면 됩니다. 앞선 실행이 멈췄다면 해당 실행 로그에서 중지할 수 있고, 현재 에이전트에 다른 로컬 디렉터리를 선택할 수도 있습니다. 이 디렉터리 상호 배제는 데몬이 메모리에서 관리하며 디스크에 lock 파일을 쓰지 않습니다. 잠금 상태가 비정상이라고 의심되면 `multica daemon restart`를 실행해 해제하세요. 직접 삭제해야 할 파일은 없습니다.
 
-## AI 코딩 도구 시작 실패
+</Tab>
+</Tabs>
+
+</Accordion>
+<Accordion title="AI 코딩 도구 시작 실패" id="ai-coding-tool-fails-to-start" value="ai-coding-tool-fails-to-start">
 
 데몬이 온라인이어도 도구 자체를 사용할 수 있다는 뜻은 아닙니다. 이번 실행의 상세 기록을 열고 다음 항목을 중점적으로 확인하세요.
 
@@ -97,7 +161,8 @@ multica issue runs <issue-id>
 
 먼저 실행 컴퓨터의 터미널에서 같은 도구를 직접 실행하세요. 도구 자체도 시작할 수 없다면 도구 로그인 또는 설정을 먼저 수정하고 실행 로그에서 실행을 재시도합니다.
 
-## CLI 업그레이드 후 macOS에서 실행이 멈춤
+</Accordion>
+<Accordion title="CLI 업그레이드 후 macOS에서 실행이 멈춤" id="runs-hang-on-macos-after-a-cli-upgrade" value="runs-hang-on-macos-after-a-cli-upgrade">
 
 Homebrew로 설치한 `multica` CLI가 `brew upgrade`, `multica update`, **런타임** 페이지의 **업데이트** 또는 데몬 자동 업데이트로 업그레이드된 뒤, `~/Desktop`, `~/Documents`, `~/Downloads`, iCloud Drive 등 보호된 폴더를 읽는 실행이 더 이상 진행되지 않을 수 있습니다. 에이전트 프로세스는 CPU를 사용하지 않고, 실행은 완료되지도 실패하지도 않습니다.
 
@@ -111,7 +176,13 @@ Homebrew로 설치한 `multica` CLI가 `brew upgrade`, `multica update`, **런�
 
 CLI를 업그레이드할 때마다 이 과정을 반복하세요. 자동 업데이트는 Multica Cloud에 연결된 데몬에서만 기본으로 켜져 있습니다. `--no-auto-update`로 데몬을 시작하면 직접 실행할 때만 업그레이드됩니다. [Multica Desktop](/desktop-app)에 번들된 CLI는 Developer ID로 서명되어 있어 업그레이드 후에도 권한이 유지됩니다.
 
-## 실시간 업데이트가 작동하지 않음
+</Accordion>
+</Accordions>
+
+## 웹 앱과 자체 호스팅 서비스
+
+<Accordions>
+<Accordion title="실시간 업데이트가 작동하지 않음" id="realtime-updates-stop-working" value="realtime-updates-stop-working">
 
 실행은 진행되지만 댓글과 상태가 실시간으로 나타나지 않는다면 일반적으로 WebSocket이 연결되지 않은 것입니다.
 
@@ -122,9 +193,9 @@ CLI를 업그레이드할 때마다 이 과정을 반복하세요. 자동 업데
 - reverse proxy가 WebSocket Upgrade 요청을 전달하는지
 - 브라우저 로그인이 만료되었는지
 
-`curl`로 `/ws`에 요청했을 때 HTTP 400이 반환되는 것은 정상입니다: 이 엔드포인트는 workspace 관련 쿼리 파라미터를 요구하며, 파라미터 없는 핸드셰이크는 WebSocket 업그레이드 전에 거부됩니다. 따라서 backend 로그에 400/401 기록이 있다는 것은 일반 HTTP 라우팅이 backend까지 도달했다는 것만 증명합니다 — 프록시가 WebSocket `Upgrade` 헤더를 보존하는지는 증명하지 않습니다. 실제 연결을 확인하려면 브라우저 DevTools → Network → WS 탭(또는 WebSocket 지원 클라이언트)에서 `101` 핸드셰이크가 성립했는지 보세요.
+`curl`로 `/ws`에 요청했을 때 HTTP 400이 반환되는 것은 정상입니다. 이 엔드포인트는 workspace 관련 쿼리 파라미터를 요구하며, 파라미터 없는 핸드셰이크는 WebSocket 업그레이드 전에 거부됩니다. 따라서 backend 로그에 400/401 기록이 있다는 것은 일반 HTTP 라우팅이 backend까지 도달했다는 것만 증명할 뿐, 프록시가 WebSocket `Upgrade` 헤더를 보존하는지는 증명하지 않습니다. 실제 연결을 확인하려면 브라우저 DevTools → Network → WS 탭(또는 WebSocket 지원 클라이언트)에서 `101` 핸드셰이크가 성립했는지 보세요.
 
-자체 호스팅 참고: 데몬의 긴 연결은 `/api/daemon/ws`로 향합니다(`/ws`가 아님). 마찬가지로 backend로 직접 전달해야 하며, 핸드셰이크가 실패하면 데몬은 조용히 폴링으로 폴백합니다. backend 로그에서 이 경로에 `status=400`이 반복되면 그 증상입니다.
+자체 호스팅 환경에서는 데몬의 긴 연결이 `/api/daemon/ws`로 향한다는 점(`/ws`가 아님)도 주의하세요. 마찬가지로 backend로 직접 전달해야 합니다. 여기서 핸드셰이크가 실패하면 데몬은 조용히 폴링으로 폴백하며, backend 로그에서 이 경로에 `status=400`이 반복되는 것이 그 증상입니다.
 
 컨테이너는 생성될 때만 `.env`를 읽으므로 수정 후 다시 생성해야 합니다.
 
@@ -132,38 +203,10 @@ CLI를 업그레이드할 때마다 이 과정을 반복하세요. 자동 업데
 docker compose -f docker-compose.selfhost.yml up -d
 ```
 
-전체 reverse proxy 예시는 [자체 호스팅 빠른 시작](/self-host-quickstart#3-접근-방식-선택)을 참고하세요.
+전체 reverse proxy 예시는 [자체 호스팅 빠른 시작](/self-host-quickstart#remote-access)을 참고하세요.
 
-## `multica setup`이 서버에 도달할 수 없다고 보고함
-
-CLI 도달 확인은 `<server-url>/health`에 GET을 보내 200을 기대합니다. backend는 이 경로를 제공합니다. 최신 web 릴리스는 `/health`를 backend로 전달하지만 구버전은 그렇지 않아, 모든 트래픽을 구버전 frontend로 전달하는 reverse proxy에서는 404가 반환되고 CLI는 정상 동작 중인 서버를 도달 불가로 오판합니다.
-
-프록시에서 `/health`를 backend(포트 8080)로 명시적으로 전달하면 모든 릴리스에서 동작합니다. [자체 호스팅 빠른 시작](/self-host-quickstart#3-접근-방식-선택)의 두 Caddy 예시에 모두 포함되어 있습니다. 확인 방법:
-
-```bash
-curl -fsS <server-url>/health
-```
-
-## `multica login`이 TLS 핸드셰이크 시간 초과로 실패함
-
-`multica login`이 브라우저를 열고 웹 로그인은 완료되지만 CLI는 "Sign-in did not complete" 또는 "TLS handshake timed out"으로 실패합니다. `multica --debug login`은 `POST /api/tokens`에서 `net/http: TLS handshake timeout`을 표시하며, 같은 컴퓨터의 `curl.exe -I https://api.multica.ai`나 브라우저는 정상적으로 연결됩니다.
-
-TCP 연결은 열리지만 TLS 핸드셰이크가 끝나지 않습니다. Multica CLI와 데몬을 포함한 Go 클라이언트는 기본적으로 TLS ClientHello에 양자내성 키 교환을 포함하므로 ClientHello가 약 1.5 KB가 되어 두 패킷으로 나뉩니다. 일부 보안 소프트웨어, VPN, 라우터, 방화벽은 이런 핸드셰이크를 버립니다. curl의 ClientHello는 훨씬 작아서 통과합니다.
-
-양자내성 키 교환을 끄고 다시 시도해 원인을 확인합니다:
-
-```powershell
-$env:GODEBUG = 'tlsmlkem=0'
-multica --debug login
-```
-
-```bash
-GODEBUG=tlsmlkem=0 multica --debug login
-```
-
-이렇게 해서 성공하면 CLI와 데몬을 실행하는 사용자에게 `GODEBUG=tlsmlkem=0`을 영구적으로 설정하고(Windows에서는 `[Environment]::SetEnvironmentVariable('GODEBUG', 'tlsmlkem=0', 'User')`를 실행한 뒤 새 터미널을 여세요) 데몬 또는 데스크톱 앱을 다시 시작하세요. `MULTICA_HTTP_TIMEOUT`을 늘려도 도움이 되지 않습니다. 핸드셰이크는 이 설정의 영향을 받지 않습니다. 근본적인 해결은 네트워크 쪽에서 해야 합니다. 분할된 TLS 핸드셰이크를 버리는 장비나 소프트웨어를 업데이트하거나 재구성하세요.
-
-## 인증 코드 및 초대 이메일이 도착하지 않음
+</Accordion>
+<Accordion title="인증 코드 및 초대 이메일이 도착하지 않음" id="verification-code-and-invitation-emails-not-delivered" value="verification-code-and-invitation-emails-not-delivered">
 
 먼저 backend 시작 로그를 확인합니다. 로그에는 현재 `SMTP relay`, `Resend API`, `DEV mode` 중 무엇을 사용하는지 표시됩니다.
 
@@ -182,7 +225,8 @@ docker compose -f docker-compose.selfhost.yml logs backend \
 프로덕션 환경에서는 로그의 인증 코드에 의존하거나 고정된 로컬 테스트 인증 코드를 활성화하지 마세요.
 </Callout>
 
-## 첨부 파일 업로드 또는 다운로드 실패
+</Accordion>
+<Accordion title="첨부 파일 업로드 또는 다운로드 실패" id="attachment-uploads-or-downloads-fail" value="attachment-uploads-or-downloads-fail">
 
 먼저 backend 로그와 응답 status code를 확인합니다. 일반적인 원인은 다음과 같습니다.
 
@@ -193,7 +237,8 @@ docker compose -f docker-compose.selfhost.yml logs backend \
 
 Docker Compose를 사용하면 기본 `backend_uploads` volume에 로컬 첨부 파일이 저장됩니다. 컨테이너를 다시 만들어도 삭제되지 않지만 `docker compose down -v`는 data volume을 삭제합니다. S3 설정은 [환경 변수](/environment-variables#첨부-파일-저장소)를 참고하세요.
 
-## 사용량(Usage)이 0으로 표시됨
+</Accordion>
+<Accordion title="사용량(Usage)이 0으로 표시됨" id="usage-shows-zero" value="usage-shows-zero">
 
 Usage 페이지는 각 실행의 원본 사용량을 직접 읽지 않고 시간별 집계 데이터를 읽습니다. 먼저 원본 데이터와 집계 테이블을 확인합니다.
 
@@ -208,7 +253,7 @@ ORDER BY plan_time DESC
 LIMIT 20;
 ```
 
-`task_usage`에 데이터가 있지만 집계 테이블이 비어 있고 스케줄 기록에 실패가 표시된다면 migration이 모두 적용되었는지 먼저 확인하세요. 업그레이드가 migration 103에서 거부되는 경우는 다음 절을 참고하세요. 집계 함수를 직접 한 번 실행해 SQL 문제인지 스케줄 문제인지 구분할 수도 있습니다.
+`task_usage`에 데이터가 있지만 집계 테이블이 비어 있고 스케줄 기록에 실패가 표시된다면 migration이 모두 적용되었는지 먼저 확인하세요. 업그레이드가 migration 103에서 거부되는 경우는 [업그레이드할 때 migration 103이 실행을 거부함](#migration-103-blocks-an-upgrade)을 참고하세요. 집계 함수를 직접 한 번 실행해 SQL 문제인지 스케줄 문제인지 구분할 수도 있습니다.
 
 ```sql
 SELECT rollup_task_usage_hourly();
@@ -216,9 +261,10 @@ SELECT rollup_task_usage_hourly();
 
 수동 실행 후 숫자가 정상이라면 집계 함수는 사용할 수 있고 backend 정기 스케줄에 문제가 있는 것입니다. 수동 SQL은 집계를 한 번만 보충하며 스케줄을 복구하지 않습니다. 시간별 집계는 backend 내장 스케줄러가 실행하므로 pg_cron을 직접 설정할 필요가 없습니다.
 
-## 업그레이드할 때 migration 103이 실행을 거부함
+</Accordion>
+<Accordion title="업그레이드할 때 migration 103이 실행을 거부함" id="migration-103-blocks-an-upgrade" value="migration-103-blocks-an-upgrade">
 
-정상 업그레이드에서는 migration 103을 위해 따로 할 일이 없습니다. `migrate up`은 migration을 적용하기 전에 이전 사용량 데이터를 자동으로 backfill합니다. 빈 데이터베이스는 바로 통과하고 이전 데이터가 있는 인스턴스는 월별로 자동 보충한 뒤 계속 진행합니다.
+정상 업그레이드에서는 migration 103을 위해 따로 할 일이 없습니다. `migrate up`은 migration을 적용하기 전에 이전 사용량 데이터를 자동으로 backfill합니다. 빈 데이터베이스는 바로 통과하고 이전 데이터가 있는 인스턴스는 월별로 보충한 뒤 계속 진행합니다.
 
 backend 시작 중 `refusing to drop legacy daily rollups` 오류가 계속 발생하면 자동 backfill이 완료되지 않은 것입니다. 예를 들어 도중에 실패했거나 `migrate up`을 사용하지 않고 SQL을 직접 적용했을 수 있습니다. 이때는 backfill 명령을 직접 실행하고 완료된 뒤 backend를 다시 시작하세요.
 
@@ -229,16 +275,32 @@ DATABASE_URL='postgres://...' go run ./cmd/backfill_task_usage_hourly
 
 자주 쓰는 flag: `--dry-run`은 쓰지 않고 미리 보기만 하며, `--sleep-between-slices`는 slice 사이에 간격을 두어 사용량이 많은 인스턴스의 읽기 부하를 낮춥니다. 명령은 월별 slice로 실행되고 멱등성을 가지므로 중단 후 바로 다시 실행할 수 있습니다. advisory lock을 보유해 서버의 정기 집계와 상호 배제되므로 중복되거나 일관되지 않은 집계 데이터가 생기지 않습니다. 완료 후 backend를 다시 시작하고 `/readyz`에서 `migrations`가 `ok`인지 확인하세요.
 
-## 포트 사용 중
+</Accordion>
+<Accordion title="포트 사용 중" id="port-already-in-use" value="port-already-in-use">
 
 로컬에서 자주 사용하는 port는 API의 `8080`, Web의 `3000`, 데몬 health check port입니다. 먼저 사용 중인 프로세스를 찾습니다.
 
+<Tabs groupId="os" persist items={["macOS / Linux", "Windows"]}>
+<Tab value="macOS / Linux">
+
 ```bash
-lsof -nP -iTCP:8080 -sTCP:LISTEN   # macOS / Linux
-netstat -ano | findstr :8080       # Windows
+lsof -nP -iTCP:8080 -sTCP:LISTEN
 ```
 
+</Tab>
+<Tab value="Windows">
+
+```bash
+netstat -ano | findstr :8080
+```
+
+</Tab>
+</Tabs>
+
 다른 Multica checkout이 사용 중이라면 해당 디렉터리에서 `make stop`을 먼저 실행합니다. 그렇지 않다면 port를 사용 중인 프로그램을 정상적으로 중지하거나 현재 서비스 port를 변경합니다. 공개 인터넷의 80/443은 Caddy, Nginx 같은 reverse proxy가 사용합니다.
+
+</Accordion>
+</Accordions>
 
 ## 로그 위치
 
@@ -261,7 +323,7 @@ multica daemon stop
 multica daemon start --foreground
 ```
 
-그래도 원인을 찾지 못하면 [GitHub Issues](https://github.com/multica-ai/multica/issues)에서 기존 문제를 검색하거나 새 태스크를 제출하세요.
+그래도 원인을 찾지 못하면 [GitHub Issues](https://github.com/multica-ai/multica/issues)에서 기존 문제를 검색하거나 새 issue를 제출하세요.
 
 ## 다음 단계
 

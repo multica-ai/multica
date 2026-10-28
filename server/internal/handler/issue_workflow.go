@@ -15,7 +15,6 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
-	"github.com/multica-ai/multica/server/internal/featureflags"
 	"github.com/multica-ai/multica/server/internal/issuestatus"
 	"github.com/multica-ai/multica/server/internal/issueworkflow"
 	"github.com/multica-ai/multica/server/internal/logger"
@@ -33,18 +32,6 @@ import (
 // owners/admins (MUL-8120). The Default workflow has no owner, so only
 // owners/admins change it. Which workflow a project uses is open to
 // owners/admins and to the project's lead.
-
-// requireProjectWorkflowsV1 gates adopting workflows behind the
-// project_workflows_v1 flag. Reads, edits of existing workflows and switching
-// a project back to Default stay open, so turning the flag off never strands
-// a project on a workflow nobody can maintain.
-func (h *Handler) requireProjectWorkflowsV1(w http.ResponseWriter, r *http.Request) bool {
-	if featureflags.ProjectWorkflowsV1Enabled(r.Context(), h.FeatureFlags) {
-		return true
-	}
-	writeFeatureDisabled(w, "project_workflows_disabled", "Project workflows are not enabled")
-	return false
-}
 
 func isWorkspaceAdmin(member db.Member) bool {
 	return roleAllowed(member.Role, "owner", "admin")
@@ -225,14 +212,11 @@ func (h *Handler) ListIssueWorkflows(w http.ResponseWriter, r *http.Request) {
 	if _, ok := h.requireWorkspaceMember(w, r, workspaceID, "workspace not found"); !ok {
 		return
 	}
-	// Default is stored the first time workflows are read with the feature
-	// on, so every client sees the same Default from then on.
-	if featureflags.ProjectWorkflowsV1Enabled(r.Context(), h.FeatureFlags) {
-		if _, err := issueworkflow.EnsureDefault(r.Context(), h.Queries, wsUUID); err != nil {
-			slog.Warn("ListIssueWorkflows ensure default failed", append(logger.RequestAttrs(r), "error", err)...)
-			writeError(w, http.StatusInternalServerError, "failed to list workflows")
-			return
-		}
+	// Store Default on the first read so every client sees the same workflow.
+	if _, err := issueworkflow.EnsureDefault(r.Context(), h.Queries, wsUUID); err != nil {
+		slog.Warn("ListIssueWorkflows ensure default failed", append(logger.RequestAttrs(r), "error", err)...)
+		writeError(w, http.StatusInternalServerError, "failed to list workflows")
+		return
 	}
 	rows, err := h.Queries.ListIssueWorkflows(r.Context(), wsUUID)
 	if err != nil {
@@ -475,9 +459,6 @@ func (h *Handler) CreateIssueWorkflow(w http.ResponseWriter, r *http.Request) {
 	}
 	member, ok := h.requireWorkspaceMember(w, r, workspaceID, "workspace not found")
 	if !ok {
-		return
-	}
-	if !h.requireProjectWorkflowsV1(w, r) {
 		return
 	}
 	var req IssueWorkflowWriteRequest
@@ -957,9 +938,6 @@ func (h *Handler) SetProjectWorkflow(w http.ResponseWriter, r *http.Request) {
 	}
 	var targetID pgtype.UUID
 	if req.WorkflowID != nil && *req.WorkflowID != "" {
-		if !h.requireProjectWorkflowsV1(w, r) {
-			return
-		}
 		id, ok := parseUUIDOrBadRequest(w, *req.WorkflowID, "workflow_id")
 		if !ok {
 			return
@@ -1108,9 +1086,6 @@ func (h *Handler) SetIssueWorkflowHandoff(w http.ResponseWriter, r *http.Request
 		return
 	}
 	step := issueworkflow.NormalizeHandoff(payloadToStep(chi.URLParam(r, "status"), req.IssueWorkflowStepPayload))
-	if (step.HandsOff() || req.CopyForProjectID != "") && !h.requireProjectWorkflowsV1(w, r) {
-		return
-	}
 	var copyFor pgtype.UUID
 	if req.CopyForProjectID != "" {
 		copyFor, ok = parseUUIDOrBadRequest(w, req.CopyForProjectID, "copy_for_project_id")

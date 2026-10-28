@@ -53,6 +53,7 @@ export class TestApiClient {
   private createdIssueIds: string[] = [];
   private createdProjectIds: string[] = [];
   private seededIssueIds: string[] = [];
+  private createdPropertyIds: string[] = [];
 
   async login(email: string, name: string) {
     const client = new pg.Client(DATABASE_URL);
@@ -197,6 +198,20 @@ export class TestApiClient {
     const project = await res.json();
     this.createdProjectIds.push(project.id);
     return project as { id: string; title: string; status: string };
+  }
+
+  /** Create a workspace custom property definition; archived on cleanup. */
+  async createProperty(name: string, type = "text") {
+    const res = await this.authedFetch("/api/properties", {
+      method: "POST",
+      body: JSON.stringify({ name, type }),
+    });
+    if (!res.ok) {
+      throw new Error(`create property failed: ${res.status} ${await res.text()}`);
+    }
+    const property = await res.json();
+    this.createdPropertyIds.push(property.id);
+    return property as { id: string; name: string };
   }
 
   async updateProject(id: string, updates: Record<string, unknown>) {
@@ -452,6 +467,19 @@ export class TestApiClient {
       }
     }
     this.createdProjectIds = [];
+    // Definitions cannot be deleted, only archived; archiving takes them out
+    // of every picker so later tests see the catalog they expect.
+    for (const id of this.createdPropertyIds) {
+      try {
+        await this.authedFetch(`/api/properties/${id}`, {
+          method: "PATCH",
+          body: JSON.stringify({ archived: true }),
+        });
+      } catch {
+        /* ignore */
+      }
+    }
+    this.createdPropertyIds = [];
   }
 
   getToken() {

@@ -1743,7 +1743,10 @@ function StepInspector({
           : t(($) => $.transcript.kind_error);
 
   return (
-    <aside className="flex w-[26rem] shrink-0 flex-col border-l bg-muted/25">
+    // Full width below md: on a phone the dialog is narrower than this pane, and
+    // a fixed 26rem pushed the header's close button past the clipped edge —
+    // the reader had no way back to the step list.
+    <aside className="flex w-full shrink-0 flex-col border-l-0 bg-muted/25 md:w-[26rem] md:border-l">
       <div className="flex items-center gap-2 border-b px-3 py-2">
         <StepIcon step={step} className="h-4 w-4 shrink-0 text-muted-foreground" />
         <span className="shrink-0 text-label font-semibold">{title}</span>

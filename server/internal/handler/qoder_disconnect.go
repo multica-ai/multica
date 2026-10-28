@@ -68,7 +68,7 @@ func (h *Handler) DisconnectQoderConnection(w http.ResponseWriter, r *http.Reque
 	}
 	defer tx.Rollback(r.Context())
 	if _, err = tx.Exec(r.Context(), `SELECT pg_advisory_xact_lock(hashtextextended($1,19))`, wsID); err != nil {
-		writeError(w, http.StatusInternalServerError, "cannot lock QCA configuration")
+		writeError(w, http.StatusInternalServerError, "cannot lock Qoder Cloud Agents configuration")
 		return
 	}
 	qtx := h.Queries.WithTx(tx)
@@ -128,7 +128,7 @@ func (h *Handler) stopQoderForDisconnect(w http.ResponseWriter, r *http.Request,
 	}
 	defer tx.Rollback(r.Context())
 	if _, err = tx.Exec(r.Context(), `SELECT pg_advisory_xact_lock(hashtextextended($1,19))`, uuidToString(ws)); err != nil {
-		writeError(w, http.StatusInternalServerError, "cannot lock QCA configuration")
+		writeError(w, http.StatusInternalServerError, "cannot lock Qoder Cloud Agents configuration")
 		return false
 	}
 	var exists, busy bool
@@ -137,11 +137,11 @@ func (h *Handler) stopQoderForDisconnect(w http.ResponseWriter, r *http.Request,
 			writeError(w, http.StatusNotFound, "Qoder is not connected")
 			return false
 		}
-		writeError(w, http.StatusInternalServerError, "cannot check QCA connection")
+		writeError(w, http.StatusInternalServerError, "cannot check Qoder Cloud Agents connection")
 		return false
 	}
 	if busy {
-		writeError(w, http.StatusConflict, "QCA is synchronizing; retry shortly")
+		writeError(w, http.StatusConflict, "Qoder Cloud Agents is synchronizing; retry shortly")
 		return false
 	}
 	if _, refused := h.checkQoderDisconnectPlan(w, r.Context(), tx, h.Queries.WithTx(tx), ws, expected); refused {
@@ -154,11 +154,11 @@ func (h *Handler) stopQoderForDisconnect(w http.ResponseWriter, r *http.Request,
 		return false
 	}
 	if _, err = tx.Exec(r.Context(), `UPDATE cloud_agent_connection SET enabled=false,revision=revision+1,status='stopped',last_error='' WHERE provider='qoder_cloud' AND workspace_id=$1`, ws); err != nil {
-		writeError(w, http.StatusInternalServerError, "cannot stop QCA runtime")
+		writeError(w, http.StatusInternalServerError, "cannot stop Qoder Cloud Agents runtime")
 		return false
 	}
 	if err := tx.Commit(r.Context()); err != nil {
-		writeError(w, http.StatusInternalServerError, "cannot stop QCA runtime")
+		writeError(w, http.StatusInternalServerError, "cannot stop Qoder Cloud Agents runtime")
 		return false
 	}
 	if revokedHash != "" {
@@ -183,11 +183,11 @@ func (h *Handler) checkQoderDisconnectPlan(w http.ResponseWriter, ctx context.Co
 	}
 	var active bool
 	if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM agent_task_queue t JOIN agent_runtime rt ON rt.id=t.runtime_id WHERE rt.workspace_id=$1 AND rt.provider='qoder_cloud' AND t.status IN ('running','dispatched'))`, ws).Scan(&active); err != nil {
-		writeError(w, http.StatusInternalServerError, "cannot check active QCA tasks")
+		writeError(w, http.StatusInternalServerError, "cannot check active Qoder Cloud Agents tasks")
 		return nil, true
 	}
 	if active {
-		writeError(w, http.StatusConflict, "wait for or cancel active QCA tasks before disconnecting")
+		writeError(w, http.StatusConflict, "wait for or cancel active Qoder Cloud Agents tasks before disconnecting")
 		return nil, true
 	}
 	var agents []db.Agent

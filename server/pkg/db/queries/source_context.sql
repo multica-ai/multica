@@ -130,11 +130,9 @@ WHERE workspace_id = sqlc.arg(workspace_id)
 RETURNING storage_key;
 
 -- name: ClaimSourceContextObjectIntentForCleanup :one
-UPDATE issue_source_context_object_intent AS intent
-SET state = 'deleting',
-    lease_token = sqlc.arg(lease_token),
-    lease_expires_at = now() + interval '2 minutes'
-FROM (
+-- MATERIALIZED pins the single candidate so nested-loop rescans cannot lease
+-- extra objects.
+WITH due AS MATERIALIZED (
     SELECT candidate.storage_key
     FROM issue_source_context_object_intent candidate
     WHERE candidate.next_attempt_at <= now()
@@ -145,7 +143,12 @@ FROM (
     ORDER BY candidate.next_attempt_at, candidate.storage_key
     LIMIT 1
     FOR UPDATE SKIP LOCKED
-) due
+)
+UPDATE issue_source_context_object_intent AS intent
+SET state = 'deleting',
+    lease_token = sqlc.arg(lease_token),
+    lease_expires_at = now() + interval '2 minutes'
+FROM due
 WHERE intent.storage_key = due.storage_key
 RETURNING intent.*;
 

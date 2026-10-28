@@ -1,10 +1,11 @@
 import * as React from "react"
 
 const MOBILE_BREAKPOINT = 768
-// Tailwind `lg`. Below it a 256px nav plus a 320px list column leave a
-// list/detail surface only a couple hundred pixels of reading width, so those
-// surfaces fold to the single column phones already get.
-const COMPACT_BREAKPOINT = 1024
+// Tailwind `md`. Below it the nav is a sheet and list/detail surfaces fold to
+// one column. From here up to `xl` the nav stays a docked column but starts
+// collapsed (see SIDEBAR_AUTO_COLLAPSE_QUERY), which leaves a foldable's inner
+// screen or a tablet enough reading width for both panes.
+const COMPACT_BREAKPOINT = 768
 
 function useIsBelow(breakpoint: number) {
   const [isBelow, setIsBelow] = React.useState<boolean | undefined>(undefined)

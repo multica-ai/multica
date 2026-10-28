@@ -67,10 +67,12 @@ interface DateOnlyPickerProps {
  * `DeferredPopup` for why.
  */
 export function DateOnlyPicker(props: DateOnlyPickerProps) {
+  // A one-shot defaultOpen must not replace the mounted calendar with a cold trigger.
+  const [initialDefaultOpen] = useState(props.defaultOpen ?? false);
   const canDefer =
     props.open === undefined &&
     props.onOpenChange === undefined &&
-    !props.defaultOpen;
+    !props.defaultOpen && !initialDefaultOpen;
   if (!canDefer) {
     return <DateOnlyPickerImpl {...props} />;
   }
