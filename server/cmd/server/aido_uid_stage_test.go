@@ -140,7 +140,7 @@ func TestAIDOUidStage(t *testing.T) {
 	if pgSandbox == "" {
 		pgSandbox = filepath.Join(root, "pg-boundary.sb")
 	}
-	pgPolicy := `(version 1) (allow default) (deny network-outbound (remote ip "localhost:5432")) (deny network-outbound (local unix-socket))`
+	pgPolicy := `(version 1) (allow default) (deny network-outbound (remote ip "localhost:5432")) (deny network-outbound (remote ip "*:5436")) (deny network-outbound (local unix-socket))`
 	if err := os.WriteFile(pgSandbox, []byte(pgPolicy), 0600); err != nil {
 		t.Fatal(err)
 	}
