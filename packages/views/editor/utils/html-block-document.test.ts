@@ -10,6 +10,8 @@ import {
   nextHtmlBlockHeight,
   readHtmlBlockMessage,
   readHtmlBlockTheme,
+  stripThemeForegroundTokens,
+  usesThemeBackground,
   usesThemeTokens,
 } from "./html-block-document";
 import { __FRAGMENT_NAV_SHIM__ } from "./iframe-fragment-nav";
@@ -55,7 +57,7 @@ describe("HTML block bridge", () => {
 describe("buildHtmlBlockDocument", () => {
   it("puts the theme and bridge in front of the markup and the fragment shim after it", () => {
     const doc = buildHtmlBlockDocument("<p>hi</p>", THEME);
-    expect(doc.startsWith("<style>:root{--foreground:black;--chart-1:blue}</style><script>")).toBe(true);
+    expect(doc.startsWith("<style>:root{--chart-1:blue;color-scheme:light}</style><script>")).toBe(true);
     expect(doc).toContain(__HTML_BLOCK_BRIDGE__);
     expect(doc).toContain("</script><p>hi</p>");
     expect(doc.endsWith(__FRAGMENT_NAV_SHIM__)).toBe(true);
@@ -74,12 +76,33 @@ describe("buildHtmlBlockDocument", () => {
     expect(doc.split("\n")[1]!.startsWith("line2")).toBe(true);
   });
 
-  it("gives the app's color scheme only to HTML that uses a theme token", () => {
-    expect(buildHtmlBlockDocument('<p style="color:var(--foreground)">x</p>', THEME)).toContain(
-      ";color-scheme:dark}",
+  it("gives the app's color scheme only to HTML that paints a theme background", () => {
+    // Theme-painted: a surface background with foreground text keeps the dark scheme.
+    const painted = buildHtmlBlockDocument(
+      '<div style="background:var(--surface);color:var(--foreground)">x</div>',
+      THEME,
     );
-    expect(buildHtmlBlockDocument('<p style="color:#333">x</p>', THEME)).not.toContain(
-      "color-scheme",
+    expect(painted).toContain("--foreground:black");
+    expect(painted).toContain(";color-scheme:dark}");
+    // Text-only borrowing: a diagram with its own pastel boxes must not get
+    // the dark foreground, or its text turns near-white on light boxes.
+    const textOnly = buildHtmlBlockDocument(
+      '<div style="background:#dbeafe;color:var(--foreground)">x</div>',
+      THEME,
+    );
+    expect(
+      textOnly.startsWith("<style>:root{--chart-1:blue;color-scheme:light}</style><script>"),
+    ).toBe(true);
+    // Chart-only borrowing: series colours stay, but the default text must
+    // not flip to white on the white canvas.
+    const chartOnly = buildHtmlBlockDocument('<div style="fill:var(--chart-1)">x</div>', THEME);
+    expect(
+      chartOnly.startsWith("<style>:root{--chart-1:blue;color-scheme:light}</style><script>"),
+    ).toBe(true);
+    expect(chartOnly).not.toContain("color-scheme:dark");
+    // Plain HTML is a light document too.
+    expect(buildHtmlBlockDocument('<p style="color:#333">x</p>', THEME)).toContain(
+      "color-scheme:light",
     );
   });
 });
@@ -91,6 +114,29 @@ describe("usesThemeTokens", () => {
     expect(usesThemeTokens("font-family: var(--font-sans)")).toBe(true);
     expect(usesThemeTokens("border-radius: var(--border-radius)")).toBe(false);
     expect(usesThemeTokens("--foreground: red")).toBe(false);
+  });
+});
+
+describe("usesThemeBackground", () => {
+  it("matches surface tokens only", () => {
+    expect(usesThemeBackground("background: var(--surface)")).toBe(true);
+    expect(usesThemeBackground("background: var(--background)")).toBe(true);
+    expect(usesThemeBackground("background: var( --muted )")).toBe(true);
+    expect(usesThemeBackground("color: var(--foreground)")).toBe(false);
+    expect(usesThemeBackground("fill: var(--chart-1)")).toBe(false);
+    expect(usesThemeBackground("border-color: var(--border)")).toBe(false);
+    expect(usesThemeBackground("--surface: white")).toBe(false);
+  });
+});
+
+describe("stripThemeForegroundTokens", () => {
+  it("drops only the text tokens", () => {
+    expect(
+      stripThemeForegroundTokens(
+        "--foreground:black;--chart-1:blue;--muted-foreground:gray;--font-sans:Inter",
+      ),
+    ).toBe("--chart-1:blue;--font-sans:Inter");
+    expect(stripThemeForegroundTokens("")).toBe("");
   });
 });
 

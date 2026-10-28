@@ -13,11 +13,18 @@ import { withFragmentNavShim } from "./iframe-fragment-nav";
  *
  * The prefix also carries the app's theme tokens as CSS custom properties, so
  * HTML written against `var(--foreground)` / `var(--chart-1)` follows light and
- * dark mode. Using a token is the opt-in: only then does the document also get
- * the app's `color-scheme`. That matters in dark mode, where a light document
- * inside a dark page is painted on an opaque white canvas — right for HTML
- * that was written for white, wrong for HTML that asked for the theme. HTML
- * that uses no token is left exactly as written: no reset, no scheme.
+ * dark mode. Painting with the theme is the opt-in, and it takes a background
+ * token (`var(--surface)`, `var(--background)`, ...): only then does the
+ * document also get the app's `color-scheme` and its text tokens. That matters
+ * in dark mode, where a light document inside a dark page is painted on an
+ * opaque white canvas — a diagram that borrows only `var(--foreground)` for
+ * its text while painting its own pastel boxes would otherwise get near-white
+ * text on light boxes, unreadable, and a chart that only borrows a series
+ * colour would get its default text flipped to white on the same white canvas.
+ * HTML that paints no theme background is therefore rendered as a light
+ * document: `color-scheme: light`, its non-text tokens still available, and
+ * its foreground tokens left undefined so text falls back to the light
+ * scheme's dark default (or the author's own fallback).
  */
 
 /** Marker on every bridge message; anything without it is ignored. */
@@ -52,6 +59,36 @@ export const HTML_BLOCK_THEME_TOKENS = [
   "--chart-5",
   "--radius",
 ] as const;
+
+/**
+ * Tokens that paint a surface. Using one means the document paints with the
+ * theme, so it opts into the app's color scheme and text tokens. Chart and
+ * border tokens are deliberately not here: a chart that only borrows a series
+ * colour, or a diagram that only borrows a border colour, still sits on a
+ * light canvas the author painted (or the default white canvas).
+ */
+export const HTML_BLOCK_THEME_BACKGROUND_TOKENS = [
+  "--background",
+  "--surface",
+  "--muted",
+  "--secondary",
+  "--accent",
+  "--primary",
+  "--destructive",
+  "--success",
+  "--warning",
+  "--info",
+  "--brand",
+] as const;
+
+/** Text tokens: defined only for theme-painted documents (see above). */
+const HTML_BLOCK_THEME_FOREGROUND_TOKENS: ReadonlySet<string> = new Set([
+  "--foreground",
+  "--muted-foreground",
+  "--primary-foreground",
+  "--secondary-foreground",
+  "--accent-foreground",
+]);
 
 // The bridge is one line on purpose: it sits on the author's first line, so a
 // script error's line number still points at the author's own source.
@@ -143,9 +180,35 @@ const THEME_TOKEN_USE = new RegExp(
   `var\\(\\s*(?:${[...HTML_BLOCK_THEME_TOKENS, "--font-sans"].join("|")})(?![\\w-])`,
 );
 
-/** Whether the HTML reads any theme token, which opts it into the app's scheme. */
+/** Whether the HTML reads any theme token. */
 export function usesThemeTokens(html: string): boolean {
   return THEME_TOKEN_USE.test(html);
+}
+
+const THEME_BACKGROUND_TOKEN_USE = new RegExp(
+  `var\\(\\s*(?:${HTML_BLOCK_THEME_BACKGROUND_TOKENS.join("|")})(?![\\w-])`,
+);
+
+/** Whether the HTML paints a surface with a theme token, opting into the app's scheme. */
+export function usesThemeBackground(html: string): boolean {
+  return THEME_BACKGROUND_TOKEN_USE.test(html);
+}
+
+/**
+ * Drops the text tokens from a `:root` declaration list, so a `var(--foreground)`
+ * in a light document resolves to the light scheme's dark default (or the
+ * author's fallback) instead of the app's dark-mode foreground. Declarations
+ * are `name:value` pairs joined by `;` (values here never contain `;` — see
+ * UNSAFE_CSS_VALUE in readHtmlBlockTheme), so splitting on `;` is exact.
+ */
+export function stripThemeForegroundTokens(declarations: string): string {
+  return declarations
+    .split(";")
+    .filter((pair) => {
+      const name = pair.split(":")[0]?.trim();
+      return name != null && name !== "" && !HTML_BLOCK_THEME_FOREGROUND_TOKENS.has(name);
+    })
+    .join(";");
 }
 
 /**
@@ -154,9 +217,10 @@ export function usesThemeTokens(html: string): boolean {
  * fragment-navigation shim after it.
  */
 export function buildHtmlBlockDocument(html: string, theme: HtmlBlockTheme): string {
-  const root = usesThemeTokens(html)
-    ? `${theme.declarations};color-scheme:${theme.colorScheme}`
-    : theme.declarations;
+  const parts = usesThemeBackground(html)
+    ? [theme.declarations, `color-scheme:${theme.colorScheme}`]
+    : [stripThemeForegroundTokens(theme.declarations), "color-scheme:light"];
+  const root = parts.filter((part) => part !== "").join(";");
   const prefix = `<style>:root{${root}}</style><script>${BRIDGE_SCRIPT}</script>`;
   const doctype = DOCTYPE_RE.exec(html)?.[0];
   const body = doctype
