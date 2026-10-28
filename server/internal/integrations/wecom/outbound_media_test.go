@@ -345,7 +345,7 @@ func TestSendAttachments_ADeliveredFileIsNotAnnounced(t *testing.T) {
 	if len(got) != 1 || got[0] != "Here it is." {
 		t.Errorf("text sends = %v, want the answer alone — a delivered file needs no commentary", got)
 	}
-	for _, notice := range []string{mediaSendFailedText, mediaSendUnknownText, mediaLookupFailedText} {
+	for _, notice := range []string{copyFor(DefaultLocale).MediaSendFailed, copyFor(DefaultLocale).MediaSendUnknown, copyFor(DefaultLocale).MediaLookupFailed} {
 		if slices.Contains(got, notice) {
 			t.Errorf("a delivered file was reported to the user as %q", notice)
 		}
@@ -372,10 +372,10 @@ func TestSendAttachments_ARefusedFileIsReportedAsDefinitelyFailed(t *testing.T) 
 	if len(got) != 2 {
 		t.Fatalf("text sends = %v, want the answer and a note that the file failed", got)
 	}
-	if got[1] != mediaSendFailedText {
+	if got[1] != copyFor(DefaultLocale).MediaSendFailed {
 		t.Errorf("second message = %q, want the definite failure notice — the server refused it, so there is no doubt to hedge", got[1])
 	}
-	if strings.Contains(got[1], mediaSendUnknownText) {
+	if strings.Contains(got[1], copyFor(DefaultLocale).MediaSendUnknown) {
 		t.Error("a refusal was reported with the hedged wording; a definite failure the user is invited to doubt is a failure they will not act on")
 	}
 	if n := len(mediaSends(t, conn)); n != 0 {
@@ -442,7 +442,7 @@ func TestSendAttachments_ALookupFailureIsSaidOutLoud(t *testing.T) {
 	if len(got) != 2 {
 		t.Fatalf("text sends = %v, want the answer and a note that the lookup failed", got)
 	}
-	if got[1] != mediaLookupFailedText {
+	if got[1] != copyFor(DefaultLocale).MediaLookupFailed {
 		t.Errorf("second message = %q, want the lookup-failure notice", got[1])
 	}
 }
@@ -472,7 +472,7 @@ func TestSendAttachments_ADeliveryShedForBacklogIsSaidOutLoud(t *testing.T) {
 		t.Fatalf("upload init frames = %d, want 0 — the delivery was supposed to be shed", n)
 	}
 	got := markdownSends(t, conn)
-	if len(got) != 2 || got[1] != mediaSendFailedText {
+	if len(got) != 2 || got[1] != copyFor(DefaultLocale).MediaSendFailed {
 		t.Errorf("text sends = %v, want the answer and the failure notice — a shed delivery the user is never told about is a file that silently vanishes", got)
 	}
 }
@@ -523,7 +523,7 @@ func TestSendAttachment_RefusesAnOversizeAttachmentWithoutReadingIt(t *testing.T
 		t.Errorf("upload init frames = %d, want 0", n)
 	}
 	got := markdownSends(t, conn)
-	if len(got) != 2 || got[1] != mediaSendFailedText {
+	if len(got) != 2 || got[1] != copyFor(DefaultLocale).MediaSendFailed {
 		t.Errorf("text sends = %v, want the answer and the definite failure notice", got)
 	}
 }
@@ -545,7 +545,7 @@ func TestSendAttachments_ReportsAnUnreadableObject(t *testing.T) {
 		t.Errorf("upload init frames = %d, want 0 — there were no bytes to upload", n)
 	}
 	got := markdownSends(t, conn)
-	if len(got) != 2 || got[1] != mediaSendFailedText {
+	if len(got) != 2 || got[1] != copyFor(DefaultLocale).MediaSendFailed {
 		t.Errorf("text sends = %v, want the answer and the failure notice", got)
 	}
 }

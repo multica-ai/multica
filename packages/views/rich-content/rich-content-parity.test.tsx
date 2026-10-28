@@ -205,8 +205,10 @@ async function expectMermaidRendered(container: HTMLElement) {
   await waitFor(() => {
     expect(mermaidLeaf(container)).not.toBeNull();
   });
+  // Rendered, not still loading: the diagram's sandboxed frame carries the SVG.
   await waitFor(() => {
-    expect(mermaidLeaf(container)?.querySelector("svg")).not.toBeNull();
+    const frame = mermaidLeaf(container)?.querySelector<HTMLIFrameElement>(".mermaid-diagram-frame");
+    expect(frame?.srcdoc).toContain("<svg");
   });
   // Not a plain code block: the fence was upgraded.
   expect(container.querySelector("code.hljs")).toBeNull();

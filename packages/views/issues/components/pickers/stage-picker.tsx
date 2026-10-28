@@ -31,6 +31,7 @@ export function StagePicker({
   maxStage = 0,
   trigger: customTrigger,
   triggerRender,
+  tooltip,
   open: controlledOpen,
   onOpenChange: controlledOnOpenChange,
   align,
@@ -42,6 +43,8 @@ export function StagePicker({
   maxStage?: number;
   trigger?: React.ReactNode;
   triggerRender?: React.ReactElement;
+  /** Hover tooltip naming the property; hidden while the picker is open. */
+  tooltip?: React.ReactNode;
   open?: boolean;
   onOpenChange?: (v: boolean) => void;
   align?: "start" | "center" | "end";
@@ -62,6 +65,7 @@ export function StagePicker({
       width="w-44"
       align={align}
       triggerRender={triggerRender}
+      tooltip={tooltip}
       trigger={
         customTrigger ?? (
           <>

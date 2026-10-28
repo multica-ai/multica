@@ -42,6 +42,37 @@ export function useUnbindAgentsAndDeleteRuntime(wsId: string) {
   });
 }
 
+// Confirmed access restriction to private or selected members. Like runtime deletion, this changes
+// runtime rows, agent bindings, and task presence, so every affected server
+// projection is invalidated after the transaction settles.
+export function useRevokeRuntimeWorkspaceAccess(wsId: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({
+      runtimeId,
+      expectedNonownerAgentIds,
+      expectedTaskIds,
+      sharedWith,
+    }: {
+      runtimeId: string;
+      expectedNonownerAgentIds: string[];
+      expectedTaskIds: string[];
+      sharedWith?: string[];
+    }) =>
+      api.revokeRuntimeWorkspaceAccess(
+        runtimeId,
+        expectedNonownerAgentIds,
+        expectedTaskIds,
+        sharedWith,
+      ),
+    onSettled: () => {
+      qc.invalidateQueries({ queryKey: runtimeKeys.all(wsId) });
+      qc.invalidateQueries({ queryKey: workspaceKeys.agents(wsId) });
+      qc.invalidateQueries({ queryKey: agentTaskSnapshotKeys.all(wsId) });
+    },
+  });
+}
+
 // useUpdateRuntime patches editable fields on a runtime (visibility, custom
 // name). Invalidates the runtime list so the picker disabled-state and
 // display names recompute.
@@ -55,6 +86,7 @@ export function useUpdateRuntime(wsId: string) {
       runtimeId: string;
       patch: {
         visibility?: "private" | "public";
+        shared_with?: string[];
         // Empty string clears the custom name; omit to leave unchanged.
         custom_name?: string;
         apply_to_machine?: boolean;

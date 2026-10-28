@@ -130,7 +130,7 @@ export function TokensTab() {
   };
 
   return (
-    <SettingsTab title={t(($) => $.tokens.title)} description={t(($) => $.tokens.purpose)}>
+    <SettingsTab title={t(($) => $.tokens.title)} description={t(($) => $.tokens.purpose)} scope="account">
       <SettingsSection
         description={t(($) => $.tokens.security_note)}
       >

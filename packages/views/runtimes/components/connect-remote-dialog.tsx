@@ -12,9 +12,9 @@ import { Check, ChevronRight, Copy, Terminal } from "lucide-react";
 import { useQueryClient } from "@tanstack/react-query";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { runtimeKeys } from "@multica/core/runtimes/queries";
+import { useDaemonSetupCommands } from "@multica/core/runtimes";
 import { useWSEvent } from "@multica/core/realtime";
 import { paths, useWorkspaceSlug } from "@multica/core/paths";
-import { useConfigStore } from "@multica/core/config";
 import {
   Dialog,
   DialogContent,
@@ -24,6 +24,7 @@ import {
   DialogTitle,
 } from "@multica/ui/components/ui/dialog";
 import { Button } from "@multica/ui/components/ui/button";
+import { TooltipHint } from "@multica/ui/components/common/tooltip-hint";
 import { CODE_LIGATURE_CLASS } from "@multica/ui/lib/code-style";
 import { copyText } from "@multica/ui/lib/clipboard";
 import {
@@ -32,39 +33,11 @@ import {
 } from "@multica/ui/lib/motion";
 import { cn } from "@multica/ui/lib/utils";
 import { CliInstallCommand } from "../../common/cli-install-command";
+import { DaemonSetupNotice } from "../../common/daemon-setup-notice";
 import { useNavigation } from "../../navigation";
 import { useT } from "../../i18n";
 
 type Step = "instructions" | "success";
-
-const CLOUD_SERVER_URL = "https://api.multica.ai";
-const CLOUD_APP_URL = "https://multica.ai";
-
-function normalizeCommandURL(url: string | undefined) {
-  return url?.trim().replace(/\/+$/, "") ?? "";
-}
-
-function daemonCommands(serverUrl: string | undefined, appUrl: string | undefined) {
-  const normalizedServerUrl = normalizeCommandURL(serverUrl);
-  const normalizedAppUrl = normalizeCommandURL(appUrl);
-  if (normalizedServerUrl && normalizedAppUrl) {
-    return {
-      setupCmd: `multica setup self-host --server-url ${normalizedServerUrl} --app-url ${normalizedAppUrl}`,
-      tokenCmd: `multica config set server_url ${normalizedServerUrl}
-multica config set app_url ${normalizedAppUrl}
-multica login --token <YOUR_TOKEN>
-multica daemon start`,
-    };
-  }
-
-  return {
-    setupCmd: "multica setup",
-    tokenCmd: `multica config set server_url ${CLOUD_SERVER_URL}
-multica config set app_url ${CLOUD_APP_URL}
-multica login --token <YOUR_TOKEN>
-multica daemon start`,
-  };
-}
 
 export function ConnectRemoteDialog({ onClose }: { onClose: () => void }) {
   const [step, setStep] = useState<Step>("instructions");
@@ -161,9 +134,7 @@ export function ConnectRemoteDialog({ onClose }: { onClose: () => void }) {
   );
 }
 
-// ---------------------------------------------------------------------------
 // Copy button + code row — mirrors onboarding/CliInstallInstructions
-// ---------------------------------------------------------------------------
 
 function CopyButton({ text, ariaLabel }: { text: string; ariaLabel: string }) {
   const [copied, setCopied] = useState(false);
@@ -181,18 +152,20 @@ function CopyButton({ text, ariaLabel }: { text: string; ariaLabel: string }) {
   };
 
   return (
-    <button
-      type="button"
-      onClick={handleCopy}
-      aria-label={ariaLabel}
-      className="shrink-0 rounded-xs p-1 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-    >
-      {copied ? (
-        <Check className="h-3.5 w-3.5 text-success" aria-hidden />
-      ) : (
-        <Copy className="h-3.5 w-3.5" aria-hidden />
-      )}
-    </button>
+    <TooltipHint label={ariaLabel}>
+      <button
+        type="button"
+        onClick={handleCopy}
+        aria-label={ariaLabel}
+        className="shrink-0 rounded-xs p-1 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+      >
+        {copied ? (
+          <Check className="h-3.5 w-3.5 text-success" aria-hidden />
+        ) : (
+          <Copy className="h-3.5 w-3.5" aria-hidden />
+        )}
+      </button>
+    </TooltipHint>
   );
 }
 
@@ -235,15 +208,11 @@ function CommandStep({
   );
 }
 
-// ---------------------------------------------------------------------------
 // Step 1: Instructions
-// ---------------------------------------------------------------------------
 
 function InstructionsStep({ onClose }: { onClose: () => void }) {
   const { t } = useT("runtimes");
-  const daemonServerUrl = useConfigStore((s) => s.daemonServerUrl);
-  const daemonAppUrl = useConfigStore((s) => s.daemonAppUrl);
-  const { setupCmd, tokenCmd } = daemonCommands(daemonServerUrl, daemonAppUrl);
+  const commands = useDaemonSetupCommands();
   return (
     <>
       <DialogHeader className="px-6 pt-6 pb-2">
@@ -279,19 +248,28 @@ function InstructionsStep({ onClose }: { onClose: () => void }) {
 
           <div>
             <CommandStep n={2} label={t(($) => $.connect.step2_label)}>
-              <CommandRow
-                cmd={setupCmd}
-                copyAria={t(($) => $.connect.copy_aria)}
-              />
+              {commands.status === "ready" ? (
+                <CommandRow
+                  cmd={commands.setupCmd}
+                  copyAria={t(($) => $.connect.copy_aria)}
+                />
+              ) : (
+                <DaemonSetupNotice status={commands.status} />
+              )}
             </CommandStep>
-            <p className="mt-1.5 text-micro leading-[1.55] text-muted-foreground">
-              {t(($) => $.connect.step2_hint)}
-            </p>
+            {commands.status === "ready" && (
+              <p className="mt-1.5 text-micro leading-[1.55] text-muted-foreground">
+                {t(($) => $.connect.step2_hint)}
+              </p>
+            )}
           </div>
 
-          <LiveListening />
-
-          <TroubleshootingDetails tokenCmd={tokenCmd} />
+          {commands.status === "ready" && (
+            <>
+              <LiveListening />
+              <TroubleshootingDetails tokenCmd={commands.tokenCmd} />
+            </>
+          )}
         </div>
       </div>
 
@@ -361,9 +339,7 @@ function TroubleshootingDetails({ tokenCmd }: { tokenCmd: string }) {
   );
 }
 
-// ---------------------------------------------------------------------------
 // Live-listening indicator
-// ---------------------------------------------------------------------------
 
 function LiveListening() {
   const { t } = useT("runtimes");
@@ -384,9 +360,7 @@ function LiveListening() {
   );
 }
 
-// ---------------------------------------------------------------------------
 // Step 2: Success
-// ---------------------------------------------------------------------------
 
 function SuccessStep({
   onGoToAgents,

@@ -2,6 +2,7 @@ package attribution
 
 import (
 	"testing"
+	"time"
 
 	"github.com/jackc/pgx/v5/pgtype"
 )
@@ -502,5 +503,34 @@ func TestSourceStringDefaultsToUnattributed(t *testing.T) {
 	}
 	if SourceDirectHuman.String() != "direct_human" {
 		t.Errorf("unexpected string for direct_human: %q", SourceDirectHuman.String())
+	}
+}
+
+// HumanAction feeds the self-host "delegating member" count: only the human
+// who acted counts, never a human the run merely inherits.
+func TestHumanActionOnlyForTheActingMember(t *testing.T) {
+	member := pgtype.UUID{Bytes: [16]byte{1}, Valid: true}
+	acted := pgtype.Timestamptz{Time: time.Date(2026, 9, 9, 23, 0, 0, 0, time.UTC), Valid: true}
+	cases := []struct {
+		name string
+		got  Result
+		want bool
+	}{
+		{"member comment", ClassifyComment(CommentFacts{AuthorType: "member", AuthorID: member, CreatedAt: acted}, SourceDelegation), true},
+		{"agent comment", ClassifyComment(CommentFacts{AuthorType: "agent", SourceTaskID: member, ParentOriginator: member}, SourceDelegation), false},
+		{"actor assignment", ClassifyDirect(DirectFacts{ActorUserID: member}), true},
+		{"issue creator fallback", ClassifyDirect(DirectFacts{CreatorType: "member", CreatorID: member}), false},
+		{"agent-created origin", ClassifyDirect(DirectFacts{OriginType: "agent_create", OriginOriginator: member}), false},
+		{"chat sender", DirectHumanRun(member, EvidenceChat, pgtype.UUID{}), true},
+		{"unresolved chat sender", DirectHumanRun(pgtype.UUID{}, EvidenceChat, pgtype.UUID{}), false},
+		{"trigger owner", TriggerOwner(member, EvidenceAutopilotRun, pgtype.UUID{}), false},
+	}
+	for _, tc := range cases {
+		if tc.got.HumanAction != tc.want {
+			t.Errorf("%s: HumanAction = %v, want %v", tc.name, tc.got.HumanAction, tc.want)
+		}
+	}
+	if got := cases[0].got.HumanActedAt; got != acted {
+		t.Errorf("member comment HumanActedAt = %v, want the comment's created_at", got)
 	}
 }

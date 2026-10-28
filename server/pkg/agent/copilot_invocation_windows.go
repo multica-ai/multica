@@ -7,8 +7,8 @@ import (
 	"os"
 )
 
-// platformCopilotInvocation keeps the multi-line -p prompt built by
-// buildCopilotArgs intact on Windows by spawning the native copilot.exe
+// platformCopilotInvocation keeps the argv built by buildCopilotArgs intact
+// on Windows (the prompt itself rides stdin) by spawning the native copilot.exe
 // bundled in the npm package, so neither cmd.exe's %* expansion nor
 // PowerShell's $args re-serialisation can re-tokenise it (see
 // resolveCopilotNativeFromShim for why neither launcher can be made safe).

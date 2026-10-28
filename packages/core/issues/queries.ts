@@ -19,6 +19,7 @@ import type {
   ListIssuesCache,
 } from "../types";
 import { ALL_STATUSES } from "./config";
+import { issueColumnCategory } from "./status-category";
 
 export function issueTasksOptions(issueId: string) {
   return queryOptions({
@@ -242,7 +243,7 @@ export type AssigneeGroupedIssuesFilter = Omit<
   "group_by" | "limit" | "offset" | "group_assignee_type" | "group_assignee_id"
 >;
 
-/** Page size per status column. */
+/** Size of the issue list's first page, all categories together. */
 export const ISSUE_PAGE_SIZE = 50;
 
 /**
@@ -267,17 +268,20 @@ export function flattenIssueBuckets(data: ListIssuesCache) {
   return out;
 }
 
+/**
+ * One request for the list's first page, grouped into the category buckets
+ * here. Every reader of this cache looks an issue up by id and none pages a
+ * bucket, so one shared window serves them all. Each bucket's `total` is its
+ * own row count. A custom status the server did not resolve falls back to
+ * `issueColumnCategory`'s bucket, so no row is dropped.
+ */
 async function fetchFirstPages(filter: MyIssuesFilter = {}, sort?: IssueSortParam): Promise<ListIssuesCache> {
-  const responses = await Promise.all(
-    PAGINATED_CATEGORIES.map((category) =>
-      api.listIssues({ status_category: category, limit: ISSUE_PAGE_SIZE, offset: 0, ...sort, ...filter }),
-    ),
-  );
+  const res = await api.listIssues({ limit: ISSUE_PAGE_SIZE, offset: 0, ...sort, ...filter });
   const byStatus: ListIssuesCache["byStatus"] = {};
-  PAGINATED_CATEGORIES.forEach((status: IssueStatusCategory, i: number) => {
-    const res = responses[i]!;
-    byStatus[status] = { issues: res.issues, total: res.total };
-  });
+  for (const category of PAGINATED_CATEGORIES) {
+    const issues = res.issues.filter((issue) => issueColumnCategory(issue) === category);
+    byStatus[category] = { issues, total: issues.length };
+  }
   return { byStatus };
 }
 
@@ -361,7 +365,7 @@ export function issueTableFacetsOptions(
  * `Issue[]` for consumers. Mutations and ws-updaters must use
  * `setQueryData<ListIssuesCache>(...)` and preserve the byStatus shape.
  *
- * Fetches the first page of each paginated status in parallel.
+ * Fetches the first page in one request and buckets it by category.
  */
 export function issueListOptions(wsId: string, sort?: IssueSortParam) {
   return queryOptions({
@@ -376,8 +380,12 @@ export function issueListOptions(wsId: string, sort?: IssueSortParam) {
  * Page size for the scheduled-issue fetch. The Gantt view always pulls every
  * scheduled issue (no client pagination), so this is just the chunk size we
  * use to walk the server's `(limit, offset)` window until we hit `total`.
+ *
+ * Must not exceed the server's `ListIssues` page-size cap (100): the server
+ * silently clamps larger values, and a clamped page would otherwise look like
+ * a short final page.
  */
-export const PROJECT_GANTT_PAGE_LIMIT = 500;
+export const PROJECT_GANTT_PAGE_LIMIT = 100;
 
 /**
  * Paranoia cap on the loop in {@link fetchProjectGanttIssues}. Real projects
@@ -402,9 +410,14 @@ async function fetchProjectGanttIssues(
       offset,
     });
     issues.push(...res.issues);
-    if (res.issues.length < PROJECT_GANTT_PAGE_LIMIT) break;
+    if (res.issues.length === 0) break;
     if (issues.length >= res.total) break;
-    offset += PROJECT_GANTT_PAGE_LIMIT;
+    if (res.issues.length < PROJECT_GANTT_PAGE_LIMIT) break;
+    // Advance by what the server actually returned. This does not make the
+    // loop tolerate a server cap below PROJECT_GANTT_PAGE_LIMIT — a capped
+    // page is short and ends the loop above — so the constant must stay in
+    // sync with the server's ListIssues page-size cap.
+    offset += res.issues.length;
   }
   return issues;
 }

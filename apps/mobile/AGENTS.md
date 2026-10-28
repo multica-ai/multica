@@ -35,6 +35,8 @@ These rules apply only to `apps/mobile/`, in addition to the [root instructions]
 
 ### Sheets and navigation
 
+- Import navigation hooks, theme providers, and theme values from `expo-router`. Its bundled navigation context is separate from `@react-navigation/*`; direct imports from those packages are lint errors.
+
 | Content | Container |
 | --- | --- |
 | Confirmation or text prompt | Native alert/prompt |

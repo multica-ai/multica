@@ -1,0 +1,115 @@
+---
+title: Search, shortcuts, and preferences
+description: Search and run commands with ⌘K, review and rebind keyboard shortcuts, find text inside an issue, and set personal preferences such as theme, language, and time zone.
+---
+
+import { Callout } from "fumadocs-ui/components/callout";
+import { Step, Steps } from "fumadocs-ui/components/steps";
+
+Keys below are written for macOS. On Windows and Linux, `⌘` becomes `Ctrl`; the tables list both.
+
+## Search
+
+Press `⌘K`, or click **Search...** at the top of the sidebar. With nothing typed, the search box offers **New Issue** and the issues you opened recently. Once you type, results are grouped:
+
+| Group | What it finds |
+|---|---|
+| **Pages** | Workspace pages such as Inbox, Chat, Issues, Projects, Agents, and Settings. |
+| **Commands** | New Issue, New Project, and switching to the light, dark, or system theme. On an issue page you also get Copy Issue Link, Copy Identifier, Fold All Comments, and Unfold All Comments. |
+| **Members** | Matches by name or email. |
+| **Workspaces** | Other workspaces you belong to; selecting one switches to it. |
+| **Projects**, **Issues** | Matches titles as well as project descriptions, issue descriptions, and comments. The matching snippet shows under the result, and done issues are included. |
+| **Cancelled** | Cancelled projects and issues are grouped at the end instead of mixing in with the rest. |
+
+Selecting a result opens it. Hold `⌘` (`Ctrl` on Windows and Linux) while clicking or pressing Enter to open it in a new tab. `Esc` closes the search box.
+
+## Keyboard shortcuts
+
+| Action | macOS | Windows / Linux | Notes |
+|---|---|---|---|
+| Open search | `⌘K` | `Ctrl+K` | |
+| Create issue | `C` | `C` | Opens your preferred creation flow. On a project page, the new issue is prefilled with that project. |
+| Toggle left sidebar | `⌘B` | `Ctrl+B` | |
+| Toggle right sidebar | `⌘/` | `Ctrl+/` | Only on pages with a right sidebar, such as an issue. |
+| Toggle chat window | `⌘J` | `Ctrl+J` | Opening it puts the cursor in the message input. See [Chat from any page](/chat#chat-from-any-page). |
+| Find in issue | `⌘F` | `Ctrl+F` | See below. |
+| Archive notification | `E` | `E` | Archives the open inbox notification, or restores it while you're reading the archive. |
+| Send | `⌘↵` | `Ctrl+Enter` | Sends comments and chat messages, and also submits new issues. |
+| Go back | `⌘[` | `Ctrl+[` | |
+| Go forward | `⌘]` | `Ctrl+]` | |
+
+Single-key shortcuts (`C`, `E`) and Go back / Go forward don't fire while you're typing in an input.
+
+The **Navigation** group also has Go to Inbox, Chat, My Issues, Issues, Projects, Autopilot, Agents, Squads, Usage, Runtimes, Skills, and Settings. None of them has a key by default; bind the ones you use.
+
+### Fixed system shortcuts
+
+These can't be changed. Except for `Esc`, they work only in the [desktop app](/desktop-app); in a browser, the browser handles these keys.
+
+| Action | macOS | Windows / Linux |
+|---|---|---|
+| Open Settings | `⌘,` | `Ctrl+,` |
+| Close active tab | `⌘W` | `Ctrl+W` |
+| Select tab 1–8 | `⌘1`–`⌘8` | `Ctrl+1`–`Ctrl+8` |
+| Select last tab | `⌘9` | `Ctrl+9` |
+| Zoom in / Zoom out / Reset zoom | `⌘+` / `⌘−` / `⌘0` | `Ctrl++` / `Ctrl+-` / `Ctrl+0` |
+| Close dialog or menu | `Esc` | `Esc` |
+
+## Change a shortcut
+
+<Steps>
+<Step>
+
+Open **Settings → Shortcuts**. Use the search box at the top to find an action by name.
+
+</Step>
+<Step>
+
+Click the keys to the right of an action. When it says "Press keys", press the new combination. `Esc` cancels; `Delete` clears the action's shortcut.
+
+</Step>
+<Step>
+
+The two buttons at the end of each row reset that action to its default and disable it. **Restore defaults** at the top undoes every customization at once.
+
+</Step>
+</Steps>
+
+Shortcuts are saved on the current device only. On another computer, or when you switch between the browser and the desktop app, set them again.
+
+Recording rejects a few kinds of combinations and says why under the keys:
+
+- A combination already assigned to another action.
+- Combinations the browser, the desktop window, or the operating system owns, such as `⌘W`, `⌘R`, `⌘Q`, `⌘,`, editing keys like copy and paste, `⌘0`–`⌘9`, and the zoom keys. In a browser, `⌘P`, `⌘L`, `⌘T`, `⌘N`, `⌘D`, and `⌘U` are off-limits too; the desktop app allows them. On Windows and Linux, any combination with the Win / Super key is rejected.
+- Actions that also work inside an input, such as Open search, Toggle chat window, and Find in issue, need `⌘`, `Ctrl`, or `Control`, so they never fire while you type.
+- **Send** can only be `↵` or `⌘↵`.
+
+<Callout>
+If you set **Send** to `↵`, use `Shift+Enter` for a new line: it inserts a paragraph, continues a list, or adds a line break in a code block.
+</Callout>
+
+## Find in issue
+
+On an issue page, `⌘F` opens Multica's own find bar instead of the browser's. Browser find only sees the comments currently rendered on screen; this one searches the whole timeline, including the title, the description, and every comment.
+
+Matching ignores case. The bar shows "current/total", or "No matches". Press `↵` for the next match, `Shift+Enter` for the previous one, and `Esc` to close. Text that spans a formatting change (say, half of it bold) isn't found.
+
+In the desktop app, only the visible tab responds to `⌘F`.
+
+## Preferences
+
+Personal preferences live under **Settings → Preferences** and apply immediately. Each group is stored in a different place:
+
+| Group | Setting | Stored in |
+|---|---|---|
+| **Language & region** | Language: English, 中文, 한국어, 日本語, Français. The page reloads after a change.<br />Time zone: follows the browser by default; used for dates and charts in all your workspaces. The list covers every time zone and is searchable. | Your account, synced to other devices |
+| **Appearance** | Theme: Light, Dark, or System. You can also type "theme" in the search box to switch. | This device |
+| **Comments & chat** | **Pin comment bar to bottom**: keeps the comment box in view while you read a long timeline.<br />**When replying to a running agent**: whether a reply defaults to "Add to current run" or "Start after this run". You can still change it per message; see [Steer a running agent](/mentioning-agents#steer-a-running-agent).<br />**Floating chat window**: when off, the chat button no longer appears in the bottom-right corner. | This device |
+| **Opening issues** | Whether clicking a card or row opens the full page or a side preview. Shift+Click opens the other one. | This device |
+| **Fields shown when creating issues** | Which fields stay on the toolbar for "Create with agent" and "Manual create". Hidden fields remain in the ⋯ menu and reappear while they hold a value. | This device, for the current workspace |
+
+## Next steps
+
+- [Chat with agents](/chat) — the floating chat window, queued messages, and Steer.
+- [Issues](/issues) — what an issue holds, statuses, and views.
+- [Comments](/comments) — comments, annotations, and @mentions.

@@ -10,6 +10,7 @@ import {
   HardDrive,
   Pencil,
   Search,
+  Tags,
   X,
 } from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
@@ -18,12 +19,15 @@ import { labelListOptions } from "@multica/core/labels/queries";
 import type { Agent, Label, MemberWithUser } from "@multica/core/types";
 import { resolvePublicFileUrl } from "@multica/core/workspace/avatar-url";
 import { Button } from "@multica/ui/components/ui/button";
+import { IconButton } from "@multica/ui/components/common/icon-button";
 import {
   DropdownMenu,
   DropdownMenuCheckboxItem,
   DropdownMenuContent,
+  DropdownMenuItem,
   DropdownMenuRadioGroup,
   DropdownMenuRadioItem,
+  DropdownMenuSeparator,
   DropdownMenuSub,
   DropdownMenuSubContent,
   DropdownMenuSubTrigger,
@@ -51,6 +55,13 @@ import {
   type SkillSortField,
 } from "@multica/core/skills/stores";
 import { LabelChip } from "../../labels/label-chip";
+import { LabelManager } from "../../labels/label-manager";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+} from "@multica/ui/components/ui/dialog";
 import { useT } from "../../i18n";
 import type { SkillRow } from "./skill-list-filter";
 import { PAGE_TOOLBAR } from "../../layout/page-header";
@@ -126,6 +137,7 @@ export function SkillListToolbar({
 }) {
   const { t } = useT("skills");
   const [labelSearch, setLabelSearch] = useState("");
+  const [manageLabelsOpen, setManageLabelsOpen] = useState(false);
   const wsId = useWorkspaceId();
   const { data: catalogLabels = [] } = useQuery(labelListOptions(wsId, "skill"));
 
@@ -451,6 +463,15 @@ export function SkillListToolbar({
                     </div>
                   )}
                 </div>
+                {/* A shortcut to the skill label catalog, next to the
+                    skills it tags; Settings → Labels manages the same list. */}
+                <DropdownMenuSeparator className="my-0" />
+                <div className="p-1">
+                  <DropdownMenuItem onClick={() => setManageLabelsOpen(true)}>
+                    <Tags />
+                    {t(($) => $.toolbar.manage_labels)}
+                  </DropdownMenuItem>
+                </div>
               </DropdownMenuSubContent>
             </DropdownMenuSub>
           </DropdownMenuContent>
@@ -521,7 +542,7 @@ export function SkillListToolbar({
                     </DropdownMenuRadioGroup>
                   </DropdownMenuContent>
                 </DropdownMenu>
-                <Button
+                <IconButton
                   variant="outline"
                   size="icon-sm"
                   onClick={() =>
@@ -529,7 +550,7 @@ export function SkillListToolbar({
                       sortDirection === "asc" ? "desc" : "asc",
                     )
                   }
-                  title={
+                  label={
                     sortDirection === "asc"
                       ? t(($) => $.toolbar.direction_asc)
                       : t(($) => $.toolbar.direction_desc)
@@ -540,7 +561,7 @@ export function SkillListToolbar({
                   ) : (
                     <ArrowDown className="size-3.5" />
                   )}
-                </Button>
+                </IconButton>
               </div>
             </div>
 
@@ -567,6 +588,15 @@ export function SkillListToolbar({
           </PopoverContent>
         </Popover>
       </div>
+
+      <Dialog open={manageLabelsOpen} onOpenChange={setManageLabelsOpen}>
+        <DialogContent className="max-h-[85vh] overflow-y-auto sm:max-w-3xl">
+          <DialogHeader>
+            <DialogTitle>{t(($) => $.toolbar.manage_labels_title)}</DialogTitle>
+          </DialogHeader>
+          <LabelManager scope="skill" />
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

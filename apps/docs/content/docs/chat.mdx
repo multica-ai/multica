@@ -1,30 +1,63 @@
 ---
 title: Chat with agents
-description: One-to-one, fully private conversation with an agent, outside any issue. The agent starts with no issue context and never auto-creates issues — but it acts with your workspace access when you explicitly ask it to.
+description: A one-to-one conversation with an agent that only you can see. The agent starts with no issue context and doesn't create issues on its own; when you explicitly ask, it acts with your workspace access.
 ---
 
 import { Callout } from "fumadocs-ui/components/callout";
+import { Step, Steps } from "fumadocs-ui/components/steps";
+import { ChatDemo } from "@/components/demos/chat-demo";
+import { ChatQueueDemo } from "@/components/demos/chat-queue-demo";
 
-Chat fits work that hasn't formed a clear issue yet: sorting out ideas, checking on the workspace, discussing an approach, or having an agent finish a small task first.
+Chat fits work that hasn't become a clear issue yet: sorting out ideas, checking on the workspace, discussing an approach, asking a question that doesn't belong to any issue, or having an agent finish a small task first.
 
-**Chat is a one-to-one conversation between you and an [agent](/agents)** — stepping outside the [issue](/issues) board. The agent starts with **no issue context** — it isn't looking at your board and won't turn the conversation into issues on its own — and the entire conversation is **fully private** (nobody else in the [workspace](/workspaces), including admins, can see it). It fits discussing an approach with an agent, brainstorming, or asking a question that does not belong to any issue.
+Chat is a one-to-one conversation between you and an [agent](/agents), off the [issue](/issues) board. The whole conversation is **fully private**: nobody else in the [workspace](/workspaces), admins included, can see it.
 
-A chat is **not bound to any issue**: the agent doesn't automatically receive an issue's description and comments, but it can still use the Multica CLI to query workspaces, projects, issues, and skills within its permissions.
+A chat is **not bound to any issue**. The agent isn't watching your board, doesn't automatically receive an issue's description and comments, and won't turn the conversation into issues on its own. It can still use the Multica CLI to query workspaces, projects, issues, and skills within its permissions, and when you explicitly ask, it acts with your workspace access, for example to create an issue.
 
 A chat can also carry background. Click **+** at the bottom left of the input and choose **Project context** to attach a [project](/projects) to the conversation; when the agent runs, it receives that project's description, repositories, and other resources.
 
-![A chat with an agent: a question answered with the result organized into a table](/images/docs/chat-conversation.webp)
-
 ## Start a conversation
 
-1. Open **Chat** in the sidebar.
-2. Click new and pick an agent you have permission to run.
-3. Type a message; you can also attach images or files.
-4. After you send, Multica creates a run for the message, and the reply comes back to the current conversation.
+<Steps>
+<Step>
+
+Open **Chat** in the sidebar.
+
+</Step>
+<Step>
+
+Click new and pick an agent you have permission to run.
+
+</Step>
+<Step>
+
+Type a message; you can also attach images or files.
+
+</Step>
+<Step>
+
+After you send, Multica creates a run for the message, and the reply comes back to the current conversation.
+
+</Step>
+</Steps>
 
 If the runtime is offline, the message waits until it comes back online. Once the agent is archived, or you lose permission to run it, you can't send new messages.
 
-Before the first message, Chat shows up to three suggestions configured for the selected agent. Selecting one copies its full prompt into the composer without sending it, so you can adapt it first. Agents without configured suggestions use localized general-purpose examples.
+Before the first message, Chat shows up to three suggestions configured for the selected agent. Selecting one only fills the composer with its full prompt; nothing is sent, so you can edit it first. Agents without configured suggestions show general-purpose examples.
+
+After the agent replies, it sometimes offers **Follow-up questions** below the reply. Clicking one sends it right away.
+
+<ChatDemo />
+
+## Chat from any page
+
+You don't have to leave the page you're on to chat. Workspace pages have a round chat button in the bottom-right corner (its tooltip reads "Ask Multica"), which opens a floating chat window. The window and the **Chat** page share the same conversations, so you can pick up a chat from either one.
+
+- Press `⌘J` (`Ctrl+J` on Windows and Linux) to open or close the floating window; opening it puts the cursor in the message input. The key works while you're typing in that input, too. You can rebind it under **Settings → Shortcuts**; see [Search, shortcuts, and preferences](/shortcuts).
+- Drag the window's edges to resize it, or expand or minimize it. While an agent is replying, the closed chat button pulses gently.
+- The **Chat** page itself doesn't show the button, and `⌘J` does nothing there: the page already shows the same conversation.
+
+If you don't want the floating window, turn off **Floating chat window** under **Settings → Preferences → Comments & chat**. Chat is then reachable only from the sidebar. The switch applies to the current device only.
 
 ## Chat vs. issues
 
@@ -35,7 +68,7 @@ Before the first message, Chat shows up to three suggestions configured for the 
 | Letting teammates see the background and continue the discussion | **Issue** |
 | A quick look at workspace information with no work record needed | **Chat** |
 
-Direct chats created in Multica are visible only to their creator; other workspace members and admins cannot read them. Conclusions the team needs to see together should be written into an issue, a project description, or a skill.
+Direct chats created in Multica can be read only by their creator, not by other members or admins. Put conclusions the team needs to see into an issue, a project description, or a skill.
 
 ## Multi-turn context
 
@@ -47,7 +80,28 @@ If the local session no longer exists, the context can't be continued, or the pr
 
 While the agent runs, the UI shows the current phase and tool activity. Expand **View details** to inspect the run in full.
 
-To interrupt, click the stop button next to the input. Content already returned to the conversation is kept; input not yet processed is restored to the editor when possible.
+To interrupt, click the stop button next to the input (shown while the input is empty). Content already returned to the conversation is kept.
+
+If the agent hadn't produced anything yet, the message you just sent is taken back out of the conversation and returned to the input, attachments included, so you can edit and resend it. Stopping sometimes takes a moment to finish; refreshing the page or closing the window in the meantime doesn't lose the message, and it comes back to the input the next time you open that conversation. If the input already holds another draft, the message waits until you clear it.
+
+## Send messages while a reply is in progress
+
+You can keep typing while the agent is still replying. Once the input has content, the send button becomes **Queue message**. Queued messages don't interrupt the current reply; they wait in a queue above the input and are handled in order after the reply ends.
+
+| Action | Result |
+|---|---|
+| **Steer** | Moves this message to the front and stops the current reply. What the agent already wrote stays in the conversation, and it handles this message next. |
+| Remove (trash icon) | Takes the message out of the queue; it is never sent to the agent. |
+| **⋯ → Edit queued message** | Puts the message and its attachments back in the input so you can change it and send it again. |
+| **⋯ → Clear all** | Withdraws every queued message. The current reply keeps going. |
+
+**Steer** is unavailable until the current reply has actually started (for example, while it still waits for a runtime to pick it up), and after you lose permission to run the agent.
+
+<ChatQueueDemo />
+
+<Callout>
+**Steer** here stops the current reply first. [Add to current run](/mentioning-agents#steer-a-running-agent) in issue comments works differently: it doesn't interrupt the run, and the agent reads the message after its current step and carries on with the original task.
+</Callout>
 
 ## Organize the conversation list
 
@@ -68,4 +122,5 @@ Deleting a conversation cannot be undone and stops any runs in it that haven't f
 
 - [Assign issues to agents](/assigning-issues) — turn a discussion into trackable work.
 - [Inbox and subscriptions](/inbox) — follow team activity that needs you.
+- [Search, shortcuts, and preferences](/shortcuts) — open chat, search, and move between pages from the keyboard.
 - [Providers matrix](/providers) — session and model capabilities per AI coding tool.

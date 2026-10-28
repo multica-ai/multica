@@ -25,6 +25,10 @@ const (
 	// MaxActorValues is exported so the handler's existing focused tests can
 	// continue to pin the public multi-actor limit after validation moved here.
 	MaxActorValues = 20
+	// Free-form list values (multi_text / multi_url) are capped the same way:
+	// the whole properties bag shares one 16KB row budget, and URL entries can
+	// individually reach 2048 bytes.
+	MaxListValues = 20
 )
 
 var actorKinds = []string{"member"}
@@ -160,6 +164,63 @@ func optionsHint(config propertyConfig) string {
 	return strings.Join(parts, ", ")
 }
 
+// textItem validates one text value - a single `text` value or one
+// `multi_text` element. Text keeps interior spacing as written.
+func textItem(s string) (string, error) {
+	if strings.TrimSpace(s) == "" {
+		return "", errors.New("value cannot be empty (use DELETE to unset a property)")
+	}
+	if utf8.RuneCountInString(s) > maxTextValueLen {
+		return "", fmt.Errorf("value must be %d characters or fewer", maxTextValueLen)
+	}
+	return util.SanitizeTextForPostgres(s), nil
+}
+
+// urlItem validates and canonicalizes one http(s) URL value - a single `url`
+// value or one `multi_url` element.
+func urlItem(s string) (string, error) {
+	s = strings.TrimSpace(s)
+	if len(s) > maxURLValueLen {
+		return "", fmt.Errorf("value must be %d characters or fewer", maxURLValueLen)
+	}
+	parsed, err := url.Parse(s)
+	if err != nil || (parsed.Scheme != "http" && parsed.Scheme != "https") || parsed.Host == "" {
+		return "", errors.New("value must be an http(s) URL")
+	}
+	return s, nil
+}
+
+// validateStringList validates a multi_text / multi_url value: a non-empty
+// array whose every element passes the item validator. Duplicates are dropped
+// and the caller's order preserved, mirroring multi_actor.
+func validateStringList(value any, itemValidator func(string) (string, error)) ([]byte, error) {
+	items, ok := value.([]any)
+	if !ok || len(items) == 0 {
+		return nil, errors.New("value must be a non-empty array of strings")
+	}
+	if len(items) > MaxListValues {
+		return nil, fmt.Errorf("value cannot list more than %d entries", MaxListValues)
+	}
+	seen := make(map[string]struct{}, len(items))
+	out := make([]string, 0, len(items))
+	for _, item := range items {
+		text, ok := item.(string)
+		if !ok {
+			return nil, errors.New("value must be a non-empty array of strings")
+		}
+		canonical, err := itemValidator(text)
+		if err != nil {
+			return nil, err
+		}
+		if _, duplicate := seen[canonical]; duplicate {
+			continue
+		}
+		seen[canonical] = struct{}{}
+		out = append(out, canonical)
+	}
+	return json.Marshal(out)
+}
+
 // ValidateValue checks a raw JSON value against the definition's type and
 // returns the canonical JSON stored by every issue-property write path.
 func ValidateValue(def db.IssueProperty, raw json.RawMessage) ([]byte, error) {
@@ -181,27 +242,25 @@ func ValidateValue(def db.IssueProperty, raw json.RawMessage) ([]byte, error) {
 		if !ok {
 			return nil, errors.New("value must be a string")
 		}
-		if strings.TrimSpace(text) == "" {
-			return nil, errors.New("value cannot be empty (use DELETE to unset a property)")
+		item, err := textItem(text)
+		if err != nil {
+			return nil, err
 		}
-		if utf8.RuneCountInString(text) > maxTextValueLen {
-			return nil, fmt.Errorf("value must be %d characters or fewer", maxTextValueLen)
-		}
-		return json.Marshal(util.SanitizeTextForPostgres(text))
+		return json.Marshal(item)
+	case "multi_text":
+		return validateStringList(value, textItem)
 	case "url":
 		text, ok := value.(string)
 		if !ok {
 			return nil, errors.New("value must be a URL string")
 		}
-		text = strings.TrimSpace(text)
-		if len(text) > maxURLValueLen {
-			return nil, fmt.Errorf("value must be %d characters or fewer", maxURLValueLen)
+		item, err := urlItem(text)
+		if err != nil {
+			return nil, err
 		}
-		parsed, err := url.Parse(text)
-		if err != nil || (parsed.Scheme != "http" && parsed.Scheme != "https") || parsed.Host == "" {
-			return nil, errors.New("value must be an http(s) URL")
-		}
-		return json.Marshal(text)
+		return json.Marshal(item)
+	case "multi_url":
+		return validateStringList(value, urlItem)
 	case "number":
 		if _, ok := value.(float64); !ok {
 			return nil, errors.New("value must be a number")

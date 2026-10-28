@@ -13,6 +13,7 @@ import {
   X,
 } from "lucide-react";
 import { Button } from "@multica/ui/components/ui/button";
+import { IconButton } from "@multica/ui/components/common/icon-button";
 import { Input } from "@multica/ui/components/ui/input";
 import {
   Tooltip,
@@ -120,6 +121,7 @@ export function McpServerRow({
   name,
   transport,
   status,
+  meta,
   canManage,
   actionsDisabled = false,
   rename,
@@ -131,6 +133,8 @@ export function McpServerRow({
   name: string;
   transport: string;
   status?: ReactNode;
+  /** Extra context after the transport, e.g. how many agents use it. */
+  meta?: ReactNode;
   canManage: boolean;
   actionsDisabled?: boolean;
   rename?: McpServerRenameState;
@@ -182,31 +186,31 @@ export function McpServerRow({
                   </p>
                 ) : null}
               </div>
-              <Button
+              <IconButton
                 type="submit"
                 variant="secondary"
                 size="icon-sm"
                 className="mt-0.5"
                 disabled={rename.pending}
-                aria-label={labels.renameSave}
+                label={labels.renameSave}
               >
                 {rename.pending ? (
                   <Loader2 className="animate-spin motion-reduce:animate-none" />
                 ) : (
                   <Check />
                 )}
-              </Button>
-              <Button
+              </IconButton>
+              <IconButton
                 type="button"
                 variant="ghost"
                 size="icon-sm"
                 className="mt-0.5 text-muted-foreground"
                 disabled={rename.pending}
                 onClick={rename.onCancel}
-                aria-label={labels.renameCancel}
+                label={labels.renameCancel}
               >
                 <X />
-              </Button>
+              </IconButton>
             </form>
           ) : (
             <span className="truncate text-body font-medium">{name}</span>
@@ -215,6 +219,7 @@ export function McpServerRow({
         </div>
         <p className="text-caption text-muted-foreground">
           {mcpTransportLabel(transport)}
+          {meta ? <> · {meta}</> : null}
         </p>
       </div>
 

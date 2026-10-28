@@ -29,6 +29,7 @@ import {
 import { Button } from "@multica/ui/components/ui/button";
 import { Input } from "@multica/ui/components/ui/input";
 import { Label } from "@multica/ui/components/ui/label";
+import { TooltipHint } from "@multica/ui/components/common/tooltip-hint";
 import { toast } from "sonner";
 
 import { useNavigation } from "../navigation";
@@ -238,11 +239,9 @@ export function CreateSquadModal({ onClose }: { onClose: () => void }) {
   );
 }
 
-// ---------------------------------------------------------------------------
 // LeaderPicker — single-select agent picker, grouped "My Agents" first then
 // "Workspace Agents". Empty workspaces render a disabled trigger that points
 // the user at agent creation.
-// ---------------------------------------------------------------------------
 function LeaderPicker({
   agents,
   currentUserId,
@@ -381,12 +380,10 @@ function LeaderPicker({
   );
 }
 
-// ---------------------------------------------------------------------------
 // AdditionalMembersPicker — multi-select agents + workspace members. The
 // trigger shows up to 3 chips inline; the rest collapse into "+N". The popup
 // stays open while the user toggles selections so they can pick multiple
 // without re-opening it.
-// ---------------------------------------------------------------------------
 function AdditionalMembersPicker({
   agents,
   members,
@@ -596,18 +593,20 @@ function MemberChip({
     <span className="inline-flex items-center gap-1 rounded-full border bg-background px-1.5 py-0.5 text-caption">
       <ActorAvatar actorType={m.type} actorId={m.id} size="xs" />
       <span className="max-w-[120px] truncate">{m.name}</span>
-      <button
-        type="button"
-        onClick={(e) => {
-          e.preventDefault();
-          e.stopPropagation();
-          onRemove();
-        }}
-        aria-label={t(($) => $.create_squad.members_remove_aria, { name: m.name })}
-        className="rounded-full text-muted-foreground hover:text-foreground"
-      >
-        <X className="h-3 w-3" />
-      </button>
+      <TooltipHint label={t(($) => $.create_squad.members_remove_aria, { name: m.name })}>
+        <button
+          type="button"
+          onClick={(e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            onRemove();
+          }}
+          aria-label={t(($) => $.create_squad.members_remove_aria, { name: m.name })}
+          className="rounded-full text-muted-foreground hover:text-foreground"
+        >
+          <X className="h-3 w-3" />
+        </button>
+      </TooltipHint>
     </span>
   );
 }

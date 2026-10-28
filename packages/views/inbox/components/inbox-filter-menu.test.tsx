@@ -89,17 +89,20 @@ function renderMenu({
   items = ITEMS,
   priorityFilterSupport = "supported",
   archived = false,
+  activeIssueIds,
   getArchivedInboxFacets = vi.fn(async () => ({ statuses: {}, priorities: {}, actors: {}, unreadCount: 0 })),
   statusEntries = BUILT_IN_STATUS_ORDER.map(statusEntry),
 }: {
   items?: InboxItem[];
   priorityFilterSupport?: InboxPriorityFilterSupport;
   archived?: boolean;
+  activeIssueIds?: ReadonlySet<string>;
   getArchivedInboxFacets?: ReturnType<typeof vi.fn>;
   statusEntries?: IssueStatusEntry[];
 } = {}) {
   setApiInstance({
     getArchivedInboxFacets,
+    getAgentTaskSnapshot: async () => [],
     listIssueStatuses: async () => ({
       statuses: statusEntries,
       categories: [],
@@ -115,6 +118,7 @@ function renderMenu({
         wsId="ws-1"
         items={items}
         priorityFilterSupport={priorityFilterSupport}
+        activeIssueIds={activeIssueIds}
         archived={archived}
       />
     </QueryClientProvider>,
@@ -283,6 +287,31 @@ describe("InboxFilterMenu", () => {
         screen.getByRole("button", { name: "1 active filter" }),
       ).toHaveTextContent("1"),
     );
+  });
+
+  it("toggles no agents working and counts the idle rows behind it", async () => {
+    renderMenu({ activeIssueIds: new Set(["issue-todo-high"]) });
+
+    fireEvent.click(screen.getByRole("button", { name: "Filter inbox" }));
+    fireEvent.click(
+      await screen.findByRole("menuitemcheckbox", {
+        name: /No agents working.*1 notification/,
+      }),
+    );
+
+    expect(
+      useInboxFilterStore.getState().filtersByWorkspace["ws-1"]?.idleOnly,
+    ).toBe(true);
+  });
+
+  it("hides no agents working in the archive and ignores a carried-over selection", async () => {
+    useInboxFilterStore.getState().toggleIdleOnly("ws-1");
+    renderMenu({ archived: true });
+
+    // Not counted on the trigger, and not offered in the menu.
+    fireEvent.click(screen.getByRole("button", { name: "Filter inbox" }));
+    await screen.findByRole("menuitemcheckbox", { name: /Unread only/ });
+    expect(screen.queryByRole("menuitemcheckbox", { name: /No agents working/ })).toBeNull();
   });
 
   it("hides priority and clears its filter for a legacy response", async () => {

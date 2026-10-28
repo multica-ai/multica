@@ -9,6 +9,9 @@ export const locales: Locale[] = ["en", "zh-Hans", "ko", "ja"];
 export const localeLabels: Record<Locale, string> = {
   en: "EN",
   "zh-Hans": "\u4e2d\u6587",
+  // The landing dictionary has no Traditional Chinese variant yet, so
+  // `locales` above does not offer it and it reads the Simplified copy.
+  "zh-Hant": "\u7e41\u9ad4\u4e2d\u6587",
   ko: "\ud55c\uad6d\uc5b4",
   ja: "\u65e5\u672c\u8a9e",
   // The landing dictionary has no French variant yet, so `locales` above still
@@ -21,11 +24,11 @@ export function toLandingDictionaryLocale(
 ): LandingDictionaryLocale {
   if (locale === "ko") return "ko";
   if (locale === "ja") return "ja";
-  return locale === "zh-Hans" ? "zh" : "en";
+  return isZhLocale(locale) ? "zh" : "en";
 }
 
 export function isZhLocale(locale: Locale): boolean {
-  return locale === "zh-Hans";
+  return locale === "zh-Hans" || locale === "zh-Hant";
 }
 
 type FeatureSection = {

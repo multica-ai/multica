@@ -55,6 +55,13 @@ func TestClient_IdentityHeaders_PostJSON(t *testing.T) {
 			// (MUL-7034). Dropping it silently sends those retries back to a
 			// fresh directory, losing the continuity nothing else would flag.
 			protocol.DaemonCapabilityCheckoutKeepsWorkV1,
+			// Without it the server never hands this daemon the wakeups that
+			// waited for its run; they start runs of their own instead.
+			protocol.DaemonCapabilityJoinedWakeupsV1,
+			// Without it the server keeps adding the lines that override the
+			// built-in in_progress / in_review rules to [Project workflow],
+			// rules this daemon's brief no longer states (MUL-8145).
+			protocol.DaemonCapabilityWorkflowStatusRulesV1,
 		} {
 			if !capabilities[want] {
 				t.Errorf("X-Client-Capabilities missing %q: %v", want, capabilities)

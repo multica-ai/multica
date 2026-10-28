@@ -3,13 +3,95 @@ package service
 import (
 	"context"
 	"errors"
+	"fmt"
 	"testing"
+	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
+
+func TestStaleDispatchRecoveryHonorsBatchLimitWithStaleStatistics(t *testing.T) {
+	for _, limit := range []int32{0, 1, 2, 10} {
+		t.Run(fmt.Sprintf("limit_%d", limit), func(t *testing.T) {
+			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+			defer cancel()
+			tx, err := sharedTestPool(t).Begin(ctx)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer tx.Rollback(context.Background())
+			// Copy the real schemas so statistics and claims stay local to this test.
+			for _, name := range []string{"agent", "agent_runtime", "agent_task_queue"} {
+				table := pgx.Identifier{name}.Sanitize()
+				if _, err := tx.Exec(ctx, "CREATE TEMP TABLE "+table+" (LIKE public."+table+" INCLUDING ALL) ON COMMIT DROP"); err != nil {
+					t.Fatal(err)
+				}
+			}
+			var runtimeID, agentID pgtype.UUID
+			if err := tx.QueryRow(ctx, `
+				INSERT INTO agent_runtime (workspace_id, name, runtime_mode, provider, status, visibility, last_seen_at)
+				VALUES (gen_random_uuid(), 'batch reclaim', 'local', 'multica_daemon', 'online', 'public', now())
+				RETURNING id
+			`).Scan(&runtimeID); err != nil {
+				t.Fatal(err)
+			}
+			if err := tx.QueryRow(ctx, `
+				INSERT INTO agent (workspace_id, name, runtime_mode, runtime_id)
+				SELECT workspace_id, 'batch reclaim', 'local', id FROM agent_runtime WHERE id = $1
+				RETURNING id
+			`, runtimeID).Scan(&agentID); err != nil {
+				t.Fatal(err)
+			}
+			const seed = `INSERT INTO agent_task_queue (agent_id, runtime_id, status, dispatched_at, priority)
+				SELECT $1, $2, 'dispatched', now() - interval '10 minutes', 6 - n
+				FROM generate_series($3::int, $4::int) n`
+			if _, err := tx.Exec(ctx, seed, agentID, runtimeID, 1, 1); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := tx.Exec(ctx, "ANALYZE agent; ANALYZE agent_runtime; ANALYZE agent_task_queue"); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := tx.Exec(ctx, seed, agentID, runtimeID, 2, 5); err != nil {
+				t.Fatal(err)
+			}
+			queries := db.New(tx)
+			params := db.ReclaimStaleDispatchedTasksForRuntimesParams{
+				RuntimeIds: []pgtype.UUID{runtimeID}, PrepareLeaseSecs: 60,
+				ClaimRecoverySecs: 30, RuntimeStaleSecs: RuntimeClaimFreshnessSeconds, MaxTasks: limit,
+			}
+			claimed := 0
+			for {
+				batch, err := queries.ReclaimStaleDispatchedTasksForRuntimes(ctx, params)
+				if err != nil {
+					t.Fatal(err)
+				}
+				want := min(int(limit), 5-claimed)
+				if len(batch) != want {
+					t.Fatalf("reclaimed %d tasks, want %d (limit %d, already claimed %d)", len(batch), want, limit, claimed)
+				}
+				for _, task := range batch {
+					if task.Priority > int32(5-claimed) || task.Priority <= int32(5-claimed-want) {
+						t.Fatalf("reclaimed priority %d outside the next %d highest-priority tasks", task.Priority, want)
+					}
+				}
+				claimed += len(batch)
+				var renewed int
+				if err := tx.QueryRow(ctx, `SELECT count(*) FROM agent_task_queue WHERE prepare_lease_expires_at > now()`).Scan(&renewed); err != nil {
+					t.Fatal(err)
+				}
+				if renewed != claimed {
+					t.Fatalf("renewed %d task leases after returning %d tasks", renewed, claimed)
+				}
+				if want == 0 {
+					break
+				}
+			}
+		})
+	}
+}
 
 // TestRuntimeHealthGatesClaimsAndStaleDispatchRecovery directly covers every
 // SQL release path that can hand work to a daemon. Offline, stale, or wrong

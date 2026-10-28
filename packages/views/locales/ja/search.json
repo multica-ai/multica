@@ -9,7 +9,8 @@
     "projects": "プロジェクト",
     "issues": "タスク",
     "cancelled": "キャンセル済み",
-    "recent": "最近の項目"
+    "recent": "最近の項目",
+    "workspaces": "ワークスペース"
   },
   "commands": {
     "current_theme_aria": "現在のテーマ",

@@ -5,7 +5,7 @@ import { useWorkspaceId } from "@multica/core/hooks";
 import { useIssueStatuses } from "@multica/core/issue-statuses/hooks";
 import { useState, useEffect, useCallback, useRef } from "react";
 import type { Issue } from "@multica/core/types";
-import { api } from "@multica/core/api";
+import { searchIssues } from "@multica/core/search-index";
 import {
   Command,
   CommandDialog,
@@ -87,7 +87,7 @@ export function IssuePickerModal({
         const controller = new AbortController();
         abortRef.current = controller;
         try {
-          const res = await api.searchIssues({
+          const res = await searchIssues({
             q: q.trim(),
             limit: 20,
             include_closed: true,

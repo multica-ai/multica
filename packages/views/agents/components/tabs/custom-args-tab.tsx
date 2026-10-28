@@ -12,6 +12,7 @@ import {
 import type { Agent, RuntimeDevice } from "@multica/core/types";
 import { createSafeId } from "@multica/core/utils";
 import { Button } from "@multica/ui/components/ui/button";
+import { IconButton } from "@multica/ui/components/common/icon-button";
 import { Input } from "@multica/ui/components/ui/input";
 import { toast } from "sonner";
 import { useT } from "../../../i18n";
@@ -222,31 +223,31 @@ export function CustomArgsTab({
                         {entry.value}
                       </code>
                       <div className="flex shrink-0 items-center gap-0.5">
-                        <Button
+                        <IconButton
                           type="button"
                           variant="ghost"
                           size="icon-sm"
                           onClick={() => startEditing(entry)}
                           disabled={editor !== null}
-                          aria-label={t(($) => $.tab_body.custom_args.edit_aria, {
+                          label={t(($) => $.tab_body.custom_args.edit_aria, {
                             index: index + 1,
                           })}
                         >
                           <Pencil className="size-3.5" aria-hidden="true" />
-                        </Button>
-                        <Button
+                        </IconButton>
+                        <IconButton
                           type="button"
                           variant="ghost"
                           size="icon-sm"
                           onClick={() => removeEntry(entry.id)}
                           disabled={editor !== null}
                           className="text-muted-foreground hover:text-destructive"
-                          aria-label={t(($) => $.tab_body.custom_args.remove_aria, {
+                          label={t(($) => $.tab_body.custom_args.remove_aria, {
                             index: index + 1,
                           })}
                         >
                           <Trash2 className="size-3.5" aria-hidden="true" />
-                        </Button>
+                        </IconButton>
                       </div>
                     </div>
                   )}

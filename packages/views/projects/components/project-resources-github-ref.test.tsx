@@ -25,13 +25,28 @@ const PINNED = {
   created_by: "u1",
 };
 
+const AVAILABLE_REPO = {
+  url: "https://github.com/multica-ai/api",
+  description: "API and daemon runtime",
+};
+
+const ATTACHABLE_REPO = {
+  url: "https://github.com/multica-ai/daemon",
+  description: "Background task runner",
+};
+
+const PINNED_REPO = {
+  url: "https://github.com/multica-ai/multica",
+  description: "The main monorepo",
+};
+
 // The common case: no ref, so tasks use the repository's default branch.
 const PLAIN = {
   id: "res-2",
   project_id: "p1",
   workspace_id: "workspace-1",
   resource_type: "github_repo",
-  resource_ref: { url: "https://github.com/multica-ai/docs" },
+  resource_ref: { url: AVAILABLE_REPO.url },
   label: null,
   position: 1,
   created_at: "2026-09-19T00:00:00Z",
@@ -64,7 +79,11 @@ vi.mock("@multica/core/runtimes", () => ({
 }));
 vi.mock("@multica/core/hooks", () => ({ useWorkspaceId: () => "workspace-1" }));
 vi.mock("@multica/core/paths", () => ({
-  useCurrentWorkspace: () => ({ id: "workspace-1", slug: "ws", repos: [] }),
+  useCurrentWorkspace: () => ({
+    id: "workspace-1",
+    slug: "ws",
+    repos: [AVAILABLE_REPO, ATTACHABLE_REPO, PINNED_REPO],
+  }),
 }));
 vi.mock("../../platform/local-directory", () => ({
   isDesktopShell: () => false,
@@ -88,12 +107,31 @@ describe("ProjectResourcesSection — github_repo checkout ref", () => {
     renderWithI18n(<ProjectResourcesSection projectId="p1" />);
     expect(screen.getByText("Release line")).toBeTruthy();
     expect(screen.getByText("release/2026-09")).toBeTruthy();
+    expect(screen.queryByText(PINNED_REPO.description)).toBeNull();
+  });
+
+  it("shows a live workspace repository description and keeps it out of the attached resource label", async () => {
+    renderWithI18n(<ProjectResourcesSection projectId="p1" />);
+    expect(screen.getAllByText("multica-ai/api")).not.toHaveLength(0);
+    expect(screen.getByText(AVAILABLE_REPO.description)).toBeTruthy();
+
+    fireEvent.click(screen.getByRole("button", { name: /add resource/i }));
+    expect(screen.getByText(ATTACHABLE_REPO.description)).toBeTruthy();
+    fireEvent.click(
+      screen.getByRole("button", { name: /multica-ai\/daemon/i }),
+    );
+
+    await waitFor(() => expect(createMock).toHaveBeenCalledTimes(1));
+    expect(createMock.mock.calls[0]?.[0]).toEqual({
+      resource_type: "github_repo",
+      resource_ref: { url: ATTACHABLE_REPO.url },
+    });
   });
 
   it("saves a new ref while preserving the rest of the stored ref", async () => {
     renderWithI18n(<ProjectResourcesSection projectId="p1" />);
 
-    fireEvent.click(screen.getAllByTitle(/change the branch tasks work on/i)[0]!);
+    fireEvent.click(screen.getAllByRole("button", { name: /change the branch tasks work on/i })[0]!);
     const input = screen.getByLabelText(/starting branch/i);
     fireEvent.change(input, { target: { value: "release/2026-10" } });
     fireEvent.click(screen.getByRole("button", { name: /^save$/i }));
@@ -116,7 +154,7 @@ describe("ProjectResourcesSection — github_repo checkout ref", () => {
   it("clearing the field drops the key so tasks fall back to the default branch", async () => {
     renderWithI18n(<ProjectResourcesSection projectId="p1" />);
 
-    fireEvent.click(screen.getAllByTitle(/change the branch tasks work on/i)[0]!);
+    fireEvent.click(screen.getAllByRole("button", { name: /change the branch tasks work on/i })[0]!);
     fireEvent.change(screen.getByLabelText(/starting branch/i), {
       target: { value: "" },
     });
@@ -135,7 +173,7 @@ describe("ProjectResourcesSection — github_repo checkout ref", () => {
   it("refuses to save a ref git could never resolve", async () => {
     renderWithI18n(<ProjectResourcesSection projectId="p1" />);
 
-    fireEvent.click(screen.getAllByTitle(/change the branch tasks work on/i)[0]!);
+    fireEvent.click(screen.getAllByRole("button", { name: /change the branch tasks work on/i })[0]!);
     fireEvent.change(screen.getByLabelText(/starting branch/i), {
       target: { value: "main..dev" },
     });
@@ -265,7 +303,7 @@ describe("ProjectResourcesSection — github_repo checkout ref", () => {
     expect(within(pinnedRow).queryByText("release/2026-09")).toBeTruthy();
     expect(within(pinnedRow).queryByText(/default branch/i)).toBeNull();
 
-    const plainRow = screen.getByText("multica-ai/docs").closest(".group") as HTMLElement;
+    const plainRow = screen.getAllByText("multica-ai/api")[0]?.closest(".group") as HTMLElement;
     expect(within(plainRow).queryByText(/default branch/i)).toBeTruthy();
     expect(within(plainRow).queryByText("release/2026-09")).toBeNull();
   });
@@ -277,7 +315,7 @@ describe("ProjectResourcesSection — github_repo checkout ref", () => {
   it("declines a pasted commit id and points at the per-task escape hatch", () => {
     renderWithI18n(<ProjectResourcesSection projectId="p1" />);
 
-    fireEvent.click(screen.getAllByTitle(/change the branch tasks work on/i)[0]!);
+    fireEvent.click(screen.getAllByRole("button", { name: /change the branch tasks work on/i })[0]!);
     fireEvent.change(screen.getByLabelText(/starting branch/i), {
       target: { value: "5e0b1cfa0a7d6a1a0f4b3f2e1d0c9b8a7f6e5d4c" },
     });
@@ -292,7 +330,7 @@ describe("ProjectResourcesSection — github_repo checkout ref", () => {
   it("still accepts a tag-shaped name — it could be a branch, and only the remote knows", async () => {
     renderWithI18n(<ProjectResourcesSection projectId="p1" />);
 
-    fireEvent.click(screen.getAllByTitle(/change the branch tasks work on/i)[0]!);
+    fireEvent.click(screen.getAllByRole("button", { name: /change the branch tasks work on/i })[0]!);
     fireEvent.change(screen.getByLabelText(/starting branch/i), {
       target: { value: "v1.4.0" },
     });

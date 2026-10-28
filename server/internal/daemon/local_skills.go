@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"runtime"
 	"sort"
 	"strings"
 	"unicode/utf8"
@@ -132,6 +133,7 @@ func localSkillRootsForProvider(provider string) ([]localSkillRoot, bool, error)
 	}
 
 	var providerRoot string
+	var additionalProviderRoots []string
 	// Built-in runtime identities (e.g. "omp") declare their user skills dir
 	// in the descriptor; resolve to providerRoot and fall through to the
 	// common construction below so universal roots, merging, and fallback
@@ -244,6 +246,14 @@ func localSkillRootsForProvider(provider string) ([]localSkillRoot, bool, error)
 			// directly below it. Project skills are injected separately under
 			// <workDir>/.minimax/skills.
 			providerRoot = filepath.Join(home, ".minimax", "skills")
+		case "devin":
+			providerRoot, additionalProviderRoots = devinLocalSkillRoots(home, runtime.GOOS, os.Getenv("XDG_CONFIG_HOME"), os.Getenv("APPDATA"))
+		case "muse":
+			configHome := os.Getenv("XDG_CONFIG_HOME")
+			if configHome == "" {
+				configHome = filepath.Join(home, ".config")
+			}
+			providerRoot = filepath.Join(configHome, "muse", "skills")
 		default:
 			return nil, false, nil
 		}
@@ -254,6 +264,9 @@ func localSkillRootsForProvider(provider string) ([]localSkillRoot, bool, error)
 	// skip it rather than resolve skill keys against the daemon's cwd.
 	if providerRoot != "" {
 		roots = append(roots, localSkillRoot{path: providerRoot, kind: localSkillRootProvider})
+	}
+	for _, path := range additionalProviderRoots {
+		roots = append(roots, localSkillRoot{path: path, kind: localSkillRootProvider})
 	}
 	roots = append(roots, localSkillRoot{path: filepath.Join(home, ".agents", "skills"), kind: localSkillRootUniversal})
 	if provider == "claude" {
@@ -274,6 +287,25 @@ func localSkillRootsForProvider(provider string) ([]localSkillRoot, bool, error)
 		}
 	}
 	return roots, true, nil
+}
+
+// Include the documented Windsurf channels after Devin/Cognition roots and
+// before the universal fallback. The order is deterministic for import/listing
+// collisions; the explicit inputs keep OS resolution testable.
+func devinLocalSkillRoots(home, goos, configHome, appData string) (string, []string) {
+	if goos == "windows" {
+		configHome = appData
+		if configHome == "" {
+			configHome = filepath.Join(home, "AppData", "Roaming")
+		}
+	} else if configHome == "" {
+		configHome = filepath.Join(home, ".config")
+	}
+	additional := []string{filepath.Join(configHome, "cognition", "skills")}
+	for _, channel := range []string{"windsurf", "windsurf-next", "windsurf-insiders"} {
+		additional = append(additional, filepath.Join(home, ".codeium", channel, "skills"))
+	}
+	return filepath.Join(configHome, "devin", "skills"), additional
 }
 
 // hermesLocalSkillsRoot returns the skills dir of the Hermes home a task runs

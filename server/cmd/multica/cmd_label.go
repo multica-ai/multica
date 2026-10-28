@@ -11,9 +11,7 @@ import (
 	"github.com/multica-ai/multica/server/internal/cli"
 )
 
-// ---------------------------------------------------------------------------
 // Label commands — workspace-scoped CRUD for labels (issues and skills).
-// ---------------------------------------------------------------------------
 
 var labelCmd = &cobra.Command{
 	Use:   "label",

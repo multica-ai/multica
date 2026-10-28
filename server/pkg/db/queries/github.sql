@@ -232,25 +232,16 @@ WHERE pull_request_id = $1;
 
 -- name: LinkIssueToPullRequest :execrows
 -- Automatic link from a PR title, branch, or closing keyword. Returns 1 only
--- when the link is new, so the webhook evaluates auto-complete on the link
--- event and not on every redelivery. An existing link (automatic or manual) is
--- left untouched; close_intent is set by SyncPullRequestCloseIntent.
+-- when the link is new, so the webhook evaluates the merge automation on the
+-- link event and not on every redelivery. An existing link (automatic or
+-- manual) is left untouched. close_intent is no longer read or written
+-- (MUL-7726).
 INSERT INTO issue_pull_request (
     issue_id, pull_request_id, linked_by_type, linked_by_id
 ) VALUES (
     $1, $2, 'system', NULL
 )
 ON CONFLICT (issue_id, pull_request_id) DO NOTHING;
-
--- name: SyncPullRequestCloseIntent :exec
--- Sets close_intent on every link of the PR, automatic or manual, to whether
--- the PR text closes that issue with a keyword ("Closes MUL-1" in its title or
--- body), so a keyword removed before the merge stops counting. The webhook
--- calls it until the PR's merge/close event, which fixes the decision.
-UPDATE issue_pull_request
-SET close_intent = (issue_id = ANY(sqlc.arg('closing_issue_ids')::uuid[]))
-WHERE pull_request_id = sqlc.arg('pull_request_id')
-  AND close_intent <> (issue_id = ANY(sqlc.arg('closing_issue_ids')::uuid[]));
 
 -- name: LinkIssueToPullRequestManually :execrows
 -- A member linked this PR by hand. Marking an existing automatic link as

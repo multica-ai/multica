@@ -94,6 +94,7 @@ func TestPiExecuteTurnErrorGraceClosesStdoutHeldByEscapedDescendant(t *testing.T
 	}
 	pi := backend.(*piBackend)
 	pi.turnErrorGrace = grace
+	pi.terminateGrace = grace
 
 	started := time.Now()
 	session, err := pi.Execute(context.Background(), "prompt-ignored", ExecOptions{

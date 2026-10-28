@@ -6,7 +6,7 @@ import {
   useState,
   type PointerEventHandler,
 } from "react";
-import { ChevronLeft, ChevronRight, History } from "lucide-react";
+import { ArrowLeft, ArrowRight } from "lucide-react";
 import {
   SidebarTrigger,
   useSidebar,
@@ -19,22 +19,31 @@ import {
   DropdownMenuLabel,
 } from "@multica/ui/components/ui/dropdown-menu";
 import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from "@multica/ui/components/ui/tooltip";
+import {
   ResourceLeadingVisual,
   useTabPresentation,
 } from "@multica/views/layout";
-import { useNavigation } from "@multica/views/navigation";
-import {
-  useTabHistory,
-  type BrowsingHistoryEntry,
-} from "@/hooks/use-tab-history";
+import { ActionShortcutKeycaps } from "@multica/views/common/shortcut-keycaps";
+import { useT } from "@multica/views/i18n";
+import { useTabHistory } from "@/hooks/use-tab-history";
 import { browsingHistoryKeyForUrl } from "@/stores/tab-store";
 
-export const WINDOW_TOOLBAR_CLEARANCE = 256;
+// Controls sit left-aligned just past the macOS traffic lights, which end
+// around x=76 with trafficLightPosition { x: 16 }. The clearance covers that
+// inset plus Back, Forward and the sidebar toggle (3 × 28px, 2 × 8px gaps) and
+// a 12px trailing pad, and matches the sidebar's minimum width so the
+// controls always fit inside the expanded sidebar column.
+const TRAFFIC_LIGHT_CLEARANCE = 88;
+export const WINDOW_TOOLBAR_CLEARANCE = 200;
 const LONG_PRESS_DURATION_MS = 500;
 const LONG_PRESS_MOVE_TOLERANCE_PX = 8;
 const MAX_HISTORY_MENU_ITEMS = 30;
 
-type HistoryMenuMode = "all" | "back" | "forward";
+type HistoryMenuMode = "back" | "forward";
 
 interface OpenHistoryMenu {
   mode: HistoryMenuMode;
@@ -120,7 +129,7 @@ function useLongPress(
 }
 
 export function historyIndicesForMenu(
-  mode: Exclude<HistoryMenuMode, "all">,
+  mode: HistoryMenuMode,
   currentIndex: number,
   historyLength: number,
 ): number[] {
@@ -139,20 +148,6 @@ export function historyIndicesForMenu(
     },
     (_, offset) => currentIndex + offset + 1,
   );
-}
-
-export function browsingHistoryForMenu(
-  browsingHistory: BrowsingHistoryEntry[],
-  currentUrl: string | undefined,
-): BrowsingHistoryEntry[] {
-  const currentResource = currentUrl
-    ? browsingHistoryKeyForUrl(currentUrl)
-    : undefined;
-  return browsingHistory
-    .filter(
-      (entry) => browsingHistoryKeyForUrl(entry.url) !== currentResource,
-    )
-    .slice(0, MAX_HISTORY_MENU_ITEMS);
 }
 
 function HistoryMenuItem({
@@ -180,6 +175,7 @@ function HistoryMenuItem({
 }
 
 export function WindowToolbar() {
+  const { t } = useT("layout");
   const { state: sidebarState, isCompact } = useSidebar();
   const sidebarHidden = sidebarState === "collapsed" || isCompact;
   const toolbarWidth: React.CSSProperties["width"] = sidebarHidden
@@ -195,8 +191,8 @@ export function WindowToolbar() {
     goForward,
     goToHistoryIndex,
   } = useTabHistory();
-  const { push } = useNavigation();
   const [menu, setMenu] = useState<OpenHistoryMenu | null>(null);
+  const [tooltip, setTooltip] = useState<HistoryMenuMode | null>(null);
   const menuAnchorRef = useRef<HTMLElement | null>(null);
   const menuContentRef = useRef<HTMLDivElement | null>(null);
 
@@ -226,18 +222,10 @@ export function WindowToolbar() {
 
   const menuIndices = useMemo(
     () =>
-      menu && menu.mode !== "all"
+      menu
         ? historyIndicesForMenu(menu.mode, historyIndex, historyEntries.length)
         : [],
     [historyEntries.length, historyIndex, menu],
-  );
-  const browsingMenuEntries = useMemo(
-    () =>
-      browsingHistoryForMenu(
-        browsingHistory,
-        historyEntries[historyIndex],
-      ),
-    [browsingHistory, historyEntries, historyIndex],
   );
   const browsingHistoryTitles = useMemo(
     () =>
@@ -251,11 +239,9 @@ export function WindowToolbar() {
     [browsingHistory],
   );
   const menuLabel =
-    menu?.mode === "back"
-      ? "Back history"
-      : menu?.mode === "forward"
-        ? "Forward history"
-        : "Recently viewed";
+    menu?.mode === "forward"
+      ? t(($) => $.window.forward_history)
+      : t(($) => $.window.back_history);
   const navButtonClassName =
     "flex size-7 items-center justify-center rounded-md text-faint-foreground transition-colors duration-150 hover:bg-sidebar-accent hover:text-sidebar-accent-foreground focus-visible:outline-2 focus-visible:outline-offset-2 disabled:pointer-events-none disabled:opacity-30 motion-reduce:transition-none";
 
@@ -266,110 +252,120 @@ export function WindowToolbar() {
     },
     [goToHistoryIndex],
   );
-  const selectBrowsingHistory = useCallback(
-    (url: string) => {
-      push(url);
-      setMenu(null);
-    },
-    [push],
-  );
 
   return (
     <div
       data-slot="window-toolbar"
       data-sidebar-resize-consumer
-      className="fixed left-0 top-0 z-30 flex h-12 shrink-0 items-center justify-end px-3"
+      className="fixed left-0 top-0 z-30 flex h-10 shrink-0 items-center pr-3"
       style={
         {
           WebkitAppRegion: "drag",
           width: toolbarWidth,
+          paddingLeft: TRAFFIC_LIGHT_CLEARANCE,
         } as React.CSSProperties
       }
     >
       <div
-        className="flex items-center gap-1"
+        className="flex items-center gap-2"
         style={{ WebkitAppRegion: "no-drag" } as React.CSSProperties}
       >
+        <Tooltip
+          // Stays shut while a history menu is open over the same button.
+          open={tooltip === "back" && menu === null}
+          onOpenChange={(open) => setTooltip(open ? "back" : null)}
+        >
+          <TooltipTrigger
+            render={
+              <button
+                type="button"
+                disabled={!canGoBack}
+                aria-label={t(($) => $.window.go_back)}
+                aria-haspopup="menu"
+                aria-expanded={menu?.mode === "back"}
+                className={navButtonClassName}
+                onPointerDown={backPress.onPointerDown}
+                onPointerMove={backPress.onPointerMove}
+                onPointerUp={backPress.onPointerUp}
+                onPointerCancel={backPress.onPointerCancel}
+                onPointerLeave={backPress.onPointerLeave}
+                onContextMenu={(event) => {
+                  event.preventDefault();
+                  openMenu("back", event.currentTarget);
+                }}
+                onKeyDown={(event) => {
+                  if (event.key !== "ArrowDown") return;
+                  event.preventDefault();
+                  openMenu("back", event.currentTarget);
+                }}
+                onClick={(event) => {
+                  if (backPress.consumeClick()) {
+                    event.preventDefault();
+                    return;
+                  }
+                  goBack();
+                }}
+              >
+                <ArrowLeft aria-hidden className="size-4" />
+              </button>
+            }
+          />
+          <TooltipContent side="bottom">
+            {t(($) => $.window.go_back)}
+            <ActionShortcutKeycaps action="goBack" />
+            <span className="text-muted-foreground">{t(($) => $.window.hold_for_history)}</span>
+          </TooltipContent>
+        </Tooltip>
+        <Tooltip
+          open={tooltip === "forward" && menu === null}
+          onOpenChange={(open) => setTooltip(open ? "forward" : null)}
+        >
+          <TooltipTrigger
+            render={
+              <button
+                type="button"
+                disabled={!canGoForward}
+                aria-label={t(($) => $.window.go_forward)}
+                aria-haspopup="menu"
+                aria-expanded={menu?.mode === "forward"}
+                className={navButtonClassName}
+                onPointerDown={forwardPress.onPointerDown}
+                onPointerMove={forwardPress.onPointerMove}
+                onPointerUp={forwardPress.onPointerUp}
+                onPointerCancel={forwardPress.onPointerCancel}
+                onPointerLeave={forwardPress.onPointerLeave}
+                onContextMenu={(event) => {
+                  event.preventDefault();
+                  openMenu("forward", event.currentTarget);
+                }}
+                onKeyDown={(event) => {
+                  if (event.key !== "ArrowDown") return;
+                  event.preventDefault();
+                  openMenu("forward", event.currentTarget);
+                }}
+                onClick={(event) => {
+                  if (forwardPress.consumeClick()) {
+                    event.preventDefault();
+                    return;
+                  }
+                  goForward();
+                }}
+              >
+                <ArrowRight aria-hidden className="size-4" />
+              </button>
+            }
+          />
+          <TooltipContent side="bottom">
+            {t(($) => $.window.go_forward)}
+            <ActionShortcutKeycaps action="goForward" />
+            <span className="text-muted-foreground">{t(($) => $.window.hold_for_history)}</span>
+          </TooltipContent>
+        </Tooltip>
         <SidebarTrigger
           className="size-7 text-faint-foreground hover:bg-sidebar-accent hover:text-sidebar-accent-foreground"
+          shortcut={<ActionShortcutKeycaps action="toggleSidebar" />}
           style={{ WebkitAppRegion: "no-drag" } as React.CSSProperties}
         />
-        <button
-          type="button"
-          disabled={browsingMenuEntries.length === 0}
-          aria-label="History"
-          aria-haspopup="menu"
-          aria-expanded={menu?.mode === "all"}
-          title="History"
-          className={navButtonClassName}
-          onClick={(event) => openMenu("all", event.currentTarget)}
-        >
-          <History aria-hidden className="size-4" />
-        </button>
-        <button
-          type="button"
-          disabled={!canGoBack}
-          aria-label="Go back"
-          aria-haspopup="menu"
-          aria-expanded={menu?.mode === "back"}
-          title="Go back (press and hold for history)"
-          className={navButtonClassName}
-          onPointerDown={backPress.onPointerDown}
-          onPointerMove={backPress.onPointerMove}
-          onPointerUp={backPress.onPointerUp}
-          onPointerCancel={backPress.onPointerCancel}
-          onPointerLeave={backPress.onPointerLeave}
-          onContextMenu={(event) => {
-            event.preventDefault();
-            openMenu("back", event.currentTarget);
-          }}
-          onKeyDown={(event) => {
-            if (event.key !== "ArrowDown") return;
-            event.preventDefault();
-            openMenu("back", event.currentTarget);
-          }}
-          onClick={(event) => {
-            if (backPress.consumeClick()) {
-              event.preventDefault();
-              return;
-            }
-            goBack();
-          }}
-        >
-          <ChevronLeft aria-hidden className="size-4" />
-        </button>
-        <button
-          type="button"
-          disabled={!canGoForward}
-          aria-label="Go forward"
-          aria-haspopup="menu"
-          aria-expanded={menu?.mode === "forward"}
-          title="Go forward (press and hold for history)"
-          className={navButtonClassName}
-          onPointerDown={forwardPress.onPointerDown}
-          onPointerMove={forwardPress.onPointerMove}
-          onPointerUp={forwardPress.onPointerUp}
-          onPointerCancel={forwardPress.onPointerCancel}
-          onPointerLeave={forwardPress.onPointerLeave}
-          onContextMenu={(event) => {
-            event.preventDefault();
-            openMenu("forward", event.currentTarget);
-          }}
-          onKeyDown={(event) => {
-            if (event.key !== "ArrowDown") return;
-            event.preventDefault();
-            openMenu("forward", event.currentTarget);
-          }}
-          onClick={(event) => {
-            if (forwardPress.consumeClick()) {
-              event.preventDefault();
-              return;
-            }
-            goForward();
-          }}
-        >
-          <ChevronRight aria-hidden className="size-4" />
-        </button>
       </div>
 
       <DropdownMenu
@@ -390,25 +386,16 @@ export function WindowToolbar() {
         >
           <DropdownMenuGroup>
             <DropdownMenuLabel>{menuLabel}</DropdownMenuLabel>
-            {menu?.mode === "all"
-              ? browsingMenuEntries.map((entry) => (
-                  <HistoryMenuItem
-                    key={entry.url}
-                    url={entry.url}
-                    fallbackTitle={entry.title}
-                    onSelect={() => selectBrowsingHistory(entry.url)}
-                  />
-                ))
-              : menuIndices.map((index) => (
-                  <HistoryMenuItem
-                    key={`${index}:${historyEntries[index]}`}
-                    url={historyEntries[index]}
-                    fallbackTitle={browsingHistoryTitles.get(
-                      browsingHistoryKeyForUrl(historyEntries[index]),
-                    )}
-                    onSelect={() => selectHistoryIndex(index)}
-                  />
-                ))}
+            {menuIndices.map((index) => (
+              <HistoryMenuItem
+                key={`${index}:${historyEntries[index]}`}
+                url={historyEntries[index]}
+                fallbackTitle={browsingHistoryTitles.get(
+                  browsingHistoryKeyForUrl(historyEntries[index]),
+                )}
+                onSelect={() => selectHistoryIndex(index)}
+              />
+            ))}
           </DropdownMenuGroup>
         </DropdownMenuContent>
       </DropdownMenu>

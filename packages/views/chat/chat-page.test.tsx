@@ -3,7 +3,7 @@
 import { StrictMode } from "react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { fireEvent, render, screen } from "@testing-library/react";
+import { act, fireEvent, render, screen } from "@testing-library/react";
 import type { Agent } from "@multica/core/types";
 import { I18nProvider } from "@multica/core/i18n/react";
 import enCommon from "../locales/en/common.json";
@@ -74,16 +74,24 @@ vi.mock("@multica/ui/components/ui/resizable", () => ({
 // Same width-driven layout mock the inbox page tests use: the deep-link tests
 // all want the desktop two-pane layout, the breakpoint tests at the bottom set
 // their own width.
-const FOLD_INNER = 851;
-const TABLET = 1024;
+// iPhone Duo's inner screen: 669px wide held upright, 951px held sideways.
+const FOLD_INNER_PORTRAIT = 669;
+const FOLD_INNER_LANDSCAPE = 951;
+const TABLET = 768;
 const DESKTOP = 1440;
 const layout = vi.hoisted(() => ({ width: 1440 }));
 vi.mock("@multica/ui/hooks/use-mobile", () => ({
   useIsMobile: () => layout.width < 768,
-  useIsCompact: () => layout.width < 1024,
+  useIsCompact: () => layout.width < 768,
 }));
 vi.mock("@multica/core/paths", () => ({
+  useRequiredWorkspaceSlug: () => "acme",
   useWorkspacePaths: () => ({ chat: () => "/acme/chat" }),
+}));
+const platformWorkspace = vi.hoisted(() => ({ slug: "acme" }));
+vi.mock("@multica/core/platform", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@multica/core/platform")>()),
+  getCurrentSlug: () => platformWorkspace.slug,
 }));
 
 // The store mock is REACTIVE like real Zustand: setActiveSession replaces the
@@ -202,7 +210,7 @@ const NO_ACCESS_MSG = "You don't have access to chat with this agent.";
 
 function renderPage(search: string, { strict = false } = {}) {
   const replace = vi.fn();
-  const navigation: NavigationAdapter = {
+  let navigation: NavigationAdapter = {
     push: vi.fn(),
     replace,
     back: vi.fn(),
@@ -229,7 +237,20 @@ function renderPage(search: string, { strict = false } = {}) {
     return strict ? <StrictMode>{page}</StrictMode> : page;
   };
   const view = render(makeUi());
-  return { replace, rerender: () => view.rerender(makeUi()) };
+  return {
+    replace,
+    rerender: (
+      { pathname, search }: { pathname?: string; search?: string } = {},
+    ) => {
+      navigation = {
+        ...navigation,
+        pathname: pathname ?? navigation.pathname,
+        searchParams:
+          search === undefined ? navigation.searchParams : new URLSearchParams(search),
+      };
+      view.rerender(makeUi());
+    },
+  };
 }
 
 beforeEach(() => {
@@ -238,7 +259,113 @@ beforeEach(() => {
   storeListeners.clear();
   availableAgentsRef.current = [agent];
   agentsSettledRef.current = true;
+  platformWorkspace.slug = "acme";
   layout.width = DESKTOP;
+});
+
+describe("ChatPage URL synchronization", () => {
+  it.each(["/globex/issues", "/acme/issues"])(
+    "does not redirect back to chat when the retained page observes %s",
+    (pathname) => {
+      const { replace, rerender } = renderPage("session=session-1");
+      expect(storeRef.current.activeSessionId).toBe("session-1");
+      mockSetActiveSession.mockClear();
+
+      // App Router can retain the outgoing page after the shared navigation
+      // adapter has already published the destination URL.
+      rerender({ pathname, search: "" });
+
+      expect(replace).not.toHaveBeenCalled();
+      expect(mockSetActiveSession).not.toHaveBeenCalled();
+    },
+  );
+
+  it.each([null, "session-3"])(
+    "does not write the rehydrated session %s into the outgoing workspace's URL",
+    (sessionId) => {
+      const { replace, rerender } = renderPage("session=session-1");
+      rerender({ pathname: "/globex/issues" });
+      mockSetActiveSession.mockClear();
+      replace.mockClear();
+
+      act(() => {
+        mockSetActiveSession(sessionId);
+      });
+
+      expect(storeRef.current.activeSessionId).toBe(sessionId);
+      expect(mockSetActiveSession).toHaveBeenCalledTimes(1);
+      expect(replace).not.toHaveBeenCalled();
+    },
+  );
+
+  it.each([null, "session-3"])(
+    "ignores rehydration to %s before the destination pathname commits",
+    (sessionId) => {
+      const { replace } = renderPage("session=session-1");
+      mockSetActiveSession.mockClear();
+
+      // The incoming layout can rehydrate the shared store while the
+      // outgoing page's navigation adapter still reports /acme/chat.
+      platformWorkspace.slug = "globex";
+      act(() => {
+        mockSetActiveSession(sessionId);
+      });
+
+      expect(storeRef.current.activeSessionId).toBe(sessionId);
+      expect(mockSetActiveSession).toHaveBeenCalledTimes(1);
+      expect(replace).not.toHaveBeenCalled();
+    },
+  );
+
+  it("resumes synchronization when returning to the same chat URL", () => {
+    const { replace, rerender } = renderPage("session=session-1");
+    rerender({ pathname: "/globex/issues", search: "session=session-1" });
+    act(() => {
+      mockSetActiveSession("session-2");
+    });
+    replace.mockClear();
+    mockSetActiveSession.mockClear();
+
+    rerender({ pathname: "/acme/chat" });
+
+    expect(mockSetActiveSession).toHaveBeenCalledWith("session-1");
+    expect(storeRef.current.activeSessionId).toBe("session-1");
+    expect(replace).not.toHaveBeenCalled();
+  });
+
+  it("mirrors thread selection and clearing while the chat route is current", () => {
+    const { replace } = renderPage("session=session-1");
+
+    act(() => {
+      mockSetActiveSession("session-2");
+    });
+    expect(replace).toHaveBeenLastCalledWith("/acme/chat?session=session-2");
+
+    act(() => {
+      mockSetActiveSession(null);
+    });
+    expect(replace).toHaveBeenLastCalledWith("/acme/chat");
+  });
+
+  it.each(["pathname", "rehydration"])(
+    "does not consume a pending agent link after workspace switching starts via %s",
+    (transition) => {
+      availableAgentsRef.current = [];
+      agentsSettledRef.current = false;
+      const { replace, rerender } = renderPage("agent=agent-1");
+
+      availableAgentsRef.current = [agent];
+      agentsSettledRef.current = true;
+      if (transition === "rehydration") platformWorkspace.slug = "globex";
+      rerender({
+        pathname: transition === "pathname" ? "/globex/chat" : "/acme/chat",
+      });
+
+      expect(mockStartNewChat).not.toHaveBeenCalled();
+      expect(mockToastError).not.toHaveBeenCalled();
+      expect(replace).not.toHaveBeenCalled();
+    },
+  );
 });
 
 describe("ChatPage ?agent= deep link", () => {
@@ -328,11 +455,10 @@ describe("ChatPage ?agent= deep link", () => {
 describe("ChatPage responsive layout", () => {
   const SELECT_PROMPT = "Pick a conversation, or start a new one with +";
 
-  it("folds to a single column on a folded inner screen", () => {
-    // 851px — the reported Pixel Fold inner screen. Too narrow for nav + thread
-    // list + conversation, so with nothing open it spends the whole width on
-    // the list instead of an empty conversation pane.
-    layout.width = FOLD_INNER;
+  it("folds to a single column on a foldable's inner screen held upright", () => {
+    // Below the compact breakpoint, with nothing open, the page spends the
+    // whole width on the thread list instead of an empty conversation pane.
+    layout.width = FOLD_INNER_PORTRAIT;
     renderPage("");
 
     expect(
@@ -341,10 +467,10 @@ describe("ChatPage responsive layout", () => {
     expect(screen.queryByText(SELECT_PROMPT)).not.toBeInTheDocument();
   });
 
-  it("gives the open conversation the whole folded inner screen", () => {
+  it("gives the open conversation the whole upright inner screen", () => {
     // Opening a thread replaces the list, so the way back has to travel with
     // the conversation — same trip the phone layout already had.
-    layout.width = FOLD_INNER;
+    layout.width = FOLD_INNER_PORTRAIT;
     // The page reconciles the store against `?session=`, so the open thread has
     // to be in the URL too — otherwise the sync effect closes it.
     storeRef.current = { activeSessionId: "session-1" };
@@ -357,11 +483,11 @@ describe("ChatPage responsive layout", () => {
     expect(screen.getByRole("button", { name: "Chat" })).toBeInTheDocument();
   });
 
-  it("keeps both panes at the compact breakpoint", () => {
-    // 1024px is the first width that keeps two panes. The nav auto-collapses
+  it.each([TABLET, FOLD_INNER_LANDSCAPE])("keeps both panes at %spx", (width) => {
+    // 768px is the first width that keeps two panes. The nav auto-collapses
     // there instead (see the sidebar), so the thread list stays on screen next
     // to an open conversation.
-    layout.width = TABLET;
+    layout.width = width;
     storeRef.current = { activeSessionId: "session-1" };
     renderPage("session=session-1");
 

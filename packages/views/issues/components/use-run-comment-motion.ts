@@ -45,7 +45,9 @@ export function useRunAnimationVisibility<T extends Element>() {
   const ref = useCallback((node: T | null) => setElement(node), []);
   useEffect(() => {
     if (!element || typeof IntersectionObserver !== "function") return;
-    const observer = new IntersectionObserver(([entry]) => setVisible(entry?.isIntersecting ?? true));
+    // One notification can queue several changes, oldest first: a keyed move
+    // reports the detached row, then its new place. Only the last is current.
+    const observer = new IntersectionObserver((entries) => setVisible(entries.at(-1)?.isIntersecting ?? true));
     observer.observe(element);
     return () => observer.disconnect();
   }, [element]);

@@ -38,6 +38,16 @@
   overflow-wrap: break-word;
 }
 
+/* Bidirectional text (Arabic, Hebrew, Persian mixed with English). Each block
+   takes its base direction from its own first strong character instead of the
+   page, so an Arabic paragraph is right-aligned and keeps English words, paths
+   and numbers in the right order, while English blocks stay left-aligned.
+   `start` follows the resolved direction, so LTR-only content is unchanged. */
+.rich-text-editor :is(p, li, h1, h2, h3, h4, h5, h6, blockquote) {
+  unicode-bidi: plaintext;
+  text-align: start;
+}
+
 /* Headings — compact but with clear visual hierarchy */
 .rich-text-editor h1 {
   font-size: var(--text-display-sm);
@@ -329,8 +339,9 @@
 }
 
 /* Tiptap tables have no <thead>, so their header row is tbody's first row —
-   without this it draws a border-top right against the wrapper's own border. */
-.rich-text-editor table > tbody:first-child > tr:first-child {
+   without this it draws a border-top right against the wrapper's own border.
+   The table frame renders a <colgroup> ahead of the editor's rows. */
+.rich-text-editor :is(table > tbody:first-child, table > colgroup:first-child + tbody) > tr:first-child {
   border-top: 0;
 }
 
@@ -342,7 +353,12 @@
 .rich-text-editor th,
 .rich-text-editor td {
   text-align: left;
-  padding: 0.625rem 1rem;
+  vertical-align: top;
+  padding: 0.5rem 0.75rem;
+  /* Chinese text may break between any two characters, so a column of it
+     reports a one-character minimum and gets squeezed to that whenever
+     another column wants the space. */
+  min-width: 6rem;
   font-size: var(--text-body);
   /* Match body-paragraph line-height. Tiptap wraps cell content in <p>
      (which carries 1.625); the readonly render keeps bare text in the cell,
@@ -351,8 +367,126 @@
   line-height: 1.625;
 }
 
+/* The header label sets its column's minimum width rather than wrapping. */
 .rich-text-editor th {
-  font-weight: 600;
+  font-size: var(--text-label);
+  font-weight: 500;
+  color: var(--muted-foreground);
+  white-space: nowrap;
+}
+
+/* Mention chips truncate inside a cell instead of widening its column. Column
+   widths start from each cell's min-content, where the chip's percentage
+   max-width does not apply, so its whole title became the column's minimum
+   and squeezed every other column. As a grid whose title track may shrink to
+   zero, the chip asks only for its icon and identifier. */
+.rich-text-editor :is(td, th) span.issue-mention:has(> :nth-child(3)) {
+  display: inline-grid;
+  grid-template-columns: auto auto minmax(0, max-content);
+  max-width: 18rem;
+}
+
+.rich-text-editor :is(td, th) span.project-chip {
+  display: inline-grid;
+  grid-template-columns: auto minmax(0, max-content);
+  max-width: 18rem;
+}
+
+/* Table frame (RichTableFrame): the outer box carries the margin, and its
+   toolbar sits inside the top margin, so the margin is never shorter than the
+   toolbar (h-6). The bottom margin matches it, keeping the space even. The
+   wrapper anchors the resize handles, so they scroll with the columns. */
+.rich-text-editor .rich-table {
+  margin: 1.5rem 0;
+}
+
+.rich-text-editor > .rich-table:last-child,
+.rich-text-editor > .table-node:last-child > .rich-table {
+  margin-bottom: 0;
+}
+
+.rich-text-editor .rich-table .tableWrapper {
+  position: relative;
+  margin: 0;
+}
+
+/* Explicit column widths (a viewer's resize, or the overflow fit): fixed
+   layout at those widths. */
+.rich-text-editor table[data-column-widths] {
+  table-layout: fixed;
+  min-width: 0;
+}
+
+.rich-text-editor table[data-column-widths] colgroup {
+  display: table-column-group;
+}
+
+.rich-text-editor table[data-column-widths] th {
+  white-space: normal;
+}
+
+/* Resized by the viewer: the box hugs the table so the border and toolbar
+   follow a table narrower than the column. */
+.rich-text-editor .rich-table[data-resized] {
+  width: fit-content;
+  max-width: 100%;
+}
+
+/* Placed over a column edge by RichTableFrame, which sets left, top and
+   height from the header row. */
+.rich-text-editor .rich-table-resize-handle {
+  position: absolute;
+  z-index: 10;
+  width: 8px;
+  cursor: col-resize;
+  touch-action: none;
+  user-select: none;
+  outline: none;
+}
+
+.rich-text-editor .rich-table-resize-handle::after {
+  content: "";
+  position: absolute;
+  inset-block: 0;
+  left: 3px;
+  width: 2px;
+  background: transparent;
+  transition: background-color 100ms;
+}
+
+.rich-text-editor .rich-table-resize-handle[data-edge="end"]::after {
+  left: auto;
+  right: 0;
+}
+
+.rich-text-editor .rich-table-resize-handle:hover::after,
+.rich-text-editor .rich-table-resize-handle:focus-visible::after {
+  background: color-mix(in srgb, var(--brand) 60%, transparent);
+}
+
+.rich-text-editor .rich-table-resize-handle[data-resizing]::after {
+  background: var(--brand);
+  transition: none;
+}
+
+.rich-text-editor .rich-table-resize-handle [data-width-badge] {
+  display: none;
+}
+
+.rich-text-editor .rich-table-resize-handle[data-resizing] [data-width-badge] {
+  display: block;
+  position: absolute;
+  top: 0.375rem;
+  right: 0.625rem;
+  padding: 0.125rem 0.375rem;
+  border-radius: var(--radius-sm);
+  background: var(--primary);
+  color: var(--primary-foreground);
+  font-size: var(--text-caption);
+  font-weight: 500;
+  line-height: 1rem;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
 }
 
 /* Remove paragraph margin inside table cells */

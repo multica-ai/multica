@@ -3,13 +3,14 @@
 import { useState, type ReactNode } from "react";
 import { Check, Copy, Terminal } from "lucide-react";
 import { Card, CardContent } from "@multica/ui/components/ui/card";
+import { TooltipHint } from "@multica/ui/components/common/tooltip-hint";
 import { CODE_LIGATURE_CLASS } from "@multica/ui/lib/code-style";
 import { cn } from "@multica/ui/lib/utils";
 import { copyText } from "@multica/ui/lib/clipboard";
+import { useDaemonSetupCommands } from "@multica/core/runtimes";
 import { CliInstallCommand } from "../../common/cli-install-command";
+import { DaemonSetupNotice } from "../../common/daemon-setup-notice";
 import { useT } from "../../i18n";
-
-const SETUP_CMD = "multica setup";
 
 function CopyButton({ text }: { text: string }) {
   const { t } = useT("onboarding");
@@ -24,18 +25,20 @@ function CopyButton({ text }: { text: string }) {
   };
 
   return (
-    <button
-      type="button"
-      onClick={handleCopy}
-      className="shrink-0 rounded-xs p-1 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
-      aria-label={t(($) => $.cli_install.copy_aria)}
-    >
-      {copied ? (
-        <Check className="h-3.5 w-3.5 text-success" />
-      ) : (
-        <Copy className="h-3.5 w-3.5" />
-      )}
-    </button>
+    <TooltipHint label={t(($) => $.cli_install.copy_aria)}>
+      <button
+        type="button"
+        onClick={handleCopy}
+        className="shrink-0 rounded-xs p-1 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+        aria-label={t(($) => $.cli_install.copy_aria)}
+      >
+        {copied ? (
+          <Check className="h-3.5 w-3.5 text-success" />
+        ) : (
+          <Copy className="h-3.5 w-3.5" />
+        )}
+      </button>
+    </TooltipHint>
   );
 }
 
@@ -75,16 +78,10 @@ function Step({
   );
 }
 
-/**
- * CLI install instructions — two copy-and-run commands. Step 1 is the public
- * install script, which differs per OS and so renders through
- * `CliInstallCommand`'s platform switch; step 2 is the cloud
- * `multica setup`, hardcoded because the CLI itself knows the endpoints for
- * it. Local development tests a self-host variant by typing the extended
- * command directly in the terminal; no need to thread env vars through React.
- */
 export function CliInstallInstructions() {
   const { t } = useT("onboarding");
+  const commands = useDaemonSetupCommands();
+
   return (
     <Card className="w-full">
       <CardContent className="space-y-4 pt-4">
@@ -103,7 +100,11 @@ export function CliInstallInstructions() {
           </CliInstallCommand>
         </Step>
         <Step n={2} label={t(($) => $.cli_install.step2_label)}>
-          <CommandRow cmd={SETUP_CMD} />
+          {commands.status === "ready" ? (
+            <CommandRow cmd={commands.setupCmd} />
+          ) : (
+            <DaemonSetupNotice status={commands.status} />
+          )}
         </Step>
       </CardContent>
     </Card>

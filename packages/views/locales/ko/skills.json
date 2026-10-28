@@ -1,7 +1,6 @@
 {
   "page": {
     "title": "스킬",
-    "tagline": "이 워크스페이스의 모든 에이전트가 사용할 수 있는 지침입니다.",
     "learn_more": "자세히 보기 →",
     "new_skill": "새 스킬",
     "search_placeholder": "스킬 검색...",
@@ -112,7 +111,9 @@
     "sort_by": "정렬",
     "direction_asc": "오름차순",
     "direction_desc": "내림차순",
-    "section_columns": "표시 열"
+    "section_columns": "표시 열",
+    "manage_labels": "라벨 관리...",
+    "manage_labels_title": "스킬 라벨"
   },
   "detail": {
     "all_skills": "모든 스킬",

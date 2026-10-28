@@ -1051,10 +1051,9 @@ func mustCreateIssue(t *testing.T, title, status string) pgtype.UUID {
 }
 
 // TestBatchCustomTerminalStatusEntersStageBarrier is the regression guard for
-// the batch stage-barrier prefilter. It compared status literals, so a batch
-// that moved the last child onto a CUSTOM done status left childDoneCompleted
-// empty and skipped the parent notification entirely — the already-fixed
-// barrier logic downstream never ran.
+// the batch stage barrier with a custom closed status (MUL-6243): moving the
+// last child onto a CUSTOM done status must close the parent's barrier like
+// the built-in done status.
 func TestBatchCustomTerminalStatusEntersStageBarrier(t *testing.T) {
 	ctx := context.Background()
 	createTestCustomStatus(t, "batch_done_s", issuestatus.Done)
@@ -1074,15 +1073,11 @@ func TestBatchCustomTerminalStatusEntersStageBarrier(t *testing.T) {
 		t.Fatalf("batch update: %d %s", rec.Code, rec.Body.String())
 	}
 
-	// The observable effect of entering the barrier is the system comment on
-	// the parent. Without the fix the batch is silent.
-	var comments int
-	if err := testPool.QueryRow(ctx,
-		`SELECT count(*) FROM comment WHERE issue_id = $1`, parent).Scan(&comments); err != nil {
-		t.Fatalf("count parent comments: %v", err)
-	}
-	if comments == 0 {
-		t.Error("moving the last child to a custom done status did not close the stage barrier")
+	// The observable effect of closing the barrier is the rule's entry on the
+	// parent. Without the fix the batch is silent.
+	t.Cleanup(func() { cleanupChildDoneIssue(uuidToString(parent)) })
+	if entries := childDoneEntries(t, uuidToString(parent)); len(entries) != 1 {
+		t.Errorf("moving the last child to a custom done status did not close the stage barrier: %+v", entries)
 	}
 }
 

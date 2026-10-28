@@ -9,7 +9,8 @@ import { SubmitButton } from "@multica/ui/components/common/submit-button";
 import { Button } from "@multica/ui/components/ui/button";
 import { ActorAvatar } from "../../common/actor-avatar";
 import { contentReferencesAttachment, type AgentTask } from "@multica/core/types";
-import { formatShortcut, useShortcut } from "@multica/core/shortcuts";
+import { useShortcut } from "@multica/core/shortcuts";
+import { ShortcutKeycaps } from "../../common/shortcut-keycaps";
 import { useCommentDraftStore, type CommentDraftKey } from "@multica/core/issues/stores";
 import { cn } from "@multica/ui/lib/utils";
 import type { AvatarSize } from "@multica/ui/lib/avatar-size";
@@ -22,9 +23,7 @@ import { useStopRunsBeforeSend } from "./use-stop-runs-before-send";
 import { useCommentUploads } from "./use-comment-uploads";
 import { useQuickActionMenu } from "../hooks/use-quick-action-menu";
 
-// ---------------------------------------------------------------------------
 // Types
-// ---------------------------------------------------------------------------
 
 interface ReplyInputProps {
   issueId: string;
@@ -51,9 +50,7 @@ interface ReplyInputProps {
 
 const NEVER_STEER_BY_DEFAULT = () => false;
 
-// ---------------------------------------------------------------------------
 // ReplyInput
-// ---------------------------------------------------------------------------
 
 function ReplyInput({
   issueId,
@@ -338,13 +335,19 @@ function ReplyInput({
             disabled={!canSend}
             loading={submitting}
             busy={gate.uploading}
-            tooltip={gate.uploading
+            disabledReason={gate.uploading
               ? tEditor(($) => $.upload.in_progress)
               : !canSend && annotations.length > 0 && !targetMissing
                 ? t(($) => $.reply.annotations.intent_hint)
-              : sendShortcut
-                ? `${t(($) => $.comment.send_tooltip)} · ${formatShortcut(sendShortcut)}`
-                : t(($) => $.comment.send_tooltip)}
+                : undefined}
+            tooltip={sendShortcut
+              ? (
+                <>
+                  {t(($) => $.comment.send_tooltip)}
+                  <ShortcutKeycaps shortcut={sendShortcut} decorative />
+                </>
+              )
+              : t(($) => $.comment.send_tooltip)}
             ariaLabel={gate.uploading
               ? tEditor(($) => $.upload.in_progress)
               : t(($) => $.comment.send_tooltip)}

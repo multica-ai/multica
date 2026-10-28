@@ -53,7 +53,7 @@ func TestIssueWakeupBusyRuleDoesNotBlockOtherWorkspace(t *testing.T) {
 			}
 			ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 			defer cancel()
-			if err = s.Tick(ctx); err == nil {
+			if err = s.TickWorkspaces(ctx, parseTestUUID(t, f.WorkspaceID), parseTestUUID(t, other.WorkspaceID)); err == nil {
 				t.Fatal("expected busy-rule diagnostic")
 			}
 			if ctx.Err() != nil {
@@ -169,19 +169,36 @@ func TestIssueWakeupCaptureRacingConsumptionKeepsNewInput(t *testing.T) {
 func TestIssueWakeupReceiptExpiryIsBoundedAndKeepsPending(t *testing.T) {
 	f, s, issue, agent := wakeFixture(t)
 	w := wakeCreate(t, f, s, issue, WakeupInput{AgentID: agent, Kind: "event", EventTypes: []string{"comment.created"}, Instruction: "check"})
-	f.Exec(t, `INSERT INTO issue_wakeup_receipt(id,wakeup_id,revision,event_key,event_type,payload,created_at,processed_at)
+	ctx := context.Background()
+	tx, err := f.Pool.Begin(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer tx.Rollback(ctx)
+	q := f.q.WithTx(tx)
+	_, err = tx.Exec(ctx, `INSERT INTO issue_wakeup_receipt(id,wakeup_id,revision,event_key,event_type,payload,created_at,processed_at)
  SELECT gen_random_uuid(),$1,1,n::text,'comment.created','{}',now()-interval '10 days',now()-interval '8 days' FROM generate_series(1,1050) n`, w.ID)
-	f.Exec(t, `INSERT INTO issue_wakeup_receipt(id,wakeup_id,revision,event_key,event_type,payload,created_at,processed_at)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = tx.Exec(ctx, `INSERT INTO issue_wakeup_receipt(id,wakeup_id,revision,event_key,event_type,payload,created_at,processed_at)
  VALUES(gen_random_uuid(),$1,1,'pending','comment.created','{}',now()-interval '10 days',NULL),
  (gen_random_uuid(),$1,1,'recent','comment.created','{}',now()-interval '10 days',now())`, w.ID)
-	removed, err := f.q.DeleteExpiredWakeupReceipts(context.Background(), pgtype.Timestamptz{Time: time.Now().Add(-7 * 24 * time.Hour), Valid: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	removed, err := q.DeleteExpiredWakeupReceipts(ctx, pgtype.Timestamptz{Time: time.Now().Add(-7 * 24 * time.Hour), Valid: true})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if removed != 1000 {
 		t.Fatalf("cleanup not bounded: %d", removed)
 	}
-	if got := f.Count(t, "SELECT count(*) FROM issue_wakeup_receipt WHERE wakeup_id=$1 AND event_key IN ('pending','recent')", w.ID); got != 2 {
+	var kept int
+	if err = tx.QueryRow(ctx, "SELECT count(*) FROM issue_wakeup_receipt WHERE wakeup_id=$1 AND event_key IN ('pending','recent')", w.ID).Scan(&kept); err != nil {
+		t.Fatal(err)
+	}
+	if kept != 2 {
 		t.Fatal("expired pending input or recent dedup key")
 	}
 }

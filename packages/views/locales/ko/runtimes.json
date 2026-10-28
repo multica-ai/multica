@@ -1,10 +1,9 @@
 {
   "page": {
     "title": "런타임",
-    "tagline": "에이전트의 CLI 세션을 실행하는 기기와 클라우드 워커입니다.",
     "learn_more": "자세히 보기 →",
-    "connect_remote": "컴퓨터 추가",
-    "search_placeholder": "런타임 검색...",
+    "connect_remote": "머신 추가",
+    "search_placeholder": "검색…",
     "scope_mine": "내 것",
     "scope_all": "전체",
     "live": "실시간",
@@ -13,7 +12,7 @@
     "filter_all_description": "이 보기의 모든 런타임",
     "empty": {
       "title": "아직 런타임이 없습니다",
-      "hint": "데스크톱 앱은 이 컴퓨터를 자동 감지합니다. 다른 컴퓨터는 여기서 연결하세요."
+      "hint": "데스크톱 앱은 이 컴퓨터를 자동 감지합니다. 다른 머신은 여기서 추가하세요."
     },
     "no_matches": {
       "title": "일치하는 결과 없음",
@@ -25,6 +24,52 @@
     "bootstrapping": {
       "title": "로컬 런타임 시작 중...",
       "hint": "워크스페이스에 연결 중..."
+    },
+    "add": "추가",
+    "add_menu": {
+      "machines": "머신",
+      "this_computer": "이 컴퓨터",
+      "this_computer_connected": "연결됨 · {{name}}",
+      "this_computer_download": "데스크톱 앱을 내려받아 연결",
+      "other_machine": "다른 머신 또는 서버",
+      "other_machine_hint": "해당 머신에서 명령 두 개 실행",
+      "cloud_services": "클라우드 서비스",
+      "qoder_manage_hint": "연결됨 · 연결 관리",
+      "cloud_runtime_hint": "Multica가 호스팅하는 클라우드 노드 생성"
+    },
+    "columns": {
+      "name": "이름",
+      "harness": "Harness",
+      "agents": "에이전트",
+      "workload": "작업량",
+      "status": "상태"
+    },
+    "groups": {
+      "machines": {
+        "title": "머신"
+      },
+      "cloud": {
+        "title": "클라우드 서비스",
+        "coming_soon": "출시 예정"
+      }
+    },
+    "rows": {
+      "this_computer_title": "이 컴퓨터에서 실행",
+      "this_computer_hint": "데스크톱 앱을 내려받아 로그인하면 이 컴퓨터의 Claude Code, Codex 등이 자동으로 표시됩니다",
+      "download_desktop": "데스크톱 앱 다운로드",
+      "add_machine_title": "다른 머신 또는 서버 추가",
+      "add_machine_hint": "해당 머신에서 명령 두 개를 실행하면 에이전트가 그 머신의 CLI를 사용할 수 있습니다",
+      "view_commands": "명령 보기",
+      "owner_you": "나",
+      "connect": "연결",
+      "not_connected": "연결 안 됨",
+      "provided_by": "{{vendor}} 제공",
+      "no_matches": "일치하는 머신 또는 클라우드 서비스가 없습니다"
+    },
+    "filters": {
+      "all": "전체",
+      "online": "온라인",
+      "offline": "오프라인"
     }
   },
   "mika_setup": {
@@ -75,7 +120,7 @@
     "rename": "기기 이름 변경",
     "rename_dialog": {
       "title": "기기 이름 변경",
-      "description": "이 컴퓨터와 모든 런타임에 사용됩니다.",
+      "description": "이 머신과 모든 런타임에 사용됩니다.",
       "placeholder": "예: 내 MacBook",
       "hint": "비워 두면 기기의 기본 이름을 사용합니다.",
       "cancel": "취소",
@@ -124,18 +169,44 @@
     "diagnostics_visibility": "공개 범위",
     "visibility_label": {
       "private": "비공개",
-      "public": "공개"
+      "public": "공개",
+      "members": "지정 멤버"
+    },
+    "visibility_choice": {
+      "private": "비공개",
+      "public": "공개",
+      "members": "멤버"
     },
     "visibility_hint": {
       "private": "본인만 이 런타임에 에이전트를 만들 수 있습니다.",
-      "public": "워크스페이스 멤버라면 누구나 이 런타임에 에이전트를 만들 수 있습니다."
+      "public": "워크스페이스 멤버라면 누구나 이 런타임에 에이전트를 만들 수 있습니다.",
+      "members": "나와 선택한 멤버만 이 런타임에서 에이전트를 만들 수 있습니다."
     },
     "visibility_hint_readonly": {
       "private": "이 런타임에 에이전트를 만들 수 있는 사람은 런타임 owner뿐이며, 공개로 바꿀 수 있는 사람도 owner뿐입니다.",
-      "public": "워크스페이스 멤버라면 누구나 이 런타임에 에이전트를 만들 수 있습니다. 다시 비공개로 바꿀 수 있는 사람은 런타임 owner뿐입니다."
+      "public": "워크스페이스 멤버라면 누구나 이 런타임에 에이전트를 만들 수 있습니다. 다시 비공개로 바꿀 수 있는 사람은 런타임 owner뿐입니다.",
+      "members": "소유자와 선택한 멤버만 이 런타임에서 에이전트를 만들 수 있습니다."
     },
+    "visibility_members_title": "멤버와 공유",
+    "visibility_members_search": "멤버 검색",
+    "visibility_members_none": "워크스페이스에 다른 멤버가 없습니다.",
+    "visibility_members_no_match": "일치하는 멤버가 없습니다.",
+    "visibility_members_edit": "편집",
+    "visibility_members_count_other": "멤버 {{count}}명",
     "visibility_toast_updated": "공개 범위를 {{visibility}}(으)로 설정했습니다",
     "visibility_toast_failed": "공개 범위를 업데이트하지 못했습니다",
+    "visibility_revoke_dialog": {
+      "title": "런타임 접근을 제한할까요?",
+      "description": "\"{{name}}\" 접근을 제한하면 영향받는 에이전트 {{count}}개의 연결을 해제하고 실행 {{taskCount}}개를 취소하며 해당 에이전트의 활성 오토파일럿을 일시 중지합니다. 접근 권한이 유지되는 에이전트와 실행은 영향받지 않습니다.",
+      "warning": "서버의 접근 권한은 즉시 취소됩니다. 연결된 데몬은 일반 취소 확인 과정에서 중단합니다. 오프라인 컴퓨터는 다시 연결될 때까지 중단 요청을 받을 수 없으므로 그동안 로컬 프로세스가 계속 실행될 수 있습니다.",
+      "plan_changed": "이 대화 상자가 열린 동안 접근 계획이 변경되었습니다. 내용을 검토하고 다시 확인하세요.",
+      "checkbox": "목록의 다른 멤버 에이전트 연결이 해제되고 활성 실행이 취소되며 활성 자동화가 일시 중지됨을 이해했습니다.",
+      "cancel": "취소",
+      "confirm": "접근 제한",
+      "submitting": "접근을 취소하는 중...",
+      "toast_success": "런타임 접근 권한을 변경했습니다",
+      "toast_failed": "Runtime 접근을 취소하지 못했습니다"
+    },
     "delete_dialog": {
       "self_heal_notice": "이 런타임은 실행 중인 로컬 데몬이 관리합니다. 삭제는 성공하지만, 데몬 프로세스를 멈추지 않으면 몇 초 안에 새 런타임이 다시 등록됩니다. 완전히 제거하려면 먼저 데몬을 중지하세요.",
       "profile_backed_notice": "이 런타임은 사용자 지정 런타임 프로필에서 등록되었습니다. 여기서 삭제하면 현재 런타임 인스턴스만 제거되며, 프로필이 남아 있는 동안 실행 중인 데몬이 다시 등록할 수 있습니다. 완전히 제거하려면 Custom runtimes에서 사용자 지정 런타임 프로필을 삭제하세요.",
@@ -187,16 +258,16 @@
   "running_other": "실행 중 {{count}}개",
   "queued_other": "대기 중 {{count}}개",
   "connect": {
-    "title": "컴퓨터 추가",
-    "description": "추가하려는 컴퓨터에서 아래 두 명령을 실행하세요. 데몬이 온라인이 되는 순간 감지합니다.",
+    "title": "머신 추가",
+    "description": "추가하려는 머신에서 아래 두 명령을 실행하세요. 데몬이 온라인이 되는 순간 감지합니다.",
     "step1_label": "Multica CLI 설치",
     "platform_group": "플랫폼 선택",
     "platform_macos_linux": "macOS / Linux",
     "platform_windows": "Windows",
     "step2_label": "데몬 시작",
     "step2_hint": "로그인을 위해 브라우저를 열고, 이후 데몬을 백그라운드에서 계속 실행합니다.",
-    "live_listening": "컴퓨터를 기다리는 중",
-    "troubleshooting": "해당 컴퓨터에서 브라우저를 열 수 없나요?",
+    "live_listening": "머신을 기다리는 중",
+    "troubleshooting": "해당 머신에서 브라우저를 열 수 없나요?",
     "trouble_intro": "브라우저 로그인 대신 토큰을 사용하세요. 2단계를 대체하며 터미널이 있는 곳이면 어디서든 작동합니다.",
     "trouble_token_hint_prefix": "토큰은 ",
     "trouble_token_hint_destination": "설정 → 토큰",
@@ -205,8 +276,8 @@
     "trouble_view_logs": "로그 보기",
     "copy_aria": "복사",
     "cancel": "취소",
-    "success_title": "컴퓨터 연결됨",
-    "success_description": "컴퓨터가 연결되었습니다. 에이전트를 만들 수 있습니다.",
+    "success_title": "머신 연결됨",
+    "success_description": "머신이 연결되었습니다. 에이전트를 만들 수 있습니다.",
     "view_runtime": "런타임 보기",
     "create_agent": "에이전트 만들기"
   },
@@ -449,5 +520,138 @@
     "table_cache_r": "캐시 R",
     "table_cache_w": "캐시 W",
     "no_data": "아직 사용량 데이터가 없습니다"
+  },
+  "qoder": {
+    "title": "Qoder Cloud Agents runtime",
+    "description": "Connect Qoder Cloud Agents. Multica manages execution and stores credentials encrypted. Workspace administrators can change this configuration.",
+    "loading": "Loading…",
+    "unavailable": "서버 설정이 필요합니다: MULTICA_VCS_SECRET_KEY를 설정하세요.",
+    "online": "Online",
+    "error": "Connection error",
+    "starting": "Starting",
+    "not_configured": "Not configured",
+    "name": "Runtime name",
+    "region": "리전",
+    "region_global": "글로벌(qoder.com)",
+    "region_cn": "중국(qoder.com.cn)",
+    "region_hint": "PAT를 만든 사이트를 선택하세요. PAT는 해당 리전에서만 사용할 수 있습니다.",
+    "keep_secret": "Leave blank to keep the saved token",
+    "repositories": "GitHub authorization",
+    "repositories_hint": "저장소마다 토큰을 연결하세요. 저장소와 시작 브랜치는 프로젝트에서 선택합니다.",
+    "remove": "Remove",
+    "add_repository": "Add repository",
+    "saved": "Saved. The server will start the runtime automatically.",
+    "check": "Test connection",
+    "working": "Working…",
+    "stop": "일시 중지",
+    "stopped": "일시 중지됨",
+    "offline": "Offline; reconnecting",
+    "checking": "연결 테스트 중...",
+    "check_passed": "연결 성공",
+    "check_failed": "연결 실패",
+    "environment": "실행 환경",
+    "select_environment": "실행 환경 선택",
+    "no_environments": "사용 가능한 환경이 없습니다. Qoder에서 생성한 후 새로고침하세요.",
+    "refresh_catalog": "목록 새로고침",
+    "agent": "원격 에이전트",
+    "select_agent": "Qoder Cloud Agents에서 에이전트 선택",
+    "agent_hint": "저장된 Qoder PAT로 원격 에이전트를 연결합니다. 모델, 도구, 스킬은 Qoder Cloud Agents에서 관리합니다.",
+    "no_agents": "사용 가능한 에이전트가 없습니다. Qoder Cloud Agents에서 에이전트를 생성한 후 새로고침하세요.",
+    "agent_unavailable": "연결된 원격 에이전트를 사용할 수 없습니다. 다른 에이전트를 선택하세요.",
+    "save_agent": "연결 저장",
+    "agent_saved": "Qoder Cloud Agents의 에이전트 연결을 저장했습니다",
+    "agent_save_failed": "Qoder Cloud Agents의 에이전트 연결을 저장할 수 없습니다",
+    "cloud_title": "Qoder Cloud Agents",
+    "managed": "관리형 서비스",
+    "cloud_description": "공유 연결로 Qoder 클라우드에서 에이전트를 실행합니다. 로컬 호스트를 관리할 필요가 없습니다.",
+    "configure_credentials": "인증 정보 설정",
+    "add_agent": "에이전트 추가",
+    "add_agent_description": "기존 Qoder Cloud Agents 에이전트에 연결할 Multica 에이전트를 생성합니다. Qoder 클라우드에 설정된 환경과 인증 정보를 사용합니다.",
+    "agent_name": "에이전트 이름",
+    "cancel": "취소",
+    "shared_credentials_hint": "인증 정보는 현재 워크스페이스 내에서 공유됩니다. PAT는 암호화하여 저장되며 다시 표시되지 않습니다.",
+    "agent_count_other": "에이전트 {{count}}개",
+    "github_url": "GitHub URL",
+    "github_token": "GitHub 토큰",
+    "execution": "실행 설정",
+    "concurrency": "동시 실행 수",
+    "concurrency_hint": "한도를 넘는 작업은 대기열에서 기다립니다.",
+    "run_timeout": "실행 제한 시간(분)",
+    "run_timeout_hint": "이 시간이 지나도 끝나지 않은 실행은 취소되고 실패로 기록됩니다.",
+    "data_disclosure_title": "Multica가 Qoder로 보내는 내용",
+    "data_disclosure": "이슈 제목과 설명, 관련 댓글, 프로젝트 컨텍스트, 에이전트 지침. GitHub 토큰은 실행 시 저장소를 마운트하는 데만 사용됩니다.",
+    "usage": "실행 중 {{active}}/{{limit}} · 대기 {{queued}}",
+    "open_settings": "설정 열기",
+    "default_repository": "기본 저장소",
+    "default_repository_hint": "이슈의 프로젝트에 저장소가 없을 때 마운트됩니다. 연결에 이 저장소의 GitHub 토큰이 필요합니다.",
+    "default_branch": "브랜치",
+    "default_branch_placeholder": "기본 브랜치",
+    "create_agent": "이것으로 에이전트 만들기",
+    "connect": {
+      "submit": "연결",
+      "connected": "Qoder가 연결되었습니다. 몇 초 후 사용할 수 있습니다.",
+      "token": "개인 액세스 토큰",
+      "token_rejected": "{{region}}에서는 이 토큰을 사용할 수 없습니다. 토큰은 생성한 사이트에서만 유효합니다.",
+      "retry_cn": "중국 사이트로 다시 시도",
+      "retry_global": "글로벌 사이트로 다시 시도",
+      "verifying": "토큰 확인 중…",
+      "verified": "토큰 확인됨",
+      "environment_waiting": "토큰을 확인하면 불러옵니다",
+      "repo_count_other": "저장소 {{count}}개",
+      "optional": "선택 사항",
+      "execution_summary": "동시에 최대 {{concurrency}}개 · 제한 시간 {{timeout}}분"
+    },
+    "stop_confirm": {
+      "title": "Qoder Cloud Agents를 일시 중지할까요?",
+      "description": "다시 시작하기 전까지 새 작업은 Qoder로 보내지지 않습니다.",
+      "cancel": "취소",
+      "description_agents_other": "다음 {{count}}개 에이전트는 지침과 기록을 유지하지만 Qoder를 다시 시작하거나 다른 런타임으로 옮기기 전까지 새 작업을 받을 수 없습니다."
+    },
+    "connect_title": "Qoder Cloud Agents 연결",
+    "connect_description": "Multica는 Qoder 샌드박스에서 작업을 실행합니다.",
+    "page": {
+      "configuration": "구성",
+      "agents_title": "에이전트",
+      "pause_title": "Qoder 일시 중지",
+      "pause_hint": "Qoder로 새 작업을 보내지 않습니다. 자격 증명과 에이전트는 유지되며 언제든 다시 시작할 수 있습니다.",
+      "resume_title": "Qoder 다시 시작",
+      "resume": "다시 시작",
+      "resumed": "Qoder를 시작하는 중입니다.",
+      "disconnect_title": "Qoder 연결 해제",
+      "disconnect_hint": "저장된 PAT와 저장소 토큰을 삭제하고 이 런타임을 제거합니다. 이를 사용하는 에이전트는 연결이 해제되며 기록은 유지됩니다.",
+      "disconnect": "연결 해제",
+      "not_connected_title": "Qoder가 연결되지 않았습니다",
+      "not_connected_hint": "워크스페이스 관리자에게 Qoder Cloud Agents 연결을 요청하세요.",
+      "workload_idle": "유휴",
+      "connection_title": "연결",
+      "edit": "편집",
+      "edit_connection_title": "연결 편집",
+      "edit_connection_hint": "저장하기 전에 연결을 테스트합니다.",
+      "test_and_save": "테스트 후 저장",
+      "save": "저장",
+      "token_saved": "저장됨",
+      "repositories_hint": "에이전트는 여기서 승인한 저장소만 복제할 수 있습니다.",
+      "repo_token_saved": "토큰 저장됨",
+      "repo_actions": "{{repo}} 작업",
+      "replace_token": "토큰 교체",
+      "replace_token_title": "{{repo}} 토큰 교체",
+      "open_on_github": "GitHub에서 열기",
+      "remove_repository_title": "{{repo}}을(를) 제거할까요?",
+      "remove_repository_description": "이 저장소의 토큰이 삭제되며 에이전트가 더 이상 복제할 수 없습니다.",
+      "edit_limits": "실행 설정 편집",
+      "run_timeout": "실행 제한 시간",
+      "manage_title": "관리",
+      "minutes_other": "{{count}}분"
+    },
+    "disconnect_confirm": {
+      "title": "Qoder Cloud Agents 연결을 해제할까요?",
+      "description": "저장된 PAT와 저장소 토큰이 삭제되고 Qoder 런타임이 제거됩니다. 다시 사용하려면 처음부터 연결해야 합니다.",
+      "description_agents_other": "다음 {{count}}개 에이전트는 연결이 해제됩니다. 지침과 기록은 유지되며 다른 런타임으로 옮길 수 있습니다.",
+      "plan_changed": "Qoder의 에이전트가 변경되었습니다. 최신 목록을 확인한 뒤 다시 확인하세요.",
+      "confirm": "연결 해제",
+      "working": "연결 해제 중…",
+      "cancel": "취소",
+      "done": "Qoder 연결을 해제했습니다"
+    }
   }
 }

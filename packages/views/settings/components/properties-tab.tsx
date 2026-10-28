@@ -29,6 +29,7 @@ import type {
 } from "@multica/core/types";
 import { ISSUE_PROPERTY_TYPES } from "@multica/core/types";
 import { Button } from "@multica/ui/components/ui/button";
+import { IconButton } from "@multica/ui/components/common/icon-button";
 import { Badge } from "@multica/ui/components/ui/badge";
 import { Input } from "@multica/ui/components/ui/input";
 import { Textarea } from "@multica/ui/components/ui/textarea";
@@ -77,7 +78,7 @@ import {
   PropertyIconPicker,
 } from "../../common/property-icon";
 import { useLocale, useT } from "../../i18n";
-import { SettingsTab } from "./settings-layout";
+import { SettingsReadOnlyNotice, SettingsTab } from "./settings-layout";
 
 const MAX_ACTIVE_PROPERTIES = 20;
 
@@ -140,8 +141,9 @@ export function PropertiesTab() {
   return (
     <SettingsTab
       title={t(($) => $.properties.title)}
-      description={t(($) => $.properties.description)}
+      scope="workspace"
     >
+      {currentMember && !canManage ? <SettingsReadOnlyNotice wsId={wsId} /> : null}
       <div className="space-y-5">
         <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
           <div className="relative w-full sm:max-w-sm">
@@ -262,13 +264,13 @@ export function PropertiesTab() {
                     <DropdownMenu>
                       <DropdownMenuTrigger
                         render={
-                          <Button
+                          <IconButton
                             variant="ghost"
                             size="icon-sm"
-                            aria-label={t(($) => $.properties.actions.open, { name: property.name })}
+                            label={t(($) => $.properties.actions.open, { name: property.name })}
                           >
                             <MoreHorizontal className="size-4" />
-                          </Button>
+                          </IconButton>
                         }
                       />
                       <DropdownMenuContent align="end">
@@ -351,6 +353,10 @@ export function PropertyTypeLabel({ type }: { type: string }) {
       return <>{t(($) => $.properties.types.actor)}</>;
     case "multi_actor":
       return <>{t(($) => $.properties.types.multi_actor)}</>;
+    case "multi_text":
+      return <>{t(($) => $.properties.types.multi_text)}</>;
+    case "multi_url":
+      return <>{t(($) => $.properties.types.multi_url)}</>;
     default:
       // Forward compat: newer servers may ship types this build doesn't know.
       return <>{type}</>;
@@ -600,10 +606,10 @@ function PropertyEditorDialog({
                       placeholder={t(($) => $.properties.editor.option_name_placeholder)}
                       className="h-8"
                     />
-                    <Button
+                    <IconButton
                       variant="ghost"
                       size="icon-sm"
-                      aria-label={t(($) => $.properties.editor.remove_option)}
+                      label={t(($) => $.properties.editor.remove_option)}
                       disabled={draft.options.length <= 1}
                       onClick={() =>
                         setDraft((current) => ({
@@ -613,7 +619,7 @@ function PropertyEditorDialog({
                       }
                     >
                       <X className="size-4" />
-                    </Button>
+                    </IconButton>
                   </div>
                 ))}
               </div>

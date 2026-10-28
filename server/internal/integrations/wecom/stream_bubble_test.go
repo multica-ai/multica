@@ -319,7 +319,7 @@ func (r *bubbleRig) ask(t *testing.T, reqID string) {
 			Source: channel.Source{ChannelType: TypeWecom, ChatID: "CHAT_1", ChatType: channel.ChatTypeP2P, SenderID: "USER_1"},
 			Raw:    raw,
 		},
-		bubbleSessionID(t))
+		bubbleSessionID(t), bubbleSessionID(t))
 }
 
 // reconnect swaps the installation's live socket the way the Supervisor does
