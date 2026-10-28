@@ -3,6 +3,7 @@
 import { useQuery } from "@tanstack/react-query";
 import { ActorAvatar as ActorAvatarBase } from "@multica/ui/components/common/actor-avatar";
 import { Skeleton } from "@multica/ui/components/ui/skeleton";
+import { TruncatedTooltip } from "@multica/ui/components/common/truncated-tooltip";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { useWorkspacePaths } from "@multica/core/paths";
 import { agentListOptions } from "@multica/core/workspace/queries";
@@ -188,14 +189,15 @@ function CurrentIssueRow({
       <span className="w-16 shrink-0 text-muted-foreground">{label}</span>
       {issueId ? (
         issue ? (
-          <AppLink
-            href={issueHref(issueId)}
-            className="min-w-0 truncate text-brand hover:underline"
-            title={`${issue.identifier} ${issue.title}`}
-          >
-            <span className="mr-1 font-mono text-micro">{issue.identifier}</span>
-            <span>{issue.title}</span>
-          </AppLink>
+          <TruncatedTooltip content={`${issue.identifier} ${issue.title}`}>
+            <AppLink
+              href={issueHref(issueId)}
+              className="min-w-0 truncate text-brand hover:underline"
+            >
+              <span className="mr-1 font-mono text-micro">{issue.identifier}</span>
+              <span>{issue.title}</span>
+            </AppLink>
+          </TruncatedTooltip>
         ) : (
           <Skeleton className="h-3 w-24" />
         )

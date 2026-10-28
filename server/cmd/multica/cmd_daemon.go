@@ -112,6 +112,7 @@ func init() {
 	f.Bool("no-auto-update", false, "Disable periodic CLI self-update (env: MULTICA_DAEMON_AUTO_UPDATE=false)")
 	f.Duration("auto-update-interval", 0, "How often to poll GitHub for a newer release (env: MULTICA_DAEMON_AUTO_UPDATE_INTERVAL)")
 	f.Bool("no-auto-reload", false, "Disable restarting when the multica binary on disk changes version (env: MULTICA_DAEMON_AUTO_RELOAD=false)")
+	daemonStopCmd.Flags().Bool("force", false, "Wait for graceful shutdown, then force termination if needed")
 
 	daemonLogsCmd.Flags().BoolP("follow", "f", false, "Follow log output")
 	daemonLogsCmd.Flags().IntP("lines", "n", 50, "Number of lines to show")
@@ -1118,6 +1119,9 @@ func runDaemonForeground(cmd *cobra.Command) error {
 	if daemonAlive(existing) && daemonIdentityMismatch(existing, profile, port) == nil {
 		return fmt.Errorf("daemon %s is already running or starting", describeProfile(profile))
 	}
+	if err := writeDaemonShutdownResult(profile, daemonShutdownResult{PID: os.Getpid()}); err != nil {
+		return fmt.Errorf("initialize daemon shutdown result: %w", err)
+	}
 	healthLn, actualPort, err := bindDaemonHealthPort(cfg.HealthPort, net.Listen)
 	if err != nil {
 		return err
@@ -1141,8 +1145,12 @@ func runDaemonForeground(cmd *cobra.Command) error {
 	}
 	defer os.Remove(daemonPIDPathForProfile(profile))
 
-	if err := d.RunWithHealthListener(ctx, healthLn); err != nil && !errors.Is(err, context.Canceled) {
-		return err
+	runErr := d.RunWithHealthListener(ctx, healthLn)
+	if err := writeDaemonShutdownResult(profile, daemonShutdownResult{PID: os.Getpid(), CleanupConfirmed: d.ShutdownCleanupConfirmed()}); err != nil {
+		return fmt.Errorf("write daemon shutdown result: %w", err)
+	}
+	if runErr != nil && !errors.Is(runErr, context.Canceled) {
+		return runErr
 	}
 
 	// Check if the daemon needs to restart after a CLI update.
@@ -1359,6 +1367,13 @@ func runDaemonStop(cmd *cobra.Command, _ []string) error {
 	defer cancel()
 
 	health := checkDaemonHealthOnPort(ctx, healthPort)
+	if force, _ := cmd.Flags().GetBool("force"); force {
+		if err := stopDaemonAndWait(profile, healthPort, health, daemonShutdownLockWait, 2*time.Second); err != nil {
+			return err
+		}
+		fmt.Fprintln(os.Stderr, "Daemon stopped.")
+		return nil
+	}
 	if !daemonAlive(health) {
 		label := "Daemon"
 		if profile != "" {

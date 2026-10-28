@@ -4,6 +4,7 @@ import type { Label } from "@multica/core/types";
 import { X } from "lucide-react";
 import { TooltipHint } from "@multica/ui/components/common/tooltip-hint";
 import { useT } from "../i18n";
+import { TruncatedTooltip } from "@multica/ui/components/common/truncated-tooltip";
 
 /**
  * Map a label's `#rrggbb` color to a readable text color.
@@ -65,11 +66,13 @@ export function LabelChip({ label, onRemove, className, fullName }: LabelChipPro
       className={`inline-flex min-w-0 items-center gap-1 rounded-full px-2 py-0.5 text-caption font-medium ${className ?? ""}`}
       style={{ backgroundColor: label.color, color: textColor }}
       // aria-label exposes the full name to screen readers when the span
-      // visually truncates. title stays for sighted hover-tooltip.
+      // visually truncates; sighted users get it from the hover tooltip,
+      // which only opens when the name is actually cut off.
       aria-label={label.name}
-      title={label.name}
     >
-      <span className={nameClass}>{label.name}</span>
+      <TruncatedTooltip content={fullName ? null : label.name}>
+        <span className={nameClass}>{label.name}</span>
+      </TruncatedTooltip>
       {onRemove && (
         <TooltipHint label={t(($) => $.remove_label, { name: label.name })}>
           <button

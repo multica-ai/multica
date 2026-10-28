@@ -406,7 +406,7 @@ describe("IssueRunsDialog", () => {
       }),
     ]);
 
-    expect(screen.getByTitle("Wakeup · When CI finishes")).toHaveTextContent("Wakeup · When CI finishes");
+    expect(screen.getByText("Wakeup · When CI finishes")).toBeInTheDocument();
     expect(screen.queryByText(/“/)).not.toBeInTheDocument();
   });
 
@@ -414,7 +414,19 @@ describe("IssueRunsDialog", () => {
     const long = "把之前拆出去的三个子任务都合并回这个 PR，conditions / history / runaway protection 一起做完再提交";
     open([makeTask({ trigger_comment_id: "comment-1", trigger_summary: long, usage: [usage()] })]);
 
-    expect(screen.getByText(`“${long}”`)).toHaveAttribute("title", `“${long}”`);
+    // jsdom has no layout: give the line the clipped box a browser would.
+    const line = screen.getByText(`“${long}”`);
+    line.style.overflowX = "hidden";
+    Object.defineProperties(line, {
+      scrollWidth: { configurable: true, value: 600 },
+      clientWidth: { configurable: true, value: 200 },
+    });
+    vi.useFakeTimers();
+    fireEvent.pointerEnter(line, { pointerType: "mouse" });
+    act(() => {
+      vi.advanceTimersByTime(550);
+    });
+    expect(document.querySelector("[data-slot='tooltip-content']")).toHaveTextContent(`“${long}”`);
   });
 
   it("renders in the member's language", () => {

@@ -589,6 +589,25 @@ func TestTaskMulticaEnvironmentIncludesPrivateConfigRoot(t *testing.T) {
 	}
 }
 
+func TestHermesTaskEnvPassthroughCoversTaskEnvironment(t *testing.T) {
+	t.Parallel()
+	names := execenv.HermesTaskEnvPassthroughNames()
+	seen := make(map[string]bool, len(names))
+	for _, name := range names {
+		if !strings.HasPrefix(name, "MULTICA_") || seen[name] {
+			t.Errorf("invalid or duplicate Hermes task environment name: %q", name)
+		}
+		seen[name] = true
+	}
+	env := taskMulticaEnvironment(Task{ID: "task-test", AgentID: "agent-test", WorkspaceID: "workspace-test"},
+		"hermes", "agent-name", "mat_fixture", "/task/config", "/task/workspaces", "https://task.example", 19514, 3, "/task/tmp")
+	for name := range env {
+		if strings.HasPrefix(name, "MULTICA_") && !seen[name] {
+			t.Errorf("daemon injects %s but Hermes tool subprocesses will drop it", name)
+		}
+	}
+}
+
 func TestTaskMulticaEnvironmentTempPolicy(t *testing.T) {
 	t.Setenv("CLAUDE_CODE_TMPDIR", "")
 	for _, provider := range []string{"claude", "codex", "pi", "opencode", "cursor"} {

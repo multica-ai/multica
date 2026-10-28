@@ -17,6 +17,8 @@ import (
 	"github.com/aws/aws-sdk-go-v2/credentials"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
 	"github.com/aws/aws-sdk-go-v2/service/s3/types"
+	"github.com/aws/smithy-go/middleware"
+	smithyhttp "github.com/aws/smithy-go/transport/http"
 )
 
 type S3Storage struct {
@@ -86,6 +88,11 @@ func NewS3StorageFromEnv() *S3Storage {
 			o.UsePathStyle = usePathStyle
 		})
 	}
+	if isGCSEndpoint(endpointURL) {
+		s3Opts = append(s3Opts, func(o *s3.Options) {
+			o.APIOptions = append(o.APIOptions, excludeGCSAcceptEncoding)
+		})
+	}
 
 	slog.Info("S3 storage initialized", "bucket", bucket, "region", region, "cdn_domain", cdnDomain, "endpoint_url", endpointURL, "use_path_style", usePathStyle)
 	return &S3Storage{
@@ -134,6 +141,52 @@ func parseBoolEnv(raw string) (bool, error) {
 	default:
 		return false, fmt.Errorf("invalid bool %q", raw)
 	}
+}
+
+// isGCSEndpoint reports whether endpointURL points to Google Cloud Storage XML API.
+func isGCSEndpoint(endpointURL string) bool {
+	if endpointURL == "" {
+		return false
+	}
+	host := endpointHostname(endpointURL)
+	return host == "storage.googleapis.com" || strings.HasSuffix(host, ".storage.googleapis.com")
+}
+
+// excludeGCSAcceptEncoding keeps the header GCS rewrites out of the signature,
+// while retaining the SDK's value on the wire to prevent automatic decompression.
+func excludeGCSAcceptEncoding(stack *middleware.Stack) error {
+	// Presigning replaces Signing and removes the SDK's Accept-Encoding middleware.
+	if _, ok := stack.Finalize.Get("Signing"); !ok {
+		return nil
+	}
+
+	// Values belong to this operation's stack; retry attempts run sequentially.
+	var values []string
+	if err := stack.Finalize.Insert(middleware.FinalizeMiddlewareFunc("RemoveGCSAcceptEncoding",
+		func(ctx context.Context, in middleware.FinalizeInput, next middleware.FinalizeHandler) (middleware.FinalizeOutput, middleware.Metadata, error) {
+			req, ok := in.Request.(*smithyhttp.Request)
+			if !ok {
+				return middleware.FinalizeOutput{}, middleware.Metadata{}, fmt.Errorf("GCS signing: unexpected request type %T", in.Request)
+			}
+			values = req.Header.Values("Accept-Encoding")
+			req.Header.Del("Accept-Encoding")
+			return next.HandleFinalize(ctx, in)
+		},
+	), "Signing", middleware.Before); err != nil {
+		return err
+	}
+	return stack.Finalize.Insert(middleware.FinalizeMiddlewareFunc("RestoreGCSAcceptEncoding",
+		func(ctx context.Context, in middleware.FinalizeInput, next middleware.FinalizeHandler) (middleware.FinalizeOutput, middleware.Metadata, error) {
+			req, ok := in.Request.(*smithyhttp.Request)
+			if !ok {
+				return middleware.FinalizeOutput{}, middleware.Metadata{}, fmt.Errorf("GCS signing: unexpected request type %T", in.Request)
+			}
+			if len(values) > 0 {
+				req.Header["Accept-Encoding"] = values
+			}
+			return next.HandleFinalize(ctx, in)
+		},
+	), "Signing", middleware.After)
 }
 
 // awsEndpointDomains are the parent domains AWS serves S3 from. VPC, dualstack

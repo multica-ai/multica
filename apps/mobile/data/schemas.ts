@@ -336,25 +336,26 @@ export const SendChatMessageResponseSchema: z.ZodType<SendChatMessageResponse> =
 // error). Mirrors web's TaskMessagePayload type and the WS `task:message`
 // payload so the mobile cache shape stays interchangeable with web's.
 export const TaskMessagePayloadSchema: z.ZodType<TaskMessagePayload> = z.object({
-  task_id: z.string(),
-  issue_id: z.string().default(""),
-  chat_session_id: z.string().optional(),
-  seq: z.number().default(0),
+  call_id: z.string().optional().catch(undefined),
+  task_id: z.string().default("").catch(""),
+  issue_id: z.string().default("").catch(""),
+  chat_session_id: z.string().optional().catch(undefined),
+  seq: z.number().default(0).catch(0),
   // Enum drift defense: unknown server-side types fall back to "text" so
   // the row still renders (as a plain markdown chunk) instead of crashing
   // the timeline. Matches root CLAUDE.md "Enum drift downgrades, not crashes".
   type: z
     .enum(["text", "thinking", "tool_use", "tool_result", "error"])
     .catch("text"),
-  tool: z.string().optional(),
-  content: z.string().optional(),
-  input: z.record(z.string(), z.unknown()).optional(),
-  output: z.string().optional(),
+  tool: z.string().optional().catch(undefined),
+  content: z.string().optional().catch(undefined),
+  input: z.record(z.string(), z.unknown()).optional().catch(undefined),
+  output: z.string().optional().catch(undefined),
   // Optional with no default: absent means no daemon measured this record's
   // completeness, which is not the same as measured-and-complete. `.catch`
   // keeps a malformed value from failing the row and emptying the transcript.
   output_truncated: z.boolean().optional().catch(undefined),
-  created_at: z.string().optional(),
+  created_at: z.string().optional().catch(undefined),
 }).loose();
 
 export const TaskMessageListSchema = z.array(TaskMessagePayloadSchema).default([]);
@@ -413,7 +414,16 @@ export const AgentTaskSchema: z.ZodType<AgentTask> = z.object({
   runtime_id: z.string().default(""),
   issue_id: z.string().default(""),
   status: z
-    .enum(["queued", "dispatched", "running", "completed", "failed", "cancelled"])
+    .enum([
+      "queued",
+      "deferred",
+      "dispatched",
+      "waiting_local_directory",
+      "running",
+      "completed",
+      "failed",
+      "cancelled",
+    ])
     .catch("queued"),
   priority: z.number().default(0),
   dispatched_at: z.string().nullable().default(null),

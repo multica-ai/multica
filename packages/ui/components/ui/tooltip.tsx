@@ -2,16 +2,54 @@
 
 import { Tooltip as TooltipPrimitive } from "@base-ui/react/tooltip"
 
+import { useEffect } from "react"
+
 import { cn } from "@multica/ui/lib/utils"
 
+/** Hover time before a tooltip opens, shared by every tooltip in the app. */
+const TOOLTIP_OPEN_DELAY = 500
+
+/**
+ * After a tooltip closes, hovering another trigger within this window opens it
+ * at once, so moving along a toolbar only waits on the first tooltip.
+ */
+const TOOLTIP_INSTANT_WINDOW = 400
+
+// Tooltip activity across every tooltip popup, including ones Base UI's delay
+// group doesn't see (DeferredTooltip drives a controlled Tooltip with no
+// Trigger). Updated by the popup itself as it mounts and unmounts.
+let openPopups = 0
+let lastPopupClosedAt = Number.NEGATIVE_INFINITY
+
+/** True while a tooltip is showing or just closed, i.e. the next one should skip its delay. */
+function isTooltipInstantPhase(): boolean {
+  return (
+    openPopups > 0 ||
+    Date.now() - lastPopupClosedAt < TOOLTIP_INSTANT_WINDOW
+  )
+}
+
+function TooltipActivity() {
+  useEffect(() => {
+    openPopups += 1
+    return () => {
+      openPopups -= 1
+      lastPopupClosedAt = Date.now()
+    }
+  }, [])
+  return null
+}
+
 function TooltipProvider({
-  delay = 200,
+  delay = TOOLTIP_OPEN_DELAY,
+  timeout = TOOLTIP_INSTANT_WINDOW,
   ...props
 }: TooltipPrimitive.Provider.Props) {
   return (
     <TooltipPrimitive.Provider
       data-slot="tooltip-provider"
       delay={delay}
+      timeout={timeout}
       {...props}
     />
   )
@@ -61,6 +99,7 @@ function TooltipContent({
           )}
           {...props}
         >
+          <TooltipActivity />
           {children}
         </TooltipPrimitive.Popup>
       </TooltipPrimitive.Positioner>
@@ -68,4 +107,12 @@ function TooltipContent({
   )
 }
 
-export { Tooltip, TooltipTrigger, TooltipContent, TooltipProvider }
+export {
+  Tooltip,
+  TooltipTrigger,
+  TooltipContent,
+  TooltipProvider,
+  TOOLTIP_OPEN_DELAY,
+  TOOLTIP_INSTANT_WINDOW,
+  isTooltipInstantPhase,
+}

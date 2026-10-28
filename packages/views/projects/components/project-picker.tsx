@@ -118,6 +118,7 @@ export function ProjectPicker({
           <PickerItem
             key={p.id}
             selected={p.id === projectId}
+            truncationTooltip={p.title}
             onClick={() => {
               onUpdate({ project_id: p.id });
               setOpen(false);

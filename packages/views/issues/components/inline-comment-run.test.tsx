@@ -91,14 +91,12 @@ describe("InlineCommentRun", () => {
     await screen.findByText("Checking the PR");
     fireEvent.click(screen.getByRole("button", { name: /View activity/ }));
     const preview = screen.getAllByText("Checking the PR").find((node) => node.closest("summary"))!;
-    expect(preview).toHaveAttribute("title", "Checking the PR");
     expect(screen.queryByTestId("step-body")).not.toBeInTheDocument();
     act(() => client.setQueryData(chatKeys.taskMessages(id), [
       message,
       { ...message, seq: 2, content: " changes.\nReviewing migration safety." },
     ]));
     await waitFor(() => expect(preview).toHaveTextContent("Checking the PR changes."));
-    expect(preview).toHaveAttribute("title", "Checking the PR changes.");
     fireEvent.click(preview.closest("summary")!, { detail: 0 });
     expect(await screen.findByTestId("step-body")).toHaveTextContent("Checking the PR changes. Reviewing migration safety.");
   });
@@ -118,7 +116,6 @@ describe("InlineCommentRun", () => {
     const preview = screen.getByText("read_file · .../db/queries.sql");
     const summary = preview.closest("summary")!;
     expect(summary).toHaveTextContent("4 steps");
-    expect(preview).toHaveAttribute("title", "read_file · .../db/queries.sql");
     fireEvent.click(summary, { detail: 0 });
     expect(await screen.findByText(".../db/queries.sql")).toBeInTheDocument();
     expect(screen.getByText(".../db/models.go")).toBeInTheDocument();
@@ -135,7 +132,7 @@ describe("InlineCommentRun", () => {
     setup(task());
     await screen.findByText("Checking logs");
     fireEvent.click(screen.getByRole("button", { name: /View activity/ }));
-    expect(screen.getByText("Checking [REDACTED GITHUB TOKEN]")).toHaveAttribute("title", "Checking [REDACTED GITHUB TOKEN]");
+    expect(screen.getByText("Checking [REDACTED GITHUB TOKEN]").closest("summary")).not.toBeNull();
     expect(screen.getByText("Agent message").closest("summary")).not.toBeNull();
     expect(document.body.innerHTML).not.toContain(secret);
   });
@@ -156,7 +153,6 @@ describe("InlineCommentRun", () => {
     expect(header.firstChild).toBe(textNode);
     fireEvent.click(screen.getByRole("button", { name: /View activity/ }));
     const preview = screen.getAllByText("Checking the runtime logs.").find((node) => node.closest("summary"))!;
-    expect(preview).toHaveAttribute("title", "Checking the runtime logs.");
     const details = preview.closest("details")!;
     expect(details).not.toHaveAttribute("open");
     expect(screen.queryByTestId("step-body")).not.toBeInTheDocument();
@@ -174,7 +170,7 @@ describe("InlineCommentRun", () => {
     await screen.findByText(/REDACTED/);
     fireEvent.click(screen.getByRole("button", { name: /View activity/ }));
     const preview = screen.getAllByText(/REDACTED/).find((node) => node.closest("summary"))!;
-    expect(preview.getAttribute("title")).toContain("REDACTED");
+    expect(preview.textContent).toContain("REDACTED");
     expect(document.body.innerHTML).not.toContain("ghp_");
     expect(preview.textContent!.length).toBeLessThanOrEqual(201);
   });

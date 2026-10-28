@@ -15,6 +15,7 @@ import {
   PopoverTitle,
   PopoverTrigger,
 } from "@multica/ui/components/ui/popover";
+import { TruncatedTooltip } from "@multica/ui/components/common/truncated-tooltip";
 import { useT } from "../../i18n";
 import { useWakeupText } from "./wakeup-presentation";
 
@@ -184,9 +185,11 @@ function InstructionEditor({
         ) : (
           <div className="text-caption text-muted-foreground">
             <p>{t(($) => $.wakeups.system.instruction_default)}</p>
-            <p className="mt-1 line-clamp-4 whitespace-pre-wrap break-words" title={rule.default_instruction}>
-              {rule.default_instruction}
-            </p>
+            <TruncatedTooltip content={rule.default_instruction}>
+              <p className="mt-1 line-clamp-4 whitespace-pre-wrap break-words">
+                {rule.default_instruction}
+              </p>
+            </TruncatedTooltip>
           </div>
         )}
       </div>

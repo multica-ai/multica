@@ -48,7 +48,7 @@ import {
   DropdownMenuSubTrigger,
   DropdownMenuTrigger,
 } from "@multica/ui/components/ui/dropdown-menu";
-import { Tooltip, TooltipTrigger, TooltipContent, TooltipProvider } from "@multica/ui/components/ui/tooltip";
+import { Tooltip, TooltipTrigger, TooltipContent } from "@multica/ui/components/ui/tooltip";
 import { TooltipHint } from "@multica/ui/components/common/tooltip-hint";
 import { Button } from "@multica/ui/components/ui/button";
 import { Switch } from "@multica/ui/components/ui/switch";
@@ -1469,7 +1469,7 @@ export function ManualCreatePanel({
 
             {/* Footer — same 2x2-grid-on-phones / single-row-from-`sm` shape
                 as the agent panel; see the note on AgentCreatePanel's footer
-                for why (MUL-6236). TooltipProvider/Tooltip render no DOM and
+                for why (MUL-6236). Tooltip renders no DOM and
                 TooltipContent is portaled, so the Create button stays a direct
                 grid child in both branches below. */}
             <div className="grid grid-cols-[auto_1fr] items-center gap-x-2 gap-y-2.5 border-t px-4 py-3 shrink-0 sm:flex sm:flex-wrap">
@@ -1503,15 +1503,13 @@ export function ManualCreatePanel({
                 {t(($) => $.create_issue.create_another)}
               </label>
               {submitState === "missing_title" ? (
-                <TooltipProvider delay={200}>
-                  <Tooltip>
-                    {/* No `<span>` wrapper needed now: aria-disabled leaves the
-                        button focusable and hoverable, so it can anchor its own
-                        tooltip. */}
-                    <TooltipTrigger render={createButton} />
-                    <TooltipContent side="top">{t(($) => $.create_issue.title_required)}</TooltipContent>
-                  </Tooltip>
-                </TooltipProvider>
+                <Tooltip>
+                  {/* No `<span>` wrapper needed now: aria-disabled leaves the
+                      button focusable and hoverable, so it can anchor its own
+                      tooltip. */}
+                  <TooltipTrigger render={createButton} />
+                  <TooltipContent side="top">{t(($) => $.create_issue.title_required)}</TooltipContent>
+                </Tooltip>
               ) : (
                 createButton
               )}

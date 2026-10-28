@@ -378,18 +378,29 @@ LIMIT 1;
 SELECT c.* FROM comment c
 WHERE c.issue_id = @issue_id
   AND (c.id = ANY(@planned_comment_ids::uuid[])
-       OR comment_thread_root_id(c.id) = sqlc.narg('comment_thread_id')::uuid)
+       OR comment_thread_root_id(c.id) = sqlc.narg('comment_thread_id')::uuid
+       -- An agent comment that steered this run but was never read took the
+       -- place of the follow-up its mention would have queued; replay it.
+       OR (c.author_type = 'agent' AND EXISTS (
+           SELECT 1 FROM task_supplement steered
+           WHERE steered.comment_id = c.id AND steered.task_id = sqlc.narg('task_id')::uuid
+             AND steered.status <> 'delivered'
+       )))
   -- A deleted comment is no longer input, even when replies keep its row.
   AND c.deleted_at IS NULL
-  -- A comment that steered this agent's running turn belongs to that turn,
-  -- regardless of delivery status: failed delivery must not become an automatic
-  -- new run. The same comment still reconciles normally for any other agent
-  -- it addressed without steering.
+  -- A member comment that steered this agent's running turn belongs to that
+  -- turn, regardless of delivery status: failed delivery must not become an
+  -- automatic new run, because the member sees the failure and can retry or
+  -- send it as a new run. No one watches an agent's steering receipt, so an
+  -- agent comment belongs to the turn only once delivered; otherwise it is
+  -- replayed like any other mention. The same comment still reconciles
+  -- normally for any other agent it addressed without steering.
   AND NOT EXISTS (
       SELECT 1 FROM task_supplement s
       JOIN agent_task_queue bound ON bound.id = s.task_id
       WHERE s.comment_id = c.id AND s.workspace_id = c.workspace_id
         AND bound.agent_id = @agent_id
+        AND (c.author_type <> 'agent' OR s.status = 'delivered')
   )
   -- An explicit member/agent cancellation acknowledges the planned input for
   -- this agent only for completing tasks already in flight at cancellation;

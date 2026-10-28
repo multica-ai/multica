@@ -76,7 +76,7 @@ func failTaskSuccessorCase(t *testing.T, failureReason string) {
 
 	// The operator reruns while that task is still running: allowed now, and it
 	// takes the single queued/dispatched slot the unique index permits.
-	rerun, err := testHandler.TaskService.RerunIssue(ctx, parseUUID(issueID), pgtype.UUID{}, pgtype.UUID{}, parseUUID(testUserID), nil)
+	rerun, err := testHandler.TaskService.RerunIssue(ctx, parseUUID(issueID), pgtype.UUID{}, pgtype.UUID{}, parseUUID(testUserID), false, nil)
 	if err != nil {
 		t.Fatalf("RerunIssue behind running task: %v", err)
 	}
@@ -219,7 +219,7 @@ func TestFailTaskAndRerunConcurrently_NeverStrandsRunningTask(t *testing.T) {
 		go func() {
 			defer wg.Done()
 			<-start
-			_, rerunErr = testHandler.TaskService.RerunIssue(ctx, parseUUID(issueID), pgtype.UUID{}, pgtype.UUID{}, parseUUID(testUserID), nil)
+			_, rerunErr = testHandler.TaskService.RerunIssue(ctx, parseUUID(issueID), pgtype.UUID{}, pgtype.UUID{}, parseUUID(testUserID), false, nil)
 		}()
 		close(start)
 		wg.Wait()
@@ -430,7 +430,7 @@ func TestFailTaskAndRerunConcurrently_NonAssigneeTarget(t *testing.T) {
 		go func() {
 			defer wg.Done()
 			<-start
-			_, rerunErr = testHandler.TaskService.RerunIssue(ctx, parseUUID(issueID), parseUUID(sourceTaskID), pgtype.UUID{}, parseUUID(testUserID), nil)
+			_, rerunErr = testHandler.TaskService.RerunIssue(ctx, parseUUID(issueID), parseUUID(sourceTaskID), pgtype.UUID{}, parseUUID(testUserID), false, nil)
 		}()
 		close(start)
 		wg.Wait()

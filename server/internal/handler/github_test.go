@@ -1520,6 +1520,61 @@ func TestPRAutoComplete_TargetStatus(t *testing.T) {
 	}
 }
 
+// TestPRAutoComplete_RespectsProjectWorkflow: a merge writes only a status the
+// issue's project workflow lists. Issues outside any project and projects on
+// Default move as before; a named workflow without the target leaves the
+// issue where it is, and the issue page says nothing about it.
+func TestPRAutoComplete_RespectsProjectWorkflow(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("handler test fixture not initialized (no DB?)")
+	}
+	secret := "workflow-target-secret"
+	t.Setenv("GITHUB_WEBHOOK_SECRET", secret)
+	const installationID int64 = 30264021
+	// done is in every workflow, so the target here is one a workflow may omit.
+	setWorkspacePRMergeStatusForTest(t, "in_review")
+
+	withTarget := createTestWorkflow(t, "PR merge: lists in_review", "in_progress", "in_review")
+	withoutTarget := createTestWorkflow(t, "PR merge: no in_review", "in_progress")
+	defaultProject := createWorkflowTestProject(t, "PR merge on Default")
+	withTargetProject := createWorkflowTestProject(t, "PR merge with in_review")
+	setProjectWorkflow(t, withTargetProject, map[string]any{"workflow_id": withTarget.ID}).Want(http.StatusOK)
+	withoutTargetProject := createWorkflowTestProject(t, "PR merge without in_review")
+	setProjectWorkflow(t, withoutTargetProject, map[string]any{"workflow_id": withoutTarget.ID}).Want(http.StatusOK)
+
+	cases := []struct {
+		name      string
+		projectID string
+		wantState string
+		wantAfter string
+	}{
+		{"no project", "", prAutoCompleteWaiting, "in_review"},
+		{"default workflow", defaultProject, prAutoCompleteWaiting, "in_review"},
+		{"named workflow lists the target", withTargetProject, prAutoCompleteWaiting, "in_review"},
+		{"named workflow without the target", withoutTargetProject, prAutoCompleteNotInWorkflow, "in_progress"},
+	}
+	for i, tc := range cases {
+		inst := int64(0)
+		if i == 0 {
+			inst = installationID
+		}
+		issue := prAutoCompleteTestIssue(t, "workflow target: "+tc.name, inst)
+		if tc.projectID != "" {
+			dbfx.Exec(t, `UPDATE issue SET project_id = $2 WHERE id = $1`, issue.ID, tc.projectID)
+		}
+		number := int32(100 + i)
+		branch := fmt.Sprintf("fix/workflow-%d", i)
+		firePRWebhook(t, secret, installationID, number, issue.Identifier+": fix", "", branch, "opened")
+		if got := prAutoCompleteStateForTest(t, issue.ID); got.State != tc.wantState {
+			t.Errorf("%s: before merge auto_complete = %+v, want %s", tc.name, got, tc.wantState)
+		}
+		firePRWebhook(t, secret, installationID, number, issue.Identifier+": fix", "", branch, "merged")
+		if got := issueStatusForTest(t, issue.ID); got != tc.wantAfter {
+			t.Errorf("%s: status after merge = %q, want %q", tc.name, got, tc.wantAfter)
+		}
+	}
+}
+
 func TestPRMergeStatusSetting(t *testing.T) {
 	for _, tc := range []struct {
 		settings string

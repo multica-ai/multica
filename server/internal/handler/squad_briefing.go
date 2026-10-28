@@ -208,6 +208,19 @@ const squadOperatingProtocolHardRules = `Hard rules:
   @mention on this issue, or create a ` + "`" + `todo` + "`" + ` child issue assigned to
   them. Never both for the same work.`
 
+// squadSteerRule is added to the hard rules only for a daemon that ships a
+// CLI with --steer (protocol.DaemonCapabilityCLICommentSteerV1): an older CLI
+// rejects the flag and the comment is never posted.
+const squadSteerRule = `- A worker already running on this issue gets a new comment only after its
+  run ends. To correct it mid-run (wrong direction, a missing fact, a
+  narrower scope), steer that run instead: add the comment with
+  ` + "`" + `--steer <run-id>` + "`" + ` (run ids from ` + "`" + `multica issue runs <issue-id> --active` + "`" + `), or
+  ` + "`" + `--steer-active` + "`" + ` for every running worker you may steer. Only a run that
+  accepts additional messages (` + "`" + `can_supplement: true` + "`" + ` in
+  ` + "`" + `multica issue runs <issue-id> --active --output json` + "`" + `) can be steered, and
+  the command reports per run whether it was. New work is still a normal
+  delegation.`
+
 // squadOperatingProtocolFor assembles the protocol, selecting the parent-status
 // responsibility that matches this leader's actual authority over the issue
 // and, for an owner, whether the issue's project workflow governs its moves.
@@ -246,9 +259,15 @@ func squadOperatingProtocolFor(ownsIssueStatus bool, workflow leaderWorkflow) st
 // Archived agent members are skipped — there's no point asking the leader
 // to delegate to a retired agent. Members whose underlying record can't be
 // loaded (deleted user/agent races, FK weirdness) are also skipped silently.
-func buildSquadLeaderBriefing(ctx context.Context, q *db.Queries, squad db.Squad, ownsIssueStatus bool, workflow leaderWorkflow) string {
+//
+// steer adds the rule for steering a running worker; see squadSteerRule.
+func buildSquadLeaderBriefing(ctx context.Context, q *db.Queries, squad db.Squad, ownsIssueStatus bool, workflow leaderWorkflow, steer bool) string {
 	var sb strings.Builder
 	sb.WriteString(squadOperatingProtocolFor(ownsIssueStatus, workflow))
+	if steer {
+		sb.WriteString("\n")
+		sb.WriteString(squadSteerRule)
+	}
 	sb.WriteString("\n\n")
 	sb.WriteString(buildSquadRoster(ctx, q, squad))
 
