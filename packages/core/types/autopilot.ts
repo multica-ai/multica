@@ -64,9 +64,24 @@ export interface Autopilot {
   can_manage_access?: boolean;
 }
 
+export type WebhookPayloadConditionValue = string | number | boolean;
+
+// A payload condition tests one field of the webhook body. `path` walks
+// objects with dots; numeric segments index arrays and `*` matches any
+// element. A missing path never matches.
+export interface WebhookPayloadCondition {
+  path: string;
+  op: "equals" | "not_equals" | "contains" | "in" | "exists";
+  value?: WebhookPayloadConditionValue;
+  values?: WebhookPayloadConditionValue[];
+  ignore_case?: boolean;
+}
+
 export interface WebhookEventFilter {
   event: string;
   actions?: string[];
+  // Every condition must hold for the filter to match.
+  conditions?: WebhookPayloadCondition[];
 }
 
 export interface AutopilotSubscriber {

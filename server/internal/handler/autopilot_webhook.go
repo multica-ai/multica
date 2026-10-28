@@ -632,12 +632,39 @@ func (h *Handler) HandleAutopilotWebhook(w http.ResponseWriter, r *http.Request)
 
 // ── Event filter helpers ────────────────────────────────────────────────────
 
-// WebhookEventFilter declares one event and an optional list of actions.
-// A nil/empty Actions means "any action" for this event.
+// WebhookEventFilter declares one event, an optional list of actions and
+// optional payload conditions. A nil/empty Actions means "any action" for
+// this event; every condition must hold for the filter to match.
 type WebhookEventFilter struct {
-	Event   string   `json:"event"`
-	Actions []string `json:"actions,omitempty"`
+	Event      string                    `json:"event"`
+	Actions    []string                  `json:"actions,omitempty"`
+	Conditions []WebhookPayloadCondition `json:"conditions,omitempty"`
 }
+
+// WebhookPayloadCondition tests one field of the event payload. Path is a
+// dot-separated walk through objects; numeric segments index arrays and "*"
+// matches any element.
+type WebhookPayloadCondition struct {
+	Path       string `json:"path"`
+	Op         string `json:"op"`
+	Value      any    `json:"value,omitempty"`
+	Values     []any  `json:"values,omitempty"`
+	IgnoreCase bool   `json:"ignore_case,omitempty"`
+}
+
+const (
+	payloadOpEquals    = "equals"
+	payloadOpNotEquals = "not_equals"
+	payloadOpContains  = "contains"
+	payloadOpIn        = "in"
+	payloadOpExists    = "exists"
+)
+
+const webhookPathWildcard = "*"
+
+// maxWebhookPayloadConditions bounds the per-filter work done on the
+// unauthenticated-adjacent ingress path.
+const maxWebhookPayloadConditions = 20
 
 // validateWebhookEventFilters enforces the contract at the HTTP boundary so
 // that malformed shapes never reach the database. The matcher (read path)
@@ -652,8 +679,61 @@ func validateWebhookEventFilters(filters []WebhookEventFilter) error {
 				return fmt.Errorf("event_filters[%d].actions[%d] must not be empty", i, j)
 			}
 		}
+		if len(f.Conditions) > maxWebhookPayloadConditions {
+			return fmt.Errorf("event_filters[%d].conditions must not exceed %d entries", i, maxWebhookPayloadConditions)
+		}
+		for j, c := range f.Conditions {
+			if err := validateWebhookPayloadCondition(c); err != nil {
+				return fmt.Errorf("event_filters[%d].conditions[%d]: %w", i, j, err)
+			}
+		}
 	}
 	return nil
+}
+
+func validateWebhookPayloadCondition(c WebhookPayloadCondition) error {
+	if strings.TrimSpace(c.Path) == "" {
+		return errors.New("path must not be empty")
+	}
+	for _, seg := range strings.Split(c.Path, ".") {
+		if seg == "" {
+			return errors.New("path must not contain empty segments")
+		}
+	}
+	switch c.Op {
+	case payloadOpEquals, payloadOpNotEquals:
+		if !isScalarConditionValue(c.Value) {
+			return errors.New("value must be a string, number or boolean")
+		}
+	case payloadOpContains:
+		if s, ok := c.Value.(string); !ok || s == "" {
+			return errors.New("value must be a non-empty string")
+		}
+	case payloadOpIn:
+		if len(c.Values) == 0 {
+			return errors.New("values must not be empty")
+		}
+		for _, v := range c.Values {
+			if !isScalarConditionValue(v) {
+				return errors.New("values must be strings, numbers or booleans")
+			}
+		}
+	case payloadOpExists:
+		if c.Value != nil || len(c.Values) > 0 {
+			return errors.New("exists takes no value")
+		}
+	default:
+		return fmt.Errorf("op must be one of %s, %s, %s, %s, %s", payloadOpEquals, payloadOpNotEquals, payloadOpContains, payloadOpIn, payloadOpExists)
+	}
+	return nil
+}
+
+func isScalarConditionValue(v any) bool {
+	switch v.(type) {
+	case string, float64, bool:
+		return true
+	}
+	return false
 }
 
 // encodeWebhookEventFilters returns the JSONB bytes to persist for a CREATE.
@@ -700,19 +780,26 @@ func webhookEventAllowedByTriggerScope(eventFilters []byte, envelope WebhookEnve
 	}
 	_, eventName, eventAction := splitWebhookEvent(envelope.Event)
 	actionCandidates := webhookActionCandidates(eventAction, envelope.EventPayload)
+	var payload any
+	payloadDecoded := false
 	for _, f := range filters {
 		if f.Event != eventName {
 			continue
 		}
-		if len(f.Actions) == 0 {
+		if !webhookActionAllowed(f.Actions, actionCandidates) {
+			continue
+		}
+		if len(f.Conditions) == 0 {
 			return true
 		}
-		for _, action := range actionCandidates {
-			for _, allowed := range f.Actions {
-				if action == allowed {
-					return true
-				}
-			}
+		if !payloadDecoded {
+			// Undecodable payloads leave payload nil, so every condition
+			// fails and the filter denies.
+			_ = json.Unmarshal(envelope.EventPayload, &payload)
+			payloadDecoded = true
+		}
+		if webhookPayloadConditionsHold(f.Conditions, payload) {
+			return true
 		}
 		// Intentionally do NOT return false here: the UI allows several
 		// filters that share the same event name (e.g. two workflow_run
@@ -776,6 +863,135 @@ func webhookActionCandidates(eventAction string, payload json.RawMessage) []stri
 		out = append(out, v)
 	}
 	return out
+}
+
+func webhookActionAllowed(allowed, candidates []string) bool {
+	if len(allowed) == 0 {
+		return true
+	}
+	for _, action := range candidates {
+		for _, a := range allowed {
+			if action == a {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func webhookPayloadConditionsHold(conditions []WebhookPayloadCondition, payload any) bool {
+	for _, c := range conditions {
+		if !webhookPayloadConditionHolds(c, payload) {
+			return false
+		}
+	}
+	return true
+}
+
+// webhookPayloadConditionHolds resolves the path to every value it reaches
+// (a "*" segment fans out over array elements). equals, contains, in and
+// exists hold when any value matches; not_equals holds when none does. A
+// path that reaches nothing never matches, and exists ignores JSON nulls.
+func webhookPayloadConditionHolds(c WebhookPayloadCondition, payload any) bool {
+	values := resolveWebhookPayloadPath(payload, strings.Split(c.Path, "."))
+	if len(values) == 0 {
+		return false
+	}
+	if c.Op == payloadOpNotEquals {
+		for _, got := range values {
+			if webhookConditionValuesEqual(got, c.Value, c.IgnoreCase) {
+				return false
+			}
+		}
+		return true
+	}
+	for _, got := range values {
+		if webhookConditionValueMatches(c, got) {
+			return true
+		}
+	}
+	return false
+}
+
+func webhookConditionValueMatches(c WebhookPayloadCondition, got any) bool {
+	switch c.Op {
+	case payloadOpExists:
+		return got != nil
+	case payloadOpEquals:
+		return webhookConditionValuesEqual(got, c.Value, c.IgnoreCase)
+	case payloadOpContains:
+		s, ok := got.(string)
+		want, wantOK := c.Value.(string)
+		if !ok || !wantOK {
+			return false
+		}
+		if c.IgnoreCase {
+			return strings.Contains(strings.ToLower(s), strings.ToLower(want))
+		}
+		return strings.Contains(s, want)
+	case payloadOpIn:
+		for _, v := range c.Values {
+			if webhookConditionValuesEqual(got, v, c.IgnoreCase) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// resolveWebhookPayloadPath walks objects by key and arrays by index or
+// "*". Each payload node is visited at most once per path, so the work is
+// bounded by the body size cap.
+func resolveWebhookPayloadPath(node any, segs []string) []any {
+	if len(segs) == 0 {
+		return []any{node}
+	}
+	seg, rest := segs[0], segs[1:]
+	switch n := node.(type) {
+	case map[string]any:
+		next, ok := n[seg]
+		if !ok {
+			return nil
+		}
+		return resolveWebhookPayloadPath(next, rest)
+	case []any:
+		if seg == webhookPathWildcard {
+			var out []any
+			for _, el := range n {
+				out = append(out, resolveWebhookPayloadPath(el, rest)...)
+			}
+			return out
+		}
+		idx, err := strconv.Atoi(seg)
+		if err != nil || idx < 0 || idx >= len(n) {
+			return nil
+		}
+		return resolveWebhookPayloadPath(n[idx], rest)
+	}
+	return nil
+}
+
+// webhookConditionValuesEqual compares JSON-decoded scalars. Mismatched
+// types never compare equal, so "false" does not match false.
+func webhookConditionValuesEqual(got, want any, ignoreCase bool) bool {
+	switch w := want.(type) {
+	case string:
+		g, ok := got.(string)
+		if !ok {
+			return false
+		}
+		if ignoreCase {
+			return strings.EqualFold(g, w)
+		}
+		return g == w
+	case float64:
+		g, ok := got.(float64)
+		return ok && g == w
+	case bool:
+		g, ok := got.(bool)
+		return ok && g == w
+	}
+	return false
 }
 
 // ── Persistence helpers ─────────────────────────────────────────────────────

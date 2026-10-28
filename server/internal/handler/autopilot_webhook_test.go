@@ -318,6 +318,132 @@ func TestWebhookEventAllowedByTriggerScope_MultipleFilters(t *testing.T) {
 	}
 }
 
+// reviewFilters scopes pull_request deliveries to ready, labelled PRs on
+// release branches that weren't opened by a bot.
+const reviewFilters = `[{"event":"pull_request","actions":["opened","synchronize"],"conditions":[
+	{"path":"pull_request.draft","op":"equals","value":false},
+	{"path":"pull_request.labels.*.name","op":"equals","value":"needs-review","ignore_case":true},
+	{"path":"pull_request.base.ref","op":"in","values":["main","release"]},
+	{"path":"sender.type","op":"not_equals","value":"Bot"}
+]}]`
+
+func pullRequestEnvelope(payload string) WebhookEnvelope {
+	return WebhookEnvelope{Event: "github.pull_request.opened", EventPayload: json.RawMessage(payload)}
+}
+
+func TestWebhookEventAllowedByTriggerScope_PayloadConditions(t *testing.T) {
+	filters := []byte(reviewFilters)
+	const labelled = `"labels":[{"name":"backend"},{"name":"Needs-Review"}]`
+	cases := []struct {
+		name    string
+		payload string
+		want    bool
+	}{
+		{"all conditions hold", `{"action":"opened","pull_request":{"draft":false,` + labelled + `,"base":{"ref":"main"}},"sender":{"type":"User"}}`, true},
+		{"draft", `{"action":"opened","pull_request":{"draft":true,` + labelled + `,"base":{"ref":"main"}},"sender":{"type":"User"}}`, false},
+		{"label missing", `{"action":"opened","pull_request":{"draft":false,"labels":[{"name":"backend"}],"base":{"ref":"main"}},"sender":{"type":"User"}}`, false},
+		{"no labels", `{"action":"opened","pull_request":{"draft":false,"labels":[],"base":{"ref":"main"}},"sender":{"type":"User"}}`, false},
+		{"other base branch", `{"action":"opened","pull_request":{"draft":false,` + labelled + `,"base":{"ref":"dev"}},"sender":{"type":"User"}}`, false},
+		{"bot sender", `{"action":"opened","pull_request":{"draft":false,` + labelled + `,"base":{"ref":"main"}},"sender":{"type":"Bot"}}`, false},
+		{"missing path", `{"action":"opened","pull_request":{"draft":false,` + labelled + `}}`, false},
+		{"string is not a boolean", `{"action":"opened","pull_request":{"draft":"false",` + labelled + `,"base":{"ref":"main"}},"sender":{"type":"User"}}`, false},
+		{"non-object payload", `["needs-review"]`, false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := webhookEventAllowedByTriggerScope(filters, pullRequestEnvelope(tc.payload)); got != tc.want {
+				t.Fatalf("got %v, want %v", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestWebhookEventAllowedByTriggerScope_ConditionsDoNotShadowLaterFilters(t *testing.T) {
+	filters := []byte(`[
+		{"event":"pull_request","conditions":[{"path":"pull_request.draft","op":"equals","value":false}]},
+		{"event":"pull_request","conditions":[{"path":"pull_request.number","op":"equals","value":42}]}
+	]`)
+	if !webhookEventAllowedByTriggerScope(filters, pullRequestEnvelope(`{"pull_request":{"draft":true,"number":42}}`)) {
+		t.Fatal("second filter should match when the first one's conditions fail")
+	}
+}
+
+func TestWebhookEventAllowedByTriggerScope_ConditionOps(t *testing.T) {
+	payload := `{"status":"Open","closed_at":null,"count":3,"items":[{"tag":"urgent"},{"tag":"docs"}],"commits":[{"files":["a.go"]},{"files":["README.md"]}]}`
+	cases := []struct {
+		name string
+		cond string
+		want bool
+	}{
+		{"equals is case-sensitive by default", `{"path":"status","op":"equals","value":"open"}`, false},
+		{"equals ignore_case", `{"path":"status","op":"equals","value":"open","ignore_case":true}`, true},
+		{"not_equals", `{"path":"status","op":"not_equals","value":"Closed"}`, true},
+		{"not_equals on missing path", `{"path":"missing","op":"not_equals","value":"x"}`, false},
+		{"equals number", `{"path":"count","op":"equals","value":3}`, true},
+		{"contains on number", `{"path":"count","op":"contains","value":"3"}`, false},
+		{"array index", `{"path":"items.0.tag","op":"equals","value":"urgent"}`, true},
+		{"array index out of range", `{"path":"items.2.tag","op":"equals","value":"urgent"}`, false},
+		{"wildcard any element", `{"path":"items.*.tag","op":"equals","value":"docs"}`, true},
+		{"wildcard no element", `{"path":"items.*.tag","op":"equals","value":"bug"}`, false},
+		{"wildcard not_equals means none", `{"path":"items.*.tag","op":"not_equals","value":"docs"}`, false},
+		{"wildcard not_equals holds", `{"path":"items.*.tag","op":"not_equals","value":"bug"}`, true},
+		{"nested wildcards", `{"path":"commits.*.files.*","op":"contains","value":".md"}`, true},
+		{"wildcard on object", `{"path":"status.*","op":"equals","value":"Open"}`, false},
+		{"in ignore_case", `{"path":"status","op":"in","values":["closed","open"],"ignore_case":true}`, true},
+		{"exists", `{"path":"items.*.tag","op":"exists"}`, true},
+		{"exists on missing path", `{"path":"merged_at","op":"exists"}`, false},
+		{"exists ignores null", `{"path":"closed_at","op":"exists"}`, false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			filters := []byte(`[{"event":"pull_request","conditions":[` + tc.cond + `]}]`)
+			if got := webhookEventAllowedByTriggerScope(filters, pullRequestEnvelope(payload)); got != tc.want {
+				t.Fatalf("got %v, want %v", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestValidateWebhookEventFilters_Conditions(t *testing.T) {
+	var valid []WebhookEventFilter
+	if err := json.Unmarshal([]byte(reviewFilters), &valid); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if err := validateWebhookEventFilters(valid); err != nil {
+		t.Fatalf("valid filters rejected: %v", err)
+	}
+
+	invalid := map[string]string{
+		"empty path":        `{"path":"","op":"equals","value":"x"}`,
+		"empty segment":     `{"path":"sender..type","op":"equals","value":"x"}`,
+		"unknown op":        `{"path":"sender.type","op":"matches","value":"x"}`,
+		"missing value":     `{"path":"sender.type","op":"equals"}`,
+		"object value":      `{"path":"sender.type","op":"equals","value":{"a":1}}`,
+		"contains non-text": `{"path":"sender.type","op":"contains","value":1}`,
+		"empty in":          `{"path":"sender.type","op":"in","values":[]}`,
+		"exists with value": `{"path":"sender.type","op":"exists","value":"x"}`,
+	}
+	for name, cond := range invalid {
+		t.Run(name, func(t *testing.T) {
+			var filters []WebhookEventFilter
+			if err := json.Unmarshal([]byte(`[{"event":"pull_request","conditions":[`+cond+`]}]`), &filters); err != nil {
+				t.Fatalf("decode: %v", err)
+			}
+			if err := validateWebhookEventFilters(filters); err == nil {
+				t.Fatal("expected validation error")
+			}
+		})
+	}
+
+	tooMany := WebhookEventFilter{Event: "pull_request"}
+	for range maxWebhookPayloadConditions + 1 {
+		tooMany.Conditions = append(tooMany.Conditions, WebhookPayloadCondition{Path: "a", Op: payloadOpEquals, Value: "x"})
+	}
+	if err := validateWebhookEventFilters([]WebhookEventFilter{tooMany}); err == nil {
+		t.Fatal("expected error above the condition cap")
+	}
+}
+
 func TestSplitWebhookEvent(t *testing.T) {
 	tests := []struct {
 		input        string

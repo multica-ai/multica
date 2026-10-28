@@ -91,6 +91,21 @@ Webhook 요청에는 다음 제약이 있습니다.
 
 예를 들어 이벤트 이름에 `workflow_run`, Actions에 `completed, failed`를 입력하면 이 두 종류의 `workflow_run` 결과만 받습니다. Multica는 GitHub의 `X-GitHub-Event`와 body의 `action`을 포함해 일반적인 요청 header와 payload에서 이벤트와 action을 식별합니다.
 
+각 줄에는 payload 필드에 대한 `conditions`도 지정할 수 있습니다. 줄의 **조건**을 클릭하거나 API로 설정하세요. 모든 조건을 만족해야 해당 줄이 일치하며, 걸러진 이벤트는 실행이 시작되기 전에 무시됩니다. `path`는 점으로 payload를 따라가며, 숫자는 배열 인덱스이고 `*`는 임의의 요소를 뜻합니다(`pull_request.labels.*.name`). `op`는 `equals`, `not_equals`, `contains`, `in`, `exists` 중 하나이며, `ignore_case`는 텍스트에 적용됩니다. `*`를 쓰면 `equals`, `contains`, `in`, `exists`는 요소 하나라도 일치하면 성립하고, `not_equals`는 어떤 요소도 일치하지 않을 때 성립합니다. 필드가 없으면 일치하지 않으며, `exists`는 `null`을 무시합니다. 예를 들어 아래 줄은 준비된 상태이고 `needs-review` 라벨이 있으며 `main` 또는 `release`를 대상으로 하고 봇이 열지 않은 pull request만 받습니다.
+
+```json
+{
+  "event": "pull_request",
+  "actions": ["opened", "synchronize"],
+  "conditions": [
+    { "path": "pull_request.draft", "op": "equals", "value": false },
+    { "path": "pull_request.labels.*.name", "op": "equals", "value": "needs-review" },
+    { "path": "pull_request.base.ref", "op": "in", "values": ["main", "release"] },
+    { "path": "sender.type", "op": "not_equals", "value": "Bot" }
+  ]
+}
+```
+
 ### Webhook URL 보호
 
 <Callout type="warning">
