@@ -134,6 +134,13 @@ multica issue rerun-task <run-id> --issue MUL-123
 multica issue rerun-task <run-id> --issue MUL-123 --fresh
 ```
 
+把评论插话到仍在进行中的运行，而不是排队一个后续运行（仅限支持插话的运行；你的评论能启动哪个智能体，就能向它插话）：
+
+```bash
+multica issue comment add MUL-123 --content-file note.md --steer <task-id>
+multica issue comment add MUL-123 --content-file note.md --steer-active
+```
+
 同一项目、同一父任务下已有标题相同（不区分大小写，忽略多余空格）且未关闭的任务时，`issue create` 会拒绝创建并给出那个任务。确实要再建一个，加 `--allow-duplicate`；要把一个任务标为另一个的重复，用 `multica issue status MUL-124 cancelled --duplicate-of MUL-123`。
 
 ### 时间线

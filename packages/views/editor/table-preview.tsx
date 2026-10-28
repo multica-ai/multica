@@ -26,6 +26,7 @@ import {
 import { ArrowDown, ArrowUp, ArrowUpDown } from "lucide-react";
 import { DataTable } from "@multica/ui/components/ui/data-table";
 import { cn } from "@multica/ui/lib/utils";
+import { TruncatedTooltip } from "@multica/ui/components/common/truncated-tooltip";
 import { useT } from "../i18n";
 import {
   parseDelimited,
@@ -173,15 +174,16 @@ export function TablePreview({ text, delimiter }: TablePreviewProps) {
         cell: ({ getValue }) => {
           const value = getValue<string | undefined>() ?? "";
           return (
-            <span
-              className={cn(
-                "block truncate",
-                columnInfo[index]?.numeric && "text-right tabular-nums",
-              )}
-              title={value}
-            >
-              {value}
-            </span>
+            <TruncatedTooltip content={value}>
+              <span
+                className={cn(
+                  "block truncate",
+                  columnInfo[index]?.numeric && "text-right tabular-nums",
+                )}
+              >
+                {value}
+              </span>
+            </TruncatedTooltip>
           );
         },
         size: columnInfo[index]?.width ?? MIN_COLUMN_WIDTH,
@@ -253,9 +255,11 @@ export function SortHeader({
         numeric && "flex-row-reverse",
       )}
     >
-      <span className="truncate font-medium" title={title}>
-        {title}
-      </span>
+      <TruncatedTooltip content={title}>
+        <span className="truncate font-medium">
+          {title}
+        </span>
+      </TruncatedTooltip>
       <Icon
         aria-hidden
         className={cn(

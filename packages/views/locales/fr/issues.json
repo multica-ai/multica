@@ -501,7 +501,8 @@
     "pull_requests_empty_title": "Aucune pull request associée."
   },
   "timeline": {
-    "loading": "Chargement..."
+    "loading": "Chargement...",
+    "jump_to_latest": "Aller au plus récent"
   },
   "activity": {
     "created": "a créé cette tâche",

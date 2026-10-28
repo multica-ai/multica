@@ -618,7 +618,7 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 				// backfills) take it directly; the constructor-based services
 				// wrap *db.Queries internally, so they keep taking queries.
 				cs := lark.NewChannelStore(queries)
-				patcher := lark.NewPatcher(cs, installSvc, larkClient, lark.PatcherConfig{})
+				patcher := lark.NewPatcher(cs, installSvc, larkClient, lark.PatcherConfig{AppURL: appURLFromEnv()})
 				if store != nil && patcher.SetAttachments(store) {
 					h.DeclareChannelFileDelivery(string(channel.TypeFeishu))
 				}

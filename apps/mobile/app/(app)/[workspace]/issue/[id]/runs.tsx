@@ -9,7 +9,8 @@
  * the legacy `useRunsSheetStore` is gone since the route system is the
  * single source of truth for what's open.
  *
- * Past-row tap is a no-op in v1 — transcript drilldown is deferred.
+ * Past rows push a task-id-addressed execution-record screen. Keeping the
+ * identifier in the route makes deep links and cache misses deterministic.
  */
 import { useMemo } from "react";
 import { ScrollView, View } from "react-native";

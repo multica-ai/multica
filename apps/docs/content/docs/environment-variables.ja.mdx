@@ -136,6 +136,8 @@ allowlist の正確な判定順序は[ログインとサインアップ](/auth-s
 | `ATTACHMENT_DOWNLOAD_MODE` | `auto` | `auto`、`cloudfront`、`presign`、`proxy` |
 | `ATTACHMENT_DOWNLOAD_URL_TTL` | `30m` | 署名付きダウンロード URL の有効期間 |
 
+`AWS_ENDPOINT_URL` が Google Cloud Storage を指す場合、`Accept-Encoding` はリクエスト署名から自動的に除外されます。
+
 内部ネットワークの MinIO など、ブラウザから endpoint に直接到達できない場合は `ATTACHMENT_DOWNLOAD_MODE=proxy` を使ってください。
 
 ### ローカルディスク

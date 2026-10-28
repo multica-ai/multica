@@ -371,6 +371,6 @@ describe("AgentsPage search + model column (GitHub #9500)", () => {
     renderPage();
 
     expect(screen.getByText("Model")).toBeInTheDocument();
-    expect(screen.getAllByTitle("claude").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("claude").length).toBeGreaterThan(0);
   });
 });

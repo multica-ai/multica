@@ -18,6 +18,7 @@ import { Button } from "@multica/ui/components/ui/button";
 import { IconButton } from "@multica/ui/components/common/icon-button";
 import { Tooltip, TooltipTrigger, TooltipContent } from "@multica/ui/components/ui/tooltip";
 import { cn } from "@multica/ui/lib/utils";
+import { TruncatedTooltip } from "@multica/ui/components/common/truncated-tooltip";
 import { AgentTranscriptDialog, StepBody } from "../../common/task-transcript/agent-transcript-dialog";
 import { buildTimeline } from "../../common/task-transcript/build-timeline";
 import { buildSteps, groupSteps, isCallStep, isGroupRow, type TraceRow } from "../../common/task-transcript/build-steps";
@@ -177,7 +178,9 @@ export function InlineCommentRun({ run, className, viewState, showIdentity = fal
       <div ref={animationVisibility.ref} className="flex min-h-7 min-w-0 items-center gap-2" data-run-summary-row>
         {showIdentity && <>
           <ActorAvatar actorType="agent" actorId={task.agent_id} size="md" enableHoverCard showStatusDot />
-          <span className="max-w-[30%] shrink-0 truncate text-body font-medium" title={name}>{name}</span>
+          <TruncatedTooltip content={name}>
+            <span className="max-w-[30%] shrink-0 truncate text-body font-medium">{name}</span>
+          </TruncatedTooltip>
           {!active && task.completed_at && <Tooltip>
             <TooltipTrigger render={<span className="shrink-0 cursor-default text-caption text-muted-foreground @max-[32rem]/run:hidden">
               {timeAgo(task.completed_at)}
@@ -196,7 +199,9 @@ export function InlineCommentRun({ run, className, viewState, showIdentity = fal
               <span>{statusText}</span>
               <span className="break-all font-mono text-muted-foreground">{rawError}</span>
             </TooltipContent>
-          </Tooltip> : <span className="truncate" title={statusText}>{statusText}</span>}
+          </Tooltip> : <TruncatedTooltip content={statusText}>
+            <span className="truncate">{statusText}</span>
+          </TruncatedTooltip>}
         </span>
         <button type="button"
           className={cn("flex min-w-0 items-center gap-1.5 rounded-xs py-1 text-left text-caption text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
@@ -225,10 +230,12 @@ export function InlineCommentRun({ run, className, viewState, showIdentity = fal
       <div className={cn(showIdentity && "pl-8")}>
         {replyTo}
         {output && <div className="mt-2 text-body"><ReadonlyContent content={redactSecrets(output)} /></div>}
-        {needsAction && rawError && <p title={rawError}
-          className="mt-1.5 line-clamp-4 whitespace-pre-wrap break-words rounded-md border bg-muted/50 px-2.5 py-1.5 font-mono text-caption text-muted-foreground">
-          {rawError}
-        </p>}
+        {needsAction && rawError && <TruncatedTooltip content={rawError}>
+          <p
+            className="mt-1.5 line-clamp-4 whitespace-pre-wrap break-words rounded-md border bg-muted/50 px-2.5 py-1.5 font-mono text-caption text-muted-foreground">
+            {rawError}
+          </p>
+        </TruncatedTooltip>}
         {expanded && <div id={regionId} className="mt-2 min-w-0 space-y-1">
           {isPending && <p className="text-caption text-muted-foreground">{t(($) => $.inline_run.loading)}</p>}
           {isError && <div role="alert" className="text-caption text-destructive">{t(($) => $.inline_run.load_failed)}
@@ -341,7 +348,9 @@ function InlineStep({ row, live, formatText }: { row: TraceRow; live: boolean; f
     <summary onClick={disclosure.onTrigger} className="flex cursor-pointer list-none items-center gap-2 rounded-xs py-1.5 hover:bg-accent/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring [&::-webkit-details-marker]:hidden">
       {pending ? <Loader2 aria-hidden className="size-3.5 shrink-0 animate-spin text-info motion-reduce:animate-none" />
         : <Icon aria-hidden className={cn("size-3.5 shrink-0", error ? "text-destructive" : "text-muted-foreground")} />}
-      <span className={cn("min-w-0 flex-1 truncate", error && "text-destructive")} title={summary}>{summary}</span>
+      <TruncatedTooltip content={summary}>
+        <span className={cn("min-w-0 flex-1 truncate", error && "text-destructive")}>{summary}</span>
+      </TruncatedTooltip>
       {(grouped || call) && <span className="shrink-0 text-micro text-muted-foreground">
         {grouped ? t(($) => $.inline_run.steps, { count: row.steps.length }) : row.tool}
       </span>}
