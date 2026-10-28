@@ -120,7 +120,7 @@ export function TOTPSetupDialog(props: {
         {step === "qr" && otpauth && (
           <div className="space-y-4">
             <p className="text-sm">{t(($) => $.security.two_factor.setup_scan_qr)}</p>
-            <div className="flex justify-center rounded bg-white p-4">
+            <div className="flex justify-center rounded-md bg-white p-4">
               <QRCode value={otpauth} size={200} />
             </div>
             <p className="text-xs text-muted-foreground">
