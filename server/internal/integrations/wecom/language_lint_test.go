@@ -71,14 +71,12 @@ func TestOnlyStringsGoHoldsUserVisibleCopy(t *testing.T) {
 	}
 	var offenders []offence
 
-	// The files below still hold their copy as literals. They are listed with
-	// an exact count rather than left out of the walk, so the lint still fails
-	// on a literal added anywhere else — including a new one in a listed file —
+	// A file that still holds its copy as literals is listed here with an
+	// exact count rather than left out of the walk, so the lint still fails on
+	// a literal added anywhere else — including a new one in a listed file —
 	// and fails again if a listed file loses a literal without this list being
-	// updated.
-	pending := map[string]int{
-		"media_ingest.go": 2,
-	}
+	// updated. None is left.
+	pending := map[string]int{}
 
 	for _, name := range packageGoFiles(t, "strings.go") {
 		f, err := parser.ParseFile(fset, filepath.Clean(name), nil, 0)

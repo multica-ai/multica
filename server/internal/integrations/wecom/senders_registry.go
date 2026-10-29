@@ -63,6 +63,13 @@ func (r *sendersRegistry) mx() Metrics {
 	return r.metrics
 }
 
+// RecordMediaFailure lets the media resolver report through the registry it
+// already holds, rather than threading a second sink through a constructor
+// that has no other reason to know about metrics.
+func (r *sendersRegistry) RecordMediaFailure(reason string) {
+	r.mx().RecordMediaFailure(reason)
+}
+
 // NewSendersRegistry is the public constructor boot uses to inject the
 // same registry into both the wecom ChannelDeps (writer side) and the
 // OutboundReplier (reader side). Kept exported so router.go can wire it
