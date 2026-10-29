@@ -1,6 +1,6 @@
 "use client";
 
-import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { memo, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { toast } from "sonner";
 import { useQuery } from "@tanstack/react-query";
 import { Virtuoso, type Components, type VirtuosoHandle } from "react-virtuoso";
@@ -24,6 +24,7 @@ import {
   AlertCircle,
   AlertTriangle,
   ArrowUpRight,
+  CircleDot,
   Copy,
   RotateCw,
 } from "@multica/ui/icons";
@@ -94,6 +95,12 @@ interface ChatMessageListProps {
    * that reply until chat:quick_actions resolves it.
    */
   quickActionsPendingMessageId?: string | null;
+  /**
+   * Extra content under a persisted message — e.g. its thread and the issue
+   * it became. Keep the function stable: a new identity re-renders every
+   * visible row.
+   */
+  renderMessageExtras?: (message: ChatMessage) => ReactNode;
 }
 
 // ─── Virtuoso chrome ─────────────────────────────────────────────────────
@@ -191,6 +198,7 @@ export function ChatMessageList({
   quickActionsDisabled = false,
   onRegenerateQuickActions,
   quickActionsPendingMessageId = null,
+  renderMessageExtras,
 }: ChatMessageListProps) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const [scrollContainerEl, setScrollContainerEl] = useState<HTMLDivElement | null>(null);
@@ -378,7 +386,7 @@ export function ChatMessageList({
         components={LIST_COMPONENTS}
         itemContent={(_, item) => (
           <div
-            className={cn(CHAT_COLUMN, "py-2")}
+            className={cn(CHAT_COLUMN, "group/message py-2")}
             {...(item.key === liveEndKey ? { [LIVE_END_ROW_ATTR]: "" } : {})}
           >
             <MessageBubble
@@ -391,6 +399,7 @@ export function ChatMessageList({
               latestAssistantMessageId={latestAssistantMessageId}
               quickActionsPendingMessageId={quickActionsPendingMessageId}
               starterCardsMessageId={starterCardsMessageId}
+              renderMessageExtras={renderMessageExtras}
             />
           </div>
         )}
@@ -456,6 +465,7 @@ const MessageBubble = memo(function MessageBubble({
   latestAssistantMessageId,
   quickActionsPendingMessageId,
   starterCardsMessageId,
+  renderMessageExtras,
 }: {
   item: ChatRenderItem;
   isPending: boolean;
@@ -466,6 +476,7 @@ const MessageBubble = memo(function MessageBubble({
   latestAssistantMessageId: string | null;
   quickActionsPendingMessageId: string | null;
   starterCardsMessageId: string | null;
+  renderMessageExtras?: (message: ChatMessage) => ReactNode;
 }) {
   // The live row and the persisted assistant row both land here under one key,
   // and both render <AssistantMessage> — same component type, same position —
@@ -484,9 +495,15 @@ const MessageBubble = memo(function MessageBubble({
 
   const { message } = item;
 
+  if (message.message_kind === "issue_event") {
+    return <IssueEventLine message={message} />;
+  }
+
+  const extras = renderMessageExtras?.(message);
+
   if (message.role === "user") {
     return (
-      <div className="flex justify-end">
+      <div className="flex flex-col items-end gap-1">
         <div className="rounded-2xl bg-muted px-3.5 py-2 text-body max-w-[80%] break-words">
           {/* User messages are authored as markdown in ContentEditor, so they
            * render through the SAME RichContent as assistant replies and as
@@ -505,6 +522,7 @@ const MessageBubble = memo(function MessageBubble({
             className="mt-1.5"
           />
         </div>
+        {extras}
       </div>
     );
   }
@@ -521,9 +539,26 @@ const MessageBubble = memo(function MessageBubble({
       canRegenerateQuickActions={message.id === latestAssistantMessageId}
       quickActionsPending={quickActionsPendingMessageId === message.id}
       showStarterCards={message.id === starterCardsMessageId}
+      extras={extras}
     />
   );
 });
+
+// A server-authored line reporting what happened to an issue created from the
+// thread's root message. Not a reply, so it reads as a quiet status row.
+function IssueEventLine({ message }: { message: ChatMessage }) {
+  return (
+    <div className="flex items-start gap-2 text-caption text-muted-foreground">
+      <CircleDot className="mt-0.5 size-3.5 shrink-0" />
+      <RichContent
+        content={message.content}
+        density="compact"
+        phase="settled"
+        className="min-w-0 flex-1"
+      />
+    </div>
+  );
+}
 
 /**
  * Assistant turn body — renders BOTH the in-flight (live) and the persisted
@@ -553,6 +588,7 @@ function AssistantMessage({
   canRegenerateQuickActions = false,
   quickActionsPending = false,
   showStarterCards = false,
+  extras,
 }: {
   taskId: string | null;
   message?: ChatMessage;
@@ -565,6 +601,7 @@ function AssistantMessage({
   quickActionsPending?: boolean;
   /** This turn is Mika's onboarding opening — render starter cards, not chips. */
   showStarterCards?: boolean;
+  extras?: ReactNode;
 }) {
   const canFetchTaskMessages = isTaskMessageTaskId(taskId);
 
@@ -672,6 +709,7 @@ function AssistantMessage({
           ) : onQuickAction && quickActionsPending ? (
             <QuickActionsSkeleton />
           ) : null}
+          {extras}
         </>
       )}
     </div>

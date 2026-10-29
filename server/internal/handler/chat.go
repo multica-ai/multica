@@ -177,14 +177,16 @@ func (h *Handler) ListChatSessions(w http.ResponseWriter, r *http.Request) {
 	}
 
 	status := r.URL.Query().Get("status")
+	includeThreads := r.URL.Query().Get("include_threads") == "true"
 
 	// Two call sites → two row types with identical shape. Collect into a
 	// common response slice via small per-branch loops.
 	var resp []ChatSessionResponse
 	if status == "all" {
 		rows, err := h.Queries.ListAllChatSessionsByCreator(r.Context(), db.ListAllChatSessionsByCreatorParams{
-			WorkspaceID: parseUUID(workspaceID),
-			CreatorID:   parseUUID(userID),
+			WorkspaceID:    parseUUID(workspaceID),
+			CreatorID:      parseUUID(userID),
+			IncludeThreads: includeThreads,
 		})
 		if err != nil {
 			writeError(w, http.StatusInternalServerError, "failed to list chat sessions")
@@ -209,12 +211,17 @@ func (h *Handler) ListChatSessions(w http.ResponseWriter, r *http.Request) {
 				Pinned:      s.PinnedAt.Valid,
 				CreatedAt:   timestampToString(s.CreatedAt),
 				UpdatedAt:   timestampToString(s.UpdatedAt),
+
+				ParentChatSessionID: uuidToPtr(s.ParentChatSessionID),
+				RootChatMessageID:   uuidToPtr(s.RootChatMessageID),
+				ThreadReplyCount:    threadReplyCount(s.ParentChatSessionID, s.ThreadReplyCount),
 			})
 		}
 	} else {
 		rows, err := h.Queries.ListChatSessionsByCreator(r.Context(), db.ListChatSessionsByCreatorParams{
-			WorkspaceID: parseUUID(workspaceID),
-			CreatorID:   parseUUID(userID),
+			WorkspaceID:    parseUUID(workspaceID),
+			CreatorID:      parseUUID(userID),
+			IncludeThreads: includeThreads,
 		})
 		if err != nil {
 			writeError(w, http.StatusInternalServerError, "failed to list chat sessions")
@@ -239,6 +246,10 @@ func (h *Handler) ListChatSessions(w http.ResponseWriter, r *http.Request) {
 				Pinned:      s.PinnedAt.Valid,
 				CreatedAt:   timestampToString(s.CreatedAt),
 				UpdatedAt:   timestampToString(s.UpdatedAt),
+
+				ParentChatSessionID: uuidToPtr(s.ParentChatSessionID),
+				RootChatMessageID:   uuidToPtr(s.RootChatMessageID),
+				ThreadReplyCount:    threadReplyCount(s.ParentChatSessionID, s.ThreadReplyCount),
 			})
 		}
 	}
@@ -714,6 +725,24 @@ func (h *Handler) DeleteChatSession(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "failed to lock chat session")
 		return
 	}
+	// Threads (MUL-8357) go with their conversation. They are locked here,
+	// before the agent, in the same session -> agent order a send takes.
+	var threadIDs []pgtype.UUID
+	if !session.ParentChatSessionID.Valid {
+		threadIDs, err = qtx.ListChatThreadIDsByParent(r.Context(), db.ListChatThreadIDsByParentParams{
+			ParentChatSessionID: session.ID, WorkspaceID: session.WorkspaceID,
+		})
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "failed to list chat threads")
+			return
+		}
+		for _, threadID := range threadIDs {
+			if _, err := qtx.LockChatSessionForDelete(r.Context(), threadID); err != nil && !errors.Is(err, pgx.ErrNoRows) {
+				writeError(w, http.StatusInternalServerError, "failed to lock chat thread")
+				return
+			}
+		}
+	}
 
 	// Claim, clear, prioritize, and direct send all lock the agent before task
 	// rows. Keep delete on the same agent -> task suffix after its session lock,
@@ -727,6 +756,14 @@ func (h *Handler) DeleteChatSession(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to cancel chat session tasks")
 		return
+	}
+	for _, threadID := range threadIDs {
+		threadCancelled, err := qtx.CancelAgentTasksByChatSession(r.Context(), threadID)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "failed to cancel chat thread tasks")
+			return
+		}
+		cancelled = append(cancelled, threadCancelled...)
 	}
 	if err := service.SettleTerminalTaskState(r.Context(), qtx, cancelled...); err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to settle terminal task state")
@@ -771,6 +808,23 @@ func (h *Handler) DeleteChatSession(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	for _, threadID := range threadIDs {
+		if err := qtx.DeleteChatDraftRestoresBySession(r.Context(), threadID); err != nil {
+			writeError(w, http.StatusInternalServerError, "failed to delete chat thread draft restores")
+			return
+		}
+		if err := qtx.DeleteChatSession(r.Context(), db.DeleteChatSessionParams{ID: threadID, WorkspaceID: session.WorkspaceID}); err != nil {
+			writeError(w, http.StatusInternalServerError, "failed to delete chat thread")
+			return
+		}
+	}
+	if err := qtx.DeleteChatMessageIssuesBySessions(r.Context(), db.DeleteChatMessageIssuesBySessionsParams{
+		WorkspaceID: session.WorkspaceID,
+		SessionIds:  append([]pgtype.UUID{session.ID}, threadIDs...),
+	}); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to delete chat issue links")
+		return
+	}
 	if err := qtx.DeleteChatSession(r.Context(), db.DeleteChatSessionParams{
 		ID:          session.ID,
 		WorkspaceID: session.WorkspaceID,
@@ -805,6 +859,10 @@ func (h *Handler) DeleteChatSession(w http.ResponseWriter, r *http.Request) {
 	h.publishChat(protocol.EventChatSessionDeleted, workspaceID, "member", userID, resolvedSessionID, protocol.ChatSessionDeletedPayload{
 		ChatSessionID: resolvedSessionID,
 	})
+	for _, threadID := range threadIDs {
+		id := uuidToString(threadID)
+		h.publishChat(protocol.EventChatSessionDeleted, workspaceID, "member", userID, id, protocol.ChatSessionDeletedPayload{ChatSessionID: id})
+	}
 
 	w.WriteHeader(http.StatusNoContent)
 }
@@ -1933,8 +1991,13 @@ type ChatSessionResponse struct {
 	// older Chat that remains readable and writable in Multica.
 	ChannelSource         *ChatSessionChannelSourceResponse `json:"channel_source,omitempty"`
 	IsCurrentChannelRoute *bool                             `json:"is_current_channel_route,omitempty"`
-	CreatedAt             string                            `json:"created_at"`
-	UpdatedAt             string                            `json:"updated_at"`
+	// Set only on a thread (MUL-8357): the conversation it branched from, the
+	// message it replies to, and — on list endpoints — how many messages it holds.
+	ParentChatSessionID *string `json:"parent_chat_session_id,omitempty"`
+	RootChatMessageID   *string `json:"root_chat_message_id,omitempty"`
+	ThreadReplyCount    *int    `json:"thread_reply_count,omitempty"`
+	CreatedAt           string  `json:"created_at"`
+	UpdatedAt           string  `json:"updated_at"`
 }
 
 type ChatSessionChannelSourceResponse struct {
@@ -2040,7 +2103,19 @@ func chatSessionToResponse(s db.ChatSession) ChatSessionResponse {
 		Pinned:      s.PinnedAt.Valid,
 		CreatedAt:   timestampToString(s.CreatedAt),
 		UpdatedAt:   timestampToString(s.UpdatedAt),
+
+		ParentChatSessionID: uuidToPtr(s.ParentChatSessionID),
+		RootChatMessageID:   uuidToPtr(s.RootChatMessageID),
 	}
+}
+
+// threadReplyCount is the list-row reply count, present only on threads.
+func threadReplyCount(parent pgtype.UUID, count int32) *int {
+	if !parent.Valid {
+		return nil
+	}
+	n := int(count)
+	return &n
 }
 
 func chatMessageToResponse(m db.ChatMessage, attachments []AttachmentResponse) ChatMessageResponse {
@@ -2104,6 +2179,8 @@ func normalizeMessageKind(kind string) string {
 		return protocol.ChatMessageKindOnboardingKickoff
 	case protocol.ChatMessageKindOnboardingOpening:
 		return protocol.ChatMessageKindOnboardingOpening
+	case protocol.ChatMessageKindIssueEvent:
+		return protocol.ChatMessageKindIssueEvent
 	default:
 		return protocol.ChatMessageKindMessage
 	}

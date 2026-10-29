@@ -9,11 +9,19 @@ import type { ChatSession } from "../types/chat";
  * conversation": still listed, opened read-only.
  *
  * Sessions bound to an external channel (Slack, Lark, ...) never become
- * primary: their replies happen in that channel.
+ * primary: their replies happen in that channel. Threads are neither: they
+ * belong to the message they reply to.
  */
 
 function activityTime(s: ChatSession): number {
   return new Date(s.last_message?.created_at ?? s.updated_at).getTime();
+}
+
+/** A thread under a message, rather than a conversation of its own. */
+export function isThreadChatSession(
+  session: Pick<ChatSession, "parent_chat_session_id">,
+): boolean {
+  return !!session.parent_chat_session_id;
 }
 
 export function isChannelChatSession(s: ChatSession): boolean {
@@ -26,7 +34,7 @@ export function pickPrimaryChatSession(
 ): ChatSession | null {
   let best: ChatSession | null = null;
   for (const s of sessions ?? []) {
-    if (s.agent_id !== agentId) continue;
+    if (s.agent_id !== agentId || isThreadChatSession(s)) continue;
     if (s.status === "archived" || isChannelChatSession(s)) continue;
     if (!best || activityTime(s) > activityTime(best)) best = s;
   }
@@ -40,7 +48,7 @@ export function earlierChatSessions(
   primaryId: string | null,
 ): ChatSession[] {
   return (sessions ?? [])
-    .filter((s) => s.agent_id === agentId && s.id !== primaryId)
+    .filter((s) => s.agent_id === agentId && s.id !== primaryId && !isThreadChatSession(s))
     .sort((a, b) => activityTime(b) - activityTime(a));
 }
 

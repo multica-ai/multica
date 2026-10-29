@@ -66,6 +66,21 @@
     "read_only": "This earlier conversation is read-only. Its context isn't carried into the current one.",
     "read_only_channel": "Replies to this conversation happen in {{channel}}.",
     "no_access": "You can't start a chat with {{name}}.",
-    "archived_no_chat": "{{name}} is archived and has no conversation with you."
+    "archived_no_chat": "{{name}} is archived and has no conversation with you.",
+    "thread": {
+      "title": "Thread",
+      "back": "Back to conversation",
+      "root_label": "Replying to",
+      "empty": "Replies here stay with this message. {{name}} sees the message you're replying to.",
+      "reply": "Reply in thread",
+      "replies_one": "{{count}} reply",
+      "replies_other": "{{count}} replies",
+      "open_failed": "Couldn't open the thread"
+    },
+    "issue": {
+      "create": "Create issue",
+      "created": "Created {{identifier}} and assigned it to {{name}}",
+      "create_failed": "Couldn't create the issue"
+    }
   }
 }

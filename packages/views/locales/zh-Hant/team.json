@@ -66,6 +66,20 @@
     "read_only": "以前的對話唯讀，其中的上下文不會帶到目前對話。",
     "read_only_channel": "這段對話請在{{channel}}裡回覆。",
     "no_access": "你無法和 {{name}} 發起對話。",
-    "archived_no_chat": "{{name}} 已歸檔，你和它沒有對話。"
+    "archived_no_chat": "{{name}} 已歸檔，你和它沒有對話。",
+    "thread": {
+      "title": "話題",
+      "back": "回到對話",
+      "root_label": "回覆",
+      "empty": "這裡的回覆只屬於這則訊息。{{name}} 會看到你回覆的那則訊息。",
+      "reply": "在話題中回覆",
+      "replies_other": "{{count}} 則回覆",
+      "open_failed": "無法開啟話題"
+    },
+    "issue": {
+      "create": "建立任務",
+      "created": "已建立 {{identifier}} 並指派給 {{name}}",
+      "create_failed": "無法建立任務"
+    }
   }
 }

@@ -20,6 +20,7 @@ import type {
   CancelTaskResponse,
   ChatMessage,
   ChatDraftRestoresResponse,
+  ChatMessageIssue,
   ChatPendingTask,
   ChatSession,
   PrioritizeQueuedChatTaskResponse,
@@ -968,7 +969,7 @@ export const ChatMessageSchema = z.object({
   failure_reason: z.string().nullable().optional(),
   elapsed_ms: z.number().nullable().optional(),
   message_kind: z
-    .enum(["message", "no_response", "onboarding_kickoff", "onboarding_opening"])
+    .enum(["message", "no_response", "onboarding_kickoff", "onboarding_opening", "issue_event"])
     .catch("message")
     .optional(),
   // Optional additive data degrades independently: a malformed suggestion
@@ -2150,6 +2151,7 @@ const ChatLastMessageSchema = z.object({
     "no_response",
     "onboarding_kickoff",
     "onboarding_opening",
+    "issue_event",
   ]).optional().catch(undefined),
 }).loose();
 
@@ -2173,6 +2175,9 @@ export const ChatSessionSchema: z.ZodType<ChatSession> = z.object({
   pinned: z.boolean().optional(),
   channel_source: ChatChannelSourceSchema.optional().catch(undefined),
   is_current_channel_route: z.boolean().optional().catch(undefined),
+  parent_chat_session_id: z.string().nullable().optional().catch(undefined),
+  root_chat_message_id: z.string().nullable().optional().catch(undefined),
+  thread_reply_count: z.number().optional().catch(undefined),
   created_at: z.string().default(""),
   updated_at: z.string().default(""),
 }).loose();
@@ -2193,6 +2198,26 @@ export const ChatSessionListSchema = z
   .transform((sessions) => sessions.filter((session) => session.id !== ""))
   .default([]);
 export const EMPTY_CHAT_SESSION_LIST: ChatSession[] = [];
+
+// Issues created from a conversation's messages
+// (`GET /api/chat/sessions/{id}/issues`). A malformed row drops on its own so
+// the rest still mark their messages.
+const ChatMessageIssueSchema = z.object({
+  issue_id: z.string(),
+  identifier: z.string().default(""),
+  title: z.string().default(""),
+  status: z.string().default(""),
+  chat_message_id: z.string(),
+  thread_session_id: z.string(),
+}).loose();
+
+export const ChatMessageIssueListSchema = z.object({
+  issues: z
+    .array(ChatMessageIssueSchema.nullable().catch(null))
+    .transform((rows): ChatMessageIssue[] => rows.filter((row) => row !== null))
+    .default([]),
+}).loose();
+export const EMPTY_CHAT_MESSAGE_ISSUE_LIST: { issues: ChatMessageIssue[] } = { issues: [] };
 
 // Deferred-cancellation draft restores
 // (`GET /api/chat/sessions/{id}/draft-restores`, #5219) feed the composer

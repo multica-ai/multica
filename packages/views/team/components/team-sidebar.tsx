@@ -16,7 +16,7 @@ import { useWorkspaceId } from "@multica/core/hooks";
 import { useModalStore } from "@multica/core/modals";
 import { useWorkspacePaths } from "@multica/core/paths";
 import { useChatStore } from "@multica/core/chat";
-import { chatSessionsOptions } from "@multica/core/chat/queries";
+import { chatSessionsWithThreadsOptions } from "@multica/core/chat/queries";
 import { unreadChatMessagesByAgent } from "@multica/core/chat/primary-session";
 import {
   agentListOptions,
@@ -58,7 +58,7 @@ export function TeamSidebar({ selection }: { selection: TeamSelection }) {
   const { data: agents = [] } = useQuery(agentListOptions(wsId));
   const { data: squads = [] } = useQuery(squadListOptions(wsId));
   const { data: members = [] } = useQuery(memberListOptions(wsId));
-  const { data: sessions = [] } = useQuery(chatSessionsOptions(wsId));
+  const { data: sessions = [] } = useQuery(chatSessionsWithThreadsOptions(wsId));
   const activeSessionId = useChatStore((s) => s.activeSessionId);
 
   // The open agent chat is being read; its unread is about to clear.

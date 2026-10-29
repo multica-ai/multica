@@ -96,6 +96,8 @@ import type {
   TaskMessagePayload,
   Attachment,
   ChatSession,
+  ChatMessageIssue,
+  CreateIssueFromChatMessageResponse,
   ChatPinnedAgent,
   ChatMessage,
   ChatMessagesPage,
@@ -270,6 +272,8 @@ import {
   ChatPendingTaskSchema,
   ChatSessionListSchema,
   ChatSessionSchema,
+  ChatMessageIssueListSchema,
+  EMPTY_CHAT_MESSAGE_ISSUE_LIST,
   PrioritizeQueuedChatTaskResponseSchema,
   SendChatMessageResponseSchema,
   StartMikaOnboardingResponseSchema,
@@ -3714,10 +3718,14 @@ export class ApiClient {
 
   // Chat Sessions
   async listChatSessions(
-    params?: { status?: string },
+    params?: { status?: string; include_threads?: boolean },
     workspaceSlug?: string,
   ): Promise<ChatSession[]> {
-    const query = params?.status ? `?status=${params.status}` : "";
+    const search = new URLSearchParams();
+    if (params?.status) search.set("status", params.status);
+    if (params?.include_threads) search.set("include_threads", "true");
+    const qs = search.toString();
+    const query = qs ? `?${qs}` : "";
     const raw: unknown = await this.fetch(`/api/chat/sessions${query}`, {
       headers: workspaceHeader(workspaceSlug),
     });
@@ -3746,6 +3754,36 @@ export class ApiClient {
       headers: workspaceHeader(workspaceSlug),
       body: JSON.stringify(data),
     });
+  }
+
+  /** Open the thread under a message, creating it on first use. */
+  async createChatThread(sessionId: string, rootMessageId: string): Promise<ChatSession> {
+    const raw: unknown = await this.fetch(`/api/chat/sessions/${sessionId}/threads`, {
+      method: "POST",
+      body: JSON.stringify({ root_message_id: rootMessageId }),
+    });
+    return parseWithFallback(raw, ChatSessionSchema, EMPTY_CHAT_SESSION, {
+      endpoint: "POST /api/chat/sessions/:id/threads",
+    });
+  }
+
+  /** Turn a message into an issue assigned to the conversation's agent. */
+  async createIssueFromChatMessage(
+    sessionId: string,
+    messageId: string,
+    data?: { title?: string },
+  ): Promise<CreateIssueFromChatMessageResponse> {
+    return this.fetch(`/api/chat/sessions/${sessionId}/messages/${messageId}/issue`, {
+      method: "POST",
+      body: JSON.stringify(data ?? {}),
+    });
+  }
+
+  async listChatMessageIssues(sessionId: string): Promise<ChatMessageIssue[]> {
+    const raw: unknown = await this.fetch(`/api/chat/sessions/${sessionId}/issues`);
+    return parseWithFallback(raw, ChatMessageIssueListSchema, EMPTY_CHAT_MESSAGE_ISSUE_LIST, {
+      endpoint: "GET /api/chat/sessions/:id/issues",
+    }).issues;
   }
 
   async deleteChatSession(id: string): Promise<void> {

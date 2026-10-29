@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   useInfiniteQuery,
   useQuery,
@@ -21,7 +21,8 @@ import {
   useWorkspaceAgentAvailability,
 } from "@multica/core/agents";
 import {
-  chatSessionsOptions,
+  chatSessionsWithThreadsOptions,
+  isThreadChatSession,
   chatMessagesPageOptions,
   pendingChatTaskOptions,
   chatKeys,
@@ -49,11 +50,13 @@ import type {
   Attachment,
   ChatMessage,
   ChatPendingTask,
+  ChatSession,
 } from "@multica/core/types";
 import { useT } from "../../i18n";
 import { useAppForeground } from "../../common/use-app-foreground";
 
 const uiLogger = createLogger("chat.ui");
+const EMPTY_SESSIONS: ChatSession[] = [];
 const apiLogger = createLogger("chat.api");
 
 // Derive a concise session title from the first user message: first line,
@@ -220,8 +223,14 @@ export function useChatController(opts?: { isActive?: boolean }) {
   const { data: members = [], isSuccess: membersLoaded } = useQuery(
     memberListOptions(wsId),
   );
-  const { data: sessions = [], isSuccess: sessionsLoaded } = useQuery(
-    chatSessionsOptions(wsId),
+  // Lookups by id run over threads too, so a thread opened in the Team page is
+  // a real session here; `sessions` (what surfaces list) holds conversations.
+  const { data: allSessions = EMPTY_SESSIONS, isSuccess: sessionsLoaded } = useQuery(
+    chatSessionsWithThreadsOptions(wsId),
+  );
+  const sessions = useMemo(
+    () => allSessions.filter((s) => !isThreadChatSession(s)),
+    [allSessions],
   );
   const { data: projects = [], isSuccess: projectsLoaded } = useQuery(
     projectListOptions(wsId),
@@ -300,7 +309,7 @@ export function useChatController(opts?: { isActive?: boolean }) {
   );
 
   const currentSession = activeSessionId
-    ? sessions.find((s) => s.id === activeSessionId)
+    ? allSessions.find((s) => s.id === activeSessionId)
     : null;
   const isSessionArchived = currentSession?.status === "archived";
   const candidateProjectId = currentSession
@@ -411,7 +420,7 @@ export function useChatController(opts?: { isActive?: boolean }) {
   // session that stays active past the tick — a real select, deep link, or
   // refresh — is read.
   const currentHasUnread =
-    sessions.find((s) => s.id === activeSessionId)?.has_unread ?? false;
+    allSessions.find((s) => s.id === activeSessionId)?.has_unread ?? false;
   useEffect(() => {
     if (!isActive || !appForeground || !activeSessionId) return;
     if (!currentHasUnread) return;
@@ -436,7 +445,7 @@ export function useChatController(opts?: { isActive?: boolean }) {
       if (
         activeSessionId &&
         (!sessionsLoaded ||
-          sessions.some((s) => s.id === activeSessionId) ||
+          allSessions.some((s) => s.id === activeSessionId) ||
           hasInFlightPendingTask(qc, activeSessionId))
       ) {
         return activeSessionId;
@@ -464,7 +473,7 @@ export function useChatController(opts?: { isActive?: boolean }) {
       activeAgent,
       activeProjectId,
       createSession,
-      sessions,
+      allSessions,
       sessionsLoaded,
       qc,
     ],
@@ -480,11 +489,11 @@ export function useChatController(opts?: { isActive?: boolean }) {
   useEffect(() => {
     if (getCurrentWsId() !== wsId) return;
     if (!activeSessionId || !sessionsLoaded) return;
-    if (sessions.some((s) => s.id === activeSessionId)) return;
+    if (allSessions.some((s) => s.id === activeSessionId)) return;
     if (hasInFlightPendingTask(qc, activeSessionId)) return;
     uiLogger.info("clearing dangling activeSessionId", { sessionId: activeSessionId });
     setActiveSession(null);
-  }, [wsId, activeSessionId, sessionsLoaded, sessions, qc, setActiveSession]);
+  }, [wsId, activeSessionId, sessionsLoaded, allSessions, qc, setActiveSession]);
 
   // Upload transport moved into the coordinated-upload engine inside ChatInput
   // (MUL-5181 L2); surfaces only forward whether the affordance exists.

@@ -30,10 +30,12 @@ export function TeamAgentView({
   agentId,
   tab,
   sessionId,
+  threadId,
 }: {
   agentId: string;
   tab: TeamTab;
   sessionId: string | null;
+  threadId: string | null;
 }) {
   const { t } = useT("team");
   const { t: tAgents } = useT("agents");
@@ -106,7 +108,9 @@ export function TeamAgentView({
       />
       <div className="flex min-h-0 flex-1">
         <div className="flex min-h-0 min-w-0 flex-1 flex-col">
-          {tab === "chat" && <TeamAgentChat agent={agent} sessionId={sessionId} />}
+          {tab === "chat" && (
+            <TeamAgentChat agent={agent} sessionId={sessionId} threadId={threadId} />
+          )}
           {tab === "work" && <ActorIssuesPanel actorType="agent" actorId={agent.id} />}
           {tab === "setup" && (
             <AgentOverviewPane

@@ -292,6 +292,10 @@ const (
 	// the opening self-describes: chat renders the starter cards under this
 	// kind instead of quick-action chips (MUL-5765).
 	ChatMessageKindOnboardingOpening = "onboarding_opening"
+	// ChatMessageKindIssueEvent is a system-authored line in a thread about an
+	// issue created from a chat message: its creation and each status move
+	// (MUL-8357). Older readers render it as an ordinary assistant message.
+	ChatMessageKindIssueEvent = "issue_event"
 )
 
 // ChatDonePayload is broadcast when an agent finishes responding to a chat

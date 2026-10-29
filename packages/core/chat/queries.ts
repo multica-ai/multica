@@ -1,9 +1,11 @@
 import { infiniteQueryOptions, queryOptions, useQuery, type QueryClient } from "@tanstack/react-query";
 import { useEffect, useRef } from "react";
 import { api } from "../api";
+import { isThreadChatSession } from "./primary-session";
 import type { TaskMessagePayload } from "../types/events";
 import type {
   ChatQuickActionsFailureState,
+  ChatMessageIssue,
   ChatQuickActionsPendingState,
   ChatSession,
 } from "../types/chat";
@@ -56,6 +58,9 @@ export const chatKeys = {
   pendingTasks: (wsId: string) => [...chatKeys.all(wsId), "pending-tasks"] as const,
   /** Per-user pinned agents for the quick-agent bar. */
   pinnedAgents: (wsId: string) => [...chatKeys.all(wsId), "pinned-agents"] as const,
+  /** Issues created from one conversation's messages. */
+  messageIssues: (wsId: string, sessionId: string) =>
+    [...chatKeys.all(wsId), "message-issues", sessionId] as const,
   /**
    * Boolean "does the user have any in-flight chat task" — the FAB's cheap
    * running indicator. Separate cache from the detailed `pendingTasks` list so
@@ -74,11 +79,49 @@ export function isTaskMessageTaskId(taskId: string | null | undefined): taskId i
   return typeof taskId === "string" && UUID_PATTERN.test(taskId);
 }
 
+export { isThreadChatSession };
+
+// Keeps the array identity when nothing is dropped, so list consumers don't
+// re-render for a cache that holds no threads.
+function dropChatThreads(sessions: ChatSession[]): ChatSession[] {
+  return sessions.some(isThreadChatSession)
+    ? sessions.filter((s) => !isThreadChatSession(s))
+    : sessions;
+}
+
+function fetchChatSessions() {
+  return api.listChatSessions({ status: "all", include_threads: true });
+}
+
+/**
+ * The viewer's conversations. The cache also holds their threads (one fetch,
+ * one realtime path), but every list surface sees conversations only — a
+ * thread is reached from the message it replies to.
+ */
 export function chatSessionsOptions(wsId: string) {
   return queryOptions({
     queryKey: chatKeys.sessions(wsId),
-    queryFn: () => api.listChatSessions({ status: "all" }),
+    queryFn: fetchChatSessions,
     staleTime: Infinity,
+    select: dropChatThreads,
+  });
+}
+
+/** The same cache with threads kept, for code that opens or counts them. */
+export function chatSessionsWithThreadsOptions(wsId: string) {
+  return queryOptions({
+    queryKey: chatKeys.sessions(wsId),
+    queryFn: fetchChatSessions,
+    staleTime: Infinity,
+  });
+}
+
+export function chatMessageIssuesOptions(wsId: string, sessionId: string) {
+  return queryOptions<ChatMessageIssue[]>({
+    queryKey: chatKeys.messageIssues(wsId, sessionId),
+    queryFn: () => api.listChatMessageIssues(sessionId),
+    enabled: !!sessionId,
+    staleTime: 30_000,
   });
 }
 

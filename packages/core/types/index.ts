@@ -170,6 +170,8 @@ export {
 } from "./attachment-url";
 export type {
   ChatSession,
+  ChatMessageIssue,
+  CreateIssueFromChatMessageResponse,
   ChatLastMessage,
   ChatPinnedAgent,
   ChatMessage,

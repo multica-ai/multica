@@ -3836,6 +3836,19 @@ func (h *Handler) buildClaimedTaskResponse(r *http.Request, task *db.AgentTaskQu
 		if strings.TrimSpace(resp.ThreadName) == "" && resp.ChatMessage != "" {
 			resp.ThreadName = resp.ChatMessage
 		}
+
+		// A thread (MUL-8357) runs as its own agent conversation. Until it has
+		// one to resume, the message it replies to is part of the prompt.
+		if cs.RootChatMessageID.Valid && resp.PriorSessionID == "" && resp.ChatMessage != "" {
+			if root, err := h.Queries.GetChatMessage(r.Context(), cs.RootChatMessageID); err == nil {
+				resp.ChatMessage = chatThreadRootContext(root, resp.ChatMessage)
+			} else {
+				slog.Warn("chat claim: load thread root message failed; sending reply alone",
+					"task_id", uuidToString(task.ID),
+					"chat_session_id", uuidToString(cs.ID),
+					"error", err)
+			}
+		}
 	}
 
 	// Autopilot run_only task: resolve workspace from autopilot_run →

@@ -66,6 +66,20 @@
     "read_only": "以前の会話は読み取り専用です。その文脈は現在の会話に引き継がれません。",
     "read_only_channel": "この会話への返信は {{channel}} で行います。",
     "no_access": "{{name}} とのチャットは開始できません。",
-    "archived_no_chat": "{{name}} はアーカイブ済みで、あなたとの会話はありません。"
+    "archived_no_chat": "{{name}} はアーカイブ済みで、あなたとの会話はありません。",
+    "thread": {
+      "title": "スレッド",
+      "back": "会話に戻る",
+      "root_label": "返信先",
+      "empty": "ここでの返信はこのメッセージに紐づきます。{{name}} には返信先のメッセージも伝わります。",
+      "reply": "スレッドで返信",
+      "replies_other": "{{count}} 件の返信",
+      "open_failed": "スレッドを開けませんでした"
+    },
+    "issue": {
+      "create": "タスクを作成",
+      "created": "{{identifier}} を作成し、{{name}} に割り当てました",
+      "create_failed": "タスクを作成できませんでした"
+    }
   }
 }

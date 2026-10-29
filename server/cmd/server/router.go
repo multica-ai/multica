@@ -2457,6 +2457,11 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					r.Post("/quick-actions/regenerate", h.RegenerateChatQuickActions)
 					r.Get("/messages", h.ListChatMessages)
 					r.Get("/messages/page", h.ListChatMessagesPage)
+					// Team page (MUL-8357): threads on a message, and issues
+					// created from one. 404 while the team_page flag is off.
+					r.Post("/threads", h.CreateChatThread)
+					r.Post("/messages/{messageId}/issue", h.CreateIssueFromChatMessage)
+					r.Get("/issues", h.ListChatMessageIssues)
 					r.Get("/pending-task", h.GetPendingChatTask)
 					r.Delete("/queued-tasks", h.ClearQueuedChatTasks)
 					r.Post("/queued-tasks/{taskId}/prioritize", h.PrioritizeQueuedChatTask)

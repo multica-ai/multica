@@ -69,7 +69,7 @@ import { workspaceListOptions, myInvitationListOptions, workspaceKeys } from "@m
 import { resolvePublicFileUrl } from "@multica/core/workspace/avatar-url";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { inboxUnreadSummaryEnabled, inboxUnreadSummaryOptions, useInboxUnreadCount, hasOtherWorkspaceUnread, unreadWorkspaceIds } from "@multica/core/inbox/queries";
-import { chatSessionsOptions } from "@multica/core/chat/queries";
+import { chatSessionsWithThreadsOptions, isThreadChatSession } from "@multica/core/chat/queries";
 import { countUnreadChatMessages } from "@multica/core/chat/unread";
 import { useChatStore } from "@multica/core/chat";
 import { api, ApiError } from "@multica/core/api";
@@ -79,7 +79,7 @@ import { pinListOptions } from "@multica/core/pins/queries";
 import { useDeletePin, useReorderPins } from "@multica/core/pins/mutations";
 import { issueDetailOptions } from "@multica/core/issues/queries";
 import { projectDetailOptions } from "@multica/core/projects/queries";
-import type { PinnedItem } from "@multica/core/types";
+import type { ChatSession, PinnedItem } from "@multica/core/types";
 import { useLogout } from "../auth";
 import { ProjectIcon } from "../projects/components/project-icon";
 import { routeIconForPath } from "./route-icon-components";
@@ -105,6 +105,7 @@ function isNavActive(pathname: string, href: string): boolean {
 // `useEffect`/`useMemo` that depends on the value, and can trigger infinite
 // re-render loops when the effect itself calls `setState`.
 const EMPTY_PINS: PinnedItem[] = [];
+const EMPTY_CHAT_SESSIONS: ChatSession[] = [];
 const EMPTY_WORKSPACES: Awaited<ReturnType<typeof api.listWorkspaces>> = [];
 const EMPTY_INVITATIONS: Awaited<ReturnType<typeof api.listMyInvitations>> = [];
 const EMPTY_INBOX_SUMMARY: Awaited<ReturnType<typeof api.getInboxUnreadSummary>> = [];
@@ -477,8 +478,11 @@ export function AppSidebar({ topSlot, searchSlot, headerClassName, headerStyle }
   // Chat tab unread badge: IM-style total of unread *messages* across chat
   // threads (countUnreadChatMessages is the shared definition — mobile's tab
   // badge derives from the same function, keeping the platforms in agreement).
-  const { data: chatSessions = [] } = useQuery({
-    ...chatSessionsOptions(wsId ?? ""),
+  // With the Team page on, thread replies count too: Team shows them under
+  // their messages, while the Chat page has nowhere to clear them.
+  const teamPageEnabled = useFeatureEnabled(TEAM_PAGE_FLAG, false);
+  const { data: chatSessions = EMPTY_CHAT_SESSIONS } = useQuery({
+    ...chatSessionsWithThreadsOptions(wsId ?? ""),
     enabled: !!wsId,
   });
   // The session the user is reading right now must not count: the thread list
@@ -495,7 +499,6 @@ export function AppSidebar({ topSlot, searchSlot, headerClassName, headerStyle }
   const floatingChatOpen = useChatStore((s) => s.isOpen);
   const appForeground = useAppForeground();
   const chatHref = p.chat();
-  const teamPageEnabled = useFeatureEnabled(TEAM_PAGE_FLAG, false);
   const viewedChatSessionId =
     appForeground &&
     (floatingChatOpen ||
@@ -504,8 +507,12 @@ export function AppSidebar({ topSlot, searchSlot, headerClassName, headerStyle }
       ? activeChatSessionId
       : null;
   const chatUnreadCount = React.useMemo(
-    () => countUnreadChatMessages(chatSessions, viewedChatSessionId),
-    [chatSessions, viewedChatSessionId],
+    () =>
+      countUnreadChatMessages(
+        teamPageEnabled ? chatSessions : chatSessions.filter((s) => !isThreadChatSession(s)),
+        viewedChatSessionId,
+      ),
+    [chatSessions, teamPageEnabled, viewedChatSessionId],
   );
   // Cross-workspace unread summary backs the workspace-switcher dot. One
   // shared cache entry across workspaces; gated on an active workspace since

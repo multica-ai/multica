@@ -73,3 +73,26 @@ describe("unreadChatMessagesByAgent", () => {
     expect(byAgent.get("a2")).toBe(3);
   });
 });
+
+describe("threads", () => {
+  it("are never the primary conversation nor an earlier one", () => {
+    const sessions = [
+      session({ id: "main", updated_at: "2026-01-01T00:00:00Z" }),
+      session({
+        id: "thread",
+        parent_chat_session_id: "main",
+        root_chat_message_id: "m1",
+        updated_at: "2026-03-01T00:00:00Z",
+      }),
+    ];
+    expect(pickPrimaryChatSession(sessions, "a1")?.id).toBe("main");
+    expect(earlierChatSessions(sessions, "a1", "main")).toEqual([]);
+  });
+
+  it("still count toward the agent's unread", () => {
+    const sessions = [
+      session({ id: "thread", parent_chat_session_id: "main", unread_count: 2 }),
+    ];
+    expect(unreadChatMessagesByAgent(sessions).get("a1")).toBe(2);
+  });
+});

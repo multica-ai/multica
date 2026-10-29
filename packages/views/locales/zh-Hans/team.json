@@ -66,6 +66,20 @@
     "read_only": "以前的对话只读，其中的上下文不会带到当前对话。",
     "read_only_channel": "这段对话请在{{channel}}里回复。",
     "no_access": "你无法和 {{name}} 发起对话。",
-    "archived_no_chat": "{{name}} 已归档，你和它没有对话。"
+    "archived_no_chat": "{{name}} 已归档，你和它没有对话。",
+    "thread": {
+      "title": "话题",
+      "back": "回到对话",
+      "root_label": "回复",
+      "empty": "这里的回复只属于这条消息。{{name}} 会看到你回复的那条消息。",
+      "reply": "在话题中回复",
+      "replies_other": "{{count}} 条回复",
+      "open_failed": "无法打开话题"
+    },
+    "issue": {
+      "create": "创建任务",
+      "created": "已创建 {{identifier}} 并指派给 {{name}}",
+      "create_failed": "无法创建任务"
+    }
   }
 }

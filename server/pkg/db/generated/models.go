@@ -537,6 +537,16 @@ type ChatMessage struct {
 	ChannelTypingSettled          bool               `json:"channel_typing_settled"`
 }
 
+type ChatMessageIssue struct {
+	IssueID         pgtype.UUID        `json:"issue_id"`
+	WorkspaceID     pgtype.UUID        `json:"workspace_id"`
+	ChatSessionID   pgtype.UUID        `json:"chat_session_id"`
+	ChatMessageID   pgtype.UUID        `json:"chat_message_id"`
+	ThreadSessionID pgtype.UUID        `json:"thread_session_id"`
+	CreatedBy       pgtype.UUID        `json:"created_by"`
+	CreatedAt       pgtype.Timestamptz `json:"created_at"`
+}
+
 type ChatPinnedAgent struct {
 	ID          pgtype.UUID        `json:"id"`
 	WorkspaceID pgtype.UUID        `json:"workspace_id"`
@@ -564,6 +574,8 @@ type ChatSession struct {
 	PinnedAt            pgtype.Timestamptz `json:"pinned_at"`
 	ProjectID           pgtype.UUID        `json:"project_id"`
 	ExplicitlyCreatedAt pgtype.Timestamptz `json:"explicitly_created_at"`
+	ParentChatSessionID pgtype.UUID        `json:"parent_chat_session_id"`
+	RootChatMessageID   pgtype.UUID        `json:"root_chat_message_id"`
 }
 
 type ClientUsageDaily struct {

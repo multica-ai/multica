@@ -1,14 +1,15 @@
 /**
  * Team page selection lives in the URL so every object is deep-linkable and a
  * desktop tab knows what it shows: `?agent=` | `?squad=` | `?member=`, plus
- * `tab=` and, for an agent, `session=` (an earlier conversation).
+ * `tab=` and, for an agent, `session=` (an earlier conversation) or `thread=`
+ * (the thread under one of its messages).
  */
 
 export type TeamTab = "chat" | "work" | "setup";
 
 export type TeamSelection =
   | { kind: "none" }
-  | { kind: "agent"; id: string; tab: TeamTab; sessionId: string | null }
+  | { kind: "agent"; id: string; tab: TeamTab; sessionId: string | null; threadId: string | null }
   | { kind: "squad"; id: string; tab: TeamTab }
   | { kind: "member"; id: string; tab: TeamTab };
 
@@ -35,6 +36,7 @@ export function parseTeamSelection(params: URLSearchParams): TeamSelection {
       id: agent,
       tab: tabFor("agent", tab),
       sessionId: params.get("session") || null,
+      threadId: params.get("thread") || null,
     };
   }
   const squad = params.get("squad");
@@ -48,7 +50,13 @@ export function parseTeamSelection(params: URLSearchParams): TeamSelection {
 export function teamHref(
   base: string,
   target:
-    | { kind: TeamSelectionKind; id: string; tab?: TeamTab; sessionId?: string | null }
+    | {
+        kind: TeamSelectionKind;
+        id: string;
+        tab?: TeamTab;
+        sessionId?: string | null;
+        threadId?: string | null;
+      }
     | { kind: "none" },
 ): string {
   if (target.kind === "none") return base;
@@ -56,5 +64,6 @@ export function teamHref(
   params.set(target.kind, target.id);
   if (target.tab && target.tab !== TEAM_TABS[target.kind][0]) params.set("tab", target.tab);
   if (target.kind === "agent" && target.sessionId) params.set("session", target.sessionId);
+  if (target.kind === "agent" && target.threadId) params.set("thread", target.threadId);
   return `${base}?${params.toString()}`;
 }

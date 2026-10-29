@@ -38,6 +38,7 @@ export function TeamPage() {
         agentId={selection.id}
         tab={selection.tab}
         sessionId={selection.sessionId}
+        threadId={selection.threadId}
       />
     ) : selection.kind === "squad" ? (
       <TeamSquadView key={`squad:${selection.id}`} squadId={selection.id} tab={selection.tab} />

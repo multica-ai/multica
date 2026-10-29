@@ -66,6 +66,20 @@
     "read_only": "이전 대화는 읽기 전용이며, 그 맥락은 현재 대화로 이어지지 않습니다.",
     "read_only_channel": "이 대화의 답장은 {{channel}}에서 합니다.",
     "no_access": "{{name}}와(과) 채팅을 시작할 수 없습니다.",
-    "archived_no_chat": "{{name}}은(는) 보관되었으며 대화 기록이 없습니다."
+    "archived_no_chat": "{{name}}은(는) 보관되었으며 대화 기록이 없습니다.",
+    "thread": {
+      "title": "스레드",
+      "back": "대화로 돌아가기",
+      "root_label": "답장 대상",
+      "empty": "여기의 답장은 이 메시지에만 남습니다. {{name}}은(는) 답장 대상 메시지를 함께 봅니다.",
+      "reply": "스레드에서 답장",
+      "replies_other": "답장 {{count}}개",
+      "open_failed": "스레드를 열 수 없습니다"
+    },
+    "issue": {
+      "create": "태스크 만들기",
+      "created": "{{identifier}}을(를) 만들어 {{name}}에게 할당했습니다",
+      "create_failed": "태스크를 만들 수 없습니다"
+    }
   }
 }
