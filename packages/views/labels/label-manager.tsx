@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { MoreHorizontal, Pencil, Plus, Search, Tag, Trash2 } from "lucide-react";
+import { MoreHorizontal, Pencil, Plus, Search, Tag, Trash2 } from "@multica/ui/icons";
 import { toast } from "sonner";
 import { useWorkspaceId } from "@multica/core/hooks";
 import {

@@ -1,6 +1,6 @@
 "use client";
 
-import { Check } from "lucide-react";
+import { Check } from "@multica/ui/icons";
 
 // shadcn official pattern (PR #6862): a checkbox indicator that appears on
 // item hover/focus inside DropdownMenuCheckboxItem rows. Pair it with

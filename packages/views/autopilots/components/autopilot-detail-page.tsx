@@ -1,24 +1,23 @@
 "use client";
 
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import {
   Zap, Play, Clock, Plus, Trash2, CheckCircle2, XCircle, Loader2, Pencil,
   Ban, ChevronDown, ChevronRight,
   Webhook, RotateCw, Server,
-} from "lucide-react";
+} from "@multica/ui/icons";
 import { useQuery } from "@tanstack/react-query";
 import { autopilotDetailOptions, autopilotRunsOptions, autopilotRunOptions } from "@multica/core/autopilots/queries";
 import { projectDetailOptions } from "@multica/core/projects/queries";
 import {
   useUpdateAutopilot,
   useDeleteAutopilot,
-  useTriggerAutopilot,
   useCreateAutopilotTrigger,
   useDeleteAutopilotTrigger,
   useRotateAutopilotTriggerWebhookToken,
 } from "@multica/core/autopilots/mutations";
 import { buildAutopilotWebhookUrl } from "@multica/core/autopilots";
-import { api, clientErrorMessage, dispatchReasonCode } from "@multica/core/api";
+import { api } from "@multica/core/api";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { useWorkspacePaths } from "@multica/core/paths";
 import { useActorName } from "@multica/core/workspace/hooks";
@@ -66,7 +65,8 @@ import { ReadonlyContent } from "../../editor";
 import { TranscriptButton } from "../../common/task-transcript";
 import { AutopilotDialog } from "./autopilot-dialog";
 import { EditScheduleTriggerDialog } from "./edit-schedule-trigger-dialog";
-import { runNowToastKind, runNowBlockedKey } from "./run-now-toast";
+import { useRunAutopilotNow } from "./use-run-autopilot-now";
+import { useRegisterCommandBarContext } from "../../search/register-context";
 import { WebhookPayloadPreview } from "./webhook-payload-preview";
 import { WebhookDeliveriesSection } from "./webhook-deliveries-section";
 import { ProjectIcon } from "../../projects/components/project-icon";
@@ -685,7 +685,14 @@ export function AutopilotDetailPage({ autopilotId }: { autopilotId: string }) {
   const { data: runs = [], isLoading: runsLoading } = useQuery(autopilotRunsOptions(wsId, autopilotId));
   const updateAutopilot = useUpdateAutopilot();
   const deleteAutopilot = useDeleteAutopilot();
-  const triggerAutopilot = useTriggerAutopilot();
+  const { runNow, isPending: runNowPending } = useRunAutopilotNow();
+  const loadedAutopilot = data?.autopilot ?? null;
+  useRegisterCommandBarContext(
+    useMemo(
+      () => (loadedAutopilot ? { kind: "autopilot", autopilot: loadedAutopilot } : null),
+      [loadedAutopilot],
+    ),
+  );
   const projectId = data?.autopilot.project_id ?? null;
   const { data: project, isLoading: projectLoading } = useQuery({
     ...projectDetailOptions(wsId, projectId ?? ""),
@@ -755,38 +762,7 @@ export function AutopilotDetailPage({ autopilotId }: { autopilotId: string }) {
   // doesn't send the field (older backend).
   const canManageAccess = autopilot.can_manage_access ?? canWrite;
 
-  const handleRunNow = async () => {
-    try {
-      const run = await triggerAutopilot.mutateAsync(autopilotId);
-      // Manual "run now" returns 200 even when admission blocks the run, so the
-      // toast is driven by the run's domain status, not the HTTP 2xx (MUL-4525).
-      // Success is a whitelist (issue_created/running) — a skipped run warns, a
-      // failed or unknown/future status errors — never a false "triggered".
-      const kind = runNowToastKind(run?.status);
-      if (kind === "success") {
-        toast.success(t(($) => $.detail.toast_triggered));
-        return;
-      }
-      // reason_code is the stable, typed cause the server decided at admission
-      // time; an unknown/absent code degrades to a generic "not triggered".
-      const message = t(($) => $.detail[runNowBlockedKey(run?.reason_code)]);
-      if (kind === "warning") {
-        toast.warning(message);
-      } else {
-        toast.error(message);
-      }
-    } catch (e: any) {
-      const reason = dispatchReasonCode(e);
-      if (reason) {
-        toast.error(t(($) => $.detail[runNowBlockedKey(reason)]));
-        return;
-      }
-      // Only a 4xx message is written for the user; a 5xx one is internal
-      // server detail (MUL-6472), so an unclassified dispatch failure shows the
-      // localized generic sentence instead of the raw body.
-      toast.error(clientErrorMessage(e) || t(($) => $.detail.toast_trigger_failed));
-    }
-  };
+  const handleRunNow = () => runNow(autopilotId);
 
   const handleDelete = async () => {
     setDeleting(true);
@@ -849,17 +825,17 @@ export function AutopilotDetailPage({ autopilotId }: { autopilotId: string }) {
               <Button
                 size="sm"
                 onClick={handleRunNow}
-                disabled={autopilot.status !== "active" || triggerAutopilot.isPending}
+                disabled={autopilot.status !== "active" || runNowPending}
                 className="px-2 sm:px-2.5"
-                aria-label={triggerAutopilot.isPending ? t(($) => $.detail.running) : t(($) => $.detail.run_now)}
+                aria-label={runNowPending ? t(($) => $.detail.running) : t(($) => $.detail.run_now)}
               >
-                {triggerAutopilot.isPending ? (
+                {runNowPending ? (
                   <Loader2 className="h-3.5 w-3.5 sm:mr-1 animate-spin" />
                 ) : (
                   <Play className="h-3.5 w-3.5 sm:mr-1" />
                 )}
                 <span className="hidden sm:inline">
-                  {triggerAutopilot.isPending
+                  {runNowPending
                     ? t(($) => $.detail.running)
                     : t(($) => $.detail.run_now)}
                 </span>

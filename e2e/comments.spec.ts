@@ -64,7 +64,7 @@ test.describe("Comments", () => {
     const shell = page.getByTestId("comment-composer-shell");
     await expect(shell).toBeVisible();
     const composer = shell.locator("xpath=ancestor::div[contains(@class, 'rounded-lg')][1]");
-    const submitBtn = composer.locator("button:has(svg.lucide-arrow-up)").last();
+    const submitBtn = composer.locator("button:has(svg.icon-arrow-up)").last();
     await expect(submitBtn).toBeDisabled();
   });
 });

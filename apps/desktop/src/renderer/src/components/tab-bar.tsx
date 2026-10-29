@@ -7,7 +7,7 @@ import {
   type RefObject,
 } from "react";
 import { motion, useReducedMotion } from "motion/react";
-import { X, Plus, Pin, PinOff, ListX, AppWindow } from "lucide-react";
+import { X, Plus, Pin, PinOff, ListX, AppWindow } from "@multica/ui/icons";
 import {
   DndContext,
   PointerSensor,

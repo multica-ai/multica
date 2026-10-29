@@ -4,7 +4,7 @@ import { useIssueStatuses } from "@multica/core/issue-statuses/hooks";
 import { useWorkspaceId } from "@multica/core/hooks";
 
 import { memo, useState, useCallback, useMemo, useEffect, useRef } from "react";
-import { ChevronRight, Plus } from "lucide-react";
+import { ChevronRight, Plus } from "@multica/ui/icons";
 import { Accordion } from "@base-ui/react/accordion";
 import {
   DndContext,

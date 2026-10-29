@@ -9,7 +9,7 @@ import {
   Laptop,
   Loader2,
   UserRound,
-} from "lucide-react";
+} from "@multica/ui/icons";
 import { useQuery } from "@tanstack/react-query";
 import { Card, CardContent } from "@multica/ui/components/ui/card";
 import { cn } from "@multica/ui/lib/utils";

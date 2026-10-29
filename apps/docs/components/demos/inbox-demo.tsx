@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { Archive, ArchiveRestore, ChevronLeft, ChevronRight, CircleCheck, X } from "lucide-react";
+import { Archive, ArchiveRestore, ChevronLeft, ChevronRight, CircleCheck, X } from "@multica/ui/icons";
 import { Button } from "@multica/ui/components/ui/button";
 import { cn } from "@multica/ui/lib/utils";
 import { CoachMark, DemoAvatar, DemoComment, DemoFrame, useDemoCopy, useStartWhenVisible } from "./demo-kit";

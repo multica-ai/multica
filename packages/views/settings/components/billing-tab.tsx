@@ -11,7 +11,7 @@ import {
   Loader2,
   Plus,
   RefreshCw,
-} from "lucide-react";
+} from "@multica/ui/icons";
 import { ApiError, errorCode } from "@multica/core/api";
 import { autopilotQuotaUsageOptions } from "@multica/core/autopilots";
 import {

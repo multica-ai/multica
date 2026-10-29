@@ -1,7 +1,7 @@
 "use client";
 
 import { useStore } from "zustand";
-import { ListTodo } from "lucide-react";
+import { ListTodo } from "@multica/ui/icons";
 import { useAuthStore } from "@multica/core/auth";
 import {
   myIssuesRelationFromScope,

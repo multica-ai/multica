@@ -24,7 +24,7 @@
 
 import { useEffect, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { Loader2, RefreshCw, ExternalLink } from "lucide-react";
+import { Loader2, RefreshCw, ExternalLink } from "@multica/ui/icons";
 import { toast } from "sonner";
 import {
   billingBalanceOptions,

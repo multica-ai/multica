@@ -6,7 +6,7 @@ import {
   useState,
   type PointerEventHandler,
 } from "react";
-import { ArrowLeft, ArrowRight } from "lucide-react";
+import { ArrowLeft, ArrowRight } from "@multica/ui/icons";
 import {
   SidebarTrigger,
   useSidebar,

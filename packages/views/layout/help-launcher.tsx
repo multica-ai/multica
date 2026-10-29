@@ -7,7 +7,7 @@ import {
   Download,
   History,
   MessageCircle,
-} from "lucide-react";
+} from "@multica/ui/icons";
 import {
   DropdownMenu,
   DropdownMenuContent,

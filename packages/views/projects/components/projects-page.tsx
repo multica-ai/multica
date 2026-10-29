@@ -17,7 +17,7 @@ import {
   Search,
   Trash2,
   X,
-} from "lucide-react";
+} from "@multica/ui/icons";
 import { useQuery } from "@tanstack/react-query";
 import { toast } from "sonner";
 import {

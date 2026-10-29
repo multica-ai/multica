@@ -9,7 +9,7 @@ import {
   MessageSquare,
   Workflow,
   X,
-} from "lucide-react";
+} from "@multica/ui/icons";
 import { toast } from "sonner";
 import {
   Tooltip,
@@ -47,6 +47,9 @@ const RECENT_PAGE = 20;
 // still in flight, so first paint of the tab is a skeleton rather than the
 // "nothing finished yet" empty state (which reads as a wrong answer).
 const RECENT_SKELETON_ROWS = 4;
+// Row actions are 22px for a pointer; on touch they need a fingertip-sized
+// target (30px fits inside the two-line row without growing it).
+const TOUCH_ACTION_CLASS = "[@media(hover:none)]:p-2";
 
 interface ActivityTabProps {
   agent: Agent;
@@ -759,17 +762,18 @@ function TaskRow({
         </div>
       </div>
 
-      {/* Hover-only actions. The row is intentionally non-clickable so
+      {/* Hover-revealed actions. The row is intentionally non-clickable so
           neither destination is privileged — issue detail and transcript
           are equally valid follow-ups. focus-within keeps the slot
-          reachable for keyboard users. */}
-      <div className="ml-2 flex shrink-0 items-center gap-0.5 opacity-0 transition-opacity duration-100 group-hover:opacity-100 group-focus-within:opacity-100">
+          reachable for keyboard users; touch screens have no hover, so
+          there the slot stays visible with larger tap targets. */}
+      <div className="ml-2 flex shrink-0 items-center gap-0.5 opacity-0 transition-opacity duration-100 group-hover:opacity-100 group-focus-within:opacity-100 [@media(hover:none)]:opacity-100">
         {hasIssue && (
           <Tooltip>
             <TooltipTrigger
               render={<AppLink href={paths.issueDetail(task.issue_id)} />}
               aria-label={t(($) => $.tab_body.activity.open_issue_aria)}
-              className="flex items-center justify-center rounded-xs p-1 text-muted-foreground hover:text-foreground hover:bg-accent/50 transition-colors"
+              className={`flex items-center justify-center rounded-xs p-1 text-muted-foreground hover:text-foreground hover:bg-accent/50 transition-colors ${TOUCH_ACTION_CLASS}`}
             >
               <ArrowUpRight className="h-3.5 w-3.5" aria-hidden="true" />
             </TooltipTrigger>
@@ -782,6 +786,7 @@ function TaskRow({
             agentName={agent.name}
             isLive={isRunning}
             title={t(($) => $.tab_body.activity.transcript_tooltip)}
+            className={TOUCH_ACTION_CLASS}
           />
         )}
         {showCancel && (
@@ -795,7 +800,7 @@ function TaskRow({
                   aria-label={t(($) => $.tab_body.activity.cancel_task_aria)}
                 />
               }
-              className="flex items-center justify-center rounded-xs p-1 text-muted-foreground transition-colors hover:bg-destructive/10 hover:text-destructive disabled:cursor-not-allowed disabled:opacity-50"
+              className={`flex items-center justify-center rounded-xs p-1 text-muted-foreground transition-colors hover:bg-destructive/10 hover:text-destructive disabled:cursor-not-allowed disabled:opacity-50 ${TOUCH_ACTION_CLASS}`}
             >
               <X className="h-3.5 w-3.5" aria-hidden="true" />
             </TooltipTrigger>

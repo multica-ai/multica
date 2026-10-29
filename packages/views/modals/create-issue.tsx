@@ -22,7 +22,7 @@ import {
   Shapes,
   Tag,
   X as XIcon,
-} from "lucide-react";
+} from "@multica/ui/icons";
 import { cn } from "@multica/ui/lib/utils";
 import { toast } from "sonner";
 import type {

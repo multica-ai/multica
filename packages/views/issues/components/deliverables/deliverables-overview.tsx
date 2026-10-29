@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState, type CSSProperties, type ReactNode } from "react";
-import { LayoutGrid, MessageSquareText, X } from "lucide-react";
+import { LayoutGrid, MessageSquareText, X } from "@multica/ui/icons";
 import type { DeliverableFile } from "@multica/core/attachments/deliverables";
 import type { TimelineEntry } from "@multica/core/types";
 import { useActorName } from "@multica/core/workspace/hooks";

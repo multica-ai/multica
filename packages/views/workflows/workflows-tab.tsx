@@ -2,7 +2,7 @@
 
 import { Fragment, useMemo } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { ChevronDown, ChevronRight, LayoutTemplate, Plus } from "lucide-react";
+import { ChevronDown, ChevronRight, LayoutTemplate, Plus } from "@multica/ui/icons";
 import { useAuthStore } from "@multica/core/auth";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { useIssueStatuses } from "@multica/core/issue-statuses/hooks";

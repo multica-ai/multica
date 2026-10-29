@@ -86,7 +86,7 @@ describe("McpServerRow", () => {
       .getByRole("button", { name: "Replace configuration linear" })
       .querySelector("svg");
 
-    expect(icon).toHaveClass("lucide-sliders-horizontal");
+    expect(icon).toHaveClass("icon-sliders-horizontal");
     expect(icon?.getAttribute("class")).not.toMatch(/refresh|rotate/i);
   });
 

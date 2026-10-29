@@ -1,6 +1,6 @@
 "use client";
 
-import { X as XIcon } from "lucide-react";
+import { X as XIcon } from "@multica/ui/icons";
 import { TooltipHint } from "@multica/ui/components/common/tooltip-hint";
 import { cn } from "@multica/ui/lib/utils";
 

@@ -1,7 +1,7 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { ChevronsUpDown } from "lucide-react";
+import { ChevronsUpDown } from "@multica/ui/icons";
 import { toast } from "sonner";
 import {
   Select,

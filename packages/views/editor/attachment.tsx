@@ -32,7 +32,7 @@ import {
   Link as LinkIcon,
   Maximize2,
   Trash2,
-} from "lucide-react";
+} from "@multica/ui/icons";
 import type { ReactNode } from "react";
 import { toast } from "sonner";
 import { cn } from "@multica/ui/lib/utils";

@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { ArrowUpRight, Check, Clock, LoaderCircle } from "lucide-react";
+import { ArrowUpRight, Check, Clock, LoaderCircle } from "@multica/ui/icons";
 import { cn } from "@multica/ui/lib/utils";
 import {
   Tooltip,

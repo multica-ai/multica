@@ -49,13 +49,15 @@
 }
 
 /* Headings — compact but with clear visual hierarchy */
+/* No negative tracking: Inter's optical-size axis already draws 24px in its
+   display cut, which is tighter than the text cut. Weight stops at 600 so h1
+   sits on the same weight as the issue title above it. */
 .rich-text-editor h1 {
   font-size: var(--text-display-sm);
-  font-weight: 700;
+  font-weight: 600;
   margin-top: 1.5rem;
   margin-bottom: 0.5rem;
   line-height: 1.3;
-  letter-spacing: -0.01em;
 }
 
 .rich-text-editor h2 {
@@ -142,6 +144,15 @@
 
 .rich-text-editor li + li {
   margin-top: 0.25rem;
+}
+
+/* Han, kana and Hangul fill the whole em square and carry no ascender or
+   descender gaps, so the 1.625 that reads airy for Latin reads cramped for CJK.
+   Keyed to the UI locale (<html lang>), the best signal available for the
+   language people write their issues and comments in. Table cells are listed
+   so editable cells (text in a <p>) and readonly cells (bare text) stay equal. */
+.rich-text-editor :is(p, li, th, td):is(:lang(zh), :lang(ja), :lang(ko)) {
+  line-height: 1.75;
 }
 
 .rich-text-editor li::marker {

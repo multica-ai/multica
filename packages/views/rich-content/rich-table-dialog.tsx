@@ -19,7 +19,7 @@ import {
   type Row,
   type SortingState,
 } from "@tanstack/react-table";
-import { Check, Copy, Search, X } from "lucide-react";
+import { Check, Copy, Search, X } from "@multica/ui/icons";
 import { Button } from "@multica/ui/components/ui/button";
 import { IconButton } from "@multica/ui/components/common/icon-button";
 import { DataTable } from "@multica/ui/components/ui/data-table";

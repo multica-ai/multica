@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Globe, Loader2, Lock, Users } from "lucide-react";
+import { Globe, Loader2, Lock, Users } from "@multica/ui/icons";
 import type {
   AgentInvocationTarget,
   AgentInvocationTargetInput,

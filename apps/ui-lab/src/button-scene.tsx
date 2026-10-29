@@ -8,7 +8,7 @@ import {
   Loader2,
   Plus,
   Send,
-} from "lucide-react";
+} from "@multica/ui/icons";
 import { Button } from "@multica/ui/components/ui/button";
 import { Input } from "@multica/ui/components/ui/input";
 import {

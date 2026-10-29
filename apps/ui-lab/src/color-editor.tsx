@@ -1,7 +1,7 @@
 import { useTranslation } from "react-i18next";
 import { useEffect, useId, useRef, useState } from "react";
 import { HexColorPicker } from "react-colorful";
-import { Check, ChevronDown, Copy, RotateCcw, Search } from "lucide-react";
+import { Check, ChevronDown, Copy, RotateCcw, Search } from "@multica/ui/icons";
 import { Button } from "@multica/ui/components/ui/button";
 import { Input } from "@multica/ui/components/ui/input";
 import {

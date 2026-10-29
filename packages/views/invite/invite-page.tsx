@@ -20,7 +20,7 @@ import { useT } from "../i18n";
 import { Button } from "@multica/ui/components/ui/button";
 import { Card, CardContent } from "@multica/ui/components/ui/card";
 import { Skeleton } from "@multica/ui/components/ui/skeleton";
-import { ArrowLeft, LogOut, Users, Check, X } from "lucide-react";
+import { ArrowLeft, LogOut, Users, Check, X } from "@multica/ui/icons";
 
 export interface InvitePageProps {
   invitationId: string;
