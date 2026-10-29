@@ -1,7 +1,7 @@
 "use client";
 
 import { focusManager, useQuery } from "@tanstack/react-query";
-import { ArchiveRestore } from "lucide-react";
+import { ArchiveRestore } from "@multica/ui/icons";
 import { toast } from "sonner";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { archivedInboxLookupOptions, useUnarchiveInbox } from "@multica/core/inbox";
