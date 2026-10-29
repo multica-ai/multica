@@ -1012,8 +1012,11 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					// Same store the Router claims on, so the receipt this
 					// adapter sends before the Router sees the message cannot
 					// also be answered there.
-					Dedup:  wecom.NewDeduper(wecomStore),
-					Logger: slog.Default(),
+					Dedup: wecom.NewDeduper(wecomStore),
+					// The receipt for a message the bot cannot read is written
+					// in the sender's profile language in a 1:1.
+					Languages: queries,
+					Logger:    slog.Default(),
 				})
 				// Streaming replies: WeCom's smart-bot protocol has no
 				// typing indicator, no reaction and no read receipt, so the

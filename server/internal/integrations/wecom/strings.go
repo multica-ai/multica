@@ -219,6 +219,13 @@ type copyPack struct {
 	MediaSendFailed   string
 	MediaSendUnknown  string
 	MediaLookupFailed string
+
+	// UnsupportedMsgType answers a message kind the adapter cannot read at
+	// all — sent from the read loop, which never reaches the Replier. It does
+	// not name text, because photos, files, videos and 图文混排 route: a person
+	// who has just watched the bot answer a screenshot and is then told it
+	// only handles text reads that as the bot being broken.
+	UnsupportedMsgType string
 }
 
 // label returns the display name for an inbox notification type.
@@ -293,6 +300,7 @@ var copyPacks = map[Locale]copyPack{
 		MediaSendFailed:        "⚠️ 有文件没能发出来，我这边保留着，需要的话我再试一次。",
 		MediaSendUnknown:       "⚠️ 有文件我没收到企业微信的送达回执，可能已经发到了、也可能没有。我不会自动重发，免得发重了；你那边没看到的话说一声，我再发一次。",
 		MediaLookupFailed:      "⚠️ 我这边没查到这条回答带没带文件，所以要是有，这次没发出来。需要的话我再试一次。",
+		UnsupportedMsgType:     "抱歉，我暂时无法处理这类消息。",
 		StreamCancelled:        "⏹️ 这次处理已取消。",
 
 		InboxDetailLink: "查看详情",
@@ -335,6 +343,7 @@ var copyPacks = map[Locale]copyPack{
 		MediaSendFailed:        "⚠️ I couldn't send one of the files. It is still here — say the word and I'll try again.",
 		MediaSendUnknown:       "⚠️ WeCom never confirmed one of the files, so it may or may not have arrived. I won't resend it automatically in case that shows it twice — tell me if it isn't there and I'll send it again.",
 		MediaLookupFailed:      "⚠️ I couldn't check whether this answer had a file with it, so if it did, it didn't go out. Say the word and I'll try again.",
+		UnsupportedMsgType:     "Sorry, I can't read that kind of message.",
 		StreamCancelled:        "⏹️ That run was cancelled.",
 
 		InboxDetailLink: "View details",
