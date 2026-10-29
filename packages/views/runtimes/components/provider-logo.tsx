@@ -4,6 +4,7 @@ import codeartsLogo from "./codearts-logo.svg";
 import qwenLogo from "./qwen-logo.svg";
 import reasonixLogo from "./reasonix-logo.svg";
 import dimLogo from "./dim-logo.png";
+import museappLogo from "./museapp-logo.svg";
 
 // Next.js exposes static imports as objects while Vite exposes URL strings.
 // Normalize both shapes here so shared provider logos work in web and desktop.
@@ -386,6 +387,18 @@ function ZeroClawLogo({ className }: { className: string }) {
   );
 }
 
+// Muse app (Meta's personal AI agent, reached through a remote receptionist) —
+// the squiggle "M" as muse.ai serves it
+// (https://muse.ai/images/landing/brand/muse-logo.svg), copied verbatim. Not
+// the Muse Code CLI mark above: that is a different product with its own
+// runtime. Rendered through <img> like the other asset logos, which also keeps
+// the SVG's own gradient id from colliding when several rows share a page.
+const museappLogoSrc = staticAssetSrc(museappLogo);
+
+function MuseAppLogo({ className }: { className: string }) {
+  return <img src={museappLogoSrc} alt="" aria-hidden className={className} />;
+}
+
 export function ProviderLogo({
   provider,
   className = "h-4 w-4",
@@ -444,6 +457,8 @@ export function ProviderLogo({
       return <McodeLogo className={className} />;
     case "muse":
       return <MuseLogo className={className} />;
+    case "museapp":
+      return <MuseAppLogo className={className} />;
     case "dsh":
       return <DshLogo className={className} />;
     case "dim":
