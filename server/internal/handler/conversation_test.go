@@ -381,3 +381,33 @@ func TestConversations_ThreadKeepsTheRepliedAgent(t *testing.T) {
 		t.Fatalf("channel root = %+v, want its thread summary with 4 replies", msgs)
 	}
 }
+
+func TestConversations_ThreadUnderAnAgentMessageGoesToThatAgent(t *testing.T) {
+	withFeatureFlag(t, testHandler, featureflags.TeamPage, true)
+	agentID := createHandlerTestAgent(t, "ConvRootAgent", []byte("[]"))
+	conv := createChannelForTest(t, "agent-root-room", "public", conversationMemberInput{MemberType: "agent", MemberID: agentID})
+	sendConversationMessageForTest(t, testUserID, conv.ID, convAgentMention(agentID, "ConvRootAgent")+" hi", "")
+	var sessionID, taskID string
+	if err := testPool.QueryRow(context.Background(), `
+		SELECT cs.id, atq.id FROM chat_session cs JOIN agent_task_queue atq ON atq.chat_session_id = cs.id
+		WHERE cs.conversation_id = $1
+	`, conv.ID).Scan(&sessionID, &taskID); err != nil {
+		t.Fatalf("load channel task: %v", err)
+	}
+	testHandler.mirrorConversationReply(context.Background(), protocol.ChatDonePayload{ChatSessionID: sessionID, TaskID: taskID, Content: "hello"})
+
+	msgs := listConversationMessagesForTest(t, testUserID, conv.ID)
+	reply := msgs[len(msgs)-1]
+	if reply.AuthorType != "agent" {
+		t.Fatalf("latest channel message = %+v, want the agent reply", reply)
+	}
+	var thread ConversationResponse
+	if code := callConversation(t, testHandler.OpenConversationThread, testUserID, http.MethodPost, "/api/conversations/"+conv.ID+"/threads", conv.ID,
+		map[string]any{"root_message_id": reply.ID}, &thread); code != http.StatusCreated {
+		t.Fatalf("open thread: %d", code)
+	}
+	sendConversationMessageForTest(t, testUserID, thread.ID, "and one more", "")
+	if n := conversationAgentTasks(t, thread.ID, agentID); n != 1 {
+		t.Fatalf("reply under the agent's message: %d tasks, want 1", n)
+	}
+}

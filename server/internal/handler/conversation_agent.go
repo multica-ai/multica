@@ -37,10 +37,14 @@ func (h *Handler) conversationReplyTargets(ctx context.Context, conv db.Conversa
 	if latest, err := h.Queries.GetLatestAgentAuthor(ctx, conv.ID); err == nil && latest.Valid {
 		return []string{uuidToString(latest)}
 	}
-	if root, err := h.Queries.GetConversationMessage(ctx, conv.RootMessageID); err == nil {
-		return mentionedAgentIDs(root.Content)
+	root, err := h.Queries.GetConversationMessage(ctx, conv.RootMessageID)
+	if err != nil {
+		return nil
 	}
-	return nil
+	if root.AuthorType == "agent" && root.AuthorID.Valid {
+		return []string{uuidToString(root.AuthorID)}
+	}
+	return mentionedAgentIDs(root.Content)
 }
 
 func mentionedAgentIDs(content string) []string {
