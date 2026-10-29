@@ -210,12 +210,13 @@ vi.mock("@tanstack/react-query", async (importOriginal) => ({
 afterEach(() => {
   cleanup();
   useWorkspaceSwitcherStore.getState().setOpen(false);
+  useWorkspaceSwitcherStore.getState().setPrimaryHeld(false);
   configureShortcutPlatform(null);
   configureShortcutRuntime(null);
 });
 
 describe("workspace switcher keyboard presentation", () => {
-  it("opens the real menu from shared shortcut state and right-aligns the first nine workspace hints", async () => {
+  it("shows aligned workspace hints only while Command is held, including when opening the menu", async () => {
     configureShortcutPlatform("macos");
     configureShortcutRuntime("desktop");
     workspaces.current = Array.from({ length: 10 }, (_, index) => ({
@@ -234,11 +235,36 @@ describe("workspace switcher keyboard presentation", () => {
     const tenth = within(menu).getByRole("menuitem", { name: "Workspace 10" });
     expect(tenth.querySelector('[data-slot="shortcut-keycaps"]')).toBeNull();
     expect(tenth.hasAttribute("aria-keyshortcuts")).toBe(false);
+    fireEvent.keyUp(menu, { key: "Meta", metaKey: false });
+    expect(menu.querySelector('[data-slot="shortcut-keycaps"]')).toBeNull();
+    expect(useWorkspaceSwitcherStore.getState().isOpen).toBe(true);
+    fireEvent.keyDown(menu, { key: "Control", ctrlKey: true });
+    expect(menu.querySelector('[data-slot="shortcut-keycaps"]')).toBeNull();
+    fireEvent.keyDown(menu, { key: "Meta", metaKey: true });
+    expect(menu.querySelectorAll('[data-slot="shortcut-keycaps"]')).toHaveLength(9);
+    fireEvent.blur(window);
+    expect(menu.querySelector('[data-slot="shortcut-keycaps"]')).toBeNull();
     fireEvent.keyDown(menu, { key: "O", metaKey: true, shiftKey: true });
     await waitFor(() => expect(useWorkspaceSwitcherStore.getState().isOpen).toBe(false));
     fireEvent.keyDown(document, { key: "O", metaKey: true, shiftKey: true });
     fireEvent.keyDown(await screen.findByRole("menu"), { key: "Escape" });
     await waitFor(() => expect(useWorkspaceSwitcherStore.getState().isOpen).toBe(false));
+  });
+
+  it("shows hints on Control rather than Command on Windows", async () => {
+    configureShortcutPlatform("windows");
+    configureShortcutRuntime("desktop");
+    workspaces.current = [{ id: "ws-1", name: "Workspace 1", slug: "workspace-1", avatar_url: null }];
+    renderWithI18n(<AppSidebar />);
+    fireEvent.click(screen.getByRole("button", { name: "Workspaces" }));
+    const menu = await screen.findByRole("menu");
+    expect(menu.querySelector('[data-slot="shortcut-keycaps"]')).toBeNull();
+    fireEvent.keyDown(menu, { key: "Meta", metaKey: true });
+    expect(menu.querySelector('[data-slot="shortcut-keycaps"]')).toBeNull();
+    fireEvent.keyDown(menu, { key: "Control", ctrlKey: true });
+    expect(menu.querySelector('[data-slot="shortcut-keycaps"]')).not.toBeNull();
+    fireEvent.keyUp(menu, { key: "Control", ctrlKey: false });
+    expect(menu.querySelector('[data-slot="shortcut-keycaps"]')).toBeNull();
   });
 });
 

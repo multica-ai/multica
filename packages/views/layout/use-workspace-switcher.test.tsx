@@ -30,6 +30,7 @@ beforeEach(() => configureShortcutPlatform("macos"));
 afterEach(() => {
   cleanup();
   useWorkspaceSwitcherStore.getState().setOpen(false);
+  useWorkspaceSwitcherStore.getState().setPrimaryHeld(false);
   configureShortcutPlatform(null);
 });
 

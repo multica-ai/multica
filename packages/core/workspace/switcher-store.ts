@@ -4,6 +4,8 @@ import { create } from "zustand";
 
 interface WorkspaceSwitcherStore {
   isOpen: boolean;
+  primaryHeld: boolean;
+  setPrimaryHeld: (held: boolean) => void;
   requestedIndex: number | null;
   setOpen: (open: boolean) => void;
   toggle: () => void;
@@ -15,6 +17,8 @@ interface WorkspaceSwitcherStore {
 // can route Electron's numbered shortcuts here without duplicating its IPC.
 export const useWorkspaceSwitcherStore = create<WorkspaceSwitcherStore>((set, get) => ({
   isOpen: false,
+  primaryHeld: false,
+  setPrimaryHeld: (primaryHeld) => set({ primaryHeld }),
   requestedIndex: null,
   setOpen: (isOpen) => set({ isOpen, requestedIndex: null }),
   toggle: () => set((state) => ({ isOpen: !state.isOpen, requestedIndex: null })),

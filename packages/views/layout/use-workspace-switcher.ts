@@ -17,6 +17,8 @@ export function useWorkspaceSwitcher(
   const isOpen = useWorkspaceSwitcherStore((state) => state.isOpen);
   const setOpen = useWorkspaceSwitcherStore((state) => state.setOpen);
   const requestedIndex = useWorkspaceSwitcherStore((state) => state.requestedIndex);
+  const primaryHeld = useWorkspaceSwitcherStore((state) => state.primaryHeld);
+  const setPrimaryHeld = useWorkspaceSwitcherStore((state) => state.setPrimaryHeld);
 
   const selectWorkspace = useCallback((index: number, close = true) => {
     const workspace = workspaces[index];
@@ -34,10 +36,17 @@ export function useWorkspaceSwitcher(
   }, [isOpen, requestedIndex, selectWorkspace]);
 
   useEffect(() => {
-    if (!isOpen) return;
+    const mac = getShortcutPlatform() === "macos";
+    const updateModifier = (event: { metaKey: boolean; ctrlKey: boolean }) => {
+      setPrimaryHeld(mac ? event.metaKey : event.ctrlKey);
+    };
+    const clearModifier = () => setPrimaryHeld(false);
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === "hidden") clearModifier();
+    };
     const handleKeyDown = (event: KeyboardEvent) => {
-      if (isImeComposing(event)) return;
-      const mac = getShortcutPlatform() === "macos";
+      updateModifier(event);
+      if (!isOpen || isImeComposing(event)) return;
       const primary = mac ? event.metaKey : event.ctrlKey;
       const secondary = mac ? event.ctrlKey : event.metaKey;
       if (!primary || secondary || event.altKey) return;
@@ -57,8 +66,18 @@ export function useWorkspaceSwitcher(
       }
     };
     window.addEventListener("keydown", handleKeyDown, true);
-    return () => window.removeEventListener("keydown", handleKeyDown, true);
-  }, [activeWorkspaceId, isOpen, selectWorkspace, workspaces]);
+    window.addEventListener("keyup", updateModifier, true);
+    window.addEventListener("pointerdown", updateModifier, true);
+    window.addEventListener("blur", clearModifier);
+    document.addEventListener("visibilitychange", handleVisibilityChange);
+    return () => {
+      window.removeEventListener("keydown", handleKeyDown, true);
+      window.removeEventListener("keyup", updateModifier, true);
+      window.removeEventListener("pointerdown", updateModifier, true);
+      window.removeEventListener("blur", clearModifier);
+      document.removeEventListener("visibilitychange", handleVisibilityChange);
+    };
+  }, [activeWorkspaceId, isOpen, selectWorkspace, setPrimaryHeld, workspaces]);
 
-  return { isOpen, setOpen };
+  return { isOpen, setOpen, primaryHeld };
 }

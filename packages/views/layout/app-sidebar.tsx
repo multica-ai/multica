@@ -699,7 +699,7 @@ export function AppSidebar({ topSlot, searchSlot, headerClassName, headerStyle }
                         )}
                         {showWorkspaceShortcuts && (
                           <span className="ml-2 flex w-12 shrink-0 justify-end">
-                            {index < 9 && (
+                            {index < 9 && switcher.primaryHeld && (
                               <ShortcutKeycaps decorative shortcut={createShortcutChord(String(index + 1), { primary: true })} />
                             )}
                           </span>
