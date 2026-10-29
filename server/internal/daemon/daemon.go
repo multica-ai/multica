@@ -2411,7 +2411,7 @@ func demotableBuiltinProbeVerdict(verdict builtinProbeVerdict) bool {
 //
 // Only builtinProbeBelowMinimum does not: it is a pure function of a version
 // string this round already parsed, so a second look reaches the same
-// conclusion. The other two are deterministic about the state they describe but
+// conclusion. The other demotable verdicts describe deterministic states but
 // rest on an observation that is not — an installer overwriting the bin entry in
 // place (the very repair we tell users to run) or a DSH upgrade moving the
 // profile under a probe. Requiring a second sighting a window later makes those
@@ -2421,7 +2421,7 @@ func builtinProbeNeedsConfirmation(verdict builtinProbeVerdict) bool {
 	return verdict != builtinProbeBelowMinimum
 }
 
-const dshProfileMigrationReason = "the multica DSH profile must load the first-party runtime without the legacy bridge; back up the profile, install a compatible @multica-ai/dsh-runtime bundle from its directory or tarball with dsh plugin, and update dsh.profile.bundles to load @multica-ai/dsh-runtime instead of dsh-profile-multica; a dependencies entry alone does not load the runtime"
+const dshProfileMigrationReason = "the multica DSH profile needs manual migration; back up the profile, build a compatible " + dshMulticaRuntimePackage + " bundle from https://github.com/multica-ai/dsh-multica-runtime following its README, install the directory or tarball with dsh plugin, and update dsh.profile.bundles to load " + dshMulticaRuntimePackage + " instead of " + dshLegacyRuntimePackage + "; a dependencies entry alone does not load the runtime"
 
 // dshMissingProfileReason is the user-facing explanation for a
 // builtinProbeMissingProfile drop. It names the repair because nothing else in
@@ -2644,8 +2644,9 @@ probeLoop:
 		// above.
 		if name == "dsh" {
 			// What the probe said decides what may happen next. Only a
-			// confirmed-absent profile may install a bundle or condemn the
-			// runtime. An incompatible one is reported and neither installed
+			// confirmed-absent profile may install a bundle. A configuration
+			// needing migration may demote the runtime but is never overwritten.
+			// A protocol-incompatible profile is reported and neither installed
 			// over nor demoted — the profile is deliberately there, and this
 			// daemon may be the stale side of the skew. A probe that merely
 			// failed is transient, on the same rule every other provider's
@@ -2653,6 +2654,8 @@ probeLoop:
 			switch probeDshMulticaProfile(ctx, resolved.Path) {
 			case dshProbeOK:
 			case dshProbeNeedsMigration:
+				d.logger.Warn("skip registering runtime: DSH Multica runtime profile needs manual migration",
+					"name", name, "path", resolved.Path)
 				return "", dshProfileMigrationReason, builtinProbeProfileMigration
 			case dshProbeMissingProfile:
 				d.logger.Warn("skip registering runtime: DSH Multica runtime profile is not installed",

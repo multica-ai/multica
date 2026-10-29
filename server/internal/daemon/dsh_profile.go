@@ -61,6 +61,8 @@ const (
 	// records that name in dependencies and, when the package is a bundle, in
 	// dsh.profile.bundles — including installs from git, a directory, or a tarball.
 	dshMulticaRuntimePackage = "@multica-ai/dsh-runtime"
+	dshLegacyRuntimePackage  = "dsh-profile-multica"
+	dshBaseProfileBundle     = "@deepseek-ai/dsh-base"
 )
 
 // dshProfileManifest is the slice of a profile package.json this daemon reads.
@@ -132,7 +134,7 @@ func dshMulticaProfileManifestPath() string {
 // as a loaded profile bundle, without the legacy bridge.
 func dshProfileNamesRuntime(manifest dshProfileManifest) bool {
 	for _, bundle := range manifest.DSH.Profile.Bundles {
-		if bundle == "dsh-profile-multica" {
+		if bundle == dshLegacyRuntimePackage {
 			return false
 		}
 	}
@@ -160,7 +162,7 @@ func dshMulticaProfileNeedsMigration() bool {
 		return true
 	}
 	for _, bundle := range manifest.DSH.Profile.Bundles {
-		if bundle != "@deepseek-ai/dsh-base" {
+		if bundle != dshBaseProfileBundle {
 			return true
 		}
 	}

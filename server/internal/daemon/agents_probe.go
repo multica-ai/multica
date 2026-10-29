@@ -396,7 +396,7 @@ const (
 	dshProbeNeedsMigration
 	// dshProbeMissingProfile: the manifest does not name the Multica runtime.
 	// A file that merely exists is not enough — a refused install leaves one.
-	// This is the only verdict that may install a bundle or condemn the runtime.
+	// This is the only verdict that may install a bundle.
 	dshProbeMissingProfile
 	// dshProbeIncompatible: something answered, with a protocol this daemon does
 	// not drive. The profile is installed, so installing over it would replace a
