@@ -265,6 +265,10 @@
         "label": "Send",
         "description": "Also submits new issues."
       },
+      "toggleWorkspaceSwitcher": {
+        "label": "Toggle workspace switcher",
+        "description": ""
+      },
       "goBack": {
         "label": "Go back",
         "description": "Navigate back through history, like a browser."

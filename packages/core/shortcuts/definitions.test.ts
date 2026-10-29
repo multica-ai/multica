@@ -45,6 +45,15 @@ afterEach(() => {
 });
 
 describe("keyboard shortcut definitions", () => {
+  it("registers a configurable Navigation shortcut for the workspace switcher", () => {
+    const action = SHORTCUT_ACTIONS.find(({ id }) => id === "toggleWorkspaceSwitcher");
+    expect(action).toMatchObject({
+      category: "navigation",
+      defaultShortcut: createShortcutChord("O", { primary: true, shift: true }),
+      allowInEditable: true,
+    });
+  });
+
   it("keeps every shipped default inside the action safety policy", () => {
     for (const action of SHORTCUT_ACTIONS) {
       if (!action.defaultShortcut) continue;

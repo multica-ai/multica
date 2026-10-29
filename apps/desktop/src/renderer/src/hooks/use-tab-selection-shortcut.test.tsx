@@ -1,5 +1,7 @@
 // @vitest-environment jsdom
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { act } from "@testing-library/react";
+import { useWorkspaceSwitcherStore } from "@multica/core/workspace/switcher-store";
 import { render } from "@testing-library/react";
 import type { TabSelectionShortcutKey } from "../../../shared/main-renderer-messages";
 import { useTabStore, type TabSession } from "@/stores/tab-store";
@@ -74,9 +76,24 @@ function stubDesktopAPI(kind: "main" | "issue") {
 }
 
 describe("selectTabByShortcut", () => {
+  afterEach(() => useWorkspaceSwitcherStore.getState().setOpen(false));
   beforeEach(() => {
     seedTabs(10);
     useWindowOverlayStore.setState({ overlay: null });
+  });
+
+  it("routes desktop IPC to the workspace switcher while open, then restores tab shortcuts", () => {
+    const desktop = stubDesktopAPI("main");
+    const { unmount } = render(<Probe />);
+    const switcher = useWorkspaceSwitcherStore.getState();
+    act(() => switcher.setOpen(true));
+    act(() => desktop.deliver(9));
+    expect(activeTabId()).toBe("t1");
+    expect(useWorkspaceSwitcherStore.getState().requestedIndex).toBe(8);
+    act(() => switcher.setOpen(false));
+    act(() => desktop.deliver(9));
+    expect(activeTabId()).toBe("t10");
+    unmount();
   });
 
   it.each([1, 2, 3, 4, 5, 6, 7, 8] as const)(

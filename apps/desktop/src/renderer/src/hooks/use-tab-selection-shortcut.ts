@@ -1,10 +1,12 @@
 import { useEffect } from "react";
+import { useWorkspaceSwitcherStore } from "@multica/core/workspace/switcher-store";
 import type { TabSelectionShortcutKey } from "../../../shared/main-renderer-messages";
 import { useTabStore } from "@/stores/tab-store";
 import { useWindowOverlayStore } from "@/stores/window-overlay-store";
 
 /**
- * Select a product tab using browser numbering semantics:
+ * Route numbered shortcuts to the open workspace switcher, or otherwise
+ * select a product tab using browser numbering semantics:
  *
  * - 1..8 select that exact one-based position.
  * - 9 always selects the final tab, even when more than nine tabs exist.
@@ -15,6 +17,7 @@ import { useWindowOverlayStore } from "@/stores/window-overlay-store";
  */
 export function selectTabByShortcut(key: TabSelectionShortcutKey): void {
   if (useWindowOverlayStore.getState().overlay) return;
+  if (useWorkspaceSwitcherStore.getState().requestSelection(key - 1)) return;
 
   const store = useTabStore.getState();
   const slug = store.activeWorkspaceSlug;

@@ -42,6 +42,25 @@ After the issue prefix changes, every issue immediately switches to the new numb
 
 One account can join multiple workspaces. Switching only changes what you are currently viewing; it moves no data.
 
+### Keyboard workspace switching
+
+In the desktop app, **Settings → Keyboard shortcuts → Navigation → Toggle workspace switcher** opens or closes the sidebar menu that contains your profile, workspaces, and logout. Its default is **⌘⇧O** on macOS and **Ctrl+Shift+O** on Windows/Linux; you can change or clear it in settings.
+
+![Workspace switcher with right-aligned keyboard shortcuts](/images/docs/workspace-switcher-keyboard.webp)
+
+While the switcher is open:
+
+| Shortcut | Result |
+| --- | --- |
+| ⌘1–9 / Ctrl+1–9 | Select that workspace in menu order and close the menu. The first nine rows show right-aligned shortcut hints. Missing positions do nothing. |
+| ⌘↑ / Ctrl+↑ | Switch to the previous workspace and keep the menu open. The first wraps to the last. |
+| ⌘↓ / Ctrl+↓ | Switch to the next workspace and keep the menu open. The last wraps to the first. |
+| Esc | Close the menu. |
+
+Switching does not reorder the list. The arrows can reach workspaces beyond the first nine. Selecting the current workspace closes the menu without leaving its current page. Desktop switches through the existing workspace navigation flow, retaining each workspace's tabs and history. With the menu closed, ⌘1–9 / Ctrl+1–9 keep selecting product tabs; ⌘0 / Ctrl+0 continues to reset zoom.
+
+### Leave a workspace
+
 After leaving a workspace, you need a new invitation to return. Leaving also deactivates the runtimes you own, archives the agents bound to them, and cancels their unfinished runs.
 
 The last `owner` cannot leave; promote another member to `owner` first.

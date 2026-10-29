@@ -85,8 +85,12 @@ import { routeIconForPath } from "./route-icon-components";
 import { RouteDataPrefetch } from "./route-data-prefetch";
 import { useT } from "../i18n";
 import {
+  createShortcutChord,
+  getShortcutPlatform,
+  getShortcutRuntime,
   useShortcut,
 } from "@multica/core/shortcuts";
+import { useWorkspaceSwitcher } from "./use-workspace-switcher";
 import { ShortcutKeycaps } from "../common/shortcut-keycaps";
 import { useAppForeground } from "../common/use-app-foreground";
 
@@ -442,6 +446,8 @@ export function AppSidebar({ topSlot, searchSlot, headerClassName, headerStyle }
   const workspace = useCurrentWorkspace();
   const p = useWorkspacePaths();
   const { data: workspaces = EMPTY_WORKSPACES } = useQuery(workspaceListOptions());
+  const switcher = useWorkspaceSwitcher(workspaces, workspace?.id);
+  const showWorkspaceShortcuts = getShortcutRuntime() === "desktop";
   const { data: myInvitations = EMPTY_INVITATIONS } = useQuery(myInvitationListOptions());
   const workspaceCreationDisabled = useConfigStore((s) => s.workspaceCreationDisabled);
 
@@ -618,8 +624,9 @@ export function AppSidebar({ topSlot, searchSlot, headerClassName, headerStyle }
         <SidebarHeader className={cn("py-3", headerClassName)} style={headerStyle}>
           <SidebarMenu>
             <SidebarMenuItem>
-              <DropdownMenu>
+              <DropdownMenu open={switcher.isOpen} onOpenChange={switcher.setOpen}>
                 <DropdownMenuTrigger
+                  aria-label={t(($) => $.sidebar.workspaces_label)}
                   render={
                     <SidebarMenuButton>
                       <span className="relative">
@@ -666,9 +673,13 @@ export function AppSidebar({ topSlot, searchSlot, headerClassName, headerStyle }
                     <DropdownMenuLabel className="text-caption text-muted-foreground">
                       {t(($) => $.sidebar.workspaces_label)}
                     </DropdownMenuLabel>
-                    {workspaces.map((ws) => (
+                    {workspaces.map((ws, index) => (
                       <DropdownMenuItem
                         key={ws.id}
+                        aria-label={ws.name}
+                        aria-keyshortcuts={showWorkspaceShortcuts && index < 9
+                          ? `${getShortcutPlatform() === "macos" ? "Meta" : "Control"}+${index + 1}`
+                          : undefined}
                         render={
                           <AppLink href={paths.workspace(ws.slug).issues()} />
                         }
@@ -685,6 +696,13 @@ export function AppSidebar({ topSlot, searchSlot, headerClassName, headerStyle }
                         )}
                         {ws.id === workspace?.id && (
                           <Check className="h-3.5 w-3.5 text-primary" />
+                        )}
+                        {showWorkspaceShortcuts && (
+                          <span className="ml-2 flex w-12 shrink-0 justify-end">
+                            {index < 9 && (
+                              <ShortcutKeycaps decorative shortcut={createShortcutChord(String(index + 1), { primary: true })} />
+                            )}
+                          </span>
                         )}
                       </DropdownMenuItem>
                     ))}

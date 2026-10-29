@@ -1,17 +1,20 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { configureShortcutPlatform, configureShortcutRuntime } from "@multica/core/shortcuts";
+import { useWorkspaceSwitcherStore } from "@multica/core/workspace/switcher-store";
 import { buildIssueStatusCatalog } from "@multica/core/issue-statuses/queries";
 
 vi.mock("@multica/core/issue-statuses/hooks", () => ({
   useIssueStatuses: () => buildIssueStatusCatalog([]),
 }));
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ApiError } from "@multica/core/api";
 import { renderWithI18n } from "../test/i18n";
 import { AppSidebar } from "./app-sidebar";
+import { GlobalShortcuts } from "./global-shortcuts";
 
 const { appForeground, chatSessions, chatStore, detail, deletePin, invitationApi, navigation, pins, sidebarState, summary, workspaces } = vi.hoisted(() => ({
   appForeground: { current: true },
-  sidebarState: { setOpenMobile: vi.fn() },
+  sidebarState: { setOpenMobile: vi.fn(), setOpen: vi.fn(), toggleSidebar: vi.fn(), isCompact: false },
   chatSessions: { current: [] as { id?: string; unread_count?: number }[] },
   chatStore: { current: { activeSessionId: null as string | null, isOpen: false } },
   detail: { current: { isPending: false, isError: false, data: null as unknown, error: null as unknown } },
@@ -82,16 +85,7 @@ vi.mock("@multica/ui/components/ui/sidebar", () => ({
   ),
   SidebarMenuItem: ({ children }: { children: React.ReactNode }) => <>{children}</>,
   SidebarRail: () => null,
-  useSidebar: () => ({ setOpenMobile: sidebarState.setOpenMobile }),
-}));
-vi.mock("@multica/ui/components/ui/dropdown-menu", () => ({
-  DropdownMenu: ({ children }: { children: React.ReactNode }) => <>{children}</>,
-  DropdownMenuContent: ({ children }: { children: React.ReactNode }) => <>{children}</>,
-  DropdownMenuGroup: ({ children }: { children: React.ReactNode }) => <>{children}</>,
-  DropdownMenuItem: ({ children }: { children: React.ReactNode }) => <>{children}</>,
-  DropdownMenuLabel: ({ children }: { children: React.ReactNode }) => <>{children}</>,
-  DropdownMenuSeparator: () => null,
-  DropdownMenuTrigger: ({ render }: { render: React.ReactNode }) => <>{render}</>,
+  useSidebar: () => sidebarState,
 }));
 vi.mock("@multica/ui/components/ui/collapsible", () => ({
   Collapsible: ({ children }: { children: React.ReactNode }) => <>{children}</>,
@@ -110,11 +104,10 @@ vi.mock("./help-launcher", () => ({ HelpLauncher: () => null }));
 vi.mock("../auth", () => ({ useLogout: () => vi.fn() }));
 vi.mock("../issues/components/status-icon", () => ({ StatusIcon: () => <span /> }));
 vi.mock("../navigation", () => ({
-  AppLink: ({ children, href }: { children: React.ReactNode; href: string }) => <a href={href}>{children}</a>,
+  AppLink: ({ children, href, ...props }: React.ComponentProps<"a">) => <a href={href} {...props}>{children}</a>,
   useNavigation: () => ({ pathname: navigation.current.pathname, push: vi.fn() }),
 }));
 vi.mock("../projects/components/project-icon", () => ({ ProjectIcon: () => <span /> }));
-vi.mock("../workspace/workspace-avatar", () => ({ WorkspaceAvatar: () => <span /> }));
 vi.mock("@multica/ui/components/common/actor-avatar", () => ({ ActorAvatar: () => <span /> }));
 
 vi.mock("@multica/core/auth", () => ({
@@ -213,6 +206,41 @@ vi.mock("@tanstack/react-query", async (importOriginal) => ({
     invalidateQueries: invitationApi.invalidateQueries,
   }),
 }));
+
+afterEach(() => {
+  cleanup();
+  useWorkspaceSwitcherStore.getState().setOpen(false);
+  configureShortcutPlatform(null);
+  configureShortcutRuntime(null);
+});
+
+describe("workspace switcher keyboard presentation", () => {
+  it("opens the real menu from shared shortcut state and right-aligns the first nine workspace hints", async () => {
+    configureShortcutPlatform("macos");
+    configureShortcutRuntime("desktop");
+    workspaces.current = Array.from({ length: 10 }, (_, index) => ({
+      id: `ws-${index + 1}`, name: `Workspace ${index + 1}`, slug: `workspace-${index + 1}`, avatar_url: null,
+    }));
+    renderWithI18n(<><GlobalShortcuts /><AppSidebar /></>);
+    fireEvent.keyDown(document, { key: "O", metaKey: true, shiftKey: true });
+    const menu = await screen.findByRole("menu");
+    for (let index = 1; index <= 9; index++) {
+      const row = within(menu).getByRole("menuitem", { name: `Workspace ${index}` });
+      expect(row.getAttribute("aria-keyshortcuts")).toBe(`Meta+${index}`);
+      const hint = row.querySelector('[data-slot="shortcut-keycaps"]');
+      expect(hint).not.toBeNull();
+      expect(hint?.parentElement?.className).toContain("justify-end");
+    }
+    const tenth = within(menu).getByRole("menuitem", { name: "Workspace 10" });
+    expect(tenth.querySelector('[data-slot="shortcut-keycaps"]')).toBeNull();
+    expect(tenth.hasAttribute("aria-keyshortcuts")).toBe(false);
+    fireEvent.keyDown(menu, { key: "O", metaKey: true, shiftKey: true });
+    await waitFor(() => expect(useWorkspaceSwitcherStore.getState().isOpen).toBe(false));
+    fireEvent.keyDown(document, { key: "O", metaKey: true, shiftKey: true });
+    fireEvent.keyDown(await screen.findByRole("menu"), { key: "Escape" });
+    await waitFor(() => expect(useWorkspaceSwitcherStore.getState().isOpen).toBe(false));
+  });
+});
 
 describe("PinRow", () => {
   beforeEach(() => {
@@ -359,6 +387,7 @@ describe("workspace-switcher unread dot", () => {
 
 describe("workspace-switcher dropdown per-workspace dot", () => {
   beforeEach(() => {
+    useWorkspaceSwitcherStore.getState().setOpen(true);
     summary.current = [];
     // Active workspace is ws-1 (see useCurrentWorkspace mock); "Other" is ws-2.
     workspaces.current = [
@@ -368,8 +397,8 @@ describe("workspace-switcher dropdown per-workspace dot", () => {
   });
 
   // Row dots are brand dots WITHOUT the aggregate avatar dot's `ring-sidebar`.
-  const rowDots = (container: HTMLElement) =>
-    container.querySelectorAll("span.bg-brand:not(.ring-sidebar)");
+  const rowDots = (_container: HTMLElement) =>
+    screen.getByRole("menu").querySelectorAll("span.bg-brand:not(.ring-sidebar)");
 
   it("dots the specific other workspace that has unread", () => {
     summary.current = [{ workspace_id: "ws-2", count: 3 }];

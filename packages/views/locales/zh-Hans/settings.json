@@ -263,6 +263,10 @@
         "label": "发送",
         "description": "也用于提交新任务。"
       },
+      "toggleWorkspaceSwitcher": {
+        "label": "显示/隐藏工作区切换器",
+        "description": ""
+      },
       "goBack": {
         "label": "后退",
         "description": "像浏览器一样在历史记录中后退。"

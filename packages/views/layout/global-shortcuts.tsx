@@ -11,6 +11,7 @@ import {
   type ShortcutActionId,
 } from "@multica/core/shortcuts";
 import { useChatStore } from "@multica/core/chat";
+import { useWorkspaceSwitcherStore } from "@multica/core/workspace/switcher-store";
 import { openCreateIssueWithPreference } from "@multica/core/issues/stores";
 import { useModalStore } from "@multica/core/modals";
 import { useWorkspacePaths } from "@multica/core/paths";
@@ -23,6 +24,7 @@ const GLOBAL_ACTIONS: readonly ShortcutActionId[] = [
   "openSearch",
   "createIssue",
   "toggleSidebar",
+  "toggleWorkspaceSwitcher",
   "toggleChat",
   "goBack",
   "goForward",
@@ -46,7 +48,7 @@ export function shouldIgnoreGlobalShortcutEvent(event: KeyboardEvent): boolean {
 
 /** Executes configurable product-level shortcuts inside the dashboard shell. */
 export function GlobalShortcuts() {
-  const { toggleSidebar } = useSidebar();
+  const { toggleSidebar, setOpen, setOpenMobile, isCompact } = useSidebar();
   const navigation = useNavigation();
   const workspacePaths = useWorkspacePaths();
 
@@ -109,6 +111,15 @@ export function GlobalShortcuts() {
         toggleSidebar();
         return;
       }
+      if (actionId === "toggleWorkspaceSwitcher") {
+        const switcher = useWorkspaceSwitcherStore.getState();
+        if (!switcher.isOpen) {
+          if (isCompact) setOpenMobile(true);
+          else setOpen(true);
+        }
+        switcher.toggle();
+        return;
+      }
       if (actionId === "goBack") {
         navigation.back();
         return;
@@ -139,7 +150,7 @@ export function GlobalShortcuts() {
 
     document.addEventListener("keydown", handleKeyDown);
     return () => document.removeEventListener("keydown", handleKeyDown);
-  }, [navigation, overrides, toggleSidebar, workspacePaths]);
+  }, [isCompact, navigation, overrides, setOpen, setOpenMobile, toggleSidebar, workspacePaths]);
 
   return null;
 }

@@ -263,6 +263,10 @@
         "label": "보내기",
         "description": "새 태스크 생성에도 사용됩니다."
       },
+      "toggleWorkspaceSwitcher": {
+        "label": "워크스페이스 전환 메뉴 열기/닫기",
+        "description": ""
+      },
       "goBack": {
         "label": "뒤로 가기",
         "description": "브라우저처럼 기록을 따라 뒤로 이동합니다."
