@@ -18,8 +18,8 @@ test("admins can reach property actions in narrow settings and save edits", asyn
     admin.setWorkspaceId(workspace.id);
     admin.setWorkspaceSlug(workspace.slug);
     await admin.markUserOnboarded();
-    const name = `Customer segment ${suffix}`;
-    await admin.createProperty(name);
+    const name = `Segment ${suffix}`;
+    const property = await admin.createProperty(name);
     const token = admin.getToken();
     if (!token) throw new Error("Admin login did not return a token");
     await page.addInitScript((value) => {
@@ -50,7 +50,13 @@ test("admins can reach property actions in narrow settings and save edits", asyn
     await expect(dialog).toBeVisible();
     const renamed = `${name} updated`;
     await dialog.getByLabel("Name", { exact: true }).fill(renamed);
+    await expect(dialog.getByLabel("Name", { exact: true })).toHaveValue(renamed);
+    const saved = page.waitForResponse((response) =>
+      response.url().endsWith(`/api/properties/${property.id}`)
+      && response.request().method() === "PATCH",
+    );
     await dialog.getByRole("button", { name: "Save property" }).click();
+    expect((await saved).ok()).toBe(true);
     await expect(dialog).not.toBeVisible();
     await page.reload();
     await expect(page.getByRole("button", { name: `Actions for ${renamed}`, exact: true })).toBeVisible();
