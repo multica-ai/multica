@@ -985,8 +985,9 @@ type writeGuardKey struct{}
 // ctx that carries none behaves exactly as before.
 //
 // It covers what goes through request — the upload steps and aibot_send_msg,
-// text or media. Stream frames take their own path (writeStreamFrame) and do
-// not consult it; nothing puts a guard on those today.
+// text or media — and stream frames (writeStreamFrame), which is how the
+// closing frame of a bubble is held to the same check as the message it would
+// otherwise fall back to.
 //
 // The guard runs while the writer is held, so it must be quick: whatever it
 // waits for, the ping loop and every other send on this socket wait for too.
@@ -1018,6 +1019,13 @@ func (s *wsSender) writeStreamFrame(ctx context.Context, reqID, streamID string,
 		return err
 	}
 	defer s.unlockWriter()
+	// Ahead of beginStreamFrameLocked: a frame the guard refuses never takes
+	// the turn's place, so there is nothing to give back.
+	if guard := writeGuardFrom(ctx); guard != nil {
+		if err := guard(ctx); err != nil {
+			return fmt.Errorf("%w: %w", errNotAttempted, err)
+		}
+	}
 	if !s.beginStreamFrameLocked(reqID, streamID, w, finish) {
 		return errStreamSuperseded
 	}
