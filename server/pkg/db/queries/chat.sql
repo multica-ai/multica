@@ -34,6 +34,9 @@ WHERE id = ANY(@ids::uuid[]);
 SELECT cs.* FROM chat_session AS cs
 WHERE cs.id = $1
   AND cs.workspace_id = $2
+  -- A Team conversation's hidden agent context is read through the
+  -- conversation, which owns its access rules.
+  AND cs.conversation_id IS NULL
   AND (
     cs.explicitly_created_at IS NOT NULL
     OR
@@ -76,6 +79,8 @@ WHERE cs.workspace_id = $1 AND cs.creator_id = $2 AND cs.status = 'active'
   -- Threads (MUL-8357) are listed only for clients that render them, so an
   -- older client never shows a thread as a separate conversation.
   AND (sqlc.arg('include_threads')::bool OR cs.parent_chat_session_id IS NULL)
+  -- A Team conversation's hidden agent context is never a chat of its own.
+  AND cs.conversation_id IS NULL
   AND (
     cs.explicitly_created_at IS NOT NULL
     OR
@@ -119,6 +124,8 @@ LEFT JOIN LATERAL (
 ) lm ON true
 WHERE cs.workspace_id = $1 AND cs.creator_id = $2
   AND (sqlc.arg('include_threads')::bool OR cs.parent_chat_session_id IS NULL)
+  -- A Team conversation's hidden agent context is never a chat of its own.
+  AND cs.conversation_id IS NULL
   AND (
     cs.explicitly_created_at IS NOT NULL
     OR
@@ -1491,6 +1498,7 @@ WHERE atq.chat_session_id IS NOT NULL
   AND atq.regenerate_quick_actions_for IS NULL
   AND cs.workspace_id = $1
   AND cs.creator_id = $2
+  AND cs.conversation_id IS NULL
 ORDER BY atq.created_at DESC;
 
 -- name: HasPendingChatTasksByCreator :one
@@ -1515,6 +1523,7 @@ SELECT EXISTS (
     AND cs.workspace_id = sqlc.arg(workspace_id)
     AND cs.creator_id = sqlc.arg(creator_id)
     AND cs.agent_id = ANY(sqlc.arg(agent_ids)::uuid[])
+    AND cs.conversation_id IS NULL
 ) AS has_pending;
 
 -- name: MarkChatSessionRead :exec
@@ -1748,6 +1757,7 @@ WHERE workspace_id = $1
   AND agent_id = $3
   AND status = 'active'
   AND parent_chat_session_id IS NULL
+  AND conversation_id IS NULL
 ORDER BY created_at ASC
 LIMIT 1;
 

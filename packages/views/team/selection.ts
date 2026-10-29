@@ -1,8 +1,9 @@
 /**
  * Team page selection lives in the URL so every object is deep-linkable and a
- * desktop tab knows what it shows: `?agent=` | `?squad=` | `?member=`, plus
- * `tab=` and, for an agent, `session=` (an earlier conversation) or `thread=`
- * (the thread under one of its messages).
+ * desktop tab knows what it shows: `?agent=` | `?squad=` | `?member=` |
+ * `?channel=`, plus `tab=` and `thread=` (the thread under one message of the
+ * conversation shown). An agent also takes `session=`, an earlier
+ * conversation with it.
  */
 
 export type TeamTab = "chat" | "work" | "setup";
@@ -11,7 +12,8 @@ export type TeamSelection =
   | { kind: "none" }
   | { kind: "agent"; id: string; tab: TeamTab; sessionId: string | null; threadId: string | null }
   | { kind: "squad"; id: string; tab: TeamTab }
-  | { kind: "member"; id: string; tab: TeamTab };
+  | { kind: "member"; id: string; tab: TeamTab; threadId: string | null }
+  | { kind: "channel"; id: string; tab: TeamTab; threadId: string | null };
 
 export type TeamSelectionKind = Exclude<TeamSelection["kind"], "none">;
 
@@ -19,7 +21,8 @@ export type TeamSelectionKind = Exclude<TeamSelection["kind"], "none">;
 export const TEAM_TABS: Record<TeamSelectionKind, TeamTab[]> = {
   agent: ["chat", "work", "setup"],
   squad: ["work", "setup"],
-  member: ["work"],
+  member: ["chat", "work"],
+  channel: ["chat"],
 };
 
 function tabFor(kind: TeamSelectionKind, raw: string | null): TeamTab {
@@ -29,6 +32,7 @@ function tabFor(kind: TeamSelectionKind, raw: string | null): TeamTab {
 
 export function parseTeamSelection(params: URLSearchParams): TeamSelection {
   const tab = params.get("tab");
+  const threadId = params.get("thread") || null;
   const agent = params.get("agent");
   if (agent) {
     return {
@@ -36,13 +40,15 @@ export function parseTeamSelection(params: URLSearchParams): TeamSelection {
       id: agent,
       tab: tabFor("agent", tab),
       sessionId: params.get("session") || null,
-      threadId: params.get("thread") || null,
+      threadId,
     };
   }
   const squad = params.get("squad");
   if (squad) return { kind: "squad", id: squad, tab: tabFor("squad", tab) };
   const member = params.get("member");
-  if (member) return { kind: "member", id: member, tab: tabFor("member", tab) };
+  if (member) return { kind: "member", id: member, tab: tabFor("member", tab), threadId };
+  const channel = params.get("channel");
+  if (channel) return { kind: "channel", id: channel, tab: "chat", threadId };
   return { kind: "none" };
 }
 
@@ -64,6 +70,6 @@ export function teamHref(
   params.set(target.kind, target.id);
   if (target.tab && target.tab !== TEAM_TABS[target.kind][0]) params.set("tab", target.tab);
   if (target.kind === "agent" && target.sessionId) params.set("session", target.sessionId);
-  if (target.kind === "agent" && target.threadId) params.set("thread", target.threadId);
+  if (target.kind !== "squad" && target.threadId) params.set("thread", target.threadId);
   return `${base}?${params.toString()}`;
 }

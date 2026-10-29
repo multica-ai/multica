@@ -14,7 +14,8 @@ describe("parseTeamSelection", () => {
       threadId: null,
     });
     expect(parse("squad=s1&tab=chat")).toEqual({ kind: "squad", id: "s1", tab: "work" });
-    expect(parse("member=u1&tab=setup")).toEqual({ kind: "member", id: "u1", tab: "work" });
+    expect(parse("member=u1&tab=setup")).toEqual({ kind: "member", id: "u1", tab: "chat", threadId: null });
+    expect(parse("member=u1&tab=work")).toMatchObject({ tab: "work" });
   });
 
   it("keeps an agent's earlier conversation", () => {
@@ -26,6 +27,14 @@ describe("parseTeamSelection", () => {
     expect(teamHref("/ws/team", { kind: "agent", id: "a1", threadId: "t1" })).toBe(
       "/ws/team?agent=a1&thread=t1",
     );
+  });
+
+  it("opens a channel and the thread under one of its messages", () => {
+    expect(parse("channel=c1&thread=t1")).toEqual({ kind: "channel", id: "c1", tab: "chat", threadId: "t1" });
+    expect(teamHref("/ws/team", { kind: "channel", id: "c1", threadId: "t1" })).toBe(
+      "/ws/team?channel=c1&thread=t1",
+    );
+    expect(teamHref("/ws/team", { kind: "member", id: "u1", tab: "work" })).toBe("/ws/team?member=u1&tab=work");
   });
 
   it("is none without a target", () => {

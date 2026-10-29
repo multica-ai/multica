@@ -2,7 +2,7 @@
 
 import { useMemo, useState, type ReactNode } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { ChevronRight, Plus, Search } from "@multica/ui/icons";
+import { ChevronRight, Hash, Lock, Plus, Search } from "@multica/ui/icons";
 import { cn } from "@multica/ui/lib/utils";
 import { Input } from "@multica/ui/components/ui/input";
 import {
@@ -18,17 +18,23 @@ import { useWorkspacePaths } from "@multica/core/paths";
 import { useChatStore } from "@multica/core/chat";
 import { chatSessionsWithThreadsOptions } from "@multica/core/chat/queries";
 import { unreadChatMessagesByAgent } from "@multica/core/chat/primary-session";
+import { useFeatureEnabled } from "@multica/core/config";
+import { TEAM_PAGE_FLAG } from "@multica/core/feature-flags";
+import { conversationListOptions, directCounterpart } from "@multica/core/conversations";
 import {
   agentListOptions,
   memberListOptions,
   squadListOptions,
 } from "@multica/core/workspace/queries";
-import type { Agent, ChatSession } from "@multica/core/types";
+import type { Agent, ChatSession, Conversation } from "@multica/core/types";
 import { AppLink } from "../../navigation";
 import { ActorAvatar } from "../../common/actor-avatar";
 import { PageHeader } from "../../layout/page-header";
 import { useT } from "../../i18n";
 import { teamHref, type TeamSelection } from "../selection";
+import { TeamCreateChannelDialog } from "./team-create-channel-dialog";
+
+const EMPTY_CONVERSATIONS: Conversation[] = [];
 
 function lastActivity(sessions: ChatSession[], agentId: string): number {
   let latest = 0;
@@ -60,6 +66,26 @@ export function TeamSidebar({ selection }: { selection: TeamSelection }) {
   const { data: members = [] } = useQuery(memberListOptions(wsId));
   const { data: sessions = [] } = useQuery(chatSessionsWithThreadsOptions(wsId));
   const activeSessionId = useChatStore((s) => s.activeSessionId);
+  const teamPageEnabled = useFeatureEnabled(TEAM_PAGE_FLAG, false);
+  const { data: conversations = EMPTY_CONVERSATIONS } = useQuery({
+    ...conversationListOptions(wsId),
+    enabled: teamPageEnabled,
+  });
+  const [creatingChannel, setCreatingChannel] = useState(false);
+  const channels = useMemo(
+    () => conversations.filter((c) => c.kind === "channel" && !c.archived_at && (c.is_member || c.visibility === "public")),
+    [conversations],
+  );
+  // Unread in the viewer's direct conversation with each member.
+  const unreadByMember = useMemo(() => {
+    const out = new Map<string, number>();
+    for (const c of conversations) {
+      if (c.kind !== "direct" || c.unread_count === 0 || !user) continue;
+      const other = directCounterpart(c, user.id);
+      if (other) out.set(other, c.unread_count);
+    }
+    return out;
+  }, [conversations, user]);
 
   // The open agent chat is being read; its unread is about to clear.
   const viewedSessionId = selection.kind === "agent" ? activeSessionId : null;
@@ -145,6 +171,31 @@ export function TeamSidebar({ selection }: { selection: TeamSelection }) {
           )}
         </TeamSection>
 
+        {teamPageEnabled && (
+          <TeamSection
+            label={t(($) => $.sidebar.channels)}
+            count={channels.length}
+            addLabel={t(($) => $.sidebar.add_channel)}
+            onAdd={() => setCreatingChannel(true)}
+          >
+            {channels.filter((c) => matches(c.name)).map((channel) => (
+              <TeamRow
+                key={channel.id}
+                href={teamHref(base, { kind: "channel", id: channel.id })}
+                selected={selectedKey === `channel:${channel.id}`}
+                avatar={
+                  <span className="flex size-5 shrink-0 items-center justify-center text-muted-foreground">
+                    {channel.visibility === "private" ? <Lock className="size-3.5" /> : <Hash className="size-3.5" />}
+                  </span>
+                }
+                label={channel.name}
+                unread={selectedKey === `channel:${channel.id}` ? 0 : channel.unread_count}
+                muted={!channel.is_member}
+              />
+            ))}
+          </TeamSection>
+        )}
+
         <TeamSection
           label={t(($) => $.sidebar.squads)}
           count={liveSquads.length}
@@ -175,6 +226,7 @@ export function TeamSidebar({ selection }: { selection: TeamSelection }) {
               selected={selectedKey === `member:${member.user_id}`}
               avatar={<ActorAvatar actorType="member" actorId={member.user_id} size="sm" />}
               label={member.name}
+              unread={selectedKey === `member:${member.user_id}` ? 0 : (unreadByMember.get(member.user_id) ?? 0)}
               trailing={
                 member.user_id === user?.id ? (
                   <span className="text-micro text-muted-foreground">{t(($) => $.sidebar.you)}</span>
@@ -184,6 +236,7 @@ export function TeamSidebar({ selection }: { selection: TeamSelection }) {
           ))}
         </TeamSection>
       </div>
+      {creatingChannel && <TeamCreateChannelDialog onClose={() => setCreatingChannel(false)} />}
     </div>
   );
 }

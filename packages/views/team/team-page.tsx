@@ -17,6 +17,7 @@ import { TeamSidebar } from "./components/team-sidebar";
 import { TeamAgentView } from "./components/team-agent-view";
 import { TeamSquadView } from "./components/team-squad-view";
 import { TeamMemberView } from "./components/team-member-view";
+import { TeamChannelView } from "./components/team-channel-view";
 
 /**
  * Team: one place for everyone who works in the workspace — agents, squads
@@ -43,7 +44,14 @@ export function TeamPage() {
     ) : selection.kind === "squad" ? (
       <TeamSquadView key={`squad:${selection.id}`} squadId={selection.id} tab={selection.tab} />
     ) : selection.kind === "member" ? (
-      <TeamMemberView key={`member:${selection.id}`} userId={selection.id} tab={selection.tab} />
+      <TeamMemberView
+        key={`member:${selection.id}`}
+        userId={selection.id}
+        tab={selection.tab}
+        threadId={selection.threadId}
+      />
+    ) : selection.kind === "channel" ? (
+      <TeamChannelView key={`channel:${selection.id}`} channelId={selection.id} threadId={selection.threadId} />
     ) : (
       <div className="flex h-full flex-col items-center justify-center gap-3 text-muted-foreground">
         <MessagesSquare className="h-10 w-10 text-faint-foreground" />

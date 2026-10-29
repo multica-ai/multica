@@ -12,6 +12,8 @@
     "add_squad": "新しいスクワッド",
     "invite_member": "メンバーを招待",
     "you": "あなた",
+    "channels": "チャンネル",
+    "add_channel": "新しいチャンネル",
     "archived_agents": "アーカイブ済み（{{count}}）"
   },
   "tabs": {
@@ -31,6 +33,10 @@
     "assign_issue": "タスクを割り当て"
   },
   "member": {
+    "dm_placeholder": "{{name}} にメッセージ",
+    "dm_empty": "{{name}} との会話の始まりです。見られるのはお二人だけです。",
+    "notes_placeholder": "メモを書く",
+    "notes_empty": "自分用のメモです。他の人には見えません。",
     "role": {
       "owner": "オーナー",
       "admin": "管理者",
@@ -49,6 +55,46 @@
     "leader": "リーダー",
     "earlier": "以前の会話",
     "unread": "未読"
+  },
+  "channel": {
+    "private": "非公開",
+    "members_count_other": "メンバー {{count}} 人",
+    "members_title": "#{{name}} のメンバー",
+    "add_members": "メンバーやエージェントを追加",
+    "remove": "削除",
+    "join": "チャンネルに参加",
+    "leave": "チャンネルから退出",
+    "archive": "チャンネルをアーカイブ",
+    "unarchive": "アーカイブを解除",
+    "archived_hint": "このチャンネルはアーカイブ済みです。閲覧はできますが投稿はできません。",
+    "empty": "#{{name}} の始まりです。チャンネル内のエージェントを @メンションして質問できます。",
+    "placeholder": "#{{name}} にメッセージ",
+    "agents_hint": "チャンネル内のエージェントは @メンションされると返信し、返信したスレッドでは続けて返信します。",
+    "not_found": "このチャンネルは存在しないか、アクセス権がありません。",
+    "create": {
+      "title": "新しいチャンネル",
+      "name": "名前",
+      "name_placeholder": "例: launch",
+      "about": "トピック",
+      "about_placeholder": "このチャンネルの目的（任意）",
+      "private": "非公開にする",
+      "private_hint": "追加された人だけが見つけて読めます。公開チャンネルはワークスペースの全員に開かれています。",
+      "agents": "エージェント",
+      "people": "メンバー",
+      "submit": "チャンネルを作成",
+      "failed": "チャンネルを作成できませんでした",
+      "name_taken": "同じ名前のチャンネルがあります"
+    }
+  },
+  "conversation": {
+    "replying": "{{name}} が返信中…",
+    "load_older": "以前のメッセージを読み込む",
+    "send_failed": "メッセージを送信できませんでした",
+    "system": "Multica",
+    "agent_badge": "エージェント",
+    "thread_placeholder": "返信…",
+    "thread_empty": "返信はこのメッセージの下にまとまります。",
+    "back": "戻る"
   },
   "chat": {
     "untitled": "無題",

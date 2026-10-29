@@ -12,6 +12,8 @@
     "add_squad": "新建小队",
     "invite_member": "邀请成员",
     "you": "你",
+    "channels": "频道",
+    "add_channel": "新建频道",
     "archived_agents": "已归档（{{count}}）"
   },
   "tabs": {
@@ -31,6 +33,10 @@
     "assign_issue": "指派任务"
   },
   "member": {
+    "dm_placeholder": "发消息给 {{name}}",
+    "dm_empty": "这是你和 {{name}} 对话的开始，只有你们两人能看到。",
+    "notes_placeholder": "记点什么",
+    "notes_empty": "写给自己的笔记，其他人看不到。",
     "role": {
       "owner": "所有者",
       "admin": "管理员",
@@ -49,6 +55,46 @@
     "leader": "队长",
     "earlier": "以前的对话",
     "unread": "未读"
+  },
+  "channel": {
+    "private": "私有",
+    "members_count_other": "{{count}} 位成员",
+    "members_title": "#{{name}} 的成员",
+    "add_members": "添加成员或智能体",
+    "remove": "移除",
+    "join": "加入频道",
+    "leave": "退出频道",
+    "archive": "归档频道",
+    "unarchive": "取消归档",
+    "archived_hint": "该频道已归档，可以阅读但无法发言。",
+    "empty": "这是 #{{name}} 的开始。@ 频道里的智能体向它提问。",
+    "placeholder": "发消息到 #{{name}}",
+    "agents_hint": "频道里的智能体在被 @ 时回复，并在它回答过的话题里继续回复。",
+    "not_found": "该频道不存在，或你没有访问权限。",
+    "create": {
+      "title": "新建频道",
+      "name": "名称",
+      "name_placeholder": "例如 launch",
+      "about": "主题",
+      "about_placeholder": "这个频道用来做什么？（可选）",
+      "private": "设为私有",
+      "private_hint": "只有被添加的人能找到和阅读。公开频道对工作区所有人开放。",
+      "agents": "智能体",
+      "people": "成员",
+      "submit": "创建频道",
+      "failed": "无法创建频道",
+      "name_taken": "已有同名频道"
+    }
+  },
+  "conversation": {
+    "replying": "{{name}} 正在回复…",
+    "load_older": "加载更早的消息",
+    "send_failed": "消息未发送",
+    "system": "Multica",
+    "agent_badge": "智能体",
+    "thread_placeholder": "回复…",
+    "thread_empty": "回复会留在这条消息下。",
+    "back": "返回"
   },
   "chat": {
     "untitled": "未命名",

@@ -12,6 +12,8 @@
     "add_squad": "新建小隊",
     "invite_member": "邀請成員",
     "you": "你",
+    "channels": "頻道",
+    "add_channel": "新建頻道",
     "archived_agents": "已歸檔（{{count}}）"
   },
   "tabs": {
@@ -31,6 +33,10 @@
     "assign_issue": "指派任務"
   },
   "member": {
+    "dm_placeholder": "傳訊息給 {{name}}",
+    "dm_empty": "這是你和 {{name}} 對話的開始，只有你們兩人看得到。",
+    "notes_placeholder": "記點什麼",
+    "notes_empty": "寫給自己的筆記，其他人看不到。",
     "role": {
       "owner": "擁有者",
       "admin": "管理員",
@@ -49,6 +55,46 @@
     "leader": "隊長",
     "earlier": "以前的對話",
     "unread": "未讀"
+  },
+  "channel": {
+    "private": "私人",
+    "members_count_other": "{{count}} 位成員",
+    "members_title": "#{{name}} 的成員",
+    "add_members": "新增成員或智慧體",
+    "remove": "移除",
+    "join": "加入頻道",
+    "leave": "退出頻道",
+    "archive": "封存頻道",
+    "unarchive": "取消封存",
+    "archived_hint": "該頻道已封存，可以閱讀但無法發言。",
+    "empty": "這是 #{{name}} 的開始。@ 頻道裡的智慧體向它提問。",
+    "placeholder": "傳訊息到 #{{name}}",
+    "agents_hint": "頻道裡的智慧體在被 @ 時回覆，並在它回答過的話題裡繼續回覆。",
+    "not_found": "該頻道不存在，或你沒有存取權限。",
+    "create": {
+      "title": "新建頻道",
+      "name": "名稱",
+      "name_placeholder": "例如 launch",
+      "about": "主題",
+      "about_placeholder": "這個頻道用來做什麼？（選填）",
+      "private": "設為私人",
+      "private_hint": "只有被新增的人能找到和閱讀。公開頻道對工作區所有人開放。",
+      "agents": "智慧體",
+      "people": "成員",
+      "submit": "建立頻道",
+      "failed": "無法建立頻道",
+      "name_taken": "已有同名頻道"
+    }
+  },
+  "conversation": {
+    "replying": "{{name}} 正在回覆…",
+    "load_older": "載入更早的訊息",
+    "send_failed": "訊息未傳送",
+    "system": "Multica",
+    "agent_badge": "智慧體",
+    "thread_placeholder": "回覆…",
+    "thread_empty": "回覆會留在這則訊息下。",
+    "back": "返回"
   },
   "chat": {
     "untitled": "未命名",

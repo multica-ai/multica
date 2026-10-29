@@ -94,14 +94,16 @@ func isChatPrivateEvent(e events.Event) bool {
 func registerListeners(bus *events.Bus, b realtime.Broadcaster) {
 	// Personal events should NOT be broadcast to the whole workspace.
 	personalEvents := map[string]bool{
-		protocol.EventInboxNew:           true,
-		protocol.EventInboxRead:          true,
-		protocol.EventInboxArchived:      true,
-		protocol.EventInboxUnarchived:    true,
-		protocol.EventInboxBatchRead:     true,
-		protocol.EventInboxBatchArchived: true,
-		protocol.EventInvitationCreated:  true,
-		protocol.EventInvitationRevoked:  true,
+		protocol.EventInboxNew:            true,
+		protocol.EventInboxRead:           true,
+		protocol.EventInboxArchived:       true,
+		protocol.EventInboxUnarchived:     true,
+		protocol.EventInboxBatchRead:      true,
+		protocol.EventInboxBatchArchived:  true,
+		protocol.EventInvitationCreated:   true,
+		protocol.EventInvitationRevoked:   true,
+		protocol.EventConversationMessage: true,
+		protocol.EventConversationUpdated: true,
 	}
 
 	// Helper: marshal event and send to a specific user.
@@ -211,6 +213,30 @@ func registerListeners(bus *events.Bus, b realtime.Broadcaster) {
 			}
 			realtime.M.RecordEvent(e.Type)
 			b.SendToUser(e.ActorID, data, e.WorkspaceID)
+		})
+	}
+
+	// A Team conversation's events go only to the people who can read it: its
+	// members' connections bound to this workspace, or the whole workspace for
+	// a public channel. An event naming neither is dropped, never widened.
+	for _, eventType := range []string{protocol.EventConversationMessage, protocol.EventConversationUpdated} {
+		bus.Subscribe(eventType, func(e events.Event) {
+			payload, ok := e.Payload.(protocol.ConversationEventPayload)
+			if !ok || e.WorkspaceID == "" {
+				return
+			}
+			data, err := json.Marshal(map[string]any{"type": e.Type, "payload": payload, "actor_id": e.ActorID, "actor_type": e.ActorType})
+			if err != nil {
+				return
+			}
+			realtime.M.RecordEvent(e.Type)
+			if payload.Public {
+				b.BroadcastToWorkspace(e.WorkspaceID, data)
+				return
+			}
+			for _, userID := range payload.RecipientIDs {
+				b.BroadcastToScope(realtime.ScopeWorkspaceMember, realtime.WorkspaceMemberScopeID(e.WorkspaceID, userID), data)
+			}
 		})
 	}
 

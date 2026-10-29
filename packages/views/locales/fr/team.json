@@ -12,6 +12,8 @@
     "add_squad": "Nouvelle squad",
     "invite_member": "Inviter un membre",
     "you": "Vous",
+    "channels": "Canaux",
+    "add_channel": "Nouveau canal",
     "archived_agents": "Archivés ({{count}})"
   },
   "tabs": {
@@ -31,6 +33,10 @@
     "assign_issue": "Assigner une tâche"
   },
   "member": {
+    "dm_placeholder": "Écrire à {{name}}",
+    "dm_empty": "Début de votre conversation avec {{name}}. Vous seuls la voyez.",
+    "notes_placeholder": "Notez quelque chose",
+    "notes_empty": "Notes pour vous seul. Personne d'autre ne les voit.",
     "role": {
       "owner": "Propriétaire",
       "admin": "Administrateur",
@@ -49,6 +55,47 @@
     "leader": "Responsable",
     "earlier": "Conversations précédentes",
     "unread": "Non lu"
+  },
+  "channel": {
+    "private": "Privé",
+    "members_count_one": "{{count}} membre",
+    "members_count_other": "{{count}} membres",
+    "members_title": "Membres de #{{name}}",
+    "add_members": "Ajouter des personnes ou des agents",
+    "remove": "Retirer",
+    "join": "Rejoindre le canal",
+    "leave": "Quitter le canal",
+    "archive": "Archiver le canal",
+    "unarchive": "Désarchiver le canal",
+    "archived_hint": "Ce canal est archivé. Vous pouvez le lire, mais personne ne peut y écrire.",
+    "empty": "Début de #{{name}}. @mentionnez un agent du canal pour lui poser une question.",
+    "placeholder": "Écrire dans #{{name}}",
+    "agents_hint": "Les agents du canal répondent quand vous les @mentionnez, puis continuent dans le fil où ils ont répondu.",
+    "not_found": "Ce canal n'existe pas ou vous n'y avez pas accès.",
+    "create": {
+      "title": "Nouveau canal",
+      "name": "Nom",
+      "name_placeholder": "ex. lancement",
+      "about": "Sujet",
+      "about_placeholder": "À quoi sert ce canal ? (facultatif)",
+      "private": "Rendre privé",
+      "private_hint": "Seules les personnes ajoutées peuvent le trouver et le lire. Les canaux publics sont ouverts à tout l'espace.",
+      "agents": "Agents",
+      "people": "Personnes",
+      "submit": "Créer le canal",
+      "failed": "Impossible de créer le canal",
+      "name_taken": "Un canal porte déjà ce nom"
+    }
+  },
+  "conversation": {
+    "replying": "{{name}} répond…",
+    "load_older": "Charger les messages précédents",
+    "send_failed": "Message non envoyé",
+    "system": "Multica",
+    "agent_badge": "Agent",
+    "thread_placeholder": "Répondre…",
+    "thread_empty": "Les réponses restent sous ce message.",
+    "back": "Retour"
   },
   "chat": {
     "untitled": "Sans titre",

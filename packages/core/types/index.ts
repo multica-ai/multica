@@ -192,6 +192,20 @@ export type {
   ChatDraftRestore,
   ChatDraftRestoresResponse,
 } from "./chat";
+export type {
+  Conversation,
+  ConversationAuthorType,
+  ConversationEventPayload,
+  ConversationKind,
+  ConversationMember,
+  ConversationMemberType,
+  ConversationMessage,
+  ConversationMessagesPage,
+  ConversationThreadSummary,
+  ConversationVisibility,
+  ConversationWorkingAgent,
+  CreateChannelRequest,
+} from "./conversation";
 export type { StorageAdapter } from "./storage";
 export type {
   Project,

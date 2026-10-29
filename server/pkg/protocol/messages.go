@@ -479,3 +479,15 @@ type DaemonHeartbeatPendingLocalSkillImport struct {
 	ID       string `json:"id"`
 	SkillKey string `json:"skill_key"`
 }
+
+// ConversationEventPayload is the body of conversation:message and
+// conversation:updated. The realtime layer delivers it to RecipientIDs within
+// the workspace, or to the whole workspace when Public is set (a public
+// channel anyone in the workspace may read); neither field is sent.
+type ConversationEventPayload struct {
+	ConversationID       string   `json:"conversation_id"`
+	ParentConversationID string   `json:"parent_conversation_id,omitempty"`
+	Message              any      `json:"message,omitempty"`
+	RecipientIDs         []string `json:"-"`
+	Public               bool     `json:"-"`
+}

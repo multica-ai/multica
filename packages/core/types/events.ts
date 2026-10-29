@@ -7,6 +7,7 @@ import type { TimelineEntry } from "./activity";
 import type { Workspace, MemberWithUser, Invitation } from "./workspace";
 import type { Project } from "./project";
 import type { Label } from "./label";
+import type { ConversationEventPayload } from "./conversation";
 
 // WebSocket event types (matching Go server protocol/events.go)
 export type WSEventType =
@@ -64,6 +65,8 @@ export type WSEventType =
   | "chat:session_read"
   | "chat:session_deleted"
   | "chat:session_updated"
+  | "conversation:message"
+  | "conversation:updated"
   | "project:created"
   | "project:updated"
   | "project:deleted"
@@ -629,6 +632,8 @@ export interface WSEventPayloadMap {
   "chat:session_read": ChatSessionReadPayload;
   "chat:session_deleted": ChatSessionDeletedPayload;
   "chat:session_updated": unknown;
+  "conversation:message": ConversationEventPayload;
+  "conversation:updated": ConversationEventPayload;
   "project:created": ProjectCreatedPayload;
   "project:updated": ProjectUpdatedPayload;
   "project:deleted": ProjectDeletedPayload;

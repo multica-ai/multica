@@ -576,6 +576,7 @@ type ChatSession struct {
 	ExplicitlyCreatedAt pgtype.Timestamptz `json:"explicitly_created_at"`
 	ParentChatSessionID pgtype.UUID        `json:"parent_chat_session_id"`
 	RootChatMessageID   pgtype.UUID        `json:"root_chat_message_id"`
+	ConversationID      pgtype.UUID        `json:"conversation_id"`
 }
 
 type ClientUsageDaily struct {
@@ -660,6 +661,55 @@ type ContactSalesInquiry struct {
 	ConsentUpdates  bool               `json:"consent_updates"`
 	SubmitterIp     *netip.Addr        `json:"submitter_ip"`
 	UserAgent       string             `json:"user_agent"`
+	CreatedAt       pgtype.Timestamptz `json:"created_at"`
+}
+
+type Conversation struct {
+	ID                   pgtype.UUID        `json:"id"`
+	WorkspaceID          pgtype.UUID        `json:"workspace_id"`
+	Kind                 string             `json:"kind"`
+	Name                 string             `json:"name"`
+	About                string             `json:"about"`
+	Visibility           string             `json:"visibility"`
+	DirectKey            pgtype.Text        `json:"direct_key"`
+	ParentConversationID pgtype.UUID        `json:"parent_conversation_id"`
+	RootMessageID        pgtype.UUID        `json:"root_message_id"`
+	CreatedBy            pgtype.UUID        `json:"created_by"`
+	LastMessageSeq       int64              `json:"last_message_seq"`
+	LastMessageAt        pgtype.Timestamptz `json:"last_message_at"`
+	ArchivedAt           pgtype.Timestamptz `json:"archived_at"`
+	CreatedAt            pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt            pgtype.Timestamptz `json:"updated_at"`
+}
+
+type ConversationAgentSession struct {
+	ConversationID pgtype.UUID        `json:"conversation_id"`
+	AgentID        pgtype.UUID        `json:"agent_id"`
+	WorkspaceID    pgtype.UUID        `json:"workspace_id"`
+	ChatSessionID  pgtype.UUID        `json:"chat_session_id"`
+	CreatedAt      pgtype.Timestamptz `json:"created_at"`
+}
+
+type ConversationMember struct {
+	ConversationID pgtype.UUID        `json:"conversation_id"`
+	WorkspaceID    pgtype.UUID        `json:"workspace_id"`
+	MemberType     string             `json:"member_type"`
+	MemberID       pgtype.UUID        `json:"member_id"`
+	LastReadSeq    int64              `json:"last_read_seq"`
+	CreatedAt      pgtype.Timestamptz `json:"created_at"`
+}
+
+type ConversationMessage struct {
+	ID              pgtype.UUID        `json:"id"`
+	ConversationID  pgtype.UUID        `json:"conversation_id"`
+	WorkspaceID     pgtype.UUID        `json:"workspace_id"`
+	Seq             int64              `json:"seq"`
+	AuthorType      string             `json:"author_type"`
+	AuthorID        pgtype.UUID        `json:"author_id"`
+	Kind            string             `json:"kind"`
+	Content         string             `json:"content"`
+	TaskID          pgtype.UUID        `json:"task_id"`
+	ClientMessageID pgtype.Text        `json:"client_message_id"`
 	CreatedAt       pgtype.Timestamptz `json:"created_at"`
 }
 

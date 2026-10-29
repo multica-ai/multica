@@ -12,6 +12,8 @@
     "add_squad": "새 스쿼드",
     "invite_member": "멤버 초대",
     "you": "나",
+    "channels": "채널",
+    "add_channel": "새 채널",
     "archived_agents": "보관됨 ({{count}})"
   },
   "tabs": {
@@ -31,6 +33,10 @@
     "assign_issue": "태스크 할당"
   },
   "member": {
+    "dm_placeholder": "{{name}}에게 메시지",
+    "dm_empty": "{{name}}와(과)의 대화가 시작됩니다. 두 사람만 볼 수 있습니다.",
+    "notes_placeholder": "메모 남기기",
+    "notes_empty": "나만 보는 메모입니다.",
     "role": {
       "owner": "소유자",
       "admin": "관리자",
@@ -49,6 +55,46 @@
     "leader": "리더",
     "earlier": "이전 대화",
     "unread": "읽지 않음"
+  },
+  "channel": {
+    "private": "비공개",
+    "members_count_other": "멤버 {{count}}명",
+    "members_title": "#{{name}} 멤버",
+    "add_members": "사람 또는 에이전트 추가",
+    "remove": "제거",
+    "join": "채널 참여",
+    "leave": "채널 나가기",
+    "archive": "채널 보관",
+    "unarchive": "보관 해제",
+    "archived_hint": "보관된 채널입니다. 읽을 수는 있지만 글을 쓸 수 없습니다.",
+    "empty": "#{{name}}의 시작입니다. 채널의 에이전트를 @멘션해 질문하세요.",
+    "placeholder": "#{{name}}에 메시지",
+    "agents_hint": "채널의 에이전트는 @멘션되면 답하고, 답한 스레드에서는 계속 답합니다.",
+    "not_found": "채널이 없거나 접근 권한이 없습니다.",
+    "create": {
+      "title": "새 채널",
+      "name": "이름",
+      "name_placeholder": "예: launch",
+      "about": "주제",
+      "about_placeholder": "이 채널의 용도 (선택)",
+      "private": "비공개로 만들기",
+      "private_hint": "추가된 사람만 찾고 읽을 수 있습니다. 공개 채널은 워크스페이스의 모두에게 열려 있습니다.",
+      "agents": "에이전트",
+      "people": "사람",
+      "submit": "채널 만들기",
+      "failed": "채널을 만들 수 없습니다",
+      "name_taken": "같은 이름의 채널이 있습니다"
+    }
+  },
+  "conversation": {
+    "replying": "{{name}} 답장 중…",
+    "load_older": "이전 메시지 불러오기",
+    "send_failed": "메시지를 보내지 못했습니다",
+    "system": "Multica",
+    "agent_badge": "에이전트",
+    "thread_placeholder": "답장…",
+    "thread_empty": "답장은 이 메시지 아래에 모입니다.",
+    "back": "뒤로"
   },
   "chat": {
     "untitled": "제목 없음",

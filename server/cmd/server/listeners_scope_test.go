@@ -373,3 +373,41 @@ func TestRegisterListeners_InvitationRevokedStillTargetsInviteeNotActor(t *testi
 }
 
 func inviteePtr(s string) *string { return &s }
+
+func TestRegisterListeners_ConversationEventsReachOnlyReaders(t *testing.T) {
+	bus := events.New()
+	fb := &fakeBroadcaster{}
+	registerListeners(bus, fb)
+
+	bus.Publish(events.Event{
+		Type: protocol.EventConversationMessage, WorkspaceID: "ws-1", ActorType: "member", ActorID: "u-1",
+		Payload: protocol.ConversationEventPayload{ConversationID: "c-1", RecipientIDs: []string{"u-1", "u-2"}},
+	})
+	fb.mu.Lock()
+	if len(fb.workspaceCalls) != 0 || len(fb.userCalls) != 0 || fb.broadcastCalled != 0 {
+		t.Fatalf("private conversation left its members: workspace=%+v user=%+v", fb.workspaceCalls, fb.userCalls)
+	}
+	if len(fb.scopeCalls) != 2 ||
+		fb.scopeCalls[0].scopeID != realtime.WorkspaceMemberScopeID("ws-1", "u-1") ||
+		fb.scopeCalls[1].scopeID != realtime.WorkspaceMemberScopeID("ws-1", "u-2") {
+		t.Fatalf("scope fanout = %+v, want each member once", fb.scopeCalls)
+	}
+	var frame map[string]any
+	if err := json.Unmarshal(fb.scopeCalls[0].msg, &frame); err != nil {
+		t.Fatalf("decode frame: %v", err)
+	}
+	if payload, _ := frame["payload"].(map[string]any); payload["conversation_id"] != "c-1" || payload["RecipientIDs"] != nil {
+		t.Fatalf("frame payload = %+v, want the conversation id and no recipient list", frame["payload"])
+	}
+	fb.mu.Unlock()
+
+	bus.Publish(events.Event{
+		Type: protocol.EventConversationUpdated, WorkspaceID: "ws-1",
+		Payload: protocol.ConversationEventPayload{ConversationID: "c-2", Public: true},
+	})
+	fb.mu.Lock()
+	defer fb.mu.Unlock()
+	if len(fb.workspaceCalls) != 1 || fb.workspaceCalls[0].workspaceID != "ws-1" {
+		t.Fatalf("public channel fanout = %+v, want the workspace once", fb.workspaceCalls)
+	}
+}

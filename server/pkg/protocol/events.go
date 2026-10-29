@@ -71,6 +71,11 @@ const (
 	EventSkillUpdated = "skill:updated"
 	EventSkillDeleted = "skill:deleted"
 
+	// Team conversation events (MUL-8357). Delivered only to the people who
+	// can read the conversation; see ConversationEventPayload.
+	EventConversationMessage = "conversation:message"
+	EventConversationUpdated = "conversation:updated"
+
 	// Chat events
 	EventChatMessage = "chat:message"
 	EventChatDone    = "chat:done"

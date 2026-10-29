@@ -98,6 +98,11 @@ import type {
   ChatSession,
   ChatMessageIssue,
   CreateIssueFromChatMessageResponse,
+  Conversation,
+  ConversationMessage,
+  ConversationMessagesPage,
+  ConversationMember,
+  CreateChannelRequest,
   ChatPinnedAgent,
   ChatMessage,
   ChatMessagesPage,
@@ -273,6 +278,12 @@ import {
   ChatSessionListSchema,
   ChatSessionSchema,
   ChatMessageIssueListSchema,
+  ConversationSchema,
+  ConversationListSchema,
+  ConversationMessageSchema,
+  ConversationMessagesPageSchema,
+  EMPTY_CONVERSATION_LIST,
+  EMPTY_CONVERSATION_MESSAGES_PAGE,
   EMPTY_CHAT_MESSAGE_ISSUE_LIST,
   PrioritizeQueuedChatTaskResponseSchema,
   SendChatMessageResponseSchema,
@@ -3784,6 +3795,103 @@ export class ApiClient {
     return parseWithFallback(raw, ChatMessageIssueListSchema, EMPTY_CHAT_MESSAGE_ISSUE_LIST, {
       endpoint: "GET /api/chat/sessions/:id/issues",
     }).issues;
+  }
+
+  // Team conversations: channels, member direct messages and their threads.
+
+  async listConversations(): Promise<Conversation[]> {
+    const raw: unknown = await this.fetch("/api/conversations");
+    return parseWithFallback(raw, ConversationListSchema, EMPTY_CONVERSATION_LIST, {
+      endpoint: "GET /api/conversations",
+    }).conversations;
+  }
+
+  async getConversation(id: string): Promise<Conversation> {
+    const raw: unknown = await this.fetch(`/api/conversations/${id}`);
+    return ConversationSchema.parse(raw);
+  }
+
+  async createChannel(data: CreateChannelRequest): Promise<Conversation> {
+    const raw: unknown = await this.fetch("/api/conversations", {
+      method: "POST",
+      body: JSON.stringify(data),
+    });
+    return ConversationSchema.parse(raw);
+  }
+
+  /** The one direct conversation with another member, created on first use. */
+  async openDirectConversation(userId: string): Promise<Conversation> {
+    const raw: unknown = await this.fetch("/api/conversations/direct", {
+      method: "POST",
+      body: JSON.stringify({ user_id: userId }),
+    });
+    return ConversationSchema.parse(raw);
+  }
+
+  async updateConversation(
+    id: string,
+    data: { name?: string; about?: string; archived?: boolean },
+  ): Promise<Conversation> {
+    const raw: unknown = await this.fetch(`/api/conversations/${id}`, {
+      method: "PATCH",
+      body: JSON.stringify(data),
+    });
+    return ConversationSchema.parse(raw);
+  }
+
+  async addConversationMembers(id: string, members: ConversationMember[]): Promise<Conversation> {
+    const raw: unknown = await this.fetch(`/api/conversations/${id}/members`, {
+      method: "POST",
+      body: JSON.stringify({ members }),
+    });
+    return ConversationSchema.parse(raw);
+  }
+
+  async removeConversationMember(id: string, member: ConversationMember): Promise<void> {
+    await this.fetch(`/api/conversations/${id}/members/${member.member_type}/${member.member_id}`, {
+      method: "DELETE",
+    });
+  }
+
+  async listConversationMessages(
+    id: string,
+    params?: { before_seq?: number; limit?: number },
+  ): Promise<ConversationMessagesPage> {
+    const search = new URLSearchParams();
+    if (params?.before_seq != null) search.set("before_seq", String(params.before_seq));
+    if (params?.limit != null) search.set("limit", String(params.limit));
+    const qs = search.toString();
+    const raw: unknown = await this.fetch(`/api/conversations/${id}/messages${qs ? `?${qs}` : ""}`);
+    return parseWithFallback(raw, ConversationMessagesPageSchema, EMPTY_CONVERSATION_MESSAGES_PAGE, {
+      endpoint: "GET /api/conversations/:id/messages",
+    });
+  }
+
+  async sendConversationMessage(
+    id: string,
+    data: { content: string; client_message_id: string },
+  ): Promise<ConversationMessage> {
+    const raw: unknown = await this.fetch(`/api/conversations/${id}/messages`, {
+      method: "POST",
+      body: JSON.stringify(data),
+    });
+    return ConversationMessageSchema.parse(raw);
+  }
+
+  /** Open the thread under a message, creating it on first use. */
+  async openConversationThread(id: string, rootMessageId: string): Promise<Conversation> {
+    const raw: unknown = await this.fetch(`/api/conversations/${id}/threads`, {
+      method: "POST",
+      body: JSON.stringify({ root_message_id: rootMessageId }),
+    });
+    return ConversationSchema.parse(raw);
+  }
+
+  async markConversationRead(id: string, seq: number): Promise<void> {
+    await this.fetch(`/api/conversations/${id}/read`, {
+      method: "POST",
+      body: JSON.stringify({ seq }),
+    });
   }
 
   async deleteChatSession(id: string): Promise<void> {

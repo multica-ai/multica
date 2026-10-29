@@ -12,6 +12,8 @@
     "add_squad": "New squad",
     "invite_member": "Invite member",
     "you": "You",
+    "channels": "Channels",
+    "add_channel": "New channel",
     "archived_agents": "Archived ({{count}})"
   },
   "tabs": {
@@ -31,6 +33,10 @@
     "assign_issue": "Assign issue"
   },
   "member": {
+    "dm_placeholder": "Message {{name}}",
+    "dm_empty": "This is the start of your conversation with {{name}}. Only the two of you can see it.",
+    "notes_placeholder": "Jot something down",
+    "notes_empty": "Notes to yourself. Nobody else can see them.",
     "role": {
       "owner": "Owner",
       "admin": "Admin",
@@ -49,6 +55,47 @@
     "leader": "Leader",
     "earlier": "Earlier conversations",
     "unread": "Unread"
+  },
+  "channel": {
+    "private": "Private",
+    "members_count_one": "{{count}} member",
+    "members_count_other": "{{count}} members",
+    "members_title": "Members of #{{name}}",
+    "add_members": "Add people or agents",
+    "remove": "Remove",
+    "join": "Join channel",
+    "leave": "Leave channel",
+    "archive": "Archive channel",
+    "unarchive": "Unarchive channel",
+    "archived_hint": "This channel is archived. You can read it, but nobody can post.",
+    "empty": "This is the start of #{{name}}. @mention an agent in the channel to ask it something.",
+    "placeholder": "Message #{{name}}",
+    "agents_hint": "Agents in the channel reply when you @mention them, and keep replying in the thread they answered.",
+    "not_found": "This channel doesn't exist or you don't have access to it.",
+    "create": {
+      "title": "New channel",
+      "name": "Name",
+      "name_placeholder": "e.g. launch",
+      "about": "Topic",
+      "about_placeholder": "What is this channel for? (optional)",
+      "private": "Make private",
+      "private_hint": "Only people added can find and read it. Public channels are open to everyone in the workspace.",
+      "agents": "Agents",
+      "people": "People",
+      "submit": "Create channel",
+      "failed": "Couldn't create the channel",
+      "name_taken": "A channel with this name already exists"
+    }
+  },
+  "conversation": {
+    "replying": "{{name}} is replying…",
+    "load_older": "Load older messages",
+    "send_failed": "Message not sent",
+    "system": "Multica",
+    "agent_badge": "Agent",
+    "thread_placeholder": "Reply…",
+    "thread_empty": "Replies stay under this message.",
+    "back": "Back"
   },
   "chat": {
     "untitled": "Untitled",
