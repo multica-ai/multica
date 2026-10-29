@@ -5,7 +5,7 @@ import { IssueSidebarSectionHeader } from "./issue-sidebar-section";
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { CircleSlash, MoreHorizontal, Plus, RotateCcw, Settings } from "lucide-react";
+import { CircleSlash, MoreHorizontal, Plus, RotateCcw, Settings } from "@multica/ui/icons";
 import { ApiError } from "@multica/core/api";
 import {
   issuePullRequestsOptions,

@@ -2,7 +2,7 @@
 
 import { useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { Plug } from "lucide-react";
+import { Plug } from "@multica/ui/icons";
 import { useFeatureEnabled } from "@multica/core/config";
 import { PLUGINS_V1_FLAG } from "@multica/core/feature-flags";
 import { useCurrentWorkspace } from "@multica/core/paths";

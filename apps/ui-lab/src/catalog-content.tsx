@@ -1,6 +1,6 @@
 import type { ReactNode } from "react";
 import { useTranslation } from "react-i18next";
-import { ArrowRight, CircleDashed, RotateCcw } from "lucide-react";
+import { ArrowRight, CircleDashed, RotateCcw } from "@multica/ui/icons";
 import { Button } from "@multica/ui/components/ui/button";
 import {
   catalog,

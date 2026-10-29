@@ -1,6 +1,6 @@
 import { useTranslation } from "react-i18next";
 import { useEffect, useId, useRef, useState } from "react";
-import { RotateCcw } from "lucide-react";
+import { RotateCcw } from "@multica/ui/icons";
 
 export function NumberField({
   label,

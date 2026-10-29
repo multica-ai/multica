@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Minus, Plus } from "lucide-react";
+import { Minus, Plus } from "@multica/ui/icons";
 import { TooltipHint } from "@multica/ui/components/common/tooltip-hint";
 import { cn } from "@multica/ui/lib/utils";
 import {

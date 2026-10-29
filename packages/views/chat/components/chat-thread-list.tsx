@@ -13,7 +13,7 @@ import {
   PinOff,
   Square,
   Trash2,
-} from "lucide-react";
+} from "@multica/ui/icons";
 import { cn } from "@multica/ui/lib/utils";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { paths, useWorkspaceSlug } from "@multica/core/paths";

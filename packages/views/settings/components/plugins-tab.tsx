@@ -2,7 +2,7 @@
 
 import { useMemo, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { AlertCircle, CalendarClock, Loader2, Trash2, Upload } from "lucide-react";
+import { AlertCircle, CalendarClock, Loader2, Trash2, Upload } from "@multica/ui/icons";
 import { toast } from "sonner";
 import { useCurrentMember } from "@multica/core/permissions";
 import {

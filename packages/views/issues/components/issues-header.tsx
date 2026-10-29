@@ -21,7 +21,7 @@ import {
   UserMinus,
   UserPen,
   Waves,
-} from "lucide-react";
+} from "@multica/ui/icons";
 import { Button } from "@multica/ui/components/ui/button";
 import { Spinner } from "@multica/ui/components/ui/spinner";
 import { Input } from "@multica/ui/components/ui/input";

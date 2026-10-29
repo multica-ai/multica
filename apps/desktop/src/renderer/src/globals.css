@@ -65,6 +65,17 @@ html[lang|="ja"] {
                "Noto Sans CJK KR", sans-serif;
 }
 
+/* Traditional Chinese: same problem one level down — the default stack is
+   Simplified-first, so zh-TW users get Simplified glyph shapes for shared
+   ideographs. App.tsx maps zh-Hant to `zh-TW`. Mirrors apps/web/app/globals.css. */
+html[lang="zh-TW"] {
+  --font-sans: "Inter Variable", "Inter", -apple-system, BlinkMacSystemFont,
+               "Segoe UI", "PingFang TC", "Microsoft JhengHei",
+               "Noto Sans CJK TC", "PingFang SC", "Microsoft YaHei",
+               "Noto Sans CJK SC", "Apple SD Gothic Neo", "Malgun Gothic",
+               "Noto Sans CJK KR", sans-serif;
+}
+
 @source "../../../../../packages/ui/**/*.tsx";
 @source "../../../../../packages/core/**/*.{ts,tsx}";
 @source "../../../../../packages/views/**/*.{ts,tsx}";

@@ -744,12 +744,11 @@
     "trigger_wakeup": "由唤醒触发 · {{condition}}",
     "trigger_image": "[图片]",
     "summary_runs_other": "{{count}} 次运行",
-    "latest": "最近",
     "open_timeline": "打开时间线",
     "more_runs_other": "显示其余 {{count}} 次运行",
     "strip_aria": "每次运行的费用——打开运行时间线",
     "strip_no_usage": "没有用量记录",
-    "sparkline_now": "现在"
+    "queued_count_other": "{{count}} 个排队中"
   },
   "runs_timeline": {
     "title": "运行记录",

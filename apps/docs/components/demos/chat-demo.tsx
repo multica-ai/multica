@@ -1,7 +1,7 @@
 "use client";
 
 import { type ReactNode, useState } from "react";
-import { CircleDashed, Loader2 } from "lucide-react";
+import { CircleDashed, Loader2 } from "@multica/ui/icons";
 import { CoachMark, DemoAvatar, DemoFrame, DemoSendButton, useDemoCopy, useDemoTimers, useStartWhenVisible } from "./demo-kit";
 
 type Suggestion = { label: string; prompt: string };

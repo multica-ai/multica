@@ -12,7 +12,7 @@ import {
   Search,
   SlidersHorizontal,
   X,
-} from "lucide-react";
+} from "@multica/ui/icons";
 import { toast } from "sonner";
 import { useAuthStore } from "@multica/core/auth";
 import { useWorkspaceId } from "@multica/core/hooks";

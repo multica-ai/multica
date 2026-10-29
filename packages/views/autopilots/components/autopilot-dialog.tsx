@@ -19,7 +19,7 @@ import {
   Webhook,
   X as XIcon,
   Zap,
-} from "lucide-react";
+} from "@multica/ui/icons";
 import { cn } from "@multica/ui/lib/utils";
 import {
   Dialog,

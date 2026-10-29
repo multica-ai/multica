@@ -1,5 +1,5 @@
 import { cn } from "@multica/ui/lib/utils"
-import { Loader2Icon } from "lucide-react"
+import { Loader2Icon } from "@multica/ui/icons"
 
 function Spinner({ className, ...props }: React.ComponentProps<"svg">) {
   return (

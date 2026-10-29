@@ -6,8 +6,8 @@ import {
   Clock,
   Loader2,
   PlugZap,
-  type LucideIcon,
-} from "lucide-react";
+  type IconComponent,
+} from "@multica/ui/icons";
 import type { AgentAvailability, Workload } from "@multica/core/agents";
 
 // Visual mapping for the two presence dimensions, kept in matching shape
@@ -44,7 +44,7 @@ export interface AvailabilityVisual {
   // Foreground colour for the label text alongside the dot.
   textClass: string;
   // Icon used in larger badge contexts (detail header, hover card).
-  icon: LucideIcon;
+  icon: IconComponent;
 }
 
 export const availabilityConfig: Record<AgentAvailability, AvailabilityVisual> = {
@@ -86,7 +86,7 @@ export interface WorkloadVisual {
   // Foreground colour for icon + label text.
   textClass: string;
   // Icon used inline.
-  icon: LucideIcon;
+  icon: IconComponent;
 }
 
 export const workloadConfig: Record<Workload, WorkloadVisual> = {

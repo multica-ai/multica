@@ -744,12 +744,11 @@
     "trigger_wakeup": "깨우기 · {{condition}}",
     "trigger_image": "[이미지]",
     "summary_runs_other": "실행 {{count}}회",
-    "latest": "최근",
     "open_timeline": "타임라인 열기",
     "more_runs_other": "{{count}}개 더 보기",
     "strip_aria": "실행별 비용 — 실행 타임라인 열기",
     "strip_no_usage": "사용량 기록 없음",
-    "sparkline_now": "지금"
+    "queued_count_other": "{{count}}개 대기 중"
   },
   "runs_timeline": {
     "title": "실행 기록",

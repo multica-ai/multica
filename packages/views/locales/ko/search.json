@@ -1,36 +1,169 @@
 {
-  "title": "검색",
-  "description": "페이지, 태스크, 프로젝트, 멤버를 검색합니다",
-  "placeholder": "명령어를 입력하거나 검색하세요...",
+  "title": "명령 바",
+  "description": "검색하고, 명령을 실행하거나, 에이전트에게 작업을 맡기세요",
+  "placeholder": "검색하거나 할 일을 입력하세요...",
+  "page_placeholder": "필터...",
+  "breadcrumb_aria": "현재 메뉴",
   "groups": {
     "pages": "페이지",
     "commands": "명령어",
     "members": "멤버",
+    "agents": "에이전트",
+    "squads": "스쿼드",
     "projects": "프로젝트",
     "issues": "태스크",
+    "autopilots": "오토파일럿",
+    "chats": "채팅",
+    "skills": "스킬",
     "cancelled": "취소됨",
     "recent": "최근 항목",
-    "workspaces": "워크스페이스"
+    "workspaces": "워크스페이스",
+    "new": "새로 만들기",
+    "best_match": "가장 일치",
+    "actions": "작업"
+  },
+  "context": {
+    "current_issue": "현재 태스크",
+    "selected_issues_other": "선택한 태스크 {{count}}개",
+    "current_project": "현재 프로젝트",
+    "current_agent": "현재 에이전트",
+    "current_autopilot": "현재 오토파일럿",
+    "inbox": "인박스",
+    "current_chat": "현재 채팅"
   },
   "commands": {
     "current_theme_aria": "현재 테마",
     "new_issue": "새 태스크",
     "new_project": "새 프로젝트",
+    "new_autopilot": "새 오토파일럿",
+    "chat_with_agent": "에이전트와 채팅",
+    "change_theme": "테마 변경...",
+    "send_feedback": "피드백 보내기",
     "copy_issue_link": "태스크 링크 복사",
     "copy_identifier": "식별자 복사 ({{identifier}})",
     "fold_all_comments": "모든 댓글 접기",
-    "unfold_all_comments": "모든 댓글 펼치기",
-    "switch_to_light": "라이트 테마로 전환",
-    "switch_to_dark": "다크 테마로 전환",
-    "use_system_theme": "시스템 테마 사용"
+    "unfold_all_comments": "모든 댓글 펼치기"
+  },
+  "issue": {
+    "change_status": "상태 변경...",
+    "assign_to": "담당자 지정...",
+    "set_priority": "우선순위 설정...",
+    "run_quick_action": "빠른 작업 실행...",
+    "quick_actions_available_other": "{{count}}개 사용 가능",
+    "add_label": "라벨 추가...",
+    "set_due_date": "마감일 설정...",
+    "move_to_project": "프로젝트로 이동...",
+    "set_parent": "상위 태스크 설정...",
+    "cancel_run": "현재 실행 취소",
+    "retry_run": "마지막 실행 재시도",
+    "create_sub_issue": "새 하위 태스크",
+    "subscribe": "구독",
+    "unsubscribe": "구독 취소",
+    "delete": "태스크 삭제",
+    "delete_selected_other": "태스크 {{count}}개 삭제"
+  },
+  "project": {
+    "change_status": "프로젝트 상태 변경...",
+    "new_issue": "이 프로젝트에 새 태스크",
+    "pin": "사이드바에 고정",
+    "unpin": "사이드바 고정 해제",
+    "copy_link": "프로젝트 링크 복사"
+  },
+  "agent": {
+    "chat": "{{name}}와 채팅",
+    "assign_issue": "{{name}}에게 태스크 지정...",
+    "new_issue": "{{name}}에게 새 태스크",
+    "pin_in_chat": "채팅에 고정",
+    "unpin_in_chat": "채팅 고정 해제"
+  },
+  "autopilot": {
+    "run_now": "지금 한 번 실행",
+    "pause": "일시 중지",
+    "resume": "다시 시작"
+  },
+  "inbox": {
+    "archive": "보관",
+    "mark_unread": "읽지 않음으로 표시",
+    "mark_all_read": "인박스 모두 읽음으로 표시",
+    "archive_all_read": "읽은 인박스 항목 모두 보관"
+  },
+  "chat": {
+    "link_project": "프로젝트에 연결...",
+    "pin": "채팅 고정",
+    "unpin": "채팅 고정 해제",
+    "archive": "채팅 보관"
+  },
+  "pages": {
+    "status": "상태",
+    "priority": "우선순위",
+    "assignee": "담당자",
+    "labels": "라벨",
+    "due_date": "마감일",
+    "project": "프로젝트",
+    "parent": "상위 태스크",
+    "quick_actions": "빠른 작업",
+    "theme": "테마",
+    "project_status": "프로젝트 상태",
+    "no_project": "프로젝트 없음",
+    "current": "현재"
+  },
+  "theme": {
+    "light": "라이트",
+    "dark": "다크",
+    "system": "시스템"
   },
   "toast": {
     "link_copied": "링크를 복사했습니다",
-    "copied_identifier": "{{identifier}}를 복사했습니다"
+    "copied_identifier": "{{identifier}}를 복사했습니다",
+    "run_retried": "실행을 다시 시작했습니다",
+    "run_cancelled": "실행을 취소했습니다",
+    "subscribed": "구독했습니다",
+    "unsubscribed": "구독을 취소했습니다",
+    "label_added": "라벨 {{name}}을 추가했습니다",
+    "label_removed": "라벨 {{name}}을 제거했습니다",
+    "label_failed": "일부 태스크에 라벨 {{name}}을 추가하지 못했습니다",
+    "update_failed": "업데이트에 실패했습니다",
+    "assigned": "{{identifier}}를 {{name}}에게 지정했습니다"
   },
   "empty": {
-    "no_results": "검색 결과가 없습니다.",
-    "type_to_search": "태스크와 프로젝트를 검색해 보세요"
+    "no_results": "결과가 없습니다.",
+    "no_labels": "라벨이 없습니다",
+    "type_to_find_issue": "입력해서 태스크 찾기",
+    "type_to_find_people": "입력해서 멤버와 에이전트 찾기"
+  },
+  "delegate": {
+    "heading": "에이전트에게 맡기기",
+    "create_and_assign": "새 태스크를 만들어 {{name}}에게 지정",
+    "squad": "스쿼드",
+    "context_aria": "함께 보낼 컨텍스트",
+    "parent": "{{identifier}} 하위",
+    "pick_crumb": "선택",
+    "pick_another": "다른 에이전트나 스쿼드에게 맡기기...",
+    "detected": "지시로 인식"
+  },
+  "best": {
+    "assign": "{{subject}}를 {{name}}에게 지정",
+    "chat": "{{name}}와 채팅",
+    "new_issue_in": "{{name}}에 새 태스크"
+  },
+  "types": {
+    "issue": "태스크",
+    "project": "프로젝트",
+    "agent": "에이전트",
+    "autopilot": "오토파일럿",
+    "squad": "스쿼드",
+    "member": "멤버"
+  },
+  "footer": {
+    "navigate": "선택",
+    "select": "실행",
+    "open_in_new_tab": "새 탭에서 열기",
+    "delegate": "만들어서 {{name}}에게 맡기기",
+    "search_instead": "키워드로 검색",
+    "back": "뒤로",
+    "prefix_commands": "명령어",
+    "prefix_issues": "태스크",
+    "prefix_people": "멤버와 에이전트"
   },
   "trigger": {
     "label": "검색..."

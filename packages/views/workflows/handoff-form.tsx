@@ -27,7 +27,7 @@ import {
 import { Spinner } from "@multica/ui/components/ui/spinner";
 import { Textarea } from "@multica/ui/components/ui/textarea";
 import { cn } from "@multica/ui/lib/utils";
-import { ChevronDown } from "lucide-react";
+import { ChevronDown } from "@multica/ui/icons";
 import { ActorAvatar } from "../common/actor-avatar";
 import { PickerEmpty, PickerItem, PickerSection, PropertyPicker } from "../issues/components/pickers/property-picker";
 import { StatusIcon } from "../issues/components/status-icon";

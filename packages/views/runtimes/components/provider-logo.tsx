@@ -1,5 +1,5 @@
 import { useId } from "react";
-import { Monitor } from "lucide-react";
+import { Monitor } from "@multica/ui/icons";
 import codeartsLogo from "./codearts-logo.svg";
 import qwenLogo from "./qwen-logo.svg";
 import reasonixLogo from "./reasonix-logo.svg";

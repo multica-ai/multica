@@ -1,6 +1,6 @@
 "use client";
 
-import { Bell, Clock3, Hourglass, ListChecks, RefreshCw, TriangleAlert } from "lucide-react";
+import { Bell, Clock3, Hourglass, ListChecks, RefreshCw, TriangleAlert } from "@multica/ui/icons";
 import type { TimelineEntry, WakeupCondition, WakeupPreview } from "@multica/core/types";
 import { useT } from "../../i18n";
 import type { useWakeupText } from "./wakeup-presentation";

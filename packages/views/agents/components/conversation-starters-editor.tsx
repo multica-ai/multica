@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { MessageSquare, Pencil, Plus, Trash2 } from "lucide-react";
+import { MessageSquare, Pencil, Plus, Trash2 } from "@multica/ui/icons";
 import {
   AGENT_CONVERSATION_STARTER_LABEL_MAX_LENGTH,
   AGENT_CONVERSATION_STARTER_MAX_LENGTH,

@@ -3,7 +3,7 @@
 import { IssueSidebarSectionHeader } from "../issue-sidebar-section";
 
 import { useState } from "react";
-import { LayoutGrid } from "lucide-react";
+import { LayoutGrid } from "@multica/ui/icons";
 import type { DeliverableFile } from "@multica/core/attachments/deliverables";
 import { IconButton } from "@multica/ui/components/common/icon-button";
 import { TooltipHint } from "@multica/ui/components/common/tooltip-hint";

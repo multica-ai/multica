@@ -1,36 +1,172 @@
 {
-  "title": "Recherche",
-  "description": "Rechercher des pages, des tâches, des projets et des membres",
-  "placeholder": "Saisissez une commande ou une recherche...",
+  "title": "Barre de commandes",
+  "description": "Rechercher, lancer une commande ou confier du travail à un agent",
+  "placeholder": "Rechercher, ou décrire ce qu'il faut faire...",
+  "page_placeholder": "Filtrer...",
+  "breadcrumb_aria": "Menu actuel",
   "groups": {
     "pages": "Pages",
     "commands": "Commandes",
     "members": "Membres",
+    "agents": "Agents",
+    "squads": "Squads",
     "projects": "Projets",
     "issues": "Tâches",
+    "autopilots": "Automatisations",
+    "chats": "Discussions",
+    "skills": "Skills",
     "cancelled": "Annulés",
     "recent": "Récents",
-    "workspaces": "Espaces de travail"
+    "workspaces": "Espaces de travail",
+    "new": "Créer",
+    "best_match": "Meilleur résultat",
+    "actions": "Actions"
+  },
+  "context": {
+    "current_issue": "Tâche actuelle",
+    "selected_issues_one": "{{count}} tâche sélectionnée",
+    "selected_issues_other": "{{count}} tâches sélectionnées",
+    "current_project": "Projet actuel",
+    "current_agent": "Agent actuel",
+    "current_autopilot": "Automatisation actuelle",
+    "inbox": "Boîte de réception",
+    "current_chat": "Discussion actuelle"
   },
   "commands": {
     "current_theme_aria": "Thème actuel",
     "new_issue": "Nouvelle tâche",
     "new_project": "Nouveau projet",
+    "new_autopilot": "Nouvelle automatisation",
+    "chat_with_agent": "Discuter avec un agent",
+    "change_theme": "Changer de thème...",
+    "send_feedback": "Envoyer un retour",
     "copy_issue_link": "Copier le lien de la tâche",
     "copy_identifier": "Copier l'identifiant ({{identifier}})",
     "fold_all_comments": "Replier tous les commentaires",
-    "unfold_all_comments": "Déplier tous les commentaires",
-    "switch_to_light": "Passer au thème clair",
-    "switch_to_dark": "Passer au thème sombre",
-    "use_system_theme": "Utiliser le thème du système"
+    "unfold_all_comments": "Déplier tous les commentaires"
+  },
+  "issue": {
+    "change_status": "Changer le statut...",
+    "assign_to": "Assigner à...",
+    "set_priority": "Définir la priorité...",
+    "run_quick_action": "Lancer une action rapide...",
+    "quick_actions_available_one": "{{count}} disponible",
+    "quick_actions_available_other": "{{count}} disponibles",
+    "add_label": "Ajouter un libellé...",
+    "set_due_date": "Définir l'échéance...",
+    "move_to_project": "Déplacer vers un projet...",
+    "set_parent": "Définir la tâche parente...",
+    "cancel_run": "Annuler l'exécution en cours",
+    "retry_run": "Relancer la dernière exécution",
+    "create_sub_issue": "Nouvelle sous-tâche",
+    "subscribe": "S'abonner",
+    "unsubscribe": "Se désabonner",
+    "delete": "Supprimer la tâche",
+    "delete_selected_one": "Supprimer {{count}} tâche",
+    "delete_selected_other": "Supprimer {{count}} tâches"
+  },
+  "project": {
+    "change_status": "Changer le statut du projet...",
+    "new_issue": "Nouvelle tâche dans ce projet",
+    "pin": "Épingler dans la barre latérale",
+    "unpin": "Désépingler de la barre latérale",
+    "copy_link": "Copier le lien du projet"
+  },
+  "agent": {
+    "chat": "Discuter avec {{name}}",
+    "assign_issue": "Assigner une tâche à {{name}}...",
+    "new_issue": "Nouvelle tâche pour {{name}}",
+    "pin_in_chat": "Épingler dans la discussion",
+    "unpin_in_chat": "Désépingler de la discussion"
+  },
+  "autopilot": {
+    "run_now": "Exécuter une fois maintenant",
+    "pause": "Mettre en pause",
+    "resume": "Reprendre"
+  },
+  "inbox": {
+    "archive": "Archiver",
+    "mark_unread": "Marquer comme non lu",
+    "mark_all_read": "Tout marquer comme lu dans la boîte de réception",
+    "archive_all_read": "Archiver tous les éléments lus"
+  },
+  "chat": {
+    "link_project": "Associer à un projet...",
+    "pin": "Épingler la discussion",
+    "unpin": "Désépingler la discussion",
+    "archive": "Archiver la discussion"
+  },
+  "pages": {
+    "status": "Statut",
+    "priority": "Priorité",
+    "assignee": "Responsable",
+    "labels": "Libellés",
+    "due_date": "Échéance",
+    "project": "Projet",
+    "parent": "Tâche parente",
+    "quick_actions": "Actions rapides",
+    "theme": "Thème",
+    "project_status": "Statut du projet",
+    "no_project": "Aucun projet",
+    "current": "Actuel"
+  },
+  "theme": {
+    "light": "Clair",
+    "dark": "Sombre",
+    "system": "Système"
   },
   "toast": {
     "link_copied": "Lien copié",
-    "copied_identifier": "{{identifier}} copié"
+    "copied_identifier": "{{identifier}} copié",
+    "run_retried": "Exécution relancée",
+    "run_cancelled": "Exécution annulée",
+    "subscribed": "Abonné",
+    "unsubscribed": "Désabonné",
+    "label_added": "Libellé {{name}} ajouté",
+    "label_removed": "Libellé {{name}} retiré",
+    "label_failed": "Impossible d'ajouter le libellé {{name}} à toutes les tâches",
+    "update_failed": "Échec de la mise à jour",
+    "assigned": "{{identifier}} assignée à {{name}}"
   },
   "empty": {
     "no_results": "Aucun résultat.",
-    "type_to_search": "Saisissez du texte pour rechercher des tâches et des projets"
+    "no_labels": "Aucun libellé",
+    "type_to_find_issue": "Tapez pour trouver une tâche",
+    "type_to_find_people": "Tapez pour trouver des membres et des agents"
+  },
+  "delegate": {
+    "heading": "Confier à un agent",
+    "create_and_assign": "Créer une tâche et l'assigner à {{name}}",
+    "squad": "Squad",
+    "context_aria": "Contexte joint",
+    "parent": "Sous {{identifier}}",
+    "pick_crumb": "Choisir",
+    "pick_another": "Confier à un autre agent ou squad...",
+    "detected": "Instruction"
+  },
+  "best": {
+    "assign": "Assigner {{subject}} à {{name}}",
+    "chat": "Discuter avec {{name}}",
+    "new_issue_in": "Nouvelle tâche dans {{name}}"
+  },
+  "types": {
+    "issue": "Tâche",
+    "project": "Projet",
+    "agent": "Agent",
+    "autopilot": "Automatisation",
+    "squad": "Squad",
+    "member": "Membre"
+  },
+  "footer": {
+    "navigate": "Naviguer",
+    "select": "Valider",
+    "open_in_new_tab": "Ouvrir dans un nouvel onglet",
+    "delegate": "Créer et confier à {{name}}",
+    "search_instead": "Rechercher comme mots-clés",
+    "back": "Retour",
+    "prefix_commands": "Commandes",
+    "prefix_issues": "Tâches",
+    "prefix_people": "Membres et agents"
   },
   "trigger": {
     "label": "Rechercher..."

@@ -24,7 +24,7 @@ import {
   CardContent,
 } from "@multica/ui/components/ui/card";
 import { Button } from "@multica/ui/components/ui/button";
-import { Loader2 } from "lucide-react";
+import { Loader2 } from "@multica/ui/icons";
 import { setLoggedInCookie } from "@/features/auth/auth-cookie";
 import Link from "next/link";
 import { LoginPage, validateCliCallback } from "@multica/views/auth";

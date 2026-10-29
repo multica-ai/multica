@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { ChevronDown, Cloud, Loader2, Lock, Search } from "lucide-react";
+import { ChevronDown, Cloud, Loader2, Lock, Search } from "@multica/ui/icons";
 import { ProviderLogo } from "../../runtimes/components/provider-logo";
 import { ActorAvatar } from "../../common/actor-avatar";
 import {

@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { AlertTriangle } from "lucide-react";
+import { AlertTriangle } from "@multica/ui/icons";
 import { toast } from "sonner";
 import type { AgentRuntime } from "@multica/core/types";
 import { ApiError, parseWithFallback } from "@multica/core/api";

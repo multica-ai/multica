@@ -4,7 +4,7 @@ import { IssueSidebarSectionHeader } from "./issue-sidebar-section";
 
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { ArrowRight } from "lucide-react";
+import { ArrowRight } from "@multica/ui/icons";
 import type { Issue, IssueDuplicateOf } from "@multica/core/types";
 import { issueStatusCategory } from "@multica/core/issues";
 import { issueDuplicatesOptions } from "@multica/core/issues/queries";

@@ -1,4 +1,4 @@
-import type { LucideIcon } from "lucide-react";
+import type { IconComponent } from "@multica/ui/icons";
 import { WORKSPACE_PAGES } from "@multica/core/paths";
 import { ROUTE_ICON_COMPONENTS } from "../../layout/route-icon-components";
 
@@ -14,5 +14,5 @@ import { ROUTE_ICON_COMPONENTS } from "../../layout/route-icon-components";
  * This is for the skill *entity*. A file inside a skill is not a skill; those
  * keep the file-type icons in `file-tree.tsx`.
  */
-export const SkillIcon: LucideIcon =
+export const SkillIcon: IconComponent =
   ROUTE_ICON_COMPONENTS[WORKSPACE_PAGES.skills.icon];

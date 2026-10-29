@@ -257,11 +257,28 @@ describe("InlineCommentRun", () => {
     expect(expanded).toBe(before);
     expect(expanded).toHaveFocus();
     expect(expanded).toHaveAttribute("aria-expanded", "true");
-    await screen.findByRole("button", { name: "Open full log" });
+    await screen.findByText("pnpm test");
     fireEvent.click(expanded, { detail: 0 });
     expect(screen.getByRole("button", { name: /View activity/ })).toHaveFocus();
     expect(screen.getByRole("button", { name: /View activity/ })).toHaveAttribute("aria-expanded", "false");
   });
+  it.each(["running", "completed", "failed"] as const)("opens the full log from the %s run row without expanding it", async (status) => {
+    vi.mocked(api.listTaskMessages).mockResolvedValue(messages);
+    setup(task({ status, completed_at: status === "running" ? null : "2026-09-07T00:01:23Z" }));
+    const trigger = screen.getByRole("button", { name: "Open full log" });
+    expect(trigger).toHaveAttribute("aria-haspopup", "dialog");
+    fireEvent.click(trigger);
+    await waitFor(() => expect(screen.getByRole("dialog")).toHaveTextContent("Full transcript"));
+    expect(screen.getByRole("button", { name: /View activity/ })).toHaveAttribute("aria-expanded", "false");
+  });
+
+  it.each(["queued", "dispatched", "waiting_local_directory"] as const)("offers no full log before a %s run starts", (status) => {
+    vi.mocked(api.listTaskMessages).mockResolvedValue([]);
+    setup(task({ status }));
+    fireEvent.click(screen.getByRole("button", { name: /View activity/ }));
+    expect(screen.queryByRole("button", { name: "Open full log" })).not.toBeInTheDocument();
+  });
+
   it("shows real activity, expands in place, follows WS data and retains the open transcript at completion", async () => {
     vi.mocked(api.listTaskMessages).mockResolvedValue(messages);
     const current = task();

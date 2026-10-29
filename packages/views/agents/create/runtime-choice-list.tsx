@@ -13,7 +13,7 @@ import {
   Plus,
   SquareTerminal,
   TriangleAlert,
-} from "lucide-react";
+} from "@multica/ui/icons";
 import type { QoderConnection } from "@multica/core/runtimes/qoder";
 import { Button, buttonVariants } from "@multica/ui/components/ui/button";
 import { cn } from "@multica/ui/lib/utils";

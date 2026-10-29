@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { CheckCircle2, Clock, FastForward, Loader2, Pencil, Play } from "lucide-react";
+import { CheckCircle2, Clock, FastForward, Loader2, Pencil, Play } from "@multica/ui/icons";
 import { Button } from "@multica/ui/components/ui/button";
 import { cn } from "@multica/ui/lib/utils";
 import {

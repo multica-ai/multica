@@ -8,7 +8,7 @@ import {
   GitMerge,
   GitPullRequestArrow,
   MoreHorizontal,
-} from "lucide-react";
+} from "@multica/ui/icons";
 import { Button } from "@multica/ui/components/ui/button";
 import { cn } from "@multica/ui/lib/utils";
 import { CoachMark, DemoAvatar, DemoFrame, useDemoCopy, useDemoTimers, useStartWhenVisible } from "./demo-kit";

@@ -1,7 +1,7 @@
 "use client";
 
 import type { CSSProperties, ReactNode } from "react";
-import { ArrowLeft, Check } from "lucide-react";
+import { ArrowLeft, Check } from "@multica/ui/icons";
 import {
   ONBOARDING_STEP_ORDER,
   type OnboardingStep,

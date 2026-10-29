@@ -1,7 +1,7 @@
 "use client";
 
 import { useQuery } from "@tanstack/react-query";
-import { FolderOpen, GitBranch } from "lucide-react";
+import { FolderOpen, GitBranch } from "@multica/ui/icons";
 import { projectResourcesOptions } from "@multica/core/projects";
 import type { Agent, LocalDirectoryResourceRef, ProjectResource } from "@multica/core/types";
 import { useWorkspaceId } from "@multica/core/hooks";

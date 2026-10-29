@@ -12,7 +12,7 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import { createPortal } from "react-dom";
 import { computePosition, offset, flip, shift } from "@floating-ui/dom";
-import { ExternalLink, Copy } from "lucide-react";
+import { ExternalLink, Copy } from "@multica/ui/icons";
 import { toast } from "sonner";
 import { IconButton } from "@multica/ui/components/common/icon-button";
 import { copyText } from "@multica/ui/lib/clipboard";

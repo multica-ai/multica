@@ -1,7 +1,7 @@
 "use client";
 
 import { useMemo, useState, type ReactElement } from "react";
-import { ChevronDown, TriangleAlert, Users } from "lucide-react";
+import { ChevronDown, TriangleAlert, Users } from "@multica/ui/icons";
 import type { CommentTriggerPreviewAgent, CommentTriggerOutcome } from "@multica/core/types";
 import type { AgentRunState, RecipientAction } from "@multica/core/issues/run-steering";
 import { useAgentPresenceDetail } from "@multica/core/agents";

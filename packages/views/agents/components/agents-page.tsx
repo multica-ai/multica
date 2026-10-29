@@ -6,7 +6,7 @@ import {
   Bot,
   Lock,
   Plus,
-} from "lucide-react";
+} from "@multica/ui/icons";
 import { useQuery } from "@tanstack/react-query";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import type {
@@ -1037,16 +1037,14 @@ export function AgentsPage(_props: AgentsPageProps = {}) {
         onCreate={() => navigation.push(paths.newAgent())}
       />
 
-      {isLoading || (!showEmpty && !listReady) ? (
-        <div className="flex-1 overflow-y-auto @container">
-          <LoadingSkeleton />
-        </div>
-      ) : showEmpty ? (
+      {showEmpty ? (
         <div className="flex flex-1 items-center justify-center">
           <EmptyState onCreate={() => navigation.push(paths.newAgent())} />
         </div>
       ) : (
         <>
+          {/* Mounted through loading so the rows don't drop by a toolbar's
+              height when the list lands. */}
           <AgentListToolbar
             scope={scope}
             onScopeChange={setScope}
@@ -1066,6 +1064,11 @@ export function AgentsPage(_props: AgentsPageProps = {}) {
             members={members}
             visibleCount={rows.length}
           />
+          {isLoading || !listReady ? (
+            <div className="flex-1 overflow-y-auto @container">
+              <LoadingSkeleton />
+            </div>
+          ) : (
           <div
             ref={listScrollRef}
             className="min-h-0 flex-1 overflow-auto @container"
@@ -1184,6 +1187,7 @@ export function AgentsPage(_props: AgentsPageProps = {}) {
               </ListGridBody>
             </ListGrid>
           </div>
+          )}
         </>
       )}
 

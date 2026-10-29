@@ -8,7 +8,7 @@ import {
   type MouseEvent,
   type ReactNode,
 } from "react";
-import { RotateCw, X } from "lucide-react";
+import { RotateCw, X } from "@multica/ui/icons";
 import { Button } from "@multica/ui/components/ui/button";
 import { useT } from "../i18n";
 

@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, type ReactNode } from "react";
-import { Check, ChevronDown, FileText, ImageIcon, MessageSquareText } from "lucide-react";
+import { Check, ChevronDown, FileText, ImageIcon, MessageSquareText } from "@multica/ui/icons";
 import {
   findDeliverableVersion,
   type DeliverableFile,

@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useCallback, useRef, useEffect } from "react";
-import { Check } from "lucide-react";
+import { Check } from "@multica/ui/icons";
 import {
   Popover,
   PopoverTrigger,

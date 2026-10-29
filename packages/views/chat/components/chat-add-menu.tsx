@@ -1,7 +1,7 @@
 "use client";
 
 import { useRef } from "react";
-import { Check, FolderKanban, Image as ImageIcon, Plus, X } from "lucide-react";
+import { Check, FolderKanban, Image as ImageIcon, Plus, X } from "@multica/ui/icons";
 import { IconButton } from "@multica/ui/components/common/icon-button";
 import {
   DropdownMenu,

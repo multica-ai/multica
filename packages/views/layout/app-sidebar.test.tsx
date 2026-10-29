@@ -207,7 +207,11 @@ vi.mock("@tanstack/react-query", async (importOriginal) => ({
     if (queryKey[0] === "chat" && queryKey[2] === "sessions") return { data: chatSessions.current };
     return { data: [] };
   },
-  useQueryClient: () => ({ fetchQuery: vi.fn(), invalidateQueries: invitationApi.invalidateQueries }),
+  useQueryClient: () => ({
+    fetchQuery: vi.fn(),
+    prefetchQuery: vi.fn(),
+    invalidateQueries: invitationApi.invalidateQueries,
+  }),
 }));
 
 describe("PinRow", () => {

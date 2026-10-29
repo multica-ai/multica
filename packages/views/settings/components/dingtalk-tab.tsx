@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { useInfiniteQuery, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { ChevronDown, ChevronRight, ExternalLink, Info, Trash2 } from "lucide-react";
+import { ChevronDown, ChevronRight, ExternalLink, Info, Trash2 } from "@multica/ui/icons";
 import { cn } from "@multica/ui/lib/utils";
 import { Button } from "@multica/ui/components/ui/button";
 import { Card, CardContent } from "@multica/ui/components/ui/card";

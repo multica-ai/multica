@@ -9,7 +9,7 @@ import {
   RotateCcw,
   Square,
   Trash2,
-} from "lucide-react";
+} from "@multica/ui/icons";
 import { useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import type { Agent } from "@multica/core/types";

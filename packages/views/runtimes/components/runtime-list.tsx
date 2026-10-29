@@ -10,7 +10,7 @@ import {
   MoreHorizontal,
   Pencil,
   Trash2,
-} from "lucide-react";
+} from "@multica/ui/icons";
 import { toast } from "sonner";
 import { useQuery } from "@tanstack/react-query";
 import { CurrencyNumberFlow } from "@multica/ui/components/ui/number-flow";

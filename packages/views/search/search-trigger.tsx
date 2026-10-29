@@ -1,6 +1,6 @@
 "use client";
 
-import { Search } from "lucide-react";
+import { Search } from "@multica/ui/icons";
 import { SidebarMenuButton } from "@multica/ui/components/ui/sidebar";
 import {
   useShortcut,
