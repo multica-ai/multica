@@ -6,7 +6,7 @@ import {
   Bot,
   Lock,
   Plus,
-} from "lucide-react";
+} from "@multica/ui/icons";
 import { useQuery } from "@tanstack/react-query";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import type {

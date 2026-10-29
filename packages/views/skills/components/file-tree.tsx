@@ -12,7 +12,7 @@ import {
   Pencil,
   PencilLine,
   Trash2,
-} from "lucide-react";
+} from "@multica/ui/icons";
 import { Input } from "@multica/ui/components/ui/input";
 import {
   DropdownMenu,

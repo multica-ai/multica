@@ -2,6 +2,12 @@
  * Multica shared base styles — imported by all apps
  * ============================================================================= */
 
+/* The UI locale is Chinese, Japanese or Korean. Han, kana and Hangul fill the
+ * whole em square, so wrapped CJK text needs more leading than the Latin value
+ * the type scale pairs with each size. Keyed to <html lang>, which both apps
+ * set from the active locale. */
+@custom-variant cjk (&:is(:lang(zh), :lang(ja), :lang(ko)));
+
 /* The chat launcher overlays the dashboard's bottom-right corner on every
  * workspace page, so anything that runs to that corner has to stop short of
  * it. Named rather than spelled out at each site: the intent is legible, every

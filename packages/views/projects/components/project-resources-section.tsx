@@ -10,7 +10,7 @@ import {
   Plus,
   Search,
   Trash2,
-} from "lucide-react";
+} from "@multica/ui/icons";
 import { toast } from "sonner";
 import {
   projectResourcesOptions,

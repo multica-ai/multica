@@ -1,4 +1,4 @@
-import { Ban, CheckCircle2, XCircle } from "lucide-react";
+import { Ban, CheckCircle2, XCircle } from "@multica/ui/icons";
 import type { AgentTask } from "@multica/core/types";
 
 // Terminal-status glyph for one agent run. Shared by the execution log rows

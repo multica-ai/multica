@@ -13,7 +13,7 @@ import {
   Trash2,
   Users,
   X,
-} from "lucide-react";
+} from "@multica/ui/icons";
 import { useQuery, useQueryClient, useMutation } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { useCurrentWorkspace, useWorkspacePaths } from "@multica/core/paths";

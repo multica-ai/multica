@@ -15,7 +15,7 @@ import {
   Shield,
   Webhook,
   Zap,
-} from "lucide-react";
+} from "@multica/ui/icons";
 import { useQuery } from "@tanstack/react-query";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { autopilotListOptions } from "@multica/core/autopilots/queries";

@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { CornerDownRight } from "lucide-react";
+import { CornerDownRight } from "@multica/ui/icons";
 import {
   CoachMark,
   DemoAvatar,

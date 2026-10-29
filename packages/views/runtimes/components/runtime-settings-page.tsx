@@ -1,6 +1,6 @@
 "use client";
 
-import { Server } from "lucide-react";
+import { Server } from "@multica/ui/icons";
 import { useQuery } from "@tanstack/react-query";
 import type { AgentRuntime } from "@multica/core/types";
 import { useWorkspaceId } from "@multica/core/hooks";

@@ -244,7 +244,7 @@ describe("TabBar hover action buttons", () => {
     // The leading slot is the resource visual (size-3.5), not a Pin glyph. The
     // only Pin lives in the size-2.5 hover action button.
     expect(pinnedTab.querySelector('[data-testid="tab-leading"]')).toBeTruthy();
-    expect(pinnedTab.querySelector(".lucide-pin.size-3\\.5")).toBeNull();
+    expect(pinnedTab.querySelector(".icon-pin.size-3\\.5")).toBeNull();
   });
 });
 

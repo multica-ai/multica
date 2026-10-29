@@ -54,8 +54,8 @@ const (
 
 var validPropertyTypes = []string{"text", "number", "select", "multi_select", "date", "checkbox", "url", "actor", "multi_actor", "multi_text", "multi_url"}
 
-// Property icons use stable catalog keys that the Web client maps to Lucide
-// glyphs. Keeping this allowlist at the API boundary prevents arbitrary text
+// Property icons use stable catalog keys that the Web client maps to its
+// icon glyphs. Keeping this allowlist at the API boundary prevents arbitrary text
 // (including emoji) from leaking into every issue surface that renders icons.
 var validPropertyIcons = map[string]struct{}{
 	"circle-dot": {}, "signal-high": {}, "user-round": {}, "folder-kanban": {},

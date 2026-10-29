@@ -12,7 +12,7 @@ import {
   MoreHorizontal,
   Settings2,
   X as XIcon,
-} from "lucide-react";
+} from "@multica/ui/icons";
 import { useQuery } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { DialogTitle } from "@multica/ui/components/ui/dialog";

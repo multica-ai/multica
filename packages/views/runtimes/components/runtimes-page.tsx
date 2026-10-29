@@ -14,7 +14,7 @@ import {
   Search,
   Server,
   SquareTerminal,
-} from "lucide-react";
+} from "@multica/ui/icons";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { useAuthStore } from "@multica/core/auth";

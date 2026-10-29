@@ -12,7 +12,7 @@ import {
   Copy,
   Check,
   Webhook,
-} from "lucide-react";
+} from "@multica/ui/icons";
 import { useQuery } from "@tanstack/react-query";
 import {
   autopilotDeliveriesOptions,

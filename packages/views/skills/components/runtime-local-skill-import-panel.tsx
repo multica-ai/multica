@@ -14,7 +14,7 @@ import {
   Search,
   SkipForward,
   XCircle,
-} from "lucide-react";
+} from "@multica/ui/icons";
 import type {
   RuntimeLocalSkillImportConflict,
   RuntimeLocalSkillSummary,

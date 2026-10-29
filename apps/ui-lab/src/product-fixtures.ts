@@ -330,6 +330,7 @@ export function createFixtureApi(getLocale: () => LabLocale = () => "en") {
     listPins: async () => [],
     listMyInvitations: async () => [],
     getInboxUnreadSummary: async () => [],
+    listArchivedInboxPage: async () => ({ items: [], hasMore: false, nextCursor: null }),
     getUnreadInboxCount: async () => ({ count: 0 }),
     listChatSessions: async () => [],
     listIssueViews: async () => [],

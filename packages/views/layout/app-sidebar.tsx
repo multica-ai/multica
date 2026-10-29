@@ -26,7 +26,7 @@ import { Layers,
   Check,
   SquarePen,
   X,
-} from "lucide-react";
+} from "@multica/ui/icons";
 import { WorkspaceAvatar } from "../workspace/workspace-avatar";
 import { ActorAvatar } from "@multica/ui/components/common/actor-avatar";
 import { Tooltip, TooltipTrigger, TooltipContent } from "@multica/ui/components/ui/tooltip";

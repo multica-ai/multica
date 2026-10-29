@@ -26,7 +26,7 @@ import {
   ArrowUpRight,
   Copy,
   RotateCw,
-} from "lucide-react";
+} from "@multica/ui/icons";
 import { useScrollFade } from "@multica/ui/hooks/use-scroll-fade";
 import { isTaskMessageTaskId, taskMessagesOptions } from "@multica/core/chat/queries";
 import { RichContent } from "../../rich-content";

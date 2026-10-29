@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { BotOff, CircleDot, Filter, Mail, RotateCcw, SignalHigh, UserRound } from "lucide-react";
+import { BotOff, CircleDot, Filter, Mail, RotateCcw, SignalHigh, UserRound } from "@multica/ui/icons";
 import { PRIORITY_DISPLAY_ORDER } from "@multica/core/issues/config";
 import {
   filterInboxItems,

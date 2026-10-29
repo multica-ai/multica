@@ -1,7 +1,7 @@
 "use client";
 
 import { useRef, useState } from "react";
-import { ArrowRight, ChevronDown, ChevronRight, CornerDownRight, X } from "lucide-react";
+import { ArrowRight, ChevronDown, ChevronRight, CornerDownRight, X } from "@multica/ui/icons";
 import { Button } from "@multica/ui/components/ui/button";
 import { cn } from "@multica/ui/lib/utils";
 import {

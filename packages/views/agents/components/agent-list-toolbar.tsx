@@ -7,7 +7,7 @@ import {
   Filter,
   Search,
   X,
-} from "lucide-react";
+} from "@multica/ui/icons";
 import {
   ALL_ACCESS_SCOPES,
   effectiveAccessScope,

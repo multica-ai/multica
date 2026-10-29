@@ -1,36 +1,169 @@
 {
-  "title": "搜索",
-  "description": "搜索页面、任务、项目和成员",
-  "placeholder": "输入命令或关键词搜索...",
+  "title": "命令栏",
+  "description": "搜索、执行命令，或把工作交给智能体",
+  "placeholder": "搜索，或输入要做的事...",
+  "page_placeholder": "筛选...",
+  "breadcrumb_aria": "当前菜单",
   "groups": {
     "pages": "页面",
     "commands": "命令",
     "members": "成员",
+    "agents": "智能体",
+    "squads": "小队",
     "projects": "项目",
     "issues": "任务",
+    "autopilots": "自动化",
+    "chats": "对话",
+    "skills": "Skills",
     "cancelled": "已取消",
     "recent": "最近",
-    "workspaces": "工作区"
+    "workspaces": "工作区",
+    "new": "新建",
+    "best_match": "最佳匹配",
+    "actions": "操作"
+  },
+  "context": {
+    "current_issue": "当前任务",
+    "selected_issues_other": "已选 {{count}} 个任务",
+    "current_project": "当前项目",
+    "current_agent": "当前智能体",
+    "current_autopilot": "当前自动化",
+    "inbox": "收件箱",
+    "current_chat": "当前对话"
   },
   "commands": {
     "current_theme_aria": "当前主题",
     "new_issue": "新建任务",
     "new_project": "新建项目",
+    "new_autopilot": "新建自动化",
+    "chat_with_agent": "和智能体对话",
+    "change_theme": "切换主题...",
+    "send_feedback": "发送反馈",
     "copy_issue_link": "复制任务链接",
     "copy_identifier": "复制标识符 ({{identifier}})",
     "fold_all_comments": "收起全部评论",
-    "unfold_all_comments": "展开全部评论",
-    "switch_to_light": "切换到浅色主题",
-    "switch_to_dark": "切换到深色主题",
-    "use_system_theme": "跟随系统主题"
+    "unfold_all_comments": "展开全部评论"
+  },
+  "issue": {
+    "change_status": "更改状态...",
+    "assign_to": "指派给...",
+    "set_priority": "设置优先级...",
+    "run_quick_action": "运行快捷操作...",
+    "quick_actions_available_other": "{{count}} 条可用",
+    "add_label": "添加标签...",
+    "set_due_date": "设置截止日期...",
+    "move_to_project": "移动到项目...",
+    "set_parent": "设置父任务...",
+    "cancel_run": "取消当前运行",
+    "retry_run": "重试上次运行",
+    "create_sub_issue": "新建子任务",
+    "subscribe": "订阅",
+    "unsubscribe": "取消订阅",
+    "delete": "删除任务",
+    "delete_selected_other": "删除 {{count}} 个任务"
+  },
+  "project": {
+    "change_status": "更改项目状态...",
+    "new_issue": "在此项目下新建任务",
+    "pin": "固定到侧边栏",
+    "unpin": "从侧边栏取消固定",
+    "copy_link": "复制项目链接"
+  },
+  "agent": {
+    "chat": "和 {{name}} 对话",
+    "assign_issue": "把任务指派给 {{name}}...",
+    "new_issue": "新建任务给 {{name}}",
+    "pin_in_chat": "在聊天里固定",
+    "unpin_in_chat": "从聊天里取消固定"
+  },
+  "autopilot": {
+    "run_now": "立即运行一次",
+    "pause": "暂停",
+    "resume": "启用"
+  },
+  "inbox": {
+    "archive": "归档",
+    "mark_unread": "标为未读",
+    "mark_all_read": "收件箱全部标为已读",
+    "archive_all_read": "归档收件箱全部已读"
+  },
+  "chat": {
+    "link_project": "关联到项目...",
+    "pin": "固定对话",
+    "unpin": "取消固定对话",
+    "archive": "归档对话"
+  },
+  "pages": {
+    "status": "状态",
+    "priority": "优先级",
+    "assignee": "负责人",
+    "labels": "标签",
+    "due_date": "截止日期",
+    "project": "项目",
+    "parent": "父任务",
+    "quick_actions": "快捷操作",
+    "theme": "主题",
+    "project_status": "项目状态",
+    "no_project": "无项目",
+    "current": "当前"
+  },
+  "theme": {
+    "light": "浅色",
+    "dark": "深色",
+    "system": "跟随系统"
   },
   "toast": {
     "link_copied": "已复制链接",
-    "copied_identifier": "已复制 {{identifier}}"
+    "copied_identifier": "已复制 {{identifier}}",
+    "run_retried": "已重新运行",
+    "run_cancelled": "已取消运行",
+    "subscribed": "已订阅",
+    "unsubscribed": "已取消订阅",
+    "label_added": "已添加标签 {{name}}",
+    "label_removed": "已移除标签 {{name}}",
+    "label_failed": "未能给所有任务添加标签 {{name}}",
+    "update_failed": "更新失败",
+    "assigned": "已把 {{identifier}} 指派给 {{name}}"
   },
   "empty": {
     "no_results": "未找到结果。",
-    "type_to_search": "输入关键词搜索任务和项目"
+    "no_labels": "没有标签",
+    "type_to_find_issue": "输入关键词查找任务",
+    "type_to_find_people": "输入关键词查找成员和智能体"
+  },
+  "delegate": {
+    "heading": "交给智能体",
+    "create_and_assign": "新建任务并指派给 {{name}}",
+    "squad": "小队",
+    "context_aria": "附带上下文",
+    "parent": "挂在 {{identifier}} 下",
+    "pick_crumb": "选择",
+    "pick_another": "换一个智能体或小队...",
+    "detected": "识别为指令"
+  },
+  "best": {
+    "assign": "把 {{subject}} 指派给 {{name}}",
+    "chat": "和 {{name}} 对话",
+    "new_issue_in": "在 {{name}} 下新建任务"
+  },
+  "types": {
+    "issue": "任务",
+    "project": "项目",
+    "agent": "智能体",
+    "autopilot": "自动化",
+    "squad": "小队",
+    "member": "成员"
+  },
+  "footer": {
+    "navigate": "选择",
+    "select": "执行",
+    "open_in_new_tab": "在新标签页打开",
+    "delegate": "新建并交给 {{name}}",
+    "search_instead": "仅作为关键词搜索",
+    "back": "返回",
+    "prefix_commands": "命令",
+    "prefix_issues": "任务",
+    "prefix_people": "人和智能体"
   },
   "trigger": {
     "label": "搜索..."

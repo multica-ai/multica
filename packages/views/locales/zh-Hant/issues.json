@@ -463,6 +463,7 @@
     "agents_group": "智慧體",
     "mark_done_tooltip": "標記為已完成",
     "archive_tooltip": "歸檔",
+    "restore_to_inbox_tooltip": "恢復到收件箱",
     "pin_tooltip": "固定到側邊欄",
     "unpin_tooltip": "從側邊欄取消固定",
     "quick_jump_label": "快捷跳轉",
@@ -743,12 +744,11 @@
     "trigger_wakeup": "由喚醒觸發 · {{condition}}",
     "trigger_image": "[圖片]",
     "summary_runs_other": "{{count}} 次執行",
-    "latest": "最近",
     "open_timeline": "開啟時間線",
     "more_runs_other": "顯示其餘 {{count}} 次執行",
     "strip_aria": "每次執行的費用——開啟執行時間線",
     "strip_no_usage": "沒有用量記錄",
-    "sparkline_now": "現在"
+    "queued_count_other": "{{count}} 個排隊中"
   },
   "runs_timeline": {
     "title": "執行記錄",

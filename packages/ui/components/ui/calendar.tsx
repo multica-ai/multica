@@ -10,7 +10,7 @@ import {
 
 import { cn } from "@multica/ui/lib/utils"
 import { Button, buttonVariants } from "@multica/ui/components/ui/button"
-import { ChevronLeftIcon, ChevronRightIcon, ChevronDownIcon } from "lucide-react"
+import { ChevronLeftIcon, ChevronRightIcon, ChevronDownIcon } from "@multica/ui/icons"
 
 function Calendar({
   className,

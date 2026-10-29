@@ -30,7 +30,7 @@ import {
   Trash2,
   Undo2,
   X,
-} from "lucide-react";
+} from "@multica/ui/icons";
 import { Button } from "@multica/ui/components/ui/button";
 import { MulticaIcon } from "@multica/ui/components/common/multica-icon";
 import { Input } from "@multica/ui/components/ui/input";

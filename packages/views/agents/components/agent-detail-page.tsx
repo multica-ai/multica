@@ -1,6 +1,7 @@
 "use client";
 
-import { useState } from "react";
+import { useMemo, useState } from "react";
+import { useRegisterCommandBarContext } from "../../search/register-context";
 import {
   AlertCircle,
   ArrowLeft,
@@ -12,7 +13,7 @@ import {
   Plus,
   Server,
   Trash2,
-} from "lucide-react";
+} from "@multica/ui/icons";
 import { toast } from "sonner";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import type {
@@ -115,6 +116,9 @@ export function AgentDetailPage({ agentId }: AgentDetailPageProps) {
     listAgent ?? (isForbidden || isNotFound ? null : detailQuery.data) ?? null;
   const presence: AgentPresenceDetail | null =
     agent ? presenceMap.get(agent.id) ?? null : null;
+  useRegisterCommandBarContext(
+    useMemo(() => (agent ? { kind: "agent", agent } : null), [agent]),
+  );
 
   // Permission hook MUST be called unconditionally — its `agent | null`
   // signature handles the not-found / loading case internally so the early

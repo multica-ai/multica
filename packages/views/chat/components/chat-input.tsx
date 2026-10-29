@@ -2,7 +2,7 @@
 
 import type { ReactNode } from "react";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import { TriangleAlert } from "lucide-react";
+import { TriangleAlert } from "@multica/ui/icons";
 import { toast } from "sonner";
 import { cn } from "@multica/ui/lib/utils";
 import {

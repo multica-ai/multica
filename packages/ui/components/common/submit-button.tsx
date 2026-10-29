@@ -1,7 +1,7 @@
 "use client";
 
 import type { ReactNode, SyntheticEvent } from "react";
-import { ArrowUp, Loader2, Square } from "lucide-react";
+import { ArrowUp, Loader2, Square } from "@multica/ui/icons";
 import { Button } from "@multica/ui/components/ui/button";
 import {
   Tooltip,

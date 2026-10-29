@@ -9,7 +9,7 @@ import {
   Lock,
   Pencil,
   Plus,
-} from "lucide-react";
+} from "@multica/ui/icons";
 import { SkillIcon } from "../lib/skill-icon";
 import type {
   Agent,

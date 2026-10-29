@@ -12,7 +12,7 @@ import {
   Save,
   Trash2,
   WrapText,
-} from "lucide-react";
+} from "@multica/ui/icons";
 import { api } from "@multica/core/api";
 import type { Agent } from "@multica/core/types";
 import { Button } from "@multica/ui/components/ui/button";

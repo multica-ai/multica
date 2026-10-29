@@ -14,7 +14,7 @@ import {
 } from "@multica/core/agents";
 import { issueDetailOptions } from "@multica/core/issues";
 import type { AgentTask } from "@multica/core/types";
-import { AlertTriangle } from "lucide-react";
+import { AlertTriangle } from "@multica/ui/icons";
 import { AppLink } from "../../navigation";
 import { useT, useTimeAgo } from "../../i18n";
 import { availabilityConfig, workloadConfig } from "../presence";

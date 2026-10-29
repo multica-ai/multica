@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Loader2, Save } from "lucide-react";
+import { Loader2, Save } from "@multica/ui/icons";
 import type { Agent } from "@multica/core/types";
 import {
   OPENCLAW_GATEWAY_TOKEN_MASK,

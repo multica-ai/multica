@@ -9,7 +9,7 @@ import {
   MessageSquare,
   Workflow,
   X,
-} from "lucide-react";
+} from "@multica/ui/icons";
 import { toast } from "sonner";
 import {
   Tooltip,

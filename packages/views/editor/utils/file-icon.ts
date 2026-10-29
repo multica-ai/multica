@@ -12,8 +12,8 @@ import {
   FileText,
   FileVideo,
   ImageIcon,
-  type LucideIcon,
-} from "lucide-react";
+  type IconComponent,
+} from "@multica/ui/icons";
 import { getPreviewKind } from "./preview";
 
 function extensionOf(filename: string): string {
@@ -40,7 +40,7 @@ export function isDocumentFile(contentType: string, filename: string): boolean {
   return DOCUMENT_EXTENSIONS.has(extensionOf(filename));
 }
 
-export function fileIcon(contentType: string, filename: string): LucideIcon {
+export function fileIcon(contentType: string, filename: string): IconComponent {
   const ext = extensionOf(filename);
   if (SPREADSHEET_EXTENSIONS.has(ext)) return FileSpreadsheet;
   if (ARCHIVE_EXTENSIONS.has(ext)) return FileArchive;

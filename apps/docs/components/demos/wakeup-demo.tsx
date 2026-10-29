@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState, type ReactNode } from "react";
-import { Bell, ChevronDown, ChevronRight, Clock3, FastForward, Info, Plus, RefreshCw } from "lucide-react";
+import { Bell, ChevronDown, ChevronRight, Clock3, FastForward, Info, Plus, RefreshCw } from "@multica/ui/icons";
 import { Button } from "@multica/ui/components/ui/button";
 import { cn } from "@multica/ui/lib/utils";
 import {

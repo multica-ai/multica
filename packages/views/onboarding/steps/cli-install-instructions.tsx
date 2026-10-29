@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, type ReactNode } from "react";
-import { Check, Copy, Terminal } from "lucide-react";
+import { Check, Copy, Terminal } from "@multica/ui/icons";
 import { Card, CardContent } from "@multica/ui/components/ui/card";
 import { TooltipHint } from "@multica/ui/components/common/tooltip-hint";
 import { CODE_LIGATURE_CLASS } from "@multica/ui/lib/code-style";

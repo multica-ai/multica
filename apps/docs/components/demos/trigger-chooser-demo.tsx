@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { ArrowRight, Check } from "lucide-react";
+import { ArrowRight, Check } from "@multica/ui/icons";
 import { cn } from "@multica/ui/lib/utils";
 import { LocaleLink } from "@/components/locale-link";
 import { CoachMark, DemoFrame, useDemoCopy, useStartWhenVisible } from "./demo-kit";

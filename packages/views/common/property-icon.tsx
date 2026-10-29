@@ -42,18 +42,18 @@ import {
   Wrench,
   X,
   Zap,
-  type LucideIcon,
-} from "lucide-react";
+  type IconComponent,
+} from "@multica/ui/icons";
 import { DeferredTooltip } from "./deferred-tooltip";
 
 interface PropertyIconOption {
   value: string;
   label: string;
-  Icon: LucideIcon;
+  Icon: IconComponent;
 }
 
 /**
- * A deliberately small Lucide catalog that starts with the same symbols used
+ * A deliberately small icon catalog that starts with the same symbols used
  * by built-in issue properties. Persist stable keys rather than SVG data or
  * component names so the visual implementation can evolve independently.
  */

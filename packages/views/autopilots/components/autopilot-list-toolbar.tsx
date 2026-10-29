@@ -6,7 +6,7 @@ import {
   ChevronDown,
   Filter,
   X,
-} from "lucide-react";
+} from "@multica/ui/icons";
 import type { Autopilot } from "@multica/core/types";
 import {
   AUTOPILOT_SCOPES,

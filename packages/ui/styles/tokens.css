@@ -93,10 +93,13 @@
     /* counters, badges, timestamps, overline labels */
     --text-micro: 11px;
     --text-micro--line-height: 15px;
-    /* secondary and helper text — was text-xs */
+    /* chips, shortcut hints, tooltips, helper text under a field, issue
+       identifiers — was text-xs. Not for text people read in place:
+       that is label. */
     --text-caption: 12px;
     --text-caption--line-height: 16px;
-    /* dense labels: table headers, metadata rows */
+    /* text read in place beside body copy: activity entries, comment
+       timestamps, property panel rows, table headers, metadata rows */
     --text-label: 13px;
     --text-label--line-height: 18px;
     /* UI body, the workhorse — was text-sm */

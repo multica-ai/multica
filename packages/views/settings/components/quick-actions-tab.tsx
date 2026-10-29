@@ -14,7 +14,7 @@ import {
   Trash2,
   TriangleAlert,
   Zap,
-} from "lucide-react";
+} from "@multica/ui/icons";
 import { toast } from "sonner";
 import { useWorkspaceId } from "@multica/core/hooks";
 import {

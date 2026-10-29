@@ -1,6 +1,6 @@
 "use client";
 
-import { Server } from "lucide-react";
+import { Server } from "@multica/ui/icons";
 import { useWorkspacePaths } from "@multica/core/paths";
 import { Button } from "@multica/ui/components/ui/button";
 import { cn } from "@multica/ui/lib/utils";

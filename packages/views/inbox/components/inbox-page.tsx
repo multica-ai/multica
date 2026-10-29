@@ -53,6 +53,7 @@ import {
 
 import { IssueDetail, issueHighlightMementoKey } from "../../issues/components/issue-detail";
 import { ActionShortcutKeycaps } from "../../common/shortcut-keycaps";
+import { useRegisterCommandBarContext } from "../../search/register-context";
 import { IssuePeekHost } from "../../issues/components/issue-peek";
 import { useIssueSurfaceActivity } from "../../issues/surface/activity";
 import { useViewStateWriter } from "../../platform";
@@ -69,7 +70,7 @@ import {
   ChevronLeft,
   ListChecks,
   ArrowLeft,
-} from "lucide-react";
+} from "@multica/ui/icons";
 import type { InboxItem } from "@multica/core/types";
 import { Button } from "@multica/ui/components/ui/button";
 import { IconButton } from "@multica/ui/components/common/icon-button";
@@ -570,6 +571,37 @@ export function InboxPage() {
         ),
     });
   };
+
+  // The command bar calls the page's own handlers, so archiving from it moves
+  // the selection and toasts exactly like the row actions do.
+  const commandBarHandlersRef = useRef({
+    handleArchive,
+    handleMarkUnread,
+    handleMarkAllRead,
+    handleArchiveAllRead,
+  });
+  useEffect(() => {
+    commandBarHandlersRef.current = {
+      handleArchive,
+      handleMarkUnread,
+      handleMarkAllRead,
+      handleArchiveAllRead,
+    };
+  });
+  const commandBarItem = isArchivedView ? null : selected;
+  useRegisterCommandBarContext(
+    useMemo(
+      () => ({
+        kind: "inbox",
+        item: commandBarItem,
+        archive: (id: string) => commandBarHandlersRef.current.handleArchive(id),
+        markUnread: (id: string) => commandBarHandlersRef.current.handleMarkUnread(id),
+        markAllRead: () => commandBarHandlersRef.current.handleMarkAllRead(),
+        archiveAllRead: () => commandBarHandlersRef.current.handleArchiveAllRead(),
+      }),
+      [commandBarItem],
+    ),
+  );
 
   const handleArchiveCompleted = () => {
     setSelectedKey("");

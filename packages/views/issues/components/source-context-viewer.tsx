@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { AlertTriangle, ChevronRight, LocateFixed, Maximize2, Minimize2, XIcon } from "lucide-react";
+import { AlertTriangle, ChevronRight, LocateFixed, Maximize2, Minimize2, XIcon } from "@multica/ui/icons";
 import { issueStatusCategory } from "@multica/core/issues";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { useIssueStatuses } from "@multica/core/issue-statuses/hooks";

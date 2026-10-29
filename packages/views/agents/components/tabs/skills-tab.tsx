@@ -7,7 +7,7 @@ import {
   RefreshCw,
   Server,
   Trash2,
-} from "lucide-react";
+} from "@multica/ui/icons";
 import { SkillIcon } from "../../../skills/lib/skill-icon";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";

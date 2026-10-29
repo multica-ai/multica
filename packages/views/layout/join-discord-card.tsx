@@ -1,6 +1,6 @@
 "use client";
 
-import { X } from "lucide-react";
+import { X } from "@multica/ui/icons";
 import { useAuthStore } from "@multica/core/auth";
 import { TooltipHint } from "@multica/ui/components/common/tooltip-hint";
 import { DISCORD_URL, DiscordIcon } from "./discord";
