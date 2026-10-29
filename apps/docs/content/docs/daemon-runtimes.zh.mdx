@@ -165,6 +165,10 @@ CodeBuddy、Kimi CLI 和 Pi 启动时会自己加载用户级配置，并与 Mul
 | Hermes 记忆（每个智能体一份） | 同一目录下的 `hermes-state/` | 90 天未使用后删除 |
 | 每次运行的私有临时目录（`TMPDIR`） | 系统临时目录下的 `multica-task-*` | 运行结束后删除，守护进程被强制结束时由之后的清理补删 |
 
+Hermes 在任务和聊天中的运行会将会话持久目录作为隔离的 `HERMES_HOME`，`state.db` 及其 SQLite 日志文件均为目录内的普通文件。这个布局同时支持旧版进程内 ACP 和新版由 Gateway 执行的 ACP。已有会话记录会直接复用，旧运行目录中的会话历史会在下次运行前迁移。
+
+Multica 每次运行都会刷新其中的 skill 和派生配置。模型服务认证会保留，托管运行的消息平台适配器和 HTTP 入口会关闭。宿主的 Gateway 状态、日志、会话和定时任务各自隔离。运行结束时会停止本次运行的 Gateway，确保后续运行使用自己的执行环境。
+
 ### Codex 原生记忆与子智能体 [#codex-memory]
 
 守护进程管理的 Codex 运行默认关闭 Codex 原生记忆，避免本机或前一次运行留下的记忆带进别的工作区。设置只写入这次运行专用的 `CODEX_HOME/config.toml`（`features.memories` 和 `memories.generate_memories`、`memories.use_memories` 均为 `false`），不改你的 `~/.codex/config.toml`。需要保留原生记忆时，在守护进程的环境中设置 `MULTICA_CODEX_MEMORY=1`。

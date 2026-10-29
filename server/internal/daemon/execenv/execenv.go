@@ -103,7 +103,7 @@ type PrepareParams struct {
 	// Multica profile dir could not be resolved.
 	HermesMemoryStore string
 	// HermesSessionStore is the conversation's persistent Hermes session store
-	// (HermesSessionStorePath) the overlay links state.db to, so the transcript
+	// (HermesSessionStorePath) used as HERMES_HOME, so the transcript
 	// outlives the task and a follow-up turn can actually resume it. Empty keeps
 	// state.db task-local — no agent or conversation to key on, or the Multica
 	// profile dir could not be resolved.
@@ -317,9 +317,10 @@ type Environment struct {
 	// exports this as CURSOR_DATA_DIR so project-level MCP approvals are
 	// isolated from the user's persistent ~/.cursor/projects state.
 	CursorDataDir string
-	// HermesHome is the path to the per-task HERMES_HOME overlay (set only for
+	// HermesHome is the effective HERMES_HOME overlay (set only for
 	// the hermes provider, and only when the agent has skills bound — empty
-	// otherwise, leaving the user's real home in place). It mirrors ~/.hermes/
+	// otherwise, leaving the user's real home in place). With a conversation
+	// store it lives there; otherwise it lives under the task root. It mirrors ~/.hermes/
 	// via symlink, derives a config.yaml that references the user's real skills
 	// as an external root, and holds the bound skills in its skills/ subdir. The
 	// daemon exports it as HERMES_HOME so the hermes CLI discovers those skills
@@ -327,10 +328,8 @@ type Environment struct {
 	// .agent_context/skills/ fallback was never read (issue #5242). See
 	// hermes_home.go.
 	HermesHome string
-	// HermesSessionStore is the conversation's session store this task's
-	// state.db is actually linked to, or "" when the session database stayed
-	// task-local (no store to key on, or a host that could not create the
-	// link).
+	// HermesSessionStore is the conversation's durable home, or "" when
+	// there is no conversation store and the home stays task-local.
 	HermesSessionStore string
 	// HermesSessionHistoryPresent reports that the mounted store actually holds
 	// a session database — a prior turn's transcript this task can resume.
@@ -670,7 +669,7 @@ func Prepare(params PrepareParams, logger *slog.Logger) (*Environment, error) {
 		if err != nil {
 			return nil, fmt.Errorf("execenv: prepare hermes-home: %w", err)
 		}
-		env.HermesHome = hermesHome
+		env.HermesHome = sessions.Home
 		if sessions.Mounted {
 			env.HermesSessionStore = params.HermesSessionStore
 			env.HermesSessionHistoryPresent = sessions.HistoryPresent
@@ -982,7 +981,7 @@ func Reuse(params ReuseParams, logger *slog.Logger) *Environment {
 				logger.Warn("execenv: refresh hermes-home failed; forcing fresh prepare", "error", err)
 				return nil
 			}
-			env.HermesHome = hermesHome
+			env.HermesHome = sessions.Home
 			env.HermesSessionStore = ""
 			env.HermesSessionHistoryPresent = false
 			if sessions.Mounted {

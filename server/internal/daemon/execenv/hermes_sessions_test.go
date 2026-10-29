@@ -84,13 +84,14 @@ func TestPrepareHermesHomeSessionStorePersistsAcrossTasks(t *testing.T) {
 		t.Fatal("HistoryPresent = true on a conversation's first turn, want false")
 	}
 	// Hermes creates state.db lazily and writes the transcript into it.
-	mustWrite(t, filepath.Join(firstTask, "state.db"), "transcript")
+	mustWrite(t, filepath.Join(sessions.Home, "state.db"), "transcript")
 
 	secondTask := filepath.Join(t.TempDir(), "hermes-home")
-	if _, err := prepareHermesHome(secondTask, sharedHome, false, skills, nil, "", store, testLogger()); err != nil {
+	sessions, err = prepareHermesHome(secondTask, sharedHome, false, skills, nil, "", store, testLogger())
+	if err != nil {
 		t.Fatalf("prepare second task: %v", err)
 	}
-	got, err := os.ReadFile(filepath.Join(secondTask, "state.db"))
+	got, err := os.ReadFile(filepath.Join(sessions.Home, "state.db"))
 	if err != nil {
 		t.Fatalf("second task lost the conversation transcript: %v", err)
 	}
@@ -98,14 +99,14 @@ func TestPrepareHermesHomeSessionStorePersistsAcrossTasks(t *testing.T) {
 		t.Fatalf("transcript = %q, want %q", got, "transcript")
 	}
 
-	// It must be a link into the store, not a copy — a copy would take this
-	// turn's writes and throw them away with the task directory.
-	fi, err := os.Lstat(filepath.Join(secondTask, "state.db"))
+	// The database is an ordinary file in the durable home. Task cleanup
+	// cannot delete it, and gateway ownership checks accept it.
+	fi, err := os.Lstat(filepath.Join(sessions.Home, "state.db"))
 	if err != nil {
 		t.Fatalf("lstat state.db: %v", err)
 	}
-	if fi.Mode()&os.ModeSymlink == 0 {
-		t.Fatalf("state.db is not a link (mode %v)", fi.Mode())
+	if !fi.Mode().IsRegular() {
+		t.Fatalf("state.db is not a regular file (mode %v)", fi.Mode())
 	}
 }
 
@@ -124,14 +125,14 @@ func TestPrepareHermesHomeSessionStoreIsolatesConversations(t *testing.T) {
 		filepath.Join(storeRoot, "agent-1", "default", "issue-a"), testLogger()); err != nil {
 		t.Fatalf("prepare conversation A: %v", err)
 	}
-	mustWrite(t, filepath.Join(homeA, "state.db"), "issue A transcript")
+	mustWrite(t, filepath.Join(storeRoot, "agent-1", "default", "issue-a", "state.db"), "issue A transcript")
 
 	homeB := filepath.Join(t.TempDir(), "hermes-home")
 	if _, err := prepareHermesHome(homeB, sharedHome, false, skills, nil, "",
 		filepath.Join(storeRoot, "agent-1", "default", "issue-b"), testLogger()); err != nil {
 		t.Fatalf("prepare conversation B: %v", err)
 	}
-	if _, err := os.ReadFile(filepath.Join(homeB, "state.db")); !os.IsNotExist(err) {
+	if _, err := os.ReadFile(filepath.Join(storeRoot, "agent-1", "default", "issue-b", "state.db")); !os.IsNotExist(err) {
 		t.Fatalf("conversation B can see another conversation's transcript (err = %v)", err)
 	}
 }
@@ -290,7 +291,7 @@ func TestPrepareHermesHomeSessionMountIsIdempotent(t *testing.T) {
 	if _, err := prepareHermesHome(hermesHome, sharedHome, false, skills, nil, "", store, testLogger()); err != nil {
 		t.Fatalf("prepare: %v", err)
 	}
-	mustWrite(t, filepath.Join(hermesHome, "state.db"), "transcript")
+	mustWrite(t, filepath.Join(store, "state.db"), "transcript")
 	if _, err := prepareHermesHome(hermesHome, sharedHome, false, skills, nil, "", store, testLogger()); err != nil {
 		t.Fatalf("reuse prepare: %v", err)
 	}
@@ -373,71 +374,29 @@ func TestPruneHermesSessionStoresDisabled(t *testing.T) {
 	}
 }
 
-// TestPrepareHermesHomeLinkFailureKeepsTaskLocalDB is the degradation contract:
-// on a host that cannot symlink, the mount must leave the task-local database
-// exactly where it found it. Getting the order wrong — migrate, delete, then
-// discover the link cannot be created — would turn a conversation that worked
-// via workdir reuse into an empty one, i.e. a regression on precisely the hosts
-// the fallback exists to protect.
-//
-// The failure is injected rather than skipped: this path must be covered on
-// every host, not only on a Windows box without symlink privileges.
-func TestPrepareHermesHomeLinkFailureKeepsTaskLocalDB(t *testing.T) {
-	sharedHome := t.TempDir()
-	store := filepath.Join(t.TempDir(), "issue-1")
-	skills := []SkillContextForEnv{{Name: "deploy", Content: "# Deploy"}}
-	hermesHome := filepath.Join(t.TempDir(), "hermes-home")
-
-	if _, err := prepareHermesHome(hermesHome, sharedHome, false, skills, nil, "", "", testLogger()); err != nil {
-		t.Fatalf("prepare pre-store task: %v", err)
+func TestPrepareHermesHomeSessionSurvivesTaskCleanup(t *testing.T) {
+	shared, scratch := t.TempDir(), filepath.Join(t.TempDir(), "hermes-home")
+	store := filepath.Join(t.TempDir(), "conversation")
+	if _, err := prepareHermesHome(scratch, shared, false, nil, nil, "", "", testLogger()); err != nil {
+		t.Fatal(err)
 	}
-	mustWrite(t, filepath.Join(hermesHome, "state.db"), "transcript")
-	mustWrite(t, filepath.Join(hermesHome, "state.db-wal"), "uncheckpointed tail")
-
-	restore := stubHermesSessionLink(t, func(string, string) error {
-		return errors.New("symlink privilege not held")
-	})
-
-	sessions, err := prepareHermesHome(hermesHome, sharedHome, false, skills, nil, "", store, testLogger())
+	mustWrite(t, filepath.Join(scratch, "state.db"), "transcript")
+	mustWrite(t, filepath.Join(scratch, "state.db-wal"), "uncheckpointed tail")
+	prepared, err := prepareHermesHome(scratch, shared, false, nil, nil, "", store, testLogger())
 	if err != nil {
-		t.Fatalf("prepare with unlinkable store: %v", err)
+		t.Fatal(err)
 	}
-	if sessions.Mounted || sessions.HistoryPresent {
-		t.Fatalf("mount = %+v, want both false when the link could not be created", sessions)
+	if !prepared.Mounted || !prepared.HistoryPresent || prepared.Home != store {
+		t.Fatalf("unexpected conversation home: %+v", prepared)
 	}
-
-	// The database — and its un-checkpointed tail — must still be here.
-	for name, want := range map[string]string{
-		"state.db":     "transcript",
-		"state.db-wal": "uncheckpointed tail",
-	} {
-		got, err := os.ReadFile(filepath.Join(hermesHome, name))
-		if err != nil {
-			t.Fatalf("%s was destroyed by a failed mount: %v", name, err)
+	if err := os.RemoveAll(scratch); err != nil {
+		t.Fatal(err)
+	}
+	for name, want := range map[string]string{"state.db": "transcript", "state.db-wal": "uncheckpointed tail"} {
+		got, err := os.ReadFile(filepath.Join(prepared.Home, name))
+		if err != nil || string(got) != want {
+			t.Fatalf("persistent %s = %q, %v; want %q", name, got, err, want)
 		}
-		if string(got) != want {
-			t.Fatalf("%s = %q, want %q", name, got, want)
-		}
-	}
-	if entries, err := os.ReadDir(store); err != nil {
-		t.Fatalf("read store: %v", err)
-	} else if len(entries) != 0 {
-		t.Fatalf("store holds %d entries after a failed mount, want 0", len(entries))
-	}
-
-	// And once the host can link again, the same overlay mounts and carries the
-	// database over — nothing was lost in between.
-	restore()
-	sessions, err = prepareHermesHome(hermesHome, sharedHome, false, skills, nil, "", store, testLogger())
-	if err != nil {
-		t.Fatalf("prepare after link support returns: %v", err)
-	}
-	if !sessions.Mounted || !sessions.HistoryPresent {
-		t.Fatalf("mount = %+v, want mounted with history after recovery", sessions)
-	}
-	got, err := os.ReadFile(filepath.Join(store, "state.db"))
-	if err != nil || string(got) != "transcript" {
-		t.Fatalf("store db = %q (err %v), want the preserved transcript", got, err)
 	}
 }
 
@@ -514,7 +473,7 @@ func TestPrepareHermesHomeMountedEmptyStoreReportsNoHistory(t *testing.T) {
 	if _, err := prepareHermesHome(hermesHome, sharedHome, false, skills, nil, "", store, testLogger()); err != nil {
 		t.Fatalf("prepare first turn: %v", err)
 	}
-	mustWrite(t, filepath.Join(hermesHome, "state.db"), "transcript")
+	mustWrite(t, filepath.Join(store, "state.db"), "transcript")
 
 	sessions, err := prepareHermesHome(hermesHome, sharedHome, false, skills, nil, "", store, testLogger())
 	if err != nil {
@@ -825,26 +784,7 @@ func TestPrepareHermesHomeStoreCleanupHandlesUnexpectedEntryTypes(t *testing.T) 
 	})
 }
 
-// stubHermesSessionLink swaps the symlink primitive for the duration of a test
-// and returns a restore func, so a test can assert both the failure and the
-// recovery in one run.
-func stubHermesSessionLink(t *testing.T, fn func(target, link string) error) (restore func()) {
-	t.Helper()
-	prev := hermesSessionLink
-	hermesSessionLink = fn
-	restored := false
-	restore = func() {
-		if !restored {
-			hermesSessionLink = prev
-			restored = true
-		}
-	}
-	t.Cleanup(restore)
-	return restore
-}
-
-// stubHermesSessionCopy swaps the migration's copy primitive, same contract as
-// stubHermesSessionLink.
+// stubHermesSessionCopy injects migration failures until the returned restore runs.
 func stubHermesSessionCopy(t *testing.T, fn func(src, dst string) error) (restore func()) {
 	t.Helper()
 	prev := hermesSessionCopy

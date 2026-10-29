@@ -471,6 +471,7 @@
     "agents_group": "Agents",
     "mark_done_tooltip": "Mark as done",
     "archive_tooltip": "Archive",
+    "restore_to_inbox_tooltip": "Restore to inbox",
     "pin_tooltip": "Pin to sidebar",
     "unpin_tooltip": "Unpin from sidebar",
     "quick_jump_label": "Quick navigation",

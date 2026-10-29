@@ -245,7 +245,21 @@ func settleAutopilotQuota(ctx context.Context, q *db.Queries, reservationID pgty
 	return err == nil, err
 }
 
-func (s *AutopilotService) completeAutopilotRun(ctx context.Context, params db.UpdateAutopilotRunCompletedParams) (db.AutopilotRun, error) {
+// autopilotRunCompletion and autopilotRunFailure carry the terminal inputs
+// that UpdateAutopilotRunTerminalWithQuota settles atomically with the run's
+// quota reservation.
+type autopilotRunCompletion struct {
+	ID     pgtype.UUID
+	Result []byte
+}
+
+type autopilotRunFailure struct {
+	ID            pgtype.UUID
+	FailureReason pgtype.Text
+	ReasonCode    pgtype.Text
+}
+
+func (s *AutopilotService) completeAutopilotRun(ctx context.Context, params autopilotRunCompletion) (db.AutopilotRun, error) {
 	row, err := s.Queries.UpdateAutopilotRunTerminalWithQuota(ctx, db.UpdateAutopilotRunTerminalWithQuotaParams{
 		TerminalStatus: "completed",
 		Result:         params.Result,
@@ -255,7 +269,7 @@ func (s *AutopilotService) completeAutopilotRun(ctx context.Context, params db.U
 	return autopilotRunFromTerminalRow(row), err
 }
 
-func (s *AutopilotService) failAutopilotRun(ctx context.Context, params db.UpdateAutopilotRunFailedParams) (db.AutopilotRun, error) {
+func (s *AutopilotService) failAutopilotRun(ctx context.Context, params autopilotRunFailure) (db.AutopilotRun, error) {
 	row, err := s.Queries.UpdateAutopilotRunTerminalWithQuota(ctx, db.UpdateAutopilotRunTerminalWithQuotaParams{
 		TerminalStatus: "failed",
 		FailureReason:  params.FailureReason,

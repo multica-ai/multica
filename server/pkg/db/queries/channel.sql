@@ -791,23 +791,6 @@ SET last_message_id = sqlc.narg('last_message_id'),
 FROM current_route
 WHERE binding.id = current_route.id;
 
--- name: MarkChannelChatSessionPendingFresh :one
--- Persists a channel `/clear` intent until the next chat task is successfully
--- created. RETURNING makes a missing binding an error instead of silently
--- acknowledging a fresh start that was never stored.
-UPDATE channel_chat_session_binding
-SET pending_fresh = TRUE
-WHERE chat_session_id = $1 AND retired_at IS NULL
-RETURNING pending_fresh;
-
--- name: LockChannelChatSessionPendingFresh :one
--- EnqueueChatTask reads this under the same row lock and transaction that
--- creates the task. A concurrent `/clear` therefore lands either before this
--- task and is consumed by it, or after this task and remains for the next one.
-SELECT pending_fresh FROM channel_chat_session_binding
-WHERE chat_session_id = $1
-FOR UPDATE;
-
 -- name: LockChannelChatSessionBindingForContext :one
 -- Context mutations acquire this row after chat_session and before any
 -- channel_chat_context_generation row. Keeping the statements separate makes
@@ -815,11 +798,6 @@ FOR UPDATE;
 SELECT * FROM channel_chat_session_binding
 WHERE chat_session_id = $1
 FOR UPDATE;
-
--- name: ClearChannelChatSessionPendingFresh :exec
-UPDATE channel_chat_session_binding
-SET pending_fresh = FALSE
-WHERE chat_session_id = $1;
 
 -- name: ClearChannelChatSessionPendingFreshForRevision :exec
 UPDATE channel_chat_session_binding

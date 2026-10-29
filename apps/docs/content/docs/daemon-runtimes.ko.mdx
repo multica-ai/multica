@@ -164,6 +164,10 @@ CodeBuddy, Kimi CLI, Pi는 시작할 때 사용자 수준 설정을 직접 읽�
 | Hermes 메모리(에이전트마다 하나) | 같은 디렉터리의 `hermes-state/` | 90일 동안 쓰지 않으면 삭제 |
 | 실행마다 쓰는 전용 임시 디렉터리(`TMPDIR`) | 시스템 임시 디렉터리의 `multica-task-*` | 실행이 끝나면 삭제. 데몬이 강제 종료된 경우 이후 정리에서 삭제 |
 
+Hermes의 태스크 및 채팅 실행은 대화의 영구 디렉터리를 격리된 `HERMES_HOME`으로 사용하며, 일반 파일인 `state.db`와 SQLite 저널을 그 안에 둡니다. 이 구조는 기존의 프로세스 내 ACP와 Gateway 기반 ACP를 모두 지원합니다. 기존 세션 기록은 그대로 재사용하고, 실행 로컬 디렉터리의 기록은 다음 실행 전에 이전합니다.
+
+Multica는 실행마다 홈의 스킬과 파생 설정을 갱신합니다. 모델 제공업체의 인증은 유지하고, 관리되는 실행의 메시징 어댑터와 HTTP 수신 기능은 비활성화합니다. 호스트의 Gateway 상태, 로그, 세션, cron 작업은 격리됩니다. 실행이 끝나면 해당 실행의 Gateway를 중지하여 다음 실행이 자체 실행 환경을 사용하도록 합니다.
+
 ### Codex 기본 메모리와 하위 에이전트 [#codex-memory]
 
 데몬이 관리하는 Codex 실행에서는 Codex 기본 메모리가 기본적으로 꺼집니다. 이 컴퓨터나 이전 실행의 메모리가 다른 워크스페이스로 넘어가지 않게 하기 위해서입니다. 설정은 해당 실행 전용 `CODEX_HOME/config.toml`에만 기록되고(`features.memories`, `memories.generate_memories`, `memories.use_memories` 모두 `false`), `~/.codex/config.toml`은 바뀌지 않습니다. 기본 메모리를 유지하려면 데몬 환경에 `MULTICA_CODEX_MEMORY=1`을 설정하세요.

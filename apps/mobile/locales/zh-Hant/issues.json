@@ -146,7 +146,10 @@
     "title": "取消執行？",
     "message": "智慧體會在當前步驟結束後停止。",
     "keep_running": "繼續執行",
-    "cancel_task": "取消執行"
+    "cancel_task": "取消執行",
+    "waiting_for_connection": "等待網路連線...",
+    "stopping": "正在停止...",
+    "failed": "無法停止執行，請重試。"
   },
   "form": {
     "discard_title": "放棄修改？",

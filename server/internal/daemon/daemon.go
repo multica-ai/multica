@@ -2371,6 +2371,8 @@ const (
 	// Deterministic like the two above — the same binary keeps refusing until
 	// someone installs the profile — and the reason carries that repair.
 	builtinProbeMissingProfile
+	// A bridge is configured but cannot safely serve work; manual migration only.
+	builtinProbeProfileMigration
 	// builtinProbeIncompatibleProfile: something answered `--probe`, with a
 	// protocol version this daemon does not drive — a bundle older than the
 	// check, or a newer one this build has yet to catch up with. Reported, and
@@ -2401,7 +2403,7 @@ const (
 // learned this round.
 func demotableBuiltinProbeVerdict(verdict builtinProbeVerdict) bool {
 	switch verdict {
-	case builtinProbeBelowMinimum, builtinProbeNotExecutable, builtinProbeMissingProfile:
+	case builtinProbeBelowMinimum, builtinProbeNotExecutable, builtinProbeMissingProfile, builtinProbeProfileMigration:
 		return true
 	}
 	return false
@@ -2412,7 +2414,7 @@ func demotableBuiltinProbeVerdict(verdict builtinProbeVerdict) bool {
 //
 // Only builtinProbeBelowMinimum does not: it is a pure function of a version
 // string this round already parsed, so a second look reaches the same
-// conclusion. The other two are deterministic about the state they describe but
+// conclusion. The other demotable verdicts describe deterministic states but
 // rest on an observation that is not — an installer overwriting the bin entry in
 // place (the very repair we tell users to run) or a DSH upgrade moving the
 // profile under a probe. Requiring a second sighting a window later makes those
@@ -2421,6 +2423,8 @@ func demotableBuiltinProbeVerdict(verdict builtinProbeVerdict) bool {
 func builtinProbeNeedsConfirmation(verdict builtinProbeVerdict) bool {
 	return verdict != builtinProbeBelowMinimum
 }
+
+const dshProfileMigrationReason = "the multica DSH profile needs manual migration; back up the profile, build a compatible " + dshMulticaRuntimePackage + " bundle from https://github.com/multica-ai/dsh-multica-runtime following its README, install the directory or tarball with dsh plugin, and update dsh.profile.bundles to load " + dshMulticaRuntimePackage + " instead of " + dshLegacyRuntimePackage + "; a dependencies entry alone does not load the runtime"
 
 // dshMissingProfileReason is the user-facing explanation for a
 // builtinProbeMissingProfile drop. It names the repair because nothing else in
@@ -2482,7 +2486,7 @@ func newRuntimeVerdict(verdict builtinProbeVerdict, reason, execPath string, ins
 			offline.Repair = &repair
 		}
 		return runtimeVerdict{reason: reason, offline: offline}
-	case builtinProbeMissingProfile:
+	case builtinProbeMissingProfile, builtinProbeProfileMigration:
 		// The same class of finding as an unrunnable file: the machine is
 		// reachable and the CLI cannot serve work, so the server must refuse
 		// the trigger and say what is missing rather than queue behind a wait
@@ -2493,7 +2497,7 @@ func newRuntimeVerdict(verdict builtinProbeVerdict, reason, execPath string, ins
 		offline := &RuntimeOfflineReason{
 			Code:       RuntimeOfflineCodeDshProfile,
 			Detail:     reason,
-			Installing: installing,
+			Installing: installing && verdict != builtinProbeProfileMigration,
 		}
 		repair := dshProfileRepair()
 		offline.Repair = &repair
@@ -2643,14 +2647,19 @@ probeLoop:
 		// above.
 		if name == "dsh" {
 			// What the probe said decides what may happen next. Only a
-			// confirmed-absent profile may install a bundle or condemn the
-			// runtime. An incompatible one is reported and neither installed
+			// confirmed-absent profile may install a bundle. A configuration
+			// needing migration may demote the runtime but is never overwritten.
+			// A protocol-incompatible profile is reported and neither installed
 			// over nor demoted — the profile is deliberately there, and this
 			// daemon may be the stale side of the skew. A probe that merely
 			// failed is transient, on the same rule every other provider's
 			// version probe gets.
 			switch probeDshMulticaProfile(ctx, resolved.Path) {
 			case dshProbeOK:
+			case dshProbeNeedsMigration:
+				d.logger.Warn("skip registering runtime: DSH Multica runtime profile needs manual migration",
+					"name", name, "path", resolved.Path)
+				return "", dshProfileMigrationReason, builtinProbeProfileMigration
 			case dshProbeMissingProfile:
 				d.logger.Warn("skip registering runtime: DSH Multica runtime profile is not installed",
 					"name", name, "path", resolved.Path)
@@ -8118,7 +8127,7 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 			d.markActiveStore(store)
 			defer d.unmarkActiveStore(store)
 		}
-		// The overlay links state.db here so the conversation transcript
+		// The conversation store is the isolated home, so its ordinary state.db
 		// survives the task and a follow-up turn can actually resume it
 		// (GH #6806). Keyed on (agent, resolved source home, conversation):
 		// tasks of one conversation are serial, so the shard has a single
@@ -8688,6 +8697,18 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		DaemonVersion:  d.cfg.CLIVersion,
 		CodexVersion:   codexVersion,
 		BuiltinRuntime: !usesCustomProfileCommand,
+	}
+	if hermesOverlayActive {
+		// Retire an owner left by a crashed/interrupted daemon before it can
+		// execute tools with the preceding task's frozen environment.
+		if err := agent.StopHermesTaskGateway(backendConfig, env.HermesHome); err != nil {
+			return TaskResult{}, err
+		}
+		defer func() {
+			if err := agent.StopHermesTaskGateway(backendConfig, env.HermesHome); err != nil {
+				d.logger.Warn("failed to stop task Hermes gateway", "home", env.HermesHome, "error", err)
+			}
+		}()
 	}
 	// Register retirement before any fresh-session launch can fail. The check
 	// uses the backend's final binary, environment, working directory and MCP
