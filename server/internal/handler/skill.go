@@ -2516,7 +2516,22 @@ func (h *Handler) UpsertSkillFile(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	sf, err := h.Queries.UpsertSkillFile(r.Context(), db.UpsertSkillFileParams{
+	tx, err := h.TxStarter.Begin(r.Context())
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to start transaction")
+		return
+	}
+	defer tx.Rollback(r.Context())
+	qtx := h.Queries.WithTx(tx)
+
+	// Touch the parent first so its row lock is taken before the file write,
+	// in the same order UpdateSkill takes them.
+	skill, err = qtx.TouchSkill(r.Context(), skill.ID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to update skill")
+		return
+	}
+	sf, err := qtx.UpsertSkillFile(r.Context(), db.UpsertSkillFileParams{
 		SkillID: skill.ID,
 		Path:    sanitizeNullBytes(req.Path),
 		Content: sanitizeNullBytes(req.Content),
@@ -2526,7 +2541,17 @@ func (h *Handler) UpsertSkillFile(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "failed to upsert skill file")
 		return
 	}
+	resp, err := skillWithFilesInTx(r.Context(), qtx, skill)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to list skill files")
+		return
+	}
+	if err := tx.Commit(r.Context()); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to commit")
+		return
+	}
 
+	h.publishSkillFilesChanged(r, resp)
 	writeJSON(w, http.StatusOK, skillFileToResponse(sf))
 }
 
@@ -2552,11 +2577,62 @@ func (h *Handler) DeleteSkillFile(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusNotFound, "skill file not found")
 		return
 	}
-	if err := h.Queries.DeleteSkillFile(r.Context(), file.ID); err != nil {
+
+	tx, err := h.TxStarter.Begin(r.Context())
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to start transaction")
+		return
+	}
+	defer tx.Rollback(r.Context())
+	qtx := h.Queries.WithTx(tx)
+
+	skill, err = qtx.TouchSkill(r.Context(), skill.ID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to update skill")
+		return
+	}
+	if err := qtx.DeleteSkillFile(r.Context(), file.ID); err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to delete skill file")
 		return
 	}
+	resp, err := skillWithFilesInTx(r.Context(), qtx, skill)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to list skill files")
+		return
+	}
+	if err := tx.Commit(r.Context()); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to commit")
+		return
+	}
+
+	h.publishSkillFilesChanged(r, resp)
 	w.WriteHeader(http.StatusNoContent)
+}
+
+// skillWithFilesInTx builds the skill:updated payload from reads inside the
+// writing transaction, so the event carries exactly the state it committed.
+func skillWithFilesInTx(ctx context.Context, qtx *db.Queries, skill db.Skill) (SkillWithFilesResponse, error) {
+	files, err := qtx.ListSkillFiles(ctx, skill.ID)
+	if err != nil {
+		return SkillWithFilesResponse{}, err
+	}
+	fileResps := make([]SkillFileResponse, len(files))
+	for i, f := range files {
+		fileResps[i] = skillFileToResponse(f)
+	}
+	return SkillWithFilesResponse{
+		SkillResponse: skillToResponse(skill),
+		Files:         fileResps,
+	}, nil
+}
+
+// publishSkillFilesChanged announces a supporting-file write the same way
+// UpdateSkill announces an edit: a file change is a change to the skill, and
+// clients holding the skill (detail page, agent skill lists) must refetch it.
+func (h *Handler) publishSkillFilesChanged(r *http.Request, resp SkillWithFilesResponse) {
+	wsID := h.resolveWorkspaceID(r)
+	actorType, actorID := h.resolveActor(r, requestUserID(r), wsID)
+	h.publish(protocol.EventSkillUpdated, wsID, actorType, actorID, map[string]any{"skill": resp})
 }
 
 // --- Agent-Skill junction ---
