@@ -379,13 +379,14 @@ describe("estimateCost", () => {
   it("prices current Codex models per OpenAI's official cache-aware rates", () => {
     // Official announcement rates. 5.6 is the first OpenAI generation to bill
     // cache writes separately: cacheRead generally = 0.1x input (GPT-6.1
-    // Sol uses 0.05x), cacheWrite = 1.25x
+    // Sol and Terra use 0.05x), cacheWrite = 1.25x
     // input. Cover every model x every token category so a wrong cache rate
     // can't hide behind an input-only assertion. `total` is 1M of each of the
     // four categories priced at its own rate.
     const cases = [
       { model: "gpt-6-astra", input: 10, cacheRead: 1, cacheWrite: 12.5, output: 50, total: 73.5 },
       { model: "gpt-6.1-sol", input: 2, cacheRead: 0.1, cacheWrite: 2.5, output: 10, total: 14.6 },
+      { model: "gpt-6.1-terra", input: 1, cacheRead: 0.05, cacheWrite: 1.25, output: 5, total: 7.3 },
       { model: "gpt-6-sol", input: 2, cacheRead: 0.2, cacheWrite: 2.5, output: 10, total: 14.7 },
       { model: "gpt-6-luna", input: 0.1, cacheRead: 0.01, cacheWrite: 0.125, output: 0.5, total: 0.735 },
       { model: "gpt-5.6-sol", input: 5, cacheRead: 0.5, cacheWrite: 6.25, output: 30, total: 41.75 },
@@ -526,6 +527,10 @@ describe("estimateCost", () => {
       expect(isModelPriced(model, "codex")).toBe(true);
       expect(estimateCost({ ...zeroUsage, provider: "codex", model, cache_read_tokens: 1_000_000 })).toBeCloseTo(0.1, 5);
     }
+    for (const model of ["openai:gpt-6.1-terra", "openai/gpt-6.1-terra", "gpt-6.1-terra[1m]"]) {
+      expect(isModelPriced(model, "codex")).toBe(true);
+      expect(estimateCost({ ...zeroUsage, provider: "codex", model, cache_read_tokens: 1_000_000 })).toBeCloseTo(0.05, 5);
+    }
   });
 
   it("flags catalog SKUs without a published price (gpt-5.5-mini) as unmapped", () => {
@@ -558,6 +563,8 @@ describe("estimateCost", () => {
     expect(isModelPriced("gpt-6-astra-pro")).toBe(false);
     expect(isModelPriced("gpt-6.1-sol-pro")).toBe(false);
     expect(isModelPriced("gpt-6-1-sol")).toBe(false);
+    expect(isModelPriced("gpt-6.1-terra-pro")).toBe(false);
+    expect(isModelPriced("gpt-6-1-terra")).toBe(false);
     expect(isModelPriced("gpt-6-sol-high")).toBe(false);
     expect(isModelPriced("gpt-6-luna-pro")).toBe(false);
     expect(

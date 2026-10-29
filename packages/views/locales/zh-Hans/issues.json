@@ -464,6 +464,7 @@
     "agents_group": "智能体",
     "mark_done_tooltip": "标记为已完成",
     "archive_tooltip": "归档",
+    "restore_to_inbox_tooltip": "恢复到收件箱",
     "pin_tooltip": "固定到侧边栏",
     "unpin_tooltip": "从侧边栏取消固定",
     "quick_jump_label": "快捷跳转",
@@ -496,7 +497,8 @@
     "pull_requests_empty_title": "暂无关联 PR。"
   },
   "timeline": {
-    "loading": "加载中…"
+    "loading": "加载中…",
+    "jump_to_latest": "跳到最新"
   },
   "activity": {
     "created": "创建了这个任务",
@@ -743,12 +745,11 @@
     "trigger_wakeup": "由唤醒触发 · {{condition}}",
     "trigger_image": "[图片]",
     "summary_runs_other": "{{count}} 次运行",
-    "latest": "最近",
     "open_timeline": "打开时间线",
     "more_runs_other": "显示其余 {{count}} 次运行",
     "strip_aria": "每次运行的费用——打开运行时间线",
     "strip_no_usage": "没有用量记录",
-    "sparkline_now": "现在"
+    "queued_count_other": "{{count}} 个排队中"
   },
   "runs_timeline": {
     "title": "运行记录",

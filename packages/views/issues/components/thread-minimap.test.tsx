@@ -426,7 +426,7 @@ describe("ThreadMinimap", () => {
       .getByRole("button", { name: "First thread opener (resolved)" });
     expect(row).toHaveAttribute("aria-description", "Alice, Design agent, Bob, Carol");
     expect(within(row).getByAltText("Alice")).toHaveAttribute("src", "https://example.com/alice.png");
-    expect(within(row).getByTitle("Design agent").querySelector(".lucide-bot")).not.toBeNull();
+    expect(within(row).getByTitle("Design agent").querySelector(".icon-bot")).not.toBeNull();
     expect(within(row).getByTitle("Bob")).toBeInTheDocument();
     expect(within(row).getByTitle("Carol")).toHaveTextContent("+1");
     expect(within(row).getByLabelText("Resolved")).toBeInTheDocument();

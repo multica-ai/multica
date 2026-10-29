@@ -123,7 +123,7 @@
     "backlog": "待規劃",
     "todo": "待辦",
     "in_progress": "進行中",
-    "in_review": "稽覈中",
+    "in_review": "審查中",
     "done": "已完成",
     "blocked": "已阻塞",
     "cancelled": "已取消"
@@ -463,6 +463,7 @@
     "agents_group": "智慧體",
     "mark_done_tooltip": "標記為已完成",
     "archive_tooltip": "歸檔",
+    "restore_to_inbox_tooltip": "恢復到收件箱",
     "pin_tooltip": "固定到側邊欄",
     "unpin_tooltip": "從側邊欄取消固定",
     "quick_jump_label": "快捷跳轉",
@@ -495,7 +496,8 @@
     "pull_requests_empty_title": "暫無關聯 PR。"
   },
   "timeline": {
-    "loading": "載入中…"
+    "loading": "載入中…",
+    "jump_to_latest": "跳到最新"
   },
   "activity": {
     "created": "建立了這個任務",
@@ -742,12 +744,11 @@
     "trigger_wakeup": "由喚醒觸發 · {{condition}}",
     "trigger_image": "[圖片]",
     "summary_runs_other": "{{count}} 次執行",
-    "latest": "最近",
     "open_timeline": "開啟時間線",
     "more_runs_other": "顯示其餘 {{count}} 次執行",
     "strip_aria": "每次執行的費用——開啟執行時間線",
     "strip_no_usage": "沒有用量記錄",
-    "sparkline_now": "現在"
+    "queued_count_other": "{{count}} 個排隊中"
   },
   "runs_timeline": {
     "title": "執行記錄",
@@ -1270,7 +1271,7 @@
       "pick_issue_description": "該任務達到所選狀態時喚醒智慧體。",
       "other_done": "完成",
       "other_ended": "完成或取消",
-      "other_in_review": "進入稽覈中",
+      "other_in_review": "進入審查中",
       "other_blocked": "進入 blocked",
       "max_fires": "最多觸發",
       "max_fires_times_other": "{{count}} 次",
@@ -1324,7 +1325,7 @@
       "pr_conflicts": "當關聯 PR 出現合併衝突時",
       "other_done": "當 {{issue}} 完成時",
       "other_ended": "當 {{issue}} 完成或取消時",
-      "other_in_review": "當 {{issue}} 進入稽覈中時",
+      "other_in_review": "當 {{issue}} 進入審查中時",
       "other_blocked": "當 {{issue}} 進入 blocked 時",
       "another_issue": "另一個任務",
       "unknown_label": "已刪除的標籤",
@@ -1348,7 +1349,7 @@
       "pr_conflicts": "監視合併衝突",
       "other_done": "等 {{issue}} 完成",
       "other_ended": "等 {{issue}} 結束",
-      "other_in_review": "等 {{issue}} 進入稽覈",
+      "other_in_review": "等 {{issue}} 進入審查",
       "other_blocked": "等 {{issue}} 進入 blocked",
       "time": "{{time}} 喚醒 {{agent}}",
       "header": "{{agent}} 在{{what}}",

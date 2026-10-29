@@ -3,6 +3,7 @@ package execenv
 import (
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -827,5 +828,215 @@ func mustWrite(t *testing.T, path, content string) {
 	}
 	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
 		t.Fatalf("write %s: %v", path, err)
+	}
+}
+
+func TestHermesTerminalEnvPassthrough(t *testing.T) {
+	t.Parallel()
+	required := []string{
+		"MULTICA_TOKEN", "MULTICA_TASK_CONFIG_ROOT", "MULTICA_TASK_WORKSPACES_ROOT",
+		"MULTICA_SERVER_URL", "MULTICA_DAEMON_PORT", "MULTICA_WORKSPACE_ID",
+		"MULTICA_AGENT_NAME", "MULTICA_AGENT_ID", "MULTICA_TASK_ID", "MULTICA_TASK_SLOT",
+		"MULTICA_AUTOPILOT_RUN_ID", "MULTICA_AUTOPILOT_ID",
+		"MULTICA_QUICK_CREATE_TASK_ID", "MULTICA_QUICK_CREATE_ATTACHMENT_IDS",
+	}
+	for _, tc := range []struct {
+		name, config string
+		existing     []string
+	}{
+		{name: "no config"},
+		{name: "existing config without terminal", config: "model: hermes-4\n"},
+		{name: "null terminal", config: "model: hermes-4\nterminal: null\n"},
+		{name: "scalar terminal", config: "model: hermes-4\nterminal: invalid\n"},
+		{name: "sequence terminal", config: "model: hermes-4\nterminal: [invalid]\n"},
+		{name: "existing terminal", config: "model: hermes-4\nterminal:\n  timeout: 42\n"},
+		{name: "scalar terminal anchor", config: "model: hermes-4\nterminal: &terminal invalid\ncopy: *terminal\n"},
+		{name: "terminal alias", config: "model: hermes-4\ndefaults: &terminal {timeout: 42, env_passthrough: [CUSTOM_KEY]}\nterminal: *terminal\ncopy: *terminal\n", existing: []string{"CUSTOM_KEY"}},
+		{name: "allowlist alias", config: "model: hermes-4\nshared_names: &names [CUSTOM_KEY, MULTICA_TOKEN, CUSTOM_KEY]\nterminal: {timeout: 42, env_passthrough: *names}\ncopy: *names\n", existing: []string{"CUSTOM_KEY", "MULTICA_TOKEN"}},
+		{name: "terminal anchor", config: "model: hermes-4\nterminal: &terminal {timeout: 42, env_passthrough: &names [CUSTOM_KEY]}\nshared_names: *names\ncopy: *terminal\n", existing: []string{"CUSTOM_KEY"}},
+		{name: "existing allowlist", config: "model: hermes-4\nterminal:\n  timeout: 42\n  env_passthrough: [CUSTOM_KEY, MULTICA_TOKEN, CUSTOM_KEY]\n", existing: []string{"CUSTOM_KEY", "MULTICA_TOKEN"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			shared := t.TempDir()
+			source := filepath.Join(shared, "config.yaml")
+			if tc.config != "" {
+				mustWrite(t, source, tc.config)
+			}
+			task := TaskContextForEnv{IssueID: "hermes-env", AgentSkills: []SkillContextForEnv{{Name: "Helper", Content: "Help."}}}
+			env, err := Prepare(PrepareParams{
+				WorkspacesRoot:   t.TempDir(),
+				WorkspaceID:      "ws-hermes-env",
+				TaskID:           "cccc1111-2222-3333-4444-555566667777",
+				Provider:         "hermes",
+				HermesSourceHome: shared,
+				HermesEnv: map[string]string{
+					"MULTICA_TOKEN":                       "mat_fixture_not_for_config",
+					"MULTICA_AUTOPILOT_RUN_ID":            "autopilot_run_fixture",
+					"MULTICA_AUTOPILOT_ID":                "autopilot_fixture",
+					"MULTICA_QUICK_CREATE_TASK_ID":        "quick_create_fixture",
+					"MULTICA_QUICK_CREATE_ATTACHMENT_IDS": `["attachment_fixture"]`,
+					"UNRELATED_SECRET":                    "unrelated_fixture",
+				},
+				Task: task,
+			}, testLogger())
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer env.Cleanup(true)
+			want := append([]string{}, tc.existing...)
+			for _, key := range required {
+				found := false
+				for _, old := range want {
+					if old == key {
+						found = true
+					}
+				}
+				if !found {
+					want = append(want, key)
+				}
+			}
+			for _, phase := range []string{"fresh", "reuse"} {
+				if phase == "reuse" {
+					// A stale task-local policy must be rebuilt from the shared config.
+					mustWrite(t, filepath.Join(env.HermesHome, "config.yaml"), "terminal: {env_passthrough: [STALE_KEY]}\n")
+					reused := Reuse(ReuseParams{WorkDir: env.WorkDir, Provider: "hermes", HermesSourceHome: shared, Task: task}, testLogger())
+					if reused == nil {
+						t.Fatal("Reuse returned nil")
+					}
+					env = reused
+				}
+				data, err := os.ReadFile(filepath.Join(env.HermesHome, "config.yaml"))
+				if err != nil {
+					t.Fatal(err)
+				}
+				var cfg struct {
+					Model    string
+					Terminal struct {
+						Timeout        int
+						EnvPassthrough []string `yaml:"env_passthrough"`
+					}
+				}
+				if err := yaml.Unmarshal(data, &cfg); err != nil {
+					t.Fatal(err)
+				}
+				if !reflect.DeepEqual(cfg.Terminal.EnvPassthrough, want) {
+					t.Errorf("%s env_passthrough = %v, want %v", phase, cfg.Terminal.EnvPassthrough, want)
+				}
+				if tc.config != "" && cfg.Model != "hermes-4" {
+					t.Errorf("%s lost user model", phase)
+				}
+				if strings.Contains(tc.config, "timeout:") && cfg.Terminal.Timeout != 42 {
+					t.Errorf("%s lost terminal timeout", phase)
+				}
+				var before, after map[string]any
+				if err := yaml.Unmarshal([]byte(tc.config), &before); err != nil {
+					t.Fatal(err)
+				}
+				if err := yaml.Unmarshal(data, &after); err != nil {
+					t.Fatal(err)
+				}
+				for _, key := range []string{"defaults", "shared_names", "copy"} {
+					if !reflect.DeepEqual(before[key], after[key]) {
+						t.Errorf("%s changed %s: got %v, want %v", phase, key, after[key], before[key])
+					}
+				}
+				for _, forbidden := range []string{
+					"mat_fixture_not_for_config", "autopilot_run_fixture", "autopilot_fixture",
+					"quick_create_fixture", "attachment_fixture", "unrelated_fixture", "UNRELATED_SECRET", "STALE_KEY",
+				} {
+					if strings.Contains(string(data), forbidden) {
+						t.Errorf("%s config contains %s", phase, forbidden)
+					}
+				}
+				original, err := os.ReadFile(source)
+				if tc.config == "" {
+					if !os.IsNotExist(err) {
+						t.Fatalf("created shared config: %v", err)
+					}
+				} else if err != nil || string(original) != tc.config {
+					t.Fatalf("shared config changed: %v", err)
+				}
+			}
+		})
+	}
+}
+
+func TestHermesTerminalConfigInvalidAliases(t *testing.T) {
+	t.Parallel()
+	for _, config := range []string{
+		"terminal: *missing\n",
+	} {
+		source, overlay := t.TempDir(), t.TempDir()
+		mustWrite(t, filepath.Join(source, "config.yaml"), config)
+		if err := writeDerivedHermesConfig(source, overlay, nil, testLogger()); err != nil {
+			t.Fatal(err)
+		}
+		data, err := os.ReadFile(filepath.Join(overlay, "config.yaml"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if string(data) != config {
+			t.Errorf("invalid alias config was not preserved: got %q, want %q", data, config)
+		}
+	}
+	cycle := &yaml.Node{Kind: yaml.AliasNode}
+	cycle.Alias = cycle
+	for _, node := range []*yaml.Node{cycle, {Kind: yaml.AliasNode}} {
+		if got := resolveHermesYAMLAlias(node); got != nil {
+			t.Errorf("invalid alias resolved to %v", got)
+		}
+	}
+}
+
+func TestHermesTerminalConfigFailurePreservesDerivedSettings(t *testing.T) {
+	t.Parallel()
+	for _, terminalConfig := range []string{
+		"terminal: &terminal {nested: *terminal}\n",
+		"names: &names [*names]\nterminal: {env_passthrough: *names}\n",
+	} {
+		source, overlay := t.TempDir(), t.TempDir()
+		config := "model: hermes-4\nskills: {external_dirs: [custom-skills]}\nmemory: {provider: supermemory}\n" + terminalConfig
+		sourceConfig := filepath.Join(source, "config.yaml")
+		mustWrite(t, sourceConfig, config)
+		if err := writeDerivedHermesConfig(source, overlay, nil, testLogger()); err != nil {
+			t.Fatal(err)
+		}
+		data, err := os.ReadFile(filepath.Join(overlay, "config.yaml"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		var before, after yaml.Node
+		if err := yaml.Unmarshal([]byte(config), &before); err != nil {
+			t.Fatal(err)
+		}
+		if err := yaml.Unmarshal(data, &after); err != nil {
+			t.Fatal(err)
+		}
+		wantDirs := []string{filepath.Join(source, "custom-skills"), filepath.Join(source, "skills")}
+		if got := existingHermesExternalDirs(&after); !reflect.DeepEqual(got, wantDirs) {
+			t.Errorf("external_dirs = %v, want %v", got, wantDirs)
+		}
+		top := yamlDocumentRoot(&after)
+		provider := yamlMapValue(yamlMapValue(top, "memory"), "provider")
+		if provider == nil || provider.Value != "" {
+			t.Errorf("external memory provider was not disabled: %v", provider)
+		}
+		for _, key := range []string{"model", "terminal", "names"} {
+			original, err := yaml.Marshal(yamlMapValue(yamlDocumentRoot(&before), key))
+			if err != nil {
+				t.Fatal(err)
+			}
+			derived, err := yaml.Marshal(yamlMapValue(top, key))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if string(derived) != string(original) {
+				t.Errorf("changed %s: got %q, want %q", key, derived, original)
+			}
+		}
+		original, err := os.ReadFile(sourceConfig)
+		if err != nil || string(original) != config {
+			t.Fatalf("shared config changed: %v", err)
+		}
 	}
 }

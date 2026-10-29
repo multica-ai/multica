@@ -466,6 +466,7 @@
     "agents_group": "에이전트",
     "mark_done_tooltip": "완료로 표시",
     "archive_tooltip": "보관",
+    "restore_to_inbox_tooltip": "인박스로 복원",
     "pin_tooltip": "사이드바에 고정",
     "unpin_tooltip": "사이드바 고정 해제",
     "quick_jump_label": "빠른 탐색",
@@ -496,7 +497,8 @@
     "pull_requests_empty_title": "연결된 PR이 없습니다."
   },
   "timeline": {
-    "loading": "불러오는 중..."
+    "loading": "불러오는 중...",
+    "jump_to_latest": "최신으로 이동"
   },
   "activity": {
     "created": "이 태스크를 만들었습니다",
@@ -743,12 +745,11 @@
     "trigger_wakeup": "깨우기 · {{condition}}",
     "trigger_image": "[이미지]",
     "summary_runs_other": "실행 {{count}}회",
-    "latest": "최근",
     "open_timeline": "타임라인 열기",
     "more_runs_other": "{{count}}개 더 보기",
     "strip_aria": "실행별 비용 — 실행 타임라인 열기",
     "strip_no_usage": "사용량 기록 없음",
-    "sparkline_now": "지금"
+    "queued_count_other": "{{count}}개 대기 중"
   },
   "runs_timeline": {
     "title": "실행 기록",

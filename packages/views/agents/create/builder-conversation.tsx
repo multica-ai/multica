@@ -1,7 +1,7 @@
 "use client";
 
 import type { ReactNode } from "react";
-import { Loader2, MessageSquare, X } from "lucide-react";
+import { Loader2, MessageSquare, X } from "@multica/ui/icons";
 import {
   applyDraftModelChange,
   applyDraftRuntimeChange,

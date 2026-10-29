@@ -1,6 +1,6 @@
 "use client";
 
-import { Check, Workflow } from "lucide-react";
+import { Check, Workflow } from "@multica/ui/icons";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { useIssueWorkflows } from "@multica/core/issue-workflows";
 import {

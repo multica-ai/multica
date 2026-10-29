@@ -2,6 +2,12 @@
  * Multica shared base styles — imported by all apps
  * ============================================================================= */
 
+/* The UI locale is Chinese, Japanese or Korean. Han, kana and Hangul fill the
+ * whole em square, so wrapped CJK text needs more leading than the Latin value
+ * the type scale pairs with each size. Keyed to <html lang>, which both apps
+ * set from the active locale. */
+@custom-variant cjk (&:is(:lang(zh), :lang(ja), :lang(ko)));
+
 /* The chat launcher overlays the dashboard's bottom-right corner on every
  * workspace page, so anything that runs to that corner has to stop short of
  * it. Named rather than spelled out at each site: the intent is legible, every
@@ -158,6 +164,25 @@
   animation: nav-progress-sweep 1.4s cubic-bezier(0.4, 0, 0.2, 1) infinite;
 }
 
+/* Skeleton: hidden (space still reserved) for the first 200ms, then pulses.
+ * Data that lands inside that window — a warm cache, a prefetched route, a
+ * fast API — swaps straight from nothing to content instead of flashing a
+ * placeholder for a frame or two. Visibility, not opacity, so the hold never
+ * fights the pulse over the same property. */
+@keyframes skeleton-hold {
+  from, to { visibility: hidden; }
+}
+
+@keyframes skeleton-pulse {
+  50% { opacity: 0.5; }
+}
+
+.animate-skeleton {
+  animation:
+    skeleton-hold 200ms step-end,
+    skeleton-pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+}
+
 /* Border beam: a brand-tinted highlight sweeps continuously around the
  * host's rounded border, drawing the eye to a CTA that would otherwise blend
  * into the chrome (e.g. the "switch to agent" affordance in manual create).
@@ -300,6 +325,10 @@ html[data-dnd-dragging="true"] * {
   .shimmer-text-copy,
   .animate-nav-progress-sweep {
     animation: none;
+  }
+
+  .animate-skeleton {
+    animation: skeleton-hold 200ms step-end;
   }
 
   .shimmer-text-window {

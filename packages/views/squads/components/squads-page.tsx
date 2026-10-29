@@ -13,7 +13,7 @@ import {
   Trash2,
   Users,
   X,
-} from "lucide-react";
+} from "@multica/ui/icons";
 import { useQuery, useQueryClient, useMutation } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { useCurrentWorkspace, useWorkspacePaths } from "@multica/core/paths";
@@ -923,9 +923,7 @@ export function SquadsPage() {
         }
       />
 
-      {isLoading ? (
-        <LoadingSkeleton />
-      ) : squads.length === 0 ? (
+      {!isLoading && squads.length === 0 ? (
         <CollectionPageState
           icon={Users}
           title={t(($) => $.page.empty_no_squads)}
@@ -941,6 +939,8 @@ export function SquadsPage() {
         />
       ) : (
         <>
+          {/* Mounted through loading so the rows don't drop by a toolbar's
+              height when the list lands. */}
           <SquadListToolbar
             scope={scope}
             onScopeChange={setScope}
@@ -959,6 +959,9 @@ export function SquadsPage() {
             hiddenColumns={hiddenColumns}
             onToggleColumn={toggleColumn}
           />
+          {isLoading ? (
+            <LoadingSkeleton />
+          ) : (
           <div className="min-h-0 flex-1 overflow-auto @container">
             <ListGrid
               className={`${GRID_COLS} @2xl:min-w-[var(--sqc-minw)]`}
@@ -1027,6 +1030,7 @@ export function SquadsPage() {
               )}
             </ListGrid>
           </div>
+          )}
         </>
       )}
     </div>

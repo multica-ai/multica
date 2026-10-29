@@ -12,8 +12,8 @@ import {
   Delete,
   Option,
   Space,
-  type LucideIcon,
-} from "lucide-react";
+  type IconComponent,
+} from "@multica/ui/icons";
 import {
   formatShortcut,
   getShortcutPlatform,
@@ -29,7 +29,7 @@ type ShortcutToken = {
   id: string;
   label: string;
   text?: string;
-  icon?: LucideIcon;
+  icon?: IconComponent;
 };
 
 const KEY_TOKENS: Record<string, Omit<ShortcutToken, "id">> = {

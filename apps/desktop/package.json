@@ -48,7 +48,6 @@
     "@tanstack/react-query": "catalog:",
     "electron-updater": "^6.8.3",
     "fix-path": "^5.0.0",
-    "lucide-react": "catalog:",
     "motion": "^12.38.0",
     "react": "catalog:",
     "react-dom": "catalog:",

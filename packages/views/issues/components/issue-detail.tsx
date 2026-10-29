@@ -33,7 +33,8 @@ import {
   Tag,
   Unlink,
   Users,
-} from "lucide-react";
+  ArrowDown,
+} from "@multica/ui/icons";
 import { BreadcrumbHeader, type BreadcrumbSegment } from "../../layout/breadcrumb-header";
 import { Skeleton } from "@multica/ui/components/ui/skeleton";
 import { Button } from "@multica/ui/components/ui/button";
@@ -111,6 +112,7 @@ import { ThreadMinimap, type ThreadMinimapThread } from "./thread-minimap";
 import { collectThreadParticipants, collectThreadReplies, deriveThreadResolution } from "./thread-utils";
 import { IssueAgentHeaderChip } from "./issue-agent-header-chip";
 import { IssueWakeupHeaderChip } from "./issue-wakeup-header-chip";
+import { IssueInboxRestoreButton } from "./issue-inbox-restore-button";
 import { ExecutionLogSection } from "./execution-log-section";
 import { WakeupsSection } from "./wakeups-section";
 import { QuickActionsSection } from "./quick-actions-section";
@@ -135,6 +137,7 @@ import {
   useProjectWorkflow,
 } from "@multica/core/issue-workflows";
 import { useRecentContextStore } from "@multica/core/chat";
+import { useRegisterCommandBarContext } from "../../search/register-context";
 import { useModalStore } from "@multica/core/modals";
 import { issueListOptions, issueDetailOptions, childIssuesOptions, childIssueProgressOptions, issueAttachmentsOptions } from "@multica/core/issues/queries";
 import { projectDetailOptions } from "@multica/core/projects/queries";
@@ -171,6 +174,7 @@ import {
   useViewStateWriter,
 } from "../../platform";
 import { cn } from "@multica/ui/lib/utils";
+import { TruncatedTooltip } from "@multica/ui/components/common/truncated-tooltip";
 import { PAGE_GUTTER } from "../../layout/page-header";
 
 import { ProgressRing } from "./progress-ring";
@@ -179,6 +183,7 @@ import { MetadataSection } from "./metadata-section";
 import { IssueSidebarSectionHeader, IssueSidebarStack, IssueSidebarPropertyGrid } from "./issue-sidebar-section";
 import { useT } from "../../i18n";
 import { useIssueDetailScrollRestore } from "../hooks/use-issue-detail-scroll-restore";
+import { useJumpToLatest } from "../hooks/use-jump-to-latest";
 import { useInPageFind } from "../hooks/use-in-page-find";
 import { useStickyComposer } from "../hooks/use-sticky-composer";
 import { FindBar } from "./find-bar";
@@ -205,7 +210,7 @@ export function issueHighlightMementoKey(issueId: string): string {
 // stay one control visually — they occupy the same slot and only differ in
 // what a click does.
 const SUBSCRIPTION_ACTION_CLASS =
-  "text-caption text-muted-foreground hover:text-foreground transition-colors disabled:pointer-events-none disabled:opacity-50";
+  "text-label text-muted-foreground hover:text-foreground transition-colors disabled:pointer-events-none disabled:opacity-50";
 
 function SubscriberPopoverContent({
   members,
@@ -571,6 +576,21 @@ function shallowEqualEntries(a: TimelineEntry[], b: TimelineEntry[]): boolean {
   return true;
 }
 
+function JumpToLatestButton({ onClick, label }: { onClick: () => void; label: string }) {
+  return (
+    <Button
+      type="button"
+      variant="outline"
+      size="sm"
+      onClick={onClick}
+      className="absolute bottom-full left-1/2 mb-6 -translate-x-1/2 rounded-full bg-background shadow-md dark:bg-background dark:hover:bg-muted"
+    >
+      <ArrowDown />
+      {label}
+    </Button>
+  );
+}
+
 // Flat per-item shape consumed by <Virtuoso>. Virtuoso needs a flat array
 // where each entry is one rendered row; we keep the grouping logic from
 // `timelineView.groups` (consecutive same-actor activities still collapse
@@ -686,7 +706,7 @@ function ActivityBlock({
         <button
           type="button"
           onClick={onToggle}
-          className="flex items-center gap-1.5 text-caption text-muted-foreground transition-colors hover:text-foreground"
+          className="flex items-center gap-1.5 text-label text-muted-foreground transition-colors hover:text-foreground"
         >
           <ChevronRight className="h-3 w-3 shrink-0" />
           <span>{t(($) => $.activity.activity_count, { count })}</span>
@@ -713,7 +733,7 @@ function ActivityBlock({
         <button
           type="button"
           onClick={onToggle}
-          className="flex items-center gap-1.5 text-caption text-muted-foreground transition-colors hover:text-foreground"
+          className="flex items-center gap-1.5 text-label text-muted-foreground transition-colors hover:text-foreground"
         >
           <ChevronDown className="h-3 w-3 shrink-0" />
           <span>{t(($) => $.activity.activity_count, { count: entries.length })}</span>
@@ -723,7 +743,7 @@ function ActivityBlock({
         <button
           type="button"
           onClick={onToggleShowOlder}
-          className="flex items-center gap-1.5 text-caption text-muted-foreground transition-colors hover:text-foreground"
+          className="flex items-center gap-1.5 text-label text-muted-foreground transition-colors hover:text-foreground"
         >
           <ChevronRight className="h-3 w-3 shrink-0" />
           <span>{t(($) => $.activity.show_more_activities, { count: hiddenOlderCount })}</span>
@@ -777,7 +797,7 @@ function ActivityBlock({
 
         const handoff = isStatusChange && !!details.handoff_to_id;
         return (
-          <div key={entry.id} className="text-caption text-muted-foreground">
+          <div key={entry.id} className="text-label text-muted-foreground">
             <div className="flex items-center">
               <div className="mr-2 flex w-4 shrink-0 justify-center">{leadIcon}</div>
               <div className="flex min-w-0 flex-1 items-center gap-1">
@@ -937,7 +957,7 @@ function SubIssueRow({
           href={paths.issueDetail(child.id)}
           className="flex min-w-0 flex-1 items-center gap-2.5"
         >
-          <span className="text-micro text-muted-foreground tabular-nums font-medium shrink-0">
+          <span className="text-caption text-muted-foreground tabular-nums shrink-0">
             {child.identifier}
           </span>
           <IssueAgentActivityIndicator issueId={child.id} />
@@ -1436,6 +1456,10 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
   // User preference: pin the bottom comment bar to the scroll viewport. Off
   // below `md` regardless of the preference — see the hook.
   const stickyComposer = useStickyComposer();
+  // Mobile only: desktop already reaches the latest entry through the
+  // ThreadMinimap rail, which is not rendered below `md`. Passing null keeps
+  // the hook's scroll and resize listeners off on desktop.
+  const jumpToLatest = useJumpToLatest(isMobile ? scrollContainerEl : null);
 
   // Per-session: which resolved threads the user has temporarily expanded.
   // Not persisted (matches Linear) — reload collapses everything back to bars.
@@ -1569,6 +1593,15 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
       });
     }
   }, [issue?.id, wsId]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const deletedFallbackPath = onDelete ? undefined : paths.issues();
+  useRegisterCommandBarContext(
+    useMemo(
+      () =>
+        issue ? { kind: "issue", issue, onDeletedFallbackPath: deletedFallbackPath } : null,
+      [issue, deletedFallbackPath],
+    ),
+  );
 
   // Fire `onDelete` once when the issue transitions from loaded to missing.
   // Delete goes through a shell-level modal, so the caller (e.g. inbox) can't
@@ -2759,7 +2792,7 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
     <div className="col-span-2 mt-1">
       <Popover open={addPropPopoverOpen} onOpenChange={setAddPropPopoverOpen}>
         <PopoverTrigger
-          className="-mx-2 flex items-center gap-1.5 rounded-md px-2 py-1 text-caption text-muted-foreground transition-colors hover:bg-accent/50 hover:text-foreground"
+          className="-mx-2 flex items-center gap-1.5 rounded-md px-2 py-1 text-label text-muted-foreground transition-colors hover:bg-accent/50 hover:text-foreground"
         >
           <Plus className="h-3 w-3 shrink-0" />
           <span>{t(($) => $.detail.add_property_action)}</span>
@@ -2829,7 +2862,9 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
                     ) : (
                       <SlidersHorizontal className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
                     )}
-                    <span className="line-clamp-2 min-w-0 break-words [overflow-wrap:anywhere]" title={p.name}>{p.name}</span>
+                    <TruncatedTooltip content={p.name}>
+                      <span className="line-clamp-2 min-w-0 break-words [overflow-wrap:anywhere]">{p.name}</span>
+                    </TruncatedTooltip>
                   </button>
                 ))}
               </>
@@ -2938,7 +2973,9 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
                 label={
                   <>
                     <PropertyIcon property={p} className="size-3.5 text-caption" />
-                    <span className="line-clamp-2 min-w-0 break-words [overflow-wrap:anywhere]" title={p.name}>{p.name}</span>
+                    <TruncatedTooltip content={p.name}>
+                      <span className="line-clamp-2 min-w-0 break-words [overflow-wrap:anywhere]">{p.name}</span>
+                    </TruncatedTooltip>
                   </>
                 }
               >
@@ -2976,7 +3013,7 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
             <div className="flex items-center gap-0.5 rounded-md px-2 hover:bg-accent/50 transition-colors group">
               <AppLink
                 href={paths.issueDetail(parentIssue.id)}
-                className="flex flex-1 min-w-0 items-center gap-1.5 py-2 text-caption"
+                className="flex flex-1 min-w-0 items-center gap-1.5 py-2 text-label"
               >
                 <StatusIcon
                   status={parentIssue.status}
@@ -3155,7 +3192,7 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
         ]
       : [];
 
-  const titleSizeClass = isPeek ? "text-title-lg font-semibold" : "text-display-sm font-bold";
+  const titleSizeClass = isPeek ? "text-title-lg font-semibold" : "text-display-sm font-semibold";
 
   const detailContent = (
     <CurrentIssueRenderContextProvider value={currentIssueRenderContext}>
@@ -3195,6 +3232,8 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
                 It self-hides when no agent is active. */}
             <IssueAgentHeaderChip issueId={id} onJumpToRun={jumpToRun} />
             <IssueWakeupHeaderChip issueId={id} onOpen={openWakeups} />
+            {/* The inbox passes `onDone` and owns archive and restore there. */}
+            {!onDone && <IssueInboxRestoreButton issueId={id} />}
             {onDone && !issueBehavesAsAny(issue, ["done", "closed"]) && (
               <Tooltip>
                 <TooltipTrigger
@@ -3321,7 +3360,7 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
                 ref={titleEditorRef}
                 defaultValue={titleConflictDraft ?? issue.title}
                 placeholder={t(($) => $.detail.title_placeholder)}
-                className={cn("w-full leading-snug tracking-tight", titleSizeClass)}
+                className={cn("w-full leading-snug", titleSizeClass)}
                 onReady={titleLazy.onReady}
                 onBlur={(value) => {
                   const trimmed = value.trim();
@@ -3349,7 +3388,7 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
             <div
               role="button"
               tabIndex={0}
-              className={cn("w-full cursor-text leading-snug tracking-tight", titleSizeClass)}
+              className={cn("w-full cursor-text leading-snug", titleSizeClass)}
               onClick={(e) => {
                 // A drag-selection (copying the title) must not summon the editor.
                 const sel = window.getSelection();
@@ -3421,9 +3460,9 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
           {parentIssue && !issue.source_context && (
             <AppLink
               href={paths.issueDetail(parentIssue.id)}
-              className="mt-2 inline-flex max-w-full items-center gap-1.5 text-caption text-muted-foreground hover:text-foreground transition-colors group/parent"
+              className="mt-2 inline-flex max-w-full items-center gap-1.5 text-label text-muted-foreground hover:text-foreground transition-colors group/parent"
             >
-              <span className="font-medium shrink-0">{t(($) => $.detail.sub_issue_of)}</span>
+              <span className="shrink-0">{t(($) => $.detail.sub_issue_of)}</span>
               <StatusIcon
                   status={parentIssue.status}
                   color={resolveStatusColor(parentIssue.status)}
@@ -3562,7 +3601,7 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
             <div className="mt-6">
               <button
                 type="button"
-                className="inline-flex items-center gap-1.5 text-caption text-muted-foreground hover:text-foreground transition-colors"
+                className="inline-flex items-center gap-1.5 text-label text-muted-foreground hover:text-foreground transition-colors"
                 onClick={() => actions.openCreateSubIssue()}
               >
                 <Plus className="h-3.5 w-3.5" />
@@ -3899,6 +3938,15 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
               page background and is invisible), and pb-4 so the card floats
               off the viewport edge — with -mb-4 giving the padding back to
               the column's py-8 so the at-rest layout doesn't shift. */}
+          {/* "Jump to latest" (MUL-8324, mobile only) floats centered just above the
+              composer's top edge. With the sticky composer it rides the
+              composer itself; without it, a zero-height sticky anchor pins
+              it to the viewport bottom until the composer scrolls in. */}
+          {!stickyComposer && jumpToLatest.visible && (
+            <div className="sticky bottom-0 z-10 h-0">
+              <JumpToLatestButton onClick={jumpToLatest.jump} label={t(($) => $.timeline.jump_to_latest)} />
+            </div>
+          )}
           <div
             ref={composerRef}
             className={cn(
@@ -3912,6 +3960,9 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
                 keeps the previous issue's in-memory content and the
                 next keystroke would flush it into the new issue's
                 draft key. */}
+            {stickyComposer && jumpToLatest.visible && (
+              <JumpToLatestButton onClick={jumpToLatest.jump} label={t(($) => $.timeline.jump_to_latest)} />
+            )}
             <CommentInput
               key={id}
               issueId={id}
@@ -3993,7 +4044,7 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
       <div className="flex flex-1 min-h-0">
         {detailContent}
         <Sheet open={mobileSidebarOpen} onOpenChange={setMobileSidebarOpen}>
-          <SheetContent side="right" showCloseButton={false} className="w-[320px] overflow-y-auto [scrollbar-gutter:stable] p-4">
+          <SheetContent side="right" showCloseButton={false} className="w-[320px] overflow-y-auto [scrollbar-gutter:stable] px-2 py-4">
             {sidebarContent}
           </SheetContent>
         </Sheet>
@@ -4019,7 +4070,9 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
         panelRef={sidebarRef}
         onResize={handleDesktopSidebarResize}
       >
-        <AnimatedRightSidebar open={desktopSidebarVisualOpen} motionEnabled={desktopSidebarMotionEnabled}>
+        {/* Sections inset their own bodies and rows, so the panel itself only
+            needs a narrow gutter. */}
+        <AnimatedRightSidebar open={desktopSidebarVisualOpen} motionEnabled={desktopSidebarMotionEnabled} contentClassName="px-2 py-4">
           {sidebarContent}
         </AnimatedRightSidebar>
       </ResizablePanel>

@@ -1,7 +1,7 @@
 "use client";
 
 import { memo, useCallback, useMemo, useState } from "react";
-import { Bell, Clock3, TriangleAlert } from "lucide-react";
+import { Bell, Clock3, TriangleAlert } from "@multica/ui/icons";
 import { useQuery } from "@tanstack/react-query";
 import { ShimmerText } from "@multica/ui/components/common/shimmer-text";
 import {

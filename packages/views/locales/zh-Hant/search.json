@@ -1,36 +1,169 @@
 {
-  "title": "搜尋",
-  "description": "搜尋頁面、任務、專案和成員",
-  "placeholder": "輸入命令或關鍵詞搜尋...",
+  "title": "命令列",
+  "description": "搜尋、執行命令，或把工作交給智慧體",
+  "placeholder": "搜尋，或輸入要做的事...",
+  "page_placeholder": "篩選...",
+  "breadcrumb_aria": "目前選單",
   "groups": {
     "pages": "頁面",
     "commands": "命令",
     "members": "成員",
+    "agents": "智慧體",
+    "squads": "小隊",
     "projects": "專案",
     "issues": "任務",
+    "autopilots": "自動化",
+    "chats": "對話",
+    "skills": "Skills",
     "cancelled": "已取消",
     "recent": "最近",
-    "workspaces": "工作區"
+    "workspaces": "工作區",
+    "new": "新建",
+    "best_match": "最佳符合",
+    "actions": "操作"
+  },
+  "context": {
+    "current_issue": "目前任務",
+    "selected_issues_other": "已選 {{count}} 個任務",
+    "current_project": "目前專案",
+    "current_agent": "目前智慧體",
+    "current_autopilot": "目前自動化",
+    "inbox": "收件箱",
+    "current_chat": "目前對話"
   },
   "commands": {
     "current_theme_aria": "當前主題",
     "new_issue": "新建任務",
     "new_project": "新建專案",
+    "new_autopilot": "新建自動化",
+    "chat_with_agent": "和智慧體對話",
+    "change_theme": "切換主題...",
+    "send_feedback": "傳送意見回饋",
     "copy_issue_link": "複製任務連結",
     "copy_identifier": "複製識別符號 ({{identifier}})",
     "fold_all_comments": "收起全部評論",
-    "unfold_all_comments": "展開全部評論",
-    "switch_to_light": "切換到淺色主題",
-    "switch_to_dark": "切換到深色主題",
-    "use_system_theme": "跟隨系統主題"
+    "unfold_all_comments": "展開全部評論"
+  },
+  "issue": {
+    "change_status": "變更狀態...",
+    "assign_to": "指派給...",
+    "set_priority": "設定優先級...",
+    "run_quick_action": "執行快捷操作...",
+    "quick_actions_available_other": "{{count}} 條可用",
+    "add_label": "新增標籤...",
+    "set_due_date": "設定截止日期...",
+    "move_to_project": "移動到專案...",
+    "set_parent": "設定父任務...",
+    "cancel_run": "取消目前執行",
+    "retry_run": "重試上次執行",
+    "create_sub_issue": "新建子任務",
+    "subscribe": "訂閱",
+    "unsubscribe": "取消訂閱",
+    "delete": "刪除任務",
+    "delete_selected_other": "刪除 {{count}} 個任務"
+  },
+  "project": {
+    "change_status": "變更專案狀態...",
+    "new_issue": "在此專案下新建任務",
+    "pin": "固定到側邊欄",
+    "unpin": "從側邊欄取消固定",
+    "copy_link": "複製專案連結"
+  },
+  "agent": {
+    "chat": "和 {{name}} 對話",
+    "assign_issue": "把任務指派給 {{name}}...",
+    "new_issue": "新建任務給 {{name}}",
+    "pin_in_chat": "在聊天裡固定",
+    "unpin_in_chat": "從聊天裡取消固定"
+  },
+  "autopilot": {
+    "run_now": "立即執行一次",
+    "pause": "暫停",
+    "resume": "啟用"
+  },
+  "inbox": {
+    "archive": "封存",
+    "mark_unread": "標為未讀",
+    "mark_all_read": "收件箱全部標為已讀",
+    "archive_all_read": "封存收件箱全部已讀"
+  },
+  "chat": {
+    "link_project": "關聯到專案...",
+    "pin": "固定對話",
+    "unpin": "取消固定對話",
+    "archive": "封存對話"
+  },
+  "pages": {
+    "status": "狀態",
+    "priority": "優先級",
+    "assignee": "負責人",
+    "labels": "標籤",
+    "due_date": "截止日期",
+    "project": "專案",
+    "parent": "父任務",
+    "quick_actions": "快捷操作",
+    "theme": "主題",
+    "project_status": "專案狀態",
+    "no_project": "無專案",
+    "current": "目前"
+  },
+  "theme": {
+    "light": "淺色",
+    "dark": "深色",
+    "system": "跟隨系統"
   },
   "toast": {
     "link_copied": "已複製連結",
-    "copied_identifier": "已複製 {{identifier}}"
+    "copied_identifier": "已複製 {{identifier}}",
+    "run_retried": "已重新執行",
+    "run_cancelled": "已取消執行",
+    "subscribed": "已訂閱",
+    "unsubscribed": "已取消訂閱",
+    "label_added": "已新增標籤 {{name}}",
+    "label_removed": "已移除標籤 {{name}}",
+    "label_failed": "未能給所有任務新增標籤 {{name}}",
+    "update_failed": "更新失敗",
+    "assigned": "已把 {{identifier}} 指派給 {{name}}"
   },
   "empty": {
     "no_results": "未找到結果。",
-    "type_to_search": "輸入關鍵詞搜尋任務和專案"
+    "no_labels": "沒有標籤",
+    "type_to_find_issue": "輸入關鍵詞查找任務",
+    "type_to_find_people": "輸入關鍵詞查找成員和智慧體"
+  },
+  "delegate": {
+    "heading": "交給智慧體",
+    "create_and_assign": "新建任務並指派給 {{name}}",
+    "squad": "小隊",
+    "context_aria": "附帶上下文",
+    "parent": "掛在 {{identifier}} 下",
+    "pick_crumb": "選擇",
+    "pick_another": "換一個智慧體或小隊...",
+    "detected": "識別為指令"
+  },
+  "best": {
+    "assign": "把 {{subject}} 指派給 {{name}}",
+    "chat": "和 {{name}} 對話",
+    "new_issue_in": "在 {{name}} 下新建任務"
+  },
+  "types": {
+    "issue": "任務",
+    "project": "專案",
+    "agent": "智慧體",
+    "autopilot": "自動化",
+    "squad": "小隊",
+    "member": "成員"
+  },
+  "footer": {
+    "navigate": "選擇",
+    "select": "執行",
+    "open_in_new_tab": "在新分頁開啟",
+    "delegate": "新建並交給 {{name}}",
+    "search_instead": "僅作為關鍵詞搜尋",
+    "back": "返回",
+    "prefix_commands": "命令",
+    "prefix_issues": "任務",
+    "prefix_people": "人和智慧體"
   },
   "trigger": {
     "label": "搜尋..."

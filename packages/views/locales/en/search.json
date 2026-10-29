@@ -1,36 +1,172 @@
 {
-  "title": "Search",
-  "description": "Search pages, issues, projects, and members",
-  "placeholder": "Type a command or search...",
+  "title": "Command bar",
+  "description": "Search, run commands, or hand work to an agent",
+  "placeholder": "Search, or type what needs doing...",
+  "page_placeholder": "Filter...",
+  "breadcrumb_aria": "Current menu",
   "groups": {
     "pages": "Pages",
     "commands": "Commands",
     "members": "Members",
+    "agents": "Agents",
+    "squads": "Squads",
     "projects": "Projects",
     "issues": "Issues",
+    "autopilots": "Autopilots",
+    "chats": "Chats",
+    "skills": "Skills",
     "cancelled": "Cancelled",
     "recent": "Recent",
-    "workspaces": "Workspaces"
+    "workspaces": "Workspaces",
+    "new": "New",
+    "best_match": "Best match",
+    "actions": "Actions"
+  },
+  "context": {
+    "current_issue": "Current issue",
+    "selected_issues_one": "{{count}} selected issue",
+    "selected_issues_other": "{{count}} selected issues",
+    "current_project": "Current project",
+    "current_agent": "Current agent",
+    "current_autopilot": "Current autopilot",
+    "inbox": "Inbox",
+    "current_chat": "Current chat"
   },
   "commands": {
     "current_theme_aria": "Current theme",
-    "new_issue": "New Issue",
-    "new_project": "New Project",
-    "copy_issue_link": "Copy Issue Link",
-    "copy_identifier": "Copy Identifier ({{identifier}})",
-    "fold_all_comments": "Fold All Comments",
-    "unfold_all_comments": "Unfold All Comments",
-    "switch_to_light": "Switch to Light Theme",
-    "switch_to_dark": "Switch to Dark Theme",
-    "use_system_theme": "Use System Theme"
+    "new_issue": "New issue",
+    "new_project": "New project",
+    "new_autopilot": "New autopilot",
+    "chat_with_agent": "Chat with an agent",
+    "change_theme": "Change theme...",
+    "send_feedback": "Send feedback",
+    "copy_issue_link": "Copy issue link",
+    "copy_identifier": "Copy identifier ({{identifier}})",
+    "fold_all_comments": "Fold all comments",
+    "unfold_all_comments": "Unfold all comments"
+  },
+  "issue": {
+    "change_status": "Change status...",
+    "assign_to": "Assign to...",
+    "set_priority": "Set priority...",
+    "run_quick_action": "Run quick action...",
+    "quick_actions_available_one": "{{count}} available",
+    "quick_actions_available_other": "{{count}} available",
+    "add_label": "Add label...",
+    "set_due_date": "Set due date...",
+    "move_to_project": "Move to project...",
+    "set_parent": "Set parent issue...",
+    "cancel_run": "Cancel current run",
+    "retry_run": "Retry last run",
+    "create_sub_issue": "New sub-issue",
+    "subscribe": "Subscribe",
+    "unsubscribe": "Unsubscribe",
+    "delete": "Delete issue",
+    "delete_selected_one": "Delete {{count}} issue",
+    "delete_selected_other": "Delete {{count}} issues"
+  },
+  "project": {
+    "change_status": "Change project status...",
+    "new_issue": "New issue in this project",
+    "pin": "Pin to sidebar",
+    "unpin": "Unpin from sidebar",
+    "copy_link": "Copy project link"
+  },
+  "agent": {
+    "chat": "Chat with {{name}}",
+    "assign_issue": "Assign an issue to {{name}}...",
+    "new_issue": "New issue for {{name}}",
+    "pin_in_chat": "Pin in chat",
+    "unpin_in_chat": "Unpin from chat"
+  },
+  "autopilot": {
+    "run_now": "Run once now",
+    "pause": "Pause",
+    "resume": "Resume"
+  },
+  "inbox": {
+    "archive": "Archive",
+    "mark_unread": "Mark as unread",
+    "mark_all_read": "Mark all inbox items as read",
+    "archive_all_read": "Archive all read inbox items"
+  },
+  "chat": {
+    "link_project": "Link to project...",
+    "pin": "Pin chat",
+    "unpin": "Unpin chat",
+    "archive": "Archive chat"
+  },
+  "pages": {
+    "status": "Status",
+    "priority": "Priority",
+    "assignee": "Assignee",
+    "labels": "Labels",
+    "due_date": "Due date",
+    "project": "Project",
+    "parent": "Parent issue",
+    "quick_actions": "Quick actions",
+    "theme": "Theme",
+    "project_status": "Project status",
+    "no_project": "No project",
+    "current": "Current"
+  },
+  "theme": {
+    "light": "Light",
+    "dark": "Dark",
+    "system": "System"
   },
   "toast": {
     "link_copied": "Link copied",
-    "copied_identifier": "Copied {{identifier}}"
+    "copied_identifier": "Copied {{identifier}}",
+    "run_retried": "Run restarted",
+    "run_cancelled": "Run cancelled",
+    "subscribed": "Subscribed",
+    "unsubscribed": "Unsubscribed",
+    "label_added": "Added label {{name}}",
+    "label_removed": "Removed label {{name}}",
+    "label_failed": "Couldn't add label {{name}} to every issue",
+    "update_failed": "Update failed",
+    "assigned": "Assigned {{identifier}} to {{name}}"
   },
   "empty": {
     "no_results": "No results found.",
-    "type_to_search": "Type to search issues and projects"
+    "no_labels": "No labels",
+    "type_to_find_issue": "Type to find an issue",
+    "type_to_find_people": "Type to find people and agents"
+  },
+  "delegate": {
+    "heading": "Hand to agent",
+    "create_and_assign": "New issue and assign to {{name}}",
+    "squad": "Squad",
+    "context_aria": "Created with",
+    "parent": "Under {{identifier}}",
+    "pick_crumb": "Choose",
+    "pick_another": "Hand to another agent or squad...",
+    "detected": "Instruction"
+  },
+  "best": {
+    "assign": "Assign {{subject}} to {{name}}",
+    "chat": "Chat with {{name}}",
+    "new_issue_in": "New issue in {{name}}"
+  },
+  "types": {
+    "issue": "Issue",
+    "project": "Project",
+    "agent": "Agent",
+    "autopilot": "Autopilot",
+    "squad": "Squad",
+    "member": "Member"
+  },
+  "footer": {
+    "navigate": "Navigate",
+    "select": "Select",
+    "open_in_new_tab": "Open in new tab",
+    "delegate": "Create and hand to {{name}}",
+    "search_instead": "Search as keywords",
+    "back": "Back",
+    "prefix_commands": "Commands",
+    "prefix_issues": "Issues",
+    "prefix_people": "People & agents"
   },
   "trigger": {
     "label": "Search..."

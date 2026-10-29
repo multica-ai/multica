@@ -33,7 +33,7 @@ import type {
   Agent,
   Squad,
 } from "@multica/core/types";
-import { ListTodo } from "lucide-react";
+import { ListTodo } from "@multica/ui/icons";
 import { ActorAvatar } from "../../common/actor-avatar";
 import { StatusIcon } from "../../issues/components/status-icon";
 import { ProjectIcon } from "../../projects/components/project-icon";

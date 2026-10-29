@@ -349,7 +349,7 @@ describe("ResourceLeadingVisual", () => {
     expect(getByTestId("actor-avatar").getAttribute("data-actor")).toBe("agent:ag1");
   });
 
-  it("renders a lucide icon for a plain icon visual", () => {
+  it("renders a route icon for a plain icon visual", () => {
     const { container } = render(
       <ResourceLeadingVisual visual={{ kind: "icon", icon: "Inbox" }} />,
     );

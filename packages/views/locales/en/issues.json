@@ -471,6 +471,7 @@
     "agents_group": "Agents",
     "mark_done_tooltip": "Mark as done",
     "archive_tooltip": "Archive",
+    "restore_to_inbox_tooltip": "Restore to inbox",
     "pin_tooltip": "Pin to sidebar",
     "unpin_tooltip": "Unpin from sidebar",
     "quick_jump_label": "Quick navigation",
@@ -502,7 +503,8 @@
     "pull_requests_empty_title": "No linked pull requests."
   },
   "timeline": {
-    "loading": "Loading..."
+    "loading": "Loading...",
+    "jump_to_latest": "Jump to latest"
   },
   "activity": {
     "created": "created this issue",
@@ -773,13 +775,13 @@
     "trigger_image": "[Image]",
     "summary_runs_one": "{{count}} run",
     "summary_runs_other": "{{count}} runs",
-    "latest": "Latest",
     "open_timeline": "Open timeline",
     "more_runs_one": "Show {{count}} more",
     "more_runs_other": "Show {{count}} more",
     "strip_aria": "Cost per run — open the run timeline",
     "strip_no_usage": "No usage recorded",
-    "sparkline_now": "Now"
+    "queued_count_one": "{{count}} queued",
+    "queued_count_other": "{{count}} queued"
   },
   "runs_timeline": {
     "title": "Runs",

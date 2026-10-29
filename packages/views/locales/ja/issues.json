@@ -466,6 +466,7 @@
     "agents_group": "エージェント",
     "mark_done_tooltip": "完了にする",
     "archive_tooltip": "アーカイブ",
+    "restore_to_inbox_tooltip": "インボックスに戻す",
     "pin_tooltip": "サイドバーにピン留め",
     "unpin_tooltip": "サイドバーのピン留めを解除",
     "quick_jump_label": "クイックナビゲーション",
@@ -496,7 +497,8 @@
     "pull_requests_empty_title": "関連する PR はありません。"
   },
   "timeline": {
-    "loading": "読み込み中..."
+    "loading": "読み込み中...",
+    "jump_to_latest": "最新に移動"
   },
   "activity": {
     "created": "このタスクを作成しました",
@@ -743,12 +745,11 @@
     "trigger_wakeup": "起動 · {{condition}}",
     "trigger_image": "[画像]",
     "summary_runs_other": "{{count}} 回の実行",
-    "latest": "最新",
     "open_timeline": "タイムラインを開く",
     "more_runs_other": "残り {{count}} 件を表示",
     "strip_aria": "実行ごとの費用 — 実行タイムラインを開く",
     "strip_no_usage": "使用量の記録なし",
-    "sparkline_now": "現在"
+    "queued_count_other": "{{count}} 件待機中"
   },
   "runs_timeline": {
     "title": "実行履歴",

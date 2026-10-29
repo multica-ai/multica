@@ -2,7 +2,7 @@
 
 import { useState, type ReactNode } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { Check, ChevronDown, Settings, Workflow } from "lucide-react";
+import { Check, ChevronDown, Settings, Workflow } from "@multica/ui/icons";
 import { toast } from "sonner";
 import { api, clientErrorMessage } from "@multica/core/api";
 import { useWorkspaceId } from "@multica/core/hooks";

@@ -96,14 +96,15 @@ function renderPage({
   connection = qoder(),
   desktop = false,
 }: {
-  runtimes?: AgentRuntime[];
+  /** `null` leaves the runtime list unseeded, so the page renders loading. */
+  runtimes?: AgentRuntime[] | null;
   connection?: QoderConnection;
   desktop?: boolean;
 } = {}) {
   const qc = new QueryClient({
     defaultOptions: { queries: { retry: false, staleTime: Infinity } },
   });
-  qc.setQueryData(runtimeListOptions(WS).queryKey, runtimes);
+  if (runtimes) qc.setQueryData(runtimeListOptions(WS).queryKey, runtimes);
   qc.setQueryData(runtimeProfileListOptions(WS).queryKey, []);
   qc.setQueryData(agentListOptions(WS).queryKey, []);
   qc.setQueryData(memberListOptions(WS).queryKey, []);
@@ -138,6 +139,16 @@ describe("RuntimesPage", () => {
     expect(screen.getByRole("button", { name: "Connect" })).toBeInTheDocument();
     expect(screen.getByText("Cursor Cloud Agents")).toBeInTheDocument();
     expect(screen.getByText("Claude Managed Agents")).toBeInTheDocument();
+  });
+
+  it("keeps the header, toolbar and column headers up while the list loads", () => {
+    const { container } = renderPage({ runtimes: null });
+
+    expect(screen.getByRole("heading", { name: "Runtimes" })).toBeInTheDocument();
+    expect(screen.getByRole("textbox")).toBeInTheDocument();
+    expect(screen.getAllByRole("columnheader").length).toBeGreaterThan(0);
+    expect(container.querySelector('[data-slot="skeleton"]')).not.toBeNull();
+    expect(screen.queryByText("Machines")).not.toBeInTheDocument();
   });
 
   it("offers the desktop download on web when no machine is connected", () => {

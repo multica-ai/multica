@@ -328,6 +328,19 @@ describe("AgentsPage listReady gate", () => {
     expect(screen.getAllByTestId("skeleton").length).toBeGreaterThan(0);
   });
 
+  it("keeps the toolbar above the skeleton while the agent list loads", () => {
+    // A toolbar that only mounts once rows land pushes the list down by its
+    // height mid-navigation (MUL-8337).
+    mocks.agents = [];
+    mocks.agentsLoading = true;
+
+    renderPage();
+
+    expect(screen.getByTestId("agent-list-toolbar")).toBeInTheDocument();
+    expect(screen.getAllByTestId("skeleton").length).toBeGreaterThan(0);
+    expect(screen.queryByText("No agents yet")).not.toBeInTheDocument();
+  });
+
   it("shows the empty state without blocking on auxiliary queries when there are no agents", () => {
     mocks.agents = [];
     // All auxiliary queries pending — the empty state must not wait on them.
@@ -371,6 +384,6 @@ describe("AgentsPage search + model column (GitHub #9500)", () => {
     renderPage();
 
     expect(screen.getByText("Model")).toBeInTheDocument();
-    expect(screen.getAllByTitle("claude").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("claude").length).toBeGreaterThan(0);
   });
 });

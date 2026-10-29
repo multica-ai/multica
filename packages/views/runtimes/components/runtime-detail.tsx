@@ -6,7 +6,7 @@ import {
   ChevronRight,
   Cpu,
   Lock,
-} from "lucide-react";
+} from "@multica/ui/icons";
 import { toast } from "sonner";
 import { useQuery } from "@tanstack/react-query";
 import type {
@@ -30,11 +30,6 @@ import {
 } from "@multica/core/agents";
 import { useWorkspacePaths } from "@multica/core/paths";
 import { Button } from "@multica/ui/components/ui/button";
-import {
-  Tooltip,
-  TooltipContent,
-  TooltipTrigger,
-} from "@multica/ui/components/ui/tooltip";
 import { ActorAvatar } from "../../common/actor-avatar";
 import { BreadcrumbHeader } from "../../layout/breadcrumb-header";
 import { AppLink, useNavigation } from "../../navigation";
@@ -47,6 +42,7 @@ import { RuntimeAccessEditor, RuntimeAccessReadout } from "./runtime-access-edit
 import { DeleteRuntimeProfileDialog } from "./delete-runtime-profile-dialog";
 import { runtimeRowLabel } from "./runtime-machines";
 import { useT, useTimeAgo } from "../../i18n";
+import { TruncatedTooltip } from "@multica/ui/components/common/truncated-tooltip";
 
 function getCliVersion(metadata: Record<string, unknown>): string | null {
   if (
@@ -312,16 +308,11 @@ function HeroCard({
         </Fact>
         <Fact label={t(($) => $.detail.fact_device)}>
           {device?.hostname ? (
-            <Tooltip>
-              <TooltipTrigger
-                render={
-                  <span className="block truncate font-mono text-caption">
-                    {device.hostname}
-                  </span>
-                }
-              />
-              <TooltipContent>{device.hostname}</TooltipContent>
-            </Tooltip>
+            <TruncatedTooltip content={device.hostname}>
+              <span className="block truncate font-mono text-caption">
+                {device.hostname}
+              </span>
+            </TruncatedTooltip>
           ) : (
             <span className="text-body text-muted-foreground">—</span>
           )}

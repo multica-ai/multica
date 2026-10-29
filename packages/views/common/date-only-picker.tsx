@@ -7,7 +7,7 @@ import {
   formatDateOnly,
   isPastDateOnly,
 } from "@multica/core/issues/date";
-import { Check } from "lucide-react";
+import { Check } from "@multica/ui/icons";
 import { Calendar } from "@multica/ui/components/ui/calendar";
 import {
   Popover,

@@ -52,8 +52,8 @@ import {
   Tablet,
   WrapText,
   X,
-  type LucideIcon,
-} from "lucide-react";
+  type IconComponent,
+} from "@multica/ui/icons";
 import type { Attachment } from "@multica/core/types";
 import { paths, useWorkspaceSlug } from "@multica/core/paths";
 import { createShortcutChord } from "@multica/core/shortcuts";
@@ -597,7 +597,7 @@ export function AttachmentPreviewModal({
 
 // Panel — top bar + stage
 
-const KIND_ICONS: Record<PreviewKind, LucideIcon> = {
+const KIND_ICONS: Record<PreviewKind, IconComponent> = {
   image: ImageIcon,
   pdf: FileText,
   video: FileVideo,
@@ -611,7 +611,7 @@ const KIND_ICONS: Record<PreviewKind, LucideIcon> = {
 
 type StructuredView = "tree" | "raw";
 
-const VIEWPORT_ICONS: Record<HtmlViewport, LucideIcon> = {
+const VIEWPORT_ICONS: Record<HtmlViewport, IconComponent> = {
   fill: Maximize2,
   desktop: Monitor,
   tablet: Tablet,
@@ -1141,7 +1141,7 @@ function ChromeSegmented<T extends string>({
 }: {
   label: string;
   value: T;
-  options: ReadonlyArray<{ value: T; label: string; icon: LucideIcon }>;
+  options: ReadonlyArray<{ value: T; label: string; icon: IconComponent }>;
   disabled?: boolean;
   onChange: (value: T) => void;
 }) {

@@ -39,7 +39,7 @@ import {
   type CSSProperties,
   type RefObject,
 } from "react";
-import { Check, Copy, Frame, Maximize2, Minus, Plus } from "lucide-react";
+import { Check, Copy, Frame, Maximize2, Minus, Plus } from "@multica/ui/icons";
 import { copyText } from "@multica/ui/lib/clipboard";
 import { TooltipHint } from "@multica/ui/components/common/tooltip-hint";
 import { useT } from "../i18n";

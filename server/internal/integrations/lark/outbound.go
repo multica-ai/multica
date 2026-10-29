@@ -144,6 +144,7 @@ func (defaultRenderer) Render(in RenderInput) (CardRender, error) {
 // without a real Postgres connection.
 type PatcherQueries interface {
 	mediaDeliveryQueries
+	referenceLinkQueries
 	GetAgentTask(ctx context.Context, id pgtype.UUID) (db.AgentTaskQueue, error)
 	TaskHasChannelIngestedMessages(ctx context.Context, taskID pgtype.UUID) (bool, error)
 	GetChannelTaskDelivery(ctx context.Context, taskID pgtype.UUID) (db.ChannelTaskDelivery, error)
@@ -173,10 +174,11 @@ type CredentialsResolver interface {
 // PatcherConfig tunes the outbound Patcher. Defaults via withDefaults;
 // tests typically override Renderer / Now / Logger.
 type PatcherConfig struct {
+	// AppURL is the deployment's web URL for verified outbound reference links.
+	AppURL string
 	// Renderer drives the error card template used on the EventTaskFailed
 	// path. The success path (EventChatDone) bypasses the renderer
-	// entirely — it sends the raw assistant reply as a plain text IM
-	// message — so this only matters for the failure branch.
+	// and sends a text message or Markdown card.
 	Renderer Renderer
 	Now      func() time.Time
 	Logger   *slog.Logger
@@ -543,6 +545,7 @@ func (p *Patcher) sendChatReply(ctx context.Context, creds InstallationCredentia
 		handedOff = p.deliverAttachmentsAsync(ctx, creds, binding, target, workspaceID, payload)
 		return nil
 	}
+	content = p.linkReplyReferences(ctx, workspaceID, content)
 	// A plain answer with bound images also needs an updatable card. The
 	// bounded metadata probe does not read bytes or wait for an upload.
 	markdown := containsMarkdown(content) || p.replyNeedsMediaCard(ctx, workspaceID, payload)

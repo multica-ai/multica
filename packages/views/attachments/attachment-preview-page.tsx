@@ -29,7 +29,7 @@
 
 import { useCallback, useEffect } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { Loader2 } from "lucide-react";
+import { Loader2 } from "@multica/ui/icons";
 import { api } from "@multica/core/api";
 import { useT } from "../i18n";
 import { useRestoredViewState, useViewStateWriter } from "../platform";

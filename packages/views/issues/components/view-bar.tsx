@@ -28,7 +28,7 @@ import {
   Plus,
   Settings2,
   Trash2,
-} from "lucide-react";
+} from "@multica/ui/icons";
 import { Button } from "@multica/ui/components/ui/button";
 import {
   ContextMenu,

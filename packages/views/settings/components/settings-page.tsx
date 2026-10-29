@@ -25,7 +25,7 @@ import {
   Workflow,
   Zap,
   ShieldCheck,
-} from "lucide-react";
+} from "@multica/ui/icons";
 import { useAuthStore } from "@multica/core/auth";
 import { useCurrentWorkspace } from "@multica/core/paths";
 import { useFeatureEnabled } from "@multica/core/config";

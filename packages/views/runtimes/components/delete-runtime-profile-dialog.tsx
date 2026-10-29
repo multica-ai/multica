@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { AlertTriangle } from "lucide-react";
+import { AlertTriangle } from "@multica/ui/icons";
 import { toast } from "sonner";
 import type { RuntimeProfile } from "@multica/core/types";
 import {
