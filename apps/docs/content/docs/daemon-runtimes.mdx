@@ -164,6 +164,10 @@ A cache is removed only when all three hold: no workspace or project references 
 | Hermes memory (one per agent) | `hermes-state/` in the same directory | Removed after 90 days unused |
 | Each run's private temporary directory (`TMPDIR`) | `multica-task-*` in the system temp directory | Removed when the run ends; if the daemon was killed, a later cleanup removes it |
 
+Hermes issue and chat tasks use their conversation's session directory as an isolated `HERMES_HOME`, with a regular `state.db` and its SQLite journals inside it. This works with both in-process ACP and gateway-backed Hermes. Existing session stores are reused, and task-local history is migrated before the next run starts.
+
+Multica refreshes the home's skills and derived configuration for each run. Provider authentication is preserved; messaging adapters and HTTP ingress are disabled for managed tasks. Host gateway state, logs, sessions, and cron jobs are isolated. Any task-owned gateway is stopped at task completion so later tasks receive their own execution environment.
+
 ### Codex native memory and subagents [#codex-memory]
 
 Daemon-managed Codex runs have Codex native memory turned off by default, so memories from this machine or an earlier run do not carry into another workspace. The setting is written only to that run's own `CODEX_HOME/config.toml` (`features.memories`, `memories.generate_memories`, and `memories.use_memories` all `false`); your `~/.codex/config.toml` is not changed. To keep native memory, set `MULTICA_CODEX_MEMORY=1` in the daemon's environment.

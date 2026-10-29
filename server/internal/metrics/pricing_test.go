@@ -82,6 +82,14 @@ func TestPriceForModelAliasCodexCurrentGeneration(t *testing.T) {
 			want:  ModelPrice{Provider: "openai", Model: "gpt-6.1-sol", InputPerM: 2, CacheReadPerM: 0.1, CacheWritePerM: 2.5, OutputPerM: 10},
 		},
 		{
+			model: "gpt-6.1-terra",
+			want:  ModelPrice{Provider: "openai", Model: "gpt-6.1-terra", InputPerM: 1, CacheReadPerM: 0.05, CacheWritePerM: 1.25, OutputPerM: 5},
+		},
+		{
+			model: "openai/gpt-6.1-terra[1m]",
+			want:  ModelPrice{Provider: "openai", Model: "gpt-6.1-terra", InputPerM: 1, CacheReadPerM: 0.05, CacheWritePerM: 1.25, OutputPerM: 5},
+		},
+		{
 			model: "openai:gpt-6-sol",
 			want:  ModelPrice{Provider: "openai", Model: "gpt-6-sol", InputPerM: 2, CacheReadPerM: 0.2, CacheWritePerM: 2.5, OutputPerM: 10},
 		},
@@ -118,6 +126,8 @@ func TestPriceForModelAliasCodexCurrentGeneration(t *testing.T) {
 		"gpt-6-astra-pro",
 		"gpt-6.1-sol-pro",
 		"gpt-6-1-sol",
+		"gpt-6.1-terra-pro",
+		"gpt-6-1-terra",
 		"gpt-6-sol-high",
 		"gpt-6-luna-pro",
 		"gpt-6-astra/unknown",

@@ -466,6 +466,7 @@
     "agents_group": "에이전트",
     "mark_done_tooltip": "완료로 표시",
     "archive_tooltip": "보관",
+    "restore_to_inbox_tooltip": "인박스로 복원",
     "pin_tooltip": "사이드바에 고정",
     "unpin_tooltip": "사이드바 고정 해제",
     "quick_jump_label": "빠른 탐색",

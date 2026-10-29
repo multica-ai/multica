@@ -466,6 +466,7 @@
     "agents_group": "エージェント",
     "mark_done_tooltip": "完了にする",
     "archive_tooltip": "アーカイブ",
+    "restore_to_inbox_tooltip": "インボックスに戻す",
     "pin_tooltip": "サイドバーにピン留め",
     "unpin_tooltip": "サイドバーのピン留めを解除",
     "quick_jump_label": "クイックナビゲーション",

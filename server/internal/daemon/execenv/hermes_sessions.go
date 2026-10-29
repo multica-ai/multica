@@ -16,10 +16,9 @@ import (
 // get separate SQLite databases. This keeps resumable transcripts across task homes
 // without sharing a live database among an agent's concurrent issues.
 //
-// Keep session storage outside the memories root. Link overlay/state.db to the
-// store so SQLite places WAL and SHM sidecars beside the persistent database and
-// task teardown cannot remove them. Detect provider session-ID rebinding when a
-// requested session is absent.
+// The conversation store is the effective HERMES_HOME, with an ordinary state.db
+// and its journals inside it. Both in-process ACP and gateway-backed Hermes can
+// use it without relaxing gateway database ownership checks or copying a live DB.
 
 // hermesSessionStoreRoot is the directory under the daemon's Multica profile
 // dir that holds every agent's persistent Hermes conversation shards.
@@ -71,109 +70,52 @@ func hermesConversationSegment(task TaskContextForEnv) string {
 
 // hermesSessionMount is what a mount attempt actually achieved.
 //
-// The two facts are deliberately separate. Mounted says state.db resolves to
-// the store; HistoryPresent says the store holds a database to resume. A
+// The two facts are deliberately separate. Mounted says the store is the home;
+// HistoryPresent says the store holds a database to resume. A
 // mounted-but-empty store is the normal shape of a conversation's first turn,
 // and also what a GC reclaim, a profile switch or an operator's `rm` leaves
 // behind — treating "mounted" as "resumable" would forward a session id into an
 // empty database, which is the silent restart this whole change exists to kill.
 type hermesSessionMount struct {
+	Home           string
 	Mounted        bool
 	HistoryPresent bool
 }
 
-// hermesSessionLink creates the store link. Indirected so a test can simulate a
-// host that cannot create symlinks — the degradation path is the one that must
-// never destroy a database, so it needs coverage everywhere, not only on
-// Windows.
-var hermesSessionLink = os.Symlink
-
-// hermesSessionCopy copies one file of a migration. Indirected so a test can
-// fail the second file of the state.db family and prove the store is never left
-// holding a partially migrated conversation.
+// hermesSessionCopy copies one file of a migration. Tests can fail a sidecar
+// copy to prove a partial migration never replaces the original transcript.
 var hermesSessionCopy = copyFile
 
-// mountHermesSessionDB points the overlay's state.db at the conversation's
-// store, so the transcript outlives the task.
-//
-// The order of operations is the contract. Nothing that could destroy an
-// existing database happens until the link has actually been created (under a
-// staging name), because the alternative — migrate, delete, then discover this
-// host cannot symlink — turns a working task-local conversation into an empty
-// one on exactly the hosts the degradation path exists to protect. A false
-// Mounted with a nil error therefore means "nothing was touched; keep the
-// database task-local", which is the pre-existing behaviour.
-//
-// Idempotent across Reuse: a link already pointing at the store is left alone.
-// A real state.db left by an older daemon — or by a task that ran before this
-// conversation had a store — is migrated into an empty store rather than
-// dropped, so upgrading mid-conversation does not discard the transcript the
-// user is in the middle of.
-func mountHermesSessionDB(hermesHome, storeDir string, logger *slog.Logger) (hermesSessionMount, error) {
-	dst := filepath.Join(hermesHome, hermesSessionDBEntry)
-	target := filepath.Join(storeDir, hermesSessionDBEntry)
-
+// prepareHermesSessionHome uses the existing conversation store as the home.
+// Keep the old task overlay intact for daemon rollback: an older daemon can
+// still link its state.db to this same store. Never turn that task path into a
+// directory link, which would let an older daemon unlink the store's own DB.
+func prepareHermesSessionHome(hermesHome, storeDir string, logger *slog.Logger) (hermesSessionMount, error) {
 	if err := os.MkdirAll(storeDir, 0o700); err != nil {
-		return hermesSessionMount{}, fmt.Errorf("create hermes session store %s: %w", storeDir, err)
+		return hermesSessionMount{}, fmt.Errorf("create hermes session home: %w", err)
 	}
-
-	fi, err := os.Lstat(dst)
-	switch {
-	case err == nil && fi.Mode()&os.ModeSymlink != 0:
-		if current, rlErr := os.Readlink(dst); rlErr == nil && filepath.Clean(current) == filepath.Clean(target) {
-			// Already mounted (Reuse). The link can still be dangling — the GC
-			// may have reclaimed the store since the last turn — so the history
-			// question is answered from the store, never from the link.
-			touchHermesSessionStore(storeDir, logger)
-			return hermesSessionMount{Mounted: true, HistoryPresent: hermesStoreHasSessionDB(storeDir)}, nil
+	if filepath.Clean(hermesHome) != filepath.Clean(storeDir) {
+		if err := os.MkdirAll(hermesHome, 0o700); err != nil {
+			return hermesSessionMount{}, err
 		}
-	case err != nil && !os.IsNotExist(err):
-		return hermesSessionMount{}, fmt.Errorf("stat hermes session db %s: %w", dst, err)
+		if err := prepareHermesTaskLocalState(hermesHome); err != nil {
+			return hermesSessionMount{}, err
+		}
+		if err := migrateHermesTaskSessionDB(hermesHome, storeDir, logger); err != nil {
+			return hermesSessionMount{}, err
+		}
+		if err := removeHermesSessionDBFamily(hermesHome); err != nil {
+			return hermesSessionMount{}, err
+		}
 	}
-
-	// Prove the host can link BEFORE anything destructive. A real symlink,
-	// never a copy: createFileLink falls back to copying on a Windows host that
-	// cannot symlink, and a copied SQLite database would absorb every write of
-	// this turn into a file the next task throws away — worse than staying
-	// task-local, because it looks like it worked.
-	staged := filepath.Join(hermesHome, hermesSessionLinkStagingEntry)
-	if err := os.RemoveAll(staged); err != nil {
-		return hermesSessionMount{}, fmt.Errorf("clear stale session link staging %s: %w", staged, err)
-	}
-	if err := hermesSessionLink(target, staged); err != nil {
-		logger.Warn("execenv: hermes session store not mounted; conversation history stays task-local",
-			"store", storeDir,
-			"error", err,
-		)
-		return hermesSessionMount{}, nil
-	}
-	defer os.RemoveAll(staged) // no-op once the staging link has been renamed into place
-
-	if err := migrateHermesTaskSessionDB(hermesHome, storeDir, logger); err != nil {
+	// This store already belongs to the conversation. Mark it before the generic
+	// overlay initializer, whose legacy-host migration would otherwise discard it.
+	if err := writeFileAtomic(filepath.Join(storeDir, hermesTaskLocalStateMarker), []byte("conversation Hermes state\n"), 0o600); err != nil {
 		return hermesSessionMount{}, err
 	}
-	if err := removeHermesSessionDBFamily(hermesHome); err != nil {
-		return hermesSessionMount{}, err
-	}
-	// Publish the link. Fails closed: the database is already safe in the store
-	// by this point, so a rename failure means a broken filesystem, not lost
-	// history, and the task must not start against a home with no state.db path
-	// at all.
-	if err := os.Rename(staged, dst); err != nil {
-		return hermesSessionMount{}, fmt.Errorf("publish hermes session link %s: %w", dst, err)
-	}
-	// Stamp the store as just-used: mounting it does not touch its mtime, so
-	// without this the GC's idle check could reclaim a long-idle conversation
-	// right as a task picks it back up.
 	touchHermesSessionStore(storeDir, logger)
-	return hermesSessionMount{Mounted: true, HistoryPresent: hermesStoreHasSessionDB(storeDir)}, nil
+	return hermesSessionMount{Home: storeDir, Mounted: true, HistoryPresent: hermesStoreHasSessionDB(storeDir)}, nil
 }
-
-// hermesSessionLinkStagingEntry is where the store link is created before it is
-// published over state.db. Dot-prefixed so isHermesTaskLocalStateEntry does not
-// match it and the family cleanup cannot remove the link it is about to
-// publish.
-const hermesSessionLinkStagingEntry = ".multica-session-link"
 
 // hermesStoreHasSessionDB reports whether storeDir holds a session database
 // with readable content. A zero-length file is what SQLite leaves after an

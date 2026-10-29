@@ -463,6 +463,7 @@
     "agents_group": "智慧體",
     "mark_done_tooltip": "標記為已完成",
     "archive_tooltip": "歸檔",
+    "restore_to_inbox_tooltip": "恢復到收件箱",
     "pin_tooltip": "固定到側邊欄",
     "unpin_tooltip": "從側邊欄取消固定",
     "quick_jump_label": "快捷跳轉",

@@ -1606,3 +1606,207 @@ func TestOpenclawExecuteAllowsCurrentVersion(t *testing.T) {
 		t.Fatal("timeout waiting for result")
 	}
 }
+
+func TestClassifyOpenclawStateLockFailure(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name    string
+		message string
+		want    openclawStateLockFailure
+	}{
+		{
+			name:    "ownership acquisition timeout",
+			message: `GatewayLockError("failed to acquire gateway state ownership; waited 10000ms for Gateway state ownership")`,
+			want:    openclawStateLockOwnership,
+		},
+		{
+			name:    "resident gateway refusal",
+			message: `GatewayLockError("A Gateway is running for this state directory (pid 123, port 18789). Run without --local to use it, or stop the Gateway first (openclaw gateway stop).")`,
+			want:    openclawStateLockResidentGateway,
+		},
+		{
+			name:    "state directory ownership lock",
+			message: "OpenClaw could not acquire the state-directory ownership lock",
+			want:    openclawStateLockOwnership,
+		},
+		{
+			name:    "state dir ownership lock",
+			message: "failed to acquire state dir ownership lock",
+			want:    openclawStateLockOwnership,
+		},
+		{
+			name:    "unrelated lock error",
+			message: "failed to acquire workspace ownership lock",
+			want:    openclawStateLockNone,
+		},
+		{
+			name:    "unrelated openclaw error",
+			message: "openclaw returned no parseable output",
+			want:    openclawStateLockNone,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			if got := classifyOpenclawStateLockFailure(tt.message); got != tt.want {
+				t.Fatalf("classifyOpenclawStateLockFailure(%q) = %v, want %v", tt.message, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestOpenclawStateLockGuidance(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name           string
+		message        string
+		wantContains   []string
+		wantNotContain []string
+	}{
+		{
+			name:    "resident gateway recommends gateway mode",
+			message: `GatewayLockError("A Gateway is running for this state directory (pid 123, port 18789). Run without --local to use it, or stop the Gateway first (openclaw gateway stop).")`,
+			wantContains: []string{
+				"runtime_config.mode",
+				"gateway",
+				"openclaw gateway stop",
+			},
+		},
+		{
+			name:    "ownership lock recommends dedicated directory",
+			message: `GatewayLockError("failed to acquire gateway state ownership; waited 10000ms for Gateway state ownership")`,
+			wantContains: []string{
+				"backends.openclaw.state_dir",
+				"OPENCLAW_STATE_DIR",
+				"separate credentials and sessions",
+			},
+			wantNotContain: []string{"runtime_config.mode"},
+		},
+		{
+			name:    "unrelated error",
+			message: "openclaw returned no parseable output",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			guidance, ok := openclawStateLockGuidance(tt.message)
+			if len(tt.wantContains) == 0 && len(tt.wantNotContain) == 0 {
+				if ok || guidance != "" {
+					t.Fatalf("openclawStateLockGuidance(%q) = %q, %v; want no guidance", tt.message, guidance, ok)
+				}
+				return
+			}
+			if !ok {
+				t.Fatalf("openclawStateLockGuidance(%q) returned no guidance", tt.message)
+			}
+			for _, want := range tt.wantContains {
+				if !strings.Contains(guidance, want) {
+					t.Errorf("guidance missing %q: %s", want, guidance)
+				}
+			}
+			for _, unwanted := range tt.wantNotContain {
+				if strings.Contains(guidance, unwanted) {
+					t.Errorf("guidance unexpectedly contains %q: %s", unwanted, guidance)
+				}
+			}
+		})
+	}
+}
+
+func TestOpenclawExecuteReportsStateOwnershipLockAction(t *testing.T) {
+	t.Parallel()
+	if runtime.GOOS == "windows" {
+		t.Skip("shell-script fixture is POSIX-only")
+	}
+
+	tests := []struct {
+		name         string
+		mode         string
+		stderr       string
+		wantContains []string
+		wantAbsent   []string
+	}{
+		{
+			name:   "local ownership timeout",
+			stderr: `GatewayLockError("failed to acquire gateway state ownership; waited 10000ms for Gateway state ownership")`,
+			wantContains: []string{
+				"backends.openclaw.state_dir",
+				"OPENCLAW_STATE_DIR",
+				"failed to acquire gateway state ownership",
+			},
+		},
+		{
+			name:   "local resident gateway",
+			stderr: `GatewayLockError("A Gateway is running for this state directory (pid 123, port 18789). Run without --local to use it, or stop the Gateway first (openclaw gateway stop).")`,
+			wantContains: []string{
+				"runtime_config.mode",
+				"openclaw gateway stop",
+				"A Gateway is running for this state directory",
+			},
+		},
+		{
+			name:       "gateway mode unchanged",
+			mode:       "gateway",
+			stderr:     `GatewayLockError("A Gateway is running for this state directory (pid 123, port 18789). Run without --local to use it, or stop the Gateway first (openclaw gateway stop).")`,
+			wantAbsent: []string{"runtime_config.mode", "backends.openclaw.state_dir", "openclaw gateway stop"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			fakePath := filepath.Join(t.TempDir(), "openclaw")
+			script := "#!/bin/sh\n" +
+				"if [ \"$1\" = \"--version\" ]; then\n" +
+				"  echo 'openclaw 2026.5.5 c37871e'\n" +
+				"  exit 0\n" +
+				"fi\n" +
+				"echo '" + tt.stderr + "' >&2\n" +
+				"exit 1\n"
+			writeTestExecutable(t, fakePath, []byte(script))
+
+			backend, err := New("openclaw", Config{ExecutablePath: fakePath, Logger: slog.Default()})
+			if err != nil {
+				t.Fatalf("new openclaw backend: %v", err)
+			}
+
+			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+			defer cancel()
+			session, err := backend.Execute(ctx, "prompt", ExecOptions{
+				Timeout:      5 * time.Second,
+				OpenclawMode: tt.mode,
+			})
+			if err != nil {
+				t.Fatalf("Execute: %v", err)
+			}
+			go func() {
+				for range session.Messages {
+				}
+			}()
+
+			select {
+			case result := <-session.Result:
+				if result.Status != "failed" {
+					t.Fatalf("status = %q, want failed", result.Status)
+				}
+				for _, want := range tt.wantContains {
+					if !strings.Contains(result.Error, want) {
+						t.Errorf("error missing %q: %s", want, result.Error)
+					}
+				}
+				for _, unwanted := range tt.wantAbsent {
+					if strings.Contains(result.Error, unwanted) {
+						t.Errorf("error unexpectedly contains %q: %s", unwanted, result.Error)
+					}
+				}
+			case <-time.After(10 * time.Second):
+				t.Fatal("timeout waiting for result")
+			}
+		})
+	}
+}

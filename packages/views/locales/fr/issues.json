@@ -470,6 +470,7 @@
     "agents_group": "Agents",
     "mark_done_tooltip": "Marquer comme terminé",
     "archive_tooltip": "Archiver",
+    "restore_to_inbox_tooltip": "Restaurer dans la boîte de réception",
     "pin_tooltip": "Épingler à la barre latérale",
     "unpin_tooltip": "Détacher de la barre latérale",
     "quick_jump_label": "Navigation rapide",

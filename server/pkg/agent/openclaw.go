@@ -29,6 +29,10 @@ const openclawNoParseableOutput = "openclaw returned no parseable output"
 // of "openclaw returned no parseable output".
 const minOpenclawVersion = "2026.5.5"
 
+const openclawStateOwnershipLockError = "OpenClaw could not acquire ownership of its state directory because another OpenClaw process owns it. Stop that process, or configure a dedicated state directory through backends.openclaw.state_dir / OPENCLAW_STATE_DIR and retry. A dedicated directory has separate credentials and sessions."
+
+const openclawResidentGatewayLocalRefusalError = "OpenClaw Gateway is already running for this state directory. Switch this OpenClaw runtime's runtime_config.mode to gateway so Multica uses the resident Gateway, or stop it with openclaw gateway stop before retrying in local mode. To keep local mode, configure a dedicated state directory through backends.openclaw.state_dir / OPENCLAW_STATE_DIR; that directory has separate credentials and sessions."
+
 // openclawVersionPattern extracts a three-segment dotted version from
 // arbitrary `openclaw --version` output (e.g. "openclaw 2026.5.5",
 // "openclaw v2026.5.5 c37871e").
@@ -108,7 +112,8 @@ func (b *openclawBackend) Execute(ctx context.Context, prompt string, opts ExecO
 		cancel()
 		return nil, fmt.Errorf("openclaw stdout pipe: %w", err)
 	}
-	cmd.Stderr = newLogWriter(b.cfg.Logger, "[openclaw:stderr] ")
+	stderrBuf := newStderrTail(newLogWriter(b.cfg.Logger, "[openclaw:stderr] "), agentStderrTailBytes)
+	cmd.Stderr = stderrBuf
 
 	if err := startOwnedProcessTree(cmd, b.cfg.Logger); err != nil {
 		cancel()
@@ -189,6 +194,18 @@ func (b *openclawBackend) Execute(ctx context.Context, prompt string, opts ExecO
 			scanResult.errMsg = fmt.Sprintf("openclaw exited with error: %v", exitErr)
 		}
 
+		// A resident OpenClaw Gateway may already own the default ~/.openclaw
+		// state directory. Local mode cannot share that ownership lock; surface
+		// the configuration needed to use an isolated state directory instead of
+		// leaving users with the generic "no parseable output" failure. Gateway
+		// mode talks to the resident Gateway and is unaffected by this lock.
+		if opts.OpenclawMode != "gateway" && scanResult.status == "failed" {
+			stderr := stderrBuf.Tail()
+			if guidance, ok := openclawStateLockGuidance(stderr); ok {
+				scanResult.errMsg = withAgentStderr(guidance, "OpenClaw", sanitizeAgentDiagnostic(stderr))
+			}
+		}
+
 		b.cfg.Logger.Info("openclaw finished", "pid", cmd.Process.Pid, "status", scanResult.status, "duration", duration.Round(time.Millisecond).String())
 
 		// Build usage map. Prefer the model openclaw reported in
@@ -216,6 +233,53 @@ func (b *openclawBackend) Execute(ctx context.Context, prompt string, opts ExecO
 	}()
 
 	return &Session{Messages: msgCh, Result: resCh}, nil
+}
+
+type openclawStateLockFailure int
+
+const (
+	openclawStateLockNone openclawStateLockFailure = iota
+	openclawStateLockOwnership
+	openclawStateLockResidentGateway
+)
+
+// openclawStateLockGuidance recognizes the two ways `openclaw agent --local`
+// can be refused by a state directory that is already in use. Keep the match
+// anchored to state ownership or the resident-Gateway refusal so unrelated
+// lock failures are not rewritten.
+func openclawStateLockGuidance(message string) (string, bool) {
+	switch classifyOpenclawStateLockFailure(message) {
+	case openclawStateLockResidentGateway:
+		return openclawResidentGatewayLocalRefusalError, true
+	case openclawStateLockOwnership:
+		return openclawStateOwnershipLockError, true
+	default:
+		return "", false
+	}
+}
+
+func classifyOpenclawStateLockFailure(message string) openclawStateLockFailure {
+	normalized := strings.ToLower(strings.Join(strings.Fields(message), " "))
+	if normalized == "" {
+		return openclawStateLockNone
+	}
+	if strings.Contains(normalized, "a gateway is running for this state directory") {
+		return openclawStateLockResidentGateway
+	}
+	if strings.Contains(normalized, "gatewaylockerror") && strings.Contains(normalized, "state ownership") {
+		return openclawStateLockOwnership
+	}
+	if strings.Contains(normalized, "failed to acquire gateway state ownership") {
+		return openclawStateLockOwnership
+	}
+	if strings.Contains(normalized, "ownership lock") {
+		if strings.Contains(normalized, "state-directory") ||
+			strings.Contains(normalized, "state directory") ||
+			strings.Contains(normalized, "state dir") {
+			return openclawStateLockOwnership
+		}
+	}
+	return openclawStateLockNone
 }
 
 // buildOpenclawArgs assembles the argv for a one-shot `openclaw agent` invocation.

@@ -969,15 +969,8 @@ func TestHermesTerminalConfigInvalidAliases(t *testing.T) {
 	} {
 		source, overlay := t.TempDir(), t.TempDir()
 		mustWrite(t, filepath.Join(source, "config.yaml"), config)
-		if err := writeDerivedHermesConfig(source, overlay, nil, testLogger()); err != nil {
-			t.Fatal(err)
-		}
-		data, err := os.ReadFile(filepath.Join(overlay, "config.yaml"))
-		if err != nil {
-			t.Fatal(err)
-		}
-		if string(data) != config {
-			t.Errorf("invalid alias config was not preserved: got %q, want %q", data, config)
+		if err := writeDerivedHermesConfig(source, overlay, nil, testLogger()); err == nil {
+			t.Fatal("malformed config must fail closed before gateway ingress can start")
 		}
 	}
 	cycle := &yaml.Node{Kind: yaml.AliasNode}

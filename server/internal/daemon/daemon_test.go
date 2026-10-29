@@ -163,6 +163,9 @@ func TestIsBlockedEnvKey(t *testing.T) {
 		{key: "CURSOR_MCP_AUTH_SOURCE", want: true},
 		{key: "OPENCLAW_CONFIG_PATH", want: true},
 		{key: "OPENCLAW_INCLUDE_ROOTS", want: true},
+		// OPENCLAW_STATE_DIR is intentionally NOT blocked so users can give an
+		// agent a dedicated OpenClaw state directory when the default is locked.
+		{key: "OPENCLAW_STATE_DIR", want: false},
 		{key: "ANTHROPIC_API_KEY", want: false},
 		{key: "CURSOR_AGENT", want: false},
 		// HERMES_HOME is intentionally NOT blocked: a skill-less Hermes task
