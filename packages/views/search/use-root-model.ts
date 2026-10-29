@@ -2,6 +2,8 @@
 
 import { useMemo } from "react";
 import type { CommandBarContext } from "@multica/core/command-bar";
+import { useFeatureEnabled } from "@multica/core/config";
+import { TEAM_PAGE_FLAG } from "@multica/core/feature-flags";
 import { WORKSPACE_PAGES, type WorkspacePageKey } from "@multica/core/paths";
 import { partitionAggregatedSearchResults } from "@multica/core/search/cancelled-rank";
 import type { SearchIssueResult, SearchProjectResult } from "@multica/core/types";
@@ -35,6 +37,7 @@ import { useServerSearch, type SearchResults } from "./use-server-search";
 const PAGE_KEYWORDS: Record<WorkspacePageKey, string[]> = {
   inbox: ["inbox", "notifications", "收件箱", "通知"],
   chat: ["chat", "messages", "conversation", "聊天", "消息", "对话"],
+  team: ["team", "agents", "squads", "members", "people", "团队", "成员", "智能体"],
   myIssues: ["my", "issues", "assigned", "mine", "我的", "任务"],
   issues: ["issues", "tasks", "bugs", "任务"],
   projects: ["projects", "kanban", "项目"],
@@ -153,14 +156,15 @@ export function useRootModel(
   const delegateCandidates = useDelegateCandidates(active);
   const attachments = useDelegateAttachments(contexts);
 
+  const teamPageEnabled = useFeatureEnabled(TEAM_PAGE_FLAG, false);
   const navPages = useMemo<NavPage[]>(
     () =>
-      NAV_PAGE_KEYS.map((key) => ({
+      NAV_PAGE_KEYS.filter((key) => key !== "team" || teamPageEnabled).map((key) => ({
         key,
         label: tNav(($) => $.nav[WORKSPACE_PAGES[key].navKey]),
         keywords: PAGE_KEYWORDS[key],
       })),
-    [tNav],
+    [tNav, teamPageEnabled],
   );
 
   return useMemo<RootModel>(() => {

@@ -1,0 +1,71 @@
+{
+  "page": {
+    "title": "チーム",
+    "select_prompt": "一緒に作業する相手を選んでください"
+  },
+  "sidebar": {
+    "filter_placeholder": "絞り込み",
+    "agents": "エージェント",
+    "squads": "スクワッド",
+    "members": "メンバー",
+    "add_agent": "新しいエージェント",
+    "add_squad": "新しいスクワッド",
+    "invite_member": "メンバーを招待",
+    "you": "あなた",
+    "archived_agents": "アーカイブ済み（{{count}}）"
+  },
+  "tabs": {
+    "chat": "チャット",
+    "work": "作業",
+    "setup": "設定"
+  },
+  "detail": {
+    "tabs_aria": "セクション",
+    "toggle_panel": "詳細の表示切り替え",
+    "not_found": "この項目は存在しないか、アクセス権がありません。"
+  },
+  "agent": {
+    "assign_issue": "タスクを割り当て"
+  },
+  "squad": {
+    "assign_issue": "タスクを割り当て"
+  },
+  "member": {
+    "role": {
+      "owner": "オーナー",
+      "admin": "管理者",
+      "member": "メンバー"
+    }
+  },
+  "panel": {
+    "now": "現在",
+    "archived": "アーカイブ済みのため、作業を受け付けません。",
+    "properties": "プロパティ",
+    "runtime": "ランタイム",
+    "no_runtime": "未接続",
+    "model": "モデル",
+    "owner": "オーナー",
+    "squad": "スクワッド",
+    "leader": "リーダー",
+    "earlier": "以前の会話",
+    "unread": "未読"
+  },
+  "chat": {
+    "untitled": "無題",
+    "channel_label": {
+      "slack": "Slack",
+      "lark": "Lark",
+      "dingtalk": "DingTalk",
+      "wecom": "WeCom",
+      "telegram": "Telegram",
+      "other": "外部チャネル"
+    },
+    "earlier_label": "以前の会話 · {{date}}",
+    "earlier_from_channel": "{{channel}} で開始",
+    "back_to_current": "現在の会話に戻る",
+    "read_only": "以前の会話は読み取り専用です。その文脈は現在の会話に引き継がれません。",
+    "read_only_channel": "この会話への返信は {{channel}} で行います。",
+    "no_access": "{{name}} とのチャットは開始できません。",
+    "archived_no_chat": "{{name}} はアーカイブ済みで、あなたとの会話はありません。"
+  }
+}

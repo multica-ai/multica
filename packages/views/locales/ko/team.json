@@ -1,0 +1,71 @@
+{
+  "page": {
+    "title": "팀",
+    "select_prompt": "함께 일할 대상을 선택하세요"
+  },
+  "sidebar": {
+    "filter_placeholder": "필터",
+    "agents": "에이전트",
+    "squads": "스쿼드",
+    "members": "멤버",
+    "add_agent": "새 에이전트",
+    "add_squad": "새 스쿼드",
+    "invite_member": "멤버 초대",
+    "you": "나",
+    "archived_agents": "보관됨 ({{count}})"
+  },
+  "tabs": {
+    "chat": "채팅",
+    "work": "작업",
+    "setup": "설정"
+  },
+  "detail": {
+    "tabs_aria": "섹션",
+    "toggle_panel": "세부 정보 표시 전환",
+    "not_found": "이 항목이 없거나 접근 권한이 없습니다."
+  },
+  "agent": {
+    "assign_issue": "태스크 할당"
+  },
+  "squad": {
+    "assign_issue": "태스크 할당"
+  },
+  "member": {
+    "role": {
+      "owner": "소유자",
+      "admin": "관리자",
+      "member": "멤버"
+    }
+  },
+  "panel": {
+    "now": "현재",
+    "archived": "보관되어 더 이상 작업을 받지 않습니다.",
+    "properties": "속성",
+    "runtime": "런타임",
+    "no_runtime": "연결 안 됨",
+    "model": "모델",
+    "owner": "소유자",
+    "squad": "스쿼드",
+    "leader": "리더",
+    "earlier": "이전 대화",
+    "unread": "읽지 않음"
+  },
+  "chat": {
+    "untitled": "제목 없음",
+    "channel_label": {
+      "slack": "Slack",
+      "lark": "Lark",
+      "dingtalk": "DingTalk",
+      "wecom": "WeCom",
+      "telegram": "Telegram",
+      "other": "외부 채널"
+    },
+    "earlier_label": "이전 대화 · {{date}}",
+    "earlier_from_channel": "{{channel}}에서 시작",
+    "back_to_current": "현재 대화로",
+    "read_only": "이전 대화는 읽기 전용이며, 그 맥락은 현재 대화로 이어지지 않습니다.",
+    "read_only_channel": "이 대화의 답장은 {{channel}}에서 합니다.",
+    "no_access": "{{name}}와(과) 채팅을 시작할 수 없습니다.",
+    "archived_no_chat": "{{name}}은(는) 보관되었으며 대화 기록이 없습니다."
+  }
+}

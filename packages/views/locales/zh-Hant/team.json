@@ -1,0 +1,71 @@
+{
+  "page": {
+    "title": "團隊",
+    "select_prompt": "選擇一位成員開始協作"
+  },
+  "sidebar": {
+    "filter_placeholder": "篩選",
+    "agents": "智慧體",
+    "squads": "小隊",
+    "members": "成員",
+    "add_agent": "新建智慧體",
+    "add_squad": "新建小隊",
+    "invite_member": "邀請成員",
+    "you": "你",
+    "archived_agents": "已歸檔（{{count}}）"
+  },
+  "tabs": {
+    "chat": "對話",
+    "work": "工作",
+    "setup": "設定"
+  },
+  "detail": {
+    "tabs_aria": "分區",
+    "toggle_panel": "顯示或隱藏詳情",
+    "not_found": "該對象不存在，或你沒有存取權限。"
+  },
+  "agent": {
+    "assign_issue": "指派任務"
+  },
+  "squad": {
+    "assign_issue": "指派任務"
+  },
+  "member": {
+    "role": {
+      "owner": "擁有者",
+      "admin": "管理員",
+      "member": "成員"
+    }
+  },
+  "panel": {
+    "now": "目前",
+    "archived": "已歸檔，不再接收工作。",
+    "properties": "屬性",
+    "runtime": "執行時",
+    "no_runtime": "未連線",
+    "model": "模型",
+    "owner": "擁有者",
+    "squad": "小隊",
+    "leader": "隊長",
+    "earlier": "以前的對話",
+    "unread": "未讀"
+  },
+  "chat": {
+    "untitled": "未命名",
+    "channel_label": {
+      "slack": "Slack",
+      "lark": "飛書",
+      "dingtalk": "釘釘",
+      "wecom": "企業微信",
+      "telegram": "Telegram",
+      "other": "外部渠道"
+    },
+    "earlier_label": "以前的對話 · {{date}}",
+    "earlier_from_channel": "來自{{channel}}",
+    "back_to_current": "回到目前對話",
+    "read_only": "以前的對話唯讀，其中的上下文不會帶到目前對話。",
+    "read_only_channel": "這段對話請在{{channel}}裡回覆。",
+    "no_access": "你無法和 {{name}} 發起對話。",
+    "archived_no_chat": "{{name}} 已歸檔，你和它沒有對話。"
+  }
+}

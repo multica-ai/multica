@@ -73,7 +73,8 @@ import { chatSessionsOptions } from "@multica/core/chat/queries";
 import { countUnreadChatMessages } from "@multica/core/chat/unread";
 import { useChatStore } from "@multica/core/chat";
 import { api, ApiError } from "@multica/core/api";
-import { useConfigStore } from "@multica/core/config";
+import { useConfigStore, useFeatureEnabled } from "@multica/core/config";
+import { TEAM_PAGE_FLAG } from "@multica/core/feature-flags";
 import { pinListOptions } from "@multica/core/pins/queries";
 import { useDeletePin, useReorderPins } from "@multica/core/pins/mutations";
 import { issueDetailOptions } from "@multica/core/issues/queries";
@@ -115,6 +116,7 @@ const PINNED_PREVIEW_LIMIT = 5;
 type NavKey =
   | "inbox"
   | "chat"
+  | "team"
   | "myIssues"
   | "issues"
   | "projects"
@@ -131,6 +133,7 @@ type NavKey =
 type NavLabelKey =
   | "inbox"
   | "chat"
+  | "team"
   | "my_issues"
   | "issues"
   | "projects"
@@ -151,6 +154,13 @@ const personalNav: { key: NavKey; labelKey: NavLabelKey }[] = [
   { key: "chat", labelKey: "chat" },
 ];
 
+// With the Team page on, Team replaces Chat, Agents and Squads in the nav.
+const teamPersonalNav: { key: NavKey; labelKey: NavLabelKey }[] = [
+  { key: "inbox", labelKey: "inbox" },
+  { key: "myIssues", labelKey: "my_issues" },
+  { key: "team", labelKey: "team" },
+];
+
 const workNav: { key: NavKey; labelKey: NavLabelKey }[] = [
   { key: "issues", labelKey: "issues" },
   { key: "projects", labelKey: "projects" },
@@ -163,6 +173,8 @@ const aiTeamNav: { key: NavKey; labelKey: NavLabelKey }[] = [
   { key: "skills", labelKey: "skills" },
   { key: "runtimes", labelKey: "runtimes" },
 ];
+
+const teamAiTeamNav = aiTeamNav.filter((item) => item.key !== "agents" && item.key !== "squads");
 
 const utilityNav: { key: NavKey; labelKey: NavLabelKey }[] = [
   { key: "usage", labelKey: "usage" },
@@ -483,8 +495,12 @@ export function AppSidebar({ topSlot, searchSlot, headerClassName, headerStyle }
   const floatingChatOpen = useChatStore((s) => s.isOpen);
   const appForeground = useAppForeground();
   const chatHref = p.chat();
+  const teamPageEnabled = useFeatureEnabled(TEAM_PAGE_FLAG, false);
   const viewedChatSessionId =
-    appForeground && (floatingChatOpen || isNavActive(pathname, chatHref))
+    appForeground &&
+    (floatingChatOpen ||
+      isNavActive(pathname, chatHref) ||
+      (teamPageEnabled && isNavActive(pathname, p.team())))
       ? activeChatSessionId
       : null;
   const chatUnreadCount = React.useMemo(
@@ -775,7 +791,7 @@ export function AppSidebar({ topSlot, searchSlot, headerClassName, headerStyle }
           <SidebarGroup>
             <SidebarGroupContent>
               <SidebarMenu className="gap-0.5">
-                {personalNav.map((item) => {
+                {(teamPageEnabled ? teamPersonalNav : personalNav).map((item) => {
                   const href = p[item.key]();
                   const Icon = routeIconForPath(href);
                   const isActive = isNavActive(pathname, href);
@@ -795,7 +811,7 @@ export function AppSidebar({ topSlot, searchSlot, headerClassName, headerStyle }
                             className="ml-auto text-caption"
                           />
                         )}
-                        {item.key === "chat" && chatUnreadCount > 0 && (
+                        {(item.key === "chat" || item.key === "team") && chatUnreadCount > 0 && (
                           <CappedNumberFlow
                             value={chatUnreadCount}
                             animated={false}
@@ -888,7 +904,7 @@ export function AppSidebar({ topSlot, searchSlot, headerClassName, headerStyle }
             <SidebarGroupLabel>{t(($) => $.sidebar.ai_team_group)}</SidebarGroupLabel>
             <SidebarGroupContent>
               <SidebarMenu className="gap-0.5">
-                {aiTeamNav.map((item) => {
+                {(teamPageEnabled ? teamAiTeamNav : aiTeamNav).map((item) => {
                   const href = p[item.key]();
                   const Icon = routeIconForPath(href);
                   const isActive = isNavActive(pathname, href);

@@ -2,6 +2,7 @@
   "nav": {
     "inbox": "收件箱",
     "chat": "聊天",
+    "team": "团队",
     "my_issues": "我的任务",
     "issues": "任务",
     "projects": "项目",

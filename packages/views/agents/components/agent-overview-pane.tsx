@@ -127,6 +127,11 @@ interface AgentOverviewPaneProps {
   canEdit: boolean;
   navIntent?: DetailTab | null;
   onNavIntentHandled?: () => void;
+  /**
+   * `setup` drops Overview and Work (the Team page owns those as Chat and
+   * Work) and merges Capabilities and Settings into one section list.
+   */
+  variant?: "full" | "setup";
 }
 
 /**
@@ -147,7 +152,10 @@ export function AgentOverviewPane({
   canEdit,
   navIntent,
   onNavIntentHandled,
+  variant = "full",
 }: AgentOverviewPaneProps) {
+  const setupMode = variant === "setup";
+  const defaultView: DetailTab = setupMode ? "general" : "overview";
   const { t } = useT("agents");
   const wsId = useWorkspaceId();
   const navigation = useNavigation();
@@ -157,7 +165,7 @@ export function AgentOverviewPane({
     false,
   );
   const [activeView, setActiveView] = useState<DetailTab>(() =>
-    isDetailTab(urlView) ? urlView : "overview",
+    isDetailTab(urlView) ? urlView : defaultView,
   );
   const [activeDirty, setActiveDirty] = useState(false);
   const [pendingView, setPendingView] = useState<DetailTab | null>(null);
@@ -243,30 +251,38 @@ export function AgentOverviewPane({
     [canEdit, qoderRuntime, runtime?.provider],
   );
 
-  const visibleViews = useMemo(
-    () =>
-      new Set<DetailTab>([
-        "overview",
-        "work",
-        ...visibleCapabilityTabs.map((tab) => tab.id),
-        ...visibleSettingsTabs.map((tab) => tab.id),
-      ]),
+  const setupTabs = useMemo(
+    () => [
+      ...visibleSettingsTabs.filter((tab) => tab.id === "general"),
+      ...visibleCapabilityTabs,
+      ...visibleSettingsTabs.filter((tab) => tab.id !== "general"),
+    ],
     [visibleCapabilityTabs, visibleSettingsTabs],
   );
 
-  const effectiveView = visibleViews.has(activeView) ? activeView : "overview";
+  const visibleViews = useMemo(
+    () =>
+      new Set<DetailTab>([
+        ...(setupMode ? [] : (["overview", "work"] as DetailTab[])),
+        ...visibleCapabilityTabs.map((tab) => tab.id),
+        ...visibleSettingsTabs.map((tab) => tab.id),
+      ]),
+    [setupMode, visibleCapabilityTabs, visibleSettingsTabs],
+  );
+
+  const effectiveView = visibleViews.has(activeView) ? activeView : defaultView;
   const activeSection = sectionForView(effectiveView);
 
   const commitView = useCallback(
     (next: DetailTab) => {
       setActiveView(next);
       const params = new URLSearchParams(navigation.searchParams);
-      if (next === "overview") params.delete("view");
+      if (next === defaultView) params.delete("view");
       else params.set("view", next);
       const query = params.toString();
       navigation.replace(`${navigation.pathname}${query ? `?${query}` : ""}`);
     },
-    [navigation],
+    [defaultView, navigation],
   );
 
   const requestView = useCallback(
@@ -310,13 +326,13 @@ export function AgentOverviewPane({
     if (urlView === lastUrlViewRef.current) return;
     lastUrlViewRef.current = urlView;
     if (urlView === null) {
-      setActiveView("overview");
+      setActiveView(defaultView);
       return;
     }
     if (isDetailTab(urlView) && visibleViews.has(urlView)) {
       setActiveView(urlView);
     }
-  }, [urlView, visibleViews]);
+  }, [defaultView, urlView, visibleViews]);
 
   useEffect(() => {
     if (navIntent == null) return;
@@ -324,8 +340,9 @@ export function AgentOverviewPane({
     onNavIntentHandled?.();
   }, [navIntent, onNavIntentHandled, requestView, visibleViews]);
 
-  const secondaryTabs =
-    activeSection === "capabilities"
+  const secondaryTabs = setupMode
+    ? setupTabs
+    : activeSection === "capabilities"
       ? visibleCapabilityTabs
       : activeSection === "settings"
         ? visibleSettingsTabs
@@ -338,6 +355,7 @@ export function AgentOverviewPane({
 
   return (
     <div className="flex min-h-0 flex-1 flex-col bg-background">
+      {!setupMode && (
       <div
         className="shrink-0 overflow-x-auto border-b"
         role="tablist"
@@ -363,6 +381,7 @@ export function AgentOverviewPane({
           ))}
         </div>
       </div>
+      )}
 
       {/* Header, tab bar, banners and every panel read PAGE_RAIL, so the page
           is one centred column at every width (MUL-7107). The first pass put

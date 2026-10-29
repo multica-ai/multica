@@ -63,14 +63,23 @@ import type { Squad, SquadMember, SquadMemberStatus, SquadMemberStatusValue, Age
 import { useT } from "../../i18n";
 import { matchesPinyin } from "../../editor/extensions/pinyin-match";
 
-export function SquadDetailPage() {
+export function SquadDetailPage({
+  squadId: squadIdProp,
+  embedded = false,
+  onArchived,
+}: {
+  squadId?: string;
+  /** Hosted inside another page (Team setup): no breadcrumb header. */
+  embedded?: boolean;
+  onArchived?: () => void;
+} = {}) {
   const { t } = useT("squads");
   const workspace = useCurrentWorkspace();
   const wsId = useWorkspaceId();
   const p = useWorkspacePaths();
   const { pathname, push } = useNavigation();
   const queryClient = useQueryClient();
-  const squadId = pathname.split("/").pop() ?? "";
+  const squadId = squadIdProp ?? pathname.split("/").pop() ?? "";
 
   const { data: squad, refetch: refetchSquad } = useQuery<Squad>({
     queryKey: [...workspaceKeys.squads(wsId), squadId],
@@ -172,7 +181,12 @@ export function SquadDetailPage() {
 
   const deleteMut = useMutation({
     mutationFn: () => api.deleteSquad(squadId),
-    onSuccess: () => { queryClient.invalidateQueries({ queryKey: workspaceKeys.squads(wsId) }); push(p.squads()); toast.success(t(($) => $.archive_dialog.success)); },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: workspaceKeys.squads(wsId) });
+      if (onArchived) onArchived();
+      else push(p.squads());
+      toast.success(t(($) => $.archive_dialog.success));
+    },
     onError: (err) =>
       toast.error(err instanceof Error && err.message ? err.message : t(($) => $.toasts.archive_failed)),
   });
@@ -199,8 +213,18 @@ export function SquadDetailPage() {
     .toUpperCase()
     .slice(0, 2);
 
+  const archiveButton = canManage ? (
+    <Button size="sm" variant="ghost" className="text-destructive hover:text-destructive" onClick={() => setConfirmArchive(true)}>
+      <Trash2 className="size-3.5 mr-1" />
+      {t(($) => $.inspector.archive_button)}
+    </Button>
+  ) : null;
+
   return (
     <div className="flex flex-1 min-h-0 flex-col">
+      {embedded ? (
+        archiveButton && <div className="flex shrink-0 justify-end px-3 pt-3 md:px-6">{archiveButton}</div>
+      ) : (
       <BreadcrumbHeader
         segments={[{ href: p.squads(), label: t(($) => $.page.title) }]}
         leaf={
@@ -209,15 +233,9 @@ export function SquadDetailPage() {
             <h1 className="truncate text-body font-medium text-foreground">{squad.name}</h1>
           </>
         }
-        actions={
-          canManage ? (
-            <Button size="sm" variant="ghost" className="text-destructive hover:text-destructive" onClick={() => setConfirmArchive(true)}>
-              <Trash2 className="size-3.5 mr-1" />
-              {t(($) => $.inspector.archive_button)}
-            </Button>
-          ) : null
-        }
+        actions={archiveButton}
       />
+      )}
 
       {/* Two-column grid mirrors agent-detail-page: left inspector (identity +
           properties + leader), right pane with tabs (Members | Instructions).

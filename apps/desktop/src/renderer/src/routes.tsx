@@ -30,6 +30,7 @@ import { AgentCreatedPage } from "./pages/agent-created-page";
 import { SquadsPage, SquadDetailPage as SquadDetailPageView } from "@multica/views/squads/components";
 import { InboxPage } from "@multica/views/inbox";
 import { ChatPage } from "@multica/views/chat";
+import { TeamPage } from "@multica/views/team";
 import { SettingsPage } from "@multica/views/settings";
 import { useT } from "@multica/views/i18n";
 import { Download, Server } from "@multica/ui/icons";
@@ -228,6 +229,7 @@ export const appRoutes: RouteObject[] = [
           },
           { path: "inbox", element: <InboxPage />, handle: { title: "Inbox" } },
           { path: "chat", element: <ChatPage />, handle: { title: "Chat" } },
+          { path: "team", element: <TeamPage />, handle: { title: "Team" } },
           {
             path: "attachments/:id/preview",
             element: <AttachmentPreviewRoute />,

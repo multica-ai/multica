@@ -1,0 +1,71 @@
+{
+  "page": {
+    "title": "Team",
+    "select_prompt": "Pick someone to work with"
+  },
+  "sidebar": {
+    "filter_placeholder": "Filter",
+    "agents": "Agents",
+    "squads": "Squads",
+    "members": "Members",
+    "add_agent": "New agent",
+    "add_squad": "New squad",
+    "invite_member": "Invite member",
+    "you": "You",
+    "archived_agents": "Archived ({{count}})"
+  },
+  "tabs": {
+    "chat": "Chat",
+    "work": "Work",
+    "setup": "Setup"
+  },
+  "detail": {
+    "tabs_aria": "Sections",
+    "toggle_panel": "Toggle details",
+    "not_found": "This item no longer exists or you don't have access to it."
+  },
+  "agent": {
+    "assign_issue": "Assign issue"
+  },
+  "squad": {
+    "assign_issue": "Assign issue"
+  },
+  "member": {
+    "role": {
+      "owner": "Owner",
+      "admin": "Admin",
+      "member": "Member"
+    }
+  },
+  "panel": {
+    "now": "Now",
+    "archived": "Archived — it no longer takes work.",
+    "properties": "Properties",
+    "runtime": "Runtime",
+    "no_runtime": "Not connected",
+    "model": "Model",
+    "owner": "Owner",
+    "squad": "Squad",
+    "leader": "Leader",
+    "earlier": "Earlier conversations",
+    "unread": "Unread"
+  },
+  "chat": {
+    "untitled": "Untitled",
+    "channel_label": {
+      "slack": "Slack",
+      "lark": "Lark",
+      "dingtalk": "DingTalk",
+      "wecom": "WeCom",
+      "telegram": "Telegram",
+      "other": "an external channel"
+    },
+    "earlier_label": "Earlier conversation · {{date}}",
+    "earlier_from_channel": "Started in {{channel}}",
+    "back_to_current": "Back to current",
+    "read_only": "This earlier conversation is read-only. Its context isn't carried into the current one.",
+    "read_only_channel": "Replies to this conversation happen in {{channel}}.",
+    "no_access": "You can't start a chat with {{name}}.",
+    "archived_no_chat": "{{name}} is archived and has no conversation with you."
+  }
+}

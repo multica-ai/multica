@@ -68,7 +68,7 @@ export function useGlobalCommands(contexts: readonly CommandBarContext[]): Palet
           // ⌘J opens the floating chat where it is available; elsewhere (the
           // Chat page itself, or with the overlay turned off) go to Chat.
           const chat = useChatStore.getState();
-          if (chat.floatingChatEnabled && !isFloatingChatRouteSuppressed(pathname, chatPath)) {
+          if (chat.floatingChatEnabled && !isFloatingChatRouteSuppressed(pathname, chatPath, p.team())) {
             chat.setOpen(true);
           } else {
             navigation.push(chatPath);

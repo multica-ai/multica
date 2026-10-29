@@ -78,7 +78,7 @@ export function GlobalShortcuts() {
     // swallowing it for an action that would visibly do nothing.
     const canToggleFloatingChat = () =>
       useChatStore.getState().floatingChatEnabled &&
-      !isFloatingChatRouteSuppressed(navigation.pathname, chatPath);
+      !isFloatingChatRouteSuppressed(navigation.pathname, chatPath, workspacePaths.team());
 
     const handleKeyDown = (event: KeyboardEvent) => {
       // Component/editor handlers run before this document-level listener.

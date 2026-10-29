@@ -106,6 +106,17 @@ export function parseTabSubject(url: string): TabSubject {
       };
     case "chat":
       return { kind: "chat", sessionId: query.get("session") || null };
+    case "team": {
+      // The Team container's selection is the tab's identity: an open agent,
+      // squad or member reads as that actor, like its old detail route did.
+      const agent = query.get("agent");
+      if (agent) return { kind: "actor", actorType: "agent", id: agent };
+      const squad = query.get("squad");
+      if (squad) return { kind: "actor", actorType: "squad", id: squad };
+      const member = query.get("member");
+      if (member) return { kind: "actor", actorType: "member", id: member };
+      return { kind: "page", page: "team" };
+    }
     case "runtimes":
       if (!id) return { kind: "page", page: "runtimes" };
       // `/runtimes/:machineId/runtime/:runtimeId` — nested runtime.

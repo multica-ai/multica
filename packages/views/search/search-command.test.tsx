@@ -7,6 +7,8 @@ import { useCommandBarContextStore, type CommandBarContext } from "@multica/core
 import { inboxUnreadSummaryOptions } from "@multica/core/inbox/queries";
 import { I18nProvider } from "@multica/core/i18n/react";
 import { issueDetailOptions, issueTimelineOptions } from "@multica/core/issues/queries";
+import { configStore } from "@multica/core/config";
+import { TEAM_PAGE_FLAG } from "@multica/core/feature-flags";
 import { WORKSPACE_PAGES } from "@multica/core/paths";
 import type { Issue } from "@multica/core/types";
 import {
@@ -422,6 +424,7 @@ describe("SearchCommand", () => {
 
     it("offers every workspace nav page, not a hand-maintained subset", async () => {
       const user = userEvent.setup();
+      configStore.getState().setFeatureFlags({ [TEAM_PAGE_FLAG]: true });
       renderSearch();
       // The Pages group is generated from WORKSPACE_PAGES — the registry the
       // sidebar and the desktop tab bar read (MUL-6272).
@@ -430,6 +433,7 @@ describe("SearchCommand", () => {
         await user.type(input(), enLayout.nav[page.navKey]);
         await waitFor(() => expect(renderedValues()).toContain(`page:${key}`));
       }
+      configStore.getState().setFeatureFlags({});
     });
 
     it("does not surface a page on an incidental substring of a hidden keyword", async () => {

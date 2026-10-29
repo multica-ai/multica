@@ -1,0 +1,71 @@
+{
+  "page": {
+    "title": "Équipe",
+    "select_prompt": "Choisissez avec qui travailler"
+  },
+  "sidebar": {
+    "filter_placeholder": "Filtrer",
+    "agents": "Agents",
+    "squads": "Squads",
+    "members": "Membres",
+    "add_agent": "Nouvel agent",
+    "add_squad": "Nouvelle squad",
+    "invite_member": "Inviter un membre",
+    "you": "Vous",
+    "archived_agents": "Archivés ({{count}})"
+  },
+  "tabs": {
+    "chat": "Discussion",
+    "work": "Travail",
+    "setup": "Configuration"
+  },
+  "detail": {
+    "tabs_aria": "Sections",
+    "toggle_panel": "Afficher ou masquer les détails",
+    "not_found": "Cet élément n'existe plus ou vous n'y avez pas accès."
+  },
+  "agent": {
+    "assign_issue": "Assigner une tâche"
+  },
+  "squad": {
+    "assign_issue": "Assigner une tâche"
+  },
+  "member": {
+    "role": {
+      "owner": "Propriétaire",
+      "admin": "Administrateur",
+      "member": "Membre"
+    }
+  },
+  "panel": {
+    "now": "En ce moment",
+    "archived": "Archivé — il ne prend plus de travail.",
+    "properties": "Propriétés",
+    "runtime": "Runtime",
+    "no_runtime": "Non connecté",
+    "model": "Modèle",
+    "owner": "Propriétaire",
+    "squad": "Squad",
+    "leader": "Responsable",
+    "earlier": "Conversations précédentes",
+    "unread": "Non lu"
+  },
+  "chat": {
+    "untitled": "Sans titre",
+    "channel_label": {
+      "slack": "Slack",
+      "lark": "Lark",
+      "dingtalk": "DingTalk",
+      "wecom": "WeCom",
+      "telegram": "Telegram",
+      "other": "un canal externe"
+    },
+    "earlier_label": "Conversation précédente · {{date}}",
+    "earlier_from_channel": "Commencée dans {{channel}}",
+    "back_to_current": "Revenir à l'actuelle",
+    "read_only": "Cette conversation précédente est en lecture seule. Son contexte n'est pas repris dans l'actuelle.",
+    "read_only_channel": "Les réponses à cette conversation se font dans {{channel}}.",
+    "no_access": "Vous ne pouvez pas discuter avec {{name}}.",
+    "archived_no_chat": "{{name}} est archivé et n'a aucune conversation avec vous."
+  }
+}

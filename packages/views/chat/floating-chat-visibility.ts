@@ -7,10 +7,14 @@
  * there. The shortcut has to honour the same rule: flipping `isOpen` on a route
  * where the overlay cannot mount reads as a dead keypress, and then surprises
  * the user with a window that pops open (or vanishes) on the next navigation.
+ * The Team page drives the same store for its agent chat, so it is suppressed
+ * too.
  */
 export function isFloatingChatRouteSuppressed(
   pathname: string,
-  chatPath: string,
+  ...surfacePaths: string[]
 ): boolean {
-  return pathname === chatPath || pathname.startsWith(`${chatPath}/`);
+  return surfacePaths.some(
+    (path) => pathname === path || pathname.startsWith(`${path}/`),
+  );
 }
