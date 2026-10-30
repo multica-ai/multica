@@ -1708,5 +1708,34 @@
   },
   "hover_card": {
     "created_updated": "建立於 {{created}} · 更新於 {{updated}}"
+  },
+  "browser": {
+    "open": "瀏覽器",
+    "close": "關閉瀏覽器",
+    "url_placeholder": "搜尋或輸入網址",
+    "back": "返回",
+    "forward": "前進",
+    "reload": "重新整理",
+    "stop": "停止",
+    "select": "選取元素",
+    "selecting": "點擊頁面上的元素（按 Esc 取消）",
+    "pen": "畫筆",
+    "rect": "矩形",
+    "arrow": "箭頭",
+    "eraser": "橡皮擦",
+    "undo": "復原",
+    "clear": "清除繪圖",
+    "color": "顏色",
+    "send_drawing": "傳送繪圖",
+    "note_placeholder": "新增備註",
+    "send": "傳送",
+    "discard": "捨棄",
+    "sent": "已加入留言草稿",
+    "send_failed": "傳送失敗",
+    "selected_element": "已選取元素",
+    "open_external": "在預設瀏覽器中開啟",
+    "capture_failed": "無法擷取頁面",
+    "screenshot_alt": "瀏覽器截圖",
+    "resize": "調整瀏覽器寬度"
   }
 }

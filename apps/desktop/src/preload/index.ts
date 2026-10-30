@@ -1,3 +1,9 @@
+import {
+  ISSUE_BROWSER_STATE_CHANNEL,
+  type IssueBrowserBounds,
+  type IssueBrowserDrawTool,
+  type IssueBrowserState,
+} from "../shared/issue-browser";
 import { contextBridge, ipcRenderer } from "electron";
 import { electronAPI } from "@electron-toolkit/preload";
 import type { RuntimeConfigResult } from "../shared/runtime-config";
@@ -101,6 +107,40 @@ function subscribeToMainRendererChannel<T>(
 }
 
 const desktopAPI = {
+  /** Per-issue embedded browser (guest pages live in the main process). */
+  issueBrowser: {
+    show: (issueId: string, bounds: IssueBrowserBounds, url?: string) =>
+      ipcRenderer.invoke("issue-browser:show", issueId, bounds, url),
+    setBounds: (issueId: string, bounds: IssueBrowserBounds) =>
+      ipcRenderer.invoke("issue-browser:set-bounds", issueId, bounds),
+    hide: (issueId: string) => ipcRenderer.invoke("issue-browser:hide", issueId),
+    close: (issueId: string) => ipcRenderer.invoke("issue-browser:close", issueId),
+    navigate: (issueId: string, url: string) =>
+      ipcRenderer.invoke("issue-browser:navigate", issueId, url),
+    control: (issueId: string, action: "back" | "forward" | "reload" | "stop") =>
+      ipcRenderer.invoke("issue-browser:control", issueId, action),
+    getState: (issueId: string) => ipcRenderer.invoke("issue-browser:get-state", issueId),
+    pickElement: (issueId: string) => ipcRenderer.invoke("issue-browser:pick-element", issueId),
+    cancelPick: (issueId: string) => ipcRenderer.invoke("issue-browser:cancel-pick", issueId),
+    draw: (
+      issueId: string,
+      command:
+        | { type: "state" }
+        | { type: "tool"; tool: IssueBrowserDrawTool | null }
+        | { type: "color"; color: string }
+        | { type: "undo" }
+        | { type: "clear" },
+    ) =>
+      ipcRenderer.invoke("issue-browser:draw", issueId, command),
+    capture: (issueId: string, rect?: IssueBrowserBounds) =>
+      ipcRenderer.invoke("issue-browser:capture", issueId, rect),
+    onState: (callback: (state: IssueBrowserState) => void) => {
+      const handler = (_e: Electron.IpcRendererEvent, state: IssueBrowserState) =>
+        callback(state);
+      ipcRenderer.on(ISSUE_BROWSER_STATE_CHANNEL, handler);
+      return () => ipcRenderer.removeListener(ISSUE_BROWSER_STATE_CHANNEL, handler);
+    },
+  },
   /** App version + normalized OS. Read once at preload time so the renderer
    *  can use it synchronously when initializing the API client. */
   appInfo,

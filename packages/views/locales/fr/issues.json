@@ -1774,5 +1774,34 @@
   },
   "hover_card": {
     "created_updated": "a créé {{created}} · mis à jour {{updated}}"
+  },
+  "browser": {
+    "open": "Navigateur",
+    "close": "Fermer le navigateur",
+    "url_placeholder": "Rechercher ou saisir une adresse",
+    "back": "Retour",
+    "forward": "Suivant",
+    "reload": "Actualiser",
+    "stop": "Arrêter",
+    "select": "Sélectionner un élément",
+    "selecting": "Cliquez sur un élément de la page (Échap pour annuler)",
+    "pen": "Stylo",
+    "rect": "Rectangle",
+    "arrow": "Flèche",
+    "eraser": "Gomme",
+    "undo": "Annuler",
+    "clear": "Effacer le dessin",
+    "color": "Couleur",
+    "send_drawing": "Envoyer le dessin",
+    "note_placeholder": "Ajouter une note",
+    "send": "Envoyer",
+    "discard": "Ignorer",
+    "sent": "Ajouté au brouillon de commentaire",
+    "send_failed": "Échec de l'envoi",
+    "selected_element": "Élément sélectionné",
+    "open_external": "Ouvrir dans le navigateur par défaut",
+    "capture_failed": "Impossible de capturer la page",
+    "screenshot_alt": "Capture du navigateur",
+    "resize": "Redimensionner le navigateur"
   }
 }

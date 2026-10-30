@@ -746,7 +746,7 @@ export function ChatWindow() {
     "absolute z-50 flex flex-col overflow-hidden bg-surface-raised @container",
     isMobile
       ? "inset-x-0"
-      : "right-2 rounded-xl shadow-[var(--floating-shadow)] ring-1 ring-surface-border",
+      : "right-[calc(0.5rem+var(--issue-browser-inset,0px))] rounded-xl shadow-[var(--floating-shadow)] ring-1 ring-surface-border",
   );
   // Soft keyboards shrink only the *visual* viewport — the layout viewport
   // (and this panel's bottom-anchored parent) keeps its full height, so

@@ -1709,5 +1709,34 @@
   },
   "hover_card": {
     "created_updated": "创建于 {{created}} · 更新于 {{updated}}"
+  },
+  "browser": {
+    "open": "浏览器",
+    "close": "关闭浏览器",
+    "url_placeholder": "搜索或输入网址",
+    "back": "后退",
+    "forward": "前进",
+    "reload": "刷新",
+    "stop": "停止",
+    "select": "选择元素",
+    "selecting": "点击页面上的元素（按 Esc 取消）",
+    "pen": "画笔",
+    "rect": "矩形",
+    "arrow": "箭头",
+    "eraser": "橡皮擦",
+    "undo": "撤销",
+    "clear": "清除绘图",
+    "color": "颜色",
+    "send_drawing": "发送绘图",
+    "note_placeholder": "添加备注",
+    "send": "发送",
+    "discard": "放弃",
+    "sent": "已添加到评论草稿",
+    "send_failed": "发送失败",
+    "selected_element": "已选元素",
+    "open_external": "在默认浏览器中打开",
+    "capture_failed": "无法截取页面",
+    "screenshot_alt": "浏览器截图",
+    "resize": "调整浏览器宽度"
   }
 }

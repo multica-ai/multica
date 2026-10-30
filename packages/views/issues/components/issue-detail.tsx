@@ -39,6 +39,7 @@ import { BreadcrumbHeader, type BreadcrumbSegment } from "../../layout/breadcrum
 import { Skeleton } from "@multica/ui/components/ui/skeleton";
 import { Button } from "@multica/ui/components/ui/button";
 import { IconButton } from "@multica/ui/components/common/icon-button";
+import { IssueBrowserPanel, IssueBrowserToggle } from "./issue-browser";
 import { ResizablePanelGroup, ResizablePanel, ResizableHandle } from "@multica/ui/components/ui/resizable";
 import { Sheet, SheetContent } from "@multica/ui/components/ui/sheet";
 import { useIsMobile } from "@multica/ui/hooks/use-mobile";
@@ -3300,6 +3301,7 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
                 </IconButton>
               }
             />
+            {!isPeek && <IssueBrowserToggle issueId={id} />}
             {isPeek ? (
               trailingActions
             ) : (
@@ -4053,7 +4055,8 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
   }
 
   return withPreview(
-    <ResizablePanelGroup orientation="horizontal" className="flex-1 min-h-0" defaultLayout={defaultLayout} onLayoutChanged={onLayoutChanged}>
+    <div className="flex flex-1 min-h-0">
+    <ResizablePanelGroup orientation="horizontal" className="flex-1 min-h-0 min-w-0" defaultLayout={defaultLayout} onLayoutChanged={onLayoutChanged}>
       <ResizablePanel id="content" minSize="50%">
         {detailContent}
       </ResizablePanel>
@@ -4076,7 +4079,9 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
           {sidebarContent}
         </AnimatedRightSidebar>
       </ResizablePanel>
-    </ResizablePanelGroup>,
+    </ResizablePanelGroup>
+    <IssueBrowserPanel issueId={id} />
+    </div>,
   );
 }
 

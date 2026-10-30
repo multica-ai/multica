@@ -1709,5 +1709,34 @@
   },
   "hover_card": {
     "created_updated": "{{created}}に作成 · {{updated}}に更新"
+  },
+  "browser": {
+    "open": "ブラウザ",
+    "close": "ブラウザを閉じる",
+    "url_placeholder": "検索またはアドレスを入力",
+    "back": "戻る",
+    "forward": "進む",
+    "reload": "再読み込み",
+    "stop": "停止",
+    "select": "要素を選択",
+    "selecting": "ページ上の要素をクリック（Escでキャンセル）",
+    "pen": "ペン",
+    "rect": "四角形",
+    "arrow": "矢印",
+    "eraser": "消しゴム",
+    "undo": "元に戻す",
+    "clear": "描画を消去",
+    "color": "色",
+    "send_drawing": "描画を送信",
+    "note_placeholder": "メモを追加",
+    "send": "送信",
+    "discard": "破棄",
+    "sent": "コメントの下書きに追加しました",
+    "send_failed": "送信に失敗しました",
+    "selected_element": "選択した要素",
+    "open_external": "既定のブラウザで開く",
+    "capture_failed": "ページをキャプチャできませんでした",
+    "screenshot_alt": "ブラウザのスクリーンショット",
+    "resize": "ブラウザの幅を変更"
   }
 }

@@ -1709,5 +1709,34 @@
   },
   "hover_card": {
     "created_updated": "{{created}} 생성 · {{updated}} 수정됨"
+  },
+  "browser": {
+    "open": "브라우저",
+    "close": "브라우저 닫기",
+    "url_placeholder": "검색하거나 주소 입력",
+    "back": "뒤로",
+    "forward": "앞으로",
+    "reload": "새로고침",
+    "stop": "중지",
+    "select": "요소 선택",
+    "selecting": "페이지의 요소를 클릭하세요 (Esc로 취소)",
+    "pen": "펜",
+    "rect": "사각형",
+    "arrow": "화살표",
+    "eraser": "지우개",
+    "undo": "실행 취소",
+    "clear": "그림 지우기",
+    "color": "색상",
+    "send_drawing": "그림 보내기",
+    "note_placeholder": "메모 추가",
+    "send": "보내기",
+    "discard": "취소",
+    "sent": "댓글 초안에 추가했습니다",
+    "send_failed": "보내지 못했습니다",
+    "selected_element": "선택한 요소",
+    "open_external": "기본 브라우저에서 열기",
+    "capture_failed": "페이지를 캡처할 수 없습니다",
+    "screenshot_alt": "브라우저 스크린샷",
+    "resize": "브라우저 너비 조절"
   }
 }

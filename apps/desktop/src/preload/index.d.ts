@@ -16,9 +16,43 @@ import type {
   DaemonPrefs,
   LocalRuntimeProbe,
 } from "../shared/daemon-types";
+import type {
+  IssueBrowserBounds,
+  IssueBrowserCapture,
+  IssueBrowserDrawState,
+  IssueBrowserDrawTool,
+  IssueBrowserPickedElement,
+  IssueBrowserResult,
+  IssueBrowserState,
+} from "../shared/issue-browser";
 import type { TabSelectionShortcutKey } from "../shared/main-renderer-messages";
 
+interface IssueBrowserAPI {
+  show: (issueId: string, bounds: IssueBrowserBounds, url?: string) => Promise<IssueBrowserResult<IssueBrowserState>>;
+  setBounds: (issueId: string, bounds: IssueBrowserBounds) => Promise<IssueBrowserResult<boolean>>;
+  hide: (issueId: string) => Promise<IssueBrowserResult<boolean>>;
+  close: (issueId: string) => Promise<IssueBrowserResult<boolean>>;
+  navigate: (issueId: string, url: string) => Promise<IssueBrowserResult<boolean>>;
+  control: (issueId: string, action: "back" | "forward" | "reload" | "stop") => Promise<IssueBrowserResult<boolean>>;
+  getState: (issueId: string) => Promise<IssueBrowserResult<IssueBrowserState>>;
+  pickElement: (issueId: string) => Promise<IssueBrowserResult<IssueBrowserPickedElement | null>>;
+  cancelPick: (issueId: string) => Promise<IssueBrowserResult<boolean>>;
+  draw: (
+    issueId: string,
+    command:
+      | { type: "state" }
+      | { type: "tool"; tool: IssueBrowserDrawTool | null }
+      | { type: "color"; color: string }
+      | { type: "undo" }
+      | { type: "clear" },
+  ) => Promise<IssueBrowserResult<IssueBrowserDrawState>>;
+  capture: (issueId: string, rect?: IssueBrowserBounds) => Promise<IssueBrowserResult<IssueBrowserCapture>>;
+  onState: (callback: (state: IssueBrowserState) => void) => () => void;
+}
+
 interface DesktopAPI {
+  /** Per-issue embedded browser. */
+  issueBrowser: IssueBrowserAPI;
   /** App version + normalized OS, captured synchronously at preload time. */
   appInfo: {
     version: string;

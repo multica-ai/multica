@@ -1775,5 +1775,34 @@
   },
   "hover_card": {
     "created_updated": "created {{created}} · updated {{updated}}"
+  },
+  "browser": {
+    "open": "Browser",
+    "close": "Close browser",
+    "url_placeholder": "Search or enter address",
+    "back": "Back",
+    "forward": "Forward",
+    "reload": "Reload",
+    "stop": "Stop",
+    "select": "Select element",
+    "selecting": "Click an element on the page (Esc to cancel)",
+    "pen": "Pen",
+    "rect": "Rectangle",
+    "arrow": "Arrow",
+    "eraser": "Eraser",
+    "undo": "Undo",
+    "clear": "Clear drawing",
+    "color": "Color",
+    "send_drawing": "Send drawing",
+    "note_placeholder": "Add a note",
+    "send": "Send",
+    "discard": "Discard",
+    "sent": "Added to comment draft",
+    "send_failed": "Failed to send",
+    "selected_element": "Selected element",
+    "open_external": "Open in default browser",
+    "capture_failed": "Could not capture the page",
+    "screenshot_alt": "Browser screenshot",
+    "resize": "Resize browser"
   }
 }
