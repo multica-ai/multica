@@ -379,6 +379,32 @@ func TestCommentTriggerOnComment(t *testing.T) {
 		}
 	})
 
+	// MUL-8416: a reply that merges into the root's still-queued task takes
+	// over trigger_comment_id. Later replies under the root must still reach
+	// the agent once that task has finished.
+	t.Run("reply to member thread whose root was folded into a queued task continues agent", func(t *testing.T) {
+		clearTasks(t, issueID)
+		threadID := postComment(t, issueID, "Please fix this bug", nil)
+		followUpID := postComment(t, issueID, "Also check the spacing", strPtr(threadID))
+		if n := countPendingTasks(t, issueID); n != 1 {
+			t.Fatalf("expected the follow-up to merge into the root's task, got %d pending tasks", n)
+		}
+		if got := latestTriggerCommentID(t, issueID); got != followUpID {
+			t.Fatalf("trigger_comment_id = %q, want merged follow-up %q", got, followUpID)
+		}
+		if _, err := testPool.Exec(context.Background(), `
+			UPDATE agent_task_queue
+			SET status = 'completed', completed_at = now()
+			WHERE issue_id = $1 AND trigger_comment_id = $2
+		`, issueID, followUpID); err != nil {
+			t.Fatalf("failed to complete merged task: %v", err)
+		}
+		postComment(t, issueID, "Should the page header go too?", strPtr(threadID))
+		if n := countPendingTasks(t, issueID); n != 1 {
+			t.Errorf("expected 1 pending task (conversation continuation), got %d", n)
+		}
+	})
+
 	t.Run("reply to member thread mentioning assignee triggers agent", func(t *testing.T) {
 		clearTasks(t, issueID)
 		// Member starts a thread.
