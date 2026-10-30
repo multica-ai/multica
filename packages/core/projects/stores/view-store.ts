@@ -1,6 +1,7 @@
 "use client";
 
 import { create } from "zustand";
+import type { ProjectLifecycleView } from "../lifecycle";
 import { createJSONStorage, persist } from "zustand/middleware";
 import { createWorkspaceAwareStorage, registerForWorkspaceRehydration } from "../../platform/workspace-storage";
 import { defaultStorage } from "../../platform/storage";
@@ -8,8 +9,7 @@ import { defaultStorage } from "../../platform/storage";
 // Projects is the one dual-view list: a dense table (compact) and a card
 // grid (comfortable), toggled by viewMode. Sort + filters feed both views;
 // hiddenColumns only applies to the table. No scope (lead is optional and
-// often an agent, so there's no strong personal axis; status is a 5-value
-// lifecycle better expressed as a filter). Search stays session-local.
+// often an agent, so there's no strong personal axis). Search stays session-local.
 export type ProjectViewMode = "compact" | "comfortable";
 
 export type ProjectSortField = "name" | "priority" | "status" | "progress" | "created";
@@ -52,6 +52,8 @@ export type ProjectColumnKey = "priority" | "progress" | "lead" | "issues" | "cr
 export const PROJECT_DEFAULT_HIDDEN_COLUMNS: ProjectColumnKey[] = ["issues"];
 
 export interface ProjectViewState {
+  lifecycleView: ProjectLifecycleView;
+  setLifecycleView: (view: ProjectLifecycleView) => void;
   viewMode: ProjectViewMode;
   sortField: ProjectSortField;
   sortDirection: ProjectSortDirection;
@@ -67,6 +69,7 @@ export interface ProjectViewState {
 }
 
 const DEFAULTS = {
+  lifecycleView: "active" as ProjectLifecycleView,
   viewMode: "compact" as ProjectViewMode,
   sortField: "created" as ProjectSortField,
   sortDirection: PROJECT_SORT_DEFAULT_DIRECTION.created,
@@ -78,6 +81,10 @@ export const useProjectViewStore = create<ProjectViewState>()(
   persist(
     (set) => ({
       ...DEFAULTS,
+      setLifecycleView: (lifecycleView) => set((state) => ({
+        lifecycleView,
+        filters: { ...state.filters, statuses: [] },
+      })),
       setViewMode: (mode) => set({ viewMode: mode }),
       toggleSort: (field) =>
         set((state) =>
@@ -110,7 +117,11 @@ export const useProjectViewStore = create<ProjectViewState>()(
           const next = list.includes(value)
             ? list.filter((v) => v !== value)
             : [...list, value];
-          return { filters: { ...state.filters, [key]: next } };
+          return {
+            filters: { ...state.filters, [key]: next },
+            // Explicit status filters span all lifecycle views.
+            ...(key === "statuses" ? { lifecycleView: "all" as const } : {}),
+          };
         }),
       clearFilters: () => set({ filters: EMPTY_PROJECT_FILTERS }),
     }),
@@ -118,6 +129,7 @@ export const useProjectViewStore = create<ProjectViewState>()(
       name: "multica_projects_view",
       storage: createJSONStorage(() => createWorkspaceAwareStorage(defaultStorage)),
       partialize: (state) => ({
+        lifecycleView: state.lifecycleView,
         viewMode: state.viewMode,
         sortField: state.sortField,
         sortDirection: state.sortDirection,
@@ -133,6 +145,8 @@ export const useProjectViewStore = create<ProjectViewState>()(
         return {
           ...current,
           ...p,
+          // Keep pre-existing explicit status choices discoverable in All.
+          lifecycleView: p.lifecycleView ?? (p.filters?.statuses?.length ? "all" : "active"),
           filters: { ...EMPTY_PROJECT_FILTERS, ...(p.filters ?? {}) },
         };
       },

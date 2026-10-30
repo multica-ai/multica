@@ -10,8 +10,8 @@ import { PillButton } from "../../common/pill-button";
 vi.mock("@tanstack/react-query", () => ({
   useQuery: () => ({
     data: [
-      { id: "project-1", title: "Launch Command Center", icon: null },
-      { id: "project-2", title: "Mobile Web", icon: null },
+      { id: "project-1", title: "Launch Command Center", status: "completed", icon: null },
+      { id: "project-2", title: "Mobile Web", status: "cancelled", icon: null },
     ],
   }),
 }));
@@ -54,6 +54,19 @@ function renderPicker(props: Partial<React.ComponentProps<typeof ProjectPicker>>
 const SEARCH_PLACEHOLDER = "Search projects...";
 
 describe("ProjectPicker", () => {
+  it("keeps completed and cancelled projects searchable and selectable", async () => {
+    const user = userEvent.setup();
+    const onUpdate = vi.fn();
+    renderPicker({ projectId: null, onUpdate });
+    await user.click(screen.getByRole("button", { name: /no project/i }));
+    await user.type(await screen.findByPlaceholderText(SEARCH_PLACEHOLDER), "launch");
+    await user.click(screen.getByRole("button", { name: /launch command center/i }));
+    expect(onUpdate).toHaveBeenCalledWith({ project_id: "project-1" });
+    await user.click(screen.getByRole("button", { name: /no project/i }));
+    await user.type(await screen.findByPlaceholderText(SEARCH_PLACEHOLDER), "mobile");
+    await user.click(screen.getByRole("button", { name: /mobile web/i }));
+    expect(onUpdate).toHaveBeenCalledWith({ project_id: "project-2" });
+  });
   it("renders the trigger alone — the pill carries no inline clear control", () => {
     // Regression: the clear × used to be an absolutely-positioned sibling
     // overlaying the trigger, and only the picker's own default trigger

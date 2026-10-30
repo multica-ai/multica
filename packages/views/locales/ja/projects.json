@@ -167,7 +167,7 @@
     "fallback_label": "プロジェクト"
   },
   "toolbar": {
-    "result_count_title": "該当プロジェクト / すべてのプロジェクト",
+    "result_count_title": "該当プロジェクト / このビューのプロジェクト",
     "filter_label": "フィルター",
     "filter_active_count_other": "{{count}} 件のフィルター",
     "clear_filters": "フィルターをクリア",
@@ -180,5 +180,16 @@
     "direction_desc": "降順",
     "section_columns": "列",
     "view": "ビュー"
+  },
+  "lifecycle": {
+    "label": "プロジェクトのライフサイクル",
+    "active": "アクティブ",
+    "completed": "完了",
+    "all": "すべて",
+    "empty": {
+      "active": "アクティブなプロジェクトはありません",
+      "completed": "完了したプロジェクトはありません",
+      "all": "プロジェクトはまだありません"
+    }
   }
 }

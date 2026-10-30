@@ -1,5 +1,5 @@
 /**
- * Projects browse page. Flat FlatList over the workspace's projects.
+ * Projects browse page. Lifecycle views project the full workspace list.
  *
  * Title and `+` button live in the native iOS Stack header (declared via
  * Stack.Screen options in parent `_layout.tsx`, overridden here to add
@@ -7,12 +7,14 @@
  * would stack two "Projects" labels vertically.
  *
  * Sort: client-side by `updated_at` desc — most recently touched at top.
- * Mirrors web's default list ordering. WS `project:*` events keep the cache
+ * WS `project:*` events keep the cache
  * fresh via the listing-level realtime hook (`useProjectsRealtime` in
  * `_layout.tsx`), so pull-to-refresh is rarely needed but kept for the
  * cellular-edge case where a WS reconnect missed events.
  */
-import { useCallback, useMemo } from "react";
+import { useCallback, useMemo, useState } from "react";
+import SegmentedControl from "@react-native-segmented-control/segmented-control";
+import { matchesProjectLifecycle, PROJECT_LIFECYCLE_VIEWS, type ProjectLifecycleView } from "@multica/core/projects/lifecycle";
 import {
   ActivityIndicator,
   FlatList,
@@ -33,7 +35,12 @@ import { useT } from "@/lib/i18n";
 export default function ProjectsPage() {
   const wsId = useWorkspaceStore((s) => s.currentWorkspaceId);
   const wsSlug = useWorkspaceStore((s) => s.currentWorkspaceSlug);
+  return <ProjectsBrowser key={wsId} wsId={wsId} wsSlug={wsSlug} />;
+}
+
+function ProjectsBrowser({ wsId, wsSlug }: { wsId: string | null; wsSlug: string | null }) {
   const { t } = useT("projects");
+  const [lifecycleView, setLifecycleView] = useState<ProjectLifecycleView>("active");
 
   const { data, isLoading, error, refetch, isRefetching } = useQuery(
     projectListOptions(wsId),
@@ -41,11 +48,11 @@ export default function ProjectsPage() {
 
   const sorted = useMemo(() => {
     if (!data) return [];
-    return [...data].sort(
+    return data.filter((p) => matchesProjectLifecycle(p.status, lifecycleView)).sort(
       (a, b) =>
         new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime(),
     );
-  }, [data]);
+  }, [data, lifecycleView]);
 
   const goCreate = useCallback(() => {
     if (wsSlug) router.push(`/${wsSlug}/project/new`);
@@ -58,6 +65,19 @@ export default function ProjectsPage() {
   return (
     <SafeAreaView className="flex-1 bg-background" edges={[]}>
       <Stack.Screen options={{ headerRight }} />
+      <View className="px-4 py-2">
+        <SegmentedControl
+          accessibilityLabel={t("lifecycle.label")}
+          values={PROJECT_LIFECYCLE_VIEWS.map((view) =>
+            `${t(`lifecycle.${view}`)} (${data?.filter((p) => matchesProjectLifecycle(p.status, view)).length ?? 0})`,
+          )}
+          selectedIndex={PROJECT_LIFECYCLE_VIEWS.indexOf(lifecycleView)}
+          onChange={(event) => {
+            const view = PROJECT_LIFECYCLE_VIEWS[event.nativeEvent.selectedSegmentIndex];
+            if (view) setLifecycleView(view);
+          }}
+        />
+      </View>
 
       {isLoading ? (
         <View className="flex-1 items-center justify-center">
@@ -74,11 +94,16 @@ export default function ProjectsPage() {
             <Text>{t("common:actions.retry")}</Text>
           </Button>
         </View>
-      ) : sorted.length === 0 ? (
+      ) : data?.length === 0 ? (
         <EmptyState onCreate={goCreate} />
       ) : (
         <FlatList
           data={sorted}
+          ListEmptyComponent={
+            <View className="items-center px-6 py-12">
+              <Text>{t(`lifecycle.empty.${lifecycleView}`)}</Text>
+            </View>
+          }
           keyExtractor={(item) => item.id}
           ItemSeparatorComponent={() => (
             <View className="h-px bg-border ml-4" />

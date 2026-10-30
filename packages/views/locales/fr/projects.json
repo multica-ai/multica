@@ -168,7 +168,7 @@
     "fallback_label": "Projet"
   },
   "toolbar": {
-    "result_count_title": "Projets correspondants / tous les projets",
+    "result_count_title": "Projets correspondants / projets dans cette vue",
     "filter_label": "Filtrer",
     "filter_active_count_one": "{{count}} filtre",
     "filter_active_count_other": "{{count}} filtres",
@@ -182,5 +182,16 @@
     "direction_desc": "Décroissant",
     "section_columns": "Colonnes",
     "view": "Vue"
+  },
+  "lifecycle": {
+    "label": "Cycle de vie des projets",
+    "active": "Actifs",
+    "completed": "Terminés",
+    "all": "Tous",
+    "empty": {
+      "active": "Aucun projet actif",
+      "completed": "Aucun projet terminé",
+      "all": "Aucun projet pour le moment"
+    }
   }
 }

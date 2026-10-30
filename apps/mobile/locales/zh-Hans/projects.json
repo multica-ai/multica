@@ -74,5 +74,16 @@
     "count": "运行 · {{count}}"
   },
   "status.planned": "计划中",
-  "form.description_placeholder": "这个项目是做什么的？"
+  "form.description_placeholder": "这个项目是做什么的？",
+  "lifecycle": {
+    "label": "项目生命周期",
+    "active": "活跃",
+    "completed": "已完成",
+    "all": "全部",
+    "empty": {
+      "active": "没有活跃项目",
+      "completed": "没有已完成项目",
+      "all": "暂无项目"
+    }
+  }
 }

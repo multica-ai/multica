@@ -19,6 +19,8 @@ const mocks = vi.hoisted(() => ({
   openModal: vi.fn(),
   projectViewState: {
     viewMode: "compact",
+    lifecycleView: "active",
+    setLifecycleView: vi.fn(),
     sortField: "name",
     sortDirection: "asc",
     hiddenColumns: [] as string[],

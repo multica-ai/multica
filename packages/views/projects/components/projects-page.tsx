@@ -1,6 +1,7 @@
 "use client";
 
-import { useCallback, useMemo, useState, type MouseEvent } from "react";
+import { useCallback, useEffect, useMemo, useState, type MouseEvent } from "react";
+import { matchesProjectLifecycle, PROJECT_LIFECYCLE_VIEWS } from "@multica/core/projects/lifecycle";
 import {
   ArrowDown,
   ArrowUp,
@@ -86,6 +87,7 @@ import {
   PopoverTrigger,
 } from "@multica/ui/components/ui/popover";
 import { Switch } from "@multica/ui/components/ui/switch";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@multica/ui/components/ui/tabs";
 import {
   Tooltip,
   TooltipContent,
@@ -797,14 +799,20 @@ function ProjectBatchToolbar({
 // Page
 
 export function ProjectsPage() {
-  const { t } = useT("projects");
   const wsId = useWorkspaceId();
+  return <ProjectsBrowser key={wsId} wsId={wsId} />;
+}
+
+function ProjectsBrowser({ wsId }: { wsId: string }) {
+  const { t } = useT("projects");
   const wsPaths = useWorkspacePaths();
   const rowLink = useRowLink();
   const currentUser = useAuthStore((s) => s.user);
   const { getActorName } = useActorName();
 
   const viewMode = useProjectViewStore((s) => s.viewMode);
+  const lifecycleView = useProjectViewStore((s) => s.lifecycleView);
+  const setLifecycleView = useProjectViewStore((s) => s.setLifecycleView);
   const setViewMode = useProjectViewStore((s) => s.setViewMode);
   const sortField = useProjectViewStore((s) => s.sortField);
   const sortDirection = useProjectViewStore((s) => s.sortDirection);
@@ -866,9 +874,14 @@ export function ProjectsPage() {
     return m;
   }, [projects]);
 
+  const lifecycleProjects = useMemo(
+    () => projects.filter((p) => matchesProjectLifecycle(p.status, lifecycleView)),
+    [projects, lifecycleView],
+  );
+
   const visible = useMemo(() => {
     const q = search.trim().toLowerCase();
-    const filtered = projects.filter((p) => {
+    const filtered = lifecycleProjects.filter((p) => {
       if (q && !p.title.toLowerCase().includes(q) && !matchesPinyin(p.title, q)) {
         return false;
       }
@@ -904,9 +917,18 @@ export function ProjectsPage() {
       return (Date.parse(a.created_at) - Date.parse(b.created_at)) * dir;
     });
     return sorted;
-  }, [projects, search, filters, sortField, sortDirection]);
+  }, [lifecycleProjects, search, filters, sortField, sortDirection]);
 
-  const selectedProjects = visible.filter((p) => selectedIds.has(p.id));
+  useEffect(() => {
+    // A hidden row must not become selected again after rollback or a view switch.
+    const visibleIds = new Set(isCompact ? visible.map((p) => p.id) : []);
+    setSelectedIds((prev) => {
+      const next = new Set([...prev].filter((id) => visibleIds.has(id)));
+      return next.size === prev.size ? prev : next;
+    });
+  }, [visible, isCompact]);
+
+  const selectedProjects = isCompact ? visible.filter((p) => selectedIds.has(p.id)) : [];
   const allSelected = visible.length > 0 && selectedProjects.length === visible.length;
   const someSelected = selectedProjects.length > 0 && !allSelected;
   const handleToggleAll = () =>
@@ -944,7 +966,7 @@ export function ProjectsPage() {
       <CollectionPageHeader
         icon={FolderKanban}
         title={t(($) => $.page.title)}
-        count={projects.length}
+        count={visible.length}
         actions={
           <CollectionPageHeaderAction
             icon={Plus}
@@ -966,17 +988,37 @@ export function ProjectsPage() {
         />
       ) : (
         <>
+          <Tabs
+            value={lifecycleView}
+            onValueChange={(value) => {
+              if (PROJECT_LIFECYCLE_VIEWS.includes(value)) setLifecycleView(value);
+            }}
+            className="min-h-0 flex-1 gap-0"
+          >
+            <div className={cn("shrink-0 overflow-x-auto py-2", PAGE_GUTTER)}>
+            <TabsList aria-label={t(($) => $.lifecycle.label)}>
+              {PROJECT_LIFECYCLE_VIEWS.map((view) => (
+                <TabsTrigger key={view} value={view}>
+                  {t(($) => $.lifecycle[view])}{" "}
+                  <span className="text-caption tabular-nums text-muted-foreground">
+                    {projects.filter((p) => matchesProjectLifecycle(p.status, view)).length}
+                  </span>
+                </TabsTrigger>
+              ))}
+            </TabsList>
+            </div>
+          <TabsContent value={lifecycleView} className="flex min-h-0 flex-1 flex-col">
           {/* Toolbar */}
           <div className={PAGE_TOOLBAR}>
             <div className="flex min-w-0 items-center gap-2">
-              <div className="relative hidden md:block">
+              <div className="relative min-w-0">
                 <Search className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
                 <Input
                   value={search}
                   onChange={(e) => setSearch(e.target.value)}
                   aria-label={t(($) => $.page.search_placeholder)}
                   placeholder={t(($) => $.page.search_placeholder)}
-                  className="h-8 w-56 pl-8 text-body"
+                  className="h-8 w-full max-w-56 pl-8 text-body"
                 />
               </div>
               {(hasActiveFilters || search.trim().length > 0) && (
@@ -984,7 +1026,7 @@ export function ProjectsPage() {
                   title={t(($) => $.toolbar.result_count_title)}
                   className="hidden shrink-0 text-caption tabular-nums text-muted-foreground md:inline"
                 >
-                  {visible.length} / {projects.length}
+                  {visible.length} / {lifecycleProjects.length}
                 </span>
               )}
             </div>
@@ -1232,7 +1274,19 @@ export function ProjectsPage() {
           ) : visible.length === 0 ? (
             <div className="flex flex-1 flex-col items-center justify-center py-24 text-muted-foreground">
               <Search className="mb-3 h-10 w-10 opacity-30" />
-              <p className="text-body">{t(($) => $.page.no_matches)}</p>
+              <p className="text-body">
+                {lifecycleProjects.length === 0
+                  ? t(($) => $.lifecycle.empty[lifecycleView])
+                  : t(($) => $.page.no_matches)}
+              </p>
+              {(hasActiveFilters || search.trim()) && (
+                <Button variant="ghost" size="sm" onClick={() => {
+                  clearFilters();
+                  setSearch("");
+                }}>
+                  {t(($) => $.toolbar.clear_filters)}
+                </Button>
+              )}
             </div>
           ) : isCompact ? (
             <div className="min-h-0 flex-1 overflow-auto @container">
@@ -1286,11 +1340,14 @@ export function ProjectsPage() {
           )}
 
           <ProjectBatchToolbar
+            key={selectedProjects.map((p) => p.id).join(",")}
             rows={selectedProjects}
             pinnedIds={pinnedProjectIds}
             canDelete={isWorkspaceAdmin}
             onClear={() => setSelectedIds(new Set())}
           />
+          </TabsContent>
+          </Tabs>
         </>
       )}
     </div>

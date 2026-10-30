@@ -167,7 +167,7 @@
     "fallback_label": "專案"
   },
   "toolbar": {
-    "result_count_title": "當前結果 / 全部專案",
+    "result_count_title": "目前結果 / 此檢視中的專案",
     "filter_label": "篩選",
     "filter_active_count_other": "{{count}} 項篩選",
     "clear_filters": "清除篩選",
@@ -180,5 +180,16 @@
     "direction_desc": "降序",
     "section_columns": "列",
     "view": "檢視"
+  },
+  "lifecycle": {
+    "label": "專案生命週期",
+    "active": "活躍",
+    "completed": "已完成",
+    "all": "全部",
+    "empty": {
+      "active": "沒有活躍專案",
+      "completed": "沒有已完成專案",
+      "all": "尚無專案"
+    }
   }
 }

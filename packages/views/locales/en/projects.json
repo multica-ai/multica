@@ -168,7 +168,7 @@
     "fallback_label": "Project"
   },
   "toolbar": {
-    "result_count_title": "Matching projects / all projects",
+    "result_count_title": "Matching projects / projects in this view",
     "filter_label": "Filter",
     "filter_active_count_one": "{{count}} filter",
     "filter_active_count_other": "{{count}} filters",
@@ -182,5 +182,16 @@
     "direction_desc": "Descending",
     "section_columns": "Columns",
     "view": "View"
+  },
+  "lifecycle": {
+    "label": "Project lifecycle",
+    "active": "Active",
+    "completed": "Completed",
+    "all": "All",
+    "empty": {
+      "active": "No active projects",
+      "completed": "No completed projects",
+      "all": "No projects yet"
+    }
   }
 }
