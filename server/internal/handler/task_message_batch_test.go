@@ -236,6 +236,66 @@ func TestReportTaskMessagesPublishesInSeqOrder(t *testing.T) {
 	}
 }
 
+// A chat task's transcript is the agent's half of a private conversation, so
+// its task:message events must name the chat session and its creator for the
+// realtime layer to deliver them to that member only. The creator here is not
+// the daemon's user, so the owner cannot have come from the request.
+func TestReportTaskMessagesStampsChatSessionOwner(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+	creatorID := dbfx.User(t, "Chat owner", "task-message-chat-owner@example.test")
+	dbfx.Member(t, testWorkspaceID, creatorID, "member")
+	agentID := dbfx.Agent(t, "chat transcript agent", handlerTestRuntimeID(t), testutil.Cols{
+		"instructions": "",
+		"custom_env":   testutil.Raw("'{}'::jsonb"),
+		"custom_args":  testutil.Raw("'[]'::jsonb"),
+	})
+	chatSessionID := dbfx.ChatSession(t, agentID, testutil.Cols{"creator_id": creatorID})
+	chatTaskID := dbfx.Task(t, agentID, testutil.Cols{
+		"runtime_id":      handlerTestRuntimeID(t),
+		"chat_session_id": chatSessionID,
+		"status":          "running",
+		"started_at":      testutil.Raw("now()"),
+	})
+	issueTaskID := seedBatchTask(t, "issue transcript")
+
+	sharedBus := testHandler.Bus
+	testHandler.Bus = events.New()
+	t.Cleanup(func() { testHandler.Bus = sharedBus })
+	var mu sync.Mutex
+	got := map[string]events.Event{}
+	testHandler.Bus.Subscribe(protocol.EventTaskMessage, func(e events.Event) {
+		mu.Lock()
+		defer mu.Unlock()
+		got[e.TaskID] = e
+	})
+
+	for _, taskID := range []string{chatTaskID, issueTaskID} {
+		testutil.Call(t, testHandler.ReportTaskMessages, batchMessagesRequest(t, taskID, []any{
+			map[string]any{"seq": 1, "type": "text", "content": "transcript"},
+		})).Want(http.StatusOK)
+	}
+
+	mu.Lock()
+	defer mu.Unlock()
+	chat, ok := got[chatTaskID]
+	if !ok {
+		t.Fatal("chat task published no task:message")
+	}
+	if chat.ChatSessionID != chatSessionID || chat.ChatSessionOwnerID != creatorID {
+		t.Fatalf("chat task:message hints = session %q owner %q, want %q / %q",
+			chat.ChatSessionID, chat.ChatSessionOwnerID, chatSessionID, creatorID)
+	}
+	issue, ok := got[issueTaskID]
+	if !ok {
+		t.Fatal("issue task published no task:message")
+	}
+	if issue.ChatSessionID != "" || issue.ChatSessionOwnerID != "" || issue.WorkspaceID != testWorkspaceID {
+		t.Fatalf("issue task:message = %+v, want workspace-scoped without chat hints", issue)
+	}
+}
+
 // TestCreateTaskMessagesBatchIsAtomic exercises the production query, not a copy
 // of it: a batch that violates the primary key must persist nothing. This is the
 // property the single statement buys over the per-message loop, which could

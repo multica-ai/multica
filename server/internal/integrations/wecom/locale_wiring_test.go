@@ -13,6 +13,8 @@ package wecom
 
 import (
 	"context"
+	"encoding/json"
+	"log/slog"
 	"strings"
 	"testing"
 
@@ -412,6 +414,94 @@ func TestTheBubbleClosesInTheAskersLanguage(t *testing.T) {
 }
 
 // ---- surface 6: the read loop's own receipt ----
+
+// TestUnreadableKindReceiptReadsTheSendersLanguage drives dispatchFrame with a
+// message nothing here can read. The receipt is sent by the read loop before
+// the Router or the Replier ever see the message, so it is a surface of its own
+// and has to consult the pack itself.
+//
+// REVERSE VERIFICATION: put the zh-Hans literal back in dispatchFrame and the
+// English case receives the Chinese line.
+func TestUnreadableKindReceiptReadsTheSendersLanguage(t *testing.T) {
+	t.Parallel()
+	for _, tc := range localeCases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			c := testChannel(func(context.Context, channel.InboundMessage) error { return nil })
+			c.installationID = mustTestUUID(t)
+			c.languages = fakeLanguages{senderID: "USER_A", userID: localeTestUserID, language: tc.language}
+			conn := &recordingConn{}
+			if err := c.dispatchFrame(context.Background(), msgCallbackFrame(t, "location", ""),
+				conn.autoAck(newWSSender(conn, nil)), slog.Default()); err != nil {
+				t.Fatalf("dispatchFrame: %v", err)
+			}
+			if got, want := sentMarkdown(t, conn, 0), copyPacks[tc.locale].UnsupportedMsgType; got != want {
+				t.Fatalf("receipt = %q, want the %s copy %q", got, tc.locale, want)
+			}
+		})
+	}
+}
+
+// The factory is what router.go calls, and the unit tests above set the field by
+// hand, so this is the one that fails if the copy from ChannelDeps into the
+// channel stops happening.
+//
+// REVERSE VERIFICATION: drop languages: deps.Languages from newWecomFactory and
+// this receives the Chinese line.
+func TestTheFactoryCarriesTheLanguageLookupIntoTheReceipt(t *testing.T) {
+	t.Parallel()
+	factory := newWecomFactory(ChannelDeps{
+		Credentials: fixedCredentials{},
+		Languages:   fakeLanguages{senderID: "USER_A", userID: localeTestUserID, language: "en"},
+	})
+	ch, err := factory(channel.Config{
+		ID:      mustTestUUID(t),
+		Raw:     []byte(`{"bot_id":"bot-1"}`),
+		Handler: func(context.Context, channel.InboundMessage) error { return nil },
+	})
+	if err != nil {
+		t.Fatalf("factory: %v", err)
+	}
+	wc, ok := ch.(*wecomChannel)
+	if !ok {
+		t.Fatalf("factory returned %T, want *wecomChannel", ch)
+	}
+	conn := &recordingConn{}
+	if err := wc.dispatchFrame(context.Background(), msgCallbackFrame(t, "location", ""),
+		conn.autoAck(newWSSender(conn, nil)), slog.Default()); err != nil {
+		t.Fatalf("dispatchFrame: %v", err)
+	}
+	if got, want := sentMarkdown(t, conn, 0), copyPacks[LocaleEn].UnsupportedMsgType; got != want {
+		t.Fatalf("receipt = %q, want the English %q: the factory dropped ChannelDeps.Languages", got, want)
+	}
+}
+
+// In a room there is no one profile to read, so the receipt is the
+// deployment's, whatever the sender's own profile says.
+func TestUnreadableKindReceiptInARoomReadsTheDeployment(t *testing.T) {
+	t.Parallel()
+	c := testChannel(func(context.Context, channel.InboundMessage) error { return nil })
+	c.installationID = mustTestUUID(t)
+	c.languages = fakeLanguages{senderID: "USER_A", userID: localeTestUserID, language: "en"}
+	frame := msgCallbackFrame(t, "location", "")
+	var mc aibotMsgCallback
+	if err := json.Unmarshal(frame.Body, &mc); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	mc.ChatType = "group"
+	body, err := json.Marshal(mc)
+	if err != nil {
+		t.Fatalf("encode: %v", err)
+	}
+	frame.Body = body
+	conn := &recordingConn{}
+	if err := c.dispatchFrame(context.Background(), frame, conn.autoAck(newWSSender(conn, nil)), slog.Default()); err != nil {
+		t.Fatalf("dispatchFrame: %v", err)
+	}
+	if got, want := sentMarkdown(t, conn, 0), copyFor(deploymentLocale()).UnsupportedMsgType; got != want {
+		t.Fatalf("room receipt = %q, want the deployment's %q", got, want)
+	}
+}
 
 // ---- the deployment knob ----
 

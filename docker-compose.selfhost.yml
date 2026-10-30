@@ -211,6 +211,12 @@ services:
       # for a debugging session and unset it when that session ends, because
       # what it records is user message content.
       MULTICA_WECOM_TRACE: ${MULTICA_WECOM_TRACE:-}
+      # Which language the bot's own copy is written in for readers whose
+      # language cannot be looked up — a group chat, or anyone not linked to a
+      # Multica account yet. A linked person reads their own profile language
+      # instead. zh-Hans (default) or en; an unrecognised value leaves the
+      # default in place and the resolved one is logged at boot.
+      MULTICA_WECOM_DEFAULT_LOCALE: ${MULTICA_WECOM_DEFAULT_LOCALE:-}
       # Telegram bot integration. MULTICA_TELEGRAM_SECRET_KEY is the
       # opt-in: unset = integration disabled. It decrypts the
       # per-installation bot token stored in channel_installation.config

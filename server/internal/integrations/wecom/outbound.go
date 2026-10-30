@@ -407,12 +407,20 @@ func (o *Outbound) deliverAnswer(ctx context.Context, e events.Event, taskID pgt
 				text = c.StreamNoReply
 			}
 		}
-		sealErr := o.finishStream(ctx, t.Handle, text)
+		// A closing frame is capped at the same 20480 bytes as any other body
+		// and is CLIPPED to fit: the answer ends in an ellipsis and the rest of
+		// it is nowhere the reader can get to. So the bubble carries what one
+		// frame holds and the remainder follows as ordinary messages, split and
+		// numbered the way sendTextCtx splits an answer with no bubble.
+		head, rest := splitForBubble(text)
+		sealErr := o.finishStream(ctx, t.Handle, head)
 		switch classifySeal(sealErr) {
 		case sealOnScreen:
+			o.sendRest(ctx, t.Handle, rest)
 			o.delivered()
 			return answerOutcome{addr: t.Handle.address(), spoke: true}, nil
 		case sealUnknown:
+			o.sendRest(ctx, t.Handle, rest)
 			o.unconfirmed(ctx, e, unconfirmedSealReason(sealErr), sealErr)
 			return answerOutcome{addr: t.Handle.address(), spoke: true}, nil
 		}
@@ -527,7 +535,7 @@ func (o *Outbound) routeFrameAwaiting(ctx context.Context, f relayFrame, eventID
 }
 
 // relaySeal asks whichever replica holds this round to close it. Routed by
-// round ownership, so it needs no address — see deliverRelayed.
+// round ownership, so it needs no address — see relayKindSeal.
 func (o *Outbound) relaySeal(e events.Event, taskID pgtype.UUID, reason string, carriesFiles bool) {
 	id := util.UUIDToString(taskID)
 	if id == "" {
@@ -635,7 +643,14 @@ func (o *Outbound) sendAsMessage(ctx context.Context, e events.Event, taskID pgt
 	if !hasVisibleChar(content) {
 		return answerOutcome{addr: addr}, nil
 	}
-	err = sender.sendTextCtx(ctx, addr.ChatID, addr.ChatType, content)
+	err = sender.sendTextCtx(guardReply(ctx, o.q, addr.InstallationID), addr.ChatID, addr.ChatType, content)
+	if errors.Is(err, errInstallationGone) && !errors.Is(err, errPartiallySent) {
+		// Revoked while this answer waited for its turn on the socket. Not a
+		// failed delivery: the same skip taskAddress files when the revocation
+		// came before the address was read. The files go nowhere either.
+		o.skippedFor(ctx, e.ChatSessionID, skipInstallationInactive)
+		return answerOutcome{addr: addr}, errNothingToSay
+	}
 	// Recorded here rather than returned, so this send and the relay's go
 	// through the one mapping in recordSend (#8344).
 	o.recordSend(ctx, e.ChatSessionID, e.Type, err)
@@ -729,14 +744,77 @@ func chatDoneTaskID(e events.Event) (pgtype.UUID, bool) {
 //
 // senders and streams are non-nil here: a turn has a bubble only through them.
 func (o *Outbound) finishStream(ctx context.Context, h streamHandle, text string) error {
-	err := o.streams.seal(ctx, o.senders, h, text)
+	err := o.streams.seal(guardReply(ctx, o.q, h.InstallationID), o.senders, h, text)
 	if err == nil {
 		return nil
+	}
+	if errors.Is(err, errInstallationGone) {
+		// Not a failed seal: nobody may write here any more. The caller's
+		// fallback reaches the same verdict on its own.
+		o.logger.InfoContext(ctx, "wecom outbound: bubble left open, installation revoked",
+			"installation_id", uuidStringPub(h.InstallationID))
+		return err
 	}
 	o.logger.WarnContext(ctx, "wecom outbound: in-place reply failed, sending a new message instead",
 		"installation_id", uuidStringPub(h.InstallationID),
 		"stream_unusable", streamUnusable(err), "error", err)
 	return err
+}
+
+// splitForBubble divides an answer into the part one stream frame holds and
+// the part that has to follow it as messages.
+//
+// It is splitForWire, so a bubble and a plain message break an answer at the
+// same places and number the pieces the same way. Think tags are defused
+// first: defusing inserts bytes, so splitting first could hand the frame a head
+// that fits and is then pushed back over the cap (defusing is idempotent, so
+// the frame's own pass changes nothing).
+func splitForBubble(text string) (head string, rest []string) {
+	pieces := splitForWire(defuseThinkTags(text))
+	if len(pieces) <= 1 {
+		return text, nil
+	}
+	return pieces[0], pieces[1:]
+}
+
+// sendRest delivers the pieces of an answer that did not fit in its sealed
+// bubble, as messages directly underneath it, in order.
+//
+// All of them go out under one hold of the chat's lock (sendPiecesCtx), the
+// way sendTextCtx sends a split answer: taken piece by piece, a second long
+// answer, an inbox card or a file pushed to the same chat can land between
+// them, and the reader can no longer tell whose (2/3) is whose.
+//
+// They are reply frames like any other, so each one re-reads the installation
+// first (guardReply): a revocation that lands while they wait for the lock
+// stops them.
+//
+// It runs when the seal is on screen and also when its outcome is unknown. The
+// rest has never been sent, so sending it cannot print anything twice; if the
+// head did land, the reader gets the whole answer, and if it did not, (2/n)
+// onwards at least shows that the start is missing. Holding it back would leave
+// a bubble that ends at (1/n) with nothing after it.
+//
+// The pieces get the budget the bubble cannot spend (fallbackBudget): a seal
+// whose verdict never came back has usually used the turn's deadline up, and
+// the rest is still the answer.
+//
+// A piece that fails cannot un-send anything before it; it stops the rest,
+// because what follows only reads after it. The reply is counted by what the
+// seal says, which is how sendTextCtx's own split reports a later piece
+// failing (errPartiallySent), so a long answer is counted one way with or
+// without a bubble.
+func (o *Outbound) sendRest(ctx context.Context, h streamHandle, rest []string) {
+	if len(rest) == 0 {
+		return
+	}
+	ctx, cancel := fallbackBudget(ctx)
+	defer cancel()
+	if err := o.senders.sendPiecesCtx(guardReply(ctx, o.q, h.InstallationID), h.InstallationID, h.ChatID, h.ChatType, rest); err != nil {
+		o.logger.WarnContext(ctx, "wecom outbound: only part of a long answer reached the chat",
+			"installation_id", uuidStringPub(h.InstallationID),
+			"pieces", len(rest)+1, "error", err)
+	}
 }
 
 // chatDoneContent extracts the reply text from an EventChatDone payload
@@ -949,7 +1027,7 @@ func (o *Outbound) pushInbox(ctx context.Context, item map[string]any, binding d
 		// reach WeCom and the caller may offer it to the recipient-wide binding.
 		return false, true
 	}
-	if err := sender.sendTextCtx(ctx, binding.ChannelUserID, chatTypeSingleInt, content); err != nil {
+	if err := sender.sendTextCtx(guardReply(ctx, o.q, binding.InstallationID), binding.ChannelUserID, chatTypeSingleInt, content); err != nil {
 		o.logger.WarnContext(ctx, "wecom outbound: inbox push failed",
 			"error", err, "installation_id", uuidStringPub(binding.InstallationID),
 			"recipient_id", recipientIDStr)
@@ -1102,10 +1180,23 @@ func (c installationCheck) String() string {
 // database blip on one attempt confirmed a one-shot chat:done as handled and
 // threw the answer away.
 func (o *Outbound) mayStillWrite(ctx context.Context, id pgtype.UUID) installationCheck {
+	return readInstallationCheck(ctx, o.q, id)
+}
+
+// installationReader is the one read a permission check makes. Both the
+// outbound subscriber's queries and the typing manager's delivery lookup carry
+// it, which is what lets the two ask the same question of the same row.
+type installationReader interface {
+	GetChannelInstallation(ctx context.Context, arg db.GetChannelInstallationParams) (db.ChannelInstallation, error)
+}
+
+// readInstallationCheck is mayStillWrite for a caller that is not the outbound
+// subscriber.
+func readInstallationCheck(ctx context.Context, q installationReader, id pgtype.UUID) installationCheck {
 	if !id.Valid {
 		return installationGone
 	}
-	inst, err := o.q.GetChannelInstallation(ctx, db.GetChannelInstallationParams{
+	inst, err := q.GetChannelInstallation(ctx, db.GetChannelInstallationParams{
 		ID:          id,
 		ChannelType: channelTypeWecom,
 	})
@@ -1120,4 +1211,48 @@ func (o *Outbound) mayStillWrite(ctx context.Context, id pgtype.UUID) installati
 		return installationGone
 	}
 	return installationOK
+}
+
+// errInstallationGone marks a reply frame refused at the socket because its
+// installation was revoked, or its row is gone, after the reply was addressed.
+// What it settles is the obligation: there is no longer an installation to
+// deliver through, so the reply is not owed to anyone — skipInstallationInactive,
+// the same outcome taskAddress reaches when the revocation came first.
+var errInstallationGone = errors.New("wecom: installation revoked")
+
+// replyWriteGuard is the permission check for the frames of a reply: the
+// message, each piece of a long one, and the closing frame of its bubble. It
+// is installed in the context (withWriteGuard) and run by the ws layer with
+// the writer in hand, for the same reason attachmentWriteGuard is: the address
+// was read once, before the chat's turn and the writer's, and a revocation in
+// between is otherwise written straight through.
+//
+// Unlike attachmentWriteGuard it keeps the two refusals apart, because a reply
+// has an outcome to report and the two are opposite facts about it. Gone is
+// errInstallationGone. Unreadable is a lookup that failed ahead of the write —
+// the dropTransport case, and on the relay one more offer, since the answer is
+// still owed and still the only copy.
+func replyWriteGuard(q installationReader, id pgtype.UUID) func(context.Context) error {
+	return func(ctx context.Context) error {
+		ctx, cancel := context.WithTimeout(ctx, permissionReadBudget)
+		defer cancel()
+		switch check := readInstallationCheck(ctx, q, id); check {
+		case installationOK:
+			return nil
+		case installationGone:
+			return errInstallationGone
+		default:
+			return fmt.Errorf("wecom: installation could not be read (%s)", check)
+		}
+	}
+}
+
+// guardReply puts replyWriteGuard on ctx. A nil reader leaves ctx as it was:
+// a manager built without a delivery lookup has nothing to ask, and writes as
+// it did before the guard existed.
+func guardReply(ctx context.Context, q installationReader, id pgtype.UUID) context.Context {
+	if q == nil {
+		return ctx
+	}
+	return withWriteGuard(ctx, replyWriteGuard(q, id))
 }

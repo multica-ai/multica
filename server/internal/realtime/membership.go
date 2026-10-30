@@ -55,6 +55,9 @@ func (h *Hub) registerClient(client *Client) {
 	M.ActiveConnections.Add(1)
 	h.subscribe(client, ScopeWorkspace, client.workspaceID)
 	h.subscribe(client, ScopeUser, client.userID)
+	if client.workspaceID != "" && client.userID != "" {
+		h.subscribe(client, ScopeWorkspaceMember, WorkspaceMemberScopeID(client.workspaceID, client.userID))
+	}
 	slog.Info("ws client connected", "workspace_id", client.workspaceID, "user_id", client.userID, "total_clients", total)
 }
 
