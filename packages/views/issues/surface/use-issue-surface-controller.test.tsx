@@ -966,7 +966,7 @@ describe("useIssueSurfaceController", () => {
   it("sends workspace running-task issue ids through the Table filter", async () => {
     const store = getIssueSurfaceViewStore("project:p1");
     store.getState().setViewMode("table");
-    store.getState().toggleAgentRunningFilter();
+    store.getState().cycleAgentWorkingMode();
     listIssues.mockResolvedValue({ issues: [], total: 0 });
     const getWorkspaceWorkingAgents = vi.fn(() =>
       Promise.resolve([
@@ -1027,7 +1027,7 @@ describe("useIssueSurfaceController", () => {
   it("uses the active My Issues relation for the Table working-agent filter", async () => {
     const store = getIssueSurfaceViewStore("my:user-1:assigned");
     store.getState().setViewMode("table");
-    store.getState().toggleAgentRunningFilter();
+    store.getState().cycleAgentWorkingMode();
     const getWorkspaceWorkingAgents = vi.fn(() =>
       Promise.resolve([] satisfies WorkspaceWorkingAgent[]),
     );
@@ -1070,7 +1070,7 @@ describe("useIssueSurfaceController", () => {
     async (viewMode) => {
       const store = getIssueSurfaceViewStore("project:p1");
       store.getState().setViewMode(viewMode);
-      store.getState().toggleAgentRunningFilter();
+      store.getState().cycleAgentWorkingMode();
       mockWorkingAgents([
         makeWorkingAgent("agent-from-working-api", ["issue-from-working-api"]),
       ]);
@@ -1108,7 +1108,7 @@ describe("useIssueSurfaceController", () => {
     store.getState().toggleAssigneeFilter({ type: "agent", id: "agent-2" });
     store.getState().toggleAssigneeFilter({ type: "member", id: "member-1" });
     store.getState().toggleNoAssignee();
-    store.getState().toggleAgentRunningFilter();
+    store.getState().cycleAgentWorkingMode();
     mockWorkingAgents([
       makeWorkingAgent("agent-2", ["member-assigned-running-issue"]),
       makeWorkingAgent("agent-3", ["unassigned-running-issue"]),
@@ -1379,7 +1379,7 @@ describe("useIssueSurfaceController", () => {
     ]);
 
     const store = getIssueSurfaceViewStore("project:p1");
-    act(() => store.getState().toggleAgentRunningFilter());
+    act(() => store.getState().cycleAgentWorkingMode());
 
     const { result } = renderHook(
       () =>
@@ -1458,7 +1458,7 @@ describe("useIssueSurfaceController", () => {
     const store = getIssueSurfaceViewStore("project:p1");
     act(() => {
       store.getState().toggleStatusFilter("todo");
-      store.getState().toggleAgentRunningFilter();
+      store.getState().cycleAgentWorkingMode();
     });
 
     const { result } = renderHook(
@@ -1581,7 +1581,7 @@ describe("useIssueSurfaceController", () => {
     await waitFor(() => expect(result.current.isLoading).toBe(false));
     listIssueTableRows.mockClear();
     listIssueTableFacets.mockClear();
-    act(() => store.getState().toggleAgentRunningFilter());
+    act(() => store.getState().cycleAgentWorkingMode());
     expect(result.current.isLoading).toBe(true);
     expect(result.current.isEmpty).toBe(false);
     expect(result.current.isWorkingFilterError).toBe(false);
@@ -1595,16 +1595,16 @@ describe("useIssueSurfaceController", () => {
       query: expect.objectContaining({ filters: expect.objectContaining({ working_issue_ids: ["todo-1"] }) }),
     }));
     expect(getWorkspaceWorkingAgents).toHaveBeenCalledWith("issue", undefined, undefined);
-    act(() => store.getState().toggleAgentRunningFilter());
-    act(() => store.getState().toggleAgentRunningFilter());
+    act(() => store.setState({ agentWorkingMode: "all" }));
+    act(() => store.setState({ agentWorkingMode: "working" }));
     expect(getWorkspaceWorkingAgents).toHaveBeenCalledTimes(1);
     expect(result.current.isLoading).toBe(false);
 
-    act(() => store.getState().toggleAgentRunningFilter());
+    act(() => store.setState({ agentWorkingMode: "all" }));
     listIssueTableRows.mockClear();
     act(() => {
       qc.removeQueries({ queryKey: workspaceWorkingAgentsKeys.all("ws-1") });
-      store.getState().toggleAgentRunningFilter();
+      store.setState({ agentWorkingMode: "working" });
     });
     await waitFor(() => expect(getWorkspaceWorkingAgents).toHaveBeenCalledTimes(2));
     expect(result.current.isLoading).toBe(true);
@@ -1624,7 +1624,7 @@ describe("useIssueSurfaceController", () => {
   it("keeps Table loading until working membership resolves, and lets the filter be disabled while pending", async () => {
     getWorkspaceWorkingAgents.mockImplementation(() => never());
     const store = getIssueSurfaceViewStore("project:p1");
-    store.getState().toggleAgentRunningFilter();
+    store.getState().cycleAgentWorkingMode();
     const { result } = renderHook(
       () => useIssueSurfaceController({ scope: { type: "project", projectId: "p1" }, modes: ["table"] }),
       { wrapper: makeWrapper(qc) },
@@ -1632,7 +1632,7 @@ describe("useIssueSurfaceController", () => {
     await waitFor(() => expect(result.current.workingAgents).toEqual([]));
     expect(result.current.isLoading).toBe(true);
     expect(result.current.isEmpty).toBe(false);
-    act(() => store.getState().toggleAgentRunningFilter());
+    act(() => store.setState({ agentWorkingMode: "all" }));
     expect(result.current.isLoading).toBe(false);
     expect(result.current.tableQuerySpec.filters.working_issue_ids).toBeUndefined();
   });
@@ -1641,7 +1641,7 @@ describe("useIssueSurfaceController", () => {
     mockListByStatus({ todo: [makeIssue({ id: "todo-1", status: "todo" })] });
     getWorkspaceWorkingAgents.mockRejectedValueOnce(new Error("offline"));
     const store = getIssueSurfaceViewStore("project:p1");
-    store.getState().toggleAgentRunningFilter();
+    store.getState().cycleAgentWorkingMode();
     const { result } = renderHook(
       () => useIssueSurfaceController({ scope: { type: "project", projectId: "p1" }, modes: ["list"] }),
       { wrapper: makeWrapper(qc) },
@@ -1655,6 +1655,176 @@ describe("useIssueSurfaceController", () => {
     await waitFor(() => expect(result.current.issues.map((issue) => issue.id)).toEqual(["todo-1"]));
     expect(result.current.isLoading).toBe(false);
     expect(result.current.isWorkingFilterError).toBe(false);
+  });
+
+  describe("not working mode", () => {
+    function renderList(mode: "list" | "table" | "board" = "list") {
+      return renderHook(
+        () => useIssueSurfaceController({ scope: { type: "project", projectId: "p1" }, modes: [mode] }),
+        { wrapper: makeWrapper(qc) },
+      );
+    }
+
+    it("sends the visible running ids as an exclusion and never as the positive filter", async () => {
+      mockListByStatus({ todo: [makeIssue({ id: "todo-1", status: "todo" })] });
+      mockWorkingAgents([makeWorkingAgent("agent-1", ["todo-1"])]);
+      const store = getIssueSurfaceViewStore("project:p1");
+      store.setState({ agentWorkingMode: "not_working" });
+      const { result } = renderList("table");
+      await waitFor(() => expect(result.current.isLoading).toBe(false));
+      expect(result.current.tableQuerySpec.filters.not_working_issue_ids).toEqual(["todo-1"]);
+      expect(result.current.tableQuerySpec.filters.working_issue_ids).toBeUndefined();
+      expect(result.current.hasActiveFilters).toBe(true);
+    });
+
+    it("a loaded projection with zero running issues sends an explicit empty exclusion", async () => {
+      mockListByStatus({ todo: [makeIssue({ id: "todo-1", status: "todo" })] });
+      mockWorkingAgents([]);
+      const store = getIssueSurfaceViewStore("project:p1");
+      store.setState({ agentWorkingMode: "not_working" });
+      const { result } = renderList("table");
+      await waitFor(() => expect(result.current.isLoading).toBe(false));
+      expect(result.current.tableQuerySpec.filters.not_working_issue_ids).toEqual([]);
+      expect(result.current.isWorkingFilterError).toBe(false);
+    });
+
+    it("never fetches rows (or lists everything) while the projection is unresolved", async () => {
+      getWorkspaceWorkingAgents.mockImplementation(() => never());
+      const store = getIssueSurfaceViewStore("project:p1");
+      store.setState({ agentWorkingMode: "not_working" });
+      const { result } = renderList("table");
+      await waitFor(() => expect(getWorkspaceWorkingAgents).toHaveBeenCalled());
+      expect(result.current.isLoading).toBe(true);
+      expect(result.current.isEmpty).toBe(false);
+      expect(result.current.tableQuerySpec.filters.not_working_issue_ids).toBeUndefined();
+      expect(listIssueTableRows).not.toHaveBeenCalled();
+    });
+
+    it("surfaces a failed projection as a retryable error, then recovers", async () => {
+      mockListByStatus({ todo: [makeIssue({ id: "todo-1", status: "todo" })] });
+      getWorkspaceWorkingAgents.mockRejectedValueOnce(new Error("offline"));
+      const store = getIssueSurfaceViewStore("project:p1");
+      store.setState({ agentWorkingMode: "not_working" });
+      const { result } = renderList("list");
+      await waitFor(() => expect(result.current.isWorkingFilterError).toBe(true));
+      expect(result.current.isEmpty).toBe(false);
+      expect(result.current.tableQuerySpec.filters.not_working_issue_ids).toBeUndefined();
+      expect(listIssueTableRows).not.toHaveBeenCalled();
+      mockWorkingAgents([]);
+      act(() => result.current.retryWorkingFilter());
+      await waitFor(() => expect(result.current.isWorkingFilterError).toBe(false));
+      await waitFor(() => expect(result.current.isLoading).toBe(false));
+    });
+
+    it("the chip count does not follow the inverse filter", async () => {
+      mockListByStatus({
+        todo: [makeIssue({ id: "todo-1", status: "todo" })],
+        in_progress: [makeIssue({ id: "prog-1", status: "in_progress" })],
+      });
+      mockWorkingAgents([makeWorkingAgent("agent-1", ["todo-1"])]);
+      const store = getIssueSurfaceViewStore("project:p1");
+      const { result } = renderList("table");
+      await waitFor(() => expect(result.current.isLoading).toBe(false));
+      await waitFor(() => expect(result.current.workingAgents).toEqual([{ id: "agent-1", running_task_count: 1 }]));
+      const before = listIssueTableFacets.mock.calls.length;
+      act(() => store.setState({ agentWorkingMode: "not_working" }));
+      await waitFor(() => expect(result.current.isLoading).toBe(false));
+      // The working_agents facet request must carry neither working field.
+      const facetCalls = listIssueTableFacets.mock.calls.slice(before) as Array<[
+        { query: { filters: Record<string, unknown> }; facets: Array<{ kind: string }> },
+      ]>;
+      for (const [request] of facetCalls) {
+        if (request.facets.some((f) => f.kind === "working_agents")) {
+          expect(request.query.filters.working_issue_ids).toBeUndefined();
+          expect(request.query.filters.not_working_issue_ids).toBeUndefined();
+        }
+      }
+      expect(result.current.workingAgents).toEqual([{ id: "agent-1", running_task_count: 1 }]);
+    });
+
+    it("moves between all, working and not working with one membership key each", async () => {
+      mockListByStatus({ todo: [makeIssue({ id: "todo-1", status: "todo" })] });
+      mockWorkingAgents([makeWorkingAgent("agent-1", ["todo-1"])]);
+      const store = getIssueSurfaceViewStore("project:p1");
+      const { result } = renderList("table");
+      await waitFor(() => expect(result.current.isLoading).toBe(false));
+      const seen: Array<Record<string, unknown>> = [];
+      for (let i = 0; i < 3; i += 1) {
+        act(() => store.getState().cycleAgentWorkingMode());
+        await waitFor(() => expect(result.current.isLoading).toBe(false));
+        seen.push({ ...result.current.tableQuerySpec.filters });
+      }
+      expect(seen[0]!.working_issue_ids).toEqual(["todo-1"]);
+      expect(seen[0]!.not_working_issue_ids).toBeUndefined();
+      expect(seen[1]!.not_working_issue_ids).toEqual(["todo-1"]);
+      expect(seen[1]!.working_issue_ids).toBeUndefined();
+      expect(seen[2]!.working_issue_ids).toBeUndefined();
+      expect(seen[2]!.not_working_issue_ids).toBeUndefined();
+      expect(store.getState().agentWorkingMode).toBe("all");
+    });
+
+    it("clearFilters resets the mode to all", () => {
+      const store = getIssueSurfaceViewStore("project:p1");
+      store.setState({ agentWorkingMode: "not_working" });
+      store.getState().clearFilters();
+      expect(store.getState().agentWorkingMode).toBe("all");
+    });
+
+    // The surface filters on the server, so a started or stopped run has to
+    // show up as a different exclusion in the request the rows come from.
+    async function refreshProjection(agents: WorkspaceWorkingAgent[]) {
+      mockWorkingAgents(agents);
+      await act(async () => {
+        await qc.invalidateQueries({ queryKey: workspaceWorkingAgentsKeys.all("ws-1") });
+      });
+    }
+    const lastRowsExclusion = () => {
+      const calls = listIssueTableRows.mock.calls as Array<[{ query: { filters: { not_working_issue_ids?: string[] } } }]>;
+      return calls.at(-1)?.[0].query.filters.not_working_issue_ids;
+    };
+
+    it("a run starting adds its issue to the exclusion; the last run stopping removes it", async () => {
+      mockListByStatus({
+        todo: [makeIssue({ id: "todo-1", status: "todo" }), makeIssue({ id: "todo-2", status: "todo" })],
+      });
+      mockWorkingAgents([makeWorkingAgent("agent-1", ["todo-1"])]);
+      const store = getIssueSurfaceViewStore("project:p1");
+      store.setState({ agentWorkingMode: "not_working" });
+      const { result } = renderList("list");
+      await waitFor(() => expect(result.current.isLoading).toBe(false));
+      await waitFor(() => expect(lastRowsExclusion()).toEqual(["todo-1"]));
+
+      // Agent 2 starts on todo-2: it must leave Not working.
+      await refreshProjection([makeWorkingAgent("agent-1", ["todo-1"]), makeWorkingAgent("agent-2", ["todo-2"])]);
+      await waitFor(() => expect([...(lastRowsExclusion() ?? [])].sort()).toEqual(["todo-1", "todo-2"]));
+
+      // Agent 1 stops while agent 2 still runs: only todo-1 re-enters.
+      await refreshProjection([makeWorkingAgent("agent-2", ["todo-2"])]);
+      await waitFor(() => expect(lastRowsExclusion()).toEqual(["todo-2"]));
+
+      // Everyone stops: a loaded, empty projection excludes nothing.
+      await refreshProjection([]);
+      await waitFor(() => expect(lastRowsExclusion()).toEqual([]));
+      expect(result.current.isWorkingFilterError).toBe(false);
+    });
+
+    it("two agents on one issue keep it excluded until the last one stops", async () => {
+      mockListByStatus({ todo: [makeIssue({ id: "todo-1", status: "todo" })] });
+      mockWorkingAgents([makeWorkingAgent("agent-1", ["todo-1"]), makeWorkingAgent("agent-2", ["todo-1"])]);
+      const store = getIssueSurfaceViewStore("project:p1");
+      store.setState({ agentWorkingMode: "not_working" });
+      const { result } = renderList("list");
+      await waitFor(() => expect(result.current.isLoading).toBe(false));
+      // Two agents, one issue: it appears once in the exclusion.
+      await waitFor(() => expect(lastRowsExclusion()).toEqual(["todo-1"]));
+
+      await refreshProjection([makeWorkingAgent("agent-2", ["todo-1"])]);
+      await waitFor(() => expect(getWorkspaceWorkingAgents.mock.calls.length).toBeGreaterThan(1));
+      expect(lastRowsExclusion()).toEqual(["todo-1"]);
+
+      await refreshProjection([]);
+      await waitFor(() => expect(lastRowsExclusion()).toEqual([]));
+    });
   });
 
   it("keeps swimlane chrome bounded while descriptors retain hidden-status counts", async () => {
@@ -1776,7 +1946,7 @@ describe("useIssueSurfaceController", () => {
     const store = getIssueSurfaceViewStore("project:p1");
     act(() => {
       store.getState().setViewMode("gantt");
-      store.getState().toggleAgentRunningFilter();
+      store.getState().cycleAgentWorkingMode();
     });
 
     const { result } = renderHook(
@@ -1803,6 +1973,63 @@ describe("useIssueSurfaceController", () => {
       "gantt-open",
     ]);
     expect(getAgentTaskSnapshot).not.toHaveBeenCalled();
+  });
+
+  it("Gantt applies Not working as the exact complement of Working over the same canvas rows", async () => {
+    mockGanttIssues(ganttFixture);
+    mockWorkingAgents([makeWorkingAgent("agent-editor", ["gantt-open"])]);
+    const store = getIssueSurfaceViewStore("project:p1");
+    act(() => {
+      store.getState().setViewMode("gantt");
+      store.setState({ ganttShowCompleted: true });
+    });
+    const { result } = renderHook(
+      () =>
+        useIssueSurfaceController({
+          scope: { type: "project", projectId: "p1" },
+          modes: ["board", "list", "swimlane", "gantt"],
+        }),
+      { wrapper: makeWrapper(qc, "project:p1") },
+    );
+    await waitFor(() => expect(result.current.isLoading).toBe(false));
+    const ids = () => result.current.filteredGanttIssues.map((i) => i.id).sort();
+
+    // Done is shown and the undated row is never drawn, so the canvas has two rows.
+    await waitFor(() => expect(ids()).toEqual(["gantt-done", "gantt-open"]));
+
+    act(() => store.setState({ agentWorkingMode: "working" }));
+    await waitFor(() => expect(ids()).toEqual(["gantt-open"]));
+
+    act(() => store.setState({ agentWorkingMode: "not_working" }));
+    await waitFor(() => expect(ids()).toEqual(["gantt-done"]));
+    // The chip keeps counting the agents on the visible canvas in every mode.
+    expect(result.current.workingAgents).toEqual([{ id: "agent-editor", running_task_count: 1 }]);
+  });
+
+  it("Gantt holds Not working back until the projection resolves", async () => {
+    mockGanttIssues(ganttFixture);
+    let finish!: (agents: WorkspaceWorkingAgent[]) => void;
+    getWorkspaceWorkingAgents.mockImplementation(() => new Promise((resolve) => { finish = resolve; }));
+    const store = getIssueSurfaceViewStore("project:p1");
+    act(() => {
+      store.getState().setViewMode("gantt");
+      store.setState({ agentWorkingMode: "not_working" });
+    });
+    const { result } = renderHook(
+      () =>
+        useIssueSurfaceController({
+          scope: { type: "project", projectId: "p1" },
+          modes: ["gantt"],
+        }),
+      { wrapper: makeWrapper(qc, "project:p1") },
+    );
+    await waitFor(() => expect(getWorkspaceWorkingAgents).toHaveBeenCalled());
+    // Unknown membership: nothing may be listed as "not working".
+    expect(result.current.filteredGanttIssues).toEqual([]);
+    expect(result.current.isLoading).toBe(true);
+    await act(async () => finish([makeWorkingAgent("agent-1", ["gantt-open"])]));
+    await waitFor(() => expect(result.current.isLoading).toBe(false));
+    expect(result.current.filteredGanttIssues.map((i) => i.id)).not.toContain("gantt-open");
   });
 
   it.each([
@@ -1832,7 +2059,7 @@ describe("useIssueSurfaceController", () => {
           id: selectedAssigneeId,
         });
       }
-      store.getState().toggleAgentRunningFilter();
+      store.getState().cycleAgentWorkingMode();
     });
 
     const { result } = renderHook(
@@ -1874,7 +2101,7 @@ describe("useIssueSurfaceController", () => {
     const store = getIssueSurfaceViewStore("project:p1");
     act(() => {
       store.getState().setViewMode("gantt");
-      store.getState().toggleAgentRunningFilter();
+      store.getState().cycleAgentWorkingMode();
       store.getState().toggleGanttShowCompleted();
     });
 

@@ -54,6 +54,8 @@ export {
   type CardProperties,
   type ActorFilterValue,
   type IssueViewState,
+  type AgentWorkingMode,
+  nextAgentWorkingMode,
   type TableSystemColumnKey,
   type TableColumnKey,
   type TableColumnConfig,

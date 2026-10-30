@@ -1,5 +1,7 @@
 "use client";
 
+import { useId } from "react";
+import { Zap, ZapOff } from "lucide-react";
 import { ActorAvatar } from "@multica/ui/components/common/actor-avatar";
 import { Button } from "@multica/ui/components/ui/button";
 import {
@@ -9,11 +11,14 @@ import {
 } from "@multica/ui/components/ui/hover-card";
 import { useActorName } from "@multica/core/workspace/hooks";
 import type { WorkingAgentSummary } from "@multica/core/types";
+import type { AgentWorkingMode } from "@multica/core/issues/stores/view-store";
 import { AgentAvatarStack } from "../../agents/components/agent-avatar-stack";
 import { useT } from "../../i18n";
 
 interface WorkspaceAgentWorkingChipProps {
-  value: boolean;
+  /** `all` = filter off, `working` / `not_working` = the two directions. */
+  value: AgentWorkingMode;
+  /** Advances the mode: all -> working -> not_working -> all. */
   onToggle: () => void;
   /** Agents working inside the surface this header belongs to, already narrowed
    *  by its scope and every active filter. `undefined` = not resolved yet. */
@@ -41,11 +46,11 @@ export function chipActivity(
  * not yet know whether the surface is idle, and dimming it would claim so.
  */
 export function chipAppearance(
-  value: boolean,
+  value: AgentWorkingMode,
   activity: ChipActivity,
 ): { variant: "brand" | "brandSubtle" | "outline"; className: string } {
   const layout = "h-8 px-2 md:h-7 md:px-2.5";
-  if (value) return { variant: "brand", className: layout };
+  if (value !== "all") return { variant: "brand", className: layout };
   if (activity === "some") return { variant: "brandSubtle", className: layout };
   if (activity === "unknown") return { variant: "outline", className: layout };
   return { variant: "outline", className: `${layout} text-muted-foreground` };
@@ -137,8 +142,10 @@ export function WorkingAgentsHoverContent({
  * hover body alike — because "0" and "not known yet" are different claims and
  * the reader cannot tell them apart once one of them is rendered as the other.
  *
- * Clicking only toggles view state; the controller turns the running-issue set
- * into the query's `working_issue_ids` filter.
+ * Clicking only advances view state (all -> working -> not working -> all); the
+ * controller turns the running-issue set into the query's `working_issue_ids`
+ * or `not_working_issue_ids` filter. The count always describes the agents
+ * working, in every mode, so it does not move when you click the chip.
  */
 export function WorkspaceAgentWorkingChip({
   value,
@@ -148,10 +155,22 @@ export function WorkspaceAgentWorkingChip({
   const { t } = useT("issues");
   const activity = chipActivity(agents);
   const agentIds = agents?.map((agent) => agent.id) ?? [];
-  const label =
+  // The count always names the agents working, whichever way the filter
+  // points, so it never moves when the chip is clicked.
+  const workingLabel =
     activity === "unknown"
       ? t(($) => $.agent_activity.chip_agents_working_unknown)
       : t(($) => $.agent_activity.chip_agents_working, { count: agentIds.length });
+  const label = workingLabel;
+  const stateLabel =
+    value === "working"
+      ? t(($) => $.agent_activity.chip_state_working)
+      : value === "not_working"
+        ? t(($) => $.agent_activity.chip_state_not_working)
+        : t(($) => $.agent_activity.chip_state_all);
+  // The accessible NAME stays the count label in every state (unchanged for
+  // existing consumers); the three-way state is its description.
+  const stateId = useId();
   const appearance = chipAppearance(value, activity);
 
   const trigger = (
@@ -160,9 +179,26 @@ export function WorkspaceAgentWorkingChip({
       size="sm"
       className={appearance.className}
       onClick={onToggle}
-      aria-pressed={value}
+      // Three states do not fit aria-pressed's two, so the current state is
+      // announced as the button's description instead.
       aria-label={label}
+      aria-describedby={stateId}
+      data-working-mode={value}
     >
+      <span id={stateId} className="sr-only">
+        {stateLabel}
+      </span>
+      {/* The selected state, by SHAPE rather than colour, so it reads at every
+          width (the text label beside the chip is hidden below md) and without
+          a tooltip: a bolt means "only issues with agents working", a struck
+          bolt means "only issues without". All is the plain chip. The accessible
+          state lives in the description above, so the glyph is decorative. */}
+      {value === "working" && (
+        <Zap aria-hidden="true" data-state-icon="working" className="size-3.5 shrink-0" />
+      )}
+      {value === "not_working" && (
+        <ZapOff aria-hidden="true" data-state-icon="not_working" className="size-3.5 shrink-0" />
+      )}
       {activity === "some" && (
         <AgentAvatarStack agentIds={agentIds} size="sm" max={3} />
       )}

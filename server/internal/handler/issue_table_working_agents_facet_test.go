@@ -346,6 +346,17 @@ func TestIssueTableWorkingAgentsFacetFollowsSurfaceScopeAndFilters(t *testing.T)
 				matchNone[insideAgentID], off[insideAgentID],
 			)
 		}
+		// The inverse filter is dropped by the same rule, otherwise clicking
+		// the chip into "Not working" would shrink its own number.
+		notWorking := workingAgentsFacetCounts(t, workingAgentsFacetRequest(projectScope, map[string]any{
+			"not_working_issue_ids": []string{inProjectTodoID},
+		}))
+		if notWorking[insideAgentID] != off[insideAgentID] {
+			t.Errorf(
+				"the not-working filter changed the count: %d vs %d",
+				notWorking[insideAgentID], off[insideAgentID],
+			)
+		}
 	})
 
 	t.Run("workspace scope still sees both agents", func(t *testing.T) {
