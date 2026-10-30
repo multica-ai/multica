@@ -74,9 +74,10 @@ func (h *Handler) wecomIntegrationConfigured() bool {
 func (h *Handler) ListWecomInstallations(w http.ResponseWriter, r *http.Request) {
 	if !h.wecomIntegrationConfigured() {
 		writeJSON(w, http.StatusOK, map[string]any{
-			"installations":     []WecomInstallationResponse{},
-			"configured":        false,
-			"install_supported": false,
+			"installations":          []WecomInstallationResponse{},
+			"configured":             false,
+			"install_supported":      false,
+			"scan_install_supported": false,
 		})
 		return
 	}
@@ -102,6 +103,10 @@ func (h *Handler) ListWecomInstallations(w http.ResponseWriter, r *http.Request)
 		"installations":     out,
 		"configured":        true,
 		"install_supported": true,
+		// Scan install additionally needs a QR provider (a source id), so it can
+		// be off on a deployment where the BYO path works. The UI hides the
+		// "create a new bot" option rather than offering a button that 503s.
+		"scan_install_supported": h.WecomInstall != nil && h.WecomInstall.Configured(),
 	})
 }
 
