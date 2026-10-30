@@ -248,9 +248,36 @@ jobs:
       - name: Test views shard ${{ matrix.index }}/${{ matrix.total }}
         run: pnpm exec turbo test --filter='@multica/views' -- --shard=${{ matrix.index }}/${{ matrix.total }}
 
+  frontend-chat-scroll-test:
+    needs: changes
+    if: ${{ needs.changes.outputs.frontend == 'true' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Install Chromium
+        run: pnpm exec playwright install --with-deps chromium
+
+      - name: Test chat scrolling with real Virtuoso
+        run: pnpm exec playwright test --config=playwright.chat-scroll.config.ts
+
   # Preserve the aggregate check names while validating intentional skips.
   frontend:
-    needs: [changes, frontend-build, frontend-test, frontend-views-test, frontend-quality]
+    needs: [changes, frontend-build, frontend-test, frontend-views-test, frontend-chat-scroll-test, frontend-quality]
     if: ${{ !cancelled() }}
     runs-on: ubuntu-latest
     steps:
@@ -258,7 +285,7 @@ jobs:
       - name: Check frontend job results
         env:
           NEEDS_JSON: ${{ toJSON(needs) }}
-          JOB_SCOPES: '{"frontend-build":"frontend","frontend-test":"frontend","frontend-views-test":"frontend","frontend-quality":"quality_only"}'
+          JOB_SCOPES: '{"frontend-build":"frontend","frontend-test":"frontend","frontend-views-test":"frontend","frontend-chat-scroll-test":"frontend","frontend-quality":"quality_only"}'
         run: node scripts/ci-scope.mjs gate
 
   # The Go caches are handled explicitly here rather than through setup-go's

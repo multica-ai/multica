@@ -39,7 +39,7 @@ vi.mock("react-virtuoso", () => ({
     data: unknown[];
     itemContent: (i: number, item: unknown) => ReactElement;
     computeItemKey: (i: number, item: unknown) => string;
-    followOutput?: (atBottom: boolean) => "smooth" | "auto" | false;
+    followOutput?: false | ((atBottom: boolean) => "smooth" | "auto" | false);
     totalListHeightChanged?: () => void;
   }) => {
     reportContentHeightChanged = totalListHeightChanged;
@@ -54,8 +54,9 @@ vi.mock("react-virtuoso", () => ({
     return (
       <div
         data-testid="virtuoso-rows"
-        data-follow-at-bottom={String(followOutput?.(true))}
-        data-follow-away-from-bottom={String(followOutput?.(false))}
+        data-follow-disabled={String(followOutput === false)}
+        data-follow-at-bottom={String(followOutput && followOutput(true))}
+        data-follow-away-from-bottom={String(followOutput && followOutput(false))}
       >
         {data.map((item, i) => (
           <div key={computeItemKey(i, item)} data-row-key={computeItemKey(i, item)}>
@@ -217,6 +218,9 @@ function scroller(el: HTMLElement, initialContent = 2000): Scroller {
   };
   pinCalls = [];
 
+  // Virtuoso's initial positioning emits a real scroll after mounting.
+  act(() => el.dispatchEvent(new Event("scroll")));
+
   const scrollEvent = () => {
     act(() => {
       el.dispatchEvent(new Event("scroll"));
@@ -317,6 +321,12 @@ function scroller(el: HTMLElement, initialContent = 2000): Scroller {
     },
     wheelWithoutScroll(px) {
       const nested = document.createElement("pre");
+      nested.style.overflowY = "auto";
+      Object.defineProperties(nested, {
+        scrollTop: { value: 200 },
+        scrollHeight: { value: 800 },
+        clientHeight: { value: 200 },
+      });
       el.appendChild(nested);
       act(() => {
         nested.dispatchEvent(new WheelEvent("wheel", { deltaY: -px, bubbles: true }));
@@ -398,6 +408,38 @@ function renderStreamingChat({ contentHeight = 2000 } = {}) {
 }
 
 describe("ChatMessageList auto-scroll", () => {
+  it("accepts fractional input whose scroll arrives after the input frame", () => {
+    const { scroll, followsAtBottom } = renderStreamingChat();
+
+    act(() => scroll.el.dispatchEvent(new WheelEvent("wheel", { deltaY: -0.5 })));
+    act(() => renderFrame());
+    scroll.browserScrollsListUp(1);
+
+    expect(followsAtBottom()).toBe("false");
+    expect(scroll.distanceFromBottom()).toBe(1);
+    expect(scroll.pinCalls()).toHaveLength(0);
+  });
+
+  it("passes literal false to Virtuoso as soon as the reader leaves", () => {
+    const { scroll, view } = renderStreamingChat();
+
+    scroll.readerScrollsUp(2);
+
+    expect(view.container.querySelector("[data-follow-disabled]"))
+      .toHaveAttribute("data-follow-disabled", "true");
+  });
+
+  it("does not mistake a viewport clamp for pending reader input", () => {
+    const { scroll, followsAtBottom } = renderStreamingChat();
+
+    scroll.pageUpFromRowControl();
+    scroll.growViewport(72);
+    scroll.grow(180);
+
+    expect(followsAtBottom()).toBe("auto");
+    expect(scroll.distanceFromBottom()).toBe(0);
+  });
+
   it("stops following and reveal polling before a closing list unmounts", () => {
     const { view, scroll, setActive, followsAtBottom } = renderStreamingChat();
     const observedBefore = observedTargets().length;
@@ -581,9 +623,7 @@ describe("ChatMessageList auto-scroll", () => {
     expect(scroll.distanceFromBottom()).toBe(0);
   });
 
-  // The base behavior `atBottomThreshold` always granted: a trackpad nudge
-  // inside the edge zone is not the reader leaving.
-  it("keeps following after a small trackpad nudge near the live end", () => {
+  it("lets a small confirmed trackpad nudge leave the live end", () => {
     const { scroll, streamChunk } = renderStreamingChat();
 
     scroll.readerScrollsUp(2);
@@ -592,7 +632,7 @@ describe("ChatMessageList auto-scroll", () => {
     streamChunk(1);
     scroll.grow(180);
 
-    expect(scroll.distanceFromBottom()).toBe(0);
+    expect(scroll.distanceFromBottom()).toBe(182);
   });
 
   it("releases when touch momentum carries a flick past the threshold", () => {
@@ -618,11 +658,11 @@ describe("ChatMessageList auto-scroll", () => {
     streamChunk(1);
 
     expect(scroll.distanceFromBottom()).toBe(80.5);
-    expect(followsAtBottom()).toBe("auto");
+    expect(followsAtBottom()).toBe("false");
     scroll.touchEnd();
   });
 
-  it("resumes pinning after a sub-threshold touch ends", () => {
+  it("keeps the reader's position after a small touch ends", () => {
     const { scroll, streamChunk } = renderStreamingChat();
 
     scroll.touchStart(100);
@@ -632,7 +672,7 @@ describe("ChatMessageList auto-scroll", () => {
     streamChunk(1);
     scroll.grow(180);
 
-    expect(scroll.distanceFromBottom()).toBe(0);
+    expect(scroll.distanceFromBottom()).toBe(260);
   });
 
   it("releases on incremental upward scrolling during a fast stream", () => {
@@ -641,10 +681,7 @@ describe("ChatMessageList auto-scroll", () => {
     streamChunk(1);
     scroll.grow(180);
 
-    // 60px wheel ticks, each under the edge threshold on its own and each
-    // answered by a chunk that pins the reader back — but the displacement
-    // they actually took accumulates across the pins, so the third tick
-    // crosses the threshold and releases.
+    // The first confirmed upward scroll releases, including during a stream.
     for (let seq = 2; seq <= 5; seq++) {
       scroll.readerScrollsUp(60);
       streamChunk(seq);
@@ -654,7 +691,7 @@ describe("ChatMessageList auto-scroll", () => {
     streamChunk(6);
     scroll.grow(180);
 
-    expect(scroll.distanceFromBottom()).toBe(660);
+    expect(scroll.distanceFromBottom()).toBe(1140);
   });
 
   // Discrete mouse wheel at reading pace: one notch per event, spaced past
@@ -676,10 +713,10 @@ describe("ChatMessageList auto-scroll", () => {
 
   // A reply's final chunk always exists and has a whole intent window to land
   // in after any small nudge; no later event will re-evaluate a declined pin.
-  it("pins a chunk that lands inside the reader's intent window", () => {
+  it("pins the final chunk when pending input never scrolled the list", () => {
     const { scroll, streamChunk } = renderStreamingChat();
 
-    scroll.readerScrollsUp(2);
+    scroll.wheelWithoutScroll(2);
     streamChunk(1);
     scroll.grow(180);
 
