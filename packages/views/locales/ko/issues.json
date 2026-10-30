@@ -215,7 +215,6 @@
     "search_fields": "필드",
     "search_values": "값",
     "advanced_switch": "고급 필터로 전환",
-    "advanced_switch_hint": "필드 간 '또는'",
     "advanced_title": "고급 필터",
     "advanced_match_leading": "다음 조건",
     "advanced_match_trailing": "충족",

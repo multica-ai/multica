@@ -220,7 +220,6 @@
     "search_fields": "Fields",
     "search_values": "Values",
     "advanced_switch": "Switch to advanced filter",
-    "advanced_switch_hint": "“Or” across fields",
     "advanced_title": "Advanced filter",
     "advanced_match_leading": "Match",
     "advanced_match_trailing": "of the conditions",

@@ -215,7 +215,6 @@
     "search_fields": "字段",
     "search_values": "值",
     "advanced_switch": "切换到高级筛选",
-    "advanced_switch_hint": "跨字段“或”",
     "advanced_title": "高级筛选",
     "advanced_match_leading": "满足",
     "advanced_match_trailing": "条件",

@@ -220,7 +220,6 @@
     "search_fields": "Champs",
     "search_values": "Valeurs",
     "advanced_switch": "Passer au filtre avancé",
-    "advanced_switch_hint": "« Ou » entre champs",
     "advanced_title": "Filtre avancé",
     "advanced_match_leading": "Correspond à",
     "advanced_match_trailing": "des conditions",

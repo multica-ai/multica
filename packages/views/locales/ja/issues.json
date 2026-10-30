@@ -215,7 +215,6 @@
     "search_fields": "フィールド",
     "search_values": "値",
     "advanced_switch": "高度なフィルターに切り替え",
-    "advanced_switch_hint": "フィールドをまたぐ「または」",
     "advanced_title": "高度なフィルター",
     "advanced_match_leading": "次の条件の",
     "advanced_match_trailing": "に一致",

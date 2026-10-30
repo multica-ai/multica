@@ -1596,9 +1596,6 @@ export function IssueFilterMenu({
       >
         <ListTree className="size-3.5" />
         {t(($) => $.filters.advanced_switch)}
-        <span className="ml-auto pl-4 text-caption text-muted-foreground">
-          {t(($) => $.filters.advanced_switch_hint)}
-        </span>
       </DropdownMenuItem>
 
       {/* Reset */}

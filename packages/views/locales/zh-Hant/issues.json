@@ -215,7 +215,6 @@
     "search_fields": "欄位",
     "search_values": "值",
     "advanced_switch": "切換到進階篩選",
-    "advanced_switch_hint": "跨欄位「或」",
     "advanced_title": "進階篩選",
     "advanced_match_leading": "滿足",
     "advanced_match_trailing": "條件",
