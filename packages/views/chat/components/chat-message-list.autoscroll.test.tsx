@@ -164,6 +164,12 @@ interface Scroller {
   shrinkViewport(px: number): void;
   /** Reader wheel input scrolling up by `px`, and the scroll it causes. */
   readerScrollsUp(px: number): void;
+  /**
+   * Reader wheel input whose scroll reaches the main thread `frames`
+   * rendering frames later — what Chromium on macOS does under load, because
+   * the compositor applies the wheel and delivers the scroll event late.
+   */
+  readerScrollsUpLate(px: number, frames: number): void;
   /** Starts a one-finger touch gesture at `clientY`. */
   touchStart(clientY: number): void;
   /** Moves that finger and then scrolls the list up by `scrollPx`. */
@@ -178,6 +184,8 @@ interface Scroller {
    * (or hits a list with nothing to scroll), so no scroll event follows.
    */
   wheelWithoutScroll(px: number): void;
+  /** Wheel over a capped code block that still has room to scroll itself. */
+  wheelInNestedScroller(px: number): void;
   /** PageUp bubbling from a focused control inside a row. */
   pageUpFromRowControl(): void;
   /** Shift+Space (pages UP) bubbling from a focused control inside a row. */
@@ -291,6 +299,14 @@ function scroller(el: HTMLElement, initialContent = 2000): Scroller {
     readerScrollsUp(px) {
       wheelBy(px);
     },
+    readerScrollsUpLate(px, frames) {
+      act(() => {
+        el.dispatchEvent(new WheelEvent("wheel", { deltaY: -px }));
+      });
+      for (let i = 0; i < frames; i++) renderFrame();
+      state.scrollTop -= px;
+      scrollEvent();
+    },
     touchStart(clientY) {
       act(() => {
         el.dispatchEvent(touchEvent("touchstart", clientY));
@@ -317,6 +333,19 @@ function scroller(el: HTMLElement, initialContent = 2000): Scroller {
     },
     wheelWithoutScroll(px) {
       const nested = document.createElement("pre");
+      el.appendChild(nested);
+      act(() => {
+        nested.dispatchEvent(new WheelEvent("wheel", { deltaY: -px, bubbles: true }));
+      });
+    },
+    wheelInNestedScroller(px) {
+      const nested = document.createElement("pre");
+      nested.style.overflowY = "auto";
+      Object.defineProperties(nested, {
+        scrollHeight: { configurable: true, get: () => 800 },
+        clientHeight: { configurable: true, get: () => 300 },
+        scrollTop: { configurable: true, get: () => 250 },
+      });
       el.appendChild(nested);
       act(() => {
         nested.dispatchEvent(new WheelEvent("wheel", { deltaY: -px, bubbles: true }));
@@ -731,11 +760,45 @@ describe("ChatMessageList auto-scroll", () => {
   it("pins a system shift after nested scrolling left input unconsumed", () => {
     const { scroll } = renderStreamingChat();
 
-    scroll.wheelWithoutScroll(300);
+    scroll.wheelInNestedScroller(300);
     renderFrame();
     scroll.browserScrollsListUp(200);
 
     expect(scroll.distanceFromBottom()).toBe(0);
+  });
+
+  it("pins a system shift once unconsumed input has outlived its claim", () => {
+    const { scroll } = renderStreamingChat();
+
+    scroll.wheelWithoutScroll(300);
+    renderFrame();
+    renderFrame();
+    renderFrame();
+    scroll.browserScrollsListUp(200);
+
+    expect(scroll.distanceFromBottom()).toBe(0);
+  });
+
+  // Chromium applies a wheel on the compositor and can hand the main thread
+  // the resulting scroll event a frame or two later — measured on macOS
+  // under a streaming reply (#8915). The reader's own scroll must still be
+  // theirs, or every notch is pinned back and the list cannot leave the end.
+  it("releases for wheel notches whose scroll lands frames after the input", () => {
+    const { scroll, streamChunk } = renderStreamingChat();
+
+    for (let seq = 1; seq <= 3; seq++) {
+      scroll.readerScrollsUpLate(60, 2);
+      streamChunk(seq);
+      scroll.grow(180);
+    }
+    gestureSettles();
+    const parked = scroll.scrollTop;
+
+    streamChunk(4);
+    scroll.grow(180);
+
+    expect(scroll.scrollTop).toBe(parked);
+    expect(scroll.distanceFromBottom()).toBeGreaterThan(0);
   });
 
   it("keeps following after a flick on a conversation too short to scroll", () => {

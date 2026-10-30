@@ -26,7 +26,9 @@ import {
 // nested scrollers (capped `overflow-auto` code blocks) whose wheel/touch
 // events bubble here without moving the list, and on a conversation shorter
 // than the viewport nothing scrolls at all. Unconsumed input must not release
-// the follow. The same rule works in reverse for keys: any scroll key from
+// the follow. Wheels a nested scroller will take are not staged at all; any
+// other claim lives for a few frames, since the confirming scroll can arrive
+// after the input's own frame (see INPUT_CLAIM_FRAMES). The same rule works in reverse for keys: any scroll key from
 // anywhere in the container stages intent, and if the browser answers it by
 // scrolling the list (focus on a row control page-scrolls the nearest
 // scrollable ancestor), the scroll confirms it — the reader is never pinned
@@ -88,6 +90,50 @@ const LIVE_END_SETTLE_MS = 120;
 // A list whose content never stops moving must not stay hidden. Past this,
 // reveal whatever Virtuoso has: a shift beats a blank chat.
 const REVEAL_DEADLINE_MS = 1000;
+
+/**
+ * Rendering frames an input claim waits for the list's own scroll.
+ *
+ * Chromium applies wheel and trackpad scrolls on the compositor, and the
+ * scroll event reaches the main thread on its own schedule: measured in the
+ * desktop app's Electron on macOS with real trackpad and mouse-wheel input,
+ * 40-50% of scroll events landed one frame after the input that caused them,
+ * and under a streaming reply's render load every mouse-wheel notch landed one
+ * or two frames late (#8915). A claim that expired after a single frame left
+ * those scrolls unattributable, so each was pinned back and the reader could
+ * not leave the live end. Long enough to cover that lag, short enough that a
+ * claim nothing honored cannot reach a later, unrelated system shift.
+ */
+const INPUT_CLAIM_FRAMES = 3;
+
+/**
+ * Whether a scroller nested inside the list (a capped code block) will take
+ * this wheel itself. Its input never moves the list, so staging it would only
+ * leave a claim behind for a system shift to draw on. Scroll chaining hands a
+ * nested scroller's input to the list only once it cannot move any further.
+ */
+function nestedScrollerTakesWheel(
+  target: EventTarget | null,
+  scrollEl: HTMLElement,
+  deltaY: number,
+): boolean {
+  for (
+    let node = target instanceof HTMLElement ? target : null;
+    node && node !== scrollEl;
+    node = node.parentElement
+  ) {
+    if (node.scrollHeight <= node.clientHeight) continue;
+    const style = getComputedStyle(node);
+    if (style.overflowY !== "auto" && style.overflowY !== "scroll") continue;
+    if (style.overscrollBehaviorY === "contain" || style.overscrollBehaviorY === "none") {
+      return true;
+    }
+    const canMove =
+      deltaY < 0 ? node.scrollTop > 0 : node.scrollTop + node.clientHeight < node.scrollHeight;
+    if (canMove) return true;
+  }
+  return false;
+}
 
 export interface StickToBottom {
   /** For `followOutput`: the reader is still following the live end. */
@@ -191,17 +237,26 @@ export function useStickToBottom(
 
     // Mirror of the transcript dialog's wiring with the live end at the
     // BOTTOM: away from it is up, so every input sign flips.
+    // The claim outlives the input's own frame by INPUT_CLAIM_FRAMES, because
+    // the scroll that confirms it can reach the main thread frames later.
     let inputFrame: number | null = null;
     const stageInput = (delta: number) => {
       if (!activeRef.current) return;
       follow.input(delta);
       if (inputFrame !== null) cancelAnimationFrame(inputFrame);
-      inputFrame = requestAnimationFrame(() => {
+      let framesLeft = INPUT_CLAIM_FRAMES;
+      const endClaim = () => {
+        if (--framesLeft > 0) {
+          inputFrame = requestAnimationFrame(endClaim);
+          return;
+        }
         inputFrame = null;
         follow.endInputFrame();
-      });
+      };
+      inputFrame = requestAnimationFrame(endClaim);
     };
     const onWheel = (e: WheelEvent) => {
+      if (nestedScrollerTakesWheel(e.target, scrollEl, e.deltaY)) return;
       const scale =
         e.deltaMode === 1 ? LINE_SCROLL_PX : e.deltaMode === 2 ? scrollEl.clientHeight : 1;
       stageInput(-e.deltaY * scale);
