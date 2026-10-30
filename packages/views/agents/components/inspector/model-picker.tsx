@@ -3,7 +3,7 @@
 import { useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { ChevronDown, Cpu, Loader2, Plus } from "lucide-react";
-import { modelChoices, runtimeModelsOptions } from "@multica/core/runtimes";
+import { runtimeModelsOptions } from "@multica/core/runtimes";
 import { Input } from "@multica/ui/components/ui/input";
 import { Label } from "@multica/ui/components/ui/label";
 import {
@@ -56,8 +56,8 @@ export function ModelPicker({
   // reference; `?? []` would mint a fresh array on every render and
   // invalidate filters needlessly.
   const models = useMemo(
-    () => modelChoices(modelsQuery.data?.models ?? [], value),
-    [modelsQuery.data, value],
+    () => modelsQuery.data?.models ?? [],
+    [modelsQuery.data],
   );
 
   const filtered = useMemo(() => {
