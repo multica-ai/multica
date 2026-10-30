@@ -514,12 +514,14 @@ describe("estimateCost", () => {
     }
   });
 
-  it("uses the current routed Flash rate for Cursor 3.5 and 3.6 aliases", () => {
-    for (const model of ["gemini-3.5-flash-high", "gemini-3.6-flash-high"]) {
-      expect(estimateCost({ ...zeroUsage, provider: "cursor", model,
+  it("prices Cursor's 3.5 and 3.6 Flash at Cursor's sheet, not Google's routed rate", () => {
+    const cost = (model: string) =>
+      estimateCost({ ...zeroUsage, provider: "cursor", model,
         input_tokens: 1_000_000, output_tokens: 1_000_000, cache_read_tokens: 1_000_000,
-      })).toBeCloseTo(0.75 + 3.75 + 0.075, 5);
-    }
+      });
+    expect(cost("gemini-3.5-flash")).toBeCloseTo(1.5 + 9 + 0.15, 5);
+    expect(cost("gemini-3.6-flash-high")).toBeCloseTo(1.5 + 7.5 + 0.15, 5);
+    expect(cost("gemini-3.7-flash-high")).toBeCloseTo(0.75 + 3.75 + 0.075, 5);
   });
 
   it("resolves current Codex routing prefixes and context tags", () => {
@@ -757,7 +759,7 @@ describe("estimateCost", () => {
     );
   });
 
-  it("prices Cursor Fast variants only where Cursor publishes a Fast rate", () => {
+  it("prices Cursor Fast variants only where a Fast rate is published", () => {
     const cost = (model: string) =>
       estimateCost({
         ...zeroUsage,
@@ -771,13 +773,34 @@ describe("estimateCost", () => {
     expect(cost("cursor-grok-4.5-high-fast")).toBeCloseTo(4 + 18, 5);
     expect(cost("claude-opus-4-7-thinking-high-fast")).toBeCloseTo(30 + 150, 5);
     expect(cost("claude-opus-4-8[effort=high,fast=true]")).toBeCloseTo(10 + 50, 5);
+    // Cursor's sheet doesn't price these Fast variants; the vendor sheet does.
+    expect(cost("claude-opus-5-5-xhigh-fast")).toBeCloseTo(8 + 40, 5);
+    expect(cost("claude-opus-5-5[fast=true]")).toBeCloseTo(8 + 40, 5);
+    expect(cost("claude-opus-5-thinking-high-fast")).toBeCloseTo(10 + 50, 5);
+    expect(cost("gpt-5.5-extra-high-fast")).toBeCloseTo(12.5 + 75, 5);
+    expect(cost("gpt-5.3-codex-xhigh-fast")).toBeCloseTo(3.5 + 28, 5);
+    expect(cost("gpt-5.2-fast")).toBeCloseTo(3.5 + 28, 5);
     // No published Fast rate: unmapped, never the cheaper standard rate.
-    expect(isModelPriced("claude-opus-5-5-high-fast", "cursor")).toBe(false);
-    expect(isModelPriced("gpt-5.5-medium-fast", "cursor")).toBe(false);
-    expect(isModelPriced("claude-opus-5-5[fast=true]", "cursor")).toBe(false);
+    expect(isModelPriced("claude-sonnet-5-5-high-fast", "cursor")).toBe(false);
+    expect(isModelPriced("kimi-k3-fast", "cursor")).toBe(false);
+    expect(isModelPriced("claude-sonnet-5[fast=true]", "cursor")).toBe(false);
     expect(collectUnmappedModels([
-      { ...zeroUsage, provider: "cursor", model: "claude-opus-5-5-high-fast", input_tokens: 1 },
-    ])).toEqual(["cursor/claude-opus-5-5-high-fast"]);
+      { ...zeroUsage, provider: "cursor", model: "claude-sonnet-5-5-high-fast", input_tokens: 1 },
+    ])).toEqual(["cursor/claude-sonnet-5-5-high-fast"]);
+  });
+
+  it("prices Cursor catalog ids missing from the base table", () => {
+    const cost = (model: string) =>
+      estimateCost({
+        ...zeroUsage,
+        provider: "cursor",
+        model,
+        input_tokens: 1_000_000,
+        output_tokens: 1_000_000,
+        cache_read_tokens: 1_000_000,
+      });
+    expect(cost("gpt-5.1-high")).toBeCloseTo(1.25 + 10 + 0.125, 5);
+    expect(cost("deepseek-v41-flash-1017-max")).toBeCloseTo(0.3 + 1.2 + 0.006, 5);
   });
 
   it("keeps Cursor variant stripping scoped to Cursor rows", () => {
