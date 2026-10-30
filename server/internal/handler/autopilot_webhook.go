@@ -24,7 +24,9 @@ import (
 
 	obsmetrics "github.com/multica-ai/multica/server/internal/metrics"
 	"github.com/multica-ai/multica/server/internal/middleware"
+	"github.com/multica-ai/multica/server/internal/service"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
+	"github.com/multica-ai/multica/server/pkg/dbid"
 )
 
 // maxWebhookBodyBytes is the request body size cap for webhook ingress.
@@ -357,7 +359,7 @@ func (h *Handler) HandleAutopilotWebhook(w http.ResponseWriter, r *http.Request)
 		writeWebhookRateLimit(w, r, h.WebhookAbsoluteIPRateLimiter, ip, "absolute_ip", h.Metrics)
 		return
 	}
-	if ip != "" && h.WebhookIPRateLimiter != nil && !webhookLimiterCheck(r.Context(), h.WebhookIPRateLimiter, ip) {
+	if ip != "" && h.WebhookIPRateLimiter != nil && !slidingWindowLimiterCheck(r.Context(), h.WebhookIPRateLimiter, ip) {
 		writeWebhookRateLimit(w, r, h.WebhookIPRateLimiter, ip, "bad_credential_ip", h.Metrics)
 		return
 	}
@@ -571,6 +573,16 @@ func (h *Handler) HandleAutopilotWebhook(w http.ResponseWriter, r *http.Request)
 		delivery.ID,
 	)
 	if err != nil {
+		var quotaErr *service.AutopilotQuotaExceededError
+		if errors.As(err, &quotaErr) {
+			respBody := map[string]any{
+				"status": "ignored", "delivery_id": uuidToString(delivery.ID),
+				"reason_code": "quota_exceeded",
+			}
+			h.finaliseDeliveryTerminal(r, delivery.ID, deliveryStatusIgnored, http.StatusOK, respBody, quotaErr.Error(), "quota_exceeded")
+			writeJSON(w, http.StatusOK, respBody)
+			return
+		}
 		slog.Warn("webhook admission failed",
 			"trigger_id", uuidToString(trigRow.ID),
 			"autopilot_id", uuidToString(autopilot.ID),
@@ -788,6 +800,7 @@ type persistDeliveryInput struct {
 // Any other error bubbles up so the handler can 500 cleanly.
 func (h *Handler) persistInboundDelivery(r *http.Request, in persistDeliveryInput) (db.WebhookDelivery, bool, error) {
 	params := db.CreateWebhookDeliveryParams{
+		ID:              dbid.NewV7(),
 		WorkspaceID:     in.WorkspaceID,
 		AutopilotID:     in.AutopilotID,
 		TriggerID:       in.TriggerID,
@@ -844,6 +857,7 @@ func (h *Handler) finaliseDeliveryTerminal(
 	httpStatus int,
 	responseBody any,
 	errMsg string,
+	reasonCode ...string,
 ) {
 	bodyJSON, _ := json.Marshal(responseBody)
 	params := db.UpdateWebhookDeliveryTerminalParams{
@@ -854,6 +868,9 @@ func (h *Handler) finaliseDeliveryTerminal(
 	}
 	if errMsg != "" {
 		params.Error = pgtype.Text{String: errMsg, Valid: true}
+	}
+	if len(reasonCode) > 0 && reasonCode[0] != "" {
+		params.ReasonCode = pgtype.Text{String: reasonCode[0], Valid: true}
 	}
 	if _, err := h.Queries.UpdateWebhookDeliveryTerminal(r.Context(), params); err != nil {
 		slog.Warn("webhook: finalise terminal failed",
@@ -914,7 +931,7 @@ func (h *Handler) deliveryProvider(ctx context.Context, id pgtype.UUID) string {
 func writeWebhookRateLimit(w http.ResponseWriter, r *http.Request, limiter WebhookRateLimiter, key, gate string, metrics *obsmetrics.BusinessMetrics) {
 	retryAfter := time.Second
 	if limiter != nil {
-		if retry := webhookLimiterRetryAfter(r.Context(), limiter, key); retry > 0 {
+		if retry := slidingWindowLimiterRetryAfter(r.Context(), limiter, key); retry > 0 {
 			retryAfter = retry
 		}
 	}

@@ -42,8 +42,13 @@ export const dashboardKeys = {
     [...dashboardKeys.all(wsId), "failures-by-agent", days, projectId, tz] as const,
 };
 
-// 5-min rollup cadence on the server, 60s background refetch on the client.
+// The server materializes these rollups on a 5-minute cadence, so a mounted
+// dashboard re-polls on that same cadence — polling faster would only re-read
+// an unchanged rollup. The short staleTime keeps re-entering the page honest:
+// anything older than a minute refetches on mount instead of waiting out the
+// interval. Neither fires for unmounted queries or backgrounded windows.
 const STALE_TIME = 60 * 1000;
+const REFETCH_INTERVAL = 5 * 60 * 1000;
 
 // Range changes should keep the previous result mounted so KPI cards and
 // charts transition in place instead of falling back to a full-page skeleton.
@@ -80,6 +85,7 @@ export function dashboardUsageDailyOptions(
       }),
     enabled: !!wsId,
     staleTime: STALE_TIME,
+    refetchInterval: REFETCH_INTERVAL,
     placeholderData: (previousData, previousQuery) =>
       isSameDashboardScope(previousQuery?.queryKey, queryKey)
         ? keepPreviousData(previousData)
@@ -104,6 +110,7 @@ export function dashboardUsageByAgentOptions(
       }),
     enabled: !!wsId,
     staleTime: STALE_TIME,
+    refetchInterval: REFETCH_INTERVAL,
     placeholderData: (previousData, previousQuery) =>
       isSameDashboardScope(previousQuery?.queryKey, queryKey)
         ? keepPreviousData(previousData)
@@ -128,6 +135,7 @@ export function dashboardAgentRunTimeOptions(
       }),
     enabled: !!wsId,
     staleTime: STALE_TIME,
+    refetchInterval: REFETCH_INTERVAL,
     placeholderData: (previousData, previousQuery) =>
       isSameDashboardScope(previousQuery?.queryKey, queryKey)
         ? keepPreviousData(previousData)
@@ -152,6 +160,7 @@ export function dashboardRunTimeDailyOptions(
       }),
     enabled: !!wsId,
     staleTime: STALE_TIME,
+    refetchInterval: REFETCH_INTERVAL,
     placeholderData: (previousData, previousQuery) =>
       isSameDashboardScope(previousQuery?.queryKey, queryKey)
         ? keepPreviousData(previousData)
@@ -176,6 +185,7 @@ export function dashboardFailuresDailyOptions(
       }),
     enabled: !!wsId,
     staleTime: STALE_TIME,
+    refetchInterval: REFETCH_INTERVAL,
     placeholderData: (previousData, previousQuery) =>
       isSameDashboardScope(previousQuery?.queryKey, queryKey)
         ? keepPreviousData(previousData)
@@ -200,6 +210,7 @@ export function dashboardFailuresByAgentOptions(
       }),
     enabled: !!wsId,
     staleTime: STALE_TIME,
+    refetchInterval: REFETCH_INTERVAL,
     placeholderData: (previousData, previousQuery) =>
       isSameDashboardScope(previousQuery?.queryKey, queryKey)
         ? keepPreviousData(previousData)

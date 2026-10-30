@@ -4,8 +4,10 @@ import (
 	"crypto/rand"
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"os"
+	"strings"
 	"sync"
 )
 
@@ -26,6 +28,33 @@ func JWTSecret() []byte {
 	})
 
 	return jwtSecret
+}
+
+// ErrInsecureJWTSecret is returned by ValidateJWTSecret when the configured
+// secret is empty or one of the publicly known defaults shipped in the
+// repo/config templates. Anyone can forge HS256 signatures with these
+// values, so a production server must refuse to boot on them.
+var ErrInsecureJWTSecret = errors.New("JWT_SECRET is empty or a known insecure default")
+
+// insecureJWTSecrets is the denylist of values that must never reach a
+// production deployment. The empty string is covered by JWTSecret()'s
+// dev-only fallback; "change-me-in-production" was historically shipped by
+// docker-compose.selfhost.yml and .env.example. Add any placeholder a template
+// ships with to this list before publishing it.
+var insecureJWTSecrets = map[string]struct{}{
+	"":                        {},
+	defaultJWTSecret:          {},
+	"change-me-in-production": {},
+}
+
+// ValidateJWTSecret reports whether secret is safe to sign production
+// tokens with. It is deliberately cheap and side-effect free so the boot
+// path and tests can call it directly.
+func ValidateJWTSecret(secret string) error {
+	if _, weak := insecureJWTSecrets[strings.TrimSpace(secret)]; weak {
+		return ErrInsecureJWTSecret
+	}
+	return nil
 }
 
 // GeneratePATToken creates a new personal access token: "mul_" + 40 random hex chars.

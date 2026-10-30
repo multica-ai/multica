@@ -3,12 +3,14 @@
 import { useMemo, useState } from "react";
 import {
   AlertTriangle,
+  ExternalLink,
   Globe,
+  Users,
   Loader2,
   MoreHorizontal,
   Pencil,
   Trash2,
-} from "lucide-react";
+} from "@multica/ui/icons";
 import { toast } from "sonner";
 import { useQuery } from "@tanstack/react-query";
 import { CurrencyNumberFlow } from "@multica/ui/components/ui/number-flow";
@@ -28,6 +30,7 @@ import {
 import { agentTaskSnapshotOptions } from "@multica/core/agents";
 import {
   deriveRuntimeHealth,
+  isRuntimeUsableForUser,
   runtimeProfileListOptions,
   runtimeUsageOptions,
 } from "@multica/core/runtimes";
@@ -36,6 +39,7 @@ import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
+  DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@multica/ui/components/ui/dropdown-menu";
 import {
@@ -50,7 +54,7 @@ import {
   TooltipContent,
   TooltipTrigger,
 } from "@multica/ui/components/ui/tooltip";
-import { useRowLink } from "../../navigation";
+import { useIntentNavigate, useRowLink } from "../../navigation";
 import { ActorAvatar } from "../../common/actor-avatar";
 import { useViewingTimezone } from "../../common/use-viewing-timezone";
 import { ProviderLogo } from "./provider-logo";
@@ -71,6 +75,8 @@ import {
   pendingRuntimeCommandName,
 } from "./pending-runtime";
 import { useT, useTimeAgo } from "../../i18n";
+import { DeferredTooltip } from "@multica/ui/components/common/deferred-tooltip";
+import { TruncatedTooltip } from "@multica/ui/components/common/truncated-tooltip";
 
 // The machine detail's runtimes table on the shared ListGrid. Paradigm
 // pieces are taken À LA CARTE here: subgrid template + var-width tracks +
@@ -181,9 +187,7 @@ export function buildWorkloadIndex(
   return result;
 }
 
-// ---------------------------------------------------------------------------
 // Cells
-// ---------------------------------------------------------------------------
 
 function RuntimeNameCell({
   runtime,
@@ -206,7 +210,7 @@ function RuntimeNameCell({
         <ProviderLogo provider={runtime.provider} className="h-5 w-5" />
       </div>
       <div className="flex min-w-0 flex-1 items-center gap-1.5">
-        <span className="block min-w-0 shrink truncate text-sm font-medium">
+        <span className="block min-w-0 shrink truncate text-body font-medium">
           {label}
         </span>
         <RuntimeKindBadge runtime={runtime} />
@@ -228,8 +232,8 @@ function RuntimeKindBadge({ runtime }: { runtime: AgentRuntime }) {
     <span
       className={
         isCustom
-          ? "inline-flex shrink-0 items-center rounded bg-info/10 px-1 text-[10px] font-medium text-info"
-          : "inline-flex shrink-0 items-center rounded bg-muted px-1 text-[10px] font-medium text-muted-foreground"
+          ? "inline-flex shrink-0 items-center rounded-xs bg-info/10 px-1 text-micro font-medium text-info"
+          : "inline-flex shrink-0 items-center rounded-xs bg-muted px-1 text-micro font-medium text-muted-foreground"
       }
     >
       {isCustom
@@ -244,13 +248,13 @@ function PendingRuntimeBadge({ runtime }: { runtime: AgentRuntime }) {
   if (!isPendingCustomRuntime(runtime)) return null;
   if (isDisabledCustomRuntime(runtime)) {
     return (
-      <span className="inline-flex shrink-0 items-center rounded bg-muted px-1 text-[10px] font-medium text-muted-foreground">
+      <span className="inline-flex shrink-0 items-center rounded-xs bg-muted px-1 text-micro font-medium text-muted-foreground">
         {t(($) => $.list.badge_disabled)}
       </span>
     );
   }
   return (
-    <span className="inline-flex shrink-0 items-center rounded bg-warning/10 px-1 text-[10px] font-medium text-warning">
+    <span className="inline-flex shrink-0 items-center rounded-xs bg-warning/10 px-1 text-micro font-medium text-warning">
       {t(($) => $.list.badge_registering)}
     </span>
   );
@@ -260,19 +264,21 @@ function PendingRuntimeBadge({ runtime }: { runtime: AgentRuntime }) {
 // `🔒 Private` chip on every row turns the whole column into noise.
 function VisibilityBadge({ runtime }: { runtime: AgentRuntime }) {
   const { t } = useT("runtimes");
-  if (runtime.visibility !== "public") return null;
+  const scope = runtime.visibility === "public" ? "public" : "members";
+  if (scope === "members" && !runtime.shared_with?.length) return null;
+  const Icon = scope === "public" ? Globe : Users;
   return (
     <Tooltip>
       <TooltipTrigger
         render={
-          <span className="inline-flex shrink-0 items-center gap-0.5 rounded bg-info/10 px-1 text-[10px] font-medium text-info">
-            <Globe className="h-2.5 w-2.5" />
-            {t(($) => $.detail.visibility_label.public)}
+          <span className="inline-flex shrink-0 items-center gap-0.5 rounded-xs bg-info/10 px-1 text-micro font-medium text-info">
+            <Icon className="h-2.5 w-2.5" />
+            {t(($) => $.detail.visibility_label[scope])}
           </span>
         }
       />
       <TooltipContent>
-        {t(($) => $.detail.visibility_hint.public)}
+        {t(($) => $.detail.visibility_hint_readonly[scope])}
       </TooltipContent>
     </Tooltip>
   );
@@ -301,7 +307,7 @@ function HealthCell({
   if (isDisabledCustomRuntime(runtime)) {
     return (
       <ListGridCell>
-        <span className="text-xs text-muted-foreground">
+        <span className="text-caption text-muted-foreground">
           {t(($) => $.list.pending_health_disabled)}
         </span>
       </ListGridCell>
@@ -313,7 +319,7 @@ function HealthCell({
       <ListGridCell className="gap-1.5">
         <AlertTriangle className="h-3.5 w-3.5 shrink-0 text-destructive" />
         <span
-          className="block min-w-0 truncate text-xs text-destructive"
+          className="block min-w-0 truncate text-caption text-destructive"
           title={registrationFailure}
         >
           {t(($) => $.list.pending_health_error)}
@@ -330,7 +336,7 @@ function HealthCell({
         ) : (
           <Loader2 className="h-3.5 w-3.5 shrink-0 animate-spin text-info" />
         )}
-        <span className="block min-w-0 truncate text-xs">
+        <span className="block min-w-0 truncate text-caption">
           {warning
             ? t(($) => $.list.pending_health_warning)
             : t(($) => $.list.pending_health)}
@@ -340,14 +346,14 @@ function HealthCell({
   }
 
   const health = deriveRuntimeHealth(runtime, now);
-  const offline = health === "offline" || health === "about_to_gc";
+  const offline = health === "offline" || health === "long_offline";
   const lastSeen = runtime.last_seen_at ? timeAgo(runtime.last_seen_at) : null;
   const active = workload.runningCount + workload.queuedCount;
 
   return (
     <ListGridCell className="gap-1.5">
       <HealthIcon health={health} />
-      <span className="block min-w-0 truncate text-xs">
+      <span className="block min-w-0 truncate text-caption">
         {labelOf(health)}
         {health !== "online" && lastSeen && (
           <span className="text-muted-foreground"> · {lastSeen}</span>
@@ -373,13 +379,27 @@ function HealthCell({
 // page are large.
 const COST_CELL_DAYS = 14;
 
-export function CostCell({ runtimeId }: { runtimeId: string }) {
+export function canReadRuntimeUsage(
+  runtime: AgentRuntime,
+  currentUserId: string | null,
+): boolean {
+  return isRuntimeUsableForUser(runtime, currentUserId);
+}
+
+export function CostCell({
+  runtimeId,
+  enabled,
+}: {
+  runtimeId: string;
+  enabled: boolean;
+}) {
   const { t, i18n } = useT("runtimes");
   const tz = useViewingTimezone();
   const locales = i18n.resolvedLanguage ?? i18n.language;
-  const { data: usage = [] } = useQuery(
-    runtimeUsageOptions(runtimeId, COST_CELL_DAYS, tz),
-  );
+  const { data: usage = [] } = useQuery({
+    ...runtimeUsageOptions(runtimeId, COST_CELL_DAYS, tz),
+    enabled,
+  });
   const cost7d = useMemo(() => computeCostInWindow(usage, 7, tz), [usage, tz]);
   const costPrev7d = useMemo(
     () => computeCostInWindow(usage, 7, tz, 7),
@@ -390,7 +410,7 @@ export function CostCell({ runtimeId }: { runtimeId: string }) {
   if (usage.length === 0) {
     return (
       <div className="w-full text-right">
-        <span className="text-xs text-muted-foreground/50">—</span>
+        <span className="text-caption text-faint-foreground">—</span>
       </div>
     );
   }
@@ -415,10 +435,10 @@ export function CostCell({ runtimeId }: { runtimeId: string }) {
         value={cost7d}
         locales={locales}
         aria-label={fmt}
-        className="text-sm font-medium"
+        className="text-body font-medium"
       />
       {deltaLabel && (
-        <span className={`text-[11px] tabular-nums ${deltaTone}`}>
+        <span className={`text-micro tabular-nums ${deltaTone}`}>
           {deltaLabel}
         </span>
       )}
@@ -432,18 +452,21 @@ export function CliCell({ runtime }: { runtime: AgentRuntime }) {
   if (failure) {
     const command = pendingRuntimeCommandName(runtime);
     return (
-      <div className="flex min-w-0 flex-col text-xs">
+      <div className="flex min-w-0 flex-col text-caption">
         {command && (
-          <span
-            className="truncate font-mono text-muted-foreground"
-            title={command}
-          >
-            {command}
-          </span>
+          <TruncatedTooltip content={command}>
+            <span
+              className="truncate font-mono text-muted-foreground"
+            >
+              {command}
+            </span>
+          </TruncatedTooltip>
         )}
-        <span className="truncate text-destructive" title={failure}>
-          {failure}
-        </span>
+        <TruncatedTooltip content={failure}>
+          <span className="truncate text-destructive">
+            {failure}
+          </span>
+        </TruncatedTooltip>
       </div>
     );
   }
@@ -451,25 +474,26 @@ export function CliCell({ runtime }: { runtime: AgentRuntime }) {
     const command = pendingRuntimeCommandName(runtime);
     if (!command) {
       return (
-        <span className="text-xs text-muted-foreground/50">
+        <span className="text-caption text-muted-foreground">
           {t(($) => $.list.pending_cli_unknown)}
         </span>
       );
     }
     return (
-      <div className="flex min-w-0 items-center text-xs">
-        <span
-          className="truncate font-mono text-muted-foreground"
-          title={command}
-        >
-          {command}
-        </span>
+      <div className="flex min-w-0 items-center text-caption">
+        <TruncatedTooltip content={command}>
+          <span
+            className="truncate font-mono text-muted-foreground"
+          >
+            {command}
+          </span>
+        </TruncatedTooltip>
       </div>
     );
   }
 
   if (runtime.runtime_mode === "cloud") {
-    return <span className="text-xs text-muted-foreground/50">—</span>;
+    return <span className="text-caption text-faint-foreground">—</span>;
   }
   const meta = runtime.metadata as Record<string, unknown> | null;
   // `version` is the agent's own underlying CLI tool version — distinct per
@@ -483,11 +507,11 @@ export function CliCell({ runtime }: { runtime: AgentRuntime }) {
     meta && typeof meta.version === "string" ? meta.version : null;
 
   if (!version) {
-    return <span className="text-xs text-muted-foreground/50">—</span>;
+    return <span className="text-caption text-faint-foreground">—</span>;
   }
 
   return (
-    <div className="flex min-w-0 items-center text-xs">
+    <div className="flex min-w-0 items-center text-caption">
       <span className="truncate font-mono text-muted-foreground">
         {version}
       </span>
@@ -500,7 +524,7 @@ export function CliCell({ runtime }: { runtime: AgentRuntime }) {
 // surfaces AgentProfileCard.
 function AgentStack({ agentIds }: { agentIds: string[] }) {
   if (agentIds.length === 0) {
-    return <span className="text-xs text-muted-foreground/50">—</span>;
+    return <span className="text-caption text-faint-foreground">—</span>;
   }
   const visible = agentIds.slice(0, 3);
   const extra = agentIds.length - visible.length;
@@ -520,7 +544,7 @@ function AgentStack({ agentIds }: { agentIds: string[] }) {
         </span>
       ))}
       {extra > 0 && (
-        <span className="inline-flex h-6 w-6 items-center justify-center rounded-full bg-muted text-xs font-medium text-muted-foreground ring-2 ring-background">
+        <span className="inline-flex h-6 w-6 items-center justify-center rounded-full bg-muted text-caption font-medium text-muted-foreground ring-2 ring-background">
           +{extra}
         </span>
       )}
@@ -533,18 +557,26 @@ export function RuntimeRowMenu({
   profile,
   wsId,
   canDelete,
+  detailHref,
 }: {
   runtime: AgentRuntime;
   profile: RuntimeProfile | null;
   wsId: string;
   canDelete: boolean;
+  /**
+   * Detail destination for the row, omitted when the row has none — pending
+   * custom runtimes are not navigable, mirroring the list's own row link.
+   */
+  detailHref?: string;
 }) {
   const { t } = useT("runtimes");
+  const { t: tCommon } = useT("common");
+  const intentNavigate = useIntentNavigate();
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [editOpen, setEditOpen] = useState(false);
   const isCustomRuntime = !!runtime.profile_id;
-  // Delete is currently the only row action; if the row can't run it, drop
-  // the kebab entirely so the column doesn't render an empty popover. We
+  // Delete is the row's only management action; if the row can't run it, drop
+  // the kebab entirely so the column doesn't render a near-empty popover. We
   // used to also hide it for self-healing runtimes (live local daemon
   // re-registers within seconds), but MUL-3352 surfaced that owners read
   // a missing kebab as "I lost my permission" rather than "the daemon
@@ -558,18 +590,34 @@ export function RuntimeRowMenu({
   return (
     <>
       <DropdownMenu>
-        <DropdownMenuTrigger
-          render={
-            <button
-              type="button"
-              aria-label={t(($) => $.list.row_actions_aria)}
-              className="flex size-7 items-center justify-center rounded-md text-muted-foreground opacity-0 transition-opacity hover:bg-accent hover:text-accent-foreground focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring group-hover/row:opacity-100 data-popup-open:bg-accent data-popup-open:opacity-100 data-popup-open:text-accent-foreground"
-            >
-              <MoreHorizontal className="size-4" />
-            </button>
+        <DeferredTooltip
+          content={t(($) => $.list.row_actions_aria)}
+          trigger={
+            <DropdownMenuTrigger
+              render={
+                <button
+                  type="button"
+                  aria-label={t(($) => $.list.row_actions_aria)}
+                  className="flex size-7 items-center justify-center rounded-md text-muted-foreground opacity-0 transition-opacity hover:bg-accent hover:text-accent-foreground focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring group-hover/row:opacity-100 data-popup-open:bg-accent data-popup-open:opacity-100 data-popup-open:text-accent-foreground"
+                >
+                  <MoreHorizontal className="size-4" />
+                </button>
+              }
+            />
           }
         />
         <DropdownMenuContent align="end" className="w-40">
+          {detailHref && (
+            <>
+              <DropdownMenuItem
+                onClick={() => intentNavigate(detailHref, "foreground-tab")}
+              >
+                <ExternalLink aria-hidden="true" className="h-3.5 w-3.5" />
+                {tCommon(($) => $.navigation.open_in_new_tab)}
+              </DropdownMenuItem>
+              <DropdownMenuSeparator />
+            </>
+          )}
           {isCustomRuntime && profile && (
             <DropdownMenuItem onClick={() => setEditOpen(true)}>
               <Pencil aria-hidden="true" className="h-3.5 w-3.5" />
@@ -620,9 +668,7 @@ export function RuntimeRowMenu({
   );
 }
 
-// ---------------------------------------------------------------------------
 // List
-// ---------------------------------------------------------------------------
 
 export function RuntimeList({
   runtimes,
@@ -743,16 +789,15 @@ export function RuntimeList({
         </ListGridHeader>
         {rows.map((row) => {
           const pending = isPendingCustomRuntime(row.runtime);
+          const detailHref = pending
+            ? undefined
+            : runtimeHref?.(row.runtime.id) ??
+              wsPaths.runtimeDetail(row.runtime.id);
           return (
             <ListGridRow
               key={row.runtime.id}
               className={pending ? "cursor-default" : "cursor-pointer"}
-              {...(!pending
-                ? rowLink(
-                    runtimeHref?.(row.runtime.id) ??
-                      wsPaths.runtimeDetail(row.runtime.id),
-                  )
-                : {})}
+              {...(detailHref ? rowLink(detailHref) : {})}
             >
               <RuntimeNameCell runtime={row.runtime} machineTitle={machineTitle} />
               <HealthCell
@@ -769,12 +814,12 @@ export function RuntimeList({
                         actorId={row.ownerMember.user_id}
                         size="sm"
                       />
-                      <span className="min-w-0 truncate text-xs text-muted-foreground">
+                      <span className="min-w-0 truncate text-caption text-muted-foreground">
                         {row.ownerMember.name}
                       </span>
                     </>
                   ) : (
-                    <span className="text-xs text-muted-foreground/50">—</span>
+                    <span className="text-caption text-faint-foreground">—</span>
                   )}
                 </ListGridCell>
               ) : (
@@ -786,10 +831,13 @@ export function RuntimeList({
               <ListGridCell className="hidden @2xl:flex">
                 {pending ? (
                   <div className="w-full text-right">
-                    <span className="text-xs text-muted-foreground/50">—</span>
+                    <span className="text-caption text-faint-foreground">—</span>
                   </div>
                 ) : (
-                  <CostCell runtimeId={row.runtime.id} />
+                  <CostCell
+                    runtimeId={row.runtime.id}
+                    enabled={canReadRuntimeUsage(row.runtime, user?.id ?? null)}
+                  />
                 )}
               </ListGridCell>
               <ListGridCell className="hidden @2xl:flex">
@@ -805,6 +853,7 @@ export function RuntimeList({
                     profile={row.profile}
                     wsId={wsId}
                     canDelete={row.canDelete}
+                    detailHref={detailHref}
                   />
                 </span>
               </ListGridCell>

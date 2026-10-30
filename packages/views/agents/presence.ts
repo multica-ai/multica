@@ -6,8 +6,8 @@ import {
   Clock,
   Loader2,
   PlugZap,
-  type LucideIcon,
-} from "lucide-react";
+  type IconComponent,
+} from "@multica/ui/icons";
 import type { AgentAvailability, Workload } from "@multica/core/agents";
 
 // Visual mapping for the two presence dimensions, kept in matching shape
@@ -34,40 +34,40 @@ import type { AgentAvailability, Workload } from "@multica/core/agents";
 // — those are historical context, surfaced via Recent Work + Inbox, not
 // list-level summary state.
 
+// Visual-only: dot/text tone + icon. The human-readable word comes from the
+// `agents` locale bundle (`availability.*` / `workload.*`), never from here —
+// a `label` field inside a translated package is a second, untranslatable
+// source of the same string (#7411).
 export interface AvailabilityVisual {
-  label: string;
   // Background fill for the dot indicator.
   dotClass: string;
   // Foreground colour for the label text alongside the dot.
   textClass: string;
   // Icon used in larger badge contexts (detail header, hover card).
-  icon: LucideIcon;
+  icon: IconComponent;
 }
 
 export const availabilityConfig: Record<AgentAvailability, AvailabilityVisual> = {
   online: {
-    label: "Online",
     dotClass: "bg-success",
     textClass: "text-success",
     icon: CircleDot,
   },
   unstable: {
-    label: "Unstable",
     dotClass: "bg-warning",
     textClass: "text-warning",
     icon: PlugZap,
   },
   offline: {
-    label: "Offline",
     dotClass: "bg-muted-foreground/40",
     textClass: "text-muted-foreground",
     icon: CircleSlash,
   },
   // Lifecycle state, not a runtime state — a retired agent. Gray like
-  // offline (it can't take work) but labelled distinctly so the user reads
-  // "this agent is archived", not "temporarily unreachable".
+  // offline (it can't take work) but labelled distinctly (via
+  // `availability.archived`) so the user reads "this agent is archived", not
+  // "temporarily unreachable".
   archived: {
-    label: "Archived",
     dotClass: "bg-muted-foreground/40",
     textClass: "text-muted-foreground",
     icon: Archive,
@@ -83,16 +83,14 @@ export const availabilityOrder: AgentAvailability[] = [
 ];
 
 export interface WorkloadVisual {
-  label: string;
   // Foreground colour for icon + label text.
   textClass: string;
   // Icon used inline.
-  icon: LucideIcon;
+  icon: IconComponent;
 }
 
 export const workloadConfig: Record<Workload, WorkloadVisual> = {
   working: {
-    label: "Working",
     textClass: "text-brand",
     icon: Loader2,
   },
@@ -100,12 +98,10 @@ export const workloadConfig: Record<Workload, WorkloadVisual> = {
     // Amber chip: nothing running but tasks waiting. On an offline runtime
     // this is the "stuck" signal we explicitly surface (replacing the old
     // misleading "Running 0/N +Mq" copy).
-    label: "Queued",
     textClass: "text-warning",
     icon: Clock,
   },
   idle: {
-    label: "Idle",
     textClass: "text-muted-foreground",
     icon: AlertCircle,
   },

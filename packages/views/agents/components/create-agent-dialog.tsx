@@ -1,10 +1,11 @@
 "use client";
 
 import { useState } from "react";
-import { Globe, Lock, Users } from "lucide-react";
+import { Globe, Lock, Users } from "@multica/ui/icons";
 import { useQueryClient } from "@tanstack/react-query";
 import { ModelDropdown } from "./model-dropdown";
-import { RuntimePicker, isRuntimeUsableForUser } from "./runtime-picker";
+import { RuntimePicker } from "./runtime-picker";
+import { isRuntimeUsableForUser } from "@multica/core/runtimes";
 import { InstructionsEditor } from "./instructions-editor";
 import { SkillMultiSelect } from "./skill-multi-select";
 import { AvatarUploadControl } from "../../common/avatar-upload-control";
@@ -31,6 +32,7 @@ import {
   DialogDescription,
 } from "@multica/ui/components/ui/dialog";
 import { Button } from "@multica/ui/components/ui/button";
+import { TooltipHint } from "@multica/ui/components/common/tooltip-hint";
 import { Checkbox } from "@multica/ui/components/ui/checkbox";
 import { Input } from "@multica/ui/components/ui/input";
 import { Label } from "@multica/ui/components/ui/label";
@@ -296,15 +298,10 @@ export function CreateAgentDialog({
     <Dialog open onOpenChange={(v) => { if (!v) onClose(); }}>
       <DialogContent className="p-0 gap-0 flex flex-col overflow-hidden !top-1/2 !left-1/2 !-translate-x-1/2 !-translate-y-1/2 !w-full !max-w-2xl !h-[85vh]">
         <DialogHeader className="border-b px-5 py-3 space-y-0">
-          <DialogTitle className="text-base font-semibold">{headerTitle}</DialogTitle>
+          <DialogTitle className="text-title-sm font-semibold">{headerTitle}</DialogTitle>
           {isDuplicate && template && (
-            <DialogDescription className="mt-1 text-xs">
+            <DialogDescription className="mt-1 text-caption">
               {t(($) => $.create_dialog.description_duplicate, { name: template.name })}
-            </DialogDescription>
-          )}
-          {!isDuplicate && (
-            <DialogDescription className="mt-1 text-xs">
-              {t(($) => $.create_dialog.description_create)}
             </DialogDescription>
           )}
         </DialogHeader>
@@ -324,11 +321,12 @@ export function CreateAgentDialog({
                 name={name}
                 size={64}
                 onUploaded={setAvatarUrl}
+                onEmojiSelected={setAvatarUrl}
                 onClear={() => setAvatarUrl(null)}
               />
               <div className="flex-1 min-w-0 space-y-3">
                 <div>
-                  <Label className="text-xs text-muted-foreground">{t(($) => $.create_dialog.name_label)}</Label>
+                  <Label className="text-caption text-muted-foreground">{t(($) => $.create_dialog.name_label)}</Label>
                   <Input
                     autoFocus
                     type="text"
@@ -344,7 +342,7 @@ export function CreateAgentDialog({
                 </div>
 
                 <div>
-                  <Label className="text-xs text-muted-foreground">{t(($) => $.create_dialog.description_label)}</Label>
+                  <Label className="text-caption text-muted-foreground">{t(($) => $.create_dialog.description_label)}</Label>
                   <Input
                     type="text"
                     value={description}
@@ -376,12 +374,12 @@ export function CreateAgentDialog({
               />
             ) : (
               <div>
-                <Label className="text-xs text-muted-foreground">{t(($) => $.create_dialog.visibility_label)}</Label>
+                <Label className="text-caption text-muted-foreground">{t(($) => $.create_dialog.visibility_label)}</Label>
                 <div className="mt-1.5 flex gap-2">
                   <button
                     type="button"
                     onClick={() => setVisibility("workspace")}
-                    className={`flex flex-1 items-center gap-2 rounded-lg border px-3 py-2.5 text-sm transition-colors ${
+                    className={`flex flex-1 items-center gap-2 rounded-lg border px-3 py-2.5 text-body transition-colors ${
                       visibility === "workspace"
                         ? "border-primary bg-primary/5"
                         : "border-border hover:bg-muted"
@@ -390,7 +388,7 @@ export function CreateAgentDialog({
                     <Globe className="h-4 w-4 shrink-0 text-muted-foreground" />
                     <div className="text-left">
                       <div className="font-medium">{VISIBILITY_LABEL.workspace}</div>
-                      <div className="text-xs text-muted-foreground">
+                      <div className="text-caption text-muted-foreground">
                         {VISIBILITY_DESCRIPTION.workspace}
                       </div>
                     </div>
@@ -398,7 +396,7 @@ export function CreateAgentDialog({
                   <button
                     type="button"
                     onClick={() => setVisibility("private")}
-                    className={`flex flex-1 items-center gap-2 rounded-lg border px-3 py-2.5 text-sm transition-colors ${
+                    className={`flex flex-1 items-center gap-2 rounded-lg border px-3 py-2.5 text-body transition-colors ${
                       visibility === "private"
                         ? "border-primary bg-primary/5"
                         : "border-border hover:bg-muted"
@@ -407,7 +405,7 @@ export function CreateAgentDialog({
                     <Lock className="h-4 w-4 shrink-0 text-muted-foreground" />
                     <div className="text-left">
                       <div className="font-medium">{VISIBILITY_LABEL.private}</div>
-                      <div className="text-xs text-muted-foreground">
+                      <div className="text-caption text-muted-foreground">
                         {VISIBILITY_DESCRIPTION.private}
                       </div>
                     </div>
@@ -468,19 +466,25 @@ export function CreateAgentDialog({
           <Button variant="ghost" onClick={onClose}>
             {t(($) => $.create_dialog.cancel)}
           </Button>
-          <Button
-            onClick={handleSubmit}
-            disabled={
-              creating || !name.trim() || !selectedRuntime || selectedRuntimeLocked
-            }
-            title={
+          <TooltipHint
+            label={
               selectedRuntimeLocked
                 ? t(($) => $.create_dialog.runtime_private_locked_tooltip)
                 : undefined
             }
           >
-            {creating ? t(($) => $.create_dialog.creating) : t(($) => $.create_dialog.create)}
-          </Button>
+            <Button
+              onClick={handleSubmit}
+              disabled={
+                creating || !name.trim() || !selectedRuntime || selectedRuntimeLocked
+              }
+              // Keeps the button hoverable so its tooltip can say why it is blocked.
+              focusableWhenDisabled={selectedRuntimeLocked}
+              className="aria-disabled:cursor-not-allowed aria-disabled:opacity-50"
+            >
+              {creating ? t(($) => $.create_dialog.creating) : t(($) => $.create_dialog.create)}
+            </Button>
+          </TooltipHint>
         </div>
       </DialogContent>
     </Dialog>
@@ -538,7 +542,7 @@ function AccessSection({
 
   return (
     <div>
-      <Label className="text-xs text-muted-foreground">
+      <Label className="text-caption text-muted-foreground">
         {t(($) => $.create_dialog.access.label)}
       </Label>
       <fieldset className="mt-1.5 grid gap-2 sm:grid-cols-3">
@@ -579,7 +583,7 @@ function AccessSection({
         <div className="mt-2 rounded-lg border bg-muted/30 px-3 py-2">
           <div>
             {otherMembers.length === 0 ? (
-              <div className="py-1 text-xs text-muted-foreground">
+              <div className="py-1 text-caption text-muted-foreground">
                 {t(($) => $.create_dialog.access.public_members_empty)}
               </div>
             ) : (
@@ -589,7 +593,7 @@ function AccessSection({
                   return (
                     <label
                       key={m.user_id}
-                      className="flex cursor-pointer items-center gap-2 rounded-md px-1 py-1 text-sm hover:bg-background/60"
+                      className="flex cursor-pointer items-center gap-2 rounded-md px-1 py-1 text-body hover:bg-background/60"
                     >
                       <Checkbox
                         checked={checked}
@@ -612,7 +616,7 @@ function AccessSection({
           </div>
 
           {selectedMemberIds.size === 0 && (
-            <div className="mt-2 text-xs text-destructive" role="alert">
+            <div className="mt-2 text-caption text-destructive" role="alert">
               {t(($) => $.access.shared_target_required)}
             </div>
           )}
@@ -639,7 +643,7 @@ function CompactAccessChoice({
 }) {
   return (
     <label
-      className={`flex min-w-0 cursor-pointer items-start gap-2 rounded-lg border px-3 py-2.5 text-sm transition-colors hover:bg-muted ${
+      className={`flex min-w-0 cursor-pointer items-start gap-2 rounded-lg border px-3 py-2.5 text-body transition-colors hover:bg-muted ${
         selected ? "border-primary bg-primary/5" : "border-border"
       }`}
     >
@@ -657,7 +661,7 @@ function CompactAccessChoice({
       />
       <span className="min-w-0">
         <span className="block font-medium">{title}</span>
-        <span className="mt-0.5 block text-xs leading-4 text-muted-foreground">
+        <span className="mt-0.5 block text-caption leading-4 text-muted-foreground">
           {description}
         </span>
       </span>

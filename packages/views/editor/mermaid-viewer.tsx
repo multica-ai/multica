@@ -23,10 +23,11 @@ import {
   Download,
   Image as ImageIcon,
   X,
-} from "lucide-react";
+} from "@multica/ui/icons";
 import { cn } from "@multica/ui/lib/utils";
 import { copyText } from "@multica/ui/lib/clipboard";
 import { Dialog, DialogContent, DialogTitle } from "@multica/ui/components/ui/dialog";
+import { TooltipHint } from "@multica/ui/components/common/tooltip-hint";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -82,16 +83,17 @@ function ToolbarButton({
   children: React.ReactNode;
 }) {
   return (
-    <button
-      type="button"
-      onClick={onClick}
-      disabled={disabled}
-      title={label}
-      aria-label={label}
-      className="flex size-7 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground disabled:pointer-events-none disabled:opacity-40"
-    >
-      {children}
-    </button>
+    <TooltipHint label={label} side="bottom">
+      <button
+        type="button"
+        onClick={onClick}
+        disabled={disabled}
+        aria-label={label}
+        className="flex size-7 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground disabled:pointer-events-none disabled:opacity-40"
+      >
+        {children}
+      </button>
+    </TooltipHint>
   );
 }
 
@@ -202,7 +204,7 @@ function MermaidViewerContent({
       {/* Sibling of the scrolling canvas, never inside it: the toolbar must
           stay put no matter how far the diagram is panned or zoomed. */}
       <header className="flex shrink-0 items-center gap-1 border-b border-border bg-muted/30 px-3 py-2">
-          <DialogTitle className="mr-1 truncate text-sm font-medium">
+          <DialogTitle className="mr-1 truncate text-body font-medium">
             {t(($) => $.mermaid.viewer_title)}
           </DialogTitle>
 
@@ -226,18 +228,19 @@ function MermaidViewerContent({
               {copied ? <Check className="size-4" /> : <Copy className="size-4" />}
             </ToolbarButton>
             <DropdownMenu>
-              <DropdownMenuTrigger
-                render={
-                  <button
-                    type="button"
-                    title={t(($) => $.mermaid.export)}
-                    aria-label={t(($) => $.mermaid.export)}
-                    className="flex size-7 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground"
-                  >
-                    <Download className="size-4" />
-                  </button>
-                }
-              />
+              <TooltipHint label={t(($) => $.mermaid.export)} side="bottom">
+                <DropdownMenuTrigger
+                  render={
+                    <button
+                      type="button"
+                      aria-label={t(($) => $.mermaid.export)}
+                      className="flex size-7 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground"
+                    >
+                      <Download className="size-4" />
+                    </button>
+                  }
+                />
+              </TooltipHint>
               <DropdownMenuContent align="end">
                 <DropdownMenuItem onClick={handleDownloadPng} disabled={!canExportImage}>
                   <ImageIcon className="size-4" />

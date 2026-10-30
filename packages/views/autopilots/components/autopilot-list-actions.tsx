@@ -2,20 +2,23 @@
 
 import { useState } from "react";
 import {
+  ExternalLink,
   Loader2,
   MoreHorizontal,
   Pause,
   Play,
   Trash2,
   X,
-} from "lucide-react";
+} from "@multica/ui/icons";
 import { toast } from "sonner";
 import type { Autopilot } from "@multica/core/types";
 import {
   useDeleteAutopilot,
   useUpdateAutopilot,
 } from "@multica/core/autopilots";
+import { useWorkspacePaths } from "@multica/core/paths";
 import { Button } from "@multica/ui/components/ui/button";
+import { TooltipHint } from "@multica/ui/components/common/tooltip-hint";
 import {
   Dialog,
   DialogContent,
@@ -32,10 +35,10 @@ import {
   DropdownMenuTrigger,
 } from "@multica/ui/components/ui/dropdown-menu";
 import { useT } from "../../i18n";
+import { useIntentNavigate } from "../../navigation";
+import { DeferredTooltip } from "@multica/ui/components/common/deferred-tooltip";
 
-// ---------------------------------------------------------------------------
 // Delete dialog — single row (kebab) and batch share one implementation.
-// ---------------------------------------------------------------------------
 
 export function DeleteAutopilotsDialog({
   rows,
@@ -81,7 +84,7 @@ export function DeleteAutopilotsDialog({
             })}
           </DialogDescription>
         </DialogHeader>
-        <p className="text-xs text-muted-foreground">
+        <p className="text-caption text-muted-foreground">
           {t(($) => $.actions.delete_dialog.warning)}
         </p>
         <DialogFooter>
@@ -116,9 +119,7 @@ export function DeleteAutopilotsDialog({
   );
 }
 
-// ---------------------------------------------------------------------------
 // Status helpers shared by kebab and batch toolbar.
-// ---------------------------------------------------------------------------
 
 function useSetStatus() {
   const updateAutopilot = useUpdateAutopilot();
@@ -134,21 +135,24 @@ function useSetStatus() {
   };
 }
 
-// ---------------------------------------------------------------------------
 // Row kebab — the row is a plain `<div>` whose whole-row navigation is a mouse
 // `onClick` (see `useRowLink`), not an ancestor `<a>`. The wrapper span stops
 // click propagation so opening this menu never navigates the row — just
 // stopPropagation, no preventDefault (same pattern as the skills list).
-// ---------------------------------------------------------------------------
 
 export function AutopilotRowActions({ row }: { row: Autopilot }) {
   const { t } = useT("autopilots");
+  const { t: tCommon } = useT("common");
+  const wsPaths = useWorkspacePaths();
+  const intentNavigate = useIntentNavigate();
   const [deleteOpen, setDeleteOpen] = useState(false);
   const setStatus = useSetStatus();
 
-  // The kebab only holds write actions (pause/resume/delete). Hide it entirely
-  // for members without write access; an absent can_write (older server) keeps
-  // the menu visible and lets the backend remain the gate.
+  // Apart from the navigation entry the kebab only holds write actions
+  // (pause/resume/delete), so hide it entirely for members without write
+  // access — they still reach a new tab through a modified row click. An
+  // absent can_write (older server) keeps the menu visible and lets the
+  // backend remain the gate.
   if (row.can_write === false) return null;
 
   return (
@@ -157,18 +161,36 @@ export function AutopilotRowActions({ row }: { row: Autopilot }) {
       className="flex items-center"
     >
       <DropdownMenu>
-        <DropdownMenuTrigger
-          render={
-            <button
-              type="button"
-              aria-label={t(($) => $.actions.row_menu)}
-              className="flex size-7 items-center justify-center rounded-md text-muted-foreground opacity-0 transition-opacity hover:bg-accent hover:text-accent-foreground group-hover/row:opacity-100 data-popup-open:bg-accent data-popup-open:opacity-100 data-popup-open:text-accent-foreground"
-            >
-              <MoreHorizontal className="size-4" />
-            </button>
+        <DeferredTooltip
+          content={t(($) => $.actions.row_menu)}
+          trigger={
+            <DropdownMenuTrigger
+              render={
+                <button
+                  type="button"
+                  aria-label={t(($) => $.actions.row_menu)}
+                  className="flex size-7 items-center justify-center rounded-md text-muted-foreground opacity-0 transition-opacity hover:bg-accent hover:text-accent-foreground group-hover/row:opacity-100 data-popup-open:bg-accent data-popup-open:opacity-100 data-popup-open:text-accent-foreground"
+                >
+                  <MoreHorizontal className="size-4" />
+                </button>
+              }
+            />
           }
         />
         <DropdownMenuContent align="end" className="w-48">
+          <DropdownMenuItem
+            onClick={() =>
+              intentNavigate(
+                wsPaths.autopilotDetail(row.id),
+                "foreground-tab",
+                row.title,
+              )
+            }
+          >
+            <ExternalLink className="size-3.5" />
+            {tCommon(($) => $.navigation.open_in_new_tab)}
+          </DropdownMenuItem>
+          <DropdownMenuSeparator />
           {row.status === "active" && (
             <DropdownMenuItem onClick={() => setStatus([row], "paused")}>
               <Pause className="size-3.5" />
@@ -200,9 +222,7 @@ export function AutopilotRowActions({ row }: { row: Autopilot }) {
   );
 }
 
-// ---------------------------------------------------------------------------
 // Batch toolbar
-// ---------------------------------------------------------------------------
 
 export function AutopilotBatchToolbar({
   rows,
@@ -224,19 +244,21 @@ export function AutopilotBatchToolbar({
     <>
       {/* Anchored to the page root (relative), NOT the viewport — see the
           skills batch toolbar for the rationale. */}
-      <div className="absolute bottom-6 left-1/2 z-50 flex -translate-x-1/2 items-center gap-1 rounded-lg border bg-background px-2 py-1.5 shadow-lg">
+      <div className="absolute bottom-6 left-1/2 z-50 flex -translate-x-1/2 items-center gap-1 rounded-lg border bg-background px-2 py-1.5 shadow-lg max-md:above-chat-launcher">
         <div className="mr-1 flex items-center gap-1.5 border-r pl-1 pr-2">
-          <span className="text-sm font-medium">
+          <span className="text-body font-medium">
             {t(($) => $.actions.selected, { count: rows.length })}
           </span>
-          <button
-            type="button"
-            aria-label={t(($) => $.actions.clear_selection)}
-            onClick={onClear}
-            className="rounded p-0.5 transition-colors hover:bg-accent"
-          >
-            <X className="size-3.5 text-muted-foreground" />
-          </button>
+          <TooltipHint label={t(($) => $.actions.clear_selection)}>
+            <button
+              type="button"
+              aria-label={t(($) => $.actions.clear_selection)}
+              onClick={onClear}
+              className="rounded-xs p-0.5 transition-colors hover:bg-accent"
+            >
+              <X className="size-3.5 text-muted-foreground" />
+            </button>
+          </TooltipHint>
         </div>
 
         {anyActive && (

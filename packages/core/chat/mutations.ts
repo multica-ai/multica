@@ -1,9 +1,14 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { api } from "../api";
 import { useWorkspaceId } from "../hooks";
-import { chatKeys, sortChatSessions } from "./queries";
+import { chatKeys, sortChatSessions, QUICK_ACTIONS_PENDING_TIMEOUT_MS } from "./queries";
 import { createLogger } from "../logger";
-import type { ChatSession, ChatPinnedAgent, ChatDraftRestoresResponse } from "../types";
+import type {
+  ChatSession,
+  ChatPinnedAgent,
+  ChatDraftRestoresResponse,
+  ChatQuickActionsPendingState,
+} from "../types";
 
 const logger = createLogger("chat.mut");
 
@@ -364,6 +369,51 @@ export function useDeleteChatSession() {
     onSettled: (_data, _err, sessionId) => {
       logger.debug("deleteChatSession.settled", { sessionId });
       qc.invalidateQueries({ queryKey: chatKeys.sessions(wsId) });
+    },
+  });
+}
+
+/**
+ * Refresh the quick-action suggestions for a session's latest assistant turn
+ * (MUL-5149). Optimistically raises the pending marker for that turn — its pills
+ * go inert and the refresh icon spins — and rolls it back on failure. The
+ * refreshed pills arrive over the chat:quick_actions realtime event, which
+ * clears the marker (applyChatQuickActionsToCache). Never retried: a refresh is
+ * an explicit, quota-spending user action.
+ */
+export function useRegenerateChatQuickActions() {
+  const qc = useQueryClient();
+
+  return useMutation({
+    mutationFn: ({ sessionId, messageId }: { sessionId: string; messageId: string }) =>
+      api.regenerateChatQuickActions(sessionId, messageId),
+    onMutate: ({ sessionId, messageId }) => {
+      const previous = qc.getQueryData<ChatQuickActionsPendingState | null>(
+        chatKeys.quickActionsPending(sessionId),
+      );
+      // The server confirms messageId IS the latest turn (else 409 → onError
+      // rollback), so the marker's message_id is guaranteed to match the
+      // chat:quick_actions that resolves it — no ack reconciliation needed.
+      // task_id is unknown here and unused for resolution (applyChatQuickActionsToCache
+      // matches on message_id).
+      qc.setQueryData<ChatQuickActionsPendingState | null>(
+        chatKeys.quickActionsPending(sessionId),
+        {
+          message_id: messageId,
+          task_id: "",
+          expires_at: Date.now() + QUICK_ACTIONS_PENDING_TIMEOUT_MS,
+        },
+      );
+      return { previous, sessionId };
+    },
+    onError: (error, _vars, ctx) => {
+      logger.error("regenerateChatQuickActions.error", { error });
+      if (ctx) {
+        qc.setQueryData<ChatQuickActionsPendingState | null>(
+          chatKeys.quickActionsPending(ctx.sessionId),
+          ctx.previous ?? null,
+        );
+      }
     },
   });
 }

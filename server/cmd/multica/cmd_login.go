@@ -64,6 +64,9 @@ func init() {
 }
 
 func runLogin(cmd *cobra.Command, args []string) error {
+	if err := requireHumanLocalCommand("login"); err != nil {
+		return err
+	}
 	// Run the standard auth login flow.
 	if err := runAuthLogin(cmd, args); err != nil {
 		return err
@@ -81,13 +84,23 @@ func runLogin(cmd *cobra.Command, args []string) error {
 }
 
 func autoWatchWorkspaces(cmd *cobra.Command) error {
-	serverURL := resolveServerURL(cmd)
-	token := resolveToken(cmd)
-	if token == "" {
+	// runLogin has already passed the human/local command guard and saved the
+	// newly authenticated profile. Read that exact profile here rather than the
+	// general task-safe resolvers, which intentionally fail closed on a lone
+	// MULTICA_DAEMON_PORT signal.
+	profile := resolveProfile(cmd)
+	cfg, err := cli.LoadCLIConfigForProfile(profile)
+	if err != nil {
+		return err
+	}
+	if cfg.Token == "" {
 		return fmt.Errorf("not authenticated")
 	}
+	if cfg.ServerURL == "" {
+		return fmt.Errorf("server URL not configured")
+	}
 
-	client := cli.NewAPIClient(serverURL, "", token)
+	client := cli.NewAPIClient(normalizeAPIBaseURL(cfg.ServerURL), "", cfg.Token)
 	ctx, cancel := cli.APIContext(context.Background())
 	defer cancel()
 
@@ -109,12 +122,6 @@ func autoWatchWorkspaces(cmd *cobra.Command) error {
 			fmt.Fprintln(os.Stderr, "\nNo workspaces found.")
 			return nil
 		}
-	}
-
-	profile := resolveProfile(cmd)
-	cfg, err := cli.LoadCLIConfigForProfile(profile)
-	if err != nil {
-		return err
 	}
 
 	// Set default workspace if not set.

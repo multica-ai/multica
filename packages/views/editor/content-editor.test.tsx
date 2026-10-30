@@ -360,11 +360,56 @@ describe("ContentEditor", () => {
     expect(mockSetContent).not.toHaveBeenCalled();
   });
 
+  it("emits the adopted base when a dirty editor skips a newer server value", () => {
+    vi.useFakeTimers();
+    const onUpdate = vi.fn();
+    editorState.markdown = "old content";
+    const { rerender } = render(
+      <ContentEditor value="old content" onUpdate={onUpdate} debounceMs={100} />,
+    );
+
+    editorState.isFocused = true;
+    editorState.markdown = "local edit";
+    rerender(
+      <ContentEditor
+        value="old content\n\nremote channel image"
+        onUpdate={onUpdate}
+        debounceMs={100}
+      />,
+    );
+    expect(mockSetContent).not.toHaveBeenCalled();
+
+    act(() => {
+      latestEditorOptions.current?.onUpdate?.({ editor: editorRef.current });
+      vi.advanceTimersByTime(100);
+    });
+
+    expect(onUpdate).toHaveBeenCalledWith("local edit", "old content");
+  });
+
   // flushPendingUpdate exists for hosts that re-point ONE editor instance at a
   // different destination mid-debounce (chat swapping draftKey between
   // sessions). Without it the armed debounce fires after the switch and, since
   // onUpdate always resolves to the latest render's closure, files the old
   // document under the new destination (MUL-4864).
+  describe("clearContent", () => {
+    it("parks the caret at the start so a select-all send cannot leave a highlight", () => {
+      const ref = createRef<ContentEditorRef>();
+      render(<ContentEditor ref={ref} defaultValue="sent text" />);
+      const { clearContent } = (
+        editorRef.current as { commands: { clearContent: ReturnType<typeof vi.fn> } }
+      ).commands;
+
+      ref.current?.clearContent();
+
+      expect(clearContent).toHaveBeenCalledTimes(1);
+      expect(mockSetTextSelection).toHaveBeenCalledWith(0);
+      expect(clearContent.mock.invocationCallOrder[0]).toBeLessThan(
+        mockSetTextSelection.mock.invocationCallOrder[0]!,
+      );
+    });
+  });
+
   describe("flushPendingUpdate", () => {
     it("hands back the pending markdown and cancels the debounce so it cannot fire later", () => {
       vi.useFakeTimers();
@@ -503,6 +548,7 @@ describe("ContentEditor", () => {
     expect(onUpdate).toHaveBeenCalledTimes(1);
     expect(onUpdate).toHaveBeenCalledWith(
       "old content\n\n![shot](/api/attachments/att-1/download)",
+      "old content",
     );
     act(() => {
       vi.advanceTimersByTime(1500);

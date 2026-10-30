@@ -1,6 +1,35 @@
-export type { Issue, IssueStatus, IssuePriority, IssueAssigneeType, IssueMetadata, IssueMetadataValue, IssueReaction } from "./issue";
+export type { Issue, IssueStatus, BuiltInIssueStatus, IssuePriority, IssueAssigneeType, IssueMetadata, IssueMetadataValue, IssueReaction, SourceContextAttachment, SourceContextAuthor, SourceContextIssueSnapshot, SourceContextCommentSnapshot, SourceContextSnapshot, SourceContextLimitUsage, SourceContextPreview, SourceContextAuthorState, IssueSourceContext,
+  IssueDuplicateOf,
+} from "./issue";
+export type {
+  IssueStatusCategory,
+  IssueStatusEntry,
+  IssueStatusIcon,
+  ListIssueStatusesResponse,
+  CreateIssueStatusRequest,
+  UpdateIssueStatusRequest,
+} from "./issue-status";
+export type {
+  IssueWorkflow,
+  IssueWorkflowHandler,
+  IssueWorkflowHandlerType,
+  IssueWorkflowStep,
+  ListIssueWorkflowsResponse,
+  IssueWorkflowWriteRequest,
+  IssueWorkflowMappingRequirement,
+  IssueWorkflowMappingPlan,
+  IssueWorkflowDryRunResponse,
+  SetProjectWorkflowRequest,
+  IssueWorkflowStatusCount,
+  WorkflowHandoffPreview,
+  WorkflowHandoffRun,
+  NewWorkflowStatus,
+  IssueWorkflowStepInput,
+  SetWorkflowHandoffRequest,
+} from "./issue-workflow";
 export type {
   Agent,
+  AgentConversationStarter,
   AgentStatus,
   AgentRuntimeMode,
   AgentVisibility,
@@ -8,8 +37,10 @@ export type {
   AgentInvocationTarget,
   AgentInvocationTargetInput,
   AgentTask,
+  TaskUsage,
   TaskAttribution,
   AttributionUser,
+  TaskCancellationActor,
   TaskEvidence,
   AgentActivityBucket,
   AgentRunCount,
@@ -21,18 +52,16 @@ export type {
   RuntimeDevice,
   RuntimeProfile,
   RuntimeProtocolFamily,
+  RuntimeProfileType,
   RuntimeProfileVisibility,
   CreateRuntimeProfileRequest,
   UpdateRuntimeProfileRequest,
   CreateAgentRequest,
   AgentBuilderRuntimeSwitch,
   AgentBuilderSession,
-  AgentTemplate,
-  AgentTemplateSummary,
-  AgentTemplateSkillRef,
-  CreateAgentFromTemplateRequest,
-  CreateAgentFromTemplateResponse,
-  CreateAgentFromTemplateFailure,
+  AgentBuilderSessionSummary,
+  AgentPermissionScope,
+  StoredAgentDraft,
   UpdateAgentRequest,
   AgentEnvResponse,
   UpdateAgentEnvRequest,
@@ -43,6 +72,7 @@ export type {
   SetAgentRuntimeSkillEnabledRequest,
   SkillFile,
   CreateSkillRequest,
+  SkillImportResult,
   UpdateSkillRequest,
   SetAgentSkillsRequest,
   RuntimeUsage,
@@ -60,6 +90,7 @@ export type {
   RuntimeModel,
   RuntimeModelServiceTier,
   RuntimeModelThinking,
+  RuntimeUnavailableModel,
   RuntimeModelThinkingLevel,
   RuntimeModelListRequest,
   RuntimeModelListStatus,
@@ -75,15 +106,54 @@ export type {
   RuntimeLocalSkillsResult,
   RuntimeLocalSkillImportResult,
   IssueUsageSummary,
+  MikaBootstrapResponse,
 } from "./agent";
-export { RUNTIME_PROFILE_PROTOCOL_FAMILIES } from "./agent";
-export type { Workspace, WorkspaceRepo, Member, MemberRole, User, MemberWithUser, Invitation } from "./workspace";
-export type { InboxItem, InboxSeverity, InboxItemType, InboxWorkspaceUnread } from "./inbox";
+export { RUNTIME_PROFILE_PROTOCOL_FAMILIES, RUNTIME_PROFILE_RUNTIME_TYPES } from "./agent";
+export type { Workspace, WorkspaceRepo, WorkspaceMcpServer, Member, MemberRole, User, MemberWithUser, Invitation, ShareLink, ShareLinkInfo } from "./workspace";
+export type {
+  PluginInstallation,
+  PluginConfigField,
+  PluginConfigFieldType,
+  PluginSurface,
+  PluginSurfaceType,
+  PluginHook,
+  PluginHookTrigger,
+  PluginResource,
+  PluginInstallationListResponse,
+  PluginManifestSummary,
+  PluginPackage,
+  PluginPackageVersion,
+  PluginPackageListResponse,
+  PluginSurfaceLaunch,
+  PluginPreview,
+  PluginPreviewRequest,
+  PluginInstallRequest,
+  PluginConfigRequest,
+  PluginHookResult,
+  PluginInvocation,
+  PluginMCPTool,
+  PluginTokenIssue,
+} from "./plugin";
+export type { InboxItem, InboxSeverity, InboxItemType, InboxWorkspaceUnread, ArchivedInboxPage, ArchivedInboxFacets } from "./inbox";
 export type { NotificationGroupKey, NotificationGroupValue, NotificationPreferences, NotificationPreferenceResponse } from "./notification-preference";
-export type { Comment, CommentType, CommentAuthorType, CommentTriggerPreview, CommentTriggerPreviewAgent, CommentTriggerSource, CommentTriggerOutcome, CommentTriggerStatus, Reaction } from "./comment";
+export type { Comment, CommentType, CommentAuthorType, CommentSupplementReceipt, CommentSupplementStatus, CommentTriggerPreview, CommentTriggerPreviewAgent, CommentTriggerSource, CommentTriggerOutcome, CommentTriggerStatus, Reaction } from "./comment";
 export type { Label, LabelResourceType, CreateLabelRequest, UpdateLabelRequest, ListLabelsResponse, IssueLabelsResponse, ResourceLabelsResponse } from "./label";
-export type { IssueProperty, IssuePropertyType, IssuePropertyOption, IssuePropertyConfig, IssuePropertyValue, IssuePropertyValues, CreatePropertyRequest, UpdatePropertyRequest, ListPropertiesResponse, IssuePropertiesResponse } from "./property";
-export { ISSUE_PROPERTY_TYPES, isKnownPropertyType } from "./property";
+export type { IssueProperty, IssuePropertyType, ScalarIssuePropertyType, ListIssuePropertyType, IssuePropertyOption, IssuePropertyConfig, IssuePropertyValue, IssuePropertyValues, CreatePropertyRequest, UpdatePropertyRequest, ListPropertiesResponse, IssuePropertiesResponse, IssuePropertyActorKind, IssuePropertyActorRef, PropertyFilterOp, PropertyOperatorFilter, PropertyFilterValue } from "./property";
+export { ISSUE_PROPERTY_TYPES, isKnownPropertyType, ISSUE_PROPERTY_ACTOR_KINDS, MAX_ISSUE_PROPERTY_ACTOR_VALUES, MAX_ISSUE_PROPERTY_SELECT_VALUES, MAX_ISSUE_PROPERTY_SELECT_OPTIONS, MAX_ISSUE_PROPERTY_FILTER_VALUES, isActorPropertyType, isFilterablePropertyType, isScalarPropertyType, isListPropertyType, formatActorRef, parseActorRef, actorRefsFromValue, actorRefValuesFromValue, hasUnknownActorRef, isPropertyOperatorFilter, isKnownPropertyFilterOp, propertyFilterValueKey, PROPERTY_FILTER_OP_SYMBOLS, PROPERTY_FILTER_OPS_BY_TYPE } from "./property";
+export type {
+  QuickAction,
+  QuickActionVisibility,
+  QuickActionAssigneeType,
+  QuickActionStatus,
+  CreateQuickActionRequest,
+  UpdateQuickActionRequest,
+  ListQuickActionsResponse,
+} from "./quick-action";
+export {
+  QUICK_ACTION_SIDEBAR_LIMIT,
+  QUICK_ACTION_TEMPLATE_TOKEN_RE,
+  findQuickActionTemplateToken,
+} from "./quick-action";
 export type {
   TimelineEntry,
   AssigneeFrequencyEntry,
@@ -92,18 +162,29 @@ export type { IssueSubscriber } from "./subscriber";
 export type * from "./events";
 export type * from "./api";
 export type { Attachment } from "./attachment";
-export { attachmentDownloadPath, attachmentIdFromDownloadURL, contentReferencesAttachment } from "./attachment-url";
+export {
+  attachmentDownloadPath,
+  attachmentIdFromDownloadURL,
+  contentReferencesAttachment,
+  stripChannelMediaMarkers,
+} from "./attachment-url";
 export type {
   ChatSession,
   ChatLastMessage,
   ChatPinnedAgent,
   ChatMessage,
+  ChatQuickAction,
+  ChatQuickActionsPendingState,
+  ChatQuickActionsFailureState,
   ChatMessagesPage,
   ChatPendingTask,
+  ChatQueuedTask,
+  PrioritizeQueuedChatTaskResponse,
   PendingChatTaskItem,
   PendingChatTasksResponse,
   HasPendingChatTasksResponse,
   SendChatMessageResponse,
+  StartMikaOnboardingResponse,
   CancelledChatMessage,
   CancelTaskResponse,
   ChatDraftRestore,
@@ -122,6 +203,7 @@ export type {
   ProjectResourceRef,
   GithubRepoResourceRef,
   LocalDirectoryResourceRef,
+  LocalDirectoryExecutionMode,
   CreateProjectResourceRequest,
   UpdateProjectResourceRequest,
   ListProjectResourcesResponse,
@@ -136,6 +218,10 @@ export type {
   GitHubPullRequestMergeable,
   GitHubPullRequestMergeStateStatus,
   GitHubPullRequestState,
+  IssuePullRequestsResponse,
+  PRAutoComplete,
+  PRAutoCompleteState,
+  PullRequestLinkSource,
   ListGitHubInstallationsResponse,
   GitHubRepository,
   ListGitHubRepositoriesResponse,
@@ -167,6 +253,28 @@ export type {
   RedeemSlackBindingTokenResponse,
 } from "./slack";
 export type {
+  DingTalkInstallation,
+  ListDingTalkInstallationsResponse,
+  DingTalkGroupBot,
+  DingTalkGroup,
+  ListDingTalkGroupsResponse,
+  ListDingTalkGroupsParams,
+  RegisterDingTalkBYORequest,
+  RedeemDingTalkBindingTokenResponse,
+} from "./dingtalk";
+export type {
+  WecomInstallation,
+  ListWecomInstallationsResponse,
+  RegisterWecomBYORequest,
+  RedeemWecomBindingTokenResponse,
+} from "./wecom";
+export type {
+  TelegramInstallation,
+  ListTelegramInstallationsResponse,
+  RegisterTelegramRequest,
+  RedeemTelegramBindingTokenResponse,
+} from "./telegram";
+export type {
   Autopilot,
   AutopilotStatus,
   AutopilotExecutionMode,
@@ -180,6 +288,7 @@ export type {
   AutopilotRun,
   AutopilotRunStatus,
   AutopilotRunSource,
+  AutopilotQuotaUsage,
   WebhookEventFilter,
   CreateAutopilotRequest,
   UpdateAutopilotRequest,
@@ -229,4 +338,25 @@ export type {
   CreateBillingCheckoutSessionResponse,
   BillingCheckoutSessionStatus,
   CreateBillingPortalSessionResponse,
+  WorkspaceSubscriptionInterval,
+  WorkspaceEntitlementLimitMode,
+  WorkspaceEntitlementLimit,
+  WorkspaceSubscriptionEntitlements,
+  WorkspaceSubscriptionSummary,
+  IssueLimitUsage,
+  WorkspaceSeatCapacity,
+  WorkspaceSeatPurchaseSummary,
+  WorkspaceSubscriptionPrice,
+  WorkspaceSubscriptionPrices,
+  CreateWorkspaceSubscriptionCheckoutRequest,
+  CreateWorkspaceSubscriptionCheckoutResponse,
+  PreviewWorkspaceSeatPurchaseRequest,
+  WorkspaceSeatPurchasePreview,
+  PurchaseWorkspaceSeatsRequest,
+  PurchaseWorkspaceSeatsResponse,
+  WorkspaceSubscriptionSeatReconcileResult,
+  CreateWorkspaceSubscriptionPortalResponse,
 } from "./billing";
+export type { IssueWakeup, IssueWakeupInput, SystemWakeup, WorkspaceSystemWakeup, WakeupPreview, IssueWakeupSummaryRow, WakeupCondition, WakeupPausedReason, WakeupRun, PausedWakeup, WakeupSource } from "./issue-wakeup";
+
+export type { WorkspaceWakeup, WorkspaceWakeupPage, WorkspaceWakeupFilters, WakeupScope } from "./issue-wakeup";

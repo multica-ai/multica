@@ -1,5 +1,6 @@
 "use client";
 
+import { useStatusLabel } from "../utils/status-label";
 import {
   useCallback,
   useEffect,
@@ -49,15 +50,18 @@ import {
   Plus,
   Search,
   X,
-} from "lucide-react";
+} from "@multica/ui/icons";
 import { toast } from "sonner";
 import { DataTable } from "@multica/ui/components/ui/data-table";
 import { Button } from "@multica/ui/components/ui/button";
+import { IconButton } from "@multica/ui/components/common/icon-button";
+import { TooltipHint } from "@multica/ui/components/common/tooltip-hint";
 import { Input } from "@multica/ui/components/ui/input";
 import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuGroup,
+  DropdownMenuCheckboxItem,
   DropdownMenuItem,
   DropdownMenuLabel,
   DropdownMenuSeparator,
@@ -71,7 +75,8 @@ import { Skeleton } from "@multica/ui/components/ui/skeleton";
 import { cn } from "@multica/ui/lib/utils";
 import { ApiError } from "@multica/core/api";
 import { useWorkspaceId } from "@multica/core/hooks";
-import { ALL_STATUSES } from "@multica/core/issues/config";
+import { useIssueStatuses } from "@multica/core/issue-statuses/hooks";
+import { useModalStore } from "@multica/core/modals";
 import {
   issueKeys,
   issueTableGroupsOptions,
@@ -86,6 +91,7 @@ import {
 } from "@multica/core/issues/stores/view-store";
 import { useViewStore } from "@multica/core/issues/stores/view-store-context";
 import { propertyListOptions } from "@multica/core/properties";
+import { projectListOptions } from "@multica/core/projects/queries";
 import { useWorkspacePaths } from "@multica/core/paths";
 import { buildActorNameResolver, useActorName } from "@multica/core/workspace/hooks";
 import {
@@ -97,7 +103,6 @@ import type {
   Issue,
   IssueProperty,
   IssuePropertyValue,
-  IssueStatus,
   IssueTableGroupDescriptor,
   IssueTableGroupSpec,
   IssueTableQuerySpec,
@@ -106,19 +111,37 @@ import type {
   UpdateIssueRequest,
 } from "@multica/core/types";
 import {
+  actorRefsFromValue,
+  formatActorRef,
+  isActorPropertyType,
+} from "@multica/core/types";
+import {
   useInfiniteQuery,
   useQueries,
   useQuery,
   useQueryClient,
   type UseQueryResult,
 } from "@tanstack/react-query";
+import { runConfirmIntent } from "../actions/run-confirm-gate";
 import { ActorAvatar } from "../../common/actor-avatar";
+import { DeferredTooltip } from "../../common/deferred-tooltip";
 import { LabelChip } from "../../labels/label-chip";
-import { useNavigation } from "../../navigation";
+import { resolveClickIntent, useIntentNavigate } from "../../navigation";
 import { ProjectPicker } from "../../projects/components/project-picker";
 import { useT } from "../../i18n";
 import { useIssueSurfaceActionsOptional } from "../surface/actions-context";
 import { useIssueSurfaceSelection } from "../surface/selection-context";
+import {
+  PEEK_TARGET_ATTR,
+  useIssuePeekClick,
+  useIssuePeekActions,
+  useIssuePeekId,
+} from "../surface/peek-context";
+
+// A peeked table row: the same tint and leading bar as a peeked list row, on
+// the cells, because pinned cells paint an opaque background over the row.
+const PEEKED_TABLE_ROW_CLASS =
+  "[&>td]:bg-[color-mix(in_oklab,var(--brand)_6%,var(--background))] [&>td:first-child]:shadow-[inset_2px_0_0_var(--brand)]";
 import type { IssueCreateDefaults } from "../surface/types";
 import { ProgressRing } from "./progress-ring";
 import {
@@ -140,6 +163,7 @@ import {
 import type { ChildProgress } from "./list-row";
 import { ListLoadMoreFooter } from "./list-load-more-footer";
 import { IssueAgentActivityIndicator } from "./issue-agent-activity-indicator";
+import { IssueDuplicateOfMarker } from "./issue-duplicates";
 
 // Enough placeholder rows to cover a typical viewport; the virtualizer only
 // mounts what fits, so overshooting costs nothing.
@@ -254,6 +278,7 @@ function rebaseServerBranchState(
 function tableGroupSpec(grouping: string): IssueTableGroupSpec {
   if (grouping === "status") return { kind: "status" };
   if (grouping === "assignee") return { kind: "assignee" };
+  if (grouping === "project") return { kind: "project" };
   const propertyId = propertyIdFromViewKey(grouping);
   if (propertyId) return { kind: "property", property_id: propertyId };
   return { kind: "none" };
@@ -338,6 +363,7 @@ function IssueCheckbox({
         event.stopPropagation();
         onToggle(event.shiftKey);
       }}
+      onAuxClick={stopRowNavigation}
       onChange={() => undefined}
       className="size-3.5 cursor-pointer accent-primary"
     />
@@ -428,21 +454,23 @@ function SortableColumnHeader({
       )}
     >
       {sortable && (
-        <button
-          type="button"
-          aria-label={reorderLabel}
-          className={cn(
-            "-ml-2 mr-0.5 rounded p-0.5 text-muted-foreground/50 opacity-0 hover:bg-accent hover:text-muted-foreground group-hover/header:opacity-100 focus-visible:opacity-100",
-            isDragging ? "cursor-grabbing opacity-100" : "cursor-grab",
-          )}
-          {...attributes}
-          {...listeners}
-        >
-          <GripVertical className="size-3" />
-        </button>
+        <TooltipHint label={reorderLabel}>
+          <button
+            type="button"
+            aria-label={reorderLabel}
+            className={cn(
+              "-ml-2 mr-0.5 rounded-xs p-0.5 text-muted-foreground opacity-0 hover:bg-accent hover:text-muted-foreground group-hover/header:opacity-100 focus-visible:opacity-100",
+              isDragging ? "cursor-grabbing opacity-100" : "cursor-grab",
+            )}
+            {...attributes}
+            {...listeners}
+          >
+            <GripVertical className="size-3" />
+          </button>
+        </TooltipHint>
       )}
       <DropdownMenu>
-        <DropdownMenuTrigger className="flex min-w-0 items-center gap-1 rounded px-1.5 py-1 hover:bg-accent">
+        <DropdownMenuTrigger className="flex min-w-0 items-center gap-1 rounded-xs px-1.5 py-1 hover:bg-accent">
           <span className="truncate">{label}</span>
           {active &&
             (sortDirection === "asc" ? (
@@ -480,9 +508,12 @@ function SortableColumnHeader({
 export function TableColumnPicker({
   properties,
   trigger,
+  tooltip,
 }: {
   properties: IssueProperty[];
   trigger: React.ReactElement;
+  /** Names an icon-only `trigger`. */
+  tooltip?: string;
 }) {
   const { t } = useT("issues");
   const [search, setSearch] = useState("");
@@ -502,9 +533,11 @@ export function TableColumnPicker({
     property.name.toLocaleLowerCase().includes(query),
   );
 
+  const menuTrigger = <DropdownMenuTrigger render={trigger} />;
+
   return (
     <DropdownMenu>
-      <DropdownMenuTrigger render={trigger} />
+      {tooltip ? <TooltipHint label={tooltip}>{menuTrigger}</TooltipHint> : menuTrigger}
       <DropdownMenuContent align="end" className="w-64 p-0">
         <div className="border-b p-2">
           <Input
@@ -524,22 +557,14 @@ export function TableColumnPicker({
                 {t(($) => $.table.columns.system_section)}
               </DropdownMenuLabel>
               {systemColumns.map((key) => (
-                <DropdownMenuItem
+                <DropdownMenuCheckboxItem
                   key={key}
                   disabled={key === "title"}
-                  onClick={(event) => {
-                    event.preventDefault();
-                    toggleTableColumn(key);
-                  }}
+                  checked={selected.has(key)}
+                  onCheckedChange={() => toggleTableColumn(key)}
                 >
-                  <input
-                    type="checkbox"
-                    checked={selected.has(key)}
-                    readOnly
-                    className="size-3.5 accent-primary"
-                  />
                   {t(($) => $.table.columns[key as ColumnLabelKey])}
-                </DropdownMenuItem>
+                </DropdownMenuCheckboxItem>
               ))}
             </DropdownMenuGroup>
           )}
@@ -553,28 +578,20 @@ export function TableColumnPicker({
                 {visibleProperties.map((property) => {
                   const key = `property:${property.id}` as const;
                   return (
-                    <DropdownMenuItem
+                    <DropdownMenuCheckboxItem
                       key={property.id}
-                      onClick={(event) => {
-                        event.preventDefault();
-                        toggleTableColumn(key);
-                      }}
+                      checked={selected.has(key)}
+                      onCheckedChange={() => toggleTableColumn(key)}
                     >
-                      <input
-                        type="checkbox"
-                        checked={selected.has(key)}
-                        readOnly
-                        className="size-3.5 accent-primary"
-                      />
                       <span className="truncate">{property.name}</span>
-                    </DropdownMenuItem>
+                    </DropdownMenuCheckboxItem>
                   );
                 })}
               </DropdownMenuGroup>
             </>
           )}
           {systemColumns.length === 0 && visibleProperties.length === 0 && (
-            <p className="px-2 py-6 text-center text-xs text-muted-foreground">
+            <p className="px-2 py-6 text-center text-caption text-muted-foreground">
               {t(($) => $.table.columns.no_results)}
             </p>
           )}
@@ -609,19 +626,20 @@ export function TableIssueSearch({
         onChange={(event) => onChange(event.target.value)}
         aria-label={placeholder}
         placeholder={placeholder}
-        className="h-7 pl-7 pr-7 text-xs"
+        className="h-7 pl-7 pr-7 text-caption"
       />
       {value && (
-        <Button
+        <IconButton
           type="button"
           variant="ghost"
           size="icon-xs"
-          aria-label={clearLabel}
+          label={clearLabel}
+          tooltipSide="bottom"
           onClick={() => onChange("")}
           className="absolute right-0.5 top-0.5 text-muted-foreground"
         >
           <X className="size-3" />
-        </Button>
+        </IconButton>
       )}
     </div>
   );
@@ -646,7 +664,7 @@ export function InlineTitle({
   onEditingChange: (editing: boolean) => void;
   onUpdate: (updates: Partial<UpdateIssueRequest>) => void;
   /** Navigate to the issue — clicking the title is the primary way IN. */
-  onOpen: () => void;
+  onOpen: (event: React.MouseEvent) => void;
   onCreateSubIssue: () => void;
   onToggleParent: () => void;
   toggleLabel: string;
@@ -696,27 +714,36 @@ export function InlineTitle({
         }
         gestureStartedWhileEditingRef.current = false;
       }}
+      onAuxClickCapture={(event) => {
+        if (editing) event.stopPropagation();
+      }}
     >
       {row.hasChildren ? (
-        <button
-          type="button"
-          aria-label={toggleLabel}
-          className="rounded p-0.5 text-muted-foreground hover:bg-accent"
-          onClick={(event) => {
-            event.stopPropagation();
-            onToggleParent();
-          }}
-        >
-          {row.collapsed ? (
-            <ChevronRight className="size-3.5" />
-          ) : (
-            <ChevronDown className="size-3.5" />
-          )}
-        </button>
+        <DeferredTooltip
+          content={toggleLabel}
+          trigger={
+            <button
+              type="button"
+              aria-label={toggleLabel}
+              className="rounded-xs p-0.5 text-muted-foreground hover:bg-accent"
+              onClick={(event) => {
+                event.stopPropagation();
+                onToggleParent();
+              }}
+              onAuxClick={stopRowNavigation}
+            >
+              {row.collapsed ? (
+                <ChevronRight className="size-3.5" />
+              ) : (
+                <ChevronDown className="size-3.5" />
+              )}
+            </button>
+          }
+        />
       ) : (
         <span className="w-4 shrink-0" />
       )}
-      <span className="w-16 shrink-0 text-xs text-muted-foreground">
+      <span className="min-w-16 shrink-0 text-caption text-muted-foreground">
         {row.issue.identifier}
       </span>
       <IssueAgentActivityIndicator issueId={row.issue.id} />
@@ -742,11 +769,12 @@ export function InlineTitle({
             className="min-w-0 flex-1 truncate text-left hover:underline"
             onClick={(event) => {
               event.stopPropagation();
-              onOpen();
+              onOpen(event);
             }}
           >
             {row.issue.title}
           </button>
+          <IssueDuplicateOfMarker issue={row.issue} />
           {/* Lifted out of the flex flow, the way SidebarMenuAction is. Laid
             * out inline these two reserved ~40px of the title column for
             * buttons that are invisible until hovered — and title is the
@@ -765,29 +793,41 @@ export function InlineTitle({
             * follows the row's hover colour, since that is what the cell is
             * painted with when they appear. */}
           <span className="pointer-events-none absolute inset-y-0 right-0 flex items-center gap-0.5 bg-gradient-to-l from-background from-70% to-transparent pr-1 pl-8 opacity-0 transition-opacity group-hover:from-[color-mix(in_oklab,var(--muted)_50%,var(--background))] group-hover/title:pointer-events-auto group-hover/title:opacity-100 focus-within:pointer-events-auto focus-within:opacity-100">
-            <button
-              type="button"
-              aria-label={createSubIssueLabel}
-              className="rounded p-1 text-muted-foreground/60 hover:bg-accent hover:text-foreground"
-              onClick={(event) => {
-                event.stopPropagation();
-                onCreateSubIssue();
-              }}
-            >
-              <Plus className="size-3" />
-            </button>
-            <button
-              type="button"
-              aria-label={renameLabel}
-              className="rounded p-1 text-muted-foreground/60 hover:bg-accent hover:text-foreground"
-              onClick={(event) => {
-                event.stopPropagation();
-                setDraft(row.issue.title);
-                onEditingChange(true);
-              }}
-            >
-              <Pencil className="size-3" />
-            </button>
+            <DeferredTooltip
+              content={createSubIssueLabel}
+              trigger={
+                <button
+                  type="button"
+                  aria-label={createSubIssueLabel}
+                  className="rounded-xs p-1 text-muted-foreground hover:bg-accent hover:text-foreground"
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    onCreateSubIssue();
+                  }}
+                  onAuxClick={stopRowNavigation}
+                >
+                  <Plus className="size-3" />
+                </button>
+              }
+            />
+            <DeferredTooltip
+              content={renameLabel}
+              trigger={
+                <button
+                  type="button"
+                  aria-label={renameLabel}
+                  className="rounded-xs p-1 text-muted-foreground hover:bg-accent hover:text-foreground"
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    setDraft(row.issue.title);
+                    onEditingChange(true);
+                  }}
+                  onAuxClick={stopRowNavigation}
+                >
+                  <Pencil className="size-3" />
+                </button>
+              }
+            />
           </span>
         </>
       )}
@@ -808,7 +848,7 @@ function LazyLabelCell({
   const labels = issue.labels ?? [];
   if (open) {
     return (
-      <div onClick={stopRowNavigation}>
+      <div onClick={stopRowNavigation} onAuxClick={stopRowNavigation}>
         <LabelPicker
           issueId={issue.id}
           open
@@ -823,11 +863,12 @@ function LazyLabelCell({
   return (
     <button
       type="button"
-      className="flex max-w-full items-center gap-1 overflow-hidden rounded px-1 py-0.5 hover:bg-accent"
+      className="flex max-w-full items-center gap-1 overflow-hidden rounded-xs px-1 py-0.5 hover:bg-accent"
       onClick={(event) => {
         event.stopPropagation();
         onOpenChange(true);
       }}
+      onAuxClick={stopRowNavigation}
     >
       {labels.length > 0 ? (
         <>
@@ -835,7 +876,7 @@ function LazyLabelCell({
             <LabelChip key={label.id} label={label} />
           ))}
           {labels.length > 2 && (
-            <span className="text-xs text-muted-foreground">+{labels.length - 2}</span>
+            <span className="text-caption text-muted-foreground">+{labels.length - 2}</span>
           )}
         </>
       ) : (
@@ -870,7 +911,7 @@ export function IssueTableGroupRow({
       <TableCell colSpan={colSpan} className="h-9 px-4 py-1.5">
         <button
           type="button"
-          className="sticky left-4 flex w-fit items-center gap-2 text-xs font-medium"
+          className="sticky left-4 flex w-fit items-center gap-2 text-caption font-medium"
         >
           {group.collapsed ? (
             <ChevronRight className="size-3.5" />
@@ -890,6 +931,9 @@ export function IssueTableGroupRow({
 function propertyDisplayValue(
   property: IssueProperty,
   value: IssuePropertyValue | undefined,
+  // Actor values are "<kind>:<uuid>" references; without a resolver they would
+  // export as raw ids, so callers that can export an actor column must pass one.
+  getActorName?: (type: string, id: string) => string,
 ) {
   if (value === undefined) return "";
   const options = property.config.options ?? [];
@@ -901,6 +945,14 @@ function propertyDisplayValue(
     return options
       .filter((option) => ids.includes(option.id))
       .map((option) => option.name)
+      .join(", ");
+  }
+  if (property.type === "multi_text" || property.type === "multi_url") {
+    return Array.isArray(value) ? value.join(", ") : String(value);
+  }
+  if (isActorPropertyType(property.type)) {
+    return actorRefsFromValue(value)
+      .map((ref) => (getActorName ? getActorName(ref.kind, ref.id) : formatActorRef(ref.kind, ref.id)))
       .join(", ");
   }
   return String(value);
@@ -928,8 +980,10 @@ type TableViewMeta = {
    *  remounts and freezes the table structure while it is up. */
   editingCellKey: string | null;
   setEditingCellKey: (key: string | null) => void;
-  updateIssue: (issueId: string, updates: Partial<UpdateIssueRequest>) => void;
-  openIssue: (issue: Issue) => void;
+  /** Takes the ISSUE, not its id: the run-confirm gate reads its status
+   *  category and owner to decide whether the write needs confirming first. */
+  updateIssue: (issue: Issue, updates: Partial<UpdateIssueRequest>) => void;
+  openIssue: (issue: Issue, event?: React.MouseEvent) => void;
   createSubIssue: (issue: Issue) => void;
   toggleTableParentCollapsed: (issueId: string) => void;
   handleIssueSelection: (issueId: string, shiftKey: boolean) => void;
@@ -1023,11 +1077,12 @@ function IssueTableAddColumnHeader({
   return (
     <TableColumnPicker
       properties={meta.properties}
+      tooltip={t(($) => $.table.columns.add)}
       trigger={
         <button
           type="button"
           aria-label={t(($) => $.table.columns.add)}
-          className="rounded p-1 text-muted-foreground hover:bg-accent hover:text-foreground"
+          className="rounded-xs p-1 text-muted-foreground hover:bg-accent hover:text-foreground"
         >
           <Plus className="size-3.5" />
         </button>
@@ -1050,7 +1105,8 @@ function IssueTableHeaderCell({
   const propertyId = propertyIdFromViewKey(key);
   const property = propertyId ? meta.propertyById.get(propertyId) : undefined;
   const staticSort = propertyId
-    ? property && !["multi_select", "checkbox"].includes(property.type)
+    ? property &&
+      !["multi_select", "checkbox", "actor", "multi_actor", "multi_text", "multi_url"].includes(property.type)
       ? (`property:${propertyId}` as SortField)
       : undefined
     : SORTABLE_COLUMNS[key as TableSystemColumnKey];
@@ -1102,14 +1158,14 @@ function IssueTableBodyCell({
   const setEditorOpen = (open: boolean) =>
     meta.setEditingCellKey(open ? cellKey : null);
   const onUpdate = (updates: Partial<UpdateIssueRequest>) =>
-    meta.updateIssue(issue.id, updates);
+    meta.updateIssue(issue, updates);
 
   const propertyId = propertyIdFromViewKey(key);
   if (propertyId) {
     const property = meta.propertyById.get(propertyId);
     if (!property) return null;
     return (
-      <div onClick={stopRowNavigation}>
+      <div onClick={stopRowNavigation} onAuxClick={stopRowNavigation}>
         <CustomPropertyValueEditor
           issue={issue}
           property={property}
@@ -1127,7 +1183,7 @@ function IssueTableBodyCell({
           editing={editorOpen}
           onEditingChange={setEditorOpen}
           onUpdate={onUpdate}
-          onOpen={() => meta.openIssue(issue)}
+          onOpen={(event) => meta.openIssue(issue, event)}
           onCreateSubIssue={() => meta.createSubIssue(issue)}
           onToggleParent={() => meta.toggleTableParentCollapsed(issue.id)}
           toggleLabel={t(($) => $.table.toggle_sub_issues)}
@@ -1137,14 +1193,16 @@ function IssueTableBodyCell({
       );
     case "identifier":
       return (
-        <span className="text-xs text-muted-foreground">{issue.identifier}</span>
+        <span className="text-caption text-muted-foreground">{issue.identifier}</span>
       );
     case "status":
       return (
-        <div onClick={stopRowNavigation}>
+        <div onClick={stopRowNavigation} onAuxClick={stopRowNavigation}>
           <StatusPicker
             status={issue.status}
             onUpdate={onUpdate}
+            projectId={issue.project_id}
+            issue={issue}
             align="start"
             open={editorOpen}
             onOpenChange={setEditorOpen}
@@ -1153,7 +1211,7 @@ function IssueTableBodyCell({
       );
     case "priority":
       return (
-        <div onClick={stopRowNavigation}>
+        <div onClick={stopRowNavigation} onAuxClick={stopRowNavigation}>
           <PriorityPicker
             priority={issue.priority}
             onUpdate={onUpdate}
@@ -1165,7 +1223,7 @@ function IssueTableBodyCell({
       );
     case "assignee":
       return (
-        <div onClick={stopRowNavigation}>
+        <div onClick={stopRowNavigation} onAuxClick={stopRowNavigation}>
           <AssigneePicker
             assigneeType={issue.assignee_type}
             assigneeId={issue.assignee_id}
@@ -1186,7 +1244,7 @@ function IssueTableBodyCell({
       );
     case "project":
       return (
-        <div onClick={stopRowNavigation}>
+        <div onClick={stopRowNavigation} onAuxClick={stopRowNavigation}>
           <ProjectPicker
             projectId={issue.project_id}
             onUpdate={onUpdate}
@@ -1195,7 +1253,7 @@ function IssueTableBodyCell({
             triggerRender={
               <button
                 type="button"
-                className="flex max-w-full items-center gap-1.5 rounded px-1 py-0.5 hover:bg-accent"
+                className="flex max-w-full items-center gap-1.5 rounded-xs px-1 py-0.5 hover:bg-accent"
               />
             }
           />
@@ -1203,7 +1261,7 @@ function IssueTableBodyCell({
       );
     case "start_date":
       return (
-        <div onClick={stopRowNavigation}>
+        <div onClick={stopRowNavigation} onAuxClick={stopRowNavigation}>
           <StartDatePicker
             startDate={issue.start_date}
             onUpdate={onUpdate}
@@ -1214,7 +1272,7 @@ function IssueTableBodyCell({
       );
     case "due_date":
       return (
-        <div onClick={stopRowNavigation}>
+        <div onClick={stopRowNavigation} onAuxClick={stopRowNavigation}>
           <DueDatePicker
             dueDate={issue.due_date}
             onUpdate={onUpdate}
@@ -1226,7 +1284,7 @@ function IssueTableBodyCell({
     case "created_at":
     case "updated_at":
       return (
-        <span className="text-xs text-muted-foreground">
+        <span className="text-caption text-muted-foreground">
           {new Intl.DateTimeFormat(i18n.language, {
             month: "short",
             day: "numeric",
@@ -1237,7 +1295,7 @@ function IssueTableBodyCell({
     case "child_progress": {
       const progress = meta.childProgressMap.get(issue.id);
       return progress ? (
-        <span className="inline-flex items-center gap-1.5 text-xs text-muted-foreground">
+        <span className="inline-flex items-center gap-1.5 text-caption text-muted-foreground">
           <ProgressRing done={progress.done} total={progress.total} size={15} />
           {progress.done}/{progress.total}
         </span>
@@ -1274,8 +1332,11 @@ export function TableView({
 }: TableViewProps) {
   const { t } = useT("issues");
   const wsId = useWorkspaceId();
+  const resolveStatusLabel = useStatusLabel(wsId);
+  const { entryOf } = useIssueStatuses(wsId);
+  const openModal = useModalStore((s) => s.open);
   const queryClient = useQueryClient();
-  const navigation = useNavigation();
+  const intentNavigate = useIntentNavigate();
   const paths = useWorkspacePaths();
   const actions = useIssueSurfaceActionsOptional();
   const selection = useIssueSurfaceSelection();
@@ -1356,6 +1417,23 @@ export function TableView({
     [effectiveTableGrouping],
   );
   const usesServerGrouping = serverGroupSpec.kind !== "none";
+  // Project group rows carry only a project id; the title comes from the
+  // shared projects query the surface already primes for this grouping.
+  //
+  // Read `data` rather than defaulting it in the destructure: an un-settled
+  // query has no data, so `= []` would hand this memo a fresh array on every
+  // render and churn every consumer of the map below (MUL-5477).
+  const groupProjectsQuery = useQuery({
+    ...projectListOptions(wsId),
+    enabled: serverGroupSpec.kind === "project",
+  });
+  const groupProjectMap = useMemo(
+    () =>
+      new Map(
+        (groupProjectsQuery.data ?? []).map((project) => [project.id, project]),
+      ),
+    [groupProjectsQuery.data],
+  );
   const serverGroupsRequestGroup =
     serverGroupSpec.kind === "none"
       ? ({ kind: "status" } as const)
@@ -1482,7 +1560,16 @@ export function TableView({
           // keepPreviousData alone cannot bridge a changed table query inside
           // useQueries. Retain the last settled head per structural branch to
           // keep the previous table painted while the new query is pending.
-          ...(placeholder ? { placeholderData: () => placeholder } : {}),
+          //
+          // Passed as a VALUE, not a closure. QueryObserver reuses the previous
+          // placeholder result only while `options.placeholderData` compares
+          // equal BY REFERENCE to the previous render's, so `() => placeholder`
+          // — a fresh arrow on every rebuild of this array — forced the
+          // placeholder to be recomputed and the result re-derived on every
+          // render. The value comes from a ref Map and is already stable, and
+          // the closure ignored both of the arguments the function form
+          // receives, so the two forms are equivalent (MUL-5477).
+          ...(placeholder ? { placeholderData: placeholder } : {}),
           enabled:
             (branch.groupKey === null ||
               !collapsedGroupSet.has(branch.groupKey)) &&
@@ -1736,13 +1823,12 @@ export function TableView({
     (descriptor: IssueTableGroupDescriptor) => {
       const value = descriptor.value;
       if (value.kind === "status") {
-        if (ALL_STATUSES.includes(value.status as IssueStatus)) {
-          return t(($) => $.status[value.status as IssueStatus]);
-        }
-        // Installed clients can receive a status introduced by a newer
-        // backend. Keep the group usable instead of collapsing the response
-        // to the schema fallback or rendering an empty label.
-        return value.status;
+        // A group is one status KEY, so it shows that status's own name — a
+        // custom status must not read as its category. `resolveStatusLabel`
+        // falls back to the raw key, which is also what keeps a status
+        // introduced by a NEWER backend usable on an installed client instead
+        // of collapsing to the schema fallback or an empty label. (MUL-6243)
+        return resolveStatusLabel(value.status);
       }
       if (value.kind === "assignee") {
         return value.actor
@@ -1750,9 +1836,13 @@ export function TableView({
           : t(($) => $.table.unassigned);
       }
       if (value.kind === "project") {
-        return value.project_id
-          ? value.project_id
-          : t(($) => $.swimlane.no_project);
+        if (!value.project_id) return t(($) => $.swimlane.no_project);
+        // A project the query cannot resolve (deleted, or not visible to this
+        // member) reads as unavailable — never as its raw id.
+        return (
+          groupProjectMap.get(value.project_id)?.title ??
+          t(($) => $.table.value_unavailable)
+        );
       }
       if (value.kind === "parent") {
         if (value.value_state === "unset") {
@@ -1775,7 +1865,7 @@ export function TableView({
           ?.name ?? String(value.value ?? "")
       );
     },
-    [getActorName, propertyById, t],
+    [getActorName, groupProjectMap, propertyById, t],
   );
 
   const serverDisplayRows = useMemo<IssueTableDisplayRow[]>(() => {
@@ -2038,6 +2128,14 @@ export function TableView({
   useEffect(() => {
     onLoadedIssuesChange(loadedIssues);
   }, [loadedIssues, onLoadedIssuesChange]);
+  // Side peek steps through the loaded rows top to bottom.
+  const peek = useIssuePeekActions();
+  const peekedId = useIssuePeekId();
+  const handlePeekClick = useIssuePeekClick();
+  useEffect(() => {
+    peek?.publishColumns([visibleIssueIds]);
+  }, [peek, visibleIssueIds]);
+  useEffect(() => () => peek?.publishColumns(null), [peek]);
   const selectedIssues = useMemo(
     () => loadedIssues.filter((issue) => selection.selectedIds.has(issue.id)),
     [loadedIssues, selection.selectedIds],
@@ -2077,27 +2175,39 @@ export function TableView({
     [propertyById, t],
   );
 
+  // Inline row edits are single-issue writes like the picker in the issue
+  // detail or the right-click menu, so they route on the same gate: a status
+  // change that promotes an agent-owned issue out of the backlog category
+  // starts a run, and must confirm rather than fire from one click (MUL-6463).
   const updateIssue = useCallback(
-    (issueId: string, updates: Partial<UpdateIssueRequest>) =>
-      actions?.updateIssue(issueId, updates),
-    [actions],
+    (issue: Issue, updates: Partial<UpdateIssueRequest>) => {
+      const intent = runConfirmIntent(issue, updates, { entryOf });
+      if (intent) {
+        openModal("issue-run-confirm", intent);
+        return;
+      }
+      actions?.updateIssue(issue.id, updates);
+    },
+    [actions, entryOf, openModal],
   );
 
   const openIssue = useCallback(
-    (issue: Issue) => {
-      const path = paths.issueDetail(issue.id);
-      if (navigation.openInNewTab) {
-        navigation.openInNewTab(path, issue.identifier, { activate: true });
+    (issue: Issue, event?: React.MouseEvent) => {
+      // Match card links, including the preferred default and modifier keys.
+      if (handlePeekClick(issue.id, event)) {
+        if (event?.shiftKey) window.getSelection()?.removeAllRanges();
         return;
       }
-
-      window.open(
-        navigation.getShareableUrl(path),
-        "_blank",
-        "noopener,noreferrer",
+      // Standard link semantics: plain click navigates in place; modifier /
+      // middle clicks open tabs. Callbacks without an event (keyboard
+      // affordances) count as plain clicks.
+      intentNavigate(
+        paths.issueDetail(issue.id),
+        event ? resolveClickIntent(event) : "push",
+        issue.identifier,
       );
     },
-    [navigation, paths],
+    [intentNavigate, paths, handlePeekClick],
   );
 
   const createSubIssue = useCallback(
@@ -2248,9 +2358,12 @@ export function TableView({
         const propertyId = propertyIdFromViewKey(column.key);
         return !propertyId || exportPropertyById.has(propertyId);
       });
-      const needsActors = csvColumns.some(
-        (column) => column.key === "assignee" || column.key === "creator",
-      );
+      const needsActors = csvColumns.some((column) => {
+        if (column.key === "assignee" || column.key === "creator") return true;
+        const propertyId = propertyIdFromViewKey(column.key);
+        const property = propertyId ? exportPropertyById.get(propertyId) : undefined;
+        return property ? isActorPropertyType(property.type) : false;
+      });
       const [rows, exportLookups, exportActorName] = await Promise.all([
         mode === "all" ? exportIssues() : Promise.resolve(selectedIssues),
         resolveExportLookups({
@@ -2280,7 +2393,11 @@ export function TableView({
           if (propertyId) {
             const property = exportPropertyById.get(propertyId);
             return property
-              ? propertyDisplayValue(property, issue.properties[propertyId])
+              ? propertyDisplayValue(
+                  property,
+                  issue.properties[propertyId],
+                  exportActorName,
+                )
               : "";
           }
           switch (column.key) {
@@ -2289,7 +2406,7 @@ export function TableView({
             case "identifier":
               return issue.identifier;
             case "status":
-              return t(($) => $.status[issue.status]);
+              return resolveStatusLabel(issue.status);
             case "priority":
               return t(($) => $.priority[issue.priority]);
             case "assignee":
@@ -2412,11 +2529,20 @@ export function TableView({
             table={table}
             virtualizeRows
             emptyMessage={t(($) => $.table.empty)}
-            onRowClick={(row) => {
+            onRowClick={(row, event) => {
               if (row.original.kind === "issue") {
-                openIssue(row.original.issue);
+                openIssue(row.original.issue, event);
               }
             }}
+            getRowProps={(row) =>
+              row.original.kind === "issue"
+                ? {
+                    [PEEK_TARGET_ATTR]: row.original.issue.id,
+                    className:
+                      row.original.issue.id === peekedId ? PEEKED_TABLE_ROW_CLASS : undefined,
+                  }
+                : undefined
+            }
             renderRow={(row) => {
               if (row.original.kind === "group") {
                 return (

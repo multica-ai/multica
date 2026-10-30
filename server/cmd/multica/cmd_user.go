@@ -25,7 +25,7 @@ var userCmd = &cobra.Command{
 var userProfileCmd = &cobra.Command{
 	Use:   "profile",
 	Short: "Get or update your personal profile",
-	Long: "Manage the personal profile that agents see when they pick up a task " +
+	Long: "Manage the personal profile that agents see when they start a run " +
 		"on your behalf. The description is injected into the agent brief under " +
 		"`## Requesting User`, so use it to share role, stack, and collaboration " +
 		"preferences.",

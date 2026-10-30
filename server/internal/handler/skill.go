@@ -2,6 +2,8 @@ package handler
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -18,7 +20,9 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
+	"github.com/multica-ai/multica/server/internal/logger"
 	skillpkg "github.com/multica-ai/multica/server/internal/skill"
+	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 	"github.com/multica-ai/multica/server/pkg/protocol"
 	"golang.org/x/sync/errgroup"
@@ -26,16 +30,16 @@ import (
 
 // sanitizeNullBytes makes a string safe for a PostgreSQL TEXT column.
 //
-// Two failure modes covered:
-//   - Embedded NUL (0x00) — PG rejects with SQLSTATE 22021. Removed.
-//   - Other invalid-UTF-8 byte sequences (e.g. 0x91 = Windows-1252 smart
-//     quote, which crashed agent-template import of skills containing
-//     Windows-encoded prose). `strings.ToValidUTF8` drops them.
+// Thin alias for util.SanitizeTextForPostgres, kept because ~20 call sites
+// spell it this way. The shared helper is the single definition of what
+// "safe to persist" means, so the daemon task endpoints and the
+// comment/skill/property endpoints can no longer drift into storing
+// different text for the same input (GH #7098 review).
 //
-// Name is kept for compatibility with the many call sites; the behaviour
-// is a strict superset of the original.
+// One behaviour change came with the move: invalid UTF-8 is now replaced
+// with U+FFFD rather than dropped silently. NUL is still removed outright.
 func sanitizeNullBytes(s string) string {
-	return strings.ToValidUTF8(strings.ReplaceAll(s, "\x00", ""), "")
+	return util.SanitizeTextForPostgres(s)
 }
 
 // --- Response structs ---
@@ -69,6 +73,11 @@ type SkillSummaryResponse struct {
 	// Enabled is only populated for agent-scoped skill responses. Workspace
 	// skill lists describe the skill itself, so they omit assignment state.
 	Enabled *bool `json:"enabled,omitempty"`
+	// Labels are bulk-attached by ListSkills so the client can filter
+	// without an N+1 round-trip per row. Pointer + omitempty: ListSkills
+	// always sets a non-nil slice (empty when none). Other summary
+	// producers leave this nil so the field is omitted.
+	Labels *[]LabelResponse `json:"labels,omitempty"`
 }
 
 // AgentSkillSummary is the still-narrower shape used for skills embedded in
@@ -92,6 +101,26 @@ type SkillFileResponse struct {
 	UpdatedAt string `json:"updated_at"`
 }
 
+// SkillFileMetadataResponse is the file-listing shape: everything
+// SkillFileResponse has except `content`, plus the size and hash that answer
+// "which file makes this skill big?" without downloading any of it.
+//
+// A ~600KB skill could not be listed at all while every row carried its full
+// body, so the one command that would have diagnosed the problem was itself a
+// casualty of it (GH multica-ai/multica#7498). A list endpoint lists.
+type SkillFileMetadataResponse struct {
+	ID      string `json:"id"`
+	SkillID string `json:"skill_id"`
+	Path    string `json:"path"`
+	// Size is the byte length of the file body, computed in Postgres.
+	Size int64 `json:"size"`
+	// ContentHash is the hex SHA-256 of the file body. Callers that cache
+	// skill files can use it to skip an unchanged download.
+	ContentHash string `json:"content_hash"`
+	CreatedAt   string `json:"created_at"`
+	UpdatedAt   string `json:"updated_at"`
+}
+
 type SkillSearchCandidateResponse struct {
 	Name         string  `json:"name"`
 	URL          string  `json:"url"`
@@ -105,6 +134,19 @@ type SkillSearchCandidateResponse struct {
 type SkillWithFilesResponse struct {
 	SkillResponse
 	Files []SkillFileResponse `json:"files"`
+}
+
+// SkillWithFileMetadataResponse is `GET /api/skills/{id}?include=metadata`:
+// the skill without its SKILL.md body, and its files without theirs. Sizes and
+// hashes stand in for the content that was dropped, so a caller can still see
+// how large the skill is and which part of it is large.
+type SkillWithFileMetadataResponse struct {
+	SkillSummaryResponse
+	// ContentSize / ContentHash describe the SKILL.md body that `content`
+	// would have carried.
+	ContentSize int64                       `json:"content_size"`
+	ContentHash string                      `json:"content_hash"`
+	Files       []SkillFileMetadataResponse `json:"files"`
 }
 
 type SkillImportResult struct {
@@ -211,6 +253,26 @@ func skillFileToResponse(f db.SkillFile) SkillFileResponse {
 	}
 }
 
+func skillFileMetadataToResponse(f db.ListSkillFileMetadataRow) SkillFileMetadataResponse {
+	return SkillFileMetadataResponse{
+		ID:          uuidToString(f.ID),
+		SkillID:     uuidToString(f.SkillID),
+		Path:        f.Path,
+		Size:        f.Size,
+		ContentHash: f.ContentHash,
+		CreatedAt:   timestampToString(f.CreatedAt),
+		UpdatedAt:   timestampToString(f.UpdatedAt),
+	}
+}
+
+// contentHash is the hex SHA-256 the metadata shapes report in place of a
+// body. It matches Postgres `encode(sha256(content::bytea), 'hex')`, so a
+// SKILL.md hash computed here and a file hash computed in SQL are comparable.
+func contentHash(content string) string {
+	sum := sha256.Sum256([]byte(content))
+	return hex.EncodeToString(sum[:])
+}
+
 // --- Request structs ---
 
 type CreateSkillRequest struct {
@@ -244,19 +306,9 @@ type AddAgentSkillsRequest struct {
 
 // --- Helpers ---
 
-// validateFilePath checks that a file path is safe (no traversal, no absolute paths).
+// validateFilePath checks that a file path uses the shared supporting-file contract.
 func validateFilePath(p string) bool {
-	if p == "" {
-		return false
-	}
-	if filepath.IsAbs(p) {
-		return false
-	}
-	cleaned := filepath.Clean(p)
-	if strings.HasPrefix(cleaned, "..") {
-		return false
-	}
-	return true
+	return skillpkg.IsSafeFilePath(p)
 }
 
 func (h *Handler) loadSkillForUser(w http.ResponseWriter, r *http.Request, id string) (db.Skill, bool) {
@@ -286,12 +338,19 @@ func (h *Handler) loadSkillForUser(w http.ResponseWriter, r *http.Request, id st
 
 func (h *Handler) ListSkills(w http.ResponseWriter, r *http.Request) {
 	workspaceID := h.resolveWorkspaceID(r)
+	wsUUID := parseUUID(workspaceID)
 
-	skills, err := h.Queries.ListSkillSummariesByWorkspace(r.Context(), parseUUID(workspaceID))
+	skills, err := h.Queries.ListSkillSummariesByWorkspace(r.Context(), wsUUID)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to list skills")
 		return
 	}
+
+	ids := make([]pgtype.UUID, len(skills))
+	for i, s := range skills {
+		ids[i] = s.ID
+	}
+	labelsMap := h.labelsBySkill(r.Context(), wsUUID, ids)
 
 	resp := make([]SkillSummaryResponse, len(skills))
 	for i, s := range skills {
@@ -299,9 +358,46 @@ func (h *Handler) ListSkills(w http.ResponseWriter, r *http.Request) {
 			s.ID, s.WorkspaceID, s.Name, s.Description, s.Config,
 			s.CreatedBy, s.CreatedAt, s.UpdatedAt,
 		)
+		// Own a non-nil slice so JSON is `labels: []` (not `null`/omitted).
+		// append(nil, xs...) keeps a nil header when xs is empty.
+		labels := append([]LabelResponse{}, labelsMap[resp[i].ID]...)
+		resp[i].Labels = &labels
 	}
 
 	writeJSON(w, http.StatusOK, resp)
+}
+
+// labelsBySkill bulk-loads labels for the given skill IDs and returns a map
+// keyed by skill UUID string. On error or empty input, returns an empty map —
+// label rendering is non-critical and we'd rather serve skills without labels
+// than fail the whole list call.
+func (h *Handler) labelsBySkill(ctx context.Context, wsUUID pgtype.UUID, skillIDs []pgtype.UUID) map[string][]LabelResponse {
+	out := map[string][]LabelResponse{}
+	if len(skillIDs) == 0 {
+		return out
+	}
+	rows, err := h.Queries.ListLabelsForSkills(ctx, db.ListLabelsForSkillsParams{
+		SkillIds:    skillIDs,
+		WorkspaceID: wsUUID,
+	})
+	if err != nil {
+		slog.Warn("ListLabelsForSkills failed", "error", err)
+		return out
+	}
+	for _, r := range rows {
+		skillID := uuidToString(r.SkillID)
+		out[skillID] = append(out[skillID], LabelResponse{
+			ID:           uuidToString(r.ID),
+			WorkspaceID:  uuidToString(r.WorkspaceID),
+			ResourceType: r.ResourceType,
+			Name:         r.Name,
+			Description:  r.Description,
+			Color:        r.Color,
+			CreatedAt:    timestampToString(r.CreatedAt),
+			UpdatedAt:    timestampToString(r.UpdatedAt),
+		})
+	}
+	return out
 }
 
 func (h *Handler) SearchSkills(w http.ResponseWriter, r *http.Request) {
@@ -323,10 +419,55 @@ func (h *Handler) SearchSkills(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, candidates)
 }
 
+// Values for the `include` query parameter shared by the skill detail and
+// skill-file list endpoints.
+const (
+	skillIncludeContent  = "content"
+	skillIncludeMetadata = "metadata"
+)
+
+// resolveSkillInclude reads `?include=`. `content` inlines the SKILL.md body
+// and every file body; `metadata` returns path/size/hash only.
+//
+// A request that says nothing keeps getting content, on both endpoints. The
+// clients that call them are installed software — desktop builds for the skill
+// editor, older CLI versions whose `skill files list --output json` scripts
+// read `content` — and none of them can be asked retroactively to send a query
+// parameter. Flipping a default here would make a server deploy silently
+// change what an un-upgraded client receives, which no client-side change can
+// prevent.
+//
+// So the shrink is opt-in and travels with the caller: the CLI sends
+// `include=metadata` itself, which fixes GH #7498 without requiring the server
+// and every client to ship together. The default can flip once clients that
+// send `include=content` have aged in.
+func resolveSkillInclude(w http.ResponseWriter, r *http.Request) (bool, bool) {
+	switch strings.TrimSpace(r.URL.Query().Get("include")) {
+	case "":
+		return true, true
+	case skillIncludeContent:
+		return true, true
+	case skillIncludeMetadata:
+		return false, true
+	default:
+		writeError(w, http.StatusBadRequest, `invalid include: expected "content" or "metadata"`)
+		return false, false
+	}
+}
+
 func (h *Handler) GetSkill(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
+	includeContent, ok := resolveSkillInclude(w, r)
+	if !ok {
+		return
+	}
 	skill, ok := h.loadSkillForUser(w, r, id)
 	if !ok {
+		return
+	}
+
+	if !includeContent {
+		h.writeSkillMetadata(w, r, skill)
 		return
 	}
 
@@ -344,6 +485,33 @@ func (h *Handler) GetSkill(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, SkillWithFilesResponse{
 		SkillResponse: skillToResponse(skill),
 		Files:         fileResps,
+	})
+}
+
+// writeSkillMetadata answers GET /api/skills/{id}?include=metadata. The skill
+// row is already loaded (loadSkillForUser needs it for the tenant check), so
+// the SKILL.md size and hash cost nothing extra; only the file bodies are
+// worth a separate metadata query.
+func (h *Handler) writeSkillMetadata(w http.ResponseWriter, r *http.Request, skill db.Skill) {
+	files, err := h.Queries.ListSkillFileMetadata(r.Context(), skill.ID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to list skill files")
+		return
+	}
+
+	fileResps := make([]SkillFileMetadataResponse, len(files))
+	for i, f := range files {
+		fileResps[i] = skillFileMetadataToResponse(f)
+	}
+
+	writeJSON(w, http.StatusOK, SkillWithFileMetadataResponse{
+		SkillSummaryResponse: skillSummaryToResponse(
+			skill.ID, skill.WorkspaceID, skill.Name, skill.Description,
+			skill.Config, skill.CreatedBy, skill.CreatedAt, skill.UpdatedAt,
+		),
+		ContentSize: int64(len(skill.Content)),
+		ContentHash: contentHash(skill.Content),
+		Files:       fileResps,
 	})
 }
 
@@ -392,7 +560,8 @@ func (h *Handler) CreateSkill(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusConflict, "a skill with this name already exists")
 			return
 		}
-		writeError(w, http.StatusInternalServerError, "failed to create skill: "+err.Error())
+		slog.Warn("create skill failed", append(logger.RequestAttrs(r), "error", err)...)
+		writeError(w, http.StatusInternalServerError, "failed to create skill")
 		return
 	}
 	actorType, actorID := h.resolveActor(r, creatorID, workspaceID)
@@ -481,7 +650,8 @@ func (h *Handler) UpdateSkill(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusConflict, "a skill with this name already exists")
 			return
 		}
-		writeError(w, http.StatusInternalServerError, "failed to update skill: "+err.Error())
+		slog.Warn("update skill failed", append(logger.RequestAttrs(r), "error", err)...)
+		writeError(w, http.StatusInternalServerError, "failed to update skill")
 		return
 	}
 
@@ -504,7 +674,8 @@ func (h *Handler) UpdateSkill(w http.ResponseWriter, r *http.Request) {
 				Content: sanitizeNullBytes(f.Content),
 			})
 			if err != nil {
-				writeError(w, http.StatusInternalServerError, "failed to upsert skill file: "+err.Error())
+				slog.Warn("upsert skill file failed", append(logger.RequestAttrs(r), "error", err)...)
+				writeError(w, http.StatusInternalServerError, "failed to upsert skill file")
 				return
 			}
 			fileResps = append(fileResps, skillFileToResponse(sf))
@@ -643,7 +814,7 @@ func isCapError(err error) bool {
 // assets the agent never reads as text anyway. Logging the skip leaves a
 // breadcrumb if a user expected one of these to import.
 func (s *importedSkill) addFile(path, content string) error {
-	if isLikelyBinaryFilePath(path) {
+	if skillpkg.IsLikelyBinaryFilePath(path) {
 		slog.Info("skill import: skipping binary file", "path", path, "size", len(content))
 		return nil
 	}
@@ -656,34 +827,6 @@ func (s *importedSkill) addFile(path, content string) error {
 	s.bundleSize += len(content)
 	s.files = append(s.files, importedFile{path: path, content: content})
 	return nil
-}
-
-// isLikelyBinaryFilePath reports whether the file's extension indicates a
-// non-text payload. Conservative blacklist — extensions not on the list
-// are assumed text and pass through. `sanitizeNullBytes` (called at PG
-// insert time) is the second-line defence against any text file that
-// turns out to have stray invalid-UTF-8 bytes.
-func isLikelyBinaryFilePath(path string) bool {
-	ext := strings.ToLower(filepath.Ext(path))
-	switch ext {
-	case
-		// images
-		".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp", ".tiff", ".ico", ".heic",
-		// fonts
-		".ttf", ".otf", ".woff", ".woff2", ".eot",
-		// archives
-		".zip", ".gz", ".tar", ".bz2", ".7z", ".rar",
-		// documents (binary office)
-		".pdf", ".docx", ".xlsx", ".pptx", ".doc", ".xls", ".ppt",
-		// media
-		".mp3", ".mp4", ".wav", ".avi", ".mov", ".webm", ".m4a", ".flac",
-		// compiled / executable
-		".exe", ".dll", ".so", ".dylib", ".class", ".jar", ".wasm",
-		// db / cache
-		".db", ".sqlite", ".sqlite3", ".pyc":
-		return true
-	}
-	return false
 }
 
 // --- ClawHub types ---
@@ -746,7 +889,17 @@ type githubContentEntry struct {
 	Path        string `json:"path"`
 	Type        string `json:"type"` // "file" or "dir"
 	URL         string `json:"url"`
+	GitURL      string `json:"git_url"`
 	DownloadURL string `json:"download_url"`
+}
+
+// isSubmodule reports whether a directory-listing entry is a Git submodule.
+// For backwards compatibility the contents API lists submodules inside a
+// directory as type "file" with a null download_url; their git_url points at
+// the submodule repository's tree rather than a blob. The recursive tree path
+// skips submodules (type "commit"), so the crawl fallback must skip them too.
+func (e githubContentEntry) isSubmodule() bool {
+	return e.Type == "submodule" || (e.DownloadURL == "" && strings.Contains(e.GitURL, "/git/trees/"))
 }
 
 type githubRepoInfo struct {
@@ -1000,26 +1153,16 @@ func fetchFromClawHub(ctx context.Context, httpClient *http.Client, rawURL strin
 	}
 
 	for _, fp := range filePaths {
+		if skillpkg.IsLikelyBinaryFilePath(fp) {
+			continue
+		}
 		fileURL := fmt.Sprintf("%s/skills/%s/file?path=%s", apiBase, url.PathEscape(slug), url.QueryEscape(fp))
 		if latestVersion != "" {
 			fileURL += "&version=" + url.QueryEscape(latestVersion)
 		}
 		body, err := fetchRawFile(ctx, httpClient, fileURL)
 		if err != nil {
-			// Cap violations must abort: silently dropping a file would
-			// produce an incomplete bundle that looks valid. SKILL.md is
-			// load-bearing, so any failure on it is fatal too.
-			if isCapError(err) || fp == "SKILL.md" {
-				return nil, fmt.Errorf("clawhub import: %s: %w", fp, err)
-			}
-			// A cancelled context (overall deadline / client disconnect) is
-			// fatal for the same reason: skipping every remaining file would
-			// persist a half-populated bundle as a success.
-			if ctx.Err() != nil {
-				return nil, fmt.Errorf("clawhub import: fetch aborted at %s: %w", fp, ctx.Err())
-			}
-			slog.Warn("clawhub import: file download failed", "path", fp, "error", err)
-			continue
+			return nil, fmt.Errorf("clawhub import: %s: %w", fp, err)
 		}
 		if fp == "SKILL.md" {
 			result.content = string(body)
@@ -1130,13 +1273,9 @@ func newSkillsShImportedSkill(skillMdBody []byte, skillName, rawURL, owner, repo
 }
 
 // addSupportingFilesViaCrawl is the legacy per-directory enumeration path, used
-// as a fallback only for a truncated recursive tree (and by the github.com
-// importer). A tree-fetch failure no longer routes here — it returns a retryable
-// error instead. It lists skillDir via the contents API, recurses
-// subdirectories, and downloads each file. It stays lenient on a genuine listing
-// failure (returns with only SKILL.md, matching prior behavior under GitHub API
-// rate limiting) but treats a cancelled context as fatal so a mid-crawl deadline
-// or disconnect can't persist an incomplete bundle as a success.
+// for a truncated tree, or an unavailable tree for github.com imports. Every
+// directory and eligible file must be read before a bundle can replace local
+// content; an unavailable listing does not prove that a directory is empty.
 func addSupportingFilesViaCrawl(ctx context.Context, httpClient *http.Client, result *importedSkill, owner, repo, ref, skillDir string) error {
 	apiURL := buildGitHubContentsURL(owner, repo, skillDir, ref)
 	dirResp, err := doGitHubAPIGet(ctx, httpClient, apiURL)
@@ -1150,7 +1289,10 @@ func addSupportingFilesViaCrawl(ctx context.Context, httpClient *http.Client, re
 		if ctx.Err() != nil {
 			return fmt.Errorf("github import: directory listing aborted: %w", ctx.Err())
 		}
-		return nil
+		if err != nil {
+			return fmt.Errorf("%w: listing %s: %w", errImportSourceUnavailable, apiURL, err)
+		}
+		return fmt.Errorf("%w: listing %s: HTTP %d", errImportSourceUnavailable, apiURL, dirResp.StatusCode)
 	}
 	defer dirResp.Body.Close()
 
@@ -1163,16 +1305,15 @@ func addSupportingFilesViaCrawl(ctx context.Context, httpClient *http.Client, re
 		if ctx.Err() != nil {
 			return fmt.Errorf("github import: directory listing read aborted: %w", ctx.Err())
 		}
-		slog.Warn("github import: failed to decode top-level directory listing", "url", apiURL, "error", err)
-		return nil
+		return fmt.Errorf("%w: decoding directory %s: %w", errImportSourceUnavailable, apiURL, err)
+	}
+	if entries == nil {
+		return fmt.Errorf("%w: directory %s is not a file list", errImportSourceUnavailable, apiURL)
 	}
 
 	var allFiles []githubContentEntry
-	collectGitHubFiles(ctx, httpClient, entries, &allFiles, apiURL)
-	// collectGitHubFiles is lenient on a failed subdirectory listing; if the
-	// context was cancelled mid-crawl the collected set is incomplete, so abort.
-	if ctx.Err() != nil {
-		return fmt.Errorf("github import: directory crawl aborted: %w", ctx.Err())
+	if err := collectGitHubFiles(ctx, httpClient, entries, &allFiles, apiURL); err != nil {
+		return err
 	}
 
 	basePath := ""
@@ -1181,18 +1322,11 @@ func addSupportingFilesViaCrawl(ctx context.Context, httpClient *http.Client, re
 	}
 	for _, entry := range allFiles {
 		if entry.DownloadURL == "" {
-			continue
+			return fmt.Errorf("%w: no download URL for %s", errImportSourceUnavailable, entry.Path)
 		}
 		body, err := fetchRawFile(ctx, httpClient, entry.DownloadURL)
 		if err != nil {
-			if isCapError(err) {
-				return fmt.Errorf("github import: %s: %w", entry.Path, err)
-			}
-			if ctx.Err() != nil {
-				return fmt.Errorf("github import: fetch aborted at %s: %w", entry.Path, ctx.Err())
-			}
-			slog.Warn("github import: file download failed", "path", entry.Path, "error", err)
-			continue
+			return fmt.Errorf("github import: %s: %w", entry.Path, err)
 		}
 		relPath := strings.TrimPrefix(entry.Path, basePath)
 		if err := result.addFile(relPath, string(body)); err != nil {
@@ -1222,6 +1356,9 @@ func fetchGitHubTree(ctx context.Context, httpClient *http.Client, owner, repo, 
 	var tree githubTreeResponse
 	if err := json.NewDecoder(resp.Body).Decode(&tree); err != nil {
 		return nil, false, err
+	}
+	if tree.Tree == nil {
+		return nil, false, fmt.Errorf("GitHub tree response has no entries")
 	}
 	return tree.Tree, tree.Truncated, nil
 }
@@ -1367,7 +1504,7 @@ func addSupportingFilesFromTree(ctx context.Context, httpClient *http.Client, re
 		if lowerBase == "skill.md" || lowerBase == "license" || lowerBase == "license.txt" || lowerBase == "license.md" {
 			continue
 		}
-		if isLikelyBinaryFilePath(relPath) {
+		if skillpkg.IsLikelyBinaryFilePath(relPath) {
 			continue
 		}
 		eligible = append(eligible, treeFile{repoPath: entry.Path, relPath: relPath, size: entry.size()})
@@ -1394,7 +1531,6 @@ func addSupportingFilesFromTree(ctx context.Context, httpClient *http.Client, re
 
 	// Download concurrently, then append in the pre-sorted order.
 	contents := make([]string, len(eligible))
-	fetched := make([]bool, len(eligible))
 	g, gctx := errgroup.WithContext(ctx)
 	g.SetLimit(treeDownloadConcurrency)
 	for i, f := range eligible {
@@ -1402,26 +1538,9 @@ func addSupportingFilesFromTree(ctx context.Context, httpClient *http.Client, re
 		g.Go(func() error {
 			body, err := fetchRawFile(gctx, httpClient, buildRawGitHubURL(rawPrefix, f.repoPath))
 			if err != nil {
-				if isCapError(err) {
-					return fmt.Errorf("github import: %s: %w", f.repoPath, err)
-				}
-				// A cancelled context (overall import deadline exceeded, or the
-				// client disconnecting) must abort, not be swallowed as a
-				// per-file skip: otherwise every remaining download fails the
-				// same way, g.Wait returns nil, and the user gets a bundle that
-				// looks complete but is silently missing files. Let it surface
-				// so importFetchErrorResponse maps the deadline to a readable
-				// 504.
-				if gctx.Err() != nil {
-					return fmt.Errorf("github import: fetch aborted at %s: %w", f.repoPath, gctx.Err())
-				}
-				// Otherwise match the legacy loop's leniency: a single failed
-				// supporting file is logged and skipped, not fatal.
-				slog.Warn("github import: file download failed", "path", f.repoPath, "error", err)
-				return nil
+				return fmt.Errorf("github import: %s: %w", f.repoPath, err)
 			}
 			contents[i] = string(body)
-			fetched[i] = true
 			return nil
 		})
 	}
@@ -1430,9 +1549,6 @@ func addSupportingFilesFromTree(ctx context.Context, httpClient *http.Client, re
 	}
 
 	for i, f := range eligible {
-		if !fetched[i] {
-			continue
-		}
 		if err := result.addFile(f.relPath, contents[i]); err != nil {
 			return err
 		}
@@ -1450,18 +1566,22 @@ func (e githubTreeEntry) size() int64 {
 }
 
 // collectGitHubFiles recursively collects file entries from a GitHub directory listing.
-func collectGitHubFiles(ctx context.Context, httpClient *http.Client, entries []githubContentEntry, out *[]githubContentEntry, parentURL string) {
+func collectGitHubFiles(ctx context.Context, httpClient *http.Client, entries []githubContentEntry, out *[]githubContentEntry, parentURL string) error {
 	for _, entry := range entries {
-		// Stop descending once the context is cancelled; the caller checks
-		// ctx.Err() afterwards and aborts rather than importing a partial crawl.
 		if ctx.Err() != nil {
-			return
+			return fmt.Errorf("github import: directory crawl aborted: %w", ctx.Err())
 		}
 		lower := strings.ToLower(entry.Name)
 		if lower == "skill.md" || lower == "license" || lower == "license.txt" || lower == "license.md" {
 			continue
 		}
+		if entry.isSubmodule() {
+			continue
+		}
 		if entry.Type == "file" {
+			if skillpkg.IsLikelyBinaryFilePath(entry.Path) {
+				continue
+			}
 			*out = append(*out, entry)
 		} else if entry.Type == "dir" {
 			// Fetch subdirectory contents
@@ -1469,35 +1589,36 @@ func collectGitHubFiles(ctx context.Context, httpClient *http.Client, entries []
 			if subURL == "" {
 				parsed, err := url.Parse(parentURL)
 				if err != nil {
-					slog.Warn("github import: invalid parent directory url", "url", parentURL, "error", err)
-					continue
+					return fmt.Errorf("%w: invalid directory URL: %w", errImportSourceUnavailable, err)
 				}
 				parsed.Path = strings.TrimSuffix(parsed.Path, "/") + "/" + entry.Name
 				subURL = parsed.String()
 			}
 			subResp, err := doGitHubAPIGet(ctx, httpClient, subURL)
 			if err != nil || subResp.StatusCode != http.StatusOK {
-				attrs := []any{"url", subURL}
 				if subResp != nil {
-					attrs = append(attrs, "status", subResp.StatusCode)
 					subResp.Body.Close()
 				}
 				if err != nil {
-					attrs = append(attrs, "error", err)
+					return fmt.Errorf("%w: listing %s: %w", errImportSourceUnavailable, subURL, err)
 				}
-				slog.Warn("github import: failed to list subdirectory", attrs...)
-				continue
+				return fmt.Errorf("%w: listing %s: HTTP %d", errImportSourceUnavailable, subURL, subResp.StatusCode)
 			}
 			var subEntries []githubContentEntry
 			if err := json.NewDecoder(subResp.Body).Decode(&subEntries); err != nil {
 				subResp.Body.Close()
-				slog.Warn("github import: failed to decode subdirectory listing", "url", subURL, "error", err)
-				continue
+				return fmt.Errorf("%w: decoding directory %s: %w", errImportSourceUnavailable, subURL, err)
 			}
 			subResp.Body.Close()
-			collectGitHubFiles(ctx, httpClient, subEntries, out, subURL)
+			if subEntries == nil {
+				return fmt.Errorf("%w: directory %s is not a file list", errImportSourceUnavailable, subURL)
+			}
+			if err := collectGitHubFiles(ctx, httpClient, subEntries, out, subURL); err != nil {
+				return err
+			}
 		}
 	}
+	return nil
 }
 
 func findSkillDirFromConventionalPrefixes(ctx context.Context, httpClient *http.Client, owner, repo, defaultBranch, rawPrefix, skillName string) (string, []byte, bool) {
@@ -1934,9 +2055,8 @@ func fetchFromGitHub(ctx context.Context, httpClient *http.Client, rawURL string
 
 	// Enumerate supporting files from a single recursive tree, checking the
 	// import caps against the tree metadata before downloading anything. Fall
-	// back to the per-directory contents crawl when the tree is unavailable or
-	// truncated (kept lenient so a rate-limited listing doesn't fail an import
-	// that already produced a valid SKILL.md).
+	// back to a complete per-directory contents crawl when the tree is unavailable
+	// or truncated. Neither path may publish a partially fetched bundle.
 	tree, truncated, treeErr := fetchGitHubTree(ctx, httpClient, spec.owner, spec.repo, spec.ref)
 	if treeErr == nil && !truncated {
 		if err := addSupportingFilesFromTree(ctx, httpClient, result, tree, rawPrefix, spec.skillDir); err != nil {
@@ -2086,7 +2206,7 @@ func skillImportOverwriteFailure(err error) (int, string) {
 	case errors.Is(err, errSkillOverwriteNameMismatch):
 		return http.StatusConflict, "target skill name no longer matches the imported skill"
 	default:
-		return http.StatusInternalServerError, "failed to overwrite skill: " + err.Error()
+		return http.StatusInternalServerError, "failed to overwrite skill"
 	}
 }
 
@@ -2120,6 +2240,9 @@ func (h *Handler) resolveImportSkillConflict(w http.ResponseWriter, r *http.Requ
 		})
 		if err != nil {
 			status, reason := skillImportOverwriteFailure(err)
+			if status == http.StatusInternalServerError {
+				slog.Warn("overwrite imported skill failed", append(logger.RequestAttrs(r), "error", err)...)
+			}
 			writeJSON(w, status, SkillImportResult{
 				Status:        "failed",
 				Reason:        reason,
@@ -2133,9 +2256,10 @@ func (h *Handler) resolveImportSkillConflict(w http.ResponseWriter, r *http.Requ
 	case importOnConflictRename:
 		resp, err := h.createRenamedImportedSkill(r.Context(), workspaceUUID, creatorUUID, name, imported, config, files)
 		if err != nil {
+			slog.Warn("create renamed skill failed", append(logger.RequestAttrs(r), "error", err)...)
 			writeJSON(w, http.StatusInternalServerError, SkillImportResult{
 				Status:        "failed",
-				Reason:        "failed to create renamed skill: " + err.Error(),
+				Reason:        "failed to create renamed skill",
 				ExistingSkill: &existingInfo,
 			})
 			return
@@ -2252,12 +2376,9 @@ func importFetchErrorResponse(ctx context.Context, err error) (int, string) {
 	return http.StatusBadGateway, err.Error()
 }
 
-// finishSkillImport runs the shared tail of every skill import — whether the
-// bundle came from a hosted URL or an uploaded archive (.skill / .zip). It maps
-// the extracted files onto CreateSkillFileRequest, records provenance into
-// config.origin, and creates the skill, routing same-name collisions through
-// the on_conflict strategy.
-func (h *Handler) finishSkillImport(w http.ResponseWriter, r *http.Request, workspaceID string, workspaceUUID, creatorUUID pgtype.UUID, creatorID, strategy string, structuredResult bool, imported *importedSkill) {
+// importedSkillFileRequests maps a fetched bundle's supporting files onto
+// CreateSkillFileRequest, dropping entries whose path fails validateFilePath.
+func importedSkillFileRequests(imported *importedSkill) []CreateSkillFileRequest {
 	files := make([]CreateSkillFileRequest, 0, len(imported.files))
 	for _, f := range imported.files {
 		if !validateFilePath(f.path) {
@@ -2268,6 +2389,16 @@ func (h *Handler) finishSkillImport(w http.ResponseWriter, r *http.Request, work
 			Content: f.content,
 		})
 	}
+	return files
+}
+
+// finishSkillImport runs the shared tail of every skill import — whether the
+// bundle came from a hosted URL or an uploaded archive (.skill / .zip). It maps
+// the extracted files onto CreateSkillFileRequest, records provenance into
+// config.origin, and creates the skill, routing same-name collisions through
+// the on_conflict strategy.
+func (h *Handler) finishSkillImport(w http.ResponseWriter, r *http.Request, workspaceID string, workspaceUUID, creatorUUID pgtype.UUID, creatorID, strategy string, structuredResult bool, imported *importedSkill) {
+	files := importedSkillFileRequests(imported)
 
 	// Persist provenance into skill.config.origin so list/detail UI can show
 	// "Imported from GitHub / ClawHub / Skills.sh" and link back to the source.
@@ -2279,9 +2410,10 @@ func (h *Handler) finishSkillImport(w http.ResponseWriter, r *http.Request, work
 
 	if structuredResult {
 		if existing, found, lerr := h.lookupSkillByName(r.Context(), workspaceUUID, name); lerr != nil {
+			slog.Warn("look up existing skill failed", append(logger.RequestAttrs(r), "error", lerr)...)
 			writeJSON(w, http.StatusInternalServerError, SkillImportResult{
 				Status: "failed",
-				Reason: "failed to check for existing skill: " + lerr.Error(),
+				Reason: "failed to check for existing skill",
 			})
 			return
 		} else if found {
@@ -2306,7 +2438,8 @@ func (h *Handler) finishSkillImport(w http.ResponseWriter, r *http.Request, work
 			}
 			return
 		}
-		writeError(w, http.StatusInternalServerError, "failed to create skill: "+err.Error())
+		slog.Warn("create skill failed", append(logger.RequestAttrs(r), "error", err)...)
+		writeError(w, http.StatusInternalServerError, "failed to create skill")
 		return
 	}
 	actorType, actorID := h.resolveActor(r, creatorID, workspaceID)
@@ -2322,8 +2455,26 @@ func (h *Handler) finishSkillImport(w http.ResponseWriter, r *http.Request, work
 
 func (h *Handler) ListSkillFiles(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
+	includeContent, ok := resolveSkillInclude(w, r)
+	if !ok {
+		return
+	}
 	skill, ok := h.loadSkillForUser(w, r, id)
 	if !ok {
+		return
+	}
+
+	if !includeContent {
+		metadata, err := h.Queries.ListSkillFileMetadata(r.Context(), skill.ID)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "failed to list skill files")
+			return
+		}
+		resp := make([]SkillFileMetadataResponse, len(metadata))
+		for i, f := range metadata {
+			resp[i] = skillFileMetadataToResponse(f)
+		}
+		writeJSON(w, http.StatusOK, resp)
 		return
 	}
 
@@ -2371,7 +2522,8 @@ func (h *Handler) UpsertSkillFile(w http.ResponseWriter, r *http.Request) {
 		Content: sanitizeNullBytes(req.Content),
 	})
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "failed to upsert skill file: "+err.Error())
+		slog.Warn("upsert skill file failed", append(logger.RequestAttrs(r), "error", err)...)
+		writeError(w, http.StatusInternalServerError, "failed to upsert skill file")
 		return
 	}
 
@@ -2455,6 +2607,9 @@ func (h *Handler) SetAgentSkills(w http.ResponseWriter, r *http.Request) {
 	if !h.validateAgentSkillIDsInWorkspace(w, r, agent, skillUUIDs) {
 		return
 	}
+	if len(skillUUIDs) > 0 && h.rejectQoderOverrides(w, r, agent, qoderOverrides{skills: len(skillUUIDs)}) {
+		return
+	}
 
 	tx, err := h.TxStarter.Begin(r.Context())
 	if err != nil {
@@ -2475,7 +2630,8 @@ func (h *Handler) SetAgentSkills(w http.ResponseWriter, r *http.Request) {
 			AgentID: agent.ID,
 			SkillID: skillID,
 		}); err != nil {
-			writeError(w, http.StatusInternalServerError, "failed to add agent skill: "+err.Error())
+			slog.Warn("add agent skill failed", append(logger.RequestAttrs(r), "error", err)...)
+			writeError(w, http.StatusInternalServerError, "failed to add agent skill")
 			return
 		}
 	}
@@ -2510,6 +2666,9 @@ func (h *Handler) AddAgentSkills(w http.ResponseWriter, r *http.Request) {
 	if !h.validateAgentSkillIDsInWorkspace(w, r, agent, skillUUIDs) {
 		return
 	}
+	if len(skillUUIDs) > 0 && h.rejectQoderOverrides(w, r, agent, qoderOverrides{skills: len(skillUUIDs)}) {
+		return
+	}
 
 	tx, err := h.TxStarter.Begin(r.Context())
 	if err != nil {
@@ -2524,7 +2683,8 @@ func (h *Handler) AddAgentSkills(w http.ResponseWriter, r *http.Request) {
 			AgentID: agent.ID,
 			SkillID: skillID,
 		}); err != nil {
-			writeError(w, http.StatusInternalServerError, "failed to add agent skill: "+err.Error())
+			slog.Warn("add agent skill failed", append(logger.RequestAttrs(r), "error", err)...)
+			writeError(w, http.StatusInternalServerError, "failed to add agent skill")
 			return
 		}
 	}

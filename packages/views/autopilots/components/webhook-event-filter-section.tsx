@@ -1,8 +1,9 @@
 "use client";
 
 import { useState } from "react";
-import { X, Plus, Filter, ExternalLink } from "lucide-react";
+import { X, Plus, Filter, ExternalLink } from "@multica/ui/icons";
 import { cn } from "@multica/ui/lib/utils";
+import { TooltipHint } from "@multica/ui/components/common/tooltip-hint";
 import type { WebhookEventFilter } from "@multica/core/types";
 import { useT } from "../../i18n";
 
@@ -20,7 +21,9 @@ export function WebhookEventFilterSection({
   const [newActions, setNewActions] = useState("");
   const docsHref = i18n.language?.startsWith("zh")
     ? `https://multica.ai/docs/zh/autopilots#${encodeURIComponent("事件过滤")}`
-    : "https://multica.ai/docs/autopilots#event-filters";
+    : i18n.language?.startsWith("fr")
+      ? `https://multica.ai/docs/fr/autopilots#${encodeURIComponent("filtres-dévénements")}`
+      : "https://multica.ai/docs/autopilots#event-filters";
 
   const addFilter = () => {
     const event = newEvent.trim();
@@ -42,7 +45,7 @@ export function WebhookEventFilterSection({
 
   return (
     <div className="space-y-2">
-      <div className="flex items-center gap-1.5 text-[11px] font-semibold tracking-[0.08em] text-muted-foreground uppercase">
+      <div className="flex items-center gap-1.5 text-micro font-semibold tracking-[0.08em] text-muted-foreground uppercase">
         <Filter className="size-3" />
         {t(($) => $.dialog.event_filter_label)}
         <a
@@ -51,7 +54,7 @@ export function WebhookEventFilterSection({
           rel="noopener noreferrer"
           aria-label={t(($) => $.dialog.event_filter_docs_link_label)}
           title={t(($) => $.dialog.event_filter_docs_link_label)}
-          className="ml-0.5 inline-flex items-center text-muted-foreground/80 hover:text-foreground transition-colors"
+          className="ml-0.5 inline-flex items-center text-faint-foreground hover:text-foreground transition-colors"
         >
           <ExternalLink className="size-3" />
         </a>
@@ -62,7 +65,7 @@ export function WebhookEventFilterSection({
           {filters.map((f, idx) => (
             <div
               key={idx}
-              className="flex items-center gap-2 rounded-md border bg-background px-2.5 py-1.5 text-xs"
+              className="flex items-center gap-2 rounded-md border bg-background px-2.5 py-1.5 text-caption"
             >
               <span className="font-mono font-medium text-foreground">
                 {f.event}
@@ -72,13 +75,16 @@ export function WebhookEventFilterSection({
                   : {f.actions.join(", ")}
                 </span>
               )}
-              <button
-                type="button"
-                onClick={() => removeFilter(idx)}
-                className="ml-auto rounded p-0.5 text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
-              >
-                <X className="size-3" />
-              </button>
+              <TooltipHint label={t(($) => $.dialog.event_filter_remove_label)}>
+                <button
+                  type="button"
+                  onClick={() => removeFilter(idx)}
+                  aria-label={t(($) => $.dialog.event_filter_remove_label)}
+                  className="ml-auto rounded-xs p-0.5 text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
+                >
+                  <X className="size-3" />
+                </button>
+              </TooltipHint>
             </div>
           ))}
         </div>
@@ -96,7 +102,7 @@ export function WebhookEventFilterSection({
             }
           }}
           placeholder={t(($) => $.dialog.event_filter_event_placeholder)}
-          className="flex-1 min-w-0 rounded-md border bg-background px-2.5 py-1.5 text-xs font-mono outline-none focus:ring-1 focus:ring-ring"
+          className="flex-1 min-w-0 rounded-md border bg-background px-2.5 py-1.5 text-caption font-mono outline-none focus:ring-1 focus:ring-ring"
         />
         <input
           type="text"
@@ -109,23 +115,24 @@ export function WebhookEventFilterSection({
             }
           }}
           placeholder={t(($) => $.dialog.event_filter_actions_placeholder)}
-          className="w-28 rounded-md border bg-background px-2.5 py-1.5 text-xs outline-none focus:ring-1 focus:ring-ring"
+          className="w-28 rounded-md border bg-background px-2.5 py-1.5 text-caption outline-none focus:ring-1 focus:ring-ring"
         />
         <button
           type="button"
           onClick={addFilter}
           disabled={!newEvent.trim()}
           className={cn(
-            "inline-flex items-center justify-center rounded-md border px-2.5 py-1.5 text-xs font-medium transition-colors",
+            "inline-flex shrink-0 items-center justify-center gap-1 rounded-md border px-2.5 py-1.5 text-caption font-medium transition-colors",
             newEvent.trim()
-              ? "bg-background text-foreground hover:bg-accent/40 cursor-pointer"
+              ? "border-primary bg-primary text-primary-foreground hover:bg-primary/90 cursor-pointer"
               : "bg-muted text-muted-foreground cursor-not-allowed",
           )}
         >
           <Plus className="size-3.5" />
+          {t(($) => $.dialog.event_filter_add)}
         </button>
       </div>
-      <p className="text-[10px] text-muted-foreground">
+      <p className="text-micro text-muted-foreground">
         {t(($) => $.dialog.event_filter_hint)}
       </p>
     </div>

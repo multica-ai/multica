@@ -14,10 +14,12 @@ const pages = new Map<string, { url: string }>([
   ["zh:", { url: "/zh" }],
   ["ko:", { url: "/ko" }],
   ["ja:", { url: "/ja" }],
+  ["fr:", { url: "/fr" }],
   ["en:agents", { url: "/agents" }],
   ["zh:agents", { url: "/zh/agents" }],
   ["ko:agents", { url: "/ko/agents" }],
   ["ja:agents", { url: "/ja/agents" }],
+  ["fr:agents", { url: "/fr/agents" }],
 ]);
 
 vi.mock("@/lib/source", () => ({
@@ -81,6 +83,21 @@ describe("docsAlternates", () => {
         en: "https://www.multica.ai/docs/agents",
         zh: "https://www.multica.ai/docs/zh/agents",
         ja: "https://www.multica.ai/docs/ja/agents",
+        "x-default": "https://www.multica.ai/docs/agents",
+      },
+    });
+  });
+
+  it("includes French hreflang when a real *.fr.mdx page exists", async () => {
+    existingDocs.add("agents.fr.mdx");
+    const { docsAlternates } = await import("./site");
+
+    expect(docsAlternates(["agents"])).toEqual({
+      canonical: "https://www.multica.ai/docs/agents",
+      languages: {
+        en: "https://www.multica.ai/docs/agents",
+        zh: "https://www.multica.ai/docs/zh/agents",
+        fr: "https://www.multica.ai/docs/fr/agents",
         "x-default": "https://www.multica.ai/docs/agents",
       },
     });

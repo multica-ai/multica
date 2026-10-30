@@ -1,3 +1,4 @@
+// @vitest-environment node
 import { describe, expect, it } from "vitest";
 import { docsHrefForLocale } from "./docs-href";
 
@@ -7,5 +8,6 @@ describe("docsHrefForLocale", () => {
     expect(docsHrefForLocale("zh-Hans")).toBe("/docs/zh");
     expect(docsHrefForLocale("ko")).toBe("/docs/ko");
     expect(docsHrefForLocale("ja")).toBe("/docs/ja");
+    expect(docsHrefForLocale("fr")).toBe("/docs/fr");
   });
 });

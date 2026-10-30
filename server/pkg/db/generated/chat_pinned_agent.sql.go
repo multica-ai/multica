@@ -63,15 +63,17 @@ func (q *Queries) DeleteChatPinnedAgent(ctx context.Context, arg DeleteChatPinne
 	return err
 }
 
-const deleteChatPinnedAgentsByArchivedRuntimeAgents = `-- name: DeleteChatPinnedAgentsByArchivedRuntimeAgents :exec
+const deleteChatPinnedAgentsBySystemRuntimeAgents = `-- name: DeleteChatPinnedAgentsBySystemRuntimeAgents :exec
 DELETE FROM chat_pinned_agent
 WHERE agent_id IN (
-    SELECT id FROM agent WHERE runtime_id = $1 AND archived_at IS NOT NULL
+    SELECT id FROM agent WHERE runtime_id = $1 AND kind = 'system'
 )
 `
 
-func (q *Queries) DeleteChatPinnedAgentsByArchivedRuntimeAgents(ctx context.Context, runtimeID pgtype.UUID) error {
-	_, err := q.db.Exec(ctx, deleteChatPinnedAgentsByArchivedRuntimeAgents, runtimeID)
+// Scoped to the system agents a runtime delete hard-deletes. User agents keep
+// their pins: since MUL-5559 they survive their runtime as unbound agents.
+func (q *Queries) DeleteChatPinnedAgentsBySystemRuntimeAgents(ctx context.Context, runtimeID pgtype.UUID) error {
+	_, err := q.db.Exec(ctx, deleteChatPinnedAgentsBySystemRuntimeAgents, runtimeID)
 	return err
 }
 

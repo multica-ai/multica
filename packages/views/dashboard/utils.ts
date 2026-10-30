@@ -31,7 +31,6 @@ import type {
   FailureClassCounts,
 } from "../runtimes/components/charts";
 
-// ---------------------------------------------------------------------------
 // Dashboard data aggregations
 //
 // The workspace dashboard returns the same per-(date, model) and
@@ -41,13 +40,16 @@ import type {
 // which carries a `provider` field) we replicate here with a tighter
 // type — fewer optional fields, less conditional logic on the consumer
 // side.
-// ---------------------------------------------------------------------------
 
+// Mirrors `DailyCostStackData` in the runtimes utils, including its cache-read
+// segment — the dashboard feeds the very same DailyCostChart, so a category
+// missing here is a category missing from the chart's total (MUL-6334).
 export interface DailyCostStack {
   date: string;
   label: string;
   input: number;
   output: number;
+  cacheRead: number;
   cacheWrite: number;
   total: number;
 }
@@ -61,16 +63,25 @@ function formatDateLabel(d: string): string {
   return `${date.getMonth() + 1}/${date.getDate()}`;
 }
 
-// Per-(date, model) rows → 1 row per date with cost broken into the three
+// Per-(date, model) rows → 1 row per date with cost broken into the four
 // segments the stacked bar chart consumes. Stable sort by date asc so the
 // chart x-axis is left-to-right oldest-to-newest.
 export function aggregateDailyCost(usage: DashboardUsageDaily[]): DailyCostStack[] {
-  const map = new Map<string, { input: number; output: number; cacheWrite: number }>();
+  const map = new Map<
+    string,
+    { input: number; output: number; cacheRead: number; cacheWrite: number }
+  >();
   for (const u of usage) {
     const b = estimateCostBreakdown(u);
-    const entry = map.get(u.date) ?? { input: 0, output: 0, cacheWrite: 0 };
+    const entry = map.get(u.date) ?? {
+      input: 0,
+      output: 0,
+      cacheRead: 0,
+      cacheWrite: 0,
+    };
     entry.input += b.input;
     entry.output += b.output;
+    entry.cacheRead += b.cacheRead;
     entry.cacheWrite += b.cacheWrite;
     map.set(u.date, entry);
   }
@@ -80,14 +91,16 @@ export function aggregateDailyCost(usage: DashboardUsageDaily[]): DailyCostStack
     .map(([date, s]) => {
       const input = round(s.input);
       const output = round(s.output);
+      const cacheRead = round(s.cacheRead);
       const cacheWrite = round(s.cacheWrite);
       return {
         date,
         label: formatDateLabel(date),
         input,
         output,
+        cacheRead,
         cacheWrite,
-        total: round(input + output + cacheWrite),
+        total: round(input + output + cacheRead + cacheWrite),
       };
     });
 }
@@ -190,6 +203,12 @@ export interface AgentDashboardRow {
   cost: number;
   seconds: number;
   taskCount: number;
+  unreportedTaskCount: number;
+  hasReportedUsage: boolean;
+  // Token/cost totals come from the asynchronous hourly rollup. Keep their
+  // availability separate from real-time task_usage coverage so rollup lag
+  // never turns a reported run into either a fake zero or an unreported run.
+  hasUsageTotals: boolean;
 }
 
 // Merge per-agent token totals with per-agent run-time totals into one
@@ -211,25 +230,44 @@ export function mergeAgentDashboardRows(
   const merged = new Map<string, AgentDashboardRow>();
   for (const r of tokenRows) {
     const rt = runTimeByAgent.get(r.agentId);
+    const taskCount = rt ? rt.task_count : r.taskCount;
+    // An older server omits metered_task_count. A token row proves that some
+    // usage exists but cannot tell which of several runs produced it, so keep
+    // the old all-reported presentation until the exact coverage field is
+    // available. This avoids a new client inventing partial coverage while
+    // connected to an old backend.
+    const meteredTaskCount = rt?.metered_task_count ?? taskCount;
     merged.set(r.agentId, {
       agentId: r.agentId,
       tokens: r.tokens,
       cost: r.cost,
       seconds: rt?.total_seconds ?? 0,
-      taskCount: rt ? rt.task_count : r.taskCount,
+      taskCount,
+      unreportedTaskCount: Math.max(0, taskCount - meteredTaskCount),
+      hasReportedUsage: true,
+      hasUsageTotals: true,
     });
   }
   // Agents with run-time rows but zero tokens still belong on the list
-  // (a task that errored before producing usage). Their token columns
-  // stay at 0.
+  // (a task that errored before producing usage). Their numeric token totals
+  // stay at 0 for sorting, while the leaderboard renders them as unavailable.
   for (const r of runTimeRows) {
     if (merged.has(r.agent_id)) continue;
+    // Old servers omit the coverage field. The missing token aggregate may
+    // merely be lagging, so do not reinterpret every run as unreported.
+    const coverageKnown = r.metered_task_count !== undefined;
+    const meteredTaskCount = r.metered_task_count ?? 0;
     merged.set(r.agent_id, {
       agentId: r.agent_id,
       tokens: 0,
       cost: 0,
       seconds: r.total_seconds,
       taskCount: r.task_count,
+      unreportedTaskCount: coverageKnown
+        ? Math.max(0, r.task_count - meteredTaskCount)
+        : 0,
+      hasReportedUsage: coverageKnown && meteredTaskCount > 0,
+      hasUsageTotals: false,
     });
   }
   return Array.from(merged.values()).toSorted((a, b) => {
@@ -265,10 +303,12 @@ export const RESTRICTED_AGENTS_ROW_ID = "__restricted_agents__";
 // (those totals aggregate `task_usage_hourly` without joining `agent`), so the
 // per-agent breakdown no longer reconciled with the totals (MUL-3776, #4640).
 // Aggregating instead of dropping keeps `sum(visible rows) == KPI total` while
-// still never exposing a UUID. The bucket carries tokens + cost only; seconds
-// and taskCount stay 0 because the run-time rollups inner-join `agent`, so
-// deleted agents already contribute nothing to the Time/Tasks KPIs — the
-// component renders those two columns as "—" for this row.
+// still never exposing a UUID. The bucket carries tokens + cost and their
+// coverage metadata only; seconds and taskCount stay 0 because the run-time
+// rollups inner-join `agent`, so deleted agents already contribute nothing to
+// the Time/Tasks KPIs — the component renders those two columns as "—" for
+// this row. Preserving coverage also handles a cross-query deletion race where
+// a run-time row was read just before the agent disappeared.
 //
 // `knownAgentIds` is `null` while the agent list is still loading; callers
 // pass `null` in that case so the rows pass through untouched instead of the
@@ -290,6 +330,9 @@ export function bucketUnknownAgentRows(
     cost: 0,
     seconds: 0,
     taskCount: 0,
+    unreportedTaskCount: 0,
+    hasReportedUsage: false,
+    hasUsageTotals: false,
   };
   let hasDeleted = false;
   for (const r of rows) {
@@ -300,6 +343,9 @@ export function bucketUnknownAgentRows(
     hasDeleted = true;
     bucket.tokens += r.tokens;
     bucket.cost += r.cost;
+    bucket.unreportedTaskCount += r.unreportedTaskCount;
+    bucket.hasReportedUsage ||= r.hasReportedUsage;
+    bucket.hasUsageTotals ||= r.hasUsageTotals;
   }
   return hasDeleted ? [...known, bucket] : known;
 }
@@ -311,14 +357,12 @@ export function isSyntheticAgentRow(agentId: string): boolean {
   return agentId === DELETED_AGENTS_ROW_ID || agentId === RESTRICTED_AGENTS_ROW_ID;
 }
 
-// ---------------------------------------------------------------------------
 // Weekly fold for run-time + tasks. Mirrors `aggregateByWeek` in
 // `runtimes/utils.ts` which already covers cost / tokens — same calendar
 // week semantics (Mon–Sun anchored at today-in-tz), same pre-zeroed buckets,
 // same partial-week metadata. Workspace dashboard uses the user-chosen
 // timezone here; the runtime page uses the runtime's IANA tz. Behaviour is
 // identical apart from where the tz comes from.
-// ---------------------------------------------------------------------------
 
 interface WeekShell {
   weekStart: string;
@@ -390,21 +434,32 @@ export function aggregateWeeklyTasks(
   weekCount: number,
 ): WeeklyTasksData[] {
   const shells = buildWeekShells(tz, weekCount);
-  const buckets = new Map<string, { completed: number; failed: number }>();
+  const buckets = new Map<
+    string,
+    { completed: number; failed: number; cancelled: number }
+  >();
   for (const shell of shells)
-    buckets.set(shell.weekStart, { completed: 0, failed: 0 });
+    buckets.set(shell.weekStart, { completed: 0, failed: 0, cancelled: 0 });
   for (const r of rows) {
     const wkStart = weekStartIso(r.date);
     const bucket = buckets.get(wkStart);
     if (!bucket) continue;
     const failed = r.failed_count;
-    const completed = Math.max(0, r.task_count - failed);
+    const cancelled = r.cancelled_count;
+    const completed = Math.max(0, r.task_count - failed - cancelled);
     bucket.completed += completed;
     bucket.failed += failed;
+    bucket.cancelled += cancelled;
   }
   return shells.map((s) => {
-    const b = buckets.get(s.weekStart) ?? { completed: 0, failed: 0 };
-    return { ...s, completed: b.completed, failed: b.failed };
+    const b =
+      buckets.get(s.weekStart) ?? { completed: 0, failed: 0, cancelled: 0 };
+    return {
+      ...s,
+      completed: b.completed,
+      failed: b.failed,
+      cancelled: b.cancelled,
+    };
   });
 }
 
@@ -420,19 +475,23 @@ export function aggregateDailyTime(rows: DashboardRunTimeDaily[]): DailyTimeData
     }));
 }
 
-// Per-date run-time rows → one row per date with `completed` and `failed`
-// counts for the DailyTasksChart's stacked bar (failed_count is a subset
-// of task_count, so completed = task_count - failed_count).
+// Per-date run-time rows → one row per date with `completed`, `failed` and
+// `cancelled` counts for the DailyTasksChart's stacked bar. failed_count and
+// cancelled_count are disjoint subsets of task_count, so the succeeded count
+// is the remainder. Subtracting cancelled matters: without it a run the user
+// stopped would render in the green "completed" segment.
 export function aggregateDailyTasks(rows: DashboardRunTimeDaily[]): DailyTasksData[] {
   return rows.toSorted((a, b) => a.date.localeCompare(b.date))
     .map((r) => {
       const failed = r.failed_count;
-      const completed = Math.max(0, r.task_count - failed);
+      const cancelled = r.cancelled_count;
+      const completed = Math.max(0, r.task_count - failed - cancelled);
       return {
         date: r.date,
         label: formatDateLabel(r.date),
         completed,
         failed,
+        cancelled,
       };
     });
 }
@@ -462,7 +521,6 @@ export function formatDuration(seconds: number, lessThanMinuteLabel: string): st
   return mins > 0 ? `${hours}h ${mins}m` : `${hours}h`;
 }
 
-// ---------------------------------------------------------------------------
 // Failure aggregations
 //
 // The two failure rollups ship every terminal task, with `failure_reason: ""`
@@ -476,7 +534,6 @@ export function formatDuration(seconds: number, lessThanMinuteLabel: string): st
 // `@multica/core/dashboard`; the raw reason survives only in
 // `aggregateFailureReasons`, which powers the detail rows under the class
 // summary.
-// ---------------------------------------------------------------------------
 
 function emptyClassCounts(): FailureClassCounts {
   return Object.fromEntries(

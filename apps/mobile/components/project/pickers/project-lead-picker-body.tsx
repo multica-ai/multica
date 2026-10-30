@@ -24,6 +24,7 @@ import { memberListOptions } from "@/data/queries/members";
 import { useWorkspaceStore } from "@/data/workspace-store";
 import { useScrollToTopOnChange } from "@/lib/use-scroll-to-top-on-change";
 import { THEME } from "@/lib/theme";
+import { useT } from "@/lib/i18n";
 
 const AVATAR_SIZE = 36;
 
@@ -53,6 +54,7 @@ function isRowSelected(value: LeadValue | null, row: Row): boolean {
 
 export function ProjectLeadPickerBody({ value, query, onChange }: Props) {
   const wsId = useWorkspaceStore((s) => s.currentWorkspaceId);
+  const { t } = useT("issues");
   const { data: members = [] } = useQuery(memberListOptions(wsId));
   const { data: agents = [] } = useQuery(agentListOptions(wsId));
   const listRef = useScrollToTopOnChange(query);
@@ -141,14 +143,16 @@ export function ProjectLeadPickerBody({ value, query, onChange }: Props) {
             numberOfLines={1}
           >
             {item.kind === "unassigned"
-              ? "Unassigned"
+              ? t("picker.unassigned")
               : item.kind === "member"
                 ? item.member.name
                 : item.agent.name}
           </Text>
           {/* Inline type tag — Apple UITableViewCellStyleValue1. */}
           {item.kind === "agent" ? (
-            <Text className="text-sm text-muted-foreground">Agent</Text>
+            <Text className="text-sm text-muted-foreground">
+              {t("picker.agent")}
+            </Text>
           ) : null}
           {isRowSelected(value, item) ? (
             <Ionicons name="checkmark" size={20} color={checkColor} />
@@ -159,8 +163,8 @@ export function ProjectLeadPickerBody({ value, query, onChange }: Props) {
         <View className="px-3 py-8 items-center">
           <Text className="text-sm text-muted-foreground text-center">
             {query
-              ? "No matches."
-              : "No members or agents in this workspace yet."}
+              ? t("picker.no_matches")
+              : t("picker.no_members_agents")}
           </Text>
         </View>
       }

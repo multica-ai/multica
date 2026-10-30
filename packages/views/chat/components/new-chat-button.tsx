@@ -1,8 +1,9 @@
 "use client";
 
 import React, { useMemo, useState } from "react";
-import { Plus } from "lucide-react";
+import { Plus } from "@multica/ui/icons";
 import { Button } from "@multica/ui/components/ui/button";
+import { IconButton } from "@multica/ui/components/common/icon-button";
 import { Tooltip, TooltipTrigger, TooltipContent } from "@multica/ui/components/ui/tooltip";
 import { ActorAvatar } from "../../common/actor-avatar";
 import {
@@ -13,6 +14,8 @@ import {
 } from "../../issues/components/pickers/property-picker";
 import { matchesPinyin } from "../../editor/extensions/pinyin-match";
 import type { Agent } from "@multica/core/types";
+import { isAgentRuntimeBound } from "@multica/core/agents";
+import { toast } from "sonner";
 import { useT } from "../../i18n";
 
 /**
@@ -28,6 +31,7 @@ export function AgentPicker({
   onSelect,
   trigger,
   triggerRender,
+  tooltip,
   side = "bottom",
   align = "start",
 }: {
@@ -37,6 +41,7 @@ export function AgentPicker({
   onSelect: (agent: Agent) => void;
   trigger: React.ReactNode;
   triggerRender: React.ReactElement;
+  tooltip?: React.ReactNode;
   side?: "top" | "bottom";
   align?: "start" | "center" | "end";
 }) {
@@ -76,6 +81,7 @@ export function AgentPicker({
       onSearchChange={setFilter}
       triggerRender={triggerRender}
       trigger={trigger}
+      tooltip={tooltip}
     >
       {filteredMine.length === 0 && filteredOthers.length === 0 ? (
         <PickerEmpty />
@@ -120,8 +126,17 @@ function AgentPickerItem({
   isCurrent: boolean;
   onSelect: (agent: Agent) => void;
 }) {
+  const { t } = useT("chat");
+  const runtimeBound = isAgentRuntimeBound(agent);
   return (
-    <PickerItem selected={isCurrent} onClick={() => onSelect(agent)}>
+    <PickerItem
+      selected={isCurrent}
+      disabled={!runtimeBound}
+      tooltip={
+        runtimeBound ? undefined : t(($) => $.window.agent_needs_runtime_hint)
+      }
+      onClick={() => onSelect(agent)}
+    >
       <ActorAvatar
         actorType="agent"
         actorId={agent.id}
@@ -130,6 +145,11 @@ function AgentPickerItem({
         showStatusDot
       />
       <span className="truncate flex-1">{agent.name}</span>
+      {!runtimeBound && (
+        <span className="shrink-0 text-micro text-amber-600 dark:text-amber-400">
+          {t(($) => $.window.agent_needs_runtime)}
+        </span>
+      )}
     </PickerItem>
   );
 }
@@ -167,7 +187,13 @@ export function NewChatButton({
               size="icon-sm"
               className="rounded-full text-muted-foreground"
               aria-label={label}
-              onClick={() => onStart(only)}
+              onClick={() => {
+                if (only && !isAgentRuntimeBound(only)) {
+                  toast.error(t(($) => $.input.runtime_required_toast));
+                  return;
+                }
+                onStart(only);
+              }}
             />
           }
         >
@@ -186,11 +212,12 @@ export function NewChatButton({
       side={side}
       align="start"
       triggerRender={
-        <Button
+        <IconButton
           variant="ghost"
           size="icon-sm"
           className="rounded-full text-muted-foreground"
-          aria-label={label}
+          label={label}
+          tooltipSide={side === "top" ? "top" : "bottom"}
         />
       }
       trigger={<Plus />}

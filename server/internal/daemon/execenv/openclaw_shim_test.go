@@ -87,9 +87,7 @@ func pathWithout(t *testing.T) {
 func writeFakeInterpreter(t *testing.T, dir, name string) string {
 	t.Helper()
 	p := filepath.Join(dir, name)
-	if err := os.WriteFile(p, []byte("#!/bin/sh\nexit 0\n"), 0o755); err != nil {
-		t.Fatalf("write fake interpreter: %v", err)
-	}
+	writeTestExecutable(t, p, []byte("#!/bin/sh\nexit 0\n"))
 	return p
 }
 
@@ -281,9 +279,7 @@ func writeShim(t *testing.T, dir, unixBody, windowsBody string) string {
 	if runtime.GOOS == "windows" {
 		body = windowsBody
 	}
-	if err := os.WriteFile(shim, []byte(body), 0o755); err != nil {
-		t.Fatalf("write shim: %v", err)
-	}
+	writeTestExecutable(t, shim, []byte(body))
 	return shim
 }
 
@@ -369,6 +365,7 @@ func TestExecOpenclawCLITimeoutIsNotMisdiagnosedAsMissingInterpreter(t *testing.
 // for an explicitly cancelled context, not just a deadline, so a caller can
 // distinguish "we gave up" from "the CLI failed" without parsing strings.
 func TestExecOpenclawCLICancellationIsWrapped(t *testing.T) {
+	t.Parallel()
 	if runtime.GOOS == "windows" {
 		t.Skip("shell shim shape is covered by the windows-tagged tests")
 	}
@@ -419,6 +416,31 @@ func TestExecOpenclawCLIPrefersRealStderr(t *testing.T) {
 	}
 }
 
+// TestExecOpenclawCLIPreservesFailedStdoutWithoutLeakingIt covers the process
+// boundary behind #7130. cmd.Output returns stdout even when the child exits
+// non-zero; callers need that value to inspect OpenClaw's JSON error envelope,
+// but it must stay out of the error text because other config commands can
+// print resolved configuration and secrets there.
+func TestExecOpenclawCLIPreservesFailedStdoutWithoutLeakingIt(t *testing.T) {
+	t.Parallel()
+	const marker = "stdout-only-sensitive-marker"
+	shim := writeShim(t, t.TempDir(),
+		"#!/bin/sh\necho '"+marker+"'\nexit 1\n",
+		"@echo off\r\necho "+marker+"\r\nexit /b 1\r\n",
+	)
+
+	out, err := execOpenclawCLI(context.Background(), shim, "config", "get", "agents.list", "--json")
+	if err == nil {
+		t.Fatalf("expected the shim failure to surface as an error, got output %q", out)
+	}
+	if !strings.Contains(out, marker) {
+		t.Fatalf("failed stdout was discarded; got %q", out)
+	}
+	if strings.Contains(err.Error(), marker) {
+		t.Fatalf("failed stdout leaked into the error text: %s", err)
+	}
+}
+
 // TestExecOpenclawCLIMissingTempDoesNotChangeOutcome pins the root cause #6061
 // originally reported and then retracted. The reporter's own follow-up
 // experiment showed `{PATH, SystemRoot}` alone succeeds, so TEMP/TMP must not
@@ -447,6 +469,7 @@ func TestExecOpenclawCLIMissingTempDoesNotChangeOutcome(t *testing.T) {
 // containing a space or non-ASCII characters must not break invocation or
 // mangle the captured output.
 func TestExecOpenclawCLIHandlesShimInPathWithSpacesAndUnicode(t *testing.T) {
+	t.Parallel()
 	for _, segment := range []string{"Program Files", "用户 開發", "café dir"} {
 		t.Run(segment, func(t *testing.T) {
 			dir := filepath.Join(t.TempDir(), segment)

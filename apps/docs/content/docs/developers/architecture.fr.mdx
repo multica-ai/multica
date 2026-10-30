@@ -1,0 +1,131 @@
+---
+title: Architecture du projet
+description: Découvrez comment les clients de Multica, le service Go, le daemon d'exécution et les packages frontend partagés fonctionnent ensemble.
+---
+
+Multica se compose d'un backend Go, de plusieurs clients et d'un daemon qui tourne sur les ordinateurs d'exécution. PostgreSQL stocke les données de collaboration ; le daemon récupère les tasks et invoque les outils de codage IA locaux.
+
+Cette page, centrée sur l'implémentation, emploie **task** pour désigner l'entité interne de l'ordonnanceur, de l'API et de la base de données qui se trouve derrière une **exécution** du produit. L'interface et la documentation produit parlent d'exécution ; les identifiants comme `TaskService` et `task_id` restent inchangés pour des raisons de compatibilité.
+
+```text
+Web / Desktop / Mobile / CLI
+             │
+       HTTP + WebSocket
+             │
+      Go API ───────── PostgreSQL
+             │
+      daemon WebSocket
+             │
+     daemon local ─── outils de codage IA
+```
+
+Pour une explication orientée produit, consultez [Fonctionnement de Multica](/how-multica-works). Cette page se concentre sur l'organisation du code en couches.
+
+## Organisation du dépôt
+
+| Répertoire | Responsabilité | Technologies principales |
+| --- | --- | --- |
+| `server/` | API, authentification, ordonnancement des tasks, intégrations, CLI et daemon | Go, Chi, sqlc, gorilla/websocket |
+| `apps/web/` | Client navigateur et page d'accueil | Next.js App Router |
+| `apps/desktop/` | Client de bureau et gestion des processus locaux | Electron, electron-vite |
+| `apps/mobile/` | Client iOS autonome | Expo, React Native |
+| `apps/docs/` | Site de documentation multilingue | Next.js, Fumadocs |
+| `packages/core/` | Client API, types, queries, mutations et logique métier indépendante de la plateforme | TanStack Query, Zustand |
+| `packages/ui/` | UI de base sans logique métier | shadcn, Base UI |
+| `packages/views/` | Pages et composants métier partagés par Web et Desktop | React |
+| `packages/tsconfig/`, `packages/eslint-config/` | Configuration d'outillage partagée | TypeScript, ESLint |
+
+Les packages partagés exportent directement des fichiers source `.ts` et `.tsx`, compilés par les applications qui les consomment. Le sens des dépendances est `views → core + ui` ; `core` et `ui` ne dépendent pas l'un de l'autre.
+
+## Partage de code entre Web et Desktop
+
+Web et Desktop partagent trois couches :
+
+1. `packages/core` gère les API, le cache, les permissions et l'état indépendant de la plateforme.
+2. `packages/ui` fournit les composants de base.
+3. `packages/views` compose les pages métier.
+
+Les capacités propres à chaque plateforme, comme le routage, les cookies et l'IPC Electron, restent dans la couche applicative. Les pages partagées naviguent via `NavigationAdapter` et n'importent pas directement `next/*` ni `react-router-dom`.
+
+Par exemple, une fonctionnalité liée aux tâches dont Web et Desktop ont tous deux besoin touche généralement :
+
+```text
+packages/core/issues/      queries, mutations, mises à jour du cache
+packages/views/issues/     pages et composants métier
+apps/web/platform/         adaptateur de routage Next.js
+apps/desktop/.../platform/ adaptateur de routage Electron
+```
+
+Mobile ne réutilise pas ces pages React. Il peut importer des types et des fonctions pures depuis `@multica/core`, mais il possède sa propre UI, ses propres clés de query, son état, ses abonnements temps réel et son processus de publication.
+
+## État frontend
+
+Les données serveur et l'état client sont gérés séparément :
+
+- **TanStack Query** détient les données serveur, comme les tâches, les agents, les membres et les éléments de la boîte de réception.
+- **Zustand** détient l'état client, comme les filtres, les brouillons, les boîtes de dialogue et la mise en page.
+- L'espace de travail courant est déterminé par la route et n'est reflété dans la couche plateforme que là où les requêtes, les espaces de noms persistés ou la reconnexion l'exigent.
+- React Context ne transporte que la plomberie de la plateforme, comme l'ID de l'espace de travail et l'adaptateur de navigation.
+
+Les événements WebSocket doivent mettre à jour ou invalider le cache TanStack Query. Ne copiez pas les objets serveur dans Zustand. Les mutations qui entraînent une navigation, comme la création, la suppression ou le départ d'un espace de travail, doivent attendre la confirmation du serveur avant d'effacer l'état local.
+
+Les réponses de l'API sont analysées avec des schémas zod à la frontière `packages/core/api/`. Un client Desktop installé peut se connecter à un backend plus récent : le JSON reçu du réseau ne doit donc pas être directement converti en type TypeScript par une simple assertion.
+
+## Couches du backend
+
+Les principaux points d'entrée se trouvent dans `server/cmd/` :
+
+| Point d'entrée | Rôle |
+| --- | --- |
+| `server` | Démarre l'API HTTP, les services WebSocket, l'ordonnanceur et les workers d'intégration |
+| `multica` | CLI et daemon local |
+| `migrate` | Exécute les migrations de base de données |
+| `backfill_*` | Outils de backfill de données pour des versions spécifiques |
+
+Les requêtes suivent généralement ce chemin :
+
+```text
+router → middleware → handler → service → sqlc query → PostgreSQL
+```
+
+- `internal/middleware/` gère l'authentification, l'espace de travail et les limites des requêtes.
+- `internal/handler/` analyse les entrées HTTP et produit les réponses.
+- `internal/service/` porte les workflows métier qui couvrent plusieurs queries, ainsi que les transactions.
+- `pkg/db/queries/` contient le SQL écrit à la main.
+- `pkg/db/generated/` est généré par sqlc et ne doit pas être modifié directement.
+- `internal/integrations/` gère les événements externes provenant de GitHub, Slack, Feishu et d'autres services.
+- `internal/storage/` gère les pièces jointes locales et S3.
+
+PostgreSQL est la source de vérité pour les données métier. Redis est facultatif et sert aux événements temps réel entre instances, au cache ou à la coordination temporaire. Sans Redis, un environnement de développement à instance unique utilise des implémentations en processus.
+
+## Connexions temps réel
+
+Multica dispose de deux chemins WebSocket distincts :
+
+- `internal/realtime/` pousse vers les clients utilisateurs les modifications des tâches, des commentaires, de la boîte de réception et d'autres éléments.
+- `internal/daemonws/` connecte les daemons pour réveiller les runtimes et effectuer les RPC du daemon.
+
+WebSocket réduit la latence, mais la base de données reste l'état final. Après une reconnexion, les clients doivent se resynchroniser au moyen de queries. Le daemon conserve aussi un chemin de polling, afin qu'une seule déconnexion ne puisse pas bloquer indéfiniment une task en file d'attente.
+
+## Chemin de code d'une exécution
+
+1. Un utilisateur assigne une tâche, mentionne un agent, ou une automatisation se déclenche.
+2. `TaskService` crée une task en file d'attente et notifie le runtime correspondant.
+3. Le daemon récupère la task via l'API du daemon.
+4. Le serveur émet des identifiants temporaires liés à la task et à l'agent.
+5. Le daemon prépare un répertoire local et invoque le backend de fournisseur correspondant dans `pkg/agent`.
+6. L'outil s'exécute localement pendant que le daemon envoie la progression, les messages et le statut final.
+7. Le serveur met à jour la task et la tâche, puis rafraîchit les clients via des événements temps réel.
+
+La couche d'adaptateurs de fournisseurs normalise le démarrage, les événements de streaming, l'annulation et les données de consommation d'un outil de codage IA à l'autre, tandis que le daemon reste responsable des répertoires locaux et des sessions.
+
+## Frontières entre espaces de travail
+
+Les queries métier doivent être limitées par `workspace_id`, et l'appartenance est vérifiée avant qu'une requête n'entre dans une route d'espace de travail. `X-Workspace-ID` sélectionne l'espace de travail courant mais ne remplace pas les vérifications d'autorisation.
+
+L'assigné d'une tâche est polymorphe et peut désigner un membre, un agent ou un squad. Les nouvelles queries, clés de cache et événements temps réel doivent conserver à la fois l'espace de travail et le type d'assigné, au lieu de supposer qu'un ID de ressource suffit à constituer un contexte globalement unique.
+
+## Étapes suivantes
+
+- [Contribuer](/developers/contributing) — environnements locaux, worktrees et emplacement des tests.
+- [Conventions de développement](/developers/conventions) — les contrats du dépôt en matière de nommage, de terminologie et de textes en chinois.

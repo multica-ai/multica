@@ -1,5 +1,6 @@
 import { useAuthStore } from "@multica/core/auth";
 import { toast } from "sonner";
+import type { DaemonTranslator } from "../components/daemon-i18n";
 
 /**
  * Re-establish the local daemon's credentials after it failed to authenticate
@@ -18,7 +19,9 @@ import { toast } from "sonner";
  * out. The 401-vs-transient classification happens in the main process where the
  * real HTTP status is available; here we just act on the verdict.
  */
-export async function reauthenticateDaemon(): Promise<void> {
+export async function reauthenticateDaemon(
+  t: DaemonTranslator,
+): Promise<void> {
   const user = useAuthStore.getState().user;
   const token = localStorage.getItem("multica_token");
   if (!user || !token) {
@@ -36,13 +39,17 @@ export async function reauthenticateDaemon(): Promise<void> {
       return;
     }
     // Transient failure — keep the user signed in and let them retry.
-    toast.error("Couldn't reconnect the daemon", {
-      description: result.message || "Please try again in a moment.",
+    toast.error(t(($) => $.desktop.daemon.reconnect_failed), {
+      description:
+        result.message || t(($) => $.desktop.daemon.try_again_moment),
     });
   } catch (err) {
     // An unexpected IPC error is not an auth failure — never log out on it.
-    toast.error("Couldn't reconnect the daemon", {
-      description: err instanceof Error ? err.message : "Please try again.",
+    toast.error(t(($) => $.desktop.daemon.reconnect_failed), {
+      description:
+        err instanceof Error
+          ? err.message
+          : t(($) => $.desktop.daemon.try_again),
     });
   }
 }

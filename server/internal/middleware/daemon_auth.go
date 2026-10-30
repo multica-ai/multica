@@ -20,6 +20,8 @@ const (
 	ctxKeyDaemonWorkspaceID daemonContextKey = iota
 	ctxKeyDaemonID
 	ctxKeyDaemonAuthPath
+	ctxKeyDaemonTokenHash
+	ctxKeyDaemonTokenOwnerID
 )
 
 // Daemon auth path labels exposed via context for slow-log attribution.
@@ -52,6 +54,43 @@ func DaemonAuthPathFromContext(ctx context.Context) string {
 
 // WithDaemonContext returns a new context with the daemon workspace ID and daemon ID set.
 // This is used by tests to simulate daemon token authentication.
+// DaemonTokenHashFromContext returns the hash of the mdt_ token that
+// authenticated the request, or "" for any other auth path. Checks that must
+// re-validate the exact credential (e.g. Qoder revocation) read it from here
+// rather than the Authorization header, so they also work for requests that
+// are replayed in-process from a WebSocket connection (MUL-8154).
+func DaemonTokenHashFromContext(ctx context.Context) string {
+	h, _ := ctx.Value(ctxKeyDaemonTokenHash).(string)
+	return h
+}
+
+// DaemonTokenOwnerIDFromContext returns the runtime owner the authenticating
+// mdt_ token is bound to, or "" when it is unbound (Qoder-managed) or the
+// request did not use a daemon token (MUL-8154).
+func DaemonTokenOwnerIDFromContext(ctx context.Context) string {
+	id, _ := ctx.Value(ctxKeyDaemonTokenOwnerID).(string)
+	return id
+}
+
+// WithDaemonTokenOwnerID attaches the token's owner binding; the WS RPC
+// bridge uses it to replay a connection's credential in-process.
+func WithDaemonTokenOwnerID(ctx context.Context, ownerID string) context.Context {
+	if ownerID == "" {
+		return ctx
+	}
+	return context.WithValue(ctx, ctxKeyDaemonTokenOwnerID, ownerID)
+}
+
+// WithDaemonTokenHash attaches the authenticating mdt_ token hash. The WS
+// RPC bridge uses it to carry the connection's credential into the
+// synthetic request it hands to the HTTP handler.
+func WithDaemonTokenHash(ctx context.Context, tokenHash string) context.Context {
+	if tokenHash == "" {
+		return ctx
+	}
+	return context.WithValue(ctx, ctxKeyDaemonTokenHash, tokenHash)
+}
+
 func WithDaemonContext(ctx context.Context, workspaceID, daemonID string) context.Context {
 	ctx = context.WithValue(ctx, ctxKeyDaemonWorkspaceID, workspaceID)
 	ctx = context.WithValue(ctx, ctxKeyDaemonID, daemonID)
@@ -89,6 +128,14 @@ func DaemonAuth(queries *db.Queries, patCache *auth.PATCache, daemonCache *auth.
 			// request arrived on.
 			r.Header.Del("X-Actor-Source")
 
+			// Agent identity is server-set too: strip any client-supplied
+			// value here as well, so a handler reached through the daemon
+			// chain gets the same guarantee as one reached through Auth.
+			// The daemon's own endpoints take task ids in the request body,
+			// never these headers (MUL-3428, #4313).
+			r.Header.Del("X-Agent-ID")
+			r.Header.Del("X-Task-ID")
+
 			authHeader := r.Header.Get("Authorization")
 			if authHeader == "" {
 				slog.Debug("daemon_auth: missing authorization header", "path", r.URL.Path)
@@ -111,6 +158,8 @@ func DaemonAuth(queries *db.Queries, patCache *auth.PATCache, daemonCache *auth.
 					ctx := context.WithValue(r.Context(), ctxKeyDaemonWorkspaceID, id.WorkspaceID)
 					ctx = context.WithValue(ctx, ctxKeyDaemonID, id.DaemonID)
 					ctx = context.WithValue(ctx, ctxKeyDaemonAuthPath, DaemonAuthPathDaemonToken)
+					ctx = context.WithValue(ctx, ctxKeyDaemonTokenHash, hash)
+					ctx = WithDaemonTokenOwnerID(ctx, id.OwnerID)
 					next.ServeHTTP(w, r.WithContext(ctx))
 					return
 				}
@@ -130,17 +179,38 @@ func DaemonAuth(queries *db.Queries, patCache *auth.PATCache, daemonCache *auth.
 					WorkspaceID: uuidToString(dt.WorkspaceID),
 					DaemonID:    dt.DaemonID,
 				}
+				cacheable := true
+				if dt.OwnerID.Valid {
+					identity.OwnerID = uuidToString(dt.OwnerID)
+				} else if !strings.HasPrefix(dt.DaemonID, "qoder-managed-") {
+					// Pre-588 Remote MCP token: recover its issuing owner
+					// from the task_token minted in the same claim
+					// transaction. Unresolvable tokens stay unbound and are
+					// refused by the runtime binding check, as before.
+					owner, err := legacyDaemonTokenOwner(r.Context(), queries, dt)
+					if err != nil {
+						// Fail closed for this request, but don't cache the
+						// unbound identity on a transient DB error.
+						slog.Warn("daemon_auth: legacy daemon token owner lookup failed", "path", r.URL.Path, "error", err)
+						cacheable = false
+					}
+					identity.OwnerID = owner
+				}
 				// daemon_token.expires_at is NOT NULL; pgtype Valid is true
 				// in normal operation, but defend against zero just in case.
 				var expiresAt time.Time
 				if dt.ExpiresAt.Valid {
 					expiresAt = dt.ExpiresAt.Time
 				}
-				daemonCache.Set(r.Context(), hash, identity, auth.TTLForExpiry(time.Now(), expiresAt))
+				if cacheable {
+					daemonCache.Set(r.Context(), hash, identity, auth.TTLForExpiry(time.Now(), expiresAt))
+				}
 
 				ctx := context.WithValue(r.Context(), ctxKeyDaemonWorkspaceID, identity.WorkspaceID)
 				ctx = context.WithValue(ctx, ctxKeyDaemonID, identity.DaemonID)
 				ctx = context.WithValue(ctx, ctxKeyDaemonAuthPath, DaemonAuthPathDaemonToken)
+				ctx = context.WithValue(ctx, ctxKeyDaemonTokenHash, hash)
+				ctx = WithDaemonTokenOwnerID(ctx, identity.OwnerID)
 				next.ServeHTTP(w, r.WithContext(ctx))
 				return
 			}
@@ -170,6 +240,9 @@ func DaemonAuth(queries *db.Queries, patCache *auth.PATCache, daemonCache *auth.
 					writeError(w, http.StatusServiceUnavailable, "cloud pat verifier unavailable")
 					return
 				}
+				if rejectTemporarilyDisabledUser(w, r, identity.OwnerID, "", DaemonAuthPathCloudPAT) {
+					return
+				}
 				r.Header.Set("X-User-ID", identity.OwnerID)
 				// Mirror the regular Auth middleware: tag the auth
 				// path so any downstream guard (handler.
@@ -191,6 +264,9 @@ func DaemonAuth(queries *db.Queries, patCache *auth.PATCache, daemonCache *auth.
 				hash := auth.HashToken(tokenString)
 
 				if userID, ok := patCache.Get(r.Context(), hash); ok {
+					if rejectTemporarilyDisabledUser(w, r, userID, "", DaemonAuthPathPAT) {
+						return
+					}
 					r.Header.Set("X-User-ID", userID)
 					ctx := context.WithValue(r.Context(), ctxKeyDaemonAuthPath, DaemonAuthPathPAT)
 					next.ServeHTTP(w, r.WithContext(ctx))
@@ -209,6 +285,9 @@ func DaemonAuth(queries *db.Queries, patCache *auth.PATCache, daemonCache *auth.
 				}
 
 				userID := uuidToString(pat.UserID)
+				if rejectTemporarilyDisabledUser(w, r, userID, "", DaemonAuthPathPAT) {
+					return
+				}
 				r.Header.Set("X-User-ID", userID)
 
 				var expiresAt time.Time
@@ -249,9 +328,46 @@ func DaemonAuth(queries *db.Queries, patCache *auth.PATCache, daemonCache *auth.
 				writeError(w, http.StatusUnauthorized, "invalid claims")
 				return
 			}
+			email, _ := claims["email"].(string)
+			if rejectTemporarilyDisabledUser(w, r, sub, email, DaemonAuthPathJWT) {
+				return
+			}
 			r.Header.Set("X-User-ID", sub)
 			ctx := context.WithValue(r.Context(), ctxKeyDaemonAuthPath, DaemonAuthPathJWT)
 			next.ServeHTTP(w, r.WithContext(ctx))
 		})
 	}
+}
+
+// legacyDaemonTokenOwner recovers the issuing runtime owner of a daemon token
+// minted before migration 588 added daemon_token.owner_id (MUL-8198).
+//
+// Through v0.6.5 the only daemon tokens were per-task Remote MCP credentials,
+// inserted by FinalizeTaskClaim in the same transaction as the task's
+// task_token. Both rows therefore share created_at, and task_token.user_id is
+// the runtime owner that claim was authorized for. The owner is returned only
+// when exactly one live task_token on a runtime of the token's daemon
+// matches; anything else returns "" so the token stays unbound and is refused
+// by the runtime binding check. The result goes through the same owner
+// comparison as a token bound at mint time, so a daemon_id re-registered by
+// another member is still out of reach.
+//
+// Compatibility shim for tokens issued before the 0.7.0 upgrade; those expire
+// within 24h, so it can be removed one release later.
+func legacyDaemonTokenOwner(ctx context.Context, queries *db.Queries, dt db.DaemonToken) (string, error) {
+	if !dt.CreatedAt.Valid {
+		return "", nil
+	}
+	owners, err := queries.ListLegacyDaemonTokenOwners(ctx, db.ListLegacyDaemonTokenOwnersParams{
+		WorkspaceID: dt.WorkspaceID,
+		CreatedAt:   dt.CreatedAt,
+		DaemonID:    dt.DaemonID,
+	})
+	if err != nil {
+		return "", err
+	}
+	if len(owners) != 1 || !owners[0].Valid {
+		return "", nil
+	}
+	return uuidToString(owners[0]), nil
 }

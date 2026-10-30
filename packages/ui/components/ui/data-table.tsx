@@ -32,6 +32,12 @@ import { cn } from "@multica/ui/lib/utils";
 // header behave alike, and keeps a plain click from committing a width.
 const RESIZE_DRAG_THRESHOLD = 4;
 
+// Extra per-row presentation: a class and data attributes for the standard
+// data row (custom rows from `renderRow` carry their own).
+export type DataTableRowProps = {
+  className?: string;
+} & { [attribute: `data-${string}`]: string | undefined };
+
 interface DataTableProps<TData> extends React.ComponentProps<"div"> {
   table: TanstackTable<TData>;
   // Optional bar shown below the table when ≥1 row is selected. We
@@ -44,11 +50,15 @@ interface DataTableProps<TData> extends React.ComponentProps<"div"> {
   // descendant — buttons / dropdowns inside cells should call
   // event.stopPropagation in their own handlers). Used to navigate to
   // a detail page on row click without nesting an <a> around <tr>,
-  // which is invalid HTML.
-  onRowClick?: (row: Row<TData>) => void;
+  // which is invalid HTML. Receives the mouse event so callers can honor
+  // modifier keys; middle clicks arrive through the same callback (the
+  // caller reads `event.button`).
+  onRowClick?: (row: Row<TData>, event: React.MouseEvent) => void;
   // Optional escape hatch for semantic rows such as collapsible group
   // headers. Return null/undefined to use the standard data row renderer.
   renderRow?: (row: Row<TData>) => React.ReactNode;
+  // Marks a standard data row, e.g. the one a side panel is showing.
+  getRowProps?: (row: Row<TData>) => DataTableRowProps | undefined;
   // A caller-supplied <tfoot> (summary / quick-create rows, for example).
   footer?: React.ReactNode;
   // Render only the visible row window for large tables. Callers should use
@@ -82,6 +92,7 @@ export function DataTable<TData>({
   emptyMessage = "No results.",
   onRowClick,
   renderRow,
+  getRowProps,
   footer,
   virtualizeRows = false,
   virtualRowHeight = 41,
@@ -371,6 +382,7 @@ export function DataTable<TData>({
     emptyMessage,
     onRowClick,
     renderRow,
+    getRowProps,
     hasExplicitSize,
     measureRow: rowVirtualizer.measureElement,
     virtualizeRows,
@@ -390,7 +402,7 @@ export function DataTable<TData>({
         className="flex min-h-0 flex-1 flex-col overflow-auto bg-background"
       >
         <table
-          className="w-full table-fixed caption-bottom text-sm"
+          className="w-full table-fixed caption-bottom text-body"
           style={{
             minWidth: `${table.getTotalSize()}px`,
             ...columnSizeVars,
@@ -409,6 +421,7 @@ export function DataTable<TData>({
               <TableRow key={headerGroup.id} className="hover:bg-transparent">
                 {headerGroup.headers.map((header) => {
                   const isPinned = header.column.getIsPinned();
+                  const sorted = header.column.getIsSorted();
                   const columnHasExplicitSize = hasExplicitSize(
                     header.column.id,
                   );
@@ -423,6 +436,16 @@ export function DataTable<TData>({
                       // Lets a drag measure every column by id instead of
                       // pairing <th> elements with columns positionally.
                       data-column-id={header.column.id}
+                      // Only a table sorted through TanStack's own sorting
+                      // state says so; views that order rows themselves
+                      // leave every header unmarked.
+                      aria-sort={
+                        sorted === "asc"
+                          ? "ascending"
+                          : sorted === "desc"
+                            ? "descending"
+                            : undefined
+                      }
                       // Marks the frozen block's trailing edge for the scroll
                       // shadow to measure against. Rendered widths differ from
                       // configured ones under fixed table-layout, so the
@@ -436,7 +459,7 @@ export function DataTable<TData>({
                       // Header typography overrides for a "spreadsheet
                       // header" look: smaller, all-caps, wider letter
                       // spacing, muted colour. shadcn's <TableHead>
-                      // defaults to text-sm + text-foreground +
+                      // defaults to text-body + text-foreground +
                       // font-medium, which reads as too heavy here.
                       // h-8 (32px) tightens the strip vs the default
                       // h-10 (40px).
@@ -449,7 +472,7 @@ export function DataTable<TData>({
                       // muted with background to preserve the same visual tone
                       // as muted/30 without introducing alpha.
                       className={cn(
-                        "relative h-8 overflow-hidden border-r px-4 py-2 text-xs uppercase tracking-wider text-muted-foreground last:border-r-0",
+                        "relative h-8 overflow-hidden border-r px-4 py-2 text-caption uppercase tracking-wider text-muted-foreground last:border-r-0",
                         isPinned &&
                           "bg-[color-mix(in_oklab,var(--muted)_30%,var(--background))]",
                       )}
@@ -572,8 +595,9 @@ interface DataTableBodyProps<TData> {
   table: TanstackTable<TData>;
   rows: Row<TData>[];
   emptyMessage: React.ReactNode;
-  onRowClick?: (row: Row<TData>) => void;
+  onRowClick?: (row: Row<TData>, event: React.MouseEvent) => void;
   renderRow?: (row: Row<TData>) => React.ReactNode;
+  getRowProps?: (row: Row<TData>) => DataTableRowProps | undefined;
   hasExplicitSize: (columnId: string) => boolean;
   // The virtualizer's own measuring ref; rows report their height through it.
   measureRow: (element: HTMLElement | null) => void;
@@ -589,6 +613,7 @@ function DataTableBody<TData>({
   emptyMessage,
   onRowClick,
   renderRow,
+  getRowProps,
   hasExplicitSize,
   measureRow,
   virtualizeRows,
@@ -615,16 +640,36 @@ function DataTableBody<TData>({
           )
         : <React.Fragment key={row.id}>{customRow}</React.Fragment>;
     }
+    const { className: rowClassName, ...rowAttributes } = getRowProps?.(row) ?? {};
     return (
       <TableRow
         key={row.id}
+        {...rowAttributes}
         {...measured}
         data-state={row.getIsSelected() && "selected"}
-        onClick={onRowClick ? () => onRowClick(row) : undefined}
+        onClick={
+          onRowClick
+            ? (e) => {
+                if (e.defaultPrevented) return;
+                onRowClick(row, e);
+              }
+            : undefined
+        }
+        // Middle click never produces a `click` event; forward it through the
+        // same callback (button === 1 only — button 2 is the context menu).
+        onAuxClick={
+          onRowClick
+            ? (e) => {
+                if (e.defaultPrevented || e.button !== 1) return;
+                e.preventDefault();
+                onRowClick(row, e);
+              }
+            : undefined
+        }
         // `group` lets pinned cells track row hover via group-hover (their bg
         // is in className, not on the row, so they stay opaque enough to cover
         // content scrolling beneath them).
-        className={cn("group", onRowClick && "cursor-pointer")}
+        className={cn("group", onRowClick && "cursor-pointer", rowClassName)}
       >
         {row.getVisibleCells().map((cell) => {
           const isPinned = cell.column.getIsPinned();

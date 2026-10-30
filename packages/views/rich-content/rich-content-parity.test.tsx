@@ -54,6 +54,8 @@ vi.mock("@multica/core/paths", () => ({
 
 vi.mock("../navigation", () => ({
   useNavigation: () => ({ push: vi.fn(), openInNewTab: vi.fn() }),
+  useOptionalNavigation: () => ({ push: vi.fn(), openInNewTab: vi.fn() }),
+  resolveClickIntent: () => "push",
   useAppOrigin: () => null,
   AppLink: ({ href, children }: { href: string; children: React.ReactNode }) => (
     <a href={href}>{children}</a>
@@ -193,7 +195,7 @@ beforeEach(() => {
 
 /**
  * The Mermaid leaf's own container — NOT a bare `svg` query, which also matches
- * the lucide icons in code-block chrome.
+ * the icons in code-block chrome.
  */
 const mermaidLeaf = (container: HTMLElement): Element | null =>
   container.querySelector(".mermaid-diagram");
@@ -203,8 +205,10 @@ async function expectMermaidRendered(container: HTMLElement) {
   await waitFor(() => {
     expect(mermaidLeaf(container)).not.toBeNull();
   });
+  // Rendered, not still loading: the diagram's sandboxed frame carries the SVG.
   await waitFor(() => {
-    expect(mermaidLeaf(container)?.querySelector("svg")).not.toBeNull();
+    const frame = mermaidLeaf(container)?.querySelector<HTMLIFrameElement>(".mermaid-diagram-frame");
+    expect(frame?.srcdoc).toContain("<svg");
   });
   // Not a plain code block: the fence was upgraded.
   expect(container.querySelector("code.hljs")).toBeNull();

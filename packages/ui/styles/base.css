@@ -2,6 +2,40 @@
  * Multica shared base styles — imported by all apps
  * ============================================================================= */
 
+/* The UI locale is Chinese, Japanese or Korean. Han, kana and Hangul fill the
+ * whole em square, so wrapped CJK text needs more leading than the Latin value
+ * the type scale pairs with each size. Keyed to <html lang>, which both apps
+ * set from the active locale. */
+@custom-variant cjk (&:is(:lang(zh), :lang(ja), :lang(ko)));
+
+/* The chat launcher overlays the dashboard's bottom-right corner on every
+ * workspace page, so anything that runs to that corner has to stop short of
+ * it. Named rather than spelled out at each site: the intent is legible, every
+ * site that yields to the launcher is findable by these classes, and the
+ * distance stays derived from the launcher's own geometry.
+ *
+ * Which one to reach for depends on how the site approaches the corner:
+ *  - a full-width bar arrives from the left     -> pe-chat-launcher
+ *  - scrollable content ends there              -> pb-chat-launcher
+ *  - a centred overlay grows into it            -> above-chat-launcher
+ *
+ * A centred toolbar (`left-1/2 -translate-x-1/2`) cannot use the padding
+ * variants: inline padding widens it symmetrically, so it reaches just as far
+ * right as before. It has to clear the launcher vertically instead. On a wide
+ * viewport a centred toolbar never gets near the corner, so its clearance is
+ * usually applied under a `max-md:` variant. */
+@utility pe-chat-launcher {
+  padding-inline-end: var(--chat-launcher-clearance);
+}
+
+@utility pb-chat-launcher {
+  padding-bottom: var(--chat-launcher-clearance);
+}
+
+@utility above-chat-launcher {
+  bottom: calc(var(--chat-launcher-clearance) + var(--chat-launcher-inset));
+}
+
 /* Shiki dual themes: CSS-only light/dark switching via CSS variables */
 /* @see https://shiki.style/guide/dual-themes */
 .shiki,
@@ -45,47 +79,6 @@
   animation: onboarding-enter 0.4s ease both;
 }
 
-/* Welcome-after-onboarding Modal: emoji pops in with two quick scale
- * bounces so the celebration registers visually without being
- * disruptive. ~700ms total. */
-@keyframes welcome-emoji-pop {
-  0%   { transform: scale(0.4); opacity: 0; }
-  35%  { transform: scale(1.25); opacity: 1; }
-  55%  { transform: scale(0.92); }
-  75%  { transform: scale(1.12); }
-  100% { transform: scale(1); }
-}
-.animate-welcome-emoji-pop {
-  animation: welcome-emoji-pop 0.7s cubic-bezier(0.4, 0, 0.2, 1) both;
-}
-
-/* Onboarding completion: success badge spring-pop.
- * Lands with a subtle overshoot (scale 1.12 → 1) so the circle feels
- * physical rather than linearly interpolated. Paired with the drawn
- * checkmark below which kicks in after the badge has settled. */
-@keyframes completion-badge {
-  0% { transform: scale(0); opacity: 0; }
-  60% { transform: scale(1.12); opacity: 1; }
-  100% { transform: scale(1); opacity: 1; }
-}
-
-.animate-completion-badge {
-  animation: completion-badge 500ms cubic-bezier(0.5, 1.5, 0.4, 1) both;
-}
-
-/* Onboarding completion: SVG checkmark drawn by animating
- * stroke-dashoffset from 1 → 0. Requires the target <path> to declare
- * `pathLength={1}` and `strokeDasharray={1}` so the stroke length is
- * normalized and the animation is geometry-agnostic. */
-@keyframes completion-check {
-  from { stroke-dashoffset: 1; }
-  to { stroke-dashoffset: 0; }
-}
-
-.animate-completion-check {
-  animation: completion-check 400ms ease-out 350ms both;
-}
-
 /* Chat FAB: gentle color + border tint while a chat task is running.
  * Keeps the ring at the same thickness — only hue shifts towards brand
  * at half-cycle, no outer glow. */
@@ -104,35 +97,57 @@
   animation: chat-impulse 1.6s ease-in-out infinite;
 }
 
-/* ChatGPT-style "thinking" shimmer for inline text — a soft light sweep
- * runs across the glyphs, signalling "the agent is doing something" without
- * a separate spinner. Pure CSS: linear-gradient clipped to the text shape,
- * the gradient slid across via background-position. Uses the same muted →
- * foreground tokens chat copy normally uses, so the effect adapts to light
- * and dark mode without per-mode overrides.
- *
- * Apply to a <span> wrapping the label only — not the whole pill, since
- * the timer counter and Cancel button shouldn't shimmer. */
-@keyframes chat-text-shimmer {
-  0% { background-position: 200% 0; }
-  100% { background-position: -200% 0; }
+/* ShimmerText keeps the base glyphs still and moves a masked highlight over
+ * them. Counter-translate the copy so only the light moves, avoiding the
+ * per-frame text repaint caused by animating a clipped background-position.
+ * The old 200%-wide gradient travelled four label widths per 2.5s cycle.
+ * A six-width window with a repeating two-width mask preserves that spacing
+ * and covers the label throughout the sweep, including the loop seam. */
+@keyframes shimmer-text-window {
+  from { transform: translateX(-66.6666666667%); }
+  to { transform: translateX(0%); }
 }
 
-.animate-chat-text-shimmer {
-  background-image: linear-gradient(
-    90deg,
-    var(--muted-foreground) 0%,
-    var(--muted-foreground) 35%,
-    var(--foreground) 50%,
-    var(--muted-foreground) 65%,
-    var(--muted-foreground) 100%
-  );
-  background-size: 200% 100%;
-  background-clip: text;
-  -webkit-background-clip: text;
-  color: transparent;
-  -webkit-text-fill-color: transparent;
-  animation: chat-text-shimmer 2.5s linear infinite;
+@keyframes shimmer-text-copy {
+  from { transform: translateX(400%); }
+  to { transform: translateX(0%); }
+}
+
+.shimmer-text {
+  display: inline-block;
+  position: relative;
+  max-width: 100%;
+  overflow: hidden;
+  vertical-align: bottom;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  color: var(--muted-foreground);
+}
+
+.shimmer-text-window {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 600%;
+  height: 100%;
+  pointer-events: none;
+  user-select: none;
+  mask-image: linear-gradient(90deg, transparent 35%, black 50%, transparent 65%);
+  mask-size: calc(100% / 3) 100%;
+  mask-repeat: repeat-x;
+  animation: shimmer-text-window 2.5s linear infinite;
+}
+
+.shimmer-text-copy {
+  display: block;
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: calc(100% / 6);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: var(--foreground);
+  animation: shimmer-text-copy 2.5s linear infinite;
 }
 
 /* Navigation progress bar: 2px brand-colored indeterminate sweep with a
@@ -149,37 +164,64 @@
   animation: nav-progress-sweep 1.4s cubic-bezier(0.4, 0, 0.2, 1) infinite;
 }
 
+/* Skeleton: hidden (space still reserved) for the first 200ms, then pulses.
+ * Data that lands inside that window — a warm cache, a prefetched route, a
+ * fast API — swaps straight from nothing to content instead of flashing a
+ * placeholder for a frame or two. Visibility, not opacity, so the hold never
+ * fights the pulse over the same property. */
+@keyframes skeleton-hold {
+  from, to { visibility: hidden; }
+}
+
+@keyframes skeleton-pulse {
+  50% { opacity: 0.5; }
+}
+
+.animate-skeleton {
+  animation:
+    skeleton-hold 200ms step-end,
+    skeleton-pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+}
+
 /* Border beam: a brand-tinted highlight sweeps continuously around the
- * element's rounded border, drawing the eye to a CTA that would otherwise
- * blend into the chrome (e.g. the "switch to agent" affordance in manual
- * create). Built with a conic-gradient on a ::before whose mask carves out a
- * 1px ring; an animated @property angle drives the rotation so only the
- * gradient repaints, not layout. The ring respects `border-radius: inherit`,
- * so any rounded host picks up the right curvature for free. Pair with a
- * subtle background tint on the host so the highlight has something to ride
- * on at low contrast. */
-@property --border-beam-angle {
-  syntax: "<angle>";
-  initial-value: 0deg;
-  inherits: false;
-}
-
+ * host's rounded border, drawing the eye to a CTA that would otherwise blend
+ * into the chrome (e.g. the "switch to agent" affordance in manual create).
+ * Rendered by <BorderBeam /> inside a positioned host. The ring is a static
+ * mask that carves a 1px band out of the host's border box and inherits its
+ * radius; inside it, a square conic gradient rotates via transform. Rotating
+ * the gradient about the host's center looks the same as sweeping its start
+ * angle, but the compositor can run it without repainting the ring every
+ * frame. Pair with a subtle background tint on the host so the highlight has
+ * something to ride on at low contrast. */
 @keyframes border-beam-rotate {
-  to { --border-beam-angle: 360deg; }
+  from { transform: translate(-50%, -50%) rotate(0turn); }
+  to { transform: translate(-50%, -50%) rotate(1turn); }
 }
 
-.border-beam {
-  position: relative;
-}
-
-.border-beam::before {
-  content: "";
+.border-beam-ring {
   position: absolute;
   inset: 0;
   border-radius: inherit;
   padding: 1px;
+  overflow: hidden;
+  pointer-events: none;
+  container-type: size;
+  -webkit-mask:
+    linear-gradient(#000 0 0) content-box,
+    linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor;
+          mask-composite: exclude;
+}
+
+.border-beam-light {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  /* Width + height is at least the diagonal, so the square covers the ring at
+   * every angle. */
+  width: calc(100cqw + 100cqh);
+  aspect-ratio: 1;
   background: conic-gradient(
-    from var(--border-beam-angle),
     transparent 0deg,
     transparent 220deg,
     #ffbe7b 245deg,
@@ -189,18 +231,11 @@
     #5b9dff 345deg,
     transparent 360deg
   );
-  -webkit-mask:
-    linear-gradient(#000 0 0) content-box,
-    linear-gradient(#000 0 0);
-  -webkit-mask-composite: xor;
-          mask-composite: exclude;
   animation: border-beam-rotate 3.2s linear infinite;
-  pointer-events: none;
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .border-beam::before {
-    animation: none;
+  .border-beam-ring {
     background: linear-gradient(
       90deg,
       #ffbe7b,
@@ -209,6 +244,10 @@
       #a07cfe,
       #5b9dff
     );
+  }
+
+  .border-beam-light {
+    display: none;
   }
 }
 
@@ -221,16 +260,27 @@
 /* Sidebar resizing follows the same cursor contract as
  * react-resizable-panels: the resize cursor survives leaving the narrow rail
  * and wins over descendants with their own cursor declarations. Live width is
- * written directly to the two layout shells, so their toggle transitions must
- * stay disabled until the gesture finishes. */
+ * written directly to the layout shells and opt-in chrome consumers, so their
+ * toggle transitions must stay disabled until the gesture finishes. */
 html[data-sidebar-resizing="true"],
 html[data-sidebar-resizing="true"] * {
   cursor: ew-resize !important;
   user-select: none !important;
 }
 
+/* Row drag-and-drop shares the same cursor contract: while a dnd-kit drag
+ * is active the grabbing cursor must survive the pointer leaving the drag
+ * handle and win over descendants' own cursor declarations (including the
+ * preflight `cursor: pointer` on buttons the pointer crosses mid-drag). */
+html[data-dnd-dragging="true"],
+html[data-dnd-dragging="true"] * {
+  cursor: grabbing !important;
+  user-select: none !important;
+}
+
 [data-sidebar-resizing="true"] [data-slot="sidebar-gap"],
-[data-sidebar-resizing="true"] [data-slot="sidebar-container"] {
+[data-sidebar-resizing="true"] [data-slot="sidebar-container"],
+[data-sidebar-resizing="true"] [data-sidebar-resize-consumer] {
   transition: none !important;
 }
 
@@ -252,20 +302,57 @@ html[data-sidebar-resizing="true"] * {
   transition: none;
 }
 
+/* Each block owns only its own author/body, excluding nested replies.
+ * Keep space reserved and keyboard access intact when mouse actions fade out.
+ * Portaled menus hold their trigger visible even after focus leaves the block. */
+[data-comment-actions] {
+  transition: opacity 120ms ease-out;
+}
+
+@media (hover: hover) and (pointer: fine) {
+  [data-comment-block]:not(:hover):not(:focus-within)
+    [data-comment-actions]:not(:has([aria-haspopup][aria-expanded="true"])) {
+    opacity: 0;
+    pointer-events: none;
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
   .animate-entrance-spin,
   .animate-onboarding-enter,
-  .animate-welcome-emoji-pop,
-  .animate-completion-badge,
-  .animate-completion-check,
   .animate-chat-impulse,
-  .animate-chat-text-shimmer,
+  .shimmer-text-window,
+  .shimmer-text-copy,
   .animate-nav-progress-sweep {
     animation: none;
   }
 
+  .animate-skeleton {
+    animation: skeleton-hold 200ms step-end;
+  }
+
+  .shimmer-text-window {
+    display: none;
+  }
+
+  [data-comment-actions],
   [data-right-sidebar-panel] {
     transition: none;
+  }
+}
+
+@media (forced-colors: active) {
+  .shimmer-text {
+    color: CanvasText;
+  }
+
+  .shimmer-text-window,
+  .shimmer-text-copy {
+    animation: none;
+  }
+
+  .shimmer-text-window {
+    display: none;
   }
 }
 

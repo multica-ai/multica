@@ -175,7 +175,7 @@ func TestAutopilotCreateIssuePositionBelowCurrentMinimum(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GetAutopilot: %v", err)
 	}
-	run, err := testHandler.AutopilotService.DispatchAutopilot(ctx, ap, pgtype.UUID{}, "manual", nil)
+	run, _, err := testHandler.AutopilotService.DispatchAutopilotManual(ctx, ap, pgtype.UUID{}, nil, parseUUID(testUserID))
 	if err != nil {
 		t.Fatalf("DispatchAutopilot: %v", err)
 	}

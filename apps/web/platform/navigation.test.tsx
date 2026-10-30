@@ -7,7 +7,7 @@
  * answer it with a router push, or those links silently do nothing.
  */
 import { describe, expect, it, vi, afterEach, beforeEach } from "vitest";
-import { render } from "@testing-library/react";
+import { act, render } from "@testing-library/react";
 
 const router = vi.hoisted(() => ({
   push: vi.fn(),
@@ -121,5 +121,39 @@ describe("WebNavigationProvider canGoBack", () => {
 
   it("reports false where the browser cannot answer, so callers use the fallback", () => {
     expect(renderAdapter()().canGoBack!()).toBe(false);
+  });
+});
+
+/**
+ * MUL-6784 — the fragment is the only part of the current location Next.js
+ * never hands to React: `usePathname()` drops it. Shared views rebuild share
+ * and feedback links from the adapter, so a missing `hash` silently turns a
+ * `#comment-…` deep link into a link to the whole page.
+ */
+describe("WebNavigationProvider hash", () => {
+  afterEach(() => {
+    window.location.hash = "";
+  });
+
+  it("reports the fragment of the page being rendered", () => {
+    window.location.hash = "#comment-c1";
+
+    expect(renderAdapter()().hash).toBe("#comment-c1");
+  });
+
+  it('reports "" when the location has no fragment', () => {
+    expect(renderAdapter()().hash).toBe("");
+  });
+
+  it("re-reads the fragment when it changes after mount", async () => {
+    const adapter = renderAdapter();
+
+    await act(async () => {
+      window.location.hash = "#comment-c2";
+      // jsdom dispatches hashchange in a later task, like the browser.
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+
+    expect(adapter().hash).toBe("#comment-c2");
   });
 });

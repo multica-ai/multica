@@ -5,6 +5,17 @@ type UseIssueDetailScrollRestoreArgs = {
   scrollContainerEl: HTMLElement | null;
   ready: boolean;
   disabled?: boolean;
+  /**
+   * Authoritative restore target from the platform's tab memento, when one
+   * is being served (MUL-4741). It wins over this hook's module-level map:
+   * the memento is captured from the live DOM at the moment the view is
+   * left, while the map only hears scroll *events* — content-driven
+   * position shifts (scroll anchoring, streaming blocks collapsing) move
+   * scrollTop without one, leaving the map holding an older visit. Without
+   * this, the two restores race and the retry loop below overwrites the
+   * memento's fresher offset with the stale one.
+   */
+  overrideTop?: number;
 };
 
 const scrollPositions = new Map<string, number>();
@@ -15,6 +26,7 @@ export function useIssueDetailScrollRestore({
   scrollContainerEl,
   ready,
   disabled = false,
+  overrideTop,
 }: UseIssueDetailScrollRestoreArgs) {
   const restoredKeyRef = useRef<string | null>(null);
 
@@ -47,14 +59,14 @@ export function useIssueDetailScrollRestore({
 
     restoredKeyRef.current = restoreKey;
 
-    const target = scrollPositions.get(restoreKey) ?? 0;
+    const target = overrideTop ?? scrollPositions.get(restoreKey) ?? 0;
     if (target <= 1) {
       scrollContainerEl.scrollTop = target;
       return;
     }
 
     return restoreScrollTopWithRetry(scrollContainerEl, target);
-  }, [scrollContainerEl, restoreKey, ready, disabled]);
+  }, [scrollContainerEl, restoreKey, ready, disabled, overrideTop]);
 }
 
 function saveScrollPosition(restoreKey: string, scrollTop: number) {

@@ -1,0 +1,2 @@
+DROP TRIGGER IF EXISTS mirror_dingtalk_group_presence_bot_identity ON dingtalk_group_presence;
+DROP FUNCTION IF EXISTS mirror_dingtalk_group_presence_bot_identity();

@@ -4,6 +4,7 @@ import (
 	"math"
 	"strconv"
 	"testing"
+	"time"
 
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/testutil"
@@ -17,7 +18,7 @@ func TestBusinessMetricsLifecycleCountersAndGauge(t *testing.T) {
 
 	m.RecordTaskEnqueued("issue", "local")
 	for i := 0; i < 100; i++ {
-		m.RecordTaskDispatched("task-"+strconv.Itoa(i), "issue", "local", 2.5)
+		m.RecordTaskDispatched("task-"+strconv.Itoa(i), "issue", "local", 2.5, 0.5)
 	}
 	m.RecordTaskStarted("issue", "local", "codex")
 	m.RecordTaskTerminal("task-0", "issue", "local", "completed", 10, 20, 1)
@@ -43,6 +44,9 @@ func TestBusinessMetricsLifecycleCountersAndGauge(t *testing.T) {
 	if got := testutil.CollectAndCount(m.taskQueueWait); got != 1 {
 		t.Fatalf("queue wait series count = %d, want 1", got)
 	}
+	if got := testutil.CollectAndCount(m.taskClaimableWait); got != 1 {
+		t.Fatalf("claimable wait series count = %d, want 1", got)
+	}
 	if got := testutil.CollectAndCount(m.taskRunSeconds); got != 1 {
 		t.Fatalf("run seconds series count = %d, want 1", got)
 	}
@@ -63,6 +67,29 @@ func TestBusinessMetricsFailureReasonUsesCanonicalClassifier(t *testing.T) {
 	}
 	if got := testutil.ToFloat64(m.taskFailed.WithLabelValues("issue", "local", taskfailure.ReasonAgentUnknown.String())); got != 0 {
 		t.Fatalf("unknown failure counter = %v, want 0", got)
+	}
+}
+
+func TestBusinessMetricsChatClaimResumeObservations(t *testing.T) {
+	m := NewBusinessMetrics()
+
+	m.RecordChatClaimSessionFallbackNeeded()
+	m.RecordChatClaimSessionFallbackHit()
+	m.RecordChatClaimSessionFallbackMiss()
+	m.RecordChatClaimSessionFallbackError()
+	m.ObserveChatClaimLastSessionQuery(0.01)
+	m.ObserveChatClaimRolloutMissingQuery(0.02)
+
+	if got := testutil.ToFloat64(m.chatClaimSessionFallbackNeeded); got != 1 {
+		t.Errorf("chat claim fallback needed = %v, want 1", got)
+	}
+	for _, result := range []string{"hit", "miss", "error"} {
+		if got := testutil.ToFloat64(m.chatClaimSessionFallbackResult.WithLabelValues(result)); got != 1 {
+			t.Errorf("chat claim fallback %s = %v, want 1", result, got)
+		}
+	}
+	if got := testutil.CollectAndCount(m.chatClaimResumeQueryDuration); got != 2 {
+		t.Fatalf("chat claim resume query series = %d, want 2", got)
 	}
 }
 
@@ -102,12 +129,17 @@ func TestBusinessMetricsRegistryExposesAllFamilies(t *testing.T) {
 	registry.MustRegister(m.Collectors()...)
 
 	m.RecordTaskEnqueued("issue", "local")
-	m.RecordTaskDispatched("task-1", "issue", "local", 1)
+	m.RecordTaskDispatched("task-1", "issue", "local", 1, 0.25)
 	m.RecordTaskStarted("issue", "local", "codex")
 	m.RecordTaskTerminal("task-1", "issue", "local", "completed", 2, 3, 1)
 	m.RecordTaskFailed("issue", "local", taskfailure.ReasonTimeout.String())
 	m.RecordTaskQueuedExpired("issue", "local")
 	m.RecordTaskLeaseExpired("issue")
+	m.RecordChatClaimSessionFallbackNeeded()
+	m.RecordChatClaimSessionFallbackHit()
+	m.ObserveChatClaimLastSessionQuery(0.01)
+	m.ObserveChatClaimRolloutMissingQuery(0.01)
+	m.RecordIssueMetadataMutation("set", "changed", 10*time.Millisecond)
 	m.RecordLLMUsage("issue", "local", "codex", "gpt-5.4", 1, 1, 1, 1, 0)
 	m.RecordLLMUsage("issue", "local", "custom-provider", "custom-model", 1, 0, 0, 0, 0)
 
@@ -142,12 +174,20 @@ func TestBusinessMetricsRegistryExposesAllFamilies(t *testing.T) {
 	m.RecordAutopilotRunSkipped("manual", "throttled")
 	m.RecordWebhookDelivery("github", "dispatched")
 	m.RecordWebhookRateLimited("absolute_ip")
+	m.RecordEmailRateLimited("workspace_invitation", "recipient")
 	m.RecordGithubEventReceived("pull_request", "opened")
 	m.RecordGithubPRReview("approved")
 	m.ObserveGithubPRMergeSeconds(120)
 	m.RecordCloudRuntimeRequest("provision", "ok", 0.5)
 	m.RecordDaemonWSMessageReceived("heartbeat")
 	m.RecordChatOutputLocalPath("file_url")
+	m.RecordEntitlementConfigError()
+	m.RecordEntitlementCache("hit")
+	m.RecordEntitlementRefresh("success", 0.01)
+	m.RecordEntitlementDecision("autopilot_runs", "observe", "cache_fresh")
+	m.RecordEntitlementVersionRegression()
+	m.RecordAutopilotQuotaDecision("observe", "manual", "admitted")
+	m.ObserveRuntimeSweepStage(RuntimeSweepStageLiveness, time.Second, 2, 1)
 
 	families, err := registry.Gather()
 	if err != nil {
@@ -161,6 +201,45 @@ func TestBusinessMetricsRegistryExposesAllFamilies(t *testing.T) {
 		if !seen[metric] {
 			t.Fatalf("registry did not expose metric family %s", metric)
 		}
+	}
+	if !seen["multica_entitlement_config_error_total"] {
+		t.Fatal("registry did not expose metric family multica_entitlement_config_error_total")
+	}
+}
+
+func TestBusinessMetricsRuntimeGC(t *testing.T) {
+	m := NewBusinessMetrics()
+	m.RecordRuntimeGCDeleted()
+	m.RecordRuntimeGCFailed()
+	m.RecordRuntimeGCSkipped(RuntimeGCSkipNonTerminalTask)
+
+	if got := testutil.ToFloat64(m.runtimeGCDeleted); got != 1 {
+		t.Fatalf("runtime GC deleted = %v, want 1", got)
+	}
+	if got := testutil.ToFloat64(m.runtimeGCFailed); got != 1 {
+		t.Fatalf("runtime GC failed = %v, want 1", got)
+	}
+	if got := testutil.ToFloat64(m.runtimeGCSkipped.WithLabelValues(RuntimeGCSkipNonTerminalTask)); got != 1 {
+		t.Fatalf("runtime GC skipped = %v, want 1", got)
+	}
+}
+
+func TestBusinessMetricsRuntimeSweepStage(t *testing.T) {
+	m := NewBusinessMetrics()
+	m.ObserveRuntimeSweepStage(RuntimeSweepStageLiveness, 250*time.Millisecond, 3, 1)
+	m.ObserveRuntimeSweepStage("unbounded-user-value", time.Second, -1, -1)
+
+	if got := testutil.ToFloat64(m.runtimeSweepCandidateRows.WithLabelValues(RuntimeSweepStageLiveness)); got != 3 {
+		t.Fatalf("runtime liveness candidate rows = %v, want 3", got)
+	}
+	if got := testutil.ToFloat64(m.runtimeSweepRowsChanged.WithLabelValues(RuntimeSweepStageLiveness)); got != 1 {
+		t.Fatalf("runtime liveness changed rows = %v, want 1", got)
+	}
+	if got := testutil.ToFloat64(m.runtimeSweepCandidateRows.WithLabelValues("other")); got != 0 {
+		t.Fatalf("normalized other candidate rows = %v, want 0", got)
+	}
+	if got := testutil.CollectAndCount(m.runtimeSweepStageDuration); got != 2 {
+		t.Fatalf("runtime sweep duration series = %d, want 2", got)
 	}
 }
 
@@ -215,6 +294,59 @@ func TestBusinessMetricsFallsBackToRateTableWithoutProviderCost(t *testing.T) {
 	output := testutil.ToFloat64(m.llmCostUSD.WithLabelValues("xai", "grok-4.5", "output", "local", "issue"))
 	if math.Abs(input-2) > 1e-9 || math.Abs(output-6) > 1e-9 {
 		t.Fatalf("estimated cost = (%v, %v), want (2, 6) from the rate table", input, output)
+	}
+}
+
+func TestBusinessMetricsCostOnlyUsage(t *testing.T) {
+	for _, tc := range []struct {
+		name         string
+		model        string
+		provider     string
+		requestModel string
+	}{
+		{"priced", "grok-4.6", "xai", "grok-4.6"},
+		{"unpriced", "grok-composer-2.5-fast", "grok", "unknown"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			m := NewBusinessMetrics()
+			const actualUSD = 0.01
+			m.RecordLLMUsage("issue", "local", "grok", tc.model,
+				0, 0, 0, 0, int64(actualUSD*CostUSDTicksPerUSD))
+
+			// Inspect collectors without creating zero-token series in the test.
+			if got := testutil.CollectAndCount(m.llmTokens); got != 0 {
+				t.Errorf("priced token series = %d, want 0", got)
+			}
+			if got := testutil.CollectAndCount(m.llmUnpricedTokens); got != 0 {
+				t.Errorf("unpriced token series = %d, want 0", got)
+			}
+			if got := testutil.CollectAndCount(m.llmCostUSD); got != 1 {
+				t.Errorf("cost series = %d, want 1", got)
+			}
+			got := testutil.ToFloat64(m.llmCostUSD.WithLabelValues(
+				tc.provider, tc.model, "input", "local", "issue"))
+			if math.Abs(got-actualUSD) > 1e-9 {
+				t.Errorf("recorded cost = %v, want %v", got, actualUSD)
+			}
+			if got := testutil.ToFloat64(m.llmRequests.WithLabelValues(tc.provider, tc.requestModel, "local")); got != 1 {
+				t.Errorf("request counter = %v, want 1", got)
+			}
+		})
+	}
+}
+
+func TestBusinessMetricsEmptyPricedUsage(t *testing.T) {
+	m := NewBusinessMetrics()
+	m.RecordLLMUsage("issue", "local", "grok", "grok-4.6", 0, 0, 0, 0, 0)
+
+	if got := testutil.CollectAndCount(m.llmTokens); got != 0 {
+		t.Errorf("token series = %d, want 0", got)
+	}
+	if got := testutil.CollectAndCount(m.llmCostUSD); got != 0 {
+		t.Errorf("cost series = %d, want 0", got)
+	}
+	if got := testutil.ToFloat64(m.llmRequests.WithLabelValues("xai", "grok-4.6", "local")); got != 1 {
+		t.Errorf("request counter = %v, want 1", got)
 	}
 }
 

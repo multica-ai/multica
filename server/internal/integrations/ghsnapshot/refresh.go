@@ -9,6 +9,7 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
+	"github.com/multica-ai/multica/server/internal/dbreader"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
 
@@ -39,8 +40,15 @@ var (
 	defaultSweepTTL      = 10 * time.Minute
 	defaultSweepInterval = 10 * time.Minute
 	defaultSweepMaxRows  = int32(200)
-	maxChaseAttempts     = 12
-	queueBuffer          = 2048
+	// PRs watched by a "wake on merge conflict" rule stay in the sweep even
+	// when decided, re-fetched once their snapshot is older than this.
+	defaultWatchTTL = 5 * time.Minute
+	// After a merge into a repository, GitHub recomputes the other PRs'
+	// mergeability asynchronously and may still answer with the old verdict
+	// at first, so watched PRs are fetched after each of these delays.
+	defaultMergeWatchDelays = []time.Duration{30 * time.Second, 3 * time.Minute}
+	maxChaseAttempts        = 12
+	queueBuffer             = 2048
 )
 
 // Manager owns the outbound GitHub API refresh pipeline. A Manager whose client
@@ -49,16 +57,19 @@ var (
 // PR linking, merge→Done, or any other existing behavior (acceptance
 // criterion 4).
 type Manager struct {
-	client    *Client
-	queries   *db.Queries
-	pool      TxBeginner
-	onApplied func(ctx context.Context, prID pgtype.UUID)
+	client       *Client
+	queries      *db.Queries
+	readSelector *dbreader.Selector
+	pool         TxBeginner
+	onApplied    func(ctx context.Context, prID pgtype.UUID)
 
 	concurrency   int
 	viewTTL       time.Duration
 	sweepTTL      time.Duration
 	sweepInterval time.Duration
 	sweepMaxRows  int32
+	watchTTL      time.Duration
+	mergeDelays   []time.Duration
 	chaseBackoff  []time.Duration
 	now           func() time.Time
 	jitter        func() time.Duration
@@ -77,6 +88,8 @@ type Manager struct {
 	// this cursor and wraps, preventing a fixed first page from starving later
 	// installations when early addresses repeatedly fail.
 	sweepAfter address
+	// The same rotation for the conflict-watch sweep.
+	watchAfter address
 	// Secondary rate limits are scoped to the installation whose token incurred
 	// them. One customer must never pause every other installation.
 	rateUntil map[int64]time.Time
@@ -92,6 +105,7 @@ func NewManager(client *Client, queries *db.Queries, pool TxBeginner, onApplied 
 	return &Manager{
 		client:        client,
 		queries:       queries,
+		readSelector:  dbreader.NewPrimaryOnly(queries),
 		pool:          pool,
 		onApplied:     onApplied,
 		concurrency:   defaultConcurrency,
@@ -99,6 +113,8 @@ func NewManager(client *Client, queries *db.Queries, pool TxBeginner, onApplied 
 		sweepTTL:      defaultSweepTTL,
 		sweepInterval: defaultSweepInterval,
 		sweepMaxRows:  defaultSweepMaxRows,
+		watchTTL:      defaultWatchTTL,
+		mergeDelays:   defaultMergeWatchDelays,
 		chaseBackoff:  defaultChaseBackoff,
 		now:           time.Now,
 		jitter:        func() time.Duration { return time.Duration(rand.Int63n(int64(250 * time.Millisecond))) },
@@ -109,6 +125,15 @@ func NewManager(client *Client, queries *db.Queries, pool TxBeginner, onApplied 
 		trailing:      map[address]bool{},
 		attempts:      map[address]int{},
 		rateUntil:     map[int64]time.Time{},
+	}
+}
+
+// SetReadSelector opts the refresh worker into the API server's configured
+// replica routing. It must be called before Start; managers used by tests and
+// primary-only deployments retain the safe primary default from NewManager.
+func (m *Manager) SetReadSelector(selector *dbreader.Selector) {
+	if selector != nil {
+		m.readSelector = selector
 	}
 }
 
@@ -234,7 +259,7 @@ func (m *Manager) process(ctx context.Context, addr address) {
 		return
 	}
 
-	rows, err := m.queries.ListGitHubPRRowsByAddress(ctx, db.ListGitHubPRRowsByAddressParams{
+	rows, err := m.listGitHubPRRowsByAddress(ctx, db.ListGitHubPRRowsByAddressParams{
 		InstallationID: addr.InstallationID,
 		RepoOwner:      addr.Owner,
 		RepoName:       addr.Repo,
@@ -265,10 +290,13 @@ func (m *Manager) process(ctx context.Context, addr address) {
 		}
 	}
 
-	// Chase decision. Chase only while the snapshot is undecided AND we still
-	// have an open PR row on this head. If nothing applied (head advanced past
-	// this response, or the PR is gone), the webhook that moved the head has
-	// already enqueued the fresh head, so we stop here.
+	// Chase only while the snapshot is undecided AND a write proved that an
+	// open PR row still exists on this head. If the head advanced, its webhook
+	// owns the next refresh; if the row was removed, nothing remains to refresh.
+	// Replica lag can instead make rows empty; that omission is recovered by the
+	// bounded TTL sweep for an open/draft PR or by a later page-view refresh, so
+	// it must not start a chase without having observed current row state. A
+	// logged write failure is likewise left to those later triggers.
 	if anyApplied && anyOpenApplied && !snap.Decided() {
 		m.scheduleChase(addr)
 	} else {
@@ -276,6 +304,23 @@ func (m *Manager) process(ctx context.Context, addr address) {
 		delete(m.attempts, addr)
 		m.mu.Unlock()
 	}
+}
+
+// listGitHubPRRowsByAddress is eventual-consistency safe because the returned
+// IDs are only candidates for primary writes. Each write checks the current
+// head SHA on the primary, so replica lag can omit an update but cannot apply a
+// snapshot for an old head. The TTL sweep and page-view trigger recover omitted
+// rows.
+func (m *Manager) listGitHubPRRowsByAddress(ctx context.Context, params db.ListGitHubPRRowsByAddressParams) ([]db.ListGitHubPRRowsByAddressRow, error) {
+	return dbreader.Read(
+		ctx,
+		m.readSelector,
+		dbreader.BusinessGitHubPRRefresh,
+		dbreader.EventualConsistency,
+		func(ctx context.Context, queries *db.Queries) ([]db.ListGitHubPRRowsByAddressRow, error) {
+			return queries.ListGitHubPRRowsByAddress(ctx, params)
+		},
+	)
 }
 
 func (m *Manager) rateLimitPause(installationID int64) time.Duration {
@@ -459,11 +504,16 @@ func (m *Manager) sweepLoop(ctx context.Context) {
 	}
 }
 
-// sweepOnce enqueues a refresh for every open PR whose snapshot is both stale
-// and undecided. Bounded by sweepMaxRows. This is the safety net for an
+func (m *Manager) sweepOnce(ctx context.Context) {
+	m.sweepUndecided(ctx)
+	m.sweepConflictWatched(ctx)
+}
+
+// sweepUndecided enqueues a refresh for every open PR whose snapshot is both
+// stale and undecided. Bounded by sweepMaxRows. This is the safety net for an
 // undecided PR whose base branch changes without a pull_request webhook, and
 // for any webhook that was dropped during a deploy.
-func (m *Manager) sweepOnce(ctx context.Context) {
+func (m *Manager) sweepUndecided(ctx context.Context) {
 	m.mu.Lock()
 	after := m.sweepAfter
 	m.mu.Unlock()
@@ -493,6 +543,62 @@ func (m *Manager) sweepOnce(ctx context.Context) {
 	}
 	for _, r := range rows {
 		m.Enqueue(r.InstallationID, r.RepoOwner, r.RepoName, r.PrNumber)
+	}
+}
+
+// sweepConflictWatched keeps the PRs a "wake on merge conflict" rule watches
+// fresh. A decided snapshot leaves the undecided sweep, yet a direct push to
+// the base branch can make it conflicting with no event for the PR itself.
+func (m *Manager) sweepConflictWatched(ctx context.Context) {
+	m.mu.Lock()
+	after := m.watchAfter
+	m.mu.Unlock()
+
+	rows, err := m.queries.ListStaleConflictWatchedGitHubPRs(ctx, db.ListStaleConflictWatchedGitHubPRsParams{
+		OlderThan:           tsFromTime(m.now().Add(-m.watchTTL)),
+		AfterInstallationID: after.InstallationID,
+		AfterRepoOwner:      after.Owner,
+		AfterRepoName:       after.Repo,
+		AfterPrNumber:       after.Number,
+		MaxRows:             m.sweepMaxRows,
+	})
+	if err != nil {
+		slog.Warn("ghsnapshot: conflict-watch sweep query failed", "err", err.Error())
+		return
+	}
+	if len(rows) > 0 {
+		last := rows[len(rows)-1]
+		m.mu.Lock()
+		m.watchAfter = address{InstallationID: last.InstallationID, Owner: last.RepoOwner, Repo: last.RepoName, Number: last.PrNumber}
+		m.mu.Unlock()
+	}
+	for _, r := range rows {
+		m.Enqueue(r.InstallationID, r.RepoOwner, r.RepoName, r.PrNumber)
+	}
+}
+
+// RefreshConflictWatchers schedules refreshes for the open PRs in a repository
+// that a "wake on merge conflict" rule watches, after the PR numbered merged
+// merged there. That can move their base, which sends no event for them.
+func (m *Manager) RefreshConflictWatchers(ctx context.Context, installationID int64, owner, repo string, merged int32) {
+	if !m.Enabled() {
+		return
+	}
+	numbers, err := m.queries.ListConflictWatchedGitHubPRNumbersInRepo(ctx, db.ListConflictWatchedGitHubPRNumbersInRepoParams{
+		InstallationID: installationID,
+		RepoOwner:      owner,
+		RepoName:       repo,
+		PrNumber:       merged,
+	})
+	if err != nil {
+		slog.Warn("ghsnapshot: conflict-watch lookup failed", "err", err.Error())
+		return
+	}
+	for _, number := range numbers {
+		addr := address{InstallationID: installationID, Owner: owner, Repo: repo, Number: number}
+		for _, delay := range m.mergeDelays {
+			m.scheduleRetry(addr, delay)
+		}
 	}
 }
 

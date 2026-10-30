@@ -17,7 +17,7 @@ SET response_status = $2,
     response_body = $3,
     last_attempt_at = now()
 WHERE id = $1
-RETURNING id, workspace_id, autopilot_id, trigger_id, provider, event, dedupe_key, dedupe_source, signature_status, status, attempt_count, selected_headers, content_type, raw_body, response_status, response_body, autopilot_run_id, replayed_from_delivery_id, error, received_at, last_attempt_at, created_at, available_at, lease_token, lease_expires_at, dispatch_attempts
+RETURNING id, workspace_id, autopilot_id, trigger_id, provider, event, dedupe_key, dedupe_source, signature_status, status, attempt_count, selected_headers, content_type, raw_body, response_status, response_body, autopilot_run_id, replayed_from_delivery_id, error, received_at, last_attempt_at, created_at, available_at, lease_token, lease_expires_at, dispatch_attempts, reason_code, replay_idempotency_key
 `
 
 type AcknowledgeWebhookDeliveryParams struct {
@@ -59,6 +59,8 @@ func (q *Queries) AcknowledgeWebhookDelivery(ctx context.Context, arg Acknowledg
 		&i.LeaseToken,
 		&i.LeaseExpiresAt,
 		&i.DispatchAttempts,
+		&i.ReasonCode,
+		&i.ReplayIdempotencyKey,
 	)
 	return i, err
 }
@@ -68,7 +70,7 @@ UPDATE webhook_delivery
 SET attempt_count = attempt_count + 1,
     last_attempt_at = now()
 WHERE id = $1
-RETURNING id, workspace_id, autopilot_id, trigger_id, provider, event, dedupe_key, dedupe_source, signature_status, status, attempt_count, selected_headers, content_type, raw_body, response_status, response_body, autopilot_run_id, replayed_from_delivery_id, error, received_at, last_attempt_at, created_at, available_at, lease_token, lease_expires_at, dispatch_attempts
+RETURNING id, workspace_id, autopilot_id, trigger_id, provider, event, dedupe_key, dedupe_source, signature_status, status, attempt_count, selected_headers, content_type, raw_body, response_status, response_body, autopilot_run_id, replayed_from_delivery_id, error, received_at, last_attempt_at, created_at, available_at, lease_token, lease_expires_at, dispatch_attempts, reason_code, replay_idempotency_key
 `
 
 // On duplicate detection, bump attempt_count and refresh last_attempt_at on
@@ -104,6 +106,8 @@ func (q *Queries) BumpWebhookDeliveryAttempt(ctx context.Context, id pgtype.UUID
 		&i.LeaseToken,
 		&i.LeaseExpiresAt,
 		&i.DispatchAttempts,
+		&i.ReasonCode,
+		&i.ReplayIdempotencyKey,
 	)
 	return i, err
 }
@@ -124,7 +128,7 @@ SET lease_token = gen_random_uuid(),
     lease_expires_at = now() + interval '2 minutes'
 FROM candidate
 WHERE d.id = candidate.id
-RETURNING d.id, d.workspace_id, d.autopilot_id, d.trigger_id, d.provider, d.event, d.dedupe_key, d.dedupe_source, d.signature_status, d.status, d.attempt_count, d.selected_headers, d.content_type, d.raw_body, d.response_status, d.response_body, d.autopilot_run_id, d.replayed_from_delivery_id, d.error, d.received_at, d.last_attempt_at, d.created_at, d.available_at, d.lease_token, d.lease_expires_at, d.dispatch_attempts
+RETURNING d.id, d.workspace_id, d.autopilot_id, d.trigger_id, d.provider, d.event, d.dedupe_key, d.dedupe_source, d.signature_status, d.status, d.attempt_count, d.selected_headers, d.content_type, d.raw_body, d.response_status, d.response_body, d.autopilot_run_id, d.replayed_from_delivery_id, d.error, d.received_at, d.last_attempt_at, d.created_at, d.available_at, d.lease_token, d.lease_expires_at, d.dispatch_attempts, d.reason_code, d.replay_idempotency_key
 `
 
 // Claims one due delivery. SKIP LOCKED spreads work across replicas; the
@@ -162,6 +166,8 @@ func (q *Queries) ClaimQueuedWebhookDelivery(ctx context.Context) (WebhookDelive
 		&i.LeaseToken,
 		&i.LeaseExpiresAt,
 		&i.DispatchAttempts,
+		&i.ReasonCode,
+		&i.ReplayIdempotencyKey,
 	)
 	return i, err
 }
@@ -172,13 +178,14 @@ SET status = $3,
     autopilot_run_id = $4,
     dispatch_attempts = dispatch_attempts + 1,
     error = $5,
+    reason_code = $6,
     lease_token = NULL,
     lease_expires_at = NULL,
     last_attempt_at = now()
 WHERE id = $1
   AND lease_token = $2
   AND status = 'queued'
-RETURNING id, workspace_id, autopilot_id, trigger_id, provider, event, dedupe_key, dedupe_source, signature_status, status, attempt_count, selected_headers, content_type, raw_body, response_status, response_body, autopilot_run_id, replayed_from_delivery_id, error, received_at, last_attempt_at, created_at, available_at, lease_token, lease_expires_at, dispatch_attempts
+RETURNING id, workspace_id, autopilot_id, trigger_id, provider, event, dedupe_key, dedupe_source, signature_status, status, attempt_count, selected_headers, content_type, raw_body, response_status, response_body, autopilot_run_id, replayed_from_delivery_id, error, received_at, last_attempt_at, created_at, available_at, lease_token, lease_expires_at, dispatch_attempts, reason_code, replay_idempotency_key
 `
 
 type CompleteClaimedWebhookDeliveryParams struct {
@@ -187,6 +194,7 @@ type CompleteClaimedWebhookDeliveryParams struct {
 	Status         string      `json:"status"`
 	AutopilotRunID pgtype.UUID `json:"autopilot_run_id"`
 	Error          pgtype.Text `json:"error"`
+	ReasonCode     pgtype.Text `json:"reason_code"`
 }
 
 func (q *Queries) CompleteClaimedWebhookDelivery(ctx context.Context, arg CompleteClaimedWebhookDeliveryParams) (WebhookDelivery, error) {
@@ -196,6 +204,7 @@ func (q *Queries) CompleteClaimedWebhookDelivery(ctx context.Context, arg Comple
 		arg.Status,
 		arg.AutopilotRunID,
 		arg.Error,
+		arg.ReasonCode,
 	)
 	var i WebhookDelivery
 	err := row.Scan(
@@ -225,6 +234,8 @@ func (q *Queries) CompleteClaimedWebhookDelivery(ctx context.Context, arg Comple
 		&i.LeaseToken,
 		&i.LeaseExpiresAt,
 		&i.DispatchAttempts,
+		&i.ReasonCode,
+		&i.ReplayIdempotencyKey,
 	)
 	return i, err
 }
@@ -235,13 +246,14 @@ INSERT INTO webhook_delivery (
     workspace_id, autopilot_id, trigger_id, provider, event,
     dedupe_key, dedupe_source, signature_status, status,
     selected_headers, content_type, raw_body,
-    replayed_from_delivery_id
+    replayed_from_delivery_id, replay_idempotency_key, reason_code, id
 ) VALUES (
     $1, $2, $3, $4, $5,
     $9, $10, $6, $7,
     $8, $11, $12,
-    $13
-) RETURNING id, workspace_id, autopilot_id, trigger_id, provider, event, dedupe_key, dedupe_source, signature_status, status, attempt_count, selected_headers, content_type, raw_body, response_status, response_body, autopilot_run_id, replayed_from_delivery_id, error, received_at, last_attempt_at, created_at, available_at, lease_token, lease_expires_at, dispatch_attempts
+    $13, $14,
+    $15, COALESCE($16::uuid, gen_random_uuid())
+) RETURNING id, workspace_id, autopilot_id, trigger_id, provider, event, dedupe_key, dedupe_source, signature_status, status, attempt_count, selected_headers, content_type, raw_body, response_status, response_body, autopilot_run_id, replayed_from_delivery_id, error, received_at, last_attempt_at, created_at, available_at, lease_token, lease_expires_at, dispatch_attempts, reason_code, replay_idempotency_key
 `
 
 type CreateWebhookDeliveryParams struct {
@@ -258,6 +270,9 @@ type CreateWebhookDeliveryParams struct {
 	ContentType            pgtype.Text `json:"content_type"`
 	RawBody                []byte      `json:"raw_body"`
 	ReplayedFromDeliveryID pgtype.UUID `json:"replayed_from_delivery_id"`
+	ReplayIdempotencyKey   pgtype.Text `json:"replay_idempotency_key"`
+	ReasonCode             pgtype.Text `json:"reason_code"`
+	ID                     pgtype.UUID `json:"id"`
 }
 
 // =====================
@@ -281,6 +296,9 @@ func (q *Queries) CreateWebhookDelivery(ctx context.Context, arg CreateWebhookDe
 		arg.ContentType,
 		arg.RawBody,
 		arg.ReplayedFromDeliveryID,
+		arg.ReplayIdempotencyKey,
+		arg.ReasonCode,
+		arg.ID,
 	)
 	var i WebhookDelivery
 	err := row.Scan(
@@ -310,6 +328,8 @@ func (q *Queries) CreateWebhookDelivery(ctx context.Context, arg CreateWebhookDe
 		&i.LeaseToken,
 		&i.LeaseExpiresAt,
 		&i.DispatchAttempts,
+		&i.ReasonCode,
+		&i.ReplayIdempotencyKey,
 	)
 	return i, err
 }
@@ -322,7 +342,7 @@ SET available_at = $3,
 WHERE id = $1
   AND lease_token = $2
   AND status = 'queued'
-RETURNING id, workspace_id, autopilot_id, trigger_id, provider, event, dedupe_key, dedupe_source, signature_status, status, attempt_count, selected_headers, content_type, raw_body, response_status, response_body, autopilot_run_id, replayed_from_delivery_id, error, received_at, last_attempt_at, created_at, available_at, lease_token, lease_expires_at, dispatch_attempts
+RETURNING id, workspace_id, autopilot_id, trigger_id, provider, event, dedupe_key, dedupe_source, signature_status, status, attempt_count, selected_headers, content_type, raw_body, response_status, response_body, autopilot_run_id, replayed_from_delivery_id, error, received_at, last_attempt_at, created_at, available_at, lease_token, lease_expires_at, dispatch_attempts, reason_code, replay_idempotency_key
 `
 
 type DeferClaimedWebhookDeliveryParams struct {
@@ -363,12 +383,14 @@ func (q *Queries) DeferClaimedWebhookDelivery(ctx context.Context, arg DeferClai
 		&i.LeaseToken,
 		&i.LeaseExpiresAt,
 		&i.DispatchAttempts,
+		&i.ReasonCode,
+		&i.ReplayIdempotencyKey,
 	)
 	return i, err
 }
 
 const getWebhookDelivery = `-- name: GetWebhookDelivery :one
-SELECT id, workspace_id, autopilot_id, trigger_id, provider, event, dedupe_key, dedupe_source, signature_status, status, attempt_count, selected_headers, content_type, raw_body, response_status, response_body, autopilot_run_id, replayed_from_delivery_id, error, received_at, last_attempt_at, created_at, available_at, lease_token, lease_expires_at, dispatch_attempts FROM webhook_delivery
+SELECT id, workspace_id, autopilot_id, trigger_id, provider, event, dedupe_key, dedupe_source, signature_status, status, attempt_count, selected_headers, content_type, raw_body, response_status, response_body, autopilot_run_id, replayed_from_delivery_id, error, received_at, last_attempt_at, created_at, available_at, lease_token, lease_expires_at, dispatch_attempts, reason_code, replay_idempotency_key FROM webhook_delivery
 WHERE id = $1
 `
 
@@ -402,12 +424,14 @@ func (q *Queries) GetWebhookDelivery(ctx context.Context, id pgtype.UUID) (Webho
 		&i.LeaseToken,
 		&i.LeaseExpiresAt,
 		&i.DispatchAttempts,
+		&i.ReasonCode,
+		&i.ReplayIdempotencyKey,
 	)
 	return i, err
 }
 
 const getWebhookDeliveryByTriggerAndDedupe = `-- name: GetWebhookDeliveryByTriggerAndDedupe :one
-SELECT id, workspace_id, autopilot_id, trigger_id, provider, event, dedupe_key, dedupe_source, signature_status, status, attempt_count, selected_headers, content_type, raw_body, response_status, response_body, autopilot_run_id, replayed_from_delivery_id, error, received_at, last_attempt_at, created_at, available_at, lease_token, lease_expires_at, dispatch_attempts FROM webhook_delivery
+SELECT id, workspace_id, autopilot_id, trigger_id, provider, event, dedupe_key, dedupe_source, signature_status, status, attempt_count, selected_headers, content_type, raw_body, response_status, response_body, autopilot_run_id, replayed_from_delivery_id, error, received_at, last_attempt_at, created_at, available_at, lease_token, lease_expires_at, dispatch_attempts, reason_code, replay_idempotency_key FROM webhook_delivery
 WHERE trigger_id = $1
   AND dedupe_key = $2
 ORDER BY (status IN ('rejected', 'failed')), created_at DESC
@@ -456,12 +480,14 @@ func (q *Queries) GetWebhookDeliveryByTriggerAndDedupe(ctx context.Context, arg 
 		&i.LeaseToken,
 		&i.LeaseExpiresAt,
 		&i.DispatchAttempts,
+		&i.ReasonCode,
+		&i.ReplayIdempotencyKey,
 	)
 	return i, err
 }
 
 const getWebhookDeliveryInWorkspace = `-- name: GetWebhookDeliveryInWorkspace :one
-SELECT id, workspace_id, autopilot_id, trigger_id, provider, event, dedupe_key, dedupe_source, signature_status, status, attempt_count, selected_headers, content_type, raw_body, response_status, response_body, autopilot_run_id, replayed_from_delivery_id, error, received_at, last_attempt_at, created_at, available_at, lease_token, lease_expires_at, dispatch_attempts FROM webhook_delivery
+SELECT id, workspace_id, autopilot_id, trigger_id, provider, event, dedupe_key, dedupe_source, signature_status, status, attempt_count, selected_headers, content_type, raw_body, response_status, response_body, autopilot_run_id, replayed_from_delivery_id, error, received_at, last_attempt_at, created_at, available_at, lease_token, lease_expires_at, dispatch_attempts, reason_code, replay_idempotency_key FROM webhook_delivery
 WHERE id = $1 AND workspace_id = $2
 `
 
@@ -501,6 +527,55 @@ func (q *Queries) GetWebhookDeliveryInWorkspace(ctx context.Context, arg GetWebh
 		&i.LeaseToken,
 		&i.LeaseExpiresAt,
 		&i.DispatchAttempts,
+		&i.ReasonCode,
+		&i.ReplayIdempotencyKey,
+	)
+	return i, err
+}
+
+const getWebhookReplayByIdempotencyKey = `-- name: GetWebhookReplayByIdempotencyKey :one
+SELECT id, workspace_id, autopilot_id, trigger_id, provider, event, dedupe_key, dedupe_source, signature_status, status, attempt_count, selected_headers, content_type, raw_body, response_status, response_body, autopilot_run_id, replayed_from_delivery_id, error, received_at, last_attempt_at, created_at, available_at, lease_token, lease_expires_at, dispatch_attempts, reason_code, replay_idempotency_key FROM webhook_delivery
+WHERE replayed_from_delivery_id = $1 AND replay_idempotency_key = $2
+LIMIT 1
+`
+
+type GetWebhookReplayByIdempotencyKeyParams struct {
+	ReplayedFromDeliveryID pgtype.UUID `json:"replayed_from_delivery_id"`
+	ReplayIdempotencyKey   pgtype.Text `json:"replay_idempotency_key"`
+}
+
+func (q *Queries) GetWebhookReplayByIdempotencyKey(ctx context.Context, arg GetWebhookReplayByIdempotencyKeyParams) (WebhookDelivery, error) {
+	row := q.db.QueryRow(ctx, getWebhookReplayByIdempotencyKey, arg.ReplayedFromDeliveryID, arg.ReplayIdempotencyKey)
+	var i WebhookDelivery
+	err := row.Scan(
+		&i.ID,
+		&i.WorkspaceID,
+		&i.AutopilotID,
+		&i.TriggerID,
+		&i.Provider,
+		&i.Event,
+		&i.DedupeKey,
+		&i.DedupeSource,
+		&i.SignatureStatus,
+		&i.Status,
+		&i.AttemptCount,
+		&i.SelectedHeaders,
+		&i.ContentType,
+		&i.RawBody,
+		&i.ResponseStatus,
+		&i.ResponseBody,
+		&i.AutopilotRunID,
+		&i.ReplayedFromDeliveryID,
+		&i.Error,
+		&i.ReceivedAt,
+		&i.LastAttemptAt,
+		&i.CreatedAt,
+		&i.AvailableAt,
+		&i.LeaseToken,
+		&i.LeaseExpiresAt,
+		&i.DispatchAttempts,
+		&i.ReasonCode,
+		&i.ReplayIdempotencyKey,
 	)
 	return i, err
 }
@@ -512,7 +587,7 @@ SELECT
     d.attempt_count, d.content_type, d.response_status,
     d.autopilot_run_id, d.replayed_from_delivery_id, d.error,
     d.received_at, d.last_attempt_at, d.created_at,
-    d.available_at, d.dispatch_attempts
+    d.available_at, d.dispatch_attempts, d.reason_code, d.replay_idempotency_key
 FROM webhook_delivery d
 JOIN autopilot a ON a.id = d.autopilot_id
 WHERE d.autopilot_id = $1
@@ -550,6 +625,8 @@ type ListWebhookDeliveriesByAutopilotRow struct {
 	CreatedAt              pgtype.Timestamptz `json:"created_at"`
 	AvailableAt            pgtype.Timestamptz `json:"available_at"`
 	DispatchAttempts       int32              `json:"dispatch_attempts"`
+	ReasonCode             pgtype.Text        `json:"reason_code"`
+	ReplayIdempotencyKey   pgtype.Text        `json:"replay_idempotency_key"`
 }
 
 // Workspace-scoped via the join so a runId from another workspace cannot
@@ -596,6 +673,8 @@ func (q *Queries) ListWebhookDeliveriesByAutopilot(ctx context.Context, arg List
 			&i.CreatedAt,
 			&i.AvailableAt,
 			&i.DispatchAttempts,
+			&i.ReasonCode,
+			&i.ReplayIdempotencyKey,
 		); err != nil {
 			return nil, err
 		}
@@ -618,7 +697,7 @@ SET available_at = $3,
 WHERE id = $1
   AND lease_token = $2
   AND status = 'queued'
-RETURNING id, workspace_id, autopilot_id, trigger_id, provider, event, dedupe_key, dedupe_source, signature_status, status, attempt_count, selected_headers, content_type, raw_body, response_status, response_body, autopilot_run_id, replayed_from_delivery_id, error, received_at, last_attempt_at, created_at, available_at, lease_token, lease_expires_at, dispatch_attempts
+RETURNING id, workspace_id, autopilot_id, trigger_id, provider, event, dedupe_key, dedupe_source, signature_status, status, attempt_count, selected_headers, content_type, raw_body, response_status, response_body, autopilot_run_id, replayed_from_delivery_id, error, received_at, last_attempt_at, created_at, available_at, lease_token, lease_expires_at, dispatch_attempts, reason_code, replay_idempotency_key
 `
 
 type RetryClaimedWebhookDeliveryParams struct {
@@ -666,6 +745,8 @@ func (q *Queries) RetryClaimedWebhookDelivery(ctx context.Context, arg RetryClai
 		&i.LeaseToken,
 		&i.LeaseExpiresAt,
 		&i.DispatchAttempts,
+		&i.ReasonCode,
+		&i.ReplayIdempotencyKey,
 	)
 	return i, err
 }
@@ -678,7 +759,7 @@ SET status = $2,
     response_body = $5,
     last_attempt_at = now()
 WHERE id = $1
-RETURNING id, workspace_id, autopilot_id, trigger_id, provider, event, dedupe_key, dedupe_source, signature_status, status, attempt_count, selected_headers, content_type, raw_body, response_status, response_body, autopilot_run_id, replayed_from_delivery_id, error, received_at, last_attempt_at, created_at, available_at, lease_token, lease_expires_at, dispatch_attempts
+RETURNING id, workspace_id, autopilot_id, trigger_id, provider, event, dedupe_key, dedupe_source, signature_status, status, attempt_count, selected_headers, content_type, raw_body, response_status, response_body, autopilot_run_id, replayed_from_delivery_id, error, received_at, last_attempt_at, created_at, available_at, lease_token, lease_expires_at, dispatch_attempts, reason_code, replay_idempotency_key
 `
 
 type UpdateWebhookDeliveryDispatchedParams struct {
@@ -728,6 +809,8 @@ func (q *Queries) UpdateWebhookDeliveryDispatched(ctx context.Context, arg Updat
 		&i.LeaseToken,
 		&i.LeaseExpiresAt,
 		&i.DispatchAttempts,
+		&i.ReasonCode,
+		&i.ReplayIdempotencyKey,
 	)
 	return i, err
 }
@@ -736,17 +819,19 @@ const updateWebhookDeliveryTerminal = `-- name: UpdateWebhookDeliveryTerminal :o
 UPDATE webhook_delivery
 SET status = $2,
     error = $3,
-    response_status = $4,
-    response_body = $5,
+    reason_code = $4,
+    response_status = $5,
+    response_body = $6,
     last_attempt_at = now()
 WHERE id = $1
-RETURNING id, workspace_id, autopilot_id, trigger_id, provider, event, dedupe_key, dedupe_source, signature_status, status, attempt_count, selected_headers, content_type, raw_body, response_status, response_body, autopilot_run_id, replayed_from_delivery_id, error, received_at, last_attempt_at, created_at, available_at, lease_token, lease_expires_at, dispatch_attempts
+RETURNING id, workspace_id, autopilot_id, trigger_id, provider, event, dedupe_key, dedupe_source, signature_status, status, attempt_count, selected_headers, content_type, raw_body, response_status, response_body, autopilot_run_id, replayed_from_delivery_id, error, received_at, last_attempt_at, created_at, available_at, lease_token, lease_expires_at, dispatch_attempts, reason_code, replay_idempotency_key
 `
 
 type UpdateWebhookDeliveryTerminalParams struct {
 	ID             pgtype.UUID `json:"id"`
 	Status         string      `json:"status"`
 	Error          pgtype.Text `json:"error"`
+	ReasonCode     pgtype.Text `json:"reason_code"`
 	ResponseStatus pgtype.Int4 `json:"response_status"`
 	ResponseBody   pgtype.Text `json:"response_body"`
 }
@@ -759,6 +844,7 @@ func (q *Queries) UpdateWebhookDeliveryTerminal(ctx context.Context, arg UpdateW
 		arg.ID,
 		arg.Status,
 		arg.Error,
+		arg.ReasonCode,
 		arg.ResponseStatus,
 		arg.ResponseBody,
 	)
@@ -790,6 +876,8 @@ func (q *Queries) UpdateWebhookDeliveryTerminal(ctx context.Context, arg UpdateW
 		&i.LeaseToken,
 		&i.LeaseExpiresAt,
 		&i.DispatchAttempts,
+		&i.ReasonCode,
+		&i.ReplayIdempotencyKey,
 	)
 	return i, err
 }

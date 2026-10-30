@@ -23,6 +23,12 @@ export type ValidateLocalDirectoryResult = {
     | "error"
     | "unsupported";
   error?: string;
+  /**
+   * Whether the directory sits inside a git working tree. Only meaningful when
+   * ok=true; absent from an older desktop build, which is why callers must
+   * treat `undefined` as "unknown" rather than "not a repo".
+   */
+  is_git_repo?: boolean;
 };
 
 interface DesktopLocalDirectoryAPI {

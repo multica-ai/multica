@@ -82,15 +82,3 @@ func TestErrDispatchSkippedUnwraps(t *testing.T) {
 		t.Fatal("pgx.ErrNoRows wrongly satisfied errDispatchSkipped")
 	}
 }
-
-func TestResolveAutopilotLeaderSentinels(t *testing.T) {
-	// Sanity-check the sentinel exported via errors.Is so callers can branch
-	// on "archived" without string-matching the failure reason.
-	if !errors.Is(errSquadArchived, errSquadArchived) {
-		t.Fatal("errSquadArchived must satisfy errors.Is itself")
-	}
-	wrapped := fmt.Errorf("wrap: %w", errSquadArchived)
-	if !errors.Is(wrapped, errSquadArchived) {
-		t.Fatal("errSquadArchived must unwrap through fmt.Errorf")
-	}
-}

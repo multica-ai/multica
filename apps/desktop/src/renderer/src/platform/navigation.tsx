@@ -1,10 +1,11 @@
 import { useMemo } from "react";
 import {
   NavigationProvider,
+  type LinkClickIntent,
   type NavigationAdapter,
 } from "@multica/views/navigation";
 import { useAuthStore } from "@multica/core/auth";
-import { isReservedSlug } from "@multica/core/paths";
+import { workspaceSlugForPath, paths } from "@multica/core/paths";
 import {
   useTabStore,
   getActiveTab,
@@ -21,17 +22,6 @@ function requireRuntimeAppUrl(scope: string): string {
     );
   }
   return runtimeConfig.config.appUrl;
-}
-
-/**
- * Extract the leading workspace slug from a path, or null if the path isn't
- * workspace-scoped (root, login, any reserved prefix).
- */
-function extractWorkspaceSlug(path: string): string | null {
-  const first = path.split("/").filter(Boolean)[0] ?? "";
-  if (!first) return null;
-  if (isReservedSlug(first)) return null;
-  return first;
 }
 
 /**
@@ -59,7 +49,7 @@ function tryRouteToOverlay(path: string): boolean {
     overlay.open({ type: "invitations" });
     return true;
   }
-  if (path.startsWith("/invite/")) {
+  if (path.startsWith("/invite/") && !workspaceSlugForPath(path)) {
     let id = "";
     try {
       id = decodeURIComponent(path.slice("/invite/".length));
@@ -85,38 +75,53 @@ function tryRouteToOverlay(path: string): boolean {
  * invite-accept flow — they all call `useNavigation().push(path)` with a
  * full workspace URL, and on desktop we translate "target slug differs
  * from active" into "switch the tab-group that's visible in the TabBar".
+ *
+ * The target's bare Issues root (what the workspace switchers send, and where
+ * web lands) resumes the workspace's last active tab instead, or Issues if it
+ * has none. Any deeper path opens exactly that path.
  */
 function tryRouteToOtherWorkspace(path: string): boolean {
-  const targetSlug = extractWorkspaceSlug(path);
+  const targetSlug = workspaceSlugForPath(path);
   if (!targetSlug) return false;
   const { activeWorkspaceSlug, switchWorkspace } = useTabStore.getState();
   if (targetSlug === activeWorkspaceSlug) return false;
-  switchWorkspace(targetSlug, path);
+  const resume = path === paths.workspace(targetSlug).issues();
+  switchWorkspace(targetSlug, resume ? undefined : path);
   return true;
 }
 
 /**
- * Open a path that a link inside content resolved to (the `multica:navigate`
- * event fired by the shared editor/markdown link handler) in a foreground tab.
+ * Execute a content link (the `multica:navigate` event fired by the shared
+ * editor/markdown link handler) with the disposition the click resolved to:
+ * a plain click navigates in place — the same thing a plain click means on
+ * every other internal link — and modifier clicks open a background or
+ * foreground tab.
  *
- * A content link is a jump to another subject, so it gets its own tab rather
- * than replacing what the user was reading. It can also address another
- * workspace — a pasted app URL, an agent quoting a cross-workspace issue — and
- * opening that inside the active workspace's tab group would mount it under the
- * wrong group, so the slug check routes it through switchWorkspace exactly like
- * an adapter push does.
+ * A content link can also address another workspace — a pasted app URL, an
+ * agent quoting a cross-workspace issue — and opening that inside the active
+ * workspace's tab group would mount it under the wrong group, so the slug
+ * check routes it through switchWorkspace exactly like an adapter push does.
  */
-export function routeContentLinkPath(path: string): void {
+export function routeContentLinkPath(
+  path: string,
+  disposition: LinkClickIntent = "push",
+): void {
   const store = useTabStore.getState();
-  const slug = extractWorkspaceSlug(path);
+  const slug = workspaceSlugForPath(path);
   if (slug && slug !== store.activeWorkspaceSlug) {
     store.switchWorkspace(slug, path);
     return;
   }
+  if (disposition === "push") {
+    const active = getActiveTab(store);
+    if (active && active.url === path) return;
+    if (tryRouteToPinnedNewTab(path)) return;
+    store.navigateActiveSession(path);
+    return;
+  }
   // Empty seed title — the tab bar derives the real title from the URL and
   // cache; a raw path would flash before that resolves.
-  const tabId = store.openTab(path, "");
-  store.setActiveTab(tabId);
+  store.openTab(path, "", { activate: disposition === "foreground-tab" });
 }
 
 /**
@@ -169,7 +174,8 @@ export function DesktopNavigationProvider({
     const { pathname, suffix } = splitTabUrl(url);
     const hashIdx = suffix.indexOf("#");
     const search = hashIdx === -1 ? suffix : suffix.slice(0, hashIdx);
-    return { pathname, search };
+    const hash = hashIdx === -1 ? "" : suffix.slice(hashIdx);
+    return { pathname, search, hash };
   }, [activeUrl]);
 
   const adapter: NavigationAdapter = useMemo(
@@ -195,6 +201,9 @@ export function DesktopNavigationProvider({
       back: () => {
         useTabStore.getState().goBack();
       },
+      forward: () => {
+        useTabStore.getState().goForward();
+      },
       // The active tab's virtual history, same source the shell's back button
       // reads. A tab opened straight onto a destination sits at index 0 and
       // has nothing behind it.
@@ -204,17 +213,25 @@ export function DesktopNavigationProvider({
       },
       pathname: location.pathname,
       searchParams: new URLSearchParams(location.search),
+      // The tab's URL is the only place the fragment survives on desktop: the
+      // renderer's own `window.location` is the packaged file:// page.
+      hash: location.hash,
       openInNewTab: (
         path: string,
         title?: string,
         opts?: { activate?: boolean },
       ) => {
         // Cross-workspace "open in new tab" switches workspace and opens
-        // the path there (focus follows the user); same-workspace defaults
-        // to background tab (browser cmd+click semantics). Callers that
-        // represent an explicit "Open in new tab" CTA pass `activate: true`
-        // to bring the new tab to the foreground.
-        const slug = extractWorkspaceSlug(path);
+        // the path there (focus follows the user), REGARDLESS of
+        // `opts.activate`. This is a deliberate product exception to the
+        // background-tab contract (decided with MUL-5860): a background tab
+        // added to a non-visible workspace's group would give the user zero
+        // feedback — "nothing happened" is worse than losing the background
+        // semantics for the rare cross-workspace link. Same-workspace
+        // defaults to background tab (browser cmd+click semantics); callers
+        // that represent an explicit "Open in new tab" CTA pass
+        // `activate: true` to bring the new tab to the foreground.
+        const slug = workspaceSlugForPath(path);
         const store = useTabStore.getState();
         if (slug && slug !== store.activeWorkspaceSlug) {
           store.switchWorkspace(slug, path);

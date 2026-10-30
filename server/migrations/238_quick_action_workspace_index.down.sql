@@ -1,0 +1,1 @@
+DROP INDEX CONCURRENTLY IF EXISTS idx_quick_action_workspace_status_usage;

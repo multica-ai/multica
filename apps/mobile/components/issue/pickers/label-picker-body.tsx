@@ -25,6 +25,7 @@ import { useWorkspaceStore } from "@/data/workspace-store";
 import { useScrollToTopOnChange } from "@/lib/use-scroll-to-top-on-change";
 import { pickInlineColor } from "@/lib/inline-color";
 import { THEME } from "@/lib/theme";
+import { useT } from "@/lib/i18n";
 
 type Row =
   | { kind: "create"; name: string }
@@ -47,6 +48,7 @@ export function LabelPickerBody({
   onCreate,
 }: Props) {
   const wsId = useWorkspaceStore((s) => s.currentWorkspaceId);
+  const { t } = useT("issues");
   const { data: labels = [] } = useQuery(labelListOptions(wsId));
   const listRef = useScrollToTopOnChange(query);
   const { colorScheme } = useColorScheme();
@@ -118,7 +120,7 @@ export function LabelPickerBody({
               style={{ backgroundColor: pickInlineColor(item.name) }}
             />
             <Text className="flex-1 text-base text-foreground">
-              Create &ldquo;{item.name}&rdquo;
+              {t("picker.create_label", { name: item.name })}
             </Text>
             <Ionicons name="add" size={20} color={checkColor} />
           </Pressable>
@@ -147,8 +149,8 @@ export function LabelPickerBody({
         <View className="px-3 py-8 items-center">
           <Text className="text-sm text-muted-foreground text-center">
             {query
-              ? "No matches."
-              : "No labels in this workspace yet."}
+              ? t("picker.no_matches")
+              : t("picker.no_labels")}
           </Text>
         </View>
       }

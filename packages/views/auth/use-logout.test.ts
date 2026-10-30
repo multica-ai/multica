@@ -3,26 +3,18 @@ import { describe, expect, it, vi, beforeEach } from "vitest";
 import { renderHook } from "@testing-library/react";
 import { useLogout } from "./use-logout";
 
-// Order of the destructive calls is the contract under test: each in-memory
-// reset is a Zustand setState, and persist middleware writes the reset state
-// straight back to storage under the still-active workspace slug. Resetting
-// AFTER the per-slug key removal therefore resurrects the just-deleted keys
-// (for the issue draft store: with the previous user's lastAssignee inside).
+// What client state gets erased, and the order it has to happen in, is pinned
+// in core's platform/session-cleanup.test.ts — the session-expiry path runs
+// the same function. What is left for this hook is the logout-only tail:
+// erase, then drop auth, then move the URL.
 const calls = vi.hoisted(() => [] as string[]);
-const mockReset = vi.hoisted(() => vi.fn());
-const mockClearWorkspaceStorage = vi.hoisted(() => vi.fn());
+const mockClearClientSessionData = vi.hoisted(() => vi.fn());
 const mockAuthLogout = vi.hoisted(() => vi.fn());
 const mockPush = vi.hoisted(() => vi.fn());
-const mockQueryClientClear = vi.hoisted(() => vi.fn());
+const queryClient = vi.hoisted(() => ({ id: "query-client" }));
 
 vi.mock("@tanstack/react-query", () => ({
-  useQueryClient: () => ({
-    getQueryData: () => [
-      { slug: "acme" },
-      { slug: "beta" },
-    ],
-    clear: mockQueryClientClear,
-  }),
+  useQueryClient: () => queryClient,
 }));
 
 vi.mock("@multica/core/auth", () => ({
@@ -35,17 +27,8 @@ vi.mock("@multica/core/auth", () => ({
   ),
 }));
 
-vi.mock("@multica/core/workspace/queries", () => ({
-  workspaceKeys: { list: () => ["workspaces", "list"] },
-}));
-
 vi.mock("@multica/core/platform", () => ({
-  clearWorkspaceStorage: mockClearWorkspaceStorage,
-  defaultStorage: { getItem: () => null, setItem: () => {}, removeItem: () => {} },
-}));
-
-vi.mock("@multica/core/drafts/cleanup-registry", () => ({
-  resetAllRegisteredDrafts: mockReset,
+  clearClientSessionData: mockClearClientSessionData,
 }));
 
 vi.mock("@multica/core/paths", () => ({
@@ -60,25 +43,20 @@ describe("useLogout", () => {
   beforeEach(() => {
     calls.length = 0;
     vi.clearAllMocks();
-    mockReset.mockImplementation(() => calls.push("reset"));
-    mockClearWorkspaceStorage.mockImplementation((_a: unknown, slug: string) =>
-      calls.push(`clear:${slug}`),
-    );
+    mockClearClientSessionData.mockImplementation(() => calls.push("clear"));
+    mockAuthLogout.mockImplementation(() => calls.push("authLogout"));
+    mockPush.mockImplementation(() => calls.push("push"));
   });
 
-  it("resets in-memory drafts BEFORE removing their persisted keys", () => {
+  // Erasing after the auth store publishes `unauthenticated` would race the
+  // shells' login redirect, and navigating first would leave the caller on a
+  // workspace URL that renders null.
+  it("erases client state, then drops auth, then navigates to /login", () => {
     const { result } = renderHook(() => useLogout());
     result.current();
 
-    expect(calls).toEqual(["reset", "clear:acme", "clear:beta"]);
-  });
-
-  it("still ends by clearing the query cache, auth, and navigating to /login", () => {
-    const { result } = renderHook(() => useLogout());
-    result.current();
-
-    expect(mockQueryClientClear).toHaveBeenCalledTimes(1);
-    expect(mockAuthLogout).toHaveBeenCalledTimes(1);
+    expect(calls).toEqual(["clear", "authLogout", "push"]);
+    expect(mockClearClientSessionData).toHaveBeenCalledWith(queryClient);
     expect(mockPush).toHaveBeenCalledWith("/login");
   });
 });

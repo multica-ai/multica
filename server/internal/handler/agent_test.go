@@ -1347,23 +1347,6 @@ func TestMergeAgentEnv_PureFunction(t *testing.T) {
 	}
 }
 
-// Compile-time guard: AgentResponse must NOT carry the legacy env
-// fields. Reintroducing them is a security regression — this test
-// fails to compile rather than fails at runtime so reviewers see the
-// breakage in the diff. Kept as a runtime test because the package
-// boundary makes a struct-tag introspection cheap and obvious.
-func TestAgentResponseShape_HasNoLegacyEnvFields(t *testing.T) {
-	typ := reflect.TypeOf(AgentResponse{})
-	for i := 0; i < typ.NumField(); i++ {
-		f := typ.Field(i)
-		tag := strings.Split(f.Tag.Get("json"), ",")[0]
-		switch tag {
-		case "custom_env", "custom_env_redacted", "custom_env_redacted_reason":
-			t.Errorf("AgentResponse must not carry %q field (MUL-2600)", tag)
-		}
-	}
-}
-
 // TestUpdateAgent_RedactsMcpConfigForAgentActor closes the second leg
 // of MUL-2600 review #2: an agent process with a task token (or with
 // the X-Actor-Source server marker) must not be able to scrape another

@@ -1,10 +1,9 @@
 {
   "page": {
     "title": "Runtimes",
-    "tagline": "Machines and cloud workers running CLI sessions for your agents.",
     "learn_more": "Learn more →",
-    "connect_remote": "Add a computer",
-    "search_placeholder": "Search runtimes…",
+    "connect_remote": "Add a machine",
+    "search_placeholder": "Search…",
     "scope_mine": "Mine",
     "scope_all": "All",
     "live": "Live",
@@ -13,7 +12,7 @@
     "filter_all_description": "All runtimes in this view",
     "empty": {
       "title": "No runtimes yet",
-      "hint": "Desktop auto-scans this computer. To use another machine — a server, dev box, or any computer with a terminal — add it here."
+      "hint": "Desktop detects this computer automatically. Add other machines here."
     },
     "no_matches": {
       "title": "No matches",
@@ -24,8 +23,62 @@
     },
     "bootstrapping": {
       "title": "Starting local runtime…",
-      "hint": "This usually takes a few seconds. Your daemon is registering with the workspace."
+      "hint": "Connecting to the workspace..."
+    },
+    "add": "Add",
+    "add_menu": {
+      "machines": "Machines",
+      "this_computer": "This computer",
+      "this_computer_connected": "Connected · {{name}}",
+      "this_computer_download": "Download the desktop app to connect it",
+      "other_machine": "Other machine or server",
+      "other_machine_hint": "Run two commands on that machine",
+      "cloud_services": "Cloud services",
+      "qoder_manage_hint": "Connected · manage connection",
+      "cloud_runtime_hint": "Provision a Multica-hosted cloud node"
+    },
+    "columns": {
+      "name": "Name",
+      "harness": "Harness",
+      "agents": "Agents",
+      "workload": "Workload",
+      "status": "Status"
+    },
+    "groups": {
+      "machines": {
+        "title": "Machines"
+      },
+      "cloud": {
+        "title": "Cloud services",
+        "coming_soon": "Coming soon"
+      }
+    },
+    "rows": {
+      "this_computer_title": "Run on this computer",
+      "this_computer_hint": "Download the desktop app and sign in; Claude Code, Codex and other CLIs on this computer show up here automatically",
+      "download_desktop": "Download desktop",
+      "add_machine_title": "Add another machine or server",
+      "add_machine_hint": "Run two commands on that machine so agents can use the CLIs installed there",
+      "view_commands": "View commands",
+      "owner_you": "You",
+      "connect": "Connect",
+      "not_connected": "Not connected",
+      "provided_by": "By {{vendor}}",
+      "no_matches": "No machines or cloud services match"
+    },
+    "filters": {
+      "all": "All",
+      "online": "Online",
+      "offline": "Offline"
     }
+  },
+  "mika_setup": {
+    "title": "Your runtime is ready. Start with Mika.",
+    "description": "Let Mika organize work and coordinate agents.",
+    "action": "Start with Mika",
+    "failed": "Couldn't start Mika",
+    "dialog_title": "Where should Mika run?",
+    "cancel": "Cancel"
   },
   "machine": {
     "search_placeholder": "Search machines…",
@@ -71,7 +124,7 @@
     "rename": "Rename machine",
     "rename_dialog": {
       "title": "Rename machine",
-      "description": "Give this machine a name you'll recognize. It applies to every runtime on this machine and shows up when you pick a runtime for an agent.",
+      "description": "Used for this machine and all its runtimes.",
       "placeholder": "e.g. Bohan's MacBook",
       "hint": "Leave empty to use the device's default name.",
       "cancel": "Cancel",
@@ -85,7 +138,7 @@
   "health": {
     "online": {
       "label": "Online",
-      "description": "Heartbeat received in the last 45s. Ready to dispatch tasks."
+      "description": "Heartbeat received in the last 45s. Ready to dispatch runs."
     },
     "recently_lost": {
       "label": "Recently lost",
@@ -95,9 +148,9 @@
       "label": "Offline",
       "description": "No heartbeat for 5+ minutes. Restart the daemon or investigate the host."
     },
-    "about_to_gc": {
-      "label": "About to GC",
-      "description": "Offline 6+ days. Auto-deleted at 7 days unless it reconnects."
+    "long_offline": {
+      "label": "Long offline",
+      "description": "No heartbeat for 6+ days. If this host will stay offline, rebind its agents to another runtime or delete this runtime."
     }
   },
   "detail": {
@@ -121,14 +174,45 @@
     "diagnostics_visibility": "Visibility",
     "visibility_label": {
       "private": "Private",
-      "public": "Public"
+      "public": "Public",
+      "members": "Specific members"
+    },
+    "visibility_choice": {
+      "private": "Private",
+      "public": "Public",
+      "members": "Members"
     },
     "visibility_hint": {
-      "private": "Only you and workspace admins can create agents on this runtime.",
-      "public": "Any workspace member can create agents on this runtime."
+      "private": "Only you can create agents on this runtime.",
+      "public": "Any workspace member can create agents on this runtime.",
+      "members": "Only you and the selected members can create agents on this runtime."
     },
+    "visibility_hint_readonly": {
+      "private": "Only the runtime owner can create agents on this runtime, and only they can switch it to Public.",
+      "public": "Any workspace member can create agents on this runtime. Only the runtime owner can switch it back to Private.",
+      "members": "Only the owner and selected members can create agents on this runtime."
+    },
+    "visibility_members_title": "Share with members",
+    "visibility_members_search": "Search members",
+    "visibility_members_none": "No other workspace members yet.",
+    "visibility_members_no_match": "No members match.",
+    "visibility_members_edit": "Edit",
+    "visibility_members_count_one": "{{count}} member",
+    "visibility_members_count_other": "{{count}} members",
     "visibility_toast_updated": "Visibility set to {{visibility}}",
     "visibility_toast_failed": "Failed to update visibility",
+    "visibility_revoke_dialog": {
+      "title": "Restrict runtime access?",
+      "description": "Restricting access to \"{{name}}\" will unbind {{count}} affected agents, cancel {{taskCount}} active runs, and pause active autopilots assigned to those agents. Agents and runs that keep access are unaffected.",
+      "warning": "Access is revoked immediately on the server. Connected daemons stop through their normal cancellation check. An offline machine cannot receive the stop request until it reconnects; its local process may continue meanwhile.",
+      "plan_changed": "The access plan changed while this dialog was open. Review it and confirm again.",
+      "checkbox": "I understand that the listed teammate agents will be unbound, their active runs cancelled, and their active autopilots paused.",
+      "cancel": "Cancel",
+      "confirm": "Restrict access",
+      "submitting": "Revoking access...",
+      "toast_success": "Runtime access updated",
+      "toast_failed": "Failed to revoke runtime access"
+    },
     "delete_dialog": {
       "self_heal_notice": "This runtime is managed by a running local daemon. Deleting it will succeed, but the daemon will re-register a fresh runtime within seconds — stop the daemon process first to remove it permanently.",
       "profile_backed_notice": "This runtime was registered from a custom runtime profile. Deleting it removes only the current runtime instance; a running daemon can register it again while the profile remains. Delete the custom runtime profile from Custom runtimes to remove it permanently.",
@@ -140,18 +224,18 @@
         "submitting": "Deleting..."
       },
       "cascade": {
-        "title_one": "Archive {{count}} agent and delete this Runtime?",
-        "title_other": "Archive {{count}} agents and delete this Runtime?",
-        "description": "Delete \"{{name}}\". The agents below will be archived and removed from active workflows; their queued or running tasks will be cancelled, and then the Runtime will be deleted.",
-        "warning": "This is destructive. Archived agents will be removed from active workflows and their queued or running tasks will be cancelled.",
+        "title_one": "Unbind {{count}} agent and delete this Runtime?",
+        "title_other": "Unbind {{count}} agents and delete this Runtime?",
+        "description": "Delete \"{{name}}\". The agents below are kept — their instructions, chats and run history stay intact — but they will be unbound and cannot run until you bind them to another runtime. Their queued or in-progress runs will be cancelled, and then the Runtime will be deleted.",
+        "warning": "Queued and in-progress runs will be cancelled, and these agents cannot be assigned new work until they are bound to a runtime.",
         "notice_runtime_has_active_agents": "Active agents were added since you opened this dialog. Review the new plan and confirm.",
         "notice_runtime_delete_plan_changed": "The active agent set changed while this dialog was open. Review the new plan and confirm.",
-        "checkbox_one": "I understand this {{count}} agent will be archived and any queued or running tasks will be cancelled.",
-        "checkbox_other": "I understand these {{count}} agents will be archived and any queued or running tasks will be cancelled.",
+        "checkbox_one": "I understand this {{count}} agent will be unbound and cannot run until I bind it to a runtime, and that any queued or in-progress runs will be cancelled.",
+        "checkbox_other": "I understand these {{count}} agents will be unbound and cannot run until I bind them to a runtime, and that any queued or in-progress runs will be cancelled.",
         "cancel": "Cancel",
-        "confirm_one": "Archive {{count}} agent and delete runtime",
-        "confirm_other": "Archive {{count}} agents and delete runtime",
-        "submitting": "Archiving and deleting...",
+        "confirm_one": "Unbind {{count}} agent and delete runtime",
+        "confirm_other": "Unbind {{count}} agents and delete runtime",
+        "submitting": "Unbinding and deleting...",
         "delete_failed_toast": "Failed to delete runtime",
         "table": {
           "header_agent": "Agent",
@@ -187,14 +271,16 @@
   "queued_one": "{{count}} queued",
   "queued_other": "{{count}} queued",
   "connect": {
-    "title": "Add a computer",
-    "description": "Run these two commands on the computer you want to add. We'll detect it the moment the daemon comes online.",
+    "title": "Add a machine",
+    "description": "Run these two commands on the machine you want to add. We'll detect it the moment the daemon comes online.",
     "step1_label": "Install the Multica CLI",
+    "platform_group": "Choose your platform",
+    "platform_macos_linux": "macOS / Linux",
+    "platform_windows": "Windows",
     "step2_label": "Start the daemon",
     "step2_hint": "Opens a browser to sign in, then keeps the daemon running in the background.",
-    "live_listening": "Waiting for your computer",
-    "live_listening_hint": "We'll detect it as soon as the daemon starts — usually under a minute.",
-    "troubleshooting": "Can't open a browser on that computer?",
+    "live_listening": "Waiting for your machine",
+    "troubleshooting": "Can't open a browser on that machine?",
     "trouble_intro": "Use a token instead of the browser sign-in. This replaces step 2 and works anywhere you have a terminal.",
     "trouble_token_hint_prefix": "Create a token in ",
     "trouble_token_hint_destination": "Settings → Tokens",
@@ -203,22 +289,21 @@
     "trouble_view_logs": "View logs",
     "copy_aria": "Copy",
     "cancel": "Cancel",
-    "success_title": "Computer connected",
-    "success_description": "Your computer is online and ready. Create an agent and it can start picking up tasks here.",
+    "success_title": "Machine connected",
+    "success_description": "Machine connected. You can now create an agent.",
     "view_runtime": "View runtime",
     "create_agent": "Create an agent"
   },
   "cloud_runtime": {
     "action": "Cloud Runtime",
     "title": "Cloud Runtime",
-    "description": "Launch a managed cloud node and watch its Fleet status.",
+    "description": "Create a cloud runtime.",
     "create_title": "New node",
-    "create_hint": "Choose a name, instance type, and disk size. Fleet applies the rest.",
     "nodes_title": "Fleet nodes",
     "refresh": "Refresh",
     "nodes_empty": "No cloud nodes",
     "nodes_failed": "Cloud Runtime unavailable",
-    "nodes_failed_hint": "Fleet did not return a node list.",
+    "nodes_failed_hint": "Couldn't load cloud nodes. Try again.",
     "node_fallback_name": "Cloud node",
     "create": "Create node",
     "creating": "Creating...",
@@ -255,6 +340,8 @@
     "managed_by_desktop_title": "The CLI binary is managed by Multica Desktop — update Desktop to upgrade the CLI.",
     "read_only": "Read-only",
     "read_only_title": "Only runtime owners and workspace admins can update the CLI.",
+    "local_build": "Local build",
+    "local_build_title": "This runtime reports a non-release version, so Multica cannot tell whether an upgrade is available. Update it from the machine itself.",
     "latest": "Latest",
     "available": "available",
     "action": "Update",
@@ -272,6 +359,13 @@
   "charts": {
     "heatmap_less": "Less",
     "heatmap_more": "More",
+    "heatmap_no_activity": "No activity",
+    "heatmap_busiest_day": "Busiest day",
+    "heatmap_most_active_weekday": "Most active weekday",
+    "heatmap_quietest_weekday": "Quietest weekday",
+    "heatmap_average": "avg {{value}}",
+    "heatmap_window_total_one": "{{count}}-day total",
+    "heatmap_window_total_other": "{{count}}-day total",
     "tooltip_total": "Total"
   },
   "list": {
@@ -329,7 +423,7 @@
       "read_only": "Read-only"
     },
     "detail": {
-      "base_family": "Base protocol family",
+      "base_family": "Base runtime",
       "command": "Command",
       "description": "Description",
       "no_description": "No description",
@@ -341,12 +435,12 @@
     "form": {
       "create_title": "New custom runtime",
       "edit_title": "Edit custom runtime",
-      "step_family_label": "Choose a base protocol family",
-      "step_family_hint": "The underlying CLI protocol this runtime speaks.",
+      "step_family_label": "Choose a base runtime",
+      "step_family_hint": "Select the CLI this command is compatible with.",
       "step_details_label": "Configure the runtime",
       "step_progress": "Step {{current}} of {{total}}",
-      "family_label": "Base protocol family",
-      "family_locked_hint": "The base protocol family can't be changed after creation.",
+      "family_label": "Base runtime",
+      "family_locked_hint": "The base runtime cannot be changed after creation.",
       "display_name_label": "Display name",
       "display_name_placeholder": "e.g. My custom Claude…",
       "command_name_label": "Command",
@@ -380,7 +474,7 @@
       "cancel": "Cancel",
       "deleting": "Deleting…",
       "toast_deleted": "Custom runtime deleted from workspace",
-      "error_bound": "This runtime can't be deleted while agents are still using it.",
+      "error_bound": "This custom runtime can't be deleted while agents are still using it — including agents on other machines that registered it.",
       "error_generic": "Failed to delete the runtime."
     }
   },
@@ -443,5 +537,143 @@
     "table_cache_r": "Cache R",
     "table_cache_w": "Cache W",
     "no_data": "No usage data yet"
+  },
+  "qoder": {
+    "title": "Qoder Cloud Agents runtime",
+    "description": "Connect Qoder Cloud Agents. Multica manages execution and stores credentials encrypted. Workspace administrators can change this configuration.",
+    "loading": "Loading…",
+    "unavailable": "Server setup is required: configure MULTICA_VCS_SECRET_KEY.",
+    "online": "Online",
+    "error": "Connection error",
+    "starting": "Starting",
+    "not_configured": "Not configured",
+    "name": "Runtime name",
+    "region": "Region",
+    "region_global": "Global (qoder.com)",
+    "region_cn": "China (qoder.com.cn)",
+    "region_hint": "Use the site where you created the PAT; a PAT only works in its own region.",
+    "keep_secret": "Leave blank to keep the saved token",
+    "repositories": "GitHub authorization",
+    "repositories_hint": "Bind a token to each repository. Select the repository and starting branch in your project.",
+    "remove": "Remove",
+    "add_repository": "Add repository",
+    "saved": "Saved. The server will start the runtime automatically.",
+    "check": "Test connection",
+    "working": "Working…",
+    "stop": "Pause",
+    "stopped": "Paused",
+    "offline": "Offline; reconnecting",
+    "checking": "Testing connection...",
+    "check_passed": "Connection successful",
+    "check_failed": "Connection failed",
+    "environment": "Environment",
+    "select_environment": "Select an environment",
+    "no_environments": "No available environments. Create one in Qoder, then refresh.",
+    "refresh_catalog": "Refresh list",
+    "agent": "Remote agent",
+    "select_agent": "Select an agent from Qoder Cloud Agents",
+    "agent_hint": "Use the saved Qoder PAT to link a remote agent. Manage its model, tools and skills in Qoder Cloud Agents.",
+    "no_agents": "No agents available. Create an agent in Qoder Cloud Agents, then refresh.",
+    "agent_unavailable": "The linked remote agent is unavailable. Select another agent.",
+    "save_agent": "Save association",
+    "agent_saved": "Agent association with Qoder Cloud Agents saved",
+    "agent_save_failed": "Could not save agent association with Qoder Cloud Agents",
+    "cloud_title": "Qoder Cloud Agents",
+    "managed": "Managed service",
+    "cloud_description": "Run agents in Qoder Cloud using a shared connection, without maintaining a local host.",
+    "configure_credentials": "Configure credentials",
+    "add_agent": "Add agent",
+    "add_agent_description": "Create a Multica agent linked to an existing agent in Qoder Cloud Agents. It will use the environment and credentials configured for Qoder Cloud.",
+    "agent_name": "Agent name",
+    "cancel": "Cancel",
+    "shared_credentials_hint": "Credentials are shared within this workspace. PATs are encrypted and never displayed after saving.",
+    "agent_count_one": "{{count}} agent",
+    "agent_count_other": "{{count}} agents",
+    "github_url": "GitHub URL",
+    "github_token": "GitHub token",
+    "execution": "Execution",
+    "concurrency": "Concurrent runs",
+    "concurrency_hint": "Runs beyond this limit wait in the queue.",
+    "run_timeout": "Run timeout (minutes)",
+    "run_timeout_hint": "A run still going after this long is cancelled and marked failed.",
+    "data_disclosure_title": "What Multica sends to Qoder",
+    "data_disclosure": "The issue title and description, relevant comments, project context and the agent's instructions. GitHub tokens are only used to mount the repository for a run.",
+    "usage": "{{active}} of {{limit}} running · {{queued}} queued",
+    "open_settings": "Open settings",
+    "default_repository": "Default repository",
+    "default_repository_hint": "Mounted when the issue's project has no repository. The connection needs a GitHub token for it.",
+    "default_branch": "Branch",
+    "default_branch_placeholder": "Default branch",
+    "create_agent": "Create an agent with it",
+    "connect": {
+      "submit": "Connect",
+      "connected": "Qoder connected. It will be ready in a few seconds.",
+      "token": "Personal access token",
+      "token_rejected": "{{region}} does not accept this token. A token only works on the site that created it.",
+      "retry_cn": "Retry on China site",
+      "retry_global": "Retry on Global site",
+      "verifying": "Verifying token…",
+      "verified": "Token verified",
+      "environment_waiting": "Environments load once the token is verified",
+      "repo_count_one": "{{count}} repository",
+      "repo_count_other": "{{count}} repositories",
+      "optional": "Optional",
+      "execution_summary": "Up to {{concurrency}} at once · {{timeout}} min timeout"
+    },
+    "stop_confirm": {
+      "title": "Pause Qoder Cloud Agents?",
+      "description": "New tasks will not be sent to Qoder until it is resumed.",
+      "cancel": "Cancel",
+      "description_agents_one": "This agent keeps its instructions and history but cannot take new tasks until Qoder is resumed or it moves to another runtime.",
+      "description_agents_other": "These {{count}} agents keep their instructions and history but cannot take new tasks until Qoder is resumed or they move to another runtime."
+    },
+    "connect_title": "Connect Qoder Cloud Agents",
+    "connect_description": "Multica runs tasks in Qoder's sandboxes.",
+    "page": {
+      "configuration": "Configuration",
+      "agents_title": "Agents",
+      "pause_title": "Pause Qoder",
+      "pause_hint": "Stop sending new tasks to Qoder. Credentials and agents stay, and you can resume anytime.",
+      "resume_title": "Resume Qoder",
+      "resume": "Resume",
+      "resumed": "Qoder is starting.",
+      "disconnect_title": "Disconnect Qoder",
+      "disconnect_hint": "Delete the saved PAT and repository tokens and remove this runtime. Agents using it are unbound and keep their history.",
+      "disconnect": "Disconnect",
+      "not_connected_title": "Qoder isn't connected",
+      "not_connected_hint": "Ask a workspace admin to connect Qoder Cloud Agents.",
+      "workload_idle": "Idle",
+      "connection_title": "Connection",
+      "edit": "Edit",
+      "edit_connection_title": "Edit connection",
+      "edit_connection_hint": "The connection is tested before it's saved.",
+      "test_and_save": "Test and save",
+      "save": "Save",
+      "token_saved": "Saved",
+      "repositories_hint": "Agents can only clone the repositories authorized here.",
+      "repo_token_saved": "Token saved",
+      "repo_actions": "Actions for {{repo}}",
+      "replace_token": "Replace token",
+      "replace_token_title": "Replace the token for {{repo}}",
+      "open_on_github": "Open on GitHub",
+      "remove_repository_title": "Remove {{repo}}?",
+      "remove_repository_description": "Its token is deleted and agents can no longer clone it.",
+      "edit_limits": "Edit execution settings",
+      "run_timeout": "Run timeout",
+      "manage_title": "Manage",
+      "minutes_one": "{{count}} minute",
+      "minutes_other": "{{count}} minutes"
+    },
+    "disconnect_confirm": {
+      "title": "Disconnect Qoder Cloud Agents?",
+      "description": "The saved PAT and repository tokens are deleted and the Qoder runtime is removed. To use Qoder again, connect it from scratch.",
+      "description_agents_one": "This agent will be unbound. It keeps its instructions and history and can move to another runtime.",
+      "description_agents_other": "These {{count}} agents will be unbound. They keep their instructions and history and can move to another runtime.",
+      "plan_changed": "The agents on Qoder changed. Review the list and confirm again.",
+      "confirm": "Disconnect",
+      "working": "Disconnecting…",
+      "cancel": "Cancel",
+      "done": "Qoder disconnected"
+    }
   }
 }

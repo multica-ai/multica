@@ -1,3 +1,5 @@
+// @vitest-environment node
+
 import { describe, expect, it } from "vitest";
 import type { AgentRuntime } from "../types";
 import { deriveRuntimeHealth } from "./derive-health";
@@ -56,7 +58,7 @@ describe("deriveRuntimeHealth", () => {
     ).toBe("offline");
   });
 
-  it("returns about_to_gc when offline beyond 6 days (within 1 day of GC)", () => {
+  it("returns long_offline when offline beyond 6 days", () => {
     expect(
       deriveRuntimeHealth(
         makeRuntime({
@@ -65,17 +67,17 @@ describe("deriveRuntimeHealth", () => {
         }),
         FIXED_NOW,
       ),
-    ).toBe("about_to_gc");
+    ).toBe("long_offline");
   });
 
-  it("treats null last_seen_at as long-offline (about_to_gc)", () => {
+  it("treats null last_seen_at as long_offline", () => {
     // last_seen_at = null means lastSeen = 0 (epoch), so offlineFor is huge.
     expect(
       deriveRuntimeHealth(
         makeRuntime({ status: "offline", last_seen_at: null }),
         FIXED_NOW,
       ),
-    ).toBe("about_to_gc");
+    ).toBe("long_offline");
   });
 
   it("respects the 5-minute boundary (just inside → recently_lost)", () => {

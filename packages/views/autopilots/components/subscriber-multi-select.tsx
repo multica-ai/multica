@@ -1,11 +1,12 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { Plus, X } from "lucide-react";
+import { Plus, X } from "@multica/ui/icons";
 import { useQuery } from "@tanstack/react-query";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { memberListOptions } from "@multica/core/workspace/queries";
 import { cn } from "@multica/ui/lib/utils";
+import { TooltipHint } from "@multica/ui/components/common/tooltip-hint";
 import { ActorAvatar } from "../../common/actor-avatar";
 import {
   PropertyPicker,
@@ -68,18 +69,20 @@ export function SubscriberMultiSelect({
       {selectedMembers.map((m) => (
         <span
           key={m.user_id}
-          className="inline-flex items-center gap-1 rounded-full border bg-background px-2 py-0.5 text-xs"
+          className="inline-flex items-center gap-1 rounded-full border bg-background px-2 py-0.5 text-caption"
         >
           <ActorAvatar actorType="member" actorId={m.user_id} size="xs" />
           <span className="max-w-[10rem] truncate">{m.name}</span>
-          <button
-            type="button"
-            onClick={() => remove(m.user_id)}
-            className="text-muted-foreground hover:text-foreground transition-colors cursor-pointer"
-            aria-label={t(($) => $.dialog.subscribers_remove_tooltip)}
-          >
-            <X className="size-3" />
-          </button>
+          <TooltipHint label={t(($) => $.dialog.subscribers_remove_tooltip)}>
+            <button
+              type="button"
+              onClick={() => remove(m.user_id)}
+              className="text-muted-foreground hover:text-foreground transition-colors cursor-pointer"
+              aria-label={t(($) => $.dialog.subscribers_remove_tooltip)}
+            >
+              <X className="size-3" />
+            </button>
+          </TooltipHint>
         </span>
       ))}
       <PropertyPicker
@@ -96,7 +99,7 @@ export function SubscriberMultiSelect({
         trigger={
           <span
             className={cn(
-              "inline-flex items-center gap-1 rounded-full border border-dashed px-2 py-0.5 text-xs text-muted-foreground",
+              "inline-flex items-center gap-1 rounded-full border border-dashed px-2 py-0.5 text-caption text-muted-foreground",
               "hover:border-primary/40 hover:text-foreground transition-colors cursor-pointer",
             )}
           >

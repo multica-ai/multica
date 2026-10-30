@@ -1,8 +1,21 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
+import {
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+  type ReactNode,
+  type RefObject,
+} from "react";
 import { motion } from "motion/react";
 import type { Layout, PanelSize } from "react-resizable-panels";
+import {
+  isEditableShortcutTarget,
+  shortcutMatchesEvent,
+  useShortcut,
+} from "@multica/core/shortcuts";
+import { isImeComposing } from "@multica/core/utils";
 import { cn } from "@multica/ui/lib/utils";
 
 export const rightSidebarPanelMotionProps = {
@@ -81,29 +94,62 @@ export function useAnimatedRightSidebarState(initialOpen: boolean) {
   return { open, visualOpen, motionEnabled, beginToggle, handleResize };
 }
 
+/** Toggle the right sidebar only for the visible detail page that owns it. */
+export function useRightSidebarShortcut(
+  targetRef: RefObject<HTMLElement | null>,
+  onToggle: () => void,
+) {
+  const shortcut = useShortcut("toggleRightSidebar");
+
+  useEffect(() => {
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.defaultPrevented || event.repeat || isImeComposing(event)) return;
+      if (isEditableShortcutTarget(event.target)) return;
+      if (!shortcutMatchesEvent(shortcut, event)) return;
+
+      const target = targetRef.current;
+      if (!target || target.getClientRects().length === 0) return;
+
+      event.preventDefault();
+      onToggle();
+    };
+
+    document.addEventListener("keydown", handleKeyDown);
+    return () => document.removeEventListener("keydown", handleKeyDown);
+  }, [onToggle, shortcut, targetRef]);
+}
+
 export function AnimatedRightSidebar({
   open,
   motionEnabled,
   children,
   className,
+  contentClassName = "p-4",
 }: {
   open: boolean;
   motionEnabled?: boolean;
   children: ReactNode;
   className?: string;
+  contentClassName?: string;
 }) {
   return (
     <motion.div
       animate={{ opacity: open ? 1 : 0, x: open ? 0 : 12 }}
+      // `relative` makes this scroller the containing block of absolutely
+      // positioned descendants (`sr-only` labels in the execution log, etc.).
+      // Without it they resolve against an ancestor outside the scroller:
+      // they escape its clip and stretch the enclosing panel's scroll height,
+      // so wheeling past the end of the comments scrolled the whole issue
+      // detail up and left a blank band at the bottom (MUL-8100).
       className={cn(
-        "h-full overflow-x-hidden overflow-y-auto border-l",
+        "relative h-full overflow-x-hidden overflow-y-auto [scrollbar-gutter:stable] border-l",
         !open && "pointer-events-none",
         className,
       )}
       initial={false}
       transition={motionEnabled ? rightSidebarTransition : { duration: 0 }}
     >
-      <div className="p-4">{children}</div>
+      <div className={contentClassName}>{children}</div>
     </motion.div>
   );
 }

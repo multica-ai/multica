@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
+import type { ComponentProps, ReactNode } from "react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 import type { AgentRuntime, RuntimeProfile } from "@multica/core/types";
@@ -14,6 +15,7 @@ const TEST_RESOURCES = {
 };
 
 const mockUpdateRuntime = vi.hoisted(() => vi.fn());
+const mockUpdateRuntimeError = vi.hoisted(() => ({ value: null as unknown }));
 const mockDeleteRuntimeProfile = vi.hoisted(() => vi.fn());
 const mockQueryData = vi.hoisted(() => ({
   members: [] as Array<Record<string, unknown>>,
@@ -24,15 +26,16 @@ vi.mock("@multica/core/hooks", () => ({
   useWorkspaceId: () => "ws-1",
 }));
 
-vi.mock("@multica/core/api", () => ({
+vi.mock("@multica/core/api", async (importOriginal) => ({
+  ...await importOriginal<typeof import("@multica/core/api")>(),
   api: {
     updateRuntime: (...args: unknown[]) => mockUpdateRuntime(...args),
+    revokeRuntimeWorkspaceAccess: vi.fn(),
     deleteRuntime: vi.fn(),
-    archiveAgentsAndDeleteRuntime: vi.fn(),
+    unbindAgentsAndDeleteRuntime: vi.fn(),
     deleteRuntimeProfile: (...args: unknown[]) =>
       mockDeleteRuntimeProfile(...args),
   },
-  ApiError: class ApiError extends Error {},
 }));
 
 vi.mock("sonner", () => ({
@@ -73,9 +76,19 @@ vi.mock("@multica/core/auth", () => ({
     sel({ user: { id: "user-me" } }),
 }));
 
-vi.mock("@multica/core/runtimes", () => ({
+// isRuntimeUsableForUser is the shared owner/public rule the component reads
+// runtime access from, so the real implementation is kept rather than stubbed —
+// a stub here would just re-derive the rule this test is meant to pin down.
+vi.mock("@multica/core/runtimes", async () => ({
+  isRuntimeUsableForUser: (
+    await vi.importActual<typeof import("@multica/core/runtimes")>(
+      "@multica/core/runtimes",
+    )
+  ).isRuntimeUsableForUser,
   deriveRuntimeHealth: () => "online",
   runtimeDisplayName: (rt: { name: string; custom_name?: string | null }) =>
+    rt.custom_name?.trim() || rt.name,
+  runtimeDisplayLabel: (rt: { name: string; custom_name?: string | null }) =>
     rt.custom_name?.trim() || rt.name,
   runtimeProfileListOptions: (wsId: string) => ({
     queryKey: ["runtime-profiles", wsId],
@@ -103,15 +116,23 @@ vi.mock("@multica/core/runtimes/mutations", () => ({
   useUpdateRuntime: () => ({
     mutate: (
       args: { runtimeId: string; patch: Record<string, unknown> },
-      opts?: { onSuccess?: () => void; onError?: () => void },
+      opts?: { onSuccess?: () => void; onError?: (error: unknown) => void },
     ) => {
       mockUpdateRuntime(args.runtimeId, args.patch);
-      opts?.onSuccess?.();
+      if (mockUpdateRuntimeError.value) {
+        opts?.onError?.(mockUpdateRuntimeError.value);
+      } else {
+        opts?.onSuccess?.();
+      }
     },
     isPending: false,
   }),
+  useRevokeRuntimeWorkspaceAccess: () => ({
+    mutate: vi.fn(),
+    isPending: false,
+  }),
   useDeleteRuntime: () => ({ mutate: vi.fn(), isPending: false, mutateAsync: vi.fn() }),
-  useArchiveAgentsAndDeleteRuntime: () => ({
+  useUnbindAgentsAndDeleteRuntime: () => ({
     mutate: vi.fn(),
     isPending: false,
     mutateAsync: vi.fn(),
@@ -121,7 +142,9 @@ vi.mock("@multica/core/runtimes/mutations", () => ({
 // Stubbing ProviderLogo / UsageSection avoids dragging in chart libs and
 // additional query keys we don't care about here.
 vi.mock("./provider-logo", () => ({ ProviderLogo: () => null }));
-vi.mock("./usage-section", () => ({ UsageSection: () => null }));
+vi.mock("./usage-section", () => ({
+  UsageSection: () => <div data-testid="usage-section" />,
+}));
 vi.mock("./shared", () => ({ HealthBadge: () => null }));
 vi.mock("../../agents/presence", () => ({
   availabilityConfig: { offline: { dotClass: "", textClass: "" } },
@@ -129,11 +152,12 @@ vi.mock("../../agents/presence", () => ({
 }));
 vi.mock("../../common/actor-avatar", () => ({ ActorAvatar: () => null }));
 vi.mock("../../navigation", () => ({
-  AppLink: () => null,
+  AppLink: ({ children }: { children: ReactNode }) => <>{children}</>,
   useNavigation: () => ({ push: vi.fn(), replace: vi.fn() }),
 }));
 
 import { RuntimeDetail } from "./runtime-detail";
+import { ApiError } from "@multica/core/api";
 
 function makeRuntime(overrides: Partial<AgentRuntime>): AgentRuntime {
   return {
@@ -174,12 +198,18 @@ function makeProfile(overrides: Partial<RuntimeProfile> = {}): RuntimeProfile {
   };
 }
 
-function renderDetail(runtime: AgentRuntime) {
+function renderDetail(
+  runtime: AgentRuntime,
+  props: Pick<
+    ComponentProps<typeof RuntimeDetail>,
+    "machineHref" | "machineLabel"
+  > = {},
+) {
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   return render(
     <I18nProvider locale="en" resources={TEST_RESOURCES}>
       <QueryClientProvider client={qc}>
-        <RuntimeDetail runtime={runtime} />
+        <RuntimeDetail runtime={runtime} {...props} />
       </QueryClientProvider>
     </I18nProvider>,
   );
@@ -190,14 +220,32 @@ describe("RuntimeDetail visibility section", () => {
     vi.clearAllMocks();
     mockQueryData.members = [];
     mockQueryData.profiles = [];
+    mockUpdateRuntimeError.value = null;
     mockDeleteRuntimeProfile.mockResolvedValue(undefined);
   });
 
   it("shows owner-editable visibility choices when the caller owns the runtime", () => {
     renderDetail(makeRuntime({ owner_id: "user-me" }));
-    expect(screen.getByText("Visibility")).toBeInTheDocument();
-    expect(screen.getByText("Private")).toBeInTheDocument();
-    expect(screen.getByText("Public")).toBeInTheDocument();
+    expect(screen.getByRole("group", { name: "Visibility" })).toBeInTheDocument();
+    for (const name of ["Private", "Public", "Members"]) {
+      expect(screen.getByRole("button", { name })).toBeInTheDocument();
+    }
+  });
+
+  it("opens a reviewed revocation plan instead of silently making an in-use public runtime private", async () => {
+    mockUpdateRuntimeError.value = new ApiError("conflict", 409, "Conflict", {
+      code: "runtime_has_nonowner_dependents",
+      nonowner_agents: [{ id: "00000000-0000-4000-8000-000000000001", name: "Teammate Agent" }],
+      active_task_ids: ["00000000-0000-4000-8000-000000000002"],
+    });
+    renderDetail(makeRuntime({ visibility: "public" }));
+
+    fireEvent.click(screen.getByRole("button", { name: "Private" }));
+
+    expect(await screen.findByText("Restrict runtime access?")).toBeInTheDocument();
+    expect(screen.getByText("Teammate Agent")).toBeInTheDocument();
+    expect(screen.getByText(/Agents and runs that keep access are unaffected/)).toBeInTheDocument();
+    expect(screen.getByText(/pause active autopilots assigned to those agents/)).toBeInTheDocument();
   });
 
   it("keeps daemon CLI version details without rendering update controls", () => {
@@ -218,12 +266,115 @@ describe("RuntimeDetail visibility section", () => {
     ).not.toBeInTheDocument();
   });
 
-  it("flips visibility to public when the owner clicks the Public choice", async () => {
-    renderDetail(makeRuntime({ owner_id: "user-me", visibility: "private" }));
-    fireEvent.click(screen.getByText("Public"));
-    await waitFor(() =>
-      expect(mockUpdateRuntime).toHaveBeenCalledWith("rt-1", { visibility: "public" }),
+  it("uses the provider name when the runtime alias is the machine name", () => {
+    renderDetail(
+      makeRuntime({
+        name: "Pi (Studio Mac)",
+        custom_name: "Studio Mac",
+        provider: "pi",
+      }),
+      { machineHref: "/runtimes/local:daemon-1", machineLabel: "Studio Mac" },
     );
+
+    expect(screen.getAllByText("Pi")).toHaveLength(2);
+    expect(screen.getByRole("banner")).toHaveTextContent("Studio Mac");
+  });
+
+  it("preserves a runtime-specific alias that differs from the machine name", () => {
+    renderDetail(
+      makeRuntime({
+        name: "Pi (Studio Mac)",
+        custom_name: "Research Pi",
+        provider: "pi",
+      }),
+      { machineHref: "/runtimes/local:daemon-1", machineLabel: "Studio Mac" },
+    );
+
+    expect(screen.getAllByText("Research Pi")).toHaveLength(2);
+  });
+
+  it("applies Public in one click, without a separate Save step", async () => {
+    renderDetail(makeRuntime({ owner_id: "user-me", visibility: "private" }));
+    expect(screen.getByRole("button", { name: "Private" })).toHaveAttribute("aria-pressed", "true");
+    fireEvent.click(screen.getByRole("button", { name: "Public" }));
+    await waitFor(() =>
+      expect(mockUpdateRuntime).toHaveBeenCalledWith("rt-1", { visibility: "public", shared_with: [] }),
+    );
+  });
+
+  it("does not send a request when the active scope is clicked again", () => {
+    renderDetail(makeRuntime({ owner_id: "user-me", visibility: "private" }));
+    fireEvent.click(screen.getByRole("button", { name: "Private" }));
+    expect(mockUpdateRuntime).not.toHaveBeenCalled();
+  });
+
+  it("saves the selected members only after explicit confirmation", async () => {
+    mockQueryData.members = [
+      { user_id: "user-me", role: "member", name: "Me" },
+      { user_id: "user-alice", role: "member", name: "Alice" },
+      { user_id: "user-bob", role: "member", name: "Bob" },
+    ];
+    renderDetail(makeRuntime({}));
+    fireEvent.click(screen.getByRole("button", { name: "Members" }));
+    expect(await screen.findByText("Share with members")).toBeInTheDocument();
+    // The owner is never offered as a recipient.
+    expect(screen.queryByRole("checkbox", { name: "Me" })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Save" })).toBeDisabled();
+    fireEvent.click(screen.getByRole("checkbox", { name: "Alice" }));
+    expect(mockUpdateRuntime).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+    await waitFor(() => expect(mockUpdateRuntime).toHaveBeenCalledWith("rt-1", {
+      visibility: "private", shared_with: ["user-alice"],
+    }));
+  });
+
+  it("discards the member draft on Cancel", async () => {
+    mockQueryData.members = [
+      { user_id: "user-me", role: "member", name: "Me" },
+      { user_id: "user-alice", role: "member", name: "Alice" },
+    ];
+    renderDetail(makeRuntime({}));
+    fireEvent.click(screen.getByRole("button", { name: "Members" }));
+    fireEvent.click(await screen.findByRole("checkbox", { name: "Alice" }));
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+    await waitFor(() => expect(screen.queryByText("Share with members")).not.toBeInTheDocument());
+    expect(mockUpdateRuntime).not.toHaveBeenCalled();
+  });
+
+  it("summarizes current recipients and reopens the picker with them selected", async () => {
+    mockQueryData.members = [
+      { user_id: "user-me", role: "member", name: "Me" },
+      { user_id: "user-alice", role: "member", name: "Alice" },
+      { user_id: "user-bob", role: "member", name: "Bob" },
+    ];
+    renderDetail(makeRuntime({ shared_with: ["user-alice"] }));
+    expect(screen.getByRole("button", { name: "Members" })).toHaveAttribute("aria-pressed", "true");
+    fireEvent.click(screen.getByRole("button", { name: /Alice.*Edit/ }));
+    expect(await screen.findByRole("checkbox", { name: "Alice" })).toBeChecked();
+    expect(screen.getByRole("checkbox", { name: "Bob" })).not.toBeChecked();
+    // An unchanged selection is not saveable.
+    expect(screen.getByRole("button", { name: "Save" })).toBeDisabled();
+  });
+
+  it("filters a long member list by name", async () => {
+    mockQueryData.members = [
+      { user_id: "user-me", role: "member", name: "Me" },
+      ...["Alice", "Bob", "Carol", "Dave", "Erin", "Frank", "Grace"].map((name) => ({
+        user_id: `user-${name.toLowerCase()}`, role: "member", name,
+      })),
+    ];
+    renderDetail(makeRuntime({}));
+    fireEvent.click(screen.getByRole("button", { name: "Members" }));
+    fireEvent.change(await screen.findByRole("textbox", { name: "Search members" }), { target: { value: "gr" } });
+    expect(screen.getByRole("checkbox", { name: "Grace" })).toBeInTheDocument();
+    expect(screen.queryByRole("checkbox", { name: "Alice" })).not.toBeInTheDocument();
+  });
+
+  it("shows a shared recipient the read-only scope and runtime usage", () => {
+    renderDetail(makeRuntime({ owner_id: "someone-else", shared_with: ["user-me"] }));
+    expect(screen.getByText("Specific members")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Save" })).not.toBeInTheDocument();
+    expect(screen.getByTestId("usage-section")).toBeInTheDocument();
   });
 
   it("renders a read-only visibility chip when the caller cannot edit", () => {
@@ -231,6 +382,61 @@ describe("RuntimeDetail visibility section", () => {
     expect(screen.getByText("Public")).toBeInTheDocument();
     // The editor's "Private" choice button must not render in read-only mode.
     expect(screen.queryByText("Private")).not.toBeInTheDocument();
+  });
+
+  // MUL-6126: a workspace admin may rename or delete someone else's runtime,
+  // but not share it — sharing is the owner's consent to lend their machine,
+  // and the PATCH refuses an admin regardless of what this UI renders.
+  it("keeps visibility read-only for a workspace admin who does not own the runtime", () => {
+    mockQueryData.members = [
+      { user_id: "user-me", role: "admin" },
+      { user_id: "someone-else", role: "member" },
+    ];
+    renderDetail(
+      makeRuntime({ owner_id: "someone-else", visibility: "private" }),
+    );
+    expect(screen.getByText("Private")).toBeInTheDocument();
+    expect(screen.queryByText("Public")).not.toBeInTheDocument();
+  });
+
+  it("hides usage from a workspace admin viewing another member's private runtime", () => {
+    mockQueryData.members = [
+      { user_id: "user-me", role: "admin" },
+      { user_id: "someone-else", role: "member" },
+    ];
+
+    renderDetail(
+      makeRuntime({ owner_id: "someone-else", visibility: "private" }),
+    );
+
+    expect(screen.queryByTestId("usage-section")).not.toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: /Delete runtime/i }),
+    ).toBeInTheDocument();
+  });
+
+  it("shows usage to a workspace admin viewing another member's public runtime", () => {
+    mockQueryData.members = [
+      { user_id: "user-me", role: "admin" },
+      { user_id: "someone-else", role: "member" },
+    ];
+
+    renderDetail(
+      makeRuntime({ owner_id: "someone-else", visibility: "public" }),
+    );
+
+    expect(screen.getByTestId("usage-section")).toBeInTheDocument();
+  });
+
+  // An ownerless runtime is unreadable server-side (the read gate reuses
+  // canUseRuntimeForAgent, which is fail-closed without an owner), so the
+  // page must not render a Usage section that can only 404.
+  it("hides usage for an ownerless runtime even when it is public", () => {
+    mockQueryData.members = [{ user_id: "user-me", role: "admin" }];
+
+    renderDetail(makeRuntime({ owner_id: null, visibility: "public" }));
+
+    expect(screen.queryByTestId("usage-section")).not.toBeInTheDocument();
   });
 
   // MUL-3352: an owner viewing an online local (self-healing) runtime

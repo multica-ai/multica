@@ -1,11 +1,13 @@
 import type { WebContents } from "electron";
+import type { TabSelectionShortcutKey } from "../shared/main-renderer-messages";
 
-// Shape of the input subset we read from Electron's `before-input-event`.
-// Modeled as a structural type so the handler is unit-testable without a
-// real Electron Input instance.
+// Shape of the Electron `before-input-event` fields relevant to shortcut
+// policy. Modeled as a structural type so the handler is unit-testable
+// without a real Electron Input instance.
 export type ShortcutInput = {
   type: string;
   key: string;
+  code: string;
   control: boolean;
   meta: boolean;
   alt: boolean;
@@ -24,26 +26,16 @@ const ZOOM_MIN = -3;
 const ZOOM_MAX = 4.5;
 
 /**
- * Inspect a `before-input-event` key and apply (or block) the matching
- * window-level shortcut. Returns `true` when the caller should call
- * `event.preventDefault()` — that both swallows the renderer keydown and
- * prevents the application menu accelerator from firing, so we don't
- * double-trigger zoom on macOS where the default menu also binds these
- * keys.
- *
- * Why we don't rely on the menu's `zoomIn` / `zoomOut` roles: on macOS the
- * default `Cmd+-` accelerator does not fire reliably across keyboard
- * layouts (issue MUL-2354 — Cmd+= zooms in but Cmd+- doesn't undo it).
- * Handling the shortcuts here gives identical behavior on every platform
- * and every layout.
+ * Window shortcut outcomes tell the caller whether to continue, preventDefault,
+ * or dispatch a renderer action. Prevent handled input from also firing the menu
+ * accelerator. Handle zoom here for consistent keyboard-layout behavior.
+ * close-tab, open-settings, and select-tab actions route to the main window.
  */
-/**
- * Result of handleAppShortcut:
- * - `false`: not handled, let Electron continue
- * - `true`: handled (preventDefault), no further action
- * - `"close-tab"`: Cmd/Ctrl+W intercepted — caller should send IPC to renderer
- */
-export type ShortcutResult = boolean | "close-tab";
+export type ShortcutResult =
+  | boolean
+  | "close-tab"
+  | "open-settings"
+  | { action: "select-tab"; key: TabSelectionShortcutKey };
 
 export function handleAppShortcut(
   input: ShortcutInput,
@@ -62,6 +54,23 @@ export function handleAppShortcut(
   }
 
   if (!primary || !noSecondaryModifiers) return false;
+
+  // Browser-style direct tab selection. 1..8 address that exact position;
+  // 9 is interpreted by the renderer as "last tab" regardless of count.
+  // Main owns the chord so it works while focus is inside any editor/control
+  // and can prevent both renderer handlers and native accelerators from also
+  // acting. Match the logical key, as Settings records and persists shortcuts
+  // using KeyboardEvent.key. This keeps an AZERTY Ctrl+& override reachable;
+  // pressing Shift on that layout produces the logical key "1" and selects
+  // tab 1. On QWERTY, Shift+Digit1 produces "!", so that chord stays distinct.
+  // Holding the chord is swallowed without repeatedly changing MRU.
+  if (/^[1-9]$/.test(input.key)) {
+    if (input.isAutoRepeat) return true;
+    return {
+      action: "select-tab",
+      key: Number(input.key) as TabSelectionShortcutKey,
+    };
+  }
 
   // Cmd/Ctrl + "=" (unshifted) or "+" (Shift+=) → zoom in.
   if (
@@ -87,6 +96,17 @@ export function handleAppShortcut(
   if (input.key === "0" && !input.shift) {
     webContents.setZoomLevel(0);
     return true;
+  }
+
+  // Cmd/Ctrl + "," → open Settings, the macOS Preferences convention (and
+  // what editors bind on every platform). Handled here rather than in the
+  // renderer so the chord fires from any window and any focus context —
+  // including while the caret sits in a text field, where a document-level
+  // listener would have to make an exception for itself.
+  if (input.key === "," && !input.shift) {
+    // Holding the chord must not queue one request per repeat.
+    if (input.isAutoRepeat) return true;
+    return "open-settings";
   }
 
   // Cmd/Ctrl + W → close active tab (or window if last tab).

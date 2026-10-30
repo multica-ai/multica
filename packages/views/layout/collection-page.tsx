@@ -1,7 +1,7 @@
 "use client";
 
 import type { ComponentProps, ReactNode } from "react";
-import type { LucideIcon } from "lucide-react";
+import type { IconComponent } from "@multica/ui/icons";
 import { Button } from "@multica/ui/components/ui/button";
 import {
   Empty,
@@ -15,7 +15,7 @@ import { cn } from "@multica/ui/lib/utils";
 import { PageHeader } from "./page-header";
 
 interface CollectionPageHeaderProps {
-  icon: LucideIcon;
+  icon: IconComponent;
   title: ReactNode;
   count?: number;
   description?: ReactNode;
@@ -41,24 +41,24 @@ export function CollectionPageHeader({
   className,
 }: CollectionPageHeaderProps) {
   return (
-    <PageHeader className={cn("justify-between gap-3 px-5", className)}>
-      <div className="flex min-w-0 items-center gap-2">
+    <PageHeader className={className}>
+      <div className="flex min-w-0 flex-1 items-center gap-2">
         <Icon
           aria-hidden="true"
           className="size-4 shrink-0 text-muted-foreground"
         />
-        <h1 className="truncate text-sm font-medium">{title}</h1>
+        <h1 className="truncate text-body font-medium">{title}</h1>
         {typeof count === "number" && count > 0 ? (
-          <span className="shrink-0 font-mono text-xs tabular-nums text-muted-foreground/70">
+          <span className="shrink-0 font-mono text-caption tabular-nums text-muted-foreground">
             {count}
           </span>
         ) : null}
-        {description ? (
-          <p className="ml-2 hidden min-w-0 truncate text-xs text-muted-foreground md:block">
+        {description || learnMore ? (
+          <p className="ml-2 hidden min-w-0 truncate text-caption text-muted-foreground md:block">
             {description}
             {learnMore ? (
               <>
-                {" "}
+                {description ? " " : null}
                 <a
                   href={learnMore.href}
                   target="_blank"
@@ -83,7 +83,7 @@ export function CollectionPageHeader({
 
 interface CollectionPageHeaderActionProps
   extends Omit<ComponentProps<typeof Button>, "children"> {
-  icon: LucideIcon;
+  icon: IconComponent;
   label: string;
 }
 
@@ -117,7 +117,7 @@ export function CollectionPageHeaderAction({
 type PageStateTone = "muted" | "destructive" | "warning";
 
 interface CollectionPageStateProps {
-  icon: LucideIcon;
+  icon: IconComponent;
   title: ReactNode;
   description?: ReactNode;
   actions?: ReactNode;

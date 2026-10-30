@@ -8,6 +8,8 @@ import (
 	"runtime"
 	"strings"
 	"testing"
+
+	"github.com/multica-ai/multica/server/pkg/agent"
 )
 
 // newSelfHealTestDaemon builds a Daemon with just the state resolveAgentEntry
@@ -28,7 +30,8 @@ func newSelfHealTestDaemon() *Daemon {
 func stubDetectVersionFromPath(t *testing.T) {
 	t.Helper()
 	orig := detectAgentVersion
-	detectAgentVersion = func(_ context.Context, path string) (string, error) {
+	detectAgentVersion = func(_ context.Context, runtimeCmd agent.Command) (string, error) {
+		path := runtimeCmd.Path
 		return filepath.Base(filepath.Dir(filepath.Dir(path))), nil
 	}
 	t.Cleanup(func() { detectAgentVersion = orig })
@@ -317,5 +320,67 @@ func TestResolveAgentEntry_NoCommandNoHeal(t *testing.T) {
 	entry := AgentEntry{Path: filepath.Join(t.TempDir(), "does-not-exist"), Command: ""}
 	if got, _ := d.resolveAgentEntry(context.Background(), "codex", entry); got.Path != entry.Path {
 		t.Fatalf("entry with empty Command was rewritten: got %q, want %q", got.Path, entry.Path)
+	}
+}
+
+// TestRefreshHealedVersion_KeepsHealedPairCurrentAfterInPlaceUpgrade covers the
+// gap the hot-refresh path opened.
+//
+// resolveAgentEntry deliberately returns healed.version, NOT the shared
+// agentVersions cache, whenever a previous self-heal is still live — that is the
+// MUL-4486 guarantee that a reader seeing the healed path sees the version
+// detected for it. But a re-probe only wrote agentVersions, so once the healed
+// binary was itself replaced in place, the daemon reported the new version to
+// the server while every task kept launching under the version captured at heal
+// time (runTask's Codex sandbox policy reads exactly this value).
+func TestRefreshHealedVersion_KeepsHealedPairCurrentAfterInPlaceUpgrade(t *testing.T) {
+	d := newSelfHealTestDaemon()
+	healed := filepath.Join(t.TempDir(), "codex")
+	writeExecStub(t, healed)
+
+	// State after a self-heal: path + the version detected for it at that time.
+	d.resolvedPaths["codex"] = healedAgent{path: healed, version: "1.0.0"}
+	d.setAgentVersion("codex", "1.0.0")
+
+	entry := AgentEntry{Path: "/gone/codex", Command: "codex"}
+	if _, version := d.resolveAgentEntry(context.Background(), "codex", entry); version != "1.0.0" {
+		t.Fatalf("baseline version = %q, want 1.0.0", version)
+	}
+
+	// The healed binary is now overwritten in place — same path, new version.
+	// This is what a re-probe observes and publishes.
+	d.setAgentVersion("codex", "2.0.0")
+	d.refreshHealedVersion("codex", healed, "2.0.0")
+
+	gotEntry, version := d.resolveAgentEntry(context.Background(), "codex", entry)
+	if version != "2.0.0" {
+		t.Errorf("resolveAgentEntry version = %q, want 2.0.0 — tasks would still run the old version's policy", version)
+	}
+	if gotEntry.Path != healed {
+		t.Errorf("resolveAgentEntry path = %q, want the healed path %q", gotEntry.Path, healed)
+	}
+}
+
+// TestRefreshHealedVersion_LeavesOtherPairingsAlone: a heal that has since moved
+// the provider to a different binary owns its own {path, version} pairing, and a
+// blank detection is never a version.
+func TestRefreshHealedVersion_LeavesOtherPairingsAlone(t *testing.T) {
+	d := newSelfHealTestDaemon()
+	d.resolvedPaths["codex"] = healedAgent{path: "/current/codex", version: "2.0.0"}
+
+	d.refreshHealedVersion("codex", "/stale/codex", "9.9.9")
+	if got := d.resolvedPaths["codex"]; got.version != "2.0.0" || got.path != "/current/codex" {
+		t.Errorf("pairing for a different path was modified: %+v", got)
+	}
+
+	d.refreshHealedVersion("codex", "/current/codex", "")
+	if got := d.resolvedPaths["codex"].version; got != "2.0.0" {
+		t.Errorf("healed version = %q, want 2.0.0 — a blank detection is not a version", got)
+	}
+
+	// A provider that was never healed must not gain an entry.
+	d.refreshHealedVersion("claude", "/usr/bin/claude", "3.0.0")
+	if _, ok := d.resolvedPaths["claude"]; ok {
+		t.Error("refreshHealedVersion invented a heal record for a provider that was never healed")
 	}
 }

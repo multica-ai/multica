@@ -10,22 +10,23 @@
  * `useColorScheme` everything else in the app uses, and rebuilds the
  * style object whenever the theme flips.
  *
- * Sizing follows the mobile typography scale documented in
- * `apps/mobile/docs/markdown-renderer-research.md` → "Mobile typography
- * scale" (calibrated against Apple HIG; one tier below shadcn web defaults
- * because markdown headings inside an issue card are structural, not
- * screen titles). HIG values are encoded in `MD_FONT` / `MD_LINE` /
- * `MD_GAP` constants — these are NOT RNR tokens to replace; they are
+ * Sizing sits one tier below shadcn web defaults because markdown headings
+ * inside an issue card are structural, not screen titles. The scale is
+ * calibrated against Apple HIG Dynamic Type (Body 17pt, Title 3 20pt,
+ * Title 2 22pt, Title 1 28pt) and cross-checked against GitHub Mobile and
+ * Linear iOS. Those values are encoded in the `MD_FONT` / `MD_LINE` /
+ * `MD_GAP` constants below — these are NOT RNR tokens to replace; they are
  * mobile-specific design constants validated by the 2026-05-09 inline-
  * code incident.
  */
 import { useMemo } from "react";
+import { MOBILE_RADIUS } from "@/lib/radius";
 import { THEME } from "@/lib/theme";
 import { useColorScheme } from "@/lib/use-color-scheme";
 
 /**
  * Typography scale — Apple HIG-calibrated, one tier below shadcn web.
- * See `docs/markdown-renderer-research.md` "Mobile typography scale".
+ * h1 maps to HIG Title 3 (20), h2 one step down (18), h3 body+2 (16).
  */
 const MD_FONT = {
   body: 14,
@@ -63,9 +64,8 @@ const MD_LINE = {
   // chip artifact is library-specific, not RN-platform-wide. Discord /
   // Slack / Telegram / Mattermost mobile all use background + mono with
   // no visible top-heavy issue, confirming this is enriched's bug, not
-  // an RN+iOS structural limitation. See:
-  //   - docs/markdown-rendering-adr.md "Known limitations"
-  //   - docs/markdown-renderer-research.md decision log 2026-05-19
+  // an RN+iOS structural limitation. See
+  // docs/markdown-rendering-adr.md "Known limitations".
   body: 24,
   // Heading lineHeights match each heading's fontSize × ~1.3. We MUST
   // pass these explicitly: enriched-markdown's heading defaults are
@@ -179,46 +179,10 @@ export function useMarkdownStyle() {
         color: t.brand,
         underline: true,
       },
-      // Inline code — monospace + muted-foreground tint, NO background chip.
-      //
-      // Why no background: on iOS, NSAttributedString draws
-      // NSBackgroundColorAttributeName as a rectangle spanning the full
-      // line-box height (24pt for our CJK-tuned body leading). PingFang
-      // SC places the baseline at ~75-80% of the line-box, so monospaced
-      // glyphs sit low inside that rectangle, leaving ~11pt empty at the
-      // top vs ~6pt at the bottom — a visible 2:1 asymmetry in CJK
-      // paragraphs. This is a platform-level constraint, not a library
-      // bug: the library's STYLES.md exposes only fontFamily / fontSize /
-      // color / backgroundColor / borderColor for inline code — no
-      // padding, lineHeight, or baselineOffset knob. Confirmed 2026-05-21
-      // (researcher brief): zero open PRs / forks / prereleases touching
-      // inline-code vertical geometry; upstream issue #255 has no
-      // maintainer response since 2026-04-20. The only real fixes are at
-      // the native layer (custom NSLayoutManager.drawBackground override
-      // or TextKit 2 NSTextLayoutManager.enumerateTextSegments(.highlight))
-      // which would require forking the library — not worth the perpetual
-      // patch-rebase cost for a polish issue.
-      //
-      // Visual identification stays strong without the chip: monospace
-      // font + muted-foreground tint matches Apple Notes / iA Writer.
-      //
-      // Color choice — mutedForeground (NOT brand):
-      //   - mutedForeground is a neutral gray, reads as "subdued prose".
-      //   - brand is reserved for links; tinting code blue confused users
-      //     into tapping it as if it were a link (tried 2026-05-19, then
-      //     reverted same day for this reason).
-      //
-      // fontFamily intentionally NOT set: enriched-markdown's default is
-      // the platform system monospace (SF Mono on iOS, monospace on
-      // Android), which has a larger visual x-height than the previously-
-      // explicit "Menlo" override.
-      //
-      // Revisit when:
-      //   - upstream #255 ships a paddingVertical / lineHeight knob, OR
-      //   - we contribute the TextKit 2 fix upstream (the right hook is
-      //     NSTextLayoutManager.enumerateTextSegments(in:type:.highlight:))
-      // Either way, switch back to a tinted-chip style for cross-platform
-      // visual parity with web/desktop.
+      // Keep inline code backgrounds transparent: native attributed-string chips
+      // span the line box and cannot be vertically padded by this renderer. Monospace
+      // and a neutral tint identify code without making it look like a link.
+      // Leave fontFamily unset to use the platform's system monospace.
       code: {
         color: t.mutedForeground,
         backgroundColor: "transparent",
@@ -250,7 +214,7 @@ export function useMarkdownStyle() {
         backgroundColor: t.surface2,
         borderColor: t.border,
         padding: 12,
-        borderRadius: 8,
+        borderRadius: MOBILE_RADIUS.md,
         marginBottom: MD_GAP.paragraph,
       },
       // Blockquote — `color` is REQUIRED: enriched's default is a hardcoded
@@ -286,7 +250,7 @@ export function useMarkdownStyle() {
         marginLeft: 16,
       },
       image: {
-        borderRadius: 8,
+        borderRadius: MOBILE_RADIUS.md,
         marginBottom: MD_GAP.paragraph,
       },
       // Task lists. `checkedTextColor` REQUIRED: enriched default is `#000000`,
@@ -309,9 +273,8 @@ export function useMarkdownStyle() {
         fontSize: MD_FONT.body,
         lineHeight: MD_LINE.body,
         borderColor: t.border,
-        // borderRadius: 8 (was 6) — aligns with codeBlock and image (both 8).
-        // No reason for table to be the odd one out.
-        borderRadius: 8,
+        // Match the compact medium radius used by codeBlock and image.
+        borderRadius: MOBILE_RADIUS.md,
         headerBackgroundColor: t.surface2,
         headerTextColor: t.foreground,
         // Transparent rows let the page background show through — works in

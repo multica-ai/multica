@@ -15,13 +15,17 @@ import (
 )
 
 var issueMoveFields = map[string]struct{}{
-	"status":          {},
-	"assignee_type":   {},
-	"assignee_id":     {},
-	"parent_issue_id": {},
-	"project_id":      {},
-	"before_id":       {},
-	"after_id":        {},
+	"status":            {},
+	"assignee_type":     {},
+	"assignee_id":       {},
+	"parent_issue_id":   {},
+	"project_id":        {},
+	"before_id":         {},
+	"after_id":          {},
+	"expected_revision": {},
+	// A drag onto a workflow handoff step can stop the previous agent's run,
+	// exactly as the same status change through UpdateIssue can. (MUL-7420)
+	"stop_previous_assignee_runs": {},
 }
 
 // MoveIssue accepts relative neighbors instead of a client-authored canonical

@@ -1,7 +1,6 @@
 package agent
 
 import (
-	"bufio"
 	"context"
 	"fmt"
 	"io"
@@ -112,9 +111,12 @@ func (b *traecliBackend) Execute(ctx context.Context, prompt string, opts ExecOp
 		[]string{"acp", "serve", "--yolo"},
 		filterCustomArgs(opts.CustomArgs, traecliBlockedArgs, b.cfg.Logger)...,
 	)
-	cmd := exec.CommandContext(runCtx, execPath, traecliArgs...)
+	cmd := b.cfg.commandAt(execPath).exec(runCtx, traecliArgs...)
 	hideAgentWindow(cmd)
-	b.cfg.Logger.Info("agent command", "exec", execPath, "args", traecliArgs)
+	b.cfg.logAgentCommand(cmd, newAgentCommandLogArgs(traecliArgs,
+		trustAgentCommandPositional(0, "acp"),
+		trustAgentCommandPositional(1, "serve"),
+	))
 	if opts.Cwd != "" {
 		cmd.Dir = opts.Cwd
 	}
@@ -141,7 +143,7 @@ func (b *traecliBackend) Execute(ctx context.Context, prompt string, opts ExecOp
 		return nil, fmt.Errorf("traecli stderr pipe: %w", err)
 	}
 
-	if err := cmd.Start(); err != nil {
+	if err := startOwnedProcessTree(cmd, b.cfg.Logger); err != nil {
 		cancel()
 		return nil, fmt.Errorf("start traecli: %w", err)
 	}
@@ -165,6 +167,7 @@ func (b *traecliBackend) Execute(ctx context.Context, prompt string, opts ExecOp
 	var streamingCurrentTurn atomic.Bool
 
 	promptDone := make(chan hermesPromptResult, 1)
+	activity := make(chan struct{}, 1)
 
 	c := &hermesClient{
 		cfg:          b.cfg,
@@ -173,6 +176,12 @@ func (b *traecliBackend) Execute(ctx context.Context, prompt string, opts ExecOp
 		pendingTools: make(map[string]*pendingToolCall),
 		acceptNotification: func(string) bool {
 			return streamingCurrentTurn.Load()
+		},
+		onActivity: func() {
+			select {
+			case activity <- struct{}{}:
+			default:
+			}
 		},
 		onMessage: func(msg Message) {
 			if !streamingCurrentTurn.Load() {
@@ -198,8 +207,7 @@ func (b *traecliBackend) Execute(ctx context.Context, prompt string, opts ExecOp
 	readerDone := make(chan struct{})
 	go func() {
 		defer close(readerDone)
-		scanner := bufio.NewScanner(stdout)
-		scanner.Buffer(make([]byte, 0, 1024*1024), 10*1024*1024)
+		scanner := newAgentStreamScanner(stdout)
 		for scanner.Scan() {
 			line := strings.TrimSpace(scanner.Text())
 			if line == "" {
@@ -217,6 +225,7 @@ func (b *traecliBackend) Execute(ctx context.Context, prompt string, opts ExecOp
 		defer func() {
 			stdin.Close()
 			_ = cmd.Wait()
+			releaseProcessGroup(cmd)
 		}()
 
 		startTime := time.Now()
@@ -247,7 +256,7 @@ func (b *traecliBackend) Execute(ctx context.Context, prompt string, opts ExecOp
 		// Drop MCP entries whose remote transport the runtime didn't advertise
 		// (traecli advertises mcpCapabilities {http, sse}). See hermes.go for
 		// why sending an unsupported transport tanks the whole session/new.
-		mcpServers = filterACPMcpServersByCapability(mcpServers, extractACPMcpCapabilities(initResult), "traecli", b.cfg.Logger)
+		mcpServers = filterACPMcpServersByCapability(mcpServers, extractACPMcpCapabilities(initResult), "traecli", b.cfg)
 
 		cwd := opts.Cwd
 		if cwd == "" {
@@ -263,9 +272,13 @@ func (b *traecliBackend) Execute(ctx context.Context, prompt string, opts ExecOp
 				"mcpServers": mcpServers,
 			})
 			if err != nil {
-				finalStatus = "failed"
-				finalError = fmt.Sprintf("traecli session/load failed: %v", err)
-				resCh <- Result{Status: finalStatus, Error: finalError, DurationMs: time.Since(startTime).Milliseconds()}
+				// A runtime that refuses the recorded id has to say so here:
+				// without ResumeRejected the daemon reads the bare failure as
+				// "checked, not a rejection", keeps the pointer and replays the
+				// same dead session on every later turn (GH #8116).
+				finalStatus, finalError, resumeRejected = classifyACPResumeFailure(
+					runCtx, "traecli", "session/load", err, timeout, b.cfg.Logger)
+				resCh <- Result{Status: finalStatus, Error: finalError, DurationMs: time.Since(startTime).Milliseconds(), ResumeRejected: resumeRejected}
 				return
 			}
 			var changed bool
@@ -314,7 +327,9 @@ func (b *traecliBackend) Execute(ctx context.Context, prompt string, opts ExecOp
 				b.cfg.Logger.Warn("traecli set_session_model failed", "error", err, "requested_model", opts.Model)
 				finalStatus = "failed"
 				finalError = fmt.Sprintf("traecli could not switch to model %q: %v", opts.Model, err)
-				if opts.ResumeSessionID != "" && isACPSessionNotFound(err) {
+				if setupFailureWithholdsSessionID(opts) {
+					sessionID = ""
+				} else if isACPSessionNotFound(err) {
 					b.cfg.Logger.Warn("resumed session not found at set_model time; clearing session id so the daemon retries fresh",
 						"backend", "traecli",
 						"session_id", sessionID,
@@ -372,13 +387,10 @@ func (b *traecliBackend) Execute(ctx context.Context, prompt string, opts ExecOp
 					finalStatus = "aborted"
 					finalError = "traecli cancelled the prompt"
 				}
-				c.usageMu.Lock()
-				c.usage.InputTokens += pr.usage.InputTokens
-				c.usage.OutputTokens += pr.usage.OutputTokens
-				c.usage.CacheReadTokens += pr.usage.CacheReadTokens
-				c.usageMu.Unlock()
+				c.mergeUsage(pr.usage)
 			default:
 			}
+			waitForACPNotificationQuiescence(runCtx, activity, readerDone, acpNotificationQuietTime, traecliReaderDrainGrace)
 		}
 
 		duration := time.Since(startTime)
@@ -416,12 +428,10 @@ func (b *traecliBackend) Execute(ctx context.Context, prompt string, opts ExecOp
 		// give-up turn that lands before a tool call stays visible.
 		finalStatus, finalError = promoteACPResultOnProviderError(finalStatus, finalError, providerErrorOutput, providerErr)
 
-		c.usageMu.Lock()
-		u := c.usage
-		c.usageMu.Unlock()
+		u := c.accumulatedUsage()
 
 		var usageMap map[string]TokenUsage
-		if u.InputTokens > 0 || u.OutputTokens > 0 || u.CacheReadTokens > 0 || u.CacheWriteTokens > 0 {
+		if acpUsagePresent(u) {
 			model := effectiveModel
 			if model == "" {
 				model = "unknown"

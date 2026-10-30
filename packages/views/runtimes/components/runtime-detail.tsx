@@ -5,9 +5,8 @@ import {
   Trash2,
   ChevronRight,
   Cpu,
-  Globe,
   Lock,
-} from "lucide-react";
+} from "@multica/ui/icons";
 import { toast } from "sonner";
 import { useQuery } from "@tanstack/react-query";
 import type {
@@ -19,9 +18,9 @@ import type {
 import { useAuthStore } from "@multica/core/auth";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { memberListOptions, agentListOptions } from "@multica/core/workspace/queries";
-import { useUpdateRuntime } from "@multica/core/runtimes/mutations";
 import {
   deriveRuntimeHealth,
+  isRuntimeUsableForUser,
   runtimeDisplayName,
   runtimeProfileListOptions,
 } from "@multica/core/runtimes";
@@ -31,11 +30,6 @@ import {
 } from "@multica/core/agents";
 import { useWorkspacePaths } from "@multica/core/paths";
 import { Button } from "@multica/ui/components/ui/button";
-import {
-  Tooltip,
-  TooltipContent,
-  TooltipTrigger,
-} from "@multica/ui/components/ui/tooltip";
 import { ActorAvatar } from "../../common/actor-avatar";
 import { BreadcrumbHeader } from "../../layout/breadcrumb-header";
 import { AppLink, useNavigation } from "../../navigation";
@@ -44,8 +38,11 @@ import { HealthBadge } from "./shared";
 import { ProviderLogo } from "./provider-logo";
 import { UsageSection } from "./usage-section";
 import { DeleteRuntimeDialog } from "./delete-runtime-dialog";
+import { RuntimeAccessEditor, RuntimeAccessReadout } from "./runtime-access-editor";
 import { DeleteRuntimeProfileDialog } from "./delete-runtime-profile-dialog";
+import { runtimeRowLabel } from "./runtime-machines";
 import { useT, useTimeAgo } from "../../i18n";
+import { TruncatedTooltip } from "@multica/ui/components/common/truncated-tooltip";
 
 function getCliVersion(metadata: Record<string, unknown>): string | null {
   if (
@@ -65,7 +62,7 @@ function shortDaemonId(id: string | null): string | null {
 }
 
 // 30s tick keeps derived runtime health honest as time-based windows
-// (recently_lost → offline → about_to_gc) cross thresholds without any new
+// (recently_lost → offline → long_offline) cross thresholds without any new
 // query data arriving. Agent presence has no time windows anymore, so it
 // doesn't need this — but useWorkspacePresenceMap is the dependency we
 // already mounted on this page, and that's wired to query data, not `now`.
@@ -118,6 +115,7 @@ export function RuntimeDetail({
     : false;
   const isRuntimeOwner = user && runtime.owner_id === user.id;
   const canEditRuntime = isAdmin || isRuntimeOwner;
+  const canReadRuntime = isRuntimeUsableForUser(runtime, user?.id ?? null);
   const runtimeProfile: RuntimeProfile | null = runtime.profile_id
     ? profiles.find((p) => p.id === runtime.profile_id) ?? null
     : null;
@@ -147,6 +145,9 @@ export function RuntimeDetail({
   const lastSeen = runtime.last_seen_at
     ? timeAgo(runtime.last_seen_at)
     : t(($) => $.detail.never_seen);
+  const runtimeName = machineLabel
+    ? runtimeRowLabel(runtime, machineLabel)
+    : runtimeDisplayName(runtime);
 
   return (
     <div className="flex h-full flex-col">
@@ -158,13 +159,13 @@ export function RuntimeDetail({
             : []),
         ]}
         leaf={
-          <span className="truncate font-mono text-xs text-foreground">
-            {runtimeDisplayName(runtime)}
+          <span className="truncate font-mono text-caption text-foreground">
+            {runtimeName}
           </span>
         }
         actions={
           !canEditRuntime ? (
-            <span className="inline-flex items-center gap-1 text-xs text-muted-foreground">
+            <span className="inline-flex items-center gap-1 text-caption text-muted-foreground">
               <Lock className="h-3 w-3" />
               {t(($) => $.detail.read_only)}
             </span>
@@ -182,13 +183,14 @@ export function RuntimeDetail({
           <div className="min-w-0 space-y-5">
             <HeroCard
               runtime={runtime}
+              runtimeName={runtimeName}
               health={health}
               lastSeen={lastSeen}
               ownerMember={ownerMember}
               cliVersion={cliVersion}
               daemonShort={daemonShort}
             />
-            <UsageSection runtime={runtime} />
+            {canReadRuntime && <UsageSection runtime={runtime} />}
           </div>
 
           {/* Right rail: serving agents + diagnostics */}
@@ -200,7 +202,7 @@ export function RuntimeDetail({
             />
             <DiagnosticsCard
               runtime={runtime}
-              canEdit={!!canEditRuntime}
+              canEditVisibility={!!isRuntimeOwner}
               canDelete={!!canDelete}
               onDelete={() => setDeleteOpen(true)}
             />
@@ -245,6 +247,7 @@ function parseDeviceInfo(raw: string): { hostname: string; runtime?: string } {
 
 function HeroCard({
   runtime,
+  runtimeName,
   health,
   lastSeen,
   ownerMember,
@@ -252,6 +255,7 @@ function HeroCard({
   daemonShort,
 }: {
   runtime: AgentRuntime;
+  runtimeName: string;
   health: ReturnType<typeof deriveRuntimeHealth>;
   lastSeen: string;
   ownerMember: MemberWithUser | null;
@@ -272,11 +276,11 @@ function HeroCard({
         </div>
         <div className="min-w-0 flex-1">
           <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
-            <h2 className="truncate text-base font-semibold tracking-tight">
-              {runtimeDisplayName(runtime)}
+            <h2 className="truncate text-title-sm font-semibold tracking-tight">
+              {runtimeName}
             </h2>
             <HealthBadge health={health} />
-            <span className="text-xs text-muted-foreground">
+            <span className="text-caption text-muted-foreground">
               {t(($) => $.detail.last_seen, { when: lastSeen })}
             </span>
           </div>
@@ -296,30 +300,25 @@ function HeroCard({
                 size="sm"
                 enableHoverCard
               />
-              <span className="cursor-pointer truncate text-sm">{ownerMember.name}</span>
+              <span className="cursor-pointer truncate text-body">{ownerMember.name}</span>
             </span>
           ) : (
-            <span className="text-sm text-muted-foreground">—</span>
+            <span className="text-body text-muted-foreground">—</span>
           )}
         </Fact>
         <Fact label={t(($) => $.detail.fact_device)}>
           {device?.hostname ? (
-            <Tooltip>
-              <TooltipTrigger
-                render={
-                  <span className="block truncate font-mono text-xs">
-                    {device.hostname}
-                  </span>
-                }
-              />
-              <TooltipContent>{device.hostname}</TooltipContent>
-            </Tooltip>
+            <TruncatedTooltip content={device.hostname}>
+              <span className="block truncate font-mono text-caption">
+                {device.hostname}
+              </span>
+            </TruncatedTooltip>
           ) : (
-            <span className="text-sm text-muted-foreground">—</span>
+            <span className="text-body text-muted-foreground">—</span>
           )}
         </Fact>
         <Fact label={t(($) => $.detail.fact_runtime)}>
-          <span className="block truncate text-sm">
+          <span className="block truncate text-body">
             {device?.runtime ?? (
               <span className="capitalize">{runtime.provider}</span>
             )}
@@ -335,7 +334,7 @@ function HeroCard({
           <button
             type="button"
             onClick={() => setShowDetails((v) => !v)}
-            className="flex w-full items-center gap-1 px-4 py-2 text-xs text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
+            className="flex w-full items-center gap-1 px-4 py-2 text-caption text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
           >
             <ChevronRight
               className={`h-3 w-3 transition-transform ${
@@ -377,15 +376,15 @@ function Fact({
 }) {
   return (
     <div className={`min-w-0 ${compact ? "" : "px-4 py-3"}`}>
-      <dt className="text-[11px] uppercase tracking-wider text-muted-foreground">
+      <dt className="text-micro uppercase tracking-wider text-muted-foreground">
         {label}
       </dt>
-      <dd className={`mt-1 ${mono ? "font-mono text-xs" : ""}`}>{children}</dd>
+      <dd className={`mt-1 ${mono ? "font-mono text-caption" : ""}`}>{children}</dd>
     </div>
   );
 }
 
-function ServingAgentsCard({
+export function ServingAgentsCard({
   agents,
   presenceMap,
   agentHref,
@@ -399,15 +398,15 @@ function ServingAgentsCard({
   return (
     <div className="rounded-lg border">
       <div className="flex items-center justify-between border-b px-4 py-2.5">
-        <span className="text-xs font-semibold">{t(($) => $.detail.serving_title)}</span>
-        <span className="text-xs text-muted-foreground">
+        <span className="text-caption font-semibold">{t(($) => $.detail.serving_title)}</span>
+        <span className="text-caption text-muted-foreground">
           {t(($) => $.detail.serving_count, { count: agents.length })}
         </span>
       </div>
       {agents.length === 0 ? (
         <div className="flex flex-col items-center px-4 py-6 text-center">
-          <Cpu className="h-5 w-5 text-muted-foreground/40" />
-          <p className="mt-2 text-xs text-muted-foreground">
+          <Cpu className="h-5 w-5 text-faint-foreground" />
+          <p className="mt-2 text-caption text-muted-foreground">
             {t(($) => $.detail.no_agents)}
           </p>
         </div>
@@ -430,10 +429,10 @@ function ServingAgentsCard({
               >
                 <ActorAvatar actorType="agent" actorId={agent.id} size="sm" enableHoverCard showStatusDot />
                 <div className="min-w-0 flex-1">
-                  <div className="truncate text-xs font-medium">
+                  <div className="truncate text-caption font-medium">
                     {agent.name}
                   </div>
-                  <div className="mt-0.5 flex flex-wrap items-center gap-x-1.5 gap-y-0.5 text-xs">
+                  <div className="mt-0.5 flex flex-wrap items-center gap-x-1.5 gap-y-0.5 text-caption">
                     <span className="inline-flex items-center gap-1.5">
                       <span className={`h-1.5 w-1.5 rounded-full ${av.dotClass}`} />
                       <span className={av.textClass}>{avLabel}</span>
@@ -455,7 +454,7 @@ function ServingAgentsCard({
                     )}
                   </div>
                 </div>
-                <ChevronRight className="h-3.5 w-3.5 shrink-0 text-muted-foreground/40 transition-colors group-hover:text-muted-foreground" />
+                <ChevronRight className="h-3.5 w-3.5 shrink-0 text-faint-foreground transition-colors group-hover:text-muted-foreground" />
               </AppLink>
             );
           })}
@@ -467,12 +466,18 @@ function ServingAgentsCard({
 
 function DiagnosticsCard({
   runtime,
-  canEdit,
+  canEditVisibility,
   canDelete,
   onDelete,
 }: {
   runtime: AgentRuntime;
-  canEdit: boolean;
+  /**
+   * Runtime owner only — narrower than the card's other affordances on
+   * purpose (MUL-6126). Sharing a machine with the workspace is the owner's
+   * call, so a workspace admin sees the read-only chip here even though they
+   * may still rename or delete the runtime.
+   */
+  canEditVisibility: boolean;
   canDelete: boolean;
   onDelete: () => void;
 }) {
@@ -480,17 +485,17 @@ function DiagnosticsCard({
   return (
     <div className="rounded-lg border">
       <div className="border-b px-4 py-2.5">
-        <span className="text-xs font-semibold">{t(($) => $.detail.diagnostics_title)}</span>
+        <span className="text-caption font-semibold">{t(($) => $.detail.diagnostics_title)}</span>
       </div>
       <div className="space-y-3 p-4">
         <div>
-          <div className="mb-1.5 text-[11px] uppercase tracking-wide text-muted-foreground">
+          <div className="mb-1.5 text-micro uppercase tracking-wide text-muted-foreground">
             {t(($) => $.detail.diagnostics_visibility)}
           </div>
-          {canEdit ? (
-            <VisibilityEditor runtime={runtime} />
+          {canEditVisibility ? (
+            <RuntimeAccessEditor runtime={runtime} />
           ) : (
-            <VisibilityReadout runtime={runtime} />
+            <RuntimeAccessReadout runtime={runtime} />
           )}
         </div>
         {canDelete && (
@@ -514,126 +519,5 @@ function DiagnosticsCard({
         )}
       </div>
     </div>
-  );
-}
-
-// VisibilityReadout renders a static "Private" / "Public" pill for users
-// who can't edit the runtime. The description used to sit under the chip;
-// it now lives in the hover tooltip so the Diagnostics column stays compact
-// and matches the surrounding sections. Older backends that omit the field
-// render as "Private" to match the strict default.
-function VisibilityReadout({ runtime }: { runtime: AgentRuntime }) {
-  const { t } = useT("runtimes");
-  const visibility = runtime.visibility === "public" ? "public" : "private";
-  const Icon = visibility === "public" ? Globe : Lock;
-  return (
-    <Tooltip>
-      <TooltipTrigger
-        render={
-          <span className="inline-flex items-center gap-1.5 rounded-md border bg-muted/30 px-2 py-1.5 text-xs">
-            <Icon className="h-3 w-3 text-muted-foreground" />
-            <span className="font-medium">
-              {t(($) => $.detail.visibility_label[visibility])}
-            </span>
-          </span>
-        }
-      />
-      <TooltipContent>
-        {t(($) => $.detail.visibility_hint[visibility])}
-      </TooltipContent>
-    </Tooltip>
-  );
-}
-
-// VisibilityEditor lets the runtime owner (or workspace admin) flip
-// public↔private. The PATCH endpoint also re-checks; this is a UI gate, not
-// a security boundary. Per-choice description text lives in the hover
-// tooltip so the two buttons stay a tight icon+label pair instead of the
-// previous two-line block that competed with the surrounding cards.
-function VisibilityEditor({ runtime }: { runtime: AgentRuntime }) {
-  const { t } = useT("runtimes");
-  const wsId = useWorkspaceId();
-  const updateRuntime = useUpdateRuntime(wsId);
-  const current = runtime.visibility === "public" ? "public" : "private";
-
-  const flip = (next: "private" | "public") => {
-    if (next === current) return;
-    updateRuntime.mutate(
-      { runtimeId: runtime.id, patch: { visibility: next } },
-      {
-        onSuccess: () =>
-          toast.success(
-            t(($) => $.detail.visibility_toast_updated, {
-              visibility: t(($) => $.detail.visibility_label[next]),
-            }),
-          ),
-        onError: (err) =>
-          toast.error(
-            err instanceof Error && err.message
-              ? err.message
-              : t(($) => $.detail.visibility_toast_failed),
-          ),
-      },
-    );
-  };
-
-  return (
-    <div className="inline-flex items-center gap-0.5 rounded-md bg-muted p-0.5">
-      <VisibilityChoice
-        active={current === "private"}
-        icon={<Lock className="h-3 w-3" />}
-        label={t(($) => $.detail.visibility_label.private)}
-        tooltip={t(($) => $.detail.visibility_hint.private)}
-        disabled={updateRuntime.isPending}
-        onClick={() => flip("private")}
-      />
-      <VisibilityChoice
-        active={current === "public"}
-        icon={<Globe className="h-3 w-3" />}
-        label={t(($) => $.detail.visibility_label.public)}
-        tooltip={t(($) => $.detail.visibility_hint.public)}
-        disabled={updateRuntime.isPending}
-        onClick={() => flip("public")}
-      />
-    </div>
-  );
-}
-
-function VisibilityChoice({
-  active,
-  icon,
-  label,
-  tooltip,
-  disabled,
-  onClick,
-}: {
-  active: boolean;
-  icon: React.ReactNode;
-  label: string;
-  tooltip: string;
-  disabled: boolean;
-  onClick: () => void;
-}) {
-  return (
-    <Tooltip>
-      <TooltipTrigger
-        render={
-          <button
-            type="button"
-            onClick={onClick}
-            disabled={disabled}
-            className={`inline-flex items-center gap-1.5 rounded px-2 py-1 text-xs font-medium transition-colors ${
-              active
-                ? "bg-background text-foreground shadow-sm"
-                : "text-muted-foreground hover:text-foreground"
-            } ${disabled ? "cursor-not-allowed opacity-60" : ""}`}
-          >
-            <span className="shrink-0">{icon}</span>
-            <span>{label}</span>
-          </button>
-        }
-      />
-      <TooltipContent>{tooltip}</TooltipContent>
-    </Tooltip>
   );
 }

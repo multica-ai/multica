@@ -1,6 +1,6 @@
 "use client";
 
-import { Globe, Lock } from "lucide-react";
+import { Globe, Lock } from "@multica/ui/icons";
 import type { AgentVisibility } from "@multica/core/types";
 import { Tooltip, TooltipTrigger, TooltipContent } from "@multica/ui/components/ui/tooltip";
 import { useT } from "../../i18n";
@@ -33,7 +33,7 @@ export function VisibilityBadge({
       <TooltipTrigger
         render={
           <span
-            className={`inline-flex items-center gap-1 text-xs text-muted-foreground ${className}`}
+            className={`inline-flex items-center gap-1 text-caption text-muted-foreground ${className}`}
             aria-label={tooltip}
           >
             <Icon className="h-3 w-3 shrink-0" />

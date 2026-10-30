@@ -25,20 +25,70 @@ const testUserID = "test-user"
 // mockMembershipChecker always returns true.
 type mockMembershipChecker struct{}
 
-func (m *mockMembershipChecker) IsMember(_ context.Context, _, _ string) bool {
-	return true
+func (m *mockMembershipChecker) IsMember(_ context.Context, _, _ string) (bool, error) {
+	return true, nil
+}
+
+func (*mockMembershipChecker) Members(_ context.Context, identities []MembershipIdentity) (map[MembershipIdentity]bool, error) {
+	members := make(map[MembershipIdentity]bool, len(identities))
+	for _, identity := range identities {
+		members[identity] = true
+	}
+	return members, nil
 }
 
 func makeTestToken(t *testing.T) string {
+	return makeTestTokenForUser(t, testUserID, "")
+}
+
+func makeTestTokenForUser(t *testing.T, userID, email string) string {
 	t.Helper()
-	token := jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.MapClaims{
+	claims := jwt.MapClaims{
 		"sub": testUserID,
-	})
+	}
+	if userID != "" {
+		claims["sub"] = userID
+	}
+	if email != "" {
+		claims["email"] = email
+	}
+	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
 	signed, err := token.SignedString(auth.JWTSecret())
 	if err != nil {
 		t.Fatalf("failed to sign test JWT: %v", err)
 	}
 	return signed
+}
+
+type staticPATResolver map[string]string
+
+func (s staticPATResolver) ResolveToken(_ context.Context, token string) (string, bool) {
+	userID, ok := s[token]
+	return userID, ok
+}
+
+func TestAuthenticateTokenRejectsTemporarilyDisabledJWTUser(t *testing.T) {
+	token := makeTestTokenForUser(t, "514492f7-b30f-4147-bd33-c0e8ce5d6d4f", "")
+
+	uid, errMsg := authenticateToken(token, nil, context.Background())
+	if uid != "" {
+		t.Fatalf("expected no user ID, got %q", uid)
+	}
+	if !strings.Contains(errMsg, "account disabled") {
+		t.Fatalf("expected account disabled error, got %q", errMsg)
+	}
+}
+
+func TestAuthenticateTokenRejectsTemporarilyDisabledPATUser(t *testing.T) {
+	uid, errMsg := authenticateToken("mul_disabled", staticPATResolver{
+		"mul_disabled": "1d542296-17c6-484a-9914-dcee589be116",
+	}, context.Background())
+	if uid != "" {
+		t.Fatalf("expected no user ID, got %q", uid)
+	}
+	if !strings.Contains(errMsg, "account disabled") {
+		t.Fatalf("expected account disabled error, got %q", errMsg)
+	}
 }
 
 func newTestHub(t *testing.T) (*Hub, *httptest.Server) {
@@ -47,6 +97,7 @@ func newTestHub(t *testing.T) (*Hub, *httptest.Server) {
 	go hub.Run()
 
 	mc := &mockMembershipChecker{}
+	hub.SetMembershipChecker(mc)
 	mux := http.NewServeMux()
 	mux.HandleFunc("/ws", func(w http.ResponseWriter, r *http.Request) {
 		HandleWebSocket(hub, mc, nil, nil, w, r)
@@ -129,6 +180,39 @@ func TestClientHandleSubscribeReportsLookupFailure(t *testing.T) {
 
 	if len(client.subscriptions) != 0 {
 		t.Fatalf("lookup failure must not subscribe client, got %d subscriptions", len(client.subscriptions))
+	}
+}
+
+// A workspace-member room carries one member's private content in one
+// workspace. A connection joins only its own room, at connect time, and no
+// subscribe frame can add another one.
+func TestWorkspaceMemberScopeReachesOnlyThatMembersWorkspaceConnection(t *testing.T) {
+	hub := NewHub()
+	newClient := func(userID, workspaceID string) *Client {
+		c := &Client{hub: hub, send: make(chan []byte, 4), userID: userID, workspaceID: workspaceID}
+		hub.registerClient(c)
+		return c
+	}
+	owner := newClient("owner", "ws-x")
+	ownerElsewhere := newClient("owner", "ws-y")
+	peer := newClient("peer", "ws-x")
+
+	peer.handleSubscribe(ScopeWorkspaceMember, WorkspaceMemberScopeID("ws-x", "owner"))
+	select {
+	case raw := <-peer.send:
+		if !strings.Contains(string(raw), "subscribe_error") {
+			t.Fatalf("peer subscribe reply = %s, want subscribe_error", raw)
+		}
+	default:
+		t.Fatal("peer subscribe to another member's room was not refused")
+	}
+
+	hub.BroadcastToScope(ScopeWorkspaceMember, WorkspaceMemberScopeID("ws-x", "owner"), []byte(`{"type":"chat:done"}`))
+	if len(owner.send) != 1 {
+		t.Fatalf("owner's ws-x connection got %d frames, want 1", len(owner.send))
+	}
+	if len(ownerElsewhere.send) != 0 || len(peer.send) != 0 {
+		t.Fatalf("frame reached ws-y owner (%d) or peer (%d)", len(ownerElsewhere.send), len(peer.send))
 	}
 }
 
@@ -461,5 +545,115 @@ func TestCheckOrigin(t *testing.T) {
 				t.Fatalf("checkOrigin(host=%q, origin=%q, X-Forwarded-Host=%q, remoteAddr=%q) = %v, want %v", tc.host, tc.origin, tc.fwdHost, tc.remoteAddr, got, tc.want)
 			}
 		})
+	}
+}
+
+// waitFor polls cond until it holds or the deadline expires. Hub registration
+// and the metrics bump both happen off the connection's own goroutine, so
+// asserting on them right after a read would race.
+func waitFor(t *testing.T, what string, cond func() bool) {
+	t.Helper()
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		if cond() {
+			return
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	t.Fatalf("timed out waiting for %s", what)
+}
+
+// The token-auth path reads its first frame before the caller has presented
+// any credential, so the read limit has to be in place by then (#6210).
+func TestHandleWebSocket_RejectsOversizedFrameBeforeAuth(t *testing.T) {
+	hub, server := newTestHub(t)
+	defer server.Close()
+
+	before := M.InboundTooLargeTotal.Load()
+
+	wsURL := "ws" + strings.TrimPrefix(server.URL, "http") + "/ws?workspace_id=" + testWorkspaceID
+	conn, _, err := websocket.DefaultDialer.Dial(wsURL, nil)
+	if err != nil {
+		t.Fatalf("failed to connect WebSocket: %v", err)
+	}
+	defer conn.Close()
+
+	// Write errors are expected here: the server rejects the frame from its
+	// declared length and closes before the payload is drained.
+	_ = conn.WriteMessage(websocket.TextMessage, bytes.Repeat([]byte("a"), inboundReadLimit+1))
+
+	conn.SetReadDeadline(time.Now().Add(2 * time.Second))
+	if _, _, err := conn.ReadMessage(); !websocket.IsCloseError(err, websocket.CloseMessageTooBig) {
+		t.Fatalf("read after oversized pre-auth frame = %v, want close code %d", err, websocket.CloseMessageTooBig)
+	}
+
+	waitFor(t, "inbound_too_large_total to increment", func() bool {
+		return M.InboundTooLargeTotal.Load()-before == 1
+	})
+	if n := totalClients(hub); n != 0 {
+		t.Fatalf("oversized pre-auth frame registered %d clients, want 0", n)
+	}
+}
+
+func TestReadPump_RejectsOversizedFrameAfterAuth(t *testing.T) {
+	hub, server := newTestHub(t)
+	defer server.Close()
+
+	conn := connectWS(t, server)
+	defer conn.Close()
+
+	waitFor(t, "client registration", func() bool { return totalClients(hub) == 1 })
+	before := M.InboundTooLargeTotal.Load()
+
+	oversized, err := json.Marshal(map[string]any{
+		"type": "ping",
+		"pad":  string(bytes.Repeat([]byte("a"), inboundReadLimit)),
+	})
+	if err != nil {
+		t.Fatalf("marshal oversized frame: %v", err)
+	}
+	_ = conn.WriteMessage(websocket.TextMessage, oversized)
+
+	conn.SetReadDeadline(time.Now().Add(2 * time.Second))
+	if _, _, err := conn.ReadMessage(); !websocket.IsCloseError(err, websocket.CloseMessageTooBig) {
+		t.Fatalf("read after oversized frame = %v, want close code %d", err, websocket.CloseMessageTooBig)
+	}
+
+	waitFor(t, "inbound_too_large_total to increment", func() bool {
+		return M.InboundTooLargeTotal.Load()-before == 1
+	})
+	waitFor(t, "client to be unregistered", func() bool { return totalClients(hub) == 0 })
+}
+
+// The limit must not clip legitimate traffic: real frames are ~1 KiB, so
+// anything comfortably below the cap has to keep working.
+func TestReadPump_AcceptsFrameUnderReadLimit(t *testing.T) {
+	_, server := newTestHub(t)
+	defer server.Close()
+
+	conn := connectWS(t, server)
+	defer conn.Close()
+
+	frame, err := json.Marshal(map[string]any{
+		"type": "ping",
+		"pad":  string(bytes.Repeat([]byte("a"), inboundReadLimit/2)),
+	})
+	if err != nil {
+		t.Fatalf("marshal ping frame: %v", err)
+	}
+	if len(frame) >= inboundReadLimit {
+		t.Fatalf("test frame is %d bytes, not under the %d byte limit", len(frame), inboundReadLimit)
+	}
+	if err := conn.WriteMessage(websocket.TextMessage, frame); err != nil {
+		t.Fatalf("write ping: %v", err)
+	}
+
+	conn.SetReadDeadline(time.Now().Add(2 * time.Second))
+	_, raw, err := conn.ReadMessage()
+	if err != nil {
+		t.Fatalf("read pong: %v", err)
+	}
+	if !strings.Contains(string(raw), "pong") {
+		t.Fatalf("got %s, want a pong frame", raw)
 	}
 }

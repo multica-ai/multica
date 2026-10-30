@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { Brain, ChevronDown } from "lucide-react";
+import { Brain, ChevronDown } from "@multica/ui/icons";
 import type { RuntimeModelThinkingLevel } from "@multica/core/types";
 import { Label } from "@multica/ui/components/ui/label";
 import {
@@ -10,6 +10,7 @@ import {
 } from "../../../issues/components/pickers";
 import { CHIP_CLASS } from "./chip";
 import { useT } from "../../../i18n";
+import { TooltipHint } from "@multica/ui/components/common/tooltip-hint";
 
 /**
  * Per-agent reasoning/effort picker (MUL-2339). Renders only when the
@@ -69,7 +70,7 @@ export function ThinkingPicker({
   if (!canEdit) {
     if (variant === "field") {
       const control = (
-        <div className="flex min-h-10 items-center gap-2 rounded-lg border border-input bg-input/50 px-3 text-sm text-muted-foreground">
+        <div className="flex min-h-10 items-center gap-2 rounded-lg border border-input bg-input/50 px-3 text-body text-muted-foreground">
           <Brain className="h-4 w-4 shrink-0" aria-hidden="true" />
           <span className="min-w-0 truncate">{triggerLabel}</span>
         </div>
@@ -84,7 +85,7 @@ export function ThinkingPicker({
     }
     return (
       <span
-        className="min-w-0 truncate px-1.5 py-0.5 font-mono text-[11px] text-muted-foreground"
+        className="min-w-0 truncate px-1.5 py-0.5 font-mono text-micro text-muted-foreground"
         title={triggerTitle}
       >
         {triggerLabel}
@@ -108,7 +109,7 @@ export function ThinkingPicker({
           type="button"
           className={
             variant === "field"
-              ? `${showLabel ? "mt-1.5 " : ""}flex min-h-10 w-full min-w-0 items-center gap-2 rounded-lg border border-input bg-transparent px-3 text-left text-sm transition-colors hover:bg-muted focus-visible:outline-none focus-visible:ring-3 focus-visible:ring-ring/50`
+              ? `${showLabel ? "mt-1.5 " : ""}flex min-h-10 w-full min-w-0 items-center gap-2 rounded-lg border border-input bg-transparent px-3 text-left text-body transition-colors hover:bg-muted focus-visible:outline-none focus-visible:ring-3 focus-visible:ring-ring/50`
               : CHIP_CLASS
           }
           aria-label={triggerTitle}
@@ -126,7 +127,7 @@ export function ThinkingPicker({
             className={
               variant === "field"
                 ? "min-w-0 flex-1 truncate"
-                : "min-w-0 truncate font-mono text-[11px]"
+                : "min-w-0 truncate font-mono text-micro"
             }
           >
             {triggerLabel}
@@ -160,9 +161,9 @@ export function ThinkingPicker({
               factory default is irrelevant to what actually fires, so
               flagging one option as "default" was misleading. */}
           <span className="block min-w-0 flex-1 text-left">
-            <span className="truncate text-[13px] font-medium">{l.label}</span>
+            <span className="truncate text-label font-medium">{l.label}</span>
             {l.description && (
-              <span className="mt-0.5 block text-[11px] leading-snug text-muted-foreground">
+              <span className="mt-0.5 block text-micro leading-snug text-muted-foreground">
                 {l.description}
               </span>
             )}
@@ -171,14 +172,15 @@ export function ThinkingPicker({
       ))}
 
       {value && (
-        <button
-          type="button"
-          onClick={() => void select("")}
-          className="mt-1 flex w-full items-center border-t px-3 py-2 text-left text-xs text-muted-foreground transition-colors hover:bg-accent/50"
-          title={t(($) => $.pickers.thinking_clear_title)}
-        >
-          {t(($) => $.pickers.thinking_clear)}
-        </button>
+        <TooltipHint label={t(($) => $.pickers.thinking_clear_title)}>
+          <button
+            type="button"
+            onClick={() => void select("")}
+            className="mt-1 flex w-full items-center border-t px-3 py-2 text-left text-caption text-muted-foreground transition-colors hover:bg-accent/50"
+          >
+            {t(($) => $.pickers.thinking_clear)}
+          </button>
+        </TooltipHint>
       )}
     </PropertyPicker>
   );

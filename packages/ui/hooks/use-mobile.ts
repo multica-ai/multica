@@ -1,19 +1,32 @@
 import * as React from "react"
 
 const MOBILE_BREAKPOINT = 768
+// Tailwind `md`. Below it the nav is a sheet and list/detail surfaces fold to
+// one column. From here up to `xl` the nav stays a docked column but starts
+// collapsed (see SIDEBAR_AUTO_COLLAPSE_QUERY), which leaves a foldable's inner
+// screen or a tablet enough reading width for both panes.
+const COMPACT_BREAKPOINT = 768
 
-export function useIsMobile() {
-  const [isMobile, setIsMobile] = React.useState<boolean | undefined>(undefined)
+function useIsBelow(breakpoint: number) {
+  const [isBelow, setIsBelow] = React.useState<boolean | undefined>(undefined)
 
   React.useEffect(() => {
-    const mql = window.matchMedia(`(max-width: ${MOBILE_BREAKPOINT - 1}px)`)
+    const mql = window.matchMedia(`(max-width: ${breakpoint - 1}px)`)
     const onChange = () => {
-      setIsMobile(window.innerWidth < MOBILE_BREAKPOINT)
+      setIsBelow(window.innerWidth < breakpoint)
     }
     mql.addEventListener("change", onChange)
-    setIsMobile(window.innerWidth < MOBILE_BREAKPOINT)
+    setIsBelow(window.innerWidth < breakpoint)
     return () => mql.removeEventListener("change", onChange)
-  }, [])
+  }, [breakpoint])
 
-  return !!isMobile
+  return !!isBelow
+}
+
+export function useIsMobile() {
+  return useIsBelow(MOBILE_BREAKPOINT)
+}
+
+export function useIsCompact() {
+  return useIsBelow(COMPACT_BREAKPOINT)
 }

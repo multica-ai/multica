@@ -14,6 +14,31 @@ body:
     validations:
       required: true
 
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      description: >-
+        Which part of Multica is this about? Areas marked community-maintained are
+        looked after by volunteer maintainers — see
+        https://multica.ai/docs/community-maintained. Please do not @-mention a
+        maintainer directly; we route reports from here.
+      options:
+        - Web app
+        - Desktop app
+        - Mobile app (iOS)
+        - CLI
+        - Agents and runtimes
+        - Issues, projects and workspaces
+        - Chat integration — Feishu / Lark or Slack
+        - Chat integration — DingTalk (community-maintained)
+        - Chat integration — WeCom (community-maintained)
+        - Chat integration — Telegram (community-maintained)
+        - Self-hosting and deployment
+        - Other / not sure
+    validations:
+      required: true
+
   - type: textarea
     id: description
     attributes:

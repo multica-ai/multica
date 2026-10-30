@@ -1,8 +1,9 @@
 "use client";
 
+import { issueStatusCategory } from "@multica/core/issues";
 import { useState, useRef, useEffect, useLayoutEffect } from "react";
-import { useQuery } from "@tanstack/react-query";
-import { useNavigation } from "../navigation";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { AppLink, resolveClickIntent, useNavigation } from "../navigation";
 import {
   AlertTriangle,
   ArrowDown,
@@ -21,7 +22,7 @@ import {
   Shapes,
   Tag,
   X as XIcon,
-} from "lucide-react";
+} from "@multica/ui/icons";
 import { cn } from "@multica/ui/lib/utils";
 import { toast } from "sonner";
 import type {
@@ -30,6 +31,7 @@ import type {
   IssuePriority,
   IssueAssigneeType,
   IssuePropertyValue,
+  SourceContextPreview,
 } from "@multica/core/types";
 import { contentReferencesAttachment } from "@multica/core/types";
 import {
@@ -46,7 +48,8 @@ import {
   DropdownMenuSubTrigger,
   DropdownMenuTrigger,
 } from "@multica/ui/components/ui/dropdown-menu";
-import { Tooltip, TooltipTrigger, TooltipContent, TooltipProvider } from "@multica/ui/components/ui/tooltip";
+import { Tooltip, TooltipTrigger, TooltipContent } from "@multica/ui/components/ui/tooltip";
+import { TooltipHint } from "@multica/ui/components/common/tooltip-hint";
 import { Button } from "@multica/ui/components/ui/button";
 import { Switch } from "@multica/ui/components/ui/switch";
 import { ContentEditor, type ContentEditorRef, TitleEditor, type TitleEditorRef, useFileDropZone, FileDropOverlay, useUploadGate, useComposerSubmit } from "../editor";
@@ -60,6 +63,10 @@ import { useIssueTriggerPreview } from "../issues/hooks/use-issue-trigger-previe
 import { useActorName } from "@multica/core/workspace/hooks";
 import { useCurrentWorkspace, useWorkspacePaths } from "@multica/core/paths";
 import { useWorkspaceId } from "@multica/core/hooks";
+import { useIssueStatuses } from "@multica/core/issue-statuses/hooks";
+import { useProjectWorkflow, workflowAllowsStatus, workflowStep } from "@multica/core/issue-workflows";
+import { projectListOptions } from "@multica/core/projects/queries";
+import { stepHandlerActor, useStepHandlerLabel } from "../workflows/step-handler";
 import { useIssueDraftStore, type IssueCreateDraft } from "@multica/core/issues/stores/draft-store";
 import { useCreateModeStore } from "@multica/core/issues/stores/create-mode-store";
 import { useQuickCreateStore } from "@multica/core/issues/stores/quick-create-store";
@@ -68,12 +75,13 @@ import {
   type ManualCreateField,
 } from "@multica/core/issues/stores/issue-create-settings-store";
 import { issueDetailOptions, childIssuesOptions } from "@multica/core/issues/queries";
-import { useCreateIssue, useUpdateIssue } from "@multica/core/issues/mutations";
-import { useAttachLabelToIssue } from "@multica/core/labels";
 import {
-  propertyListOptions,
-  useSetIssueProperty,
-} from "@multica/core/properties";
+  useCreateCommentSubIssue,
+  useCreateIssue,
+  useUpdateIssue,
+} from "@multica/core/issues/mutations";
+import { useAttachLabelToIssue } from "@multica/core/labels";
+import { propertyListOptions } from "@multica/core/properties";
 import {
   ApiError,
   DuplicateIssueErrorBodySchema,
@@ -81,7 +89,8 @@ import {
   parseWithFallback,
 } from "@multica/core/api";
 import { FileUploadButton } from "@multica/ui/components/common/file-upload-button";
-import { PillButton } from "../common/pill-button";
+import { BorderBeam } from "@multica/ui/components/common/border-beam";
+import { ClearablePillButton, PillButton } from "../common/pill-button";
 import { ActorAvatar } from "../common/actor-avatar";
 import { PropertyIcon } from "../common/property-icon";
 import {
@@ -90,14 +99,14 @@ import {
 } from "../issues/components/pickers/custom-property-picker";
 import { IssuePickerModal } from "./issue-picker-modal";
 import { useT } from "../i18n";
+import { SourceContextPreviewCard, useSourceContextFailureMessage } from "./source-context-preview";
+import { useIssueLimitUpgradePrompt } from "./use-issue-limit-upgrade-prompt";
 
-// ---------------------------------------------------------------------------
 // ManualCreatePanel — manual-mode body of the create-issue dialog. Renders
 // DialogContent + everything inside; the surrounding `<Dialog>` is owned by
 // CreateIssueDialog so mode switching swaps only the inner panel without
 // remounting the Dialog Root (no overlay flash). `onSwitchMode` flips the
 // shell's local mode state.
-// ---------------------------------------------------------------------------
 
 // CreateRunHint is the create modal's passive pre-trigger label (MUL-3375 §4):
 // whether saving will start a run, driven by the unified backend predicate
@@ -172,7 +181,7 @@ function CreateRunHint({
       <div className="overflow-hidden">
         <div
           aria-live="polite"
-          className="flex items-center gap-1.5 px-4 pb-1 pt-0.5 text-[0.6875rem] text-muted-foreground"
+          className="flex items-center gap-1.5 px-4 pb-1 pt-0.5 text-micro text-muted-foreground"
         >
           {avatarId && (
             <ActorAvatar
@@ -185,6 +194,29 @@ function CreateRunHint({
           <span className="truncate">{text}</span>
         </div>
       </div>
+    </div>
+  );
+}
+
+/**
+ * Names who a new issue will be handed to when its project's workflow starts
+ * it on a step with a handler and no assignee was picked. (MUL-7420)
+ */
+function WorkflowHandoffHint({ projectId, status }: { projectId?: string; status: IssueStatus }) {
+  const { t } = useT("issues");
+  const wsId = useWorkspaceId();
+  const workflow = useProjectWorkflow(wsId, projectId);
+  const { data: projects } = useQuery({ ...projectListOptions(wsId), enabled: !!workflow });
+  const project = projects?.find((p) => p.id === projectId);
+  const handlerLabel = useStepHandlerLabel(project);
+  const step = workflowStep(workflow, status);
+  const label = handlerLabel(step);
+  if (!label) return null;
+  const actor = stepHandlerActor(step, project);
+  return (
+    <div aria-live="polite" className="flex items-center gap-1.5 px-4 pb-1 pt-0.5 text-micro text-muted-foreground">
+      {actor && <ActorAvatar actorType={actor.type} actorId={actor.id} size="sm" profileLink={false} />}
+      <span className="truncate">{t(($) => $.workflows.create_handoff_hint, { name: label })}</span>
     </div>
   );
 }
@@ -207,16 +239,31 @@ export function ManualCreatePanel({
   setIsExpanded: (v: boolean) => void;
 }) {
   const { t } = useT("modals");
+  const { t: tIssues } = useT("issues");
   const { t: tEditor } = useT("editor");
+  const { t: tProjects } = useT("projects");
   const router = useNavigation();
   const p = useWorkspacePaths();
   const workspaceName = useCurrentWorkspace()?.name;
+  const anchorCommentId = typeof data?.anchor_comment_id === "string" ? data.anchor_comment_id : null;
+  const sourcePreview = data?.source_context_preview as SourceContextPreview | undefined;
+  const sourceContextLoading = data?.source_context_loading === true;
+  const sourceContextFailed = data?.source_context_failed === true;
+  const sourceContextError = data?.source_context_error;
+  const refetchSourceContext = data?.source_context_refetch as (() => Promise<unknown>) | undefined;
+  const sourceContextExpanded = typeof data?.source_context_expanded === "boolean"
+    ? data.source_context_expanded
+    : undefined;
+  const onSourceContextExpandedChange = data?.source_context_on_expanded_change as ((expanded: boolean) => void) | undefined;
+  const sourceContextFailureMessage = useSourceContextFailureMessage();
+  const showIssueLimitUpgradePrompt = useIssueLimitUpgradePrompt();
 
   const draft = useIssueDraftStore((s) => s.draft);
   const setManual = useIssueDraftStore((s) => s.setManual);
   const setShared = useIssueDraftStore((s) => s.setShared);
   const setAgent = useIssueDraftStore((s) => s.setAgent);
   const setActiveMode = useIssueDraftStore((s) => s.setActiveMode);
+  const beginBatchContinuation = useIssueDraftStore((s) => s.beginBatchContinuation);
   const clearDraft = useIssueDraftStore((s) => s.clearDraft);
   const setLastAssignee = useIssueDraftStore((s) => s.setLastAssignee);
   const setLastMode = useCreateModeStore((s) => s.setLastMode);
@@ -255,6 +302,8 @@ export function ManualCreatePanel({
   const [labelIds, setLabelIds] = useState<string[]>(draft.manual.labelIds);
   const [propertyValues, setPropertyValues] = useState(draft.manual.propertyValues ?? {});
   const [customPropertyPickerId, setCustomPropertyPickerId] = useState<string | null>(null);
+  const [propertyErrorId, setPropertyErrorId] = useState<string | null>(null);
+  const [unavailablePropertyRemoved, setUnavailablePropertyRemoved] = useState(false);
   const [projectId, setProjectId] = useState<string | undefined>(() => {
     if (data && "project_id" in data) {
       return (data.project_id as string | null) ?? undefined;
@@ -264,13 +313,15 @@ export function ManualCreatePanel({
   const [parentIssueId, setParentIssueId] = useState<string | undefined>(
     (data?.parent_issue_id as string) || undefined,
   );
-  // Stage only applies to a sub-issue; kept local (not in the persisted draft)
-  // since it's a per-creation choice tied to the chosen parent.
+  const parentIssueLocked = anchorCommentId !== null
+    && typeof data?.parent_issue_id === "string"
+    && data.parent_issue_id.length > 0;
+  // Stage belongs to this create session and only applies to a sub-issue.
   const [stage, setStage] = useState<number | null>(
     typeof data?.stage === "number" ? (data.stage as number) : null,
   );
   const [parentPickerOpen, setParentPickerOpen] = useState(false);
-  // Toolbar fields hidden via Settings → Issue reuse the overflow reveal
+  // Toolbar fields hidden via Settings → Preferences → Issue creation reuse the overflow reveal
   // pattern: the ⋯ menu item flips this open, which mounts the inline pill
   // (the popover's anchor) AND opens the picker. Closing without a value
   // unmounts the pill again; a field holding a non-default value always
@@ -295,6 +346,8 @@ export function ManualCreatePanel({
   // Fetch parent issue details for the chip (status/identifier/title).
   // List cache usually has it already, so this resolves synchronously.
   const wsId = useWorkspaceId();
+  const queryClient = useQueryClient();
+  const { categoryOf: draftStatusCategory, colorOf, iconOf } = useIssueStatuses(wsId);
   const { data: workspaceProperties = [] } = useQuery(propertyListOptions(wsId));
   const { data: parentIssue } = useQuery({
     ...issueDetailOptions(wsId, parentIssueId ?? ""),
@@ -358,6 +411,18 @@ export function ManualCreatePanel({
     setManual({ assigneeType: type, assigneeId: id });
   };
   const updateProject = (id?: string) => { setProjectId(id); setShared({ projectId: id }); };
+  const updateParent = (id?: string) => {
+    setParentIssueId(id);
+    setStage(null);
+  };
+  // A project using a named workflow only accepts its columns: a status it
+  // does not list moves to todo, which every workflow keeps. (MUL-7420)
+  const createWorkflow = useProjectWorkflow(wsId, projectId);
+  useEffect(() => {
+    if (createWorkflow && !workflowAllowsStatus(createWorkflow, status)) {
+      setStatus("todo");
+    }
+  }, [createWorkflow, status]);
   const updateStartDate = (v: string | null) => { setStartDate(v); setManual({ startDate: v }); };
   const updateDueDate = (v: string | null) => { setDueDate(v); setShared({ dueDate: v }); };
   const updateLabelIds = (ids: string[]) => { setLabelIds(ids); setManual({ labelIds: ids }); };
@@ -367,9 +432,10 @@ export function ManualCreatePanel({
     else next[propertyId] = value;
     setPropertyValues(next);
     setManual({ propertyValues: next });
+    if (propertyErrorId === propertyId) setPropertyErrorId(null);
   };
 
-  // Inline pill reveal per toolbar field: kept by Settings → Issue, holding a
+  // Inline pill reveal per toolbar field: kept by Settings → Preferences → Issue creation, holding a
   // non-default value (a hidden field with a value must stay visible — the
   // draft or a mode-switch carry may have set it), or just opened from the ⋯
   // overflow (the picker popover needs the inline pill as its anchor).
@@ -383,37 +449,29 @@ export function ManualCreatePanel({
     start_date: manualFields.includes("start_date") || startDate !== null || startDatePickerOpen,
   };
 
-  // Field visibility lives in Settings → Issue; the modal closes first so the
-  // dialog doesn't linger over the settings page. The draft store already
-  // holds everything typed, so nothing is lost across the round-trip.
-  const openFieldSettings = () => {
-    onClose();
-    router.push(`${p.settings()}?tab=issue`);
-  };
-
   const createIssueMutation = useCreateIssue();
+  const createCommentSubIssueMutation = useCreateCommentSubIssue();
   const updateIssueMutation = useUpdateIssue();
   const attachLabelMutation = useAttachLabelToIssue();
-  const setIssuePropertyMutation = useSetIssueProperty();
   const resetForNextIssue = () => {
     setTitle("");
-    setStatus("todo");
+    setStatus(status);
     setPriority("none");
     setStartDate(null);
     setDueDate(null);
     setLabelIds([]);
     setPropertyValues({});
     setCustomPropertyPickerId(null);
+    setPropertyErrorId(null);
+    setUnavailablePropertyRemoved(false);
     setProjectId(undefined);
-    setParentIssueId(undefined);
-    setStage(null);
     setChildIssues([]);
-    // Keep the just-used assignee for the next issue in the batch; reset
-    // everything else across the manual + shared slots.
+    // Keep status and assignee in this batch. Parent and stage stay in local
+    // state, while other manual and shared fields reset for the next issue.
     setManual({
       title: "",
       description: "",
-      status: "todo",
+      status,
       assigneeType,
       assigneeId,
       startDate: null,
@@ -426,8 +484,14 @@ export function ManualCreatePanel({
       dueDate: null,
       attachments: [],
     });
+    // The reset above is a batch continuation, not user input: record it so a
+    // field the user actually changes afterwards (priority, a date, a label —
+    // anything `hasDraft` alone would not consider content) keeps the draft
+    // recoverable, while a continuation nobody touched is still discarded.
+    beginBatchContinuation();
     descEditorRef.current?.clearContent();
     setFormResetKey((key) => key + 1);
+    batchContinuationRef.current = true;
   };
 
   // Manual create runs through the shared await-then-render composer contract
@@ -441,10 +505,19 @@ export function ManualCreatePanel({
   // object identity at submit; success clears ONLY an untouched draft —
   // whether the edit came mid-flight or from a reopened dialog.
   const mountedRef = useRef(true);
+  const batchContinuationRef = useRef(false);
   useLayoutEffect(() => {
     mountedRef.current = true;
     return () => {
       mountedRef.current = false;
+      // A keep-open form nobody edited is only a batch continuation. Ending it
+      // as the form closes drops the inherited batch status, so the next fresh
+      // dialog starts from todo, while a continuation the user did edit keeps
+      // its fields. The store action decides, and no-ops when a source-context
+      // wrapper already restored the ordinary draft.
+      if (batchContinuationRef.current) {
+        useIssueDraftStore.getState().endBatchContinuation();
+      }
     };
   }, []);
   const submittedDraftRef = useRef<IssueCreateDraft | null>(null);
@@ -454,6 +527,7 @@ export function ManualCreatePanel({
     uploadGate: gate,
     normalize: () => title.trim(),
     onSubmit: async (): Promise<boolean> => {
+      setUnavailablePropertyRemoved(false);
       // Flush the description editor's pending debounce into the store BEFORE
       // snapshotting, so a late flush of pre-submit typing cannot masquerade
       // as an edit made during the request.
@@ -465,54 +539,53 @@ export function ManualCreatePanel({
       const activeAttachmentIds = draftAttachments
         .filter((a) => contentReferencesAttachment(description ?? "", a))
         .map((a) => a.id);
-      const issue = await createIssueMutation.mutateAsync({
-        title: title.trim(),
-        description,
-        status,
-        priority,
-        assignee_type: assigneeType,
-        assignee_id: assigneeId,
-        start_date: startDate || undefined,
-        due_date: dueDate || undefined,
-        attachment_ids: activeAttachmentIds.length > 0 ? activeAttachmentIds : undefined,
-        // The server attaches these in the same transaction as the create and
-        // echoes them back as `issue.labels`, so a stale selection fails the
-        // create instead of leaving a committed-but-unlabeled issue. A legacy
-        // backend that predates this ignores the field — handled by the
-        // compatibility fallback below.
-        label_ids: labelIds.length > 0 ? labelIds : undefined,
-        parent_issue_id: parentIssueId,
-        // Stage is only meaningful for a sub-issue (relative to its siblings).
-        stage: parentIssueId && stage != null ? stage : undefined,
-        project_id: projectId,
-      });
-
-      // Custom-property values can only be addressed once the issue has an
-      // id. Keep the modal in its submitting state until every value settles
-      // so closing or "Create another" cannot race the fan-out.
-      const propertyEntries = Object.entries(propertyValues);
-      if (propertyEntries.length > 0) {
-        const results = await Promise.allSettled(
-          propertyEntries.map(([propertyId, value]) =>
-            setIssuePropertyMutation.mutateAsync({
-              issueId: issue.id,
-              propertyId,
-              value,
-            }),
-          ),
-        );
-        let failed = 0;
-        for (const result of results) {
-          if (result.status === "rejected") {
-            failed += 1;
-            console.error("[create-issue] custom property set failed", result.reason);
-          }
-        }
-        if (failed > 0) {
-          toast.error(
-            t(($) => $.create_issue.toast_set_properties_failed, { count: failed }),
-          );
-        }
+      let issue: Issue;
+      if (anchorCommentId && sourcePreview) {
+        issue = await createCommentSubIssueMutation.mutateAsync({
+          anchorCommentId,
+          data: {
+            mode: "manual",
+            capture_token: sourcePreview.capture_token,
+            issue: {
+              title: title.trim(),
+              description,
+              status,
+              priority,
+              assignee_type: assigneeType,
+              assignee_id: assigneeId,
+              start_date: startDate || undefined,
+              due_date: dueDate || undefined,
+              attachment_ids: activeAttachmentIds.length > 0 ? activeAttachmentIds : undefined,
+              label_ids: labelIds.length > 0 ? labelIds : undefined,
+              ...(Object.keys(propertyValues).length > 0 ? { properties: propertyValues } : {}),
+              stage: parentIssueId && stage != null ? stage : undefined,
+              project_id: projectId,
+            },
+          },
+        });
+      } else {
+        issue = await createIssueMutation.mutateAsync({
+          title: title.trim(),
+          description,
+          status,
+          priority,
+          assignee_type: assigneeType,
+          assignee_id: assigneeId,
+          start_date: startDate || undefined,
+          due_date: dueDate || undefined,
+          attachment_ids: activeAttachmentIds.length > 0 ? activeAttachmentIds : undefined,
+          // The server attaches these in the same transaction as the create and
+          // echoes them back as `issue.labels`, so a stale selection fails the
+          // create instead of leaving a committed-but-unlabeled issue. A legacy
+          // backend that predates this ignores the field — handled by the
+          // compatibility fallback below.
+          label_ids: labelIds.length > 0 ? labelIds : undefined,
+          ...(Object.keys(propertyValues).length > 0 ? { properties: propertyValues } : {}),
+          parent_issue_id: parentIssueId,
+          // Stage is only meaningful for a sub-issue (relative to its siblings).
+          stage: parentIssueId && stage != null ? stage : undefined,
+          project_id: projectId,
+        });
       }
 
       // Link queued children to the new parent. Deferred to after create
@@ -585,15 +658,24 @@ export function ManualCreatePanel({
               <div className="flex items-center justify-center size-5 rounded-full bg-emerald-500/15 text-emerald-500">
                 <Check className="size-3" />
               </div>
-              <span className="text-sm font-medium">{t(($) => $.create_issue.toast_created)}</span>
+              <span className="text-body font-medium">{t(($) => $.create_issue.toast_created)}</span>
             </div>
-            <div className="flex items-center gap-2 text-sm text-muted-foreground ml-7">
-              <StatusIcon status={issue.status} className="size-3.5 shrink-0" />
+            <div className="flex items-center gap-2 text-body text-muted-foreground ml-7">
+              <StatusIcon
+                status={issue.status}
+                icon={iconOf(issue.status)}
+                color={colorOf(issue.status)}
+                category={issueStatusCategory(issue) ?? undefined}
+                className="size-3.5 shrink-0"
+              />
               <span className="truncate">{issue.identifier} – {issue.title}</span>
             </div>
+            {/* Not an AppLink: sonner renders toast content under <Toaster />,
+                which is mounted outside NavigationProvider, so useNavigation()
+                would throw here. */}
             <button
               type="button"
-              className="ml-7 mt-2 text-sm text-primary hover:underline cursor-pointer"
+              className="ml-7 mt-2 text-body text-primary hover:underline cursor-pointer"
               onClick={() => {
                 router.push(p.issueDetail(issue.id));
                 toast.dismiss(toastId);
@@ -606,6 +688,71 @@ export function ManualCreatePanel({
       }
       return true;
     } catch (err) {
+      const sourceCode = err instanceof ApiError && err.body && typeof err.body === "object"
+        ? (err.body as { code?: unknown }).code
+        : undefined;
+      if (anchorCommentId && (
+        sourceCode === "source_context_changed"
+        || sourceCode === "anchor_comment_deleted"
+        || sourceCode === "source_issue_deleted"
+      )) {
+        await refetchSourceContext?.();
+        toast.error(sourceContextFailureMessage(err) ?? tIssues(($) => $.source_context.error_source_changed));
+        return false;
+      }
+      if (anchorCommentId && sourceCode === "source_context_server_unsupported") {
+        toast.error(tIssues(($) => $.source_context.error_server_unsupported));
+        return false;
+      }
+      if (anchorCommentId && sourceCode === "source_context_too_large") {
+        toast.error(sourceContextFailureMessage(err) ?? tIssues(($) => $.source_context.error_too_large));
+        return false;
+      }
+      if (sourceCode === "issue_limit_reached") {
+        showIssueLimitUpgradePrompt();
+        return false;
+      }
+      if (sourceCode === "invalid_issue_property" && err instanceof ApiError) {
+        const propertyId =
+          err.body && typeof err.body === "object"
+            ? (err.body as { property_id?: unknown }).property_id
+            : undefined;
+        if (
+          mountedRef.current &&
+          typeof propertyId === "string" &&
+          Object.prototype.hasOwnProperty.call(propertyValues, propertyId)
+        ) {
+          // Read the current catalog, not the submit-time snapshot. An
+          // unloaded catalog is not evidence that a property is unavailable.
+          const availableProperties = queryClient.getQueryData(
+            propertyListOptions(wsId).queryKey,
+          )?.properties;
+          if (availableProperties?.some((property) => property.id === propertyId)) {
+            setPropertyErrorId(propertyId);
+            setCustomPropertyPickerId(propertyId);
+          } else if (availableProperties) {
+            const currentValues = useIssueDraftStore.getState().draft.manual.propertyValues ?? {};
+            if (Object.prototype.hasOwnProperty.call(currentValues, propertyId)) {
+              // Preserve edits made while the request was pending in both the
+              // local selection and the workspace-persisted draft.
+              setPropertyValues((current) => {
+                const next = { ...current };
+                delete next[propertyId];
+                return next;
+              });
+              const next = { ...currentValues };
+              delete next[propertyId];
+              setManual({ propertyValues: next });
+              setPropertyErrorId(null);
+              setCustomPropertyPickerId(null);
+              setUnavailablePropertyRemoved(true);
+              return false;
+            }
+          }
+        }
+        toast.error(err.message || t(($) => $.create_issue.toast_failed));
+        return false;
+      }
       // Duplicate-issue is the only structured 409 the create endpoint
       // returns. We schema-guard the body (ApiError.body is `unknown`) so a
       // future server-side rename / drop of `code` / `issue` degrades to the
@@ -625,16 +772,18 @@ export function ManualCreatePanel({
                   <div className="flex items-center justify-center size-5 rounded-full bg-amber-500/15 text-amber-500">
                     <AlertTriangle className="size-3" />
                   </div>
-                  <span className="text-sm font-medium">
+                  <span className="text-body font-medium">
                     {t(($) => $.create_issue.toast_duplicate_title)}
                   </span>
                 </div>
-                <div className="flex items-center gap-2 text-sm text-muted-foreground ml-7">
+                <div className="flex items-center gap-2 text-body text-muted-foreground ml-7">
                   <span className="truncate">{dup.issue.identifier} – {dup.issue.title}</span>
                 </div>
+                {/* See the created-issue toast above: toast content lives
+                    outside NavigationProvider, so this stays a button. */}
                 <button
                   type="button"
-                  className="ml-7 mt-2 text-sm text-primary hover:underline cursor-pointer"
+                  className="ml-7 mt-2 text-body text-primary hover:underline cursor-pointer"
                   onClick={() => {
                     router.push(p.issueDetail(dup.issue.id));
                     toast.dismiss(toastId);
@@ -658,8 +807,7 @@ export function ManualCreatePanel({
     }
   },
     onAccepted: () => {
-      // These preferences derive from the SUBMITTED values, not the live
-      // draft — an issue was created, so record them regardless of the guard.
+      // Only the assignee persists across independent create sessions.
       setLastAssignee(assigneeType, assigneeId);
       setLastMode("manual");
       // Success may only consume the draft it submitted (MUL-5181 P0): any
@@ -687,6 +835,7 @@ export function ManualCreatePanel({
   // at the fix; otherwise hand off to the composer (single-flight + gate live
   // there).
   const handleSubmit = () => {
+    if (anchorCommentId && !sourcePreview) return;
     if (!title.trim()) {
       titleEditorRef.current?.focus();
       return;
@@ -746,14 +895,16 @@ export function ManualCreatePanel({
 
   // One state for the button and the keyboard paths, so a rendered affordance
   // can never disagree with what `handleSubmit` will actually do.
-  const submitState: "submitting" | "uploading" | "missing_title" | "ready" =
+  const submitState: "submitting" | "uploading" | "missing_title" | "source_unavailable" | "ready" =
     submitting
       ? "submitting"
       : gate.uploading
         ? "uploading"
-        : !title.trim()
-          ? "missing_title"
-          : "ready";
+        : anchorCommentId && !sourcePreview
+          ? "source_unavailable"
+          : !title.trim()
+            ? "missing_title"
+            : "ready";
   const submitBusy = submitState === "submitting" || submitState === "uploading";
 
   // Built once and reused by both footer branches: rendering a separate Button
@@ -767,13 +918,13 @@ export function ManualCreatePanel({
       // keyboard and screen-reader users could never reach the tooltip that
       // explains why nothing happens. `handleSubmit` is the real gate either way.
       disabled={submitBusy}
-      aria-disabled={submitState === "missing_title" || undefined}
+      aria-disabled={submitState === "missing_title" || submitState === "source_unavailable" || undefined}
       aria-busy={submitBusy || undefined}
       // The Button base only dims/blocks on native `disabled`, so aria-disabled
       // would otherwise stay a fully lit, pressable-looking primary button.
       // Deliberately no `pointer-events-none`: this control still has to hover
       // its tooltip and take the click that focuses the title.
-      className="aria-disabled:opacity-50 aria-disabled:cursor-not-allowed aria-disabled:active:translate-y-0"
+      className="justify-self-end aria-disabled:opacity-50 aria-disabled:cursor-not-allowed aria-disabled:active:translate-y-0"
     >
       {submitState === "submitting" ? (
         t(($) => $.create_issue.submitting)
@@ -783,12 +934,14 @@ export function ManualCreatePanel({
         <>
           {t(($) => $.create_issue.submit)}
           {/* Decorative: the accessible name must stay "Create Issue", not
-              "Create Issue Command Enter". Absent when `send` is unbound. */}
+              "Create Issue Command Enter". Absent when `send` is unbound.
+              Hidden on phones — no ⌘ key there, and the footer row is at its
+              tightest. */}
           {sendShortcut ? (
             <ShortcutKeycaps
               shortcut={sendShortcut}
               decorative
-              className="ml-1"
+              className="ml-1 max-sm:hidden"
               keyClassName="border-background/30 bg-background/15 text-primary-foreground shadow-none"
             />
           ) : null}
@@ -803,9 +956,9 @@ export function ManualCreatePanel({
 
             {/* Header */}
             <div className="flex items-center justify-between px-5 pt-3 pb-2 shrink-0">
-              <div className="flex items-center gap-1.5 text-xs">
+              <div className="flex items-center gap-1.5 text-caption">
                 <span className="text-muted-foreground">{workspaceName}</span>
-                <ChevronRight className="size-3 text-muted-foreground/50" />
+                <ChevronRight className="size-3 text-faint-foreground" />
                 <span className="font-medium">{t(($) => $.create_issue.manual_breadcrumb)}</span>
               </div>
               <div className="flex items-center gap-1">
@@ -815,6 +968,7 @@ export function ManualCreatePanel({
                       <button
                         type="button"
                         onClick={() => setIsExpanded(!isExpanded)}
+                        aria-label={isExpanded ? t(($) => $.common.collapse_tooltip) : t(($) => $.common.expand_tooltip)}
                         className="rounded-sm p-1.5 opacity-70 hover:opacity-100 hover:bg-accent/60 transition-all cursor-pointer"
                       >
                         {isExpanded ? <Minimize2 className="size-4" /> : <Maximize2 className="size-4" />}
@@ -833,6 +987,7 @@ export function ManualCreatePanel({
                       <button
                         type="button"
                         onClick={onClose}
+                        aria-label={t(($) => $.common.close)}
                         className="rounded-sm p-1.5 opacity-70 hover:opacity-100 hover:bg-accent/60 transition-all cursor-pointer"
                       >
                         <XIcon className="size-4" />
@@ -852,7 +1007,7 @@ export function ManualCreatePanel({
                 autoFocus
                 defaultValue={draft.manual.title}
                 placeholder={t(($) => $.create_issue.title_placeholder)}
-                className="text-lg font-semibold"
+                className="text-title font-semibold"
                 onChange={(v) => updateTitle(v)}
                 // Chord only — plain Enter still just ends title editing (#5532).
                 onSubmitShortcut={handleSubmit}
@@ -875,20 +1030,38 @@ export function ManualCreatePanel({
               {descDragOver && <FileDropOverlay />}
             </div>
 
+            {anchorCommentId && (
+              <SourceContextPreviewCard
+                preview={sourcePreview}
+                loading={sourceContextLoading}
+                failed={sourceContextFailed}
+                error={sourceContextError}
+                onRetry={refetchSourceContext ? () => { void refetchSourceContext(); } : undefined}
+                constrainToParent
+                expanded={sourceContextExpanded}
+                onExpandedChange={onSourceContextExpandedChange}
+              />
+            )}
 
             {/* Pre-trigger preview — a passive caption above the toolbar; reveals
                 when an agent assignee will pick the issue up. */}
-            <CreateRunHint assigneeType={assigneeType} assigneeId={assigneeId} status={status} />
+            {assigneeId ? (
+              <CreateRunHint assigneeType={assigneeType} assigneeId={assigneeId} status={status} />
+            ) : (
+              <WorkflowHandoffHint projectId={projectId} status={status} />
+            )}
 
-            {/* Property toolbar — each field renders per the Settings → Issue
+            {/* Property toolbar — each field renders per the Settings → Preferences → Issue creation
                 selection (see showField above). */}
             <div className="flex items-center gap-1.5 px-4 py-2 shrink-0 flex-wrap">
               {/* Status */}
               {showField.status && (
                 <StatusPicker
                   status={status}
+                  projectId={projectId ?? null}
                   onUpdate={(u) => { if (u.status) updateStatus(u.status); }}
                   triggerRender={<PillButton />}
+                  tooltip={tIssues(($) => $.detail.prop_status)}
                   align="start"
                   open={fieldPickerOpen === "status" ? true : undefined}
                   onOpenChange={(open) => setFieldPickerOpen(open ? "status" : null)}
@@ -901,6 +1074,7 @@ export function ManualCreatePanel({
                   priority={priority}
                   onUpdate={(u) => { if (u.priority) updatePriority(u.priority); }}
                   triggerRender={<PillButton />}
+                  tooltip={tIssues(($) => $.detail.prop_priority)}
                   align="start"
                   open={fieldPickerOpen === "priority" ? true : undefined}
                   onOpenChange={(open) => setFieldPickerOpen(open ? "priority" : null)}
@@ -917,6 +1091,7 @@ export function ManualCreatePanel({
                     u.assignee_id ?? undefined,
                   )}
                   triggerRender={<PillButton />}
+                  tooltip={tIssues(($) => $.detail.prop_assignee)}
                   align="start"
                   open={fieldPickerOpen === "assignee" ? true : undefined}
                   onOpenChange={(open) => setFieldPickerOpen(open ? "assignee" : null)}
@@ -932,6 +1107,7 @@ export function ManualCreatePanel({
                   selectedIds={labelIds}
                   onSelectedIdsChange={updateLabelIds}
                   triggerRender={<PillButton />}
+                  tooltip={tIssues(($) => $.detail.prop_labels)}
                   align="start"
                   open={fieldPickerOpen === "labels" ? true : undefined}
                   onOpenChange={(open) => setFieldPickerOpen(open ? "labels" : null)}
@@ -943,7 +1119,13 @@ export function ManualCreatePanel({
                 <ProjectPicker
                   projectId={projectId ?? null}
                   onUpdate={(u) => updateProject(u.project_id ?? undefined)}
-                  triggerRender={<PillButton />}
+                  triggerRender={
+                    <ClearablePillButton
+                      onClear={projectId ? () => updateProject(undefined) : undefined}
+                      clearLabel={tProjects(($) => $.picker.clear_aria)}
+                    />
+                  }
+                  tooltip={tIssues(($) => $.detail.prop_project)}
                   align="start"
                   open={fieldPickerOpen === "project" ? true : undefined}
                   onOpenChange={(open) => setFieldPickerOpen(open ? "project" : null)}
@@ -957,12 +1139,13 @@ export function ManualCreatePanel({
                   onUpdate={(u) => setStage(u.stage ?? null)}
                   maxStage={maxSiblingStage(parentChildren)}
                   triggerRender={<PillButton />}
+                  tooltip={tIssues(($) => $.detail.prop_stage)}
                   align="start"
                 />
               )}
 
               {/* Start date — collapsed into the ⋯ menu by default since it's
-                  a low-frequency field (exposable via Settings → Issue).
+                  a low-frequency field (exposable via Settings → Preferences → Issue creation).
                   Renders inline when configured visible, when the field has a
                   value, OR when the user just opened it from the overflow
                   menu (the picker's calendar popover needs the inline pill
@@ -972,6 +1155,7 @@ export function ManualCreatePanel({
                   startDate={startDate}
                   onUpdate={(u) => updateStartDate(u.start_date ?? null)}
                   triggerRender={<PillButton />}
+                  tooltip={tIssues(($) => $.detail.prop_start_date)}
                   align="start"
                   open={startDatePickerOpen}
                   onOpenChange={setStartDatePickerOpen}
@@ -986,6 +1170,7 @@ export function ManualCreatePanel({
                   dueDate={dueDate}
                   onUpdate={(u) => updateDueDate(u.due_date ?? null)}
                   triggerRender={<PillButton />}
+                  tooltip={tIssues(($) => $.detail.prop_due_date)}
                   align="start"
                   open={dueDatePickerOpen}
                   onOpenChange={setDueDatePickerOpen}
@@ -1003,36 +1188,55 @@ export function ManualCreatePanel({
                 .map((property) => {
                   const value = propertyValues[property.id];
                   return (
-                    <CustomPropertyValueInput
+                    <div
                       key={property.id}
-                      property={property}
-                      value={value}
-                      onChange={(next) => updatePropertyValue(property.id, next)}
-                      open={customPropertyPickerId === property.id}
-                      onOpenChange={(open) =>
-                        setCustomPropertyPickerId(open ? property.id : null)
-                      }
-                      triggerRender={<PillButton />}
-                      trigger={
-                        <>
-                          <PropertyIcon property={property} className="size-3.5 text-xs" />
-                          <span className="max-w-32 truncate">{property.name}</span>
-                          {value !== undefined && (
-                            <span className="max-w-40 truncate text-muted-foreground">
-                              <CustomPropertyValueDisplay property={property} value={value} />
-                            </span>
-                          )}
-                        </>
-                      }
-                    />
+                      data-property-error={propertyErrorId === property.id || undefined}
+                      className={cn(
+                        propertyErrorId === property.id &&
+                          "rounded-full ring-2 ring-destructive",
+                      )}
+                    >
+                      <CustomPropertyValueInput
+                        property={property}
+                        value={value}
+                        onChange={(next) => updatePropertyValue(property.id, next)}
+                        open={customPropertyPickerId === property.id}
+                        onOpenChange={(open) =>
+                          setCustomPropertyPickerId(open ? property.id : null)
+                        }
+                        triggerRender={<PillButton />}
+                        trigger={
+                          <>
+                            <PropertyIcon property={property} className="size-3.5 text-caption" />
+                            <span className="max-w-32 truncate">{property.name}</span>
+                            {value !== undefined && (
+                              <span className="max-w-40 truncate text-muted-foreground">
+                                <CustomPropertyValueDisplay property={property} value={value} />
+                              </span>
+                            )}
+                          </>
+                        }
+                      />
+                    </div>
                   );
                 })}
 
               {/* Parent chip — appears when parent is set.
                   Placed before the ⋯ so it wraps to a new line with ⋯ if
                   space is tight, but ⋯ always stays last in DOM order. */}
-              {parentIssueId && parentIssue && (
-                <div className="inline-flex items-center rounded-full border text-xs transition-colors hover:bg-accent/60">
+              {parentIssueId && parentIssueLocked ? (
+                <span
+                  data-testid="manual-sub-issue-chip"
+                  className="inline-flex items-center gap-1 rounded-full bg-muted px-2 py-0.5 text-caption text-muted-foreground"
+                >
+                  {t(($) => $.create_issue.subissue_of, {
+                    identifier: parentIssue?.identifier
+                      ?? (data?.parent_issue_identifier as string | undefined)
+                      ?? "",
+                  })}
+                </span>
+              ) : parentIssueId && parentIssue ? (
+                <div className="inline-flex items-center rounded-full border text-caption transition-colors hover:bg-accent/60">
                   <button
                     type="button"
                     onClick={() => setParentPickerOpen(true)}
@@ -1043,58 +1247,70 @@ export function ManualCreatePanel({
                       {t(($) => $.create_issue.subissue_of, { identifier: parentIssue.identifier })}
                     </span>
                   </button>
-                  <button
-                    type="button"
-                    onClick={() => setParentIssueId(undefined)}
-                    className="p-1 pr-2 text-muted-foreground hover:text-foreground cursor-pointer"
-                    aria-label={t(($) => $.create_issue.remove_parent_aria)}
-                  >
-                    <XIcon className="size-3" />
-                  </button>
+                  <TooltipHint label={t(($) => $.create_issue.remove_parent_aria)}>
+                    <button
+                      type="button"
+                      onClick={() => updateParent(undefined)}
+                      className="p-1 pr-2 text-muted-foreground hover:text-foreground cursor-pointer"
+                      aria-label={t(($) => $.create_issue.remove_parent_aria)}
+                    >
+                      <XIcon className="size-3" />
+                    </button>
+                  </TooltipHint>
                 </div>
-              )}
+              ) : null}
 
               {/* Child chips — one per queued sub-issue. Links are deferred
                   until create resolves (see handleSubmit). */}
               {childIssues.map((c) => (
                 <div
                   key={c.id}
-                  className="inline-flex items-center rounded-full border text-xs transition-colors hover:bg-accent/60"
+                  className="inline-flex items-center rounded-full border text-caption transition-colors hover:bg-accent/60"
                 >
                   <div className="flex items-center gap-1.5 py-1 pl-2.5">
                     <ArrowDown className="size-3 text-muted-foreground" />
                     <span>{t(($) => $.create_issue.subissue_chip, { identifier: c.identifier })}</span>
                   </div>
-                  <button
-                    type="button"
-                    onClick={() =>
-                      setChildIssues((prev) => prev.filter((x) => x.id !== c.id))
-                    }
-                    className="p-1 pr-2 text-muted-foreground hover:text-foreground cursor-pointer"
-                    aria-label={t(($) => $.create_issue.remove_subissue_aria, { identifier: c.identifier })}
-                  >
-                    <XIcon className="size-3" />
-                  </button>
+                  <TooltipHint label={t(($) => $.create_issue.remove_subissue_aria, { identifier: c.identifier })}>
+                    <button
+                      type="button"
+                      onClick={() =>
+                        setChildIssues((prev) => prev.filter((x) => x.id !== c.id))
+                      }
+                      className="p-1 pr-2 text-muted-foreground hover:text-foreground cursor-pointer"
+                      aria-label={t(($) => $.create_issue.remove_subissue_aria, { identifier: c.identifier })}
+                    >
+                      <XIcon className="size-3" />
+                    </button>
+                  </TooltipHint>
                 </div>
               ))}
 
               {/* Overflow — always the last child so DOM order keeps it at the
                   end of the wrap flow, no matter how many chips are present. */}
               <DropdownMenu>
-                <DropdownMenuTrigger
-                  render={
-                    <PillButton aria-label={t(($) => $.create_issue.more_options_aria)}>
-                      <MoreHorizontal className="size-3.5" />
-                    </PillButton>
-                  }
-                />
+                <TooltipHint label={t(($) => $.create_issue.more_options_aria)}>
+                  <DropdownMenuTrigger
+                    render={
+                      <PillButton aria-label={t(($) => $.create_issue.more_options_aria)}>
+                        <MoreHorizontal className="size-3.5" />
+                      </PillButton>
+                    }
+                  />
+                </TooltipHint>
                 <DropdownMenuContent align="start" className="w-auto">
                   {/* Re-entry points for toolbar fields hidden via
-                      Settings → Issue. Listed in toolbar order; each opens
+                      Settings → Preferences → Issue creation. Listed in toolbar order; each opens
                       the picker inline (mounting the pill as its anchor). */}
                   {!showField.status && (
                     <DropdownMenuItem onClick={() => setFieldPickerOpen("status")}>
-                      <StatusIcon status={status} className="h-3.5 w-3.5" />
+                      <StatusIcon
+                        status={status}
+                        icon={iconOf(status)}
+                        color={colorOf(status)}
+                        category={draftStatusCategory(status)}
+                        className="h-3.5 w-3.5"
+                      />
                       {t(($) => $.create_issue.set_status)}
                     </DropdownMenuItem>
                   )}
@@ -1134,7 +1350,7 @@ export function ManualCreatePanel({
                       {t(($) => $.create_issue.set_start_date)}
                     </DropdownMenuItem>
                   )}
-                  {parentIssueId && parentIssue ? (
+                  {!parentIssueLocked && (parentIssueId && parentIssue ? (
                     <DropdownMenuItem onClick={() => setParentPickerOpen(true)}>
                       <ArrowUp className="h-3.5 w-3.5" />
                       {t(($) => $.create_issue.parent_with_id, { identifier: parentIssue.identifier })}
@@ -1144,7 +1360,7 @@ export function ManualCreatePanel({
                       <ArrowUp className="h-3.5 w-3.5" />
                       {t(($) => $.create_issue.set_parent)}
                     </DropdownMenuItem>
-                  )}
+                  ))}
                   <DropdownMenuItem onClick={() => setChildPickerOpen(true)}>
                     <ArrowDown className="h-3.5 w-3.5" />
                     {t(($) => $.create_issue.add_subissue)}
@@ -1165,7 +1381,7 @@ export function ManualCreatePanel({
                             )}
                             onClick={() => setCustomPropertyPickerId(property.id)}
                           >
-                            <PropertyIcon property={property} className="size-3.5 text-xs" />
+                            <PropertyIcon property={property} className="size-3.5 text-caption" />
                             <span className="truncate">{property.name}</span>
                             {Object.prototype.hasOwnProperty.call(
                               propertyValues,
@@ -1177,16 +1393,33 @@ export function ManualCreatePanel({
                     </DropdownMenuSub>
                   )}
                   <DropdownMenuSeparator />
-                  <DropdownMenuItem onClick={openFieldSettings}>
+                  {/* Field visibility lives in Settings → Preferences → Issue creation; the modal
+                      closes first so the dialog doesn't linger over the
+                      settings page. The draft store already holds everything
+                      typed, so nothing is lost across the round-trip. */}
+                  <DropdownMenuItem
+                    render={
+                      <AppLink
+                        href={`${p.settings()}?tab=preferences&section=issue`}
+                        onClick={(e) => {
+                          // A modifier click opens Settings in another tab —
+                          // the modal (and the draft in it) stays put. Only
+                          // an in-place navigation closes it.
+                          if (resolveClickIntent(e) !== "push") return;
+                          onClose();
+                        }}
+                      />
+                    }
+                  >
                     <Settings2 className="h-3.5 w-3.5" />
                     {t(($) => $.create_issue.customize_fields)}
                   </DropdownMenuItem>
-                  {parentIssueId && parentIssue && (
+                  {!parentIssueLocked && parentIssueId && parentIssue && (
                     <>
                       <DropdownMenuSeparator />
                       <DropdownMenuItem
                         variant="destructive"
-                        onClick={() => setParentIssueId(undefined)}
+                        onClick={() => updateParent(undefined)}
                       >
                         <XIcon className="h-3.5 w-3.5" />
                         {t(($) => $.create_issue.remove_parent)}
@@ -1196,6 +1429,12 @@ export function ManualCreatePanel({
                 </DropdownMenuContent>
               </DropdownMenu>
             </div>
+
+            {unavailablePropertyRemoved && (
+              <p role="alert" className="px-5 pb-3 text-caption text-destructive">
+                {t(($) => $.create_issue.unavailable_property_removed)}
+              </p>
+            )}
 
             {/* Parent / child pickers — rendered inline so they stack over this
                 modal instead of replacing it via useModalStore. */}
@@ -1209,7 +1448,7 @@ export function ManualCreatePanel({
                 ...(parentIssueId ? [parentIssueId] : []),
               ]}
               onSelect={(selected) => {
-                setParentIssueId(selected.id);
+                updateParent(selected.id);
               }}
             />
             <IssuePickerModal
@@ -1228,49 +1467,52 @@ export function ManualCreatePanel({
               }}
             />
 
-            {/* Footer */}
-            <div className="flex flex-col gap-2 border-t px-4 py-3 shrink-0 sm:flex-row sm:items-center sm:justify-between">
-              <div className="flex min-h-7 items-center gap-2">
+            {/* Footer — same 2x2-grid-on-phones / single-row-from-`sm` shape
+                as the agent panel; see the note on AgentCreatePanel's footer
+                for why (MUL-6236). Tooltip renders no DOM and
+                TooltipContent is portaled, so the Create button stays a direct
+                grid child in both branches below. */}
+            <div className="grid grid-cols-[auto_1fr] items-center gap-x-2 gap-y-2.5 border-t px-4 py-3 shrink-0 sm:flex sm:flex-wrap">
+              <div className="flex min-h-7 items-center gap-2 sm:mr-auto">
                 <FileUploadButton
+                  size="sm"
                   multiple
                   onSelect={(file) => descEditorRef.current?.uploadFile(file)}
                 />
               </div>
-              <div className="flex flex-wrap items-center justify-end gap-2">
+              <TooltipHint label={t(($) => $.create_issue.switch_to_agent_tooltip)}>
                 <button
                   type="button"
                   onClick={switchToAgent}
                   disabled={gate.uploading}
                   aria-disabled={gate.uploading || undefined}
                   aria-busy={gate.uploading || undefined}
-                  title={t(($) => $.create_issue.switch_to_agent_tooltip)}
-                  className="border-beam group flex shrink-0 items-center gap-1.5 text-xs px-2 py-1 rounded-sm text-muted-foreground bg-brand/5 hover:bg-brand/10 hover:text-foreground transition-colors cursor-pointer disabled:cursor-not-allowed disabled:opacity-50"
+                  className="relative group flex shrink-0 items-center gap-1.5 justify-self-end text-caption px-2 py-1 rounded-sm text-muted-foreground bg-brand/5 hover:bg-brand/10 hover:text-foreground transition-colors cursor-pointer disabled:cursor-not-allowed disabled:opacity-50"
                 >
-                  <ArrowLeftRight className="size-3.5 text-brand/80 transition-transform duration-300 group-hover:rotate-180" />
+                  <ArrowLeftRight className="size-3.5 text-brand transition-transform duration-300 group-hover:rotate-180" />
                   {t(($) => $.create_issue.switch_to_agent)}
+                  <BorderBeam />
                 </button>
-                <label className="flex shrink-0 items-center gap-1.5 text-xs text-muted-foreground cursor-pointer select-none">
-                  <Switch
-                    size="sm"
-                    checked={keepOpen}
-                    onCheckedChange={setKeepOpen}
-                  />
-                  {t(($) => $.create_issue.create_another)}
-                </label>
-                {submitState === "missing_title" ? (
-                  <TooltipProvider delay={200}>
-                    <Tooltip>
-                      {/* No `<span>` wrapper needed now: aria-disabled leaves the
-                          button focusable and hoverable, so it can anchor its own
-                          tooltip. */}
-                      <TooltipTrigger render={createButton} />
-                      <TooltipContent side="top">{t(($) => $.create_issue.title_required)}</TooltipContent>
-                    </Tooltip>
-                  </TooltipProvider>
-                ) : (
-                  createButton
-                )}
-              </div>
+              </TooltipHint>
+              <label className="flex shrink-0 items-center gap-1.5 text-caption text-muted-foreground cursor-pointer select-none">
+                <Switch
+                  size="sm"
+                  checked={keepOpen}
+                  onCheckedChange={setKeepOpen}
+                />
+                {t(($) => $.create_issue.create_another)}
+              </label>
+              {submitState === "missing_title" ? (
+                <Tooltip>
+                  {/* No `<span>` wrapper needed now: aria-disabled leaves the
+                      button focusable and hoverable, so it can anchor its own
+                      tooltip. */}
+                  <TooltipTrigger render={createButton} />
+                  <TooltipContent side="top">{t(($) => $.create_issue.title_required)}</TooltipContent>
+                </Tooltip>
+              ) : (
+                createButton
+              )}
             </div>
     </>
   );
@@ -1284,9 +1526,15 @@ export function manualDialogContentClass(isExpanded: boolean) {
     "p-0 gap-0 flex flex-col overflow-hidden",
     "!top-1/2 !left-1/2 !-translate-x-1/2",
     "!transition-all !duration-300 !ease-out",
+    // Phone gutter — see the matching note in create-issue-dialog.tsx: the
+    // `!important` widths below also override DialogContent's
+    // `max-w-[calc(100%-2rem)]`, leaving the card edge to edge on a phone
+    // (MUL-6236). `!h-96` stays a hard height; it already fits the shortest
+    // phone we support.
+    "!w-full !max-w-[calc(100vw-1.5rem)]",
     isExpanded
-      ? "!max-w-4xl !w-full !h-5/6 !-translate-y-1/2"
-      : "!max-w-2xl !w-full !h-96 !-translate-y-1/2",
+      ? "!h-5/6 !-translate-y-1/2 sm:!max-w-4xl"
+      : "!h-96 !-translate-y-1/2 sm:!max-w-2xl",
   );
 }
 

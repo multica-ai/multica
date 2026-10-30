@@ -4,6 +4,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"runtime"
 	"testing"
 )
 
@@ -24,6 +25,22 @@ func writeTestLocalSkill(t *testing.T, root, rel string, files map[string]string
 		}
 	}
 	return skillDir
+}
+
+// setTestUserHome redirects every environment variable used by Go and the
+// runtime home resolvers on supported platforms. HOME alone is not enough on
+// Windows: os.UserHomeDir reads USERPROFILE and Hermes uses LOCALAPPDATA.
+func setTestUserHome(t *testing.T, home string) {
+	t.Helper()
+	redirectTestHome(t, home)
+	t.Setenv("LOCALAPPDATA", filepath.Join(home, "AppData", "Local"))
+}
+
+func testDefaultHermesHome(home string) string {
+	if runtime.GOOS == "windows" {
+		return filepath.Join(home, "AppData", "Local", "hermes")
+	}
+	return filepath.Join(home, ".hermes")
 }
 
 func writeTestClaudePlugin(t *testing.T, home, id, name string, enabled bool) string {
@@ -55,7 +72,7 @@ func writeTestClaudePlugin(t *testing.T, home, id, name string, enabled bool) st
 
 func TestListRuntimeLocalSkills_Claude(t *testing.T) {
 	home := t.TempDir()
-	t.Setenv("HOME", home)
+	redirectTestHome(t, home)
 
 	writeTestLocalSkill(t, filepath.Join(home, ".claude", "skills"), "review-helper", map[string]string{
 		"SKILL.md":           "---\nname: Review Helper\ndescription: Review pull requests\n---\n# Review Helper\n",
@@ -100,6 +117,26 @@ func TestListRuntimeLocalSkills_Claude(t *testing.T) {
 	}
 }
 
+func TestListRuntimeLocalSkills_Mcode(t *testing.T) {
+	home := t.TempDir()
+	redirectTestHome(t, home)
+
+	writeTestLocalSkill(t, filepath.Join(home, ".minimax", "skills"), "mcode-review", map[string]string{
+		"SKILL.md": "---\nname: MCode Review\ndescription: Review code with MiniMax Code\n---\n",
+	})
+
+	skills, supported, err := listRuntimeLocalSkills("mcode")
+	if err != nil {
+		t.Fatalf("listRuntimeLocalSkills: %v", err)
+	}
+	if !supported || len(skills) != 1 {
+		t.Fatalf("supported=%v skills=%#v", supported, skills)
+	}
+	if skills[0].SourcePath != "~/.minimax/skills/mcode-review" {
+		t.Fatalf("source_path = %q", skills[0].SourcePath)
+	}
+}
+
 // TestListRuntimeLocalSkills_Codebuddy is the regression guard for a bug
 // where CodeBuddy was treated as a drop-in alias for Claude and local
 // (user-level) skills were discovered from ~/.claude/skills. CodeBuddy Code
@@ -109,7 +146,7 @@ func TestListRuntimeLocalSkills_Claude(t *testing.T) {
 // ~/.codebuddy/skills/"). Discovery must use ~/.codebuddy/skills instead.
 func TestListRuntimeLocalSkills_Codebuddy(t *testing.T) {
 	home := t.TempDir()
-	t.Setenv("HOME", home)
+	redirectTestHome(t, home)
 
 	writeTestLocalSkill(t, filepath.Join(home, ".codebuddy", "skills"), "review-helper", map[string]string{
 		"SKILL.md": "---\nname: CodeBuddy Review\ndescription: Review code with CodeBuddy\n---\n# CodeBuddy Review\n",
@@ -148,7 +185,7 @@ func TestListRuntimeLocalSkills_Codebuddy(t *testing.T) {
 
 func TestRuntimeLocalSkills_CodebuddyExcludesClaudePluginSkills(t *testing.T) {
 	home := t.TempDir()
-	t.Setenv("HOME", home)
+	redirectTestHome(t, home)
 
 	writeTestLocalSkill(t, filepath.Join(home, ".codebuddy", "skills"), "codebuddy-only", map[string]string{
 		"SKILL.md": "---\nname: CodeBuddy Only\n---\n",
@@ -183,7 +220,7 @@ func TestRuntimeLocalSkills_CodebuddyExcludesClaudePluginSkills(t *testing.T) {
 
 func TestListRuntimeLocalSkills_ClaudeEnabledPlugin(t *testing.T) {
 	home := t.TempDir()
-	t.Setenv("HOME", home)
+	redirectTestHome(t, home)
 	installPath := writeTestClaudePlugin(t, home, "paper-desktop@paper", "paper-desktop", true)
 	writeTestLocalSkill(t, filepath.Join(installPath, "skills"), "design-to-code", map[string]string{
 		"SKILL.md": "---\nname: Design to code\ndescription: Turn a design into code\n---\n# Design\n",
@@ -215,7 +252,7 @@ func TestListRuntimeLocalSkills_ClaudeEnabledPlugin(t *testing.T) {
 
 func TestListRuntimeLocalSkills_ClaudeDisabledPluginIsHidden(t *testing.T) {
 	home := t.TempDir()
-	t.Setenv("HOME", home)
+	redirectTestHome(t, home)
 	installPath := writeTestClaudePlugin(t, home, "paper-desktop@paper", "paper-desktop", false)
 	writeTestLocalSkill(t, filepath.Join(installPath, "skills"), "design-to-code", map[string]string{
 		"SKILL.md": "---\nname: Design to code\n---\n",
@@ -232,7 +269,7 @@ func TestListRuntimeLocalSkills_ClaudeDisabledPluginIsHidden(t *testing.T) {
 
 func TestListRuntimeLocalSkills_Kiro(t *testing.T) {
 	home := t.TempDir()
-	t.Setenv("HOME", home)
+	redirectTestHome(t, home)
 
 	writeTestLocalSkill(t, filepath.Join(home, ".kiro", "skills"), "review-helper", map[string]string{
 		"SKILL.md": "---\nname: Kiro Review\ndescription: Review code with Kiro\n---\n# Kiro Review\n",
@@ -279,10 +316,28 @@ func TestLocalSkills_DiscoversACPProviderRoots(t *testing.T) {
 			wantName: "Kimi Review",
 		},
 		{
+			provider: "reasonix",
+			root:     filepath.Join(".reasonix", "skills"),
+			wantPath: "~/.reasonix/skills/review-helper",
+			wantName: "Reasonix Review",
+		},
+		{
+			provider: "dsh",
+			root:     filepath.Join(".dsh", "skills"),
+			wantPath: "~/.dsh/skills/review-helper",
+			wantName: "DSH Review",
+		},
+		{
 			provider: "qoder",
 			root:     filepath.Join(".qoder", "skills"),
 			wantPath: "~/.qoder/skills/review-helper",
 			wantName: "Qoder Review",
+		},
+		{
+			provider: "qoderclicn",
+			root:     filepath.Join(".qoder-cn", "skills"),
+			wantPath: "~/.qoder-cn/skills/review-helper",
+			wantName: "Qoder CN Review",
 		},
 		{
 			provider: "qwen",
@@ -301,15 +356,28 @@ func TestLocalSkills_DiscoversACPProviderRoots(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.provider, func(t *testing.T) {
 			home := t.TempDir()
-			t.Setenv("HOME", home)
+			setTestUserHome(t, home)
+			root := filepath.Join(home, tc.root)
+			wantPath := tc.wantPath
 			if tc.provider == "grok" {
 				t.Setenv("GROK_HOME", "")
 			}
 			if tc.provider == "qwen" {
 				t.Setenv("QWEN_HOME", "")
 			}
+			if tc.provider == "reasonix" {
+				t.Setenv("REASONIX_HOME", "")
+			}
+			if tc.provider == "dsh" {
+				t.Setenv("DSH_HOME", "")
+			}
+			if tc.provider == "hermes" {
+				t.Setenv("HERMES_HOME", "")
+				root = filepath.Join(testDefaultHermesHome(home), "skills")
+				wantPath = relativizeHomePath(filepath.Join(root, "review-helper"))
+			}
 
-			writeTestLocalSkill(t, filepath.Join(home, tc.root), "review-helper", map[string]string{
+			writeTestLocalSkill(t, root, "review-helper", map[string]string{
 				"SKILL.md": "---\nname: " + tc.wantName + "\ndescription: Review code\n---\n# Review\n",
 				"notes.md": "notes",
 			})
@@ -333,8 +401,8 @@ func TestLocalSkills_DiscoversACPProviderRoots(t *testing.T) {
 			if skills[0].Root != localSkillRootProvider {
 				t.Fatalf("root = %q, want %q", skills[0].Root, localSkillRootProvider)
 			}
-			if skills[0].SourcePath != tc.wantPath {
-				t.Fatalf("source_path = %q, want %q", skills[0].SourcePath, tc.wantPath)
+			if skills[0].SourcePath != wantPath {
+				t.Fatalf("source_path = %q, want %q", skills[0].SourcePath, wantPath)
 			}
 
 			bundle, supported, err := loadRuntimeLocalSkillBundle(tc.provider, "review-helper")
@@ -347,8 +415,8 @@ func TestLocalSkills_DiscoversACPProviderRoots(t *testing.T) {
 			if bundle.Name != tc.wantName {
 				t.Fatalf("bundle name = %q, want %q", bundle.Name, tc.wantName)
 			}
-			if bundle.SourcePath != tc.wantPath {
-				t.Fatalf("bundle source_path = %q, want %q", bundle.SourcePath, tc.wantPath)
+			if bundle.SourcePath != wantPath {
+				t.Fatalf("bundle source_path = %q, want %q", bundle.SourcePath, wantPath)
 			}
 			if len(bundle.Files) != 1 {
 				t.Fatalf("expected 1 supporting file, got %d", len(bundle.Files))
@@ -357,10 +425,117 @@ func TestLocalSkills_DiscoversACPProviderRoots(t *testing.T) {
 	}
 }
 
+// Hermes discovery must scan the home a Hermes task actually runs against, not
+// a hardcoded ~/.hermes: otherwise the skills Hermes loads never appear in the
+// Skills tab or the import dialog (GH #8310). The Windows default
+// (%LOCALAPPDATA%\hermes) comes from the same resolver and is covered by
+// execenv's TestPlatformDefaultHermesHome.
+func TestListRuntimeLocalSkills_HermesFollowsTaskHome(t *testing.T) {
+	tests := []struct {
+		name string
+		// setup configures the Hermes home and returns the skills dir a task
+		// would read; "" means no provider root should be scanned.
+		setup func(t *testing.T, hermesHome string) string
+	}{
+		{
+			name: "explicit HERMES_HOME",
+			setup: func(t *testing.T, _ string) string {
+				hermesHome := filepath.Join(t.TempDir(), "custom-hermes")
+				t.Setenv("HERMES_HOME", hermesHome)
+				return filepath.Join(hermesHome, "skills")
+			},
+		},
+		{
+			name: "sticky active profile",
+			setup: func(t *testing.T, hermesHome string) string {
+				writeTestHermesActiveProfile(t, hermesHome, "work")
+				return filepath.Join(hermesHome, "profiles", "work", "skills")
+			},
+		},
+		{
+			// Hermes refuses to start under a reserved sticky profile, so there
+			// is no home whose skills it would load.
+			name: "invalid sticky active profile",
+			setup: func(t *testing.T, hermesHome string) string {
+				writeTestHermesActiveProfile(t, hermesHome, "hermes")
+				return ""
+			},
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			home := t.TempDir()
+			setTestUserHome(t, home)
+			t.Setenv("HERMES_HOME", "")
+			hermesHome := testDefaultHermesHome(home)
+			skillsDir := tc.setup(t, hermesHome)
+
+			// A skill in the default Hermes home that the task-side resolver does
+			// not read must not be surfaced when another home/profile is selected.
+			writeTestLocalSkill(t, filepath.Join(hermesHome, "skills"), "wrong-home", map[string]string{
+				"SKILL.md": "---\nname: Wrong Home\n---\n# Wrong\n",
+			})
+			writeTestLocalSkill(t, filepath.Join(home, ".agents", "skills"), "shared-helper", map[string]string{
+				"SKILL.md": "---\nname: Shared Helper\n---\n# Shared\n",
+			})
+			wantKeys := []string{"shared-helper"}
+			if skillsDir != "" {
+				writeTestLocalSkill(t, skillsDir, "review-helper", map[string]string{
+					"SKILL.md": "---\nname: Hermes Home Review\n---\n# Review\n",
+				})
+				wantKeys = []string{"review-helper", "shared-helper"}
+			}
+
+			skills, supported, err := listRuntimeLocalSkills("hermes")
+			if err != nil {
+				t.Fatalf("listRuntimeLocalSkills: %v", err)
+			}
+			if !supported {
+				t.Fatal("hermes should be supported")
+			}
+			gotKeys := make([]string, 0, len(skills))
+			for _, s := range skills {
+				gotKeys = append(gotKeys, s.Key)
+			}
+			if !reflect.DeepEqual(gotKeys, wantKeys) {
+				t.Fatalf("keys = %v, want %v", gotKeys, wantKeys)
+			}
+			if skillsDir == "" {
+				return
+			}
+			if skills[0].Root != localSkillRootProvider {
+				t.Fatalf("root = %q, want %q", skills[0].Root, localSkillRootProvider)
+			}
+			if want := relativizeHomePath(filepath.Join(skillsDir, "review-helper")); skills[0].SourcePath != want {
+				t.Fatalf("source_path = %q, want %q", skills[0].SourcePath, want)
+			}
+
+			bundle, supported, err := loadRuntimeLocalSkillBundle("hermes", "review-helper")
+			if err != nil {
+				t.Fatalf("loadRuntimeLocalSkillBundle: %v", err)
+			}
+			if !supported || bundle == nil || bundle.Name != "Hermes Home Review" {
+				t.Fatalf("unexpected bundle: supported=%v bundle=%+v", supported, bundle)
+			}
+		})
+	}
+}
+
+func writeTestHermesActiveProfile(t *testing.T, hermesHome, name string) {
+	t.Helper()
+	if err := os.MkdirAll(hermesHome, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(hermesHome, "active_profile"), []byte(name+"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestListRuntimeLocalSkills_GrokUsesGROKHOME(t *testing.T) {
 	home := t.TempDir()
 	grokHome := filepath.Join(t.TempDir(), "custom-grok-home")
-	t.Setenv("HOME", home)
+	redirectTestHome(t, home)
 	t.Setenv("GROK_HOME", grokHome)
 	writeTestLocalSkill(t, filepath.Join(grokHome, "skills"), "review-helper", map[string]string{
 		"SKILL.md": "---\nname: Grok Home Review\ndescription: Review code\n---\n# Review\n",
@@ -395,7 +570,7 @@ func TestListRuntimeLocalSkills_GrokUsesGROKHOME(t *testing.T) {
 func TestListRuntimeLocalSkills_QwenUsesQWENHOME(t *testing.T) {
 	home := t.TempDir()
 	qwenHome := filepath.Join(t.TempDir(), "custom-qwen-home")
-	t.Setenv("HOME", home)
+	redirectTestHome(t, home)
 	t.Setenv("QWEN_HOME", qwenHome)
 	writeTestLocalSkill(t, filepath.Join(qwenHome, "skills"), "review-helper", map[string]string{
 		"SKILL.md": "---\nname: Qwen Home Review\ndescription: Review code\n---\n# Review\n",
@@ -435,7 +610,7 @@ func TestListRuntimeLocalSkills_QwenUsesQWENHOME(t *testing.T) {
 // listRuntimeLocalSkills must follow those symlinks.
 func TestListRuntimeLocalSkills_FollowsSymlinkedSkillDirs(t *testing.T) {
 	home := t.TempDir()
-	t.Setenv("HOME", home)
+	redirectTestHome(t, home)
 
 	// Real skill lives outside the runtime root.
 	target := writeTestLocalSkill(t, filepath.Join(home, ".agents", "skills"), "lark-doc", map[string]string{
@@ -490,7 +665,7 @@ func TestListRuntimeLocalSkills_FollowsSymlinkedSkillDirs(t *testing.T) {
 func TestListRuntimeLocalSkills_CodexUsesSharedCODEXHOME(t *testing.T) {
 	home := t.TempDir()
 	codexHome := t.TempDir()
-	t.Setenv("HOME", home)
+	redirectTestHome(t, home)
 	t.Setenv("CODEX_HOME", codexHome)
 
 	writeTestLocalSkill(t, filepath.Join(codexHome, "skills"), "debugger", map[string]string{
@@ -530,7 +705,7 @@ func TestListRuntimeLocalSkills_CodexUsesSharedCODEXHOME(t *testing.T) {
 // bundle, not separate skills.
 func TestListRuntimeLocalSkills_DescendsIntoNestedSkillDirs(t *testing.T) {
 	home := t.TempDir()
-	t.Setenv("HOME", home)
+	redirectTestHome(t, home)
 
 	root := filepath.Join(home, ".config", "opencode", "skills")
 
@@ -569,7 +744,7 @@ func TestListRuntimeLocalSkills_DescendsIntoNestedSkillDirs(t *testing.T) {
 
 func TestLoadRuntimeLocalSkillBundle_OpenCode(t *testing.T) {
 	home := t.TempDir()
-	t.Setenv("HOME", home)
+	redirectTestHome(t, home)
 
 	writeTestLocalSkill(t, filepath.Join(home, ".config", "opencode", "skills"), "release/reporter", map[string]string{
 		"SKILL.md":           "---\nname: Release Reporter\ndescription: Summarize release notes\n---\n# Release Reporter\n",
@@ -606,7 +781,7 @@ func TestLoadRuntimeLocalSkillBundle_OpenCode(t *testing.T) {
 
 func TestListRuntimeLocalSkills_OpenClaw(t *testing.T) {
 	home := t.TempDir()
-	t.Setenv("HOME", home)
+	redirectTestHome(t, home)
 
 	writeTestLocalSkill(t, filepath.Join(home, ".openclaw", "skills"), "planner", map[string]string{
 		"SKILL.md": "# Planner\n",
@@ -629,7 +804,7 @@ func TestListRuntimeLocalSkills_OpenClaw(t *testing.T) {
 
 func TestLoadRuntimeLocalSkillBundle_Cursor(t *testing.T) {
 	home := t.TempDir()
-	t.Setenv("HOME", home)
+	redirectTestHome(t, home)
 
 	writeTestLocalSkill(t, filepath.Join(home, ".cursor", "skills"), "docs-helper", map[string]string{
 		"SKILL.md":         "---\nname: Docs Helper\n---\n# Docs Helper\n",
@@ -664,7 +839,7 @@ func TestLoadRuntimeLocalSkillBundle_Cursor(t *testing.T) {
 // directory at all) must be discovered and tagged Root="universal".
 func TestListRuntimeLocalSkills_DiscoversUniversalAgentsRoot(t *testing.T) {
 	home := t.TempDir()
-	t.Setenv("HOME", home)
+	redirectTestHome(t, home)
 
 	writeTestLocalSkill(t, filepath.Join(home, ".agents", "skills"), "universal-helper", map[string]string{
 		"SKILL.md":     "---\nname: Universal Helper\ndescription: Cross-tool skill\n---\n# Universal Helper\n",
@@ -704,7 +879,7 @@ func TestListRuntimeLocalSkills_DiscoversUniversalAgentsRoot(t *testing.T) {
 // can't fetch.
 func TestLoadRuntimeLocalSkillBundle_ImportsFromUniversalRoot(t *testing.T) {
 	home := t.TempDir()
-	t.Setenv("HOME", home)
+	redirectTestHome(t, home)
 
 	writeTestLocalSkill(t, filepath.Join(home, ".agents", "skills"), "shared-skill", map[string]string{
 		"SKILL.md":        "---\nname: Shared Skill\ndescription: Imported from agents root\n---\n# Shared Skill\n",
@@ -737,7 +912,7 @@ func TestLoadRuntimeLocalSkillBundle_ImportsFromUniversalRoot(t *testing.T) {
 // provider-root key resolves to.
 func TestLocalSkills_ProviderRootWinsOnKeyConflict(t *testing.T) {
 	home := t.TempDir()
-	t.Setenv("HOME", home)
+	redirectTestHome(t, home)
 
 	writeTestLocalSkill(t, filepath.Join(home, ".claude", "skills"), "dup", map[string]string{
 		"SKILL.md": "---\nname: Provider Copy\n---\n# provider\n",
@@ -779,7 +954,7 @@ func TestLocalSkills_ProviderRootWinsOnKeyConflict(t *testing.T) {
 // Both roots contribute their non-conflicting skills, merged and sorted once.
 func TestListRuntimeLocalSkills_MergesBothRoots(t *testing.T) {
 	home := t.TempDir()
-	t.Setenv("HOME", home)
+	redirectTestHome(t, home)
 
 	writeTestLocalSkill(t, filepath.Join(home, ".claude", "skills"), "provider-only", map[string]string{
 		"SKILL.md": "---\nname: Provider Only\n---\n",
@@ -816,7 +991,7 @@ func TestListRuntimeLocalSkills_MergesBothRoots(t *testing.T) {
 // returns empty" guarantee, now per-root.)
 func TestListRuntimeLocalSkills_MissingUniversalRootIsNotAnError(t *testing.T) {
 	home := t.TempDir()
-	t.Setenv("HOME", home)
+	redirectTestHome(t, home)
 
 	writeTestLocalSkill(t, filepath.Join(home, ".claude", "skills"), "only-provider", map[string]string{
 		"SKILL.md": "---\nname: Only Provider\n---\n",
@@ -838,7 +1013,7 @@ func TestListRuntimeLocalSkills_MissingUniversalRootIsNotAnError(t *testing.T) {
 // Both roots missing → empty list, no error.
 func TestListRuntimeLocalSkills_BothRootsMissing(t *testing.T) {
 	home := t.TempDir()
-	t.Setenv("HOME", home)
+	redirectTestHome(t, home)
 
 	skills, supported, err := listRuntimeLocalSkills("claude")
 	if err != nil {
@@ -855,7 +1030,7 @@ func TestListRuntimeLocalSkills_BothRootsMissing(t *testing.T) {
 // Nested layouts (a skill two levels deep) work in the universal root too.
 func TestListRuntimeLocalSkills_NestedSkillInUniversalRoot(t *testing.T) {
 	home := t.TempDir()
-	t.Setenv("HOME", home)
+	redirectTestHome(t, home)
 
 	writeTestLocalSkill(t, filepath.Join(home, ".agents", "skills"), "release/reporter", map[string]string{
 		"SKILL.md": "---\nname: Release Reporter\n---\n",
@@ -885,7 +1060,7 @@ func TestListRuntimeLocalSkills_NestedSkillInUniversalRoot(t *testing.T) {
 // the provider root genuinely lacks the key (IsNotExist).
 func TestLoadRuntimeLocalSkillBundle_FallsThroughToUniversalOnNotExist(t *testing.T) {
 	home := t.TempDir()
-	t.Setenv("HOME", home)
+	redirectTestHome(t, home)
 
 	// Provider root exists but does NOT contain "only-universal".
 	writeTestLocalSkill(t, filepath.Join(home, ".claude", "skills"), "something-else", map[string]string{
@@ -914,7 +1089,7 @@ func TestLoadRuntimeLocalSkillBundle_FallsThroughToUniversalOnNotExist(t *testin
 // the read fails ("is a directory") while the dir itself exists.
 func TestLoadRuntimeLocalSkillBundle_DoesNotMaskReadErrorWithUniversalFallback(t *testing.T) {
 	home := t.TempDir()
-	t.Setenv("HOME", home)
+	redirectTestHome(t, home)
 
 	clashDir := filepath.Join(home, ".claude", "skills", "clash")
 	if err := os.MkdirAll(filepath.Join(clashDir, "SKILL.md"), 0o755); err != nil {
@@ -940,7 +1115,7 @@ func TestLoadRuntimeLocalSkillBundle_DoesNotMaskReadErrorWithUniversalFallback(t
 // root) and `foo` (from the agents root). A shared visited set would drop one.
 func TestListRuntimeLocalSkills_PerRootVisitedAllowsCrossRootSymlinkAlias(t *testing.T) {
 	home := t.TempDir()
-	t.Setenv("HOME", home)
+	redirectTestHome(t, home)
 
 	target := writeTestLocalSkill(t, filepath.Join(home, ".agents", "skills"), "foo", map[string]string{
 		"SKILL.md": "---\nname: Foo\n---\n",
@@ -986,7 +1161,7 @@ func TestListRuntimeLocalSkills_PerRootVisitedAllowsCrossRootSymlinkAlias(t *tes
 // disagree.
 func TestLoadRuntimeLocalSkillBundle_ProviderDirWithoutSkillMdFallsThrough(t *testing.T) {
 	home := t.TempDir()
-	t.Setenv("HOME", home)
+	redirectTestHome(t, home)
 
 	// Provider root has a same-key directory but NO SKILL.md (just a stray
 	// file), so it is NOT a valid skill.
@@ -1033,7 +1208,7 @@ func TestLoadRuntimeLocalSkillBundle_ProviderDirWithoutSkillMdFallsThrough(t *te
 // a non-dir, so load must fall through too.
 func TestLoadRuntimeLocalSkillBundle_ProviderNonDirFallsThrough(t *testing.T) {
 	home := t.TempDir()
-	t.Setenv("HOME", home)
+	redirectTestHome(t, home)
 
 	claudeRoot := filepath.Join(home, ".claude", "skills")
 	if err := os.MkdirAll(claudeRoot, 0o755); err != nil {
@@ -1055,4 +1230,222 @@ func TestLoadRuntimeLocalSkillBundle_ProviderNonDirFallsThrough(t *testing.T) {
 		t.Fatalf("bundle = %+v, want universal Filish", bundle)
 	}
 
+}
+
+// invalidUTF8Docx is a .docx prefix (PK zip magic) followed by bytes that are
+// not valid UTF-8. Carrying this through SkillFileData.Content is exactly the
+// corruption in #7143: encoding/json rewrites each invalid byte to U+FFFD, so
+// the file written back into the task environment no longer opens.
+const invalidUTF8Docx = "PK\x03\x04\x14\x00\x06\x00\xff\xfe\x80\x81payload"
+
+func TestCollectLocalSkillFiles_SkipsBinarySupportingFiles(t *testing.T) {
+	root := t.TempDir()
+	skillDir := writeTestLocalSkill(t, root, "docs", map[string]string{
+		"SKILL.md":               "---\nname: docs\n---\nbody\n",
+		"references/notes.md":    "# notes\n",
+		"references/report.docx": invalidUTF8Docx,
+		"assets/logo.png":        "\x89PNG\r\n\x1a\n\x00\x00\x00",
+	})
+
+	files, err := collectLocalSkillFiles(skillDir, true)
+	if err != nil {
+		t.Fatalf("collectLocalSkillFiles: %v", err)
+	}
+
+	paths := make([]string, 0, len(files))
+	for _, f := range files {
+		paths = append(paths, f.Path)
+	}
+	want := []string{"references/notes.md"}
+	if !reflect.DeepEqual(paths, want) {
+		t.Fatalf("collected paths = %v, want %v", paths, want)
+	}
+
+	// The text file that survives must survive byte-for-byte.
+	if files[0].Content != "# notes\n" {
+		t.Errorf("text content = %q, want %q", files[0].Content, "# notes\n")
+	}
+}
+
+func TestCollectLocalSkillFiles_BinarySkipIsConsistentAcrossPasses(t *testing.T) {
+	// Discovery reports the bundle with includeContent=false and sync uploads
+	// it with includeContent=true. If only one pass skipped binary files the
+	// two would disagree on what the bundle contains. This must hold both for
+	// a listed binary extension and for one caught only by the content-level
+	// UTF-8 check — the discovery pass has to actually read the file to make
+	// the same call the sync pass makes.
+	root := t.TempDir()
+	skillDir := writeTestLocalSkill(t, root, "docs", map[string]string{
+		"SKILL.md":                  "---\nname: docs\n---\nbody\n",
+		"references/notes.md":       "# notes\n",
+		"references/report.docx":    invalidUTF8Docx,
+		"weights/model.safetensors": invalidUTF8Bytes,
+	})
+
+	listed, err := collectLocalSkillFiles(skillDir, false)
+	if err != nil {
+		t.Fatalf("collectLocalSkillFiles(includeContent=false): %v", err)
+	}
+	synced, err := collectLocalSkillFiles(skillDir, true)
+	if err != nil {
+		t.Fatalf("collectLocalSkillFiles(includeContent=true): %v", err)
+	}
+
+	listedPaths := make([]string, 0, len(listed))
+	for _, f := range listed {
+		listedPaths = append(listedPaths, f.Path)
+	}
+	syncedPaths := make([]string, 0, len(synced))
+	for _, f := range synced {
+		syncedPaths = append(syncedPaths, f.Path)
+	}
+	if !reflect.DeepEqual(listedPaths, syncedPaths) {
+		t.Fatalf("discovery pass = %v, sync pass = %v; passes must agree", listedPaths, syncedPaths)
+	}
+	want := []string{"references/notes.md"}
+	if !reflect.DeepEqual(listedPaths, want) {
+		t.Fatalf("collected paths = %v, want %v", listedPaths, want)
+	}
+}
+
+// invalidUTF8Bytes carries no listed binary extension's magic — it exists to
+// prove the content-level check, not the extension list, is what catches it.
+const invalidUTF8Bytes = "\xff\xfe\x00\x01payload\x80\x81"
+
+// Bohan-J's review on #7175: the extension blacklist alone doesn't close the
+// root cause. A binary file with an unlisted extension must still be caught
+// by the content-level utf8.Valid check.
+func TestCollectLocalSkillFiles_SkipsUnlistedBinaryExtension(t *testing.T) {
+	root := t.TempDir()
+	skillDir := writeTestLocalSkill(t, root, "docs", map[string]string{
+		"SKILL.md":                  "---\nname: docs\n---\nbody\n",
+		"references/notes.md":       "# notes\n",
+		"weights/model.safetensors": invalidUTF8Bytes,
+		"data/table.parquet":        invalidUTF8Bytes,
+		"blob.bin":                  invalidUTF8Bytes,
+	})
+
+	files, err := collectLocalSkillFiles(skillDir, true)
+	if err != nil {
+		t.Fatalf("collectLocalSkillFiles: %v", err)
+	}
+
+	paths := make([]string, 0, len(files))
+	for _, f := range files {
+		paths = append(paths, f.Path)
+	}
+	want := []string{"references/notes.md"}
+	if !reflect.DeepEqual(paths, want) {
+		t.Fatalf("collected paths = %v, want %v — an unlisted binary extension must still be caught by the content check", paths, want)
+	}
+}
+
+// A binary file with no extension at all must be caught the same way.
+func TestCollectLocalSkillFiles_SkipsInvalidUTF8WithNoExtension(t *testing.T) {
+	root := t.TempDir()
+	skillDir := writeTestLocalSkill(t, root, "docs", map[string]string{
+		"SKILL.md":            "---\nname: docs\n---\nbody\n",
+		"references/notes.md": "# notes\n",
+		"references/README":   invalidUTF8Bytes,
+	})
+
+	files, err := collectLocalSkillFiles(skillDir, true)
+	if err != nil {
+		t.Fatalf("collectLocalSkillFiles: %v", err)
+	}
+
+	paths := make([]string, 0, len(files))
+	for _, f := range files {
+		paths = append(paths, f.Path)
+	}
+	want := []string{"references/notes.md"}
+	if !reflect.DeepEqual(paths, want) {
+		t.Fatalf("collected paths = %v, want %v — a no-extension binary file must still be caught by the content check", paths, want)
+	}
+}
+
+// validUTF8WithNUL is UTF-16LE encoding of "Hello": every byte is a valid
+// single-byte UTF-8 sequence (printable ASCII or NUL), so utf8.Valid alone
+// would accept it — multica-eve's review on #7175 flagged this as a
+// realistic byte-integrity hole: the server-side import path
+// (server/internal/handler/skill_create.go's sanitizeNullBytes) strips every
+// 0x00, so a file like this still comes back different from what went in.
+const validUTF8WithNUL = "H\x00e\x00l\x00l\x00o\x00"
+
+// A file with an unlisted extension that is valid UTF-8 but contains an
+// embedded NUL must still be caught — utf8.Valid alone is not sufficient.
+func TestCollectLocalSkillFiles_SkipsUnlistedExtensionWithEmbeddedNUL(t *testing.T) {
+	root := t.TempDir()
+	skillDir := writeTestLocalSkill(t, root, "docs", map[string]string{
+		"SKILL.md":            "---\nname: docs\n---\nbody\n",
+		"references/notes.md": "# notes\n",
+		"weights/model.dat":   validUTF8WithNUL,
+	})
+
+	files, err := collectLocalSkillFiles(skillDir, true)
+	if err != nil {
+		t.Fatalf("collectLocalSkillFiles: %v", err)
+	}
+
+	paths := make([]string, 0, len(files))
+	for _, f := range files {
+		paths = append(paths, f.Path)
+	}
+	want := []string{"references/notes.md"}
+	if !reflect.DeepEqual(paths, want) {
+		t.Fatalf("collected paths = %v, want %v — valid UTF-8 with an embedded NUL must still be caught", paths, want)
+	}
+}
+
+// A no-extension file with the same valid-UTF-8-but-NUL-containing content
+// must be caught the same way.
+func TestCollectLocalSkillFiles_SkipsNoExtensionWithEmbeddedNUL(t *testing.T) {
+	root := t.TempDir()
+	skillDir := writeTestLocalSkill(t, root, "docs", map[string]string{
+		"SKILL.md":             "---\nname: docs\n---\nbody\n",
+		"references/notes.md":  "# notes\n",
+		"references/UTF16NAME": validUTF8WithNUL,
+	})
+
+	files, err := collectLocalSkillFiles(skillDir, true)
+	if err != nil {
+		t.Fatalf("collectLocalSkillFiles: %v", err)
+	}
+
+	paths := make([]string, 0, len(files))
+	for _, f := range files {
+		paths = append(paths, f.Path)
+	}
+	want := []string{"references/notes.md"}
+	if !reflect.DeepEqual(paths, want) {
+		t.Fatalf("collected paths = %v, want %v — a no-extension file with an embedded NUL must still be caught", paths, want)
+	}
+}
+
+// A valid-UTF-8 text file — including one with an extension the blacklist
+// doesn't recognize, and one with no extension at all — must still pass
+// through untouched. The content check must not over-trigger on ordinary
+// text.
+func TestCollectLocalSkillFiles_ValidUTF8TextPassesThroughUntouched(t *testing.T) {
+	root := t.TempDir()
+	body := "# Notes\n\nContém acentos e emoji 🎉 — não é binário.\n"
+	skillDir := writeTestLocalSkill(t, root, "docs", map[string]string{
+		"SKILL.md":  "---\nname: docs\n---\nbody\n",
+		"notes.txt": body,
+		"data.csv":  "a,b,c\n1,2,3\n",
+		"config":    "key=value\n",
+	})
+
+	files, err := collectLocalSkillFiles(skillDir, true)
+	if err != nil {
+		t.Fatalf("collectLocalSkillFiles: %v", err)
+	}
+	if len(files) != 3 {
+		t.Fatalf("expected all 3 valid-UTF-8 supporting files to pass through, got %d: %+v", len(files), files)
+	}
+	for _, f := range files {
+		if f.Path == "notes.txt" && f.Content != body {
+			t.Errorf("notes.txt content = %q, want %q", f.Content, body)
+		}
+	}
 }

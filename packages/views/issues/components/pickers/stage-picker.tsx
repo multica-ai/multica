@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { Milestone } from "lucide-react";
+import { Milestone } from "@multica/ui/icons";
 import type { UpdateIssueRequest } from "@multica/core/types";
 import { PropertyPicker, PickerItem } from "./property-picker";
 import { useT } from "../../../i18n";
@@ -31,6 +31,7 @@ export function StagePicker({
   maxStage = 0,
   trigger: customTrigger,
   triggerRender,
+  tooltip,
   open: controlledOpen,
   onOpenChange: controlledOnOpenChange,
   align,
@@ -42,6 +43,8 @@ export function StagePicker({
   maxStage?: number;
   trigger?: React.ReactNode;
   triggerRender?: React.ReactElement;
+  /** Hover tooltip naming the property; hidden while the picker is open. */
+  tooltip?: React.ReactNode;
   open?: boolean;
   onOpenChange?: (v: boolean) => void;
   align?: "start" | "center" | "end";
@@ -62,6 +65,7 @@ export function StagePicker({
       width="w-44"
       align={align}
       triggerRender={triggerRender}
+      tooltip={tooltip}
       trigger={
         customTrigger ?? (
           <>
@@ -75,14 +79,20 @@ export function StagePicker({
         )
       }
     >
+      {/* "No stage" — always the first row, matching every other picker. Keeps
+          the value rows' icon column so the labels line up. */}
       <PickerItem
+        emptyValue
         selected={stage == null}
         onClick={() => {
           onUpdate({ stage: null });
           setOpen(false);
         }}
       >
-        <span className="truncate text-xs text-muted-foreground">{t(($) => $.stage.none)}</span>
+        <span className="inline-flex items-center gap-1.5 text-caption text-muted-foreground">
+          <Milestone className="h-3 w-3 shrink-0" />
+          <span className="truncate">{t(($) => $.stage.none)}</span>
+        </span>
       </PickerItem>
       {options.map((s) => (
         <PickerItem
@@ -93,7 +103,7 @@ export function StagePicker({
             setOpen(false);
           }}
         >
-          <span className="inline-flex items-center gap-1.5 text-xs">
+          <span className="inline-flex items-center gap-1.5 text-caption">
             <Milestone className="h-3 w-3 shrink-0 text-muted-foreground" />
             {t(($) => $.stage.value, { n: s })}
           </span>

@@ -58,8 +58,7 @@ func enqueueIssueTaskWithTrigger(t *testing.T, ctx context.Context, agentID, iss
 func claimTriggerFieldsForTest(t *testing.T, runtimeID string) (taskID, triggerContent, triggerSummary, raw string) {
 	t.Helper()
 	w := httptest.NewRecorder()
-	req := newDaemonTokenRequest("POST", "/api/daemon/runtimes/"+runtimeID+"/tasks/claim", nil,
-		testWorkspaceID, "comment-workspace-scope")
+	req := newOwnerDaemonRequest("POST", "/api/daemon/runtimes/"+runtimeID+"/tasks/claim", nil)
 	req = withURLParam(req, "runtimeId", runtimeID)
 	testHandler.ClaimTaskByRuntime(w, req)
 	if w.Code != http.StatusOK {

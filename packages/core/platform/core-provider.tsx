@@ -16,6 +16,11 @@ import { QueryProvider } from "../provider";
 import { createLogger } from "../logger";
 import { defaultStorage } from "./storage";
 import { AuthInitializer } from "./auth-initializer";
+import {
+  createSessionRenewal,
+  watchSessionActivity,
+  type SessionRenewal,
+} from "./session-renewal";
 import type { CoreProviderProps, ClientIdentity } from "./types";
 import type { StorageAdapter } from "../types/storage";
 import { ClientUsageReporter } from "../client-usage";
@@ -29,14 +34,32 @@ import {
 let initialized = false;
 let authStore: ReturnType<typeof createAuthStore>;
 let chatStore: ReturnType<typeof createChatStore>;
-function initCore(
-  apiBaseUrl: string,
-  storage: StorageAdapter,
-  onLogin?: () => void,
-  onLogout?: () => void,
-  cookieAuth?: boolean,
-  identity?: ClientIdentity,
-) {
+// Token mode only. Cookie-mode browsers have their session re-issued by the
+// server on any authenticated request, so there is nothing for a client-side
+// renewer to do there (MUL-7436).
+let sessionRenewal: SessionRenewal | null = null;
+// Named rather than positional: onLogin / onLogout / onSessionExpired are
+// three adjacent `() => void`, and nothing but the argument order would tell
+// them apart at the call site.
+interface InitCoreOptions {
+  apiBaseUrl: string;
+  storage: StorageAdapter;
+  onLogin?: () => void;
+  onLogout?: () => void;
+  onSessionExpired?: () => void;
+  cookieAuth?: boolean;
+  identity?: ClientIdentity;
+}
+
+function initCore({
+  apiBaseUrl,
+  storage,
+  onLogin,
+  onLogout,
+  onSessionExpired,
+  cookieAuth,
+  identity,
+}: InitCoreOptions) {
   if (initialized) return;
 
   configureShortcutPlatform(
@@ -55,9 +78,25 @@ function initCore(
 
   const api = new ApiClient(apiBaseUrl, {
     logger: createLogger("api"),
+    // A 401 mid-session has to end the session, not just drop the token.
+    // Dropping it alone left the shell mounted with `user` still set, so no
+    // shell ever showed the login page and every following request went out
+    // unauthenticated — the user got a wall of "missing authorization"
+    // toasts with no way forward (MUL-7028). The store action is idempotent,
+    // so a screenful of parallel 401s is still one expiry.
+    //
+    // `authStore` is assigned a few lines below, synchronously, and this
+    // callback can only run from a request — never before boot finishes.
     onUnauthorized: () => {
-      storage.removeItem("multica_token");
+      authStore.getState().sessionExpired();
     },
+    // Token mode only. Desktop runs one ApiClient per window over one shared
+    // localStorage, so the credential has to be read through to storage rather
+    // than cached per instance — otherwise a session renewed in one window
+    // leaves the others sending a token that is on its way out (MUL-7436).
+    getToken: cookieAuth
+      ? undefined
+      : () => storage.getItem("multica_token"),
     identity,
   });
   setApiInstance(api);
@@ -73,11 +112,27 @@ function initCore(
   // client reads the slug from that singleton for the X-Workspace-Slug
   // header. No boot-time hydration from storage is required.
 
-  authStore = createAuthStore({ api, storage, onLogin, onLogout, cookieAuth });
+  authStore = createAuthStore({
+    api,
+    storage,
+    onLogin,
+    onLogout,
+    onSessionExpired,
+    cookieAuth,
+  });
   registerAuthStore(authStore);
 
   chatStore = createChatStore({ storage });
   registerChatStore(chatStore);
+
+  if (!cookieAuth) {
+    sessionRenewal = createSessionRenewal({
+      api,
+      storage,
+      isAuthenticated: () => authStore.getState().status === "authenticated",
+      logger: createLogger("auth"),
+    });
+  }
 
   initialized = true;
 }
@@ -90,20 +145,51 @@ export function CoreProvider({
   cookieAuth,
   onLogin,
   onLogout,
+  onSessionExpired,
   identity,
   locale,
   resources,
   localeAdapter,
+  syncUserLocale = true,
 }: CoreProviderProps) {
   // Initialize singletons on first render only. Dependencies are read-once:
   // apiBaseUrl, storage, and callbacks are set at app boot and never change at runtime.
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  useMemo(() => initCore(apiBaseUrl, storage, onLogin, onLogout, cookieAuth, identity), []);
+  useMemo(
+    () =>
+      initCore({
+        apiBaseUrl,
+        storage,
+        onLogin,
+        onLogout,
+        onSessionExpired,
+        cookieAuth,
+        identity,
+      }),
+    [],
+  );
 
   // Client-only freeze watchdog — shared by web and desktop. No-op on the
   // server and idempotent, so mounting it here covers both apps in one place.
   useEffect(() => {
     installFreezeWatchdog();
+  }, []);
+
+  // Sliding session renewal, driven by use rather than by a clock. The store
+  // subscription covers the launch check: at mount the boot identity probe is
+  // still running, so the first attempt that finds a live session is the one
+  // that fires — and `maybeRenew` declines cheaply for every store update
+  // after that until the server-supplied interval has elapsed.
+  useEffect(() => {
+    const renewal = sessionRenewal;
+    if (!renewal) return;
+    const unsubscribe = authStore.subscribe(() => renewal.maybeRenew());
+    const stopWatching = watchSessionActivity(renewal);
+    renewal.maybeRenew();
+    return () => {
+      unsubscribe();
+      stopWatching();
+    };
   }, []);
 
   // I18nProvider wraps everything else: server and client must use the same
@@ -113,7 +199,6 @@ export function CoreProvider({
     <QueryProvider>
       <AuthInitializer
         onLogin={onLogin}
-        onLogout={onLogout}
         storage={storage}
         cookieAuth={cookieAuth}
         identity={identity}
@@ -140,7 +225,7 @@ export function CoreProvider({
   // the host app provides one (web layout + desktop App both do).
   const withAdapter = localeAdapter ? (
     <LocaleAdapterProvider adapter={localeAdapter}>
-      <UserLocaleSync />
+      {syncUserLocale && <UserLocaleSync />}
       {tree}
     </LocaleAdapterProvider>
   ) : (

@@ -8,11 +8,13 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"sort"
 	"strconv"
 	"strings"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
+	"github.com/multica-ai/multica/server/internal/issuestatus"
 	"github.com/multica-ai/multica/server/internal/logger"
 	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
@@ -57,6 +59,7 @@ type issueTableGroupsResponse struct {
 }
 
 type resolvedIssueTableGroup struct {
+	legacyCategories  bool
 	kind              string
 	propertyID        string
 	propertyType      string
@@ -67,9 +70,119 @@ type resolvedIssueTableGroup struct {
 	primary           *resolvedIssueTableGroup
 	secondaryValues   []string
 	secondaryFiltered bool
+	// secondaryCategory marks a compound whose secondary axis is the CATEGORY
+	// of the status rather than its key, retained for installed clients.
+	secondaryCategory bool
+	// categoryKeys maps each of the 4 categories to the concrete status keys
+	// that belong to it, resolved ONCE per request. Category predicates expand
+	// through this into `i.status = ANY(...)` so the (workspace_id, status)
+	// index stays usable — see issuestatus.ExpandCategories. (MUL-6243)
+	categoryKeys map[string][]string
+	// statusCustomKeys is the CUSTOM key -> category map behind
+	// statusCategoryExpr. Empty for a workspace with no custom statuses.
+	statusCustomKeys map[string]string
+	statusOrder      []string
+}
+
+// statusCategoryExpr builds the scalar `status key -> category` rewrite used as
+// a GROUP BY expression. Built-ins and custom keys are both translated to one
+// of the four lifecycle categories. (MUL-6243)
+func statusCategoryExpr(customKeys map[string]string, addArg func(any) string) string {
+	return statusValueCategoryExpr("i.status", customKeys, addArg)
+}
+
+func statusValueCategoryExpr(valueExpr string, customKeys map[string]string, addArg func(any) string) string {
+	allKeys := make(map[string]string, len(customKeys)+len(validIssueStatuses))
+	for _, key := range validIssueStatuses {
+		if category, ok := issuestatus.CategoryForBehavior(key); ok {
+			allKeys[key] = category
+		}
+	}
+	for key, category := range customKeys {
+		allKeys[key] = category
+	}
+	keys := make([]string, 0, len(allKeys))
+	for key := range allKeys {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	var b strings.Builder
+	b.WriteString("CASE " + valueExpr)
+	for _, key := range keys {
+		fmt.Fprintf(&b, " WHEN %s::text THEN %s::text", addArg(key), addArg(allKeys[key]))
+	}
+	b.WriteString(" ELSE " + valueExpr + " END")
+	return b.String()
+}
+
+// statusOrderExpression ranks a category in board order.
+func statusOrderExpression(categoryExpr string) string {
+	return "CASE " + categoryExpr + " WHEN 'unstarted' THEN 0 WHEN 'started' THEN 1 WHEN 'done' THEN 2 WHEN 'closed' THEN 3 ELSE 4 END"
+}
+
+// resolveStatusCategoryMaps derives BOTH shapes a category grouping needs from
+// ONE catalog read: the custom key -> category map behind the GROUP BY rewrite,
+// and the category -> concrete keys expansion that predicate() looks up (it has
+// no context or Querier of its own).
+//
+// One read, not three. A board can load four column branches as separate
+// HTTP requests, so a per-call `ExpandCategories` + `CustomKeyCategories` pair
+// would multiply catalog SELECTs behind one surface load.
+func (h *Handler) resolveStatusCategoryMaps(
+	ctx context.Context,
+	workspaceID pgtype.UUID,
+	legacy bool,
+) (customKeys map[string]string, categoryKeys map[string][]string, err error) {
+	customKeys, err = issuestatus.CustomKeyCategories(ctx, h.issueStatusCatalog(), workspaceID)
+	if err != nil {
+		return nil, nil, err
+	}
+	categoryKeys = make(map[string][]string, len(validIssueStatusCategories))
+	categories := validIssueStatusCategories
+	if legacy {
+		categories = validIssueStatuses
+	}
+	for _, category := range categories {
+		// Every category contains its built-in behaviors even for an unseeded
+		// workspace.
+		categoryKeys[category] = issuestatus.BehaviorsForCategory(category)
+		if legacy {
+			categoryKeys[category] = []string{category}
+		}
+	}
+	// Sorted so the expansion — and therefore the query's argument list — is
+	// deterministic for the same catalog.
+	keys := make([]string, 0, len(customKeys))
+	for key := range customKeys {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	for _, key := range keys {
+		category := customKeys[key]
+		if legacy {
+			category = issuestatus.WireCategory(key, category)
+			customKeys[key] = category
+		}
+		categoryKeys[category] = append(categoryKeys[category], key)
+	}
+	return customKeys, categoryKeys, nil
 }
 
 func issueTableGroupIdentity(group issueTableGroupSpec) string {
+	identity := issueTableGroupBaseIdentity(group)
+	if group.Kind == "status_category" || (group.Kind == "compound" && group.Secondary == "status_category") {
+		format := group.CategoryFormat
+		if format == "" {
+			format = "legacy"
+		}
+		// Do not accept cursors minted before the category wire contract was
+		// explicit, or cursors from the other format.
+		return identity + ":category_format=" + format
+	}
+	return identity
+}
+
+func issueTableGroupBaseIdentity(group issueTableGroupSpec) string {
 	if group.Kind == "property" {
 		return "group:property:" + group.PropertyID + ":empty=" + strconv.FormatBool(group.IncludeEmpty)
 	}
@@ -84,6 +197,12 @@ func issueTableGroupIdentity(group issueTableGroupSpec) string {
 }
 
 func (h *Handler) resolveIssueTableGroup(w http.ResponseWriter, r *http.Request, workspaceID pgtype.UUID, group issueTableGroupSpec, allowNone bool) (resolvedIssueTableGroup, bool) {
+	if group.CategoryFormat != "" && (group.CategoryFormat != "lifecycle" ||
+		(group.Kind != "status_category" && !(group.Kind == "compound" && group.Secondary == "status_category"))) {
+		writeError(w, http.StatusBadRequest, "category_format=lifecycle requires status_category grouping")
+		return resolvedIssueTableGroup{}, false
+	}
+	legacy := group.CategoryFormat == ""
 	if group.Kind != "compound" && group.SecondaryValues != nil {
 		writeError(w, http.StatusBadRequest, "group.secondary_values requires group.kind=compound")
 		return resolvedIssueTableGroup{}, false
@@ -96,7 +215,41 @@ func (h *Handler) resolveIssueTableGroup(w http.ResponseWriter, r *http.Request,
 		}
 		return resolvedIssueTableGroup{kind: "none"}, true
 	case "status":
-		return resolvedIssueTableGroup{kind: "status", groupExpr: "i.status"}, true
+		entries, err := h.issueStatusCatalog().ListIssueStatusEntries(r.Context(), db.ListIssueStatusEntriesParams{
+			WorkspaceID: workspaceID, IncludeArchived: true,
+		})
+		if err != nil {
+			slog.Warn("resolve status group order failed", append(logger.RequestAttrs(r), "error", err)...)
+			writeIssueTableQueryFailure(w, r, "failed to resolve table group")
+			return resolvedIssueTableGroup{}, false
+		}
+		customKeys := make(map[string]string)
+		for _, entry := range entries {
+			if !entry.IsSystem {
+				customKeys[entry.Key] = entry.Category
+			}
+		}
+		return resolvedIssueTableGroup{
+			kind:             "status",
+			groupExpr:        "i.status",
+			statusCustomKeys: customKeys,
+			statusOrder:      issueTableStatusOrder(entries),
+		}, true
+	case "status_category":
+		// Retained category-grouping API for installed clients. New task views
+		// use exact status groups, including custom keys.
+		customKeys, categoryKeys, err := h.resolveStatusCategoryMaps(r.Context(), workspaceID, legacy)
+		if err != nil {
+			slog.Warn("resolve status category group failed", append(logger.RequestAttrs(r), "error", err)...)
+			writeIssueTableQueryFailure(w, r, "failed to resolve table group")
+			return resolvedIssueTableGroup{}, false
+		}
+		return resolvedIssueTableGroup{
+			kind:             "status_category",
+			legacyCategories: legacy,
+			categoryKeys:     categoryKeys,
+			statusCustomKeys: customKeys,
+		}, true
 	case "assignee":
 		return resolvedIssueTableGroup{
 			kind:      "assignee",
@@ -129,36 +282,77 @@ END, ''))`,
 )) END`,
 		}, true
 	case "compound":
-		if group.Secondary != "status" {
+		if group.Secondary != "status" && group.Secondary != "status_category" {
 			writeIssueTableUnsupportedGroup(w, "secondary_group_unsupported", "Only status is supported as a secondary group.")
 			return resolvedIssueTableGroup{}, false
 		}
+		secondaryCategory := group.Secondary == "status_category"
 		if group.Primary != "assignee" && group.Primary != "project" && group.Primary != "parent" {
 			writeIssueTableUnsupportedGroup(w, "primary_group_unsupported", "This primary group is not supported.")
 			return resolvedIssueTableGroup{}, false
 		}
+		var customKeys map[string]string
+		if !secondaryCategory {
+			var err error
+			customKeys, err = issuestatus.CustomKeyCategories(r.Context(), h.issueStatusCatalog(), workspaceID)
+			if err != nil {
+				writeIssueTableQueryFailure(w, r, "failed to resolve table group")
+				return resolvedIssueTableGroup{}, false
+			}
+		}
 		seenSecondaryValues := make(map[string]struct{}, len(group.SecondaryValues))
+		seenInputs := make(map[string]bool, len(group.SecondaryValues))
+		normalizedSecondaryValues := make([]string, 0, len(group.SecondaryValues))
+		validSecondary := validIssueStatuses
+		if secondaryCategory && !legacy {
+			validSecondary = validIssueStatusCategories
+		}
 		for _, value := range group.SecondaryValues {
-			if !issueTableContainsString(validIssueStatuses, value) {
+			if seenInputs[value] {
+				writeError(w, http.StatusBadRequest, "duplicate group.secondary_values")
+				return resolvedIssueTableGroup{}, false
+			}
+			seenInputs[value] = true
+			if secondaryCategory && !legacy {
+				if normalized, ok := issuestatus.ParseCategory(value); ok {
+					value = normalized
+				}
+			}
+			_, custom := customKeys[value]
+			if !issueTableContainsString(validSecondary, value) && (secondaryCategory || !custom) {
 				writeError(w, http.StatusBadRequest, "invalid group.secondary_values")
 				return resolvedIssueTableGroup{}, false
 			}
 			if _, exists := seenSecondaryValues[value]; exists {
-				writeError(w, http.StatusBadRequest, "duplicate group.secondary_values")
-				return resolvedIssueTableGroup{}, false
+				continue // Distinct legacy categories can now share one lifecycle.
 			}
 			seenSecondaryValues[value] = struct{}{}
+			normalizedSecondaryValues = append(normalizedSecondaryValues, value)
 		}
 		primary, ok := h.resolveIssueTableGroup(w, r, workspaceID, issueTableGroupSpec{Kind: group.Primary}, false)
 		if !ok {
 			return resolvedIssueTableGroup{}, false
 		}
-		return resolvedIssueTableGroup{
+		resolved := resolvedIssueTableGroup{
 			kind:              "compound",
 			primary:           &primary,
-			secondaryValues:   append([]string(nil), group.SecondaryValues...),
+			secondaryValues:   normalizedSecondaryValues,
 			secondaryFiltered: group.SecondaryValues != nil,
-		}, true
+			secondaryCategory: secondaryCategory,
+			legacyCategories:  legacy,
+			statusCustomKeys:  customKeys,
+		}
+		if secondaryCategory {
+			customKeys, categoryKeys, err := h.resolveStatusCategoryMaps(r.Context(), workspaceID, legacy)
+			if err != nil {
+				slog.Warn("resolve compound status category group failed", append(logger.RequestAttrs(r), "error", err)...)
+				writeIssueTableQueryFailure(w, r, "failed to resolve table group")
+				return resolvedIssueTableGroup{}, false
+			}
+			resolved.statusCustomKeys = customKeys
+			resolved.categoryKeys = categoryKeys
+		}
+		return resolved, true
 	case "property":
 		propertyUUID, err := util.ParseUUID(group.PropertyID)
 		if err != nil {
@@ -233,6 +427,9 @@ func (group resolvedIssueTableGroup) expression(addArg func(any) string) string 
 	if group.kind == "compound" && group.primary != nil {
 		return group.primary.expression(addArg)
 	}
+	if group.kind == "status_category" {
+		return group.categoryExpression(addArg)
+	}
 	if group.kind == "property" && group.propertyType == "select" {
 		active := make([]string, 0, len(group.activeOptions))
 		for value := range group.activeOptions {
@@ -253,13 +450,61 @@ func (group resolvedIssueTableGroup) sortExpression() string {
 	return "group_value"
 }
 
+// Match the catalog's category / position / built-in / key ordering, including
+// fallback built-ins before a legacy workspace's catalog has been seeded.
+func issueTableStatusOrder(entries []db.IssueStatus) []string {
+	rows := append([]db.IssueStatus(nil), entries...)
+	seen := make(map[string]bool, len(rows))
+	for _, row := range rows {
+		seen[row.Key] = true
+	}
+	builtIns := []string{"backlog", "todo", "in_progress", "in_review", "blocked", "done", "cancelled"}
+	builtInRank := make(map[string]int)
+	for i, key := range builtIns {
+		builtInRank[key] = i
+		if !seen[key] {
+			category, _ := issuestatus.CategoryForBehavior(key)
+			rows = append(rows, db.IssueStatus{Key: key, Category: category, IsSystem: true})
+		}
+	}
+	categoryRank := map[string]int{"unstarted": 0, "started": 1, "done": 2, "closed": 3}
+	sort.Slice(rows, func(i, j int) bool {
+		a, b := rows[i], rows[j]
+		a.Category, _ = issuestatus.ParseCategory(a.Category)
+		b.Category, _ = issuestatus.ParseCategory(b.Category)
+		if categoryRank[a.Category] != categoryRank[b.Category] {
+			return categoryRank[a.Category] < categoryRank[b.Category]
+		}
+		if a.Position != b.Position {
+			return a.Position < b.Position
+		}
+		if a.IsSystem != b.IsSystem {
+			return a.IsSystem
+		}
+		if a.IsSystem && builtInRank[a.Key] != builtInRank[b.Key] {
+			return builtInRank[a.Key] < builtInRank[b.Key]
+		}
+		return a.Key < b.Key
+	})
+	keys := make([]string, len(rows))
+	for i, row := range rows {
+		keys[i] = row.Key
+	}
+	return keys
+}
+
 func (group resolvedIssueTableGroup) orderExpression(addArg func(any) string) string {
 	if group.kind == "compound" && group.primary != nil {
 		return group.primary.orderExpression(addArg)
 	}
 	switch group.kind {
 	case "status":
-		return "CASE group_value WHEN 'backlog' THEN 0 WHEN 'todo' THEN 1 WHEN 'in_progress' THEN 2 WHEN 'in_review' THEN 3 WHEN 'done' THEN 4 WHEN 'blocked' THEN 5 WHEN 'cancelled' THEN 6 ELSE 7 END"
+		return fmt.Sprintf("COALESCE(array_position(%s::text[], group_value), 100000)", addArg(group.statusOrder))
+	case "status_category":
+		if group.legacyCategories {
+			return fmt.Sprintf("COALESCE(array_position(%s::text[], group_value), 100000)", addArg(validIssueStatuses))
+		}
+		return statusOrderExpression("group_value")
 	case "assignee":
 		return "CASE split_part(group_value, ':', 1) WHEN 'member' THEN 0 WHEN 'agent' THEN 1 WHEN 'squad' THEN 2 ELSE 3 END"
 	case "project":
@@ -298,8 +543,39 @@ func (group resolvedIssueTableGroup) contextExpression(addArg func(any) string, 
 ), '{}'::jsonb) END`, prefixRef)
 }
 
-func compoundCellGroupKey(primaryKey, status string) string {
-	return "compound:" + base64.RawURLEncoding.EncodeToString([]byte(primaryKey)) + ":status:" + status
+const statusCategoryGroupKeyPrefix = "status_category:"
+
+func statusCategoryGroupKey(category string) string {
+	return statusCategoryGroupKeyPrefix + category
+}
+
+func parseStatusCategoryGroupKey(key string) (string, bool) {
+	if !strings.HasPrefix(key, statusCategoryGroupKeyPrefix) {
+		return "", false
+	}
+	category := strings.TrimPrefix(key, statusCategoryGroupKeyPrefix)
+	return issuestatus.ParseCategory(category)
+}
+
+// categoryKeysFor returns the concrete status keys in a category. Its fallback
+// contains the category's built-in behaviors, so a failed catalog read still
+// produces correct default columns.
+func (group resolvedIssueTableGroup) categoryKeysFor(category string) []string {
+	if keys := group.categoryKeys[category]; len(keys) > 0 {
+		return keys
+	}
+	if group.legacyCategories {
+		return []string{category}
+	}
+	return issuestatus.BehaviorsForCategory(category)
+}
+
+func compoundCellGroupKey(primaryKey, status string, category bool) string {
+	axis := ":status:"
+	if category {
+		axis = ":status_category:"
+	}
+	return "compound:" + base64.RawURLEncoding.EncodeToString([]byte(primaryKey)) + axis + status
 }
 
 func (group resolvedIssueTableGroup) descriptor(raw string, count int64, context issueTableGroupContext, secondaryCounts map[string]int64) (issueTableGroupDescriptorResponse, error) {
@@ -309,10 +585,20 @@ func (group resolvedIssueTableGroup) descriptor(raw string, count int64, context
 			return descriptor, err
 		}
 		descriptor.SecondaryGroups = make([]issueTableGroupDescriptorResponse, 0, len(secondaryCounts))
-		for _, status := range validIssueStatuses {
+		secondaryValues := append([]string(nil), validIssueStatuses...)
+		customKeys := make([]string, 0, len(group.statusCustomKeys))
+		for key := range group.statusCustomKeys {
+			customKeys = append(customKeys, key)
+		}
+		sort.Strings(customKeys)
+		secondaryValues = append(secondaryValues, customKeys...)
+		if group.secondaryCategory {
+			secondaryValues = group.categoryValues()
+		}
+		for _, status := range secondaryValues {
 			statusCount := secondaryCounts[status]
 			descriptor.SecondaryGroups = append(descriptor.SecondaryGroups, issueTableGroupDescriptorResponse{
-				Key: compoundCellGroupKey(descriptor.Key, status),
+				Key: compoundCellGroupKey(descriptor.Key, status, group.secondaryCategory),
 				Value: issueTableGroupValueResponse{
 					Kind:   "status",
 					Status: status,
@@ -325,10 +611,22 @@ func (group resolvedIssueTableGroup) descriptor(raw string, count int64, context
 	descriptor := issueTableGroupDescriptorResponse{Count: count}
 	switch group.kind {
 	case "status":
-		if !issueTableContainsString(validIssueStatuses, raw) {
+		// Any non-empty status KEY, not just the 7 built-ins. Since MUL-6243 a
+		// workspace can hold custom statuses, and rejecting one here failed the
+		// WHOLE grouped response with a 500 — one custom status made "group by
+		// status" unusable for the entire workspace.
+		if raw == "" {
 			return descriptor, fmt.Errorf("unexpected status group value %q", raw)
 		}
 		descriptor.Key = "status:" + raw
+		descriptor.Value = issueTableGroupValueResponse{Kind: "status", Status: raw}
+	case "status_category":
+		if !issueTableContainsString(group.categoryValues(), raw) {
+			return descriptor, fmt.Errorf("unexpected status category group value %q", raw)
+		}
+		descriptor.Key = statusCategoryGroupKey(raw)
+		// value.kind stays "status" for compatibility with existing grouped
+		// response consumers; the group key identifies this as a category.
 		descriptor.Value = issueTableGroupValueResponse{Kind: "status", Status: raw}
 	case "assignee":
 		descriptor.Value.Kind = "assignee"
@@ -421,8 +719,20 @@ func (group resolvedIssueTableGroup) predicate(w http.ResponseWriter, key string
 			return "", false
 		}
 		encodedAndStatus := strings.TrimPrefix(key, prefix)
-		encoded, status, ok := strings.Cut(encodedAndStatus, ":status:")
-		if !ok || !issueTableContainsString(validIssueStatuses, status) {
+		axis := ":status:"
+		if group.secondaryCategory {
+			axis = ":status_category:"
+		}
+		encoded, status, ok := strings.Cut(encodedAndStatus, axis)
+		validSecondary := validIssueStatuses
+		if group.secondaryCategory {
+			validSecondary = group.categoryValues()
+			if normalized, valid := issuestatus.ParseCategory(status); valid && !group.legacyCategories {
+				status = normalized
+			}
+		}
+		_, custom := group.statusCustomKeys[status]
+		if !ok || (!issueTableContainsString(validSecondary, status) && (group.secondaryCategory || !custom)) {
 			writeError(w, http.StatusBadRequest, "invalid group_key")
 			return "", false
 		}
@@ -435,6 +745,9 @@ func (group resolvedIssueTableGroup) predicate(w http.ResponseWriter, key string
 		if !ok {
 			return "", false
 		}
+		if group.secondaryCategory {
+			return fmt.Sprintf("(%s) AND i.status = ANY(%s::text[])", primaryPredicate, addArg(group.categoryKeysFor(status))), true
+		}
 		return fmt.Sprintf("(%s) AND i.status = %s::text", primaryPredicate, addArg(status)), true
 	}
 	switch group.kind {
@@ -446,11 +759,29 @@ func (group resolvedIssueTableGroup) predicate(w http.ResponseWriter, key string
 		return "TRUE", true
 	case "status":
 		const prefix = "status:"
-		if !strings.HasPrefix(key, prefix) || !issueTableContainsString(validIssueStatuses, strings.TrimPrefix(key, prefix)) {
+		status, found := strings.CutPrefix(key, prefix)
+		// A custom status is a valid group here too; the predicate is an exact
+		// key match either way. Length-bounded so an arbitrary blob cannot ride
+		// in as a status key.
+		if !found || status == "" || len(status) > 64 {
 			writeError(w, http.StatusBadRequest, "invalid group_key")
 			return "", false
 		}
-		return fmt.Sprintf("i.status = %s::text", addArg(strings.TrimPrefix(key, prefix))), true
+		return fmt.Sprintf("i.status = %s::text", addArg(status)), true
+	case "status_category":
+		category, ok := parseStatusCategoryGroupKey(key)
+		if group.legacyCategories {
+			category, ok = strings.CutPrefix(key, statusCategoryGroupKeyPrefix)
+			ok = ok && issueTableContainsString(group.categoryValues(), category)
+		}
+		if !ok {
+			writeError(w, http.StatusBadRequest, "invalid group_key")
+			return "", false
+		}
+		// Expanded to concrete keys rather than wrapping the column in a
+		// category function: `status = ANY(...)` keeps the (workspace_id,
+		// status) index, a function wrapper would force a workspace scan.
+		return fmt.Sprintf("i.status = ANY(%s::text[])", addArg(group.categoryKeysFor(category))), true
 	case "assignee":
 		const prefix = "assignee:"
 		if !strings.HasPrefix(key, prefix) {
@@ -660,8 +991,15 @@ func (h *Handler) ListIssueTableGroups(w http.ResponseWriter, r *http.Request) {
 )`, groupExpr, compiled.where, expectedRef, expectedRef)
 	}
 	if group.kind == "compound" {
+		// The secondary axis is either the status key itself or the CATEGORY it
+		// behaves as. In the category case a custom status counts into the cell
+		// of the column it renders in, never a cell of its own. (MUL-6243)
+		secondaryExpr := "i.status"
+		if group.secondaryCategory {
+			secondaryExpr = group.categoryExpression(addArg)
+		}
 		groupedCTE = fmt.Sprintf(`cells AS (
-  SELECT %s AS group_value, i.status AS secondary_value, COUNT(*)::bigint AS cell_count
+  SELECT %s AS group_value, %s AS secondary_value, COUNT(*)::bigint AS cell_count
   FROM issue i
   WHERE %s
   GROUP BY 1, 2
@@ -672,9 +1010,20 @@ func (h *Handler) ListIssueTableGroups(w http.ResponseWriter, r *http.Request) {
          jsonb_object_agg(secondary_value, cell_count)::jsonb AS secondary_counts
   FROM cells
   GROUP BY group_value
-)`, groupExpr, compiled.where)
+)`, groupExpr, secondaryExpr, compiled.where)
 		if group.secondaryFiltered {
 			visibleRef := addArg(group.secondaryValues)
+			// promoted_parents matches raw `child.status`, so a category axis has
+			// to expand back to concrete keys there; the cell filters compare
+			// against secondary_value, which is already a category.
+			visibleKeysRef := visibleRef
+			if group.secondaryCategory && group.primary != nil && group.primary.kind == "parent" {
+				expanded := make([]string, 0, len(group.secondaryValues))
+				for _, category := range group.secondaryValues {
+					expanded = append(expanded, group.categoryKeysFor(category)...)
+				}
+				visibleKeysRef = addArg(expanded)
+			}
 			headerPredicate := "TRUE"
 			promotedParentsCTE := ""
 			if group.primary != nil && group.primary.kind == "parent" {
@@ -687,14 +1036,14 @@ func (h *Handler) ListIssueTableGroups(w http.ResponseWriter, r *http.Request) {
   FROM membership child
   WHERE child.parent_issue_id IS NOT NULL
     AND child.status = ANY(%s::text[])
-)`, visibleRef)
+)`, visibleKeysRef)
 			}
 			groupedCTE = fmt.Sprintf(`membership AS NOT MATERIALIZED (
   SELECT i.*
   FROM issue i
   WHERE %s
 )%s, cells AS (
-  SELECT %s AS group_value, i.status AS secondary_value,
+  SELECT %s AS group_value, %s AS secondary_value,
          COUNT(*) FILTER (WHERE %s)::bigint AS cell_count
   FROM membership i
   GROUP BY 1, 2
@@ -712,7 +1061,7 @@ func (h *Handler) ListIssueTableGroups(w http.ResponseWriter, r *http.Request) {
     SUM(cell_count) FILTER (WHERE secondary_value = ANY(%s::text[])),
     0
   ) > 0
-)`, compiled.where, promotedParentsCTE, groupExpr, headerPredicate, visibleRef, visibleRef)
+)`, compiled.where, promotedParentsCTE, groupExpr, secondaryExpr, headerPredicate, visibleRef, visibleRef)
 		}
 	}
 	query := fmt.Sprintf(`WITH %s, sorted AS (
@@ -813,4 +1162,37 @@ func (h *Handler) ListIssueTableGroups(w http.ResponseWriter, r *http.Request) {
 	}
 	committed = true
 	writeJSON(w, http.StatusOK, response)
+}
+
+// issueStatusCatalog is the querier catalog reads go through. Defaults to
+// Queries; tests substitute a counting wrapper.
+func (h *Handler) issueStatusCatalog() issuestatus.Querier {
+	if h.IssueStatusCatalog != nil {
+		return h.IssueStatusCatalog
+	}
+	return h.Queries
+}
+
+// A legacy category bucket must match the per-row wire category, including
+// built-in identity. Lifecycle grouping is an explicit request capability.
+func (group resolvedIssueTableGroup) categoryValues() []string {
+	if group.legacyCategories {
+		return validIssueStatuses
+	}
+	return validIssueStatusCategories
+}
+
+func (group resolvedIssueTableGroup) categoryExpression(addArg func(any) string) string {
+	if !group.legacyCategories {
+		return statusCategoryExpr(group.statusCustomKeys, addArg)
+	}
+	keys := make(map[string]string, len(group.statusCustomKeys)+len(validIssueStatuses))
+	for key, category := range group.statusCustomKeys {
+		keys[key] = category
+	}
+	for _, key := range validIssueStatuses {
+		keys[key] = key
+	}
+	// Explicit built-in entries override the lifecycle defaults in the helper.
+	return statusCategoryExpr(keys, addArg)
 }

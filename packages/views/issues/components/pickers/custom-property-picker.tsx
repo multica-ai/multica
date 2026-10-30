@@ -1,9 +1,10 @@
 "use client";
 
-import { useEffect, useState } from "react";
-import { CalendarDays, ExternalLink } from "lucide-react";
+import { useEffect, useId, useRef, useState } from "react";
+import { CalendarDays, Check, ExternalLink, X } from "@multica/ui/icons";
 import { toast } from "sonner";
 import type { Issue, IssueProperty, IssuePropertyValue } from "@multica/core/types";
+import { hasUnknownActorRef, isListPropertyType, MAX_ISSUE_PROPERTY_SELECT_VALUES } from "@multica/core/types";
 import {
   useSetIssueProperty,
   useUnsetIssueProperty,
@@ -19,10 +20,48 @@ import {
   PopoverTrigger,
   PopoverContent,
 } from "@multica/ui/components/ui/popover";
-import { Button } from "@multica/ui/components/ui/button";
+import { IconButton } from "@multica/ui/components/common/icon-button";
 import { Input } from "@multica/ui/components/ui/input";
-import { useT } from "../../../i18n";
-import { PropertyPicker, PickerItem } from "./property-picker";
+import { useLocale, useT } from "../../../i18n";
+import { matchesPinyin } from "../../../editor/extensions/pinyin-match";
+import { PropertyPicker, PickerItem, PickerEmpty } from "./property-picker";
+import { ActorPropertyPicker, ActorPropertyDisplay } from "./actor-property-picker";
+
+const EDITABLE_PROPERTY_TYPES = [
+  "select",
+  "multi_select",
+  "date",
+  "checkbox",
+  "text",
+  "number",
+  "url",
+  "actor",
+  "multi_actor",
+  "multi_text",
+  "multi_url",
+];
+
+/**
+ * Whether the editor must degrade to read-only (Clear is still offered, so a
+ * stale value can always be cleaned up). Three reasons:
+ *
+ *   1. The definition is archived.
+ *   2. The definition's type is newer than this build.
+ *   3. A single `actor` value references a kind this build cannot parse. It
+ *      would otherwise render as empty and the user, believing the field is
+ *      unset, would overwrite a value they were never shown. `multi_actor` is
+ *      exempt: its toggle round-trips unknown entries instead of replacing the
+ *      whole value (MUL-6286 review).
+ */
+export function isCustomPropertyReadOnly(
+  property: IssueProperty,
+  value: IssuePropertyValue | undefined,
+): boolean {
+  if (property.archived) return true;
+  if (!EDITABLE_PROPERTY_TYPES.includes(property.type)) return true;
+  if (property.type === "actor" && hasUnknownActorRef(value)) return true;
+  return false;
+}
 
 /**
  * Value editor for one custom property on one issue. The editor shape
@@ -32,7 +71,10 @@ import { PropertyPicker, PickerItem } from "./property-picker";
  *   multi_select  → PropertyPicker with toggling items (stays open)
  *   date          → Calendar popover (mirrors DueDatePicker)
  *   checkbox      → Yes / No picker
+ *   actor         → member picker (commits and closes)
+ *   multi_actor   → member picker with toggling items (stays open)
  *   text/number/url → popover with an input, Enter commits
+ *   multi_text/multi_url → popover with removable rows + an appending input
  *
  * Archived definitions render read-only: the popover only offers Clear
  * (the server rejects new values on archived properties but always allows
@@ -59,20 +101,28 @@ export function CustomPropertyValueEditor({
 
   return (
     <CustomPropertyValueInput
+      key={`${issue.id}:${property.id}`}
       property={property}
       value={value}
       defaultOpen={defaultOpen}
       open={open}
       onOpenChange={onOpenChange}
       onChange={(next) => {
+        // List editors await the write and show failures beside the draft.
+        if (isListPropertyType(property.type) && !isCustomPropertyReadOnly(property, value)) {
+          const variables = { issueId: issue.id, propertyId: property.id };
+          return (next === undefined
+            ? unsetProperty.mutateAsync(variables)
+            : setProperty.mutateAsync({ ...variables, value: next })
+          ).then(() => {});
+        }
         if (next === undefined) {
-          unsetProperty.mutate(
+          return unsetProperty.mutate(
             { issueId: issue.id, propertyId: property.id },
             { onError },
           );
-          return;
         }
-        setProperty.mutate(
+        return setProperty.mutate(
           { issueId: issue.id, propertyId: property.id, value: next },
           { onError },
         );
@@ -84,7 +134,7 @@ export function CustomPropertyValueEditor({
 /**
  * Mutation-free custom-property editor. Create flows use this while an issue
  * still exists only as a draft; issue detail wraps it above with the normal
- * optimistic mutations.
+ * optimistic mutations. List editors await onChange before clearing the draft.
  */
 export function CustomPropertyValueInput({
   property,
@@ -98,7 +148,7 @@ export function CustomPropertyValueInput({
 }: {
   property: IssueProperty;
   value: IssuePropertyValue | undefined;
-  onChange: (value: IssuePropertyValue | undefined) => void;
+  onChange: (value: IssuePropertyValue | undefined) => void | Promise<void>;
   defaultOpen?: boolean;
   open?: boolean;
   onOpenChange?: (open: boolean) => void;
@@ -107,9 +157,15 @@ export function CustomPropertyValueInput({
 }) {
   const { t } = useT("issues");
   const [internalOpen, setInternalOpen] = useState(defaultOpen);
+  const [optionSearch, setOptionSearch] = useState("");
   const open = controlledOpen ?? internalOpen;
   const setOpen = controlledOnOpenChange ?? setInternalOpen;
   const hasValue = value !== undefined;
+  const options = property.config.options ?? [];
+  const optionQuery = optionSearch.trim().toLowerCase();
+  const filteredOptions = options.filter((option) =>
+    option.name.toLowerCase().includes(optionQuery) || matchesPinyin(option.name, optionQuery),
+  );
 
   const commit = (next: IssuePropertyValue) => onChange(next);
   const clear = () => onChange(undefined);
@@ -123,27 +179,23 @@ export function CustomPropertyValueInput({
     </span>
   );
 
-  const clearFooter = hasValue ? (
-    <Button
-      variant="ghost"
-      size="xs"
+  // Empty value as the first row, not a footer button — the position every
+  // other picker uses for "no value", and being a real row it can carry the
+  // checkmark when the property is unset.
+  const emptyRow = (
+    <PickerItem
+      emptyValue
+      selected={!hasValue}
       onClick={() => {
         clear();
         setOpen(false);
       }}
-      className="w-full justify-start text-muted-foreground hover:text-foreground"
     >
-      {t(($) => $.pickers.custom_property.clear_action)}
-    </Button>
-  ) : undefined;
+      <span className="text-muted-foreground">{t(($) => $.pickers.custom_property.none)}</span>
+    </PickerItem>
+  );
 
-  // Archived (or unknown-type) definitions: read-only display; the only
-  // offered action is Clear so stale values can still be cleaned up.
-  const readOnly =
-    property.archived ||
-    !["select", "multi_select", "date", "checkbox", "text", "number", "url"].includes(
-      property.type,
-    );
+  const readOnly = isCustomPropertyReadOnly(property, value);
 
   if (readOnly) {
     return (
@@ -153,10 +205,12 @@ export function CustomPropertyValueInput({
         align="start"
         trigger={valueTrigger}
         triggerRender={triggerRender}
-        footer={clearFooter}
       >
-        <p className="px-2 py-1.5 text-xs text-muted-foreground">
-          {t(($) => $.pickers.custom_property.archived_hint)}
+        {emptyRow}
+        <p className="px-2 py-1.5 text-caption text-muted-foreground">
+          {property.archived
+            ? t(($) => $.pickers.custom_property.archived_hint)
+            : t(($) => $.pickers.custom_property.unknown_value_hint)}
         </p>
       </PropertyPicker>
     );
@@ -164,18 +218,18 @@ export function CustomPropertyValueInput({
 
   switch (property.type) {
     case "select": {
-      const options = property.config.options ?? [];
       return (
         <PropertyPicker
           open={open}
           onOpenChange={setOpen}
           align="start"
           searchable={options.length > 7}
+          onSearchChange={setOptionSearch}
           trigger={valueTrigger}
           triggerRender={triggerRender}
-          footer={clearFooter}
         >
-          {options.map((option) => (
+          {emptyRow}
+          {filteredOptions.map((option) => (
             <PickerItem
               key={option.id}
               selected={value === option.id}
@@ -188,12 +242,13 @@ export function CustomPropertyValueInput({
               <span className="truncate">{option.name}</span>
             </PickerItem>
           ))}
+          {filteredOptions.length === 0 && <PickerEmpty />}
         </PropertyPicker>
       );
     }
     case "multi_select": {
-      const options = property.config.options ?? [];
       const selected = Array.isArray(value) ? value : [];
+      const atCapacity = selected.length >= MAX_ISSUE_PROPERTY_SELECT_VALUES;
       const toggle = (optionId: string) => {
         const next = selected.includes(optionId)
           ? selected.filter((id) => id !== optionId)
@@ -207,34 +262,79 @@ export function CustomPropertyValueInput({
           onOpenChange={setOpen}
           align="start"
           searchable={options.length > 7}
+          onSearchChange={setOptionSearch}
           trigger={valueTrigger}
           triggerRender={triggerRender}
-          footer={clearFooter}
         >
-          {options.map((option) => (
+          {emptyRow}
+          {filteredOptions.map((option) => (
             <PickerItem
               key={option.id}
               selected={selected.includes(option.id)}
+              disabled={atCapacity && !selected.includes(option.id)}
               onClick={() => toggle(option.id)}
             >
               <span className="size-2.5 shrink-0 rounded-full" style={{ backgroundColor: option.color }} />
               <span className="truncate">{option.name}</span>
             </PickerItem>
           ))}
+          {filteredOptions.length === 0 && <PickerEmpty />}
         </PropertyPicker>
       );
     }
+    case "actor":
+    case "multi_actor":
+      return (
+        <ActorPropertyPicker
+          property={property}
+          value={value}
+          onChange={onChange}
+          open={open}
+          onOpenChange={setOpen}
+          trigger={valueTrigger}
+          triggerRender={triggerRender}
+          emptyRow={emptyRow}
+        />
+      );
+    case "multi_text":
+    case "multi_url":
+      return (
+        <ListPropertyEditor
+          property={property}
+          value={value}
+          open={open}
+          onOpenChange={setOpen}
+          onCommit={commit}
+          onClear={clear}
+          trigger={valueTrigger}
+          triggerRender={triggerRender}
+        />
+      );
     case "date": {
       const date = typeof value === "string" ? dateOnlyToLocalDate(value) : undefined;
       return (
         <Popover open={open} onOpenChange={setOpen}>
           <PopoverTrigger
-            className={triggerRender ? undefined : "flex items-center gap-1.5 cursor-pointer rounded px-1 -mx-1 hover:bg-accent/30 transition-colors overflow-hidden"}
+            className={triggerRender ? undefined : "flex items-center gap-1.5 cursor-pointer rounded-xs px-1 -mx-1 hover:bg-accent/30 transition-colors overflow-hidden"}
             render={triggerRender}
           >
             {valueTrigger}
           </PopoverTrigger>
           <PopoverContent className="w-auto p-0" align="start">
+            {/* Empty value above the calendar — same position as DateOnlyPicker. */}
+            <button
+              type="button"
+              onClick={() => {
+                clear();
+                setOpen(false);
+              }}
+              className="flex w-full items-center gap-3 border-b px-3 py-2 text-left text-body transition-colors hover:bg-accent"
+            >
+              <span className="flex min-w-0 flex-1 items-center gap-2 text-muted-foreground">
+                {t(($) => $.pickers.custom_property.none)}
+              </span>
+              <Check className={`h-3.5 w-3.5 shrink-0 text-muted-foreground ${date ? "invisible" : ""}`} />
+            </button>
             <Calendar
               mode="single"
               selected={date}
@@ -244,21 +344,6 @@ export function CustomPropertyValueInput({
                 setOpen(false);
               }}
             />
-            {date && (
-              <div className="border-t px-3 py-2">
-                <Button
-                  variant="ghost"
-                  size="xs"
-                  onClick={() => {
-                    clear();
-                    setOpen(false);
-                  }}
-                  className="text-muted-foreground hover:text-foreground"
-                >
-                  {t(($) => $.pickers.custom_property.clear_action)}
-                </Button>
-              </div>
-            )}
           </PopoverContent>
         </Popover>
       );
@@ -271,8 +356,8 @@ export function CustomPropertyValueInput({
           align="start"
           trigger={valueTrigger}
           triggerRender={triggerRender}
-          footer={clearFooter}
         >
+          {emptyRow}
           <PickerItem
             selected={value === true}
             onClick={() => {
@@ -366,7 +451,7 @@ function TextishPropertyEditor({
   return (
     <Popover open={open} onOpenChange={onOpenChange}>
       <PopoverTrigger
-        className={triggerRender ? undefined : "flex items-center gap-1.5 cursor-pointer rounded px-1 -mx-1 hover:bg-accent/30 transition-colors overflow-hidden"}
+        className={triggerRender ? undefined : "flex items-center gap-1.5 cursor-pointer rounded-xs px-1 -mx-1 hover:bg-accent/30 transition-colors overflow-hidden"}
         render={triggerRender}
       >
         {trigger ?? (value === undefined ? (
@@ -394,17 +479,164 @@ function TextishPropertyEditor({
             className="h-8"
           />
           {property.type === "url" && typeof value === "string" && (
-            <Button
+            <IconButton
               type="button"
               variant="ghost"
               size="icon-sm"
-              aria-label={t(($) => $.pickers.custom_property.open_link)}
+              label={t(($) => $.pickers.custom_property.open_link)}
               onClick={() => window.open(value, "_blank", "noopener,noreferrer")}
             >
               <ExternalLink className="size-3.5" />
-            </Button>
+            </IconButton>
           )}
         </form>
+      </PopoverContent>
+    </Popover>
+  );
+}
+
+/**
+ * List editor for multi_text / multi_url: current entries as removable rows
+ * above an input that appends on Enter. The popover stays open across
+ * additions (multi-select interaction); each add/remove commits the whole
+ * array, and removing the last entry clears the property.
+ */
+function ListPropertyEditor({
+  property,
+  value,
+  open,
+  onOpenChange,
+  onCommit,
+  onClear,
+  trigger,
+  triggerRender,
+}: {
+  property: IssueProperty;
+  value: IssuePropertyValue | undefined;
+  open: boolean;
+  onOpenChange: (v: boolean) => void;
+  onCommit: (next: IssuePropertyValue) => void | Promise<void>;
+  onClear: () => void | Promise<void>;
+  trigger?: React.ReactNode;
+  triggerRender?: React.ReactElement<Record<string, unknown>>;
+}) {
+  const { t } = useT("issues");
+  const [draft, setDraft] = useState("");
+  const [error, setError] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
+  const savingRef = useRef(false);
+  const errorId = useId();
+
+  useEffect(() => {
+    if (open) setError(null);
+  }, [open]);
+
+  const items = Array.isArray(value) ? value : [];
+  const placeholder =
+    property.type === "multi_url"
+      ? t(($) => $.pickers.custom_property.url_placeholder)
+      : t(($) => $.pickers.custom_property.value_placeholder);
+
+  const save = async (next: string[], clearDraft = false) => {
+    if (savingRef.current) return;
+    savingRef.current = true;
+    setSaving(true);
+    setError(null);
+    try {
+      if (next.length === 0) await onClear();
+      else await onCommit(next);
+      if (clearDraft) setDraft("");
+    } catch (error) {
+      setError(error instanceof Error ? error.message : String(error));
+    } finally {
+      savingRef.current = false;
+      setSaving(false);
+    }
+  };
+
+  const add = () => {
+    if (savingRef.current) return;
+    const trimmed = draft.trim();
+    if (!trimmed) return;
+    if (property.type === "multi_url" && !/^https?:\/\//i.test(trimmed)) {
+      setError(t(($) => $.pickers.custom_property.url_scheme_required));
+      return;
+    }
+    if (items.includes(trimmed)) {
+      setDraft("");
+      setError(null);
+      return;
+    }
+    void save([...items, trimmed], true);
+  };
+
+  return (
+    <Popover open={open} onOpenChange={onOpenChange}>
+      <PopoverTrigger
+        className={triggerRender ? undefined : "flex items-center gap-1.5 cursor-pointer rounded-xs px-1 -mx-1 hover:bg-accent/30 transition-colors overflow-hidden"}
+        render={triggerRender}
+      >
+        {trigger}
+      </PopoverTrigger>
+      <PopoverContent className="w-64 p-2" align="start">
+        {items.length > 0 && (
+          <ul className="mb-2 max-h-48 overflow-y-auto">
+            {items.map((item) => (
+              <li key={item} className="flex min-w-0 items-center gap-1 rounded-sm px-1 py-0.5 hover:bg-accent/40">
+                <span className="min-w-0 flex-1 truncate text-body">{item}</span>
+                {property.type === "multi_url" && (
+                  <IconButton
+                    type="button"
+                    variant="ghost"
+                    size="icon-sm"
+                    label={t(($) => $.pickers.custom_property.open_link)}
+                    onClick={() => window.open(item, "_blank", "noopener,noreferrer")}
+                  >
+                    <ExternalLink className="size-3.5" />
+                  </IconButton>
+                )}
+                <IconButton
+                  type="button"
+                  variant="ghost"
+                  size="icon-sm"
+                  label={t(($) => $.pickers.custom_property.remove_item, { value: item })}
+                  disabled={saving}
+                  onClick={() => void save(items.filter((entry) => entry !== item))}
+                >
+                  <X className="size-3.5" />
+                </IconButton>
+              </li>
+            ))}
+          </ul>
+        )}
+        <form
+          onSubmit={(event) => {
+            event.preventDefault();
+            add();
+          }}
+          className="flex items-center gap-2"
+          aria-busy={saving}
+        >
+          <Input
+            autoFocus
+            value={draft}
+            readOnly={saving}
+            aria-label={property.name}
+            aria-invalid={error !== null}
+            aria-describedby={error ? errorId : undefined}
+            onChange={(event) => {
+              setDraft(event.target.value);
+              setError(null);
+            }}
+            placeholder={placeholder}
+            className="h-8"
+          />
+        </form>
+        {error && (
+          <p id={errorId} role="alert" className="text-caption text-destructive">
+            {error}
+          </p>
+        )}
       </PopoverContent>
     </Popover>
   );
@@ -424,6 +656,7 @@ export function CustomPropertyValueDisplay({
   value: IssuePropertyValue | undefined;
 }) {
   const { t } = useT("issues");
+  const locale = useLocale();
   if (value === undefined) {
     return (
       <span className="text-muted-foreground">
@@ -464,10 +697,48 @@ export function CustomPropertyValueDisplay({
           {selected.map((option) => (
             <span
               key={option.id}
-              className="inline-flex max-w-32 items-center gap-1 rounded-full border border-surface-border px-1.5 py-px text-[11px]"
+              className="inline-flex max-w-32 items-center gap-1 rounded-full border border-surface-border px-1.5 py-px text-micro"
             >
               <span className="size-2 shrink-0 rounded-full" style={{ backgroundColor: option.color }} />
               <span className="truncate">{option.name}</span>
+            </span>
+          ))}
+        </span>
+      );
+    }
+    case "actor":
+    case "multi_actor":
+      return (
+        <ActorPropertyDisplay
+          value={value}
+          emptyLabel={
+            <span className="text-muted-foreground">
+              {t(($) => $.pickers.custom_property.empty)}
+            </span>
+          }
+        />
+      );
+    case "multi_text":
+    case "multi_url": {
+      const items = Array.isArray(value) ? value : [];
+      if (items.length === 0) {
+        return (
+          <span className="text-muted-foreground">
+            {t(($) => $.pickers.custom_property.empty)}
+          </span>
+        );
+      }
+      return (
+        <span className="flex min-w-0 flex-wrap items-center gap-1">
+          {items.map((item) => (
+            <span
+              key={item}
+              className="inline-flex max-w-48 items-center gap-1 rounded-full border border-surface-border px-1.5 py-px text-micro"
+            >
+              {property.type === "multi_url" && (
+                <ExternalLink className="size-2.5 shrink-0 text-muted-foreground" />
+              )}
+              <span className="truncate">{item}</span>
             </span>
           ))}
         </span>
@@ -478,7 +749,7 @@ export function CustomPropertyValueDisplay({
         <span className="flex items-center gap-1.5">
           <CalendarDays className="h-3.5 w-3.5 text-muted-foreground" />
           {typeof value === "string"
-            ? formatDateOnly(value, { month: "short", day: "numeric" }, "en-US")
+            ? formatDateOnly(value, { month: "short", day: "numeric" }, locale)
             : String(value)}
         </span>
       );

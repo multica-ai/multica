@@ -11,10 +11,6 @@ import {
   type RendererRouteContextInput,
 } from "../shared/renderer-route-context";
 import {
-  DIAGNOSTICS_CONTROL_CHANNEL,
-  type DiagnosticsControl,
-} from "../shared/diagnostics-control";
-import {
   isNavigationGesture,
   NAVIGATION_GESTURE_CHANNEL,
   type NavigationGesture,
@@ -30,7 +26,10 @@ import type {
 } from "../shared/daemon-types";
 import {
   MAIN_RENDERER_CHANNEL_STATE_CHANNEL,
+  parseTabSelectionShortcutKey,
+  TAB_SELECTION_SHORTCUT_CHANNEL,
   type MainRendererMessageChannel,
+  type TabSelectionShortcutKey,
 } from "../shared/main-renderer-messages";
 
 // Synchronously fetch app metadata from main at preload time so the renderer
@@ -206,10 +205,6 @@ const desktopAPI = {
   /** Report the renderer's memory-router path for recovery diagnostics. */
   setRendererRouteContext: (context: RendererRouteContextInput) =>
     ipcRenderer.send(RENDERER_ROUTE_CONTEXT_CHANNEL, context),
-  /** Publish the server-driven diagnostics flags. The main process starts
-   *  fail-closed and only enables hang stack capture once this says so. */
-  setDiagnosticsControl: (control: DiagnosticsControl) =>
-    ipcRenderer.send(DIAGNOSTICS_CONTROL_CHANNEL, control),
   /** Open the OS folder picker and return the chosen absolute path. */
   pickDirectory: (defaultPath?: string) =>
     ipcRenderer.invoke("local-directory:pick", defaultPath),
@@ -226,6 +221,23 @@ const desktopAPI = {
       ipcRenderer.removeListener("tab:close-active", handler);
     };
   },
+  /** Listen for Cmd/Ctrl+, requests to open Settings. Only the main window
+   *  subscribes — main delivers the chord there even when it was pressed in
+   *  an issue window, because Settings is a tab. Returns an unsubscribe fn. */
+  onOpenSettings: (callback: () => void) =>
+    subscribeToMainRendererChannel("settings:open", () => callback()),
+  /** Listen for fixed Cmd/Ctrl+1..9 tab-selection requests. Only the main
+   *  window subscribes; main routes requests there from any focused window. */
+  onSelectTabShortcut: (
+    callback: (key: TabSelectionShortcutKey) => void,
+  ) =>
+    subscribeToMainRendererChannel<unknown>(
+      TAB_SELECTION_SHORTCUT_CHANNEL,
+      (payload) => {
+        const key = parseTabSelectionShortcutKey(payload);
+        if (key !== null) callback(key);
+      },
+    ),
   /** Ask the main process to close the window (used after closing the last tab). */
   closeWindow: () => ipcRenderer.send("window:close"),
   /** Open a validated issue-detail route in a dedicated native window. */

@@ -1,11 +1,18 @@
-import { queryOptions, useQuery } from "@tanstack/react-query";
+import type { InfiniteData, QueryClient } from "@tanstack/react-query";
+import type { ArchivedInboxPage } from "../types/inbox";
+import { EMPTY_INBOX_FILTERS, type ArchivedInboxFilters } from "./filter-store";
+import { infiniteQueryOptions, queryOptions, useQuery } from "@tanstack/react-query";
 import { api } from "../api";
 import type { InboxItem, InboxWorkspaceUnread } from "../types";
+import { focusManager } from "@tanstack/react-query";
 
 export const inboxKeys = {
   all: (wsId: string) => ["inbox", wsId] as const,
   list: (wsId: string) => [...inboxKeys.all(wsId), "list"] as const,
   archived: (wsId: string) => [...inboxKeys.all(wsId), "archived"] as const,
+  pages: (wsId: string) => [...inboxKeys.archived(wsId), "pages"] as const,
+  lookup: (wsId: string) => [...inboxKeys.archived(wsId), "lookup"] as const,
+  facets: (wsId: string) => [...inboxKeys.all(wsId), "archived-facets"] as const,
   // Account-level (not workspace-scoped): a single shared cache entry that
   // holds unread counts for every workspace the user belongs to.
   unreadSummary: () => ["inbox", "unread-summary"] as const,
@@ -19,11 +26,9 @@ export function inboxListOptions(wsId: string) {
 }
 
 /**
- * Archived notifications, backing the inbox's "Archived" sub-view. A separate
- * cache entry from the main list rather than one flat cache split locally
- * (which is what chat does): the archive grows without end, so it is fetched
- * from its own capped endpoint, and the server — not the client — decides
- * which issues belong in which list.
+ * @deprecated Legacy array endpoint, capped at 200 groups. New archive
+ * consumers must use archivedInboxPagesOptions for the complete archive.
+ * Retained for compatibility with legacy cache consumers.
  */
 export function archivedInboxListOptions(wsId: string) {
   return queryOptions({
@@ -32,16 +37,92 @@ export function archivedInboxListOptions(wsId: string) {
   });
 }
 
+// Lists the archived dimensions explicitly, so an `idleOnly` carried in from
+// the active inbox never changes the key or refetches the archive.
+function normalizedInboxFilters(filters: ArchivedInboxFilters): ArchivedInboxFilters {
+  return { statuses: [...filters.statuses].sort(), priorities: [...filters.priorities].sort(),
+    actors: [...filters.actors].sort(), unreadOnly: filters.unreadOnly };
+}
+
+export function archivedInboxPagesOptions(wsId: string, filters: ArchivedInboxFilters) {
+  return infiniteQueryOptions({
+    queryKey: [...inboxKeys.pages(wsId), normalizedInboxFilters(filters)],
+    initialPageParam: null as string | null,
+    queryFn: ({ pageParam, signal }) => api.listArchivedInboxPage(filters, { cursor: pageParam, signal }),
+    getNextPageParam: (page) => page.nextCursor ?? undefined,
+    retry: false,
+  });
+}
+
+export function archivedInboxLookupOptions(wsId: string, groupId: string, filters: ArchivedInboxFilters = EMPTY_INBOX_FILTERS) {
+  return queryOptions({
+    queryKey: [...inboxKeys.lookup(wsId), groupId, normalizedInboxFilters(filters)],
+    queryFn: ({ signal }) => api.listArchivedInboxPage(filters, { groupId, signal }),
+    enabled: !!groupId,
+    retry: false,
+  });
+}
+
+export function archivedInboxFacetsOptions(wsId: string, filters: ArchivedInboxFilters) {
+  return queryOptions({
+    queryKey: [...inboxKeys.facets(wsId), normalizedInboxFilters(filters)],
+    queryFn: ({ signal }) => api.getArchivedInboxFacets(filters, signal),
+    retry: false,
+  });
+}
+
+export type ArchivedInboxCache = InboxItem[] | ArchivedInboxPage | InfiniteData<ArchivedInboxPage>;
+
+export function mapArchivedInboxCache(data: ArchivedInboxCache, patch: (items: InboxItem[]) => InboxItem[]): ArchivedInboxCache {
+  if (Array.isArray(data)) return patch(data);
+  if ("pages" in data) return { ...data, pages: data.pages.map((page) => ({ ...page, items: patch(page.items) })) };
+  return { ...data, items: patch(data.items) };
+}
+
+export function patchArchivedInboxCaches(qc: QueryClient, wsId: string, patch: (items: InboxItem[]) => InboxItem[]) {
+  const snapshot = qc.getQueriesData<ArchivedInboxCache>({ queryKey: inboxKeys.archived(wsId) });
+  for (const [key, data] of snapshot) {
+    if (data) qc.setQueryData(key, mapArchivedInboxCache(data, patch));
+  }
+  return snapshot;
+}
+
 /**
  * Cross-workspace unread inbox summary. One cache entry shared across all
  * workspaces — the data is account-level, so switching workspaces does not
  * refetch it; only the derived "is this for another workspace" view changes.
+ *
+ * Visibility gating is the default, including for direct observers such as
+ * the search palette. `refetchOnWindowFocus` re-reads an invalidated summary
+ * once when the page is shown again; with `staleTime: Infinity` a page that
+ * missed no event is not stale and makes no request. The dock badge overrides
+ * `enabled` through `inboxUnreadSummaryEnabled` to stay live while hidden.
  */
 export function inboxUnreadSummaryOptions() {
   return queryOptions({
     queryKey: inboxKeys.unreadSummary(),
     queryFn: () => api.getInboxUnreadSummary(),
+    enabled: () => focusManager.isFocused(),
+    refetchOnWindowFocus: true,
   });
+}
+
+/**
+ * `enabled` for an observer of the unread summary: fetch only while the page
+ * is on screen. Every open tab is its own client and receives every inbox
+ * event, so each event cost one summary request per open tab, and each request
+ * recomputes the newest item per issue over the user's whole active inbox. A
+ * hidden tab renders nothing that reads the summary, and with no enabled
+ * observer left an invalidation marks the query without refetching it.
+ *
+ * `whileHidden` is for a reader that stays on screen while the page is hidden:
+ * the desktop dock badge of a minimized window.
+ */
+export function inboxUnreadSummaryEnabled(
+  wsId: string | null | undefined,
+  { whileHidden = false }: { whileHidden?: boolean } = {},
+) {
+  return () => !!wsId && (whileHidden || focusManager.isFocused());
 }
 
 /**
@@ -68,17 +149,42 @@ export function unreadWorkspaceIds(summary: InboxWorkspaceUnread[]): Set<string>
 }
 
 /**
- * Unread inbox count for the given workspace, aligned with what the inbox
- * list UI renders: archived items excluded, then deduplicated by issue so a
- * single issue with three unread notifications counts once.
+ * Unread inbox count for one workspace within the cross-workspace summary.
+ * A workspace with nothing unread is absent from the response entirely, so a
+ * missing entry means zero rather than "not loaded yet".
  */
-export function useInboxUnreadCount(wsId: string | null | undefined): number {
+export function unreadCountForWorkspace(
+  summary: InboxWorkspaceUnread[],
+  wsId: string | null | undefined,
+): number {
+  if (!wsId) return 0;
+  return summary.find((s) => s.workspace_id === wsId)?.count ?? 0;
+}
+
+/**
+ * Unread inbox count for the given workspace — the number the sidebar nav
+ * badge and the desktop dock badge render.
+ *
+ * Read from the cross-workspace summary, NOT from the inbox list. The summary
+ * is one small server-computed row per workspace and the sidebar already
+ * fetches it for the workspace-switcher dot, so the badge costs no request of
+ * its own; deriving it from `listInbox()` instead downloaded the entire
+ * unbounded inbox on every app start just to render a number (MUL-6967).
+ *
+ * `GET /api/inbox/unread-count` is deliberately not the source: it counts raw
+ * notification rows, while the inbox renders one row per issue. The summary
+ * endpoint applies the same newest-per-issue rule `deduplicateInboxItems`
+ * applies client-side, so this number matches the list the user sees.
+ */
+export function useInboxUnreadCount(
+  wsId: string | null | undefined,
+  options?: { whileHidden?: boolean },
+): number {
   const { data } = useQuery({
-    queryKey: inboxKeys.list(wsId ?? ""),
-    queryFn: () => api.listInbox(),
-    enabled: !!wsId,
-    select: (items: InboxItem[]) =>
-      deduplicateInboxItems(items).filter((i) => !i.read).length,
+    ...inboxUnreadSummaryOptions(),
+    enabled: inboxUnreadSummaryEnabled(wsId, options),
+    select: (summary: InboxWorkspaceUnread[]) =>
+      unreadCountForWorkspace(summary, wsId),
   });
   return data ?? 0;
 }

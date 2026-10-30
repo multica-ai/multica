@@ -30,7 +30,10 @@ jobs:
       - name: Setup Go
         uses: actions/setup-go@v5
         with:
-          go-version-file: server/go.mod
+          # Keep the security floor even when the setup-go manifest lags;
+          # continue accepting newer patches within Go 1.27.
+          go-version: "~1.27.3"
+          check-latest: true
           cache-dependency-path: server/go.sum
 
       - name: Setup pnpm

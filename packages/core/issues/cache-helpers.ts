@@ -1,23 +1,24 @@
 import type {
   Issue,
-  IssueStatus,
+  IssueStatusCategory,
   IssueStatusBucket,
   ListIssuesCache,
 } from "../types";
-import { PAGINATED_STATUSES } from "./queries";
+import { PAGINATED_CATEGORIES } from "./queries";
+import { issueStatusCategory, normalizeStatusPatch } from "./status-category";
 
 const EMPTY_BUCKET: IssueStatusBucket = { issues: [], total: 0 };
 
 export function getBucket(
   resp: ListIssuesCache,
-  status: IssueStatus,
+  status: IssueStatusCategory,
 ): IssueStatusBucket {
   return resp.byStatus[status] ?? EMPTY_BUCKET;
 }
 
 export function setBucket(
   resp: ListIssuesCache,
-  status: IssueStatus,
+  status: IssueStatusCategory,
   bucket: IssueStatusBucket,
 ): ListIssuesCache {
   return { ...resp, byStatus: { ...resp.byStatus, [status]: bucket } };
@@ -27,10 +28,10 @@ export function setBucket(
 export function findIssueLocation(
   resp: ListIssuesCache,
   id: string,
-): { status: IssueStatus; issue: Issue } | null {
-  for (const status of PAGINATED_STATUSES) {
+): { status: IssueStatusCategory; issue: Issue } | null {
+  for (const status of PAGINATED_CATEGORIES) {
     const bucket = resp.byStatus[status];
-    const found = bucket?.issues.find((i) => i.id === id);
+    const found = bucket?.issues.find((i: Issue) => i.id === id);
     if (found) return { status, issue: found };
   }
   return null;
@@ -41,9 +42,15 @@ export function addIssueToBuckets(
   resp: ListIssuesCache,
   issue: Issue,
 ): ListIssuesCache {
-  const bucket = getBucket(resp, issue.status);
-  if (bucket.issues.some((i) => i.id === issue.id)) return resp;
-  return setBucket(resp, issue.status, {
+  // An unresolvable custom status has no column to place the issue in. The
+  // caller is responsible for invalidating instead — silently dropping it would
+  // leave the board missing a row that exists on the server. Callers use
+  // `issueStatusCategory(issue) === null` to detect this before calling.
+  const category = issueStatusCategory(issue);
+  if (!category) return resp;
+  const bucket = getBucket(resp, category);
+  if (bucket.issues.some((i: Issue) => i.id === issue.id)) return resp;
+  return setBucket(resp, category, {
     issues: [...bucket.issues, issue],
     total: bucket.total + 1,
   });
@@ -71,8 +78,8 @@ export function removeIssueFromBuckets(
  */
 export function moveBucketTotal(
   resp: ListIssuesCache,
-  from: IssueStatus,
-  to: IssueStatus,
+  from: IssueStatusCategory,
+  to: IssueStatusCategory,
 ): ListIssuesCache {
   if (from === to) return resp;
   const fromBucket = getBucket(resp, from);
@@ -91,7 +98,7 @@ export function moveBucketTotal(
  */
 export function decrementBucketTotal(
   resp: ListIssuesCache,
-  status: IssueStatus,
+  status: IssueStatusCategory,
 ): ListIssuesCache {
   const bucket = getBucket(resp, status);
   return setBucket(resp, status, {
@@ -126,44 +133,79 @@ export function insertByPosition(issues: Issue[], issue: Issue): Issue[] {
 export function patchIssueInBuckets(
   resp: ListIssuesCache,
   id: string,
-  patch: Partial<Issue>,
+  rawPatch: Partial<Issue>,
 ): ListIssuesCache {
   const loc = findIssueLocation(resp, id);
   if (!loc) return resp;
+  // Normalized so the merged entity's status_category matches the bucket it
+  // lands in; a bare spread would keep the previous category. (MUL-6243)
+  const patch = normalizeStatusPatch(rawPatch);
   const merged: Issue = { ...loc.issue, ...patch };
-  const nextStatus = patch.status ?? loc.status;
 
-  if (nextStatus === loc.status) {
+  // Resolve the DESTINATION category before comparing anything. `loc.status` is
+  // a CATEGORY (the bucket key) while `patch.status` is a status KEY, so
+  // comparing them directly treats a same-category key change — `in_review` to
+  // a custom `human_review` — as a cross-bucket move. That path then deletes
+  // from and inserts into the same bucket using a pre-delete snapshot, leaving
+  // the card duplicated and the total one too high.
+  //
+  // Resolved from `patch` alone, never from `merged`: merged inherits the
+  // PREVIOUS issue's status_category, which would silently keep the old column
+  // after a real move.
+  const nextCategory =
+    patch.status === undefined
+      ? loc.status
+      : issueStatusCategory({ status: patch.status, status_category: patch.status_category });
+
+  // Unresolvable custom status: no bucket to move it to. Leave the cache alone
+  // and let the caller invalidate — see patchNeedsInvalidation.
+  if (!nextCategory) return resp;
+
+  if (nextCategory === loc.status) {
     const bucket = getBucket(resp, loc.status);
     const positionChanged =
       patch.position !== undefined && patch.position !== loc.issue.position;
     if (!positionChanged) {
-      // Plain field update (labels, metadata, title, …): keep the slot so a
-      // remote edit never reorders an otherwise-untouched column.
+      // Plain field update (labels, metadata, title, a same-category status
+      // key change …): keep the slot so a remote edit never reorders an
+      // otherwise-untouched column, and never change the total.
       return setBucket(resp, loc.status, {
         ...bucket,
-        issues: bucket.issues.map((i) => (i.id === id ? merged : i)),
+        issues: bucket.issues.map((i: Issue) => (i.id === id ? merged : i)),
       });
     }
     // Same-column reorder: lift the card out and re-insert at its new slot.
     return setBucket(resp, loc.status, {
       ...bucket,
       issues: insertByPosition(
-        bucket.issues.filter((i) => i.id !== id),
+        bucket.issues.filter((i: Issue) => i.id !== id),
         merged,
       ),
     });
   }
 
   const fromBucket = getBucket(resp, loc.status);
-  const toBucket = getBucket(resp, nextStatus);
+  const toBucket = getBucket(resp, nextCategory);
   let next = setBucket(resp, loc.status, {
-    issues: fromBucket.issues.filter((i) => i.id !== id),
+    issues: fromBucket.issues.filter((i: Issue) => i.id !== id),
     total: Math.max(0, fromBucket.total - 1),
   });
-  next = setBucket(next, nextStatus, {
+  next = setBucket(next, nextCategory, {
     issues: insertByPosition(toBucket.issues, merged),
     total: toBucket.total + 1,
   });
   return next;
+}
+
+/**
+ * True when a status patch names a status this client cannot resolve to a
+ * category, so `patchIssueInBuckets` will no-op. Callers must invalidate rather
+ * than treat that as "nothing to do" — the row moved on the server, and leaving
+ * the cache untouched drifts the column and its total permanently.
+ */
+export function patchNeedsInvalidation(patch: Partial<Issue>): boolean {
+  if (patch.status === undefined) return false;
+  return (
+    issueStatusCategory({ status: patch.status, status_category: patch.status_category }) === null
+  );
 }

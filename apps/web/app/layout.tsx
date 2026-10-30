@@ -5,13 +5,16 @@ import { ThemeProvider } from "@/components/theme-provider";
 import { Toaster } from "@multica/ui/components/ui/sonner";
 import { cn } from "@multica/ui/lib/utils";
 import { WebProviders } from "@/components/web-providers";
-import type { SupportedLocale } from "@multica/core/i18n";
 import { RESOURCES } from "@multica/views/locales";
 import { getRequestLocale } from "@/lib/request-locale";
+import { HTML_LANG } from "@/lib/html-lang";
+import { SITE_TITLE, TITLE_TEMPLATE } from "@/platform/document-title";
 import {
   resolveBrowserApiBaseUrl,
   resolveBrowserWsUrl,
 } from "@/config/runtime-urls";
+import { resolveGoogleAnalyticsId } from "@/config/google-analytics";
+import { GoogleAnalytics } from "@/components/google-analytics";
 import "./globals.css";
 
 // Inter is the Latin UI face. next/font produces a hashed family (`__Inter_xxx`)
@@ -29,10 +32,16 @@ import "./globals.css";
 // italic face the ~20 semantic italic labels (chat empty states, model-picker's
 // "Managed by runtime", dashboard/squad placeholders) plus every markdown <em> and
 // blockquote rendered as browser-synthesized oblique. Keep in sync with desktop's
-// `@fontsource-variable/inter/wght-italic.css` import.
+// `@fontsource-variable/inter/opsz-italic.css` import.
+//
+// The `opsz` axis lets Inter draw each size with its own cut: 14px and below
+// keep the open text design, while titles and headings get Inter Display's
+// tighter spacing and finer details automatically (`font-optical-sizing: auto`
+// is the CSS default). Keep in sync with desktop's `opsz.css` import.
 const inter = Inter({
   subsets: ["latin"],
   style: ["normal", "italic"],
+  axes: ["opsz"],
   variable: "--font-inter",
 });
 // Mono font has no explicit CJK fallback: CJK chars in code blocks are inherently
@@ -74,14 +83,30 @@ export const viewport: Viewport = {
 export const metadata: Metadata = {
   metadataBase: new URL("https://www.multica.ai"),
   title: {
-    default: "Multica — Project Management for Human + Agent Teams",
-    template: "%s | Multica",
+    default: SITE_TITLE,
+    template: TITLE_TEMPLATE,
   },
   description:
-    "Open-source platform that turns coding agents into real teammates. Assign tasks, track progress, compound skills.",
+    "Source-available platform that turns coding agents into real teammates. Assign tasks, track progress, compound skills.",
   icons: {
     icon: [{ url: "/favicon.svg", type: "image/svg+xml" }],
     shortcut: ["/favicon.svg"],
+    // iOS never reads the manifest's icons for the home screen; it needs its
+    // own opaque, full-bleed square and rounds the corners itself.
+    apple: [{ url: "/icons/apple-touch-icon.png", sizes: "180x180" }],
+  },
+  // Home-screen behaviour: launch without browser chrome, and label the icon
+  // "Multica" rather than the long SEO <title>. `capable` renders the
+  // standardised `mobile-web-app-capable` tag — Next 16 no longer emits the
+  // deprecated apple-prefixed spelling, so iOS standalone rides on the
+  // manifest's `display` instead (honoured since iOS 16.4).
+  appleWebApp: {
+    capable: true,
+    title: "Multica",
+    // `default` keeps the web view below the status bar. Going edge-to-edge
+    // (`black-translucent` + viewport-fit=cover) needs env(safe-area-inset-*)
+    // padding, which no surface in the app has yet.
+    statusBarStyle: "default",
   },
   openGraph: {
     type: "website",
@@ -102,17 +127,6 @@ export const metadata: Metadata = {
   },
 };
 
-// HTML lang attribute uses BCP-47 region tags that screen readers and font
-// stacks recognize widely. i18next keeps `zh-Hans` as its internal locale
-// (script subtag is what we actually translate against), but the html element
-// expects a region-flavoured tag for accessibility tooling and CJK fallback.
-const HTML_LANG: Record<SupportedLocale, string> = {
-  en: "en",
-  "zh-Hans": "zh-CN",
-  ko: "ko-KR",
-  ja: "ja-JP",
-};
-
 export default async function RootLayout({
   children,
 }: {
@@ -122,6 +136,8 @@ export default async function RootLayout({
   const resources = { [locale]: RESOURCES[locale] };
   const apiBaseUrl = resolveBrowserApiBaseUrl(process.env);
   const wsUrl = resolveBrowserWsUrl(process.env);
+  // Opt-in Google Analytics: omitted entirely unless GOOGLE_ANALYTICS_ID is set.
+  const googleAnalyticsId = resolveGoogleAnalyticsId(process.env);
 
   return (
     <html
@@ -159,6 +175,7 @@ export default async function RootLayout({
           </WebProviders>
           <Toaster />
         </ThemeProvider>
+        {googleAnalyticsId && <GoogleAnalytics measurementId={googleAnalyticsId} />}
       </body>
     </html>
   );

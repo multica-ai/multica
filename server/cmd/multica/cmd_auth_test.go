@@ -1,11 +1,17 @@
 package main
 
 import (
+	"encoding/json"
+	"fmt"
 	"net"
+	"net/http"
+	"net/http/httptest"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
+	"github.com/multica-ai/multica/server/internal/testutil"
 	"github.com/spf13/cobra"
 )
 
@@ -17,11 +23,30 @@ func TestMain(m *testing.M) {
 		"MULTICA_DAEMON_PORT",
 		"MULTICA_WORKSPACE_ID",
 		"MULTICA_SERVER_URL",
+		"MULTICA_TASK_CONFIG_ROOT",
 	} {
 		os.Unsetenv(key)
 	}
-	os.Exit(m.Run())
+
+	// Redirect both home environment variables to one scratch directory for the
+	// whole binary. On Windows os.UserHomeDir reads USERPROFILE, not HOME, so a
+	// test that redirects only HOME still resolves ~/.multica against the real
+	// home — which is how a full-suite run wrote SaveCLIConfig fixtures over a
+	// real default-profile config.json. Process-wide redirection isolates tests
+	// that forget their own redirect on every platform; per-test t.Setenv
+	// overrides still take precedence.
+	scratchHome, err := testutil.IsolateUserHome("multica-cli-tests-home-")
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "isolate cmd/multica test home: %v\n", err)
+		os.Exit(1)
+	}
+
+	code := m.Run()
+	_ = os.RemoveAll(scratchHome)
+	os.Exit(code)
 }
+
+var redirectTestHome = testutil.RedirectUserHome
 
 // testCmd returns a minimal cobra.Command with the --profile persistent flag
 // registered, matching the rootCmd setup used in production.
@@ -323,6 +348,145 @@ func TestLoginTokenFlagParsing(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestRunAuthStatusTaskContextDoesNotPrintCredential(t *testing.T) {
+	const fakeTaskToken = "mat_task_status_sentinel"
+	redirectTestHome(t, t.TempDir())
+	t.Setenv("MULTICA_AGENT_ID", "agent-test")
+	t.Setenv("MULTICA_TASK_ID", "task-test")
+	t.Setenv("MULTICA_TOKEN", fakeTaskToken)
+	t.Setenv("MULTICA_TASK_CONFIG_ROOT", filepath.Join(t.TempDir(), "task-multica"))
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/me" {
+			http.NotFound(w, r)
+			return
+		}
+		if got := r.Header.Get("Authorization"); got != "Bearer "+fakeTaskToken {
+			t.Errorf("Authorization = %q, want fake task token", got)
+		}
+		_ = json.NewEncoder(w).Encode(map[string]string{"name": "Task Agent", "email": "task@example.test"})
+	}))
+	defer srv.Close()
+	t.Setenv("MULTICA_SERVER_URL", srv.URL)
+
+	stderr := captureStderr(t)
+	if err := runAuthStatus(testCmd(), nil); err != nil {
+		stderr.restore()
+		t.Fatalf("runAuthStatus: %v", err)
+	}
+	out := stderr.read()
+	for _, forbidden := range []string{fakeTaskToken, fakeTaskToken[:12], "Token:"} {
+		if strings.Contains(out, forbidden) {
+			t.Fatalf("auth status exposed credential material %q:\n%s", forbidden, out)
+		}
+	}
+	for _, want := range []string{"Server:", "Task Agent", "task@example.test"} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("auth status output missing %q:\n%s", want, out)
+		}
+	}
+}
+
+func TestRunAuthStatusTaskContextRequiresTaskToken(t *testing.T) {
+	ownerHome := t.TempDir()
+	redirectTestHome(t, ownerHome)
+	t.Setenv("MULTICA_AGENT_ID", "agent-test")
+	t.Setenv("MULTICA_TASK_ID", "task-test")
+	t.Setenv("MULTICA_TASK_CONFIG_ROOT", filepath.Join(t.TempDir(), "task-multica"))
+
+	ownerPath := filepath.Join(ownerHome, ".multica", "config.json")
+	if err := os.MkdirAll(filepath.Dir(ownerPath), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	ownerBytes := []byte("{\n  \"server_url\": \"https://owner.invalid\",\n  \"token\": \"mul_owner_sentinel\"\n}\n")
+	if err := os.WriteFile(ownerPath, ownerBytes, 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	requestCount := 0
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		requestCount++
+		_ = json.NewEncoder(w).Encode(map[string]string{"name": "Unexpected", "email": "unexpected@example.test"})
+	}))
+	defer srv.Close()
+	t.Setenv("MULTICA_SERVER_URL", srv.URL)
+
+	for _, tc := range []struct {
+		name  string
+		token string
+	}{
+		{name: "missing token", token: ""},
+		{name: "human token", token: "mul_owner_sentinel"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Setenv("MULTICA_TOKEN", tc.token)
+			requestCount = 0
+			stderr := captureStderr(t)
+			err := runAuthStatus(testCmd(), nil)
+			stderr.restore()
+			out := stderr.read()
+			if err == nil || !strings.Contains(err.Error(), "task-scoped mat_ token") {
+				t.Fatalf("runAuthStatus error = %v, want task token requirement", err)
+			}
+			if requestCount != 0 {
+				t.Fatalf("auth status made %d request(s) without a task token", requestCount)
+			}
+			for _, forbidden := range []string{tc.token, "Token:"} {
+				if forbidden != "" && strings.Contains(out, forbidden) {
+					t.Fatalf("auth status exposed credential material %q: %s", forbidden, out)
+				}
+			}
+		})
+	}
+
+	after, err := os.ReadFile(ownerPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(after) != string(ownerBytes) {
+		t.Fatalf("owner config content changed: got %q", after)
+	}
+}
+
+func TestHumanAuthCommandsFailClosedInTaskContext(t *testing.T) {
+	ownerHome := t.TempDir()
+	redirectTestHome(t, ownerHome)
+	t.Setenv("MULTICA_AGENT_ID", "agent-test")
+	t.Setenv("MULTICA_TASK_ID", "task-test")
+	t.Setenv("MULTICA_TOKEN", "mat_task_sentinel")
+	t.Setenv("MULTICA_SERVER_URL", "https://task.invalid")
+	t.Setenv("MULTICA_TASK_CONFIG_ROOT", filepath.Join(t.TempDir(), "task-multica"))
+
+	ownerPath := filepath.Join(ownerHome, ".multica", "config.json")
+	if err := os.MkdirAll(filepath.Dir(ownerPath), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	ownerBytes := []byte("{\n  \"server_url\": \"https://owner.invalid\",\n  \"token\": \"mul_owner_sentinel\"\n}\n")
+	if err := os.WriteFile(ownerPath, ownerBytes, 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	loginCmd := testCmd()
+	loginCmd.Flags().String("token", "mul_fake_login", "")
+	_ = loginCmd.Flags().Set("token", "mul_fake_login")
+	for name, run := range map[string]func() error{
+		"login":  func() error { return runAuthLogin(loginCmd, nil) },
+		"logout": func() error { return runAuthLogout(testCmd(), nil) },
+	} {
+		err := run()
+		if err == nil || !strings.Contains(err.Error(), "not available inside a daemon-managed task") {
+			t.Fatalf("%s error = %v, want task-context guard", name, err)
+		}
+	}
+	after, err := os.ReadFile(ownerPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(after) != string(ownerBytes) {
+		t.Fatalf("owner config content changed: got %q", after)
 	}
 }
 

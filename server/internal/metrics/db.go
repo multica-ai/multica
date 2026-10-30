@@ -6,7 +6,7 @@ import (
 )
 
 type DBCollector struct {
-	pool *pgxpool.Pool
+	pools []namedDBPool
 
 	acquiredConns         *prometheus.Desc
 	idleConns             *prometheus.Desc
@@ -23,28 +23,40 @@ type DBCollector struct {
 	maxLifetimeDestroyCnt *prometheus.Desc
 }
 
-func NewDBCollector(pool *pgxpool.Pool) *DBCollector {
-	return &DBCollector{
-		pool: pool,
+type namedDBPool struct {
+	role string
+	pool *pgxpool.Pool
+}
 
-		acquiredConns:         newDBDesc("acquired_conns", "Currently acquired PostgreSQL connections."),
-		idleConns:             newDBDesc("idle_conns", "Currently idle PostgreSQL connections."),
-		maxConns:              newDBDesc("max_conns", "Maximum PostgreSQL connections allowed by the pool."),
-		totalConns:            newDBDesc("total_conns", "Total PostgreSQL connections currently in the pool."),
-		constructingConns:     newDBDesc("constructing_conns", "PostgreSQL connections currently being established."),
-		acquireCount:          newDBDesc("acquire_count", "Total successful PostgreSQL connection acquires."),
-		acquireDuration:       newDBDesc("acquire_duration_seconds_total", "Total time spent acquiring PostgreSQL connections."),
-		emptyAcquireCount:     newDBDesc("empty_acquire_count", "Total acquires that waited because the PostgreSQL pool was empty."),
-		emptyAcquireWaitTime:  newDBDesc("empty_acquire_wait_seconds_total", "Total time spent waiting for PostgreSQL connections when the pool was empty."),
-		canceledAcquireCount:  newDBDesc("canceled_acquire_count", "Total canceled PostgreSQL connection acquires."),
-		newConnsCount:         newDBDesc("new_conns_count", "Total PostgreSQL connections created by the pool."),
-		maxIdleDestroyCount:   newDBDesc("max_idle_destroy_count", "Total PostgreSQL connections destroyed due to idle limits."),
-		maxLifetimeDestroyCnt: newDBDesc("max_lifetime_destroy_count", "Total PostgreSQL connections destroyed due to max lifetime."),
+func NewDBCollector(primary, replica *pgxpool.Pool) *DBCollector {
+	pools := make([]namedDBPool, 0, 2)
+	if primary != nil {
+		pools = append(pools, namedDBPool{role: "primary", pool: primary})
+	}
+	if replica != nil {
+		pools = append(pools, namedDBPool{role: "replica", pool: replica})
+	}
+	return &DBCollector{
+		pools: pools,
+
+		acquiredConns:         newDBDesc("acquired_conns", "Number of acquired connections in each PostgreSQL pool."),
+		idleConns:             newDBDesc("idle_conns", "Number of idle connections in each PostgreSQL pool."),
+		maxConns:              newDBDesc("max_conns", "Maximum connections configured for each PostgreSQL pool."),
+		totalConns:            newDBDesc("total_conns", "Number of current connections in each PostgreSQL pool."),
+		constructingConns:     newDBDesc("constructing_conns", "Number of connections being established in each PostgreSQL pool."),
+		acquireCount:          newDBDesc("acquire_count", "Total successful connection acquisitions from each PostgreSQL pool."),
+		acquireDuration:       newDBDesc("acquire_duration_seconds_total", "Total time spent acquiring connections from each PostgreSQL pool."),
+		emptyAcquireCount:     newDBDesc("empty_acquire_count", "Total acquisitions that waited for an available connection in each PostgreSQL pool."),
+		emptyAcquireWaitTime:  newDBDesc("empty_acquire_wait_seconds_total", "Total time spent waiting for an available connection in each PostgreSQL pool."),
+		canceledAcquireCount:  newDBDesc("canceled_acquire_count", "Total canceled connection acquisitions from each PostgreSQL pool."),
+		newConnsCount:         newDBDesc("new_conns_count", "Total connections created in each PostgreSQL pool."),
+		maxIdleDestroyCount:   newDBDesc("max_idle_destroy_count", "Total connections destroyed by each PostgreSQL pool after exceeding the idle limit."),
+		maxLifetimeDestroyCnt: newDBDesc("max_lifetime_destroy_count", "Total connections destroyed by each PostgreSQL pool after exceeding the maximum lifetime."),
 	}
 }
 
 func newDBDesc(name, help string) *prometheus.Desc {
-	return prometheus.NewDesc("multica_db_pool_"+name, help, nil, nil)
+	return prometheus.NewDesc("multica_db_pool_"+name, help, []string{"role"}, nil)
 }
 
 func (c *DBCollector) Describe(ch chan<- *prometheus.Desc) {
@@ -68,21 +80,23 @@ func (c *DBCollector) Describe(ch chan<- *prometheus.Desc) {
 }
 
 func (c *DBCollector) Collect(ch chan<- prometheus.Metric) {
-	if c.pool == nil {
-		return
+	for _, namedPool := range c.pools {
+		collectDBPool(ch, namedPool.role, namedPool.pool.Stat(), c)
 	}
-	stat := c.pool.Stat()
-	ch <- prometheus.MustNewConstMetric(c.acquiredConns, prometheus.GaugeValue, float64(stat.AcquiredConns()))
-	ch <- prometheus.MustNewConstMetric(c.idleConns, prometheus.GaugeValue, float64(stat.IdleConns()))
-	ch <- prometheus.MustNewConstMetric(c.maxConns, prometheus.GaugeValue, float64(stat.MaxConns()))
-	ch <- prometheus.MustNewConstMetric(c.totalConns, prometheus.GaugeValue, float64(stat.TotalConns()))
-	ch <- prometheus.MustNewConstMetric(c.constructingConns, prometheus.GaugeValue, float64(stat.ConstructingConns()))
-	ch <- prometheus.MustNewConstMetric(c.acquireCount, prometheus.CounterValue, float64(stat.AcquireCount()))
-	ch <- prometheus.MustNewConstMetric(c.acquireDuration, prometheus.CounterValue, stat.AcquireDuration().Seconds())
-	ch <- prometheus.MustNewConstMetric(c.emptyAcquireCount, prometheus.CounterValue, float64(stat.EmptyAcquireCount()))
-	ch <- prometheus.MustNewConstMetric(c.emptyAcquireWaitTime, prometheus.CounterValue, stat.EmptyAcquireWaitTime().Seconds())
-	ch <- prometheus.MustNewConstMetric(c.canceledAcquireCount, prometheus.CounterValue, float64(stat.CanceledAcquireCount()))
-	ch <- prometheus.MustNewConstMetric(c.newConnsCount, prometheus.CounterValue, float64(stat.NewConnsCount()))
-	ch <- prometheus.MustNewConstMetric(c.maxIdleDestroyCount, prometheus.CounterValue, float64(stat.MaxIdleDestroyCount()))
-	ch <- prometheus.MustNewConstMetric(c.maxLifetimeDestroyCnt, prometheus.CounterValue, float64(stat.MaxLifetimeDestroyCount()))
+}
+
+func collectDBPool(ch chan<- prometheus.Metric, role string, stat *pgxpool.Stat, c *DBCollector) {
+	ch <- prometheus.MustNewConstMetric(c.acquiredConns, prometheus.GaugeValue, float64(stat.AcquiredConns()), role)
+	ch <- prometheus.MustNewConstMetric(c.idleConns, prometheus.GaugeValue, float64(stat.IdleConns()), role)
+	ch <- prometheus.MustNewConstMetric(c.maxConns, prometheus.GaugeValue, float64(stat.MaxConns()), role)
+	ch <- prometheus.MustNewConstMetric(c.totalConns, prometheus.GaugeValue, float64(stat.TotalConns()), role)
+	ch <- prometheus.MustNewConstMetric(c.constructingConns, prometheus.GaugeValue, float64(stat.ConstructingConns()), role)
+	ch <- prometheus.MustNewConstMetric(c.acquireCount, prometheus.CounterValue, float64(stat.AcquireCount()), role)
+	ch <- prometheus.MustNewConstMetric(c.acquireDuration, prometheus.CounterValue, stat.AcquireDuration().Seconds(), role)
+	ch <- prometheus.MustNewConstMetric(c.emptyAcquireCount, prometheus.CounterValue, float64(stat.EmptyAcquireCount()), role)
+	ch <- prometheus.MustNewConstMetric(c.emptyAcquireWaitTime, prometheus.CounterValue, stat.EmptyAcquireWaitTime().Seconds(), role)
+	ch <- prometheus.MustNewConstMetric(c.canceledAcquireCount, prometheus.CounterValue, float64(stat.CanceledAcquireCount()), role)
+	ch <- prometheus.MustNewConstMetric(c.newConnsCount, prometheus.CounterValue, float64(stat.NewConnsCount()), role)
+	ch <- prometheus.MustNewConstMetric(c.maxIdleDestroyCount, prometheus.CounterValue, float64(stat.MaxIdleDestroyCount()), role)
+	ch <- prometheus.MustNewConstMetric(c.maxLifetimeDestroyCnt, prometheus.CounterValue, float64(stat.MaxLifetimeDestroyCount()), role)
 }

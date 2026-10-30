@@ -74,3 +74,10 @@ data/
 .kilo
 .idea
 .gstack/
+
+# Python (agent tooling)
+__pycache__/
+*.pyc
+perf-report/
+# The production example is a tracked template; `.env*` above would hide it.
+!apps/mobile/.env.production.example

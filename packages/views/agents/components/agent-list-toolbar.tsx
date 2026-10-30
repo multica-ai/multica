@@ -7,7 +7,7 @@ import {
   Filter,
   Search,
   X,
-} from "lucide-react";
+} from "@multica/ui/icons";
 import {
   ALL_ACCESS_SCOPES,
   effectiveAccessScope,
@@ -25,6 +25,7 @@ import {
   type AgentSortField,
 } from "@multica/core/agents/stores";
 import { Button } from "@multica/ui/components/ui/button";
+import { IconButton } from "@multica/ui/components/common/icon-button";
 import { Input } from "@multica/ui/components/ui/input";
 import {
   DropdownMenu,
@@ -53,6 +54,8 @@ import { FILTER_ITEM_CLASS, HoverCheck } from "../../common/hover-check";
 import { availabilityConfig } from "../presence";
 import { useT } from "../../i18n";
 import type { AgentListRow } from "./agents-page";
+import { PAGE_GUTTER } from "../../layout/page-header";
+import { cn } from "@multica/ui/lib/utils";
 
 const COLUMN_KEYS: AgentColumnKey[] = [
   "status",
@@ -198,11 +201,11 @@ export function AgentListToolbar({
   const sortLabel = SORT_LABELS[sortField];
 
   const countBadge = (n: number) => (
-    <span className="ml-auto pl-3 text-xs text-muted-foreground">{n}</span>
+    <span className="ml-auto pl-3 text-caption text-muted-foreground">{n}</span>
   );
 
   return (
-    <div className="h-12 shrink-0 overflow-x-auto px-5 [-webkit-overflow-scrolling:touch]">
+    <div className={cn("h-12 shrink-0 overflow-x-auto [-webkit-overflow-scrolling:touch]", PAGE_GUTTER)}>
       <div className="flex h-full w-max min-w-full items-center justify-between gap-2">
         {/* Left: local search + scope buttons + result count. Scope mixes the
           ownership lens (mine/all) with the archived lifecycle stage. Button
@@ -216,7 +219,7 @@ export function AgentListToolbar({
             onChange={(e) => onSearchChange(e.target.value)}
             aria-label={t(($) => $.page.search_placeholder)}
             placeholder={t(($) => $.page.search_placeholder)}
-            className="h-8 w-56 pl-8 text-sm"
+            className="h-8 w-56 pl-8 text-body"
           />
         </div>
 
@@ -234,7 +237,7 @@ export function AgentListToolbar({
               onClick={() => onScopeChange(s)}
             >
               {SCOPE_LABELS[s]}
-              <span className="tabular-nums text-xs text-muted-foreground/70">
+              <span className="tabular-nums text-caption text-muted-foreground">
                 {scopeCounts[s]}
               </span>
             </Button>
@@ -262,7 +265,7 @@ export function AgentListToolbar({
               {AGENT_SCOPES.map((s) => (
                 <DropdownMenuRadioItem key={s} value={s}>
                   {SCOPE_LABELS[s]}
-                  <span className="ml-2 tabular-nums text-xs text-muted-foreground/70">
+                  <span className="ml-2 tabular-nums text-caption text-muted-foreground">
                     {scopeCounts[s]}
                   </span>
                 </DropdownMenuRadioItem>
@@ -274,7 +277,7 @@ export function AgentListToolbar({
         {(hasActiveFilters || hasSearch) && (
           <span
             title={t(($) => $.toolbar.result_count_title)}
-            className="hidden shrink-0 text-xs tabular-nums text-muted-foreground md:inline"
+            className="hidden shrink-0 text-caption tabular-nums text-muted-foreground md:inline"
           >
             {visibleCount} / {allRows.length}
           </span>
@@ -339,7 +342,7 @@ export function AgentListToolbar({
                   {t(($) => $.toolbar.section_availability)}
                 </span>
                 {filters.availability.length > 0 && (
-                  <span className="text-xs font-medium text-primary">
+                  <span className="text-caption font-medium text-primary">
                     {filters.availability.length}
                   </span>
                 )}
@@ -378,7 +381,7 @@ export function AgentListToolbar({
                   {t(($) => $.toolbar.section_access)}
                 </span>
                 {filters.access.length > 0 && (
-                  <span className="text-xs font-medium text-primary">
+                  <span className="text-caption font-medium text-primary">
                     {filters.access.length}
                   </span>
                 )}
@@ -414,7 +417,7 @@ export function AgentListToolbar({
                   {t(($) => $.toolbar.section_runtime)}
                 </span>
                 {filters.runtimes.length > 0 && (
-                  <span className="text-xs font-medium text-primary">
+                  <span className="text-caption font-medium text-primary">
                     {filters.runtimes.length}
                   </span>
                 )}
@@ -444,7 +447,7 @@ export function AgentListToolbar({
                   {t(($) => $.toolbar.section_owner)}
                 </span>
                 {filters.owners.length > 0 && (
-                  <span className="text-xs font-medium text-primary">
+                  <span className="text-caption font-medium text-primary">
                     {filters.owners.length}
                   </span>
                 )}
@@ -484,7 +487,7 @@ export function AgentListToolbar({
                     {t(($) => $.toolbar.section_model)}
                   </span>
                   {filters.models.length > 0 && (
-                    <span className="text-xs font-medium text-primary">
+                    <span className="text-caption font-medium text-primary">
                       {filters.models.length}
                     </span>
                   )}
@@ -537,7 +540,7 @@ export function AgentListToolbar({
           </Tooltip>
           <PopoverContent align="end" className="w-64 p-0">
             <div className="border-b px-3 py-2.5">
-              <span className="text-xs font-medium text-muted-foreground">
+              <span className="text-caption font-medium text-muted-foreground">
                 {t(($) => $.toolbar.sort_by)}
               </span>
               <div className="mt-2 flex items-center gap-1.5">
@@ -547,7 +550,7 @@ export function AgentListToolbar({
                       <Button
                         variant="outline"
                         size="sm"
-                        className="flex-1 justify-between text-xs"
+                        className="flex-1 justify-between text-caption"
                       >
                         {sortLabel}
                         <ChevronDown className="size-3 text-muted-foreground" />
@@ -569,7 +572,7 @@ export function AgentListToolbar({
                     </DropdownMenuRadioGroup>
                   </DropdownMenuContent>
                 </DropdownMenu>
-                <Button
+                <IconButton
                   variant="outline"
                   size="icon-sm"
                   onClick={() =>
@@ -577,7 +580,7 @@ export function AgentListToolbar({
                       sortDirection === "asc" ? "desc" : "asc",
                     )
                   }
-                  title={
+                  label={
                     sortDirection === "asc"
                       ? t(($) => $.toolbar.direction_asc)
                       : t(($) => $.toolbar.direction_desc)
@@ -588,12 +591,12 @@ export function AgentListToolbar({
                   ) : (
                     <ArrowDown className="size-3.5" />
                   )}
-                </Button>
+                </IconButton>
               </div>
             </div>
 
             <div className="px-3 py-2.5">
-              <span className="text-xs font-medium text-muted-foreground">
+              <span className="text-caption font-medium text-muted-foreground">
                 {t(($) => $.toolbar.section_columns)}
               </span>
               <div className="mt-2 space-y-2">
@@ -602,7 +605,7 @@ export function AgentListToolbar({
                     key={key}
                     className="flex cursor-pointer items-center justify-between"
                   >
-                    <span className="text-sm">{COLUMN_LABELS[key]}</span>
+                    <span className="text-body">{COLUMN_LABELS[key]}</span>
                     <Switch
                       size="sm"
                       checked={!hiddenColumns.includes(key)}

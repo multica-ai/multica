@@ -1,7 +1,7 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { Plus, X } from "lucide-react";
+import { Plus, X } from "@multica/ui/icons";
 import { useQuery } from "@tanstack/react-query";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { memberListOptions } from "@multica/core/workspace/queries";
@@ -12,6 +12,7 @@ import {
 } from "@multica/core/autopilots/mutations";
 import type { AutopilotCollaborator } from "@multica/core/types";
 import { toast } from "sonner";
+import { TooltipHint } from "@multica/ui/components/common/tooltip-hint";
 import { ActorAvatar } from "../../common/actor-avatar";
 import {
   PropertyPicker,
@@ -82,7 +83,7 @@ export function AutopilotAccessManager({
   return (
     <div className="space-y-2">
       <div className="flex items-center justify-between">
-        <span className="text-xs font-medium uppercase tracking-wider text-muted-foreground">
+        <span className="text-caption font-medium uppercase tracking-wider text-muted-foreground">
           {t(($) => $.access.current_label)}
         </span>
         <PropertyPicker
@@ -97,7 +98,7 @@ export function AutopilotAccessManager({
           searchPlaceholder={t(($) => $.access.search_placeholder)}
           onSearchChange={setFilter}
           trigger={
-            <span className="inline-flex cursor-pointer items-center gap-1 rounded-md border border-dashed px-2 py-1 text-xs text-muted-foreground transition-colors hover:border-primary/40 hover:text-foreground">
+            <span className="inline-flex cursor-pointer items-center gap-1 rounded-md border border-dashed px-2 py-1 text-caption text-muted-foreground transition-colors hover:border-primary/40 hover:text-foreground">
               <Plus className="size-3" />
               {t(($) => $.access.add)}
             </span>
@@ -124,7 +125,7 @@ export function AutopilotAccessManager({
       </div>
 
       {collaborators.length === 0 ? (
-        <p className="rounded-md border border-dashed px-3 py-4 text-center text-sm text-muted-foreground">
+        <p className="rounded-md border border-dashed px-3 py-4 text-center text-body text-muted-foreground">
           {t(($) => $.access.empty)}
         </p>
       ) : (
@@ -136,25 +137,27 @@ export function AutopilotAccessManager({
             >
               <span className="flex min-w-0 items-center gap-2">
                 <ActorAvatar actorType="member" actorId={c.user_id} size="sm" />
-                <span className="truncate text-sm">
+                <span className="truncate text-body">
                   {getActorName("member", c.user_id)}
                 </span>
               </span>
-              <button
-                type="button"
-                onClick={() => void handleRevoke(c.user_id)}
-                disabled={revoke.isPending}
-                className="cursor-pointer text-muted-foreground transition-colors hover:text-foreground disabled:opacity-50"
-                aria-label={t(($) => $.access.remove_tooltip)}
-              >
-                <X className="size-3.5" />
-              </button>
+              <TooltipHint label={t(($) => $.access.remove_tooltip)}>
+                <button
+                  type="button"
+                  onClick={() => void handleRevoke(c.user_id)}
+                  disabled={revoke.isPending}
+                  className="cursor-pointer text-muted-foreground transition-colors hover:text-foreground disabled:opacity-50"
+                  aria-label={t(($) => $.access.remove_tooltip)}
+                >
+                  <X className="size-3.5" />
+                </button>
+              </TooltipHint>
             </li>
           ))}
         </ul>
       )}
 
-      <p className="text-xs text-muted-foreground">
+      <p className="text-caption text-muted-foreground">
         {t(($) => $.access.owner_note)}
       </p>
     </div>

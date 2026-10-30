@@ -83,7 +83,9 @@ func TestAgentCreateOriginator_E2E_CreateAssignSquad_PrivateWorkerTriggered(t *t
 	`, creatorAID, ownerH).Scan(&creatorTaskID); err != nil {
 		t.Fatalf("create A's acting task: %v", err)
 	}
-	t.Cleanup(func() { testPool.Exec(context.Background(), `DELETE FROM agent_task_queue WHERE id = $1`, creatorTaskID) })
+	t.Cleanup(func() {
+		testPool.Exec(context.Background(), `DELETE FROM agent_task_queue WHERE id = $1`, creatorTaskID)
+	})
 
 	// Step 1: agent A creates an issue through the ordinary create path and
 	// assigns it to the private-leader squad in the same call.
@@ -203,7 +205,9 @@ func TestAgentCreateOriginator_E2E_UpdateAssignSquad_HandlerGateAdmitsPrivateLea
 	`, creatorAID, ownerH).Scan(&creatorTaskID); err != nil {
 		t.Fatalf("create A's acting task: %v", err)
 	}
-	t.Cleanup(func() { testPool.Exec(context.Background(), `DELETE FROM agent_task_queue WHERE id = $1`, creatorTaskID) })
+	t.Cleanup(func() {
+		testPool.Exec(context.Background(), `DELETE FROM agent_task_queue WHERE id = $1`, creatorTaskID)
+	})
 
 	// Agent A creates an unassigned issue via the ordinary path.
 	w := httptest.NewRecorder()

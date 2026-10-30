@@ -137,13 +137,12 @@ function renderModal() {
 }
 
 describe("SourceBackfillModal", () => {
-  it("does not render when there is no user", () => {
-    renderModal();
-    expect(
-      screen.queryByText(/How did you hear about Multica/i),
-    ).not.toBeInTheDocument();
-  });
-
+  // Which users need the backfill is needsSourceBackfill's contract — no user,
+  // not yet onboarded, empty/missing/legacy-string/malformed source, the skip
+  // flag and the dismiss cap all have their matrix in
+  // @multica/core/onboarding/needs-backfill.test.ts. What belongs here is the
+  // modal's own reaction to the verdict, so one settled user stands for the
+  // whole "predicate says no" family.
   it("does not render when the user already recorded a source", () => {
     setUser({
       id: "u1",
@@ -273,18 +272,6 @@ describe("SourceBackfillModal", () => {
     expect(sent.source_skipped).toBe(true);
     expect(sent.role).toBe("founder");
     expect(sent.use_case).toEqual(["manage_team"]);
-  });
-
-  it("treats a legacy single-string source as already answered", () => {
-    setUser({
-      id: "u1",
-      onboarded_at: "2026-01-01T00:00:00Z",
-      onboarding_questionnaire: { source: "search" },
-    });
-    renderModal();
-    expect(
-      screen.queryByText(/How did you hear about Multica/i),
-    ).not.toBeInTheDocument();
   });
 
   it("picking a second option replaces the first (single-select primary source)", async () => {

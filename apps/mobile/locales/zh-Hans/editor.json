@@ -1,0 +1,22 @@
+{
+  "a11y": {
+    "mention_someone": "提及某人",
+    "bullet_list": "无序列表",
+    "checklist": "清单",
+    "code_block": "代码块",
+    "quote": "引用",
+    "attach_image": "添加图片",
+    "attach_file": "添加文件"
+  },
+  "code": {
+    "copied": "代码已复制",
+    "copy": "复制代码"
+  },
+  "upload": {
+    "file_too_large_title": "文件过大",
+    "file_too_large_message": "文件必须小于 100 MB。",
+    "failed": "上传失败",
+    "error": "未知错误"
+  },
+  "a11y.mention_someone": "提及某人"
+}

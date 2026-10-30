@@ -1,5 +1,8 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { clearWorkspaceStorage } from "./storage-cleanup";
+import {
+  clearAllWorkspaceStorage,
+  clearWorkspaceStorage,
+} from "./storage-cleanup";
 import {
   registerDraftCleanup,
   __clearDraftCleanupRegistryForTest,
@@ -56,5 +59,64 @@ describe("clearWorkspaceStorage", () => {
     expect(adapter.removeItem).toHaveBeenCalledWith("multica_test_global_draft");
     // 8 non-draft keys + 2 registered draft keys.
     expect(adapter.removeItem).toHaveBeenCalledTimes(11);
+  });
+});
+
+describe("clearAllWorkspaceStorage", () => {
+  function makeAdapter(values: Record<string, string>) {
+    return {
+      getItem: (k: string) => values[k] ?? null,
+      setItem: (k: string, v: string) => {
+        values[k] = v;
+      },
+      removeItem: (k: string) => {
+        delete values[k];
+      },
+      keys: () => Object.keys(values),
+      snapshot: () => ({ ...values }),
+    };
+  }
+
+  // The point of enumerating: a cold start rejected at the identity probe
+  // never loaded a workspace list, so it cannot name a single slug.
+  it("removes workspace-scoped keys for slugs the caller never knew", () => {
+    registerDraftCleanup({
+      storageKey: "multica_comment_drafts",
+      workspaceScoped: true,
+      resetInMemory: vi.fn(),
+    });
+    registerDraftCleanup({
+      storageKey: "multica_quick_create",
+      workspaceScoped: false,
+      resetInMemory: vi.fn(),
+    });
+    const adapter = makeAdapter({
+      "multica_comment_drafts:acme": "1",
+      "multica_comment_drafts:globex": "2",
+      "multica_navigation:initech": "3",
+      "multica:chat:activeSessionId:acme": "4",
+      multica_quick_create: "5",
+      // Not session state — a device preference and another app's key.
+      multica_locale: "zh-Hans",
+      unrelated_key: "keep",
+    });
+
+    expect(clearAllWorkspaceStorage(adapter)).toBe(true);
+
+    expect(adapter.snapshot()).toEqual({
+      multica_locale: "zh-Hans",
+      unrelated_key: "keep",
+    });
+  });
+
+  it("reports when the adapter cannot enumerate, instead of silently doing nothing", () => {
+    const adapter = {
+      getItem: vi.fn(),
+      setItem: vi.fn(),
+      removeItem: vi.fn(),
+    };
+
+    expect(clearAllWorkspaceStorage(adapter)).toBe(false);
+    expect(adapter.removeItem).not.toHaveBeenCalled();
   });
 });

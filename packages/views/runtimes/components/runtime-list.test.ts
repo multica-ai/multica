@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
-import type { Agent, AgentTask } from "@multica/core/types";
-import { buildWorkloadIndex } from "./runtime-list";
+import type { Agent, AgentRuntime, AgentTask } from "@multica/core/types";
+import { buildWorkloadIndex, canReadRuntimeUsage } from "./runtime-list";
 
 function makeAgent(overrides: Partial<Agent> = {}): Agent {
   return {
@@ -69,5 +69,38 @@ describe("buildWorkloadIndex", () => {
       runningCount: 1,
       queuedCount: 0,
     });
+  });
+});
+
+function makeRuntime(overrides: Partial<AgentRuntime> = {}): AgentRuntime {
+  return {
+    id: "runtime-1",
+    workspace_id: "ws-1",
+    daemon_id: "daemon-1",
+    name: "Runtime",
+    runtime_mode: "local",
+    provider: "codex",
+    launch_header: "",
+    status: "online",
+    device_info: "Mac",
+    metadata: {},
+    owner_id: "user-2",
+    visibility: "private",
+    last_seen_at: null,
+    created_at: "2026-01-01T00:00:00Z",
+    updated_at: "2026-01-01T00:00:00Z",
+    ...overrides,
+  };
+}
+
+describe("canReadRuntimeUsage", () => {
+  it("does not load usage for an admin viewing another member's private runtime", () => {
+    expect(canReadRuntimeUsage(makeRuntime(), "admin-1")).toBe(false);
+  });
+
+  it("allows usage for a public teammate runtime", () => {
+    expect(
+      canReadRuntimeUsage(makeRuntime({ visibility: "public" }), "member-1"),
+    ).toBe(true);
   });
 });

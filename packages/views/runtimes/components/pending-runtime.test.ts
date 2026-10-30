@@ -1,3 +1,4 @@
+// @vitest-environment node
 import { describe, expect, it } from "vitest";
 import type { AgentRuntime, RuntimeProfile } from "@multica/core/types";
 import {

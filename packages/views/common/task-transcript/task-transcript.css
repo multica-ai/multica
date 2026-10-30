@@ -1,14 +1,15 @@
 /*
  * Log-scale markdown for transcript agent text (rendered via RichContent with
  * className="transcript-prose"). Structure is preserved; the type scale is
- * flattened to the transcript's data-panel rhythm: body 12.5px, mono 11px,
+ * flattened to the transcript's data-panel rhythm: body caption (12px), mono
+ * micro (11px),
  * headings demoted to body size. Selectors double up with .rich-text-editor
  * (the RichContent root) so they outrank the shared base styles regardless of
  * CSS load order.
  */
 
 .rich-text-editor.transcript-prose {
-  font-size: 12.5px;
+  font-size: var(--text-caption);
   line-height: 1.7;
 }
 
@@ -41,22 +42,22 @@
 .rich-text-editor.transcript-prose h4,
 .rich-text-editor.transcript-prose h5,
 .rich-text-editor.transcript-prose h6 {
-  font-size: 12.5px;
+  font-size: var(--text-caption);
   font-weight: 500;
   margin: 0.5rem 0 0.15rem;
 }
 
 .rich-text-editor.transcript-prose code {
-  font-size: 11px;
+  font-size: var(--text-micro);
 }
 
 .rich-text-editor.transcript-prose pre,
 .rich-text-editor.transcript-prose .code-block-wrapper {
-  font-size: 11px;
+  font-size: var(--text-micro);
   margin: 0.35rem 0;
 }
 
 .rich-text-editor.transcript-prose blockquote {
   margin: 0.35rem 0;
-  font-size: 12.5px;
+  font-size: var(--text-caption);
 }

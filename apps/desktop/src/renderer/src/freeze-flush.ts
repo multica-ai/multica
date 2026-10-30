@@ -1,6 +1,5 @@
 import type { CaptureEventOptions } from "@multica/core/analytics";
 import type { FreezeBreadcrumb } from "../../shared/freeze-breadcrumb";
-import { sanitizeHangStackFrames } from "../../shared/hang-stack";
 
 // Reporting a failure the previous session couldn't report itself.
 //
@@ -87,11 +86,9 @@ export function buildFreezeEventProps(
 
   return {
     source: crashed ? "render-process-gone" : "main-unresponsive",
-    recovered: false,
     breadcrumb_ts: breadcrumb.ts,
     crashed_version: breadcrumb.version,
     ...routeProps(context.desktopRoute),
-    ...stackProps(context.stack),
     ...crashProps(context.details),
   };
 }
@@ -108,33 +105,6 @@ function routeProps(value: unknown): Record<string, unknown> {
   return {
     ...(typeof route.path === "string" ? { path: route.path } : {}),
     ...(typeof route.surface === "string" ? { surface: route.surface } : {}),
-  };
-}
-
-/**
- * Frames are rebuilt here rather than forwarded.
- *
- * The capture side already whitelists, but its output travels through an
- * on-disk breadcrumb that `readFreezeBreadcrumb` barely validates — it only
- * has to survive version skew. So the array reaching this function could come
- * from an older build, a corrupt file, or a future writer, and shipping it
- * as-is would put whatever it contains (a `scopeChain` handle, an absolute
- * install path) straight into telemetry. Re-sanitizing is cheap; trusting the
- * file is not.
- *
- * The top frame is also flattened onto the event so a hang groups by the
- * function that blocked the thread without unpacking the array.
- */
-function stackProps(value: unknown): Record<string, unknown> {
-  const frames = sanitizeHangStackFrames(value);
-  if (!frames) return {};
-  const top = frames[0]!;
-  return {
-    stack: frames,
-    stack_depth: frames.length,
-    stack_function: top.functionName,
-    ...(top.url ? { stack_url: top.url } : {}),
-    stack_line: top.lineNumber,
   };
 }
 

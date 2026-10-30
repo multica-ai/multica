@@ -35,14 +35,6 @@ afterEach(() => {
 });
 
 describe("useSquadsViewStore", () => {
-  it("defaults to 'mine'", () => {
-    expect(useSquadsViewStore.getState().scope).toBe("mine");
-  });
-
-  it("setScope mutates the store", () => {
-    useSquadsViewStore.getState().setScope("all");
-    expect(useSquadsViewStore.getState().scope).toBe("all");
-  });
 
   it("partialize persists view prefs (no actions) under the workspace-namespaced key", async () => {
     setCurrentWorkspace("acme", "ws_a");

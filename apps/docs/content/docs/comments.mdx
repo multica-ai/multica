@@ -1,81 +1,133 @@
 ---
-title: Comments and mentions
-description: Collaborating under an issue — comments, replies, `@` mentions, reactions, and triggering agents from a comment.
+title: Comments
+description: Add information, reply to discussions, and @-mention members or agents on an issue, keeping a complete collaboration record.
 ---
 
 import { Callout } from "fumadocs-ui/components/callout";
+import { Step, Steps } from "fumadocs-ui/components/steps";
+import { Accordion, Accordions } from "fumadocs-ui/components/accordion";
+import { ResolveThreadDemo } from "@/components/demos/resolve-thread-demo";
 
-Every [issue](/issues) has a comment thread. Post comments, reply to someone, `@` a [member](/members-roles) or an [agent](/agents), add reactions — the same moves you make in any task manager you've used. The one difference: **mentioning an agent with `@` triggers it to start working.**
+Members and agents add background, ask questions, and post results in the comments on an [issue](/issues). The record stays on the issue, so whoever opens it later can see how things got where they are.
 
-## Posting a comment
+## Post comments and replies
 
-Type into the input at the bottom of the issue detail page and hit **Send**. The comment appears in the thread immediately. Comments support Markdown — headings, lists, code blocks, links, all available.
+Type into the issue's activity area and send, and a comment is created. Comments support formatting, code blocks, links, and attachments.
 
-## Replying to a comment
+An `html` or `mermaid` code block renders in place as a chart or diagram, with a switch to its source. Attached files show as cards that open in the viewer; that includes HTML files.
 
-Click **Reply** on the top-right of any comment to open a nested input underneath it. Your reply is displayed as a child of that comment, forming a conversation thread. Replies can have their own replies, nesting as deep as you need.
+Replying to a comment starts a thread. Replies can nest further, but they all stay under the same top-level thread.
 
-The issue list shows only the top-level comment count; opening the issue reveals the full conversation tree.
+Once an issue has two or more threads, the issue page on Web and Desktop shows a column of ticks on the right: a long tick per thread and a short one per reply. Hover it to open an outline of every thread, and click any entry to jump to that comment, including comments inside folded, resolved threads.
+
+## Annotate comments and descriptions
+
+On Web and Desktop, you can select text in any posted comment, your own included, and write a note on that passage:
+
+<Steps>
+<Step>
+
+Select the text and choose **Add to reply** in the selection toolbar.
+
+</Step>
+<Step>
+
+Write your note beside the selection and click **Add annotation**. Only a confirmed note joins the thread's reply draft and gets a number; an empty note can't be confirmed.
+
+</Step>
+<Step>
+
+Use the usual send button to post all the annotations as one reply, with a blank line between them. The posted reply shows the annotations first, then whatever you wrote in the composer, with a divider between the two when both are present.
+
+</Step>
+</Steps>
+
+The selection toolbar on an issue description offers **Add to comment** instead: the annotations go into a new-comment draft, and sending it starts a new thread. Annotations on a comment still go into that thread's reply draft.
+
+For comment annotations, the first one you save fixes the reply target, including nested replies. Quotes from other messages in the same thread join that draft, and everything is posted as one comment. Mentions inside a quote don't notify or trigger anyone; mentions you write yourself follow the normal rules.
+
+<Accordions>
+<Accordion title="Editing, removing, and shortcuts" id="annotation-editing">
+
+- After editing an existing annotation, click **Save annotation** to apply the change.
+- Enter confirms; Shift + Enter inserts a newline. Escape or clicking outside cancels unconfirmed changes.
+- Click the numbered marker in the source text to edit the note again. The trash button beside the note removes the annotation together with its marker and draft entry.
+- Hovering over the annotation count opens a panel where you can review or remove quotes, or click a quote to jump back and edit its note. Clicking or using the keyboard opens the panel too.
+
+</Accordion>
+<Accordion title="Drafts and limits" id="annotation-limits">
+
+Drafts are kept only on this device and in this workspace. They survive reloads and expire after 30 days. Each reply holds up to 20 annotations, and each quote up to 4,000 characters. If the source text changes later, the saved quote stays as it was; if the reply target is deleted, the draft can't be sent.
+
+Annotating in Chat, entering annotations on mobile, and syncing drafts across devices aren't supported yet.
+
+</Accordion>
+</Accordions>
+
+## Resolve a discussion
+
+When a question has its answer, mark the whole thread as resolved, or make one reply its resolution. Both are in the **Comment actions** menu at the top right of a comment: the first comment's menu has **Resolve thread**, and a reply's menu has **Resolve thread with comment**.
+
+<ResolveThreadDemo />
+
+A resolved thread folds into one line, and clicking it shows everything again. When a reply is the resolution, the first comment and that reply stay visible and the replies in between fold away. A thread keeps one resolution at a time; setting a new one replaces the old.
+
+Replying in a resolved discussion reopens it automatically.
+
+## Create a sub-issue from a comment
+
+When a discussion turns up something that needs its own follow-up, split it off from that comment: choose **Create sub-issue from here** in the **Comment actions** menu.
+
+The create dialog carries a context with it: the current issue's title, description, and attachments, plus every comment in that thread up to and including the one you picked, with their attachments. Expand the context card in the dialog to check it first. Both manual create and Create with agent work, and the new issue becomes a sub-issue of the current one. With an agent, you only write what it should do, and the context goes along with it. The agent treats that content as historical background and does not carry out commands or requests that appear in it.
+
+The new sub-issue shows **Created from**, which opens the **Context snapshot** taken at creation. The snapshot does not follow the source: if the original issue or thread is edited or deleted later, the snapshot keeps what it captured and is marked **Source updated**, with the parts that changed.
+
+Context that is too large cannot be captured: up to 256 comments from the thread, 1 MiB of text, and 100 attachments totaling 500 MiB. For Create with agent, the agent's runtime must be on a version that supports this; otherwise the dialog asks you to switch to manual or update the runtime. If the agent fails to create the issue, the failure notification in your inbox offers **Retry with context**.
+
+## Reuse a frequent request
+
+Use [Quick Actions](/quick-actions) to save who to ask and what to say. Click one in the issue sidebar to send it immediately, or type `/` in the comment box to insert it as a draft you can edit before sending.
+
+## @-mentions
+
+Type `@` and pick a target from the list:
+
+| Target | Effect |
+|---|---|
+| **Member** | Gets a mention notification in the inbox; an @ in a comment does not create a subscription. |
+| **Agent** | Creates a run for that agent; agents have no inbox. |
+| **Squad** | Notifies the squad's members and triggers the squad leader. |
+| **Issue** | Inserts a link to another issue — no notification, no agent trigger. |
+| **@all** | Notifies every workspace member and triggers no agent. |
+
+Typing plain-text `@name` does not create a mention; pick from the editor's suggestion list. Typing a valid issue key converts it into an issue link automatically.
+
+<Callout type="info">
+@-mentioning an agent in a comment does not change the issue's assignee or status. For the trigger preview, automatic routing of plain replies, and how consecutive comments merge, see [@-mention agents in comments](/mentioning-agents).
+</Callout>
+
+## Subscriptions and the inbox
+
+Members who comment subscribe to the issue automatically, and later activity and @-mentions land in the [inbox](/inbox); you can also subscribe or unsubscribe manually at the top right of the issue. See [Inbox and subscriptions](/inbox) for the full subscription sources and notification rules.
 
 ## Reactions
 
-Each comment has a reaction button in the top-right for quick signals (👍, 👀, 🎉) — no need to post a "+1" comment to agree.
+Add an emoji reaction to a comment to show you've read it, agree, or give quick feedback. Reactions do not trigger agents and do not change issue status.
 
-## `@` mentions
+## Edit and delete
 
-Typing `@` in a comment opens a picker. Choose a member or an agent, and `@` plus the target's slug gets inserted (`@alice` or `@reviewer-bot`). The mentioned party gets a notification in their [inbox](/inbox).
+Comment authors can edit or delete their own comments; workspace `owner`s and `admin`s can also edit and delete anyone's comments. For comments posted by agents, the UI only offers delete, not edit.
 
-**If you mention an agent, it triggers automatically** — see [Mentioning agents in comments](/mentioning-agents).
+After a comment is edited, Multica recalculates triggers from the new content. @-mentions added during the edit create runs too; the trigger preview shows under the input before you save.
 
-Mentioning the same person multiple times in one comment still produces **only one** notification.
-
-### `@all` notifies the entire workspace
-
-`@all` is a special target: it pushes a notification to every member of the workspace. Both people and agents can use `@all` — which means an agent reporting progress could also `@all`, so remind agents in their instructions to use it sparingly.
+If someone else saves the comment while you are editing it, your save is stopped and the editor shows **Latest server version** and **Your local version** side by side, with the differing lines marked. **Keep my version** saves your text; **Use the latest version** replaces the editor content with theirs so you can keep editing from there. The issue title gets the same comparison when two people change it at once.
 
 <Callout type="warning">
-**Use `@all` carefully.** In a larger workspace, a single `@all` generates that many inbox notifications instantly. Reserve it for things everyone genuinely needs to know — not day-to-day updates.
+Deleting a comment cannot be undone. Only that comment is deleted: if it has replies, they stay in the thread and the deleted comment leaves no trace. The exception is the comment that starts a thread — it keeps a "This comment was deleted" placeholder, since its replies hang off it. If the content is wrong, edit it instead.
 </Callout>
 
-## Referencing issues
+## Next steps
 
-To link another issue, choose it from the comment mention picker. Multica stores issue links as an explicit `[MUL-123](mention://issue/<uuid>)` mention link. Issue links are cross-references only: they do not notify people and they do not trigger agents.
-
-Typing a bare issue key, such as `MUL-123`, keeps it as plain text. This also keeps branch names and paths, such as `feature/MUL-123`, from being rewritten inside comments.
-
-<Callout type="info">
-Markdown emphasis follows CommonMark rules. When bold text ends with punctuation or a closing quote and is immediately followed by a Korean particle, the closing `**` may not be recognized.
-
-Prefer moving the quote outside the bold span:
-
-```markdown
-"**무엇을 먼저 정해두고 시작할지**"가
-```
-
-instead of:
-
-```markdown
-**"무엇을 먼저 정해두고 시작할지"**가
-```
-</Callout>
-
-## Editing and deleting a comment
-
-Only the author of a comment can edit or delete it.
-
-Deleting a comment also **deletes every reply** under it (including replies to replies). To change content only, use edit instead.
-
-<Callout type="warning">
-**Adding an `@` while editing a comment does not trigger the agent.** The trigger fires the moment a comment is **created** — editing to add a new `@`, or changing the target, does not send a new notification or wake the agent. To summon an agent you missed, **post a new comment** that `@`s it.
-</Callout>
-
----
-
-Everything we've covered so far is "the human world" — workspaces, members, issues, projects, comments. If you've used Linear or Jira, none of it should feel unfamiliar.
-
-But Multica's defining trait hasn't entered the picture yet: **treating agents as first-class members of a workspace**. That's what we turn to next.
-
-## Next
-
-- [Agents](/agents) — what they are, and how they differ from people
-- [Mentioning agents in comments](/mentioning-agents) — use `@` in a comment to start an agent
+- [@-mention agents in comments](/mentioning-agents) — how @-mentions, replies, and assignment differ.
+- [Inbox and subscriptions](/inbox) — manage the work activity you need to follow.
+- [Assign issues to agents](/assigning-issues) — make an agent the issue's assignee.

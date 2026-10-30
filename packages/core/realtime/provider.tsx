@@ -16,8 +16,10 @@ import type { StoreApi, UseBoundStore } from "zustand";
 import type { AuthState } from "../auth/store";
 import {
   getCurrentSlug,
+  getCurrentWsId,
   subscribeToCurrentSlug,
 } from "../platform/workspace-storage";
+import { useLocalSearchIndexSync } from "../search-index/hooks";
 import { createLogger } from "../logger";
 import { useRealtimeSync, type RealtimeSyncStores } from "./use-realtime-sync";
 
@@ -66,6 +68,7 @@ export function WSProvider({
     getCurrentSlug,
     () => null,
   );
+  const wsId = useSyncExternalStore(subscribeToCurrentSlug, getCurrentWsId, () => null);
   const [wsClient, setWsClient] = useState<WSClient | null>(null);
 
   // Depend on identity primitives instead of the object reference so a parent
@@ -87,6 +90,10 @@ export function WSProvider({
     const ws = new WSClient(wsUrl, {
       logger: createLogger("ws"),
       cookieAuth,
+      // Re-read on every (re)connect instead of pinning the token captured
+      // below: a session renewed since this effect ran would otherwise keep
+      // reconnecting with a credential that is on its way to expiring.
+      getToken: cookieAuth ? undefined : () => storage.getItem("multica_token"),
       identity:
         identityPlatform || identityVersion || identityOS
           ? {
@@ -119,6 +126,9 @@ export function WSProvider({
 
   // Centralized WS -> store sync (uses state so it re-subscribes when WS changes)
   useRealtimeSync(wsClient, stores, onToast);
+
+  // Keeps this workspace's local search index attached and caught up.
+  useLocalSearchIndexSync(wsClient, user?.id ?? null, wsId, wsSlug);
 
   const subscribe = useCallback(
     (event: WSEventType, handler: EventHandler) => {

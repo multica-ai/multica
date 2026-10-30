@@ -77,8 +77,16 @@ func TestMetrics_Snapshot_IncludesCounters(t *testing.T) {
 	}
 }
 
-// Compile-time guarantee that *Hub continues to satisfy Broadcaster, in case
-// someone changes hub.go method signatures without updating the interface.
-func TestHubImplementsBroadcaster(t *testing.T) {
-	var _ Broadcaster = NewHub()
+func TestMetricsAggregatesStreamsWithoutTTLAcrossRelayModes(t *testing.T) {
+	m := &Metrics{}
+	m.SetRedisStreamsWithoutTTL("sharded", 1)
+	m.SetRedisStreamsWithoutTTL("legacy", 2)
+	if got := m.RedisRelayStreamsWithoutTTL.Load(); got != 3 {
+		t.Fatalf("streams without TTL = %d, want 3", got)
+	}
+
+	m.SetRedisStreamsWithoutTTL("sharded", 0)
+	if got := m.RedisRelayStreamsWithoutTTL.Load(); got != 2 {
+		t.Fatalf("streams without TTL after sharded repair = %d, want 2", got)
+	}
 }

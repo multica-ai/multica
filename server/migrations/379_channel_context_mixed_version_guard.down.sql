@@ -1,0 +1,2 @@
+DROP TRIGGER IF EXISTS trg_enforce_channel_message_task_context_revision ON chat_message;
+DROP FUNCTION IF EXISTS enforce_channel_message_task_context_revision();

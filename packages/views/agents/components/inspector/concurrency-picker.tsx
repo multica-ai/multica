@@ -35,7 +35,7 @@ export function ConcurrencyPicker({
 
   if (!canEdit) {
     return (
-      <span className="font-mono text-xs tabular-nums text-muted-foreground">
+      <span className="font-mono text-caption tabular-nums text-muted-foreground">
         {value}
       </span>
     );
@@ -65,7 +65,7 @@ export function ConcurrencyPicker({
       }
     >
       <div className="space-y-2 p-2">
-        <p className="text-xs text-muted-foreground">
+        <p className="text-caption text-muted-foreground">
           {t(($) => $.pickers.concurrency_range, { min: MIN, max: MAX })}
         </p>
         <div className="flex items-center gap-2">
@@ -82,7 +82,7 @@ export function ConcurrencyPicker({
               }
             }}
             autoFocus
-            className="h-8 w-20 font-mono text-xs"
+            className="h-8 w-20 font-mono text-caption"
           />
           <Button size="sm" onClick={() => void commit()}>
             {t(($) => $.inspector.save)}

@@ -2,7 +2,7 @@
 
 import { useMemo } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { Plus } from "lucide-react";
+import { Plus } from "@multica/ui/icons";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { chatPinnedAgentsOptions } from "@multica/core/chat/queries";
 import { usePinChatAgent, useUnpinChatAgent } from "@multica/core/chat/mutations";
@@ -97,6 +97,7 @@ export function QuickAgentBar({
           onSelect={(agent) => pin.mutate(agent.id)}
           side="bottom"
           align="start"
+          tooltip={t(($) => $.list.add_agent)}
           triggerRender={
             <button
               type="button"

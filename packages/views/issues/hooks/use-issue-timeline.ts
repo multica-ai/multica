@@ -6,6 +6,7 @@ import {
   useQueryClient,
   useMutationState,
 } from "@tanstack/react-query";
+import type { QueryClient } from "@tanstack/react-query";
 import type {
   Comment,
   TimelineEntry,
@@ -39,6 +40,7 @@ import {
   mentionLabelsByTarget,
 } from "@multica/core/issues/comment-trigger-outcomes";
 import { useWSEvent, useWSReconnect } from "@multica/core/realtime";
+import { removeCommentSubtree } from "@multica/core/issues/comment-deletion";
 import { toast } from "sonner";
 import { useT } from "../../i18n";
 import { blockedShortReasonLabel } from "../blocked-trigger-copy";
@@ -55,6 +57,7 @@ function commentToTimelineEntry(c: Comment): TimelineEntry {
     parent_id: c.parent_id,
     created_at: c.created_at,
     updated_at: c.updated_at,
+    revision: c.revision,
     comment_type: c.type,
     reactions: c.reactions ?? [],
     attachments: c.attachments ?? [],
@@ -62,7 +65,53 @@ function commentToTimelineEntry(c: Comment): TimelineEntry {
     resolved_by_type: c.resolved_by_type,
     resolved_by_id: c.resolved_by_id,
     source_task_id: c.source_task_id,
+    supplements: c.supplements,
+    supplement_task_id: c.supplement_task_id,
+    supplement_status: c.supplement_status,
+    supplement_failure_reason: c.supplement_failure_reason,
+    supplement_delivered_at: c.supplement_delivered_at,
+    deleted_at: c.deleted_at,
   };
+}
+
+function acceptsCommentRevision(
+  current: TimelineEntry,
+  incoming: Comment,
+): boolean {
+  return (
+    current.revision === undefined ||
+    (incoming.revision !== undefined && incoming.revision >= current.revision)
+  );
+}
+
+function applyCommentSnapshot(
+  qc: QueryClient,
+  issueId: string,
+  comment: Comment,
+) {
+  let missingRevision = false;
+  qc.setQueryData<TLCache>(issueKeys.timeline(issueId), (old) =>
+    old?.map((entry) => {
+      if (entry.id !== comment.id) return entry;
+      if (entry.revision !== undefined && comment.revision === undefined) {
+        missingRevision = true;
+        return entry;
+      }
+      return acceptsCommentRevision(entry, comment)
+        ? {
+            ...commentToTimelineEntry(comment),
+            actor_name: entry.actor_name,
+            actor_avatar_url: entry.actor_avatar_url,
+          }
+        : entry;
+    }),
+  );
+  if (missingRevision) {
+    // During a rolling deployment, an old server may emit an unversioned
+    // snapshot after this cache has already observed a versioned one. Never
+    // overwrite the ordered value; refetch from the authoritative API instead.
+    qc.invalidateQueries({ queryKey: issueKeys.timeline(issueId) });
+  }
 }
 
 export function useIssueTimeline(issueId: string, userId?: string) {
@@ -118,11 +167,7 @@ export function useIssueTimeline(issueId: string, userId?: string) {
       (payload: unknown) => {
         const { comment } = payload as CommentUpdatedPayload;
         if (comment.issue_id !== issueId) return;
-        qc.setQueryData<TLCache>(issueKeys.timeline(issueId), (old) =>
-          old?.map((e) =>
-            e.id === comment.id ? commentToTimelineEntry(comment) : e,
-          ),
-        );
+        applyCommentSnapshot(qc, issueId, comment);
       },
       [qc, issueId],
     ),
@@ -140,11 +185,7 @@ export function useIssueTimeline(issueId: string, userId?: string) {
       (payload: unknown) => {
         const { comment } = payload as CommentResolvedPayload;
         if (comment.issue_id !== issueId) return;
-        qc.setQueryData<TLCache>(issueKeys.timeline(issueId), (old) =>
-          old?.map((e) =>
-            e.id === comment.id ? commentToTimelineEntry(comment) : e,
-          ),
-        );
+        applyCommentSnapshot(qc, issueId, comment);
       },
       [qc, issueId],
     ),
@@ -156,11 +197,7 @@ export function useIssueTimeline(issueId: string, userId?: string) {
       (payload: unknown) => {
         const { comment } = payload as CommentUnresolvedPayload;
         if (comment.issue_id !== issueId) return;
-        qc.setQueryData<TLCache>(issueKeys.timeline(issueId), (old) =>
-          old?.map((e) =>
-            e.id === comment.id ? commentToTimelineEntry(comment) : e,
-          ),
-        );
+        applyCommentSnapshot(qc, issueId, comment);
       },
       [qc, issueId],
     ),
@@ -172,27 +209,12 @@ export function useIssueTimeline(issueId: string, userId?: string) {
       (payload: unknown) => {
         const { comment_id, issue_id } = payload as CommentDeletedPayload;
         if (issue_id !== issueId) return;
-        qc.setQueryData<TLCache>(issueKeys.timeline(issueId), (old) => {
-          if (!old) return old;
-          // Cascade through replies (full timeline now lives in this single
-          // cache, so a flat sweep is sufficient).
-          const idsToRemove = new Set<string>([comment_id]);
-          let changed = true;
-          while (changed) {
-            changed = false;
-            for (const e of old) {
-              if (
-                e.parent_id &&
-                idsToRemove.has(e.parent_id) &&
-                !idsToRemove.has(e.id)
-              ) {
-                idsToRemove.add(e.id);
-                changed = true;
-              }
-            }
-          }
-          return old.filter((e) => !idsToRemove.has(e.id));
-        });
+        // A comment with replies is tombstoned (comment:updated), never
+        // removed, so any cached reply of a removed comment is stale: older
+        // servers cascaded the delete to every descendant.
+        qc.setQueryData<TLCache>(issueKeys.timeline(issueId), (old) =>
+          old ? removeCommentSubtree(old, comment_id) : old,
+        );
       },
       [qc, issueId],
     ),
@@ -220,16 +242,33 @@ export function useIssueTimeline(issueId: string, userId?: string) {
     "reaction:added",
     useCallback(
       (payload: unknown) => {
-        const { reaction, issue_id } = payload as ReactionAddedPayload;
+        const { reaction, issue_id, comment_revision } = payload as ReactionAddedPayload;
         if (issue_id !== issueId) return;
+        let missingRevision = false;
         qc.setQueryData<TLCache>(issueKeys.timeline(issueId), (old) =>
           old?.map((e) => {
             if (e.id !== reaction.comment_id) return e;
+            if (comment_revision === undefined && e.revision !== undefined) {
+              missingRevision = true;
+              return e;
+            }
+            if (
+              comment_revision !== undefined &&
+              e.revision !== undefined &&
+              comment_revision < e.revision
+            ) return e;
             const existing = e.reactions ?? [];
             if (existing.some((r) => r.id === reaction.id)) return e;
-            return { ...e, reactions: [...existing, reaction] };
+            return {
+              ...e,
+              revision: comment_revision ?? e.revision,
+              reactions: [...existing, reaction],
+            };
           }),
         );
+        if (missingRevision) {
+          qc.invalidateQueries({ queryKey: issueKeys.timeline(issueId) });
+        }
       },
       [qc, issueId],
     ),
@@ -241,11 +280,22 @@ export function useIssueTimeline(issueId: string, userId?: string) {
       (payload: unknown) => {
         const p = payload as ReactionRemovedPayload;
         if (p.issue_id !== issueId) return;
+        let missingRevision = false;
         qc.setQueryData<TLCache>(issueKeys.timeline(issueId), (old) =>
           old?.map((e) => {
             if (e.id !== p.comment_id) return e;
+            if (p.comment_revision === undefined && e.revision !== undefined) {
+              missingRevision = true;
+              return e;
+            }
+            if (
+              p.comment_revision !== undefined &&
+              e.revision !== undefined &&
+              p.comment_revision < e.revision
+            ) return e;
             return {
               ...e,
+              revision: p.comment_revision ?? e.revision,
               reactions: (e.reactions ?? []).filter(
                 (r) =>
                   !(
@@ -257,6 +307,9 @@ export function useIssueTimeline(issueId: string, userId?: string) {
             };
           }),
         );
+        if (missingRevision) {
+          qc.invalidateQueries({ queryKey: issueKeys.timeline(issueId) });
+        }
       },
       [qc, issueId],
     ),
@@ -302,12 +355,12 @@ export function useIssueTimeline(issueId: string, userId?: string) {
   // on success — so a slow send no longer leaves the box full next to an
   // already-posted comment, and a failed send keeps the draft.
   const submitComment = useCallback(
-    async (content: string, attachmentIds?: string[], suppressAgentIds?: string[]): Promise<boolean> => {
+    async (content: string, attachmentIds?: string[], suppressAgentIds?: string[], steerTaskIds?: string[]): Promise<string | false> => {
       if (!content.trim() || !userId) return false;
       try {
-        const comment = await createComment({ content, attachmentIds, suppressAgentIds });
+        const comment = await createComment({ content, attachmentIds, suppressAgentIds, steerTaskIds });
         warnUnhandledTriggers(comment?.trigger_outcomes, comment?.content);
-        return true;
+        return comment.id;
       } catch (err) {
         toast.error(
           err instanceof Error && err.message
@@ -321,7 +374,7 @@ export function useIssueTimeline(issueId: string, userId?: string) {
   );
 
   const submitReply = useCallback(
-    async (parentId: string, content: string, attachmentIds?: string[], suppressAgentIds?: string[]): Promise<boolean> => {
+    async (parentId: string, content: string, attachmentIds?: string[], suppressAgentIds?: string[], steerTaskIds?: string[]): Promise<string | false> => {
       if (!content.trim() || !userId) return false;
       try {
         const comment = await createComment({
@@ -330,9 +383,10 @@ export function useIssueTimeline(issueId: string, userId?: string) {
           parentId,
           attachmentIds,
           suppressAgentIds,
+          steerTaskIds,
         });
         warnUnhandledTriggers(comment?.trigger_outcomes, comment?.content);
-        return true;
+        return comment.id;
       } catch (err) {
         toast.error(
           err instanceof Error && err.message
@@ -346,19 +400,17 @@ export function useIssueTimeline(issueId: string, userId?: string) {
   );
 
   const editComment = useCallback(
-    async (commentId: string, content: string, attachmentIds: string[], suppressAgentIds?: string[]) => {
-      try {
-        const comment = await updateComment({ commentId, content, attachmentIds, suppressAgentIds });
-        warnUnhandledTriggers(comment?.trigger_outcomes, comment?.content);
-      } catch (err) {
-        toast.error(
-          err instanceof Error && err.message
-            ? err.message
-            : t(($) => $.comment.update_failed),
-        );
-      }
+    async (commentId: string, content: string, attachmentIds: string[], suppressAgentIds?: string[], contentBase?: string) => {
+      const comment = await updateComment({
+        commentId,
+        content,
+        attachmentIds,
+        suppressAgentIds,
+        contentBase,
+      });
+      warnUnhandledTriggers(comment?.trigger_outcomes, comment?.content);
     },
-    [updateComment, warnUnhandledTriggers, t],
+    [updateComment, warnUnhandledTriggers],
   );
 
   const deleteComment = useCallback(

@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { Globe, Lock } from "lucide-react";
+import { Globe, Lock } from "@multica/ui/icons";
 import {
   VISIBILITY_DESCRIPTION,
   VISIBILITY_LABEL,
@@ -64,7 +64,7 @@ export function VisibilityPicker({
         <Globe className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
         <div className="text-left">
           <div className="font-medium">{VISIBILITY_LABEL.workspace}</div>
-          <div className="text-xs text-muted-foreground">
+          <div className="text-caption text-muted-foreground">
             {VISIBILITY_DESCRIPTION.workspace}
           </div>
         </div>
@@ -76,7 +76,7 @@ export function VisibilityPicker({
         <Lock className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
         <div className="text-left">
           <div className="font-medium">{VISIBILITY_LABEL.private}</div>
-          <div className="text-xs text-muted-foreground">
+          <div className="text-caption text-muted-foreground">
             {VISIBILITY_DESCRIPTION.private}
           </div>
         </div>

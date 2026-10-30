@@ -3,6 +3,7 @@ import { cleanup, fireEvent, screen, within } from "@testing-library/react";
 import {
   createShortcutChord,
   configureShortcutPlatform,
+  configureShortcutRuntime,
   getShortcut,
   useShortcutStore,
 } from "@multica/core/shortcuts";
@@ -18,7 +19,36 @@ describe("KeyboardShortcutsTab", () => {
   afterEach(() => {
     cleanup();
     configureShortcutPlatform(null);
+    configureShortcutRuntime(null);
     useShortcutStore.getState().resetAll();
+  });
+
+  it("shows distinct left and right sidebar actions", () => {
+    renderWithI18n(<KeyboardShortcutsTab />);
+
+    expect(
+      screen.getByRole("button", {
+        name: "Change shortcut for Toggle left sidebar",
+      }),
+    ).toBeInTheDocument();
+    const rightSidebarRecorder = screen.getByRole("button", {
+      name: "Change shortcut for Toggle right sidebar",
+    });
+    expect(within(rightSidebarRecorder).getByTitle("Ctrl")).toHaveTextContent(
+      "Ctrl",
+    );
+    expect(within(rightSidebarRecorder).getByTitle("/")).toHaveTextContent("/");
+  });
+
+  it("shows the fixed numbered tab shortcuts", () => {
+    renderWithI18n(<KeyboardShortcutsTab />);
+
+    expect(screen.getByText("Select tab 1–8")).toBeInTheDocument();
+    expect(screen.getByText("Select last tab")).toBeInTheDocument();
+    expect(
+      screen.getByRole("img", { name: "Ctrl+1–8" }),
+    ).toBeInTheDocument();
+    expect(screen.getByRole("img", { name: "Ctrl+9" })).toBeInTheDocument();
   });
 
   it("records a shortcut and applies it immediately", () => {
@@ -28,13 +58,33 @@ describe("KeyboardShortcutsTab", () => {
     });
 
     fireEvent.click(recorder);
-    fireEvent.keyDown(recorder, { key: "j", ctrlKey: true });
+    fireEvent.keyDown(recorder, { key: "e", ctrlKey: true });
 
     expect(getShortcut("openSearch")).toEqual(
-      createShortcutChord("J", { primary: true }),
+      createShortcutChord("E", { primary: true }),
     );
     expect(within(recorder).getByTitle("Ctrl")).toHaveTextContent("Ctrl");
-    expect(within(recorder).getByTitle("J")).toHaveTextContent("J");
+    expect(within(recorder).getByTitle("E")).toHaveTextContent("E");
+  });
+
+  it("records logical punctuation from a physical number-row key", () => {
+    configureShortcutRuntime("desktop");
+    renderWithI18n(<KeyboardShortcutsTab />);
+    const recorder = screen.getByRole("button", {
+      name: "Change shortcut for Open search",
+    });
+
+    fireEvent.click(recorder);
+    fireEvent.keyDown(recorder, {
+      key: "&",
+      code: "Digit1",
+      ctrlKey: true,
+    });
+
+    expect(getShortcut("openSearch")).toEqual(
+      createShortcutChord("&", { primary: true }),
+    );
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
   });
 
   it("only captures keys while the recorder is active", () => {
@@ -44,22 +94,22 @@ describe("KeyboardShortcutsTab", () => {
     });
 
     recorder.focus();
-    fireEvent.keyDown(recorder, { key: "j", ctrlKey: true });
+    fireEvent.keyDown(recorder, { key: "e", ctrlKey: true });
     expect(getShortcut("openSearch")).toEqual(
       createShortcutChord("K", { primary: true }),
     );
 
     fireEvent.click(recorder);
-    fireEvent.keyDown(recorder, { key: "j", ctrlKey: true });
+    fireEvent.keyDown(recorder, { key: "e", ctrlKey: true });
     expect(getShortcut("openSearch")).toEqual(
-      createShortcutChord("J", { primary: true }),
+      createShortcutChord("E", { primary: true }),
     );
 
     // Focus remains on the button after a successful recording. Tab must move
     // focus normally instead of silently replacing the shortcut with Tab.
     fireEvent.keyDown(recorder, { key: "Tab" });
     expect(getShortcut("openSearch")).toEqual(
-      createShortcutChord("J", { primary: true }),
+      createShortcutChord("E", { primary: true }),
     );
   });
 

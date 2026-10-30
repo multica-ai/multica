@@ -4,13 +4,13 @@ import { useMemo, useRef, useState } from "react";
 import {
   AlertCircle,
   AlertTriangle,
-  BookOpen,
   Download,
   HardDrive,
   Lock,
   Pencil,
   Plus,
-} from "lucide-react";
+} from "@multica/ui/icons";
+import { SkillIcon } from "../lib/skill-icon";
 import type {
   Agent,
   AgentRuntime,
@@ -50,14 +50,19 @@ import {
   TooltipTrigger,
 } from "@multica/ui/components/ui/tooltip";
 import { ActorAvatar } from "@multica/ui/components/common/actor-avatar";
-import { useNavigation, useRowLink } from "../../navigation";
+import {
+  rowLinkInteractiveProps,
+  useNavigation,
+  useRowLink,
+} from "../../navigation";
 import {
   CollectionPageHeader,
   CollectionPageHeaderAction,
   CollectionPageState,
 } from "../../layout/collection-page";
 import { canEditSkill } from "../hooks/use-can-edit-skill";
-import { readOrigin, type OriginInfo } from "../lib/origin";
+import { originSourceUrl, readOrigin } from "../lib/origin";
+import { rowMatchesFilters, type SkillRow } from "./skill-list-filter";
 import { CreateSkillDialog } from "./create-skill-dialog";
 import {
   useSkillsViewStore,
@@ -72,6 +77,7 @@ import {
   type SkillActionsContext,
 } from "./skill-list-actions";
 import { useT, useTimeAgo } from "../../i18n";
+import { docsLocalePrefix } from "../../common/docs-locale";
 
 // Column template — single source of truth for header, rows, and skeletons.
 // Tracks: [edge 0.75rem] [checkbox 1rem] [name, only fr track]
@@ -148,20 +154,10 @@ function columnTrackVars(
 // (@multica/core/skills/stores/view-store) so the persisted state and the
 // UI share one definition. Re-exported here for the toolbar's convenience.
 export type SortField = SkillSortField;
+export { rowMatchesFilters, type SkillRow } from "./skill-list-filter";
 
-export interface SkillRow {
-  skill: SkillSummary;
-  agents: Agent[];
-  creator: MemberWithUser | null;
-  runtime: AgentRuntime | null;
-  originType: OriginInfo["type"];
-  canEdit: boolean;
-}
-
-// ---------------------------------------------------------------------------
 // Page header bar — uses shared PageHeader so the mobile sidebar trigger and
 // h-12 chrome stay consistent with every other dashboard list page.
-// ---------------------------------------------------------------------------
 
 function PageHeaderBar({
   totalCount,
@@ -170,15 +166,14 @@ function PageHeaderBar({
   totalCount: number;
   onCreate: () => void;
 }) {
-  const { t } = useT("skills");
+  const { t, i18n } = useT("skills");
   return (
     <CollectionPageHeader
-      icon={BookOpen}
+      icon={SkillIcon}
       title={t(($) => $.page.title)}
       count={totalCount}
-      description={t(($) => $.page.tagline)}
       learnMore={{
-        href: "https://multica.ai/docs/skills",
+        href: `https://multica.ai/docs${docsLocalePrefix(i18n.language)}/skills`,
         label: t(($) => $.page.learn_more),
       }}
       actions={
@@ -192,9 +187,7 @@ function PageHeaderBar({
   );
 }
 
-// ---------------------------------------------------------------------------
 // Cells
-// ---------------------------------------------------------------------------
 
 // Hover-revealed multi-select checkbox. Same pattern as SkillPickerList:
 // the shadcn Checkbox is presentational only (`pointer-events-none`, so the
@@ -237,14 +230,14 @@ function NameCell({ row }: { row: SkillRow }) {
   const { skill, canEdit } = row;
   return (
     <ListGridCell className="gap-1.5">
-      <span className="min-w-0 truncate text-sm font-medium">
+      <span className="min-w-0 truncate text-body font-medium">
         {skill.name}
       </span>
       {!canEdit && (
         <Tooltip>
           <TooltipTrigger
             render={
-              <Lock className="h-3 w-3 shrink-0 text-muted-foreground/60" />
+              <Lock className="h-3 w-3 shrink-0 text-faint-foreground" />
             }
           />
           <TooltipContent>{t(($) => $.table.lock_tooltip)}</TooltipContent>
@@ -259,7 +252,7 @@ function UsedByCell({ agents }: { agents: Agent[] }) {
   if (agents.length === 0) {
     return (
       <ListGridCell>
-        <span className="text-xs text-muted-foreground/70">
+        <span className="text-caption text-muted-foreground">
           {t(($) => $.table.unused)}
         </span>
       </ListGridCell>
@@ -277,7 +270,7 @@ function UsedByCell({ agents }: { agents: Agent[] }) {
           isAgent
           size="md"
         />
-        <span className="min-w-0 truncate text-xs text-muted-foreground">
+        <span className="min-w-0 truncate text-caption text-muted-foreground">
           {agent.name}
         </span>
       </ListGridCell>
@@ -307,7 +300,7 @@ function UsedByCell({ agents }: { agents: Agent[] }) {
           </Tooltip>
         ))}
         {extra > 0 && (
-          <span className="inline-flex h-6 w-6 items-center justify-center rounded-full bg-muted text-xs font-medium text-muted-foreground ring-2 ring-background">
+          <span className="inline-flex h-6 w-6 items-center justify-center rounded-full bg-muted text-caption font-medium text-muted-foreground ring-2 ring-background">
             +{extra}
           </span>
         )}
@@ -348,10 +341,33 @@ function SourceCell({
     label = t(($) => $.table.source_github);
   }
 
+  // Imported skills link to their upstream page; the anchor must not bubble
+  // its click OR auxclick into the row's whole-row navigation.
+  const sourceUrl = originSourceUrl(origin);
+
   return (
-    <ListGridCell className="hidden gap-1.5 text-xs text-muted-foreground @2xl:flex">
+    <ListGridCell className="hidden gap-1.5 text-caption text-muted-foreground @2xl:flex">
       {icon}
-      <span className="min-w-0 truncate">{label}</span>
+      {sourceUrl ? (
+        <Tooltip>
+          <TooltipTrigger
+            render={
+              <a
+                href={sourceUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                {...rowLinkInteractiveProps}
+                className="min-w-0 truncate hover:underline"
+              >
+                {label}
+              </a>
+            }
+          />
+          <TooltipContent side="top">{sourceUrl}</TooltipContent>
+        </Tooltip>
+      ) : (
+        <span className="min-w-0 truncate">{label}</span>
+      )}
     </ListGridCell>
   );
 }
@@ -367,7 +383,7 @@ function CreatorCell({ creator }: { creator: MemberWithUser | null }) {
             avatarUrl={resolvePublicFileUrl(creator.avatar_url)}
             size="md"
           />
-          <span className="min-w-0 truncate text-xs text-muted-foreground">
+          <span className="min-w-0 truncate text-caption text-muted-foreground">
             {creator.name}
           </span>
         </>
@@ -376,15 +392,13 @@ function CreatorCell({ creator }: { creator: MemberWithUser | null }) {
   );
 }
 
-// ---------------------------------------------------------------------------
 // Empty state
-// ---------------------------------------------------------------------------
 
 function EmptyState({ onCreate }: { onCreate: () => void }) {
   const { t } = useT("skills");
   return (
     <CollectionPageState
-      icon={BookOpen}
+      icon={SkillIcon}
       title={t(($) => $.page.empty.title)}
       description={t(($) => $.page.empty.description)}
       actions={
@@ -397,9 +411,7 @@ function EmptyState({ onCreate }: { onCreate: () => void }) {
   );
 }
 
-// ---------------------------------------------------------------------------
 // List
-// ---------------------------------------------------------------------------
 
 function SkillListHeader({
   sortField,
@@ -552,9 +564,7 @@ function LoadingSkeleton() {
   );
 }
 
-// ---------------------------------------------------------------------------
 // Page
-// ---------------------------------------------------------------------------
 
 export default function SkillsPage() {
   const { t } = useT("skills");
@@ -662,34 +672,9 @@ export default function SkillsPage() {
 
   // Visible rows: name search + filters, then sort.
   const rows = useMemo<SkillRow[]>(() => {
-    const q = search.trim().toLowerCase();
-    const filtered = allRows.filter((row) => {
-      if (q && !row.skill.name.toLowerCase().includes(q)) return false;
-      if (filters.usage.length > 0) {
-        const usage = row.agents.length > 0 ? "used" : "unused";
-        if (!filters.usage.includes(usage)) return false;
-      }
-      if (
-        filters.origins.length > 0 &&
-        !filters.origins.includes(row.originType)
-      ) {
-        return false;
-      }
-      if (
-        filters.agents.length > 0 &&
-        !row.agents.some((a) => filters.agents.includes(a.id))
-      ) {
-        return false;
-      }
-      if (
-        filters.creators.length > 0 &&
-        (!row.skill.created_by ||
-          !filters.creators.includes(row.skill.created_by))
-      ) {
-        return false;
-      }
-      return true;
-    });
+    const filtered = allRows.filter((row) =>
+      rowMatchesFilters(row, filters, search),
+    );
 
     const dir = sortDirection === "asc" ? 1 : -1;
     filtered.sort((a, b) => {
@@ -802,23 +787,21 @@ export default function SkillsPage() {
       {supportingQueryDown && (
         <div
           role="status"
-          className="flex shrink-0 items-start gap-2 border-b bg-warning/10 px-6 py-2 text-xs text-muted-foreground"
+          className="flex shrink-0 items-start gap-2 border-b bg-warning/10 px-6 py-2 text-caption text-muted-foreground"
         >
           <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0 text-warning" />
           <span>{t(($) => $.page.supporting_data_warning)}</span>
         </div>
       )}
 
-      {isLoading ? (
-        <div className="flex-1 overflow-y-auto @container">
-          <LoadingSkeleton />
-        </div>
-      ) : showEmpty ? (
+      {showEmpty ? (
         <div className="flex flex-1 items-center justify-center">
           <EmptyState onCreate={() => setCreateOpen(true)} />
         </div>
       ) : (
         <>
+          {/* Mounted through loading so the rows don't drop by a toolbar's
+              height when the list lands. */}
           <SkillListToolbar
             search={search}
             onSearchChange={setSearch}
@@ -834,6 +817,11 @@ export default function SkillsPage() {
             allRows={allRows}
             visibleCount={rows.length}
           />
+          {isLoading ? (
+            <div className="flex-1 overflow-y-auto @container">
+              <LoadingSkeleton />
+            </div>
+          ) : (
           <div
             ref={listScrollRef}
             className="min-h-0 flex-1 overflow-auto @container"
@@ -859,7 +847,7 @@ export default function SkillsPage() {
               }}
             >
               {rows.length === 0 && (
-                <div className="col-span-full py-16 text-center text-sm text-muted-foreground">
+                <div className="col-span-full py-16 text-center text-body text-muted-foreground">
                   {t(($) => $.page.no_matches.title)}
                 </div>
               )}
@@ -872,7 +860,7 @@ export default function SkillsPage() {
                 className={`cursor-pointer ${
                   selectedIds.has(row.skill.id) ? "bg-accent/30" : ""
                 }`}
-                {...rowLink(paths.skillDetail(row.skill.id))}
+                {...rowLink(paths.skillDetail(row.skill.id), row.skill.name)}
               >
                 <CheckboxCell
                   checked={selectedIds.has(row.skill.id)}
@@ -895,14 +883,14 @@ export default function SkillsPage() {
                   <ListGridCell className="hidden px-0 @2xl:flex" />
                 )}
                 {isColVisible("updated") ? (
-                  <ListGridCell className="hidden whitespace-nowrap text-xs tabular-nums text-muted-foreground @2xl:flex">
+                  <ListGridCell className="hidden whitespace-nowrap text-caption tabular-nums text-muted-foreground @2xl:flex">
                     {timeAgo(row.skill.updated_at)}
                   </ListGridCell>
                 ) : (
                   <ListGridCell className="hidden px-0 @2xl:flex" />
                 )}
                 {isColVisible("created") ? (
-                  <ListGridCell className="hidden whitespace-nowrap text-xs tabular-nums text-muted-foreground @2xl:flex">
+                  <ListGridCell className="hidden whitespace-nowrap text-caption tabular-nums text-muted-foreground @2xl:flex">
                     {timeAgo(row.skill.created_at)}
                   </ListGridCell>
                 ) : (
@@ -917,6 +905,7 @@ export default function SkillsPage() {
             </ListGridBody>
           </ListGrid>
           </div>
+          )}
         </>
       )}
 

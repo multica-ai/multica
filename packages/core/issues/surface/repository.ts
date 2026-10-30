@@ -1,95 +1,21 @@
-import type { UseQueryOptions } from "@tanstack/react-query";
-import {
-  issueAssigneeGroupsOptions,
-  issueFlatExportOptions,
-  issueFlatListOptions,
-  issueListOptions,
-  myIssueAssigneeGroupsOptions,
-  myIssueListOptions,
-  projectGanttIssuesOptions,
-  type AssigneeGroupedIssuesFilter,
-  type IssueFlatFilter,
-  type IssueSortParam,
-} from "../queries";
-import type {
-  GroupedIssuesResponse,
-  Issue,
-  ListIssuesCache,
-} from "../../types";
 import type { IssueSurfaceQueryPlan } from "./query-plan";
+import { projectGanttIssuesOptions } from "../queries";
 
 /**
- * Issue surface repository — resolves a {@link IssueSurfaceQueryPlan} to the
- * concrete query options backing each render mode. Views declare WHICH
- * window they show (scope → plan) and WHICH mode is active; which endpoint,
- * cache key, and pagination style serve it is decided here in core, so the
- * view layer never branches on workspace-vs-scoped plumbing.
+ * Issue surface repository — resolves a {@link IssueSurfaceQueryPlan} to
+ * concrete query options. Every list-shaped mode (table, list, board,
+ * swimlane) is served by the server-owned Table query channel; the Gantt
+ * projection below is the one remaining scoped fetch, and it compiles its
+ * assignee-type narrowing from the same plan as everything else.
  */
-
-/** Status-bucketed list — feeds the board / list / swimlane modes.
- *
- * Both branches share the exact cache shape (`ListIssuesCache` selected to
- * `Issue[]`); the cast below only erases the branch-specific query-key
- * literal so one `useQuery` call site can consume either plan kind. */
-export function issueSurfaceListOptions(
+export function issueSurfaceGanttOptions(
   wsId: string,
+  projectId: string,
   plan: IssueSurfaceQueryPlan,
-  sort?: IssueSortParam,
-): UseQueryOptions<ListIssuesCache, Error, Issue[]> {
-  return (
-    plan.kind === "workspace"
-      ? issueListOptions(wsId, sort)
-      : myIssueListOptions(wsId, plan.queryScope, plan.queryFilter, plan.userId, sort)
-  ) as UseQueryOptions<ListIssuesCache, Error, Issue[]>;
-}
-
-/** Flat cross-status window — feeds the table mode with offset pagination. */
-export function issueSurfaceFlatOptions(
-  wsId: string,
-  plan: IssueSurfaceQueryPlan,
-  sort?: IssueSortParam,
-  facets: IssueFlatFilter = {},
 ) {
-  return issueFlatListOptions(
+  return projectGanttIssuesOptions(
     wsId,
-    plan.queryScope ?? plan.scopeKey,
-    { ...plan.queryFilter, ...facets },
-    plan.userId,
-    sort,
+    projectId,
+    plan.queryFilter.assignee_types,
   );
-}
-
-/** Fully materialized flat window used only for an explicit CSV export. */
-export function issueSurfaceFlatExportOptions(
-  wsId: string,
-  plan: IssueSurfaceQueryPlan,
-  sort?: IssueSortParam,
-  facets: IssueFlatFilter = {},
-) {
-  return issueFlatExportOptions(
-    wsId,
-    plan.queryScope ?? plan.scopeKey,
-    { ...plan.queryFilter, ...facets },
-    plan.userId,
-    sort,
-  );
-}
-
-/** Assignee-grouped list — feeds the board's group-by-assignee mode. */
-export function issueSurfaceAssigneeGroupsOptions(
-  wsId: string,
-  plan: IssueSurfaceQueryPlan,
-  filter: AssigneeGroupedIssuesFilter,
-  sort?: IssueSortParam,
-): UseQueryOptions<GroupedIssuesResponse> {
-  return (
-    plan.kind === "workspace"
-      ? issueAssigneeGroupsOptions(wsId, filter, sort)
-      : myIssueAssigneeGroupsOptions(wsId, plan.queryScope, filter, plan.userId, sort)
-  ) as UseQueryOptions<GroupedIssuesResponse>;
-}
-
-/** Scheduled-only issue set — feeds a project surface's Gantt mode. */
-export function issueSurfaceGanttOptions(wsId: string, projectId: string) {
-  return projectGanttIssuesOptions(wsId, projectId);
 }

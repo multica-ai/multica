@@ -86,26 +86,37 @@ function sinkListItemRange(itemType: NodeType): Command {
  * and must be swallowed even when the structural indent is a no-op (first child
  * with nothing to nest under, or already at max depth). Otherwise the unhandled
  * Tab falls through to the browser and moves focus out of the editor to the
- * next control. So the return value tracks "is the caret in this list?"
- * (`editor.isActive(name)`), NOT "did the indent move anything?": indent
- * best-effort, then swallow while in a list, fall through (focus nav) when not.
+ * next control. Handle only the nearest list range containing the selection:
+ * `isActive` also matches ancestor items, so a checkbox keymap would otherwise
+ * swallow Tab or lift the parent checkbox while editing a nested bullet.
  */
 function listItemKeymap(editor: Editor, name: string) {
+  const ownsSelection = () => {
+    const { $from, $to } = editor.state.selection;
+    const range = $from.blockRange($to, (node) => {
+      const itemName = node.firstChild?.type.name;
+      return itemName === "listItem" || itemName === "taskItem";
+    });
+    return range?.parent.firstChild?.type.name === name;
+  };
+
   return {
     Enter: () =>
+      ownsSelection() &&
       editor.commands.first(({ commands }) => [
         () => commands.splitListItem(name),
         () => commands.liftListItem(name),
       ]),
     Tab: () => {
+      if (!ownsSelection()) return false;
       const itemType = editor.schema.nodes[name];
       if (!itemType) return false;
       sinkListItemRange(itemType)(editor.state, (tr) =>
         editor.view.dispatch(tr),
       );
-      return editor.isActive(name);
+      return true;
     },
-    "Shift-Tab": () => editor.commands.liftListItem(name),
+    "Shift-Tab": () => ownsSelection() && editor.commands.liftListItem(name),
   };
 }
 

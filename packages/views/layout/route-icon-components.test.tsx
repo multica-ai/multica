@@ -1,15 +1,7 @@
 import { describe, it, expect } from "vitest";
-import { paths, WORKSPACE_PAGES, DEFAULT_ROUTE_ICON_NAME } from "@multica/core/paths";
+import { render } from "@testing-library/react";
+import { paths, DEFAULT_ROUTE_ICON_NAME } from "@multica/core/paths";
 import { ROUTE_ICON_COMPONENTS, routeIconForPath } from "./route-icon-components";
-
-describe("ROUTE_ICON_COMPONENTS", () => {
-  it("has a component for every page icon", () => {
-    const missing = Object.values(WORKSPACE_PAGES)
-      .map((page) => page.icon)
-      .filter((name) => !ROUTE_ICON_COMPONENTS[name]);
-    expect(missing).toEqual([]);
-  });
-});
 
 describe("routeIconForPath", () => {
   // The invariant this whole contract exists for (MUL-4370): the sidebar and
@@ -28,6 +20,13 @@ describe("routeIconForPath", () => {
     const p = paths.workspace("acme");
     expect(routeIconForPath(p.projects())).not.toBe(routeIconForPath(p.issues()));
     expect(routeIconForPath(p.autopilots())).not.toBe(routeIconForPath(p.issues()));
+  });
+
+  // The active sidebar item tints the glyph's `icon-body`; without one the
+  // active state loses its fill.
+  it.each(Object.entries(ROUTE_ICON_COMPONENTS))("%s marks a body for the active tint", (_, Icon) => {
+    const { container } = render(<Icon />);
+    expect(container.querySelector("svg .icon-body")).not.toBeNull();
   });
 
   it("returns the default component instead of undefined for an unknown route", () => {

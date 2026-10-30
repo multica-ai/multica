@@ -564,6 +564,7 @@ func TestOpencodeBackendOverridesUserOpenCodeConfigContent(t *testing.T) {
 // the child saw at exec time.
 func fakeOpencodeScriptCapturingEnv() string {
 	return `#!/bin/sh
+cat > /dev/null
 if [ -n "$OPENCODE_CAPTURE_FILE" ]; then
   {
     printf 'OPENCODE_CONFIG_CONTENT=%s\n' "${OPENCODE_CONFIG_CONTENT-<unset>}"

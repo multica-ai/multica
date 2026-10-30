@@ -2,15 +2,25 @@
  * @vitest-environment jsdom
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { act, renderHook } from "@testing-library/react";
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { act, renderHook, waitFor } from "@testing-library/react";
+import { QueryClient, QueryClientProvider, useQuery } from "@tanstack/react-query";
 import type { ReactNode } from "react";
 import { setApiInstance } from "../api";
 import type { ApiClient } from "../api/client";
 import { defaultStorage } from "../platform/storage";
-import type { Workspace } from "../types";
-import { useCreateWorkspace, useDeleteWorkspace } from "./mutations";
-import { workspaceKeys } from "./queries";
+import type { Workspace, WorkspaceMcpServer } from "../types";
+import { forgetLocalSearchIndex } from "../search-index/instance";
+import {
+  useCreateWorkspace,
+  useDeleteWorkspace,
+  useLeaveWorkspace,
+  useUpdateWorkspaceMcpServer,
+} from "./mutations";
+
+vi.mock("../search-index/instance", () => ({
+  forgetLocalSearchIndex: vi.fn(async () => undefined),
+}));
+import { agentMcpServersOptions, workspaceKeys } from "./queries";
 import {
   isWorkspaceDeletePending,
   unmarkWorkspaceDeletePending,
@@ -128,6 +138,7 @@ describe("useDeleteWorkspace", () => {
     unmarkWorkspaceDeletePending("ws-2");
     localStorage.clear();
     vi.restoreAllMocks();
+    vi.mocked(forgetLocalSearchIndex).mockClear();
   });
 
   it("leaves the list cache untouched while the DELETE is pending (no optimistic removal)", async () => {
@@ -192,6 +203,7 @@ describe("useDeleteWorkspace", () => {
 
     expect(defaultStorage.getItem("multica_issue_draft:delete-me")).toBeNull();
     expect(defaultStorage.getItem("multica_issue_draft:keep-me")).toBe("draft");
+    expect(forgetLocalSearchIndex).toHaveBeenCalledWith("ws-2");
   });
 
   it("leaves storage and cache untouched when the DELETE fails", async () => {
@@ -210,6 +222,8 @@ describe("useDeleteWorkspace", () => {
     // No optimistic write happened, so there is nothing to roll back.
     expect(defaultStorage.getItem("multica_issue_draft:delete-me")).toBe("draft");
     expect(cachedList().map((w) => w.id)).toEqual(["ws-1", "ws-2"]);
+    // The workspace still exists, so its local search copy stays.
+    expect(forgetLocalSearchIndex).not.toHaveBeenCalled();
   });
 
   it("keeps the self-initiated marker after success and lifts it after failure", async () => {
@@ -233,5 +247,144 @@ describe("useDeleteWorkspace", () => {
       await expect(result.current.mutateAsync("ws-2")).rejects.toThrow("boom");
     });
     expect(isWorkspaceDeletePending("ws-2")).toBe(false);
+  });
+});
+
+describe("useUpdateWorkspaceMcpServer", () => {
+  let qc: QueryClient;
+
+  beforeEach(() => {
+    qc = new QueryClient({
+      defaultOptions: { queries: { retry: false, staleTime: Infinity } },
+    });
+  });
+
+  afterEach(() => {
+    qc.clear();
+    vi.restoreAllMocks();
+  });
+
+  it.each([
+    {
+      change: "renaming a server",
+      update: { name: "renamed" },
+      expected: { name: "renamed", transport: "http" },
+    },
+    {
+      change: "replacing HTTP configuration with stdio",
+      update: { config: { command: "mcp-server", args: [] } },
+      expected: { name: "original", transport: "stdio" },
+    },
+  ])("refreshes active and invalidates inactive agent assignments after $change", async ({ update, expected }) => {
+    const original: WorkspaceMcpServer = {
+      id: "server-1",
+      workspace_id: "ws-1",
+      name: "original",
+      transport: "http",
+      created_at: "2026-01-01T00:00:00Z",
+      updated_at: "2026-01-01T00:00:00Z",
+    };
+    let current = original;
+    const updateWorkspaceMcpServer = vi.fn<ApiClient["updateWorkspaceMcpServer"]>()
+      .mockImplementation(async () => {
+        current = { ...original, ...expected };
+        return current;
+      });
+    const listAgentMcpServers = vi.fn<ApiClient["listAgentMcpServers"]>()
+      .mockImplementation(async () => [{ ...current, enabled: true }]);
+    setApiInstance({ updateWorkspaceMcpServer, listAgentMcpServers } as unknown as ApiClient);
+
+    const activeKey = agentMcpServersOptions("agent-1").queryKey;
+    const inactiveKey = agentMcpServersOptions("agent-2").queryKey;
+    qc.setQueryData(workspaceKeys.mcpServers("ws-1"), [original]);
+    qc.setQueryData(activeKey, [{ ...original, enabled: true }]);
+    qc.setQueryData(inactiveKey, [{ ...original, enabled: false }]);
+
+    const { result } = renderHook(() => ({
+      assignment: useQuery(agentMcpServersOptions("agent-1")),
+      updateServer: useUpdateWorkspaceMcpServer("ws-1"),
+    }), { wrapper: createWrapper(qc) });
+
+    // Infinity staleTime reproduces a previously visited agent page whose
+    // assignment otherwise never refreshes when the workspace library changes.
+    expect(result.current.assignment.data).toEqual([{ ...original, enabled: true }]);
+    expect(listAgentMcpServers).not.toHaveBeenCalled();
+
+    await act(async () => {
+      await result.current.updateServer.mutateAsync({ serverId: "server-1", ...update });
+    });
+
+    expect(updateWorkspaceMcpServer).toHaveBeenCalledWith("ws-1", "server-1", update);
+    expect(qc.getQueryState(workspaceKeys.mcpServers("ws-1"))?.isInvalidated).toBe(true);
+    expect(qc.getQueryState(inactiveKey)?.isInvalidated).toBe(true);
+    await waitFor(() => {
+      expect(result.current.assignment.data).toEqual([{ ...original, ...expected, enabled: true }]);
+    });
+    expect(listAgentMcpServers).toHaveBeenCalledWith("agent-1");
+  });
+
+  it("refetches authoritative assignments while preserving a failed update's rejection", async () => {
+    const original: WorkspaceMcpServer = {
+      id: "server-1",
+      workspace_id: "ws-1",
+      name: "original",
+      transport: "http",
+      created_at: "2026-01-01T00:00:00Z",
+      updated_at: "2026-01-01T00:00:00Z",
+    };
+    const responseLost = new Error("response lost after update committed");
+    const authoritative = [{ ...original, name: "renamed", enabled: false }];
+    const updateWorkspaceMcpServer = vi.fn<ApiClient["updateWorkspaceMcpServer"]>()
+      .mockRejectedValue(responseLost);
+    const listAgentMcpServers = vi.fn<ApiClient["listAgentMcpServers"]>()
+      .mockResolvedValue(authoritative);
+    setApiInstance({ updateWorkspaceMcpServer, listAgentMcpServers } as unknown as ApiClient);
+
+    qc.setQueryData(workspaceKeys.mcpServers("ws-1"), [original]);
+    qc.setQueryData(agentMcpServersOptions("agent-1").queryKey, [
+      { ...original, enabled: true },
+    ]);
+    const { result } = renderHook(() => ({
+      assignment: useQuery(agentMcpServersOptions("agent-1")),
+      updateServer: useUpdateWorkspaceMcpServer("ws-1"),
+    }), { wrapper: createWrapper(qc) });
+
+    expect(listAgentMcpServers).not.toHaveBeenCalled();
+    await act(async () => {
+      await expect(result.current.updateServer.mutateAsync({
+        serverId: "server-1",
+        name: "renamed",
+      })).rejects.toBe(responseLost);
+    });
+
+    expect(qc.getQueryState(workspaceKeys.mcpServers("ws-1"))?.isInvalidated).toBe(true);
+    await waitFor(() => {
+      expect(result.current.assignment.data).toEqual(authoritative);
+      expect(result.current.updateServer.error).toBe(responseLost);
+    });
+    expect(listAgentMcpServers).toHaveBeenCalledWith("agent-1");
+  });
+});
+
+describe("useLeaveWorkspace", () => {
+  afterEach(() => {
+    vi.mocked(forgetLocalSearchIndex).mockClear();
+  });
+
+  it("destroys the local search copy only after the server confirms", async () => {
+    const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    const leaveWorkspace = vi.fn().mockRejectedValueOnce(new Error("nope")).mockResolvedValueOnce(undefined);
+    setApiInstance({ leaveWorkspace, listWorkspaces: vi.fn().mockResolvedValue([]) } as unknown as ApiClient);
+    const { result } = renderHook(() => useLeaveWorkspace(), { wrapper: createWrapper(qc) });
+
+    await act(async () => {
+      await expect(result.current.mutateAsync("ws-3")).rejects.toThrow("nope");
+    });
+    expect(forgetLocalSearchIndex).not.toHaveBeenCalled();
+
+    await act(async () => {
+      await result.current.mutateAsync("ws-3");
+    });
+    expect(forgetLocalSearchIndex).toHaveBeenCalledWith("ws-3");
   });
 });

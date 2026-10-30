@@ -36,6 +36,7 @@ func newProjectResourceUpdateTestCmd() *cobra.Command {
 	c.Flags().String("local-path", "", "")
 	c.Flags().String("daemon-id", "", "")
 	c.Flags().String("ref-label", "", "")
+	c.Flags().String("execution-mode", "", "")
 	c.Flags().String("ref", "", "")
 	c.Flags().String("label", "", "")
 	c.Flags().Bool("clear-label", false, "")
@@ -323,6 +324,64 @@ func TestBuildResourceRefFromFlagsLocalDirectoryMerges(t *testing.T) {
 		}
 		if _, ok := ref["label"]; ok {
 			t.Errorf("expected embedded label to be cleared, got %v", ref["label"])
+		}
+	})
+}
+
+// Switching an existing resource between in_place and worktree is a one-flag
+// edit, and an unrelated edit must not silently reset the mode — that would
+// drop a user back to serialised tasks without telling them.
+func TestBuildResourceRefFromFlagsLocalDirectoryExecutionMode(t *testing.T) {
+	t.Run("sets worktree mode", func(t *testing.T) {
+		cmd := newProjectResourceUpdateTestCmd()
+		_ = cmd.Flags().Set("execution-mode", "worktree")
+		existing := map[string]any{"local_path": "/Users/foo/work/a", "daemon_id": "d1"}
+		ref, has, err := buildResourceRefFromFlags(cmd, "local_directory", existing)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if !has {
+			t.Fatal("expected has=true")
+		}
+		if ref["execution_mode"] != "worktree" {
+			t.Errorf("execution_mode = %v, want worktree", ref["execution_mode"])
+		}
+	})
+
+	t.Run("unrelated edit preserves existing mode", func(t *testing.T) {
+		cmd := newProjectResourceUpdateTestCmd()
+		_ = cmd.Flags().Set("ref-label", "renamed")
+		existing := map[string]any{
+			"local_path":     "/Users/foo/work/a",
+			"daemon_id":      "d1",
+			"execution_mode": "worktree",
+		}
+		ref, _, err := buildResourceRefFromFlags(cmd, "local_directory", existing)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if ref["execution_mode"] != "worktree" {
+			t.Errorf("execution_mode lost on an unrelated edit: %v", ref["execution_mode"])
+		}
+	})
+
+	t.Run("empty value clears back to the default", func(t *testing.T) {
+		cmd := newProjectResourceUpdateTestCmd()
+		_ = cmd.Flags().Set("execution-mode", "")
+		existing := map[string]any{
+			"local_path":     "/Users/foo/work/a",
+			"daemon_id":      "d1",
+			"execution_mode": "worktree",
+		}
+		ref, has, err := buildResourceRefFromFlags(cmd, "local_directory", existing)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if !has {
+			t.Fatal("expected has=true")
+		}
+		if _, ok := ref["execution_mode"]; ok {
+			t.Errorf("expected execution_mode cleared, got %v", ref["execution_mode"])
 		}
 	})
 }

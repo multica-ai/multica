@@ -1,0 +1,22 @@
+-- Generate planner statistics for the LOWER(properties::text) expression that
+-- migration 446 indexes. Building an expression index does not collect
+-- statistics for its expression — the CREATE INDEX docs are explicit that
+-- ANALYZE must run, or the autovacuum daemon must analyze the table, before the
+-- planner has anything to judge the new index by.
+--
+-- Without it the index is built, valid, and ignored: an existing issue table
+-- gets no statistics row for the expression, the planner falls back to a
+-- pattern-length heuristic that estimates a single-character needle at 5% of
+-- the table, and a scalar `contains` filter stays on the workspace-wide
+-- sequential scan this index exists to remove — now also paying for the
+-- prefilter clause on every row. A deployment with no bulk writes cannot rely
+-- on autovacuum to fix that promptly: the default threshold is 10% of rows
+-- changed, which a large, quiet issue table can take weeks to reach.
+--
+-- Deliberately not gated on pg_bigm, unlike 446: ANALYZE is valid, cheap and
+-- side-effect-free everywhere, and refreshing the table's ordinary column
+-- statistics is useful even where the expression index was skipped. It takes
+-- ShareUpdateExclusiveLock, which does not block reads or writes.
+--
+-- Separate file because 446 must stay a single-statement concurrent build.
+ANALYZE issue;

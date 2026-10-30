@@ -26,8 +26,15 @@ const (
 	OutcomeDropped       Outcome = "dropped"
 	OutcomeNeedsBinding  Outcome = "needs_binding"
 	OutcomeIngested      Outcome = "ingested"
+	OutcomeFreshPending  Outcome = "fresh_pending"
+	OutcomeChatStarted   Outcome = "chat_started"
+	OutcomeIssueUsage    Outcome = "issue_usage"
 	OutcomeAgentOffline  Outcome = "agent_offline"
 	OutcomeAgentArchived Outcome = "agent_archived"
+	// OutcomeInvokeDenied — the sender may not run this agent. The web chat
+	// refuses the same person at the same point; this is that verdict on the
+	// channel side.
+	OutcomeInvokeDenied Outcome = "invoke_denied"
 )
 
 // DropReason enumerates the drop-audit categories. Values match the legacy
@@ -41,6 +48,7 @@ const (
 	DropReasonDuplicate           DropReason = "duplicate"
 	DropReasonRevokedInstallation DropReason = "revoked_installation"
 	DropReasonInvalidEvent        DropReason = "invalid_event"
+	DropReasonInvokeDenied        DropReason = "invocation_not_allowed"
 )
 
 // Result is the typed verdict the Router produces for one inbound message,
@@ -51,13 +59,29 @@ type Result struct {
 	DropReason     DropReason
 	InstallationID pgtype.UUID
 	ChatSessionID  pgtype.UUID
+	// ChatMessageID identifies this persisted input, including before debounce creates a task.
+	ChatMessageID        pgtype.UUID
+	ChannelBindingID     pgtype.UUID
+	ChannelRouteRevision int64
 	// Sender is the platform-native sender id (e.g. Lark open_id), so the
 	// replier can target a binding prompt back to the sender.
-	Sender          string
-	IssueID         pgtype.UUID
-	IssueNumber     int32
-	IssueIdentifier string
-	IssueTitle      string
+	Sender             string
+	IssueID            pgtype.UUID
+	IssueNumber        int32
+	IssueIdentifier    string
+	IssueWorkspaceSlug string
+	IssueTitle         string
+	// IssueDuplicate marks an /issue command that did not create a new issue
+	// because the shared duplicate guard found the active IssueID above.
+	// Repliers render this as a business conflict, never as an internal error.
+	IssueDuplicate bool
+	// IssueUsageHadMedia marks a title-less /issue whose current inbound
+	// message also carried downloadable media. Repliers use it to tell the
+	// sender to include that media again with the corrected command.
+	IssueUsageHadMedia bool
+	// runScheduled reports whether this ingest scheduled a normal chat run.
+	// It is Router-internal state: repliers must continue to use Outcome.
+	runScheduled bool
 }
 
 // ResolvedInstallation is the channel-agnostic installation context the Router
@@ -87,6 +111,30 @@ type EnsureSessionParams struct {
 	Message      channel.InboundMessage
 }
 
+// StartSessionParams carries a /new route rotation. Creator owns the new Chat;
+// Sender is the authenticated user who issued the command and initiated its
+// first context. They differ for group chats, where the installer owns the Chat
+// but the group member remains the turn initiator. PersistMessage is false only
+// for the bare control command; a media-only /new is a real first turn.
+type StartSessionParams struct {
+	Installation           ResolvedInstallation
+	Creator                pgtype.UUID
+	Sender                 pgtype.UUID
+	Message                channel.InboundMessage
+	ClaimToken             pgtype.UUID
+	MediaPendingSeconds    float64
+	PersistMessage         bool
+	HistoryBoundaryPending bool
+	BeforeCommit           func(context.Context, pgx.Tx, db.ChatSession) error
+}
+
+type StartSessionResult struct {
+	SessionID     pgtype.UUID
+	BindingID     pgtype.UUID
+	RouteRevision int64
+	Append        AppendResult
+}
+
 // AppendParams carries the inputs for SessionBinder.AppendMessage. ClaimToken
 // is the dedup owner-fence token; the binder runs the dedup Mark INSIDE its
 // chat_message+session tx so the durable write and the Mark commit atomically.
@@ -113,17 +161,76 @@ type AppendResult struct {
 	// DedupMarked is true when AppendMessage finalized the dedup claim in its
 	// own tx; the Router then skips the post-pipeline finalize.
 	DedupMarked bool
+	// ContextRevision is the durable agent-visible context generation assigned
+	// to this message. The batcher keys and task snapshot use it as a boundary.
+	ContextRevision int64
+	// PendingContexts includes every generation with durable unowned input and
+	// its authenticated sender snapshot. It re-arms debounce windows lost on
+	// process crash without borrowing the sender of a later generation.
+	PendingContexts []PendingContext
+	InitialTitle    string
+	// BecameVisible is true only when this committed ordinary turn changed an
+	// implicit channel session from hidden orchestration state into a public Chat.
+	BecameVisible bool
+	BindingID     pgtype.UUID
+	RouteRevision int64
+}
+
+// PendingContext identifies durable unowned input that needs a run timer. The
+// initiator can be absent only for legacy or corrupt data; recovery fails
+// closed for such older generations rather than impersonating a new sender.
+type PendingContext struct {
+	Revision        int64
+	InitiatorUserID pgtype.UUID
+}
+
+// ChannelChatLifecycle bridges committed channel Chat changes to the server's
+// existing realtime and best-effort title services without coupling the engine
+// package to HTTP handlers.
+type ChannelChatLifecycle interface {
+	ChannelChatStarted(event ChannelChatStartedEvent)
+	ChannelChatTitleInitialized(workspaceID, creatorID, sessionID pgtype.UUID, title string)
+	GenerateChannelChatTitle(workspaceID, creatorID, sessionID pgtype.UUID, currentTitle, sourceText string)
+}
+
+// ChannelChatStartedEvent contains enough committed metadata for clients to
+// add or invalidate a channel-created Chat without changing their navigation.
+type ChannelChatStartedEvent struct {
+	WorkspaceID    pgtype.UUID
+	CreatorID      pgtype.UUID
+	AgentID        pgtype.UUID
+	SessionID      pgtype.UUID
+	InstallationID pgtype.UUID
+	ChannelType    channel.Type
+	RouteRevision  int64
+	Title          string
 }
 
 // BindMediaParams carries stored media references to the post-append
-// attachment transaction. MessageID is the durable chat_message created by
-// AppendMessage; media downloads must never run inside this transaction.
+// attachment transaction. MessageID is the durable chat_message whose pending
+// marker the binder clears. IssueID selects issue ownership for an /issue turn;
+// otherwise the references bind to MessageID. IssueDescriptionBase is valid
+// only for an issue created by this turn and lets the binder replace inline
+// placeholders iff nobody edited the description first. Media downloads must
+// never run inside this transaction.
 type BindMediaParams struct {
-	MessageID   pgtype.UUID
-	SessionID   pgtype.UUID
-	WorkspaceID pgtype.UUID
-	Sender      pgtype.UUID
-	MediaRefs   []channel.MediaRef
+	MessageID            pgtype.UUID
+	SessionID            pgtype.UUID
+	WorkspaceID          pgtype.UUID
+	Sender               pgtype.UUID
+	IssueID              pgtype.UUID
+	IssueDescriptionBase pgtype.Text
+	IssueCommandText     string
+	Body                 string
+	MediaRefs            []channel.MediaRef
+}
+
+// BindMediaResult reports a title initialized only after the first media
+// attachment committed. The Router uses it to publish realtime state and run
+// the same best-effort LLM/CAS title flow as a text-first Chat.
+type BindMediaResult struct {
+	InitialTitle string
+	TitleSource  string
 }
 
 // IssueCommand is the parsed /issue command.
@@ -143,6 +250,9 @@ var (
 	// ErrSenderNotMember: the sender is bound but not a workspace member →
 	// non_workspace_member drop.
 	ErrSenderNotMember = errors.New("engine: sender not a workspace member")
+	// ErrRouteChanged asks the Router to resolve the platform route again and
+	// retry the same claimed message before any durable write is made.
+	ErrRouteChanged = errors.New("engine: route changed")
 	// ErrDuplicate: Claim found the message already processed / in flight →
 	// duplicate drop.
 	ErrDuplicate = errors.New("engine: duplicate message")
@@ -180,8 +290,10 @@ type Deduper interface {
 // rotated mid-flight.
 type SessionBinder interface {
 	EnsureSession(ctx context.Context, p EnsureSessionParams) (pgtype.UUID, error)
+	StartSession(ctx context.Context, p StartSessionParams) (StartSessionResult, error)
+	MarkPendingFresh(ctx context.Context, sessionID pgtype.UUID, messageID string) error
 	AppendMessage(ctx context.Context, p AppendParams) (AppendResult, error)
-	BindMedia(ctx context.Context, p BindMediaParams) error
+	BindMedia(ctx context.Context, p BindMediaParams) (BindMediaResult, error)
 }
 
 // MediaResolver resolves platform media after the user message and dedup mark
@@ -201,9 +313,60 @@ type MediaResolver interface {
 	// plain ingest path: no marker, no deferred run, no semaphore slot.
 	HasMedia(msg channel.InboundMessage) bool
 	// ResolveMedia downloads the platform media and uploads it to object
-	// storage. chatMessageID is the durable chat_message the refs will bind
-	// to; the intent ledger keys the reconciler's reference check on it.
+	// storage. chatMessageID is the durable chat_message that owns the pending
+	// intent; the Router decides whether the resulting refs belong to that
+	// message or to an issue created from the same turn.
 	ResolveMedia(ctx context.Context, inst ResolvedInstallation, sender ResolvedIdentity, sessionID, chatMessageID pgtype.UUID, msg channel.InboundMessage) channel.InboundMessage
+}
+
+// MediaAbandonNotifier is an optional extra a MediaResolver may implement, for
+// the one failure it cannot see for itself.
+//
+// ResolveMedia owns telling the sender about the attachments it tried and
+// could not fetch. But the Router wraps the whole call in a media budget of
+// its own, and when THAT expires the resolver either never ran or was cut off
+// mid-way, and the Router then discards even the refs it did return. The
+// resolver cannot see that last step, so neither the notice nor any count it
+// keeps covers it. The user is left with the bot answering the line they typed
+// beside the picture as if there were no picture, and nothing telling them to
+// send it again.
+//
+// The Router calls this on that path, on a goroutine of its own and a context
+// of its own with a deadline (mediaAbandonNoticeTimeout): database
+// finalization does not wait for it, and the context that expired cannot carry
+// a message out. Implementing it is optional, and a resolver that does not is
+// left exactly as it was: the type assertion simply misses, which is what
+// keeps the budget path unchanged for every channel that has not opted in.
+type MediaAbandonNotifier interface {
+	NotifyMediaAbandoned(ctx context.Context, inst ResolvedInstallation, msg channel.InboundMessage, a MediaAbandonment)
+}
+
+// MediaNoticeDrainer is an optional extra for a MediaResolver whose
+// ResolveMedia sends its failure notice on a goroutine of its own, so that the
+// Router's bind does not wait on a chat write. The Router's Drain calls it
+// after every media job has finished, which is after every ResolveMedia has
+// returned and so after every such notice has been started; it blocks until
+// those notices are done. Each notice carries its own deadline, which is what
+// bounds the wait.
+type MediaNoticeDrainer interface {
+	DrainMediaNotices()
+}
+
+// MediaAbandonment is what the Router knows about the attachments it gave up
+// on, and the resolver does not.
+type MediaAbandonment struct {
+	// Cause is the media budget's own error: context.DeadlineExceeded when the
+	// budget ran out, context.Canceled when the Router is draining for
+	// shutdown.
+	Cause error
+	// Started is false when the budget was gone before ResolveMedia was
+	// called, so the resolver saw none of this message's attachments. When it
+	// is true, ResolveMedia ran and returned, and every attachment it failed on
+	// is already its own to account for.
+	Started bool
+	// Dropped are the refs ResolveMedia returned that the Router is discarding
+	// instead of binding: stored, but too late to reach the agent.
+	Dropped []channel.MediaRef
 }
 
 // MediaIntentLedger persists upload intent BEFORE the object is written. The
@@ -275,14 +438,14 @@ type OutboundReplier interface {
 // it.
 type TypingNotifier interface {
 	// OnIngested shows the indicator for a successfully ingested message.
-	OnIngested(ctx context.Context, inst ResolvedInstallation, msg channel.InboundMessage, sessionID pgtype.UUID)
+	OnIngested(ctx context.Context, inst ResolvedInstallation, msg channel.InboundMessage, sessionID pgtype.UUID, chatMessageID pgtype.UUID)
 	// OnSettled clears the indicator for a session whose run trigger produced no
 	// task (agent offline / archived, or an enqueue failure). In that case no
 	// task lifecycle event is ever published, so the platform's own bus-driven
 	// clear (on chat-done / task-failed) would never fire and the indicator would
 	// stick. The Router calls this from the debounced flush. Idempotent: a
 	// session with no indicator is a no-op.
-	OnSettled(ctx context.Context, sessionID pgtype.UUID)
+	OnSettled(ctx context.Context, sessionID pgtype.UUID, scope TypingSettlement)
 }
 
 // ResolverSet is the per-platform bundle the Router runs the pipeline through.
@@ -305,13 +468,27 @@ type ResolverSet struct {
 // for the /issue command. Shared across platforms.
 type IssueCreator interface {
 	Create(ctx context.Context, p service.IssueCreateParams, opts service.IssueCreateOpts) (service.IssueCreateResult, error)
+	PublishAttachmentsChanged(ctx context.Context, issue db.Issue, actorID pgtype.UUID)
 }
 
 // TaskEnqueuer is the narrow subset of service.TaskService the Router needs to
 // trigger a chat run. Shared across platforms.
 type TaskEnqueuer interface {
-	EnqueueChatTask(ctx context.Context, session db.ChatSession, initiatorUserID pgtype.UUID, forceFreshSession bool) (db.AgentTaskQueue, error)
+	EnqueueChannelChatTask(ctx context.Context, session db.ChatSession, initiatorUserID pgtype.UUID, forceFreshSession bool, contextRevision int64, bindingID pgtype.UUID, routeRevision int64) (db.AgentTaskQueue, error)
+	PrepareChatTaskEnqueue(ctx context.Context, agentID, initiatorUserID pgtype.UUID) (service.PreparedChatTaskEnqueue, error)
+	EnqueuePreparedChannelChatTaskInTx(ctx context.Context, tx pgx.Tx, session db.ChatSession, initiatorUserID pgtype.UUID, forceFreshSession bool, contextRevision int64, prepared service.PreparedChatTaskEnqueue) (db.AgentTaskQueue, error)
+	FinalizeChatTaskEnqueue(ctx context.Context, task db.AgentTaskQueue)
 	PromoteChannelChatTasksIfMediaReady(ctx context.Context, sessionID pgtype.UUID) error
+	PromoteDeferredChannelIssueTask(ctx context.Context, taskID pgtype.UUID) error
+	// MemberMayInvokeAgent applies the invocation policy by agent id: the
+	// Router has the installation's agent id, not the loaded row.
+	//
+	// An agent that no longer exists admits nobody, and so does a member who is
+	// not a target — both are (false, nil). A query that FAILED is an error,
+	// never false, because the Router reads false as "tell this person no" and
+	// marks the message processed. The scheduled triggers use the fail-closed
+	// wrapper instead; they can wait for the next tick, a person cannot.
+	MemberMayInvokeAgent(ctx context.Context, agentID, userID pgtype.UUID) (bool, error)
 }
 
 // SessionReader reads the rows the debounced flush + /issue identifier need.
@@ -319,4 +496,11 @@ type TaskEnqueuer interface {
 type SessionReader interface {
 	GetChatSession(ctx context.Context, id pgtype.UUID) (db.ChatSession, error)
 	GetWorkspace(ctx context.Context, id pgtype.UUID) (db.Workspace, error)
+}
+
+// TypingSettlement identifies the failed flush's immutable input boundary.
+// It excludes later arrivals and other context generations in the same session.
+type TypingSettlement struct {
+	WorkspaceID, InstallationID, ThroughMessageID pgtype.UUID
+	ContextRevision                               int64
 }

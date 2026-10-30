@@ -1,6 +1,6 @@
 "use client";
 
-import { Server } from "lucide-react";
+import { Server } from "@multica/ui/icons";
 import { useQuery } from "@tanstack/react-query";
 import type { AgentRuntime } from "@multica/core/types";
 import { useWorkspaceId } from "@multica/core/hooks";
@@ -9,6 +9,7 @@ import { runtimeListOptions } from "@multica/core/runtimes/queries";
 import { Skeleton } from "@multica/ui/components/ui/skeleton";
 import { RuntimeDetail } from "./runtime-detail";
 import { buildRuntimeMachines } from "./runtime-machines";
+import { QoderDetailPage } from "./qoder-detail-page";
 import { useT } from "../../i18n";
 
 export function RuntimeSettingsPage({
@@ -49,16 +50,17 @@ export function RuntimeSettingsPage({
       <div className="flex h-full flex-col items-center justify-center text-muted-foreground">
         <Server
           aria-hidden="true"
-          className="h-10 w-10 text-muted-foreground/30"
+          className="h-10 w-10 text-faint-foreground"
         />
-        <p className="mt-3 text-sm">{t(($) => $.detail_page.not_found_title)}</p>
-        <p className="mt-1 text-xs text-muted-foreground/70">
+        <p className="mt-3 text-body">{t(($) => $.detail_page.not_found_title)}</p>
+        <p className="mt-1 text-caption text-muted-foreground">
           {t(($) => $.detail_page.not_found_hint)}
         </p>
       </div>
     );
   }
   const { machine, runtime } = target;
+  if (runtime.provider === "qoder_cloud") return <QoderDetailPage />;
 
   return (
     <RuntimeDetail

@@ -1,7 +1,12 @@
+// @vitest-environment node
 import { describe, it, expect } from "vitest";
 import type { ChatMessage } from "@multica/core/types";
 import type { ChatTimelineItem } from "@multica/core/chat";
-import { splitTimeline, extractCopyText } from "./copy-text";
+import {
+  canonicalAnswerText,
+  extractCopyText,
+  splitTimeline,
+} from "./copy-text";
 
 const text = (seq: number, content: string): ChatTimelineItem => ({
   seq,
@@ -81,54 +86,38 @@ describe("splitTimeline", () => {
   });
 });
 
+describe("canonicalAnswerText", () => {
+  it("uses persisted message content", () => {
+    expect(canonicalAnswerText(message("legacy body"))).toBe("legacy body");
+  });
+
+  it("applies a surface transform to hidden protocols", () => {
+    expect(
+      canonicalAnswerText(
+        message("visible<agent_draft>hidden</agent_draft>"),
+        (content) => content.replace(/<agent_draft>[\s\S]*<\/agent_draft>/, ""),
+      ),
+    ).toBe("visible");
+  });
+});
+
 describe("extractCopyText", () => {
-  it("falls back to message.content when timeline is empty (legacy)", () => {
-    expect(extractCopyText(message("legacy body"), [])).toBe("legacy body");
-  });
-
-  it("returns concatenated text segments for an all-text timeline", () => {
+  it("copies canonical message content without transcript inference", () => {
     expect(
-      extractCopyText(message(""), [text(1, "hello"), text(2, "world")]),
-    ).toBe("hello\n\nworld");
-  });
-
-  it("returns only the final text for the standard tool-using shape", () => {
-    expect(
-      extractCopyText(message(""), [
-        thinking(1),
-        tool(2),
-        text(3, "intermediate — should be excluded"),
-        tool(4),
-        text(5, "final answer"),
+      extractCopyText(message("complete canonical answer"), [
+        text(1, "partial timeline answer"),
+        thinking(2),
       ]),
-    ).toBe("final answer");
+    ).toBe("complete canonical answer");
   });
 
-  it("includes preface and final, excludes middle text", () => {
+  it("falls back to visible timeline text for legacy empty-content rows", () => {
     expect(
-      extractCopyText(message(""), [
-        text(1, "preface"),
-        tool(2),
-        text(3, "middle — excluded"),
-        tool(4),
-        text(5, "final"),
-      ]),
+      extractCopyText(message(""), [text(1, "preface"), tool(2), text(3, "final")]),
     ).toBe("preface\n\nfinal");
   });
 
-  it("falls back to message.content when timeline has no text items", () => {
-    expect(
-      extractCopyText(message("fallback body"), [thinking(1), tool(2)]),
-    ).toBe("fallback body");
-  });
-
-  it("joins multiple trailing text segments with blank-line separators", () => {
-    expect(
-      extractCopyText(message(""), [
-        tool(1),
-        text(2, "para 1"),
-        text(3, "para 2"),
-      ]),
-    ).toBe("para 1\n\npara 2");
+  it("returns empty text for an attachment-only row", () => {
+    expect(extractCopyText(message(""), [])).toBe("");
   });
 });

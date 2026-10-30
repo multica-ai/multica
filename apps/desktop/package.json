@@ -1,7 +1,7 @@
 {
   "name": "@multica/desktop",
   "productName": "Multica",
-  "version": "0.1.0",
+  "version": "0.7.2",
   "private": true,
   "description": "Multica Desktop — native desktop client for the Multica platform.",
   "homepage": "https://multica.ai",
@@ -14,7 +14,7 @@
     "name": "Multica",
     "email": "support@multica.ai"
   },
-  "license": "UNLICENSED",
+  "license": "SEE LICENSE IN ../../LICENSE",
   "main": "./out/main/index.js",
   "scripts": {
     "bundle-cli": "node scripts/bundle-cli.mjs",
@@ -48,7 +48,6 @@
     "@tanstack/react-query": "catalog:",
     "electron-updater": "^6.8.3",
     "fix-path": "^5.0.0",
-    "lucide-react": "catalog:",
     "motion": "^12.38.0",
     "react": "catalog:",
     "react-dom": "catalog:",
@@ -69,7 +68,7 @@
     "@types/react": "catalog:",
     "@types/react-dom": "catalog:",
     "@vitejs/plugin-react": "^5.1.1",
-    "electron": "^39.2.6",
+    "electron": "^44.9.3",
     "electron-builder": "^26.0.12",
     "electron-vite": "^5.0.0",
     "globals": "^16.0.0",

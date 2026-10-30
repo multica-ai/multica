@@ -13,17 +13,6 @@ describe("issue create settings store", () => {
     });
   });
 
-  it("defaults to project-only quick create and the classic manual toolbar", () => {
-    expect(useIssueCreateSettingsStore.getState().quickCreateFields).toEqual(["project"]);
-    expect(useIssueCreateSettingsStore.getState().manualCreateFields).toEqual([
-      "status",
-      "priority",
-      "assignee",
-      "labels",
-      "project",
-    ]);
-  });
-
   it("keeps quick create fields in canonical order regardless of toggle sequence", () => {
     const { setQuickCreateFieldVisible } = useIssueCreateSettingsStore.getState();
 

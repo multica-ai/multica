@@ -1,19 +1,20 @@
 "use client";
 
 import { useState, type ReactNode } from "react";
-import { Check, Copy, Eye, EyeOff } from "lucide-react";
+import { Check, Copy, Eye, EyeOff } from "@multica/ui/icons";
 import { toast } from "sonner";
 import { maskAutopilotWebhookUrl } from "@multica/core/autopilots";
-import { Button } from "@multica/ui/components/ui/button";
+import { IconButton } from "@multica/ui/components/common/icon-button";
 import { cn } from "@multica/ui/lib/utils";
 import { copyText } from "@multica/ui/lib/clipboard";
 import { useT } from "../../i18n";
+import { TooltipHint } from "@multica/ui/components/common/tooltip-hint";
 
 const SIZES = {
   // Trigger row on the detail page — compact, sits inline with the row actions.
   sm: {
     row: "items-center",
-    value: "rounded bg-muted px-2 py-1 text-xs",
+    value: "rounded-xs bg-muted px-2 py-1 text-caption",
     button: "h-7 w-7",
     buttonVariant: "ghost",
     icon: "h-3.5 w-3.5",
@@ -21,7 +22,7 @@ const SIZES = {
   // Post-create panel — larger standalone field.
   md: {
     row: "items-stretch",
-    value: "rounded-md border bg-muted px-3 py-2 text-xs",
+    value: "rounded-md border bg-muted px-3 py-2 text-caption",
     button: "h-9 w-9",
     buttonVariant: "outline",
     icon: "size-4",
@@ -81,44 +82,43 @@ export function WebhookUrlField({ url, size = "sm", actions }: WebhookUrlFieldPr
         // Click-to-reveal lives on the value itself. Once revealed it goes back
         // to plain text so the URL stays selectable — a toggle button there
         // would swallow the drag-select.
-        <button
-          type="button"
-          onClick={() => setRevealedUrl(url)}
-          className={cn(valueClassName, "text-left cursor-pointer transition-colors hover:bg-muted/70")}
-          title={t(($) => $.trigger_row.show_url)}
-          aria-label={t(($) => $.trigger_row.hidden_url_aria)}
-        >
-          {maskAutopilotWebhookUrl(url)}
-        </button>
+        <TooltipHint label={t(($) => $.trigger_row.show_url)}>
+          <button
+            type="button"
+            onClick={() => setRevealedUrl(url)}
+            className={cn(valueClassName, "text-left cursor-pointer transition-colors hover:bg-muted/70")}
+            aria-label={t(($) => $.trigger_row.hidden_url_aria)}
+          >
+            {maskAutopilotWebhookUrl(url)}
+          </button>
+        </TooltipHint>
       )}
-      <Button
+      <IconButton
         size="icon"
         variant={s.buttonVariant}
         className={cn("shrink-0", s.button)}
         onClick={() => setRevealedUrl(revealed ? null : url)}
-        title={revealed ? t(($) => $.trigger_row.hide_url) : t(($) => $.trigger_row.show_url)}
-        aria-label={revealed ? t(($) => $.trigger_row.hide_url) : t(($) => $.trigger_row.show_url)}
+        label={revealed ? t(($) => $.trigger_row.hide_url) : t(($) => $.trigger_row.show_url)}
       >
         {revealed ? (
           <EyeOff className={cn(s.icon, "text-muted-foreground")} />
         ) : (
           <Eye className={cn(s.icon, "text-muted-foreground")} />
         )}
-      </Button>
-      <Button
+      </IconButton>
+      <IconButton
         size="icon"
         variant={s.buttonVariant}
         className={cn("shrink-0", s.button)}
         onClick={handleCopy}
-        title={t(($) => $.trigger_row.copy_url)}
-        aria-label={t(($) => $.trigger_row.copy_url)}
+        label={t(($) => $.trigger_row.copy_url)}
       >
         {copied ? (
           <Check className={cn(s.icon, "text-emerald-500")} />
         ) : (
           <Copy className={cn(s.icon, "text-muted-foreground")} />
         )}
-      </Button>
+      </IconButton>
       {actions}
     </div>
   );

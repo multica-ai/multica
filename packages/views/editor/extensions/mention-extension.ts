@@ -41,13 +41,18 @@ function findMentionStart(src: string): number {
   return -1;
 }
 
+/** A mention as text, the way its pill reads: issues and projects by name. */
+export function mentionText(attrs: Record<string, unknown>): string {
+  const type = attrs.type ?? "member";
+  const prefix = type === "issue" || type === "project" ? "" : "@";
+  return `${prefix}${String(attrs.label ?? attrs.id ?? "")}`;
+}
+
 export const BaseMentionExtension = Mention.extend({
   addNodeView() {
     return ReactNodeViewRenderer(MentionView);
   },
   renderHTML({ node, HTMLAttributes }) {
-    const type = node.attrs.type ?? "member";
-    const prefix = type === "issue" || type === "project" ? "" : "@";
     return [
       "span",
       mergeAttributes(
@@ -59,7 +64,7 @@ export const BaseMentionExtension = Mention.extend({
           "data-mention-id": node.attrs.id,
         },
       ),
-      `${prefix}${node.attrs.label ?? node.attrs.id}`,
+      mentionText(node.attrs),
     ];
   },
   addAttributes() {

@@ -28,7 +28,20 @@ export {
   useAttachmentPreview,
   isPreviewable,
 } from "./attachment-preview-modal";
-export type { AttachmentPreviewHandle } from "./attachment-preview-modal";
+export type {
+  AttachmentPreviewHandle,
+  PreviewLocateAction,
+  PreviewSequence,
+} from "./attachment-preview-modal";
+export {
+  PreviewSequenceProvider,
+  collectPreviewSequence,
+  usePreviewSequence,
+} from "./preview-sequence-context";
+export type {
+  PreviewItemDetails,
+  PreviewSequenceControls,
+} from "./preview-sequence-context";
 export { AttachmentCard } from "./attachment-card";
 export type { AttachmentCardProps } from "./attachment-card";
 export { Attachment } from "./attachment";

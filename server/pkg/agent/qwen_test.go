@@ -25,7 +25,7 @@ func TestNewReturnsQwenBackend(t *testing.T) {
 
 func TestBuildQwenArgsKeepsProtocolManaged(t *testing.T) {
 	t.Parallel()
-	args := buildQwenArgs("task prompt", ExecOptions{
+	args := buildQwenArgs(ExecOptions{
 		Model:           "qwen3.8-max-preview",
 		ResumeSessionID: "session-1",
 		ExtraArgs:       []string{"--output-format", "text", "--sandbox"},
@@ -42,7 +42,11 @@ func TestBuildQwenArgsKeepsProtocolManaged(t *testing.T) {
 			t.Fatalf("managed argument %q leaked into %v", forbidden, args)
 		}
 	}
-	wantPrefix := []string{"-p", "task prompt", "--output-format", "stream-json", "--model", "qwen3.8-max-preview", "--resume", "session-1"}
+	// The prompt is never part of argv (see buildQwenArgs) — it goes on stdin.
+	if strings.Contains(joined, "-p ") || strings.HasPrefix(joined, "-p") {
+		t.Fatalf("-p must not appear in argv, prompt is delivered on stdin: %v", args)
+	}
+	wantPrefix := []string{"--output-format", "stream-json", "--model", "qwen3.8-max-preview", "--resume", "session-1"}
 	if len(args) < len(wantPrefix) {
 		t.Fatalf("args too short: %v", args)
 	}
@@ -66,7 +70,7 @@ func TestBuildQwenArgsYoloAlwaysPresent(t *testing.T) {
 	t.Parallel()
 	// --yolo must be injected even when custom_args is empty: Qwen's
 	// non-interactive mode otherwise filters out shell, edit, and write tools.
-	args := buildQwenArgs("task", ExecOptions{}, slog.Default())
+	args := buildQwenArgs(ExecOptions{}, slog.Default())
 	if !strings.Contains(strings.Join(args, " "), "--yolo") {
 		t.Fatalf("--yolo missing from base args %v", args)
 	}
@@ -75,11 +79,22 @@ func TestBuildQwenArgsYoloAlwaysPresent(t *testing.T) {
 func fakeQwenScript() string {
 	return `#!/bin/sh
 if [ -n "$QWEN_ARGS_FILE" ]; then printf '%s\n' "$@" > "$QWEN_ARGS_FILE"; fi
+if [ -n "$QWEN_STDIN_FILE" ]; then cat > "$QWEN_STDIN_FILE"; fi
 while [ "$#" -gt 0 ]; do
   if [ "$1" = "--mcp-config" ] && [ -n "$QWEN_MCP_CAPTURE_FILE" ]; then cp "$2" "$QWEN_MCP_CAPTURE_FILE"; break; fi
   shift
 done
 case "$QWEN_MODE" in
+  usage-resume)
+    printf '%s\n' '{"type":"system","subtype":"init","session_id":"sess-qwen-1","model":"qwen-test"}'
+    printf '%s\n' '{"type":"assistant","session_id":"sess-qwen-1","message":{"id":"current-message","model":"qwen-test","content":[{"type":"text","text":"done"}],"usage":{"input_tokens":100,"output_tokens":10}}}'
+    printf '%s\n' '{"type":"result","subtype":"success","session_id":"sess-qwen-1","result":"done","usage":{"input_tokens":1100,"output_tokens":110}}'
+    ;;
+  usage-fallback)
+    printf '%s\n' '{"type":"assistant","message":{"id":"message-1","model":"qwen-test","content":[{"type":"text","text":"first"}],"usage":{"input_tokens":100,"output_tokens":50}}}'
+    printf '%s\n' '{"type":"assistant","message":{"id":"message-2","model":"qwen-test","content":[{"type":"text","text":"second"}],"usage":{"input_tokens":200,"output_tokens":20}}}'
+    exit 7
+    ;;
   error)
     printf '%s\n' '{"type":"system","subtype":"init","session_id":"sess-error","model":"qwen-test"}'
     printf '%s\n' '{"type":"result","subtype":"error_during_execution","session_id":"sess-error","is_error":true,"error":{"type":"authentication_error","message":"synthetic Qwen authentication failure"}}'
@@ -147,7 +162,7 @@ func TestQwenBackendStreamsNativeEvents(t *testing.T) {
 		t.Fatalf("unexpected result: %+v", result)
 	}
 	usage := result.Usage["qwen-test"]
-	if usage.InputTokens != 20 || usage.OutputTokens != 4 || usage.CacheReadTokens != 6 {
+	if usage.InputTokens != 14 || usage.OutputTokens != 4 || usage.CacheReadTokens != 6 {
 		t.Fatalf("unexpected final usage: %+v", usage)
 	}
 	var thinking, toolUse, toolResult, text bool
@@ -180,6 +195,37 @@ func TestQwenBackendPreservesSuccessfulResumeSession(t *testing.T) {
 	_, result := awaitQwenResult(t, session)
 	if result.Status != "completed" || result.Output != "PONG" || result.SessionID != "sess-qwen-1" {
 		t.Fatalf("resumed result = %+v", result)
+	}
+}
+
+// TestQwenBackendDeliversPromptOnStdin is the round-trip regression guard for
+// #6082/#5649: the prompt must reach the child intact — including embedded
+// double quotes, an em dash, and a shell-metacharacter-laden fragment — none
+// of it ever having touched argv or a Windows/PowerShell command line. If
+// buildQwenArgs regressed to putting the prompt back on argv, this would
+// still pass (the fake script only inspects stdin), so
+// TestBuildQwenArgsKeepsProtocolManaged's "-p must not appear in argv" check
+// is what actually catches that regression; this test guards the other half
+// of the contract — that stdin delivery actually carries the bytes through.
+func TestQwenBackendDeliversPromptOnStdin(t *testing.T) {
+	t.Parallel()
+	stdinPath := filepath.Join(t.TempDir(), "qwen.stdin")
+	backend := newFakeQwenBackend(t, map[string]string{"QWEN_STDIN_FILE": stdinPath})
+	prompt := `go build -ldflags "-X main.version=foo" — mind the em dash & the quotes"`
+	session, err := backend.Execute(context.Background(), prompt, ExecOptions{Model: "qwen-test", Timeout: 5 * time.Second})
+	if err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+	_, result := awaitQwenResult(t, session)
+	if result.Status != "completed" {
+		t.Fatalf("result = %+v", result)
+	}
+	got, err := os.ReadFile(stdinPath)
+	if err != nil {
+		t.Fatalf("read captured stdin: %v", err)
+	}
+	if string(got) != prompt {
+		t.Fatalf("stdin content = %q, want %q", got, prompt)
 	}
 }
 
@@ -298,7 +344,7 @@ func TestQwenCode020FixtureParses(t *testing.T) {
 	if !state.sawResult || state.resultIsError || state.sessionID != "session-redacted" || state.finalResultText != "DONE" {
 		t.Fatalf("unexpected fixture state: %+v", state)
 	}
-	if state.usage["qwen3.8-max-preview"].InputTokens != 46539 {
+	if state.usage["qwen3.8-max-preview"] != (TokenUsage{InputTokens: 4639, OutputTokens: 159, CacheReadTokens: 41900}) {
 		t.Fatalf("fixture usage = %+v", state.usage)
 	}
 }

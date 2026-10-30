@@ -1,0 +1,31 @@
+-- Records the git branch a task delivered its work on.
+--
+-- Worktree-mode local_directory tasks hand their result back as a branch in the
+-- user's own repo rather than as edits to the working copy, so the branch name
+-- is the only pointer to where the work went. It is written on BOTH terminal
+-- paths: a task that fails partway still commits whatever the agent produced,
+-- and that is exactly when the user most needs to be told where to look.
+--
+-- Nullable and unindexed on purpose: only worktree tasks populate it, and it is
+-- read alongside the task row that is already being fetched by primary key.
+ALTER TABLE agent_task_queue ADD COLUMN IF NOT EXISTS branch_name TEXT;
+
+-- Rollout / rollback note for worktree mode (MUL-5707).
+--
+-- Isolation for a worktree resource is enforced in two places, both of which
+-- live in server code shipped with this migration: the save-time daemon-version
+-- gate, and the claim-time gate that re-checks the runtime actually taking the
+-- task. Those cover a daemon downgraded at any point after the resource was
+-- created.
+--
+-- The one combination they cannot cover is rolling the SERVER back to before
+-- this change while a daemon below MinLocalWorktreeCLIVersion is still in the
+-- fleet: an old server has no gate, and an old daemon json-skips execution_mode
+-- and would run the task in place, editing the working copy the resource asked
+-- to isolate. So: do not roll the server back past this change while any
+-- worktree local_directory resource exists, unless every daemon in those
+-- workspaces is at or above the floor.
+--
+-- Rolling the server back with only CURRENT daemons is safe for isolation — a
+-- current daemon implements the mode itself and refuses modes it does not
+-- recognise. The only loss is branch_name, which an old server drops.

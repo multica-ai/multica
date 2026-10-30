@@ -1,18 +1,17 @@
 "use client";
 
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import {
   Zap, Play, Clock, Plus, Trash2, CheckCircle2, XCircle, Loader2, Pencil,
   Ban, ChevronDown, ChevronRight,
-  Webhook, RotateCw,
-} from "lucide-react";
+  Webhook, RotateCw, Server,
+} from "@multica/ui/icons";
 import { useQuery } from "@tanstack/react-query";
 import { autopilotDetailOptions, autopilotRunsOptions, autopilotRunOptions } from "@multica/core/autopilots/queries";
 import { projectDetailOptions } from "@multica/core/projects/queries";
 import {
   useUpdateAutopilot,
   useDeleteAutopilot,
-  useTriggerAutopilot,
   useCreateAutopilotTrigger,
   useDeleteAutopilotTrigger,
   useRotateAutopilotTriggerWebhookToken,
@@ -27,6 +26,7 @@ import { BreadcrumbHeader } from "../../layout/breadcrumb-header";
 import { ActorAvatar } from "../../common/actor-avatar";
 import { Skeleton } from "@multica/ui/components/ui/skeleton";
 import { Button } from "@multica/ui/components/ui/button";
+import { IconButton } from "@multica/ui/components/common/icon-button";
 import { Switch } from "@multica/ui/components/ui/switch";
 import { cn } from "@multica/ui/lib/utils";
 import { toast } from "sonner";
@@ -64,11 +64,14 @@ import type { AgentTask } from "@multica/core/types/agent";
 import { ReadonlyContent } from "../../editor";
 import { TranscriptButton } from "../../common/task-transcript";
 import { AutopilotDialog } from "./autopilot-dialog";
-import { runNowToastKind, runNowBlockedKey } from "./run-now-toast";
+import { EditScheduleTriggerDialog } from "./edit-schedule-trigger-dialog";
+import { useRunAutopilotNow } from "./use-run-autopilot-now";
+import { useRegisterCommandBarContext } from "../../search/register-context";
 import { WebhookPayloadPreview } from "./webhook-payload-preview";
 import { WebhookDeliveriesSection } from "./webhook-deliveries-section";
 import { ProjectIcon } from "../../projects/components/project-icon";
 import { useT } from "../../i18n";
+import { PageHeader } from "../../layout/page-header";
 
 // A run that already happened is an instant in the reader's day, so it reads in
 // the reader's zone (no timeZone passed). A run that is still to come belongs to
@@ -138,20 +141,20 @@ function RunRow({ run, agentId, agentName }: { run: AutopilotRun; agentId: strin
   const content = (
     <>
       <StatusIcon className={cn("h-4 w-4 shrink-0", visual.color, visual.spin && "animate-spin")} />
-      <span className={cn("w-24 shrink-0 text-xs font-medium", visual.color)}>
+      <span className={cn("w-24 shrink-0 text-caption font-medium", visual.color)}>
         {t(($) => $.run_status[status])}
       </span>
-      <span className="w-20 shrink-0 text-xs text-muted-foreground">
+      <span className="w-20 shrink-0 text-caption text-muted-foreground">
         {t(($) => $.run_source[run.source as "schedule" | "manual" | "webhook" | "api"]) ?? run.source}
       </span>
-      <span className="flex-1 min-w-0 text-xs text-muted-foreground truncate">
+      <span className="flex-1 min-w-0 text-caption text-muted-foreground truncate">
         {run.issue_id ? (
           t(($) => $.run.issue_linked)
         ) : run.failure_reason ? (
           <span className="text-destructive">{run.failure_reason}</span>
         ) : null}
       </span>
-      <span className="w-32 shrink-0 text-right text-xs text-muted-foreground tabular-nums">
+      <span className="w-32 shrink-0 text-right text-caption text-muted-foreground tabular-nums">
         {formatInTimeZone(run.triggered_at || run.created_at, undefined, i18n.language)}
       </span>
       {syntheticTask && !run.issue_id && (
@@ -170,7 +173,7 @@ function RunRow({ run, agentId, agentName }: { run: AutopilotRun; agentId: strin
     </>
   );
 
-  const rowClass = "flex items-center gap-3 px-4 py-2.5 text-sm hover:bg-accent/30 transition-colors";
+  const rowClass = "flex items-center gap-3 px-4 py-2.5 text-body hover:bg-accent/30 transition-colors";
 
   if (run.issue_id) {
     return (
@@ -225,20 +228,20 @@ function SkippedRunsGroup({
     <div className="border-t bg-muted/20">
       <button
         type="button"
-        className="flex w-full items-center gap-3 px-4 py-2.5 text-left text-sm hover:bg-accent/30 transition-colors"
+        className="flex w-full items-center gap-3 px-4 py-2.5 text-left text-body hover:bg-accent/30 transition-colors"
         onClick={() => setOpen((value) => !value)}
         aria-expanded={open}
       >
         <ToggleIcon className="h-4 w-4 shrink-0 text-muted-foreground" />
         <Ban className="h-4 w-4 shrink-0 text-muted-foreground" />
-        <span className="w-24 shrink-0 text-xs font-medium text-muted-foreground">
+        <span className="w-24 shrink-0 text-caption font-medium text-muted-foreground">
           {t(($) => $.run.skipped_group.label)}
         </span>
-        <span className="flex-1 min-w-0 text-xs text-muted-foreground truncate">
+        <span className="flex-1 min-w-0 text-caption text-muted-foreground truncate">
           {t(($) => $.run.skipped_group.summary, { count: runs.length })}
         </span>
         {latestRun && (
-          <span className="w-32 shrink-0 text-right text-xs text-muted-foreground tabular-nums">
+          <span className="w-32 shrink-0 text-right text-caption text-muted-foreground tabular-nums">
             {formatInTimeZone(latestRun.triggered_at || latestRun.created_at, undefined, i18n.language)}
           </span>
         )}
@@ -254,13 +257,14 @@ function SkippedRunsGroup({
   );
 }
 
-function TriggerRow({ trigger, autopilotId, canWrite }: { trigger: AutopilotTrigger; autopilotId: string; canWrite: boolean }) {
+export function TriggerRow({ trigger, autopilotId, canWrite }: { trigger: AutopilotTrigger; autopilotId: string; canWrite: boolean }) {
   const { t, i18n } = useT("autopilots");
   const describeSchedule = useDescribeSchedule();
   const deleteTrigger = useDeleteAutopilotTrigger();
   const rotateToken = useRotateAutopilotTriggerWebhookToken();
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [rotateOpen, setRotateOpen] = useState(false);
+  const [editOpen, setEditOpen] = useState(false);
   const [deleting, setDeleting] = useState(false);
 
   const handleDelete = async () => {
@@ -323,33 +327,50 @@ function TriggerRow({ trigger, autopilotId, canWrite }: { trigger: AutopilotTrig
   // trash icon visually floats above the URL action buttons because the
   // outer flex uses `items-start`.
   const deleteButton = canWrite ? (
-    <Button
+    <IconButton
       size="icon"
       variant="ghost"
       className="h-7 w-7 shrink-0"
       onClick={() => setConfirmOpen(true)}
-      title={t(($) => $.trigger_row.delete_dialog.confirm)}
+      label={t(($) => $.trigger_row.delete_dialog.confirm)}
     >
       <Trash2 className="h-3.5 w-3.5 text-muted-foreground" />
-    </Button>
+    </IconButton>
   ) : null;
+
+  // Schedule rows only: cron and timezone are the fields this dialog edits, and
+  // the API rejects them on any other kind. It rides alongside Delete so the
+  // row that states a schedule is also the row that can change it — without it
+  // an autopilot with two schedules has no editable schedule at all (MUL-7478).
+  const editButton =
+    canWrite && trigger.kind === "schedule" ? (
+      <IconButton
+        size="icon"
+        variant="ghost"
+        className="h-7 w-7 shrink-0"
+        onClick={() => setEditOpen(true)}
+        label={t(($) => $.trigger_row.edit_schedule)}
+      >
+        <Pencil className="h-3.5 w-3.5 text-muted-foreground" />
+      </IconButton>
+    ) : null;
 
   return (
     <div className="flex items-start gap-3 rounded-md border px-3 py-2">
       <Icon className="h-4 w-4 shrink-0 text-muted-foreground mt-0.5" />
       <div className="flex-1 min-w-0">
         <div className="flex items-center gap-2 flex-wrap">
-          <span className="text-sm font-medium">{t(($) => $.trigger_kind[trigger.kind])}</span>
+          <span className="text-body font-medium">{t(($) => $.trigger_kind[trigger.kind])}</span>
           {trigger.label && (
-            <span className="text-xs text-muted-foreground">({trigger.label})</span>
+            <span className="text-caption text-muted-foreground">({trigger.label})</span>
           )}
           {!trigger.enabled && (
-            <span className="text-xs bg-muted px-1.5 py-0.5 rounded">
+            <span className="text-caption bg-muted px-1.5 py-0.5 rounded-xs">
               {t(($) => $.trigger_row.disabled_badge)}
             </span>
           )}
           {isApi && (
-            <span className="text-xs bg-muted px-1.5 py-0.5 rounded">
+            <span className="text-caption bg-muted px-1.5 py-0.5 rounded-xs">
               {t(($) => $.trigger_row.deprecated_badge)}
             </span>
           )}
@@ -358,21 +379,25 @@ function TriggerRow({ trigger, autopilotId, canWrite }: { trigger: AutopilotTrig
           // The plain-language line leads; the raw expression drops to a
           // secondary line so the two never run together as one blob.
           <div className="mt-0.5 space-y-0.5">
-            <div className="text-xs text-muted-foreground">
+            <div className="text-caption text-muted-foreground">
               {scheduleDescription ?? trigger.cron_expression}
               {trigger.timezone && ` (${trigger.timezone})`}
             </div>
             {scheduleDescription !== null && scheduleConfig !== null && (
               // Fields only: the zone already reads out in the sentence above,
               // where a person can use it — same rule as the editor's readback.
-              <div className="font-mono text-[11px] text-muted-foreground/60">
+              <div className="font-mono text-micro text-muted-foreground">
                 {cronFields(scheduleConfig)}
               </div>
             )}
           </div>
         )}
-        {trigger.next_run_at && (
-          <div className="text-xs text-muted-foreground">
+        {/* A disabled trigger keeps the next_run_at it had — the dispatcher
+            filters on `enabled` instead of clearing it — so the row would
+            otherwise carry the Disabled badge and a promise to run at 09:00
+            in the same breath. The badge is the true one. */}
+        {trigger.next_run_at && trigger.enabled && (
+          <div className="text-caption text-muted-foreground">
             {t(($) => $.trigger_row.next_label, {
               date: formatInTimeZone(
                 trigger.next_run_at,
@@ -389,16 +414,16 @@ function TriggerRow({ trigger, autopilotId, canWrite }: { trigger: AutopilotTrig
               actions={
                 <>
                   {canWrite && (
-                    <Button
+                    <IconButton
                       size="icon"
                       variant="ghost"
                       className="h-7 w-7 shrink-0"
                       onClick={() => setRotateOpen(true)}
-                      title={t(($) => $.trigger_row.rotate_url)}
+                      label={t(($) => $.trigger_row.rotate_url)}
                       disabled={rotateToken.isPending}
                     >
                       <RotateCw className={cn("h-3.5 w-3.5 text-muted-foreground", rotateToken.isPending && "animate-spin")} />
-                    </Button>
+                    </IconButton>
                   )}
                   {deleteButton}
                 </>
@@ -407,7 +432,12 @@ function TriggerRow({ trigger, autopilotId, canWrite }: { trigger: AutopilotTrig
           </div>
         )}
       </div>
-      {!showWebhookUrlRow && deleteButton}
+      {!showWebhookUrlRow && (
+        <div className="flex shrink-0 items-center gap-0.5">
+          {editButton}
+          {deleteButton}
+        </div>
+      )}
       <AlertDialog open={confirmOpen} onOpenChange={(v) => { if (!v && !deleting) setConfirmOpen(false); }}>
         <AlertDialogContent>
           <AlertDialogHeader>
@@ -432,6 +462,12 @@ function TriggerRow({ trigger, autopilotId, canWrite }: { trigger: AutopilotTrig
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+      <EditScheduleTriggerDialog
+        open={editOpen}
+        onOpenChange={setEditOpen}
+        autopilotId={autopilotId}
+        trigger={trigger}
+      />
       <AlertDialog open={rotateOpen} onOpenChange={(v) => { if (!v && !rotateToken.isPending) setRotateOpen(false); }}>
         <AlertDialogContent>
           <AlertDialogHeader>
@@ -531,14 +567,14 @@ function AddTriggerDialog({
             would push the track past the dialog instead of truncating. */}
         <div className="min-w-0 space-y-4 pt-2">
           <div>
-            <label className="text-xs font-medium text-muted-foreground">
+            <label className="text-caption font-medium text-muted-foreground">
               {t(($) => $.add_trigger_dialog.type_label)}
             </label>
             <div className="mt-1">
               <SegmentedToggle
                 value={kind}
                 onChange={setKind}
-                buttonClassName="px-3 py-1.5 text-sm"
+                buttonClassName="px-3 py-1.5 text-body"
                 options={[
                   [
                     "schedule",
@@ -574,13 +610,13 @@ function AddTriggerDialog({
               disabled={submitting}
             />
           ) : (
-            <p className="rounded-md bg-muted/50 px-3 py-2 text-xs text-muted-foreground">
+            <p className="rounded-md bg-muted/50 px-3 py-2 text-caption text-muted-foreground">
               {t(($) => $.add_trigger_dialog.webhook_help)}
             </p>
           )}
 
           <div>
-            <label className="text-xs font-medium text-muted-foreground">
+            <label className="text-caption font-medium text-muted-foreground">
               {t(($) => $.add_trigger_dialog.label_field)}
             </label>
             <input
@@ -588,7 +624,7 @@ function AddTriggerDialog({
               value={label}
               onChange={(e) => setLabel(e.target.value)}
               placeholder={t(($) => $.add_trigger_dialog.label_placeholder)}
-              className="mt-1 w-full rounded-md border bg-background px-3 py-2 text-sm outline-none focus:ring-1 focus:ring-ring"
+              className="mt-1 w-full rounded-md border bg-background px-3 py-2 text-body outline-none focus:ring-1 focus:ring-ring"
             />
           </div>
           <div className="flex justify-end pt-1">
@@ -616,7 +652,7 @@ function SubscriberChips({
   const members = (subscribers ?? []).filter((s) => s.user_type === "member");
   if (members.length === 0) {
     return (
-      <div className="mt-1 text-sm text-muted-foreground">
+      <div className="mt-1 text-body text-muted-foreground">
         {t(($) => $.detail.field_subscribers_none)}
       </div>
     );
@@ -626,7 +662,7 @@ function SubscriberChips({
       {members.map((s) => (
         <span
           key={`${s.user_type}:${s.user_id}`}
-          className="inline-flex items-center gap-1 rounded-full border bg-background px-2 py-0.5 text-xs"
+          className="inline-flex items-center gap-1 rounded-full border bg-background px-2 py-0.5 text-caption"
         >
           <ActorAvatar actorType="member" actorId={s.user_id} size="xs" />
           <span className="max-w-[14rem] truncate">
@@ -649,7 +685,14 @@ export function AutopilotDetailPage({ autopilotId }: { autopilotId: string }) {
   const { data: runs = [], isLoading: runsLoading } = useQuery(autopilotRunsOptions(wsId, autopilotId));
   const updateAutopilot = useUpdateAutopilot();
   const deleteAutopilot = useDeleteAutopilot();
-  const triggerAutopilot = useTriggerAutopilot();
+  const { runNow, isPending: runNowPending } = useRunAutopilotNow();
+  const loadedAutopilot = data?.autopilot ?? null;
+  useRegisterCommandBarContext(
+    useMemo(
+      () => (loadedAutopilot ? { kind: "autopilot", autopilot: loadedAutopilot } : null),
+      [loadedAutopilot],
+    ),
+  );
   const projectId = data?.autopilot.project_id ?? null;
   const { data: project, isLoading: projectLoading } = useQuery({
     ...projectDetailOptions(wsId, projectId ?? ""),
@@ -664,11 +707,11 @@ export function AutopilotDetailPage({ autopilotId }: { autopilotId: string }) {
   if (isLoading) {
     return (
       <div className="flex h-full flex-col">
-        <div className="flex h-12 shrink-0 items-center gap-2 border-b px-5">
+        <PageHeader>
           <Skeleton className="h-4 w-4" />
           <span className="text-muted-foreground">/</span>
           <Skeleton className="h-4 w-32" />
-        </div>
+        </PageHeader>
         <div className="flex-1 overflow-y-auto">
           <div className="max-w-4xl mx-auto p-6 space-y-8">
             <section className="space-y-4">
@@ -719,30 +762,7 @@ export function AutopilotDetailPage({ autopilotId }: { autopilotId: string }) {
   // doesn't send the field (older backend).
   const canManageAccess = autopilot.can_manage_access ?? canWrite;
 
-  const handleRunNow = async () => {
-    try {
-      const run = await triggerAutopilot.mutateAsync(autopilotId);
-      // Manual "run now" returns 200 even when admission blocks the run, so the
-      // toast is driven by the run's domain status, not the HTTP 2xx (MUL-4525).
-      // Success is a whitelist (issue_created/running) — a skipped run warns, a
-      // failed or unknown/future status errors — never a false "triggered".
-      const kind = runNowToastKind(run?.status);
-      if (kind === "success") {
-        toast.success(t(($) => $.detail.toast_triggered));
-        return;
-      }
-      // reason_code is the stable, typed cause the server decided at admission
-      // time; an unknown/absent code degrades to a generic "not triggered".
-      const message = t(($) => $.detail[runNowBlockedKey(run?.reason_code)]);
-      if (kind === "warning") {
-        toast.warning(message);
-      } else {
-        toast.error(message);
-      }
-    } catch (e: any) {
-      toast.error(e?.message || t(($) => $.detail.toast_trigger_failed));
-    }
-  };
+  const handleRunNow = () => runNow(autopilotId);
 
   const handleDelete = async () => {
     setDeleting(true);
@@ -771,7 +791,7 @@ export function AutopilotDetailPage({ autopilotId }: { autopilotId: string }) {
         segments={[{ href: wsPaths.autopilots(), label: t(($) => $.page.title) }]}
         leaf={
           <>
-            <h1 className="min-w-0 truncate text-sm font-medium text-foreground">{autopilot.title}</h1>
+            <h1 className="min-w-0 truncate text-body font-medium text-foreground">{autopilot.title}</h1>
             <div className="ml-1 flex items-center gap-1.5 shrink-0">
               <Switch
                 size="sm"
@@ -785,7 +805,7 @@ export function AutopilotDetailPage({ autopilotId }: { autopilotId: string }) {
                 }
               />
               <span className={cn(
-                "text-xs font-medium hidden sm:inline",
+                "text-caption font-medium hidden sm:inline",
                 autopilot.status === "active" ? "text-emerald-500" :
                 autopilot.status === "paused" ? "text-amber-500" :
                 "text-muted-foreground",
@@ -805,17 +825,17 @@ export function AutopilotDetailPage({ autopilotId }: { autopilotId: string }) {
               <Button
                 size="sm"
                 onClick={handleRunNow}
-                disabled={autopilot.status !== "active" || triggerAutopilot.isPending}
+                disabled={autopilot.status !== "active" || runNowPending}
                 className="px-2 sm:px-2.5"
-                aria-label={triggerAutopilot.isPending ? t(($) => $.detail.running) : t(($) => $.detail.run_now)}
+                aria-label={runNowPending ? t(($) => $.detail.running) : t(($) => $.detail.run_now)}
               >
-                {triggerAutopilot.isPending ? (
+                {runNowPending ? (
                   <Loader2 className="h-3.5 w-3.5 sm:mr-1 animate-spin" />
                 ) : (
                   <Play className="h-3.5 w-3.5 sm:mr-1" />
                 )}
                 <span className="hidden sm:inline">
-                  {triggerAutopilot.isPending
+                  {runNowPending
                     ? t(($) => $.detail.running)
                     : t(($) => $.detail.run_now)}
                 </span>
@@ -825,16 +845,33 @@ export function AutopilotDetailPage({ autopilotId }: { autopilotId: string }) {
         }
       />
 
+      {autopilot.pause_reason === "agent_runtime_required" && (
+        <div className="flex shrink-0 items-center gap-2 border-b border-amber-500/30 bg-amber-500/10 px-6 py-2 text-caption text-amber-900 dark:text-amber-100">
+          <Server className="size-3.5 shrink-0" />
+          <span className="flex-1">
+            {t(($) => $.detail.paused_runtime_required)}
+          </span>
+          {autopilot.assignee_type === "agent" && (
+            <AppLink
+              href={`${wsPaths.agentDetail(autopilot.assignee_id)}?view=general`}
+              className="font-medium underline underline-offset-2"
+            >
+              {t(($) => $.detail.bind_runtime)}
+            </AppLink>
+          )}
+        </div>
+      )}
+
       <div className="flex-1 overflow-y-auto">
         <div className="max-w-4xl mx-auto p-6 space-y-8">
           {/* Properties */}
           <section className="space-y-4">
-            <h2 className="text-sm font-medium text-muted-foreground uppercase tracking-wider">
+            <h2 className="text-body font-medium text-muted-foreground uppercase tracking-wider">
               {t(($) => $.detail.section_properties)}
             </h2>
-            <div className="grid grid-cols-2 gap-4 text-sm">
+            <div className="grid grid-cols-2 gap-4 text-body">
               <div>
-                <label className="text-xs text-muted-foreground">{t(($) => $.detail.field_agent)}</label>
+                <label className="text-caption text-muted-foreground">{t(($) => $.detail.field_agent)}</label>
                 <div className="mt-1 flex items-center gap-2">
                   <ActorAvatar
                     actorType={autopilot.assignee_type}
@@ -849,7 +886,7 @@ export function AutopilotDetailPage({ autopilotId }: { autopilotId: string }) {
                 </div>
               </div>
               <div>
-                <label className="text-xs text-muted-foreground">{t(($) => $.detail.field_created_by)}</label>
+                <label className="text-caption text-muted-foreground">{t(($) => $.detail.field_created_by)}</label>
                 <div className="mt-1 flex items-center gap-2">
                   {/* Creator may be a member or an agent: the HTTP create path stamps
                       member today, but backend logic also writes created_by_type=agent.
@@ -867,36 +904,38 @@ export function AutopilotDetailPage({ autopilotId }: { autopilotId: string }) {
                 </div>
               </div>
               <div>
-                <label className="text-xs text-muted-foreground">{t(($) => $.detail.field_output_mode)}</label>
+                <label className="text-caption text-muted-foreground">{t(($) => $.detail.field_output_mode)}</label>
                 <div className="mt-1">
                   {t(($) => $.execution_mode[autopilot.execution_mode as AutopilotExecutionMode])}
                 </div>
               </div>
-              {autopilot.execution_mode === "create_issue" && (
-                <div>
-                  <label className="text-xs text-muted-foreground">{t(($) => $.detail.field_project)}</label>
-                  <div className="mt-1 min-w-0">
-                    {!autopilot.project_id ? (
-                      <span className="text-muted-foreground">{t(($) => $.detail.no_project)}</span>
-                    ) : projectLoading ? (
-                      <Skeleton className="h-5 w-32" />
-                    ) : project ? (
-                      <AppLink
-                        href={wsPaths.projectDetail(project.id)}
-                        className="inline-flex max-w-full items-center gap-1.5 text-foreground hover:underline"
-                      >
-                        <ProjectIcon project={project} size="md" />
-                        <span className="truncate">{project.title}</span>
-                      </AppLink>
-                    ) : (
-                      <span className="text-muted-foreground">{t(($) => $.detail.project_unavailable)}</span>
-                    )}
-                  </div>
+              {/* Shown for BOTH output modes (MUL-6681): a run_only autopilot's
+                  project decides its execution environment (repository /
+                  local_directory, and therefore worktree isolation), so an
+                  operator debugging a run needs to see it here. */}
+              <div>
+                <label className="text-caption text-muted-foreground">{t(($) => $.detail.field_project)}</label>
+                <div className="mt-1 min-w-0">
+                  {!autopilot.project_id ? (
+                    <span className="text-muted-foreground">{t(($) => $.detail.no_project)}</span>
+                  ) : projectLoading ? (
+                    <Skeleton className="h-5 w-32" />
+                  ) : project ? (
+                    <AppLink
+                      href={wsPaths.projectDetail(project.id)}
+                      className="inline-flex max-w-full items-center gap-1.5 text-foreground hover:underline"
+                    >
+                      <ProjectIcon project={project} size="md" />
+                      <span className="truncate">{project.title}</span>
+                    </AppLink>
+                  ) : (
+                    <span className="text-muted-foreground">{t(($) => $.detail.project_unavailable)}</span>
+                  )}
                 </div>
-              )}
+              </div>
               {autopilot.execution_mode === "create_issue" && (
                 <div className="col-span-2">
-                  <label className="text-xs text-muted-foreground">
+                  <label className="text-caption text-muted-foreground">
                     {t(($) => $.detail.field_subscribers)}
                   </label>
                   <SubscriberChips
@@ -906,7 +945,7 @@ export function AutopilotDetailPage({ autopilotId }: { autopilotId: string }) {
               )}
               {autopilot.description && (
                 <div className="col-span-2">
-                  <label className="text-xs text-muted-foreground">{t(($) => $.detail.field_prompt)}</label>
+                  <label className="text-caption text-muted-foreground">{t(($) => $.detail.field_prompt)}</label>
                   <div className="mt-1">
                     <ReadonlyContent content={autopilot.description} />
                   </div>
@@ -918,7 +957,7 @@ export function AutopilotDetailPage({ autopilotId }: { autopilotId: string }) {
           {/* Triggers */}
           <section className="space-y-3">
             <div className="flex items-center justify-between">
-              <h2 className="text-sm font-medium text-muted-foreground uppercase tracking-wider">
+              <h2 className="text-body font-medium text-muted-foreground uppercase tracking-wider">
                 {t(($) => $.detail.section_triggers)}
               </h2>
               {canWrite && (
@@ -929,7 +968,7 @@ export function AutopilotDetailPage({ autopilotId }: { autopilotId: string }) {
               )}
             </div>
             {triggers.length === 0 ? (
-              <div className="rounded-md border border-dashed p-4 text-center text-sm text-muted-foreground">
+              <div className="rounded-md border border-dashed p-4 text-center text-body text-muted-foreground">
                 {t(($) => $.detail.no_triggers)}
               </div>
             ) : (
@@ -951,7 +990,7 @@ export function AutopilotDetailPage({ autopilotId }: { autopilotId: string }) {
 
           {/* Run History */}
           <section className="space-y-3">
-            <h2 className="text-sm font-medium text-muted-foreground uppercase tracking-wider">
+            <h2 className="text-body font-medium text-muted-foreground uppercase tracking-wider">
               {t(($) => $.detail.section_run_history)}
             </h2>
             {runsLoading ? (
@@ -961,7 +1000,7 @@ export function AutopilotDetailPage({ autopilotId }: { autopilotId: string }) {
                 ))}
               </div>
             ) : runs.length === 0 ? (
-              <div className="rounded-md border border-dashed p-4 text-center text-sm text-muted-foreground">
+              <div className="rounded-md border border-dashed p-4 text-center text-body text-muted-foreground">
                 {t(($) => $.detail.no_runs)}
               </div>
             ) : (
@@ -976,7 +1015,7 @@ export function AutopilotDetailPage({ autopilotId }: { autopilotId: string }) {
           {/* Danger zone */}
           {canWrite && (
             <section className="space-y-3 pt-4 border-t">
-              <h2 className="text-sm font-medium text-destructive uppercase tracking-wider">
+              <h2 className="text-body font-medium text-destructive uppercase tracking-wider">
                 {t(($) => $.detail.section_danger)}
               </h2>
               <Button size="sm" variant="destructive" onClick={() => setDeleteConfirmOpen(true)}>

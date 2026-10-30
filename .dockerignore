@@ -32,7 +32,19 @@ e2e/test-results
 coverage
 
 # Docs
-docs/
+/docs/
+*.md
 
-# Desktop app (not needed for web self-hosting)
-apps/desktop
+# Dockerfile.web needs the web workspace and root dependency patch inputs.
+# Default-exclude other app files so they do not enter the build context.
+/apps/*
+!/apps/web/
+!/apps/mobile
+/apps/mobile/*
+!/apps/mobile/patches
+!/apps/mobile/patches/**
+
+# Repository-only tooling
+/.github/
+/deploy/
+/scripts/

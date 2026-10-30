@@ -1,10 +1,12 @@
 package engine
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"io"
 	"log/slog"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -19,15 +21,19 @@ import (
 // held in memory so a single fake can play both "we hold the lease" and
 // "another replica holds the lease" within one test.
 type fakeStore struct {
-	mu             sync.Mutex
-	installations  []Installation
-	listErr        error
-	leaseOwner     map[string]string    // installation_id -> lease token
-	leaseExpiresAt map[string]time.Time // installation_id -> expiry
-	acquireErr     error
-	releaseErr     error
-	now            func() time.Time
-	acquireCount   int32
+	mu                   sync.Mutex
+	installations        []Installation
+	listErr              error
+	leaseOwner           map[string]string    // installation_id -> lease token
+	leaseExpiresAt       map[string]time.Time // installation_id -> expiry
+	acquireErr           error
+	acquireAfterWriteErr error
+	renewErr             error
+	listHeldErr          error
+	releaseErr           error
+	now                  func() time.Time
+	acquireCount         int32
+	renewCount           int32
 
 	// releaseBlock, if non-nil, makes ReleaseWSLease block until it is
 	// closed/sent on OR the caller's ctx fires. Simulates a frozen pool so
@@ -55,7 +61,23 @@ func (f *fakeStore) ListActiveInstallations(ctx context.Context) ([]Installation
 	return out, nil
 }
 
-func (f *fakeStore) AcquireWSLease(ctx context.Context, arg AcquireLeaseParams) error {
+func (f *fakeStore) ListHeldWSLeases(_ context.Context, ids []pgtype.UUID) (map[string]struct{}, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.listHeldErr != nil {
+		return nil, f.listHeldErr
+	}
+	held := make(map[string]struct{}, len(ids))
+	for _, instID := range ids {
+		id := uuidString(instID)
+		if _, ok := f.leaseOwner[id]; ok && f.leaseExpiresAt[id].After(f.now()) {
+			held[id] = struct{}{}
+		}
+	}
+	return held, nil
+}
+
+func (f *fakeStore) TryAcquireWSLease(ctx context.Context, arg AcquireLeaseParams) error {
 	atomic.AddInt32(&f.acquireCount, 1)
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -70,9 +92,29 @@ func (f *fakeStore) AcquireWSLease(ctx context.Context, arg AcquireLeaseParams) 
 	if !hasOwner || exp.Before(now) || owner == arg.Token {
 		f.leaseOwner[id] = arg.Token
 		f.leaseExpiresAt[id] = arg.ExpiresAt
+		if f.acquireAfterWriteErr != nil {
+			err := f.acquireAfterWriteErr
+			f.acquireAfterWriteErr = nil
+			return err
+		}
 		return nil
 	}
 	return ErrLeaseNotAcquired
+}
+
+func (f *fakeStore) RenewWSLease(_ context.Context, arg AcquireLeaseParams) error {
+	atomic.AddInt32(&f.renewCount, 1)
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.renewErr != nil {
+		return f.renewErr
+	}
+	id := uuidString(arg.ID)
+	if f.leaseOwner[id] != arg.Token || !f.leaseExpiresAt[id].After(f.now()) {
+		return ErrLeaseNotAcquired
+	}
+	f.leaseExpiresAt[id] = arg.ExpiresAt
+	return nil
 }
 
 func (f *fakeStore) ReleaseWSLease(ctx context.Context, arg ReleaseLeaseParams) error {
@@ -114,6 +156,30 @@ func (f *fakeStore) leaseHolder(id pgtype.UUID) (string, bool) {
 	defer f.mu.Unlock()
 	owner, ok := f.leaseOwner[uuidString(id)]
 	return owner, ok
+}
+
+type contextCapturingContendedLeaseStore struct {
+	acquireCtx chan context.Context
+}
+
+func (s *contextCapturingContendedLeaseStore) ListHeldWSLeases(_ context.Context, _ []pgtype.UUID) (map[string]struct{}, error) {
+	return map[string]struct{}{}, nil
+}
+
+func (s *contextCapturingContendedLeaseStore) TryAcquireWSLease(ctx context.Context, _ AcquireLeaseParams) error {
+	select {
+	case s.acquireCtx <- ctx:
+	default:
+	}
+	return ErrLeaseNotAcquired
+}
+
+func (s *contextCapturingContendedLeaseStore) RenewWSLease(_ context.Context, _ AcquireLeaseParams) error {
+	return errors.New("unexpected lease renewal")
+}
+
+func (s *contextCapturingContendedLeaseStore) ReleaseWSLease(_ context.Context, _ ReleaseLeaseParams) error {
+	return nil
 }
 
 // fakeChannel is a channel.Channel whose Connect behaves per a script
@@ -196,6 +262,26 @@ func discardLogger() *slog.Logger {
 	return slog.New(slog.NewTextHandler(io.Discard, nil))
 }
 
+// syncBuffer is a mutex-guarded sink for capturing slog output. The
+// supervisor logs from several goroutines, so an unguarded bytes.Buffer
+// would race under -race.
+type syncBuffer struct {
+	mu  sync.Mutex
+	buf bytes.Buffer
+}
+
+func (b *syncBuffer) Write(p []byte) (int, error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buf.Write(p)
+}
+
+func (b *syncBuffer) String() string {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buf.String()
+}
+
 func fastConfig() Config {
 	return Config{
 		LeaseTTL:           500 * time.Millisecond,
@@ -232,7 +318,7 @@ func TestSupervisorAcquiresLeaseAndConnects(t *testing.T) {
 	var builds int32
 	reg := fakeRegistry(fc, &builds, nil)
 
-	sup := NewSupervisor(q, reg, nil, fastConfig())
+	sup := NewSupervisor(q, q, reg, nil, fastConfig())
 	ctx, cancel := context.WithCancel(context.Background())
 	go sup.Run(ctx)
 
@@ -273,7 +359,7 @@ func TestSupervisorSkipsUnregisteredChannelType(t *testing.T) {
 	var builds int32
 	reg := fakeRegistry(fc, &builds, nil) // registers ONLY TypeFeishu
 
-	sup := NewSupervisor(q, reg, nil, fastConfig())
+	sup := NewSupervisor(q, q, reg, nil, fastConfig())
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	go sup.Run(ctx)
@@ -305,7 +391,7 @@ func TestSupervisorInjectsHandler(t *testing.T) {
 		called.Store(true)
 		return nil
 	}
-	sup := NewSupervisor(q, reg, handler, fastConfig())
+	sup := NewSupervisor(q, q, reg, handler, fastConfig())
 	ctx, cancel := context.WithCancel(context.Background())
 	go sup.Run(ctx)
 
@@ -327,6 +413,44 @@ func TestSupervisorInjectsHandler(t *testing.T) {
 	sup.Wait()
 }
 
+func TestSupervisorCancelsChildContextAfterContendedAcquire(t *testing.T) {
+	q := newFakeStore()
+	instID := uuidFromString(t, "21212121-2121-2121-2121-212121212121")
+	inst := activeInst(instID, "fp1")
+	leases := &contextCapturingContendedLeaseStore{acquireCtx: make(chan context.Context, 1)}
+
+	fc := &fakeChannel{typ: channel.TypeFeishu}
+	var builds int32
+	sup := NewSupervisor(q, leases, fakeRegistry(fc, &builds, nil), nil, fastConfig())
+	parentCtx, parentCancel := context.WithCancel(context.Background())
+	defer func() {
+		parentCancel()
+		sup.wg.Wait()
+	}()
+
+	// Start one supervisor directly so the test observes exactly one lease
+	// attempt; Run would continue sweeping and could start another attempt.
+	sup.startSupervisor(parentCtx, inst)
+	var acquireCtx context.Context
+	select {
+	case acquireCtx = <-leases.acquireCtx:
+	case <-time.After(300 * time.Millisecond):
+		t.Fatal("supervisor did not attempt to acquire the lease")
+	}
+
+	select {
+	case <-acquireCtx.Done():
+		if !errors.Is(acquireCtx.Err(), context.Canceled) {
+			t.Fatalf("acquire context error = %v, want context.Canceled", acquireCtx.Err())
+		}
+	case <-time.After(300 * time.Millisecond):
+		t.Fatal("supervisor returned after lease contention without cancelling its child context")
+	}
+	if got := atomic.LoadInt32(&builds); got != 0 {
+		t.Fatalf("contended lease should not build a channel, builds=%d", got)
+	}
+}
+
 func TestSupervisorSkipsWhenAnotherReplicaHoldsLease(t *testing.T) {
 	q := newFakeStore()
 	instID := uuidFromString(t, "22222222-2222-2222-2222-222222222222")
@@ -337,7 +461,7 @@ func TestSupervisorSkipsWhenAnotherReplicaHoldsLease(t *testing.T) {
 	var builds int32
 	reg := fakeRegistry(fc, &builds, nil)
 
-	sup := NewSupervisor(q, reg, nil, fastConfig())
+	sup := NewSupervisor(q, q, reg, nil, fastConfig())
 	ctx, cancel := context.WithCancel(context.Background())
 	go sup.Run(ctx)
 
@@ -349,9 +473,80 @@ func TestSupervisorSkipsWhenAnotherReplicaHoldsLease(t *testing.T) {
 	if owner, _ := q.leaseHolder(instID); owner != "other-replica" {
 		t.Fatalf("foreign lease should be untouched, got %q", owner)
 	}
+	if got := atomic.LoadInt32(&q.acquireCount); got != 0 {
+		t.Fatalf("loser should rely on batched held-key sweeps, acquire attempts=%d", got)
+	}
+
+	// Revoking an installation this node only observed as contended must prune
+	// its takeover-timing state; otherwise repeated install/revoke cycles leak.
+	q.mu.Lock()
+	q.installations = nil
+	q.mu.Unlock()
+	if !waitFor(200*time.Millisecond, func() bool {
+		sup.mu.Lock()
+		defer sup.mu.Unlock()
+		_, ok := sup.contendedSince[uuidString(instID)]
+		return !ok
+	}) {
+		t.Fatalf("revoked contended installation was not pruned")
+	}
 
 	cancel()
 	sup.Wait()
+}
+
+func TestSupervisorTwoNodesHaveExactlyOneOwner(t *testing.T) {
+	q := newFakeStore()
+	instID := uuidFromString(t, "23232323-2323-2323-2323-232323232323")
+	q.installations = []Installation{activeInst(instID, "fp1")}
+
+	first := &fakeChannel{typ: channel.TypeFeishu}
+	second := &fakeChannel{typ: channel.TypeFeishu}
+	var firstBuilds, secondBuilds int32
+	supA := NewSupervisor(q, q, fakeRegistry(first, &firstBuilds, nil), nil, fastConfig())
+	supB := NewSupervisor(q, q, fakeRegistry(second, &secondBuilds, nil), nil, fastConfig())
+	ctx, cancel := context.WithCancel(context.Background())
+	go supA.Run(ctx)
+	go supB.Run(ctx)
+
+	if !waitFor(300*time.Millisecond, func() bool { return first.Connects()+second.Connects() == 1 }) {
+		t.Fatalf("expected one owner, connects A=%d B=%d", first.Connects(), second.Connects())
+	}
+	time.Sleep(100 * time.Millisecond)
+	if got := first.Connects() + second.Connects(); got != 1 {
+		t.Fatalf("both nodes connected to one installation: connects=%d", got)
+	}
+
+	cancel()
+	supA.Wait()
+	supB.Wait()
+}
+
+func TestSupervisorAcquireResponseLossWaitsForExpiryBeforeRetry(t *testing.T) {
+	q := newFakeStore()
+	q.acquireAfterWriteErr = errors.New("response lost")
+	instID := uuidFromString(t, "24242424-2424-2424-2424-242424242424")
+	q.installations = []Installation{activeInst(instID, "fp1")}
+	fc := &fakeChannel{typ: channel.TypeFeishu}
+	var builds int32
+	sup := NewSupervisor(q, q, fakeRegistry(fc, &builds, nil), nil, fastConfig())
+	ctx, cancel := context.WithCancel(context.Background())
+	go sup.Run(ctx)
+	defer func() {
+		cancel()
+		sup.Wait()
+	}()
+
+	time.Sleep(150 * time.Millisecond)
+	if got := fc.Connects(); got != 0 {
+		t.Fatalf("must not connect when acquire acknowledgement was lost; connects=%d", got)
+	}
+	if got := atomic.LoadInt32(&q.acquireCount); got != 1 {
+		t.Fatalf("held key should suppress retries before expiry; attempts=%d", got)
+	}
+	if !waitFor(800*time.Millisecond, func() bool { return fc.Connects() == 1 }) {
+		t.Fatalf("expected takeover after uncertain lease expired")
+	}
 }
 
 func TestSupervisorReclaimsLeaseAfterExpiry(t *testing.T) {
@@ -364,7 +559,7 @@ func TestSupervisorReclaimsLeaseAfterExpiry(t *testing.T) {
 	var builds int32
 	reg := fakeRegistry(fc, &builds, nil)
 
-	sup := NewSupervisor(q, reg, nil, fastConfig())
+	sup := NewSupervisor(q, q, reg, nil, fastConfig())
 	ctx, cancel := context.WithCancel(context.Background())
 	go sup.Run(ctx)
 
@@ -385,7 +580,7 @@ func TestSupervisorReapsSupervisorWhenRevoked(t *testing.T) {
 	var builds int32
 	reg := fakeRegistry(fc, &builds, nil)
 
-	sup := NewSupervisor(q, reg, nil, fastConfig())
+	sup := NewSupervisor(q, q, reg, nil, fastConfig())
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	go sup.Run(ctx)
@@ -417,7 +612,7 @@ func TestSupervisorRestartsOnCredentialsRotation(t *testing.T) {
 	var builds int32
 	reg := fakeRegistry(fc, &builds, nil)
 
-	sup := NewSupervisor(q, reg, nil, fastConfig())
+	sup := NewSupervisor(q, q, reg, nil, fastConfig())
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	go sup.Run(ctx)
@@ -437,6 +632,44 @@ func TestSupervisorRestartsOnCredentialsRotation(t *testing.T) {
 	}
 }
 
+func TestSupervisorRotationReplacesConnectionInSameSweep(t *testing.T) {
+	q := newFakeStore()
+	instID := uuidFromString(t, "56565656-5656-5656-5656-565656565656")
+	q.installations = []Installation{activeInst(instID, "fp-one")}
+
+	fc := &fakeChannel{typ: channel.TypeFeishu}
+	var builds int32
+	cfg := fastConfig()
+	cfg.LeaseTTL = 6 * time.Second
+	cfg.LeaseRenewInterval = 3 * time.Second
+	cfg.PollInterval = 2 * time.Second
+	cfg.LeaseErrorRetryInterval = 100 * time.Millisecond
+	cfg.LeaseExpirySafetyMargin = 500 * time.Millisecond
+	cfg.RotationWaitTimeout = 500 * time.Millisecond
+	sup := NewSupervisor(q, q, fakeRegistry(fc, &builds, nil), nil, cfg)
+	ctx, cancel := context.WithCancel(context.Background())
+	go sup.Run(ctx)
+	defer func() {
+		cancel()
+		sup.Wait()
+	}()
+	if !waitFor(300*time.Millisecond, func() bool { return atomic.LoadInt32(&builds) == 1 }) {
+		t.Fatalf("initial channel never built")
+	}
+
+	q.mu.Lock()
+	q.installations[0].Fingerprint = "fp-two"
+	q.mu.Unlock()
+	started := time.Now()
+	sup.sweep(ctx)
+	if !waitFor(500*time.Millisecond, func() bool { return atomic.LoadInt32(&builds) == 2 }) {
+		t.Fatalf("rotation waited for the next %s poll instead of restarting in the same sweep", cfg.PollInterval)
+	}
+	if elapsed := time.Since(started); elapsed >= cfg.PollInterval {
+		t.Fatalf("rotation replacement took %s, poll interval is %s", elapsed, cfg.PollInterval)
+	}
+}
+
 func TestSupervisorDoesNotRestartOnUnchangedRow(t *testing.T) {
 	q := newFakeStore()
 	instID := uuidFromString(t, "66666666-6666-6666-6666-666666666666")
@@ -446,7 +679,7 @@ func TestSupervisorDoesNotRestartOnUnchangedRow(t *testing.T) {
 	var builds int32
 	reg := fakeRegistry(fc, &builds, nil)
 
-	sup := NewSupervisor(q, reg, nil, fastConfig())
+	sup := NewSupervisor(q, q, reg, nil, fastConfig())
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	go sup.Run(ctx)
@@ -470,7 +703,7 @@ func TestSupervisorBacksOffOnBuildError(t *testing.T) {
 	var builds int32
 	reg := fakeRegistry(fc, &builds, errors.New("boom"))
 
-	sup := NewSupervisor(q, reg, nil, fastConfig())
+	sup := NewSupervisor(q, q, reg, nil, fastConfig())
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	go sup.Run(ctx)
@@ -504,7 +737,7 @@ func TestSupervisorLeaseLossCancelsConnection(t *testing.T) {
 	var builds int32
 	reg := fakeRegistry(fc, &builds, nil)
 
-	sup := NewSupervisor(q, reg, nil, fastConfig())
+	sup := NewSupervisor(q, q, reg, nil, fastConfig())
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	go sup.Run(ctx)
@@ -524,6 +757,123 @@ func TestSupervisorLeaseLossCancelsConnection(t *testing.T) {
 	}
 }
 
+func TestSupervisorClearedLeaseKeyCancelsOldOwner(t *testing.T) {
+	q := newFakeStore()
+	instID := uuidFromString(t, "8b8b8b8b-8b8b-8b8b-8b8b-8b8b8b8b8b8b")
+	q.installations = []Installation{activeInst(instID, "fp1")}
+
+	connectReturned := make(chan struct{}, 1)
+	fc := &fakeChannel{
+		typ: channel.TypeFeishu,
+		script: []func(context.Context) error{func(ctx context.Context) error {
+			<-ctx.Done()
+			connectReturned <- struct{}{}
+			return ctx.Err()
+		}},
+	}
+	var builds int32
+	sup := NewSupervisor(q, q, fakeRegistry(fc, &builds, nil), nil, fastConfig())
+	ctx, cancel := context.WithCancel(context.Background())
+	go sup.Run(ctx)
+	defer func() {
+		cancel()
+		sup.Wait()
+	}()
+	if !waitFor(300*time.Millisecond, func() bool { return fc.Connects() == 1 }) {
+		t.Fatalf("channel never connected")
+	}
+
+	// Simulate Redis losing/clearing the key. Strict renewal must treat absence
+	// as lease loss instead of recreating the key from the old owner.
+	q.mu.Lock()
+	delete(q.leaseOwner, uuidString(instID))
+	delete(q.leaseExpiresAt, uuidString(instID))
+	q.mu.Unlock()
+	select {
+	case <-connectReturned:
+	case <-time.After(500 * time.Millisecond):
+		t.Fatalf("cleared lease key did not tear down the old owner")
+	}
+}
+
+func TestSupervisorTransientRenewalErrorRecoversBeforeDeadline(t *testing.T) {
+	q := newFakeStore()
+	instID := uuidFromString(t, "89898989-8989-8989-8989-898989898989")
+	q.installations = []Installation{activeInst(instID, "fp1")}
+	fc := &fakeChannel{typ: channel.TypeFeishu}
+	var builds int32
+	sup := NewSupervisor(q, q, fakeRegistry(fc, &builds, nil), nil, fastConfig())
+	ctx, cancel := context.WithCancel(context.Background())
+	go sup.Run(ctx)
+	defer func() {
+		cancel()
+		sup.Wait()
+	}()
+	if !waitFor(300*time.Millisecond, func() bool { return fc.Connects() == 1 }) {
+		t.Fatalf("channel never connected")
+	}
+
+	q.mu.Lock()
+	q.renewErr = errors.New("temporary redis timeout")
+	q.mu.Unlock()
+	if !waitFor(200*time.Millisecond, func() bool { return atomic.LoadInt32(&q.renewCount) >= 2 }) {
+		t.Fatalf("renewal errors were not retried quickly")
+	}
+	q.mu.Lock()
+	q.renewErr = nil
+	q.mu.Unlock()
+	before := atomic.LoadInt32(&q.renewCount)
+	if !waitFor(200*time.Millisecond, func() bool { return atomic.LoadInt32(&q.renewCount) > before }) {
+		t.Fatalf("renewal did not recover")
+	}
+	if got := fc.Connects(); got != 1 {
+		t.Fatalf("transient error should not reconnect the channel; connects=%d", got)
+	}
+}
+
+func TestSupervisorOneWayRedisPartitionDisconnectsBeforeConfirmedExpiry(t *testing.T) {
+	q := newFakeStore()
+	q.releaseBlock = make(chan struct{})
+	instID := uuidFromString(t, "8a8a8a8a-8a8a-8a8a-8a8a-8a8a8a8a8a8a")
+	q.installations = []Installation{activeInst(instID, "fp1")}
+	connectReturned := make(chan struct{}, 1)
+	fc := &fakeChannel{
+		typ: channel.TypeFeishu,
+		script: []func(context.Context) error{func(ctx context.Context) error {
+			<-ctx.Done()
+			connectReturned <- struct{}{}
+			return ctx.Err()
+		}},
+	}
+	var builds int32
+	cfg := fastConfig()
+	cfg.LeaseReleaseTimeout = 100 * time.Millisecond
+	sup := NewSupervisor(q, q, fakeRegistry(fc, &builds, nil), nil, cfg)
+	ctx, cancel := context.WithCancel(context.Background())
+	go sup.Run(ctx)
+	if !waitFor(300*time.Millisecond, func() bool { return fc.Connects() == 1 }) {
+		t.Fatalf("channel never connected")
+	}
+
+	q.mu.Lock()
+	q.renewErr = errors.New("partitioned from redis")
+	q.mu.Unlock()
+	select {
+	case <-connectReturned:
+	case <-time.After(800 * time.Millisecond):
+		t.Fatalf("partitioned owner stayed connected beyond confirmed lease")
+	}
+	q.mu.Lock()
+	expiresAt := q.leaseExpiresAt[uuidString(instID)]
+	q.mu.Unlock()
+	if !time.Now().Before(expiresAt) {
+		t.Fatalf("connection was not cancelled before backend lease expiry: expires_at=%s", expiresAt)
+	}
+	close(q.releaseBlock)
+	cancel()
+	sup.Wait()
+}
+
 func TestSupervisorReleaseLeaseBoundedByTimeout(t *testing.T) {
 	q := newFakeStore()
 	q.releaseBlock = make(chan struct{}) // never closed; release always hits ctx.Done
@@ -536,7 +886,7 @@ func TestSupervisorReleaseLeaseBoundedByTimeout(t *testing.T) {
 
 	cfg := fastConfig()
 	cfg.LeaseReleaseTimeout = 40 * time.Millisecond
-	sup := NewSupervisor(q, reg, nil, cfg)
+	sup := NewSupervisor(q, q, reg, nil, cfg)
 	ctx, cancel := context.WithCancel(context.Background())
 	go sup.Run(ctx)
 
@@ -568,7 +918,7 @@ func TestSupervisorWaitWithTimeoutReturnsFalseWhenStuck(t *testing.T) {
 
 	cfg := fastConfig()
 	cfg.LeaseReleaseTimeout = 10 * time.Second // longer than the WaitWithTimeout below
-	sup := NewSupervisor(q, reg, nil, cfg)
+	sup := NewSupervisor(q, q, reg, nil, cfg)
 	ctx, cancel := context.WithCancel(context.Background())
 	go sup.Run(ctx)
 
@@ -598,7 +948,7 @@ func TestSupervisorRotationStaleReleaseDoesNotClearSuccessorLease(t *testing.T) 
 	var builds int32
 	reg := fakeRegistry(fc, &builds, nil)
 
-	sup := NewSupervisor(q, reg, nil, fastConfig())
+	sup := NewSupervisor(q, q, reg, nil, fastConfig())
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	go sup.Run(ctx)
@@ -627,7 +977,8 @@ func TestSupervisorRotationStaleReleaseDoesNotClearSuccessorLease(t *testing.T) 
 }
 
 func TestSupervisorConfigDefaults(t *testing.T) {
-	sup := NewSupervisor(newFakeStore(), channel.NewRegistry(), nil, Config{})
+	store := newFakeStore()
+	sup := NewSupervisor(store, store, channel.NewRegistry(), nil, Config{})
 	if sup.cfg.LeaseTTL <= 0 || sup.cfg.LeaseRenewInterval <= 0 || sup.cfg.PollInterval <= 0 {
 		t.Fatalf("lifecycle intervals must default to positive values")
 	}
@@ -637,10 +988,88 @@ func TestSupervisorConfigDefaults(t *testing.T) {
 	if sup.ShutdownTimeout() <= 0 {
 		t.Fatalf("shutdown timeout must default to a positive value")
 	}
+	if sup.cfg.RotationWaitTimeout <= 0 {
+		t.Fatalf("rotation wait timeout must default to a positive value")
+	}
 	if sup.cfg.Now == nil || sup.cfg.Logger == nil {
 		t.Fatalf("Now and Logger must be defaulted")
 	}
 	if sup.NodeID() == "" {
 		t.Fatalf("node id must be assigned")
+	}
+}
+
+func TestSupervisorPartialTTLConfigDerivesSafeIntervals(t *testing.T) {
+	store := newFakeStore()
+	sup := NewSupervisor(store, store, channel.NewRegistry(), nil, Config{LeaseTTL: 30 * time.Second})
+	if sup.cfg.LeaseRenewInterval != 10*time.Second {
+		t.Fatalf("renew interval = %s, want TTL/3", sup.cfg.LeaseRenewInterval)
+	}
+	if sup.cfg.PollInterval != 5*time.Second {
+		t.Fatalf("poll interval = %s, want renew/2", sup.cfg.PollInterval)
+	}
+}
+
+func TestSupervisorRejectsUnsafeLeaseIntervals(t *testing.T) {
+	store := newFakeStore()
+	defer func() {
+		if recover() == nil {
+			t.Fatalf("expected invalid poll/renew/ttl relation to panic")
+		}
+	}()
+	NewSupervisor(store, store, channel.NewRegistry(), nil, Config{
+		LeaseTTL: 30 * time.Second, LeaseRenewInterval: 20 * time.Second, PollInterval: 25 * time.Second,
+		LeaseErrorRetryInterval: time.Second, LeaseExpirySafetyMargin: time.Second,
+	})
+}
+
+// The connection-exit log must not carry a field named lease_token. The
+// lease token is an internal CAS marker rather than a credential, but a
+// plaintext `lease_token=` in the log reads as a leaked channel credential
+// to anyone tailing it — that misread is what GH #7132 reported. node_id
+// and lease_gen are the same information under a name that does not invite
+// the false positive, so this asserts the field NAME is gone and the
+// diagnostic fields survived, not that anything is secret.
+func TestSupervisorExitLogOmitsLeaseTokenField(t *testing.T) {
+	q := newFakeStore()
+	instID := uuidFromString(t, "cccccccc-cccc-cccc-cccc-cccccccccccc")
+	q.installations = []Installation{activeInst(instID, "fp1")}
+
+	// First Connect fails immediately, driving the exact "connection exited
+	// with error" branch the report quoted; later attempts park on ctx.
+	fc := &fakeChannel{
+		typ: channel.TypeFeishu,
+		script: []func(ctx context.Context) error{
+			func(ctx context.Context) error { return errors.New("read message: websocket: close 1006") },
+		},
+	}
+	var builds int32
+	reg := fakeRegistry(fc, &builds, nil)
+
+	var logs syncBuffer
+	cfg := fastConfig()
+	cfg.Logger = slog.New(slog.NewTextHandler(&logs, nil))
+
+	sup := NewSupervisor(q, q, reg, nil, cfg)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go sup.Run(ctx)
+
+	if !waitFor(time.Second, func() bool {
+		return strings.Contains(logs.String(), "connection exited with error")
+	}) {
+		t.Fatalf("expected the exit-with-error log; got %q", logs.String())
+	}
+	cancel()
+	sup.Wait()
+
+	out := logs.String()
+	if strings.Contains(out, "lease_token") {
+		t.Errorf("supervisor logs must not carry a lease_token field; got %q", out)
+	}
+	for _, field := range []string{"installation_id=", "node_id=", "lease_gen="} {
+		if !strings.Contains(out, field) {
+			t.Errorf("supervisor logs lost diagnostic field %s; got %q", field, out)
+		}
 	}
 }

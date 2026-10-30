@@ -1,8 +1,8 @@
 "use client";
 
 import { useRef } from "react";
-import { Check, FolderKanban, Image as ImageIcon, Plus, X } from "lucide-react";
-import { Button } from "@multica/ui/components/ui/button";
+import { Check, FolderKanban, Image as ImageIcon, Plus, X } from "@multica/ui/icons";
+import { IconButton } from "@multica/ui/components/common/icon-button";
 import {
   DropdownMenu,
   DropdownMenuTrigger,
@@ -60,17 +60,16 @@ export function ChatAddMenu({
       <DropdownMenu>
         <DropdownMenuTrigger
           render={
-            <Button
+            <IconButton
               type="button"
               variant="ghost"
               size="icon-sm"
               disabled={disabled}
-              aria-label={t(($) => $.input.add_tooltip)}
-              title={t(($) => $.input.add_tooltip)}
+              label={t(($) => $.input.add_tooltip)}
               className="rounded-full text-muted-foreground"
             >
               <Plus />
-            </Button>
+            </IconButton>
           }
         />
         <DropdownMenuContent align="start" side="top" sideOffset={6}>
@@ -98,7 +97,7 @@ export function ChatAddMenu({
                   </DropdownMenuItem>
                 ))}
                 {projects.length === 0 && (
-                  <div className="px-2 py-1.5 text-xs text-muted-foreground">
+                  <div className="px-2 py-1.5 text-caption text-muted-foreground">
                     {t(($) => $.input.no_projects)}
                   </div>
                 )}
@@ -112,7 +111,7 @@ export function ChatAddMenu({
                 {projectContextUnsupported && (
                   <>
                     <DropdownMenuSeparator />
-                    <div className="max-w-56 px-2 py-1.5 text-xs text-muted-foreground">
+                    <div className="max-w-56 px-2 py-1.5 text-caption text-muted-foreground">
                       {t(($) => $.input.project_context_unsupported)}
                     </div>
                   </>

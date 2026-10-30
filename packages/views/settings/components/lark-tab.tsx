@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { ChevronRight, ExternalLink, RefreshCw, Trash2 } from "lucide-react";
+import { ChevronRight, ExternalLink, RefreshCw, Trash2 } from "@multica/ui/icons";
 // Named import, NOT default: react-qr-code is CJS, and electron-vite's
 // dep-optimizer default-import interop handed back the module namespace
 // object instead of the component, throwing "Element type is invalid …
@@ -41,7 +41,9 @@ import { larkInstallationsOptions, larkKeys } from "@multica/core/lark";
 import { api, ApiError } from "@multica/core/api";
 import type { LarkInstallation, LarkInstallStatusResponse } from "@multica/core/types";
 import { ActorAvatar } from "../../common/actor-avatar";
-import { useT } from "../../i18n";
+import { docsLocalePrefix } from "../../common/docs-locale";
+import { useLocale, useT } from "../../i18n";
+import { TooltipHint } from "@multica/ui/components/common/tooltip-hint";
 
 // MUL-3083: the Lark (international, open.larksuite.com) "connect a Bot"
 // entry is temporarily hidden while its install → inbound pipeline is
@@ -107,19 +109,13 @@ export function LarkTab() {
 
   return (
     <div className="space-y-8">
-      <section className="space-y-1">
-        <p className="text-sm text-muted-foreground">
-          {t(($) => $.lark.page_description)}
-        </p>
-      </section>
-
       {!configured ? (
         <Card>
           <CardContent className="space-y-2">
-            <p className="text-sm font-medium">{t(($) => $.lark.not_enabled_title)}</p>
-            <p className="text-xs text-muted-foreground">
+            <p className="text-body font-medium">{t(($) => $.lark.not_enabled_title)}</p>
+            <p className="text-caption text-muted-foreground">
               {t(($) => $.lark.not_enabled_description_prefix)}{" "}
-              <code className="rounded bg-muted px-1 py-0.5 text-[10px]">
+              <code className="rounded-xs bg-muted px-1 py-0.5 text-micro">
                 MULTICA_LARK_SECRET_KEY
               </code>{" "}
               {t(($) => $.lark.not_enabled_description_suffix)}{" "}
@@ -131,31 +127,31 @@ export function LarkTab() {
         // Device-flow install path is not wired (HTTP client is the stub
         // or RegistrationService didn't initialize). We deliberately do
         // NOT direct users to the agent-detail "Bind" button because the
-        // backend would 503 anyway. Existing installations still render
+        // backend would reject it anyway. Existing installations still render
         // via the branch below; this only hides the empty-state CTA
         // when there is nothing to manage.
         <Card>
           <CardContent className="space-y-2">
-            <p className="text-sm font-medium">{t(($) => $.lark.preview_title)}</p>
-            <p className="text-xs text-muted-foreground">
+            <p className="text-body font-medium">{t(($) => $.lark.preview_title)}</p>
+            <p className="text-caption text-muted-foreground">
               {t(($) => $.lark.preview_description)}
             </p>
           </CardContent>
         </Card>
       ) : (
         <section className="space-y-3">
-          <h2 className="text-sm font-semibold">{t(($) => $.lark.connected_bots)}</h2>
+          <h2 className="text-body font-semibold">{t(($) => $.lark.connected_bots)}</h2>
           {isLoading ? (
             <Card>
               <CardContent>
-                <p className="text-sm text-muted-foreground">{t(($) => $.lark.loading)}</p>
+                <p className="text-body text-muted-foreground">{t(($) => $.lark.loading)}</p>
               </CardContent>
             </Card>
           ) : installations.length === 0 ? (
             <Card>
               <CardContent className="space-y-2">
-                <p className="text-sm font-medium">{t(($) => $.lark.empty_title)}</p>
-                <p className="text-xs text-muted-foreground">
+                <p className="text-body font-medium">{t(($) => $.lark.empty_title)}</p>
+                <p className="text-caption text-muted-foreground">
                   {t(($) => $.lark.empty_description_prefix)}{" "}
                   <strong>{t(($) => $.lark.empty_description_cta)}</strong>{" "}
                   {t(($) => $.lark.empty_description_suffix)}
@@ -220,6 +216,7 @@ function InstallationRow({
   onDisconnect: () => void;
 }) {
   const { t } = useT("settings");
+  const locale = useLocale();
   // The bot is bound 1:1 to a Multica Agent (per the (workspace_id,
   // agent_id) UNIQUE in lark_installation). Render the Multica agent's
   // identity here rather than the raw Lark app_id / bot_open_id — those
@@ -240,22 +237,22 @@ function InstallationRow({
           profileLink
         />
         <div className="space-y-1">
-          <p className="text-sm font-medium">
+          <p className="text-body font-medium">
             {agentName}
-            <span className="ml-2 rounded bg-muted px-1.5 py-0.5 text-[10px] text-muted-foreground">
+            <span className="ml-2 rounded-xs bg-muted px-1.5 py-0.5 text-micro text-muted-foreground">
               {installation.region === "lark"
                 ? t(($) => $.lark.region_lark)
                 : t(($) => $.lark.region_feishu)}
             </span>
             {!isActive && (
-              <span className="ml-2 rounded bg-muted px-1.5 py-0.5 text-[10px] text-muted-foreground">
+              <span className="ml-2 rounded-xs bg-muted px-1.5 py-0.5 text-micro text-muted-foreground">
                 {t(($) => $.lark.revoked_badge)}
               </span>
             )}
           </p>
-          <p className="text-[10px] text-muted-foreground">
+          <p className="text-micro text-muted-foreground">
             {t(($) => $.lark.installed_at_label, {
-              when: new Date(installation.installed_at).toLocaleString(),
+              when: new Date(installation.installed_at).toLocaleString(locale),
             })}
           </p>
         </div>
@@ -398,40 +395,46 @@ export function LarkAgentBindButton({
         className={cn("flex flex-wrap items-center gap-2", className)}
         data-testid="lark-agent-bind-buttons"
       >
-        <Button
-          variant="outline"
-          size="sm"
-          onClick={() => setDialogRegion("feishu")}
-          disabled={!agentId}
-          title={
+        <TooltipHint
+          label={
             agentName
               ? t(($) => $.lark.bind_button_feishu_title, { agent: agentName })
               : undefined
           }
-          data-testid="lark-agent-bind-feishu"
         >
-          <ExternalLink className="h-3 w-3" />
-          {t(($) => $.lark.bind_button_feishu)}
-        </Button>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => setDialogRegion("feishu")}
+            disabled={!agentId}
+            data-testid="lark-agent-bind-feishu"
+          >
+            <ExternalLink className="h-3 w-3" />
+            {t(($) => $.lark.bind_button_feishu)}
+          </Button>
+        </TooltipHint>
         {/* MUL-3083: Lark (international) bind entry is temporarily hidden —
             see LARK_INTL_CONNECT_ENABLED. Mainland Feishu (above) is
             unaffected. */}
         {LARK_INTL_CONNECT_ENABLED && (
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={() => setDialogRegion("lark")}
-            disabled={!agentId}
-            title={
+          <TooltipHint
+            label={
               agentName
                 ? t(($) => $.lark.bind_button_lark_title, { agent: agentName })
                 : undefined
             }
-            data-testid="lark-agent-bind-lark"
           >
-            <ExternalLink className="h-3 w-3" />
-            {t(($) => $.lark.bind_button_lark)}
-          </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => setDialogRegion("lark")}
+              disabled={!agentId}
+              data-testid="lark-agent-bind-lark"
+            >
+              <ExternalLink className="h-3 w-3" />
+              {t(($) => $.lark.bind_button_lark)}
+            </Button>
+          </TooltipHint>
         )}
       </div>
       {dialogRegion && (
@@ -468,13 +471,13 @@ function LarkAgentBotStatusRow({
       type="button"
       onClick={onClick}
       className={cn(
-        "flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-xs text-muted-foreground transition-colors hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50",
+        "flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-caption text-muted-foreground transition-colors hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50",
         className,
       )}
       data-testid="lark-agent-bot-status"
     >
       <span className="inline-block h-1.5 w-1.5 shrink-0 rounded-full bg-emerald-500" />
-      <span className="rounded bg-muted px-1.5 py-0.5 text-[10px] text-muted-foreground">
+      <span className="rounded-xs bg-muted px-1.5 py-0.5 text-micro text-muted-foreground">
         {installation.region === "lark"
           ? t(($) => $.lark.region_lark)
           : t(($) => $.lark.region_feishu)}
@@ -512,6 +515,12 @@ function larkDevConsoleHost(region?: string): string {
     : "https://open.feishu.cn";
 }
 
+// larkDocsUrl points at the Lark/Feishu integration guide, localized the
+// same way as the Telegram and Slack docs links.
+function larkDocsUrl(lang: string | undefined): string {
+  return `https://multica.ai/docs${docsLocalePrefix(lang)}/lark-bot-integration`;
+}
+
 function LarkAgentBotConnectedBadge({
   installation,
   className,
@@ -519,7 +528,7 @@ function LarkAgentBotConnectedBadge({
   installation: LarkInstallation;
   className?: string;
 }) {
-  const { t } = useT("settings");
+  const { t, i18n } = useT("settings");
   const wsId = useWorkspaceId();
   const qc = useQueryClient();
   const manageHref = `${larkDevConsoleHost(installation.region)}/app/${encodeURIComponent(installation.app_id)}`;
@@ -563,29 +572,30 @@ function LarkAgentBotConnectedBadge({
           is mandatory: the backend disconnect tears down the WebSocket
           and stops message delivery. */}
       <div className="flex items-center justify-between gap-3">
-        <span className="inline-flex min-w-0 items-center gap-2 text-xs text-muted-foreground">
+        <span className="inline-flex min-w-0 items-center gap-2 text-caption text-muted-foreground">
           <span className="inline-block h-1.5 w-1.5 shrink-0 rounded-full bg-emerald-500" />
-          <span className="rounded bg-muted px-1.5 py-0.5 text-[10px] text-muted-foreground">
+          <span className="rounded-xs bg-muted px-1.5 py-0.5 text-micro text-muted-foreground">
             {installation.region === "lark"
               ? t(($) => $.lark.region_lark)
               : t(($) => $.lark.region_feishu)}
           </span>
           <span className="truncate">{t(($) => $.lark.agent_bot_connected_label)}</span>
         </span>
-        <Button
-          variant="destructive"
-          size="sm"
-          onClick={() => setConfirmOpen(true)}
-          disabled={disconnecting}
-          title={t(($) => $.lark.agent_bot_disconnect_tooltip)}
-          aria-label={t(($) => $.lark.disconnect)}
-          data-testid="lark-agent-bot-disconnect"
-        >
-          <Trash2 className="h-3 w-3" />
-          {disconnecting
-            ? t(($) => $.lark.disconnecting)
-            : t(($) => $.lark.disconnect)}
-        </Button>
+        <TooltipHint label={t(($) => $.lark.agent_bot_disconnect_tooltip)}>
+          <Button
+            variant="destructive"
+            size="sm"
+            onClick={() => setConfirmOpen(true)}
+            disabled={disconnecting}
+            aria-label={t(($) => $.lark.disconnect)}
+            data-testid="lark-agent-bot-disconnect"
+          >
+            <Trash2 className="h-3 w-3" />
+            {disconnecting
+              ? t(($) => $.lark.disconnecting)
+              : t(($) => $.lark.disconnect)}
+          </Button>
+        </TooltipHint>
       </div>
 
       {/* Row 2: secondary "Manage in Lark" link to the Bot's dev-console
@@ -596,7 +606,7 @@ function LarkAgentBotConnectedBadge({
         href={manageHref}
         target="_blank"
         rel="noopener noreferrer"
-        className="inline-flex items-center gap-1 text-xs text-muted-foreground underline-offset-2 transition-colors hover:text-foreground hover:underline"
+        className="inline-flex items-center gap-1 text-caption text-muted-foreground underline-offset-2 transition-colors hover:text-foreground hover:underline"
         title={
           installation.region === "lark"
             ? t(($) => $.lark.agent_bot_manage_tooltip_lark)
@@ -608,6 +618,23 @@ function LarkAgentBotConnectedBadge({
           ? t(($) => $.lark.agent_bot_manage_link_lark)
           : t(($) => $.lark.agent_bot_manage_link_feishu)}
       </a>
+
+      {/* Row 3: the check a silent Bot almost always needs (#8496). An app
+          whose events go to a request URL instead of the long connection
+          binds fine and shows exactly this badge while receiving nothing,
+          and this row is where someone looks when the Bot stays quiet —
+          the install dialog closes itself a beat after success. */}
+      <p className="text-caption text-muted-foreground">
+        {t(($) => $.lark.agent_bot_silent_hint)}{" "}
+        <a
+          href={larkDocsUrl(i18n.language)}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="underline underline-offset-2 transition-colors hover:text-foreground"
+        >
+          {t(($) => $.lark.agent_bot_silent_hint_link)}
+        </a>
+      </p>
 
       <AlertDialog
         open={confirmOpen}
@@ -852,7 +879,7 @@ function LarkInstallDialog({
 
         <div className="flex flex-col items-center gap-4 py-2">
           {beginning && !session && (
-            <p className="text-sm text-muted-foreground">{t(($) => $.lark.install_starting)}</p>
+            <p className="text-body text-muted-foreground">{t(($) => $.lark.install_starting)}</p>
           )}
 
           {session && status === "pending" && (
@@ -862,16 +889,11 @@ function LarkInstallDialog({
                   network image dependency, prints at any DPI. */}
                 <QRCode value={session.qrCodeURL} size={192} />
               </div>
-              <p className="text-center text-xs text-muted-foreground">
-                {region === "lark"
-                  ? t(($) => $.lark.install_scan_hint_lark)
-                  : t(($) => $.lark.install_scan_hint_feishu)}
-              </p>
               <a
                 href={session.qrCodeURL}
                 target="_blank"
                 rel="noopener noreferrer"
-                className="text-xs underline text-muted-foreground"
+                className="text-caption underline text-muted-foreground"
               >
                 {region === "lark"
                   ? t(($) => $.lark.install_open_link_fallback_lark)
@@ -881,12 +903,12 @@ function LarkInstallDialog({
           )}
 
           {status === "success" && (
-            <p className="text-sm font-medium">{t(($) => $.lark.install_success)}</p>
+            <p className="text-body font-medium">{t(($) => $.lark.install_success)}</p>
           )}
 
           {status === "error" && (
             <div className="space-y-2 text-center">
-              <p className="text-sm font-medium text-destructive">
+              <p className="text-body font-medium text-destructive">
                 {(() => {
                   switch (errorReason) {
                     case "expired":
@@ -911,7 +933,7 @@ function LarkInstallDialog({
                 })()}
               </p>
               {errorMessage && (
-                <p className="text-[10px] text-muted-foreground break-all">
+                <p className="text-micro text-muted-foreground break-all">
                   {errorMessage}
                 </p>
               )}

@@ -1,25 +1,10 @@
 import type { TaskFailureReason } from "../types";
 
 /**
- * Picks the copy key a UI surface should render for a server-supplied
- * `failure_reason`, degrading instead of falling off a cliff.
- *
- * Resolution order:
- *   1. Exact match — the surface has copy for this precise reason.
- *   2. Coarse family — `agent_error.provider_network` degrades to
- *      `agent_error` when the surface only has family-level copy.
- *   3. `undefined` — nothing usable; the caller renders its own fallback.
- *
- * Why this exists: the backend's taxonomy is refined (`agent_error.*`) and
- * grows independently of shipped clients. Before MUL-5370 the surfaces did an
- * exact `Record` lookup against the six-value coarse enum, so every refined
- * reason missed and rendered a generic "something went wrong" — the useful
- * classification the backend had already computed was thrown away at the last
- * step. Step 2 makes an unseen `agent_error.<new_thing>` land on the family
- * line rather than the fallback, which is the repo's "enum drift downgrades,
- * not crashes" rule applied to copy.
- *
- * Pure and dependency-free so mobile can import it directly.
+ * Resolve failure copy by exact reason, then coarse family, then caller fallback.
+ * The server taxonomy can grow independently of installed clients; unfamiliar
+ * agent_error subtypes should retain family-level guidance. Keep this helper pure
+ * so mobile can share it.
  */
 export function resolveFailureReasonKey<K extends string>(
   reason: TaskFailureReason | string | null | undefined,

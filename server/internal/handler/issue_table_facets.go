@@ -2,6 +2,7 @@ package handler
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -10,6 +11,7 @@ import (
 	"strings"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/multica-ai/multica/server/internal/logger"
 	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
@@ -42,9 +44,9 @@ func issueTableQueryWithoutFacet(input issueTableQuerySpec, facet issueTableFace
 	output := input
 	output.Filters = input.Filters
 	if input.Filters.Properties != nil {
-		output.Filters.Properties = make(map[string][]string, len(input.Filters.Properties))
+		output.Filters.Properties = make(map[string][]json.RawMessage, len(input.Filters.Properties))
 		for propertyID, values := range input.Filters.Properties {
-			output.Filters.Properties[propertyID] = append([]string(nil), values...)
+			output.Filters.Properties[propertyID] = append([]json.RawMessage(nil), values...)
 		}
 	}
 
@@ -65,6 +67,13 @@ func issueTableQueryWithoutFacet(input issueTableQuerySpec, facet issueTableFace
 		output.Filters.LabelIDs = nil
 	case "property":
 		delete(output.Filters.Properties, facet.PropertyID)
+	case "working_agents":
+		// Disjunctive like every other facet: drop this facet's own dimension so
+		// the answer is "who would you see if you turned the agents-working
+		// filter ON", which is also the answer while it is already on. That
+		// makes the header chip's count stable across the toggle.
+		output.Filters.WorkingIssueIDs = nil
+		output.Filters.WorkingOnly = false
 	}
 	return output
 }
@@ -194,6 +203,39 @@ func (h *Handler) issueTableFacetQuery(w http.ResponseWriter, r *http.Request, r
 		query = fmt.Sprintf(`SELECT COALESCE(i.project_id::text, '__none__'), COUNT(*)::bigint FROM issue i WHERE %s GROUP BY 1`, compiled.where)
 	case "label":
 		query = fmt.Sprintf(`SELECT itl.label_id::text, COUNT(DISTINCT i.id)::bigint FROM issue i JOIN issue_to_label itl ON itl.issue_id = i.id WHERE %s GROUP BY itl.label_id`, compiled.where)
+	case "working_agents":
+		agentIDs, ok := h.issueTableWorkingAgentIDs(w, r, compiled.workspaceID)
+		if !ok {
+			return response, false
+		}
+		if len(agentIDs) == 0 {
+			return response, true
+		}
+		// One row per agent currently running issue work inside THIS surface,
+		// with its running-task count. Same predicate as
+		// ListWorkspaceWorkingAgents with type=issue (chat > autopilot > issue
+		// precedence, user-authored non-archived agents only), but the issue set
+		// comes from the surface's own compiled scope + filters instead of a
+		// second, independent workspace-wide definition. That is what keeps the
+		// header chip's count equal to the rows clicking it leaves (MUL-5525).
+		// Join the unique visible-agent ids as a relation. With a large roster,
+		// ANY(array) can become a per-task linear filter on a global running
+		// scan; a relation also permits a hash join. Materialization bounds the
+		// intermediate set, not the optimizer's task access or issue join plan.
+		query = fmt.Sprintf(`WITH running AS MATERIALIZED (
+  SELECT atq.agent_id, atq.issue_id
+  FROM unnest($%d::uuid[]) AS cand(agent_id)
+  JOIN agent_task_queue atq
+    ON atq.agent_id = cand.agent_id AND atq.status = 'running'
+  WHERE atq.chat_session_id IS NULL
+    AND atq.autopilot_run_id IS NULL
+    AND atq.issue_id IS NOT NULL
+)
+SELECT r.agent_id::text, COUNT(*)::bigint
+FROM running r
+WHERE EXISTS (SELECT 1 FROM issue i WHERE i.id = r.issue_id AND %s)
+GROUP BY r.agent_id`, len(compiled.args)+1, compiled.where)
+		compiled.args = append(compiled.args, agentIDs)
 	case "property":
 		propertyID, err := util.ParseUUID(facet.PropertyID)
 		if err != nil {
@@ -219,12 +261,24 @@ func (h *Handler) issueTableFacetQuery(w http.ResponseWriter, r *http.Request, r
 		}
 		propertyKey := "'" + util.UUIDToString(property.ID) + "'"
 		switch property.Type {
-		case "select":
-			query = fmt.Sprintf(`SELECT i.properties ->> %s, COUNT(*)::bigint FROM issue i WHERE %s AND jsonb_typeof(i.properties -> %s) = 'string' GROUP BY 1`, propertyKey, compiled.where, propertyKey)
-		case "multi_select":
-			query = fmt.Sprintf(`SELECT property_value.value, COUNT(DISTINCT i.id)::bigint FROM issue i JOIN LATERAL jsonb_array_elements_text(CASE WHEN jsonb_typeof(i.properties -> %s) = 'array' THEN i.properties -> %s ELSE '[]'::jsonb END) AS property_value(value) ON TRUE WHERE %s GROUP BY property_value.value`, propertyKey, propertyKey, compiled.where)
+		case "select", "actor":
+			// Unset issues count under the "__none__" bucket so the filter menu's
+			// "No value" option carries a real count (issues without the key).
+			query = fmt.Sprintf(`SELECT COALESCE(i.properties ->> %s, '__none__'), COUNT(*)::bigint FROM issue i WHERE %s AND (jsonb_typeof(i.properties -> %s) = 'string' OR NOT (i.properties ? %s)) GROUP BY 1`, propertyKey, compiled.where, propertyKey, propertyKey)
+		case "text", "url", "date", "number", "multi_text", "multi_url":
+			// Scalar and free-form-list values are unbounded distinct-value
+			// spaces (multi_text/multi_url enumerate arbitrary user strings),
+			// so grouping by distinct value would return one row per observed
+			// value with no bound. The filter menu only reads the "__none__"
+			// bucket for these types, so compute just the two bounded buckets
+			// instead of pulling the whole value space. Key existence is exact
+			// for "no value": stored values can never be null or empty, so a
+			// present key is always a set value.
+			query = fmt.Sprintf(`SELECT CASE WHEN i.properties ? %s THEN '__set__' ELSE '__none__' END, COUNT(*)::bigint FROM issue i WHERE %s GROUP BY 1`, propertyKey, compiled.where)
+		case "multi_select", "multi_actor":
+			query = fmt.Sprintf(`SELECT COALESCE(property_value.value, '__none__'), COUNT(DISTINCT i.id)::bigint FROM issue i JOIN LATERAL (SELECT jsonb_array_elements_text(CASE WHEN jsonb_typeof(i.properties -> %s) = 'array' THEN i.properties -> %s ELSE '[]'::jsonb END) AS value UNION ALL SELECT NULL WHERE NOT (i.properties ? %s)) property_value(value) ON TRUE WHERE %s GROUP BY 1`, propertyKey, propertyKey, propertyKey, compiled.where)
 		case "checkbox":
-			query = fmt.Sprintf(`SELECT i.properties ->> %s, COUNT(*)::bigint FROM issue i WHERE %s AND jsonb_typeof(i.properties -> %s) = 'boolean' GROUP BY 1`, propertyKey, compiled.where, propertyKey)
+			query = fmt.Sprintf(`SELECT COALESCE(i.properties ->> %s, '__none__'), COUNT(*)::bigint FROM issue i WHERE %s AND (jsonb_typeof(i.properties -> %s) = 'boolean' OR NOT (i.properties ? %s)) GROUP BY 1`, propertyKey, compiled.where, propertyKey, propertyKey)
 		default:
 			writeIssueTableUnsupportedGroup(w, "property_type_unsupported", "This property type cannot be used as a filter facet.")
 			return response, false
@@ -258,6 +312,41 @@ func (h *Handler) issueTableFacetQuery(w http.ResponseWriter, r *http.Request, r
 		return strings.Compare(response.Values[i].Key, response.Values[j].Key) < 0
 	})
 	return response, true
+}
+
+// The working-agents facet discloses agent identity. Resolve its visible,
+// active user agents inside the table snapshot before scanning their tasks.
+// accessibleAgentIDs intentionally includes archived agents for other
+// aggregations, so it cannot supply this facet's candidate set.
+func (h *Handler) issueTableWorkingAgentIDs(
+	w http.ResponseWriter,
+	r *http.Request,
+	workspaceUUID pgtype.UUID,
+) ([]pgtype.UUID, bool) {
+	workspaceID := util.UUIDToString(workspaceUUID)
+	member, ok := h.workspaceMember(w, r, workspaceID)
+	if !ok {
+		return nil, false
+	}
+	actorType, actorID := h.resolveActor(r, requestUserID(r), workspaceID)
+	agents, err := h.Queries.ListAgents(r.Context(), workspaceUUID)
+	if err != nil {
+		writeIssueTableQueryFailure(w, r, "failed to resolve agent access")
+		return nil, false
+	}
+	targetsByAgent, ok := h.loadInvocationTargetsByAgent(r.Context(), agents)
+	if !ok {
+		writeIssueTableQueryFailure(w, r, "failed to resolve agent access")
+		return nil, false
+	}
+	ids := make([]pgtype.UUID, 0, len(agents))
+	for _, agent := range agents {
+		if actorType == "member" && !memberAllowedToViewAgent(agent, targetsByAgent[uuidToString(agent.ID)], actorID, member.Role) {
+			continue
+		}
+		ids = append(ids, agent.ID)
+	}
+	return ids, true
 }
 
 func (h *Handler) ListIssueTableFacets(w http.ResponseWriter, r *http.Request) {

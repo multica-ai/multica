@@ -19,9 +19,10 @@ import (
 // the Auth middleware. ComposioCallback is the exception: it is a public route
 // (outside the Auth group, see router.go / MUL-3843) because the browser often
 // arrives without a session cookie — its identity comes from the signed state,
-// not requireUserID. The whole block returns 503 when h.Composio is nil
+// not requireUserID. The whole block returns 403 when h.Composio is nil
 // (COMPOSIO_API_KEY unset), matching the Lark/GitHub "integration not
-// configured" convention.
+// configured" convention. A missing deployment capability is a non-retryable
+// 403, not a transient 503.
 
 // ComposioConnectInitRequest is the POST /connect/init body.
 type ComposioConnectInitRequest struct {
@@ -60,12 +61,11 @@ func (h *Handler) composioMCPAppsEnabled(ctx context.Context) bool {
 	return featureflags.ComposioMCPAppsEnabled(ctx, h.FeatureFlags)
 }
 
-// ComposioConnectInit (POST /api/integrations/composio/connect/init) starts a
-// hosted Composio auth flow for the requested toolkit and returns the redirect
-// URL. An unsupported toolkit slug is a 400 (the MVP only wires Notion).
+// ComposioConnectInit starts hosted auth for a toolkit with an enabled project
+// auth config. An unsupported toolkit slug returns 400.
 func (h *Handler) ComposioConnectInit(w http.ResponseWriter, r *http.Request) {
 	if h.Composio == nil || !h.composioMCPAppsEnabled(r.Context()) {
-		writeError(w, http.StatusServiceUnavailable, "composio integration not configured")
+		writeFeatureDisabled(w, "composio_not_configured", "composio integration not configured")
 		return
 	}
 	userID, ok := requireUserID(w, r)
@@ -110,7 +110,7 @@ func (h *Handler) ComposioConnectInit(w http.ResponseWriter, r *http.Request) {
 // error code so the user is never left on a blank API response.
 func (h *Handler) ComposioCallback(w http.ResponseWriter, r *http.Request) {
 	if h.Composio == nil || !h.composioMCPAppsEnabled(r.Context()) {
-		writeError(w, http.StatusServiceUnavailable, "composio integration not configured")
+		writeFeatureDisabled(w, "composio_not_configured", "composio integration not configured")
 		return
 	}
 	q := r.URL.Query()
@@ -133,7 +133,7 @@ func (h *Handler) ComposioCallback(w http.ResponseWriter, r *http.Request) {
 // the caller's active connections.
 func (h *Handler) ListComposioConnections(w http.ResponseWriter, r *http.Request) {
 	if h.Composio == nil || !h.composioMCPAppsEnabled(r.Context()) {
-		writeError(w, http.StatusServiceUnavailable, "composio integration not configured")
+		writeFeatureDisabled(w, "composio_not_configured", "composio integration not configured")
 		return
 	}
 	userID, ok := requireUserID(w, r)
@@ -172,7 +172,7 @@ func (h *Handler) ListComposioConnections(w http.ResponseWriter, r *http.Request
 // load-failed state rather than a misleading empty catalog.
 func (h *Handler) ListComposioToolkits(w http.ResponseWriter, r *http.Request) {
 	if h.Composio == nil || !h.composioMCPAppsEnabled(r.Context()) {
-		writeError(w, http.StatusServiceUnavailable, "composio integration not configured")
+		writeFeatureDisabled(w, "composio_not_configured", "composio integration not configured")
 		return
 	}
 	if _, ok := requireUserID(w, r); !ok {
@@ -201,7 +201,7 @@ func (h *Handler) ListComposioToolkits(w http.ResponseWriter, r *http.Request) {
 // a connection that does not belong to the caller is a 404.
 func (h *Handler) DeleteComposioConnection(w http.ResponseWriter, r *http.Request) {
 	if h.Composio == nil || !h.composioMCPAppsEnabled(r.Context()) {
-		writeError(w, http.StatusServiceUnavailable, "composio integration not configured")
+		writeFeatureDisabled(w, "composio_not_configured", "composio integration not configured")
 		return
 	}
 	userID, ok := requireUserID(w, r)

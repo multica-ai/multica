@@ -4,14 +4,20 @@ import { join } from "path";
 import { pathToFileURL } from "url";
 import { electronApp, optimizer, is } from "@electron-toolkit/utils";
 import fixPath from "fix-path";
-import { setupAutoUpdater } from "./updater";
-import { setupDaemonManager } from "./daemon-manager";
+import { createElectronBusyInstallPrompt, setupAutoUpdater } from "./updater";
+import {
+  prepareDaemonForUpdateInstall,
+  resumeDaemonAfterAbortedUpdateInstall,
+  setupDaemonManager,
+} from "./daemon-manager";
 import { setupLocalDirectory } from "./local-directory";
+import { configureLinuxFileDialogs } from "./linux-file-dialog";
 import { openExternalSafely, downloadURLSafely } from "./external-url";
 import { installContextMenu } from "./context-menu";
 import { handleAppShortcut } from "./keyboard-shortcuts";
 import { installNavigationGestures } from "./navigation-gestures";
 import { installNavigationGuard } from "./navigation-guard";
+import { createRendererWebPreferences } from "./renderer-web-preferences";
 import { getAppVersion } from "./app-version";
 import { loadRuntimeConfig } from "./runtime-config-loader";
 import type { RuntimeConfigResult } from "../shared/runtime-config";
@@ -26,19 +32,13 @@ import {
   type RendererRecoveryWindow,
 } from "./renderer-recovery";
 import { createBestEffortDevLog } from "./dev-log";
+import { appendMissingPathDirs } from "./path-fallback";
 import {
   writeFreezeBreadcrumb,
   readFreezeBreadcrumb,
   ackFreezeBreadcrumb,
   clearFreezeBreadcrumb,
 } from "./freeze-breadcrumb";
-import {
-  captureHangStack,
-  coolDebuggerChannel,
-  warmDebuggerChannel,
-} from "./renderer-stack-capture";
-import { DIAGNOSTICS_CONTROL_CHANNEL } from "../shared/diagnostics-control";
-import { createDiagnosticsControlRegistry } from "./diagnostics-control-registry";
 import {
   loadWindowState,
   resolveWindowOptions,
@@ -59,6 +59,7 @@ import {
   MAIN_RENDERER_CHANNEL_STATE_CHANNEL,
   MainRendererMessageQueue,
   parseMainRendererChannelState,
+  TAB_SELECTION_SHORTCUT_CHANNEL,
   type MainRendererMessageChannel,
 } from "../shared/main-renderer-messages";
 import { AuthSessionCoordinator } from "./auth-session-coordinator";
@@ -66,6 +67,8 @@ import {
   NotificationGate,
   parseNativeNotificationPayload,
 } from "./notification-gate";
+
+configureLinuxFileDialogs(app.commandLine);
 
 // Guards against registering the will-download handler more than once on the
 // same session. window.webContents.session is shared, and createWindow() can
@@ -112,15 +115,17 @@ const BUNDLED_ICON_PATH = join(__dirname, "../../resources/icon.png").replace(
 // or any daemon-manager spawn.
 if (process.platform !== "win32") {
   fixPath();
-  // Fallback: prepend common install locations in case fix-path came up
-  // short (broken shell rc, non-interactive $SHELL, missing entries). Safe
-  // to duplicate — PATH lookups short-circuit on first match.
-  const fallbackPaths = [
+  // Fallback: ensure common install locations are on PATH when fix-path came
+  // up short (broken shell rc, non-interactive $SHELL, missing entries).
+  // Append only missing dirs — never prepend. Prepending /usr/local/bin over
+  // a recovered login PATH shadows nvm/fnm Node with a stale system binary
+  // (e.g. Node 12), which breaks shebang CLIs (`#!/usr/bin/env node`) such as
+  // CodeBuddy and OpenClaw during daemon --version probes.
+  process.env.PATH = appendMissingPathDirs(process.env.PATH ?? "", [
     "/opt/homebrew/bin",
     "/usr/local/bin",
     join(homedir(), ".local/bin"),
-  ];
-  process.env.PATH = `${fallbackPaths.join(":")}:${process.env.PATH ?? ""}`;
+  ]);
 }
 
 const PROTOCOL = "multica";
@@ -150,35 +155,6 @@ const rendererRouteContexts = new WeakMap<
   RendererRouteContext
 >();
 
-// Hang stack capture is off until the backend says otherwise, and stays off in
-// dev. Reading a stack means holding a debugger channel open on a renderer, so
-// it has to be revocable without shipping a release — the flag arrives with
-// /api/config, which is also why this cannot be decided at window creation: no
-// renderer has fetched config yet at that point.
-//
-// State is per renderer, not global: every window publishes `false` before its
-// own config lands, so one global value would let a newly opened window revoke
-// capture for the others (see diagnostics-control-registry).
-const diagnosticsControl = createDiagnosticsControlRegistry<Electron.WebContents>({
-  warm: (webContents) => {
-    if (is.dev || webContents.isDestroyed()) return;
-    void warmDebuggerChannel(webContents.debugger);
-  },
-  cool: (webContents) => {
-    if (webContents.isDestroyed()) return;
-    void coolDebuggerChannel(webContents.debugger);
-  },
-});
-
-/** Read the hung renderer's JS stack, or null when capture is not permitted. */
-async function captureStackIfEnabled(
-  webContents: Electron.WebContents,
-): Promise<unknown> {
-  if (is.dev) return null;
-  if (!diagnosticsControl.isStackCaptureEnabled(webContents)) return null;
-  if (webContents.isDestroyed()) return null;
-  return captureHangStack(webContents.debugger);
-}
 let runtimeConfigResult: RuntimeConfigResult = {
   ok: false,
   error: { message: "Runtime config has not loaded yet" },
@@ -255,41 +231,6 @@ function getSystemLocale(): string {
   return app.getPreferredSystemLanguages()[0] ?? "en";
 }
 
-function createRendererWebPreferences(
-  systemLocale: string,
-  additionalArguments: string[] = [],
-): Electron.WebPreferences {
-  return {
-    preload: join(__dirname, "../preload/index.js"),
-    sandbox: false,
-    webSecurity: false,
-    // Required for the Chromium PDF viewer (PDFium) to activate inside
-    // iframes — used by the attachment preview modal for application/pdf
-    // files. Default is false in Electron; without it <iframe src=*.pdf>
-    // renders blank.
-    //
-    // Security trade-off, accepted intentionally:
-    //   1. These windows already run with `webSecurity: false` +
-    //      `sandbox: false`, so `plugins: true` does not meaningfully widen
-    //      the renderer's attack surface beyond what is already accepted.
-    //   2. The only PDFs that reach an iframe here are signed CloudFront URLs
-    //      we ourselves issued (see useDownloadAttachment); user-supplied URLs
-    //      are routed through `setWindowOpenHandler` → `openExternalSafely` and
-    //      cannot land in this renderer.
-    //   3. Chromium's PDFium plugin is itself sandboxed inside its own process
-    //      and only handles the `application/pdf` MIME.
-    //
-    // If we ever tighten `webSecurity` / `sandbox`, revisit this by hosting
-    // the PDF viewer in a dedicated BrowserView with `plugins: true` scoped
-    // to that view, keeping the main renderer plugin-free.
-    plugins: true,
-    additionalArguments: [
-      `--multica-locale=${systemLocale}`,
-      ...additionalArguments,
-    ],
-  };
-}
-
 function loadRenderer(window: BrowserWindow): void {
   const rendererEntry = join(__dirname, "../renderer/index.html");
   const rendererURL =
@@ -331,6 +272,18 @@ function installWindowShortcutHandler(window: BrowserWindow): void {
     if (result === "close-tab") {
       event.preventDefault();
       window.webContents.send("tab:close-active");
+    } else if (result === "open-settings") {
+      event.preventDefault();
+      // Settings is a tab, so it can only live in the tabbed main window.
+      // Routing through the queue means the chord also works from a
+      // dedicated issue window — and from one that outlived the main window,
+      // which is recreated and only then handed the request.
+      dispatchToMainRenderer("settings:open", null);
+    } else if (typeof result === "object" && result.action === "select-tab") {
+      event.preventDefault();
+      // Product tabs only exist in the main window. Route there even when the
+      // chord came from a dedicated issue window, matching Settings behavior.
+      dispatchToMainRenderer(TAB_SELECTION_SHORTCUT_CHANNEL, result.key);
     } else if (result) {
       event.preventDefault();
     }
@@ -366,7 +319,8 @@ function createWindow(): BrowserWindow {
     minWidth: 900,
     minHeight: 600,
     titleBarStyle: "hiddenInset",
-    trafficLightPosition: { x: 16, y: 17 },
+    // Center the native controls in the main window's 40px tab toolbar.
+    trafficLightPosition: { x: 16, y: 13 },
     show: false,
     autoHideMenuBar: true,
     // Windows/Linux pick up the window/taskbar icon from this option.
@@ -377,7 +331,10 @@ function createWindow(): BrowserWindow {
     ...(is.dev || process.platform === "linux"
       ? { icon: BUNDLED_ICON_PATH }
       : {}),
-    webPreferences: createRendererWebPreferences(systemLocale),
+    webPreferences: createRendererWebPreferences(
+      join(__dirname, "../preload/index.js"),
+      systemLocale,
+    ),
   });
   const window = mainWindow;
 
@@ -489,7 +446,6 @@ function createWindow(): BrowserWindow {
     // Only persist in production: a true hang/crash can't report itself, so we
     // write a breadcrumb and the next renderer boot flushes it to PostHog. Dev
     // is excluded to keep field telemetry clean.
-    captureStack: () => captureStackIfEnabled(window.webContents),
     persistBreadcrumb: is.dev
       ? undefined
       : (payload) =>
@@ -531,9 +487,11 @@ function createIssueWindow(context: IssueWindowContext): void {
     ...(is.dev || process.platform === "linux"
       ? { icon: BUNDLED_ICON_PATH }
       : {}),
-    webPreferences: createRendererWebPreferences(systemLocale, [
-      encodeIssueWindowArgument(context),
-    ]),
+    webPreferences: createRendererWebPreferences(
+      join(__dirname, "../preload/index.js"),
+      systemLocale,
+      [encodeIssueWindowArgument(context)],
+    ),
   });
 
   issueWindows.add(window);
@@ -573,7 +531,6 @@ function createIssueWindow(context: IssueWindowContext): void {
       const routeContext = rendererRouteContexts.get(window.webContents);
       return routeContext ? { desktopRoute: routeContext } : {};
     },
-    captureStack: () => captureStackIfEnabled(window.webContents),
     persistBreadcrumb: is.dev
       ? undefined
       : (payload) =>
@@ -706,8 +663,8 @@ if (!gotTheLock) {
     // IPC: open URL in default browser (used by renderer for Google login).
     // All scheme-allowlist enforcement lives in openExternalSafely — this
     // is the single audit point for renderer-controlled URLs reaching the
-    // OS shell under the app's intentional webSecurity: false + sandbox:
-    // false configuration.
+    // OS shell under the app's intentional webSecurity: false configuration
+    // (the renderer itself runs sandboxed).
     ipcMain.handle("shell:openExternal", (_event, url: string) => {
       return openExternalSafely(url);
     });
@@ -764,14 +721,6 @@ if (!gotTheLock) {
       if (!BrowserWindow.fromWebContents(event.sender)) return;
       if (typeof ts !== "number" || !Number.isFinite(ts)) return;
       ackFreezeBreadcrumb(freezeBreadcrumbPath(), ts);
-    });
-
-    // Server-driven kill switch for stack capture. Fail-closed: anything that
-    // is not an explicit `true` turns it off, and turning it off also drops
-    // the debugger channels we are holding.
-    ipcMain.on(DIAGNOSTICS_CONTROL_CHANNEL, (event, control: unknown) => {
-      if (!BrowserWindow.fromWebContents(event.sender)) return;
-      diagnosticsControl.apply(event.sender, control);
     });
 
     // Sync IPC: preload exposes the validated runtime config before renderer
@@ -897,7 +846,20 @@ if (!gotTheLock) {
     desktopInitialized = true;
     createWindow();
 
-    setupAutoUpdater(() => mainWindow);
+    // Register first so the update quit gate can block daemon autoStop.
+    setupAutoUpdater(() => mainWindow, {
+      // Windows only (the updater ignores it elsewhere): stop the bundled
+      // daemon before the installer runs so multica.exe is replaced. #8823
+      daemonGate: {
+        prepare: prepareDaemonForUpdateInstall,
+        resumeAfterAbortedInstall: resumeDaemonAfterAbortedUpdateInstall,
+        confirmInstallWhileBusy: createElectronBusyInstallPrompt((options) =>
+          mainWindow && !mainWindow.isDestroyed()
+            ? dialog.showMessageBox(mainWindow, options)
+            : dialog.showMessageBox(options),
+        ),
+      },
+    });
     setupDaemonManager(() => mainWindow);
     setupLocalDirectory(() => mainWindow);
 

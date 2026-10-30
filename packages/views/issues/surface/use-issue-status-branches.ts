@@ -12,7 +12,12 @@ import {
   useQueryClient,
   type UseQueryResult,
 } from "@tanstack/react-query";
-import { ALL_STATUSES } from "@multica/core/issues/config";
+import { statusColumnKeys } from "@multica/core/issues";
+import {
+  isBuiltInIssueStatus,
+} from "@multica/core/issue-statuses";
+import type { IssueStatusCatalog } from "@multica/core/issue-statuses";
+import { useIssueStatuses } from "@multica/core/issue-statuses/hooks";
 import {
   issueKeys,
   issueTableRowPageOptions,
@@ -36,10 +41,7 @@ export interface IssueStatusPageState {
   retry: () => void;
 }
 
-export type IssueStatusPagination = Record<
-  IssueStatus,
-  IssueStatusPageState
->;
+export type IssueStatusPagination = Record<IssueStatus, IssueStatusPageState>;
 
 interface StatusCursorState {
   identity: string;
@@ -65,18 +67,22 @@ interface StatusBranchData {
   headPending: boolean;
 }
 
+// Page each concrete status independently, including custom statuses.
 function statusGroupKey(status: IssueStatus) {
   return `status:${status}`;
 }
+
+/** Exact-key grouping keeps sibling statuses in independent branches. */
+const STATUS_GROUP = { kind: "status" } as const;
 
 function initialCursorState(
   identity: string,
   statuses: readonly IssueStatus[],
 ): StatusCursorState {
   const cursors = Object.fromEntries(
-    ALL_STATUSES.map((status) => [
+    statuses.map((status) => [
       status,
-      statuses.includes(status) ? [null] : [],
+      [null],
     ]),
   ) as StatusCursorState["cursors"];
   return { identity, cursors };
@@ -91,22 +97,33 @@ function rebaseCursorState(
     state.identity === identity ? state : initialCursorState(identity, statuses);
   let cursors: StatusCursorState["cursors"] | null = null;
   for (const status of statuses) {
-    if (current.cursors[status].length > 0) continue;
+    if ((current.cursors[status]?.length ?? 0) > 0) continue;
     cursors ??= { ...current.cursors };
     cursors[status] = [null];
   }
   return cursors ? { ...current, cursors } : current;
 }
 
+/**
+ * Per-status totals, never folded into lifecycle categories. The facet is
+ * disjunctive, so narrow it to the selected keys when a status filter is active.
+ * Unknown keys wait for catalog refresh instead of inflating another column.
+ */
 function statusCountsFromFacets(
   facets: IssueTableFacetsResponse | undefined,
+  catalog: Pick<IssueStatusCatalog, "entryOf" | "isLoaded">,
+  selectedStatuses: readonly string[] | undefined,
 ) {
   const counts = new Map<IssueStatus, number>();
+  const selected =
+    selectedStatuses && selectedStatuses.length > 0
+      ? new Set(selectedStatuses)
+      : null;
   const statusFacet = facets?.facets.find((facet) => facet.kind === "status");
   for (const value of statusFacet?.values ?? []) {
-    if (ALL_STATUSES.includes(value.key as IssueStatus)) {
-      counts.set(value.key as IssueStatus, value.count);
-    }
+    if (selected && !selected.has(value.key)) continue;
+    if (!isBuiltInIssueStatus(value.key) && !catalog.entryOf(value.key)) continue;
+    counts.set(value.key, value.count);
   }
   return counts;
 }
@@ -145,7 +162,12 @@ export function useIssueStatusBranches({
   enabled: boolean;
 }): IssueStatusBranches {
   const queryClient = useQueryClient();
-  const identity = useMemo(() => JSON.stringify(query), [query]);
+  const catalog = useIssueStatuses(wsId);
+  const group = STATUS_GROUP;
+  const identity = useMemo(
+    () => JSON.stringify({ wsId, query, group: group.kind }),
+    [group.kind, query, wsId],
+  );
   const [cursorState, setCursorState] = useState<StatusCursorState>(() =>
     initialCursorState(identity, statuses),
   );
@@ -165,7 +187,7 @@ export function useIssueStatusBranches({
     () =>
       enabled
         ? statuses.flatMap((status) =>
-            activeCursorState.cursors[status].map((cursor) => ({
+            (activeCursorState.cursors[status] ?? []).map((cursor) => ({
               status,
               cursor,
             })),
@@ -176,6 +198,11 @@ export function useIssueStatusBranches({
   const headPlaceholderRef = useRef(
     new Map<IssueStatus, IssueTableRowsResponse>(),
   );
+  const placeholderWorkspaceRef = useRef(wsId);
+  if (placeholderWorkspaceRef.current !== wsId) {
+    headPlaceholderRef.current.clear();
+    placeholderWorkspaceRef.current = wsId;
+  }
   const pageQueries = useMemo(
     () =>
       pageTargets.map(({ status, cursor }) => {
@@ -184,7 +211,7 @@ export function useIssueStatusBranches({
         return {
           ...issueTableRowPageOptions(wsId, {
             query,
-            group: { kind: "status" },
+            group,
             group_key: statusGroupKey(status),
             hierarchy: { enabled: false },
             parent_id: null,
@@ -192,13 +219,13 @@ export function useIssueStatusBranches({
           }),
           // useQueries replaces observers when the query hash changes, so its
           // built-in keepPreviousData cannot bridge a filter/sort transition.
-          // Retain only the last settled HEAD per fixed status branch. Tails
+          // Retain only the last settled HEAD per concrete status branch. Tails
           // are deliberately detached; exact facets remain server-owned.
           ...(placeholder ? { placeholderData: () => placeholder } : {}),
           enabled,
         };
       }),
-    [enabled, pageTargets, query, wsId],
+    [enabled, group, pageTargets, query, wsId],
   );
   const pageResults = useQueries({ queries: pageQueries }) as Array<
     UseQueryResult<IssueTableRowsResponse, Error>
@@ -243,7 +270,7 @@ export function useIssueStatusBranches({
       if (
         target?.cursor === null &&
         queryResult?.isFetching &&
-        activeCursorState.cursors[target.status].length > 1
+        (activeCursorState.cursors[target.status]?.length ?? 0) > 1
       ) {
         headFetching.add(target.status);
       }
@@ -267,7 +294,7 @@ export function useIssueStatusBranches({
         for (const row of page.rows) {
           // Realtime can patch an issue's status before the broad query
           // invalidation has moved it between branch caches. Never render a
-          // patched card under a status it no longer belongs to.
+          // patched card under a column whose exact key no longer matches.
           if (row.issue.status !== target.status) continue;
           if (seen.has(row.issue.id)) continue;
           seen.add(row.issue.id);
@@ -312,7 +339,7 @@ export function useIssueStatusBranches({
       next[status] = branch.headUpdatedAt;
       const seen = previous[status];
       if (
-        activeCursorState.cursors[status].length > 1 &&
+        (activeCursorState.cursors[status]?.length ?? 0) > 1 &&
         (branch.headFetching ||
           (seen !== undefined && seen !== branch.headUpdatedAt))
       ) {
@@ -334,14 +361,17 @@ export function useIssueStatusBranches({
     statuses,
   ]);
 
-  const counts = useMemo(() => statusCountsFromFacets(facets), [facets]);
+  const counts = useMemo(
+    () => statusCountsFromFacets(facets, catalog, query.filters.statuses),
+    [facets, catalog, query.filters.statuses],
+  );
   const loadMore = useCallback(
     (status: IssueStatus) => {
       const cursor = branchData.get(status)?.nextCursor;
       if (!cursor) return;
       setCursorState((previous) => {
         if (previous.identity !== identity) return previous;
-        const current = previous.cursors[status];
+        const current = previous.cursors[status] ?? [null];
         if (current.includes(cursor)) return previous;
         return {
           ...previous,
@@ -360,7 +390,7 @@ export function useIssueStatusBranches({
         queryKey: issueKeys.tableRows(
           wsId,
           query,
-          { kind: "status" },
+          group,
           statusGroupKey(status),
           false,
           null,
@@ -369,12 +399,12 @@ export function useIssueStatusBranches({
         type: "active",
       });
     },
-    [query, queryClient, wsId],
+    [group, query, queryClient, wsId],
   );
 
   const pagination = useMemo<IssueStatusPagination>(() => {
     return Object.fromEntries(
-      ALL_STATUSES.map((status) => {
+      statusColumnKeys(catalog, true).map((status) => {
         const branch = branchData.get(status);
         const loaded = branch?.rows.length ?? 0;
         const total = counts.get(status) ?? loaded;
@@ -393,7 +423,7 @@ export function useIssueStatusBranches({
         ];
       }),
     ) as IssueStatusPagination;
-  }, [branchData, counts, enabled, loadMore, retry]);
+  }, [branchData, catalog, counts, enabled, loadMore, retry]);
 
   const issues = useMemo(
     () => statuses.flatMap((status) => branchData.get(status)?.rows ?? []),

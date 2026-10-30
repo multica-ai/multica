@@ -10,7 +10,7 @@ import { waitForPageText } from "./helpers";
 // landing on /onboarding.
 
 const EMAIL = `onboarding-v3-${Date.now()}@localhost`;
-const SHOTS_DIR = "/tmp/onboarding-v3-shots";
+const SHOTS_DIR = "../shots-rail";
 
 test.use({ viewport: { width: 1440, height: 900 } });
 
@@ -37,7 +37,16 @@ test("onboarding — welcome → about you (answer path)", async ({ page }) => {
   await expect(page.getByText("Tell us a bit about you.")).toBeVisible({ timeout: 10000 });
   await expect(page.getByText("Which best describes you?")).toBeVisible();
   await expect(page.getByText("What do you want to use Multica for?")).toBeVisible();
-  await expect(page.getByText(/Step 1 of 3/)).toBeVisible();
+  // The rail names every step and marks the current one; the ordinal
+  // counter it replaced is gone.
+  await expect(page.locator('[data-slot="stepper-title"]')).toHaveText([
+    "About you",
+    "Workspace",
+    "Meet Mika",
+  ]);
+  await expect(
+    page.locator('[aria-current="step"]').filter({ hasText: "About you" }),
+  ).toBeVisible();
   await expect(page.getByText("How did you hear about Multica?")).toHaveCount(0);
   await page.waitForTimeout(500);
   await page.screenshot({ path: `${SHOTS_DIR}/02-about-you.png` });
@@ -49,8 +58,21 @@ test("onboarding — welcome → about you (answer path)", async ({ page }) => {
 
   // 3. Workspace step
   await expect(page.getByRole("heading", { name: /Name your workspace/i })).toBeVisible({ timeout: 10000 });
-  await expect(page.getByText(/Step 2 of 3/)).toBeVisible();
+  await expect(
+    page.locator('[aria-current="step"]').filter({ hasText: "Workspace" }),
+  ).toBeVisible();
+  await page.waitForTimeout(600);
   await page.screenshot({ path: `${SHOTS_DIR}/03-workspace.png` });
+
+  // 4. Runtime step — the rail should now show two completed steps and mark
+  //    "Meet Mika" current.
+  await page.getByRole("textbox").first().fill(`Rail QA ${Date.now()}`);
+  await page.getByRole("button", { name: /^Create /i }).click();
+  await expect(
+    page.locator('[aria-current="step"]').filter({ hasText: "Meet Mika" }),
+  ).toBeVisible({ timeout: 20000 });
+  await page.waitForTimeout(800);
+  await page.screenshot({ path: `${SHOTS_DIR}/06-runtime.png` });
 });
 
 test("onboarding — one skip clears the whole questionnaire step", async ({ page }) => {
@@ -68,12 +90,17 @@ test("onboarding — one skip clears the whole questionnaire step", async ({ pag
   // A single Skip covers role + use case — next stop is workspace.
   await page.getByRole("button", { name: "Skip" }).click();
   await expect(page.getByRole("heading", { name: /Name your workspace/i })).toBeVisible({ timeout: 10000 });
+  await page.waitForTimeout(600);
   await page.screenshot({ path: `${SHOTS_DIR}/04-after-skip.png` });
 });
 
-test("onboarding — zh-Hans renders Chinese labels", async ({ page, context }) => {
+test("onboarding — zh-Hans renders Chinese labels", async ({ page, context, baseURL }) => {
   await context.addCookies([
-    { name: "multica-locale", value: "zh-Hans", url: "http://localhost:13442" },
+    {
+      name: "multica-locale",
+      value: "zh-Hans",
+      url: baseURL ?? "http://localhost:3000",
+    },
   ]);
   const api = new TestApiClient();
   await api.login(`zh-${Date.now()}@localhost`, "中文用户");
@@ -83,11 +110,15 @@ test("onboarding — zh-Hans renders Chinese labels", async ({ page, context }) 
   await page.goto("/onboarding", { waitUntil: "domcontentloaded" });
   await waitForPageText(page, "在 web 端继续");
 
-  await page.getByRole("button").first().click().catch(() => {});
+  // Click the CTA by name. `getByRole("button").first()` used to stand in for
+  // it, but the welcome screen renders the pinned Log out button first in DOM
+  // order — so this step was signing the user out and the assertions below
+  // were waiting on a page that had already redirected to login.
+  await page.getByRole("button", { name: "在 web 端继续" }).click();
 
   // About-you screen — Chinese headline + both sub-questions.
   await expect(page.getByText("简单介绍一下你自己。")).toBeVisible({ timeout: 10000 });
-  await expect(page.getByText("你是什么角色？")).toBeVisible();
+  await expect(page.getByText("哪一项最符合你？")).toBeVisible();
   await page.waitForTimeout(500);
   await page.screenshot({ path: `${SHOTS_DIR}/05-about-you-zh.png` });
 });

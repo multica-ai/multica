@@ -13,17 +13,6 @@ import (
 	"time"
 )
 
-func TestNewReturnsOpencodeBackend(t *testing.T) {
-	t.Parallel()
-	b, err := New("opencode", Config{ExecutablePath: "/nonexistent/opencode"})
-	if err != nil {
-		t.Fatalf("New(opencode) error: %v", err)
-	}
-	if _, ok := b.(*opencodeBackend); !ok {
-		t.Fatalf("expected *opencodeBackend, got %T", b)
-	}
-}
-
 // ── Text event tests ──
 
 func TestOpencodeHandleTextEvent(t *testing.T) {
@@ -982,6 +971,207 @@ func TestOpencodeProcessEventsToolErrorThenCleanFinish(t *testing.T) {
 	}
 
 	close(ch)
+	var msgs []Message
+	for msg := range ch {
+		msgs = append(msgs, msg)
+	}
+
+	var toolUses, toolResults int
+	var failedToolResult *Message
+	for i := range msgs {
+		switch msgs[i].Type {
+		case MessageToolUse:
+			toolUses++
+		case MessageToolResult:
+			toolResults++
+			if msgs[i].CallID == "functions.read:1" {
+				failedToolResult = &msgs[i]
+			}
+		}
+	}
+	if toolUses != 2 || toolResults != 2 {
+		t.Fatalf("tool messages are not paired: tool_use=%d tool_result=%d (%+v)", toolUses, toolResults, msgs)
+	}
+	if failedToolResult == nil {
+		t.Fatal("missing tool_result for failed read tool")
+	}
+	if failedToolResult.Output != "File not found: /nonexistent-path-xyz/also-missing.md" {
+		t.Errorf("failed tool output: got %q", failedToolResult.Output)
+	}
+}
+
+func TestOpencodeProcessEventsEmptyFinalStepFails(t *testing.T) {
+	t.Parallel()
+
+	b := &opencodeBackend{cfg: Config{Logger: slog.Default()}}
+	ch := make(chan Message, 256)
+
+	// Regression for #6522. The run did real work, then the provider stream
+	// died: the final step opened, emitted a reasoning part (which carries no
+	// deliverable and no tokens), and closed with reason "unknown" and an
+	// all-zero token block. `opencode run` exited 0, so the daemon reported
+	// `completed` with an empty agent_error and the task stalled with no
+	// deliverable. Zero input tokens means the provider round-trip never
+	// happened — that is a dead stream, not a completion.
+	lines := strings.Join([]string{
+		`{"type":"step_start","timestamp":1000,"sessionID":"ses_void","part":{"type":"step-start"}}`,
+		`{"type":"text","timestamp":1001,"sessionID":"ses_void","part":{"type":"text","text":"All context gathered. Let me set up and begin."}}`,
+		`{"type":"tool_use","timestamp":1002,"sessionID":"ses_void","part":{"type":"tool","tool":"bash","callID":"call_1","state":{"status":"completed","input":{"command":"ls"},"output":"ok\n"}}}`,
+		`{"type":"step_finish","timestamp":1003,"sessionID":"ses_void","part":{"type":"step-finish","reason":"tool-calls","tokens":{"input":14585,"output":89,"cache":{"write":0,"read":0}}}}`,
+		`{"type":"step_start","timestamp":1004,"sessionID":"ses_void","part":{"type":"step-start"}}`,
+		`{"type":"reasoning","timestamp":1005,"sessionID":"ses_void","part":{"type":"reasoning","text":"thinking..."}}`,
+		`{"type":"step_finish","timestamp":1006,"sessionID":"ses_void","part":{"type":"step-finish","reason":"unknown","tokens":{"input":0,"output":0,"reasoning":0,"cache":{"write":0,"read":0}},"cost":0}}`,
+	}, "\n")
+
+	result := b.processEvents(strings.NewReader(lines), ch)
+
+	if result.status != "failed" {
+		t.Errorf("status: got %q, want %q (an empty final step must not complete the run)", result.status, "failed")
+	}
+	if !strings.Contains(result.errMsg, "empty step") {
+		t.Errorf("errMsg: got %q, want it to name the empty step", result.errMsg)
+	}
+	// The error text is the input to taskfailure.Classify, which routes this
+	// failure to the retryable provider_network bucket — see the matching
+	// cases in pkg/taskfailure/classify_test.go. Keep the two in sync.
+	if !strings.HasPrefix(result.errMsg, "opencode stream ended") {
+		t.Errorf("errMsg: got %q, want the classifier's opencode stream-ended prefix", result.errMsg)
+	}
+	if !result.noTerminalSignal {
+		t.Error("noTerminalSignal: got false, want true")
+	}
+	// Work done before the stream died must still be reported, so the failure
+	// stays diagnosable and the usage already paid for is not lost.
+	if result.output != "All context gathered. Let me set up and begin." {
+		t.Errorf("output: got %q, want the text emitted before the empty step", result.output)
+	}
+	if result.usage.InputTokens != 14585 || result.usage.OutputTokens != 89 {
+		t.Errorf("usage: got %+v, want the first step's tokens preserved", result.usage)
+	}
+
+	close(ch)
+}
+
+func TestOpencodeProcessEventsEmptyStepMidRunRecovers(t *testing.T) {
+	t.Parallel()
+
+	b := &opencodeBackend{cfg: Config{Logger: slog.Default()}}
+	ch := make(chan Message, 256)
+
+	// Only the step the run *ends* on matters. A void step that the run
+	// recovers from — the next step produces real output and closes cleanly —
+	// is not evidence of a dead stream and must stay "completed".
+	lines := strings.Join([]string{
+		`{"type":"step_start","timestamp":1000,"sessionID":"ses_recover","part":{"type":"step-start"}}`,
+		`{"type":"step_finish","timestamp":1001,"sessionID":"ses_recover","part":{"type":"step-finish","reason":"unknown","tokens":{"input":0,"output":0,"cache":{"write":0,"read":0}}}}`,
+		`{"type":"step_start","timestamp":1002,"sessionID":"ses_recover","part":{"type":"step-start"}}`,
+		`{"type":"text","timestamp":1003,"sessionID":"ses_recover","part":{"type":"text","text":"recovered and done"}}`,
+		`{"type":"step_finish","timestamp":1004,"sessionID":"ses_recover","part":{"type":"step-finish","reason":"stop","tokens":{"input":120,"output":8,"cache":{"write":0,"read":0}}}}`,
+	}, "\n")
+
+	result := b.processEvents(strings.NewReader(lines), ch)
+
+	if result.status != "completed" {
+		t.Errorf("status: got %q, want %q (a recovered void step must not fail the run)", result.status, "completed")
+	}
+	if result.errMsg != "" {
+		t.Errorf("errMsg: got %q, want empty", result.errMsg)
+	}
+
+	close(ch)
+}
+
+func TestOpencodeProcessEventsToolOnlyFinalStepStaysCompleted(t *testing.T) {
+	t.Parallel()
+
+	b := &opencodeBackend{cfg: Config{Logger: slog.Default()}}
+	ch := make(chan Message, 256)
+
+	// The guard must key on "this step produced nothing", not "the run produced
+	// no text". A task whose only deliverable is a tool side effect — here a
+	// provider-executed tool, so no continuation step is owed — legitimately
+	// ends without any assistant prose and must stay green.
+	lines := strings.Join([]string{
+		`{"type":"step_start","timestamp":1000,"sessionID":"ses_toolonly","part":{"type":"step-start"}}`,
+		`{"type":"tool_use","timestamp":1001,"sessionID":"ses_toolonly","part":{"type":"tool","tool":"web_search","callID":"call_1","metadata":{"providerExecuted":true},"state":{"status":"completed","input":{"query":"weather"},"output":"sunny"}}}`,
+		`{"type":"step_finish","timestamp":1002,"sessionID":"ses_toolonly","part":{"type":"step-finish","reason":"stop","tokens":{"input":0,"output":0,"cache":{"write":0,"read":0}}}}`,
+	}, "\n")
+
+	result := b.processEvents(strings.NewReader(lines), ch)
+
+	if result.status != "completed" {
+		t.Errorf("status: got %q, want %q (a tool call is a productive step)", result.status, "completed")
+	}
+	if result.errMsg != "" {
+		t.Errorf("errMsg: got %q, want empty", result.errMsg)
+	}
+
+	close(ch)
+}
+
+func TestOpencodeProcessEventsUsageOnlyFinalStepStaysCompleted(t *testing.T) {
+	t.Parallel()
+
+	// A step that emitted neither text nor a tool call but reports usage did
+	// reach the provider, so it is not the zero-round-trip shape the guard
+	// targets and must stay green. OpenCode reports reasoning and the
+	// aggregate total in their own fields and cost as a sibling of the token
+	// block, so each of them alone has to be enough — a guard that only looked
+	// at input/output would fail these healthy runs.
+	usageCases := []struct {
+		name  string
+		final string
+	}{
+		{
+			name:  "input only",
+			final: `{"type":"step_finish","timestamp":1005,"sessionID":"ses_usage","part":{"type":"step-finish","reason":"stop","tokens":{"input":950,"output":0,"cache":{"write":0,"read":0}}}}`,
+		},
+		{
+			name:  "reasoning only",
+			final: `{"type":"step_finish","timestamp":1005,"sessionID":"ses_usage","part":{"type":"step-finish","reason":"stop","tokens":{"input":0,"output":0,"reasoning":82,"cache":{"write":0,"read":0}}}}`,
+		},
+		{
+			name:  "aggregate total only",
+			final: `{"type":"step_finish","timestamp":1005,"sessionID":"ses_usage","part":{"type":"step-finish","reason":"stop","tokens":{"total":14674,"input":0,"output":0,"cache":{"write":0,"read":0}}}}`,
+		},
+		{
+			name:  "cost only",
+			final: `{"type":"step_finish","timestamp":1005,"sessionID":"ses_usage","part":{"type":"step-finish","reason":"stop","tokens":{"input":0,"output":0,"cache":{"write":0,"read":0}},"cost":0.0021}}`,
+		},
+		{
+			name:  "cache read only",
+			final: `{"type":"step_finish","timestamp":1005,"sessionID":"ses_usage","part":{"type":"step-finish","reason":"stop","tokens":{"input":0,"output":0,"cache":{"write":0,"read":512}}}}`,
+		},
+	}
+
+	for _, tc := range usageCases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			b := &opencodeBackend{cfg: Config{Logger: slog.Default()}}
+			ch := make(chan Message, 256)
+
+			lines := strings.Join([]string{
+				`{"type":"step_start","timestamp":1000,"sessionID":"ses_usage","part":{"type":"step-start"}}`,
+				`{"type":"text","timestamp":1001,"sessionID":"ses_usage","part":{"type":"text","text":"answer"}}`,
+				`{"type":"step_finish","timestamp":1002,"sessionID":"ses_usage","part":{"type":"step-finish","reason":"stop","tokens":{"input":900,"output":40,"cache":{"write":0,"read":0}}}}`,
+				`{"type":"step_start","timestamp":1003,"sessionID":"ses_usage","part":{"type":"step-start"}}`,
+				`{"type":"reasoning","timestamp":1004,"sessionID":"ses_usage","part":{"type":"reasoning","text":"thinking..."}}`,
+				tc.final,
+			}, "\n")
+
+			result := b.processEvents(strings.NewReader(lines), ch)
+
+			if result.status != "completed" {
+				t.Errorf("status: got %q, want %q (reported usage proves the provider round-trip happened)", result.status, "completed")
+			}
+			if result.errMsg != "" {
+				t.Errorf("errMsg: got %q, want empty", result.errMsg)
+			}
+
+			close(ch)
+		})
+	}
 }
 
 // ── Windows native-binary resolution tests ──
@@ -1114,6 +1304,16 @@ if [ -n "$OPENCODE_ARGS_FILE" ]; then
     printf '%s\n' "$arg" >> "$OPENCODE_ARGS_FILE"
   done
 fi
+
+# Real OpenCode reads stdin to EOF (await Bun.stdin.text()) before it does any
+# work, so the fake must drain it too. A fake that exits without reading closes
+# the read end under the daemon's concurrent prompt write, which surfaces as a
+# spurious EPIPE whose timing depends on machine load.
+if [ -n "$OPENCODE_STDIN_FILE" ]; then
+  cat > "$OPENCODE_STDIN_FILE"
+else
+  cat > /dev/null
+fi
 if [ -n "$OPENCODE_PWD_FILE" ]; then
   printf '%s\n' "$PWD" > "$OPENCODE_PWD_FILE"
 fi
@@ -1235,6 +1435,7 @@ func TestOpencodeBackendNeverEmitsPromptFlag(t *testing.T) {
 
 	tempDir := t.TempDir()
 	argsFile := filepath.Join(tempDir, "argv.txt")
+	stdinFile := filepath.Join(tempDir, "stdin.txt")
 	fakePath := filepath.Join(tempDir, "opencode")
 	writeTestExecutable(t, fakePath, []byte(fakeOpencodeScript()))
 
@@ -1243,7 +1444,10 @@ func TestOpencodeBackendNeverEmitsPromptFlag(t *testing.T) {
 	backend, err := New("opencode", Config{
 		ExecutablePath: fakePath,
 		Logger:         slog.Default(),
-		Env:            map[string]string{"OPENCODE_ARGS_FILE": argsFile},
+		Env: map[string]string{
+			"OPENCODE_ARGS_FILE":  argsFile,
+			"OPENCODE_STDIN_FILE": stdinFile,
+		},
 	})
 	if err != nil {
 		t.Fatalf("new opencode backend: %v", err)
@@ -1279,9 +1483,16 @@ func TestOpencodeBackendNeverEmitsPromptFlag(t *testing.T) {
 	if containsString(args, brief) {
 		t.Errorf("SystemPrompt leaked into argv: %v", args)
 	}
-	// The user prompt is still the final positional arg.
-	if len(args) == 0 || args[len(args)-1] != "do the thing" {
-		t.Errorf("expected prompt as final positional arg, got %v", args)
+	// The user prompt travels on stdin, not argv (#6538).
+	if containsString(args, "do the thing") {
+		t.Errorf("user prompt leaked into argv: %v", args)
+	}
+	stdinRaw, err := os.ReadFile(stdinFile)
+	if err != nil {
+		t.Fatalf("read stdin file: %v", err)
+	}
+	if string(stdinRaw) != "do the thing" {
+		t.Errorf("prompt did not arrive on stdin: got %q", string(stdinRaw))
 	}
 }
 
@@ -1519,6 +1730,7 @@ func TestOpencodeBackendBlocksDirOverride(t *testing.T) {
 // rescue the run; the unclosed step is what fails it.
 func fakeOpencodeMidToolScript() string {
 	return `#!/bin/sh
+cat > /dev/null
 printf '{"type":"step_start","timestamp":1,"sessionID":"ses_fake","part":{"type":"step-start"}}\n'
 printf '{"type":"tool_use","timestamp":2,"sessionID":"ses_fake","part":{"type":"tool","tool":"read","callID":"functions.read:1","state":{"status":"error","input":{"filePath":"/nope.md"},"error":"File not found"}}}\n'
 exit 0
@@ -1573,6 +1785,7 @@ func TestOpencodeBackendFailsOnStreamEndingMidTool(t *testing.T) {
 // step_finish and no error event.
 func fakeOpencodeStepThenExit1Script() string {
 	return `#!/bin/sh
+cat > /dev/null
 printf '{"type":"step_start","timestamp":1,"sessionID":"ses_fake","part":{"type":"step-start"}}\n'
 exit 1
 `

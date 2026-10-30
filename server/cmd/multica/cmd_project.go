@@ -154,6 +154,7 @@ func init() {
 	projectResourceAddCmd.Flags().String("local-path", "", "Shortcut: absolute path to the working directory (only used when --type local_directory)")
 	projectResourceAddCmd.Flags().String("daemon-id", "", "Shortcut: id of the daemon that owns the local path (only used when --type local_directory)")
 	projectResourceAddCmd.Flags().String("ref-label", "", "Shortcut: optional label embedded in resource_ref (only used when --type local_directory)")
+	projectResourceAddCmd.Flags().String("execution-mode", "", "Shortcut: how runs share the directory — in_place (default, one run at a time) or worktree (each run gets its own git worktree; requires a git repo) (only used when --type local_directory)")
 	projectResourceAddCmd.Flags().String("ref", "", "Generic JSON resource_ref payload, or a github_repo checkout ref when used with --url")
 	projectResourceAddCmd.Flags().String("label", "", "Optional human-readable label")
 	projectResourceAddCmd.Flags().String("output", "json", "Output format: table or json")
@@ -165,6 +166,7 @@ func init() {
 	projectResourceUpdateCmd.Flags().String("local-path", "", "Shortcut: new absolute local path (local_directory)")
 	projectResourceUpdateCmd.Flags().String("daemon-id", "", "Shortcut: new daemon id (local_directory)")
 	projectResourceUpdateCmd.Flags().String("ref-label", "", "Shortcut: new label embedded in resource_ref (local_directory)")
+	projectResourceUpdateCmd.Flags().String("execution-mode", "", "Shortcut: new execution mode — in_place or worktree (local_directory)")
 	projectResourceUpdateCmd.Flags().String("ref", "", "Generic JSON resource_ref payload, or a github_repo checkout ref")
 	projectResourceUpdateCmd.Flags().String("label", "", "New human-readable label; pass an empty string to clear")
 	projectResourceUpdateCmd.Flags().Bool("clear-label", false, "Clear the human-readable label")
@@ -191,9 +193,7 @@ func init() {
 	projectStatusCmd.Flags().String("output", "table", "Output format: table or json")
 }
 
-// ---------------------------------------------------------------------------
 // Project commands
-// ---------------------------------------------------------------------------
 
 func runProjectList(cmd *cobra.Command, _ []string) error {
 	client, err := newAPIClient(cmd)
@@ -520,9 +520,7 @@ func runProjectStatus(cmd *cobra.Command, args []string) error {
 	return nil
 }
 
-// ---------------------------------------------------------------------------
 // Project resource commands
-// ---------------------------------------------------------------------------
 
 func runProjectResourceList(cmd *cobra.Command, args []string) error {
 	client, err := newAPIClient(cmd)
@@ -606,6 +604,9 @@ func runProjectResourceAdd(cmd *cobra.Command, args []string) error {
 			ref := map[string]any{"local_path": pathVal, "daemon_id": daemonVal}
 			if refLabel, _ := cmd.Flags().GetString("ref-label"); strings.TrimSpace(refLabel) != "" {
 				ref["label"] = strings.TrimSpace(refLabel)
+			}
+			if mode, _ := cmd.Flags().GetString("execution-mode"); strings.TrimSpace(mode) != "" {
+				ref["execution_mode"] = strings.TrimSpace(mode)
 			}
 			body["resource_ref"] = ref
 		default:
@@ -845,7 +846,8 @@ func buildResourceRefFromFlags(cmd *cobra.Command, resourceType string, existing
 		pathSet := cmd.Flags().Changed("local-path")
 		daemonSet := cmd.Flags().Changed("daemon-id")
 		labelSet := cmd.Flags().Changed("ref-label")
-		if !pathSet && !daemonSet && !labelSet {
+		modeSet := cmd.Flags().Changed("execution-mode")
+		if !pathSet && !daemonSet && !labelSet && !modeSet {
 			return nil, false, nil
 		}
 		ref := map[string]any{}
@@ -858,6 +860,9 @@ func buildResourceRefFromFlags(cmd *cobra.Command, resourceType string, existing
 			}
 			if l, ok := existingRef["label"].(string); ok && strings.TrimSpace(l) != "" {
 				ref["label"] = strings.TrimSpace(l)
+			}
+			if m, ok := existingRef["execution_mode"].(string); ok && strings.TrimSpace(m) != "" {
+				ref["execution_mode"] = strings.TrimSpace(m)
 			}
 		}
 		if pathSet {
@@ -882,6 +887,16 @@ func buildResourceRefFromFlags(cmd *cobra.Command, resourceType string, existing
 				ref["label"] = refLabel
 			}
 		}
+		if modeSet {
+			// An empty value clears the field back to the in_place default,
+			// mirroring how --ref-label clears a label.
+			mode := strings.TrimSpace(mustString(cmd, "execution-mode"))
+			if mode == "" {
+				delete(ref, "execution_mode")
+			} else {
+				ref["execution_mode"] = mode
+			}
+		}
 		if v, ok := ref["local_path"].(string); !ok || v == "" {
 			return nil, false, fmt.Errorf("local_directory: --local-path is required (no existing local_path to merge with)")
 		}
@@ -893,7 +908,7 @@ func buildResourceRefFromFlags(cmd *cobra.Command, resourceType string, existing
 		// Unknown type or empty (resource not found) — caller must use --ref.
 		if cmd.Flags().Changed("url") || cmd.Flags().Changed("default-branch-hint") ||
 			cmd.Flags().Changed("local-path") || cmd.Flags().Changed("daemon-id") ||
-			cmd.Flags().Changed("ref-label") {
+			cmd.Flags().Changed("ref-label") || cmd.Flags().Changed("execution-mode") {
 			return nil, false, fmt.Errorf("no built-in shortcut for resource type %q; pass the full payload via --ref '<json>'", resourceType)
 		}
 		return nil, false, nil
@@ -954,9 +969,7 @@ func summarizeResourceRef(raw any) string {
 	return ""
 }
 
-// ---------------------------------------------------------------------------
 // Helpers
-// ---------------------------------------------------------------------------
 
 func formatLead(project map[string]any, actors actorDisplayLookup) string {
 	lType := strVal(project, "lead_type")

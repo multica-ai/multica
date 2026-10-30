@@ -5,6 +5,7 @@ import { useWorkspacePaths } from "@multica/core/paths";
 import { useNavigation } from "../navigation";
 import { ChatFab } from "./components/chat-fab";
 import { ChatWindow } from "./components/chat-window";
+import { isFloatingChatRouteSuppressed } from "./floating-chat-visibility";
 
 /**
  * Mount point for the floating chat overlay (FAB + window). Rendered once in
@@ -24,9 +25,7 @@ export function FloatingChat() {
 
   if (!enabled) return null;
   // Suppress on the Chat tab — it renders the same conversation full-page.
-  if (pathname === wsPaths.chat() || pathname.startsWith(`${wsPaths.chat()}/`)) {
-    return null;
-  }
+  if (isFloatingChatRouteSuppressed(pathname, wsPaths.chat())) return null;
 
   return (
     <>

@@ -9,6 +9,7 @@ import { api } from "@multica/core/api";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { workspaceKeys } from "@multica/core/workspace/queries";
 import { Button } from "@multica/ui/components/ui/button";
+import { TooltipHint } from "@multica/ui/components/common/tooltip-hint";
 import {
   UI_EASE_OUT,
   UI_MOTION_DURATION,
@@ -21,7 +22,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@multica/ui/components/ui/dialog";
-import { Archive, ArchiveRestore, Loader2, X } from "lucide-react";
+import { Archive, ArchiveRestore, Loader2, X } from "@multica/ui/icons";
 import { useT } from "../../i18n";
 import { AccessPicker, type AccessChange } from "./inspector/access-picker";
 import type { AgentListRow } from "./agents-page";
@@ -140,7 +141,7 @@ export function AgentBatchToolbar({
         {rows.length > 0 && (
           <div
             key="agent-batch-toolbar"
-            className="absolute bottom-6 left-1/2 z-50 -translate-x-1/2"
+            className="absolute bottom-6 left-1/2 z-50 -translate-x-1/2 max-md:above-chat-launcher"
           >
             <motion.div
               className="flex items-center gap-1 rounded-lg border bg-background px-2 py-1.5 shadow-lg"
@@ -172,17 +173,19 @@ export function AgentBatchToolbar({
               }}
             >
         <div className="mr-1 flex items-center gap-1.5 border-r pl-1 pr-2">
-          <span className="text-sm font-medium">
+          <span className="text-body font-medium">
             {t(($) => $.actions.selected, { count: rows.length })}
           </span>
-          <button
-            type="button"
-            aria-label={t(($) => $.actions.clear_selection)}
-            onClick={onClear}
-            className="rounded p-0.5 transition-colors hover:bg-accent"
-          >
-            <X className="size-3.5 text-muted-foreground" />
-          </button>
+          <TooltipHint label={t(($) => $.actions.clear_selection)}>
+            <button
+              type="button"
+              aria-label={t(($) => $.actions.clear_selection)}
+              onClick={onClear}
+              className="rounded-xs p-0.5 transition-colors hover:bg-accent"
+            >
+              <X className="size-3.5 text-muted-foreground" />
+            </button>
+          </TooltipHint>
         </div>
 
         {anyArchived && (
@@ -233,7 +236,7 @@ export function AgentBatchToolbar({
       {rows.length > 0 && <Dialog open={confirmArchive} onOpenChange={setConfirmArchive}>
         <DialogContent className="sm:max-w-md">
           <DialogHeader>
-            <DialogTitle>
+            <DialogTitle className="break-all">
               {t(($) => $.row_actions.archive_dialog_title, {
                 name:
                   rows.length === 1 && rows[0]

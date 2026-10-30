@@ -1,178 +1,442 @@
 ---
-title: CLI 命令速查
-description: Multica CLI 的所有顶级命令一页概览。完整用法查 `multica <命令> --help`。
+title: 使用 CLI
+description: 安装并登录 Multica CLI，在终端中管理工作区、任务、智能体和运行时。
 ---
 
 import { Callout } from "fumadocs-ui/components/callout";
+import { Tab, Tabs } from "fumadocs-ui/components/tabs";
 
-Multica CLI 把 Web UI 能做的事几乎全部搬到了命令行上（创建 [issue](/issues)、分配 [智能体](/agents)、启动 [守护进程](/daemon-runtimes) 等等）。这一页把所有顶级命令列出来，每条配一句用途。完整 flag 和示例用 `multica <命令> --help` 查。
+Multica CLI 既负责连接本机运行时，也可以在终端中管理工作区、任务、智能体和自动化。这里介绍常用路径；当前版本支持的参数始终以命令自身的 `--help` 为准。
 
-## 认证入口
+## 安装
 
-第一次用 CLI 时先登录，拿一个**个人访问令牌（Personal Access Token，PAT）**：
-
-```bash
-multica login
-```
-
-浏览器会自动打开，你在 Web 端同意后，CLI 把 PAT（`mul_` 前缀）保存到 `~/.multica/config.json`。此后所有命令都会自动用这个 PAT 认证。
-
-<Callout type="tip">
-CI / 无浏览器环境跳过浏览器流程：先在 Web 端 **Settings → Personal Access Tokens** 创建一个 PAT，然后 `multica login --token <mul_...>` 直接填入。
-</Callout>
-
-Token 类型的详细区分见 [认证与令牌](/auth-tokens)。
-
-## 认证与初始化
-
-| 命令 | 用途 |
-|---|---|
-| `multica login` | 登录并保存 PAT |
-| `multica auth status` | 查看当前登录状态、用户、工作区 |
-| `multica auth logout` | 清除本地 PAT |
-| `multica setup cloud` | Multica Cloud 一键初始化（登录 + 装 daemon） |
-| `multica setup self-host` | 自部署后端的一键初始化 |
-
-## 工作区和成员
-
-| 命令 | 用途 |
-|---|---|
-| `multica workspace list` | 列出你有权访问的所有工作区 |
-| `multica workspace create --name "..." --slug "..." [--issue-prefix "..."] [--description "..."] [--context "..."]` | 创建工作区（你会成为 owner）。`--name` 和 `--slug` 必填，slug 创建后不可修改；不会切换你当前的工作区。 |
-| `multica workspace get <slug>` | 查看一个工作区的详情 |
-| `multica workspace member list` | 列出当前工作区的成员 |
-| `multica workspace update <id> --name "..." [--description "..."] [--context "..."] [--issue-prefix "..."]` | 修改 workspace 元数据（admin/owner 权限）。长文本可用 `--description-stdin` / `--context-stdin`。 |
-
-## Issue 和 Project
-
-<Callout type="info">
-`list` 类命令（`multica issue list`、`autopilot list`、`project list` 等）表格里默认显示**可直接复制**的短 ID：issue 是 key（如 `MUL-123`），其余资源是 UUID 短前缀。下面表格里的 `<id>` 同时接受短 ID 和完整 UUID，所以典型用法是 `multica issue list` → 复制 key → `multica issue get MUL-123`。需要完整 UUID 时给 `list` 加 `--full-id`。
-</Callout>
-
-| 命令 | 用途 |
-|---|---|
-| `multica issue list` | 列出 issue（默认显示可复制的 issue key） |
-| `multica issue get <id>` | 查看单条 issue（接受 issue key 或 UUID） |
-| `multica issue create --title "..."` | 创建新 issue |
-| `multica issue update <id> ...` | 修改 issue（状态、优先级、分配人等） |
-| `multica issue assign <id> --to <name>` | 分配给成员、智能体或小队（分配给智能体会触发一次运行） |
-| `multica issue status <id> <status>` | 快捷改状态 |
-| `multica issue search <query>` | 关键字搜索 |
-| `multica issue children <id>` | 按 stage 分组查看子 issue |
-| `multica issue pull-requests <id>` | 查看关联 PR 及其状态 |
-| `multica issue runs <id>` | 查看 issue 上智能体跑过的任务 |
-| `multica issue run-messages <task-id>` | 查看某次执行的消息 |
-| `multica issue usage <id>` | 查看单个 issue 聚合 token 用量 |
-| `multica issue rerun <id>` | 给该 issue 当前的智能体分配人重新创建一条任务 |
-| `multica issue cancel-task <task-id>` | 取消排队中或运行中的任务 |
-| `multica issue comment <id> ...` | 嵌套：看 / 发评论 |
-| `multica issue comment resolve/unresolve <comment-id>` | 标记评论线程已解决 / 未解决 |
-| `multica issue subscriber <id> ...` | 嵌套：订阅 / 取消订阅 |
-| `multica issue metadata <id> ...` | 嵌套：读写 issue metadata |
-| `multica issue label <id> ...` | 嵌套：管理 issue 上的 label |
-| `multica project list/get/create/update/delete/status` | Project CRUD |
-| `multica label list/create/update/delete` | Workspace label CRUD |
-
-## 智能体和 Skill
-
-| 命令 | 用途 |
-|---|---|
-| `multica agent list` | 列出工作区的智能体 |
-| `multica agent get <slug>` | 查看智能体配置 |
-| `multica agent create ...` | 创建智能体 |
-| `multica agent update <slug> ...` | 修改智能体 |
-| `multica agent archive <slug>` | 归档 |
-| `multica agent restore <slug>` | 恢复归档的智能体 |
-| `multica agent tasks <slug>` | 查看智能体的任务历史 |
-| `multica agent avatar <slug>` | 上传智能体头像 |
-| `multica agent env <slug> ...` | 读取或替换智能体的 custom environment variables |
-| `multica agent skills ...` | 嵌套：挂载 / 卸载 Skill |
-| `multica skill list/get/create/update/delete` | Skill CRUD |
-| `multica skill import ...` | 从 GitHub / ClawHub / 本机导入 Skill |
-| `multica skill files ...` | 嵌套：管理 Skill 的文件 |
-
-### Skill 导入冲突
-
-`multica skill import --url <url>` 默认等同于 `--on-conflict fail`。如果工作区里已经有同名 Skill，命令会返回结构化 `conflict` 结果并退出，不会修改工作区。
-
-如果你是已有 Skill 的 creator，并且想用新导入内容覆盖它，同时保留原 Skill 的 ID 和 agent 绑定，用 `--on-conflict overwrite`。如果想保留已有 Skill、另存一份，用 `--on-conflict rename`，系统会自动加 `-2` 这类后缀。如果只是批量导入时遇到同名项就跳过，用 `--on-conflict skip`。
+<Tabs groupId="os" persist items={["macOS / Linux", "Windows"]}>
+<Tab value="macOS / Linux">
 
 ```bash
-multica skill import --url https://skills.sh/acme/repo/review-helper
-multica skill import --url https://skills.sh/acme/repo/review-helper --on-conflict overwrite
-multica skill import --url https://skills.sh/acme/repo/review-helper --on-conflict rename
-multica skill import --url https://skills.sh/acme/repo/review-helper --on-conflict skip
+curl -fsSL https://raw.githubusercontent.com/multica-ai/multica/main/scripts/install.sh | bash
 ```
 
-## 小队
+安装了 Homebrew 时也可以运行：
 
-| 命令 | 用途 |
-|---|---|
-| `multica squad list` | 列出工作区里的小队 |
-| `multica squad get <id>` | 查看一个小队 |
-| `multica squad create --name "..." --leader <agent>` | 创建小队（owner / admin）|
-| `multica squad update <id> ...` | 修改名字、描述、instructions、队长、头像 |
-| `multica squad delete <id>` | 归档（软删除）—— 同时把分配给小队的 issue 转给队长 |
-| `multica squad member list/add/remove/set-role <squad-id>` | 管理小队成员并原地更新 role |
-| `multica squad activity <issue-id> <action\|no_action\|failed> --reason "..."` | 队长智能体每轮结束时调用，记录 evaluation |
+```bash
+brew install multica-ai/tap/multica
+```
 
-完整模型见 [小队](/squads)。
+</Tab>
+<Tab value="Windows">
 
-## Autopilots
+在 PowerShell 中运行：
 
-| 命令 | 用途 |
-|---|---|
-| `multica autopilot list` | 列出工作区所有 autopilot |
-| `multica autopilot get <id>` | 查看单个 autopilot |
-| `multica autopilot create ...` | 创建 autopilot |
-| `multica autopilot update <id> ...` | 修改 |
-| `multica autopilot delete <id>` | 删除 |
-| `multica autopilot runs <id>` | 查看运行历史 |
-| `multica autopilot trigger <id>` | 手动触发一次 |
-| `multica autopilot trigger-add/update/delete <id>` | 管理 schedule 或 webhook trigger |
-| `multica autopilot trigger-rotate-url <id> <trigger-id>` | 轮换 webhook trigger URL |
+```powershell
+irm https://raw.githubusercontent.com/multica-ai/multica/main/scripts/install.ps1 | iex
+```
 
-`multica autopilot create/update` 还支持 `--subscriber`，为 `create_issue` 模式创建的 issue 设置默认订阅人；`update` 支持 `--clear-subscribers` 清空默认订阅人。
+</Tab>
+</Tabs>
+
+确认安装成功：
+
+```bash
+multica version
+```
+
+## 第一次连接
+
+按连接的服务选择：
+
+<Tabs items={["Multica Cloud", "自托管实例"]}>
+<Tab value="Multica Cloud">
+
+```bash
+multica setup
+```
+
+</Tab>
+<Tab value="自托管实例">
+
+```bash
+multica setup self-host \
+  --server-url https://api.example.com \
+  --app-url https://app.example.com
+```
+
+</Tab>
+</Tabs>
+
+`setup` 会保存服务地址、打开浏览器完成登录，并启动守护进程。完成后检查：
+
+```bash
+multica auth status
+multica daemon status
+```
+
+如果只需要重新登录，不想覆盖其他配置，运行 `multica login`。没有浏览器的环境可以先在 Web 设置中创建个人访问令牌，再输入：
+
+```bash
+multica login --token
+```
+
+命令会在终端中提示粘贴令牌，避免把完整值留在 shell history 中。
+
+## 选择工作区
+
+列出并切换默认工作区：
+
+```bash
+multica workspace list
+multica workspace switch <slug>
+```
+
+之后的命令会使用这个工作区。单次命令可以通过 `--workspace-id` 临时覆盖，也可以设置 `MULTICA_WORKSPACE_ID`。
+
+邀请成员：
+
+```bash
+multica workspace member invite teammate@example.com
+multica workspace member invite admin@example.com --role admin
+```
+
+## 常用任务操作
+
+```bash
+# 查看和搜索
+multica issue list
+multica issue get MUL-123
+multica issue search "登录失败"
+
+# 创建和修改
+multica issue create --title "修复登录失败"
+multica issue status MUL-123 in_progress
+multica issue assign MUL-123 --to "Backend Agent"
+
+# 评论和执行记录
+multica issue comment list MUL-123
+multica issue comment add MUL-123 --content "请先检查回归测试"
+multica issue comment update <comment-id> --expected-revision 2 --content "请检查回归测试和发布说明"
+multica issue runs MUL-123
+```
+
+长描述或评论从 stdin 读取，避免处理换行和引号：
+
+```bash
+multica issue create --title "升级说明" --description-stdin < notes.md
+multica issue comment add MUL-123 --content-stdin < review.md
+multica issue comment update <comment-id> --expected-revision 2 --content-file revised-review.md
+```
+
+查看某次运行的消息、停止运行或重试：
+
+```bash
+multica issue run-messages <task-id> --issue MUL-123
+multica issue cancel-task <task-id> --issue MUL-123
+multica issue rerun-task <run-id> --issue MUL-123
+multica issue rerun-task <run-id> --issue MUL-123 --fresh
+```
+
+把评论插话到仍在进行中的运行，而不是排队一个后续运行（仅限支持插话的运行；你的评论能启动哪个智能体，就能向它插话）：
+
+```bash
+multica issue comment add MUL-123 --content-file note.md --steer <task-id>
+multica issue comment add MUL-123 --content-file note.md --steer-active
+```
+
+同一项目、同一父任务下已有标题相同（不区分大小写，忽略多余空格）且未关闭的任务时，`issue create` 会拒绝创建并给出那个任务。确实要再建一个，加 `--allow-duplicate`；要把一个任务标为另一个的重复，用 `multica issue status MUL-124 cancelled --duplicate-of MUL-123`。
+
+### 时间线
+
+`issue get` 给出任务现在的状态；`issue timeline` 按时间顺序列出状态、优先级、负责人、标题、日期的改动和运行结果，并混排评论，用来回答"什么时候进入 in_review""卡在当前状态多久了"：
+
+```bash
+multica issue timeline MUL-123 --action status_changed
+multica issue timeline MUL-123 --activity-only --output json
+multica issue timeline MUL-123 --since 2026-08-19T00:00:00Z
+```
+
+`--activity-only` 去掉评论，保留全部活动记录；`--action` 只返回指定的动作，可重复，并隐含 `--activity-only`。服务器读取的历史有上限，被截断时 stderr 会打印警告，这时不要据此推算停留时长。
+
+### 读长评论线程
+
+评论多的任务，智能体逐条读取很费 token。先扫一遍线程，再展开需要的那一个：
+
+```bash
+multica issue comment list MUL-123 --roots-only --summary --output json --compact
+multica issue comment list MUL-123 --thread <comment-id> --tail 5 --output json --compact
+```
+
+- `--roots-only` 只返回顶层评论，每条附带回复数和最近活动时间。
+- `--summary` 把每条内容截成预览。
+- `--compact` 只作用于 JSON 输出，去掉不带信息的字段（例如重复的 `issue_id`、空数组）。
+- `--recent N` 返回最近活跃的 N 个线程，每个线程带上全部回复，回复多时输出可能很长。
+- 已解决的线程默认折叠成首条评论和结论，需要原文时加 `--full`。
+
+列表也可以只取需要的字段：`multica issue list --output json --fields id,identifier,title,status`。筛选在 CLI 本地完成，减少的是输出和上下文，不是请求量。
+
+### 唤醒
+
+唤醒让智能体在某个事件发生、某个条件成立或到点时开始一次普通运行。完整规则见[任务唤醒](/issue-wakeups)。
+
+```bash
+multica issue wakeup events
+multica issue wakeup create MUL-123 --agent-id <agent-id> \
+  --event comment.created --filter-actor-type member --filter-actor-id <user-id> \
+  --instruction "对方回复后，按回复内容更新报价单"
+multica issue wakeup create MUL-123 --agent-id <agent-id> \
+  --kind every --every 1h --expires-in 72h \
+  --instruction "检查供应商是否回信"
+multica issue wakeup list MUL-123
+multica issue wakeup runs MUL-123 <wakeup-id>
+```
+
+在终端里以成员身份创建时需要 `--agent-id`；智能体在自己的运行中创建时默认唤醒它自己。
+
+## 智能体和 skill
+
+```bash
+multica agent list
+multica agent get <agent-id>
+multica agent create --help
+multica agent update <agent-id> --help
+
+multica skill list
+multica skill get <skill-id>
+multica skill import --url <skill-url>
+multica agent skills add <agent-id> --skill-ids <skill-id>
+```
+
+导入时遇到同名 skill，默认会停止且不修改现有内容。按意图选择：
+
+```bash
+multica skill import --url <skill-url> --on-conflict overwrite
+multica skill import --url <skill-url> --on-conflict rename
+multica skill import --url <skill-url> --on-conflict skip
+```
+
+`overwrite` 只允许 skill 的创建者使用，并保留原来的 ID 与智能体绑定关系。
+
+环境变量和 MCP 配置常带有 token。命令行里直接写值会留在 shell 历史和 `ps` 输出中，用 `-file` 或 `-stdin` 形式传入：
+
+```bash
+multica agent create --name "运营助手" --runtime-id <runtime-id> \
+  --custom-env-file ./agent-env.json \
+  --mcp-config-file ./mcp.json \
+  --custom-args '["--max-turns", "40"]'
+
+multica agent env set <agent-id> --custom-env-stdin < agent-env.json
+multica agent update <agent-id> --mcp-config-file ./mcp.json
+```
+
+- `--custom-env` 系列只在 `agent create` 中可用。之后修改用 `agent env set`，它整体替换原有变量，值写成 `****` 的键保留原值。
+- `agent update --mcp-config null` 清除 MCP 配置。
+- `--custom-args` 是 JSON 数组，排在启动参数的最后。选模型用 `--model`，部分工具会拒绝出现在自定义参数里的 `--model`。
+- 谁能调用智能体用 `--permission-mode`：`private` 只有所有者，`public_to` 配合 `--public-to-workspace` 或 `--public-to-member <user-id>`。`--visibility private|workspace` 是旧写法，会映射到 `--permission-mode`；两者同时给出时以 `--permission-mode` 为准。
 
 ## 守护进程和运行时
 
-| 命令 | 用途 |
-|---|---|
-| `multica daemon start` | 启动 daemon（默认后台；加 `--foreground` 前台跑）|
-| `multica daemon stop` | 停止 daemon |
-| `multica daemon restart` | 重启 daemon |
-| `multica daemon status` | 查看 daemon 是否在线 + 并发情况 |
-| `multica daemon logs` | 查看 daemon 日志 |
-| `multica runtime list` | 列出当前工作区的 runtime |
-| `multica runtime usage` | 查看资源使用情况 |
-| `multica runtime activity` | 近期活动记录 |
-| `multica runtime update <id> ...` | 在某个 runtime 上触发 CLI 更新 |
-| `multica runtime delete <id> [--cascade]` | 删除 runtime，可选择同时归档绑定的智能体 |
-| `multica runtime profile ...` | 管理自定义 runtime profile 和本机路径覆盖 |
-
-## 杂项
-
-| 命令 | 用途 |
-|---|---|
-| `multica repo checkout <url>` | 把 repo 拉到本地以供智能体使用 |
-| `multica config` | 查看 / 修改 CLI 本地配置 |
-| `multica version` | 显示 CLI 版本 |
-| `multica update` | 升级 CLI 到最新版 |
-| `multica attachment download <id>` | 下载 issue / 评论的附件 |
-
-## 查完整 flag
-
-每条命令都支持 `--help`：
-
 ```bash
-multica issue create --help
-multica agent update --help
+multica daemon start
+multica daemon stop
+multica daemon restart
+multica daemon status --output json
+multica daemon logs --follow
+
+multica runtime list
+multica runtime rename <runtime-id> "Office Mac"
+multica runtime usage <runtime-id>
+multica runtime activity <runtime-id>
 ```
 
-v2 会给每条命令一个独立的详细 reference 页。
+```bash
+multica daemon autostart enable
+multica runtime usage <runtime-id> --days 30
+multica runtime update <runtime-id> --target-version <version> --wait
+multica runtime profile create --display-name "内部 Claude 封装" \
+  --command-name ccms --runtime-type claude
+```
 
-## 下一步
+`daemon autostart` 为当前 profile 登记开机自启，平台差异见[开机自启](/daemon-runtimes#autostart)。`runtime usage` 默认统计 90 天，`--days` 最多 365。`runtime update` 让那台电脑上的守护进程把 CLI 更新到指定版本，`--wait` 会一直等到更新结束。`runtime profile create` 用 `--runtime-type` 指定兼容的工具（旧的 `--protocol-family` 仍可用）；固定参数目前只能在网页端填写。
 
-- [认证与令牌](/auth-tokens) —— PAT / JWT / Daemon Token 的区别
-- [守护进程与运行时](/daemon-runtimes) —— `daemon` 命令背后的工作机制
-- [创建和配置智能体](/agents-create) —— `multica agent create` 的完整选项
+删除仍绑定活跃智能体的运行时时，命令默认拒绝。`multica runtime delete <id> --cascade` 会解绑这些智能体、保留其配置与历史记录，并取消它们的活动运行。
+
+运行机制和自定义 profile 见[守护进程与运行时](/daemon-runtimes)。
+
+## 项目、工作区和自动化
+
+```bash
+multica project create --title "618 活动" --lead "李雷" \
+  --repo https://github.com/acme/campaign-site
+multica project resource add <project-id> --type github_repo \
+  --url https://github.com/acme/brand-assets --default-branch-hint main
+
+multica workspace create --name "运营部" --slug ops --issue-prefix OPS
+multica workspace update --context-stdin < team-context.md
+
+multica autopilot create --title "每周销售周报" --agent "运营助手" \
+  --mode create_issue --issue-title-template "销售周报 {{date}}"
+multica autopilot trigger-add <autopilot-id> --cron "0 9 * * 1" --timezone Asia/Shanghai
+```
+
+- `--lead` 接受成员或智能体的名称。`--default-branch-hint` 只告诉智能体仓库的默认分支，不会切换分支。
+- 工作区的 `--context` 会提供给工作区里的每个智能体。`--slug` 创建后不能修改；`--issue-prefix` 会转成大写，修改它会给所有现有任务重新编号，外部引用里的旧编号随之失效。
+- `--issue-title-template` 只替换 `{{date}}`（UTC，`YYYY-MM-DD`），其他 `{{...}}` 会被拒绝。定时触发器的 `--timezone` 默认 UTC。
+
+## 命令概览
+
+| 命令 | 用途 |
+| --- | --- |
+| `issue` | 创建、更新、分配和搜索任务；管理评论、订阅、标签、属性、唤醒、时间线与执行记录 |
+| `project` | 管理项目、项目资源和项目使用的工作流 |
+| `workflow` | 管理工作流：状态以及每个状态交给谁处理 |
+| `label`、`property` | 管理工作区标签和自定义属性 |
+| `agent`、`skill`、`squad` | 管理智能体、skill 和小队 |
+| `autopilot` | 管理自动化、触发器和运行历史 |
+| `workspace` | 创建、查看、切换工作区和邀请成员 |
+| `repo` | 管理工作区仓库，并把仓库检出到本机 |
+| `daemon`、`runtime` | 启停本机守护进程，查看和管理运行时 |
+| `attachment` | 上传或下载附件 |
+| `user profile` | 查看或更新当前用户资料 |
+| `auth`、`login`、`setup` | 登录、查看认证状态和初始化连接 |
+| `config` | 查看或修改当前 CLI profile 的本地配置 |
+| `update`、`version` | 更新 CLI 或查看版本 |
+
+`multica chat` 读取的是**智能体当前正在处理的外部聊天会话**，主要供聊天集成中的智能体使用，不能用来浏览任意工作区对话。
+
+## ID 和输出格式
+
+任务使用 `MUL-123` 这样的 key 或完整 UUID，不接受 UUID 短前缀。
+
+其他资源的 `list` 命令通常显示可复制的短 ID，并支持 `--full-id` 输出完整 UUID。短 ID 不唯一时，CLI 会要求增加字符或改用完整 UUID。运行的短 ID 还需要通过 `--issue` 指明所属任务。
+
+许多命令支持结构化输出：
+
+```bash
+multica issue list --output json
+multica agent list --output json
+```
+
+脚本使用 JSON 输出，不解析面向终端的表格。各命令支持的输出格式和分页参数以 `multica <command> --help` 为准。
+
+## Profile 与配置
+
+默认配置保存在 `~/.multica/config.json`。使用 `--profile <name>` 可以隔离另一套服务地址、令牌、默认工作区和守护进程状态：
+
+```bash
+multica setup self-host --profile staging \
+  --server-url https://api.staging.example.com \
+  --app-url https://app.staging.example.com
+
+multica issue list --profile staging
+```
+
+命名 profile 保存在 `~/.multica/profiles/<name>/config.json`。查看当前值：
+
+```bash
+multica config show
+multica config show --profile staging
+```
+
+<Callout type="warning">
+CLI 配置文件包含可代表你访问 Multica 的令牌。不要提交到仓库、上传到日志或与他人共享。
+</Callout>
+
+## 命令参考
+
+下表覆盖当前全部顶层命令，按 CLI 自身的分组排列。所有命令都接受全局 flag `--server-url`、`--workspace-id`、`--profile` 和 `--debug`。`--output` 是逐命令注册的 flag，默认格式因命令而异：`list` 类默认表格，`get`、`create` 类多默认 JSON。完整参数以 `multica <command> --help` 为准。
+
+### Core
+
+| 命令 | 子命令 | 用途 | 关键 flag |
+| --- | --- | --- | --- |
+| `issue` | `list` | 列出任务 | `--status`、`--priority`、`--assignee`、`--project`、`--metadata`（可重复）、`--property`（可重复，`"名称=值"` 或 `"Score>=3"`、`"Due<2026-01-01"`、`"Notes~=text"` 这样的比较；`__none__` 匹配未设置）、`--limit`、`--offset`、`--sort`（支持 `property:<名称或 id>`）、`--full-id`、`--fields`（仅 JSON；逗号分隔，只输出这些字段）、`--resolve-properties`（仅 JSON；在保存的 id 旁附上属性、选项和成员名称） |
+| | `get <id>` | 查看单个任务 | `--resolve-properties`（仅 JSON；在保存的 id 旁附上属性、选项和成员名称） |
+| | `create` | 创建任务 | `--title`（必填）、`--description` / `--description-stdin` / `--description-file`、`--status`、`--priority`、`--assignee`、`--parent`、`--stage`、`--project`、`--start-date`、`--due-date`、`--attachment`（可重复）、`--property`（可重复）、`--allow-duplicate`（已有同名未关闭任务时仍创建） |
+| | `update <id>` | 更新任务字段 | 与 `create` 同类字段，另有 `--position`、`--no-start`、`--duplicate-of` |
+| | `assign <id>` | 指派或取消指派 | `--to`（名称模糊匹配成员、智能体或小队）、`--to-id`、`--unassign`、`--no-start` |
+| | `status <id> <status>` | 修改状态 | `--no-start`、`--duplicate-of` |
+| | `reorder <id>` | 在列内移动 | |
+| | `search <query>` | 搜索任务 | `--limit`、`--include-closed` |
+| | `children <id>` | 按阶段分组列出子任务 | |
+| | `pull-requests <id>` | 列出关联的 PR | |
+| | `comment list/add/update/delete/resolve/unresolve` | 管理评论 | `add`：`--content` / `--content-stdin` / `--content-file`、`--parent`、`--attachment`；`update`：`--expected-revision`（必填）、`--content` / `--content-stdin` / `--content-file`；`list`：`--since`、`--thread`、`--tail`、`--recent`、`--roots-only`、`--summary`、`--compact`、`--full` |
+| | `timeline <id>` | 按时间列出活动记录和评论 | `--action`（可重复）、`--activity-only`、`--since`、`--tail` |
+| | `wakeup events/list/get/create/update/disable/trigger/delete/checkin/runs` | 管理任务唤醒，详见[任务唤醒](/issue-wakeups) | `create` / `update`：`--agent-id`、`--kind`（`event`、`at`、`every`、`cron`）、`--event`、`--at` / `--after`、`--every`、`--cron`、`--timezone`、`--until-*` 条件、`--expires-in` / `--expires-at`、`--instruction` / `--instruction-file`；`checkin`：`--note` |
+| | `subscriber list/add/remove <issue-id>` | 管理订阅者 | `--user`、`--user-id`（缺省为当前用户） |
+| | `label list/add/remove <issue-id>` | 管理任务上的标签 | |
+| | `metadata list/get/set/delete <issue-id>` | 管理任务级键值元数据 | |
+| | `property list/set/unset <issue-id>` | 设置自定义属性值 | `set`：`--name`、`--value`（`actor` / `multi_actor` 接受成员的名称、邮箱或 id） |
+| | `runs <issue-id>` | 查看执行历史 | `--full-id` |
+| | `run-messages <task-id>` | 查看单次执行的消息 | `--since`、`--issue` |
+| | `usage <issue-id>` | 查看聚合 token 用量 | |
+| | `rerun-task <run-id>` | 沿用原智能体和触发上下文，重跑指定运行 | `--issue`, `--fresh` |
+| | `cancel-task <task-id>` | 取消进行中或排队中的运行 | `--issue` |
+| `project` | `list/get/create/update/delete` | 管理项目 | `create`：`--title`（必填）、`--lead`、`--status`、`--icon`、`--start-date`、`--due-date`、`--repo`（可重复） |
+| | `status <id> <status>` | 修改项目状态 | |
+| | `resource list/add/update/remove` | 管理项目附加资源 | `--type`、`--url`、`--default-branch-hint`、`--ref`、`--local-path`、`--daemon-id`、`--execution-mode`（本地目录的 `in_place` / `worktree`） |
+| | `workflow get/set <project-id>` | 查看项目当前生效的工作流，或切换工作流 | `set <project-id> <workflow\|default>`：`--map old=new`（可重复），`--dry-run` 打印状态迁移计划；切换不会重新分配任务，也不会启动运行。仅管理员和项目负责人可操作 |
+| `workflow` | `list/get/create/update/delete` | 管理工作流；`get` 等命令接受 ID、ID 前缀、完整名称或 `default` | `create` / `update`：`--name`、`--description`、`--steps-file`（步骤的 JSON 数组，整体替换）；`update`：`--map old=new`（可重复）、`--dry-run`。编辑和删除仅限工作流所有者和工作区管理员；仍被项目使用的工作流不能删除 |
+| | `handoff set <workflow> <status-key>` | 设置单个步骤的处理人、说明和下一步/退回状态，未指定的字段保持不变 | `--handler`（`none`、`project_lead`、`creator`，或成员/智能体/小队的名称或 UUID）、`--instructions` / `--instructions-file`、`--next`、`--back`、`--copy-for-project` |
+| `label` | `list/get/create/update/delete` | 管理工作区标签 | `list`：`--resource-type`（`issue` 或 `skill`）、`--full-id`；`create`：`--name`、`--color`、`--resource-type`（`issue` 或 `skill`）、`--description` |
+| `property` | `list/get/create/update/archive/unarchive` | 管理工作区自定义属性 | `create`：`--name`、`--type`（`text`、`number`、`select`、`multi_select`、`date`、`checkbox`、`url`、`actor`、`multi_actor`、`multi_text`、`multi_url`）、`--option`（可重复，仅 select 类型）；`list`：`--include-archived`；类型创建后不可修改 |
+| `agent` | `list/get/create/update/archive/restore` | 管理智能体 | `--name`、`--runtime-id`（`create` 必填）、`--instructions`、`--conversation-starters`、`--model`、`--thinking-level`、`--custom-env` / `--custom-env-file` / `--custom-env-stdin`（仅 `create`）、`--custom-args`、`--mcp-config` / `--mcp-config-file` / `--mcp-config-stdin`、`--permission-mode`、`--visibility`（旧写法）、`--max-concurrent-tasks` |
+| | `copy <agent-id>` | 复制为新智能体，原智能体不受影响 | `--name`（默认为原名加 ` (copy)`）、`--runtime-id`（复制到其他运行时时必须同时指定 `--model`）、`--no-skills`；`custom_env`、`mcp_config`、`runtime_config` 等机密配置不会复制，需用与 `create` 相同的 flag 重新提供 |
+| | `tasks <id>` | 查看智能体的运行 | |
+| | `avatar <id>` | 上传头像 | |
+| | `env get/set <agent-id>` | 读写自定义环境变量（智能体所有者或工作区 owner/admin；每次读取都会记录） | `set`：`--custom-env` / `--custom-env-file` / `--custom-env-stdin`，整体替换，值为 `****` 的键保留原值 |
+| | `skills list/set/add <agent-id>` | 管理绑定的 skill | `--skill-ids`（`set` 全量替换，`add` 增量添加） |
+| | `mcp list/add/enable/disable/remove <agent-id>` | 给该 agent 分配工作区 MCP 服务 | server id 从 `workspace mcp list` 获取。库里的条目在这里添加之前不会生效；`disable` 只停止下发，保留分配 |
+| `autopilot` | `list/get/create/update/delete` | 管理自动化 | `create`：`--title`、`--agent`、`--mode`（均必填）、`--description`、`--issue-title-template`、`--project`、`--subscriber`（可重复） |
+| | `trigger <id>` | 手动触发一次 | |
+| | `runs <id>` | 查看运行历史 | |
+| | `trigger-add/trigger-update/trigger-delete/trigger-rotate-url` | 管理定时和 webhook 触发器 | `trigger-add`：`--kind`（`schedule` 或 `webhook`）、`--cron`、`--timezone`（默认 UTC）、`--label` |
+| `workspace` | `list/get/create/update/switch` | 管理工作区；`switch` 设置当前 profile 的默认工作区 | `create`：`--name`、`--slug`（均必填）、`--issue-prefix`、`--description`、`--context` / `--context-stdin`；`update` 可改除 slug 外的同类字段 |
+| | `mcp list/add/update/remove` | 管理工作区的 MCP 服务库 | 写操作需要 owner/admin。这里添加的服务不会分配给任何 agent——用 `multica agent mcp add` 分配给某个 agent。`list` 只列出名称与 transport；存储的条目是只写的，任何角色都读不回。`--server-config-file` / `--server-config-stdin` 避免 token 进入 shell 历史 |
+| | `member list/invite <email>` | 查看成员、发出邀请 | `invite`：`--role`（member 或 admin，默认 member） |
+| `repo` | `list/add/remove/checkout` | 管理工作区仓库并检出到本机 | `--url`（可重复）；`checkout`：`--ref` |
+| `skill` | `list/get/create/update/delete` | 管理 skill | |
+| | `import` | 从 URL 或本地文件导入 skill | `--url` / `--file`、`--on-conflict`（`fail`、`overwrite`、`rename`、`skip`，默认 `fail`） |
+| | `search <query>` | 搜索 skill | |
+| | `files list/upsert/delete <skill-id>` | 管理 skill 内的文件 | |
+| | `label list/add/remove <skill-id>` | 管理 skill 上的标签 | `add` / `remove`：`<label-id>` 可使用完整 UUID 或短前缀 |
+| `squad` | `list/get/create/update/delete` | 管理小队（`delete` 为归档） | |
+| | `member list/add/set-role/remove` | 管理小队成员 | |
+| | `activity <issue-id> <outcome>` | 记录队长评价 | |
+| `chat` | `history`、`thread [id]` | 读取智能体当前正在处理的外部聊天会话 | `--limit`、`--before` |
+
+### Runtime
+
+| 命令 | 子命令 | 用途 | 关键 flag |
+| --- | --- | --- | --- |
+| `daemon` | `start` | 启动本机守护进程 | `--foreground`、`--device-name`、`--runtime-name`、`--workspaces-root`、`--poll-interval`、`--heartbeat-interval`、`--agent-timeout`（`0` 表示不设上限）、`--max-concurrent-tasks`、`--no-auto-update`；均有对应的 `MULTICA_*` 环境变量 |
+| | `stop` / `status` / `restart` | 停止、查看状态、重启（`restart` 与 `start` 同一套 flag） | |
+| | `logs` | 查看守护进程日志 | `--follow`、`--lines` |
+| | `disk-usage` | 查看本机磁盘占用 | `--by-workspace`、`--by-task`、`--top` |
+| | `autostart enable/disable/status` | 登记或取消当前 profile 的开机自启 | `status`：`--output` |
+| `runtime` | `list/usage/activity/update/rename/delete` | 查看和管理运行时 | `usage`：`--days`（默认 90，最多 365）；`update`：`--target-version`（必填）、`--wait`；`delete`：`--cascade`（解绑绑定的智能体、保留其数据并取消其运行） |
+| | `profile list/create/update/delete` | 管理自定义运行时 profile | `create`：`--display-name`、`--command-name`（均必填）、`--runtime-type`（或旧的 `--protocol-family`）、`--description`；`update`：`--enabled` |
+| | `profile set-path/unset-path <profile-id>` | 固定本机可执行文件路径（仅本地生效，不上传服务器） | |
+
+### Additional
+
+| 命令 | 子命令 | 用途 | 关键 flag |
+| --- | --- | --- | --- |
+| `auth` | `status` / `logout` | 查看认证状态；`logout` 只删除本地保存的令牌，不吊销服务端令牌 | |
+| `user` | `profile get/update` | 查看或更新当前用户资料 | |
+| `login` | — | 浏览器登录并自动配置全部工作区 | `--token`（不带值时在终端交互式输入） |
+| `setup` | `cloud`（默认）、`self-host` | 保存服务地址、完成登录并启动守护进程 | `self-host`：`--server-url`、`--app-url`、`--port`、`--frontend-port` |
+| `attachment` | `download <attachment-id>`、`upload <path>` | 下载或上传附件 | `download`：`--output-dir`；`upload`：`--task` |
+| `config` | `show`、`set <key> <value>` | 查看或修改当前 profile 的本地配置 | 优先级：命令行 flag > 环境变量 > `config.json` > 内置默认；设为空串可清除 |
+| `update` | — | 更新 CLI 到最新版本 | |
+| `version` | — | 查看版本信息 | `--output`（`text` 或 `json`） |
+
+## 在其他编码智能体里操作 Multica
+
+如果你的工作大多发生在 Codex、Claude Code 或 Cursor 里，可以直接在那里操作 Multica，不必切回终端。[Multica CLI skill](https://github.com/multica-ai/multica-cli) 会教这些智能体安全地使用本页的命令：读任务和评论线程时少耗 token、通过文件写评论，以及正确处理 mention、状态变更和指派带来的副作用。
+
+它完全通过你已认证的 CLI 运行，本身不授予任何权限，权限仍然只来自你的登录、所选 profile 和工作区。要求 CLI 版本不低于 v0.4.26。该仓库的 README 说明了 Claude Code 插件市场、Codex skill 安装器、Cursor 以及其他任何加载 Markdown 指令的工具的安装方式。
+
+## 接下来
+
+- [Multica CLI skill](https://github.com/multica-ai/multica-cli) — 在 Codex、Claude Code 或 Cursor 里操作 Multica。
+- [认证与令牌](/auth-tokens) — PAT 的创建、续期和吊销。
+- [故障排查](/troubleshooting) — 命令报错和运行不开始的排查路径。
+- [创建和配置智能体](/agents-create) — `agent create` 各字段的完整语义。

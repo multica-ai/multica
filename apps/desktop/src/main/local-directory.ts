@@ -1,7 +1,7 @@
 import { ipcMain, dialog, BrowserWindow } from "electron";
 import { access, stat } from "fs/promises";
 import { constants as fsConstants } from "fs";
-import { basename, isAbsolute } from "path";
+import { basename, dirname, isAbsolute, join } from "path";
 
 export interface PickDirectoryResult {
   ok: boolean;
@@ -24,6 +24,15 @@ export interface ValidateLocalDirectoryResult {
     | "not_writable"
     | "error";
   error?: string;
+  /**
+   * Whether the directory sits inside a git working tree. Only set when ok=true.
+   *
+   * Worktree execution mode requires a git repo, and only the desktop app can
+   * see the filesystem — the server cannot. Reporting it here lets the picker
+   * disable that mode with a reason at selection time, instead of letting the
+   * user save a resource whose very first task fails.
+   */
+  is_git_repo?: boolean;
 }
 
 async function validateLocalDirectory(
@@ -50,7 +59,32 @@ async function validateLocalDirectory(
   } catch {
     return { ok: false, reason: "not_writable" };
   }
-  return { ok: true };
+  return { ok: true, is_git_repo: await isInsideGitWorkTree(path) };
+}
+
+/**
+ * Walks up from `path` looking for a `.git` entry, mirroring how git itself
+ * resolves a working tree — so a subdirectory of a repo reports true, matching
+ * what the daemon does with `rev-parse --show-toplevel` at task time.
+ *
+ * `.git` is accepted as either a directory (ordinary clone) or a file (a linked
+ * worktree, where it holds a gitdir pointer). Any error means "can't tell",
+ * which is reported as not-a-repo: this only drives a UI hint, and the daemon
+ * re-checks authoritatively before running anything.
+ */
+async function isInsideGitWorkTree(path: string): Promise<boolean> {
+  let current = path;
+  for (;;) {
+    try {
+      await stat(join(current, ".git"));
+      return true;
+    } catch {
+      // Not here — keep walking up.
+    }
+    const parent = dirname(current);
+    if (parent === current) return false;
+    current = parent;
+  }
 }
 
 function errorMessage(err: unknown): string {

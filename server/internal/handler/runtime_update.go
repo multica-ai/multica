@@ -3,17 +3,18 @@ package handler
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"log/slog"
 	"net/http"
 	"sync"
 	"time"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/multica-ai/multica/server/internal/logger"
+	obsmetrics "github.com/multica-ai/multica/server/internal/metrics"
 )
 
-// ---------------------------------------------------------------------------
 // CLI update request store
-// ---------------------------------------------------------------------------
 
 type UpdateStatus string
 
@@ -203,25 +204,12 @@ func (s *InMemoryUpdateStore) Fail(_ context.Context, id string, errMsg string) 
 	return nil
 }
 
-// ---------------------------------------------------------------------------
 // Handlers
-// ---------------------------------------------------------------------------
 
 // InitiateUpdate creates a new CLI update request (protected route, called by frontend).
 func (h *Handler) InitiateUpdate(w http.ResponseWriter, r *http.Request) {
 	runtimeID := chi.URLParam(r, "runtimeId")
-	runtimeUUID, ok := parseUUIDOrBadRequest(w, runtimeID, "runtime_id")
-	if !ok {
-		return
-	}
-
-	rt, err := h.Queries.GetAgentRuntime(r.Context(), runtimeUUID)
-	if err != nil {
-		writeError(w, http.StatusNotFound, "runtime not found")
-		return
-	}
-
-	member, ok := h.requireWorkspaceMember(w, r, uuidToString(rt.WorkspaceID), "runtime not found")
+	rt, member, ok := h.requireRuntimeReadAccess(w, r, obsmetrics.RuntimeLookupSourceRuntimeAPI, runtimeID)
 	if !ok {
 		return
 	}
@@ -249,7 +237,19 @@ func (h *Handler) InitiateUpdate(w http.ResponseWriter, r *http.Request) {
 		uuidToString(member.UserID),
 	)
 	if err != nil {
-		writeError(w, http.StatusConflict, err.Error())
+		// Only the in-progress rejection is a conflict the caller can act on.
+		// Every other Create failure is infrastructure — the Redis store wraps
+		// connection failures as "reserve active update: ..." / "persist update
+		// request: ..." — and echoing it back would both leak internals and
+		// label an outage as a user-fixable conflict. That was survivable while
+		// the CLI hid 409 bodies; it no longer is, now that they are shown by
+		// default.
+		if errors.Is(err, errUpdateInProgress) {
+			writeError(w, http.StatusConflict, err.Error())
+			return
+		}
+		slog.Error("UpdateStore Create failed", "error", err, "runtime_id", uuidToString(rt.ID))
+		writeError(w, http.StatusInternalServerError, "failed to start the update")
 		return
 	}
 
@@ -259,17 +259,7 @@ func (h *Handler) InitiateUpdate(w http.ResponseWriter, r *http.Request) {
 // GetUpdate returns the status of an update request (protected route, called by frontend).
 func (h *Handler) GetUpdate(w http.ResponseWriter, r *http.Request) {
 	runtimeID := chi.URLParam(r, "runtimeId")
-	runtimeUUID, ok := parseUUIDOrBadRequest(w, runtimeID, "runtime_id")
-	if !ok {
-		return
-	}
-
-	rt, err := h.Queries.GetAgentRuntime(r.Context(), runtimeUUID)
-	if err != nil {
-		writeError(w, http.StatusNotFound, "runtime not found")
-		return
-	}
-	member, ok := h.requireWorkspaceMember(w, r, uuidToString(rt.WorkspaceID), "runtime not found")
+	rt, member, ok := h.requireRuntimeReadAccess(w, r, obsmetrics.RuntimeLookupSourceRuntimeUpdatePoll, runtimeID)
 	if !ok {
 		return
 	}
@@ -277,7 +267,8 @@ func (h *Handler) GetUpdate(w http.ResponseWriter, r *http.Request) {
 
 	update, err := h.UpdateStore.Get(r.Context(), updateID)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "failed to load update: "+err.Error())
+		slog.Warn("load update failed", append(logger.RequestAttrs(r), "error", err)...)
+		writeError(w, http.StatusInternalServerError, "failed to load update")
 		return
 	}
 	if update == nil || update.RuntimeID != uuidToString(rt.ID) {
@@ -308,7 +299,8 @@ func (h *Handler) ReportUpdateResult(w http.ResponseWriter, r *http.Request) {
 
 	existing, err := h.UpdateStore.Get(r.Context(), updateID)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "failed to load update: "+err.Error())
+		slog.Warn("load update failed", append(logger.RequestAttrs(r), "error", err)...)
+		writeError(w, http.StatusInternalServerError, "failed to load update")
 		return
 	}
 	if existing == nil || existing.RuntimeID != runtimeID {

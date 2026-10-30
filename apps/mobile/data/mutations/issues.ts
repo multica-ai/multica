@@ -15,21 +15,41 @@
  */
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import type {
-  AgentTask,
   CreateIssueRequest,
   Issue,
   IssueReaction,
+  IssueStatus,
   Label,
   Reaction,
   TimelineEntry,
   UpdateIssueRequest,
 } from "@multica/core/types";
+import type { AppConfigResponse } from "@multica/core/api/schemas";
+import {
+  applyCommentDeletion,
+  removeCommentSubtree,
+} from "@multica/core/issues/comment-deletion";
 import { api } from "@/data/api";
+import { isBuiltInIssueStatus, statusCategoryOfKey } from "@/lib/issue-status";
+import { appConfigOptions } from "@/data/queries/billing";
 import { issueKeys } from "@/data/queries/issues";
 import { inboxKeys } from "@/data/queries/inbox";
 import { useAuthStore } from "@/data/auth-store";
 import { useWorkspaceStore } from "@/data/workspace-store";
 import { useFailedCommentsStore } from "@/data/stores/failed-comments-store";
+import {
+  commentContentFromTimeline,
+  shouldAcceptServerRevision,
+} from "@/data/revision";
+import {
+  advanceCommentRevision,
+  invalidateIssueOwnerProjections,
+  onIssueAuxiliaryRevision,
+  reconcileIssueFullSnapshotRevision,
+  commentToTimelineEntry,
+  patchIssueLabels,
+  replaceCommentTimelineEntry,
+} from "@/data/realtime/issue-ws-updaters";
 
 export type ToggleCommentReactionVars = {
   commentId: string;
@@ -116,7 +136,10 @@ export function useCreateComment(issueId: string) {
     // to keep its optimistic entry so the inline retry UI has something to
     // render against. The success refetch replaces the synthetic id with
     // the server-issued one (same ASC bottom position).
-    onSuccess: () => {
+    onSuccess: (comment) => {
+      if (wsId) {
+        onIssueAuxiliaryRevision(qc, wsId, issueId, comment.issue_revision);
+      }
       qc.invalidateQueries({
         queryKey: issueKeys.timeline(wsId, issueId),
       });
@@ -208,6 +231,17 @@ export function useToggleCommentReaction(issueId: string) {
         qc.setQueryData(ctx.key, ctx.prev);
       }
     },
+    onSuccess: (reaction, vars) => {
+      if (reaction && wsId) {
+        advanceCommentRevision(
+          qc,
+          wsId,
+          issueId,
+          vars.commentId,
+          reaction.comment_revision,
+        );
+      }
+    },
     onSettled: () => {
       qc.invalidateQueries({ queryKey: issueKeys.timeline(wsId, issueId) });
     },
@@ -235,7 +269,17 @@ export function useEditComment(issueId: string) {
       commentId: string;
       content: string;
       attachmentIds?: string[];
-    }) => api.updateComment(commentId, content, attachmentIds),
+    }) => {
+      const timeline = qc.getQueryData<TimelineEntry[]>(
+        issueKeys.timeline(wsId, issueId),
+      );
+      return api.updateComment(
+        commentId,
+        content,
+        attachmentIds,
+        commentContentFromTimeline(timeline, commentId),
+      );
+    },
     onMutate: async ({ commentId, content }) => {
       const key = issueKeys.timeline(wsId, issueId);
       await qc.cancelQueries({ queryKey: key });
@@ -258,6 +302,16 @@ export function useEditComment(issueId: string) {
         qc.setQueryData(ctx.key, ctx.prev);
       }
     },
+    onSuccess: (comment) => {
+      if (wsId) {
+        replaceCommentTimelineEntry(
+          qc,
+          wsId,
+          issueId,
+          commentToTimelineEntry(comment),
+        );
+      }
+    },
     onSettled: () => {
       qc.invalidateQueries({ queryKey: issueKeys.timeline(wsId, issueId) });
     },
@@ -265,36 +319,52 @@ export function useEditComment(issueId: string) {
 }
 
 /**
- * Delete a comment. Strips the matching TimelineEntry (and any replies
- * with parent_id === commentId) from the timeline cache optimistically.
- * Backend cascades reply deletion server-side; we mirror the cascade
- * locally so the optimistic patch leaves no orphans on screen.
+ * Whether the server keeps a deleted comment's replies (#8296). Older servers
+ * omit `comment_delete_keep_replies_supported` and delete the replies too, so
+ * anything but an explicit `true` — including a config that has not loaded —
+ * fails closed. Shared by the confirm copy and `useDeleteComment`.
+ */
+export function commentDeleteKeepsReplies(
+  config: AppConfigResponse | undefined,
+): boolean {
+  return config?.comment_delete_keep_replies_supported === true;
+}
+
+/**
+ * Delete a comment. On a server that declares
+ * `comment_delete_keep_replies_supported`, only that comment goes (#8296): one
+ * with replies stays as a tombstone so they keep their parent. Older servers
+ * delete the replies too. Not optimistic — which outcome applies depends on
+ * replies only the server sees for certain. Once it confirms, mirror its
+ * outcome with the same pure helpers web uses (`useDeleteComment` in
+ * packages/core/issues/mutations.ts); realtime events and the settle refetch
+ * reconcile the rest.
  */
 export function useDeleteComment(issueId: string) {
   const qc = useQueryClient();
   const wsId = useWorkspaceStore((s) => s.currentWorkspaceId);
 
   return useMutation({
-    mutationFn: (commentId: string) => api.deleteComment(commentId),
-    onMutate: async (commentId) => {
-      const key = issueKeys.timeline(wsId, issueId);
-      await qc.cancelQueries({ queryKey: key });
-      const prev = qc.getQueryData<TimelineEntry[]>(key);
-      qc.setQueryData<TimelineEntry[]>(key, (old) =>
-        old?.filter(
-          (entry) =>
-            !(
-              entry.type === "comment" &&
-              (entry.id === commentId || entry.parent_id === commentId)
-            ),
-        ),
+    // The capability is read when the delete runs, from the same config cache
+    // the confirm copy reads, so the route matches what the user was told.
+    mutationFn: async (commentId: string) => {
+      const keepReplies = commentDeleteKeepsReplies(
+        qc.getQueryData(appConfigOptions().queryKey),
       );
-      return { prev, key };
+      await api.deleteComment(commentId, { keepReplies });
+      return keepReplies;
     },
-    onError: (_err, _vars, ctx) => {
-      if (ctx?.prev !== undefined && ctx.key) {
-        qc.setQueryData(ctx.key, ctx.prev);
-      }
+    onSuccess: (keptReplies, commentId) => {
+      qc.setQueryData<TimelineEntry[]>(issueKeys.timeline(wsId, issueId), (old) => {
+        if (!old) return old;
+        return keptReplies
+          ? applyCommentDeletion(old, commentId, new Date().toISOString())
+          : removeCommentSubtree(old, commentId);
+      });
+      // The endpoint remains 204 for compatibility, so the local caller has
+      // no body carrying issue_revision. The realtime event narrows this
+      // with its revision when connected; this is the no-WS safety net.
+      if (wsId) invalidateIssueOwnerProjections(qc, wsId, issueId);
     },
     onSettled: () => {
       qc.invalidateQueries({ queryKey: issueKeys.timeline(wsId, issueId) });
@@ -343,6 +413,16 @@ export function useResolveComment(issueId: string) {
     onError: (_err, _vars, ctx) => {
       if (ctx?.prev !== undefined && ctx.key) {
         qc.setQueryData(ctx.key, ctx.prev);
+      }
+    },
+    onSuccess: (comment) => {
+      if (wsId) {
+        replaceCommentTimelineEntry(
+          qc,
+          wsId,
+          issueId,
+          commentToTimelineEntry(comment),
+        );
       }
     },
     onSettled: () => {
@@ -402,6 +482,17 @@ export function useToggleIssueReaction(issueId: string) {
         qc.setQueryData(ctx.key, ctx.prev);
       }
     },
+    onSuccess: (reaction) => {
+      if (reaction && wsId) {
+        onIssueAuxiliaryRevision(
+          qc,
+          wsId,
+          issueId,
+          reaction.issue_revision,
+          "issue_reactions",
+        );
+      }
+    },
     onSettled: () => {
       qc.invalidateQueries({ queryKey: issueKeys.detail(wsId, issueId) });
     },
@@ -409,8 +500,29 @@ export function useToggleIssueReaction(issueId: string) {
 }
 
 /**
+ * Keeps `status_category` consistent with an optimistic `status` write
+ * (MUL-6243).
+ *
+ * A cached issue looks like `{status: "todo", status_category: "unstarted"}` while a
+ * patch carries only `{status: "human_review"}`, so a bare spread would leave
+ * the STALE category on an issue that no longer behaves that way — and category
+ * is what every list groups on. A custom key this response cannot resolve gets
+ * `undefined` rather than the inherited value: unresolvable is honest, stale is
+ * not, and `issueColumnCategory` falls back from there. The server's full
+ * response lands moments later and settles it either way.
+ */
+function statusCategoryPatch(status: IssueStatus | undefined): Partial<Issue> {
+  if (status === undefined) return {};
+  return {
+    status_category: isBuiltInIssueStatus(status) ? statusCategoryOfKey(status) : undefined,
+  };
+}
+
+/**
  * Update an issue's editable fields (status / priority / assignee / due_date /
- * project_id / etc). Optimistic merge into the detail cache; settle invalidates
+ * project_id / etc). Predictable fields merge optimistically into the detail
+ * cache; description stays authoritative because the server resolves it
+ * against description_base and hidden channel-media markers. Settle invalidates
  * the my-issues list so a status change re-buckets the SectionList in
  * (tabs)/my-issues.tsx automatically.
  *
@@ -430,7 +542,18 @@ export function useUpdateIssue(issueId: string) {
       await qc.cancelQueries({ queryKey: key });
       const prev = qc.getQueryData<Issue>(key);
       if (prev) {
-        qc.setQueryData<Issue>(key, { ...prev, ...patch });
+        const {
+          description: _description,
+          description_base: _descriptionBase,
+          title_base: _titleBase,
+          expected_revision: _expectedRevision,
+          ...optimisticPatch
+        } = patch;
+        qc.setQueryData<Issue>(key, {
+          ...prev,
+          ...optimisticPatch,
+          ...statusCategoryPatch(optimisticPatch.status),
+        });
       }
       return { prev, key };
     },
@@ -440,7 +563,19 @@ export function useUpdateIssue(issueId: string) {
       }
     },
     onSuccess: (server) => {
-      qc.setQueryData<Issue>(issueKeys.detail(wsId, issueId), server);
+      qc.setQueryData<Issue>(issueKeys.detail(wsId, issueId), (current) =>
+        !current || shouldAcceptServerRevision(current.revision, server.revision)
+          ? server
+          : current,
+      );
+      if (wsId) {
+        reconcileIssueFullSnapshotRevision(
+          qc,
+          wsId,
+          issueId,
+          server.revision,
+        );
+      }
     },
     onSettled: () => {
       qc.invalidateQueries({ queryKey: issueKeys.detail(wsId, issueId) });
@@ -487,10 +622,8 @@ export function useAttachLabel(issueId: string) {
       }
     },
     onSuccess: (server) => {
-      const key = issueKeys.detail(wsId, issueId);
-      const current = qc.getQueryData<Issue>(key);
-      if (current) {
-        qc.setQueryData<Issue>(key, { ...current, labels: server.labels });
+      if (wsId) {
+        patchIssueLabels(qc, wsId, issueId, server.labels, server.issue_revision);
       }
     },
     onSettled: () => {
@@ -527,10 +660,8 @@ export function useDetachLabel(issueId: string) {
       }
     },
     onSuccess: (server) => {
-      const key = issueKeys.detail(wsId, issueId);
-      const current = qc.getQueryData<Issue>(key);
-      if (current) {
-        qc.setQueryData<Issue>(key, { ...current, labels: server.labels });
+      if (wsId) {
+        patchIssueLabels(qc, wsId, issueId, server.labels, server.issue_revision);
       }
     },
     onSettled: () => {
@@ -563,13 +694,6 @@ export function useCreateIssue() {
   });
 }
 
-/**
- * Cancel an in-flight agent task. Optimistically removes the task from the
- * active-tasks cache so the RunRow disappears immediately; the WS
- * `task:cancelled` event then invalidates both task queries (see
- * `use-issue-realtime.ts`) so the task reappears in the past list with the
- * authoritative server state. On error we restore the snapshot.
- */
 /**
  * Delete an issue. Mirrors `useDeleteProject` (mutations/projects.ts:103-128)
  * but the cache surface is wider:
@@ -640,21 +764,15 @@ export function useCancelTask(issueId: string) {
 
   return useMutation({
     mutationFn: (taskId: string) => api.cancelTaskById(taskId),
-    onMutate: async (taskId) => {
-      const activeKey = issueKeys.activeTasks(wsId, issueId);
-      await qc.cancelQueries({ queryKey: activeKey });
-      const prev = qc.getQueryData<AgentTask[]>(activeKey);
-      qc.setQueryData<AgentTask[]>(activeKey, (old) =>
-        old ? old.filter((t) => t.id !== taskId) : old,
-      );
-      return { prev, activeKey };
-    },
-    onError: (_err, _taskId, ctx) => {
-      if (ctx?.prev) qc.setQueryData(ctx.activeKey, ctx.prev);
-    },
-    onSettled: () => {
-      qc.invalidateQueries({ queryKey: issueKeys.activeTasks(wsId, issueId) });
-      qc.invalidateQueries({ queryKey: issueKeys.tasks(wsId, issueId) });
+    // Pending mutation options can change when the workspace changes.
+    onMutate: () => ({
+      activeKey: issueKeys.activeTasks(wsId, issueId),
+      tasksKey: issueKeys.tasks(wsId, issueId),
+    }),
+    onSettled: (_data, _err, _taskId, context) => {
+      if (!context) return;
+      qc.invalidateQueries({ queryKey: context.activeKey });
+      qc.invalidateQueries({ queryKey: context.tasksKey });
     },
   });
 }

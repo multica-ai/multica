@@ -93,9 +93,12 @@ func TestSlackThreadIsolation(t *testing.T) {
 }
 
 func TestNewSlackResolverSet(t *testing.T) {
-	set := NewSlackResolverSet(nil, nil, nil, nil)
+	set := NewSlackResolverSet(nil, nil, nil, nil, nil)
 	if set.Installation == nil || set.Identity == nil || set.Dedup == nil || set.Session == nil || set.Audit == nil {
 		t.Error("resolver set must populate all required resolvers")
+	}
+	if set.Media != nil {
+		t.Error("a nil media arg must leave Media nil")
 	}
 	if set.OriginType != "slack_chat" {
 		t.Errorf("OriginType = %q, want slack_chat", set.OriginType)
@@ -108,7 +111,7 @@ func TestNewSlackResolverSet(t *testing.T) {
 	}
 
 	// A real replier + typing manager thread through.
-	set = NewSlackResolverSet(nil, nil, NewOutboundReplier(OutboundReplierConfig{}), NewTypingIndicatorManager(nil, nil, nil))
+	set = NewSlackResolverSet(nil, nil, NewOutboundReplier(OutboundReplierConfig{}), NewTypingIndicatorManager(nil, nil, nil), NewMediaResolver(nil, nil, nil, nil))
 	if set.Replier == nil {
 		t.Error("a non-nil replier must populate ResolverSet.Replier")
 	}

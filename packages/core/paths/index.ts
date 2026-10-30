@@ -1,4 +1,8 @@
-export { paths, isGlobalPath } from "./paths";
+export {
+  paths,
+  isGlobalPath,
+  AGENT_FOCUS_CONVERSATION_STARTERS,
+} from "./paths";
 export type { WorkspacePaths } from "./paths";
 export { RESERVED_SLUGS, isReservedSlug } from "./reserved-slugs";
 export {
@@ -37,3 +41,5 @@ export {
   useCurrentWorkspace,
   useWorkspacePaths,
 } from "./hooks";
+
+export { isKnownWorkspacePath, workspaceSlugForPath } from "./workspace-slugs";

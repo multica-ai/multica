@@ -1,0 +1,97 @@
+// @vitest-environment node
+import { describe, expect, it } from "vitest";
+
+import { blockedReasonLabel, blockedShortReasonLabel } from "./blocked-trigger-copy";
+import en from "../locales/en/issues.json";
+
+// A blocked mention's copy has to name the fix the user actually has. An unbound
+// agent (agent_runtime_required) and an agent whose machine is offline
+// (runtime_offline) need opposite actions — bind a runtime vs. bring the machine
+// back — so they must never collapse onto the same label. Before MUL-5559 the
+// server reported unbound agents as runtime_offline, which told people to
+// reconnect a computer that no longer existed.
+type Leaf = string | Record<string, unknown>;
+
+// Minimal stand-in for the i18n `t` used by the copy helpers: resolves the
+// selector against the real en bundle so the test fails if a key is missing.
+const t = ((selector: (bundle: unknown) => Leaf) => {
+  const value = selector(en as unknown);
+  if (typeof value !== "string") {
+    throw new Error("selector did not resolve to a string");
+  }
+  return value;
+}) as Parameters<typeof blockedReasonLabel>[1];
+
+describe("blocked trigger copy", () => {
+  it("distinguishes an unbound agent from an offline runtime", () => {
+    const unbound = blockedReasonLabel("agent_runtime_required", t);
+    const offline = blockedReasonLabel("runtime_offline", t);
+
+    expect(unbound).not.toBe(offline);
+    expect(unbound).toBe(en.comment.trigger_blocked_agent_runtime_required);
+    expect(offline).toBe(en.comment.trigger_blocked_runtime_offline);
+    // The unbound label must not tell the user their runtime is offline.
+    expect(unbound.toLowerCase()).not.toContain("offline");
+  });
+
+  it("distinguishes them in the short chip label too", () => {
+    const unbound = blockedShortReasonLabel("agent_runtime_required", t);
+    const offline = blockedShortReasonLabel("runtime_offline", t);
+
+    expect(unbound).not.toBe(offline);
+    expect(unbound).toBe(en.comment.trigger_blocked_short_agent_runtime_required);
+  });
+
+  // MUL-6164 adds the third member of the family: the machine is reachable and
+  // its CLI cannot run there. "Offline" copy would send the user to reconnect
+  // something that is already connected.
+  it("distinguishes an unusable runtime from an offline one", () => {
+    const unusable = blockedReasonLabel("runtime_unusable", t);
+    const offline = blockedReasonLabel("runtime_offline", t);
+
+    expect(unusable).not.toBe(offline);
+    expect(unusable).toBe(en.comment.trigger_blocked_runtime_unusable);
+    expect(unusable.toLowerCase()).not.toContain("offline");
+    expect(blockedShortReasonLabel("runtime_unusable", t)).toBe(
+      en.comment.trigger_blocked_short_runtime_unusable,
+    );
+  });
+
+  // PUCK-89: the agent is bound but its owner cannot
+  // execute it on the selected private runtime. Retrying never fixes this, so
+  // the copy must name the two real fixes and must not read as a transient
+  // failure.
+  it("gives runtime_access_denied dedicated actionable copy", () => {
+    const denied = blockedReasonLabel("runtime_access_denied", t);
+
+    expect(denied).toBe(en.comment.trigger_blocked_runtime_access_denied);
+    expect(denied.toLowerCase()).toContain("public");
+    expect(denied.toLowerCase()).toContain("rebind");
+    expect(denied.toLowerCase()).not.toContain("try again");
+    expect(blockedShortReasonLabel("runtime_access_denied", t)).toBe(
+      en.comment.trigger_blocked_short_runtime_access_denied,
+    );
+  });
+
+  // A missing runtime profile is not a broken CLI: the CLI runs, and the
+  // reinstall the unusable copy asks for fixes nothing. Sharing one label was
+  // what told DSH users to reinstall a CLI that was never the problem.
+  it("distinguishes a missing runtime profile from an unusable CLI", () => {
+    const missingProfile = blockedReasonLabel("runtime_profile_missing", t);
+
+    expect(missingProfile).toBe(en.comment.trigger_blocked_runtime_profile_missing);
+    expect(missingProfile).not.toBe(blockedReasonLabel("runtime_unusable", t));
+    expect(missingProfile).not.toBe(en.comment.trigger_blocked_generic);
+    expect(missingProfile.toLowerCase()).not.toContain("reinstall");
+    expect(blockedShortReasonLabel("runtime_profile_missing", t)).toBe(
+      en.comment.trigger_blocked_short_runtime_profile_missing,
+    );
+  });
+
+  it("degrades an unknown code to the generic label", () => {
+    expect(blockedReasonLabel("some_future_code", t)).toBe(en.comment.trigger_blocked_generic);
+    expect(blockedShortReasonLabel("some_future_code", t)).toBe(
+      en.comment.trigger_blocked_short_generic,
+    );
+  });
+});

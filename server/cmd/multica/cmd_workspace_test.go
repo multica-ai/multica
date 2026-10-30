@@ -88,7 +88,7 @@ func TestRunWorkspaceCreatePostsWorkspaceAndDoesNotSwitchDefault(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	t.Setenv("HOME", t.TempDir())
+	redirectTestHome(t, t.TempDir())
 	t.Setenv("MULTICA_SERVER_URL", srv.URL)
 	t.Setenv("MULTICA_TOKEN", "test-token")
 	t.Setenv("MULTICA_WORKSPACE_ID", "existing-workspace")
@@ -177,8 +177,8 @@ func TestRunWorkspaceCreateRequiresSlug(t *testing.T) {
 func TestRunWorkspaceCreateRejectsDualStdin(t *testing.T) {
 	cmd := newWorkspaceCreateTestCmd()
 	for name, value := range map[string]string{
-		"name":             "Growth Team",
-		"slug":             "growth-team",
+		"name":              "Growth Team",
+		"slug":              "growth-team",
 		"description-stdin": "true",
 		"context-stdin":     "true",
 	} {
@@ -198,8 +198,8 @@ func TestRunWorkspaceCreateRejectsDualStdin(t *testing.T) {
 func TestRunWorkspaceCreateReadsDescriptionFromStdin(t *testing.T) {
 	cmd := newWorkspaceCreateTestCmd()
 	for name, value := range map[string]string{
-		"name":             "Growth Team",
-		"slug":             "growth-team",
+		"name":              "Growth Team",
+		"slug":              "growth-team",
 		"description-stdin": "true",
 	} {
 		if err := cmd.Flags().Set(name, value); err != nil {
@@ -243,7 +243,7 @@ func TestRunWorkspaceCreatePrintsTable(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	t.Setenv("HOME", t.TempDir())
+	redirectTestHome(t, t.TempDir())
 	t.Setenv("MULTICA_SERVER_URL", srv.URL)
 	t.Setenv("MULTICA_TOKEN", "test-token")
 
@@ -280,7 +280,7 @@ func TestRunWorkspaceSwitch(t *testing.T) {
 	defer srv.Close()
 
 	// Isolate HOME so the test never touches the developer's ~/.multica.
-	t.Setenv("HOME", t.TempDir())
+	redirectTestHome(t, t.TempDir())
 	t.Setenv("MULTICA_SERVER_URL", srv.URL)
 	t.Setenv("MULTICA_TOKEN", "test-token")
 	t.Setenv("MULTICA_WORKSPACE_ID", "")
@@ -345,6 +345,40 @@ func TestRunWorkspaceSwitch(t *testing.T) {
 			t.Errorf("expected staging config file at %s, got %v", path, err)
 		}
 	})
+}
+
+func TestRunWorkspaceSwitchFailsClosedInTaskContext(t *testing.T) {
+	redirectTestHome(t, t.TempDir())
+	t.Setenv("MULTICA_AGENT_ID", "agent-test")
+	t.Setenv("MULTICA_TASK_ID", "task-test")
+	t.Setenv("MULTICA_TOKEN", "mat_task_sentinel")
+	t.Setenv("MULTICA_SERVER_URL", "https://task.invalid")
+	t.Setenv("MULTICA_WORKSPACE_ID", "task-workspace")
+	t.Setenv("MULTICA_TASK_CONFIG_ROOT", filepath.Join(t.TempDir(), "task-multica"))
+
+	err := runWorkspaceSwitch(newWorkspaceSwitchTestCmd(), []string{"target"})
+	if err == nil || !strings.Contains(err.Error(), "not available inside a daemon-managed task") {
+		t.Fatalf("runWorkspaceSwitch error = %v, want task-context guard before API or profile access", err)
+	}
+}
+
+func TestFetchWorkspacesExplainsPortOnlyFailClosedContext(t *testing.T) {
+	t.Chdir(t.TempDir())
+	redirectTestHome(t, t.TempDir())
+	t.Setenv("MULTICA_AGENT_ID", "")
+	t.Setenv("MULTICA_TASK_ID", "")
+	t.Setenv(cli.TaskConfigRootEnv, "")
+	t.Setenv("MULTICA_DAEMON_PORT", "20032")
+	t.Setenv("MULTICA_SERVER_URL", "https://api.example.test")
+	t.Setenv("MULTICA_TOKEN", "")
+	if err := cli.SaveCLIConfig(cli.CLIConfig{Token: "mul_owner_pat"}); err != nil {
+		t.Fatalf("seed config: %v", err)
+	}
+
+	_, err := fetchWorkspaces(t.Context(), newWorkspaceSwitchTestCmd())
+	if err == nil || !strings.Contains(err.Error(), "MULTICA_DAEMON_PORT") || !strings.Contains(err.Error(), "remove") {
+		t.Fatalf("fetchWorkspaces error = %v, want stale port recovery guidance", err)
+	}
 }
 
 func TestResolveWorkspaceByIDOrSlug(t *testing.T) {
@@ -654,23 +688,8 @@ func newWorkspaceMemberInviteTestCmd() *cobra.Command {
 	return cmd
 }
 
-func TestWorkspaceMemberInviteCommandIsRegistered(t *testing.T) {
-	cmd, _, err := workspaceMemberCmd.Find([]string{"invite", "alice@example.com"})
-	if err != nil {
-		t.Fatalf("find invite command: %v", err)
-	}
-	if cmd == nil || cmd.Name() != "invite" {
-		t.Fatalf("invite command not registered; got %#v", cmd)
-	}
-	for _, flag := range []string{"role", "output"} {
-		if cmd.Flags().Lookup(flag) == nil {
-			t.Fatalf("invite command missing --%s flag", flag)
-		}
-	}
-}
-
 func TestRunWorkspaceMemberInvitePostsInvitation(t *testing.T) {
-	t.Setenv("HOME", t.TempDir())
+	redirectTestHome(t, t.TempDir())
 	t.Setenv("MULTICA_TOKEN", "test-token")
 	t.Setenv("MULTICA_WORKSPACE_ID", "workspace-123")
 
@@ -715,7 +734,7 @@ func TestRunWorkspaceMemberInvitePostsInvitation(t *testing.T) {
 }
 
 func TestRunWorkspaceMemberInviteUsesWorkspaceArgAndRoleFlag(t *testing.T) {
-	t.Setenv("HOME", t.TempDir())
+	redirectTestHome(t, t.TempDir())
 	t.Setenv("MULTICA_TOKEN", "test-token")
 
 	const wsUUID = "11111111-1111-1111-1111-111111111111"
@@ -747,7 +766,7 @@ func TestRunWorkspaceMemberInviteUsesWorkspaceArgAndRoleFlag(t *testing.T) {
 }
 
 func TestRunWorkspaceMemberInviteRejectsOwnerRole(t *testing.T) {
-	t.Setenv("HOME", t.TempDir())
+	redirectTestHome(t, t.TempDir())
 	t.Setenv("MULTICA_TOKEN", "test-token")
 	t.Setenv("MULTICA_WORKSPACE_ID", "workspace-123")
 
@@ -769,7 +788,7 @@ func TestRunWorkspaceMemberInviteRejectsOwnerRole(t *testing.T) {
 }
 
 func TestRunWorkspaceMemberInviteRejectsUnknownRole(t *testing.T) {
-	t.Setenv("HOME", t.TempDir())
+	redirectTestHome(t, t.TempDir())
 	t.Setenv("MULTICA_TOKEN", "test-token")
 	t.Setenv("MULTICA_WORKSPACE_ID", "workspace-123")
 

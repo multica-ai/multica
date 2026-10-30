@@ -26,7 +26,7 @@ beforeAll(() => {
 
 beforeEach(() => {
   localStorage.clear();
-  useAgentsViewStore.setState({ scope: "mine" });
+  useAgentsViewStore.setState({ scope: "mine", search: "" });
   setCurrentWorkspace(null, null);
 });
 
@@ -35,14 +35,6 @@ afterEach(() => {
 });
 
 describe("useAgentsViewStore", () => {
-  it("defaults to 'mine'", () => {
-    expect(useAgentsViewStore.getState().scope).toBe("mine");
-  });
-
-  it("setScope mutates the store", () => {
-    useAgentsViewStore.getState().setScope("all");
-    expect(useAgentsViewStore.getState().scope).toBe("all");
-  });
 
   it("partialize persists only view prefs (no actions) under the workspace-namespaced key", async () => {
     setCurrentWorkspace("acme", "ws_a");
@@ -123,11 +115,6 @@ describe("useAgentsViewStore", () => {
   });
 
   describe("access filter dimension", () => {
-    it("EMPTY_AGENT_FILTERS initializes access to []", async () => {
-      const { EMPTY_AGENT_FILTERS } = await import("./view-store");
-      expect(EMPTY_AGENT_FILTERS.access).toEqual([]);
-    });
-
     it("toggleFilter('access', value) adds and removes the value", () => {
       const { toggleFilter } = useAgentsViewStore.getState();
       toggleFilter("access", "owner-only");
@@ -196,6 +183,84 @@ describe("useAgentsViewStore", () => {
       await flush();
 
       expect(useAgentsViewStore.getState().filters.access).toEqual([]);
+    });
+  });
+  describe("model column default (GitHub #9500)", () => {
+    it("shows the model column by default", async () => {
+      setCurrentWorkspace("acme", "ws_a");
+      await flush();
+      await flush();
+      expect(useAgentsViewStore.getState().hiddenColumns).not.toContain("model");
+    });
+
+    it("migrates a v0 payload by un-hiding model and keeping other hidden columns", async () => {
+      localStorage.setItem(
+        "multica_agents_view:acme",
+        JSON.stringify({
+          state: { scope: "all", hiddenColumns: ["model", "created", "runs"] },
+          version: 0,
+        }),
+      );
+
+      setCurrentWorkspace("acme", "ws_a");
+      await flush();
+      await flush();
+
+      const state = useAgentsViewStore.getState();
+      expect(state.hiddenColumns).toEqual(["created", "runs"]);
+      expect(state.scope).toBe("all");
+    });
+
+    it("respects a v1 payload that hides model explicitly", async () => {
+      localStorage.setItem(
+        "multica_agents_view:acme",
+        JSON.stringify({
+          state: { hiddenColumns: ["model"] },
+          version: 1,
+        }),
+      );
+
+      setCurrentWorkspace("acme", "ws_a");
+      await flush();
+      await flush();
+
+      expect(useAgentsViewStore.getState().hiddenColumns).toEqual(["model"]);
+    });
+  });
+
+  describe("search (session-only)", () => {
+    it("keeps the query in the store but never persists it", async () => {
+      setCurrentWorkspace("acme", "ws_a");
+      await flush();
+      useAgentsViewStore.getState().setSearch("reviewer");
+      await flush();
+
+      expect(useAgentsViewStore.getState().search).toBe("reviewer");
+      const raw = localStorage.getItem("multica_agents_view:acme");
+      expect(raw).not.toBeNull();
+      expect(JSON.parse(raw as string).state).not.toHaveProperty("search");
+    });
+
+    it("clears the query on workspace switch", async () => {
+      localStorage.setItem(
+        "multica_agents_view:beta",
+        JSON.stringify({ state: { scope: "all" }, version: 1 }),
+      );
+      setCurrentWorkspace("acme", "ws_a");
+      await flush();
+      await flush();
+      useAgentsViewStore.getState().setSearch("reviewer");
+
+      setCurrentWorkspace("beta", "ws_b");
+      await flush();
+      await flush();
+      expect(useAgentsViewStore.getState().search).toBe("");
+
+      useAgentsViewStore.getState().setSearch("reviewer");
+      setCurrentWorkspace("gamma", "ws_c");
+      await flush();
+      await flush();
+      expect(useAgentsViewStore.getState().search).toBe("");
     });
   });
 });

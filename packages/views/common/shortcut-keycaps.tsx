@@ -12,11 +12,13 @@ import {
   Delete,
   Option,
   Space,
-  type LucideIcon,
-} from "lucide-react";
+  type IconComponent,
+} from "@multica/ui/icons";
 import {
   formatShortcut,
   getShortcutPlatform,
+  useShortcut,
+  type ShortcutActionId,
   type ShortcutChord,
   type ShortcutPlatform,
 } from "@multica/core/shortcuts";
@@ -27,7 +29,7 @@ type ShortcutToken = {
   id: string;
   label: string;
   text?: string;
-  icon?: LucideIcon;
+  icon?: IconComponent;
 };
 
 const KEY_TOKENS: Record<string, Omit<ShortcutToken, "id">> = {
@@ -113,8 +115,8 @@ export function ShortcutKeycaps({
           className={cn(
             "border border-border/70 bg-muted/80 shadow-[0_1px_0_0_color-mix(in_oklab,var(--border)_70%,transparent)]",
             size === "md"
-              ? "h-7 min-w-7 rounded-md px-1.5 text-xs [&_svg]:size-3.5"
-              : "h-5 min-w-5 px-1 text-[10px] [&_svg]:size-3",
+              ? "h-7 min-w-7 rounded-md px-1.5 text-caption [&_svg]:size-3.5"
+              : "h-5 min-w-5 px-1 text-micro [&_svg]:size-3",
             keyClassName,
           )}
         >
@@ -123,4 +125,13 @@ export function ShortcutKeycaps({
       ))}
     </span>
   );
+}
+
+/**
+ * Decorative keycaps for a registered action's current binding, for a tooltip
+ * whose text already names the action. Renders nothing when it is unbound.
+ */
+export function ActionShortcutKeycaps({ action }: { action: ShortcutActionId }) {
+  const shortcut = useShortcut(action);
+  return shortcut ? <ShortcutKeycaps shortcut={shortcut} decorative /> : null;
 }

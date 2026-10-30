@@ -52,7 +52,7 @@ export default async function UseCasesIndexPage() {
             <h1 className="mx-auto max-w-[880px] landing-serif text-[3rem] leading-[1.02] tracking-[-0.035em] drop-shadow-[0_10px_34px_rgba(0,0,0,0.32)] sm:text-[4rem] lg:text-[5rem]">
               {text.indexTitle}
             </h1>
-            <p className="mx-auto mt-6 max-w-[620px] text-[15px] leading-7 text-white/84 sm:text-[17px]">
+            <p className="mx-auto mt-6 max-w-[620px] text-body-lg leading-7 text-white/84 sm:text-title">
               {text.indexSubtitle}
             </p>
           </div>
@@ -85,19 +85,19 @@ export default async function UseCasesIndexPage() {
                     ) : null}
                   </div>
                   {category ? (
-                    <div className="mt-5 text-[12px] uppercase tracking-[0.14em] text-[#0a0d12]/50">
+                    <div className="mt-5 text-caption uppercase tracking-[0.14em] text-[#0a0d12]/50">
                       {category}
                     </div>
                   ) : null}
-                  <h3 className="mt-2 text-[18px] font-semibold leading-[1.35] text-[#0a0d12] sm:text-[20px]">
+                  <h3 className="mt-2 text-title font-semibold leading-[1.35] text-[#0a0d12] sm:text-title-lg">
                     {page.data.title}
                   </h3>
                   {page.data.description ? (
-                    <p className="mt-2 text-[14px] leading-[1.6] text-[#0a0d12]/60">
+                    <p className="mt-2 text-body leading-[1.6] text-[#0a0d12]/60">
                       {page.data.description}
                     </p>
                   ) : null}
-                  <span className="mt-3 text-[13px] text-[#0a0d12]/70 transition-colors group-hover:text-[#0a0d12]">
+                  <span className="mt-3 text-label text-[#0a0d12]/70 transition-colors group-hover:text-[#0a0d12]">
                     {text.cardReadMore}
                   </span>
                 </Link>

@@ -3,6 +3,7 @@ package realtime
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"log/slog"
 	"net"
 	"net/http"
@@ -21,7 +22,13 @@ import (
 
 // MembershipChecker verifies a user belongs to a workspace.
 type MembershipChecker interface {
-	IsMember(ctx context.Context, userID, workspaceID string) bool
+	IsMember(ctx context.Context, userID, workspaceID string) (bool, error)
+	Members(ctx context.Context, identities []MembershipIdentity) (map[MembershipIdentity]bool, error)
+}
+
+type MembershipIdentity struct {
+	WorkspaceID string
+	UserID      string
 }
 
 // SlugResolver translates a workspace slug to its UUID.
@@ -194,6 +201,15 @@ const (
 	writeWait  = 10 * time.Second
 	pongWait   = 60 * time.Second
 	pingPeriod = (pongWait * 9) / 10
+
+	// inboundReadLimit caps a single inbound message. Every frame a client
+	// legitimately sends is tiny — the largest is the token auth frame, well
+	// under 1 KiB — but gorilla buffers a whole message in memory before
+	// handing it over, and a fragmented message keeps the read deadline alive
+	// through interleaved pongs. Without a limit one connection can therefore
+	// grow that buffer without bound and OOM the process. Matches the daemon
+	// hub limit so both WebSocket surfaces answer this question the same way.
+	inboundReadLimit = 64 * 1024
 )
 
 var upgrader = websocket.Upgrader{
@@ -216,6 +232,14 @@ type Client struct {
 	send        chan []byte
 	userID      string
 	workspaceID string
+	writeMu     sync.Mutex // serializes application writes and the final removal notice
+	stopped     atomic.Bool
+
+	// sendMu guards sendClosed so a late inbound-response or fanout send
+	// can never write to the closed send channel. closeSend flips
+	// sendClosed under sendMu before closing send, mirroring daemonws.
+	sendMu     sync.Mutex
+	sendClosed bool
 
 	// subscriptions is guarded by hub.mu. Tracks the scopes this client is
 	// currently in. Used to clean up rooms on disconnect.
@@ -265,12 +289,19 @@ type SubscriptionCallback func(scopeType, scopeID string)
 
 // Hub manages WebSocket connections organized into scope-based rooms.
 type Hub struct {
-	rooms      map[scopeKey]map[*Client]bool
-	clients    map[*Client]bool // every connected client (used by global Broadcast and snapshots)
-	broadcast  chan []byte
-	register   chan *Client
-	unregister chan *Client
-	mu         sync.RWMutex
+	rooms                map[scopeKey]map[*Client]bool
+	clients              map[*Client]bool // every connected client (used by global Broadcast and snapshots)
+	broadcast            chan []byte
+	register             chan *Client
+	unregister           chan *Client
+	mu                   sync.RWMutex
+	membership           MembershipChecker // guarded by mu
+	writeMembership      chan membershipWriteRequest
+	writeMembershipOnce  sync.Once
+	memberRemovals       chan memberRemovalJob
+	memberRemovalOnce    sync.Once
+	memberRemovalPending atomic.Int64
+	memberRemovalDropped atomic.Int64
 
 	authorizer ScopeAuthorizer
 
@@ -282,11 +313,13 @@ type Hub struct {
 // NewHub creates a new Hub instance.
 func NewHub() *Hub {
 	return &Hub{
-		rooms:      make(map[scopeKey]map[*Client]bool),
-		clients:    make(map[*Client]bool),
-		broadcast:  make(chan []byte),
-		register:   make(chan *Client),
-		unregister: make(chan *Client),
+		rooms:           make(map[scopeKey]map[*Client]bool),
+		clients:         make(map[*Client]bool),
+		broadcast:       make(chan []byte),
+		register:        make(chan *Client),
+		unregister:      make(chan *Client),
+		writeMembership: make(chan membershipWriteRequest, maxMembershipBatch),
+		memberRemovals:  make(chan memberRemovalJob, memberRemovalQueueSize),
 	}
 }
 
@@ -312,18 +345,7 @@ func (h *Hub) Run() {
 	for {
 		select {
 		case client := <-h.register:
-			h.mu.Lock()
-			h.clients[client] = true
-			total := len(h.clients)
-			h.mu.Unlock()
-			M.ConnectsTotal.Add(1)
-			M.ActiveConnections.Add(1)
-			// Auto-subscribe to the workspace and user scopes.
-			h.subscribe(client, ScopeWorkspace, client.workspaceID)
-			if client.userID != "" {
-				h.subscribe(client, ScopeUser, client.userID)
-			}
-			slog.Info("ws client connected", "workspace_id", client.workspaceID, "user_id", client.userID, "total_clients", total)
+			h.registerClient(client)
 
 		case client := <-h.unregister:
 			h.removeClient(client)
@@ -354,7 +376,7 @@ func (h *Hub) removeClient(client *Client) {
 			}
 		}
 	}
-	close(client.send)
+	client.closeSend()
 	cb := h.onLastSubscriber
 	total := len(h.clients)
 	h.mu.Unlock()
@@ -489,6 +511,15 @@ func (h *Hub) BroadcastToScopeDedup(scopeType, scopeID string, message []byte, e
 	if scopeType == "" || scopeID == "" {
 		return
 	}
+	// Both the local fast path and every relay backend converge here. Removal
+	// invalidations reach peers immediately; target connections are revalidated.
+	if scopeType == ScopeWorkspace && h.queueMemberRemoval(scopeID, message, eventID) {
+		return
+	}
+	h.broadcastToScope(scopeType, scopeID, message, eventID, "")
+}
+
+func (h *Hub) broadcastToScope(scopeType, scopeID string, message []byte, eventID, excludeUserID string) {
 	key := sk(scopeType, scopeID)
 
 	h.mu.RLock()
@@ -496,13 +527,15 @@ func (h *Hub) BroadcastToScopeDedup(scopeType, scopeID string, message []byte, e
 	var slow []*Client
 	var sent int64
 	for client := range clients {
+		if excludeUserID != "" && client.userID == excludeUserID {
+			continue
+		}
 		if !client.markSeen(eventID) {
 			continue
 		}
-		select {
-		case client.send <- message:
+		if client.trySend(message) {
 			sent++
-		default:
+		} else {
 			slow = append(slow, client)
 		}
 	}
@@ -535,10 +568,9 @@ func (h *Hub) fanoutAllDedup(message []byte, excludeWorkspace, eventID string) {
 		if !client.markSeen(eventID) {
 			continue
 		}
-		select {
-		case client.send <- message:
+		if client.trySend(message) {
 			sent++
-		default:
+		} else {
 			slow = append(slow, client)
 		}
 	}
@@ -587,10 +619,9 @@ func (h *Hub) fanoutUser(userID string, message []byte, excludeWorkspace, eventI
 		if !client.markSeen(eventID) {
 			continue
 		}
-		select {
-		case client.send <- message:
+		if client.trySend(message) {
 			sent++
-		default:
+		} else {
 			slow = append(slow, client)
 		}
 	}
@@ -631,7 +662,7 @@ func (h *Hub) evictSlow(slow []*Client) {
 			}
 		}
 		c.subscriptions = nil
-		close(c.send)
+		c.closeSend()
 		evicted++
 	}
 	cb := h.onLastSubscriber
@@ -660,8 +691,10 @@ func (h *Hub) Snapshot() map[string]any {
 		rooms[key.Type]++
 	}
 	return map[string]any{
-		"connections": len(h.clients),
-		"rooms":       rooms,
+		"connections":                       len(h.clients),
+		"rooms":                             rooms,
+		"membership_removals_pending":       h.memberRemovalPending.Load(),
+		"membership_removals_dropped_total": h.memberRemovalDropped.Load(),
 	}
 }
 
@@ -674,6 +707,9 @@ func authenticateToken(tokenStr string, pr PATResolver, ctx context.Context) (st
 		uid, ok := pr.ResolveToken(ctx, tokenStr)
 		if !ok {
 			return "", `{"error":"invalid token"}`
+		}
+		if auth.IsTemporarilyDisabledUserID(uid) {
+			return "", `{"error":"account disabled"}`
 		}
 		return uid, ""
 	}
@@ -697,17 +733,33 @@ func authenticateToken(tokenStr string, pr PATResolver, ctx context.Context) (st
 	if !ok || strings.TrimSpace(uid) == "" {
 		return "", `{"error":"invalid claims"}`
 	}
+	email, _ := claims["email"].(string)
+	if auth.IsTemporarilyDisabledUser(uid, email) {
+		return "", `{"error":"account disabled"}`
+	}
 	return uid, ""
 }
 
 // firstMessageAuth reads the first WebSocket message expecting an auth payload.
-func firstMessageAuth(conn *websocket.Conn) (string, string) {
+// A non-empty errMsg is for the caller to write back before closing the
+// connection. closed=true means the connection is already torn down and the
+// caller must return without writing anything further.
+func firstMessageAuth(conn *websocket.Conn) (token, errMsg string, closed bool) {
 	conn.SetReadDeadline(time.Now().Add(10 * time.Second))
 	defer conn.SetReadDeadline(time.Time{})
 
 	_, raw, err := conn.ReadMessage()
 	if err != nil {
-		return "", `{"error":"auth timeout or read error"}`
+		if errors.Is(err, websocket.ErrReadLimit) {
+			// gorilla has already replied CloseMessageTooBig (1009), so an
+			// auth_error frame here would be data sent after a close frame.
+			// Counted separately to keep the breach out of ordinary churn.
+			M.InboundTooLargeTotal.Add(1)
+			slog.Warn("ws: pre-auth frame exceeded read limit", "limit_bytes", inboundReadLimit)
+			conn.Close()
+			return "", "", true
+		}
+		return "", `{"error":"auth timeout or read error"}`, false
 	}
 
 	var msg struct {
@@ -717,10 +769,10 @@ func firstMessageAuth(conn *websocket.Conn) (string, string) {
 		} `json:"payload"`
 	}
 	if err := json.Unmarshal(raw, &msg); err != nil || msg.Type != "auth" || msg.Payload.Token == "" {
-		return "", `{"error":"expected auth message as first frame"}`
+		return "", `{"error":"expected auth message as first frame"}`, false
 	}
 
-	return msg.Payload.Token, ""
+	return msg.Payload.Token, "", false
 }
 
 type wsMessageWriter interface {
@@ -764,10 +816,19 @@ func HandleWebSocket(hub *Hub, mc MembershipChecker, pr PATResolver, resolveSlug
 	if cookie, err := r.Cookie(auth.AuthCookieName); err == nil && cookie.Value != "" {
 		uid, errMsg := authenticateToken(cookie.Value, pr, r.Context())
 		if errMsg != "" {
-			http.Error(w, errMsg, http.StatusUnauthorized)
+			status := http.StatusUnauthorized
+			if errMsg == `{"error":"account disabled"}` {
+				status = http.StatusForbidden
+			}
+			http.Error(w, errMsg, status)
 			return
 		}
-		if !mc.IsMember(r.Context(), uid, workspaceID) {
+		member, lookupErr := checkMembership(mc, uid, workspaceID)
+		if lookupErr != nil {
+			http.Error(w, `{"error":"membership lookup failed"}`, http.StatusServiceUnavailable)
+			return
+		}
+		if !member {
 			http.Error(w, `{"error":"not a member of this workspace"}`, http.StatusForbidden)
 			return
 		}
@@ -780,8 +841,16 @@ func HandleWebSocket(hub *Hub, mc MembershipChecker, pr PATResolver, resolveSlug
 		return
 	}
 
+	// Bound inbound messages here rather than in readPump: the token auth
+	// path below reads its first frame before the caller is authenticated, so
+	// a limit installed any later leaves that read unbounded.
+	conn.SetReadLimit(inboundReadLimit)
+
 	if userID == "" {
-		tokenStr, errMsg := firstMessageAuth(conn)
+		tokenStr, errMsg, closed := firstMessageAuth(conn)
+		if closed {
+			return
+		}
 		if errMsg != "" {
 			writeWSAuthErrorAndClose(conn, []byte(errMsg), "workspace_id", workspaceID)
 			return
@@ -791,7 +860,12 @@ func HandleWebSocket(hub *Hub, mc MembershipChecker, pr PATResolver, resolveSlug
 			writeWSAuthErrorAndClose(conn, []byte(errMsg), "workspace_id", workspaceID)
 			return
 		}
-		if !mc.IsMember(r.Context(), uid, workspaceID) {
+		member, lookupErr := checkMembership(mc, uid, workspaceID)
+		if lookupErr != nil {
+			writeWSAuthErrorAndClose(conn, []byte(`{"error":"membership lookup failed"}`), "workspace_id", workspaceID)
+			return
+		}
+		if !member {
 			writeWSAuthErrorAndClose(
 				conn,
 				[]byte(`{"error":"not a member of this workspace"}`),
@@ -869,7 +943,17 @@ func (c *Client) readPump() {
 	for {
 		_, raw, err := c.conn.ReadMessage()
 		if err != nil {
-			if websocket.IsUnexpectedCloseError(err, websocket.CloseGoingAway, websocket.CloseNormalClosure) {
+			switch {
+			case errors.Is(err, websocket.ErrReadLimit):
+				// Counted separately so an over-limit close stays visible
+				// instead of blending into ordinary connection churn.
+				M.InboundTooLargeTotal.Add(1)
+				slog.Warn("ws: inbound frame exceeded read limit",
+					"limit_bytes", inboundReadLimit,
+					"user_id", c.userID,
+					"workspace_id", c.workspaceID,
+				)
+			case websocket.IsUnexpectedCloseError(err, websocket.CloseGoingAway, websocket.CloseNormalClosure):
 				slog.Debug("websocket read error", "error", err, "user_id", c.userID, "workspace_id", c.workspaceID)
 			}
 			break
@@ -980,15 +1064,41 @@ func (c *Client) handleUnsubscribe(scope, id string) {
 // sendJSON best-effort encodes v and pushes it to the client's send channel.
 // Drops the message if the channel is full (the writePump will be evicted by
 // the next BroadcastToScope cycle).
+// trySend delivers frame to the write pump without blocking and without
+// ever writing to a closed channel (safe against concurrent teardown).
+// Returns false when the buffer is full or the connection is closing.
+func (c *Client) trySend(frame []byte) bool {
+	c.sendMu.Lock()
+	defer c.sendMu.Unlock()
+	if c.sendClosed {
+		return false
+	}
+	select {
+	case c.send <- frame:
+		return true
+	default:
+		return false
+	}
+}
+
+// closeSend closes the client's send channel exactly once. Safe to call
+// from removeClient and evictSlow concurrently.
+func (c *Client) closeSend() {
+	c.sendMu.Lock()
+	defer c.sendMu.Unlock()
+	if c.sendClosed {
+		return
+	}
+	c.sendClosed = true
+	close(c.send)
+}
+
 func (c *Client) sendJSON(v any) {
 	data, err := json.Marshal(v)
 	if err != nil {
 		return
 	}
-	select {
-	case c.send <- data:
-	default:
-	}
+	c.trySend(data)
 }
 
 func (c *Client) writePump() {
@@ -1001,18 +1111,28 @@ func (c *Client) writePump() {
 	for {
 		select {
 		case message, ok := <-c.send:
-			c.conn.SetWriteDeadline(time.Now().Add(writeWait))
 			if !ok {
-				c.conn.WriteMessage(websocket.CloseMessage, []byte{})
+				c.writeMu.Lock()
+				if !c.stopped.Load() {
+					c.conn.SetWriteDeadline(time.Now().Add(writeWait))
+					c.conn.WriteMessage(websocket.CloseMessage, []byte{})
+				}
+				c.writeMu.Unlock()
 				return
 			}
-			if err := c.conn.WriteMessage(websocket.TextMessage, message); err != nil {
-				slog.Warn("websocket write error", "error", err, "user_id", c.userID, "workspace_id", c.workspaceID)
+			if !c.writeBatch(message) {
 				return
 			}
 		case <-ticker.C:
+			c.writeMu.Lock()
+			if c.stopped.Load() {
+				c.writeMu.Unlock()
+				return
+			}
 			c.conn.SetWriteDeadline(time.Now().Add(writeWait))
-			if err := c.conn.WriteMessage(websocket.PingMessage, nil); err != nil {
+			err := c.conn.WriteMessage(websocket.PingMessage, nil)
+			c.writeMu.Unlock()
+			if err != nil {
 				return
 			}
 		}

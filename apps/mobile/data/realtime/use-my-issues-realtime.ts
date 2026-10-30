@@ -48,7 +48,13 @@ export function useMyIssuesRealtime() {
           removeFromMyIssuesList(qc, wsId, payload.issue_id);
         }),
         ws.on("issue_labels:changed", (payload) => {
-          patchIssueLabels(qc, wsId, payload.issue_id, payload.labels);
+          patchIssueLabels(
+            qc,
+            wsId,
+            payload.issue_id,
+            payload.labels,
+            payload.issue_revision,
+          );
         }),
         ws.onReconnect(invalidateMyAll),
       ];

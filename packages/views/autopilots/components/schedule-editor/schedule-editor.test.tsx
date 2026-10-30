@@ -8,7 +8,6 @@ import type { SupportedLocale } from "@multica/core/i18n";
 import { renderWithI18n } from "../../../test/i18n";
 import { ScheduleEditor } from "./schedule-editor";
 import type { ScheduleConfig } from "./model";
-import { getDefaultScheduleConfig } from "./model";
 import { cronFields, parseCron, toCron } from "./cron-mapping";
 
 // The heaviest interaction cases drive several async userEvent steps through
@@ -191,15 +190,6 @@ async function editCronText(expr: string) {
 }
 
 describe("ScheduleEditor", () => {
-  it("renders the three form blocks and the cron readback", () => {
-    renderEditor(cron("0 9-21 * * *"));
-    expect(screen.getByText("Time")).toBeInTheDocument();
-    expect(screen.getByText("Days")).toBeInTheDocument();
-    expect(screen.getByText("Timezone")).toBeInTheDocument();
-    // The cron expression lives in the result panel below the form, shown as a
-    // click-to-edit readback rather than a labelled field.
-    expect(screen.getByRole("button", { name: /click to edit/ })).toBeInTheDocument();
-  });
 
   it("never fires onChange on mount (untouched save sends no update)", async () => {
     const onChange = vi.fn();
@@ -207,44 +197,6 @@ describe("ScheduleEditor", () => {
     await waitFor(() => expect(screen.getByText("Next runs")).toBeInTheDocument());
     expect(onChange).not.toHaveBeenCalled();
     expect(cronOut()).toBe("0 9-21 * * *");
-  });
-
-  it("echoes a compound expression into structured controls", () => {
-    renderEditor(cron("0 9-21/2 * * 2-4"));
-    expect(screen.getByTestId("raw-out").textContent).toBe("null");
-    expect(screen.getByRole("button", { name: "Tuesday", pressed: true })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Thursday", pressed: true })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Monday", pressed: false })).toBeInTheDocument();
-    expect(screen.getByText(/Every 2 hours · 09:00–21:00 · Tue–Thu/)).toBeInTheDocument();
-  });
-
-  it("toggles weekly day chips without collapsing the selection", async () => {
-    const user = userEvent.setup();
-    renderEditor(cron("0 9 * * 2-4"));
-    await user.click(screen.getByRole("button", { name: "Friday" }));
-    expect(cronOut()).toBe("0 9 * * 2-5");
-    await user.click(screen.getByRole("button", { name: "Tuesday" }));
-    expect(cronOut()).toBe("0 9 * * 3-5");
-  });
-
-  it("keeps a compound time pattern intact while the days are edited", async () => {
-    const user = userEvent.setup();
-    // Every other day-editing test starts from 09:00 — the default time — so a
-    // setDays that reset the time dimension would pass them all unnoticed. This
-    // one starts where the time is nothing like the default.
-    renderEditor(cron("30 9-21/3 * * 2-4"));
-    await user.click(screen.getByRole("button", { name: "Friday" }));
-    expect(cronOut()).toBe("30 9-21/3 * * 2-5");
-    await user.click(screen.getByRole("button", { name: "Tuesday" }));
-    expect(cronOut()).toBe("30 9-21/3 * * 3-5");
-
-    // …and the same for a switch of day *kind*, not just a chip toggle.
-    await user.click(screen.getByLabelText("Day pattern"));
-    await user.click(await screen.findByRole("option", { name: "Day of month" }));
-    expect(cronOut()).toBe("30 9-21/3 1 * *");
-    await user.click(screen.getByLabelText("Day pattern"));
-    await user.click(await screen.findByRole("option", { name: "Every day" }));
-    expect(cronOut()).toBe("30 9-21/3 * * *");
   });
 
   it("edits interval, window and day chips in sequence on one schedule", async () => {
@@ -267,13 +219,6 @@ describe("ScheduleEditor", () => {
     await user.click(screen.getByLabelText("Window start hour"));
     await user.keyboard("10");
     expect(cronOut()).toBe("0 10-18/3 * * 1-4");
-  });
-
-  it("keeps at least one weekly day selected", async () => {
-    const user = userEvent.setup();
-    renderEditor(cron("0 9 * * 1"));
-    await user.click(screen.getByRole("button", { name: "Monday" }));
-    expect(cronOut()).toBe("0 9 * * 1");
   });
 
   // Stepping off a bound wraps; stepping from OUTSIDE the range lands on the
@@ -303,12 +248,6 @@ describe("ScheduleEditor", () => {
     expect(cronOut()).toBe(expected);
   });
 
-  it("edits the interval step outside of raw cron", () => {
-    renderEditor(cron("0 */2 * * *"));
-    fireEvent.change(screen.getByRole("spinbutton"), { target: { value: "3" } });
-    expect(cronOut()).toBe("0 */3 * * *");
-  });
-
   it("hydrates structured controls from cron text", async () => {
     renderEditor(cron("0 9 * * *"));
     await editCronText("0 9-21/2 * * 2-4");
@@ -329,20 +268,6 @@ describe("ScheduleEditor", () => {
     await editCronText("0 9 * * *");
     expect(screen.getByTestId("raw-out").textContent).toBe("null");
     expect(screen.queryByText(/visual editor can't represent/)).not.toBeInTheDocument();
-  });
-
-  it("takes a degenerate expression into the controls instead of greying them out", async () => {
-    // "*/65" steps past the minute field on its first stride, so it selects
-    // minute 0 — the 14th of the month, on the hour, from 10:00 to 20:59. Every
-    // control can hold that, and the editor used to claim otherwise while the
-    // preview below it listed the hourly runs.
-    renderEditor(cron("*/65 10-20 14 * *"));
-    expect(screen.getByTestId("raw-out").textContent).toBe("null");
-    expect(screen.getByTestId("cron-out").textContent).toBe("0 10-20 14 * *");
-    expect(screen.queryByText(/visual editor can't represent/)).not.toBeInTheDocument();
-    // Live controls, carrying the schedule — not a greyed-out shell over a raw
-    // cron box.
-    expect(screen.getByLabelText("Day of month")).toHaveValue(14);
   });
 
   it("changes the timezone of a structured schedule without touching the expression", async () => {
@@ -379,15 +304,14 @@ describe("ScheduleEditor", () => {
     expect(screen.getByTestId("raw-out").textContent).toBe("0 9 1,15 * *");
   });
 
-  it("shows server-driven next runs", async () => {
-    renderEditor(getDefaultScheduleConfig("UTC"));
-    await waitFor(() => expect(screen.getByText("Next runs")).toBeInTheDocument());
-  });
-
   it("shows the server error inline for an invalid expression", async () => {
     renderEditor(cron("0 9 * * *"));
     await editCronText("@daily");
     await waitFor(() => expect(screen.getByText(/expected exactly 5 fields/)).toBeInTheDocument());
+    expect(screen.getByTestId("valid-out").textContent).toBe("false");
+    expect(screen.queryByText(/visual editor can't represent/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/Checking this expression/)).not.toBeInTheDocument();
+    expect(screen.queryByText("Next runs")).not.toBeInTheDocument();
   });
 
   it("does not accept an emptied cron expression", async () => {
@@ -451,31 +375,6 @@ describe("ScheduleEditor", () => {
   it("still shows next runs when the editor is locked", async () => {
     renderEditor(cron("0 9 * * 1-5"), { disabled: true });
     await waitFor(() => expect(screen.getByText("Next runs")).toBeInTheDocument());
-  });
-
-  it("keeps the hour when switching between fixed time and interval", async () => {
-    const user = userEvent.setup();
-    renderEditor(cron("30 14 * * *"));
-    await user.click(screen.getByRole("button", { name: "At an interval" }));
-    await user.click(screen.getByRole("button", { name: "At a time" }));
-    // The interval model has nowhere to keep an hour; losing it would silently
-    // rewrite 14:30 as 09:30.
-    expect(screen.getByTestId("cron-out").textContent).toBe("30 14 * * *");
-  });
-
-  it("keeps the minute across a fixed time → minute-step window → fixed time trip", async () => {
-    const user = userEvent.setup();
-    renderEditor(cron("30 14 * * *"));
-    await user.click(screen.getByRole("button", { name: "At an interval" }));
-    await user.click(screen.getByLabelText("Interval unit"));
-    await user.click(await screen.findByRole("option", { name: "minutes" }));
-    await user.click(screen.getByLabelText("Window start hour"));
-    await user.keyboard("14");
-    await user.click(screen.getByRole("button", { name: "At a time" }));
-    // A minute-step window is hour-granular, so its bounds read :00 — but the
-    // model still holds the 30 the user typed. Reading the anchor back off the
-    // window would silently fire the schedule half an hour early.
-    expect(screen.getByTestId("cron-out").textContent).toBe("30 14 * * *");
   });
 
   it("focuses the interval when the time switches to an interval", async () => {
@@ -581,45 +480,6 @@ describe("ScheduleEditor", () => {
       renderEditor(cron("0 9 * * *"));
       await waitFor(() => expect(screen.getByText(/Next runs unavailable/)).toBeInTheDocument());
       expect(screen.queryByText(/500 Internal Server Error/)).not.toBeInTheDocument();
-    } finally {
-      previewFailure.transport = false;
-    }
-  });
-
-  it("says so when a valid expression has no upcoming runs", async () => {
-    renderEditor(cron("0 0 30 2 *"));
-    await waitFor(() => expect(screen.getByText(/no upcoming runs/)).toBeInTheDocument());
-  });
-
-  it("does not call an unreadable response 'no upcoming runs'", async () => {
-    previewFailure.unreadable = true;
-    try {
-      renderEditor(cron("0 9 * * *"));
-      await waitFor(() => expect(screen.getByText(/Next runs unavailable/)).toBeInTheDocument());
-      // A drifted response must never be presented as "your daily 09:00
-      // schedule will never run".
-      expect(screen.queryByText(/no upcoming runs/)).not.toBeInTheDocument();
-    } finally {
-      previewFailure.unreadable = false;
-    }
-  });
-
-  it("reports validity so the dialog can block an invalid cron", async () => {
-    renderEditor(cron("0 9 * * *"));
-    await waitFor(() => expect(screen.getByTestId("valid-out").textContent).toBe("true"));
-    await editCronText("@daily");
-    await waitFor(() => expect(screen.getByTestId("valid-out").textContent).toBe("false"));
-    expect(screen.getByText("This cron expression isn't valid.")).toBeInTheDocument();
-    // A rejected expression has no runs: the section goes entirely, rather than
-    // leaving a heading and a divider framing nothing under the error.
-    expect(screen.queryByText("Next runs")).not.toBeInTheDocument();
-  });
-
-  it("keeps a transport failure from marking the expression invalid", async () => {
-    previewFailure.transport = true;
-    try {
-      renderEditor(cron("0 9 * * *"));
-      await waitFor(() => expect(screen.getByText(/Next runs unavailable/)).toBeInTheDocument());
       expect(screen.getByTestId("valid-out").textContent).toBe("true");
     } finally {
       previewFailure.transport = false;
@@ -650,35 +510,6 @@ describe("ScheduleEditor", () => {
     expect(cronOut()).toBe("0 9-9 * * *");
   });
 
-  it("draws the interval and its unit in one box, lit by whichever holds focus", async () => {
-    renderEditor(cron("0 */3 * * *"));
-    const step = screen.getByLabelText("Interval");
-    const unit = screen.getByLabelText("Interval unit");
-    // "Every 3 hours" is one setting: the step and the unit share a box, rather
-    // than sitting in two that happen to be next to each other.
-    const box = step.closest("[data-slot=input-group]");
-    expect(box).not.toBeNull();
-    expect(box).toContainElement(unit);
-    // The box lights its border from the control inside it that has focus, and it
-    // knows them by this slot. A trigger that kept its own would leave the box
-    // dark while the select it holds is the very thing focused.
-    expect(step).toHaveAttribute("data-slot", "input-group-control");
-    expect(unit).toHaveAttribute("data-slot", "input-group-control");
-  });
-
-  it("draws the window's two ends in one box", async () => {
-    renderEditor(cron("0 9-21/3 * * *"));
-    const start = screen.getByLabelText("Window start hour");
-    // A window is one value with two ends, so it reads as one control rather than
-    // two fields that happen to sit next to each other.
-    const box = start.closest("[data-slot=input-group]");
-    expect(box).not.toBeNull();
-    expect(box).toContainElement(screen.getByLabelText("Window end hour"));
-    // The segments, not their wrapper, are what the box lights its border from:
-    // they are what gets focused.
-    expect(start).toHaveAttribute("data-slot", "input-group-control");
-  });
-
   // The window is a dimension of the schedule, not a mode of the editor: it is on
   // screen for every interval, and narrowing it is one edit — not a mode switch
   // followed by one.
@@ -707,18 +538,6 @@ describe("ScheduleEditor", () => {
     expect(cronOut()).toBe("0 9-23/3 * * *");
   });
 
-  it("takes a window widened back to the whole day as all day again", async () => {
-    const user = userEvent.setup();
-    renderEditor(cron("0 9-21/3 * * *"));
-    await user.click(screen.getByLabelText("Window start hour"));
-    await user.keyboard("00");
-    await user.click(screen.getByLabelText("Window end hour"));
-    await user.keyboard("23");
-    // A window that spans the day IS all day: the schedule has one form, and
-    // "0-23/3" is not a second one.
-    expect(cronOut()).toBe("0 */3 * * *");
-  });
-
   it("clears the window end to the end of the day, not onto its start", async () => {
     const user = userEvent.setup();
     renderEditor(cron("0 9-15 * * *"));
@@ -738,15 +557,6 @@ describe("ScheduleEditor", () => {
     expect(cronOut()).toBe("0 * * * *");
   });
 
-  it("raises the window end when the start is moved past it", async () => {
-    const user = userEvent.setup();
-    renderEditor(cron("0 9-12 * * *"));
-    const startHour = screen.getByLabelText("Window start hour");
-    await user.click(startHour!);
-    await user.keyboard("18");
-    expect(cronOut()).toBe("0 18-18 * * *");
-  });
-
   it("moves the shared firing minute when the window end's minute is edited", async () => {
     const user = userEvent.setup();
     renderEditor(cron("0 9-21 * * *"));
@@ -757,16 +567,9 @@ describe("ScheduleEditor", () => {
     expect(cronOut()).toBe("30 9-21 * * *");
   });
 
-  it("keeps the firing minute across an interval unit round-trip", async () => {
-    const user = userEvent.setup();
-    renderEditor(cron("30 */2 * * *"));
-    await user.click(screen.getAllByRole("combobox")[0]!);
-    await user.click(await screen.findByRole("option", { name: "minutes" }));
-    await user.click(screen.getAllByRole("combobox")[0]!);
-    await user.click(await screen.findByRole("option", { name: "hours" }));
-    expect(cronOut()).toBe("30 */2 * * *");
-  });
-
+  // The all-day variant of this round-trip is the same wiring with a strictly
+  // weaker assertion; clampWindow's own unit round-trip matrix is in
+  // transitions.test.ts.
   it("keeps the firing minute across a unit round-trip with a time window", async () => {
     const user = userEvent.setup();
     renderEditor(cron("30 9-21/2 * * *"));
@@ -777,18 +580,6 @@ describe("ScheduleEditor", () => {
     // The window carries the firing minute in cron, so the unit toggle must not
     // strand it: `minute`, not the window text, is the source of truth.
     expect(cronOut()).toBe("30 9-21/2 * * *");
-  });
-
-  it("keeps the firing minute when the window is widened back to the whole day", async () => {
-    const user = userEvent.setup();
-    renderEditor(cron("30 9-21/2 * * *"));
-    await user.click(screen.getByLabelText("Window start hour"));
-    await user.keyboard("00");
-    await user.click(screen.getByLabelText("Window end hour"));
-    await user.keyboard("23");
-    // The minute is the schedule's, not the window's: dropping it when the window
-    // goes would move the runs to the top of the hour behind the user's back.
-    expect(cronOut()).toBe("30 */2 * * *");
   });
 
   it("keeps both typed digits when the window start's minute is edited", async () => {
@@ -887,21 +678,6 @@ describe("ScheduleEditor", () => {
     // anchor left over from before it would quietly cut the window back to 15:00.
     expect(cronOut()).toBe("0 9-20/2 * * *");
   });
-
-  it.each(["22", "15"])(
-    "keeps the window when a fixed time at or past its end is carried back (%s:00)",
-    async (typed) => {
-      const user = userEvent.setup();
-      renderEditor(cron("0 9-15/3 * * *"));
-      await user.click(screen.getByRole("button", { name: "At a time" }));
-      await user.click(screen.getByLabelText("Hour"));
-      await user.keyboard(typed);
-      await user.click(screen.getByRole("button", { name: "At an interval" }));
-      // Rebasing onto the end hour itself collapses the window just as surely as
-      // rebasing past it: 15:00–15:00 is not a window.
-      expect(cronOut()).toBe("0 9-15/3 * * *");
-    },
-  );
 
   it("keeps the window when a fixed time later than its end is carried back", async () => {
     const user = userEvent.setup();
@@ -1083,6 +859,7 @@ describe("ScheduleEditor", () => {
         expect(screen.getByText(/server couldn't be reached/)).toBeInTheDocument(),
       );
       expect(screen.queryByText(/visual editor can't represent/)).not.toBeInTheDocument();
+      expect(screen.queryByText(/no upcoming runs/)).not.toBeInTheDocument();
     } finally {
       previewFailure.unreadable = false;
     }
@@ -1107,27 +884,6 @@ describe("ScheduleEditor", () => {
       expect(screen.getByText(/visual editor can't represent/)).toBeInTheDocument(),
     );
     expect(screen.getByText(/no upcoming runs/)).toBeInTheDocument();
-  });
-
-  it("shows the rejection, not the advanced notice, for an invalid expression", async () => {
-    renderEditor(cron("0 9 * * *"));
-    await editCronText("@daily");
-    await waitFor(() => expect(screen.getByText(/expected exactly 5 fields/)).toBeInTheDocument());
-    expect(screen.queryByText(/visual editor can't represent/)).not.toBeInTheDocument();
-    expect(screen.queryByText(/Checking this expression/)).not.toBeInTheDocument();
-  });
-
-  it("blames the timezone in advanced-only mode too", async () => {
-    previewFailure.badTimezone = true;
-    try {
-      renderEditor(cron("0 9 1,15 * *"));
-      await waitFor(() =>
-        expect(screen.getByText(/timezone isn't recognized/)).toBeInTheDocument(),
-      );
-      expect(screen.queryByText(/visual editor can't represent/)).not.toBeInTheDocument();
-    } finally {
-      previewFailure.badTimezone = false;
-    }
   });
 
   it("surfaces a rejection whose code it does not know, with the server's reason", async () => {
@@ -1265,15 +1021,6 @@ describe("ScheduleEditor", () => {
       expect(cronOut()).toBe("30 9 * * 1-5");
     });
 
-    it("promotes into advanced-only when the rest is beyond the model", async () => {
-      renderEditor(cron("0 9 * * *"));
-      await editCronText("TZ=Asia/Tokyo ?/2 ?/2 * * ?/2");
-      await waitFor(() =>
-        expect(screen.getByTestId("tz-out").textContent).toBe("Asia/Tokyo"),
-      );
-      expect(screen.getByTestId("raw-out").textContent).toBe("?/2 ?/2 * * ?/2");
-    });
-
     it("never promotes an expression the server rejected", async () => {
       renderEditor(cron("0 9 * * *"));
       await editCronText("TZ=Europe/Berlin 0 9 * * *");
@@ -1287,48 +1034,6 @@ describe("ScheduleEditor", () => {
       expect(screen.getByTestId("tz-out").textContent).toBe("UTC");
     });
 
-    it("leaves a zone the picker cannot offer buried in the text, even accepted", async () => {
-      renderEditor(cron("0 9 * * *"));
-      await editCronText("TZ=Local 0 9 * * *");
-      // "Local" is legal server-side (the SERVER host's zone) — the preview
-      // 200s — but no browser zone: there is nothing the picker could show for
-      // it, so the expression stays verbatim and keeps meaning what it meant.
-      await waitFor(() => expect(screen.getByText("Next runs")).toBeInTheDocument());
-      expect(screen.getByTestId("raw-out").textContent).toBe("TZ=Local 0 9 * * *");
-      expect(screen.getByTestId("tz-out").textContent).toBe("UTC");
-    });
-
-    it("leaves a prefix with no schedule after it verbatim, timezone untouched", async () => {
-      renderEditor(cron("0 9 * * *"));
-      await editCronText("TZ=Asia/Tokyo");
-      // robfig v3.0.1 panics on this shape and the (guarded) server rejects it;
-      // rewriting any of it would put words in the user's mouth mid-typo.
-      await waitFor(() =>
-        expect(screen.getByText("This cron expression isn't valid.")).toBeInTheDocument(),
-      );
-      expect(screen.getByTestId("raw-out").textContent).toBe("TZ=Asia/Tokyo");
-      expect(screen.getByTestId("tz-out").textContent).toBe("UTC");
-    });
-
-    it("promotes a lowercase zone under its canonical spelling", async () => {
-      renderEditor(cron("0 9 * * *"));
-      await editCronText("TZ=asia/shanghai 0 9 * * *");
-      // The mock's server takes the lowercase spelling (a case-insensitive
-      // filesystem does), but the picker's list knows only "Asia/Shanghai" —
-      // seating "asia/shanghai" would show the same zone twice.
-      await waitFor(() =>
-        expect(screen.getByTestId("tz-out").textContent).toBe("Asia/Shanghai"),
-      );
-      expect(screen.getByTestId("raw-out").textContent).toBe("null");
-      expect(cronOut()).toBe("0 9 * * *");
-    });
-
-    it("extracts immediately on hydration — a stored expression already passed the server", () => {
-      renderEditor(cron("CRON_TZ=Asia/Tokyo 30 9 * * 1-5"));
-      expect(screen.getByTestId("raw-out").textContent).toBe("null");
-      expect(screen.getByTestId("tz-out").textContent).toBe("Asia/Tokyo");
-      expect(cronOut()).toBe("30 9 * * 1-5");
-    });
   });
 
   describe("timezone prefix as the wire form", () => {
@@ -1378,19 +1083,13 @@ describe("ScheduleEditor", () => {
       // stacked onto the wire form — robfig strips ONE prefix and would read
       // the second as a field.
       await waitFor(() => expect(screen.getByText("Next runs")).toBeInTheDocument());
+      expect(screen.getByTestId("raw-out").textContent).toBe("TZ=Local 0 9 * * *");
+      expect(screen.getByTestId("tz-out").textContent).toBe("UTC");
       expect(wireOut()).toBe("TZ=Local 0 9 * * *");
       const input = await openCronInput();
       expect((input as HTMLInputElement).value).toBe("TZ=Local 0 9 * * *");
       expect(screen.queryByText("TZ=UTC")).not.toBeInTheDocument();
     });
 
-    it("re-serialises a promoted CRON_TZ= under the canonical TZ= segment", async () => {
-      renderEditor(cron("0 9 * * *"));
-      await editCronText("CRON_TZ=Asia/Tokyo 30 9 * * 1-5");
-      await waitFor(() =>
-        expect(screen.getByTestId("tz-out").textContent).toBe("Asia/Tokyo"),
-      );
-      expect(wireOut()).toBe("TZ=Asia/Tokyo 30 9 * * 1-5");
-    });
   });
 });

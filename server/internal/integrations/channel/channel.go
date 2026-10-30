@@ -3,6 +3,8 @@ package channel
 import (
 	"context"
 	"encoding/json"
+
+	"github.com/jackc/pgx/v5/pgtype"
 )
 
 // Type identifies an inbound channel platform — the discriminator the
@@ -83,6 +85,14 @@ type Channel interface {
 type Config struct {
 	Type Type
 	Raw  json.RawMessage
+
+	// ID is the channel_installation.id row this Channel is being built
+	// from. Zero when a build path doesn't have an installation (nothing
+	// in-tree does today, but Factory implementations should tolerate it
+	// rather than assume Valid). WeCom uses it to key its per-connection
+	// wsSender into a shared registry the OutboundReplier looks up by;
+	// Feishu and Slack don't currently read it.
+	ID pgtype.UUID
 
 	// Handler is the shared inbound entry point the engine injects so the
 	// built Channel can deliver normalized InboundMessage values into the

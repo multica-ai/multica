@@ -1,7 +1,10 @@
+// @vitest-environment node
 import { describe, expect, it, vi } from "vitest";
 import {
   MainRendererMessageQueue,
   parseMainRendererChannelState,
+  parseTabSelectionShortcutKey,
+  TAB_SELECTION_SHORTCUT_CHANNEL,
 } from "./main-renderer-messages";
 
 describe("MainRendererMessageQueue", () => {
@@ -63,5 +66,24 @@ describe("parseMainRendererChannelState", () => {
     expect(
       parseMainRendererChannelState({ channel: "auth:token", ready: "yes" }),
     ).toBeNull();
+    expect(
+      parseMainRendererChannelState({
+        channel: TAB_SELECTION_SHORTCUT_CHANNEL,
+        ready: true,
+      }),
+    ).toEqual({ channel: TAB_SELECTION_SHORTCUT_CHANNEL, ready: true });
   });
+});
+
+describe("parseTabSelectionShortcutKey", () => {
+  it.each([1, 2, 3, 4, 5, 6, 7, 8, 9])("accepts shortcut key %i", (key) => {
+    expect(parseTabSelectionShortcutKey(key)).toBe(key);
+  });
+
+  it.each([0, 10, 1.5, "1", null, undefined])(
+    "rejects invalid shortcut payload %j",
+    (value) => {
+      expect(parseTabSelectionShortcutKey(value)).toBeNull();
+    },
+  );
 });

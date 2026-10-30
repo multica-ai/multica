@@ -60,9 +60,8 @@ func flattenContent(msgType, rawContent string) string {
 }
 
 // larkPostContent mirrors the RECEIVE-side shape of a `post` rich-text
-// body.content. Crucially this is NOT the locale-wrapped form the SEND
-// API takes ({"zh_cn": {...}}): an inbound post body.content unmarshals
-// directly into {title, content}. content is a 2-D array — the outer
+// body.content after normalization. This is not the locale-wrapped form
+// the SEND API takes ({"zh_cn": {...}}). Content is a 2-D array — the outer
 // array is the ordered list of paragraphs, each inner array the ordered
 // spans of that paragraph; the newline between paragraphs is implicit in
 // the array boundary, not a span.
@@ -71,11 +70,63 @@ type larkPostContent struct {
 	Content [][]larkPostSpan `json:"content"`
 }
 
+// decodePostContent normalizes the receive-side variants for both text and
+// attachment discovery. Prefer legacy paragraphs when present; content_v2 may
+// be a paragraph array or a JSON-encoded paragraph array.
+func decodePostContent(raw string) (larkPostContent, error) {
+	var payload struct {
+		Title     string          `json:"title"`
+		Content   json.RawMessage `json:"content"`
+		ContentV2 json.RawMessage `json:"content_v2"`
+		Files     []larkPostSpan  `json:"files"`
+	}
+	if err := json.Unmarshal([]byte(raw), &payload); err != nil {
+		return larkPostContent{}, err
+	}
+	doc := larkPostContent{Title: payload.Title}
+	for _, content := range []json.RawMessage{payload.Content, payload.ContentV2} {
+		var encoded string
+		if json.Unmarshal(content, &encoded) == nil {
+			content = json.RawMessage(encoded)
+		}
+		var paragraphs [][]larkPostSpan
+		if json.Unmarshal(content, &paragraphs) == nil && len(paragraphs) > 0 {
+			doc.Content = paragraphs
+			break
+		}
+	}
+	seen := make(map[string]*larkPostSpan)
+	for _, para := range doc.Content {
+		for i := range para {
+			span := &para[i]
+			if (span.Tag == "file" || span.Tag == "media") && !span.IsFolder && seen[span.FileKey] == nil {
+				seen[span.FileKey] = span
+			}
+		}
+	}
+	for _, file := range payload.Files {
+		if file.IsFolder || file.FileKey == "" {
+			continue
+		}
+		if span := seen[file.FileKey]; span != nil {
+			span.FileName = firstNonEmpty(span.FileName, span.Name, file.FileName, file.Name)
+			span.MimeType = firstNonEmpty(span.MimeType, file.MimeType)
+			continue
+		}
+		file.Tag = "file"
+		para := []larkPostSpan{file}
+		doc.Content = append(doc.Content, para)
+		seen[file.FileKey] = &para[0]
+	}
+	return doc, nil
+}
+
 // larkPostSpan is one node inside a post paragraph. Only the fields that
 // carry renderable text are modelled; the tag set is extensible, so the
 // flattener emits `text` for any unrecognized tag and skips it otherwise
 // rather than failing.
 type larkPostSpan struct {
+	IsFolder bool   `json:"is_folder"`
 	Tag      string `json:"tag"`
 	Text     string `json:"text"`
 	Href     string `json:"href"`
@@ -95,16 +146,17 @@ type larkPostSpan struct {
 // ("Lark 集成", then a link "PR #3277") read as space-separated words.
 //
 // A link span renders as "text (href)" so the URL survives into the
-// agent's context; an `at` span renders as its @_user_N placeholder (or
-// the inline user_name when Lark already resolved it) so a downstream
-// resolveMentions pass can substitute the display name. Media spans
-// degrade to the same bracketed placeholders flattenContent uses.
+// agent's context; an `at` span renders as its @_user_N placeholder so
+// a downstream resolveMentions pass can substitute the display name
+// (falling back to the inline user_name when the placeholder is absent).
+// Media spans degrade to the same bracketed placeholders flattenContent
+// uses.
 func flattenPostContent(raw string) string {
 	if raw == "" {
 		return ""
 	}
-	var doc larkPostContent
-	if err := json.Unmarshal([]byte(raw), &doc); err != nil {
+	doc, err := decodePostContent(raw)
+	if err != nil {
 		return ""
 	}
 
@@ -142,17 +194,27 @@ func flattenPostParagraph(spans []larkPostSpan) string {
 				parts = append(parts, s.Href)
 			}
 		case "at":
-			// Prefer an already-resolved display name; otherwise emit
-			// the user_id, which on the receive side is the @_user_N
-			// placeholder a later resolveMentions pass maps to a name.
+			// Prefer the @_user_N placeholder so a later
+			// resolveMentions pass can map it to a display name and
+			// strip the bot's own mention; fall back to the inline
+			// user_name when the placeholder is absent.
 			switch {
-			case s.UserName != "":
-				parts = append(parts, "@"+s.UserName)
 			case s.UserID != "":
 				parts = append(parts, s.UserID)
+			case s.UserName != "":
+				parts = append(parts, "@"+s.UserName)
 			}
 		case "img":
 			parts = append(parts, "[Image]")
+		case "file":
+			if s.IsFolder || s.FileKey == "" {
+				continue
+			}
+			if name := firstNonEmpty(s.FileName, s.Name); name != "" {
+				parts = append(parts, "[File: "+name+"]")
+			} else {
+				parts = append(parts, "[File]")
+			}
 		case "media":
 			parts = append(parts, "[Video]")
 		case "emotion":

@@ -2,7 +2,7 @@
 
 import { memo, useCallback, useMemo, useState, type ReactNode } from "react";
 import { Virtuoso } from "react-virtuoso";
-import { EyeOff, MoreHorizontal, Plus, UserMinus } from "lucide-react";
+import { Ban, EyeOff, FolderMinus, MoreHorizontal, Plus, UserMinus } from "@multica/ui/icons";
 import { useDroppable } from "@dnd-kit/core";
 import { SortableContext, verticalListSortingStrategy } from "@dnd-kit/sortable";
 import type {
@@ -18,17 +18,23 @@ import {
   DropdownMenuContent,
   DropdownMenuItem,
 } from "@multica/ui/components/ui/dropdown-menu";
-import { STATUS_CONFIG } from "@multica/core/issues/config";
+import { TruncatedTooltip } from "@multica/ui/components/common/truncated-tooltip";
+import { useWorkspaceId } from "@multica/core/hooks";
+import { useIssueStatuses } from "@multica/core/issue-statuses/hooks";
 import { useViewStoreApi } from "@multica/core/issues/stores/view-store-context";
+import { useViewBaseline } from "../surface/view-baseline-context";
 import { StatusHeading } from "./status-heading";
 import { DraggableBoardCard } from "./board-card";
 import type { ChildProgress } from "./list-row";
 import { useT } from "../../i18n";
 import { ActorAvatar } from "../../common/actor-avatar";
+import { ProjectIcon } from "../../projects/components/project-icon";
 import { useRestoredScrollOffset, useRestoredScrollRef } from "../../platform";
 import { DeferredPopup } from "../../common/deferred-popup";
 import { DeferredTooltip } from "../../common/deferred-tooltip";
 import { VirtuosoSeed } from "../../common/virtuoso-seed";
+import { useBoardWorkflow } from "./board-workflow-context";
+import { ColumnHandoff } from "../../workflows/column-handoff";
 import type { IssueCreateDefaults } from "../surface/types";
 
 // Insertion-position prediction intentionally omitted. The server's
@@ -73,9 +79,16 @@ const EMPTY_VIRTUOSO_COMPONENTS = {};
 export interface BoardColumnGroup {
   id: string;
   title: string;
+  /** Status columns carry exact built-in or custom status keys. */
   status?: IssueStatus;
   assigneeType?: IssueAssigneeType | null;
   assigneeId?: string | null;
+  /** Project id for this column; null = the "No project" column. Set only
+   *  when the board is grouped by project. */
+  projectId?: string | null;
+  /** Display-only, for the column's leading icon. Null on the "No project"
+   *  column and on a project the projects query cannot resolve. */
+  project?: Pick<Project, "icon"> | null;
   /** Set when the board is grouped by a select-type custom property. */
   propertyId?: string;
   /** Option id for this column; null = the "No value" column. */
@@ -110,10 +123,23 @@ export const BoardColumn = memo(function BoardColumn({
   sortLabel?: string | null;
 }) {
   const status = group.status;
-  const cfg = status ? STATUS_CONFIG[status] : null;
-  const { setNodeRef, isOver } = useDroppable({ id: group.id });
+  const wsId = useWorkspaceId();
+  const { entryOf } = useIssueStatuses(wsId);
+  const archived = !!status && !!entryOf(status)?.archived_at;
+  const { setNodeRef, isOver: droppableIsOver } = useDroppable({ id: group.id });
+  // A dragged card whose project workflow does not list this status cannot
+  // land here; the column dims and says why. (MUL-7420)
+  const { dropBlockedReason, dropHint } = useBoardWorkflow();
+  const blockedReason = status ? dropBlockedReason(status) : null;
+  const isOver = droppableIsOver && !archived && !blockedReason;
+  const hint = isOver && status ? dropHint(status) : null;
   const viewStoreApi = useViewStoreApi();
+  // A status fixed by the open saved view cannot be hidden from the board —
+  // that would silently strip one of the view's own conditions.
+  const viewBaseline = useViewBaseline();
+  const statusFixedByView = !!status && viewBaseline?.status.has(status) === true;
   const { t } = useT("issues");
+  const { t: tCommon } = useT("common");
 
   // Resolve IDs to Issue objects, preserving parent-provided order
   const resolvedIssues = useMemo(
@@ -173,12 +199,31 @@ export const BoardColumn = memo(function BoardColumn({
   );
 
   return (
-    <div style={{ width: BOARD_COL_WIDTH }} className={`flex shrink-0 flex-col rounded-xl ${cfg?.columnBg ?? "bg-muted/40"} p-2`}>
-      <div className="mb-2 flex items-center justify-between px-1.5">
+    <div
+      style={{ width: BOARD_COL_WIDTH }}
+      className={`group/column relative flex shrink-0 flex-col rounded-xl bg-muted/40 p-2 ${
+        hint ? "ring-2 ring-brand/30" : ""
+      }`}
+    >
+      {/* A dragged card whose workflow lacks this status cannot land here: the
+          column is hatched over and says why. (MUL-7420) */}
+      {blockedReason && (
+        <div
+          aria-hidden
+          className="pointer-events-none absolute inset-0 z-20 flex items-center justify-center rounded-xl bg-background/60 bg-[repeating-linear-gradient(135deg,transparent_0_8px,var(--color-border)_8px_9px)]"
+        >
+          <span className="flex items-center gap-1.5 rounded-md border border-surface-border bg-card px-2.5 py-1 text-caption text-muted-foreground shadow-sm">
+            <Ban className="size-3" />
+            {blockedReason}
+          </span>
+        </div>
+      )}
+      <div className="mb-2 flex items-center justify-between gap-2 px-1.5">
         <BoardGroupHeading group={group} count={totalCount ?? issueIds.length} />
 
-        {/* Right: add + menu */}
-        <div className="flex items-center gap-1">
+        {/* Right: step handler + add + menu */}
+        <div className="flex min-w-0 items-center gap-1">
+          {status && <WorkflowStepHandlerBadge status={status} />}
           {/* Column-header popups mount lazily: a board/swimlane renders one
               header per column and almost none of these menus/tooltips are
               ever opened — eagerly mounting them dominated surface mount
@@ -186,23 +231,43 @@ export const BoardColumn = memo(function BoardColumn({
           {status && (
             <DeferredPopup
               ariaHasPopup="menu"
+              tooltip={tCommon(($) => $.more_actions)}
               triggerRender={
-                <Button variant="ghost" size="icon-sm" className="rounded-full text-muted-foreground">
+                <Button
+                  variant="ghost"
+                  size="icon-sm"
+                  className="rounded-full text-muted-foreground"
+                  aria-label={tCommon(($) => $.more_actions)}
+                >
                   <MoreHorizontal className="size-3.5" />
                 </Button>
               }
             >
               {(open, onOpenChange) => (
                 <DropdownMenu open={open} onOpenChange={onOpenChange}>
-                  <DropdownMenuTrigger
-                    render={
-                      <Button variant="ghost" size="icon-sm" className="rounded-full text-muted-foreground">
-                        <MoreHorizontal className="size-3.5" />
-                      </Button>
+                  <DeferredTooltip
+                    content={tCommon(($) => $.more_actions)}
+                    trigger={
+                      <DropdownMenuTrigger
+                        render={
+                          <Button
+                            variant="ghost"
+                            size="icon-sm"
+                            className="rounded-full text-muted-foreground"
+                            aria-label={tCommon(($) => $.more_actions)}
+                          >
+                            <MoreHorizontal className="size-3.5" />
+                          </Button>
+                        }
+                      />
                     }
                   />
                   <DropdownMenuContent align="end">
-                    <DropdownMenuItem onClick={() => viewStoreApi.getState().hideStatus(status)}>
+                    <DropdownMenuItem
+                      disabled={statusFixedByView}
+                      title={statusFixedByView ? t(($) => $.filters.in_view) : undefined}
+                      onClick={() => viewStoreApi.getState().hideStatus(status)}
+                    >
                       <EyeOff className="size-3.5" />
                       {t(($) => $.board.hide_column)}
                     </DropdownMenuItem>
@@ -211,7 +276,7 @@ export const BoardColumn = memo(function BoardColumn({
               )}
             </DeferredPopup>
           )}
-          {onCreateIssue && (
+          {onCreateIssue && !archived && (
             <DeferredTooltip
               content={t(($) => $.board.add_issue_tooltip)}
               trigger={
@@ -219,6 +284,7 @@ export const BoardColumn = memo(function BoardColumn({
                   variant="ghost"
                   size="icon-sm"
                   className="rounded-full text-muted-foreground"
+                  aria-label={t(($) => $.board.add_issue_tooltip)}
                   onClick={() => {
                     const data = {
                       ...(group.createData ?? {}),
@@ -235,9 +301,19 @@ export const BoardColumn = memo(function BoardColumn({
         </div>
       </div>
       <div className="relative min-h-[200px] flex-1 rounded-lg">
+        {hint && (
+          <div className="pointer-events-none absolute inset-x-1 bottom-1 z-10 flex items-center justify-center gap-1.5 rounded-lg border border-dashed border-brand/50 bg-card px-3 py-3 text-caption text-muted-foreground shadow-sm">
+            {hint.actor && <ActorAvatar actorType={hint.actor.type} actorId={hint.actor.id} size="xs" profileLink={false} />}
+            <span className="truncate">
+              {hint.run
+                ? t(($) => $.workflows.board.drop_hint_run, { name: hint.name })
+                : t(($) => $.workflows.board.drop_hint, { name: hint.name })}
+            </span>
+          </div>
+        )}
         {isOver && sortLabel && (
           <div className="pointer-events-none absolute inset-0 z-10 flex items-center justify-center rounded-lg bg-background/40">
-            <span className="rounded-md bg-popover px-2.5 py-1 text-xs font-medium text-popover-foreground shadow-sm border border-border">
+            <span className="rounded-md bg-popover px-2.5 py-1 text-caption font-medium text-popover-foreground shadow-sm border border-border">
               {sortLabel}
             </span>
           </div>
@@ -305,7 +381,7 @@ export const BoardColumn = memo(function BoardColumn({
           ) : (
             <>
               {issueIds.length === 0 && (
-                <p className="py-8 text-center text-xs text-muted-foreground">
+                <p className="py-8 text-center text-caption text-muted-foreground">
                   {t(($) => $.board.empty_column)}
                 </p>
               )}
@@ -317,6 +393,13 @@ export const BoardColumn = memo(function BoardColumn({
     </div>
   );
 });
+
+/** On a project board, the column's handoff for that project. (MUL-7420) */
+function WorkflowStepHandlerBadge({ status }: { status: string }) {
+  const { scopeWorkflow, scopeProject } = useBoardWorkflow();
+  if (!scopeWorkflow || !scopeProject) return null;
+  return <ColumnHandoff status={status} workflow={scopeWorkflow} project={scopeProject} />;
+}
 
 function BoardGroupHeading({
   group,
@@ -336,10 +419,34 @@ function BoardGroupHeading({
           className="size-2.5 shrink-0 rounded-full bg-muted-foreground/30"
           style={group.propertyOptionColor ? { backgroundColor: group.propertyOptionColor } : undefined}
         />
-        <span className="truncate text-sm font-medium" title={group.title}>
-          {group.title}
+        <TruncatedTooltip content={group.title}>
+          <span className="truncate text-body font-medium">
+            {group.title}
+          </span>
+        </TruncatedTooltip>
+        <span className="shrink-0 rounded-full bg-background px-1.5 py-0.5 text-micro font-medium tabular-nums text-muted-foreground">
+          {count}
         </span>
-        <span className="shrink-0 rounded-full bg-background px-1.5 py-0.5 text-[11px] font-medium tabular-nums text-muted-foreground">
+      </div>
+    );
+  }
+
+  if (group.projectId !== undefined) {
+    return (
+      <div className="flex min-w-0 items-center gap-2">
+        {group.project ? (
+          <ProjectIcon project={group.project} size="sm" />
+        ) : (
+          <span className="flex size-[18px] shrink-0 items-center justify-center rounded-full bg-background text-muted-foreground">
+            <FolderMinus className="size-3.5" />
+          </span>
+        )}
+        <TruncatedTooltip content={group.title}>
+          <span className="truncate text-body font-medium">
+            {group.title}
+          </span>
+        </TruncatedTooltip>
+        <span className="shrink-0 rounded-full bg-background px-1.5 py-0.5 text-micro font-medium tabular-nums text-muted-foreground">
           {count}
         </span>
       </div>
@@ -363,10 +470,12 @@ function BoardGroupHeading({
   return (
     <div className="flex min-w-0 items-center gap-2">
       {actorIcon}
-      <span className="truncate text-sm font-medium" title={group.title}>
-        {group.title}
-      </span>
-      <span className="shrink-0 rounded-full bg-background px-1.5 py-0.5 text-[11px] font-medium tabular-nums text-muted-foreground">
+      <TruncatedTooltip content={group.title}>
+        <span className="truncate text-body font-medium">
+          {group.title}
+        </span>
+      </TruncatedTooltip>
+      <span className="shrink-0 rounded-full bg-background px-1.5 py-0.5 text-micro font-medium tabular-nums text-muted-foreground">
         {count}
       </span>
     </div>

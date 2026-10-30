@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { Bot, Users } from "lucide-react";
+import { Bot, Users } from "@multica/ui/icons";
 import { cn } from "@multica/ui/lib/utils";
 import {
   AVATAR_SIZE_PX,
@@ -33,7 +33,12 @@ function ActorAvatar({
   className,
 }: ActorAvatarProps) {
   const [imgError, setImgError] = useState(false);
-  const px = AVATAR_SIZE_PX[size];
+  // A control that fixes its own content size (e.g. a toolbar pill) sets
+  // `--avatar-slot-size`; it wins over `size` so the avatar can't outgrow the
+  // control. A CSS variable rather than React context: it follows the DOM, so
+  // hover cards portaled out of the control keep their own avatar sizes.
+  const diameter = `var(--avatar-slot-size, ${AVATAR_SIZE_PX[size]}px)`;
+  const scaled = (ratio: number) => `calc(${diameter} * ${ratio})`;
   const emoji = parseAvatarEmoji(avatarUrl);
 
   useEffect(() => {
@@ -54,14 +59,14 @@ function ActorAvatar({
         // the circle — avatar shape is a hard invariant, not a per-site choice.
         "rounded-full"
       )}
-      style={{ width: px, height: px, fontSize: px * 0.45 }}
+      style={{ width: diameter, height: diameter, fontSize: scaled(0.45) }}
     >
       {emoji ? (
         <span
           role="img"
           aria-label={name}
           className="select-none leading-none"
-          style={{ fontSize: px * 0.58 }}
+          style={{ fontSize: scaled(0.58) }}
         >
           {emoji}
         </span>
@@ -73,11 +78,11 @@ function ActorAvatar({
           onError={() => setImgError(true)}
         />
       ) : isSystem ? (
-        <MulticaIcon noSpin style={{ width: px * 0.55, height: px * 0.55 }} />
+        <MulticaIcon noSpin style={{ width: scaled(0.55), height: scaled(0.55) }} />
       ) : isAgent ? (
-        <Bot style={{ width: px * 0.55, height: px * 0.55 }} />
+        <Bot style={{ width: scaled(0.55), height: scaled(0.55) }} />
       ) : isSquad ? (
-        <Users style={{ width: px * 0.55, height: px * 0.55 }} />
+        <Users style={{ width: scaled(0.55), height: scaled(0.55) }} />
       ) : (
         initials
       )}

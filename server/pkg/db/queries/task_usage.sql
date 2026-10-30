@@ -22,21 +22,92 @@ SELECT * FROM task_usage
 WHERE task_id = $1
 ORDER BY model;
 
--- name: GetIssueUsageSummary :one
+-- name: ListIssueTaskUsage :many
+-- Per-(task, provider, model) usage rows for every task on one issue — the
+-- per-run half of GetIssueUsageSummary's issue-wide total.
+--
+-- The model dimension stays on the wire for the same reason the runtime and
+-- dashboard usage rows keep it: cost is priced client-side from a per-model
+-- rate table, and a row that has collapsed two models into one sum can no
+-- longer be priced at all. The execution log sums the rows per task; the usage
+-- panel shows them split.
+--
+-- Ordering is by task then model so the client can group by task_id in one
+-- pass. Uses idx_agent_task_queue_issue_id (migration 035) + the task_usage
+-- task_id index (migration 032).
 SELECT
-    COALESCE(SUM(tu.input_tokens), 0)::bigint AS total_input_tokens,
-    COALESCE(SUM(tu.output_tokens), 0)::bigint AS total_output_tokens,
-    COALESCE(SUM(tu.cache_read_tokens), 0)::bigint AS total_cache_read_tokens,
-    COALESCE(SUM(tu.cache_write_tokens), 0)::bigint AS total_cache_write_tokens,
-    COALESCE(SUM(tu.cost_usd_ticks), 0)::bigint AS total_cost_usd_ticks,
-    COALESCE(SUM(tu.input_tokens)       FILTER (WHERE tu.cost_usd_ticks IS NULL), 0)::bigint AS uncosted_input_tokens,
-    COALESCE(SUM(tu.output_tokens)      FILTER (WHERE tu.cost_usd_ticks IS NULL), 0)::bigint AS uncosted_output_tokens,
-    COALESCE(SUM(tu.cache_read_tokens)  FILTER (WHERE tu.cost_usd_ticks IS NULL), 0)::bigint AS uncosted_cache_read_tokens,
-    COALESCE(SUM(tu.cache_write_tokens) FILTER (WHERE tu.cost_usd_ticks IS NULL), 0)::bigint AS uncosted_cache_write_tokens,
-    COUNT(DISTINCT tu.task_id)::int AS task_count
+    tu.task_id,
+    tu.provider,
+    tu.model,
+    tu.input_tokens,
+    tu.output_tokens,
+    tu.cache_read_tokens,
+    tu.cache_write_tokens,
+    tu.cost_usd_ticks
 FROM task_usage tu
 JOIN agent_task_queue atq ON atq.id = tu.task_id
-WHERE atq.issue_id = $1;
+WHERE atq.issue_id = $1
+ORDER BY tu.task_id, tu.model;
+
+-- name: ListAgentTaskUsage :many
+-- Per-(task, provider, model) usage rows for one agent's explicitly requested
+-- task history. ListAgentTasks is already access-gated before this query runs;
+-- the agent predicate preserves that authorization boundary, while task_ids
+-- keeps hydration aligned with the exact response without an N+1 query.
+SELECT
+    tu.task_id,
+    tu.provider,
+    tu.model,
+    tu.input_tokens,
+    tu.output_tokens,
+    tu.cache_read_tokens,
+    tu.cache_write_tokens,
+    tu.cost_usd_ticks
+FROM task_usage tu
+JOIN agent_task_queue atq ON atq.id = tu.task_id
+WHERE atq.agent_id = sqlc.arg('agent_id')
+  AND tu.task_id = ANY(sqlc.arg('task_ids')::uuid[])
+ORDER BY tu.task_id, tu.model;
+
+-- name: GetIssueUsageSummary :one
+-- Keep the legacy usage aggregates intact, then report coverage over finite
+-- terminal runs separately. A task_usage row is the durable evidence that a
+-- run reported usage even when every token counter is legitimately zero.
+-- Both passes use the existing issue_id / task_id indexes (migrations 035/032).
+WITH usage AS (
+    SELECT
+        COALESCE(SUM(tu.input_tokens), 0)::bigint AS total_input_tokens,
+        COALESCE(SUM(tu.output_tokens), 0)::bigint AS total_output_tokens,
+        COALESCE(SUM(tu.cache_read_tokens), 0)::bigint AS total_cache_read_tokens,
+        COALESCE(SUM(tu.cache_write_tokens), 0)::bigint AS total_cache_write_tokens,
+        COALESCE(SUM(tu.cost_usd_ticks), 0)::bigint AS total_cost_usd_ticks,
+        COALESCE(SUM(tu.input_tokens)       FILTER (WHERE tu.cost_usd_ticks IS NULL), 0)::bigint AS uncosted_input_tokens,
+        COALESCE(SUM(tu.output_tokens)      FILTER (WHERE tu.cost_usd_ticks IS NULL), 0)::bigint AS uncosted_output_tokens,
+        COALESCE(SUM(tu.cache_read_tokens)  FILTER (WHERE tu.cost_usd_ticks IS NULL), 0)::bigint AS uncosted_cache_read_tokens,
+        COALESCE(SUM(tu.cache_write_tokens) FILTER (WHERE tu.cost_usd_ticks IS NULL), 0)::bigint AS uncosted_cache_write_tokens,
+        COUNT(DISTINCT tu.task_id)::int AS task_count
+    FROM task_usage tu
+    JOIN agent_task_queue atq ON atq.id = tu.task_id
+    WHERE atq.issue_id = $1
+), terminal_runs AS (
+    SELECT
+        COUNT(*)::int AS terminal_task_count,
+        COUNT(*) FILTER (WHERE EXISTS (
+            SELECT 1 FROM task_usage tu WHERE tu.task_id = atq.id
+        ))::int AS metered_task_count
+    FROM agent_task_queue atq
+    WHERE atq.issue_id = $1
+      AND atq.status IN ('completed', 'failed', 'cancelled')
+      AND atq.started_at IS NOT NULL
+      AND atq.completed_at IS NOT NULL
+)
+SELECT
+    usage.*,
+    terminal_runs.terminal_task_count,
+    terminal_runs.metered_task_count,
+    (terminal_runs.terminal_task_count - terminal_runs.metered_task_count)::int AS unreported_task_count
+FROM usage
+CROSS JOIN terminal_runs;
 
 -- name: ListDashboardUsageDaily :many
 -- Daily per-(date, provider, model) token aggregates for the workspace, served
@@ -121,8 +192,16 @@ ORDER BY agent_id, LOWER(provider), model;
 -- caller-supplied @tz — same Viewing-tz treatment as ListDashboardUsageDaily
 -- so the Time / Tasks tabs cut their day boundary identically to the
 -- Cost / Tokens tabs (a viewer east of UTC would otherwise see the four
--- tabs disagree on a "1d" window). Only terminal tasks (completed or
--- failed) with both started_at and completed_at populated contribute.
+-- tabs disagree on a "1d" window). Only terminal tasks (completed, failed,
+-- or cancelled) with both started_at and completed_at populated contribute.
+--
+-- 'cancelled' is in the filter because a run the user stopped mid-flight
+-- burned real agent time and real tokens before the stop landed
+-- (CancelAgentTask accepts 'running'). Excluding it zeroed that time while
+-- the cost rollup — which has no status filter at all — kept charging for
+-- it, so Time/Tasks and Cost/Tokens were summing different task populations
+-- on the same page. The started_at guard keeps a run cancelled while still
+-- queued out: it never occupied an agent.
 --
 -- @since is already the viewer's local start-of-day-(N) (parseSinceParamInTZ)
 -- — passed straight through, NOT re-truncated; see ListDashboardUsageDaily.
@@ -133,12 +212,13 @@ SELECT
         0
     )::bigint AS total_seconds,
     COUNT(*)::int AS task_count,
-    COUNT(*) FILTER (WHERE atq.status = 'failed')::int AS failed_count
+    COUNT(*) FILTER (WHERE atq.status = 'failed')::int AS failed_count,
+    COUNT(*) FILTER (WHERE atq.status = 'cancelled')::int AS cancelled_count
 FROM agent_task_queue atq
 JOIN agent a ON a.id = atq.agent_id
 LEFT JOIN issue i ON i.id = atq.issue_id
 WHERE a.workspace_id = $1
-  AND atq.status IN ('completed', 'failed')
+  AND atq.status IN ('completed', 'failed', 'cancelled')
   AND atq.started_at IS NOT NULL
   AND atq.completed_at IS NOT NULL
   AND atq.completed_at >= sqlc.arg('since')::timestamptz
@@ -148,14 +228,21 @@ ORDER BY DATE(atq.completed_at AT TIME ZONE sqlc.arg('tz')::text) DESC;
 
 -- name: ListDashboardAgentRunTime :many
 -- Per-agent total task run time and task count for the workspace, optionally
--- scoped to a single project. Counts only terminal runs (completed or failed)
--- with both started_at and completed_at populated — queued/running tasks have
--- no finite duration. Anchored on completed_at so the window matches the
--- token cost window (which is anchored on tu.created_at, ~= completion time).
+-- scoped to a single project. Counts only terminal runs (completed, failed,
+-- or cancelled) with both started_at and completed_at populated — queued/
+-- running tasks have no finite duration. Anchored on completed_at so the
+-- window matches the token cost window (which is anchored on tu.created_at,
+-- ~= completion time).
+--
+-- See ListDashboardRunTimeDaily for why 'cancelled' belongs in the filter.
+-- metered_task_count uses task_usage row existence, not token totals, so a
+-- provider-reported zero stays distinct from a run that reported nothing.
 --
 -- No date bucketing, so no @tz — but @since is the viewer's local
--- start-of-day-(N) so the "last N days" window lines up with the per-agent
--- cost card; passed straight through without re-truncation.
+-- start-of-day for the EXACT N-day window (parseExactSinceParamInTZ), so the
+-- "last N days" window lines up with the per-agent cost card and the daily
+-- charts the client trims to the same span; passed straight through without
+-- re-truncation.
 SELECT
     atq.agent_id,
     COALESCE(
@@ -163,12 +250,16 @@ SELECT
         0
     )::bigint AS total_seconds,
     COUNT(*)::int AS task_count,
-    COUNT(*) FILTER (WHERE atq.status = 'failed')::int AS failed_count
+    COUNT(*) FILTER (WHERE EXISTS (
+        SELECT 1 FROM task_usage tu WHERE tu.task_id = atq.id
+    ))::int AS metered_task_count,
+    COUNT(*) FILTER (WHERE atq.status = 'failed')::int AS failed_count,
+    COUNT(*) FILTER (WHERE atq.status = 'cancelled')::int AS cancelled_count
 FROM agent_task_queue atq
 JOIN agent a ON a.id = atq.agent_id
 LEFT JOIN issue i ON i.id = atq.issue_id
 WHERE a.workspace_id = $1
-  AND atq.status IN ('completed', 'failed')
+  AND atq.status IN ('completed', 'failed', 'cancelled')
   AND atq.started_at IS NOT NULL
   AND atq.completed_at IS NOT NULL
   AND atq.completed_at >= @since::timestamptz

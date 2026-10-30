@@ -6,6 +6,7 @@ import { ProjectDetailPage } from "./pages/project-detail-page";
 import { AutopilotDetailPage } from "./pages/autopilot-detail-page";
 import { SkillDetailPage } from "./pages/skill-detail-page";
 import { AgentDetailPage } from "./pages/agent-detail-page";
+import { AiBuilderSessionPage } from "./pages/ai-builder-session-page";
 import { MemberDetailPage } from "./pages/member-detail-page";
 import {
   RuntimeDetailPage,
@@ -20,13 +21,18 @@ import { MyIssuesPage } from "@multica/views/my-issues";
 import { SkillsPage } from "@multica/views/skills";
 import { DesktopRuntimesPage } from "./components/desktop-runtimes-page";
 import { DesktopAgentsPage } from "./components/desktop-agents-page";
-import { AgentCreationStudio } from "@multica/views/agents";
+import {
+  AiCreateAgentPage,
+  ManualCreateAgentPage,
+} from "@multica/views/agents";
+import { DesktopChooseRuntimePage } from "./components/desktop-choose-runtime-page";
+import { AgentCreatedPage } from "./pages/agent-created-page";
 import { SquadsPage, SquadDetailPage as SquadDetailPageView } from "@multica/views/squads/components";
 import { InboxPage } from "@multica/views/inbox";
 import { ChatPage } from "@multica/views/chat";
 import { SettingsPage } from "@multica/views/settings";
 import { useT } from "@multica/views/i18n";
-import { Download, Server } from "lucide-react";
+import { Download, Server } from "@multica/ui/icons";
 import { DaemonSettingsTab } from "./components/daemon-settings-tab";
 import { UpdatesSettingsTab } from "./components/updates-settings-tab";
 import { WorkspaceRouteLayout } from "./components/workspace-route-layout";
@@ -41,10 +47,10 @@ function DesktopSettingsRoute() {
   const { t } = useT("settings");
   return (
     <SettingsPage
-      extraAccountTabs={[
+      extraDeviceTabs={[
         {
           value: "daemon",
-          label: "Daemon",
+          label: t(($) => $.desktop.daemon.title),
           icon: Server,
           content: <DaemonSettingsTab />,
         },
@@ -179,7 +185,31 @@ export const appRoutes: RouteObject[] = [
             handle: { title: "Skill" },
           },
           { path: "agents", element: <DesktopAgentsPage />, handle: { title: "Agents" } },
-          { path: "agents/new", element: <AgentCreationStudio />, handle: { title: "Create Agent" } },
+          {
+            path: "agents/new",
+            element: <DesktopChooseRuntimePage />,
+            handle: { title: "Create Agent" },
+          },
+          {
+            path: "agents/new/done/:agentId",
+            element: <AgentCreatedPage />,
+            handle: { title: "Create Agent" },
+          },
+          {
+            path: "agents/new/manual",
+            element: <ManualCreateAgentPage />,
+            handle: { title: "Create Agent" },
+          },
+          {
+            path: "agents/new/ai",
+            element: <AiCreateAgentPage />,
+            handle: { title: "Create Agent" },
+          },
+          {
+            path: "agents/new/ai/:sessionId",
+            element: <AiBuilderSessionPage />,
+            handle: { title: "Create Agent" },
+          },
           {
             path: "agents/:id",
             element: <AgentDetailPage />,

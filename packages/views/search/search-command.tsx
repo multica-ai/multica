@@ -1,762 +1,262 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import {
-  Check,
-  Clock,
-  Copy,
-  FileText,
-  Link2,
-  Loader2,
-  MessageSquare,
-  Plus,
-  SearchIcon,
-  ListChevronsDownUp,
-  ListChevronsUpDown,
-  Monitor,
-  Moon,
-  Sun,
-  type LucideIcon,
-} from "lucide-react";
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { ChevronRight, SearchIcon, Sparkles } from "@multica/ui/icons";
 import { Command as CommandPrimitive } from "cmdk";
-import { useQueries, useQuery, useQueryClient } from "@tanstack/react-query";
-import { toast } from "sonner";
-import type {
-  MemberWithUser,
-  SearchIssueResult,
-  SearchProjectResult,
-} from "@multica/core/types";
-import { api } from "@multica/core/api";
-import {
-  openCreateIssueWithPreference,
-  selectRecentIssues,
-  useCommentCollapseStore,
-  useRecentIssuesStore,
-  useResolvedExpandStore,
-} from "@multica/core/issues/stores";
-import { issueDetailOptions, issueTimelineOptions } from "@multica/core/issues/queries";
-import { useWorkspaceId } from "@multica/core";
-import { useWorkspacePaths } from "@multica/core/paths";
-import type { WorkspacePaths } from "@multica/core/paths";
-import { useModalStore } from "@multica/core/modals";
+import { selectCommandBarContexts, useCommandBarContextStore } from "@multica/core/command-bar";
 import { createShortcutChord } from "@multica/core/shortcuts";
-import { memberListOptions } from "@multica/core/workspace/queries";
-import { resolvePublicFileUrl } from "@multica/core/workspace/avatar-url";
-import { StatusIcon } from "../issues/components";
-import { resolvedThreadRootIds, rootCommentIds } from "../issues/components/thread-utils";
-import { ProjectIcon } from "../projects/components/project-icon";
-import { routeIconForPath } from "../layout/route-icon-components";
-import { PROJECT_STATUS_CONFIG } from "@multica/core/projects/config";
-import type { ProjectStatus } from "@multica/core/types";
-import { ActorAvatar } from "../common/actor-avatar";
-import { ShortcutKeycaps } from "../common/shortcut-keycaps";
-import { ActorAvatar as ActorAvatarBase } from "@multica/ui/components/common/actor-avatar";
 import {
   Dialog,
   DialogContent,
+  DialogDescription,
   DialogHeader,
   DialogTitle,
-  DialogDescription,
 } from "@multica/ui/components/ui/dialog";
-import { useTheme } from "@multica/ui/components/common/theme-provider";
-import { copyText } from "@multica/ui/lib/clipboard";
-import { useNavigation } from "../navigation";
+import { ShortcutKeycaps } from "../common/shortcut-keycaps";
+import { resolveClickIntent, useIntentNavigate, type LinkClickIntent } from "../navigation";
 import { useT } from "../i18n";
-import { matchesPinyin } from "../editor/extensions/pinyin-match";
-import { HighlightText } from "./highlight-text";
+import { PaletteContext, type PaletteApi } from "./palette-context";
+import { PaletteFooter } from "./footer";
+import { PaletteHostDialogs } from "./host-dialogs";
+import { PageView } from "./pages/page-view";
+import { RootView } from "./root-view";
+import { useDelegateSubmit } from "./delegate/use-delegate";
+import { useRootModel } from "./use-root-model";
 import { useSearchStore } from "./search-store";
+import type { DelegateActor, PaletteHostDialog, PaletteStackEntry } from "./types";
 
-// Nav items reference WorkspacePaths method names so they can be resolved
-// against the current workspace slug at render time (see SearchCommand body).
-// Only parameterless paths are valid nav destinations.
-type NavKey =
-  | "inbox"
-  | "myIssues"
-  | "issues"
-  | "projects"
-  | "agents"
-  | "runtimes"
-  | "skills"
-  | "settings";
+const ESCAPE = createShortcutChord("Escape");
 
-// No `icon` field: like the sidebar nav, a page's icon is derived from its
-// destination path via routeIconForPath, so all navigation surfaces show the
-// same icon for the same route.
-interface NavPage {
-  key: NavKey;
-  label: string;
-  keywords: string[];
-}
-
-type ThemeValue = "light" | "dark" | "system";
-
-function memberInitials(name: string) {
-  return name
-    .split(" ")
-    .map((word) => word[0])
-    .join("")
-    .toUpperCase()
-    .slice(0, 2);
-}
-
-function matchesMember(member: MemberWithUser, query: string) {
-  return (
-    member.name.toLowerCase().includes(query) ||
-    member.email.toLowerCase().includes(query) ||
-    (query.length >= 3 && member.role.startsWith(query)) ||
-    matchesPinyin(member.name, query)
-  );
-}
-
-function IssueAssigneeAvatar({
-  assigneeType,
-  assigneeId,
-}: {
-  assigneeType?: string | null;
-  assigneeId?: string | null;
-}) {
-  if (!assigneeType || !assigneeId) return null;
-  return (
-    <ActorAvatar
-      actorType={assigneeType}
-      actorId={assigneeId}
-      size="sm"
-      profileLink={false}
-      className="shrink-0"
-    />
-  );
-}
-
-interface CommandItem {
-  key: string;
-  label: string;
-  icon: LucideIcon;
-  keywords: string[];
-  trailing?: React.ReactNode;
-  onSelect: () => void;
-}
-
-interface SearchResults {
-  issues: SearchIssueResult[];
-  projects: SearchProjectResult[];
-}
-
+/**
+ * ⌘K. The shell owns the dialog, the input, the page stack and the footer;
+ * what the palette offers comes from the pages on screen (registered contexts)
+ * and the search over workspace objects.
+ */
 export function SearchCommand() {
   const { t } = useT("search");
-  const navPages: NavPage[] = [
-    { key: "inbox", label: t(($) => $.pages.inbox), keywords: ["inbox", "notifications", "收件箱"] },
-    { key: "myIssues", label: t(($) => $.pages.my_issues), keywords: ["my", "issues", "assigned", "我的"] },
-    { key: "issues", label: t(($) => $.pages.issues), keywords: ["issues", "tasks", "bugs"] },
-    { key: "projects", label: t(($) => $.pages.projects), keywords: ["projects", "kanban", "项目"] },
-    { key: "agents", label: t(($) => $.pages.agents), keywords: ["agents", "bots", "ai"] },
-    { key: "runtimes", label: t(($) => $.pages.runtimes), keywords: ["runtimes", "environments"] },
-    { key: "skills", label: t(($) => $.pages.skills), keywords: ["skills", "library"] },
-    { key: "settings", label: t(($) => $.pages.settings), keywords: ["settings", "config", "preferences", "设置"] },
-  ];
-  const { push, pathname, getShareableUrl } = useNavigation();
   const open = useSearchStore((s) => s.open);
   const setOpen = useSearchStore((s) => s.setOpen);
-  const wsId = useWorkspaceId();
-  const recentItems = useRecentIssuesStore(selectRecentIssues(wsId));
-  const p: WorkspacePaths = useWorkspacePaths();
-  const { theme, setTheme } = useTheme();
-  const { data: members = [] } = useQuery(memberListOptions(wsId));
-
-  // Resolve each recent issue via its cached detail entry. Recent items are
-  // typically already in the detail cache because the user has opened them;
-  // if not, this triggers a lookup per id so Recent never depends on whether
-  // the issue falls inside the paginated list cache.
-  const recentDetailQueries = useQueries({
-    queries: recentItems.map((item) => issueDetailOptions(wsId, item.id)),
-  });
-  const recentIssues = useMemo(
-    () =>
-      recentDetailQueries.flatMap((q) => (q.data ? [q.data] : [])),
-    [recentDetailQueries],
+  const [hostDialog, setHostDialog] = useState<PaletteHostDialog | null>(null);
+  const close = useCallback(() => setOpen(false), [setOpen]);
+  const openHostDialog = useCallback(
+    (dialog: PaletteHostDialog) => {
+      setOpen(false);
+      setHostDialog(dialog);
+    },
+    [setOpen],
   );
 
-  const [query, setQuery] = useState("");
-  const [results, setResults] = useState<SearchResults>({ issues: [], projects: [] });
-  const [isLoading, setIsLoading] = useState(false);
-  const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const abortRef = useRef<AbortController | null>(null);
+  return (
+    <>
+      <Dialog open={open} onOpenChange={setOpen}>
+        <DialogContent
+          finalFocus={false}
+          className="top-[20%] translate-y-0 overflow-hidden rounded-xl! p-0 sm:max-w-[640px]!"
+          showCloseButton={false}
+        >
+          <DialogHeader className="sr-only">
+            <DialogTitle>{t(($) => $.title)}</DialogTitle>
+            <DialogDescription>{t(($) => $.description)}</DialogDescription>
+          </DialogHeader>
+          {open && <PaletteBody close={close} openHostDialog={openHostDialog} />}
+        </DialogContent>
+      </Dialog>
+      <PaletteHostDialogs dialog={hostDialog} onClose={() => setHostDialog(null)} />
+    </>
+  );
+}
 
-  const filteredPages = useMemo(() => {
-    const q = query.trim().toLowerCase();
-    if (!q) return [];
-    return navPages.filter(
-      (page) =>
-        page.label.toLowerCase().includes(q) ||
-        page.keywords.some((kw) => kw.includes(q)),
-    );
-  }, [query]);
+function PaletteBody({
+  close,
+  openHostDialog,
+}: {
+  close: () => void;
+  openHostDialog: (dialog: PaletteHostDialog) => void;
+}) {
+  const intentNavigate = useIntentNavigate();
+  const [pageQuery, setPageQuery] = useState("");
+  const [stack, setStack] = useState<PaletteStackEntry[]>([]);
 
-  // Detect if current route is an issue detail page — /{slug}/issues/{id}.
-  // Falls back to null on any other route; used to gate issue-specific commands.
-  const currentIssueId = useMemo(() => {
-    const match = pathname.match(/\/issues\/([^/]+)$/);
-    const raw = match?.[1];
-    return raw ? decodeURIComponent(raw) : null;
-  }, [pathname]);
-  const { data: currentIssue = null } = useQuery({
-    ...issueDetailOptions(wsId, currentIssueId ?? ""),
-    enabled: !!currentIssueId,
-  });
-  const queryClient = useQueryClient();
+  // cmdk's onSelect carries no event, so the activating gesture's modifiers
+  // are recorded on the capture phase (click on a result, Enter in the input)
+  // and consumed by the select handlers below: cmd+click / cmd+Enter opens a
+  // result in a new tab instead of navigating in place.
+  const pendingIntentRef = useRef<LinkClickIntent>("push");
+  const recordIntent = useCallback(
+    (e: Pick<MouseEvent, "button" | "metaKey" | "ctrlKey" | "shiftKey">) => {
+      pendingIntentRef.current = resolveClickIntent(e);
+    },
+    [],
+  );
+  const consumeIntent = useCallback(() => {
+    const intent = pendingIntentRef.current;
+    pendingIntentRef.current = "push";
+    return intent;
+  }, []);
 
-  const commands = useMemo<CommandItem[]>(() => {
-    const activeThemeCheck = (value: ThemeValue) =>
-      theme === value ? (
-        <Check
-          aria-label={t(($) => $.commands.current_theme_aria)}
-          className="ml-auto size-4 shrink-0 text-muted-foreground"
-        />
-      ) : undefined;
+  const push = useCallback((entry: PaletteStackEntry) => {
+    setStack((prev) => [...prev, entry]);
+    setPageQuery("");
+  }, []);
 
-    const items: CommandItem[] = [
-      {
-        key: "new-issue",
-        label: t(($) => $.commands.new_issue),
-        icon: Plus,
-        keywords: ["new", "issue", "create", "add"],
-        onSelect: () => {
-          openCreateIssueWithPreference();
-          setOpen(false);
-        },
+  const api = useMemo<PaletteApi>(
+    () => ({
+      close,
+      push,
+      navigate: (href) => {
+        close();
+        intentNavigate(href, consumeIntent());
       },
-      {
-        key: "new-project",
-        label: t(($) => $.commands.new_project),
-        icon: Plus,
-        keywords: ["new", "project", "create", "add"],
-        onSelect: () => {
-          useModalStore.getState().open("create-project");
-          setOpen(false);
-        },
-      },
-    ];
-
-    if (currentIssueId && currentIssue) {
-      const identifier = currentIssue.identifier;
-      items.push(
-        {
-          key: "copy-issue-link",
-          label: t(($) => $.commands.copy_issue_link),
-          icon: Link2,
-          keywords: ["copy", "link", "share", "url", identifier.toLowerCase()],
-          onSelect: () => {
-            void copyText(getShareableUrl(pathname)).then((ok) => {
-              if (ok) toast.success(t(($) => $.toast.link_copied));
-            });
-            setOpen(false);
-          },
-        },
-        {
-          key: "copy-issue-identifier",
-          label: t(($) => $.commands.copy_identifier, { identifier }),
-          icon: Copy,
-          keywords: ["copy", "id", "identifier", identifier.toLowerCase()],
-          onSelect: () => {
-            void copyText(identifier).then((ok) => {
-              if (ok) toast.success(t(($) => $.toast.copied_identifier, { identifier }));
-            });
-            setOpen(false);
-          },
-        },
-        {
-          key: "fold-all-comments",
-          label: t(($) => $.commands.fold_all_comments),
-          icon: ListChevronsDownUp,
-          keywords: ["fold", "collapse", "comments", "收起", "折叠", "评论"],
-          onSelect: () => {
-            // The timeline is already cached whenever the issue page has
-            // rendered; ensureQueryData only fetches on a cold cache. If it
-            // still can't load, no comments are on screen — dropping the
-            // action matches the visible state.
-            void queryClient
-              .ensureQueryData(issueTimelineOptions(currentIssueId))
-              .then((entries) => {
-                useCommentCollapseStore
-                  .getState()
-                  .collapseAll(currentIssueId, rootCommentIds(entries));
-                useResolvedExpandStore.getState().collapseAll(currentIssueId);
-              })
-              .catch(() => {});
-            setOpen(false);
-          },
-        },
-        {
-          key: "unfold-all-comments",
-          label: t(($) => $.commands.unfold_all_comments),
-          icon: ListChevronsUpDown,
-          keywords: ["unfold", "expand", "comments", "展开", "评论"],
-          onSelect: () => {
-            void queryClient
-              .ensureQueryData(issueTimelineOptions(currentIssueId))
-              .then((entries) => {
-                useCommentCollapseStore.getState().expandAll(currentIssueId);
-                useResolvedExpandStore
-                  .getState()
-                  .expandAll(currentIssueId, resolvedThreadRootIds(entries));
-              })
-              .catch(() => {});
-            setOpen(false);
-          },
-        },
-      );
-    }
-
-    items.push(
-      {
-        key: "theme-light",
-        label: t(($) => $.commands.switch_to_light),
-        icon: Sun,
-        keywords: ["light", "theme", "appearance", "mode", "bright"],
-        trailing: activeThemeCheck("light"),
-        onSelect: () => {
-          setTheme("light");
-          setOpen(false);
-        },
-      },
-      {
-        key: "theme-dark",
-        label: t(($) => $.commands.switch_to_dark),
-        icon: Moon,
-        keywords: ["dark", "theme", "appearance", "mode", "night"],
-        trailing: activeThemeCheck("dark"),
-        onSelect: () => {
-          setTheme("dark");
-          setOpen(false);
-        },
-      },
-      {
-        key: "theme-system",
-        label: t(($) => $.commands.use_system_theme),
-        icon: Monitor,
-        keywords: ["system", "theme", "appearance", "mode", "auto"],
-        trailing: activeThemeCheck("system"),
-        onSelect: () => {
-          setTheme("system");
-          setOpen(false);
-        },
-      },
-    );
-
-    return items;
-  }, [currentIssue, currentIssueId, getShareableUrl, pathname, queryClient, setOpen, setTheme, theme, t]);
-
-  const filteredCommands = useMemo(() => {
-    const q = query.trim().toLowerCase();
-    // No query: only surface the primary creation action. Other commands
-    // (theme switches, copy actions, New Project) are revealed as the user
-    // types, leaving the empty-state space to Recent.
-    if (!q) return commands.filter((c) => c.key === "new-issue");
-    return commands.filter(
-      (c) =>
-        c.label.toLowerCase().includes(q) ||
-        c.keywords.some((kw) => kw.includes(q)),
-    );
-  }, [commands, query]);
-
-  const filteredMembers = useMemo(() => {
-    const q = query.trim().toLowerCase();
-    if (!q) return [];
-    const wantsAllMembers =
-      q.length >= 3 &&
-      ("members".startsWith(q) ||
-        "people".startsWith(q) ||
-        "users".startsWith(q) ||
-        "team".startsWith(q));
-    return members
-      .filter((member) => wantsAllMembers || matchesMember(member, q))
-      .slice(0, 10);
-  }, [members, query]);
-
-  const hasResults =
-    results.issues.length > 0 ||
-    results.projects.length > 0 ||
-    filteredMembers.length > 0;
+      openHostDialog,
+    }),
+    [close, consumeIntent, intentNavigate, openHostDialog, push],
+  );
 
   // Close on single ESC — capture phase fires before base-ui Dialog's handlers
   useEffect(() => {
-    if (!open) return;
     const handleEsc = (e: KeyboardEvent) => {
       if (e.key === "Escape") {
         e.preventDefault();
         e.stopPropagation();
-        setOpen(false);
+        close();
       }
     };
     document.addEventListener("keydown", handleEsc, true);
     return () => document.removeEventListener("keydown", handleEsc, true);
-  }, [open, setOpen]);
-
-  // Cleanup debounce/abort on unmount
-  useEffect(() => {
-    return () => {
-      if (debounceRef.current) clearTimeout(debounceRef.current);
-      if (abortRef.current) abortRef.current.abort();
-    };
-  }, []);
-
-  // Reset state when dialog closes
-  useEffect(() => {
-    if (!open) {
-      setQuery("");
-      setResults({ issues: [], projects: [] });
-      setIsLoading(false);
-    }
-  }, [open]);
-
-  const search = useCallback((q: string) => {
-    if (debounceRef.current) clearTimeout(debounceRef.current);
-    if (abortRef.current) abortRef.current.abort();
-
-    if (!q.trim()) {
-      setResults({ issues: [], projects: [] });
-      setIsLoading(false);
-      return;
-    }
-
-    setIsLoading(true);
-    debounceRef.current = setTimeout(async () => {
-      const controller = new AbortController();
-      abortRef.current = controller;
-      try {
-        const [issueRes, projectRes] = await Promise.all([
-          api.searchIssues({
-            q: q.trim(),
-            limit: 20,
-            include_closed: true,
-            signal: controller.signal,
-          }),
-          api.searchProjects({
-            q: q.trim(),
-            limit: 10,
-            include_closed: true,
-            signal: controller.signal,
-          }),
-        ]);
-        if (!controller.signal.aborted) {
-          setResults({
-            issues: issueRes.issues,
-            projects: projectRes.projects,
-          });
-          setIsLoading(false);
-        }
-      } catch {
-        if (!controller.signal.aborted) {
-          setIsLoading(false);
-        }
-      }
-    }, 300);
-  }, []);
-
-  const handleValueChange = useCallback(
-    (value: string) => {
-      setQuery(value);
-      search(value);
-    },
-    [search],
-  );
-
-  const handleSelect = useCallback(
-    (value: string) => {
-      setOpen(false);
-      if (value.startsWith("project:")) {
-        // value is "project:<id>" — slice off the 8-char prefix to extract the id.
-        push(p.projectDetail(value.slice(8)));
-      } else {
-        push(p.issueDetail(value));
-      }
-    },
-    [push, setOpen, p],
-  );
-
-  const handlePageSelect = useCallback(
-    (key: NavKey) => {
-      setOpen(false);
-      push(p[key]());
-    },
-    [push, setOpen, p],
-  );
-
-  const handleMemberSelect = useCallback(
-    (userId: string) => {
-      push(p.memberDetail(userId));
-      setOpen(false);
-    },
-    [push, setOpen, p],
-  );
+  }, [close]);
 
   return (
-    <Dialog open={open} onOpenChange={setOpen}>
-      <DialogContent
-        finalFocus={false}
-        className="top-[20%] translate-y-0 overflow-hidden rounded-xl! p-0 sm:max-w-xl!"
-        showCloseButton={false}
+    <PaletteContext.Provider value={api}>
+      <PaletteFrame
+        stack={stack}
+        setStack={setStack}
+        pageQuery={pageQuery}
+        setPageQuery={setPageQuery}
+        recordIntent={recordIntent}
+      />
+    </PaletteContext.Provider>
+  );
+}
+
+/** Everything that reads the palette API lives under its provider. */
+function PaletteFrame({
+  stack,
+  setStack,
+  pageQuery,
+  setPageQuery,
+  recordIntent,
+}: {
+  stack: PaletteStackEntry[];
+  setStack: React.Dispatch<React.SetStateAction<PaletteStackEntry[]>>;
+  pageQuery: string;
+  setPageQuery: (value: string) => void;
+  recordIntent: (e: Pick<MouseEvent, "button" | "metaKey" | "ctrlKey" | "shiftKey">) => void;
+}) {
+  const { t } = useT("search");
+  const entries = useCommandBarContextStore(selectCommandBarContexts);
+  const contexts = useMemo(() => entries.map((entry) => entry.context), [entries]);
+  const [rawQuery, setRawQuery] = useState("");
+  const [dismissedDelegateFor, setDismissedDelegateFor] = useState<string | null>(null);
+  const current = stack[stack.length - 1] ?? null;
+  const inputValue = current ? pageQuery : rawQuery;
+
+  const model = useRootModel(rawQuery, contexts, { active: true, dismissedDelegateFor });
+  const submitDelegate = useDelegateSubmit();
+  const onDelegate = useCallback(
+    (actor: DelegateActor, prompt: string) => void submitDelegate(actor, prompt, model.attachments),
+    [model.attachments, submitDelegate],
+  );
+
+  const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    // cmdk's root handler intercepts Home/End for list navigation; stop
+    // propagation so the browser moves the text caret instead.
+    if (e.key === "Home" || e.key === "End") {
+      e.stopPropagation();
+      return;
+    }
+    if (e.key === "Backspace" && current && pageQuery === "") {
+      e.preventDefault();
+      setStack((prev) => prev.slice(0, -1));
+      return;
+    }
+    // ⇧↵ treats an input that read as an instruction as a plain search.
+    if (!current && e.key === "Enter" && e.shiftKey && model.delegate) {
+      e.preventDefault();
+      setDismissedDelegateFor(rawQuery);
+    }
+  };
+
+  const delegate = !current ? model.delegate : null;
+
+  return (
+    <>
+      <CommandPrimitive
+        key={stack.length}
+        label={t(($) => $.title)}
+        shouldFilter={false}
+        onPointerDownCapture={recordIntent}
+        onClickCapture={recordIntent}
+        onKeyDownCapture={(e) => {
+          if (e.key === "Enter") {
+            recordIntent({ button: 0, metaKey: e.metaKey, ctrlKey: e.ctrlKey, shiftKey: e.shiftKey });
+          }
+        }}
+        className="flex size-full flex-col overflow-hidden rounded-xl bg-popover text-popover-foreground"
       >
-        <DialogHeader className="sr-only">
-          <DialogTitle>{t(($) => $.title)}</DialogTitle>
-          <DialogDescription>
-            {t(($) => $.description)}
-          </DialogDescription>
-        </DialogHeader>
-        <CommandPrimitive
-          shouldFilter={false}
-          className="flex size-full flex-col overflow-hidden rounded-xl bg-popover text-popover-foreground"
-        >
-          {/* Search input */}
-          <div className="flex items-center gap-3 border-b px-4 py-3">
-            <SearchIcon className="size-5 shrink-0 text-muted-foreground" />
-            <CommandPrimitive.Input
-              placeholder={t(($) => $.placeholder)}
-              value={query}
-              onValueChange={handleValueChange}
-              onKeyDown={(e) => {
-                // cmdk's root handler intercepts Home/End for list navigation;
-                // stop propagation so the browser moves the text caret instead.
-                if (e.key === "Home" || e.key === "End") {
-                  e.stopPropagation();
-                }
-              }}
-              className="flex-1 bg-transparent text-sm outline-none placeholder:text-muted-foreground"
-            />
-            <ShortcutKeycaps
-              shortcut={createShortcutChord("Escape")}
-              className="hidden shrink-0 sm:inline-flex"
-            />
-          </div>
+        <div className="flex items-center gap-2 border-b px-4 py-3">
+          {delegate ? (
+            <Sparkles className="size-4 shrink-0 text-brand" aria-hidden="true" />
+          ) : (
+            <SearchIcon className="size-4 shrink-0 text-muted-foreground" aria-hidden="true" />
+          )}
+          {current && (
+            <nav aria-label={t(($) => $.breadcrumb_aria)} className="flex min-w-0 shrink items-center gap-1">
+              {current.crumbs.map((crumb, index) => (
+                <Fragment key={`${index}:${crumb}`}>
+                  {index > 0 && <ChevronRight className="size-3 shrink-0 text-muted-foreground" />}
+                  <span className="max-w-40 truncate rounded-md bg-muted px-1.5 py-0.5 text-caption font-medium">
+                    {crumb}
+                  </span>
+                </Fragment>
+              ))}
+            </nav>
+          )}
+          <CommandPrimitive.Input
+            autoFocus
+            placeholder={current ? t(($) => $.page_placeholder) : t(($) => $.placeholder)}
+            value={inputValue}
+            onValueChange={(value) => (current ? setPageQuery(value) : setRawQuery(value))}
+            onKeyDown={handleKeyDown}
+            // The input remounts when a page opens or closes; keep the caret
+            // after text carried across.
+            onFocus={(e) => {
+              const end = e.currentTarget.value.length;
+              e.currentTarget.setSelectionRange(end, end);
+            }}
+            className="min-w-0 flex-1 bg-transparent text-body outline-none placeholder:text-muted-foreground"
+          />
+          {delegate && (
+            <span className="hidden shrink-0 items-center gap-1 rounded-md border px-1.5 py-0.5 text-caption text-muted-foreground sm:inline-flex">
+              <Sparkles className="size-3" aria-hidden="true" />
+              {t(($) => $.delegate.detected)}
+            </span>
+          )}
+          <ShortcutKeycaps shortcut={ESCAPE} className="hidden shrink-0 sm:inline-flex" />
+        </div>
 
-          {/* Results list */}
-          <CommandPrimitive.List className="max-h-[min(400px,50vh)] overflow-y-auto overflow-x-hidden">
-            {/* Pages section — only shown when query matches */}
-            {filteredPages.length > 0 && (
-              <CommandPrimitive.Group className="p-2">
-                <div className="px-3 py-1.5 text-xs font-medium text-muted-foreground">
-                  {t(($) => $.groups.pages)}
-                </div>
-                {filteredPages.map((page) => {
-                  const PageIcon = routeIconForPath(p[page.key]());
-                  return (
-                  <CommandPrimitive.Item
-                    key={page.key}
-                    value={`page:${page.key}`}
-                    onSelect={() => handlePageSelect(page.key)}
-                    className="flex cursor-default select-none items-center gap-2.5 rounded-lg px-3 py-2.5 text-sm outline-none data-[disabled=true]:pointer-events-none data-[disabled=true]:opacity-50 data-selected:bg-accent"
-                  >
-                    <PageIcon className="size-4 shrink-0 text-muted-foreground" />
-                    <span className="truncate">
-                      <HighlightText text={page.label} query={query} />
-                    </span>
-                  </CommandPrimitive.Item>
-                  );
-                })}
-              </CommandPrimitive.Group>
-            )}
+        <CommandPrimitive.List className="max-h-[min(440px,55vh)] overflow-y-auto overflow-x-hidden py-1">
+          {current ? (
+            <PageView page={current.page} query={pageQuery} onDelegate={onDelegate} />
+          ) : (
+            <RootView model={model} rawQuery={rawQuery} onDelegate={onDelegate} />
+          )}
+        </CommandPrimitive.List>
 
-            {/* Commands section — New Issue / New Project / Copy link / Theme, only shown when query matches */}
-            {filteredCommands.length > 0 && (
-              <CommandPrimitive.Group className="p-2">
-                <div className="px-3 py-1.5 text-xs font-medium text-muted-foreground">
-                  {t(($) => $.groups.commands)}
-                </div>
-                {filteredCommands.map((cmd) => (
-                  <CommandPrimitive.Item
-                    key={cmd.key}
-                    value={`command:${cmd.key}`}
-                    onSelect={cmd.onSelect}
-                    className="flex cursor-default select-none items-center gap-2.5 rounded-lg px-3 py-2.5 text-sm outline-none data-[disabled=true]:pointer-events-none data-[disabled=true]:opacity-50 data-selected:bg-accent"
-                  >
-                    <cmd.icon className="size-4 shrink-0 text-muted-foreground" />
-                    <span className="truncate">
-                      <HighlightText text={cmd.label} query={query} />
-                    </span>
-                    {cmd.trailing}
-                  </CommandPrimitive.Item>
-                ))}
-              </CommandPrimitive.Group>
-            )}
-
-            {filteredMembers.length > 0 && (
-              <CommandPrimitive.Group className="p-2">
-                <div className="px-3 py-1.5 text-xs font-medium text-muted-foreground">
-                  {t(($) => $.groups.members)}
-                </div>
-                {filteredMembers.map((member) => (
-                  <CommandPrimitive.Item
-                    key={member.user_id}
-                    value={`member:${member.user_id}`}
-                    onSelect={() => handleMemberSelect(member.user_id)}
-                    className="flex cursor-default select-none items-center gap-2.5 rounded-lg px-3 py-2.5 text-sm outline-none data-[disabled=true]:pointer-events-none data-[disabled=true]:opacity-50 data-selected:bg-accent"
-                  >
-                    <ActorAvatarBase
-                      name={member.name}
-                      initials={memberInitials(member.name)}
-                      avatarUrl={resolvePublicFileUrl(member.avatar_url)}
-                      size="md"
-                    />
-                    <div className="min-w-0 flex-1">
-                      <div className="truncate">
-                        <HighlightText text={member.name} query={query} />
-                      </div>
-                      <div className="truncate text-xs text-muted-foreground">
-                        <HighlightText text={member.email} query={query} />
-                      </div>
-                    </div>
-                  </CommandPrimitive.Item>
-                ))}
-              </CommandPrimitive.Group>
-            )}
-
-            {isLoading && (
-              <div className="flex items-center justify-center py-10">
-                <Loader2 className="size-5 animate-spin text-muted-foreground" />
-              </div>
-            )}
-
-            {!isLoading &&
-              query.trim() &&
-              !hasResults &&
-              filteredPages.length === 0 &&
-              filteredCommands.length === 0 && (
-                <CommandPrimitive.Empty className="py-10 text-center text-sm text-muted-foreground">
-                  {t(($) => $.empty.no_results)}
-                </CommandPrimitive.Empty>
-              )}
-
-            {!isLoading && results.projects.length > 0 && (
-              <CommandPrimitive.Group
-                heading={t(($) => $.groups.projects)}
-                className="p-2 [&_[cmdk-group-heading]]:px-3 [&_[cmdk-group-heading]]:py-1.5 [&_[cmdk-group-heading]]:text-xs [&_[cmdk-group-heading]]:font-medium [&_[cmdk-group-heading]]:text-muted-foreground"
-              >
-                {results.projects.map((project) => (
-                  <CommandPrimitive.Item
-                    key={`project:${project.id}`}
-                    value={`project:${project.id}`}
-                    onSelect={handleSelect}
-                    className="flex cursor-default select-none flex-col gap-1 rounded-lg px-3 py-2.5 text-sm outline-none data-[disabled=true]:pointer-events-none data-[disabled=true]:opacity-50 data-selected:bg-accent"
-                  >
-                    <div className="flex items-center gap-2.5">
-                      <ProjectIcon project={project} size="md" />
-                      <span className="truncate">
-                        <HighlightText text={project.title} query={query} />
-                      </span>
-                      <span
-                        className={`ml-auto text-xs shrink-0 ${PROJECT_STATUS_CONFIG[project.status as ProjectStatus]?.color ?? "text-muted-foreground"}`}
-                      >
-                        {PROJECT_STATUS_CONFIG[project.status as ProjectStatus]?.label ?? project.status}
-                      </span>
-                    </div>
-                    {project.match_source === "description" &&
-                      project.matched_snippet && (
-                        <div className="flex items-start gap-2 pl-[26px]">
-                          <span className="text-xs text-muted-foreground truncate">
-                            <HighlightText
-                              text={project.matched_snippet}
-                              query={query}
-                            />
-                          </span>
-                        </div>
-                      )}
-                  </CommandPrimitive.Item>
-                ))}
-              </CommandPrimitive.Group>
-            )}
-
-            {!isLoading && results.issues.length > 0 && (
-              <CommandPrimitive.Group
-                heading={t(($) => $.groups.issues)}
-                className="p-2 [&_[cmdk-group-heading]]:px-3 [&_[cmdk-group-heading]]:py-1.5 [&_[cmdk-group-heading]]:text-xs [&_[cmdk-group-heading]]:font-medium [&_[cmdk-group-heading]]:text-muted-foreground"
-              >
-                {results.issues.map((issue) => (
-                  <CommandPrimitive.Item
-                    key={issue.id}
-                    value={issue.id}
-                    onSelect={handleSelect}
-                    className="flex cursor-default select-none flex-col gap-1 rounded-lg px-3 py-2.5 text-sm outline-none data-[disabled=true]:pointer-events-none data-[disabled=true]:opacity-50 data-selected:bg-accent"
-                  >
-                    <div className="flex items-center gap-2.5">
-                      <StatusIcon
-                        status={issue.status}
-                        className="size-4 shrink-0"
-                      />
-                      <span className="text-xs text-muted-foreground shrink-0">
-                        {issue.identifier}
-                      </span>
-                      <span className="min-w-0 flex-1 truncate">
-                        <HighlightText text={issue.title} query={query} />
-                      </span>
-                      <IssueAssigneeAvatar
-                        assigneeType={issue.assignee_type}
-                        assigneeId={issue.assignee_id}
-                      />
-                    </div>
-                    {issue.matched_description_snippet && (
-                      <div className="flex items-start gap-2 pl-[26px]">
-                        <FileText className="size-3 shrink-0 text-muted-foreground mt-0.5" />
-                        <span className="text-xs text-muted-foreground truncate">
-                          <HighlightText
-                            text={issue.matched_description_snippet}
-                            query={query}
-                          />
-                        </span>
-                      </div>
-                    )}
-                    {issue.matched_comment_snippet && (
-                      <div className="flex items-start gap-2 pl-[26px]">
-                        <MessageSquare className="size-3 shrink-0 text-muted-foreground mt-0.5" />
-                        <span className="text-xs text-muted-foreground truncate">
-                          <HighlightText
-                            text={issue.matched_comment_snippet}
-                            query={query}
-                          />
-                        </span>
-                      </div>
-                    )}
-                  </CommandPrimitive.Item>
-                ))}
-              </CommandPrimitive.Group>
-            )}
-
-            {!isLoading && !query.trim() && recentIssues.length > 0 && (
-              <CommandPrimitive.Group className="p-2">
-                <div className="flex items-center gap-2 px-3 py-1.5 text-xs font-medium text-muted-foreground">
-                  <Clock className="size-3" />
-                  <span>{t(($) => $.groups.recent)}</span>
-                </div>
-                {recentIssues.map((item) => (
-                  <CommandPrimitive.Item
-                    key={item.id}
-                    value={item.id}
-                    onSelect={handleSelect}
-                    className="flex cursor-default select-none items-center gap-2.5 rounded-lg px-3 py-2.5 text-sm outline-none data-[disabled=true]:pointer-events-none data-[disabled=true]:opacity-50 data-selected:bg-accent"
-                  >
-                    <StatusIcon
-                      status={item.status}
-                      className="size-4 shrink-0"
-                    />
-                    <span className="text-xs text-muted-foreground shrink-0">
-                      {item.identifier}
-                    </span>
-                    <span className="min-w-0 flex-1 truncate">{item.title}</span>
-                    <IssueAssigneeAvatar
-                      assigneeType={item.assignee_type}
-                      assigneeId={item.assignee_id}
-                    />
-                  </CommandPrimitive.Item>
-                ))}
-              </CommandPrimitive.Group>
-            )}
-
-            {!isLoading && !query.trim() && recentIssues.length === 0 && (
-              <div className="px-5 py-4 text-center text-xs text-muted-foreground">
-                {t(($) => $.empty.type_to_search)}
-              </div>
-            )}
-          </CommandPrimitive.List>
-        </CommandPrimitive>
-      </DialogContent>
-    </Dialog>
+        <PaletteFooter
+          mode={current ? "page" : delegate ? "delegate" : "root"}
+          delegateName={delegate?.actor.name}
+        />
+      </CommandPrimitive>
+    </>
   );
 }

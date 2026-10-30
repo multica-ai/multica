@@ -3,9 +3,11 @@ import { describe, expect, it, vi, beforeEach } from "vitest";
 import {
   sanitizeTabPath,
   resourceKeyForUrl,
+  browsingHistoryKeyForUrl,
   migrateV1ToV2,
   migrateV2ToV3,
   migrateV3ToV4,
+  migrateV4ToV5,
   mergePersistedTabs,
   useTabStore,
   getActiveTab,
@@ -60,6 +62,26 @@ describe("resourceKeyForUrl", () => {
     expect(resourceKeyForUrl("/acme/issues?filter=a")).toBe("/acme/issues");
     expect(resourceKeyForUrl("/acme/issues#anchor")).toBe("/acme/issues");
     expect(resourceKeyForUrl("/acme/issues?filter=a#x")).toBe("/acme/issues");
+  });
+});
+
+describe("browsingHistoryKeyForUrl", () => {
+  it("keeps Inbox selections distinct while ignoring their other view state", () => {
+    expect(browsingHistoryKeyForUrl("/acme/inbox")).toBe("/acme/inbox");
+    expect(browsingHistoryKeyForUrl("/acme/inbox?issue=issue-a")).toBe(
+      "/acme/inbox?issue=issue-a",
+    );
+    expect(
+      browsingHistoryKeyForUrl(
+        "/acme/inbox?view=archived&issue=issue-a#comment-comment-1",
+      ),
+    ).toBe("/acme/inbox?issue=issue-a");
+  });
+
+  it("continues treating ordinary query and hash changes as one resource", () => {
+    expect(browsingHistoryKeyForUrl("/acme/issues?filter=mine#top")).toBe(
+      "/acme/issues",
+    );
   });
 });
 
@@ -125,6 +147,10 @@ describe("useTabStore actions", () => {
       stack: ["/acme/issues"],
       index: 0,
     });
+    expect(s.byWorkspace.acme.browsingHistory).toEqual(["/acme/issues"]);
+    expect(s.byWorkspace.acme.browsingHistoryTitles).toEqual({
+      "/acme/issues": "Issues",
+    });
   });
 
   it("switchWorkspace without openPath restores the group's last active tab", () => {
@@ -158,6 +184,23 @@ describe("useTabStore actions", () => {
     expect(activeTab?.url).toBe("/acme/issues");
   });
 
+  it("records the URL of the tab actually restored by a cross-workspace open", () => {
+    const store = useTabStore.getState();
+    store.switchWorkspace("butter");
+    store.navigateActiveSession("/butter/issues?filter=mine", {
+      replace: true,
+    });
+    store.switchWorkspace("acme");
+
+    store.switchWorkspace("butter", "/butter/issues");
+
+    const state = useTabStore.getState();
+    expect(getActiveTab(state)?.url).toBe("/butter/issues?filter=mine");
+    expect(state.byWorkspace.butter.browsingHistory[0]).toBe(
+      "/butter/issues?filter=mine",
+    );
+  });
+
   it("switchWorkspace with openPath not matching any tab adds a new tab", () => {
     const store = useTabStore.getState();
     store.switchWorkspace("acme");
@@ -179,6 +222,35 @@ describe("useTabStore actions", () => {
     expect(useTabStore.getState().byWorkspace.acme.tabs).toHaveLength(2); // default + projects
   });
 
+  it("shares browsing history across tabs while Back and Forward remain per-tab", () => {
+    const store = useTabStore.getState();
+    store.switchWorkspace("acme");
+    store.navigateActiveSession("/acme/issues/issue-1");
+    const firstTab = getActiveTab(useTabStore.getState())!;
+
+    const newTabId = store.addTab("/acme/issues", "Issues");
+    store.setActiveTab(newTabId);
+
+    const state = useTabStore.getState();
+    const newTab = getActiveTab(state)!;
+    expect(firstTab.history).toEqual({
+      stack: ["/acme/issues", "/acme/issues/issue-1"],
+      index: 1,
+    });
+    expect(newTab.history).toEqual({ stack: ["/acme/issues"], index: 0 });
+    expect(state.byWorkspace.acme.browsingHistory).toEqual([
+      "/acme/issues",
+      "/acme/issues/issue-1",
+    ]);
+
+    store.goBack();
+    expect(getActiveTab(useTabStore.getState())!.url).toBe("/acme/issues");
+    expect(useTabStore.getState().byWorkspace.acme.browsingHistory).toEqual([
+      "/acme/issues",
+      "/acme/issues/issue-1",
+    ]);
+  });
+
   it("openTab with a different query focuses the existing tab and keeps its url (RFC §8.2 semantic change)", () => {
     const store = useTabStore.getState();
     store.switchWorkspace("acme"); // default tab at /acme/issues
@@ -194,15 +266,96 @@ describe("useTabStore actions", () => {
     expect(s.byWorkspace.acme.tabs[0].url).toBe("/acme/issues");
   });
 
+  describe("openTab insertion position (MUL-5860)", () => {
+    const urls = () =>
+      useTabStore.getState().byWorkspace.acme.tabs.map((t) => t.url);
+
+    it("inserts the new tab immediately right of the active tab, not at the end", () => {
+      const store = useTabStore.getState();
+      store.switchWorkspace("acme"); // A = /acme/issues, active
+      store.addTab("/acme/projects", "B");
+      store.addTab("/acme/skills", "C");
+      expect(urls()).toEqual(["/acme/issues", "/acme/projects", "/acme/skills"]);
+
+      store.openTab("/acme/issues/d", "D"); // background: A stays active
+      const s = useTabStore.getState();
+      expect(urls()).toEqual([
+        "/acme/issues",
+        "/acme/issues/d",
+        "/acme/projects",
+        "/acme/skills",
+      ]);
+      expect(getActiveTab(s)?.url).toBe("/acme/issues");
+    });
+
+    it("inserts right of a mid-strip opener", () => {
+      const store = useTabStore.getState();
+      store.switchWorkspace("acme"); // A
+      store.addTab("/acme/projects", "B");
+      store.addTab("/acme/skills", "C");
+      const bId = useTabStore.getState().byWorkspace.acme.tabs[1].id;
+      store.setActiveTab(bId);
+
+      store.openTab("/acme/issues/d", "D", { activate: true });
+      const s = useTabStore.getState();
+      expect(urls()).toEqual([
+        "/acme/issues",
+        "/acme/projects",
+        "/acme/issues/d",
+        "/acme/skills",
+      ]);
+      expect(getActiveTab(s)?.url).toBe("/acme/issues/d"); // foreground open
+    });
+
+    it("a pinned opener's 'right' is the start of the unpinned zone", () => {
+      const store = useTabStore.getState();
+      store.switchWorkspace("acme"); // A
+      store.addTab("/acme/projects", "B");
+      const aId = useTabStore.getState().byWorkspace.acme.tabs[0].id;
+      store.togglePin(aId); // [A(pinned, active), B]
+
+      store.openTab("/acme/issues/d", "D");
+      const s = useTabStore.getState();
+      expect(urls()).toEqual(["/acme/issues", "/acme/issues/d", "/acme/projects"]);
+      expect(s.byWorkspace.acme.tabs[0].pinned).toBe(true);
+      expect(s.byWorkspace.acme.tabs[1].pinned).toBe(false);
+    });
+
+    it("the explicit new-tab button (addTab) still appends", () => {
+      const store = useTabStore.getState();
+      store.switchWorkspace("acme"); // A active
+      store.addTab("/acme/projects", "B");
+      store.addTab("/acme/skills", "C"); // active is still A — must append anyway
+      expect(urls()).toEqual(["/acme/issues", "/acme/projects", "/acme/skills"]);
+    });
+
+    it("a dedupe hit focuses the existing tab without reordering", () => {
+      const store = useTabStore.getState();
+      store.switchWorkspace("acme"); // A active
+      store.addTab("/acme/projects", "B");
+      store.addTab("/acme/skills", "C");
+
+      store.openTab("/acme/skills", "C again"); // hits C, at the far end
+      const s = useTabStore.getState();
+      expect(urls()).toEqual(["/acme/issues", "/acme/projects", "/acme/skills"]);
+      expect(getActiveTab(s)?.url).toBe("/acme/skills");
+    });
+  });
+
   it("closeTab on the last tab in a workspace reseeds the default tab", () => {
     const store = useTabStore.getState();
     store.switchWorkspace("acme");
+    store.navigateActiveSession("/acme/issues/issue-1");
     const onlyTabId = useTabStore.getState().byWorkspace.acme.tabs[0].id;
     store.closeTab(onlyTabId);
     const s = useTabStore.getState();
     expect(s.byWorkspace.acme.tabs).toHaveLength(1);
     expect(s.byWorkspace.acme.tabs[0].url).toBe("/acme/issues");
     expect(s.byWorkspace.acme.tabs[0].id).not.toBe(onlyTabId); // fresh tab
+    expect(s.byWorkspace.acme.browsingHistory).toEqual([
+      "/acme/issues",
+      "/acme/issues/issue-1",
+    ]);
   });
 
   it("ignores updates addressed to a tab after it has been closed", () => {
@@ -332,6 +485,123 @@ describe("navigateActiveSession", () => {
       stack: ["/acme/issues", "/acme/projects?sort=name"],
       index: 1,
     });
+    expect(useTabStore.getState().byWorkspace.acme.browsingHistory).toEqual([
+      "/acme/projects?sort=name",
+      "/acme/issues",
+    ]);
+  });
+
+  it("records an opened issue and keeps only the latest URL for one resource", () => {
+    const store = useTabStore.getState();
+    store.switchWorkspace("acme");
+
+    store.navigateActiveSession("/acme/issues/issue-1");
+    store.navigateActiveSession("/acme/issues/issue-1?tab=activity", {
+      replace: true,
+    });
+    store.navigateActiveSession("/acme/issues/issue-1#comment-comment-1", {
+      replace: true,
+    });
+
+    expect(useTabStore.getState().byWorkspace.acme.browsingHistory).toEqual([
+      "/acme/issues/issue-1#comment-comment-1",
+      "/acme/issues",
+    ]);
+  });
+
+  it("persists the resolved title for a visited resource", () => {
+    const store = useTabStore.getState();
+    store.switchWorkspace("acme");
+    store.navigateActiveSession("/acme/issues/issue-1");
+    const active = getActiveTab(useTabStore.getState())!;
+
+    store.updateTab(active.id, { title: "MUL-1: Fix history" });
+
+    expect(
+      useTabStore.getState().byWorkspace.acme.browsingHistoryTitles,
+    ).toEqual({
+      "/acme/issues": "Issues",
+      "/acme/issues/issue-1": "MUL-1: Fix history",
+    });
+  });
+
+  it("records each issue viewed inside Inbox without changing its replace-based session history", () => {
+    const store = useTabStore.getState();
+    store.switchWorkspace("acme");
+
+    store.navigateActiveSession("/acme/inbox");
+    store.navigateActiveSession("/acme/inbox?issue=issue-a", {
+      replace: true,
+    });
+    store.navigateActiveSession("/acme/inbox?issue=issue-b", {
+      replace: true,
+    });
+
+    const state = useTabStore.getState();
+    expect(getActiveTab(state)?.history).toEqual({
+      stack: ["/acme/issues", "/acme/inbox?issue=issue-b"],
+      index: 1,
+    });
+    expect(state.byWorkspace.acme.browsingHistory).toEqual([
+      "/acme/inbox?issue=issue-b",
+      "/acme/inbox?issue=issue-a",
+      "/acme/inbox",
+      "/acme/issues",
+    ]);
+  });
+
+  it("moves a revisited Inbox issue to the front instead of duplicating it", () => {
+    const store = useTabStore.getState();
+    store.switchWorkspace("acme");
+    store.navigateActiveSession("/acme/inbox");
+    store.navigateActiveSession("/acme/inbox?issue=issue-a", {
+      replace: true,
+    });
+    store.navigateActiveSession("/acme/inbox?issue=issue-b", {
+      replace: true,
+    });
+    store.navigateActiveSession(
+      "/acme/inbox?view=archived&issue=issue-a#comment-comment-1",
+      { replace: true },
+    );
+
+    expect(useTabStore.getState().byWorkspace.acme.browsingHistory).toEqual([
+      "/acme/inbox?view=archived&issue=issue-a#comment-comment-1",
+      "/acme/inbox?issue=issue-b",
+      "/acme/inbox",
+      "/acme/issues",
+    ]);
+  });
+
+  it("records both sides of a navigation when upgrading from an empty browsing history", () => {
+    const store = useTabStore.getState();
+    store.switchWorkspace("acme");
+    const group = useTabStore.getState().byWorkspace.acme;
+    useTabStore.setState({
+      byWorkspace: {
+        acme: { ...group, browsingHistory: [] },
+      },
+    });
+
+    store.navigateActiveSession("/acme/issues/issue-1");
+
+    expect(useTabStore.getState().byWorkspace.acme.browsingHistory).toEqual([
+      "/acme/issues/issue-1",
+      "/acme/issues",
+    ]);
+  });
+
+  it("replaces an issue UUID visit with its canonical identifier URL", () => {
+    const store = useTabStore.getState();
+    store.switchWorkspace("acme");
+
+    store.navigateActiveSession("/acme/issues/01a08a00-0000-7000-8000-000000000001");
+    store.navigateActiveSession("/acme/issues/ACM-1", { replace: true });
+
+    expect(useTabStore.getState().byWorkspace.acme.browsingHistory).toEqual([
+      "/acme/issues/ACM-1",
+      "/acme/issues",
+    ]);
   });
 
   it("replace swaps the current history entry instead of pushing", () => {
@@ -394,6 +664,28 @@ describe("navigateActiveSession", () => {
     store.goForward();
     expect(getActiveTab(useTabStore.getState())!.history.index).toBe(1);
   });
+
+  it("goToHistoryIndex jumps directly and ignores invalid indices", () => {
+    const store = useTabStore.getState();
+    store.switchWorkspace("acme");
+    store.navigateActiveSession("/acme/projects");
+    store.navigateActiveSession("/acme/agents");
+
+    store.goToHistoryIndex(0);
+    let active = getActiveTab(useTabStore.getState())!;
+    expect(active.url).toBe("/acme/issues");
+    expect(active.history.index).toBe(0);
+
+    store.goToHistoryIndex(2);
+    active = getActiveTab(useTabStore.getState())!;
+    expect(active.url).toBe("/acme/agents");
+    expect(active.history.index).toBe(2);
+
+    store.goToHistoryIndex(-1);
+    store.goToHistoryIndex(3);
+    store.goToHistoryIndex(1.5);
+    expect(getActiveTab(useTabStore.getState())).toBe(active);
+  });
 });
 
 describe("reloadActiveTab", () => {
@@ -427,6 +719,7 @@ describe("commitScrollMemento", () => {
 
     expect(useTabStore.getState().byWorkspace.acme.tabs[0].memento).toEqual({
       scroll: { "/acme/issues::board:status:todo": { top: 420, height: 8000 } },
+      view: {},
     });
   });
 
@@ -444,6 +737,7 @@ describe("commitScrollMemento", () => {
 
     expect(useTabStore.getState().byWorkspace.acme.tabs[0].memento).toEqual({
       scroll: {},
+      view: {},
     });
   });
 
@@ -480,6 +774,155 @@ describe("commitScrollMemento", () => {
 
     expect(useTabStore.getState().byWorkspace.acme).toBe(before);
   });
+
+  it("preserves view-state entries across a scroll REPLACE", () => {
+    const store = useTabStore.getState();
+    store.switchWorkspace("acme");
+    const tabId = useTabStore.getState().byWorkspace.acme.tabs[0].id;
+    store.commitViewState(tabId, "/acme/inbox", "highlight:i1", "c1");
+    store.commitScrollMemento(tabId, "/acme/inbox", {
+      list: { top: 500, height: 8000 },
+    });
+
+    // Scrolled back to 0 before leaving: REPLACE clears the route's scroll
+    // entries — but never its view-state entries.
+    store.commitScrollMemento(tabId, "/acme/inbox", {});
+
+    expect(useTabStore.getState().byWorkspace.acme.tabs[0].memento).toEqual({
+      scroll: {},
+      view: { "/acme/inbox::highlight:i1": "c1" },
+    });
+  });
+
+  it("persists contentKey on external-source entries (iframe scroll)", () => {
+    const store = useTabStore.getState();
+    store.switchWorkspace("acme");
+    const tabId = useTabStore.getState().byWorkspace.acme.tabs[0].id;
+    store.commitScrollMemento(tabId, "/acme/attachments/x/preview", {
+      "html-iframe": { top: 400, height: 9000, contentKey: "abc123" },
+    });
+
+    expect(
+      useTabStore.getState().byWorkspace.acme.tabs[0].memento.scroll[
+        "/acme/attachments/x/preview::html-iframe"
+      ],
+    ).toEqual({ top: 400, height: 9000, contentKey: "abc123" });
+  });
+
+  it("treats top:0 with a new contentKey as a change so it REPLACES a stale positive offset", () => {
+    const store = useTabStore.getState();
+    store.switchWorkspace("acme");
+    const tabId = useTabStore.getState().byWorkspace.acme.tabs[0].id;
+    const route = "/acme/attachments/x/preview";
+
+    store.commitScrollMemento(tabId, route, {
+      "html-iframe": { top: 800, height: 9000, contentKey: "v1" },
+    });
+    // Content changed (re-upload): the new document hasn't scrolled yet so
+    // capture reports top:0 with the NEW key. This must overwrite the old
+    // positive offset, otherwise the next visit would wrongly restore 800.
+    store.commitScrollMemento(tabId, route, {
+      "html-iframe": { top: 0, height: 0, contentKey: "v2" },
+    });
+
+    expect(
+      useTabStore.getState().byWorkspace.acme.tabs[0].memento.scroll[
+        `${route}::html-iframe`
+      ],
+    ).toEqual({ top: 0, height: 0, contentKey: "v2" });
+  });
+
+  it("does NOT skip the write when contentKey changes even with identical top/height", () => {
+    const store = useTabStore.getState();
+    store.switchWorkspace("acme");
+    const tabId = useTabStore.getState().byWorkspace.acme.tabs[0].id;
+    const route = "/acme/attachments/x/preview";
+
+    store.commitScrollMemento(tabId, route, {
+      "html-iframe": { top: 100, height: 5000, contentKey: "v1" },
+    });
+    const before = useTabStore.getState().byWorkspace.acme.tabs[0].memento;
+
+    store.commitScrollMemento(tabId, route, {
+      "html-iframe": { top: 100, height: 5000, contentKey: "v2" },
+    });
+
+    const after = useTabStore.getState().byWorkspace.acme.tabs[0].memento;
+    expect(after).not.toBe(before);
+    expect(after.scroll[`${route}::html-iframe`].contentKey).toBe("v2");
+  });
+});
+
+describe("commitViewState", () => {
+  it("stores route-scoped entries on the addressed tab", () => {
+    const store = useTabStore.getState();
+    store.switchWorkspace("acme");
+    const tabId = useTabStore.getState().byWorkspace.acme.tabs[0].id;
+
+    store.commitViewState(tabId, "/acme/inbox", "highlight:i1", "c1");
+
+    expect(useTabStore.getState().byWorkspace.acme.tabs[0].memento).toEqual({
+      scroll: {},
+      view: { "/acme/inbox::highlight:i1": "c1" },
+    });
+  });
+
+  it("clears an entry when the value is undefined, leaving others intact", () => {
+    const store = useTabStore.getState();
+    store.switchWorkspace("acme");
+    const tabId = useTabStore.getState().byWorkspace.acme.tabs[0].id;
+    store.commitViewState(tabId, "/acme/inbox", "highlight:i1", "c1");
+    store.commitViewState(tabId, "/acme/inbox", "highlight:i2", "c2");
+
+    store.commitViewState(tabId, "/acme/inbox", "highlight:i1", undefined);
+
+    expect(useTabStore.getState().byWorkspace.acme.tabs[0].memento.view).toEqual({
+      "/acme/inbox::highlight:i2": "c2",
+    });
+  });
+
+  it("skips the store write when the value is unchanged", () => {
+    const store = useTabStore.getState();
+    store.switchWorkspace("acme");
+    const tabId = useTabStore.getState().byWorkspace.acme.tabs[0].id;
+    store.commitViewState(tabId, "/acme/inbox", "highlight:i1", "c1");
+    const before = useTabStore.getState().byWorkspace.acme;
+
+    store.commitViewState(tabId, "/acme/inbox", "highlight:i1", "c1");
+    store.commitViewState(tabId, "/acme/inbox", "highlight:absent", undefined);
+
+    expect(useTabStore.getState().byWorkspace.acme).toBe(before);
+  });
+
+  it("evicts the oldest entries beyond the cap", () => {
+    const store = useTabStore.getState();
+    store.switchWorkspace("acme");
+    const tabId = useTabStore.getState().byWorkspace.acme.tabs[0].id;
+    for (let i = 0; i < 101; i++) {
+      store.commitViewState(tabId, "/acme/inbox", `highlight:i${i}`, "c");
+    }
+
+    const view = useTabStore.getState().byWorkspace.acme.tabs[0].memento.view;
+    expect(Object.keys(view)).toHaveLength(100);
+    expect(view["/acme/inbox::highlight:i0"]).toBeUndefined();
+    expect(view["/acme/inbox::highlight:i100"]).toBe("c");
+  });
+
+  it("preserves scroll entries when a view-state entry commits", () => {
+    const store = useTabStore.getState();
+    store.switchWorkspace("acme");
+    const tabId = useTabStore.getState().byWorkspace.acme.tabs[0].id;
+    store.commitScrollMemento(tabId, "/acme/inbox", {
+      list: { top: 500, height: 8000 },
+    });
+
+    store.commitViewState(tabId, "/acme/inbox", "highlight:i1", "c1");
+
+    expect(useTabStore.getState().byWorkspace.acme.tabs[0].memento).toEqual({
+      scroll: { "/acme/inbox::list": { top: 500, height: 8000 } },
+      view: { "/acme/inbox::highlight:i1": "c1" },
+    });
+  });
 });
 
 describe("bulk tab closing", () => {
@@ -515,6 +958,170 @@ describe("bulk tab closing", () => {
     const group = useTabStore.getState().byWorkspace.acme;
     expect(group.tabs.map((tab) => tab.id)).toEqual([issuesId, projectsId]);
     expect(group.activeTabId).toBe(issuesId);
+  });
+});
+
+describe("closeTab activation order (MUL-5665)", () => {
+  // Tabs are appended at the end of the strip, so the tab you opened from a
+  // list is rarely that list's neighbour. Landing on a positional neighbour
+  // dropped users on a page they hadn't looked at in a while.
+  it("activates the last visited tab, not the positional neighbour", () => {
+    const store = useTabStore.getState();
+    store.switchWorkspace("acme");
+    const issuesId = useTabStore.getState().byWorkspace.acme.tabs[0].id;
+    store.addTab("/acme/projects", "Projects");
+    const agentsId = store.addTab("/acme/agents", "Agents");
+
+    store.setActiveTab(issuesId);
+    store.setActiveTab(agentsId);
+    store.closeTab(agentsId);
+
+    const group = useTabStore.getState().byWorkspace.acme;
+    expect(group.activeTabId).toBe(issuesId); // positional would give Projects
+    expect(group.recentTabIds).toEqual([]);
+  });
+
+  it("walks back through the visit history as tabs keep closing", () => {
+    const store = useTabStore.getState();
+    store.switchWorkspace("acme");
+    const issuesId = useTabStore.getState().byWorkspace.acme.tabs[0].id;
+    const projectsId = store.addTab("/acme/projects", "Projects");
+    const agentsId = store.addTab("/acme/agents", "Agents");
+    const settingsId = store.addTab("/acme/settings", "Settings");
+
+    store.setActiveTab(projectsId);
+    store.setActiveTab(agentsId);
+    store.setActiveTab(settingsId);
+    expect(useTabStore.getState().byWorkspace.acme.recentTabIds).toEqual([
+      agentsId,
+      projectsId,
+      issuesId,
+    ]);
+
+    store.closeTab(settingsId);
+    expect(useTabStore.getState().byWorkspace.acme.activeTabId).toBe(agentsId);
+    store.closeTab(agentsId);
+    expect(useTabStore.getState().byWorkspace.acme.activeTabId).toBe(projectsId);
+    store.closeTab(projectsId);
+    expect(useTabStore.getState().byWorkspace.acme.activeTabId).toBe(issuesId);
+  });
+
+  it("counts a revisit once — the most recent visit wins", () => {
+    const store = useTabStore.getState();
+    store.switchWorkspace("acme");
+    const issuesId = useTabStore.getState().byWorkspace.acme.tabs[0].id;
+    const projectsId = store.addTab("/acme/projects", "Projects");
+    const agentsId = store.addTab("/acme/agents", "Agents");
+
+    store.setActiveTab(projectsId); // recent: [issues]
+    store.setActiveTab(issuesId); // recent: [projects]
+    store.setActiveTab(agentsId); // recent: [issues, projects]
+
+    expect(useTabStore.getState().byWorkspace.acme.recentTabIds).toEqual([
+      issuesId,
+      projectsId,
+    ]);
+    store.closeTab(agentsId);
+    expect(useTabStore.getState().byWorkspace.acme.activeTabId).toBe(issuesId);
+  });
+
+  it("drops a closed background tab from the visit history", () => {
+    const store = useTabStore.getState();
+    store.switchWorkspace("acme");
+    const issuesId = useTabStore.getState().byWorkspace.acme.tabs[0].id;
+    const projectsId = store.addTab("/acme/projects", "Projects");
+    const agentsId = store.addTab("/acme/agents", "Agents");
+
+    store.setActiveTab(projectsId);
+    store.setActiveTab(agentsId); // recent: [projects, issues]
+
+    store.closeTab(projectsId); // not the active tab
+    const group = useTabStore.getState().byWorkspace.acme;
+    expect(group.activeTabId).toBe(agentsId); // untouched
+    expect(group.recentTabIds).toEqual([issuesId]);
+
+    store.closeTab(agentsId);
+    expect(useTabStore.getState().byWorkspace.acme.activeTabId).toBe(issuesId);
+  });
+
+  it("falls back to the positional neighbour when no other tab was ever visited", () => {
+    const store = useTabStore.getState();
+    store.switchWorkspace("acme");
+    const issuesId = useTabStore.getState().byWorkspace.acme.tabs[0].id;
+    const projectsId = store.addTab("/acme/projects", "Projects");
+    store.addTab("/acme/agents", "Agents");
+
+    // addTab never activates, so the active tab has no visit history behind it.
+    store.closeTab(issuesId);
+
+    expect(useTabStore.getState().byWorkspace.acme.activeTabId).toBe(projectsId);
+  });
+
+  it("opening a tab in a new tab and closing it returns to the opener", () => {
+    const store = useTabStore.getState();
+    store.switchWorkspace("acme");
+    const issuesId = useTabStore.getState().byWorkspace.acme.tabs[0].id;
+    store.addTab("/acme/projects", "Projects");
+    const detailId = store.openTab("/acme/issues/bug-42", "Bug 42", {
+      activate: true,
+    });
+
+    store.closeTab(detailId);
+
+    expect(useTabStore.getState().byWorkspace.acme.activeTabId).toBe(issuesId);
+  });
+
+  it("closeOtherTabs keeps only surviving tabs in the visit history", () => {
+    const store = useTabStore.getState();
+    store.switchWorkspace("acme");
+    const issuesId = useTabStore.getState().byWorkspace.acme.tabs[0].id;
+    const projectsId = store.addTab("/acme/projects", "Projects");
+    const agentsId = store.addTab("/acme/agents", "Agents");
+    store.togglePin(issuesId);
+    store.setActiveTab(issuesId);
+    store.setActiveTab(projectsId);
+    store.setActiveTab(agentsId); // recent: [projects, issues]
+
+    store.closeOtherTabs(agentsId);
+
+    const group = useTabStore.getState().byWorkspace.acme;
+    expect(group.tabs.map((t) => t.id)).toEqual([issuesId, agentsId]);
+    expect(group.recentTabIds).toEqual([issuesId]); // projects is gone
+    expect(group.activeTabId).toBe(agentsId);
+  });
+
+  it("keeps each workspace's visit history to itself", () => {
+    const store = useTabStore.getState();
+    store.switchWorkspace("acme");
+    const acmeIssuesId = useTabStore.getState().byWorkspace.acme.tabs[0].id;
+    const acmeProjectsId = store.addTab("/acme/projects", "Projects");
+    store.setActiveTab(acmeProjectsId);
+
+    store.switchWorkspace("butter");
+    const butterIssuesId = useTabStore.getState().byWorkspace.butter.tabs[0].id;
+    const butterAgentsId = store.addTab("/butter/agents", "Agents");
+    store.setActiveTab(butterAgentsId);
+    store.closeTab(butterAgentsId);
+
+    const state = useTabStore.getState();
+    expect(state.byWorkspace.butter.activeTabId).toBe(butterIssuesId);
+    expect(state.byWorkspace.acme.recentTabIds).toEqual([acmeIssuesId]);
+  });
+
+  it("reseeding the last tab of a workspace starts a fresh visit history", () => {
+    const store = useTabStore.getState();
+    store.switchWorkspace("acme");
+    const issuesId = useTabStore.getState().byWorkspace.acme.tabs[0].id;
+    const projectsId = store.addTab("/acme/projects", "Projects");
+    store.setActiveTab(projectsId);
+    store.closeTab(issuesId);
+
+    store.closeTab(projectsId); // last tab — reseeds the default
+
+    const group = useTabStore.getState().byWorkspace.acme;
+    expect(group.tabs).toHaveLength(1);
+    expect(group.recentTabIds).toEqual([]);
+    expect(group.activeTabId).toBe(group.tabs[0].id);
   });
 });
 
@@ -700,7 +1307,7 @@ describe("migrateV3ToV4 (legacy view-state import, MUL-4741)", () => {
         title: "Issues",
         pinned: true,
         history: { stack: ["/acme/issues"], index: 0 },
-        memento: { scroll: {} },
+        memento: { scroll: {}, view: {} },
       },
     ]);
   });
@@ -711,6 +1318,54 @@ describe("migrateV3ToV4 (legacy view-state import, MUL-4741)", () => {
     } as Parameters<typeof migrateV3ToV4>[0]);
     expect(v4.byWorkspace).toEqual({});
     expect(v4.activeWorkspaceSlug).toBeNull();
+  });
+});
+
+describe("migrateV4ToV5", () => {
+  it("seeds cross-tab browsing history from the destinations v4 knew", () => {
+    const v5 = migrateV4ToV5({
+      activeWorkspaceSlug: "acme",
+      byWorkspace: {
+        acme: {
+          activeTabId: "t2",
+          recentTabIds: ["t1"],
+          tabs: [
+            {
+              id: "t1",
+              url: "/acme/issues/issue-1",
+              title: "Issue",
+              pinned: false,
+              history: {
+                stack: ["/acme/issues", "/acme/issues/issue-1"],
+                index: 1,
+              },
+              memento: { scroll: {}, view: {} },
+            },
+            {
+              id: "t2",
+              url: "/acme/projects",
+              title: "Projects",
+              pinned: false,
+              history: {
+                stack: ["/acme/issues", "/acme/projects"],
+                index: 1,
+              },
+              memento: { scroll: {}, view: {} },
+            },
+          ],
+        },
+      },
+    });
+
+    expect(v5.byWorkspace.acme.browsingHistory).toEqual([
+      "/acme/projects",
+      "/acme/issues",
+      "/acme/issues/issue-1",
+    ]);
+    expect(v5.byWorkspace.acme.browsingHistoryTitles).toEqual({
+      "/acme/issues/issue-1": "Issue",
+      "/acme/projects": "Projects",
+    });
   });
 });
 
@@ -762,5 +1417,181 @@ describe("mergePersistedTabs (rehydration, MUL-4370)", () => {
     const tab = rehydrate(persistedTab("/acme/squads"));
     expect(tab).not.toHaveProperty("icon");
     expect(tab.url).toBe("/acme/squads");
+  });
+
+  // Payloads written before the generic view-state entries existed carry a
+  // memento with only `scroll`; the session shape requires `view` too.
+  it("normalizes a memento persisted without view-state entries", () => {
+    const tab = rehydrate(
+      persistedTab("/acme/inbox", {
+        memento: { scroll: { "/acme/inbox::list": { top: 5, height: 100 } } },
+      }),
+    );
+    expect(tab.memento).toEqual({
+      scroll: { "/acme/inbox::list": { top: 5, height: 100 } },
+      view: {},
+    });
+  });
+
+  function rehydrateGroup(
+    activeTabId: string,
+    urls: Record<string, string>,
+    recentTabIds?: unknown,
+  ): WorkspaceTabGroup {
+    return mergePersistedTabs(
+      {
+        activeWorkspaceSlug: "acme",
+        byWorkspace: {
+          acme: {
+            activeTabId,
+            recentTabIds,
+            tabs: Object.entries(urls).map(([id, url]) =>
+              persistedTab(url, { id }),
+            ),
+          },
+        },
+      },
+      emptyState(),
+    ).byWorkspace.acme;
+  }
+
+  it("restores the MRU order so the first close after a restart still returns there", () => {
+    const group = rehydrateGroup(
+      "t3",
+      { t1: "/acme/issues", t2: "/acme/projects", t3: "/acme/agents" },
+      ["t1", "t2"],
+    );
+    expect(group.recentTabIds).toEqual(["t1", "t2"]);
+
+    useTabStore.setState({
+      activeWorkspaceSlug: "acme",
+      byWorkspace: { acme: group },
+    });
+    useTabStore.getState().closeTab("t3");
+    expect(useTabStore.getState().byWorkspace.acme.activeTabId).toBe("t1");
+  });
+
+  it("sanitizes an MRU order carrying dropped, duplicate, or active tab ids", () => {
+    const group = rehydrateGroup(
+      "t2",
+      { t1: "/acme/issues", t2: "/acme/projects" },
+      ["gone", "t1", "t1", "t2", 7],
+    );
+    expect(group.recentTabIds).toEqual(["t1"]);
+  });
+
+  it("defaults the MRU order to empty for payloads written before it existed", () => {
+    const group = rehydrateGroup("t1", { t1: "/acme/issues" });
+    expect(group.recentTabIds).toEqual([]);
+  });
+
+  it("restores, sanitizes, and resource-deduplicates workspace browsing history", () => {
+    const result = mergePersistedTabs(
+      {
+        activeWorkspaceSlug: "acme",
+        byWorkspace: {
+          acme: {
+            activeTabId: "t1",
+            tabs: [persistedTab("/acme/issues")],
+            browsingHistory: [
+              "/acme/issues/issue-1?tab=activity",
+              "/acme/issues/issue-1",
+              "/acme/inbox?view=archived&issue=issue-b",
+              "/acme/inbox?issue=issue-a#comment-comment-1",
+              "/acme/inbox?issue=issue-a",
+              "/acme/inbox",
+              "/other/issues/issue-2",
+              "/login",
+              7,
+            ],
+          },
+        },
+      },
+      emptyState(),
+    );
+
+    expect(result.byWorkspace.acme.browsingHistory).toEqual([
+      "/acme/issues/issue-1?tab=activity",
+      "/acme/inbox?view=archived&issue=issue-b",
+      "/acme/inbox?issue=issue-a#comment-comment-1",
+      "/acme/inbox",
+    ]);
+  });
+
+  it("restores only titles belonging to valid browsing-history entries", () => {
+    const result = mergePersistedTabs(
+      {
+        activeWorkspaceSlug: "acme",
+        byWorkspace: {
+          acme: {
+            activeTabId: "t1",
+            tabs: [
+              persistedTab("/acme/issues/issue-1", {
+                title: "MUL-1: Fix history",
+              }),
+            ],
+            browsingHistory: [
+              "/acme/issues/issue-1",
+              "/acme/projects",
+            ],
+            browsingHistoryTitles: {
+              "/acme/issues/issue-1": "MUL-1: Fix history",
+              "/acme/projects": "Projects",
+              "/other/issues/issue-2": "Other workspace",
+              "/acme/agents": 7,
+            },
+          },
+        },
+      },
+      emptyState(),
+    );
+
+    expect(result.byWorkspace.acme.browsingHistoryTitles).toEqual({
+      "/acme/issues/issue-1": "MUL-1: Fix history",
+      "/acme/projects": "Projects",
+    });
+  });
+
+  it("backfills a known tab title when an older v5 payload has no title map", () => {
+    const result = mergePersistedTabs(
+      {
+        activeWorkspaceSlug: "acme",
+        byWorkspace: {
+          acme: {
+            activeTabId: "t1",
+            tabs: [
+              persistedTab("/acme/issues/issue-1", {
+                title: "MUL-1: Fix history",
+              }),
+            ],
+            browsingHistory: ["/acme/issues/issue-1"],
+          },
+        },
+      },
+      emptyState(),
+    );
+
+    expect(result.byWorkspace.acme.browsingHistoryTitles).toEqual({
+      "/acme/issues/issue-1": "MUL-1: Fix history",
+    });
+  });
+});
+
+describe("reserved workspace restoration", () => {
+  it("preserves matching saved tabs before the membership list loads", () => {
+    useTabStore.getState().switchWorkspace("acme");
+    const group = useTabStore.getState().byWorkspace.acme;
+    const tabs = group.tabs.map((tab) => ({
+      ...tab, url: "/dingtalk/issues", history: { stack: ["/dingtalk/issues"], index: 0 },
+    }));
+    const restored = mergePersistedTabs({
+      activeWorkspaceSlug: "dingtalk",
+      byWorkspace: { dingtalk: { ...group, tabs, browsingHistory: ["/dingtalk/issues"] } },
+    }, { activeWorkspaceSlug: null as string | null, byWorkspace: {} as Record<string, WorkspaceTabGroup> });
+    expect(restored.byWorkspace.dingtalk.tabs[0].url).toBe("/dingtalk/issues");
+    expect(restored.byWorkspace.dingtalk.browsingHistory).toEqual(["/dingtalk/issues"]);
+    useTabStore.setState(restored);
+    useTabStore.getState().validateWorkspaceSlugs(new Set(["acme"]));
+    expect(useTabStore.getState().byWorkspace.dingtalk).toBeUndefined();
   });
 });

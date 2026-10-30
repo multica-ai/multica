@@ -22,17 +22,88 @@ const (
 // ClientIdentity captures the already-authenticated daemon connection scope.
 type ClientIdentity struct {
 	DaemonID string
-	UserID   string
+	// DaemonTokenHash is the hash of the mdt_ token that authenticated the
+	// connection (empty for user credentials). RPCs replay requests without
+	// an Authorization header, so credential-specific checks such as Qoder
+	// revocation re-validate this hash on every call (MUL-8154).
+	DaemonTokenHash string
+	// DaemonTokenOwnerID is the runtime owner that token is bound to (empty
+	// for Qoder-managed tokens and user credentials), replayed into every RPC
+	// so the per-runtime owner binding holds over WS as well (MUL-8154).
+	DaemonTokenOwnerID string
+	UserID             string
 	// WorkspaceID is the legacy single-workspace scope used by older callers
 	// and daemon-token auth. New code should populate WorkspaceIDs from the
 	// runtime rows authorized for this connection.
-	WorkspaceID   string
-	WorkspaceIDs  []string
-	RuntimeIDs    []string
+	WorkspaceID  string
+	WorkspaceIDs []string
+	RuntimeIDs   []string
+	// RuntimeLeases is populated from the connection-time batch authorization
+	// query. Entries are retained for the lifetime of the connection to avoid
+	// concurrent map writes; they are not an authorization source. client.runtimes
+	// is the sole mutable heartbeat scope and is checked before a lease is used.
+	// Each value tracks only the DB liveness state needed to throttle writes.
+	RuntimeLeases map[string]*RuntimeLease
 	ClientVersion string
 	// Capabilities is the raw X-Client-Capabilities header captured at connect,
 	// so RPC handlers can honor the same capability gating as the HTTP path.
 	Capabilities string
+}
+
+// RuntimeLease is the connection-scoped liveness state for one already
+// authenticated runtime. Ownership is immutable after the WebSocket upgrade;
+// only the last DB write and status advance as heartbeats are processed.
+type RuntimeLease struct {
+	mu sync.Mutex
+
+	workspaceID     string
+	status          string
+	lastSeenAt      time.Time
+	lastSeenAtValid bool
+}
+
+// RuntimeLeaseState is an atomic snapshot used by the heartbeat handler.
+type RuntimeLeaseState struct {
+	WorkspaceID     string
+	Status          string
+	LastSeenAt      time.Time
+	LastSeenAtValid bool
+}
+
+func NewRuntimeLease(workspaceID, status string, lastSeenAt time.Time, lastSeenAtValid bool) *RuntimeLease {
+	return &RuntimeLease{
+		workspaceID:     workspaceID,
+		status:          status,
+		lastSeenAt:      lastSeenAt,
+		lastSeenAtValid: lastSeenAtValid,
+	}
+}
+
+func (l *RuntimeLease) Snapshot() RuntimeLeaseState {
+	if l == nil {
+		return RuntimeLeaseState{}
+	}
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return RuntimeLeaseState{
+		WorkspaceID:     l.workspaceID,
+		Status:          l.status,
+		LastSeenAt:      l.lastSeenAt,
+		LastSeenAtValid: l.lastSeenAtValid,
+	}
+}
+
+// MarkDBWriteScheduled advances the connection's DB-flush watermark after a
+// synchronous write succeeds or a durable batch entry has been accepted.
+func (l *RuntimeLease) MarkDBWriteScheduled(at time.Time) {
+	if l == nil {
+		return
+	}
+	l.mu.Lock()
+	l.status = "online"
+	l.lastSeenAt = at
+	l.lastSeenAtValid = true
+	l.mu.Unlock()
 }
 
 // AuthorizedWorkspaceIDs returns the connection's workspace scope in stable
@@ -86,11 +157,12 @@ func (i ClientIdentity) AllowsWorkspace(workspaceID string) bool {
 }
 
 type client struct {
-	hub      *Hub
-	conn     *websocket.Conn
-	send     chan []byte
-	identity ClientIdentity
-	runtimes map[string]struct{}
+	hub       *Hub
+	conn      *websocket.Conn
+	send      chan []byte
+	identity  ClientIdentity
+	runtimeMu sync.RWMutex
+	runtimes  map[string]struct{}
 
 	// ctx is cancelled when the connection tears down, so async RPC handlers
 	// stop instead of running against a dead socket. cancel is invoked from
@@ -129,7 +201,13 @@ func (c *client) trySend(frame []byte) bool {
 	}
 }
 
-const eventDedupCapacity = 128
+const (
+	eventDedupCapacity = 128
+	// The runtime-gone cache is hub-wide rather than per connection. Size it
+	// independently to retain a complete runtime GC batch (currently capped at
+	// 500) through local delivery and Redis loopback.
+	runtimeGoneDedupCapacity = 512
+)
 
 // markSeen records eventID as already delivered to this client. Empty event IDs
 // disable dedup and are always delivered.
@@ -153,6 +231,63 @@ func (c *client) markSeen(eventID string) bool {
 		delete(c.seenIDs, drop)
 	}
 	return true
+}
+
+func (c *client) allowsRuntime(runtimeID string) bool {
+	c.runtimeMu.RLock()
+	defer c.runtimeMu.RUnlock()
+	_, ok := c.runtimes[runtimeID]
+	return ok
+}
+
+func (c *client) removeRuntime(runtimeID string) {
+	c.runtimeMu.Lock()
+	delete(c.runtimes, runtimeID)
+	c.runtimeMu.Unlock()
+}
+
+func (c *client) runtimeCount() int {
+	c.runtimeMu.RLock()
+	defer c.runtimeMu.RUnlock()
+	return len(c.runtimes)
+}
+
+// markRuntimeGoneSeen deduplicates a runtime invalidation at the Hub level.
+// Runtime invalidation removes the client from byRuntime, so the ordinary
+// per-client event cache is no longer reachable when the Redis loopback of a
+// locally delivered event arrives.
+func (h *Hub) markRuntimeGoneSeen(eventID string) bool {
+	if eventID == "" {
+		return true
+	}
+	h.runtimeGoneDedupMu.Lock()
+	defer h.runtimeGoneDedupMu.Unlock()
+	if _, ok := h.runtimeGoneSeenIDs[eventID]; ok {
+		return false
+	}
+	h.runtimeGoneSeenIDs[eventID] = struct{}{}
+	h.runtimeGoneSeenOrder = append(h.runtimeGoneSeenOrder, eventID)
+	if len(h.runtimeGoneSeenOrder) > runtimeGoneDedupCapacity {
+		drop := h.runtimeGoneSeenOrder[0]
+		h.runtimeGoneSeenOrder = h.runtimeGoneSeenOrder[1:]
+		delete(h.runtimeGoneSeenIDs, drop)
+	}
+	return true
+}
+
+func (h *Hub) forgetRuntimeGoneSeen(eventID string) {
+	if eventID == "" {
+		return
+	}
+	h.runtimeGoneDedupMu.Lock()
+	delete(h.runtimeGoneSeenIDs, eventID)
+	for index, seenID := range h.runtimeGoneSeenOrder {
+		if seenID == eventID {
+			h.runtimeGoneSeenOrder = append(h.runtimeGoneSeenOrder[:index], h.runtimeGoneSeenOrder[index+1:]...)
+			break
+		}
+	}
+	h.runtimeGoneDedupMu.Unlock()
 }
 
 // HeartbeatHandler processes a daemon:heartbeat frame. It must verify that
@@ -192,6 +327,10 @@ type Hub struct {
 	byWorkspace map[string]map[*client]bool
 	byUser      map[string]map[*client]bool
 
+	runtimeGoneDedupMu   sync.Mutex
+	runtimeGoneSeenIDs   map[string]struct{}
+	runtimeGoneSeenOrder []string
+
 	hbMu        sync.RWMutex
 	onHeartbeat HeartbeatHandler
 
@@ -212,10 +351,11 @@ func NewHub() *Hub {
 			// grows cookie fallback.
 			CheckOrigin: func(r *http.Request) bool { return true },
 		},
-		clients:     make(map[*client]bool),
-		byRuntime:   make(map[string]map[*client]bool),
-		byWorkspace: make(map[string]map[*client]bool),
-		byUser:      make(map[string]map[*client]bool),
+		clients:            make(map[*client]bool),
+		byRuntime:          make(map[string]map[*client]bool),
+		byWorkspace:        make(map[string]map[*client]bool),
+		byUser:             make(map[string]map[*client]bool),
+		runtimeGoneSeenIDs: make(map[string]struct{}, runtimeGoneDedupCapacity),
 	}
 }
 
@@ -313,7 +453,14 @@ func (h *Hub) HandleWebSocket(w http.ResponseWriter, r *http.Request, identity C
 
 // NotifyTaskAvailable sends a best-effort wakeup to daemons watching runtimeID.
 func (h *Hub) NotifyTaskAvailable(runtimeID, taskID string) {
-	h.notifyTaskAvailable(runtimeID, taskID, "")
+	h.notifyTask(protocol.EventDaemonTaskAvailable, runtimeID, taskID, "")
+}
+
+// NotifyTaskSupplementAvailable wakes only the daemon that owns runtimeID;
+// the task ID lets that daemon wake the matching in-flight run without polling
+// or disturbing the machine-level new-task claim loop.
+func (h *Hub) NotifyTaskSupplementAvailable(runtimeID, taskID string) {
+	h.notifyTask(protocol.EventDaemonTaskSupplementAvailable, runtimeID, taskID, "")
 }
 
 // NotifyRuntimeProfilesChanged asks connected daemons in workspaceID to pull
@@ -336,11 +483,19 @@ func (h *Hub) NotifyPendingWork(runtimeID, kind string) {
 	h.notifyPendingWork(runtimeID, kind, "")
 }
 
-func (h *Hub) notifyTaskAvailable(runtimeID, taskID, eventID string) {
-	if h == nil || runtimeID == "" {
+// NotifyRuntimeGone tells daemons watching runtimeID that the server deleted
+// the runtime and removes it from each connection's heartbeat scope. The
+// heartbeat scheduler's batch write receipts remain the correctness fallback
+// when this best-effort notification is missed.
+func (h *Hub) NotifyRuntimeGone(runtimeID string) {
+	h.notifyRuntimeGone(runtimeID, "")
+}
+
+func (h *Hub) notifyTask(eventType, runtimeID, taskID, eventID string) {
+	if h == nil || runtimeID == "" || (eventType == protocol.EventDaemonTaskSupplementAvailable && taskID == "") {
 		return
 	}
-	data, err := taskAvailableFrame(runtimeID, taskID)
+	data, err := taskWakeupFrame(eventType, runtimeID, taskID)
 	if err != nil {
 		return
 	}
@@ -390,22 +545,89 @@ func (h *Hub) notifyPendingWork(runtimeID, kind, eventID string) {
 	}
 }
 
+func (h *Hub) notifyRuntimeGone(runtimeID, eventID string) {
+	if h == nil || runtimeID == "" {
+		return
+	}
+	data, err := runtimeGoneFrame(runtimeID)
+	if err != nil {
+		return
+	}
+	delivered, deduped := h.invalidateRuntime(runtimeID, data, eventID)
+	if delivered {
+		M.RuntimeGoneDeliveredHit.Add(1)
+	} else if !deduped {
+		M.RuntimeGoneDeliveredMiss.Add(1)
+	}
+}
+
+func (h *Hub) invalidateRuntime(runtimeID string, data []byte, eventID string) (delivered bool, deduped bool) {
+	h.mu.Lock()
+	connections := h.byRuntime[runtimeID]
+	clients := make([]*client, 0, len(connections))
+	for c := range connections {
+		c.removeRuntime(runtimeID)
+		clients = append(clients, c)
+	}
+	delete(h.byRuntime, runtimeID)
+	h.mu.Unlock()
+	if len(clients) == 0 {
+		if !h.markRuntimeGoneSeen(eventID) {
+			return false, true
+		}
+		// Do not consume the event when it raced just ahead of connection
+		// registration. Its Redis loopback/replay can still invalidate the
+		// newly registered scope; the batch receipt remains the final fallback.
+		h.forgetRuntimeGoneSeen(eventID)
+		return false, false
+	}
+	// Mark only after removing the current clients. If this event was already
+	// seen, the clients collected above registered after its first delivery and
+	// still need invalidation; clients from the first delivery are no longer in
+	// byRuntime and cannot receive a duplicate frame.
+	h.markRuntimeGoneSeen(eventID)
+
+	slow := make([]*client, 0)
+	for _, c := range clients {
+		if !c.markSeen(eventID) {
+			deduped = true
+			continue
+		}
+		if c.trySend(data) {
+			delivered = true
+		} else {
+			slow = append(slow, c)
+		}
+	}
+	for _, c := range slow {
+		M.SlowEvictionsTotal.Add(1)
+		h.unregister(c)
+		c.conn.Close()
+	}
+	return delivered, deduped
+}
+
 func (h *Hub) DeliverDaemonRuntime(scopeID string, frame []byte, eventID string) {
 	if h == nil {
 		return
 	}
-	M.WakeupReceivedTotal.Add(1)
 	var msg protocol.Message
 	if err := json.Unmarshal(frame, &msg); err != nil {
+		M.WakeupReceivedTotal.Add(1)
 		slog.Debug("daemon websocket relay: invalid frame", "error", err, "scope_id", scopeID, "event_id", eventID)
 		M.WakeupDeliveredMiss.Add(1)
 		return
 	}
+	if msg.Type == protocol.EventDaemonHeartbeatAck {
+		M.RuntimeGoneReceivedTotal.Add(1)
+	} else {
+		M.WakeupReceivedTotal.Add(1)
+	}
 	switch msg.Type {
-	case protocol.EventDaemonTaskAvailable:
+	case protocol.EventDaemonTaskAvailable, protocol.EventDaemonTaskSupplementAvailable:
 		var payload protocol.TaskAvailablePayload
-		if err := json.Unmarshal(msg.Payload, &payload); err != nil || payload.RuntimeID == "" {
-			slog.Debug("daemon websocket relay: invalid task_available payload", "error", err, "scope_id", scopeID, "event_id", eventID)
+		if err := json.Unmarshal(msg.Payload, &payload); err != nil || payload.RuntimeID == "" || (msg.Type == protocol.EventDaemonTaskSupplementAvailable && payload.TaskID == "") {
+			slog.Debug("daemon websocket relay: invalid task wakeup payload", "type", msg.Type, "error", err, "scope_id", scopeID, "event_id", eventID)
 			M.WakeupDeliveredMiss.Add(1)
 			return
 		}
@@ -447,6 +669,19 @@ func (h *Hub) DeliverDaemonRuntime(scopeID string, frame []byte, eventID string)
 			M.WakeupDeliveredHit.Add(1)
 		} else if !deduped {
 			M.WakeupDeliveredMiss.Add(1)
+		}
+	case protocol.EventDaemonHeartbeatAck:
+		var payload protocol.DaemonHeartbeatAckPayload
+		if err := json.Unmarshal(msg.Payload, &payload); err != nil || payload.RuntimeID == "" || payload.Status != protocol.HeartbeatStatusRuntimeGone || !payload.RuntimeGone {
+			slog.Debug("daemon websocket relay: invalid runtime_gone payload", "error", err, "scope_id", scopeID, "event_id", eventID)
+			M.RuntimeGoneDeliveredMiss.Add(1)
+			return
+		}
+		delivered, deduped := h.invalidateRuntime(payload.RuntimeID, frame, eventID)
+		if delivered {
+			M.RuntimeGoneDeliveredHit.Add(1)
+		} else if !deduped {
+			M.RuntimeGoneDeliveredMiss.Add(1)
 		}
 	default:
 		M.WakeupDeliveredMiss.Add(1)
@@ -538,9 +773,9 @@ func (h *Hub) notifyUserFrame(userID string, data []byte, eventID string) (deliv
 	return delivered, deduped
 }
 
-func taskAvailableFrame(runtimeID, taskID string) ([]byte, error) {
+func taskWakeupFrame(eventType, runtimeID, taskID string) ([]byte, error) {
 	return json.Marshal(protocol.Message{
-		Type: protocol.EventDaemonTaskAvailable,
+		Type: eventType,
 		Payload: mustMarshalRaw(protocol.TaskAvailablePayload{
 			RuntimeID: runtimeID,
 			TaskID:    taskID,
@@ -575,6 +810,17 @@ func pendingWorkFrame(runtimeID, kind string) ([]byte, error) {
 	})
 }
 
+func runtimeGoneFrame(runtimeID string) ([]byte, error) {
+	return json.Marshal(protocol.Message{
+		Type: protocol.EventDaemonHeartbeatAck,
+		Payload: mustMarshalRaw(protocol.DaemonHeartbeatAckPayload{
+			RuntimeID:   runtimeID,
+			Status:      protocol.HeartbeatStatusRuntimeGone,
+			RuntimeGone: true,
+		}),
+	})
+}
+
 func mustMarshalRaw(v any) json.RawMessage {
 	data, err := json.Marshal(v)
 	if err != nil {
@@ -604,6 +850,7 @@ func (h *Hub) UserConnectionCount(userID string) int {
 func (h *Hub) register(c *client) {
 	h.mu.Lock()
 	h.clients[c] = true
+	c.runtimeMu.RLock()
 	for runtimeID := range c.runtimes {
 		conns := h.byRuntime[runtimeID]
 		if conns == nil {
@@ -612,6 +859,7 @@ func (h *Hub) register(c *client) {
 		}
 		conns[c] = true
 	}
+	c.runtimeMu.RUnlock()
 	workspaceIDs := c.identity.AuthorizedWorkspaceIDs()
 	for _, workspaceID := range workspaceIDs {
 		conns := h.byWorkspace[workspaceID]
@@ -639,7 +887,7 @@ func (h *Hub) register(c *client) {
 		"user_id", c.identity.UserID,
 		"workspace_id", c.identity.PrimaryWorkspaceID(),
 		"workspace_ids", workspaceIDs,
-		"runtimes", len(c.runtimes),
+		"runtimes", c.runtimeCount(),
 		"client_version", c.identity.ClientVersion,
 		"total_clients", total,
 	)
@@ -652,6 +900,7 @@ func (h *Hub) unregister(c *client) {
 		return
 	}
 	delete(h.clients, c)
+	c.runtimeMu.RLock()
 	for runtimeID := range c.runtimes {
 		if conns := h.byRuntime[runtimeID]; conns != nil {
 			delete(conns, c)
@@ -660,6 +909,7 @@ func (h *Hub) unregister(c *client) {
 			}
 		}
 	}
+	c.runtimeMu.RUnlock()
 	workspaceIDs := c.identity.AuthorizedWorkspaceIDs()
 	for _, workspaceID := range workspaceIDs {
 		if conns := h.byWorkspace[workspaceID]; conns != nil {
@@ -691,7 +941,7 @@ func (h *Hub) unregister(c *client) {
 		"user_id", c.identity.UserID,
 		"workspace_id", c.identity.PrimaryWorkspaceID(),
 		"workspace_ids", workspaceIDs,
-		"runtimes", len(c.runtimes),
+		"runtimes", c.runtimeCount(),
 		"total_clients", total,
 	)
 }
@@ -795,6 +1045,9 @@ func (c *client) handleRPCFrame(raw json.RawMessage) {
 			hctx, cancel = context.WithTimeout(c.ctx, time.Duration(req.TimeoutMs)*time.Millisecond)
 			defer cancel()
 		}
+		completion := &rpcCompletion{}
+		hctx = context.WithValue(hctx, rpcCompletionKey{}, completion)
+		defer completion.run()
 		status, body, err := handler(hctx, c.identity, req.Method, req.Body)
 		if err != nil {
 			if status < 400 {
@@ -848,7 +1101,7 @@ func (c *client) handleHeartbeatFrame(raw json.RawMessage) {
 		slog.Debug("daemon websocket heartbeat missing runtime_id", "daemon_id", c.identity.DaemonID)
 		return
 	}
-	if _, ok := c.runtimes[payload.RuntimeID]; !ok {
+	if !c.allowsRuntime(payload.RuntimeID) {
 		// The connection authenticated for a fixed runtime set; reject any
 		// heartbeat for a runtime the client did not register for.
 		slog.Warn("daemon websocket heartbeat for unauthorized runtime",

@@ -8,6 +8,7 @@ import { PropRow } from "../../../common/prop-row";
 import { SettingsRow } from "../../../settings/components/settings-layout";
 import { useT } from "../../../i18n";
 import { ThinkingPicker } from "./thinking-picker";
+import { findModelCapabilityEntry } from "./model-capability";
 
 /**
  * Thinking row for the agent inspector. Hidden when the active model has
@@ -116,7 +117,7 @@ function pickModelEntry(
   model: string,
   provider: string,
 ): RuntimeModel | undefined {
-  if (model) return models.find((m) => m.id === model);
+  if (model) return findModelCapabilityEntry(models, model, provider);
   // Empty model = "follow the runtime's own default". For codex that default
   // comes from the local config.toml and can be any installed model, so we
   // must NOT preview the flagged Default entry's effort catalog — gpt-5.6-sol
@@ -124,6 +125,13 @@ function pickModelEntry(
   // support. Fail closed (no preview): the row hides unless a stale level is
   // persisted, in which case it still renders so the orphan can be cleared.
   // Mirrors the backend ValidateThinkingLevel. (MUL-4347)
-  if (provider === "codex") return undefined;
+  //
+  // omp is fenced off for the same reason with a different cause: its
+  // `omp models --json` catalog marks no default at all and sorts by
+  // provider/id, so `models[0]` is arbitrary — and at task time omp resolves
+  // its own default role model, then clamps the level to what that model
+  // supports. Previewing any entry here would offer a level the real model may
+  // silently lower. (MUL-7412)
+  if (provider === "codex" || provider === "omp") return undefined;
   return models.find((m) => m.default) ?? models[0];
 }

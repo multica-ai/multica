@@ -14,6 +14,14 @@
 
 const encode = (id: string) => encodeURIComponent(id);
 
+/**
+ * `?focus=` token that scrolls the agent's General settings to its
+ * conversation-starters editor and flashes it. Lives here because it is URL
+ * vocabulary: `agentConversationStarters()` writes it and the page reads it,
+ * and a shared constant is what stops the two from drifting apart.
+ */
+export const AGENT_FOCUS_CONVERSATION_STARTERS = "conversation_starters";
+
 function workspaceScoped(slug: string) {
   const ws = `/${encode(slug)}`;
   return {
@@ -26,13 +34,35 @@ function workspaceScoped(slug: string) {
     autopilots: () => `${ws}/autopilots`,
     autopilotDetail: (id: string) => `${ws}/autopilots/${encode(id)}`,
     agents: () => `${ws}/agents`,
+    // Step 1 of agent creation: choose where the agent runs.
     newAgent: () => `${ws}/agents/new`,
+    // Step 2: configure the agent on the chosen runtime. A real route so a
+    // half-filled form survives a refresh and can be linked to directly.
+    newAgentManual: () => `${ws}/agents/new/manual`,
+    // Step 3: the agent exists; offer its first uses.
+    newAgentDone: (agentId: string) =>
+      `${ws}/agents/new/done/${encode(agentId)}`,
+    newAgentAi: () => `${ws}/agents/new/ai`,
+    // One creation conversation. It is a durable object, not a step of the
+    // route above: it survives leaving the studio and is resumed later, so it
+    // owns an address instead of being a query param on the "start one" screen.
+    newAgentAiSession: (sessionId: string) =>
+      `${ws}/agents/new/ai/${encode(sessionId)}`,
     agentDetail: (id: string) => `${ws}/agents/${encode(id)}`,
+    // Deep link behind "customize" in a chat's empty state: the agent's
+    // General settings, scrolled to the conversation starters that produced
+    // the buttons the viewer just looked at.
+    agentConversationStarters: (id: string) =>
+      `${ws}/agents/${encode(id)}?view=general&focus=${AGENT_FOCUS_CONVERSATION_STARTERS}`,
     memberDetail: (id: string) => `${ws}/members/${encode(id)}`,
     squads: () => `${ws}/squads`,
     squadDetail: (id: string) => `${ws}/squads/${encode(id)}`,
     inbox: () => `${ws}/inbox`,
     chat: () => `${ws}/chat`,
+    chatWithAgent: (agentId: string) =>
+      `${ws}/chat?agent=${encode(agentId)}`,
+    chatSession: (sessionId: string) =>
+      `${ws}/chat?session=${encode(sessionId)}`,
     myIssues: () => `${ws}/my-issues`,
     runtimes: () => `${ws}/runtimes`,
     runtimeDetail: (id: string) => `${ws}/runtimes/${encode(id)}`,

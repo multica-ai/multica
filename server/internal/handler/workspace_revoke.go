@@ -3,8 +3,11 @@ package handler
 import (
 	"context"
 	"log/slog"
+	"slices"
 
+	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgtype"
+	"github.com/multica-ai/multica/server/internal/service"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 	"github.com/multica-ai/multica/server/pkg/protocol"
 )
@@ -14,8 +17,8 @@ import (
 // agent pinned to one of those runtimes is archived, every in-flight task on
 // those runtimes is cancelled (cancelled rather than failed so the daemon's
 // per-task status poller interrupts the running agent gracefully), the
-// daemon_token rows for those runtimes are deleted, and finally the member row
-// itself is removed.
+// member's durable subscriptions and daemon_token rows are deleted, and
+// finally the member row itself is removed.
 //
 // All DB writes run inside a single transaction so a partial revocation never
 // leaves the workspace half-converged — e.g. a member who is "gone" but whose
@@ -49,6 +52,25 @@ func (h *Handler) revokeAndRemoveMember(ctx context.Context, workspaceID, userID
 	defer tx.Rollback(ctx)
 
 	qtx := h.Queries.WithTx(tx)
+
+	// Taken FIRST, before this tx touches member or issue_subscriber. The
+	// delegated auto-subscribe rule takes the same (workspace, user) lock, so
+	// a run that is mid-decomposition cannot slip a new subscriber row in
+	// between this tx's membership delete and its subscription cleanup below.
+	// First also means every holder acquires it in the same order, so these
+	// paths cannot deadlock against each other (MUL-5483 review round 7).
+	if err := qtx.LockSubscriberWrites(ctx, db.LockSubscriberWritesParams{
+		WorkspaceID: workspaceID,
+		UserID:      userID,
+	}); err != nil {
+		return empty, err
+	}
+
+	if _, err := qtx.LockRuntimeShareMemberRemoval(ctx, db.LockRuntimeShareMemberRemovalParams{
+		WorkspaceID: workspaceID, UserID: userID,
+	}); err != nil {
+		return empty, err
+	}
 
 	runtimes, err := qtx.ListAgentRuntimesByOwner(ctx, db.ListAgentRuntimesByOwnerParams{
 		WorkspaceID: workspaceID,
@@ -95,6 +117,9 @@ func (h *Handler) revokeAndRemoveMember(ctx context.Context, workspaceID, userID
 		if err != nil {
 			return empty, err
 		}
+		if err = service.SettleTerminalTaskState(ctx, qtx, result.CancelledTasks...); err != nil {
+			return empty, err
+		}
 
 		result.OfflineRuntimeIDs, err = qtx.ForceOfflineRuntimesByIDs(ctx, runtimeIDs)
 		if err != nil {
@@ -139,10 +164,99 @@ func (h *Handler) revokeAndRemoveMember(ctx context.Context, workspaceID, userID
 		return empty, err
 	}
 
+	// A private quick action is visible and runnable ONLY by its creator
+	// (quick_action carries no FK, so nothing removes it implicitly). Once the
+	// creator is gone the row is unreachable by every remaining member while
+	// still consuming the workspace's active-action limit, so drop those in
+	// the same tx. Public actions are workspace furniture and survive.
+	if err := qtx.DeletePrivateQuickActionsByCreator(ctx, db.DeletePrivateQuickActionsByCreatorParams{
+		WorkspaceID: workspaceID,
+		CreatedByID: userID,
+	}); err != nil {
+		return empty, err
+	}
+
+	// Saved views follow the private-quick-action rule above: a departed
+	// member's PRIVATE views are invisible to everyone left yet still count
+	// against quota, and a re-invite must not resurrect them. Shared views
+	// stay — they are workspace furniture other members may rely on. The
+	// per-user view-bar preferences are meaningless without the member.
+	if err := qtx.DeletePrivateIssueViewsByOwner(ctx, db.DeletePrivateIssueViewsByOwnerParams{
+		WorkspaceID: workspaceID,
+		OwnerID:     userID,
+	}); err != nil {
+		return empty, err
+	}
+	if err := qtx.DeleteIssueViewPreferencesByUser(ctx, db.DeleteIssueViewPreferencesByUserParams{
+		WorkspaceID: workspaceID,
+		UserID:      userID,
+	}); err != nil {
+		return empty, err
+	}
+
+	// issue_subscriber carries no FK either (same MUL-3515 rule as the two
+	// prunes above), and MUL-5483 gave agents a path that writes member
+	// subscriber rows on their own initiative. Dropping them in this tx is what
+	// stops a departed member from accruing inbox rows, and stops a re-invite
+	// from silently restoring visibility of everything they used to watch.
+	if err := qtx.DeleteSubscriptionsByMember(ctx, db.DeleteSubscriptionsByMemberParams{
+		WorkspaceID: workspaceID,
+		UserID:      userID,
+	}); err != nil {
+		return empty, err
+	}
+
+	// autopilot_subscriber is another FK-free subscription template. Leaving
+	// stale rows here made the detail API return a user the member picker could
+	// no longer render; the next full-replace PATCH then failed membership
+	// validation, blocking every edit to that autopilot. Prune only templates in
+	// this workspace so the same user's subscriptions elsewhere survive.
+	if err := qtx.DeleteAutopilotSubscribersByMember(ctx, db.DeleteAutopilotSubscribersByMemberParams{
+		WorkspaceID: workspaceID,
+		UserID:      userID,
+	}); err != nil {
+		return empty, err
+	}
+
 	// Member row deletion lives inside the same tx so a successful revoke is
 	// never followed by a failed member-delete (which would leave the user
 	// still a member with a dead runtime), and a failed revoke never leaves
 	// the user out of the workspace with a still-online runtime.
+	if h.seatCapacityEnabled() {
+		if err := enqueueMemberCapacityRelease(ctx, qtx, uuid.UUID(workspaceID.Bytes), uuid.UUID(memberID.Bytes)); err != nil {
+			return empty, err
+		}
+	}
+	sharedRuntimes, err := qtx.ListSharedAgentRuntimesForUpdate(ctx, db.ListSharedAgentRuntimesForUpdateParams{
+		WorkspaceID: workspaceID, UserID: userID,
+	})
+	if err != nil {
+		return empty, err
+	}
+	result.SharedRuntimeCount = len(sharedRuntimes)
+	for _, rt := range sharedRuntimes {
+		rt.SharedWith = slices.DeleteFunc(rt.SharedWith, func(id pgtype.UUID) bool { return id == userID })
+		if rt.Visibility == "public" {
+			if _, err := qtx.UpdateAgentRuntimeVisibility(ctx, db.UpdateAgentRuntimeVisibilityParams{
+				ID: rt.ID, Visibility: rt.Visibility, SharedWith: rt.SharedWith,
+			}); err != nil {
+				return empty, err
+			}
+			continue
+		}
+		if _, err := lockRuntimeRevocationPlan(ctx, qtx, rt); err != nil {
+			return empty, err
+		}
+		_, teardown, readyChats, err := applyRuntimeAccessRevocation(ctx, qtx, rt)
+		if err != nil {
+			return empty, err
+		}
+		result.SharedTeardown.UnboundAgents = append(result.SharedTeardown.UnboundAgents, teardown.UnboundAgents...)
+		result.SharedTeardown.CancelledTasks = append(result.SharedTeardown.CancelledTasks, teardown.CancelledTasks...)
+		result.SharedTeardown.PausedAutopilots = append(result.SharedTeardown.PausedAutopilots, teardown.PausedAutopilots...)
+		result.ReadyChats = append(result.ReadyChats, readyChats...)
+	}
+
 	if err := qtx.DeleteMember(ctx, memberID); err != nil {
 		return empty, err
 	}
@@ -164,10 +278,13 @@ type revocationResult struct {
 	CancelledTasks     []db.AgentTaskQueue
 	OfflineRuntimeIDs  []db.ForceOfflineRuntimesByIDsRow
 	RevokedTokenHashes []string
+	SharedRuntimeCount int
+	SharedTeardown     service.RuntimeTeardownResult
+	ReadyChats         []pgtype.UUID
 }
 
 func (r revocationResult) isEmpty() bool {
-	return len(r.Runtimes) == 0
+	return len(r.Runtimes) == 0 && r.SharedRuntimeCount == 0
 }
 
 // publishRevocation runs all post-commit side effects: invalidate daemon token
@@ -188,7 +305,10 @@ func (h *Handler) publishRevocation(ctx context.Context, result revocationResult
 	// subscribers see "task cancelled" before the parent agent disappears
 	// from active lists, matching the order ArchiveAgent uses.
 	if h.TaskService != nil && len(result.CancelledTasks) > 0 {
-		h.TaskService.BroadcastCancelledTasks(ctx, result.CancelledTasks)
+		// Revocation only archives agents, so a per-task lookup would still
+		// resolve here; the workspace is passed for the same reason as
+		// everywhere else — it is known, and it is the one being revoked.
+		h.TaskService.BroadcastCancelledTasks(ctx, workspaceIDStr, result.CancelledTasks)
 	}
 
 	for _, agent := range result.ArchivedAgents {
@@ -197,12 +317,19 @@ func (h *Handler) publishRevocation(ctx context.Context, result revocationResult
 		})
 	}
 
+	h.PublishRuntimeTeardown(ctx, result.SharedTeardown, workspaceIDStr, actorType, actorIDStr, "revoke", false)
+	if h.TaskService != nil {
+		for _, taskID := range result.ReadyChats {
+			h.TaskService.FinalizeDeferredCancelledChat(ctx, taskID)
+		}
+	}
+
 	// Tell connected clients to refresh the runtime list. We piggyback on
 	// EventDaemonRegister with a "revoke" action — same channel the runtime
 	// delete handler uses — so the frontend invalidates its cached list
 	// without us having to introduce a new event type the desktop app would
 	// need a build to learn about.
-	if len(result.OfflineRuntimeIDs) > 0 {
+	if len(result.OfflineRuntimeIDs) > 0 || result.SharedRuntimeCount > 0 {
 		h.publish(protocol.EventDaemonRegister, workspaceIDStr, actorType, actorIDStr, map[string]any{
 			"action": "revoke",
 		})

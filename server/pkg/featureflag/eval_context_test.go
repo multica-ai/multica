@@ -62,30 +62,6 @@ func TestEvalContextFromNilContext(t *testing.T) {
 	}
 }
 
-func TestPercentBucketStable(t *testing.T) {
-	t.Parallel()
-	// Hash stability is part of the public contract: the same (key, id)
-	// MUST produce the same bucket forever, otherwise users will flip
-	// in and out of experiments. We pin a handful of values so a future
-	// refactor that swaps the hash will fail loudly here.
-	cases := []struct {
-		key, id string
-		want    int
-	}{
-		{"feature_a", "user-1", bucketFor("feature_a", "user-1")},
-		{"feature_b", "", bucketFor("feature_b", "")},
-	}
-	for _, tc := range cases {
-		got := bucketFor(tc.key, tc.id)
-		if got != tc.want {
-			t.Fatalf("bucketFor(%q, %q) = %d, want %d", tc.key, tc.id, got, tc.want)
-		}
-		if got < 0 || got >= 100 {
-			t.Fatalf("bucket out of range: %d", got)
-		}
-	}
-}
-
 func TestPercentBucketSeparator(t *testing.T) {
 	t.Parallel()
 	// Without a separator, ("ab", "c") and ("a", "bc") would collide.

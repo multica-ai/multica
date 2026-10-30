@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
@@ -13,6 +14,7 @@ import (
 	"sync"
 	"sync/atomic"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/gorilla/websocket"
@@ -108,10 +110,36 @@ func (d *fakeWSDialer) DialContext(ctx context.Context, urlStr string, h http.He
 	return d.conn, nil, nil
 }
 
+// syncBuffer is a mutex-guarded io.Writer, so a slog handler written
+// from the connector goroutine can be read from the test goroutine.
+type syncBuffer struct {
+	mu  sync.Mutex
+	buf bytes.Buffer
+}
+
+func (b *syncBuffer) Write(p []byte) (int, error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buf.Write(p)
+}
+
+func (b *syncBuffer) String() string {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buf.String()
+}
+
 // quietConnector wires a connector with a deterministic decoder + the
 // fakeWSConn. Caller controls the decoder so each test can assert
 // per-payload behaviour.
 func quietConnector(t *testing.T, conn *fakeWSConn, decoder FrameDecoder, pingInterval time.Duration) *WSLongConnConnector {
+	t.Helper()
+	return connectorWithLogger(t, conn, decoder, pingInterval, slog.New(slog.NewTextHandler(io.Discard, nil)))
+}
+
+// connectorWithLogger is quietConnector with the logger left to the
+// caller, for the tests that assert on what the connector logs.
+func connectorWithLogger(t *testing.T, conn *fakeWSConn, decoder FrameDecoder, pingInterval time.Duration, logger *slog.Logger) *WSLongConnConnector {
 	t.Helper()
 	c, err := NewWSLongConnConnector(WSConnectorConfig{
 		Dialer: &fakeWSDialer{conn: conn},
@@ -125,7 +153,7 @@ func quietConnector(t *testing.T, conn *fakeWSConn, decoder FrameDecoder, pingIn
 		PingInterval: pingInterval,
 		ReadDeadline: time.Second,
 		WriteTimeout: time.Second,
-		Logger:       slog.New(slog.NewTextHandler(io.Discard, nil)),
+		Logger:       logger,
 	})
 	if err != nil {
 		t.Fatalf("NewWSLongConnConnector: %v", err)
@@ -459,6 +487,71 @@ func TestWSConnectorDecoderErrorAcksAndContinues(t *testing.T) {
 	<-done
 }
 
+// TestWSConnectorLogsDroppedEventTypeOncePerType covers #8496: an app can
+// subscribe to event types we do not handle, and that path writes neither a
+// log line nor a DB row, so the socket leaves no trace of what it receives.
+// The type is named once per connection — a busy chat delivers reactions and
+// membership churn continuously, and one line per frame would be unbounded.
+// Heartbeats carry no event type and stay silent.
+func TestWSConnectorLogsDroppedEventTypeOncePerType(t *testing.T) {
+	t.Parallel()
+	conn := newFakeWSConn()
+	logs := &syncBuffer{}
+	decoder := FrameDecoderFunc(func([]byte, Installation) (InboundMessage, bool, error) {
+		return InboundMessage{}, false, nil
+	})
+	c := connectorWithLogger(t, conn, decoder, time.Hour, slog.New(slog.NewTextHandler(logs, nil)))
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	done := make(chan error, 1)
+	go func() {
+		done <- c.Run(ctx, Installation{AppID: "test_app"}, func(context.Context, InboundMessage) (DispatchResult, error) {
+			return DispatchResult{}, nil
+		})
+	}()
+
+	reaction := `{"schema":"2.0","header":{"event_type":"im.message.reaction.created_v1","event_id":"e%d"}}`
+	pushDataFrame(conn, []byte(fmt.Sprintf(reaction, 1)), "m1")
+	waitForWrites(t, conn, 1)
+	if got := logs.String(); !strings.Contains(got, "im.message.reaction.created_v1") {
+		t.Fatalf("dropped event type not logged; log was:\n%s", got)
+	}
+
+	// Same type again, plus a heartbeat: both ACKed, neither logged.
+	pushDataFrame(conn, []byte(fmt.Sprintf(reaction, 2)), "m2")
+	pushDataFrame(conn, []byte(`{}`), "m3")
+	waitForWrites(t, conn, 3)
+	if got := strings.Count(logs.String(), "dropping unhandled event type"); got != 1 {
+		t.Errorf("log lines after a repeat + a heartbeat = %d, want 1; log was:\n%s", got, logs.String())
+	}
+
+	// A type we have not reported yet is worth one line of its own.
+	pushDataFrame(conn, []byte(`{"schema":"2.0","header":{"event_type":"im.chat.access_event_v1","event_id":"e4"}}`), "m4")
+	waitForWrites(t, conn, 4)
+	if got := strings.Count(logs.String(), "dropping unhandled event type"); got != 2 {
+		t.Errorf("log lines after a second event type = %d, want 2; log was:\n%s", got, logs.String())
+	}
+
+	cancel()
+	<-done
+}
+
+// waitForWrites blocks until the connector has written n frames (each
+// processed frame is ACKed), so a test can assert on what handling that
+// frame did without racing the connector goroutine.
+func waitForWrites(t *testing.T, conn *fakeWSConn, n int) {
+	t.Helper()
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		if len(conn.snapshot()) >= n {
+			return
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	t.Fatalf("connector wrote %d frames, want %d", len(conn.snapshot()), n)
+}
+
 func TestWSConnectorReadErrorReturnsToHub(t *testing.T) {
 	t.Parallel()
 	conn := newFakeWSConn()
@@ -788,18 +881,146 @@ func TestGorillaDialerProxyURLApplied(t *testing.T) {
 	// not about the URL parsing.
 }
 
-func TestGorillaDialerEmptyProxyURLDefaultsToEnv(t *testing.T) {
+func TestWSConnectorPongUpdatesPingInterval(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		conn := newFakeWSConn()
+		c := quietConnector(t, conn, FrameDecoderFunc(func([]byte, Installation) (InboundMessage, bool, error) { return InboundMessage{}, false, nil }), 10*time.Second)
+		ctx, cancel := context.WithCancel(context.Background())
+		done := make(chan error, 1)
+		go func() { done <- c.Run(ctx, Installation{}, nil) }()
+		synctest.Wait()
+		pushPong := func(payload string) {
+			f := NewPongFrame(7)
+			f.Payload = []byte(payload)
+			conn.Push(f.Marshal())
+			synctest.Wait()
+		}
+		checkPings := func(wait time.Duration, want int) {
+			time.Sleep(wait)
+			synctest.Wait()
+			if got := len(conn.snapshot()); got != want {
+				t.Errorf("pings after %s = %d, want %d", wait, got, want)
+			}
+		}
+		pushPong(`{"PingInterval":2}`)
+		checkPings(2*time.Second, 1)
+		for _, payload := range []string{"", `{`, `{}`, `null`, `{"PingInterval":0}`, `{"PingInterval":-1}`, `{"PingInterval":"2"}`, `{"PingInterval":9223372036854775807}`} {
+			pushPong(payload)
+		}
+		checkPings(time.Second, 1)
+		// Unchanged configuration must not postpone the next heartbeat.
+		pushPong(`{"PingInterval":2}`)
+		checkPings(time.Second, 2)
+		pushPong(`{"PingInterval":5}`)
+		checkPings(4*time.Second, 2)
+		checkPings(time.Second, 3)
+		for _, raw := range conn.snapshot() {
+			f, err := UnmarshalFrame(raw)
+			if err != nil || f.Method != FrameMethodControl || f.HeaderValue(FrameHeaderTypeKey) != FrameHeaderTypePing || f.Service != 7 {
+				t.Errorf("unexpected heartbeat: frame=%+v err=%v", f, err)
+			}
+		}
+		cancel()
+		if err := <-done; err != nil {
+			t.Errorf("Run on cancel: %v", err)
+		}
+		checkPings(time.Minute, 3)
+	})
+}
+
+func TestWSConnectorPingFailureUnblocksRead(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		conn := newFakeWSConn()
+		conn.writeErr = errors.New("injected ping failure")
+		c := quietConnector(t, conn, FrameDecoderFunc(func([]byte, Installation) (InboundMessage, bool, error) { return InboundMessage{}, false, nil }), time.Second)
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+		done := make(chan error, 1)
+		go func() { done <- c.Run(ctx, Installation{}, nil) }()
+		synctest.Wait()
+		time.Sleep(time.Second)
+		synctest.Wait()
+		select {
+		case err := <-done:
+			if err == nil {
+				t.Error("ping failure must return an error to Hub backoff")
+			}
+		default:
+			t.Error("Run stayed blocked after ping failure")
+			cancel()
+			<-done
+		}
+		select {
+		case <-conn.closed:
+		default:
+			t.Error("failed socket was not closed")
+		}
+		// The supervisor retries Connect after backoff; the same connector
+		// must start a fresh session without a surviving failed ping loop.
+		replacement := newFakeWSConn()
+		c.cfg.Dialer = &fakeWSDialer{conn: replacement}
+		go func() { done <- c.Run(ctx, Installation{}, nil) }()
+		synctest.Wait()
+		time.Sleep(time.Second)
+		synctest.Wait()
+		if got := len(replacement.snapshot()); got != 1 {
+			t.Errorf("replacement session pings = %d, want 1", got)
+		}
+		cancel()
+		if err := <-done; err != nil {
+			t.Errorf("replacement Run on cancel: %v", err)
+		}
+	})
+}
+
+func TestWSConnectorPongArmsUnarmedPingLoop(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		conn := newFakeWSConn()
+		// A non-positive fallback leaves the ticker unarmed; a later pong
+		// must still be accepted and start heartbeats.
+		c := quietConnector(t, conn, FrameDecoderFunc(func([]byte, Installation) (InboundMessage, bool, error) { return InboundMessage{}, false, nil }), -time.Second)
+		ctx, cancel := context.WithCancel(context.Background())
+		done := make(chan error, 1)
+		go func() { done <- c.Run(ctx, Installation{}, nil) }()
+		synctest.Wait()
+		time.Sleep(time.Minute)
+		synctest.Wait()
+		if got := len(conn.snapshot()); got != 0 {
+			t.Fatalf("pings before update = %d, want 0", got)
+		}
+		f := NewPongFrame(7)
+		f.Payload = []byte(`{"PingInterval":2}`)
+		conn.Push(f.Marshal())
+		synctest.Wait()
+		time.Sleep(2 * time.Second)
+		synctest.Wait()
+		if got := len(conn.snapshot()); got != 1 {
+			t.Errorf("pings after update = %d, want 1", got)
+		}
+		cancel()
+		if err := <-done; err != nil {
+			t.Errorf("Run on cancel: %v", err)
+		}
+	})
+}
+
+func TestReadDeadlineForPingInterval(t *testing.T) {
 	t.Parallel()
-	d := NewGorillaDialer()
-	if d.ProxyURL != "" {
-		t.Fatalf("NewGorillaDialer ProxyURL should be empty, got %q", d.ProxyURL)
+	const maxDuration = time.Duration(1<<63 - 1)
+	cases := []struct {
+		name       string
+		base, ping time.Duration
+		want       time.Duration
+	}{
+		{"default cadence keeps base", 6 * time.Minute, 2 * time.Minute, 6 * time.Minute},
+		{"short cadence keeps base", 6 * time.Minute, 2 * time.Second, 6 * time.Minute},
+		{"long cadence raises deadline", 6 * time.Minute, 5 * time.Minute, 15 * time.Minute},
+		{"non-positive cadence keeps base", 6 * time.Minute, -time.Second, 6 * time.Minute},
+		{"overflow saturates", 6 * time.Minute, maxDuration / 2, maxDuration},
 	}
-	// DialContext with empty ProxyURL should not panic or error on the
-	// proxy path — the underlying gorilla dialer uses ProxyFromEnvironment.
-	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
-	defer cancel()
-	_, _, _ = d.DialContext(ctx, "wss://127.0.0.1:1/ws", nil)
-	// We don't assert on the error (it'll be a connection error), we just
-	// verify that DialContext with empty ProxyURL doesn't panic or return
-	// a parse error.
+	for _, tc := range cases {
+		if got := readDeadlineFor(tc.base, tc.ping); got != tc.want {
+			t.Errorf("%s: readDeadlineFor(%s, %s) = %s, want %s", tc.name, tc.base, tc.ping, got, tc.want)
+		}
+	}
 }

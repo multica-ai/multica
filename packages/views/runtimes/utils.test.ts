@@ -1,18 +1,24 @@
+// @vitest-environment node
 import { describe, it, expect, afterEach, beforeEach, vi } from "vitest";
 import { useCustomPricingStore } from "@multica/core/runtimes/custom-pricing-store";
 import type { AgentRuntime, RuntimeUsage } from "@multica/core/types";
 
 import {
   addDaysIso,
+  aggregateByDate,
   aggregateByWeek,
   aggregateCostByModel,
+  cacheHitRatePercent,
   collectUnmappedModels,
   computeCostInWindow,
   estimateCost,
   estimateCostBreakdown,
+  formatTokens,
   isModelPriced,
   isSelfHealingRuntime,
   sliceWindow,
+  summarizeTaskUsage,
+  summarizeTaskUsageAcross,
   todayIso,
   weekStartIso,
 } from "./utils";
@@ -28,6 +34,21 @@ const zeroUsage = {
   cache_read_tokens: 0,
   cache_write_tokens: 0,
 };
+
+describe("cacheHitRatePercent", () => {
+  it("includes cache writes in the input-side denominator", () => {
+    expect(cacheHitRatePercent(0, 72, 28)).toBe(72);
+  });
+
+  it("does not round an incomplete hit rate up to 100%", () => {
+    expect(cacheHitRatePercent(45, 9_955, 0)).toBe(99);
+    expect(cacheHitRatePercent(0, 10_000, 0)).toBe(100);
+  });
+
+  it("returns null when there are no input-side tokens", () => {
+    expect(cacheHitRatePercent(0, 0, 0)).toBeNull();
+  });
+});
 
 describe("isSelfHealingRuntime", () => {
   function makeRuntime(overrides: Partial<AgentRuntime>): AgentRuntime {
@@ -142,6 +163,78 @@ describe("estimateCost", () => {
     expect(cost).toBeCloseTo(10 + 50 + 1 + 12.5, 5);
   });
 
+  it("prices Claude Fable 5.1 at the Mythos-class tier with quarter-rate cache reads", () => {
+    // Same $10 / $50 and $12.50 cache write as Fable 5, but cache reads are
+    // 0.025x input ($0.25) rather than the usual 0.1x.
+    const cost = estimateCost({
+      ...zeroUsage,
+      model: "claude-fable-5-1",
+      input_tokens: 1_000_000,
+      output_tokens: 1_000_000,
+      cache_read_tokens: 1_000_000,
+      cache_write_tokens: 1_000_000,
+    });
+    expect(cost).toBeCloseTo(10 + 50 + 0.25 + 12.5, 5);
+  });
+
+  it.each([
+    {
+      model: "claude-sonnet-5-5",
+      dotted: "claude-sonnet-5.5",
+      expected: { input: 2, output: 10, cacheRead: 0.1, cacheWrite: 2.5 },
+    },
+    {
+      model: "claude-haiku-5-5",
+      dotted: "claude-haiku-5.5",
+      expected: { input: 0.1, output: 0.5, cacheRead: 0.01, cacheWrite: 0.125 },
+    },
+  ])("prices $model across transport spellings", ({ model, dotted, expected }) => {
+    for (const alias of [
+      model,
+      dotted,
+      `anthropic/${model}`,
+      `anthropic:${dotted}`,
+      `${model}[1m]`,
+      `${model}-20261001`,
+      `${model}-2026-10-01[1m]`,
+      `${model}-latest`,
+    ]) {
+      // Aggregate totals do not identify a single request's context tier.
+      const usage = {
+        model: alias,
+        input_tokens: 1_000_000,
+        output_tokens: 1_000_000,
+        cache_read_tokens: 1_000_000,
+        cache_write_tokens: 1_000_000,
+      };
+      expect(estimateCostBreakdown(usage)).toEqual(expected);
+      expect(estimateCost(usage)).toBeCloseTo(
+        expected.input + expected.output + expected.cacheRead + expected.cacheWrite,
+        5,
+      );
+      expect(collectUnmappedModels([usage])).toEqual([]);
+    }
+  });
+
+  it("keeps unknown Sonnet and Haiku variants unmapped", () => {
+    for (const model of [
+      "claude-sonnet-5-6",
+      "claude-sonnet-5.6",
+      "claude-sonnet-5-55",
+      "claude-haiku-5-6",
+      "claude-haiku-5.6",
+      "claude-haiku-5-55",
+      ...["claude-sonnet-5", "claude-sonnet-5-5", "claude-haiku-5-5"].flatMap(
+        (base) => ["x", "-preview", "-latest-preview", "-20261001x", "[1m]junk", "[1m][2m]", "[]"].map(
+          (suffix) => base + suffix,
+        ),
+      ),
+    ]) {
+      expect(isModelPriced(model)).toBe(false);
+      expect(estimateCost({ ...zeroUsage, model, input_tokens: 1_000_000 })).toBe(0);
+    }
+  });
+
   it("prices Claude Sonnet 5 at Anthropic's intro $2 / $10 tier", () => {
     const cost = estimateCost({
       ...zeroUsage,
@@ -231,6 +324,30 @@ describe("estimateCost", () => {
     }
   });
 
+  it("prices Opus 5.5 at its own 4/20 tier with 0.05x cache reads, not Opus 5's", () => {
+    // Opus 5.5 is cheaper than Opus 5 ($4 / $20, $5 cache write) and prices
+    // cache reads at 0.05x input ($0.20) instead of the usual 0.1x. Copilot
+    // reports it dotted, so every spelling must reach the 5.5 row.
+    for (const model of [
+      "claude-opus-5-5",
+      "claude-opus-5-5[1m]",
+      "claude-opus-5.5",
+      "anthropic/claude-opus-5-5",
+    ]) {
+      expect(
+        estimateCost({
+          ...zeroUsage,
+          model,
+          input_tokens: 1_000_000,
+          output_tokens: 1_000_000,
+          cache_read_tokens: 1_000_000,
+          cache_write_tokens: 1_000_000,
+        }),
+      ).toBeCloseTo(4 + 20 + 0.2 + 5, 5);
+      expect(isModelPriced(model)).toBe(true);
+    }
+  });
+
   it("prices each dotted Codex catalog SKU at its own tier, not gpt-5", () => {
     // Every dotted minor version is priced independently. The resolver does
     // exact-match-after-date-strip (no startsWith fallback), so each row
@@ -259,13 +376,19 @@ describe("estimateCost", () => {
     ).toBeCloseTo(1.75 + 14, 5);
   });
 
-  it("prices the gpt-5.6 series per OpenAI's official cache-aware rates", () => {
+  it("prices current Codex models per OpenAI's official cache-aware rates", () => {
     // Official announcement rates. 5.6 is the first OpenAI generation to bill
-    // cache writes separately: cacheRead = 0.1x input, cacheWrite = 1.25x
+    // cache writes separately: cacheRead generally = 0.1x input (GPT-6.1
+    // Sol and Terra use 0.05x), cacheWrite = 1.25x
     // input. Cover every model x every token category so a wrong cache rate
     // can't hide behind an input-only assertion. `total` is 1M of each of the
     // four categories priced at its own rate.
     const cases = [
+      { model: "gpt-6-astra", input: 10, cacheRead: 1, cacheWrite: 12.5, output: 50, total: 73.5 },
+      { model: "gpt-6.1-sol", input: 2, cacheRead: 0.1, cacheWrite: 2.5, output: 10, total: 14.6 },
+      { model: "gpt-6.1-terra", input: 1, cacheRead: 0.05, cacheWrite: 1.25, output: 5, total: 7.3 },
+      { model: "gpt-6-sol", input: 2, cacheRead: 0.2, cacheWrite: 2.5, output: 10, total: 14.7 },
+      { model: "gpt-6-luna", input: 0.1, cacheRead: 0.01, cacheWrite: 0.125, output: 0.5, total: 0.735 },
       { model: "gpt-5.6-sol", input: 5, cacheRead: 0.5, cacheWrite: 6.25, output: 30, total: 41.75 },
       { model: "gpt-5.6-terra", input: 2.5, cacheRead: 0.25, cacheWrite: 3.125, output: 15, total: 20.875 },
       { model: "gpt-5.6-luna", input: 1, cacheRead: 0.1, cacheWrite: 1.25, output: 6, total: 8.35 },
@@ -296,6 +419,120 @@ describe("estimateCost", () => {
     }
   });
 
+  it("prices published Gemini token SKUs at standard rates in every bucket", () => {
+    const cases = [
+      { model: "gemini-4-argon", input: 2, output: 10, cacheRead: 0.1, cacheWrite: 2 },
+      { model: "gemini-3.8-flash", input: 0.75, output: 3.75, cacheRead: 0.075, cacheWrite: 0.75 },
+      { model: "gemini-3.7-flash", input: 0.75, output: 3.75, cacheRead: 0.075, cacheWrite: 0.75 },
+      { model: "gemini-3.6-flash", input: 0.75, output: 3.75, cacheRead: 0.075, cacheWrite: 0.75 },
+      { model: "gemini-3.5-flash", input: 0.75, output: 3.75, cacheRead: 0.075, cacheWrite: 0.75 },
+      { model: "gemini-3.5-flash-lite", input: 0.3, output: 2.5, cacheRead: 0.03, cacheWrite: 0.3 },
+      { model: "gemini-3.1-flash-lite", input: 0.25, output: 1.5, cacheRead: 0.025, cacheWrite: 0.25 },
+      { model: "gemini-3.1-pro", input: 2, output: 12, cacheRead: 0.2, cacheWrite: 2 },
+      { model: "gemini-3.1-pro-preview", input: 2, output: 12, cacheRead: 0.2, cacheWrite: 2 },
+      { model: "gemini-3.1-pro-preview-customtools", input: 2, output: 12, cacheRead: 0.2, cacheWrite: 2 },
+      { model: "gemini-3-flash", input: 0.5, output: 3, cacheRead: 0.05, cacheWrite: 0.5 },
+      { model: "gemini-3-flash-preview", input: 0.5, output: 3, cacheRead: 0.05, cacheWrite: 0.5 },
+      { model: "gemini-2.5-pro", input: 1.25, output: 10, cacheRead: 0.125, cacheWrite: 1.25 },
+      { model: "gemini-2.5-flash", input: 0.3, output: 2.5, cacheRead: 0.03, cacheWrite: 0.3 },
+      { model: "gemini-2.5-flash-lite", input: 0.1, output: 0.4, cacheRead: 0.01, cacheWrite: 0.1 },
+      { model: "gemini-robotics-er-2-preview", input: 1, output: 5, cacheRead: 0.1, cacheWrite: 1 },
+      { model: "gemini-robotics-er-2-streaming-preview", input: 1, output: 5, cacheRead: 0, cacheWrite: 0 },
+      { model: "gemini-3.8-flash-tts", input: 0.5, output: 9, cacheRead: 0, cacheWrite: 0 },
+      { model: "gemini-3.8-flash-lite-tts", input: 0.5, output: 6, cacheRead: 0, cacheWrite: 0 },
+      { model: "gemini-3.1-flash-tts-preview", input: 1, output: 20, cacheRead: 0, cacheWrite: 0 },
+      { model: "gemini-2.5-flash-preview-tts", input: 0.5, output: 10, cacheRead: 0, cacheWrite: 0 },
+      { model: "gemini-2.5-pro-preview-tts", input: 1, output: 20, cacheRead: 0, cacheWrite: 0 },
+      { model: "gemini-3.5-transcribe", input: 2, output: 12, cacheRead: 0, cacheWrite: 0 },
+      { model: "gemini-3.5-transcribe-live", input: 3.5, output: 21, cacheRead: 0, cacheWrite: 0 },
+      { model: "gemini-3.5-live-translate-preview", input: 3.5, output: 21, cacheRead: 0, cacheWrite: 0 },
+    ];
+    for (const c of cases) {
+      for (const model of [c.model, `google/${c.model}`, `custom:google/${c.model}[1m]`]) {
+        const row = {
+          provider: "antigravity", model,
+          input_tokens: 1_000_000, output_tokens: 1_000_000,
+          cache_read_tokens: 1_000_000, cache_write_tokens: 1_000_000,
+        };
+        expect(isModelPriced(model, row.provider), model).toBe(true);
+        expect(collectUnmappedModels([row]), model).toEqual([]);
+        expect(estimateCostBreakdown(row), model).toEqual({
+          input: c.input, output: c.output, cacheRead: c.cacheRead, cacheWrite: c.cacheWrite,
+        });
+        expect(estimateCost(row), model).toBeCloseTo(c.input + c.output + c.cacheRead + c.cacheWrite, 5);
+      }
+    }
+  });
+
+  it("resolves Antigravity display names and reasoning suffixes without changing rates", () => {
+    for (const [label, id, price] of [
+      ["Gemini 3.8 Flash", "gemini-3.8-flash", 0.75],
+      ["Gemini 3.5 Flash", "gemini-3.5-flash", 0.75],
+      ["Gemini 3.5 Flash-Lite", "gemini-3.5-flash-lite", 0.3],
+      ["Gemini 3.1 Pro", "gemini-3.1-pro", 2],
+      ["Gemini 4 Argon", "gemini-4-argon", 2],
+    ] as const) {
+      for (const model of [label, `${label} (High)`, `google/${label} (Low)`,
+        `${id}-minimal`, `antigravity:${id}-high`, `custom:google/${id}-low[1m]`]) {
+        expect(isModelPriced(model, "antigravity"), model).toBe(true);
+        expect(estimateCost({ ...zeroUsage, provider: "antigravity", model, input_tokens: 1_000_000 }), model).toBeCloseTo(price, 5);
+      }
+    }
+  });
+
+  it("does not guess Gemini variant or multimodal generation prices", () => {
+    for (const model of [
+      "gemini-3.8-flash-lite",
+      "gemini-3.8-flash-live",
+      "gemini-3.8-flash-preview",
+      "gemini-3.8-flash-ultra",
+      "gemini-3-8-flash",
+      "Gemini 3.8 Flash (Ultra)",
+      "Gemini 3.9 Flash (High)",
+      "gemini-3.8-flash[1m][2m]",
+      "gemini-3.1-pro-preview-extra",
+      "gemini-3.1-pro-image",
+      "gemini-2.5-pro-preview-05-06",
+      "gemini-2.5-flash-lite-preview-09-2025",
+      "gemini-2.5-flash-image",
+      "gemini-3-pro-image",
+      "gemini-nano-banana-2.1",
+      "gemini-3.1-flash-image",
+      "gemini-3.1-flash-lite-image",
+      "gemini-3.8-live",
+      "gemini-3.8-live-extended-thinking",
+      "gemini-3.1-flash-live-preview",
+      "gemini-2.5-flash-native-audio-preview-12-2025",
+      "gemini-omni-1.1-flash",
+      "gemini-omni-flash-preview",
+      "gemini-embedding-2",
+      "gemini-4-argon-fast",
+      "gemini-4-argon[1m][2m]",
+    ]) {
+      expect(isModelPriced(model, "antigravity"), model).toBe(false);
+      expect(estimateCost({ ...zeroUsage, provider: "antigravity", model, input_tokens: 1_000_000 }), model).toBe(0);
+    }
+  });
+
+  it("uses the current routed Flash rate for Cursor 3.5 and 3.6 aliases", () => {
+    for (const model of ["gemini-3.5-flash-high", "gemini-3.6-flash-high"]) {
+      expect(estimateCost({ ...zeroUsage, provider: "cursor", model,
+        input_tokens: 1_000_000, output_tokens: 1_000_000, cache_read_tokens: 1_000_000,
+      })).toBeCloseTo(0.75 + 3.75 + 0.075, 5);
+    }
+  });
+
+  it("resolves current Codex routing prefixes and context tags", () => {
+    for (const model of ["openai:gpt-6.1-sol", "openai/gpt-6.1-sol", "gpt-6.1-sol[1m]"]) {
+      expect(isModelPriced(model, "codex")).toBe(true);
+      expect(estimateCost({ ...zeroUsage, provider: "codex", model, cache_read_tokens: 1_000_000 })).toBeCloseTo(0.1, 5);
+    }
+    for (const model of ["openai:gpt-6.1-terra", "openai/gpt-6.1-terra", "gpt-6.1-terra[1m]"]) {
+      expect(isModelPriced(model, "codex")).toBe(true);
+      expect(estimateCost({ ...zeroUsage, provider: "codex", model, cache_read_tokens: 1_000_000 })).toBeCloseTo(0.05, 5);
+    }
+  });
+
   it("flags catalog SKUs without a published price (gpt-5.5-mini) as unmapped", () => {
     // `gpt-5.5-mini` is in the Codex catalog but OpenAI hasn't published a
     // public rate. We refuse to absorb it into `gpt-5.5` — the diagnostic
@@ -322,6 +559,14 @@ describe("estimateCost", () => {
     // literal-dot alias in server/internal/metrics/pricing.go (MUL-4347).
     expect(isModelPriced("gpt-5-6-luna")).toBe(false);
     expect(isModelPriced("gpt-5-6-sol")).toBe(false);
+    expect(isModelPriced("gpt-6-astra")).toBe(true);
+    expect(isModelPriced("gpt-6-astra-pro")).toBe(false);
+    expect(isModelPriced("gpt-6.1-sol-pro")).toBe(false);
+    expect(isModelPriced("gpt-6-1-sol")).toBe(false);
+    expect(isModelPriced("gpt-6.1-terra-pro")).toBe(false);
+    expect(isModelPriced("gpt-6-1-terra")).toBe(false);
+    expect(isModelPriced("gpt-6-sol-high")).toBe(false);
+    expect(isModelPriced("gpt-6-luna-pro")).toBe(false);
     expect(
       estimateCost({
         ...zeroUsage,
@@ -329,6 +574,106 @@ describe("estimateCost", () => {
         input_tokens: 1_000_000,
       }),
     ).toBe(0);
+  });
+
+  it("strips `provider:model` routing prefixes (Hermes custom providers) before resolving", () => {
+    // Regression: canonicalCandidates only stripped `/` prefixes, so Hermes
+    // ids like `alibaba-coding-plan:qwen3.8-max` and `custom:ark-code-latest`
+    // never resolved and stayed uncosted. `:` must be stripped like `/`.
+    const cost = estimateCost({
+      ...zeroUsage,
+      provider: "hermes",
+      model: "alibaba-coding-plan:qwen3.8-max",
+      input_tokens: 1_000_000,
+      output_tokens: 1_000_000,
+      cache_read_tokens: 1_000_000,
+      cache_write_tokens: 1_000_000,
+    });
+    // 1M × $2 + 1M × $6 + 1M × $0.17 + 1M × $2.50 = $10.67.
+    expect(cost).toBeCloseTo(10.67, 5);
+    // `ark-code-latest` is a rolling Volcengine alias, not a stable model
+    // identity, so it is deliberately unmapped after the prefix strip.
+    expect(isModelPriced("custom:ark-code-latest", "hermes")).toBe(false);
+    expect(isModelPriced("kimi-coding:kimi-k3", "hermes")).toBe(true);
+  });
+
+  it("prices the Qwen / Kimi models added from models.dev", () => {
+    expect(
+      estimateCost({
+        ...zeroUsage,
+        model: "qwen3.7-plus",
+        input_tokens: 1_000_000,
+        output_tokens: 1_000_000,
+      }),
+    ).toBeCloseTo(2.0, 5); // $0.40 + $1.60 (International ≤256K tier)
+    expect(
+      estimateCost({
+        ...zeroUsage,
+        model: "kimi-code/k3",
+        provider: "kimi",
+        input_tokens: 1_000_000,
+        output_tokens: 1_000_000,
+      }),
+    ).toBeCloseTo(18, 5); // kimi/k3 → $3 + $15
+    expect(
+      estimateCost({
+        ...zeroUsage,
+        model: "qwen3.6-flash",
+        input_tokens: 1_000_000,
+        output_tokens: 1_000_000,
+      }),
+    ).toBeCloseTo(1.75, 5); // $0.25 + $1.50 (International ≤256K tier)
+    // `ark-code-latest` is a rolling Volcengine alias (target switched in
+    // the console, possibly across model families), not a stable model
+    // identity — it stays unmapped like grok-composer-*.
+    expect(isModelPriced("ark-code-latest")).toBe(false);
+  });
+
+  it("keeps subscription-only and preview SKUs distinct from their GA siblings", () => {
+    // qwen3.8-max-preview is subscription-priced at 0; it must NOT inherit
+    // qwen3.8-max's $2/$6 tier, and `qwen3.8-max-preview[1m]` must resolve
+    // to the preview row after the context-tag strip.
+    expect(
+      estimateCost({
+        ...zeroUsage,
+        model: "qwen3.8-max-preview[1m]",
+        input_tokens: 1_000_000,
+      }),
+    ).toBe(0);
+    expect(
+      estimateCost({
+        ...zeroUsage,
+        model: "qwen3.8-max",
+        input_tokens: 1_000_000,
+      }),
+    ).toBeCloseTo(2, 5);
+  });
+
+  it("iteratively strips nested routing prefixes (custom:anthropic/claude-opus-4.7)", () => {
+    // Regression for the review blocker: stripProvider used to peel a single
+    // `/` or `:` layer, so a Hermes-style `custom:anthropic/claude-opus-4.7`
+    // stopped at `anthropic/claude-opus-4.7` and missed the table while the
+    // backend substring rules matched it. Iterative peeling must resolve it
+    // to the Opus tier: 1M × $5 + 1M × $25 = $30.
+    const cost = estimateCost({
+      ...zeroUsage,
+      provider: "hermes",
+      model: "custom:anthropic/claude-opus-4.7",
+      input_tokens: 1_000_000,
+      output_tokens: 1_000_000,
+    });
+    expect(cost).toBeCloseTo(30, 5);
+    expect(isModelPriced("custom:anthropic/claude-opus-4.7", "hermes")).toBe(true);
+  });
+
+  it("keeps unknown suffixed Qwen variants unmapped (anchored aliases)", () => {
+    // Regression for the review blocker: the backend alias regexes were
+    // unanchored substrings, so `qwen3.7-plus-extra` / `qwen3.8-max-preview-extra`
+    // silently borrowed a tier. The frontend exact matcher must agree and
+    // leave them unmapped so both sides surface the same diagnostics.
+    expect(isModelPriced("qwen3.7-plus-extra")).toBe(false);
+    expect(isModelPriced("qwen3.6-flash-extra")).toBe(false);
+    expect(isModelPriced("qwen3.8-max-preview-extra")).toBe(false);
   });
 
   it("returns 0 for a genuinely unknown model so the UI can flag it", () => {
@@ -379,6 +724,68 @@ describe("estimateCost", () => {
     expect(costWithAllTokenTypes("cursor")).toBeCloseTo(3 + 15 + 0.5, 5);
   });
 
+  it("prices Cursor catalog variants at their base model's Cursor rate", () => {
+    // Cursor ids carry effort / thinking parts the rate doesn't depend on.
+    // 1M each of input, output, cache read, cache write.
+    const cost = (model: string) =>
+      estimateCost({
+        ...zeroUsage,
+        provider: "cursor",
+        model,
+        input_tokens: 1_000_000,
+        output_tokens: 1_000_000,
+        cache_read_tokens: 1_000_000,
+        cache_write_tokens: 1_000_000,
+      });
+
+    const opus55 = 4 + 20 + 0.2 + 5;
+    expect(cost("claude-opus-5-5-high")).toBeCloseTo(opus55, 5);
+    expect(cost("claude-opus-5-5-max")).toBeCloseTo(opus55, 5);
+    expect(cost("claude-fable-5-1-thinking-high")).toBeCloseTo(10 + 50 + 0.25 + 12.5, 5);
+    // Thinking after the effort level, and the older `claude-4.6-sonnet` naming.
+    expect(cost("claude-4.6-sonnet-medium-thinking")).toBeCloseTo(3 + 15 + 0.3 + 3.75, 5);
+    expect(cost("gpt-5.5-extra-high")).toBeCloseTo(5 + 30 + 0.5, 5);
+    expect(cost("gpt-5.6-sol-none")).toBeCloseTo(4 + 20 + 0.4 + 5, 5);
+    expect(cost("cursor-grok-4.6-high")).toBeCloseTo(2 + 6 + 0.5, 5);
+    expect(cost("grok-4.7-medium")).toBeCloseTo(2 + 6 + 0.5, 5);
+    expect(cost("gemini-4-argon-medium")).toBeCloseTo(2 + 10 + 0.1, 5);
+    expect(cost("muse-wonder-1.0-minimal")).toBeCloseTo(4 + 20 + 0.2, 5);
+    expect(cost("kimi-k3-max")).toBeCloseTo(3 + 15 + 0.3, 5);
+    expect(cost("claude-opus-4-8[context=1m,effort=high,fast=false]")).toBeCloseTo(
+      5 + 25 + 0.5 + 6.25,
+      5,
+    );
+  });
+
+  it("prices Cursor Fast variants only where Cursor publishes a Fast rate", () => {
+    const cost = (model: string) =>
+      estimateCost({
+        ...zeroUsage,
+        provider: "cursor",
+        model,
+        input_tokens: 1_000_000,
+        output_tokens: 1_000_000,
+      });
+
+    expect(cost("gpt-5.6-sol-medium-fast")).toBeCloseTo(8 + 40, 5);
+    expect(cost("cursor-grok-4.5-high-fast")).toBeCloseTo(4 + 18, 5);
+    expect(cost("claude-opus-4-7-thinking-high-fast")).toBeCloseTo(30 + 150, 5);
+    expect(cost("claude-opus-4-8[effort=high,fast=true]")).toBeCloseTo(10 + 50, 5);
+    // No published Fast rate: unmapped, never the cheaper standard rate.
+    expect(isModelPriced("claude-opus-5-5-high-fast", "cursor")).toBe(false);
+    expect(isModelPriced("gpt-5.5-medium-fast", "cursor")).toBe(false);
+    expect(isModelPriced("claude-opus-5-5[fast=true]", "cursor")).toBe(false);
+    expect(collectUnmappedModels([
+      { ...zeroUsage, provider: "cursor", model: "claude-opus-5-5-high-fast", input_tokens: 1 },
+    ])).toEqual(["cursor/claude-opus-5-5-high-fast"]);
+  });
+
+  it("keeps Cursor variant stripping scoped to Cursor rows", () => {
+    expect(isModelPriced("claude-opus-5-5-high")).toBe(false);
+    expect(isModelPriced("claude-opus-5-5-high", "claude")).toBe(false);
+    expect(isModelPriced("claude-opus-5-5-high", "cursor")).toBe(true);
+  });
+
   it("scopes the generic `auto` id by provider so collisions don't borrow a price", () => {
     const auto = (provider?: string) =>
       estimateCost({ ...zeroUsage, provider, model: "auto", input_tokens: 1_000_000 });
@@ -407,8 +814,7 @@ describe("estimateCost", () => {
   // header comment. Pinning them in tests is what catches a future edit
   // that copies a price from a near-named neighbour by accident — the
   // mistake the previous attempt (PR #3170, closed) made.
-  it("prices deepseek-v4-flash at the official $0.14/$0.28 with ~50× cache-hit discount", () => {
-    // 1M input × $0.14 + 1M output × $0.28 + 1M cache read × $0.0028 = $0.4228.
+  it("prices the retired deepseek-v4-flash alias at the current Flash peak rate", () => {
     const cost = estimateCost({
       ...zeroUsage,
       model: "deepseek-v4-flash",
@@ -416,12 +822,11 @@ describe("estimateCost", () => {
       output_tokens: 1_000_000,
       cache_read_tokens: 1_000_000,
     });
-    expect(cost).toBeCloseTo(0.14 + 0.28 + 0.0028, 5);
+    expect(cost).toBeCloseTo(0.30 + 1.20 + 0.006, 5);
   });
 
   it("prices the deepseek-chat / deepseek-reasoner aliases at the same rate as deepseek-v4-flash", () => {
-    // The DeepSeek docs explicitly route both legacy names to v4-flash —
-    // they must hit the same numbers, not the older $0.27/$1.10 tier.
+    // Preserve the existing Flash routing for these historical aliases.
     const flash = estimateCost({
       ...zeroUsage,
       model: "deepseek-v4-flash",
@@ -441,6 +846,106 @@ describe("estimateCost", () => {
         input_tokens: 1_000_000,
       }),
     ).toBeCloseTo(flash, 5);
+  });
+
+  it("prices documented Flash aliases and the 1017 snapshot at the official peak rate", () => {
+    const want = { input: 0.30, output: 1.20, cacheRead: 0.006, cacheWrite: 0.30 };
+    for (const model of [
+      "deepseek-flash",
+      "deepseek/deepseek-flash",
+      "custom:deepseek/deepseek-flash[1m]",
+      "deepseek-v4-flash",
+      "deepseek-v4-flash-vision-exp",
+      "deepseek/deepseek-v4-flash-vision-exp",
+      "deepseek-chat",
+      "deepseek-reasoner",
+      "deepseek-v4.1-flash",
+      "deepseek/deepseek-v4.1-flash",
+      "deepseek/deepseek-v4.1-flash-1017",
+      "deepseek-v4.1-flash-1017",
+    ]) {
+      const usage = {
+        ...zeroUsage,
+        model,
+        input_tokens: 1_000_000,
+        output_tokens: 1_000_000,
+        cache_read_tokens: 1_000_000,
+        cache_write_tokens: 1_000_000,
+      };
+      expect(estimateCostBreakdown(usage), model).toEqual(want);
+      expect(estimateCost(usage), model).toBeCloseTo(1.806, 5);
+      expect(collectUnmappedModels([usage]), model).toEqual([]);
+    }
+  });
+
+  it("leaves unknown Flash variants unpriced", () => {
+    for (const model of [
+      "deepseek-v4.1-pro", "deepseek-v4.1-flash-preview",
+      "deepseek-v4-1-flash", "deepseek-v4.1-flash-1020",
+      "deepseek-v4.1-flash-1017-preview", "deepseek-flash-preview",
+      "deepseek-v4-flash-preview", "deepseek-v4-flash-vision-exp-extra",
+    ]) {
+      expect(isModelPriced(model), model).toBe(false);
+      expect(estimateCost({ ...zeroUsage, model, input_tokens: 1_000_000 }), model).toBe(0);
+    }
+  });
+
+  it("prices Bedrock-served Anthropic ids like their bare catalog SKUs", () => {
+    // Bedrock reports `us.anthropic.<id>` (region family + vendor prefix) and
+    // appends the inference-profile version to snapshots. Before the prefix
+    // strip none of these matched a table key, so a Bedrock runtime showed
+    // $0.00 for every turn while the tokens were still counted.
+    const tokens = {
+      input_tokens: 1_000_000,
+      output_tokens: 1_000_000,
+      cache_read_tokens: 1_000_000,
+      cache_write_tokens: 1_000_000,
+    };
+    const bareSonnet5 = estimateCost({
+      ...zeroUsage,
+      model: "claude-sonnet-5",
+      ...tokens,
+    });
+    for (const model of [
+      "us.anthropic.claude-sonnet-5",
+      "eu.anthropic.claude-sonnet-5",
+      "global.anthropic.claude-sonnet-5",
+      "anthropic.claude-sonnet-5",
+      "custom:bedrock/us.anthropic.claude-sonnet-5-v1:0[1m]",
+    ]) {
+      expect(estimateCost({ ...zeroUsage, provider: "claude", model, ...tokens })).toBeCloseTo(
+        bareSonnet5,
+        5,
+      );
+    }
+    // Snapshot + profile version suffix resolves to the same family tier.
+    expect(
+      estimateCost({
+        ...zeroUsage,
+        provider: "claude",
+        model: "us.anthropic.claude-sonnet-4-5-20250929-v1:0",
+        input_tokens: 1_000_000,
+      }),
+    ).toBeCloseTo(3, 5);
+    // A non-Anthropic Bedrock model must stay unmapped instead of borrowing a
+    // Claude rate.
+    expect(isModelPriced("us.amazon.nova-pro-v1:0", "amazon")).toBe(false);
+  });
+
+  it("only strips Bedrock versions from recognized Anthropic model ids", () => {
+    for (const model of [
+      "us.anthropic.claude-sonnet-6",
+      "us.anthropic.claude-sonnet-5-preview",
+      "global.anthropic.claude-opus-5-mini",
+      "us.anthropic.claude-sonnet-5-preview-v1:0",
+      "us.anthropic.claude-sonnet-5-v1:0junk",
+      "us.anthropic.claude-sonnet-5-v1:0[1m][2m]",
+      "gpt-6.1-sol-v1:0",
+      "claude-sonnet-5-v1:0",
+      "us.anthropic.gpt-6.1-sol-v1:0",
+    ]) {
+      expect(isModelPriced(model), model).toBe(false);
+    }
   });
 
   it("prices kimi-k2.6 at the official $0.95 / $4.00 tier (not the K2 tier)", () => {
@@ -497,6 +1002,21 @@ describe("estimateCost", () => {
         cache_read_tokens: 1_000_000,
       }),
     ).toBeCloseTo(8.3, 5);
+  });
+
+  it("prices grok-4.6 at xAI's short-context $2.00 / $6.00 tier with $0.50 cached input", () => {
+    // grok-4.6 cached input is $0.50/1M, not grok-4.5's $0.30.
+    // 1M input × $2.00 + 1M output × $6.00 + 1M cached-read × $0.50.
+    expect(
+      estimateCost({
+        ...zeroUsage,
+        provider: "xai",
+        model: "grok-4.6",
+        input_tokens: 1_000_000,
+        output_tokens: 1_000_000,
+        cache_read_tokens: 1_000_000,
+      }),
+    ).toBeCloseTo(8.5, 5);
   });
 
   it("prices the rest of the published Grok catalog", () => {
@@ -767,6 +1287,7 @@ describe("isModelPriced", () => {
   it("recognises both Claude and Codex/GPT families", () => {
     expect(isModelPriced("claude-sonnet-5")).toBe(true);
     expect(isModelPriced("claude-fable-5")).toBe(true);
+    expect(isModelPriced("claude-fable-5-1")).toBe(true);
     expect(isModelPriced("claude-sonnet-4-6")).toBe(true);
     expect(isModelPriced("gpt-5-codex")).toBe(true);
     expect(isModelPriced("gpt-5-mini")).toBe(true);
@@ -780,6 +1301,7 @@ describe("isModelPriced", () => {
     // hit the same catalog row, otherwise Copilot-routed usage gets bucketed
     // as "unmapped" and the user has to type the price in by hand.
     expect(isModelPriced("claude-sonnet-5")).toBe(true);
+    expect(isModelPriced("claude-fable-5.1")).toBe(true);
     expect(isModelPriced("claude-haiku-4.5")).toBe(true);
     expect(isModelPriced("claude-sonnet-4.5")).toBe(true);
     expect(isModelPriced("claude-sonnet-4.6")).toBe(true);
@@ -793,6 +1315,7 @@ describe("isModelPriced", () => {
     // The provider prefix is routing metadata, not part of the SKU.
     expect(isModelPriced("anthropic/claude-sonnet-5")).toBe(true);
     expect(isModelPriced("anthropic/claude-fable-5")).toBe(true);
+    expect(isModelPriced("anthropic/claude-fable-5-1")).toBe(true);
     expect(isModelPriced("anthropic/claude-opus-4.7")).toBe(true);
     expect(isModelPriced("anthropic/claude-sonnet-4-6")).toBe(true);
   });
@@ -1092,6 +1615,109 @@ describe("sliceWindow (timezone-aware)", () => {
   });
 });
 
+describe("aggregateByDate", () => {
+  // MUL-6334: the daily cost stack computed `estimateCostBreakdown` and then
+  // summed only three of its four components, silently dropping cache-read
+  // spend from every bar and from the tooltip Total that sums them.
+  function makeUsage(
+    date: string,
+    tokens: Partial<{
+      input: number;
+      output: number;
+      cacheRead: number;
+      cacheWrite: number;
+    }>,
+    model = "gpt-5.6-sol",
+  ): RuntimeUsage {
+    return {
+      runtime_id: "r",
+      date,
+      provider: "openai",
+      model,
+      input_tokens: tokens.input ?? 0,
+      output_tokens: tokens.output ?? 0,
+      cache_read_tokens: tokens.cacheRead ?? 0,
+      cache_write_tokens: tokens.cacheWrite ?? 0,
+    };
+  }
+
+  it("bills cache reads in the daily stack and its total", () => {
+    // gpt-5.6-sol: input $5/M, output $30/M, cacheRead $0.50/M.
+    const rows = [
+      makeUsage("2026-05-11", { input: 1_000_000, cacheRead: 10_000_000 }),
+    ];
+    const { dailyCostStack } = aggregateByDate(rows);
+    const day = dailyCostStack[0];
+    expect(day?.cacheRead).toBeCloseTo(5, 2);
+    expect(day?.total).toBeCloseTo(10, 2);
+  });
+
+  it("keeps every daily bucket's total equal to the sum of estimateCost", () => {
+    // The invariant the reporter asked for. A cache-read-dominated workload is
+    // the only shape that catches the regression: with zero cache reads the
+    // broken and fixed totals are identical.
+    const rows = [
+      makeUsage("2026-05-11", {
+        input: 4_300_000,
+        output: 456_400,
+        cacheRead: 79_300_000,
+      }),
+      makeUsage("2026-05-11", { input: 1_000, output: 500 }),
+      makeUsage("2026-05-12", { cacheRead: 50_000_000 }),
+      // Anthropic rows exercise the cache-write segment too.
+      makeUsage(
+        "2026-05-12",
+        { input: 200_000, output: 20_000, cacheRead: 8_000_000, cacheWrite: 400_000 },
+        "claude-sonnet-4-6",
+      ),
+    ];
+    const { dailyCostStack } = aggregateByDate(rows);
+    expect(dailyCostStack).toHaveLength(2);
+    for (const day of dailyCostStack) {
+      const expected = rows
+        .filter((r) => r.date === day.date)
+        .reduce((sum, r) => sum + estimateCost(r), 0);
+      // Each of the four segments is rounded to cents before being summed —
+      // that is what keeps the tooltip footer equal to the bars above it — so
+      // the bucket can sit up to half a cent per segment off the exact figure.
+      // The tolerance is the rounding, not slack for a dropped category: a
+      // missing segment shows up as dollars, not cents.
+      expect(Math.abs(day.total - expected)).toBeLessThanOrEqual(0.02);
+      // Total is what the tooltip footer prints; the segments are what it
+      // sums to get there. They have to be exactly the same number.
+      expect(day.input + day.output + day.cacheRead + day.cacheWrite).toBeCloseTo(
+        day.total,
+        10,
+      );
+    }
+  });
+
+  it("reproduces the reported gpt-5.6-sol undercount", () => {
+    // The exact workload from the bug report: the chart showed $35.19 against
+    // a true $74.84, hiding $39.65 (53%) of spend.
+    const rows = [
+      makeUsage("2026-05-11", {
+        input: 4_300_000,
+        output: 456_400,
+        cacheRead: 79_300_000,
+      }),
+    ];
+    const { dailyCostStack, dailyCost } = aggregateByDate(rows);
+    expect(dailyCostStack[0]?.total).toBeCloseTo(74.84, 2);
+    // The non-stacked series always included cache reads; the stack now agrees
+    // with it, which is what makes the chart agree with the Cost KPI.
+    expect(dailyCostStack[0]?.total).toBeCloseTo(dailyCost[0]?.cost ?? 0, 2);
+  });
+
+  it("still reports a non-zero total when spend is entirely cache reads", () => {
+    // `total` gates the chart's empty state, which blames an unmapped model
+    // when it reads 0. A cache-read-only bucket used to trip that.
+    const rows = [makeUsage("2026-05-11", { cacheRead: 20_000_000 })];
+    const { dailyCostStack } = aggregateByDate(rows);
+    expect(dailyCostStack[0]?.total).toBeCloseTo(10, 2);
+  });
+});
+
 describe("aggregateByWeek", () => {
   beforeEach(() => {
     vi.useFakeTimers();
@@ -1104,6 +1730,8 @@ describe("aggregateByWeek", () => {
     date: string,
     input: number,
     output: number,
+    cacheRead = 0,
+    cacheWrite = 0,
   ): RuntimeUsage {
     return {
       runtime_id: "r",
@@ -1112,8 +1740,8 @@ describe("aggregateByWeek", () => {
       model: "claude-sonnet-4-6",
       input_tokens: input,
       output_tokens: output,
-      cache_read_tokens: 0,
-      cache_write_tokens: 0,
+      cache_read_tokens: cacheRead,
+      cache_write_tokens: cacheWrite,
     };
   }
 
@@ -1174,6 +1802,24 @@ describe("aggregateByWeek", () => {
     const { weeklyCostStack } = aggregateByWeek(rows, "UTC", 1);
     expect(weeklyCostStack).toHaveLength(1);
     expect(weeklyCostStack[0]?.total).toBeCloseTo(36, 2);
+  });
+
+  it("bills cache reads in the weekly stack and its total (MUL-6334)", () => {
+    vi.setSystemTime(new Date("2026-05-17T12:00:00Z"));
+    // claude-sonnet-4-6: input $3/M, output $15/M, cacheRead $0.30/M,
+    // cacheWrite $3.75/M. Row: $3 + $15 + $6 (20M cache reads) + $3.75 = $27.75.
+    const rows = [
+      makeUsage("2026-05-11", 1_000_000, 1_000_000, 20_000_000, 1_000_000),
+    ];
+    const { weeklyCostStack } = aggregateByWeek(rows, "UTC", 1);
+    const week = weeklyCostStack[0];
+    expect(week?.cacheRead).toBeCloseTo(6, 2);
+    expect(week?.total).toBeCloseTo(27.75, 2);
+    // Same invariant the daily stack holds: bucket total === sum of estimateCost.
+    expect(week?.total).toBeCloseTo(
+      rows.reduce((sum, r) => sum + estimateCost(r), 0),
+      2,
+    );
   });
 
   it("emits trailing calendar weeks pinned to today, dropping older populated weeks", () => {
@@ -1305,5 +1951,107 @@ describe("computeCostInWindow", () => {
   it("returns 0 for an empty row set", () => {
     vi.setSystemTime(new Date("2026-05-20T12:00:00Z"));
     expect(computeCostInWindow([], 7, "UTC")).toBe(0);
+  });
+});
+
+describe("summarizeTaskUsage", () => {
+  // claude-opus-5: 5 / 25 / 0.50 / 6.25 per million.
+  const opus = {
+    provider: "anthropic",
+    model: "claude-opus-5",
+    input_tokens: 96_000,
+    output_tokens: 34_000,
+    cache_read_tokens: 712_000,
+    cache_write_tokens: 50_000,
+  };
+  // gpt-5.6-terra: 2.50 / 15 / 0.25 / 3.125 per million.
+  const terra = {
+    provider: "openai",
+    model: "gpt-5.6-terra",
+    input_tokens: 31_000,
+    output_tokens: 12_000,
+    cache_read_tokens: 158_000,
+    cache_write_tokens: 11_000,
+  };
+
+  it("sums every token bucket into the headline figure", () => {
+    const s = summarizeTaskUsage([opus]);
+    expect(s?.tokens).toBe(96_000 + 34_000 + 712_000 + 50_000);
+    expect(s?.input).toBe(96_000);
+    expect(s?.cacheWrite).toBe(50_000);
+    expect(s?.models).toEqual(["claude-opus-5"]);
+  });
+
+  it("prices each model slice at its own rate, not the combined total", () => {
+    // Priced separately: 1.9985 (opus) + 0.331375 (terra).
+    // Priced as one blob at either rate, the answer would be wrong.
+    const s = summarizeTaskUsage([opus, terra]);
+    expect(s?.cost).toBeCloseTo(1.9985 + 0.331375, 5);
+    expect(s?.models).toEqual(["claude-opus-5", "gpt-5.6-terra"]);
+  });
+
+  it("prefers the provider's own cost over the rate table", () => {
+    // 3e10 ticks = $3.00, well above what the rate table would charge, so a
+    // rate-table result would be visibly different.
+    const s = summarizeTaskUsage([{ ...opus, cost_usd_ticks: 30_000_000_000 }]);
+    expect(s?.cost).toBeCloseTo(3, 5);
+  });
+
+  it("returns null for no usage rather than a zeroed summary", () => {
+    // Both must be null: a run with no recorded usage was not free, and a
+    // 0 here would render as "$0.00" and assert that it was.
+    expect(summarizeTaskUsage(undefined)).toBeNull();
+    expect(summarizeTaskUsage([])).toBeNull();
+  });
+
+  it("counts tokens for an unpriced model but leaves its cost at 0", () => {
+    const s = summarizeTaskUsage([{ ...opus, model: "totally-made-up-model" }]);
+    expect(s?.tokens).toBe(892_000);
+    expect(s?.cost).toBe(0);
+  });
+
+  it("reports cache savings against full input pricing", () => {
+    // 712K cache reads at opus: would have cost 5/M, actually cost 0.50/M.
+    const s = summarizeTaskUsage([opus]);
+    expect(s?.cacheSavings).toBeCloseTo((712_000 * (5 - 0.5)) / 1_000_000, 5);
+  });
+});
+
+describe("summarizeTaskUsageAcross", () => {
+  const slice = {
+    model: "claude-opus-5",
+    input_tokens: 1_000_000,
+    output_tokens: 0,
+    cache_read_tokens: 0,
+    cache_write_tokens: 0,
+  };
+
+  it("skips runs with no usage instead of nulling the whole total", () => {
+    const total = summarizeTaskUsageAcross([[slice], undefined, [], [slice]]);
+    expect(total?.tokens).toBe(2_000_000);
+    expect(total?.cost).toBeCloseTo(10, 5);
+  });
+
+  it("is null only when no run has any usage", () => {
+    expect(summarizeTaskUsageAcross([undefined, [], undefined])).toBeNull();
+    expect(summarizeTaskUsageAcross([])).toBeNull();
+  });
+});
+
+describe("formatTokens", () => {
+  it("uses a compact unit ladder for large token counts", () => {
+    expect(formatTokens(999)).toBe("999");
+    expect(formatTokens(1_000)).toBe("1K");
+    expect(formatTokens(1_050)).toBe("1.1K");
+    expect(formatTokens(1_000_000)).toBe("1M");
+    expect(formatTokens(2_200_000_000)).toBe("2.2B");
+    expect(formatTokens(29_513_100_000)).toBe("29.5B");
+    expect(formatTokens(1_000_000_000_000)).toBe("1T");
+  });
+
+  it("promotes values that round across a unit boundary", () => {
+    expect(formatTokens(999_949)).toBe("999.9K");
+    expect(formatTokens(999_950)).toBe("1M");
+    expect(formatTokens(999_999_999)).toBe("1B");
   });
 });

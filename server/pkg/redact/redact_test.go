@@ -1,6 +1,8 @@
 package redact
 
 import (
+	"encoding/json"
+	"os"
 	"strings"
 	"testing"
 )
@@ -194,21 +196,6 @@ func TestRedactGenericCredentials(t *testing.T) {
 	}
 }
 
-func TestRedactHomeDirectory(t *testing.T) {
-	t.Parallel()
-	if homeDir == "" || username == "" {
-		t.Skip("cannot determine home dir or username")
-	}
-	input := "Reading file at " + homeDir + "/Documents/secret.txt"
-	got := Text(input)
-	if strings.Contains(got, username) {
-		t.Fatalf("home directory username not redacted: %s", got)
-	}
-	if !strings.Contains(got, "****") {
-		t.Fatalf("expected **** in path, got: %s", got)
-	}
-}
-
 func TestNoFalsePositivesOnNormalText(t *testing.T) {
 	t.Parallel()
 	inputs := []string{
@@ -301,6 +288,155 @@ func TestInputMapNil(t *testing.T) {
 	if got := InputMap(nil); got != nil {
 		t.Fatalf("expected nil, got: %v", got)
 	}
+}
+
+// A Codex file edit arrives as changes[]{path, diff, content}. Before the
+// nested walk these strings bypassed redaction entirely and reached the DB.
+func TestInputMapRedactsNestedSliceOfMaps(t *testing.T) {
+	t.Parallel()
+	m := map[string]any{
+		"changes": []any{
+			map[string]any{
+				"path": "cfg.go",
+				"diff": "+api_key: sk-proj-abc123def456ghi789jkl012mno345",
+			},
+			map[string]any{
+				"path":    ".env",
+				"content": "GITHUB_TOKEN=ghp_ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmn",
+			},
+		},
+	}
+	got := InputMap(m)
+
+	changes, ok := got["changes"].([]any)
+	if !ok || len(changes) != 2 {
+		t.Fatalf("changes not preserved as a 2-element slice: %#v", got["changes"])
+	}
+	first, _ := changes[0].(map[string]any)
+	if diff, _ := first["diff"].(string); strings.Contains(diff, "sk-proj") {
+		t.Fatalf("API key nested in changes[0].diff not redacted: %s", diff)
+	}
+	if first["path"] != "cfg.go" {
+		t.Fatalf("clean nested string altered: %v", first["path"])
+	}
+	second, _ := changes[1].(map[string]any)
+	if content, _ := second["content"].(string); strings.Contains(content, "ghp_ABCDEFGH") {
+		t.Fatalf("token nested in changes[1].content not redacted: %s", content)
+	}
+}
+
+func TestInputMapRedactsDeeplyNestedMaps(t *testing.T) {
+	t.Parallel()
+	m := map[string]any{
+		"a": map[string]any{
+			"b": map[string]any{
+				"c": []any{"leak sk-proj-abc123def456ghi789jkl012mno345"},
+			},
+		},
+	}
+	got := InputMap(m)
+	a, _ := got["a"].(map[string]any)
+	b, _ := a["b"].(map[string]any)
+	c, _ := b["c"].([]any)
+	if len(c) != 1 {
+		t.Fatalf("nested slice not preserved: %#v", b["c"])
+	}
+	if s, _ := c[0].(string); strings.Contains(s, "sk-proj") {
+		t.Fatalf("API key at depth 4 not redacted: %s", s)
+	}
+}
+
+// Home directory paths are intentionally left intact — see Text's doc comment.
+// This guards the removal: a path under $HOME must survive verbatim, so nobody
+// reintroduces host-path masking as an incidental side effect of another fix.
+func TestTextLeavesHomePathIntact(t *testing.T) {
+	t.Parallel()
+	home, err := os.UserHomeDir()
+	if err != nil || home == "" {
+		t.Skip("no home directory resolved in this environment")
+	}
+	path := home + "/secret/app.go"
+
+	if got := Text(path); got != path {
+		t.Fatalf("home path was rewritten:\n  input:  %s\n  output: %s", path, got)
+	}
+
+	m := map[string]any{"changes": []any{map[string]any{"path": path}}}
+	changes, _ := InputMap(m)["changes"].([]any)
+	first, _ := changes[0].(map[string]any)
+	if got, _ := first["path"].(string); got != path {
+		t.Fatalf("nested home path was rewritten:\n  input:  %s\n  output: %s", path, got)
+	}
+}
+
+func TestInputMapRedactsStringSliceAndStringMap(t *testing.T) {
+	t.Parallel()
+	m := map[string]any{
+		"argv": []string{"curl", "-H", "Authorization: Bearer abc123def456"},
+		"env":  map[string]string{"TOKEN": "ghp_ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmn"},
+	}
+	got := InputMap(m)
+
+	argv, ok := got["argv"].([]string)
+	if !ok || len(argv) != 3 {
+		t.Fatalf("argv not preserved as []string: %#v", got["argv"])
+	}
+	if strings.Contains(argv[2], "abc123def456") {
+		t.Fatalf("bearer token in []string not redacted: %s", argv[2])
+	}
+	env, ok := got["env"].(map[string]string)
+	if !ok {
+		t.Fatalf("env not preserved as map[string]string: %#v", got["env"])
+	}
+	if strings.Contains(env["TOKEN"], "ghp_ABCDEFGH") {
+		t.Fatalf("token in map[string]string not redacted: %s", env["TOKEN"])
+	}
+}
+
+// The caller keeps using the map it passed in, so redaction must not write
+// through the shared nested references.
+func TestInputMapDoesNotMutateInput(t *testing.T) {
+	t.Parallel()
+	secret := "sk-proj-abc123def456ghi789jkl012mno345"
+	inner := map[string]any{"diff": secret}
+	m := map[string]any{"changes": []any{inner}}
+
+	_ = InputMap(m)
+
+	if inner["diff"] != secret {
+		t.Fatalf("input map was mutated in place: %v", inner["diff"])
+	}
+}
+
+// Depth is attacker-influenced, so the walk must bottom out instead of
+// exhausting the stack — and must not hand back a raw string when it does.
+func TestInputMapBoundsRecursionDepth(t *testing.T) {
+	t.Parallel()
+	leaf := map[string]any{"leak": "sk-proj-abc123def456ghi789jkl012mno345"}
+	cur := leaf
+	for i := 0; i < 5000; i++ {
+		cur = map[string]any{"next": cur}
+	}
+
+	got := InputMap(cur) // must not stack overflow
+
+	blob, err := json.Marshal(got)
+	if err != nil {
+		t.Fatalf("marshal redacted map: %v", err)
+	}
+	if strings.Contains(string(blob), "sk-proj") {
+		t.Fatalf("secret past the depth limit was returned unredacted")
+	}
+	if !strings.Contains(string(blob), depthLimitPlaceholder) {
+		t.Fatalf("expected depth-limit placeholder in output: %s", truncateForLog(string(blob)))
+	}
+}
+
+func truncateForLog(s string) string {
+	if len(s) <= 200 {
+		return s
+	}
+	return s[:200] + "…"
 }
 
 func TestRedactMultipleSecrets(t *testing.T) {

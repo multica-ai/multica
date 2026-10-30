@@ -32,7 +32,7 @@ export function Screenshot({
         />
       </div>
       {caption ? (
-        <figcaption className="mt-3 text-center text-[13px] text-[#0a0d12]/45">
+        <figcaption className="mt-3 text-center text-label text-[#0a0d12]/45">
           {caption}
         </figcaption>
       ) : null}

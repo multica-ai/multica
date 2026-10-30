@@ -2,6 +2,7 @@
 
 import { memo } from "react";
 import { useQuery } from "@tanstack/react-query";
+import { ShimmerText } from "@multica/ui/components/common/shimmer-text";
 import {
   HoverCard,
   HoverCardTrigger,
@@ -58,11 +59,11 @@ export const SubIssuesAgentWorkingChip = memo(
           }
         >
           <AgentAvatarStack agentIds={agentIds} size="xs" max={3} />
-          <span className="animate-chat-text-shimmer text-[11px] font-medium leading-none tabular-nums">
+          <ShimmerText className="text-micro font-medium tabular-nums">
             {t(($) => $.agent_activity.chip_agents_working, {
               count: agentIds.length,
             })}
-          </span>
+          </ShimmerText>
         </HoverCardTrigger>
         <HoverCardContent align="start" className="w-72">
           <WorkingAgentsHoverContent agents={agents} />

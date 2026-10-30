@@ -1,47 +1,32 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { render, screen, fireEvent, waitFor } from "@testing-library/react";
+import { buildIssueStatusCatalog } from "@multica/core/issue-statuses";
+import {
+  configureShortcutPlatform,
+  createShortcutChord,
+  useShortcutStore,
+} from "@multica/core/shortcuts";
 import { RunConfirmModal } from "./run-confirm";
 
-// --- Warm agent / squad / runtime caches (prefetched in the real app) --------
-// The modal resolves the target runtime's cli_version locally — an agent's own
-// runtime, or a squad leader's — so nothing in the dialog waits on the network.
-// Tests drive the verdict by swapping the runtime's reported cli_version here.
-const cache = {
-  agents: [{ id: "agent-1", runtime_id: "runtime-1" }] as Array<{ id: string; runtime_id: string }>,
-  runtimes: [{ id: "runtime-1", metadata: { cli_version: "0.4.0" } }] as Array<{
-    id: string;
-    metadata: Record<string, unknown>;
-  }>,
-  squads: [{ id: "squad-1", leader_id: "agent-1" }] as Array<{ id: string; leader_id: string }>,
-};
-vi.mock("@tanstack/react-query", () => ({
-  useQuery: ({ queryKey }: { queryKey: string[] }) => {
-    if (queryKey[0] === "runtimes") return { data: cache.runtimes };
-    if (queryKey[0] === "workspaces" && queryKey[2] === "agents") return { data: cache.agents };
-    if (queryKey[0] === "workspaces" && queryKey[2] === "squads") return { data: cache.squads };
-    return { data: [] };
-  },
-}));
 vi.mock("@multica/core/hooks", () => ({ useWorkspaceId: () => "ws-test" }));
-vi.mock("@multica/core/workspace/queries", () => ({
-  agentListOptions: (wsId: string) => ({ queryKey: ["workspaces", wsId, "agents"] }),
-  squadListOptions: (wsId: string) => ({ queryKey: ["workspaces", wsId, "squads"] }),
-}));
-// Stub the runtimes barrel: the query-options builder would otherwise drag the
-// network layer in, and the deep cli-version module isn't an exported subpath.
-// `handoffSupported`'s real semver/dev-build logic is exhaustively covered in
-// packages/core/runtimes/cli-version.test.ts; here we only need a faithful
-// stand-in for the >= 0.3.28 threshold so the cache → version → verdict wiring
-// is exercised end to end.
-vi.mock("@multica/core/runtimes", () => ({
-  runtimeListOptions: (wsId: string) => ({ queryKey: ["runtimes", wsId, "list"] }),
-  readRuntimeCliVersion: (m?: { cli_version?: unknown }) =>
-    typeof m?.cli_version === "string" ? m.cli_version : "",
-  handoffSupported: (v?: string | null) => {
-    const m = /(\d+)\.(\d+)\.(\d+)/.exec((v ?? "").trim());
-    if (!m) return false;
-    return Number(m[1]) * 1e6 + Number(m[2]) * 1e3 + Number(m[3]) >= 3028; // 0.3.28
-  },
+vi.mock("@multica/core/issue-statuses/hooks", () => ({
+  useIssueStatuses: () =>
+    buildIssueStatusCatalog([
+      {
+        id: "rework",
+        workspace_id: "ws-test",
+        key: "rework",
+        name: "Rework",
+        description: "",
+        category: "unstarted",
+        color: "#22c55e",
+        is_system: false,
+        position: 0,
+        archived_at: null,
+        created_at: "",
+        updated_at: "",
+      },
+    ]),
 }));
 
 const mockUpdate = vi.fn().mockResolvedValue({ id: "issue-1" });
@@ -69,13 +54,17 @@ vi.mock("../i18n", () => ({
           title_assign: "Confirm assignment?",
           assign_single: "assign to {{name}}",
           assign_batch: "assign {{count}} to {{name}}",
-          note_label: "Handoff note",
-          note_placeholder: "scope...",
-          note_unsupported: "runtime too old",
           confirm_assign: "Confirm assignment",
           dont_start: "Don't start yet",
           toast_failed: "failed",
+          title_promote: "Start work now?",
+          promote_single: "move to {{status}}, {{name}} starts",
+          confirm_promote: "Move and start",
         },
+        // useStatusLabel resolves BUILT-IN keys through i18n and custom ones
+        // through the catalog, so the promote headline needs both sources.
+        status: { todo: "Todo" },
+        batch: { update_partial: "updated {{updated}} of {{count}}" },
       };
       return sel(labels).replace(/\{\{(\w+)\}\}/g, (_m, k) => String(vars?.[k] ?? ""));
     },
@@ -85,7 +74,10 @@ vi.mock("../i18n", () => ({
 // Keep the ui primitives as light DOM so the logic is what's under test.
 vi.mock("@multica/ui/components/ui/dialog", () => ({
   Dialog: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
-  DialogContent: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
+  // Keeps the real Popup's prop passthrough, which the send chord binds to.
+  DialogContent: ({ children, ...props }: React.HTMLAttributes<HTMLDivElement>) => (
+    <div data-testid="dialog-content" {...props}>{children}</div>
+  ),
   DialogHeader: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
   DialogFooter: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
   DialogTitle: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
@@ -96,15 +88,12 @@ vi.mock("@multica/ui/components/ui/button", () => ({
     <button {...props}>{children}</button>
   ),
 }));
-vi.mock("@multica/ui/components/ui/textarea", () => ({
-  Textarea: (props: React.TextareaHTMLAttributes<HTMLTextAreaElement>) => <textarea {...props} />,
-}));
 vi.mock("@multica/ui/components/ui/spinner", () => ({
   Spinner: () => <span data-testid="spinner" />,
 }));
 // vi.hoisted: vi.mock factories run before module-level consts initialize.
 // Only error is used now — completion is silent (no result toast).
-const mockToast = vi.hoisted(() => ({ error: vi.fn(), success: vi.fn() }));
+const mockToast = vi.hoisted(() => ({ error: vi.fn(), success: vi.fn(), warning: vi.fn() }));
 vi.mock("sonner", () => ({ toast: mockToast }));
 
 beforeEach(() => {
@@ -112,14 +101,36 @@ beforeEach(() => {
   mockBatch.mockClear().mockResolvedValue({ updated: 2 });
   mockToast.error.mockClear();
   mockToast.success.mockClear();
-  cache.agents = [{ id: "agent-1", runtime_id: "runtime-1" }];
-  cache.runtimes = [{ id: "runtime-1", metadata: { cli_version: "0.4.0" } }];
-  cache.squads = [{ id: "squad-1", leader_id: "agent-1" }];
+  mockToast.warning.mockClear();
+  // The real shortcut store drives both the submit chord and the keycap hint,
+  // and jsdom's platform follows the host OS — pin it so the chord is ⌘+Enter
+  // everywhere, not Ctrl+Enter on a Linux CI runner.
+  configureShortcutPlatform("macos");
+  useShortcutStore.setState({ overrides: {} });
 });
+
+afterEach(() => {
+  configureShortcutPlatform(null);
+  useShortcutStore.setState({ overrides: {} });
+});
+
+const confirmButton = () => screen.getByRole("button", { name: "Confirm assignment" });
+const dialog = () => screen.getByTestId("dialog-content");
 
 const single = {
   issueIds: ["issue-1"],
   mode: "assign" as const,
+  assigneeType: "agent" as const,
+  assigneeId: "agent-1",
+};
+
+// Promoting a parked issue out of backlog starts the run on its own, so it
+// confirms through this same dialog — one behaviour for built-in `todo` and
+// every custom Todo-category status alike (MUL-6463).
+const promote = {
+  issueIds: ["issue-1"],
+  mode: "promote" as const,
+  status: "rework",
   assigneeType: "agent" as const,
   assigneeId: "agent-1",
 };
@@ -129,22 +140,19 @@ describe("RunConfirmModal", () => {
     // The MUL-5010 core: opening the dialog fires nothing and blocks nothing.
     const { container } = render(<RunConfirmModal onClose={vi.fn()} data={single} />);
     expect(screen.queryByTestId("spinner")).not.toBeInTheDocument();
-    expect(screen.getByPlaceholderText("scope...")).not.toBeDisabled();
-    expect(screen.getByText("Confirm assignment")).not.toBeDisabled();
+    expect(confirmButton()).not.toBeDisabled();
     // Headline reads across elements — the assignee name is bolded in place.
     expect(container.textContent).toContain("assign to Walt");
   });
 
-  it("single assign sends the assignee change with the handoff note", async () => {
+  it("single assign sends the assignee change and nothing else", async () => {
     render(<RunConfirmModal onClose={vi.fn()} data={single} />);
-    fireEvent.change(screen.getByPlaceholderText("scope..."), { target: { value: "only login" } });
-    fireEvent.click(screen.getByText("Confirm assignment"));
+    fireEvent.click(confirmButton());
     await waitFor(() => expect(mockUpdate).toHaveBeenCalledTimes(1));
     expect(mockUpdate).toHaveBeenCalledWith({
       id: "issue-1",
       assignee_type: "agent",
       assignee_id: "agent-1",
-      handoff_note: "only login",
     });
     expect(mockBatch).not.toHaveBeenCalled();
   });
@@ -154,51 +162,59 @@ describe("RunConfirmModal", () => {
     // run surface through the issue's normal updates, so submit adds no toast.
     const onClose = vi.fn();
     render(<RunConfirmModal onClose={onClose} data={single} />);
-    fireEvent.click(screen.getByText("Confirm assignment"));
+    fireEvent.click(confirmButton());
     await waitFor(() => expect(onClose).toHaveBeenCalled());
     expect(mockToast.success).not.toHaveBeenCalled();
     expect(mockToast.error).not.toHaveBeenCalled();
   });
 
-  it("'暂不开始' sends suppress_run and no handoff note", async () => {
+  it("'暂不开始' sends suppress_run alongside the assignee change", async () => {
     render(<RunConfirmModal onClose={vi.fn()} data={single} />);
-    fireEvent.change(screen.getByPlaceholderText("scope..."), { target: { value: "ignored" } });
     fireEvent.click(screen.getByText("Don't start yet"));
     await waitFor(() => expect(mockUpdate).toHaveBeenCalledTimes(1));
-    const payload = mockUpdate.mock.calls[0]![0];
-    expect(payload.suppress_run).toBe(true);
-    expect(payload.handoff_note).toBeUndefined();
+    expect(mockUpdate).toHaveBeenCalledWith({
+      id: "issue-1",
+      assignee_type: "agent",
+      assignee_id: "agent-1",
+      suppress_run: true,
+    });
     expect(mockToast.success).not.toHaveBeenCalled();
   });
 
-  it("disables the note box when the agent's runtime is too old", () => {
-    cache.runtimes = [{ id: "runtime-1", metadata: { cli_version: "0.2.21" } }];
-    render(<RunConfirmModal onClose={vi.fn()} data={single} />);
-    expect(screen.getByPlaceholderText("scope...")).toBeDisabled();
-    expect(screen.getByText("runtime too old")).toBeInTheDocument();
+  it("promote sends the status change with no assignee fields", async () => {
+    // The owner is already on the issue: re-sending it would turn a status
+    // write into an assignee write on the server's side of the predicate.
+    render(<RunConfirmModal onClose={vi.fn()} data={promote} />);
+    fireEvent.click(screen.getByRole("button", { name: "Move and start" }));
+    await waitFor(() => expect(mockUpdate).toHaveBeenCalledTimes(1));
+    expect(mockUpdate).toHaveBeenCalledWith({
+      id: "issue-1",
+      status: "rework",
+    });
   });
 
-  it("resolves a squad's verdict through its leader's runtime, locally", () => {
-    // A squad run is executed by its leader, so the leader's runtime decides.
-    // The squad list gives us leader_id, so this needs no server verdict.
-    cache.runtimes = [{ id: "runtime-1", metadata: { cli_version: "0.2.21" } }];
-    render(
-      <RunConfirmModal
-        onClose={vi.fn()}
-        data={{ ...single, assigneeType: "squad", assigneeId: "squad-1" }}
-      />,
-    );
-    expect(screen.getByPlaceholderText("scope...")).toBeDisabled();
-    expect(screen.getByText("runtime too old")).toBeInTheDocument();
+  it("promote's 'don't start yet' still moves the issue, without the run", async () => {
+    // The status change is the point; suppress_run is the only difference. This
+    // is the one way to leave backlog WITHOUT waking the agent.
+    render(<RunConfirmModal onClose={vi.fn()} data={promote} />);
+    fireEvent.click(screen.getByText("Don't start yet"));
+    await waitFor(() => expect(mockUpdate).toHaveBeenCalledTimes(1));
+    expect(mockUpdate).toHaveBeenCalledWith({
+      id: "issue-1",
+      status: "rework",
+      suppress_run: true,
+    });
   });
 
-  it("leaves the note box enabled when the target runtime can't be resolved", () => {
-    // Unknown assignee → no verdict. The note is a soft gate, so an
-    // unresolvable target must not produce a spurious warning.
-    cache.agents = [];
-    render(<RunConfirmModal onClose={vi.fn()} data={single} />);
-    expect(screen.getByPlaceholderText("scope...")).not.toBeDisabled();
-    expect(screen.queryByText("runtime too old")).not.toBeInTheDocument();
+  it("promote names the target status the way the workspace named it", () => {
+    // A custom status is only recognisable by its catalog name; built-ins keep
+    // resolving through i18n so a zh workspace never reads "In Progress".
+    const { container, rerender } = render(<RunConfirmModal onClose={vi.fn()} data={promote} />);
+    expect(screen.getByText("Start work now?")).toBeInTheDocument();
+    expect(container.textContent).toContain("move to Rework, Walt starts");
+
+    rerender(<RunConfirmModal onClose={vi.fn()} data={{ ...promote, status: "todo" }} />);
+    expect(container.textContent).toContain("move to Todo, Walt starts");
   });
 
   it("batch assign (N ids) applies via batchUpdate", async () => {
@@ -206,7 +222,7 @@ describe("RunConfirmModal", () => {
       <RunConfirmModal onClose={vi.fn()} data={{ ...single, issueIds: ["i1", "i2"] }} />,
     );
     expect(container.textContent).toContain("assign 2 to Walt");
-    fireEvent.click(screen.getByText("Confirm assignment"));
+    fireEvent.click(confirmButton());
     await waitFor(() => expect(mockBatch).toHaveBeenCalledTimes(1));
     expect(mockBatch).toHaveBeenCalledWith({
       ids: ["i1", "i2"],
@@ -216,13 +232,117 @@ describe("RunConfirmModal", () => {
     expect(mockToast.success).not.toHaveBeenCalled();
   });
 
+  // --- Send chord (MUL-5694) ------------------------------------------------
+  // The chord is bound on the dialog, not on a single control, so it confirms
+  // wherever focus happens to be.
+
+  it("confirms on the send chord typed anywhere in the dialog", async () => {
+    const onClose = vi.fn();
+    render(<RunConfirmModal onClose={onClose} data={single} />);
+    fireEvent.keyDown(dialog(), { key: "Enter", metaKey: true });
+    await waitFor(() => expect(mockUpdate).toHaveBeenCalledTimes(1));
+    expect(mockUpdate).toHaveBeenCalledWith({
+      id: "issue-1",
+      assignee_type: "agent",
+      assignee_id: "agent-1",
+    });
+    await waitFor(() => expect(onClose).toHaveBeenCalled());
+  });
+
+  it("confirms from a focused footer button, which the chord cannot activate", async () => {
+    // Chromium fires no click for ⌘/Ctrl+Enter on a focused button, so without
+    // the dialog handling it there the chord is simply dead. The dialog focuses
+    // its first tabbable child, which is now a footer button.
+    render(<RunConfirmModal onClose={vi.fn()} data={single} />);
+    fireEvent.keyDown(screen.getByText("Don't start yet"), { key: "Enter", metaKey: true });
+    await waitFor(() => expect(mockUpdate).toHaveBeenCalledTimes(1));
+    // The primary action, not the button the caret happened to sit on.
+    expect(mockUpdate.mock.calls[0]![0].suppress_run).toBeUndefined();
+  });
+
+  it("yields to a focused button when send is remapped to plain Enter", () => {
+    // A bare Enter DOES activate a focused button, so confirming here as well
+    // would double-write — and on "Don't start yet" the two would disagree.
+    useShortcutStore.setState({ overrides: { send: createShortcutChord("Enter") } });
+    render(<RunConfirmModal onClose={vi.fn()} data={single} />);
+    fireEvent.keyDown(screen.getByText("Don't start yet"), { key: "Enter" });
+    fireEvent.keyDown(confirmButton(), { key: "Enter" });
+    expect(mockUpdate).not.toHaveBeenCalled();
+  });
+
+  it("submits once for a held chord, and never for an IME's committing Enter", async () => {
+    render(<RunConfirmModal onClose={vi.fn()} data={single} />);
+    fireEvent.keyDown(dialog(), { key: "Enter", metaKey: true, isComposing: true });
+    fireEvent.keyDown(dialog(), { key: "Enter", metaKey: true, repeat: true });
+    expect(mockUpdate).not.toHaveBeenCalled();
+    fireEvent.keyDown(dialog(), { key: "Enter", metaKey: true });
+    await waitFor(() => expect(mockUpdate).toHaveBeenCalledTimes(1));
+  });
+
+  it("follows a remapped send chord instead of hardcoding ⌘+Enter", async () => {
+    useShortcutStore.setState({ overrides: { send: createShortcutChord("Enter") } });
+    render(<RunConfirmModal onClose={vi.fn()} data={single} />);
+    fireEvent.keyDown(dialog(), { key: "Enter", metaKey: true });
+    expect(mockUpdate).not.toHaveBeenCalled();
+    fireEvent.keyDown(dialog(), { key: "Enter" });
+    await waitFor(() => expect(mockUpdate).toHaveBeenCalledTimes(1));
+  });
+
+  it("shows the chord on the confirm button without renaming it", () => {
+    render(<RunConfirmModal onClose={vi.fn()} data={single} />);
+    // Decorative: discoverable next to the label, absent from the a11y name —
+    // `confirmButton()` resolving by that exact name is the assertion.
+    expect(
+      confirmButton().querySelector('[data-slot="shortcut-keycaps"]'),
+    ).toBeInTheDocument();
+  });
+
   it("keeps the dialog open and surfaces the error when the write fails", async () => {
     const onClose = vi.fn();
     mockUpdate.mockRejectedValue(new Error("boom"));
     render(<RunConfirmModal onClose={onClose} data={single} />);
-    fireEvent.click(screen.getByText("Confirm assignment"));
+    fireEvent.click(confirmButton());
     await waitFor(() => expect(mockToast.error).toHaveBeenCalledWith("boom"));
     expect(onClose).not.toHaveBeenCalled();
     expect(mockToast.success).not.toHaveBeenCalled();
   });
+
+  it("runs onApplied only after the write succeeds (MUL-8179)", async () => {
+    const onApplied = vi.fn();
+    mockBatch.mockRejectedValueOnce(new Error("boom"));
+    render(
+      <RunConfirmModal
+        onClose={vi.fn()}
+        data={{ ...single, issueIds: ["i1", "i2"], onApplied }}
+      />,
+    );
+    fireEvent.click(confirmButton());
+    await waitFor(() => expect(mockToast.error).toHaveBeenCalledWith("boom"));
+    expect(onApplied).not.toHaveBeenCalled();
+
+    fireEvent.click(confirmButton());
+    await waitFor(() => expect(onApplied).toHaveBeenCalledTimes(1));
+  });
+
+  for (const updated of [0, 1]) {
+    for (const button of ["Confirm assignment", "Don't start yet"]) {
+      it(`a partial batch (${updated}/2, "${button}") warns and skips onApplied`, async () => {
+        const onApplied = vi.fn();
+        const onClose = vi.fn();
+        mockBatch.mockResolvedValueOnce({ updated });
+        render(
+          <RunConfirmModal
+            onClose={onClose}
+            data={{ ...single, issueIds: ["i1", "i2"], onApplied }}
+          />,
+        );
+        fireEvent.click(screen.getByRole("button", { name: button }));
+        await waitFor(() =>
+          expect(mockToast.warning).toHaveBeenCalledWith(`updated ${updated} of 2`),
+        );
+        expect(onApplied).not.toHaveBeenCalled();
+        expect(onClose).toHaveBeenCalled();
+      });
+    }
+  }
 });

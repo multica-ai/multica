@@ -34,13 +34,12 @@ export function useCreateProject() {
     mutationFn: (body: CreateProjectRequest) => api.createProject(body),
     onSuccess: (project) => {
       // Seed the detail cache so the post-create navigation lands on a
-      // populated page (no spinner flash). The list cache gets a prepend
-      // — list ordering is server-driven, so a brief out-of-order render
-      // is acceptable and corrected by the WS `project:created` event
-      // (or the next refetch).
+      // populated page (no spinner flash). Only prepend to a loaded list:
+      // seeding an unfetched list would hide other projects until a refetch.
+      // The next refetch restores the server-driven list order.
       qc.setQueryData<Project>(projectKeys.detail(wsId, project.id), project);
       qc.setQueryData<Project[]>(projectKeys.list(wsId), (old) =>
-        old ? [project, ...old.filter((p) => p.id !== project.id)] : [project],
+        old ? [project, ...old.filter((p) => p.id !== project.id)] : old,
       );
     },
   });
@@ -170,22 +169,13 @@ export function useDeleteProjectResource(projectId: string) {
   return useMutation({
     mutationKey: ["deleteProjectResource", projectId] as const,
     mutationFn: (resourceId: string) =>
-      api.deleteProjectResource(projectId, resourceId).then(() => resourceId),
-    onMutate: async (resourceId) => {
+      api.deleteProjectResource(projectId, resourceId),
+    onSuccess: async (_data, resourceId) => {
       const key = projectKeys.resources(wsId, projectId);
       await qc.cancelQueries({ queryKey: key });
-      const prev = qc.getQueryData<ProjectResource[]>(key);
       qc.setQueryData<ProjectResource[]>(key, (old) =>
         old ? old.filter((r) => r.id !== resourceId) : old,
       );
-      return { prev, key };
-    },
-    onError: (_err, _vars, ctx) => {
-      if (ctx?.prev !== undefined) {
-        qc.setQueryData(ctx.key, ctx.prev);
-      }
-    },
-    onSuccess: () => {
       const dropCount = (p: Project): Project => ({
         ...p,
         resource_count: Math.max(0, p.resource_count - 1),
@@ -199,6 +189,10 @@ export function useDeleteProjectResource(projectId: string) {
           ? old.map((p) => (p.id === projectId ? dropCount(p) : p))
           : old,
       );
+    },
+    onSettled: () => {
+      qc.invalidateQueries({ queryKey: projectKeys.detail(wsId, projectId) });
+      qc.invalidateQueries({ queryKey: projectKeys.list(wsId) });
     },
   });
 }

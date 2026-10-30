@@ -8,16 +8,19 @@
  * Renders nothing when there are no reactions. Adding a reaction is
  * deferred to a long-press affordance on the issue body (TODO).
  */
-import { useCallback } from "react";
+import { useCallback, useMemo } from "react";
 import { View } from "react-native";
-import type { Issue, IssueReaction } from "@multica/core/types";
+import type { Issue } from "@multica/core/types";
 import { ReactionBar } from "./reaction-bar";
 import { useToggleIssueReaction } from "@/data/mutations/issues";
 import { useAuthStore } from "@/data/auth-store";
 
 export function IssueReactionRow({ issue }: { issue: Issue }) {
   const userId = useAuthStore((s) => s.user?.id);
-  const reactions: IssueReaction[] = issue.reactions ?? [];
+  const reactions = useMemo(
+    () => issue.reactions ?? [],
+    [issue.reactions],
+  );
   const toggle = useToggleIssueReaction(issue.id);
 
   const onToggle = useCallback(

@@ -1,0 +1,11 @@
+/* Large interaction regions share the inset focus treatment defined by
+   editor/styles/zoom-canvas.css: the indicator stays visible without adding
+   an outer halo around the containing card. */
+.leaderboard-scroll-region {
+  outline: none;
+}
+
+.leaderboard-scroll-region:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: -2px;
+}

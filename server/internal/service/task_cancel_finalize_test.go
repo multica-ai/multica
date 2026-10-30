@@ -3,7 +3,6 @@ package service
 import (
 	"context"
 	"fmt"
-	"os"
 	"sync"
 	"testing"
 	"time"
@@ -17,30 +16,13 @@ import (
 
 func newCancelFinalizePool(t *testing.T) *pgxpool.Pool {
 	t.Helper()
-
-	dbURL := os.Getenv("DATABASE_URL")
-	if dbURL == "" {
-		dbURL = "postgres://multica:multica@localhost:5432/multica?sslmode=disable"
-	}
-
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-
-	pool, err := pgxpool.New(ctx, dbURL)
-	if err != nil {
-		t.Skipf("database unavailable: %v", err)
-	}
-	if err := pool.Ping(ctx); err != nil {
-		pool.Close()
-		t.Skipf("database unreachable: %v", err)
-	}
-	t.Cleanup(pool.Close)
-	return pool
+	return sharedTestPool(t)
 }
 
 type cancelFinalizeFixture struct {
 	pool          *pgxpool.Pool
 	workspaceID   string
+	creatorID     string
 	agentID       string
 	chatSessionID string
 	taskID        string
@@ -152,6 +134,7 @@ func createCancelFinalizeFixture(t *testing.T, ctx context.Context, pool *pgxpoo
 	return cancelFinalizeFixture{
 		pool:          pool,
 		workspaceID:   workspaceID,
+		creatorID:     userID,
 		agentID:       agentID,
 		chatSessionID: chatSessionID,
 		taskID:        taskID,
@@ -400,6 +383,9 @@ func TestFinalizeDeferredCancelledChat_StillEmpty_RestoresDraft(t *testing.T) {
 	if payload.ChatSessionID != f.chatSessionID {
 		t.Errorf("chat_session_id = %q, want %q", payload.ChatSessionID, f.chatSessionID)
 	}
+	if evts[0].ChatSessionOwnerID != f.creatorID {
+		t.Errorf("owner = %q, want session creator %q (realtime delivers only to the owner)", evts[0].ChatSessionOwnerID, f.creatorID)
+	}
 }
 
 // The recoverability guarantee behind the restored outcome: the draft-restore
@@ -522,8 +508,12 @@ func TestFinalizeDeferredCancelledChat_SecondCallIsNoop(t *testing.T) {
 	}
 	f.insertTranscriptRow(t, ctx)
 
-	svc.FinalizeDeferredCancelledChat(ctx, util.MustParseUUID(f.taskID))
-	svc.FinalizeDeferredCancelledChat(ctx, util.MustParseUUID(f.taskID))
+	if changed := svc.FinalizeDeferredCancelledChat(ctx, util.MustParseUUID(f.taskID)); !changed {
+		t.Fatal("first deferred finalize did not report its marker claim")
+	}
+	if changed := svc.FinalizeDeferredCancelledChat(ctx, util.MustParseUUID(f.taskID)); changed {
+		t.Fatal("duplicate deferred finalize reported a persisted change")
+	}
 
 	if got := f.assistantMessages(t, ctx); len(got) != 1 {
 		t.Errorf("assistant messages = %v, want exactly one Stopped.", got)

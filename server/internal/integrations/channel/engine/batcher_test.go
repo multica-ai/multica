@@ -64,6 +64,12 @@ func (f *fakeTimerFactory) armedCount() int {
 	return n
 }
 
+func (f *fakeTimerFactory) createdCount() int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return len(f.all)
+}
+
 // newTestBatcher builds a batcher whose timers are driven by f. Shared with
 // router_test.go (same package) to drive the debounce coalescing test.
 func newTestBatcher(f *fakeTimerFactory) *pendingBatcher {
@@ -135,6 +141,23 @@ func TestPendingBatcher_StaleTimerFireIsNoop(t *testing.T) {
 	f.fireArmed()
 	if calls != 1 {
 		t.Fatalf("the live timer must still flush exactly once; got %d", calls)
+	}
+}
+
+func TestPendingBatcher_ScheduleIfAbsentPreservesExistingWindow(t *testing.T) {
+	f := &fakeTimerFactory{}
+	b := newTestBatcher(f)
+	firstCalls, recoveryCalls := 0, 0
+
+	b.Schedule("s", func() { firstCalls++ })
+	b.ScheduleIfAbsent("s", func() { recoveryCalls++ })
+
+	if got := f.createdCount(); got != 1 {
+		t.Fatalf("recovery replaced a live timer: created=%d, want 1", got)
+	}
+	f.fireArmed()
+	if firstCalls != 1 || recoveryCalls != 0 {
+		t.Fatalf("live/recovery flushes = %d/%d, want 1/0", firstCalls, recoveryCalls)
 	}
 }
 

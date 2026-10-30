@@ -3,26 +3,28 @@ import type { RuntimeMachine } from "./runtime-machines";
 import { UpdateSection } from "./update-section";
 
 /**
- * Pick one runtime the viewer may manage as the command channel for a
- * machine-wide daemon update. Workspace admins may manage any runtime; other
- * members must own the runtime. An online runtime wins so the daemon can
- * receive the request immediately.
+ * Pick one runtime the viewer may use as the command channel for a
+ * machine-wide daemon update. The viewer may use their own runtime, or a
+ * public runtime when they are a workspace owner/admin. An online runtime
+ * wins so the daemon can receive the request immediately.
  */
 export function machineUpdateRuntime(
   machine: RuntimeMachine,
   currentUserId: string | undefined,
-  canManageAnyRuntime: boolean,
+  canManagePublicRuntimes: boolean,
 ): AgentRuntime | null {
   if (machine.mode !== "local") return null;
 
-  const manageable = canManageAnyRuntime
-    ? machine.runtimes
-    : currentUserId
-      ? machine.runtimes.filter((runtime) => runtime.owner_id === currentUserId)
-      : [];
+  const usable = currentUserId
+    ? machine.runtimes.filter(
+        (runtime) =>
+          runtime.owner_id === currentUserId ||
+          (canManagePublicRuntimes && runtime.visibility === "public"),
+      )
+    : [];
   return (
-    manageable.find((runtime) => runtime.status === "online") ??
-    manageable[0] ??
+    usable.find((runtime) => runtime.status === "online") ??
+    usable[0] ??
     null
   );
 }
@@ -30,16 +32,16 @@ export function machineUpdateRuntime(
 export function MachineCliSection({
   machine,
   currentUserId,
-  canManageAnyRuntime,
+  canManagePublicRuntimes = false,
 }: {
   machine: RuntimeMachine;
   currentUserId: string | undefined;
-  canManageAnyRuntime: boolean;
+  canManagePublicRuntimes?: boolean;
 }) {
   const updateRuntime = machineUpdateRuntime(
     machine,
     currentUserId,
-    canManageAnyRuntime,
+    canManagePublicRuntimes,
   );
 
   if (machine.mode !== "local") {

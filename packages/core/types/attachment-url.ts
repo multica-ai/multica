@@ -1,28 +1,19 @@
 /**
- * Stable URL helpers for attachment references that get persisted into
- * markdown bodies (issue descriptions, comment bodies, chat messages).
- *
- * Background — MUL-3130:
- *
- *   The original upload flow returned `att.url` as the link to embed in
- *   markdown. After PR #3903 (MUL-3132), `att.url` for the LocalStorage
- *   backend became a 30-minute HMAC-signed `/uploads/<key>?exp&sig` URL.
- *   That URL is short-lived by design — it's the in-memory token that
- *   keeps native browser <img>/<video> resource loads working without an
- *   Authorization header. Persisting it into a comment body means the
- *   comment's images break the moment the signature expires (default
- *   30 min). The same problem applies to CloudFront-mode `download_url`
- *   values, which are also signed redirects.
- *
- *   The fix is to persist a STABLE path that contains only the
- *   attachment id. The server's /api/attachments/{id}/download endpoint
- *   self-resolves the workspace from the attachment row and re-signs (or
- *   proxies) on every request, so the URL is correct forever — until
- *   the attachment row itself is deleted.
+ * Stable attachment URLs for persisted Markdown. Signed storage/download URLs
+ * expire; persist attachment-ID paths so the server can authorize and resolve a
+ * fresh download on each request.
  */
 
 const DOWNLOAD_PREFIX = "/api/attachments/";
 const DOWNLOAD_SUFFIX = "/download";
+const CHANNEL_MEDIA_MARKER_RE =
+  /<!-- multica:channel-media:[0-9a-fA-F-]{36} -->/g;
+
+/** Remove server-owned channel-media merge metadata from editable or rendered
+ * Markdown while leaving the visible attachment link untouched. */
+export function stripChannelMediaMarkers(content: string): string {
+  return content.replace(CHANNEL_MEDIA_MARKER_RE, "");
+}
 
 /**
  * UUID literal regex (RFC 4122 form). Used to extract an attachment id

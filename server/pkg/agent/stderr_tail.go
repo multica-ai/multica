@@ -22,10 +22,11 @@ var (
 	agentDiagnosticSecretRe    = regexp.MustCompile(`(?i)(authorization|auth|api[_-]?key|token|secret|password)(\s*[:=]\s*)([^\s,;]+)`)
 )
 
-// sanitizeAgentDiagnostic removes terminal control characters, common secret
-// shapes, and local home-directory details before a child-process diagnostic is
-// persisted in Result.Error. stderr is still forwarded to the local daemon log;
-// this helper protects the task row and user-visible failure comment.
+// sanitizeAgentDiagnostic removes terminal control characters and common secret
+// shapes before a child-process diagnostic is persisted in Result.Error. stderr
+// is still forwarded to the local daemon log; this helper protects the task row
+// and user-visible failure comment. Local paths are left intact — they are what
+// makes a crash diagnostic actionable, and hiding them was never a boundary.
 func sanitizeAgentDiagnostic(value string) string {
 	value = strings.Map(func(r rune) rune {
 		if r < 0x20 && r != '\n' && r != '\t' {

@@ -37,7 +37,14 @@ func ParseSkillFrontmatter(content string) (name, description string) {
 	if err := yaml.Unmarshal([]byte(match[1]), &fm); err != nil {
 		return "", ""
 	}
-	return coerceFrontmatterValue(fm["name"]), coerceFrontmatterValue(fm["description"])
+	// Trimmed because both fields are single-line labels wherever they are
+	// consumed, while YAML block scalars (`description: |`, `description: >`)
+	// carry a trailing newline by clip chomping. Storing that newline made the
+	// imported skill differ from its own trimmed form, which the skill detail
+	// page read as an unsaved edit (MUL-5645). Normalize at the parse seam so
+	// no import path has to remember to.
+	return strings.TrimSpace(coerceFrontmatterValue(fm["name"])),
+		strings.TrimSpace(coerceFrontmatterValue(fm["description"]))
 }
 
 // coerceFrontmatterValue renders a decoded YAML value as a string, mirroring the

@@ -19,6 +19,8 @@ const (
 	ReasonQueued    ReasonCode = "queued"
 	ReasonCoalesced ReasonCode = "coalesced"
 	ReasonDeferred  ReasonCode = "deferred"
+	// ReasonSteered: the comment went into the target's running turn.
+	ReasonSteered ReasonCode = "steered"
 
 	// ReasonInvocationNotAllowed: the acting principal may not trigger this
 	// target under the invocation-permission model. Deliberately generic — it
@@ -27,9 +29,41 @@ const (
 	// ReasonTargetUnavailable: the target cannot run (archived agent, deleted /
 	// archived squad, unresolvable leader, or no assignee).
 	ReasonTargetUnavailable ReasonCode = "target_unavailable"
-	// ReasonRuntimeOffline: the target is permitted but its runtime is not bound
-	// / not online at dispatch time.
+	// ReasonRuntimeOffline: the target is permitted and bound to a runtime, but
+	// that runtime is not online at dispatch time. The task is not lost — the
+	// user's fix is to bring the machine back, and queued work waits for it.
 	ReasonRuntimeOffline ReasonCode = "runtime_offline"
+	// ReasonRuntimeUnusable: the target is bound to a runtime whose machine is
+	// reachable, but whose agent CLI cannot be executed there — the npm
+	// placeholder stub left behind when a package's postinstall was blocked is
+	// the case in the field (MUL-6164). Distinct from runtime_offline for the
+	// same reason agent_runtime_required is: waiting changes nothing here. The
+	// machine is already on, and the fix is a command the user runs on it, which
+	// the daemon reports with this verdict so clients can show it.
+	ReasonRuntimeUnusable ReasonCode = "runtime_unusable"
+	// ReasonRuntimeAccessDenied: the target is permitted, but its agent owner
+	// cannot execute it on the private runtime selected for the task. This is
+	// distinct from invocation_not_allowed: the caller may invoke the agent,
+	// while the runtime/agent ownership binding still prevents execution.
+	ReasonRuntimeAccessDenied ReasonCode = "runtime_access_denied"
+	// ReasonRuntimeProfileMissing: the target is bound to a reachable runtime
+	// whose agent CLI runs fine, but a runtime profile that CLI needs in order
+	// to speak Multica's protocol is not installed on that machine — DeepSeek
+	// Harness, whose `multica` profile supplies the `--stdio` protocol, is the
+	// case in the field. Blocked for the same reason as runtime_unusable
+	// (MUL-6164): the machine is already on and waiting changes nothing. Kept
+	// APART from runtime_unusable because the repair is different in kind — the
+	// CLI is not broken and reinstalling it fixes nothing, so copy that says
+	// "reinstall the CLI" sends the user to the wrong place entirely.
+	ReasonRuntimeProfileMissing ReasonCode = "runtime_profile_missing"
+	// ReasonAgentRuntimeRequired: the target is permitted but bound to no
+	// runtime at all (agent.runtime_id IS NULL), which is where an agent lands
+	// when its runtime is deleted (MUL-5559). Distinct from runtime_offline on
+	// purpose: there is no machine to bring back, nothing will ever claim work
+	// for this agent, and the only fix is binding it to a runtime. Clients that
+	// collapse the two send the user looking for an offline computer that does
+	// not exist.
+	ReasonAgentRuntimeRequired ReasonCode = "agent_runtime_required"
 	// ReasonAttributionBlocked: a fail-closed workspace could not resolve a
 	// responsible human for the run, so it was refused.
 	ReasonAttributionBlocked ReasonCode = "attribution_blocked"
@@ -43,6 +77,24 @@ const (
 	// success: nothing new runs. (Named to avoid implying the NEW comment was
 	// already processed.)
 	ReasonSelfTriggerSuppressed ReasonCode = "self_trigger_suppressed"
+	// ReasonIssueInTriage: the issue is waiting in Triage, which has no executor
+	// to act on (MUL-7189 §2.3). Returned when a trigger would have had to
+	// derive one from the issue — running its assignee again, or asking it to
+	// perform an action. An @mention is not refused: naming an agent by hand is
+	// a conversation, and it dispatches normally.
+	//
+	// It is a property of the ISSUE, not of the target, so it is
+	// enumeration-safe by construction: every target on the same issue gets the
+	// same code, and the caller already sees the issue. Nothing is queued and
+	// nothing is pending — the trigger is answered by accepting the issue out of
+	// Triage, not by waiting.
+	ReasonIssueInTriage ReasonCode = "issue_in_triage"
+	// ReasonQuotaExceeded is a policy-neutral refusal for an exhausted
+	// Cloud-provided autopilot interval.
+	ReasonQuotaExceeded ReasonCode = "quota_exceeded"
+	// ReasonIssueLimitReached means a create_issue Autopilot was admitted for a
+	// run, but Cloud's effective workspace issue-count limit blocked the issue.
+	ReasonIssueLimitReached ReasonCode = "issue_limit_reached"
 	// ReasonInternalError: an unexpected server error prevented a clean decision.
 	ReasonInternalError ReasonCode = "internal_error"
 )

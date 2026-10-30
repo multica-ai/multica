@@ -1,6 +1,6 @@
 "use client";
 
-import { CalendarClock } from "lucide-react";
+import { CalendarClock } from "@multica/ui/icons";
 import type { UpdateProjectRequest } from "@multica/core/types";
 import { DateOnlyPicker } from "../../common/date-only-picker";
 import { useT } from "../../i18n";
@@ -36,7 +36,7 @@ export function ProjectStartDatePicker({
       onChange={(v) => onUpdate({ start_date: v })}
       icon={<CalendarClock className="h-3.5 w-3.5 text-muted-foreground" />}
       placeholder={t(($) => $.detail.prop_start_date)}
-      clearLabel={t(($) => $.detail.clear_date)}
+      emptyLabel={t(($) => $.detail.no_start_date)}
       triggerRender={triggerRender}
       align={align}
       open={open}

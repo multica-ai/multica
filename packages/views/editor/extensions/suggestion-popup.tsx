@@ -6,32 +6,6 @@ import { ReactRenderer } from "@tiptap/react";
 import { exitSuggestion, type SuggestionKeyDownProps, type SuggestionProps } from "@tiptap/suggestion";
 import type { PluginKey } from "@tiptap/pm/state";
 
-/**
- * Keys that accept the currently highlighted suggestion row.
- *
- * `Enter` is the canonical accept (WAI-ARIA combobox guidance). Plain `Tab` is
- * an additive convenience that matches terminal / CLI / editor completion
- * muscle memory (MUL-3685). `Shift+Tab` and any `Ctrl/Cmd/Alt + Tab` are
- * deliberately NOT accept keys: they stay reverse focus navigation / OS window
- * switching, so standard keyboard accessibility is preserved.
- *
- * Centralizing the rule here keeps every picker built on
- * `createSuggestionPopupRender` (mention, slash-skill, builtin command, and any
- * future suggestion list) consistent instead of each list re-deciding what
- * counts as "accept". Callers use it in place of a bare `event.key === "Enter"`
- * check, so `Tab` becomes a strict alias of `Enter` inside their accept branch.
- */
-export function isPickerAcceptKey(event: KeyboardEvent): boolean {
-  if (event.key === "Enter") return true;
-  return (
-    event.key === "Tab" &&
-    !event.shiftKey &&
-    !event.ctrlKey &&
-    !event.metaKey &&
-    !event.altKey
-  );
-}
-
 interface SuggestionPopupRenderOptions<
   TItem,
   TSelected = TItem,
@@ -41,6 +15,8 @@ interface SuggestionPopupRenderOptions<
   pluginKey: PluginKey;
   component: ComponentType<TComponentProps>;
   getProps: (props: SuggestionProps<TItem, TSelected>) => TComponentProps;
+  /** Refresh an active popup when its externally supplied catalog changes. */
+  subscribe?: (refresh: () => void) => () => void;
   onKeyDown?: (
     ref: TRef | null | undefined,
     props: SuggestionKeyDownProps,
@@ -56,6 +32,7 @@ export function createSuggestionPopupRender<
   pluginKey,
   component,
   getProps,
+  subscribe,
   onKeyDown,
 }: SuggestionPopupRenderOptions<TItem, TSelected, TRef, TComponentProps>) {
   return () => {
@@ -63,8 +40,13 @@ export function createSuggestionPopupRender<
     let popup: HTMLDivElement | null = null;
     let removeOutsideListeners: (() => void) | null = null;
     let removeAutoUpdate: (() => void) | null = null;
+    let unsubscribe: (() => void) | undefined;
+    let currentProps: SuggestionProps<TItem, TSelected> | null = null;
 
     const cleanup = () => {
+      unsubscribe?.();
+      unsubscribe = undefined;
+      currentProps = null;
       removeOutsideListeners?.();
       removeOutsideListeners = null;
       removeAutoUpdate?.();
@@ -190,6 +172,7 @@ export function createSuggestionPopupRender<
 
     return {
       onStart: (props: SuggestionProps<TItem, TSelected>) => {
+        currentProps = props;
         renderer = new ReactRenderer(component, {
           props: getProps(props),
           editor: props.editor,
@@ -205,9 +188,15 @@ export function createSuggestionPopupRender<
         installOutsideListeners(props);
         trackPosition(popup, props.clientRect);
         updatePosition(popup, props.clientRect);
+        unsubscribe = subscribe?.(() => {
+          if (!currentProps || !renderer) return;
+          renderer.updateProps(getProps(currentProps));
+          if (popup) updatePosition(popup, currentProps.clientRect);
+        });
       },
 
       onUpdate: (props: SuggestionProps<TItem, TSelected>) => {
+        currentProps = props;
         renderer?.updateProps(getProps(props));
         if (popup) {
           trackPosition(popup, props.clientRect);

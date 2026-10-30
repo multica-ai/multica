@@ -39,7 +39,6 @@ function makeRuntime(overrides: Partial<AgentRuntime> = {}): AgentRuntime {
 
 function renderStep(props: { runtimesPending?: boolean } = {}) {
   const onNext = vi.fn();
-  const onBack = vi.fn();
   const qc = new QueryClient({
     defaultOptions: { queries: { retry: false } },
   });
@@ -49,13 +48,12 @@ function renderStep(props: { runtimesPending?: boolean } = {}) {
         <StepRuntimeConnect
           wsId="ws_test"
           onNext={onNext}
-          onBack={onBack}
           runtimesPending={props.runtimesPending}
         />
       </I18nProvider>
     </QueryClientProvider>,
   );
-  return { onNext, onBack };
+  return { onNext };
 }
 
 describe("StepRuntimeConnect", () => {
@@ -71,17 +69,10 @@ describe("StepRuntimeConnect", () => {
     vi.useRealTimers();
   });
 
-  it("mounts and shows the scanning UI without touching framework-level globals", () => {
+  it("does not render a permanently-disabled Mika action while scanning", () => {
     renderStep();
     expect(
-      screen.getByText(/connecting this computer/i),
-    ).toBeInTheDocument();
-  });
-
-  it("does not render a permanently-disabled Start exploring while scanning", () => {
-    renderStep();
-    expect(
-      screen.queryByRole("button", { name: /start exploring/i }),
+      screen.queryByRole("button", { name: /start with mika/i }),
     ).not.toBeInTheDocument();
   });
 
@@ -123,15 +114,16 @@ describe("StepRuntimeConnect", () => {
     renderStep();
     act(() => vi.advanceTimersByTime(25000));
 
-    expect(
-      screen.getByText(/this computer is connected/i),
-    ).toBeInTheDocument();
+    // Assert on the runtime count row rather than headline copy: the phase is
+    // what this test is about, and keying on the headline made a copy edit
+    // look like a behaviour regression.
+    expect(screen.getByText(/1 agent runtime/i)).toBeInTheDocument();
     expect(
       screen.queryByText(/no agent runtime found/i),
     ).not.toBeInTheDocument();
-    // Continue is actionable in the found phase.
+    // Starting with Mika is actionable in the found phase.
     expect(
-      screen.getByRole("button", { name: /start exploring/i }),
+      screen.getByRole("button", { name: /start with mika/i }),
     ).toBeInTheDocument();
   });
 

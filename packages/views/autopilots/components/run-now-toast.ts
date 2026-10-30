@@ -32,9 +32,13 @@ export function runNowToastKind(status: string | undefined): RunNowToastKind {
 export type RunNowBlockedKey =
   | "run_blocked_invocation_not_allowed"
   | "run_blocked_runtime_offline"
+  | "run_blocked_agent_runtime_required"
+  | "run_blocked_runtime_access_denied"
   | "run_blocked_target_unavailable"
   | "run_blocked_attribution"
   | "run_blocked_already_active"
+  | "run_blocked_quota_exceeded"
+  | "run_blocked_issue_limit_reached"
   | "run_blocked_generic";
 
 export function runNowBlockedKey(reasonCode: string | undefined): RunNowBlockedKey {
@@ -43,12 +47,24 @@ export function runNowBlockedKey(reasonCode: string | undefined): RunNowBlockedK
       return "run_blocked_invocation_not_allowed";
     case "runtime_offline":
       return "run_blocked_runtime_offline";
+    // Unbound, not offline: nothing will claim the run until the agent is bound
+    // to a runtime (MUL-5559).
+    case "agent_runtime_required":
+      return "run_blocked_agent_runtime_required";
+    // Bound but not permitted there: the agent's owner cannot execute it on
+    // the selected private runtime. Retrying never fixes this.
+    case "runtime_access_denied":
+      return "run_blocked_runtime_access_denied";
     case "target_unavailable":
       return "run_blocked_target_unavailable";
     case "attribution_blocked":
       return "run_blocked_attribution";
     case "already_active":
       return "run_blocked_already_active";
+    case "quota_exceeded":
+      return "run_blocked_quota_exceeded";
+    case "issue_limit_reached":
+      return "run_blocked_issue_limit_reached";
     default:
       return "run_blocked_generic";
   }

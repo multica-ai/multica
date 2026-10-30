@@ -10,7 +10,7 @@ import {
   MoreHorizontal,
   Newspaper,
   Users,
-} from "lucide-react";
+} from "@multica/ui/icons";
 import { toast } from "sonner";
 import { useAuthStore } from "@multica/core/auth";
 import {
@@ -54,39 +54,13 @@ const EMPTY_BACKFILL: Pick<
 };
 
 /**
- * Source-attribution prompt for onboarded users whose questionnaire
- * never recorded a source. The question is not asked during
- * onboarding at all — this prompt is its only collection point.
- * Rendered as a Dialog overlay on top of the workspace shell — the
- * user keeps their workspace context visible behind a dimmed backdrop.
+ * Collect missing acquisition attribution after onboarding has delivered value.
+ * User eligibility and workspace completion thresholds gate opening; latch the
+ * open decision so a successful write cannot interrupt the closing animation.
  *
- * Self-mounted: the caller drops `<SourceBackfillModal />` once inside
- * the dashboard layout. Two gates decide whether the dialog opens:
- *
- *   1. User-level: `needsSourceBackfill(user, dismissCount)` — no
- *      source recorded, never declined, dismiss cap not reached.
- *   2. Workspace-level: agents (or squads) have completed at least
- *      SOURCE_BACKFILL_MIN_AGENT_DONE_ISSUES issues here. Attribution
- *      is a zero-payoff ask for the user, so it waits until Multica
- *      has visibly delivered value. The count query only runs while
- *      gate 1 passes, so settled users never pay for it.
- *
- * Once the dialog opens we capture the open decision in a ref so
- * subsequent re-renders that flip the predicate to false (e.g. after
- * submit, before refreshMe round-trips) don't tear the dialog away
- * mid-animation.
- *
- * Three exit shapes:
- *   - Submit         → PATCH merged questionnaire, terminal.
- *   - Skip           → PATCH `source_skipped=true`, terminal (never
- *                       ask again).
- *   - Close X / ESC  → bump per-user dismiss counter; predicate
- *                       returns false on next mount once the cap is
- *                       reached.
- *
- * State persistence is intentional:
- *   - source / source_other: server (JSONB merged with prior answers).
- *   - dismissCount: per-user localStorage, view-layer only.
+ * Submit and explicit Skip persist terminal server answers. Dismissal only raises
+ * a per-user local counter. Merge questionnaire fields rather than replacing prior
+ * answers, and skip the completion-count query once user eligibility is settled.
  */
 export function SourceBackfillModal() {
   const user = useAuthStore((s) => s.user);
@@ -273,9 +247,13 @@ function SourceBackfillDialogBody({
       onComplete();
     } catch (err) {
       setBusy(false);
-      toast.error(err instanceof Error ? err.message : "Failed to save");
+      toast.error(
+        err instanceof Error
+          ? err.message
+          : t(($) => $.source_backfill.save_failed_toast),
+      );
     }
-  }, [canSubmit, answers.source, answers.source_other, onComplete]);
+  }, [canSubmit, answers.source, answers.source_other, onComplete, t]);
 
   const skip = useCallback(async () => {
     if (busy) return;
@@ -293,20 +271,24 @@ function SourceBackfillDialogBody({
       onComplete();
     } catch (err) {
       setBusy(false);
-      toast.error(err instanceof Error ? err.message : "Failed to save");
+      toast.error(
+        err instanceof Error
+          ? err.message
+          : t(($) => $.source_backfill.save_failed_toast),
+      );
     }
-  }, [busy, onComplete]);
+  }, [busy, onComplete, t]);
 
   return (
     <DialogContent className="sm:max-w-2xl p-0 gap-0 overflow-hidden">
       <div className="px-6 pt-6 pb-2">
-        <div className="text-[11px] font-medium uppercase tracking-[0.08em] text-muted-foreground">
+        <div className="text-micro font-medium uppercase tracking-[0.08em] text-muted-foreground">
           {t(($) => $.source_backfill.eyebrow)}
         </div>
-        <h2 className="mt-1 text-balance font-serif text-2xl font-medium leading-tight tracking-tight text-foreground">
+        <h2 className="mt-1 text-balance font-serif text-display-sm font-medium leading-tight tracking-tight text-foreground">
           {t(($) => $.questions.source.question)}
         </h2>
-        <p className="mt-2 text-sm text-muted-foreground">
+        <p className="mt-2 text-body text-muted-foreground">
           {t(($) => $.source_backfill.lede)}
         </p>
       </div>
@@ -346,11 +328,9 @@ function SourceBackfillDialogBody({
       <div className="mt-4 flex flex-wrap items-center justify-end gap-x-4 gap-y-2 border-t bg-muted/40 px-6 py-3">
         <span
           aria-live="polite"
-          className="mr-auto text-xs text-muted-foreground"
+          className="mr-auto text-caption text-muted-foreground"
         >
-          {canSubmit
-            ? t(($) => $.source_backfill.hint_ready)
-            : t(($) => $.step_question.hint_pick)}
+          {t(($) => $.step_question.hint_pick)}
         </span>
         <div className="flex items-center gap-2">
           <Button variant="secondary" disabled={busy} onClick={skip}>

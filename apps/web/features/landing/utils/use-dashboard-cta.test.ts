@@ -21,7 +21,7 @@ function makeWs(slug: string): Workspace {
 
 const fetched = (workspaces: Workspace[], hasOnboarded = true) => ({
   isAuthenticated: true,
-  isWorkspaceListFetched: true,
+  workspaceListReady: true,
   workspaces,
   hasOnboarded,
 });
@@ -31,8 +31,8 @@ describe("resolveDashboardCtaHref", () => {
     expect(
       resolveDashboardCtaHref({
         isAuthenticated: false,
-        isWorkspaceListFetched: false,
-        workspaces: undefined,
+        workspaceListReady: false,
+        workspaces: [],
         hasOnboarded: false,
       }),
     ).toBe(paths.login());
@@ -57,17 +57,14 @@ describe("resolveDashboardCtaHref", () => {
     expect(resolveDashboardCtaHref(fetched([]))).toBe(paths.newWorkspace());
   });
 
-  it.each([
-    ["the list has not resolved yet", false, undefined],
-    ["the list resolved as undefined", true, undefined],
-  ])("falls back to /issues while %s", (_label, isWorkspaceListFetched, workspaces) => {
+  it("falls back to /issues while the list has not resolved yet", () => {
     // /issues is a legacy route the proxy rewrites to the last workspace, so
     // the button still works during hydration. It must not fall back to `/`,
     // which is what made the CTA dead in the first place.
     const href = resolveDashboardCtaHref({
       isAuthenticated: true,
-      isWorkspaceListFetched,
-      workspaces,
+      workspaceListReady: false,
+      workspaces: [],
       hasOnboarded: true,
     });
     expect(href).toBe("/issues");

@@ -6,7 +6,8 @@ import { PluginKey } from "@tiptap/pm/state";
 import { forwardRef, useImperativeHandle } from "react";
 import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
-import { createSuggestionPopupRender, isPickerAcceptKey } from "./suggestion-popup";
+import { createSuggestionPopupRender } from "./suggestion-popup";
+import { isPickerAcceptKey } from "../../common/picker-keys";
 import { PatchedListItem } from "./list-item";
 
 interface TestItem {
@@ -268,37 +269,6 @@ describe("Escape containment while a picker is open", () => {
     // With no picker open Escape is the host dialog's own close shortcut and
     // must keep working — the fix must not swallow Escape unconditionally.
     expect(hostEscape).toHaveBeenCalledTimes(1);
-  });
-});
-
-// ---------------------------------------------------------------------------
-// isPickerAcceptKey — the shared accept-key policy (MUL-3685)
-// ---------------------------------------------------------------------------
-
-describe("isPickerAcceptKey", () => {
-  const accepts = (init: KeyboardEventInit) =>
-    isPickerAcceptKey(new KeyboardEvent("keydown", init));
-
-  it("treats Enter and plain Tab as accept keys", () => {
-    expect(accepts({ key: "Enter" })).toBe(true);
-    expect(accepts({ key: "Tab" })).toBe(true);
-  });
-
-  it("keeps Enter an accept key regardless of modifiers (Mod-Enter unchanged)", () => {
-    expect(accepts({ key: "Enter", metaKey: true })).toBe(true);
-  });
-
-  it("does not treat Shift+Tab or Ctrl/Cmd/Alt+Tab as accept keys", () => {
-    expect(accepts({ key: "Tab", shiftKey: true })).toBe(false);
-    expect(accepts({ key: "Tab", ctrlKey: true })).toBe(false);
-    expect(accepts({ key: "Tab", metaKey: true })).toBe(false);
-    expect(accepts({ key: "Tab", altKey: true })).toBe(false);
-  });
-
-  it("ignores unrelated keys", () => {
-    expect(accepts({ key: "ArrowDown" })).toBe(false);
-    expect(accepts({ key: "Escape" })).toBe(false);
-    expect(accepts({ key: "a" })).toBe(false);
   });
 });
 

@@ -41,7 +41,7 @@ export const DEFAULT_MANUAL_CREATE_FIELDS: ManualCreateField[] = [
 ];
 
 // Which optional fields each create-issue mode keeps on its toolbar. Owned by
-// Settings → Issue and read by both create dialogs; a field toggled off here
+// Settings → Preferences → Issue creation and read by both create dialogs; a field toggled off here
 // stays reachable from the dialog's ⋯ overflow and always re-surfaces while it
 // holds a value. Per-workspace via the workspace-aware storage (projects and
 // custom properties differ per workspace), per-user for free from

@@ -27,6 +27,9 @@ func stubLLMCompletion(t *testing.T, status int, content string) *httptest.Serve
 	t.Helper()
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if status != http.StatusOK {
+			// A retryable status still exercises the SDK's retries; Retry-After: 0
+			// only stops them from sleeping through the backoff curve.
+			w.Header().Set("Retry-After", "0")
 			w.WriteHeader(status)
 			_, _ = io.WriteString(w, `{"error":{"message":"stub upstream error"}}`)
 			return
@@ -376,5 +379,20 @@ func TestSanitizeChatTitle(t *testing.T) {
 				t.Fatalf("sanitizeChatTitle(%q) = %q, want %q", tc.in, got, tc.want)
 			}
 		})
+	}
+}
+
+func TestShouldGenerateFirstMessageTitlePreservesChannelManualRename(t *testing.T) {
+	if shouldGenerateFirstMessageTitle(false, "manual name", "", true, true) {
+		t.Fatal("channel manual rename was treated as an auto-generated title")
+	}
+	if !shouldGenerateFirstMessageTitle(false, "derived title", "derived title", true, true) {
+		t.Fatal("title initialized by the channel send should be eligible for refinement")
+	}
+	if shouldGenerateFirstMessageTitle(false, "unknown source", "", false, false) {
+		t.Fatal("source lookup failure must skip optional title generation")
+	}
+	if !shouldGenerateFirstMessageTitle(false, "first-party seed", "", false, true) {
+		t.Fatal("first-party Chat should retain the existing title refinement flow")
 	}
 }

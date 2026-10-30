@@ -21,8 +21,20 @@
     "DESKTOP_APP_SUFFIX"
   ],
   "tasks": {
+    // `fumadocs-mdx` regenerates `.source/` by removing the directory and
+    // writing it again, so two of them in the same package at once is a race:
+    // one process rm -rf's the tree the other has already mkdir'd, and the
+    // loser dies on `ENOENT .source/index.ts`. `build` and `typecheck` both
+    // needed those types and both used to shell out to it, which turbo is free
+    // to run concurrently — a red CI job on nothing but timing. One task the
+    // two depend on generates it once, and its output is cached like any
+    // other. Packages without an `mdx` script are unaffected: turbo skips a
+    // dependency no package implements.
+    "mdx": {
+      "outputs": [".source/**"]
+    },
     "build": {
-      "dependsOn": ["^build"],
+      "dependsOn": ["^build", "mdx"],
       // No explicit `inputs`: turbo's default (every git-tracked file in the
       // package) is the only safe hash source now that the cache is actually
       // restored in CI. The previous narrow glob list matched neither
@@ -41,7 +53,7 @@
       "persistent": true
     },
     "typecheck": {
-      "dependsOn": ["^typecheck"]
+      "dependsOn": ["^typecheck", "mdx"]
     },
     // Hash-only transit task. No package implements a `cache-inputs` script,
     // so every node resolves to <NONEXISTENT> and nothing is ever executed --

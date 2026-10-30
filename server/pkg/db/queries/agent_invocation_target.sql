@@ -43,13 +43,18 @@ WHERE ait.agent_id = a.id
   AND ait.target_type = 'member'
   AND ait.target_id = @target_id;
 
--- name: DeleteAgentInvocationTargetsByArchivedRuntimeAgents :exec
+-- name: DeleteAgentInvocationTargetsBySystemRuntimeAgents :exec
 -- Application-layer replacement for the (deliberately absent) agent_id ON
--- DELETE CASCADE: removes invocation targets for the archived agents a runtime
+-- DELETE CASCADE: removes invocation targets for the system agents a runtime
 -- delete is about to hard-delete. MUST run in the same tx as, and BEFORE,
--- DeleteArchivedAgentsByRuntime so no orphan target rows survive the agent
--- rows they belonged to. Mirrors the agent hard-delete predicate exactly.
+-- DeleteSystemAgentsByRuntime so no orphan target rows survive the agent rows
+-- they belonged to. Mirrors the agent hard-delete predicate exactly.
+--
+-- Scoped to kind = 'system' since MUL-5559: user agents are no longer deleted
+-- with their runtime (they are unbound and keep their configuration), so
+-- clearing THEIR invocation targets here would silently strip a surviving
+-- agent's allow-list.
 DELETE FROM agent_invocation_target
 WHERE agent_id IN (
-    SELECT id FROM agent WHERE runtime_id = $1 AND archived_at IS NOT NULL
+    SELECT id FROM agent WHERE runtime_id = $1 AND kind = 'system'
 );

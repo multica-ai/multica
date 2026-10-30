@@ -39,6 +39,27 @@ vi.mock("@multica/ui/components/ui/dropdown-menu", () => ({
       {children}
     </button>
   ),
+  DropdownMenuCheckboxItem: ({
+    children,
+    disabled,
+    checked,
+    onCheckedChange,
+  }: {
+    children: ReactNode;
+    disabled?: boolean;
+    checked?: boolean;
+    onCheckedChange?: (checked: boolean) => void;
+  }) => (
+    <button
+      type="button"
+      role="menuitemcheckbox"
+      aria-checked={checked}
+      disabled={disabled}
+      onClick={() => onCheckedChange?.(!checked)}
+    >
+      {children}
+    </button>
+  ),
   DropdownMenuLabel: ({ children }: { children: ReactNode }) => (
     <div>{children}</div>
   ),
@@ -81,7 +102,7 @@ describe("TableColumnPicker", () => {
     renderPicker();
 
     await user.click(screen.getByRole("button", { name: "Add column" }));
-    await user.click(screen.getByRole("menuitem", { name: "Project" }));
+    await user.click(screen.getByRole("menuitemcheckbox", { name: "Project" }));
 
     expect(toggleTableColumn).toHaveBeenCalledWith("project");
   });
@@ -91,7 +112,9 @@ describe("TableColumnPicker", () => {
     renderPicker();
 
     await user.click(screen.getByRole("button", { name: "Add column" }));
-    await user.click(screen.getByRole("menuitem", { name: "Environment" }));
+    await user.click(
+      screen.getByRole("menuitemcheckbox", { name: "Environment" }),
+    );
 
     expect(toggleTableColumn).toHaveBeenCalledWith("property:property-environment");
   });

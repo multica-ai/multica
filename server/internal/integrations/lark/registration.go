@@ -58,10 +58,12 @@ const (
 	// without buying any latency improvement.
 	registrationDefaultPollSeconds = 5
 
-	// Default registration window (10 minutes) — long enough for a user
-	// to scan, switch apps, walk the create-bot flow, and authorize on
-	// their phone, short enough that an abandoned session does not pin
-	// resources for hours.
+	// Fallback registration window, used ONLY when the server omits the
+	// expiry from its begin response. Both real clouds send
+	// expires_in=3600, so this is a floor for mocks / schema drift, not
+	// the value users normally get: 10 minutes is long enough to scan,
+	// switch apps, walk the create-bot flow, and authorize on a phone,
+	// short enough that an abandoned session does not poll for hours.
 	registrationDefaultExpireSeconds = 600
 
 	// Internal-tenant brand label Lark uses to flag "you scanned with a
@@ -263,9 +265,16 @@ func (c *RegistrationClient) Begin(ctx context.Context, namePreset string, regio
 		VerificationURI         string `json:"verification_uri"`
 		UserCode                string `json:"user_code"`
 		Interval                int    `json:"interval"`
-		ExpireIn                int    `json:"expire_in"`
-		Error                   string `json:"error"`
-		ErrorDescription        string `json:"error_description"`
+		// ExpiresIn is the RFC 8628 §3.2 field name, and the one both
+		// accounts.feishu.cn and accounts.larksuite.com actually send
+		// (currently 3600). ExpireIn is the spelling the upstream Lark
+		// Go SDK types; we accept both so a schema drift in either
+		// direction keeps the real window instead of silently
+		// collapsing to the default.
+		ExpiresIn        int    `json:"expires_in"`
+		ExpireIn         int    `json:"expire_in"`
+		Error            string `json:"error"`
+		ErrorDescription string `json:"error_description"`
 	}
 	form := url.Values{
 		"action":            []string{"begin"},
@@ -294,7 +303,9 @@ func (c *RegistrationClient) Begin(ctx context.Context, namePreset string, regio
 		interval = resp.Interval
 	}
 	expireIn := registrationDefaultExpireSeconds
-	if resp.ExpireIn > 0 {
+	if resp.ExpiresIn > 0 {
+		expireIn = resp.ExpiresIn
+	} else if resp.ExpireIn > 0 {
 		expireIn = resp.ExpireIn
 	}
 	return &BeginResult{

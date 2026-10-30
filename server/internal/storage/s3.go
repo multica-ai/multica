@@ -17,6 +17,8 @@ import (
 	"github.com/aws/aws-sdk-go-v2/credentials"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
 	"github.com/aws/aws-sdk-go-v2/service/s3/types"
+	"github.com/aws/smithy-go/middleware"
+	smithyhttp "github.com/aws/smithy-go/transport/http"
 )
 
 type S3Storage struct {
@@ -86,6 +88,11 @@ func NewS3StorageFromEnv() *S3Storage {
 			o.UsePathStyle = usePathStyle
 		})
 	}
+	if isGCSEndpoint(endpointURL) {
+		s3Opts = append(s3Opts, func(o *s3.Options) {
+			o.APIOptions = append(o.APIOptions, excludeGCSAcceptEncoding)
+		})
+	}
 
 	slog.Info("S3 storage initialized", "bucket", bucket, "region", region, "cdn_domain", cdnDomain, "endpoint_url", endpointURL, "use_path_style", usePathStyle)
 	return &S3Storage{
@@ -134,6 +141,111 @@ func parseBoolEnv(raw string) (bool, error) {
 	default:
 		return false, fmt.Errorf("invalid bool %q", raw)
 	}
+}
+
+// isGCSEndpoint reports whether endpointURL points to Google Cloud Storage XML API.
+func isGCSEndpoint(endpointURL string) bool {
+	if endpointURL == "" {
+		return false
+	}
+	host := endpointHostname(endpointURL)
+	return host == "storage.googleapis.com" || strings.HasSuffix(host, ".storage.googleapis.com")
+}
+
+// excludeGCSAcceptEncoding keeps the header GCS rewrites out of the signature,
+// while retaining the SDK's value on the wire to prevent automatic decompression.
+func excludeGCSAcceptEncoding(stack *middleware.Stack) error {
+	// Presigning replaces Signing and removes the SDK's Accept-Encoding middleware.
+	if _, ok := stack.Finalize.Get("Signing"); !ok {
+		return nil
+	}
+
+	// Values belong to this operation's stack; retry attempts run sequentially.
+	var values []string
+	if err := stack.Finalize.Insert(middleware.FinalizeMiddlewareFunc("RemoveGCSAcceptEncoding",
+		func(ctx context.Context, in middleware.FinalizeInput, next middleware.FinalizeHandler) (middleware.FinalizeOutput, middleware.Metadata, error) {
+			req, ok := in.Request.(*smithyhttp.Request)
+			if !ok {
+				return middleware.FinalizeOutput{}, middleware.Metadata{}, fmt.Errorf("GCS signing: unexpected request type %T", in.Request)
+			}
+			values = req.Header.Values("Accept-Encoding")
+			req.Header.Del("Accept-Encoding")
+			return next.HandleFinalize(ctx, in)
+		},
+	), "Signing", middleware.Before); err != nil {
+		return err
+	}
+	return stack.Finalize.Insert(middleware.FinalizeMiddlewareFunc("RestoreGCSAcceptEncoding",
+		func(ctx context.Context, in middleware.FinalizeInput, next middleware.FinalizeHandler) (middleware.FinalizeOutput, middleware.Metadata, error) {
+			req, ok := in.Request.(*smithyhttp.Request)
+			if !ok {
+				return middleware.FinalizeOutput{}, middleware.Metadata{}, fmt.Errorf("GCS signing: unexpected request type %T", in.Request)
+			}
+			if len(values) > 0 {
+				req.Header["Accept-Encoding"] = values
+			}
+			return next.HandleFinalize(ctx, in)
+		},
+	), "Signing", middleware.After)
+}
+
+// awsEndpointDomains are the parent domains AWS serves S3 from. VPC, dualstack
+// and FIPS hostnames all live under them, as does the China partition.
+var awsEndpointDomains = []string{"amazonaws.com", "amazonaws.com.cn"}
+
+// usesAWSEndpoint reports whether uploads go to real AWS S3 — either the
+// default endpoint or an explicitly configured AWS one. The match is on the
+// host label boundary, so "notamazonaws.com" and "s3.amazonaws.com.evil.net"
+// are correctly treated as third-party endpoints.
+func (s *S3Storage) usesAWSEndpoint() bool {
+	if s.endpointURL == "" {
+		return true
+	}
+	host := endpointHostname(s.endpointURL)
+	for _, domain := range awsEndpointDomains {
+		if host == domain || strings.HasSuffix(host, "."+domain) {
+			return true
+		}
+	}
+	return false
+}
+
+// endpointHostname extracts the comparable hostname from a configured
+// endpoint: lowercased, without the port, and without a trailing root dot.
+// A value written without a scheme is retried as an https URL, since
+// url.Parse otherwise reads the whole thing as a path.
+func endpointHostname(endpointURL string) string {
+	parsed, err := url.Parse(endpointURL)
+	if err != nil {
+		return ""
+	}
+	if parsed.Hostname() == "" {
+		parsed, err = url.Parse("https://" + endpointURL)
+		if err != nil {
+			return ""
+		}
+	}
+	return strings.TrimSuffix(strings.ToLower(parsed.Hostname()), ".")
+}
+
+// uploadChecksumOptions returns the per-request options for the buffered
+// upload path. The SDK defaults RequestChecksumCalculation to WhenSupported,
+// which sends the body as aws-chunked with a CRC32 trailer; Aliyun OSS and
+// Tencent COS do not implement that encoding and reject the request outright.
+//
+// Downgrading to WhenRequired drops the trailer, but it also drops the
+// client-side checksum entirely, so it is applied only to non-AWS endpoints.
+// Real AWS S3 accepts the trailer today, and buckets carrying a default Object
+// Lock retention actually require a checksum, so those requests are left
+// exactly as the SDK built them — including any AWS_REQUEST_CHECKSUM_CALCULATION
+// the operator configured.
+func (s *S3Storage) uploadChecksumOptions() []func(*s3.Options) {
+	if s.usesAWSEndpoint() {
+		return nil
+	}
+	return []func(*s3.Options){func(opts *s3.Options) {
+		opts.RequestChecksumCalculation = aws.RequestChecksumCalculationWhenRequired
+	}}
 }
 
 // storageClass returns the appropriate S3 storage class.
@@ -281,7 +393,7 @@ func (s *S3Storage) Upload(ctx context.Context, key string, data []byte, content
 		ContentDisposition: aws.String(ContentDisposition(contentType, filename)),
 		CacheControl:       aws.String("max-age=432000,public"),
 		StorageClass:       s.storageClass(),
-	})
+	}, s.uploadChecksumOptions()...)
 	if err != nil {
 		return "", fmt.Errorf("s3 PutObject: %w", err)
 	}
@@ -289,7 +401,7 @@ func (s *S3Storage) Upload(ctx context.Context, key string, data []byte, content
 }
 
 func (s *S3Storage) UploadStream(ctx context.Context, key string, data io.Reader, sizeBytes int64, contentType string, filename string) (string, error) {
-	if sizeBytes <= 0 {
+	if sizeBytes < 0 {
 		return "", fmt.Errorf("s3 PutObject: content length is required for streaming upload")
 	}
 	input := &s3.PutObjectInput{

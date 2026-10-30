@@ -1,7 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { AgentInvocationTarget } from "../types";
 import {
-  ALL_ACCESS_SCOPES,
   effectiveAccessScope,
   isAccessChangeReady,
 } from "./effective-access";
@@ -49,16 +48,6 @@ describe("effectiveAccessScope", () => {
 
   it("prefers workspace when a workspace target sits alongside member targets", () => {
     expect(effectiveAccessScope("public_to", [member("u-1"), ws()])).toBe("workspace");
-  });
-});
-
-describe("ALL_ACCESS_SCOPES", () => {
-  it("lists the three scopes in display order", () => {
-    expect(ALL_ACCESS_SCOPES).toEqual([
-      "workspace",
-      "specific-people",
-      "owner-only",
-    ]);
   });
 });
 

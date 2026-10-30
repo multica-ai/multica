@@ -24,7 +24,7 @@ import {
   CardContent,
 } from "@multica/ui/components/ui/card";
 import { Button } from "@multica/ui/components/ui/button";
-import { Loader2 } from "lucide-react";
+import { Loader2 } from "@multica/ui/icons";
 import { setLoggedInCookie } from "@/features/auth/auth-cookie";
 import Link from "next/link";
 import { LoginPage, validateCliCallback } from "@multica/views/auth";
@@ -174,7 +174,7 @@ function LoginPageContent() {
         <div className="flex min-h-screen items-center justify-center">
           <Card className="w-full max-w-sm">
             <CardHeader className="text-center">
-              <CardTitle className="text-2xl">
+              <CardTitle className="text-display-sm">
                 {t(($) => $.web.desktop_handoff.failed_title)}
               </CardTitle>
               <CardDescription>{desktopError}</CardDescription>
@@ -187,7 +187,7 @@ function LoginPageContent() {
       <div className="flex min-h-screen items-center justify-center">
         <Card className="w-full max-w-sm">
           <CardHeader className="text-center">
-            <CardTitle className="text-2xl">
+            <CardTitle className="text-display-sm">
               {t(($) => $.web.desktop_handoff.opening_title)}
             </CardTitle>
             <CardDescription>
@@ -234,7 +234,7 @@ function LoginPageContent() {
       }
       onTokenObtained={setLoggedInCookie}
       extra={
-        <span className="text-xs text-muted-foreground">
+        <span className="text-caption text-muted-foreground">
           {t(($) => $.web.prefer_desktop)}{" "}
           <Link
             href="/download"
