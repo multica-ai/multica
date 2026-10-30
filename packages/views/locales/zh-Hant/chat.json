@@ -248,5 +248,17 @@
     "delete": "刪除會話",
     "archive": "歸檔會話",
     "unarchive": "取消歸檔"
+  },
+  "project_filter": {
+    "label": "專案",
+    "all": "所有專案",
+    "clear": "清除專案篩選"
+  },
+  "project_chats": {
+    "title": "聊天",
+    "empty": "此專案暫無活躍聊天",
+    "loading": "正在載入聊天...",
+    "error": "無法載入聊天",
+    "retry": "重試"
   }
 }

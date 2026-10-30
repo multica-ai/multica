@@ -248,5 +248,17 @@
     "delete": "删除会话",
     "archive": "归档会话",
     "unarchive": "取消归档"
+  },
+  "project_filter": {
+    "label": "项目",
+    "all": "所有项目",
+    "clear": "清除项目筛选"
+  },
+  "project_chats": {
+    "title": "聊天",
+    "empty": "此项目暂无活跃聊天",
+    "loading": "正在加载聊天...",
+    "error": "无法加载聊天",
+    "retry": "重试"
   }
 }

@@ -104,6 +104,17 @@ export function sortChatSessions(sessions: ChatSession[]): ChatSession[] {
   });
 }
 
+/** Project detail shows active chats by activity, without the inbox's pin priority. */
+export function projectChatSessions(
+  sessions: ChatSession[],
+  wsId: string,
+  projectId: string,
+): ChatSession[] {
+  return sessions
+    .filter((s) => s.workspace_id === wsId && s.project_id === projectId && s.status !== "archived")
+    .sort((a, b) => sessionActivityTime(b) - sessionActivityTime(a));
+}
+
 /**
  * Number of sessions that should light up the quick-chat FAB unread badge.
  * `chatSessionsOptions` fetches `status=all` (active + archived) so the thread

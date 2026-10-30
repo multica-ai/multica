@@ -483,6 +483,15 @@ describe("useChatController.advanceSelectionAfterArchive", () => {
     expect(h.store.setSelectedAgentId).toHaveBeenCalledWith("agent-b");
   });
 
+  it("advances only within the visible project scope, clearing when it drains", () => {
+    const result = setup("sA", [sA, sB, sC], [agentA, agentB]);
+    act(() => result.current.advanceSelectionAfterArchive(sA, [sA, sC]));
+    expect(h.store.setActiveSession).toHaveBeenCalledWith("sC");
+    h.store.setActiveSession.mockClear();
+    act(() => result.current.advanceSelectionAfterArchive(sA, [sA]));
+    expect(h.store.setActiveSession).toHaveBeenCalledWith(null);
+  });
+
   it("does not touch the selected agent when the next chat is the same agent", () => {
     // Both chats belong to agent-a; archiving the open one advances within the
     // same agent, so there is no reason to rewrite selectedAgentId.

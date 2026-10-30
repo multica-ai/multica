@@ -186,6 +186,8 @@ describe("useRealtimeSync — ws instance change", () => {
       vi.advanceTimersByTime(100);
 
       expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: issueWorkflowKeys.all("ws-1") });
+      expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: chatKeys.all("ws-1") });
+      expect(invalidateSpy).not.toHaveBeenCalledWith({ queryKey: chatKeys.all("ws-2") });
       expect(invalidateSpy).not.toHaveBeenCalledWith({ queryKey: issueWorkflowKeys.all("ws-2") });
     } finally {
       vi.useRealTimers();

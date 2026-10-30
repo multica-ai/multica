@@ -1,10 +1,11 @@
 // @vitest-environment jsdom
 
+import userEvent from "@testing-library/user-event";
 import { StrictMode } from "react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { act, fireEvent, render, screen } from "@testing-library/react";
-import type { Agent } from "@multica/core/types";
+import type { Agent, ChatSession, Project } from "@multica/core/types";
 import { I18nProvider } from "@multica/core/i18n/react";
 import enCommon from "../locales/en/common.json";
 import enChat from "../locales/en/chat.json";
@@ -29,16 +30,21 @@ vi.mock("./components/chat-input", () => ({
 }));
 vi.mock("./components/chat-thread-list", () => ({
   ChatThreadList: ({
-    onSelectSession,
+    onSelectSession, sessions, onArchive,
   }: {
+    sessions: ChatSession[];
+    onArchive: (s: ChatSession) => void;
     onSelectSession: (s: { id: string; agent_id: string }) => void;
   }) => (
+    <>
+    {sessions.map((s) => <div key={s.id}>{s.title}<button onClick={() => onArchive(s)}>archive-{s.id}</button></div>)}
     <button
       type="button"
       onClick={() => onSelectSession({ id: "session-9", agent_id: "agent-9" })}
     >
       select-thread
     </button>
+    </>
   ),
 }));
 vi.mock("./components/chat-session-header", () => ({
@@ -104,6 +110,8 @@ const storeRef = vi.hoisted(() => ({
   current: { activeSessionId: null as string | null },
 }));
 const storeListeners = vi.hoisted(() => new Set<() => void>());
+const projectState = vi.hoisted(() => ({ wsId: "ws-1", projects: [] as Project[], sessions: [] as ChatSession[] }));
+const advanceArchive = vi.hoisted(() => vi.fn());
 const availableAgentsRef = vi.hoisted(() => ({ current: [] as Agent[] }));
 const agentsSettledRef = vi.hoisted(() => ({ current: true }));
 const mockStartNewChat = vi.hoisted(() => vi.fn());
@@ -135,18 +143,20 @@ vi.mock("./components/use-chat-controller", async () => {
   const { useSyncExternalStore } = await import("react");
   return {
     useChatController: () => ({
-      wsId: "ws-1",
+      wsId: projectState.wsId,
       user: { id: "user-1" },
       agents: availableAgentsRef.current,
       availableAgents: availableAgentsRef.current,
       agentsSettled: agentsSettledRef.current,
-      sessions: [],
+      sessions: projectState.sessions,
+      projects: projectState.projects,
+      projectsLoaded: true,
       activeSessionId: useSyncExternalStore(
         subscribeToStore,
         () => storeRef.current,
       ).activeSessionId,
       selectedAgentId: null,
-      currentSession: null,
+      currentSession: projectState.sessions.find((s) => s.id === storeRef.current.activeSessionId) ?? null,
       isSessionArchived: false,
       isAgentArchived: false,
       isAgentRuntimeBound: true,
@@ -171,7 +181,7 @@ vi.mock("./components/use-chat-controller", async () => {
       handleNewChat: vi.fn(),
       handleStartNewChat: mockStartNewChat,
       handleSelectSession: vi.fn(),
-      advanceSelectionAfterArchive: vi.fn(),
+      advanceSelectionAfterArchive: advanceArchive,
       archiveSession: vi.fn(),
       setActiveSession: mockSetActiveSession,
       setSelectedAgentId: vi.fn(),
@@ -495,5 +505,77 @@ describe("ChatPage responsive layout", () => {
       screen.getByRole("button", { name: "select-thread" }),
     ).toBeInTheDocument();
     expect(screen.getByText("chat-input")).toBeInTheDocument();
+  });
+});
+
+
+describe("ChatPage project filter", () => {
+  const projectA = { id: "p1", title: "Project Alpha" } as Project;
+  const projectB = { id: "p2", title: "Project Beta" } as Project;
+  const chat = (id: string, project_id: string | null): ChatSession => ({
+    id, title: `Thread ${id}`, project_id, workspace_id: "ws-1", agent_id: "a1", creator_id: "u1", status: "active", has_unread: false,
+    created_at: "2026-10-01T00:00:00Z", updated_at: "2026-10-01T00:00:00Z",
+  });
+  beforeEach(() => {
+    projectState.wsId = "ws-1";
+    projectState.projects = [projectA, projectB];
+    projectState.sessions = [chat("one", "p1"), chat("two", "p2"), chat("none", null), chat("next", "p1")];
+    advanceArchive.mockClear();
+  });
+  afterEach(() => { projectState.projects = []; projectState.sessions = []; projectState.wsId = "ws-1"; });
+
+  it("filters mixed project/no-project data, clears it and advances archive within the scope", async () => {
+    renderPage("session=one");
+    await userEvent.click(screen.getByRole("combobox", { name: "Project" }));
+    await userEvent.click(await screen.findByRole("option", { name: "Project Alpha" }));
+    expect(screen.getByText("Thread one")).toBeVisible();
+    expect(screen.queryByText("Thread two")).not.toBeInTheDocument();
+    expect(screen.queryByText("Thread none")).not.toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: "archive-one" }));
+    expect(advanceArchive).toHaveBeenCalledWith(projectState.sessions[0], [projectState.sessions[0], projectState.sessions[3]]);
+    await userEvent.click(screen.getByRole("button", { name: "Clear project filter" }));
+    expect(screen.getByText("Thread none")).toBeVisible();
+  });
+
+  it("clears the selected conversation when filtering it out", async () => {
+    renderPage("session=two");
+    mockSetActiveSession.mockClear();
+    await userEvent.click(screen.getByRole("combobox", { name: "Project" }));
+    await userEvent.click(await screen.findByRole("option", { name: "Project Alpha" }));
+    expect(mockSetActiveSession).toHaveBeenCalledWith(null);
+    expect(screen.getByText("Pick a conversation, or start a new one with +")).toBeVisible();
+  });
+
+  it("clears a selected chat reassociated out of the filter, but leaves another route's selection alone", async () => {
+    const view = renderPage("session=one");
+    await userEvent.click(screen.getByRole("combobox", { name: "Project" }));
+    await userEvent.click(await screen.findByRole("option", { name: "Project Alpha" }));
+    mockSetActiveSession.mockClear();
+    projectState.sessions = projectState.sessions.map((s) => s.id === "one" ? { ...s, project_id: "p2" } : s);
+    view.rerender();
+    expect(mockSetActiveSession).toHaveBeenCalledWith(null);
+    mockSetActiveSession.mockClear();
+    storeRef.current = { activeSessionId: "two" };
+    view.rerender({ pathname: "/acme/issues", search: "" });
+    expect(mockSetActiveSession).not.toHaveBeenCalled();
+  });
+
+  it("drops deleted-project and previous-workspace filters without resurrecting them", async () => {
+    const view = renderPage("");
+    await userEvent.click(screen.getByRole("combobox", { name: "Project" }));
+    await userEvent.click(await screen.findByRole("option", { name: "Project Alpha" }));
+    projectState.projects = [projectB];
+    view.rerender();
+    expect(screen.getByRole("combobox")).toHaveTextContent("All projects");
+    projectState.projects = [projectA, projectB];
+    view.rerender();
+    expect(screen.getByRole("combobox")).toHaveTextContent("All projects");
+    await userEvent.click(screen.getByRole("combobox", { name: "Project" }));
+    await userEvent.click(await screen.findByRole("option", { name: "Project Alpha" }));
+    projectState.wsId = "ws-2"; projectState.projects = [];
+    view.rerender();
+    projectState.wsId = "ws-1"; projectState.projects = [projectA];
+    view.rerender();
+    expect(screen.getByRole("combobox")).toHaveTextContent("All projects");
   });
 });

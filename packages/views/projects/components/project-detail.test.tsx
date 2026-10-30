@@ -221,6 +221,8 @@ vi.mock("../../issues/components/priority-icon", () => ({
   PriorityIcon: () => null,
 }));
 
+vi.mock("./project-chats-section", () => ({ ProjectChatsSection: () => <section aria-label="Chats" /> }));
+
 vi.mock("./project-resources-section", () => ({
   ProjectResourcesSection: () => null,
 }));
