@@ -18,9 +18,10 @@ vi.mock("../api", () => ({
     initiateListModels: (
       runtimeId: string,
       options?: { force?: boolean },
-    ) => initiateListModels(runtimeId, options),
-    getListModelsResult: (runtimeId: string, requestId: string) =>
-      getListModelsResult(runtimeId, requestId),
+      workspaceSlug?: string,
+    ) => initiateListModels(runtimeId, options, workspaceSlug),
+    getListModelsResult: (runtimeId: string, requestId: string, workspaceSlug?: string) =>
+      getListModelsResult(runtimeId, requestId, workspaceSlug),
   },
 }));
 
@@ -143,7 +144,7 @@ describe("resolveRuntimeModels", () => {
     expect(result.models).toEqual(catalog);
     expect(result.supported).toBe(true);
     expect(getListModelsResult).toHaveBeenCalledTimes(2);
-    expect(getListModelsResult).toHaveBeenLastCalledWith("rt-1", "req-1");
+    expect(getListModelsResult).toHaveBeenLastCalledWith("rt-1", "req-1", undefined);
   });
 
   // MUL-6606 review: the client budget has to cover the server's pending AND
@@ -297,7 +298,7 @@ describe("runtimeModelsOptions", () => {
 
     await refreshRuntimeModels(client, "rt-1");
 
-    expect(initiateListModels).toHaveBeenCalledWith("rt-1", { force: true });
+    expect(initiateListModels).toHaveBeenCalledWith("rt-1", { force: true }, undefined);
     expect(client.getQueryData(runtimeModelsKeys.forRuntime("rt-1"))).toMatchObject({
       models: refreshedCatalog,
       cached: false,
@@ -384,5 +385,31 @@ describe("runtimeModelsOptions", () => {
     // data, not after a gap.
     expect(emissions[0]?.ids).toEqual(catalog.map((m) => m.id));
     expect(initiateListModels).toHaveBeenCalledTimes(2);
+  });
+});
+
+
+describe("onboarding workspace context", () => {
+  it("passes the target through initial query, polling, and forced refresh", async () => {
+    vi.useFakeTimers();
+    const client = new QueryClient();
+    try {
+      initiateListModels.mockResolvedValue(request({ status: "pending" }));
+      getListModelsResult.mockResolvedValue(request({ status: "completed", models: catalog }));
+      const initial = client.fetchQuery(runtimeModelsOptions("rt-1", "new-workspace"));
+      await vi.advanceTimersByTimeAsync(500);
+      await initial;
+      expect(initiateListModels).toHaveBeenLastCalledWith("rt-1", undefined, "new-workspace");
+      expect(getListModelsResult).toHaveBeenLastCalledWith("rt-1", "req-1", "new-workspace");
+      const refresh = refreshRuntimeModels(client, "rt-1", "new-workspace");
+      await vi.advanceTimersByTimeAsync(500);
+      await refresh;
+      expect(initiateListModels).toHaveBeenLastCalledWith("rt-1", { force: true }, "new-workspace");
+      expect(getListModelsResult).toHaveBeenLastCalledWith("rt-1", "req-1", "new-workspace");
+      expect(client.getQueryData(runtimeModelsKeys.forRuntime("rt-1"))).toMatchObject({ models: catalog });
+    } finally {
+      client.clear();
+      vi.useRealTimers();
+    }
   });
 });
