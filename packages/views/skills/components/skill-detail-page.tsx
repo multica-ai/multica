@@ -39,6 +39,7 @@ import {
   memberListOptions,
   selectSkillAssignments,
   skillDetailOptions,
+  skillVersionsOptions,
   workspaceKeys,
 } from "@multica/core/workspace/queries";
 import { resolvePublicFileUrl } from "@multica/core/workspace/avatar-url";
@@ -85,6 +86,7 @@ import {
   type SkillActionsContext,
 } from "./skill-list-actions";
 import { RefreshSkillDialog } from "./refresh-skill-dialog";
+import { SkillVersionsTab } from "./skill-versions-tab";
 import { useT } from "../../i18n";
 import { ResourceLabelPicker } from "../../labels/resource-label-picker";
 
@@ -159,17 +161,17 @@ function hasLocalEdits(draft: SkillDraft, baseline: SkillDraft | null): boolean 
 }
 
 /**
- * Two tabs, not three. A skill has no settings axis to speak of:
+ * No Settings tab. A skill has no settings axis to speak of:
  * `UpdateSkillRequest` carries only name / description / content / config /
  * files, and edit rights are derived (creator or workspace admin) with no
  * writable counterpart — so a Settings tab would hold a delete button and a
  * read-only sentence. Delete lives in the header instead, matching the agent
  * detail page where Archive sits in the header.
  */
-type DetailView = "overview" | "files";
+type DetailView = "overview" | "files" | "versions";
 
 function isDetailView(value: string | null): value is DetailView {
-  return value === "overview" || value === "files";
+  return value === "overview" || value === "files" || value === "versions";
 }
 
 // File path validation + inline add
@@ -997,6 +999,10 @@ export function SkillDetailPage({ skillId }: { skillId: string }) {
         exact: true,
       });
       qc.invalidateQueries({ queryKey: workspaceKeys.agents(wsId) });
+      qc.invalidateQueries({
+        queryKey: skillVersionsOptions(wsId, skill.id).queryKey,
+        exact: true,
+      });
       toast.success(t(($) => $.detail.toast_saved));
     } catch (err) {
       toast.error(err instanceof Error ? err.message : t(($) => $.detail.toast_save_failed));
@@ -1151,6 +1157,7 @@ export function SkillDetailPage({ skillId }: { skillId: string }) {
       id: "files",
       label: t(($) => $.detail.tabs.files, { count: totalFileCount(skill) }),
     },
+    { id: "versions", label: t(($) => $.detail.tabs.versions) },
   ];
 
   return (
@@ -1302,7 +1309,7 @@ export function SkillDetailPage({ skillId }: { skillId: string }) {
       <div
         className={cn(
           "min-h-0 flex-1 overflow-y-auto",
-          activeView === "files" && "md:overflow-hidden",
+          activeView !== "overview" && "md:overflow-hidden",
         )}
       >
         {activeView === "overview" ? (
@@ -1316,6 +1323,17 @@ export function SkillDetailPage({ skillId }: { skillId: string }) {
             onNameChange={setName}
             onDescriptionChange={setDescription}
             onAddToAgents={() => setShowAddToAgents(true)}
+          />
+        ) : activeView === "versions" ? (
+          <SkillVersionsTab
+            skill={skill}
+            wsId={wsId}
+            canEdit={canEdit}
+            hasUnsavedChanges={isDirty}
+            members={members}
+            // Adopt explicitly: the user confirmed the restore, so a dirty
+            // draft is replaced instead of tripping the conflict banner.
+            onRestored={(updated) => adoptServerVersion(updated)}
           />
         ) : (
           <FilesTab
@@ -1456,7 +1474,13 @@ export function SkillDetailPage({ skillId }: { skillId: string }) {
         onOpenChange={setConfirmRefresh}
         // Adopt explicitly: the user just confirmed the overwrite, so a dirty
         // draft must be replaced instead of tripping the conflict banner.
-        onRefreshed={(updated) => adoptServerVersion(updated)}
+        onRefreshed={(updated) => {
+          adoptServerVersion(updated);
+          qc.invalidateQueries({
+            queryKey: skillVersionsOptions(wsId, updated.id).queryKey,
+            exact: true,
+          });
+        }}
       />
     </div>
   );

@@ -134,6 +134,30 @@ export function skillDetailOptions(wsId: string, skillId: string) {
   });
 }
 
+// Nested under the skill detail key so skill realtime events, which
+// invalidate the workspace skills prefix, refresh history too.
+export function skillVersionsOptions(wsId: string, skillId: string) {
+  return queryOptions({
+    queryKey: [...workspaceKeys.skills(wsId), skillId, "versions"] as const,
+    queryFn: () => api.listSkillVersions(skillId),
+    enabled: !!skillId,
+  });
+}
+
+// A version never changes once written.
+export function skillVersionDetailOptions(
+  wsId: string,
+  skillId: string,
+  version: number | null,
+) {
+  return queryOptions({
+    queryKey: [...workspaceKeys.skills(wsId), skillId, "versions", version] as const,
+    queryFn: () => api.getSkillVersion(skillId, version as number),
+    enabled: !!skillId && version !== null,
+    staleTime: Infinity,
+  });
+}
+
 /**
  * Builds a `Map<skillId, Agent[]>` from the cached agent list. The server
  * already returns each agent with its full skill list inline, so no extra

@@ -202,7 +202,8 @@
     "tabs": {
       "aria": "技能分區",
       "overview": "概覽",
-      "files_other": "檔案 {{count}}"
+      "files_other": "檔案 {{count}}",
+      "versions": "版本"
     },
     "overview": {
       "properties": "屬性",
@@ -229,6 +230,33 @@
       "mode_preview": "預覽",
       "mode_edit": "編輯",
       "mode_raw": "純文字"
+    },
+    "versions": {
+      "list_aria": "skill 版本",
+      "version_label": "v{{version}}",
+      "current": "目前",
+      "unknown_author": "未知",
+      "empty": "還沒有版本。這個 skill 下次被修改時，會先把目前內容記錄為第一個版本。",
+      "load_failed": "版本載入失敗。",
+      "restore": "還原",
+      "toast_restored": "已還原 v{{version}}",
+      "toast_restore_failed": "版本還原失敗",
+      "source": {
+        "baseline": "早期內容",
+        "create": "建立",
+        "update": "編輯",
+        "import": "匯入",
+        "refresh": "從來源更新",
+        "restore": "還原自 v{{version}}"
+      },
+      "dialog": {
+        "title": "還原到 v{{version}}？",
+        "description": "v{{version}} 的內容會成為一個新版本，智慧體從下一次執行起使用它。較新的版本仍保留在歷史中。",
+        "unsaved_warning": "未儲存的修改會被捨棄。",
+        "cancel": "取消",
+        "confirm": "還原",
+        "restoring": "還原中..."
+      }
     }
   },
   "create": {

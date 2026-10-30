@@ -202,7 +202,8 @@
     "tabs": {
       "aria": "スキルのセクション",
       "overview": "概要",
-      "files_other": "ファイル {{count}}"
+      "files_other": "ファイル {{count}}",
+      "versions": "バージョン"
     },
     "overview": {
       "properties": "プロパティ",
@@ -229,6 +230,33 @@
       "mode_preview": "プレビュー",
       "mode_edit": "編集",
       "mode_raw": "プレーンテキスト"
+    },
+    "versions": {
+      "list_aria": "スキルのバージョン",
+      "version_label": "v{{version}}",
+      "current": "現在",
+      "unknown_author": "不明",
+      "empty": "まだバージョンはありません。次にこのスキルを変更したとき、現在の内容が最初のバージョンとして記録されます。",
+      "load_failed": "バージョンを読み込めませんでした。",
+      "restore": "復元",
+      "toast_restored": "v{{version}} を復元しました",
+      "toast_restore_failed": "バージョンを復元できませんでした",
+      "source": {
+        "baseline": "以前の内容",
+        "create": "作成",
+        "update": "編集",
+        "import": "インポート",
+        "refresh": "ソースから更新",
+        "restore": "v{{version}} から復元"
+      },
+      "dialog": {
+        "title": "v{{version}} を復元しますか？",
+        "description": "v{{version}} の内容が新しいバージョンになり、エージェントは次回の実行からそれを使います。新しいバージョンも履歴に残ります。",
+        "unsaved_warning": "保存していない変更は破棄されます。",
+        "cancel": "キャンセル",
+        "confirm": "復元",
+        "restoring": "復元中…"
+      }
     }
   },
   "create": {

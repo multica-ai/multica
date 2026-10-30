@@ -2537,6 +2537,66 @@ describe("ApiClient refreshSkill response schema", () => {
   });
 });
 
+describe("ApiClient skill version response schemas", () => {
+  function stubJSON(body: unknown) {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify(body), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    return fetchMock;
+  }
+
+  const summary = {
+    id: "ver-2",
+    skill_id: "skill-1",
+    version: 2,
+    name: "review-helper",
+    source: "restore",
+    restored_from_version: 1,
+    created_by: "user-1",
+    created_at: "2026-01-02T00:00:00Z",
+  };
+
+  it("parses the version list and maps unknown sources to update", async () => {
+    stubJSON([summary, { ...summary, id: "ver-1", version: 1, source: "future-kind" }]);
+    const result = await new ApiClient("https://api.example.test").listSkillVersions("skill-1");
+    expect(result.map((v) => [v.version, v.source])).toEqual([
+      [2, "restore"],
+      [1, "update"],
+    ]);
+  });
+
+  it("falls back to an empty list when the response is malformed", async () => {
+    stubJSON({ versions: 42 });
+    const result = await new ApiClient("https://api.example.test").listSkillVersions("skill-1");
+    expect(result).toEqual([]);
+  });
+
+  it("parses a version snapshot and defaults omitted fields", async () => {
+    const fetchMock = stubJSON({ ...summary, content: "# v2", files: [{ path: "a.md" }] });
+    const result = await new ApiClient("https://api.example.test").getSkillVersion("skill-1", 2);
+    expect(String(fetchMock.mock.calls[0]?.[0])).toContain("/api/skills/skill-1/versions/2");
+    expect(result).toMatchObject({
+      version: 2,
+      description: "",
+      content: "# v2",
+      files: [{ path: "a.md", content: "" }],
+    });
+  });
+
+  it("restores through POST and falls back to the empty skill on a malformed body", async () => {
+    const fetchMock = stubJSON({ skill: 42 });
+    const result = await new ApiClient("https://api.example.test").restoreSkillVersion("skill-1", 1);
+    const [url, init] = fetchMock.mock.calls[0] ?? [];
+    expect(String(url)).toContain("/api/skills/skill-1/versions/1/restore");
+    expect((init as RequestInit | undefined)?.method).toBe("POST");
+    expect(result).toMatchObject({ id: "", files: [] });
+  });
+});
+
 describe("ApiClient workspace MCP servers", () => {
   function stubJSON(body: unknown) {
     const fetchMock = vi.fn().mockResolvedValue(

@@ -67,8 +67,82 @@ func (q *Queries) CreateSkill(ctx context.Context, arg CreateSkillParams) (Skill
 	return i, err
 }
 
+const createSkillVersion = `-- name: CreateSkillVersion :one
+INSERT INTO skill_version (
+    workspace_id, skill_id, version, name, description, content, files,
+    content_hash, source, restored_from_version, created_by, created_at
+)
+VALUES (
+    $1, $2, $3, $4, $5, $6, $7,
+    $8, $9, $10, $11,
+    COALESCE($12::timestamptz, now())
+)
+RETURNING id, workspace_id, skill_id, version, name, source, restored_from_version, created_by, created_at
+`
+
+type CreateSkillVersionParams struct {
+	WorkspaceID         pgtype.UUID        `json:"workspace_id"`
+	SkillID             pgtype.UUID        `json:"skill_id"`
+	Version             int32              `json:"version"`
+	Name                string             `json:"name"`
+	Description         string             `json:"description"`
+	Content             string             `json:"content"`
+	Files               []byte             `json:"files"`
+	ContentHash         string             `json:"content_hash"`
+	Source              string             `json:"source"`
+	RestoredFromVersion pgtype.Int4        `json:"restored_from_version"`
+	CreatedBy           pgtype.UUID        `json:"created_by"`
+	CreatedAt           pgtype.Timestamptz `json:"created_at"`
+}
+
+type CreateSkillVersionRow struct {
+	ID                  pgtype.UUID        `json:"id"`
+	WorkspaceID         pgtype.UUID        `json:"workspace_id"`
+	SkillID             pgtype.UUID        `json:"skill_id"`
+	Version             int32              `json:"version"`
+	Name                string             `json:"name"`
+	Source              string             `json:"source"`
+	RestoredFromVersion pgtype.Int4        `json:"restored_from_version"`
+	CreatedBy           pgtype.UUID        `json:"created_by"`
+	CreatedAt           pgtype.Timestamptz `json:"created_at"`
+}
+
+func (q *Queries) CreateSkillVersion(ctx context.Context, arg CreateSkillVersionParams) (CreateSkillVersionRow, error) {
+	row := q.db.QueryRow(ctx, createSkillVersion,
+		arg.WorkspaceID,
+		arg.SkillID,
+		arg.Version,
+		arg.Name,
+		arg.Description,
+		arg.Content,
+		arg.Files,
+		arg.ContentHash,
+		arg.Source,
+		arg.RestoredFromVersion,
+		arg.CreatedBy,
+		arg.CreatedAt,
+	)
+	var i CreateSkillVersionRow
+	err := row.Scan(
+		&i.ID,
+		&i.WorkspaceID,
+		&i.SkillID,
+		&i.Version,
+		&i.Name,
+		&i.Source,
+		&i.RestoredFromVersion,
+		&i.CreatedBy,
+		&i.CreatedAt,
+	)
+	return i, err
+}
+
 const deleteSkill = `-- name: DeleteSkill :exec
-DELETE FROM skill WHERE id = $1 AND workspace_id = $2
+WITH deleted_versions AS (
+    DELETE FROM skill_version
+    WHERE skill_version.skill_id = $1 AND skill_version.workspace_id = $2
+)
+DELETE FROM skill WHERE skill.id = $1 AND skill.workspace_id = $2
 `
 
 type DeleteSkillParams struct {
@@ -77,6 +151,8 @@ type DeleteSkillParams struct {
 }
 
 // Defense-in-depth: workspace_id is a SQL-layer tenant guard. See DeleteIssue.
+// skill_version has no FK, so the skill's history is removed in the same
+// statement.
 func (q *Queries) DeleteSkill(ctx context.Context, arg DeleteSkillParams) error {
 	_, err := q.db.Exec(ctx, deleteSkill, arg.ID, arg.WorkspaceID)
 	return err
@@ -98,6 +174,25 @@ DELETE FROM skill_file WHERE skill_id = $1
 func (q *Queries) DeleteSkillFilesBySkill(ctx context.Context, skillID pgtype.UUID) error {
 	_, err := q.db.Exec(ctx, deleteSkillFilesBySkill, skillID)
 	return err
+}
+
+const getLatestSkillVersion = `-- name: GetLatestSkillVersion :one
+SELECT version, content_hash FROM skill_version
+WHERE skill_id = $1
+ORDER BY version DESC
+LIMIT 1
+`
+
+type GetLatestSkillVersionRow struct {
+	Version     int32  `json:"version"`
+	ContentHash string `json:"content_hash"`
+}
+
+func (q *Queries) GetLatestSkillVersion(ctx context.Context, skillID pgtype.UUID) (GetLatestSkillVersionRow, error) {
+	row := q.db.QueryRow(ctx, getLatestSkillVersion, skillID)
+	var i GetLatestSkillVersionRow
+	err := row.Scan(&i.Version, &i.ContentHash)
+	return i, err
 }
 
 const getSkill = `-- name: GetSkill :one
@@ -196,6 +291,38 @@ func (q *Queries) GetSkillInWorkspace(ctx context.Context, arg GetSkillInWorkspa
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.PluginInstallationID,
+	)
+	return i, err
+}
+
+const getSkillVersion = `-- name: GetSkillVersion :one
+SELECT id, workspace_id, skill_id, version, name, description, content, files, content_hash, source, restored_from_version, created_by, created_at FROM skill_version
+WHERE skill_id = $1 AND workspace_id = $2 AND version = $3
+`
+
+type GetSkillVersionParams struct {
+	SkillID     pgtype.UUID `json:"skill_id"`
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
+	Version     int32       `json:"version"`
+}
+
+func (q *Queries) GetSkillVersion(ctx context.Context, arg GetSkillVersionParams) (SkillVersion, error) {
+	row := q.db.QueryRow(ctx, getSkillVersion, arg.SkillID, arg.WorkspaceID, arg.Version)
+	var i SkillVersion
+	err := row.Scan(
+		&i.ID,
+		&i.WorkspaceID,
+		&i.SkillID,
+		&i.Version,
+		&i.Name,
+		&i.Description,
+		&i.Content,
+		&i.Files,
+		&i.ContentHash,
+		&i.Source,
+		&i.RestoredFromVersion,
+		&i.CreatedBy,
+		&i.CreatedAt,
 	)
 	return i, err
 }
@@ -605,6 +732,61 @@ func (q *Queries) ListSkillSummariesByWorkspace(ctx context.Context, workspaceID
 	return items, nil
 }
 
+const listSkillVersions = `-- name: ListSkillVersions :many
+SELECT id, workspace_id, skill_id, version, name, source, restored_from_version, created_by, created_at
+FROM skill_version
+WHERE skill_id = $1 AND workspace_id = $2
+ORDER BY version DESC
+`
+
+type ListSkillVersionsParams struct {
+	SkillID     pgtype.UUID `json:"skill_id"`
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
+}
+
+type ListSkillVersionsRow struct {
+	ID                  pgtype.UUID        `json:"id"`
+	WorkspaceID         pgtype.UUID        `json:"workspace_id"`
+	SkillID             pgtype.UUID        `json:"skill_id"`
+	Version             int32              `json:"version"`
+	Name                string             `json:"name"`
+	Source              string             `json:"source"`
+	RestoredFromVersion pgtype.Int4        `json:"restored_from_version"`
+	CreatedBy           pgtype.UUID        `json:"created_by"`
+	CreatedAt           pgtype.Timestamptz `json:"created_at"`
+}
+
+// Metadata only: snapshots can be large, and the list never shows bodies.
+func (q *Queries) ListSkillVersions(ctx context.Context, arg ListSkillVersionsParams) ([]ListSkillVersionsRow, error) {
+	rows, err := q.db.Query(ctx, listSkillVersions, arg.SkillID, arg.WorkspaceID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListSkillVersionsRow{}
+	for rows.Next() {
+		var i ListSkillVersionsRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.WorkspaceID,
+			&i.SkillID,
+			&i.Version,
+			&i.Name,
+			&i.Source,
+			&i.RestoredFromVersion,
+			&i.CreatedBy,
+			&i.CreatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listSkillsByWorkspace = `-- name: ListSkillsByWorkspace :many
 
 SELECT id, workspace_id, name, description, content, config, created_by, created_at, updated_at, plugin_installation_id FROM skill
@@ -642,6 +824,33 @@ func (q *Queries) ListSkillsByWorkspace(ctx context.Context, workspaceID pgtype.
 		return nil, err
 	}
 	return items, nil
+}
+
+const lockSkillForVersioning = `-- name: LockSkillForVersioning :one
+
+SELECT id, workspace_id, name, description, content, config, created_by, created_at, updated_at, plugin_installation_id FROM skill WHERE id = $1 FOR UPDATE
+`
+
+// Skill versions
+// Serializes version-number allocation for one skill. Every content write
+// takes this row lock inside its transaction before reading the latest
+// version, so concurrent writers cannot allocate the same number.
+func (q *Queries) LockSkillForVersioning(ctx context.Context, id pgtype.UUID) (Skill, error) {
+	row := q.db.QueryRow(ctx, lockSkillForVersioning, id)
+	var i Skill
+	err := row.Scan(
+		&i.ID,
+		&i.WorkspaceID,
+		&i.Name,
+		&i.Description,
+		&i.Content,
+		&i.Config,
+		&i.CreatedBy,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.PluginInstallationID,
+	)
+	return i, err
 }
 
 const removeAgentSkill = `-- name: RemoveAgentSkill :exec

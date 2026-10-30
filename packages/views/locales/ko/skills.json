@@ -202,7 +202,8 @@
     "tabs": {
       "aria": "스킬 섹션",
       "overview": "개요",
-      "files_other": "파일 {{count}}"
+      "files_other": "파일 {{count}}",
+      "versions": "버전"
     },
     "overview": {
       "properties": "속성",
@@ -229,6 +230,33 @@
       "mode_preview": "미리보기",
       "mode_edit": "편집",
       "mode_raw": "일반 텍스트"
+    },
+    "versions": {
+      "list_aria": "스킬 버전",
+      "version_label": "v{{version}}",
+      "current": "현재",
+      "unknown_author": "알 수 없음",
+      "empty": "아직 버전이 없습니다. 다음에 이 스킬을 변경하면 현재 내용이 첫 번째 버전으로 기록됩니다.",
+      "load_failed": "버전을 불러오지 못했습니다.",
+      "restore": "복원",
+      "toast_restored": "v{{version}}을(를) 복원했습니다",
+      "toast_restore_failed": "버전을 복원하지 못했습니다",
+      "source": {
+        "baseline": "이전 내용",
+        "create": "생성",
+        "update": "편집",
+        "import": "가져오기",
+        "refresh": "소스에서 업데이트",
+        "restore": "v{{version}}에서 복원"
+      },
+      "dialog": {
+        "title": "v{{version}}(으)로 복원할까요?",
+        "description": "v{{version}}의 내용이 새 버전이 되며, 에이전트는 다음 실행부터 이를 사용합니다. 이후 버전도 기록에 남습니다.",
+        "unsaved_warning": "저장하지 않은 변경 사항은 삭제됩니다.",
+        "cancel": "취소",
+        "confirm": "복원",
+        "restoring": "복원하는 중..."
+      }
     }
   },
   "create": {

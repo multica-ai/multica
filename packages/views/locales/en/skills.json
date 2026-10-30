@@ -215,7 +215,8 @@
       "aria": "Skill sections",
       "overview": "Overview",
       "files_one": "Files {{count}}",
-      "files_other": "Files {{count}}"
+      "files_other": "Files {{count}}",
+      "versions": "Versions"
     },
     "overview": {
       "properties": "Properties",
@@ -244,6 +245,33 @@
       "mode_preview": "Preview",
       "mode_edit": "Edit",
       "mode_raw": "Plain text"
+    },
+    "versions": {
+      "list_aria": "Skill versions",
+      "version_label": "v{{version}}",
+      "current": "Current",
+      "unknown_author": "Unknown",
+      "empty": "No versions yet. The next change to this skill records its current content as the first version.",
+      "load_failed": "Failed to load versions.",
+      "restore": "Restore",
+      "toast_restored": "Restored v{{version}}",
+      "toast_restore_failed": "Failed to restore version",
+      "source": {
+        "baseline": "Earlier content",
+        "create": "Created",
+        "update": "Edited",
+        "import": "Imported",
+        "refresh": "Updated from source",
+        "restore": "Restored from v{{version}}"
+      },
+      "dialog": {
+        "title": "Restore v{{version}}?",
+        "description": "The content of v{{version}} becomes a new version. Agents use it from their next run. Newer versions stay in the history.",
+        "unsaved_warning": "Your unsaved changes will be discarded.",
+        "cancel": "Cancel",
+        "confirm": "Restore",
+        "restoring": "Restoring..."
+      }
     }
   },
   "create": {

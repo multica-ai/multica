@@ -202,7 +202,8 @@
     "tabs": {
       "aria": "技能分区",
       "overview": "概览",
-      "files_other": "文件 {{count}}"
+      "files_other": "文件 {{count}}",
+      "versions": "版本"
     },
     "overview": {
       "properties": "属性",
@@ -229,6 +230,33 @@
       "mode_preview": "预览",
       "mode_edit": "编辑",
       "mode_raw": "纯文本"
+    },
+    "versions": {
+      "list_aria": "skill 版本",
+      "version_label": "v{{version}}",
+      "current": "当前",
+      "unknown_author": "未知",
+      "empty": "还没有版本。这个 skill 下次被修改时，会先把当前内容记录为第一个版本。",
+      "load_failed": "版本加载失败。",
+      "restore": "恢复",
+      "toast_restored": "已恢复 v{{version}}",
+      "toast_restore_failed": "版本恢复失败",
+      "source": {
+        "baseline": "早期内容",
+        "create": "创建",
+        "update": "编辑",
+        "import": "导入",
+        "refresh": "从来源更新",
+        "restore": "恢复自 v{{version}}"
+      },
+      "dialog": {
+        "title": "恢复到 v{{version}}？",
+        "description": "v{{version}} 的内容会成为一个新版本，智能体从下一次运行起使用它。更新的版本仍保留在历史里。",
+        "unsaved_warning": "未保存的修改会被丢弃。",
+        "cancel": "取消",
+        "confirm": "恢复",
+        "restoring": "恢复中..."
+      }
     }
   },
   "create": {

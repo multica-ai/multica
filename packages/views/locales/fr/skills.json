@@ -215,7 +215,8 @@
       "aria": "Sections du skill",
       "overview": "Vue d'ensemble",
       "files_one": "Fichiers {{count}}",
-      "files_other": "Fichiers {{count}}"
+      "files_other": "Fichiers {{count}}",
+      "versions": "Versions"
     },
     "overview": {
       "properties": "Propriétés",
@@ -244,6 +245,33 @@
       "mode_preview": "Aperçu",
       "mode_edit": "Modifier",
       "mode_raw": "Texte brut"
+    },
+    "versions": {
+      "list_aria": "Versions du skill",
+      "version_label": "v{{version}}",
+      "current": "Actuelle",
+      "unknown_author": "Inconnu",
+      "empty": "Aucune version pour l'instant. À la prochaine modification de ce skill, son contenu actuel sera enregistré comme première version.",
+      "load_failed": "Impossible de charger les versions.",
+      "restore": "Restaurer",
+      "toast_restored": "v{{version}} restaurée",
+      "toast_restore_failed": "Impossible de restaurer la version",
+      "source": {
+        "baseline": "Contenu antérieur",
+        "create": "Création",
+        "update": "Modification",
+        "import": "Import",
+        "refresh": "Mis à jour depuis la source",
+        "restore": "Restaurée depuis v{{version}}"
+      },
+      "dialog": {
+        "title": "Restaurer v{{version}} ?",
+        "description": "Le contenu de v{{version}} devient une nouvelle version. Les agents l'utilisent dès leur prochaine exécution. Les versions plus récentes restent dans l'historique.",
+        "unsaved_warning": "Vos modifications non enregistrées seront perdues.",
+        "cancel": "Annuler",
+        "confirm": "Restaurer",
+        "restoring": "Restauration..."
+      }
     }
   },
   "create": {
