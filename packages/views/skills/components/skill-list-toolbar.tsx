@@ -47,6 +47,7 @@ import {
 } from "@multica/ui/components/ui/tooltip";
 import { ActorAvatar } from "@multica/ui/components/common/actor-avatar";
 import { FILTER_ITEM_CLASS, HoverCheck } from "../../common/hover-check";
+import { keepMenuSearchKeys } from "../../common/menu-search-keys";
 import {
   type SkillColumnKey,
   type SkillListFilters,
@@ -431,6 +432,7 @@ export function SkillListToolbar({
                     type="text"
                     value={labelSearch}
                     onChange={(e) => setLabelSearch(e.target.value)}
+                    onKeyDown={keepMenuSearchKeys}
                     placeholder={t(($) => $.toolbar.filter_search_placeholder)}
                     className="w-full bg-transparent text-body outline-none placeholder:text-muted-foreground"
                     autoFocus
