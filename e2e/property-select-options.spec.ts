@@ -30,6 +30,7 @@ for (const type of ["select", "multi_select"] as const) {
       await page.getByRole("menuitem", { name: "Edit", exact: true }).click();
       const dialog = page.getByRole("dialog", { name: "Edit property" });
       await expect(dialog.getByPlaceholder("Option name")).toHaveCount(200);
+      await expect(dialog.getByRole("button", { name: "Add option", exact: true })).toBeDisabled();
       await dialog.getByPlaceholder("Option name").last().fill("Service 200 updated");
       await expect(dialog.getByRole("button", { name: "Save property" })).toBeInViewport();
       const editorImage = test.info().outputPath(`${type}-editor.png`);
