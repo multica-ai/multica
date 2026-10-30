@@ -33,6 +33,7 @@ import {
 import { useLocaleAdapter } from "@multica/core/i18n/react";
 import { useAuthStore } from "@multica/core/auth";
 import { useChatStore } from "@multica/core/chat";
+import { SIDEBAR_ITEMS, useSidebarPreferencesStore } from "@multica/core/navigation";
 import {
   useCommentComposerStore,
   type RunningAgentReply,
@@ -91,6 +92,8 @@ export function PreferencesTab() {
         </SettingsCard>
       </SettingsSection>
 
+      <SidebarPreferences />
+
       <SettingsSection
         title={t(($) => $.preferences.comments_title)}
         scope="device"
@@ -122,6 +125,35 @@ export function PreferencesTab() {
         <IssueFieldsMatrix />
       </SettingsSection>
     </SettingsTab>
+  );
+}
+
+function SidebarPreferences() {
+  const { t } = useT("settings");
+  const { t: layoutT } = useT("layout");
+  const hiddenItems = useSidebarPreferencesStore((s) => s.hiddenItems);
+  const setItemVisible = useSidebarPreferencesStore((s) => s.setItemVisible);
+  return (
+    <SettingsSection
+      title={t(($) => $.preferences.sidebar_title)}
+      scope="device"
+      anchor="sidebar"
+    >
+      <SettingsCard>
+        {SIDEBAR_ITEMS.map((item) => {
+          const label = layoutT(($) => $.nav[item]);
+          return (
+            <SettingsRow key={item} label={label}>
+              <Switch
+                checked={!hiddenItems.includes(item)}
+                onCheckedChange={(checked) => setItemVisible(item, checked)}
+                aria-label={label}
+              />
+            </SettingsRow>
+          );
+        })}
+      </SettingsCard>
+    </SettingsSection>
   );
 }
 
