@@ -48,6 +48,7 @@
     "forward_history": "進む履歴"
   },
   "sidebar": {
+    "unavailable_pin": "利用できない項目",
     "unpin_tooltip": "ピン留めを解除",
     "workspaces_label": "ワークスペース",
     "create_workspace": "ワークスペースを作成",

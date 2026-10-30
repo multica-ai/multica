@@ -1,4 +1,6 @@
 "use client";
+
+import { Button } from "@multica/ui/components/ui/button";
 import { useIssueStatuses } from "@multica/core/issue-statuses/hooks";
 
 import { issueStatusCategory } from "@multica/core/issues";
@@ -72,7 +74,7 @@ import { inboxUnreadSummaryEnabled, inboxUnreadSummaryOptions, useInboxUnreadCou
 import { chatSessionsOptions } from "@multica/core/chat/queries";
 import { countUnreadChatMessages } from "@multica/core/chat/unread";
 import { useChatStore } from "@multica/core/chat";
-import { api, ApiError } from "@multica/core/api";
+import { api } from "@multica/core/api";
 import { useConfigStore } from "@multica/core/config";
 import { pinListOptions } from "@multica/core/pins/queries";
 import { useDeletePin, useReorderPins } from "@multica/core/pins/mutations";
@@ -268,6 +270,20 @@ function SortablePinItem({
   );
 }
 
+function UnavailablePin({ onUnpin }: { onUnpin: () => void }) {
+  const { t } = useT("layout");
+  return (
+    <SidebarMenuItem>
+      <div className="flex h-7 items-center gap-2 px-2 text-sm text-muted-foreground">
+        <span className="min-w-0 flex-1 truncate">{t(($) => $.sidebar.unavailable_pin)}</span>
+        <Button variant="ghost" size="xs" onClick={onUnpin}>
+          {t(($) => $.sidebar.unpin_tooltip)}
+        </Button>
+      </div>
+    </SidebarMenuItem>
+  );
+}
+
 /**
  * Smart wrapper that resolves a pin's display data (label + status/icon)
  * from the issue / project detail query cache. Both queries are declared
@@ -275,8 +291,7 @@ function SortablePinItem({
  * regardless of `pin.item_type`.
  *
  * Loading: render a flat skeleton so the sidebar height doesn't jump.
- * Missing (deleted item / 404): render nothing — the row hides itself
- * until the user unpins manually or a server-side cascade catches up.
+ * Unavailable details: keep the row visible with an explicit unpin action.
  */
 function PinRow({
   pin,
@@ -309,24 +324,12 @@ function PinRow({
     enabled: isView,
   });
 
-  const triggeredRef = useRef(false);
-  useEffect(() => {
-    // Views are exempt from 404-auto-unpin: an installed desktop client
-    // talking to an older backend without the view endpoints sees 404 for
-    // every view pin — auto-unpinning would permanently delete them all.
-    // A deleted view's row simply hides instead.
-    if (isView) return;
-    const err = isIssue ? issueQuery.error : projectQuery.error;
-    if (err instanceof ApiError && err.status === 404 && !triggeredRef.current) {
-      triggeredRef.current = true;
-      onUnpin();
-    }
-  }, [isIssue, isView, issueQuery.error, onUnpin, projectQuery.error]);
+  // A detail failure is not authoritative evidence that the pin was deleted.
 
   const activeViewByContainer = useActiveIssueViewStore((s) => s.active);
   if (isView) {
     if (viewQuery.isPending) return <PinSkeleton />;
-    if (viewQuery.isError || !viewQuery.data) return null;
+    if (viewQuery.isError || !viewQuery.data) return <UnavailablePin onUnpin={onUnpin} />;
     const view = viewQuery.data;
     // One resolved scope drives the path AND the container key so an
     // unrecognised scope_type from a newer backend degrades coherently.
@@ -370,7 +373,7 @@ function PinRow({
 
   if (isIssue) {
     if (issueQuery.isPending) return <PinSkeleton />;
-    if (issueQuery.isError || !issueQuery.data) return null;
+    if (issueQuery.isError || !issueQuery.data) return <UnavailablePin onUnpin={onUnpin} />;
     const issue = issueQuery.data;
     const label = issue.title;
     const iconNode = (
@@ -396,7 +399,7 @@ function PinRow({
   }
 
   if (projectQuery.isPending) return <PinSkeleton />;
-  if (projectQuery.isError || !projectQuery.data) return null;
+  if (projectQuery.isError || !projectQuery.data) return <UnavailablePin onUnpin={onUnpin} />;
   const project = projectQuery.data;
   const iconNode = <ProjectIcon project={project} size="sm" />;
   return (
@@ -542,7 +545,9 @@ export function AppSidebar({ topSlot, searchSlot, headerClassName, headerStyle }
   useEffect(() => {
     setLocalPinnedWsId(wsId ?? null);
   }, [wsId]);
-  const visiblePinned = localPinnedWsId === (wsId ?? null) ? localPinned : EMPTY_PINS;
+  const visiblePinned = localPinnedWsId === (wsId ?? null)
+    ? localPinned.filter((pin) => pin.workspace_id === wsId)
+    : EMPTY_PINS;
   const pinsExpanded = expandedPinsWorkspaceId === wsId;
   const displayedPinned = pinsExpanded ? visiblePinned : visiblePinned.slice(0, PINNED_PREVIEW_LIMIT);
   // View pins are absent here (their href resolves async): while a view

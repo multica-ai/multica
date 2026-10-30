@@ -257,6 +257,7 @@ import { createRequestId, createSafeId } from "../utils";
 import { getCurrentSlug } from "../platform/workspace-storage";
 import { parseWithFallback } from "./schema";
 import {
+  PinnedItemListSchema,
   RuntimeProfileSchema,
   RuntimeProfileListSchema,
   AgentTaskListSchema,
@@ -4666,11 +4667,22 @@ export class ApiClient {
   }
 
   // Pins
-  async listPins(): Promise<PinnedItem[]> {
+  async listPins(workspaceId?: string): Promise<PinnedItem[]> {
     // include=view is the capability opt-in: the server withholds view pins
     // from clients that don't declare support (old builds treated any
     // non-issue pin as a project pin and auto-deleted it on 404).
-    return this.fetch("/api/pins?include=view");
+    const raw = await this.fetch<unknown>("/api/pins?include=view", {
+      // Slug has server-side precedence, so clear the global slug when binding
+      // this request to the UUID used by the query cache (including retries).
+      headers: workspaceId
+        ? { "X-Workspace-Slug": "", "X-Workspace-ID": workspaceId }
+        : undefined,
+    });
+    const pins = parseWithFallback<PinnedItem[] | null>(raw, PinnedItemListSchema, null, {
+      endpoint: "GET /api/pins",
+    });
+    if (pins === null) throw new Error("Invalid pin list response");
+    return pins;
   }
 
   async createPin(data: CreatePinRequest): Promise<PinnedItem> {
