@@ -527,7 +527,7 @@ func (o *Outbound) routeFrameAwaiting(ctx context.Context, f relayFrame, eventID
 }
 
 // relaySeal asks whichever replica holds this round to close it. Routed by
-// round ownership, so it needs no address — see deliverRelayed.
+// round ownership, so it needs no address — see relayKindSeal.
 func (o *Outbound) relaySeal(e events.Event, taskID pgtype.UUID, reason string, carriesFiles bool) {
 	id := util.UUIDToString(taskID)
 	if id == "" {
