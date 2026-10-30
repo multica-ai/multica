@@ -395,6 +395,30 @@ describe("useRealtimeSync — queued chat promotion", () => {
   });
 });
 
+describe("useRealtimeSync — comment folded into a queued run", () => {
+  afterEach(() => {
+    cleanup();
+    vi.useRealTimers();
+  });
+
+  it("refreshes the issue's runs so the queued block moves under the folded comment", async () => {
+    vi.useFakeTimers();
+    const qc = new QueryClient({ defaultOptions: { queries: { retry: false, staleTime: Infinity } } });
+    const ws = createMockWs();
+    renderHook(() => useRealtimeSync(ws, createStores()), { wrapper: createWrapper(qc) });
+    const onAny = vi.mocked(ws.onAny).mock.calls[0]![0];
+    qc.setQueryData(issueKeys.tasks("issue-1"), []);
+
+    onAny({
+      type: "task:coalesced",
+      payload: { task_id: "task-1", agent_id: "agent-1", issue_id: "issue-1", status: "queued" },
+    } as never);
+    await vi.advanceTimersByTimeAsync(1_000);
+
+    expect(qc.getQueryState(issueKeys.tasks("issue-1"))?.isInvalidated).toBe(true);
+  });
+});
+
 describe("useRealtimeSync — Table server membership invalidation", () => {
   let qc: QueryClient;
   let stores: RealtimeSyncStores;

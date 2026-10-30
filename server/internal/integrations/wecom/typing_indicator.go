@@ -724,7 +724,7 @@ func (m *TypingIndicatorManager) WithRelay(r noticeRouter) *TypingIndicatorManag
 
 // relaySeal asks whichever replica holds this round to close it, and says
 // nothing about where that replica is. No address lookup: a seal frame is
-// routed by round ownership — see deliverRelayed — which is what lets the
+// routed by round ownership — see relayKindSeal — which is what lets the
 // cancellation path keep its refusal to chase an address.
 func (m *TypingIndicatorManager) relaySeal(sessionID pgtype.UUID, taskID, reason string) bool {
 	if m.relay == nil || taskID == "" {
