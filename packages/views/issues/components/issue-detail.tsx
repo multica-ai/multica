@@ -1248,7 +1248,8 @@ export function IssueDetailSkeleton({
   leading,
   trailing,
   sidebar = true,
-}: { leading?: ReactNode; trailing?: ReactNode; sidebar?: boolean } = {}) {
+  variant = "page",
+}: { leading?: ReactNode; trailing?: ReactNode; sidebar?: boolean; variant?: "page" | "peek" } = {}) {
   const contentWidth = useContentWidth();
   return (
     <div className="flex flex-1 min-h-0 flex-col">
@@ -1273,8 +1274,13 @@ export function IssueDetailSkeleton({
               skeleton doesn't reflow sideways when real content mounts. */}
           <div
             className={cn(
-              "mx-auto w-full px-3 py-6 space-y-6 md:px-8 md:py-8",
-              contentWidth === "standard" && "max-w-4xl",
+              "mx-auto w-full space-y-6",
+              variant === "peek"
+                ? "px-6 py-5"
+                : cn(
+                    "px-3 py-6 md:px-8 md:py-8",
+                    contentWidth === "standard" && "max-w-4xl",
+                  ),
             )}
           >
             <Skeleton className="h-8 w-3/4" />
@@ -2734,7 +2740,7 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
   if (loading) {
     // The host's trailing controls hold the peek's only close button, so the
     // waiting and missing states carry them too.
-    return <IssueDetailSkeleton leading={leadingAction} trailing={trailingActions} sidebar={!isPeek} />;
+    return <IssueDetailSkeleton leading={leadingAction} trailing={trailingActions} sidebar={!isPeek} variant={variant} />;
   }
 
   if (!issue) {
