@@ -1529,11 +1529,17 @@ func (o *Outbound) deliverRelayed(ctx context.Context, f relayFrame) relayResult
 				if !hasVisibleChar(text) {
 					text = wordlessSealCopy(t.Handle.Locale, f.CarriesFiles)
 				}
-				sealErr := o.finishStream(ctx, t.Handle, text)
+				// The same split the local path makes (outbound.go): a closing
+				// frame is clipped to 20480 bytes, so the rest follows as
+				// messages under the bubble.
+				head, rest := splitForBubble(text)
+				sealErr := o.finishStream(ctx, t.Handle, head)
 				switch classifySeal(sealErr) {
 				case sealOnScreen:
+					o.sendRest(ctx, t.Handle, rest)
 					record, spoke = o.delivered, true
 				case sealUnknown:
+					o.sendRest(ctx, t.Handle, rest)
 					se := sealErr
 					record = func() {
 						o.unconfirmedFor(ctx, f.SessionID, f.Kind, unconfirmedSealReason(se), se)

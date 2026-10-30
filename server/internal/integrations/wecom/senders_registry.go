@@ -202,3 +202,14 @@ func (r *sendersRegistry) sendTextCtx(ctx context.Context, id pgtype.UUID, chatI
 	}
 	return sender.sendTextCtx(ctx, chatID, chatType, content)
 }
+
+// sendPiecesCtx is sendTextCtx for an answer that is already split: every piece
+// goes out under one hold of the chat's lock, so nothing another caller pushes
+// to the same chat can land between them.
+func (r *sendersRegistry) sendPiecesCtx(ctx context.Context, id pgtype.UUID, chatID string, chatType int, pieces []string) error {
+	sender := r.get(id)
+	if sender == nil {
+		return errNoLiveConnection
+	}
+	return sender.sendPiecesCtx(ctx, chatID, chatType, pieces)
+}
