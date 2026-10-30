@@ -270,6 +270,20 @@ func TestRepoCheckoutSummary(t *testing.T) {
 			result: repoCheckoutResult{Path: "/work/repo", Kept: "local_work", UnpushedCommits: 3},
 			want:   []string{"(branch: detached HEAD; 0 uncommitted files, 3 unpushed commits)"},
 		},
+		{
+			name:   "fetch failed",
+			result: repoCheckoutResult{Path: "/work/repo", BranchName: "agent/test/task", FetchError: "git fetch: fatal: unable to access remote"},
+			want: []string{
+				"Checked out " + repoURL + " → /work/repo (branch: agent/test/task)",
+				"\nWarning: fetching the remote failed, so this checkout comes from the cached copy and may be behind the remote.",
+				"Fetch error: git fetch: fatal: unable to access remote",
+			},
+		},
+		{
+			name:   "kept after a failed fetch",
+			result: repoCheckoutResult{Path: "/work/repo", BranchName: "agent/test/task", Kept: "task_branch", FetchError: "git fetch: boom"},
+			want:   []string{"only remote refs were fetched", "Warning: fetching the remote failed", "Fetch error: git fetch: boom"},
+		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			got := repoCheckoutSummary(repoURL, tc.result)
@@ -280,6 +294,9 @@ func TestRepoCheckoutSummary(t *testing.T) {
 			}
 			if kept := strings.HasPrefix(got, "Kept "); kept != (tc.result.Kept != "") {
 				t.Fatalf("summary reads kept=%v for Kept=%q:\n%s", kept, tc.result.Kept, got)
+			}
+			if warned := strings.Contains(got, "Warning:"); warned != (tc.result.FetchError != "") {
+				t.Fatalf("summary warns=%v for FetchError=%q:\n%s", warned, tc.result.FetchError, got)
 			}
 		})
 	}
