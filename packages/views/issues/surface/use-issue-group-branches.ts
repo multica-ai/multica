@@ -51,6 +51,7 @@ export interface IssueGroupBranches {
   isLoadingMoreGroups: boolean;
   loadMoreGroups: () => void;
   retryGroups: () => void;
+  isGroupError: boolean;
 }
 
 interface CursorState {
@@ -500,6 +501,7 @@ export function useIssueGroupBranches({
       enabled &&
       (groupsQuery.isError ||
         branchKeys.some((key) => branchData.get(key)?.isError)),
+    isGroupError: enabled && groupsQuery.isError,
     hasMoreGroups: enabled && !!hasNextGroupPage,
     isLoadingMoreGroups: enabled && isFetchingNextGroupPage,
     loadMoreGroups,

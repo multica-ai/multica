@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen, fireEvent, act, waitFor } from "@testing-library/react";
+import { render, screen, fireEvent, act, waitFor, within } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { SwimLaneView } from "./swimlane-view";
 import { IssueContextMenuProvider } from "../actions";
@@ -116,6 +116,11 @@ const mockViewState: {
   sortDirection: "asc";
   cardProperties: Record<string, boolean>;
   swimlaneGrouping: SwimlaneGroupingMock;
+  swimlaneProjectAxis: "status-columns" | "project-columns";
+  swimlaneProjectColumnOrder: string[];
+  collapsedSwimlaneStatusRows: string[];
+  setSwimlaneProjectColumnOrder: (order: string[]) => void;
+  toggleSwimlaneStatusRow: (status: string) => void;
   swimlaneOrders: Record<SwimlaneGroupingMock, string[]>;
   collapsedSwimlanes: Record<SwimlaneGroupingMock, string[]>;
   setSwimlaneGrouping: (g: SwimlaneGroupingMock) => void;
@@ -139,6 +144,11 @@ const mockViewState: {
   sortDirection: "asc",
   cardProperties: { priority: true, description: true, assignee: true, dueDate: true, project: true, childProgress: true, labels: true },
   swimlaneGrouping: "parent",
+  swimlaneProjectAxis: "status-columns",
+  swimlaneProjectColumnOrder: [],
+  collapsedSwimlaneStatusRows: [],
+  setSwimlaneProjectColumnOrder: vi.fn(),
+  toggleSwimlaneStatusRow: vi.fn(),
   swimlaneOrders: { parent: [], project: [], assignee: [] },
   collapsedSwimlanes: { parent: [], project: [], assignee: [] },
   setSwimlaneGrouping: vi.fn(),
@@ -179,11 +189,15 @@ vi.mock("@multica/core/modals", () => ({
 // Mock dnd-kit
 let lastOnDragEnd: any = null;
 let lastOnDragOver: any = null;
+let lastOnDragStart: any = null;
+let lastOnDragCancel: any = null;
 
 vi.mock("@dnd-kit/core", () => ({
-  DndContext: ({ children, onDragEnd, onDragOver }: any) => {
+  DndContext: ({ children, onDragEnd, onDragOver, onDragStart, onDragCancel }: any) => {
     lastOnDragEnd = onDragEnd;
     lastOnDragOver = onDragOver;
+    lastOnDragStart = onDragStart;
+    lastOnDragCancel = onDragCancel;
     return children;
   },
   DragOverlay: () => null,
@@ -198,6 +212,7 @@ vi.mock("@dnd-kit/core", () => ({
 vi.mock("@dnd-kit/sortable", () => ({
   SortableContext: ({ children }: any) => children,
   verticalListSortingStrategy: {},
+  horizontalListSortingStrategy: {},
   // Real arrayMove implementation — the production code uses this both for
   // card reordering and lane reordering, so returning undefined would break
   // every reorder assertion.
@@ -345,6 +360,7 @@ function makeServerBranches(
     isLoading: false,
     isRefreshing: false,
     isError: false,
+    isGroupError: false,
     hasMoreGroups: false,
     isLoadingMoreGroups: false,
     loadMoreGroups: vi.fn(),
@@ -371,6 +387,9 @@ describe("SwimLaneView", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockViewState.swimlaneGrouping = "parent";
+    mockViewState.swimlaneProjectAxis = "status-columns";
+    mockViewState.swimlaneProjectColumnOrder = [];
+    mockViewState.collapsedSwimlaneStatusRows = [];
     mockViewState.swimlaneOrders = { parent: [], project: [], assignee: [] };
     mockViewState.collapsedSwimlanes = { parent: [], project: [], assignee: [] };
     mockViewState.priorityFilters = [];
@@ -1262,6 +1281,133 @@ describe("SwimLaneView", () => {
     );
   });
 
+  describe("project columns", () => {
+    beforeEach(() => {
+      mockViewState.swimlaneGrouping = "project";
+      mockViewState.swimlaneProjectAxis = "project-columns";
+    });
+
+    it.each([
+      ["horizontal", "proj-2", "todo"],
+      ["vertical", "proj-1", "in_progress"],
+      ["diagonal", "proj-2", "in_progress"],
+      ["clear project", "none", "todo"],
+    ])("%s drag keeps semantic cell updates and does not clear parent or assignee", (_name, project, status) => {
+      const move = vi.fn();
+      const { container } = renderWithI18n(<SwimLaneView issues={projectIssues} visibleStatuses={["todo", "in_progress"]} onMoveIssue={move} />);
+      const target = `swim:project:${project}:${status}`;
+      act(() => lastOnDragStart({ active: { id: "issue-a" } }));
+      act(() => lastOnDragOver({ active: { id: "issue-a" }, over: { id: target } }));
+      expect(container.querySelector(`[data-swimlane-cell="${target}"]`)).toHaveTextContent("Issue A");
+      expect(screen.getAllByText("Issue A")).toHaveLength(1);
+      act(() => lastOnDragEnd({ active: { id: "issue-a" }, over: { id: target } }));
+      expect(move).toHaveBeenCalledTimes(1);
+      const updates = move.mock.calls[0]![1];
+      expect(updates.project_id).toBe(project === "none" ? null : project);
+      expect(updates.status).toBe(status === "todo" ? undefined : status);
+      expect(updates).not.toHaveProperty("assignee_id");
+      expect(updates).not.toHaveProperty("assignee_type");
+      expect(updates).not.toHaveProperty("parent_issue_id");
+      expect(updates).toHaveProperty("before_id");
+      expect(updates).toHaveProperty("after_id");
+    });
+
+    it("restores one source card on cancel and on failed mutation settle", async () => {
+      const move = vi.fn();
+      const { container } = renderWithI18n(<SwimLaneView issues={projectIssues} onMoveIssue={move} />);
+      const source = () => container.querySelector('[data-swimlane-cell="swim:project:proj-1:todo"]');
+      const target = "swim:project:proj-2:in_progress";
+      const drag = () => {
+        act(() => lastOnDragStart({ active: { id: "issue-a" } }));
+        act(() => lastOnDragOver({ active: { id: "issue-a" }, over: { id: target } }));
+      };
+      drag();
+      act(() => lastOnDragCancel());
+      expect(source()).toHaveTextContent("Issue A");
+      expect(move).not.toHaveBeenCalled();
+      await act(async () => new Promise<void>((resolve) => requestAnimationFrame(() => resolve())));
+      drag();
+      act(() => lastOnDragEnd({ active: { id: "issue-a" }, over: { id: target } }));
+      // The mutation owner rolled back its query snapshot; its settled
+      // callback must release the local projection back to that source.
+      act(() => move.mock.calls[0]![2]());
+      await waitFor(() => expect(source()).toHaveTextContent("Issue A"));
+      expect(screen.getAllByText("Issue A")).toHaveLength(1);
+    });
+
+    it("does not mutate for a same-cell drop", () => {
+      const move = vi.fn();
+      renderWithI18n(<SwimLaneView issues={projectIssues} onMoveIssue={move} />);
+      act(() => lastOnDragStart({ active: { id: "issue-a" } }));
+      act(() => lastOnDragEnd({ active: { id: "issue-a" }, over: { id: "swim:project:proj-1:todo" } }));
+      expect(move).not.toHaveBeenCalled();
+    });
+
+    it("ignores project row collapse and retains status-row collapse independently", () => {
+      mockViewState.collapsedSwimlanes.project = ["proj-1"];
+      mockViewState.collapsedSwimlaneStatusRows = ["in_progress"];
+      renderWithI18n(<SwimLaneView issues={projectIssues} onMoveIssue={vi.fn()} />);
+      expect(screen.getByText("Issue A")).toBeInTheDocument();
+      expect(screen.queryByText("Issue B")).not.toBeInTheDocument();
+      fireEvent.click(screen.getByRole("button", { name: /In Progress\s*1/ }));
+      expect(mockViewState.toggleSwimlaneStatusRow).toHaveBeenCalledWith("in_progress");
+      expect(mockViewState.toggleSwimlaneCollapsed).not.toHaveBeenCalled();
+    });
+
+    it("reorders project columns without changing project row order or hidden entries", () => {
+      mockViewState.swimlaneOrders.project = ["proj-1", "proj-2"];
+      mockViewState.swimlaneProjectColumnOrder = ["proj-2", "hidden", "proj-1"];
+      renderWithI18n(<SwimLaneView issues={projectIssues} onMoveIssue={vi.fn()} />);
+      act(() => lastOnDragEnd({ active: { id: "lane:project:proj-1" }, over: { id: "lane:project:proj-2" } }));
+      expect(mockViewState.setSwimlaneProjectColumnOrder).toHaveBeenCalledWith(["proj-1", "hidden", "proj-2"]);
+      expect(mockSetSwimlaneOrder).not.toHaveBeenCalled();
+    });
+
+    it("keeps empty No project cells, opaque cursor retry, counts, and create defaults", () => {
+      const data = [projectIssues[0]!];
+      const branches = makeServerBranches([{
+        key: "project-key", value: { kind: "project", project_id: "proj-1" }, count: 80,
+        secondary_groups: [{ key: "opaque-todo-key", value: { kind: "status", status: "todo" }, count: 80 }],
+      }], data);
+      branches.pagination["opaque-todo-key"]!.isError = true;
+      branches.isError = true;
+      const create = vi.fn();
+      const { container } = renderWithI18n(<SwimLaneView issues={data} visibleStatuses={["todo"]} onMoveIssue={vi.fn()} groupBranches={branches} onCreateIssue={create} />);
+      expect(screen.getByText("No project")).toBeInTheDocument();
+      expect(container.querySelector('[data-swimlane-cell="swim:project:none:todo"]')).toBeInTheDocument();
+      expect(screen.getAllByText("Loading more failed — Retry")).toHaveLength(1);
+      fireEvent.click(screen.getByText("Loading more failed — Retry"));
+      expect(branches.pagination["opaque-todo-key"]!.retry).toHaveBeenCalledOnce();
+      expect(screen.getAllByText("80").length).toBeGreaterThanOrEqual(2);
+      const noProject = container.querySelector('[data-swimlane-cell="swim:project:none:todo"]')!.parentElement!;
+      fireEvent.click(within(noProject).getByRole("button", { name: "Add issue" }));
+      expect(create).toHaveBeenCalledWith({ status: "todo", project_id: null });
+    });
+
+    it("offers group-page retry separately from a cell-page retry", () => {
+      const branches = makeServerBranches([], []);
+      branches.isGroupError = true;
+      branches.isError = true;
+      renderWithI18n(<SwimLaneView issues={[]} visibleStatuses={["todo"]} onMoveIssue={vi.fn()} groupBranches={branches} />);
+      fireEvent.click(screen.getByRole("button", { name: "Loading more failed — Retry" }));
+      expect(branches.retryGroups).toHaveBeenCalledOnce();
+    });
+
+    it("windows project cells horizontally and remounts their existing paged cards", () => {
+      const many = Array.from({ length: 100 }, (_, index) => ({ ...projectIssues[0]!, id: `many-${index}`, title: `Card ${index}`, project_id: `p-${index}` }));
+      const { container } = renderWithI18n(<SwimLaneView issues={many} visibleStatuses={["todo"]} onMoveIssue={vi.fn()} />);
+      expect(container.querySelectorAll("[data-swimlane-cell]").length).toBeLessThan(8);
+      expect(screen.queryByText("Card 99")).not.toBeInTheDocument();
+      const scroller = container.querySelector('[data-board-scroller]')!;
+      fireEvent.scroll(scroller, { target: { scrollLeft: 99 * 296 } });
+      expect(screen.getByText("Card 99")).toBeInTheDocument();
+      expect(screen.queryByText("Card 0")).not.toBeInTheDocument();
+      fireEvent.scroll(scroller, { target: { scrollLeft: 0 } });
+      expect(screen.getByText("Card 0")).toBeInTheDocument();
+      expect(screen.getAllByText("Card 0")).toHaveLength(1);
+    });
+  });
+
   // ------------------------------------------------------------------
   // Assignee grouping
   // ------------------------------------------------------------------
@@ -1565,6 +1711,9 @@ describe("SwimLaneView", () => {
 
   it("filters batch-fetched children using active filters", async () => {
     mockViewState.swimlaneGrouping = "parent";
+    mockViewState.swimlaneProjectAxis = "status-columns";
+    mockViewState.swimlaneProjectColumnOrder = [];
+    mockViewState.collapsedSwimlaneStatusRows = [];
 
     const grandparent: Issue = {
       id: "gp-2",
@@ -1659,6 +1808,9 @@ describe("SwimLaneView", () => {
 
   it("filters batch-fetched children using API-derived running issue ids", async () => {
     mockViewState.swimlaneGrouping = "parent";
+    mockViewState.swimlaneProjectAxis = "status-columns";
+    mockViewState.swimlaneProjectColumnOrder = [];
+    mockViewState.collapsedSwimlaneStatusRows = [];
 
     const grandparent: Issue = {
       id: "gp-3",
@@ -1757,6 +1909,9 @@ describe("SwimLaneView", () => {
 
   it("hides batch-fetched children when the running issue set is empty", async () => {
     mockViewState.swimlaneGrouping = "parent";
+    mockViewState.swimlaneProjectAxis = "status-columns";
+    mockViewState.swimlaneProjectColumnOrder = [];
+    mockViewState.collapsedSwimlaneStatusRows = [];
     const parent = mockIssues[0]!;
     const batchOnlyChild: Issue = {
       ...mockIssues[1]!,
@@ -1799,6 +1954,9 @@ describe("SwimLaneView", () => {
 
   it("hides batch-fetched children when 'Show sub-issues' is off", async () => {
     mockViewState.swimlaneGrouping = "parent";
+    mockViewState.swimlaneProjectAxis = "status-columns";
+    mockViewState.swimlaneProjectColumnOrder = [];
+    mockViewState.collapsedSwimlaneStatusRows = [];
 
     const grandparent: Issue = {
       id: "gp-4",

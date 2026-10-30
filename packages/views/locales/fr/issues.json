@@ -201,6 +201,9 @@
     "chip_save_as": "Enregistrer sous"
   },
   "display": {
+    "swimlane_axes": "Axes",
+    "status_columns_project_rows": "Colonnes de statuts / Lignes de projets",
+    "project_columns_status_rows": "Colonnes de projets / Lignes de statuts",
     "tooltip": "Paramètres d'affichage",
     "button": "Affichage",
     "grouping_section": "Regroupement",
