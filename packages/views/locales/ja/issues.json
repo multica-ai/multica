@@ -197,6 +197,9 @@
     "chip_save_as": "別名で保存"
   },
   "display": {
+    "swimlane_axes": "軸",
+    "status_columns_project_rows": "ステータス列 / プロジェクト行",
+    "project_columns_status_rows": "プロジェクト列 / ステータス行",
     "tooltip": "表示設定",
     "button": "表示",
     "grouping_section": "グループ化",

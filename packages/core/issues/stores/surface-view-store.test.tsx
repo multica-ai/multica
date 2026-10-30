@@ -9,6 +9,7 @@ import {
   getIssueSurfaceViewStateRegistrySnapshot,
   getIssueSurfaceViewStore,
   pruneIssueSurfaceViewStates,
+  seedIssueSurfaceViewState,
 } from "./surface-view-store";
 
 const flush = async () => {
@@ -126,6 +127,67 @@ describe("issue surface view store registry", () => {
       getIssueSurfaceViewStore("workspace:compact-card").getState().cardProperties
         .project,
     ).toBe(true);
+  });
+
+  it("round trips project axes through saved views and workspace/project surfaces", async () => {
+    setCurrentWorkspace("axis-a", "ws_axis_a");
+    await flush();
+    const source = getIssueSurfaceViewStore("project:axis");
+    source.getState().setSwimlaneGrouping("project");
+    source.getState().setSwimlaneProjectAxis("project-columns");
+    source.getState().setSwimlaneOrder(["project-row"]);
+    source.getState().toggleSwimlaneCollapsed("project-row");
+    source.getState().setSwimlaneProjectColumnOrder(["project-column"]);
+    source.getState().toggleSwimlaneStatusRow("qa");
+    source.getState().hideStatus("done");
+    source.getState().setSwimlaneGrouping("parent");
+    source.getState().setSwimlaneOrder(["parent-row"]);
+    source.getState().setSwimlaneGrouping("project");
+    expect(source.getState().swimlaneProjectAxis).toBe("project-columns");
+    const snapshot = getIssueSurfaceViewStateRegistrySnapshot()["project:axis"]!.state;
+    seedIssueSurfaceViewState("view:axis", snapshot);
+    const saved = getIssueSurfaceViewStore("view:axis");
+    expect(saved.getState().swimlaneProjectColumnOrder).toEqual(["project-column"]);
+    expect(saved.getState().swimlaneOrders).toEqual({ project: ["project-row"], parent: ["parent-row"], assignee: [] });
+    expect(saved.getState().collapsedSwimlanes.project).toEqual(["project-row"]);
+    expect(saved.getState().collapsedSwimlaneStatusRows).toEqual(["qa"]);
+    expect(saved.getState().hiddenStatuses).toContain("done");
+    expect(getIssueSurfaceViewStore("workspace:axis").getState().swimlaneProjectAxis).toBe("status-columns");
+    expect(getIssueSurfaceViewStore("project:other-axis").getState().swimlaneProjectAxis).toBe("status-columns");
+    setCurrentWorkspace("axis-b", "ws_axis_b");
+    await flush();
+    expect(source.getState().swimlaneProjectAxis).toBe("status-columns");
+    expect(saved.getState().collapsedSwimlaneStatusRows).toEqual([]);
+    setCurrentWorkspace("axis-a", "ws_axis_a");
+    await flush();
+    expect(source.getState().swimlaneProjectAxis).toBe("project-columns");
+    expect(saved.getState().collapsedSwimlaneStatusRows).toEqual(["qa"]);
+    // An existing local adjustment beats the saved definition on reopening.
+    saved.getState().setSwimlaneProjectAxis("status-columns");
+    seedIssueSurfaceViewState("view:axis", snapshot);
+    expect(saved.getState().swimlaneProjectAxis).toBe("status-columns");
+  });
+
+  it("defaults legacy and unknown saved axes without losing layout or status preferences", async () => {
+    setCurrentWorkspace("axis-legacy", "ws_axis_legacy");
+    await flush();
+    for (const [id, axis] of [["legacy", undefined], ["unknown", "future"]]) {
+      seedIssueSurfaceViewState(`view:axis-${id}`, {
+        swimlaneProjectAxis: axis,
+        swimlaneOrders: { project: ["p1"] },
+        collapsedSwimlanes: { project: ["p1"] },
+        hiddenStatuses: ["qa"],
+        swimlaneProjectColumnOrder: ["p2", null, "p2"],
+        collapsedSwimlaneStatusRows: "bad-value",
+      });
+      const state = getIssueSurfaceViewStore(`view:axis-${id}`).getState();
+      expect(state.swimlaneProjectAxis).toBe("status-columns");
+      expect(state.swimlaneOrders.project).toEqual(["p1"]);
+      expect(state.collapsedSwimlanes.project).toEqual(["p1"]);
+      expect(state.hiddenStatuses).toEqual(["qa"]);
+      expect(state.swimlaneProjectColumnOrder).toEqual(["p2"]);
+      expect(state.collapsedSwimlaneStatusRows).toEqual([]);
+    }
   });
 
   it("isolates view state by surface key inside one workspace registry", async () => {

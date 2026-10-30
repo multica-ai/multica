@@ -197,6 +197,9 @@
     "chip_save_as": "다른 이름으로 저장"
   },
   "display": {
+    "swimlane_axes": "축",
+    "status_columns_project_rows": "상태 열 / 프로젝트 행",
+    "project_columns_status_rows": "프로젝트 열 / 상태 행",
     "tooltip": "보기 설정",
     "button": "보기",
     "grouping_section": "그룹화",

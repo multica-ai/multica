@@ -197,6 +197,9 @@
     "chip_save_as": "另存"
   },
   "display": {
+    "swimlane_axes": "泳道方向",
+    "status_columns_project_rows": "狀態欄 / 專案列",
+    "project_columns_status_rows": "專案欄 / 狀態列",
     "tooltip": "顯示設定",
     "button": "顯示",
     "grouping_section": "分組",

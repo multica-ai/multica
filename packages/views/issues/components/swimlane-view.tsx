@@ -21,7 +21,7 @@ import {
   type DragEndEvent,
   type DragOverEvent,
 } from "@dnd-kit/core";
-import { SortableContext, useSortable, verticalListSortingStrategy, arrayMove } from "@dnd-kit/sortable";
+import { SortableContext, useSortable, verticalListSortingStrategy, horizontalListSortingStrategy, arrayMove } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
 import { Virtuoso } from "react-virtuoso";
 import { ChevronRight, EyeOff, GripVertical, MoreHorizontal, Pencil, Plus } from "@multica/ui/icons";
@@ -52,6 +52,7 @@ import {
   DropdownMenuItem,
 } from "@multica/ui/components/ui/dropdown-menu";
 import { sortIssues } from "../utils/sort";
+import { useStatusLabel } from "../utils/status-label";
 import { BUILT_IN_STATUS_ORDER, STATUS_CONFIG } from "@multica/core/issues/config";
 import { DraggableBoardCard, BoardCardContent } from "./board-card";
 import { StatusIcon } from "./status-icon";
@@ -491,6 +492,7 @@ function buildServerLanes(
   const visibleStatusSet = new Set(visibleStatuses);
   const lanes = descriptors.flatMap((descriptor): LaneGroup[] => {
     if (
+      !(grouping === "project" && descriptor.value.kind === "project" && descriptor.value.project_id === null) &&
       (descriptor.secondary_groups ?? []).every(
         (secondary) =>
           secondary.value.kind !== "status" ||
@@ -590,6 +592,11 @@ function buildServerLanes(
     }
     return [];
   });
+  // The groups endpoint can omit an empty null bucket (or return it on a
+  // later page). Keep a clear-project drop target without fetching extra rows.
+  if (grouping === "project" && !lanes.some((lane) => lane.rawId === NONE_LANE_ID)) {
+    lanes.unshift({ ...buildProjectLanes([], [], [], labels)[0]!, total: 0 });
+  }
   const orderIndex = new Map<string, number>();
   storedOrder.forEach((rawId, index) => orderIndex.set(rawId, index));
   const originalIndex = new Map(
@@ -651,7 +658,11 @@ function SwimLaneViewImpl({
   const sortDirection = useViewStore((s) => s.sortDirection);
   const swimlaneGrouping = useViewStore((s) => s.swimlaneGrouping);
   const swimlaneOrders = useViewStore((s) => s.swimlaneOrders);
-  const swimlaneOrder = swimlaneOrders[swimlaneGrouping];
+  const swimlaneProjectAxis = useViewStore((s) => s.swimlaneProjectAxis);
+  const projectColumnOrder = useViewStore((s) => s.swimlaneProjectColumnOrder);
+  const collapsedStatusRows = useViewStore((s) => s.collapsedSwimlaneStatusRows);
+  const transposed = swimlaneGrouping === "project" && swimlaneProjectAxis === "project-columns";
+  const swimlaneOrder = transposed ? projectColumnOrder : swimlaneOrders[swimlaneGrouping];
 
   const wsId = useWorkspaceId();
   const statusCatalog = useIssueStatuses(wsId);
@@ -1037,13 +1048,17 @@ function SwimLaneViewImpl({
   const peek = useIssuePeekActions();
   useEffect(() => {
     peek?.publishColumns(
-      sortedStatuses.map((status) =>
-        laneGroups.flatMap((lane) =>
-          collapsedLanes.has(lane.key) ? [] : (localCells[lane.key]?.[status] ?? []),
-        ),
-      ),
+      transposed
+        ? laneGroups.map((lane) => sortedStatuses.flatMap((status) =>
+            collapsedStatusRows.includes(status) ? [] : (localCells[lane.key]?.[status] ?? []),
+          ))
+        : sortedStatuses.map((status) =>
+            laneGroups.flatMap((lane) =>
+              collapsedLanes.has(lane.key) ? [] : (localCells[lane.key]?.[status] ?? []),
+            ),
+          ),
     );
-  }, [peek, sortedStatuses, laneGroups, collapsedLanes, localCells]);
+  }, [peek, sortedStatuses, laneGroups, collapsedLanes, localCells, transposed, collapsedStatusRows]);
   useEffect(() => () => peek?.publishColumns(null), [peek]);
 
   const collisionDetection = useMemo(
@@ -1201,7 +1216,9 @@ function SwimLaneViewImpl({
         // Any remaining `visibleNext` ids (visible lanes that weren't
         // in stored at all) get appended at the end.
         const stored =
-          viewStoreApi.getState().swimlaneOrders[swimlaneGrouping] ?? [];
+          transposed
+            ? viewStoreApi.getState().swimlaneProjectColumnOrder
+            : viewStoreApi.getState().swimlaneOrders[swimlaneGrouping] ?? [];
         const visibleSet = new Set(visibleOrder);
         let cursor = 0;
         const merged = stored.map((id) =>
@@ -1209,7 +1226,8 @@ function SwimLaneViewImpl({
         );
         for (const id of visibleNext.slice(cursor)) merged.push(id);
 
-        viewStoreApi.getState().setSwimlaneOrder(merged);
+        if (transposed) viewStoreApi.getState().setSwimlaneProjectColumnOrder(merged);
+        else viewStoreApi.getState().setSwimlaneOrder(merged);
         return;
       }
       if (activeLaneRef || overLaneRef) return;
@@ -1327,7 +1345,7 @@ function SwimLaneViewImpl({
         },
       );
     },
-    [cells, cellSet, laneByKey, laneGroups, onMoveIssue, swimlaneGrouping, viewStoreApi, entryOf],
+    [cells, cellSet, laneByKey, laneGroups, onMoveIssue, swimlaneGrouping, viewStoreApi, entryOf, transposed],
   );
 
   // Grid template: one column per status, fixed width COLUMN_WIDTH, gap COLUMN_GAP.
@@ -1434,8 +1452,26 @@ function SwimLaneViewImpl({
           "group-data-[peek-open]/peek:after:w-(--issue-peek-width) group-data-[peek-open]/peek:after:shrink-0 group-data-[peek-open]/peek:after:content-['']",
         )}
       >
+        {transposed ? (
+          <ProjectColumns
+            lanes={orderedLanes}
+            statuses={sortedStatuses}
+            scrollEl={scrollEl}
+            localCells={localCells}
+            issueMap={issueMapRef.current}
+            childProgressMap={childProgressMap}
+            projectMap={projectMap}
+            projectId={projectId}
+            onCreateIssue={onCreateIssue}
+            statusCatalog={statusCatalog}
+            statusTotals={statusTotals}
+            collapsedStatuses={collapsedStatusRows}
+            onToggleStatus={(status) => viewStoreApi.getState().toggleSwimlaneStatusRow(status)}
+            groupBranches={groupBranches}
+          />
+        ) : (
         <div className="flex shrink-0 flex-col" style={{ width: `${trackWidth}px` }}>
-        {groupBranches?.isError && laneGroups.length === 0 && (
+        {groupBranches?.isError && groupBranches.descriptors.length === 0 && (
           <button
             type="button"
             className="py-8 text-body text-destructive hover:underline"
@@ -1550,6 +1586,7 @@ function SwimLaneViewImpl({
           )}
         </SortableContext>
         </div>
+        )}
       </div>
 
       <DragOverlay dropAnimation={null}>
@@ -1568,6 +1605,149 @@ function SwimLaneViewImpl({
         ) : null}
       </DragOverlay>
     </DndContext>
+  );
+}
+
+const STATUS_ROW_LABEL_WIDTH = 180;
+const PROJECT_COLUMN_STRIDE = COLUMN_WIDTH + COLUMN_GAP;
+
+/** Window only the horizontal project dimension. The mounted cells still own
+ * their original server cursor branches; scrolling never prefetches a page. */
+function ProjectColumns({
+  lanes, statuses, scrollEl, localCells, issueMap, childProgressMap,
+  projectMap, projectId, onCreateIssue, statusCatalog, statusTotals,
+  collapsedStatuses, onToggleStatus, groupBranches,
+}: {
+  lanes: LaneGroup[];
+  statuses: IssueStatus[];
+  scrollEl: HTMLDivElement | null;
+  localCells: Record<string, Record<string, string[]>>;
+  issueMap: Map<string, Issue>;
+  childProgressMap: Map<string, ChildProgress>;
+  projectMap?: Map<string, Project>;
+  projectId?: string;
+  onCreateIssue?: (defaults: IssueCreateDefaults) => void;
+  statusCatalog: IssueStatusCatalog;
+  statusTotals: Map<IssueStatus, number>;
+  collapsedStatuses: IssueStatus[];
+  onToggleStatus: (status: IssueStatus) => void;
+  groupBranches?: IssueGroupBranches;
+}) {
+  const { t } = useT("issues");
+  const labelOf = useStatusLabel(useWorkspaceId());
+  const [window, setWindow] = useState({ start: 0, end: 5, labelWidth: STATUS_ROW_LABEL_WIDTH });
+  useEffect(() => {
+    if (!scrollEl) return;
+    const measure = () => {
+      const viewportWidth = scrollEl.clientWidth || 1024;
+      const labelWidth = viewportWidth < 640 ? 72 : STATUS_ROW_LABEL_WIDTH;
+      const start = Math.max(0, Math.floor((scrollEl.scrollLeft - labelWidth) / PROJECT_COLUMN_STRIDE) - 1);
+      const end = Math.max(start + 1, Math.ceil((scrollEl.scrollLeft + viewportWidth) / PROJECT_COLUMN_STRIDE) + 1);
+      setWindow((previous) => previous.start === start && previous.end === end && previous.labelWidth === labelWidth ? previous : { start, end, labelWidth });
+    };
+    measure();
+    scrollEl.addEventListener("scroll", measure, { passive: true });
+    const observer = new ResizeObserver(measure);
+    observer.observe(scrollEl);
+    return () => {
+      scrollEl.removeEventListener("scroll", measure);
+      observer.disconnect();
+    };
+  }, [scrollEl]);
+  const start = Math.min(window.start, Math.max(0, lanes.length - 1));
+  const end = Math.min(Math.max(window.end, start + 1), lanes.length);
+  const visibleLanes = lanes.slice(start, end);
+  const leading = start * PROJECT_COLUMN_STRIDE;
+  const trailing = (lanes.length - end) * PROJECT_COLUMN_STRIDE;
+  const hasGroupFooter = groupBranches?.enabled && (groupBranches.hasMoreGroups || groupBranches.isGroupError);
+  const width = window.labelWidth + (lanes.length + (hasGroupFooter ? 1 : 0)) * PROJECT_COLUMN_STRIDE;
+  const columnStyle = { width: COLUMN_WIDTH, marginRight: COLUMN_GAP, flexShrink: 0 };
+  const rowLabelClass = "sticky left-0 z-10 flex shrink-0 items-start bg-background py-2 pr-3";
+  return (
+    <div data-swimlane-axis="project-columns" className="shrink-0" style={{ width }}>
+      <SortableContext items={lanes.filter((lane) => !lane.isPinned).map((lane) => laneIdFor("project", lane.rawId))} strategy={horizontalListSortingStrategy}>
+        <div className="sticky top-0 z-20 mb-2 flex bg-background/95 pb-2 backdrop-blur">
+          <div className={rowLabelClass} style={{ width: window.labelWidth }} />
+          <div style={{ width: leading, flexShrink: 0 }} />
+          {visibleLanes.map((lane) => (
+            <div key={lane.key} style={columnStyle}>
+              <ProjectColumnHeading lane={lane} statuses={statuses} localCells={localCells} pagination={groupBranches?.pagination} />
+            </div>
+          ))}
+          <div style={{ width: trailing, flexShrink: 0 }} />
+          {hasGroupFooter && (
+            <div style={columnStyle}>
+              {groupBranches.isGroupError ? (
+                <Button variant="ghost" size="sm" onClick={groupBranches.retryGroups}>
+                  {t(($) => $.table.load_more_failed_retry)}
+                </Button>
+              ) : (
+                <InfiniteScrollSentinel onVisible={groupBranches.loadMoreGroups} loading={groupBranches.isLoadingMoreGroups} />
+              )}
+            </div>
+          )}
+        </div>
+      </SortableContext>
+      {statuses.map((status) => {
+        const collapsed = collapsedStatuses.includes(status);
+        return (
+          <div key={status} data-swimlane-status-row={status} className="mb-4 flex items-stretch">
+            <div className={rowLabelClass} style={{ width: window.labelWidth }}>
+              <button type="button" aria-label={`${labelOf(status)} ${statusTotals.get(status) ?? 0}`} title={labelOf(status)} aria-expanded={!collapsed} onClick={() => onToggleStatus(status)} className="flex min-w-0 items-center gap-1 rounded-md p-1 text-left hover:bg-accent/70">
+                <ChevronRight className={cn("size-3 shrink-0", !collapsed && "rotate-90")} />
+                {window.labelWidth < STATUS_ROW_LABEL_WIDTH ? (
+                  <>
+                    <StatusIcon status={status} category={statusCatalog.categoryOf(status)} color={statusCatalog.colorOf(status)} icon={statusCatalog.iconOf(status)} className="size-3 shrink-0" />
+                    <span className="text-caption tabular-nums text-muted-foreground">{statusTotals.get(status) ?? 0}</span>
+                  </>
+                ) : <StatusHeading status={status} count={statusTotals.get(status) ?? 0} />}
+              </button>
+            </div>
+            <div style={{ width: leading, flexShrink: 0 }} />
+            {!collapsed && visibleLanes.map((lane) => (
+              <div key={lane.key} style={columnStyle} className="flex flex-col [&>div]:flex-1">
+                <SwimLaneCell
+                  cellId={cellId(lane.key, status)}
+                  issueIds={localCells[lane.key]?.[status] ?? []}
+                  issueMap={issueMap}
+                  childProgressMap={childProgressMap}
+                  projectMap={projectMap}
+                  status={status}
+                  statusCatalog={statusCatalog}
+                  lane={lane}
+                  projectId={projectId}
+                  onCreateIssue={onCreateIssue}
+                  page={lane.serverCellKeys?.[status] ? groupBranches?.pagination[lane.serverCellKeys[status]!] : undefined}
+                />
+              </div>
+            ))}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+function ProjectColumnHeading({ lane, statuses, localCells, pagination }: {
+  lane: LaneGroup;
+  statuses: IssueStatus[];
+  localCells: Record<string, Record<string, string[]>>;
+  pagination?: Record<string, IssueGroupPageState>;
+}) {
+  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
+    id: laneIdFor("project", lane.rawId), disabled: lane.isPinned,
+  });
+  const total = statuses.reduce((sum, status) => {
+    const key = lane.serverCellKeys?.[status];
+    return sum + (key ? pagination?.[key]?.total ?? 0 : localCells[lane.key]?.[status]?.length ?? 0);
+  }, 0);
+  return (
+    <div ref={setNodeRef} {...attributes} {...listeners} style={{ transform: CSS.Transform.toString(transform), transition }} className={cn("flex min-h-10 items-center gap-2 rounded-xl bg-muted/40 px-3 py-2", isDragging && "opacity-50")}>
+      {!lane.isPinned && <GripVertical className="size-3 shrink-0 cursor-grab text-faint-foreground" />}
+      {lane.project && <ProjectIcon project={lane.project} size="sm" />}
+      <span className="min-w-0 flex-1 truncate text-body font-semibold" title={lane.title}>{lane.title}</span>
+      <span className="text-caption tabular-nums text-muted-foreground">{total}</span>
+    </div>
   );
 }
 
@@ -1811,6 +1991,7 @@ function SwimLaneCell({
     <div className={`flex min-h-[120px] flex-col rounded-xl ${cfg?.columnBg ?? "bg-muted/40"} p-2`}>
       <div
         ref={setNodeRef}
+        data-swimlane-cell={cId}
         className={`flex-1 space-y-2 rounded-sm p-1 transition-colors ${
           isOver ? "bg-accent/60" : ""
         }`}
