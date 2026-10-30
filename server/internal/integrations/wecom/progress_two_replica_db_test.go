@@ -106,7 +106,7 @@ func newProgressReplica(t *testing.T, turn *progressTurn, holdsSocket bool, rela
 		Tasks: q, Deliveries: q, Languages: q, Identities: q,
 		Logger: log,
 	})
-	r.typing.guardAfter = -1 // fired by the tests, at the moment they mean to
+	r.typing.guardAfter = -1  // fired by the tests, at the moment they mean to
 	r.typing.trailAfter = nil // no timer to land a frame mid-assertion
 	r.typing.Register(r.bus)
 	r.typing.WithRelay(r.router)

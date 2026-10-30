@@ -908,6 +908,21 @@ func (f *progressFeed) flush(c copyPack, openedAt time.Time) string {
 	return f.renderLocked(c, now.Sub(openedAt))
 }
 
+// continued is the feed for the bubble a rotation hands the round over to:
+// no step lines, a fresh throttle, and the same raw reasoning buffer. The
+// buffer is the context redaction needs — a secret's label and its value can
+// sit either side of the hand-over — so starting it over would let the second
+// half of a split credential through unrecognised. Nil stays nil: a feed is
+// created on the first report that reaches a writable round.
+func (f *progressFeed) continued() *progressFeed {
+	if f == nil {
+		return nil
+	}
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return &progressFeed{now: f.now, thinking: f.thinking}
+}
+
 // pending reports whether the feed holds something no frame has carried yet.
 func (f *progressFeed) pending() bool {
 	f.mu.Lock()

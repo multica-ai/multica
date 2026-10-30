@@ -1064,8 +1064,12 @@ func (s *streamStore) markUnusable(sessionID pgtype.UUID, streamID string) bool 
 //
 // The window restarts: CreatedAt is stamped now, so expiry and the next guard
 // count from the new stream's opening frame, which is what the server counts
-// from. The feed starts over too — the new stream is a new bubble and carries
-// none of the old one's lines.
+// from. The new stream is a new bubble and carries none of the old one's
+// step lines, but it does carry the reasoning buffer (progressFeed.continued):
+// redaction runs over that joined buffer, and a label at the end of the old
+// bubble's reasoning (`password=`) is what lets the value at the start of the
+// new one be recognised. The old bubble is sealed with the hand-over line, so
+// the reasoning it showed is not on screen twice.
 func (s *streamStore) rotate(sessionID pgtype.UUID, seq roundSeq, streamID string) (old, next streamHandle, ok bool) {
 	if streamID == "" {
 		return streamHandle{}, streamHandle{}, false
@@ -1087,7 +1091,7 @@ func (s *streamStore) rotate(sessionID pgtype.UUID, seq roundSeq, streamID strin
 	next.CreatedAt = s.now()
 	e.handle = next
 	e.createdAt = next.CreatedAt
-	e.feed = nil
+	e.feed = e.feed.continued()
 	e.rotations++
 	e.stepsAtOpen = e.steps
 	return old, next, true

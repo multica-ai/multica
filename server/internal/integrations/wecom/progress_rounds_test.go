@@ -1063,3 +1063,52 @@ func (p *progressRig) roundSteps(t *testing.T, taskName string) int {
 	t.Fatalf("no round is bound to %s", taskName)
 	return 0
 }
+
+// A credential split across two reasoning increments is redacted even when the
+// bubble is handed over between them. Redaction runs over the joined reasoning
+// buffer; a rotation that started that buffer over would leave the new bubble
+// with `hunter2 for the connection.` and nothing to say it is a password, and
+// WeCom has no unsend. The hand-over resets the step list, not the context.
+//
+// REVERSE VERIFICATION: make rotate set the feed to nil again and the
+// across_rotation case writes hunter2 into the new bubble.
+func TestASecretSplitAcrossARotationIsCaught(t *testing.T) {
+	t.Parallel()
+	for _, rotate := range []bool{false, true} {
+		name := "same_bubble"
+		if rotate {
+			name = "across_rotation"
+		}
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			rig := newProgressRig(t)
+			rig.running(t, "REQ-A", "task-1")
+			rig.toolCall(t, "task-1", "Read", map[string]any{"file_path": "/srv/app/db.go"})
+			rig.tick()
+			rig.think(t, "task-1", "The database config has password=")
+			if rotate {
+				_, next := rig.rotated(t, "task-1")
+				rig.tick()
+				rig.think(t, "task-1", "hunter2 for the connection. ")
+				frames := rig.conn.streamFrames(t)
+				last := frames[len(frames)-1]
+				if last["id"] != next {
+					t.Fatalf("the reasoning after the hand-over went to stream %v, want the new bubble %s", last["id"], next)
+				}
+				if body, _ := last["content"].(string); strings.Contains(body, "/srv/app/db.go") {
+					t.Errorf("the new bubble repeats the old bubble's step lines: %q", body)
+				}
+			} else {
+				rig.tick()
+				rig.think(t, "task-1", "hunter2 for the connection. ")
+			}
+			body := rig.lastRefresh(t)
+			if strings.Contains(body, "hunter2") {
+				t.Fatalf("a password split across two reasoning increments reached the bubble: %q", body)
+			}
+			if !strings.Contains(body, "for the connection") {
+				t.Errorf("the reasoning around the redacted value is missing: %q", body)
+			}
+		})
+	}
+}
