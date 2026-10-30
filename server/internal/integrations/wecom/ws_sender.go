@@ -249,6 +249,12 @@ var errNotAttempted = errors.New("wecom: nothing was written")
 // that are provably non-deliveries.
 var errChatBusy = fmt.Errorf("%w; the wait for this chat's turn ended first", errNotAttempted)
 
+// errStreamDisowned is a closing frame that was never written because the
+// server had already refused this round's stream for good (846605 / 846608,
+// recorded by markUnusable). Nothing left the process, so the words are
+// provably not in the bubble and the caller's fallback may say them.
+var errStreamDisowned = fmt.Errorf("%w; the server has disowned this round's stream", errNotAttempted)
+
 func newWSSender(conn wsConn, log *slog.Logger) *wsSender {
 	if log == nil {
 		log = slog.Default()

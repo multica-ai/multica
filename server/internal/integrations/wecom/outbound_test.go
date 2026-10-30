@@ -120,6 +120,9 @@ type fakeOutboundQueries struct {
 	deliveryFiled      *bool
 	perTaskDelivery    map[string]bool
 	sessionChannelType string
+	// transcript is task_message as the bubble reads it back
+	// (ListTaskProgressSince). nil reads as a table with no rows.
+	transcript *fakeTranscript
 	// t is who an unset stamp is reported to. fileTask sets it, and a filed
 	// row is the only route to the origin gate, so it is always there by the
 	// time the gate reads.
