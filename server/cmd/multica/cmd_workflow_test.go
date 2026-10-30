@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -388,5 +389,52 @@ func TestProjectWorkflowSetOtherConflictKeepsDefaultError(t *testing.T) {
 	}
 	if out != "" {
 		t.Fatalf("stdout = %q, want empty", out)
+	}
+}
+
+// The same plan with 45 statuses runs past 4 KiB; the command must still
+// print all of it through the real HTTP client.
+func TestProjectWorkflowSetMappingRequiredKeepsLargePlan(t *testing.T) {
+	required := make([]any, 0, 45)
+	for i := 0; i < 45; i++ {
+		required = append(required, map[string]any{
+			"status_key":           fmt.Sprintf("custom_status_with_a_long_key_%02d", i),
+			"issue_count":          1,
+			"suggested_status_key": "todo",
+		})
+	}
+	payload, _ := json.Marshal(map[string]any{
+		"error": "map every status", "code": "workflow_status_mapping_required",
+		"plan": map[string]any{"required": required, "unchanged": []any{}, "total_issues": 45, "affected_issues": 45},
+	})
+	if len(payload) <= 4096 {
+		t.Fatalf("fixture is %d bytes; it must exceed 4096", len(payload))
+	}
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodGet {
+			_ = json.NewEncoder(w).Encode(map[string]any{"id": testWorkflowUUID, "name": "Review flow", "steps": []any{}})
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusConflict)
+		_, _ = w.Write(payload)
+	}))
+	t.Cleanup(srv.Close)
+	setCLITestServerEnv(t, srv.URL)
+
+	cmd := newProjectWorkflowSetTestCmd("json")
+	out, err := captureStdout(t, func() error {
+		return runProjectWorkflowSet(cmd, []string{testProjectUUID, testWorkflowUUID})
+	})
+	if err != errSilent {
+		t.Fatalf("err = %v, want errSilent", err)
+	}
+	var got map[string]any
+	if jerr := json.Unmarshal([]byte(out), &got); jerr != nil {
+		t.Fatalf("stdout is not JSON: %v", jerr)
+	}
+	plan, _ := got["plan"].(map[string]any)
+	if rows, _ := plan["required"].([]any); len(rows) != 45 {
+		t.Fatalf("plan.required has %d rows, want 45", len(rows))
 	}
 }
