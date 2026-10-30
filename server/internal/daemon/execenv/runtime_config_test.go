@@ -1150,6 +1150,25 @@ func TestRuntimeConfigPathDistinguishesCodebuddyFromClaude(t *testing.T) {
 	}
 }
 
+// Langcli is a Claude Code fork registered as its own runtime identity, so it
+// must inherit the claude family's context file and native skills directory
+// through the descriptor rather than falling through to the unknown-provider
+// branch.
+func TestRuntimeConfigPathLangcliInheritsClaudePaths(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+
+	got := runtimeConfigPath(dir, "langcli")
+	want := filepath.Join(dir, "CLAUDE.md")
+	if got != want {
+		t.Fatalf("langcli runtime config path = %q, want %q", got, want)
+	}
+
+	if got, want := skillsDirPath(dir, "langcli"), filepath.Join(dir, ".claude", "skills"); got != want {
+		t.Fatalf("langcli skills dir = %q, want %q", got, want)
+	}
+}
+
 func TestRuntimeConfigPathDevinUsesAgentsMd(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()

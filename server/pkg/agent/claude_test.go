@@ -1321,3 +1321,40 @@ func TestBuildClaudeArgsManagedSkillSettingsWins(t *testing.T) {
 		t.Fatalf("unrelated custom arg was dropped: %v", args)
 	}
 }
+
+// TestClaudeConfigDirUsesRuntimeConfigHome pins where resume-time usage
+// baselines are read for a Claude Code fork: langcli keys transcripts under
+// ~/.langcli, so a fork must resolve its own config home, while
+// CLAUDE_CONFIG_DIR still names the full directory outright.
+func TestClaudeConfigDirUsesRuntimeConfigHome(t *testing.T) {
+	t.Parallel()
+	home := t.TempDir()
+	env := []string{"HOME=" + home, "USERPROFILE=" + home}
+
+	tests := []struct {
+		name          string
+		configHomeDir string
+		want          string
+	}{
+		{"family default", "", filepath.Join(home, ".claude")},
+		{"fork config home", ".langcli", filepath.Join(home, ".langcli")},
+	}
+	for _, tc := range tests {
+		got, err := claudeConfigDir(env, "", tc.configHomeDir)
+		if err != nil {
+			t.Fatalf("%s: claudeConfigDir: %v", tc.name, err)
+		}
+		if got != tc.want {
+			t.Errorf("%s: claudeConfigDir = %q, want %q", tc.name, got, tc.want)
+		}
+	}
+
+	override := filepath.Join(home, "custom")
+	got, err := claudeConfigDir(append(append([]string{}, env...), "CLAUDE_CONFIG_DIR="+override), "", ".langcli")
+	if err != nil {
+		t.Fatalf("CLAUDE_CONFIG_DIR override: claudeConfigDir: %v", err)
+	}
+	if got != override {
+		t.Errorf("CLAUDE_CONFIG_DIR override: claudeConfigDir = %q, want %q", got, override)
+	}
+}

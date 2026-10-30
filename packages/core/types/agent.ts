@@ -138,9 +138,12 @@ export const RUNTIME_PROFILE_PROTOCOL_FAMILIES = [
 export type RuntimeProtocolFamily =
   (typeof RUNTIME_PROFILE_PROTOCOL_FAMILIES)[number];
 
+// Built-in runtime identities that reuse an existing protocol family are
+// valid profile targets too (a custom wrapper may be based on them).
 export const RUNTIME_PROFILE_RUNTIME_TYPES = [
   ...RUNTIME_PROFILE_PROTOCOL_FAMILIES,
   "omp",
+  "langcli",
 ] as const;
 export type RuntimeProfileType = (typeof RUNTIME_PROFILE_RUNTIME_TYPES)[number];
 

@@ -54,6 +54,70 @@ func TestListRuntimeLocalMcpServersClaudeMissingConfig(t *testing.T) {
 	}
 }
 
+// Langcli keeps claude's user-scope MCP file (~/.claude.json) but keys plugins
+// to its own config home (~/.langcli), so it inherits the user config and its
+// own plugin servers — never the ~/.claude/plugins installs belonging to
+// Claude Code.
+func TestRuntimeLocalMcpServersLangcliReadsClaudeUserConfig(t *testing.T) {
+	home := t.TempDir()
+	redirectTestHome(t, home)
+	config := `{"mcpServers":{"user":{"command":"user-server"}}}`
+	if err := os.WriteFile(filepath.Join(home, ".claude.json"), []byte(config), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	claudeInstall := writeTestClaudePlugin(t, home, "paper-desktop@paper", "paper-desktop", true)
+	pluginConfig := `{"mcpServers":{"paper":{"type":"http","url":"http://127.0.0.1:29979/mcp"}}}`
+	if err := os.WriteFile(filepath.Join(claudeInstall, "mcp.json"), []byte(pluginConfig), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	langInstall := writeTestClaudePluginAt(t, filepath.Join(home, ".langcli"), "lang-desktop@lang", "lang-desktop", true)
+	langPluginConfig := `{"mcpServers":{"lang":{"type":"http","url":"http://127.0.0.1:29980/mcp"}}}`
+	if err := os.WriteFile(filepath.Join(langInstall, "mcp.json"), []byte(langPluginConfig), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	servers, supported, err := listRuntimeLocalMcpServers("langcli")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !supported {
+		t.Fatal("langcli user-scope MCP config should be supported")
+	}
+	byName := make(map[string]runtimeLocalMcpServerSummary, len(servers))
+	for _, server := range servers {
+		byName[server.Name] = server
+	}
+	if len(byName) != 2 {
+		t.Fatalf("servers=%#v", servers)
+	}
+	if user, ok := byName["user"]; !ok || user.Source != "User config" {
+		t.Fatalf("user MCP summary = %#v", byName["user"])
+	}
+	if _, ok := byName["lang"]; !ok {
+		t.Fatalf("langcli must merge its own ~/.langcli plugin servers: %#v", servers)
+	}
+	if _, ok := byName["paper"]; ok {
+		t.Fatalf("langcli must not merge ~/.claude plugin servers: %#v", servers)
+	}
+
+	configs, supported, err := loadRuntimeMcpServerConfigs("langcli")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !supported {
+		t.Fatal("langcli user-scope MCP config should be supported")
+	}
+	if _, ok := configs["user"]; !ok {
+		t.Fatalf("langcli config missing user server: %#v", configs)
+	}
+	if _, ok := configs["lang"]; !ok {
+		t.Fatalf("langcli config missing its own plugin server: %#v", configs)
+	}
+	if _, ok := configs["paper"]; ok {
+		t.Fatalf("langcli must not merge ~/.claude plugin servers: %#v", configs)
+	}
+}
+
 func TestListRuntimeLocalMcpServersOmpReadsNativeConfig(t *testing.T) {
 	home := t.TempDir()
 	redirectTestHome(t, home)

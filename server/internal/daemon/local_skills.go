@@ -269,8 +269,8 @@ func localSkillRootsForProvider(provider string) ([]localSkillRoot, bool, error)
 		roots = append(roots, localSkillRoot{path: path, kind: localSkillRootProvider})
 	}
 	roots = append(roots, localSkillRoot{path: filepath.Join(home, ".agents", "skills"), kind: localSkillRootUniversal})
-	if provider == "claude" {
-		for _, plugin := range listEnabledClaudePlugins(home) {
+	if configDir, ok := claudeFamilyConfigDir(home, provider); ok {
+		for _, plugin := range listEnabledClaudePlugins(configDir) {
 			manifest, _ := readClaudePluginManifest(plugin.InstallPath)
 			for _, path := range claudePluginComponentPaths(
 				plugin.InstallPath,
@@ -648,7 +648,7 @@ func enumerateLocalSkills(
 				Provider:    provider,
 				Root:        root.kind,
 				Plugin:      root.plugin,
-				CanDisable:  provider == "codex" || provider == "claude",
+				CanDisable:  provider == "codex" || agent.ProtocolFamilyFor(provider) == "claude",
 				// `files` is the supporting bundle (collectLocalSkillFiles
 				// intentionally excludes SKILL.md so the bundle's `Content`
 				// field can carry it without duplication on import). For the

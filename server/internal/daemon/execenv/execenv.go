@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/multica-ai/multica/server/internal/runtimeapps"
+	"github.com/multica-ai/multica/server/pkg/agent"
 )
 
 // RepoContextForEnv describes a workspace repo available for checkout.
@@ -643,7 +644,7 @@ func Prepare(params PrepareParams, logger *slog.Logger) (*Environment, error) {
 		env.CodexHome = codexHome
 	}
 
-	if params.Provider == "claude" {
+	if agent.ProtocolFamilyFor(params.Provider) == "claude" {
 		settingsPath, err := prepareClaudeSkillSettings(envRoot, params.Task.DisabledRuntimeSkills, params.Task.AgentSkills)
 		if err != nil {
 			return nil, fmt.Errorf("execenv: prepare claude skill settings: %w", err)
@@ -934,7 +935,7 @@ func Reuse(params ReuseParams, logger *slog.Logger) *Environment {
 		}
 	}
 
-	if params.Provider == "claude" && env.RootDir != "" {
+	if agent.ProtocolFamilyFor(params.Provider) == "claude" && env.RootDir != "" {
 		settingsPath, err := prepareClaudeSkillSettings(env.RootDir, params.Task.DisabledRuntimeSkills, params.Task.AgentSkills)
 		if err != nil {
 			logger.Warn("execenv: refresh claude skill settings failed", "error", err)
