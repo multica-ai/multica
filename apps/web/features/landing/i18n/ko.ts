@@ -279,7 +279,7 @@ export function createKoDict(
       },
       entries: [
         {
-          version: "0.8.0",
+          version: "0.7.2",
           date: "2026-10-30",
           title: "새 ⌘K 명령 바, 실행 중 에이전트 간 정보 보충, 속성 선택지 200개",
           changes: [],

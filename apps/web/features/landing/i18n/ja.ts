@@ -280,7 +280,7 @@ export function createJaDict(
       },
       entries: [
         {
-          version: "0.8.0",
+          version: "0.7.2",
           date: "2026-10-30",
           title: "新しい ⌘K コマンドバー、実行中のエージェント同士の情報補足、プロパティの選択肢が 200 個に",
           changes: [],

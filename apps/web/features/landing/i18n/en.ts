@@ -523,7 +523,7 @@ export function createEnDict(
     },
     entries: [
       {
-        version: "0.8.0",
+        version: "0.7.2",
         date: "2026-10-30",
         title: "A new ⌘K command bar, agents that guide each other mid-run, and 200 property options",
         changes: [],

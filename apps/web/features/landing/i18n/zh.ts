@@ -508,7 +508,7 @@ export function createZhDict(
     },
     entries: [
       {
-        version: "0.8.0",
+        version: "0.7.2",
         date: "2026-10-30",
         title: "全新 ⌘K 命令栏、智能体运行中互相补充信息、属性选项增至 200 个",
         changes: [],
