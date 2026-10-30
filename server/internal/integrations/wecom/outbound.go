@@ -407,12 +407,20 @@ func (o *Outbound) deliverAnswer(ctx context.Context, e events.Event, taskID pgt
 				text = c.StreamNoReply
 			}
 		}
-		sealErr := o.finishStream(ctx, t.Handle, text)
+		// A closing frame is capped at the same 20480 bytes as any other body
+		// and is CLIPPED to fit: the answer ends in an ellipsis and the rest of
+		// it is nowhere the reader can get to. So the bubble carries what one
+		// frame holds and the remainder follows as ordinary messages, split and
+		// numbered the way sendTextCtx splits an answer with no bubble.
+		head, rest := splitForBubble(text)
+		sealErr := o.finishStream(ctx, t.Handle, head)
 		switch classifySeal(sealErr) {
 		case sealOnScreen:
+			o.sendRest(ctx, t.Handle, rest)
 			o.delivered()
 			return answerOutcome{addr: t.Handle.address(), spoke: true}, nil
 		case sealUnknown:
+			o.sendRest(ctx, t.Handle, rest)
 			o.unconfirmed(ctx, e, unconfirmedSealReason(sealErr), sealErr)
 			return answerOutcome{addr: t.Handle.address(), spoke: true}, nil
 		}
@@ -527,7 +535,7 @@ func (o *Outbound) routeFrameAwaiting(ctx context.Context, f relayFrame, eventID
 }
 
 // relaySeal asks whichever replica holds this round to close it. Routed by
-// round ownership, so it needs no address — see deliverRelayed.
+// round ownership, so it needs no address — see relayKindSeal.
 func (o *Outbound) relaySeal(e events.Event, taskID pgtype.UUID, reason string, carriesFiles bool) {
 	id := util.UUIDToString(taskID)
 	if id == "" {
@@ -751,6 +759,62 @@ func (o *Outbound) finishStream(ctx context.Context, h streamHandle, text string
 		"installation_id", uuidStringPub(h.InstallationID),
 		"stream_unusable", streamUnusable(err), "error", err)
 	return err
+}
+
+// splitForBubble divides an answer into the part one stream frame holds and
+// the part that has to follow it as messages.
+//
+// It is splitForWire, so a bubble and a plain message break an answer at the
+// same places and number the pieces the same way. Think tags are defused
+// first: defusing inserts bytes, so splitting first could hand the frame a head
+// that fits and is then pushed back over the cap (defusing is idempotent, so
+// the frame's own pass changes nothing).
+func splitForBubble(text string) (head string, rest []string) {
+	pieces := splitForWire(defuseThinkTags(text))
+	if len(pieces) <= 1 {
+		return text, nil
+	}
+	return pieces[0], pieces[1:]
+}
+
+// sendRest delivers the pieces of an answer that did not fit in its sealed
+// bubble, as messages directly underneath it, in order.
+//
+// All of them go out under one hold of the chat's lock (sendPiecesCtx), the
+// way sendTextCtx sends a split answer: taken piece by piece, a second long
+// answer, an inbox card or a file pushed to the same chat can land between
+// them, and the reader can no longer tell whose (2/3) is whose.
+//
+// They are reply frames like any other, so each one re-reads the installation
+// first (guardReply): a revocation that lands while they wait for the lock
+// stops them.
+//
+// It runs when the seal is on screen and also when its outcome is unknown. The
+// rest has never been sent, so sending it cannot print anything twice; if the
+// head did land, the reader gets the whole answer, and if it did not, (2/n)
+// onwards at least shows that the start is missing. Holding it back would leave
+// a bubble that ends at (1/n) with nothing after it.
+//
+// The pieces get the budget the bubble cannot spend (fallbackBudget): a seal
+// whose verdict never came back has usually used the turn's deadline up, and
+// the rest is still the answer.
+//
+// A piece that fails cannot un-send anything before it; it stops the rest,
+// because what follows only reads after it. The reply is counted by what the
+// seal says, which is how sendTextCtx's own split reports a later piece
+// failing (errPartiallySent), so a long answer is counted one way with or
+// without a bubble.
+func (o *Outbound) sendRest(ctx context.Context, h streamHandle, rest []string) {
+	if len(rest) == 0 {
+		return
+	}
+	ctx, cancel := fallbackBudget(ctx)
+	defer cancel()
+	if err := o.senders.sendPiecesCtx(guardReply(ctx, o.q, h.InstallationID), h.InstallationID, h.ChatID, h.ChatType, rest); err != nil {
+		o.logger.WarnContext(ctx, "wecom outbound: only part of a long answer reached the chat",
+			"installation_id", uuidStringPub(h.InstallationID),
+			"pieces", len(rest)+1, "error", err)
+	}
 }
 
 // chatDoneContent extracts the reply text from an EventChatDone payload

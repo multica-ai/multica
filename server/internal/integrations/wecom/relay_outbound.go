@@ -291,6 +291,17 @@ const (
 	// reply whose round is gone falls through to an ordinary push; one
 	// cancel-all click would then put 这次处理已取消 into every chat in the
 	// deployment. A seal frame with no round does NOTHING AT ALL.
+	//
+	// And it is for whoever holds the ROUND, which is not a question the
+	// socket or the claim can answer, so it takes neither: it is published
+	// under its task id, since it carries no installation and the stream
+	// reader drops a frame with no scope id, and perform hands it to every
+	// replica's deliverRelayed without the ownership gate or the claim. Gated
+	// on the socket it reached nobody; claimed once for the deployment, the
+	// replica that won could be one without the round, and the holder would
+	// lose the race and never close the bubble. Every replica but the holder
+	// finds no round and returns, and a copy that reaches the holder twice
+	// finds the round already taken.
 	relayKindSeal = "seal"
 )
 
@@ -846,7 +857,11 @@ func (r *RelayOutbound) publishFrame(ctx context.Context, f relayFrame, eventID 
 		r.logger.Warn("wecom relay: marshal outbound frame", "error", err)
 		return relayNotWired
 	}
-	if err := r.publisher.PublishWithID(realtime.ScopeWecomOutbound, f.InstallationID, "", body, eventID); err != nil {
+	scope := f.InstallationID
+	if f.Kind == relayKindSeal {
+		scope = f.TaskID // see relayKindSeal
+	}
+	if err := r.publisher.PublishWithID(realtime.ScopeWecomOutbound, scope, "", body, eventID); err != nil {
 		r.logger.Warn("wecom relay: publish failed",
 			"error", err, "installation_id", f.InstallationID, "task_id", f.TaskID)
 		// The bus call failed, but a publish whose RESPONSE was lost may still
@@ -988,12 +1003,25 @@ func (r *RelayOutbound) DeliverWecomOutbound(scopeID string, frame []byte, event
 		return
 	}
 	select {
-	case r.queues[r.shardFor(f.InstallationID)] <- queued{frame: f, eventID: eventID}:
+	case r.queues[r.shardFor(dispatchKey(f))] <- queued{frame: f, eventID: eventID}:
 	default:
 		// Shed rather than stall the shard. Counted, because a reply nobody
 		// gets is exactly what this whole path exists to stop being silent.
 		r.shed(queued{frame: f, eventID: eventID}, "dispatch queue full")
 	}
+}
+
+// dispatchKey picks the shard queue a frame waits on. Replies and inbox pushes
+// go by installation, which is what keeps one bot's frames in order. A seal
+// carries no installation, so keying it the same way would put every seal in
+// the deployment on one queue behind one worker, and a cancel-all burst past
+// QueueDepth would be shed: those bubbles would keep spinning. A seal needs no
+// ordering against anything but its own round, so it goes by task id.
+func dispatchKey(f relayFrame) string {
+	if f.Kind == relayKindSeal {
+		return f.TaskID
+	}
+	return f.InstallationID
 }
 
 func (r *RelayOutbound) shardFor(installationID string) int {
@@ -1007,6 +1035,13 @@ func (r *RelayOutbound) shardFor(installationID string) int {
 // False means it is owed another offer, which the caller schedules at the head
 // of the installation's line.
 func (r *RelayOutbound) perform(ctx context.Context, item queued) bool {
+	if item.frame.Kind == relayKindSeal {
+		// Neither gate below applies: see relayKindSeal.
+		dctx, cancel := context.WithTimeout(ctx, r.cfg.deliveryBudget())
+		r.handler.deliverRelayed(dctx, item.frame)
+		cancel()
+		return true
+	}
 	// Ownership FIRST, the global claim second. The claim is a cross-replica
 	// SET NX: every replica reads every frame, and if one that cannot send
 	// were allowed to win it, the replica that can send would lose the race,
@@ -1529,11 +1564,17 @@ func (o *Outbound) deliverRelayed(ctx context.Context, f relayFrame) relayResult
 				if !hasVisibleChar(text) {
 					text = wordlessSealCopy(t.Handle.Locale, f.CarriesFiles)
 				}
-				sealErr := o.finishStream(ctx, t.Handle, text)
+				// The same split the local path makes (outbound.go): a closing
+				// frame is clipped to 20480 bytes, so the rest follows as
+				// messages under the bubble.
+				head, rest := splitForBubble(text)
+				sealErr := o.finishStream(ctx, t.Handle, head)
 				switch classifySeal(sealErr) {
 				case sealOnScreen:
+					o.sendRest(ctx, t.Handle, rest)
 					record, spoke = o.delivered, true
 				case sealUnknown:
+					o.sendRest(ctx, t.Handle, rest)
 					se := sealErr
 					record = func() {
 						o.unconfirmedFor(ctx, f.SessionID, f.Kind, unconfirmedSealReason(se), se)
