@@ -24,13 +24,3 @@ export function resolveClickIntent(
   }
   return "push";
 }
-
-/**
- * Whether AppLink answers this click by navigating the current page. Shift
- * counts as leaving: web hands it to the browser's new window.
- */
-export function navigatesInPlace(
-  e: Pick<MouseEvent, "button" | "metaKey" | "ctrlKey" | "shiftKey">,
-): boolean {
-  return resolveClickIntent(e) === "push" && !e.shiftKey;
-}

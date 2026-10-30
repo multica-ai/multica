@@ -148,7 +148,7 @@ function RailSpaceLink({
           newTabTitle={fullLabel}
           aria-current={active ? "page" : undefined}
           {...peekHandlers}
-          className="group relative flex h-[52px] w-[52px] flex-col items-center justify-center gap-1 rounded-[10px] text-muted-foreground transition-colors outline-none hover:bg-sidebar-accent/60 hover:text-sidebar-accent-foreground focus-visible:outline-2 focus-visible:outline-ring aria-[current=page]:bg-sidebar-accent aria-[current=page]:font-medium aria-[current=page]:text-sidebar-accent-foreground"
+          className="group relative flex h-[52px] w-[52px] flex-col items-center justify-center gap-1 rounded-xl text-muted-foreground transition-colors outline-none hover:bg-sidebar-accent/60 hover:text-sidebar-accent-foreground focus-visible:outline-2 focus-visible:outline-ring aria-[current=page]:bg-sidebar-accent aria-[current=page]:font-medium aria-[current=page]:text-sidebar-accent-foreground"
         >
           <Icon className="size-5" />
           <span className="max-w-full truncate px-1 text-micro leading-[14px]">{label}</span>

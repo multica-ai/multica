@@ -46,7 +46,6 @@ import { DeleteViewDialog } from "../../issue-views/delete-view-dialog";
 import { ViewNameInput } from "../../issue-views/view-name-input";
 import { useBuiltinViewNavigation } from "../../issue-views/builtin-views";
 import { useT } from "../../i18n";
-import { navigatesInPlace } from "../../navigation";
 import { PANEL_ROW_CLASS, PanelCount, PanelLink, PanelList, PanelSection, isPathWithin, panelRowStateClass } from "../panel-nav";
 import { SidebarIssueList, TREE_ROW_BUTTON_CLASS, TreeRow } from "./sidebar-tree";
 
@@ -337,12 +336,9 @@ function BuiltinViewRow({
           setMenuOpen(true);
         }}
         onNavigate={(event) => {
-          if (drag.consumeDrag()) {
-            event.preventDefault();
-            return;
-          }
-          if (navigatesInPlace(event)) builtinNav.prepare(builtin);
+          if (drag.consumeDrag()) event.preventDefault();
         }}
+        onNavigateInPlace={() => builtinNav.prepare(builtin)}
         trailing={
           <RowMenu label={t(($) => $.panels.work.view_actions, { name: label })} open={menuOpen} onOpenChange={setMenuOpen}>
             <DropdownMenuItem onClick={() => actions.copyLink(href)}>
@@ -450,12 +446,9 @@ function SavedViewRow({
           setMenuOpen(true);
         }}
         onNavigate={(event) => {
-          if (drag.consumeDrag()) {
-            event.preventDefault();
-            return;
-          }
-          if (navigatesInPlace(event)) setActive(target.containerKey, view.id);
+          if (drag.consumeDrag()) event.preventDefault();
         }}
+        onNavigateInPlace={() => setActive(target.containerKey, view.id)}
         trailing={
           <RowMenu label={t(($) => $.panels.work.view_actions, { name: view.name })} open={menuOpen} onOpenChange={setMenuOpen}>
             {canManage && (

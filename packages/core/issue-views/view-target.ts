@@ -7,7 +7,7 @@ export interface IssueViewTarget {
   scope: IssueViewScope;
   /** The surface the view opens on. */
   path: string;
-  /** `path?view=<id>`: web pages adopt it on load. */
+  /** `path?view=<id>`: pages adopt it on load, so a new tab opens the view. */
   href: string;
   /** Active-view store key of that surface. */
   containerKey: string;

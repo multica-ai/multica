@@ -309,9 +309,21 @@ export function splitTabUrl(url: string): { pathname: string; suffix: string } {
   return { pathname: url.slice(0, cut), suffix: url.slice(cut) };
 }
 
-/** Dedup identity of a tab URL: its pathname (search/hash are view state). */
+/**
+ * Dedup identity of a tab URL: its pathname (search/hash are view state),
+ * plus the saved view it opens — `?view=` names a different list, so
+ * cmd+clicking view B from a tab showing view A must open B, not focus A.
+ */
 export function resourceKeyForUrl(url: string): string {
-  return splitTabUrl(url).pathname;
+  const { pathname, suffix } = splitTabUrl(url);
+  const view = searchParamsOfSuffix(suffix).get("view");
+  return view ? `${pathname}?view=${encodeURIComponent(view)}` : pathname;
+}
+
+function searchParamsOfSuffix(suffix: string): URLSearchParams {
+  if (!suffix.startsWith("?")) return new URLSearchParams();
+  const hashIndex = suffix.indexOf("#");
+  return new URLSearchParams(hashIndex === -1 ? suffix.slice(1) : suffix.slice(1, hashIndex));
 }
 
 /**
@@ -330,11 +342,8 @@ function inboxSelectionKeyForUrl(url: string): string | null {
   const { pathname, suffix } = splitTabUrl(url);
   const segments = pathname.split("/").filter(Boolean);
   if (segments.length !== 2 || segments[1] !== "inbox") return null;
-  if (!suffix.startsWith("?")) return null;
 
-  const hashIndex = suffix.indexOf("#");
-  const search = hashIndex === -1 ? suffix.slice(1) : suffix.slice(1, hashIndex);
-  const selectedKey = new URLSearchParams(search).get("issue");
+  const selectedKey = searchParamsOfSuffix(suffix).get("issue");
   if (!selectedKey) return null;
 
   return `${pathname}?issue=${encodeURIComponent(selectedKey)}`;

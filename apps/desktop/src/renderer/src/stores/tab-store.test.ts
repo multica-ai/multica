@@ -63,6 +63,12 @@ describe("resourceKeyForUrl", () => {
     expect(resourceKeyForUrl("/acme/issues#anchor")).toBe("/acme/issues");
     expect(resourceKeyForUrl("/acme/issues?filter=a#x")).toBe("/acme/issues");
   });
+
+  it("keeps the saved view a URL opens, and nothing else of its search", () => {
+    expect(resourceKeyForUrl("/acme/issues?view=v1")).toBe("/acme/issues?view=v1");
+    expect(resourceKeyForUrl("/acme/issues?filter=a&view=v1#x")).toBe("/acme/issues?view=v1");
+    expect(resourceKeyForUrl("/acme/issues#view=v1")).toBe("/acme/issues");
+  });
 });
 
 describe("browsingHistoryKeyForUrl", () => {
@@ -264,6 +270,22 @@ describe("useTabStore actions", () => {
     // The existing tab's own view state (url) wins; the incoming filter does
     // not overwrite it.
     expect(s.byWorkspace.acme.tabs[0].url).toBe("/acme/issues");
+  });
+
+  it("openTab of another saved view opens its own tab; the same view focuses it", () => {
+    const store = useTabStore.getState();
+    store.switchWorkspace("acme");
+    store.navigateActiveSession("/acme/issues?view=a");
+    const viewA = getActiveTab(useTabStore.getState())!.id;
+
+    const viewB = store.openTab("/acme/issues?view=b", "B");
+    const allIssues = store.openTab("/acme/issues", "Issues");
+    const viewAgain = store.openTab("/acme/issues?view=a&filter=urgent", "A");
+
+    const urls = useTabStore.getState().byWorkspace.acme.tabs.map((t) => t.url);
+    expect(new Set([viewA, viewB, allIssues]).size).toBe(3);
+    expect(viewAgain).toBe(viewA);
+    expect(urls).toEqual(expect.arrayContaining(["/acme/issues?view=a", "/acme/issues?view=b", "/acme/issues"]));
   });
 
   describe("openTab insertion position (MUL-5860)", () => {

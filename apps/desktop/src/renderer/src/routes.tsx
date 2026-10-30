@@ -38,7 +38,11 @@ import { DaemonSettingsTab } from "./components/daemon-settings-tab";
 import { UpdatesSettingsTab } from "./components/updates-settings-tab";
 import { WorkspaceRouteLayout } from "./components/workspace-route-layout";
 import { DesktopRouteErrorPage } from "./components/route-error-page";
+import { IssueViewUrlSync } from "./platform/issue-view-tabs";
 import { useRenderedRouteStore } from "./stores/rendered-route-store";
+
+const WORKSPACE_VIEW_SCOPE = { scope_type: "workspace" } as const;
+const MY_VIEW_SCOPE = { scope_type: "my" } as const;
 
 /**
  * Wraps `SettingsPage` so the desktop-only extra tabs can pull their labels
@@ -146,7 +150,11 @@ export const appRoutes: RouteObject[] = [
           { index: true, element: null },
           {
             path: "issues",
-            element: <IssuesPage />,
+            element: (
+              <IssueViewUrlSync scope={WORKSPACE_VIEW_SCOPE}>
+                <IssuesPage />
+              </IssueViewUrlSync>
+            ),
             handle: { title: "Issues" },
           },
           {
@@ -176,7 +184,11 @@ export const appRoutes: RouteObject[] = [
           },
           {
             path: "my-issues",
-            element: <MyIssuesPage />,
+            element: (
+              <IssueViewUrlSync scope={MY_VIEW_SCOPE}>
+                <MyIssuesPage />
+              </IssueViewUrlSync>
+            ),
             handle: { title: "My Issues" },
           },
           {

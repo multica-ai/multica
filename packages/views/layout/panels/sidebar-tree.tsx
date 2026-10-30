@@ -42,6 +42,7 @@ interface TreeRowProps extends React.ComponentProps<"div"> {
   /** End of the row: a count, or a settings button. */
   trailing?: React.ReactNode;
   onNavigate?: (event: React.MouseEvent<HTMLAnchorElement>) => void;
+  onNavigateInPlace?: () => void;
   rowRef?: React.Ref<HTMLDivElement>;
 }
 
@@ -63,6 +64,7 @@ export const TreeRow = forwardRef<HTMLAnchorElement, TreeRowProps>(function Tree
     onPrefetch,
     trailing,
     onNavigate,
+    onNavigateInPlace,
     rowRef,
     className,
     ...rowProps
@@ -132,6 +134,7 @@ export const TreeRow = forwardRef<HTMLAnchorElement, TreeRowProps>(function Tree
         aria-current={active ? "page" : undefined}
         onKeyDown={onKeyDown}
         onClick={onNavigate}
+        onNavigateInPlace={onNavigateInPlace}
         className="min-w-0 flex-1 truncate outline-none after:absolute after:inset-0 after:rounded-lg focus-visible:after:outline-2 focus-visible:after:outline-ring"
       >
         {label}

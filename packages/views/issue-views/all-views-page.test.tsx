@@ -3,8 +3,11 @@ import { screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import type { IssueView } from "@multica/core/api/schemas";
 import { renderWithI18n } from "../test/i18n";
+import { useActiveIssueViewStore } from "@multica/core/issue-views/active-view-store";
 import { NavigationProvider, type NavigationAdapter } from "../navigation";
 import { AllViewsPage } from "./all-views-page";
+
+const WORKSPACE_KEY = "ws-1:workspace";
 
 const mocks = vi.hoisted(() => ({
   views: [] as IssueView[],
@@ -76,7 +79,7 @@ function view(id: string, name: string, patch: Partial<IssueView> = {}): IssueVi
   } as IssueView;
 }
 
-function renderPage() {
+function renderPage(overrides: Partial<NavigationAdapter> = {}) {
   const adapter: NavigationAdapter = {
     push: vi.fn(),
     replace: vi.fn(),
@@ -85,12 +88,14 @@ function renderPage() {
     searchParams: new URLSearchParams(),
     hash: "",
     getShareableUrl: (path) => path,
+    ...overrides,
   };
   renderWithI18n(
     <NavigationProvider value={adapter}>
       <AllViewsPage />
     </NavigationProvider>,
   );
+  return adapter;
 }
 
 beforeEach(() => {
@@ -102,6 +107,7 @@ beforeEach(() => {
   mocks.star.mockReset();
   mocks.unstar.mockReset();
   mocks.open.mockReset();
+  useActiveIssueViewStore.setState({ active: {} });
 });
 
 describe("AllViewsPage", () => {
@@ -130,15 +136,46 @@ describe("AllViewsPage", () => {
 
   it("stars and unstars without opening the view", async () => {
     const user = userEvent.setup();
-    renderPage();
+    const { push } = renderPage();
 
     await user.click(screen.getByRole("button", { name: "Remove Needs review from sidebar" }));
     expect(mocks.unstar).toHaveBeenCalledWith("view:v1");
     await user.click(screen.getByRole("button", { name: "Add Team backlog to sidebar" }));
     expect(mocks.star).toHaveBeenCalledWith("view:v2");
-    expect(mocks.open).not.toHaveBeenCalled();
+    expect(push).not.toHaveBeenCalled();
+    expect(useActiveIssueViewStore.getState().active).toEqual({});
 
     await user.click(screen.getByText("Team backlog"));
-    expect(mocks.open).toHaveBeenCalledWith(expect.objectContaining({ id: "v2" }));
+    expect(push).toHaveBeenCalledWith("/acme/issues?view=v2");
+    expect(useActiveIssueViewStore.getState().active[WORKSPACE_KEY]).toBe("v2");
+  });
+
+  it("opens a view in place for a shift-click, which rows never hand to the browser", async () => {
+    const user = userEvent.setup();
+    const { push } = renderPage();
+
+    await user.keyboard("{Shift>}");
+    await user.click(screen.getByText("Team backlog"));
+    await user.keyboard("{/Shift}");
+
+    expect(push).toHaveBeenCalledWith("/acme/issues?view=v2");
+    expect(useActiveIssueViewStore.getState().active[WORKSPACE_KEY]).toBe("v2");
+  });
+
+  it("leaves the open view alone when a view or All issues opens in a new tab", async () => {
+    const user = userEvent.setup();
+    useActiveIssueViewStore.setState({ active: { [WORKSPACE_KEY]: "v-open" } });
+    const openInNewTab = vi.fn();
+    renderPage({ openInNewTab });
+
+    const allIssuesRow = screen.getByRole("button", { name: "Add All issues to sidebar" }).closest('[role="row"]')!;
+    await user.keyboard("{Meta>}");
+    await user.click(screen.getByText("Team backlog"));
+    await user.click(allIssuesRow);
+    await user.keyboard("{/Meta}");
+
+    expect(openInNewTab).toHaveBeenCalledWith("/acme/issues?view=v2", "Team backlog");
+    expect(openInNewTab).toHaveBeenCalledWith("/acme/issues", "All issues");
+    expect(useActiveIssueViewStore.getState().active[WORKSPACE_KEY]).toBe("v-open");
   });
 });

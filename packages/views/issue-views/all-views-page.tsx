@@ -50,10 +50,11 @@ import {
   type BuiltinViewKey,
 } from "@multica/core/issue-views/sidebar-views";
 import { issueViewTarget } from "@multica/core/issue-views/view-target";
+import { useActiveIssueViewStore } from "@multica/core/issue-views/active-view-store";
 import { ActorAvatar } from "../common/actor-avatar";
 import { CollectionPageHeader, CollectionPageHeaderAction } from "../layout/collection-page";
 import { PAGE_TOOLBAR } from "../layout/page-header";
-import { navigatesInPlace, rowLinkInteractiveProps, useRowLink } from "../navigation";
+import { rowLinkInteractiveProps, useRowLink } from "../navigation";
 import { useT } from "../i18n";
 import { useBuiltinViewNavigation } from "./builtin-views";
 import { DeleteViewDialog } from "./delete-view-dialog";
@@ -85,6 +86,7 @@ export function AllViewsPage() {
   const actions = useIssueViewActions();
   const builtinNav = useBuiltinViewNavigation();
   const rowLink = useRowLink();
+  const setActive = useActiveIssueViewStore((s) => s.setActive);
   const { data: views = EMPTY_VIEWS } = useQuery(issueViewEverywhereOptions(wsId));
   const { data: projects = [] } = useQuery(projectListOptions(wsId));
   const { data: members = [] } = useQuery(memberListOptions(wsId));
@@ -227,17 +229,9 @@ export function AllViewsPage() {
           ) : null}
           {shownBuiltins.map(({ key, name }) => {
             const href = builtinNav.hrefFor(key);
-            const link = rowLink(href, name);
+            const link = rowLink(href, name, () => builtinNav.prepare(key));
             return (
-              <ListGridRow
-                key={key}
-                className="h-10 cursor-pointer"
-                {...link}
-                onClick={(event) => {
-                  if (navigatesInPlace(event)) builtinNav.prepare(key);
-                  link.onClick(event);
-                }}
-              >
+              <ListGridRow key={key} className="h-10 cursor-pointer" {...link}>
                 {starButton(builtinViewItemId(key), name)}
                 <ListGridCell className="gap-2">
                   {BUILTIN_ICON[key]}
@@ -257,22 +251,11 @@ export function AllViewsPage() {
           })}
           {shownViews.map((view) => {
             const target = issueViewTarget(wsId, view, paths);
-            const link = rowLink(target.href, view.name);
+            const link = rowLink(target.href, view.name, () => setActive(target.containerKey, view.id));
             const filterCount = issueViewFilterCount(view.query);
             const canManage = actions.canManage(view);
             return (
-              <ListGridRow
-                key={view.id}
-                className="h-10 cursor-pointer"
-                {...link}
-                onClick={(event) => {
-                  if (navigatesInPlace(event)) {
-                    actions.open(view);
-                    return;
-                  }
-                  link.onClick(event);
-                }}
-              >
+              <ListGridRow key={view.id} className="h-10 cursor-pointer" {...link}>
                 {starButton(savedViewItemId(view.id), view.name)}
                 <ListGridCell className="gap-2">
                   <Layers className="size-4 shrink-0 text-muted-foreground" />
