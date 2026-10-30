@@ -49,7 +49,8 @@ pnpm exec playwright test --config=playwright.perf.config.ts floating-chat-lifet
 It checks that closing removes the message list, keeps the real composer and
 an in-flight upload alive, shows messages received while closed on reopen, and
 survives an interrupted exit. It also checks that the message list's ancestor
-is never scaled. HTTP and WebSocket traffic is synthetic; no backend is needed.
+is never scaled, and that a reopened window never paints before its message
+list does. HTTP and WebSocket traffic is synthetic; no backend is needed.
 
 ## When to run it
 
