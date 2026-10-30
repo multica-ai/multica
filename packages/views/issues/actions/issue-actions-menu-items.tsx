@@ -22,6 +22,7 @@ import {
   Unlink,
   UserMinus,
 } from "@multica/ui/icons";
+import { useIssueDeletion } from "@multica/core/issues/use-issue-deletion";
 import type { Issue } from "@multica/core/types";
 import { resolveWorkdirCopyTarget } from "@multica/core/issues";
 import { todayDateOnly, addDaysDateOnly } from "@multica/core/issues/date";
@@ -112,6 +113,7 @@ export function IssueActionsMenuItems({
 }: IssueActionsMenuItemsProps) {
   const { t } = useT("issues");
   const wsId = useWorkspaceId();
+  const { canDelete } = useIssueDeletion(wsId);
   // Only the statuses the issue's workflow allows; entering a step that hands
   // the issue off confirms first, as in the status picker. (MUL-7420)
   const { options: statusOptions, workflow } = useIssueStatusOptions(wsId, issue.project_id, issue.status);
@@ -406,6 +408,8 @@ export function IssueActionsMenuItems({
       <P.Separator />
 
       <P.Item
+        disabled={!canDelete(issue)}
+        title={!canDelete(issue) ? t(($) => $.batch.delete_restricted) : undefined}
         variant="destructive"
         onClick={() => openDeleteConfirm({ onDeletedFallbackPath })}
       >

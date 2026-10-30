@@ -740,6 +740,10 @@
     "usage_help": "Utilisation"
   },
   "workspace": {
+    "permissions_title": "Autorisations",
+    "issue_deletion_policy_unsupported": "Ce serveur ne permet pas de configurer les autorisations de suppression des tâches.",
+    "restrict_issue_deletion": "Restreindre la suppression des tâches",
+    "restrict_issue_deletion_hint": "Les membres peuvent supprimer les tâches créées par eux ou par leurs agents. Les propriétaires et administrateurs peuvent supprimer toute tâche. Les agents peuvent uniquement supprimer leurs propres tâches.",
     "section_general": "Détails de l'espace de travail",
     "logo_label": "Logo de l'espace de travail",
     "change_logo_aria": "Changer le logo de l'espace de travail",

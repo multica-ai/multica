@@ -735,6 +735,10 @@
     "usage_help": "사용 방법"
   },
   "workspace": {
+    "permissions_title": "권한",
+    "issue_deletion_policy_unsupported": "이 서버는 태스크 삭제 권한 설정을 지원하지 않습니다.",
+    "restrict_issue_deletion": "태스크 삭제 제한",
+    "restrict_issue_deletion_hint": "멤버는 본인 또는 본인 소유 에이전트가 만든 태스크를 삭제할 수 있습니다. owner와 admin은 모든 태스크를 삭제할 수 있습니다. 에이전트는 자신이 만든 태스크만 삭제할 수 있습니다.",
     "section_general": "워크스페이스 정보",
     "logo_label": "워크스페이스 아이콘",
     "change_logo_aria": "워크스페이스 로고 변경",

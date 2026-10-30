@@ -39,6 +39,7 @@
     "./issue-workflows/hooks": "./issue-workflows/hooks.ts",
     "./issue-workflows/mutations": "./issue-workflows/mutations.ts",
     "./issues": "./issues/index.ts",
+    "./issues/use-issue-deletion": "./issues/use-issue-deletion.ts",
     "./issues/batch": "./issues/batch.ts",
     "./issues/canonical-id": "./issues/canonical-id.ts",
     "./issues/queries": "./issues/queries.ts",

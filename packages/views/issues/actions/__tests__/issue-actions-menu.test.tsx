@@ -12,6 +12,11 @@ const TEST_RESOURCES = { en: { common: enCommon, issues: enIssues } };
 // Mocks — same pattern as the issue-detail test suite.
 // ---------------------------------------------------------------------------
 
+const deletionPolicy = vi.hoisted(() => ({ allowed: true, restricted: false }));
+vi.mock("@multica/core/issues/use-issue-deletion", () => ({
+  useIssueDeletion: () => ({ restricted: deletionPolicy.restricted, canDelete: () => deletionPolicy.allowed }),
+}));
+
 vi.mock("@multica/core/hooks", () => ({
   useWorkspaceId: () => "ws-1",
 }));
@@ -178,6 +183,8 @@ function wrap(ui: React.ReactNode) {
 }
 
 beforeEach(() => {
+  deletionPolicy.allowed = true;
+  deletionPolicy.restricted = false;
   mockOpenModal.mockReset();
   openInNewTabMock.mockReset();
   getShareableUrlMock.mockClear();
@@ -297,6 +304,17 @@ describe("IssueActionsDropdown", () => {
     // The sibling "Set parent issue..." proves the submenu opened.
     expect(await screen.findByText("Set parent issue...")).toBeInTheDocument();
     expect(screen.queryByText("Remove parent issue")).not.toBeInTheDocument();
+  });
+
+  it("disables Delete issue when the workspace policy denies it", async () => {
+    deletionPolicy.allowed = false;
+    deletionPolicy.restricted = true;
+    render(wrap(<IssueActionsDropdown issue={mockIssue} trigger={<button data-testid="trigger">Menu</button>} />));
+    fireEvent.click(screen.getByTestId("trigger"));
+    const item = await screen.findByText("Delete issue");
+    expect(item.closest('[role="menuitem"]')).toHaveAttribute("aria-disabled", "true");
+    fireEvent.click(item);
+    expect(mockOpenModal).not.toHaveBeenCalled();
   });
 
   it("clicking Delete issue opens the delete-confirm modal", async () => {

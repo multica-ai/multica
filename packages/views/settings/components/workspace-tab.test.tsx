@@ -7,6 +7,7 @@ import enCommon from "../../locales/en/common.json";
 import enSettings from "../../locales/en/settings.json";
 
 const mockUpdateWorkspace = vi.hoisted(() => vi.fn());
+const mockUpdateDeletionPolicy = vi.hoisted(() => vi.fn());
 const mockInvalidateQueries = vi.hoisted(() => vi.fn());
 const mockToastSuccess = vi.hoisted(() => vi.fn());
 const workspaceRef = vi.hoisted(() => ({
@@ -18,6 +19,9 @@ const workspaceRef = vi.hoisted(() => ({
     context: "",
     issue_prefix: "TES",
     repos: [] as { url: string }[],
+    settings: {} as Record<string, unknown>,
+    restrict_issue_deletion: false as boolean | undefined,
+    issue_deletion_policy_supported: true as boolean | undefined,
   },
 }));
 const membersRef = vi.hoisted(() => ({
@@ -63,6 +67,7 @@ vi.mock("@multica/core/workspace/mutations", () => ({
 vi.mock("@multica/core/api", () => ({
   api: {
     updateWorkspace: mockUpdateWorkspace,
+    updateWorkspaceIssueDeletionPolicy: mockUpdateDeletionPolicy,
     getBaseUrl: () => "http://127.0.0.1:8080",
   },
 }));
@@ -105,6 +110,11 @@ function I18nWrapper({ children }: { children: ReactNode }) {
 describe("WorkspaceTab — automatic updates", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mockUpdateDeletionPolicy.mockImplementation(async (_id: string, restricted: boolean) => ({
+      ...workspaceRef.current,
+      restrict_issue_deletion: restricted,
+      issue_deletion_policy_supported: true,
+    }));
     vi.useFakeTimers({ shouldAdvanceTime: true });
     workspaceRef.current = {
       id: "workspace-1",
@@ -114,6 +124,9 @@ describe("WorkspaceTab — automatic updates", () => {
       context: "",
       issue_prefix: "TES",
       repos: [],
+      settings: {},
+      restrict_issue_deletion: false,
+      issue_deletion_policy_supported: true,
     };
     membersRef.current = [{ user_id: "user-1", role: "owner", name: "Ada" }];
     mockUpdateWorkspace.mockImplementation(
@@ -141,6 +154,36 @@ describe("WorkspaceTab — automatic updates", () => {
     expect(screen.getByText("test-workspace")).toBeInTheDocument();
     expect(screen.queryByRole("textbox", { name: "Slug" })).toBeNull();
     expect(screen.queryByRole("button", { name: /^Save$/ })).toBeNull();
+  });
+
+  it("saves policy through its dedicated endpoint without submitting cached settings", async () => {
+    workspaceRef.current.settings = { github_enabled: true };
+    const user = setupUser();
+    render(<WorkspaceTab />, {wrapper: I18nWrapper});
+    const control = screen.getByRole("switch", {name: "Restrict issue deletion"});
+    expect(control).not.toBeChecked();
+    await user.click(control);
+    await waitFor(() => expect(mockUpdateDeletionPolicy).toHaveBeenCalledWith("workspace-1", true));
+    expect(mockUpdateWorkspace).not.toHaveBeenCalled();
+  });
+
+  it("disables policy configuration on an older server without a fallback write", async () => {
+    workspaceRef.current.issue_deletion_policy_supported = undefined;
+    workspaceRef.current.restrict_issue_deletion = undefined;
+    const user = setupUser();
+    render(<WorkspaceTab />, { wrapper: I18nWrapper });
+    const control = screen.getByRole("switch", { name: "Restrict issue deletion" });
+    expect(control).toHaveAttribute("aria-disabled", "true");
+    expect(screen.getByText("This server does not support configuring issue deletion permissions.")).toBeInTheDocument();
+    await user.click(control);
+    expect(mockUpdateDeletionPolicy).not.toHaveBeenCalled();
+    expect(mockUpdateWorkspace).not.toHaveBeenCalled();
+  });
+
+  it("prevents ordinary members from changing the deletion policy", () => {
+    membersRef.current = [{user_id: "user-1", role: "member", name: "Ada"}];
+    render(<WorkspaceTab />, {wrapper: I18nWrapper});
+    expect(screen.getByRole("switch", {name: "Restrict issue deletion"})).toHaveAttribute("aria-disabled", "true");
   });
 
   it("auto-saves ordinary workspace fields silently, without invalidating issue caches", async () => {

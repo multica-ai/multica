@@ -132,6 +132,9 @@
     "issue_actions": "任務操作"
   },
   "delete": {
+    "failed_title": "無法刪除任務",
+    "permission_denied": "你沒有刪除此任務的權限。",
+    "failed": "任務未能刪除，請重試。",
     "title": "刪除任務？",
     "message": "{{identifier}} 及其評論、表情和附件將被永久刪除，且無法撤銷。"
   },

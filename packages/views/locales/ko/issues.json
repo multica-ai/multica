@@ -821,6 +821,7 @@
     "confirm": "실행 중지"
   },
   "batch": {
+    "delete_restricted": "본인 또는 본인 소유 에이전트가 만든 태스크를 삭제할 수 있습니다. 워크스페이스 owner와 admin은 모든 태스크를 삭제할 수 있습니다.",
     "selected": "{{count}}개 선택됨",
     "status": "상태",
     "priority": "우선순위",

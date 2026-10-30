@@ -859,6 +859,7 @@
     "confirm": "Stop run"
   },
   "batch": {
+    "delete_restricted": "You can delete issues you created or that your agents created. Workspace owners and admins can delete any issue.",
     "selected": "{{count}} selected",
     "status": "Status",
     "priority": "Priority",

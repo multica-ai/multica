@@ -858,6 +858,7 @@
     "confirm": "Arrêter l'exécution"
   },
   "batch": {
+    "delete_restricted": "Vous pouvez supprimer les tâches créées par vous ou par vos agents. Les propriétaires et administrateurs peuvent supprimer toute tâche.",
     "selected": "{{count}} sélectionnés",
     "status": "Statut",
     "priority": "Priorité",

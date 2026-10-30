@@ -735,6 +735,10 @@
     "usage_help": "使用方法"
   },
   "workspace": {
+    "permissions_title": "权限",
+    "issue_deletion_policy_unsupported": "当前服务端尚不支持配置任务删除权限。",
+    "restrict_issue_deletion": "限制任务删除权限",
+    "restrict_issue_deletion_hint": "成员可删除本人或本人拥有的智能体创建的任务。owner 和 admin 可删除任意任务。智能体仅可删除自己创建的任务。",
     "section_general": "工作区信息",
     "logo_label": "工作区图标",
     "change_logo_aria": "更换工作区图标",

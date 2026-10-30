@@ -14,6 +14,11 @@ const selection = vi.hoisted(() => ({
   select: vi.fn(),
   deselect: vi.fn(),
 }));
+const deletionPolicy = vi.hoisted(() => ({ allowed: true, restricted: false }));
+vi.mock("@multica/core/issues/use-issue-deletion", () => ({
+  useIssueDeletion: () => ({ restricted: deletionPolicy.restricted, canDelete: () => deletionPolicy.allowed }),
+}));
+
 vi.mock("@multica/core/issues/stores/selection-store", () => ({
   useIssueSelectionStore: (selector: (s: typeof selection) => unknown) => selector(selection),
 }));
@@ -104,6 +109,8 @@ function makeIssue(overrides: Partial<Issue> = {}): Issue {
 }
 
 beforeEach(() => {
+  deletionPolicy.allowed = true;
+  deletionPolicy.restricted = false;
   selection.selectedIds = new Set(["a"]);
   batchUpdate.mockClear();
   batchDelete.mockClear();
@@ -155,6 +162,17 @@ describe("BatchActionToolbar status routing (MUL-4155)", () => {
       ids: ["a"],
       updates: { assignee_type: "member", assignee_id: "user-1" },
     });
+  });
+
+  it("disables deleting a selection containing an unauthorized issue", () => {
+    deletionPolicy.allowed = false;
+    deletionPolicy.restricted = true;
+    render(<BatchActionToolbar issues={[makeIssue()]} />);
+    const button = screen.getByText("label", { selector: "button.text-destructive" });
+    expect(button).toBeDisabled();
+    fireEvent.click(button);
+    expect(screen.queryByRole("alertdialog")).not.toBeInTheDocument();
+    expect(batchDelete).not.toHaveBeenCalled();
   });
 
   it("opens the dedicated delete confirmation, not the run-confirm modal", () => {

@@ -821,6 +821,7 @@
     "confirm": "停止运行"
   },
   "batch": {
+    "delete_restricted": "你可以删除本人或本人拥有的智能体创建的任务。工作区 owner 和 admin 可以删除任意任务。",
     "selected": "已选择 {{count}} 个",
     "status": "状态",
     "priority": "优先级",
