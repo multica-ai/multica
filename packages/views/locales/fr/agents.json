@@ -902,6 +902,11 @@
     "failed_indicator": "En échec"
   },
   "transcript": {
+    "quiet_minutes_one": "Aucun nouvel événement depuis {{count}} minute",
+    "quiet_minutes_other": "Aucun nouvel événement depuis {{count}} minutes",
+    "quiet_tool": "En attente de {{tool}}.",
+    "quiet_running": "L’exécution peut encore être en cours.",
+    "quiet_stop_description": "L’exécution actuelle va s’arrêter. Les commentaires en attente pourront être traités dans une nouvelle exécution. Le travail déjà enregistré sera conservé.",
     "dialog_title": "Transcription d'exécution de l'agent",
     "status_running": "En cours",
     "status_completed": "Terminée",

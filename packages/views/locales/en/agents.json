@@ -902,6 +902,11 @@
     "failed_indicator": "Failed"
   },
   "transcript": {
+    "quiet_minutes_one": "No new events for {{count}} minute",
+    "quiet_minutes_other": "No new events for {{count}} minutes",
+    "quiet_tool": "Waiting for {{tool}}.",
+    "quiet_running": "The run may still be working.",
+    "quiet_stop_description": "The current run will stop. Queued comments can continue in a new run. Work already saved is kept.",
     "dialog_title": "Agent Execution Transcript",
     "status_running": "Running",
     "status_completed": "Completed",
