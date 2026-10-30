@@ -330,6 +330,32 @@ multica agent list --output json
 
 Scripts should use JSON output rather than parsing the terminal-oriented tables. The output formats and pagination flags each command supports are defined by `multica <command> --help`.
 
+### Reading issue timestamps
+
+In `multica issue list --output json` and `multica issue get --output json`,
+`created_at` and `updated_at` are RFC3339 timestamps. `last_activity_at` is
+nullable and uses RFC3339 with optional fractional seconds. The CLI preserves
+these API values; it does not convert them to the client's local timezone.
+
+A trailing `Z` means **UTC** (offset `+00:00`). For example,
+`2026-10-30T13:15:22Z` and `2026-10-30T21:15:22+08:00` denote the same instant.
+Honor the supplied `Z` or numeric offset rather than assuming every timestamp
+ends in `Z`. For age or staleness checks, parse timestamps as offset-aware
+instants and subtract them; do not remove the timezone or compare the displayed
+hour with a local wall clock.
+
+For example, in JavaScript:
+
+```js
+const updatedAt = Date.parse("2026-10-30T13:15:22Z");
+const now = Date.parse("2026-10-30T21:17:22+08:00");
+const ageSeconds = (now - updatedAt) / 1000; // 120 seconds, not eight hours
+```
+
+Handle a `null` `last_activity_at` before parsing it. Issue `start_date` and
+`due_date` are nullable calendar dates (`YYYY-MM-DD`), not instants to convert
+between timezones.
+
 ## Profiles and configuration
 
 The default configuration lives in `~/.multica/config.json`. Use `--profile <name>` to isolate a separate set of server address, token, default workspace, and daemon state:
