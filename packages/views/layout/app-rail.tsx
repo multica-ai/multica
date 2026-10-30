@@ -4,9 +4,12 @@ import { useMemo } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Settings, Users, type IconComponent } from "@multica/ui/icons";
 import { useChatStore } from "@multica/core/chat";
-import { chatSessionsOptions } from "@multica/core/chat/queries";
+import { chatSessionsWithThreadsOptions, isThreadChatSession } from "@multica/core/chat/queries";
 import { countUnreadChatMessages } from "@multica/core/chat/unread";
 import { useInboxUnreadCount } from "@multica/core/inbox/queries";
+import { useFeatureEnabled } from "@multica/core/config";
+import { TEAM_PAGE_FLAG } from "@multica/core/feature-flags";
+import type { ChatSession } from "@multica/core/types";
 import {
   RAIL_SPACES,
   useCurrentWorkspace,
@@ -31,22 +34,26 @@ import { RAIL_ICON_BUTTON_CLASS } from "./rail-styles";
 import { RailWorkspaces } from "./rail-workspaces";
 import { routeIconForPath } from "./route-icon-components";
 
+const EMPTY_CHAT_SESSIONS: ChatSession[] = [];
+
 type RailBadge =
   | { kind: "count"; value: number; tone: "brand" | "neutral" }
   | { kind: "dot"; tone: "warning" | "destructive" };
 
 /**
  * Rail badges. Inbox and Chat count unread; Team and Autopilots only flag
- * that something needs a look — the panel says what.
+ * that something needs a look — the panel says what. With the Team page on,
+ * agent chats live in Team, so Team carries the chat count, thread replies
+ * included (Team shows them under their messages).
  */
-function useRailBadges(): Partial<Record<RailSpaceId, RailBadge>> {
+function useRailBadges(teamPageEnabled: boolean): Partial<Record<RailSpaceId, RailBadge>> {
   const wsId = useCurrentWorkspace()?.id;
   const p = useWorkspacePaths();
   const { pathname } = useNavigation();
   const inboxUnread = useInboxUnreadCount(wsId);
 
-  const { data: chatSessions = [] } = useQuery({
-    ...chatSessionsOptions(wsId ?? ""),
+  const { data: chatSessions = EMPTY_CHAT_SESSIONS } = useQuery({
+    ...chatSessionsWithThreadsOptions(wsId ?? ""),
     enabled: !!wsId,
   });
   // The session the user is reading right now must not count: its row shows 0
@@ -59,12 +66,19 @@ function useRailBadges(): Partial<Record<RailSpaceId, RailBadge>> {
   const floatingChatOpen = useChatStore((s) => s.isOpen);
   const appForeground = useAppForeground();
   const viewedChatSessionId =
-    appForeground && (floatingChatOpen || isPathWithin(pathname, p.chat()))
+    appForeground &&
+    (floatingChatOpen ||
+      isPathWithin(pathname, p.chat()) ||
+      (teamPageEnabled && isPathWithin(pathname, p.team())))
       ? activeChatSessionId
       : null;
   const chatUnread = useMemo(
-    () => countUnreadChatMessages(chatSessions, viewedChatSessionId),
-    [chatSessions, viewedChatSessionId],
+    () =>
+      countUnreadChatMessages(
+        teamPageEnabled ? chatSessions : chatSessions.filter((s) => !isThreadChatSession(s)),
+        viewedChatSessionId,
+      ),
+    [chatSessions, teamPageEnabled, viewedChatSessionId],
   );
 
   const { stuck } = useTeamAgentStatus(wsId);
@@ -72,8 +86,10 @@ function useRailBadges(): Partial<Record<RailSpaceId, RailBadge>> {
 
   const badges: Partial<Record<RailSpaceId, RailBadge>> = {};
   if (inboxUnread > 0) badges.inbox = { kind: "count", value: inboxUnread, tone: "brand" };
-  if (chatUnread > 0) badges.chat = { kind: "count", value: chatUnread, tone: "neutral" };
-  if (stuck.length > 0) badges.team = { kind: "dot", tone: "warning" };
+  if (chatUnread > 0) {
+    badges[teamPageEnabled ? "team" : "chat"] = { kind: "count", value: chatUnread, tone: "neutral" };
+  }
+  if (stuck.length > 0 && !badges.team) badges.team = { kind: "dot", tone: "warning" };
   if (failingAutopilots.length > 0) badges.autopilots = { kind: "dot", tone: "destructive" };
   return badges;
 }
@@ -177,7 +193,9 @@ export function AppRail({
   const { t } = useT("layout");
   const p = useWorkspacePaths();
   const shell = useAppShell();
-  const badges = useRailBadges();
+  const teamPageEnabled = useFeatureEnabled(TEAM_PAGE_FLAG, false);
+  const badges = useRailBadges(teamPageEnabled);
+  const spaces = teamPageEnabled ? RAIL_SPACES.filter((id) => id !== "chat") : RAIL_SPACES;
   const space = shell?.space ?? null;
   const settingsPeek = usePeekHandlers("settings", space === "settings");
 
@@ -195,7 +213,7 @@ export function AppRail({
       fullLabel: t(($) => $.spaces.work),
     },
     team: {
-      href: p.agents(),
+      href: teamPageEnabled ? p.team() : p.agents(),
       icon: Users,
       label: t(($) => $.rail.team),
       fullLabel: t(($) => $.spaces.team),
@@ -234,7 +252,7 @@ export function AppRail({
         <div className="h-2 shrink-0" />
       )}
       <ul className="flex flex-col items-center gap-0.5">
-        {RAIL_SPACES.map((id) => (
+        {spaces.map((id) => (
           <RailSpaceLink
             key={id}
             space={id}

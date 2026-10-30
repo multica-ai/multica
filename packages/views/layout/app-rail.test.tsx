@@ -11,10 +11,11 @@ const state = vi.hoisted(() => ({
   pathname: "/acme/issues",
   appForeground: true,
   inboxUnread: 0,
-  chatSessions: [] as { id: string; unread_count?: number }[],
+  chatSessions: [] as { id: string; unread_count?: number; parent_chat_session_id?: string | null }[],
   chat: { activeSessionId: null as string | null, isOpen: false },
   stuck: [] as unknown[],
   failingAutopilots: [] as unknown[],
+  teamPage: false,
 }));
 
 vi.mock("../navigation", () => ({
@@ -42,10 +43,14 @@ vi.mock("@multica/core/inbox/queries", () => ({
   useInboxUnreadCount: () => state.inboxUnread,
 }));
 vi.mock("@multica/core/chat/queries", () => ({
-  chatSessionsOptions: (wsId: string) => ({
+  chatSessionsWithThreadsOptions: (wsId: string) => ({
     queryKey: ["chat", wsId, "sessions"],
     queryFn: async () => state.chatSessions,
   }),
+  isThreadChatSession: (s: { parent_chat_session_id?: string | null }) => !!s.parent_chat_session_id,
+}));
+vi.mock("@multica/core/config", () => ({
+  useFeatureEnabled: () => state.teamPage,
 }));
 // Callable-store shape (selectorFn + getState) per the repo testing rules.
 vi.mock("@multica/core/chat", () => ({
@@ -109,6 +114,7 @@ beforeEach(() => {
   state.chat = { activeSessionId: null, isOpen: false };
   state.stuck = [];
   state.failingAutopilots = [];
+  state.teamPage = false;
 });
 
 describe("AppRail global actions", () => {
@@ -229,6 +235,39 @@ describe("AppRail chat badge", () => {
     expect(chatBadge()).toHaveAttribute("aria-label", "5");
   });
 });
+
+describe("AppRail with the Team page on", () => {
+  beforeEach(() => {
+    state.teamPage = true;
+  });
+
+  it("lands Team on the Team page and drops Chat, whose chats live there", () => {
+    state.pathname = "/acme/team";
+    renderRail(<PanelReader />);
+    expect(link("/acme/team")).toHaveAttribute("aria-current", "page");
+    expect(link("/acme/chat")).toBeNull();
+    expect(screen.getByTestId("has-panel").textContent).toBe("false");
+  });
+
+  it("moves the chat count, thread replies included, onto Team", () => {
+    state.chatSessions = [
+      { id: "a", unread_count: 2 },
+      { id: "t", unread_count: 1, parent_chat_session_id: "a" },
+    ];
+    renderRail();
+    expect(countBadge("/acme/team")).toHaveAttribute("aria-label", "3");
+  });
+
+  it("keeps the Team panel on the other team pages", () => {
+    state.pathname = "/acme/runtimes";
+    renderRail(<PanelReader />);
+    expect(screen.getByTestId("has-panel").textContent).toBe("true");
+  });
+});
+
+function PanelReader() {
+  return <span data-testid="has-panel">{String(useAppShell()?.hasPanel)}</span>;
+}
 
 describe("AppRail panel peek", () => {
   afterEach(() => {

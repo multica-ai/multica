@@ -451,6 +451,7 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 		GitExtraCACerts:                gitca.Load(slog.Default()),
 	}
 	h := handler.New(queries, pool, hub, bus, emailSvc, store, cfSigner, analyticsClient, signupConfig, daemonHub)
+	h.RegisterConversationListeners(bus)
 	invitationRateLimits := handler.DefaultInvitationRateLimits()
 	invitationRateLimits.Actor.Limit = envNonNegativeInt("RATE_LIMIT_INVITATION_ACTOR_10M", invitationRateLimits.Actor.Limit)
 	invitationRateLimits.Workspace.Limit = envNonNegativeInt("RATE_LIMIT_INVITATION_WORKSPACE_24H", invitationRateLimits.Workspace.Limit)
@@ -2457,6 +2458,11 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					r.Post("/quick-actions/regenerate", h.RegenerateChatQuickActions)
 					r.Get("/messages", h.ListChatMessages)
 					r.Get("/messages/page", h.ListChatMessagesPage)
+					// Team page (MUL-8357): threads on a message, and issues
+					// created from one. 404 while the team_page flag is off.
+					r.Post("/threads", h.CreateChatThread)
+					r.Post("/messages/{messageId}/issue", h.CreateIssueFromChatMessage)
+					r.Get("/issues", h.ListChatMessageIssues)
 					r.Get("/pending-task", h.GetPendingChatTask)
 					r.Delete("/queued-tasks", h.ClearQueuedChatTasks)
 					r.Post("/queued-tasks/{taskId}/prioritize", h.PrioritizeQueuedChatTask)
@@ -2469,6 +2475,24 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 			})
 			r.Get("/api/chat/pending-tasks", h.ListPendingChatTasks)
 			r.Get("/api/chat/pending-tasks/has-any", h.HasPendingChatTasks)
+
+			// Team conversations (MUL-8357): channels, member direct messages
+			// and their threads. 404 while the team_page flag is off.
+			r.Route("/api/conversations", func(r chi.Router) {
+				r.Get("/", h.ListConversations)
+				r.Post("/", h.CreateConversation)
+				r.Post("/direct", h.OpenDirectConversation)
+				r.Route("/{conversationId}", func(r chi.Router) {
+					r.Get("/", h.GetConversation)
+					r.Patch("/", h.UpdateConversation)
+					r.Post("/members", h.AddConversationMembers)
+					r.Delete("/members/{memberType}/{memberId}", h.RemoveConversationMember)
+					r.Get("/messages", h.ListConversationMessages)
+					r.Post("/messages", h.SendConversationMessage)
+					r.Post("/threads", h.OpenConversationThread)
+					r.Post("/read", h.MarkConversationRead)
+				})
+			})
 
 			// Quick-agent bar: per-user pinned agents for one-tap new chats.
 			r.Get("/api/chat/pinned-agents", h.ListChatPinnedAgents)

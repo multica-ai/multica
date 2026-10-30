@@ -2,7 +2,7 @@
 import { describe, expect, it } from "vitest";
 import { paths } from "./paths";
 import { WORKSPACE_PAGES, type WorkspacePageKey } from "./route-icons";
-import { spaceForPath } from "./spaces";
+import { pathHasOwnList, spaceForPath } from "./spaces";
 
 describe("spaceForPath", () => {
   const ws = paths.workspace("acme");
@@ -26,6 +26,7 @@ describe("spaceForPath", () => {
     [ws.runtimeDetail("r-1"), "team"],
     [ws.skills(), "team"],
     [ws.usage(), "team"],
+    [`${ws.team()}?agent=a-1`, "team"],
     [ws.chatSession("c-1"), "chat"],
     [ws.autopilotDetail("ap-1"), "autopilots"],
     [`${ws.settings()}?tab=members`, "settings"],
@@ -37,5 +38,15 @@ describe("spaceForPath", () => {
     expect(spaceForPath(ws.attachmentPreview("f-1"))).toBeNull();
     expect(spaceForPath("/acme")).toBeNull();
     expect(spaceForPath("/")).toBeNull();
+  });
+});
+
+describe("pathHasOwnList", () => {
+  const ws = paths.workspace("acme");
+
+  it("is true only for pages that render their own list column", () => {
+    expect(pathHasOwnList(`${ws.team()}?channel=c-1`)).toBe(true);
+    expect(pathHasOwnList(ws.agents())).toBe(false);
+    expect(pathHasOwnList(ws.issues())).toBe(false);
   });
 });

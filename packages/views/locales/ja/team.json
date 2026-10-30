@@ -1,0 +1,191 @@
+{
+  "page": {
+    "title": "チーム",
+    "select_prompt": "一緒に作業する相手を選んでください"
+  },
+  "sidebar": {
+    "filter_placeholder": "絞り込み",
+    "agents": "エージェント",
+    "squads": "スクワッド",
+    "members": "メンバー",
+    "add_agent": "新しいエージェント",
+    "add_squad": "新しいスクワッド",
+    "invite_member": "メンバーを招待",
+    "you": "あなた",
+    "channels": "チャンネル",
+    "add_channel": "新しいチャンネル",
+    "archived_agents": "アーカイブ済み（{{count}}）",
+    "jump_to": "移動…",
+    "new": "新規",
+    "more": "他 {{count}} 件",
+    "show_less": "表示を減らす",
+    "invited": "招待済み"
+  },
+  "tabs": {
+    "chat": "チャット",
+    "work": "作業",
+    "setup": "設定"
+  },
+  "detail": {
+    "tabs_aria": "セクション",
+    "toggle_panel": "詳細の表示切り替え",
+    "not_found": "この項目は存在しないか、アクセス権がありません。",
+    "copy_link": "リンクをコピー",
+    "link_copied": "リンクをコピーしました",
+    "copied": "コピーしました"
+  },
+  "agent": {
+    "assign_issue": "タスクを割り当て",
+    "archive": "エージェントをアーカイブ"
+  },
+  "squad": {
+    "assign_issue": "タスクを割り当て",
+    "working_other": "{{count}} 件作業中",
+    "work_note": "スクワッドに割り当てた Issue はまず {{name}} に届き、適切なメンバーに振り分けられます。",
+    "members": "メンバー",
+    "leader": "リーダー",
+    "created_by": "作成者",
+    "how_it_works": "仕事の流れ",
+    "how_it_works_body": "スクワッドに Issue を割り当てると {{name}} が受け取り、必要に応じて分割して各メンバーに渡します。進捗は Issue に表示されます。",
+    "member_status": {
+      "working": "作業中",
+      "idle": "アイドル",
+      "offline": "オフライン",
+      "unstable": "不安定",
+      "archived": "アーカイブ済み"
+    }
+  },
+  "member": {
+    "dm_placeholder": "{{name}} にメッセージ",
+    "dm_empty": "{{name}} との会話の始まりです。見られるのはお二人だけです。",
+    "notes_placeholder": "メモを書く",
+    "notes_empty": "自分用のメモです。他の人には見えません。",
+    "role": {
+      "owner": "オーナー",
+      "admin": "管理者",
+      "member": "メンバー"
+    },
+    "copy_email": "メールをコピー",
+    "email": "メール",
+    "role_label": "ロール",
+    "joined": "参加日",
+    "agents": "エージェント",
+    "squads": "スクワッド"
+  },
+  "panel": {
+    "now": "現在",
+    "archived": "アーカイブ済みのため、作業を受け付けません。",
+    "properties": "プロパティ",
+    "runtime": "ランタイム",
+    "no_runtime": "未接続",
+    "model": "モデル",
+    "owner": "オーナー",
+    "squad": "スクワッド",
+    "leader": "リーダー",
+    "earlier": "以前の会話",
+    "unread": "未読",
+    "status": "ステータス",
+    "idle_note": "アイドル中 — Issue を割り当てるか、メッセージを送ってください。",
+    "offline_note": "オフライン — ランタイムが接続されていないため、接続されるまで作業は待機します。",
+    "replying_in_chat": "チャットで返信中",
+    "queued": "待機中:",
+    "chat_reply": "チャット返信",
+    "now_counts": "実行中 {{running}} · 待機 {{queued}}"
+  },
+  "channel": {
+    "private": "非公開",
+    "members_title": "#{{name}} のメンバー",
+    "add_members": "メンバーやエージェントを追加",
+    "remove": "削除",
+    "join": "チャンネルに参加",
+    "leave": "チャンネルから退出",
+    "archive": "チャンネルをアーカイブ",
+    "unarchive": "アーカイブを解除",
+    "archived_hint": "このチャンネルはアーカイブ済みです。閲覧はできますが投稿はできません。",
+    "empty": "#{{name}} の始まりです。チャンネル内のエージェントを @メンションして質問できます。",
+    "placeholder": "#{{name}} にメッセージ",
+    "agents_hint": "チャンネル内のエージェントは @メンションされると返信し、返信したスレッドでは続けて返信します。",
+    "not_found": "このチャンネルは存在しないか、アクセス権がありません。",
+    "create": {
+      "title": "チャンネルを作成",
+      "name": "名前",
+      "name_placeholder": "例: release-0.9",
+      "about": "目的",
+      "about_placeholder": "このチャンネルは何のためのものですか？",
+      "private_hint": "メンバーだけが閲覧できます。参加しているエージェントが内容を外に持ち出すことはありません。",
+      "agents": "エージェント",
+      "people": "メンバー",
+      "submit": "チャンネルを作成",
+      "failed": "チャンネルを作成できませんでした",
+      "name_taken": "同じ名前のチャンネルがあります",
+      "description": "人とエージェントが 1 つのテーマについて話す共有の場所です。エージェントは @メンションすると返信します。",
+      "optional": "任意",
+      "members": "メンバー",
+      "members_count_other": "あなたを含め {{count}} 人",
+      "no_matches": "一致する項目はありません",
+      "visibility": "公開範囲",
+      "public_hint": "ワークスペースの誰でも見つけて参加できます。",
+      "privacy_note": "エージェントが誰かの個人チャットを見ることはありません",
+      "cancel": "キャンセル"
+    },
+    "public": "公開",
+    "about": "概要",
+    "no_about": "目的は未設定です。",
+    "people": "メンバー",
+    "agents": "エージェント",
+    "settings": "設定",
+    "visibility": "公開範囲",
+    "mention_hint": "このチャンネルのエージェントは @メンションすると返信します",
+    "no_mention_note": "あなたにだけ表示: エージェントがメンションされていないため、誰も返信しません。"
+  },
+  "conversation": {
+    "replying": "{{name}} が返信中…",
+    "load_older": "以前のメッセージを読み込む",
+    "send_failed": "メッセージを送信できませんでした",
+    "system": "Multica",
+    "agent_badge": "エージェント",
+    "thread_placeholder": "返信…",
+    "thread_empty": "返信はこのメッセージの下にまとまります。",
+    "new_messages": "新着"
+  },
+  "chat": {
+    "untitled": "無題",
+    "channel_label": {
+      "slack": "Slack",
+      "lark": "Lark",
+      "dingtalk": "DingTalk",
+      "wecom": "WeCom",
+      "telegram": "Telegram",
+      "other": "外部チャネル"
+    },
+    "earlier_label": "以前の会話 · {{date}}",
+    "earlier_from_channel": "{{channel}} で開始",
+    "back_to_current": "現在の会話に戻る",
+    "read_only": "以前の会話は読み取り専用です。その文脈は現在の会話に引き継がれません。",
+    "read_only_channel": "この会話への返信は {{channel}} で行います。",
+    "no_access": "{{name}} とのチャットは開始できません。",
+    "archived_no_chat": "{{name}} はアーカイブ済みで、あなたとの会話はありません。",
+    "thread": {
+      "title": "スレッド",
+      "empty": "ここでの返信はこのメッセージに紐づきます。{{name}} には返信先のメッセージも伝わります。",
+      "reply": "スレッドで返信",
+      "replies_other": "{{count}} 件の返信",
+      "open_failed": "スレッドを開けませんでした",
+      "last_reply": "最終返信 {{time}}",
+      "in": "{{name}} 内",
+      "close": "スレッドを閉じる"
+    },
+    "issue": {
+      "create": "タスクを作成",
+      "created": "{{identifier}} を作成し、{{name}} に割り当てました",
+      "create_failed": "タスクを作成できませんでした"
+    }
+  },
+  "status": {
+    "archived": "アーカイブ済み",
+    "offline": "オフライン",
+    "working": "作業中",
+    "waiting": "待機中",
+    "idle": "アイドル"
+  }
+}

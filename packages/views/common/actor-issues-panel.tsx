@@ -25,7 +25,7 @@ import { IssueSurface } from "../issues/surface/issue-surface";
 import { useT } from "../i18n";
 import { PAGE_GUTTER } from "../layout/page-header";
 
-export type TaskActorType = "member" | "agent";
+export type TaskActorType = "member" | "agent" | "squad";
 
 const SCOPE_VALUES: ActorIssuesScope[] = ["assigned", "created"];
 

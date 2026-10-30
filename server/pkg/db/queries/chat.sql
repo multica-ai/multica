@@ -19,6 +19,12 @@ WHERE id = $1;
 SELECT * FROM chat_session
 WHERE id = $1 AND workspace_id = $2;
 
+-- name: ListChatSessionCreators :many
+-- Owners of a page of chat tasks, so task lists can hide the content of chat
+-- tasks the viewer did not start.
+SELECT id, creator_id FROM chat_session
+WHERE id = ANY(@ids::uuid[]);
+
 -- name: GetPublicChatSessionInWorkspace :one
 -- A channel command is a durable control-plane record, not a public chat turn.
 -- Channel-created sessions therefore become public only after they contain a
@@ -28,6 +34,9 @@ WHERE id = $1 AND workspace_id = $2;
 SELECT cs.* FROM chat_session AS cs
 WHERE cs.id = $1
   AND cs.workspace_id = $2
+  -- A Team conversation's hidden agent context is read through the
+  -- conversation, which owns its access rules.
+  AND cs.conversation_id IS NULL
   AND (
     cs.explicitly_created_at IS NOT NULL
     OR
@@ -51,7 +60,12 @@ SELECT cs.*,
        COALESCE(lm.role, '') AS last_message_role,
        lm.created_at AS last_message_at,
        lm.failure_reason AS last_message_failure_reason,
-       COALESCE(lm.message_kind, '') AS last_message_kind
+       COALESCE(lm.message_kind, '') AS last_message_kind,
+       CASE WHEN cs.parent_chat_session_id IS NULL THEN 0
+            ELSE (SELECT count(*) FROM chat_message m
+                    WHERE m.chat_session_id = cs.id
+                      AND m.message_kind != 'channel_command')
+       END::int AS thread_reply_count
 FROM chat_session cs
 LEFT JOIN LATERAL (
   SELECT content, role, created_at, failure_reason, message_kind
@@ -62,6 +76,11 @@ LEFT JOIN LATERAL (
    LIMIT 1
 ) lm ON true
 WHERE cs.workspace_id = $1 AND cs.creator_id = $2 AND cs.status = 'active'
+  -- Threads (MUL-8357) are listed only for clients that render them, so an
+  -- older client never shows a thread as a separate conversation.
+  AND (sqlc.arg('include_threads')::bool OR cs.parent_chat_session_id IS NULL)
+  -- A Team conversation's hidden agent context is never a chat of its own.
+  AND cs.conversation_id IS NULL
   AND (
     cs.explicitly_created_at IS NOT NULL
     OR
@@ -88,7 +107,12 @@ SELECT cs.*,
        COALESCE(lm.role, '') AS last_message_role,
        lm.created_at AS last_message_at,
        lm.failure_reason AS last_message_failure_reason,
-       COALESCE(lm.message_kind, '') AS last_message_kind
+       COALESCE(lm.message_kind, '') AS last_message_kind,
+       CASE WHEN cs.parent_chat_session_id IS NULL THEN 0
+            ELSE (SELECT count(*) FROM chat_message m
+                    WHERE m.chat_session_id = cs.id
+                      AND m.message_kind != 'channel_command')
+       END::int AS thread_reply_count
 FROM chat_session cs
 LEFT JOIN LATERAL (
   SELECT content, role, created_at, failure_reason, message_kind
@@ -99,6 +123,9 @@ LEFT JOIN LATERAL (
    LIMIT 1
 ) lm ON true
 WHERE cs.workspace_id = $1 AND cs.creator_id = $2
+  AND (sqlc.arg('include_threads')::bool OR cs.parent_chat_session_id IS NULL)
+  -- A Team conversation's hidden agent context is never a chat of its own.
+  AND cs.conversation_id IS NULL
   AND (
     cs.explicitly_created_at IS NOT NULL
     OR
@@ -1471,6 +1498,7 @@ WHERE atq.chat_session_id IS NOT NULL
   AND atq.regenerate_quick_actions_for IS NULL
   AND cs.workspace_id = $1
   AND cs.creator_id = $2
+  AND cs.conversation_id IS NULL
 ORDER BY atq.created_at DESC;
 
 -- name: HasPendingChatTasksByCreator :one
@@ -1495,6 +1523,7 @@ SELECT EXISTS (
     AND cs.workspace_id = sqlc.arg(workspace_id)
     AND cs.creator_id = sqlc.arg(creator_id)
     AND cs.agent_id = ANY(sqlc.arg(agent_ids)::uuid[])
+    AND cs.conversation_id IS NULL
 ) AS has_pending;
 
 -- name: MarkChatSessionRead :exec
@@ -1727,5 +1756,65 @@ WHERE workspace_id = $1
   AND creator_id = $2
   AND agent_id = $3
   AND status = 'active'
+  AND parent_chat_session_id IS NULL
+  AND conversation_id IS NULL
 ORDER BY created_at ASC
 LIMIT 1;
+
+-- name: GetChatThreadByRoot :one
+SELECT * FROM chat_session
+WHERE root_chat_message_id = $1 AND workspace_id = $2;
+
+-- name: CreateChatThreadSession :one
+-- Get-or-create a thread on one message (MUL-8357). The partial unique index
+-- on root_chat_message_id turns a concurrent second open into a no-op; the
+-- caller then reads the winner with GetChatThreadByRoot. A thread is created
+-- explicitly, so it is a public Chat before its first reply.
+INSERT INTO chat_session (
+    id, workspace_id, agent_id, creator_id, title, runtime_id, project_id,
+    parent_chat_session_id, root_chat_message_id, explicitly_created_at
+)
+VALUES (
+    sqlc.arg('id'), sqlc.arg('workspace_id'), sqlc.arg('agent_id'), sqlc.arg('creator_id'), sqlc.arg('title'),
+    (SELECT runtime_id FROM agent WHERE id = sqlc.arg('agent_id')),
+    sqlc.narg('project_id'), sqlc.arg('parent_chat_session_id'), sqlc.arg('root_chat_message_id'), now()
+)
+ON CONFLICT (root_chat_message_id) WHERE root_chat_message_id IS NOT NULL DO NOTHING
+RETURNING *;
+
+-- name: ListChatThreadIDsByParent :many
+SELECT id FROM chat_session
+WHERE parent_chat_session_id = $1 AND workspace_id = $2;
+
+-- name: CreateChatEventMessage :one
+-- A system-authored line in a chat (an issue created from a message, or its
+-- status moving). Stored as an assistant row so every reader renders it, with
+-- a kind the Team page draws as a compact event.
+INSERT INTO chat_message (id, chat_session_id, role, content, message_kind)
+VALUES (sqlc.arg('id'), sqlc.arg('chat_session_id'), 'assistant', sqlc.arg('content'), sqlc.arg('message_kind'))
+RETURNING *;
+
+-- name: CreateChatMessageIssue :one
+INSERT INTO chat_message_issue (issue_id, workspace_id, chat_session_id, chat_message_id, thread_session_id, created_by)
+VALUES ($1, $2, $3, $4, $5, $6)
+RETURNING *;
+
+-- name: GetChatMessageIssue :one
+SELECT * FROM chat_message_issue
+WHERE issue_id = $1;
+
+-- name: ListChatMessageIssuesBySession :many
+-- Issues created from this conversation's messages, for the chip under each
+-- message. A deleted issue drops out through the join.
+SELECT cmi.issue_id, cmi.chat_message_id, cmi.thread_session_id,
+       i.number AS issue_number, i.title AS issue_title, i.status AS issue_status
+FROM chat_message_issue cmi
+JOIN issue i ON i.id = cmi.issue_id AND i.workspace_id = cmi.workspace_id
+WHERE cmi.chat_session_id = $1 AND cmi.workspace_id = $2
+ORDER BY cmi.created_at ASC;
+
+-- name: DeleteChatMessageIssuesBySessions :exec
+DELETE FROM chat_message_issue
+WHERE workspace_id = sqlc.arg('workspace_id')
+  AND (chat_session_id = ANY(sqlc.arg('session_ids')::uuid[])
+       OR thread_session_id = ANY(sqlc.arg('session_ids')::uuid[]));

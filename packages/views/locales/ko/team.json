@@ -1,0 +1,191 @@
+{
+  "page": {
+    "title": "팀",
+    "select_prompt": "함께 일할 대상을 선택하세요"
+  },
+  "sidebar": {
+    "filter_placeholder": "필터",
+    "agents": "에이전트",
+    "squads": "스쿼드",
+    "members": "멤버",
+    "add_agent": "새 에이전트",
+    "add_squad": "새 스쿼드",
+    "invite_member": "멤버 초대",
+    "you": "나",
+    "channels": "채널",
+    "add_channel": "새 채널",
+    "archived_agents": "보관됨 ({{count}})",
+    "jump_to": "이동…",
+    "new": "새로 만들기",
+    "more": "{{count}}개 더",
+    "show_less": "간단히 보기",
+    "invited": "초대됨"
+  },
+  "tabs": {
+    "chat": "채팅",
+    "work": "작업",
+    "setup": "설정"
+  },
+  "detail": {
+    "tabs_aria": "섹션",
+    "toggle_panel": "세부 정보 표시 전환",
+    "not_found": "이 항목이 없거나 접근 권한이 없습니다.",
+    "copy_link": "링크 복사",
+    "link_copied": "링크를 복사했습니다",
+    "copied": "복사했습니다"
+  },
+  "agent": {
+    "assign_issue": "태스크 할당",
+    "archive": "에이전트 보관"
+  },
+  "squad": {
+    "assign_issue": "태스크 할당",
+    "working_other": "{{count}}명 작업 중",
+    "work_note": "스쿼드에 할당된 이슈는 먼저 {{name}}에게 가고, {{name}}이(가) 알맞은 멤버에게 배분합니다.",
+    "members": "멤버",
+    "leader": "리더",
+    "created_by": "만든 사람",
+    "how_it_works": "작업 흐름",
+    "how_it_works_body": "스쿼드에 이슈를 할당하면 {{name}}이(가) 받아 필요하면 나누고 각 부분을 멤버에게 넘깁니다. 진행 상황은 이슈에 표시됩니다.",
+    "member_status": {
+      "working": "작업 중",
+      "idle": "유휴",
+      "offline": "오프라인",
+      "unstable": "불안정",
+      "archived": "보관됨"
+    }
+  },
+  "member": {
+    "dm_placeholder": "{{name}}에게 메시지",
+    "dm_empty": "{{name}}와(과)의 대화가 시작됩니다. 두 사람만 볼 수 있습니다.",
+    "notes_placeholder": "메모 남기기",
+    "notes_empty": "나만 보는 메모입니다.",
+    "role": {
+      "owner": "소유자",
+      "admin": "관리자",
+      "member": "멤버"
+    },
+    "copy_email": "이메일 복사",
+    "email": "이메일",
+    "role_label": "역할",
+    "joined": "가입일",
+    "agents": "에이전트",
+    "squads": "스쿼드"
+  },
+  "panel": {
+    "now": "현재",
+    "archived": "보관되어 더 이상 작업을 받지 않습니다.",
+    "properties": "속성",
+    "runtime": "런타임",
+    "no_runtime": "연결 안 됨",
+    "model": "모델",
+    "owner": "소유자",
+    "squad": "스쿼드",
+    "leader": "리더",
+    "earlier": "이전 대화",
+    "unread": "읽지 않음",
+    "status": "상태",
+    "idle_note": "유휴 상태 — 이슈를 할당하거나 메시지를 보내세요.",
+    "offline_note": "오프라인 — 런타임이 연결되지 않아 연결될 때까지 작업이 대기합니다.",
+    "replying_in_chat": "채팅에서 답장 중",
+    "queued": "대기열:",
+    "chat_reply": "채팅 답장",
+    "now_counts": "실행 중 {{running}} · 대기 {{queued}}"
+  },
+  "channel": {
+    "private": "비공개",
+    "members_title": "#{{name}} 멤버",
+    "add_members": "사람 또는 에이전트 추가",
+    "remove": "제거",
+    "join": "채널 참여",
+    "leave": "채널 나가기",
+    "archive": "채널 보관",
+    "unarchive": "보관 해제",
+    "archived_hint": "보관된 채널입니다. 읽을 수는 있지만 글을 쓸 수 없습니다.",
+    "empty": "#{{name}}의 시작입니다. 채널의 에이전트를 @멘션해 질문하세요.",
+    "placeholder": "#{{name}}에 메시지",
+    "agents_hint": "채널의 에이전트는 @멘션되면 답하고, 답한 스레드에서는 계속 답합니다.",
+    "not_found": "채널이 없거나 접근 권한이 없습니다.",
+    "create": {
+      "title": "채널 만들기",
+      "name": "이름",
+      "name_placeholder": "예: release-0.9",
+      "about": "목적",
+      "about_placeholder": "이 채널은 무엇에 관한 채널인가요?",
+      "private_hint": "멤버만 볼 수 있습니다. 채널의 에이전트는 내용을 다른 곳으로 가져가지 않습니다.",
+      "agents": "에이전트",
+      "people": "사람",
+      "submit": "채널 만들기",
+      "failed": "채널을 만들 수 없습니다",
+      "name_taken": "같은 이름의 채널이 있습니다",
+      "description": "사람과 에이전트가 한 주제로 대화하는 공유 공간입니다. 에이전트는 @멘션하면 답장합니다.",
+      "optional": "선택",
+      "members": "멤버",
+      "members_count_other": "나를 포함해 {{count}}명",
+      "no_matches": "일치하는 항목 없음",
+      "visibility": "공개 범위",
+      "public_hint": "워크스페이스의 누구나 찾고 참여할 수 있습니다.",
+      "privacy_note": "에이전트는 누구의 개인 채팅도 보지 않습니다",
+      "cancel": "취소"
+    },
+    "public": "공개",
+    "about": "소개",
+    "no_about": "목적이 설정되지 않았습니다.",
+    "people": "사람",
+    "agents": "에이전트",
+    "settings": "설정",
+    "visibility": "공개 범위",
+    "mention_hint": "이 채널의 에이전트는 @멘션하면 답장합니다",
+    "no_mention_note": "나에게만 표시: 멘션된 에이전트가 없어 아무도 답장하지 않습니다."
+  },
+  "conversation": {
+    "replying": "{{name}} 답장 중…",
+    "load_older": "이전 메시지 불러오기",
+    "send_failed": "메시지를 보내지 못했습니다",
+    "system": "Multica",
+    "agent_badge": "에이전트",
+    "thread_placeholder": "답장…",
+    "thread_empty": "답장은 이 메시지 아래에 모입니다.",
+    "new_messages": "새 메시지"
+  },
+  "chat": {
+    "untitled": "제목 없음",
+    "channel_label": {
+      "slack": "Slack",
+      "lark": "Lark",
+      "dingtalk": "DingTalk",
+      "wecom": "WeCom",
+      "telegram": "Telegram",
+      "other": "외부 채널"
+    },
+    "earlier_label": "이전 대화 · {{date}}",
+    "earlier_from_channel": "{{channel}}에서 시작",
+    "back_to_current": "현재 대화로",
+    "read_only": "이전 대화는 읽기 전용이며, 그 맥락은 현재 대화로 이어지지 않습니다.",
+    "read_only_channel": "이 대화의 답장은 {{channel}}에서 합니다.",
+    "no_access": "{{name}}와(과) 채팅을 시작할 수 없습니다.",
+    "archived_no_chat": "{{name}}은(는) 보관되었으며 대화 기록이 없습니다.",
+    "thread": {
+      "title": "스레드",
+      "empty": "여기의 답장은 이 메시지에만 남습니다. {{name}}은(는) 답장 대상 메시지를 함께 봅니다.",
+      "reply": "스레드에서 답장",
+      "replies_other": "답장 {{count}}개",
+      "open_failed": "스레드를 열 수 없습니다",
+      "last_reply": "마지막 답장 {{time}}",
+      "in": "{{name}}에서",
+      "close": "스레드 닫기"
+    },
+    "issue": {
+      "create": "태스크 만들기",
+      "created": "{{identifier}}을(를) 만들어 {{name}}에게 할당했습니다",
+      "create_failed": "태스크를 만들 수 없습니다"
+    }
+  },
+  "status": {
+    "archived": "보관됨",
+    "offline": "오프라인",
+    "working": "작업 중",
+    "waiting": "대기 중",
+    "idle": "유휴"
+  }
+}

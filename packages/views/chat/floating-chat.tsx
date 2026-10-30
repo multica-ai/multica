@@ -24,8 +24,8 @@ export function FloatingChat() {
   const wsPaths = useWorkspacePaths();
 
   if (!enabled) return null;
-  // Suppress on the Chat tab — it renders the same conversation full-page.
-  if (isFloatingChatRouteSuppressed(pathname, wsPaths.chat())) return null;
+  // Suppress on the Chat tab and Team page — they render the same conversation.
+  if (isFloatingChatRouteSuppressed(pathname, wsPaths.chat(), wsPaths.team())) return null;
 
   return (
     <>

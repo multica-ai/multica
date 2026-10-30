@@ -13,8 +13,16 @@ import { PageHeader } from "../layout/page-header";
 import { WorkspaceAvatar } from "../workspace/workspace-avatar";
 import { ActorIssuesPanel } from "../common/actor-issues-panel";
 import { useT } from "../i18n";
+import { useWorkspacePaths } from "@multica/core/paths";
+import { TeamRedirect, teamHrefForMember, useTeamPageEnabled } from "../team/redirects";
 
 export function MemberDetailPage({ userId }: { userId: string }) {
+  const wsPaths = useWorkspacePaths();
+  if (useTeamPageEnabled()) return <TeamRedirect to={teamHrefForMember(wsPaths.team(), userId)} />;
+  return <MemberDetailPageContent userId={userId} />;
+}
+
+function MemberDetailPageContent({ userId }: { userId: string }) {
   const { t } = useT("members");
   const wsId = useWorkspaceId();
   const workspace = useCurrentWorkspace();

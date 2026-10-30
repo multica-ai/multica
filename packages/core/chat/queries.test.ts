@@ -3,6 +3,8 @@ import { describe, expect, it } from "vitest";
 import type { TaskMessagePayload } from "../types/events";
 import type { ChatSession } from "../types/chat";
 import {
+  chatSessionsOptions,
+  chatSessionsWithThreadsOptions,
   countUnreadChatSessions,
   isTaskMessageTaskId,
   mergeTaskMessagesBySeq,
@@ -186,5 +188,28 @@ describe("countUnreadChatSessions", () => {
     ];
 
     expect(countUnreadChatSessions(sessions)).toBe(0);
+  });
+});
+
+describe("chatSessionsOptions", () => {
+  const base = {
+    workspace_id: "ws",
+    agent_id: "a1",
+    creator_id: "u1",
+    title: "",
+    status: "active" as const,
+    has_unread: false,
+    created_at: "",
+    updated_at: "",
+  };
+  const conversation: ChatSession = { ...base, id: "c1" };
+  const thread: ChatSession = { ...base, id: "t1", parent_chat_session_id: "c1", root_chat_message_id: "m1" };
+
+  it("lists conversations only while sharing the cache that holds threads", () => {
+    const select = chatSessionsOptions("ws").select!;
+    expect(select([conversation, thread])).toEqual([conversation]);
+    const noThreads = [conversation];
+    expect(select(noThreads)).toBe(noThreads);
+    expect(chatSessionsWithThreadsOptions("ws").queryKey).toEqual(chatSessionsOptions("ws").queryKey);
   });
 });

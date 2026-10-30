@@ -1,0 +1,191 @@
+{
+  "page": {
+    "title": "团队",
+    "select_prompt": "选择一位成员开始协作"
+  },
+  "sidebar": {
+    "filter_placeholder": "筛选",
+    "agents": "智能体",
+    "squads": "小队",
+    "members": "成员",
+    "add_agent": "新建智能体",
+    "add_squad": "新建小队",
+    "invite_member": "邀请成员",
+    "you": "你",
+    "channels": "频道",
+    "add_channel": "新建频道",
+    "archived_agents": "已归档（{{count}}）",
+    "jump_to": "跳转到…",
+    "new": "新建",
+    "more": "还有 {{count}} 个",
+    "show_less": "收起",
+    "invited": "已邀请"
+  },
+  "tabs": {
+    "chat": "对话",
+    "work": "工作",
+    "setup": "设置"
+  },
+  "detail": {
+    "tabs_aria": "分区",
+    "toggle_panel": "显示或隐藏详情",
+    "not_found": "该对象不存在，或你没有访问权限。",
+    "copy_link": "复制链接",
+    "link_copied": "链接已复制",
+    "copied": "已复制"
+  },
+  "agent": {
+    "assign_issue": "指派任务",
+    "archive": "归档智能体"
+  },
+  "squad": {
+    "assign_issue": "指派任务",
+    "working_other": "{{count}} 个工作中",
+    "work_note": "分配给小队的 issue 会先交给 {{name}}，由它分派给合适的成员。",
+    "members": "成员",
+    "leader": "队长",
+    "created_by": "创建者",
+    "how_it_works": "工作如何流转",
+    "how_it_works_body": "把 issue 分配给小队，{{name}} 会接手，必要时拆分，再交给各个成员。进度会显示在 issue 上。",
+    "member_status": {
+      "working": "工作中",
+      "idle": "空闲",
+      "offline": "离线",
+      "unstable": "不稳定",
+      "archived": "已归档"
+    }
+  },
+  "member": {
+    "dm_placeholder": "发消息给 {{name}}",
+    "dm_empty": "这是你和 {{name}} 对话的开始，只有你们两人能看到。",
+    "notes_placeholder": "记点什么",
+    "notes_empty": "写给自己的笔记，其他人看不到。",
+    "role": {
+      "owner": "所有者",
+      "admin": "管理员",
+      "member": "成员"
+    },
+    "copy_email": "复制邮箱",
+    "email": "邮箱",
+    "role_label": "角色",
+    "joined": "加入时间",
+    "agents": "智能体",
+    "squads": "小队"
+  },
+  "panel": {
+    "now": "当前",
+    "archived": "已归档，不再接收工作。",
+    "properties": "属性",
+    "runtime": "运行时",
+    "no_runtime": "未连接",
+    "model": "模型",
+    "owner": "所有者",
+    "squad": "小队",
+    "leader": "队长",
+    "earlier": "以前的对话",
+    "unread": "未读",
+    "status": "状态",
+    "idle_note": "空闲中 — 给它分配 issue，或直接发消息。",
+    "offline_note": "离线 — 运行时未连接，任务会等到它重新连接。",
+    "replying_in_chat": "正在聊天中回复",
+    "queued": "排队中：",
+    "chat_reply": "一条聊天回复",
+    "now_counts": "{{running}} 个运行中 · {{queued}} 个排队"
+  },
+  "channel": {
+    "private": "私有",
+    "members_title": "#{{name}} 的成员",
+    "add_members": "添加成员或智能体",
+    "remove": "移除",
+    "join": "加入频道",
+    "leave": "退出频道",
+    "archive": "归档频道",
+    "unarchive": "取消归档",
+    "archived_hint": "该频道已归档，可以阅读但无法发言。",
+    "empty": "这是 #{{name}} 的开始。@ 频道里的智能体向它提问。",
+    "placeholder": "发消息到 #{{name}}",
+    "agents_hint": "频道里的智能体在被 @ 时回复，并在它回答过的话题里继续回复。",
+    "not_found": "该频道不存在，或你没有访问权限。",
+    "create": {
+      "title": "创建频道",
+      "name": "名称",
+      "name_placeholder": "例如 release-0.9",
+      "about": "用途",
+      "about_placeholder": "这个频道是做什么的？",
+      "private_hint": "只有成员可见。频道里的智能体不会把内容带到别处。",
+      "agents": "智能体",
+      "people": "成员",
+      "submit": "创建频道",
+      "failed": "无法创建频道",
+      "name_taken": "已有同名频道",
+      "description": "成员和智能体围绕一个主题讨论的共享空间。@ 提及智能体时它才会回复。",
+      "optional": "可选",
+      "members": "成员",
+      "members_count_other": "含你共 {{count}} 位",
+      "no_matches": "没有匹配项",
+      "visibility": "可见性",
+      "public_hint": "工作区里的任何人都可以找到并加入。",
+      "privacy_note": "智能体看不到任何人的私聊",
+      "cancel": "取消"
+    },
+    "public": "公开",
+    "about": "关于",
+    "no_about": "未设置用途。",
+    "people": "成员",
+    "agents": "智能体",
+    "settings": "设置",
+    "visibility": "可见性",
+    "mention_hint": "@ 提及频道里的智能体，它才会回复",
+    "no_mention_note": "仅你可见：没有 @ 任何智能体，所以不会有智能体回复。"
+  },
+  "conversation": {
+    "replying": "{{name}} 正在回复…",
+    "load_older": "加载更早的消息",
+    "send_failed": "消息未发送",
+    "system": "Multica",
+    "agent_badge": "智能体",
+    "thread_placeholder": "回复…",
+    "thread_empty": "回复会留在这条消息下。",
+    "new_messages": "新消息"
+  },
+  "chat": {
+    "untitled": "未命名",
+    "channel_label": {
+      "slack": "Slack",
+      "lark": "飞书",
+      "dingtalk": "钉钉",
+      "wecom": "企业微信",
+      "telegram": "Telegram",
+      "other": "外部渠道"
+    },
+    "earlier_label": "以前的对话 · {{date}}",
+    "earlier_from_channel": "来自{{channel}}",
+    "back_to_current": "回到当前对话",
+    "read_only": "以前的对话只读，其中的上下文不会带到当前对话。",
+    "read_only_channel": "这段对话请在{{channel}}里回复。",
+    "no_access": "你无法和 {{name}} 发起对话。",
+    "archived_no_chat": "{{name}} 已归档，你和它没有对话。",
+    "thread": {
+      "title": "话题",
+      "empty": "这里的回复只属于这条消息。{{name}} 会看到你回复的那条消息。",
+      "reply": "在话题中回复",
+      "replies_other": "{{count}} 条回复",
+      "open_failed": "无法打开话题",
+      "last_reply": "最后回复 {{time}}",
+      "in": "来自 {{name}}",
+      "close": "关闭话题"
+    },
+    "issue": {
+      "create": "创建任务",
+      "created": "已创建 {{identifier}} 并指派给 {{name}}",
+      "create_failed": "无法创建任务"
+    }
+  },
+  "status": {
+    "archived": "已归档",
+    "offline": "离线",
+    "working": "工作中",
+    "waiting": "等待中",
+    "idle": "空闲"
+  }
+}

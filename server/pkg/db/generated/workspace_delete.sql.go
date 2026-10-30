@@ -337,6 +337,21 @@ deleted_draft_restores AS (
 deleted_agent_builder_drafts AS (
     DELETE FROM agent_builder_draft WHERE workspace_id = $1
 ),
+deleted_chat_message_issues AS (
+    DELETE FROM chat_message_issue WHERE workspace_id = $1
+),
+deleted_conversation_agent_sessions AS (
+    DELETE FROM conversation_agent_session WHERE workspace_id = $1
+),
+deleted_conversation_messages AS (
+    DELETE FROM conversation_message WHERE workspace_id = $1
+),
+deleted_conversation_members AS (
+    DELETE FROM conversation_member WHERE workspace_id = $1
+),
+deleted_conversations AS (
+    DELETE FROM conversation WHERE workspace_id = $1
+),
 deleted_comment_reactions AS (
     DELETE FROM comment_reaction WHERE workspace_id = $1
 ),

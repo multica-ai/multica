@@ -1,7 +1,7 @@
 "use client";
 
 import { createContext, use, useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { spaceForPath, type AppSpaceId } from "@multica/core/paths";
+import { pathHasOwnList, spaceForPath, type AppSpaceId } from "@multica/core/paths";
 import { useSidebarSafe } from "@multica/ui/components/ui/sidebar";
 import { useNavigation } from "../navigation";
 
@@ -73,7 +73,8 @@ export function AppShellProvider({
   // Keyed by `${workspaceSlug}/${space}`. The fragment is left out so a
   // comment deep link is not replayed on every return to the space.
   const [spaceUrls, setSpaceUrls] = useState<Record<string, string>>({});
-  const hasPanel = space !== null && PANEL_SPACES.has(space);
+  const hasPanel =
+    space !== null && PANEL_SPACES.has(space) && !pathHasOwnList(renderedPathname || pathname);
   const [listCollapsed, setListCollapsed] = useState(false);
   const [peekSpace, setPeekSpace] = useState<AppSpaceId | null>(null);
   const openTimer = useRef<ReturnType<typeof setTimeout> | null>(null);

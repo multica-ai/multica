@@ -420,17 +420,6 @@ func (q *Queries) ClearChannelChatContextPendingFresh(ctx context.Context, arg C
 	return err
 }
 
-const clearChannelChatSessionPendingFresh = `-- name: ClearChannelChatSessionPendingFresh :exec
-UPDATE channel_chat_session_binding
-SET pending_fresh = FALSE
-WHERE chat_session_id = $1
-`
-
-func (q *Queries) ClearChannelChatSessionPendingFresh(ctx context.Context, chatSessionID pgtype.UUID) error {
-	_, err := q.db.Exec(ctx, clearChannelChatSessionPendingFresh, chatSessionID)
-	return err
-}
-
 const clearChannelChatSessionPendingFreshForRevision = `-- name: ClearChannelChatSessionPendingFreshForRevision :exec
 UPDATE channel_chat_session_binding
 SET pending_fresh = FALSE
@@ -2476,22 +2465,6 @@ func (q *Queries) LockChannelChatSessionBindingForContext(ctx context.Context, c
 	return i, err
 }
 
-const lockChannelChatSessionPendingFresh = `-- name: LockChannelChatSessionPendingFresh :one
-SELECT pending_fresh FROM channel_chat_session_binding
-WHERE chat_session_id = $1
-FOR UPDATE
-`
-
-// EnqueueChatTask reads this under the same row lock and transaction that
-// creates the task. A concurrent `/clear` therefore lands either before this
-// task and is consumed by it, or after this task and remains for the next one.
-func (q *Queries) LockChannelChatSessionPendingFresh(ctx context.Context, chatSessionID pgtype.UUID) (bool, error) {
-	row := q.db.QueryRow(ctx, lockChannelChatSessionPendingFresh, chatSessionID)
-	var pending_fresh bool
-	err := row.Scan(&pending_fresh)
-	return pending_fresh, err
-}
-
 const lockChannelInstallationAppIDSlot = `-- name: LockChannelInstallationAppIDSlot :exec
 SELECT pg_advisory_xact_lock(
     hashtext($1::text),
@@ -2590,23 +2563,6 @@ func (q *Queries) LockCurrentChannelChatSessionBindingBySession(ctx context.Cont
 		&i.HistoryBoundaryPending,
 	)
 	return i, err
-}
-
-const markChannelChatSessionPendingFresh = `-- name: MarkChannelChatSessionPendingFresh :one
-UPDATE channel_chat_session_binding
-SET pending_fresh = TRUE
-WHERE chat_session_id = $1 AND retired_at IS NULL
-RETURNING pending_fresh
-`
-
-// Persists a channel `/clear` intent until the next chat task is successfully
-// created. RETURNING makes a missing binding an error instead of silently
-// acknowledging a fresh start that was never stored.
-func (q *Queries) MarkChannelChatSessionPendingFresh(ctx context.Context, chatSessionID pgtype.UUID) (bool, error) {
-	row := q.db.QueryRow(ctx, markChannelChatSessionPendingFresh, chatSessionID)
-	var pending_fresh bool
-	err := row.Scan(&pending_fresh)
-	return pending_fresh, err
 }
 
 const markChannelInboundDedupProcessed = `-- name: MarkChannelInboundDedupProcessed :execrows

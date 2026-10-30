@@ -1,0 +1,191 @@
+{
+  "page": {
+    "title": "團隊",
+    "select_prompt": "選擇一位成員開始協作"
+  },
+  "sidebar": {
+    "filter_placeholder": "篩選",
+    "agents": "智慧體",
+    "squads": "小隊",
+    "members": "成員",
+    "add_agent": "新建智慧體",
+    "add_squad": "新建小隊",
+    "invite_member": "邀請成員",
+    "you": "你",
+    "channels": "頻道",
+    "add_channel": "新建頻道",
+    "archived_agents": "已歸檔（{{count}}）",
+    "jump_to": "跳至…",
+    "new": "新增",
+    "more": "還有 {{count}} 個",
+    "show_less": "收合",
+    "invited": "已邀請"
+  },
+  "tabs": {
+    "chat": "對話",
+    "work": "工作",
+    "setup": "設定"
+  },
+  "detail": {
+    "tabs_aria": "分區",
+    "toggle_panel": "顯示或隱藏詳情",
+    "not_found": "該對象不存在，或你沒有存取權限。",
+    "copy_link": "複製連結",
+    "link_copied": "連結已複製",
+    "copied": "已複製"
+  },
+  "agent": {
+    "assign_issue": "指派任務",
+    "archive": "封存代理"
+  },
+  "squad": {
+    "assign_issue": "指派任務",
+    "working_other": "{{count}} 個工作中",
+    "work_note": "指派給小隊的 issue 會先交給 {{name}}，由它分派給合適的成員。",
+    "members": "成員",
+    "leader": "隊長",
+    "created_by": "建立者",
+    "how_it_works": "工作如何流轉",
+    "how_it_works_body": "把 issue 指派給小隊，{{name}} 會接手，必要時拆分，再交給各個成員。進度會顯示在 issue 上。",
+    "member_status": {
+      "working": "工作中",
+      "idle": "閒置",
+      "offline": "離線",
+      "unstable": "不穩定",
+      "archived": "已封存"
+    }
+  },
+  "member": {
+    "dm_placeholder": "傳訊息給 {{name}}",
+    "dm_empty": "這是你和 {{name}} 對話的開始，只有你們兩人看得到。",
+    "notes_placeholder": "記點什麼",
+    "notes_empty": "寫給自己的筆記，其他人看不到。",
+    "role": {
+      "owner": "擁有者",
+      "admin": "管理員",
+      "member": "成員"
+    },
+    "copy_email": "複製電子郵件",
+    "email": "電子郵件",
+    "role_label": "角色",
+    "joined": "加入時間",
+    "agents": "代理",
+    "squads": "小隊"
+  },
+  "panel": {
+    "now": "目前",
+    "archived": "已歸檔，不再接收工作。",
+    "properties": "屬性",
+    "runtime": "執行時",
+    "no_runtime": "未連線",
+    "model": "模型",
+    "owner": "擁有者",
+    "squad": "小隊",
+    "leader": "隊長",
+    "earlier": "以前的對話",
+    "unread": "未讀",
+    "status": "狀態",
+    "idle_note": "閒置中 — 指派 issue 給它，或直接傳訊息。",
+    "offline_note": "離線 — 執行環境未連線，工作會等到它重新連線。",
+    "replying_in_chat": "正在聊天中回覆",
+    "queued": "佇列中：",
+    "chat_reply": "一則聊天回覆",
+    "now_counts": "{{running}} 個執行中 · {{queued}} 個排隊"
+  },
+  "channel": {
+    "private": "私人",
+    "members_title": "#{{name}} 的成員",
+    "add_members": "新增成員或智慧體",
+    "remove": "移除",
+    "join": "加入頻道",
+    "leave": "退出頻道",
+    "archive": "封存頻道",
+    "unarchive": "取消封存",
+    "archived_hint": "該頻道已封存，可以閱讀但無法發言。",
+    "empty": "這是 #{{name}} 的開始。@ 頻道裡的智慧體向它提問。",
+    "placeholder": "傳訊息到 #{{name}}",
+    "agents_hint": "頻道裡的智慧體在被 @ 時回覆，並在它回答過的話題裡繼續回覆。",
+    "not_found": "該頻道不存在，或你沒有存取權限。",
+    "create": {
+      "title": "建立頻道",
+      "name": "名稱",
+      "name_placeholder": "例如 release-0.9",
+      "about": "用途",
+      "about_placeholder": "這個頻道是做什麼的？",
+      "private_hint": "只有成員可見。頻道裡的代理不會把內容帶到別處。",
+      "agents": "智慧體",
+      "people": "成員",
+      "submit": "建立頻道",
+      "failed": "無法建立頻道",
+      "name_taken": "已有同名頻道",
+      "description": "成員和代理圍繞一個主題討論的共享空間。@ 提及代理時它才會回覆。",
+      "optional": "選填",
+      "members": "成員",
+      "members_count_other": "含你共 {{count}} 位",
+      "no_matches": "沒有相符項目",
+      "visibility": "可見性",
+      "public_hint": "工作區裡的任何人都可以找到並加入。",
+      "privacy_note": "代理看不到任何人的私訊",
+      "cancel": "取消"
+    },
+    "public": "公開",
+    "about": "關於",
+    "no_about": "未設定用途。",
+    "people": "成員",
+    "agents": "代理",
+    "settings": "設定",
+    "visibility": "可見性",
+    "mention_hint": "@ 提及頻道裡的代理，它才會回覆",
+    "no_mention_note": "僅你可見：沒有 @ 任何代理，所以不會有代理回覆。"
+  },
+  "conversation": {
+    "replying": "{{name}} 正在回覆…",
+    "load_older": "載入更早的訊息",
+    "send_failed": "訊息未傳送",
+    "system": "Multica",
+    "agent_badge": "智慧體",
+    "thread_placeholder": "回覆…",
+    "thread_empty": "回覆會留在這則訊息下。",
+    "new_messages": "新訊息"
+  },
+  "chat": {
+    "untitled": "未命名",
+    "channel_label": {
+      "slack": "Slack",
+      "lark": "飛書",
+      "dingtalk": "釘釘",
+      "wecom": "企業微信",
+      "telegram": "Telegram",
+      "other": "外部渠道"
+    },
+    "earlier_label": "以前的對話 · {{date}}",
+    "earlier_from_channel": "來自{{channel}}",
+    "back_to_current": "回到目前對話",
+    "read_only": "以前的對話唯讀，其中的上下文不會帶到目前對話。",
+    "read_only_channel": "這段對話請在{{channel}}裡回覆。",
+    "no_access": "你無法和 {{name}} 發起對話。",
+    "archived_no_chat": "{{name}} 已歸檔，你和它沒有對話。",
+    "thread": {
+      "title": "話題",
+      "empty": "這裡的回覆只屬於這則訊息。{{name}} 會看到你回覆的那則訊息。",
+      "reply": "在話題中回覆",
+      "replies_other": "{{count}} 則回覆",
+      "open_failed": "無法開啟話題",
+      "last_reply": "最後回覆 {{time}}",
+      "in": "來自 {{name}}",
+      "close": "關閉討論串"
+    },
+    "issue": {
+      "create": "建立任務",
+      "created": "已建立 {{identifier}} 並指派給 {{name}}",
+      "create_failed": "無法建立任務"
+    }
+  },
+  "status": {
+    "archived": "已封存",
+    "offline": "離線",
+    "working": "工作中",
+    "waiting": "等待中",
+    "idle": "閒置"
+  }
+}

@@ -12,7 +12,7 @@ export type IssueScope =
   | { type: "project"; projectId: string; actorKind?: WorkspaceIssueActorKind }
   | {
       type: "actor";
-      actorType: Extract<IssueAssigneeType, "member" | "agent">;
+      actorType: Extract<IssueAssigneeType, "member" | "agent" | "squad">;
       actorId: string;
       relation: "assigned" | "created";
     }

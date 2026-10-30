@@ -19,7 +19,6 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import type {
   Agent,
   AgentRuntime,
-  UpdateAgentRequest,
 } from "@multica/core/types";
 import {
   type AgentPresenceDetail,
@@ -34,7 +33,6 @@ import { useWorkspacePaths } from "@multica/core/paths";
 import {
   agentDetailOptions,
   agentListOptions,
-  cacheAgentResponse,
   memberListOptions,
   workspaceKeys,
 } from "@multica/core/workspace/queries";
@@ -65,14 +63,23 @@ import { ActorAvatar } from "../../common/actor-avatar";
 import { AgentPresenceIndicator } from "./agent-presence-indicator";
 import { VisibilityBadge } from "./visibility-badge";
 import { AgentOverviewPane, type DetailTab } from "./agent-overview-pane";
+import { useAgentUpdate } from "./use-agent-update";
 import { ExpandableDescription } from "../../common/expandable-description";
 import { useT, useTimeAgo } from "../../i18n";
+import { TeamRedirect, teamHrefForAgent, useTeamPageEnabled } from "../../team/redirects";
 
 interface AgentDetailPageProps {
   agentId: string;
 }
 
 export function AgentDetailPage({ agentId }: AgentDetailPageProps) {
+  const paths = useWorkspacePaths();
+  const { searchParams } = useNavigation();
+  if (useTeamPageEnabled()) return <TeamRedirect to={teamHrefForAgent(paths.team(), agentId, searchParams)} />;
+  return <AgentDetailPageContent agentId={agentId} />;
+}
+
+function AgentDetailPageContent({ agentId }: AgentDetailPageProps) {
   const { t } = useT("agents");
   const wsId = useWorkspaceId();
   const paths = useWorkspacePaths();
@@ -136,75 +143,7 @@ export function AgentDetailPage({ agentId }: AgentDetailPageProps) {
   // overview pane to focus a tab. The pane clears it after consuming.
   const [tabNavIntent, setTabNavIntent] = useState<DetailTab | null>(null);
 
-  const handleUpdate = async (id: string, data: Record<string, unknown>) => {
-    // Optimistic update: patch the matching agent in the cached list
-    // BEFORE the network round-trip so the inspector picker chips flip to
-    // the new value immediately on click. Without this, every inspector
-    // picker (thinking / visibility / concurrency / model / runtime) waits
-    // 0.5-2s for the API response + invalidate + refetch before the trigger
-    // updates — readable as obvious lag in the UI.
-    //
-    // On error we rollback only the fields THIS call wrote, leaving any
-    // other concurrently-mutated fields untouched, then invalidate so the
-    // cache converges with the server. A whole-list snapshot rollback
-    // would clobber a concurrent successful mutation if the failing call
-    // resolves last (e.g. flipping visibility then runtime simultaneously
-    // and only the visibility PATCH fails).
-    const optimisticData =
-      typeof data.runtime_id === "string"
-        ? { ...data, runtime_bound: data.runtime_id.trim().length > 0 }
-        : data;
-    const queryKey = workspaceKeys.agents(wsId);
-    const detailQueryKey = workspaceKeys.agent(wsId, id);
-    const prevAgents = qc.getQueryData<Agent[]>(queryKey);
-    const prevListAgent = prevAgents?.find((a) => a.id === id);
-    const prevDetailAgent = qc.getQueryData<Agent>(detailQueryKey);
-    const previousFields = (previousAgent: Agent | undefined) => {
-      const fields: Record<string, unknown> = {};
-      if (!previousAgent) return fields;
-      for (const key of Object.keys(optimisticData)) {
-        fields[key] = (
-          previousAgent as unknown as Record<string, unknown>
-        )[key];
-      }
-      return fields;
-    };
-    const prevListFields = previousFields(prevListAgent);
-    const prevDetailFields = previousFields(prevDetailAgent);
-    qc.setQueryData<Agent[]>(queryKey, (old) =>
-      old?.map((a) =>
-        a.id === id ? ({ ...a, ...optimisticData } as Agent) : a,
-      ),
-    );
-    qc.setQueryData<Agent>(detailQueryKey, (old) =>
-      old ? ({ ...old, ...optimisticData } as Agent) : old,
-    );
-    try {
-      const updatedAgent = await api.updateAgent(
-        id,
-        data as UpdateAgentRequest,
-      );
-      cacheAgentResponse(qc, wsId, updatedAgent, { insertIntoList: false });
-      void qc.invalidateQueries({ queryKey });
-      toast.success(t(($) => $.detail.agent_updated_toast));
-    } catch (e) {
-      if (prevListAgent) {
-        qc.setQueryData<Agent[]>(queryKey, (old) =>
-          old?.map((a) =>
-            a.id === id ? ({ ...a, ...prevListFields } as Agent) : a,
-          ),
-        );
-      }
-      if (prevDetailAgent) {
-        qc.setQueryData<Agent>(detailQueryKey, (old) =>
-          old ? ({ ...old, ...prevDetailFields } as Agent) : old,
-        );
-      }
-      void qc.invalidateQueries({ queryKey });
-      toast.error(e instanceof Error ? e.message : t(($) => $.detail.update_failed_toast));
-      throw e;
-    }
-  };
+  const handleUpdate = useAgentUpdate();
 
   const handleArchive = async (id: string) => {
     try {

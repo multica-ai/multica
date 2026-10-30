@@ -35,6 +35,11 @@ const (
 	// makes those endpoints answer 404, so clients stop syncing and search
 	// through the server again without a client release.
 	LocalSearchIndex = "local_search_index"
+	// TeamPage gates the Team page (MUL-8357): the merged surface for agent
+	// chats, squads, members and conversations, plus the conversation API
+	// behind channels and member DMs. Off by default; the old Chat, Agents
+	// and Squads pages stay reachable either way.
+	TeamPage = "team_page"
 	// agentBuilderCompat is no longer a release flag. Keep publishing the key
 	// as enabled so installed desktop clients that still gate the AI creation
 	// entry on this config decision receive the permanently enabled behavior.
@@ -59,6 +64,7 @@ var frontendPublicFlags = []string{
 	BillingWorkspaceSubscriptions,
 	ComposioMCPApps,
 	PluginsV1,
+	TeamPage,
 }
 
 func BillingWorkspaceSubscriptionsEnabled(ctx context.Context, flags *featureflag.Service) bool {
@@ -75,6 +81,10 @@ func PluginsV1Enabled(ctx context.Context, flags *featureflag.Service) bool {
 
 func TriageV1Enabled(ctx context.Context, flags *featureflag.Service) bool {
 	return flags.IsEnabled(ctx, TriageV1, false)
+}
+
+func TeamPageEnabled(ctx context.Context, flags *featureflag.Service) bool {
+	return flags.IsEnabled(ctx, TeamPage, false)
 }
 
 func LocalSearchIndexEnabled(ctx context.Context, flags *featureflag.Service) bool {

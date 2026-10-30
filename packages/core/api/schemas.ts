@@ -20,6 +20,10 @@ import type {
   CancelTaskResponse,
   ChatMessage,
   ChatDraftRestoresResponse,
+  ChatMessageIssue,
+  Conversation,
+  ConversationMessage,
+  ConversationMessagesPage,
   ChatPendingTask,
   ChatSession,
   PrioritizeQueuedChatTaskResponse,
@@ -968,7 +972,7 @@ export const ChatMessageSchema = z.object({
   failure_reason: z.string().nullable().optional(),
   elapsed_ms: z.number().nullable().optional(),
   message_kind: z
-    .enum(["message", "no_response", "onboarding_kickoff", "onboarding_opening"])
+    .enum(["message", "no_response", "onboarding_kickoff", "onboarding_opening", "issue_event"])
     .catch("message")
     .optional(),
   // Optional additive data degrades independently: a malformed suggestion
@@ -2150,6 +2154,7 @@ const ChatLastMessageSchema = z.object({
     "no_response",
     "onboarding_kickoff",
     "onboarding_opening",
+    "issue_event",
   ]).optional().catch(undefined),
 }).loose();
 
@@ -2173,6 +2178,9 @@ export const ChatSessionSchema: z.ZodType<ChatSession> = z.object({
   pinned: z.boolean().optional(),
   channel_source: ChatChannelSourceSchema.optional().catch(undefined),
   is_current_channel_route: z.boolean().optional().catch(undefined),
+  parent_chat_session_id: z.string().nullable().optional().catch(undefined),
+  root_chat_message_id: z.string().nullable().optional().catch(undefined),
+  thread_reply_count: z.number().optional().catch(undefined),
   created_at: z.string().default(""),
   updated_at: z.string().default(""),
 }).loose();
@@ -2193,6 +2201,100 @@ export const ChatSessionListSchema = z
   .transform((sessions) => sessions.filter((session) => session.id !== ""))
   .default([]);
 export const EMPTY_CHAT_SESSION_LIST: ChatSession[] = [];
+
+// Issues created from a conversation's messages
+// (`GET /api/chat/sessions/{id}/issues`). A malformed row drops on its own so
+// the rest still mark their messages.
+const ChatMessageIssueSchema = z.object({
+  issue_id: z.string(),
+  identifier: z.string().default(""),
+  title: z.string().default(""),
+  status: z.string().default(""),
+  chat_message_id: z.string(),
+  thread_session_id: z.string(),
+}).loose();
+
+export const ChatMessageIssueListSchema = z.object({
+  issues: z
+    .array(ChatMessageIssueSchema.nullable().catch(null))
+    .transform((rows): ChatMessageIssue[] => rows.filter((row) => row !== null))
+    .default([]),
+}).loose();
+export const EMPTY_CHAT_MESSAGE_ISSUE_LIST: { issues: ChatMessageIssue[] } = { issues: [] };
+
+// Team conversations (`/api/conversations`). Lists drop a malformed row
+// rather than the whole response; unknown kinds fall back to the safest
+// reading (a private channel, a plain message) instead of failing.
+const ConversationMemberSchema = z.object({
+  member_type: z.enum(["member", "agent"]).catch("member"),
+  member_id: z.string(),
+}).loose();
+
+const ConversationThreadSummarySchema = z.object({
+  id: z.string(),
+  reply_count: z.number().default(0),
+  last_reply_at: z.string().nullable().default(null),
+}).loose();
+
+export const ConversationMessageSchema = z.object({
+  id: z.string(),
+  conversation_id: z.string(),
+  seq: z.number(),
+  author_type: z.enum(["member", "agent", "system"]).catch("system"),
+  author_id: z.string().nullable().default(null),
+  kind: z.enum(["message", "event"]).catch("message"),
+  content: z.string().default(""),
+  task_id: z.string().nullable().default(null),
+  client_message_id: z.string().nullable().default(null),
+  created_at: z.string(),
+  thread: ConversationThreadSummarySchema.optional().catch(undefined),
+}).loose() satisfies z.ZodType<ConversationMessage>;
+
+export const ConversationSchema = z.object({
+  id: z.string(),
+  workspace_id: z.string(),
+  kind: z.enum(["channel", "direct", "thread"]).catch("channel"),
+  name: z.string().default(""),
+  about: z.string().default(""),
+  visibility: z.enum(["public", "private"]).catch("private"),
+  parent_conversation_id: z.string().nullable().optional(),
+  root_message_id: z.string().nullable().optional(),
+  created_by: z.string().default(""),
+  last_message_seq: z.number().default(0),
+  last_message_at: z.string().nullable().default(null),
+  archived_at: z.string().nullable().default(null),
+  created_at: z.string().default(""),
+  updated_at: z.string().default(""),
+  is_member: z.boolean().default(false),
+  last_read_seq: z.number().default(0),
+  unread_count: z.number().default(0),
+  members: z
+    .array(ConversationMemberSchema.nullable().catch(null))
+    .transform((rows) => rows.filter((row) => row !== null))
+    .default([]),
+  working_agents: z
+    .array(z.object({ agent_id: z.string(), task_id: z.string() }).loose())
+    .optional()
+    .catch(undefined),
+  root_message: ConversationMessageSchema.optional().catch(undefined),
+}).loose() satisfies z.ZodType<Conversation>;
+
+export const ConversationListSchema = z.object({
+  conversations: z
+    .array(ConversationSchema.nullable().catch(null))
+    .transform((rows): Conversation[] => rows.filter((row) => row !== null))
+    .default([]),
+}).loose();
+export const EMPTY_CONVERSATION_LIST: { conversations: Conversation[] } = { conversations: [] };
+
+export const ConversationMessagesPageSchema = z.object({
+  messages: z
+    .array(ConversationMessageSchema.nullable().catch(null))
+    .transform((rows): ConversationMessage[] => rows.filter((row) => row !== null))
+    .default([]),
+  has_more: z.boolean().default(false),
+}).loose() satisfies z.ZodType<ConversationMessagesPage>;
+export const EMPTY_CONVERSATION_MESSAGES_PAGE: ConversationMessagesPage = { messages: [], has_more: false };
 
 // Deferred-cancellation draft restores
 // (`GET /api/chat/sessions/{id}/draft-restores`, #5219) feed the composer

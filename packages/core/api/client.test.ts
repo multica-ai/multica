@@ -3171,3 +3171,62 @@ describe("ApiClient shared credential across windows", () => {
     expect(onUnauthorized).toHaveBeenCalledTimes(1);
   });
 });
+
+describe("ApiClient chat threads", () => {
+  const json = (body: unknown) =>
+    new Response(JSON.stringify(body), { status: 200, headers: { "Content-Type": "application/json" } });
+
+  it("asks for threads only when told to and keeps their fields", async () => {
+    const fetchMock = vi.fn().mockImplementation(() =>
+      Promise.resolve(
+        json([
+          { id: "c1", status: "active" },
+          { id: "t1", status: "active", parent_chat_session_id: "c1", root_chat_message_id: "m1", thread_reply_count: 3 },
+        ]),
+      ),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    const client = new ApiClient("https://api.example.test");
+
+    const sessions = await client.listChatSessions({ status: "all", include_threads: true });
+    expect(String(fetchMock.mock.calls[0]?.[0])).toBe(
+      "https://api.example.test/api/chat/sessions?status=all&include_threads=true",
+    );
+    expect(sessions[1]).toMatchObject({ parent_chat_session_id: "c1", thread_reply_count: 3 });
+
+    await client.listChatSessions({ status: "all" });
+    expect(String(fetchMock.mock.calls[1]?.[0])).toBe("https://api.example.test/api/chat/sessions?status=all");
+  });
+
+  it("drops malformed message issues and survives a malformed list", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(
+        json({
+          issues: [
+            { issue_id: "i1", identifier: "MUL-1", title: "Fix", status: "todo", chat_message_id: "m1", thread_session_id: "t1" },
+            { issue_id: 7 },
+          ],
+        }),
+      )
+      .mockResolvedValueOnce(json({ issues: "nope" }));
+    vi.stubGlobal("fetch", fetchMock);
+    const client = new ApiClient("https://api.example.test");
+
+    expect(await client.listChatMessageIssues("c1")).toEqual([
+      { issue_id: "i1", identifier: "MUL-1", title: "Fix", status: "todo", chat_message_id: "m1", thread_session_id: "t1" },
+    ]);
+    expect(await client.listChatMessageIssues("c1")).toEqual([]);
+  });
+
+  it("opens a thread by its root message", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(json({ id: "t1", parent_chat_session_id: "c1" }));
+    vi.stubGlobal("fetch", fetchMock);
+    const client = new ApiClient("https://api.example.test");
+
+    const thread = await client.createChatThread("c1", "m1");
+    expect(String(fetchMock.mock.calls[0]?.[0])).toBe("https://api.example.test/api/chat/sessions/c1/threads");
+    expect(JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body))).toEqual({ root_message_id: "m1" });
+    expect(thread.parent_chat_session_id).toBe("c1");
+  });
+});

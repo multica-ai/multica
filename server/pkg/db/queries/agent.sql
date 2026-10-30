@@ -963,22 +963,6 @@ WHERE id = $1
   AND started_at IS NULL
 RETURNING *;
 
--- name: StartAgentTask :one
--- Legacy single-winner transition; generation-aware callers lock the claim first.
--- Transitions a task to running. Accepts either 'dispatched' (the normal
--- claim → run flow) or 'waiting_local_directory' (the daemon held the row in
--- a wait state while another task owned the local_directory path lock; once
--- the lock was acquired the daemon flips here). wait_reason is cleared on
--- the transition so a future read can't conflate "currently waiting" with
--- "previously waited".
-UPDATE agent_task_queue
-SET status = 'running',
-    started_at = now(),
-    wait_reason = NULL,
-    prepare_lease_expires_at = NULL
-WHERE agent_task_queue.id = $1 AND agent_task_queue.status IN ('dispatched', 'waiting_local_directory')
-RETURNING *;
-
 -- name: LockAgentTaskStartClaim :one
 -- Serialize start/replay with reclaim and cancellation. A stale delivery must
 -- never start or acknowledge a newer claim, even on the same runtime.
@@ -995,8 +979,9 @@ FOR UPDATE;
 -- alongside the status.
 --
 -- The CHECK only allows the transition from 'dispatched' so a daemon can't
--- mark an already-running or terminal task as waiting; the StartAgentTask
--- mutation handles the reverse transition once the lock is acquired.
+-- mark an already-running or terminal task as waiting; the
+-- StartAgentTaskWithSupplement mutation handles the reverse transition once
+-- the lock is acquired.
 UPDATE agent_task_queue
 SET status = 'waiting_local_directory',
     wait_reason = $2,

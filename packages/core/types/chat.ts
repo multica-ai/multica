@@ -16,12 +16,15 @@ export interface ChatPinnedAgent {
  *   Mika but never rendered as a member message.
  * - "onboarding_opening" — Mika's reply to the kickoff; chat renders the
  *   onboarding starter cards under it instead of quick-action chips.
+ * - "issue_event" — a server-authored line in a thread reporting what happened
+ *   to an issue created from the thread's root message.
  */
 export type ChatMessageKind =
   | "message"
   | "no_response"
   | "onboarding_kickoff"
-  | "onboarding_opening";
+  | "onboarding_opening"
+  | "issue_event";
 
 /**
  * A concise follow-up offered by an assistant reply. `label` is rendered in
@@ -109,8 +112,31 @@ export interface ChatSession {
   channel_source?: ChatChannelSource;
   /** Absent for first-party Chats. */
   is_current_channel_route?: boolean;
+  /** Set on a thread: the conversation it branched from. Threads are only
+   *  listed for clients that ask for them (`include_threads`). */
+  parent_chat_session_id?: string | null;
+  /** Set on a thread: the message in the parent it replies to. */
+  root_chat_message_id?: string | null;
+  /** Thread-only: messages in the thread, for the reply count under its root. */
+  thread_reply_count?: number;
   created_at: string;
   updated_at: string;
+}
+
+/** An issue created from a chat message, with the thread it reports into. */
+export interface ChatMessageIssue {
+  issue_id: string;
+  identifier: string;
+  title: string;
+  status: string;
+  chat_message_id: string;
+  thread_session_id: string;
+}
+
+export interface CreateIssueFromChatMessageResponse {
+  issue: import("./issue").Issue;
+  link: ChatMessageIssue;
+  thread: ChatSession;
 }
 
 export interface PendingChatTaskItem {

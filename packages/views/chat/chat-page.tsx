@@ -34,6 +34,7 @@ import { ArchivedAgentBanner } from "./components/archived-agent-banner";
 import { AgentAccessRevokedBanner } from "./components/agent-access-revoked-banner";
 import { RuntimeRequiredBanner } from "./components/runtime-required-banner";
 import { useRegisterCommandBarContext } from "../search/register-context";
+import { ChatTeamRedirect, useTeamPageEnabled } from "../team/redirects";
 
 /**
  * Chat tab — the first-class two-pane surface (thread list on the left,
@@ -55,6 +56,11 @@ import { useRegisterCommandBarContext } from "../search/register-context";
  * style).
  */
 export function ChatPage() {
+  if (useTeamPageEnabled()) return <ChatTeamRedirect />;
+  return <ChatPageContent />;
+}
+
+function ChatPageContent() {
   const { t } = useT("chat");
   const { pathname, searchParams, replace } = useNavigation();
   const workspaceSlug = useRequiredWorkspaceSlug();

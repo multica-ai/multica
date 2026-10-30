@@ -417,3 +417,56 @@ export function useRegenerateChatQuickActions() {
     },
   });
 }
+
+// A thread the server just returned must be in the sessions cache before the
+// view opens it: the chat controller treats an active session missing from the
+// list as dangling and clears it.
+function upsertThreadIntoSessions(qc: ReturnType<typeof useQueryClient>, wsId: string, thread: ChatSession) {
+  if (!thread.id) return;
+  qc.setQueryData<ChatSession[]>(chatKeys.sessions(wsId), (old) => {
+    if (!old) return old;
+    return old.some((s) => s.id === thread.id) ? old : [...old, thread];
+  });
+}
+
+/** Open (or create) the thread under a message. */
+export function useCreateChatThread() {
+  const qc = useQueryClient();
+  const wsId = useWorkspaceId();
+
+  return useMutation({
+    mutationFn: ({ sessionId, rootMessageId }: { sessionId: string; rootMessageId: string }) =>
+      api.createChatThread(sessionId, rootMessageId),
+    onSuccess: (thread) => upsertThreadIntoSessions(qc, wsId, thread),
+    onError: (error) => logger.error("createChatThread.error", { error }),
+    onSettled: () => {
+      qc.invalidateQueries({ queryKey: chatKeys.sessions(wsId) });
+    },
+  });
+}
+
+/** Turn a message into an issue assigned to the conversation's agent. */
+export function useCreateIssueFromChatMessage() {
+  const qc = useQueryClient();
+  const wsId = useWorkspaceId();
+
+  return useMutation({
+    mutationFn: ({
+      sessionId,
+      messageId,
+      title,
+    }: {
+      sessionId: string;
+      messageId: string;
+      title?: string;
+    }) => api.createIssueFromChatMessage(sessionId, messageId, title ? { title } : undefined),
+    onSuccess: (res, { sessionId }) => {
+      upsertThreadIntoSessions(qc, wsId, res.thread);
+      qc.invalidateQueries({ queryKey: chatKeys.messageIssues(wsId, sessionId) });
+    },
+    onError: (error) => logger.error("createIssueFromChatMessage.error", { error }),
+    onSettled: () => {
+      qc.invalidateQueries({ queryKey: chatKeys.sessions(wsId) });
+    },
+  });
+}

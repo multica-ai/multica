@@ -68,6 +68,7 @@ import {
 } from "../chat/queries";
 import { useChatStore } from "../chat";
 import { upsertChatMessageToCaches } from "../chat/message-cache";
+import { applyConversationEvent } from "../conversations/realtime";
 import {
   promotePendingChatTask,
   removePendingChatTask,
@@ -76,6 +77,7 @@ import { resolvePostAuthDestination, useHasOnboarded } from "../paths";
 import type {
   IssueTableFacetsRequest,
   IssueTableQuerySpec,
+  ConversationEventPayload,
   MemberAddedPayload,
   WorkspaceDeletedPayload,
   WorkspaceUpdatedPayload,
@@ -1056,6 +1058,7 @@ export function useRealtimeSync(
       // Chat events are handled explicitly below; do not double-invalidate.
       "chat:message", "chat:done", "chat:quick_actions", "chat:cancel_finalized", "chat:session_read",
       "chat:session_created", "chat:session_deleted", "chat:session_updated",
+      "conversation:message", "conversation:updated",
       // task:message stays out of the prefix path because it fires per
       // streamed message during a long run — invalidating the snapshot on
       // every message would flood the network. Specific chat handlers below
@@ -1876,6 +1879,22 @@ export function useRealtimeSync(
       workingAgentDirty.clear();
     };
   }, [ws, qc, authStore, onToast]);
+
+  // Team conversations: the server sends these only to people who can read
+  // the conversation, so applying them never widens what the viewer sees.
+  useEffect(() => {
+    if (!ws) return;
+    const onEvent = (type: "conversation:message" | "conversation:updated") => (p: unknown) => {
+      const wsId = getCurrentWsId();
+      if (wsId) applyConversationEvent(qc, wsId, type, p as ConversationEventPayload);
+    };
+    const unsubMessage = ws.on("conversation:message", onEvent("conversation:message"));
+    const unsubUpdated = ws.on("conversation:updated", onEvent("conversation:updated"));
+    return () => {
+      unsubMessage();
+      unsubUpdated();
+    };
+  }, [ws, qc]);
 
   // Reconnect -> refetch all data to recover missed events
   useEffect(() => {

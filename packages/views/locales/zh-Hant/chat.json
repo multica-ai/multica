@@ -84,7 +84,9 @@
     "quick_actions_heading": "後續提問",
     "quick_actions_aria": "後續提問建議",
     "quick_actions_regenerate": "重新生成建議",
-    "quick_actions_regenerate_failed": "無法重新生成建議，請重試。"
+    "quick_actions_regenerate_failed": "無法重新生成建議，請重試。",
+    "today": "今天",
+    "yesterday": "昨天"
   },
   "session_history": {
     "untitled": "無標題",

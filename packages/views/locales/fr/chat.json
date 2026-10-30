@@ -88,7 +88,9 @@
     "quick_actions_heading": "Questions de suivi",
     "quick_actions_aria": "Suggestions pour continuer",
     "quick_actions_regenerate": "Régénérer les suggestions",
-    "quick_actions_regenerate_failed": "Impossible d'actualiser les suggestions. Veuillez réessayer."
+    "quick_actions_regenerate_failed": "Impossible d'actualiser les suggestions. Veuillez réessayer.",
+    "today": "Aujourd’hui",
+    "yesterday": "Hier"
   },
   "session_history": {
     "untitled": "Sans titre",

@@ -5,9 +5,6 @@ import "encoding/json"
 const (
 	DaemonCapabilitySkillBundlesV1      = "skill-bundles-v1"
 	DaemonCapabilityCoalescedCommentsV1 = "coalesced-comments-v1"
-	DaemonCapabilityExecutionManifestV1 = "execution-manifest-v1"
-	DaemonCapabilityAgentSkillV1        = "agent-skill-v1"
-	DaemonCapabilityRemoteMCPV1         = "remote-mcp-v1"
 	// DaemonCapabilityLocalWorktreeV1 advertises that the daemon implements
 	// worktree mode for local_directory resources (execution_mode=worktree).
 	//
@@ -295,6 +292,10 @@ const (
 	// the opening self-describes: chat renders the starter cards under this
 	// kind instead of quick-action chips (MUL-5765).
 	ChatMessageKindOnboardingOpening = "onboarding_opening"
+	// ChatMessageKindIssueEvent is a system-authored line in a thread about an
+	// issue created from a chat message: its creation and each status move
+	// (MUL-8357). Older readers render it as an ordinary assistant message.
+	ChatMessageKindIssueEvent = "issue_event"
 )
 
 // ChatDonePayload is broadcast when an agent finishes responding to a chat
@@ -477,4 +478,16 @@ type DaemonHeartbeatPendingLocalSkills struct {
 type DaemonHeartbeatPendingLocalSkillImport struct {
 	ID       string `json:"id"`
 	SkillKey string `json:"skill_key"`
+}
+
+// ConversationEventPayload is the body of conversation:message and
+// conversation:updated. The realtime layer delivers it to RecipientIDs within
+// the workspace, or to the whole workspace when Public is set (a public
+// channel anyone in the workspace may read); neither field is sent.
+type ConversationEventPayload struct {
+	ConversationID       string   `json:"conversation_id"`
+	ParentConversationID string   `json:"parent_conversation_id,omitempty"`
+	Message              any      `json:"message,omitempty"`
+	RecipientIDs         []string `json:"-"`
+	Public               bool     `json:"-"`
 }
