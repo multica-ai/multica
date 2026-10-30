@@ -54,13 +54,19 @@ export const catalog: readonly CatalogModule[] = [
   },
   {
     id: "product",
-    pages: planned(
-      "issueRow",
-      "statusPicker",
-      "assigneePicker",
-      "comments",
-      "agentRun",
-    ),
+    pages: [
+      ...planned(
+        "issueRow",
+        "statusPicker",
+        "assigneePicker",
+        "comments",
+        "agentRun",
+      ),
+      {
+        id: "skillVersions",
+        content: { kind: "preview", scene: "skillVersions" },
+      },
+    ],
   },
   {
     id: "layouts",

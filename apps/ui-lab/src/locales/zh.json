@@ -402,6 +402,7 @@
       "assigneePicker": "负责人选择器",
       "comments": "评论",
       "agentRun": "智能体运行",
+      "skillVersions": "Skill 版本（mock）",
       "sidebar": "侧边栏",
       "list": "任务列表",
       "detail": "任务详情",

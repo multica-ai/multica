@@ -31,6 +31,11 @@ import {
   user,
   workspace,
 } from "./product-fixtures";
+import {
+  SKILL_VERSIONS_START,
+  SkillVersionsScene,
+  isSkillVersionsPath,
+} from "./skill-versions/scene";
 
 let fixtureLocale: LabLocale = "en";
 const api = createFixtureApi(() => fixtureLocale);
@@ -52,7 +57,7 @@ export function ProductPreview({
   scene,
   locale,
 }: {
-  scene: "list" | "detail";
+  scene: "list" | "detail" | "skillVersions";
   locale: LabLocale;
 }) {
   const { t } = useTranslation("uiLab");
@@ -77,11 +82,20 @@ export function ProductPreview({
     void client.cancelQueries().then(() => client.invalidateQueries());
   }, [client, locale]);
   const [path, setPath] = useState(
-    scene === "detail" ? `/ui-lab/issues/${issues[0]!.id}` : "/ui-lab/issues",
+    scene === "skillVersions"
+      ? SKILL_VERSIONS_START
+      : scene === "detail"
+        ? `/ui-lab/issues/${issues[0]!.id}`
+        : "/ui-lab/issues",
   );
   const navigation = useMemo<NavigationAdapter>(() => {
     const navigate = (next: string) => {
-      if (/^\/ui-lab\/issues(?:\/[^/]+)?$/.test(next)) setPath(next);
+      if (
+        scene === "skillVersions"
+          ? isSkillVersionsPath(next)
+          : /^\/ui-lab\/issues(?:\/[^/]+)?$/.test(next)
+      )
+        setPath(next);
       else toast.info(t(($) => $.lab.preview.unavailable));
     };
     return {
@@ -93,7 +107,7 @@ export function ProductPreview({
       back: () => setPath("/ui-lab/issues"),
       getShareableUrl: (value) => `${location.origin}${value}`,
     };
-  }, [path, t]);
+  }, [path, scene, t]);
   const issueId = path.split("/")[3];
   return (
     <QueryClientProvider client={client}>
@@ -109,7 +123,12 @@ export function ProductPreview({
                 <SidebarProvider className="h-svh bg-app-shell">
                   <AppSidebar />
                   <SidebarInset className="relative overflow-hidden">
-                    {issueId ? (
+                    {scene === "skillVersions" ? (
+                      <SkillVersionsScene
+                        path={path}
+                        navigate={navigation.push}
+                      />
+                    ) : issueId ? (
                       <IssueDetail issueId={issueId} />
                     ) : (
                       <IssuesPage />
