@@ -265,7 +265,7 @@ function SortableTabItem({
         "group relative flex size-full min-w-0 items-center gap-1.5 px-2.5 text-caption transition-colors",
         "select-none cursor-default",
         isActive
-          ? "font-medium text-foreground"
+          ? "text-foreground"
           : "text-muted-foreground hover:text-foreground",
         isDragging && "opacity-60",
       )}

@@ -88,7 +88,7 @@ export const TreeRow = forwardRef<HTMLAnchorElement, TreeRowProps>(function Tree
         PANEL_ROW_CLASS,
         panelRowStateClass(active),
         "group/row relative",
-        expanded && !active && "font-medium text-foreground",
+        expanded && !active && "text-foreground",
         className,
       )}
     >

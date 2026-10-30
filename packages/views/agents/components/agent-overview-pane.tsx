@@ -439,7 +439,7 @@ export function AgentOverviewPane({
                       className={cn(
                         "flex h-8 shrink-0 items-center rounded-md px-2.5 text-left text-caption transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring md:w-full",
                         active
-                          ? "bg-surface-selected font-medium text-surface-selected-foreground hover:bg-surface-selected"
+                          ? "bg-surface-selected text-surface-selected-foreground hover:bg-surface-selected"
                           : "text-muted-foreground hover:bg-surface-hover hover:text-foreground",
                       )}
                     >

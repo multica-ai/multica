@@ -73,7 +73,7 @@ export function PanelBody({
       ref={ref}
       style={fadeStyle}
       onClickCapture={onClickCapture}
-      className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-2 pb-4"
+      className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-2 pb-4 [&>section:first-child]:mt-0"
     >
       {children}
     </div>
@@ -149,7 +149,7 @@ export const PANEL_ROW_CLASS =
 
 export function panelRowStateClass(active: boolean) {
   return active
-    ? "bg-surface-selected font-medium text-surface-selected-foreground hover:bg-surface-selected"
+    ? "bg-surface-selected text-surface-selected-foreground hover:bg-surface-selected"
     : "text-muted-foreground hover:bg-surface-hover hover:text-foreground";
 }
 

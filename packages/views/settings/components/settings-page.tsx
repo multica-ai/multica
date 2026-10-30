@@ -336,7 +336,7 @@ export function SettingsPage({ extraDeviceTabs = [] }: SettingsPageProps = {}) {
         className={cn(
           "flex min-h-8 items-center gap-2.5 rounded-lg px-3 py-1.5 text-body transition-colors focus-visible:outline-2 focus-visible:outline-ring",
           active.value === item.value
-            ? "bg-surface-selected font-medium text-surface-selected-foreground hover:bg-surface-selected"
+            ? "bg-surface-selected text-surface-selected-foreground hover:bg-surface-selected"
             : "text-muted-foreground hover:bg-surface-hover hover:text-foreground",
         )}
       >
@@ -496,7 +496,7 @@ export function SettingsPage({ extraDeviceTabs = [] }: SettingsPageProps = {}) {
               group.subgroups.map((subgroup) => {
                 const id = `settings-group-${group.key}-${subgroup.key}`;
                 return (
-                  <section key={id} aria-labelledby={id} className="mt-4 first:mt-0">
+                  <section key={id} aria-labelledby={id} className="mt-5 first:mt-0">
                     <h2
                       id={id}
                       className="flex h-7 min-w-0 items-center px-3 text-caption font-medium text-muted-foreground"
