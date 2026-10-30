@@ -6,7 +6,7 @@ import { Button } from "@multica/ui/components/ui/button";
 import { cn } from "@multica/ui/lib/utils";
 import { AppLink } from "../../navigation";
 import { useT } from "../../i18n";
-import { CHAT_COLUMN, CHAT_GUTTER } from "./chat-column";
+import { CHAT_GUTTER, useChatColumn } from "./chat-column";
 
 export function RuntimeRequiredBanner({
   agentId,
@@ -17,13 +17,14 @@ export function RuntimeRequiredBanner({
 }) {
   const { t } = useT("chat");
   const paths = useWorkspacePaths();
+  const chatColumn = useChatColumn();
   const name = agentName?.trim() || t(($) => $.runtime_required_banner.fallback_name);
 
   return (
     <div className={cn(CHAT_GUTTER, "mb-1.5")}>
       <div
         className={cn(
-          CHAT_COLUMN,
+          chatColumn,
           "flex items-center gap-2 rounded-md bg-amber-50 px-2.5 py-1.5 text-caption text-amber-900 ring-1 ring-amber-200/60 dark:bg-amber-950/40 dark:text-amber-200 dark:ring-amber-900/40",
         )}
       >

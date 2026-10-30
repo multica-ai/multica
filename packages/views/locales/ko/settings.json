@@ -157,6 +157,11 @@
     "toast_saved": "변경사항을 저장했습니다"
   },
   "preferences": {
+    "content_width": {
+      "title": "콘텐츠 너비",
+      "standard": "표준",
+      "full": "전체 너비"
+    },
     "theme": {
       "title": "테마",
       "light": "라이트",

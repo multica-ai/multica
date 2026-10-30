@@ -20,7 +20,7 @@ import {
 } from "../../editor/use-coordinated-uploads";
 import { SubmitButton } from "@multica/ui/components/common/submit-button";
 import { ChatAddMenu } from "./chat-add-menu";
-import { CHAT_COLUMN, CHAT_GUTTER } from "./chat-column";
+import { CHAT_GUTTER, useChatColumn } from "./chat-column";
 import { useChatStore, DRAFT_NEW_SESSION } from "@multica/core/chat";
 import { attachmentToDraftUpload, type DraftUpload } from "@multica/core/drafts";
 import { createLogger } from "@multica/core/logger";
@@ -175,6 +175,7 @@ export function ChatInput({
   draftKeyOverride,
   editorKeyOverride,
 }: ChatInputProps) {
+  const chatColumn = useChatColumn();
   const { t } = useT("chat");
   const { t: tEditor } = useT("editor");
   const sendShortcut = useShortcut("send");
@@ -664,7 +665,7 @@ export function ChatInput({
           // once, and it keeps the cap finite if a future host ever mounts the
           // composer without a definite height (percentage max-height would
           // then resolve to none).
-          CHAT_COLUMN,
+          chatColumn,
           "relative flex min-h-16 max-h-96 flex-col rounded-lg border border-surface-border bg-surface pb-9 transition-[border-color,box-shadow] focus-within:border-brand focus-within:ring-2 focus-within:ring-ring/20",
           // Visual + interaction lock when there's no agent. We don't
           // toggle ContentEditor's editable mode (Tiptap can't switch
