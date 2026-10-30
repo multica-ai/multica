@@ -2,6 +2,8 @@ package wecom
 
 import (
 	"context"
+	"encoding/json"
+	"fmt"
 	"io"
 	"log/slog"
 	"testing"
@@ -253,5 +255,44 @@ func TestACompletionWithNothingToSayElsewhereClosesTheBubbleThroughTheRelay(t *t
 	}
 	if n := p.dedupe.claimCount(); n != 0 {
 		t.Errorf("the seal took %d claim(s)", n)
+	}
+}
+
+// A seal carries no installation, so dispatching it by installation put every
+// seal in the deployment on one shard queue. A cancel-all burst bigger than
+// that one queue was shed, and those bubbles kept spinning.
+//
+// REVERSE VERIFICATION: dispatch seals by InstallationID again and the burst
+// lands on one queue, which overflows.
+func TestABurstOfSealsIsSpreadAcrossTheDispatchQueues(t *testing.T) {
+	t.Parallel()
+	const shards, depth = 8, 4
+	r := NewRelayOutbound(nil, nil, RelayConfig{Shards: shards, QueueDepth: depth},
+		slog.New(slog.NewTextHandler(io.Discard, nil)))
+	// Not started: frames stay in the queues where they can be counted.
+	const n = shards * depth / 2
+	for i := 0; i < n; i++ {
+		frame, err := json.Marshal(relayFrame{
+			Kind:       relayKindSeal,
+			SealReason: sealReasonCancelled,
+			TaskID:     fmt.Sprintf("00000000-0000-0000-0000-%012d", i),
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		r.DeliverWecomOutbound("", frame, fmt.Sprintf("seal-%d", i))
+	}
+	queued, used := 0, 0
+	for _, q := range r.queues {
+		queued += len(q)
+		if len(q) > 0 {
+			used++
+		}
+	}
+	if queued != n {
+		t.Errorf("%d of %d seals were queued, the rest shed", queued, n)
+	}
+	if used < 2 {
+		t.Errorf("all seals went to %d queue(s); they should spread by task id", used)
 	}
 }

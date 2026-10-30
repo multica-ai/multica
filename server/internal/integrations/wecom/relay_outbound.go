@@ -1003,12 +1003,25 @@ func (r *RelayOutbound) DeliverWecomOutbound(scopeID string, frame []byte, event
 		return
 	}
 	select {
-	case r.queues[r.shardFor(f.InstallationID)] <- queued{frame: f, eventID: eventID}:
+	case r.queues[r.shardFor(dispatchKey(f))] <- queued{frame: f, eventID: eventID}:
 	default:
 		// Shed rather than stall the shard. Counted, because a reply nobody
 		// gets is exactly what this whole path exists to stop being silent.
 		r.shed(queued{frame: f, eventID: eventID}, "dispatch queue full")
 	}
+}
+
+// dispatchKey picks the shard queue a frame waits on. Replies and inbox pushes
+// go by installation, which is what keeps one bot's frames in order. A seal
+// carries no installation, so keying it the same way would put every seal in
+// the deployment on one queue behind one worker, and a cancel-all burst past
+// QueueDepth would be shed: those bubbles would keep spinning. A seal needs no
+// ordering against anything but its own round, so it goes by task id.
+func dispatchKey(f relayFrame) string {
+	if f.Kind == relayKindSeal {
+		return f.TaskID
+	}
+	return f.InstallationID
 }
 
 func (r *RelayOutbound) shardFor(installationID string) int {
