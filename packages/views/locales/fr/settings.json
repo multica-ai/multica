@@ -183,6 +183,11 @@
       "search": "Rechercher un fuseau horaire...",
       "empty": "Aucun fuseau horaire correspondant"
     },
+    "activity_order": {
+      "title": "Ordre de l’activité des tâches",
+      "oldest_first": "Les plus anciennes d’abord",
+      "newest_first": "Les plus récentes d’abord"
+    },
     "sticky_comment_bar": {
       "title": "Épingler la barre de commentaire en bas"
     },

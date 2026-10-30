@@ -7,6 +7,7 @@ import { issueKeys } from "@multica/core/issues/queries";
 import { issueStatusKeys } from "@multica/core/issue-statuses";
 import { I18nProvider } from "@multica/core/i18n/react";
 import { toast } from "sonner";
+import { useIssueActivityStore } from "@multica/core/issues/stores/issue-activity-store";
 import { useResolvedExpandStore } from "@multica/core/issues/stores/resolved-expand-store";
 import { useCommentCollapseStore } from "@multica/core/issues/stores";
 import {
@@ -512,6 +513,7 @@ vi.mock("react-virtuoso", () => ({
 // jsdom's HTMLElement.prototype.scrollIntoView is a no-op stub; replace it
 // with a spy so the deep-link effect's call can be observed.
 beforeEach(() => {
+  useIssueActivityStore.setState({ order: "oldest_first" });
   scrollIntoViewSpy.mockClear();
   scrollToIndexSpy.mockClear();
   Object.defineProperty(HTMLElement.prototype, "scrollIntoView", {
@@ -749,6 +751,106 @@ describe("IssueDetail (shared)", () => {
     // Reset project mock — individual tests override per case. Default fixture
     // has project_id: null so getProject is not invoked.
     mockApiObj.getProject.mockReset();
+  });
+
+  describe("issue activity order", () => {
+    beforeEach(() => {
+      mockApiObj.listTimeline.mockImplementation(async (_id: string, direction?: string) => direction === "desc" ? [...mockTimeline].reverse() : mockTimeline);
+    });
+    function commentIds(container: HTMLElement) {
+      return Array.from(container.querySelectorAll('[id^="comment-comment-"]')).map((el) => el.id);
+    }
+
+    it("requests the selected server direction and restores oldest first", async () => {
+      const { container } = renderIssueDetail();
+      await screen.findByText("I can help with this");
+      expect(commentIds(container)).toEqual(["comment-comment-1", "comment-comment-2"]);
+      act(() => useIssueActivityStore.getState().setOrder("newest_first"));
+      await waitFor(() => expect(commentIds(container)).toEqual(["comment-comment-2", "comment-comment-1"]));
+      expect(mockApiObj.listTimeline).toHaveBeenCalledWith("issue-1", "desc");
+      act(() => useIssueActivityStore.getState().setOrder("oldest_first"));
+      await waitFor(() => expect(commentIds(container)).toEqual(["comment-comment-1", "comment-comment-2"]));
+    });
+
+    it("keeps replies chronological under their parent while reversing roots", async () => {
+      useIssueActivityStore.getState().setOrder("newest_first");
+      mockApiObj.listTimeline.mockResolvedValue([
+        ...mockTimeline,
+        { ...mockTimeline[0]!, id: "reply-first", parent_id: "comment-1", content: "First reply", created_at: "2026-01-18T00:00:00Z" },
+        { ...mockTimeline[1]!, id: "reply-second", parent_id: "comment-1", content: "Second reply", created_at: "2026-01-19T00:00:00Z" },
+      ].reverse());
+      const { container } = renderIssueDetail();
+      await screen.findByText("Second reply");
+      expect(commentIds(container)).toEqual(["comment-comment-2", "comment-comment-1"]);
+      const root = document.getElementById("comment-comment-1")!;
+      expect(within(root).getByText("First reply").compareDocumentPosition(within(root).getByText("Second reply")) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    });
+
+    it("shows newest activity first inside an expanded status block", async () => {
+      useIssueActivityStore.getState().setOrder("newest_first");
+      mockApiObj.listTimeline.mockResolvedValue([
+        ...mockTimeline,
+        { type: "activity", id: "activity-1", actor_type: "member", actor_id: "user-1", action: "status_changed", details: { from: "todo", to: "in_progress" }, created_at: "2026-01-18T00:00:00Z" },
+        { type: "activity", id: "activity-2", actor_type: "member", actor_id: "user-1", action: "status_changed", details: { from: "in_progress", to: "in_review" }, created_at: "2026-01-19T00:00:00Z" },
+      ].reverse());
+      renderIssueDetail();
+      const latest = await screen.findByText("changed status from In Progress to In Review");
+      const earlier = screen.getByText("changed status from Todo to In Progress");
+      expect(latest.compareDocumentPosition(earlier) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+      expect(earlier.compareDocumentPosition(screen.getByText("I can help with this")) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    });
+
+    it("orders an agent run among comments and prepends incoming activity while preserving the server response order", async () => {
+      useIssueActivityStore.getState().setOrder("newest_first");
+      const task: AgentTask = {
+        id: "run-order", agent_id: "agent-1", runtime_id: "runtime-1", issue_id: "issue-1",
+        status: "queued", priority: 0, created_at: "2026-01-18T00:00:00Z",
+        started_at: null, dispatched_at: null, completed_at: null, result: null, error: null,
+      };
+      mockApiObj.listTasksByIssue.mockResolvedValue([task]);
+      const client = createTestQueryClient();
+      const { container } = render(
+        <I18nProvider locale="en" resources={TEST_RESOURCES}>
+          <QueryClientProvider client={client}><IssueDetail issueId="issue-1" /></QueryClientProvider>
+        </I18nProvider>,
+      );
+      const run = await screen.findByText("Waiting for an available agent.");
+      expect(run.compareDocumentPosition(await screen.findByText("I can help with this")) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+      const incoming: TimelineEntry = { ...mockTimeline[1]!, id: "comment-incoming", content: "Latest agent message", created_at: "2026-01-19T00:00:00Z" };
+      act(() => client.setQueryData(issueKeys.timelineSorted("issue-1", "desc"), [incoming, ...mockTimeline.slice().reverse()]));
+      const latest = await screen.findByText("Latest agent message");
+      expect(latest.compareDocumentPosition(run) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+      expect(commentIds(container)).toEqual(["comment-comment-incoming", "comment-comment-2", "comment-comment-1"]);
+      expect(client.getQueryData<TimelineEntry[]>(issueKeys.timelineSorted("issue-1", "desc"))?.map((entry) => entry.id)).toEqual(["comment-incoming", "comment-2", "comment-1"]);
+    });
+
+    it("uses newest first in deep-link mode and still highlights the target", async () => {
+      useIssueActivityStore.getState().setOrder("newest_first");
+      const { container } = renderIssueDetailWithHighlight("comment-1");
+      await waitFor(() => expect(hasHighlightedCommentBackground(document.getElementById("comment-comment-1"))).toBe(true));
+      expect(commentIds(container)).toEqual(["comment-comment-2", "comment-comment-1"]);
+      expect(screen.queryByTestId("virtuoso-mock")).toBeNull();
+    });
+
+    it("puts the mobile composer above newest-first activity and locates a new post at the top", async () => {
+      useIssueActivityStore.getState().setOrder("newest_first");
+      mockViewport.isMobile = true;
+      mockApiObj.createComment.mockResolvedValue({
+        id: "comment-new", issue_id: "issue-1", content: "A new update", author_type: "member", author_id: "user-1", parent_id: null, type: "comment", created_at: "2026-08-13T00:00:00Z", updated_at: "2026-08-13T00:00:00Z",
+      });
+      const { container } = renderIssueDetail();
+      await screen.findByText("I can help with this");
+      const shell = screen.getByTestId("comment-composer-shell");
+      expect(shell.compareDocumentPosition(document.getElementById("comment-comment-2")!) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+      expect(screen.queryByRole("button", { name: "Jump to latest" })).toBeNull();
+      fireEvent.click(shell);
+      const editor = await screen.findByPlaceholderText("Leave a comment...");
+      fireEvent.change(editor, { target: { value: "A new update" } });
+      const composer = editor.closest<HTMLElement>("[aria-busy], .relative.flex.flex-col.rounded-lg")!;
+      fireEvent.click(within(composer).getByRole("button", { name: "Send" }));
+      await waitFor(() => expect(scrollToIndexSpy).toHaveBeenCalledWith({ index: 0, align: "start", offset: -16 }));
+      expect(commentIds(container)).toEqual(["comment-comment-new", "comment-comment-2", "comment-comment-1"]);
+    });
   });
 
   it("passes the issue's agent assignment to the local-directory hint", async () => {

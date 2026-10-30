@@ -7,6 +7,7 @@ import {
 import { api, ApiError } from "../api";
 import type {
   Issue,
+  TimelineDirection,
   IssueAssigneeType,
   IssueStatusCategory,
   IssueTableFacetsRequest,
@@ -158,6 +159,10 @@ export const issueKeys = {
   /** Full-issue timeline (single TanStack Query, no cursor). */
   timeline: (issueId: string) =>
     [...issueKeys.timelineAll(), issueId] as const,
+  timelineSorted: (issueId: string, direction: TimelineDirection) =>
+    direction === "desc"
+      ? [...issueKeys.timeline(issueId), direction] as const
+      : issueKeys.timeline(issueId),
   /** Prefix across all issues — WS task lifecycle events invalidate here so
    *  an open composer's trigger preview refreshes when an agent's queue
    *  state changes (the dedup guard makes the answer queue-dependent). */
@@ -611,10 +616,11 @@ export function childrenByParentsOptions(
  * entries per issue) it added complexity without a UX win and broke reply
  * threads at page boundaries.
  */
-export function issueTimelineOptions(issueId: string) {
+export function issueTimelineOptions(issueId: string, direction: TimelineDirection = "asc") {
   return queryOptions({
-    queryKey: issueKeys.timeline(issueId),
-    queryFn: () => api.listTimeline(issueId),
+    queryKey: issueKeys.timelineSorted(issueId, direction),
+    queryFn: () => direction === "asc" ? api.listTimeline(issueId) : api.listTimeline(issueId, direction),
+    staleTime: 0,
   });
 }
 

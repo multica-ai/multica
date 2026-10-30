@@ -52,6 +52,7 @@ export function buildCommentRunView(
   tasks: readonly AgentTask[],
   timeline: readonly TimelineEntry[],
   previous = new Map<string, CommentRun[]>(),
+  direction: "asc" | "desc" = "asc",
 ): { timeline: readonly TimelineEntry[]; runs: Map<string, CommentRun[]>; standaloneRuns: CommentRun[] } {
   // Quick create owns the issue's creation, not a turn inside the issue. The
   // backend links that task to the issue after success so it remains available
@@ -67,7 +68,7 @@ export function buildCommentRunView(
       supplementalByTask.set(receipt.task_id, ids);
     }
   }
-  const timelineOrder = new Map(timeline.map((entry, index) => [entry.id, index]));
+  const timelineOrder = new Map(timeline.map((entry, index) => [entry.id, direction === "asc" ? index : timeline.length - 1 - index]));
   const threadRoot = (id: string): string | undefined => {
     const seen = new Set<string>();
     let entry = comments.get(id);
@@ -243,6 +244,7 @@ export function orderTimelineWithRuns(
   entries: readonly TimelineEntry[],
   runs: readonly CommentRun[],
   entryById: ReadonlyMap<string, TimelineEntry>,
+  direction?: "asc" | "desc",
 ): (TimelineEntry | CommentRun)[] {
   const slotted = new Set(runs.filter((run) => run.hasReply).map((run) => run.commentId));
   const sortTime = (item: TimelineEntry | CommentRun): number =>
@@ -255,12 +257,21 @@ export function orderTimelineWithRuns(
   // invariant sortTimelineEntriesAsc holds for the flat cache.
   const slotRow = (item: TimelineEntry | CommentRun): { created_at: string; id: string } =>
     "task" in item ? publishedReply(item, entryById) ?? item.task : item;
-  return [...entries.filter((entry) => !slotted.has(entry.id)), ...runs].sort((a, b) => {
+  const compare = (a: TimelineEntry | CommentRun, b: TimelineEntry | CommentRun) => {
     const left = sortTime(a), right = sortTime(b);
     if (left !== right) return left < right ? -1 : 1;
     const leftRow = slotRow(a), rightRow = slotRow(b);
     return leftRow.created_at.localeCompare(rightRow.created_at) || leftRow.id.localeCompare(rightRow.id);
-  });
+  };
+  const rows: (TimelineEntry | CommentRun)[] = entries.filter((entry) => !slotted.has(entry.id));
+  if (!direction) return [...rows, ...runs].sort(compare);
+  // Main entries already arrive in server order. Only insert the separately
+  // fetched run blocks; thread callers keep their chronological merge above.
+  for (const run of runs) {
+    const index = rows.findIndex((row) => direction === "asc" ? compare(run, row) < 0 : compare(run, row) > 0);
+    rows.splice(index < 0 ? rows.length : index, 0, run);
+  }
+  return rows;
 }
 
 /** A run's slot in a thread. */

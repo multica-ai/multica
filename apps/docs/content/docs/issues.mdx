@@ -126,6 +126,14 @@ Archive a property you no longer use: it disappears from pickers and filters, th
 
 An issue is the persistent record of a piece of work; a [run](/tasks) is one concrete run by an agent. One issue can produce several runs over time — a first implementation, follow-up changes, another check. A completed run only means that run ended, and an agent answering a question does not mean the issue's work has been delivered; whether the issue is finished is determined by the issue's status.
 
+### Activity order
+
+In the web and desktop apps, **Settings → Preferences → Comments & chat → Issue activity order** chooses **Oldest first** (the default) or **Newest first**. The choice applies immediately to issue pages and side previews and is saved on this device across workspaces.
+
+**Newest first** places recent comments, agent runs, and status activity at the top of the discussion, with the comment composer above it. Activity blocks show their newest events first; replies stay under their parent comment in chronological order, and each run's transcript stays chronological. The client sends `direction=asc` or `direction=desc` when requesting the timeline; the backend orders comments and activities by creation time and ID. Omitting the direction keeps oldest-first responses, and legacy paginated requests keep their existing response shape and order. New activity appears in the same selected order. Comment links, search, and posting a comment or reply still locate the corresponding message. Switching back restores chronological activity and the bottom composer.
+
+See the [activity-order test cases](../../../../docs/testing/issue-activity-order.md) for verification scenarios.
+
 ## Deliverables
 
 Files that members and agents upload in comments are collected in the **Deliverables** section of the issue sidebar. It lists the latest 3 images and 4 other files; **View all** opens every deliverable grouped by the comment that posted it, with filters for images, documents, videos, and other files. `G` in the file viewer opens the same page. Attachments on the issue description are inputs, so they do not count.

@@ -1,5 +1,6 @@
 "use client";
 
+import { useIssueActivityStore } from "@multica/core/issues/stores/issue-activity-store";
 import { useIsMobile } from "@multica/ui/hooks/use-mobile";
 import { useCommentComposerStore } from "@multica/core/issues/stores";
 
@@ -25,5 +26,6 @@ import { useCommentComposerStore } from "@multica/core/issues/stores";
 export function useStickyComposer(): boolean {
   const preferred = useCommentComposerStore((s) => s.sticky);
   const isMobile = useIsMobile();
-  return preferred && !isMobile;
+  const order = useIssueActivityStore((s) => s.order);
+  return preferred && !isMobile && order === "oldest_first";
 }

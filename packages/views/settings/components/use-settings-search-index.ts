@@ -53,6 +53,12 @@ export function useSettingsSearchIndex(
       { tab: "preferences", anchor: "theme", title: t(($) => $.preferences.theme.title) },
       {
         tab: "preferences",
+        anchor: "issue-activity-order",
+        title: t(($) => $.preferences.activity_order.title),
+        description: `${t(($) => $.preferences.activity_order.oldest_first)} · ${t(($) => $.preferences.activity_order.newest_first)}`,
+      },
+      {
+        tab: "preferences",
         anchor: "sticky-comment-bar",
         title: t(($) => $.preferences.sticky_comment_bar.title),
       },

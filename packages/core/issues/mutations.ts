@@ -47,7 +47,8 @@ import type {
   UpdateIssueRequest,
 } from "../types";
 import type { TimelineEntry, IssueSubscriber, Reaction } from "../types";
-import { sortTimelineEntriesAsc } from "./timeline-sort";
+import { insertTimelineEntry } from "./timeline-sort";
+import { useIssueActivityStore } from "./stores/issue-activity-store";
 import { applyCommentDeletion, removeCommentSubtree } from "./comment-deletion";
 import { configStore } from "../config";
 import {
@@ -823,6 +824,8 @@ type TimelineCache = TimelineEntry[];
 
 export function useCreateComment(issueId: string) {
   const qc = useQueryClient();
+  const direction = useIssueActivityStore((state) => state.order) === "newest_first" ? "desc" : "asc";
+  const timelineKey = issueKeys.timelineSorted(issueId, direction);
   const wsId = useWorkspaceId();
   return useMutation({
     mutationFn: ({
@@ -867,14 +870,14 @@ export function useCreateComment(issueId: string) {
       // this entry from the broadcast path before this onSuccess fires. Skip
       // the append if the entry is already in the cache — but keep the
       // steering receipts, which that broadcast predates.
-      qc.setQueryData<TimelineCache>(issueKeys.timeline(issueId), (old) => {
+      qc.setQueryData<TimelineCache>(timelineKey, (old) => {
         if (!old) return [entry];
         if (old.some((e) => e.id === entry.id)) {
           return steered
             ? old.map((e) => (e.id === entry.id && !e.supplements?.length ? { ...e, supplements: entry.supplements } : e))
             : old;
         }
-        return sortTimelineEntriesAsc([...old, entry]);
+        return insertTimelineEntry(old, entry, direction);
       });
       // A steered turn now lists this comment among its inputs.
       if (steered) qc.invalidateQueries({ queryKey: issueKeys.tasks(issueId) });
@@ -895,6 +898,8 @@ export function useCreateComment(issueId: string) {
 
 export function useUpdateComment(issueId: string) {
   const qc = useQueryClient();
+  const direction = useIssueActivityStore((state) => state.order) === "newest_first" ? "desc" : "asc";
+  const timelineKey = issueKeys.timelineSorted(issueId, direction);
   const wsId = useWorkspaceId();
   return useMutation({
     mutationFn: ({
@@ -914,9 +919,9 @@ export function useUpdateComment(issueId: string) {
     }) => api.updateComment(commentId, content, attachmentIds, suppressAgentIds, contentBase, expectedRevision),
     onMutate: async ({ commentId, content, attachmentIds }) => {
       await qc.cancelQueries({ queryKey: issueKeys.timeline(issueId) });
-      const prev = qc.getQueryData<TimelineCache>(issueKeys.timeline(issueId));
+      const prev = qc.getQueryData<TimelineCache>(timelineKey);
       const kept = new Set(attachmentIds);
-      qc.setQueryData<TimelineCache>(issueKeys.timeline(issueId), (old) =>
+      qc.setQueryData<TimelineCache>(timelineKey, (old) =>
         old?.map((e) =>
           e.id === commentId
             ? { ...e, content, attachments: e.attachments?.filter((a) => kept.has(a.id)) }
@@ -927,7 +932,7 @@ export function useUpdateComment(issueId: string) {
     },
     onError: (_err, _vars, ctx) => {
       if (ctx?.prev !== undefined) {
-        qc.setQueryData(issueKeys.timeline(issueId), ctx.prev);
+        qc.setQueryData(timelineKey, ctx.prev);
       }
     },
     onSuccess: (comment) => {
@@ -948,6 +953,8 @@ export function useUpdateComment(issueId: string) {
 
 export function useDeleteComment(issueId: string) {
   const qc = useQueryClient();
+  const direction = useIssueActivityStore((state) => state.order) === "newest_first" ? "desc" : "asc";
+  const timelineKey = issueKeys.timelineSorted(issueId, direction);
   const wsId = useWorkspaceId();
   return useMutation({
     // The capability is read when the delete runs, so the route matches the
@@ -962,7 +969,7 @@ export function useDeleteComment(issueId: string) {
     // confirms, mirror its outcome; realtime events and the settle refetch
     // reconcile the rest.
     onSuccess: (keptReplies, commentId) => {
-      qc.setQueryData<TimelineCache>(issueKeys.timeline(issueId), (old) => {
+      qc.setQueryData<TimelineCache>(timelineKey, (old) => {
         if (!old) return old;
         return keptReplies
           ? applyCommentDeletion(old, commentId, new Date().toISOString())
@@ -1027,13 +1034,15 @@ function collectThreadCommentIds(
 
 export function useResolveComment(issueId: string) {
   const qc = useQueryClient();
+  const direction = useIssueActivityStore((state) => state.order) === "newest_first" ? "desc" : "asc";
+  const timelineKey = issueKeys.timelineSorted(issueId, direction);
   return useMutation({
     mutationFn: ({ commentId, resolved }: { commentId: string; resolved: boolean }) =>
       resolved ? api.resolveComment(commentId) : api.unresolveComment(commentId),
     onMutate: async ({ commentId, resolved }) => {
       await qc.cancelQueries({ queryKey: issueKeys.timeline(issueId) });
-      const prev = qc.getQueryData<TimelineCache>(issueKeys.timeline(issueId));
-      qc.setQueryData<TimelineCache>(issueKeys.timeline(issueId), (old) => {
+      const prev = qc.getQueryData<TimelineCache>(timelineKey);
+      qc.setQueryData<TimelineCache>(timelineKey, (old) => {
         if (!old) return old;
         // Resolving makes this comment the sole resolution in its thread, so
         // mirror the server (ClearOtherThreadResolutions) and clear every other
@@ -1060,7 +1069,7 @@ export function useResolveComment(issueId: string) {
     },
     onError: (_err, _vars, ctx) => {
       if (ctx?.prev !== undefined) {
-        qc.setQueryData(issueKeys.timeline(issueId), ctx.prev);
+        qc.setQueryData(timelineKey, ctx.prev);
       }
     },
     onSettled: () => {
