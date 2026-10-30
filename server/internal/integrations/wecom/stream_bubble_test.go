@@ -58,6 +58,16 @@ type bubbleConn struct {
 	// stream is dead and no bubble exists.
 	failOpeningWrite error
 
+	// failPushWrite makes the socket refuse every aibot_send_msg — the "as a
+	// new message" path — while stream frames still go through.
+	failPushWrite error
+
+	// onPush runs after the nth aibot_send_msg (counted from 1) has been
+	// recorded and before its verdict is routed: the sender is still inside
+	// that piece, holding whatever it holds while it waits for an ack.
+	onPush     func(n int)
+	pushWrites int
+
 	// onClosing runs after a closing frame has been recorded and before its
 	// verdict is routed. It is how a test says "the socket dropped right after
 	// this frame went out" — by swapping the installation's sender from
@@ -75,7 +85,9 @@ func (c *bubbleConn) WriteMessage(_ int, data []byte) error {
 	s := c.sender
 	code := 0
 	lost := false
-	var onClosing func()
+	// afterRecord runs once the frame is recorded and before its verdict is
+	// routed: onClosing for a closing frame, onPush for a push.
+	var afterRecord func()
 	if isClosingFrame(env) {
 		c.closingWrites++
 		if c.failClosingWrite != nil {
@@ -86,7 +98,14 @@ func (c *bubbleConn) WriteMessage(_ int, data []byte) error {
 			code = c.refuseClosingCode
 		}
 		lost = c.closingWrites <= c.loseClosingAcks
-		onClosing = c.onClosing
+		afterRecord = c.onClosing
+	} else if env.Cmd == cmdSendMsg && c.failPushWrite != nil {
+		c.mu.Unlock()
+		return c.failPushWrite
+	} else if env.Cmd == cmdSendMsg && c.onPush != nil {
+		c.pushWrites++
+		n, hook := c.pushWrites, c.onPush
+		afterRecord = func() { hook(n) }
 	} else if env.Cmd == cmdRespondMsg {
 		if c.failOpeningWrite != nil {
 			c.mu.Unlock()
@@ -97,8 +116,8 @@ func (c *bubbleConn) WriteMessage(_ int, data []byte) error {
 		}
 	}
 	c.mu.Unlock()
-	if onClosing != nil {
-		onClosing()
+	if afterRecord != nil {
+		afterRecord()
 	}
 	if s != nil && !lost {
 		s.routeResponse(frameEnvelope{

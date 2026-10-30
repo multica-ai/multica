@@ -12,6 +12,7 @@ display metadata; it is context later injected into task briefs and
 - [Debugging wrong context](#debugging-wrong-context)
 - [Side effects](#side-effects)
 - [Project workflows](#project-workflows)
+- [Reading and changing workflows](#reading-and-changing-workflows)
 
 ## Core model
 
@@ -200,3 +201,34 @@ reference (`in_progress` on start, `in_review` on delivery) do not apply.
 - **No `blocked` column.** When the workflow has none, comment why you cannot
   proceed, then use the "needs changes" status if the step has one, or leave
   the status as it is.
+
+## Reading and changing workflows
+
+Use these only when the task is about the workflow itself: who handles a
+status, a step's instructions, or which workflow a project uses. Working an
+issue inside a workflow needs none of them.
+
+- Read first: `multica workflow list`, `multica workflow get <workflow>`
+  (an ID, ID prefix, exact name, or `default`), and
+  `multica project workflow get <project-id>`, which returns the effective
+  workflow with `uses_default: true` when the project has none set.
+- One step: `multica workflow handoff set <workflow> <status-key>` with
+  `--handler` (`none`, `project_lead`, `creator`, or a member/agent/squad),
+  `--instructions` / `--instructions-file`, `--next`, `--back`. Flags you do
+  not pass keep their current value. The change applies to every project on
+  that workflow; `--copy-for-project <project-id>` saves it on a copy only that
+  project uses.
+- Whole workflow: `multica workflow create|update --steps-file <json>`
+  replaces all steps; `multica workflow delete` is refused for Default and for
+  a workflow a project still uses.
+- Switching: `multica project workflow set <project-id> <workflow|default>`.
+  Run it with `--dry-run` first. Issues on statuses the target lacks need
+  `--map old=new`; a missing mapping fails with
+  `workflow_status_mapping_required` and the plan. Pick each target from the
+  plan or ask; never guess. The move neither reassigns issues nor starts runs.
+- Permissions are the server's: editing or deleting a workflow needs its owner
+  or a workspace admin, switching a project needs an admin or the project
+  lead. A 403 is the answer, not something to work around.
+
+All of these except the reads change what every later issue in those projects
+does. Ask before running one the user did not request.

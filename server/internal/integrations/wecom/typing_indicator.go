@@ -724,7 +724,7 @@ func (m *TypingIndicatorManager) WithRelay(r noticeRouter) *TypingIndicatorManag
 
 // relaySeal asks whichever replica holds this round to close it, and says
 // nothing about where that replica is. No address lookup: a seal frame is
-// routed by round ownership — see deliverRelayed — which is what lets the
+// routed by round ownership — see relayKindSeal — which is what lets the
 // cancellation path keep its refusal to chase an address.
 func (m *TypingIndicatorManager) relaySeal(sessionID pgtype.UUID, taskID, reason string) bool {
 	if m.relay == nil || taskID == "" {
@@ -761,7 +761,13 @@ func (m *TypingIndicatorManager) sayAsPlainMessage(ctx context.Context, sessionI
 			return nil
 		}
 	}
-	err := m.senders.sendTextCtx(ctx, addr.InstallationID, addr.ChatID, addr.ChatType, text)
+	err := m.senders.sendTextCtx(guardReply(ctx, m.deliveries, addr.InstallationID), addr.InstallationID, addr.ChatID, addr.ChatType, text)
+	if errors.Is(err, errInstallationGone) && !errors.Is(err, errPartiallySent) {
+		m.log.InfoContext(ctx, "wecom typing: a run's ending not said, installation revoked",
+			"chat_session_id", util.UUIDToString(sessionID),
+			"installation_id", util.UUIDToString(addr.InstallationID))
+		return err
+	}
 	if err != nil {
 		m.log.WarnContext(ctx, "wecom typing: could not deliver a run's ending",
 			"chat_session_id", util.UUIDToString(sessionID),
@@ -897,7 +903,15 @@ func taskIDFromEvent(e events.Event) string {
 // handle, captured at ingest, because by now the binding row may point at a
 // different chat.
 func (m *TypingIndicatorManager) writeClosing(ctx context.Context, sessionID pgtype.UUID, h streamHandle, text, why string) {
+	// The bubble was painted while the installation was live. Whether it may
+	// still be written is asked of each frame, the seal's and the fallback's.
+	ctx = guardReply(ctx, m.deliveries, h.InstallationID)
 	err := m.streams.seal(ctx, m.senders, h, text)
+	if errors.Is(err, errInstallationGone) {
+		m.log.InfoContext(ctx, "wecom typing: bubble left open, installation revoked",
+			"chat_session_id", util.UUIDToString(sessionID), "reason", why)
+		return
+	}
 	switch classifySeal(err) {
 	case sealOnScreen:
 		return

@@ -30,6 +30,8 @@ import (
 	"path"
 	"slices"
 	"strings"
+	"sync"
+	"time"
 
 	"github.com/jackc/pgx/v5/pgtype"
 
@@ -38,13 +40,28 @@ import (
 	"github.com/multica-ai/multica/server/internal/util"
 )
 
-// mediaFailureNotice lines. WeCom deployments are China-only, so these follow
-// the Chinese product voice the rest of this adapter already writes in
-// (wecom_channel.go's receipt, router.go's session titles).
-const (
-	mediaUnreadableNotice = "抱歉，有附件没能收到，麻烦重新发一次。"
-	mediaTooLargeNotice   = "抱歉，附件太大了，我这边收不下。"
-)
+// The two failure lines are copyPack.MediaUnreadable / MediaTooLarge
+// (strings.go), read in the language of the chat they land in.
+
+// mediaNoticeLocaleTimeout bounds the profile lookup behind the failure
+// notice. Deliberately small: the notice is worth sending in the wrong
+// language, and not worth delaying.
+const mediaNoticeLocaleTimeout = 2 * time.Second
+
+// mediaNoticeTimeout bounds the notice ResolveMedia sends about its own
+// failures: the lookup above, a wait for the chat's turn behind an answer
+// already streaming, and one server acknowledgement. Same size, and same
+// reasoning, as the Router's bound on the notice it asks for when its budget
+// runs out (engine.mediaAbandonNoticeTimeout).
+const mediaNoticeTimeout = 15 * time.Second
+
+// mediaNoticeQueries is what the failure notice reads before it writes: the
+// reader's language, and whether the installation may still write at all
+// (replyWriteGuard). *db.Queries is both.
+type mediaNoticeQueries interface {
+	languageLookup
+	installationReader
+}
 
 // mediaStorage is the slice of storage.Storage this resolver drives.
 // ObjectURL is a pure function of configuration, which is what lets the
@@ -69,16 +86,32 @@ type wecomMediaResolver struct {
 	// sender an attachment did not make it. nil disables the notice and
 	// leaves only the log.
 	notify *sendersRegistry
-	logger *slog.Logger
+	// queries picks the failure notice's language from where it lands
+	// (language.go: a 1:1 reads the sender's profile, a room the
+	// deployment's) and asks, as the notice is written, whether the
+	// installation was revoked since the message came in. nil puts every
+	// notice on the deployment default and writes it unchecked.
+	queries mediaNoticeQueries
+	// notices counts the failure notices ResolveMedia has sent off on their
+	// own goroutines, so that the Router's Drain can wait for them
+	// (DrainMediaNotices) the way it waited when they were sent inline.
+	notices sync.WaitGroup
+	logger  *slog.Logger
 }
 
 // NewMediaResolver builds the wecom MediaResolver. storage and ledger are
 // required — without either there is nothing durable to point an attachment
 // at, and the resolver degrades to leaving the placeholder in place. senders
-// is optional: without it a failed attachment is only logged.
-func NewMediaResolver(storage mediaStorage, ledger engine.MediaIntentLedger, senders *sendersRegistry, logger *slog.Logger) engine.MediaResolver {
+// is optional: without it a failed attachment is only logged and the failure
+// counter — which reports through the same registry — goes nowhere; so is
+// queries, without which the notice is written in the deployment's language
+// and is not checked against a revoked installation.
+func NewMediaResolver(storage mediaStorage, ledger engine.MediaIntentLedger, senders *sendersRegistry, queries mediaNoticeQueries, logger *slog.Logger) engine.MediaResolver {
 	if logger == nil {
 		logger = slog.Default()
+	}
+	if queries == nil {
+		logger.Warn("wecom media: no queries wired; attachment-failure notices go out in the deployment language whatever the reader's profile says, and are written even after the installation is revoked")
 	}
 	return &wecomMediaResolver{
 		storage: storage,
@@ -86,9 +119,32 @@ func NewMediaResolver(storage mediaStorage, ledger engine.MediaIntentLedger, sen
 		// Never a bare http.Client: the URL being fetched came off the wire,
 		// and this client refuses to connect to anything that is not public
 		// internet (media_guard.go).
-		http:   newMediaHTTPClient(mediaGuard{}),
-		notify: senders,
-		logger: logger,
+		http:    newMediaHTTPClient(mediaGuard{}),
+		notify:  senders,
+		queries: queries,
+		logger:  logger,
+	}
+}
+
+// recordFailure reports n attachments that never reached the agent, under
+// the reason an operator would act on (the mediaDrop* constants).
+//
+// It goes through the senders registry the resolver already holds rather than
+// a sink of its own: this type is built at boot from router.go with five
+// arguments already, and the registry is the one thing here that both knows
+// about metrics and is guaranteed to be the same instance the read loop
+// reports through.
+//
+// Each attachment is counted at exactly one of two places. ResolveMedia counts
+// every attachment it failed on, whatever the reason. NotifyMediaAbandoned
+// counts the ones ResolveMedia never saw fail: all of them when it never ran,
+// and the refs it returned that the Router then dropped when it did.
+func (r *wecomMediaResolver) recordFailure(reason string, n int) {
+	if r.notify == nil {
+		return
+	}
+	for range n {
+		r.notify.RecordMediaFailure(reason)
 	}
 }
 
@@ -128,7 +184,26 @@ func (r *wecomMediaResolver) ResolveMedia(ctx context.Context, inst engine.Resol
 		ref, err := r.ingestOne(ctx, inst, chatMessageID, wm, i, m)
 		if err != nil {
 			failure := classifyMediaFailure(err)
-			failures = appendFailure(failures, failure)
+			// Counted per attachment, not per message: appendFailure
+			// deliberately collapses four expired links into one sentence for
+			// the sender, and an operator asking how much media is being lost
+			// wants the four. Counted here rather than beside the notice for
+			// the same reason the log line is here — tellTheSender is skipped
+			// entirely when there is no live socket to write to, which is
+			// exactly the moment a failure most wants recording.
+			if failure == mediaFailureUnreadable && ctx.Err() != nil {
+				// The Router's budget cut this one off: it ran out mid-download,
+				// or before this attachment's turn came and every step on the
+				// dead context failed at once. Counted as that, not as
+				// unreadable, or a budget too small for the files people send
+				// would read as WeCom serving broken links. Left out of the
+				// sender's notice: the Router is about to ask for that one
+				// (NotifyMediaAbandoned).
+				r.recordFailure(abandonReason(ctx.Err()), 1)
+			} else {
+				r.recordFailure(failure.metricReason(), 1)
+				failures = appendFailure(failures, failure)
+			}
 			// A refused address gets its own line because the operator's next
 			// move is different from every other failure here: the attachment
 			// is fine and the deployment declined to dial where its host
@@ -153,7 +228,34 @@ func (r *wecomMediaResolver) ResolveMedia(ctx context.Context, inst engine.Resol
 		msg.MediaRefs = append(msg.MediaRefs, ref)
 	}
 
-	r.tellTheSender(inst, wm, failures)
+	// When the Router's media budget ran out under us, the Router follows with
+	// NotifyMediaAbandoned — and that says the same sentence, because from
+	// where the sender is sitting it is the same event. Saying it here as well
+	// gives them the identical apology twice in a row, which reads as the bot
+	// glitching rather than as one attachment that did not make it.
+	//
+	// Only the line the Router is about to repeat is dropped. A "too big"
+	// verdict was reached on its own merits before the clock ran out, and it
+	// is the one the sender can actually act on, so it still goes.
+	if ctx.Err() != nil {
+		failures = withoutNotice(failures, mediaFailureUnreadable)
+	}
+
+	// On its own goroutine and its own deadline: the Router binds this
+	// message, clears its pending-media marker and promotes its task only once
+	// this returns, and a notice waiting on the chat's turn or on the server's
+	// acknowledgement must not hold that up, nor spend the budget that decides
+	// whether the refs above are kept. Counted in notices, so the Router's
+	// Drain still waits for it (DrainMediaNotices).
+	if len(failures) > 0 {
+		r.notices.Add(1)
+		go func() {
+			defer r.notices.Done()
+			noticeCtx, cancel := context.WithTimeout(context.Background(), mediaNoticeTimeout)
+			defer cancel()
+			r.tellTheSender(noticeCtx, inst, wm, failures)
+		}()
+	}
 	return msg
 }
 
@@ -352,6 +454,32 @@ func classifyMediaFailure(err error) mediaFailure {
 	return mediaFailureUnreadable
 }
 
+// abandonReason is the label for an attachment the Router's budget took, by
+// what ended the budget: running out, or the server shutting down. The two
+// want different answers (a bigger budget or a faster media host, versus
+// nothing), and a deploy would otherwise read as a slow-download incident.
+func abandonReason(cause error) string {
+	if errors.Is(cause, context.Canceled) {
+		return mediaDropShutdown
+	}
+	return mediaDropBudgetExpired
+}
+
+// metricReason is the label this failure is counted under. The sender's
+// wording folds "blocked" into "unreadable" — there is nothing they can do
+// differently either way — but the operator's does not, which is the whole
+// reason this kind exists.
+func (f mediaFailure) metricReason() string {
+	switch f {
+	case mediaFailureTooLarge:
+		return mediaDropTooLarge
+	case mediaFailureBlocked:
+		return mediaDropBlockedAddress
+	default:
+		return mediaDropUnreadable
+	}
+}
+
 // appendFailure keeps one entry per kind. A message with four attachments
 // that all expired is one thing that went wrong, and saying it four times
 // helps nobody.
@@ -364,6 +492,85 @@ func appendFailure(list []mediaFailure, f mediaFailure) []mediaFailure {
 	return append(list, f)
 }
 
+// noticeKind collapses the failure kinds that read as the same sentence down
+// to the one that names it. Two kinds do: mediaFailureBlocked lands on the
+// unreadable wording deliberately, because from the sender's side a refused
+// address and a download that fell over are the same event — the attachment
+// did not arrive — and the thing that separates them is what the operator must
+// change, which belongs in the log. Neither the resolved address nor the
+// signed url goes into a chat message.
+//
+// Anything reasoning about "would these two read the same" asks here. It
+// cannot compare the rendered sentences: since the copy pack those are the
+// reader's, and two readers in one group get different strings for the one
+// event.
+func noticeKind(f mediaFailure) mediaFailure {
+	if f == mediaFailureTooLarge {
+		return mediaFailureTooLarge
+	}
+	return mediaFailureUnreadable
+}
+
+// noticeFor is the one place a failure kind becomes a sentence, in the
+// language c is written in.
+func noticeFor(c copyPack, f mediaFailure) string {
+	if noticeKind(f) == mediaFailureTooLarge {
+		return c.MediaTooLarge
+	}
+	return c.MediaUnreadable
+}
+
+// withoutNotice drops every kind that would read the same as drop, leaving the
+// rest in order. It goes through noticeKind rather than comparing kinds
+// directly because the sender reads sentences: dropping mediaFailureUnreadable
+// while leaving mediaFailureBlocked in the list would still print the same
+// line twice.
+func withoutNotice(list []mediaFailure, drop mediaFailure) []mediaFailure {
+	out := list[:0]
+	for _, f := range list {
+		if noticeKind(f) != noticeKind(drop) {
+			out = append(out, f)
+		}
+	}
+	return out
+}
+
+// DrainMediaNotices answers engine.MediaNoticeDrainer: it returns once every
+// failure notice ResolveMedia has sent off has finished. Each runs under
+// mediaNoticeTimeout, so the wait is bounded by that.
+func (r *wecomMediaResolver) DrainMediaNotices() {
+	r.notices.Wait()
+}
+
+// NotifyMediaAbandoned answers engine.MediaAbandonNotifier: the Router's own
+// media budget expired, so this resolver either never ran or was cut off, and
+// the Router has dropped whatever refs it did return.
+//
+// It counts what ResolveMedia could not: every attachment when ResolveMedia
+// never ran, and otherwise only the refs it returned that the Router dropped.
+// The ones ResolveMedia failed on it has already counted, so counting them
+// here would count them twice.
+//
+// The sender gets the same line as an attachment that could not be read,
+// because from where they are sitting it is the same event and the same
+// remedy: the picture did not get through, send it again. Which side of the
+// seam ran out of time is ours to know and theirs not to care about.
+//
+// ctx is the Router's, with its own deadline; the lookup and the write below
+// both run under it.
+func (r *wecomMediaResolver) NotifyMediaAbandoned(ctx context.Context, inst engine.ResolvedInstallation, msg channel.InboundMessage, a engine.MediaAbandonment) {
+	wm, err := wecomMsgFromRaw(msg)
+	if err != nil || len(wm.Media) == 0 {
+		return
+	}
+	lost := len(a.Dropped)
+	if !a.Started {
+		lost = len(wm.Media)
+	}
+	r.recordFailure(abandonReason(a.Cause), lost)
+	r.tellTheSender(ctx, inst, wm, []mediaFailure{mediaFailureUnreadable})
+}
+
 // tellTheSender writes one short notice into the chat the attachments came
 // from, over the same live aibot socket every other wecom message uses.
 //
@@ -372,7 +579,7 @@ func appendFailure(list []mediaFailure, f mediaFailure) []mediaFailure {
 // never received. The agent run itself is deliberately left to proceed — the
 // person can see for themselves that the picture did not get through, and the
 // answer to whatever they typed beside it is still worth having.
-func (r *wecomMediaResolver) tellTheSender(inst engine.ResolvedInstallation, wm InboundMessage, failures []mediaFailure) {
+func (r *wecomMediaResolver) tellTheSender(ctx context.Context, inst engine.ResolvedInstallation, wm InboundMessage, failures []mediaFailure) {
 	if len(failures) == 0 || r.notify == nil || !inst.ID.Valid {
 		return
 	}
@@ -395,27 +602,29 @@ func (r *wecomMediaResolver) tellTheSender(inst engine.ResolvedInstallation, wm 
 	if strings.EqualFold(wm.ChatType, "group") {
 		chatType = chatTypeGroupInt
 	}
+	// ctx is the notice's own, never the media budget's: the commonest reason
+	// to be here is a download that ran out of time, and on that path the
+	// budget is already spent. The lookup gets a shorter slice of it, so a
+	// stalled profile read costs the notice its language and not the notice.
+	lookupCtx, cancel := context.WithTimeout(ctx, mediaNoticeLocaleTimeout)
+	c := copyFor(localeFor(lookupCtx, r.queries, inst.ID, chatType, wm.SenderUserID))
+	cancel()
+
 	lines := make([]string, 0, len(failures))
 	for _, f := range failures {
-		notice := mediaUnreadableNotice
-		if f == mediaFailureTooLarge {
-			notice = mediaTooLargeNotice
-		}
-		// mediaFailureBlocked lands on the unreadable wording deliberately.
-		// From the sender's side a refused address and a download that fell
-		// over are the same event — the attachment did not arrive — and the
-		// thing that separates them is what the operator must change, which
-		// belongs in the log. Neither the resolved address nor the signed url
-		// goes into a chat message.
-		//
-		// Two kinds sharing one wording is why the dedupe moved here from
-		// appendFailure: a message with one blocked and one unreadable
-		// attachment is still one piece of news.
-		if !slices.Contains(lines, notice) {
+		// Deduped by sentence, not by kind: two kinds share the unreadable
+		// wording (see noticeFor), so a message with one blocked and one
+		// unreadable attachment is still one piece of news. That is why the
+		// dedupe is here rather than in appendFailure, which the operator log
+		// needs kept per-kind.
+		if notice := noticeFor(c, f); !slices.Contains(lines, notice) {
 			lines = append(lines, notice)
 		}
 	}
-	if err := sender.sendText(chatID, chatType, strings.Join(lines, "\n")); err != nil {
+	// guardReply: the installation was read when the message came in, which
+	// can be a whole media budget ago. A revocation since then stops the
+	// notice at the socket, as it stops every reply frame.
+	if err := sender.sendTextCtx(guardReply(ctx, r.queries, inst.ID), chatID, chatType, strings.Join(lines, "\n")); err != nil {
 		r.logger.Warn("wecom media failure notice not delivered",
 			"installation_id", util.UUIDToString(inst.ID), "msg_id", wm.MsgID, "err", err)
 	}

@@ -27,7 +27,7 @@ import type {
   IssuePropertyOption,
   IssuePropertyType,
 } from "@multica/core/types";
-import { ISSUE_PROPERTY_TYPES } from "@multica/core/types";
+import { ISSUE_PROPERTY_TYPES, MAX_ISSUE_PROPERTY_SELECT_OPTIONS } from "@multica/core/types";
 import { Button } from "@multica/ui/components/ui/button";
 import { IconButton } from "@multica/ui/components/common/icon-button";
 import { Badge } from "@multica/ui/components/ui/badge";
@@ -627,6 +627,7 @@ function PropertyEditorDialog({
                 variant="ghost"
                 size="sm"
                 className="gap-2"
+                disabled={draft.options.length >= MAX_ISSUE_PROPERTY_SELECT_OPTIONS}
                 onClick={() =>
                   setDraft((current) => ({
                     ...current,

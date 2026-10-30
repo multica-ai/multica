@@ -224,15 +224,53 @@ func (f *fakeOutboundQueries) GetChannelTaskDelivery(_ context.Context, taskID p
 		f.refuseImpossibleRouting(id)
 	}
 	return db.ChannelTaskDelivery{
-		BindingID: f.sessionBinding.ID, InstallationID: f.sessionBinding.InstallationID,
+		BindingID: f.sessionBinding.ID, InstallationID: f.deliveryInstallationID(),
 		ChannelType: channelType, ChannelChatID: f.sessionBinding.ChannelChatID,
 		ChatType:         f.sessionBinding.ChatType,
 		ChannelMessageID: f.sessionBinding.LastMessageID, ChannelThreadID: f.sessionBinding.LastThreadID,
 		RouteRevision: f.sessionBinding.RouteRevision, Config: f.sessionBinding.Config,
 	}, nil
 }
-func (f *fakeOutboundQueries) GetChannelInstallation(context.Context, db.GetChannelInstallationParams) (db.ChannelInstallation, error) {
-	return f.installation, f.installErr
+
+// rigInstallationID is the bot a turn came in on when the rig never named one.
+// The delivery row's installation_id is NOT NULL in production, and the write
+// guard reads the installation by that id, so a rig that leaves it unset still
+// has to be answering about some bot.
+var rigInstallationID = pgtype.UUID{Bytes: [16]byte{0xfe, 0xed}, Valid: true}
+
+// deliveryInstallationID is the bot the turn's delivery row names: the
+// binding's when the rig set one, else the installation the rig filed, else
+// rigInstallationID.
+func (f *fakeOutboundQueries) deliveryInstallationID() pgtype.UUID {
+	switch {
+	case f.sessionBinding.InstallationID.Valid:
+		return f.sessionBinding.InstallationID
+	case f.installation.ID.Valid:
+		return f.installation.ID
+	}
+	return rigInstallationID
+}
+
+// GetChannelInstallation answers BY ID, because production does — and the
+// reply write guard asks it about whichever bot a frame is about to go out on.
+//
+// The delivery row's bot is the installation the rig filed. A bot a member
+// binding was found on is active: both binding lookups join on ci.status =
+// 'active' (queries/channel.sql), so production cannot hand back a binding on
+// any other kind. Every other id has no row.
+func (f *fakeOutboundQueries) GetChannelInstallation(_ context.Context, arg db.GetChannelInstallationParams) (db.ChannelInstallation, error) {
+	if f.installErr != nil {
+		return db.ChannelInstallation{}, f.installErr
+	}
+	switch {
+	case arg.ID == f.deliveryInstallationID():
+		inst := f.installation
+		inst.ID = arg.ID
+		return inst, nil
+	case arg.ID.Valid && (arg.ID == f.memberBinding.InstallationID || arg.ID == f.agentMemberBinding.InstallationID):
+		return db.ChannelInstallation{ID: arg.ID, Status: string(InstallationActive)}, nil
+	}
+	return db.ChannelInstallation{}, pgx.ErrNoRows
 }
 func (f *fakeOutboundQueries) FindChannelBindingForMember(context.Context, db.FindChannelBindingForMemberParams) (db.ChannelUserBinding, error) {
 	return f.memberBinding, f.memberErr
