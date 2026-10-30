@@ -10,57 +10,25 @@ import (
 	"strings"
 
 	"gopkg.in/yaml.v3"
+
+	"github.com/multica-ai/multica/server/internal/util"
 )
 
-// Hermes discovers skills from exactly two places (verified against the bundled
-// Hermes agent source, agent/skill_utils.py get_all_skills_dirs): its home
-// skills dir `<HERMES_HOME>/skills/` first, then the directories listed under
-// `skills.external_dirs` in `<HERMES_HOME>/config.yaml`, in config order. It has
-// NO workspace-relative discovery, so the generic `.agent_context/skills/`
-// fallback the daemon used before was never scanned and workspace-assigned
-// skills silently never took effect (issue #5242).
+// Hermes discovers skills in HERMES_HOME/skills before skills.external_dirs;
+// it does not scan the task workspace. Bound skills therefore use an isolated
+// home overlay, while skill-less tasks keep the original home. Conversation
+// stores are the effective home so state.db stays inside its owning profile.
 //
-// Rather than replace HERMES_HOME with a home rebuilt from a fixed allowlist —
-// which would silently change behavior for tasks that don't even use skills and
-// would drop any home state not on the list (plugins, OAuth state, hooks, SOUL,
-// scripts, and whatever Hermes adds next) — this builds a minimal compatibility
-// overlay, and only when the agent actually has skills bound (gated at the call
-// site in Prepare/Reuse; a skill-less Hermes task keeps HERMES_HOME untouched).
+// Mirror host-home entries except task-owned overrides. The local skills directory
+// contains bound skills; external_dirs preserves shared skills and configured
+// directories normalized against the original home and effective environment.
 //
-// The overlay:
-//   - mirrors every top-level entry of the shared ~/.hermes/ into the per-task
-//     home via symlink, EXCEPT the entries it overrides — so the denylist stays
-//     tiny and future home state is inherited automatically instead of being
-//     missed by an allowlist;
-//   - derives a task-local config.yaml whose `skills.external_dirs` points at
-//     the shared skills dir plus the user's existing external_dirs, expanded
-//     against the agent's effective env and normalized to absolute paths (Hermes
-//     resolves relative external_dirs against HERMES_HOME, so leaving them
-//     relative after the redirect would silently repoint them) — this exposes
-//     the user's global/builtin skills read-only without copying them;
-//   - populates the task-local `skills/` dir with ONLY the Multica-bound skills,
-//     which take precedence because Hermes lists the home skills dir first;
-//   - keeps `memories/` overlay-owned, NOT symlinked to the shared home: Hermes
-//     loads and writes back MEMORY.md/USER.md there, and per-agent memory is a
-//     Multica product concern — the host's local Hermes memory must not bleed
-//     into a task, nor task memory back out to the host. The overlay links it to
-//     the agent's persistent store so it survives across tasks and issues
-//     (hermes_memory.go); it is a fresh per-task dir only when no store applies;
-//   - keeps the state.db SQLite session store and its journal sidecars
-//     overlay-owned: the host's conversation history is never linked or copied.
-//     state.db is then linked to the conversation's own persistent store
-//     (hermes_sessions.go) so a multi-turn conversation survives the task; it
-//     stays a task-local file only when there is no store to key on, or on a
-//     host that cannot create the link;
-//   - disables the external `memory.provider` in the derived config so a
-//     host-configured Supermemory/Hindsight/etc. backend isn't shared across
-//     tasks. This is the on-disk + external-backend memory isolation; a managed,
-//     agent-scoped memory backend is a separate future product decision.
+// Keep memories, state.db and its journals overlay-owned, using agent-scoped
+// memory and conversation-scoped session stores when available. Disable external
+// memory providers to prevent cross-task sharing.
 //
-// The shared ~/.hermes/ is never modified by this setup. Note however that
-// mirrored entries are writable symlinks, so if Hermes writes through one at
-// runtime (e.g. refreshing token state under a mirrored auth/OAuth path) that
-// write does reach the shared home — that propagation is intentional.
+// Setup does not modify the shared home. Mirrored auth and other entries remain
+// writable symlinks, so runtime updates through them intentionally reach the host.
 
 // hermesOverriddenEntries are the fixed top-level entries of the shared
 // ~/.hermes/ that the overlay supplies its own task-local version of, so they
@@ -101,6 +69,10 @@ var hermesOverriddenEntries = map[string]struct{}{
 	"active_profile":           {},
 	"profiles":                 {},
 	".env":                     {},
+	"logs":                     {},
+	"sessions":                 {},
+	"cron":                     {},
+	hermesGatewayStateMarker:   {},
 	hermesTaskLocalStateMarker: {},
 }
 
@@ -113,7 +85,7 @@ func isHermesOverlayOwnedEntry(name string) bool {
 	if _, owned := hermesOverriddenEntries[name]; owned {
 		return true
 	}
-	return isHermesTaskLocalStateEntry(name)
+	return isHermesTaskLocalStateEntry(name) || isHermesGatewayStateEntry(name)
 }
 
 func isHermesTaskLocalStateEntry(name string) bool {
@@ -278,30 +250,17 @@ func hermesRootFromHomeFor(base, native string) string {
 // resolvePathBestEffort resolves symlinks like Python's Path.resolve(strict=False):
 // it follows every symlink in the existing prefix of p and appends the remaining
 // non-existent tail unchanged, rather than failing (as filepath.EvalSymlinks does)
-// when p doesn't fully exist. The result is absolute.
+// when p doesn't fully exist. The result is absolute. When the kernel's own
+// resolution cannot be determined (util.ErrUnresolvablePath — an unknown
+// redirecting reparse point, an unobservable drive), the input is returned
+// unchanged: the containment comparison downstream then fails to relate it and
+// treats it as under nothing, which is the conservative answer.
 func resolvePathBestEffort(p string) string {
-	if p == "" {
+	resolved, err := util.ResolveSymlinksBestEffort(p)
+	if err != nil {
 		return p
 	}
-	if abs, err := filepath.Abs(p); err == nil {
-		p = abs
-	}
-	if resolved, err := filepath.EvalSymlinks(p); err == nil {
-		return resolved
-	}
-	dir := p
-	var tail []string
-	for {
-		parent := filepath.Dir(dir)
-		if parent == dir {
-			return p // reached the root without an existing ancestor
-		}
-		tail = append([]string{filepath.Base(dir)}, tail...)
-		dir = parent
-		if resolved, err := filepath.EvalSymlinks(dir); err == nil {
-			return filepath.Join(append([]string{resolved}, tail...)...)
-		}
-	}
+	return resolved
 }
 
 // isPathUnder reports whether child is parent or nested under it.
@@ -356,7 +315,7 @@ func hermesProfileDir(root, name string) (home string, mustExist bool, err error
 }
 
 // prepareHermesHome builds the per-task HERMES_HOME compatibility overlay
-// described above. The daemon exports the given path as HERMES_HOME on the
+// described above. The daemon exports the returned Home as HERMES_HOME on the
 // hermes subprocess so the CLI discovers the bound skills natively.
 //
 // Callers gate this on the agent having skills bound; it is a full rebuild each
@@ -374,10 +333,10 @@ func hermesProfileDir(root, name string) (home string, mustExist bool, err error
 // what the Hermes child sees. memoryStore is the agent's persistent memory store
 // (execenv.HermesMemoryStorePath) that memories/ is linked to; empty keeps
 // memories/ task-local for this task. sessionStore is the conversation's
-// persistent session store (execenv.HermesSessionStorePath) that state.db is
-// linked to; empty — or a host that cannot create the link — keeps the session
-// database task-local. The returned hermesSessionMount reports both what got
-// mounted and whether the store actually holds a transcript, so the caller never
+// persistent session store (execenv.HermesSessionStorePath), used as the
+// effective home; empty keeps the session database task-local.
+// The returned hermesSessionMount reports the effective home and whether the
+// store actually holds a transcript, so the caller never
 // tells a task it can resume history that is not there.
 func prepareHermesHome(hermesHome, sourceHome string, sourceMustExist bool, workspaceSkills []SkillContextForEnv, env map[string]string, memoryStore, sessionStore string, logger *slog.Logger) (sessions hermesSessionMount, err error) {
 	sharedHome := strings.TrimSpace(sourceHome)
@@ -390,6 +349,14 @@ func prepareHermesHome(hermesHome, sourceHome string, sourceMustExist bool, work
 		}
 	}
 
+	if sessionStore != "" {
+		sessions, err = prepareHermesSessionHome(hermesHome, sessionStore, logger)
+		if err != nil {
+			return hermesSessionMount{}, fmt.Errorf("prepare conversation home: %w", err)
+		}
+		hermesHome = sessions.Home
+	}
+	sessions.Home = hermesHome
 	if err := os.MkdirAll(hermesHome, 0o700); err != nil {
 		return hermesSessionMount{}, fmt.Errorf("create hermes-home dir: %w", err)
 	}
@@ -401,16 +368,8 @@ func prepareHermesHome(hermesHome, sourceHome string, sourceMustExist bool, work
 	if err := prepareHermesTaskLocalState(hermesHome); err != nil {
 		return hermesSessionMount{}, fmt.Errorf("prepare task-local state: %w", err)
 	}
-	// Sessions: link state.db at the conversation's persistent store so the
-	// transcript survives the task. A store that cannot be mounted leaves the
-	// database task-local — the pre-existing behaviour — rather than failing the
-	// task. See hermes_sessions.go.
-	if sessionStore != "" {
-		mounted, err := mountHermesSessionDB(hermesHome, sessionStore, logger)
-		if err != nil {
-			return hermesSessionMount{}, fmt.Errorf("mount conversation sessions: %w", err)
-		}
-		sessions = mounted
+	if err := prepareHermesGatewayState(hermesHome); err != nil {
+		return hermesSessionMount{}, fmt.Errorf("prepare gateway state: %w", err)
 	}
 	// Memory: link memories/ at the agent's persistent store so it survives the
 	// task, or fall back to a fresh task-local dir when there is no store (no
@@ -472,6 +431,7 @@ func writeDerivedHermesEnv(sharedHome, hermesHome string) error {
 	// treats it literally (no escaping / var expansion) — task home paths can
 	// contain spaces or other characters under the workspaces root.
 	fmt.Fprintf(&buf, "HERMES_HOME='%s'\n", hermesHome)
+	buf.WriteString("GATEWAY_MULTIPLEX_PROFILES=false\n")
 
 	return writeFileAtomic(dst, []byte(buf.String()), 0o600)
 }
@@ -633,11 +593,11 @@ func linkSharedHermesEntry(src, dst string) error {
 // with `skills.external_dirs` set to their existing external dirs plus the shared
 // ~/.hermes/skills, all as absolute paths. When the user has no config we still
 // write a minimal one so their global skills stay reachable via the external
-// root. If the config can't be parsed we copy it verbatim so auth/model settings
-// survive — the bound skills still load from the task-local skills/ dir, which is
-// the point of the fix; only the user's global skills would be missing. The file
+// root. Invalid config fails closed because Hermes could otherwise fall back to
+// environment credentials and enable the host's messaging adapters. The file
 // is written 0600 (it can hold inline api_key secrets) via atomic replace, so
-// reuse also repairs a prior file's permissions.
+// reuse also repairs a prior file's permissions. The terminal passthrough
+// allowlist preserves task credentials in tool shells without storing values.
 func writeDerivedHermesConfig(sharedHome, hermesHome string, env map[string]string, logger *slog.Logger) error {
 	srcConfig := filepath.Join(sharedHome, "config.yaml")
 	dstConfig := filepath.Join(hermesHome, "config.yaml")
@@ -668,24 +628,128 @@ func writeDerivedHermesConfig(sharedHome, hermesHome string, env map[string]stri
 		if err := setHermesExternalDirs(doc, computeHermesExternalDirs(sharedHome, nil, env)); err != nil {
 			return err
 		}
+		if err := setHermesTerminalEnvPassthrough(doc); err != nil {
+			return err
+		}
+		if err := disableHermesGatewayIngress(doc); err != nil {
+			return err
+		}
 		return marshalYAMLToFile(doc, dstConfig)
 	}
 
 	var doc yaml.Node
 	if err := yaml.Unmarshal(data, &doc); err != nil {
-		logger.Warn("execenv: hermes-home config parse failed; copying verbatim", "error", err)
-		return writeFileAtomic(dstConfig, data, 0o600)
+		return fmt.Errorf("parse hermes config: %w", err)
 	}
 	dirs := computeHermesExternalDirs(sharedHome, existingHermesExternalDirs(&doc), env)
 	if err := setHermesExternalDirs(&doc, dirs); err != nil {
-		logger.Warn("execenv: hermes-home set external_dirs failed; copying verbatim", "error", err)
-		return writeFileAtomic(dstConfig, data, 0o600)
+		return err
 	}
 	// Disable any host-configured external memory backend (memory.provider) so a
 	// Supermemory/Hindsight/etc. bank isn't shared across managed tasks; the
 	// built-in per-task memories/ dir is already isolated above.
 	disableHermesMemoryProvider(&doc)
+	if err := disableHermesGatewayIngress(&doc); err != nil {
+		return err
+	}
+	if err := setHermesTerminalEnvPassthrough(&doc); err != nil {
+		logger.Warn("execenv: hermes-home set terminal passthrough failed; keeping other derived settings", "error", err)
+	}
 	return marshalYAMLToFile(&doc, dstConfig)
+}
+
+// HermesTaskEnvPassthroughNames lists the daemon-owned task context that Hermes
+// tool subprocesses need, including optional autopilot and quick-create fields.
+// Only names are persisted; Hermes ignores names absent from the process env.
+func HermesTaskEnvPassthroughNames() []string {
+	return []string{
+		"MULTICA_TOKEN",
+		"MULTICA_TASK_CONFIG_ROOT",
+		"MULTICA_TASK_WORKSPACES_ROOT",
+		"MULTICA_SERVER_URL",
+		"MULTICA_DAEMON_PORT",
+		"MULTICA_WORKSPACE_ID",
+		"MULTICA_AGENT_NAME",
+		"MULTICA_AGENT_ID",
+		"MULTICA_TASK_ID",
+		"MULTICA_TASK_SLOT",
+		"MULTICA_AUTOPILOT_RUN_ID",
+		"MULTICA_AUTOPILOT_ID",
+		"MULTICA_QUICK_CREATE_TASK_ID",
+		"MULTICA_QUICK_CREATE_ATTACHMENT_IDS",
+	}
+}
+
+// setHermesTerminalEnvPassthrough lets Multica CLI calls in Hermes tool shells
+// use the task environment already injected by the daemon. Only names are
+// persisted; user entries and other terminal settings remain intact.
+func setHermesTerminalEnvPassthrough(doc *yaml.Node) error {
+	top := yamlDocumentRoot(doc)
+	if top == nil {
+		return fmt.Errorf("hermes config: unexpected root node")
+	}
+	original := yamlMapValue(top, "terminal")
+	terminal := resolveHermesYAMLAlias(original)
+	if original != nil && terminal == nil {
+		return fmt.Errorf("hermes config: invalid terminal alias")
+	}
+	if terminal != nil {
+		// Decode validates recursive/excessive aliases before materializing references.
+		var validated any
+		if err := terminal.Decode(&validated); err != nil {
+			return fmt.Errorf("hermes terminal config: %w", err)
+		}
+	}
+	// Preserve references to values we replace. Detach nested anchors first so
+	// aliases of the whole terminal section keep their original allowlist too.
+	for _, node := range []*yaml.Node{yamlMapValue(terminal, "env_passthrough"), original} {
+		if node != nil && node.Anchor != "" {
+			expandAliasesOf(doc, node)
+		}
+	}
+	if terminal == nil || terminal.Kind != yaml.MappingNode {
+		terminal = &yaml.Node{Kind: yaml.MappingNode, Tag: "!!map"}
+	} else {
+		detached := *terminal
+		detached.Anchor = ""
+		detached.Content = append([]*yaml.Node(nil), terminal.Content...)
+		terminal = &detached
+	}
+	yamlSetMapValue(top, "terminal", terminal)
+	names := []string{}
+	seen := map[string]bool{}
+	add := func(name string) {
+		if !seen[name] {
+			seen[name] = true
+			names = append(names, name)
+		}
+	}
+	if existing := resolveHermesYAMLAlias(yamlMapValue(terminal, "env_passthrough")); existing != nil && existing.Kind == yaml.SequenceNode {
+		for _, entry := range existing.Content {
+			entry = resolveHermesYAMLAlias(entry)
+			if entry != nil && entry.Kind == yaml.ScalarNode && entry.Tag == "!!str" {
+				add(entry.Value)
+			}
+		}
+	}
+	for _, name := range HermesTaskEnvPassthroughNames() {
+		add(name)
+	}
+	yamlSetMapValue(terminal, "env_passthrough", yamlStringSeq(names))
+	return nil
+}
+
+// resolveHermesYAMLAlias follows references without looping on malformed nodes.
+func resolveHermesYAMLAlias(node *yaml.Node) *yaml.Node {
+	seen := map[*yaml.Node]bool{}
+	for node != nil && node.Kind == yaml.AliasNode {
+		if seen[node] {
+			return nil
+		}
+		seen[node] = true
+		node = node.Alias
+	}
+	return node
 }
 
 // disableHermesMemoryProvider forces skills-adjacent `memory.provider` to empty
@@ -792,8 +856,7 @@ func writeHermesBoundSkills(hermesHome string, workspaceSkills []SkillContextFor
 		// only source, matching un-redirected behavior.
 		return os.MkdirAll(skillsDir, 0o700)
 	}
-	// Skills live under env.RootDir/hermes-home, which the GC loop (cloud) or
-	// env teardown (local_directory) wipes wholesale — no sidecar manifest.
+	// This directory is owned by the isolated home and replaced on every run.
 	return writeSkillFiles(skillsDir, workspaceSkills, nil)
 }
 

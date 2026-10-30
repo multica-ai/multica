@@ -9,6 +9,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -1716,7 +1717,7 @@ func TestBuildPerTaskOpenclawConfigOmitsGatewayWhenZero(t *testing.T) {
 	t.Parallel()
 
 	cfg := buildPerTaskOpenclawConfig(
-		"", false, "", nil, false, "/workdir", nil, false,
+		"", false, "", nil, "", "/workdir", nil, false,
 		OpenclawGatewayPin{},
 	)
 	if _, present := cfg["gateway"]; present {
@@ -1734,7 +1735,7 @@ func TestBuildPerTaskOpenclawConfigWritesGatewayBlock(t *testing.T) {
 		TLS:   true,
 	}
 	cfg := buildPerTaskOpenclawConfig(
-		"", false, "", nil, false, "/workdir", nil, false,
+		"", false, "", nil, "", "/workdir", nil, false,
 		pin,
 	)
 
@@ -1773,7 +1774,7 @@ func TestBuildPerTaskOpenclawConfigPartialGatewayOmitsZeroFields(t *testing.T) {
 	// fields must not land in the wrapper as empty strings/zeros — that
 	// would override the user's value with junk.
 	cfg := buildPerTaskOpenclawConfig(
-		"", false, "", nil, false, "/workdir", nil, false,
+		"", false, "", nil, "", "/workdir", nil, false,
 		OpenclawGatewayPin{Host: "gw.internal", Port: 18789},
 	)
 	gw := cfg["gateway"].(map[string]any)
@@ -2114,6 +2115,408 @@ func TestPrepareOpenclawConfigNewSchemaEmptyRegistry(t *testing.T) {
 	}
 	if agents["defaults"].(map[string]any)["workspace"] != workDir {
 		t.Errorf("defaults.workspace not set")
+	}
+}
+
+// ── 2026.8+ `agents.entries.<id>` schema ──
+//
+// OpenClaw 2026.8 retired `agents.list` in favour of a map keyed by agent id.
+// Unlike the sqlite-registry generations, that map is configuration the
+// per-task wrapper can override — and it has to: an entry that pins an
+// absolute `workspace` outranks `agents.defaults.workspace` verbatim, so a host
+// that pinned one for its gateway agent would run every task in that pinned
+// directory instead of the prepared workdir (skills/ never loads, and the agent
+// silently edits the wrong tree).
+//
+// The tests below are the regression coverage the reviewer of the earlier
+// attempt at this fix asked for: the new probe and its fallbacks, the write-back
+// in both the plain and the managed-MCP flow, and the fail-closed edge that must
+// not be traded away for either.
+
+// TestPrepareOpenclawConfigProbesAgentsEntriesOnCurrentWording — 2026.8.x
+// reports the retired path as `Unknown config path: agents.list`, and the
+// envelope can arrive with err == nil because the completeness rule accepts a
+// finished JSON answer from a CLI that has not exited yet (see
+// openclawStdoutEnvelopeError). That spelling has to select the entries probe: a
+// path-less "key not found" matcher cannot see it, and without the probe the
+// host silently loses its per-agent workspace pinning.
+func TestPrepareOpenclawConfigProbesAgentsEntriesOnCurrentWording(t *testing.T) {
+	envRoot := t.TempDir()
+	workDir := filepath.Join(envRoot, "workdir")
+	if err := os.MkdirAll(workDir, 0o755); err != nil {
+		t.Fatalf("mkdir workdir: %v", err)
+	}
+	userConfigPath := filepath.Join(t.TempDir(), "openclaw.json")
+	if err := os.WriteFile(userConfigPath, []byte(`{}`), 0o600); err != nil {
+		t.Fatalf("write user cfg: %v", err)
+	}
+
+	stub := installOpenclawStub(t, map[string]openclawResponse{
+		"config file": {stdout: userConfigPath},
+		// Envelope without an exit error, in the shape 2026.8.1-beta.3 emits.
+		"config get agents.list --json": {
+			stdout: `{"ok":false,"error":{"type":"cli_error","message":"Unknown config path: agents.list"}}`,
+		},
+		"config get agents.entries --json": {
+			stdout: `{"main":{"workspace":"/Users/cob/.openclaw/workspace"}}`,
+		},
+		// Answerable on purpose: a regression that consults the registry here
+		// must fail the call-graph assertion below rather than the stub's
+		// unexpected-args guard, so the diagnostic says which wire was crossed.
+		"agents list --json": {stdout: `[{"id":"main"}]`},
+	})
+
+	if _, err := prepareOpenclawConfig(envRoot, workDir, OpenclawConfigPrep{OpenclawBin: stub.bin}); err != nil {
+		t.Fatalf("prepareOpenclawConfig: %v", err)
+	}
+
+	var invocations []string
+	for _, call := range stub.calls {
+		invocations = append(invocations, strings.Join(call.args, " "))
+	}
+	want := []string{
+		"config validate --json",
+		"config get agents.list --json",
+		"config get agents.entries --json",
+	}
+	if strings.Join(invocations, " | ") != strings.Join(want, " | ") {
+		t.Errorf("call graph on a 2026.8 host:\n got: %v\nwant: %v", invocations, want)
+	}
+}
+
+// TestPrepareOpenclawConfigPinsAgentsEntriesWorkspaces — the whole point of the
+// probe: every `agents.entries.<id>.workspace` lands on the task workdir, and
+// nothing else about the entry does. The wrapper is a sibling of the user's
+// config in the $include merge, so anything echoed back from the resolved entry
+// would override the user's own value — including values `config get` has
+// already replaced with `__OPENCLAW_REDACTED__` (covered on its own by
+// TestPrepareOpenclawConfigEntriesWriteBackDropsRedactedFields).
+func TestPrepareOpenclawConfigPinsAgentsEntriesWorkspaces(t *testing.T) {
+	envRoot := t.TempDir()
+	workDir := filepath.Join(envRoot, "workdir")
+	if err := os.MkdirAll(workDir, 0o755); err != nil {
+		t.Fatalf("mkdir workdir: %v", err)
+	}
+	userConfigPath := filepath.Join(t.TempDir(), "openclaw.json")
+	if err := os.WriteFile(userConfigPath, []byte(`{}`), 0o600); err != nil {
+		t.Fatalf("write user cfg: %v", err)
+	}
+
+	// The multi-agent shape from the field: the gateway's own agent pinned to
+	// its workspace, plus a second agent pinned somewhere else. Both would win
+	// over agents.defaults.workspace if the wrapper did not rewrite them.
+	entries := `{"main":{"workspace":"/Users/cob/.openclaw/workspace","name":"Chamber",` +
+		`"memory":{"search":{"remote":{"apiKey":"__OPENCLAW_REDACTED__"}}}},` +
+		`"oncall":{"workspace":"/Users/cob/.openclaw/workspace-oncall","model":"anthropic/claude-sonnet-4-6"}}`
+	stub := installOpenclawStub(t, map[string]openclawResponse{
+		"config file": {stdout: userConfigPath},
+		"config get agents.list --json": {
+			stdout: `{"ok":false,"error":{"type":"cli_error","message":"Unknown config path: agents.list"}}`,
+			err:    errors.New("openclaw config get agents.list --json: exit status 1"),
+		},
+		"config get agents.entries --json": {stdout: entries},
+		"agents list --json":               {stdout: `[{"id":"main"}]`},
+	})
+
+	result, err := prepareOpenclawConfig(envRoot, workDir, OpenclawConfigPrep{OpenclawBin: stub.bin})
+	if err != nil {
+		t.Fatalf("prepareOpenclawConfig: %v", err)
+	}
+	got := mustReadJSON(t, result.ConfigPath)
+	agents := got["agents"].(map[string]any)
+	if agents["defaults"].(map[string]any)["workspace"] != workDir {
+		t.Errorf("defaults.workspace = %v, want %q", agents["defaults"].(map[string]any)["workspace"], workDir)
+	}
+	if _, present := agents["list"]; present {
+		t.Errorf("agents.list must be omitted on a 2026.8 host, got %v", agents["list"])
+	}
+	gotEntries, ok := agents["entries"].(map[string]any)
+	if !ok {
+		t.Fatalf("agents.entries missing from the wrapper — the pinned host workspaces would keep overriding the task workspace: %v", agents)
+	}
+	if len(gotEntries) != 2 {
+		t.Errorf("agents.entries has %d entries, want 2: %v", len(gotEntries), gotEntries)
+	}
+	for _, id := range []string{"main", "oncall"} {
+		entry, ok := gotEntries[id].(map[string]any)
+		if !ok {
+			t.Fatalf("agents.entries.%s is not an object: %v", id, gotEntries[id])
+		}
+		if entry["workspace"] != workDir {
+			t.Errorf("agents.entries.%s.workspace = %v, want %q", id, entry["workspace"], workDir)
+		}
+		if len(entry) != 1 {
+			t.Errorf("agents.entries.%s = %v; the wrapper must pin `workspace` alone, because $include gives these siblings precedence over the user's own config", id, entry)
+		}
+	}
+
+	wrapper, err := os.ReadFile(result.ConfigPath)
+	if err != nil {
+		t.Fatalf("read wrapper: %v", err)
+	}
+	for _, banned := range []string{"__multica_entries_", "__OPENCLAW_REDACTED__", `"name"`, `"model"`, `"memory"`} {
+		if strings.Contains(string(wrapper), banned) {
+			t.Errorf("the wrapper carries %s, which belongs to the user's config rather than to this package: %s", banned, wrapper)
+		}
+	}
+	for _, call := range stub.calls {
+		if strings.Join(call.args, " ") == "agents list --json" {
+			t.Errorf("registry consulted on a host whose agents came from agents.entries: %v", call.args)
+		}
+	}
+}
+
+// TestPrepareOpenclawConfigPinsAgentsEntriesWorkspacesWithManagedMcp — a
+// managed mcp_config does not change which CLI calls preparation makes, and it
+// must not change the entries write-back either: the wrapper still pins the
+// task workspace and still carries the managed `mcp.servers` beside it.
+func TestPrepareOpenclawConfigPinsAgentsEntriesWorkspacesWithManagedMcp(t *testing.T) {
+	envRoot := t.TempDir()
+	workDir := filepath.Join(envRoot, "workdir")
+	if err := os.MkdirAll(workDir, 0o755); err != nil {
+		t.Fatalf("mkdir workdir: %v", err)
+	}
+	userConfigPath := filepath.Join(t.TempDir(), "openclaw.json")
+	if err := os.WriteFile(userConfigPath, []byte(`{}`), 0o600); err != nil {
+		t.Fatalf("write user cfg: %v", err)
+	}
+
+	stub := installOpenclawStub(t, map[string]openclawResponse{
+		"config file": {stdout: userConfigPath},
+		"config get agents.list --json": {
+			stdout: `{"error":"Unknown config path: agents.list"}`,
+			err:    errors.New("openclaw config get agents.list --json: exit status 1"),
+		},
+		"config get agents.entries --json": {
+			stdout: `{"main":{"workspace":"/Users/cob/.openclaw/workspace"}}`,
+		},
+	})
+
+	result, err := prepareOpenclawConfig(envRoot, workDir, OpenclawConfigPrep{
+		OpenclawBin: stub.bin,
+		McpConfig:   json.RawMessage(`{"mcpServers":{"managed":{"command":"managed"}}}`),
+	})
+	if err != nil {
+		t.Fatalf("prepareOpenclawConfig: %v", err)
+	}
+	got := mustReadJSON(t, result.ConfigPath)
+	agents := got["agents"].(map[string]any)
+	entry, ok := agents["entries"].(map[string]any)["main"].(map[string]any)
+	if !ok {
+		t.Fatalf("agents.entries.main missing under managed MCP: %v", agents)
+	}
+	if entry["workspace"] != workDir {
+		t.Errorf("agents.entries.main.workspace = %v, want %q", entry["workspace"], workDir)
+	}
+	if len(entry) != 1 {
+		t.Errorf("agents.entries.main = %v, want `workspace` alone", entry)
+	}
+	mcp, ok := got["mcp"].(map[string]any)
+	if !ok {
+		t.Fatalf("wrapper has no mcp block under managed MCP: %v", got)
+	}
+	servers, ok := mcp["servers"].(map[string]any)
+	if !ok || len(servers) != 1 {
+		t.Errorf("mcp.servers = %v, want exactly the managed set", mcp["servers"])
+	}
+}
+
+// TestPrepareOpenclawConfigEntriesWriteBackDropsRedactedFields — the write-back
+// must not copy the resolved entry. `config get` runs the config through
+// redaction before it extracts the path it was asked for, so a sensitive
+// per-agent value comes back as the literal `__OPENCLAW_REDACTED__`. The
+// wrapper is a sibling of the user's config in the $include merge and siblings
+// win, so echoing that sentinel back would replace the user's real secret — a
+// memory search API key, a web fetch header, sandbox SSH credentials — for
+// every task on the host, and nothing on OpenClaw's load path restores it.
+// Emitting `{"<id>": {"workspace": ...}}` leaves every other field coming from
+// the user's own file, untouched.
+func TestPrepareOpenclawConfigEntriesWriteBackDropsRedactedFields(t *testing.T) {
+	envRoot := t.TempDir()
+	workDir := filepath.Join(envRoot, "workdir")
+	if err := os.MkdirAll(workDir, 0o755); err != nil {
+		t.Fatalf("mkdir workdir: %v", err)
+	}
+	userConfigPath := filepath.Join(t.TempDir(), "openclaw.json")
+	if err := os.WriteFile(userConfigPath, []byte(`{}`), 0o600); err != nil {
+		t.Fatalf("write user cfg: %v", err)
+	}
+
+	// The shapes upstream's own redaction regression covers, nested inside the
+	// one entry that carries the pinned workspace.
+	entries := `{"main":{"workspace":"/Users/cob/.openclaw/workspace",` +
+		`"memory":{"search":{"remote":{"apiKey":"__OPENCLAW_REDACTED__"}}},` +
+		`"tools":{"web":{"fetch":{"headers":{"Authorization":"__OPENCLAW_REDACTED__"}}}},` +
+		`"sandbox":{"ssh":{"password":"__OPENCLAW_REDACTED__"}}}}`
+	stub := installOpenclawStub(t, map[string]openclawResponse{
+		"config file": {stdout: userConfigPath},
+		"config get agents.list --json": {
+			stdout: `{"ok":false,"error":{"type":"cli_error","message":"Unknown config path: agents.list"}}`,
+		},
+		"config get agents.entries --json": {stdout: entries},
+	})
+
+	result, err := prepareOpenclawConfig(envRoot, workDir, OpenclawConfigPrep{OpenclawBin: stub.bin})
+	if err != nil {
+		t.Fatalf("prepareOpenclawConfig: %v", err)
+	}
+	wrapper, err := os.ReadFile(result.ConfigPath)
+	if err != nil {
+		t.Fatalf("read wrapper: %v", err)
+	}
+	if strings.Contains(string(wrapper), "__OPENCLAW_REDACTED__") {
+		t.Errorf("the wrapper carries a redaction sentinel, which would override the user's real secret through the $include merge: %s", wrapper)
+	}
+
+	got := mustReadJSON(t, result.ConfigPath)
+	entry, ok := got["agents"].(map[string]any)["entries"].(map[string]any)["main"].(map[string]any)
+	if !ok {
+		t.Fatalf("agents.entries.main missing — the task workspace would not be pinned: %v", got)
+	}
+	if entry["workspace"] != workDir {
+		t.Errorf("agents.entries.main.workspace = %v, want %q", entry["workspace"], workDir)
+	}
+	if len(entry) != 1 {
+		t.Errorf("agents.entries.main = %v, want `workspace` alone", entry)
+	}
+}
+
+// TestPrepareOpenclawConfigFallsBackToRegistryWhenEntriesPathIsUnset — on
+// 2026.8 the entries path exists but may carry nothing, which the CLI reports as
+// "Config path is valid but unset: agents.entries" (again with err == nil when
+// the envelope arrives without an exit). That is a host whose agents live in the
+// registry, so the fallback has to run — and its rows still must not reach the
+// wrapper.
+func TestPrepareOpenclawConfigFallsBackToRegistryWhenEntriesPathIsUnset(t *testing.T) {
+	envRoot := t.TempDir()
+	workDir := filepath.Join(envRoot, "workdir")
+	if err := os.MkdirAll(workDir, 0o755); err != nil {
+		t.Fatalf("mkdir workdir: %v", err)
+	}
+	userConfigPath := filepath.Join(t.TempDir(), "openclaw.json")
+	if err := os.WriteFile(userConfigPath, []byte(`{}`), 0o600); err != nil {
+		t.Fatalf("write user cfg: %v", err)
+	}
+
+	stub := installOpenclawStub(t, map[string]openclawResponse{
+		"config file": {stdout: userConfigPath},
+		"config get agents.list --json": {
+			stdout: `{"error":"Unknown config path: agents.list"}`,
+		},
+		"config get agents.entries --json": {
+			stdout: `{"error":"Config path is valid but unset: agents.entries"}`,
+		},
+		"agents list --json": {stdout: `[{"id":"main","identityName":"Beau","agentDir":"/Users/cob/.openclaw/agents/main/agent","workspace":"/Users/cob/.openclaw/workspace","isDefault":true}]`},
+	})
+
+	result, err := prepareOpenclawConfig(envRoot, workDir, OpenclawConfigPrep{OpenclawBin: stub.bin})
+	if err != nil {
+		t.Fatalf("prepareOpenclawConfig: %v", err)
+	}
+	got := mustReadJSON(t, result.ConfigPath)
+	agents := got["agents"].(map[string]any)
+	if agents["defaults"].(map[string]any)["workspace"] != workDir {
+		t.Errorf("defaults.workspace not pinned to workDir: %v", agents["defaults"])
+	}
+	if _, present := agents["entries"]; present {
+		t.Errorf("agents.entries must be omitted for a registry-sourced host, got %v", agents["entries"])
+	}
+	if _, present := agents["list"]; present {
+		t.Errorf("agents.list must be omitted for a registry-sourced host, got %v", agents["list"])
+	}
+	wrapper, err := os.ReadFile(result.ConfigPath)
+	if err != nil {
+		t.Fatalf("read wrapper: %v", err)
+	}
+	if strings.Contains(string(wrapper), "Config path is valid but unset") {
+		t.Errorf("wrapper carries the CLI error envelope: %s", wrapper)
+	}
+}
+
+// TestPrepareOpenclawConfigFailsClosedOnUnrelatedConfigPathEnvelope — the
+// missing-path verdict is matched on the path the probe asked for, not on the
+// presence of the words. An envelope about a different key is not permission to
+// downgrade this host to `agents.defaults.workspace` and call the task prepared:
+// it is a CLI whose answer we did not understand, and preparation fails closed.
+func TestPrepareOpenclawConfigFailsClosedOnUnrelatedConfigPathEnvelope(t *testing.T) {
+	envRoot := t.TempDir()
+	workDir := filepath.Join(envRoot, "workdir")
+	if err := os.MkdirAll(workDir, 0o755); err != nil {
+		t.Fatalf("mkdir workdir: %v", err)
+	}
+	userConfigPath := filepath.Join(t.TempDir(), "openclaw.json")
+	if err := os.WriteFile(userConfigPath, []byte(`{}`), 0o600); err != nil {
+		t.Fatalf("write user cfg: %v", err)
+	}
+
+	stub := installOpenclawStub(t, map[string]openclawResponse{
+		"config file": {stdout: userConfigPath},
+		// A different key, so the probe's question is still unanswered.
+		"config get agents.list --json": {
+			stdout: `{"error":"Unknown config path: agents.defaults"}`,
+		},
+		"config get agents.entries --json": {
+			stdout: `{"main":{"workspace":"/Users/cob/.openclaw/workspace"}}`,
+		},
+		"agents list --json": {stdout: `[{"id":"main"}]`},
+	})
+
+	_, err := prepareOpenclawConfig(envRoot, workDir, OpenclawConfigPrep{OpenclawBin: stub.bin})
+	if err == nil {
+		t.Fatal("prepareOpenclawConfig accepted an envelope about an unrelated config path")
+	}
+	if !strings.Contains(err.Error(), "Unknown config path: agents.defaults") {
+		t.Errorf("error %q does not carry the CLI's own diagnostic", err.Error())
+	}
+	for _, call := range stub.calls {
+		switch strings.Join(call.args, " ") {
+		case "config get agents.entries --json", "agents list --json":
+			t.Errorf("`openclaw %s` must not run for an envelope naming another path", strings.Join(call.args, " "))
+		}
+	}
+	if _, statErr := os.Stat(filepath.Join(envRoot, openclawConfigFile)); !os.IsNotExist(statErr) {
+		t.Errorf("a failed preparation wrote a wrapper (stat err: %v)", statErr)
+	}
+}
+
+// TestRewriteAgentsEntriesWorkspacesRefusesRegistryRows pins the write-back
+// gate at the unit level: registry rows carry the CLI-only fields OpenClaw's
+// validator rejects, so any element that did not come from the entries probe
+// must sink the whole map rather than be filtered out quietly. What an entries
+// row carries is the id alone — the payload is redacted and must not be copied.
+func TestRewriteAgentsEntriesWorkspacesRefusesRegistryRows(t *testing.T) {
+	t.Parallel()
+	registryRows := []any{
+		map[string]any{"id": "main", "workspace": "/Users/cob/.openclaw/workspace", "identityName": "Beau"},
+	}
+	if got := rewriteAgentsEntriesWorkspaces(registryRows, "/workdir"); got != nil {
+		t.Errorf("registry rows were written back as agents.entries: %v", got)
+	}
+	if got := rewriteAgentsEntriesWorkspaces(nil, "/workdir"); got != nil {
+		t.Errorf("an empty resolved list must omit the key, got %v", got)
+	}
+	// Half-marked: a regression that filters quietly instead of refusing would
+	// still pin the marked id, and the unmarked row's source would go unexamined.
+	mixed := []any{
+		map[string]any{openclawEntriesKeyField: "main"},
+		map[string]any{"id": "oncall", "workspace": "/Users/cob/.openclaw/workspace-oncall"},
+	}
+	if got := rewriteAgentsEntriesWorkspaces(mixed, "/workdir"); got != nil {
+		t.Errorf("a list with an unmarked row was written back: %v", got)
+	}
+	entries := []any{
+		map[string]any{
+			openclawEntriesKeyField: "main",
+			// Anything else riding on the row is ignored on purpose — the
+			// payload `config get` returns carries redaction sentinels.
+			"workspace": "/Users/cob/.openclaw/workspace",
+			"name":      "Chamber",
+		},
+	}
+	got := rewriteAgentsEntriesWorkspaces(entries, "/workdir")
+	want := map[string]any{"main": map[string]any{"workspace": "/workdir"}}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("rewritten entries = %#v, want %#v", got, want)
 	}
 }
 

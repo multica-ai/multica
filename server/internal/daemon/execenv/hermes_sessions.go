@@ -11,49 +11,14 @@ import (
 	"github.com/multica-ai/multica/server/internal/cli"
 )
 
-// Background
+// Persist Hermes ACP session databases by agent, profile, and conversation under
+// hermes-sessions. Tasks for one conversation are serialized; separate conversations
+// get separate SQLite databases. This keeps resumable transcripts across task homes
+// without sharing a live database among an agent's concurrent issues.
 //
-// Hermes persists every ACP session — the actual conversation transcript — in
-// the SQLite database at `<HERMES_HOME>/state.db` (acp_adapter/session.py).
-// Because Multica has to take over HERMES_HOME to inject bound skills, that
-// database landed inside the per-task overlay, which made a Hermes agent's
-// conversation last exactly one task.
-//
-// The failure was silent, which is what made it expensive. `session/resume`
-// against a database that does not hold the session does not fail: Hermes
-// creates a fresh session and answers with an ordinary success frame
-// (acp_adapter/server.py resume_session), so the daemon believed it had
-// resumed, re-sent the same dead id on every later turn, and the user saw a
-// conversation that restarted from zero with nothing in the logs (GH #6806).
-// The backend now detects that rebind (resolveHermesResumedSessionID), and
-// this file removes the cause.
-//
-// The store is keyed by (agent, hermes profile, conversation):
-//
-//	<multica profile dir>/hermes-sessions/<agent>/<hermes profile>/<conversation>/state.db
-//
-// Keying to the conversation — the issue, or `chat_<id>` for a chat session —
-// is what makes this safe to share where #6693 could not. Its stated reason
-// for leaving state.db task-local was concurrency: one agent's parallel tasks
-// would write one live SQLite database, which needs lock and consistency work
-// (plus Windows byte-range locks on `-shm`) that plain memory files do not.
-// Tasks of the SAME conversation are serial by construction — a follow-up is
-// dispatched after its predecessor reports — so the shard has one writer at a
-// time, while two different issues get two different databases and never meet.
-//
-// The (agent, profile) prefix matches the memory store's scoping exactly, so
-// pointing an agent at another Hermes profile gives it a fresh conversation
-// line just as it gives it a fresh memory line. It is a sibling root rather
-// than a subdirectory of `hermes-state/<agent>/<profile>` because that
-// directory IS the agent's memories dir (the overlay links `memories/`
-// straight at it), so nesting sessions inside it would surface them to Hermes
-// as a memory entry.
-//
-// The overlay mounts the shard by symlinking `<overlay>/state.db` at
-// `<store>/state.db`. SQLite resolves the link when it derives the `-wal` and
-// `-shm` paths, so the journal sidecars are created in the store next to the
-// database rather than in the task directory, and a task teardown can never
-// take the write-ahead log with it.
+// The conversation store is the effective HERMES_HOME, with an ordinary state.db
+// and its journals inside it. Both in-process ACP and gateway-backed Hermes can
+// use it without relaxing gateway database ownership checks or copying a live DB.
 
 // hermesSessionStoreRoot is the directory under the daemon's Multica profile
 // dir that holds every agent's persistent Hermes conversation shards.
@@ -105,115 +70,75 @@ func hermesConversationSegment(task TaskContextForEnv) string {
 
 // hermesSessionMount is what a mount attempt actually achieved.
 //
-// The two facts are deliberately separate. Mounted says state.db resolves to
-// the store; HistoryPresent says the store holds a database to resume. A
+// The two facts are deliberately separate. Mounted says the store is the home;
+// HistoryPresent says the store holds a database to resume. A
 // mounted-but-empty store is the normal shape of a conversation's first turn,
 // and also what a GC reclaim, a profile switch or an operator's `rm` leaves
 // behind — treating "mounted" as "resumable" would forward a session id into an
 // empty database, which is the silent restart this whole change exists to kill.
 type hermesSessionMount struct {
+	Home           string
 	Mounted        bool
 	HistoryPresent bool
 }
 
-// hermesSessionLink creates the store link. Indirected so a test can simulate a
-// host that cannot create symlinks — the degradation path is the one that must
-// never destroy a database, so it needs coverage everywhere, not only on
-// Windows.
-var hermesSessionLink = os.Symlink
-
-// hermesSessionCopy copies one file of a migration. Indirected so a test can
-// fail the second file of the state.db family and prove the store is never left
-// holding a partially migrated conversation.
+// hermesSessionCopy copies one file of a migration. Tests can fail a sidecar
+// copy to prove a partial migration never replaces the original transcript.
 var hermesSessionCopy = copyFile
 
-// mountHermesSessionDB points the overlay's state.db at the conversation's
-// store, so the transcript outlives the task.
-//
-// The order of operations is the contract. Nothing that could destroy an
-// existing database happens until the link has actually been created (under a
-// staging name), because the alternative — migrate, delete, then discover this
-// host cannot symlink — turns a working task-local conversation into an empty
-// one on exactly the hosts the degradation path exists to protect. A false
-// Mounted with a nil error therefore means "nothing was touched; keep the
-// database task-local", which is the pre-existing behaviour.
-//
-// Idempotent across Reuse: a link already pointing at the store is left alone.
-// A real state.db left by an older daemon — or by a task that ran before this
-// conversation had a store — is migrated into an empty store rather than
-// dropped, so upgrading mid-conversation does not discard the transcript the
-// user is in the middle of.
-func mountHermesSessionDB(hermesHome, storeDir string, logger *slog.Logger) (hermesSessionMount, error) {
-	dst := filepath.Join(hermesHome, hermesSessionDBEntry)
-	target := filepath.Join(storeDir, hermesSessionDBEntry)
-
+// prepareHermesSessionHome uses the existing conversation store as the home.
+// Keep the old task overlay intact for daemon rollback: an older daemon can
+// still link its state.db to this same store. Never turn that task path into a
+// directory link, which would let an older daemon unlink the store's own DB.
+func prepareHermesSessionHome(hermesHome, storeDir string, logger *slog.Logger) (hermesSessionMount, error) {
 	if err := os.MkdirAll(storeDir, 0o700); err != nil {
-		return hermesSessionMount{}, fmt.Errorf("create hermes session store %s: %w", storeDir, err)
+		return hermesSessionMount{}, fmt.Errorf("create hermes session home: %w", err)
 	}
-
-	fi, err := os.Lstat(dst)
-	switch {
-	case err == nil && fi.Mode()&os.ModeSymlink != 0:
-		if current, rlErr := os.Readlink(dst); rlErr == nil && filepath.Clean(current) == filepath.Clean(target) {
-			// Already mounted (Reuse). The link can still be dangling — the GC
-			// may have reclaimed the store since the last turn — so the history
-			// question is answered from the store, never from the link.
-			touchHermesSessionStore(storeDir, logger)
-			return hermesSessionMount{Mounted: true, HistoryPresent: hermesStoreHasSessionDB(storeDir)}, nil
+	if filepath.Clean(hermesHome) != filepath.Clean(storeDir) {
+		if err := os.MkdirAll(hermesHome, 0o700); err != nil {
+			return hermesSessionMount{}, err
 		}
-	case err != nil && !os.IsNotExist(err):
-		return hermesSessionMount{}, fmt.Errorf("stat hermes session db %s: %w", dst, err)
+		if err := prepareHermesTaskLocalState(hermesHome); err != nil {
+			return hermesSessionMount{}, err
+		}
+		if err := migrateHermesTaskSessionDB(hermesHome, storeDir, logger); err != nil {
+			return hermesSessionMount{}, err
+		}
+		if err := removeHermesSessionDBFamily(hermesHome); err != nil {
+			return hermesSessionMount{}, err
+		}
 	}
-
-	// Prove the host can link BEFORE anything destructive. A real symlink,
-	// never a copy: createFileLink falls back to copying on a Windows host that
-	// cannot symlink, and a copied SQLite database would absorb every write of
-	// this turn into a file the next task throws away — worse than staying
-	// task-local, because it looks like it worked.
-	staged := filepath.Join(hermesHome, hermesSessionLinkStagingEntry)
-	if err := os.RemoveAll(staged); err != nil {
-		return hermesSessionMount{}, fmt.Errorf("clear stale session link staging %s: %w", staged, err)
-	}
-	if err := hermesSessionLink(target, staged); err != nil {
-		logger.Warn("execenv: hermes session store not mounted; conversation history stays task-local",
-			"store", storeDir,
-			"error", err,
-		)
-		return hermesSessionMount{}, nil
-	}
-	defer os.RemoveAll(staged) // no-op once the staging link has been renamed into place
-
-	if err := migrateHermesTaskSessionDB(hermesHome, storeDir, logger); err != nil {
+	// This store already belongs to the conversation. Mark it before the generic
+	// overlay initializer, whose legacy-host migration would otherwise discard it.
+	if err := writeFileAtomic(filepath.Join(storeDir, hermesTaskLocalStateMarker), []byte("conversation Hermes state\n"), 0o600); err != nil {
 		return hermesSessionMount{}, err
 	}
-	if err := removeHermesSessionDBFamily(hermesHome); err != nil {
-		return hermesSessionMount{}, err
-	}
-	// Publish the link. Fails closed: the database is already safe in the store
-	// by this point, so a rename failure means a broken filesystem, not lost
-	// history, and the task must not start against a home with no state.db path
-	// at all.
-	if err := os.Rename(staged, dst); err != nil {
-		return hermesSessionMount{}, fmt.Errorf("publish hermes session link %s: %w", dst, err)
-	}
-	// Stamp the store as just-used: mounting it does not touch its mtime, so
-	// without this the GC's idle check could reclaim a long-idle conversation
-	// right as a task picks it back up.
 	touchHermesSessionStore(storeDir, logger)
-	return hermesSessionMount{Mounted: true, HistoryPresent: hermesStoreHasSessionDB(storeDir)}, nil
+	return hermesSessionMount{Home: storeDir, Mounted: true, HistoryPresent: hermesStoreHasSessionDB(storeDir)}, nil
 }
 
-// hermesSessionLinkStagingEntry is where the store link is created before it is
-// published over state.db. Dot-prefixed so isHermesTaskLocalStateEntry does not
-// match it and the family cleanup cannot remove the link it is about to
-// publish.
-const hermesSessionLinkStagingEntry = ".multica-session-link"
-
 // hermesStoreHasSessionDB reports whether storeDir holds a session database
-// with content. A zero-length file is what SQLite leaves after an `open` that
-// never wrote a page, and resuming against it is the same amnesia as an absent
-// one — so it counts as no history, not as history.
+// with readable content. A zero-length file is what SQLite leaves after an
+// `open` that never wrote a page; resuming against it is the same as an absent
+// database, so it counts as no history.
 func hermesStoreHasSessionDB(storeDir string) bool {
+	path := filepath.Join(storeDir, hermesSessionDBEntry)
+	fi, err := os.Stat(path)
+	if err != nil || !fi.Mode().IsRegular() || fi.Size() == 0 {
+		return false
+	}
+	db, err := os.Open(path)
+	if err != nil {
+		return false
+	}
+	defer db.Close()
+	return true
+}
+
+// hermesStoreContainsSessionDB protects existing history during migration,
+// even when it cannot currently be opened for resume. Read permissions do not
+// prevent unlinking a database from a writable directory.
+func hermesStoreContainsSessionDB(storeDir string) bool {
 	fi, err := os.Stat(filepath.Join(storeDir, hermesSessionDBEntry))
 	return err == nil && fi.Mode().IsRegular() && fi.Size() > 0
 }
@@ -234,7 +159,7 @@ func hermesStoreHasSessionDB(storeDir string) bool {
 // Only an empty store is migrated into — a store that already holds a database
 // is this conversation's real history and must never be overwritten.
 func migrateHermesTaskSessionDB(hermesHome, storeDir string, logger *slog.Logger) error {
-	if hermesStoreHasSessionDB(storeDir) {
+	if hermesStoreContainsSessionDB(storeDir) {
 		return nil // store already holds this conversation — never overwrite it
 	}
 
@@ -306,7 +231,7 @@ func migrateHermesTaskSessionDB(hermesHome, storeDir string, logger *slog.Logger
 func publishHermesSessionStaging(staging, storeDir string) (bool, error) {
 	hermesSessionPublishMu.Lock()
 	defer hermesSessionPublishMu.Unlock()
-	if hermesStoreHasSessionDB(storeDir) {
+	if hermesStoreContainsSessionDB(storeDir) {
 		return false, nil // a competitor published a real transcript first
 	}
 	if hermesSessionPublishBarrier != nil {
@@ -315,7 +240,7 @@ func publishHermesSessionStaging(staging, storeDir string) (bool, error) {
 	if err := removeHermesSessionDBFamily(storeDir); err != nil {
 		return false, err
 	}
-	return promoteHermesStoreStaging(staging, storeDir, hermesStoreHasSessionDB)
+	return promoteHermesStoreStaging(staging, storeDir, hermesStoreContainsSessionDB)
 }
 
 // hermesSessionPublishMu serializes every session-store publish in this

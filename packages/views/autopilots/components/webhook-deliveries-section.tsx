@@ -12,7 +12,7 @@ import {
   Copy,
   Check,
   Webhook,
-} from "lucide-react";
+} from "@multica/ui/icons";
 import { useQuery } from "@tanstack/react-query";
 import {
   autopilotDeliveriesOptions,
@@ -30,6 +30,7 @@ import {
 } from "@multica/ui/components/ui/dialog";
 import { cn } from "@multica/ui/lib/utils";
 import { copyText } from "@multica/ui/lib/clipboard";
+import { TruncatedTooltip } from "@multica/ui/components/common/truncated-tooltip";
 import { toast } from "sonner";
 import { useLocale, useT } from "../../i18n";
 import type {
@@ -275,7 +276,7 @@ function DeliveryDetailDialog({
               </span>
             </div>
             <Badge variant="outline">{full.provider || "—"}</Badge>
-            <code className="rounded bg-muted px-2 py-0.5 text-caption font-mono">
+            <code className="rounded-xs bg-muted px-2 py-0.5 text-caption font-mono">
               {full.event || t(($) => $.webhook_payload.unknown_event)}
             </code>
             <SignatureBadge status={full.signature_status as WebhookSignatureStatus} />
@@ -373,15 +374,16 @@ function MetaRow({
   return (
     <div className="flex flex-col">
       <dt className="text-muted-foreground">{label}</dt>
-      <dd
-        className={cn(
-          "truncate text-foreground",
-          mono && "font-mono",
-        )}
-        title={value}
-      >
-        {value}
-      </dd>
+      <TruncatedTooltip content={value}>
+        <dd
+          className={cn(
+            "truncate text-foreground",
+            mono && "font-mono",
+          )}
+        >
+          {value}
+        </dd>
+      </TruncatedTooltip>
     </div>
   );
 }
@@ -471,7 +473,7 @@ function CodeBlock({ label, value }: { label: string; value: string }) {
         <button
           type="button"
           onClick={handleCopy}
-          className="flex items-center gap-1 rounded px-2 py-0.5 hover:bg-accent transition-colors"
+          className="flex items-center gap-1 rounded-xs px-2 py-0.5 hover:bg-accent transition-colors"
         >
           {copied ? (
             <Check className="h-3 w-3 text-emerald-500" />

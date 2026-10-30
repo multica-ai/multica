@@ -166,19 +166,9 @@ func parseACPEffortOption(raw json.RawMessage) (acpEffortOption, bool) {
 // would wave it through, and the task would silently run at the default — the
 // exact fake switch this whole path exists to prevent.
 //
-// Models other than the current one keep a nil Thinking, which hides the picker
-// for them. Reading a real per-model catalog means driving the session's own
-// `model` config option once per model and consuming each refreshed response;
-// that is a follow-up, not something to fake here.
+// Other models stay nil unless discovery explicitly probes them after switching.
 func annotateACPThinkingForSessionModel(models []Model, sessionResult json.RawMessage) {
-	option, ok := parseACPEffortOption(sessionResult)
-	if !ok || len(option.Choices) == 0 {
-		return
-	}
-	thinking := &ModelThinking{
-		SupportedLevels: option.Choices,
-		DefaultLevel:    option.CurrentValue,
-	}
+	thinking := acpModelThinking(sessionResult)
 	for i := range models {
 		// Default is set from the session's advertised currentModelId, so it
 		// marks the one model this catalog actually describes. If nothing is
@@ -186,6 +176,85 @@ func annotateACPThinkingForSessionModel(models []Model, sessionResult json.RawMe
 		if models[i].Default {
 			models[i].Thinking = thinking
 		}
+	}
+}
+
+// acpModelThinking is the effort catalog one ACP session state advertises, or
+// nil when it advertises none.
+func acpModelThinking(raw json.RawMessage) *ModelThinking {
+	option, ok := parseACPEffortOption(raw)
+	if !ok || len(option.Choices) == 0 {
+		return nil
+	}
+	return &ModelThinking{SupportedLevels: option.Choices, DefaultLevel: option.CurrentValue}
+}
+
+func hasACPConfigOptions(raw json.RawMessage) bool {
+	var result map[string]json.RawMessage
+	if json.Unmarshal(raw, &result) != nil {
+		return false
+	}
+	_, camel := result["configOptions"]
+	_, snake := result["config_options"]
+	return camel || snake
+}
+
+// acpOptionsAfterModelSwitch returns the session's configOptions as they
+// stand once session/set_model has run, or nil when the runtime exposed none
+// and the caller's pre-switch view is therefore stale.
+//
+// Two correlated sources, in order: the set_model response when it carries
+// configOptions, otherwise a re-read through the advertised `model` selector,
+// since session/set_config_option echoes the full configuration. The
+// config_option_update notification some runtimes publish instead is never
+// used: it is uncorrelated, may land after the response, and can still
+// describe the previous model.
+func acpOptionsAfterModelSwitch(ctx context.Context, request acpRequestFn, sessionID, modelID string, session, switched json.RawMessage) (json.RawMessage, error) {
+	if hasACPConfigOptions(switched) {
+		return switched, nil
+	}
+	if _, ok := findACPConfigOption(session, "model"); !ok {
+		return nil, nil
+	}
+	refreshed, err := request(ctx, "session/set_config_option", map[string]any{
+		"sessionId": sessionID, "configId": "model", "value": modelID,
+	})
+	if err != nil || !hasACPConfigOptions(refreshed) {
+		return nil, err
+	}
+	return refreshed, nil
+}
+
+// probeACPModelEffort fills in the effort catalog for every model other than
+// the session's current one by switching the throwaway discovery session onto
+// each and reading the options it advertises there — the per-model read that
+// annotateACPThinkingForSessionModel cannot do from a single response. A model
+// whose switch yields no options keeps a nil Thinking rather than borrowing a
+// sibling's levels. A session with no configOptions at all (Hermes Agent) is
+// skipped outright: switching models there cannot surface a catalog.
+func probeACPModelEffort(ctx context.Context, request acpRequestFn, sessionResult json.RawMessage, models []Model) {
+	sessionID := extractACPSessionID(sessionResult)
+	if sessionID == "" || !hasACPConfigOptions(sessionResult) {
+		return
+	}
+	for i := range models {
+		if models[i].Default {
+			continue
+		}
+		if ctx.Err() != nil {
+			return
+		}
+		switched, err := request(ctx, "session/set_model", map[string]any{
+			"sessionId": sessionID, "modelId": models[i].ID,
+		})
+		if err != nil {
+			continue
+		}
+		options, err := acpOptionsAfterModelSwitch(ctx, request, sessionID, models[i].ID, sessionResult, switched)
+		if err != nil {
+			continue
+		}
+		models[i].Thinking = acpModelThinking(options)
 	}
 }
 

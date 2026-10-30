@@ -1,4 +1,5 @@
 import type { TimelineEntry } from "@multica/core/types";
+import { isDeletedComment } from "@multica/core/issues/comment-deletion";
 import { sortTimelineEntriesAsc } from "@multica/core/issues/timeline-sort";
 
 /**
@@ -31,7 +32,10 @@ export function collectThreadReplies(
   return sortTimelineEntriesAsc(out);
 }
 
-/** Unique member and agent authors, root first, followed by all nested replies. */
+/**
+ * Unique member and agent authors, root first, followed by all nested replies.
+ * A deleted comment's author no longer takes part in the thread.
+ */
 export function collectThreadParticipants(
   root: TimelineEntry,
   replies: readonly TimelineEntry[],
@@ -39,6 +43,7 @@ export function collectThreadParticipants(
   const seen = new Set<string>();
   return [root, ...replies].filter((entry) => {
     if (entry.actor_type !== "member" && entry.actor_type !== "agent") return false;
+    if (isDeletedComment(entry)) return false;
     const key = `${entry.actor_type}:${entry.actor_id}`;
     if (seen.has(key)) return false;
     seen.add(key);

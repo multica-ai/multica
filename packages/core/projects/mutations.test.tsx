@@ -12,7 +12,8 @@ import {
   getIssueSurfaceViewStore,
   pruneIssueSurfaceViewStates,
 } from "../issues/stores/surface-view-store";
-import { useDeleteProject } from "./mutations";
+import { issueKeys } from "../issues/queries";
+import { useDeleteProject, useUpdateProject } from "./mutations";
 
 vi.mock("../hooks", () => ({
   useWorkspaceId: () => "ws-1",
@@ -57,5 +58,65 @@ describe("useDeleteProject", () => {
 
     expect(deleteProject).toHaveBeenCalledWith("p1");
     expect(store.getState().viewMode).toBe("board");
+  });
+
+  // Regression: the issue-table invalidation once sat on the create
+  // mutation, so a missed realtime event left a project-status-filtered
+  // window showing the deleted project's issues (staleTime is Infinity).
+  it("invalidates the issue table windows", async () => {
+    const tableKey = [...issueKeys.tableAll("ws-1"), "window"];
+    qc.setQueryData(tableKey, { rows: [] });
+
+    const { result } = renderHook(() => useDeleteProject(), {
+      wrapper: createWrapper(qc),
+    });
+
+    await act(async () => {
+      await result.current.mutateAsync("p1");
+    });
+
+    expect(qc.getQueryState(tableKey)?.isInvalidated).toBe(true);
+  });
+});
+
+describe("useUpdateProject", () => {
+  let qc: QueryClient;
+  let updateProject: ReturnType<typeof vi.fn>;
+  const tableKey = [...issueKeys.tableAll("ws-1"), "window"];
+
+  beforeEach(() => {
+    qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    updateProject = vi.fn().mockResolvedValue({ id: "p1" });
+    setApiInstance({ updateProject } as unknown as ApiClient);
+    qc.setQueryData(tableKey, { rows: [] });
+  });
+
+  afterEach(() => {
+    qc.clear();
+    vi.restoreAllMocks();
+  });
+
+  it("invalidates the issue table windows when the status changes", async () => {
+    const { result } = renderHook(() => useUpdateProject(), {
+      wrapper: createWrapper(qc),
+    });
+
+    await act(async () => {
+      await result.current.mutateAsync({ id: "p1", status: "paused" });
+    });
+
+    expect(qc.getQueryState(tableKey)?.isInvalidated).toBe(true);
+  });
+
+  it("leaves the issue table windows alone when the status is untouched", async () => {
+    const { result } = renderHook(() => useUpdateProject(), {
+      wrapper: createWrapper(qc),
+    });
+
+    await act(async () => {
+      await result.current.mutateAsync({ id: "p1", title: "Renamed" });
+    });
+
+    expect(qc.getQueryState(tableKey)?.isInvalidated).toBe(false);
   });
 });

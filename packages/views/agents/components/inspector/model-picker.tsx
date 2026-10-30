@@ -2,7 +2,7 @@
 
 import { useMemo, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { ChevronDown, Cpu, Loader2, Plus } from "lucide-react";
+import { ChevronDown, Cpu, Loader2, Plus } from "@multica/ui/icons";
 import {
   refreshRuntimeModels,
   runtimeModelsOptions,
@@ -16,6 +16,7 @@ import { CHIP_CLASS } from "./chip";
 import { useT } from "../../../i18n";
 import { UnavailableModelsNote } from "../unavailable-models-note";
 import { ModelSearchHeader } from "../model-search-header";
+import { TooltipHint } from "@multica/ui/components/common/tooltip-hint";
 
 /**
  * Inline model picker for the agent inspector. Lighter cousin of
@@ -279,14 +280,15 @@ export function ModelPicker({
       )}
 
       {value && (
-        <button
-          type="button"
-          onClick={() => void select("")}
-          className="mt-1 flex w-full items-center border-t px-3 py-2 text-left text-caption text-muted-foreground transition-colors hover:bg-accent/50"
-          title={t(($) => $.pickers.model_clear_title)}
-        >
-          {t(($) => $.pickers.model_clear)}
-        </button>
+        <TooltipHint label={t(($) => $.pickers.model_clear_title)}>
+          <button
+            type="button"
+            onClick={() => void select("")}
+            className="mt-1 flex w-full items-center border-t px-3 py-2 text-left text-caption text-muted-foreground transition-colors hover:bg-accent/50"
+          >
+            {t(($) => $.pickers.model_clear)}
+          </button>
+        </TooltipHint>
       )}
     </PropertyPicker>
   );

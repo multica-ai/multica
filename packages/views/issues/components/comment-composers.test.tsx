@@ -1,4 +1,4 @@
-import { forwardRef, useEffect, useImperativeHandle, useRef, type ReactNode, type Ref } from "react";
+import { forwardRef, useEffect, useImperativeHandle, useRef, useState, type ReactNode, type Ref } from "react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { act, fireEvent, screen, waitFor } from "@testing-library/react";
@@ -24,6 +24,9 @@ const apiUploadFile = vi.hoisted(() => vi.fn());
 const apiListWorkspaces = vi.hoisted(() => vi.fn());
 const apiListQuickActions = vi.hoisted(() => vi.fn());
 const apiRenderQuickAction = vi.hoisted(() => vi.fn());
+const apiPreviewCommentTriggers = vi.hoisted(() => vi.fn());
+const apiListTasksByIssue = vi.hoisted(() => vi.fn());
+const apiCancelTask = vi.hoisted(() => vi.fn());
 const uploadWithToast = vi.hoisted(() => vi.fn());
 const editorDefaultValues = vi.hoisted(() => ({
   values: [] as Array<string | undefined>,
@@ -59,6 +62,9 @@ vi.mock("@multica/core/api", () => ({
     listWorkspaces: apiListWorkspaces,
     listQuickActions: apiListQuickActions,
     renderQuickAction: apiRenderQuickAction,
+    previewCommentTriggers: apiPreviewCommentTriggers,
+    listTasksByIssue: apiListTasksByIssue,
+    cancelTask: apiCancelTask,
   },
 }));
 
@@ -75,6 +81,12 @@ vi.mock("../../common/actor-avatar", () => ({
       {actorType}:{actorId}
     </span>
   ),
+  AgentStatusDot: () => null,
+}));
+
+vi.mock("@multica/core/agents", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@multica/core/agents")>()),
+  useAgentPresenceDetail: () => "loading",
 }));
 
 vi.mock("../../editor", async () => ({
@@ -102,6 +114,7 @@ vi.mock("../../editor", async () => ({
   ContentEditor: forwardRef(function MockContentEditor(
     {
       defaultValue,
+      value,
       onUpdate,
       placeholder,
       onUploadFile,
@@ -111,6 +124,7 @@ vi.mock("../../editor", async () => ({
       quickActionMenu,
     }: {
       defaultValue?: string;
+      value?: string;
       onUpdate?: (markdown: string) => void;
       placeholder?: string;
       onUploadFile?: (file: File, uploadId: string) => Promise<UploadResult | null>;
@@ -124,7 +138,9 @@ vi.mock("../../editor", async () => ({
     editorDefaultValues.values.push(defaultValue);
     editorQuickActionMenu.last = quickActionMenu;
     editorUploadSignal.notify = onUploadingChange;
-    const valueRef = useRef(defaultValue ?? "");
+    const initialValue = value ?? defaultValue ?? "";
+    const valueRef = useRef(initialValue);
+    const [editorValue, setEditorValue] = useState(initialValue);
     // Mirrors the real editor's `uploading` node attrs: the placeholder exists
     // from before the await until the upload settles, `hasActiveUploads` reads
     // it synchronously, and the host is told through onUploadingChange.
@@ -141,11 +157,17 @@ vi.mock("../../editor", async () => ({
       };
       // eslint-disable-next-line react-hooks/exhaustive-deps
     }, []);
+    useEffect(() => {
+      if (value === undefined || value === valueRef.current) return;
+      valueRef.current = value;
+      setEditorValue(value);
+    }, [value]);
 
     useImperativeHandle(ref, () => ({
       getMarkdown: () => valueRef.current,
       clearContent: () => {
         valueRef.current = "";
+        setEditorValue("");
       },
       focus: () => { focusCalls.focused += 1; },
       focusAtCoords: () => {},
@@ -157,6 +179,7 @@ vi.mock("../../editor", async () => ({
           const result = await onUploadFile?.(file, `mock-upload-${++mockUploadIdSeq}`);
           if (!result || destroyedRef.current) return;
           valueRef.current = `${valueRef.current}\n${result.url}`.trim();
+          setEditorValue(valueRef.current);
           onUpdate?.(valueRef.current);
         } finally {
           inFlightRef.current -= 1;
@@ -176,6 +199,7 @@ vi.mock("../../editor", async () => ({
         insertMarkdownSpy(md);
         if (destroyedRef.current || !insertMarkdownBehavior.succeed) return false;
         valueRef.current = `${valueRef.current}\n\n${md}`.trim();
+        setEditorValue(valueRef.current);
         onUpdate?.(valueRef.current);
         return true;
       },
@@ -184,10 +208,11 @@ vi.mock("../../editor", async () => ({
     return (
       <textarea
         data-testid="editor"
-        defaultValue={defaultValue}
+        value={editorValue}
         placeholder={placeholder}
         onChange={(event) => {
           valueRef.current = event.target.value;
+          setEditorValue(event.target.value);
           onUpdate?.(event.target.value);
         }}
         onKeyDown={(event) => {
@@ -249,6 +274,12 @@ function activateComposer(shellTestId: "comment-composer-shell" | "reply-compose
   fireEvent.click(screen.getByTestId(shellTestId));
 }
 
+/** Native `disabled` while empty or sending; `aria-disabled` while an upload
+ *  blocks it, so the reason tooltip stays reachable. */
+function isSendBlocked(button: HTMLButtonElement): boolean {
+  return button.disabled || button.getAttribute("aria-disabled") === "true";
+}
+
 function getSubmitButton(container: HTMLElement): HTMLButtonElement {
   // Submit is always the last button in a composer's action cluster.
   const buttons = container.querySelectorAll("button");
@@ -263,11 +294,14 @@ beforeEach(() => {
   apiListWorkspaces.mockReset();
   apiListQuickActions.mockReset();
   apiRenderQuickAction.mockReset();
+  apiPreviewCommentTriggers.mockReset();
+  apiListTasksByIssue.mockReset();
+  apiCancelTask.mockReset();
   insertMarkdownSpy.mockReset();
   insertPlaceholderSpy.mockReset();
   insertMarkdownBehavior.succeed = true;
   localStorage.clear();
-  useCommentComposerStore.setState({ sticky: true });
+  useCommentComposerStore.setState({ sticky: true, runningAgentReply: "steer" });
   // The composer's pinning (and the height cap that follows it) is viewport
   // dependent, so a narrow-viewport test must not leak into the next one.
   Object.defineProperty(window, "innerWidth", { configurable: true, value: 1280 });
@@ -358,6 +392,20 @@ describe("quick action `/` menu", () => {
   }
 });
 
+/**
+ * Pick a recipient's action from its chip menu. Under CI load the composer can
+ * still re-render the chips (the previous send settling, the preview catching
+ * up) right after the menu opens, closing it; reopen until the item shows.
+ */
+async function chooseRecipientAction(chip: string, action: RegExp) {
+  await waitFor(() => {
+    const trigger = screen.getByRole("button", { name: chip });
+    if (trigger.getAttribute("aria-expanded") !== "true") fireEvent.click(trigger);
+    expect(screen.getByRole("menuitemradio", { name: action })).toBeInTheDocument();
+  }, { timeout: 5000 });
+  fireEvent.click(screen.getByRole("menuitemradio", { name: action }));
+}
+
 describe("comment composers", () => {
   it("renders the main comment composer without a manual expand control", () => {
     const { container } = renderCommentInput();
@@ -399,9 +447,128 @@ describe("comment composers", () => {
     fireEvent.click(getSubmitButton(container));
 
     await waitFor(() => {
-      expect(onSubmit).toHaveBeenCalledWith("hello from composer", undefined, undefined);
+      expect(onSubmit).toHaveBeenCalledWith("hello from composer", undefined, undefined, undefined);
     });
   });
+
+  it("steers the thread's running turn by default, and stops it first to start over", async () => {
+    const turn = {
+      id: "turn-1", agent_id: "agent-1", issue_id: "issue-1", status: "running", priority: 0,
+      created_at: "2026-09-23T00:00:00Z", dispatched_at: null, started_at: "2026-09-23T00:00:01Z",
+      completed_at: null, result: null, error: null,
+      supplement_capability: "task-supplement-v1", can_supplement: true,
+    };
+    apiListTasksByIssue.mockResolvedValue([turn]);
+    apiPreviewCommentTriggers.mockResolvedValue({
+      agents: [{ id: "agent-1", name: "Lambda", source: "thread_parent", reason: "" }],
+    });
+    apiCancelTask.mockResolvedValue({ ...turn, status: "cancelled" });
+    const onSubmit = vi.fn().mockResolvedValue("reply-new");
+    const { container } = renderWithProviders(
+      <ReplyInput issueId="issue-1" parentId="comment-1" avatarType="member" avatarId="user-1"
+        onSubmit={onSubmit} steerByDefault={(task) => task.id === "turn-1"} />,
+    );
+
+    activateComposer("reply-composer-shell");
+    fireEvent.change(screen.getByTestId("editor"), { target: { value: "only fix web" } });
+    await screen.findByText("Add to current run", {}, { timeout: 5000 });
+    fireEvent.click(getSubmitButton(container));
+    await waitFor(() => expect(onSubmit).toHaveBeenCalledWith("only fix web", undefined, undefined,
+      ["turn-1"]), { timeout: 5000 });
+    expect(apiCancelTask).not.toHaveBeenCalled();
+
+    fireEvent.change(screen.getByTestId("editor"), { target: { value: "start over on web" } });
+    await chooseRecipientAction("Lambda trigger: Add to current run", /Stop and start over/);
+    fireEvent.click(await screen.findByRole("button", { name: "Stop and send" }, { timeout: 5000 }));
+    await waitFor(() => expect(onSubmit).toHaveBeenCalledWith("start over on web", undefined, undefined, undefined), { timeout: 5000 });
+    expect(apiCancelTask).toHaveBeenCalledWith("issue-1", "turn-1");
+    expect(apiCancelTask.mock.invocationCallOrder[0]!).toBeLessThan(onSubmit.mock.invocationCallOrder[1]!);
+  }, 15_000);
+
+  it("starts after the run by default when the personal preference says so", async () => {
+    useCommentComposerStore.setState({ runningAgentReply: "after_run" });
+    const turn = {
+      id: "turn-1", agent_id: "agent-1", issue_id: "issue-1", status: "running", priority: 0,
+      created_at: "2026-09-23T00:00:00Z", dispatched_at: null, started_at: "2026-09-23T00:00:01Z",
+      completed_at: null, result: null, error: null,
+      supplement_capability: "task-supplement-v1", can_supplement: true,
+    };
+    apiListTasksByIssue.mockResolvedValue([turn]);
+    apiPreviewCommentTriggers.mockResolvedValue({ agents: [{ id: "agent-1", name: "Lambda", source: "thread_parent", reason: "" }] });
+    const onSubmit = vi.fn().mockResolvedValue("reply-new");
+    const { container } = renderWithProviders(
+      <ReplyInput issueId="issue-1" parentId="comment-1" avatarType="member" avatarId="user-1"
+        onSubmit={onSubmit} steerByDefault={(task) => task.id === "turn-1"} />,
+    );
+
+    activateComposer("reply-composer-shell");
+    fireEvent.change(screen.getByTestId("editor"), { target: { value: "only fix web" } });
+    await screen.findByRole("button", { name: "Lambda trigger: Start after this run" }, { timeout: 5000 });
+    fireEvent.click(getSubmitButton(container));
+    await waitFor(() => expect(onSubmit).toHaveBeenCalledWith("only fix web", undefined, undefined, undefined), { timeout: 5000 });
+
+    // One message can still go into the running turn.
+    fireEvent.change(screen.getByTestId("editor"), { target: { value: "and keep desktop as is" } });
+    await chooseRecipientAction("Lambda trigger: Start after this run", /Add to current run/);
+    await screen.findByRole("button", { name: "Lambda trigger: Add to current run" }, { timeout: 5000 });
+    fireEvent.click(getSubmitButton(container));
+    await waitFor(() => expect(onSubmit).toHaveBeenLastCalledWith("and keep desktop as is", undefined, undefined,
+      ["turn-1"]), { timeout: 5000 });
+  }, 15_000);
+
+  it("steers every running recipient the message addresses", async () => {
+    const turn = (id: string, agentId: string) => ({
+      id, agent_id: agentId, issue_id: "issue-1", status: "running", priority: 0,
+      created_at: "2026-09-23T00:00:00Z", dispatched_at: null, started_at: "2026-09-23T00:00:01Z",
+      completed_at: null, result: null, error: null,
+      supplement_capability: "task-supplement-v1", can_supplement: true,
+    });
+    apiListTasksByIssue.mockResolvedValue([turn("turn-1", "agent-1"), turn("turn-2", "agent-2")]);
+    apiPreviewCommentTriggers.mockResolvedValue({ agents: [
+      { id: "agent-1", name: "Lambda", source: "mention_agent", reason: "" },
+      { id: "agent-2", name: "Orion", source: "mention_agent", reason: "" },
+    ] });
+    const onSubmit = vi.fn().mockResolvedValue("reply-new");
+    const { container } = renderWithProviders(
+      <ReplyInput issueId="issue-1" parentId="comment-1" avatarType="member" avatarId="user-1"
+        onSubmit={onSubmit} steerByDefault={() => true} />,
+    );
+    activateComposer("reply-composer-shell");
+    fireEvent.change(screen.getByTestId("editor"), { target: { value: "only fix web" } });
+    fireEvent.click(await screen.findByText("2 agents will receive this", {}, { timeout: 5000 }));
+    expect(await screen.findByRole("button", { name: "Lambda trigger: Add to current run" }, { timeout: 5000 })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Orion trigger: Add to current run" })).toBeInTheDocument();
+    fireEvent.click(getSubmitButton(container));
+    await waitFor(() => expect(onSubmit).toHaveBeenCalledWith("only fix web", undefined, undefined,
+      ["turn-1", "turn-2"]), { timeout: 5000 });
+  }, 15_000);
+
+  it("never stops the previous recipient after the mentions change under a stale preview", async () => {
+    const turn = {
+      id: "turn-1", agent_id: "agent-1", issue_id: "issue-1", status: "running", priority: 0,
+      created_at: "2026-09-23T00:00:00Z", dispatched_at: null, started_at: "2026-09-23T00:00:01Z",
+      completed_at: null, result: null, error: null,
+      supplement_capability: "task-supplement-v1", can_supplement: true,
+    };
+    apiListTasksByIssue.mockResolvedValue([turn]);
+    apiPreviewCommentTriggers.mockResolvedValue({ agents: [{ id: "agent-1", name: "Lambda", source: "thread_parent", reason: "" }] });
+    apiCancelTask.mockResolvedValue({ ...turn, status: "cancelled" });
+    const onSubmit = vi.fn().mockResolvedValue("reply-new");
+    renderWithProviders(<ReplyInput issueId="issue-1" parentId="comment-1" avatarType="member" avatarId="user-1"
+      onSubmit={onSubmit} steerByDefault={(task) => task.id === "turn-1"} />);
+    activateComposer("reply-composer-shell");
+    fireEvent.change(screen.getByTestId("editor"), { target: { value: "start over" } });
+    await chooseRecipientAction("Lambda trigger: Add to current run", /Stop and start over/);
+    // A slow preview still holds Lambda's restart, though the comment now
+    // explicitly addresses only a different agent.
+    apiPreviewCommentTriggers.mockImplementation(() => new Promise(() => {}));
+    fireEvent.change(screen.getByTestId("editor"), {
+      target: { value: "[@Orion](mention://agent/11111111-1111-4111-8111-111111111111) review desktop" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Stop and send" }));
+    await waitFor(() => expect(onSubmit).toHaveBeenCalled(), { timeout: 5000 });
+    expect(apiCancelTask).not.toHaveBeenCalled();
+  }, 15_000);
 
   it("keeps reply submission wired after removing expand", async () => {
     const { container, onSubmit } = renderReplyInput();
@@ -413,7 +580,7 @@ describe("comment composers", () => {
     fireEvent.click(getSubmitButton(container));
 
     await waitFor(() => {
-      expect(onSubmit).toHaveBeenCalledWith("thread reply", undefined, undefined);
+      expect(onSubmit).toHaveBeenCalledWith("thread reply", undefined, undefined, undefined);
     });
   });
 
@@ -463,12 +630,12 @@ describe("comment composers", () => {
         "true",
       ),
     );
-    expect(onSubmit).toHaveBeenCalledWith("sending", undefined, undefined);
+    expect(onSubmit).toHaveBeenCalledWith("sending", undefined, undefined, undefined);
 
     resolveSubmit(true);
 
     // Success: the composer clears (now empty → submit disabled, lock released).
-    await waitFor(() => expect(getSubmitButton(container)).toBeDisabled());
+    await waitFor(() => expect(isSendBlocked(getSubmitButton(container))).toBe(true));
     expect(screen.getByTestId("editor").closest("[aria-busy]")).toBeNull();
   });
 
@@ -666,7 +833,7 @@ describe("comment composers", () => {
 
     await waitFor(() => expect(onSubmit).toHaveBeenCalled());
     // Failed send must NOT clear — the box still has content, submit stays live.
-    await waitFor(() => expect(getSubmitButton(container)).not.toBeDisabled());
+    await waitFor(() => expect(isSendBlocked(getSubmitButton(container))).toBe(false));
   });
 });
 
@@ -719,7 +886,7 @@ describe("comment composers — upload submit gate", () => {
 
     const pending = startPendingUpload(container);
 
-    await waitFor(() => expect(getSubmitButton(container)).toBeDisabled());
+    await waitFor(() => expect(isSendBlocked(getSubmitButton(container))).toBe(true));
     // Screen readers must hear "busy", not just a dead control.
     expect(getSubmitButton(container)).toHaveAttribute("aria-busy", "true");
 
@@ -727,7 +894,7 @@ describe("comment composers — upload submit gate", () => {
       pending.resolve(uploadAttachment("att-1", "https://cdn.example/att-1.png"));
     });
 
-    await waitFor(() => expect(getSubmitButton(container)).not.toBeDisabled());
+    await waitFor(() => expect(isSendBlocked(getSubmitButton(container))).toBe(false));
     expect(getSubmitButton(container)).not.toHaveAttribute("aria-busy");
   });
 
@@ -742,7 +909,7 @@ describe("comment composers — upload submit gate", () => {
     activateComposer("comment-composer-shell");
     const pending = startPendingUpload(container, "mine.png");
 
-    await waitFor(() => expect(getSubmitButton(container)).toBeDisabled());
+    await waitFor(() => expect(isSendBlocked(getSubmitButton(container))).toBe(true));
     expect(insertPlaceholderSpy).not.toHaveBeenCalled();
 
     await act(async () => {
@@ -795,7 +962,7 @@ describe("comment composers — upload submit gate", () => {
     activateComposer("comment-composer-shell");
 
     const pending = startPendingUpload(container, "doomed.png");
-    await waitFor(() => expect(getSubmitButton(container)).toBeDisabled());
+    await waitFor(() => expect(isSendBlocked(getSubmitButton(container))).toBe(true));
 
     await act(async () => {
       pending.fail();
@@ -871,7 +1038,7 @@ describe("comment composers — upload submit gate", () => {
     // Draft + pending upload mount the editor directly (no shell).
     const editor = await screen.findByTestId("editor");
 
-    expect(getSubmitButton(container)).toBeDisabled();
+    expect(isSendBlocked(getSubmitButton(container))).toBe(true);
     expect(getSubmitButton(container)).toHaveAttribute("aria-busy", "true");
 
     // The shortcut path bypasses the button — the submit-time re-read of the
@@ -891,7 +1058,7 @@ describe("comment composers — upload submit gate", () => {
           uploadAttachment("att-prev", "https://cdn.example/att-prev.png"),
         );
     });
-    await waitFor(() => expect(getSubmitButton(container)).not.toBeDisabled());
+    await waitFor(() => expect(isSendBlocked(getSubmitButton(container))).toBe(false));
     fireEvent.keyDown(editor, { key: "Enter", metaKey: true });
     await waitFor(() => expect(onSubmit).toHaveBeenCalled());
   });
@@ -904,18 +1071,18 @@ describe("comment composers — upload submit gate", () => {
     const first = startPendingUpload(container, "a.png");
     const second = startPendingUpload(container, "b.png");
 
-    await waitFor(() => expect(getSubmitButton(container)).toBeDisabled());
+    await waitFor(() => expect(isSendBlocked(getSubmitButton(container))).toBe(true));
 
     // First one lands — the second is still in flight, so send must stay shut.
     await act(async () => {
       first.resolve(uploadAttachment("att-a", "https://cdn.example/att-a.png"));
     });
-    expect(getSubmitButton(container)).toBeDisabled();
+    expect(isSendBlocked(getSubmitButton(container))).toBe(true);
 
     await act(async () => {
       second.resolve(uploadAttachment("att-b", "https://cdn.example/att-b.png"));
     });
-    await waitFor(() => expect(getSubmitButton(container)).not.toBeDisabled());
+    await waitFor(() => expect(isSendBlocked(getSubmitButton(container))).toBe(false));
   });
 
   it("re-enables send after a FAILED upload so the draft isn't stuck", async () => {
@@ -924,14 +1091,14 @@ describe("comment composers — upload submit gate", () => {
     fireEvent.change(screen.getByTestId("editor"), { target: { value: "will fail" } });
 
     const pending = startPendingUpload(container);
-    await waitFor(() => expect(getSubmitButton(container)).toBeDisabled());
+    await waitFor(() => expect(isSendBlocked(getSubmitButton(container))).toBe(true));
 
     // uploadWithToast reports the failure and resolves null — the placeholder
     // is dropped and the body never referenced it, so submit must come back.
     await act(async () => {
       pending.fail();
     });
-    await waitFor(() => expect(getSubmitButton(container)).not.toBeDisabled());
+    await waitFor(() => expect(isSendBlocked(getSubmitButton(container))).toBe(false));
   });
 
   it("sends the attachment id once the upload completes", async () => {
@@ -944,13 +1111,14 @@ describe("comment composers — upload submit gate", () => {
       pending.resolve(uploadAttachment("att-9", "https://cdn.example/att-9.png"));
     });
 
-    await waitFor(() => expect(getSubmitButton(container)).not.toBeDisabled());
+    await waitFor(() => expect(isSendBlocked(getSubmitButton(container))).toBe(false));
     fireEvent.click(getSubmitButton(container));
 
     await waitFor(() =>
       expect(onSubmit).toHaveBeenCalledWith(
         expect.stringContaining("https://cdn.example/att-9.png"),
         ["att-9"],
+        undefined,
         undefined,
       ),
     );
@@ -973,7 +1141,7 @@ describe("comment composers — upload submit gate", () => {
     fireEvent.keyDown(editor, { key: "Enter", metaKey: true });
 
     await waitFor(() => expect(onSubmit).toHaveBeenCalled());
-    expect(onSubmit).toHaveBeenCalledWith("keep this, dropped the image", undefined, undefined);
+    expect(onSubmit).toHaveBeenCalledWith("keep this, dropped the image", undefined, undefined, undefined);
   });
 
   it("writes the finished upload's link into the persisted draft after the composer unmounts", async () => {
@@ -1069,7 +1237,7 @@ describe("comment composers — upload submit gate", () => {
 
     startPendingUpload(container);
 
-    await waitFor(() => expect(getSubmitButton(container)).toBeDisabled());
+    await waitFor(() => expect(isSendBlocked(getSubmitButton(container))).toBe(true));
     expect(getSubmitButton(container)).toHaveAttribute("aria-busy", "true");
   });
 
@@ -1115,5 +1283,60 @@ describe("sticky composer preference", () => {
 
     activateComposer("comment-composer-shell");
     expect(screen.getByTestId("editor").parentElement?.className).not.toContain("max-h-[40vh]");
+  });
+});
+
+describe.each(["reply", "description"])("annotations in %s drafts", (source) => {
+  const draftKey = source === "reply" ? "reply:issue-1:comment-1" as const : "new:issue-1" as const;
+  const renderAnnotatedComposer = (onSubmit: Parameters<typeof renderCommentInput>[0]) => source === "reply"
+    ? renderReplyInput({ draftKey: "reply:issue-1:comment-1", onSubmit }) : renderCommentInput(onSubmit);
+  const annotation = { id: "a", sourceCommentId: "agent-source", sourceActorName: "Emacs", quote: "Selected text", note: "Please revise", start: 0, prefix: "", suffix: "" };
+
+  it("sends an annotation-only draft once without requiring a mounted editor", async () => {
+    useCommentDraftStore.getState().addAnnotation(draftKey, annotation);
+    const onSubmit = vi.fn().mockResolvedValue("reply-new");
+    renderAnnotatedComposer(onSubmit);
+    expect(screen.queryByTestId("editor")).not.toBeInTheDocument();
+    const send = screen.getByRole("button", { name: "Send" });
+    fireEvent.click(send);
+    fireEvent.click(send);
+    await waitFor(() => expect(onSubmit).toHaveBeenCalledTimes(1));
+    expect(onSubmit.mock.calls[0]?.[0]).toContain("> Selected text");
+    expect(onSubmit.mock.calls[0]?.[0]).toContain("Please revise");
+    await waitFor(() => expect(useCommentDraftStore.getState().getAnnotations(draftKey)).toHaveLength(0));
+  });
+
+  it("sends annotations above the composer body with a divider", async () => {
+    useCommentDraftStore.getState().setDraft(draftKey, "Overall reply");
+    useCommentDraftStore.getState().addAnnotation(draftKey, annotation);
+    const onSubmit = vi.fn().mockResolvedValue("reply-new");
+    renderAnnotatedComposer(onSubmit);
+    fireEvent.click(screen.getByRole("button", { name: "Send" }));
+    await waitFor(() => expect(onSubmit).toHaveBeenCalledTimes(1));
+    expect(onSubmit.mock.calls[0]?.[0]).toBe("> Selected text\n\nPlease revise\n\n---\n\nOverall reply");
+  });
+
+  it("ignores empty selections and keeps saved annotations on send failure", async () => {
+    useCommentDraftStore.getState().addAnnotation(draftKey, { ...annotation, note: "" });
+    const onSubmit = vi.fn().mockResolvedValue(false);
+    renderAnnotatedComposer(onSubmit);
+    expect(isSendBlocked(screen.getByRole("button", { name: "Send" }) as HTMLButtonElement)).toBe(true);
+    expect(screen.queryByRole("button", { name: /1 annotation/ })).not.toBeInTheDocument();
+    act(() => { useCommentDraftStore.getState().addAnnotation(draftKey, { ...annotation, note: "New note" }); });
+    fireEvent.click(screen.getByRole("button", { name: "Send" }));
+    await waitFor(() => expect(onSubmit).toHaveBeenCalledTimes(1));
+    expect(useCommentDraftStore.getState().getAnnotations(draftKey)[0]?.note).toBe("New note");
+  });
+
+  it("retains new annotations collected while a send is pending", async () => {
+    useCommentDraftStore.getState().addAnnotation(draftKey, annotation);
+    let accept!: (id: string) => void;
+    const onSubmit = vi.fn(() => new Promise<string>((resolve) => { accept = resolve; }));
+    renderAnnotatedComposer(onSubmit);
+    fireEvent.click(screen.getByRole("button", { name: "Send" }));
+    await waitFor(() => expect(onSubmit).toHaveBeenCalledTimes(1));
+    act(() => { useCommentDraftStore.getState().addAnnotation(draftKey, { ...annotation, id: "b", quote: "Another point" }); });
+    await act(async () => accept("reply-new"));
+    expect(useCommentDraftStore.getState().getAnnotations(draftKey)).toHaveLength(2);
   });
 });

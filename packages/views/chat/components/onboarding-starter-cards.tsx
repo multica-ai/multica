@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { ArrowUpRight, Check, Clock, LoaderCircle } from "lucide-react";
+import { ArrowUpRight, Check, Clock, LoaderCircle } from "@multica/ui/icons";
 import { cn } from "@multica/ui/lib/utils";
 import {
   Tooltip,
@@ -141,7 +141,7 @@ function MiniCard({
   return (
     <div
       className={cn(
-        "flex flex-col gap-1 rounded-[4px] border border-border bg-card px-1.5 py-1",
+        "flex flex-col gap-1 rounded-xs border border-border bg-card px-1.5 py-1",
         className,
       )}
     >

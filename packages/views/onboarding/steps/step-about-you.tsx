@@ -16,7 +16,7 @@ import {
   Search,
   Settings2,
   User,
-} from "lucide-react";
+} from "@multica/ui/icons";
 import { Button } from "@multica/ui/components/ui/button";
 import type { QuestionnaireAnswers, Role, UseCase } from "@multica/core/onboarding";
 import {
@@ -167,9 +167,7 @@ export function StepAboutYou({
     onSkip();
   };
 
-  const footerHint = canContinue
-    ? t(($) => $.step_question.hint_continue)
-    : t(($) => $.step_question.hint_pick);
+  const footerHint = canContinue ? undefined : t(($) => $.step_question.hint_pick);
 
   return (
     <>

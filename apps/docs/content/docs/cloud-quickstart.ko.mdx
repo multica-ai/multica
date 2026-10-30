@@ -4,40 +4,50 @@ description: 컴퓨터를 연결하고 첫 에이전트를 만든 뒤 첫 작업
 ---
 
 import { Callout } from "fumadocs-ui/components/callout";
+import { Step, Steps } from "fumadocs-ui/components/steps";
+import { Tab, Tabs } from "fumadocs-ui/components/tabs";
 
 <Callout type="info">
 에이전트를 실행하기 전에 해당 컴퓨터에 Claude Code, Codex, Cursor 같은 [지원되는 AI 코딩 도구](/providers)가 하나 이상 설치되어 있고 로그인되어 있어야 합니다. Multica에는 이 도구들이 포함되어 있지 않습니다.
 </Callout>
 
-## 1. 로그인하고 워크스페이스 열기
+<Steps>
+<Step>
 
-Web([multica.ai](https://multica.ai)) 또는 [Multica Desktop](https://multica.ai/download)에서 로그인합니다. 이메일 인증 코드와 Google 로그인을 지원합니다.
+## 로그인하고 워크스페이스 열기 [#1-로그인하고-워크스페이스-열기]
 
-- **Desktop**: 현재 컴퓨터를 자동으로 연결할 수 있습니다.
-- **Web**: 다음 단계에서 명령줄을 통해 연결해야 합니다.
+Web([multica.ai](https://multica.ai)) 또는 [Multica Desktop](https://multica.ai/download)에서 로그인합니다. 이메일 인증 코드와 Google 로그인을 지원합니다. Desktop으로 로그인하면 다음 단계에서 이 컴퓨터를 자동으로 연결할 수 있고, Web으로 로그인하면 명령줄로 연결합니다.
 
-## 2. 컴퓨터 연결
+</Step>
+<Step>
 
-에이전트는 연결된 컴퓨터에서 작업을 실행합니다. 사이드바 아래쪽의 **설정 → 런타임**을 엽니다.
+## 컴퓨터 연결 [#2-컴퓨터-연결]
+
+에이전트는 연결된 컴퓨터에서 작업을 실행합니다. 사이드바 **AI 팀** 아래의 **런타임**을 엽니다.
 
 - **Desktop 사용**: Desktop이 이 컴퓨터를 런타임으로 자동 등록하고 설치된 AI 코딩 도구를 감지합니다. 도구를 방금 설치했다면 "새로고침"을 클릭해 다시 감지하세요.
-- **Web을 사용하거나 다른 컴퓨터를 추가해야 하는 경우**: 오른쪽 위의 **컴퓨터 추가**를 클릭하고 대상 컴퓨터의 터미널에서 팝업에 표시된 두 명령을 실행합니다.
+- **Web을 사용하거나 다른 컴퓨터를 추가해야 하는 경우**: 오른쪽 위의 **추가**를 클릭하고 **다른 머신 또는 서버**를 선택한 뒤 대상 컴퓨터의 터미널에서 팝업에 표시된 두 명령을 실행합니다.
 
-  **macOS / Linux**
+<Tabs groupId="os" persist items={["macOS / Linux", "Windows"]}>
+<Tab value="macOS / Linux">
 
-  ```bash
-  curl -fsSL https://raw.githubusercontent.com/multica-ai/multica/main/scripts/install.sh | bash
-  multica setup
-  ```
+```bash
+curl -fsSL https://raw.githubusercontent.com/multica-ai/multica/main/scripts/install.sh | bash
+multica setup
+```
 
-  **Windows PowerShell**
+</Tab>
+<Tab value="Windows">
 
-  ```powershell
-  irm https://raw.githubusercontent.com/multica-ai/multica/main/scripts/install.ps1 | iex
-  multica setup
-  ```
+```powershell
+irm https://raw.githubusercontent.com/multica-ai/multica/main/scripts/install.ps1 | iex
+multica setup
+```
 
-  `multica setup`이 브라우저를 열어 로그인을 마친 뒤 데몬을 백그라운드에서 실행합니다. 데몬이 온라인이 되면 보통 1분 안에 팝업이 이 컴퓨터를 자동으로 감지합니다.
+</Tab>
+</Tabs>
+
+`multica setup`이 브라우저를 열어 로그인을 마친 뒤 데몬을 백그라운드에서 실행합니다. 데몬이 온라인이 되면 보통 1분 안에 팝업이 이 컴퓨터를 감지합니다.
 
 **성공 기준**: 런타임 목록에 온라인 컴퓨터가 표시됩니다.
 
@@ -47,20 +57,21 @@ Web([multica.ai](https://multica.ai)) 또는 [Multica Desktop](https://multica.a
 자체 호스팅 인스턴스의 연결 명령은 조금 다릅니다. [자체 호스팅 빠른 시작](/self-host-quickstart)을 참고하세요.
 </Callout>
 
-## 3. 에이전트 만들기
+</Step>
+<Step>
 
-사이드바에서 **워크스페이스 → 에이전트**를 열고 **새 에이전트**를 클릭한 뒤 방법을 선택합니다.
+## 에이전트 만들기 [#3-에이전트-만들기]
 
-- **빈 상태로 시작**: 필드를 직접 입력합니다. 최소한 이름만 입력하고 런타임과 AI 코딩 도구를 확인하면 만들 수 있습니다.
-- **AI로 만들기**: 원하는 내용을 설명하면 Agent Builder가 질문하고 설정을 생성합니다. 이 방법에는 온라인 런타임이 필요합니다.
+사이드바 **AI 팀** 아래의 **에이전트**를 열고 **새 에이전트**를 클릭합니다. 먼저 방금 연결한 컴퓨터의 AI 코딩 도구를 선택하고 이름을 입력한 뒤 **에이전트 만들기**를 클릭합니다. 필수 항목은 런타임과 이름뿐입니다.
 
-나머지 설정은 나중에 보완할 수 있습니다. [에이전트 생성 및 설정](/agents-create)을 참고하세요.
+설정을 처음부터 쓰고 싶지 않다면 구성 화면에서 **AI에게 작성 맡기기**를 클릭하세요. Agent Builder가 질문하면서 설정을 채웁니다. 이 기능은 선택한 런타임이 온라인이어야 합니다. 나머지 설정은 나중에 보완할 수 있습니다. [에이전트 생성 및 설정](/agents-create)을 참고하세요.
 
 **성공 기준**: 에이전트 목록에 만든 에이전트가 온라인으로 표시됩니다.
 
-![에이전트 생성 시작 방법 선택: Start blank와 Build with AI](/images/docs/quickstart-new-agent.webp)
+</Step>
+<Step>
 
-## 4. 첫 태스크 맡기기
+## 첫 태스크 맡기기 [#4-첫-태스크-맡기기]
 
 사이드바 위쪽의 **새 태스크**를 클릭하거나 단축키 `C`를 누릅니다. 기본 에이전트 모드에서 다음과 같이 진행합니다.
 
@@ -70,13 +81,19 @@ Web([multica.ai](https://multica.ai)) 또는 [Multica Desktop](https://multica.a
 
 ![새 태스크 팝업의 에이전트 모드: Created by에 Multica Assistant가 선택된 모습](/images/docs/quickstart-new-issue.webp)
 
-## 5. 진행 상황과 결과 확인
+</Step>
+<Step>
+
+## 진행 상황과 결과 확인 [#5-진행-상황과-결과-확인]
 
 제출 후 해당 태스크를 엽니다. 실행 로그에는 실행 상태가 표시되고 에이전트의 진행 상황과 답변은 타임라인에 나타납니다.
 
 **성공 기준**: 실행 로그 상태가 "완료됨"으로 바뀌고 타임라인에 에이전트의 답변이 나타납니다. 전체 과정을 확인하려면 "트랜스크립트 보기"를 클릭하세요.
 
 ![태스크의 에이전트 답변과 완료된 실행 로그](/images/docs/quickstart-run-result.webp)
+
+</Step>
+</Steps>
 
 ## 자주 묻는 문제
 
@@ -92,4 +109,4 @@ Web([multica.ai](https://multica.ai)) 또는 [Multica Desktop](https://multica.a
 
 - [핵심 개념](/concepts) — 3분 안에 Multica의 모든 핵심 객체를 알아봅니다.
 - [Multica의 작동 방식](/how-multica-works) — 태스크, 에이전트, 런타임, 각 실행의 관계를 이해합니다.
-- [에이전트에게 작업 맡기기](/triggering-agents) — 할당 외에 @댓글, 대화, 오토파일럿으로 트리거하는 세 가지 방법을 알아봅니다.
+- [에이전트에게 작업 맡기기](/triggering-agents) — 할당 외에도 @멘션, 채팅, 오토파일럿으로 에이전트가 작업을 시작하게 할 수 있습니다.

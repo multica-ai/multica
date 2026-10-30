@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
-import { AlertCircle, ArrowDownToLine, Check, Loader2 } from "lucide-react";
+import { AlertCircle, ArrowDownToLine, Check, Loader2 } from "@multica/ui/icons";
 import { Button } from "@multica/ui/components/ui/button";
 import { Switch } from "@multica/ui/components/ui/switch";
 import { useT } from "@multica/views/i18n";
@@ -76,7 +76,6 @@ export function UpdatesSettingsTab() {
   return (
     <SettingsTab
       title={t(($) => $.desktop.updates.title)}
-      description={t(($) => $.desktop.updates.description)}
     >
       <SettingsCard>
         <SettingsRow label={t(($) => $.desktop.updates.current_version)}>

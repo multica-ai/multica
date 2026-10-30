@@ -1,7 +1,9 @@
 package handler
 
 import (
+	"context"
 	"net/http"
+	"os"
 	"sort"
 	"testing"
 
@@ -128,6 +130,189 @@ func TestListTasksByIssueDefaultsToFullHistory(t *testing.T) {
 	got := taskIDs(runsRequest(t, f.childA, ""))
 	if want := sortedCopy(done, live); !sameIDs(got, want) {
 		t.Fatalf("history runs = %v, want %v (a completed run must survive)", got, want)
+	}
+}
+
+func TestTaskHistoryOmitsUnusedAssigneeFallbacks(t *testing.T) {
+	if testHandler == nil || testPool == nil {
+		t.Skip("database not available")
+	}
+	agentID := createHandlerTestAgent(t, "FallbackHistoryAgent", []byte("[]"))
+	issueID := dbfx.Issue(t, "fallback history")
+	runtimeID := handlerTestRuntimeID(t)
+	primaryID := dbfx.Task(t, agentID, testutil.Cols{"issue_id": issueID, "status": "completed", "runtime_id": runtimeID})
+	want := []string{primaryID}
+	for _, tc := range []struct {
+		name       string
+		status     string
+		fallback   bool
+		dispatched bool
+		started    bool
+		visible    bool
+	}{
+		{name: "inert fallback", status: "deferred", fallback: true},
+		{name: "unused cancelled fallback", status: "cancelled", fallback: true},
+		{name: "ordinary cancellation", status: "cancelled", visible: true},
+		{name: "ordinary deferred task", status: "deferred", visible: true},
+		{name: "promoted fallback", status: "queued", fallback: true, visible: true},
+		{name: "dispatched unused cancellation", status: "cancelled", fallback: true, dispatched: true},
+		{name: "ordinary dispatched cancellation", status: "cancelled", dispatched: true, visible: true},
+		{name: "started cancellation", status: "cancelled", fallback: true, started: true, visible: true},
+		{name: "failed fallback", status: "failed", fallback: true, visible: true},
+		{name: "completed fallback", status: "completed", fallback: true, visible: true},
+	} {
+		cols := testutil.Cols{"issue_id": issueID, "status": tc.status, "trigger_summary": tc.name, "runtime_id": runtimeID}
+		if tc.fallback {
+			cols["escalation_for_task_id"] = primaryID
+		}
+		if tc.dispatched {
+			cols["dispatched_at"] = testutil.Raw("now()")
+		}
+		if tc.started {
+			cols["started_at"] = testutil.Raw("now()")
+		}
+		id := dbfx.Task(t, agentID, cols)
+		if tc.visible {
+			want = append(want, id)
+		}
+	}
+	sort.Strings(want)
+	if got := taskIDs(runsRequest(t, issueID, "")); !sameIDs(got, want) {
+		t.Errorf("issue history = %v, want %v (omit only unused assignee fallbacks)", got, want)
+	}
+	var agentRuns []AgentTaskResponse
+	testutil.Call(t, testHandler.ListAgentTasks, withURLParam(
+		newRequest(http.MethodGet, "/api/agents/"+agentID+"/tasks?include_usage=true", nil), "id", agentID,
+	)).Want(http.StatusOK).JSON(&agentRuns)
+	if got := taskIDs(agentRuns); !sameIDs(got, want) {
+		t.Errorf("agent history = %v, want %v (same visibility as issue history)", got, want)
+	}
+}
+
+func TestCancelCommentAssigneeFallbacksMigration(t *testing.T) {
+	if testHandler == nil || testPool == nil {
+		t.Skip("database not available")
+	}
+	agentID := createHandlerTestAgent(t, "RetiredFallbackAgent", []byte("[]"))
+	idleAgentID := createHandlerTestAgent(t, "UnusedFallbackAgent", []byte("[]"))
+	idleIssueID := dbfx.Issue(t, "only unused fallback")
+	idlePrimaryID := dbfx.Task(t, agentID, testutil.Cols{"issue_id": idleIssueID, "runtime_id": handlerTestRuntimeID(t), "status": "completed"})
+	idleFallbackID := dbfx.Task(t, idleAgentID, testutil.Cols{
+		"issue_id": idleIssueID, "runtime_id": handlerTestRuntimeID(t), "status": "dispatched",
+		"dispatched_at": testutil.Raw("now()"), "escalation_for_task_id": idlePrimaryID,
+	})
+	if _, err := testPool.Exec(context.Background(), `UPDATE agent SET status = 'working' WHERE id IN ($1, $2)`, agentID, idleAgentID); err != nil {
+		t.Fatal(err)
+	}
+	want := map[string]string{}
+	want[idleFallbackID] = "cancelled"
+	retryIssueID := dbfx.Issue(t, "unused fallback retry lineage")
+	retryPrimaryID := dbfx.Task(t, agentID, testutil.Cols{
+		"issue_id": retryIssueID, "runtime_id": handlerTestRuntimeID(t), "status": "completed",
+	})
+	startedFallbackID := dbfx.Task(t, agentID, testutil.Cols{
+		"issue_id": retryIssueID, "runtime_id": handlerTestRuntimeID(t), "status": "failed",
+		"started_at": testutil.Raw("now() - interval '2 minutes'"), "completed_at": testutil.Raw("now() - interval '1 minute'"),
+		"escalation_for_task_id": retryPrimaryID,
+	})
+	startedRetryID := dbfx.Task(t, agentID, testutil.Cols{
+		"issue_id": retryIssueID, "runtime_id": handlerTestRuntimeID(t), "status": "failed",
+		"started_at": testutil.Raw("now() - interval '1 minute'"), "completed_at": testutil.Raw("now()"),
+		"parent_task_id": startedFallbackID, "retry_of_task_id": startedFallbackID,
+	})
+	pendingRetryID := dbfx.Task(t, agentID, testutil.Cols{
+		"issue_id": retryIssueID, "runtime_id": handlerTestRuntimeID(t), "status": "deferred",
+		"fire_at":        testutil.Raw("now() + interval '1 minute'"),
+		"parent_task_id": startedRetryID, "retry_of_task_id": startedRetryID,
+	})
+	manualRerunID := dbfx.Task(t, agentID, testutil.Cols{
+		"issue_id": retryIssueID, "runtime_id": handlerTestRuntimeID(t), "status": "queued",
+		"rerun_of_task_id": startedFallbackID,
+	})
+	mergedIssueID := dbfx.Issue(t, "fallback with merged comment")
+	mergedPrimaryID := dbfx.Task(t, agentID, testutil.Cols{
+		"issue_id": mergedIssueID, "runtime_id": handlerTestRuntimeID(t), "status": "completed",
+	})
+	mergedOriginalCommentID := dbfx.Comment(t, mergedIssueID, "original fallback trigger")
+	mergedTriggerCommentID := dbfx.Comment(t, mergedIssueID, "explicit assignee mention")
+	mergedFallbackID := dbfx.Task(t, agentID, testutil.Cols{
+		"issue_id": mergedIssueID, "runtime_id": handlerTestRuntimeID(t), "status": "queued",
+		"escalation_for_task_id": mergedPrimaryID, "trigger_comment_id": mergedTriggerCommentID,
+	})
+	dbfx.Exec(t, `UPDATE agent_task_queue SET coalesced_comment_ids = ARRAY[$2::uuid] WHERE id = $1`,
+		mergedFallbackID, mergedOriginalCommentID)
+	want[retryPrimaryID] = "completed"
+	want[startedFallbackID] = "failed"
+	want[startedRetryID] = "failed"
+	want[pendingRetryID] = "cancelled"
+	want[manualRerunID] = "queued"
+	want[mergedPrimaryID] = "completed"
+	want[mergedFallbackID] = "queued"
+	for _, tc := range []struct {
+		status   string
+		fallback bool
+		started  bool
+		want     string
+	}{
+		{status: "deferred", fallback: true, want: "cancelled"},
+		{status: "queued", fallback: true, want: "cancelled"},
+		{status: "dispatched", fallback: true, want: "cancelled"},
+		{status: "waiting_local_directory", fallback: true, want: "cancelled"},
+		{status: "running", fallback: true, started: true, want: "running"},
+		{status: "completed", fallback: true, started: true, want: "completed"},
+		{status: "failed", fallback: true, want: "failed"},
+		{status: "cancelled", fallback: true, want: "cancelled"},
+		{status: "deferred", want: "deferred"},
+		{status: "queued", want: "queued"},
+	} {
+		issueID := dbfx.Issue(t, "retired fallback")
+		primaryID := dbfx.Task(t, agentID, testutil.Cols{"issue_id": issueID, "runtime_id": handlerTestRuntimeID(t), "status": "completed"})
+		want[primaryID] = "completed"
+		cols := testutil.Cols{"issue_id": issueID, "runtime_id": handlerTestRuntimeID(t), "status": tc.status}
+		if tc.fallback {
+			cols["escalation_for_task_id"] = primaryID
+		}
+		if tc.started {
+			cols["started_at"] = testutil.Raw("now()")
+		}
+		want[dbfx.Task(t, agentID, cols)] = tc.want
+	}
+	sql, err := os.ReadFile("../../migrations/456_cancel_comment_assignee_fallbacks.up.sql")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for range 2 {
+		if _, err := testPool.Exec(context.Background(), string(sql)); err != nil {
+			t.Fatal(err)
+		}
+		for id, status := range want {
+			if got := taskStatusByID(t, id); got != status {
+				t.Errorf("task %s status = %s, want %s", id, got, status)
+			}
+		}
+		var retryFallbackID *string
+		if err := testPool.QueryRow(context.Background(),
+			`SELECT escalation_for_task_id FROM agent_task_queue WHERE id = $1`, pendingRetryID,
+		).Scan(&retryFallbackID); err != nil {
+			t.Fatal(err)
+		}
+		if retryFallbackID == nil || *retryFallbackID != retryPrimaryID {
+			t.Errorf("pending fallback retry escalation_for_task_id = %v, want %s", retryFallbackID, retryPrimaryID)
+		}
+		for _, id := range taskIDs(runsRequest(t, retryIssueID, "")) {
+			if id == pendingRetryID {
+				t.Errorf("cancelled fallback retry %s must be hidden from issue history", id)
+			}
+		}
+		for id, wantStatus := range map[string]string{agentID: "working", idleAgentID: "idle"} {
+			agent, err := testHandler.Queries.GetAgent(context.Background(), parseUUID(id))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if agent.Status != wantStatus {
+				t.Errorf("agent %s status = %s, want %s after retiring unused fallbacks", id, agent.Status, wantStatus)
+			}
+		}
 	}
 }
 

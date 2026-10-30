@@ -406,31 +406,39 @@ func resolveProjectResourceID(ctx context.Context, client *cli.APIClient, projec
 	return resolveIDByPrefix(ctx, client, "project resource", input, fetch)
 }
 
-func resolveLabelID(ctx context.Context, client *cli.APIClient, input string) (resolvedID, error) {
-	return resolveIDByPrefix(ctx, client, "label", input, fetchLabelCandidates)
+func resolveLabelID(ctx context.Context, client *cli.APIClient, input, resourceType string) (resolvedID, error) {
+	return resolveIDByPrefix(ctx, client, "label", input, func(ctx context.Context, client *cli.APIClient) ([]idCandidate, error) {
+		return fetchLabelCandidates(ctx, client, resourceType)
+	})
 }
 
-func fetchLabelCandidates(ctx context.Context, client *cli.APIClient) ([]idCandidate, error) {
+func fetchLabelCandidates(ctx context.Context, client *cli.APIClient, resourceType string) ([]idCandidate, error) {
 	if client.WorkspaceID == "" {
 		return nil, fmt.Errorf("workspace_id is required to resolve label id prefixes")
 	}
-	params := url.Values{"workspace_id": {client.WorkspaceID}}
-	var result map[string]any
-	if err := client.GetJSON(ctx, "/api/labels?"+params.Encode(), &result); err != nil {
-		return nil, err
+	resourceTypes := []string{resourceType}
+	if resourceType == "" {
+		resourceTypes = []string{"issue", "skill"}
 	}
-	labelsRaw, _ := result["labels"].([]any)
-	candidates := make([]idCandidate, 0, len(labelsRaw))
-	for _, raw := range labelsRaw {
-		l, ok := raw.(map[string]any)
-		if !ok {
-			continue
+	candidates := make([]idCandidate, 0)
+	for _, candidateType := range resourceTypes {
+		params := url.Values{"workspace_id": {client.WorkspaceID}, "resource_type": {candidateType}}
+		var result map[string]any
+		if err := client.GetJSON(ctx, "/api/labels?"+params.Encode(), &result); err != nil {
+			return nil, err
 		}
-		candidates = append(candidates, idCandidate{
-			ID:      strVal(l, "id"),
-			Display: strVal(l, "name"),
-			Detail:  strVal(l, "color"),
-		})
+		labelsRaw, _ := result["labels"].([]any)
+		for _, raw := range labelsRaw {
+			l, ok := raw.(map[string]any)
+			if !ok {
+				continue
+			}
+			candidates = append(candidates, idCandidate{
+				ID:      strVal(l, "id"),
+				Display: strVal(l, "name"),
+				Detail:  strVal(l, "color"),
+			})
+		}
 	}
 	return candidates, nil
 }

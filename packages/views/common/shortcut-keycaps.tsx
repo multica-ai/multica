@@ -12,11 +12,13 @@ import {
   Delete,
   Option,
   Space,
-  type LucideIcon,
-} from "lucide-react";
+  type IconComponent,
+} from "@multica/ui/icons";
 import {
   formatShortcut,
   getShortcutPlatform,
+  useShortcut,
+  type ShortcutActionId,
   type ShortcutChord,
   type ShortcutPlatform,
 } from "@multica/core/shortcuts";
@@ -27,7 +29,7 @@ type ShortcutToken = {
   id: string;
   label: string;
   text?: string;
-  icon?: LucideIcon;
+  icon?: IconComponent;
 };
 
 const KEY_TOKENS: Record<string, Omit<ShortcutToken, "id">> = {
@@ -123,4 +125,13 @@ export function ShortcutKeycaps({
       ))}
     </span>
   );
+}
+
+/**
+ * Decorative keycaps for a registered action's current binding, for a tooltip
+ * whose text already names the action. Renders nothing when it is unbound.
+ */
+export function ActionShortcutKeycaps({ action }: { action: ShortcutActionId }) {
+  const shortcut = useShortcut(action);
+  return shortcut ? <ShortcutKeycaps shortcut={shortcut} decorative /> : null;
 }

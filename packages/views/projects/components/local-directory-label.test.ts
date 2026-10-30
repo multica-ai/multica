@@ -4,7 +4,7 @@ import { describe, it, expect } from "vitest";
 import { localDirectoryLabel } from "./local-directory-label";
 
 // Canonical priority matrix for the display name of a local_directory row.
-// The component suites (project-resources-rename.test.tsx) keep the wiring
+// The component suite (project-resources-local-directory.test.tsx) keeps the wiring
 // and named regressions; the read-order truth lives here.
 describe("localDirectoryLabel", () => {
   const ref = (overrides: Partial<{ label: string }> = {}) => ({
@@ -13,7 +13,7 @@ describe("localDirectoryLabel", () => {
     ...overrides,
   });
 
-  it("prefers the top-level column — where renames write — over the ref copy", () => {
+  it("prefers the top-level column — where label updates write — over the ref copy", () => {
     expect(
       localDirectoryLabel({
         label: "Renamed Client",

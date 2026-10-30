@@ -17,22 +17,22 @@ func TestBuildSearchQuery_SingleTerm(t *testing.T) {
 	if strings.Contains(query, "ILIKE") {
 		t.Error("query should not contain ILIKE")
 	}
-	if !strings.Contains(query, "LOWER(i.title) LIKE") {
-		t.Error("query should contain LOWER(i.title) LIKE")
+	if !strings.Contains(query, "lowered_issue_title.lowered LIKE") {
+		t.Error("query should match against the pre-lowered issue title")
 	}
-	if !strings.Contains(query, "LOWER(COALESCE(i.description, '')) LIKE") {
-		t.Error("query should contain LOWER(COALESCE(i.description, '')) LIKE")
+	if !strings.Contains(query, "lowered_issue_description.lowered LIKE") {
+		t.Error("query should match against the conditionally lowered issue description")
 	}
-	if !strings.Contains(query, "LOWER(c.content) LIKE") {
-		t.Error("query should contain LOWER(c.content) LIKE")
+	if !strings.Contains(query, "lowered_comment.lowered LIKE") {
+		t.Error("query should match against the pre-lowered comment content")
 	}
 
 	// Exact title rank should not double-LOWER the pattern.
-	if strings.Contains(query, "LOWER(i.title) = LOWER(") {
+	if strings.Contains(query, "lowered_issue_title.lowered = LOWER(") {
 		t.Error("exact title rank should not wrap pattern in LOWER (already lowercased in Go)")
 	}
-	if !strings.Contains(query, "LOWER(i.title) = $1") {
-		t.Error("exact title rank should compare LOWER(i.title) = $1 directly")
+	if !strings.Contains(query, "lowered_issue_title.lowered = $1") {
+		t.Error("exact title rank should compare the lowered title to $1 directly")
 	}
 
 	// Should exclude closed issues by default.
@@ -103,6 +103,81 @@ func TestBuildSearchQuery_MultiTerm(t *testing.T) {
 	// Multi-word query should have AND conditions.
 	if !strings.Contains(query, " AND ") {
 		t.Error("multi-word query should contain AND conditions for per-term matching")
+	}
+}
+
+func TestBuildSearchQuery_LowersCommentContentOnce(t *testing.T) {
+	query, _ := buildSearchQuery("Foo Bar Baz", []string{"Foo", "Bar", "Baz"}, 0, false, false, []string{"done", "cancelled"})
+
+	if count := strings.Count(query, "LOWER(c.content)"); count != 1 {
+		t.Fatalf("query lowers comment content %d times, want exactly once:\n%s", count, query)
+	}
+	if !strings.Contains(query, "CROSS JOIN LATERAL (") {
+		t.Fatalf("query does not use a lateral join for comment lowercasing:\n%s", query)
+	}
+	if !strings.Contains(query, "SELECT LOWER(c.content) AS lowered") {
+		t.Fatalf("query does not project pre-lowered comment content:\n%s", query)
+	}
+	if !strings.Contains(query, "OFFSET 0") {
+		t.Fatalf("query does not retain the OFFSET 0 planner fence around comment lowercasing:\n%s", query)
+	}
+	if !strings.Contains(query, ") lowered_comment") {
+		t.Fatalf("query does not retain the lateral alias after comment lowercasing:\n%s", query)
+	}
+	if strings.Contains(query, "LOWER(c.content) LIKE") {
+		t.Fatalf("comment predicates bypass the pre-lowered value:\n%s", query)
+	}
+}
+
+func TestBuildSearchQuery_LowersIssueTextOnceAndSkipsDescriptionForTitleMatches(t *testing.T) {
+	query, _ := buildSearchQuery("Foo Bar Baz", []string{"Foo", "Bar", "Baz"}, 0, false, false, []string{"done", "cancelled"})
+	normalizedQuery := strings.Join(strings.Fields(query), " ")
+
+	if count := strings.Count(query, "LOWER(i.title)"); count != 1 {
+		t.Fatalf("query lowers issue title %d times, want exactly once:\n%s", count, query)
+	}
+	if count := strings.Count(query, "LOWER(COALESCE(i.description, ''))"); count != 1 {
+		t.Fatalf("query lowers issue description %d times, want exactly once:\n%s", count, query)
+	}
+	if !strings.Contains(normalizedQuery, "CROSS JOIN LATERAL ( SELECT LOWER(i.title) AS lowered OFFSET 0 ) lowered_issue_title") {
+		t.Fatalf("query does not retain the title planner fence:\n%s", query)
+	}
+	if !strings.Contains(normalizedQuery, "LEFT JOIN LATERAL ( SELECT LOWER(COALESCE(i.description, '')) AS lowered WHERE NOT (lowered_issue_title.lowered LIKE $2 OR (lowered_issue_title.lowered LIKE $5 AND lowered_issue_title.lowered LIKE $6 AND lowered_issue_title.lowered LIKE $7)) OFFSET 0 ) lowered_issue_description ON TRUE") {
+		t.Fatalf("query does not condition description lowercasing on a complete title match:\n%s", query)
+	}
+	if strings.Contains(query, "LOWER(i.title) LIKE") || strings.Contains(query, "LOWER(COALESCE(i.description, '')) LIKE") {
+		t.Fatalf("issue predicates bypass the pre-lowered values:\n%s", query)
+	}
+	if !strings.Contains(query, "COALESCE(lowered_issue_description.lowered LIKE $2, FALSE) AS description_phrase") {
+		t.Fatalf("skipped description matches do not fall back to FALSE:\n%s", query)
+	}
+
+	// Conditional description skipping is equivalent only while every complete
+	// title match outranks and takes match-source precedence over description.
+	assertSQLBefore(t, query,
+		"WHEN im.title_phrase THEN 3",
+		"WHEN im.description_phrase THEN 5",
+	)
+	assertSQLBefore(t, query,
+		"WHEN (im.title_term_0 AND im.title_term_1 AND im.title_term_2) THEN 4",
+		"WHEN im.description_phrase THEN 5",
+	)
+	assertSQLBefore(t, query,
+		"WHEN im.title_phrase THEN 'title'",
+		"WHEN im.description_phrase THEN 'description'",
+	)
+	assertSQLBefore(t, query,
+		"WHEN (im.title_term_0 AND im.title_term_1 AND im.title_term_2) THEN 'title'",
+		"WHEN im.description_phrase THEN 'description'",
+	)
+}
+
+func assertSQLBefore(t *testing.T, query, earlier, later string) {
+	t.Helper()
+	earlierAt := strings.Index(query, earlier)
+	laterAt := strings.Index(query, later)
+	if earlierAt == -1 || laterAt == -1 || earlierAt > laterAt {
+		t.Fatalf("query must keep %q before %q:\n%s", earlier, later, query)
 	}
 }
 
@@ -334,7 +409,7 @@ func TestBuildSearchQuery_CommentSubqueryWorkspaceScope(t *testing.T) {
 	if fromCountMulti != 1 {
 		t.Errorf("multi-term query has %d comment scans, want exactly one:\n%s", fromCountMulti, multiQuery)
 	}
-	if !strings.Contains(multiQuery, "BOOL_OR((LOWER(c.content) LIKE") || !strings.Contains(multiQuery, "AS comment_all_terms") {
+	if !strings.Contains(multiQuery, "BOOL_OR((lowered_comment.lowered LIKE") || !strings.Contains(multiQuery, "AS comment_all_terms") {
 		t.Errorf("multi-term query does not retain the same-comment all-terms flag:\n%s", multiQuery)
 	}
 	if !strings.Contains(multiQuery, "ARRAY_AGG(c.id ORDER BY c.created_at DESC, c.id DESC)") {
@@ -357,7 +432,7 @@ func TestBuildSearchQuery_HydratesOnlyTheSelectedPage(t *testing.T) {
 	if limitAt == -1 || issueHydrationAt < limitAt || commentHydrationAt < limitAt {
 		t.Fatalf("full issue/comment hydration must happen after LIMIT/OFFSET:\n%s", query)
 	}
-	if lastTextMatch := strings.LastIndex(query, "LOWER(c.content) LIKE"); lastTextMatch > limitAt {
+	if lastTextMatch := strings.LastIndex(query, "lowered_comment.lowered LIKE"); lastTextMatch > limitAt {
 		t.Errorf("comment hydration repeats a text search after LIMIT/OFFSET:\n%s", query)
 	}
 }

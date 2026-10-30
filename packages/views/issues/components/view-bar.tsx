@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import {
   DndContext,
@@ -28,7 +28,7 @@ import {
   Plus,
   Settings2,
   Trash2,
-} from "lucide-react";
+} from "@multica/ui/icons";
 import { Button } from "@multica/ui/components/ui/button";
 import {
   ContextMenu,
@@ -273,34 +273,27 @@ export function ViewBar({
   );
 
   // --- single-row fit -----------------------------------------------------
-  // The reserve feeds back into the fit, but only ever grows when items
-  // fall out (the "more" trigger appears, then the promoted active tab
-  // widens it), which shrinks the fit further and keeps them out — the
-  // settle is monotonic in both directions.
   const activeBarId = activeView ? `view:${activeView.id}` : null;
-  const [reserveTier, setReserveTier] = useState<"menu" | "more" | "promoted">(
-    "menu",
+  const activeIndex = visible.findIndex((item) => item.barItemId === activeBarId);
+  const reserve = useCallback(
+    (fittingCount: number) =>
+      activeIndex >= fittingCount
+        ? RESERVE_PROMOTED
+        : fittingCount < visible.length
+          ? RESERVE_MORE
+          : RESERVE_MENU,
+    [activeIndex, visible.length],
   );
   const { containerRef, measureRef, fitCount } = useSingleRowFit({
     count: visible.length,
     gap: 4,
-    reserve:
-      reserveTier === "promoted"
-        ? RESERVE_PROMOTED
-        : reserveTier === "more"
-          ? RESERVE_MORE
-          : RESERVE_MENU,
+    reserve,
   });
   const fitting = visible.slice(0, fitCount);
   const overflowed = visible.slice(fitCount);
   const activeOverflowed =
     !!activeBarId && overflowed.some((item) => item.barItemId === activeBarId);
-  useEffect(() => {
-    setReserveTier(
-      activeOverflowed ? "promoted" : overflowed.length > 0 ? "more" : "menu",
-    );
-  }, [activeOverflowed, overflowed.length]);
-  const promoted = reserveTier === "promoted" && activeOverflowed;
+  const promoted = activeOverflowed;
 
   const savePrefs = (next: { hidden: string[]; order: string[] }) => {
     // A drag can land before the views list has loaded; pruning against an

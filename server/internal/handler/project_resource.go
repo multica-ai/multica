@@ -105,6 +105,9 @@ func validateGithubRepoRef(ref json.RawMessage) (json.RawMessage, error) {
 	}
 	payload.DefaultBranchHint = strings.TrimSpace(payload.DefaultBranchHint)
 	payload.Ref = strings.TrimSpace(payload.Ref)
+	if err := validateGitRef(payload.Ref); err != nil {
+		return nil, fmt.Errorf("github_repo: %w", err)
+	}
 	out, err := json.Marshal(payload)
 	if err != nil {
 		return nil, err
@@ -160,7 +163,14 @@ type localDirectoryRef struct {
 // Returns true to proceed; on false the 422 response has already been written,
 // using the same daemon_version_unsupported code as the quick-create gate so
 // clients can branch on it.
-func (h *Handler) requireWorktreeCapableDaemon(w http.ResponseWriter, r *http.Request, workspaceID pgtype.UUID, resourceType string, normalizedRef json.RawMessage) bool {
+//
+// Queries arrive as a parameter rather than off the handler: the update path
+// calls this while its transaction holds the resource row lock, and a
+// handler-level read would borrow a second connection from the pool for every
+// locked request — enough concurrent updates would drain the pool into
+// deadlock. Passing the caller's queries (the transaction there, the pool on
+// tx-free create paths) keeps every read on one connection.
+func requireWorktreeCapableDaemon(w http.ResponseWriter, r *http.Request, q *db.Queries, workspaceID pgtype.UUID, resourceType string, normalizedRef json.RawMessage) bool {
 	if resourceType != "local_directory" {
 		return true
 	}
@@ -172,7 +182,7 @@ func (h *Handler) requireWorktreeCapableDaemon(w http.ResponseWriter, r *http.Re
 	// One machine hosts one runtime row per provider, all registered by the
 	// same daemon binary. A workspace has a handful of runtimes; the unfiltered
 	// list is a tiny read.
-	runtimes, err := h.Queries.ListAgentRuntimes(r.Context(), workspaceID)
+	runtimes, err := q.ListAgentRuntimes(r.Context(), workspaceID)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to check runtime capabilities")
 		return false
@@ -404,6 +414,60 @@ func isDriveLetter(b byte) bool {
 	return (b >= 'a' && b <= 'z') || (b >= 'A' && b <= 'Z')
 }
 
+// gitRefMaxLength caps the stored checkout ref. Git's own limit is the
+// filesystem's, but a loose ref has to fit in a file name, so 255 is the
+// conservative ceiling every platform honors — far past any real branch name.
+// The cap exists to stop a pasted document from reaching the database, not to
+// police naming.
+const gitRefMaxLength = 255
+
+// validateGitRef rejects input git itself could never resolve, and nothing
+// more. It mirrors the subset of `git check-ref-format` that applies to a ref a
+// user types, so every branch, tag and commit SHA we advertise stays
+// acceptable — the check is about SHAPE only.
+//
+// Whether the ref exists on the remote is a different question, answered at
+// checkout time by the daemon. It must not gate saving project config: the
+// daemon may be offline, the repository may be private, and the server cannot
+// inspect the repository at all. An empty ref is valid and means "use the
+// repository's default branch".
+//
+// Keep in sync with validateGitRef in packages/core/github/repo-ref.ts, which
+// gives the same verdict in the UI before the request is sent.
+func validateGitRef(ref string) error {
+	if ref == "" {
+		return nil
+	}
+	if len(ref) > gitRefMaxLength {
+		return fmt.Errorf("ref must be at most %d characters", gitRefMaxLength)
+	}
+	// ASCII control characters, DEL, space, and the characters git reserves
+	// for its own revision syntax.
+	for _, r := range ref {
+		if r <= ' ' || r == '\x7f' || strings.ContainsRune("~^:?*[\\", r) {
+			return errors.New("ref must not contain spaces, control characters, or any of ~ ^ : ? * [ \\")
+		}
+	}
+	// Path-shape rules. "@{" is reflog syntax, a lone "@" is shorthand for
+	// HEAD, ".." would read as a range, and ".lock" is what git names its own
+	// lock files.
+	if strings.Contains(ref, "..") ||
+		strings.Contains(ref, "@{") ||
+		ref == "@" ||
+		strings.HasPrefix(ref, "/") ||
+		strings.HasSuffix(ref, "/") ||
+		strings.Contains(ref, "//") ||
+		strings.HasSuffix(ref, ".") {
+		return errors.New("ref is not a valid branch, tag, or commit")
+	}
+	for _, segment := range strings.Split(ref, "/") {
+		if strings.HasPrefix(segment, ".") || strings.HasSuffix(segment, ".lock") {
+			return errors.New("ref is not a valid branch, tag, or commit")
+		}
+	}
+	return nil
+}
+
 // isValidGitRepoURL accepts the three forms a user can paste from GitHub's
 // "Code" menu: https://, ssh:// (with explicit scheme), and the scp-like
 // shorthand `git@host:owner/repo.git`. The check is intentionally lax — we are
@@ -512,7 +576,7 @@ func (h *Handler) CreateProjectResource(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	if conflict, err := h.findLocalDirectoryConflict(r.Context(), project.ID, req.ResourceType, normalizedRef, pgtype.UUID{}); err != nil {
+	if conflict, err := findLocalDirectoryConflict(r.Context(), h.Queries, project.ID, req.ResourceType, normalizedRef, pgtype.UUID{}); err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to check existing resources")
 		return
 	} else if conflict {
@@ -520,7 +584,7 @@ func (h *Handler) CreateProjectResource(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	if !h.requireWorktreeCapableDaemon(w, r, project.WorkspaceID, req.ResourceType, normalizedRef) {
+	if !requireWorktreeCapableDaemon(w, r, h.Queries, project.WorkspaceID, req.ResourceType, normalizedRef) {
 		return
 	}
 
@@ -587,7 +651,21 @@ func (h *Handler) UpdateProjectResource(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	existing, err := h.Queries.GetProjectResourceInWorkspace(r.Context(), db.GetProjectResourceInWorkspaceParams{
+	// The read-decide-write flow below derives every column it writes back
+	// from the row read here. Two concurrent partial updates would otherwise
+	// interleave read→read→write→write, and the second writer's stale snapshot
+	// would silently revert the first writer's change (#9238). Taking the row
+	// lock at read time inside a short transaction serializes competitors:
+	// they block on this row until the write commits, then re-read fresh.
+	tx, err := h.TxStarter.Begin(r.Context())
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to start update transaction")
+		return
+	}
+	defer tx.Rollback(r.Context())
+	qtx := h.Queries.WithTx(tx)
+
+	existing, err := qtx.GetProjectResourceInWorkspaceForUpdate(r.Context(), db.GetProjectResourceInWorkspaceForUpdateParams{
 		ID: resourceUUID, WorkspaceID: project.WorkspaceID,
 	})
 	if err != nil {
@@ -619,7 +697,11 @@ func (h *Handler) UpdateProjectResource(w http.ResponseWriter, r *http.Request) 
 		nextRef = normalized
 	}
 
-	if conflict, err := h.findLocalDirectoryConflict(r.Context(), project.ID, existing.ResourceType, nextRef, existing.ID); err != nil {
+	// Both checks read through the transaction (qtx) rather than the handler's
+	// pool queries: this request holds the resource row lock until commit, and
+	// a pool-level read would borrow a second connection per locked request,
+	// draining the pool under enough concurrent updates.
+	if conflict, err := findLocalDirectoryConflict(r.Context(), qtx, project.ID, existing.ResourceType, nextRef, existing.ID); err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to check existing resources")
 		return
 	} else if conflict {
@@ -640,7 +722,7 @@ func (h *Handler) UpdateProjectResource(w http.ResponseWriter, r *http.Request) 
 	// after the mode was legitimately saved. The row already says worktree; the
 	// claim gate is what stops it from running somewhere that cannot.
 	if refProvided && !refRenameOnly {
-		if !h.requireWorktreeCapableDaemon(w, r, project.WorkspaceID, existing.ResourceType, nextRef) {
+		if !requireWorktreeCapableDaemon(w, r, qtx, project.WorkspaceID, existing.ResourceType, nextRef) {
 			return
 		}
 	}
@@ -727,7 +809,7 @@ func (h *Handler) UpdateProjectResource(w http.ResponseWriter, r *http.Request) 
 		}
 	}
 
-	updated, err := h.Queries.UpdateProjectResource(r.Context(), db.UpdateProjectResourceParams{
+	updated, err := qtx.UpdateProjectResource(r.Context(), db.UpdateProjectResourceParams{
 		ID:          existing.ID,
 		ResourceRef: nextRef,
 		Label:       nextLabel,
@@ -738,6 +820,10 @@ func (h *Handler) UpdateProjectResource(w http.ResponseWriter, r *http.Request) 
 			writeError(w, http.StatusConflict, "this resource is already attached to the project")
 			return
 		}
+		writeError(w, http.StatusInternalServerError, "failed to update project resource")
+		return
+	}
+	if err := tx.Commit(r.Context()); err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to update project resource")
 		return
 	}
@@ -766,7 +852,12 @@ func (h *Handler) UpdateProjectResource(w http.ResponseWriter, r *http.Request) 
 // through. We do the daemon-scoped check here in application code instead.
 //
 // `excludeID` lets the update path ignore the row being edited.
-func (h *Handler) findLocalDirectoryConflict(ctx context.Context, projectID pgtype.UUID, resourceType string, normalizedRef json.RawMessage, excludeID pgtype.UUID) (bool, error) {
+//
+// Like requireWorktreeCapableDaemon, the read goes through the passed queries
+// so the update path can run it on its transaction: a handler-level read while
+// the transaction holds the row lock would borrow a second pooled connection
+// per locked request.
+func findLocalDirectoryConflict(ctx context.Context, q *db.Queries, projectID pgtype.UUID, resourceType string, normalizedRef json.RawMessage, excludeID pgtype.UUID) (bool, error) {
 	if resourceType != "local_directory" {
 		return false, nil
 	}
@@ -774,7 +865,7 @@ func (h *Handler) findLocalDirectoryConflict(ctx context.Context, projectID pgty
 	if err := json.Unmarshal(normalizedRef, &incoming); err != nil {
 		return false, err
 	}
-	rows, err := h.Queries.ListProjectResources(ctx, projectID)
+	rows, err := q.ListProjectResources(ctx, projectID)
 	if err != nil {
 		return false, err
 	}

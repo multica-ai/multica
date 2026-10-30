@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"log/slog"
 	"os/exec"
 	"strings"
@@ -177,10 +178,12 @@ func runOwned(cmd *exec.Cmd, logger *slog.Logger) error {
 }
 
 // probeWaitDelay bounds how long a finished probe waits on output pipes its
-// descendants left open. It matches the bound detectCLIVersion already sets by
-// hand. The timer only starts once the child has exited or the context is
+// descendants left open. detectCLIVersion sets the same bound on its own
+// command. The timer only starts once the child has exited or the context is
 // done, so a healthy probe never pays it.
-const probeWaitDelay = 2 * time.Second
+// Package tests shorten it while preserving the delayed-descendant ordering;
+// production never reassigns it.
+var probeWaitDelay = 2 * time.Second
 
 // outputOwned is cmd.Output() over an owned process tree. It matches the
 // stdlib's contract — stdout returned, a failed run's stderr attached to the
@@ -453,6 +456,8 @@ var launchPrefixBlockedArgs = map[string]map[string]blockedArgMode{
 	"hermes":      hermesBlockedArgs,
 	"kimi":        kimiBlockedArgs,
 	"kiro":        kiroBlockedArgs,
+	"mcode":       mcodeBlockedArgs,
+	"muse":        museBlockedArgs,
 	"opencode":    opencodeBlockedArgs,
 	"openclaw":    openclawBlockedArgs,
 	"pi":          piBlockedArgs,
@@ -463,7 +468,32 @@ var launchPrefixBlockedArgs = map[string]map[string]blockedArgMode{
 	"reasonix":    reasonixBlockedArgs,
 	"traecli":     traecliBlockedArgs,
 	"dim":         dimBlockedArgs,
+	"devin":       devinBlockedArgs,
 	"zeroclaw":    zeroclawBlockedArgs,
+}
+
+// ValidateCustomArgs rejects arguments that the runtime always discards at launch.
+func ValidateCustomArgs(agentType string, args []string) error {
+	protocolFamily := agentType
+	if family, ok := RuntimeProtocolFamily(agentType); ok {
+		protocolFamily = family
+	}
+	blocked := launchPrefixBlockedArgs[protocolFamily]
+	for _, arg := range args {
+		flag := unshellQuoteArg(arg)
+		if idx := strings.Index(flag, "="); idx > 0 {
+			flag = flag[:idx]
+		}
+		_, isBlocked := blocked[flag]
+		if agentType == "omp" {
+			_, sessionArg := ompSessionArgs[flag]
+			isBlocked = isBlocked || sessionArg
+		}
+		if isBlocked {
+			return fmt.Errorf("custom_args: %q is managed by Multica for runtime %q and cannot be overridden; remove it from custom_args", flag, agentType)
+		}
+	}
+	return nil
 }
 
 // FilterLaunchPrefix is the exported form for callers outside this package —
@@ -471,6 +501,9 @@ var launchPrefixBlockedArgs = map[string]map[string]blockedArgMode{
 // Without it a `--version` probe and a task launch would disagree about what
 // the runtime's prefix is.
 func FilterLaunchPrefix(agentType string, prefix []string, logger *slog.Logger) []string {
+	if family, ok := RuntimeProtocolFamily(agentType); ok {
+		agentType = family
+	}
 	return filterLaunchPrefix(prefix, agentType, logger)
 }
 

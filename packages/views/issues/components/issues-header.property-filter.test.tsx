@@ -44,7 +44,7 @@ function textProperty(id: string, name: string): IssueProperty {
   };
 }
 
-function renderFilterMenu(props: IssueProperty[]) {
+function renderFilterMenu(props: IssueProperty[], propertyFilters: IssueViewState["propertyFilters"] = {}) {
   setApiInstance({
     listIssueStatuses: async () => ({ statuses: [], categories: [], total: 0 }),
     listProperties: async () => ({ properties: props }),
@@ -67,6 +67,7 @@ function renderFilterMenu(props: IssueProperty[]) {
     defaultOptions: { queries: { retry: false, staleTime: Infinity } },
   });
   const store = createStore<IssueViewState>()(viewStoreSlice);
+  store.setState({ propertyFilters });
 
   const view = renderWithI18n(
     <QueryClientProvider client={qc}>
@@ -93,6 +94,45 @@ afterEach(() => {
   // labels across tests.
   document.body.innerHTML = "";
   vi.restoreAllMocks();
+});
+
+describe("IssueFilterMenu select property filter", () => {
+  it.each(["select", "multi_select"])("caps %s filters at 50 including No value and permits replacement", async (type) => {
+    const property = {
+      ...textProperty("prop-services", "Services"), type,
+      config: {
+        options: Array.from({ length: 51 }, (_, i) => ({
+          id: `option-${i + 1}`, name: `Service ${i + 1}`, color: "#3b82f6",
+        })),
+      },
+    };
+    const selected = property.config.options.slice(0, 50).map((option) => option.id);
+    const { store } = renderFilterMenu([property], { [property.id]: selected });
+    fireEvent.click(screen.getByRole("button", { name: "Filter" }));
+    fireEvent.click(await screen.findByRole("menuitem", { name: /Services/ }));
+    const extra = await screen.findByRole("menuitemcheckbox", { name: "Service 51" });
+    const noValue = screen.getByRole("menuitemcheckbox", { name: "No value" });
+    expect(extra).toHaveAttribute("aria-disabled", "true");
+    expect(noValue).toHaveAttribute("aria-disabled", "true");
+    fireEvent.click(extra);
+    fireEvent.click(noValue);
+    expect(store.getState().propertyFilters[property.id]).toEqual(selected);
+
+    const lastSelected = screen.getByRole("menuitemcheckbox", { name: "Service 50" });
+    expect(lastSelected).not.toHaveAttribute("aria-disabled", "true");
+    fireEvent.click(lastSelected);
+    expect(noValue).not.toHaveAttribute("aria-disabled", "true");
+    fireEvent.click(noValue);
+    expect(store.getState().propertyFilters[property.id]).toEqual([...selected.slice(0, 49), "__none__"]);
+    expect(extra).toHaveAttribute("aria-disabled", "true");
+    expect(noValue).not.toHaveAttribute("aria-disabled", "true");
+
+    fireEvent.click(noValue);
+    expect(extra).not.toHaveAttribute("aria-disabled", "true");
+    fireEvent.click(extra);
+    expect(store.getState().propertyFilters[property.id]).toEqual([...selected.slice(0, 49), "option-51"]);
+    expect(lastSelected).toHaveAttribute("aria-disabled", "true");
+  });
 });
 
 describe("IssueFilterMenu scalar property filter", () => {

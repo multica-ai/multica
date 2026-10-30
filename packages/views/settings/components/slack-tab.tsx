@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { ChevronRight, ExternalLink, Trash2 } from "lucide-react";
+import { ChevronRight, ExternalLink, Trash2 } from "@multica/ui/icons";
 import { SlackMark } from "./slack-mark";
 import { cn } from "@multica/ui/lib/utils";
 import { Button } from "@multica/ui/components/ui/button";
@@ -35,8 +35,10 @@ import { slackInstallationsOptions, slackKeys } from "@multica/core/slack";
 import { api } from "@multica/core/api";
 import type { SlackInstallation } from "@multica/core/types";
 import { ActorAvatar } from "../../common/actor-avatar";
+import { docsLocalePrefix } from "../../common/docs-locale";
 import { openExternal } from "../../platform";
 import { useLocale, useT } from "../../i18n";
+import { TooltipHint } from "@multica/ui/components/common/tooltip-hint";
 
 // SlackTab is the workspace settings panel for Slack bot installations.
 // Listing is member-visible; the disconnect action is admin-only (the backend
@@ -64,9 +66,9 @@ export function SlackTab() {
   const installations = data?.installations ?? [];
   const configured = data?.configured === true;
   // install_supported tracks whether the OAuth client credentials are wired on
-  // the server. When false, "Connect Slack" would 503, so we hide the connect
-  // entry points and surface a "coming soon" notice. Already-installed bots
-  // still appear below and remain manageable.
+  // the server. When false, "Connect Slack" would be rejected, so we hide the
+  // connect entry points and surface a "coming soon" notice. Already-installed
+  // bots still appear below and remain manageable.
   const installSupported = data?.install_supported === true;
 
   const [disconnectTarget, setDisconnectTarget] = useState<string | null>(null);
@@ -97,7 +99,7 @@ export function SlackTab() {
             <p className="text-body font-medium">{t(($) => $.slack.not_enabled_title)}</p>
             <p className="text-caption text-muted-foreground">
               {t(($) => $.slack.not_enabled_description_prefix)}{" "}
-              <code className="rounded bg-muted px-1 py-0.5 text-micro">
+              <code className="rounded-xs bg-muted px-1 py-0.5 text-micro">
                 MULTICA_SLACK_SECRET_KEY
               </code>{" "}
               {t(($) => $.slack.not_enabled_description_suffix)}{" "}
@@ -210,7 +212,7 @@ function InstallationRow({
           <p className="text-body font-medium">
             {agentName}
             {!isActive && (
-              <span className="ml-2 rounded bg-muted px-1.5 py-0.5 text-micro text-muted-foreground">
+              <span className="ml-2 rounded-xs bg-muted px-1.5 py-0.5 text-micro text-muted-foreground">
                 {t(($) => $.slack.revoked_badge)}
               </span>
             )}
@@ -242,14 +244,7 @@ const SLACK_BYO_VIDEO_URL = "";
 // prefixes (English has none), matching the convention used elsewhere in the
 // app for doc links (e.g. the autopilots webhook docs link).
 function slackDocsUrl(lang: string | undefined): string {
-  const prefix = lang?.startsWith("zh")
-    ? "/zh"
-    : lang?.startsWith("ja")
-      ? "/ja"
-      : lang?.startsWith("ko")
-        ? "/ko"
-        : "";
-  return `https://multica.ai/docs${prefix}/slack-bot-integration`;
+  return `https://multica.ai/docs${docsLocalePrefix(lang)}/slack-bot-integration`;
 }
 
 // SlackAgentBindButton is the per-agent CTA exposed from the agent detail page.
@@ -357,21 +352,24 @@ export function SlackAgentBindButton({
       className={cn("flex flex-wrap items-center gap-2", className)}
       data-testid="slack-agent-bind-buttons"
     >
-      <Button
-        variant="outline"
-        size="sm"
-        onClick={() => setDialogOpen(true)}
-        disabled={!agentId}
-        title={
+      <TooltipHint
+        label={
           agentName
             ? t(($) => $.slack.bind_button_title, { agent: agentName })
             : undefined
         }
-        data-testid="slack-agent-connect"
       >
-        <SlackMark className="h-3 w-3" />
-        {t(($) => $.slack.bind_button)}
-      </Button>
+        <Button
+          variant="outline"
+          size="sm"
+          onClick={() => setDialogOpen(true)}
+          disabled={!agentId}
+          data-testid="slack-agent-connect"
+        >
+          <SlackMark className="h-3 w-3" />
+          {t(($) => $.slack.bind_button)}
+        </Button>
+      </TooltipHint>
 
       <Dialog
         open={dialogOpen}
@@ -540,34 +538,36 @@ function SlackAgentBotConnectedBadge({
           <span className="inline-block h-1.5 w-1.5 shrink-0 rounded-full bg-emerald-500" />
           <span className="truncate">{t(($) => $.slack.agent_bot_connected_label)}</span>
         </span>
-        <Button
-          variant="destructive"
-          size="sm"
-          onClick={() => setConfirmOpen(true)}
-          disabled={disconnecting}
-          title={t(($) => $.slack.agent_bot_disconnect_tooltip)}
-          aria-label={t(($) => $.slack.disconnect)}
-          data-testid="slack-agent-bot-disconnect"
-        >
-          <Trash2 className="h-3 w-3" />
-          {disconnecting
-            ? t(($) => $.slack.disconnecting)
-            : t(($) => $.slack.disconnect)}
-        </Button>
+        <TooltipHint label={t(($) => $.slack.agent_bot_disconnect_tooltip)}>
+          <Button
+            variant="destructive"
+            size="sm"
+            onClick={() => setConfirmOpen(true)}
+            disabled={disconnecting}
+            aria-label={t(($) => $.slack.disconnect)}
+            data-testid="slack-agent-bot-disconnect"
+          >
+            <Trash2 className="h-3 w-3" />
+            {disconnecting
+              ? t(($) => $.slack.disconnecting)
+              : t(($) => $.slack.disconnect)}
+          </Button>
+        </TooltipHint>
       </div>
 
       {installation.team_id && (
-        <button
-          type="button"
-          onClick={() =>
-            openExternal(`https://app.slack.com/client/${installation.team_id}`)
-          }
-          className="inline-flex items-center gap-1 text-caption text-muted-foreground underline-offset-2 transition-colors hover:text-foreground hover:underline"
-          title={t(($) => $.slack.agent_bot_manage_tooltip)}
-        >
-          <ExternalLink className="h-3 w-3" />
-          {t(($) => $.slack.agent_bot_manage_link)}
-        </button>
+        <TooltipHint label={t(($) => $.slack.agent_bot_manage_tooltip)}>
+          <button
+            type="button"
+            onClick={() =>
+              openExternal(`https://app.slack.com/client/${installation.team_id}`)
+            }
+            className="inline-flex items-center gap-1 text-caption text-muted-foreground underline-offset-2 transition-colors hover:text-foreground hover:underline"
+          >
+            <ExternalLink className="h-3 w-3" />
+            {t(($) => $.slack.agent_bot_manage_link)}
+          </button>
+        </TooltipHint>
       )}
 
       <AlertDialog

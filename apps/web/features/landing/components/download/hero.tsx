@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { ArrowRight, Download } from "lucide-react";
+import { ArrowRight, Download } from "@multica/ui/icons";
 import { useLocale } from "../../i18n";
 import type { DetectResult } from "../../utils/os-detect";
 import type { DownloadAssets } from "../../utils/parse-release-assets";
@@ -78,9 +78,7 @@ export function DownloadHero({
   );
 }
 
-// ------------------------------------------------------------
 // Content resolver — maps (detect, assets) → CTA props
-// ------------------------------------------------------------
 
 interface HeroContent {
   title: string;
@@ -207,9 +205,7 @@ export function resolveContent(
   };
 }
 
-// ------------------------------------------------------------
 // Pieces
-// ------------------------------------------------------------
 
 function PrimaryCta({
   href,
@@ -224,7 +220,7 @@ function PrimaryCta({
     return (
       <span
         aria-disabled="true"
-        className="inline-flex cursor-not-allowed items-center justify-center gap-2 rounded-[12px] border border-white/15 bg-white/8 px-5 py-3 text-body font-semibold text-white/60"
+        className="inline-flex cursor-not-allowed items-center justify-center gap-2 rounded-(--landing-radius-action) border border-white/15 bg-white/8 px-5 py-3 text-body font-semibold text-white/60"
       >
         {children}
       </span>

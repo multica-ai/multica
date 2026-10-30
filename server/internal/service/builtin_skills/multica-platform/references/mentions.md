@@ -11,6 +11,7 @@ that and do not re-derive it here.
 - [@all is the broadcast type](#all-is-the-broadcast-type)
 - [What does NOT happen](#what-does-not-happen)
 - [Who the invoke gate judges](#who-the-invoke-gate-judges)
+- [Steering another agent's running turn](#steering-another-agents-running-turn)
 - [Incorrect to correct](#incorrect-to-correct)
 
 ## A mention link is built from a real UUID
@@ -26,8 +27,22 @@ The parser accepts exactly four `<type>` values plus the `all` sentinel, and the
     (member|agent|squad|issue|all)/([0-9a-fA-F-]+|all)
 
 So the link target is a real entity UUID (or `all`), never a display name. The
-label between the brackets is free text — that is where the human-readable name
-goes.
+label between the brackets must contain visible text. Put the human-readable
+name there. The `@` prefix is optional; issue references commonly omit it:
+
+    [MUL-123](mention://issue/<uuid>)
+
+Only canonical inline links with visible label text count as mentions. Empty
+or invisible labels, reference links, images, autolinks, titles, and
+angle-bracket destinations are not mention triggers. Use the shape above.
+Text removed by HTML sanitization, such as script contents, and inert template
+contents do not make a label visible; neither does an `@` prefix on its own.
+
+Code examples are inert as mentions. This includes inline code, multiline code
+spans, indented code, and backtick or tilde fenced blocks inside lists,
+blockquotes, or `<details>`. A fenced `diff` of agent instructions cannot invoke
+its mention targets. Copy the mention syntax out of code and paste it into
+ordinary prose to trigger it. Prose mentions in blockquotes still count.
 
 One `mention://` form deliberately sits OUTSIDE this parser:
 `[Label](mention://project/<uuid>)`. `project` is absent from the type group
@@ -117,9 +132,9 @@ None of these start a fresh run, and none produce an error response — but they
 are three different things, and the response tells you which. A mention that
 never parsed is a truly silent no-op. One that parsed and was refused comes back
 in `trigger_outcomes` as `status: "blocked"` with a `reason_code`. One whose
-target is already busy comes back `coalesced` or `deferred`: no second run, but
-your comment IS folded into the task that is already running, so it still gets
-read. Read that array after posting — it is the only place any of this shows up.
+target has a queued task in the same comment thread can come back `coalesced`.
+A claim race can return `deferred`: the input is recorded for a follow-up run,
+not injected into an already running prompt. Different threads queue independently. Read that array after posting — it is the only place any of this shows up.
 
 - **A name where a UUID belongs.** `mention://member/Alice` is dead. The id
   group accepts only hex+dashes or `all`; the non-hex letters in a typical name
@@ -138,13 +153,22 @@ read. Read that array after posting — it is the only place any of this shows u
   with `target_unavailable` instead — a non-UUID names no entity anywhere, so
   it conceals nothing. Neither case is ever an error response.
 - **An already-pending task.** Even a correct `@agent`/`@squad` starts no second
-  run when the target already has a pending task on this issue. This is a fold,
-  not a drop: the comment merges into that task and the outcome is `coalesced`
-  (same reviewed head) or `deferred` (different head) — do NOT re-post it as
-  "the mention didn't work". Edit preview is the only exception:
+  run when the same target has a mergeable queued task in the **same thread**
+  (the root comment and all descendants), with the same reviewed head. The
+  outcome is `coalesced`; all covered instructions are delivered together.
+  Different root threads and assignment-triggered runs have separate queue
+  slots. Inputs received after execution starts belong to a successor run;
+  `deferred` means a claim race durably recorded the follow-up obligation.
+  Agent concurrency limits still apply, and runs for the same issue and agent
+  execute serially. Stopping or retrying one thread does not cancel another
+  thread's queue. Do not re-post a successfully queued/coalesced/deferred input. Edit preview is the only exception:
   `editing_comment_id` ignores pending tasks from the same comment being edited,
   because save cancels those old tasks before it re-computes triggers. It is
   still comment-scoped, not an agent-wide bypass.
+- **A hand-off to the issue assignee because your target is busy.** A reply
+  already routed to an agent stays with that agent; an offline or queued target
+  is waited for, never swapped for the issue assignee. Mention whoever else you
+  need by hand.
 - **An archived agent, or one with no runtime bound** (likewise a squad whose
   leader is): blocked with `target_unavailable` and `runtime_offline`
   respectively. Both are checked only AFTER the invoke gate, so a caller who may
@@ -187,6 +211,20 @@ result comment on the autopilot issue can still wake the leader), and it survive
 a busy target: if the mentioned agent is already running, the delegation is
 replayed at that run's completion under the same authority, so it is never lost.
 
+Editing or deleting input cancels active runs that contain that comment and
+re-evaluates surviving inputs. These cancelled runs expose
+`cancelled_by_comment_change: true` in task responses. Unstarted runs without
+replies remain in execution history but do not create cancelled comment blocks;
+manual cancellations and runs that already executed remain visible.
+
+Deleting removes only that comment, never its replies. A deleted comment that
+still has replies stays in `comment list` output as a placeholder — `deleted_at`
+set, `content` empty, no attachments — so the replies keep their `parent_id`.
+It carries no input: it never triggers a run, and there is nothing in it to
+answer. It can still be the `--parent` of a reply that continues its thread.
+Against a server that predates this, `comment delete` refuses instead of
+deleting the replies too.
+
 An edit is treated as a fresh action — it re-derives the comment's lineage from
 the editing action. Only the agent author editing its OWN comment re-stamps the
 lineage to the editing task; any other editor — including a workspace owner/admin
@@ -194,6 +232,51 @@ editing an agent's comment — CLEARS it. So editing an old autopilot comment fr
 an unrelated issue, or an admin editing an agent's comment (manage rights, not
 invoke rights), fails closed at the deferred completion-reconcile instead of
 reusing the original run's authority.
+
+## Steering another agent's running turn
+
+A comment to an agent that is already running reaches it only after that run
+ends. You can put the comment into the run instead:
+
+```bash
+multica issue comment add <issue-id> --parent <your trigger comment> \
+  --content-file ./note.md --steer <run-id>
+multica issue comment add <issue-id> --parent <your trigger comment> \
+  --content-file ./note.md --steer-active
+```
+
+`--steer` takes a run id from `multica issue runs <issue-id> --active`
+(repeatable; short prefixes resolve on this issue). `--steer-active` steers
+every running run on the issue that reports `can_supplement: true` for you,
+plus any other recipient of the comment that is running when it is posted. The
+CLI mentions each steered agent in the comment.
+
+Steer when the other agent is mid-task and your input changes what it is doing
+now: a correction, a missing fact, a narrower scope. Delegate new work, and
+reply to finished work, the normal way.
+
+Rules:
+
+- you can steer an agent exactly when your mention could start it (same
+  invoke check, judged on the human who started your chain);
+- never your own run;
+- at most 3 of your messages per run, and 10 from all agents; past that the
+  comment takes its normal trigger;
+- only runs that are running now and accept additional messages
+  (`can_supplement: true` in `multica issue runs <issue-id> --active --output json`);
+- no attachments. The CLI refuses `--steer` with `--attachment`.
+- a CLI that answers `unknown flag: --steer` predates steering: post the
+  comment without the flag.
+
+The CLI prints one line per run on stderr. `Steered run …` means the comment
+was added to the running turn. If that turn ends before reading it, the comment
+is handled in a follow-up run, so do not re-post it. `queued`, `coalesced`,
+`deferred` or `blocked` means the comment went through the normal mention path.
+
+The other agent sees your message labelled as coming from an agent, not a
+human. A run on an older daemon, which cannot show that label, does not read it
+mid-run; it gets the comment in a follow-up run instead. It cannot cancel or replace that agent's objective or override a human's
+instructions, so write it as input, not as a command.
 
 ## Incorrect to correct
 

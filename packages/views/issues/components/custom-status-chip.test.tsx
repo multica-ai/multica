@@ -21,7 +21,7 @@ function entry(overrides: Partial<IssueStatusEntry>): IssueStatusEntry {
     key: "custom",
     name: "Custom",
     description: "",
-    category: "in_review",
+    category: "started",
     color: "#ff0000",
     is_system: false,
     position: 1,
@@ -36,7 +36,7 @@ const IN_REVIEW_BUILT_IN = entry({
   id: "in_review",
   key: "in_review",
   name: "In Review",
-  category: "in_review",
+  category: "started",
   is_system: true,
   position: 0,
 });
@@ -51,11 +51,11 @@ describe("CustomStatusChip", () => {
     expect(container).toBeEmptyDOMElement();
   });
 
-  // Board columns and list sections are categories, so this chip is the only
+  // On boards grouped by project or assignee, this chip is the only
   // thing distinguishing two statuses that share one column.
-  it("names a custom status", () => {
-    catalogEntries = [IN_REVIEW_BUILT_IN, entry({ key: "qa", name: "QA Review" })];
-    render(<CustomStatusChip status="qa" />);
+  it.each(["qa", "started"])("names a custom status even if its key resembles a category: %s", (key) => {
+    catalogEntries = [IN_REVIEW_BUILT_IN, entry({ key, name: "QA Review" })];
+    render(<CustomStatusChip status={key} />);
     expect(screen.getByText("QA Review")).toBeInTheDocument();
   });
 

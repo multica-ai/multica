@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { ChevronRight, ExternalLink, RefreshCw, Trash2 } from "lucide-react";
+import { ChevronRight, ExternalLink, RefreshCw, Trash2 } from "@multica/ui/icons";
 // Named import, NOT default: react-qr-code is CJS, and electron-vite's
 // dep-optimizer default-import interop handed back the module namespace
 // object instead of the component, throwing "Element type is invalid …
@@ -41,7 +41,9 @@ import { larkInstallationsOptions, larkKeys } from "@multica/core/lark";
 import { api, ApiError } from "@multica/core/api";
 import type { LarkInstallation, LarkInstallStatusResponse } from "@multica/core/types";
 import { ActorAvatar } from "../../common/actor-avatar";
+import { docsLocalePrefix } from "../../common/docs-locale";
 import { useLocale, useT } from "../../i18n";
+import { TooltipHint } from "@multica/ui/components/common/tooltip-hint";
 
 // MUL-3083: the Lark (international, open.larksuite.com) "connect a Bot"
 // entry is temporarily hidden while its install → inbound pipeline is
@@ -113,7 +115,7 @@ export function LarkTab() {
             <p className="text-body font-medium">{t(($) => $.lark.not_enabled_title)}</p>
             <p className="text-caption text-muted-foreground">
               {t(($) => $.lark.not_enabled_description_prefix)}{" "}
-              <code className="rounded bg-muted px-1 py-0.5 text-micro">
+              <code className="rounded-xs bg-muted px-1 py-0.5 text-micro">
                 MULTICA_LARK_SECRET_KEY
               </code>{" "}
               {t(($) => $.lark.not_enabled_description_suffix)}{" "}
@@ -125,7 +127,7 @@ export function LarkTab() {
         // Device-flow install path is not wired (HTTP client is the stub
         // or RegistrationService didn't initialize). We deliberately do
         // NOT direct users to the agent-detail "Bind" button because the
-        // backend would 503 anyway. Existing installations still render
+        // backend would reject it anyway. Existing installations still render
         // via the branch below; this only hides the empty-state CTA
         // when there is nothing to manage.
         <Card>
@@ -237,13 +239,13 @@ function InstallationRow({
         <div className="space-y-1">
           <p className="text-body font-medium">
             {agentName}
-            <span className="ml-2 rounded bg-muted px-1.5 py-0.5 text-micro text-muted-foreground">
+            <span className="ml-2 rounded-xs bg-muted px-1.5 py-0.5 text-micro text-muted-foreground">
               {installation.region === "lark"
                 ? t(($) => $.lark.region_lark)
                 : t(($) => $.lark.region_feishu)}
             </span>
             {!isActive && (
-              <span className="ml-2 rounded bg-muted px-1.5 py-0.5 text-micro text-muted-foreground">
+              <span className="ml-2 rounded-xs bg-muted px-1.5 py-0.5 text-micro text-muted-foreground">
                 {t(($) => $.lark.revoked_badge)}
               </span>
             )}
@@ -393,40 +395,46 @@ export function LarkAgentBindButton({
         className={cn("flex flex-wrap items-center gap-2", className)}
         data-testid="lark-agent-bind-buttons"
       >
-        <Button
-          variant="outline"
-          size="sm"
-          onClick={() => setDialogRegion("feishu")}
-          disabled={!agentId}
-          title={
+        <TooltipHint
+          label={
             agentName
               ? t(($) => $.lark.bind_button_feishu_title, { agent: agentName })
               : undefined
           }
-          data-testid="lark-agent-bind-feishu"
         >
-          <ExternalLink className="h-3 w-3" />
-          {t(($) => $.lark.bind_button_feishu)}
-        </Button>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => setDialogRegion("feishu")}
+            disabled={!agentId}
+            data-testid="lark-agent-bind-feishu"
+          >
+            <ExternalLink className="h-3 w-3" />
+            {t(($) => $.lark.bind_button_feishu)}
+          </Button>
+        </TooltipHint>
         {/* MUL-3083: Lark (international) bind entry is temporarily hidden —
             see LARK_INTL_CONNECT_ENABLED. Mainland Feishu (above) is
             unaffected. */}
         {LARK_INTL_CONNECT_ENABLED && (
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={() => setDialogRegion("lark")}
-            disabled={!agentId}
-            title={
+          <TooltipHint
+            label={
               agentName
                 ? t(($) => $.lark.bind_button_lark_title, { agent: agentName })
                 : undefined
             }
-            data-testid="lark-agent-bind-lark"
           >
-            <ExternalLink className="h-3 w-3" />
-            {t(($) => $.lark.bind_button_lark)}
-          </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => setDialogRegion("lark")}
+              disabled={!agentId}
+              data-testid="lark-agent-bind-lark"
+            >
+              <ExternalLink className="h-3 w-3" />
+              {t(($) => $.lark.bind_button_lark)}
+            </Button>
+          </TooltipHint>
         )}
       </div>
       {dialogRegion && (
@@ -469,7 +477,7 @@ function LarkAgentBotStatusRow({
       data-testid="lark-agent-bot-status"
     >
       <span className="inline-block h-1.5 w-1.5 shrink-0 rounded-full bg-emerald-500" />
-      <span className="rounded bg-muted px-1.5 py-0.5 text-micro text-muted-foreground">
+      <span className="rounded-xs bg-muted px-1.5 py-0.5 text-micro text-muted-foreground">
         {installation.region === "lark"
           ? t(($) => $.lark.region_lark)
           : t(($) => $.lark.region_feishu)}
@@ -507,6 +515,12 @@ function larkDevConsoleHost(region?: string): string {
     : "https://open.feishu.cn";
 }
 
+// larkDocsUrl points at the Lark/Feishu integration guide, localized the
+// same way as the Telegram and Slack docs links.
+function larkDocsUrl(lang: string | undefined): string {
+  return `https://multica.ai/docs${docsLocalePrefix(lang)}/lark-bot-integration`;
+}
+
 function LarkAgentBotConnectedBadge({
   installation,
   className,
@@ -514,7 +528,7 @@ function LarkAgentBotConnectedBadge({
   installation: LarkInstallation;
   className?: string;
 }) {
-  const { t } = useT("settings");
+  const { t, i18n } = useT("settings");
   const wsId = useWorkspaceId();
   const qc = useQueryClient();
   const manageHref = `${larkDevConsoleHost(installation.region)}/app/${encodeURIComponent(installation.app_id)}`;
@@ -560,27 +574,28 @@ function LarkAgentBotConnectedBadge({
       <div className="flex items-center justify-between gap-3">
         <span className="inline-flex min-w-0 items-center gap-2 text-caption text-muted-foreground">
           <span className="inline-block h-1.5 w-1.5 shrink-0 rounded-full bg-emerald-500" />
-          <span className="rounded bg-muted px-1.5 py-0.5 text-micro text-muted-foreground">
+          <span className="rounded-xs bg-muted px-1.5 py-0.5 text-micro text-muted-foreground">
             {installation.region === "lark"
               ? t(($) => $.lark.region_lark)
               : t(($) => $.lark.region_feishu)}
           </span>
           <span className="truncate">{t(($) => $.lark.agent_bot_connected_label)}</span>
         </span>
-        <Button
-          variant="destructive"
-          size="sm"
-          onClick={() => setConfirmOpen(true)}
-          disabled={disconnecting}
-          title={t(($) => $.lark.agent_bot_disconnect_tooltip)}
-          aria-label={t(($) => $.lark.disconnect)}
-          data-testid="lark-agent-bot-disconnect"
-        >
-          <Trash2 className="h-3 w-3" />
-          {disconnecting
-            ? t(($) => $.lark.disconnecting)
-            : t(($) => $.lark.disconnect)}
-        </Button>
+        <TooltipHint label={t(($) => $.lark.agent_bot_disconnect_tooltip)}>
+          <Button
+            variant="destructive"
+            size="sm"
+            onClick={() => setConfirmOpen(true)}
+            disabled={disconnecting}
+            aria-label={t(($) => $.lark.disconnect)}
+            data-testid="lark-agent-bot-disconnect"
+          >
+            <Trash2 className="h-3 w-3" />
+            {disconnecting
+              ? t(($) => $.lark.disconnecting)
+              : t(($) => $.lark.disconnect)}
+          </Button>
+        </TooltipHint>
       </div>
 
       {/* Row 2: secondary "Manage in Lark" link to the Bot's dev-console
@@ -603,6 +618,23 @@ function LarkAgentBotConnectedBadge({
           ? t(($) => $.lark.agent_bot_manage_link_lark)
           : t(($) => $.lark.agent_bot_manage_link_feishu)}
       </a>
+
+      {/* Row 3: the check a silent Bot almost always needs (#8496). An app
+          whose events go to a request URL instead of the long connection
+          binds fine and shows exactly this badge while receiving nothing,
+          and this row is where someone looks when the Bot stays quiet —
+          the install dialog closes itself a beat after success. */}
+      <p className="text-caption text-muted-foreground">
+        {t(($) => $.lark.agent_bot_silent_hint)}{" "}
+        <a
+          href={larkDocsUrl(i18n.language)}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="underline underline-offset-2 transition-colors hover:text-foreground"
+        >
+          {t(($) => $.lark.agent_bot_silent_hint_link)}
+        </a>
+      </p>
 
       <AlertDialog
         open={confirmOpen}
@@ -857,11 +889,6 @@ function LarkInstallDialog({
                   network image dependency, prints at any DPI. */}
                 <QRCode value={session.qrCodeURL} size={192} />
               </div>
-              <p className="text-center text-caption text-muted-foreground">
-                {region === "lark"
-                  ? t(($) => $.lark.install_scan_hint_lark)
-                  : t(($) => $.lark.install_scan_hint_feishu)}
-              </p>
               <a
                 href={session.qrCodeURL}
                 target="_blank"

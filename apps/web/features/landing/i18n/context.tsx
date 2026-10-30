@@ -11,26 +11,8 @@ import {
 import { useRouter } from "next/navigation";
 import { useConfigStore } from "@multica/core/config";
 import { createBrowserCookieLocaleAdapter } from "@multica/core/i18n/browser";
-import { createEnDict } from "./en";
-import { createJaDict } from "./ja";
-import { createKoDict } from "./ko";
-import { createZhDict } from "./zh";
-import {
-  toLandingDictionaryLocale,
-  type LandingDict,
-  type LandingDictionaryLocale,
-  type Locale,
-} from "./types";
-
-const dictionaryFactories: Record<
-  LandingDictionaryLocale,
-  (allowSignup: boolean) => LandingDict
-> = {
-  en: createEnDict,
-  ja: createJaDict,
-  ko: createKoDict,
-  zh: createZhDict,
-};
+import { createLandingDict } from "./dictionary";
+import type { LandingDict, Locale } from "./types";
 
 type LocaleContextValue = {
   locale: Locale;
@@ -53,7 +35,7 @@ export function LocaleProvider({
   const localeAdapter = useMemo(() => createBrowserCookieLocaleAdapter(), []);
   const allowSignup = useConfigStore((state) => state.allowSignup);
   const t = useMemo(
-    () => dictionaryFactories[toLandingDictionaryLocale(locale)](allowSignup),
+    () => createLandingDict(locale, allowSignup),
     [allowSignup, locale],
   );
 

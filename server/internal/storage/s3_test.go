@@ -1,16 +1,20 @@
 package storage
 
 import (
+	"bytes"
+	"compress/gzip"
 	"context"
 	"io"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
+	"github.com/aws/aws-sdk-go-v2/aws/retry"
 	"github.com/aws/aws-sdk-go-v2/credentials"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
 )
@@ -610,4 +614,255 @@ func TestS3StorageUploadedURL(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestIsGCSEndpoint(t *testing.T) {
+	for _, tc := range []struct {
+		endpoint string
+		want     bool
+	}{
+		{"https://storage.googleapis.com", true},
+		{"https://bucket.storage.googleapis.com", true},
+		{"https://STORAGE.GOOGLEAPIS.COM:443", true},
+		{"https://storage.googleapis.com.", true},
+		{"", false},
+		{"https://s3.us-east-1.amazonaws.com", false},
+		{"https://minio.example.com", false},
+		{"https://storage.googleapis.com.attacker.example", false},
+		{"https://notstorage.googleapis.com", false},
+		{"https://example.com/storage.googleapis.com", false},
+		{"https://example.com?endpoint=storage.googleapis.com", false},
+	} {
+		t.Run(tc.endpoint, func(t *testing.T) {
+			if got := isGCSEndpoint(tc.endpoint); got != tc.want {
+				t.Fatalf("isGCSEndpoint(%q) = %v, want %v", tc.endpoint, got, tc.want)
+			}
+		})
+	}
+}
+
+// Keep the constructor's API options, but route requests to a local TLS server.
+// Replacing HTTPClient also verifies that signing does not depend on a client wrapper.
+func newS3SigningTestStore(t *testing.T, server *httptest.Server, endpoint string) *S3Storage {
+	t.Helper()
+	t.Setenv("S3_BUCKET", "test-bucket")
+	t.Setenv("S3_REGION", "us-east-1")
+	t.Setenv("AWS_ACCESS_KEY_ID", "AKID")
+	t.Setenv("AWS_SECRET_ACCESS_KEY", "SECRET")
+	t.Setenv("AWS_ENDPOINT_URL", endpoint)
+	t.Setenv("S3_USE_PATH_STYLE", "true")
+	store := NewS3StorageFromEnv()
+	if store == nil {
+		t.Fatal("NewS3StorageFromEnv() = nil")
+	}
+	opts := store.client.Options()
+	opts.BaseEndpoint = aws.String(server.URL)
+	opts.HTTPClient = server.Client()
+	opts.Retryer = retry.NewStandard(func(o *retry.StandardOptions) {
+		o.MaxAttempts = 2
+		o.MaxBackoff = time.Millisecond
+	})
+	store.client = s3.New(opts)
+	return store
+}
+
+func TestS3StorageGCSRequestSigning(t *testing.T) {
+	payload := []byte("attachment contents")
+	var compressed bytes.Buffer
+	zw := gzip.NewWriter(&compressed)
+	if _, err := zw.Write(payload); err != nil {
+		t.Fatal(err)
+	}
+	if err := zw.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	for _, tc := range []struct {
+		name     string
+		endpoint string
+		unsigned bool
+	}{
+		{"GCS", "https://storage.googleapis.com", true},
+		{"AWS", "", false},
+		{"MinIO", "https://minio.example.com", false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			type observedRequest struct {
+				header http.Header
+				body   []byte
+			}
+			observed := make(chan observedRequest, 1)
+			server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				body, err := io.ReadAll(r.Body)
+				if err != nil {
+					t.Errorf("read request body: %v", err)
+				}
+				observed <- observedRequest{header: r.Header.Clone(), body: body}
+				if r.Method == http.MethodGet {
+					w.Header().Set("Content-Encoding", "gzip")
+					_, _ = w.Write(compressed.Bytes())
+				} else if r.Method == http.MethodDelete {
+					w.WriteHeader(http.StatusNoContent)
+				}
+			}))
+			t.Cleanup(server.Close)
+			store := newS3SigningTestStore(t, server, tc.endpoint)
+
+			for _, operation := range []struct {
+				name string
+				run  func(*testing.T)
+			}{
+				{"upload", func(t *testing.T) {
+					if _, err := store.Upload(context.Background(), "file", payload, "application/octet-stream", "file"); err != nil {
+						t.Fatal(err)
+					}
+				}},
+				{"streaming upload", func(t *testing.T) {
+					stream := io.LimitReader(bytes.NewReader(payload), int64(len(payload)))
+					if _, err := store.UploadStream(context.Background(), "file", stream, int64(len(payload)), "application/octet-stream", "file"); err != nil {
+						t.Fatal(err)
+					}
+				}},
+				{"download", func(t *testing.T) {
+					reader, err := store.GetReader(context.Background(), "file")
+					if err != nil {
+						t.Fatal(err)
+					}
+					defer reader.Close()
+					got, err := io.ReadAll(reader)
+					if err != nil {
+						t.Fatal(err)
+					}
+					if !bytes.Equal(got, compressed.Bytes()) {
+						t.Fatal("download changed gzip-encoded object bytes")
+					}
+				}},
+				{"delete", func(t *testing.T) {
+					if err := store.DeleteObject(context.Background(), "file"); err != nil {
+						t.Fatal(err)
+					}
+				}},
+			} {
+				if !t.Run(operation.name, func(t *testing.T) {
+					operation.run(t)
+					got := <-observed
+					auth := got.header.Get("Authorization")
+					if auth == "" || !strings.Contains(auth, "x-amz-date") || !strings.Contains(auth, "x-amz-content-sha256") {
+						t.Fatalf("required headers are not signed: %s", auth)
+					}
+					if signed := strings.Contains(auth, "accept-encoding"); signed == tc.unsigned {
+						t.Fatalf("accept-encoding signed = %v, want %v", signed, !tc.unsigned)
+					}
+					if encoding := got.header.Get("Accept-Encoding"); encoding != "identity" {
+						t.Fatalf("Accept-Encoding = %q, want identity", encoding)
+					}
+					if operation.name == "upload" || operation.name == "streaming upload" {
+						if !strings.Contains(auth, "content-type") {
+							t.Fatalf("content-type is not signed: %s", auth)
+						}
+						if tc.unsigned && !bytes.Equal(got.body, payload) {
+							t.Fatal("GCS upload changed object bytes")
+						}
+					}
+				}) {
+					break
+				}
+			}
+		})
+	}
+}
+
+func TestS3StorageGCSOnlyExcludesAcceptEncoding(t *testing.T) {
+	t.Setenv("S3_UNSIGNED_HEADERS", "content-type,x-amz-content-sha256")
+	observed := make(chan string, 1)
+	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = io.Copy(io.Discard, r.Body)
+		observed <- r.Header.Get("Authorization")
+	}))
+	t.Cleanup(server.Close)
+	store := newS3SigningTestStore(t, server, "https://storage.googleapis.com")
+	if _, err := store.Upload(context.Background(), "file", []byte("payload"), "text/plain", "file.txt"); err != nil {
+		t.Fatal(err)
+	}
+	auth := <-observed
+	for _, header := range []string{"content-type", "x-amz-content-sha256"} {
+		if !strings.Contains(auth, header) {
+			t.Errorf("environment variable removed %s from signature: %s", header, auth)
+		}
+	}
+}
+
+func TestS3StorageGCSPresign(t *testing.T) {
+	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		t.Error("presigning must not send an HTTP request")
+	}))
+	t.Cleanup(server.Close)
+	store := newS3SigningTestStore(t, server, "https://storage.googleapis.com")
+	signedURL, err := store.PresignGet(context.Background(), "file", 5*time.Minute)
+	if err != nil {
+		t.Fatal(err)
+	}
+	u, err := url.Parse(signedURL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := u.Query().Get("X-Amz-SignedHeaders"); got != "host" {
+		t.Fatalf("X-Amz-SignedHeaders = %q, want host", got)
+	}
+	if u.Query().Get("X-Amz-Signature") == "" {
+		t.Fatal("missing presigned signature")
+	}
+}
+
+func TestS3StorageGCSRetries(t *testing.T) {
+	observed := make(chan http.Header, 2)
+	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = io.Copy(io.Discard, r.Body)
+		observed <- r.Header.Clone()
+		if len(observed) == 1 {
+			w.WriteHeader(http.StatusInternalServerError)
+		}
+	}))
+	t.Cleanup(server.Close)
+	store := newS3SigningTestStore(t, server, "https://storage.googleapis.com")
+	if _, err := store.Upload(context.Background(), "file", []byte("payload"), "text/plain", "file.txt"); err != nil {
+		t.Fatal(err)
+	}
+	if got := len(observed); got != 2 {
+		t.Fatalf("attempts = %d, want 2", got)
+	}
+	for range 2 {
+		header := <-observed
+		if auth := header.Get("Authorization"); auth == "" || strings.Contains(auth, "accept-encoding") {
+			t.Fatalf("invalid retry signature: %s", auth)
+		}
+		if got := header.Get("Accept-Encoding"); got != "identity" {
+			t.Fatalf("Accept-Encoding = %q, want identity", got)
+		}
+	}
+}
+
+func TestS3StorageGCSConcurrentRequests(t *testing.T) {
+	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if got := r.Header.Get("Accept-Encoding"); got != "identity" {
+			t.Errorf("Accept-Encoding = %q, want identity", got)
+		}
+		if auth := r.Header.Get("Authorization"); auth == "" || strings.Contains(auth, "accept-encoding") {
+			t.Errorf("invalid concurrent request signature: %s", auth)
+		}
+	}))
+	t.Cleanup(server.Close)
+	store := newS3SigningTestStore(t, server, "https://storage.googleapis.com")
+	var wg sync.WaitGroup
+	for range 8 {
+		wg.Go(func() {
+			reader, err := store.GetReader(context.Background(), "file")
+			if err != nil {
+				t.Error(err)
+				return
+			}
+			_ = reader.Close()
+		})
+	}
+	wg.Wait()
 }

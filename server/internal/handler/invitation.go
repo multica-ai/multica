@@ -2,6 +2,7 @@ package handler
 
 import (
 	"encoding/json"
+	"errors"
 	"log/slog"
 	"net/http"
 	"strings"
@@ -9,6 +10,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/multica-ai/multica/server/internal/analytics"
 	"github.com/multica-ai/multica/server/internal/logger"
@@ -51,10 +53,8 @@ func invitationToResponse(inv db.WorkspaceInvitation) InvitationResponse {
 	}
 }
 
-// ---------------------------------------------------------------------------
 // CreateInvitation replaces the old "instant-add" CreateMember flow.
 // POST /api/workspaces/{id}/members  (same endpoint, new behaviour)
-// ---------------------------------------------------------------------------
 
 func (h *Handler) CreateInvitation(w http.ResponseWriter, r *http.Request) {
 	workspaceID := workspaceIDFromURL(r, "id")
@@ -246,10 +246,8 @@ func (h *Handler) CreateInvitation(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusCreated, resp)
 }
 
-// ---------------------------------------------------------------------------
 // ListWorkspaceInvitations — pending invitations for a workspace (admin view).
 // GET /api/workspaces/{id}/invitations
-// ---------------------------------------------------------------------------
 
 func (h *Handler) ListWorkspaceInvitations(w http.ResponseWriter, r *http.Request) {
 	workspaceID := workspaceIDFromURL(r, "id")
@@ -285,10 +283,8 @@ func (h *Handler) ListWorkspaceInvitations(w http.ResponseWriter, r *http.Reques
 	writeJSON(w, http.StatusOK, resp)
 }
 
-// ---------------------------------------------------------------------------
 // RevokeInvitation — admin cancels a pending invitation.
 // DELETE /api/workspaces/{id}/invitations/{invitationId}
-// ---------------------------------------------------------------------------
 
 func (h *Handler) RevokeInvitation(w http.ResponseWriter, r *http.Request) {
 	workspaceID := workspaceIDFromURL(r, "id")
@@ -350,10 +346,8 @@ func (h *Handler) RevokeInvitation(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
-// ---------------------------------------------------------------------------
 // GetMyInvitation — get a single invitation by ID (for the invite accept page).
 // GET /api/invitations/{id}
-// ---------------------------------------------------------------------------
 
 func (h *Handler) GetMyInvitation(w http.ResponseWriter, r *http.Request) {
 	userID, ok := requireUserID(w, r)
@@ -397,10 +391,8 @@ func (h *Handler) GetMyInvitation(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, resp)
 }
 
-// ---------------------------------------------------------------------------
 // ListMyInvitations — current user's pending invitations across all workspaces.
 // GET /api/invitations
-// ---------------------------------------------------------------------------
 
 func (h *Handler) ListMyInvitations(w http.ResponseWriter, r *http.Request) {
 	userID, ok := requireUserID(w, r)
@@ -445,10 +437,8 @@ func (h *Handler) ListMyInvitations(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, resp)
 }
 
-// ---------------------------------------------------------------------------
 // AcceptInvitation — user accepts a pending invitation.
 // POST /api/invitations/{id}/accept
-// ---------------------------------------------------------------------------
 
 func (h *Handler) AcceptInvitation(w http.ResponseWriter, r *http.Request) {
 	userID, ok := requireUserID(w, r)
@@ -479,6 +469,34 @@ func (h *Handler) AcceptInvitation(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if inv.Status != "pending" {
+		// Installed clients can hold a stale pending-invitation row for an
+		// invitation that was already concluded from another surface (the
+		// web invite page, another device). A 400 here leaves that row
+		// stuck: the sidebar swallows the error and keeps showing the row
+		// until restart. Re-accepting is idempotent while the membership
+		// from the first accept still exists — return it so the client's
+		// refetch drops the row. A membership that no longer exists (the
+		// user left the workspace afterwards) still fails: leaving was
+		// explicit and must not be undone by a stale client retry.
+		if inv.Status == "accepted" {
+			member, memberErr := h.Queries.GetMemberByUserAndWorkspace(r.Context(), db.GetMemberByUserAndWorkspaceParams{
+				UserID:      user.ID,
+				WorkspaceID: inv.WorkspaceID,
+			})
+			switch {
+			case memberErr == nil:
+				writeJSON(w, http.StatusOK, h.memberWithUserResponse(member, user))
+				return
+			case errors.Is(memberErr, pgx.ErrNoRows):
+				// The membership from the first accept is gone; fall through
+				// to the 400 below.
+			default:
+				// A transient read failure must surface as 500, not collapse
+				// into the business 400 that clients swallow silently.
+				writeError(w, http.StatusInternalServerError, "failed to load membership")
+				return
+			}
+		}
 		writeError(w, http.StatusBadRequest, "invitation is not pending")
 		return
 	}
@@ -602,10 +620,8 @@ func (h *Handler) AcceptInvitation(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, memberResp)
 }
 
-// ---------------------------------------------------------------------------
 // DeclineInvitation — user declines a pending invitation.
 // POST /api/invitations/{id}/decline
-// ---------------------------------------------------------------------------
 
 func (h *Handler) DeclineInvitation(w http.ResponseWriter, r *http.Request) {
 	userID, ok := requireUserID(w, r)
@@ -636,7 +652,12 @@ func (h *Handler) DeclineInvitation(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if inv.Status != "pending" {
-		writeError(w, http.StatusBadRequest, "invitation is not pending")
+		// Declining a concluded invitation is a no-op: it was already
+		// accepted, declined, revoked or expired from another surface, and
+		// this invitation is over either way. A stale client holding the
+		// pending row only needs its refetch to drop it, so acknowledge
+		// with 204 instead of a 400 it would swallow silently.
+		w.WriteHeader(http.StatusNoContent)
 		return
 	}
 

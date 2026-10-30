@@ -1,7 +1,13 @@
 // @vitest-environment node
 import { describe, expect, it, beforeEach } from "vitest";
 import { createStore, type StoreApi } from "zustand/vanilla";
-import { viewStoreSlice, type IssueViewState } from "./view-store";
+import {
+  cardPropertyOptionsForView,
+  sortOptionsForView,
+  viewStoreSlice,
+  mergeViewStatePersisted,
+  type IssueViewState,
+} from "./view-store";
 import { baselineFromQuery } from "../../issue-views/baseline";
 
 /**
@@ -17,11 +23,14 @@ describe("column visibility vs status filter", () => {
 
   // The regression: hiding one column wrote the OTHER six built-in keys into
   // statusFilters, so the query then excluded every custom status too — hiding
-  // Backlog silently dropped a QA card sitting in the In Review column.
+  // Backlog silently dropped a QA card too.
   it("hiding a column does not touch the status filter", () => {
     store.getState().hideStatus("backlog");
 
-    expect(store.getState().hiddenStatusCategories).toEqual(["backlog"]);
+    expect(store.getState().hiddenStatuses).toEqual([
+      "cancelled",
+      "backlog",
+    ]);
     expect(store.getState().statusFilters).toEqual([]);
   });
 
@@ -30,7 +39,10 @@ describe("column visibility vs status filter", () => {
     store.getState().hideStatus("done");
     store.getState().showStatus("backlog");
 
-    expect(store.getState().hiddenStatusCategories).toEqual(["done"]);
+    expect(store.getState().hiddenStatuses).toEqual([
+      "cancelled",
+      "done",
+    ]);
     expect(store.getState().statusFilters).toEqual([]);
   });
 
@@ -38,7 +50,10 @@ describe("column visibility vs status filter", () => {
     store.getState().hideStatus("backlog");
     store.getState().hideStatus("backlog");
 
-    expect(store.getState().hiddenStatusCategories).toEqual(["backlog"]);
+    expect(store.getState().hiddenStatuses).toEqual([
+      "cancelled",
+      "backlog",
+    ]);
   });
 
   it("a custom status filter survives hiding and showing a column", () => {
@@ -49,11 +64,107 @@ describe("column visibility vs status filter", () => {
     expect(store.getState().statusFilters).toEqual(["qa"]);
   });
 
-  it("reset restores every column", () => {
+  it("clearing filters preserves column visibility", () => {
     store.getState().hideStatus("backlog");
+    store.getState().showStatus("cancelled");
     store.getState().clearFilters();
 
-    expect(store.getState().hiddenStatusCategories).toEqual([]);
+    expect(store.getState().hiddenStatuses).toEqual(["backlog"]);
+  });
+});
+
+describe("persisted lifecycle category upgrade", () => {
+  const defaults = createStore<IssueViewState>()((set) => viewStoreSlice(set)).getState();
+  it("normalizes legacy hidden/collapsed categories without changing exact status filters", () => {
+    const state = mergeViewStatePersisted({
+      hiddenStatusCategories: ["backlog", "todo", "in_progress", "in_review", "blocked", "cancelled"],
+      listCollapsedStatuses: ["completed", "canceled"],
+      statusFilters: ["in_review", "awaiting_response"],
+    }, defaults);
+    expect(state.hiddenStatuses).toEqual(["backlog", "todo", "in_progress", "in_review", "blocked", "cancelled"]);
+    expect(state.listCollapsedStatuses).toEqual(["done", "cancelled"]);
+    expect(state.statusFilters).toEqual(["in_review", "awaiting_response"]);
+  });
+  it("keeps independent visibility for old concrete columns", () => {
+    const state = mergeViewStatePersisted({ hiddenStatuses: ["backlog", "in_review"] }, defaults);
+    expect(state.hiddenStatuses).toEqual(["backlog", "in_review"]);
+  });
+  it("preserves exact custom keys even if they resemble category names", () => {
+    const state = mergeViewStatePersisted({ hiddenStatuses: ["started"], listCollapsedStatuses: [] }, defaults);
+    expect(state.hiddenStatuses).toEqual(["started"]);
+    expect(state.listCollapsedStatuses).toEqual([]);
+  });
+});
+
+describe("issue view defaults", () => {
+  let store: StoreApi<IssueViewState>;
+  beforeEach(() => {
+    store = createStore<IssueViewState>()((set) => viewStoreSlice(set));
+  });
+
+  it("starts with newest-created issues first and a compact card", () => {
+    const state = store.getState();
+
+    expect([state.sortBy, state.sortDirection]).toEqual(["created_at", "desc"]);
+    expect(state.cardProperties).toEqual({
+      priority: true,
+      description: false,
+      assignee: true,
+      startDate: false,
+      dueDate: true,
+      project: true,
+      childProgress: true,
+      labels: false,
+    });
+  });
+
+  it("uses the semantic default direction when changing sort fields", () => {
+    store.getState().setSortBy("updated_at");
+    expect(store.getState().sortDirection).toBe("desc");
+
+    store.getState().setSortBy("priority");
+    expect(store.getState().sortDirection).toBe("asc");
+  });
+
+  it("remembers an explicit direction for each sort field", () => {
+    store.getState().setSortBy("priority");
+    store.getState().setSortDirection("desc");
+    store.getState().setSortBy("created_at");
+    store.getState().setSortBy("priority");
+
+    expect(store.getState().sortDirection).toBe("desc");
+  });
+
+  it("leaves manual order when the board stops grouping by status", () => {
+    store.getState().setSortBy("position");
+    store.getState().setGrouping("assignee");
+
+    expect(store.getState().sortBy).toBe("created_at");
+    expect(store.getState().sortDirection).toBe("desc");
+  });
+
+  it("cannot restore manual order through a list-view round trip", () => {
+    store.getState().setGrouping("assignee");
+    store.getState().setViewMode("list");
+    store.getState().setSortBy("position");
+    store.getState().setViewMode("board");
+
+    expect(store.getState().grouping).toBe("assignee");
+    expect(store.getState().sortBy).toBe("created_at");
+    expect(store.getState().sortDirection).toBe("desc");
+  });
+
+  it("only offers controls the active view can apply", () => {
+    expect(
+      cardPropertyOptionsForView("list").map((option) => option.key),
+    ).not.toContain("description");
+    expect(cardPropertyOptionsForView("gantt")).toEqual([]);
+    expect(
+      sortOptionsForView("board", "assignee").map((option) => option.value),
+    ).not.toContain("position");
+    expect(
+      sortOptionsForView("list", "assignee").map((option) => option.value),
+    ).not.toContain("position");
   });
 });
 

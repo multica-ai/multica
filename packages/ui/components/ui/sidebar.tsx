@@ -8,7 +8,7 @@ import { useTranslation } from "react-i18next"
 
 import { useIsCompact } from "@multica/ui/hooks/use-mobile"
 import { cn } from "@multica/ui/lib/utils"
-import { Button } from "@multica/ui/components/ui/button"
+import { IconButton } from "@multica/ui/components/common/icon-button"
 import { Input } from "@multica/ui/components/ui/input"
 import { Separator } from "@multica/ui/components/ui/separator"
 import {
@@ -24,7 +24,7 @@ import {
   TooltipContent,
   TooltipTrigger,
 } from "@multica/ui/components/ui/tooltip"
-import { PanelLeftIcon } from "lucide-react"
+import { PanelLeftIcon } from "@multica/ui/icons"
 
 const SIDEBAR_WIDTH_DEFAULT = 256
 const SIDEBAR_WIDTH_MIN = 200
@@ -33,10 +33,10 @@ const SIDEBAR_WIDTH_STORAGE_KEY = "sidebar_width"
 const SIDEBAR_WIDTH_MOBILE = "18rem"
 const SIDEBAR_WIDTH_ICON = "3rem"
 const SIDEBAR_DRAG_THRESHOLD = 2
-// Tailwind `lg`–`xl`: wide enough to keep a two-pane list/detail surface, too
-// narrow to also spend 256px on the nav. The nav starts collapsed here and the
-// header's trigger brings it back.
-const SIDEBAR_AUTO_COLLAPSE_QUERY = "(min-width: 1024px) and (max-width: 1279px)"
+// Tailwind `md`–`xl`: wide enough to keep a two-pane list/detail surface, too
+// narrow to also spend 256px on the nav by default. The nav starts collapsed
+// here and the header's trigger docks it back.
+const SIDEBAR_AUTO_COLLAPSE_QUERY = "(min-width: 768px) and (max-width: 1279px)"
 
 /**
  * Paints an element with whatever the sidebar wrapper is currently filled with.
@@ -66,8 +66,7 @@ type SidebarContextProps = {
   setOpenMobile: (open: boolean) => void
   /**
    * The sidebar is an overlay sheet rather than a column in the main flow.
-   * True below the compact breakpoint, which covers tablets and folded inner
-   * screens as well as phones, not phones alone.
+   * True below the compact breakpoint (`md`).
    */
   isCompact: boolean
   toggleSidebar: () => void
@@ -89,8 +88,9 @@ type SidebarResizeContextProps = {
 }
 
 const SidebarContext = React.createContext<SidebarContextProps | null>(null)
-// Width previews are written directly to the two layout shells during drag.
-// This context only exposes the one committed state transition on pointer-up.
+// Width previews are written directly to the layout shells and opt-in chrome
+// consumers during drag. This context only exposes the one committed state
+// transition on pointer-up.
 const SidebarResizeContext = React.createContext<SidebarResizeContextProps | null>(null)
 
 function useSidebar() {
@@ -165,7 +165,7 @@ function SidebarProvider({
   // because nothing ever read it, and restoring the pair would be a bug rather
   // than a feature: the auto-collapse below drives `setOpen(false)` from the
   // viewport, so persisting its result would carry a collapse the user never
-  // asked for out of the `lg`–`xl` band and into their next session on a wider
+  // asked for out of the `md`–`xl` band and into their next session on a wider
   // display. Persisting this needs a source that distinguishes a user toggle
   // from an automated one — not a cookie on this callback.
   const [_open, _setOpen] = React.useState(defaultOpen)
@@ -182,7 +182,7 @@ function SidebarProvider({
     [setOpenProp, open]
   )
 
-  // Auto-collapse across the `lg`–`xl` band. Only the two crossings are
+  // Auto-collapse across the `md`–`xl` band. Only the two crossings are
   // automated: entering it parks the state we came in with and closes the nav,
   // leaving it restores that state. Anything the user does in between — most
   // of all re-opening the nav — is left alone until the next crossing.
@@ -334,19 +334,26 @@ function Sidebar({
             <SheetTitle>Sidebar</SheetTitle>
             <SheetDescription>Displays the mobile sidebar.</SheetDescription>
           </SheetHeader>
-          <div className="flex h-full w-full flex-col">{children}</div>
+          {/*
+            On a short screen (phone landscape, a foldable's outer display) a
+            pinned header and footer leave the nav list only a few rows, so
+            the whole sheet scrolls as one column instead.
+          */}
+          <div className="flex h-full w-full flex-col [@media(max-height:640px)]:overflow-y-auto [@media(max-height:640px)]:[&>[data-slot=sidebar-content]]:flex-none">
+            {children}
+          </div>
         </SheetContent>
       </Sheet>
     )
   }
 
-  // `lg`, not `md`: this CSS gate has to agree with the `useIsCompact()` gate
-  // that chose the in-flow branch over the sheet above. While they disagreed,
+  // `md`: this CSS gate has to agree with the `useIsCompact()` gate that
+  // chose the in-flow branch over the sheet above. While they disagreed,
   // every load between the two breakpoints painted a 256px sidebar for one
   // frame before the hook resolved and collapsed it into a sheet.
   return (
     <div
-      className="group peer hidden text-sidebar-foreground lg:block"
+      className="group peer hidden text-sidebar-foreground md:block"
       data-state={state}
       data-collapsible={state === "collapsed" ? collapsible : ""}
       data-variant={variant}
@@ -369,7 +376,7 @@ function Sidebar({
         data-slot="sidebar-container"
         data-side={side}
         className={cn(
-          "fixed inset-y-0 z-10 hidden h-svh w-(--sidebar-width) transition-[left,right,width] duration-200 ease-out motion-reduce:transition-none lg:flex",
+          "fixed inset-y-0 z-10 hidden h-svh w-(--sidebar-width) transition-[left,right,width] duration-200 ease-out motion-reduce:transition-none md:flex",
           "data-[side=left]:left-0 data-[side=left]:group-data-[collapsible=offcanvas]:left-[calc(var(--sidebar-width)*-1)] data-[side=right]:right-0 data-[side=right]:group-data-[collapsible=offcanvas]:right-[calc(var(--sidebar-width)*-1)]",
           // Adjust the padding for floating and inset variants.
           variant === "floating" || variant === "inset"
@@ -394,17 +401,19 @@ function Sidebar({
 function SidebarTrigger({
   className,
   onClick,
+  shortcut,
   ...props
-}: React.ComponentProps<typeof Button>) {
+}: Omit<React.ComponentProps<typeof IconButton>, "label">) {
   const { toggleSidebar } = useSidebar()
   const { t } = useTranslation("ui")
 
   return (
-    <Button
+    <IconButton
       data-sidebar="trigger"
       data-slot="sidebar-trigger"
-      variant="ghost"
-      size="icon-sm"
+      label={t(($) => $.toggle_sidebar)}
+      shortcut={shortcut}
+      tooltipSide="bottom"
       className={cn(className)}
       onClick={(event) => {
         onClick?.(event)
@@ -413,8 +422,7 @@ function SidebarTrigger({
       {...props}
     >
       <PanelLeftIcon />
-      <span className="sr-only">{t(($) => $.toggle_sidebar)}</span>
-    </Button>
+    </IconButton>
   )
 }
 
@@ -433,6 +441,7 @@ function SidebarRail({ className, ...props }: React.ComponentProps<"button">) {
     wrapperEl: HTMLElement
     gapEl: HTMLElement
     containerEl: HTMLElement
+    liveWidthConsumers: HTMLElement[]
   } | null>(null)
   const cancelActiveDragRef = React.useRef<(() => void) | null>(null)
 
@@ -450,6 +459,9 @@ function SidebarRail({ className, ...props }: React.ComponentProps<"button">) {
       const gapEl = sidebarEl?.querySelector<HTMLElement>("[data-slot='sidebar-gap']")
       const containerEl = sidebarEl?.querySelector<HTMLElement>("[data-slot='sidebar-container']")
       if (!sidebarEl || !wrapperEl || !gapEl || !containerEl) return
+      const liveWidthConsumers = Array.from(
+        wrapperEl.querySelectorAll<HTMLElement>("[data-sidebar-resize-consumer]")
+      )
 
       const startWidth = clampSidebarWidth(containerEl.getBoundingClientRect().width)
       dragRef.current = {
@@ -461,6 +473,7 @@ function SidebarRail({ className, ...props }: React.ComponentProps<"button">) {
         wrapperEl,
         gapEl,
         containerEl,
+        liveWidthConsumers,
       }
 
       wrapperEl.setAttribute("data-sidebar-resizing", "true")
@@ -488,6 +501,9 @@ function SidebarRail({ className, ...props }: React.ComponentProps<"button">) {
           }
           drag.gapEl.style.removeProperty("width")
           drag.containerEl.style.removeProperty("width")
+          for (const consumer of drag.liveWidthConsumers) {
+            consumer.style.removeProperty("--sidebar-live-width")
+          }
           drag.wrapperEl.removeAttribute("data-sidebar-resizing")
         }
 
@@ -514,11 +530,15 @@ function SidebarRail({ className, ...props }: React.ComponentProps<"button">) {
         if (nextWidth === drag.latestWidth) return
 
         drag.latestWidth = nextWidth
-        // Only the two layout shells depend on the live width. Direct writes
-        // let the browser coalesce layout at paint time without a React commit
-        // or an inherited custom-property invalidation on the whole app tree.
+        // Direct writes let the browser coalesce layout at paint time without
+        // a React commit or an inherited custom-property invalidation on the
+        // whole app tree. Optional chrome consumers receive the same preview
+        // through a local custom property.
         drag.gapEl.style.width = `${nextWidth}px`
         drag.containerEl.style.width = `${nextWidth}px`
+        for (const consumer of drag.liveWidthConsumers) {
+          consumer.style.setProperty("--sidebar-live-width", `${nextWidth}px`)
+        }
       }
       const onPointerUp = (event: PointerEvent) => {
         if (event.pointerId === e.pointerId) finishDrag("commit")
@@ -573,7 +593,7 @@ function SidebarInset({ className, ...props }: React.ComponentProps<"main">) {
     <main
       data-slot="sidebar-inset"
       className={cn(
-        "relative flex w-full flex-1 flex-col bg-page-canvas lg:peer-data-[variant=inset]:m-2 lg:peer-data-[variant=inset]:ml-0 lg:peer-data-[variant=inset]:rounded-xl lg:peer-data-[variant=inset]:ring-1 lg:peer-data-[variant=inset]:ring-surface-border lg:peer-data-[variant=inset]:shadow-[var(--surface-shadow)] lg:peer-data-[variant=inset]:peer-data-[state=collapsed]:ml-2",
+        "relative flex w-full flex-1 flex-col bg-page-canvas md:peer-data-[variant=inset]:m-2 md:peer-data-[variant=inset]:ml-0 md:peer-data-[variant=inset]:rounded-xl md:peer-data-[variant=inset]:ring-1 md:peer-data-[variant=inset]:ring-surface-border md:peer-data-[variant=inset]:shadow-[var(--surface-shadow)] md:peer-data-[variant=inset]:peer-data-[state=collapsed]:ml-2",
         className
       )}
       {...props}
@@ -666,7 +686,7 @@ function SidebarGroupLabel({
     props: mergeProps<"div">(
       {
         className: cn(
-          "flex h-8 shrink-0 items-center rounded-md px-2 text-caption font-medium text-muted-foreground ring-sidebar-ring outline-hidden transition-[margin,opacity] duration-200 ease-linear group-data-[collapsible=icon]:-mt-8 group-data-[collapsible=icon]:opacity-0 focus-visible:ring-2 [&>svg]:size-4 [&>svg]:shrink-0",
+          "flex h-8 shrink-0 items-center rounded-md px-2 text-caption text-muted-foreground ring-sidebar-ring outline-hidden transition-[margin,opacity] duration-200 ease-linear group-data-[collapsible=icon]:-mt-8 group-data-[collapsible=icon]:opacity-0 focus-visible:ring-2 [&>svg]:size-4 [&>svg]:shrink-0",
           className
         ),
       },
@@ -741,7 +761,7 @@ function SidebarMenuItem({ className, ...props }: React.ComponentProps<"li">) {
 }
 
 const sidebarMenuButtonVariants = cva(
-  "peer/menu-button group/menu-button flex w-full items-center gap-2 overflow-hidden rounded-md p-2 text-left text-body ring-sidebar-ring outline-hidden transition-[width,height,padding] group-has-data-[sidebar=menu-action]/menu-item:pr-8 group-data-[collapsible=icon]:size-8! group-data-[collapsible=icon]:p-2! hover:bg-sidebar-accent hover:text-sidebar-accent-foreground focus-visible:ring-2 active:bg-sidebar-accent active:text-sidebar-accent-foreground disabled:pointer-events-none disabled:opacity-50 aria-disabled:pointer-events-none aria-disabled:opacity-50 data-open:hover:bg-sidebar-accent data-open:hover:text-sidebar-accent-foreground data-active:bg-sidebar-accent data-active:font-medium data-active:text-sidebar-accent-foreground data-active:hover:bg-sidebar-accent [&_svg]:size-4 [&_svg]:shrink-0 [&>span:last-child]:truncate",
+  "peer/menu-button group/menu-button flex w-full items-center gap-2 overflow-hidden rounded-md p-2 text-left text-body ring-sidebar-ring outline-hidden transition-[width,height,padding] group-has-data-[sidebar=menu-action]/menu-item:pr-8 group-data-[collapsible=icon]:size-8! group-data-[collapsible=icon]:p-2! hover:bg-sidebar-accent hover:text-sidebar-accent-foreground focus-visible:ring-2 active:bg-sidebar-accent active:text-sidebar-accent-foreground disabled:pointer-events-none disabled:opacity-50 aria-disabled:pointer-events-none aria-disabled:opacity-50 data-open:hover:bg-sidebar-accent data-open:hover:text-sidebar-accent-foreground data-active:bg-sidebar-accent data-active:font-medium data-active:text-sidebar-accent-foreground data-active:hover:bg-sidebar-accent data-active:[&_svg_.icon-body]:fill-current data-active:[&_svg_.icon-body]:[fill-opacity:0.2] [&_svg]:size-4.5 [&_svg]:shrink-0 [&>span:last-child]:truncate",
   {
     variants: {
       variant: {
@@ -750,7 +770,7 @@ const sidebarMenuButtonVariants = cva(
           "bg-background shadow-[0_0_0_1px_var(--color-sidebar-border)] hover:bg-sidebar-accent hover:text-sidebar-accent-foreground hover:shadow-[0_0_0_1px_var(--color-sidebar-accent)]",
       },
       size: {
-        default: "h-8 text-body",
+        default: "h-[34px] text-body",
         sm: "h-7 text-caption",
         lg: "h-12 text-body group-data-[collapsible=icon]:p-0!",
       },
@@ -945,7 +965,7 @@ function SidebarMenuSubButton({
     props: mergeProps<"a">(
       {
         className: cn(
-          "flex h-7 min-w-0 -translate-x-px items-center gap-2 overflow-hidden rounded-md px-2 text-sidebar-foreground ring-sidebar-ring outline-hidden group-data-[collapsible=icon]:hidden hover:bg-sidebar-accent hover:text-sidebar-accent-foreground focus-visible:ring-2 active:bg-sidebar-accent active:text-sidebar-accent-foreground disabled:pointer-events-none disabled:opacity-50 aria-disabled:pointer-events-none aria-disabled:opacity-50 data-[size=md]:text-body data-[size=sm]:text-caption data-active:bg-sidebar-accent data-active:text-sidebar-accent-foreground data-active:hover:bg-sidebar-accent [&>span:last-child]:truncate [&>svg]:size-4 [&>svg]:shrink-0 [&>svg]:text-sidebar-accent-foreground",
+          "flex h-7 min-w-0 -translate-x-px items-center gap-2 overflow-hidden rounded-md px-2 text-sidebar-foreground ring-sidebar-ring outline-hidden group-data-[collapsible=icon]:hidden hover:bg-sidebar-accent hover:text-sidebar-accent-foreground focus-visible:ring-2 active:bg-sidebar-accent active:text-sidebar-accent-foreground disabled:pointer-events-none disabled:opacity-50 aria-disabled:pointer-events-none aria-disabled:opacity-50 data-[size=md]:text-body data-[size=sm]:text-caption data-active:bg-sidebar-accent data-active:text-sidebar-accent-foreground data-active:hover:bg-sidebar-accent [&>span:last-child]:truncate [&>svg]:size-4.5 [&>svg]:shrink-0 [&>svg]:text-sidebar-accent-foreground",
           className
         ),
       },

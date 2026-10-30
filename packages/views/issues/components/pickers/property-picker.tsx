@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useCallback, useRef, useEffect } from "react";
-import { Check } from "lucide-react";
+import { Check } from "@multica/ui/icons";
 import {
   Popover,
   PopoverTrigger,
@@ -12,6 +12,7 @@ import {
   TooltipContent,
   TooltipTrigger,
 } from "@multica/ui/components/ui/tooltip";
+import { TruncatedTooltip } from "@multica/ui/components/common/truncated-tooltip";
 import { isImeComposing } from "@multica/core/utils";
 import { useT } from "../../../i18n";
 
@@ -33,17 +34,16 @@ const isEmptyItem = (el: HTMLButtonElement | undefined) =>
  * first interaction is pixel-identical.
  */
 export const PICKER_TRIGGER_CLASS =
-  "flex items-center gap-1.5 cursor-pointer rounded px-1 -mx-1 hover:bg-accent/30 transition-colors overflow-hidden";
+  "flex items-center gap-1.5 cursor-pointer rounded-xs px-1 -mx-1 hover:bg-accent/30 transition-colors overflow-hidden";
 
-// ---------------------------------------------------------------------------
 // PropertyPicker — generic Popover shell with optional search
-// ---------------------------------------------------------------------------
 
 export function PropertyPicker({
   open,
   onOpenChange,
   trigger,
   triggerRender,
+  nativeButton = true,
   width = "w-48",
   align = "end",
   side = "bottom",
@@ -59,6 +59,8 @@ export function PropertyPicker({
   onOpenChange: (v: boolean) => void;
   trigger: React.ReactNode;
   triggerRender?: React.ReactElement;
+  /** False when a compound trigger renders a non-button element. */
+  nativeButton?: boolean;
   width?: string;
   align?: "start" | "center" | "end";
   side?: React.ComponentProps<typeof PopoverContent>["side"];
@@ -182,6 +184,7 @@ export function PropertyPicker({
 
   const popoverTrigger = (
     <PopoverTrigger
+      nativeButton={nativeButton}
       className={triggerRender ? undefined : PICKER_TRIGGER_CLASS}
       render={triggerRender}
     >
@@ -225,9 +228,7 @@ export function PropertyPicker({
   );
 }
 
-// ---------------------------------------------------------------------------
 // PickerItem — single selectable row
-// ---------------------------------------------------------------------------
 
 export function PickerItem({
   selected,
@@ -235,6 +236,7 @@ export function PickerItem({
   onClick,
   hoverClassName,
   tooltip,
+  truncationTooltip,
   emptyValue = false,
   children,
 }: {
@@ -254,9 +256,13 @@ export function PickerItem({
   emptyValue?: boolean;
   /** Design-system tooltip for the row — useful when truncated content needs
    *  the full string, or when the row carries metadata that doesn't fit on
-   *  a single line. Wrapped in a real Tooltip component (200ms delay,
+   *  a single line. Wrapped in a real Tooltip component (shared delay,
    *  styled), not a native `title` attribute. */
   tooltip?: React.ReactNode;
+  /** Full text of a row label that may be cut off. Unlike `tooltip`, it only
+   *  opens when the row's content is actually truncated, so short labels
+   *  don't pop a bubble that repeats them. Ignored when `tooltip` is set. */
+  truncationTooltip?: React.ReactNode;
   children: React.ReactNode;
 }) {
   const button = (
@@ -283,7 +289,10 @@ export function PickerItem({
     </button>
   );
 
-  if (!tooltip) return button;
+  if (!tooltip) {
+    if (!truncationTooltip) return button;
+    return <TruncatedTooltip content={truncationTooltip}>{button}</TruncatedTooltip>;
+  }
 
   return (
     <Tooltip>
@@ -293,9 +302,7 @@ export function PickerItem({
   );
 }
 
-// ---------------------------------------------------------------------------
 // PickerSection — group header
-// ---------------------------------------------------------------------------
 
 export function PickerSection({
   label,
@@ -314,9 +321,7 @@ export function PickerSection({
   );
 }
 
-// ---------------------------------------------------------------------------
 // PickerEmpty — no results state
-// ---------------------------------------------------------------------------
 
 export function PickerEmpty() {
   const { t } = useT("issues");

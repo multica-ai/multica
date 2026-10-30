@@ -449,14 +449,16 @@ func TestEnqueueChatTaskLocksOutAConcurrentArchiveButNotInboundMessages(t *testi
 // probeUnderLock runs one statement on its own connection with a short
 // lock_timeout, so a row lock held by the caller's transaction surfaces as
 // SQLSTATE 55P03 instead of hanging the test. The probe always rolls back: it
-// is asking whether it *could* proceed, not changing anything.
+// is asking whether it *could* proceed, not changing anything. The timeout
+// only elapses while the probe is actually blocked, and a blocked probe waits
+// all of it out, so it stays short.
 func probeUnderLock(ctx context.Context, pool *pgxpool.Pool, sql, chatSessionID string) error {
 	tx, err := pool.Begin(ctx)
 	if err != nil {
 		return err
 	}
 	defer tx.Rollback(ctx)
-	if _, err := tx.Exec(ctx, `SET LOCAL lock_timeout = '500ms'`); err != nil {
+	if _, err := tx.Exec(ctx, `SET LOCAL lock_timeout = '50ms'`); err != nil {
 		return err
 	}
 	_, err = tx.Exec(ctx, sql, chatSessionID)
@@ -535,6 +537,9 @@ func TestDeferredChannelIssueTaskPromotesAfterMediaSettlement(t *testing.T) {
 		VALUES ($1, $2, 'member', $3, 'More context') RETURNING id`, issueID, workspaceID, userID).Scan(&commentID); err != nil {
 		t.Fatalf("seed comment: %v", err)
 	}
+	if _, err := pool.Exec(ctx, `UPDATE agent_task_queue SET trigger_comment_id=$2 WHERE id=$1`, task.ID, commentID); err != nil {
+		t.Fatal(err)
+	}
 	merged, err := q.MergeCommentIntoPendingTask(ctx, db.MergeCommentIntoPendingTaskParams{
 		IssueID:                 issueID,
 		AgentID:                 util.MustParseUUID(agentID),
@@ -579,7 +584,7 @@ func TestDeferredChannelIssueTaskConflictsWithQueuedSiblingAtDatabase(t *testing
 	ctx := context.Background()
 
 	var indexDefinition string
-	if err := pool.QueryRow(ctx, `SELECT pg_get_indexdef('idx_one_pending_task_per_issue_agent_v2'::regclass)`).Scan(&indexDefinition); err != nil {
+	if err := pool.QueryRow(ctx, `SELECT pg_get_indexdef('idx_one_pending_task_per_issue_agent_thread'::regclass)`).Scan(&indexDefinition); err != nil {
 		t.Fatalf("load pending-task index: %v", err)
 	}
 	if !strings.Contains(indexDefinition, "channel_issue_media_pending") {
@@ -614,7 +619,7 @@ func TestDeferredChannelIssueTaskConflictsWithQueuedSiblingAtDatabase(t *testing
 		INSERT INTO agent_task_queue (agent_id, runtime_id, issue_id, status, priority)
 		VALUES ($1, $2, $3, 'queued', 0)`, task.AgentID, task.RuntimeID, issueID)
 	var pgErr *pgconn.PgError
-	if !errors.As(err, &pgErr) || pgErr.Code != "23505" || pgErr.ConstraintName != "idx_one_pending_task_per_issue_agent_v2" {
+	if !errors.As(err, &pgErr) || pgErr.Code != "23505" || pgErr.ConstraintName != "idx_one_pending_task_per_issue_agent_thread" {
 		t.Fatalf("queued sibling insert error = %v, want unique violation on pending-task index", err)
 	}
 }

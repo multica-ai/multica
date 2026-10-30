@@ -17,8 +17,9 @@ import {
 } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
 import { restrictToVerticalAxis } from "@dnd-kit/modifiers";
-import { GripVertical, Layers, Pencil, Trash2 } from "lucide-react";
-import { Button } from "@multica/ui/components/ui/button";
+import { GripVertical, Layers, Pencil, Trash2 } from "@multica/ui/icons";
+import { IconButton } from "@multica/ui/components/common/icon-button";
+import { TooltipHint } from "@multica/ui/components/common/tooltip-hint";
 import { Switch } from "@multica/ui/components/ui/switch";
 import {
   Dialog,
@@ -73,18 +74,20 @@ function SortableRow({
         isDragging && "z-10 bg-accent opacity-80",
       )}
     >
-      <button
-        type="button"
-        {...attributes}
-        {...listeners}
-        aria-label={t(($) => $.view_bar.drag_handle)}
-        className={cn(
-          "cursor-grab active:cursor-grabbing text-faint-foreground hover:text-muted-foreground",
-          isDragging && "cursor-grabbing",
-        )}
-      >
-        <GripVertical className="size-3.5" />
-      </button>
+      <TooltipHint label={t(($) => $.view_bar.drag_handle)}>
+        <button
+          type="button"
+          {...attributes}
+          {...listeners}
+          aria-label={t(($) => $.view_bar.drag_handle)}
+          className={cn(
+            "cursor-grab active:cursor-grabbing text-faint-foreground hover:text-muted-foreground",
+            isDragging && "cursor-grabbing",
+          )}
+        >
+          <GripVertical className="size-3.5" />
+        </button>
+      </TooltipHint>
       <span className="min-w-0 flex-1 truncate text-body">
         {item.label}
         {item.kind === "builtin" && (
@@ -95,23 +98,23 @@ function SortableRow({
       </span>
       {item.kind === "view" && item.canManage && (
         <span className="flex items-center gap-0.5">
-          <Button
+          <IconButton
             variant="ghost"
             size="icon-sm"
-            aria-label={t(($) => $.view_selector.edit)}
+            label={t(($) => $.view_selector.edit)}
             onClick={onEdit}
           >
             <Pencil className="size-3.5" />
-          </Button>
-          <Button
+          </IconButton>
+          <IconButton
             variant="ghost"
             size="icon-sm"
-            aria-label={t(($) => $.view_bar.delete)}
+            label={t(($) => $.view_bar.delete)}
             onClick={onDelete}
             className="text-muted-foreground hover:text-destructive"
           >
             <Trash2 className="size-3.5" />
-          </Button>
+          </IconButton>
         </span>
       )}
       <Switch

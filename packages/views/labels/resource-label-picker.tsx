@@ -2,7 +2,7 @@
 
 import { useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { Check, Search, Tag } from "lucide-react";
+import { Check, Search, Tag } from "@multica/ui/icons";
 import { useWorkspaceId } from "@multica/core/hooks";
 import {
   labelListOptions,

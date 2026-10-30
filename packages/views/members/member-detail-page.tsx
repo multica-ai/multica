@@ -1,6 +1,6 @@
 "use client";
 
-import { ChevronRight, UserRound } from "lucide-react";
+import { ChevronRight, UserRound } from "@multica/ui/icons";
 import { useQuery } from "@tanstack/react-query";
 import type { MemberRole } from "@multica/core/types";
 import { useWorkspaceId } from "@multica/core/hooks";

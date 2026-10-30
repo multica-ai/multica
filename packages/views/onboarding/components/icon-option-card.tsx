@@ -1,7 +1,7 @@
 "use client";
 
 import type { ReactNode } from "react";
-import { Check } from "lucide-react";
+import { Check } from "@multica/ui/icons";
 import { Button } from "@multica/ui/components/ui/button";
 import { cn } from "@multica/ui/lib/utils";
 
@@ -9,7 +9,7 @@ const OTHER_INPUT_MAX_LENGTH = 80;
 
 /**
  * One option in a questionnaire card grid. `slug` is the persisted
- * enum value; `icon` is a React node (lucide icon, brand SVG, or emoji
+ * enum value; `icon` is a React node (product icon, brand SVG, or emoji
  * span); `label` is the localized string already resolved by the
  * caller. `isOther` flips this card into a free-text input row.
  *

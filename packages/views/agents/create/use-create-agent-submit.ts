@@ -13,6 +13,7 @@ import {
   workspaceKeys,
 } from "@multica/core/workspace/queries";
 import { useNavigation } from "../../navigation";
+import { withSquadParam } from "./squad-param";
 import { useT } from "../../i18n";
 
 interface AgentCreateErrors {
@@ -43,6 +44,8 @@ export function classifyAgentCreateError(
 export function useCreateAgentSubmit(options: {
   draft: AgentDraft;
   runtimeId: string | null;
+  /** Provider of `runtimeId`, so settings it cannot run are not submitted. */
+  runtimeProvider?: string;
   squadId: string | null;
   /** Creation-source attribution for the `agent_created` analytics event. */
   template?: string;
@@ -60,8 +63,15 @@ export function useCreateAgentSubmit(options: {
   const [nameError, setNameError] = useState<string | null>(null);
   const [formError, setFormError] = useState<string | null>(null);
 
-  const { draft, runtimeId, squadId, template, duplicateSource, onCreated } =
-    options;
+  const {
+    draft,
+    runtimeId,
+    runtimeProvider,
+    squadId,
+    template,
+    duplicateSource,
+    onCreated,
+  } = options;
 
   const create = async () => {
     if (!runtimeId || creating) return;
@@ -73,6 +83,7 @@ export function useCreateAgentSubmit(options: {
         buildCreateAgentRequest({
           draft,
           runtimeId,
+          runtimeProvider,
           template,
           duplicateSource,
         }),
@@ -109,14 +120,9 @@ export function useCreateAgentSubmit(options: {
       // Reconcile other list projections in the background instead of making
       // navigation wait on a second network request.
       void qc.invalidateQueries({ queryKey: workspaceKeys.agents(wsId) });
-      toast.success(
-        t(($) => $.creation_studio.created, {
-          name: agent.name || draft.name.trim(),
-        }),
-      );
-      navigation.push(
-        squadId ? paths.squadDetail(squadId) : paths.agentDetail(agent.id),
-      );
+      // Replace, not push: back from the done step must not reopen a form
+      // whose agent already exists.
+      navigation.replace(withSquadParam(paths.newAgentDone(agent.id), squadId));
     } catch (error) {
       const nextErrors = classifyAgentCreateError(
         error,

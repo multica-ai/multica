@@ -1,11 +1,12 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { Plus, X } from "lucide-react";
+import { Plus, X } from "@multica/ui/icons";
 import { useQuery } from "@tanstack/react-query";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { memberListOptions } from "@multica/core/workspace/queries";
 import { cn } from "@multica/ui/lib/utils";
+import { TooltipHint } from "@multica/ui/components/common/tooltip-hint";
 import { ActorAvatar } from "../../common/actor-avatar";
 import {
   PropertyPicker,
@@ -72,14 +73,16 @@ export function SubscriberMultiSelect({
         >
           <ActorAvatar actorType="member" actorId={m.user_id} size="xs" />
           <span className="max-w-[10rem] truncate">{m.name}</span>
-          <button
-            type="button"
-            onClick={() => remove(m.user_id)}
-            className="text-muted-foreground hover:text-foreground transition-colors cursor-pointer"
-            aria-label={t(($) => $.dialog.subscribers_remove_tooltip)}
-          >
-            <X className="size-3" />
-          </button>
+          <TooltipHint label={t(($) => $.dialog.subscribers_remove_tooltip)}>
+            <button
+              type="button"
+              onClick={() => remove(m.user_id)}
+              className="text-muted-foreground hover:text-foreground transition-colors cursor-pointer"
+              aria-label={t(($) => $.dialog.subscribers_remove_tooltip)}
+            >
+              <X className="size-3" />
+            </button>
+          </TooltipHint>
         </span>
       ))}
       <PropertyPicker

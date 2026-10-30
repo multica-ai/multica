@@ -437,13 +437,18 @@ func TestPlatformSkillCoversPlatformContracts(t *testing.T) {
 				// home, so losing one here loses it everywhere.
 				"A name is not an id",
 				"`--output json` writes to stdout",
-				"`--no-start` when you are only recording",
-				"Status is a category, not a literal",
+				"categories describe lifecycle only",
+				"Custom statuses do not inherit built-in automation behavior",
 				"Comment reads stay bounded",
 				"--roots-only --summary --compact",
 				"--thread <thread-id> --tail 30",
+				// MUL-7344: the per-turn `--since` delta IS a bounded read, so
+				// the bounded-reads rule must name it rather than leave an
+				// agent choosing between two contradicting instructions.
+				"that read is the bounded scan",
 			},
 			notWant: []string{
+				"--no-start",
 				// The singular forms this replaced.
 				"open the ONE reference",
 				"there is never a reason to read all eight",
@@ -456,7 +461,16 @@ func TestPlatformSkillCoversPlatformContracts(t *testing.T) {
 				"Default for code-changing issue work",
 				"open or update a PR before posting the final Multica issue comment",
 				"This is a default, not",
-				"Use a routable issue key in the PR title, body, or branch",
+				"put a routable issue key in the PR **title**",
+				"body links nothing",
+				// The empty-PR-list guidance drives GitHub write actions, so
+				// both halves of it are pinned: a syntax problem is repairable
+				// by editing the PR, and an integration problem is not — an
+				// agent that keeps editing burns deliveries on a no-op.
+				"editing the title re-runs the scan",
+				"stop editing the PR blind",
+				"whether the installation is bound to this workspace",
+				"redelivered once the receiving side is fixed",
 				"include the PR URL when a PR exists",
 				"Closes MUL-123",
 				"--status backlog",
@@ -471,7 +485,7 @@ func TestPlatformSkillCoversPlatformContracts(t *testing.T) {
 				// playbook — if they leave, the brief pointer dangles.
 				"todo starts work now, backlog parks it",
 				"`--stage <N>`",
-				"when a whole stage finishes",
+				"wakes the parent assignee when a stage",
 				"multica issue status <child-id> todo",
 				// MUL-6966 phase 1 retired the metadata write discipline
 				// along with the brief section that pointed here. What the
@@ -480,6 +494,13 @@ func TestPlatformSkillCoversPlatformContracts(t *testing.T) {
 				// the routing rule they encoded.
 				"workflow state a human should see and filter by goes in",
 				"goes in the result comment",
+				// #8001: --property comparisons. The op-by-type table is the
+				// only thing between an agent and a silently empty page, and
+				// the two rejections are the cases it would otherwise retry.
+				"Comparisons use the same flag",
+				"`~=` (contains, case-insensitive)",
+				"`!=` is rejected (the server has no not-equal filter)",
+				"so they do not form a range",
 				// #7768: nothing about concurrent runs is pushed into the
 				// prompt any more (MUL-6984), so the skill has to carry the
 				// pull path itself. All three anchors are load-bearing — the
@@ -498,6 +519,7 @@ func TestPlatformSkillCoversPlatformContracts(t *testing.T) {
 				"`value` keeps the stored ids",
 			},
 			notWant: []string{
+				"--no-start",
 				// MUL-6966 phase 1: this reference must not teach the KV bag
 				// at all — not as a section, not as a command, and not as a
 				// named key inside a warning. A blanket ban on the vocabulary
@@ -511,6 +533,9 @@ func TestPlatformSkillCoversPlatformContracts(t *testing.T) {
 				"High-signal keys",
 				"reuse these names so queries stay consistent",
 				"scratchpad for run state",
+				// #8001 replaced the reservation with the operators; a bullet
+				// that says only `=` works would contradict the one below it.
+				"Only `=` is supported today",
 				// Per-turn workflow the runtime brief owns; duplicating it here
 				// is how the two drift apart.
 				"Start from the trigger, not from memory",
@@ -522,6 +547,13 @@ func TestPlatformSkillCoversPlatformContracts(t *testing.T) {
 			file: "references/mentions.md",
 			want: []string{
 				"(member|agent|squad|issue|all)/([0-9a-fA-F-]+|all)",
+				"canonical inline links with visible label text",
+				"Text removed by HTML sanitization",
+				"reference links, images, autolinks, titles",
+				"Code examples are inert as mentions",
+				"A fenced `diff` of agent instructions cannot invoke",
+				"paste it into",
+				"Prose mentions in blockquotes still count",
 				"multica workspace member list --output json",
 				"enqueues a run for that agent",
 				"enqueues NOTHING",
@@ -582,6 +614,10 @@ func TestPlatformSkillCoversPlatformContracts(t *testing.T) {
 				"--roots-only --summary",
 				"--thread <thread-id> --tail 30",
 				"scan the roots first, then open the threads",
+				// MUL-5850: the reads carry --compact, matching the brief and
+				// the router's bounded-reads rule.
+				"--roots-only --summary --compact --output json",
+				"--thread <thread-id> --tail 30 --compact --output json",
 			},
 			notWant: []string{
 				// MUL-5696: no unbounded comment pull. Both shapes contradict
@@ -677,13 +713,14 @@ func TestPlatformSkillCoversPlatformContracts(t *testing.T) {
 			if !ok {
 				t.Fatalf("platform skill does not ship %q", tc.file)
 			}
+			unwrapped := collapseSpace(content)
 			for _, want := range tc.want {
-				if !containsUnwrapped(content, want) {
+				if !containsUnwrapped(unwrapped, want) {
 					t.Errorf("%s missing %q", tc.file, want)
 				}
 			}
 			for _, forbidden := range tc.notWant {
-				if containsUnwrapped(content, forbidden) {
+				if containsUnwrapped(unwrapped, forbidden) {
 					t.Errorf("%s carries banned content %q", tc.file, forbidden)
 				}
 			}
@@ -695,8 +732,10 @@ func TestPlatformSkillCoversPlatformContracts(t *testing.T) {
 // reference its value: it proves the skill teaches exactly what
 // util.ParseMentions enforces. The skill's "Incorrect" examples must parse to
 // nothing (the @gpt-boy class of bug: a name where a UUID belongs fails
-// silently), and its "Correct" example must parse. If the mention regex drifts,
-// this breaks and the skill's claims must be re-checked.
+// silently), and its "Correct" example must parse. If ParseMentions drifts,
+// this breaks and the skill's claims must be re-checked. Goldmark link nodes
+// exclude code; parseMentionLink validates canonical source and visible labels
+// in internal/util/mention.go. These assertions replace the retired source map.
 func TestPlatformSkillTeachesTheParserContract(t *testing.T) {
 	const uuid = "7f3a1b2c-0000-4000-8000-000000000abc"
 
@@ -729,6 +768,35 @@ func TestPlatformSkillTeachesTheParserContract(t *testing.T) {
 			name:    "all uses the literal all",
 			content: "[@all](mention://all/all) heads up",
 			want:    []util.Mention{{Type: "all", ID: "all"}},
+		},
+		{
+			name:    "empty label cannot trigger an agent",
+			content: "[](mention://agent/" + uuid + ")",
+		},
+		{
+			name:    "script content cannot make an agent label visible",
+			content: "[<script>Agent</script>@](mention://agent/" + uuid + ")",
+		},
+		{
+			name:    "template content cannot make an agent label visible",
+			content: "[<template>Agent</template>@](mention://agent/" + uuid + ")",
+		},
+		{
+			name:    "reference link cannot trigger an agent",
+			content: "[@Agent][target]\n\n[target]: mention://agent/" + uuid,
+		},
+		{
+			name:    "inline code example is inert",
+			content: "`[@Agent](mention://agent/" + uuid + ")`",
+		},
+		{
+			name:    "details diff example is inert",
+			content: "<details>\n<summary>Instructions</summary>\n\n```diff\n+ [@Agent](mention://agent/" + uuid + ")\n```\n\n</details>",
+		},
+		{
+			name:    "copied example in prose parses",
+			content: "[@Agent](mention://agent/" + uuid + ") please review",
+			want:    []util.Mention{{Type: "agent", ID: uuid}},
 		},
 		{
 			// Skill: "Using the wrong type for a real UUID still parses — it
@@ -798,8 +866,12 @@ func TestOnboardingSkillIsScopedToMika(t *testing.T) {
 // wrapped. These anchors pin a claim, not a line layout — matching raw bytes
 // made every reflow of a paragraph look like a deleted contract, which trains
 // authors to fix the test instead of the text.
-func containsUnwrapped(content, want string) bool {
-	return strings.Contains(collapseSpace(content), collapseSpace(want))
+//
+// unwrapped is content already passed through collapseSpace: callers collapse
+// each file once, because re-collapsing a whole reference per anchor made this
+// the slowest test in the package.
+func containsUnwrapped(unwrapped, want string) bool {
+	return strings.Contains(unwrapped, collapseSpace(want))
 }
 
 var whitespaceRun = regexp.MustCompile(`\s+`)

@@ -7,7 +7,7 @@ import {
   type ReactElement,
   type ReactNode,
 } from "react";
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, onTestFinished } from "vitest";
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
@@ -40,7 +40,9 @@ const mockSetShared = vi.hoisted(() => vi.fn());
 const mockSetManual = vi.hoisted(() => vi.fn());
 const mockSetAgent = vi.hoisted(() => vi.fn());
 const mockSetActiveMode = vi.hoisted(() => vi.fn());
+const mockBeginBatchContinuation = vi.hoisted(() => vi.fn());
 const mockClearDraft = vi.hoisted(() => vi.fn());
+const mockEndBatchContinuation = vi.hoisted(() => vi.fn());
 const mockSetLastAssignee = vi.hoisted(() => vi.fn());
 const mockSetKeepOpen = vi.hoisted(() => vi.fn());
 const mockToastCustom = vi.hoisted(() => vi.fn());
@@ -127,7 +129,7 @@ const emptyIssueDraft = () => ({
   manual: {
     title: "",
     description: "",
-    status: "todo" as const,
+    status: "todo" as string,
     startDate: null as string | null,
     assigneeType: undefined as "agent" | "squad" | "member" | undefined,
     assigneeId: undefined as string | undefined,
@@ -146,13 +148,31 @@ const mockDraftStore = {
   draft: emptyIssueDraft(),
   lastAssigneeType: undefined as "agent" | "squad" | "member" | undefined,
   lastAssigneeId: undefined as string | undefined,
+  // The keep-open reset's snapshot. Mirrors the store: the batch reset records
+  // the draft it produced, so a later change is a user edit while an untouched
+  // continuation is still "no draft" (see draft-store.test.ts for the
+  // predicate's own coverage).
+  batchContinuationBaseline: undefined as ReturnType<typeof emptyIssueDraft> | undefined,
   setShared: mockSetShared,
   setManual: mockSetManual,
   setAgent: mockSetAgent,
   setActiveMode: mockSetActiveMode,
+  beginBatchContinuation: mockBeginBatchContinuation,
+  endBatchContinuation: mockEndBatchContinuation,
   clearDraft: mockClearDraft,
   setLastAssignee: mockSetLastAssignee,
-  hasDraft: () => false,
+  hasDraft: () => !!(
+    mockDraftStore.draft.manual.title ||
+    mockDraftStore.draft.manual.description ||
+    mockDraftStore.draft.agent.prompt ||
+    Object.keys(mockDraftStore.draft.manual.propertyValues).length > 0 ||
+    mockDraftStore.draft.shared.attachments.some((upload) =>
+      upload.status === "uploaded" || upload.status === "uploading") ||
+    // Every setter below rebuilds `draft`, so a changed reference means the
+    // continuation was edited.
+    (mockDraftStore.batchContinuationBaseline !== undefined &&
+      mockDraftStore.draft !== mockDraftStore.batchContinuationBaseline)
+  ),
 };
 
 const mockQuickCreateStore = {
@@ -441,7 +461,11 @@ vi.mock("../editor", async () => {
 vi.mock("../issues/components", () => ({
   StatusIcon: ({ status }: { status: string }) => <span data-testid="status-icon">{status}</span>,
   StatusPicker: () => <div data-testid="status-picker" />,
-  PriorityPicker: () => <div data-testid="priority-picker" />,
+  // Surface onUpdate so tests can drive a field-only edit (priority is not
+  // part of the draft's recoverable content).
+  PriorityPicker: ({ onUpdate }: { onUpdate: (u: { priority: string }) => void }) => (
+    <div data-testid="priority-picker" onClick={() => onUpdate({ priority: "high" })} />
+  ),
   StagePicker: () => <div data-testid="stage-picker" />,
   AssigneePicker: () => <div data-testid="assignee-picker" />,
   // Surface open/onOpenChange so tests can assert progressive-disclosure
@@ -474,10 +498,11 @@ vi.mock("../issues/components", () => ({
 }));
 
 vi.mock("../issues/components/pickers/custom-property-picker", () => ({
-  CustomPropertyValueInput: ({ property, onChange }: any) => (
+  CustomPropertyValueInput: ({ property, onChange, open }: any) => (
     <button
       type="button"
       aria-label={`Edit ${property.name}`}
+      data-open={open ? "true" : "false"}
       onClick={() => onChange("option-enterprise")}
     >
       {property.name}
@@ -633,20 +658,64 @@ describe("CreateIssueModal", () => {
     // Reset the unified draft mock so per-test seeding (assignee, project, …)
     // doesn't leak into the next test in the suite.
     mockDraftStore.draft = emptyIssueDraft();
+    mockDraftStore.lastAssigneeType = undefined;
+    mockDraftStore.lastAssigneeId = undefined;
+    mockDraftStore.batchContinuationBaseline = undefined;
+    mockSetLastAssignee.mockImplementation((type, id) => {
+      mockDraftStore.lastAssigneeType = type;
+      mockDraftStore.lastAssigneeId = id;
+    });
+    // Each write rebuilds `draft`, matching the real store — the keep-open
+    // baseline is held by reference and must not see later edits.
     mockSetShared.mockImplementation((patch: Partial<typeof mockDraftStore.draft.shared>) => {
-      mockDraftStore.draft.shared = { ...mockDraftStore.draft.shared, ...patch };
+      mockDraftStore.draft = {
+        ...mockDraftStore.draft,
+        shared: { ...mockDraftStore.draft.shared, ...patch },
+      };
     });
     mockSetManual.mockImplementation((patch: Partial<typeof mockDraftStore.draft.manual>) => {
-      mockDraftStore.draft.manual = { ...mockDraftStore.draft.manual, ...patch };
+      mockDraftStore.draft = {
+        ...mockDraftStore.draft,
+        manual: { ...mockDraftStore.draft.manual, ...patch },
+      };
     });
     mockSetAgent.mockImplementation((patch: Partial<typeof mockDraftStore.draft.agent>) => {
-      mockDraftStore.draft.agent = { ...mockDraftStore.draft.agent, ...patch };
+      mockDraftStore.draft = {
+        ...mockDraftStore.draft,
+        agent: { ...mockDraftStore.draft.agent, ...patch },
+      };
     });
-    mockClearDraft.mockImplementation(() => {
+    mockBeginBatchContinuation.mockImplementation(() => {
+      mockDraftStore.batchContinuationBaseline = mockDraftStore.draft;
+    });
+    const resetMockDraft = () => {
       const next = emptyIssueDraft();
       next.manual.assigneeType = mockDraftStore.lastAssigneeType;
       next.manual.assigneeId = mockDraftStore.lastAssigneeId;
       mockDraftStore.draft = next;
+      mockDraftStore.batchContinuationBaseline = undefined;
+    };
+    mockClearDraft.mockImplementation(resetMockDraft);
+    // Mirrors the store's close-time cleanup: nothing to end without a live
+    // continuation snapshot (a source-context close restored the ordinary
+    // draft), a continuation whose manual form is still what the reset wrote
+    // loses only the status the batch inherited, and one the user actually
+    // edited closes as it is — inherited status included. The agent slot and
+    // `activeMode` stay out of the comparison: a mode switch is not an edit.
+    mockEndBatchContinuation.mockImplementation(() => {
+      const baseline = mockDraftStore.batchContinuationBaseline;
+      if (!baseline) return;
+      const { draft } = mockDraftStore;
+      const unchanged =
+        JSON.stringify({ shared: draft.shared, manual: draft.manual }) ===
+        JSON.stringify({ shared: baseline.shared, manual: baseline.manual });
+      if (unchanged) {
+        mockDraftStore.draft = {
+          ...draft,
+          manual: { ...draft.manual, status: "todo" },
+        };
+      }
+      mockDraftStore.batchContinuationBaseline = undefined;
     });
     mockApiUploadFile.mockResolvedValue({
       id: "11111111-2222-3333-4444-555555555555",
@@ -761,6 +830,35 @@ describe("CreateIssueModal", () => {
     expect(mockToastDismiss).toHaveBeenCalledWith("toast-1");
   });
 
+  it("starts a fresh create from todo without a remembered stage", async () => {
+    const user = userEvent.setup();
+    const first = renderModal(<CreateIssueModal onClose={vi.fn()} data={{
+      parent_issue_id: "parent-1",
+      status: "in_progress",
+      stage: 2,
+    }} />);
+
+    fireEvent.change(screen.getByPlaceholderText("Issue title"), {
+      target: { value: "Follow up" },
+    });
+    await user.click(screen.getByRole("button", { name: "Create Issue" }));
+
+    await waitFor(() => expect(mockCreateIssue).toHaveBeenCalledWith(
+      expect.objectContaining({ status: "in_progress", parent_issue_id: "parent-1", stage: 2 }),
+    ));
+    first.unmount();
+    renderModal(<CreateIssueModal onClose={vi.fn()} data={{ parent_issue_id: "parent-1" }} />);
+
+    fireEvent.change(screen.getByPlaceholderText("Issue title"), {
+      target: { value: "Another child" },
+    });
+    await user.click(screen.getByRole("button", { name: "Create Issue" }));
+
+    await waitFor(() => expect(mockCreateIssue).toHaveBeenCalledWith(
+      expect.objectContaining({ status: "todo", parent_issue_id: "parent-1", stage: undefined }),
+    ));
+  });
+
   it("forwards selected labels in the create payload so they attach in the same transaction", async () => {
     const user = userEvent.setup();
     mockDraftStore.draft.manual.labelIds = [
@@ -826,12 +924,16 @@ describe("CreateIssueModal", () => {
     });
   });
 
-  it("keeps manual mode open and clears content when create another is enabled", async () => {
+  it("keeps status, assignee, parent, and stage for the next issue in a batch", async () => {
     const user = userEvent.setup();
     const onClose = vi.fn();
     mockQuickCreateStore.keepOpen = true;
+    mockDraftStore.draft.manual.assigneeType = "member";
+    mockDraftStore.draft.manual.assigneeId = "alice";
 
-    renderModal(<CreateIssueModal onClose={onClose} />);
+    const modal = renderModal(<CreateIssueModal onClose={onClose} data={{
+      parent_issue_id: "parent-1", status: "in_progress", stage: 2,
+    }} />);
 
     await user.type(screen.getByPlaceholderText("Issue title"), "First follow-up issue");
     await user.type(screen.getByPlaceholderText("Add description..."), "Description to clear");
@@ -841,14 +943,15 @@ describe("CreateIssueModal", () => {
       expect(mockCreateIssue).toHaveBeenCalledWith({
         title: "First follow-up issue",
         description: "Description to clear",
-        status: "todo",
+        status: "in_progress",
         priority: "none",
-        assignee_type: undefined,
-        assignee_id: undefined,
+        assignee_type: "member",
+        assignee_id: "alice",
         start_date: undefined,
         due_date: undefined,
         attachment_ids: undefined,
-        parent_issue_id: undefined,
+        parent_issue_id: "parent-1",
+        stage: 2,
         project_id: undefined,
       });
     });
@@ -859,9 +962,9 @@ describe("CreateIssueModal", () => {
     expect(mockSetManual).toHaveBeenCalledWith({
       title: "",
       description: "",
-      status: "todo",
-      assigneeType: undefined,
-      assigneeId: undefined,
+      status: "in_progress",
+      assigneeType: "member",
+      assigneeId: "alice",
       startDate: null,
       labelIds: [],
       propertyValues: {},
@@ -872,9 +975,85 @@ describe("CreateIssueModal", () => {
       dueDate: null,
       attachments: [],
     });
+
+    await user.type(screen.getByPlaceholderText("Issue title"), "Second follow-up issue");
+    await user.click(screen.getByRole("button", { name: "Create Issue" }));
+    await waitFor(() => expect(mockCreateIssue).toHaveBeenCalledTimes(2));
+    expect(mockCreateIssue).toHaveBeenNthCalledWith(2, expect.objectContaining({
+      title: "Second follow-up issue",
+      status: "in_progress",
+      assignee_type: "member",
+      assignee_id: "alice",
+      parent_issue_id: "parent-1",
+      stage: 2,
+    }));
+
+    // An untouched continuation is not a draft: closing it drops the batch
+    // defaults so the next fresh create starts from todo again.
+    const endsAfterSubmit = mockEndBatchContinuation.mock.calls.length;
+    modal.unmount();
+    expect(mockEndBatchContinuation).toHaveBeenCalledTimes(endsAfterSubmit + 1);
+    expect(mockDraftStore.draft.manual.status).toBe("todo");
+    renderModal(<CreateIssueModal onClose={vi.fn()} />);
+    await user.type(screen.getByPlaceholderText("Issue title"), "Fresh issue");
+    await user.click(screen.getByRole("button", { name: "Create Issue" }));
+    await waitFor(() => expect(mockCreateIssue).toHaveBeenCalledTimes(3));
+    expect(mockCreateIssue).toHaveBeenNthCalledWith(3, expect.objectContaining({
+      status: "todo", parent_issue_id: undefined, stage: undefined,
+    }));
   });
 
-  it("sets configured custom property values after the issue is created", async () => {
+  it("keeps a field-only edit in the next batch issue when the dialog closes", async () => {
+    const user = userEvent.setup();
+    mockQuickCreateStore.keepOpen = true;
+
+    const modal = renderModal(<CreateIssueModal onClose={vi.fn()} />);
+
+    await user.type(screen.getByPlaceholderText("Issue title"), "First issue");
+    await user.click(screen.getByRole("button", { name: "Create Issue" }));
+    // The submitted draft is consumed, leaving an untouched continuation.
+    await waitFor(() => expect(mockClearDraft).toHaveBeenCalledTimes(1));
+    const endsAfterSubmit = mockEndBatchContinuation.mock.calls.length;
+
+    // Priority only — no title, body or attachment to mark the draft as content.
+    await user.click(screen.getByTestId("priority-picker"));
+    expect(mockSetShared).toHaveBeenCalledWith({ priority: "high" });
+
+    modal.unmount();
+
+    // The explicit selection survives alongside this batch's todo status.
+    expect(mockEndBatchContinuation).toHaveBeenCalledTimes(endsAfterSubmit + 1);
+    expect(mockDraftStore.draft.shared.priority).toBe("high");
+    expect(mockDraftStore.draft.manual.status).toBe("todo");
+
+    renderModal(<CreateIssueModal onClose={vi.fn()} />);
+    await user.type(screen.getByPlaceholderText("Issue title"), "Carried priority issue");
+    await user.click(screen.getByRole("button", { name: "Create Issue" }));
+    await waitFor(() => expect(mockCreateIssue).toHaveBeenLastCalledWith(
+      expect.objectContaining({ priority: "high" }),
+    ));
+  });
+
+  it("preserves an unfinished next issue instead of clearing it on close", async () => {
+    const user = userEvent.setup();
+    mockQuickCreateStore.keepOpen = true;
+    const modal = renderModal(<CreateIssueModal onClose={vi.fn()} data={{
+      status: "in_progress",
+    }} />);
+
+    await user.type(screen.getByPlaceholderText("Issue title"), "First issue");
+    await user.click(screen.getByRole("button", { name: "Create Issue" }));
+    await waitFor(() => expect(screen.getByPlaceholderText("Issue title")).toHaveValue(""));
+    await user.type(screen.getByPlaceholderText("Issue title"), "Unfinished next issue");
+    modal.unmount();
+
+    expect(mockDraftStore.draft.manual.title).toBe("Unfinished next issue");
+    expect(mockDraftStore.draft.manual.status).toBe("in_progress");
+    renderModal(<CreateIssueModal onClose={vi.fn()} />);
+    expect(screen.getByPlaceholderText("Issue title")).toHaveValue("Unfinished next issue");
+  });
+
+  it("includes configured custom properties in the atomic create request", async () => {
     const user = userEvent.setup();
 
     renderModal(<CreateIssueModal onClose={vi.fn()} />);
@@ -885,14 +1064,260 @@ describe("CreateIssueModal", () => {
     await user.type(screen.getByPlaceholderText("Issue title"), "Enterprise follow-up");
     await user.click(screen.getByRole("button", { name: "Create Issue" }));
 
-    await waitFor(() => {
-      expect(mockSetIssueProperty).toHaveBeenCalledWith(
-        "issue-123",
-        "property-tier",
-        "option-enterprise",
-      );
-    });
+    await waitFor(() => expect(mockCreateIssue).toHaveBeenCalledWith(
+      expect.objectContaining({
+        title: "Enterprise follow-up",
+        properties: { "property-tier": "option-enterprise" },
+      }),
+    ));
+    expect(mockSetIssueProperty).not.toHaveBeenCalled();
     expect(mockClearDraft).toHaveBeenCalled();
+  });
+
+  it("keeps the draft open and highlights the rejected custom property", async () => {
+    const user = userEvent.setup();
+    const onClose = vi.fn();
+    mockDraftStore.draft.manual.propertyValues = {
+      "property-tier": "option-enterprise",
+    };
+    mockCreateIssue.mockRejectedValueOnce(
+      new ApiError("Customer tier is invalid", 400, "Bad Request", {
+        code: "invalid_issue_property",
+        property_id: "property-tier",
+        error: "Customer tier is invalid",
+      }),
+    );
+
+    renderModal(<CreateIssueModal onClose={onClose} />);
+    await user.type(screen.getByPlaceholderText("Issue title"), "Keep this draft");
+    await user.click(screen.getByRole("button", { name: "Create Issue" }));
+
+    await waitFor(() => expect(mockToastError).toHaveBeenCalledWith("Customer tier is invalid"));
+    expect(onClose).not.toHaveBeenCalled();
+    expect(mockClearDraft).not.toHaveBeenCalled();
+    expect(screen.getByPlaceholderText("Issue title")).toHaveValue("Keep this draft");
+    expect(document.querySelector('[data-property-error="true"]')).not.toBeNull();
+    expect(screen.getByRole("button", { name: "Edit Customer tier" })).toHaveAttribute(
+      "data-open",
+      "true",
+    );
+    expect(mockDraftStore.draft.manual.propertyValues).toEqual({
+      "property-tier": "option-enterprise",
+    });
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+    expect(mockSetManual).not.toHaveBeenCalledWith(
+      expect.objectContaining({ propertyValues: expect.anything() }),
+    );
+    expect(mockSetIssueProperty).not.toHaveBeenCalled();
+  });
+
+  it.each(["ordinary", "comment-source"] as const)(
+    "removes only the rejected unavailable property from the %s draft before a manual retry",
+    async (path) => {
+      const user = userEvent.setup();
+      const onClose = vi.fn();
+      mockDraftStore.draft.manual = {
+        ...mockDraftStore.draft.manual,
+        title: "Keep this draft",
+        description: "Keep this body",
+        assigneeType: "member",
+        assigneeId: "user-1",
+        propertyValues: {
+          "property-stale": "old value",
+          "property-tier": "option-enterprise",
+        },
+      };
+      mockDraftStore.draft.shared.priority = "high";
+      const originalDraft = structuredClone(mockDraftStore.draft);
+      if (path === "ordinary") {
+        // Forward the modal's draft writes to the real persisted store, so
+        // this regression also checks the workspace storage boundary.
+        const { useIssueDraftStore: persistedStore } = await vi.importActual<
+          typeof import("@multica/core/issues/stores/draft-store")
+        >("@multica/core/issues/stores/draft-store");
+        const { setCurrentWorkspace } = await import("@multica/core/platform");
+        setCurrentWorkspace("property-recovery", "ws-test");
+        onTestFinished(() => {
+          setCurrentWorkspace(null, null);
+          localStorage.removeItem("multica_issue_draft:property-recovery");
+        });
+        await Promise.resolve();
+        persistedStore.setState({
+          draft: { ...structuredClone(originalDraft), shared: { ...originalDraft.shared, attachments: [] } },
+          isolatedDraftBackup: undefined,
+        });
+        mockSetManual.mockImplementation((patch: Partial<typeof mockDraftStore.draft.manual>) => {
+          persistedStore.getState().setManual(patch);
+          mockDraftStore.draft.manual = { ...mockDraftStore.draft.manual, ...patch };
+        });
+      }
+      const create = path === "ordinary" ? mockCreateIssue : mockCreateCommentSubIssue;
+      create.mockRejectedValueOnce(
+        new ApiError("Property is unavailable", 400, "Bad Request", {
+          code: "invalid_issue_property",
+          property_id: "property-stale",
+        }),
+      );
+      const panel = (
+        <ManualCreatePanel
+          data={path === "comment-source" ? sourceContextPanelData() : undefined}
+          onClose={onClose}
+          onSwitchMode={vi.fn()}
+          isExpanded={false}
+          setIsExpanded={vi.fn()}
+        />
+      );
+      const view = renderModal(panel);
+      await screen.findByRole("button", { name: "Edit Customer tier" });
+      await user.click(screen.getByRole("button", { name: "Create Issue" }));
+
+      expect(await screen.findByRole("alert")).toHaveTextContent(
+        "An unavailable custom property was removed from the draft. Review it before submitting again.",
+      );
+      const submittedIssue = (index: number) => path === "ordinary"
+        ? create.mock.calls[index]?.[0]
+        : create.mock.calls[index]?.[1].issue;
+      // Nothing is filtered before the server identifies the invalid field.
+      expect(submittedIssue(0).properties).toEqual(originalDraft.manual.propertyValues);
+      expect(create).toHaveBeenCalledTimes(1);
+      expect(onClose).not.toHaveBeenCalled();
+      expect(mockClearDraft).not.toHaveBeenCalled();
+      expect(mockToastError).not.toHaveBeenCalled();
+      expect(screen.getByPlaceholderText("Issue title")).toHaveValue("Keep this draft");
+      expect(screen.getByPlaceholderText("Add description...")).toHaveValue("Keep this body");
+      const remainingProperties = { "property-tier": "option-enterprise" };
+      expect(mockSetManual).toHaveBeenCalledWith({ propertyValues: remainingProperties });
+      expect(mockDraftStore.draft).toEqual({
+        ...originalDraft,
+        manual: { ...originalDraft.manual, propertyValues: remainingProperties },
+      });
+      if (path === "ordinary") {
+        const persisted = JSON.parse(localStorage.getItem("multica_issue_draft:property-recovery")!);
+        expect(persisted.state.draft).toEqual(mockDraftStore.draft);
+      }
+
+      // A user-initiated retry reads the updated local selection, not the
+      // rejected payload. Keep this retry open so reopening can check the store.
+      create.mockRejectedValueOnce(new Error("Try again later"));
+      await user.click(screen.getByRole("button", { name: "Create Issue" }));
+      await waitFor(() => expect(create).toHaveBeenCalledTimes(2));
+      expect(submittedIssue(1)).toMatchObject({
+        title: "Keep this draft",
+        description: "Keep this body",
+        assignee_type: "member",
+        assignee_id: "user-1",
+        status: "todo",
+        priority: "high",
+        properties: remainingProperties,
+      });
+      view.unmount();
+      renderModal(panel);
+      await user.click(screen.getByRole("button", { name: "Create Issue" }));
+      await waitFor(() => expect(create).toHaveBeenCalledTimes(3));
+      expect(submittedIssue(2).properties).toEqual(remainingProperties);
+      expect(mockSetIssueProperty).not.toHaveBeenCalled();
+    },
+  );
+
+  it.each([undefined, "", 42, "property-not-submitted", "toString"])(
+    "does not change the draft for an unlocatable property error (%s)",
+    async (propertyId) => {
+      const user = userEvent.setup();
+      mockDraftStore.draft.manual.title = "Keep this draft";
+      mockDraftStore.draft.manual.propertyValues = { "property-stale": "old value" };
+      const originalDraft = structuredClone(mockDraftStore.draft);
+      mockCreateIssue.mockRejectedValueOnce(
+        new ApiError("Invalid property", 400, "Bad Request", {
+          code: "invalid_issue_property",
+          property_id: propertyId,
+        }),
+      );
+      renderModal(<CreateIssueModal onClose={vi.fn()} />);
+      await screen.findByText("Customer tier");
+      await user.click(screen.getByRole("button", { name: "Create Issue" }));
+
+      await waitFor(() => expect(mockToastError).toHaveBeenCalledWith("Invalid property"));
+      expect(mockDraftStore.draft).toEqual(originalDraft);
+      expect(mockSetManual).not.toHaveBeenCalledWith(
+        expect.objectContaining({ propertyValues: expect.anything() }),
+      );
+      expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+      expect(document.querySelector('[data-property-error="true"]')).toBeNull();
+    },
+  );
+
+  it("does not treat an unloaded property catalog as an unavailable property", async () => {
+    const user = userEvent.setup();
+    mockDraftStore.draft.manual.title = "Keep this draft";
+    mockDraftStore.draft.manual.propertyValues = { "property-tier": "option-enterprise" };
+    mockListProperties.mockReturnValueOnce(new Promise(() => {}));
+    mockCreateIssue.mockRejectedValueOnce(
+      new ApiError("Invalid property", 400, "Bad Request", {
+        code: "invalid_issue_property",
+        property_id: "property-tier",
+      }),
+    );
+    renderModal(<CreateIssueModal onClose={vi.fn()} />);
+    await user.click(screen.getByRole("button", { name: "Create Issue" }));
+
+    await waitFor(() => expect(mockToastError).toHaveBeenCalledWith("Invalid property"));
+    expect(mockDraftStore.draft.manual.propertyValues).toEqual({ "property-tier": "option-enterprise" });
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+  });
+
+  it("preserves edits made while the unavailable-property error is pending", async () => {
+    const user = userEvent.setup();
+    mockDraftStore.draft.manual.title = "Draft before submit";
+    mockDraftStore.draft.manual.propertyValues = {
+      "property-stale": "old value",
+      "property-tier": "option-old",
+    };
+    let rejectCreate!: (error: Error) => void;
+    mockCreateIssue.mockImplementationOnce(() => new Promise((_, reject) => { rejectCreate = reject; }));
+    renderModal(<CreateIssueModal onClose={vi.fn()} />);
+    await screen.findByRole("button", { name: "Edit Customer tier" });
+    await user.click(screen.getByRole("button", { name: "Create Issue" }));
+    await user.type(screen.getByPlaceholderText("Issue title"), " with new edits");
+    await user.click(screen.getByRole("button", { name: "Edit Customer tier" }));
+    await act(async () => {
+      rejectCreate(new ApiError("Property is unavailable", 400, "Bad Request", {
+        code: "invalid_issue_property",
+        property_id: "property-stale",
+      }));
+    });
+
+    expect(await screen.findByRole("alert")).toBeInTheDocument();
+    expect(mockDraftStore.draft.manual.title).toBe("Draft before submit with new edits");
+    expect(mockDraftStore.draft.manual.propertyValues).toEqual({ "property-tier": "option-enterprise" });
+    await user.click(screen.getByRole("button", { name: "Create Issue" }));
+    expect(mockCreateIssue).toHaveBeenNthCalledWith(2, expect.objectContaining({
+      title: "Draft before submit with new edits",
+      properties: { "property-tier": "option-enterprise" },
+    }));
+  });
+
+  it("does not remove a property from a reopened draft after a late rejection", async () => {
+    const user = userEvent.setup();
+    mockDraftStore.draft.manual.title = "Draft before submit";
+    mockDraftStore.draft.manual.propertyValues = { "property-stale": "old value" };
+    let rejectCreate!: (error: Error) => void;
+    mockCreateIssue.mockImplementationOnce(() => new Promise((_, reject) => { rejectCreate = reject; }));
+    const view = renderModal(<CreateIssueModal onClose={vi.fn()} />);
+    await screen.findByText("Customer tier");
+    await user.click(screen.getByRole("button", { name: "Create Issue" }));
+    view.unmount();
+    mockDraftStore.draft.manual.title = "Reopened draft";
+    const reopenedDraft = structuredClone(mockDraftStore.draft);
+    renderModal(<CreateIssueModal onClose={vi.fn()} />);
+    await act(async () => {
+      rejectCreate(new ApiError("Property is unavailable", 400, "Bad Request", {
+        code: "invalid_issue_property",
+        property_id: "property-stale",
+      }));
+    });
+
+    expect(mockDraftStore.draft).toEqual(reopenedDraft);
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
   });
 
   it("persists manual-mode uploads in the issue draft", async () => {
@@ -1352,6 +1777,9 @@ describe("CreateIssueModal", () => {
 
   it("submits source-context manual create through the dedicated endpoint", async () => {
     const user = userEvent.setup();
+    mockDraftStore.draft.manual.propertyValues = {
+      "property-tier": "option-enterprise",
+    };
     renderModal(
       <ManualCreatePanel
         onClose={vi.fn()}
@@ -1370,10 +1798,14 @@ describe("CreateIssueModal", () => {
       {
         mode: "manual",
         capture_token: "sha256:preview-token",
-        issue: expect.objectContaining({ title: "Create from source comment" }),
+        issue: expect.objectContaining({
+          title: "Create from source comment",
+          properties: { "property-tier": "option-enterprise" },
+        }),
       },
     ));
     expect(mockCreateIssue).not.toHaveBeenCalled();
+    expect(mockSetIssueProperty).not.toHaveBeenCalled();
   });
 
   // Start date is a low-frequency field — by default it lives behind the

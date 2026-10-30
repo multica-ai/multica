@@ -67,7 +67,10 @@ services:
       DATABASE_REPLICA_URL: ${DATABASE_REPLICA_URL:-}
       DATABASE_REPLICA_MAX_CONNS: ${DATABASE_REPLICA_MAX_CONNS:-}
       DATABASE_REPLICA_MIN_CONNS: ${DATABASE_REPLICA_MIN_CONNS:-}
+      REDIS_URL: ${REDIS_URL:-}
+      REDIS_CLUSTER_MODE: ${REDIS_CLUSTER_MODE:-false}
       PORT: "8080"
+      MAINTENANCE_PORT: ${MAINTENANCE_PORT:-}
       METRICS_ADDR: ${METRICS_ADDR:-}
       JWT_SECRET: ${JWT_SECRET:?JWT_SECRET must be set to a strong random value — generate one with 'openssl rand -hex 32'}
       FRONTEND_ORIGIN: ${FRONTEND_ORIGIN:-http://localhost:3000}
@@ -108,6 +111,8 @@ services:
       ALLOWED_EMAILS: ${ALLOWED_EMAILS:-}
       ALLOWED_EMAIL_DOMAINS: ${ALLOWED_EMAIL_DOMAINS:-}
       DISABLE_WORKSPACE_CREATION: ${DISABLE_WORKSPACE_CREATION:-}
+      WORKSPACE_CREATION_ALLOWED_EMAILS: ${WORKSPACE_CREATION_ALLOWED_EMAILS:-}
+      DO_NOT_TRACK: ${DO_NOT_TRACK:-}
       # Managed Cloud stays off for self-hosting. All managed Cloud clients use
       # this single URL when it is configured.
       MULTICA_CLOUD_URL: ${MULTICA_CLOUD_URL:-}
@@ -152,10 +157,13 @@ services:
       # and callers fall back silently rather than failing. MULTICA_LLM_MAX_RETRIES
       # is the retry budget: unset = 2, 0 = disabled, 1-5 = an exact ceiling.
       # Anything else fails the boot instead of being silently corrected.
+      # MULTICA_LLM_DISABLE_THINKING asks gateways that honor the field to
+      # turn model reasoning off; see .env.example for the contract.
       MULTICA_LLM_API_KEY: ${MULTICA_LLM_API_KEY:-}
       MULTICA_LLM_BASE_URL: ${MULTICA_LLM_BASE_URL:-}
       MULTICA_LLM_DEFAULT_MODEL: ${MULTICA_LLM_DEFAULT_MODEL:-}
       MULTICA_LLM_MAX_RETRIES: ${MULTICA_LLM_MAX_RETRIES:-}
+      MULTICA_LLM_DISABLE_THINKING: ${MULTICA_LLM_DISABLE_THINKING:-}
       # Lark / Feishu bot integration. MULTICA_LARK_SECRET_KEY is the
       # opt-in: unset = integration disabled. Mainland 飞书 and international
       # Lark are auto-detected per installation and served side by side, so
@@ -174,6 +182,11 @@ services:
       # in the database, so this single deployment-wide key is all the operator
       # needs to set here.
       MULTICA_SLACK_SECRET_KEY: ${MULTICA_SLACK_SECRET_KEY:-}
+      # DingTalk bot integration. MULTICA_DINGTALK_SECRET_KEY is the opt-in:
+      # unset = integration disabled. It encrypts each installation's AppSecret
+      # at rest, so this single deployment-wide key is all the operator needs
+      # to set here.
+      MULTICA_DINGTALK_SECRET_KEY: ${MULTICA_DINGTALK_SECRET_KEY:-}
       # Self-hosted Git provider integration (Forgejo / Gitea / GitLab). This
       # is a self-host-only feature, so the compose file turns it on by default;
       # the managed cloud leaves it unset (off). It still needs a valid
@@ -198,6 +211,18 @@ services:
       # for a debugging session and unset it when that session ends, because
       # what it records is user message content.
       MULTICA_WECOM_TRACE: ${MULTICA_WECOM_TRACE:-}
+      # Which language the bot's own copy is written in for readers whose
+      # language cannot be looked up — a group chat, or anyone not linked to a
+      # Multica account yet. A linked person reads their own profile language
+      # instead. zh-Hans (default) or en; an unrecognised value leaves the
+      # default in place and the resolved one is logged at boot.
+      MULTICA_WECOM_DEFAULT_LOCALE: ${MULTICA_WECOM_DEFAULT_LOCALE:-}
+      # Telegram bot integration. MULTICA_TELEGRAM_SECRET_KEY is the
+      # opt-in: unset = integration disabled. It decrypts the
+      # per-installation bot token stored in channel_installation.config
+      # (bot_token_encrypted), so this single deployment-wide key is all
+      # the operator needs to set here.
+      MULTICA_TELEGRAM_SECRET_KEY: ${MULTICA_TELEGRAM_SECRET_KEY:-}
     restart: unless-stopped
 
   frontend:
@@ -212,6 +237,7 @@ services:
       DOCS_URL: ${DOCS_URL:-}
       NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-}
       NEXT_PUBLIC_WS_URL: ${NEXT_PUBLIC_WS_URL:-}
+      GOOGLE_ANALYTICS_ID: ${GOOGLE_ANALYTICS_ID:-}
     restart: unless-stopped
 
 volumes:

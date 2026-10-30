@@ -2,7 +2,7 @@
   "page": {
     "title": "스쿼드",
     "new_button": "새 스쿼드",
-    "empty_no_squads": "아직 스쿼드가 없습니다. 하나 만들어 시작하세요.",
+    "empty_no_squads": "스쿼드가 없습니다.",
     "empty_no_match": "필터와 일치하는 스쿼드가 없습니다.",
     "table": {
       "name": "스쿼드",
@@ -42,7 +42,7 @@
   },
   "add_member_dialog": {
     "title": "멤버 추가",
-    "description": "워크스페이스 멤버 또는 에이전트를 이 스쿼드에 추가합니다.",
+    "description": "워크스페이스 멤버 또는 에이전트를 선택할 수 있습니다.",
     "label_member": "멤버",
     "label_role": "역할",
     "label_optional": "(선택 사항)",
@@ -121,7 +121,7 @@
     "more_members_other": "+{{count}}명 더 보기"
   },
   "instructions_tab": {
-    "description": "스쿼드에 할당된 태스크를 리더 에이전트가 처리할 때마다 스쿼드 지침이 리더 프롬프트에 포함됩니다. 스쿼드 전체의 방향, 협업 규칙, 매 실행마다 따라야 할 맥락을 리더에게 전달할 때 사용하세요.",
+    "description": "리더는 이 스쿼드에 할당된 태스크를 처리할 때마다 이 지침을 읽습니다.",
     "unsaved_changes": "저장하지 않은 변경사항",
     "save_button": "저장",
     "placeholder": "예: 항상 실패하는 테스트부터 작성합니다. 커밋은 작고 독립적으로 유지합니다."

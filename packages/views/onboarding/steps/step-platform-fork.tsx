@@ -1,19 +1,21 @@
 "use client";
 
 import { useEffect, useState, type ReactNode } from "react";
-import { ArrowRight, Download, Loader2 } from "lucide-react";
+import { ArrowRight, Download, Loader2 } from "@multica/ui/icons";
 import { Button } from "@multica/ui/components/ui/button";
 import {
   Dialog,
   DialogContent,
-  DialogDescription,
   DialogFooter,
   DialogHeader,
   DialogTitle,
 } from "@multica/ui/components/ui/dialog";
 import { cn } from "@multica/ui/lib/utils";
 import type { AgentRuntime } from "@multica/core/types";
-import { runtimeDisplayLabel } from "@multica/core/runtimes";
+import {
+  runtimeDisplayLabel,
+  useDaemonSetupCommands,
+} from "@multica/core/runtimes";
 import {
   StepFooter,
   StepHeading,
@@ -73,6 +75,7 @@ export function StepPlatformFork({
 
   const [dialog, setDialog] = useState<DialogState>(null);
   const [connecting, setConnecting] = useState(false);
+  const [skipping, setSkipping] = useState(false);
   const [model, setModel] = useState("");
 
   const picker = useRuntimePicker(wsId, wsSlug);
@@ -98,6 +101,16 @@ export function StepPlatformFork({
       setDialog(null);
     } finally {
       setConnecting(false);
+    }
+  };
+
+  const handleSkip = async () => {
+    if (skipping) return;
+    setSkipping(true);
+    try {
+      await onNext(null);
+    } finally {
+      setSkipping(false);
     }
   };
 
@@ -141,8 +154,10 @@ export function StepPlatformFork({
         <Button
           variant="ghost"
           className="w-full"
-          onClick={() => onNext(null)}
+          disabled={skipping}
+          onClick={handleSkip}
         >
+          {skipping && <Loader2 className="h-4 w-4 animate-spin" />}
           {t(($) => $.step_runtime.skip)}
         </Button>
       </StepFooter>
@@ -171,9 +186,7 @@ export function StepPlatformFork({
   );
 }
 
-// ------------------------------------------------------------
 // Fork cards
-// ------------------------------------------------------------
 
 function ForkPrimary({ onClick }: { onClick: () => void }) {
   const { t } = useT("onboarding");
@@ -256,9 +269,7 @@ function ForkAlt({
   );
 }
 
-// ------------------------------------------------------------
 // CLI install dialog
-// ------------------------------------------------------------
 
 /**
  * Modal dialog for the CLI install path. Contains the real install
@@ -298,9 +309,6 @@ function CliInstallDialog({
       <DialogContent className="flex max-h-[85vh] flex-col sm:max-w-[560px]">
         <DialogHeader>
           <DialogTitle>{t(($) => $.step_platform.cli_dialog_title)}</DialogTitle>
-          <DialogDescription>
-            {t(($) => $.step_platform.cli_dialog_description)}
-          </DialogDescription>
         </DialogHeader>
 
         <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto pt-2">
@@ -391,10 +399,11 @@ function formatElapsed(seconds: number) {
  */
 function CliWaitingStatus({ dialogOpen }: { dialogOpen: boolean }) {
   const { t } = useT("onboarding");
+  const commands = useDaemonSetupCommands();
   const [elapsed, setElapsed] = useState(0);
 
   useEffect(() => {
-    if (!dialogOpen) {
+    if (!dialogOpen || commands.status !== "ready") {
       setElapsed(0);
       return;
     }
@@ -402,7 +411,9 @@ function CliWaitingStatus({ dialogOpen }: { dialogOpen: boolean }) {
       setElapsed((e) => e + 1);
     }, 1000);
     return () => window.clearInterval(id);
-  }, [dialogOpen]);
+  }, [dialogOpen, commands.status]);
+
+  if (commands.status !== "ready") return null;
 
   // Stage thresholds are rough — `multica setup` typical flow is
   //   ~1s save config → browser-tab auth (user-driven, 5–30s) →
@@ -446,21 +457,21 @@ function CliWaitingStatus({ dialogOpen }: { dialogOpen: boolean }) {
         {stage === "normal" && (
           <>
             {t(($) => $.step_platform.stage_normal_prefix)}
-            <span className="font-mono">{"multica setup"}</span>
+            <span className="font-mono break-all">{commands.setupCmd}</span>
             {t(($) => $.step_platform.stage_normal_suffix)}
           </>
         )}
         {stage === "midway" && (
           <>
             {t(($) => $.step_platform.stage_midway_prefix)}
-            <span className="font-mono">{"multica setup"}</span>
+            <span className="font-mono break-all">{commands.setupCmd}</span>
             {t(($) => $.step_platform.stage_midway_suffix)}
           </>
         )}
         {stage === "slow" && (
           <>
             {t(($) => $.step_platform.stage_slow_prefix)}
-            <span className="font-mono">{"multica setup"}</span>
+            <span className="font-mono break-all">{commands.setupCmd}</span>
             {t(($) => $.step_platform.stage_slow_suffix)}
           </>
         )}

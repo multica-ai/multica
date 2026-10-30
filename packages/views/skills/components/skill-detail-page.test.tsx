@@ -335,7 +335,7 @@ describe("SkillDetailPage properties", () => {
     expect(field.value).toBe(LONG_DESCRIPTION);
     expect(Number(field.rows)).toBeGreaterThanOrEqual(4);
     expect(
-      screen.getByText(`${LONG_DESCRIPTION.length} characters.`, { exact: false }),
+      screen.getByText(`${LONG_DESCRIPTION.length} characters`, { exact: false }),
     ).toBeTruthy();
   });
 });

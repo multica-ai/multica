@@ -1,9 +1,9 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { BarChart3, RefreshCw } from "lucide-react";
+import { BarChart3, RefreshCw } from "@multica/ui/icons";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { Button } from "@multica/ui/components/ui/button";
+import { IconButton } from "@multica/ui/components/common/icon-button";
 import { Skeleton } from "@multica/ui/components/ui/skeleton";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@multica/ui/components/ui/tabs";
 import {
@@ -480,15 +480,16 @@ export function DashboardPage() {
                   : tzLabel}
               </span>
             ) : null}
-            <Button
+            <IconButton
               variant="ghost"
               size="icon-sm"
-              aria-label={t(($) => $.header.refresh)}
+              label={t(($) => $.header.refresh)}
+              tooltipSide="bottom"
               onClick={handleRefresh}
               disabled={isRefreshing}
             >
               <RefreshCw className={isRefreshing ? "animate-spin" : undefined} />
-            </Button>
+            </IconButton>
           </div>
         }
       />

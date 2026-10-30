@@ -1,0 +1,12 @@
+-- Intentionally empty (MUL-7400).
+--
+-- This file reserved the `triage` status key: a CHECK that no issue_status row
+-- may be keyed `triage`, so the server could read `status = 'triage'` as "in
+-- Triage". Migration 483 moved Triage onto issue.triage_state, after which
+-- nothing reads that key as Triage and the name protects nothing. The Go side
+-- of the reservation is gone with it.
+--
+-- Emptied rather than reverted with a new migration because 475-477 have never
+-- run outside development and CI: releases deploy from tags, and the newest tag
+-- predates them. Migration 490 drops the constraint wherever a database did run
+-- this file from main.

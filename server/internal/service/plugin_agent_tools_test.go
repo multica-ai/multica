@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
+	"github.com/multica-ai/multica/server/pkg/plugincontract"
 )
 
 // Two plugins may both contribute a hook called "summarize". The agent sees one
@@ -25,8 +26,7 @@ func TestPluginToolNameNamespacesByPlugin(t *testing.T) {
 	}
 }
 
-// The separator has to be one that cannot appear inside either half, or two
-// different (plugin, hook) pairs can still land on the same string.
+// Raw keys containing separator characters must not forge another namespace.
 func TestPluginToolNameSeparatorCannotBeForged(t *testing.T) {
 	// `a.b` + `c` vs `a.b_` + `c`: with a single-underscore separator both
 	// become a_b_c.
@@ -35,6 +35,53 @@ func TestPluginToolNameSeparatorCannotBeForged(t *testing.T) {
 	}
 	if PluginToolName("x", "y__z") == PluginToolName("x__y", "z") {
 		t.Fatal("a hook key containing the separator collided with a different pair")
+	}
+}
+
+func TestPluginToolNameDistinguishesValidHookKeys(t *testing.T) {
+	var manifest plugincontract.Manifest
+	if err := json.Unmarshal([]byte(`{
+		"manifest_version": 1, "key": "com.example.checks", "name": "Checks",
+		"description": "Checks", "version": "1.0.0", "author": {"name": "example"},
+		"scopes": ["net:example.com"]
+	}`), &manifest); err != nil {
+		t.Fatal(err)
+	}
+	for _, key := range []string{
+		"check-status", "check_status", "check-status_now", "check_status-now",
+		"check-status-now", "check_status_now",
+	} {
+		manifest.Contributes.Hooks = append(manifest.Contributes.Hooks, plugincontract.Hook{
+			Key: key, Name: key, Description: "Run " + key,
+			Triggers:  []string{plugincontract.TriggerAgent},
+			Transport: plugincontract.HookTransport{Type: plugincontract.TransportHTTP, URL: "https://example.com/" + key},
+		})
+	}
+	raw, err := json.Marshal(manifest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	parsed, _, err := plugincontract.ParseManifest(raw)
+	if err != nil {
+		t.Fatalf("the hooks must be valid in the same manifest: %v", err)
+	}
+	names := make(map[string]string)
+	for _, hook := range parsed.Contributes.Hooks {
+		name := PluginToolName(parsed.Key, hook.Key)
+		if previous, exists := names[name]; exists {
+			t.Errorf("valid hooks %q and %q both map to %q", previous, hook.Key, name)
+		}
+		names[name] = hook.Key
+		if toolNameUnsafe.MatchString(name) {
+			t.Errorf("tool name %q contains provider-unsafe characters", name)
+		}
+		if again := PluginToolName(parsed.Key, hook.Key); again != name {
+			t.Errorf("tool name changed between calls: %q != %q", again, name)
+		}
+	}
+	// Existing keys without hyphens retain their advertised names.
+	if got := PluginToolName(parsed.Key, "check_status"); got != "checks_ae2ab7__check_status" {
+		t.Errorf("underscore-only hook name changed: %q", got)
 	}
 }
 

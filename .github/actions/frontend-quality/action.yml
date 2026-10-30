@@ -1,0 +1,22 @@
+name: Frontend quality
+description: Shared UI checks using the caller's installed dependencies
+runs:
+  using: composite
+  steps:
+    - name: Check packages/ui wildcard exports
+      shell: bash
+      run: |
+        bash scripts/check-ui-wildcard-exports.test.sh
+        node scripts/check-ui-wildcard-exports.mjs
+
+    - name: Check UI radius tokens
+      shell: bash
+      run: |
+        node --test scripts/check-ui-radius-tokens.test.mjs
+        node scripts/check-ui-radius-tokens.mjs
+
+    # Keep existing knip findings advisory in either caller.
+    - name: Check for dead code and phantom dependencies (knip)
+      continue-on-error: true
+      shell: bash
+      run: pnpm knip

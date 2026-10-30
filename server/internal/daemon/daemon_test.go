@@ -163,6 +163,9 @@ func TestIsBlockedEnvKey(t *testing.T) {
 		{key: "CURSOR_MCP_AUTH_SOURCE", want: true},
 		{key: "OPENCLAW_CONFIG_PATH", want: true},
 		{key: "OPENCLAW_INCLUDE_ROOTS", want: true},
+		// OPENCLAW_STATE_DIR is intentionally NOT blocked so users can give an
+		// agent a dedicated OpenClaw state directory when the default is locked.
+		{key: "OPENCLAW_STATE_DIR", want: false},
 		{key: "ANTHROPIC_API_KEY", want: false},
 		{key: "CURSOR_AGENT", want: false},
 		// HERMES_HOME is intentionally NOT blocked: a skill-less Hermes task
@@ -187,7 +190,7 @@ func TestIsBlockedEnvKey(t *testing.T) {
 
 func TestPrepareReasonixTaskStateHome(t *testing.T) {
 	home := t.TempDir()
-	t.Setenv("HOME", home)
+	redirectTestHome(t, home)
 	t.Setenv("USERPROFILE", home)
 
 	got, err := prepareReasonixTaskStateHome("work", "runtime-1", "agent_2")
@@ -209,7 +212,7 @@ func TestPrepareReasonixTaskStateHome(t *testing.T) {
 
 func TestPrepareDshTaskSessionRoot(t *testing.T) {
 	home := t.TempDir()
-	t.Setenv("HOME", home)
+	redirectTestHome(t, home)
 	t.Setenv("USERPROFILE", home)
 
 	got, err := prepareDshTaskSessionRoot("work", "runtime-1", "agent_2")
@@ -547,7 +550,7 @@ func TestTaskMulticaEnvironmentIncludesPrivateConfigRoot(t *testing.T) {
 		AgentID:     "agent-test",
 		WorkspaceID: "workspace-test",
 	}
-	env := taskMulticaEnvironment(task, "agent-name", fakeToken, taskRoot, workspacesRoot, "https://task.example", 19514, 3, "/task/tmp")
+	env := taskMulticaEnvironment(task, "codex", "agent-name", fakeToken, taskRoot, workspacesRoot, "https://task.example", 19514, 3, "/task/tmp")
 
 	want := map[string]string{
 		"MULTICA_TOKEN":                fakeToken,
@@ -563,6 +566,11 @@ func TestTaskMulticaEnvironmentIncludesPrivateConfigRoot(t *testing.T) {
 		"TMPDIR":                       "/task/tmp",
 		"TMP":                          "/task/tmp",
 		"TEMP":                         "/task/tmp",
+	}
+	if runtime.GOOS == "windows" {
+		// Windows tasks inherit host TMP/TEMP; see TestTaskMulticaEnvironmentTempPolicy.
+		delete(want, "TMP")
+		delete(want, "TEMP")
 	}
 	if !maps.Equal(env, want) {
 		t.Fatalf("taskMulticaEnvironment() = %#v, want %#v", env, want)
@@ -581,6 +589,81 @@ func TestTaskMulticaEnvironmentIncludesPrivateConfigRoot(t *testing.T) {
 	}
 	if env["MULTICA_TOKEN"] != fakeToken {
 		t.Fatal("custom env replaced task-scoped token")
+	}
+}
+
+func TestHermesTaskEnvPassthroughCoversTaskEnvironment(t *testing.T) {
+	t.Parallel()
+	names := execenv.HermesTaskEnvPassthroughNames()
+	seen := make(map[string]bool, len(names))
+	for _, name := range names {
+		if !strings.HasPrefix(name, "MULTICA_") || seen[name] {
+			t.Errorf("invalid or duplicate Hermes task environment name: %q", name)
+		}
+		seen[name] = true
+	}
+	env := taskMulticaEnvironment(Task{ID: "task-test", AgentID: "agent-test", WorkspaceID: "workspace-test"},
+		"hermes", "agent-name", "mat_fixture", "/task/config", "/task/workspaces", "https://task.example", 19514, 3, "/task/tmp")
+	for name := range env {
+		if strings.HasPrefix(name, "MULTICA_") && !seen[name] {
+			t.Errorf("daemon injects %s but Hermes tool subprocesses will drop it", name)
+		}
+	}
+}
+
+func TestTaskMulticaEnvironmentTempPolicy(t *testing.T) {
+	t.Setenv("CLAUDE_CODE_TMPDIR", "")
+	for _, provider := range []string{"claude", "codex", "pi", "opencode", "cursor"} {
+		t.Run(provider, func(t *testing.T) {
+			env := taskMulticaEnvironment(Task{}, provider, "", "", "", "", "", 0, 0, "/task/tmp")
+			if env["TMPDIR"] != "/task/tmp" {
+				t.Fatalf("TMPDIR = %q, want private task temp", env["TMPDIR"])
+			}
+			if runtime.GOOS == "windows" {
+				// Every provider can start Git Bash, whose /tmp mount is shared.
+				for _, key := range []string{"TMP", "TEMP"} {
+					if _, overridden := env[key]; overridden {
+						t.Errorf("%s must inherit the host path for Git Bash's shared /tmp", key)
+					}
+				}
+			} else {
+				for _, key := range []string{"TMP", "TEMP"} {
+					if env[key] != "/task/tmp" {
+						t.Errorf("%s = %q, want existing private task temp", key, env[key])
+					}
+				}
+			}
+			wantClaudeTemp := runtime.GOOS == "windows" && provider == "claude"
+			if got, ok := env["CLAUDE_CODE_TMPDIR"]; wantClaudeTemp && got != "/task/tmp" {
+				t.Errorf("CLAUDE_CODE_TMPDIR = %q, want private task temp", got)
+			} else if !wantClaudeTemp && ok {
+				t.Error("only Windows Claude gets a CLAUDE_CODE_TMPDIR default")
+			}
+		})
+	}
+}
+
+func TestTaskMulticaEnvironmentRespectsClaudeTempOverride(t *testing.T) {
+	t.Setenv("CLAUDE_CODE_TMPDIR", "/user/claude-temp")
+	env := taskMulticaEnvironment(Task{}, "claude", "", "", "", "", "", 0, 0, "/task/tmp")
+	if _, overridden := env["CLAUDE_CODE_TMPDIR"]; overridden {
+		t.Fatal("inherited user CLAUDE_CODE_TMPDIR must remain authoritative")
+	}
+	t.Setenv("CLAUDE_CODE_TMPDIR", "")
+	for _, key := range []string{"CLAUDE_CODE_TMPDIR", "claude_code_tmpdir"} {
+		for _, value := range []string{"/custom/claude-temp", ""} {
+			custom := map[string]string{key: value}
+			env = taskMulticaEnvironment(Task{Agent: &AgentData{CustomEnv: custom}}, "claude", "", "", "", "", "", 0, 0, "/task/tmp")
+			layerCustomEnvAndHermesHome(env, custom, "", nil)
+			if env[key] != value {
+				t.Fatalf("custom %s = %q, want user's %q", key, env[key], value)
+			}
+			for name := range env {
+				if strings.EqualFold(name, key) && name != key {
+					t.Errorf("duplicate Windows temp key %q conflicts with user's %q", name, key)
+				}
+			}
+		}
 	}
 }
 
@@ -2000,7 +2083,7 @@ func TestGateResumeToReachableSession(t *testing.T) {
 			task := Task{PriorSessionID: tt.sessionID, PriorWorkDir: priorDir}
 			taskCtx := execenv.TaskContextForEnv{PriorSessionResumed: tt.sessionID != ""}
 
-			reachable := gateResumeToReachableSession(&task, &taskCtx, "claude", envDir, !tt.sessionHomeUnreachable, false, slog.Default())
+			reachable := gateResumeToReachableSession(&task, &taskCtx, "claude", envDir, !tt.sessionHomeUnreachable, false, false, slog.Default())
 
 			if reachable != tt.wantReused {
 				t.Fatalf("reachable = %v, want %v", reachable, tt.wantReused)
@@ -2016,6 +2099,168 @@ func TestGateResumeToReachableSession(t *testing.T) {
 			wantUnavailable := tt.sessionID != "" && tt.wantSession == ""
 			if taskCtx.PriorSessionResumeUnavailable != wantUnavailable {
 				t.Fatalf("PriorSessionResumeUnavailable = %v, want %v", taskCtx.PriorSessionResumeUnavailable, wantUnavailable)
+			}
+		})
+	}
+}
+
+func TestGateCodexResumeAcrossLocalWorktrees(t *testing.T) {
+	priorDir, workDir, codexHome := t.TempDir(), t.TempDir(), t.TempDir()
+	rollout := filepath.Join(codexHome, "sessions", "2026", "10", "13", "rollout-2026-10-13T00-00-00-session-1.jsonl")
+	if err := os.MkdirAll(filepath.Dir(rollout), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(rollout, []byte("{}"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	for _, tt := range []struct {
+		name           string
+		provider       string
+		localWorktree  *execenv.LocalWorktree
+		localDirectory bool
+		stableStore    bool
+		codexHome      bool
+		sameWorkdir    bool
+		rolloutPresent bool
+		wantResume     bool
+	}{
+		{name: "continued branch and rollout", provider: "codex", localWorktree: &execenv.LocalWorktree{Continued: true}, stableStore: true, codexHome: true, rolloutPresent: true, wantResume: true},
+		{name: "new branch", provider: "codex", localWorktree: &execenv.LocalWorktree{}, stableStore: true, codexHome: true, rolloutPresent: true},
+		{name: "missing conversation key", provider: "codex", localWorktree: &execenv.LocalWorktree{Continued: true}, codexHome: true, rolloutPresent: true},
+		{name: "missing Codex home", provider: "codex", localWorktree: &execenv.LocalWorktree{Continued: true}, stableStore: true, rolloutPresent: true},
+		{name: "missing rollout", provider: "codex", localWorktree: &execenv.LocalWorktree{Continued: true}, stableStore: true, codexHome: true},
+		{name: "managed workdir", provider: "codex", stableStore: true, codexHome: true, rolloutPresent: true},
+		{name: "in-place changed workdir", provider: "codex", localDirectory: true, stableStore: true, codexHome: true, rolloutPresent: true},
+		{name: "in-place same workdir", provider: "codex", localDirectory: true, stableStore: true, codexHome: true, sameWorkdir: true, rolloutPresent: true, wantResume: true},
+		{name: "other provider", provider: "claude", localWorktree: &execenv.LocalWorktree{Continued: true}, stableStore: true, codexHome: true, rolloutPresent: true},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			task := Task{PriorSessionID: "session-1", PriorWorkDir: priorDir}
+			taskCtx := execenv.TaskContextForEnv{AgentID: "agent-1", PriorSessionResumed: true}
+			if tt.stableStore {
+				taskCtx.IssueID = "issue-1"
+			}
+			env := &execenv.Environment{WorkDir: workDir, LocalDirectory: tt.localDirectory, LocalWorktree: tt.localWorktree}
+			if tt.codexHome {
+				env.CodexHome = codexHome
+			}
+			if tt.sameWorkdir {
+				env.WorkDir = priorDir
+			}
+			store := execenv.CodexSessionStorePath("test", taskCtx)
+			eligible := codexWorktreeResumeEligible(env, store)
+			if got := gateResumeToReachableSession(&task, &taskCtx, tt.provider, env.WorkDir, true, false, eligible, slog.Default()); got {
+				if tt.provider == "codex" && !tt.rolloutPresent {
+					gateCodexResumeToRolloutPresence(&task, &taskCtx, tt.provider, t.TempDir(), slog.Default())
+				} else {
+					gateCodexResumeToRolloutPresence(&task, &taskCtx, tt.provider, env.CodexHome, slog.Default())
+				}
+			}
+			if got := task.PriorSessionID != ""; got != tt.wantResume {
+				t.Fatalf("resume=%v, want %v", got, tt.wantResume)
+			}
+			if taskCtx.PriorSessionResumed != tt.wantResume || task.PriorSessionResumeUnavailable == tt.wantResume || taskCtx.PriorSessionResumeUnavailable == tt.wantResume {
+				t.Fatalf("inconsistent resume state: task=%+v taskCtx=%+v", task, taskCtx)
+			}
+		})
+	}
+}
+
+// Hermes resumes from HERMES_HOME, independently of the task's cwd (#9062).
+func TestGateHermesResumeToSessionHome(t *testing.T) {
+	t.Parallel()
+	for _, tt := range []struct {
+		name        string
+		sameWorkdir bool
+		history     bool
+		envReused   bool
+		noStore     bool
+		want        bool
+	}{
+		{name: "changed worktree with history", history: true, want: true},
+		{name: "in place with history", sameWorkdir: true, history: true, want: true},
+		{name: "changed worktree with unavailable history"},
+		{name: "in place with unavailable history", sameWorkdir: true},
+		{name: "empty store despite reused environment", sameWorkdir: true, envReused: true},
+		{name: "unmounted store in fresh environment", noStore: true},
+		{name: "task local history in reused environment", sameWorkdir: true, noStore: true, envReused: true, want: true},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			priorDir, workDir := t.TempDir(), t.TempDir()
+			if tt.sameWorkdir {
+				workDir = priorDir
+			}
+			env := &execenv.Environment{HermesSessionStore: "conversation-store", HermesSessionHistoryPresent: tt.history}
+			if tt.noStore {
+				env.HermesSessionStore = ""
+			}
+			task := Task{PriorSessionID: "session-1", PriorWorkDir: priorDir}
+			taskCtx := execenv.TaskContextForEnv{PriorSessionResumed: true}
+			got := gateResumeToReachableSession(&task, &taskCtx, "hermes", workDir,
+				sessionHomeReachable("hermes", env, tt.envReused), false, false, slog.Default())
+			if got != tt.want || (task.PriorSessionID == "session-1") != tt.want || taskCtx.PriorSessionResumed != tt.want {
+				t.Fatalf("resume = %v, session = %q, resumed = %v; want %v", got, task.PriorSessionID, taskCtx.PriorSessionResumed, tt.want)
+			}
+			if task.PriorSessionResumeUnavailable != !tt.want || taskCtx.PriorSessionResumeUnavailable != !tt.want {
+				t.Fatal("session continuity notice does not match reachability")
+			}
+		})
+	}
+}
+
+func TestHermesPreparedSessionReachability(t *testing.T) {
+	// Keep profile/store resolution inside synthetic homes, never the user's.
+	t.Setenv("MULTICA_TASK_CONFIG_ROOT", "")
+	home := t.TempDir()
+	redirectTestHome(t, home)
+	t.Setenv("USERPROFILE", home)
+	sourceHome, root := t.TempDir(), t.TempDir()
+	taskNumber := 0
+	prepare := func(t *testing.T, agentID, issueID string) *execenv.Environment {
+		t.Helper()
+		taskCtx := execenv.TaskContextForEnv{AgentID: agentID, IssueID: issueID,
+			AgentSkills: []execenv.SkillContextForEnv{{Name: "fixture", Content: "synthetic skill"}},
+		}
+		taskNumber++
+		env, err := execenv.Prepare(execenv.PrepareParams{
+			WorkspacesRoot: root, WorkspaceID: "workspace-1", TaskID: fmt.Sprintf("task-%012d", taskNumber),
+			Provider: "hermes", HermesSourceHome: sourceHome, Task: taskCtx,
+			HermesSessionStore: execenv.HermesSessionStorePath("", agentID, sourceHome, taskCtx),
+		}, slog.Default())
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() { _ = env.Cleanup(true) })
+		return env
+	}
+	first := prepare(t, "agent-1", "issue-1")
+	if first.HermesSessionStore == "" {
+		if runtime.GOOS == "windows" {
+			t.Skip("host cannot mount Hermes session stores")
+		}
+		t.Fatal("Hermes session store was not mounted")
+	}
+	if err := os.WriteFile(filepath.Join(first.HermesHome, "state.db"), []byte("synthetic transcript"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	for _, tt := range []struct {
+		name, agentID, issueID string
+		want                   bool
+	}{
+		{"same conversation in fresh workdir", "agent-1", "issue-1", true},
+		{"different issue", "agent-1", "issue-2", false},
+		{"different agent", "agent-2", "issue-1", false},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			env := prepare(t, tt.agentID, tt.issueID)
+			if sameExistingDir(first.WorkDir, env.WorkDir) {
+				t.Fatal("fixture must prepare a different task workdir")
+			}
+			task := Task{PriorSessionID: "session-1", PriorWorkDir: first.WorkDir}
+			taskCtx := execenv.TaskContextForEnv{PriorSessionResumed: true}
+			if got := gateResumeToReachableSession(&task, &taskCtx, "hermes", env.WorkDir,
+				sessionHomeReachable("hermes", env, false), false, false, slog.Default()); got != tt.want {
+				t.Fatalf("reachable = %v, want %v", got, tt.want)
 			}
 		})
 	}
@@ -2045,7 +2290,7 @@ func TestGatePiResumeToSessionFile(t *testing.T) {
 			task := Task{PriorSessionID: sessionFile, PriorWorkDir: priorDir}
 			taskCtx := execenv.TaskContextForEnv{PriorSessionResumed: true}
 
-			reachable := gateResumeToReachableSession(&task, &taskCtx, provider, envDir, true, providerRefusesMissingSessionCwd(provider, true), slog.Default())
+			reachable := gateResumeToReachableSession(&task, &taskCtx, provider, envDir, true, providerRefusesMissingSessionCwd(provider, true), false, slog.Default())
 
 			if !reachable {
 				t.Fatal("Pi-family session file should remain reachable across workdirs")
@@ -2105,7 +2350,7 @@ func TestGatePiResumeDropsUnusableSessionFile(t *testing.T) {
 			task := Task{PriorSessionID: sessionPath, PriorWorkDir: workDir}
 			taskCtx := execenv.TaskContextForEnv{PriorSessionResumed: true}
 
-			reachable := gateResumeToReachableSession(&task, &taskCtx, "pi", workDir, true, providerRefusesMissingSessionCwd("pi", true), slog.Default())
+			reachable := gateResumeToReachableSession(&task, &taskCtx, "pi", workDir, true, providerRefusesMissingSessionCwd("pi", true), false, slog.Default())
 
 			if reachable {
 				t.Fatalf("%s Pi session was treated as reachable", test.name)
@@ -2276,7 +2521,7 @@ func TestGatePiResumeChecksRecordedCwd(t *testing.T) {
 				task := Task{PriorSessionID: sessionPath, PriorWorkDir: liveDir}
 				taskCtx := execenv.TaskContextForEnv{PriorSessionResumed: true}
 
-				reachable := gateResumeToReachableSession(&task, &taskCtx, provider, workDir, true, runtime.refusesMissingCwd, slog.Default())
+				reachable := gateResumeToReachableSession(&task, &taskCtx, provider, workDir, true, runtime.refusesMissingCwd, false, slog.Default())
 
 				if reachable != wantReachable {
 					t.Fatalf("reachable = %v, want %v", reachable, wantReachable)
@@ -2548,7 +2793,9 @@ func TestExecuteAndDrain_ResumeFailureFallback(t *testing.T) {
 	t.Parallel()
 
 	d := newTestDaemon(t)
-	ctx := context.Background()
+	capture := newTaskPhaseCaptureHandler()
+	recorder := newTaskPhaseRecorder(slog.New(capture), time.Now)
+	ctx := withTaskPhaseRecorder(context.Background(), recorder)
 	taskLog := slog.Default()
 
 	fb := &fakeBackend{
@@ -2571,6 +2818,9 @@ func TestExecuteAndDrain_ResumeFailureFallback(t *testing.T) {
 	}
 	if result.Status != "failed" || result.SessionID != "" {
 		t.Fatalf("expected failed result with empty SessionID, got %+v", result)
+	}
+	if slices.Contains(capture.phasesSnapshot(), taskPhaseTurnCompleted) {
+		t.Fatal("turn_completed was recorded for the discarded resume attempt")
 	}
 
 	// Mirrors the retry in runTask, gated on the same production predicate.
@@ -2598,6 +2848,13 @@ func TestExecuteAndDrain_ResumeFailureFallback(t *testing.T) {
 	// Second call should NOT have ResumeSessionID.
 	if fb.calls[1].ResumeSessionID != "" {
 		t.Fatal("retry should not have ResumeSessionID")
+	}
+	if slices.Contains(capture.phasesSnapshot(), taskPhaseTurnCompleted) {
+		t.Fatal("executeAndDrain recorded turn_completed before runTask reconciled the final attempt")
+	}
+	recorder.Mark(taskPhaseTurnCompleted) // Mirrors runTask after fresh-retry reconciliation.
+	if got, want := capture.phasesSnapshot(), []taskPhase{taskPhaseRuntimeStarted, taskPhaseTurnCompleted}; !slices.Equal(got, want) {
+		t.Fatalf("task phases = %v, want %v", got, want)
 	}
 }
 
@@ -2676,6 +2933,241 @@ func TestExecuteAndDrain_FlushesTranscriptBeforeReturningResult(t *testing.T) {
 
 	if got := rec.snapshot(); len(got) != 2 {
 		t.Fatalf("expected the transcript flushed before the result hand-off, got %d messages: %+v", len(got), got)
+	}
+}
+
+type firstVisibleTranscriptBackend struct {
+	emitted chan time.Time
+	release chan struct{}
+}
+
+func (b firstVisibleTranscriptBackend) Execute(ctx context.Context, _ string, _ agent.ExecOptions) (*agent.Session, error) {
+	msgCh := make(chan agent.Message)
+	resCh := make(chan agent.Result, 1)
+	go func() {
+		defer close(msgCh)
+		msgCh <- agent.Message{Type: agent.MessageText, Content: "first visible text"}
+		b.emitted <- time.Now()
+		select {
+		case <-b.release:
+			resCh <- agent.Result{Status: "completed", Output: "done"}
+		case <-ctx.Done():
+			resCh <- agent.Result{Status: "cancelled", Error: ctx.Err().Error()}
+		}
+		close(resCh)
+	}()
+	return &agent.Session{Messages: msgCh, Result: resCh}, nil
+}
+
+// TestExecuteAndDrain_ReportsFirstVisibleMessageWithoutTickerDelay pins the
+// leading edge of the daemon-to-server path. Later chunks remain batched, but
+// the first user-visible content must not sit behind the 500 ms periodic flush.
+func TestExecuteAndDrain_ReportsFirstVisibleMessageWithoutTickerDelay(t *testing.T) {
+	emitted := make(chan time.Time, 1)
+	release := make(chan struct{})
+	reported := make(chan time.Time, 1)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasSuffix(r.URL.Path, "/messages") {
+			var body struct {
+				Messages []TaskMessageData `json:"messages"`
+			}
+			if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+				t.Errorf("decode messages: %v", err)
+				http.Error(w, "bad request", http.StatusBadRequest)
+				return
+			}
+			if len(body.Messages) > 0 {
+				select {
+				case reported <- time.Now():
+				default:
+				}
+			}
+		}
+		w.WriteHeader(http.StatusOK)
+	}))
+	t.Cleanup(srv.Close)
+
+	d := &Daemon{client: NewClient(srv.URL), logger: slog.Default()}
+	done := make(chan error, 1)
+	go func() {
+		_, _, err := d.executeAndDrain(context.Background(), firstVisibleTranscriptBackend{
+			emitted: emitted,
+			release: release,
+		}, "p", agent.ExecOptions{}, slog.Default(), "task-first-visible", "", new(atomic.Int32))
+		done <- err
+	}()
+
+	emittedAt := <-emitted
+	select {
+	case reportedAt := <-reported:
+		delay := reportedAt.Sub(emittedAt)
+		t.Logf("first visible message reached the server in %s", delay.Round(time.Millisecond))
+		if delay >= 300*time.Millisecond {
+			t.Fatalf("first visible message report delay = %s, want <300ms", delay.Round(time.Millisecond))
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for first visible message report")
+	}
+	close(release)
+	if err := <-done; err != nil {
+		t.Fatalf("executeAndDrain: %v", err)
+	}
+}
+
+// timedTranscriptBackend keeps a tool open long enough to prove the daemon
+// records event occurrence time rather than giving a whole flush batch one
+// server insertion time.
+type timedTranscriptBackend struct{}
+
+func (timedTranscriptBackend) Execute(_ context.Context, _ string, _ agent.ExecOptions) (*agent.Session, error) {
+	msgCh := make(chan agent.Message)
+	resCh := make(chan agent.Result, 1)
+	go func() {
+		msgCh <- agent.Message{Type: agent.MessageToolUse, Tool: "bash", CallID: "timed"}
+		time.Sleep(10 * time.Millisecond)
+		msgCh <- agent.Message{Type: agent.MessageToolResult, Tool: "bash", CallID: "timed", Output: "ok"}
+		close(msgCh)
+		resCh <- agent.Result{Status: "completed", Output: "done"}
+		close(resCh)
+	}()
+	return &agent.Session{Messages: msgCh, Result: resCh}, nil
+}
+
+func TestExecuteAndDrain_ReportsPerEventTimestamps(t *testing.T) {
+	t.Parallel()
+
+	d, rec := newTranscriptRecorder(t)
+	if _, _, err := d.executeAndDrain(context.Background(), timedTranscriptBackend{}, "p", agent.ExecOptions{}, slog.Default(), "task-timing", "", new(atomic.Int32)); err != nil {
+		t.Fatalf("executeAndDrain: %v", err)
+	}
+
+	got := rec.snapshot()
+	if len(got) != 2 {
+		t.Fatalf("reported %d messages, want tool use and result: %+v", len(got), got)
+	}
+	if got[0].CreatedAt.IsZero() || !got[1].CreatedAt.After(got[0].CreatedAt) {
+		t.Fatalf("event timestamps = [%s, %s], want distinct ordered times", got[0].CreatedAt, got[1].CreatedAt)
+	}
+}
+
+type chunkedTranscriptBackend struct {
+	thinkingSecondStartedAt chan time.Time
+	textSecondStartedAt     chan time.Time
+}
+
+func (b *chunkedTranscriptBackend) Execute(_ context.Context, _ string, _ agent.ExecOptions) (*agent.Session, error) {
+	msgCh := make(chan agent.Message)
+	resCh := make(chan agent.Result, 1)
+	go func() {
+		msgCh <- agent.Message{Type: agent.MessageThinking, Content: "think one "}
+		time.Sleep(20 * time.Millisecond)
+		b.thinkingSecondStartedAt <- time.Now()
+		msgCh <- agent.Message{Type: agent.MessageThinking, Content: "think two"}
+
+		msgCh <- agent.Message{Type: agent.MessageText, Content: "text one "}
+		time.Sleep(20 * time.Millisecond)
+		b.textSecondStartedAt <- time.Now()
+		msgCh <- agent.Message{Type: agent.MessageText, Content: "text two"}
+		close(msgCh)
+		resCh <- agent.Result{Status: "completed", Output: "done"}
+		close(resCh)
+	}()
+	return &agent.Session{Messages: msgCh, Result: resCh}, nil
+}
+
+func TestExecuteAndDrain_ReportsFirstBufferedChunkTimestamp(t *testing.T) {
+	t.Parallel()
+
+	backend := &chunkedTranscriptBackend{
+		thinkingSecondStartedAt: make(chan time.Time, 1),
+		textSecondStartedAt:     make(chan time.Time, 1),
+	}
+	d, rec := newTranscriptRecorder(t)
+	if _, _, err := d.executeAndDrain(context.Background(), backend, "p", agent.ExecOptions{}, slog.Default(), "task-chunks", "", new(atomic.Int32)); err != nil {
+		t.Fatalf("executeAndDrain: %v", err)
+	}
+
+	got := rec.snapshot()
+	var thinking, text strings.Builder
+	var thinkingAt, textAt time.Time
+	for _, message := range got {
+		switch message.Type {
+		case "thinking":
+			thinking.WriteString(message.Content)
+			if thinkingAt.IsZero() {
+				thinkingAt = message.CreatedAt
+			}
+		case "text":
+			text.WriteString(message.Content)
+			if textAt.IsZero() {
+				textAt = message.CreatedAt
+			}
+		}
+	}
+	if thinking.String() != "think one think two" {
+		t.Fatalf("thinking content = %q, want complete ordered chunks; messages=%+v", thinking.String(), got)
+	}
+	if boundary := <-backend.thinkingSecondStartedAt; !thinkingAt.Before(boundary) {
+		t.Fatalf("first thinking created_at = %s, want before second chunk started at %s", thinkingAt, boundary)
+	}
+	if text.String() != "text one text two" {
+		t.Fatalf("text content = %q, want complete ordered chunks; messages=%+v", text.String(), got)
+	}
+	if boundary := <-backend.textSecondStartedAt; !textAt.Before(boundary) {
+		t.Fatalf("first text created_at = %s, want before second chunk started at %s", textAt, boundary)
+	}
+}
+
+type orderedTranscriptBackend struct{}
+
+func (orderedTranscriptBackend) Execute(_ context.Context, _ string, _ agent.ExecOptions) (*agent.Session, error) {
+	msgCh := make(chan agent.Message)
+	resCh := make(chan agent.Result, 1)
+	go func() {
+		msgCh <- agent.Message{Type: agent.MessageText, Content: "preface"}
+		msgCh <- agent.Message{Type: agent.MessageThinking, Content: "reasoning"}
+		msgCh <- agent.Message{Type: agent.MessageText, Content: "answer one"}
+		msgCh <- agent.Message{Type: agent.MessageToolUse, Tool: "read", CallID: "ordered"}
+		msgCh <- agent.Message{Type: agent.MessageToolResult, Tool: "read", CallID: "ordered", Output: "ok"}
+		msgCh <- agent.Message{Type: agent.MessageText, Content: "answer two"}
+		msgCh <- agent.Message{Type: agent.MessageError, Content: "warning"}
+		msgCh <- agent.Message{Type: agent.MessageText, Content: "answer three"}
+		close(msgCh)
+		resCh <- agent.Result{Status: "completed", Output: "done"}
+		close(resCh)
+	}()
+	return &agent.Session{Messages: msgCh, Result: resCh}, nil
+}
+
+func TestExecuteAndDrain_PreservesTranscriptArrivalOrderAcrossMessageTypes(t *testing.T) {
+	t.Parallel()
+
+	d, rec := newTranscriptRecorder(t)
+	if _, _, err := d.executeAndDrain(context.Background(), orderedTranscriptBackend{}, "p", agent.ExecOptions{}, slog.Default(), "task-order", "", new(atomic.Int32)); err != nil {
+		t.Fatalf("executeAndDrain: %v", err)
+	}
+
+	got := rec.snapshot()
+	want := []struct {
+		typ     string
+		content string
+	}{
+		{typ: "text", content: "preface"},
+		{typ: "thinking", content: "reasoning"},
+		{typ: "text", content: "answer one"},
+		{typ: "tool_use"},
+		{typ: "tool_result"},
+		{typ: "text", content: "answer two"},
+		{typ: "error", content: "warning"},
+		{typ: "text", content: "answer three"},
+	}
+	if len(got) != len(want) {
+		t.Fatalf("reported %d messages, want %d in arrival order: %+v", len(got), len(want), got)
+	}
+	for i, expected := range want {
+		if got[i].Seq != i+1 || got[i].Type != expected.typ || got[i].Content != expected.content {
+			t.Fatalf("message %d = %+v, want seq=%d type=%q content=%q", i, got[i], i+1, expected.typ, expected.content)
+		}
 	}
 }
 
@@ -2939,6 +3431,36 @@ func TestShouldRetryWithFreshSession(t *testing.T) {
 			want:           true,
 		},
 		{
+			// GH #8116 end to end. A qoder chat pinned to a session the CLI
+			// never persisted used to reach this gate with ResumeRejected
+			// false, because the adapter returned a bare failed Result from
+			// session/resume — so the gate read "checked, not a rejection",
+			// declined to retry, and the conversation replayed the same dead
+			// id on every later message. The adapters now flag it, and this is
+			// what that flag has to buy.
+			name: "ghost session rejected at session/resume retries",
+			result: agent.Result{
+				Status:         "failed",
+				Error:          `qoder session/resume failed: session/resume: Invalid session identifier "27d8031c-9fea-4bda-9d42-37c36fa9aebf". (code=-32602)`,
+				ResumeRejected: true,
+			},
+			priorSessionID: "27d8031c-9fea-4bda-9d42-37c36fa9aebf",
+			provider:       "qoder",
+			want:           true,
+		},
+		{
+			// The other half of the same contract: an unrecognised resume
+			// failure must NOT retry. The adapters answer "not a rejection" by
+			// leaving the flag false, and a capable backend's false is an
+			// answer, not an absence — retrying here would fork a healthy
+			// conversation over a transient MCP or network fault.
+			name:           "unflagged resume failure does not retry",
+			result:         agent.Result{Status: "failed", Error: "qoder session/resume failed: session/resume: Invalid params: mcpServers[0] transport unreachable (code=-32602)"},
+			priorSessionID: "27d8031c-9fea-4bda-9d42-37c36fa9aebf",
+			provider:       "qoder",
+			want:           false,
+		},
+		{
 			name:           "temporarily busy resume retries without declaring the session dead",
 			result:         agent.Result{Status: "failed", Error: "session already in use", ResumeRejectedTransient: true},
 			priorSessionID: "healthy-id",
@@ -3006,6 +3528,18 @@ func TestShouldRetryWithFreshSession(t *testing.T) {
 			name:           "undetectable backend network drop does not retry",
 			result:         agent.Result{Status: "failed", Error: "API Error: Connection closed mid-response"},
 			priorSessionID: "stale-id",
+			provider:       "cursor",
+			want:           false,
+		},
+		{
+			// Cursor can fail before emitting any session event when its provider
+			// connection times out. No returned ID is not a rejected resume.
+			name: "cursor connect timeout before session event keeps prior session",
+			result: agent.Result{
+				Status: "failed",
+				Error:  "cursor-agent exited with error: exit status 1 (result_seen=false, exit_code=1, scanner_error=false, event_count=0, invalid_event_count=0, last_event_type=none); actions completed before finalization may already have taken effect; cursor stderr: Error: [unavailable] connect ETIMEDOUT 192.0.2.1:443",
+			},
+			priorSessionID: "existing-cursor-session",
 			provider:       "cursor",
 			want:           false,
 		},
@@ -3396,6 +3930,8 @@ func TestShouldRetryWithFreshSession_UnresumableHistoryIsBackendAgnostic(t *test
 }
 
 func TestExecuteAndDrain_CodexInactivityReportsMCPToolResultTranscript(t *testing.T) {
+	t.Parallel()
+
 	if runtime.GOOS == "windows" {
 		t.Skip("shell-script fixture is POSIX-only")
 	}
@@ -3412,10 +3948,11 @@ func TestExecuteAndDrain_CodexInactivityReportsMCPToolResultTranscript(t *testin
 		`echo '{"jsonrpc":"2.0","method":"turn/started","params":{"threadId":"thr-drain","turn":{"id":"turn-drain"}}}'` + "\n" +
 		`echo '{"jsonrpc":"2.0","method":"item/started","params":{"threadId":"thr-drain","item":{"type":"mcpToolCall","id":"mcp-1","server":"plugin-exa-search","tool":"web_search_exa","arguments":{"query":"latest Multica news"},"status":"inProgress"}}}'` + "\n" +
 		`echo '{"jsonrpc":"2.0","method":"item/completed","params":{"threadId":"thr-drain","item":{"type":"mcpToolCall","id":"mcp-1","server":"plugin-exa-search","tool":"web_search_exa","arguments":{"query":"latest Multica news"},"status":"completed","durationMs":1627,"result":{"content":[{"type":"text","text":"private provider payload"}]}}}}'` + "\n" +
-		`sleep 5` + "\n"
-	if err := os.WriteFile(fakePath, []byte(script), 0o755); err != nil {
-		t.Fatalf("write fake codex: %v", err)
-	}
+		// Then go silent until the daemon starts tearing the turn down — its
+		// interrupt request or stdin EOF — so the inactivity watchdog always
+		// fires first, however long the box takes to get there.
+		`read line` + "\n"
+	writeTestExecutable(t, fakePath, []byte(script))
 	if err := os.Chmod(fakePath, 0o755); err != nil {
 		t.Fatalf("chmod fake codex: %v", err)
 	}
@@ -3658,6 +4195,308 @@ func TestExecuteAndDrain_IdleWatchdog_FiresOnInactivity(t *testing.T) {
 	// test from racing in slow CI.
 	if elapsed := time.Since(start); elapsed > 5*d.cfg.AgentIdleWatchdog {
 		t.Fatalf("watchdog took too long to fire: %s (window=%s)", elapsed, d.cfg.AgentIdleWatchdog)
+	}
+}
+
+// waitForAgentMessageBackend holds Execute until the wrapped backend has
+// processed a selected protocol message, then hands the full stream to the
+// daemon. It makes watchdog cancellation tests deterministic without changing
+// the production watchdog window or relying on child-process scheduling speed.
+type waitForAgentMessageBackend struct {
+	agent.Backend
+	match      func(agent.Message) bool
+	onMatch    func()
+	resultGate <-chan struct{}
+}
+
+func (b waitForAgentMessageBackend) Execute(ctx context.Context, prompt string, opts agent.ExecOptions) (*agent.Session, error) {
+	session, err := b.Backend.Execute(ctx, prompt, opts)
+	if err != nil {
+		return nil, err
+	}
+	messages := make(chan agent.Message, 256)
+	for {
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		case msg, ok := <-session.Messages:
+			if !ok {
+				return nil, errors.New("wrapped backend closed before the expected message")
+			}
+			messages <- msg
+			if !b.match(msg) {
+				continue
+			}
+			if b.onMatch != nil {
+				b.onMatch()
+			}
+			go func() {
+				defer close(messages)
+				for msg := range session.Messages {
+					messages <- msg
+				}
+			}()
+			result := session.Result
+			if b.resultGate != nil {
+				// Keep Result unavailable until the daemon enters the branch under test.
+				gatedResult := make(chan agent.Result, 1)
+				go func() {
+					defer close(gatedResult)
+					<-b.resultGate
+					if final, ok := <-session.Result; ok {
+						gatedResult <- final
+					}
+				}()
+				result = gatedResult
+			}
+			return &agent.Session{
+				ToolActivity:             session.ToolActivity,
+				InterruptBackgroundTools: session.InterruptBackgroundTools,
+				TerminalObserved:         session.TerminalObserved,
+				Messages:                 messages,
+				Result:                   result,
+			}, nil
+		}
+	}
+}
+
+func TestExecuteAndDrain_PiTurnErrorOutranksIdleWatchdogCancellation(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("shell-script fixture is POSIX-only")
+	}
+
+	const providerError = "OpenAI API error (413): Failed to buffer the request body: length limit exceeded"
+	fakePath := filepath.Join(t.TempDir(), "pi")
+	script := "#!/bin/sh\n" +
+		"cat > /dev/null\n" +
+		`printf '%s\n' '{"type":"agent_start"}'` + "\n" +
+		`printf '%s\n' '{"type":"turn_start"}'` + "\n" +
+		`printf '%s\n' '{"type":"turn_end","message":{"role":"assistant","model":"test","stopReason":"error","errorMessage":"` + providerError + `"}}'` + "\n" +
+		`printf '%s\n' '{"type":"message_update","assistantMessageEvent":{"type":"thinking_delta","delta":"post-error activity"}}'` + "\n" +
+		`printf '%s\n' '{"type":"agent_end","messages":[],"willRetry":false}'` + "\n" +
+		"exec sleep 300\n"
+	writeTestExecutable(t, fakePath, []byte(script))
+
+	backend, err := agent.New("pi", agent.Config{ExecutablePath: fakePath, Logger: slog.Default()})
+	if err != nil {
+		t.Fatalf("new pi backend: %v", err)
+	}
+	backend = waitForAgentMessageBackend{
+		Backend: backend,
+		match: func(msg agent.Message) bool {
+			return msg.Type == agent.MessageThinking && msg.Content == "post-error activity"
+		},
+	}
+	d := newTestDaemon(t)
+	d.cfg.AgentIdleWatchdog = 50 * time.Millisecond
+
+	result, _, err := d.executeAndDrain(
+		context.Background(),
+		backend,
+		"prompt-ignored",
+		agent.ExecOptions{ResumeSessionID: filepath.Join(t.TempDir(), "session.jsonl")},
+		slog.Default(),
+		"t-pi-provider-error",
+		"",
+		new(atomic.Int32),
+	)
+	if err != nil {
+		t.Fatalf("executeAndDrain: %v", err)
+	}
+	if result.Status != "failed" {
+		t.Fatalf("status = %q, want provider failure rather than idle_watchdog (error=%q)", result.Status, result.Error)
+	}
+	if result.Error != providerError {
+		t.Fatalf("error = %q, want original provider error %q", result.Error, providerError)
+	}
+}
+
+func TestExecuteAndDrain_PiWithoutTurnErrorKeepsIdleWatchdogResult(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("shell-script fixture is POSIX-only")
+	}
+
+	fakePath := filepath.Join(t.TempDir(), "pi")
+	script := "#!/bin/sh\n" +
+		"cat > /dev/null\n" +
+		`printf '%s\n' '{"type":"agent_start"}'` + "\n" +
+		"exec sleep 300\n"
+	writeTestExecutable(t, fakePath, []byte(script))
+
+	backend, err := agent.New("pi", agent.Config{ExecutablePath: fakePath, Logger: slog.Default()})
+	if err != nil {
+		t.Fatalf("new pi backend: %v", err)
+	}
+	d := newTestDaemon(t)
+	d.cfg.AgentIdleWatchdog = 200 * time.Millisecond
+
+	result, _, err := d.executeAndDrain(
+		context.Background(),
+		backend,
+		"prompt-ignored",
+		agent.ExecOptions{ResumeSessionID: filepath.Join(t.TempDir(), "session.jsonl")},
+		slog.Default(),
+		"t-pi-no-provider-error",
+		"",
+		new(atomic.Int32),
+	)
+	if err != nil {
+		t.Fatalf("executeAndDrain: %v", err)
+	}
+	if result.Status != "idle_watchdog" {
+		t.Fatalf("result = %+v, want the existing idle_watchdog disposition", result)
+	}
+	if result.Error != "execution cancelled" {
+		t.Fatalf("error = %q, want the existing no-provider-error cancellation text", result.Error)
+	}
+}
+
+func TestExecuteAndDrain_PiTurnErrorOutranksUpstreamCancellation(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("shell-script fixture is POSIX-only")
+	}
+
+	const providerError = "OpenAI API error (413): Failed to buffer the request body: length limit exceeded"
+	fakePath := filepath.Join(t.TempDir(), "pi")
+	script := "#!/bin/sh\n" +
+		"cat > /dev/null\n" +
+		`printf '%s\n' '{"type":"agent_start"}'` + "\n" +
+		`printf '%s\n' '{"type":"turn_start"}'` + "\n" +
+		`printf '%s\n' '{"type":"turn_end","message":{"role":"assistant","model":"test","stopReason":"error","errorMessage":"` + providerError + `"}}'` + "\n" +
+		`printf '%s\n' '{"type":"message_update","assistantMessageEvent":{"type":"thinking_delta","delta":"cancel now"}}'` + "\n" +
+		"exec sleep 300\n"
+	writeTestExecutable(t, fakePath, []byte(script))
+
+	backend, err := agent.New("pi", agent.Config{ExecutablePath: fakePath, Logger: slog.Default()})
+	if err != nil {
+		t.Fatalf("new pi backend: %v", err)
+	}
+	matched := make(chan struct{})
+	backend = waitForAgentMessageBackend{
+		Backend: backend,
+		match: func(msg agent.Message) bool {
+			return msg.Type == agent.MessageThinking && msg.Content == "cancel now"
+		},
+		onMatch: func() { close(matched) },
+	}
+	d := newTestDaemon(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+	sessionPath := filepath.Join(t.TempDir(), "session.jsonl")
+
+	type outcome struct {
+		result agent.Result
+		err    error
+	}
+	done := make(chan outcome, 1)
+	go func() {
+		result, _, err := d.executeAndDrain(
+			ctx,
+			backend,
+			"prompt-ignored",
+			agent.ExecOptions{ResumeSessionID: sessionPath},
+			slog.Default(),
+			"t-pi-provider-error-upstream-cancel",
+			"",
+			new(atomic.Int32),
+		)
+		done <- outcome{result: result, err: err}
+	}()
+
+	select {
+	case <-matched:
+		cancel()
+	case <-time.After(5 * time.Second):
+		t.Fatal("Pi never emitted the post-error activity")
+	}
+
+	select {
+	case got := <-done:
+		if got.err != nil {
+			t.Fatalf("executeAndDrain: %v", got.err)
+		}
+		if got.result.Status != "failed" || got.result.Error != providerError {
+			t.Fatalf("result = %+v, want original provider failure", got.result)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("executeAndDrain did not return after upstream cancellation")
+	}
+}
+
+func TestExecuteAndDrain_PiWithoutTurnErrorKeepsUpstreamCancellation(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("shell-script fixture is POSIX-only")
+	}
+
+	fakePath := filepath.Join(t.TempDir(), "pi")
+	script := "#!/bin/sh\n" +
+		"cat > /dev/null\n" +
+		`printf '%s\n' '{"type":"agent_start"}'` + "\n" +
+		"exec sleep 300\n"
+	writeTestExecutable(t, fakePath, []byte(script))
+
+	backend, err := agent.New("pi", agent.Config{ExecutablePath: fakePath, Logger: slog.Default()})
+	if err != nil {
+		t.Fatalf("new pi backend: %v", err)
+	}
+	probe := &handoffProbe{
+		gate:   make(chan struct{}),
+		prefix: "waiting for the backend to hand over its result after cancellation",
+	}
+	defer func() { probe.once.Do(func() { close(probe.gate) }) }()
+	matched := make(chan struct{})
+	backend = waitForAgentMessageBackend{
+		Backend: backend,
+		match:   func(msg agent.Message) bool { return msg.Type == agent.MessageStatus },
+		onMatch: func() { close(matched) },
+		// Both Done and Result can become ready on cancellation. Pin the drain
+		// arm rather than requiring select to choose it over an aborted Result.
+		resultGate: probe.gate,
+	}
+	d := newTestDaemon(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+	sessionPath := filepath.Join(t.TempDir(), "session.jsonl")
+
+	type outcome struct {
+		result agent.Result
+		err    error
+	}
+	done := make(chan outcome, 1)
+	go func() {
+		result, _, err := d.executeAndDrain(
+			ctx,
+			backend,
+			"prompt-ignored",
+			agent.ExecOptions{ResumeSessionID: sessionPath},
+			slog.New(probe),
+			"t-pi-no-provider-error-upstream-cancel",
+			"",
+			new(atomic.Int32),
+		)
+		done <- outcome{result: result, err: err}
+	}()
+
+	select {
+	case <-matched:
+		cancel()
+	case <-time.After(5 * time.Second):
+		t.Fatal("Pi never started")
+	}
+
+	select {
+	case got := <-done:
+		if got.err != nil {
+			t.Fatalf("executeAndDrain: %v", got.err)
+		}
+		if !probe.seen.Load() {
+			t.Fatal("upstream cancellation hand-off was not exercised")
+		}
+		if got.result.Status != "cancelled" || !strings.Contains(got.result.Error, "task cancelled by upstream context") {
+			t.Fatalf("result = %+v, want existing upstream cancellation", got.result)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("executeAndDrain did not return after upstream cancellation")
 	}
 }
 
@@ -4261,12 +5100,84 @@ func TestEnsureRepoReadyReportsSyncFailure(t *testing.T) {
 	d.workspaces["ws-1"] = newWorkspaceState("ws-1", nil, "", nil, nil)
 
 	err := d.ensureRepoReady(context.Background(), "ws-1", missingRepo)
-	if err == nil || !strings.Contains(err.Error(), "repo is configured but not synced:") {
-		t.Fatalf("expected sync failure error, got %v", err)
+	if err == nil || !strings.Contains(err.Error(), "repo is configured but not synced: git clone --bare:") {
+		t.Fatalf("expected sync failure error with git's output, got %v", err)
 	}
-	if got := d.workspaceLastRepoSyncErr("ws-1"); got == "" {
-		t.Fatal("expected lastRepoSyncErr to be recorded")
+}
+
+// syncRaceRepoCache fails the sync of failURL and, on the Lookup that
+// follows, runs a successful background sync of another repo: the window in
+// which a shared per-workspace error slot used to be cleared.
+type syncRaceRepoCache struct {
+	d          *Daemon
+	failURL    string
+	mu         sync.Mutex
+	failedOnce bool
+	raced      bool
+}
+
+func (c *syncRaceRepoCache) Lookup(string, string) string {
+	c.mu.Lock()
+	race := c.failedOnce && !c.raced
+	c.raced = c.raced || race
+	c.mu.Unlock()
+	if race {
+		c.d.syncWorkspaceRepos("ws-1", []RepoData{{URL: "https://example.com/other.git"}})
 	}
+	return ""
+}
+func (c *syncRaceRepoCache) BarePath(string, string) string { return "" }
+func (c *syncRaceRepoCache) Sync(_ string, repos []repocache.RepoInfo) error {
+	for _, r := range repos {
+		if r.URL == c.failURL {
+			c.mu.Lock()
+			c.failedOnce = true
+			c.mu.Unlock()
+			return errors.New("git clone --bare: server certificate verification failed")
+		}
+	}
+	return nil
+}
+func (c *syncRaceRepoCache) WithRepoLock(_ string, fn func() error) error { return fn() }
+func (c *syncRaceRepoCache) CreateWorktree(repocache.WorktreeParams) (*repocache.WorktreeResult, error) {
+	return nil, nil
+}
+
+func TestEnsureRepoReadyKeepsSyncFailureDespiteConcurrentSuccess(t *testing.T) {
+	t.Parallel()
+
+	const repoURL = "https://devops.example.com/team/_git/app"
+	d := newRepoReadyTestDaemon(t, func(w http.ResponseWriter, r *http.Request) {
+		json.NewEncoder(w).Encode(WorkspaceReposResponse{
+			WorkspaceID:  "ws-1",
+			Repos:        []RepoData{{URL: repoURL}},
+			ReposVersion: "v1",
+		})
+	})
+	cache := &syncRaceRepoCache{d: d, failURL: repoURL}
+	d.repoCache = cache
+	d.workspaces["ws-1"] = newWorkspaceState("ws-1", nil, "", nil, nil)
+
+	err := d.ensureRepoReady(context.Background(), "ws-1", repoURL)
+	if !cache.raced {
+		t.Fatal("test did not exercise the concurrent sync")
+	}
+	if err == nil || !strings.Contains(err.Error(), "server certificate verification failed") {
+		t.Fatalf("expected the checkout's own sync failure, got %v", err)
+	}
+}
+
+// repoRefreshWaitContext reports when ensureRepoReady reaches the cancellable
+// lock wait, after recording whether the repo was cached on entry.
+type repoRefreshWaitContext struct {
+	context.Context
+	once    sync.Once
+	waiting chan<- struct{}
+}
+
+func (c *repoRefreshWaitContext) Done() <-chan struct{} {
+	c.once.Do(func() { c.waiting <- struct{}{} })
+	return c.Context.Done()
 }
 
 func TestEnsureRepoReadyConcurrentMissRefreshesOnce(t *testing.T) {
@@ -4286,18 +5197,46 @@ func TestEnsureRepoReadyConcurrentMissRefreshesOnce(t *testing.T) {
 			ReposVersion: "v2",
 		})
 	})
-	d.workspaces["ws-1"] = newWorkspaceState("ws-1", nil, "", nil, nil)
+	ws := newWorkspaceState("ws-1", nil, "", nil, nil)
+	d.workspaces["ws-1"] = ws
 
+	// Keep the cache cold until every caller has recorded a miss and reached
+	// the lock. Merely starting goroutines also permits late warm-cache calls,
+	// which intentionally refresh settings again.
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	if err := ws.repoRefreshMu.Lock(ctx); err != nil {
+		t.Fatal(err)
+	}
+	unlock := sync.OnceFunc(ws.repoRefreshMu.Unlock)
 	const concurrency = 8
+	waiting := make(chan struct{}, concurrency)
 	var wg sync.WaitGroup
+	defer func() {
+		cancel()
+		unlock()
+		wg.Wait()
+	}()
 	errCh := make(chan error, concurrency)
 	for range concurrency {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			errCh <- d.ensureRepoReady(context.Background(), "ws-1", sourceRepo)
+			waitCtx := &repoRefreshWaitContext{Context: ctx, waiting: waiting}
+			errCh <- d.ensureRepoReady(waitCtx, "ws-1", sourceRepo)
 		}()
 	}
+	for range concurrency {
+		select {
+		case <-waiting:
+		case <-ctx.Done():
+			t.Fatal("ensureRepoReady callers did not all reach the cold-cache lock wait")
+		}
+	}
+	if got := refreshCalls.Load(); got != 0 {
+		t.Fatalf("expected no refresh before releasing cold-cache callers, got %d", got)
+	}
+	unlock()
 	wg.Wait()
 	close(errCh)
 
@@ -4667,10 +5606,10 @@ func TestReportTaskResult_TransientCompleteExhaustedDoesNotFallback(t *testing.T
 	}
 }
 
-// On permanent 4xx from /complete (e.g. 400 bad body, 404 task not found)
-// the helper bails immediately and the daemon falls back to /fail so the
-// UI shows a concrete failure rather than a perpetually-running task.
-func TestReportTaskResult_PermanentCompleteFallsBackToFail(t *testing.T) {
+// A permanent response can become recoverable after a daemon/server upgrade
+// or credential refresh. Preserve the successful result instead of replacing
+// it with a synthetic failure payload.
+func TestReportTaskResult_PermanentCompleteDoesNotReplaceOriginal(t *testing.T) {
 	defer noSleepRetry(t)()
 
 	var completeCalls, failCalls atomic.Int32
@@ -4697,12 +5636,12 @@ func TestReportTaskResult_PermanentCompleteFallsBackToFail(t *testing.T) {
 	if got := completeCalls.Load(); got != 1 {
 		t.Fatalf("permanent 400 should not retry, got %d complete attempts", got)
 	}
-	if got := failCalls.Load(); got != 1 {
-		t.Fatalf("permanent /complete should fall back to /fail exactly once, got %d", got)
+	if got := failCalls.Load(); got != 0 {
+		t.Fatalf("permanent /complete must not replace the original with /fail, got %d calls", got)
 	}
 }
 
-func TestReportTaskResult_CancelledParentStillRunsPermanentFailureFallback(t *testing.T) {
+func TestReportTaskResult_CancelledParentStillPreservesPermanentCompletion(t *testing.T) {
 	defer noSleepRetry(t)()
 
 	var completeCalls, failCalls atomic.Int32
@@ -4732,8 +5671,8 @@ func TestReportTaskResult_CancelledParentStillRunsPermanentFailureFallback(t *te
 	if got := completeCalls.Load(); got != 1 {
 		t.Fatalf("complete calls = %d, want 1", got)
 	}
-	if got := failCalls.Load(); got != 1 {
-		t.Fatalf("fallback fail calls = %d, want 1", got)
+	if got := failCalls.Load(); got != 0 {
+		t.Fatalf("fallback fail calls = %d, want 0", got)
 	}
 }
 
@@ -5933,7 +6872,7 @@ func TestBuildPromptSquadLeaderMultiThreadCarvesOutNoAction(t *testing.T) {
 // TestHermesProfileChainCoversLaunchPrefix is the daemon half of GH #7046's
 // Hermes regression. A custom runtime profile's fixed_args are no longer folded
 // into custom_args — they become the launch prefix and reach hermes ahead of
-// custom_args, with the backend's own `acp` token between the two.
+// custom_args, which in turn precede the backend's own `acp` token.
 //
 // Both halves of the profile chain therefore have to run against the argv the
 // backend really assembles. Resolving or stripping against a hand-built
@@ -5942,10 +6881,10 @@ func TestBuildPromptSquadLeaderMultiThreadCarvesOutNoAction(t *testing.T) {
 func TestHermesProfileChainCoversLaunchPrefix(t *testing.T) {
 	t.Parallel()
 
-	// A prefix ending in a value-taking flag: the `acp` token decides which
-	// selection hermes sees, so it must be present when the daemon resolves.
-	launchPrefix := []string{"--model"}
-	customArgs := []string{"-p", "research", "--yolo"}
+	// A prefix ending in a bare `-p`: the selection straddles the two regions,
+	// so only the assembled argv shows which profile hermes sees.
+	launchPrefix := []string{"-p"}
+	customArgs := []string{"research", "--yolo"}
 
 	sel := agent.ParseHermesProfileArgs(
 		agent.HermesLaunchArgv(launchPrefix, customArgs, slog.Default()))
@@ -5961,10 +6900,10 @@ func TestHermesProfileChainCoversLaunchPrefix(t *testing.T) {
 		agent.HermesLaunchArgv(strippedPrefix, strippedCustom, slog.Default())); sel.Found {
 		t.Fatalf("the launched argv can still redirect HERMES_HOME: %+v", sel)
 	}
-	if strings.Join(strippedPrefix, "\x00") != "--model" {
-		t.Errorf("prefix = %v, want the non-selector token kept", strippedPrefix)
+	if len(strippedPrefix) != 0 {
+		t.Errorf("prefix = %v, want the straddling `-p` removed", strippedPrefix)
 	}
 	if strings.Join(strippedCustom, "\x00") != "--yolo" {
-		t.Errorf("custom = %v, want only the selector removed", strippedCustom)
+		t.Errorf("custom = %v, want only the selector's value removed", strippedCustom)
 	}
 }

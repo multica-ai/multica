@@ -2,7 +2,7 @@
   "page": {
     "title": "Squads",
     "new_button": "New Squad",
-    "empty_no_squads": "No squads yet. Create one to get started.",
+    "empty_no_squads": "No squads yet.",
     "empty_no_match": "No squads match your filters.",
     "table": {
       "name": "Squad",
@@ -42,7 +42,7 @@
   },
   "add_member_dialog": {
     "title": "Add Member",
-    "description": "Add a workspace member or agent to this squad.",
+    "description": "Choose workspace members or agents.",
     "label_member": "Member",
     "label_role": "Role",
     "label_optional": "(optional)",
@@ -124,7 +124,7 @@
     "more_members_other": "+{{count}} more"
   },
   "instructions_tab": {
-    "description": "Squad instructions are injected into the leader agent's prompt whenever it works on an issue assigned to this squad. Use them to give the leader squad-wide guidance, working agreements, or context the leader should follow on every run.",
+    "description": "The leader reads these instructions whenever it works on an issue assigned to this squad.",
     "unsaved_changes": "Unsaved changes",
     "save_button": "Save",
     "placeholder": "e.g. Always start by writing a failing test. Prefer small, atomic commits."

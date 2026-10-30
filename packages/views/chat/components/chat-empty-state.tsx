@@ -1,6 +1,6 @@
 "use client";
 
-import { Settings2 } from "lucide-react";
+import { Settings2 } from "@multica/ui/icons";
 import { selectConversationStarters } from "@multica/core/agents";
 import type { Agent } from "@multica/core/types";
 import { ActorAvatar } from "../../common/actor-avatar";

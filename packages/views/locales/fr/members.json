@@ -1,0 +1,21 @@
+{
+  "role": {
+    "owner": "Propriétaire",
+    "admin": "Administrateur",
+    "member": "Membre"
+  },
+  "card": {
+    "unavailable": "Membre indisponible",
+    "agents_section": "Agents ({{count}})",
+    "detail_link": "Détail →",
+    "more_agents_one": "et {{count}} autre agent",
+    "more_agents_other": "et {{count}} autres agents"
+  },
+  "detail": {
+    "workspace_fallback": "Espace de travail",
+    "members_breadcrumb": "Membres",
+    "breadcrumb_fallback": "Membre",
+    "not_found_title": "Membre introuvable",
+    "not_found_description": "Ce membre a peut-être quitté l'espace de travail."
+  }
+}

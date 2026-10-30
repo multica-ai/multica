@@ -84,6 +84,9 @@ const h = vi.hoisted(() => {
 });
 
 vi.mock("@multica/core/hooks", () => ({ useWorkspaceId: () => "ws-1" }));
+vi.mock("@multica/core/platform", () => ({
+  getCurrentWsId: () => "ws-1",
+}));
 vi.mock("@multica/core/auth", () => ({
   useAuthStore: (sel: (s: { user: { id: string } }) => unknown) =>
     sel({ user: { id: "user-1" } }),
@@ -98,7 +101,7 @@ vi.mock("@multica/core/projects/queries", () => ({
 // Steerable per test: the invoke rule is what decides whether an OPEN session's
 // agent is still runnable. Default true so every existing case is unaffected.
 const invokableAgentIds = vi.hoisted(() => ({ current: null as string[] | null }));
-vi.mock("@multica/views/issues/components", () => ({
+vi.mock("../../issues/components/pickers/assignee-picker", () => ({
   canAssignAgent: (agent: { id: string }) =>
     invokableAgentIds.current === null ||
     invokableAgentIds.current.includes(agent.id),

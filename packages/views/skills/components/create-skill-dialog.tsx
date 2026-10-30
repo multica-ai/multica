@@ -13,7 +13,7 @@ import {
   Pencil,
   Plus,
   X as XIcon,
-} from "lucide-react";
+} from "@multica/ui/icons";
 import { toast } from "sonner";
 import { useQueryClient } from "@tanstack/react-query";
 import { api } from "@multica/core/api";
@@ -62,9 +62,7 @@ function seedAfterCreate(
   qc.invalidateQueries({ queryKey: workspaceKeys.agents(wsId) });
 }
 
-// ---------------------------------------------------------------------------
 // Chooser — initial method picker (4 cards)
-// ---------------------------------------------------------------------------
 
 function MethodChooser({ onChoose }: { onChoose: (m: Method) => void }) {
   const { t } = useT("skills");
@@ -104,9 +102,7 @@ function MethodChooser({ onChoose }: { onChoose: (m: Method) => void }) {
   );
 }
 
-// ---------------------------------------------------------------------------
 // Manual form
-// ---------------------------------------------------------------------------
 
 function ManualForm({
   onCreated,
@@ -241,9 +237,7 @@ function ManualForm({
   );
 }
 
-// ---------------------------------------------------------------------------
 // URL import form
-// ---------------------------------------------------------------------------
 
 type DetectedSource = "clawhub" | "skills.sh" | "github" | null;
 
@@ -427,9 +421,7 @@ function UrlForm({
   );
 }
 
-// ---------------------------------------------------------------------------
 // Local folder / archive import
-// ---------------------------------------------------------------------------
 
 function LocalForm({
   prepared,
@@ -604,9 +596,7 @@ function LocalForm({
   );
 }
 
-// ---------------------------------------------------------------------------
 // Root dialog
-// ---------------------------------------------------------------------------
 
 export function CreateSkillDialog({
   onClose,

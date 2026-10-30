@@ -2,7 +2,7 @@
   "page": {
     "title": "小队",
     "new_button": "新建小队",
-    "empty_no_squads": "还没有小队，创建一个开始吧。",
+    "empty_no_squads": "暂无小队。",
     "empty_no_match": "没有匹配筛选条件的小队。",
     "table": {
       "name": "小队",
@@ -42,7 +42,7 @@
   },
   "add_member_dialog": {
     "title": "添加成员",
-    "description": "添加工作区成员或智能体到这个小队。",
+    "description": "可选择工作区成员或智能体。",
     "label_member": "成员",
     "label_role": "角色",
     "label_optional": "（可选）",
@@ -121,7 +121,7 @@
     "more_members_other": "还有 {{count}} 人"
   },
   "instructions_tab": {
-    "description": "小队指引会在队长智能体处理分配给该小队的任务时注入到它的 prompt 中。可用来给队长提供贯穿全队的指导、协作规范，或每次运行都应遵循的上下文。",
+    "description": "队长每次处理分配给此小队的任务时，都会读取这些指引。",
     "unsaved_changes": "有未保存的修改",
     "save_button": "保存",
     "placeholder": "例如：始终先编写失败测试。提交应保持小而独立。"

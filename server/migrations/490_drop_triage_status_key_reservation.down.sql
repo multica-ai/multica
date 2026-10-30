@@ -1,0 +1,3 @@
+-- Intentionally empty. Re-adding the reservation would fail on any workspace
+-- that has since created a custom status keyed `triage`, and the server no
+-- longer reads that key as anything but an ordinary custom status.

@@ -21,11 +21,14 @@ const data = vi.hoisted(() => ({
 }));
 
 vi.mock("@tanstack/react-query", () => ({
+  queryOptions: <T,>(options: T) => options,
   // Two queries reach this tab: what is installed, and what has been published.
   // They are told apart by the query key so a test can have one without the
   // other — which is the normal state right after a publish.
   useQuery: (options: { queryKey?: readonly unknown[] }) =>
-    options?.queryKey?.[1] === "packages"
+    options?.queryKey?.includes("members")
+      ? { data: [], isLoading: false, isError: false }
+      : options?.queryKey?.[1] === "packages"
       ? { data: data.packages, isLoading: false, isError: false }
       : { data: data.installed, isLoading: false, isError: false },
 }));
@@ -242,7 +245,7 @@ describe("PluginsTab", () => {
     data.installed.plugins = [INSTALLATION];
     render(<PluginsTab />, { wrapper: Wrapper });
 
-    expect(screen.getByText("Read-only access")).toBeInTheDocument();
+    expect(screen.getByText("View only")).toBeInTheDocument();
     // The whole publish-and-install section is admin-only.
     expect(screen.queryByRole("button", { name: "Upload package" })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Review and install" })).not.toBeInTheDocument();

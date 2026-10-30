@@ -17,6 +17,7 @@ const (
 	ChannelTypeFeishu   = "feishu"
 	ChannelTypeWecom    = "wecom"
 	ChannelTypeDingtalk = "dingtalk"
+	ChannelTypeTelegram = "telegram"
 )
 
 // SurfacePersistsTranscript reports whether a chat surface stores its
@@ -128,6 +129,8 @@ func ChannelDisplayName(channelType string) string {
 		return "WeCom"
 	case ChannelTypeDingtalk:
 		return "DingTalk"
+	case ChannelTypeTelegram:
+		return "Telegram"
 	default:
 		return channelType
 	}

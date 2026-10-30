@@ -84,7 +84,7 @@ func newStreamTTLRefresher(ttl, refreshEvery time.Duration) *streamTTLRefresher 
 	}
 }
 
-func (r *streamTTLRefresher) refreshIfDue(ctx context.Context, client *redis.Client, key string) error {
+func (r *streamTTLRefresher) refreshIfDue(ctx context.Context, client redis.UniversalClient, key string) error {
 	now := r.now()
 	if !r.claimRefresh(key, now) {
 		return nil
@@ -104,7 +104,7 @@ func (r *streamTTLRefresher) refreshIfDue(ctx context.Context, client *redis.Cli
 
 // repairMissingTTL assigns a TTL only when a stream exists without one. It
 // intentionally does not refresh a healthy TTL, so an idle stream can expire.
-func (r *streamTTLRefresher) repairMissingTTL(ctx context.Context, client *redis.Client, key string) (time.Duration, error) {
+func (r *streamTTLRefresher) repairMissingTTL(ctx context.Context, client redis.UniversalClient, key string) (time.Duration, error) {
 	return r.reconcileTTL(ctx, client, key, true)
 }
 
@@ -112,7 +112,7 @@ func (r *streamTTLRefresher) repairMissingTTL(ctx context.Context, client *redis
 // TTL when disabled. The disabled path is the compatibility and rollback
 // phase: once all new replicas have observed it, old binaries can keep writing
 // without an inherited expiry deleting an active stream.
-func (r *streamTTLRefresher) reconcileTTL(ctx context.Context, client *redis.Client, key string, enabled bool) (time.Duration, error) {
+func (r *streamTTLRefresher) reconcileTTL(ctx context.Context, client redis.UniversalClient, key string, enabled bool) (time.Duration, error) {
 	ttl, err := client.PTTL(ctx, key).Result()
 	if err != nil {
 		return 0, err

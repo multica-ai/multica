@@ -51,6 +51,9 @@ export default function GlobalError({
           <button
             type="button"
             onClick={reset}
+            // This boundary replaces the root layout, so neither design
+            // tokens nor utility classes are available here. Keep this 6px
+            // fallback aligned with the resolved product `radius-md`.
             style={{
               marginTop: 16,
               padding: "8px 16px",
@@ -81,6 +84,11 @@ const EMERGENCY_COPY = {
     description: "页面发生意外错误，请尝试重新加载。",
     reload: "重新加载",
   },
+  "zh-Hant": {
+    title: "發生了問題",
+    description: "頁面發生意外錯誤，請嘗試重新載入。",
+    reload: "重新載入",
+  },
   ja: {
     title: "問題が発生しました",
     description: "ページで予期しないエラーが発生しました。再読み込みしてください。",
@@ -90,5 +98,10 @@ const EMERGENCY_COPY = {
     title: "문제가 발생했습니다",
     description: "페이지에서 예기치 않은 오류가 발생했습니다. 다시 불러오세요.",
     reload: "다시 불러오기",
+  },
+  fr: {
+    title: "Une erreur s'est produite",
+    description: "La page a rencontré une erreur inattendue. Essayez de la recharger.",
+    reload: "Recharger",
   },
 } as const;

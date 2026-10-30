@@ -2,57 +2,23 @@ package metrics
 
 import "github.com/prometheus/client_golang/prometheus"
 
-// WecomMetrics is the production sink behind the WeCom adapter's Metrics
-// interface (server/internal/integrations/wecom/metrics.go).
+// WecomMetrics implements the adapter's production metrics sink.
+// Separate infrastructure connection failures from credential rejections so
+// operators can distinguish retryable outages from installations needing repair.
+// The adapter classifies acknowledgements; this sink records its verdict.
 //
-// The adapter is built to degrade quietly. A dial that fails and a handshake
-// the server refuses both yield the connection back to the Supervisor, which
-// backs off and tries again; an ingest queue the read loop has to wait on
-// yields nothing and simply stops draining the socket until the worker
-// catches up. None of the three changes anything an operator can see. A bot
-// that has been down since Tuesday and a bot nobody happened to message today
-// produce the same silence.
-//
-// The two connection counters are deliberately separate. A dial or a read that
-// fails is infrastructure and usually recovers on its own; a handshake the
-// server refuses on its merits is a wrong secret or a deleted bot, and it will
-// repeat identically on every backoff until a person fixes the installation.
-// Summed into one number the operator cannot tell "wait" from "rotate the
-// credential".
-//
-// Which side of that line an ack falls on is classifySubscribeAck's call, in
-// the adapter, and this package only counts the verdict. An ack it cannot
-// verify — a throttle, a platform-side failure — is a connect failure, on the
-// "wait" side, because rotating a credential that was fine costs a second
-// outage.
-//
-// No installation_id label anywhere. It is the same class of unbounded
-// identifier as workspace_id and session_id, which forbiddenMetricLabels
-// rejects outright. Attribution falls to the structured logs and is uneven
-// there: the two connection failures reach the Supervisor as a returned error
-// and are logged with installation_id, while a blocked ingest queue is
-// counted and nothing else — the counter says some bot is behind, not which.
-// The outbound counters answer a different question from the connection ones,
-// and it is the question GH #7215 and #6890 were filed as: a reply was
-// produced, the transcript has it, and the WeCom chat stayed quiet. Several
-// unrelated causes end that way and from the chat they are one symptom, so
-// each is counted where an operator can act on it: a frame the platform
-// refused, or no socket for this installation in this process, is a drop; a
-// turn that originated in the web UI, or an installation revoked between
-// trigger and reply, was never owed to WeCom and is a skip; a frame whose
-// verdict never came back may already be on the user's screen and is
-// unconfirmed, not a drop. Delivered is the denominator: without it, a drop
-// rate of zero and a bot nobody messaged look identical, which is the same
-// ambiguity the connection counters exist to remove.
-//
-// reason is a closed set (wecom/outbound_outcome.go). It is the only label
-// here, and it stays bounded by construction — no installation, workspace or
-// session id, same rule as everywhere else in this package.
+// Outbound outcomes distinguish delivered, dropped, skipped, and unconfirmed
+// frames. A missing acknowledgement may already be visible to the user and is
+// not a confirmed drop. Reasons are bounded by wecom/outbound_outcome.go;
+// installation, workspace, and session IDs belong in logs, never metric labels.
 type WecomMetrics struct {
 	ConnectFailures       prometheus.Counter
 	AuthFailures          prometheus.Counter
 	CallbacksQueued       prometheus.Counter
 	CallbackQueueBlocked  prometheus.Counter
+	StreamOpened          prometheus.Counter
+	StreamFinished        prometheus.Counter
+	StreamFellBack        prometheus.Counter
 	OutboundDelivered     prometheus.Counter
 	OutboundDropped       *prometheus.CounterVec
 	OutboundSkipped       *prometheus.CounterVec
@@ -82,15 +48,21 @@ func NewWecomMetrics() *WecomMetrics {
 			"Inbound callbacks handed to the ingest worker. The baseline every other inbound number is read against."),
 		CallbackQueueBlocked: counter("inbound_queue_blocked_total",
 			"Times the read loop had to wait on a full ingest queue. Backpressure by design; a rising rate means the engine is behind and the socket is about to stop being drained."),
+		StreamOpened: counter("stream_opened_total",
+			"Bubbles painted on ingest. The denominator for the two below: opened minus finished minus fell_back is the number nobody ever ended, which is the only failure the finished/fell_back ratio cannot show."),
+		StreamFinished: counter("stream_finished_total",
+			"Answers that landed in the bubble the question opened."),
+		StreamFellBack: counter("stream_fell_back_total",
+			"Answers sent as a new message because the bubble refused the closing frame. The answer is not lost; the experience is the one the bubble was built to replace."),
 		OutboundDelivered: counter("outbound_delivered_total",
 			"Agent replies this adapter put in front of a WeCom user. The denominator the drop breakdown is read against."),
 		OutboundDropped: prometheus.NewCounterVec(prometheus.CounterOpts{
 			Namespace: "multica", Subsystem: "wecom", Name: "outbound_dropped_total",
-			Help: "Agent replies the adapter owed a WeCom user and did not deliver, by reason. Every reason here means somebody in WeCom is waiting on an answer that is not coming; the completions the adapter was never going to deliver are counted apart, in outbound_skipped_total.",
+			Help: "Agent replies the adapter owed a WeCom user and did not deliver, by reason. Every reason here means somebody in WeCom is waiting on an answer that is not coming; most of them are settled before the frame reaches WeCom, so read this as a count of unpaid obligations rather than of network failures. The completions this adapter did not owe, and the ones nothing here can attribute to a WeCom chat, are counted apart, in outbound_skipped_total.",
 		}, []string{"reason"}),
 		OutboundSkipped: prometheus.NewCounterVec(prometheus.CounterOpts{
 			Namespace: "multica", Subsystem: "wecom", Name: "outbound_skipped_total",
-			Help: "Completions this adapter was never going to deliver to WeCom, by reason. Kept apart from dropped because none of these is a delivery failure: origin_not_channel is a question typed in Multica on a WeCom-bound session, installation_inactive means there is no longer an installation to deliver through, nothing_to_say is an empty completion carrying no file. Counting them as drops would make ordinary web usage read as a WeCom outage.",
+			Help: "Completions this adapter did not send to WeCom, by reason: it did not owe them, or nothing here could attribute them to a WeCom chat. Kept apart from dropped, which counts the replies a WeCom user was owed and did not get; what separates the two is the obligation, not whether a frame was written. Four of these were never owed to WeCom, and counting them as drops would make ordinary usage read as an outage: origin_not_channel is a question typed in Multica on a WeCom-bound session, not_wecom_turn is another platform's turn on the bus this subscriber shares, installation_inactive means there is no longer an installation to deliver through, nothing_to_say is an empty completion carrying no file. The fifth is the one label here worth an alert: no_delivery_row is a turn the channel ingested with no row saying which chat, so a reply may well be owed and nothing left can name the room — in practice a task enqueued before an upgrade and finishing after it. The sixth is neither: route_unattributable is a turn with no row and no batch owner, so nothing here can say whether it was ever a channel's, let alone whether a reply was owed — in practice a row old enough to predate batch owners still finishing, and a rising count says only that such rows remain.",
 		}, []string{"reason"}),
 		AttachmentDelivered: counter("outbound_attachment_delivered_total",
 			"Files put in front of a WeCom user. Counts FILES; the outbound_delivered/dropped/skipped trio counts REPLIES."),
@@ -119,6 +91,7 @@ func (m *WecomMetrics) Collectors() []prometheus.Collector {
 	return []prometheus.Collector{
 		m.ConnectFailures, m.AuthFailures,
 		m.CallbacksQueued, m.CallbackQueueBlocked,
+		m.StreamOpened, m.StreamFinished, m.StreamFellBack,
 		m.OutboundDelivered, m.OutboundDropped, m.OutboundSkipped,
 		m.AttachmentDelivered, m.AttachmentDropped, m.AttachmentSheds,
 		m.OutboundUnconfirmed, m.AttachmentUnconfirmed,
@@ -154,3 +127,7 @@ func (m *WecomMetrics) RecordAttachmentUnconfirmed(reason string) {
 func (m *WecomMetrics) RecordRelayShed(kind string) {
 	m.RelayShed.WithLabelValues(kind).Inc()
 }
+
+func (m *WecomMetrics) RecordStreamOpened()   { m.StreamOpened.Inc() }
+func (m *WecomMetrics) RecordStreamFinished() { m.StreamFinished.Inc() }
+func (m *WecomMetrics) RecordStreamFellBack() { m.StreamFellBack.Inc() }

@@ -1,8 +1,9 @@
 import { useState, useEffect, useCallback, type ReactNode } from "react";
-import { AlertCircle, Info, LogIn } from "lucide-react";
+import { AlertCircle, Info, LogIn } from "@multica/ui/icons";
 import { Button } from "@multica/ui/components/ui/button";
 import { Switch } from "@multica/ui/components/ui/switch";
 import { cn } from "@multica/ui/lib/utils";
+import { TruncatedTooltip } from "@multica/ui/components/common/truncated-tooltip";
 import { toast } from "sonner";
 import {
   SettingsCard,
@@ -33,15 +34,16 @@ function DiagnosticsRow({
   return (
     <div className="grid grid-cols-[140px_minmax(0,1fr)] items-baseline gap-3 py-1.5">
       <span className="text-caption text-muted-foreground">{label}</span>
-      <span
-        className={cn(
-          "min-w-0 truncate text-body",
-          mono && "font-mono text-caption",
-        )}
-        title={typeof value === "string" ? value : undefined}
-      >
-        {value}
-      </span>
+      <TruncatedTooltip content={typeof value === "string" ? value : undefined}>
+        <span
+          className={cn(
+            "min-w-0 truncate text-body",
+            mono && "font-mono text-caption",
+          )}
+        >
+          {value}
+        </span>
+      </TruncatedTooltip>
     </div>
   );
 }
@@ -98,7 +100,6 @@ export function DaemonSettingsTab() {
   return (
     <SettingsTab
       title={t(($) => $.desktop.daemon.title)}
-      description={t(($) => $.desktop.daemon.description)}
     >
 
       {status.state === "auth_expired" && (
@@ -191,7 +192,6 @@ export function DaemonSettingsTab() {
           not for everyday use. */}
       <SettingsSection
         title={t(($) => $.desktop.daemon.diagnostics_title)}
-        description={t(($) => $.desktop.daemon.diagnostics_description)}
       >
         <SettingsCard>
           <div className="px-4 py-2">

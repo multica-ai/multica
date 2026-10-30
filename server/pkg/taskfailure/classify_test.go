@@ -75,6 +75,9 @@ func TestClassifyRules(t *testing.T) {
 		{"usage limit", "Account exceeded the daily usage limit", ReasonAgentProviderQuotaLimit},
 		{"hit your limit ascii", "you've hit your limit; upgrade to continue", ReasonAgentProviderQuotaLimit},
 		{"hit your limit curly", "you\u2019ve hit your limit", ReasonAgentProviderQuotaLimit},
+		{"session limit ascii", "You've hit your session limit \u00b7 resets 2pm (UTC)", ReasonAgentProviderQuotaLimit},
+		{"session limit curly", "You\u2019ve hit your session limit \u00b7 resets 2pm (UTC)", ReasonAgentProviderQuotaLimit},
+		{"weekly limit", "You've hit your weekly limit \u00b7 resets Nov 3, 9am (UTC)", ReasonAgentProviderQuotaLimit},
 		{"credits", "Your account has 0 credits remaining", ReasonAgentProviderQuotaLimit},
 		{"quota", "quota exceeded for project foo", ReasonAgentProviderQuotaLimit},
 
@@ -188,6 +191,29 @@ func TestClassifyRules(t *testing.T) {
 		{"402 boundary still quota", "API Error: 402 Payment Required", ReasonAgentProviderQuotaLimit},
 		{"403 boundary still auth", "HTTP 403 Forbidden", ReasonAgentProviderAuthOrAccess},
 		{"429 boundary still capacity", "got 429 from provider", ReasonAgentProviderCapacityOrRateLimit},
+
+		// 16. Letter-boundary regression (#9146): hex IDs in workspace and
+		//     task paths embed digit runs like "429" between letters
+		//     ("...c429f4b..."), which the digit-only boundary guard let
+		//     through — every failure quoting such a path landed in the
+		//     provider capacity/auth/quota/server-error buckets and sent
+		//     users to check their provider accounts for a 429 no provider
+		//     ever returned. Letters must count as embedded context, same
+		//     as digits.
+		{"429 in hex id not capacity", "local_directory worktree: refusing to record branch agent/a/b: " +
+			"the delivered commit a806f863 no longer contains e8574f2b, the commit this turn started from; " +
+			"the task worktree is preserved at /Users/u/multica_workspaces_x/ws-0000c429f4b/b-1/worktree", ReasonAgentUnknown},
+		{"403 in hex id not auth", "refusing to write /users/u/ws-c403f1b9/worktree", ReasonAgentUnknown},
+		{"401 in hex id not auth", "artifact stored at /tmp/run-00be401d7c/output.log", ReasonAgentUnknown},
+		{"402 in hex id not quota", "cache dir /var/cache/ws-0000d402aa9f removed", ReasonAgentUnknown},
+		{"5xx in hex id not server error", "log at /ws/branch-c503ba4e/worktree", ReasonAgentUnknown},
+		// A model name carrying "500" before a letter is an identifier,
+		// not a status code — same widening, same rationale.
+		{"model name 500 suffix not server error", "artifact model-pack qwen3-500b saved", ReasonAgentUnknown},
+		// Widening must not dull real detection: a genuine status code
+		// next to hex IDs still classifies.
+		{"429 still capacity alongside hex ids", "commit e8574f2b retry failed: HTTP 429 too many requests", ReasonAgentProviderCapacityOrRateLimit},
+		{"503 still server error alongside letters", "model qwen3-500b request died with HTTP 503", ReasonAgentProviderServerError},
 	}
 
 	for _, c := range cases {
@@ -222,6 +248,20 @@ func TestClassifyOrderingPriorities(t *testing.T) {
 		// auth rejection.
 		{"missing api key beats 401", "missing api_key for openai (401 returned downstream)", ReasonAgentMissingConfig},
 
+		// Some Anthropic-compatible providers return 403 for a transient
+		// concurrency rejection. The semantic witness must beat generic auth and
+		// token/context matching even when the CLI prefixes both misleadingly.
+		{"403 concurrent request limit beats auth", "Failed to authenticate. API Error: 403 You've reached your concurrent request limit. Please wait for your ongoing requests to finish and try again.", ReasonAgentProviderCapacityOrRateLimit},
+		{"access token concurrent request limit beats context", "Failed to refresh access token. API Error: 403 You've reached your concurrent request limit.", ReasonAgentProviderCapacityOrRateLimit},
+
+		// Kimi Code reports an exhausted subscription window as HTTP 403. The
+		// usage-limit witness must beat the bare 403 auth rule, while an
+		// unrelated 403 stays an auth failure.
+		{"403 usage limit beats auth", "API Error: 403 You've reached your 5-hour usage limit", ReasonAgentProviderQuotaLimit},
+		{"403 usage limit with prefix beats auth", "Failed to authenticate. API Error: 403 {\"error\":{\"message\":\"You've reached your 5-hour usage limit\"}}", ReasonAgentProviderQuotaLimit},
+		{"access token 403 usage limit beats context", "Failed to refresh access token. API Error: 403 You've reached your 5-hour usage limit", ReasonAgentProviderQuotaLimit},
+		{"plain 403 stays auth", "API Error: 403 Forbidden", ReasonAgentProviderAuthOrAccess},
+
 		// Both "429" and "rate limit" present — should still land in
 		// the capacity bucket, not the quota bucket.
 		{"429 rate limit", "API Error: 429 rate limit reached", ReasonAgentProviderCapacityOrRateLimit},
@@ -238,6 +278,54 @@ func TestClassifyOrderingPriorities(t *testing.T) {
 				t.Errorf("Classify(%q) = %q, want %q", c.in, got, c.want)
 			}
 		})
+	}
+}
+
+func TestNormalizeDaemonReasonUpgradesConcurrentRequestLimit(t *testing.T) {
+	t.Parallel()
+
+	const raw = "Failed to refresh access token. API Error: 403 You've reached your concurrent request limit."
+
+	for _, reason := range []string{
+		string(ReasonAgentContextOverflow),
+		string(ReasonAgentProviderAuthOrAccess),
+		string(ReasonAgentUnknown),
+		"agent_error",
+	} {
+		if got := NormalizeDaemonReason(reason, raw); got != ReasonAgentProviderCapacityOrRateLimit {
+			t.Errorf("NormalizeDaemonReason(%q, concurrent request rejection) = %q, want %q", reason, got, ReasonAgentProviderCapacityOrRateLimit)
+		}
+	}
+
+	if got := NormalizeDaemonReason(string(ReasonAgentProviderAuthOrAccess), "API Error: 403 Forbidden"); got != ReasonAgentProviderAuthOrAccess {
+		t.Errorf("plain 403 auth rejection changed to %q", got)
+	}
+	if got := NormalizeDaemonReason(string(ReasonAgentContextOverflow), "you exceeded the token limit"); got != ReasonAgentContextOverflow {
+		t.Errorf("ordinary token overflow changed to %q", got)
+	}
+}
+
+func TestNormalizeDaemonReasonUpgradesUsageLimit403(t *testing.T) {
+	t.Parallel()
+
+	for _, raw := range []string{
+		"API Error: 403 You've reached your 5-hour usage limit",
+		"Failed to refresh access token. API Error: 403 You've reached your 5-hour usage limit",
+	} {
+		for _, reason := range []string{
+			string(ReasonAgentContextOverflow),
+			string(ReasonAgentProviderAuthOrAccess),
+			string(ReasonAgentUnknown),
+			"agent_error",
+		} {
+			if got := NormalizeDaemonReason(reason, raw); got != ReasonAgentProviderQuotaLimit {
+				t.Errorf("NormalizeDaemonReason(%q, %q) = %q, want %q", reason, raw, got, ReasonAgentProviderQuotaLimit)
+			}
+		}
+	}
+
+	if got := NormalizeDaemonReason(string(ReasonAgentProviderAuthOrAccess), "API Error: 403 Forbidden"); got != ReasonAgentProviderAuthOrAccess {
+		t.Errorf("plain 403 auth rejection changed to %q", got)
 	}
 }
 

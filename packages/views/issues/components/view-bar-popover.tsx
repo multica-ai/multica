@@ -23,9 +23,10 @@ import {
   Pin,
   PinOff,
   Trash2,
-} from "lucide-react";
+} from "@multica/ui/icons";
 import { toast } from "sonner";
-import { Button } from "@multica/ui/components/ui/button";
+import { IconButton } from "@multica/ui/components/common/icon-button";
+import { TooltipHint } from "@multica/ui/components/common/tooltip-hint";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -142,18 +143,20 @@ function SortablePanelRow({
         isDragging ? "z-10 bg-accent opacity-80" : "hover:bg-muted/60",
       )}
     >
-      <button
-        type="button"
-        {...attributes}
-        {...listeners}
-        aria-label={t(($) => $.view_bar.drag_handle)}
-        className={cn(
-          "cursor-grab active:cursor-grabbing text-faint-foreground hover:text-muted-foreground",
-          isDragging && "cursor-grabbing",
-        )}
-      >
-        <GripVertical className="size-3.5" />
-      </button>
+      <TooltipHint label={t(($) => $.view_bar.drag_handle)}>
+        <button
+          type="button"
+          {...attributes}
+          {...listeners}
+          aria-label={t(($) => $.view_bar.drag_handle)}
+          className={cn(
+            "cursor-grab active:cursor-grabbing text-faint-foreground hover:text-muted-foreground",
+            isDragging && "cursor-grabbing",
+          )}
+        >
+          <GripVertical className="size-3.5" />
+        </button>
+      </TooltipHint>
       <button
         type="button"
         onClick={onSelect}
@@ -173,14 +176,14 @@ function SortablePanelRow({
         <DropdownMenu>
           <DropdownMenuTrigger
             render={
-              <Button
+              <IconButton
                 variant="ghost"
                 size="icon-sm"
-                aria-label={t(($) => $.view_bar.row_menu)}
+                label={t(($) => $.view_bar.row_menu)}
                 className="text-muted-foreground"
               >
                 <MoreHorizontal className="size-3.5" />
-              </Button>
+              </IconButton>
             }
           />
           <DropdownMenuContent align="end" className="w-44">

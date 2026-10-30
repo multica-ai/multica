@@ -1,0 +1,22 @@
+{
+  "a11y": {
+    "mention_someone": "提及某人",
+    "bullet_list": "無序列表",
+    "checklist": "清單",
+    "code_block": "程式碼塊",
+    "quote": "引用",
+    "attach_image": "新增圖片",
+    "attach_file": "新增檔案"
+  },
+  "code": {
+    "copied": "程式碼已複製",
+    "copy": "複製程式碼"
+  },
+  "upload": {
+    "file_too_large_title": "檔案過大",
+    "file_too_large_message": "檔案必須小於 100 MB。",
+    "failed": "上傳失敗",
+    "error": "未知錯誤"
+  },
+  "a11y.mention_someone": "提及某人"
+}

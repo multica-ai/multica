@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { GitBranch, Pencil, TriangleAlert } from "lucide-react";
+import { GitBranch, Pencil, TriangleAlert } from "@multica/ui/icons";
 import type { LocalDirectoryExecutionMode } from "@multica/core/types";
 import { Button } from "@multica/ui/components/ui/button";
 import {

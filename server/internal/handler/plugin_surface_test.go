@@ -2,6 +2,7 @@ package handler
 
 import (
 	"bytes"
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -102,6 +103,63 @@ func TestPluginSurfaceOriginMustDifferFromEveryAppOrigin(t *testing.T) {
 	content, _ := parsePluginSurfaceOrigin("https://plugin-content.example.test")
 	if !h.pluginSurfaceOriginIsDedicated(content) {
 		t.Fatal("separate content origin was rejected")
+	}
+}
+
+func TestPluginSurfaceLaunchDistinguishesDisabledFromMisconfigured(t *testing.T) {
+	tests := []struct {
+		name       string
+		handler    func(t *testing.T) *Handler
+		wantStatus int
+		wantCode   string
+	}{
+		{
+			name:       "missing configuration",
+			handler:    func(*testing.T) *Handler { return &Handler{} },
+			wantStatus: http.StatusForbidden,
+			wantCode:   "plugin_surfaces_not_configured",
+		},
+		{
+			name: "invalid origin",
+			handler: func(t *testing.T) *Handler {
+				h := pluginSurfaceTokenHandler(t)
+				h.cfg.PluginSurfaceOrigin = "not-an-origin"
+				return h
+			},
+			wantStatus: http.StatusInternalServerError,
+			wantCode:   "plugin_surfaces_misconfigured",
+		},
+		{
+			name: "shared app origin",
+			handler: func(t *testing.T) *Handler {
+				h := pluginSurfaceTokenHandler(t)
+				h.cfg.PluginSurfaceOrigin = "https://app.example.test"
+				h.cfg.AppURL = "https://app.example.test"
+				return h
+			},
+			wantStatus: http.StatusInternalServerError,
+			wantCode:   "plugin_surfaces_misconfigured",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			h := tt.handler(t)
+			withPluginsV1Flag(t, h, true)
+			recorder := httptest.NewRecorder()
+			h.GetPluginSurfaceLaunch(recorder, pluginHandlerRequest(http.MethodGet, "/plugins/surface", nil, nil))
+
+			if recorder.Code != tt.wantStatus {
+				t.Fatalf("status=%d body=%s, want %d", recorder.Code, recorder.Body.String(), tt.wantStatus)
+			}
+			var body map[string]string
+			if err := json.Unmarshal(recorder.Body.Bytes(), &body); err != nil {
+				t.Fatalf("decode response: %v", err)
+			}
+			if body["code"] != tt.wantCode {
+				t.Fatalf("code=%q, want %q", body["code"], tt.wantCode)
+			}
+		})
 	}
 }
 

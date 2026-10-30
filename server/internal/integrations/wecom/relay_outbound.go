@@ -1,56 +1,15 @@
 package wecom
 
-// relay_outbound.go — how a reply reaches the replica that can send it.
+// Relay completions to the replica holding the bot's WebSocket lease.
+// Redis claims keyed by turn deduplicate replay across restarts and replicas.
 //
-// WeCom is the one channel with no outbound REST path: every write goes over
-// the aibot WebSocket, and the WS lease means exactly one replica holds it.
-// chat:done, meanwhile, is published on the in-process events.Bus by whichever
-// replica served the daemon's POST /tasks/{id}/complete — a load-balancer
-// decision. Off-lease, outbound.go used to have nothing to do but drop the
-// reply (GH #7215, #6890; SELF_HOSTING.md states the resulting constraint).
+// Relay consumers run on the shard reader, so enqueue bounded work and return
+// without waiting for platform acknowledgements. Register before readers start;
+// Attach supplies the eventual handler while early frames wait in the queue.
 //
-// This routes it over the Redis Stream relay the repository already runs for
-// exactly this shape of problem: daemonws.RelayNotifier wakes a daemon
-// connected to another replica by publishing under ScopeDaemonRuntime, and
-// every node's XREAD loop hands the frame to whoever holds that connection.
-//
-// THREE THINGS THAT MECHANISM REQUIRES OF ITS CONSUMERS, and that a naive copy
-// of the daemon-wakeup shape does not satisfy:
-//
-//  1. It replays. A shard reader starts from (now - ReplayGrace), not "$", so
-//     events published while a pod was down are re-read — its own doc says
-//     "downstream consumers must be idempotent". A per-process seen-set is not
-//     idempotent across a restart, and does not span two replicas either. The
-//     claim therefore lives in Redis, keyed on the turn, with a lifetime that
-//     comfortably outlasts the replay window. Redis is not a new dependency
-//     here: it IS the transport. No Redis means no relay, which means no
-//     cross-replica delivery and nothing to deduplicate.
-//
-//  2. It calls the consumer SYNCHRONOUSLY on the shard read loop. The daemon
-//     wakeup's work there is a map lookup and a buffered write; ours is a
-//     network round trip that waits up to ackTimeout for the platform's
-//     verdict. Doing that inline would let one unhealthy bot stall browser
-//     realtime traffic, daemon wakeups, and every other bot on that shard. So
-//     DeliverWecomOutbound only hands the frame to a bounded queue and
-//     returns.
-//
-//  3. Its readers start early. Registration therefore has to be possible
-//     before the senders registry and the subscriber exist: this object is
-//     built and registered first, and Attach supplies the handler afterwards.
-//     Frames that arrive in between wait in the queue rather than being
-//     dropped against a nil field.
-//
-// ORDERING: every reply for one installation is carried by one queue and one
-// worker, in the order it arrived — INCLUDING across a re-offer. A frame that
-// has to be tried again does not go to the back of the queue; it parks at the
-// head of its own installation's line and everything behind it waits, because
-// two answers to the same person arriving in the wrong order is the defect
-// this ordering exists to prevent.
-//
-// Sharding is a CONCURRENCY bound, not an isolation guarantee: installations
-// are hashed onto RelayConfig.Shards queues, so two bots that collide on a
-// shard do wait behind each other. What the shard count buys is that one slow
-// bot cannot occupy every worker.
+// Preserve per-installation order across re-offers by retrying at the queue head.
+// Hashed shards bound concurrency, not isolation: colliding installations can
+// still wait behind each other.
 
 import (
 	"context"
@@ -81,15 +40,35 @@ type relayPublisher interface {
 // in-process gate, which is correct for a single-replica deployment because
 // there the relay is never used at all.
 type DedupeStore interface {
-	// Claim reports whether the caller is the first to take key. It must be
-	// atomic across processes.
-	Claim(ctx context.Context, key string, ttl time.Duration) (bool, error)
-	// Release gives a claim back, for a delivery that provably did not happen.
-	Release(ctx context.Context, key string)
-	// Held reports whether key is claimed right now. It is how the publisher
-	// learns, after the fact, whether ANY replica took a delivery it routed —
-	// see RelayOutbound.watchOutcomes.
-	Held(ctx context.Context, key string) (bool, error)
+	// Claim takes key for token, or re-takes it when key already holds
+	// token — the same owner coming back after a Release whose result was
+	// unknown. Atomic across processes. The token is what makes every other
+	// operation here safe to retry: a re-sent command can never act on a
+	// claim that a later owner has since taken.
+	Claim(ctx context.Context, key, token string, ttl time.Duration) (bool, error)
+	// Release gives back the claim held under token, for a delivery that
+	// provably did not happen: a compare-and-delete. false with a nil error
+	// means the key no longer holds token — the delete already landed, the
+	// claim expired, or somebody else holds it now — and is not a failure.
+	// A non-nil error means the OUTCOME IS UNKNOWN: the delete may or may
+	// not have landed. The caller must not read it as either.
+	Release(ctx context.Context, key, token string) (bool, error)
+	// Settle marks the claim held under token as settled: its holder is about
+	// to record the delivery's outcome. false means the key no longer holds
+	// token — the publisher already resolved it as lost, or it expired — and
+	// the holder must then record nothing, so the reply ends with one record.
+	// Settling an already-settled claim reports true (a retry is safe).
+	Settle(ctx context.Context, key, token string) (bool, error)
+	// Resolve is the publisher's end-of-grace read, and its fence: a claim
+	// still held by a token at that point is turned into claimLost in the
+	// same operation, so a holder that comes back later finds its Settle
+	// refused and records nothing. See RelayOutbound.settle.
+	Resolve(ctx context.Context, key string) (claimState, error)
+	// ClaimState is Resolve WITHOUT the fence: it reports what the key holds
+	// right now and changes nothing. It is what an inbox publish polls while it
+	// waits to see whether a replica took the delivery; Resolve would fence a
+	// holder that is merely mid-delivery. See RelayOutbound.confirmInbox.
+	ClaimState(ctx context.Context, key string) (claimState, error)
 	// ClaimBudget is the longest ONE round trip above may take. The store
 	// states it because the store enforces it: outcomeGrace pays this budget
 	// once per offer, and a copy of the number kept by the dispatcher would be
@@ -122,6 +101,23 @@ func dedupeTTLFor(replayGrace time.Duration) time.Duration {
 //
 // A zero field takes its documented default.
 type RelayConfig struct {
+	// DeliveryBudget is the longest one delivery attempt may take once it
+	// holds the claim, and it bounds the WHOLE logical delivery: the wait for
+	// the target chat's turn, and every piece a long answer is split into with
+	// its own ack wait. Zero means ackTimeout.
+	//
+	// One budget for all of it, because that is what the publisher's outcome
+	// grace reserves for one offer (outcomeGrace) — a grace sized for one ack
+	// while the delivery waits for several is a Resolve that fences a reply
+	// its holder is still writing.
+	//
+	// The grace charges it PER OFFER, not once for the chain: an offer that
+	// fails provably-unsent hands the claim back, so the next offer starts
+	// with a budget of its own. Lowering it therefore shortens the grace
+	// twelve-fold on the defaults, which is why tests that wait a grace out
+	// shrink it along with the claim budget and the lease settle.
+	DeliveryBudget time.Duration
+
 	// Shards is how many independent queues carry frames, and it is a
 	// concurrency bound rather than an ordering one: ordering comes from the
 	// hash putting one installation on one queue, and installations that
@@ -163,6 +159,15 @@ type RelayConfig struct {
 	// a tenth of one poll — and expired long before the move it existed for.
 	LeaseSettle time.Duration
 
+	// AcceptanceWindow is how long an inbox publish waits to see a replica take
+	// the delivery claim before it concludes that nobody holds that bot's
+	// socket. Its bound is the frame's trip to every replica's dispatcher plus
+	// one claim round trip (DedupeStore.ClaimBudget), NOT the re-offer chain
+	// the reply path's outcomeGrace outlasts: an inbox frame nobody claimed has
+	// no chain behind it, so waiting the chain out would only delay the
+	// fallback. Zero takes defaultRelayAcceptanceWindow.
+	AcceptanceWindow time.Duration
+
 	// RetryBackoff is the FIRST wait between re-offers; the chain doubles from
 	// there, capped at a quarter of LeaseSettle so a lease that lands early is
 	// not sat out. Small on purpose: the common reason a re-offer succeeds is
@@ -179,9 +184,22 @@ const (
 	// here would be free to drift from the thing it is meant to outlast.
 	defaultRelayLeaseSettle  = engine.DefaultPollInterval
 	defaultRelayRetryBackoff = 200 * time.Millisecond
+	// defaultRelayAcceptanceWindow matches defaultClaimBudget: one claim round
+	// trip plus room for the bus fan-out and a dispatcher's turn. The two live
+	// in different files on purpose — this is the relay's bound on how long it
+	// will wait, that is the store's bound on how long one call may take.
+	defaultRelayAcceptanceWindow = 2 * time.Second
 )
 
 // withDefaults fills the zero fields and returns the completed config.
+// deliveryBudget is DeliveryBudget with its default applied.
+func (c RelayConfig) deliveryBudget() time.Duration {
+	if c.DeliveryBudget > 0 {
+		return c.DeliveryBudget
+	}
+	return ackTimeout
+}
+
 func (c RelayConfig) withDefaults() RelayConfig {
 	if c.Shards <= 0 {
 		c.Shards = defaultRelayShards
@@ -197,6 +215,9 @@ func (c RelayConfig) withDefaults() RelayConfig {
 	}
 	if c.RetryBackoff <= 0 {
 		c.RetryBackoff = defaultRelayRetryBackoff
+	}
+	if c.AcceptanceWindow <= 0 {
+		c.AcceptanceWindow = defaultRelayAcceptanceWindow
 	}
 	return c
 }
@@ -238,31 +259,81 @@ func (c RelayConfig) retryPlan() []time.Duration {
 // read for itself, so an attachment is fetched by the replica that will send
 // it rather than shipped through Redis.
 type relayFrame struct {
-	Kind           string `json:"kind"` // relayKindReply | relayKindInbox
+	Kind           string `json:"kind"` // relayKindReply | relayKindInbox | relayKindSeal
 	InstallationID string `json:"installation_id"`
 	ChatID         string `json:"chat_id"`
 	ChatType       int    `json:"chat_type"`
 	Content        string `json:"content"`
-	TaskID         string `json:"task_id,omitempty"`
-	MessageID      string `json:"message_id,omitempty"`
-	WorkspaceID    string `json:"workspace_id,omitempty"`
-	SessionID      string `json:"session_id,omitempty"`
-	CarriesFiles   bool   `json:"carries_files,omitempty"`
+	// SealReason names the ending a relayKindSeal frame carries, instead of the
+	// words for it. The words are the ROUND's, and the round is on the holder:
+	// its locale was captured when its bubble was opened, so the holder is the
+	// only replica that can say the sentence in the language the asker reads.
+	SealReason   string `json:"seal_reason,omitempty"`
+	TaskID       string `json:"task_id,omitempty"`
+	MessageID    string `json:"message_id,omitempty"`
+	WorkspaceID  string `json:"workspace_id,omitempty"`
+	SessionID    string `json:"session_id,omitempty"`
+	CarriesFiles bool   `json:"carries_files,omitempty"`
 }
 
 const (
 	relayKindReply = "reply"
 	relayKindInbox = "inbox"
+	// relayKindSeal ENDS A ROUND WITHOUT CARRYING WORDS, which is the one thing
+	// a reply frame cannot express: every wordless ending — a cancellation, a
+	// completion with nothing to say, an answer that is only files — had no way
+	// to reach the replica holding the bubble, so off-lease it left a spinner
+	// claiming work was still in progress for the rest of the protocol's
+	// window. Nothing else ends it: the sweep writes no frame, OnSettled needs
+	// an unbound round, and the next question opens its own bubble.
+	//
+	// It is NOT a reply with an empty body, and the difference is the point. A
+	// reply whose round is gone falls through to an ordinary push; one
+	// cancel-all click would then put 这次处理已取消 into every chat in the
+	// deployment. A seal frame with no round does NOTHING AT ALL.
+	relayKindSeal = "seal"
 )
 
 // relayHandler performs a delivery on the replica that holds the socket.
 // *Outbound implements it; the indirection is what lets this object be
 // registered with the relay before the subscriber exists.
 type relayHandler interface {
-	deliverRelayed(ctx context.Context, f relayFrame) deliveryOutcome
+	deliverRelayed(ctx context.Context, f relayFrame) relayResult
 	// ownsSocket answers "does this process hold that installation's live
 	// connection right now". It gates the global claim — see perform.
 	ownsSocket(installationID string) bool
+}
+
+// claimState is what Resolve reads off one claim key.
+type claimState int
+
+const (
+	// claimAbsent — nobody holds it: never claimed, released, or expired.
+	claimAbsent claimState = iota
+	// claimHeld — a replica took it and has not recorded an outcome. Resolve
+	// turns this into claimLost as it reports it.
+	claimHeld
+	// claimSettled — its holder recorded the outcome.
+	claimSettled
+	// claimLost — the publisher recorded it as lost.
+	claimLost
+)
+
+// claimSettledValue and claimLostValue are what a key holds once it is no
+// longer a token. A token never collides with them: it is hex and a slash.
+const (
+	claimSettledValue = "settled"
+	claimLostValue    = "lost"
+)
+
+// relayResult is what one delivery attempt reports: whether the frame is
+// finished, and — for a finished one — the record its holder owes. The record
+// is separated from the delivery so it can be made AFTER the claim is settled:
+// a holder whose Settle is refused (the publisher already counted the reply
+// as lost) must record nothing, or the reply ends with two records.
+type relayResult struct {
+	outcome deliveryOutcome
+	record  func()
 }
 
 // deliveryOutcome tells the dispatcher whether the claim may be released.
@@ -281,6 +352,40 @@ const (
 	// a send at its own risk.
 	outcomeProvablyNotSent
 )
+
+// relayPublish is what one trip through the cross-replica router produced.
+//
+// The bool it replaces could not tell "the bus took it" from "a replica took
+// the delivery" from "the publish call itself failed", and an inbox push needs
+// all three: only an accepted-and-claimed frame is a delivery it may stop
+// making, and only a failed publish forbids it from trying another bot.
+type relayPublish int
+
+const (
+	// relayNotWired — nothing reached the bus: no relay is attached, or the
+	// frame could not even be built. A caller may treat it as a delivery that
+	// certainly did not happen.
+	relayNotWired relayPublish = iota
+	// relayAccepted — the bus took the frame. For a reply or a seal that is the
+	// whole answer. For an inbox push it means a replica that owns the target
+	// bot's socket took the delivery claim, so somebody is carrying it.
+	relayAccepted
+	// relayNoHolder — the bus took the frame, but across the acceptance window
+	// no replica took the delivery claim: nobody holds that installation's
+	// socket, so every dispatcher discards the frame. Only an inbox push can
+	// report this (see confirmInbox). The delivery provably did not happen.
+	relayNoHolder
+	// relayUncertain — the publish call failed, or the claim store could not
+	// answer. The frame may or may not have been accepted, so nothing may be
+	// concluded and nothing may be re-routed on this evidence.
+	relayUncertain
+)
+
+// routed reports whether the bus took the frame, which is the whole question
+// the reply and seal callers ask. They have no second route to fall back to,
+// and a frame that may have been accepted is treated as not carried, so they
+// keep their old local-send behaviour.
+func (p relayPublish) routed() bool { return p == relayAccepted }
 
 // seenEvents is a bounded, per-process set of relay event ids already acted on.
 // It is a cheap first gate in front of the Redis claim — the publisher's own
@@ -355,8 +460,13 @@ type RelayOutbound struct {
 	dedupeTTL time.Duration
 	cfg       RelayConfig
 	retryPlan []time.Duration
-	logger    *slog.Logger
-	seen      *seenEvents
+
+	// owner is this process's half of every claim token (tokenFor). Minted
+	// once per RelayOutbound so a claim can tell its own re-offers from
+	// another replica's, and nothing else.
+	owner  string
+	logger *slog.Logger
+	seen   *seenEvents
 
 	// verify carries a routed reply's id to the outcome watcher — the one
 	// owner of "did anybody end up delivering this". Buffered and shed rather
@@ -391,6 +501,7 @@ func NewRelayOutbound(publisher relayPublisher, dedupe DedupeStore, cfg RelayCon
 		dedupeTTL: dedupeTTLFor(cfg.ReplayGrace),
 		cfg:       cfg,
 		retryPlan: cfg.retryPlan(),
+		owner:     newReqID(),
 		logger:    logger,
 		seen:      newSeenEvents(4096),
 		verify:    make(chan pendingOutcome, cfg.QueueDepth),
@@ -697,27 +808,171 @@ func (r *RelayOutbound) Wait() {
 	}
 }
 
-// publish hands a delivery to the other replicas. Reports whether it went out.
-func (r *RelayOutbound) publish(f relayFrame, eventID string) bool {
+// publish hands a delivery to the other replicas and reports what the bus did
+// with it. See relayPublish for why the answer is not a bool.
+//
+// It NEVER waits: every caller of this one either has no second route to take
+// when nobody holds the target bot, or is not in a position to take one. The
+// single caller that is (an inbox push with the recipient-wide bot behind it)
+// asks through publishAwaitingHolder instead, and pays the wait only there.
+func (r *RelayOutbound) publish(f relayFrame, eventID string) relayPublish {
+	return r.publishFrame(context.Background(), f, eventID, false)
+}
+
+// publishAwaitingHolder is publish plus the acceptance wait: it answers whether
+// a replica owning the target bot's socket actually took the delivery, which is
+// what an inbox push needs before it may put a second card in the member's chat
+// through another bot. The wait is bounded by ctx, and by the acceptance window
+// it configures -- see confirmInbox.
+//
+// WHY IT IS A SEPARATE ENTRY POINT. Bus delivery is synchronous on the caller's
+// goroutine, and the publisher of an inbox:new is the HTTP request that created
+// the comment; only one replica holds a given bot's socket, so this wait is the
+// common path in a multi-replica deployment. Spending it where the answer is
+// then discarded -- a member-authored push, which has no second route to try,
+// or the fallback attempt itself, which has nothing behind it -- holds the
+// request open for a verdict nobody can act on. Those callers keep publish.
+func (r *RelayOutbound) publishAwaitingHolder(ctx context.Context, f relayFrame, eventID string) relayPublish {
+	return r.publishFrame(ctx, f, eventID, true)
+}
+
+// publishFrame is the one implementation behind the two entry points.
+func (r *RelayOutbound) publishFrame(ctx context.Context, f relayFrame, eventID string, awaitHolder bool) relayPublish {
 	if r == nil || r.publisher == nil {
-		return false
+		return relayNotWired
 	}
 	body, err := json.Marshal(f)
 	if err != nil {
 		r.logger.Warn("wecom relay: marshal outbound frame", "error", err)
-		return false
+		return relayNotWired
 	}
 	if err := r.publisher.PublishWithID(realtime.ScopeWecomOutbound, f.InstallationID, "", body, eventID); err != nil {
 		r.logger.Warn("wecom relay: publish failed",
 			"error", err, "installation_id", f.InstallationID, "task_id", f.TaskID)
-		return false
+		// The bus call failed, but a publish whose RESPONSE was lost may still
+		// have been accepted. Nothing may be concluded from it.
+		return relayUncertain
 	}
 	// A published reply is now owed an outcome by somebody. watchOutcomes is
 	// that somebody — see its comment for why it cannot be anyone else.
 	if f.Kind == relayKindReply {
 		r.awaitOutcome(f, eventID)
 	}
-	return true
+	// Reply and seal frames are fire-and-forget: their callers read only "did
+	// the bus take it", and counting a routed reply twice is what the outcome
+	// watch exists to prevent. Only the inbox push asks whether a replica
+	// actually took the delivery, because only it has a second route to fall
+	// back to -- and only when the caller asked to wait.
+	if !awaitHolder || f.Kind != relayKindInbox {
+		return relayAccepted
+	}
+	if r.dedupe == nil {
+		// No claim store means no relay in production (see DedupeStore); the
+		// bus call is the only signal available, so take it.
+		return relayAccepted
+	}
+	return r.confirmInbox(ctx, eventID)
+}
+
+// confirmInbox answers whether a replica took the delivery claim for an inbox
+// frame the bus accepted, so the publisher can tell "somebody is carrying this"
+// from "nobody holds that bot's socket" without waiting out a re-offer chain
+// that will never exist.
+//
+// It reads the claim key for up to RelayConfig.AcceptanceWindow. A claim that
+// appears means a replica owning the installation's socket engaged the
+// delivery, and the relay's own guarantees (re-offers, the outcome record) take
+// over from there. A key still absent at the end of the window means no replica
+// even took it — the frame is handed to each replica exactly once and only a
+// socket holder claims — so none ever will. The publisher then FENCES the key
+// under a token no delivery worker presents (fenceTokenFor) and reports
+// relayNoHolder, which is what lets the caller
+// route the notification somewhere else. The fence is what keeps that safe: a
+// dispatcher that is late, or a replica replaying the frame across a restart,
+// finds the claim taken and delivers nothing -- on the publishing replica too,
+// which is the one a fence under its own delivery token would NOT have stopped.
+// See fenceTokenFor.
+//
+// A claim store that cannot answer is relayUncertain: the delivery might be
+// happening, and the caller must not route a second copy on that. So is a
+// caller whose own budget ran out mid-wait -- the wait is bounded by ctx as
+// well as by the window, because this runs on a request's goroutine.
+func (r *RelayOutbound) confirmInbox(ctx context.Context, eventID string) relayPublish {
+	window := r.cfg.AcceptanceWindow
+	// THE CALLER'S BUDGET IS THE OUTER BOUND. This wait runs on the goroutine
+	// that is serving an HTTP request (see publishAwaitingHolder), so a caller
+	// that runs out of time must take the wait with it rather than be held for
+	// a window it configured elsewhere. A tighter caller deadline shortens the
+	// window; with no deadline the window stands.
+	deadline := time.Now().Add(window)
+	callerDeadline, hasCallerDeadline := ctx.Deadline()
+	if hasCallerDeadline && callerDeadline.Before(deadline) {
+		deadline = callerDeadline
+	}
+	// The poll's OWN deadline ends the wait; the context is the backstop that
+	// keeps a claim store which ignores its deadline from outlasting it, so it
+	// gets a little more room than the loop. Were the two equal, the context
+	// could fire in the same instant the last poll lands and the verdict would
+	// rest on which select case won: reporting "uncertain" for a bot nobody
+	// holds, and silently giving up the fallback.
+	pollCtx, cancel := context.WithTimeout(ctx, time.Until(deadline)+window/8+time.Millisecond)
+	defer cancel()
+	key := dedupeKey(eventID)
+	// Eight polls over whatever window actually applies, so a caller that
+	// shortened the wait still samples it evenly rather than once at the start
+	// and once past its own deadline.
+	step := window / 8
+	if effective := time.Until(deadline); effective < window {
+		step = effective / 8
+	}
+	if step < time.Millisecond {
+		step = time.Millisecond
+	}
+	for {
+		state, err := r.dedupe.ClaimState(pollCtx, key)
+		if err != nil {
+			r.logger.WarnContext(pollCtx, "wecom relay: inbox claim state unreadable; the push is not re-routed",
+				"error", err, "event_id", eventID)
+			return relayUncertain
+		}
+		if state != claimAbsent {
+			return relayAccepted
+		}
+		if !time.Now().Before(deadline) {
+			break
+		}
+		timer := time.NewTimer(step)
+		select {
+		case <-timer.C:
+		case <-pollCtx.Done():
+			timer.Stop()
+			return relayUncertain
+		}
+	}
+	// A deadline can pass before its cancellation callback updates Err. An
+	// expired caller must not fence the unconfirmed delivery or start a fallback.
+	callerErr := ctx.Err()
+	if callerErr == nil && hasCallerDeadline && !time.Now().Before(callerDeadline) {
+		callerErr = context.DeadlineExceeded
+	}
+	if callerErr != nil {
+		r.logger.WarnContext(ctx, "wecom relay: the caller's budget ran out before an inbox push's bot could be confirmed; not re-routing",
+			"error", callerErr, "event_id", eventID)
+		return relayUncertain
+	}
+	won, err := r.dedupe.Claim(pollCtx, key, r.fenceTokenFor(eventID), r.dedupeTTL)
+	if err != nil {
+		r.logger.WarnContext(pollCtx, "wecom relay: could not fence an unclaimed inbox delivery; the push is not re-routed",
+			"error", err, "event_id", eventID)
+		return relayUncertain
+	}
+	if !won {
+		// A replica took the claim between the last read and the fence.
+		return relayAccepted
+	}
+	r.logger.InfoContext(pollCtx, "wecom relay: no replica holds the inbox push's bot; its sender may route it elsewhere",
+		"event_id", eventID)
+	return relayNoHolder
 }
 
 // DeliverWecomOutbound is realtime.WecomOutboundDeliverer. It must not block:
@@ -769,8 +1024,9 @@ func (r *RelayOutbound) perform(ctx context.Context, item queued) bool {
 		return true
 	}
 	key := dedupeKey(item.eventID)
+	token := r.tokenFor(item.eventID)
 	if r.dedupe != nil {
-		won, err := r.dedupe.Claim(ctx, key, r.dedupeTTL)
+		won, err := r.dedupe.Claim(ctx, key, token, r.dedupeTTL)
 		if err != nil {
 			// A dedupe store that cannot answer must not silently become an
 			// at-least-once path: a duplicate answer in a room is worse than a
@@ -794,17 +1050,189 @@ func (r *RelayOutbound) perform(ctx context.Context, item queued) bool {
 			return false
 		}
 	}
-	outcome := r.handler.deliverRelayed(ctx, item.frame)
-	if outcome == outcomeDone {
+	// DeliveryBudget is what the publisher's outcomeGrace charges per offer
+	// (outcomeGrace, below), so it has to be what this delivery actually
+	// gets. It was documented as the bound and never applied: the send's only
+	// limit was ackTimeout, the constant, whatever the config said. An
+	// operator who lowered the budget shrank the grace without shortening the
+	// delivery, and a Resolve landing inside an ack wait fences a reply that
+	// is on its way.
+	//
+	// A budget PER OFFER and not one for the chain, because this is where the
+	// claim is taken and given back: an offer that ends provably-unsent
+	// releases the claim a few lines down, and the next offer arrives here
+	// and opens a fresh one.
+	//
+	// The default is ackTimeout, so a deployment that sets nothing sees no
+	// change. A delivery cut here ends in a context error, which
+	// unconfirmedReason reads as unknown rather than failed — correct when
+	// the cut lands after the write, and marked as certain when it lands
+	// before one (errNotAttempted, ws_sender.go).
+	dctx, cancelDelivery := context.WithTimeout(ctx, r.cfg.deliveryBudget())
+	res := r.handler.deliverRelayed(dctx, item.frame)
+	cancelDelivery()
+	if res.outcome == outcomeDone {
+		// FINISHED. The holder's record is made only once the claim says
+		// so: Settle is a compare-and-set on this replica's token, and a
+		// refusal means the publisher already resolved the reply as lost
+		// at the end of its grace — it has a record, so this one must not
+		// be made. That is the whole reason record is a closure rather than
+		// a counter moved inside deliverRelayed.
+		if r.dedupe != nil && !r.settleClaim(ctx, key, token, item.frame) {
+			return true
+		}
+		if res.record != nil {
+			res.record()
+		}
 		return true
 	}
 	// Not ours, or provably never written: give the claim back — and offer it
 	// again locally too, because release alone wakes nobody (see !won above).
-	r.seen.forget(item.eventID)
+	//
+	// Release is a compare-and-delete on this replica's token, so it is safe
+	// to retry and can never take a claim a later owner holds. Its three
+	// answers are all "offer it again":
+	//   - released: the next offer's Claim starts from an empty key;
+	//   - not ours any more: the delete already landed, or another replica
+	//     holds it now — the next Claim decides which;
+	//   - error: UNKNOWN whether the delete landed. Nothing is recorded on
+	//     that word. If the key still holds this token the next Claim
+	//     re-takes it (same owner) and the delivery runs again; if the delete
+	//     did land the next Claim takes it fresh, or loses it to a replica
+	//     that got there first — which then delivers and records, once.
+	// A claim that stays stranded under this token — every release erroring,
+	// every re-offer failing — is what the publisher's Resolve finds at the
+	// end of the grace: held, by nobody who recorded anything, and it
+	// records the loss there, once.
 	if r.dedupe != nil {
-		r.dedupe.Release(ctx, key)
+		if released, err := r.dedupe.Release(ctx, key, token); err != nil {
+			r.logger.WarnContext(ctx, "wecom relay: claim release outcome unknown; the next offer re-claims",
+				"error", err, "kind", item.frame.Kind,
+				"installation_id", item.frame.InstallationID, "task_id", item.frame.TaskID)
+		} else if !released {
+			r.logger.DebugContext(ctx, "wecom relay: claim no longer ours at release",
+				"kind", item.frame.Kind, "installation_id", item.frame.InstallationID, "task_id", item.frame.TaskID)
+		}
 	}
+	r.seen.forget(item.eventID)
 	return false
+}
+
+// claimSettleAttempts is how many times the holder asks the store to settle
+// its claim before giving up. An error from Settle means UNKNOWN, exactly as
+// it does for Release — and unlike Release there is no later offer to resolve
+// it, because a settled delivery is finished. So the retry is what resolves
+// it, and the operation is built to be retried: redisSettleSource is
+// idempotent and token-fenced, so a retry after a settle that DID land
+// matches the settled value and reports success, while one after a settle
+// that never landed finds either the token (settles it now) or the
+// publisher's fence (refused, and the holder correctly records nothing).
+const claimSettleAttempts = 3
+
+// settleRetryBackoff paces those attempts. The claim layer's own knob rather
+// than a new one: it is the same "how long before asking the store again"
+// question the re-offer chain asks.
+func (r *RelayOutbound) settleRetryBackoff() time.Duration {
+	if r.cfg.RetryBackoff > 0 {
+		return r.cfg.RetryBackoff
+	}
+	return defaultRelayRetryBackoff
+}
+
+// settleClaim marks a delivered frame's claim as settled and reports whether
+// its holder may record the outcome.
+//
+// False has two meanings, and only one of them is covered elsewhere.
+//
+// Covered: the publisher already resolved the reply as lost. Its record
+// stands, and a second one here would double it.
+//
+// NOT always covered: every attempt came back unknown. The holder cannot tell
+// which state the store is in. If the settles never landed the claim is still
+// held by this token, and the publisher's Resolve ends the reply once — the
+// common case, and the reason not to count here. But if a settle DID land and
+// only its response was lost, the key already reads settled, so that Resolve
+// stays quiet too and the reply ends with NO record at all. Recording here
+// instead would turn the common case into the double count this whole path
+// exists to prevent, so the miss is the side deliberately taken: a monitoring
+// gap under a store that keeps failing, not a reply the user did not get. The
+// warning below is what makes it visible.
+func (r *RelayOutbound) settleClaim(ctx context.Context, key, token string, f relayFrame) bool {
+	var (
+		lastErr error
+		made    int
+	)
+	for attempt := 0; attempt < claimSettleAttempts; attempt++ {
+		if attempt > 0 {
+			timer := time.NewTimer(r.settleRetryBackoff())
+			select {
+			case <-timer.C:
+			case <-ctx.Done():
+				// Shutdown does not excuse the settle: the frame is already
+				// in the user's chat, and the store call itself runs on a
+				// context of its own (dedupe_redis.go). Skip the pause, not
+				// the attempt.
+				timer.Stop()
+			}
+			if settleBudgetSpent(ctx) {
+				break
+			}
+		}
+		made++
+		settled, err := r.dedupe.Settle(ctx, key, token)
+		switch {
+		case err != nil:
+			lastErr = err
+		case settled:
+			return true
+		default:
+			r.logger.WarnContext(ctx, "wecom relay: delivered after the publisher resolved the reply as lost; not counted again",
+				"kind", f.Kind, "installation_id", f.InstallationID, "task_id", f.TaskID)
+			return false
+		}
+	}
+	// Still unknown after every attempt this was allowed to make. See the
+	// doc comment: the publisher ends the reply when the settles never
+	// landed, and nothing ends it when one landed and only its answer was
+	// lost. Which of the two happened is exactly what is not knowable here,
+	// so the outcome is left unrecorded rather than double-recorded.
+	r.logger.WarnContext(ctx, "wecom relay: delivered, but the claim could not be settled; this reply's outcome may go unrecorded",
+		"error", lastErr, "attempts", made, "kind", f.Kind,
+		"installation_id", f.InstallationID, "task_id", f.TaskID,
+		"detail", "the delivery itself reached the chat; if the settle landed and only its "+
+			"response was lost, the publisher's Resolve reads the claim as settled and stays "+
+			"quiet as well, so no delivered/dropped/unconfirmed is counted for this reply")
+	return false
+}
+
+// settleBudgetSpent reports whether a bounding DEADLINE on ctx has passed.
+//
+// A bare cancellation is not one. Shutdown interrupts the work, but the frame
+// is already in the user's chat and its claim still has to be settled — which
+// is why the store call drops cancellation (dedupe_redis.go). A deadline is
+// the opposite case: drainRemaining bounds the WHOLE drain with one, and a
+// retry chain that keeps opening attempts past it spends time the shutdown
+// already promised away. Attempts already made stand; no new one begins.
+func settleBudgetSpent(ctx context.Context) bool {
+	deadline, ok := ctx.Deadline()
+	return ok && !time.Now().Before(deadline)
+}
+
+// tokenFor is the owner token one claim is held under: this process, and the
+// delivery. Stable across re-offers on this process, unique across replicas.
+func (r *RelayOutbound) tokenFor(eventID string) string { return r.owner + "/" + eventID }
+
+// fenceTokenFor is the token a no-holder fence is planted under, and it is
+// deliberately NOT tokenFor. Claim answers "won" when the stored value equals
+// the caller's token, so a fence planted under the publisher's own delivery
+// token would be reclaimable by that replica's dispatcher the moment its
+// socket came back -- the ordinary reconnect, not an exotic one -- and the
+// frame it then delivered would be the second card the fallback had already
+// replaced. The suffix makes the fenced value one no delivery worker ever
+// presents, so the fence holds against every worker on every replica, the
+// publishing one included. It is never released; the claim TTL retires it.
+func (r *RelayOutbound) fenceTokenFor(eventID string) string {
+	return r.tokenFor(eventID) + "/fence"
 }
 
 func dedupeKey(eventID string) string { return "wecom:outbound:claim:" + eventID }
@@ -834,10 +1262,43 @@ func (r *RelayOutbound) outcomeGrace() time.Duration {
 	if r.dedupe != nil {
 		budget = r.dedupe.ClaimBudget()
 	}
-	total := budget * time.Duration(len(r.retryPlan)+1)
+	// TWO round trips per offer, not one. Every offer makes its own Claim,
+	// and every offer ends in a second call on the same budget: a Release
+	// when it is owed another offer, a Settle when it is finished. Counting
+	// only the Claim leaves half the store time out of the arithmetic, and
+	// the absent state is deliberately NOT fenced by Resolve — a premature
+	// expiry there would be recorded as a loss while a later offer could
+	// still claim, deliver and settle, which is the contradiction this whole
+	// path exists to remove. (Fencing absent would trade that miscount for a
+	// claim no offer can take, i.e. a reply the user never gets: worse.)
+	offers := len(r.retryPlan) + 1
+	total := budget * time.Duration(2*offers)
 	for _, d := range r.retryPlan {
 		total += d
 	}
+	// The settle retry on the finished offer: its extra attempts and the
+	// pauses between them (settleClaim).
+	total += time.Duration(claimSettleAttempts-1) * (budget + r.settleRetryBackoff())
+	// Plus a DELIVERY PER OFFER, not one for the chain. perform gives every
+	// claimed delivery a budget of its own, and the failure that spends the
+	// whole of one is also the failure that hands the claim back: an offer
+	// whose chat is busy waits for the chat's turn until its budget runs out
+	// and comes back errChatBusy, which is provablyNotSent, so the claim is
+	// released and the frame is offered again with a fresh budget. Charging
+	// one delivery to the chain therefore sized the grace for a chain that
+	// cannot happen — every offer's backoff plus one offer's delivery — and
+	// on the defaults that is 5s of grace against 60s the chain can spend.
+	//
+	// The Resolve that lands inside a live offer is the whole cost: it fences
+	// the key as lost in the same operation, so the holder that comes back
+	// records nothing while the counter already says the reply was dropped.
+	// One reply, counted lost and delivered at once.
+	//
+	// The other direction — a delivery that outlives the budget perform gave
+	// it — cannot happen: it IS the budget, applied to the context the
+	// delivery runs on, so an answer split into several frames spends it
+	// across all of them rather than taking an ack wait per piece.
+	total += r.cfg.deliveryBudget() * time.Duration(offers)
 	return total
 }
 
@@ -850,11 +1311,16 @@ func (r *RelayOutbound) outcomeGrace() time.Duration {
 // with every party behaving properly and no counter moving. That is the window
 // SELF_HOSTING.md describes and that nothing could previously size.
 //
-// The claim key is what makes it observable after the fact: it is set by
-// whoever took the delivery and released only by a replica that proved it sent
-// nothing. So once the re-offer chain can no longer be running, a key that is
-// absent means the reply reached nobody. One Redis EXISTS per routed reply,
-// and routed replies are the off-lease minority.
+// The claim key is what makes it observable after the fact. It is taken by
+// whoever delivers, under that replica's token; released — compare-and-delete
+// on the token — only by a replica that proved it sent nothing; and settled by
+// the holder once it has recorded the outcome. So once the re-offer chain can
+// no longer be running, Resolve reads one of four things: absent (the reply
+// reached nobody), settled (its holder counted it), lost (already resolved by
+// an earlier pass over the same key), or still held by a token — a holder that
+// never managed to record anything, which Resolve fences as lost in the same
+// operation so the holder, should it come back, records nothing. One Lua call
+// per routed reply, and routed replies are the off-lease minority.
 func (r *RelayOutbound) watchOutcomes(ctx context.Context) {
 	defer r.wg.Done()
 	if r.dedupe == nil {
@@ -912,7 +1378,7 @@ func (r *RelayOutbound) watchOutcomes(ctx context.Context) {
 // settle asks whether anybody ever claimed one routed reply, and records the
 // loss if nobody did.
 func (r *RelayOutbound) settle(ctx context.Context, p pendingOutcome) {
-	held, err := r.dedupe.Held(ctx, p.key)
+	state, err := r.dedupe.Resolve(ctx, p.key)
 	if err != nil {
 		// An unreadable claim store proves nothing either way. Saying "lost"
 		// here would turn a Redis blip into a fleet of phantom drops.
@@ -920,8 +1386,25 @@ func (r *RelayOutbound) settle(ctx context.Context, p pendingOutcome) {
 			"error", err, "installation_id", p.instID, "task_id", p.taskID)
 		return
 	}
-	if held {
-		return // somebody took it; the replica that did is what counts it
+	switch state {
+	case claimSettled:
+		return // its holder recorded the outcome
+	case claimLost:
+		return // already resolved — a republished completion meets the same key
+	case claimHeld:
+		// A replica took it and never settled it: its release or its settle
+		// was lost on the wire, or the process went with it. Resolve has
+		// just fenced the key as lost, so a holder that comes back finds its
+		// Settle refused and records nothing; this is the reply's one record.
+		r.mx().RecordOutboundDropped(string(dropTransport))
+		r.logger.WarnContext(ctx, "wecom outbound: reply not delivered",
+			"reason", string(dropTransport),
+			"chat_session_id", p.sessionID,
+			"installation_id", p.instID,
+			"task_id", p.taskID,
+			"detail", "a replica claimed the delivery and never recorded an outcome: "+
+				"its claim could not be released or settled, and nothing reached the chat")
+		return
 	}
 	r.mx().RecordOutboundDropped(string(dropNoConnection))
 	r.logger.WarnContext(ctx, "wecom outbound: reply not delivered",
@@ -957,7 +1440,7 @@ func (r *RelayOutbound) awaitOutcome(f relayFrame, eventID string) {
 // WithRelay attaches the cross-replica router to the subscriber. Without it the
 // subscriber keeps the behaviour it had: a reply produced off-lease is dropped
 // where it stands.
-func WithRelay(r *RelayOutbound) OutboundOption {
+func WithRelay(r noticeRouter) OutboundOption {
 	return func(o *Outbound) { o.relay = r }
 }
 
@@ -969,9 +1452,13 @@ func relayEventID(e events.Event, taskID pgtype.UUID) string {
 	return "wecom:" + e.Type + ":" + util.UUIDToString(taskID)
 }
 
-// relayInboxEventID is the same rule for an inbox push, which has no task.
-func relayInboxEventID(itemID, recipientID string) string {
-	return "wecom:inbox:" + itemID + ":" + recipientID
+// relayInboxEventID is the same rule for an inbox push, which has no task. The
+// installation is part of the id because one push is offered to two bots: the
+// acting agent's, then the recipient-wide one. The publisher FENCES the claim
+// of a bot nobody holds before it tries the other, and distinct ids are what
+// keep that fence from also swallowing the route around it.
+func relayInboxEventID(itemID, recipientID, installationID string) string {
+	return "wecom:inbox:" + itemID + ":" + recipientID + ":" + installationID
 }
 
 // deliverRelayed performs a delivery published by another replica. It is the
@@ -981,52 +1468,153 @@ func relayInboxEventID(itemID, recipientID string) string {
 // The frame carries identifiers, not payloads, for anything readable here: the
 // attachment rows are fetched by this replica, which is the one that can send
 // them, and are never shipped through Redis.
-func (o *Outbound) deliverRelayed(ctx context.Context, f relayFrame) deliveryOutcome {
+func (o *Outbound) deliverRelayed(ctx context.Context, f relayFrame) relayResult {
+	// A SEAL FRAME IS ANSWERED BEFORE ANY OF THIS, and it is filtered by who
+	// holds the ROUND rather than by who holds a socket. That is why it needs
+	// no installation id: a cancellation deliberately does not chase an address
+	// (typing_indicator.go), and a bubble is writable only on the replica that
+	// painted it — so "do I have this round" asks the same question without a
+	// database read.
+	//
+	// It writes no message, so none of the reply machinery below applies: no
+	// counters move, no fallback push, and a round that is not here means the
+	// frame did its whole job by doing nothing.
+	if f.Kind == relayKindSeal {
+		o.sealRelayedRound(ctx, f)
+		return relayResult{outcome: outcomeDone}
+	}
 	instID, err := util.ParseUUID(f.InstallationID)
 	if err != nil || !instID.Valid {
-		return outcomeDone // unaddressable; a retry cannot make it addressable
+		return relayResult{outcome: outcomeDone} // unaddressable; a retry cannot make it addressable
 	}
 	if o.senders == nil {
-		return outcomeNotOurs
+		return relayResult{outcome: outcomeNotOurs}
 	}
 	sender := o.senders.get(instID)
 	if sender == nil {
-		return outcomeNotOurs // the replica holding the lease will take it
+		return relayResult{outcome: outcomeNotOurs} // the replica holding the lease will take it
 	}
-	if f.Content != "" {
-		if err := sender.sendTextCtx(ctx, f.ChatID, f.ChatType, f.Content); err != nil {
-			// The reply counters are for AGENT REPLIES — their documented
-			// unit. An inbox push routed here must not move them: the same
-			// push would otherwise count as a delivered reply, a dropped
-			// reply, or nothing at all depending on which replica happened to
-			// hold the socket, and the delivered/dropped ratio would track
-			// socket placement instead of outcomes.
-			if f.Kind == relayKindReply {
-				if reason := unconfirmedReason(err); reason != "" {
-					o.unconfirmedFor(ctx, f.SessionID, f.Kind, reason, err)
-				} else {
-					o.droppedFor(ctx, f.SessionID, f.Kind, classifyDrop(err), err)
+	// record is the holder's one record for a finished reply, made by the
+	// dispatcher after the claim is settled (perform). It moves the reply
+	// counters only for AGENT REPLIES — their documented unit. An inbox push
+	// routed here must not move them: the same push would otherwise count as
+	// a delivered reply, a dropped reply, or nothing at all depending on
+	// which replica happened to hold the socket.
+	var record func()
+	// hasVisibleChar, not `!= ""`, and the same predicate the local path uses
+	// (outbound.go). A completion of "\n" carrying a file is words to neither
+	// of them: the local path sends nothing and lets the file carry the
+	// reply's outcome, and a frame routed here has to reach the same two
+	// conclusions or which replica held the socket decides whether the user
+	// sees a blank message and whether the text or the file is what the reply
+	// counter is counting.
+	// THE BUBBLE THIS REPLY BELONGS TO IS ON THIS REPLICA, so seal it rather
+	// than pushing a second message underneath it. The replica that takes a
+	// relayed reply is by definition the one holding the socket, and a bubble
+	// is writable only where it was painted — which is that same replica. The
+	// frame carries the task id for exactly this lookup.
+	//
+	// Replies only: an inbox push is not an answer to a round and must never
+	// close one.
+	// NOT GATED ON HAVING WORDS. An answer that is only files still ends the
+	// round, and gating the take on hasVisibleChar left that round open: the
+	// file arrived and the spinner above it kept turning. What the words should
+	// be is decided AFTER the round is in hand, because the copy has to be in
+	// the round's own locale and that was captured when its bubble was opened.
+	spoke := false
+	text := f.Content
+	if f.Kind == relayKindReply && f.TaskID != "" {
+		if sessionID, err := util.ParseUUID(f.SessionID); err == nil && sessionID.Valid {
+			if t, _ := o.rounds().take(ctx, sessionID, byTask(f.TaskID)); t.HasBubble {
+				if !hasVisibleChar(text) {
+					text = wordlessSealCopy(t.Handle.Locale, f.CarriesFiles)
 				}
-			} else {
-				o.logger.WarnContext(ctx, "wecom relay: inbox push failed on the lease holder",
-					"error", err, "installation_id", f.InstallationID)
+				sealErr := o.finishStream(ctx, t.Handle, text)
+				switch classifySeal(sealErr) {
+				case sealOnScreen:
+					record, spoke = o.delivered, true
+				case sealUnknown:
+					se := sealErr
+					record = func() {
+						o.unconfirmedFor(ctx, f.SessionID, f.Kind, unconfirmedSealReason(se), se)
+					}
+					spoke = true
+				default:
+					// Proof the words are not in the bubble. They still have to
+					// reach the room, on a budget the seal cannot have spent.
+					var cancel context.CancelFunc
+					ctx, cancel = fallbackBudget(ctx)
+					defer cancel()
+				}
 			}
+		}
+	}
+	// text, not f.Content: when a wordless ending's seal was refused, the copy
+	// that was going to close the bubble is what the room gets instead — the
+	// same substitution the local path makes (outbound.go).
+	if hasVisibleChar(text) && !spoke {
+		if err := sender.sendTextCtx(guardReply(ctx, o.q, instID), f.ChatID, f.ChatType, text); err != nil {
+			if f.Kind == relayKindReply && errors.Is(err, errInstallationGone) && !errors.Is(err, errPartiallySent) {
+				// Revoked while the reply waited. Final, unlike the other
+				// refusals that precede the write: no replica may write it, so
+				// another offer would only walk the retry chain and come back
+				// as no_live_connection. An inbox push takes the ordinary
+				// route below — the publisher offers a proven miss to the
+				// member's other bot, which is still the right place for it.
+				return relayResult{outcome: outcomeDone, record: func() {
+					o.skippedFor(ctx, f.SessionID, skipInstallationInactive)
+				}}
+			}
+			// WHETHER THIS FRAME IS FINISHED IS SETTLED BEFORE ANY COUNTER
+			// MOVES. A frame that is owed another offer is still in flight,
+			// and counting it here counts it once per attempt: the dispatcher
+			// re-offers a provably-unsent frame across the whole retry chain
+			// (RelayConfig.retryPlan is eleven entries on the production
+			// defaults) and the publisher's watchOutcomes settles it once
+			// more afterwards, so one reply lands on outbound_dropped twelve
+			// or thirteen times — and if a later offer succeeds, on
+			// outbound_delivered as well. That is precisely the "one reply
+			// counted as delivered and dropped at the same time" defect shed's
+			// comment above says this package no longer has.
+			//
+			// So the counters below record an outcome only for a frame that
+			// will not be offered again; a frame still in flight is owed its
+			// outcome by the single owner that can settle it after the fact —
+			// the publisher's watchOutcomes, which counts a delivery nobody
+			// took exactly once.
+			//
 			// Only a failure PROVEN to precede the write releases the claim.
 			// Everything past that point — an attempted write, a verdict that
 			// never came, a context that expired while waiting — may have
 			// reached the peer, and releasing the claim there turns a retry
 			// into a duplicate answer in the user's chat.
 			if provablyNotSent(err) {
-				return outcomeProvablyNotSent
+				o.logger.DebugContext(ctx, "wecom relay: nothing reached the wire, the frame is owed another offer",
+					"error", err, "kind", f.Kind,
+					"installation_id", f.InstallationID, "task_id", f.TaskID)
+				return relayResult{outcome: outcomeProvablyNotSent}
 			}
-			return outcomeDone
+			sendErr := err
+			if f.Kind == relayKindReply {
+				// The same mapping the direct path uses. A partial send in
+				// particular has to agree across the two, or one reply counts
+				// as delivered or dropped depending on which replica held the
+				// socket — see recordSend.
+				record = func() { o.recordSend(ctx, f.SessionID, f.Kind, sendErr) }
+			} else {
+				record = func() {
+					o.logger.WarnContext(ctx, "wecom relay: inbox push failed on the lease holder",
+						"error", sendErr, "installation_id", f.InstallationID)
+				}
+			}
+			return relayResult{outcome: outcomeDone, record: record}
 		}
 		if f.Kind == relayKindReply {
-			o.delivered()
+			record = o.delivered
 		}
 	}
 	if f.Kind == relayKindInbox {
-		return outcomeDone
+		return relayResult{outcome: outcomeDone}
 	}
 	if f.CarriesFiles {
 		o.deliverAttachmentsByID(f.MessageID, f.WorkspaceID, attachmentTarget{
@@ -1034,9 +1622,65 @@ func (o *Outbound) deliverRelayed(ctx context.Context, f relayFrame) deliveryOut
 			ChatID:         f.ChatID,
 			ChatType:       f.ChatType,
 			SessionID:      f.SessionID,
-		}, f.Content == "")
+			// Same reason as the direct path in outbound.go: the failure runs
+			// on a detached goroutine with no context left to read a profile
+			// with, so the reader's language is resolved here. A relayed reply
+			// is the one a multi-replica deployment takes most of the time —
+			// without this, an English reader's file-failure notice arrives in
+			// the deployment's language and nothing else differs.
+			Locale: localeFor(ctx, o.q, instID, f.ChatType, f.ChatID),
+		}, !hasVisibleChar(f.Content))
 	}
-	return outcomeDone
+	return relayResult{outcome: outcomeDone, record: record}
+}
+
+// wordlessSealCopy is what closes a bubble for an ending that has no words of
+// its own. One place, so a relayed round and a local one cannot say different
+// sentences about the same outcome.
+func wordlessSealCopy(locale Locale, carriesFiles bool) string {
+	c := copyFor(locale)
+	if carriesFiles {
+		return c.StreamNoReplyWithFiles
+	}
+	return c.StreamNoReply
+}
+
+// sealReason names the ending a seal frame carries. The words are not shipped:
+// they are the round's, and the round's locale is on the holder.
+const (
+	sealReasonCancelled = "cancelled"
+	sealReasonNoReply   = "no_reply"
+)
+
+// sealRelayedRound closes a round on behalf of a replica that could not reach
+// it, and does NOTHING when the round is not here — which is the reason this is
+// its own frame kind rather than a reply with an empty body.
+func (o *Outbound) sealRelayedRound(ctx context.Context, f relayFrame) {
+	if f.TaskID == "" {
+		return
+	}
+	sessionID, err := util.ParseUUID(f.SessionID)
+	if err != nil || !sessionID.Valid {
+		return
+	}
+	t, _ := o.rounds().take(ctx, sessionID, byTask(f.TaskID))
+	if !t.HasBubble {
+		// No bubble here. Nothing to close and nothing to say: this ending was
+		// silent before the frame existed and stays silent.
+		return
+	}
+	text := wordlessSealCopy(t.Handle.Locale, f.CarriesFiles)
+	if f.SealReason == sealReasonCancelled {
+		text = copyFor(t.Handle.Locale).StreamCancelled
+	}
+	if err := o.finishStream(ctx, t.Handle, text); err != nil {
+		// A seal that cannot land leaves the bubble where it was. Saying the
+		// words as a message instead is the local path's move for an ANSWER,
+		// which the asker is waiting for; nobody is waiting on this one, and a
+		// push here is the plain message this frame kind exists to avoid.
+		o.logger.WarnContext(ctx, "wecom relay: could not seal a routed round's ending",
+			"task_id", f.TaskID, "reason", f.SealReason, "error", err)
+	}
 }
 
 // ownsSocket is the pre-claim ownership gate. Cheap by design: one map read.
@@ -1054,22 +1698,55 @@ func (o *Outbound) ownsSocket(installationID string) bool {
 // provablyNotSent reports whether a send error is one that certainly occurred
 // before any byte could leave. ws_sender marks the boundary itself: a failure
 // raised by the write is wrapped in errWriteAttempted, a missing verdict is
-// errAckTimeout, and a stated refusal is a *wecomAPIError — all three mean the
-// peer may have (or, for a refusal, definitely did) see the frame. A bare
-// context error is ambiguous — request() returns one both from its pre-write
-// check and from the post-write wait — so it is treated as possibly sent,
-// which costs an un-retried delivery rather than a duplicate.
+// errAckTimeout, a verdict the caller stopped waiting for is errAckAbandoned,
+// and a stated refusal is a *wecomAPIError — all four mean the peer may have
+// (or, for a refusal, definitely did) see the frame.
+//
+// A bare context error is read the same way, and that is a choice rather than
+// an inability. request() marks the post-write case itself now, so what is
+// left is a cancellation raised before anything was written. Releasing the
+// claim on it would be correct and is deliberately not done here: this is the
+// last gate before the frame is offered to another replica, the two mistakes
+// cost different amounts — an un-retried delivery against a second copy of the
+// answer in the person's chat — and widening what gets re-offered is a change
+// to the relay's retry behaviour, not to how an error is read.
 func provablyNotSent(err error) bool {
 	var apiErr *wecomAPIError
 	switch {
 	case err == nil:
 		return false
+	case errors.Is(err, errPartiallySent):
+		// An answer past the cap goes out as several frames, and a failure on
+		// the second says nothing about the first, which the user is already
+		// reading. Retrying such a send would repeat what landed.
+		return false
 	case errors.As(err, &apiErr):
 		return false
 	case errors.Is(err, errAckTimeout):
 		return false
+	case errors.Is(err, errStreamBusy):
+		// Nothing was written: the gate refused to put a frame out while the
+		// server still owed a verdict on this req_id. Provably not sent is
+		// what lets the answer go out once, by the plain route.
+		return true
+	case errors.Is(err, errStreamAckTimeout):
+		// A stream frame whose verdict never came back is the same evidence as
+		// errAckTimeout and has to be read the same way: the frame went to the
+		// socket and the server said nothing. Missing here it fell to the
+		// default and was reported as provably unsent, which is what let a
+		// sealed bubble's answer go out a second time as a plain message.
+		return false
 	case errors.Is(err, errWriteAttempted):
 		return false
+	case errors.Is(err, errNotAttempted):
+		// AHEAD of the context branch below, which this error also matches:
+		// every not-attempted failure wraps the ctx.Err() that ended it. The
+		// chat lock is taken and the context is checked before a frame is
+		// built, so a delivery that ended at either point wrote nothing — and
+		// these are the most retryable failures the path has. Reading them as
+		// the ambiguous context error underneath settles the claim on a
+		// message that was never offered to the socket.
+		return true
 	case errors.Is(err, context.Canceled), errors.Is(err, context.DeadlineExceeded):
 		return false
 	default:

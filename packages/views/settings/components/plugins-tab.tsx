@@ -2,7 +2,7 @@
 
 import { useMemo, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { AlertCircle, CalendarClock, Loader2, Trash2, Upload } from "lucide-react";
+import { AlertCircle, CalendarClock, Loader2, Trash2, Upload } from "@multica/ui/icons";
 import { toast } from "sonner";
 import { useCurrentMember } from "@multica/core/permissions";
 import {
@@ -26,6 +26,7 @@ import type {
 import { Alert, AlertDescription, AlertTitle } from "@multica/ui/components/ui/alert";
 import { Badge } from "@multica/ui/components/ui/badge";
 import { Button } from "@multica/ui/components/ui/button";
+import { IconButton } from "@multica/ui/components/common/icon-button";
 import { Input } from "@multica/ui/components/ui/input";
 import {
   Select,
@@ -39,7 +40,12 @@ import { Textarea } from "@multica/ui/components/ui/textarea";
 import { Switch } from "@multica/ui/components/ui/switch";
 import { mcpHooks, PluginHookActivity, PluginMCPApproval, PluginScheduleActivity } from "../../plugins";
 import { useLocale, useT } from "../../i18n";
-import { SettingsCard, SettingsSection, SettingsTab } from "./settings-layout";
+import {
+  SettingsCard,
+  SettingsReadOnlyNotice,
+  SettingsSection,
+  SettingsTab,
+} from "./settings-layout";
 
 /**
  * The scope list is the entire trust model: there is no signature, no
@@ -54,7 +60,7 @@ function ScopeList({ scopes, highlighted }: { scopes: string[]; highlighted?: st
     <ul className="space-y-1.5">
       {scopes.map((scope) => (
         <li key={scope} className="flex items-baseline gap-2 text-caption">
-          <code className="shrink-0 rounded bg-muted px-1.5 py-0.5 font-mono">{scope}</code>
+          <code className="shrink-0 rounded-xs bg-muted px-1.5 py-0.5 font-mono">{scope}</code>
           <span className="text-muted-foreground">{scopeDescription(scope, t)}</span>
           {added.has(scope) ? (
             <Badge variant="secondary">{t(($) => $.plugins.consent.new_scope)}</Badge>
@@ -80,7 +86,7 @@ function ScheduleList({ hooks, showNextRun = false }: { hooks: ScheduledHook[]; 
         <li key={hook.key} className="flex flex-wrap items-baseline gap-2 text-caption">
           <span className="font-medium">{hook.name}</span>
           <span>{scheduleFrequency(hook.schedule?.cron ?? "", t)}</span>
-          <code className="rounded bg-muted px-1.5 py-0.5 font-mono">{hook.schedule?.cron ?? ""}</code>
+          <code className="rounded-xs bg-muted px-1.5 py-0.5 font-mono">{hook.schedule?.cron ?? ""}</code>
           <span className="text-muted-foreground">{hook.schedule?.timezone ?? ""}</span>
           {showNextRun && hook.schedule?.next_run_at ? (
             <span className="text-muted-foreground">
@@ -373,7 +379,7 @@ function PublishAndInstall({ wsId, canManage }: { wsId: string; canManage: boole
   };
 
   return (
-    <SettingsSection title={t(($) => $.plugins.publish.title)} description={t(($) => $.plugins.publish.description)}>
+    <SettingsSection title={t(($) => $.plugins.publish.title)} >
       <SettingsCard>
         <div className="flex flex-col gap-2 px-4 py-4 sm:flex-row sm:items-center sm:justify-between">
           <p className="text-caption text-muted-foreground">{t(($) => $.plugins.publish.hint)}</p>
@@ -502,21 +508,21 @@ function PublishedPackage({
           <div className="text-body font-medium">{pluginPackage.name}</div>
           <p className="text-caption text-muted-foreground">{pluginPackage.plugin_key}</p>
         </div>
-        <Button
+        <IconButton
           size="icon"
           variant="ghost"
-          aria-label={t(($) => $.plugins.publish.delete)}
+          label={t(($) => $.plugins.publish.delete)}
           disabled={!canManage || busy}
           onClick={() => onDelete(pluginPackage.id)}
         >
           <Trash2 />
-        </Button>
+        </IconButton>
       </div>
 
       <ul className="space-y-1.5">
         {pluginPackage.versions.map((version) => (
           <li key={version.id} className="flex flex-wrap items-center gap-2 text-caption">
-            <code className="rounded bg-muted px-1.5 py-0.5 font-mono">{version.version}</code>
+            <code className="rounded-xs bg-muted px-1.5 py-0.5 font-mono">{version.version}</code>
             {version.installed === true ? (
               <Badge variant="secondary">{t(($) => $.plugins.publish.installed_version)}</Badge>
             ) : null}
@@ -605,17 +611,17 @@ function InstalledPlugin({
                   : t(($) => $.plugins.disabled)))
                 .catch(reportError)}
             />
-            <Button
+            <IconButton
               size="icon"
               variant="ghost"
-              aria-label={t(($) => $.plugins.uninstall)}
+              label={t(($) => $.plugins.uninstall)}
               disabled={!canManage || isMutating}
               onClick={() => uninstallMutation.mutateAsync(installation.id)
                 .then(() => toast.success(t(($) => $.plugins.uninstalled)))
                 .catch(reportError)}
             >
               {uninstallMutation.isPending ? <Loader2 className="animate-spin" /> : <Trash2 />}
-            </Button>
+            </IconButton>
           </div>
         </div>
 
@@ -679,14 +685,8 @@ export function PluginsTab() {
   const installations = useMemo(() => data?.plugins ?? [], [data]);
 
   return (
-    <SettingsTab title={t(($) => $.plugins.title)} description={t(($) => $.plugins.description)}>
-      {!canManage ? (
-        <Alert>
-          <AlertCircle />
-          <AlertTitle>{t(($) => $.plugins.read_only)}</AlertTitle>
-          <AlertDescription>{t(($) => $.plugins.read_only_description)}</AlertDescription>
-        </Alert>
-      ) : null}
+    <SettingsTab title={t(($) => $.plugins.title)} scope="workspace">
+      {role && !canManage ? <SettingsReadOnlyNotice wsId={wsId} /> : null}
 
       {canManage ? <PublishAndInstall wsId={wsId} canManage={canManage} /> : null}
 

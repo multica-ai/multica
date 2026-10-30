@@ -82,6 +82,8 @@ func TestTaskWriteFence_BlocksOnWorkspaceLockAlone(t *testing.T) {
 		t.Fatalf("lock workspace row: %v", err)
 	}
 
+	// Each expected-blocked writer waits out its whole lock_timeout, which only
+	// runs while the writer is actually blocked, so it is kept small.
 	blockedEnqueue := func(name, agentID, runtimeID, issueID string) {
 		t.Helper()
 		writer, err := testPool.Begin(ctx)
@@ -89,7 +91,7 @@ func TestTaskWriteFence_BlocksOnWorkspaceLockAlone(t *testing.T) {
 			t.Fatalf("%s: begin: %v", name, err)
 		}
 		defer writer.Rollback(ctx)
-		if _, err := writer.Exec(ctx, "SET LOCAL lock_timeout = 750"); err != nil {
+		if _, err := writer.Exec(ctx, "SET LOCAL lock_timeout = 50"); err != nil {
 			t.Fatalf("%s: set lock_timeout: %v", name, err)
 		}
 		err = enqueueViaRealQuery(ctx, testHandler.Queries.WithTx(writer), agentID, runtimeID, issueID)
@@ -113,7 +115,7 @@ func TestTaskWriteFence_BlocksOnWorkspaceLockAlone(t *testing.T) {
 		t.Fatalf("begin reassign: %v", err)
 	}
 	defer reassign.Rollback(ctx)
-	if _, err := reassign.Exec(ctx, "SET LOCAL lock_timeout = 750"); err != nil {
+	if _, err := reassign.Exec(ctx, "SET LOCAL lock_timeout = 50"); err != nil {
 		t.Fatalf("reassign: set lock_timeout: %v", err)
 	}
 	_, err = testHandler.Queries.WithTx(reassign).ReassignTasksToRuntime(ctx, db.ReassignTasksToRuntimeParams{
@@ -131,7 +133,7 @@ func TestTaskWriteFence_BlocksOnWorkspaceLockAlone(t *testing.T) {
 		t.Fatalf("begin unrelated: %v", err)
 	}
 	defer unrelated.Rollback(ctx)
-	if _, err := unrelated.Exec(ctx, "SET LOCAL lock_timeout = 750"); err != nil {
+	if _, err := unrelated.Exec(ctx, "SET LOCAL lock_timeout = 200"); err != nil {
 		t.Fatalf("unrelated: set lock_timeout: %v", err)
 	}
 	if err := enqueueViaRealQuery(ctx, testHandler.Queries.WithTx(unrelated),
@@ -145,7 +147,7 @@ func TestTaskWriteFence_BlocksOnWorkspaceLockAlone(t *testing.T) {
 		t.Fatalf("begin status update: %v", err)
 	}
 	defer statusUpdate.Rollback(ctx)
-	if _, err := statusUpdate.Exec(ctx, "SET LOCAL lock_timeout = 750"); err != nil {
+	if _, err := statusUpdate.Exec(ctx, "SET LOCAL lock_timeout = 200"); err != nil {
 		t.Fatalf("status update: set lock_timeout: %v", err)
 	}
 	if _, err := statusUpdate.Exec(ctx,
@@ -302,16 +304,17 @@ VALUES ($1, $2, 'member', $3, $4) RETURNING id
 	errs := make([]error, 2*rounds)
 	for i := 0; i < rounds; i++ {
 		wg.Add(2)
-		// Owners drawn from both workspaces, in mirrored roles.
+		// Owners drawn from both workspaces, in mirrored roles. Keep each
+		// runtime matched to its agent: enqueue now rejects stale bindings.
 		go func(i int) {
 			defer wg.Done()
 			errs[2*i] = enqueueViaRealQuery(ctx, testHandler.Queries,
-				f.victimAgent, f.neighbourRuntime, neighbourIssues[i])
+				f.victimAgent, f.victimRuntime, neighbourIssues[i])
 		}(i)
 		go func(i int) {
 			defer wg.Done()
 			errs[2*i+1] = enqueueViaRealQuery(ctx, testHandler.Queries,
-				f.neighbourAgent, f.victimRuntime, victimIssues[i])
+				f.neighbourAgent, f.neighbourRuntime, victimIssues[i])
 		}(i)
 	}
 	wg.Wait()
@@ -330,7 +333,7 @@ VALUES ($1, $2, 'member', $3, $4) RETURNING id
 	if _, err := testPool.Exec(ctx, `
 DELETE FROM agent_task_queue
 WHERE (agent_id = $1 AND runtime_id = $2) OR (agent_id = $3 AND runtime_id = $4)
-`, f.victimAgent, f.neighbourRuntime, f.neighbourAgent, f.victimRuntime); err != nil {
+`, f.victimAgent, f.victimRuntime, f.neighbourAgent, f.neighbourRuntime); err != nil {
 		t.Fatalf("clean up: %v", err)
 	}
 }
@@ -357,7 +360,7 @@ func TestMergeLegacyRuntime_KeepsOldRuntimeWhenFenceRefuses(t *testing.T) {
 	// the target's workspace was torn down a moment ago.
 	vanishedTarget := parseUUID("00000000-0000-0000-0000-0000000000fe")
 
-	err := h.mergeLegacyRuntime(ctx, vanishedTarget, parseUUID(f.victimRuntime), "legacy-daemon", "delete-test")
+	err := h.mergeLegacyRuntime(ctx, vanishedTarget, parseUUID(f.victimRuntime), "legacy-daemon", "delete-test", parseUUID(testUserID))
 	if !errors.Is(err, errRuntimeMergeFenced) {
 		t.Fatalf("mergeLegacyRuntime = %v, want errRuntimeMergeFenced", err)
 	}
@@ -391,7 +394,7 @@ RETURNING id
 		t.Fatalf("create merge target: %v", err)
 	}
 	if err := h.mergeLegacyRuntime(ctx, parseUUID(freshRuntime), parseUUID(f.victimRuntime),
-		"legacy-daemon", "delete-test"); err != nil {
+		"legacy-daemon", "delete-test", parseUUID(testUserID)); err != nil {
 		t.Fatalf("merge onto a live runtime: %v", err)
 	}
 	if rowExists(t, "agent_runtime", f.victimRuntime) {
@@ -461,7 +464,7 @@ FOR EACH ROW EXECUTE FUNCTION mul5999_fail_agent_move()
 	})
 
 	err := testHandler.mergeLegacyRuntime(ctx, parseUUID(target), parseUUID(f.victimRuntime),
-		"legacy-daemon", "delete-test")
+		"legacy-daemon", "delete-test", parseUUID(testUserID))
 	if err == nil {
 		t.Fatal("merge reported success even though the agent reassignment failed")
 	}
@@ -506,7 +509,7 @@ FOR EACH ROW EXECUTE FUNCTION mul5999_fail_agent_move()
 		t.Fatalf("drop injection trigger: %v", err)
 	}
 	if err := testHandler.mergeLegacyRuntime(ctx, parseUUID(target), parseUUID(f.victimRuntime),
-		"legacy-daemon", "delete-test"); err != nil {
+		"legacy-daemon", "delete-test", parseUUID(testUserID)); err != nil {
 		t.Fatalf("merge after removing the injection: %v", err)
 	}
 	if rowExists(t, "agent_runtime", f.victimRuntime) {

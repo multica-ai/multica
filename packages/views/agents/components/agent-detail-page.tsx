@@ -1,6 +1,7 @@
 "use client";
 
-import { useState } from "react";
+import { useMemo, useState } from "react";
+import { useRegisterCommandBarContext } from "../../search/register-context";
 import {
   AlertCircle,
   ArrowLeft,
@@ -12,7 +13,7 @@ import {
   Plus,
   Server,
   Trash2,
-} from "lucide-react";
+} from "@multica/ui/icons";
 import { toast } from "sonner";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import type {
@@ -40,6 +41,7 @@ import {
 import { runtimeDisplayLabel, runtimeListOptions } from "@multica/core/runtimes";
 import { useAgentPermissions } from "@multica/core/permissions";
 import { Button } from "@multica/ui/components/ui/button";
+import { IconButton } from "@multica/ui/components/common/icon-button";
 import { CapabilityBanner } from "@multica/ui/components/common/capability-banner";
 import {
   Dialog,
@@ -114,6 +116,9 @@ export function AgentDetailPage({ agentId }: AgentDetailPageProps) {
     listAgent ?? (isForbidden || isNotFound ? null : detailQuery.data) ?? null;
   const presence: AgentPresenceDetail | null =
     agent ? presenceMap.get(agent.id) ?? null : null;
+  useRegisterCommandBarContext(
+    useMemo(() => (agent ? { kind: "agent", agent } : null), [agent]),
+  );
 
   // Permission hook MUST be called unconditionally — its `agent | null`
   // signature handles the not-found / loading case internally so the early
@@ -541,10 +546,12 @@ function DetailHeader({
                   t(($) => $.inspector.no_description_placeholder)}
               </ExpandableDescription>
               <div className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-2 text-caption text-muted-foreground">
-                <span className="inline-flex min-w-0 items-center gap-1.5">
-                  <Bot className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
-                  <span className="truncate">{agent.model || t(($) => $.pickers.model_default)}</span>
-                </span>
+                {runtime?.provider === "qoder_cloud" ? null : (
+                  <span className="inline-flex min-w-0 items-center gap-1.5">
+                    <Bot className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+                    <span className="truncate">{agent.model || t(($) => $.pickers.model_default)}</span>
+                  </span>
+                )}
                 <span className="inline-flex min-w-0 items-center gap-1.5">
                   <Server className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
                   <span className="truncate">
@@ -588,8 +595,14 @@ function DetailHeader({
             {!isArchived && canArchive && hasMoreActions ? (
               <DropdownMenu>
                 <DropdownMenuTrigger
-                  render={<Button variant="ghost" size="icon-sm" />}
-                  aria-label={t(($) => $.detail.more_actions_aria)}
+                  render={
+                    <IconButton
+                      variant="ghost"
+                      size="icon-sm"
+                      label={t(($) => $.detail.more_actions_aria)}
+                      tooltipSide="bottom"
+                    />
+                  }
                 >
                   <MoreHorizontal
                     className="h-4 w-4 text-muted-foreground"

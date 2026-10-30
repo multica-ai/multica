@@ -83,7 +83,7 @@ export function RenameMachineDialog({
   return (
     <AlertDialog open={open} onOpenChange={handleOpenChange}>
       <AlertDialogContent
-        className="w-[calc(100vw-2rem)] !max-w-[440px] gap-0 overflow-hidden rounded-lg p-0"
+        className="w-[calc(100vw-2rem)] !max-w-[440px] gap-0 overflow-hidden p-0"
         onClick={(e) => e.stopPropagation()}
       >
         <div className="px-5 pb-4 pt-5">

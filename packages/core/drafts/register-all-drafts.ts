@@ -20,3 +20,13 @@ import "../issues/stores/comment-draft-store";
 import "../projects/draft-store";
 import "../feedback/draft-store";
 import "../agents/manual-draft-store";
+import { registerDraftCleanup } from "./cleanup-registry";
+
+// Retired: drafts for a running turn now live in the thread's reply draft.
+// Keep clearing the old persisted key so text written before the move never
+// outlives logout or workspace removal.
+registerDraftCleanup({
+  storageKey: "multica_task_supplement_drafts",
+  workspaceScoped: true,
+  resetInMemory: () => {},
+});

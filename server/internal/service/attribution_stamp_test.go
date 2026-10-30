@@ -217,6 +217,10 @@ func TestMergeCommentIntoPendingTask_KeepsAccountableEqualsOriginator(t *testing
 		t.Fatalf("seed comment: %v", err)
 	}
 
+	// Bind this task's input to the thread whose attribution is being refreshed.
+	if _, err := pool.Exec(ctx, `UPDATE agent_task_queue SET trigger_comment_id=$2 WHERE id=$1`, taskID, commentID); err != nil {
+		t.Fatal(err)
+	}
 	// Re-stamp the FULL snapshot for B's member comment (direct_human + comment
 	// evidence), as the caller does.
 	if _, err := q.MergeCommentIntoPendingTask(ctx, db.MergeCommentIntoPendingTaskParams{
@@ -1219,7 +1223,7 @@ func TestRerunIssueAttributesToRerunningMember(t *testing.T) {
 	}
 
 	// The rerun, performed by a different member.
-	task, err := svc.RerunIssue(ctx, util.MustParseUUID(issueID), orig.ID, pgtype.UUID{}, util.MustParseUUID(rerunnerID), nil)
+	task, err := svc.RerunIssue(ctx, util.MustParseUUID(issueID), orig.ID, pgtype.UUID{}, util.MustParseUUID(rerunnerID), false, nil)
 	if err != nil {
 		t.Fatalf("RerunIssue: %v", err)
 	}

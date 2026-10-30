@@ -1,8 +1,24 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
 import { act, renderHook } from "@testing-library/react";
 import { useChatInputFocus } from "./use-chat-input-focus";
 
 describe("useChatInputFocus", () => {
+  const roots: HTMLElement[] = [];
+  afterEach(() => {
+    for (const root of roots.splice(0)) root.remove();
+  });
+
+  function makeWindow() {
+    const root = document.createElement("div");
+    const editor = document.createElement("div");
+    editor.contentEditable = "true";
+    editor.tabIndex = 0;
+    root.append(editor);
+    document.body.append(root);
+    roots.push(root);
+    return { root, editor };
+  }
+
   it("stays inert on mount, whether the window starts closed or open", () => {
     expect(renderHook(() => useChatInputFocus(false)).result.current.focusRequest).toBe(0);
     // A persisted "open" preference must not steal focus from the page the user
@@ -38,5 +54,37 @@ describe("useChatInputFocus", () => {
     expect(result.current.focusRequest).toBe(1);
     act(() => result.current.requestInputFocus());
     expect(result.current.focusRequest).toBe(2);
+  });
+
+  it("releases the hidden composer's focus when the window closes", () => {
+    const { root, editor } = makeWindow();
+    const windowRef = { current: root };
+    const { result, rerender } = renderHook(
+      ({ isOpen }: { isOpen: boolean }) => useChatInputFocus(isOpen, windowRef),
+      { initialProps: { isOpen: true } },
+    );
+    editor.focus();
+    expect(document.activeElement).toBe(editor);
+
+    rerender({ isOpen: false });
+    expect(document.activeElement).toBe(document.body);
+
+    rerender({ isOpen: true });
+    expect(result.current.focusRequest).toBe(1);
+  });
+
+  it("does not steal focus from a control outside the closing window", () => {
+    const { root } = makeWindow();
+    const outside = document.createElement("input");
+    document.body.append(outside);
+    roots.push(outside);
+    const windowRef = { current: root };
+    const { rerender } = renderHook(
+      ({ isOpen }: { isOpen: boolean }) => useChatInputFocus(isOpen, windowRef),
+      { initialProps: { isOpen: true } },
+    );
+    outside.focus();
+    rerender({ isOpen: false });
+    expect(document.activeElement).toBe(outside);
   });
 });

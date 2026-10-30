@@ -93,18 +93,20 @@ func (m *botCallbackRepliedMessage) UnmarshalJSON(data []byte) error {
 }
 
 type botCallbackRepliedContent struct {
-	Text                string        `json:"text"`
-	RichText            richTextItems `json:"richText"`
-	DownloadCode        string        `json:"downloadCode"`
-	PictureDownloadCode string        `json:"pictureDownloadCode"`
-	FileName            string        `json:"fileName"`
-	Recognition         string        `json:"recognition"`
+	Text                string          `json:"text"`
+	RichText            richTextItems   `json:"richText"`
+	CardContent         json.RawMessage `json:"cardContent"`
+	DownloadCode        string          `json:"downloadCode"`
+	PictureDownloadCode string          `json:"pictureDownloadCode"`
+	FileName            string          `json:"fileName"`
+	Recognition         string          `json:"recognition"`
 }
 
 func (content *botCallbackRepliedContent) UnmarshalJSON(data []byte) error {
 	type wireContent struct {
 		Text                json.RawMessage `json:"text"`
 		RichText            json.RawMessage `json:"richText"`
+		CardContent         json.RawMessage `json:"cardContent"`
 		DownloadCode        string          `json:"downloadCode"`
 		PictureDownloadCode string          `json:"pictureDownloadCode"`
 		FileName            string          `json:"fileName"`
@@ -114,12 +116,21 @@ func (content *botCallbackRepliedContent) UnmarshalJSON(data []byte) error {
 	if err := json.Unmarshal(data, &wire); err != nil {
 		return err
 	}
+	content.CardContent = append(json.RawMessage(nil), wire.CardContent...)
 	content.Text = ""
 	_ = json.Unmarshal(wire.Text, &content.Text)
-	// Decode only the documented ordered-array shape. Unsupported quote
-	// variants remain unavailable; never infer a layout from a sibling summary.
+	// Reply snapshots use text/content wrappers and msgType aliases that differ
+	// from current-message nodes. Keep that decoding scoped to selected context.
+	// The ordered array, never a sibling summary, remains the layout authority.
 	content.RichText = nil
-	_ = json.Unmarshal(wire.RichText, &content.RichText)
+	var nodes []json.RawMessage
+	if json.Unmarshal(wire.RichText, &nodes) == nil {
+		for _, node := range nodes {
+			var item richTextItem
+			_ = item.unmarshalJSON(node, true)
+			content.RichText = append(content.RichText, item)
+		}
+	}
 	content.DownloadCode = wire.DownloadCode
 	content.PictureDownloadCode = wire.PictureDownloadCode
 	content.FileName = wire.FileName
@@ -155,8 +166,14 @@ type richTextItem struct {
 // Unknown nested values are not recursively interpreted as prose or commands.
 // A bad node degrades locally so valid neighboring text and pictures survive.
 func (item *richTextItem) UnmarshalJSON(data []byte) error {
+	return item.unmarshalJSON(data, false)
+}
+
+func (item *richTextItem) unmarshalJSON(data []byte, quoted bool) error {
 	type wireItem struct {
 		Text                json.RawMessage `json:"text"`
+		Content             json.RawMessage `json:"content"`
+		MsgType             json.RawMessage `json:"msgType"`
 		Type                string          `json:"type"`
 		DownloadCode        string          `json:"downloadCode"`
 		PictureDownloadCode string          `json:"pictureDownloadCode"`
@@ -167,6 +184,12 @@ func (item *richTextItem) UnmarshalJSON(data []byte) error {
 		item.Text = "[rich-text content unavailable]"
 		return nil
 	}
+	if quoted && wire.Type == "" && len(wire.MsgType) > 0 {
+		if json.Unmarshal(wire.MsgType, &wire.Type) != nil {
+			item.Text = "[rich-text content unavailable]"
+			return nil
+		}
+	}
 	if wire.Type != "" && wire.Type != "text" && wire.Type != "picture" {
 		item.Text = "[rich-text content unavailable]"
 		return nil
@@ -174,6 +197,12 @@ func (item *richTextItem) UnmarshalJSON(data []byte) error {
 	item.Type = wire.Type
 	item.DownloadCode = wire.DownloadCode
 	item.PictureDownloadCode = wire.PictureDownloadCode
+	if quoted && (item.Type == "" || item.Type == "text") {
+		if (len(wire.Text) == 0 || string(wire.Text) == "null") && item.Type == "text" {
+			wire.Text = wire.Content
+		}
+		wire.Text = dingTalkQuotedRichTextScalar(wire.Text)
+	}
 	if len(wire.Text) > 0 && string(wire.Text) != "null" {
 		if err := json.Unmarshal(wire.Text, &item.Text); err != nil {
 			item.Text = "[rich-text content unavailable]"
@@ -182,6 +211,21 @@ func (item *richTextItem) UnmarshalJSON(data []byte) error {
 		item.Text = "[rich-text content unavailable]"
 	}
 	return nil
+}
+
+// Selected text may have one structural text/content wrapper. Read only its
+// scalar value: do not traverse arbitrary data, arrays, or JSON inside prose.
+// In particular, these quote-only aliases cannot become current commands.
+func dingTalkQuotedRichTextScalar(raw json.RawMessage) json.RawMessage {
+	var wrapper map[string]json.RawMessage
+	if json.Unmarshal(raw, &wrapper) == nil && wrapper != nil {
+		for _, key := range []string{"text", "content"} {
+			if value, ok := wrapper[key]; ok {
+				return value
+			}
+		}
+	}
+	return raw
 }
 
 // refAlt orders a picture item's two download codes into (primary, fallback),
@@ -197,9 +241,13 @@ func refAlt(downloadCode, pictureDownloadCode string) (ref, alt string) {
 // envelope does not. AppID is stamped by the receiving connection (it is the
 // installation's routing key) and read back only inside the resolvers.
 type dingtalkRawEvent struct {
-	AppID             string                  `json:"app_id"`
-	ConversationTitle string                  `json:"conversation_title,omitempty"`
-	Media             []dingtalkMediaResource `json:"media,omitempty"`
+	AppID             string `json:"app_id"`
+	ConversationTitle string `json:"conversation_title,omitempty"`
+	// CurrentText is the normalized current turn before quoted-message context
+	// is prepended. It preserves adapter-generated media placeholders in their
+	// original order for platform-visible reply rendering.
+	CurrentText string                  `json:"current_text,omitempty"`
+	Media       []dingtalkMediaResource `json:"media,omitempty"`
 }
 
 type dingtalkMediaResource struct {
@@ -269,6 +317,7 @@ func inboundFromCallbackWithBotName(data *botCallbackData, appID, botName string
 		msg.Type = channel.MsgTypeText
 		msg.Text = strings.TrimSpace(normalizeDingTalkBotMention(data, data.Text.Content, botName))
 		msg.CommandText = msg.Text
+		rawEvent.CurrentText = dingtalkCurrentVisibleText(msg)
 		applyDingTalkReplyContext(data, &msg, &rawEvent)
 		return withDingTalkRaw(msg, rawEvent), true
 
@@ -288,6 +337,7 @@ func inboundFromCallbackWithBotName(data *botCallbackData, appID, botName string
 		msg.Text = dingtalkImagePlaceholder
 		msg.CommandText = msg.Text
 		rawEvent.Media = []dingtalkMediaResource{dingtalkMediaResourceAt(ref, alt, 0)}
+		rawEvent.CurrentText = dingtalkCurrentVisibleText(msg)
 		applyDingTalkReplyContext(data, &msg, &rawEvent)
 		return withDingTalkRaw(msg, rawEvent), true
 
@@ -331,6 +381,10 @@ func inboundFromCallbackWithBotName(data *botCallbackData, appID, botName string
 		}
 		msg.Text = strings.TrimSpace(text.String())
 		msg.CommandText = strings.TrimSpace(commandText.String())
+		// Freeze what the sender actually posted before the adapter consumes a
+		// /clear or /new directive for engine routing. Outbound command notices
+		// quote this immutable display snapshot, not Router-mutated Text fields.
+		rawEvent.CurrentText = msg.Text
 		normalizeDingTalkRichTextControlLayout(&msg, rc.RichText, len(rawEvent.Media) > 0)
 		applyDingTalkReplyContext(data, &msg, &rawEvent)
 		return withDingTalkRaw(msg, rawEvent), true
@@ -349,8 +403,17 @@ func inboundFromCallbackWithBotName(data *botCallbackData, appID, botName string
 		msg.Text = "[Unsupported DingTalk message]"
 	}
 	msg.CommandText = msg.Text
+	rawEvent.CurrentText = dingtalkCurrentVisibleText(msg)
 	applyDingTalkReplyContext(data, &msg, &rawEvent)
 	return withDingTalkRaw(msg, rawEvent), true
+}
+
+// dingtalkCurrentVisibleText freezes the current user-visible turn without
+// quoted history. It runs after the bot-addressing mention is removed but
+// before Router consumes control directives, so command confirmations can
+// quote exactly what the sender posted.
+func dingtalkCurrentVisibleText(msg channel.InboundMessage) string {
+	return strings.TrimSpace(msg.Text)
 }
 
 func applyDingTalkReplyContext(data *botCallbackData, msg *channel.InboundMessage, rawEvent *dingtalkRawEvent) {
@@ -479,9 +542,8 @@ func renderDingTalkQuotedMessage(replied *botCallbackRepliedMessage) (string, []
 	case "text":
 		appendText(dingTalkReadableQuotedText(replied.Content.Text))
 	case "interactiveCard":
-		// cardParamMap belongs to a template, not a universal body schema.
-		// https://open.dingtalk.com/document/orgapp/create-and-deliver-cards
-		appendText("[quoted content unavailable]")
+		quotedBody := renderDingTalkQuotedCard(replied.Content.CardContent)
+		appendText(quotedBody)
 	case "picture", "image":
 		appendPicture(replied.Content.DownloadCode, replied.Content.PictureDownloadCode)
 		// The snapshot's text field has no documented caption meaning.
@@ -619,6 +681,8 @@ func normalizeDingTalkRichTextControlLayout(msg *channel.InboundMessage, items [
 // including legitimate quoted code/prose containing ||. Current input is never
 // filtered. Apply this only to provider text values, not rendered quote blocks,
 // so a fallback cannot discard generated image markers and their media slots.
+// This tradeoff was accepted in the review of PR #8061:
+// https://github.com/multica-ai/multica/pull/8061#pullrequestreview-5130718174
 func dingTalkReadableQuotedText(value string) string {
 	if strings.Contains(value, "||") {
 		return "[quoted content unavailable]"
@@ -740,6 +804,7 @@ func mediaUnreadableMsg(data *botCallbackData, msg channel.InboundMessage, rawEv
 		msg.Text = "[rich-text content unavailable]"
 	}
 	msg.CommandText = msg.Text
+	rawEvent.CurrentText = msg.Text
 	applyDingTalkReplyContext(data, &msg, &rawEvent)
 	return withDingTalkRaw(msg, rawEvent)
 }

@@ -1,18 +1,10 @@
 /**
- * "My Issues" list, server-filtered by scope. Mirrors the three scopes web
- * exposes in `packages/views/my-issues/components/my-issues-page.tsx:48-65`:
- *   - assigned: issues where assignee_id = me
- *   - created:  issues where creator_id  = me
- *   - agents:   issues where the assignee is an *indirect* extension of me —
- *               an owned agent, OR a squad I'm a human member of, lead, or
- *               have an owned agent inside. Driven server-side by the
- *               `involves_user_id` predicate (see MUL-2397, 2026-05-19).
- *               Direct member assignment is intentionally EXCLUDED — that's
- *               the `assigned` scope's meaning.
+ * Server-filtered My Issues scopes: direct assignments, creations, or involvement
+ * through owned agents and squad membership. The agents scope excludes direct
+ * member assignment, which belongs to assigned.
  *
- * Cache key shape is `issueKeys.myList(wsId, scope, filter)` — same prefix
- * as web's `packages/core/issues/queries.ts` so a future WS handler can
- * invalidate `issueKeys.myAll(wsId)` and reach both clients.
+ * Mobile owns these query keys and its QueryClient. useMyIssuesRealtime patches
+ * or invalidates local lists; each client receives its own server events.
  */
 import { queryOptions } from "@tanstack/react-query";
 import { api } from "@/data/api";

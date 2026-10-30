@@ -65,6 +65,54 @@ func newAutopilotGetTestCmd() *cobra.Command {
 	return cmd
 }
 
+func newAutopilotListTestCmd() *cobra.Command {
+	cmd := &cobra.Command{Use: "list"}
+	cmd.Flags().String("status", "", "")
+	cmd.Flags().String("output", "table", "")
+	cmd.Flags().Bool("full-id", false, "")
+	return cmd
+}
+
+func TestRunAutopilotListTableShowsLastRunStatus(t *testing.T) {
+	const autopilotID = "11111111-1111-1111-1111-111111111111"
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet || r.URL.Path != "/api/autopilots" {
+			t.Fatalf("request = %s %s, want GET /api/autopilots", r.Method, r.URL.Path)
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"autopilots": []map[string]any{
+				{
+					"id":              autopilotID,
+					"title":           "GitHub Ops — Stall & Sync Sweep",
+					"status":          "active",
+					"last_run_status": "failed",
+					"execution_mode":  "run_only",
+					"last_run_at":     "2026-09-09T20:00:02Z",
+					"next_run_at":     "2026-09-10T08:00:00Z",
+				},
+			},
+			"total": 1,
+		})
+	}))
+	defer srv.Close()
+
+	setCLITestServerEnv(t, srv.URL)
+
+	out, err := captureStdout(t, func() error {
+		return runAutopilotList(newAutopilotListTestCmd(), nil)
+	})
+	if err != nil {
+		t.Fatalf("runAutopilotList: %v", err)
+	}
+
+	for _, want := range []string{"LAST_STATUS", "failed", "active", "run_only"} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("table output missing %q:\n%s", want, out)
+		}
+	}
+}
+
 func TestRunAutopilotGetRedactsWebhookCredentialsByDefault(t *testing.T) {
 	const (
 		autopilotID  = "11111111-1111-1111-1111-111111111111"

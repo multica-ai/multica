@@ -11,7 +11,7 @@ import {
   type IssueSortParam,
   type MyIssuesFilter,
 } from "./queries";
-import { inboxKeys } from "../inbox/queries";
+import { inboxKeys, type ArchivedInboxCache } from "../inbox/queries";
 import { patchInboxIssueProjection } from "../inbox/ws-updaters";
 import { projectKeys } from "../projects/queries";
 import {
@@ -39,46 +39,15 @@ export type IssueFlatCache = InfiniteData<ListIssuesResponse, number>;
 export type IssueTableRowCache = IssueTableRowsResponse;
 
 /**
- * IssueCacheCoordinator — the one rules table for how a single issue change
- * propagates through the query cache.
+ * IssueCacheCoordinator applies shared mutation and WebSocket cache rules.
+ * Patch determinate loaded rows, remove rows that leave a filter, and mark keys
+ * stale when membership or an unloaded row's server-sorted position is uncertain.
+ * Update bucket totals for known transitions without inserting speculative rows.
  *
- * Every write path converges here: `useUpdateIssue` (onMutate optimistic +
- * onSuccess server reconcile), `useBatchUpdateIssues`, and the WS
- * `issue:updated` handler all call {@link applyIssueChange}, so "I changed
- * it" and "someone else changed it" follow the same rules by construction.
- *
- * The rules, per loaded bucketed list (workspace board + every myList
- * scope — My Issues, Project, actor panels, workspace members/agents tabs):
- *
- *   card present, filter untouched by the change → surgical patch (rebucket
- *     on status, position-slot insert; never a refetch — refetching the
- *     visible list is what made drags flicker)
- *   card present, no longer matches the list's filter → surgical REMOVE
- *     (bucket total decremented) — the "issue left this surface" case that a
- *     filter-blind patch used to leave behind (MUL-3669)
- *   card present, membership undecidable client-side (involves / my:all) →
- *     patch + mark the key stale
- *   card absent, change can't affect this list → skip
- *   card absent, stayed a member + status changed → move one unit of the
- *     server total between the two buckets immediately, then mark the key
- *     stale: the row's slot in the destination bucket's loaded window is
- *     server knowledge, and under staleTime: Infinity an explicit
- *     invalidation is the only channel that ever fills it in
- *   card absent, left the list (reassigned / re-projected) → old status
- *     bucket total -1
- *   card absent, may have ENTERED, or anything undecidable (no base entity,
- *     unknown membership) → mark the key stale (never hard-insert: the
- *     right page/slot under the list's sort+filter is server knowledge)
- *
- * Stale keys are NOT invalidated here — timing is the caller's contract:
- * mutations defer them to onSettled (invalidating mid-flight would refetch
- * uncommitted state and stomp the optimistic patch), the WS path invalidates
- * immediately (the server already committed).
- *
- * The detail cache and the Inbox issue projections are patched in the
- * same pass. Aggregate projections that cannot be recomputed from one entity
- * (assignee-grouped boards, Gantt, project metrics) go through
- * {@link invalidateIssueDerivatives}.
+ * This helper returns stale keys without invalidating them: mutations wait until
+ * onSettled so refetches cannot overwrite optimistic work, while committed WS
+ * changes invalidate immediately. Detail and inbox projections are patched here;
+ * aggregate projections use invalidateIssueDerivatives.
  */
 
 export interface IssueCacheChangeResult {
@@ -89,7 +58,7 @@ export interface IssueCacheChangeResult {
   prevTableRows: [QueryKey, IssueTableRowCache][];
   prevDetail: Issue | undefined;
   prevInboxList: InboxItem[] | undefined;
-  prevArchivedInboxList: InboxItem[] | undefined;
+  prevArchivedInboxCaches: [QueryKey, ArchivedInboxCache | undefined][] | undefined;
   /** Loaded list keys whose server result may have drifted (membership
    *  unknown, possible enter/leave beyond the loaded window, bucket-count
    *  drift). Invalidate on settle (mutation) or immediately (WS). */
@@ -534,12 +503,21 @@ export function applyIssueChange(
   // filtering. The issue is the real state, so both projections follow every
   // write immediately.
   let prevInboxList: InboxItem[] | undefined;
-  let prevArchivedInboxList: InboxItem[] | undefined;
+  let prevArchivedInboxCaches: [QueryKey, ArchivedInboxCache | undefined][] | undefined;
   if (patch.status !== undefined || patch.priority !== undefined) {
     prevInboxList = qc.getQueryData<InboxItem[]>(inboxKeys.list(wsId));
-    prevArchivedInboxList = qc.getQueryData<InboxItem[]>(
-      inboxKeys.archived(wsId),
-    );
+    prevArchivedInboxCaches = qc.getQueriesData<ArchivedInboxCache>({ queryKey: inboxKeys.archived(wsId) });
+    // Membership and facets are server-owned; callers refresh after commit.
+    // Full issue events also carry unchanged status/priority on title edits.
+    const archiveProjectionChanged =
+      (patch.status !== undefined && (changed.status || !prevIssue || prevIssue.status !== patch.status)) ||
+      (patch.priority !== undefined && (!prevIssue || prevIssue.priority !== patch.priority));
+    if (archiveProjectionChanged) {
+      staleKeys.push(...qc.getQueryCache().findAll({ queryKey: inboxKeys.archived(wsId) })
+        .filter((query) => query.queryKey.length > inboxKeys.archived(wsId).length)
+        .map((query) => query.queryKey));
+      staleKeys.push(...qc.getQueryCache().findAll({ queryKey: inboxKeys.facets(wsId) }).map((query) => query.queryKey));
+    }
     patchInboxIssueProjection(qc, wsId, id, {
       status: patch.status,
       priority: patch.priority,
@@ -552,7 +530,7 @@ export function applyIssueChange(
     prevTableRows,
     prevDetail,
     prevInboxList,
-    prevArchivedInboxList,
+    prevArchivedInboxCaches,
     staleKeys,
     prevIssue,
   };
@@ -571,7 +549,7 @@ export function rollbackIssueChange(
     | "prevTableRows"
     | "prevDetail"
     | "prevInboxList"
-    | "prevArchivedInboxList"
+    | "prevArchivedInboxCaches"
   >,
 ) {
   for (const [key, snapshot] of result.prevLists) {
@@ -589,11 +567,8 @@ export function rollbackIssueChange(
   if (result.prevInboxList !== undefined) {
     qc.setQueryData(inboxKeys.list(wsId), result.prevInboxList);
   }
-  if (result.prevArchivedInboxList !== undefined) {
-    qc.setQueryData(
-      inboxKeys.archived(wsId),
-      result.prevArchivedInboxList,
-    );
+  for (const [key, snapshot] of result.prevArchivedInboxCaches ?? []) {
+    qc.setQueryData(key, snapshot);
   }
 }
 
@@ -678,6 +653,13 @@ export function invalidateStaleListKeys(qc: QueryClient, staleKeys: QueryKey[]) 
     const hash = hashKey(key);
     if (seen.has(hash)) continue;
     seen.add(hash);
-    qc.invalidateQueries({ queryKey: key, exact: true });
+    if (key[0] === "inbox") {
+      // A first archive page/facet request may predate this committed issue
+      // change. Cancel before invalidation even when it has no cached data.
+      void qc.cancelQueries({ queryKey: key, exact: true }).then(() =>
+        qc.invalidateQueries({ queryKey: key, exact: true }));
+    } else {
+      qc.invalidateQueries({ queryKey: key, exact: true });
+    }
   }
 }

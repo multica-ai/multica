@@ -180,9 +180,7 @@ func verifyAttachmentCapability(attachmentID, rawExp, rawSig, intent string, now
 	return hmac.Equal(got, want)
 }
 
-// ---------------------------------------------------------------------------
 // DownloadAttachmentWithCapability — GET /api/attachments/{id}/signed-download
-// ---------------------------------------------------------------------------
 //
 // Registered as a PUBLIC route. The capability in the query IS the credential,
 // and a native download request has nothing for middleware.Auth to read, so
@@ -223,7 +221,7 @@ func (h *Handler) DownloadAttachmentWithCapability(w http.ResponseWriter, r *htt
 		return
 	}
 	if h.Storage == nil {
-		writeError(w, http.StatusServiceUnavailable, "storage not configured")
+		writeFeatureDisabled(w, "storage_not_configured", "storage not configured")
 		return
 	}
 

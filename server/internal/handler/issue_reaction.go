@@ -48,6 +48,7 @@ func addedIssueReactionToResponse(r db.AddIssueReactionRow) IssueReactionRespons
 }
 
 func (h *Handler) AddIssueReaction(w http.ResponseWriter, r *http.Request) {
+	r = h.withWakeupActor(r)
 	issueID := chi.URLParam(r, "id")
 	issue, ok := h.loadIssueForUser(w, r, issueID)
 	if !ok {
@@ -74,12 +75,14 @@ func (h *Handler) AddIssueReaction(w http.ResponseWriter, r *http.Request) {
 	workspaceID := uuidToString(issue.WorkspaceID)
 	actorType, actorID := h.resolveActor(r, userID, workspaceID)
 
-	reaction, err := h.Queries.AddIssueReaction(r.Context(), db.AddIssueReactionParams{
-		IssueID:     issue.ID,
-		WorkspaceID: issue.WorkspaceID,
-		ActorType:   actorType,
-		ActorID:     parseUUID(actorID),
-		Emoji:       req.Emoji,
+	reaction, err := wakeupWrite(h, r, func(q *db.Queries) (db.AddIssueReactionRow, error) {
+		return q.AddIssueReaction(r.Context(), db.AddIssueReactionParams{
+			IssueID:     issue.ID,
+			WorkspaceID: issue.WorkspaceID,
+			ActorType:   actorType,
+			ActorID:     parseUUID(actorID),
+			Emoji:       req.Emoji,
+		})
 	})
 	if err != nil {
 		slog.Warn("add issue reaction failed", append(logger.RequestAttrs(r), "error", err, "issue_id", issueID)...)
@@ -103,6 +106,7 @@ func (h *Handler) AddIssueReaction(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) RemoveIssueReaction(w http.ResponseWriter, r *http.Request) {
+	r = h.withWakeupActor(r)
 	issueID := chi.URLParam(r, "id")
 	issue, ok := h.loadIssueForUser(w, r, issueID)
 	if !ok {
@@ -129,11 +133,13 @@ func (h *Handler) RemoveIssueReaction(w http.ResponseWriter, r *http.Request) {
 	workspaceID := uuidToString(issue.WorkspaceID)
 	actorType, actorID := h.resolveActor(r, userID, workspaceID)
 
-	removed, err := h.Queries.RemoveIssueReaction(r.Context(), db.RemoveIssueReactionParams{
-		IssueID:   issue.ID,
-		ActorType: actorType,
-		ActorID:   parseUUID(actorID),
-		Emoji:     req.Emoji,
+	removed, err := wakeupWrite(h, r, func(q *db.Queries) (db.RemoveIssueReactionRow, error) {
+		return q.RemoveIssueReaction(r.Context(), db.RemoveIssueReactionParams{
+			IssueID:   issue.ID,
+			ActorType: actorType,
+			ActorID:   parseUUID(actorID),
+			Emoji:     req.Emoji,
+		})
 	})
 	if err != nil {
 		slog.Warn("remove issue reaction failed", append(logger.RequestAttrs(r), "error", err, "issue_id", issueID)...)

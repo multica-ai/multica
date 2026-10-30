@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { cn } from "@multica/ui/lib/utils";
+import { ShimmerText } from "@multica/ui/components/common/shimmer-text";
 import { UnicodeSpinner } from "@multica/ui/components/common/unicode-spinner";
 import type { AgentAvailability } from "@multica/core/agents";
 import type { ChatPendingTask, TaskMessagePayload } from "@multica/core/types";
@@ -216,9 +216,9 @@ export function TaskStatusPill({
         <UnicodeSpinner name="breathe" className="opacity-70" />
       )}
       <span className="truncate">
-        <span className={cn(!stage.static && "animate-chat-text-shimmer")}>
+        <ShimmerText active={!stage.static}>
           {stage.label}
-        </span>
+        </ShimmerText>
         <span className="opacity-70 tabular-nums"> · {formatElapsedSecs(elapsedSecs)}</span>
       </span>
     </div>

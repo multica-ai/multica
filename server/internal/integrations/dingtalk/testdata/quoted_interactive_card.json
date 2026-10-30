@@ -1,0 +1,45 @@
+{
+  "msgId": "current-message",
+  "originalMsgId": "selected-bot-message",
+  "conversationId": "test-chat",
+  "conversationType": "1",
+  "senderStaffId": "test-sender",
+  "msgtype": "text",
+  "text": {
+    "content": "explain",
+    "isReplyMsg": true,
+    "repliedMsg": {
+      "msgType": "interactiveCard",
+      "msgId": "selected-bot-message",
+      "content": {
+        "cardContent": [
+          {
+            "children": [
+              {
+                "elementType": "UNKNOWN",
+                "value": "{\"content\":[{\"data\":{\"text\":\"> [quoted content unavailable]\"},\"style\":{\"colorTokenV2\":\"common_level1_base_color\",\"sizeToken\":\"common_body_text_style__font_size\",\"lineHeightToken\":\"common_body_text_style__line_height\"},\"type\":\"text\"},{\"data\":{},\"style\":{\"gap\":14},\"type\":\"paragraphSpace\"},{\"data\":{\"text\":\"Repeat paragraph two from the quoted message, then reproduce the JavaScript code exactly.\"},\"style\":{\"colorTokenV2\":\"common_level1_base_color\",\"sizeToken\":\"common_body_text_style__font_size\",\"lineHeightToken\":\"common_body_text_style__line_height\"},\"type\":\"text\"}]}"
+              },
+              {
+                "elementType": "UNKNOWN",
+                "value": "{}"
+              },
+              {
+                "elementType": "TEXT",
+                "value": "Bananas. Literal text: "
+              },
+              {
+                "elementType": "TEXT",
+                "value": ". Link: https://example.com/a_(b)?x=a_b+c&y=2#part_2"
+              },
+              {
+                "elementType": "TEXT",
+                "value": "const available = primary || fallback;\n"
+              }
+            ],
+            "elementType": "RICHTEXT"
+          }
+        ]
+      }
+    }
+  }
+}

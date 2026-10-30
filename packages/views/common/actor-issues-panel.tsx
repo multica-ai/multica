@@ -2,7 +2,7 @@
 
 import { useMemo, useState } from "react";
 import { useStore } from "zustand";
-import { ListTodo, Search } from "lucide-react";
+import { ListTodo, Search } from "@multica/ui/icons";
 import type {
   Issue,
   IssueTableFacetSpec,
@@ -160,9 +160,6 @@ export function ActorIssuesPanel({
             <ListTodo className="h-10 w-10 text-faint-foreground" />
             <p className="text-body">
               {t(($) => $.actor_issues.empty[scope].title)}
-            </p>
-            <p className="text-caption">
-              {t(($) => $.actor_issues.empty[scope].description)}
             </p>
           </div>
         ) : (

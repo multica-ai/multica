@@ -1,19 +1,21 @@
 import { statusCategoryOfKey } from "@multica/core/issues";
-import type { IssueStatus, IssueStatusCategory } from "@multica/core/types";
+import { isBuiltInIssueStatus } from "@multica/core/issue-statuses";
+import type {
+  BuiltInIssueStatus,
+  IssueStatus,
+  IssueStatusCategory,
+  IssueStatusIcon,
+} from "@multica/core/types";
 import { STATUS_CONFIG } from "@multica/core/issues/config";
 
-// ---------------------------------------------------------------------------
 // Geometry constants (viewBox 0 0 14 14, center 7,7)
-// ---------------------------------------------------------------------------
 
 const CX = 7;
 const CY = 7;
 const OUTER_R = 6;
 const FILL_R = 3.5;
 
-// ---------------------------------------------------------------------------
 // Helpers
-// ---------------------------------------------------------------------------
 
 /** Build a pie-wedge SVG path from 12 o'clock, clockwise */
 function piePath(cx: number, cy: number, r: number, progress: number): string {
@@ -24,9 +26,7 @@ function piePath(cx: number, cy: number, r: number, progress: number): string {
   return `M${cx},${cy} L${cx},${cy - r} A${r},${r} 0 ${largeArc},1 ${endX},${endY} Z`;
 }
 
-// ---------------------------------------------------------------------------
 // Base component — dashed outer ring + pie fill + optional center icon
-// ---------------------------------------------------------------------------
 
 function ProgressCircle({
   progress,
@@ -59,9 +59,7 @@ function ProgressCircle({
   );
 }
 
-// ---------------------------------------------------------------------------
 // Per-status renderers
-// ---------------------------------------------------------------------------
 
 /** 16 small dots arranged in a ring */
 function BacklogIcon() {
@@ -140,11 +138,9 @@ function CancelledIcon() {
   );
 }
 
-// ---------------------------------------------------------------------------
 // Renderer map
-// ---------------------------------------------------------------------------
 
-const STATUS_RENDERERS: Record<IssueStatusCategory, () => React.ReactNode> = {
+const STATUS_RENDERERS: Record<BuiltInIssueStatus, () => React.ReactNode> = {
   backlog: BacklogIcon,
   todo: TodoIcon,
   in_progress: InProgressIcon,
@@ -154,14 +150,40 @@ const STATUS_RENDERERS: Record<IssueStatusCategory, () => React.ReactNode> = {
   cancelled: CancelledIcon,
 };
 
-// ---------------------------------------------------------------------------
+const CATEGORY_RENDERER: Record<IssueStatusCategory, BuiltInIssueStatus> = {
+  unstarted: "todo",
+  started: "in_progress",
+  done: "done",
+  closed: "cancelled",
+};
+
+const ICON_RENDERERS: Record<IssueStatusIcon, () => React.ReactNode> = {
+  dotted: BacklogIcon,
+  circle: TodoIcon,
+  half: InProgressIcon,
+  three_quarters: InReviewIcon,
+  check: DoneIcon,
+  slash: BlockedIcon,
+  cross: CancelledIcon,
+};
+
+const BUILT_IN_ICON_COLOR: Record<BuiltInIssueStatus, string> = {
+  backlog: "text-muted-foreground",
+  todo: "text-muted-foreground",
+  in_progress: "text-warning",
+  in_review: "text-success",
+  done: "text-info",
+  blocked: "text-destructive",
+  cancelled: "text-muted-foreground",
+};
+
 // Public component
-// ---------------------------------------------------------------------------
 
 export function StatusIcon({
   status,
   category: categoryProp,
   color,
+  icon,
   className = "h-4 w-4",
   inheritColor = false,
 }: {
@@ -169,22 +191,27 @@ export function StatusIcon({
   /**
    * Resolved category, for callers that hold the workspace catalog. Without it
    * the key resolves on its own, which is exact for the 7 built-ins and falls
-   * back to `todo` for a custom key this render has no catalog for.
+   * back to `unstarted` for a custom key this render has no catalog for.
    */
   category?: IssueStatusCategory;
   /** A custom status's `#rrggbb`. Built-ins keep their semantic token color. */
   color?: string | null;
+  /** Custom geometry, independent of category. Unknown/absent uses the default. */
+  icon?: string | null;
   className?: string;
   inheritColor?: boolean;
 }) {
-  // The glyph set is per CATEGORY: a custom status renders with its category's
-  // icon, which is what makes it read as "the same kind of thing". (MUL-6243)
+  // Built-ins stay locked; custom geometry never determines lifecycle behavior.
   const category = categoryProp ?? statusCategoryOfKey(status);
-  const cfg = STATUS_CONFIG[category];
-  const Renderer = STATUS_RENDERERS[category] ?? TodoIcon;
+  const builtIn = isBuiltInIssueStatus(status) ? status : null;
+  const customRenderer = icon && Object.hasOwn(ICON_RENDERERS, icon)
+    ? ICON_RENDERERS[icon as IssueStatusIcon]
+    : null;
+  const Renderer = (builtIn ? STATUS_RENDERERS[builtIn] : customRenderer)
+    ?? STATUS_RENDERERS[CATEGORY_RENDERER[category]] ?? TodoIcon;
   // A custom color wins over the category's token, but only when the caller
   // isn't already forcing the glyph to inherit (selected rows, dark chips).
-  const useCustomColor = !inheritColor && Boolean(color);
+  const useCustomColor = !builtIn && !inheritColor && Boolean(color);
 
   return (
     <svg
@@ -192,7 +219,11 @@ export function StatusIcon({
       fill="none"
       style={useCustomColor ? { color: color ?? undefined } : undefined}
       className={`${className} ${
-        inheritColor || useCustomColor ? "" : cfg?.iconColor ?? "text-muted-foreground"
+        inheritColor || useCustomColor
+          ? ""
+          : builtIn
+            ? BUILT_IN_ICON_COLOR[builtIn]
+            : STATUS_CONFIG[category]?.iconColor ?? "text-muted-foreground"
       } shrink-0`}
     >
       <Renderer />

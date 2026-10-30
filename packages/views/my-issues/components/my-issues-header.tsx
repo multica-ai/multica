@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { ChevronDown } from "lucide-react";
+import { ChevronDown } from "@multica/ui/icons";
 import { Button } from "@multica/ui/components/ui/button";
 import {
   DropdownMenu,
@@ -22,7 +22,6 @@ import { useT } from "../../i18n";
 import { WorkspaceAgentWorkingChip } from "../../issues/components/workspace-agent-working-chip";
 import {
   IssueDisplayControls,
-  ViewRefreshIndicator,
 } from "../../issues/components/issues-header";
 import { cn } from "@multica/ui/lib/utils";
 import { PAGE_GUTTER } from "../../layout/page-header";
@@ -48,7 +47,6 @@ export function MyIssuesHeader({
   workingAgents,
   scope,
   onScopeChange,
-  isRefreshing = false,
   facetCountsExact = true,
   tableFacetCounts,
   onTableFacetChange,
@@ -60,7 +58,6 @@ export function MyIssuesHeader({
   workingAgents: WorkingAgentSummary[] | undefined;
   scope: MyIssuesScope;
   onScopeChange: (scope: MyIssuesScope) => void;
-  isRefreshing?: boolean;
   /** See IssueDisplayControls.facetCountsExact. */
   facetCountsExact?: boolean;
   tableFacetCounts?: IssueTableFacetsResponse;
@@ -176,7 +173,6 @@ export function MyIssuesHeader({
             onTableFacetChange={onTableFacetChange}
             viewBaseline={viewBaseline}
           />
-          <ViewRefreshIndicator active={isRefreshing} />
         </div>
       </div>
     </div>
