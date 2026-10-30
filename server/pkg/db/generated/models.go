@@ -108,6 +108,15 @@ type AgentSkill struct {
 	Enabled   bool               `json:"enabled"`
 }
 
+type AgentTaskCodeChange struct {
+	TaskID         pgtype.UUID        `json:"task_id"`
+	RuntimeID      pgtype.UUID        `json:"runtime_id"`
+	DispatchedAt   pgtype.Timestamptz `json:"dispatched_at"`
+	Snapshot       []byte             `json:"-"`
+	SnapshotDigest string             `json:"snapshot_digest"`
+	FileCount      int32              `json:"file_count"`
+}
+
 type AgentTaskQueue struct {
 	ID                    pgtype.UUID        `json:"id"`
 	AgentID               pgtype.UUID        `json:"agent_id"`

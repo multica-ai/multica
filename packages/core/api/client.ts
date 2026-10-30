@@ -1,3 +1,4 @@
+import { parseCodeChanges, parseCodeChangesSetting } from "../issues/code-changes";
 import type { ZodType } from "zod";
 import { AgentRuntimeSchema, EMPTY_RUNTIME } from "../runtimes/schema";
 import type { IssueWakeup, IssueWakeupInput, IssueWakeupSummaryRow, PausedWakeup, SystemWakeup, WakeupRun, WorkspaceSystemWakeup } from "../types/issue-wakeup";
@@ -1404,6 +1405,25 @@ export class ApiClient {
 
   async disableIssueWakeup(issueId: string, wakeupId: string): Promise<void> {
     await this.fetch(`/api/issues/${encodeURIComponent(issueId)}/wakeups/${encodeURIComponent(wakeupId)}/disable`, { method: "POST" });
+  }
+
+  async getIssueCodeChanges(workspaceId: string, issueId: string, taskId?: string, signal?: AbortSignal) {
+    const query = taskId ? `?task_id=${encodeURIComponent(taskId)}` : "";
+    const raw = await this.fetch<unknown>(
+      `/api/issues/${encodeURIComponent(issueId)}/code-changes${query}`,
+      { headers: { "X-Workspace-ID": workspaceId, "X-Workspace-Slug": "" }, signal },
+    );
+    return parseCodeChanges(raw);
+  }
+
+  async updateWorkspaceCodeChanges(workspaceId: string, enabled: boolean) {
+    const raw = await this.fetch<unknown>(
+      `/api/workspaces/${encodeURIComponent(workspaceId)}/code-changes`,
+      { method: "PUT", body: JSON.stringify({ enabled }) },
+    );
+    const result = parseCodeChangesSetting(raw);
+    if (result.workspaceId !== workspaceId) throw new Error("Code changes setting workspace mismatch");
+    return result;
   }
 
   async getIssue(id: string, options?: { signal?: AbortSignal }): Promise<Issue> {

@@ -8,6 +8,7 @@ import enCommon from "../../locales/en/common.json";
 import enSettings from "../../locales/en/settings.json";
 
 const mockUpdateWorkspace = vi.hoisted(() => vi.fn());
+const mockUpdateCodeChanges = vi.hoisted(() => vi.fn());
 const mockDeleteInstallation = vi.hoisted(() => vi.fn());
 const mockGetConnectURL = vi.hoisted(() => vi.fn());
 const mockInvalidate = vi.hoisted(() => vi.fn());
@@ -65,6 +66,7 @@ vi.mock("@multica/core/github", async () => {
 vi.mock("@multica/core/api", () => ({
   api: {
     updateWorkspace: mockUpdateWorkspace,
+    updateWorkspaceCodeChanges: mockUpdateCodeChanges,
     deleteGitHubInstallation: mockDeleteInstallation,
     getGitHubConnectURL: mockGetConnectURL,
   },
@@ -121,6 +123,23 @@ function connect() {
 }
 
 describe("CodeTab — GitHub", () => {
+  it("uses the independent code setting endpoint and defaults off", async () => {
+    mockUpdateCodeChanges.mockResolvedValue({ workspaceId: "workspace-1", enabled: true });
+    const user = userEvent.setup();
+    render(<CodeTab />, { wrapper: Wrapper });
+    const toggle = screen.getByRole("switch", { name: "Task code changes" });
+    expect(toggle).not.toBeChecked();
+    await user.click(toggle);
+    await waitFor(() => expect(mockUpdateCodeChanges).toHaveBeenCalledWith("workspace-1", true));
+    expect(mockUpdateWorkspace).not.toHaveBeenCalled();
+  });
+
+  it("keeps the code setting read-only for members", () => {
+    roleRef.current = "member";
+    render(<CodeTab />, { wrapper: Wrapper });
+    expect(screen.getByRole("switch", { name: "Task code changes" })).toHaveAttribute("aria-disabled", "true");
+  });
+
   it("offers to connect GitHub and opens the install flow", async () => {
     mockGetConnectURL.mockResolvedValue({ configured: true, url: "https://github.com/apps/x" });
     const open = vi.spyOn(window, "open").mockImplementation(() => null);

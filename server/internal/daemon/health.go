@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/multica-ai/multica/server/pkg/codechanges"
 	"net"
 	"net/http"
 	"os"
@@ -124,6 +125,7 @@ type repoCheckoutRequest struct {
 }
 
 type activeRepoCheckoutTask struct {
+	CodeChanges *taskCodeChangeCapture
 	WorkspaceID string
 	TaskID      string
 	AgentID     string
@@ -549,6 +551,13 @@ func (d *Daemon) repoCheckoutHandler() http.HandlerFunc {
 			d.logger.Error("repo checkout failed", "url", req.URL, "error", err)
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
+		}
+
+		if activeTask.CodeChanges != nil {
+			captureCtx, cancel := context.WithTimeout(r.Context(), 2*time.Second)
+			base, _ := codechanges.Head(captureCtx, result.Path, "HEAD")
+			cancel()
+			activeTask.CodeChanges.observeCheckout(result.Path, base)
 		}
 
 		w.Header().Set("Content-Type", "application/json")

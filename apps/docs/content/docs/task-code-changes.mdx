@@ -1,0 +1,24 @@
+---
+title: Task code changes
+description: Browse the committed changes from each agent execution without a Git provider connection.
+---
+
+Workspace owners and admins can turn on **Task code changes** in **Settings → Code**. It is off by default and works independently of GitHub integration. Enabling it starts capture with new executions; disabling it stops capture and browsing while retaining saved history.
+
+Open **Code changes** in an issue's sidebar to choose an execution and browse its file tree and numbered diff. The default is the newest readable execution containing changes. A later read-only review does not replace an earlier implementation or fix. These are the changes from the selected execution, rather than a cumulative diff for the issue.
+
+The runtime compares the repository's starting commit with its delivered commit and sends a bounded snapshot to Multica. Snapshots survive branch merges and worktree cleanup. Workspace members who can read the issue can read its snapshots. Saving diffs therefore shares committed source changes through the workspace; leave the switch off if this does not match your repository's access policy.
+
+## Supported execution paths
+
+- A configured local repository, including disposable local worktrees.
+- A repository checked out on demand with `multica repo checkout` during the task.
+- Multiple registered repositories, with a separate fixed commit range for each file's repository.
+
+Repositories cloned outside the checkout helper are not searched automatically. Uncommitted edits are not included; the viewer shows a warning if they remain. Binary files, empty diffs, capture failures and size limits have explicit states. Active cancellation stops capture, and existing cancellation receipts still preserve the branch and work directory.
+
+Capture has a shared 15-second budget, at most 100 repositories and 100 files, 200 KiB per file, 2 MiB of diff text, and 8 MiB of encoded or expanded JSON. A limit is reported as incomplete. Code is stored separately from task summaries and ordinary task events; the server never mounts the runtime's repository. Workspace deletion removes its snapshots in the existing teardown transaction; the existing cleanup tick also removes artifacts whose source task was deleted separately.
+
+Terminal reports retain snapshots locally until the server acknowledges the saved digest or explicitly discards the capture because the switch was disabled or the task cancelled. A server downgrade cannot silently acknowledge an ignored snapshot. Replay does not rerun the agent or replace an existing snapshot. A different dispatch or a non-empty runtime rebinding closes access to the earlier artifact. Already saved terminal snapshots survive runtime removal; removed runtimes cannot submit missing snapshots afterward.
+
+![Code changes with sample data](/images/task-code-changes.jpg)

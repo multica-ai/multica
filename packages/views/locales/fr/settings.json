@@ -1,4 +1,8 @@
 {
+  "code_changes": {
+    "title": "Modifications du code des tâches",
+    "description": "Enregistre les modifications commitées des nouvelles exécutions pour les membres de l’espace de travail qui peuvent consulter la tâche. Les dépôts locaux fonctionnent sans GitHub ni GitLab. La désactivation conserve l’historique enregistré."
+  },
   "issue_statuses": {
     "title": "États des tâches",
     "loading": "Chargement des états…",

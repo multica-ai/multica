@@ -1452,5 +1452,9 @@
     "mcp": "Added by admins and shared across the workspace, then assigned per agent.",
     "apps": "Authorized with your own account through Composio and enabled on agents you own.",
     "plugins": "Installed packages that can add tools, scheduled hooks, and storage, each with its own permissions."
+  },
+  "code_changes": {
+    "title": "Task code changes",
+    "description": "Save committed changes from new executions for workspace members who can view the task. Local repositories work without GitHub or GitLab. Turning this off retains saved history."
   }
 }

@@ -10,6 +10,37 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
+describe("ApiClient code changes", () => {
+  it("pins history reads to the requested workspace and execution", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({
+      available: false, reason: "not_captured", runs: [],
+    }), { status: 200, headers: { "Content-Type": "application/json" } }));
+    vi.stubGlobal("fetch", fetchMock);
+    const client = new ApiClient("https://api.example.test");
+    const controller = new AbortController();
+
+    await client.getIssueCodeChanges("workspace-a", "ISSUE/1", "run/1", controller.signal);
+
+    const [url, options] = fetchMock.mock.calls[0]!;
+    expect(url).toBe("https://api.example.test/api/issues/ISSUE%2F1/code-changes?task_id=run%2F1");
+    expect(new Headers(options.headers).get("X-Workspace-ID")).toBe("workspace-a");
+    expect(new Headers(options.headers).get("X-Workspace-Slug")).toBe("");
+    expect(options.signal).toBe(controller.signal);
+  });
+
+  it("rejects a setting response for a different workspace", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({
+      workspace_id: "workspace-b", enabled: true,
+    }), { status: 200, headers: { "Content-Type": "application/json" } }));
+    vi.stubGlobal("fetch", fetchMock);
+    const client = new ApiClient("https://api.example.test");
+
+    await expect(client.updateWorkspaceCodeChanges("workspace-a", true)).rejects.toThrow("workspace mismatch");
+
+    expect(JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body))).toEqual({ enabled: true });
+  });
+});
+
 describe("ApiClient status reorder", () => {
   it("opts into built-in ordering and tolerates malformed responses", async () => {
     const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({ statuses: "invalid" }), {

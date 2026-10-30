@@ -33,6 +33,7 @@ import (
 	"github.com/multica-ai/multica/server/internal/service"
 	"github.com/multica-ai/multica/server/internal/util"
 	"github.com/multica-ai/multica/server/pkg/agent"
+	"github.com/multica-ai/multica/server/pkg/codechanges"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 	"github.com/multica-ai/multica/server/pkg/dbid"
 	"github.com/multica-ai/multica/server/pkg/protocol"
@@ -4061,6 +4062,7 @@ func (h *Handler) buildClaimedTaskResponse(r *http.Request, task *db.AgentTaskQu
 	// skips rendering the heading in that case.
 	if ws, err := h.Queries.GetWorkspace(r.Context(), parseUUID(resp.WorkspaceID)); err == nil {
 		resp.WorkspaceSlug = ws.Slug
+		resp.CodeChangesEnabled = resp.IssueID != "" && resp.ChatSessionID == "" && codechanges.Enabled(ws.Settings)
 		if issueNumber > 0 {
 			resp.IssueIdentifier = service.IssueIdentifier(ws.IssuePrefix, issueNumber)
 		}
@@ -4797,10 +4799,12 @@ func (h *Handler) ReportTaskProgress(w http.ResponseWriter, r *http.Request) {
 
 // CompleteTask marks a running task as completed.
 type TaskCompleteRequest struct {
-	PRURL     string `json:"pr_url"`
-	Output    string `json:"output"`
-	SessionID string `json:"session_id"` // Claude session ID for future resumption
-	WorkDir   string `json:"work_dir"`   // working directory used during execution
+	CodeChanges    *codechanges.Snapshot    `json:"code_changes,omitempty"`
+	CodeChangesRef codechanges.ExecutionRef `json:"code_changes_ref,omitzero"`
+	PRURL          string                   `json:"pr_url"`
+	Output         string                   `json:"output"`
+	SessionID      string                   `json:"session_id"` // Claude session ID for future resumption
+	WorkDir        string                   `json:"work_dir"`   // working directory used during execution
 	// DurableWorkDir is the configured project directory that replaces a
 	// disposable task worktree after the daemon confirms the worktree is gone.
 	DurableWorkDir string `json:"durable_work_dir,omitempty"`
@@ -4820,8 +4824,8 @@ type TaskCompleteRequest struct {
 }
 
 // sanitizeTaskCompleteRequest / sanitizeTaskFailRequest scrub every
-// caller-supplied string on a terminal task callback. Both request types are
-// flat bags of strings, so this is exhaustive by construction — but that also
+// caller-supplied string on a terminal task callback. Artifact fields are validated separately and removed from public results;
+// the remaining callback strings are sanitized here — but that also
 // means a NEW string field must be added here, or it reopens GH #7098 through a
 // fresh door. The task-row columns these feed (error, work_dir,
 // durable_work_dir, branch_name, session_id) are all TEXT, and result is
@@ -4869,6 +4873,12 @@ func (h *Handler) CompleteTask(w http.ResponseWriter, r *http.Request) {
 	// re-route below feeds req.Output into the failure classifier, and that
 	// classifier must see exactly the text we are going to persist.
 	sanitizeTaskCompleteRequest(&req)
+	if req.CodeChanges != nil {
+		if req.CodeChanges.Validate() != nil || req.CodeChangesRef.Validate() != nil {
+			writeError(w, 400, "invalid code changes report")
+			return
+		}
+	}
 
 	// GH #6402: a daemon whose backend does not (yet) read the provider's
 	// structured terminal reason reports a context-exhausted run as a clean
@@ -4895,20 +4905,28 @@ func (h *Handler) CompleteTask(w http.ResponseWriter, r *http.Request) {
 			// Carry the branch across the reroute. The run still delivered one:
 			// it ran out of context, it did not fail to produce anything, and
 			// dropping the name here would hide the work it did commit.
-			BranchName:            req.BranchName,
+			BranchName:  req.BranchName,
+			CodeChanges: req.CodeChanges, CodeChangesRef: req.CodeChangesRef,
 			SessionRolloutMissing: req.SessionRolloutMissing,
 			RetiredSessionID:      req.RetiredSessionID,
 		})
 		return
 	}
 
+	snapshot, ref := req.CodeChanges, req.CodeChangesRef
+	req.CodeChanges = nil
+	req.CodeChangesRef = codechanges.ExecutionRef{}
 	result, _ := json.Marshal(req)
 	// MUL-5305: SessionRolloutMissing is applied inside CompleteTask's terminal
 	// transaction (force session_id NULL + flag the row), so an auto-retry the
 	// same commit creates and wakes can never observe the withheld pointer or a
 	// missing continuity-gap flag.
-	task, transitioned, err := h.TaskService.CompleteTaskWithTransition(r.Context(), parseUUID(taskID), result, req.SessionID, req.WorkDir, req.BranchName, req.SessionRolloutMissing, req.RetiredSessionID, req.DurableWorkDir)
+	task, transitioned, err := h.TaskService.CompleteTaskWithCodeChanges(r.Context(), parseUUID(taskID), result, req.SessionID, req.WorkDir, req.BranchName, req.SessionRolloutMissing, req.RetiredSessionID, req.DurableWorkDir, snapshot, ref)
 	if err != nil {
+		if errors.Is(err, service.ErrCodeChangesExecutionStale) {
+			writeJSON(w, 409, map[string]string{"error": "stale code changes execution", "code": "code_changes_execution_stale"})
+			return
+		}
 		// A CompleteTask error is an infrastructure failure (transaction /
 		// assistant-outcome write), not a bad request: an already-finalized
 		// callback is treated as idempotent success and returns no error. Return
@@ -4918,6 +4936,8 @@ func (h *Handler) CompleteTask(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "failed to complete task")
 		return
 	}
+	h.setCodeChangesReceipt(w, r, workspaceID, *task, snapshot)
+
 	if !transitioned {
 		writeJSON(w, http.StatusOK, taskToResponse(*task, workspaceID))
 		return
@@ -5566,11 +5586,13 @@ func (h *Handler) GetTaskStatus(w http.ResponseWriter, r *http.Request) {
 
 // FailTask marks a running task as failed.
 type TaskFailRequest struct {
-	Error          string `json:"error"`
-	SessionID      string `json:"session_id,omitempty"`
-	WorkDir        string `json:"work_dir,omitempty"`
-	DurableWorkDir string `json:"durable_work_dir,omitempty"`
-	FailureReason  string `json:"failure_reason,omitempty"`
+	CodeChanges    *codechanges.Snapshot    `json:"code_changes,omitempty"`
+	CodeChangesRef codechanges.ExecutionRef `json:"code_changes_ref,omitzero"`
+	Error          string                   `json:"error"`
+	SessionID      string                   `json:"session_id,omitempty"`
+	WorkDir        string                   `json:"work_dir,omitempty"`
+	DurableWorkDir string                   `json:"durable_work_dir,omitempty"`
+	FailureReason  string                   `json:"failure_reason,omitempty"`
 	// BranchName: a failed run can still have produced a branch — worktree mode
 	// commits whatever the agent left before tearing the worktree down. Report
 	// it so a partially-successful run is still findable.
@@ -5619,8 +5641,19 @@ func (h *Handler) failTask(w http.ResponseWriter, r *http.Request, taskID, works
 	// keep a stale mid-flight pin) and flagging the row in the same commit that
 	// creates and wakes the auto-retry, so the retry can never claim the withheld
 	// pointer or miss the continuity gap.
-	task, transitioned, err := h.TaskService.FailTaskWithTransition(r.Context(), parseUUID(taskID), req.Error, req.SessionID, req.WorkDir, req.BranchName, req.FailureReason, req.SessionRolloutMissing, req.RetiredSessionID, req.DurableWorkDir)
+	if req.CodeChanges != nil {
+		if req.CodeChanges.Validate() != nil || req.CodeChangesRef.Validate() != nil {
+			writeError(w, 400, "invalid code changes report")
+			return
+		}
+	}
+
+	task, transitioned, err := h.TaskService.FailTaskWithCodeChanges(r.Context(), parseUUID(taskID), req.Error, req.SessionID, req.WorkDir, req.BranchName, req.FailureReason, req.SessionRolloutMissing, req.RetiredSessionID, req.DurableWorkDir, req.CodeChanges, req.CodeChangesRef)
 	if err != nil {
+		if errors.Is(err, service.ErrCodeChangesExecutionStale) {
+			writeJSON(w, 409, map[string]string{"error": "stale code changes execution", "code": "code_changes_execution_stale"})
+			return
+		}
 		// A FailTask error is an infrastructure failure (the terminal
 		// transaction that also clears the withheld session, writes the
 		// continuity-gap flag, and creates the auto-retry rolled back), not a bad
@@ -5632,6 +5665,8 @@ func (h *Handler) failTask(w http.ResponseWriter, r *http.Request, taskID, works
 		writeError(w, http.StatusInternalServerError, "failed to fail task")
 		return
 	}
+	h.setCodeChangesReceipt(w, r, workspaceID, *task, req.CodeChanges)
+
 	if !transitioned {
 		writeJSON(w, http.StatusOK, taskToResponse(*task, workspaceID))
 		return

@@ -28,6 +28,7 @@ import (
 	"github.com/multica-ai/multica/server/internal/realtime"
 	"github.com/multica-ai/multica/server/internal/runtimeapps"
 	"github.com/multica-ai/multica/server/internal/util"
+	"github.com/multica-ai/multica/server/pkg/codechanges"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 	"github.com/multica-ai/multica/server/pkg/dbid"
 	"github.com/multica-ai/multica/server/pkg/featureflag"
@@ -4605,6 +4606,16 @@ func (s *TaskService) CompleteTask(ctx context.Context, taskID pgtype.UUID, resu
 // must only run them when transitioned is true; a replay against an already
 // terminal task is still an idempotent success but must not emit them again.
 func (s *TaskService) CompleteTaskWithTransition(ctx context.Context, taskID pgtype.UUID, result []byte, sessionID, workDir, branchName string, sessionRolloutMissing bool, retiredSessionID, durableWorkDir string) (*db.AgentTaskQueue, bool, error) {
+	return s.CompleteTaskWithCodeChanges(ctx, taskID, result, sessionID, workDir, branchName, sessionRolloutMissing, retiredSessionID, durableWorkDir, nil, codechanges.ExecutionRef{})
+}
+
+// CompleteTaskWithCodeChanges saves an optional artifact with its terminal CAS.
+func (s *TaskService) CompleteTaskWithCodeChanges(ctx context.Context, taskID pgtype.UUID, result []byte, sessionID, workDir, branchName string, sessionRolloutMissing bool, retiredSessionID, durableWorkDir string, snapshot *codechanges.Snapshot, ref codechanges.ExecutionRef) (*db.AgentTaskQueue, bool, error) {
+	encodedSnapshot, err := prepareTaskCodeChanges(snapshot, ref, s.TxStarter != nil)
+	if err != nil {
+		return nil, false, err
+	}
+
 	var task db.AgentTaskQueue
 	var change *qoderIssueChange
 	// chatAssistantMsg is the single assistant outcome row written for a chat
@@ -4629,6 +4640,9 @@ func (s *TaskService) CompleteTaskWithTransition(ctx context.Context, taskID pgt
 			return err
 		}
 		task = t
+		if err := persistTaskCodeChanges(ctx, qtx, t, encodedSnapshot, snapshot, ref); err != nil {
+			return err
+		}
 		change, err = syncQoderIssue(ctx, qtx, t, true)
 		if err != nil {
 			return err
@@ -4694,8 +4708,21 @@ func (s *TaskService) CompleteTaskWithTransition(ctx context.Context, taskID pgt
 		// cancelled, or failed by the time this call runs. The UPDATE
 		// … WHERE status = 'running' returns no rows in that case.
 		// Treat it as an idempotent success — same pattern as CancelTask.
+		if errors.Is(err, ErrCodeChangesExecutionStale) {
+			return nil, false, err
+		}
 		if existing, lookupErr := s.Queries.GetAgentTask(ctx, taskID); lookupErr == nil {
 			if errors.Is(err, pgx.ErrNoRows) {
+				if snapshot != nil {
+					if !codeChangesExecutionMatches(existing, ref) {
+						return nil, false, ErrCodeChangesExecutionStale
+					}
+					if existing.Status == "completed" && taskCodeChangesReplayMatches(existing, result) {
+						if err := persistTaskCodeChanges(ctx, s.Queries, existing, encodedSnapshot, snapshot, ref); err != nil {
+							return nil, false, err
+						}
+					}
+				}
 				slog.Info("complete task: already finalized",
 					"task_id", util.UUIDToString(taskID),
 					"current_status", existing.Status,
@@ -5036,6 +5063,16 @@ func (s *TaskService) FailTask(ctx context.Context, taskID pgtype.UUID, errMsg, 
 // CompleteTaskWithTransition. The bool is false for an idempotent replay that
 // observed an already-terminal row.
 func (s *TaskService) FailTaskWithTransition(ctx context.Context, taskID pgtype.UUID, errMsg, sessionID, workDir, branchName, failureReason string, sessionRolloutMissing bool, retiredSessionID, durableWorkDir string) (*db.AgentTaskQueue, bool, error) {
+	return s.FailTaskWithCodeChanges(ctx, taskID, errMsg, sessionID, workDir, branchName, failureReason, sessionRolloutMissing, retiredSessionID, durableWorkDir, nil, codechanges.ExecutionRef{})
+}
+
+// FailTaskWithCodeChanges retains partial committed work on failed executions.
+func (s *TaskService) FailTaskWithCodeChanges(ctx context.Context, taskID pgtype.UUID, errMsg, sessionID, workDir, branchName, failureReason string, sessionRolloutMissing bool, retiredSessionID, durableWorkDir string, snapshot *codechanges.Snapshot, ref codechanges.ExecutionRef) (*db.AgentTaskQueue, bool, error) {
+	encodedSnapshot, err := prepareTaskCodeChanges(snapshot, ref, s.TxStarter != nil)
+	if err != nil {
+		return nil, false, err
+	}
+
 	// Strip bytes PostgreSQL cannot store before anything else reads errMsg, so
 	// the classifier, the transaction and every downstream consumer see the one
 	// text we will actually persist (GH #7098). Kept at the service boundary
@@ -5132,6 +5169,9 @@ func (s *TaskService) FailTaskWithTransition(ctx context.Context, taskID pgtype.
 			return err
 		}
 		task = t
+		if err := persistTaskCodeChanges(ctx, qtx, t, encodedSnapshot, snapshot, ref); err != nil {
+			return err
+		}
 
 		// Atomic with the status flip, same as the completion path. A failed
 		// coordinator that already received the recovery comment has consumed
@@ -5329,8 +5369,21 @@ func (s *TaskService) FailTaskWithTransition(ctx context.Context, taskID pgtype.
 		}
 		return nil
 	}); err != nil {
+		if errors.Is(err, ErrCodeChangesExecutionStale) {
+			return nil, false, err
+		}
 		if existing, lookupErr := s.Queries.GetAgentTask(ctx, taskID); lookupErr == nil {
 			if errors.Is(err, pgx.ErrNoRows) {
+				if snapshot != nil {
+					if !codeChangesExecutionMatches(existing, ref) {
+						return nil, false, ErrCodeChangesExecutionStale
+					}
+					if existing.Status == "failed" && existing.Error.String == errMsg {
+						if err := persistTaskCodeChanges(ctx, s.Queries, existing, encodedSnapshot, snapshot, ref); err != nil {
+							return nil, false, err
+						}
+					}
+				}
 				slog.Info("fail task: already finalized",
 					"task_id", util.UUIDToString(taskID),
 					"current_status", existing.Status,

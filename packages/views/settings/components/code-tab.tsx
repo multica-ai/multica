@@ -47,6 +47,7 @@ import { RepositoriesSection } from "./repositories-section";
 import { PRMergeStatusRow } from "./pr-merge-status-row";
 
 type GitHubSettingsKey =
+  | "code_changes_enabled"
   | "github_enabled"
   | "github_pr_sidebar_enabled"
   | "co_authored_by_enabled"
@@ -89,6 +90,19 @@ export function CodeTab() {
     if (!workspace || savingKey) return;
     setSavingKey(key);
     try {
+      if (key === "code_changes_enabled") {
+        const result = await api.updateWorkspaceCodeChanges(workspace.id, next);
+        qc.setQueryData(workspaceKeys.list(), (old: Workspace[] | undefined) =>
+          old?.map((ws) => ws.id === result.workspaceId ? {
+            ...ws,
+            settings: {
+              ...((ws.settings as Record<string, unknown>) ?? {}),
+              code_changes_enabled: result.enabled,
+            },
+          } : ws),
+        );
+        return;
+      }
       const merged = {
         ...((workspace.settings as Record<string, unknown>) ?? {}),
         [key]: next,
@@ -181,6 +195,19 @@ export function CodeTab() {
   return (
     <SettingsTab title={t(($) => $.page.tabs.code)} scope="workspace">
       {member && !isManager ? <SettingsReadOnlyNotice wsId={wsId} /> : null}
+
+      <SettingsSection title={t(($) => $.code_changes.title)} anchor="code-changes">
+        <SettingsCard>
+          <SettingsRow label={t(($) => $.code_changes.title)} description={t(($) => $.code_changes.description)}>
+            <Switch
+              aria-label={t(($) => $.code_changes.title)}
+              checked={(workspace.settings as Record<string, unknown>)?.code_changes_enabled === true}
+              disabled={!isManager || savingKey !== null}
+              onCheckedChange={(next) => persistSetting("code_changes_enabled", next)}
+            />
+          </SettingsRow>
+        </SettingsCard>
+      </SettingsSection>
 
       <SettingsSection title={t(($) => $.code.hosting_title)} anchor="code-hosting">
         <SettingsCard>

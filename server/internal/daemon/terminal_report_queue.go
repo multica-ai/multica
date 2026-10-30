@@ -7,9 +7,11 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/multica-ai/multica/server/pkg/codechanges"
 	"net/http"
 	"os"
 	"path/filepath"
+	"reflect"
 	"sort"
 	"strings"
 	"sync"
@@ -17,8 +19,9 @@ import (
 )
 
 const (
-	terminalReportRecordVersion = 1
-	terminalReportReplayWorkers = 4
+	terminalReportRecordVersion       = 2
+	terminalReportLegacyRecordVersion = 1
+	terminalReportReplayWorkers       = 4
 
 	terminalReportReplayInitialBackoff = 5 * time.Second
 	terminalReportReplayMaxBackoff     = 5 * time.Minute
@@ -38,24 +41,24 @@ const (
 // ACL boundary, so protection comes from the current user's profile/workspace
 // ACL; the queue never carries an auth token on either platform.
 //
-// Version stays at 1 because the rejection fields are additive and older
-// daemons ignore unknown JSON fields. A future incompatible version is left
-// untouched and reported on every replay pass; downgrading must never delete a
-// payload merely because the older binary cannot decode it.
+// Snapshot records use v2 and include their captured execution identity. Older
+// v1 records retain their original task-scoped interpretation and filename.
 type persistedTerminalTaskReport struct {
-	Version               int       `json:"version"`
-	CreatedAt             time.Time `json:"created_at"`
-	Kind                  string    `json:"kind"`
-	TaskID                string    `json:"task_id"`
-	Output                string    `json:"output,omitempty"`
-	BranchName            string    `json:"branch_name,omitempty"`
-	ErrorMessage          string    `json:"error,omitempty"`
-	SessionID             string    `json:"session_id,omitempty"`
-	WorkDir               string    `json:"work_dir,omitempty"`
-	DurableWorkDir        string    `json:"durable_work_dir,omitempty"`
-	FailureReason         string    `json:"failure_reason,omitempty"`
-	SessionRolloutMissing bool      `json:"session_rollout_missing,omitempty"`
-	RetiredSessionID      string    `json:"retired_session_id,omitempty"`
+	CodeChanges           *codechanges.Snapshot    `json:"code_changes,omitempty"`
+	CodeChangesRef        codechanges.ExecutionRef `json:"code_changes_ref,omitzero"`
+	Version               int                      `json:"version"`
+	CreatedAt             time.Time                `json:"created_at"`
+	Kind                  string                   `json:"kind"`
+	TaskID                string                   `json:"task_id"`
+	Output                string                   `json:"output,omitempty"`
+	BranchName            string                   `json:"branch_name,omitempty"`
+	ErrorMessage          string                   `json:"error,omitempty"`
+	SessionID             string                   `json:"session_id,omitempty"`
+	WorkDir               string                   `json:"work_dir,omitempty"`
+	DurableWorkDir        string                   `json:"durable_work_dir,omitempty"`
+	FailureReason         string                   `json:"failure_reason,omitempty"`
+	SessionRolloutMissing bool                     `json:"session_rollout_missing,omitempty"`
+	RetiredSessionID      string                   `json:"retired_session_id,omitempty"`
 
 	PermanentRejectionCount   int        `json:"permanent_rejection_count,omitempty"`
 	FirstPermanentRejectionAt *time.Time `json:"first_permanent_rejection_at,omitempty"`
@@ -63,6 +66,8 @@ type persistedTerminalTaskReport struct {
 	LastPermanentStatus       int        `json:"last_permanent_status,omitempty"`
 	QuarantinedAt             *time.Time `json:"quarantined_at,omitempty"`
 }
+
+var errTerminalReportConflict = errors.New("terminal report conflicts with the original pending payload")
 
 type pendingTerminalTaskReport struct {
 	fileName string
@@ -81,7 +86,8 @@ type terminalReportNamespaceStats struct {
 	stats terminalReportStoreStats
 }
 
-// terminalReportStore is a file-backed outbox. One file per task keeps each
+// terminalReportStore is a file-backed outbox. Snapshot reports are dispatch-
+// scoped while legacy records remain task-scoped, keeping each
 // acknowledgement independent, and hashing task IDs prevents a malformed or
 // tampered task ID from becoming a path traversal primitive.
 type terminalReportStore struct {
@@ -132,8 +138,21 @@ func persistedTerminalReport(report terminalTaskReport, createdAt time.Time) (pe
 	if err != nil {
 		return persistedTerminalTaskReport{}, err
 	}
+	if report.codeChanges == nil && report.codeChangesRef != (codechanges.ExecutionRef{}) {
+		return persistedTerminalTaskReport{}, errors.New("execution reference without snapshot")
+	}
+	version := terminalReportLegacyRecordVersion
+	if report.codeChanges != nil {
+		if err := report.codeChanges.Validate(); err != nil {
+			return persistedTerminalTaskReport{}, err
+		}
+		if err := report.codeChangesRef.Validate(); err != nil {
+			return persistedTerminalTaskReport{}, err
+		}
+		version = terminalReportRecordVersion
+	}
 	return persistedTerminalTaskReport{
-		Version:               terminalReportRecordVersion,
+		Version: version, CodeChanges: report.codeChanges, CodeChangesRef: report.codeChangesRef,
 		CreatedAt:             createdAt.UTC(),
 		Kind:                  kind,
 		TaskID:                report.taskID,
@@ -150,8 +169,21 @@ func persistedTerminalReport(report terminalTaskReport, createdAt time.Time) (pe
 }
 
 func (record persistedTerminalTaskReport) terminalReport() (terminalTaskReport, error) {
-	if record.Version != terminalReportRecordVersion {
+	if record.Version != terminalReportRecordVersion && record.Version != terminalReportLegacyRecordVersion {
 		return terminalTaskReport{}, fmt.Errorf("unsupported terminal report version %d", record.Version)
+	}
+	if record.Version == terminalReportRecordVersion {
+		if record.CodeChanges == nil {
+			return terminalTaskReport{}, errors.New("snapshot report has no snapshot")
+		}
+		if err := record.CodeChanges.Validate(); err != nil {
+			return terminalTaskReport{}, err
+		}
+		if err := record.CodeChangesRef.Validate(); err != nil {
+			return terminalTaskReport{}, err
+		}
+	} else if record.CodeChanges != nil || record.CodeChangesRef != (codechanges.ExecutionRef{}) {
+		return terminalTaskReport{}, errors.New("legacy report cannot carry snapshot metadata")
 	}
 	if strings.TrimSpace(record.TaskID) == "" {
 		return terminalTaskReport{}, errors.New("terminal report has no task id")
@@ -166,7 +198,8 @@ func (record persistedTerminalTaskReport) terminalReport() (terminalTaskReport, 
 		return terminalTaskReport{}, fmt.Errorf("unsupported terminal report kind %q", record.Kind)
 	}
 	return terminalTaskReport{
-		kind:                  kind,
+		kind:        kind,
+		codeChanges: record.CodeChanges, codeChangesRef: record.CodeChangesRef,
 		taskID:                record.TaskID,
 		output:                record.Output,
 		branchName:            record.BranchName,
@@ -216,19 +249,19 @@ func (s *terminalReportStore) enqueue(report terminalTaskReport) error {
 	if err := s.ensureDir(); err != nil {
 		return err
 	}
-	name := terminalReportFileName(report.taskID)
+	name := terminalReportFileNameForReport(report)
 	path := filepath.Join(s.dir, name)
 	if existingBody, readErr := os.ReadFile(path); readErr == nil {
 		existing, decodeErr := decodePersistedTerminalReport(existingBody)
 		if decodeErr != nil {
-			return fmt.Errorf("existing terminal report %s is unreadable: %w", name, decodeErr)
+			return fmt.Errorf("%w: existing record %s unreadable: %v", errTerminalReportConflict, name, decodeErr)
 		}
 		existingReport, decodeErr := existing.terminalReport()
 		if decodeErr != nil {
-			return fmt.Errorf("existing terminal report %s is invalid: %w", name, decodeErr)
+			return fmt.Errorf("%w: existing record %s invalid: %v", errTerminalReportConflict, name, decodeErr)
 		}
-		if existingReport != report {
-			return fmt.Errorf("terminal report for task %s conflicts with the original pending payload", report.taskID)
+		if !reflect.DeepEqual(existingReport, report) {
+			return fmt.Errorf("task %s: %w", report.taskID, errTerminalReportConflict)
 		}
 		return nil
 	} else if !errors.Is(readErr, os.ErrNotExist) {
@@ -330,7 +363,7 @@ func (s *terminalReportStore) list() ([]pendingTerminalTaskReport, error) {
 			errs = append(errs, fmt.Errorf("validate %s: %w", entry.Name(), decodeErr))
 			continue
 		}
-		if want := terminalReportFileName(report.taskID); entry.Name() != want {
+		if want := terminalReportFileNameForReport(report); entry.Name() != want {
 			errs = append(errs, fmt.Errorf("terminal report %s does not match task id", entry.Name()))
 			continue
 		}
@@ -368,7 +401,7 @@ func (s *terminalReportStore) recoverTempFiles(entries []os.DirEntry) error {
 			errs = append(errs, fmt.Errorf("validate interrupted terminal report %s: %w", name, err))
 			continue
 		}
-		targetName := terminalReportFileName(report.taskID)
+		targetName := terminalReportFileNameForReport(report)
 		wantPrefix := "." + strings.TrimSuffix(targetName, ".json") + "-"
 		if !strings.HasPrefix(name, wantPrefix) {
 			errs = append(errs, fmt.Errorf("interrupted terminal report %s does not match task id", name))
@@ -382,7 +415,7 @@ func (s *terminalReportStore) recoverTempFiles(entries []os.DirEntry) error {
 				continue
 			}
 			existingReport, decodeErr := existing.terminalReport()
-			if decodeErr != nil || existingReport != report {
+			if decodeErr != nil || !reflect.DeepEqual(existingReport, report) {
 				errs = append(errs, fmt.Errorf("interrupted terminal report %s conflicts with existing payload", name))
 				continue
 			}
@@ -417,7 +450,7 @@ func (s *terminalReportStore) recoverTempFiles(entries []os.DirEntry) error {
 func (s *terminalReportStore) acknowledge(item pendingTerminalTaskReport) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if item.fileName != terminalReportFileName(item.report.taskID) {
+	if item.fileName != terminalReportFileNameForReport(item.report) {
 		return errors.New("terminal report acknowledgement does not match task id")
 	}
 	path := filepath.Join(s.dir, item.fileName)
@@ -438,6 +471,9 @@ func terminalReportPermanentRejection(err error) (int, bool) {
 	var reqErr *requestError
 	if !errors.As(err, &reqErr) {
 		return 0, false
+	}
+	if isStaleCodeChangesReport(err) {
+		return reqErr.StatusCode, true
 	}
 	switch reqErr.StatusCode {
 	case http.StatusBadRequest, http.StatusForbidden:
@@ -472,7 +508,7 @@ func (s *terminalReportStore) recordPermanentRejection(item pendingTerminalTaskR
 	if err != nil {
 		return false, fmt.Errorf("validate rejected terminal report: %w", err)
 	}
-	if item.fileName != terminalReportFileName(report.taskID) || report != item.report {
+	if item.fileName != terminalReportFileNameForReport(report) || !reflect.DeepEqual(report, item.report) {
 		return false, errors.New("rejected terminal report no longer matches queued payload")
 	}
 
@@ -507,7 +543,7 @@ func (s *terminalReportStore) recordPermanentRejection(item pendingTerminalTaskR
 			return false, fmt.Errorf("existing failed terminal report is unreadable: %w", decodeErr)
 		}
 		existingReport, decodeErr := existing.terminalReport()
-		if decodeErr != nil || existingReport != report {
+		if decodeErr != nil || !reflect.DeepEqual(existingReport, report) {
 			return false, errors.New("failed terminal report conflicts with queued payload")
 		}
 		if err := os.Remove(path); err != nil && !errors.Is(err, os.ErrNotExist) {
@@ -667,10 +703,11 @@ func (d *Daemon) handleTerminalReportDeliveryError(ctx context.Context, item pen
 	// compensation as a separate request. It can settle the row but can never
 	// overwrite or delete the user's original successful result. A semantic
 	// task-not-found response needs no compensation because no row remains.
-	if item.report.kind == terminalTaskReportComplete && !isTaskNotFoundError(deliveryErr) {
+	if item.report.kind == terminalTaskReportComplete && !isTaskNotFoundError(deliveryErr) && !isStaleCodeChangesReport(deliveryErr) {
 		fallback := terminalTaskReport{
-			kind:                  terminalTaskReportFail,
-			taskID:                item.report.taskID,
+			kind:        terminalTaskReportFail,
+			taskID:      item.report.taskID,
+			codeChanges: item.report.codeChanges, codeChangesRef: item.report.codeChangesRef,
 			errorMessage:          fmt.Sprintf("successful terminal result was rejected by the server with HTTP %d; the original completion is preserved in the daemon failed terminal-report queue", status),
 			branchName:            item.report.branchName,
 			sessionID:             item.report.sessionID,
@@ -735,7 +772,7 @@ func (d *Daemon) replayPendingTerminalReports(ctx context.Context) (pending, del
 				if ctx.Err() != nil {
 					continue
 				}
-				release, ok := d.beginTerminalReportDelivery(item.report.taskID)
+				release, ok := d.beginTerminalReportDelivery(terminalReportDeliveryKey(item.report))
 				if !ok {
 					continue
 				}
@@ -844,4 +881,32 @@ func (d *Daemon) terminalReportReplayLoop(ctx context.Context) {
 			}
 		}
 	}
+}
+
+func terminalReportFileNameForReport(report terminalTaskReport) string {
+	if report.codeChanges == nil {
+		return terminalReportFileName(report.taskID)
+	}
+	sum := sha256.Sum256([]byte(report.taskID + "\x00" + report.codeChangesRef.RuntimeID + "\x00" + report.codeChangesRef.DispatchedAt))
+	return hex.EncodeToString(sum[:]) + ".json"
+}
+func terminalReportFileNameForRecord(record persistedTerminalTaskReport) string {
+	return terminalReportFileNameForReport(terminalTaskReport{taskID: record.TaskID, codeChanges: record.CodeChanges, codeChangesRef: record.CodeChangesRef})
+}
+func terminalReportDeliveryKey(report terminalTaskReport) string {
+	if report.codeChanges == nil {
+		return report.taskID
+	}
+	return terminalReportFileNameForReport(report)
+}
+
+func isStaleCodeChangesReport(err error) bool {
+	var request *requestError
+	if !errors.As(err, &request) || request.StatusCode != http.StatusConflict {
+		return false
+	}
+	var body struct {
+		Code string `json:"code"`
+	}
+	return json.Unmarshal([]byte(request.Body), &body) == nil && body.Code == "code_changes_execution_stale"
 }

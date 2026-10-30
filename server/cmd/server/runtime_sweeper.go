@@ -176,6 +176,9 @@ func runRuntimeSweeper(ctx context.Context, queries *db.Queries, liveness handle
 func runDelegatedFailureRecoverySweeper(ctx context.Context, taskSvc *service.TaskService) {
 	runPeriodicSweep(ctx, delegatedFailureRecoverySweepInterval, func() {
 		sweepPendingDelegatedFailureRecoveries(ctx, taskSvc)
+		if _, err := taskSvc.PurgeOrphanedCodeChanges(ctx); err != nil {
+			slog.Warn("task code changes cleanup failed", "error", err)
+		}
 	})
 }
 

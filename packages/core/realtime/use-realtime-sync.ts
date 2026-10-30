@@ -1730,6 +1730,10 @@ export function useRealtimeSync(
 
     const unsubTaskCompleted = ws.on("task:completed", (p) => {
       const payload = p as TaskCompletedPayload;
+      const codeChangesWsId = getCurrentWsId();
+      if (codeChangesWsId && payload.issue_id) {
+        qc.invalidateQueries({ queryKey: ["code-changes", codeChangesWsId, payload.issue_id] });
+      }
       if (!payload.chat_session_id) return; // issue tasks handled elsewhere
       chatWsLogger.info("task:completed (global, chat)", {
         task_id: payload.task_id,
@@ -1745,6 +1749,10 @@ export function useRealtimeSync(
 
     const unsubTaskFailed = ws.on("task:failed", (p) => {
       const payload = p as TaskFailedPayload;
+      const codeChangesWsId = getCurrentWsId();
+      if (codeChangesWsId && payload.issue_id) {
+        qc.invalidateQueries({ queryKey: ["code-changes", codeChangesWsId, payload.issue_id] });
+      }
       if (!payload.chat_session_id) return;
       chatWsLogger.warn("task:failed (global, chat)", {
         task_id: payload.task_id,

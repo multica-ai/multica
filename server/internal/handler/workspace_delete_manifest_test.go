@@ -27,6 +27,7 @@ var workspaceDeletionManifest = map[string]workspaceDeleteAction{
 	"agent_runtime":                      workspaceDelete,
 	"agent_skill":                        workspaceDelete,
 	"agent_task_queue":                   workspaceDelete,
+	"agent_task_code_changes":            workspaceDelete,
 	"agent_to_label":                     workspaceDelete,
 	"attachment":                         workspaceDelete,
 	"autopilot":                          workspaceDelete,

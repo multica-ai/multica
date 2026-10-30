@@ -1775,5 +1775,29 @@
   },
   "hover_card": {
     "created_updated": "created {{created}} · updated {{updated}}"
+  },
+  "code_changes": {
+    "title": "Code changes",
+    "open": "Browse changes",
+    "history": "Execution history",
+    "files": "Changed files",
+    "loading": "Loading changes…",
+    "error": "Could not load code changes.",
+    "retry": "Retry",
+    "not_captured": "No snapshot yet. New executions capture changes when this workspace setting is enabled.",
+    "no_repository": "No repository was registered for this execution.",
+    "capture_failed": "Changes could not be captured for this execution.",
+    "empty": "No committed changes in this execution.",
+    "dirty": "Uncommitted changes remain in the working directory and are not included here.",
+    "truncated": "This snapshot reached the size limit; some changes are omitted.",
+    "binary": "Binary file — text diff is unavailable.",
+    "file_truncated": "This file was truncated at the size limit.",
+    "close": "Close changes",
+    "old_line": "Old line",
+    "new_line": "New line",
+    "content": "Change",
+    "more": "Show more lines",
+    "per_run": "Changes from this execution only",
+    "choose_file": "Choose a file to inspect its changes."
   }
 }

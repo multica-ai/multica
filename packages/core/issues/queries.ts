@@ -1,3 +1,4 @@
+import { codeChangeKeys } from "./code-changes";
 import {
   infiniteQueryOptions,
   keepPreviousData,
@@ -20,6 +21,15 @@ import type {
 } from "../types";
 import { ALL_STATUSES } from "./config";
 import { issueColumnCategory } from "./status-category";
+
+export function issueCodeChangesOptions(wsId: string, issueId: string, taskId?: string) {
+  return queryOptions({
+    queryKey: codeChangeKeys.detail(wsId, issueId, taskId),
+    queryFn: ({ signal }) => api.getIssueCodeChanges(wsId, issueId, taskId, signal),
+    enabled: !!wsId && !!issueId,
+    staleTime: 30_000,
+  });
+}
 
 export function issueTasksOptions(issueId: string) {
   return queryOptions({

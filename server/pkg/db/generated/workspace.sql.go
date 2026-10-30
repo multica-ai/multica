@@ -438,7 +438,13 @@ UPDATE workspace SET
     name = COALESCE($2, name),
     description = COALESCE($3, description),
     context = COALESCE($4, context),
-    settings = COALESCE($5, settings),
+    -- This new flag is owned by its dedicated manager endpoint. Preserve it
+    -- when older clients replace other settings with a previously read object.
+    settings = CASE WHEN $5::jsonb IS NULL THEN settings
+        ELSE ($5::jsonb - 'code_changes_enabled') ||
+             CASE WHEN COALESCE(settings,'{}'::jsonb) ? 'code_changes_enabled'
+                  THEN jsonb_build_object('code_changes_enabled',settings->'code_changes_enabled')
+                  ELSE '{}'::jsonb END END,
     repos = COALESCE($6, repos),
     issue_prefix = COALESCE($7, issue_prefix),
     avatar_url = COALESCE($8, avatar_url),

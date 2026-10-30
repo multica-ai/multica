@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/multica-ai/multica/server/pkg/codechanges"
 	"io"
 	"net/http"
 	"net/url"
@@ -636,7 +637,15 @@ func (c *Client) CompleteTask(ctx context.Context, taskID, output, branchName, s
 }
 
 func (c *Client) completeTaskWithRetrySchedule(ctx context.Context, taskID, output, branchName, sessionID, workDir string, sessionRolloutMissing bool, retiredSessionID, durableWorkDir string, schedule []time.Duration) error {
+	return c.completeTaskWithCodeChanges(ctx, nil, codechanges.ExecutionRef{}, taskID, output, branchName, sessionID, workDir, sessionRolloutMissing, retiredSessionID, durableWorkDir, schedule)
+}
+
+func (c *Client) completeTaskWithCodeChanges(ctx context.Context, snapshot *codechanges.Snapshot, ref codechanges.ExecutionRef, taskID, output, branchName, sessionID, workDir string, sessionRolloutMissing bool, retiredSessionID, durableWorkDir string, schedule []time.Duration) error {
 	body := map[string]any{"output": output}
+	if snapshot != nil {
+		body["code_changes"] = snapshot
+		body["code_changes_ref"] = ref
+	}
 	if branchName != "" {
 		body["branch_name"] = branchName
 	}
@@ -655,7 +664,7 @@ func (c *Client) completeTaskWithRetrySchedule(ctx context.Context, taskID, outp
 	if retiredSessionID != "" {
 		body["retired_session_id"] = retiredSessionID
 	}
-	return c.postJSONWithRetry(ctx, fmt.Sprintf("/api/daemon/tasks/%s/complete", taskID), body, nil, schedule)
+	return c.postTerminalWithCodeChanges(ctx, fmt.Sprintf("/api/daemon/tasks/%s/complete", taskID), body, snapshot, schedule)
 }
 
 func (c *Client) ReportTaskUsage(ctx context.Context, taskID string, usage []TaskUsageEntry) error {
@@ -672,7 +681,15 @@ func (c *Client) FailTask(ctx context.Context, taskID, errMsg, sessionID, workDi
 }
 
 func (c *Client) failTaskWithRetrySchedule(ctx context.Context, taskID, errMsg, sessionID, workDir, branchName, failureReason string, sessionRolloutMissing bool, retiredSessionID, durableWorkDir string, schedule []time.Duration) error {
+	return c.failTaskWithCodeChanges(ctx, nil, codechanges.ExecutionRef{}, taskID, errMsg, sessionID, workDir, branchName, failureReason, sessionRolloutMissing, retiredSessionID, durableWorkDir, schedule)
+}
+
+func (c *Client) failTaskWithCodeChanges(ctx context.Context, snapshot *codechanges.Snapshot, ref codechanges.ExecutionRef, taskID, errMsg, sessionID, workDir, branchName, failureReason string, sessionRolloutMissing bool, retiredSessionID, durableWorkDir string, schedule []time.Duration) error {
 	body := map[string]any{"error": errMsg}
+	if snapshot != nil {
+		body["code_changes"] = snapshot
+		body["code_changes_ref"] = ref
+	}
 	if sessionID != "" {
 		body["session_id"] = sessionID
 	}
@@ -697,7 +714,7 @@ func (c *Client) failTaskWithRetrySchedule(ctx context.Context, taskID, errMsg, 
 	if retiredSessionID != "" {
 		body["retired_session_id"] = retiredSessionID
 	}
-	return c.postJSONWithRetry(ctx, fmt.Sprintf("/api/daemon/tasks/%s/fail", taskID), body, nil, schedule)
+	return c.postTerminalWithCodeChanges(ctx, fmt.Sprintf("/api/daemon/tasks/%s/fail", taskID), body, snapshot, schedule)
 }
 
 // PinTaskSession persists the agent's session_id and work_dir on the task
@@ -1278,6 +1295,7 @@ func (c *Client) postJSON(ctx context.Context, path string, reqBody any, respBod
 
 // responseDecoder customizes successful-response decoding inside each attempt.
 type responseDecoder func(io.Reader) error
+type responseHeaderDecoder func(http.Header) error
 
 // postJSONVia is postJSON over an explicit http.Client. Callers pick the client
 // to control the timeout regime: c.client (fixed 30s) for control-plane calls,
@@ -1323,6 +1341,11 @@ func (c *Client) postJSONViaObserved(ctx context.Context, httpClient *http.Clien
 	}
 	stats.observeResponseStarted()
 	respReader := stats.wrap(resp.Body)
+	if decode, ok := respBody.(responseHeaderDecoder); ok {
+		io.Copy(io.Discard, resp.Body)
+		return decode(resp.Header)
+	}
+
 	if respBody == nil {
 		io.Copy(io.Discard, respReader)
 		return nil
@@ -1431,4 +1454,21 @@ func (c *Client) InvokeAgentPluginHook(ctx context.Context, daemonToken, taskID,
 		return nil, errors.New("the plugin hook did not succeed")
 	}
 	return response.Output, nil
+}
+
+func (c *Client) postTerminalWithCodeChanges(ctx context.Context, path string, body any, snapshot *codechanges.Snapshot, schedule []time.Duration) error {
+	if snapshot == nil {
+		return c.postJSONWithRetry(ctx, path, body, nil, schedule)
+	}
+	encoded, err := codechanges.Encode(snapshot)
+	if err != nil {
+		return err
+	}
+	expected := "saved:" + codechanges.DigestEncoded(encoded)
+	return c.postJSONWithRetry(ctx, path, body, responseHeaderDecoder(func(header http.Header) error {
+		if receipt := header.Get(codechanges.ReceiptHeader); receipt == expected || receipt == "discarded" {
+			return nil
+		}
+		return fmt.Errorf("%w: code changes were not acknowledged; durable report retained", errInvalidResponseBody)
+	}), schedule)
 }

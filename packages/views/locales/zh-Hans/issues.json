@@ -1709,5 +1709,29 @@
   },
   "hover_card": {
     "created_updated": "创建于 {{created}} · 更新于 {{updated}}"
+  },
+  "code_changes": {
+    "title": "代码变更",
+    "open": "浏览代码变更",
+    "history": "执行历史",
+    "files": "变更文件",
+    "loading": "正在加载代码变更…",
+    "error": "代码变更加载失败。",
+    "retry": "重试",
+    "not_captured": "暂无快照。开启工作区设置后，新的执行会采集代码变更。",
+    "no_repository": "此次执行未记录到 Git 仓库。",
+    "capture_failed": "此次执行的代码变更采集失败。",
+    "empty": "此次执行没有已提交的代码变更。",
+    "dirty": "工作目录仍有未提交的变更，此处未包含。",
+    "truncated": "快照已达到大小上限，部分变更未包含。",
+    "binary": "二进制文件，无法显示文本差异。",
+    "file_truncated": "此文件已达到大小上限，内容已截断。",
+    "close": "关闭代码变更",
+    "old_line": "原行号",
+    "new_line": "新行号",
+    "content": "变更内容",
+    "more": "显示后续行",
+    "per_run": "仅显示此次执行的变更",
+    "choose_file": "选择文件查看代码变更。"
   }
 }

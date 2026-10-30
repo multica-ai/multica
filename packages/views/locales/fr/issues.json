@@ -1,4 +1,28 @@
 {
+  "code_changes": {
+    "title": "Modifications du code",
+    "open": "Parcourir les modifications",
+    "history": "Historique des exécutions",
+    "files": "Fichiers modifiés",
+    "loading": "Chargement des modifications…",
+    "error": "Impossible de charger les modifications du code.",
+    "retry": "Réessayer",
+    "not_captured": "Aucun instantané pour le moment. Les nouvelles exécutions enregistrent les modifications lorsque ce réglage de l’espace de travail est activé.",
+    "no_repository": "Aucun dépôt n’a été enregistré pour cette exécution.",
+    "capture_failed": "Les modifications de cette exécution n’ont pas pu être enregistrées.",
+    "empty": "Aucune modification commitée dans cette exécution.",
+    "dirty": "Des modifications non commitées restent dans le répertoire de travail et ne sont pas incluses ici.",
+    "truncated": "Cet instantané a atteint la limite de taille ; certaines modifications sont omises.",
+    "binary": "Fichier binaire — comparaison textuelle indisponible.",
+    "file_truncated": "Ce fichier a été tronqué à la limite de taille.",
+    "close": "Fermer les modifications",
+    "old_line": "Ancienne ligne",
+    "new_line": "Nouvelle ligne",
+    "content": "Modification",
+    "more": "Afficher plus de lignes",
+    "per_run": "Modifications de cette exécution uniquement",
+    "choose_file": "Choisissez un fichier pour examiner ses modifications."
+  },
   "inline_run": {
     "label": "Exécution de {{name}}",
     "stop": "Arrêter",

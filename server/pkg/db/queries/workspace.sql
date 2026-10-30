@@ -49,7 +49,13 @@ UPDATE workspace SET
     name = COALESCE(sqlc.narg('name'), name),
     description = COALESCE(sqlc.narg('description'), description),
     context = COALESCE(sqlc.narg('context'), context),
-    settings = COALESCE(sqlc.narg('settings'), settings),
+    -- This new flag is owned by its dedicated manager endpoint. Preserve it
+    -- when older clients replace other settings with a previously read object.
+    settings = CASE WHEN sqlc.narg('settings')::jsonb IS NULL THEN settings
+        ELSE (sqlc.narg('settings')::jsonb - 'code_changes_enabled') ||
+             CASE WHEN COALESCE(settings,'{}'::jsonb) ? 'code_changes_enabled'
+                  THEN jsonb_build_object('code_changes_enabled',settings->'code_changes_enabled')
+                  ELSE '{}'::jsonb END END,
     repos = COALESCE(sqlc.narg('repos'), repos),
     issue_prefix = COALESCE(sqlc.narg('issue_prefix'), issue_prefix),
     avatar_url = COALESCE(sqlc.narg('avatar_url'), avatar_url),

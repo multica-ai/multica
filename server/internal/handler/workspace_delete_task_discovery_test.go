@@ -193,6 +193,11 @@ func TestDeleteWorkspaceTasks_IsSelfSufficientWithoutCascades(t *testing.T) {
 	}
 	defer tx.Rollback(ctx)
 	qtx := testHandler.Queries.WithTx(tx)
+	for _, taskID := range []string{f.taskViaAgent, f.taskViaIssue, f.taskViaRuntime, f.neighbourTask} {
+		if _, err := tx.Exec(ctx, `INSERT INTO agent_task_code_changes(task_id,snapshot,snapshot_digest,file_count) VALUES($1,'snapshot','test',0)`, taskID); err != nil {
+			t.Fatalf("seed code changes: %v", err)
+		}
+	}
 
 	if err := qtx.SetWorkspaceTeardownMode(ctx); err != nil {
 		t.Fatalf("set teardown mode: %v", err)
@@ -216,6 +221,13 @@ func TestDeleteWorkspaceTasks_IsSelfSufficientWithoutCascades(t *testing.T) {
 	if n := count(`SELECT count(*) FROM agent_task_queue WHERE id = ANY($1::uuid[])`,
 		[]string{f.taskViaAgent, f.taskViaIssue, f.taskViaRuntime}); n != 0 {
 		t.Errorf("%d of the 3 ownership-path tasks survived the sweep", n)
+	}
+	if n := count(`SELECT count(*) FROM agent_task_code_changes WHERE task_id = ANY($1::uuid[])`,
+		[]string{f.taskViaAgent, f.taskViaIssue, f.taskViaRuntime}); n != 0 {
+		t.Errorf("%d code snapshots survived the task sweep", n)
+	}
+	if n := count(`SELECT count(*) FROM agent_task_code_changes WHERE task_id=$1`, f.neighbourTask); n != 1 {
+		t.Error("neighbour-only code snapshot was deleted by the victim's task sweep")
 	}
 	if n := count(`SELECT count(*) FROM task_token WHERE id = ANY($1::uuid[])`,
 		[]string{f.victimToken, f.crossTaskToken, f.crossAgentToken}); n != 0 {
