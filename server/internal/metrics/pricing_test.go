@@ -71,7 +71,7 @@ func TestPriceForModelAliasCodexCurrentGeneration(t *testing.T) {
 		},
 		{
 			model: "gpt-5.6-sol",
-			want:  ModelPrice{Provider: "openai", Model: "gpt-5.6-sol", InputPerM: 4, CacheReadPerM: 0.4, CacheWritePerM: 5, OutputPerM: 20},
+			want:  ModelPrice{Provider: "openai", Model: "gpt-5.6-sol", InputPerM: 5, CacheReadPerM: 0.5, CacheWritePerM: 6.25, OutputPerM: 30},
 		},
 		{
 			model: "gpt-6.1-sol",

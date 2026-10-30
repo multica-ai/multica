@@ -249,18 +249,19 @@ const MODEL_PRICING: Record<
   //    independently — no fallback to `gpt-5`. Entries track
   //    `server/pkg/agent/models.go` (Codex provider list).
   //    GPT-6 and GPT-5.6 rows use OpenAI's standard short-context rates
-  //    (developers.openai.com/api/docs/pricing, 2026-10-31). GPT-5.6 Sol is
-  //    on promotional pricing through at least 2026-11-21; update the row
-  //    when it ends. 5.6+ is the first OpenAI generation to bill cache writes
-  //    separately: cacheRead generally = 0.1x input, cacheWrite = 1.25x input
-  //    (see the header note above). Mirror server/internal/metrics/pricing.go.
+  //    (developers.openai.com/api/docs/pricing, 2026-10-31). GPT-5.6 Sol
+  //    keeps its $5 / $30 list rate; the page's temporary promotional rate is
+  //    deliberately not used. 5.6+ is the first OpenAI generation to bill
+  //    cache writes separately: cacheRead generally = 0.1x input, cacheWrite
+  //    = 1.25x input (see the header note above). Mirror
+  //    server/internal/metrics/pricing.go.
   "gpt-6-astra":        { input: 10,   output: 50,   cacheRead: 1.00,  cacheWrite: 12.50 },
   // GPT-6.1 Sol and Terra's cached input is 0.05x input; GPT-6 Sol's is 0.1x.
   "gpt-6.1-sol":        { input: 2,    output: 10,   cacheRead: 0.10,  cacheWrite: 2.50 },
   "gpt-6.1-terra":      { input: 1,    output: 5,    cacheRead: 0.05,  cacheWrite: 1.25 },
   "gpt-6-sol":          { input: 2,    output: 10,   cacheRead: 0.20,  cacheWrite: 2.50 },
   "gpt-6-luna":         { input: 0.10, output: 0.50, cacheRead: 0.01,  cacheWrite: 0.125 },
-  "gpt-5.6-sol":        { input: 4,    output: 20,   cacheRead: 0.40,  cacheWrite: 5 },
+  "gpt-5.6-sol":        { input: 5,    output: 30,   cacheRead: 0.50,  cacheWrite: 6.25 },
   "gpt-5.6-terra":      { input: 2,    output: 12,   cacheRead: 0.20,  cacheWrite: 2.50 },
   "gpt-5.6-luna":       { input: 0.20, output: 1.20, cacheRead: 0.02,  cacheWrite: 0.25 },
   "gpt-5.5":            { input: 5,    output: 30,   cacheRead: 0.50,  cacheWrite: 5 },
@@ -452,8 +453,9 @@ const MODEL_PRICING: Record<
   // -- Third-party models through Cursor (cursor.com/docs/models-and-pricing,
   //    "Model pricing"). Cursor bills these at API list price, but its sheet
   //    is the bill, so Cursor rows use it even where it differs from the
-  //    vendor rows above (GPT-5.6 Sol is on a Cursor promo through
-  //    2026-11-21; update the row when it ends). Keys are the Cursor base id
+  //    vendor rows above — except temporary promotional rates, which are not
+  //    used: GPT-5.6 Sol keeps its $5 / $30 list rate (Fast at 2x) rather
+  //    than the sheet's promo price. Keys are the Cursor base id
   //    left by `cursorBaseModel`, which drops the effort / thinking / fast
   //    variant parts — effort and thinking don't change per-token rates.
   //    A `-fast` row exists only where a Fast rate is published: on Cursor's
@@ -486,8 +488,8 @@ const MODEL_PRICING: Record<
   "cursor/claude-4-sonnet":      { input: 3,    output: 15,   cacheRead: 0.3,   cacheWrite: 3.75 },
   // <=100K prompt tier; see the claude-haiku-5-5 row above.
   "cursor/claude-haiku-5-5":     { input: 0.1,  output: 0.5,  cacheRead: 0.01,  cacheWrite: 0.125 },
-  "cursor/gpt-5.6-sol":          { input: 4,    output: 20,   cacheRead: 0.4,   cacheWrite: 5 },
-  "cursor/gpt-5.6-sol-fast":     { input: 8,    output: 40,   cacheRead: 0.8,   cacheWrite: 10 },
+  "cursor/gpt-5.6-sol":          { input: 5,    output: 30,   cacheRead: 0.5,   cacheWrite: 6.25 },
+  "cursor/gpt-5.6-sol-fast":     { input: 10,   output: 60,   cacheRead: 1,     cacheWrite: 12.5 },
   "cursor/gpt-5.6-terra":        { input: 2,    output: 12,   cacheRead: 0.2,   cacheWrite: 2.5 },
   "cursor/gpt-5.6-terra-fast":   { input: 4,    output: 24,   cacheRead: 0.4,   cacheWrite: 5 },
   "cursor/gpt-5.6-luna":         { input: 0.2,  output: 1.2,  cacheRead: 0.02,  cacheWrite: 0.25 },

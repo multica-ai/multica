@@ -23,10 +23,10 @@ type ModelPrice struct {
 var modelPrices = map[string]ModelPrice{
 	// GPT-5.6 series and GPT-6 (Codex `codex` provider): standard short-context
 	// rates from developers.openai.com/api/docs/pricing (2026-10-31). GPT-5.6
-	// Sol is on promotional pricing through at least 2026-11-21; update the row
-	// when it ends. For 5.6+ (including Astra) cache read is generally the
-	// 90%-off cached-input rate (0.1x input). Cache write is billed at 1.25x the
-	// uncached input rate. Earlier OpenAI SKUs don't bill cache writes
+	// Sol keeps its $5 / $30 list rate; the page's temporary promotional rate is
+	// deliberately not used. For 5.6+ (including Astra) cache read is generally
+	// the 90%-off cached-input rate (0.1x input). Cache write is billed at 1.25x
+	// the uncached input rate. Earlier OpenAI SKUs don't bill cache writes
 	// separately, so their written tokens bill as ordinary input and
 	// CacheWritePerM mirrors InputPerM. Codex app-server v0.147 reports
 	// cache-write input separately while including it in the raw input total;
@@ -38,7 +38,7 @@ var modelPrices = map[string]ModelPrice{
 	"openai:gpt-6.1-terra": {Provider: "openai", Model: "gpt-6.1-terra", InputPerM: 1.00, CacheReadPerM: 0.05, CacheWritePerM: 1.25, OutputPerM: 5.00},
 	"openai:gpt-6-sol":     {Provider: "openai", Model: "gpt-6-sol", InputPerM: 2.00, CacheReadPerM: 0.20, CacheWritePerM: 2.50, OutputPerM: 10.00},
 	"openai:gpt-6-luna":    {Provider: "openai", Model: "gpt-6-luna", InputPerM: 0.10, CacheReadPerM: 0.01, CacheWritePerM: 0.125, OutputPerM: 0.50},
-	"openai:gpt-5.6-sol":   {Provider: "openai", Model: "gpt-5.6-sol", InputPerM: 4.00, CacheReadPerM: 0.40, CacheWritePerM: 5.00, OutputPerM: 20.00},
+	"openai:gpt-5.6-sol":   {Provider: "openai", Model: "gpt-5.6-sol", InputPerM: 5.00, CacheReadPerM: 0.50, CacheWritePerM: 6.25, OutputPerM: 30.00},
 	"openai:gpt-5.6-terra": {Provider: "openai", Model: "gpt-5.6-terra", InputPerM: 2.00, CacheReadPerM: 0.20, CacheWritePerM: 2.50, OutputPerM: 12.00},
 	"openai:gpt-5.6-luna":  {Provider: "openai", Model: "gpt-5.6-luna", InputPerM: 0.20, CacheReadPerM: 0.02, CacheWritePerM: 0.25, OutputPerM: 1.20},
 	"openai:gpt-5.5":       {Provider: "openai", Model: "gpt-5.5", InputPerM: 5.00, CacheReadPerM: 0.50, CacheWritePerM: 5.00, OutputPerM: 30.00},

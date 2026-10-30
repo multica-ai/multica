@@ -389,7 +389,7 @@ describe("estimateCost", () => {
       { model: "gpt-6.1-terra", input: 1, cacheRead: 0.05, cacheWrite: 1.25, output: 5, total: 7.3 },
       { model: "gpt-6-sol", input: 2, cacheRead: 0.2, cacheWrite: 2.5, output: 10, total: 14.7 },
       { model: "gpt-6-luna", input: 0.1, cacheRead: 0.01, cacheWrite: 0.125, output: 0.5, total: 0.735 },
-      { model: "gpt-5.6-sol", input: 4, cacheRead: 0.4, cacheWrite: 5, output: 20, total: 29.4 },
+      { model: "gpt-5.6-sol", input: 5, cacheRead: 0.5, cacheWrite: 6.25, output: 30, total: 41.75 },
       { model: "gpt-5.6-terra", input: 2, cacheRead: 0.2, cacheWrite: 2.5, output: 12, total: 16.7 },
       { model: "gpt-5.6-luna", input: 0.2, cacheRead: 0.02, cacheWrite: 0.25, output: 1.2, total: 1.67 },
     ];
@@ -747,7 +747,7 @@ describe("estimateCost", () => {
     // Thinking after the effort level, and the older `claude-4.6-sonnet` naming.
     expect(cost("claude-4.6-sonnet-medium-thinking")).toBeCloseTo(3 + 15 + 0.3 + 3.75, 5);
     expect(cost("gpt-5.5-extra-high")).toBeCloseTo(5 + 30 + 0.5, 5);
-    expect(cost("gpt-5.6-sol-none")).toBeCloseTo(4 + 20 + 0.4 + 5, 5);
+    expect(cost("gpt-5.6-sol-none")).toBeCloseTo(5 + 30 + 0.5 + 6.25, 5);
     expect(cost("cursor-grok-4.6-high")).toBeCloseTo(2 + 6 + 0.5, 5);
     expect(cost("grok-4.7-medium")).toBeCloseTo(2 + 6 + 0.5, 5);
     expect(cost("gemini-4-argon-medium")).toBeCloseTo(2 + 10 + 0.1, 5);
@@ -769,7 +769,7 @@ describe("estimateCost", () => {
         output_tokens: 1_000_000,
       });
 
-    expect(cost("gpt-5.6-sol-medium-fast")).toBeCloseTo(8 + 40, 5);
+    expect(cost("gpt-5.6-sol-medium-fast")).toBeCloseTo(10 + 60, 5);
     expect(cost("cursor-grok-4.5-high-fast")).toBeCloseTo(4 + 18, 5);
     expect(cost("claude-opus-4-7-thinking-high-fast")).toBeCloseTo(30 + 150, 5);
     expect(cost("claude-opus-4-8[effort=high,fast=true]")).toBeCloseTo(10 + 50, 5);
@@ -1650,7 +1650,7 @@ describe("aggregateByDate", () => {
       cacheRead: number;
       cacheWrite: number;
     }>,
-    model = "gpt-5.5",
+    model = "gpt-5.6-sol",
   ): RuntimeUsage {
     return {
       runtime_id: "r",
@@ -1665,7 +1665,7 @@ describe("aggregateByDate", () => {
   }
 
   it("bills cache reads in the daily stack and its total", () => {
-    // gpt-5.5: input $5/M, output $30/M, cacheRead $0.50/M.
+    // gpt-5.6-sol: input $5/M, output $30/M, cacheRead $0.50/M.
     const rows = [
       makeUsage("2026-05-11", { input: 1_000_000, cacheRead: 10_000_000 }),
     ];
@@ -1715,10 +1715,9 @@ describe("aggregateByDate", () => {
     }
   });
 
-  it("reproduces the reported cache-read undercount", () => {
+  it("reproduces the reported gpt-5.6-sol undercount", () => {
     // The exact workload from the bug report: the chart showed $35.19 against
-    // a true $74.84, hiding $39.65 (53%) of spend. Reported on gpt-5.6-sol when
-    // it was priced at $5 / $30 / $0.50, the rates gpt-5.5 still carries.
+    // a true $74.84, hiding $39.65 (53%) of spend.
     const rows = [
       makeUsage("2026-05-11", {
         input: 4_300_000,

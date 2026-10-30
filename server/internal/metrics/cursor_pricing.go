@@ -8,11 +8,13 @@ import (
 // cursorModelPrices is what Cursor bills for each model in its catalog
 // (cursor.com/docs/models-and-pricing), keyed by the base id cursorBaseModel
 // leaves. Cursor's sheet is the bill even where it differs from the vendor
-// rows in modelPrices. Where Cursor offers a Fast variant its sheet doesn't
-// price, the `-fast` row carries the vendor's published Fast rate, since Cursor
-// bills third-party models at API list price; other Fast variants stay
-// unmapped rather than borrowing the cheaper standard rate. Where the sheet
-// lists no cache-write rate, CacheWritePerM is 0.
+// rows in modelPrices, except that temporary promotional rates are not used:
+// GPT-5.6 Sol keeps its $5 / $30 list rate (Fast at 2x). Where Cursor offers
+// a Fast variant its sheet doesn't price, the `-fast` row carries the vendor's
+// published Fast rate, since Cursor bills third-party models at API list
+// price; other Fast variants stay unmapped rather than borrowing the cheaper
+// standard rate. Where the sheet lists no cache-write rate, CacheWritePerM
+// is 0.
 //
 // Columns are input, output, cache read, cache write — the same order as the
 // `cursor/` rows in packages/views/runtimes/utils.ts, which this table mirrors;
@@ -53,8 +55,8 @@ var cursorModelPrices = buildCursorPrices([]struct {
 	{"claude-4.5-sonnet", 3, 15, 0.3, 3.75},
 	{"claude-4-sonnet", 3, 15, 0.3, 3.75},
 	{"claude-haiku-5-5", 0.1, 0.5, 0.01, 0.125},
-	{"gpt-5.6-sol", 4, 20, 0.4, 5},
-	{"gpt-5.6-sol-fast", 8, 40, 0.8, 10},
+	{"gpt-5.6-sol", 5, 30, 0.5, 6.25},
+	{"gpt-5.6-sol-fast", 10, 60, 1, 12.5},
 	{"gpt-5.6-terra", 2, 12, 0.2, 2.5},
 	{"gpt-5.6-terra-fast", 4, 24, 0.4, 5},
 	{"gpt-5.6-luna", 0.2, 1.2, 0.02, 0.25},
