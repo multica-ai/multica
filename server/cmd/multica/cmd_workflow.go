@@ -3,7 +3,9 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"net/http"
 	"net/url"
 	"os"
 	"strconv"
@@ -312,10 +314,40 @@ func printWorkflowTable(wf map[string]any) {
 
 func printMappingPlan(plan map[string]any) {
 	fmt.Fprintf(os.Stdout, "Dry run: %v of %v issue(s) would move.\n", plan["affected_issues"], plan["total_issues"])
-	required, _ := plan["required"].([]any)
-	if len(required) == 0 {
-		return
+	if required, _ := plan["required"].([]any); len(required) > 0 {
+		printMappingRequired(plan)
 	}
+}
+
+// reportMappingRequired handles the server's 409
+// workflow_status_mapping_required. The default error formatter keeps only
+// the first message line, which drops the plan a script needs to supply every
+// mapping at once. This prints the full body (JSON) or the plan (table) to
+// stdout, the server message to stderr, and returns errSilent so the command
+// still exits non-zero (1, as for any other conflict) without printing twice. Any other error returns nil and is left to the
+// caller.
+func reportMappingRequired(cmd *cobra.Command, err error) error {
+	var httpErr *cli.HTTPError
+	if !errors.As(err, &httpErr) || httpErr.StatusCode != http.StatusConflict {
+		return nil
+	}
+	var body map[string]any
+	if json.Unmarshal([]byte(httpErr.Body), &body) != nil || strVal(body, "code") != "workflow_status_mapping_required" {
+		return nil
+	}
+	if output, _ := cmd.Flags().GetString("output"); output == "table" {
+		if plan, ok := body["plan"].(map[string]any); ok {
+			printMappingRequired(plan)
+		}
+	} else if perr := cli.PrintJSON(os.Stdout, body); perr != nil {
+		return perr
+	}
+	fmt.Fprintf(os.Stderr, "Error: %s; pass --map old=new for each status listed\n", strVal(body, "error"))
+	return errSilent
+}
+
+func printMappingRequired(plan map[string]any) {
+	required, _ := plan["required"].([]any)
 	headers := []string{"FROM STATUS", "ISSUES", "SUGGESTED"}
 	rows := make([][]string, 0, len(required))
 	for _, raw := range required {
@@ -486,6 +518,9 @@ func runWorkflowUpdate(cmd *cobra.Command, args []string) error {
 	}
 	var result map[string]any
 	if err := client.PatchJSON(ctx, "/api/issue-workflows/"+strVal(wf, "id"), body, &result); err != nil {
+		if reported := reportMappingRequired(cmd, err); reported != nil {
+			return reported
+		}
 		return fmt.Errorf("update workflow: %w", err)
 	}
 	output, _ := cmd.Flags().GetString("output")
@@ -685,6 +720,9 @@ func runProjectWorkflowSet(cmd *cobra.Command, args []string) error {
 
 	var result map[string]any
 	if err := client.PostJSON(ctx, "/api/projects/"+projectRef.ID+"/workflow", body, &result); err != nil {
+		if reported := reportMappingRequired(cmd, err); reported != nil {
+			return reported
+		}
 		return fmt.Errorf("set project workflow: %w", err)
 	}
 	if output, _ := cmd.Flags().GetString("output"); output == "table" {

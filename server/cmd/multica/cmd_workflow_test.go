@@ -287,3 +287,106 @@ func TestProjectWorkflowGetFallsBackToDefault(t *testing.T) {
 		t.Fatalf("expected the Default workflow to be looked up from the list; got %+v", *reqs)
 	}
 }
+
+// mappingRequiredServer answers every write with the server's 409
+// workflow_status_mapping_required, listing two statuses to map.
+func mappingRequiredServer(t *testing.T) {
+	t.Helper()
+	body := map[string]any{
+		"error": `issues still use "qa"; map it to a status of the target workflow`,
+		"code":  "workflow_status_mapping_required",
+		"plan": map[string]any{
+			"required": []any{
+				map[string]any{"status_key": "qa", "issue_count": 2, "suggested_status_key": "in_review"},
+				map[string]any{"status_key": "blocked", "issue_count": 1, "suggested_status_key": "todo"},
+			},
+			"unchanged":       []any{},
+			"total_issues":    5,
+			"affected_issues": 3,
+		},
+	}
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodGet {
+			_ = json.NewEncoder(w).Encode(map[string]any{"id": testWorkflowUUID, "name": "Review flow", "steps": []any{}})
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusConflict)
+		_ = json.NewEncoder(w).Encode(body)
+	}))
+	t.Cleanup(srv.Close)
+	setCLITestServerEnv(t, srv.URL)
+}
+
+func newProjectWorkflowSetTestCmd(output string) *cobra.Command {
+	cmd := &cobra.Command{}
+	cmd.Flags().StringArray("map", nil, "")
+	cmd.Flags().Bool("dry-run", false, "")
+	cmd.Flags().String("output", output, "")
+	return cmd
+}
+
+func TestProjectWorkflowSetMappingRequiredPrintsFullPlanJSON(t *testing.T) {
+	mappingRequiredServer(t)
+	cmd := newProjectWorkflowSetTestCmd("json")
+	out, err := captureStdout(t, func() error {
+		return runProjectWorkflowSet(cmd, []string{testProjectUUID, testWorkflowUUID})
+	})
+	if err != errSilent {
+		t.Fatalf("err = %v, want errSilent so the command exits non-zero without printing twice", err)
+	}
+	var got map[string]any
+	if jerr := json.Unmarshal([]byte(out), &got); jerr != nil {
+		t.Fatalf("stdout is not JSON: %v\n%s", jerr, out)
+	}
+	if got["code"] != "workflow_status_mapping_required" {
+		t.Fatalf("code = %v", got["code"])
+	}
+	plan, _ := got["plan"].(map[string]any)
+	required, _ := plan["required"].([]any)
+	if len(required) != 2 {
+		t.Fatalf("plan.required has %d entries, want both statuses: %s", len(required), out)
+	}
+}
+
+func TestWorkflowUpdateMappingRequiredPrintsPlanTable(t *testing.T) {
+	mappingRequiredServer(t)
+	cmd := &cobra.Command{}
+	cmd.Flags().String("name", "", "")
+	cmd.Flags().String("description", "", "")
+	cmd.Flags().String("steps-file", "", "")
+	cmd.Flags().StringArray("map", nil, "")
+	cmd.Flags().Bool("dry-run", false, "")
+	cmd.Flags().String("output", "table", "")
+	_ = cmd.Flags().Set("name", "Renamed")
+	out, err := captureStdout(t, func() error {
+		return runWorkflowUpdate(cmd, []string{testWorkflowUUID})
+	})
+	if err != errSilent {
+		t.Fatalf("err = %v, want errSilent", err)
+	}
+	for _, want := range []string{"qa", "in_review", "blocked", "todo"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("table output missing %q:\n%s", want, out)
+		}
+	}
+}
+
+func TestProjectWorkflowSetOtherConflictKeepsDefaultError(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusForbidden)
+		_, _ = w.Write([]byte(`{"error":"only workspace admins and the project lead can change this project's workflow"}`))
+	}))
+	t.Cleanup(srv.Close)
+	setCLITestServerEnv(t, srv.URL)
+	cmd := newProjectWorkflowSetTestCmd("json")
+	out, err := captureStdout(t, func() error {
+		return runProjectWorkflowSet(cmd, []string{testProjectUUID, "default"})
+	})
+	if err == nil || err == errSilent {
+		t.Fatalf("err = %v, want the HTTP error for the default formatter", err)
+	}
+	if out != "" {
+		t.Fatalf("stdout = %q, want empty", out)
+	}
+}
