@@ -122,6 +122,11 @@ type TypingIndicatorManager struct {
 	// window strands it (streamGuardAfter). Zero or less disables the guard,
 	// which only tests that fire it themselves do.
 	guardAfter time.Duration
+
+	// trailAfter schedules the trailing refresh for steps the throttle held
+	// back (armTrailing). time.AfterFunc in production; nil disables it, and
+	// tests that drive it themselves swap in their own.
+	trailAfter func(time.Duration, func())
 }
 
 // TypingIndicatorConfig wires the manager. Senders and Streams are the same
@@ -181,6 +186,7 @@ func NewTypingIndicator(cfg TypingIndicatorConfig) *TypingIndicatorManager {
 		taskSessions: newTaskSessionCache(),
 		log:          logger,
 		guardAfter:   streamGuardAfter,
+		trailAfter:   func(d time.Duration, f func()) { time.AfterFunc(d, f) },
 	}
 	m.progress = newProgressLane(m.processProgress)
 	return m

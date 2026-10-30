@@ -67,7 +67,15 @@ type progressNudge struct {
 	// local one has it filled in by the lane (progressTarget).
 	target   taskRound
 	resolved bool
+	// trailing: the holder's own follow-up for steps the throttle held back
+	// (armTrailing). It is not a report: it carries no seq, is not a sign of
+	// life for the rotation guard, and is never published.
+	trailing bool
 }
+
+// progressSeqTrailing is a trailing nudge's seq. Below every real seq, so
+// progressFor does not count it and merge lets any real report's seq win.
+const progressSeqTrailing int32 = -1
 
 // merge folds a later nudge for the same run into this one. Two nudges for one
 // run say what the later of them says — a read takes every row past what is
@@ -78,6 +86,7 @@ func (n progressNudge) merge(later progressNudge) progressNudge {
 		n.seq = later.seq
 	}
 	n.local = n.local || later.local
+	n.trailing = n.trailing || later.trailing
 	if !n.resolved && later.resolved {
 		n.target, n.resolved = later.target, true
 	}
@@ -362,7 +371,7 @@ func (m *TypingIndicatorManager) showProgress(ctx context.Context, n progressNud
 		// read and a socket write per tool call for the length of the run.
 		return true
 	}
-	if !n.milestone && n.seq > 0 && n.seq <= slot.folded {
+	if !n.milestone && !n.trailing && n.seq > 0 && n.seq <= slot.folded {
 		return true // a copy of a report already shown
 	}
 	h, feed, c := slot.handle, slot.feed, copyFor(slot.handle.Locale)
@@ -374,7 +383,8 @@ func (m *TypingIndicatorManager) showProgress(ctx context.Context, n progressNud
 		added = feed.fold(progressStep{kind: progressStarting}, c, h.Level)
 	}
 	through := slot.folded
-	if !n.milestone && feed.due() {
+	due := feed.due()
+	if !n.milestone && due {
 		taskID, err := util.ParseUUID(n.taskID)
 		if err != nil || !taskID.Valid {
 			return true
@@ -396,13 +406,39 @@ func (m *TypingIndicatorManager) showProgress(ctx context.Context, n progressNud
 	if through > slot.folded || started {
 		m.streams.markFolded(sessionID, roundKey, n.taskID, through, started)
 	}
-	if !added {
+	if !added && !feed.pending() {
+		if !n.milestone && !due {
+			// Rows this report pointed at are still unread.
+			m.armTrailing(feed, n)
+		}
 		return true
 	}
 	if content := feed.flush(c, h.CreatedAt); content != "" {
 		m.writeProgress(ctx, sessionID, h, content)
+		return true
 	}
+	m.armTrailing(feed, n)
 	return true
+}
+
+// armTrailing schedules one more pass over this round once the throttle
+// window ends, for whatever the window held back. It goes through the lane
+// like any report, so it is ordered with the run's other nudges, and it is not
+// local: if the round has ended by then it finds nothing and goes nowhere.
+func (m *TypingIndicatorManager) armTrailing(feed *progressFeed, n progressNudge) {
+	if m.trailAfter == nil || m.progress == nil {
+		return
+	}
+	wait, ok := feed.armTrail()
+	if !ok {
+		return
+	}
+	t := n
+	t.seq, t.milestone, t.local, t.trailing = progressSeqTrailing, false, false, true
+	m.trailAfter(wait, func() {
+		feed.trailFired()
+		m.progress.offer(t)
+	})
 }
 
 // messageFromRow is taskMessageFields for a transcript row: the same four

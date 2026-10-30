@@ -804,6 +804,14 @@ type progressFeed struct {
 	// rather than replacing, because the transcript delivers it as 500ms
 	// increments of one continuous stream.
 	thinking string
+
+	// dirty: something folded in since the last frame went out. A step that
+	// lands inside the throttle window waits here for the trailing refresh
+	// (armTrail) rather than for whatever the run reports next, which may be
+	// minutes away.
+	dirty bool
+	// trailArmed: that trailing refresh is already scheduled. One per feed.
+	trailArmed bool
 }
 
 func newProgressFeed(now func() time.Time) *progressFeed {
@@ -847,6 +855,7 @@ func (f *progressFeed) fold(step progressStep, c copyPack, level progressLevel) 
 
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	f.dirty = true
 	switch {
 	case step.kind == progressThinking:
 		// One continuous stream arriving in pieces, so it appends and keeps
@@ -895,7 +904,46 @@ func (f *progressFeed) flush(c copyPack, openedAt time.Time) string {
 		return ""
 	}
 	f.lastFlush = now
+	f.dirty = false
 	return f.renderLocked(c, now.Sub(openedAt))
+}
+
+// pending reports whether the feed holds something no frame has carried yet.
+func (f *progressFeed) pending() bool {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.dirty
+}
+
+// armTrail claims this feed's one trailing refresh and says how long until
+// the throttle would let it out. False when one is already scheduled.
+//
+// Without it, a step that lands inside the window is only shown when the run
+// reports again. The step most worth showing is often the last before a long
+// silence — the agent reads a file and, a second later, starts a test suite
+// that runs for minutes — and the bubble would sit on the file for all of it.
+func (f *progressFeed) armTrail() (time.Duration, bool) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.trailArmed {
+		return 0, false
+	}
+	f.trailArmed = true
+	wait := time.Duration(0)
+	if !f.lastFlush.IsZero() {
+		wait = progressMinInterval - f.now().Sub(f.lastFlush)
+	}
+	if wait < 0 {
+		wait = 0
+	}
+	return wait, true
+}
+
+// trailFired releases the claim, so the next deferred step can arm another.
+func (f *progressFeed) trailFired() {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.trailArmed = false
 }
 
 // renderLocked builds the bubble body. Everything sits inside <think> tags so

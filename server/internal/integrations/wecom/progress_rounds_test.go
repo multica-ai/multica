@@ -27,7 +27,9 @@ import (
 	"context"
 	"encoding/json"
 	"strings"
+	"sync"
 	"testing"
+	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
@@ -70,6 +72,43 @@ type progressRig struct {
 	// chatType is where the questions come from. A one-to-one by default,
 	// because that is the only place a step is ever shown.
 	chatType channel.ChatType
+
+	// trails are the trailing refreshes the manager has scheduled and the
+	// test has not fired yet (fireTrails), with the wait each asked for.
+	trailMu sync.Mutex
+	trails  []scheduledTrail
+}
+
+type scheduledTrail struct {
+	wait time.Duration
+	fire func()
+}
+
+func (p *progressRig) scheduleTrail(d time.Duration, f func()) {
+	p.trailMu.Lock()
+	defer p.trailMu.Unlock()
+	p.trails = append(p.trails, scheduledTrail{wait: d, fire: f})
+}
+
+// pendingTrails reports the trailing refreshes scheduled and not yet fired.
+func (p *progressRig) pendingTrails() []scheduledTrail {
+	p.trailMu.Lock()
+	defer p.trailMu.Unlock()
+	return append([]scheduledTrail(nil), p.trails...)
+}
+
+// fireTrails runs every scheduled trailing refresh, as its timer would, and
+// waits for the lane to act on them.
+func (p *progressRig) fireTrails(t *testing.T) {
+	t.Helper()
+	p.trailMu.Lock()
+	due := p.trails
+	p.trails = nil
+	p.trailMu.Unlock()
+	for _, tr := range due {
+		tr.fire()
+	}
+	waitProgress(t, p.typing)
 }
 
 func newProgressRig(t *testing.T) *progressRig {
@@ -93,7 +132,11 @@ func newProgressRig(t *testing.T) *progressRig {
 	rig.typing.guardAfter = -1
 	rig.bus = events.New()
 	rig.typing.Register(rig.bus)
-	return &progressRig{bubbleRig: rig, identities: identities, chatType: channel.ChatTypeP2P}
+	pr := &progressRig{bubbleRig: rig, identities: identities, chatType: channel.ChatTypeP2P}
+	// Trailing refreshes are fired by the tests too; a real timer would land
+	// a frame in whichever later assertion happened to be running.
+	rig.typing.trailAfter = pr.scheduleTrail
+	return pr
 }
 
 // running is one whole round starting: the message arrives, the debounced
@@ -390,6 +433,110 @@ func TestABurstOfToolCallsBecomesOneFrame(t *testing.T) {
 	}
 	if !strings.Contains(refreshes[1], "Edit.go") {
 		t.Errorf("the second frame dropped the steps folded into the first: %q", refreshes[1])
+	}
+}
+
+// ---- the trailing refresh ----
+//
+// The throttle folds a step that lands inside the window into the next frame.
+// "Next" cannot mean "when the run reports again": the step most worth seeing
+// is often the last before a long silence — the agent reads a file and, a
+// second later, starts a test suite that runs for minutes — and the bubble
+// would show the file read for all of it. So a held step schedules one
+// refresh of its own for when the window ends.
+//
+// REVERSE VERIFICATION: drop the armTrailing calls in showProgress and the
+// first test finds no trailing refresh scheduled and the test command never
+// shown.
+
+func TestAStepTheThrottleHeldBackIsShownWithoutAnotherReport(t *testing.T) {
+	t.Parallel()
+	rig := newProgressRig(t)
+	rig.running(t, "REQ-A", "task-1")
+
+	rig.toolCall(t, "task-1", "Read", map[string]any{"file_path": "/srv/app/router.go"})
+	rig.toolCall(t, "task-1", "Bash", map[string]any{"command": "go test ./internal/..."})
+	if got := len(rig.refreshes(t)); got != 1 {
+		t.Fatalf("two tool calls inside the refresh interval produced %d frames, want 1", got)
+	}
+	trails := rig.pendingTrails()
+	if len(trails) != 1 {
+		t.Fatalf("a step held by the throttle scheduled %d trailing refreshes, want 1 — "+
+			"without one it waits for a report that may be minutes away", len(trails))
+	}
+	if trails[0].wait <= 0 || trails[0].wait > progressMinInterval {
+		t.Errorf("the trailing refresh waits %v, want the rest of the %v window", trails[0].wait, progressMinInterval)
+	}
+
+	// The window ends and the run says nothing more.
+	rig.tick()
+	rig.fireTrails(t)
+
+	refreshes := rig.refreshes(t)
+	if len(refreshes) != 2 {
+		t.Fatalf("the trailing refresh produced %d frames in total, want 2", len(refreshes))
+	}
+	if !strings.Contains(refreshes[1], "go test") {
+		t.Errorf("the trailing frame is missing the step the throttle held back: %q", refreshes[1])
+	}
+	if got := len(rig.pendingTrails()); got != 0 {
+		t.Errorf("a trailing refresh that showed everything scheduled %d more", got)
+	}
+}
+
+// Several held steps share one trailing refresh, and the refresh is not a
+// report: it is not a sign of life for the rotation guard.
+func TestHeldStepsShareOneTrailingRefresh(t *testing.T) {
+	t.Parallel()
+	rig := newProgressRig(t)
+	rig.running(t, "REQ-A", "task-1")
+
+	for _, tool := range []string{"Read", "Grep", "Edit", "Bash"} {
+		rig.toolCall(t, "task-1", tool, map[string]any{"file_path": "/srv/" + tool + ".go", "pattern": tool})
+	}
+	if got := len(rig.pendingTrails()); got != 1 {
+		t.Fatalf("three held steps scheduled %d trailing refreshes, want exactly 1", got)
+	}
+	steps := rig.roundSteps(t, "task-1")
+
+	rig.tick()
+	rig.fireTrails(t)
+
+	refreshes := rig.refreshes(t)
+	if len(refreshes) != 2 || strings.Count(refreshes[1], "\n· ") != 4 {
+		t.Fatalf("after the trailing refresh: %d frames, last %q; want 2, the last carrying all four steps",
+			len(refreshes), refreshes[len(refreshes)-1])
+	}
+	if got := rig.roundSteps(t, "task-1"); got != steps {
+		t.Errorf("the trailing refresh counted as %d report(s) of life; it is the holder's own, not the run's",
+			got-steps)
+	}
+}
+
+// A trailing refresh that fires after the answer sealed the bubble writes
+// nothing: the round is gone and the refresh is not passed on to anyone.
+func TestATrailingRefreshAfterTheAnswerWritesNothing(t *testing.T) {
+	t.Parallel()
+	rig := newProgressRig(t)
+	rig.running(t, "REQ-A", "task-1")
+
+	rig.toolCall(t, "task-1", "Read", map[string]any{"file_path": "/srv/app/router.go"})
+	rig.toolCall(t, "task-1", "Bash", map[string]any{"command": "go vet ./..."})
+	if got := len(rig.pendingTrails()); got != 1 {
+		t.Fatalf("scheduled %d trailing refreshes, want 1", got)
+	}
+	rig.answer(t, "all done", "task-1")
+	before := len(rig.conn.streamFrames(t))
+	beforePushes := len(rig.conn.pushes(t))
+
+	rig.tick()
+	rig.fireTrails(t)
+
+	if got := len(rig.conn.streamFrames(t)) - before; got != 0 {
+		t.Errorf("a trailing refresh after the answer wrote %d frame(s) onto a sealed bubble", got)
+	}
+	if got := len(rig.conn.pushes(t)) - beforePushes; got != 0 {
+		t.Errorf("a trailing refresh after the answer went out as %d plain message(s)", got)
 	}
 }
 
@@ -897,4 +1044,22 @@ func TestMilestoneStepReadsBothPayloadForms(t *testing.T) {
 	if got := milestoneStep(map[string]any{"summary": "no step"}); got != 0 {
 		t.Errorf("a payload with no step read as step %d, want 0", got)
 	}
+}
+
+// roundSteps reads how many reports the store has counted as signs of life on
+// the round bound to taskName — what the rotation guard decides from.
+func (p *progressRig) roundSteps(t *testing.T, taskName string) int {
+	t.Helper()
+	id := taskUUID(t, taskName)
+	p.streams.mu.Lock()
+	defer p.streams.mu.Unlock()
+	for _, rounds := range p.streams.sessions {
+		for _, r := range rounds {
+			if r.taskID == id {
+				return r.steps
+			}
+		}
+	}
+	t.Fatalf("no round is bound to %s", taskName)
+	return 0
 }
