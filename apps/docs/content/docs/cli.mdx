@@ -300,7 +300,8 @@ multica autopilot trigger-add <autopilot-id> --cron "0 9 * * 1" --timezone Europ
 | Command | Purpose |
 | --- | --- |
 | `issue` | Create, update, assign, and search issues; manage comments, subscribers, labels, properties, wakeups, the timeline, and runs |
-| `project` | Manage projects and their resources |
+| `project` | Manage projects, their resources, and the workflow they use |
+| `workflow` | Manage issue workflows: statuses and who handles each one |
 | `label`, `property` | Manage workspace labels and custom properties |
 | `agent`, `skill`, `squad` | Manage agents, skills, and squads |
 | `autopilot` | Manage automations, triggers, and run history |
@@ -394,6 +395,9 @@ The tables below cover every current top-level command, grouped the way the CLI 
 | `project` | `list/get/create/update/delete` | Manage projects | `create`: `--title` (required), `--lead`, `--status`, `--icon`, `--start-date`, `--due-date`, `--repo` (repeatable) |
 | | `status <id> <status>` | Change project status | |
 | | `resource list/add/update/remove` | Manage project resources | `--type`, `--url`, `--default-branch-hint`, `--ref`, `--local-path`, `--daemon-id`, `--execution-mode` (`in_place` / `worktree` for a local directory) |
+| | `workflow get/set <project-id>` | Show the project's effective workflow, or switch it | `set <project-id> <workflow\|default>`: `--map old=new` (repeatable), `--dry-run` prints the status migration plan; the switch neither reassigns issues nor starts runs. Admins and the project lead only |
+| `workflow` | `list/get/create/update/delete` | Manage workflows; `get` and other commands accept an ID, ID prefix, exact name, or `default` | `create` / `update`: `--name`, `--description`, `--steps-file` (JSON array of steps; replaces all steps); `update`: `--map old=new` (repeatable), `--dry-run`. Edits and deletes are limited to the workflow owner and workspace admins; a workflow still used by a project cannot be deleted |
+| | `handoff set <workflow> <status-key>` | Set one step's handler, instructions, and next/back status; unchanged fields are kept | `--handler` (`none`, `project_lead`, `creator`, or a member/agent/squad name or UUID), `--instructions` / `--instructions-file`, `--next`, `--back`, `--copy-for-project` |
 | `label` | `list/get/create/update/delete` | Manage workspace labels | `list`: `--resource-type` (`issue` or `skill`), `--full-id`; `create`: `--name`, `--color`, `--resource-type` (`issue` or `skill`), `--description` |
 | `property` | `list/get/create/update/archive/unarchive` | Manage workspace custom properties | `create`: `--name`, `--type` (`text`, `number`, `select`, `multi_select`, `date`, `checkbox`, `url`, `actor`, `multi_actor`, `multi_text`, `multi_url`), `--option` (repeatable, select types only); `list`: `--include-archived`; the type cannot be changed after creation |
 | `agent` | `list/get/create/update/archive/restore` | Manage agents | `--name`, `--runtime-id` (required for `create`), `--instructions`, `--conversation-starters`, `--model`, `--thinking-level`, `--custom-env` / `--custom-env-file` / `--custom-env-stdin` (`create` only), `--custom-args`, `--mcp-config` / `--mcp-config-file` / `--mcp-config-stdin`, `--permission-mode`, `--visibility` (older form), `--max-concurrent-tasks` |
