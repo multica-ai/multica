@@ -1,5 +1,6 @@
 import { create } from "zustand";
 import { createJSONStorage, persist } from "zustand/middleware";
+import type { TimelineDirection } from "../../types/activity";
 import { defaultStorage } from "../../platform/storage";
 
 export type IssueActivityOrder = "oldest_first" | "newest_first";
@@ -30,3 +31,7 @@ export const useIssueActivityStore = create<IssueActivityState>()(
     },
   ),
 );
+
+export function selectIssueTimelineDirection(state: IssueActivityState): TimelineDirection {
+  return state.order === "newest_first" ? "desc" : "asc";
+}

@@ -9,6 +9,7 @@ import { useTraceIssueLabels } from "../../common/task-transcript/use-trace-issu
 import { useActorName } from "@multica/core/workspace/hooks";
 import { useTaskMessages } from "@multica/core/chat/queries";
 import { useCancelIssueRun, useRetryIssueRun } from "@multica/core/issues/mutations";
+import { selectIssueTimelineDirection, useIssueActivityStore } from "@multica/core/issues/stores/issue-activity-store";
 import { issueTimelineOptions } from "@multica/core/issues/queries";
 import { commentSupplementReceipts } from "@multica/core/issues/run-steering";
 import { dispatchReasonCode } from "@multica/core/api";
@@ -111,8 +112,9 @@ export function InlineCommentRun({ run, className, viewState, showIdentity = fal
   const steps = useMemo(() => buildSteps(items), [items]);
   const rows = useMemo(() => groupSteps(steps), [steps]);
   // Messages that steered this turn, placed in its step list where it read them.
+  const direction = useIssueActivityStore(selectIssueTimelineDirection);
   const { data: steers = NO_STEERS } = useQuery({
-    ...issueTimelineOptions(task.issue_id),
+    ...issueTimelineOptions(task.issue_id, direction),
     enabled: false,
     select: (entries: TimelineEntry[]) => deliveredSteers(entries, task.id),
   });

@@ -48,7 +48,7 @@ import type {
 } from "../types";
 import type { TimelineEntry, IssueSubscriber, Reaction } from "../types";
 import { insertTimelineEntry } from "./timeline-sort";
-import { useIssueActivityStore } from "./stores/issue-activity-store";
+import { selectIssueTimelineDirection, useIssueActivityStore } from "./stores/issue-activity-store";
 import { applyCommentDeletion, removeCommentSubtree } from "./comment-deletion";
 import { configStore } from "../config";
 import {
@@ -824,7 +824,7 @@ type TimelineCache = TimelineEntry[];
 
 export function useCreateComment(issueId: string) {
   const qc = useQueryClient();
-  const direction = useIssueActivityStore((state) => state.order) === "newest_first" ? "desc" : "asc";
+  const direction = useIssueActivityStore(selectIssueTimelineDirection);
   const timelineKey = issueKeys.timelineSorted(issueId, direction);
   const wsId = useWorkspaceId();
   return useMutation({
@@ -898,7 +898,7 @@ export function useCreateComment(issueId: string) {
 
 export function useUpdateComment(issueId: string) {
   const qc = useQueryClient();
-  const direction = useIssueActivityStore((state) => state.order) === "newest_first" ? "desc" : "asc";
+  const direction = useIssueActivityStore(selectIssueTimelineDirection);
   const timelineKey = issueKeys.timelineSorted(issueId, direction);
   const wsId = useWorkspaceId();
   return useMutation({
@@ -953,7 +953,7 @@ export function useUpdateComment(issueId: string) {
 
 export function useDeleteComment(issueId: string) {
   const qc = useQueryClient();
-  const direction = useIssueActivityStore((state) => state.order) === "newest_first" ? "desc" : "asc";
+  const direction = useIssueActivityStore(selectIssueTimelineDirection);
   const timelineKey = issueKeys.timelineSorted(issueId, direction);
   const wsId = useWorkspaceId();
   return useMutation({
@@ -1034,7 +1034,7 @@ function collectThreadCommentIds(
 
 export function useResolveComment(issueId: string) {
   const qc = useQueryClient();
-  const direction = useIssueActivityStore((state) => state.order) === "newest_first" ? "desc" : "asc";
+  const direction = useIssueActivityStore(selectIssueTimelineDirection);
   const timelineKey = issueKeys.timelineSorted(issueId, direction);
   return useMutation({
     mutationFn: ({ commentId, resolved }: { commentId: string; resolved: boolean }) =>

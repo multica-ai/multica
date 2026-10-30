@@ -129,7 +129,7 @@ import {
 import { collectDeliverableFiles } from "@multica/core/attachments/deliverables";
 import { AttachmentVersionsProvider } from "./deliverables/attachment-versions";
 import { useQuery } from "@tanstack/react-query";
-import { useIssueActivityStore } from "@multica/core/issues/stores/issue-activity-store";
+import { selectIssueTimelineDirection, useIssueActivityStore } from "@multica/core/issues/stores/issue-activity-store";
 import { useAuthStore } from "@multica/core/auth";
 import { useWorkspacePaths } from "@multica/core/paths";
 import { useActorName } from "@multica/core/workspace/hooks";
@@ -1426,7 +1426,8 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
   // The peek gets its own key: it is an overlay on the board's route, and
   // must neither restore the full page's offset nor leave one behind for it.
   const activityOrder = useIssueActivityStore((s) => s.order);
-  const newestFirst = activityOrder === "newest_first";
+  const direction = useIssueActivityStore(selectIssueTimelineDirection);
+  const newestFirst = direction === "desc";
   const scrollContainerKey = `${isPeek ? "peek" : "main"}:${id}:${activityOrder}`;
   const restoredScrollTop = useRestoredScrollOffset(scrollContainerKey);
   const restoreScrollRef = useRestoredScrollRef(scrollContainerKey);
@@ -1646,10 +1647,10 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
   const enteringRunIds = useNewRunIds(id, commentTasks);
   const previousCommentRuns = useRef(new Map<string, CommentRun[]>());
   const { runs: commentRuns, timeline: displayTimeline, standaloneRuns } = useMemo(() => {
-    const next = buildCommentRunView(commentTasks ?? [], timeline, previousCommentRuns.current, newestFirst ? "desc" : "asc");
+    const next = buildCommentRunView(commentTasks ?? [], timeline, previousCommentRuns.current, direction);
     previousCommentRuns.current = next.runs;
     return next;
-  }, [commentTasks, timeline, newestFirst]);
+  }, [commentTasks, timeline, direction]);
 
   // Resolve / unresolve must always clear the per-session expand entry so
   // re-resolving an already-expanded thread folds it back to the bar (the
@@ -1734,14 +1735,18 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
     // Unanchored runs keep their enqueue-time slot while working, then use
     // the published reply's time or the run's end time.
     const entryById = new Map(displayTimeline.map((entry) => [entry.id, entry]));
-    const ordered = orderTimelineWithRuns(topLevel, standaloneRuns, entryById, newestFirst ? "desc" : "asc");
+    const ordered = orderTimelineWithRuns(topLevel, standaloneRuns, entryById, direction);
     const coalesced: (TimelineEntry | CommentRun)[] = [];
+    let previousActivityTimestamp = 0;
     for (const entry of ordered) {
       if ("task" in entry) {
         coalesced.push(entry);
         continue;
       }
       if (entry.type === "activity") {
+        const timestamp = Date.parse(entry.created_at);
+        const withinWindow = Math.abs(timestamp - previousActivityTimestamp) <= COALESCE_MS;
+        previousActivityTimestamp = timestamp;
         const prev = coalesced[coalesced.length - 1];
         if (
           !NEVER_COALESCE_ACTIONS.has(entry.action!) &&
@@ -1750,7 +1755,7 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
           prev.actor_type === entry.actor_type &&
           prev.actor_id === entry.actor_id &&
           (NO_TIME_LIMIT_ACTIONS.has(entry.action!) ||
-            Math.abs(new Date(entry.created_at).getTime() - new Date(prev.created_at).getTime()) <= COALESCE_MS)
+            withinWindow)
         ) {
           coalesced[coalesced.length - 1] = { ...(newestFirst ? prev : entry), coalesced_count: (prev.coalesced_count ?? 1) + 1 };
           continue;
@@ -1777,7 +1782,7 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
     }
 
     return { threadReplies, groups };
-  }, [displayTimeline, standaloneRuns, newestFirst]);
+  }, [displayTimeline, standaloneRuns, newestFirst, direction]);
 
   // Flat array consumed by <Virtuoso>. Recomputed when timelineView.groups
   // changes (timeline events) or expandedResolved flips (user toggles a

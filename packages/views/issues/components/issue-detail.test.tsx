@@ -824,6 +824,20 @@ describe("IssueDetail (shared)", () => {
       expect(client.getQueryData<TimelineEntry[]>(issueKeys.timelineSorted("issue-1", "desc"))?.map((entry) => entry.id)).toEqual(["comment-incoming", "comment-2", "comment-1"]);
     });
 
+    it.each(["oldest_first", "newest_first"] as const)("preserves repeated status grouping in %s mode", async (order) => {
+      useIssueActivityStore.getState().setOrder(order);
+      const activity: TimelineEntry[] = [
+        { type: "activity", id: "status-1", actor_type: "member", actor_id: "user-1", action: "status_changed", details: { from: "todo", to: "in_progress" }, created_at: "2026-01-18T00:00:00Z" },
+        { type: "activity", id: "status-2", actor_type: "member", actor_id: "user-1", action: "status_changed", details: { from: "in_progress", to: "in_review" }, created_at: "2026-01-18T00:01:40Z" },
+        { type: "activity", id: "status-3", actor_type: "member", actor_id: "user-1", action: "status_changed", details: { from: "in_review", to: "done" }, created_at: "2026-01-18T00:03:20Z" },
+      ];
+      mockApiObj.listTimeline.mockResolvedValue(order === "oldest_first" ? activity : activity.slice().reverse());
+      renderIssueDetail();
+      expect(await screen.findByText("×3")).toBeInTheDocument();
+      expect(screen.getByText("changed status from In Review to Done")).toBeInTheDocument();
+      expect(screen.queryByText("changed status from Todo to In Progress")).not.toBeInTheDocument();
+    });
+
     it("uses newest first in deep-link mode and still highlights the target", async () => {
       useIssueActivityStore.getState().setOrder("newest_first");
       const { container } = renderIssueDetailWithHighlight("comment-1");

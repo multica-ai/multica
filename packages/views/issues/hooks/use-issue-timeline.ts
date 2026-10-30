@@ -35,7 +35,7 @@ import {
   useToggleCommentReaction,
   type ToggleCommentReactionVars,
 } from "@multica/core/issues/mutations";
-import { useIssueActivityStore } from "@multica/core/issues/stores/issue-activity-store";
+import { selectIssueTimelineDirection, useIssueActivityStore } from "@multica/core/issues/stores/issue-activity-store";
 import { insertTimelineEntry } from "@multica/core/issues/timeline-sort";
 import {
   unhandledCommentTriggerOutcomes,
@@ -121,7 +121,7 @@ export function useIssueTimeline(issueId: string, userId?: string) {
   const { t } = useT("issues");
   const qc = useQueryClient();
 
-  const direction = useIssueActivityStore((state) => state.order) === "newest_first" ? "desc" : "asc";
+  const direction = useIssueActivityStore(selectIssueTimelineDirection);
   const query = useQuery(issueTimelineOptions(issueId, direction));
   const { data, isLoading: loading } = query;
 

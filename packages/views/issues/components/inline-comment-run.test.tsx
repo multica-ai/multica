@@ -1,10 +1,11 @@
 import { act, cleanup, fireEvent, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { ReactNode } from "react";
 import { api } from "@multica/core/api";
 import { chatKeys } from "@multica/core/chat/queries";
+import { useIssueActivityStore } from "@multica/core/issues/stores/issue-activity-store";
 import { issueKeys } from "@multica/core/issues/queries";
 import type { AgentTask, TimelineEntry } from "@multica/core/types";
 import type { TaskMessagePayload } from "@multica/core/types/events";
@@ -51,6 +52,45 @@ function setup(initialTask: AgentTask, hasReply = false, presentation: "inline" 
 }
 
 describe("InlineCommentRun", () => {
+  beforeEach(() => useIssueActivityStore.setState({ order: "oldest_first" }));
+
+  it.each([
+    { order: "oldest_first", direction: "asc" },
+    { order: "newest_first", direction: "desc" },
+  ] as const)("reads delivered run inputs from the selected $order cache and updates live", async ({ order, direction }) => {
+    useIssueActivityStore.getState().setOrder(order);
+    vi.mocked(api.listTaskMessages).mockResolvedValue([
+      { task_id: id, issue_id: "issue", seq: 1, type: "tool_use", tool: "exec_command", input: { command: "Before inputs" }, created_at: "2026-09-07T00:00:05Z" },
+      { task_id: id, issue_id: "issue", seq: 2, type: "tool_result", tool: "exec_command", output: "ok", created_at: "2026-09-07T00:00:06Z" },
+      { task_id: id, issue_id: "issue", seq: 3, type: "text", content: "After inputs", created_at: "2026-09-07T00:00:20Z" },
+    ]);
+    const { client } = setup(task());
+    const first: TimelineEntry = {
+      id: "first-input", type: "comment", actor_type: "member", actor_id: "user",
+      content: "First delivered input", created_at: "2026-09-07T00:00:08Z",
+      supplements: [{ task_id: id, agent_id: "agent", status: "delivered", delivered_at: "2026-09-07T00:00:10Z" }],
+    };
+    const currentKey = issueKeys.timelineSorted("issue", direction);
+    act(() => client.setQueryData<TimelineEntry[]>(currentKey, [first]));
+    await screen.findByText("After inputs");
+    fireEvent.click(screen.getByRole("button", { name: /View activity/ }));
+    const firstInput = await screen.findByText(/First delivered input/);
+    const before = screen.getAllByText("Before inputs").find((node) => node.closest("summary"))!;
+    const after = screen.getAllByText("After inputs").find((node) => node.closest("summary"))!;
+    expect(before.compareDocumentPosition(firstInput) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(firstInput.compareDocumentPosition(after) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+
+    const second: TimelineEntry = { ...first, id: "second-input", content: "Second delivered input", created_at: "2026-09-07T00:00:11Z",
+      supplements: [{ task_id: id, agent_id: "agent", status: "delivered", delivered_at: "2026-09-07T00:00:12Z" }],
+    };
+    act(() => {
+      client.setQueryData(issueKeys.timelineSorted("issue", direction === "asc" ? "desc" : "asc"), [first]);
+      client.setQueryData<TimelineEntry[]>(currentKey, direction === "asc" ? [first, second] : [second, first]);
+    });
+    const secondInput = await screen.findByText(/Second delivered input/);
+    expect(firstInput.compareDocumentPosition(secondInput) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(secondInput.compareDocumentPosition(after) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
   it("places a delivered steer between the steps it arrived between", async () => {
     vi.mocked(api.listTaskMessages).mockResolvedValue([
       { task_id: id, issue_id: "issue", seq: 1, type: "tool_use", tool: "exec_command", input: { command: "cat login.tsx" }, created_at: "2026-09-07T00:00:05Z" },
