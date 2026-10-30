@@ -11,11 +11,11 @@
       },
       "used": {
         "label": "使用中",
-        "description": "至少分配給一個智慧體的 skill"
+        "description": "至少分配給一個 AI 代理的 skill"
       },
       "unused": {
         "label": "未使用",
-        "description": "未分配給任何智慧體的 skill"
+        "description": "未分配給任何 AI 代理的 skill"
       },
       "mine": {
         "label": "我建立的",
@@ -35,7 +35,7 @@
     },
     "intro_banner": {
       "title": "在工作區內共享。",
-      "body": "任何成員都可以建立 skill、從 URL 或本地資料夾匯入、或從本地執行時複製——之後所有智慧體都能用它。",
+      "body": "任何成員都可以建立 skill、從 URL 或本地資料夾匯入、或從本地執行時複製——之後所有 AI 代理都能用它。",
       "highlight": "本地執行時裡的 skill 在你複製過來之前是私有的。"
     },
     "list_error": {
@@ -65,13 +65,13 @@
   },
   "actions": {
     "row_menu": "操作",
-    "add_to_agent": "新增到智慧體",
+    "add_to_agent": "新增到 AI 代理",
     "refresh": "從來源更新",
-    "my_agents": "我的智慧體",
-    "other_agents": "其他智慧體",
-    "no_agents": "暫無可用智慧體",
-    "search_placeholder": "搜尋智慧體…",
-    "no_agents_match": "沒有匹配的智慧體。",
+    "my_agents": "我的 AI 代理",
+    "other_agents": "其他 AI 代理",
+    "no_agents": "暫無可用 AI 代理",
+    "search_placeholder": "搜尋 AI 代理…",
+    "no_agents_match": "沒有匹配的 AI 代理。",
     "has_partial": "已有 {{owned}}/{{total}}",
     "added_toast": "已新增到 {{name}}",
     "add_failed_toast": "新增 skill 失敗",
@@ -80,7 +80,7 @@
     "clear_selection": "清除選擇",
     "delete_no_permission": "選中項包含僅建立者或管理員可刪除的 skill",
     "delete_dialog_title_other": "刪除 {{count}} 個 skill？",
-    "delete_dialog_desc_other": "將永久刪除選中的 {{count}} 個 skill，並從所有智慧體上移除。",
+    "delete_dialog_desc_other": "將永久刪除選中的 {{count}} 個 skill，並從所有 AI 代理上移除。",
     "deleted_toast_other": "已刪除 {{count}} 個 skill",
     "delete_failed_toast": "刪除 skill 失敗",
     "update": "更新",
@@ -95,7 +95,7 @@
     "cancel": "取消",
     "add_confirm": "新增（{{num}}）",
     "adding": "新增中...",
-    "added_multi_toast_other": "已新增到 {{count}} 個智慧體"
+    "added_multi_toast_other": "已新增到 {{count}} 個 AI 代理"
   },
   "toolbar": {
     "result_count_title": "當前結果 / 全部 skill",
@@ -123,7 +123,7 @@
     "supporting_data_warning": "部分工作區資料載入失敗。建立者歸屬、執行時名稱、編輯權限可能要等下次重新整理才完整。",
     "delete_file": "刪除檔案",
     "name_placeholder": "skill-name",
-    "description_placeholder": "用一句話描述智慧體什麼時候應該使用這個 skill...",
+    "description_placeholder": "用一句話描述 AI 代理什麼時候應該使用這個 skill...",
     "subline": {
       "origin_runtime_named": "本地執行時 · {{name}}",
       "origin_runtime_provider": "本地執行時 · {{provider}}",
@@ -164,7 +164,7 @@
       "dialog": {
         "title": "從來源更新這個 skill？",
         "description": "將從 {{source}} 重新下載\"{{name}}\"，並用最新版本替換它的名稱、描述、SKILL.md 和檔案。",
-        "warning": "對這個 skill 的本地修改將被覆蓋。智慧體分配、標籤和建立者保持不變。",
+        "warning": "對這個 skill 的本地修改將被覆蓋。AI 代理分配、標籤和建立者保持不變。",
         "cancel": "取消",
         "confirm": "更新",
         "refreshing": "更新中..."
@@ -172,8 +172,8 @@
     },
     "delete_dialog": {
       "title": "刪除這個 skill？",
-      "description_with_agents_other": "將永久刪除\"{{name}}\"，並從當前正在使用它的 {{count}} 個智慧體上移除。",
-      "description_no_agents": "將永久刪除\"{{name}}\"，並從所有智慧體上移除。",
+      "description_with_agents_other": "將永久刪除\"{{name}}\"，並從當前正在使用它的 {{count}} 個 AI 代理上移除。",
+      "description_no_agents": "將永久刪除\"{{name}}\"，並從所有 AI 代理上移除。",
       "warning": "此操作不可撤銷。",
       "cancel": "取消",
       "confirm": "永久刪除",
@@ -195,7 +195,7 @@
     },
     "header": {
       "files_other": "{{count}} 個檔案",
-      "used_by_other": "{{count}} 個智慧體在用",
+      "used_by_other": "{{count}} 個 AI 代理在用",
       "updated": "{{when}}更新",
       "updated_by": "{{name}} 於{{when}}更新"
     },
@@ -209,11 +209,11 @@
       "properties_hint": "這些欄位與 SKILL.md 的 frontmatter 保持同步。",
       "name": "名稱",
       "description": "描述",
-      "description_hint": "智慧體據此決定何時載入 skill。",
+      "description_hint": "AI 代理據此決定何時載入 skill。",
       "labels": "標籤",
-      "used_by_other": "被 {{count}} 個智慧體使用",
-      "used_by_empty": "還未分配給任何智慧體。開啟某個智慧體的 Skills 標籤頁進行分配。",
-      "permissions_owner": "你可以編輯和刪除該技能。改動將在智慧體下次執行時生效。",
+      "used_by_other": "被 {{count}} 個 AI 代理使用",
+      "used_by_empty": "還未分配給任何 AI 代理。開啟某個 AI 代理的 Skills 標籤頁進行分配。",
+      "permissions_owner": "你可以編輯和刪除該技能。改動將在 AI 代理下次執行時生效。",
       "permissions_locked_creator": "只有建立者（{{name}}）或工作區管理員可以編輯該技能。",
       "permissions_locked": "只有建立者或工作區管理員可以編輯該技能。",
       "properties_help": "關於 skill 屬性",
@@ -263,7 +263,7 @@
       "name_placeholder": "例如：review-helper",
       "name_hint": "工作區內必須唯一。",
       "description_label": "描述",
-      "description_placeholder": "用一句話說什麼時候應該把這個 skill 分配給智慧體。",
+      "description_placeholder": "用一句話說什麼時候應該把這個 skill 分配給 AI 代理。",
       "name_conflict_hint": "請換一個名字再提交。",
       "fallback_error": "建立 skill 失敗",
       "cancel": "取消",
@@ -323,7 +323,7 @@
     "skill_files_other": "{{count}} 個檔案",
     "skill_name_label": "工作區裡的 skill 名稱",
     "skill_description_label": "描述",
-    "skill_description_placeholder": "可選——描述智慧體什麼時候應該使用這個 skill。",
+    "skill_description_placeholder": "可選——描述 AI 代理什麼時候應該使用這個 skill。",
     "toast_imported": "已匯入 skill",
     "toast_import_failed": "匯入 skill 失敗",
     "select_all": "全選 ({{count}})",

@@ -8,13 +8,13 @@
   "header": {
     "scope": {
       "all_label": "全部",
-      "all_description": "分給我的、我建立的、或我的智慧體和小隊相關的",
+      "all_description": "分給我的、我建立的、或我的 AI 代理和小隊相關的",
       "assigned_label": "已分配",
       "assigned_description": "分配給我的任務",
       "created_label": "我建立的",
       "created_description": "我建立的任務",
-      "agents_label": "我的智慧體和小隊",
-      "agents_description": "分配給我的智慧體的任務"
+      "agents_label": "我的 AI 代理和小隊",
+      "agents_description": "分配給我的 AI 代理的任務"
     },
     "filter_button": "篩選",
     "filter_status": "狀態",

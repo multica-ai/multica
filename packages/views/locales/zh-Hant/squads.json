@@ -20,7 +20,7 @@
     "archive_button": "歸檔"
   },
   "member_type": {
-    "agent": "智慧體",
+    "agent": "AI 代理",
     "member": "成員"
   },
   "archive_dialog": {
@@ -42,15 +42,15 @@
   },
   "add_member_dialog": {
     "title": "新增成員",
-    "description": "可選擇工作區成員或智慧體。",
+    "description": "可選擇工作區成員或 AI 代理。",
     "label_member": "成員",
     "label_role": "角色",
     "label_optional": "（可選）",
     "cancel": "取消",
-    "select_target": "選擇成員或智慧體",
-    "search_placeholder": "搜尋成員或智慧體...",
+    "select_target": "選擇成員或 AI 代理",
+    "search_placeholder": "搜尋成員或 AI 代理...",
     "members_section": "成員",
-    "agents_section": "智慧體",
+    "agents_section": "AI 代理",
     "role_placeholder": "例如：審查者、前端負責人",
     "add": "新增"
   },
@@ -75,9 +75,9 @@
     "section_title": "成員",
     "section_count_other": "該小隊有 {{count}} 名成員",
     "add_member_button": "新增成員",
-    "create_agent_button": "建立智慧體",
+    "create_agent_button": "建立 AI 代理",
     "leader_chip": "隊長",
-    "view_agent_tooltip": "開啟智慧體詳情",
+    "view_agent_tooltip": "開啟 AI 代理詳情",
     "make_leader_tooltip": "設為小隊負責人",
     "remove_member_tooltip": "從小隊移除",
     "status_working": "工作中",

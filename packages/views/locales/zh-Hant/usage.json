@@ -49,7 +49,7 @@
     "kpi_failed_label": "失敗執行 · {{days}}天",
     "kpi_failed_hint": "共 {{total}} 次執行",
     "kpi_rate_label": "失敗率 · {{days}}天",
-    "kpi_agents_label": "受影響智慧體 · {{days}}天",
+    "kpi_agents_label": "受影響 AI 代理 · {{days}}天",
     "kpi_agents_hint": "最多 {{name}} · {{count}} 次",
     "tooltip_rate": "錯誤率",
     "class": {
@@ -58,7 +58,7 @@
       "timeout": "超時",
       "provider": "模型服務",
       "runtime": "執行時",
-      "agent": "智慧體",
+      "agent": "AI 代理",
       "other": "其他"
     },
     "title": "錯誤",
@@ -66,15 +66,15 @@
     "mix_title": "失敗構成 · {{failed}}",
     "mix_label": "失敗構成",
     "codes_label": "錯誤碼",
-    "by_agent": "問題最多的智慧體",
+    "by_agent": "問題最多的 AI 代理",
     "sort_label": "錯誤榜排序依據",
     "sort_failed": "失敗數",
     "sort_rate": "失敗率",
-    "header_agent": "智慧體",
+    "header_agent": "AI 代理",
     "header_failed": "失敗數",
     "header_runs": "執行數",
     "header_rate": "失敗率",
-    "other_agents": "其他智慧體",
+    "other_agents": "其他 AI 代理",
     "low_sample": "所選時間範圍內執行不足 {{count}} 次，失敗率參考價值有限。",
     "no_data": "所選時間範圍內沒有失敗的執行。",
     "show_reasons": "展開錯誤碼",
@@ -84,12 +84,12 @@
   },
   "leaderboard": {
     "title": "排行榜",
-    "caption": "{{count}} 個智慧體",
-    "caption_with_deleted": "{{count}} 個智慧體 · {{deleted}} 個已刪除",
-    "sort_label": "智慧體排序依據",
-    "deleted_agents": "已刪除的智慧體",
-    "other_agents": "其他智慧體",
-    "header_agent": "智慧體",
+    "caption": "{{count}} 個 AI 代理",
+    "caption_with_deleted": "{{count}} 個 AI 代理 · {{deleted}} 個已刪除",
+    "sort_label": "AI 代理排序依據",
+    "deleted_agents": "已刪除的 AI 代理",
+    "other_agents": "其他 AI 代理",
+    "header_agent": "AI 代理",
     "header_tokens": "Token",
     "header_cost": "費用",
     "header_time": "耗時",
@@ -99,11 +99,11 @@
     "usage_totals_pending": "用量彙總仍在處理中",
     "show_all": "展開全部",
     "show_less": "只看前 {{count}} 個",
-    "no_data": "所選時間範圍內暫無智慧體活動。"
+    "no_data": "所選時間範圍內暫無 AI 代理活動。"
   },
   "empty": {
     "title": "暫無消耗資料",
-    "body": "執行智慧體後可檢視 token 用量和耗時。"
+    "body": "執行 AI 代理後可檢視 token 用量和耗時。"
   },
   "duration": {
     "less_than_minute": "<1分鐘"

@@ -1,7 +1,7 @@
 {
   "title": "選擇工作區",
   "members": "成員",
-  "agents": "智慧體",
+  "agents": "AI 代理",
   "select": "選擇工作區",
   "switch": {
     "title": "切換工作區",
@@ -12,10 +12,10 @@
   },
   "empty": "你還沒有加入任何工作區。請聯絡工作區管理員以獲取邀請。",
   "agent": {
-    "title": "智慧體",
-    "empty": "還沒有智慧體",
-    "search_placeholder": "搜尋智慧體...",
-    "coming_soon": "智慧體功能即將上線。"
+    "title": "AI 代理",
+    "empty": "還沒有 AI 代理",
+    "search_placeholder": "搜尋 AI 代理...",
+    "coming_soon": "AI 代理功能即將上線。"
   },
   "actions": {
     "retry": "重試",

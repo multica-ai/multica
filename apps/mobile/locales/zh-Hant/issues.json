@@ -3,7 +3,7 @@
     "all": "全部",
     "created": "我建立的",
     "assigned": "我負責的",
-    "agents": "智慧體",
+    "agents": "AI 代理",
     "members": "成員"
   },
   "status": {
@@ -118,7 +118,7 @@
     "filtered": "沒有符合當前篩選條件的任務。",
     "assigned": "沒有分配給你的任務。",
     "created": "你還沒有建立任務。",
-    "agents": "沒有分配給智慧體或小隊的任務。",
+    "agents": "沒有分配給 AI 代理或小隊的任務。",
     "all": "該工作區還沒有任務。",
     "members": "沒有分配給成員的任務。"
   },
@@ -144,7 +144,7 @@
   },
   "cancel": {
     "title": "取消執行？",
-    "message": "智慧體會在當前步驟結束後停止。",
+    "message": "AI 代理會在當前步驟結束後停止。",
     "keep_running": "繼續執行",
     "cancel_task": "取消執行",
     "waiting_for_connection": "等待網路連線...",
@@ -159,7 +159,7 @@
   },
   "picker": {
     "unassigned": "未分配",
-    "agent": "智慧體",
+    "agent": "AI 代理",
     "needs_runtime": "需要執行時",
     "leader_needs_runtime": "負責人需要執行時",
     "squad": "小隊",
@@ -168,9 +168,9 @@
     "no_projects": "該工作區還沒有專案。\n請在網頁端建立。",
     "no_labels": "該工作區還沒有標籤。",
     "create_label": "建立 \"{{name}}\"",
-    "no_members_agents": "該工作區還沒有成員或智慧體。",
+    "no_members_agents": "該工作區還沒有成員或 AI 代理。",
     "people": "成員",
-    "agents": "智慧體",
+    "agents": "AI 代理",
     "squads": "小隊",
     "issues": "任務",
     "everyone": "所有人（@all）",
@@ -178,7 +178,7 @@
     "search_people": "搜尋成員",
     "search_projects": "搜尋專案",
     "search_labels": "搜尋標籤",
-    "search_members_agents": "搜尋成員或智慧體",
+    "search_members_agents": "搜尋成員或 AI 代理",
     "search_people_issues": "搜尋成員或任務",
     "reference_issue": "引用任務",
     "clear": "清除"
@@ -239,7 +239,7 @@
   "runs": {
     "active": "進行中",
     "past": "歷史",
-    "title": "智慧體執行",
+    "title": "AI 代理執行",
     "open_transcript": "開啟{{summary}}的執行記錄",
     "transcript": {
       "title": "執行記錄",
@@ -262,7 +262,7 @@
     "status": {
       "queued": "排隊中",
       "deferred": "已延後",
-      "dispatched": "已交給智慧體",
+      "dispatched": "已交給 AI 代理",
       "running": "執行中",
       "waiting_local_directory": "等待本地目錄可用",
       "completed": "執行成功",
@@ -274,7 +274,7 @@
   "new_badge": "新",
   "jump_a11y_other": "跳到 {{count}} 條新訊息",
   "a11y": {
-    "agent_working": "智慧體處理中 — 開啟執行",
+    "agent_working": "AI 代理處理中 — 開啟執行",
     "remove_mention": "移除提及 {{name}}",
     "retry_upload": "重試上傳 {{name}}",
     "open_file": "開啟 {{name}}",
