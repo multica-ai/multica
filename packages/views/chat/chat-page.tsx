@@ -182,13 +182,30 @@ export function ChatPage() {
     }
   };
   const { currentSession: filteredCurrentSession, setActiveSession: setFilteredActiveSession } = c;
+  const previousSelection = useRef<{ wsId: string; id: string; projectId: string | null } | null>(null);
   useEffect(() => {
-    if (!isCurrentChatRoute || getCurrentSlug() !== workspaceSlug) return;
-    if (filterId && filteredCurrentSession && filteredCurrentSession.project_id !== filterId) {
-      setFilteredActiveSession(null);
-      setComposingNew(false);
+    if (!isCurrentChatRoute || getCurrentSlug() !== workspaceSlug) {
+      previousSelection.current = null;
+      return;
     }
-  }, [filterId, filteredCurrentSession, setFilteredActiveSession, isCurrentChatRoute, workspaceSlug]);
+    // URL reconciliation may have selected a different session earlier in this
+    // commit. Wait for its render rather than acting on the outgoing snapshot.
+    if ((filteredCurrentSession?.id ?? null) !== useChatStore.getState().activeSessionId) return;
+    const previous = previousSelection.current;
+    previousSelection.current = filteredCurrentSession
+      ? { wsId: c.wsId, id: filteredCurrentSession.id, projectId: filteredCurrentSession.project_id ?? null }
+      : null;
+    if (filterId && filteredCurrentSession && filteredCurrentSession.project_id !== filterId) {
+      if (previous?.wsId === c.wsId && previous.id === filteredCurrentSession.id && previous.projectId === filterId) {
+        // The selected conversation moved out of this project in the cache.
+        setFilteredActiveSession(null);
+        setComposingNew(false);
+      } else {
+        // Opening/creating another conversation takes precedence over a filter.
+        setProjectFilter({ wsId: c.wsId, id: null });
+      }
+    }
+  }, [c.wsId, filterId, filteredCurrentSession, setFilteredActiveSession, isCurrentChatRoute, workspaceSlug]);
 
   // Single archive path for both entry points (thread-list row + conversation
   // header). When the archived chat is the one in view, move the pane off it:
@@ -212,6 +229,7 @@ export function ChatPage() {
     // A manual ⊕ pick outranks a pending deep link; when called FROM the
     // intent effect the ref is already set to this param, so this is a no-op.
     supersedeAgentIntent();
+    setProjectFilter({ wsId: c.wsId, id: null });
     if (agent) c.handleStartNewChat(agent);
     else c.handleNewChat();
     setComposingNew(true);

@@ -19,4 +19,3 @@ export function toPreview(content: string): string {
     .replace(/\s+/g, " ")
     .trim();
 }
-

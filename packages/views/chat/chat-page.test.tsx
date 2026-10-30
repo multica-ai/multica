@@ -578,4 +578,57 @@ describe("ChatPage project filter", () => {
     view.rerender();
     expect(screen.getByRole("combobox")).toHaveTextContent("All projects");
   });
+
+  it("review regression: preserves a newly created unscoped session after send", async () => {
+    const view = renderPage("session=one");
+    await userEvent.click(screen.getByRole("combobox", { name: "Project" }));
+    await userEvent.click(await screen.findByRole("option", { name: "Project Alpha" }));
+    act(() => mockSetActiveSession(null));
+    projectState.sessions = [...projectState.sessions, chat("newly-sent", null)];
+    act(() => mockSetActiveSession("newly-sent"));
+    expect(storeRef.current.activeSessionId).toBe("newly-sent");
+    expect(view.replace).toHaveBeenLastCalledWith("/acme/chat?session=newly-sent");
+    expect(screen.getByRole("combobox")).toHaveTextContent("All projects");
+    expect(screen.getByText("Thread newly-sent")).toBeVisible();
+  });
+
+  it("review regression: honors an external project chat deep link after route return", async () => {
+    const view = renderPage("session=one");
+    await userEvent.click(screen.getByRole("combobox", { name: "Project" }));
+    await userEvent.click(await screen.findByRole("option", { name: "Project Alpha" }));
+    view.rerender({ pathname: "/acme/projects/p2", search: "" });
+    view.rerender({ pathname: "/acme/chat", search: "session=two" });
+    expect(storeRef.current.activeSessionId).toBe("two");
+    expect(screen.getByRole("combobox")).toHaveTextContent("All projects");
+    expect(screen.getByText("Thread two")).toBeVisible();
+  });
+
+  it.each(["url", "selection"] as const)("preserves an explicit %s outside the filter under StrictMode", async (source) => {
+    const view = renderPage("session=one", { strict: true });
+    await userEvent.click(screen.getByRole("combobox", { name: "Project" }));
+    await userEvent.click(await screen.findByRole("option", { name: "Project Alpha" }));
+    mockSetActiveSession.mockClear();
+    view.replace.mockClear();
+    if (source === "url") view.rerender({ search: "session=two" });
+    else act(() => mockSetActiveSession("two"));
+    expect(storeRef.current.activeSessionId).toBe("two");
+    expect(mockSetActiveSession).not.toHaveBeenCalledWith(null);
+    expect(view.replace).not.toHaveBeenCalledWith("/acme/chat");
+    expect(screen.getByRole("combobox")).toHaveTextContent("All projects");
+    expect(screen.getByText("Thread two")).toBeVisible();
+  });
+
+  it("waits for a deep-linked session to load before reconciling its project", async () => {
+    const view = renderPage("session=one");
+    await userEvent.click(screen.getByRole("combobox", { name: "Project" }));
+    await userEvent.click(await screen.findByRole("option", { name: "Project Alpha" }));
+    projectState.sessions = projectState.sessions.filter((s) => s.id !== "two");
+    view.rerender({ search: "session=two" });
+    expect(storeRef.current.activeSessionId).toBe("two");
+    projectState.sessions = [...projectState.sessions, chat("two", "p2")];
+    view.rerender();
+    expect(storeRef.current.activeSessionId).toBe("two");
+    expect(screen.getByRole("combobox")).toHaveTextContent("All projects");
+    expect(screen.getByText("Thread two")).toBeVisible();
+  });
 });

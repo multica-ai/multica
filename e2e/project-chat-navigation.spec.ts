@@ -31,7 +31,8 @@ const project = { id: projectId, workspace_id: wsId, title: "Project Alpha", des
 
 test.use({ viewport: { width: 1440, height: 1000 }, locale: "en-US", serviceWorkers: "block" });
 
-test("project Chats discovery and scoped chat actions with synthetic HTTP and WS", async ({ page, context, baseURL }, testInfo) => {
+for (const scenario of ["discovery and scoped actions", "new unscoped conversation"] as const) {
+test(`project Chats ${scenario} with synthetic HTTP and WS`, async ({ page, context, baseURL }, testInfo) => {
   test.setTimeout(180_000);
   const baseline = process.env.PROJECT_CHAT_BASELINE === "1";
   const origin = new URL(baseURL ?? "http://localhost:3000").origin;
@@ -63,6 +64,7 @@ test("project Chats discovery and scoped chat actions with synthetic HTTP and WS
       case "/api/agents": return [agent];
       case "/api/chat/sessions": return sessions;
       case "/api/chat/pending-tasks/has-any": return { has_pending: false };
+      case `/api/tasks/${taskId}/messages`: return [];
       case "/api/projects": return { projects, total: projects.length };
       case `/api/projects/${projectId}`: return projects[0];
       case `/api/projects/${projectId}/resources`: return [];
@@ -103,11 +105,27 @@ test("project Chats discovery and scoped chat actions with synthetic HTTP and WS
       default: return undefined;
     }
   };
+  const messages = new Map<string, unknown[]>();
   const unexpected: string[] = [];
   await context.route("**/*", async route => {
     const url = new URL(route.request().url());
     if (url.origin !== origin) return route.abort();
     if (!url.pathname.startsWith("/api/")) return route.continue();
+    if (url.pathname === "/api/chat/sessions" && route.request().method() === "POST") {
+      const input = route.request().postDataJSON();
+      const created = { ...session, ...input, id: "44444444-4444-4444-8444-444444444449", title: "New conversation" };
+      sessions.push(created);
+      return route.fulfill({ status: 201, contentType: "application/json", body: JSON.stringify(created) });
+    }
+    if (url.pathname.endsWith("/messages") && route.request().method() === "POST") {
+      const id = url.pathname.split("/")[4]!;
+      messages.set(id, [{ id: "66666666-6666-4666-8666-666666666666", chat_session_id: id,
+        role: "user", content: route.request().postDataJSON().content, task_id: taskId, created_at: timestamp }]);
+      return route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({
+        message_id: "66666666-6666-4666-8666-666666666666", task_id: taskId,
+        created_at: timestamp, supports_queue: true, queued: false,
+      }) });
+    }
     const match = url.pathname.match(/^\/api\/chat\/sessions\/([^/]+)(.*)$/);
     if (match) {
       const row = sessions.find(s => s.id === match[1]);
@@ -118,7 +136,7 @@ test("project Chats discovery and scoped chat actions with synthetic HTTP and WS
         else Object.assign(row, update);
       } else if (route.request().method() === "DELETE") {
         sessions = sessions.filter(s => s.id !== match[1]); body = {};
-      } else if (match[2] === "/messages/page") body = { messages: [], has_more: false, limit: 50 };
+      } else if (match[2] === "/messages/page") body = { messages: messages.get(match[1]!) ?? [], has_more: false, limit: 50 };
       else if (match[2] === "/pending-task") body = {};
       else if (match[2] === "/draft-restores") body = [];
       else if (match[2] === "/read") body = {};
@@ -162,6 +180,32 @@ test("project Chats discovery and scoped chat actions with synthetic HTTP and WS
   await expect(page.getByText("Alpha recent", { exact: true }).first()).toBeVisible();
   await expect(page.getByRole("option", { name: "Project Alpha", exact: true })).toHaveCount(0);
   await page.screenshot({ path: testInfo.outputPath("head-chat-filter.png"), fullPage: true });
+  if (scenario === "new unscoped conversation") {
+    await page.getByRole("button", { name: "New chat", exact: true }).click();
+    const content = "Review new unscoped conversation";
+    await page.locator('[contenteditable="true"]').last().fill(content);
+    const created = page.waitForResponse(r => r.url().endsWith("/api/chat/sessions") && r.request().method() === "POST");
+    const sent = page.waitForResponse(r => r.url().endsWith("/messages") && r.request().method() === "POST");
+    await page.getByRole("button", { name: "Send", exact: true }).click();
+    expect((await created).status()).toBe(201);
+    expect((await sent).status()).toBe(200);
+    expect(sessions.find(s => s.id.endsWith("449"))?.project_id).toBeNull();
+    await expect(page).toHaveURL(/session=44444444-4444-4444-8444-444444444449/);
+    await expect(filter).toContainText("All projects");
+    await expect(page.getByText("New conversation", { exact: true }).first()).toBeVisible();
+    await expect(page.getByText(content, { exact: true }).first()).toBeVisible();
+    // Reopen through the list to verify the sent transcript remains reachable.
+    const row = (title: string) => page.locator('div[tabindex="0"]').filter({ has: page.getByText(title, { exact: true }) });
+    await row("Beta conversation").click();
+    await expect(page).toHaveURL(/session=44444444-4444-4444-8444-444444444446/);
+    await row("New conversation").click();
+    await expect(page).toHaveURL(/session=44444444-4444-4444-8444-444444444449/);
+    await expect(page.getByText(content, { exact: true }).first()).toBeVisible();
+    await page.screenshot({ path: testInfo.outputPath("new-chat-selected.png"), fullPage: true });
+    expect(errors).toEqual([]);
+    expect(unexpected).toEqual([]);
+    return;
+  }
   // Archiving advances within Alpha, never into another project's row.
   const selectedRow = page.locator('div[tabindex="0"]').filter({ has: page.getByText("Alpha recent", { exact: true }) });
   await selectedRow.hover();
@@ -200,3 +244,4 @@ test("project Chats discovery and scoped chat actions with synthetic HTTP and WS
   expect(errors).toEqual([]);
   expect(unexpected).toEqual([]);
 });
+}
