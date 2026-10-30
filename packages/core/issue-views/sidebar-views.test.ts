@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { IssueView } from "../api/schemas";
-import { defaultSidebarViewOrder, resolveSidebarViewItems } from "./sidebar-views";
+import { defaultSidebarViewOrder, reorderSidebarViewOrder, resolveSidebarViewItems } from "./sidebar-views";
 
 const view = (id: string, owner_id: string): IssueView => ({
   id,
@@ -40,5 +40,20 @@ describe("resolveSidebarViewItems", () => {
     );
     expect(items.map((item) => item.id)).toEqual(["view:b", "builtin:all_issues"]);
     expect(items[1]).toMatchObject({ kind: "builtin", key: "all_issues" });
+  });
+});
+
+describe("reorderSidebarViewOrder", () => {
+  it("moves visible ids and keeps unresolved ones in their slots", () => {
+    expect(
+      reorderSidebarViewOrder(
+        ["builtin:my_issues", "view:loading", "view:a", "builtin:all_issues"],
+        ["builtin:all_issues", "builtin:my_issues", "view:a"],
+      ),
+    ).toEqual(["builtin:all_issues", "view:loading", "builtin:my_issues", "view:a"]);
+  });
+
+  it("appends visible ids the stored order did not have", () => {
+    expect(reorderSidebarViewOrder(["view:a", "view:a"], ["view:b", "view:a"])).toEqual(["view:b", "view:a"]);
   });
 });

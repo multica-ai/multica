@@ -46,6 +46,7 @@ import { DeleteViewDialog } from "../../issue-views/delete-view-dialog";
 import { ViewNameInput } from "../../issue-views/view-name-input";
 import { useBuiltinViewNavigation } from "../../issue-views/builtin-views";
 import { useT } from "../../i18n";
+import { navigatesInPlace } from "../../navigation";
 import { PANEL_ROW_CLASS, PanelCount, PanelLink, PanelList, PanelSection, isPathWithin, panelRowStateClass } from "../panel-nav";
 import { SidebarIssueList, TREE_ROW_BUTTON_CLASS, TreeRow } from "./sidebar-tree";
 
@@ -340,7 +341,7 @@ function BuiltinViewRow({
             event.preventDefault();
             return;
           }
-          builtinNav.prepare(builtin);
+          if (navigatesInPlace(event)) builtinNav.prepare(builtin);
         }}
         trailing={
           <RowMenu label={t(($) => $.panels.work.view_actions, { name: label })} open={menuOpen} onOpenChange={setMenuOpen}>
@@ -453,7 +454,7 @@ function SavedViewRow({
             event.preventDefault();
             return;
           }
-          setActive(target.containerKey, view.id);
+          if (navigatesInPlace(event)) setActive(target.containerKey, view.id);
         }}
         trailing={
           <RowMenu label={t(($) => $.panels.work.view_actions, { name: view.name })} open={menuOpen} onOpenChange={setMenuOpen}>

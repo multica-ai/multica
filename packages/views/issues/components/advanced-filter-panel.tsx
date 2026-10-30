@@ -926,4 +926,3 @@ export function AdvancedFilterPanel({
     </div>
   );
 }
-

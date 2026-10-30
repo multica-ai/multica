@@ -68,46 +68,68 @@ export function resolveSidebarViewItems(
 }
 
 /**
+ * Puts the visible ids, in their new order, back into the slots visible ids
+ * held, so starred views that do not resolve yet keep their place.
+ */
+export function reorderSidebarViewOrder(order: readonly string[], visibleIds: readonly string[]): string[] {
+  const visible = new Set(visibleIds);
+  const queue = [...visibleIds];
+  const next = [...new Set(order)].map((id) => (visible.has(id) ? queue.shift()! : id));
+  return [...next, ...queue];
+}
+
+/**
  * The user's starred views in sidebar order, with the writes that rearrange
  * them. Until the first write the list is derived, so views the user creates
  * elsewhere still show up.
  */
 export function useSidebarViews(wsId: string, userId: string | undefined) {
-  const { data: views = EMPTY_VIEWS, isPending: viewsPending } = useQuery(issueViewEverywhereOptions(wsId));
-  const { data: preference } = useQuery(issueViewPreferenceOptions(wsId, SIDEBAR_VIEWS_SCOPE));
-  const { data: pins = EMPTY_PINS } = useQuery({
+  const viewsQuery = useQuery(issueViewEverywhereOptions(wsId));
+  const views = viewsQuery.data ?? EMPTY_VIEWS;
+  const preferenceQuery = useQuery(issueViewPreferenceOptions(wsId, SIDEBAR_VIEWS_SCOPE));
+  const pinsQuery = useQuery({
     ...pinListOptions(wsId, userId ?? ""),
     enabled: !!wsId && !!userId,
   });
+  const pins = pinsQuery.data ?? EMPTY_PINS;
   const update = useUpdateIssueViewPreference(wsId, SIDEBAR_VIEWS_SCOPE);
 
+  const preference = preferenceQuery.data;
   const savedOrder = preference && preference.updated_at !== "" ? preference.prefs.order : null;
-  const items = useMemo(() => {
-    const order =
+  const order = useMemo(
+    () =>
       savedOrder ??
       defaultSidebarViewOrder(
         views,
         userId,
         pins.filter((pin) => pin.item_type === "view").map((pin) => pin.item_id),
-      );
-    return resolveSidebarViewItems(order, views);
-  }, [savedOrder, views, userId, pins]);
-
-  const write = useCallback(
-    (order: string[]) => update.mutate({ hidden: [], order }),
-    [update],
+      ),
+    [savedOrder, views, userId, pins],
   );
-  const ids = useMemo(() => items.map((item) => item.id), [items]);
+  const items = useMemo(() => resolveSidebarViewItems(order, views), [order, views]);
+
+  // A write replaces the whole stored order, so it waits until that order is
+  // known: the saved one, or the default derived from views and pins.
+  const ready =
+    preferenceQuery.isSuccess &&
+    (savedOrder !== null || (viewsQuery.isSuccess && (!userId || pinsQuery.isSuccess)));
+  const write = useCallback(
+    (next: string[]) => {
+      if (ready) update.mutate({ hidden: [], order: next });
+    },
+    [ready, update],
+  );
 
   return {
     items,
     /** Saved views are still loading; built-ins render regardless. */
-    viewsPending,
-    isStarred: useCallback((id: string) => ids.includes(id), [ids]),
+    viewsPending: viewsQuery.isPending,
+    isStarred: useCallback((id: string) => order.includes(id), [order]),
     star: useCallback((id: string) => {
-      if (!ids.includes(id)) write([...ids, id]);
-    }, [ids, write]),
-    unstar: useCallback((id: string) => write(ids.filter((other) => other !== id)), [ids, write]),
-    reorder: write,
+      if (!order.includes(id)) write([...order, id]);
+    }, [order, write]),
+    unstar: useCallback((id: string) => write(order.filter((other) => other !== id)), [order, write]),
+    /** Takes the visible items' ids in their new order. */
+    reorder: useCallback((visibleIds: string[]) => write(reorderSidebarViewOrder(order, visibleIds)), [order, write]),
   };
 }

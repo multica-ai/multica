@@ -458,19 +458,43 @@ export function projectGanttIssuesOptions(
   });
 }
 
-/** The table query's page cap; a longer sidebar list stops growing there. */
-const SIDEBAR_TABLE_MAX_LIMIT = 100;
+/** Both list endpoints cap a page here, so a longer sidebar list is fetched in pages. */
+const SIDEBAR_MAX_PAGE = 100;
 
 async function listSidebarTableIssues(query: IssueTableQuerySpec, limit: number): Promise<ListIssuesResponse> {
-  const page = await api.listIssueTableRows({
-    query,
-    group: { kind: "none" },
-    group_key: null,
-    hierarchy: { enabled: false },
-    parent_id: null,
-    page: { limit: Math.min(limit, SIDEBAR_TABLE_MAX_LIMIT) },
-  });
-  return { issues: page.rows.map((row) => row.issue), total: page.total };
+  const issues: Issue[] = [];
+  let total = 0;
+  let cursor: string | null = null;
+  do {
+    const page = await api.listIssueTableRows({
+      query,
+      group: { kind: "none" },
+      group_key: null,
+      hierarchy: { enabled: false },
+      parent_id: null,
+      page: { limit: Math.min(limit - issues.length, SIDEBAR_MAX_PAGE), cursor },
+    });
+    issues.push(...page.rows.map((row) => row.issue));
+    total = page.total;
+    cursor = page.next_cursor;
+  } while (cursor && issues.length < limit);
+  return { issues, total };
+}
+
+async function listSidebarIssues(params: ListIssuesParams, limit: number): Promise<ListIssuesResponse> {
+  const issues: Issue[] = [];
+  let total = 0;
+  do {
+    const page = await api.listIssues({
+      ...params,
+      limit: Math.min(limit - issues.length, SIDEBAR_MAX_PAGE),
+      offset: issues.length,
+    });
+    issues.push(...page.issues);
+    total = page.total;
+    if (page.issues.length === 0) break;
+  } while (issues.length < limit && issues.length < total);
+  return { issues, total };
 }
 
 /** The first `limit` issues of a sidebar list, with the filtered total. */
@@ -485,7 +509,7 @@ export function sidebarIssuesOptions(
     queryFn: () =>
       "table" in request
         ? listSidebarTableIssues(request.table, limit)
-        : api.listIssues({ ...request, limit, offset: 0 }),
+        : listSidebarIssues(request, limit),
   });
 }
 

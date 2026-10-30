@@ -53,7 +53,7 @@ import { issueViewTarget } from "@multica/core/issue-views/view-target";
 import { ActorAvatar } from "../common/actor-avatar";
 import { CollectionPageHeader, CollectionPageHeaderAction } from "../layout/collection-page";
 import { PAGE_TOOLBAR } from "../layout/page-header";
-import { rowLinkInteractiveProps, useRowLink } from "../navigation";
+import { navigatesInPlace, rowLinkInteractiveProps, useRowLink } from "../navigation";
 import { useT } from "../i18n";
 import { useBuiltinViewNavigation } from "./builtin-views";
 import { DeleteViewDialog } from "./delete-view-dialog";
@@ -234,7 +234,7 @@ export function AllViewsPage() {
                 className="h-10 cursor-pointer"
                 {...link}
                 onClick={(event) => {
-                  if (!event.metaKey && !event.ctrlKey && !event.shiftKey) builtinNav.prepare(key);
+                  if (navigatesInPlace(event)) builtinNav.prepare(key);
                   link.onClick(event);
                 }}
               >
@@ -266,7 +266,7 @@ export function AllViewsPage() {
                 className="h-10 cursor-pointer"
                 {...link}
                 onClick={(event) => {
-                  if (!event.metaKey && !event.ctrlKey && !event.shiftKey) {
+                  if (navigatesInPlace(event)) {
                     actions.open(view);
                     return;
                   }
