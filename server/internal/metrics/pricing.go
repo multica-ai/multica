@@ -21,14 +21,16 @@ type ModelPrice struct {
 }
 
 var modelPrices = map[string]ModelPrice{
-	// GPT-5.6 series and GPT-6 Astra (Codex `codex` provider). Official rates
-	// from OpenAI's GPT-5.6 announcement (openai.com/index/previewing-gpt-5-6-sol)
-	// and Astra's published $10 / $50. For 5.6+ (including Astra) cache read is
-	// generally the 90%-off cached-input rate (0.1x input). Cache write is billed
-	// at 1.25x the uncached input rate — unlike earlier OpenAI SKUs, which don't
-	// bill cache writes separately. Codex app-server v0.147 reports cache-write
-	// input separately while including it in the raw input total; the collector
-	// normalizes those into mutually exclusive billing buckets.
+	// GPT-5.6 series and GPT-6 (Codex `codex` provider): standard short-context
+	// rates from developers.openai.com/api/docs/pricing (2026-10-31). GPT-5.6
+	// Sol is on promotional pricing through at least 2026-11-21; update the row
+	// when it ends. For 5.6+ (including Astra) cache read is generally the
+	// 90%-off cached-input rate (0.1x input). Cache write is billed at 1.25x the
+	// uncached input rate. Earlier OpenAI SKUs don't bill cache writes
+	// separately, so their written tokens bill as ordinary input and
+	// CacheWritePerM mirrors InputPerM. Codex app-server v0.147 reports
+	// cache-write input separately while including it in the raw input total;
+	// the collector normalizes those into mutually exclusive billing buckets.
 	"openai:gpt-6-astra": {Provider: "openai", Model: "gpt-6-astra", InputPerM: 10.00, CacheReadPerM: 1.00, CacheWritePerM: 12.50, OutputPerM: 50.00},
 	// Standard short-context rates from developers.openai.com/api/docs/models/.
 	// GPT-6.1 Sol and Terra cache at 0.05x input, not GPT-6 Sol's 0.1x.
@@ -36,14 +38,14 @@ var modelPrices = map[string]ModelPrice{
 	"openai:gpt-6.1-terra": {Provider: "openai", Model: "gpt-6.1-terra", InputPerM: 1.00, CacheReadPerM: 0.05, CacheWritePerM: 1.25, OutputPerM: 5.00},
 	"openai:gpt-6-sol":     {Provider: "openai", Model: "gpt-6-sol", InputPerM: 2.00, CacheReadPerM: 0.20, CacheWritePerM: 2.50, OutputPerM: 10.00},
 	"openai:gpt-6-luna":    {Provider: "openai", Model: "gpt-6-luna", InputPerM: 0.10, CacheReadPerM: 0.01, CacheWritePerM: 0.125, OutputPerM: 0.50},
-	"openai:gpt-5.6-sol":   {Provider: "openai", Model: "gpt-5.6-sol", InputPerM: 5.00, CacheReadPerM: 0.50, CacheWritePerM: 6.25, OutputPerM: 30.00},
-	"openai:gpt-5.6-terra": {Provider: "openai", Model: "gpt-5.6-terra", InputPerM: 2.50, CacheReadPerM: 0.25, CacheWritePerM: 3.125, OutputPerM: 15.00},
-	"openai:gpt-5.6-luna":  {Provider: "openai", Model: "gpt-5.6-luna", InputPerM: 1.00, CacheReadPerM: 0.10, CacheWritePerM: 1.25, OutputPerM: 6.00},
-	"openai:gpt-5.5":       {Provider: "openai", Model: "gpt-5.5", InputPerM: 5.00, CacheReadPerM: 0.50, CacheWritePerM: 0.50, OutputPerM: 30.00},
-	"openai:gpt-5.4":       {Provider: "openai", Model: "gpt-5.4", InputPerM: 2.50, CacheReadPerM: 0.25, CacheWritePerM: 0.25, OutputPerM: 15.00},
-	"openai:gpt-5.4-mini":  {Provider: "openai", Model: "gpt-5.4-mini", InputPerM: 0.75, CacheReadPerM: 0.075, CacheWritePerM: 0.075, OutputPerM: 4.50},
-	"openai:gpt-5.3-codex": {Provider: "openai", Model: "gpt-5.3-codex", InputPerM: 1.75, CacheReadPerM: 0.175, CacheWritePerM: 0.175, OutputPerM: 14.00},
-	"openai:gpt-5.2-codex": {Provider: "openai", Model: "gpt-5.2-codex", InputPerM: 1.75, CacheReadPerM: 0.175, CacheWritePerM: 0.175, OutputPerM: 14.00},
+	"openai:gpt-5.6-sol":   {Provider: "openai", Model: "gpt-5.6-sol", InputPerM: 4.00, CacheReadPerM: 0.40, CacheWritePerM: 5.00, OutputPerM: 20.00},
+	"openai:gpt-5.6-terra": {Provider: "openai", Model: "gpt-5.6-terra", InputPerM: 2.00, CacheReadPerM: 0.20, CacheWritePerM: 2.50, OutputPerM: 12.00},
+	"openai:gpt-5.6-luna":  {Provider: "openai", Model: "gpt-5.6-luna", InputPerM: 0.20, CacheReadPerM: 0.02, CacheWritePerM: 0.25, OutputPerM: 1.20},
+	"openai:gpt-5.5":       {Provider: "openai", Model: "gpt-5.5", InputPerM: 5.00, CacheReadPerM: 0.50, CacheWritePerM: 5.00, OutputPerM: 30.00},
+	"openai:gpt-5.4":       {Provider: "openai", Model: "gpt-5.4", InputPerM: 2.50, CacheReadPerM: 0.25, CacheWritePerM: 2.50, OutputPerM: 15.00},
+	"openai:gpt-5.4-mini":  {Provider: "openai", Model: "gpt-5.4-mini", InputPerM: 0.75, CacheReadPerM: 0.075, CacheWritePerM: 0.75, OutputPerM: 4.50},
+	"openai:gpt-5.3-codex": {Provider: "openai", Model: "gpt-5.3-codex", InputPerM: 1.75, CacheReadPerM: 0.175, CacheWritePerM: 1.75, OutputPerM: 14.00},
+	"openai:gpt-5.2-codex": {Provider: "openai", Model: "gpt-5.2-codex", InputPerM: 1.75, CacheReadPerM: 0.175, CacheWritePerM: 1.75, OutputPerM: 14.00},
 	// Anthropic's Sonnet 5 launch price is $2 / $10 through 2026-08-31. This
 	// static table cannot schedule the published post-intro $3 / $15 change yet,
 	// so keep the intro rate here and update the row when catalog support exists.

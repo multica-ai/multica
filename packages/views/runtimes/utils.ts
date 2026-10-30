@@ -187,8 +187,6 @@ export function formatUsd(n: number): string {
 // OpenAI historically did the same, but its GPT-5.6+ generation bills cache
 // writes at 1.25× input (cache reads generally get the 90% cached-input
 // discount; GPT-6.1 Sol and Terra get 95%), so those rows carry a distinct cacheWrite.
-// Codex usage doesn't yet stream cache-write tokens, so that rate isn't
-// exercised today.
 //
 // The resolver matches exact keys after stripping a trailing date snapshot
 // (see `resolvePricing` below). It deliberately does NOT do startsWith
@@ -250,22 +248,21 @@ const MODEL_PRICING: Record<
   // -- OpenAI: dotted-minor Codex catalog SKUs. Each generation is priced
   //    independently — no fallback to `gpt-5`. Entries track
   //    `server/pkg/agent/models.go` (Codex provider list).
-  //    gpt-6-astra and gpt-5.6 (sol/terra/luna) use OpenAI's official rates.
-  //    5.6+ is the first OpenAI generation to bill cache writes separately:
-  //    cacheRead generally = 0.1x input, cacheWrite = 1.25x
-  //    input (see the header note above). Codex usage doesn't yet report
-  //    cache-write tokens, so cacheWrite isn't exercised today, but the rate
-  //    is kept correct for when it is.
+  //    GPT-6 and GPT-5.6 rows use OpenAI's standard short-context rates
+  //    (developers.openai.com/api/docs/pricing, 2026-10-31). GPT-5.6 Sol is
+  //    on promotional pricing through at least 2026-11-21; update the row
+  //    when it ends. 5.6+ is the first OpenAI generation to bill cache writes
+  //    separately: cacheRead generally = 0.1x input, cacheWrite = 1.25x input
+  //    (see the header note above). Mirror server/internal/metrics/pricing.go.
   "gpt-6-astra":        { input: 10,   output: 50,   cacheRead: 1.00,  cacheWrite: 12.50 },
-  // Standard short-context rates: developers.openai.com/api/docs/models/.
   // GPT-6.1 Sol and Terra's cached input is 0.05x input; GPT-6 Sol's is 0.1x.
   "gpt-6.1-sol":        { input: 2,    output: 10,   cacheRead: 0.10,  cacheWrite: 2.50 },
   "gpt-6.1-terra":      { input: 1,    output: 5,    cacheRead: 0.05,  cacheWrite: 1.25 },
   "gpt-6-sol":          { input: 2,    output: 10,   cacheRead: 0.20,  cacheWrite: 2.50 },
   "gpt-6-luna":         { input: 0.10, output: 0.50, cacheRead: 0.01,  cacheWrite: 0.125 },
-  "gpt-5.6-sol":        { input: 5,    output: 30,   cacheRead: 0.50,  cacheWrite: 6.25 },
-  "gpt-5.6-terra":      { input: 2.50, output: 15,   cacheRead: 0.25,  cacheWrite: 3.125 },
-  "gpt-5.6-luna":       { input: 1,    output: 6,    cacheRead: 0.10,  cacheWrite: 1.25 },
+  "gpt-5.6-sol":        { input: 4,    output: 20,   cacheRead: 0.40,  cacheWrite: 5 },
+  "gpt-5.6-terra":      { input: 2,    output: 12,   cacheRead: 0.20,  cacheWrite: 2.50 },
+  "gpt-5.6-luna":       { input: 0.20, output: 1.20, cacheRead: 0.02,  cacheWrite: 0.25 },
   "gpt-5.5":            { input: 5,    output: 30,   cacheRead: 0.50,  cacheWrite: 5 },
   "gpt-5.4-mini":       { input: 0.75, output: 4.50, cacheRead: 0.075, cacheWrite: 0.75 },
   "gpt-5.4":            { input: 2.50, output: 15,   cacheRead: 0.25,  cacheWrite: 2.50 },
