@@ -14,6 +14,7 @@ export type ShortcutActionId =
   | "findInIssue"
   | "archiveInboxItem"
   | "send"
+  | "toggleWorkspaceSwitcher"
   | "goBack"
   | "goForward"
   | "goInbox"
@@ -101,6 +102,12 @@ export const SHORTCUT_ACTIONS: readonly ShortcutActionDefinition[] = [
     allowInEditable: false,
   },
   { id: "send", category: "general", defaultShortcut: primary("Enter"), allowInEditable: true },
+  {
+    id: "toggleWorkspaceSwitcher",
+    category: "navigation",
+    defaultShortcut: createShortcutChord("O", { primary: true, shift: true }),
+    allowInEditable: true,
+  },
   // Browser-style history navigation (Mod+[ / Mod+]). Neither bracket is
   // app-owned (PRIMARY_RESERVED_KEYS) nor browser-owned
   // (BROWSER_ONLY_PRIMARY_RESERVED_KEYS), so both are recordable on every

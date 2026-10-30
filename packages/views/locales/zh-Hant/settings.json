@@ -263,6 +263,10 @@
         "label": "傳送",
         "description": "也用於提交新任務。"
       },
+      "toggleWorkspaceSwitcher": {
+        "label": "顯示／隱藏工作區切換器",
+        "description": ""
+      },
       "goBack": {
         "label": "後退",
         "description": "像瀏覽器一樣在歷史記錄中後退。"

@@ -263,6 +263,10 @@
         "label": "送信",
         "description": "新しいタスクの作成にも使えます。"
       },
+      "toggleWorkspaceSwitcher": {
+        "label": "ワークスペース切り替えメニューを開閉",
+        "description": ""
+      },
       "goBack": {
         "label": "戻る",
         "description": "ブラウザーのように履歴を戻ります。"

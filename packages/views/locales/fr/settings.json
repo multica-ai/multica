@@ -265,6 +265,10 @@
         "label": "Envoyer",
         "description": "Permet aussi de créer des tâches."
       },
+      "toggleWorkspaceSwitcher": {
+        "label": "Afficher/masquer le sélecteur d’espace de travail",
+        "description": ""
+      },
       "goBack": {
         "label": "Revenir en arrière",
         "description": "Reculer dans l'historique, comme dans un navigateur."
