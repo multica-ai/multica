@@ -8,6 +8,8 @@ import { renderWithI18n } from "../../test/i18n";
 // The detail page's trigger row: what a schedule row says about itself, and
 // the edit entry it grew in MUL-7478.
 
+const mockUpdateTrigger = vi.hoisted(() => vi.fn().mockResolvedValue({}));
+
 vi.mock("@multica/core/hooks", () => ({ useWorkspaceId: () => "ws-test" }));
 vi.mock("@multica/core/paths", () => ({
   useWorkspacePaths: () => ({}),
@@ -31,7 +33,7 @@ vi.mock("@multica/core/autopilots/mutations", () => ({
   useTriggerAutopilot: () => ({ mutateAsync: vi.fn() }),
   useCreateAutopilotTrigger: () => ({ mutateAsync: vi.fn() }),
   useDeleteAutopilotTrigger: () => ({ mutateAsync: vi.fn() }),
-  useUpdateAutopilotTrigger: () => ({ mutateAsync: vi.fn() }),
+  useUpdateAutopilotTrigger: () => ({ mutateAsync: mockUpdateTrigger, isPending: false }),
   useRotateAutopilotTriggerWebhookToken: () => ({ mutateAsync: vi.fn(), isPending: false }),
 }));
 
@@ -80,6 +82,20 @@ function renderRow(trig: AutopilotTrigger, canWrite = true) {
 }
 
 describe("TriggerRow", () => {
+  it("updates webhook retention for this trigger and explains replay loss", async () => {
+    const user = userEvent.setup();
+    renderRow(trigger({ kind: "webhook", webhook_payload_policy: "redacted" }));
+    await user.selectOptions(screen.getByRole("combobox", { name: "Webhook payload" }), "metadata_only");
+    expect(mockUpdateTrigger).toHaveBeenCalledWith({ autopilotId: AUTOPILOT_ID, triggerId: "trg-morning", webhook_payload_policy: "metadata_only" });
+    expect(screen.getByText(/These deliveries cannot be replayed/)).toBeInTheDocument();
+  });
+
+  it("keeps retention read-only without write permission", () => {
+    renderRow(trigger({ kind: "webhook", webhook_payload_policy: "metadata_only" }), false);
+    expect(screen.getByRole("combobox", { name: "Webhook payload" })).toBeDisabled();
+    expect(screen.getByRole("combobox", { name: "Webhook payload" })).toHaveValue("metadata_only");
+  });
+
   beforeEach(() => {
     vi.clearAllMocks();
   });

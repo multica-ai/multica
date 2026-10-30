@@ -325,3 +325,31 @@ describe("AutopilotDialog schedule section on an autopilot with several triggers
     expect(mockCreateTrigger).not.toHaveBeenCalled();
   });
 });
+
+
+describe("AutopilotDialog webhook retention writes", () => {
+  beforeEach(() => {
+    mockUpdateAutopilot.mockReset().mockResolvedValue({ id: AUTOPILOT_ID });
+    mockUpdateTrigger.mockReset().mockResolvedValue({ id: "trg-1" });
+  });
+
+  it("does not rewrite an unchanged retention policy when only filters change", async () => {
+    const user = userEvent.setup();
+    renderEditDialog([trigger({ kind: "webhook", cron_expression: null, timezone: null,
+      webhook_payload_policy: "metadata_only", event_filters: [{ event: "ping" }] })]);
+    await user.click(screen.getByRole("button", { name: "Remove filter" }));
+    await user.click(saveButton());
+    await waitFor(() => expect(mockUpdateTrigger).toHaveBeenCalledTimes(1));
+    expect(mockUpdateTrigger.mock.calls[0]?.[0]).toMatchObject({ event_filters: [] });
+    expect(mockUpdateTrigger.mock.calls[0]?.[0]).not.toHaveProperty("webhook_payload_policy");
+  });
+
+  it("persists an explicit metadata-only choice without requiring a filter edit", async () => {
+    const user = userEvent.setup();
+    renderEditDialog([trigger({ kind: "webhook", cron_expression: null, timezone: null })]);
+    await user.selectOptions(screen.getByRole("combobox", { name: "Webhook payload" }), "metadata_only");
+    await user.click(saveButton());
+    await waitFor(() => expect(mockUpdateTrigger).toHaveBeenCalledTimes(1));
+    expect(mockUpdateTrigger.mock.calls[0]?.[0]).toMatchObject({ webhook_payload_policy: "metadata_only" });
+  });
+});

@@ -109,6 +109,7 @@ export interface AutopilotTrigger {
   // event_filters is only present for webhook triggers. Null/empty means
   // "accept all events".
   event_filters?: WebhookEventFilter[] | null;
+  webhook_payload_policy?: "redacted" | "metadata_only";
   last_fired_at: string | null;
   created_at: string;
   updated_at: string;
@@ -189,6 +190,7 @@ export interface CreateAutopilotTriggerRequest {
   label?: string;
   // event_filters is only meaningful for webhook triggers.
   event_filters?: WebhookEventFilter[];
+  webhook_payload_policy?: "redacted" | "metadata_only";
 }
 
 export interface UpdateAutopilotTriggerRequest {
@@ -198,6 +200,7 @@ export interface UpdateAutopilotTriggerRequest {
   label?: string;
   // event_filters is only meaningful for webhook triggers.
   event_filters?: WebhookEventFilter[] | null;
+  webhook_payload_policy?: "redacted" | "metadata_only";
 }
 
 export interface CronPreviewResponse {

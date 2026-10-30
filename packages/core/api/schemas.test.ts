@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 import {
   AppConfigSchema,
+  AutopilotTriggerSchema,
+  EMPTY_AUTOPILOT_TRIGGER,
   WecomInstallationSchema,
   ListWecomInstallationsResponseSchema,
   RedeemWecomBindingTokenResponseSchema,
@@ -2353,5 +2355,18 @@ describe("AgentActivityBucketListSchema duration", () => {
     expect(parsed[0]?.task_count).toBe(201);
     expect(parsed[0]?.duration_ms).toBeUndefined();
     expect(parsed[0]?.duration_count).toBeUndefined();
+  });
+});
+
+
+describe("webhook payload policy response compatibility", () => {
+  it("keeps metadata-only, defaults old or malformed policy fields, and disables unusable trigger responses", () => {
+    for (const policy of [undefined, "future_policy", 123]) {
+      const trigger = parseWithFallback({ id: "trigger", webhook_payload_policy: policy }, AutopilotTriggerSchema, EMPTY_AUTOPILOT_TRIGGER, { endpoint: "test" });
+      expect(trigger.id).toBe("trigger");
+      expect(trigger.webhook_payload_policy).toBe("redacted");
+    }
+    expect(parseWithFallback({ id: "trigger", webhook_payload_policy: "metadata_only" }, AutopilotTriggerSchema, EMPTY_AUTOPILOT_TRIGGER, { endpoint: "test" }).webhook_payload_policy).toBe("metadata_only");
+    expect(parseWithFallback(null, AutopilotTriggerSchema, EMPTY_AUTOPILOT_TRIGGER, { endpoint: "test" })).toMatchObject({ enabled: false, id: "" });
   });
 });

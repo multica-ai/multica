@@ -156,7 +156,8 @@ type AutopilotTriggerResponse struct {
 	// triggers; omitted when the trigger accepts all events. Serializes as
 	// a JSON array of {event, actions?} objects — never as a base64 string
 	// (which is what []byte would produce through encoding/json).
-	EventFilters []WebhookEventFilter `json:"event_filters,omitempty"`
+	EventFilters         []WebhookEventFilter `json:"event_filters,omitempty"`
+	WebhookPayloadPolicy string               `json:"webhook_payload_policy"`
 }
 
 type AutopilotRunResponse struct {
@@ -221,18 +222,19 @@ func autopilotToResponse(a db.Autopilot, subscribers []db.AutopilotSubscriber) A
 
 func (h *Handler) triggerToResponse(t db.AutopilotTrigger) AutopilotTriggerResponse {
 	resp := AutopilotTriggerResponse{
-		ID:             uuidToString(t.ID),
-		AutopilotID:    uuidToString(t.AutopilotID),
-		Kind:           t.Kind,
-		Enabled:        t.Enabled,
-		CronExpression: textToPtr(t.CronExpression),
-		Timezone:       textToPtr(t.Timezone),
-		NextRunAt:      timestampToPtr(t.NextRunAt),
-		WebhookToken:   textToPtr(t.WebhookToken),
-		Label:          textToPtr(t.Label),
-		LastFiredAt:    timestampToPtr(t.LastFiredAt),
-		CreatedAt:      timestampToString(t.CreatedAt),
-		UpdatedAt:      timestampToString(t.UpdatedAt),
+		ID:                   uuidToString(t.ID),
+		AutopilotID:          uuidToString(t.AutopilotID),
+		Kind:                 t.Kind,
+		Enabled:              t.Enabled,
+		CronExpression:       textToPtr(t.CronExpression),
+		Timezone:             textToPtr(t.Timezone),
+		NextRunAt:            timestampToPtr(t.NextRunAt),
+		WebhookToken:         textToPtr(t.WebhookToken),
+		WebhookPayloadPolicy: t.WebhookPayloadPolicy,
+		Label:                textToPtr(t.Label),
+		LastFiredAt:          timestampToPtr(t.LastFiredAt),
+		CreatedAt:            timestampToString(t.CreatedAt),
+		UpdatedAt:            timestampToString(t.UpdatedAt),
 	}
 	if t.Kind == "webhook" && t.WebhookToken.Valid && t.WebhookToken.String != "" {
 		path := webhookPathForToken(t.WebhookToken.String)
@@ -397,7 +399,8 @@ type CreateAutopilotTriggerRequest struct {
 	Provider *string `json:"provider"`
 	// EventFilters is an optional list of {event, actions?} scopes. Only
 	// meaningful for webhook triggers. nil/empty means "accept all events".
-	EventFilters []WebhookEventFilter `json:"event_filters,omitempty"`
+	EventFilters         []WebhookEventFilter `json:"event_filters,omitempty"`
+	WebhookPayloadPolicy string               `json:"webhook_payload_policy"`
 }
 
 // SetSigningSecretRequest is the body shape for PUT
@@ -431,7 +434,8 @@ type UpdateAutopilotTriggerRequest struct {
 	// This is why the pointer matters: with a plain []WebhookEventFilter
 	// there is no way to tell "field absent from the PATCH body" from "field
 	// present but empty", and the user can never clear filters once set.
-	EventFilters *[]WebhookEventFilter `json:"event_filters,omitempty"`
+	EventFilters         *[]WebhookEventFilter `json:"event_filters,omitempty"`
+	WebhookPayloadPolicy *string               `json:"webhook_payload_policy,omitempty"`
 }
 
 // ── Handlers ────────────────────────────────────────────────────────────────
@@ -1567,6 +1571,10 @@ func (h *Handler) CreateAutopilotTrigger(w http.ResponseWriter, r *http.Request)
 		writeError(w, http.StatusBadRequest, "timezone is not valid for webhook triggers")
 		return
 	}
+	if req.WebhookPayloadPolicy != "" && (req.Kind != "webhook" || !validWebhookPayloadPolicy(req.WebhookPayloadPolicy)) {
+		writeError(w, http.StatusBadRequest, "webhook_payload_policy must be redacted or metadata_only on a webhook trigger")
+		return
+	}
 	if req.Kind != "webhook" && len(req.EventFilters) > 0 {
 		// event_filters narrows webhook ingress — it has no meaning for a
 		// schedule trigger and would otherwise be silently dropped.
@@ -1635,7 +1643,7 @@ func (h *Handler) CreateAutopilotTrigger(w http.ResponseWriter, r *http.Request)
 			writeError(w, http.StatusInternalServerError, "failed to encode event_filters")
 			return
 		}
-		trigger, err := h.createWebhookTriggerWithMintedToken(r, ap, ptrToText(req.Label), provider, eventFiltersBytes, publisherID)
+		trigger, err := h.createWebhookTriggerWithMintedToken(r, ap, ptrToText(req.Label), provider, eventFiltersBytes, req.WebhookPayloadPolicy, publisherID)
 		if err != nil {
 			writeError(w, http.StatusInternalServerError, "failed to create trigger")
 			return
@@ -1719,6 +1727,7 @@ func (h *Handler) createWebhookTriggerWithMintedToken(
 	label pgtype.Text,
 	provider string,
 	eventFilters []byte,
+	payloadPolicy string,
 	publisherID pgtype.UUID,
 ) (db.AutopilotTrigger, error) {
 	ctx := r.Context()
@@ -1733,13 +1742,14 @@ func (h *Handler) createWebhookTriggerWithMintedToken(
 		}
 		qtx := h.Queries.WithTx(tx)
 		trigger, err := qtx.CreateAutopilotTrigger(ctx, db.CreateAutopilotTriggerParams{
-			AutopilotID:  ap.ID,
-			Kind:         "webhook",
-			Enabled:      true,
-			Label:        label,
-			WebhookToken: pgtype.Text{String: token, Valid: true},
-			Provider:     pgtype.Text{String: provider, Valid: provider != ""},
-			EventFilters: eventFilters,
+			AutopilotID:          ap.ID,
+			Kind:                 "webhook",
+			Enabled:              true,
+			Label:                label,
+			WebhookToken:         pgtype.Text{String: token, Valid: true},
+			Provider:             pgtype.Text{String: provider, Valid: provider != ""},
+			EventFilters:         eventFilters,
+			WebhookPayloadPolicy: pgtype.Text{String: payloadPolicy, Valid: payloadPolicy != ""},
 			// published_by records CONFIG responsibility only: seeded to the creator,
 			// re-stamped to a later substantive editor (MUL-4302). It has no bearing
 			// on the runs this trigger fires (MUL-6951).
@@ -1944,6 +1954,13 @@ func (h *Handler) UpdateAutopilotTrigger(w http.ResponseWriter, r *http.Request)
 	if req.Label != nil {
 		params.Label = pgtype.Text{String: *req.Label, Valid: true}
 	}
+	if req.WebhookPayloadPolicy != nil {
+		if prev.Kind != "webhook" || !validWebhookPayloadPolicy(*req.WebhookPayloadPolicy) {
+			writeError(w, http.StatusBadRequest, "webhook_payload_policy must be redacted or metadata_only on a webhook trigger")
+			return
+		}
+		params.WebhookPayloadPolicy = pgtype.Text{String: *req.WebhookPayloadPolicy, Valid: true}
+	}
 	// Tri-state PATCH for event_filters. A nil pointer (field omitted or
 	// JSON null) leaves the existing row untouched — params.EventFilters
 	// stays unset and the COALESCE in the UPDATE preserves the previous
@@ -2014,6 +2031,7 @@ func (h *Handler) UpdateAutopilotTrigger(w http.ResponseWriter, r *http.Request)
 	triggerSubstantiveChange := prev.Enabled != trigger.Enabled ||
 		prev.CronExpression != trigger.CronExpression ||
 		prev.Timezone != trigger.Timezone ||
+		prev.WebhookPayloadPolicy != trigger.WebhookPayloadPolicy ||
 		!bytes.Equal(prev.EventFilters, trigger.EventFilters)
 	if triggerSubstantiveChange {
 		if err := h.recordAutopilotRuleVersion(r.Context(), qtx, ap, "member", actor.UserID); err != nil {

@@ -538,5 +538,11 @@
     "create": "Nouveau réveil",
     "create_pick_issue": "Choisissez la tâche où ajouter un réveil",
     "create_pick_issue_description": "Le réveil appartient à cette tâche et s’arrête avec elle."
+  },
+  "payload_policy": {
+    "label": "Charge utile du webhook",
+    "redacted": "Conserver la charge utile en masquant le jeton",
+    "metadata_only": "Métadonnées uniquement",
+    "help": "Le mode métadonnées supprime le corps avant stockage et envoi à l’agent. Ces livraisons ne peuvent pas être rejouées. L’historique existant reste inchangé."
   }
 }

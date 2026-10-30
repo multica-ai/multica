@@ -99,6 +99,29 @@ The token in the webhook URL is the calling credential. Don't put the full URL i
 
 Only the autopilot's creator, workspace owners/admins, and collaborators granted access can view the full URL. The UI hides the token in the URL by default, and copying doesn't require revealing it; click the URL or the eye icon to view the full address.
 
+### Webhook payload retention
+
+A webhook trigger's `webhook_payload_policy` is `redacted` by default. This keeps the payload for existing workflows, but replaces that trigger's known calling credential with `[REDACTED]` in JSON strings and keys, including nested URLs, before delivery storage and run/agent dispatch. This is not a general secret detector: unrelated credentials in the body are still retained.
+
+Choose **Metadata only** when the webhook is only a wake signal. The source body is discarded after verification of its original signature, before any delivery or run is persisted. The stored canonical envelope contains `event`, event action/status metadata used by filters, a receive timestamp and content type, with `eventPayload: null` and `payloadPolicy: "metadata_only"`. Delivery IDs, provider deduplication identifiers, signature status and dispatch status remain in the delivery audit record. Both `run_only` and `create_issue` receive this safe envelope. This policy applies even if the trigger is disabled, the event is filtered or signature verification rejects the request.
+
+The API accepts this field on trigger creation and PATCH. Web and desktop expose it on webhook triggers. The CLI supports:
+
+```bash
+multica autopilot trigger-add <autopilot> --kind webhook --payload-policy metadata_only
+multica autopilot trigger-update <autopilot> <trigger> --payload-policy metadata_only
+```
+
+Metadata-only deliveries cannot be replayed: send a new source event instead. Changing a trigger back to `redacted` cannot restore discarded bodies. Replaying an older retained delivery applies the trigger's current policy; its original stored copy is not rewritten.
+
+#### Cleaning up previously retained credentials
+
+Changing this policy does not scrub existing delivery/run payloads, issue descriptions or their history, task/agent inputs, provider logs, exports or backups. Rotate the exposed calling credential first and stop the affected webhook while the workspace owner identifies affected delivery IDs, run IDs, generated issues and tasks. Do not paste the old credential into an issue, support ticket or agent conversation.
+
+For the hosted service, the workspace owner should request a scoped historical-payload cleanup through the service's private support channel, identifying records by IDs and time range. A retention-setting change is not confirmation that the hosted copies were deleted.
+
+For self-hosted deployments, the deployment/database owner should pause affected dispatch workers, use restricted administrative tooling to remove the retired credential from `webhook_delivery.raw_body`, `autopilot_run.trigger_payload`, generated issue descriptions and retained revisions, and linked task/agent input records. Apply the same scope to log/export stores and the backup retention process; include external agent/provider copies where applicable. Preserve record IDs, receipt timestamps, deduplication identifiers and status audit fields. Verify the affected records with a restricted search for the retired credential before resuming. Do not export matching payloads to ordinary logs. There is no automatic historical scrub performed by this setting.
+
 ### Webhook response reference
 
 When debugging a sender, check Multica's responses against this table:

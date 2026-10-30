@@ -321,7 +321,8 @@ type AutopilotTrigger struct {
 	// Actor type of created_by_id: member | agent. Only 'member' yields a run principal. NULL only for a legacy trigger that neither backfill (migrations 449, 467) could fill.
 	CreatedByType pgtype.Text `json:"created_by_type"`
 	// The member a schedule/webhook run fires AS: dispatch admission, the task's originator/accountable, and every delegated run all resolve to this one human (MUL-6951). For a trigger created since MUL-6951 it is the creator, written at creation. For a legacy trigger it is a best-effort principal inferred once by backfill and frozen (the last publisher, migration 449, else the autopilot's creator, migration 467), not proof of who created it. Ordinary edits never rewrite it, so editing the trigger cannot re-authorize its runs as the editor. NULL means no principal and the dispatch fails closed. No FK; workspace membership is re-validated on every dispatch.
-	CreatedByID pgtype.UUID `json:"created_by_id"`
+	CreatedByID          pgtype.UUID `json:"created_by_id"`
+	WebhookPayloadPolicy string      `json:"webhook_payload_policy"`
 }
 
 type ChannelBindingToken struct {

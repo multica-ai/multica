@@ -278,12 +278,25 @@ func (h *Handler) ReplayAutopilotDelivery(w http.ResponseWriter, r *http.Request
 	// subset for event inference. SelectedHeaders is small + JSON-shaped, so
 	// we decode it back into a header map to reuse the same normalize path.
 	headers := headersFromSelected(original.SelectedHeaders)
-	envelope, err := normalizeWebhookPayload(original.RawBody, headers)
+	envelope, err := storedWebhookPayload(original.RawBody, headers)
 	if err != nil {
 		writeError(w, http.StatusBadRequest, "stored body no longer parses: "+err.Error())
 		return
 	}
-	_ = envelope // the durable worker normalizes the stored payload again
+	if envelope.PayloadPolicy == "metadata_only" {
+		writeError(w, http.StatusBadRequest, "metadata-only deliveries cannot be replayed; send a new source event")
+		return
+	}
+	envelope, err = prepareWebhookPayload(envelope, trigRow.WebhookToken.String, trigRow.WebhookPayloadPolicy)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to prepare replay payload")
+		return
+	}
+	replayBody, err := json.Marshal(envelope)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to encode replay payload")
+		return
+	}
 
 	idempotencyKey := strings.TrimSpace(r.Header.Get("Idempotency-Key"))
 	if len(idempotencyKey) > 255 {
@@ -319,7 +332,7 @@ func (h *Handler) ReplayAutopilotDelivery(w http.ResponseWriter, r *http.Request
 		Status:                 deliveryStatusQueued,
 		SelectedHeaders:        original.SelectedHeaders,
 		ContentType:            pgtype.Text{String: contentType, Valid: contentType != ""},
-		RawBody:                original.RawBody,
+		RawBody:                replayBody,
 		ReplayedFromDeliveryID: original.ID,
 		ReplayIdempotencyKey:   keyText,
 	})

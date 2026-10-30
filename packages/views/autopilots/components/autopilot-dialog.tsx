@@ -67,6 +67,7 @@ import { getDefaultScheduleConfig, type ScheduleConfig } from "./schedule-editor
 import { browserTimezone } from "../../common/timezone-select";
 import { parseCron, toCron } from "./schedule-editor/cron-mapping";
 import { useScheduleSubmitGate } from "./schedule-editor/validate";
+import { WebhookPayloadPolicySelect } from "./webhook-payload-policy-select";
 import { WebhookEventFilterSection } from "./webhook-event-filter-section";
 import { WebhookUrlField } from "./webhook-url-field";
 import { useT } from "../../i18n";
@@ -201,6 +202,9 @@ export function AutopilotDialog(props: AutopilotDialogProps) {
 
   const initialEventFilters: WebhookEventFilter[] =
     !isCreate && props.triggers[0]?.event_filters ? props.triggers[0].event_filters : [];
+  const initialPayloadPolicy = !isCreate && props.triggers[0]?.webhook_payload_policy === "metadata_only" ? "metadata_only" : "redacted";
+  const [payloadPolicy, setPayloadPolicy] = useState<"redacted" | "metadata_only">(initialPayloadPolicy);
+  const initialPayloadPolicyRef = useRef(initialPayloadPolicy);
   const [eventFilters, setEventFilters] = useState<WebhookEventFilter[]>(initialEventFilters);
 
   const initialCronRef = useRef(toCron(initialCfg));
@@ -333,6 +337,7 @@ export function AutopilotDialog(props: AutopilotDialogProps) {
               autopilotId: autopilot.id,
               kind: "webhook",
               event_filters: eventFilters.length > 0 ? eventFilters : undefined,
+              webhook_payload_policy: payloadPolicy,
             });
           } else {
             await createTrigger.mutateAsync({
@@ -413,7 +418,7 @@ export function AutopilotDialog(props: AutopilotDialogProps) {
         // UpdateAutopilotTriggerRequest in autopilot.go).
         if (
           triggerKind === "webhook" &&
-          eventFiltersDirty &&
+          (eventFiltersDirty || payloadPolicy !== initialPayloadPolicyRef.current) &&
           firstTriggerIdRef.current
         ) {
           try {
@@ -421,6 +426,9 @@ export function AutopilotDialog(props: AutopilotDialogProps) {
               autopilotId: props.autopilotId,
               triggerId: firstTriggerIdRef.current,
               event_filters: eventFilters,
+              ...(payloadPolicy !== initialPayloadPolicyRef.current
+                ? { webhook_payload_policy: payloadPolicy }
+                : {}),
             });
           } catch (err) {
             triggerOk = false;
@@ -673,11 +681,10 @@ export function AutopilotDialog(props: AutopilotDialogProps) {
                 )}
               </div>
             ) : (
-              <WebhookSection
-                isCreate={isCreate}
-                eventFilters={eventFilters}
-                onEventFiltersChange={setEventFilters}
-              />
+              <div className="space-y-4">
+                <WebhookSection isCreate={isCreate} eventFilters={eventFilters} onEventFiltersChange={setEventFilters} />
+                <WebhookPayloadPolicySelect value={payloadPolicy} onChange={setPayloadPolicy} disabled={submitting} />
+              </div>
             )}
           </aside>
         </div>

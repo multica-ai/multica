@@ -538,5 +538,11 @@
     "create": "New wakeup",
     "create_pick_issue": "Choose the issue to add a wakeup to",
     "create_pick_issue_description": "The wakeup belongs to this issue and ends with it."
+  },
+  "payload_policy": {
+    "label": "Webhook payload",
+    "redacted": "Retain payload with credential redaction",
+    "metadata_only": "Metadata only",
+    "help": "Metadata only discards the body before storage and agent dispatch. These deliveries cannot be replayed. Existing history is unchanged."
   }
 }

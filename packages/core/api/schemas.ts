@@ -11,6 +11,7 @@ import type {
   AgentBuilderSessionSummary,
   Attachment,
   AutopilotRun,
+  AutopilotTrigger,
   BillingBalance,
   BillingBatchesPage,
   BillingCheckoutSessionStatus,
@@ -2546,6 +2547,20 @@ export const WebhookDeliveryResponseSchema = WebhookDeliverySchema;
 export const EMPTY_LIST_WEBHOOK_DELIVERIES_RESPONSE: ListWebhookDeliveriesResponse = {
   deliveries: [],
   total: 0,
+};
+
+// Parse the additive retention field without dropping other trigger properties.
+// Old and newer servers can omit or introduce policy values; the existing
+// redacted behavior remains the conservative UI editing default.
+export const AutopilotTriggerSchema = z.object({
+  webhook_payload_policy: z.enum(["redacted", "metadata_only"]).catch("redacted"),
+}).loose();
+
+export const EMPTY_AUTOPILOT_TRIGGER: AutopilotTrigger = {
+  id: "", autopilot_id: "", kind: "api", enabled: false,
+  cron_expression: null, timezone: null, next_run_at: null,
+  webhook_token: null, label: null, last_fired_at: null,
+  created_at: "", updated_at: "", webhook_payload_policy: "redacted",
 };
 
 // Autopilot list schema. Enums (`status`, `execution_mode`, `trigger_kinds`,

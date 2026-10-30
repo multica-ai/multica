@@ -13,6 +13,7 @@ import {
   useUpdateAutopilot,
   useDeleteAutopilot,
   useCreateAutopilotTrigger,
+  useUpdateAutopilotTrigger,
   useDeleteAutopilotTrigger,
   useRotateAutopilotTriggerWebhookToken,
 } from "@multica/core/autopilots/mutations";
@@ -47,6 +48,7 @@ import {
 } from "@multica/ui/components/ui/alert-dialog";
 import { ScheduleEditor } from "./schedule-editor/schedule-editor";
 import { WebhookUrlField } from "./webhook-url-field";
+import { WebhookPayloadPolicySelect } from "./webhook-payload-policy-select";
 import { getDefaultScheduleConfig, type ScheduleConfig } from "./schedule-editor/model";
 import { browserTimezone } from "../../common/timezone-select";
 import { cronFields, parseCron, toCron } from "./schedule-editor/cron-mapping";
@@ -257,10 +259,12 @@ function SkippedRunsGroup({
   );
 }
 
+
 export function TriggerRow({ trigger, autopilotId, canWrite }: { trigger: AutopilotTrigger; autopilotId: string; canWrite: boolean }) {
   const { t, i18n } = useT("autopilots");
   const describeSchedule = useDescribeSchedule();
   const deleteTrigger = useDeleteAutopilotTrigger();
+  const updateTrigger = useUpdateAutopilotTrigger();
   const rotateToken = useRotateAutopilotTriggerWebhookToken();
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [rotateOpen, setRotateOpen] = useState(false);
@@ -407,6 +411,19 @@ export function TriggerRow({ trigger, autopilotId, canWrite }: { trigger: Autopi
             })}
           </div>
         )}
+        {isWebhook && (
+          <WebhookPayloadPolicySelect
+            value={trigger.webhook_payload_policy === "metadata_only" ? "metadata_only" : "redacted"}
+            disabled={!canWrite || updateTrigger.isPending}
+            onChange={async (webhook_payload_policy) => {
+              try {
+                await updateTrigger.mutateAsync({ autopilotId, triggerId: trigger.id, webhook_payload_policy });
+              } catch (error) {
+                toast.error(error instanceof Error ? error.message : t(($) => $.dialog.toast_update_failed));
+              }
+            }}
+          />
+        )}
         {showWebhookUrlRow && (
           <div className="mt-1.5">
             <WebhookUrlField
@@ -509,6 +526,7 @@ function AddTriggerDialog({
     getDefaultScheduleConfig(browserTimezone()),
   );
   const [label, setLabel] = useState("");
+  const [payloadPolicy, setPayloadPolicy] = useState<"redacted" | "metadata_only">("redacted");
   const [submitting, setSubmitting] = useState(false);
   const scheduleGate = useScheduleSubmitGate(wsId);
   const canSubmit = !submitting && (kind !== "schedule" || scheduleGate.scheduleValid);
@@ -539,6 +557,7 @@ function AddTriggerDialog({
         await createTrigger.mutateAsync({
           autopilotId,
           kind: "webhook",
+          webhook_payload_policy: payloadPolicy,
           label: label.trim() || undefined,
         });
         toast.success(t(($) => $.add_trigger_dialog.toast_added_webhook));
@@ -547,6 +566,7 @@ function AddTriggerDialog({
       setKind("schedule");
       setConfig(getDefaultScheduleConfig(browserTimezone()));
       setLabel("");
+      setPayloadPolicy("redacted");
     } catch (err) {
       toast.error(
         err instanceof Error && err.message
@@ -614,6 +634,8 @@ function AddTriggerDialog({
               {t(($) => $.add_trigger_dialog.webhook_help)}
             </p>
           )}
+
+          {kind === "webhook" && <WebhookPayloadPolicySelect value={payloadPolicy} onChange={setPayloadPolicy} disabled={submitting} />}
 
           <div>
             <label className="text-caption font-medium text-muted-foreground">

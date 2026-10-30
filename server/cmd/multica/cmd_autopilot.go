@@ -166,6 +166,8 @@ func init() {
 	autopilotTriggerAddCmd.Flags().String("label", "", "Optional human-readable label")
 	autopilotTriggerAddCmd.Flags().String("output", "json", "Output format: table or json")
 
+	autopilotTriggerAddCmd.Flags().String("payload-policy", "redacted", "Webhook payload retention: redacted or metadata_only (body discarded; no replay)")
+
 	// trigger-list
 	autopilotTriggerListCmd.Flags().String("output", "table", "Output format: table or json")
 	autopilotTriggerListCmd.Flags().Bool("full-id", false, "Show full UUIDs in table output")
@@ -175,6 +177,7 @@ func init() {
 	autopilotTriggerRotateURLCmd.Flags().BoolP("yes", "y", false, "Skip the interactive confirmation prompt")
 
 	// trigger-update
+	autopilotTriggerUpdateCmd.Flags().String("payload-policy", "", "Webhook payload retention: redacted or metadata_only")
 	autopilotTriggerUpdateCmd.Flags().Bool("enabled", true, "Enable or disable the trigger")
 	autopilotTriggerUpdateCmd.Flags().String("cron", "", "New cron expression")
 	autopilotTriggerUpdateCmd.Flags().String("timezone", "", "New IANA timezone")
@@ -806,7 +809,17 @@ func runAutopilotTriggerAdd(cmd *cobra.Command, args []string) error {
 		}
 	}
 
+	policy, _ := cmd.Flags().GetString("payload-policy")
+	if policy != "redacted" && policy != "metadata_only" {
+		return fmt.Errorf("--payload-policy must be redacted or metadata_only")
+	}
+	if kind != "webhook" && cmd.Flags().Changed("payload-policy") {
+		return fmt.Errorf("--payload-policy is only valid with --kind webhook")
+	}
 	body := map[string]any{"kind": kind}
+	if kind == "webhook" {
+		body["webhook_payload_policy"] = policy
+	}
 	if kind == "schedule" {
 		body["cron_expression"] = cron
 		if v, _ := cmd.Flags().GetString("timezone"); v != "" {
@@ -911,6 +924,13 @@ func runAutopilotTriggerUpdate(cmd *cobra.Command, args []string) error {
 	}
 
 	body := map[string]any{}
+	if cmd.Flags().Changed("payload-policy") {
+		policy, _ := cmd.Flags().GetString("payload-policy")
+		if policy != "redacted" && policy != "metadata_only" {
+			return fmt.Errorf("--payload-policy must be redacted or metadata_only")
+		}
+		body["webhook_payload_policy"] = policy
+	}
 	if cmd.Flags().Changed("enabled") {
 		v, _ := cmd.Flags().GetBool("enabled")
 		body["enabled"] = v
@@ -928,7 +948,7 @@ func runAutopilotTriggerUpdate(cmd *cobra.Command, args []string) error {
 		body["label"] = v
 	}
 	if len(body) == 0 {
-		return fmt.Errorf("no fields to update; use --enabled, --cron, --timezone, or --label")
+		return fmt.Errorf("no fields to update; use --enabled, --cron, --timezone, --label, or --payload-policy")
 	}
 
 	ctx, cancel := cli.APIContext(context.Background())

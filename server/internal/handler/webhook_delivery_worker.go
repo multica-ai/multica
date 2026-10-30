@@ -154,9 +154,13 @@ func (w *WebhookDeliveryWorker) ProcessNext(ctx context.Context) (bool, error) {
 	if delivery.ContentType.Valid {
 		headers.Set("Content-Type", delivery.ContentType.String)
 	}
-	envelope, err := normalizeWebhookPayload(delivery.RawBody, headers)
+	envelope, err := storedWebhookPayload(delivery.RawBody, headers)
 	if err != nil {
 		return true, w.complete(ctx, delivery, deliveryStatusFailed, pgtype.UUID{}, "normalize stored body: "+err.Error())
+	}
+	envelope, err = prepareWebhookPayload(envelope, trigger.WebhookToken.String, trigger.WebhookPayloadPolicy)
+	if err != nil {
+		return true, w.complete(ctx, delivery, deliveryStatusFailed, pgtype.UUID{}, "prepare stored payload failed")
 	}
 	if delivery.ReceivedAt.Valid {
 		envelope.Request.ReceivedAt = delivery.ReceivedAt.Time.UTC().Format(time.RFC3339)

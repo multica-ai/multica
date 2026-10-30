@@ -534,5 +534,11 @@
     "create": "新建唤醒",
     "create_pick_issue": "选择要添加唤醒的任务",
     "create_pick_issue_description": "唤醒属于该任务，并随任务结束而停止。"
+  },
+  "payload_policy": {
+    "label": "Webhook 载荷",
+    "redacted": "保留载荷并隐藏调用凭据",
+    "metadata_only": "仅保留元数据",
+    "help": "仅保留元数据会在存储和发送给智能体前丢弃正文。这类投递无法重放，已有历史不会改变。"
   }
 }

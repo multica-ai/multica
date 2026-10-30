@@ -534,5 +534,11 @@
     "create": "起動を追加",
     "create_pick_issue": "起動を追加するタスクを選択",
     "create_pick_issue_description": "起動はこのタスクに属し、タスクの終了とともに終わります。"
+  },
+  "payload_policy": {
+    "label": "Webhook ペイロード",
+    "redacted": "認証情報をマスクして保持",
+    "metadata_only": "メタデータのみ",
+    "help": "メタデータのみでは保存・エージェント送信前に本文を破棄します。これらの配信は再実行できません。既存の履歴は変更されません。"
   }
 }

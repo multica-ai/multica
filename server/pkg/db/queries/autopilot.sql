@@ -184,14 +184,14 @@ WHERE t.id = $1 AND t.autopilot_id = $2 AND a.workspace_id = $3;
 -- name: CreateAutopilotTrigger :one
 INSERT INTO autopilot_trigger (
     autopilot_id, kind, enabled, cron_expression, timezone,
-    next_run_at, webhook_token, label, provider, event_filters,
+    next_run_at, webhook_token, label, provider, event_filters, webhook_payload_policy,
     published_by_type, published_by_id,
     created_by_type, created_by_id
 ) VALUES (
     $1, $2, $3, sqlc.narg('cron_expression'), sqlc.narg('timezone'),
     sqlc.narg('next_run_at'), sqlc.narg('webhook_token'), sqlc.narg('label'),
     COALESCE(sqlc.narg('provider')::text, 'generic'),
-    sqlc.narg('event_filters'),
+    sqlc.narg('event_filters'), COALESCE(sqlc.narg('webhook_payload_policy')::text, 'redacted'),
     sqlc.narg('published_by_type'), sqlc.narg('published_by_id'),
     sqlc.narg('created_by_type'), sqlc.narg('created_by_id')
 ) RETURNING *;
@@ -228,6 +228,7 @@ UPDATE autopilot_trigger SET
     next_run_at = sqlc.narg('next_run_at'),
     label = COALESCE(sqlc.narg('label'), label),
     event_filters = COALESCE(sqlc.narg('event_filters'), event_filters),
+    webhook_payload_policy = COALESCE(sqlc.narg('webhook_payload_policy'), webhook_payload_policy),
     updated_at = now()
 WHERE id = $1
 RETURNING *;

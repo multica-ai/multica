@@ -534,5 +534,11 @@
     "create": "깨우기 추가",
     "create_pick_issue": "깨우기를 추가할 태스크 선택",
     "create_pick_issue_description": "깨우기는 이 태스크에 속하며 태스크가 끝나면 함께 끝납니다."
+  },
+  "payload_policy": {
+    "label": "Webhook 페이로드",
+    "redacted": "자격 증명을 가리고 페이로드 보관",
+    "metadata_only": "메타데이터만",
+    "help": "메타데이터 모드는 저장 및 에이전트 전송 전에 본문을 삭제합니다. 이 전달은 재생할 수 없습니다. 기존 기록은 변경되지 않습니다."
   }
 }

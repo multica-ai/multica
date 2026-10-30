@@ -81,22 +81,6 @@ const (
 
 // ── Payload normalization ───────────────────────────────────────────────────
 
-// WebhookEnvelope is the canonical shape stored in autopilot_run.trigger_payload
-// and surfaced to the agent. The handler normalises arbitrary JSON bodies into
-// this shape so downstream consumers (run_only daemon prompt, create_issue
-// description appendix) can rely on a stable schema regardless of which
-// provider sent the webhook.
-type WebhookEnvelope struct {
-	Event        string          `json:"event"`
-	EventPayload json.RawMessage `json:"eventPayload"`
-	Request      WebhookRequest  `json:"request"`
-}
-
-type WebhookRequest struct {
-	ReceivedAt  string `json:"receivedAt"`
-	ContentType string `json:"contentType,omitempty"`
-}
-
 // normalizeWebhookPayload parses an incoming webhook body and returns a
 // WebhookEnvelope. Rules:
 //
@@ -433,11 +417,6 @@ func (h *Handler) HandleAutopilotWebhook(w http.ResponseWriter, r *http.Request)
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	envelopeBytes, err := json.Marshal(envelope)
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, "failed to encode envelope")
-		return
-	}
 	// 6. Provider + dedupe + signature.
 	provider := trigRow.Provider
 	if provider == "" {
@@ -445,6 +424,23 @@ func (h *Handler) HandleAutopilotWebhook(w http.ResponseWriter, r *http.Request)
 	}
 	dedupeKey, dedupeSource := extractDedupeKey(provider, r.Header)
 	sigStatus := verifyWebhookSignatureForProvider(provider, trigRow.SigningSecret.String, r.Header, body)
+	// Verify original bytes before redaction or discarding the payload. Store only
+	// the safe canonical envelope, including on disabled/filtered/rejected paths.
+	envelope, err = prepareWebhookPayload(envelope, token, trigRow.WebhookPayloadPolicy)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to prepare webhook payload")
+		return
+	}
+	envelopeBytes, err := json.Marshal(envelope)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to encode envelope")
+		return
+	}
+	selectedHeaders, err := redactWebhookJSON(selectedHeadersJSON(r.Header), token)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to encode webhook metadata")
+		return
+	}
 
 	// 7. Persist (INSERT delivery). Dedupe collision → bump existing row.
 	delivery, dup, err := h.persistInboundDelivery(r, persistDeliveryInput{
@@ -457,8 +453,8 @@ func (h *Handler) HandleAutopilotWebhook(w http.ResponseWriter, r *http.Request)
 		DedupeSource:    dedupeSource,
 		SignatureStatus: sigStatus,
 		ContentType:     envelope.Request.ContentType,
-		RawBody:         body,
-		SelectedHeaders: selectedHeadersJSON(r.Header),
+		RawBody:         envelopeBytes,
+		SelectedHeaders: selectedHeaders,
 	})
 	if err != nil {
 		slog.Error("webhook: persist delivery failed",
@@ -699,7 +695,7 @@ func webhookEventAllowedByTriggerScope(eventFilters []byte, envelope WebhookEnve
 		return true
 	}
 	_, eventName, eventAction := splitWebhookEvent(envelope.Event)
-	actionCandidates := webhookActionCandidates(eventAction, envelope.EventPayload)
+	actionCandidates := append(webhookActionCandidates(eventAction, envelope.EventPayload), envelope.EventActions...)
 	for _, f := range filters {
 		if f.Event != eventName {
 			continue
@@ -749,33 +745,6 @@ func isKnownProvider(prefix string) bool {
 		return true
 	}
 	return false
-}
-
-// webhookActionCandidates extracts possible action values from the event
-// action suffix and from well-known payload fields.
-func webhookActionCandidates(eventAction string, payload json.RawMessage) []string {
-	seen := map[string]struct{}{}
-	add := func(v string) {
-		v = strings.TrimSpace(v)
-		if v == "" {
-			return
-		}
-		seen[v] = struct{}{}
-	}
-	add(eventAction)
-	var obj map[string]any
-	if err := json.Unmarshal(payload, &obj); err == nil {
-		for _, key := range []string{"action", "state", "conclusion", "status"} {
-			if v, ok := obj[key].(string); ok {
-				add(v)
-			}
-		}
-	}
-	out := make([]string, 0, len(seen))
-	for v := range seen {
-		out = append(out, v)
-	}
-	return out
 }
 
 // ── Persistence helpers ─────────────────────────────────────────────────────
@@ -1007,4 +976,15 @@ func addrInPrefixes(addr netip.Addr, prefixes []netip.Prefix) bool {
 		}
 	}
 	return false
+}
+
+// Only stored canonical envelopes may supply retention metadata. Ingress always
+// normalizes untrusted input first, ignoring caller-supplied policy/actions.
+func storedWebhookPayload(body []byte, headers http.Header) (WebhookEnvelope, error) {
+	var stored WebhookEnvelope
+	if json.Unmarshal(body, &stored) == nil && stored.PayloadPolicy == "metadata_only" {
+		stored.EventPayload = json.RawMessage("null")
+		return stored, nil
+	}
+	return normalizeWebhookPayload(body, headers)
 }
