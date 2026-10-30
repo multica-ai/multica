@@ -295,7 +295,7 @@ Qoder Cloud Agents 通过远端会话执行分配的任务。Multica 服务端�
 
 超出并发上限的任务会排队等待。同一任务的后续运行会在上一会话空闲时继续使用该 Qoder 会话。智能体可以设置默认仓库，在任务所属项目未绑定仓库时使用。智能体会被要求以任务标识命名分支，并在 PR 标题前加上任务标识，以便 PR 自动关联到任务。
 
-首版支持任务运行、进度同步、取消和基于持久化记录的恢复。模型、工具和 skill 在 Qoder 中配置；暂不支持交互聊天、本地目录、附件，也不支持从 Multica 创建远端 Qoder Cloud Agents 智能体。运行时页面分别展示远端运行时和电脑。
+首版支持任务运行、聊天、进度同步、取消和基于持久化记录的恢复。模型、工具和 skill 在 Qoder 中配置；暂不支持本地目录、附件，也不支持从 Multica 创建远端 Qoder Cloud Agents 智能体。运行时页面分别展示远端运行时和电脑。
 
 独立桥接进程的配置与限制见 [Qoder runtime README](https://github.com/multica-ai/multica/blob/main/server/cmd/qoder-runtime/README.md)。
 

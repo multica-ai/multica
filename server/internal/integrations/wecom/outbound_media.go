@@ -328,6 +328,12 @@ func (o *Outbound) sendAttachments(ctx context.Context, messageID, workspaceID p
 	var replyReason dropReason
 	var replyUnconfirmed string
 	for _, row := range rows {
+		// Each file starts on whichever connection the registry holds now. The
+		// one resolved above may have been replaced while an earlier file was
+		// uploading, and a file started on a closed socket only fails.
+		if live := o.senders.get(to.InstallationID); live != nil {
+			sender = live
+		}
 		state, err := o.sendAttachment(ctx, sender, row, to)
 		switch state {
 		case deliveryDefinitelyFailed:
@@ -470,16 +476,36 @@ func (o *Outbound) sendAttachment(ctx context.Context, sender *wsSender, row db.
 	kind := wecomMediaKind(row.ContentType, row.Filename, len(data))
 	name := outboundMediaName(row.Filename, row.ContentType)
 
-	mediaID, err := sender.uploadMedia(ctx, outboundMedia{
+	media := outboundMedia{
 		Kind:     kind,
 		Filename: name,
 		Data:     data,
-	})
+	}
+	mediaID, err := sender.uploadMedia(ctx, media)
 	if err != nil {
 		// A failed upload never produced a media_id, so no message was ever
 		// addressed to the chat — including when the failure was the finish
 		// step's own lost ack. The file is definitely not there.
-		return deliveryDefinitelyFailed, fmt.Errorf("upload %s: %w", kind, err)
+		//
+		// Which is also what makes it safe to start the upload over. If WeCom
+		// replaced the connection while this one was in flight, the registry
+		// now holds a different sender, and a fresh upload_init on it cannot
+		// put a second copy of anything in the chat. Once, and only here:
+		// past this point a media_id exists and a send may already be in the
+		// chat (deliveryUnknown), where a second try would duplicate it.
+		next := o.senders.get(to.InstallationID)
+		if next == nil || next == sender || !uploadMayRestart(ctx, err) {
+			return deliveryDefinitelyFailed, fmt.Errorf("upload %s: %w", kind, err)
+		}
+		// The object's URL stays out of this line too (see sendAttachments).
+		o.logger.WarnContext(ctx, "wecom outbound: connection replaced during the upload, uploading the file again on the new one",
+			"error", err,
+			"installation_id", uuidStringPub(to.InstallationID),
+			"attachment_id", uuidStringPub(row.ID))
+		sender = next
+		if mediaID, err = sender.uploadMedia(ctx, media); err != nil {
+			return deliveryDefinitelyFailed, fmt.Errorf("upload %s on the replacement connection: %w", kind, err)
+		}
 	}
 	// Video is the only kind with fields beyond the media_id, and both are
 	// required. The file's own name is what there is to say about it — the
@@ -492,6 +518,30 @@ func (o *Outbound) sendAttachment(ctx context.Context, sender *wsSender, row db.
 		Description: name,
 	})
 	return sendOutcome(err), err
+}
+
+// uploadMayRestart reports whether a failed upload is worth starting over on a
+// replacement connection. The caller has already established the replacement;
+// this rules out the failures a new connection would meet again.
+//
+//   - A stated refusal is WeCom's verdict on the file, from a connection that
+//     was alive enough to give one.
+//   - A withdrawn permission is a person's decision, and the write guard
+//     would refuse every frame of a second upload anyway.
+//   - A file that is empty or past the cap is refused before any frame.
+//   - A context that has ended leaves no time for a second upload.
+func uploadMayRestart(ctx context.Context, err error) bool {
+	var apiErr *wecomAPIError
+	switch {
+	case ctx.Err() != nil,
+		errors.As(err, &apiErr),
+		errors.Is(err, errMediaPermissionWithdrawn),
+		errors.Is(err, errMediaUploadEmpty),
+		errors.Is(err, errMediaUploadTooLarge):
+		return false
+	default:
+		return true
+	}
 }
 
 // sendOutcome reads a media push's error for what it says about the message.

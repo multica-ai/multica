@@ -158,7 +158,7 @@ export function AgentConfigurationPanel({
               />
             </div>
           </DraftFieldRow>
-          {conversationStartersSupported && !qoderRuntime ? (
+          {conversationStartersSupported ? (
             <DraftFieldRow
               compact={compact}
               align="start"

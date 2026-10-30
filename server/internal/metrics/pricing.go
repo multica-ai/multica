@@ -70,7 +70,13 @@ var modelPrices = map[string]ModelPrice{
 	// USD rates because rollups lack each request's pricing window. Off-peak
 	// costs half as much; reseller prices can also differ. Cache writes bill
 	// as ordinary input. Mirror packages/views/runtimes/utils.ts.
-	"deepseek:v4.1-flash":    {Provider: "deepseek", Model: "v4.1-flash", InputPerM: 0.30, CacheReadPerM: 0.006, CacheWritePerM: 0.30, OutputPerM: 1.20},
+	"deepseek:v4.1-flash": {Provider: "deepseek", Model: "v4.1-flash", InputPerM: 0.30, CacheReadPerM: 0.006, CacheWritePerM: 0.30, OutputPerM: 1.20},
+	// MiniMax-M3 standard-tier estimate (https://platform.minimax.io/docs/pricing/overview).
+	// Usage aggregates multiple requests, so it cannot identify individual >512K
+	// inputs. As with xAI below, use the standard tier; long requests may be
+	// underestimated. Cache writes mirror input for newly cached input tokens,
+	// not an additional write fee (https://platform.minimax.io/docs/api-reference/text-prompt-caching).
+	"minimax:m3":             {Provider: "minimax", Model: "m3", InputPerM: 0.30, CacheReadPerM: 0.06, CacheWritePerM: 0.30, OutputPerM: 1.20},
 	"minimax:m2.7":           {Provider: "minimax", Model: "m2.7", InputPerM: 0.30, CacheReadPerM: 0.06, CacheWritePerM: 0.375, OutputPerM: 1.20},
 	"minimax:m2.7-highspeed": {Provider: "minimax", Model: "m2.7-highspeed", InputPerM: 0.60, CacheReadPerM: 0.06, CacheWritePerM: 0.375, OutputPerM: 2.40},
 	// Google standard token prices: ai.google.dev/gemini-api/docs/pricing
@@ -234,6 +240,7 @@ var modelAliasRules = []struct {
 	// and the 1017 snapshot resolve, matching the frontend's exact keys.
 	{regexp.MustCompile(`(^|/|:)deepseek-(?:flash|v4-flash(?:-vision-exp)?|v4\.1-flash(?:-1017)?|chat|reasoner)$`), "deepseek:v4.1-flash"},
 	{regexp.MustCompile(`deepseek-v4-pro`), "deepseek:v4-pro"},
+	{regexp.MustCompile(`(^|/|:)minimax-m3$`), "minimax:m3"},
 	{regexp.MustCompile(`minimax-m2[.]7.*highspeed|highspeed.*minimax-m2[.]7`), "minimax:m2.7-highspeed"},
 	{regexp.MustCompile(`minimax-m2[.]7`), "minimax:m2.7"},
 	// Each Gemini SKU is exact: an image/audio/preview variant must never

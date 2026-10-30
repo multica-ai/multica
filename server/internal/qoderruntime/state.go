@@ -21,7 +21,8 @@ type journal struct {
 	Run *run `json:"run,omitempty"`
 }
 type run struct {
-	// PriorSessionID is the session of this agent's previous run on the issue.
+	// PriorSessionID is the session of this agent's previous run on the same
+	// issue or chat.
 	// An idle prior session is continued instead of creating a new one.
 	PriorSessionID     string           `json:"prior_session_id,omitempty"`
 	Continued          bool             `json:"continued,omitempty"`

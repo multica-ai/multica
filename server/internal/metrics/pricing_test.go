@@ -229,6 +229,50 @@ func TestPriceForModelAliasGrok(t *testing.T) {
 	}
 }
 
+// TestPriceForModelAliasMinimaxM3 pins the standard-tier fallback estimate.
+// Aggregate usage cannot identify per-request long-context tiers. Cache writes
+// mirror input for newly cached tokens; existing M2.7 rates remain unchanged.
+func TestPriceForModelAliasMinimaxM3(t *testing.T) {
+	cases := []struct {
+		model string
+		want  ModelPrice
+	}{
+		{
+			model: "minimax-m3",
+			want:  ModelPrice{Provider: "minimax", Model: "m3", InputPerM: 0.3, CacheReadPerM: 0.06, CacheWritePerM: 0.3, OutputPerM: 1.2},
+		},
+		{
+			model: "codebuddy/minimax-m3",
+			want:  ModelPrice{Provider: "minimax", Model: "m3", InputPerM: 0.3, CacheReadPerM: 0.06, CacheWritePerM: 0.3, OutputPerM: 1.2},
+		},
+		{
+			model: "MiniMax-M3",
+			want:  ModelPrice{Provider: "minimax", Model: "m3", InputPerM: 0.3, CacheReadPerM: 0.06, CacheWritePerM: 0.3, OutputPerM: 1.2},
+		},
+		// The older M2.7 row must stay separate and keep its distinct rates.
+		{
+			model: "minimax-m2.7",
+			want:  ModelPrice{Provider: "minimax", Model: "m2.7", InputPerM: 0.3, CacheReadPerM: 0.06, CacheWritePerM: 0.375, OutputPerM: 1.2},
+		},
+	}
+
+	for _, tc := range cases {
+		got, ok := PriceForModelAlias(tc.model)
+		if !ok {
+			t.Fatalf("PriceForModelAlias(%q) did not resolve", tc.model)
+		}
+		if got != tc.want {
+			t.Fatalf("PriceForModelAlias(%q) = %+v, want %+v", tc.model, got, tc.want)
+		}
+	}
+
+	for _, model := range []string{"minimax-m3.5", "minimax-m3-highspeed", "some-vendor/minimax-m3-preview"} {
+		if got, ok := PriceForModelAlias(model); ok {
+			t.Fatalf("PriceForModelAlias(%q) unexpectedly resolved to %+v; want unmapped", model, got)
+		}
+	}
+}
+
 // TestGrokPricingMatchesRecordedTurn re-derives the cost of a real
 // grok 0.2.106 turn from the table and checks it against the costUsdTicks xAI
 // returned for that same turn (1 tick = 1e-10 USD). This is the end-to-end

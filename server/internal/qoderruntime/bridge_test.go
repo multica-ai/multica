@@ -235,6 +235,50 @@ func TestIssueRun(t *testing.T) {
 		t.Fatal("credential persisted")
 	}
 }
+func TestChatRun(t *testing.T) {
+	h := setup(t)
+	ctx := context.Background()
+	h.task.IssueID = ""
+	h.task.ChatSessionID = "chat-1"
+	h.task.ChatMessage = "Introduce yourself"
+	if err := h.b.step(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if h.failure != nil || !strings.Contains(h.prompt, "Introduce yourself") || !strings.Contains(h.prompt, "Audience: direct room.") || strings.Contains(h.prompt, "pull request") {
+		t.Fatalf("incorrect chat prompt: %s (failure %#v)", h.prompt, h.failure)
+	}
+	h.finish("end_turn")
+	if err := h.b.step(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if h.complete["session_id"] != "sess_1" || !strings.Contains(fmt.Sprint(h.complete["output"]), "Tests passed") {
+		t.Fatalf("result: %#v", h.complete)
+	}
+}
+func TestChatAudience(t *testing.T) {
+	for _, tc := range []struct{ channel, chatType, want string }{
+		{"", "", "Audience: direct room."},
+		{"slack", "p2p", "Audience: direct room."},
+		{"slack", "group", "Audience: group room; not private"},
+		{"feishu", "", "Audience: unknown."},
+	} {
+		if got := chatAudience(tc.channel, tc.chatType); !strings.Contains(got, tc.want) {
+			t.Errorf("chatAudience(%q, %q) = %q, want %q", tc.channel, tc.chatType, got, tc.want)
+		}
+	}
+}
+func TestChatAttachmentsFailBeforeExecution(t *testing.T) {
+	h := setup(t)
+	h.task.IssueID = ""
+	h.task.ChatSessionID = "chat-1"
+	h.task.ChatMessageAttachments = []daemon.ChatAttachmentMeta{{ID: "att-1"}}
+	if err := h.b.step(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if h.creates != 0 || !strings.Contains(fmt.Sprint(h.failure["error"]), "attachments") {
+		t.Fatalf("chat attachment ignored: %#v", h.failure)
+	}
+}
 func TestAmbiguousSubmitReconcilesAfterRestart(t *testing.T) {
 	h := setup(t)
 	h.lostSend = true

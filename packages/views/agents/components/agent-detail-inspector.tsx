@@ -147,12 +147,12 @@ export function AgentDetailInspector({
   // A Qoder agent is bound to an agent in Qoder Cloud Agents, and the model lives there. Moving
   // between Qoder and any other runtime would need a different configuration
   // the server either rejects or the bridge refuses, so neither direction is
-  // offered here. It also never opens a chat, so nothing chat-facing applies.
+  // offered here.
   const qoderRuntime = runtime?.provider === "qoder_cloud";
   const conversationStartersEnabled = useConfigStore(
     (state) => state.agentConversationStartersSupported,
   );
-  const showStarters = conversationStartersEnabled && !qoderRuntime;
+  const showStarters = conversationStartersEnabled;
   const startersComplete = starters.every(
     (item) => item.label.trim() && item.prompt.trim(),
   );
@@ -415,19 +415,17 @@ export function AgentDetailInspector({
           </SettingsSection>
         </div>
 
-        {qoderRuntime ? null : (
-          <SettingsSection
-            title={t(($) => $.conversation_starters.preview_label)}
-            className="hidden @4xl:sticky @4xl:top-0 @4xl:block"
-          >
-            <NewChatPreview
-              name={name.trim() || agent.name}
-              description={description}
-              avatarUrl={agent.avatar_url ?? null}
-              starters={showStarters ? starters : []}
-            />
-          </SettingsSection>
-        )}
+        <SettingsSection
+          title={t(($) => $.conversation_starters.preview_label)}
+          className="hidden @4xl:sticky @4xl:top-0 @4xl:block"
+        >
+          <NewChatPreview
+            name={name.trim() || agent.name}
+            description={description}
+            avatarUrl={agent.avatar_url ?? null}
+            starters={showStarters ? starters : []}
+          />
+        </SettingsSection>
       </div>
     </div>
   );

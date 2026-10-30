@@ -8,14 +8,14 @@
  * Terminal runs open their persisted execution record. Active rows keep the
  * cancel affordance and are not links: this route is for historical records.
  */
-import { Alert, Pressable, View } from "react-native";
+import { Pressable, View } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { useColorScheme } from "nativewind";
 import { router } from "expo-router";
 import type { AgentTask } from "@multica/core/types";
 import { Text } from "@/components/ui/text";
 import { ActorAvatar } from "@/components/ui/actor-avatar";
-import { useCancelTask } from "@/data/mutations/issues";
+import { RunCancelButton } from "./run-cancel-button";
 import { useActorLookup } from "@/data/use-actor-name";
 import { runFailureBadgeLabel } from "@/lib/run-failure-badge";
 import { timeAgo } from "@/lib/time-ago";
@@ -68,7 +68,7 @@ export function RunRow({ task, issueId }: Props) {
           </Text>
         </View>
       </View>
-      {isActive ? <CancelButton taskId={task.id} issueId={issueId} /> : null}
+      {isActive ? <RunCancelButton taskId={task.id} issueId={issueId} /> : null}
       {isTerminal ? (
         <Ionicons
           name="chevron-forward"
@@ -112,44 +112,6 @@ function StatusBadge({ task }: { task: AgentTask }) {
     }
   }
   return <Text className={`text-xs ${cls}`}>{label}</Text>;
-}
-
-function CancelButton({
-  taskId,
-  issueId,
-}: {
-  taskId: string;
-  issueId: string;
-}) {
-  const mutation = useCancelTask(issueId);
-  const { t } = useT("issues");
-
-  const onPress = () => {
-    Alert.alert(
-      t("cancel.title"),
-      t("cancel.message"),
-      [
-        { text: t("cancel.keep_running"), style: "cancel" },
-        {
-          text: t("cancel.cancel_task"),
-          style: "destructive",
-          onPress: () => mutation.mutate(taskId),
-        },
-      ],
-    );
-  };
-
-  return (
-    <Pressable
-      onPress={onPress}
-      disabled={mutation.isPending}
-      className="px-3 py-1.5 rounded-md bg-secondary active:opacity-70"
-    >
-      <Text className="text-xs font-medium text-foreground">
-        {t("common:actions.cancel")}
-      </Text>
-    </Pressable>
-  );
 }
 
 function fallbackSummary(

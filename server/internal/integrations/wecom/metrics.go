@@ -91,6 +91,10 @@ type Metrics interface {
 	// gauge of a backlog read over time, not a balance.
 	RecordStreamOpened()
 
+	// RecordMediaFailure — an attachment that never reached the agent.
+	// reason is one of the mediaDrop* constants below.
+	RecordMediaFailure(reason string)
+
 	// RecordOutboundDelivered — one reply reached the user. It is the
 	// denominator: without it a flat drop counter cannot be told apart from a
 	// quiet day, and "the bot went silent" is exactly the report that cannot
@@ -158,6 +162,32 @@ type Metrics interface {
 	RecordRelayShed(kind string)
 }
 
+// Reasons an attachment did not make it. Fixed set: these are label values and
+// the label space has to stay bounded.
+const (
+	// mediaDropBlockedAddress — the media host resolved somewhere the guard
+	// refuses. Either WeCom changed its CDN or somebody is pointing us at an
+	// internal address; both want looking at, and they are the two an
+	// operator can act on.
+	mediaDropBlockedAddress = "blocked_address"
+	// mediaDropTooLarge — past the size ceiling. The sender is told, so a
+	// sustained rate is a conversation about the ceiling rather than a fault.
+	mediaDropTooLarge = "too_large"
+	// mediaDropUnreadable — everything else the resolver ran into on its own:
+	// an expired url, a decrypt that failed, an upload the object store
+	// refused.
+	mediaDropUnreadable = "unreadable"
+	// mediaDropBudgetExpired — the Router's media budget ran out first: the
+	// download never started, was cut off, or finished too late to be bound.
+	// A sustained rate says the budget is short for what people send, or the
+	// media host is slow; the sender is told either way.
+	mediaDropBudgetExpired = "budget_expired"
+	// mediaDropShutdown — the server was draining while the attachment was
+	// queued or in flight. Expected around a deploy, and kept apart so a
+	// deploy does not read as a slow-download incident.
+	mediaDropShutdown = "shutdown"
+)
+
 // nopMetrics is what the constructor falls back to. A nil sink must never be a
 // nil-pointer dereference on the read loop.
 type nopMetrics struct{}
@@ -169,6 +199,7 @@ func (nopMetrics) RecordCallbackQueueBlocked()        {}
 func (nopMetrics) RecordStreamOpened()                {}
 func (nopMetrics) RecordStreamFinished()              {}
 func (nopMetrics) RecordStreamFellBack()              {}
+func (nopMetrics) RecordMediaFailure(string)          {}
 func (nopMetrics) RecordOutboundDelivered()           {}
 func (nopMetrics) RecordOutboundDropped(string)       {}
 func (nopMetrics) RecordOutboundSkipped(string)       {}

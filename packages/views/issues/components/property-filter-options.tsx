@@ -13,6 +13,7 @@ import {
   parseActorRef,
   isListPropertyType,
   isScalarPropertyType,
+  MAX_ISSUE_PROPERTY_FILTER_VALUES,
   PROPERTY_FILTER_OP_SYMBOLS,
   PROPERTY_FILTER_OPS_BY_TYPE,
   type IssueProperty,
@@ -361,6 +362,7 @@ export function PropertyFilterOptions({
     );
   }
 
+  const atCapacity = selected.length >= MAX_ISSUE_PROPERTY_FILTER_VALUES;
   return (
     <>
       {options.map((option) => {
@@ -370,7 +372,7 @@ export function PropertyFilterOptions({
           <DropdownMenuCheckboxItem
             key={option.id}
             checked={checked}
-            disabled={fixedIds?.has(option.id) === true}
+            disabled={fixedIds?.has(option.id) === true || (atCapacity && !checked)}
             title={fixedIds?.has(option.id) === true ? fixedTitle : undefined}
             onCheckedChange={() => onToggle(option.id)}
             className={FILTER_ITEM_CLASS}

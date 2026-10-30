@@ -57,6 +57,15 @@ export const ISSUE_PROPERTY_ACTOR_KINDS: IssuePropertyActorKind[] = ["member"];
 /** Upper bound on a single multi_actor value; mirrors the server cap. */
 export const MAX_ISSUE_PROPERTY_ACTOR_VALUES = 20;
 
+/** Upper bound on a single multi_select value; mirrors the server cap. */
+export const MAX_ISSUE_PROPERTY_SELECT_VALUES = 50;
+
+/** Upper bound on a select / multi_select definition; mirrors the server cap. */
+export const MAX_ISSUE_PROPERTY_SELECT_OPTIONS = 200;
+
+/** Per-property filter budget, including No value; mirrors the server cap. */
+export const MAX_ISSUE_PROPERTY_FILTER_VALUES = 50;
+
 export interface IssuePropertyActorRef {
   kind: IssuePropertyActorKind;
   /** Members are referenced by `user_id`, matching the issue assignee pair. */

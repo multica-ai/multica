@@ -40,7 +40,7 @@ import (
 //     values but keep existing ones resolvable.
 const (
 	maxActivePropertiesPerWorkspace = 20
-	maxPropertySelectOptions        = 50
+	maxPropertySelectOptions        = 200
 	maxPropertyNameLen              = 32
 	maxPropertyIconLen              = 32
 	maxPropertyDescriptionLen       = 500
@@ -234,7 +234,7 @@ func propertyTypeHasOptions(t string) bool {
 }
 
 // validatePropertyConfig canonicalizes the config for storage. Select-type
-// properties require 1..50 options; each option gets a stable server-assigned
+// properties require 1..200 options; each option gets a stable server-assigned
 // UUID if the caller didn't provide one (values reference option IDs, so
 // option renames never touch issue rows). Non-select types must not carry
 // options and are stored as {}.

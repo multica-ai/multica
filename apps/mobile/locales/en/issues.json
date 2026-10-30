@@ -148,7 +148,10 @@
     "title": "Cancel run?",
     "message": "The agent will stop after the current step.",
     "keep_running": "Keep running",
-    "cancel_task": "Cancel run"
+    "cancel_task": "Cancel run",
+    "waiting_for_connection": "Waiting for connection...",
+    "stopping": "Stopping...",
+    "failed": "Couldn’t stop the run. Try again."
   },
   "form": {
     "discard_title": "Discard changes?",
