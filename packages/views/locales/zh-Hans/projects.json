@@ -167,7 +167,7 @@
     "fallback_label": "项目"
   },
   "toolbar": {
-    "result_count_title": "当前结果 / 全部项目",
+    "result_count_title": "当前结果 / 此视图中的项目",
     "filter_label": "筛选",
     "filter_active_count_other": "{{count}} 项筛选",
     "clear_filters": "清除筛选",
@@ -180,5 +180,16 @@
     "direction_desc": "降序",
     "section_columns": "列",
     "view": "视图"
+  },
+  "lifecycle": {
+    "label": "项目生命周期",
+    "active": "活跃",
+    "completed": "已完成",
+    "all": "全部",
+    "empty": {
+      "active": "没有活跃项目",
+      "completed": "没有已完成项目",
+      "all": "暂无项目"
+    }
   }
 }

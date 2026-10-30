@@ -74,5 +74,16 @@
     "count": "執行 · {{count}}"
   },
   "status.planned": "計劃中",
-  "form.description_placeholder": "這個專案是做什麼的？"
+  "form.description_placeholder": "這個專案是做什麼的？",
+  "lifecycle": {
+    "label": "專案生命週期",
+    "active": "活躍",
+    "completed": "已完成",
+    "all": "全部",
+    "empty": {
+      "active": "沒有活躍專案",
+      "completed": "沒有已完成專案",
+      "all": "尚無專案"
+    }
+  }
 }

@@ -167,7 +167,7 @@
     "fallback_label": "프로젝트"
   },
   "toolbar": {
-    "result_count_title": "일치하는 프로젝트 / 전체 프로젝트",
+    "result_count_title": "일치하는 프로젝트 / 이 보기의 프로젝트",
     "filter_label": "필터",
     "filter_active_count_other": "필터 {{count}}개",
     "clear_filters": "필터 지우기",
@@ -180,5 +180,16 @@
     "direction_desc": "내림차순",
     "section_columns": "열",
     "view": "보기"
+  },
+  "lifecycle": {
+    "label": "프로젝트 수명 주기",
+    "active": "활성",
+    "completed": "완료",
+    "all": "전체",
+    "empty": {
+      "active": "활성 프로젝트가 없습니다",
+      "completed": "완료된 프로젝트가 없습니다",
+      "all": "아직 프로젝트가 없습니다"
+    }
   }
 }
