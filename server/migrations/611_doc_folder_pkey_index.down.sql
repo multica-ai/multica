@@ -1,0 +1,1 @@
+DROP INDEX CONCURRENTLY IF EXISTS doc_folder_pkey_uidx;

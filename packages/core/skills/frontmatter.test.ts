@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { parseFrontmatter } from "./frontmatter";
+import { parseFrontmatter, splitFrontmatter } from "./frontmatter";
 
 describe("parseFrontmatter", () => {
   it("parses single-line values", () => {
@@ -119,5 +119,19 @@ describe("parseFrontmatter", () => {
       name: "my-skill",
       description: '{"a":1,"b":2}',
     });
+  });
+});
+
+describe("splitFrontmatter", () => {
+  it("returns the raw block so it can be put back byte for byte", () => {
+    const raw = "---\nname: x\ndescription: |\n  long\n---\n\n# Body\n";
+    const { head, body } = splitFrontmatter(raw);
+    expect(head).toBe("---\nname: x\ndescription: |\n  long\n---\n");
+    expect(body).toBe("\n# Body\n");
+    expect(head + body).toBe(raw);
+  });
+
+  it("treats a file without frontmatter as all body", () => {
+    expect(splitFrontmatter("# Just text")).toEqual({ head: "", body: "# Just text" });
   });
 });

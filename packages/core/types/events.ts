@@ -73,6 +73,14 @@ export type WSEventType =
   | "label:created"
   | "label:updated"
   | "label:deleted"
+  | "doc:created"
+  | "doc:updated"
+  | "doc:deleted"
+  | "doc_folder:created"
+  | "doc_folder:updated"
+  | "doc_folder:deleted"
+  | "project_doc:linked"
+  | "project_doc:unlinked"
   | "issue_labels:changed"
   | "issue_metadata:changed"
   | "issue_properties:changed"
@@ -649,6 +657,14 @@ export interface WSEventPayloadMap {
   "label:created": unknown;
   "label:updated": unknown;
   "label:deleted": unknown;
+  "doc:created": unknown;
+  "doc:updated": unknown;
+  "doc:deleted": unknown;
+  "doc_folder:created": unknown;
+  "doc_folder:updated": unknown;
+  "doc_folder:deleted": unknown;
+  "project_doc:linked": unknown;
+  "project_doc:unlinked": unknown;
   "pin:created": unknown;
   "pin:deleted": unknown;
   "pin:reordered": unknown;

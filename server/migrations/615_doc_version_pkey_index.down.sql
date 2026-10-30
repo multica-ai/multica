@@ -1,0 +1,1 @@
+DROP INDEX CONCURRENTLY IF EXISTS doc_version_pkey_uidx;

@@ -227,6 +227,10 @@ vi.mock("./project-resources-section", () => ({
   ProjectResourcesSection: () => null,
 }));
 
+vi.mock("../../docs/components/project-docs-section", () => ({
+  ProjectDocsSection: () => null,
+}));
+
 vi.mock("./project-start-date-picker", () => ({
   ProjectStartDatePicker: () => null,
 }));

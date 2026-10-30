@@ -2175,6 +2175,34 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					r.Post("/resources", h.CreateProjectResource)
 					r.Put("/resources/{resourceId}", h.UpdateProjectResource)
 					r.Delete("/resources/{resourceId}", h.DeleteProjectResource)
+					r.Get("/docs", h.ListProjectDocs)
+					r.Post("/docs", h.LinkProjectDoc)
+					r.Delete("/docs/{docId}", h.UnlinkProjectDoc)
+				})
+			})
+
+			// Knowledge base (MUL-8370). Any member or agent can read and
+			// write; doc deletion is gated inside the handler.
+			r.Route("/api/docs", func(r chi.Router) {
+				r.Get("/", h.ListDocTree)
+				r.Post("/", h.CreateDoc)
+				r.Get("/activity", h.ListDocActivity)
+				r.Route("/{id}", func(r chi.Router) {
+					r.Get("/", h.GetDoc)
+					r.Patch("/", h.UpdateDoc)
+					r.Delete("/", h.DeleteDoc)
+					r.Post("/move", h.MoveDoc)
+					r.Post("/read", h.MarkDocRead)
+					r.Get("/versions", h.ListDocVersions)
+					r.Get("/versions/{number}", h.GetDocVersion)
+				})
+			})
+			r.Route("/api/doc-folders", func(r chi.Router) {
+				r.Post("/", h.CreateDocFolder)
+				r.Route("/{id}", func(r chi.Router) {
+					r.Patch("/", h.UpdateDocFolder)
+					r.Delete("/", h.DeleteDocFolder)
+					r.Post("/move", h.MoveDocFolder)
 				})
 			})
 

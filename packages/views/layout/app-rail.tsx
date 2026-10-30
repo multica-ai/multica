@@ -2,7 +2,7 @@
 
 import { useMemo } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { Settings, Users, type IconComponent } from "@multica/ui/icons";
+import { BookOpen, Settings, Users, type IconComponent } from "@multica/ui/icons";
 import { useChatStore } from "@multica/core/chat";
 import { chatSessionsOptions } from "@multica/core/chat/queries";
 import { countUnreadChatMessages } from "@multica/core/chat/unread";
@@ -193,6 +193,12 @@ export function AppRail({
       icon: routeIconForPath(p.issues()),
       label: t(($) => $.rail.work),
       fullLabel: t(($) => $.spaces.work),
+    },
+    kb: {
+      href: p.docs(),
+      icon: BookOpen,
+      label: t(($) => $.rail.kb),
+      fullLabel: t(($) => $.spaces.kb),
     },
     team: {
       href: p.agents(),

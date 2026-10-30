@@ -23,6 +23,7 @@ import {
   squadListOptions,
 } from "@multica/core/workspace/queries";
 import { runtimeListOptions } from "@multica/core/runtimes/queries";
+import { docDetailOptions, docTreeOptions } from "@multica/core/docs";
 import { runtimeDisplayName } from "@multica/core/runtimes";
 import { chatSessionsOptions } from "@multica/core/chat/queries";
 import {
@@ -71,6 +72,8 @@ const PENDING_RESOURCE_KEYS: ReadonlySet<TabLabelKey> = new Set<TabLabelKey>([
   "member",
   "squad",
   "skill",
+  "doc",
+  "folder",
   "machine",
   "runtime",
 ]);
@@ -148,6 +151,12 @@ function useTabEntityData(subject: TabSubject, wsId: string): TabEntityData {
     enabled: false,
   }).data;
 
+  const doc = useQuery({
+    ...docDetailOptions(wsId, subject.kind === "doc" ? subject.id : NONE),
+    enabled: false,
+  }).data;
+  const docTree = useQuery({ ...docTreeOptions(wsId), enabled: false }).data;
+
   const agents = useQuery({ ...agentListOptions(wsId), enabled: false }).data;
   const members = useQuery({ ...memberListOptions(wsId), enabled: false }).data;
   const squads = useQuery({ ...squadListOptions(wsId), enabled: false }).data;
@@ -174,6 +183,16 @@ function useTabEntityData(subject: TabSubject, wsId: string): TabEntityData {
     case "skill":
       if (skill) data.skill = { name: skill.name };
       break;
+    case "doc": {
+      const summary = doc ?? docTree?.docs.find((d) => d.id === subject.id);
+      if (summary) data.doc = { title: summary.title, format: summary.format };
+      break;
+    }
+    case "docFolder": {
+      const folder = docTree?.folders.find((f) => f.id === subject.id);
+      if (folder) data.docFolder = { title: folder.title };
+      break;
+    }
     case "actor": {
       const name =
         subject.actorType === "agent"

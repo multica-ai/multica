@@ -2,7 +2,7 @@
 
 import { useMemo } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { BarChart3, BookOpenText, Bot, Monitor, Plus, User, UserPlus, Users } from "@multica/ui/icons";
+import { BarChart3, Bot, Monitor, Plus, User, UserPlus, Users } from "@multica/ui/icons";
 import { cn } from "@multica/ui/lib/utils";
 import { ActorAvatar } from "@multica/ui/components/common/actor-avatar";
 import { IconButton } from "@multica/ui/components/common/icon-button";
@@ -13,7 +13,7 @@ import { issueDetailOptions } from "@multica/core/issues/queries";
 import { useCurrentWorkspace, useWorkspacePaths } from "@multica/core/paths";
 import { deriveRuntimeHealth } from "@multica/core/runtimes";
 import { runtimeListOptions } from "@multica/core/runtimes/queries";
-import { memberListOptions, skillListOptions, squadListOptions } from "@multica/core/workspace/queries";
+import { memberListOptions, squadListOptions } from "@multica/core/workspace/queries";
 import { resolvePublicFileUrl } from "@multica/core/workspace/avatar-url";
 import type { Agent, AgentTask } from "@multica/core/types";
 import { useNavigation } from "../../navigation";
@@ -117,7 +117,6 @@ export function TeamPanel() {
   const { data: squads = [] } = useQuery({ ...squadListOptions(wsId), enabled: !!wsId });
   const liveSquads = useMemo(() => squads.filter((squad) => !squad.archived_at), [squads]);
   const { data: members = [] } = useQuery({ ...memberListOptions(wsId), enabled: !!wsId });
-  const { data: skills = [] } = useQuery({ ...skillListOptions(wsId), enabled: !!wsId });
   const { data: runtimes = [] } = useQuery({ ...runtimeListOptions(wsId), enabled: !!wsId });
   const offlineRuntimes = useMemo(() => {
     const now = Date.now();
@@ -271,13 +270,6 @@ export function TeamPanel() {
 
         <PanelSection label={t(($) => $.panels.team.resources)}>
           <PanelList>
-            <PanelLink
-              href={p.skills()}
-              icon={<BookOpenText />}
-              label={t(($) => $.nav.skills)}
-              active={isPathWithin(pathname, p.skills())}
-              trailing={<PanelCount value={skills.length} />}
-            />
             <PanelLink
               href={p.runtimes()}
               icon={<Monitor />}

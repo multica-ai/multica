@@ -12,7 +12,8 @@
     "runtimes": "執行時",
     "skills": "Skills",
     "settings": "設定",
-    "views": "檢視"
+    "views": "檢視",
+    "docs": "知識庫"
   },
   "tab": {
     "issue": "任務",
@@ -26,7 +27,9 @@
     "runtime": "執行時",
     "attachment": "附件",
     "create_agent": "建立智慧體",
-    "unknown": "未知頁面"
+    "unknown": "未知頁面",
+    "doc": "文件",
+    "folder": "資料夾"
   },
   "help": {
     "trigger": "幫助",
@@ -64,7 +67,8 @@
   },
   "spaces": {
     "work": "任務",
-    "team": "團隊"
+    "team": "團隊",
+    "kb": "知識庫"
   },
   "rail": {
     "label": "應用導覽",
@@ -75,7 +79,8 @@
     "chat": "聊天",
     "autopilots": "自動化",
     "switch_workspace": "切換工作區",
-    "invitation_from": "{{name}} 邀請你加入"
+    "invitation_from": "{{name}} 邀請你加入",
+    "kb": "知識庫"
   },
   "panels": {
     "work": {

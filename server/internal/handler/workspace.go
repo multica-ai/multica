@@ -1339,6 +1339,13 @@ func (h *Handler) DeleteWorkspace(w http.ResponseWriter, r *http.Request) {
 			},
 		},
 		{
+			// Knowledge-base tables carry no foreign keys. (MUL-8370)
+			name: "delete knowledge base",
+			run: func() error {
+				return qtx.DeleteWorkspaceKnowledgeBase(ctx, requester.WorkspaceID)
+			},
+		},
+		{
 			name: "delete autopilot children",
 			run:  func() error { return qtx.DeleteWorkspaceAutopilotChildren(ctx, requester.WorkspaceID) },
 		},

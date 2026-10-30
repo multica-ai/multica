@@ -47,6 +47,8 @@ export type TabLabelKey =
   | "member"
   | "squad"
   | "skill"
+  | "doc"
+  | "folder"
   | "machine"
   | "runtime"
   | "attachment"
@@ -84,6 +86,8 @@ export interface TabEntityData {
   /** Resolved display name for an actor subject. */
   actorName?: string;
   skill?: { name: string };
+  doc?: { title: string; format: "markdown" | "html" };
+  docFolder?: { title: string };
   machine?: { name: string };
   runtime?: { name: string };
   /** Resolved chat session title (already includes the "New chat" fallback). */
@@ -185,6 +189,16 @@ export function resolveTabPresentation(
       return {
         visual: { kind: "icon", icon: "BookOpenText" },
         title: textOr(data.skill?.name, "skill"),
+      };
+    case "doc":
+      return {
+        visual: { kind: "icon", icon: data.doc?.format === "html" ? "FileCode" : "FileText" },
+        title: textOr(data.doc?.title, "doc"),
+      };
+    case "docFolder":
+      return {
+        visual: { kind: "icon", icon: "Folder" },
+        title: textOr(data.docFolder?.title, "folder"),
       };
     case "machine":
       return {

@@ -1,0 +1,149 @@
+{
+  "untitled": "未命名",
+  "version_number": "v{{number}}",
+  "kb": "知识库",
+  "actions": {
+    "new": "新建",
+    "new_doc": "新建文档",
+    "new_html_doc": "新建 HTML 文档",
+    "new_folder": "新建文件夹",
+    "new_skill": "新建 Skill",
+    "rename": "重命名",
+    "move": "移动到…",
+    "delete": "删除",
+    "cancel": "取消",
+    "dismiss": "关闭",
+    "history": "历史",
+    "toggle_panel": "详情",
+    "more": "更多",
+    "copy_link": "复制链接",
+    "link_copied": "已复制链接"
+  },
+  "errors": {
+    "create_doc": "无法创建文档",
+    "create_folder": "无法创建文件夹",
+    "move": "移动失败",
+    "move_into_self": "不能把文件夹移到它自己里面",
+    "rename": "重命名失败",
+    "delete": "删除失败",
+    "link": "无法更新项目关联",
+    "save": "保存失败"
+  },
+  "move": {
+    "title": "移动「{{title}}」",
+    "destination": "目标位置",
+    "root": "知识库（顶层）",
+    "current": "当前",
+    "confirm": "移动"
+  },
+  "delete": {
+    "title": "删除这篇文档？",
+    "description": "「{{title}}」及其全部历史都会被删除，无法撤销。",
+    "confirm": "删除"
+  },
+  "tree": {
+    "unread": "有未读改动",
+    "more": "{{title}} 的更多操作",
+    "add_in": "在 {{title}} 中新建",
+    "toggle": "展开 {{title}}",
+    "folder_name": "文件夹名称",
+    "delete_folder_not_empty": "清空后才能删除",
+    "empty_folder": "空文件夹",
+    "empty": "还没有文档"
+  },
+  "panel": {
+    "docs": "文档",
+    "all_skills": "全部 Skills"
+  },
+  "feed": {
+    "title": "最近更新",
+    "all": "全部",
+    "unread": "未读",
+    "mark_all_read": "全部标为已读",
+    "today": "今天",
+    "yesterday": "昨天",
+    "name_separator": "、",
+    "created": "新建",
+    "created_and_edited_other": "新建，又改了 {{count}} 次",
+    "edited_other": "改了 {{count}} 次",
+    "empty_title": "最近两周没有改动",
+    "empty_body": "团队和智能体写的文档会出现在这里，每篇文档每天一行。",
+    "empty_unread": "没有未读的更新"
+  },
+  "html": {
+    "preview": "预览",
+    "source": "源码",
+    "mode_label": "视图",
+    "source_label": "HTML 源码"
+  },
+  "side": {
+    "properties": "属性",
+    "location": "位置",
+    "format": "格式",
+    "created_by": "创建者",
+    "edited_by": "编辑过",
+    "version": "版本",
+    "view_history": "查看历史",
+    "projects": "关联的项目",
+    "link_project": "关联项目",
+    "search_projects": "搜索项目…",
+    "no_projects": "没有可关联的项目",
+    "no_linked_projects": "还没有关联项目",
+    "unlink_project": "取消关联 {{title}}"
+  },
+  "format": {
+    "markdown": "Markdown",
+    "html": "HTML 页面"
+  },
+  "editor": {
+    "placeholder": "开始写，或输入 / 调出命令…",
+    "title_label": "标题",
+    "saving": "保存中…",
+    "saved": "已保存",
+    "save_failed": "保存失败 · 重试",
+    "notice_updated": "{{name}} 更新了这篇文档",
+    "notice_merged": "{{name}} 同时保存了改动，已合并进你的编辑",
+    "notice_conflict": "你和 {{name}} 改了同一处，先保留了你的版本",
+    "use_theirs": "改用 {{name}} 的",
+    "use_theirs_failed": "这几行又被改过了，请手动修改",
+    "view_changes": "查看改动",
+    "unread_banner": "自你上次打开后有新改动，最近一次来自 {{name}}",
+    "refresh_failed": "无法加载最新版本，你的修改仍保留在这里。",
+    "retry": "重试"
+  },
+  "history": {
+    "title": "历史",
+    "current": "当前",
+    "created": "新建",
+    "restored": "恢复到 v{{number}}",
+    "reverted": "撤销了 v{{number}}",
+    "comparing_version": "v{{number}} 的改动",
+    "comparing_range": "从 v{{from}} 到 v{{to}} 的改动",
+    "no_changes": "没有改动",
+    "restore": "恢复到 v{{number}}",
+    "revert": "撤销这次改动",
+    "restore_done": "已恢复为新版本",
+    "revert_done": "已撤销，生成了新版本",
+    "revert_conflict": "之后的改动碰到了同样的行，无法自动撤销",
+    "changed_meanwhile": "刚才有人保存了新版本，请重试",
+    "nothing_changed": "文档已经是这个样子，没有需要改的内容",
+    "title_changed": "标题",
+    "load_failed": "无法加载这个版本"
+  },
+  "folder": {
+    "empty": "这个文件夹是空的"
+  },
+  "not_found": {
+    "title": "文档不存在或已被删除",
+    "folder": "文件夹不存在或已被删除",
+    "back": "返回知识库"
+  },
+  "project": {
+    "title": "文档",
+    "empty": "还没有关联文档",
+    "link": "关联文档",
+    "search": "搜索文档…",
+    "no_results": "没有可关联的文档",
+    "unlink": "取消关联 {{title}}"
+  }
+}

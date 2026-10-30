@@ -8,6 +8,7 @@
 
 @import "./shell.css";
 @import "./prose.css";
+@import "./document.css";
 @import "./code.css";
 @import "./mermaid.css";
 @import "./media.css";

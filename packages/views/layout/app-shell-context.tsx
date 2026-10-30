@@ -10,7 +10,7 @@ import { useNavigation } from "../navigation";
  * are list-and-detail pages that already render their own list column in the
  * same card, so the shell adds no panel for them.
  */
-export const PANEL_SPACES: ReadonlySet<AppSpaceId> = new Set(["work", "team", "autopilots"]);
+export const PANEL_SPACES: ReadonlySet<AppSpaceId> = new Set(["work", "kb", "team", "autopilots"]);
 
 // Opening waits for the pointer to settle so sweeping across the rail does
 // not flash every panel; closing waits long enough to cross the gap between

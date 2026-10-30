@@ -1,34 +1,28 @@
 "use client";
 
-import { useEffect, useMemo, useRef } from "react";
+import { useEffect, useRef } from "react";
 import { Textarea } from "@multica/ui/components/ui/textarea";
-import { parseFrontmatter } from "@multica/core/skills/frontmatter";
+import { splitFrontmatter } from "@multica/core/skills/frontmatter";
 import { RichContent } from "../../rich-content";
 import { useT } from "../../i18n";
-
-/**
- * How the body of the selected file is rendered. Owned by the page, not by
- * this component: the mode is a property of how the user wants to work, not
- * of the file they happen to have open, so switching files must not silently
- * bounce them back to preview.
- */
-export type FileMode = "preview" | "raw";
 
 export function isMarkdownPath(path: string) {
   return path.endsWith(".md") || path.endsWith(".mdx");
 }
 
 /**
- * Body of a single skill file.
+ * Body of a single skill file, in the same centered column as a knowledge
+ * base doc.
  *
- * Frontmatter is stripped from the preview because `name` / `description` are
- * surfaced as first-class properties on the Overview tab — rendering them
- * again here was the third copy of the same two fields.
+ * Editors always get the source, never a rich editor: agents read these files
+ * byte for byte, and a WYSIWYG round trip rewrites what it cannot model —
+ * `<example>` prompt tags come back escaped, `{{var_name}}` gains a backslash,
+ * list markers and tables are reformatted. Read-only viewers get Markdown
+ * rendered, without the frontmatter the side panel already shows.
  */
 export function FileViewer({
   path,
   content,
-  mode,
   readOnly,
   autoFocus,
   onChange,
@@ -36,9 +30,8 @@ export function FileViewer({
 }: {
   path: string;
   content: string;
-  mode: FileMode;
   readOnly: boolean;
-  /** Set by "Edit": put the caret in this file's editor once it renders. */
+  /** Put the caret in this file's editor once it renders (a just-added file). */
   autoFocus?: boolean;
   onChange: (content: string) => void;
   /** Called once the caret has landed, so the request is not replayed. */
@@ -46,58 +39,46 @@ export function FileViewer({
 }) {
   const { t } = useT("skills");
   const isMd = isMarkdownPath(path);
-  const editorRef = useRef<HTMLTextAreaElement>(null);
+  const ref = useRef<HTMLTextAreaElement>(null);
 
-  const body = useMemo(
-    () => (isMd ? parseFrontmatter(content).body : content),
-    [content, isMd],
-  );
-
-  // The caller flips the mode to raw in the same update that raises this flag,
-  // so by the time the effect runs the textarea below is mounted. Focusing
-  // through a request the page owns — rather than `autoFocus` on the element —
-  // is what makes "Edit" work on the file that is ALREADY open: that path
-  // changes no key, mounts nothing, and would never re-run a mount-only focus.
   useEffect(() => {
-    if (autoFocus !== true) return;
-    const el = editorRef.current;
-    if (!el) return;
-    el.focus();
-    // Caret at the top. Jumping to the end of a multi-thousand-character
-    // reference file would scroll away the content the user just clicked.
-    el.setSelectionRange(0, 0);
+    if (autoFocus !== true || !ref.current) return;
+    ref.current.focus();
+    // Caret at the top: jumping to the end of a long file would scroll away
+    // the content the user just opened.
+    ref.current.setSelectionRange(0, 0);
     onFocusHandled?.();
   }, [autoFocus, onFocusHandled]);
 
-  // Non-markdown files have nothing to preview; they are always raw.
-  if (isMd && mode === "preview") {
-    return (
-      <div className="h-full overflow-y-auto">
-        {/* pb-24: keeps the last lines readable under the floating save pill. */}
-        <div className="mx-auto max-w-[68ch] px-6 pb-24 pt-7 sm:px-8">
-          <RichContent
-            content={body || t(($) => $.file_viewer.no_content)}
-            density="document"
-            phase="settled"
-          />
-        </div>
-      </div>
-    );
-  }
-
   return (
-    <Textarea
-      ref={editorRef}
-      value={content}
-      readOnly={readOnly}
-      onChange={(e) => onChange(e.target.value)}
-      aria-label={t(($) => $.file_viewer.raw_aria, { path })}
-      placeholder={
-        isMd
-          ? t(($) => $.file_viewer.markdown_placeholder)
-          : t(($) => $.file_viewer.raw_placeholder)
-      }
-      className="h-full min-h-full resize-none rounded-none border-0 px-6 pb-24 pt-5 font-mono text-body leading-relaxed read-only:cursor-default focus-visible:ring-0 sm:px-8"
-    />
+    <div className="h-full overflow-y-auto">
+      {/* pb-24 keeps the last lines readable under the floating save pill. */}
+      <div className="mx-auto w-full max-w-3xl px-6 pt-8 pb-24 sm:px-10">
+        {readOnly && isMd ? (
+          <div className="prose-document">
+            <RichContent
+              content={splitFrontmatter(content).body || t(($) => $.file_viewer.no_content)}
+              density="document"
+              phase="settled"
+            />
+          </div>
+        ) : (
+          <Textarea
+            ref={ref}
+            value={content}
+            readOnly={readOnly}
+            spellCheck={false}
+            onChange={(e) => onChange(e.target.value)}
+            aria-label={t(($) => $.file_viewer.raw_aria, { path })}
+            placeholder={
+              isMd
+                ? t(($) => $.file_viewer.markdown_placeholder)
+                : t(($) => $.file_viewer.raw_placeholder)
+            }
+            className="min-h-[50vh] resize-none rounded-none border-0 bg-transparent p-0 font-mono text-body leading-relaxed shadow-none read-only:cursor-default focus-visible:ring-0 md:text-body dark:bg-transparent"
+          />
+        )}
+      </div>
+    </div>
   );
 }

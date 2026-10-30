@@ -1,6 +1,12 @@
 import { z } from "zod";
 import { normalizeIssueStatusCategory } from "../issues/config/status";
 import type {
+  Doc,
+  DocActivityItem,
+  DocFolder,
+  DocTree,
+  DocVersion,
+  DocVersionAction,
   WorkflowHandoffPreview,
   IssueWorkflow,
   IssueWorkflowDryRunResponse,
@@ -3832,3 +3838,115 @@ export const RuntimeProfileSchema = z
     runtime_type: profile.runtime_type || profile.protocol_family,
   }));
 export const RuntimeProfileListSchema = z.array(RuntimeProfileSchema);
+
+// Knowledge base (MUL-8370). Enums parse leniently: a newer server may add a
+// format or version action this build cannot name, and the doc must still list.
+const DocFormatSchema = z.string().transform((value): Doc["format"] => (value === "html" ? "html" : "markdown"));
+const DocAuthorTypeSchema = z.string().transform((value): Doc["created_by_type"] => (value === "agent" ? "agent" : "member"));
+const DOC_VERSION_ACTIONS = new Set<string>(["create", "edit", "restore", "revert"]);
+const DocVersionActionSchema = z.string().transform((value): DocVersionAction =>
+  DOC_VERSION_ACTIONS.has(value) ? (value as DocVersionAction) : "edit",
+);
+
+export const DocSummarySchema = z.object({
+  id: z.string(),
+  workspace_id: z.string(),
+  folder_id: z.string().nullable().default(null),
+  format: DocFormatSchema,
+  title: z.string().default(""),
+  revision: z.number(),
+  version_count: z.number().default(1),
+  created_by_type: DocAuthorTypeSchema,
+  created_by_id: z.string(),
+  updated_by_type: DocAuthorTypeSchema,
+  updated_by_id: z.string(),
+  created_at: z.string(),
+  updated_at: z.string(),
+  unread: z.boolean().default(false),
+}).loose();
+
+export const DocSchema = DocSummarySchema.extend({
+  content: z.string().default(""),
+  project_ids: z.array(z.string()).default([]),
+  last_seen_at: z.string().nullable().default(null),
+}).loose();
+
+export const DocFolderSchema = z.object({
+  id: z.string(),
+  workspace_id: z.string(),
+  parent_id: z.string().nullable().default(null),
+  title: z.string(),
+  created_by_type: DocAuthorTypeSchema,
+  created_by_id: z.string(),
+  created_at: z.string(),
+  updated_at: z.string(),
+}).loose();
+
+export const DocTreeSchema = z.object({
+  folders: z.array(DocFolderSchema).default([]),
+  docs: z.array(DocSummarySchema).default([]),
+}).loose();
+
+export const DocVersionSchema = z.object({
+  doc_id: z.string(),
+  number: z.number(),
+  title: z.string().default(""),
+  author_type: DocAuthorTypeSchema,
+  author_id: z.string(),
+  message: z.string().default(""),
+  action: DocVersionActionSchema,
+  action_ref: z.number().nullable().default(null),
+  task_id: z.string().nullable().default(null),
+  issue_id: z.string().nullable().default(null),
+  lines_added: z.number().default(0),
+  lines_removed: z.number().default(0),
+  created_at: z.string(),
+  updated_at: z.string(),
+  content: z.string().optional(),
+}).loose();
+
+export const DocVersionListSchema = z.object({
+  versions: z.array(DocVersionSchema).default([]),
+}).loose();
+
+export const DocActivityItemSchema = z.object({
+  doc_id: z.string(),
+  doc_title: z.string().default(""),
+  doc_folder_id: z.string().nullable().default(null),
+  doc_format: DocFormatSchema,
+  number: z.number(),
+  author_type: DocAuthorTypeSchema,
+  author_id: z.string(),
+  message: z.string().default(""),
+  action: DocVersionActionSchema,
+  action_ref: z.number().nullable().default(null),
+  task_id: z.string().nullable().default(null),
+  issue_id: z.string().nullable().default(null),
+  lines_added: z.number().default(0),
+  lines_removed: z.number().default(0),
+  created_at: z.string(),
+  updated_at: z.string(),
+  unread: z.boolean().default(false),
+}).loose();
+
+export const DocActivityListSchema = z.object({
+  items: z.array(DocActivityItemSchema).default([]),
+}).loose();
+
+export const ProjectDocListSchema = z.object({
+  docs: z.array(DocSummarySchema).default([]),
+}).loose();
+
+export const EMPTY_DOC_TREE: DocTree = { folders: [], docs: [] };
+export const EMPTY_DOC_VERSIONS: DocVersion[] = [];
+export const EMPTY_DOC_ACTIVITY: DocActivityItem[] = [];
+export const EMPTY_DOC_FOLDER: DocFolder = {
+  id: "",
+  workspace_id: "",
+  parent_id: null,
+  title: "",
+  created_by_type: "member",
+  created_by_id: "",
+  created_at: "",
+  updated_at: "",
+};

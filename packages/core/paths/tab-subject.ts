@@ -30,6 +30,10 @@ export type TabSubject =
   | { kind: "actor"; actorType: TabActorType; id: string }
   /** A single skill detail. */
   | { kind: "skill"; id: string }
+  /** A knowledge-base doc, including its history page. */
+  | { kind: "doc"; id: string }
+  /** A knowledge-base folder. */
+  | { kind: "docFolder"; id: string }
   /** A runtime machine detail. */
   | { kind: "machine"; machineId: string }
   /** A runtime nested under a machine. */
@@ -117,6 +121,12 @@ export function parseTabSubject(url: string): TabSubject {
       return { kind: "machine", machineId: id };
     case "skills":
       return id ? { kind: "skill", id } : { kind: "page", page: "skills" };
+    case "docs":
+      // `/docs/folders/:id` is a folder; `/docs/:id[/history]` is a doc.
+      if (id === "folders") {
+        return segments[3] ? { kind: "docFolder", id: segments[3] } : { kind: "unknown" };
+      }
+      return id ? { kind: "doc", id } : { kind: "page", page: "docs" };
     case "settings":
       return { kind: "page", page: "settings" };
     case "attachments":
@@ -153,6 +163,10 @@ export function tabSubjectKey(subject: TabSubject): string {
       return `actor:${subject.actorType}:${subject.id}`;
     case "skill":
       return `skill:${subject.id}`;
+    case "doc":
+      return `doc:${subject.id}`;
+    case "docFolder":
+      return `docFolder:${subject.id}`;
     case "machine":
       return `machine:${subject.machineId}`;
     case "runtime":

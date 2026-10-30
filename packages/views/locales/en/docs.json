@@ -1,0 +1,151 @@
+{
+  "untitled": "Untitled",
+  "version_number": "v{{number}}",
+  "kb": "Knowledge base",
+  "actions": {
+    "new": "New",
+    "new_doc": "New doc",
+    "new_html_doc": "New HTML doc",
+    "new_folder": "New folder",
+    "new_skill": "New skill",
+    "rename": "Rename",
+    "move": "Move to…",
+    "delete": "Delete",
+    "cancel": "Cancel",
+    "dismiss": "Dismiss",
+    "history": "History",
+    "toggle_panel": "Details",
+    "more": "More",
+    "copy_link": "Copy link",
+    "link_copied": "Link copied"
+  },
+  "errors": {
+    "create_doc": "Couldn't create the doc",
+    "create_folder": "Couldn't create the folder",
+    "move": "Couldn't move it",
+    "move_into_self": "A folder can't move into itself",
+    "rename": "Couldn't rename the folder",
+    "delete": "Couldn't delete it",
+    "link": "Couldn't update the project link",
+    "save": "Couldn't save"
+  },
+  "move": {
+    "title": "Move “{{title}}”",
+    "destination": "Destination",
+    "root": "Knowledge base (top level)",
+    "current": "Current",
+    "confirm": "Move"
+  },
+  "delete": {
+    "title": "Delete this doc?",
+    "description": "“{{title}}” and its whole history will be deleted. This can't be undone.",
+    "confirm": "Delete"
+  },
+  "tree": {
+    "unread": "Unread changes",
+    "more": "More actions for {{title}}",
+    "add_in": "New in {{title}}",
+    "toggle": "Show contents of {{title}}",
+    "folder_name": "Folder name",
+    "delete_folder_not_empty": "Empty the folder to delete it",
+    "empty_folder": "Empty folder",
+    "empty": "No docs yet"
+  },
+  "panel": {
+    "docs": "Docs",
+    "all_skills": "All skills"
+  },
+  "feed": {
+    "title": "Recent updates",
+    "all": "All",
+    "unread": "Unread",
+    "mark_all_read": "Mark all read",
+    "today": "Today",
+    "yesterday": "Yesterday",
+    "name_separator": ", ",
+    "created": "created it",
+    "created_and_edited_one": "created it, then edited it {{count}} time",
+    "created_and_edited_other": "created it, then edited it {{count}} times",
+    "edited_one": "edited it {{count}} time",
+    "edited_other": "edited it {{count}} times",
+    "empty_title": "Nothing changed in the last two weeks",
+    "empty_body": "Docs your team and agents write show up here, one row per doc per day.",
+    "empty_unread": "You're all caught up"
+  },
+  "html": {
+    "preview": "Preview",
+    "source": "Source",
+    "mode_label": "View",
+    "source_label": "HTML source"
+  },
+  "side": {
+    "properties": "Properties",
+    "location": "Location",
+    "format": "Format",
+    "created_by": "Created by",
+    "edited_by": "Edited by",
+    "version": "Version",
+    "view_history": "View history",
+    "projects": "Linked projects",
+    "link_project": "Link a project",
+    "search_projects": "Search projects…",
+    "no_projects": "No projects to link",
+    "no_linked_projects": "Not linked to a project",
+    "unlink_project": "Unlink {{title}}"
+  },
+  "format": {
+    "markdown": "Markdown",
+    "html": "HTML page"
+  },
+  "editor": {
+    "placeholder": "Write, or type / for commands…",
+    "title_label": "Title",
+    "saving": "Saving…",
+    "saved": "Saved",
+    "save_failed": "Not saved · Retry",
+    "notice_updated": "{{name}} updated this doc",
+    "notice_merged": "{{name}} saved at the same time; their changes are merged into yours",
+    "notice_conflict": "You and {{name}} changed the same lines — yours are kept",
+    "use_theirs": "Use {{name}}'s",
+    "use_theirs_failed": "Those lines changed again; edit them by hand",
+    "view_changes": "View changes",
+    "unread_banner": "Changed since you last opened it, most recently by {{name}}",
+    "refresh_failed": "Couldn't load the latest version. Your edits are kept here.",
+    "retry": "Retry"
+  },
+  "history": {
+    "title": "History",
+    "current": "Current",
+    "created": "Created",
+    "restored": "Restored v{{number}}",
+    "reverted": "Undid v{{number}}",
+    "comparing_version": "Changes in v{{number}}",
+    "comparing_range": "Changes from v{{from}} to v{{to}}",
+    "no_changes": "No changes",
+    "restore": "Restore v{{number}}",
+    "revert": "Undo this change",
+    "restore_done": "Restored as a new version",
+    "revert_done": "Change undone as a new version",
+    "revert_conflict": "Later edits touch the same lines, so this change can't be undone automatically",
+    "changed_meanwhile": "Someone saved in the meantime — try again",
+    "nothing_changed": "Nothing to change — the doc already matches",
+    "title_changed": "Title",
+    "load_failed": "Couldn't load this version"
+  },
+  "folder": {
+    "empty": "This folder is empty"
+  },
+  "not_found": {
+    "title": "This doc doesn't exist or was deleted",
+    "folder": "This folder doesn't exist or was deleted",
+    "back": "Back to the knowledge base"
+  },
+  "project": {
+    "title": "Docs",
+    "empty": "No docs linked yet",
+    "link": "Link doc",
+    "search": "Search docs…",
+    "no_results": "No docs to link",
+    "unlink": "Unlink {{title}}"
+  }
+}

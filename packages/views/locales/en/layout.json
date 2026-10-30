@@ -12,7 +12,8 @@
     "runtimes": "Runtimes",
     "skills": "Skills",
     "settings": "Settings",
-    "views": "Views"
+    "views": "Views",
+    "docs": "Knowledge base"
   },
   "tab": {
     "issue": "Issue",
@@ -26,7 +27,9 @@
     "runtime": "Runtime",
     "attachment": "Attachment",
     "create_agent": "Create Agent",
-    "unknown": "Unknown page"
+    "unknown": "Unknown page",
+    "doc": "Doc",
+    "folder": "Folder"
   },
   "help": {
     "trigger": "Help",
@@ -64,7 +67,8 @@
   },
   "spaces": {
     "work": "Issues",
-    "team": "Team"
+    "team": "Team",
+    "kb": "Knowledge base"
   },
   "rail": {
     "label": "App navigation",
@@ -75,7 +79,8 @@
     "chat": "Chat",
     "autopilots": "Auto",
     "switch_workspace": "Switch workspace",
-    "invitation_from": "{{name}} invited you"
+    "invitation_from": "{{name}} invited you",
+    "kb": "Docs"
   },
   "panels": {
     "work": {

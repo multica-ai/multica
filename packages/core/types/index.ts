@@ -28,6 +28,20 @@ export type {
   SetWorkflowHandoffRequest,
 } from "./issue-workflow";
 export type {
+  Doc,
+  DocActivityItem,
+  DocAuthorType,
+  DocFolder,
+  DocFormat,
+  DocSummary,
+  DocTree,
+  DocVersion,
+  DocVersionAction,
+  CreateDocRequest,
+  UpdateDocRequest,
+  CreateDocFolderRequest,
+} from "./doc";
+export type {
   Agent,
   AgentConversationStarter,
   AgentStatus,

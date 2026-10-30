@@ -1,0 +1,5 @@
+DROP TABLE IF EXISTS project_doc;
+DROP TABLE IF EXISTS doc_read;
+DROP TABLE IF EXISTS doc_version;
+DROP TABLE IF EXISTS doc;
+DROP TABLE IF EXISTS doc_folder;

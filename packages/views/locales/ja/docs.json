@@ -1,0 +1,149 @@
+{
+  "untitled": "無題",
+  "version_number": "v{{number}}",
+  "kb": "ナレッジベース",
+  "actions": {
+    "new": "新規",
+    "new_doc": "新規ドキュメント",
+    "new_html_doc": "新規 HTML ドキュメント",
+    "new_folder": "新規フォルダ",
+    "new_skill": "新規スキル",
+    "rename": "名前を変更",
+    "move": "移動…",
+    "delete": "削除",
+    "cancel": "キャンセル",
+    "dismiss": "閉じる",
+    "history": "履歴",
+    "toggle_panel": "詳細",
+    "more": "その他",
+    "copy_link": "リンクをコピー",
+    "link_copied": "リンクをコピーしました"
+  },
+  "errors": {
+    "create_doc": "ドキュメントを作成できませんでした",
+    "create_folder": "フォルダを作成できませんでした",
+    "move": "移動できませんでした",
+    "move_into_self": "フォルダを自身の中には移動できません",
+    "rename": "フォルダ名を変更できませんでした",
+    "delete": "削除できませんでした",
+    "link": "プロジェクトのリンクを更新できませんでした",
+    "save": "保存できませんでした"
+  },
+  "move": {
+    "title": "「{{title}}」を移動",
+    "destination": "移動先",
+    "root": "ナレッジベース（最上位）",
+    "current": "現在",
+    "confirm": "移動"
+  },
+  "delete": {
+    "title": "このドキュメントを削除しますか？",
+    "description": "「{{title}}」とその履歴がすべて削除されます。元に戻せません。",
+    "confirm": "削除"
+  },
+  "tree": {
+    "unread": "未読の変更",
+    "more": "{{title}} のその他の操作",
+    "add_in": "{{title}} に新規作成",
+    "toggle": "{{title}} の中身を表示",
+    "folder_name": "フォルダ名",
+    "delete_folder_not_empty": "削除するにはフォルダを空にしてください",
+    "empty_folder": "空のフォルダ",
+    "empty": "ドキュメントはまだありません"
+  },
+  "panel": {
+    "docs": "ドキュメント",
+    "all_skills": "すべてのスキル"
+  },
+  "feed": {
+    "title": "最近の更新",
+    "all": "すべて",
+    "unread": "未読",
+    "mark_all_read": "すべて既読にする",
+    "today": "今日",
+    "yesterday": "昨日",
+    "name_separator": "、",
+    "created": "が作成",
+    "created_and_edited_other": "が作成し、{{count}} 回編集",
+    "edited_other": "が {{count}} 回編集",
+    "empty_title": "この2週間は変更がありません",
+    "empty_body": "チームとエージェントが書いたドキュメントが、1日1ドキュメント1行でここに表示されます。",
+    "empty_unread": "すべて既読です"
+  },
+  "html": {
+    "preview": "プレビュー",
+    "source": "ソース",
+    "mode_label": "表示",
+    "source_label": "HTML ソース"
+  },
+  "side": {
+    "properties": "プロパティ",
+    "location": "場所",
+    "format": "形式",
+    "created_by": "作成者",
+    "edited_by": "編集者",
+    "version": "バージョン",
+    "view_history": "履歴を見る",
+    "projects": "関連プロジェクト",
+    "link_project": "プロジェクトを関連付ける",
+    "search_projects": "プロジェクトを検索…",
+    "no_projects": "関連付けられるプロジェクトはありません",
+    "no_linked_projects": "プロジェクトに関連付けられていません",
+    "unlink_project": "{{title}} の関連付けを解除"
+  },
+  "format": {
+    "markdown": "Markdown",
+    "html": "HTML ページ"
+  },
+  "editor": {
+    "placeholder": "入力するか / でコマンド…",
+    "title_label": "タイトル",
+    "saving": "保存中…",
+    "saved": "保存済み",
+    "save_failed": "未保存 · 再試行",
+    "notice_updated": "{{name}} がこのドキュメントを更新しました",
+    "notice_merged": "{{name}} が同時に保存しました。変更はあなたの編集に統合されています",
+    "notice_conflict": "あなたと {{name}} が同じ行を変更しました — あなたの内容を残しています",
+    "use_theirs": "{{name}} の内容を使う",
+    "use_theirs_failed": "その行は再度変更されています。手動で編集してください",
+    "view_changes": "変更を見る",
+    "unread_banner": "前回開いた後に変更されました（最新: {{name}}）",
+    "refresh_failed": "最新版を読み込めませんでした。編集内容はここに残っています。",
+    "retry": "再試行"
+  },
+  "history": {
+    "title": "履歴",
+    "current": "現在",
+    "created": "作成",
+    "restored": "v{{number}} を復元",
+    "reverted": "v{{number}} を取り消し",
+    "comparing_version": "v{{number}} の変更",
+    "comparing_range": "v{{from}} から v{{to}} までの変更",
+    "no_changes": "変更はありません",
+    "restore": "v{{number}} を復元",
+    "revert": "この変更を取り消す",
+    "restore_done": "新しいバージョンとして復元しました",
+    "revert_done": "新しいバージョンとして取り消しました",
+    "revert_conflict": "後の編集が同じ行に触れているため、自動では取り消せません",
+    "changed_meanwhile": "その間に誰かが保存しました。もう一度お試しください",
+    "nothing_changed": "ドキュメントはすでにこの内容です。変更はありません",
+    "title_changed": "タイトル",
+    "load_failed": "このバージョンを読み込めませんでした"
+  },
+  "folder": {
+    "empty": "このフォルダは空です"
+  },
+  "not_found": {
+    "title": "このドキュメントは存在しないか削除されました",
+    "folder": "このフォルダは存在しないか削除されました",
+    "back": "ナレッジベースに戻る"
+  },
+  "project": {
+    "title": "ドキュメント",
+    "empty": "リンクされたドキュメントはありません",
+    "link": "ドキュメントをリンク",
+    "search": "ドキュメントを検索…",
+    "no_results": "リンクできるドキュメントはありません",
+    "unlink": "{{title}} のリンクを解除"
+  }
+}

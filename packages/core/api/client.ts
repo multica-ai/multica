@@ -3,6 +3,31 @@ import { AgentRuntimeSchema, EMPTY_RUNTIME } from "../runtimes/schema";
 import type { IssueWakeup, IssueWakeupInput, IssueWakeupSummaryRow, PausedWakeup, SystemWakeup, WakeupRun, WorkspaceSystemWakeup } from "../types/issue-wakeup";
 import type { WorkspaceWakeupPage, WorkspaceWakeupFilters } from "../types/issue-wakeup";
 import { WorkspaceWakeupPageSchema, IssueWakeupSchema, IssueWakeupSummaryRowSchema, PausedWakeupSchema, SystemWakeupSchema, WakeupRunSchema, WorkspaceSystemWakeupSchema } from "./schemas";
+import {
+  DocActivityListSchema,
+  DocFolderSchema,
+  DocSchema,
+  DocSummarySchema,
+  DocTreeSchema,
+  DocVersionListSchema,
+  DocVersionSchema,
+  EMPTY_DOC_ACTIVITY,
+  EMPTY_DOC_FOLDER,
+  EMPTY_DOC_TREE,
+  EMPTY_DOC_VERSIONS,
+  ProjectDocListSchema,
+} from "./schemas";
+import type {
+  CreateDocFolderRequest,
+  CreateDocRequest,
+  Doc,
+  DocActivityItem,
+  DocFolder,
+  DocSummary,
+  DocTree,
+  DocVersion,
+  UpdateDocRequest,
+} from "../types/doc";
 import type { ArchivedInboxFilters } from "../inbox/filter-store";
 import type { ArchivedInboxPage, ArchivedInboxFacets } from "../types/inbox";
 import { parseQoderConnection, parseQoderCatalog, type QoderInput } from "../runtimes/qoder-schema";
@@ -4183,6 +4208,117 @@ export class ApiClient {
 
   async deleteLabel(id: string): Promise<void> {
     await this.fetch(`/api/labels/${id}`, { method: "DELETE" });
+  }
+
+  // Knowledge base (MUL-8370). A single doc that fails validation is an error,
+  // never an empty doc: the editor autosaves, and writing back a blank body
+  // would erase real content.
+  private parseDoc(raw: unknown, endpoint: string): Doc {
+    const doc = parseWithFallback<Doc | null>(raw, DocSchema, null, { endpoint });
+    if (!doc) throw new Error(`Malformed response from ${endpoint}`);
+    return doc;
+  }
+
+  async listDocTree(): Promise<DocTree> {
+    const raw = await this.fetch<unknown>(`/api/docs`);
+    return parseWithFallback(raw, DocTreeSchema, EMPTY_DOC_TREE, { endpoint: "GET /api/docs" });
+  }
+
+  async listDocActivity(): Promise<DocActivityItem[]> {
+    const raw = await this.fetch<unknown>(`/api/docs/activity`);
+    const parsed = parseWithFallback(raw, DocActivityListSchema, { items: EMPTY_DOC_ACTIVITY }, {
+      endpoint: "GET /api/docs/activity",
+    });
+    return parsed.items;
+  }
+
+  async getDoc(id: string): Promise<Doc> {
+    const raw = await this.fetch<unknown>(`/api/docs/${id}`);
+    return this.parseDoc(raw, "GET /api/docs/{id}");
+  }
+
+  async createDoc(data: CreateDocRequest): Promise<Doc> {
+    const raw = await this.fetch<unknown>(`/api/docs`, { method: "POST", body: JSON.stringify(data) });
+    return this.parseDoc(raw, "POST /api/docs");
+  }
+
+  /**
+   * Writes a doc. A stale `base_revision` rejects with an ApiError whose
+   * status is 409 and body code `revision_conflict`; see
+   * `isDocRevisionConflict`.
+   */
+  async updateDoc(id: string, data: UpdateDocRequest): Promise<Doc> {
+    const raw = await this.fetch<unknown>(`/api/docs/${id}`, { method: "PATCH", body: JSON.stringify(data) });
+    return this.parseDoc(raw, "PATCH /api/docs/{id}");
+  }
+
+  async moveDoc(id: string, folderId: string | null): Promise<DocSummary | null> {
+    const raw = await this.fetch<unknown>(`/api/docs/${id}/move`, {
+      method: "POST",
+      body: JSON.stringify({ folder_id: folderId }),
+    });
+    return parseWithFallback<DocSummary | null>(raw, DocSummarySchema, null, { endpoint: "POST /api/docs/{id}/move" });
+  }
+
+  async deleteDoc(id: string): Promise<void> {
+    await this.fetch(`/api/docs/${id}`, { method: "DELETE" });
+  }
+
+  async markDocRead(id: string): Promise<void> {
+    await this.fetch(`/api/docs/${id}/read`, { method: "POST" });
+  }
+
+  async listDocVersions(id: string): Promise<DocVersion[]> {
+    const raw = await this.fetch<unknown>(`/api/docs/${id}/versions`);
+    const parsed = parseWithFallback(raw, DocVersionListSchema, { versions: EMPTY_DOC_VERSIONS }, {
+      endpoint: "GET /api/docs/{id}/versions",
+    });
+    return parsed.versions;
+  }
+
+  async getDocVersion(id: string, number: number): Promise<DocVersion | null> {
+    const raw = await this.fetch<unknown>(`/api/docs/${id}/versions/${number}`);
+    return parseWithFallback<DocVersion | null>(raw, DocVersionSchema, null, {
+      endpoint: "GET /api/docs/{id}/versions/{number}",
+    });
+  }
+
+  async createDocFolder(data: CreateDocFolderRequest): Promise<DocFolder> {
+    const raw = await this.fetch<unknown>(`/api/doc-folders`, { method: "POST", body: JSON.stringify(data) });
+    return parseWithFallback(raw, DocFolderSchema, EMPTY_DOC_FOLDER, { endpoint: "POST /api/doc-folders" });
+  }
+
+  async renameDocFolder(id: string, title: string): Promise<DocFolder> {
+    const raw = await this.fetch<unknown>(`/api/doc-folders/${id}`, { method: "PATCH", body: JSON.stringify({ title }) });
+    return parseWithFallback(raw, DocFolderSchema, EMPTY_DOC_FOLDER, { endpoint: "PATCH /api/doc-folders/{id}" });
+  }
+
+  async moveDocFolder(id: string, parentId: string | null): Promise<DocFolder> {
+    const raw = await this.fetch<unknown>(`/api/doc-folders/${id}/move`, {
+      method: "POST",
+      body: JSON.stringify({ parent_id: parentId }),
+    });
+    return parseWithFallback(raw, DocFolderSchema, EMPTY_DOC_FOLDER, { endpoint: "POST /api/doc-folders/{id}/move" });
+  }
+
+  async deleteDocFolder(id: string): Promise<void> {
+    await this.fetch(`/api/doc-folders/${id}`, { method: "DELETE" });
+  }
+
+  async listProjectDocs(projectId: string): Promise<DocSummary[]> {
+    const raw = await this.fetch<unknown>(`/api/projects/${projectId}/docs`);
+    const parsed = parseWithFallback(raw, ProjectDocListSchema, { docs: [] as DocSummary[] }, {
+      endpoint: "GET /api/projects/{id}/docs",
+    });
+    return parsed.docs;
+  }
+
+  async linkProjectDoc(projectId: string, docId: string): Promise<void> {
+    await this.fetch(`/api/projects/${projectId}/docs`, { method: "POST", body: JSON.stringify({ doc_id: docId }) });
+  }
+
+  async unlinkProjectDoc(projectId: string, docId: string): Promise<void> {
+    await this.fetch(`/api/projects/${projectId}/docs/${docId}`, { method: "DELETE" });
   }
 
   // Workspace workflows (MUL-7420). Any workspace member may read and create

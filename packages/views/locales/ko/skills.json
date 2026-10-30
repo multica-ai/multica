@@ -120,6 +120,7 @@
     "read_only": "읽기 전용",
     "delete_aria": "스킬 삭제",
     "delete_tooltip": "스킬 삭제",
+    "toggle_panel": "세부 정보",
     "supporting_data_warning": "일부 워크스페이스 데이터를 불러오지 못했습니다. 다음 새로고침 전까지 생성자 표시, 런타임 이름, 수정 권한이 불완전하게 보일 수 있습니다.",
     "delete_file": "파일 삭제",
     "name_placeholder": "skill-name",
@@ -195,14 +196,8 @@
     },
     "header": {
       "files_other": "파일 {{count}}개",
-      "used_by_other": "에이전트 {{count}}개가 사용 중",
       "updated": "{{when}} 업데이트",
       "updated_by": "{{name}}이(가) {{when}} 업데이트"
-    },
-    "tabs": {
-      "aria": "스킬 섹션",
-      "overview": "개요",
-      "files_other": "파일 {{count}}"
     },
     "overview": {
       "properties": "속성",
@@ -216,19 +211,11 @@
       "permissions_owner": "이 스킬을 편집하고 삭제할 수 있습니다. 변경 사항은 다음 에이전트 실행부터 적용됩니다.",
       "permissions_locked_creator": "작성자({{name}}) 또는 워크스페이스 관리자만 이 스킬을 편집할 수 있습니다.",
       "permissions_locked": "작성자 또는 워크스페이스 관리자만 이 스킬을 편집할 수 있습니다.",
-      "properties_help": "skill 속성 정보",
       "character_count": "{{count}}자"
     },
     "files": {
-      "list_aria": "스킬 파일",
-      "main": "기본 파일",
-      "supporting_other": "보조 파일 {{count}}",
-      "supporting_empty": "보조 파일이 없습니다.",
       "add_file": "새 파일",
-      "mode_aria": "파일 보기",
-      "mode_preview": "미리보기",
-      "mode_edit": "편집",
-      "mode_raw": "일반 텍스트"
+      "reference_of": "{{name}}의 참조 파일"
     }
   },
   "create": {
@@ -357,18 +344,14 @@
     "conflict_name_still_exists": "해당 이름이 이미 있습니다. 다른 이름을 선택하거나 건너뛰세요."
   },
   "file_tree": {
-    "no_files": "파일 없음",
     "actions": {
-      "label": "{{path}} 작업",
-      "edit": "편집",
-      "rename": "이름 변경",
-      "delete": "삭제"
+      "rename": "이름 변경"
     }
   },
   "file_viewer": {
     "no_content": "*아직 내용이 없습니다*",
-    "markdown_placeholder": "Markdown 내용 작성...",
+    "markdown_placeholder": "Markdown으로 작성…",
     "raw_placeholder": "파일 내용...",
-    "raw_aria": "{{path}}의 일반 텍스트 내용"
+    "raw_aria": "{{path}}의 소스"
   }
 }

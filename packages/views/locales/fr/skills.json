@@ -128,6 +128,7 @@
     "read_only": "Lecture seule",
     "delete_aria": "Supprimer le skill",
     "delete_tooltip": "Supprimer le skill",
+    "toggle_panel": "Détails",
     "supporting_data_warning": "Certaines données de l'espace de travail n'ont pas pu être chargées. L'attribution des créateurs, les noms de runtimes ou les droits de modification peuvent apparaître incomplets jusqu'à la prochaine actualisation.",
     "delete_file": "Supprimer le fichier",
     "name_placeholder": "nom-du-skill",
@@ -206,16 +207,8 @@
     "header": {
       "files_one": "{{count}} fichier",
       "files_other": "{{count}} fichiers",
-      "used_by_one": "{{count}} agent",
-      "used_by_other": "{{count}} agents",
       "updated": "Mis à jour {{when}}",
       "updated_by": "Mis à jour {{when}} par {{name}}"
-    },
-    "tabs": {
-      "aria": "Sections du skill",
-      "overview": "Vue d'ensemble",
-      "files_one": "Fichiers {{count}}",
-      "files_other": "Fichiers {{count}}"
     },
     "overview": {
       "properties": "Propriétés",
@@ -230,20 +223,11 @@
       "permissions_owner": "Vous pouvez modifier et supprimer ce skill. Les changements prennent effet à la prochaine exécution d'agent.",
       "permissions_locked_creator": "Seuls le créateur ({{name}}) ou un administrateur de l'espace de travail peuvent modifier ce skill.",
       "permissions_locked": "Seuls le créateur ou un administrateur de l'espace de travail peuvent modifier ce skill.",
-      "properties_help": "À propos des propriétés du skill",
       "character_count": "{{count}} caractères"
     },
     "files": {
-      "list_aria": "Fichiers du skill",
-      "main": "Fichier principal",
-      "supporting_one": "Annexes {{count}}",
-      "supporting_other": "Annexes {{count}}",
-      "supporting_empty": "Aucun fichier annexe.",
       "add_file": "Nouveau fichier",
-      "mode_aria": "Vue du fichier",
-      "mode_preview": "Aperçu",
-      "mode_edit": "Modifier",
-      "mode_raw": "Texte brut"
+      "reference_of": "Fichier de référence de {{name}}"
     }
   },
   "create": {
@@ -374,18 +358,14 @@
     "conflict_name_still_exists": "Ce nom existe déjà. Choisissez-en un autre ou ignorez."
   },
   "file_tree": {
-    "no_files": "Aucun fichier",
     "actions": {
-      "label": "Actions pour {{path}}",
-      "edit": "Modifier",
-      "rename": "Renommer",
-      "delete": "Supprimer"
+      "rename": "Renommer"
     }
   },
   "file_viewer": {
     "no_content": "*Aucun contenu pour l'instant*",
-    "markdown_placeholder": "Rédigez du contenu Markdown...",
+    "markdown_placeholder": "Écrivez en Markdown…",
     "raw_placeholder": "Contenu du fichier...",
-    "raw_aria": "Contenu en texte brut de {{path}}"
+    "raw_aria": "Source de {{path}}"
   }
 }

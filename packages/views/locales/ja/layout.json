@@ -12,7 +12,8 @@
     "runtimes": "ランタイム",
     "skills": "スキル",
     "settings": "設定",
-    "views": "ビュー"
+    "views": "ビュー",
+    "docs": "ナレッジベース"
   },
   "tab": {
     "issue": "タスク",
@@ -26,7 +27,9 @@
     "runtime": "ランタイム",
     "attachment": "添付ファイル",
     "create_agent": "エージェントを作成",
-    "unknown": "不明なページ"
+    "unknown": "不明なページ",
+    "doc": "ドキュメント",
+    "folder": "フォルダ"
   },
   "help": {
     "trigger": "ヘルプ",
@@ -64,7 +67,8 @@
   },
   "spaces": {
     "work": "タスク",
-    "team": "チーム"
+    "team": "チーム",
+    "kb": "ナレッジベース"
   },
   "rail": {
     "label": "アプリナビゲーション",
@@ -75,7 +79,8 @@
     "chat": "チャット",
     "autopilots": "自動化",
     "switch_workspace": "ワークスペースを切り替え",
-    "invitation_from": "{{name}} さんから招待されています"
+    "invitation_from": "{{name}} さんから招待されています",
+    "kb": "ドキュメント"
   },
   "panels": {
     "work": {

@@ -93,6 +93,21 @@ describe("resolveTabPresentation — direct resources", () => {
     });
   });
 
+  it("docs show their format icon and title, folders a folder", () => {
+    expect(present("/acme/docs/d1", { doc: { title: "Runbook", format: "markdown" } })).toEqual({
+      visual: { kind: "icon", icon: "FileText" },
+      title: { kind: "text", text: "Runbook" },
+    });
+    expect(present("/acme/docs/d1/history", { doc: { title: "Report", format: "html" } })).toEqual({
+      visual: { kind: "icon", icon: "FileCode" },
+      title: { kind: "text", text: "Report" },
+    });
+    expect(present("/acme/docs/folders/f1", {})).toEqual({
+      visual: { kind: "icon", icon: "Folder" },
+      title: { kind: "tab", tabKey: "folder" },
+    });
+  });
+
   it("attachment shows the filename and a matching file icon, falling back only when missing", () => {
     // Filename present (from ?name=) → title is the filename, icon matches type.
     expect(present("/acme/attachments/att1/preview?name=report.pdf")).toEqual({

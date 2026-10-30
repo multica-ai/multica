@@ -125,6 +125,17 @@ const (
 	// project:updated instead.
 	EventIssueWorkflowChanged = "issue_workflow:changed"
 
+	// Knowledge base events (MUL-8370). Payloads carry ids and metadata only;
+	// clients re-read content. doc:updated also covers moves.
+	EventDocCreated         = "doc:created"
+	EventDocUpdated         = "doc:updated"
+	EventDocDeleted         = "doc:deleted"
+	EventDocFolderCreated   = "doc_folder:created"
+	EventDocFolderUpdated   = "doc_folder:updated"
+	EventDocFolderDeleted   = "doc_folder:deleted"
+	EventProjectDocLinked   = "project_doc:linked"
+	EventProjectDocUnlinked = "project_doc:unlinked"
+
 	// Pin events
 	EventPinCreated   = "pin:created"
 	EventPinDeleted   = "pin:deleted"

@@ -12,7 +12,8 @@
     "runtimes": "Runtimes",
     "skills": "Skills",
     "settings": "Paramètres",
-    "views": "Vues"
+    "views": "Vues",
+    "docs": "Base de connaissances"
   },
   "tab": {
     "issue": "Tâche",
@@ -26,7 +27,9 @@
     "runtime": "Runtime",
     "attachment": "Pièce jointe",
     "create_agent": "Créer un agent",
-    "unknown": "Page inconnue"
+    "unknown": "Page inconnue",
+    "doc": "Document",
+    "folder": "Dossier"
   },
   "help": {
     "trigger": "Aide",
@@ -64,7 +67,8 @@
   },
   "spaces": {
     "work": "Tâches",
-    "team": "Équipe"
+    "team": "Équipe",
+    "kb": "Base de connaissances"
   },
   "rail": {
     "label": "Navigation de l'application",
@@ -75,7 +79,8 @@
     "chat": "Chat",
     "autopilots": "Auto",
     "switch_workspace": "Changer d'espace de travail",
-    "invitation_from": "{{name}} vous a invité"
+    "invitation_from": "{{name}} vous a invité",
+    "kb": "Docs"
   },
   "panels": {
     "work": {

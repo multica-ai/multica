@@ -1,0 +1,149 @@
+{
+  "untitled": "未命名",
+  "version_number": "v{{number}}",
+  "kb": "知識庫",
+  "actions": {
+    "new": "新增",
+    "new_doc": "新增文件",
+    "new_html_doc": "新增 HTML 文件",
+    "new_folder": "新增資料夾",
+    "new_skill": "新增 Skill",
+    "rename": "重新命名",
+    "move": "移動到…",
+    "delete": "刪除",
+    "cancel": "取消",
+    "dismiss": "關閉",
+    "history": "歷史",
+    "toggle_panel": "詳情",
+    "more": "更多",
+    "copy_link": "複製連結",
+    "link_copied": "已複製連結"
+  },
+  "errors": {
+    "create_doc": "無法建立文件",
+    "create_folder": "無法建立資料夾",
+    "move": "移動失敗",
+    "move_into_self": "不能把資料夾移到它自己裡面",
+    "rename": "重新命名失敗",
+    "delete": "刪除失敗",
+    "link": "無法更新專案關聯",
+    "save": "儲存失敗"
+  },
+  "move": {
+    "title": "移動「{{title}}」",
+    "destination": "目標位置",
+    "root": "知識庫（最上層）",
+    "current": "目前",
+    "confirm": "移動"
+  },
+  "delete": {
+    "title": "刪除這份文件？",
+    "description": "「{{title}}」及其全部歷史都會被刪除，無法復原。",
+    "confirm": "刪除"
+  },
+  "tree": {
+    "unread": "有未讀改動",
+    "more": "{{title}} 的更多操作",
+    "add_in": "在 {{title}} 中新增",
+    "toggle": "展開 {{title}}",
+    "folder_name": "資料夾名稱",
+    "delete_folder_not_empty": "清空後才能刪除",
+    "empty_folder": "空資料夾",
+    "empty": "還沒有文件"
+  },
+  "panel": {
+    "docs": "文件",
+    "all_skills": "全部 Skills"
+  },
+  "feed": {
+    "title": "最近更新",
+    "all": "全部",
+    "unread": "未讀",
+    "mark_all_read": "全部標為已讀",
+    "today": "今天",
+    "yesterday": "昨天",
+    "name_separator": "、",
+    "created": "新增",
+    "created_and_edited_other": "新增，又改了 {{count}} 次",
+    "edited_other": "改了 {{count}} 次",
+    "empty_title": "最近兩週沒有改動",
+    "empty_body": "團隊和智慧體寫的文件會出現在這裡，每份文件每天一行。",
+    "empty_unread": "沒有未讀的更新"
+  },
+  "html": {
+    "preview": "預覽",
+    "source": "原始碼",
+    "mode_label": "檢視",
+    "source_label": "HTML 原始碼"
+  },
+  "side": {
+    "properties": "屬性",
+    "location": "位置",
+    "format": "格式",
+    "created_by": "建立者",
+    "edited_by": "編輯過",
+    "version": "版本",
+    "view_history": "查看歷史",
+    "projects": "關聯的專案",
+    "link_project": "關聯專案",
+    "search_projects": "搜尋專案…",
+    "no_projects": "沒有可關聯的專案",
+    "no_linked_projects": "還沒有關聯專案",
+    "unlink_project": "取消關聯 {{title}}"
+  },
+  "format": {
+    "markdown": "Markdown",
+    "html": "HTML 頁面"
+  },
+  "editor": {
+    "placeholder": "開始寫，或輸入 / 叫出命令…",
+    "title_label": "標題",
+    "saving": "儲存中…",
+    "saved": "已儲存",
+    "save_failed": "儲存失敗 · 重試",
+    "notice_updated": "{{name}} 更新了這份文件",
+    "notice_merged": "{{name}} 同時儲存了改動，已合併進你的編輯",
+    "notice_conflict": "你和 {{name}} 改了同一處，先保留了你的版本",
+    "use_theirs": "改用 {{name}} 的",
+    "use_theirs_failed": "這幾行又被改過了，請手動修改",
+    "view_changes": "查看改動",
+    "unread_banner": "自你上次開啟後有新改動，最近一次來自 {{name}}",
+    "refresh_failed": "無法載入最新版本，你的修改仍保留在這裡。",
+    "retry": "重試"
+  },
+  "history": {
+    "title": "歷史",
+    "current": "目前",
+    "created": "新增",
+    "restored": "還原到 v{{number}}",
+    "reverted": "撤銷了 v{{number}}",
+    "comparing_version": "v{{number}} 的改動",
+    "comparing_range": "從 v{{from}} 到 v{{to}} 的改動",
+    "no_changes": "沒有改動",
+    "restore": "還原到 v{{number}}",
+    "revert": "撤銷這次改動",
+    "restore_done": "已還原為新版本",
+    "revert_done": "已撤銷，產生了新版本",
+    "revert_conflict": "之後的改動碰到了同樣的行，無法自動撤銷",
+    "changed_meanwhile": "剛才有人儲存了新版本，請重試",
+    "nothing_changed": "文件已經是這個樣子，沒有需要改的內容",
+    "title_changed": "標題",
+    "load_failed": "無法載入這個版本"
+  },
+  "folder": {
+    "empty": "這個資料夾是空的"
+  },
+  "not_found": {
+    "title": "文件不存在或已被刪除",
+    "folder": "資料夾不存在或已被刪除",
+    "back": "返回知識庫"
+  },
+  "project": {
+    "title": "文件",
+    "empty": "還沒有關聯文件",
+    "link": "關聯文件",
+    "search": "搜尋文件…",
+    "no_results": "沒有可關聯的文件",
+    "unlink": "取消關聯 {{title}}"
+  }
+}

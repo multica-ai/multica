@@ -1,13 +1,14 @@
 // @vitest-environment jsdom
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { fireEvent, render, screen } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import type { Skill } from "@multica/core/types";
 import { I18nProvider } from "@multica/core/i18n/react";
 import enCommon from "../../locales/en/common.json";
 import enSkills from "../../locales/en/skills.json";
+import { useState } from "react";
 import { NavigationProvider, type NavigationAdapter } from "../../navigation";
 
 const TEST_RESOURCES = { en: { common: enCommon, skills: enSkills } };
@@ -71,7 +72,10 @@ vi.mock("@multica/core/auth", () => {
 // SkillIcon, so the real module has to stay reachable.
 vi.mock("@multica/core/paths", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@multica/core/paths")>()),
-  useWorkspacePaths: () => ({ skills: () => "/acme/skills" }),
+  useWorkspacePaths: () => ({
+    skills: () => "/acme/skills",
+    skillDetail: (id: string) => `/acme/skills/${id}`,
+  }),
 }));
 vi.mock("@multica/core/permissions", () => ({
   useSkillPermissions: () => ({ canEdit: { allowed: true, reason: null } }),
@@ -104,7 +108,13 @@ vi.mock("@multica/ui/components/common/actor-avatar", () => ({
   ActorAvatar: () => <div />,
 }));
 
+import { api } from "@multica/core/api";
 import { SkillDetailPage } from "./skill-detail-page";
+
+const source = (path: string) =>
+  screen.getByRole("textbox", { name: `Source of ${path}` }) as HTMLTextAreaElement;
+const findSource = async (path: string) =>
+  (await screen.findByRole("textbox", { name: `Source of ${path}` })) as HTMLTextAreaElement;
 
 const LONG_DESCRIPTION =
   "Animation for product interfaces — when to animate and when not to. " +
@@ -125,30 +135,48 @@ const baseSkill: Skill = {
   ],
 };
 
+const PATHNAME = "/acme/skills/skill-1";
+
+/** The page reads the open file from `?file=`; `replace` moves the URL like the router would. */
 function renderPage(searchParams = new URLSearchParams()) {
   const queryClient = new QueryClient({
     defaultOptions: { queries: { retry: false } },
   });
   const replace = vi.fn();
-  const navigation: NavigationAdapter = {
-    push: vi.fn(),
-    replace,
-    back: vi.fn(),
-    pathname: "/acme/skills/skill-1",
-    searchParams,
-    hash: "",
-    getShareableUrl: (path) => path,
-  };
-  render(
-    <I18nProvider locale="en" resources={TEST_RESOURCES}>
+  const navigate: { current: (path: string) => void } = { current: () => {} };
+
+  function Harness() {
+    const [params, setParams] = useState(searchParams);
+    navigate.current = (path) => setParams(new URLSearchParams(path.split("?")[1] ?? ""));
+    const navigation: NavigationAdapter = {
+      push: vi.fn(),
+      replace: (path) => {
+        replace(path);
+        navigate.current(path);
+      },
+      back: vi.fn(),
+      pathname: PATHNAME,
+      searchParams: params,
+      hash: "",
+      getShareableUrl: (path) => path,
+    };
+    return (
       <NavigationProvider value={navigation}>
         <QueryClientProvider client={queryClient}>
           <SkillDetailPage skillId="skill-1" />
         </QueryClientProvider>
       </NavigationProvider>
+    );
+  }
+
+  render(
+    <I18nProvider locale="en" resources={TEST_RESOURCES}>
+      <Harness />
     </I18nProvider>,
   );
-  return { replace, queryClient };
+  /** Opens another file the way the knowledge base tree's links do. */
+  const openFile = (path: string) => act(() => navigate.current(`${PATHNAME}?file=${path}`));
+  return { replace, queryClient, openFile };
 }
 
 /** Publishes a new server version of the skill, as a `skill:updated` event would. */
@@ -170,124 +198,124 @@ beforeEach(() => {
   canEditRef.current = true;
 });
 
-describe("SkillDetailPage tabs", () => {
-  it("opens on Overview and exposes exactly two tabs", async () => {
+describe("SkillDetailPage file selection", () => {
+  it("opens SKILL.md beside the skill's properties, with no tabs", async () => {
     renderPage();
-    const tabs = await screen.findAllByRole("tab", { name: /Overview|Files/ });
-    expect(tabs.map((t) => t.textContent)).toEqual(["Overview", "Files 2"]);
-    // A Settings tab would only hold a delete button and a read-only
-    // sentence — the skill update payload has no settings-shaped fields.
-    expect(screen.queryByRole("tab", { name: "Settings" })).toBeNull();
-    expect(
-      screen.getByRole("tab", { name: "Overview" }).getAttribute("aria-selected"),
-    ).toBe("true");
+    expect(await screen.findByLabelText("Description")).toBeTruthy();
+    expect(source("SKILL.md").value).toBe(baseSkill.content);
+    expect(screen.queryByRole("tab")).toBeNull();
   });
 
-  it("mirrors the active tab into ?view= so the pane survives a reload", async () => {
+  it("opens the file named in ?file=, keeping the skill's properties beside it", async () => {
+    renderPage(new URLSearchParams("file=patterns.md"));
+    expect((await findSource("patterns.md")).value).toBe("# Patterns\n");
+    expect(screen.getByText("Reference file of aiforui-animations")).toBeTruthy();
+    expect(screen.getByLabelText("Description")).toBeTruthy();
+  });
+
+  it("folds the properties panel away and back from the header", async () => {
+    renderPage();
+    await screen.findByLabelText("Description");
+    const toggle = screen.getByRole("button", { name: "Details" });
+    expect(toggle.getAttribute("aria-pressed")).toBe("true");
+
+    fireEvent.click(toggle);
+    expect(screen.queryByLabelText("Description")).toBeNull();
+    expect(source("SKILL.md")).toBeTruthy();
+
+    fireEvent.click(screen.getByRole("button", { name: "Details" }));
+    expect(screen.getByLabelText("Description")).toBeTruthy();
+  });
+
+  it("falls back to SKILL.md when ?file= names no file", async () => {
+    renderPage(new URLSearchParams("file=missing.md"));
+    expect(await screen.findByLabelText("Description")).toBeTruthy();
+  });
+
+  it("follows a renamed file in the URL", async () => {
+    const { replace } = renderPage(new URLSearchParams("file=patterns.md"));
+    await userEvent.click(await screen.findByRole("button", { name: "Rename" }));
+    const input = screen.getByDisplayValue("patterns.md");
+    await userEvent.clear(input);
+    await userEvent.type(input, "guides/patterns.md{Enter}");
+    expect(replace).toHaveBeenLastCalledWith(`${PATHNAME}?file=guides%2Fpatterns.md`);
+    expect(screen.getAllByText("guides/patterns.md").length).toBeGreaterThan(0);
+    expect(screen.queryByText("patterns.md")).toBeNull();
+  });
+
+  it("returns to SKILL.md after deleting the open file", async () => {
+    const { replace } = renderPage(new URLSearchParams("file=patterns.md"));
+    await userEvent.click(await screen.findByRole("button", { name: "Delete file" }));
+    expect(replace).toHaveBeenLastCalledWith(PATHNAME);
+    expect(await screen.findByLabelText("Description")).toBeTruthy();
+    expect(screen.getByText("Changed: 1 file")).toBeTruthy();
+  });
+
+  it("opens a new file in a focused editor", async () => {
     const { replace } = renderPage();
-    fireEvent.click(await screen.findByRole("tab", { name: "Files 2" }));
-    expect(replace).toHaveBeenCalledWith("/acme/skills/skill-1?view=files");
-  });
+    await userEvent.click(await screen.findByRole("button", { name: "New file" }));
+    await userEvent.type(screen.getByPlaceholderText("templates/review.md"), "notes.md");
+    await userEvent.click(screen.getByRole("button", { name: "Add" }));
 
-  it("restores the Files tab from ?view=files", async () => {
-    renderPage(new URLSearchParams("view=files"));
-    expect(
-      (await screen.findByRole("tab", { name: "Files 2" })).getAttribute(
-        "aria-selected",
-      ),
-    ).toBe("true");
+    expect(replace).toHaveBeenLastCalledWith(`${PATHNAME}?file=notes.md`);
+    expect(source("notes.md").value).toBe("");
+    expect(document.activeElement).toBe(source("notes.md"));
   });
 });
 
-describe("SkillDetailPage file mode", () => {
-  it("keeps plain-text mode when switching files", async () => {
-    renderPage(new URLSearchParams("view=files"));
-
-    fireEvent.click(await screen.findByRole("button", { name: "Edit" }));
-    expect(screen.getByRole("textbox", { name: /SKILL\.md/ })).toBeTruthy();
-
-    // Mode used to live inside FileViewer, which the per-path `key`
-    // remounted — selecting another file silently snapped back to preview.
-    fireEvent.click(screen.getByRole("tab", { name: "patterns.md" }));
-    expect(screen.getByRole("textbox", { name: /patterns\.md/ })).toBeTruthy();
-    expect(screen.queryByTestId("preview")).toBeNull();
+describe("SkillDetailPage editor", () => {
+  it("edits the whole file as source, with no preview or edit switch", async () => {
+    renderPage();
+    expect((await findSource("SKILL.md")).value).toBe(baseSkill.content);
+    for (const name of ["Preview", "Edit", "Plain text"]) {
+      expect(screen.queryByRole("button", { name })).toBeNull();
+    }
   });
 
-  it("strips frontmatter from the preview so name/description are not shown twice", async () => {
-    renderPage(new URLSearchParams("view=files"));
+  it("saves exactly what was typed: frontmatter, prompt tags, placeholders, list markers", async () => {
+    vi.mocked(api.updateSkill).mockImplementation(async (_id, payload) => ({
+      ...(skillRef.current as Skill),
+      ...payload,
+      updated_at: "2026-07-29T11:00:00Z",
+    }) as Skill);
+    const typed =
+      "---\nname: aiforui-animations\ndisable-model-invocation: true\n---\n\n" +
+      "<instructions>\nUse {{reviewer_name}} and snake_case_names.\n</instructions>\n\n" +
+      "* star bullet\n1) paren list\n\n| a | b |\n|---|---|\n";
+    renderPage();
+    fireEvent.change(await findSource("SKILL.md"), { target: { value: typed } });
+    await userEvent.click(screen.getByRole("button", { name: /Save changes/ }));
+
+    expect(vi.mocked(api.updateSkill).mock.calls[0]![1].content).toBe(typed);
+  });
+
+  it("edits other files as source too", async () => {
+    skillRef.current = {
+      ...baseSkill,
+      files: [{ id: "f-2", path: "scripts/run.sh", content: "echo hi\n" } as Skill["files"][number]],
+    };
+    renderPage(new URLSearchParams("file=scripts/run.sh"));
+    expect((await findSource("scripts/run.sh")).value).toBe("echo hi\n");
+  });
+
+  it("shows read-only viewers the rendered file, without frontmatter or file actions", async () => {
+    canEditRef.current = false;
+    renderPage();
+
     const preview = await screen.findByTestId("preview");
     expect(preview.textContent).toContain("# Interface Animations");
     expect(preview.textContent).not.toContain("name: aiforui-animations");
-  });
-});
-
-describe("SkillDetailPage edit action (MUL-5654)", () => {
-  /** Opens a file row's action menu the way the rail exposes it. */
-  async function openRowMenu(path: string | RegExp) {
-    // The file-name button carries role="tab", so a "button" match on the row
-    // is the trailing "..." trigger.
-    await userEvent.click(await screen.findByRole("button", { name: path }));
-  }
-
-  it("opens a supporting file in a focused editor", async () => {
-    renderPage(new URLSearchParams("view=files"));
-
-    await openRowMenu(/patterns\.md/);
-    await userEvent.click(
-      await screen.findByRole("menuitem", { name: "Edit" }),
-    );
-
-    // One gesture owes all three: the file is open, the pane is the editor
-    // rather than the preview, and the caret is already in it.
-    const editor = screen.getByRole("textbox", { name: /patterns\.md/ });
-    expect(screen.queryByTestId("preview")).toBeNull();
-    expect(document.activeElement).toBe(editor);
-  });
-
-  it("focuses the editor for the file that is already open", async () => {
-    renderPage(new URLSearchParams("view=files"));
-
-    // SKILL.md opens selected, so this path mounts nothing new. A mount-only
-    // autoFocus would silently do nothing here.
-    await openRowMenu(/SKILL\.md/);
-    await userEvent.click(
-      await screen.findByRole("menuitem", { name: "Edit" }),
-    );
-
-    expect(document.activeElement).toBe(
-      screen.getByRole("textbox", { name: /SKILL\.md/ }),
-    );
-  });
-
-  it("leaves the caret at the top rather than the end of the file", async () => {
-    renderPage(new URLSearchParams("view=files"));
-
-    await openRowMenu(/patterns\.md/);
-    await userEvent.click(
-      await screen.findByRole("menuitem", { name: "Edit" }),
-    );
-
-    const editor = screen.getByRole("textbox", {
-      name: /patterns\.md/,
-    }) as HTMLTextAreaElement;
-    expect([editor.selectionStart, editor.selectionEnd]).toEqual([0, 0]);
-  });
-
-  it("offers read-only viewers a plain-text view, not an edit they cannot make", async () => {
-    canEditRef.current = false;
-    renderPage(new URLSearchParams("view=files"));
-
-    expect(await screen.findByRole("button", { name: "Plain text" })).toBeTruthy();
-    expect(screen.queryByRole("button", { name: "Edit" })).toBeNull();
-    // No row menus either — the tree offers no action the page would refuse.
-    expect(screen.queryByRole("button", { name: /Actions for/ })).toBeNull();
+    expect(screen.queryByRole("textbox", { name: /^Source of/ })).toBeNull();
+    for (const name of ["New file", "Rename", "Delete file"]) {
+      expect(screen.queryByRole("button", { name })).toBeNull();
+    }
   });
 });
 
 describe("SkillDetailPage save pill", () => {
   it("is absent while clean and floats in with a change summary once dirty", async () => {
     renderPage();
-    await screen.findByRole("tab", { name: "Overview" });
+    await screen.findByLabelText("Description");
     expect(screen.queryByRole("button", { name: /Save changes/ })).toBeNull();
 
     fireEvent.change(screen.getByLabelText("Description"), {
@@ -311,10 +339,8 @@ describe("SkillDetailPage save pill", () => {
   });
 
   it("counts a supporting-file edit as one changed file", async () => {
-    renderPage(new URLSearchParams("view=files"));
-    fireEvent.click(await screen.findByRole("tab", { name: "patterns.md" }));
-    fireEvent.click(screen.getByRole("button", { name: "Edit" }));
-    fireEvent.change(screen.getByRole("textbox", { name: /patterns\.md/ }), {
+    renderPage(new URLSearchParams("file=patterns.md"));
+    fireEvent.change(await findSource("patterns.md"), {
       target: { value: "edited content" },
     });
     expect(screen.getByText("Changed: 1 file")).toBeTruthy();
@@ -358,7 +384,7 @@ describe("SkillDetailPage draft baseline (MUL-5645)", () => {
   it("opens clean when the description carries a trailing newline", async () => {
     skillRef.current = { ...baseSkill, description: `${LONG_DESCRIPTION}\n` };
     renderPage();
-    await screen.findAllByRole("tab", { name: /Overview|Files/ });
+    await screen.findByLabelText("Description");
     expect(screen.queryByText(/^Changed:/)).toBeNull();
   });
 
@@ -375,7 +401,7 @@ describe("SkillDetailPage draft baseline (MUL-5645)", () => {
 
   it("pulls a remote edit in silently while the draft is untouched", async () => {
     const { queryClient } = renderPage();
-    await screen.findAllByRole("tab", { name: /Overview|Files/ });
+    await screen.findByLabelText("Description");
 
     await remoteUpdate(queryClient, { description: "Rewritten by the agent" });
 
@@ -387,15 +413,14 @@ describe("SkillDetailPage draft baseline (MUL-5645)", () => {
   });
 
   it("pulls a remote SKILL.md edit in silently too", async () => {
-    const { queryClient } = renderPage(new URLSearchParams("view=files"));
-    await screen.findAllByRole("tab", { name: /Overview|Files/ });
+    const { queryClient } = renderPage();
+    await screen.findByLabelText("Description");
 
     await remoteUpdate(queryClient, {
       content: `${baseSkill.content}\n## Added remotely\n`,
     });
 
-    const preview = await screen.findByTestId("preview");
-    expect(preview.textContent).toContain("Added remotely");
+    await waitFor(() => expect(source("SKILL.md").value).toContain("Added remotely"));
     expect(screen.queryByText(CONFLICT_BANNER)).toBeNull();
     expect(screen.queryByText(/^Changed:/)).toBeNull();
   });
@@ -484,7 +509,7 @@ describe("SkillDetailPage rail", () => {
   it("keeps the read-only capability banner on the shared rail", async () => {
     canEditRef.current = false;
     renderPage();
-    await screen.findAllByRole("tab", { name: /Overview|Files/ });
+    await screen.findByLabelText("Description");
 
     const banner = document.body.querySelector(
       `.${RAIL_SENTINEL}.${GUTTER_SENTINEL}.pt-3`,
@@ -492,14 +517,12 @@ describe("SkillDetailPage rail", () => {
     expect(banner).toBeTruthy();
   });
 
-  it("puts the identity strip and the tab row on that same rail", async () => {
+  it("puts the file toolbar on that same rail", async () => {
     renderPage();
-    await screen.findAllByRole("tab", { name: /Overview|Files/ });
+    await screen.findByLabelText("Description");
 
-    const railed = document.body.querySelectorAll(
-      `.${RAIL_SENTINEL}.${GUTTER_SENTINEL}`,
-    );
-    // Identity strip, tab row and the Overview panel at minimum.
-    expect(railed.length).toBeGreaterThanOrEqual(3);
+    const toolbar = screen.getByText("SKILL.md", { selector: "span.font-mono" }).closest("div");
+    expect(toolbar?.className).toContain(RAIL_SENTINEL);
+    expect(toolbar?.className).toContain(GUTTER_SENTINEL);
   });
 });

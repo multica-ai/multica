@@ -7,6 +7,7 @@ import { useSidebar } from "@multica/ui/components/ui/sidebar";
 import { useAppShell } from "./app-shell-context";
 import { PanelResizeHandle } from "./panel-resize-handle";
 import { AutopilotsPanel } from "./panels/autopilots-panel";
+import { KbPanel } from "./panels/kb-panel";
 import { ChatPeek, InboxPeek } from "./panels/list-space-peeks";
 import { NAV_PEEK_CLASS } from "./rail-styles";
 import { TeamPanel } from "./panels/team-panel";
@@ -14,6 +15,7 @@ import { WorkPanel } from "./panels/work-panel";
 
 const PANELS: Partial<Record<AppSpaceId, () => React.ReactNode>> = {
   work: WorkPanel,
+  kb: KbPanel,
   team: TeamPanel,
   autopilots: AutopilotsPanel,
 };

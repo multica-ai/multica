@@ -12,7 +12,8 @@
     "runtimes": "런타임",
     "skills": "스킬",
     "settings": "설정",
-    "views": "뷰"
+    "views": "뷰",
+    "docs": "지식 베이스"
   },
   "tab": {
     "issue": "태스크",
@@ -26,7 +27,9 @@
     "runtime": "런타임",
     "attachment": "첨부파일",
     "create_agent": "에이전트 만들기",
-    "unknown": "알 수 없는 페이지"
+    "unknown": "알 수 없는 페이지",
+    "doc": "문서",
+    "folder": "폴더"
   },
   "help": {
     "trigger": "도움말",
@@ -64,7 +67,8 @@
   },
   "spaces": {
     "work": "태스크",
-    "team": "팀"
+    "team": "팀",
+    "kb": "지식 베이스"
   },
   "rail": {
     "label": "앱 탐색",
@@ -75,7 +79,8 @@
     "chat": "채팅",
     "autopilots": "자동화",
     "switch_workspace": "워크스페이스 전환",
-    "invitation_from": "{{name}} 님이 초대했습니다"
+    "invitation_from": "{{name}} 님이 초대했습니다",
+    "kb": "문서"
   },
   "panels": {
     "work": {

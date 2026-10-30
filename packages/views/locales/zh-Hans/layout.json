@@ -12,7 +12,8 @@
     "runtimes": "运行时",
     "skills": "Skills",
     "settings": "设置",
-    "views": "视图"
+    "views": "视图",
+    "docs": "知识库"
   },
   "tab": {
     "issue": "任务",
@@ -26,7 +27,9 @@
     "runtime": "运行时",
     "attachment": "附件",
     "create_agent": "创建智能体",
-    "unknown": "未知页面"
+    "unknown": "未知页面",
+    "doc": "文档",
+    "folder": "文件夹"
   },
   "help": {
     "trigger": "帮助",
@@ -64,7 +67,8 @@
   },
   "spaces": {
     "work": "任务",
-    "team": "团队"
+    "team": "团队",
+    "kb": "知识库"
   },
   "rail": {
     "label": "应用导航",
@@ -75,7 +79,8 @@
     "chat": "聊天",
     "autopilots": "自动化",
     "switch_workspace": "切换工作区",
-    "invitation_from": "{{name}} 邀请你加入"
+    "invitation_from": "{{name}} 邀请你加入",
+    "kb": "知识库"
   },
   "panels": {
     "work": {

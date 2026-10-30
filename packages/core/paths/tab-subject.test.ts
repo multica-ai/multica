@@ -23,6 +23,11 @@ describe("parseTabSubject", () => {
     ["/acme/projects/p1", { kind: "project", id: "p1" }],
     ["/acme/autopilots/a1", { kind: "autopilot", id: "a1" }],
     ["/acme/skills/s1", { kind: "skill", id: "s1" }],
+    ["/acme/docs", { kind: "page", page: "docs" }],
+    ["/acme/docs/d1", { kind: "doc", id: "d1" }],
+    ["/acme/docs/d1/history", { kind: "doc", id: "d1" }],
+    ["/acme/docs/folders/f1", { kind: "docFolder", id: "f1" }],
+    ["/acme/docs/folders", { kind: "unknown" }],
     ["/acme/attachments/att1/preview", { kind: "attachment", id: "att1", filename: null }],
     [
       "/acme/attachments/att1/preview?name=report.pdf",

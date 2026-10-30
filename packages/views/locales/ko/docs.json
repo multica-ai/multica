@@ -1,0 +1,149 @@
+{
+  "untitled": "제목 없음",
+  "version_number": "v{{number}}",
+  "kb": "지식 베이스",
+  "actions": {
+    "new": "새로 만들기",
+    "new_doc": "새 문서",
+    "new_html_doc": "새 HTML 문서",
+    "new_folder": "새 폴더",
+    "new_skill": "새 스킬",
+    "rename": "이름 변경",
+    "move": "이동…",
+    "delete": "삭제",
+    "cancel": "취소",
+    "dismiss": "닫기",
+    "history": "기록",
+    "toggle_panel": "세부 정보",
+    "more": "더 보기",
+    "copy_link": "링크 복사",
+    "link_copied": "링크를 복사했습니다"
+  },
+  "errors": {
+    "create_doc": "문서를 만들지 못했습니다",
+    "create_folder": "폴더를 만들지 못했습니다",
+    "move": "이동하지 못했습니다",
+    "move_into_self": "폴더를 자기 자신 안으로 옮길 수 없습니다",
+    "rename": "폴더 이름을 바꾸지 못했습니다",
+    "delete": "삭제하지 못했습니다",
+    "link": "프로젝트 연결을 바꾸지 못했습니다",
+    "save": "저장하지 못했습니다"
+  },
+  "move": {
+    "title": "‘{{title}}’ 이동",
+    "destination": "대상 위치",
+    "root": "지식 베이스(최상위)",
+    "current": "현재",
+    "confirm": "이동"
+  },
+  "delete": {
+    "title": "이 문서를 삭제할까요?",
+    "description": "‘{{title}}’와 전체 기록이 삭제됩니다. 되돌릴 수 없습니다.",
+    "confirm": "삭제"
+  },
+  "tree": {
+    "unread": "읽지 않은 변경",
+    "more": "{{title}} 더 보기",
+    "add_in": "{{title}}에 새로 만들기",
+    "toggle": "{{title}} 내용 보기",
+    "folder_name": "폴더 이름",
+    "delete_folder_not_empty": "삭제하려면 폴더를 비우세요",
+    "empty_folder": "빈 폴더",
+    "empty": "아직 문서가 없습니다"
+  },
+  "panel": {
+    "docs": "문서",
+    "all_skills": "모든 스킬"
+  },
+  "feed": {
+    "title": "최근 업데이트",
+    "all": "전체",
+    "unread": "읽지 않음",
+    "mark_all_read": "모두 읽음으로 표시",
+    "today": "오늘",
+    "yesterday": "어제",
+    "name_separator": ", ",
+    "created": "님이 만듦",
+    "created_and_edited_other": "님이 만들고 {{count}}번 수정",
+    "edited_other": "님이 {{count}}번 수정",
+    "empty_title": "지난 2주 동안 변경이 없습니다",
+    "empty_body": "팀과 에이전트가 쓴 문서가 하루에 문서당 한 줄씩 여기에 표시됩니다.",
+    "empty_unread": "모두 확인했습니다"
+  },
+  "html": {
+    "preview": "미리 보기",
+    "source": "소스",
+    "mode_label": "보기",
+    "source_label": "HTML 소스"
+  },
+  "side": {
+    "properties": "속성",
+    "location": "위치",
+    "format": "형식",
+    "created_by": "만든 사람",
+    "edited_by": "편집한 사람",
+    "version": "버전",
+    "view_history": "기록 보기",
+    "projects": "연결된 프로젝트",
+    "link_project": "프로젝트 연결",
+    "search_projects": "프로젝트 검색…",
+    "no_projects": "연결할 프로젝트가 없습니다",
+    "no_linked_projects": "연결된 프로젝트 없음",
+    "unlink_project": "{{title}} 연결 해제"
+  },
+  "format": {
+    "markdown": "Markdown",
+    "html": "HTML 페이지"
+  },
+  "editor": {
+    "placeholder": "입력하거나 /로 명령어…",
+    "title_label": "제목",
+    "saving": "저장 중…",
+    "saved": "저장됨",
+    "save_failed": "저장 안 됨 · 다시 시도",
+    "notice_updated": "{{name}}님이 이 문서를 업데이트했습니다",
+    "notice_merged": "{{name}}님이 동시에 저장했습니다. 변경 사항을 내 편집에 합쳤습니다",
+    "notice_conflict": "나와 {{name}}님이 같은 줄을 바꿨습니다 — 내 내용을 유지했습니다",
+    "use_theirs": "{{name}}님 것 사용",
+    "use_theirs_failed": "해당 줄이 다시 바뀌었습니다. 직접 수정하세요",
+    "view_changes": "변경 사항 보기",
+    "unread_banner": "마지막으로 연 이후 변경됨(최근: {{name}})",
+    "refresh_failed": "최신 버전을 불러오지 못했습니다. 편집 내용은 여기에 그대로 있습니다.",
+    "retry": "다시 시도"
+  },
+  "history": {
+    "title": "기록",
+    "current": "현재",
+    "created": "생성",
+    "restored": "v{{number}} 복원",
+    "reverted": "v{{number}} 되돌림",
+    "comparing_version": "v{{number}}의 변경 사항",
+    "comparing_range": "v{{from}}에서 v{{to}}까지의 변경 사항",
+    "no_changes": "변경 사항 없음",
+    "restore": "v{{number}} 복원",
+    "revert": "이 변경 되돌리기",
+    "restore_done": "새 버전으로 복원했습니다",
+    "revert_done": "새 버전으로 되돌렸습니다",
+    "revert_conflict": "이후 편집이 같은 줄을 바꿔 자동으로 되돌릴 수 없습니다",
+    "changed_meanwhile": "그 사이 누군가 저장했습니다. 다시 시도하세요",
+    "nothing_changed": "문서가 이미 이 상태라 바꿀 내용이 없습니다",
+    "title_changed": "제목",
+    "load_failed": "이 버전을 불러오지 못했습니다"
+  },
+  "folder": {
+    "empty": "이 폴더는 비어 있습니다"
+  },
+  "not_found": {
+    "title": "문서가 없거나 삭제되었습니다",
+    "folder": "폴더가 없거나 삭제되었습니다",
+    "back": "지식 베이스로 돌아가기"
+  },
+  "project": {
+    "title": "문서",
+    "empty": "연결된 문서가 없습니다",
+    "link": "문서 연결",
+    "search": "문서 검색…",
+    "no_results": "연결할 문서가 없습니다",
+    "unlink": "{{title}} 연결 해제"
+  }
+}

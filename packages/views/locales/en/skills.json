@@ -128,6 +128,7 @@
     "read_only": "Read-only",
     "delete_aria": "Delete skill",
     "delete_tooltip": "Delete skill",
+    "toggle_panel": "Details",
     "supporting_data_warning": "Some workspace data failed to load. Creator attribution, runtime names, or edit permissions may appear incomplete until the next refresh.",
     "delete_file": "Delete file",
     "name_placeholder": "skill-name",
@@ -206,16 +207,8 @@
     "header": {
       "files_one": "{{count}} file",
       "files_other": "{{count}} files",
-      "used_by_one": "{{count}} agent",
-      "used_by_other": "{{count}} agents",
       "updated": "Updated {{when}}",
       "updated_by": "Updated {{when}} by {{name}}"
-    },
-    "tabs": {
-      "aria": "Skill sections",
-      "overview": "Overview",
-      "files_one": "Files {{count}}",
-      "files_other": "Files {{count}}"
     },
     "overview": {
       "properties": "Properties",
@@ -230,20 +223,11 @@
       "permissions_owner": "You can edit and delete this skill. Changes take effect on the next agent run.",
       "permissions_locked_creator": "Only the creator ({{name}}) or a workspace admin can edit this skill.",
       "permissions_locked": "Only the creator or a workspace admin can edit this skill.",
-      "properties_help": "About skill properties",
       "character_count": "{{count}} characters"
     },
     "files": {
-      "list_aria": "Skill files",
-      "main": "Main file",
-      "supporting_one": "Supporting {{count}}",
-      "supporting_other": "Supporting {{count}}",
-      "supporting_empty": "No supporting files.",
       "add_file": "New file",
-      "mode_aria": "File view",
-      "mode_preview": "Preview",
-      "mode_edit": "Edit",
-      "mode_raw": "Plain text"
+      "reference_of": "Reference file of {{name}}"
     }
   },
   "create": {
@@ -374,18 +358,14 @@
     "conflict_name_still_exists": "That name already exists. Choose another name or skip."
   },
   "file_tree": {
-    "no_files": "No files",
     "actions": {
-      "label": "Actions for {{path}}",
-      "edit": "Edit",
-      "rename": "Rename",
-      "delete": "Delete"
+      "rename": "Rename"
     }
   },
   "file_viewer": {
     "no_content": "*No content yet*",
-    "markdown_placeholder": "Write markdown content...",
+    "markdown_placeholder": "Write in Markdown…",
     "raw_placeholder": "File content...",
-    "raw_aria": "Plain text content of {{path}}"
+    "raw_aria": "Source of {{path}}"
   }
 }

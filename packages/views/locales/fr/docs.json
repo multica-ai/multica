@@ -1,0 +1,151 @@
+{
+  "untitled": "Sans titre",
+  "version_number": "v{{number}}",
+  "kb": "Base de connaissances",
+  "actions": {
+    "new": "Nouveau",
+    "new_doc": "Nouveau document",
+    "new_html_doc": "Nouveau document HTML",
+    "new_folder": "Nouveau dossier",
+    "new_skill": "Nouvelle compétence",
+    "rename": "Renommer",
+    "move": "Déplacer vers…",
+    "delete": "Supprimer",
+    "cancel": "Annuler",
+    "dismiss": "Fermer",
+    "history": "Historique",
+    "toggle_panel": "Détails",
+    "more": "Plus",
+    "copy_link": "Copier le lien",
+    "link_copied": "Lien copié"
+  },
+  "errors": {
+    "create_doc": "Impossible de créer le document",
+    "create_folder": "Impossible de créer le dossier",
+    "move": "Impossible de déplacer l'élément",
+    "move_into_self": "Un dossier ne peut pas être déplacé dans lui-même",
+    "rename": "Impossible de renommer le dossier",
+    "delete": "Impossible de supprimer l'élément",
+    "link": "Impossible de modifier le lien du projet",
+    "save": "Échec de l'enregistrement"
+  },
+  "move": {
+    "title": "Déplacer « {{title}} »",
+    "destination": "Destination",
+    "root": "Base de connaissances (racine)",
+    "current": "Actuel",
+    "confirm": "Déplacer"
+  },
+  "delete": {
+    "title": "Supprimer ce document ?",
+    "description": "« {{title}} » et tout son historique seront supprimés. Action irréversible.",
+    "confirm": "Supprimer"
+  },
+  "tree": {
+    "unread": "Modifications non lues",
+    "more": "Plus d'actions pour {{title}}",
+    "add_in": "Nouveau dans {{title}}",
+    "toggle": "Afficher le contenu de {{title}}",
+    "folder_name": "Nom du dossier",
+    "delete_folder_not_empty": "Videz le dossier pour le supprimer",
+    "empty_folder": "Dossier vide",
+    "empty": "Aucun document"
+  },
+  "panel": {
+    "docs": "Documents",
+    "all_skills": "Toutes les compétences"
+  },
+  "feed": {
+    "title": "Mises à jour récentes",
+    "all": "Tout",
+    "unread": "Non lu",
+    "mark_all_read": "Tout marquer comme lu",
+    "today": "Aujourd'hui",
+    "yesterday": "Hier",
+    "name_separator": ", ",
+    "created": "l'a créé",
+    "created_and_edited_one": "l'a créé, puis modifié {{count}} fois",
+    "created_and_edited_other": "l'a créé, puis modifié {{count}} fois",
+    "edited_one": "l'a modifié {{count}} fois",
+    "edited_other": "l'a modifié {{count}} fois",
+    "empty_title": "Aucune modification ces deux dernières semaines",
+    "empty_body": "Les documents écrits par l'équipe et les agents apparaissent ici, une ligne par document et par jour.",
+    "empty_unread": "Vous êtes à jour"
+  },
+  "html": {
+    "preview": "Aperçu",
+    "source": "Source",
+    "mode_label": "Affichage",
+    "source_label": "Source HTML"
+  },
+  "side": {
+    "properties": "Propriétés",
+    "location": "Emplacement",
+    "format": "Format",
+    "created_by": "Créé par",
+    "edited_by": "Modifié par",
+    "version": "Version",
+    "view_history": "Voir l'historique",
+    "projects": "Projets liés",
+    "link_project": "Lier un projet",
+    "search_projects": "Rechercher des projets…",
+    "no_projects": "Aucun projet à lier",
+    "no_linked_projects": "Lié à aucun projet",
+    "unlink_project": "Délier {{title}}"
+  },
+  "format": {
+    "markdown": "Markdown",
+    "html": "Page HTML"
+  },
+  "editor": {
+    "placeholder": "Écrivez, ou tapez / pour les commandes…",
+    "title_label": "Titre",
+    "saving": "Enregistrement…",
+    "saved": "Enregistré",
+    "save_failed": "Non enregistré · Réessayer",
+    "notice_updated": "{{name}} a mis à jour ce document",
+    "notice_merged": "{{name}} a enregistré en même temps ; ses modifications sont fusionnées avec les vôtres",
+    "notice_conflict": "Vous et {{name}} avez modifié les mêmes lignes — les vôtres sont conservées",
+    "use_theirs": "Garder la version de {{name}}",
+    "use_theirs_failed": "Ces lignes ont encore changé ; modifiez-les à la main",
+    "view_changes": "Voir les modifications",
+    "unread_banner": "Modifié depuis votre dernière visite, en dernier par {{name}}",
+    "refresh_failed": "Impossible de charger la dernière version. Vos modifications sont conservées ici.",
+    "retry": "Réessayer"
+  },
+  "history": {
+    "title": "Historique",
+    "current": "Actuelle",
+    "created": "Créé",
+    "restored": "v{{number}} restaurée",
+    "reverted": "v{{number}} annulée",
+    "comparing_version": "Modifications de la v{{number}}",
+    "comparing_range": "Modifications de la v{{from}} à la v{{to}}",
+    "no_changes": "Aucune modification",
+    "restore": "Restaurer la v{{number}}",
+    "revert": "Annuler cette modification",
+    "restore_done": "Restaurée comme nouvelle version",
+    "revert_done": "Modification annulée dans une nouvelle version",
+    "revert_conflict": "Des modifications ultérieures touchent les mêmes lignes ; annulation automatique impossible",
+    "changed_meanwhile": "Quelqu'un a enregistré entre-temps — réessayez",
+    "nothing_changed": "Rien à changer : le document est déjà dans cet état",
+    "title_changed": "Titre",
+    "load_failed": "Impossible de charger cette version"
+  },
+  "folder": {
+    "empty": "Ce dossier est vide"
+  },
+  "not_found": {
+    "title": "Ce document n'existe pas ou a été supprimé",
+    "folder": "Ce dossier n'existe pas ou a été supprimé",
+    "back": "Retour à la base de connaissances"
+  },
+  "project": {
+    "title": "Documents",
+    "empty": "Aucun document lié",
+    "link": "Lier un document",
+    "search": "Rechercher des documents…",
+    "no_results": "Aucun document à lier",
+    "unlink": "Délier {{title}}"
+  }
+}

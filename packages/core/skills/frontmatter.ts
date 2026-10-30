@@ -12,6 +12,16 @@ export interface ParsedFrontmatter {
   body: string;
 }
 
+/**
+ * The raw frontmatter block (delimiters included, "" when there is none) and
+ * the body after it, so an editor can change the body and put the block back
+ * byte for byte.
+ */
+export function splitFrontmatter(raw: string): { head: string; body: string } {
+  const match = FRONTMATTER_RE.exec(raw);
+  return match ? { head: match[0], body: raw.slice(match[0].length) } : { head: "", body: raw };
+}
+
 export function parseFrontmatter(raw: string): ParsedFrontmatter {
   const match = FRONTMATTER_RE.exec(raw);
   if (!match) return { frontmatter: null, body: raw };

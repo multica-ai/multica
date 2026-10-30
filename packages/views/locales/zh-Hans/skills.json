@@ -120,6 +120,7 @@
     "read_only": "只读",
     "delete_aria": "删除 skill",
     "delete_tooltip": "删除 skill",
+    "toggle_panel": "详情",
     "supporting_data_warning": "部分工作区数据加载失败。创建者归属、运行时名称、编辑权限可能要等下次刷新才完整。",
     "delete_file": "删除文件",
     "name_placeholder": "skill-name",
@@ -195,14 +196,8 @@
     },
     "header": {
       "files_other": "{{count}} 个文件",
-      "used_by_other": "{{count}} 个智能体在用",
       "updated": "{{when}}更新",
       "updated_by": "{{name}} 于{{when}}更新"
-    },
-    "tabs": {
-      "aria": "技能分区",
-      "overview": "概览",
-      "files_other": "文件 {{count}}"
     },
     "overview": {
       "properties": "属性",
@@ -216,19 +211,11 @@
       "permissions_owner": "你可以编辑和删除该技能。改动将在智能体下次运行时生效。",
       "permissions_locked_creator": "只有创建者（{{name}}）或工作区管理员可以编辑该技能。",
       "permissions_locked": "只有创建者或工作区管理员可以编辑该技能。",
-      "properties_help": "关于 skill 属性",
       "character_count": "{{count}} 个字符"
     },
     "files": {
-      "list_aria": "技能文件",
-      "main": "主文件",
-      "supporting_other": "附属文件 {{count}}",
-      "supporting_empty": "暂无附属文件。",
       "add_file": "新建文件",
-      "mode_aria": "文件视图",
-      "mode_preview": "预览",
-      "mode_edit": "编辑",
-      "mode_raw": "纯文本"
+      "reference_of": "{{name}} 的参考文件"
     }
   },
   "create": {
@@ -357,18 +344,14 @@
     "conflict_name_still_exists": "这个名称仍然已存在。请换一个名称或跳过。"
   },
   "file_tree": {
-    "no_files": "无文件",
     "actions": {
-      "label": "{{path}} 的操作",
-      "edit": "编辑",
-      "rename": "重命名",
-      "delete": "删除"
+      "rename": "重命名"
     }
   },
   "file_viewer": {
     "no_content": "*暂无内容*",
-    "markdown_placeholder": "输入 Markdown 内容...",
+    "markdown_placeholder": "用 Markdown 书写…",
     "raw_placeholder": "文件内容...",
-    "raw_aria": "{{path}} 的纯文本内容"
+    "raw_aria": "{{path}} 的源码"
   }
 }
