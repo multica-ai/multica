@@ -480,8 +480,7 @@ func (c *wecomChannel) dispatchFrame(ctx context.Context, env frameEnvelope, sen
 			// one-line receipt and stop. Best-effort: a send failure degrades
 			// to the prior silent drop.
 			log.Debug("wecom: unsupported message kind, replying with a receipt", "msg_type", mc.MsgType, "msg_id", mc.MsgID)
-			c.sendUnsupportedReceipt(ctx, sender, mc.MsgID, msg.Source.ChatID,
-				aibotChatTypeFromChannel(msg.Source.ChatType), c.receiptCopy(ctx, msg), log)
+			c.sendUnsupportedReceipt(ctx, sender, mc.MsgID, msg, log)
 			return nil
 		}
 		if err := c.handler(ctx, msg); err != nil {
@@ -661,12 +660,14 @@ type ChannelDeps struct {
 // the database unreachable the choice is a possible duplicate against a bot
 // that looks broken, and silence is the worse of the two. That is the same
 // stance the send itself takes.
+//
+// The copy is resolved only after the claim, so a redelivery stopped at the
+// claim does not pay for the language lookup.
 func (c *wecomChannel) sendUnsupportedReceipt(
 	ctx context.Context,
 	sender *wsSender,
-	messageID, chatID string,
-	chatType int,
-	content string,
+	messageID string,
+	msg channel.InboundMessage,
 	log *slog.Logger,
 ) {
 	var (
@@ -690,7 +691,8 @@ func (c *wecomChannel) sendUnsupportedReceipt(
 		}
 	}
 
-	if err := sender.sendText(chatID, chatType, content); err != nil {
+	chatType := aibotChatTypeFromChannel(msg.Source.ChatType)
+	if err := sender.sendText(msg.Source.ChatID, chatType, c.receiptCopy(ctx, msg)); err != nil {
 		log.Debug("wecom: unsupported-kind receipt send failed", "error", err, "msg_id", messageID)
 		if claimed {
 			// Nothing was delivered, so the claim must not stand: it would
@@ -717,23 +719,19 @@ func (c *wecomChannel) sendUnsupportedReceipt(
 // adapter — no engine edit (same contract as lark.RegisterFeishu /
 // slack.RegisterSlack).
 func RegisterWecom(reg *channel.Registry, deps ChannelDeps) {
+	logger := deps.Logger
+	if logger == nil {
+		logger = slog.Default()
+	}
 	if deps.Dedup == nil {
 		// Not fatal — answering twice is what main does today — but it has no
 		// other symptom: nothing errors, and the duplicate only shows up in
 		// somebody's chat, one per redelivery, each spending a push from that
 		// conversation's quota.
-		logger := deps.Logger
-		if logger == nil {
-			logger = slog.Default()
-		}
 		logger.Warn("wecom: no deduper wired; a redelivered unreadable message will be answered again " +
 			"on every delivery (set ChannelDeps.Dedup to NewDeduper(store))")
 	}
 	if deps.Languages == nil {
-		logger := deps.Logger
-		if logger == nil {
-			logger = slog.Default()
-		}
 		logger.Warn("wecom: no language lookup wired; the receipt for a message the bot cannot read will use " +
 			"the deployment language whatever the sender's profile says (set ChannelDeps.Languages)")
 	}
