@@ -286,7 +286,19 @@
       "cancel": "取消",
       "import": "导入",
       "importing": "导入中...",
-      "toast_imported": "已导入 skill"
+      "toast_imported": "已导入 skill",
+      "select_all": "全选",
+      "import_count": "导入 {{count}} 个",
+      "done": "完成",
+      "stop": "当前项完成后停止",
+      "unreadable": "无法读取此 skill，请重新选择文件夹。",
+      "uncertain": "导入结果尚不确定，请刷新核对后再重试。列表中已有同名项的 skill 将保持锁定，请前往列表查看。",
+      "check_results": "刷新核对",
+      "retry_ready": "刷新后的列表中未找到此 skill，可以重试。",
+      "uncertain_manual": "导入结果尚不确定，且无法确认压缩包内的 skill 名称。再次导入此压缩包前，请前往 skill 列表人工核对。",
+      "check_failed": "无法核对 skill 列表，结果不确定的导入项仍保持锁定。请重新核对，或前往列表人工查看。",
+      "workspace_changed": "工作区已切换，后续导入已停止。请关闭弹窗，在目标工作区重新打开。",
+      "summary": "成功 {{success}} 个 · 失败或待核对 {{failed}} 个"
     },
     "url": {
       "url_label": "Skill URL",
