@@ -19,6 +19,7 @@ type WecomMetrics struct {
 	StreamOpened          prometheus.Counter
 	StreamFinished        prometheus.Counter
 	StreamFellBack        prometheus.Counter
+	MediaFailures         *prometheus.CounterVec
 	OutboundDelivered     prometheus.Counter
 	OutboundDropped       *prometheus.CounterVec
 	OutboundSkipped       *prometheus.CounterVec
@@ -54,6 +55,10 @@ func NewWecomMetrics() *WecomMetrics {
 			"Answers that landed in the bubble the question opened."),
 		StreamFellBack: counter("stream_fell_back_total",
 			"Answers sent as a new message because the bubble refused the closing frame. The answer is not lost; the experience is the one the bubble was built to replace."),
+		MediaFailures: prometheus.NewCounterVec(prometheus.CounterOpts{
+			Namespace: "multica", Subsystem: "wecom", Name: "media_failures_total",
+			Help: "Attachments the media resolver took on that never reached the agent, by reason. 'unreadable' is a download, decrypt or upload that failed on its own; 'too_large' is past the size ceiling; 'blocked_address' means the media host resolved somewhere the SSRF guard refuses, which is either WeCom moving its CDN or somebody pointing us inward; 'budget_expired' is the media budget running out before the attachment was bound, whether it never started, was cut off or finished too late; 'shutdown' is the server draining while it was queued or in flight.",
+		}, []string{"reason"}),
 		OutboundDelivered: counter("outbound_delivered_total",
 			"Agent replies this adapter put in front of a WeCom user. The denominator the drop breakdown is read against."),
 		OutboundDropped: prometheus.NewCounterVec(prometheus.CounterOpts{
@@ -92,6 +97,7 @@ func (m *WecomMetrics) Collectors() []prometheus.Collector {
 		m.ConnectFailures, m.AuthFailures,
 		m.CallbacksQueued, m.CallbackQueueBlocked,
 		m.StreamOpened, m.StreamFinished, m.StreamFellBack,
+		m.MediaFailures,
 		m.OutboundDelivered, m.OutboundDropped, m.OutboundSkipped,
 		m.AttachmentDelivered, m.AttachmentDropped, m.AttachmentSheds,
 		m.OutboundUnconfirmed, m.AttachmentUnconfirmed,
@@ -131,3 +137,6 @@ func (m *WecomMetrics) RecordRelayShed(kind string) {
 func (m *WecomMetrics) RecordStreamOpened()   { m.StreamOpened.Inc() }
 func (m *WecomMetrics) RecordStreamFinished() { m.StreamFinished.Inc() }
 func (m *WecomMetrics) RecordStreamFellBack() { m.StreamFellBack.Inc() }
+func (m *WecomMetrics) RecordMediaFailure(reason string) {
+	m.MediaFailures.WithLabelValues(reason).Inc()
+}

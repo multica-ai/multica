@@ -201,17 +201,17 @@ export class TestApiClient {
   }
 
   /** Create a workspace custom property definition; archived on cleanup. */
-  async createProperty(name: string, type = "text") {
+  async createProperty(name: string, type = "text", config?: { options: { name: string; color: string }[] }) {
     const res = await this.authedFetch("/api/properties", {
       method: "POST",
-      body: JSON.stringify({ name, type }),
+      body: JSON.stringify({ name, type, config }),
     });
     if (!res.ok) {
       throw new Error(`create property failed: ${res.status} ${await res.text()}`);
     }
     const property = await res.json();
     this.createdPropertyIds.push(property.id);
-    return property as { id: string; name: string };
+    return property as { id: string; name: string; config: { options?: { id: string; name: string; color: string }[] } };
   }
 
   async updateProject(id: string, updates: Record<string, unknown>) {

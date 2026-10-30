@@ -1,10 +1,20 @@
 "use client";
 
-import { Fragment, useMemo } from "react";
+import { useMemo, useState, type ReactNode } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { ChevronDown, ChevronRight, LayoutTemplate, Plus } from "@multica/ui/icons";
+import {
+  ArrowRight,
+  ChevronDown,
+  ChevronRight,
+  Info,
+  LayoutTemplate,
+  Plus,
+  Search,
+  User,
+} from "@multica/ui/icons";
 import { useAuthStore } from "@multica/core/auth";
 import { useWorkspaceId } from "@multica/core/hooks";
+import { useWorkspacePaths } from "@multica/core/paths";
 import { useIssueStatuses } from "@multica/core/issue-statuses/hooks";
 import { statusColumnKeys } from "@multica/core/issues";
 import { useIssueWorkflows } from "@multica/core/issue-workflows";
@@ -21,13 +31,23 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@multica/ui/components/ui/dropdown-menu";
+import {
+  Popover,
+  PopoverContent,
+  PopoverDescription,
+  PopoverTitle,
+  PopoverTrigger,
+} from "@multica/ui/components/ui/popover";
 import { ActorAvatar } from "../common/actor-avatar";
+import { matchesPinyin } from "../editor/extensions/pinyin-match";
 import { StatusIcon } from "../issues/components/status-icon";
 import { useStatusLabel } from "../issues/utils/status-label";
-import { useNavigation } from "../navigation";
+import { AppLink, useNavigation } from "../navigation";
+import { ProjectIcon } from "../projects/components/project-icon";
 import { IssueStatusesTab } from "../settings/components/issue-statuses-tab";
 import { SettingsTab } from "../settings/components/settings-layout";
 import { useT } from "../i18n";
+import { useStepHandlerLabel } from "./step-handler";
 import { WORKFLOW_TEMPLATES, type WorkflowTemplateId } from "./templates";
 import { WorkflowEditorPage } from "./workflow-editor-page";
 
@@ -71,8 +91,9 @@ export function WorkflowsTab() {
     }
     return `${navigation.pathname}?${next.toString()}`;
   };
-  const openEditor = (id: string, from: WorkflowTemplateId | null = null) =>
-    navigation.push(hrefWith({ [WORKFLOW_PARAM]: id, [DUPLICATE_PARAM]: null, [TEMPLATE_PARAM]: from }));
+  const editorHref = (id: string, from: WorkflowTemplateId | null = null) =>
+    hrefWith({ [WORKFLOW_PARAM]: id, [DUPLICATE_PARAM]: null, [TEMPLATE_PARAM]: from });
+  const openEditor = (id: string, from: WorkflowTemplateId | null = null) => navigation.push(editorHref(id, from));
   const backToList = () =>
     navigation.push(hrefWith({ [WORKFLOW_PARAM]: null, [DUPLICATE_PARAM]: null, [TEMPLATE_PARAM]: null }));
 
@@ -153,7 +174,7 @@ export function WorkflowsTab() {
     >
       <div className="divide-y divide-surface-border overflow-hidden rounded-lg border border-surface-border bg-card">
         {defaultRow ? (
-          <WorkflowRow workflow={defaultRow} projects={defaultProjects} onOpen={() => openEditor(defaultRow.id)} />
+          <WorkflowRow workflow={defaultRow} projects={defaultProjects} href={editorHref(defaultRow.id)} />
         ) : (
           <DefaultWorkflowRow projects={defaultProjects} />
         )}
@@ -163,7 +184,7 @@ export function WorkflowsTab() {
               key={workflow.id}
               workflow={workflow}
               projects={projects.filter((p) => workflow.project_ids.includes(p.id))}
-              onOpen={() => openEditor(workflow.id)}
+              href={editorHref(workflow.id)}
             />
           ))}
       </div>
@@ -182,75 +203,174 @@ function DefaultWorkflowRow({ projects }: { projects: Project[] }) {
   const wsId = useWorkspaceId();
   const catalog = useIssueStatuses(wsId);
   const keys = statusColumnKeys(catalog);
-  const separator = t(($) => $.workflows.list_separator);
   return (
-    <button
-      type="button"
-      className="flex w-full items-center gap-4 px-4 py-3.5 text-left transition-colors hover:bg-accent/40"
-      onClick={() => document.getElementById("status-library")?.scrollIntoView({ behavior: "smooth", block: "start" })}
-    >
-      <div className="min-w-0 flex-1 space-y-2">
-        <div className="flex flex-wrap items-center gap-2">
-          <span className="text-body font-semibold">{t(($) => $.workflows.default_name)}</span>
-        </div>
-        <StepChain steps={keys.map((key) => ({ status_key: key, handler: { type: "none" }, instructions: "" }))} />
-        <p className="text-caption text-muted-foreground">
-          {projects.length > 0
-            ? t(($) => $.workflows.settings.used_by_default, {
-                count: projects.length,
-                names: projects.map((p) => p.title).join(separator),
-              })
-            : t(($) => $.workflows.settings.used_by_default_none)}
-        </p>
-      </div>
-      <ChevronRight aria-hidden className="size-4 shrink-0 text-muted-foreground" />
-    </button>
+    <WorkflowRowLayout
+      name={
+        <button
+          type="button"
+          className={ROW_LINK_CLASS}
+          onClick={() => document.getElementById("status-library")?.scrollIntoView({ behavior: "smooth", block: "start" })}
+        >
+          {t(($) => $.workflows.default_name)}
+        </button>
+      }
+      description={t(($) => $.workflows.default_summary)}
+      usage={<WorkflowUsage name={t(($) => $.workflows.default_name)} projects={projects} isDefault />}
+      steps={keys.map((key) => ({ status_key: key, handler: { type: "none" }, instructions: "" }))}
+    />
   );
 }
 
-function WorkflowRow({
-  workflow,
-  projects,
-  onOpen,
-}: {
-  workflow: IssueWorkflow;
-  projects: Project[];
-  onOpen: () => void;
-}) {
-  const { t } = useT("issues");
-  const separator = t(($) => $.workflows.list_separator);
+function WorkflowRow({ workflow, projects, href }: { workflow: IssueWorkflow; projects: Project[]; href: string }) {
   return (
-    <button
-      type="button"
-      onClick={onOpen}
-      className="flex w-full items-center gap-4 px-4 py-3.5 text-left transition-colors hover:bg-accent/40"
+    <WorkflowRowLayout
+      name={
+        <AppLink href={href} className={ROW_LINK_CLASS}>
+          {workflow.name}
+        </AppLink>
+      }
+      description={workflow.description}
+      usage={<WorkflowUsage name={workflow.name} projects={projects} isDefault={workflow.is_default} />}
+      steps={workflow.steps}
+    />
+  );
+}
+
+/**
+ * The name's `::after` stretches over the whole row, so the row clicks
+ * through to the workflow while its accessible name stays the workflow name.
+ * Controls on the row sit above it with `relative z-10`.
+ */
+const ROW_LINK_CLASS =
+  "min-w-0 max-w-[40%] shrink-0 truncate text-body font-semibold outline-none after:absolute after:inset-0 focus-visible:after:outline-2 focus-visible:after:-outline-offset-2 focus-visible:after:outline-ring";
+
+function WorkflowRowLayout({
+  name,
+  description,
+  usage,
+  steps,
+}: {
+  name: ReactNode;
+  description?: string | null;
+  usage: ReactNode;
+  steps: IssueWorkflowStep[];
+}) {
+  return (
+    <div className="relative flex items-center gap-4 px-4 py-3.5 transition-colors hover:bg-accent/40">
+      <div className="min-w-0 flex-1 space-y-2.5">
+        <div className="flex min-h-7 min-w-0 items-center gap-2">
+          {name}
+          {description && <span className="min-w-0 truncate text-caption text-muted-foreground">{description}</span>}
+          {usage}
+        </div>
+        <StepChain steps={steps} />
+      </div>
+      <ChevronRight aria-hidden className="size-4 shrink-0 text-faint-foreground" />
+    </div>
+  );
+}
+
+const USAGE_STACK_SIZE = 3;
+const USAGE_FILTER_MIN = 7;
+
+/**
+ * Which projects use a workflow, as one line: up to three project icons and a
+ * count (or the name, for a single project). The full list opens on click.
+ */
+function WorkflowUsage({ name, projects, isDefault }: { name: string; projects: Project[]; isDefault: boolean }) {
+  const { t } = useT("issues");
+  const paths = useWorkspacePaths();
+  const [open, setOpen] = useState(false);
+  const [filter, setFilter] = useState("");
+  const sorted = useMemo(
+    () => [...projects].sort((a, b) => b.updated_at.localeCompare(a.updated_at)),
+    [projects],
+  );
+
+  if (sorted.length === 0) {
+    return (
+      <span className="ml-auto shrink-0 text-label text-muted-foreground">
+        {isDefault ? t(($) => $.workflows.settings.usage_default_none) : t(($) => $.workflows.settings.no_projects)}
+      </span>
+    );
+  }
+
+  const query = filter.trim().toLowerCase();
+  const visible = query
+    ? sorted.filter((p) => p.title.toLowerCase().includes(query) || matchesPinyin(p.title, query))
+    : sorted;
+  const summary = isDefault
+    ? t(($) => $.workflows.settings.usage_default, { count: sorted.length })
+    : sorted.length === 1
+      ? sorted[0]!.title
+      : t(($) => $.workflows.settings.projects, { count: sorted.length });
+
+  return (
+    <Popover
+      open={open}
+      onOpenChange={(next) => {
+        setOpen(next);
+        if (!next) setFilter("");
+      }}
     >
-      <div className="min-w-0 flex-1 space-y-2">
-        <div className="flex flex-wrap items-center gap-2">
-          <span className="text-body font-semibold">{workflow.name}</span>
-          {workflow.description && (
-            <span className="truncate text-caption text-muted-foreground">{workflow.description}</span>
+      <PopoverTrigger className="relative z-10 -mr-2 ml-auto inline-flex h-7 min-w-0 max-w-[45%] shrink-0 items-center gap-2 rounded-md px-2 text-label text-muted-foreground transition-colors hover:bg-surface-selected hover:text-foreground focus-visible:outline-2 focus-visible:outline-ring data-popup-open:bg-surface-selected data-popup-open:text-foreground">
+        <span aria-hidden className="flex shrink-0 -space-x-1.5">
+          {sorted.slice(0, USAGE_STACK_SIZE).map((project) => (
+            <span key={project.id} className="flex size-5 items-center justify-center rounded-full bg-muted ring-2 ring-card">
+              <ProjectIcon project={project} size="sm" />
+            </span>
+          ))}
+        </span>
+        <span className="truncate">{summary}</span>
+      </PopoverTrigger>
+      <PopoverContent align="end" className="w-80 gap-0 p-0">
+        <div className="flex min-w-0 items-baseline gap-1.5 px-3 pb-2 pt-3">
+          <PopoverTitle className="truncate text-label font-semibold">{name}</PopoverTitle>
+          <PopoverDescription className="shrink-0 text-caption">
+            {t(($) => $.workflows.settings.projects, { count: sorted.length })}
+          </PopoverDescription>
+        </div>
+        {sorted.length >= USAGE_FILTER_MIN && (
+          <div className="relative mx-2 mb-1">
+            <Search aria-hidden className="pointer-events-none absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />
+            <input
+              type="text"
+              value={filter}
+              onChange={(e) => setFilter(e.target.value)}
+              placeholder={t(($) => $.workflows.settings.filter_projects)}
+              aria-label={t(($) => $.workflows.settings.filter_projects)}
+              className="h-8 w-full rounded-md border border-input bg-transparent pl-8 pr-2 text-label outline-none placeholder:text-muted-foreground focus-visible:border-ring"
+            />
+          </div>
+        )}
+        <div className="max-h-72 overflow-y-auto p-1">
+          {visible.length === 0 ? (
+            <p className="px-2 py-3 text-center text-caption text-muted-foreground">
+              {t(($) => $.workflows.settings.no_matching_projects)}
+            </p>
+          ) : (
+            visible.map((project) => (
+              <AppLink
+                key={project.id}
+                href={paths.projectDetail(project.id)}
+                onClick={() => setOpen(false)}
+                className="flex h-8 items-center gap-2 rounded-md px-2 text-label transition-colors hover:bg-accent focus-visible:bg-accent focus-visible:outline-none"
+              >
+                <ProjectIcon project={project} size="sm" />
+                <span className="min-w-0 flex-1 truncate">{project.title}</span>
+                <span className="shrink-0 text-caption tabular-nums text-muted-foreground">{project.issue_count}</span>
+              </AppLink>
+            ))
           )}
         </div>
-        <StepChain steps={workflow.steps} />
-        <p className="text-caption text-muted-foreground">
-          {workflow.is_default
-            ? projects.length > 0
-              ? t(($) => $.workflows.settings.used_by_default, {
-                  count: projects.length,
-                  names: projects.map((p) => p.title).join(separator),
-                })
-              : t(($) => $.workflows.settings.used_by_default_none)
-            : projects.length > 0
-              ? t(($) => $.workflows.settings.used_by, {
-                  count: projects.length,
-                  names: projects.map((p) => p.title).join(separator),
-                })
-              : t(($) => $.workflows.settings.no_projects)}
-        </p>
-      </div>
-      <ChevronRight aria-hidden className="size-4 shrink-0 text-muted-foreground" />
-    </button>
+        {isDefault && (
+          <p className="flex items-center gap-2 border-t border-surface-border px-3 py-2.5 text-caption text-muted-foreground">
+            <Info aria-hidden className="size-3.5 shrink-0" />
+            {t(($) => $.workflows.settings.default_covers_no_project)}
+          </p>
+        )}
+      </PopoverContent>
+    </Popover>
   );
 }
 
@@ -260,19 +380,26 @@ function WorkflowRow({
  * path an issue takes.
  */
 function StepChain({ steps }: { steps: IssueWorkflowStep[] }) {
-  const { t } = useT("issues");
   const wsId = useWorkspaceId();
   const catalog = useIssueStatuses(wsId);
   const labelOf = useStatusLabel(wsId);
+  const handlerLabel = useStepHandlerLabel(null);
   const path = steps.filter((s) => s.status_key !== "blocked" && catalog.categoryOf(s.status_key) !== "closed");
   return (
     <div className="flex flex-wrap items-center gap-x-1 gap-y-1.5">
       {path.map((step, index) => {
         const { type, id } = step.handler;
+        const handler = handlerLabel(step);
+        const actor = (type === "agent" || type === "squad" || type === "member") && id ? { type, id } : null;
+        // The arrow travels with the step it points to, so a wrapped line
+        // starts with "→ step" instead of ending on an arrow beside the
+        // row's chevron.
         return (
-          <Fragment key={step.status_key}>
-            {index > 0 && <ChevronRight aria-hidden className="size-3 text-muted-foreground" />}
-            <span className="inline-flex items-center gap-1.5 rounded-full border border-surface-border px-2 py-0.5 text-caption">
+          <span key={step.status_key} className="inline-flex items-center gap-1">
+            {index > 0 && <ArrowRight aria-hidden className="size-3 text-faint-foreground" />}
+            <span
+              className={`inline-flex h-[22px] items-center gap-1.5 rounded-full border border-surface-border bg-card pl-2 text-caption ${handler ? "pr-0.5" : "pr-2"}`}
+            >
               <StatusIcon
                 status={step.status_key}
                 category={catalog.categoryOf(step.status_key)}
@@ -281,17 +408,20 @@ function StepChain({ steps }: { steps: IssueWorkflowStep[] }) {
                 className="h-3 w-3"
               />
               {labelOf(step.status_key)}
-              {(type === "agent" || type === "squad" || type === "member") && id && (
-                <ActorAvatar actorType={type} actorId={id} size="xs" profileLink={false} />
-              )}
-              {type === "project_lead" && (
-                <span className="text-muted-foreground">· {t(($) => $.workflows.handler.project_lead)}</span>
-              )}
-              {type === "creator" && (
-                <span className="text-muted-foreground">· {t(($) => $.workflows.handler.creator)}</span>
+              {handler && (
+                <span className="inline-flex h-4 max-w-40 items-center gap-1 rounded-full bg-muted pl-px pr-1.5 text-muted-foreground [--avatar-slot-size:14px]">
+                  {actor ? (
+                    <ActorAvatar actorType={actor.type} actorId={actor.id} size="xs" profileLink={false} />
+                  ) : (
+                    <span aria-hidden className="flex size-3.5 shrink-0 items-center justify-center rounded-full border border-dashed border-faint-foreground">
+                      <User className="size-2" />
+                    </span>
+                  )}
+                  <span className="truncate">{handler}</span>
+                </span>
               )}
             </span>
-          </Fragment>
+          </span>
         );
       })}
     </div>

@@ -985,8 +985,9 @@ type writeGuardKey struct{}
 // ctx that carries none behaves exactly as before.
 //
 // It covers what goes through request — the upload steps and aibot_send_msg,
-// text or media. Stream frames take their own path (writeStreamFrame) and do
-// not consult it; nothing puts a guard on those today.
+// text or media — and stream frames (writeStreamFrame), which is how the
+// closing frame of a bubble is held to the same check as the message it would
+// otherwise fall back to.
 //
 // The guard runs while the writer is held, so it must be quick: whatever it
 // waits for, the ping loop and every other send on this socket wait for too.
@@ -1018,6 +1019,13 @@ func (s *wsSender) writeStreamFrame(ctx context.Context, reqID, streamID string,
 		return err
 	}
 	defer s.unlockWriter()
+	// Ahead of beginStreamFrameLocked: a frame the guard refuses never takes
+	// the turn's place, so there is nothing to give back.
+	if guard := writeGuardFrom(ctx); guard != nil {
+		if err := guard(ctx); err != nil {
+			return fmt.Errorf("%w: %w", errNotAttempted, err)
+		}
+	}
 	if !s.beginStreamFrameLocked(reqID, streamID, w, finish) {
 		return errStreamSuperseded
 	}
@@ -1138,7 +1146,15 @@ func (s *wsSender) sendText(chatID string, chatTypeInt int, content string) erro
 // caller's question — may this send be tried again? — has a different answer
 // once part of the answer is in the chat.
 func (s *wsSender) sendTextCtx(ctx context.Context, chatID string, chatTypeInt int, content string) error {
-	pieces := splitForWire(content)
+	return s.sendPiecesCtx(ctx, chatID, chatTypeInt, splitForWire(content))
+}
+
+// sendPiecesCtx sends pieces that are already cut to fit, in order, under one
+// hold of the chat's lock. sendTextCtx is the caller for a whole answer; the
+// other is the remainder of an answer whose head went into its bubble, which
+// is split before the bubble is sealed and so arrives here already in pieces.
+// Each piece must fit in one frame.
+func (s *wsSender) sendPiecesCtx(ctx context.Context, chatID string, chatTypeInt int, pieces []string) error {
 	// Held for every send, not only a split one: a single-frame push from
 	// another caller — an inbox card, the file this same answer produced
 	// (sendMedia takes the same lock), the unsupported-type notice — is

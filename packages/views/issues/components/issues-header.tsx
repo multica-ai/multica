@@ -76,7 +76,7 @@ import type {
   ProjectStatus,
   WorkingAgentSummary,
 } from "@multica/core/types";
-import { formatActorRef, isActorPropertyType, isFilterablePropertyType, isListPropertyType, isScalarPropertyType, propertyFilterValueKey, PROPERTY_FILTER_OP_SYMBOLS, PROPERTY_FILTER_OPS_BY_TYPE, type PropertyFilterOp, type PropertyFilterValue } from "@multica/core/types";
+import { formatActorRef, isActorPropertyType, isFilterablePropertyType, isListPropertyType, isScalarPropertyType, propertyFilterValueKey, MAX_ISSUE_PROPERTY_FILTER_VALUES, PROPERTY_FILTER_OP_SYMBOLS, PROPERTY_FILTER_OPS_BY_TYPE, type PropertyFilterOp, type PropertyFilterValue } from "@multica/core/types";
 import { ProjectIcon } from "../../projects/components/project-icon";
 import { useProjectStatusLabels } from "../../projects/components/labels";
 import { ActorAvatar } from "../../common/actor-avatar";
@@ -992,6 +992,7 @@ function PropertyFilterOptions({
     );
   }
 
+  const atCapacity = selected.length >= MAX_ISSUE_PROPERTY_FILTER_VALUES;
   return (
     <>
       {options.map((option) => {
@@ -1001,7 +1002,7 @@ function PropertyFilterOptions({
           <DropdownMenuCheckboxItem
             key={option.id}
             checked={checked}
-            disabled={fixedIds?.has(option.id) === true}
+            disabled={fixedIds?.has(option.id) === true || (atCapacity && !checked)}
             title={fixedIds?.has(option.id) === true ? fixedTitle : undefined}
             onCheckedChange={() => onToggle(option.id)}
             className={FILTER_ITEM_CLASS}

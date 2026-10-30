@@ -22,6 +22,10 @@ import (
 const (
 	maxTextValueLen = 2000
 	maxURLValueLen  = 2048
+	// Keep per-issue selections at the former definition cap so larger
+	// vocabularies do not crowd out the shared 16KB properties bag.
+	maxMultiSelectValues = 50
+	maxOptionsHint       = 20
 	// MaxActorValues is exported so the handler's existing focused tests can
 	// continue to pin the public multi-actor limit after validation moved here.
 	MaxActorValues = 20
@@ -157,9 +161,13 @@ func optionOrder(config propertyConfig) map[string]int {
 }
 
 func optionsHint(config propertyConfig) string {
-	parts := make([]string, len(config.Options))
-	for index, option := range config.Options {
-		parts[index] = fmt.Sprintf("%s (%s)", option.ID, option.Name)
+	visible := config.Options[:min(len(config.Options), maxOptionsHint)]
+	parts := make([]string, 0, len(visible)+1)
+	for _, option := range visible {
+		parts = append(parts, fmt.Sprintf("%s (%s)", option.ID, option.Name))
+	}
+	if remaining := len(config.Options) - len(visible); remaining > 0 {
+		parts = append(parts, fmt.Sprintf("... (%d more options; retrieve the property definition for the full list)", remaining))
 	}
 	return strings.Join(parts, ", ")
 }
@@ -310,6 +318,9 @@ func ValidateValue(def db.IssueProperty, raw json.RawMessage) ([]byte, error) {
 			}
 			seen[id] = struct{}{}
 			ids = append(ids, id)
+			if len(ids) > maxMultiSelectValues {
+				return nil, fmt.Errorf("value cannot list more than %d options", maxMultiSelectValues)
+			}
 		}
 		sort.SliceStable(ids, func(left, right int) bool { return order[ids[left]] < order[ids[right]] })
 		return json.Marshal(ids)

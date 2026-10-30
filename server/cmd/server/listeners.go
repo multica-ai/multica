@@ -67,9 +67,24 @@ func projectOutbound(eventType string, payload any) any {
 	return projected
 }
 
+// isChatPrivateEvent reports whether e carries chat session content that only
+// the session's creator may receive. Every chat:* event qualifies, including
+// ones added later. Of the task events only task:message does: it streams the
+// agent's transcript. Chat-task lifecycle events (task:queued, task:completed,
+// ...) keep workspace fanout because every member's agent presence and
+// workload views depend on them; they carry ids and status, and task:failed
+// has its error text stripped by projectOutbound.
+func isChatPrivateEvent(e events.Event) bool {
+	if strings.HasPrefix(e.Type, "chat:") {
+		return true
+	}
+	return e.Type == protocol.EventTaskMessage && e.ChatSessionID != ""
+}
+
 // registerListeners wires up event bus listeners for WS broadcasting.
 // Personal events (inbox, invites) are sent only to the target user via
-// SendToUser. All other events are broadcast to the workspace room.
+// SendToUser, and chat content only to the chat session's creator. All other
+// events are broadcast to the workspace room.
 //
 // The broadcaster parameter is intentionally typed as the realtime.Broadcaster
 // interface (not *realtime.Hub) so that this layer can later be swapped out
@@ -87,8 +102,6 @@ func registerListeners(bus *events.Bus, b realtime.Broadcaster) {
 		protocol.EventInboxBatchArchived: true,
 		protocol.EventInvitationCreated:  true,
 		protocol.EventInvitationRevoked:  true,
-		protocol.EventChatSessionCreated: true,
-		protocol.EventChatSessionUpdated: true,
 	}
 
 	// Helper: marshal event and send to a specific user.
@@ -201,16 +214,6 @@ func registerListeners(bus *events.Bus, b realtime.Broadcaster) {
 		})
 	}
 
-	// A Chat session is creator-private. Its initial title may be derived from
-	// the creator's first message, so the list-invalidation event must not be
-	// broadcast to every workspace member. ActorID is the creator on every
-	// producer path for this event.
-	for _, eventType := range []string{protocol.EventChatSessionCreated, protocol.EventChatSessionUpdated} {
-		bus.Subscribe(eventType, func(e events.Event) {
-			sendToRecipient(b, e, e.ActorID)
-		})
-	}
-
 	// member:added — also send to the invited user so they discover the new workspace.
 	// Pass excludeWorkspace so clients already in the target room (reached via
 	// BroadcastToWorkspace in SubscribeAll) don't receive the event twice.
@@ -246,6 +249,30 @@ func registerListeners(bus *events.Bus, b realtime.Broadcaster) {
 			return
 		}
 
+		// A chat session is creator-private: its events and its tasks'
+		// transcript go only to the creator's connections bound to the
+		// session's workspace. Not the whole user scope: a connection to
+		// another workspace is authorized against that workspace, so it would
+		// keep receiving this content after the creator is removed from this
+		// one. The scope is joined at connect time, so this needs no client
+		// subscribe frame. Without a known owner and workspace the event is
+		// dropped, never widened.
+		if isChatPrivateEvent(e) {
+			if e.ChatSessionOwnerID == "" || e.WorkspaceID == "" {
+				slog.Warn("realtime: dropping chat event without session owner",
+					"event_type", e.Type, "chat_session_id", e.ChatSessionID, "task_id", e.TaskID)
+				return
+			}
+			data, err := json.Marshal(map[string]any{"type": e.Type, "payload": projectOutbound(e.Type, e.Payload), "actor_id": e.ActorID, "actor_type": e.ActorType})
+			if err != nil {
+				slog.Error("failed to marshal event", "event_type", e.Type, "error", err)
+				return
+			}
+			realtime.M.RecordEvent(e.Type)
+			b.BroadcastToScope(realtime.ScopeWorkspaceMember, realtime.WorkspaceMemberScopeID(e.WorkspaceID, e.ChatSessionOwnerID), data)
+			return
+		}
+
 		msg := map[string]any{
 			"type":       e.Type,
 			"payload":    projectOutbound(e.Type, e.Payload),
@@ -268,11 +295,12 @@ func registerListeners(bus *events.Bus, b realtime.Broadcaster) {
 		// every chat/task message on the floor, breaking the live chat
 		// timeline, chat unread badges, and pending-task UI.
 		//
-		// Until the client lands its scope-subscription PR, we keep
-		// task/chat events on workspace fanout (same behavior as before this
-		// PR). The `Event.TaskID` / `Event.ChatSessionID` hints are still
-		// populated by producers so that flipping the switch later is a
-		// one-line change here. See review on PR #1429 for context.
+		// Until the client lands its scope-subscription PR, task events stay
+		// on workspace fanout, except chat-task transcripts, which take the
+		// creator-only user-scope route above. The `Event.TaskID` /
+		// `Event.ChatSessionID` hints are still populated by producers so
+		// that flipping the switch later is a one-line change here. See
+		// review on PR #1429 for context.
 
 		if e.WorkspaceID != "" {
 			realtime.M.RecordEvent(e.Type)
