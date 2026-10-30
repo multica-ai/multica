@@ -11,7 +11,6 @@ import (
 	"github.com/multica-ai/multica/server/pkg/agent"
 )
 
-// TestProbeMuseAppReceptionistProtocolSkew: Codex round2 item 5.
 // A version-mismatched receptionist must yield builtinProbeProtocolSkew
 // (demotable), not builtinProbeUnavailable.
 func TestProbeMuseAppReceptionistProtocolSkew(t *testing.T) {
@@ -61,7 +60,6 @@ func TestProbeMuseAppReceptionistOK(t *testing.T) {
 	}
 }
 
-// TestProbeMuseAppReceptionistSkewNeedsConfirmation: Codex round2 item 1.
 // Protocol skew must go through confirmation (not exempt like below-minimum).
 func TestProbeMuseAppReceptionistSkewNeedsConfirmation(t *testing.T) {
 	if !builtinProbeNeedsConfirmation(builtinProbeProtocolSkew) {

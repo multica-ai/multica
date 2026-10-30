@@ -878,7 +878,6 @@ func TestMuseAppProtocolSkewCancelsOrphanedTask(t *testing.T) {
 	}
 }
 
-// TestMuseAppProbeProtocolSkew: Codex round2 item 5.
 // probeMuseAppReceptionist must map version mismatch to ErrMuseAppProtocolSkew.
 func TestMuseAppProbeProtocolSkew(t *testing.T) {
 	mux := http.NewServeMux()
@@ -915,7 +914,6 @@ func TestMuseAppProbeProtocolOK(t *testing.T) {
 	}
 }
 
-// TestMuseAppTimeoutSRoundsUp: Codex round2 item 5.
 // Sub-second timeout must round up to 1, not truncate to 0.
 func TestMuseAppTimeoutSRoundsUp(t *testing.T) {
 	fastMuseAppPolls(t)
@@ -944,7 +942,6 @@ func TestMuseAppTimeoutSRoundsUp(t *testing.T) {
 	}
 }
 
-// TestMuseAppNoTimeoutSends24h: Codex round2 item 3.
 // When Go has no deadline, send explicit 24h so the receptionist
 // doesn't default to 1h and kill a task Go is happy to wait for.
 func TestMuseAppNoTimeoutSends24h(t *testing.T) {
@@ -973,7 +970,6 @@ func TestMuseAppNoTimeoutSends24h(t *testing.T) {
 	}
 }
 
-// TestMuseAppPollFailureCancelsRemote: Codex round2 item 5.
 // When polling fails exhaustively, the backend must best-effort cancel
 // the remote task (B2).
 func TestMuseAppPollFailureCancelsRemote(t *testing.T) {
