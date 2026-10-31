@@ -65,6 +65,9 @@ WORKDIR /app
 # Remove once the pinned node image includes libssl3 >= 3.5.8-r0.
 RUN apk add --no-cache "libcrypto3>=3.5.8-r0" "libssl3>=3.5.8-r0"
 
+# The standalone server runs with Node; npm is only needed in build stages.
+RUN npm uninstall --global --offline --ignore-scripts --logs-max=0 npm
+
 ENV NODE_ENV=production
 ENV REMOTE_API_URL=http://backend:8080
 
