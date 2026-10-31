@@ -1,6 +1,30 @@
 package service
 
-import "testing"
+import (
+	"testing"
+
+	"github.com/multica-ai/multica/server/pkg/taskfailure"
+)
+
+// Exercise the classification/normalization/resume-safety chain used by
+// FailTask. An old daemon's non-empty context_overflow reason must be corrected
+// before it can clear the chat pointer and exclude the session on the next turn.
+func TestTokenWindowQuotaPreservesSession(t *testing.T) {
+	t.Parallel()
+	const raw = `429 {"error":{"code":"token_window_quota_exceeded","message":"This API key has reached its 5h usage limit"}}`
+	for _, reported := range []string{
+		taskfailure.ReasonAgentContextOverflow.String(), // Older daemon.
+		taskfailure.Classify(raw).String(),              // Current daemon.
+	} {
+		normalized := taskfailure.NormalizeDaemonReason(reported, raw).String()
+		if ResumeUnsafeFailure(normalized, raw) {
+			t.Errorf("quota failure must preserve the session: reported=%q normalized=%q", reported, normalized)
+		}
+		if retryableReasons[normalized] {
+			t.Errorf("exhausted usage quota must not trigger automatic retries: reason=%q", normalized)
+		}
+	}
+}
 
 // TestResumeUnsafeFailureEmptyHistoryMessage covers the manual-retry half of
 // GH #6066. The claim handler resolves a rerun's session from the exact source
