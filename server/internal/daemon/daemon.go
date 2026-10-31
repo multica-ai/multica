@@ -6112,7 +6112,7 @@ func (d *Daemon) acquireLocalDirectoryLockIfNeeded(ctx context.Context, task Tas
 		}
 		return nil, true
 	}
-	if err := validateLocalPath(assignment.AbsPath); err != nil {
+	if err := validateLocalPathAccess(assignment.AbsPath, !assignment.SkipsCheckout()); err != nil {
 		taskLog.Error("local_directory: path validation failed", "error", err)
 		if failErr := d.reportTerminalTask(ctx, terminalTaskReport{
 			kind:          terminalTaskReportFail,
@@ -6123,6 +6123,11 @@ func (d *Daemon) acquireLocalDirectoryLockIfNeeded(ctx context.Context, task Tas
 			taskLog.Error("fail task after local_directory validation error", "error", failErr)
 		}
 		return nil, true
+	}
+
+	if assignment.SkipsCheckout() {
+		taskLog.Info("local_directory: none mode, skipping checkout and path mutex")
+		return nil, false
 	}
 
 	// Worktree mode is the whole point of not serialising: each task gets its
@@ -7952,7 +7957,10 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 	// Resolve any local_directory assignment again here so runTask can plumb
 	// LocalWorkDir into execenv. handleTask already validated + locked the
 	// path for worker tasks; leader tasks intentionally skip the assignment.
-	localAssignment, _ := localDirectoryAssignmentForTask(task, d.cfg.DaemonID)
+	localAssignment, err := localDirectoryAssignmentForTask(task, d.cfg.DaemonID)
+	if err != nil {
+		return TaskResult{}, fmt.Errorf("resolve local_directory: %w", err)
+	}
 	// Reuse intentionally skipped for local_directory tasks: the prior
 	// WorkDir is the user's own path (always present) but the reuse path
 	// loses the envRoot association the GC loop needs, and re-running
@@ -8305,7 +8313,7 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 				return TaskResult{}, asEnvironmentSetupFailure(fmt.Errorf("prepare execution environment: %w", err))
 			}
 		} else {
-			if localAssignment != nil {
+			if localAssignment != nil && !localAssignment.SkipsCheckout() {
 				prepParams.LocalWorkDir = localAssignment.AbsPath
 			}
 			env, err = d.prepareExecutionEnvironment(prepareCtx, prepParams)
@@ -8535,7 +8543,10 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 	// is the one thing it cannot work out from its own context — tell it.
 	// Worktree mode is excluded: there the tree is this task's private checkout.
 	var promptOptions []PromptOption
-	if localAssignment != nil && !localAssignment.UsesWorktree() && localDirectoryLockExempt(task) {
+	if localAssignment.SkipsCheckout() {
+		promptOptions = append(promptOptions, WithReadOnlyLocalDirectory(localAssignment.AbsPath))
+	}
+	if localAssignment != nil && !localAssignment.SkipsCheckout() && !localAssignment.UsesWorktree() && localDirectoryLockExempt(task) {
 		promptOptions = append(promptOptions, WithSharedLocalDirectory())
 	}
 	// Worktree mode hands this turn a tree that is mid-merge when the user's
