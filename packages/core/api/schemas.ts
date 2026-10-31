@@ -22,6 +22,7 @@ import type {
   ChatDraftRestoresResponse,
   ChatPendingTask,
   ChatSession,
+  RuntimeDirectoryRequest,
   PrioritizeQueuedChatTaskResponse,
   SendChatMessageResponse,
   StartMikaOnboardingResponse,
@@ -2185,12 +2186,36 @@ const ChatChannelSourceSchema = z.object({
   route_revision: z.number().default(0),
 }).loose();
 
+export const ChatWorkingDirectorySchema = z.object({
+  daemon_id: z.string().min(1),
+  path: z.string().min(1),
+});
+
+export const RuntimeDirectoryRequestSchema = z.object({
+  id: z.string(),
+  runtime_id: z.string(),
+  status: z.enum(["pending", "running", "completed", "failed", "timeout"]),
+  path: z.string().default(""),
+  result: z.object({
+    path: z.string(),
+    parent_path: z.string().nullable(),
+    entries: z.array(z.object({ name: z.string(), path: z.string() })),
+    selectable: z.boolean(),
+  }).nullable().default(null),
+  error: z.string().nullable().default(null),
+});
+
+export const EMPTY_RUNTIME_DIRECTORY_REQUEST: RuntimeDirectoryRequest = {
+  id: "", runtime_id: "", status: "failed", path: "", result: null, error: null,
+};
+
 export const ChatSessionSchema: z.ZodType<ChatSession> = z.object({
   id: z.string(),
   workspace_id: z.string().default(""),
   agent_id: z.string().default(""),
   creator_id: z.string().default(""),
   project_id: z.string().nullable().optional(),
+  working_directory: ChatWorkingDirectorySchema.nullable().default(null).catch(null),
   title: z.string().default(""),
   status: z.enum(["active", "archived"]).catch("active"),
   has_unread: z.boolean().default(false),

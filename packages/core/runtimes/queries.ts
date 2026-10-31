@@ -59,3 +59,21 @@ export function runtimeListOptions(wsId: string, owner?: "me", wsSlug?: string) 
     queryFn: () => api.listRuntimes({ workspace_id: wsId, owner }, wsSlug),
   });
 }
+
+export const runtimeDirectoryKeys = {
+  request: (wsId: string, runtimeId: string, requestId: string) =>
+    ["runtimes", wsId, runtimeId, "directories", requestId] as const,
+};
+
+export function runtimeDirectoryRequestOptions(wsId: string, runtimeId: string, requestId: string) {
+  return queryOptions({
+    queryKey: runtimeDirectoryKeys.request(wsId, runtimeId, requestId),
+    queryFn: () => api.getRuntimeDirectoryRequest(runtimeId, requestId),
+    enabled: Boolean(wsId && runtimeId && requestId),
+    retry: false,
+    refetchInterval: (query) => {
+      const status = query.state.data?.status;
+      return !query.state.error && (status === "pending" || status === "running") ? 500 : false;
+    },
+  });
+}

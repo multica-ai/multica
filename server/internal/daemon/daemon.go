@@ -4522,11 +4522,12 @@ func (d *Daemon) handleHeartbeatActions(ctx context.Context, runtimeID string, r
 	if resp == nil {
 		return
 	}
-	if resp.PendingUpdate != nil || resp.PendingModelList != nil || resp.PendingLocalSkills != nil || resp.PendingLocalSkillImport != nil {
+	if resp.PendingUpdate != nil || resp.PendingModelList != nil || resp.PendingLocalSkills != nil || resp.PendingLocalSkillImport != nil || resp.PendingDirectories != nil {
 		d.logger.Debug("heartbeat: pending actions",
 			"runtime_id", runtimeID,
 			"update", resp.PendingUpdate != nil,
 			"model_list", resp.PendingModelList != nil,
+			"directories", resp.PendingDirectories != nil,
 			"local_skills", resp.PendingLocalSkills != nil,
 			"local_skill_import", resp.PendingLocalSkillImport != nil,
 		)
@@ -4537,6 +4538,11 @@ func (d *Daemon) handleHeartbeatActions(ctx context.Context, runtimeID string, r
 	if resp.PendingModelList != nil {
 		if rt := d.findRuntime(runtimeID); rt != nil {
 			go d.handleModelList(ctx, *rt, resp.PendingModelList.ID)
+		}
+	}
+	if resp.PendingDirectories != nil {
+		if rt := d.findRuntime(runtimeID); rt != nil {
+			go d.handleDirectoryList(ctx, runtimeID, *resp.PendingDirectories)
 		}
 	}
 	if resp.PendingLocalSkills != nil {
@@ -6077,7 +6083,7 @@ func withoutWorktreePreserved(err error) error {
 //  4. The blocking wait is cancelled (daemon shutdown, server-side cancel)
 //     — fail the task with the ctx error.
 func (d *Daemon) acquireLocalDirectoryLockIfNeeded(ctx context.Context, task Task, taskLog *slog.Logger) (release func(), abort bool) {
-	if len(task.ProjectResources) == 0 || d.cfg.DaemonID == "" {
+	if task.WorkingDirectory == nil && (len(task.ProjectResources) == 0 || d.cfg.DaemonID == "") {
 		return nil, false
 	}
 	assignment, err := localDirectoryAssignmentForTask(task, d.cfg.DaemonID)
@@ -7952,7 +7958,10 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 	// Resolve any local_directory assignment again here so runTask can plumb
 	// LocalWorkDir into execenv. handleTask already validated + locked the
 	// path for worker tasks; leader tasks intentionally skip the assignment.
-	localAssignment, _ := localDirectoryAssignmentForTask(task, d.cfg.DaemonID)
+	localAssignment, localDirectoryErr := localDirectoryAssignmentForTask(task, d.cfg.DaemonID)
+	if localDirectoryErr != nil {
+		return TaskResult{}, fmt.Errorf("resolve working directory: %w", localDirectoryErr)
+	}
 	// Reuse intentionally skipped for local_directory tasks: the prior
 	// WorkDir is the user's own path (always present) but the reuse path
 	// loses the envRoot association the GC loop needs, and re-running

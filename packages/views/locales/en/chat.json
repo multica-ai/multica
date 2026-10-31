@@ -251,5 +251,19 @@
     "archive": "Archive chat",
     "unarchive": "Unarchive chat",
     "delete": "Delete chat"
+  },
+  "directory": {
+    "title": "Working directory",
+    "new_conversation": "Changing the directory starts a new conversation.",
+    "path": "Directory path",
+    "browse": "Browse",
+    "loading": "Loading directories...",
+    "failed": "Unable to load this directory. Try another path.",
+    "parent": "Parent directory",
+    "empty": "No subdirectories",
+    "not_selectable": "This directory cannot be used.",
+    "cancel": "Cancel",
+    "select": "Use directory",
+    "remove": "Use default directory"
   }
 }

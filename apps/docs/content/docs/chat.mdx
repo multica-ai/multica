@@ -16,6 +16,14 @@ A chat is **not bound to any issue**. The agent isn't watching your board, doesn
 
 A chat can also carry background. Click **+** at the bottom left of the input and choose **Project context** to attach a [project](/projects) to the conversation; when the agent runs, it receives that project's description, repositories, and other resources.
 
+## Choose a working directory
+
+In Web or Desktop, select an agent, then open **+ → Working directory** to browse folders on its runtime's machine or enter an absolute path. Choose **Use directory** before sending your message. The directory belongs to the remote machine, even when you are chatting from another computer.
+
+This requires an online local runtime that you own and a daemon supporting chat working directories. Cloud runtimes and OpenClaw gateway mode do not expose this option. Existing directory permissions and protected-root checks still apply.
+
+The agent works directly in the chosen folder, and later messages keep using it. Selecting or clearing a directory in an existing conversation starts a new conversation. A selected directory takes precedence over a project's execution directory while keeping its project context. Runs fail explicitly if the directory or machine is unavailable; they do not silently move to another folder.
+
 ## Start a conversation
 
 <Steps>

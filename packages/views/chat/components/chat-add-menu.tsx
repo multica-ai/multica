@@ -1,7 +1,7 @@
 "use client";
 
 import { useRef } from "react";
-import { Check, FolderKanban, Image as ImageIcon, Plus, X } from "@multica/ui/icons";
+import { Check, Folder, FolderKanban, Image as ImageIcon, Plus, X } from "@multica/ui/icons";
 import { IconButton } from "@multica/ui/components/common/icon-button";
 import {
   DropdownMenu,
@@ -22,6 +22,7 @@ interface ChatAddMenuProps {
    *  editor's upload extension, same path as paste / drag-drop. */
   onSelectFile?: (file: File) => void;
   projects?: Project[];
+  onSelectDirectory?: () => void;
   projectId?: string | null;
   onSelectProject?: (projectId: string | null) => void;
   /** Soft warning: the active agent's daemon is too old to receive the
@@ -39,6 +40,7 @@ interface ChatAddMenuProps {
  */
 export function ChatAddMenu({
   onSelectFile,
+  onSelectDirectory,
   projects = [],
   projectId,
   onSelectProject,
@@ -79,6 +81,7 @@ export function ChatAddMenu({
               {t(($) => $.input.upload_file)}
             </DropdownMenuItem>
           )}
+          {onSelectDirectory && <DropdownMenuItem onClick={onSelectDirectory}><Folder />{t(($) => $.directory.title)}</DropdownMenuItem>}
           {onSelectProject && (
             <DropdownMenuSub>
               <DropdownMenuSubTrigger>

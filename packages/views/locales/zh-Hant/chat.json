@@ -247,5 +247,19 @@
     "delete": "刪除會話",
     "archive": "歸檔會話",
     "unarchive": "取消歸檔"
+  },
+  "directory": {
+    "title": "工作目錄",
+    "new_conversation": "更換目錄將建立新對話。",
+    "path": "目錄路徑",
+    "browse": "瀏覽",
+    "loading": "正在載入目錄...",
+    "failed": "無法載入此目錄，請嘗試其他路徑。",
+    "parent": "上層目錄",
+    "empty": "沒有子目錄",
+    "not_selectable": "無法使用此目錄。",
+    "cancel": "取消",
+    "select": "使用目錄",
+    "remove": "使用預設目錄"
   }
 }

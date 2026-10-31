@@ -1892,6 +1892,22 @@ func (h *Handler) processHeartbeat(ctx context.Context, runtimeID string, suppor
 		}
 	}
 
+	if h.DirectoryListStore != nil {
+		probeCtx, cancelProbe := context.WithTimeout(ctx, heartbeatHasPendingTimeout)
+		hasPending, err := h.DirectoryListStore.HasPending(probeCtx, runtimeID)
+		cancelProbe()
+		if err != nil {
+			slog.Warn("directory listing HasPending failed", "error", err, "runtime_id", runtimeID)
+		} else if hasPending {
+			pending, err := h.DirectoryListStore.PopPending(ctx, runtimeID)
+			if err != nil {
+				slog.Warn("directory listing PopPending failed", "error", err, "runtime_id", runtimeID)
+			} else if pending != nil {
+				ack.PendingDirectories = &protocol.DaemonHeartbeatPendingDirectories{ID: pending.ID, Path: pending.Path, DaemonID: pending.DaemonID}
+			}
+		}
+	}
+
 	return ack, m, nil
 }
 
@@ -3591,6 +3607,16 @@ func (h *Handler) buildClaimedTaskResponse(r *http.Request, task *db.AgentTaskQu
 			return resp, deliveredCommentIDs, issueSnapshot, agentSkillCount, builtinSkillCount, failure
 		}
 		resp.ChatSessionID = uuidToString(cs.ID)
+		directory, directoryErr := chatWorkingDirectoryForClaim(cs, agent, runtime,
+			requestHasClientCapability(r, protocol.DaemonCapabilityChatWorkingDirectoryV1))
+		if directoryErr != nil {
+			return resp, deliveredCommentIDs, issueSnapshot, agentSkillCount, builtinSkillCount,
+				h.failClaimedTaskBeforeLaunch(r.Context(), task,
+					fmt.Sprintf("Cannot use the selected working directory: %v", directoryErr),
+					taskfailure.ReasonRuntimeAccessDenied, "working_directory_unavailable",
+					http.StatusConflict, "selected working directory is unavailable")
+		}
+		resp.WorkingDirectory = directory
 		resp.ThreadName = cs.Title
 		// Legacy compatibility: agent creation no longer creates intro chats,
 		// but historical is_agent_intro sessions can still be resumed. Such a
@@ -4121,7 +4147,7 @@ func (h *Handler) buildClaimedTaskResponse(r *http.Request, task *db.AgentTaskQu
 		resp.ProjectResources,
 		runtime,
 		requestHasClientCapability(r, protocol.DaemonCapabilityLocalWorktreeV1),
-	); reason != "" {
+	); resp.WorkingDirectory == nil && reason != "" {
 		slog.Error("task claim: runtime too old for worktree mode; cancelling rather than running in place",
 			"task_id", uuidToString(task.ID),
 			"runtime_id", runtimeID,

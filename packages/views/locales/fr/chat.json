@@ -251,5 +251,19 @@
     "archive": "Archiver la discussion",
     "unarchive": "Désarchiver la discussion",
     "delete": "Supprimer la discussion"
+  },
+  "directory": {
+    "title": "Dossier de travail",
+    "new_conversation": "Changer de dossier démarre une nouvelle conversation.",
+    "path": "Chemin du dossier",
+    "browse": "Parcourir",
+    "loading": "Chargement des dossiers...",
+    "failed": "Impossible de charger ce dossier. Essayez un autre chemin.",
+    "parent": "Dossier parent",
+    "empty": "Aucun sous-dossier",
+    "not_selectable": "Ce dossier ne peut pas être utilisé.",
+    "cancel": "Annuler",
+    "select": "Utiliser ce dossier",
+    "remove": "Utiliser le dossier par défaut"
   }
 }

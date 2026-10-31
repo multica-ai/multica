@@ -388,6 +388,14 @@ export function ChatPage() {
         agentAccessRevoked={c.isAgentAccessRevoked}
         agentRuntimeRequired={!c.isAgentRuntimeBound}
         agentName={c.activeAgent?.name}
+        directoryWorkspaceId={c.wsId}
+        directoryRuntime={c.directorySelection.runtime}
+        workingDirectory={c.directorySelection.workingDirectory}
+        onWorkingDirectoryChange={(directory) => {
+          supersedeAgentIntent();
+          c.directorySelection.onChange(directory);
+          setComposingNew(true);
+        }}
         projects={c.projects}
         projectId={c.activeProjectId}
         projectContextUnsupported={c.projectContextUnsupported}

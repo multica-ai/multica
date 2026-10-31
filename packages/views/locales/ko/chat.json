@@ -247,5 +247,19 @@
     "delete": "채팅 삭제",
     "archive": "채팅 보관",
     "unarchive": "채팅 보관 해제"
+  },
+  "directory": {
+    "title": "작업 디렉터리",
+    "new_conversation": "디렉터리를 변경하면 새 대화가 시작됩니다.",
+    "path": "디렉터리 경로",
+    "browse": "찾아보기",
+    "loading": "디렉터리 불러오는 중...",
+    "failed": "이 디렉터리를 불러올 수 없습니다. 다른 경로를 시도하세요.",
+    "parent": "상위 디렉터리",
+    "empty": "하위 디렉터리 없음",
+    "not_selectable": "이 디렉터리를 사용할 수 없습니다.",
+    "cancel": "취소",
+    "select": "디렉터리 사용",
+    "remove": "기본 디렉터리 사용"
   }
 }

@@ -87,6 +87,7 @@ import {
   seedAcceptedPendingTask,
 } from "./use-chat-controller";
 import { useChatProjectContextSupport } from "./use-chat-project-context-support";
+import { useChatWorkingDirectory } from "./use-chat-working-directory";
 import { createLogger } from "@multica/core/logger";
 import type { Agent, Attachment, ChatMessage, ChatSession, PendingChatTasksResponse } from "@multica/core/types";
 import { useLocale, useT } from "../../i18n";
@@ -251,6 +252,8 @@ export function ChatWindow() {
   );
 
   const projectContextSupport = useChatProjectContextSupport(wsId, activeAgent);
+  const directorySelection = useChatWorkingDirectory(wsId, activeAgent, currentSession);
+  const carryDirectoryToDraft = directorySelection.carryToDraft;
 
   // Three-state availability — "loading" stays neutral (no banner, no
   // disable) so the input doesn't flash a fake "no agent" state in the
@@ -375,6 +378,7 @@ export function ChatWindow() {
             agent_id: activeAgent.id,
             title: titleSeed.slice(0, 50),
             project_id: activeProjectId,
+            working_directory: directorySelection.workingDirectory,
           });
           return session.id;
         } finally {
@@ -388,6 +392,7 @@ export function ChatWindow() {
       activeSessionId,
       activeAgent,
       activeProjectId,
+      directorySelection.workingDirectory,
       createSession,
       sessions,
       sessionsLoaded,
@@ -653,6 +658,7 @@ export function ChatWindow() {
       previousPendingTask: pendingTaskId,
     });
     setSelectedProjectId(null);
+    useChatStore.getState().setWorkingDirectoryDraft(null);
     setActiveSession(null);
     requestInputFocus();
   }, [
@@ -702,6 +708,7 @@ export function ChatWindow() {
         case "startFreshChat":
           setSelectedAgentId(plan.agentId);
           setSelectedProjectId(plan.projectId);
+          carryDirectoryToDraft();
           setActiveSession(null);
           break;
         case "setDraftProject":
@@ -711,6 +718,7 @@ export function ChatWindow() {
       requestInputFocus();
     }, [
       activeProjectId,
+      carryDirectoryToDraft,
       activeSessionId,
       currentSession,
       setSessionProject,
@@ -974,6 +982,10 @@ export function ChatWindow() {
         agentAccessRevoked={isAgentAccessRevoked}
         agentRuntimeRequired={!activeAgentRuntimeBound}
         agentName={activeAgent?.name}
+        directoryWorkspaceId={wsId}
+        directoryRuntime={directorySelection.runtime}
+        workingDirectory={directorySelection.workingDirectory}
+        onWorkingDirectoryChange={directorySelection.onChange}
         projects={projects}
         projectId={activeProjectId}
         onProjectChange={handleProjectChange}

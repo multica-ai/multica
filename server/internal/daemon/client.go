@@ -202,6 +202,7 @@ func daemonHTTPClientCapabilities() string {
 
 func daemonCommonCapabilities() []string {
 	return []string{
+		protocol.DaemonCapabilityChatWorkingDirectoryV1,
 		protocol.DaemonCapabilitySkillBundlesV1,
 		protocol.DaemonCapabilityCoalescedCommentsV1,
 		protocol.DaemonCapabilityLocalWorktreeV1,
@@ -766,6 +767,11 @@ func (c *Client) ReportUpdateResult(ctx context.Context, runtimeID, updateID str
 // ReportModelListResult sends the model-discovery result back to the server.
 func (c *Client) ReportModelListResult(ctx context.Context, runtimeID, requestID string, result map[string]any) error {
 	return c.postJSON(ctx, fmt.Sprintf("/api/daemon/runtimes/%s/models/%s/result", runtimeID, requestID), result, nil)
+}
+
+// ReportDirectoryListResult sends a read-only host directory listing.
+func (c *Client) ReportDirectoryListResult(ctx context.Context, runtimeID, requestID string, result map[string]any) error {
+	return c.postJSON(ctx, fmt.Sprintf("/api/daemon/runtimes/%s/directories/%s/result", runtimeID, requestID), result, nil)
 }
 
 // ReportLocalSkillListResult sends the runtime-local-skill inventory back to the server.

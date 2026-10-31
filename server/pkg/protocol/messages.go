@@ -180,6 +180,7 @@ type WorkspacesChangedPayload struct{}
 // heartbeat, which claims whatever is queued) — so an unknown value from a
 // newer server stays safe on an older daemon.
 const (
+	PendingWorkKindDirectories      = "directories"
 	PendingWorkKindModelList        = "model_list"
 	PendingWorkKindLocalSkills      = "local_skills"
 	PendingWorkKindLocalSkillImport = "local_skill_import"
@@ -435,6 +436,7 @@ type DaemonHeartbeatAckPayload struct {
 	Status                  string                                  `json:"status"`
 	ServerCapabilities      []string                                `json:"server_capabilities,omitempty"`
 	RuntimeGone             bool                                    `json:"runtime_gone,omitempty"`
+	PendingDirectories      *DaemonHeartbeatPendingDirectories      `json:"pending_directories,omitempty"`
 	PendingUpdate           *DaemonHeartbeatPendingUpdate           `json:"pending_update,omitempty"`
 	PendingModelList        *DaemonHeartbeatPendingModelList        `json:"pending_model_list,omitempty"`
 	PendingLocalSkills      *DaemonHeartbeatPendingLocalSkills      `json:"pending_local_skills,omitempty"`
@@ -474,4 +476,11 @@ type DaemonHeartbeatPendingLocalSkills struct {
 type DaemonHeartbeatPendingLocalSkillImport struct {
 	ID       string `json:"id"`
 	SkillKey string `json:"skill_key"`
+}
+
+// DaemonHeartbeatPendingDirectories requests a read-only host directory listing.
+type DaemonHeartbeatPendingDirectories struct {
+	ID       string `json:"id"`
+	Path     string `json:"path"`
+	DaemonID string `json:"daemon_id"`
 }

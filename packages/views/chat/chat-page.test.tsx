@@ -124,6 +124,7 @@ vi.mock("./components/use-chat-controller", async () => {
   return {
     useChatController: () => ({
       wsId: "ws-1",
+      directorySelection: { runtime: null, workingDirectory: null, onChange: vi.fn() },
       user: { id: "user-1" },
       agents: availableAgentsRef.current,
       availableAgents: availableAgentsRef.current,

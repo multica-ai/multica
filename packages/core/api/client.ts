@@ -97,6 +97,8 @@ import type {
   TaskMessagePayload,
   Attachment,
   ChatSession,
+  ChatWorkingDirectory,
+  RuntimeDirectoryRequest,
   ChatPinnedAgent,
   ChatMessage,
   ChatMessagesPage,
@@ -271,6 +273,8 @@ import {
   ChatPendingTaskSchema,
   ChatSessionListSchema,
   ChatSessionSchema,
+  RuntimeDirectoryRequestSchema,
+  EMPTY_RUNTIME_DIRECTORY_REQUEST,
   PrioritizeQueuedChatTaskResponseSchema,
   SendChatMessageResponseSchema,
   StartMikaOnboardingResponseSchema,
@@ -3767,13 +3771,40 @@ export class ApiClient {
       agent_id: string;
       title?: string;
       project_id?: string | null;
+      working_directory?: ChatWorkingDirectory | null;
     },
     workspaceSlug?: string,
   ): Promise<ChatSession> {
-    return this.fetch("/api/chat/sessions", {
+    const raw: unknown = await this.fetch("/api/chat/sessions", {
       method: "POST",
       headers: workspaceHeader(workspaceSlug),
       body: JSON.stringify(data),
+    });
+    const session = parseWithFallback(raw, ChatSessionSchema, EMPTY_CHAT_SESSION, {
+      endpoint: "POST /api/chat/sessions",
+    });
+    if (data.working_directory && (
+      session.working_directory?.daemon_id !== data.working_directory.daemon_id ||
+      session.working_directory?.path !== data.working_directory.path
+    )) {
+      throw new Error("Server did not retain the requested working directory");
+    }
+    return session;
+  }
+
+  async createRuntimeDirectoryRequest(runtimeId: string, path: string): Promise<RuntimeDirectoryRequest> {
+    const raw: unknown = await this.fetch(`/api/runtimes/${encodeURIComponent(runtimeId)}/directories`, {
+      method: "POST", body: JSON.stringify({ path }),
+    });
+    return parseWithFallback(raw, RuntimeDirectoryRequestSchema, EMPTY_RUNTIME_DIRECTORY_REQUEST, {
+      endpoint: "POST /api/runtimes/:id/directories",
+    });
+  }
+
+  async getRuntimeDirectoryRequest(runtimeId: string, requestId: string): Promise<RuntimeDirectoryRequest> {
+    const raw: unknown = await this.fetch(`/api/runtimes/${encodeURIComponent(runtimeId)}/directories/${encodeURIComponent(requestId)}`);
+    return parseWithFallback(raw, RuntimeDirectoryRequestSchema, EMPTY_RUNTIME_DIRECTORY_REQUEST, {
+      endpoint: "GET /api/runtimes/:id/directories/:requestId",
     });
   }
 

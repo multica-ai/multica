@@ -247,5 +247,19 @@
     "delete": "删除会话",
     "archive": "归档会话",
     "unarchive": "取消归档"
+  },
+  "directory": {
+    "title": "工作目录",
+    "new_conversation": "更换目录将新建对话。",
+    "path": "目录路径",
+    "browse": "浏览",
+    "loading": "正在加载目录...",
+    "failed": "无法加载此目录，请尝试其他路径。",
+    "parent": "上级目录",
+    "empty": "没有子目录",
+    "not_selectable": "无法使用此目录。",
+    "cancel": "取消",
+    "select": "使用目录",
+    "remove": "使用默认目录"
   }
 }
