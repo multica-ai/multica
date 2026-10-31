@@ -106,6 +106,13 @@ func ensureFileFlagWithinWorkdir(cmd *cobra.Command, fileFlag, flagName, filePat
 	if allow, _ := cmd.Flags().GetBool("allow-external-file"); allow {
 		return nil
 	}
+	// Bash process substitution (`--description-file <(cat <<'EOF'...)`) arrives
+	// as /dev/fd/N, a pipe owned by this process. That is not a stale file from
+	// another run, which is the leak MUL-4252 closes; rejecting it is why
+	// agent-created sub-issues fail when the model still uses a heredoc pipe.
+	if isProcessLocalAnonymousPipe(filePath) {
+		return nil
+	}
 	within, err := fileWithinWorkingDir(filePath)
 	if err != nil {
 		return fmt.Errorf("resolve --%s path %q: %w", fileFlag, filePath, err)
@@ -138,6 +145,46 @@ func ensureFileFlagWithinWorkdir(cmd *cobra.Command, fileFlag, flagName, filePat
 func pathExists(filePath string) bool {
 	_, err := os.Stat(filePath)
 	return !errors.Is(err, os.ErrNotExist)
+}
+
+// isProcessLocalAnonymousPipe reports whether filePath names a pipe (or
+// socket) belonging to this process: /dev/fd/N, /proc/self/fd/N, or
+// /dev/stdin. Those spellings are how a shell exposes process substitution
+// and heredoc pipes; they cannot be another run's leftover /tmp file.
+//
+// Regular files reached through the same spelling (exec 11</tmp/stale.md)
+// are left to the workdir check, so the fd spelling cannot smuggle an
+// external file past MUL-4252. Attachments do not use this helper.
+func isProcessLocalAnonymousPipe(filePath string) bool {
+	if !isProcessLocalFDPath(filePath) {
+		return false
+	}
+	st, err := os.Stat(filePath)
+	if err != nil {
+		return false
+	}
+	return st.Mode()&os.ModeNamedPipe != 0 || st.Mode()&os.ModeSocket != 0
+}
+
+func isProcessLocalFDPath(filePath string) bool {
+	p := filepath.ToSlash(filePath)
+	if p == "/dev/stdin" {
+		return true
+	}
+	return isNumericFDPath(p, "/dev/fd/") || isNumericFDPath(p, "/proc/self/fd/")
+}
+
+func isNumericFDPath(p, prefix string) bool {
+	rest, ok := strings.CutPrefix(p, prefix)
+	if !ok || rest == "" {
+		return false
+	}
+	for i := 0; i < len(rest); i++ {
+		if rest[i] < '0' || rest[i] > '9' {
+			return false
+		}
+	}
+	return true
 }
 
 // fileWithinWorkingDir reports whether filePath resolves to a location inside
