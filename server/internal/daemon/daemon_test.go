@@ -2083,7 +2083,7 @@ func TestGateResumeToReachableSession(t *testing.T) {
 			task := Task{PriorSessionID: tt.sessionID, PriorWorkDir: priorDir}
 			taskCtx := execenv.TaskContextForEnv{PriorSessionResumed: tt.sessionID != ""}
 
-			reachable := gateResumeToReachableSession(&task, &taskCtx, "claude", envDir, !tt.sessionHomeUnreachable, false, false, slog.Default())
+			reachable := gateResumeToReachableSession(&task, &taskCtx, "claude", envDir, !tt.sessionHomeUnreachable, false, false, false, slog.Default())
 
 			if reachable != tt.wantReused {
 				t.Fatalf("reachable = %v, want %v", reachable, tt.wantReused)
@@ -2132,7 +2132,7 @@ func TestGateCodexResumeAcrossLocalWorktrees(t *testing.T) {
 		{name: "managed workdir", provider: "codex", stableStore: true, codexHome: true, rolloutPresent: true},
 		{name: "in-place changed workdir", provider: "codex", localDirectory: true, stableStore: true, codexHome: true, rolloutPresent: true},
 		{name: "in-place same workdir", provider: "codex", localDirectory: true, stableStore: true, codexHome: true, sameWorkdir: true, rolloutPresent: true, wantResume: true},
-		{name: "other provider", provider: "claude", localWorktree: &execenv.LocalWorktree{Continued: true}, stableStore: true, codexHome: true, rolloutPresent: true},
+		{name: "other provider", provider: "cursor", localWorktree: &execenv.LocalWorktree{Continued: true}, stableStore: true, codexHome: true, rolloutPresent: true},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			task := Task{PriorSessionID: "session-1", PriorWorkDir: priorDir}
@@ -2149,7 +2149,7 @@ func TestGateCodexResumeAcrossLocalWorktrees(t *testing.T) {
 			}
 			store := execenv.CodexSessionStorePath("test", taskCtx)
 			eligible := codexWorktreeResumeEligible(env, store)
-			if got := gateResumeToReachableSession(&task, &taskCtx, tt.provider, env.WorkDir, true, false, eligible, slog.Default()); got {
+			if got := gateResumeToReachableSession(&task, &taskCtx, tt.provider, env.WorkDir, true, false, eligible, false, slog.Default()); got {
 				if tt.provider == "codex" && !tt.rolloutPresent {
 					gateCodexResumeToRolloutPresence(&task, &taskCtx, tt.provider, t.TempDir(), slog.Default())
 				} else {
@@ -2163,6 +2163,77 @@ func TestGateCodexResumeAcrossLocalWorktrees(t *testing.T) {
 				t.Fatalf("inconsistent resume state: task=%+v taskCtx=%+v", task, taskCtx)
 			}
 		})
+	}
+}
+
+// Claude Code keys its session store to the cwd, but a continued local
+// worktree runs in a fresh directory every turn (#9731). The gate accepts the
+// resume only when the prior transcript has been migrated into this run's
+// encoded projects directory first; a missing transcript still drops it,
+// fail-closed like the cwd-keyed default.
+func TestGateClaudeResumeAcrossLocalWorktrees(t *testing.T) {
+	priorDir, workDir, home := t.TempDir(), t.TempDir(), t.TempDir()
+	origUserHome := daemonUserHome
+	daemonUserHome = func() (string, error) { return home, nil }
+	t.Cleanup(func() { daemonUserHome = origUserHome })
+
+	for _, tt := range []struct {
+		name        string
+		continued   bool
+		transcript  bool
+		sameWorkdir bool
+		wantResume  bool
+	}{
+		{name: "continued worktree with migrated transcript", continued: true, transcript: true, wantResume: true},
+		{name: "continued worktree without transcript", continued: true},
+		{name: "new forked branch", continued: false, transcript: true},
+		{name: "in-place same workdir", sameWorkdir: true, transcript: true, wantResume: true},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			prior, work := priorDir, workDir
+			if tt.sameWorkdir {
+				work = prior
+			}
+			if tt.transcript {
+				projectDir := filepath.Join(home, ".claude", "projects", encodeClaudeCwd(prior))
+				if err := os.MkdirAll(projectDir, 0o755); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.WriteFile(filepath.Join(projectDir, "session-1.jsonl"), []byte("{}"), 0o600); err != nil {
+					t.Fatal(err)
+				}
+				t.Cleanup(func() { os.RemoveAll(filepath.Join(home, ".claude")) })
+			}
+			task := Task{PriorSessionID: "session-1", PriorWorkDir: prior}
+			taskCtx := execenv.TaskContextForEnv{AgentID: "agent-1", PriorSessionResumed: true}
+			env := &execenv.Environment{WorkDir: work, LocalWorktree: &execenv.LocalWorktree{Continued: tt.continued}}
+
+			ready := migrateClaudeWorktreeTranscript(env, task.PriorSessionID, env.WorkDir, task.PriorWorkDir, slog.Default())
+			reachable := gateResumeToReachableSession(&task, &taskCtx, "claude", env.WorkDir, true, false, false, ready, slog.Default())
+
+			if reachable != tt.wantResume {
+				t.Fatalf("reachable = %v, want %v", reachable, tt.wantResume)
+			}
+			if got := task.PriorSessionID != ""; got != tt.wantResume {
+				t.Fatalf("resume=%v, want %v", got, tt.wantResume)
+			}
+			if taskCtx.PriorSessionResumed != tt.wantResume || task.PriorSessionResumeUnavailable == tt.wantResume || taskCtx.PriorSessionResumeUnavailable == tt.wantResume {
+				t.Fatalf("inconsistent resume state: task=%+v taskCtx=%+v", task, taskCtx)
+			}
+		})
+	}
+}
+
+func TestEncodeClaudeCwd(t *testing.T) {
+	for _, tt := range []struct{ in, want string }{
+		{"/home/user/repo", "-home-user-repo"},
+		{"/tmp/dir with space", "-tmp-dir-with-space"},
+		{"/a/b.c/d", "-a-b-c-d"},
+		{`C:\Users\dev`, "C--Users-dev"},
+	} {
+		if got := encodeClaudeCwd(tt.in); got != tt.want {
+			t.Fatalf("encodeClaudeCwd(%q) = %q, want %q", tt.in, got, tt.want)
+		}
 	}
 }
 
@@ -2197,7 +2268,7 @@ func TestGateHermesResumeToSessionHome(t *testing.T) {
 			task := Task{PriorSessionID: "session-1", PriorWorkDir: priorDir}
 			taskCtx := execenv.TaskContextForEnv{PriorSessionResumed: true}
 			got := gateResumeToReachableSession(&task, &taskCtx, "hermes", workDir,
-				sessionHomeReachable("hermes", env, tt.envReused), false, false, slog.Default())
+				sessionHomeReachable("hermes", env, tt.envReused), false, false, false, slog.Default())
 			if got != tt.want || (task.PriorSessionID == "session-1") != tt.want || taskCtx.PriorSessionResumed != tt.want {
 				t.Fatalf("resume = %v, session = %q, resumed = %v; want %v", got, task.PriorSessionID, taskCtx.PriorSessionResumed, tt.want)
 			}
@@ -2259,7 +2330,7 @@ func TestHermesPreparedSessionReachability(t *testing.T) {
 			task := Task{PriorSessionID: "session-1", PriorWorkDir: first.WorkDir}
 			taskCtx := execenv.TaskContextForEnv{PriorSessionResumed: true}
 			if got := gateResumeToReachableSession(&task, &taskCtx, "hermes", env.WorkDir,
-				sessionHomeReachable("hermes", env, false), false, false, slog.Default()); got != tt.want {
+				sessionHomeReachable("hermes", env, false), false, false, false, slog.Default()); got != tt.want {
 				t.Fatalf("reachable = %v, want %v", got, tt.want)
 			}
 		})
@@ -2290,7 +2361,7 @@ func TestGatePiResumeToSessionFile(t *testing.T) {
 			task := Task{PriorSessionID: sessionFile, PriorWorkDir: priorDir}
 			taskCtx := execenv.TaskContextForEnv{PriorSessionResumed: true}
 
-			reachable := gateResumeToReachableSession(&task, &taskCtx, provider, envDir, true, providerRefusesMissingSessionCwd(provider, true), false, slog.Default())
+			reachable := gateResumeToReachableSession(&task, &taskCtx, provider, envDir, true, providerRefusesMissingSessionCwd(provider, true), false, false, slog.Default())
 
 			if !reachable {
 				t.Fatal("Pi-family session file should remain reachable across workdirs")
@@ -2350,7 +2421,7 @@ func TestGatePiResumeDropsUnusableSessionFile(t *testing.T) {
 			task := Task{PriorSessionID: sessionPath, PriorWorkDir: workDir}
 			taskCtx := execenv.TaskContextForEnv{PriorSessionResumed: true}
 
-			reachable := gateResumeToReachableSession(&task, &taskCtx, "pi", workDir, true, providerRefusesMissingSessionCwd("pi", true), false, slog.Default())
+			reachable := gateResumeToReachableSession(&task, &taskCtx, "pi", workDir, true, providerRefusesMissingSessionCwd("pi", true), false, false, slog.Default())
 
 			if reachable {
 				t.Fatalf("%s Pi session was treated as reachable", test.name)
@@ -2521,7 +2592,7 @@ func TestGatePiResumeChecksRecordedCwd(t *testing.T) {
 				task := Task{PriorSessionID: sessionPath, PriorWorkDir: liveDir}
 				taskCtx := execenv.TaskContextForEnv{PriorSessionResumed: true}
 
-				reachable := gateResumeToReachableSession(&task, &taskCtx, provider, workDir, true, runtime.refusesMissingCwd, false, slog.Default())
+				reachable := gateResumeToReachableSession(&task, &taskCtx, provider, workDir, true, runtime.refusesMissingCwd, false, false, slog.Default())
 
 				if reachable != wantReachable {
 					t.Fatalf("reachable = %v, want %v", reachable, wantReachable)
