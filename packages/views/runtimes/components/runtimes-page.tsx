@@ -3,7 +3,6 @@
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
 import {
   Check,
-  ChevronRight,
   Cloud,
   Download,
   Laptop,
@@ -57,30 +56,24 @@ import {
   DropdownMenuTrigger,
 } from "@multica/ui/components/ui/dropdown-menu";
 import {
-  ListGrid,
-  ListGridCell,
-  ListGridHeader,
-  ListGridHeaderCell,
-  ListGridRow,
-} from "@multica/ui/components/ui/list-grid";
-import {
   MikaRuntimeChoice,
   type MikaRuntimeSelection,
 } from "./mika-runtime-choice";
-import { Skeleton } from "@multica/ui/components/ui/skeleton";
 import {
   CollectionCreateButton,
   CollectionPageHeader,
   CollectionScopeItems,
 } from "../../layout/collection-page";
-import { PAGE_GUTTER, PAGE_RAIL } from "../../layout/page-header";
-import { cn } from "@multica/ui/lib/utils";
 import {
-  AppLink,
-  rowLinkInteractiveProps,
-  useNavigation,
-  useRowLink,
-} from "../../navigation";
+  CollectionEmptyValue,
+  CollectionList,
+  CollectionNameCell,
+  CollectionTag,
+  type CollectionColumn,
+  type CollectionGroup,
+} from "../../layout/collection-list";
+import { cn } from "@multica/ui/lib/utils";
+import { useNavigation } from "../../navigation";
 import { getMikaOnboarding, pickContentLang } from "../../onboarding/templates";
 import { qoderOptions } from "@multica/core/runtimes/qoder";
 import { QODER_RUNTIME_LOCATOR } from "./qoder-detail-page";
@@ -92,7 +85,6 @@ import { RuntimeList, buildWorkloadIndex } from "./runtime-list";
 import { pendingRuntimeFromProfile } from "./pending-runtime";
 import { buildRuntimeMachines, type RuntimeMachine } from "./runtime-machines";
 import {
-  HealthDot,
   HealthIcon,
   ProviderIconStack,
   machineIcon,
@@ -121,15 +113,20 @@ const COMING_SOON_SERVICES = [
   { provider: "claude", name: "Claude Managed Agents", vendor: "Anthropic" },
 ];
 
-// Track order: edge, name, harness, agents, workload, status, actions, edge.
-// Below @2xl only name, status and actions keep a track; the other cells are
-// `hidden @2xl:flex` and drop out of subgrid placement. MUST stay a literal
-// string so Tailwind sees the arbitrary template.
-const GRID_COLS =
-  "grid-cols-[0.5rem_minmax(160px,1fr)_112px_5.5rem_0.5rem] " +
-  "@2xl:grid-cols-[0.5rem_minmax(120px,1fr)_128px_64px_112px_136px_5.5rem_0.5rem]";
+type RuntimeRow =
+  | { kind: "machine"; id: string; machine: RuntimeMachine; agentCount: number }
+  | { kind: "qoder"; id: string; connection: QoderConnection; agentCount: number }
+  | { kind: "coming-soon"; id: string; provider: string; name: string; vendor: string }
+  | {
+      kind: "action";
+      id: string;
+      icon: typeof Server;
+      title: string;
+      description: string;
+      action: ReactNode;
+    };
 
-const OPTIONAL_CELL = "hidden @2xl:flex";
+type QoderStatus = "stopped" | "online" | "error" | "offline" | "starting";
 
 function useNowTick(intervalMs = 30_000): number {
   const [now, setNow] = useState(() => Date.now());
@@ -147,6 +144,22 @@ function qoderIsOnline(connection: QoderConnection): boolean {
     connection.status === "online"
   );
 }
+
+function qoderStatus(connection: QoderConnection): QoderStatus {
+  if (!connection.enabled) return "stopped";
+  if (connection.status === "online") return "online";
+  if (connection.status === "error") return "error";
+  if (connection.status === "offline") return "offline";
+  return "starting";
+}
+
+const QODER_DOT: Record<QoderStatus, string> = {
+  online: "bg-success",
+  error: "bg-destructive",
+  starting: "bg-warning",
+  offline: "bg-muted-foreground/40",
+  stopped: "bg-muted-foreground/40",
+};
 
 export function RuntimesPage({
   localDaemonId,
@@ -303,6 +316,139 @@ export function RuntimesPage({
   const openQoder = () =>
     qoderConfigured ? navigation.push(qoderHref) : setQoderDialogOpen(true);
 
+  const columns = useMemo<CollectionColumn<RuntimeRow>[]>(
+    () => [
+      {
+        key: "name",
+        header: t(($) => $.page.columns.name),
+        cell: (row) => (
+          <RuntimeNameCell
+            row={row}
+            currentUserId={currentUserId ?? null}
+            members={members}
+            onConnectQoder={() => setQoderDialogOpen(true)}
+          />
+        ),
+      },
+      {
+        key: "harness",
+        header: t(($) => $.page.columns.harness),
+        width: 112,
+        cell: (row) =>
+          row.kind === "machine" ? (
+            <ProviderIconStack providers={row.machine.providerNames} />
+          ) : row.kind === "qoder" ? (
+            <CollectionEmptyValue />
+          ) : null,
+      },
+      {
+        key: "agents",
+        header: t(($) => $.page.columns.agents),
+        width: 56,
+        align: "end",
+        className: "tabular-nums",
+        cell: (row) =>
+          row.kind === "machine" || (row.kind === "qoder" && row.connection.configured)
+            ? row.agentCount
+            : row.kind === "qoder"
+              ? <CollectionEmptyValue />
+              : null,
+      },
+      {
+        key: "workload",
+        header: t(($) => $.page.columns.workload),
+        width: 112,
+        cell: (row) => <RuntimeWorkloadCell row={row} />,
+      },
+      {
+        key: "status",
+        header: t(($) => $.page.columns.status),
+        width: 136,
+        core: true,
+        cell: (row) => <RuntimeStatusCell row={row} bootstrapping={bootstrapping} />,
+      },
+    ],
+    [t, currentUserId, members, bootstrapping],
+  );
+
+  const machineRows: RuntimeRow[] = visibleMachines.map((machine) => ({
+    kind: "machine",
+    id: machine.id,
+    machine,
+    agentCount: machine.runtimes.reduce(
+      (sum, runtime) => sum + (agentCountByRuntime.get(runtime.id) ?? 0),
+      0,
+    ),
+  }));
+  if (showThisComputerRow) {
+    machineRows.push({
+      kind: "action",
+      id: "action:this-computer",
+      icon: Laptop,
+      title: t(($) => $.page.rows.this_computer_title),
+      description: t(($) => $.page.rows.this_computer_hint),
+      action: (
+        <a
+          href="/download"
+          target="_blank"
+          rel="noreferrer"
+          className={buttonVariants({ variant: "outline", size: "xs" })}
+        >
+          <Download aria-hidden="true" className="size-3.5" />
+          {t(($) => $.page.rows.download_desktop)}
+        </a>
+      ),
+    });
+  }
+  if (showAddMachineRow) {
+    machineRows.push({
+      kind: "action",
+      id: "action:add-machine",
+      icon: SquareTerminal,
+      title: t(($) => $.page.rows.add_machine_title),
+      description: t(($) => $.page.rows.add_machine_hint),
+      action: (
+        <Button variant="outline" size="xs" onClick={() => setShowConnectDialog(true)}>
+          {t(($) => $.page.rows.view_commands)}
+        </Button>
+      ),
+    });
+  }
+  const cloudRows: RuntimeRow[] = [];
+  if (showQoderRow && qoder) {
+    cloudRows.push({
+      kind: "qoder",
+      id: "qoder",
+      connection: qoder,
+      agentCount: qoderAgentCount,
+    });
+  }
+  for (const service of visibleComingSoon) {
+    cloudRows.push({ kind: "coming-soon", id: `soon:${service.provider}`, ...service });
+  }
+  const groups: CollectionGroup<RuntimeRow>[] = nothingMatches
+    ? []
+    : [
+        {
+          key: "machines",
+          label: t(($) => $.page.groups.machines.title),
+          count: machineList.length,
+          rows: machineRows,
+        },
+        {
+          key: "cloud",
+          label: t(($) => $.page.groups.cloud.title),
+          count: configuredCloudCount,
+          rows: cloudRows,
+        },
+      ];
+  const rowHref = (row: RuntimeRow) =>
+    row.kind === "machine"
+      ? paths.runtimeDetail(row.machine.id)
+      : row.kind === "qoder" && row.connection.configured
+        ? qoderHref
+        : null;
+
   return (
     <div className="flex min-h-0 flex-1 flex-col">
       <CollectionPageHeader
@@ -333,108 +479,25 @@ export function RuntimesPage({
       />
 
       <div className="min-h-0 flex-1 overflow-y-auto">
-        <div className={cn(PAGE_RAIL, PAGE_GUTTER, "flex flex-col gap-3 py-4 sm:py-6")}>
-          <div className="@container overflow-hidden rounded-lg border bg-card">
-            <ListGrid className={cn(GRID_COLS, "[&>[role=row]:last-child]:border-b-0")}>
-              <ListGridHeader className="static border-b bg-card after:hidden">
-                <ListGridHeaderCell>{t(($) => $.page.columns.name)}</ListGridHeaderCell>
-                <ListGridHeaderCell className={OPTIONAL_CELL}>
-                  {t(($) => $.page.columns.harness)}
-                </ListGridHeaderCell>
-                <ListGridHeaderCell className={OPTIONAL_CELL}>
-                  {t(($) => $.page.columns.agents)}
-                </ListGridHeaderCell>
-                <ListGridHeaderCell className={OPTIONAL_CELL}>
-                  {t(($) => $.page.columns.workload)}
-                </ListGridHeaderCell>
-                <ListGridHeaderCell>{t(($) => $.page.columns.status)}</ListGridHeaderCell>
-                <ListGridHeaderCell aria-hidden="true" />
-              </ListGridHeader>
-
-              {listLoading ? (
-                <RuntimeRowsSkeleton />
-              ) : nothingMatches ? (
-                <div
-                  role="row"
-                  className="col-span-full px-4 py-10 text-center text-caption text-muted-foreground"
-                >
-                  {t(($) => $.page.rows.no_matches)}
-                </div>
-              ) : (
-                <>
-                  <GroupHeader
-                    title={t(($) => $.page.groups.machines.title)}
-                    count={machineList.length}
-                  />
-                  {visibleMachines.map((machine) => (
-                    <MachineRow
-                      key={machine.id}
-                      machine={machine}
-                      bootstrapping={bootstrapping}
-                      currentUserId={currentUserId ?? null}
-                      members={members}
-                      agentCount={machine.runtimes.reduce(
-                        (sum, runtime) =>
-                          sum + (agentCountByRuntime.get(runtime.id) ?? 0),
-                        0,
-                      )}
-                    />
-                  ))}
-                  {showThisComputerRow && (
-                    <ActionRow
-                      icon={Laptop}
-                      title={t(($) => $.page.rows.this_computer_title)}
-                      description={t(($) => $.page.rows.this_computer_hint)}
-                      action={
-                        <a
-                          href="/download"
-                          target="_blank"
-                          rel="noreferrer"
-                          className={buttonVariants({ variant: "outline", size: "sm" })}
-                        >
-                          <Download aria-hidden="true" className="size-3.5" />
-                          {t(($) => $.page.rows.download_desktop)}
-                        </a>
-                      }
-                    />
-                  )}
-                  {showAddMachineRow && (
-                    <ActionRow
-                      icon={SquareTerminal}
-                      title={t(($) => $.page.rows.add_machine_title)}
-                      description={t(($) => $.page.rows.add_machine_hint)}
-                      action={
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          onClick={() => setShowConnectDialog(true)}
-                        >
-                          {t(($) => $.page.rows.view_commands)}
-                        </Button>
-                      }
-                    />
-                  )}
-
-                  <GroupHeader
-                    title={t(($) => $.page.groups.cloud.title)}
-                    count={configuredCloudCount}
-                  />
-                  {showQoderRow && qoder && (
-                    <QoderRow
-                      connection={qoder}
-                      agentCount={qoderAgentCount}
-                      detailHref={qoderHref}
-                      onConnect={() => setQoderDialogOpen(true)}
-                    />
-                  )}
-                  {visibleComingSoon.map((service) => (
-                    <ComingSoonRow key={service.provider} {...service} />
-                  ))}
-                </>
-              )}
-            </ListGrid>
-          </div>
-
+        <CollectionList
+          embedded
+          pageShortcuts
+          label={scopeLabels[statusFilter]}
+          columns={columns}
+          groups={groups}
+          loading={listLoading}
+          getRowId={(row) => row.id}
+          getRowHref={rowHref}
+          getRowTitle={(row) =>
+            row.kind === "machine"
+              ? row.machine.title
+              : row.kind === "qoder"
+                ? t(($) => $.qoder.cloud_title)
+                : undefined
+          }
+          empty={t(($) => $.page.rows.no_matches)}
+        />
+        <div className="flex flex-col gap-6 px-6 pt-6 pb-16 empty:hidden">
           {!agentsLoading &&
             !chatSessionsLoading &&
             memberNeedsMikaSetup(agents, chatSessions) &&
@@ -452,7 +515,6 @@ export function RuntimesPage({
             <OrphanRuntimeProfiles
               runtimes={orphanProfileRuntimes}
               now={now}
-              hasMachines={machines.length > 0}
             />
           )}
         </div>
@@ -606,128 +668,96 @@ function AddMenuItem({
   );
 }
 
-function GroupHeader({ title, count }: { title: string; count: number }) {
-  return (
-    <div
-      role="row"
-      className="col-span-full flex h-9 min-w-0 items-center gap-2 border-b bg-muted/40 px-4 text-caption"
-    >
-      <span className="font-semibold text-foreground">{title}</span>
-      <span className="font-mono tabular-nums text-muted-foreground">{count}</span>
-    </div>
-  );
-}
-
-function ActionRow({
-  icon: Icon,
-  title,
-  description,
-  action,
+function RuntimeNameCell({
+  row,
+  currentUserId,
+  members,
+  onConnectQoder,
 }: {
-  icon: typeof Server;
-  title: string;
-  description: string;
-  action: ReactNode;
+  row: RuntimeRow;
+  currentUserId: string | null;
+  members: MemberWithUser[];
+  onConnectQoder: () => void;
 }) {
-  return (
-    <div
-      role="row"
-      className="col-span-full flex min-h-14 items-center gap-3 border-b px-4 py-2.5"
-    >
-      <span className="flex size-8 shrink-0 items-center justify-center rounded-lg border border-dashed text-muted-foreground">
-        <Icon aria-hidden="true" className="size-4" />
-      </span>
-      <span className="min-w-0 flex-1">
-        <span className="block truncate text-body font-medium">{title}</span>
-        <span className="block truncate text-caption text-muted-foreground">
-          {description}
-        </span>
-      </span>
-      <span className="shrink-0">{action}</span>
-    </div>
-  );
-}
-
-function RowTile({
-  children,
-  dot,
-}: {
-  children: ReactNode;
-  dot?: ReactNode;
-}) {
-  return (
-    <span className="relative flex size-8 shrink-0 items-center justify-center rounded-lg border bg-background">
-      {children}
-      {dot}
-    </span>
-  );
-}
-
-function NameCell({
-  tile,
-  title,
-  href,
-  badge,
-  subtitle,
-  muted,
-}: {
-  tile: ReactNode;
-  title: string;
-  href?: string;
-  badge?: ReactNode;
-  subtitle: string;
-  muted?: boolean;
-}) {
-  return (
-    <ListGridCell className="gap-3 py-2.5">
-      {tile}
-      <span className="min-w-0 flex-1">
-        <span className="flex min-w-0 items-center gap-2">
-          {href ? (
-            <AppLink
-              href={href}
-              className="truncate text-body font-medium focus-visible:outline-none focus-visible:underline"
-              {...rowLinkInteractiveProps}
-            >
-              {title}
-            </AppLink>
-          ) : (
-            <span
-              className={cn(
-                "truncate text-body font-medium",
-                muted && "text-muted-foreground",
-              )}
-            >
-              {title}
+  const { t } = useT("runtimes");
+  switch (row.kind) {
+    case "machine": {
+      const { machine } = row;
+      const Icon = machineIcon(machine);
+      const ownerId = machine.runtimes[0]?.owner_id ?? null;
+      const owner =
+        ownerId && ownerId === currentUserId
+          ? t(($) => $.page.rows.owner_you)
+          : (members.find((member) => member.user_id === ownerId)?.name ?? null);
+      const description =
+        [machine.deviceSummary, owner].filter(Boolean).join(" · ") ||
+        (machine.section === "cloud"
+          ? t(($) => $.machine.metrics.cloud_worker)
+          : t(($) => $.machine.metrics.local_daemon));
+      return (
+        <CollectionNameCell
+          icon={<Icon aria-hidden="true" className="size-4 shrink-0 text-muted-foreground" />}
+          title={machine.title}
+          badges={
+            machine.isCurrent ? (
+              <CollectionTag>{t(($) => $.machine.this_machine)}</CollectionTag>
+            ) : undefined
+          }
+          description={description}
+        />
+      );
+    }
+    case "qoder": {
+      const { connection } = row;
+      const byQoder = t(($) => $.page.rows.provided_by, { vendor: "Qoder" });
+      const error =
+        connection.configured &&
+        qoderStatus(connection) === "error" &&
+        connection.lastError;
+      return (
+        <CollectionNameCell
+          icon={<ProviderLogo provider="qoder_cloud" className="size-4 shrink-0" />}
+          title={t(($) => $.qoder.cloud_title)}
+          description={error || byQoder}
+          trailing={
+            connection.configured ? undefined : (
+              <Button variant="outline" size="xs" onClick={onConnectQoder}>
+                {t(($) => $.page.rows.connect)}
+              </Button>
+            )
+          }
+        />
+      );
+    }
+    case "coming-soon":
+      return (
+        <CollectionNameCell
+          icon={
+            <span className="shrink-0 opacity-60">
+              <ProviderLogo provider={row.provider} className="size-4" />
             </span>
-          )}
-          {badge}
-        </span>
-        <span className="block truncate text-caption text-muted-foreground">
-          {subtitle}
-        </span>
-      </span>
-    </ListGridCell>
-  );
-}
-
-function EmptyCell({ optional = true }: { optional?: boolean }) {
-  return (
-    <ListGridCell className={cn(optional && OPTIONAL_CELL, "text-caption text-faint-foreground")}>
-      —
-    </ListGridCell>
-  );
-}
-
-function RowChevron() {
-  return (
-    <ListGridCell className="justify-end">
-      <ChevronRight
-        aria-hidden="true"
-        className="size-4 text-faint-foreground transition-transform group-hover/row:translate-x-0.5 group-hover/row:text-muted-foreground"
-      />
-    </ListGridCell>
-  );
+          }
+          title={row.name}
+          description={t(($) => $.page.rows.provided_by, { vendor: row.vendor })}
+          muted
+        />
+      );
+    case "action": {
+      const Icon = row.icon;
+      return (
+        <CollectionNameCell
+          icon={
+            <span className="flex size-5 shrink-0 items-center justify-center rounded-sm border border-dashed text-muted-foreground">
+              <Icon aria-hidden="true" className="size-3" />
+            </span>
+          }
+          title={row.title}
+          description={row.description}
+          trailing={<span className="shrink-0">{row.action}</span>}
+        />
+      );
+    }
+  }
 }
 
 function WorkloadText({
@@ -738,282 +768,93 @@ function WorkloadText({
   queued: number;
 }) {
   const { t } = useT("runtimes");
-  if (running + queued === 0) {
-    return (
-      <span className="text-caption text-muted-foreground">
-        {t(($) => $.machine.metrics.workload_idle)}
-      </span>
-    );
-  }
+  if (running + queued === 0) return <>{t(($) => $.machine.metrics.workload_idle)}</>;
   return (
-    <span className="truncate text-caption tabular-nums">
+    <span className="truncate tabular-nums text-foreground">
       {t(($) => $.machine.metrics.workload_hint, { running, queued })}
     </span>
   );
 }
 
-function MachineRow({
-  machine,
+function RuntimeWorkloadCell({ row }: { row: RuntimeRow }) {
+  if (row.kind === "machine") {
+    return row.machine.health === "online" ? (
+      <WorkloadText running={row.machine.runningCount} queued={row.machine.queuedCount} />
+    ) : (
+      <CollectionEmptyValue />
+    );
+  }
+  if (row.kind === "qoder") {
+    return row.connection.configured && qoderStatus(row.connection) === "online" ? (
+      <WorkloadText running={row.connection.activeRuns} queued={row.connection.queuedRuns} />
+    ) : (
+      <CollectionEmptyValue />
+    );
+  }
+  return null;
+}
+
+function RuntimeStatusCell({
+  row,
   bootstrapping,
-  currentUserId,
-  members,
-  agentCount,
 }: {
-  machine: RuntimeMachine;
+  row: RuntimeRow;
   bootstrapping?: boolean;
-  currentUserId: string | null;
-  members: MemberWithUser[];
-  agentCount: number;
 }) {
   const { t } = useT("runtimes");
   const healthLabel = useHealthLabel();
   const timeAgo = useTimeAgo();
-  const paths = useWorkspacePaths();
-  const rowLink = useRowLink();
-  const href = paths.runtimeDetail(machine.id);
-  const Icon = machineIcon(machine);
-  const ownerId = machine.runtimes[0]?.owner_id ?? null;
-  const owner =
-    ownerId && ownerId === currentUserId
-      ? t(($) => $.page.rows.owner_you)
-      : (members.find((member) => member.user_id === ownerId)?.name ?? null);
-  const subtitle =
-    [machine.deviceSummary, owner].filter(Boolean).join(" · ") ||
-    (machine.section === "cloud"
-      ? t(($) => $.machine.metrics.cloud_worker)
-      : t(($) => $.machine.metrics.local_daemon));
-  const starting =
-    machine.isCurrent && bootstrapping && machine.runtimes.length === 0;
-  const online = machine.health === "online";
-
-  return (
-    <ListGridRow
-      className="h-auto min-h-14 cursor-pointer border-b"
-      {...rowLink(href, machine.title)}
-    >
-      <NameCell
-        tile={
-          <RowTile
-            dot={
-              <HealthDot
-                health={machine.health}
-                className="absolute -bottom-0.5 -right-0.5 ring-2 ring-card"
-              />
-            }
-          >
-            <Icon aria-hidden="true" className="size-4 text-muted-foreground" />
-          </RowTile>
-        }
-        title={machine.title}
-        href={href}
-        badge={
-          machine.isCurrent ? (
-            <Badge variant="secondary" className="shrink-0">
-              {t(($) => $.machine.this_machine)}
-            </Badge>
-          ) : undefined
-        }
-        subtitle={subtitle}
-      />
-      <ListGridCell className={OPTIONAL_CELL}>
-        <ProviderIconStack providers={machine.providerNames} />
-      </ListGridCell>
-      <ListGridCell className={cn(OPTIONAL_CELL, "text-body tabular-nums")}>
-        {agentCount}
-      </ListGridCell>
-      {online ? (
-        <ListGridCell className={OPTIONAL_CELL}>
-          <WorkloadText
-            running={machine.runningCount}
-            queued={machine.queuedCount}
-          />
-        </ListGridCell>
-      ) : (
-        <EmptyCell />
-      )}
-      <ListGridCell className="gap-1.5 text-caption">
-        {starting ? (
+  switch (row.kind) {
+    case "machine": {
+      const { machine } = row;
+      if (machine.isCurrent && bootstrapping && machine.runtimes.length === 0) {
+        return (
           <>
-            <Loader2 aria-hidden="true" className="size-3 animate-spin text-muted-foreground" />
-            <span className="truncate text-muted-foreground">
-              {t(($) => $.page.bootstrapping.title)}
-            </span>
+            <Loader2 aria-hidden="true" className="size-3 shrink-0 animate-spin" />
+            <span className="truncate">{t(($) => $.page.bootstrapping.title)}</span>
           </>
-        ) : (
-          <>
-            <HealthIcon health={machine.health} />
-            <span className={cn("truncate", !online && "text-muted-foreground")}>
-              {healthLabel(machine.health)}
-              {!online && machine.lastSeenAt
-                ? ` · ${timeAgo(machine.lastSeenAt)}`
-                : ""}
-            </span>
-          </>
-        )}
-      </ListGridCell>
-      <RowChevron />
-    </ListGridRow>
-  );
-}
-
-function QoderRow({
-  connection,
-  agentCount,
-  detailHref,
-  onConnect,
-}: {
-  connection: QoderConnection;
-  agentCount: number;
-  detailHref: string;
-  onConnect: () => void;
-}) {
-  const { t } = useT("runtimes");
-  const rowLink = useRowLink();
-  const title = t(($) => $.qoder.cloud_title);
-  const logo = <ProviderLogo provider="qoder_cloud" className="size-4" />;
-  const byQoder = t(($) => $.page.rows.provided_by, { vendor: "Qoder" });
-
-  if (!connection.configured) {
-    return (
-      <ListGridRow className="h-auto min-h-14 border-b">
-        <NameCell
-          tile={
-            <RowTile
-              dot={
-                <span className="absolute -bottom-0.5 -right-0.5 size-2 rounded-full bg-warning ring-2 ring-card" />
-              }
-            >
-              {logo}
-            </RowTile>
-          }
-          title={title}
-          subtitle={byQoder}
-        />
-        <EmptyCell />
-        <EmptyCell />
-        <EmptyCell />
-        <ListGridCell>
+        );
+      }
+      const online = machine.health === "online";
+      return (
+        <>
+          <HealthIcon health={machine.health} />
+          <span className={cn("truncate", online && "text-foreground")}>
+            {healthLabel(machine.health)}
+            {!online && machine.lastSeenAt ? ` · ${timeAgo(machine.lastSeenAt)}` : ""}
+          </span>
+        </>
+      );
+    }
+    case "qoder": {
+      if (!row.connection.configured) {
+        return (
           <Badge variant="secondary" className="bg-warning/10 text-warning">
             {t(($) => $.page.rows.not_connected)}
           </Badge>
-        </ListGridCell>
-        <ListGridCell className="justify-end">
-          <Button variant="outline" size="sm" onClick={onConnect}>
-            {t(($) => $.page.rows.connect)}
-          </Button>
-        </ListGridCell>
-      </ListGridRow>
-    );
-  }
-
-  const status = !connection.enabled
-    ? "stopped"
-    : connection.status === "online"
-      ? "online"
-      : connection.status === "error"
-        ? "error"
-        : connection.status === "offline"
-          ? "offline"
-          : "starting";
-  const dotTone =
-    status === "online"
-      ? "bg-success"
-      : status === "error"
-        ? "bg-destructive"
-        : status === "starting"
-          ? "bg-warning"
-          : "bg-muted-foreground/40";
-  const subtitle =
-    status === "error" && connection.lastError ? connection.lastError : byQoder;
-
-  return (
-    <ListGridRow
-      className="h-auto min-h-14 cursor-pointer border-b"
-      {...rowLink(detailHref, title)}
-    >
-      <NameCell
-        tile={
-          <RowTile
-            dot={
-              <span
-                className={cn(
-                  "absolute -bottom-0.5 -right-0.5 size-2 rounded-full ring-2 ring-card",
-                  dotTone,
-                )}
-              />
-            }
+        );
+      }
+      const status = qoderStatus(row.connection);
+      return (
+        <>
+          <span aria-hidden="true" className={cn("size-1.5 shrink-0 rounded-full", QODER_DOT[status])} />
+          <span
+            className={cn(
+              "truncate",
+              status === "online" && "text-foreground",
+              status === "error" && "text-destructive",
+            )}
           >
-            {logo}
-          </RowTile>
-        }
-        title={title}
-        href={detailHref}
-        subtitle={subtitle}
-      />
-      <EmptyCell />
-      <ListGridCell className={cn(OPTIONAL_CELL, "text-body tabular-nums")}>
-        {agentCount}
-      </ListGridCell>
-      {status === "online" ? (
-        <ListGridCell className={OPTIONAL_CELL}>
-          <WorkloadText
-            running={connection.activeRuns}
-            queued={connection.queuedRuns}
-          />
-        </ListGridCell>
-      ) : (
-        <EmptyCell />
-      )}
-      <ListGridCell className="gap-1.5 text-caption">
-        <span aria-hidden="true" className={cn("size-1.5 rounded-full", dotTone)} />
-        <span
-          className={cn(
-            "truncate",
-            status === "error" && "text-destructive",
-            status !== "online" && status !== "error" && "text-muted-foreground",
-          )}
-        >
-          {t(($) => $.qoder[status])}
-        </span>
-      </ListGridCell>
-      <RowChevron />
-    </ListGridRow>
-  );
-}
-
-function ComingSoonRow({
-  provider,
-  name,
-  vendor,
-}: {
-  provider: string;
-  name: string;
-  vendor: string;
-}) {
-  const { t } = useT("runtimes");
-  return (
-    <ListGridRow className="h-auto min-h-14 border-b hover:bg-transparent">
-      <NameCell
-        tile={
-          <RowTile>
-            <span className="opacity-60">
-              <ProviderLogo provider={provider} className="size-4" />
-            </span>
-          </RowTile>
-        }
-        title={name}
-        subtitle={t(($) => $.page.rows.provided_by, { vendor })}
-        muted
-      />
-      <EmptyCell />
-      <EmptyCell />
-      <EmptyCell />
-      <ListGridCell>
-        <Badge variant="secondary">{t(($) => $.page.groups.cloud.coming_soon)}</Badge>
-      </ListGridCell>
-      <ListGridCell aria-hidden="true" />
-    </ListGridRow>
-  );
+            {t(($) => $.qoder[status])}
+          </span>
+        </>
+      );
+    }
+    case "coming-soon":
+      return <Badge variant="secondary">{t(($) => $.page.groups.cloud.coming_soon)}</Badge>;
+    case "action":
+      return null;
+  }
 }
 
 /**
@@ -1144,15 +985,13 @@ function MikaSetupCard({
 function OrphanRuntimeProfiles({
   runtimes,
   now,
-  hasMachines,
 }: {
   runtimes: ReturnType<typeof pendingRuntimeFromProfile>[];
   now: number;
-  hasMachines: boolean;
 }) {
   const { t } = useT("runtimes");
   return (
-    <section className={hasMachines ? "mt-6" : undefined}>
+    <section>
       <div className="mb-3">
         <h2 className="text-body font-semibold">
           {t(($) => $.profiles.unassigned_title)}
@@ -1161,47 +1000,8 @@ function OrphanRuntimeProfiles({
           {t(($) => $.profiles.unassigned_description)}
         </p>
       </div>
-      <div className="overflow-hidden rounded-lg border bg-card">
-        <RuntimeList runtimes={runtimes} now={now} />
-      </div>
+      <RuntimeList runtimes={runtimes} now={now} />
     </section>
-  );
-}
-
-function RuntimeRowsSkeleton() {
-  return (
-    <>
-      <div
-        role="row"
-        className="col-span-full flex h-9 items-center border-b bg-muted/40 px-4"
-      >
-        <Skeleton className="h-3 w-20" />
-      </div>
-      {Array.from({ length: 3 }).map((_, index) => (
-        <ListGridRow key={index} className="h-auto min-h-14 border-b hover:bg-transparent">
-          <ListGridCell className="gap-3">
-            <Skeleton className="size-8 shrink-0 rounded-lg" />
-            <div className="min-w-0 flex-1">
-              <Skeleton className="h-3.5 w-36 max-w-full" />
-              <Skeleton className="mt-1.5 h-3 w-24 max-w-full" />
-            </div>
-          </ListGridCell>
-          <ListGridCell className={OPTIONAL_CELL}>
-            <Skeleton className="size-4 rounded-sm" />
-          </ListGridCell>
-          <ListGridCell className={OPTIONAL_CELL}>
-            <Skeleton className="h-3 w-6" />
-          </ListGridCell>
-          <ListGridCell className={OPTIONAL_CELL}>
-            <Skeleton className="h-3 w-10" />
-          </ListGridCell>
-          <ListGridCell>
-            <Skeleton className="h-3 w-16" />
-          </ListGridCell>
-          <ListGridCell aria-hidden="true" />
-        </ListGridRow>
-      ))}
-    </>
   );
 }
 

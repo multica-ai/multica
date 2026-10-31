@@ -151,7 +151,18 @@
     "filter": "篩選",
     "filter_count_other": "{{count}} 個篩選",
     "reset": "重設",
-    "display": "顯示設定"
+    "display": "顯示設定",
+    "selected_other": "已選 {{count}} 項",
+    "clear_selection": "清除選擇",
+    "select_all": "全選",
+    "select_row": "選擇此列",
+    "row_actions": "更多操作",
+    "sort_by": "排序",
+    "direction_asc": "升序",
+    "direction_desc": "降序",
+    "section_columns": "欄",
+    "load_more": "載入更多",
+    "loading_more": "載入中…"
   },
   "object_page": {
     "toggle_panel": "切換右側邊欄",

@@ -3931,8 +3931,8 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
               spans the timeline — at column level `sticky bottom-0` can pin
               the composer across the whole scroll range.
 
-              Sticky treatment mirrors list-grid's sticky header, bottom
-              edge: opaque bg-background under/around the card (its rounded
+              Sticky treatment, bottom edge: opaque bg-background
+              under/around the card (its rounded
               corners would otherwise leak scrolled text), a 16px gradient
               fade above (exactly the mt-4 gap, so at rest it sits over the
               page background and is invisible), and pb-4 so the card floats

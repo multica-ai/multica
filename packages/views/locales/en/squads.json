@@ -131,10 +131,5 @@
     "mine": "My squads",
     "all": "All squads"
   },
-  "toolbar": {
-    "sort_by": "Sort by",
-    "direction_asc": "Ascending",
-    "direction_desc": "Descending",
-    "section_columns": "Columns"
-  }
+  "toolbar": {}
 }

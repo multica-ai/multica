@@ -1,63 +1,27 @@
 "use client";
 
-import { ArrowDown, ArrowUp, ChevronDown } from "@multica/ui/icons";
 import type { Autopilot } from "@multica/core/types";
-import type {
-  AutopilotColumnKey,
-  AutopilotListFilters,
-  AutopilotSortDirection,
-  AutopilotSortField,
-} from "@multica/core/autopilots/stores";
+import type { AutopilotListFilters } from "@multica/core/autopilots/stores";
 import { useActorName } from "@multica/core/workspace/hooks";
-import { Button } from "@multica/ui/components/ui/button";
-import { IconButton } from "@multica/ui/components/common/icon-button";
 import {
   DropdownMenu,
   DropdownMenuCheckboxItem,
   DropdownMenuContent,
-  DropdownMenuRadioGroup,
-  DropdownMenuRadioItem,
   DropdownMenuSub,
   DropdownMenuSubContent,
   DropdownMenuSubTrigger,
   DropdownMenuTrigger,
 } from "@multica/ui/components/ui/dropdown-menu";
-import {
-  Popover,
-  PopoverContent,
-  PopoverTrigger,
-} from "@multica/ui/components/ui/popover";
-import { Switch } from "@multica/ui/components/ui/switch";
 import { ActorAvatar } from "../../common/actor-avatar";
 import { FILTER_ITEM_CLASS, HoverCheck } from "../../common/hover-check";
 import { useT } from "../../i18n";
-import {
-  CollectionDisplayButton,
-  CollectionFilterButton,
-} from "../../layout/collection-page";
+import { CollectionFilterButton } from "../../layout/collection-page";
 
 // Composite "type:id" value for polymorphic actor filter dimensions, so the
 // string[] filter store can hold agent/squad/member references alike.
 export function actorFilterValue(type: string, id: string): string {
   return `${type}:${id}`;
 }
-
-const COLUMN_KEYS: AutopilotColumnKey[] = [
-  "assignee",
-  "trigger",
-  "lastRun",
-  "nextRun",
-  "mode",
-  "creator",
-  "created",
-];
-
-const SORT_FIELDS: AutopilotSortField[] = [
-  "name",
-  "lastRun",
-  "nextRun",
-  "created",
-];
 
 const MODES = ["create_issue", "run_only"] as const;
 const TRIGGER_KINDS = ["schedule", "webhook", "api"] as const;
@@ -266,126 +230,5 @@ export function AutopilotFilterMenu({
         </DropdownMenuSub>
       </DropdownMenuContent>
     </DropdownMenu>
-  );
-}
-
-/**
- * Display settings — same paradigm as skills: sort select + direction toggle +
- * column switches, mutating the same store the list header sort buttons use.
- */
-export function AutopilotDisplayMenu({
-  sortField,
-  sortDirection,
-  onSortFieldChange,
-  onSortDirectionChange,
-  hiddenColumns,
-  onToggleColumn,
-}: {
-  sortField: AutopilotSortField;
-  sortDirection: AutopilotSortDirection;
-  onSortFieldChange: (field: AutopilotSortField) => void;
-  onSortDirectionChange: (direction: AutopilotSortDirection) => void;
-  hiddenColumns: AutopilotColumnKey[];
-  onToggleColumn: (key: AutopilotColumnKey) => void;
-}) {
-  const { t } = useT("autopilots");
-
-  const SORT_LABELS: Record<AutopilotSortField, string> = {
-    name: t(($) => $.page.table.name),
-    lastRun: t(($) => $.page.table.last_run),
-    nextRun: t(($) => $.page.table.next_run),
-    created: t(($) => $.page.table.created),
-  };
-
-  const COLUMN_LABELS: Record<AutopilotColumnKey, string> = {
-    assignee: t(($) => $.page.table.assignee),
-    trigger: t(($) => $.page.table.trigger),
-    lastRun: t(($) => $.page.table.last_run),
-    nextRun: t(($) => $.page.table.next_run),
-    mode: t(($) => $.page.table.mode),
-    creator: t(($) => $.page.table.created_by),
-    created: t(($) => $.page.table.created),
-  };
-
-  return (
-    <Popover>
-      <PopoverTrigger render={<CollectionDisplayButton />} />
-      <PopoverContent align="end" className="w-64 p-0">
-        <div className="border-b px-3 py-2.5">
-          <span className="text-caption font-medium text-muted-foreground">
-            {t(($) => $.toolbar.sort_by)}
-          </span>
-          <div className="mt-2 flex items-center gap-1.5">
-            <DropdownMenu>
-              <DropdownMenuTrigger
-                render={
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    className="flex-1 justify-between text-caption"
-                  >
-                    {SORT_LABELS[sortField]}
-                    <ChevronDown className="size-3 text-muted-foreground" />
-                  </Button>
-                }
-              />
-              <DropdownMenuContent align="start" className="w-auto">
-                <DropdownMenuRadioGroup
-                  value={sortField}
-                  onValueChange={(v) =>
-                    onSortFieldChange(v as AutopilotSortField)
-                  }
-                >
-                  {SORT_FIELDS.map((field) => (
-                    <DropdownMenuRadioItem key={field} value={field}>
-                      {SORT_LABELS[field]}
-                    </DropdownMenuRadioItem>
-                  ))}
-                </DropdownMenuRadioGroup>
-              </DropdownMenuContent>
-            </DropdownMenu>
-            <IconButton
-              variant="outline"
-              size="icon-sm"
-              onClick={() =>
-                onSortDirectionChange(sortDirection === "asc" ? "desc" : "asc")
-              }
-              label={
-                sortDirection === "asc"
-                  ? t(($) => $.toolbar.direction_asc)
-                  : t(($) => $.toolbar.direction_desc)
-              }
-            >
-              {sortDirection === "asc" ? (
-                <ArrowUp className="size-3.5" />
-              ) : (
-                <ArrowDown className="size-3.5" />
-              )}
-            </IconButton>
-          </div>
-        </div>
-
-        <div className="px-3 py-2.5">
-          <span className="text-caption font-medium text-muted-foreground">
-            {t(($) => $.toolbar.section_columns)}
-          </span>
-          <div className="mt-2 space-y-2">
-            {COLUMN_KEYS.map((key) => (
-              <label
-                key={key}
-                className="flex cursor-pointer items-center justify-between"
-              >
-                <span className="text-body">{COLUMN_LABELS[key]}</span>
-                <Switch
-                  size="sm"
-                  checked={!hiddenColumns.includes(key)}
-                  onCheckedChange={() => onToggleColumn(key)}
-                />
-              </label>
-            ))}
-          </div>
-        </div>
-      </PopoverContent>
-    </Popover>
   );
 }

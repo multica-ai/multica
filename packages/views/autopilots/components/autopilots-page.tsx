@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
   AlertCircle,
   Clock,
@@ -11,11 +11,9 @@ import {
   Zap,
 } from "@multica/ui/icons";
 import { useQuery } from "@tanstack/react-query";
-import { useVirtualizer } from "@tanstack/react-virtual";
 import { autopilotListOptions } from "@multica/core/autopilots/queries";
 import {
   useAutopilotsViewStore,
-  AUTOPILOT_DEFAULT_HIDDEN_COLUMNS,
   AUTOPILOT_SCOPES,
   type AutopilotColumnKey,
   type AutopilotScope,
@@ -26,20 +24,8 @@ import { useWorkspacePaths } from "@multica/core/paths";
 import { useActorName } from "@multica/core/workspace/hooks";
 import type { Autopilot } from "@multica/core/types";
 import { Button } from "@multica/ui/components/ui/button";
-import { Checkbox } from "@multica/ui/components/ui/checkbox";
-import {
-  LIST_GRID_BOTTOM_CLEARANCE,
-  ListGrid,
-  ListGridBody,
-  ListGridCell,
-  ListGridHeader,
-  ListGridHeaderCell,
-  ListGridRow,
-  type ListGridSortDirection,
-} from "@multica/ui/components/ui/list-grid";
-import { Skeleton } from "@multica/ui/components/ui/skeleton";
 import { WorkspaceWakeups } from "./workspace-wakeups";
-import { useNavigation, useRowLink } from "../../navigation";
+import { useNavigation } from "../../navigation";
 import { ActorAvatar } from "../../common/actor-avatar";
 import { formatInTimeZone } from "../../common/format-in-time-zone";
 import {
@@ -49,9 +35,16 @@ import {
   CollectionResetButton,
   CollectionScopeItems,
 } from "../../layout/collection-page";
+import {
+  CollectionDisplayMenu,
+  CollectionEmptyValue,
+  CollectionList,
+  CollectionNameCell,
+  type CollectionColumn,
+  type CollectionSort,
+} from "../../layout/collection-list";
 import { AutopilotDialog } from "./autopilot-dialog";
 import {
-  AutopilotDisplayMenu,
   AutopilotFilterMenu,
   actorFilterValue,
   countActiveFilterDimensions,
@@ -64,138 +57,46 @@ import { AUTOPILOT_TEMPLATES, type AutopilotTemplate } from "./autopilot-templat
 import { isWakeupsTab } from "./wakeups-tab";
 import { useLocale, useT, useTimeAgo } from "../../i18n";
 
-// Column template — single source of truth for header, rows, and skeletons.
-// Same conventions as the skills list (see list-grid.tsx and the comment
-// there): deterministic var-width tracks (rows are virtualized), and
-// TWO-ZONE responsiveness:
-// - Container ≥ @2xl (672px): WYSIWYG — every user-enabled column renders;
-//   the grid carries min-width = Σ(enabled tracks + gaps) and the wrapper
-//   scrolls horizontally when the enabled set outgrows the container. An
-//   enabled column must NEVER silently vanish (the "dead toggle" bug).
-// - Container < @2xl: static core set (name + assignee), no horizontal
-//   scroll, column toggles don't apply.
-const GRID_COLS =
-  "grid-cols-[0.75rem_1rem_minmax(120px,1fr)_var(--apc-assignee)_1.75rem_0.75rem] " +
-  "@2xl:grid-cols-[0.75rem_1rem_minmax(200px,1fr)_var(--apc-assignee)_var(--apc-trigger)_var(--apc-lastrun)_var(--apc-nextrun)_var(--apc-mode)_var(--apc-creator)_var(--apc-created)_1.75rem_0.75rem]";
-
-// h-12 rows; the virtualizer's fixed-size contract.
-const ROW_HEIGHT = 48;
-
-// Single source for hideable column widths: track vars and the grid's
-// min-width derive from the same numbers.
-const COLUMN_WIDTHS: Record<AutopilotColumnKey, number> = {
-  assignee: 144,
-  trigger: 144,
-  lastRun: 120,
-  nextRun: 104,
-  mode: 104,
-  creator: 144,
-  created: 104,
-};
-
-// Fixed tracks (edges 12+12, checkbox 16, name min 200, kebab 28) plus the
-// 11 gap-x-3 gaps between the wide template's 12 tracks (zero-width tracks
-// still carry gaps).
-const FIXED_TRACKS_WIDTH = 268 + 11 * 12;
-
-function columnTrackVars(
-  isVisible: (key: AutopilotColumnKey) => boolean,
-): React.CSSProperties {
-  const width = (key: AutopilotColumnKey) =>
-    isVisible(key) ? `${COLUMN_WIDTHS[key]}px` : "0px";
-  const minWidth =
-    FIXED_TRACKS_WIDTH +
-    (Object.keys(COLUMN_WIDTHS) as AutopilotColumnKey[]).reduce(
-      (sum, key) => sum + (isVisible(key) ? COLUMN_WIDTHS[key] : 0),
-      0,
-    );
-  return {
-    "--apc-assignee": width("assignee"),
-    "--apc-trigger": width("trigger"),
-    "--apc-lastrun": width("lastRun"),
-    "--apc-nextrun": width("nextRun"),
-    "--apc-mode": width("mode"),
-    "--apc-creator": width("creator"),
-    "--apc-created": width("created"),
-    "--apc-minw": `${minWidth}px`,
-  } as React.CSSProperties;
-}
-
-
 // Cells
-
-function CheckboxCell({
-  checked,
-  onToggle,
-}: {
-  checked: boolean;
-  onToggle: () => void;
-}) {
-  return (
-    <ListGridCell className="justify-center px-0">
-      <button
-        type="button"
-        aria-pressed={checked}
-        onClick={(e) => {
-          e.stopPropagation();
-          onToggle();
-        }}
-        className={`-m-1.5 flex items-center p-1.5 ${
-          checked
-            ? ""
-            : "opacity-0 transition-opacity group-hover/row:opacity-100"
-        }`}
-      >
-        <Checkbox
-          checked={checked}
-          tabIndex={-1}
-          className="pointer-events-none"
-        />
-      </button>
-    </ListGridCell>
-  );
-}
 
 function NameCell({ autopilot }: { autopilot: Autopilot }) {
   const { t } = useT("autopilots");
   return (
-    <ListGridCell className="gap-1.5">
-      <span className="min-w-0 truncate text-body font-medium">
-        {autopilot.title}
-      </span>
-      {/* Paused marker: in the "all" scope active and paused rows mix, so a
-          paused automation needs an inline signal. */}
-      {autopilot.status === "paused" && (
-        <span
-          title={
-            autopilot.pause_reason === "agent_runtime_required"
-              ? t(($) => $.status.paused_runtime_required)
-              : t(($) => $.status.paused)
-          }
-          className="flex shrink-0 items-center text-amber-500"
-        >
-          <Pause className="size-3" />
-        </span>
-      )}
-    </ListGridCell>
+    <CollectionNameCell
+      title={autopilot.title}
+      badges={
+        // Paused marker: in the "all" scope active and paused rows mix, so a
+        // paused automation needs an inline signal.
+        autopilot.status === "paused" ? (
+          <span
+            title={
+              autopilot.pause_reason === "agent_runtime_required"
+                ? t(($) => $.status.paused_runtime_required)
+                : t(($) => $.status.paused)
+            }
+            className="flex shrink-0 items-center text-amber-500"
+          >
+            <Pause className="size-3" />
+          </span>
+        ) : null
+      }
+    />
   );
 }
 
-function AssigneeCell({ autopilot }: { autopilot: Autopilot }) {
+function ActorCell({ type, id, hoverCard = false }: { type: string; id: string; hoverCard?: boolean }) {
   const { getActorName } = useActorName();
   return (
-    <ListGridCell className="gap-1.5">
+    <>
       <ActorAvatar
-        actorType={autopilot.assignee_type}
-        actorId={autopilot.assignee_id}
+        actorType={type}
+        actorId={id}
         size="sm"
-        enableHoverCard={autopilot.assignee_type === "agent"}
-        showStatusDot={autopilot.assignee_type === "agent"}
+        enableHoverCard={hoverCard}
+        showStatusDot={hoverCard}
       />
-      <span className="min-w-0 truncate text-caption text-muted-foreground">
-        {getActorName(autopilot.assignee_type, autopilot.assignee_id)}
-      </span>
-    </ListGridCell>
+      <span className="min-w-0 truncate">{getActorName(type, id)}</span>
+    </>
   );
 }
 
@@ -208,15 +109,9 @@ const TRIGGER_ICONS: Record<string, typeof Zap> = {
 function TriggerCell({ autopilot }: { autopilot: Autopilot }) {
   const { t } = useT("autopilots");
   const kinds = autopilot.trigger_kinds ?? [];
-  if (kinds.length === 0) {
-    return (
-      <ListGridCell className="hidden @2xl:flex">
-        <span className="text-caption text-faint-foreground">—</span>
-      </ListGridCell>
-    );
-  }
+  if (kinds.length === 0) return <CollectionEmptyValue />;
   return (
-    <ListGridCell className="hidden gap-2 @2xl:flex">
+    <span className="flex min-w-0 items-center gap-2">
       {kinds.map((kind) => {
         // Server-driven enum: unknown kinds get a generic icon + raw label.
         const Icon = TRIGGER_ICONS[kind] ?? Zap;
@@ -225,16 +120,13 @@ function TriggerCell({ autopilot }: { autopilot: Autopilot }) {
             ? t(($) => $.trigger_kind[kind])
             : kind;
         return (
-          <span
-            key={kind}
-            className="flex min-w-0 items-center gap-1 text-caption text-muted-foreground"
-          >
+          <span key={kind} className="flex min-w-0 items-center gap-1">
             <Icon className="size-3 shrink-0" />
             <span className="truncate">{label}</span>
           </span>
         );
       })}
-    </ListGridCell>
+    </span>
   );
 }
 
@@ -259,13 +151,7 @@ function runStatusDotClass(status: string | null | undefined): string {
 function LastRunCell({ autopilot }: { autopilot: Autopilot }) {
   const { t } = useT("autopilots");
   const timeAgo = useTimeAgo();
-  if (!autopilot.last_run_at) {
-    return (
-      <ListGridCell className="hidden @2xl:flex">
-        <span className="text-caption text-faint-foreground">—</span>
-      </ListGridCell>
-    );
-  }
+  if (!autopilot.last_run_at) return <CollectionEmptyValue />;
   const status = autopilot.last_run_status;
   const knownStatus =
     status === "issue_created" ||
@@ -276,7 +162,7 @@ function LastRunCell({ autopilot }: { autopilot: Autopilot }) {
       ? status
       : null;
   return (
-    <ListGridCell className="hidden gap-1.5 @2xl:flex">
+    <>
       <span
         title={
           knownStatus
@@ -285,26 +171,19 @@ function LastRunCell({ autopilot }: { autopilot: Autopilot }) {
         }
         className={`size-1.5 shrink-0 rounded-full ${runStatusDotClass(status)}`}
       />
-      <span className="whitespace-nowrap text-caption tabular-nums text-muted-foreground">
-        {timeAgo(autopilot.last_run_at)}
-      </span>
-    </ListGridCell>
+      <span className="tabular-nums">{timeAgo(autopilot.last_run_at)}</span>
+    </>
   );
 }
 
 function NextRunCell({ autopilot }: { autopilot: Autopilot }) {
   const { i18n } = useT("autopilots");
   const next = autopilot.next_run_at;
+  if (!next) return <CollectionEmptyValue />;
   return (
-    <ListGridCell className="hidden @2xl:flex">
-      {next ? (
-        <span className="whitespace-nowrap text-caption tabular-nums text-muted-foreground">
-          {formatInTimeZone(next, undefined, i18n.language)}
-        </span>
-      ) : (
-        <span className="text-caption text-faint-foreground">—</span>
-      )}
-    </ListGridCell>
+    <span className="truncate tabular-nums">
+      {formatInTimeZone(next, undefined, i18n.language)}
+    </span>
   );
 }
 
@@ -315,203 +194,7 @@ function ModeCell({ autopilot }: { autopilot: Autopilot }) {
     mode === "create_issue" || mode === "run_only"
       ? t(($) => $.execution_mode[mode])
       : mode;
-  return (
-    <ListGridCell className="hidden @2xl:flex">
-      <span className="truncate text-caption text-muted-foreground">
-        {label}
-      </span>
-    </ListGridCell>
-  );
-}
-
-function CreatorCell({ autopilot }: { autopilot: Autopilot }) {
-  const { getActorName } = useActorName();
-  return (
-    <ListGridCell className="hidden gap-1.5 @2xl:flex">
-      <ActorAvatar
-        actorType={autopilot.created_by_type}
-        actorId={autopilot.created_by_id}
-        size="sm"
-      />
-      <span className="min-w-0 truncate text-caption text-muted-foreground">
-        {getActorName(autopilot.created_by_type, autopilot.created_by_id)}
-      </span>
-    </ListGridCell>
-  );
-}
-
-// Header row
-
-function AutopilotListHeader({
-  sortField,
-  sortDirection,
-  onSort,
-  allSelected,
-  someSelected,
-  onToggleAll,
-  isColVisible,
-}: {
-  sortField: AutopilotSortField;
-  sortDirection: ListGridSortDirection;
-  onSort: (field: AutopilotSortField) => void;
-  allSelected: boolean;
-  someSelected: boolean;
-  onToggleAll: () => void;
-  isColVisible: (key: AutopilotColumnKey) => boolean;
-}) {
-  const { t } = useT("autopilots");
-  const sorted = (field: AutopilotSortField) =>
-    sortField === field ? sortDirection : false;
-  const anySelected = allSelected || someSelected;
-  return (
-    <ListGridHeader>
-      <div className="flex items-center justify-center">
-        <button
-          type="button"
-          aria-pressed={allSelected}
-          onClick={onToggleAll}
-          className={`-m-1.5 flex items-center p-1.5 ${
-            anySelected
-              ? ""
-              : "opacity-0 transition-opacity group-hover/header:opacity-100"
-          }`}
-        >
-          <Checkbox
-            checked={allSelected}
-            indeterminate={someSelected && !allSelected}
-            tabIndex={-1}
-            className="pointer-events-none"
-          />
-        </button>
-      </div>
-      <ListGridHeaderCell sorted={sorted("name")} onSort={() => onSort("name")}>
-        {t(($) => $.page.table.name)}
-      </ListGridHeaderCell>
-      {isColVisible("assignee") ? (
-        <ListGridHeaderCell>
-          {t(($) => $.page.table.assignee)}
-        </ListGridHeaderCell>
-      ) : (
-        <ListGridHeaderCell className="px-0" />
-      )}
-      {isColVisible("trigger") ? (
-        <ListGridHeaderCell className="hidden @2xl:flex">
-          {t(($) => $.page.table.trigger)}
-        </ListGridHeaderCell>
-      ) : (
-        <ListGridHeaderCell className="hidden px-0 @2xl:flex" />
-      )}
-      {isColVisible("lastRun") ? (
-        <ListGridHeaderCell
-          className="hidden @2xl:flex"
-          sorted={sorted("lastRun")}
-          onSort={() => onSort("lastRun")}
-        >
-          {t(($) => $.page.table.last_run)}
-        </ListGridHeaderCell>
-      ) : (
-        <ListGridHeaderCell className="hidden px-0 @2xl:flex" />
-      )}
-      {isColVisible("nextRun") ? (
-        <ListGridHeaderCell
-          className="hidden @2xl:flex"
-          sorted={sorted("nextRun")}
-          onSort={() => onSort("nextRun")}
-        >
-          {t(($) => $.page.table.next_run)}
-        </ListGridHeaderCell>
-      ) : (
-        <ListGridHeaderCell className="hidden px-0 @2xl:flex" />
-      )}
-      {isColVisible("mode") ? (
-        <ListGridHeaderCell className="hidden @2xl:flex">
-          {t(($) => $.page.table.mode)}
-        </ListGridHeaderCell>
-      ) : (
-        <ListGridHeaderCell className="hidden px-0 @2xl:flex" />
-      )}
-      {isColVisible("creator") ? (
-        <ListGridHeaderCell className="hidden @2xl:flex">
-          {t(($) => $.page.table.created_by)}
-        </ListGridHeaderCell>
-      ) : (
-        <ListGridHeaderCell className="hidden px-0 @2xl:flex" />
-      )}
-      {isColVisible("created") ? (
-        <ListGridHeaderCell
-          className="hidden @2xl:flex"
-          sorted={sorted("created")}
-          onSort={() => onSort("created")}
-        >
-          {t(($) => $.page.table.created)}
-        </ListGridHeaderCell>
-      ) : (
-        <ListGridHeaderCell className="hidden px-0 @2xl:flex" />
-      )}
-      <span aria-hidden="true" />
-    </ListGridHeader>
-  );
-}
-
-function LoadingSkeleton() {
-  return (
-    <ListGrid
-      className={GRID_COLS}
-      style={columnTrackVars(
-        (key) => !AUTOPILOT_DEFAULT_HIDDEN_COLUMNS.includes(key),
-      )}
-    >
-      <ListGridHeader>
-        <span aria-hidden="true" />
-        <ListGridHeaderCell>
-          <Skeleton className="h-3 w-12" />
-        </ListGridHeaderCell>
-        <ListGridHeaderCell>
-          <Skeleton className="h-3 w-14" />
-        </ListGridHeaderCell>
-        <ListGridHeaderCell className="hidden @2xl:flex">
-          <Skeleton className="h-3 w-12" />
-        </ListGridHeaderCell>
-        <ListGridHeaderCell className="hidden @2xl:flex">
-          <Skeleton className="h-3 w-12" />
-        </ListGridHeaderCell>
-        <ListGridHeaderCell className="hidden @2xl:flex">
-          <Skeleton className="h-3 w-12" />
-        </ListGridHeaderCell>
-        {/* mode/creator/created are hidden by default — keep their tracks
-            mapped with empty placeholders. */}
-        <ListGridHeaderCell className="hidden px-0 @2xl:flex" />
-        <ListGridHeaderCell className="hidden px-0 @2xl:flex" />
-        <ListGridHeaderCell className="hidden px-0 @2xl:flex" />
-        <span aria-hidden="true" />
-      </ListGridHeader>
-      {Array.from({ length: 5 }).map((_, i) => (
-        <ListGridRow key={i} className="hover:bg-transparent">
-          <span aria-hidden="true" />
-          <ListGridCell>
-            <Skeleton className="h-3.5 w-40 max-w-full" />
-          </ListGridCell>
-          <ListGridCell className="gap-1.5">
-            <Skeleton className="size-5 rounded-full" />
-            <Skeleton className="h-3 w-12" />
-          </ListGridCell>
-          <ListGridCell className="hidden @2xl:flex">
-            <Skeleton className="h-3 w-16" />
-          </ListGridCell>
-          <ListGridCell className="hidden @2xl:flex">
-            <Skeleton className="h-3 w-14" />
-          </ListGridCell>
-          <ListGridCell className="hidden @2xl:flex">
-            <Skeleton className="h-3 w-14" />
-          </ListGridCell>
-          <ListGridCell className="hidden px-0 @2xl:flex" />
-          <ListGridCell className="hidden px-0 @2xl:flex" />
-          <ListGridCell className="hidden px-0 @2xl:flex" />
-          <span aria-hidden="true" />
-        </ListGridRow>
-      ))}
-    </ListGrid>
-  );
+  return <span className="truncate">{label}</span>;
 }
 
 // Page
@@ -536,7 +219,6 @@ function AutopilotList() {
   const locale = useLocale();
   const wsId = useWorkspaceId();
   const wsPaths = useWorkspacePaths();
-  const rowLink = useRowLink();
   const {
     data: autopilots = [],
     isLoading,
@@ -569,18 +251,6 @@ function AutopilotList() {
   const toggleColumn = useAutopilotsViewStore((s) => s.toggleColumn);
   const toggleFilter = useAutopilotsViewStore((s) => s.toggleFilter);
   const clearFilters = useAutopilotsViewStore((s) => s.clearFilters);
-
-  const isColVisible = (key: AutopilotColumnKey) =>
-    !hiddenColumns.includes(key);
-
-  const toggleSelected = (id: string) => {
-    setSelectedIds((prev) => {
-      const next = new Set(prev);
-      if (next.has(id)) next.delete(id);
-      else next.add(id);
-      return next;
-    });
-  };
 
   const scopeLabels: Record<AutopilotScope, string> = {
     all: tLayout(($) => $.panels.autopilots.all),
@@ -672,15 +342,88 @@ function AutopilotList() {
     return filtered;
   }, [scopeRows, filters, sortField, sortDirection]);
 
-  // Row virtualization — same wiring as the skills list: headless math,
-  // offsets as padding on the body, fixed-height rows.
-  const listScrollRef = useRef<HTMLDivElement | null>(null);
-  const rowVirtualizer = useVirtualizer({
-    count: rows.length,
-    getScrollElement: () => listScrollRef.current,
-    estimateSize: () => ROW_HEIGHT,
-    overscan: 10,
-  });
+  const columns = useMemo<CollectionColumn<Autopilot>[]>(
+    () => [
+      {
+        key: "name",
+        header: t(($) => $.page.table.name),
+        sortKey: "name",
+        cell: (a) => <NameCell autopilot={a} />,
+      },
+      {
+        key: "assignee",
+        header: t(($) => $.page.table.assignee),
+        width: 144,
+        core: true,
+        hideable: true,
+        cell: (a) => (
+          <ActorCell
+            type={a.assignee_type}
+            id={a.assignee_id}
+            hoverCard={a.assignee_type === "agent"}
+          />
+        ),
+      },
+      {
+        key: "trigger",
+        header: t(($) => $.page.table.trigger),
+        width: 144,
+        hideable: true,
+        cell: (a) => <TriggerCell autopilot={a} />,
+      },
+      {
+        key: "lastRun",
+        header: t(($) => $.page.table.last_run),
+        width: 112,
+        sortKey: "lastRun",
+        hideable: true,
+        cell: (a) => <LastRunCell autopilot={a} />,
+      },
+      {
+        key: "nextRun",
+        header: t(($) => $.page.table.next_run),
+        width: 128,
+        sortKey: "nextRun",
+        hideable: true,
+        cell: (a) => <NextRunCell autopilot={a} />,
+      },
+      {
+        key: "mode",
+        header: t(($) => $.page.table.mode),
+        width: 104,
+        hideable: true,
+        cell: (a) => <ModeCell autopilot={a} />,
+      },
+      {
+        key: "creator",
+        header: t(($) => $.page.table.created_by),
+        width: 144,
+        hideable: true,
+        cell: (a) => <ActorCell type={a.created_by_type} id={a.created_by_id} />,
+      },
+      {
+        key: "created",
+        header: t(($) => $.page.table.created),
+        width: 104,
+        sortKey: "created",
+        hideable: true,
+        cell: (a) => (
+          <span className="tabular-nums">
+            {new Date(a.created_at).toLocaleDateString(locale)}
+          </span>
+        ),
+      },
+    ],
+    [t, locale],
+  );
+
+  const sort: CollectionSort = {
+    field: sortField,
+    direction: sortDirection,
+    onToggle: (field) => handleSort(field as AutopilotSortField),
+    onFieldChange: (field) => handleSortFieldSelect(field as AutopilotSortField),
+    onDirectionChange: setSortDirection,
+  };
 
   const openCreate = (template?: AutopilotTemplate) => {
     setSelectedTemplate(template ?? null);
@@ -702,19 +445,6 @@ function AutopilotList() {
   }, [createParam, templateParam]);
 
   const selectedRows = rows.filter((a) => selectedIds.has(a.id));
-  const allSelected = rows.length > 0 && selectedRows.length === rows.length;
-  const someSelected = selectedRows.length > 0 && !allSelected;
-  const handleToggleAll = () => {
-    setSelectedIds(allSelected ? new Set() : new Set(rows.map((a) => a.id)));
-  };
-
-  const virtualItems = rowVirtualizer.getVirtualItems();
-  const firstVirtual = virtualItems[0];
-  const lastVirtual = virtualItems[virtualItems.length - 1];
-  const virtualPadding = {
-    top: firstVirtual ? firstVirtual.start : 0,
-    bottom: lastVirtual ? rowVirtualizer.getTotalSize() - lastVirtual.end : 0,
-  };
 
   const totalCount = autopilots.length;
   const showEmpty = !isLoading && !listError && totalCount === 0;
@@ -749,13 +479,11 @@ function AutopilotList() {
         }
         actions={
           <>
-            <AutopilotDisplayMenu
-              sortField={sortField}
-              sortDirection={sortDirection}
-              onSortFieldChange={handleSortFieldSelect}
-              onSortDirectionChange={setSortDirection}
+            <CollectionDisplayMenu
+              columns={columns}
               hiddenColumns={hiddenColumns}
-              onToggleColumn={toggleColumn}
+              onToggleColumn={(key) => toggleColumn(key as AutopilotColumnKey)}
+              sort={sort}
             />
             <CollectionCreateButton
               label={t(($) => $.page.new_autopilot)}
@@ -826,107 +554,21 @@ function AutopilotList() {
             {t(($) => $.page.start_blank)}
           </Button>
         </div>
-      ) : isLoading ? (
-        <div className="flex-1 overflow-y-auto @container">
-          <LoadingSkeleton />
-        </div>
       ) : (
-        <div
-          ref={listScrollRef}
-          className="min-h-0 flex-1 overflow-auto @container"
-        >
-          <ListGrid
-            className={`${GRID_COLS} @2xl:min-w-[var(--apc-minw)]`}
-            style={columnTrackVars(isColVisible)}
-          >
-            <AutopilotListHeader
-              sortField={sortField}
-              sortDirection={sortDirection}
-              onSort={handleSort}
-              allSelected={allSelected}
-              someSelected={someSelected}
-              onToggleAll={handleToggleAll}
-              isColVisible={isColVisible}
-            />
-            <ListGridBody
-              style={{
-                paddingTop: virtualPadding.top,
-                paddingBottom:
-                  virtualPadding.bottom + LIST_GRID_BOTTOM_CLEARANCE,
-              }}
-            >
-              {rows.length === 0 && (
-                <div className="col-span-full py-16 text-center text-body text-muted-foreground">
-                  {t(($) => $.page.no_matches)}
-                </div>
-              )}
-              {virtualItems.map((vi) => {
-                const autopilot = rows[vi.index];
-                if (!autopilot) return null;
-                return (
-                  <ListGridRow
-                    key={autopilot.id}
-                    className={`cursor-pointer ${
-                      selectedIds.has(autopilot.id) ? "bg-accent/30" : ""
-                    }`}
-                    {...rowLink(
-                      wsPaths.autopilotDetail(autopilot.id),
-                      autopilot.title,
-                    )}
-                  >
-                    <CheckboxCell
-                      checked={selectedIds.has(autopilot.id)}
-                      onToggle={() => toggleSelected(autopilot.id)}
-                    />
-                    <NameCell autopilot={autopilot} />
-                    {isColVisible("assignee") ? (
-                      <AssigneeCell autopilot={autopilot} />
-                    ) : (
-                      <ListGridCell className="px-0" />
-                    )}
-                    {isColVisible("trigger") ? (
-                      <TriggerCell autopilot={autopilot} />
-                    ) : (
-                      <ListGridCell className="hidden px-0 @2xl:flex" />
-                    )}
-                    {isColVisible("lastRun") ? (
-                      <LastRunCell autopilot={autopilot} />
-                    ) : (
-                      <ListGridCell className="hidden px-0 @2xl:flex" />
-                    )}
-                    {isColVisible("nextRun") ? (
-                      <NextRunCell autopilot={autopilot} />
-                    ) : (
-                      <ListGridCell className="hidden px-0 @2xl:flex" />
-                    )}
-                    {isColVisible("mode") ? (
-                      <ModeCell autopilot={autopilot} />
-                    ) : (
-                      <ListGridCell className="hidden px-0 @2xl:flex" />
-                    )}
-                    {isColVisible("creator") ? (
-                      <CreatorCell autopilot={autopilot} />
-                    ) : (
-                      <ListGridCell className="hidden px-0 @2xl:flex" />
-                    )}
-                    {isColVisible("created") ? (
-                      <ListGridCell className="hidden whitespace-nowrap text-caption tabular-nums text-muted-foreground @2xl:flex">
-                        {new Date(autopilot.created_at).toLocaleDateString(
-                          locale,
-                        )}
-                      </ListGridCell>
-                    ) : (
-                      <ListGridCell className="hidden px-0 @2xl:flex" />
-                    )}
-                    <ListGridCell className="justify-end px-0">
-                      <AutopilotRowActions row={autopilot} />
-                    </ListGridCell>
-                  </ListGridRow>
-                );
-              })}
-            </ListGridBody>
-          </ListGrid>
-        </div>
+        <CollectionList
+          label={scopeLabels[scope]}
+          columns={columns}
+          hiddenColumns={hiddenColumns}
+          rows={rows}
+          loading={isLoading}
+          getRowId={(a) => a.id}
+          getRowHref={(a) => wsPaths.autopilotDetail(a.id)}
+          getRowTitle={(a) => a.title}
+          rowMenu={(a) => <AutopilotRowActions row={a} />}
+          sort={sort}
+          selection={{ selectedIds, onChange: setSelectedIds }}
+          empty={t(($) => $.page.no_matches)}
+        />
       )}
 
       <AutopilotBatchToolbar

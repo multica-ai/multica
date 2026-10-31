@@ -16,9 +16,7 @@
     "pin": "固定到側邊欄",
     "unpin": "取消釘選",
     "delete": "刪除",
-    "no_matches": "沒有匹配的專案",
-    "selected_other": "已選 {{count}} 項",
-    "clear_selection": "清除選擇"
+    "no_matches": "沒有匹配的專案"
   },
   "table": {
     "name": "名稱",
@@ -172,10 +170,6 @@
     "section_status": "狀態",
     "section_priority": "優先順序",
     "section_lead": "負責人",
-    "sort_by": "排序",
-    "direction_asc": "升序",
-    "direction_desc": "降序",
-    "section_columns": "列",
     "view": "檢視"
   }
 }

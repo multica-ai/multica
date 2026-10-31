@@ -16,9 +16,7 @@
     "pin": "固定到侧边栏",
     "unpin": "取消钉选",
     "delete": "删除",
-    "no_matches": "没有匹配的项目",
-    "selected_other": "已选 {{count}} 项",
-    "clear_selection": "清除选择"
+    "no_matches": "没有匹配的项目"
   },
   "table": {
     "name": "名称",
@@ -172,10 +170,6 @@
     "section_status": "状态",
     "section_priority": "优先级",
     "section_lead": "负责人",
-    "sort_by": "排序",
-    "direction_asc": "升序",
-    "direction_desc": "降序",
-    "section_columns": "列",
     "view": "视图"
   }
 }

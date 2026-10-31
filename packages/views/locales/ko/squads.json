@@ -129,10 +129,5 @@
     "mine": "내 스쿼드",
     "all": "전체 스쿼드"
   },
-  "toolbar": {
-    "sort_by": "정렬",
-    "direction_asc": "오름차순",
-    "direction_desc": "내림차순",
-    "section_columns": "열"
-  }
+  "toolbar": {}
 }

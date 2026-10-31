@@ -1049,16 +1049,8 @@
     "section_availability": "Availability",
     "section_access": "Access",
     "section_runtime": "Runtime",
-    "sort_by": "Sort by",
-    "direction_asc": "Ascending",
-    "direction_desc": "Descending",
-    "section_columns": "Columns",
     "section_owner": "Owner",
     "section_model": "Model"
   },
-  "actions": {
-    "selected_one": "{{count}} selected",
-    "selected_other": "{{count}} selected",
-    "clear_selection": "Clear selection"
-  }
+  "actions": {}
 }

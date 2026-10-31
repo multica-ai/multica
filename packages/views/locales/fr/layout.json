@@ -157,7 +157,19 @@
     "filter_count_one": "{{count}} filtre",
     "filter_count_other": "{{count}} filtres",
     "reset": "Réinitialiser",
-    "display": "Affichage"
+    "display": "Affichage",
+    "selected_one": "{{count}} sélectionné",
+    "selected_other": "{{count}} sélectionnés",
+    "clear_selection": "Effacer la sélection",
+    "select_all": "Tout sélectionner",
+    "select_row": "Sélectionner la ligne",
+    "row_actions": "Actions de la ligne",
+    "sort_by": "Trier par",
+    "direction_asc": "Croissant",
+    "direction_desc": "Décroissant",
+    "section_columns": "Colonnes",
+    "load_more": "Charger plus",
+    "loading_more": "Chargement…"
   },
   "object_page": {
     "toggle_panel": "Afficher ou masquer le panneau de droite",

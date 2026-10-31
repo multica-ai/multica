@@ -129,10 +129,5 @@
     "mine": "自分のスクワッド",
     "all": "すべてのスクワッド"
   },
-  "toolbar": {
-    "sort_by": "並び替え",
-    "direction_asc": "昇順",
-    "direction_desc": "降順",
-    "section_columns": "列"
-  }
+  "toolbar": {}
 }

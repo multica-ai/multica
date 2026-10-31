@@ -1,6 +1,5 @@
 "use client";
 
-import { ArrowDown, ArrowUp, ChevronDown } from "@multica/ui/icons";
 import {
   ALL_ACCESS_SCOPES,
   effectiveAccessScope,
@@ -9,58 +8,22 @@ import {
 import type { MemberWithUser } from "@multica/core/types";
 import { runtimeDisplayLabel } from "@multica/core/runtimes";
 import { resolvePublicFileUrl } from "@multica/core/workspace/avatar-url";
-import type {
-  AgentColumnKey,
-  AgentListFilters,
-  AgentSortDirection,
-  AgentSortField,
-} from "@multica/core/agents/stores";
-import { Button } from "@multica/ui/components/ui/button";
-import { IconButton } from "@multica/ui/components/common/icon-button";
+import type { AgentListFilters } from "@multica/core/agents/stores";
 import {
   DropdownMenu,
   DropdownMenuCheckboxItem,
   DropdownMenuContent,
-  DropdownMenuRadioGroup,
-  DropdownMenuRadioItem,
   DropdownMenuSub,
   DropdownMenuSubContent,
   DropdownMenuSubTrigger,
   DropdownMenuTrigger,
 } from "@multica/ui/components/ui/dropdown-menu";
-import {
-  Popover,
-  PopoverContent,
-  PopoverTrigger,
-} from "@multica/ui/components/ui/popover";
-import { Switch } from "@multica/ui/components/ui/switch";
 import { ActorAvatar } from "@multica/ui/components/common/actor-avatar";
 import { FILTER_ITEM_CLASS, HoverCheck } from "../../common/hover-check";
-import {
-  CollectionDisplayButton,
-  CollectionFilterButton,
-} from "../../layout/collection-page";
+import { CollectionFilterButton } from "../../layout/collection-page";
 import { availabilityConfig } from "../presence";
 import { useT } from "../../i18n";
 import type { AgentListRow } from "./agents-page";
-
-const COLUMN_KEYS: AgentColumnKey[] = [
-  "status",
-  "owner",
-  "access",
-  "runtime",
-  "lastActive",
-  "runs",
-  "model",
-  "created",
-];
-
-const SORT_FIELDS: AgentSortField[] = [
-  "lastActive",
-  "name",
-  "runs",
-  "created",
-];
 
 const AVAILABILITY_VALUES: AgentAvailability[] = [
   "online",
@@ -299,122 +262,5 @@ export function AgentListFilterMenu({
         )}
       </DropdownMenuContent>
     </DropdownMenu>
-  );
-}
-
-/** The header's display icon: sort field and direction, then column toggles. */
-export function AgentListDisplayMenu({
-  sortField,
-  sortDirection,
-  onSortFieldChange,
-  onSortDirectionChange,
-  hiddenColumns,
-  onToggleColumn,
-}: {
-  sortField: AgentSortField;
-  sortDirection: AgentSortDirection;
-  onSortFieldChange: (field: AgentSortField) => void;
-  onSortDirectionChange: (direction: AgentSortDirection) => void;
-  hiddenColumns: AgentColumnKey[];
-  onToggleColumn: (key: AgentColumnKey) => void;
-}) {
-  const { t } = useT("agents");
-
-  const SORT_LABELS: Record<AgentSortField, string> = {
-    lastActive: t(($) => $.columns.last_active),
-    name: t(($) => $.columns.agent),
-    runs: t(($) => $.columns.runs),
-    created: t(($) => $.columns.created),
-  };
-
-  const COLUMN_LABELS: Record<AgentColumnKey, string> = {
-    status: t(($) => $.columns.status),
-    owner: t(($) => $.columns.owner),
-    access: t(($) => $.columns.access),
-    runtime: t(($) => $.columns.runtime),
-    lastActive: t(($) => $.columns.last_active),
-    runs: t(($) => $.columns.runs),
-    model: t(($) => $.columns.model),
-    created: t(($) => $.columns.created),
-  };
-
-  return (
-    <Popover>
-      <PopoverTrigger render={<CollectionDisplayButton />} />
-      <PopoverContent align="end" className="w-64 p-0">
-        <div className="border-b px-3 py-2.5">
-          <span className="text-caption font-medium text-muted-foreground">
-            {t(($) => $.toolbar.sort_by)}
-          </span>
-          <div className="mt-2 flex items-center gap-1.5">
-            <DropdownMenu>
-              <DropdownMenuTrigger
-                render={
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    className="flex-1 justify-between text-caption"
-                  >
-                    {SORT_LABELS[sortField]}
-                    <ChevronDown className="size-3 text-muted-foreground" />
-                  </Button>
-                }
-              />
-              <DropdownMenuContent align="start" className="w-auto">
-                <DropdownMenuRadioGroup
-                  value={sortField}
-                  onValueChange={(v) => onSortFieldChange(v as AgentSortField)}
-                >
-                  {SORT_FIELDS.map((field) => (
-                    <DropdownMenuRadioItem key={field} value={field}>
-                      {SORT_LABELS[field]}
-                    </DropdownMenuRadioItem>
-                  ))}
-                </DropdownMenuRadioGroup>
-              </DropdownMenuContent>
-            </DropdownMenu>
-            <IconButton
-              variant="outline"
-              size="icon-sm"
-              onClick={() =>
-                onSortDirectionChange(sortDirection === "asc" ? "desc" : "asc")
-              }
-              label={
-                sortDirection === "asc"
-                  ? t(($) => $.toolbar.direction_asc)
-                  : t(($) => $.toolbar.direction_desc)
-              }
-            >
-              {sortDirection === "asc" ? (
-                <ArrowUp className="size-3.5" />
-              ) : (
-                <ArrowDown className="size-3.5" />
-              )}
-            </IconButton>
-          </div>
-        </div>
-
-        <div className="px-3 py-2.5">
-          <span className="text-caption font-medium text-muted-foreground">
-            {t(($) => $.toolbar.section_columns)}
-          </span>
-          <div className="mt-2 space-y-2">
-            {COLUMN_KEYS.map((key) => (
-              <label
-                key={key}
-                className="flex cursor-pointer items-center justify-between"
-              >
-                <span className="text-body">{COLUMN_LABELS[key]}</span>
-                <Switch
-                  size="sm"
-                  checked={!hiddenColumns.includes(key)}
-                  onCheckedChange={() => onToggleColumn(key)}
-                />
-              </label>
-            ))}
-          </div>
-        </div>
-      </PopoverContent>
-    </Popover>
   );
 }

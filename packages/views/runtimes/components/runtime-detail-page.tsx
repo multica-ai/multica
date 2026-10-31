@@ -340,7 +340,7 @@ export function RuntimeDetailPage({
             }
           >
             {machineRuntimes.length > 0 ? (
-              <ObjectSectionCard>
+              <div className="-mx-2">
                 <RuntimeList
                   runtimes={machineRuntimes}
                   now={now}
@@ -349,7 +349,7 @@ export function RuntimeDetailPage({
                     paths.runtimeSettings(machine.id, childRuntimeId)
                   }
                 />
-              </ObjectSectionCard>
+              </div>
             ) : (
               <div className="flex min-h-40 flex-col items-center justify-center rounded-lg border border-dashed px-6 text-center">
                 <Server

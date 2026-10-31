@@ -313,7 +313,7 @@ describe("ProjectsPage compact row navigation", () => {
     renderProjects(makeAdapter({ push }));
     const row = projectRow();
 
-    await user.click(within(row).getByRole("button", { pressed: false }));
+    await user.click(within(row).getByRole("checkbox", { name: "Select row" }));
     await user.click(within(row).getByRole("button", { name: "Project actions" }));
     await user.click(within(row).getAllByRole("button", { name: "In Progress" })[0]!);
     await user.click(within(row).getAllByRole("button", { name: "High" })[0]!);

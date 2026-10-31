@@ -35,6 +35,7 @@ vi.mock("@multica/core/paths", () => ({
     issueDetail: (id: string) => `/ws/issues/${id}`,
   }),
 }));
+const rowLinks = vi.hoisted(() => [] as string[]);
 vi.mock("../../navigation", () => ({
   AppLink: ({
     href,
@@ -48,6 +49,12 @@ vi.mock("../../navigation", () => ({
       {children}
     </a>
   ),
+  useIntentNavigate: () => () => {},
+  useRowLink: () => (href: string) => ({
+    onClick: () => rowLinks.push(href),
+    onAuxClick: () => {},
+    onMouseEnter: () => {},
+  }),
 }));
 vi.mock("../../common/actor-avatar", () => ({ ActorAvatar: () => null }));
 vi.mock("../../common/task-transcript", () => ({
@@ -89,6 +96,7 @@ function mount() {
 }
 beforeEach(() => {
   queries = [];
+  rowLinks.length = 0;
   rows = ["a", "b"].map((id) => ({
     id,
     issue_id: `issue-${id}`,
@@ -164,14 +172,10 @@ it("shows consumed running work separately from its off state and keeps transcri
   expect(
     within(row).getByRole("button", { name: "Enable again" }),
   ).toBeDisabled();
-  expect(within(row).getByRole("checkbox")).toHaveAttribute(
-    "aria-disabled",
-    "true",
-  );
-  expect(within(row).getByRole("link", { name: /Issue a/ })).toHaveAttribute(
-    "href",
-    "/ws/issues/issue-a",
-  );
+  // A rule that is already off is not part of batch selection.
+  expect(within(row).queryByRole("checkbox")).toBeNull();
+  fireEvent.click(within(row).getByText("Issue a"));
+  expect(rowLinks).toEqual(["/ws/issues/issue-a"]);
 });
 
 it("confirms batch consequences and retains only failed selections for retry", async () => {
@@ -182,7 +186,7 @@ it("confirms batch consequences and retains only failed selections for retry", a
   await screen.findByText("Issue a");
   fireEvent.click(
     screen.getByRole("checkbox", {
-      name: "Select enabled wakeups on this page",
+      name: "Select all enabled wakeups",
     }),
   );
   fireEvent.click(screen.getByRole("button", { name: "Turn off selected" }));
@@ -206,12 +210,12 @@ it("confirms batch consequences and retains only failed selections for retry", a
   ).toBeChecked();
 });
 
-it("resets page and selection on scope changes and sends bounded page requests", async () => {
+it("loads more in bounded pages and resets paging and selection on scope changes", async () => {
   const user = userEvent.setup();
   mount();
   await screen.findByText("Issue a");
-  fireEvent.click(screen.getByRole("button", { name: "Next" }));
-  await waitFor(() => expect(queries.at(-1)?.offset).toBe(50));
+  fireEvent.click(screen.getByRole("button", { name: "Load more" }));
+  await waitFor(() => expect(queries.at(-1)).toMatchObject({ offset: 2, limit: 50 }));
   await screen.findByText("Issue a");
   fireEvent.click(
     screen.getByRole("checkbox", { name: "Select DEV-a, Agent a" }),
@@ -227,9 +231,9 @@ it("resets page and selection on scope changes and sends bounded page requests",
     }),
   );
   expect(screen.getByRole("button", { name: "All wakeups" })).toBeVisible();
-  expect(
-    screen.queryByRole("button", { name: "Turn off selected" }),
-  ).toBeNull();
+  await waitFor(() =>
+    expect(screen.queryByRole("button", { name: "Turn off selected" })).toBeNull(),
+  );
   expect(screen.queryByRole("button", { name: /search/i })).toBeNull();
 });
 
@@ -238,8 +242,8 @@ it("makes read-only rules non-selectable and surfaces inventory failures", async
   const view = mount();
   await screen.findByText("Issue a");
   expect(
-    screen.getByRole("checkbox", { name: "Select DEV-a, Agent a" }),
-  ).toHaveAttribute("aria-disabled", "true");
+    screen.queryByRole("checkbox", { name: "Select DEV-a, Agent a" }),
+  ).toBeNull();
   expect(
     screen.getByRole("switch", { name: "Wakeup for Agent a" }),
   ).toHaveAttribute("aria-disabled", "true");

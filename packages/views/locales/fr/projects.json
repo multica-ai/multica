@@ -16,10 +16,7 @@
     "pin": "Épingler à la barre latérale",
     "unpin": "Détacher",
     "delete": "Supprimer",
-    "no_matches": "Aucun projet correspondant",
-    "selected_one": "{{count}} sélectionné",
-    "selected_other": "{{count}} sélectionnés",
-    "clear_selection": "Effacer la sélection"
+    "no_matches": "Aucun projet correspondant"
   },
   "table": {
     "name": "Nom",
@@ -173,10 +170,6 @@
     "section_status": "Statut",
     "section_priority": "Priorité",
     "section_lead": "Responsable",
-    "sort_by": "Trier par",
-    "direction_asc": "Croissant",
-    "direction_desc": "Décroissant",
-    "section_columns": "Colonnes",
     "view": "Vue"
   }
 }

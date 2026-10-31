@@ -874,10 +874,6 @@
     "section_availability": "가용성",
     "section_access": "접근 권한",
     "section_runtime": "런타임",
-    "sort_by": "정렬",
-    "direction_asc": "오름차순",
-    "direction_desc": "내림차순",
-    "section_columns": "열",
     "section_owner": "소유자",
     "section_model": "모델"
   },
@@ -1030,8 +1026,5 @@
       "next": "다음"
     }
   },
-  "actions": {
-    "selected_other": "{{count}}개 선택됨",
-    "clear_selection": "선택 해제"
-  }
+  "actions": {}
 }

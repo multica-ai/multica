@@ -1049,16 +1049,8 @@
     "section_availability": "Disponibilité",
     "section_access": "Accès",
     "section_runtime": "Runtime",
-    "sort_by": "Trier par",
-    "direction_asc": "Croissant",
-    "direction_desc": "Décroissant",
-    "section_columns": "Colonnes",
     "section_owner": "Propriétaire",
     "section_model": "Modèle"
   },
-  "actions": {
-    "selected_one": "{{count}} sélectionné",
-    "selected_other": "{{count}} sélectionnés",
-    "clear_selection": "Effacer la sélection"
-  }
+  "actions": {}
 }

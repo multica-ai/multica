@@ -151,7 +151,18 @@
     "filter": "필터",
     "filter_count_other": "필터 {{count}}개",
     "reset": "초기화",
-    "display": "표시 설정"
+    "display": "표시 설정",
+    "selected_other": "{{count}}개 선택됨",
+    "clear_selection": "선택 해제",
+    "select_all": "모두 선택",
+    "select_row": "행 선택",
+    "row_actions": "행 작업",
+    "sort_by": "정렬",
+    "direction_asc": "오름차순",
+    "direction_desc": "내림차순",
+    "section_columns": "열",
+    "load_more": "더 불러오기",
+    "loading_more": "불러오는 중…"
   },
   "object_page": {
     "toggle_panel": "오른쪽 사이드바 전환",

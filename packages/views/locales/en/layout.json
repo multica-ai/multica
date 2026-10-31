@@ -157,7 +157,19 @@
     "filter_count_one": "{{count}} filter",
     "filter_count_other": "{{count}} filters",
     "reset": "Reset",
-    "display": "Display settings"
+    "display": "Display settings",
+    "selected_one": "{{count}} selected",
+    "selected_other": "{{count}} selected",
+    "clear_selection": "Clear selection",
+    "select_all": "Select all",
+    "select_row": "Select row",
+    "row_actions": "Row actions",
+    "sort_by": "Sort by",
+    "direction_asc": "Ascending",
+    "direction_desc": "Descending",
+    "section_columns": "Columns",
+    "load_more": "Load more",
+    "loading_more": "Loading…"
   },
   "object_page": {
     "toggle_panel": "Toggle right sidebar",

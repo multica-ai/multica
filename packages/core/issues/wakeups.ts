@@ -1,4 +1,5 @@
 import {
+  infiniteQueryOptions,
   queryOptions,
   useMutation,
   useQueryClient,
@@ -172,6 +173,24 @@ export function workspaceWakeupsOptions(
   return queryOptions({
     queryKey: ["workspace-wakeups", workspaceId, filters],
     queryFn: () => api.listWorkspaceWakeups(filters),
+    enabled: !!workspaceId,
+    refetchInterval: 10_000,
+  });
+}
+
+/** The workspace list, one `limit`-sized page per "Load more". */
+export function workspaceWakeupsInfiniteOptions(
+  workspaceId: string,
+  filters: Omit<WorkspaceWakeupFilters, "offset">,
+) {
+  return infiniteQueryOptions({
+    queryKey: ["workspace-wakeups", workspaceId, "pages", filters],
+    initialPageParam: 0,
+    queryFn: ({ pageParam }) => api.listWorkspaceWakeups({ ...filters, offset: pageParam }),
+    getNextPageParam: (lastPage, pages) => {
+      const loaded = pages.reduce((sum, page) => sum + page.items.length, 0);
+      return lastPage.items.length > 0 && loaded < lastPage.total ? loaded : undefined;
+    },
     enabled: !!workspaceId,
     refetchInterval: 10_000,
   });

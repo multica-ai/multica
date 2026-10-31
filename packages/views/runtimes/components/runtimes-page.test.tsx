@@ -48,7 +48,12 @@ vi.mock("../../navigation", () => ({
   ),
   rowLinkInteractiveProps: {},
   useNavigation: () => ({ push: vi.fn() }),
-  useRowLink: () => () => ({}),
+  useIntentNavigate: () => vi.fn(),
+  useRowLink: () => () => ({
+    onClick: vi.fn(),
+    onAuxClick: vi.fn(),
+    onMouseEnter: vi.fn(),
+  }),
 }));
 
 const NOW = Date.now();

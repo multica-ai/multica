@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useRef, useState } from "react";
+import { useMemo, useState } from "react";
 import {
   AlertCircle,
   AlertTriangle,
@@ -18,7 +18,6 @@ import type {
   SkillSummary,
 } from "@multica/core/types";
 import { useQuery } from "@tanstack/react-query";
-import { useVirtualizer } from "@tanstack/react-virtual";
 import { useAuthStore } from "@multica/core/auth";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { useWorkspacePaths } from "@multica/core/paths";
@@ -31,35 +30,26 @@ import {
 import { runtimeDisplayLabel, runtimeListOptions } from "@multica/core/runtimes";
 import { resolvePublicFileUrl } from "@multica/core/workspace/avatar-url";
 import { Button } from "@multica/ui/components/ui/button";
-import { Checkbox } from "@multica/ui/components/ui/checkbox";
-import {
-  LIST_GRID_BOTTOM_CLEARANCE,
-  ListGrid,
-  ListGridBody,
-  ListGridCell,
-  ListGridHeader,
-  ListGridHeaderCell,
-  ListGridRow,
-  type ListGridSortDirection,
-} from "@multica/ui/components/ui/list-grid";
-import { Skeleton } from "@multica/ui/components/ui/skeleton";
 import {
   Tooltip,
   TooltipContent,
   TooltipTrigger,
 } from "@multica/ui/components/ui/tooltip";
 import { ActorAvatar } from "@multica/ui/components/common/actor-avatar";
-import {
-  rowLinkInteractiveProps,
-  useNavigation,
-  useRowLink,
-} from "../../navigation";
+import { rowLinkInteractiveProps, useNavigation } from "../../navigation";
 import {
   CollectionPageHeader,
   CollectionPageState,
   CollectionResetButton,
   CollectionScopeItems,
 } from "../../layout/collection-page";
+import {
+  CollectionDisplayMenu,
+  CollectionList,
+  CollectionNameCell,
+  type CollectionColumn,
+  type CollectionSort,
+} from "../../layout/collection-list";
 import { canEditSkill } from "../hooks/use-can-edit-skill";
 import { originSourceUrl, readOrigin } from "../lib/origin";
 import { rowMatchesFilters, type SkillRow } from "./skill-list-filter";
@@ -69,13 +59,11 @@ import {
 } from "./create-skill-dialog";
 import {
   useSkillsViewStore,
-  DEFAULT_HIDDEN_COLUMNS,
   type SkillColumnKey,
   type SkillSortField,
 } from "@multica/core/skills/stores";
 import {
   SkillCreateMenu,
-  SkillDisplayMenu,
   SkillFilterMenu,
   countActiveFilterDimensions,
 } from "./skill-list-controls";
@@ -85,77 +73,6 @@ import {
   type SkillActionsContext,
 } from "./skill-list-actions";
 import { useT, useTimeAgo } from "../../i18n";
-
-// Column template — single source of truth for header, rows, and skeletons.
-// Tracks: [edge 0.75rem] [checkbox 1rem] [name, only fr track]
-// [usedBy] [source] [creator] [updated] [created] [kebab 1.75rem]
-// [edge 0.75rem].
-// Content cells carry a default px-2 from list-grid.tsx
-// (structural columns opt out with px-0), so the narrow edge tracks plus
-// cell padding land content 20px from the container edge. Non-core cells
-// carry `hidden @2xl:flex`. The breakpoint queries the CONTAINER (the page
-// wrapper is the `@container`), not the viewport, so sidebars and split
-// panes are accounted for.
-// Hideable tracks are DETERMINISTIC widths via CSS vars (no max-content):
-// rows are virtualized, so with only the visible slice mounted a
-// content-driven track would resize as different rows scrolled into view.
-// Truncation moved from per-cell max-w caps to the tracks themselves.
-// A user-hidden column zeroes its var (columnTrackVars), collapsing the
-// track exactly like the old max-content placeholder did; the empty
-// placeholder cell stays rendered to keep subgrid auto-placement intact.
-//
-// TWO-ZONE RESPONSIVENESS (replaces the retired per-tier breakpoints):
-// - Container ≥ @2xl (672px): WYSIWYG — every user-enabled column renders.
-//   The grid carries min-width = Σ(enabled tracks + gaps) so when the
-//   enabled set outgrows the container the wrapper scrolls horizontally.
-//   The scrollbar is the escape valve for an over-provisioned column set,
-//   never the default experience; an enabled column must NEVER silently
-//   vanish (that "dead toggle" bug shipped twice).
-// - Container < @2xl (phones, slim split panes): static core set
-//   (name + usedBy), no horizontal scroll, column toggles don't apply.
-const GRID_COLS =
-  "grid-cols-[0.75rem_1rem_minmax(120px,1fr)_var(--lgc-usedby)_1.75rem_0.75rem] " +
-  "@2xl:grid-cols-[0.75rem_1rem_minmax(200px,1fr)_var(--lgc-usedby)_var(--lgc-source)_var(--lgc-creator)_var(--lgc-updated)_var(--lgc-created)_1.75rem_0.75rem]";
-
-// h-12 rows. The virtualizer's fixed-size contract: every row renders at
-// exactly this height, which is what lets it skip per-row measurement.
-const ROW_HEIGHT = 48;
-
-// Single source for hideable column widths: track vars and the grid's
-// min-width derive from the same numbers.
-const COLUMN_WIDTHS: Record<SkillColumnKey, number> = {
-  usedBy: 144,
-  source: 152,
-  creator: 144,
-  updated: 104,
-  created: 104,
-};
-
-// Fixed tracks (edges 12+12, checkbox 16, name min 200, kebab 28) plus the
-// 9 gap-x-3 gaps between the wide template's 10 tracks (zero-width tracks
-// still carry gaps).
-const FIXED_TRACKS_WIDTH = 268 + 9 * 12;
-
-function columnTrackVars(
-  isVisible: (key: SkillColumnKey) => boolean,
-): React.CSSProperties {
-  const width = (key: SkillColumnKey) =>
-    isVisible(key) ? `${COLUMN_WIDTHS[key]}px` : "0px";
-  const minWidth =
-    FIXED_TRACKS_WIDTH +
-    (Object.keys(COLUMN_WIDTHS) as SkillColumnKey[]).reduce(
-      (sum, key) => sum + (isVisible(key) ? COLUMN_WIDTHS[key] : 0),
-      0,
-    );
-  return {
-    "--lgc-usedby": width("usedBy"),
-    "--lgc-source": width("source"),
-    "--lgc-creator": width("creator"),
-    "--lgc-updated": width("updated"),
-    "--lgc-created": width("created"),
-    "--lgc-minw": `${minWidth}px`,
-  } as React.CSSProperties;
-}
 
 // Sort/filter/column types and defaults live in the core view store
 // (@multica/core/skills/stores/view-store) so the persisted state and the
@@ -167,98 +84,51 @@ type SkillScope = "all" | "mine";
 
 // Cells
 
-// Hover-revealed multi-select checkbox. Same pattern as SkillPickerList:
-// the shadcn Checkbox is presentational only (`pointer-events-none`, so the
-// Base UI button can never swallow the click) and the wrapping <button> owns
-// the toggle. It stops click propagation so toggling never triggers the
-// row's whole-row navigation (see `useRowLink`) — no preventDefault needed,
-// the row is a plain <div>, not an <a>.
-function CheckboxCell({
-  checked,
-  onToggle,
-}: {
-  checked: boolean;
-  onToggle: () => void;
-}) {
-  return (
-    <ListGridCell className="justify-center px-0">
-      <button
-        type="button"
-        aria-pressed={checked}
-        onClick={(e) => {
-          e.stopPropagation();
-          onToggle();
-        }}
-        className={`-m-1.5 flex items-center p-1.5 ${
-          checked ? "" : "opacity-0 transition-opacity group-hover/row:opacity-100"
-        }`}
-      >
-        <Checkbox
-          checked={checked}
-          tabIndex={-1}
-          className="pointer-events-none"
-        />
-      </button>
-    </ListGridCell>
-  );
-}
-
 function NameCell({ row }: { row: SkillRow }) {
   const { t } = useT("skills");
   const { skill, canEdit } = row;
   return (
-    <ListGridCell className="gap-1.5">
-      <span className="min-w-0 truncate text-body font-medium">
-        {skill.name}
-      </span>
-      {!canEdit && (
-        <Tooltip>
-          <TooltipTrigger
-            render={
-              <Lock className="h-3 w-3 shrink-0 text-faint-foreground" />
-            }
-          />
-          <TooltipContent>{t(($) => $.table.lock_tooltip)}</TooltipContent>
-        </Tooltip>
-      )}
-    </ListGridCell>
+    <CollectionNameCell
+      icon={<SkillIcon className="size-4 shrink-0 text-muted-foreground" />}
+      title={skill.name}
+      badges={
+        !canEdit && (
+          <Tooltip>
+            <TooltipTrigger
+              render={<Lock className="h-3 w-3 shrink-0 text-faint-foreground" />}
+            />
+            <TooltipContent>{t(($) => $.table.lock_tooltip)}</TooltipContent>
+          </Tooltip>
+        )
+      }
+      description={skill.description || undefined}
+    />
   );
 }
 
 function UsedByCell({ agents }: { agents: Agent[] }) {
   const { t } = useT("skills");
-  if (agents.length === 0) {
-    return (
-      <ListGridCell>
-        <span className="text-caption text-muted-foreground">
-          {t(($) => $.table.unused)}
-        </span>
-      </ListGridCell>
-    );
-  }
+  if (agents.length === 0) return <span>{t(($) => $.table.unused)}</span>;
   const soleAgent = agents.length === 1 ? agents[0] : undefined;
   if (soleAgent) {
     const agent = soleAgent;
     return (
-      <ListGridCell className="gap-1.5">
+      <>
         <ActorAvatar
           name={agent.name}
           initials={agent.name.slice(0, 2).toUpperCase()}
           avatarUrl={resolvePublicFileUrl(agent.avatar_url)}
           isAgent
-          size="md"
+          size="sm"
         />
-        <span className="min-w-0 truncate text-caption text-muted-foreground">
-          {agent.name}
-        </span>
-      </ListGridCell>
+        <span className="min-w-0 truncate">{agent.name}</span>
+      </>
     );
   }
   const visible = agents.slice(0, 3);
   const extra = agents.length - visible.length;
   return (
-    <ListGridCell>
-      <div className="flex items-center -space-x-1.5">
+    <div className="flex items-center -space-x-1.5">
         {visible.map((a) => (
           <Tooltip key={a.id}>
             <TooltipTrigger
@@ -269,7 +139,7 @@ function UsedByCell({ agents }: { agents: Agent[] }) {
                     initials={a.name.slice(0, 2).toUpperCase()}
                     avatarUrl={resolvePublicFileUrl(a.avatar_url)}
                     isAgent
-                    size="md"
+                    size="sm"
                   />
                 </span>
               }
@@ -278,12 +148,11 @@ function UsedByCell({ agents }: { agents: Agent[] }) {
           </Tooltip>
         ))}
         {extra > 0 && (
-          <span className="inline-flex h-6 w-6 items-center justify-center rounded-full bg-muted text-caption font-medium text-muted-foreground ring-2 ring-background">
+          <span className="inline-flex size-5 items-center justify-center rounded-full bg-muted text-micro font-medium text-muted-foreground ring-2 ring-background">
             +{extra}
           </span>
         )}
-      </div>
-    </ListGridCell>
+    </div>
   );
 }
 
@@ -324,7 +193,7 @@ function SourceCell({
   const sourceUrl = originSourceUrl(origin);
 
   return (
-    <ListGridCell className="hidden gap-1.5 text-caption text-muted-foreground @2xl:flex">
+    <>
       {icon}
       {sourceUrl ? (
         <Tooltip>
@@ -346,27 +215,22 @@ function SourceCell({
       ) : (
         <span className="min-w-0 truncate">{label}</span>
       )}
-    </ListGridCell>
+    </>
   );
 }
 
 function CreatorCell({ creator }: { creator: MemberWithUser | null }) {
+  if (!creator) return null;
   return (
-    <ListGridCell className="hidden gap-1.5 @2xl:flex">
-      {creator && (
-        <>
-          <ActorAvatar
-            name={creator.name}
-            initials={creator.name.slice(0, 2).toUpperCase()}
-            avatarUrl={resolvePublicFileUrl(creator.avatar_url)}
-            size="md"
-          />
-          <span className="min-w-0 truncate text-caption text-muted-foreground">
-            {creator.name}
-          </span>
-        </>
-      )}
-    </ListGridCell>
+    <>
+      <ActorAvatar
+        name={creator.name}
+        initials={creator.name.slice(0, 2).toUpperCase()}
+        avatarUrl={resolvePublicFileUrl(creator.avatar_url)}
+        size="sm"
+      />
+      <span className="min-w-0 truncate">{creator.name}</span>
+    </>
   );
 }
 
@@ -383,159 +247,6 @@ function EmptyState() {
   );
 }
 
-// List
-
-function SkillListHeader({
-  sortField,
-  sortDirection,
-  onSort,
-  allSelected,
-  someSelected,
-  onToggleAll,
-  isColVisible,
-}: {
-  sortField: SortField;
-  sortDirection: ListGridSortDirection;
-  onSort: (field: SortField) => void;
-  allSelected: boolean;
-  someSelected: boolean;
-  onToggleAll: () => void;
-  isColVisible: (key: SkillColumnKey) => boolean;
-}) {
-  const { t } = useT("skills");
-  const sorted = (field: SortField) =>
-    sortField === field ? sortDirection : false;
-  const anySelected = allSelected || someSelected;
-  return (
-    <ListGridHeader>
-      {/* Tri-state select-all in the checkbox track. Same presentational
-          Checkbox + interactive wrapper pattern as the row cells; revealed
-          on header hover or whenever a selection exists. */}
-      <div className="flex items-center justify-center">
-        <button
-          type="button"
-          aria-pressed={allSelected}
-          onClick={onToggleAll}
-          className={`-m-1.5 flex items-center p-1.5 ${
-            anySelected
-              ? ""
-              : "opacity-0 transition-opacity group-hover/header:opacity-100"
-          }`}
-        >
-          <Checkbox
-            checked={allSelected}
-            indeterminate={someSelected && !allSelected}
-            tabIndex={-1}
-            className="pointer-events-none"
-          />
-        </button>
-      </div>
-      <ListGridHeaderCell sorted={sorted("name")} onSort={() => onSort("name")}>
-        {t(($) => $.table.name)}
-      </ListGridHeaderCell>
-      {isColVisible("usedBy") ? (
-        <ListGridHeaderCell
-          sorted={sorted("usedBy")}
-          onSort={() => onSort("usedBy")}
-        >
-          {t(($) => $.table.used_by)}
-        </ListGridHeaderCell>
-      ) : (
-        <ListGridHeaderCell className="px-0" />
-      )}
-      {isColVisible("source") ? (
-        <ListGridHeaderCell className="hidden @2xl:flex">
-          {t(($) => $.table.source)}
-        </ListGridHeaderCell>
-      ) : (
-        <ListGridHeaderCell className="hidden px-0 @2xl:flex" />
-      )}
-      {isColVisible("creator") ? (
-        <ListGridHeaderCell className="hidden @2xl:flex">
-          {t(($) => $.table.created_by)}
-        </ListGridHeaderCell>
-      ) : (
-        <ListGridHeaderCell className="hidden px-0 @2xl:flex" />
-      )}
-      {isColVisible("updated") ? (
-        <ListGridHeaderCell
-          className="hidden @2xl:flex"
-          sorted={sorted("updated")}
-          onSort={() => onSort("updated")}
-        >
-          {t(($) => $.table.updated)}
-        </ListGridHeaderCell>
-      ) : (
-        <ListGridHeaderCell className="hidden px-0 @2xl:flex" />
-      )}
-      {isColVisible("created") ? (
-        <ListGridHeaderCell
-          className="hidden @2xl:flex"
-          sorted={sorted("created")}
-          onSort={() => onSort("created")}
-        >
-          {t(($) => $.table.created)}
-        </ListGridHeaderCell>
-      ) : (
-        <ListGridHeaderCell className="hidden px-0 @2xl:flex" />
-      )}
-      <span aria-hidden="true" />
-    </ListGridHeader>
-  );
-}
-
-function LoadingSkeleton() {
-  return (
-    <ListGrid
-      className={GRID_COLS}
-      style={columnTrackVars((key) => !DEFAULT_HIDDEN_COLUMNS.includes(key))}
-    >
-      <ListGridHeader>
-        <span aria-hidden="true" />
-        <ListGridHeaderCell>
-          <Skeleton className="h-3 w-12" />
-        </ListGridHeaderCell>
-        <ListGridHeaderCell>
-          <Skeleton className="h-3 w-14" />
-        </ListGridHeaderCell>
-        {/* Source and created are hidden by default — keep their tracks
-            mapped with empty placeholders so the skeleton matches the
-            default layout. */}
-        <ListGridHeaderCell className="hidden px-0 @2xl:flex" />
-        <ListGridHeaderCell className="hidden @2xl:flex">
-          <Skeleton className="h-3 w-10" />
-        </ListGridHeaderCell>
-        <ListGridHeaderCell className="hidden @2xl:flex">
-          <Skeleton className="h-3 w-12" />
-        </ListGridHeaderCell>
-        <ListGridHeaderCell className="hidden px-0 @2xl:flex" />
-        <span aria-hidden="true" />
-      </ListGridHeader>
-      {Array.from({ length: 5 }).map((_, i) => (
-        <ListGridRow key={i} className="hover:bg-transparent">
-          <span aria-hidden="true" />
-          <ListGridCell>
-            <Skeleton className="h-3.5 w-40 max-w-full" />
-          </ListGridCell>
-          <ListGridCell>
-            <Skeleton className="h-5 w-14" />
-          </ListGridCell>
-          <ListGridCell className="hidden px-0 @2xl:flex" />
-          <ListGridCell className="hidden gap-1.5 @2xl:flex">
-            <Skeleton className="size-5 rounded-full" />
-            <Skeleton className="h-3 w-12" />
-          </ListGridCell>
-          <ListGridCell className="hidden @2xl:flex">
-            <Skeleton className="h-3 w-10" />
-          </ListGridCell>
-          <ListGridCell className="hidden px-0 @2xl:flex" />
-          <span aria-hidden="true" />
-        </ListGridRow>
-      ))}
-    </ListGrid>
-  );
-}
-
 // Page
 
 export default function SkillsPage() {
@@ -543,7 +254,6 @@ export default function SkillsPage() {
   const wsId = useWorkspaceId();
   const paths = useWorkspacePaths();
   const navigation = useNavigation();
-  const rowLink = useRowLink();
   const timeAgo = useTimeAgo();
   const currentUserId = useAuthStore((s) => s.user?.id ?? null);
 
@@ -584,17 +294,6 @@ export default function SkillsPage() {
   const toggleColumn = useSkillsViewStore((s) => s.toggleColumn);
   const toggleFilter = useSkillsViewStore((s) => s.toggleFilter);
   const clearFilters = useSkillsViewStore((s) => s.clearFilters);
-
-  const isColVisible = (key: SkillColumnKey) => !hiddenColumns.includes(key);
-
-  const toggleSelected = (id: string) => {
-    setSelectedIds((prev) => {
-      const next = new Set(prev);
-      if (next.has(id)) next.delete(id);
-      else next.add(id);
-      return next;
-    });
-  };
 
   const assignments = useMemo(() => selectSkillAssignments(agents), [agents]);
 
@@ -681,32 +380,69 @@ export default function SkillsPage() {
     return filtered;
   }, [scopeRows, filters, sortField, sortDirection]);
 
-  // Row virtualization — Linear-style: the virtualizer only does the math
-  // (visible index range + offsets); the DOM stays ours. Offsets become
-  // padding on the rows wrapper, so the mounted rows remain direct subgrid
-  // children and column alignment is untouched. Fixed ROW_HEIGHT rows mean
-  // no per-row measurement. The scroll element is the SINGLE outer
-  // scroller (both axes) — see ListGridBody's comment for why the split
-  // scroll structure was retired.
-  const listScrollRef = useRef<HTMLDivElement | null>(null);
-  const rowVirtualizer = useVirtualizer({
-    count: rows.length,
-    getScrollElement: () => listScrollRef.current,
-    estimateSize: () => ROW_HEIGHT,
-    overscan: 10,
-  });
-
   const handleCreated = (skill: Skill) => {
     navigation.push(paths.skillDetail(skill.id));
   };
 
   const selectedRows = rows.filter((row) => selectedIds.has(row.skill.id));
-  const allSelected = rows.length > 0 && selectedRows.length === rows.length;
-  const someSelected = selectedRows.length > 0 && !allSelected;
-  const handleToggleAll = () => {
-    setSelectedIds(
-      allSelected ? new Set() : new Set(rows.map((r) => r.skill.id)),
-    );
+
+  const columns = useMemo<CollectionColumn<SkillRow>[]>(
+    () => [
+      {
+        key: "name",
+        header: t(($) => $.table.name),
+        sortKey: "name",
+        cell: (row) => <NameCell row={row} />,
+      },
+      {
+        key: "usedBy",
+        header: t(($) => $.table.used_by),
+        width: 144,
+        sortKey: "usedBy",
+        core: true,
+        hideable: true,
+        cell: (row) => <UsedByCell agents={row.agents} />,
+      },
+      {
+        key: "source",
+        header: t(($) => $.table.source),
+        width: 152,
+        hideable: true,
+        cell: (row) => <SourceCell skill={row.skill} runtime={row.runtime} />,
+      },
+      {
+        key: "creator",
+        header: t(($) => $.table.created_by),
+        width: 144,
+        hideable: true,
+        cell: (row) => <CreatorCell creator={row.creator} />,
+      },
+      {
+        key: "updated",
+        header: t(($) => $.table.updated),
+        width: 104,
+        sortKey: "updated",
+        hideable: true,
+        cell: (row) => <span className="tabular-nums">{timeAgo(row.skill.updated_at)}</span>,
+      },
+      {
+        key: "created",
+        header: t(($) => $.table.created),
+        width: 104,
+        sortKey: "created",
+        hideable: true,
+        cell: (row) => <span className="tabular-nums">{timeAgo(row.skill.created_at)}</span>,
+      },
+    ],
+    [t, timeAgo],
+  );
+
+  const sort: CollectionSort = {
+    field: sortField,
+    direction: sortDirection,
+    onToggle: (field) => handleSort(field as SkillSortField),
+    onFieldChange: (field) => handleSortFieldSelect(field as SkillSortField),
+    onDirectionChange: setSortDirection,
   };
 
   const narrowed = countActiveFilterDimensions(filters) > 0;
@@ -741,13 +477,11 @@ export default function SkillsPage() {
       }
       actions={
         <>
-          <SkillDisplayMenu
-            sortField={sortField}
-            sortDirection={sortDirection}
-            onSortFieldChange={handleSortFieldSelect}
-            onSortDirectionChange={setSortDirection}
+          <CollectionDisplayMenu
+            columns={columns}
             hiddenColumns={hiddenColumns}
-            onToggleColumn={toggleColumn}
+            onToggleColumn={(key) => toggleColumn(key as SkillColumnKey)}
+            sort={sort}
           />
           <SkillCreateMenu onCreate={setCreateMethod} />
         </>
@@ -798,18 +532,6 @@ export default function SkillsPage() {
   const supportingQueryDown =
     !!agentsError || !!membersError || !!runtimesError;
 
-  // Unmounted rows above/below the visible slice become padding on the
-  // scrolling body, exactly like Linear's --x-paddingTop/Bottom offsets.
-  const virtualItems = rowVirtualizer.getVirtualItems();
-  const firstVirtual = virtualItems[0];
-  const lastVirtual = virtualItems[virtualItems.length - 1];
-  const virtualPadding = {
-    top: firstVirtual ? firstVirtual.start : 0,
-    bottom: lastVirtual
-      ? rowVirtualizer.getTotalSize() - lastVirtual.end
-      : 0,
-  };
-
   return (
     // relative: positioning anchor for the batch toolbar (page-centered,
     // not viewport-centered).
@@ -831,97 +553,20 @@ export default function SkillsPage() {
           <EmptyState />
         </div>
       ) : (
-        <>
-          {isLoading ? (
-            <div className="flex-1 overflow-y-auto @container">
-              <LoadingSkeleton />
-            </div>
-          ) : (
-          <div
-            ref={listScrollRef}
-            className="min-h-0 flex-1 overflow-auto @container"
-          >
-          <ListGrid
-            className={`${GRID_COLS} @2xl:min-w-[var(--lgc-minw)]`}
-            style={columnTrackVars(isColVisible)}
-          >
-            <SkillListHeader
-              sortField={sortField}
-              sortDirection={sortDirection}
-              onSort={handleSort}
-              allSelected={allSelected}
-              someSelected={someSelected}
-              onToggleAll={handleToggleAll}
-              isColVisible={isColVisible}
-            />
-            <ListGridBody
-              style={{
-                paddingTop: virtualPadding.top,
-                paddingBottom:
-                  virtualPadding.bottom + LIST_GRID_BOTTOM_CLEARANCE,
-              }}
-            >
-              {rows.length === 0 && (
-                <div className="col-span-full py-16 text-center text-body text-muted-foreground">
-                  {t(($) => $.page.no_matches.title)}
-                </div>
-              )}
-              {virtualItems.map((vi) => {
-                const row = rows[vi.index];
-                if (!row) return null;
-                return (
-              <ListGridRow
-                key={row.skill.id}
-                className={`cursor-pointer ${
-                  selectedIds.has(row.skill.id) ? "bg-accent/30" : ""
-                }`}
-                {...rowLink(paths.skillDetail(row.skill.id), row.skill.name)}
-              >
-                <CheckboxCell
-                  checked={selectedIds.has(row.skill.id)}
-                  onToggle={() => toggleSelected(row.skill.id)}
-                />
-                <NameCell row={row} />
-                {isColVisible("usedBy") ? (
-                  <UsedByCell agents={row.agents} />
-                ) : (
-                  <ListGridCell className="px-0" />
-                )}
-                {isColVisible("source") ? (
-                  <SourceCell skill={row.skill} runtime={row.runtime} />
-                ) : (
-                  <ListGridCell className="hidden px-0 @2xl:flex" />
-                )}
-                {isColVisible("creator") ? (
-                  <CreatorCell creator={row.creator} />
-                ) : (
-                  <ListGridCell className="hidden px-0 @2xl:flex" />
-                )}
-                {isColVisible("updated") ? (
-                  <ListGridCell className="hidden whitespace-nowrap text-caption tabular-nums text-muted-foreground @2xl:flex">
-                    {timeAgo(row.skill.updated_at)}
-                  </ListGridCell>
-                ) : (
-                  <ListGridCell className="hidden px-0 @2xl:flex" />
-                )}
-                {isColVisible("created") ? (
-                  <ListGridCell className="hidden whitespace-nowrap text-caption tabular-nums text-muted-foreground @2xl:flex">
-                    {timeAgo(row.skill.created_at)}
-                  </ListGridCell>
-                ) : (
-                  <ListGridCell className="hidden px-0 @2xl:flex" />
-                )}
-                <ListGridCell className="justify-end px-0">
-                  <SkillRowActions row={row} ctx={actionsCtx} />
-                </ListGridCell>
-              </ListGridRow>
-                );
-              })}
-            </ListGridBody>
-          </ListGrid>
-          </div>
-          )}
-        </>
+        <CollectionList
+          label={scopeLabels[scope]}
+          columns={columns}
+          hiddenColumns={hiddenColumns}
+          rows={rows}
+          loading={isLoading}
+          getRowId={(row) => row.skill.id}
+          getRowHref={(row) => paths.skillDetail(row.skill.id)}
+          getRowTitle={(row) => row.skill.name}
+          rowMenu={(row) => <SkillRowActions row={row} ctx={actionsCtx} />}
+          sort={sort}
+          selection={{ selectedIds, onChange: setSelectedIds }}
+          empty={t(($) => $.page.no_matches.title)}
+        />
       )}
 
       <SkillBatchToolbar

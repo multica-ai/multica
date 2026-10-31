@@ -16,10 +16,7 @@
     "pin": "Pin to sidebar",
     "unpin": "Unpin",
     "delete": "Delete",
-    "no_matches": "No projects match",
-    "selected_one": "{{count}} selected",
-    "selected_other": "{{count}} selected",
-    "clear_selection": "Clear selection"
+    "no_matches": "No projects match"
   },
   "table": {
     "name": "Name",
@@ -173,10 +170,6 @@
     "section_status": "Status",
     "section_priority": "Priority",
     "section_lead": "Lead",
-    "sort_by": "Sort by",
-    "direction_asc": "Ascending",
-    "direction_desc": "Descending",
-    "section_columns": "Columns",
     "view": "View"
   }
 }

@@ -162,8 +162,8 @@ function makeAdapter(
   };
 }
 
-// The row menu is a plain exported component on the ListGrid version of the
-// list — render it directly with the row fields it reads.
+// The row menu is a plain exported component — render it directly with the
+// row fields it reads.
 function renderActionsCell(
   row: RuntimeRow,
   options: { detailHref?: string; adapter?: NavigationAdapter } = {},

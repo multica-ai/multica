@@ -1023,15 +1023,8 @@
     "section_availability": "可用性",
     "section_access": "訪問權限",
     "section_runtime": "執行時",
-    "sort_by": "排序",
-    "direction_asc": "升序",
-    "direction_desc": "降序",
-    "section_columns": "列",
     "section_owner": "owner",
     "section_model": "模型"
   },
-  "actions": {
-    "selected_other": "已選 {{count}} 項",
-    "clear_selection": "清除選擇"
-  }
+  "actions": {}
 }

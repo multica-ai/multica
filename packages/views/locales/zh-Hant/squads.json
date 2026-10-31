@@ -129,10 +129,5 @@
     "mine": "我的小隊",
     "all": "全部小隊"
   },
-  "toolbar": {
-    "sort_by": "排序",
-    "direction_asc": "升序",
-    "direction_desc": "降序",
-    "section_columns": "列"
-  }
+  "toolbar": {}
 }

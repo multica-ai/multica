@@ -12,6 +12,7 @@ import {
   DialogTitle,
 } from "@multica/ui/components/ui/dialog";
 import { Button } from "@multica/ui/components/ui/button";
+import { cn } from "@multica/ui/lib/utils";
 import { useT } from "../../i18n";
 import { isActiveWakeupRun, useWakeupText } from "./wakeup-presentation";
 
@@ -28,7 +29,8 @@ export function WakeupControl({
   task?: AgentTask;
   pending: boolean;
   closed: boolean;
-  size?: "sm" | "default";
+  /** `xs` fits a 36px list row. */
+  size?: "xs" | "sm" | "default";
   onDisable: () => void;
   onEnable: (input?: { at?: string; rearm?: boolean }) => Promise<void>;
 }) {
@@ -51,10 +53,19 @@ export function WakeupControl({
   const needsRearm = !wakeup.enabled && (consumed || expired);
   const canEnable = !closed && (!activeRun || wakeup.mode === "continuous");
   return (
-    <div className={`flex shrink-0 items-center px-2 ${size === "sm" ? "min-h-10 [&>button]:text-caption [&>button]:font-normal" : "min-h-11"}`}>
+    <div
+      className={cn(
+        "flex shrink-0 items-center",
+        size === "xs"
+          ? "[&>button]:h-6 [&>button]:px-2 [&>button]:text-caption [&>button]:font-normal"
+          : size === "sm"
+            ? "min-h-10 px-2 [&>button]:text-caption [&>button]:font-normal"
+            : "min-h-11 px-2",
+      )}
+    >
       {wakeup.enabled || (!needsRearm && !canDisable) ? (
         <Switch
-          size={size}
+          size={size === "default" ? "default" : "sm"}
           checked={wakeup.enabled}
           disabled={pending || (!wakeup.enabled && !canEnable)}
           aria-label={t(($) => $.wakeups.toggle, {

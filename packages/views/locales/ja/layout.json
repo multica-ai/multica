@@ -151,7 +151,18 @@
     "filter": "フィルター",
     "filter_count_other": "{{count}} 件のフィルター",
     "reset": "リセット",
-    "display": "表示設定"
+    "display": "表示設定",
+    "selected_other": "{{count}} 件選択中",
+    "clear_selection": "選択を解除",
+    "select_all": "すべて選択",
+    "select_row": "行を選択",
+    "row_actions": "行の操作",
+    "sort_by": "並び替え",
+    "direction_asc": "昇順",
+    "direction_desc": "降順",
+    "section_columns": "列",
+    "load_more": "さらに読み込む",
+    "loading_more": "読み込み中…"
   },
   "object_page": {
     "toggle_panel": "右サイドバーを切り替え",

@@ -226,5 +226,35 @@ describe("useAgentsViewStore", () => {
 
       expect(useAgentsViewStore.getState().hiddenColumns).toEqual(["model"]);
     });
+
+    it("moves a v1 payload still on the old default to the new default", async () => {
+      localStorage.setItem(
+        "multica_agents_view:acme",
+        JSON.stringify({ state: { hiddenColumns: ["created"] }, version: 1 }),
+      );
+
+      setCurrentWorkspace("acme", "ws_a");
+      await flush();
+      await flush();
+
+      expect(useAgentsViewStore.getState().hiddenColumns).toEqual([
+        "owner",
+        "access",
+        "created",
+      ]);
+    });
+
+    it("keeps a customised v1 column choice", async () => {
+      localStorage.setItem(
+        "multica_agents_view:acme",
+        JSON.stringify({ state: { hiddenColumns: ["created", "runs"] }, version: 1 }),
+      );
+
+      setCurrentWorkspace("acme", "ws_a");
+      await flush();
+      await flush();
+
+      expect(useAgentsViewStore.getState().hiddenColumns).toEqual(["created", "runs"]);
+    });
   });
 });

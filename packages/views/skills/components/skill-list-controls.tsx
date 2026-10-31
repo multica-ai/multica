@@ -2,9 +2,6 @@
 
 import { useState } from "react";
 import {
-  ArrowDown,
-  ArrowUp,
-  ChevronDown,
   Download,
   FolderOpen,
   HardDrive,
@@ -17,27 +14,17 @@ import { useWorkspaceId } from "@multica/core/hooks";
 import { labelListOptions } from "@multica/core/labels/queries";
 import type { Agent, Label, MemberWithUser } from "@multica/core/types";
 import { resolvePublicFileUrl } from "@multica/core/workspace/avatar-url";
-import { Button } from "@multica/ui/components/ui/button";
-import { IconButton } from "@multica/ui/components/common/icon-button";
 import {
   DropdownMenu,
   DropdownMenuCheckboxItem,
   DropdownMenuContent,
   DropdownMenuItem,
-  DropdownMenuRadioGroup,
-  DropdownMenuRadioItem,
   DropdownMenuSeparator,
   DropdownMenuSub,
   DropdownMenuSubContent,
   DropdownMenuSubTrigger,
   DropdownMenuTrigger,
 } from "@multica/ui/components/ui/dropdown-menu";
-import {
-  Popover,
-  PopoverContent,
-  PopoverTrigger,
-} from "@multica/ui/components/ui/popover";
-import { Switch } from "@multica/ui/components/ui/switch";
 import { ActorAvatar } from "@multica/ui/components/common/actor-avatar";
 import {
   Dialog,
@@ -47,32 +34,18 @@ import {
 } from "@multica/ui/components/ui/dialog";
 import { FILTER_ITEM_CLASS, HoverCheck } from "../../common/hover-check";
 import {
-  type SkillColumnKey,
   type SkillListFilters,
   type SkillOriginType,
-  type SkillSortDirection,
-  type SkillSortField,
 } from "@multica/core/skills/stores";
 import { LabelChip } from "../../labels/label-chip";
 import { LabelManager } from "../../labels/label-manager";
 import {
   CollectionCreateButton,
-  CollectionDisplayButton,
   CollectionFilterButton,
 } from "../../layout/collection-page";
 import { useT } from "../../i18n";
 import type { CreateSkillMethod } from "./create-skill-dialog";
 import type { SkillRow } from "./skill-list-filter";
-
-const COLUMN_KEYS: SkillColumnKey[] = [
-  "usedBy",
-  "source",
-  "creator",
-  "updated",
-  "created",
-];
-
-const SORT_FIELDS: SkillSortField[] = ["name", "usedBy", "updated", "created"];
 
 export function countActiveFilterDimensions(
   filters: SkillListFilters,
@@ -358,123 +331,6 @@ export function SkillFilterMenu({
         </DialogContent>
       </Dialog>
     </>
-  );
-}
-
-/**
- * Display settings: the sort row (field select + direction toggle) and the
- * column switches. Mutates the same sort state the list's column headers use.
- */
-export function SkillDisplayMenu({
-  sortField,
-  sortDirection,
-  onSortFieldChange,
-  onSortDirectionChange,
-  hiddenColumns,
-  onToggleColumn,
-}: {
-  sortField: SkillSortField;
-  sortDirection: SkillSortDirection;
-  onSortFieldChange: (field: SkillSortField) => void;
-  onSortDirectionChange: (direction: SkillSortDirection) => void;
-  hiddenColumns: SkillColumnKey[];
-  onToggleColumn: (key: SkillColumnKey) => void;
-}) {
-  const { t } = useT("skills");
-
-  const COLUMN_LABELS: Record<SkillColumnKey, string> = {
-    usedBy: t(($) => $.table.used_by),
-    source: t(($) => $.table.source),
-    creator: t(($) => $.table.created_by),
-    updated: t(($) => $.table.updated),
-    created: t(($) => $.table.created),
-  };
-
-  const SORT_LABELS: Record<SkillSortField, string> = {
-    name: t(($) => $.table.name),
-    usedBy: t(($) => $.table.used_by),
-    updated: t(($) => $.table.updated),
-    created: t(($) => $.table.created),
-  };
-
-  return (
-    <Popover>
-      <PopoverTrigger render={<CollectionDisplayButton />} />
-      <PopoverContent align="end" className="w-64 p-0">
-        <div className="border-b px-3 py-2.5">
-          <span className="text-caption font-medium text-muted-foreground">
-            {t(($) => $.toolbar.sort_by)}
-          </span>
-          <div className="mt-2 flex items-center gap-1.5">
-            <DropdownMenu>
-              <DropdownMenuTrigger
-                render={
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    className="flex-1 justify-between text-caption"
-                  >
-                    {SORT_LABELS[sortField]}
-                    <ChevronDown className="size-3 text-muted-foreground" />
-                  </Button>
-                }
-              />
-              <DropdownMenuContent align="start" className="w-auto">
-                <DropdownMenuRadioGroup
-                  value={sortField}
-                  onValueChange={(v) => onSortFieldChange(v as SkillSortField)}
-                >
-                  {SORT_FIELDS.map((field) => (
-                    <DropdownMenuRadioItem key={field} value={field}>
-                      {SORT_LABELS[field]}
-                    </DropdownMenuRadioItem>
-                  ))}
-                </DropdownMenuRadioGroup>
-              </DropdownMenuContent>
-            </DropdownMenu>
-            <IconButton
-              variant="outline"
-              size="icon-sm"
-              onClick={() =>
-                onSortDirectionChange(sortDirection === "asc" ? "desc" : "asc")
-              }
-              label={
-                sortDirection === "asc"
-                  ? t(($) => $.toolbar.direction_asc)
-                  : t(($) => $.toolbar.direction_desc)
-              }
-            >
-              {sortDirection === "asc" ? (
-                <ArrowUp className="size-3.5" />
-              ) : (
-                <ArrowDown className="size-3.5" />
-              )}
-            </IconButton>
-          </div>
-        </div>
-
-        <div className="px-3 py-2.5">
-          <span className="text-caption font-medium text-muted-foreground">
-            {t(($) => $.toolbar.section_columns)}
-          </span>
-          <div className="mt-2 space-y-2">
-            {COLUMN_KEYS.map((key) => (
-              <label
-                key={key}
-                className="flex cursor-pointer items-center justify-between"
-              >
-                <span className="text-body">{COLUMN_LABELS[key]}</span>
-                <Switch
-                  size="sm"
-                  checked={!hiddenColumns.includes(key)}
-                  onCheckedChange={() => onToggleColumn(key)}
-                />
-              </label>
-            ))}
-          </div>
-        </div>
-      </PopoverContent>
-    </Popover>
   );
 }
 

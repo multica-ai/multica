@@ -150,7 +150,6 @@ vi.mock("../../common/actor-avatar", () => ({ ActorAvatar: () => null }));
 vi.mock("./agent-row-actions", () => ({ AgentRowActions: () => null }));
 vi.mock("./agent-list-toolbar", () => ({
   AgentListFilterMenu: () => <div data-testid="agent-list-filter" />,
-  AgentListDisplayMenu: () => <div data-testid="agent-list-display" />,
   countActiveFilterDimensions: (filters: Record<string, unknown[]>) =>
     Object.values(filters).filter((values) => values.length > 0).length,
 }));
@@ -414,7 +413,9 @@ describe("AgentsPage header", () => {
     const adapter = renderPage();
 
     const header = screen.getByRole("banner");
-    expect(within(header).getByTestId("agent-list-display")).toBeInTheDocument();
+    expect(
+      within(header).getByRole("button", { name: "Display settings" }),
+    ).toBeInTheDocument();
     fireEvent.click(within(header).getByRole("button", { name: "New agent" }));
     expect(adapter.push).toHaveBeenCalledWith("/test-workspace/agents/new");
   });
