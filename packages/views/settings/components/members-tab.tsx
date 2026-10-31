@@ -12,6 +12,7 @@ import {
   Plus,
   Search,
   Shield,
+  ShieldOff,
   Trash2,
   User,
   UserMinus,
@@ -171,6 +172,7 @@ function useRoleLabels() {
 
 function MemberRow({
   member,
+  workspaceID,
   canManage,
   canManageOwners,
   ownerCount,
@@ -180,6 +182,7 @@ function MemberRow({
   onRemove,
 }: {
   member: MemberWithUser;
+  workspaceID: string;
   canManage: boolean;
   canManageOwners: boolean;
   /** Total number of owners in this workspace — needed to gate demoting the
@@ -198,7 +201,35 @@ function MemberRow({
   const canEditRole = canManage && !isSelf && (member.role !== "owner" || canManageOwners);
   const canRemove = canManage && !isSelf && (member.role !== "owner" || canManageOwners);
   const isLastOwner = member.role === "owner" && ownerCount <= 1;
-  const showMenu = canEditRole || canRemove;
+  // Mirror canEditRole/canRemove's owner-boundary: an admin (canManage but
+  // not canManageOwners) cannot reset an owner's TOTP because the backend
+  // would refuse with 403. Showing the menu item anyway would be a
+  // destructive button that always fails.
+  const canResetTOTP =
+    canManage && member.totp_enabled === true && !isSelf &&
+    (member.role !== "owner" || canManageOwners);
+  const showMenu = canEditRole || canRemove || canResetTOTP;
+
+  const [resetOpen, setResetOpen] = useState(false);
+  const [resetting, setResetting] = useState(false);
+  const queryClient = useQueryClient();
+
+  const handleReset = async () => {
+    setResetting(true);
+    try {
+      const { reset } = await api.adminResetMemberTOTP(workspaceID, member.user_id);
+      // The schema fallback is { reset: false }: never report an unconfirmed
+      // account-wide security change as done.
+      if (reset !== true) throw new Error("reset not confirmed");
+      toast.success(t(($) => $.members.totp_reset.success, { name: member.name }));
+      setResetOpen(false);
+      queryClient.invalidateQueries({ queryKey: workspaceKeys.members(workspaceID) });
+    } catch {
+      toast.error(t(($) => $.members.totp_reset.error));
+    } finally {
+      setResetting(false);
+    }
+  };
 
   return (
     <div className="flex items-center gap-3 px-4 py-3">
@@ -291,10 +322,43 @@ function MemberRow({
                 {t(($) => $.members.remove_action)}
               </DropdownMenuItem>
             )}
+            {canResetTOTP && (
+              <>
+                <DropdownMenuSeparator />
+                <DropdownMenuItem variant="destructive" onClick={() => setResetOpen(true)}>
+                  <ShieldOff className="h-3.5 w-3.5" />
+                  {t(($) => $.members.totp_reset.menu_item)}
+                </DropdownMenuItem>
+              </>
+            )}
           </DropdownMenuContent>
         </DropdownMenu>
       )}
       </span>
+      <AlertDialog open={resetOpen} onOpenChange={setResetOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>
+              {t(($) => $.members.totp_reset.confirm_title, { name: member.name })}
+            </AlertDialogTitle>
+            <AlertDialogDescription>
+              {t(($) => $.members.totp_reset.confirm_description, { name: member.name })}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={resetting}>
+              {t(($) => $.members.totp_reset.cancel)}
+            </AlertDialogCancel>
+            <AlertDialogAction
+              onClick={handleReset}
+              disabled={resetting}
+              className="bg-destructive hover:bg-destructive/90"
+            >
+              {resetting ? "..." : t(($) => $.members.totp_reset.confirm)}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }
@@ -978,6 +1042,7 @@ export function MembersTab() {
                 <div key={m.id}>
                   <MemberRow
                     member={m}
+                    workspaceID={workspace.id}
                     canManage={canManageWorkspace}
                     canManageOwners={isOwner}
                     ownerCount={ownerCount}

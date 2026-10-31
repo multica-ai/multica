@@ -77,6 +77,8 @@ export function AuthInitializer({
           workspaceCreationDisabled: cfg.workspace_creation_disabled === true,
           // Absent/false on the managed cloud and older servers → section hidden.
           vcsIntegrationAvailable: cfg.vcs_integration_available === true,
+          // Old servers omit this field — default false so TOTP UI stays hidden.
+          totpSupported: cfg.totp_supported === true,
         });
         // Legacy servers only publish both URLs for self-host. Explicit unknown
         // or malformed targets stay closed, and absent URLs never imply Cloud.

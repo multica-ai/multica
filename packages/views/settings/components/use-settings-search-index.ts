@@ -106,6 +106,12 @@ export function useSettingsSearchIndex(
         title: t(($) => $.notifications.browser.label),
       },
       {
+        tab: "security",
+        anchor: "authenticator",
+        title: t(($) => $.security.two_factor.label),
+        description: t(($) => $.security.two_factor.hint_disabled),
+      },
+      {
         tab: "tokens",
         title: t(($) => $.page.tabs.tokens),
         description: t(($) => $.tokens.purpose),

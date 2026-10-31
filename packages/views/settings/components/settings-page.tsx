@@ -23,6 +23,7 @@ import {
   X,
   Workflow,
   Zap,
+  ShieldCheck,
 } from "@multica/ui/icons";
 import { useCurrentWorkspace } from "@multica/core/paths";
 import { useFeatureEnabled } from "@multica/core/config";
@@ -44,6 +45,7 @@ import { CodeTab } from "./code-tab";
 import { ChannelsTab } from "./channels-tab";
 import { ConnectedAppsTab, useComposioAvailable } from "./connected-apps-tab";
 import { NotificationsTab } from "./notifications-tab";
+import { SecurityTab } from "./security-tab";
 import { LabelsTab } from "./labels-tab";
 import { WorkflowsTab } from "../../workflows/workflows-tab";
 import { PropertiesTab } from "./properties-tab";
@@ -144,6 +146,12 @@ export function SettingsPage({ extraDeviceTabs = [] }: SettingsPageProps = {}) {
               t(($) => $.page.tabs.notifications),
               Bell,
               <NotificationsTab />,
+            ),
+            entry(
+              "security",
+              t(($) => $.page.tabs.security),
+              ShieldCheck,
+              <SecurityTab />,
             ),
             entry(
               "shortcuts",

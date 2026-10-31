@@ -396,6 +396,7 @@
       "issue": "任務",
       "notifications": "通知",
       "tokens": "API Token",
+      "security": "安全",
       "general": "常規",
       "github": "GitHub",
       "labs": "實驗室",
@@ -687,6 +688,33 @@
       "granted": "當前瀏覽器可以彈出通知橫幅。",
       "denied": "已被瀏覽器攔截。請在瀏覽器設定中為本站點開啟通知權限。",
       "enabled_badge": "已啟用"
+    }
+  },
+  "security": {
+    "title": "安全",
+    "description": "管理你的帳號安全設定。",
+    "two_factor": {
+      "label": "驗證器應用登入",
+      "hint_unavailable": "此伺服器不支援驗證器應用登入。",
+      "hint_enabled": "你可以使用驗證器應用中的驗證碼登入。",
+      "hint_disabled": "設定驗證器應用，作為信箱驗證碼之外的登入方式。",
+      "unavailable_badge": "不可用",
+      "setup_button": "設定",
+      "disable_button": "停用",
+      "setup_title": "設定驗證器應用登入",
+      "setup_scan_qr": "用你的驗證器應用（Google Authenticator、Authy、1Password 等）掃描此 QR 碼。",
+      "setup_manual": "或手動輸入此金鑰：",
+      "setup_next": "下一步 — 輸入驗證碼",
+      "setup_verify": "輸入驗證器應用中的 6 位驗證碼以確認設定。",
+      "setup_success": "驗證器應用登入已啟用。",
+      "setup_invalid": "驗證碼無效，請重試。",
+      "setup_init_error": "TOTP 設定啟動失敗，請重試。",
+      "disable_title": "停用驗證器應用登入",
+      "disable_prompt": "輸入驗證器應用中的 6 位驗證碼以停用此登入方式。",
+      "disable_success": "驗證器應用登入已停用。",
+      "disable_invalid": "驗證碼無效，請重試。",
+      "disable_locked": "無效驗證碼次數過多，請等待 15 分鐘後再試。",
+      "confirm": "確認"
     }
   },
   "tokens": {
@@ -1365,6 +1393,15 @@
         "label": "成員",
         "description": "建立並處理任務"
       }
+    },
+    "totp_reset": {
+      "menu_item": "重設驗證器",
+      "confirm_title": "確定要重設 {{name}} 的驗證器嗎？",
+      "confirm_description": "此操作會清除 {{name}} 在整個 Multica 帳號（不只是本工作區）的驗證器登入設定。{{name}} 之後可以在 Settings → Security 重新設定。在此之前仍可用信箱驗證碼登入。",
+      "cancel": "取消",
+      "confirm": "重設驗證器",
+      "success": "已重設 {{name}} 的驗證器",
+      "error": "重設驗證器失敗"
     },
     "share_links_create_title": "建立分享連結",
     "share_links_create_button": "生成",
