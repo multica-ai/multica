@@ -472,6 +472,17 @@ func appendIssueTableInvolvedPredicate(where []string, addArg func(any) string, 
 )`, ref))
 }
 
+// issueTableOwnedAgentCreatorPredicate matches issues created by an agent the
+// user owns. It widens only the my:any union: the Agents tab (`involved`) stays
+// assignee-based so it remains disjoint from Assigned.
+func issueTableOwnedAgentCreatorPredicate(addArg func(any) string, userID pgtype.UUID) string {
+	return fmt.Sprintf(`(i.creator_type = 'agent' AND i.creator_id IN (
+       SELECT a.id FROM agent a
+        WHERE a.workspace_id = $1
+          AND a.owner_id     = %s::uuid
+    ))`, addArg(userID))
+}
+
 func (h *Handler) compileIssueTableQuery(w http.ResponseWriter, r *http.Request, spec issueTableQuerySpec) (issueTableSQL, bool) {
 	workspaceID := h.resolveWorkspaceID(r)
 	workspaceUUID, ok := parseUUIDOrBadRequest(w, workspaceID, "workspace_id")
@@ -609,7 +620,8 @@ func (h *Handler) compileIssueTableQuery(w http.ResponseWriter, r *http.Request,
 			assignedRef := addArg(userUUID)
 			createdRef := addArg(userUUID)
 			involved := appendIssueTableInvolvedPredicate(nil, addArg, userUUID)[0]
-			where = append(where, fmt.Sprintf("((i.assignee_type = 'member' AND i.assignee_id = %s::uuid) OR (i.creator_type = 'member' AND i.creator_id = %s::uuid) OR %s)", assignedRef, createdRef, involved))
+			ownedAgentCreated := issueTableOwnedAgentCreatorPredicate(addArg, userUUID)
+			where = append(where, fmt.Sprintf("((i.assignee_type = 'member' AND i.assignee_id = %s::uuid) OR (i.creator_type = 'member' AND i.creator_id = %s::uuid) OR %s OR %s)", assignedRef, createdRef, involved, ownedAgentCreated))
 		default:
 			writeError(w, http.StatusBadRequest, "invalid scope.relation")
 			return issueTableSQL{}, false
