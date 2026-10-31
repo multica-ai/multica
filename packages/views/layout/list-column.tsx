@@ -5,7 +5,7 @@ import { useSidebarSafe } from "@multica/ui/components/ui/sidebar";
 import { cn } from "@multica/ui/lib/utils";
 import { useAppShell } from "./app-shell-context";
 import { PanelResizeHandle } from "./panel-resize-handle";
-import { NAV_PEEK_CLASS } from "./rail-styles";
+import { NAV_COLUMN_MOTION_CLASS, NAV_PEEK_CLASS } from "./rail-styles";
 
 /**
  * The list column of a list-and-detail page (Inbox, Chat, Settings). It takes
@@ -34,32 +34,37 @@ export function ListColumn({
   const peeking = collapsed && !!shell?.peekSpace && shell.peekSpace === shell.space;
 
   return (
-    <aside
-      ref={ref}
-      data-slot="list-column"
-      data-state={collapsed ? "collapsed" : "expanded"}
-      inert={collapsed && !peeking}
-      className={cn(
-        "relative h-full shrink-0 transition-[width] duration-200 ease-out motion-reduce:transition-none",
-        collapsed ? "w-0" : "w-(--sidebar-width)",
-        collapsed && !peeking && "overflow-hidden",
-        className,
-      )}
-    >
-      <div
-        data-slot={peeking ? "list-column-peek" : undefined}
-        onPointerEnter={peeking ? shell.holdPeek : undefined}
-        onPointerLeave={peeking ? shell.releasePeek : undefined}
+    <>
+      <aside
+        ref={ref}
+        data-slot="list-column"
+        data-state={collapsed ? "collapsed" : "expanded"}
+        inert={collapsed && !peeking}
         className={cn(
-          "flex h-full w-(--sidebar-width) flex-col overflow-hidden",
-          peeking ? NAV_PEEK_CLASS : cn("border-r", innerClassName),
+          "relative flex h-full shrink-0 justify-end",
+          NAV_COLUMN_MOTION_CLASS,
+          collapsed ? "w-0" : "w-(--sidebar-width)",
+          !peeking && "overflow-hidden",
+          className,
         )}
       >
-        {children}
-      </div>
+        <div
+          data-slot={peeking ? "list-column-peek" : undefined}
+          onPointerEnter={peeking ? shell.holdPeek : undefined}
+          onPointerLeave={peeking ? shell.releasePeek : undefined}
+          className={cn(
+            "flex h-full w-(--sidebar-width) shrink-0 flex-col overflow-hidden",
+            peeking ? NAV_PEEK_CLASS : cn("border-r", innerClassName),
+          )}
+        >
+          {children}
+        </div>
+      </aside>
       {!collapsed && sidebar && !sidebar.isCompact && onToggle && (
-        <PanelResizeHandle panelRef={ref} onToggle={onToggle} />
+        <div className="relative w-0 shrink-0">
+          <PanelResizeHandle panelRef={ref} onToggle={onToggle} />
+        </div>
       )}
-    </aside>
+    </>
   );
 }

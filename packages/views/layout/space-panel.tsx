@@ -8,7 +8,7 @@ import { useAppShell } from "./app-shell-context";
 import { PanelResizeHandle } from "./panel-resize-handle";
 import { AutopilotsPanel } from "./panels/autopilots-panel";
 import { ChatPeek, InboxPeek } from "./panels/list-space-peeks";
-import { NAV_PEEK_CLASS } from "./rail-styles";
+import { NAV_COLUMN_MOTION_CLASS, NAV_PEEK_CLASS } from "./rail-styles";
 import { TeamPanel } from "./panels/team-panel";
 import { WorkPanel } from "./panels/work-panel";
 
@@ -61,15 +61,20 @@ export function SpacePanel() {
           data-state={open ? "expanded" : "collapsed"}
           inert={!open}
           className={cn(
-            "relative hidden shrink-0 transition-[width] duration-200 ease-out motion-reduce:transition-none md:block",
-            open ? "w-(--sidebar-width)" : "w-0 overflow-hidden",
+            "relative hidden shrink-0 justify-end overflow-hidden md:flex",
+            NAV_COLUMN_MOTION_CLASS,
+            open ? "w-(--sidebar-width)" : "w-0",
           )}
         >
-          <div className="flex h-full w-(--sidebar-width) flex-col overflow-hidden border-r">
+          <div className="flex h-full w-(--sidebar-width) shrink-0 flex-col overflow-hidden border-r">
             <SpacePanelContent space={space} />
           </div>
-          {open && <PanelResizeHandle panelRef={panelRef} onToggle={shell.toggleNav} />}
         </aside>
+      )}
+      {hasPanel && open && (
+        <div className="relative hidden w-0 shrink-0 md:block">
+          <PanelResizeHandle panelRef={panelRef} onToggle={shell.toggleNav} />
+        </div>
       )}
       {Peek && (
         <aside
