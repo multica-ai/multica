@@ -25,6 +25,46 @@ describe("ApiClient status reorder", () => {
   });
 });
 
+describe("ApiClient issue-status compatibility", () => {
+  it("uses the built-in catalog when an older server has no status route", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(
+        new Response(JSON.stringify({ error: "not found" }), {
+          status: 404,
+          statusText: "Not Found",
+          headers: { "Content-Type": "application/json" },
+        }),
+      ),
+    );
+
+    const result = await new ApiClient("https://api.example.test").listIssueStatuses(true);
+
+    expect(result).toEqual({
+      statuses: [],
+      categories: ["unstarted", "started", "done", "closed"],
+      total: 0,
+    });
+  });
+
+  it("keeps non-404 status failures retryable", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(
+        new Response(JSON.stringify({ error: "unavailable" }), {
+          status: 503,
+          statusText: "Service Unavailable",
+          headers: { "Content-Type": "application/json" },
+        }),
+      ),
+    );
+
+    await expect(
+      new ApiClient("https://api.example.test").listIssueStatuses(true),
+    ).rejects.toMatchObject({ status: 503 });
+  });
+});
+
 describe("ApiClient agent conversation-starter compatibility", () => {
   const prompt = {
     label: "Review a PR",
