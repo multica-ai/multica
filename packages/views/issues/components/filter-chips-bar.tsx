@@ -4,6 +4,7 @@ import { useIssueStatuses } from "@multica/core/issue-statuses/hooks";
 import { useStatusLabel } from "../utils/status-label";
 import { useMemo, type ReactNode } from "react";
 import {
+  Bot,
   CalendarClock,
   CalendarDays,
   CircleDashed,
@@ -230,8 +231,13 @@ export function useFilterChips(
   const advancedFilter = useViewStore((s) => s.advancedFilter);
   const negatedFilters = useViewStore((s) => s.negatedFilters);
   const propertyFilters = useViewStore((s) => s.propertyFilters);
+  const agentRunningFilter = useViewStore((s) => s.agentRunningFilter);
   const store = useViewStoreApi();
   const negated = new Set(negatedFilters);
+  const clearAgentRunning = () => {
+    const s = store.getState();
+    if (s.agentRunningFilter) s.toggleAgentRunningFilter();
+  };
 
   const hasStoreFilters =
     statusFilters.length > 0 ||
@@ -442,6 +448,16 @@ export function useFilterChips(
       onRemove: () => clearDimension("status"),
     });
   }
+  // Never part of a saved view, so inside one it is always an addition.
+  if (agentRunningFilter) {
+    chips.push({
+      key: "agentRunning",
+      icon: <Bot className={CHIP_ICON_CLASS} />,
+      label: t(($) => $.filters.section_agent),
+      value: t(($) => $.filters.agent_running_value),
+      onRemove: clearAgentRunning,
+    });
+  }
   const [onlyPriority] = deltaPriority;
   if (deltaPriority.length > 0) {
     chips.push({
@@ -643,6 +659,7 @@ export function useFilterChips(
     if (baseline) {
       // Back to exactly the view's own conditions.
       store.getState().resetFiltersTo(baseline.raw);
+      clearAgentRunning();
       onDateFilterChange?.(null);
       return;
     }

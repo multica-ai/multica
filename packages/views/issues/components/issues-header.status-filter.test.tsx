@@ -20,7 +20,7 @@
  */
 
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { cleanup, fireEvent, screen, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { createStore } from "zustand/vanilla";
 import { setApiInstance } from "@multica/core/api";
@@ -114,6 +114,14 @@ async function openStatusSubmenu() {
   );
 }
 
+/** The Status submenu's options, apart from the top-level checkbox rows. */
+function statusOptions() {
+  const submenu = screen
+    .getByRole("menuitemcheckbox", { name: /In Review/ })
+    .closest<HTMLElement>("[role='menu']")!;
+  return within(submenu).getAllByRole("menuitemcheckbox");
+}
+
 afterEach(() => {
   cleanup();
   // Base UI portals the menu onto document.body; leftovers would duplicate
@@ -135,9 +143,7 @@ describe("IssueFilterMenu status section", () => {
     // The custom status sits directly after the built-in of the category it
     // behaves as — one flat list, top to bottom.
     // Built-ins are named by i18n, the custom one by the catalog.
-    expect(
-      screen.getAllByRole("menuitemcheckbox").map((el) => el.textContent?.trim()),
-    ).toEqual([
+    expect(statusOptions().map((el) => el.textContent?.trim())).toEqual([
       "Backlog",
       "Todo",
       "In Progress",
@@ -157,7 +163,7 @@ describe("IssueFilterMenu status section", () => {
     expect(
       document.querySelector("[data-slot='dropdown-menu-label']"),
     ).toBeNull();
-    expect(screen.getAllByRole("menuitemcheckbox")).toHaveLength(BUILT_IN_STATUS_ORDER.length);
+    expect(statusOptions()).toHaveLength(BUILT_IN_STATUS_ORDER.length);
   });
 });
 

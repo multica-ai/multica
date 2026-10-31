@@ -720,10 +720,10 @@ export function useIssueSurfaceController({
     // expressible as a Table query spec, so a facet answer would over-count.
     //
     // The actor panel (member / agent detail) renders no agents-working chip at
-    // all, so nothing would read the answer — and with no control to toggle it,
-    // `agentRunningFilter` is unreachable there. Skip the aggregation rather
-    // than pay for it on every panel mount. Adding the chip to that header
-    // means dropping this clause.
+    // all, so nothing would read the answer; its filter menu toggles
+    // `agentRunningFilter` through the issue ids above, not this count. Skip
+    // the aggregation rather than pay for it on every panel mount. Adding the
+    // chip to that header means dropping this clause.
     enabled: !usesGantt && scope.type !== "actor",
   });
   const facetWorkingAgents = useMemo<WorkingAgentSummary[] | undefined>(() => {

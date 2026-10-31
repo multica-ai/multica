@@ -164,6 +164,7 @@ function getActiveFilterCount(
     propertyFilters?: Record<string, PropertyFilterValue[]>;
     advancedFilter?: AdvancedFilterGroup | null;
     dateFilter?: IssueDateFilter | null;
+    agentRunningFilter?: boolean;
   },
   // Inside a saved view only the user's additions on top of the view's own
   // query count — the baseline is the view, not "active filtering".
@@ -210,6 +211,7 @@ function getActiveFilterCount(
     if (deltaCount > 0) count++;
   }
   if (state.dateFilter) count++;
+  if (state.agentRunningFilter) count++;
   return count;
 }
 
@@ -1043,6 +1045,7 @@ export function IssueFilterMenu({
   const advancedFilter = useViewStore((s) => s.advancedFilter);
   const negatedFilters = useViewStore((s) => s.negatedFilters);
   const propertyFilters = useViewStore((s) => s.propertyFilters);
+  const agentRunningFilter = useViewStore((s) => s.agentRunningFilter);
   const viewStoreApi = useViewStoreApi();
   const act = viewStoreApi.getState();
   const advancedMode = advancedFilter !== null;
@@ -1096,6 +1099,7 @@ export function IssueFilterMenu({
         negatedFilters,
         advancedFilter,
         dateFilter: showDateFilter ? dateFilter : null,
+        agentRunningFilter,
       },
       viewBaseline,
     ) > 0;
@@ -1124,9 +1128,11 @@ export function IssueFilterMenu({
   const sectionLabel = (key: string) =>
     key === "date"
       ? t(($) => $.filters.section_date)
-      : key.startsWith("property:")
-        ? filterableProperties.find((p) => `property:${p.id}` === key)?.name ?? ""
-        : fieldLabels[key as NegatableFilterDimension] ?? "";
+      : key === "agentRunning"
+        ? t(($) => $.filters.agent_running)
+        : key.startsWith("property:")
+          ? filterableProperties.find((p) => `property:${p.id}` === key)?.name ?? ""
+          : fieldLabels[key as NegatableFilterDimension] ?? "";
   const renderFieldSections = (pass: "active" | "rest" | "search") => {
     const show = (key: string) =>
       pass === "search" ? matchesFilterQuery(sectionLabel(key), query) : inPass(key, pass);
@@ -1184,6 +1190,21 @@ export function IssueFilterMenu({
                 })}
               </DropdownMenuSubContent>
             </DropdownMenuSub>
+            )}
+
+            {/* Agent is running — a yes/no condition, so the row itself
+                toggles. The check sits where the other rows keep their
+                chevron, keeping the icons in one column. */}
+            {show("agentRunning") && (
+            <DropdownMenuCheckboxItem
+              checked={agentRunningFilter}
+              onCheckedChange={() => act.toggleAgentRunningFilter()}
+              className={cn(FILTER_ITEM_CLASS, "pr-2!")}
+            >
+              <Bot className="size-3.5" />
+              <span className="flex-1">{t(($) => $.filters.agent_running)}</span>
+              <HoverCheck checked={agentRunningFilter} />
+            </DropdownMenuCheckboxItem>
             )}
 
             {/* Priority */}
@@ -1512,6 +1533,7 @@ export function IssueFilterMenu({
   };
   const sectionKeys = [
     ...searchFields.filter((field) => field !== "relation" || showRelation),
+    "agentRunning",
     ...(showDateFilter ? ["date"] : []),
     ...filterableProperties.map((p) => `property:${p.id}`),
   ];
@@ -1606,6 +1628,7 @@ export function IssueFilterMenu({
               // Inside a saved view, reset returns to the view's own
               // conditions, never to nothing.
               act.resetFiltersTo(viewBaseline.raw);
+              if (agentRunningFilter) act.toggleAgentRunningFilter();
             } else {
               act.clearFilters();
             }
@@ -1768,6 +1791,7 @@ export function IssueDisplayControls({
   const dueDateFilters = useViewStore((s) => s.dueDateFilters);
   const advancedFilter = useViewStore((s) => s.advancedFilter);
   const negatedFilters = useViewStore((s) => s.negatedFilters);
+  const agentRunningFilter = useViewStore((s) => s.agentRunningFilter);
   const cardPropertyIds = useViewStore((s) => s.cardPropertyIds);
   const sortBy = useViewStore((s) => s.sortBy);
   const sortDirection = useViewStore((s) => s.sortDirection);
@@ -1848,6 +1872,7 @@ export function IssueDisplayControls({
       negatedFilters,
       advancedFilter,
       dateFilter: showDateFilter ? dateFilter : null,
+      agentRunningFilter,
     },
     viewBaseline,
   );
