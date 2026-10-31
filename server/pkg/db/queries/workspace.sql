@@ -58,9 +58,14 @@ WHERE id = $1
 RETURNING *;
 
 -- name: IncrementIssueCounter :one
-UPDATE workspace SET issue_counter = issue_counter + 1
-WHERE id = $1
-RETURNING issue_counter;
+UPDATE workspace AS w
+SET issue_counter = GREATEST(
+        w.issue_counter,
+        (SELECT COALESCE(MAX(i.number), 0) FROM issue AS i WHERE i.workspace_id = w.id)
+    ) + 1,
+    updated_at = now()
+WHERE w.id = $1
+RETURNING w.issue_counter;
 
 -- name: LockWorkspaceForDelete :one
 -- Taken first by DeleteWorkspace, before it enumerates the workspace's chat
