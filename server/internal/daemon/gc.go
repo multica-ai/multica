@@ -777,21 +777,30 @@ func (d *Daemon) gcDecisionAutopilotRun(ctx context.Context, taskDir string, met
 	// Terminal states per the autopilot_run CHECK constraint:
 	//   completed, failed, skipped — the run finished its own work.
 	//   issue_created            — the run produced an issue task that owns
-	//                              its own workdir; this run's workdir is
-	//                              dead weight from here on.
-	// Non-terminal: pending, running. Skip until they reach a terminal state
-	// rather than trying to bound them by mtime — long autopilots are real.
+	//                              its own workdir.
+	// Non-terminal: running. Skip until they reach a terminal state rather
+	// than trying to bound them by mtime — long autopilots are real.
 	//
-	// An autopilot run's workdir is never reused: unlike issue/chat tasks there
-	// is no PriorWorkDir path that hands a later run the same directory, so every
-	// run gets a fresh one. Whatever the run produced already lives server-side
-	// (and an issue_created run handed its work to an issue task that owns its own
-	// envRoot). So the moment the run reaches a terminal state the directory is
-	// dead weight and we reclaim it immediately, without waiting out GCTTL — the
-	// same reasoning gcDecisionQuickCreate applies to quick-create dirs. The
-	// active-env-root short-circuit in shouldCleanTaskDir still protects a run
-	// that is mid-flight, so this can't pull the rug from under live work.
+	// The directory of a terminal run IS the next run's reuse target
+	// (GH #8532): the server hands the successor this path via PriorWorkDir,
+	// and the rendered path rides inside the provider's own system prompt —
+	// the last cross-run prompt-cache breakpoint — so a fresh path per run
+	// re-writes the whole cacheable prefix every run. Terminal runs therefore
+	// wait out GCTTL exactly like terminal issue dirs, and a successor that
+	// reuses the directory refreshes .gc_meta.json on completion, restarting
+	// the countdown. Whatever the run produced already lives server-side, so
+	// keeping the directory only buys cache stability, never data retention
+	// we wouldn't grant an issue dir. The active-env-root short-circuit in
+	// shouldCleanTaskDir still protects a run that is mid-flight, so this
+	// can't pull the rug from under live work.
 	if isAutopilotRunTerminal(status.Status) {
+		// The run's completed_at is the TTL anchor. A terminal status with no
+		// usable stamp stays conservative — an unreadable timestamp never
+		// becomes a deletion signal, the same rule the issue decision applies
+		// to malformed lifecycle answers.
+		if status.CompletedAt.IsZero() || time.Since(status.CompletedAt) <= d.cfg.GCTTL {
+			return gcActionSkip
+		}
 		d.logger.Info("gc: eligible for cleanup",
 			"dir", filepath.Base(taskDir),
 			"kind", "autopilot_run",

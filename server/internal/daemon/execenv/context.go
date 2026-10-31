@@ -28,6 +28,11 @@ type taskContextMarkerFile struct {
 	AgentID       string `json:"agent_id,omitempty"`
 	IssueID       string `json:"issue_id,omitempty"`
 	ChatSessionID string `json:"chat_session_id,omitempty"`
+	// AutopilotID names the owning autopilot for run_only tasks (GH #8532):
+	// the stable cross-run key that lets consecutive runs of one autopilot
+	// reuse the same workdir path. Empty on legacy markers, which therefore
+	// never match an autopilot-scoped reuse and fail closed.
+	AutopilotID string `json:"autopilot_id,omitempty"`
 }
 
 // EnsureWorkspacesRootMarker writes a persistent daemon-task marker at
@@ -206,6 +211,7 @@ func writeTaskContextMarker(workDir string, ctx TaskContextForEnv, manifest *sid
 		AgentID:       ctx.AgentID,
 		IssueID:       ctx.IssueID,
 		ChatSessionID: ctx.ChatSessionID,
+		AutopilotID:   ctx.AutopilotID,
 	}
 	data, err := json.MarshalIndent(payload, "", "  ")
 	if err != nil {

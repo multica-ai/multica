@@ -3893,6 +3893,25 @@ func (h *Handler) buildClaimedTaskResponse(r *http.Request, task *db.AgentTaskQu
 			}
 		}
 		projectCtx.applyTo(&resp)
+
+		// GH #8532: offer the most recent terminal task's workdir of THIS
+		// autopilot so the daemon reuses the path and the provider's prompt
+		// cache survives across runs. The rendered workdir path is embedded in
+		// the runtime's own system prompt (the last cross-run cache
+		// breakpoint), so a per-run path invalidates the whole prefix every
+		// run. Only the PATH needs to be stable — the daemon re-proves
+		// ownership on disk and may empty the directory — and no session is
+		// attached: each run of an autopilot starts a fresh conversation. A
+		// fresh-session rerun keeps today's clean-slate semantics and declines
+		// the offer, matching the issue-branch guard above.
+		if !task.ForceFreshSession {
+			if priorWorkDir, err := h.Queries.GetLastAutopilotTaskWorkDir(r.Context(), db.GetLastAutopilotTaskWorkDirParams{
+				AutopilotID: run.AutopilotID,
+				AgentID:     task.AgentID,
+			}); err == nil && priorWorkDir.Valid {
+				resp.PriorWorkDir = priorWorkDir.String
+			}
+		}
 	}
 
 	// Quick-create task: no issue / chat / autopilot link — workspace and
@@ -6715,10 +6734,9 @@ func (h *Handler) GetChatSessionGCCheck(w http.ResponseWriter, r *http.Request) 
 }
 
 // GetAutopilotRunGCCheck returns the status and completed_at of an autopilot
-// run for the daemon GC loop. The daemon decides purely on terminal status:
-// an autopilot run's workdir is never reused, so a terminal run is reclaimed on
-// sight while non-terminal status is a skip signal — completed_at is returned
-// for the API contract and diagnostics, not as a TTL anchor.
+// run for the daemon GC loop. Since GH #8532 the run's directory is the next
+// run's reuse target, so the daemon TTL-gates the reclaim on completed_at
+// (exactly like the issue check) and skips non-terminal runs outright.
 //
 // Workspace ownership is resolved via the parent autopilot row.
 func (h *Handler) GetAutopilotRunGCCheck(w http.ResponseWriter, r *http.Request) {

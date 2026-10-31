@@ -616,15 +616,17 @@ func Prepare(params PrepareParams, logger *slog.Logger) (*Environment, error) {
 	// follow-up can be claimed the instant the prior task completes — before
 	// the prior handler writes .gc_meta.json — so reuse eligibility must be
 	// provable from an artifact that exists the moment the env is created. Only
-	// managed (non-local_directory) issue and chat envs get this marker; that is
-	// exactly the set with a durable conversation scope. Non-fatal: a write failure
+	// managed (non-local_directory) envs with a durable cross-run scope get
+	// this marker: issue, chat, and — since GH #8532 — autopilot, whose stable
+	// scope key is the autopilot id. Non-fatal: a write failure
 	// only costs the next follow-up its session reuse (it falls back to a fresh
 	// session), which must never block dispatching this task.
-	if params.LocalWorkDir == "" && (params.Task.IssueID != "" || params.Task.ChatSessionID != "") {
+	if params.LocalWorkDir == "" && (params.Task.IssueID != "" || params.Task.ChatSessionID != "" || params.Task.AutopilotID != "") {
 		if err := WriteManagedEnvProvenance(envRoot, ManagedEnvProvenance{
 			WorkspaceID:   params.WorkspaceID,
 			IssueID:       params.Task.IssueID,
 			ChatSessionID: params.Task.ChatSessionID,
+			AutopilotID:   params.Task.AutopilotID,
 			AgentID:       params.Task.AgentID,
 		}); err != nil && logger != nil {
 			logger.Warn("execenv: write managed env provenance failed (non-fatal); a follow-up may start a fresh session", "error", err)
@@ -1186,7 +1188,11 @@ type ManagedEnvProvenance struct {
 	WorkspaceID   string `json:"workspace_id"`
 	IssueID       string `json:"issue_id,omitempty"`
 	ChatSessionID string `json:"chat_session_id,omitempty"`
-	AgentID       string `json:"agent_id"`
+	// AutopilotID names the owning autopilot for run_only tasks (GH #8532).
+	// Empty on provenance written before autopilot workdir reuse existed, so
+	// such env roots never match an autopilot-scoped reuse and fail closed.
+	AutopilotID string `json:"autopilot_id,omitempty"`
+	AgentID     string `json:"agent_id"`
 }
 
 // WriteManagedEnvProvenance persists the reuse-eligibility marker at the env

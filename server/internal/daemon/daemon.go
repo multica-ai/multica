@@ -6856,7 +6856,7 @@ func shouldReusePriorWorkdir(task Task, localAssignment *localDirectoryAssignmen
 	if len(parts) != 3 || parts[0] == "" || parts[1] == "" || parts[2] != "workdir" {
 		return "", false
 	}
-	if task.AgentID == "" || (task.IssueID == "" && task.ChatSessionID == "") {
+	if task.AgentID == "" || (task.IssueID == "" && task.ChatSessionID == "" && task.AutopilotID == "") {
 		return "", false
 	}
 	// Managed-env provenance is written only for non-local resumable envs, so
@@ -6878,6 +6878,7 @@ func shouldReusePriorWorkdir(task Task, localAssignment *localDirectoryAssignmen
 		AgentID       string `json:"agent_id"`
 		IssueID       string `json:"issue_id"`
 		ChatSessionID string `json:"chat_session_id"`
+		AutopilotID   string `json:"autopilot_id"`
 	}
 	if json.Unmarshal(data, &marker) != nil {
 		return "", false
@@ -6891,7 +6892,19 @@ func shouldReusePriorWorkdir(task Task, localAssignment *localDirectoryAssignmen
 		}
 		return workdir, true
 	}
-	if prov.ChatSessionID != task.ChatSessionID || marker.ChatSessionID != task.ChatSessionID {
+	if task.ChatSessionID != "" {
+		if prov.ChatSessionID != task.ChatSessionID || marker.ChatSessionID != task.ChatSessionID {
+			return "", false
+		}
+		return workdir, true
+	}
+	// Autopilot scope (GH #8532): the stable cross-run key is the autopilot
+	// id, not the per-run task, so every run of one autopilot lands in the
+	// same workdir path and the provider's prompt cache survives. Provenance
+	// written before this scope existed records no autopilot id and fails
+	// closed here — the first run after upgrade prepares fresh, and its own
+	// Prepare stamps the scope for every run after it.
+	if prov.AutopilotID != task.AutopilotID || marker.AutopilotID != task.AutopilotID {
 		return "", false
 	}
 	return workdir, true

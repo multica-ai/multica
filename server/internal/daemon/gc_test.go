@@ -2277,33 +2277,38 @@ func TestShouldCleanTaskDir_KindDispatch(t *testing.T) {
 			want: gcActionSkip,
 		},
 		{
-			// The directory is never reused, so a terminal run is reclaimed on
-			// sight — the recent completed_at no longer buys it a 24h reprieve.
-			name: "autopilot completed within TTL — clean immediately (no 24h gate)",
+			// GH #8532: the directory IS the next run's reuse target — its
+			// path is what the provider's prompt cache keys on. A terminal
+			// run whose completed_at is still within GCTTL keeps the
+			// directory, exactly like a terminal issue's workdir; past the
+			// TTL it is reclaimed.
+			name: "autopilot completed within TTL — reuse target, skip",
 			meta: &execenv.GCMeta{Kind: execenv.GCKindAutopilotRun, AutopilotRunID: runID, WorkspaceID: "ws"},
 			servers: []serverResp{{
 				path: "/api/daemon/autopilot-runs/" + runID + "/gc-check",
 				body: map[string]any{"status": "completed", "completed_at": withinTTL},
 			}},
-			want: gcActionClean,
+			want: gcActionSkip,
 		},
 		{
-			// Terminal status with no completed_at stamp at all still cleans —
-			// GC keys purely on the terminal status, not on any timestamp.
-			name: "autopilot skipped with no completed_at — clean",
+			// A terminal status with no completed_at stamp must stay
+			// conservative: an unusable timestamp never becomes a deletion
+			// signal, the same rule the issue and chat decisions apply to
+			// unreadable lifecycle answers.
+			name: "autopilot skipped with no completed_at — skip",
 			meta: &execenv.GCMeta{Kind: execenv.GCKindAutopilotRun, AutopilotRunID: runID, WorkspaceID: "ws"},
 			servers: []serverResp{{
 				path: "/api/daemon/autopilot-runs/" + runID + "/gc-check",
 				body: map[string]any{"status": "skipped"},
 			}},
-			want: gcActionClean,
+			want: gcActionSkip,
 		},
 		{
-			name: "autopilot failed — clean",
+			name: "autopilot failed over TTL — clean",
 			meta: &execenv.GCMeta{Kind: execenv.GCKindAutopilotRun, AutopilotRunID: runID, WorkspaceID: "ws"},
 			servers: []serverResp{{
 				path: "/api/daemon/autopilot-runs/" + runID + "/gc-check",
-				body: map[string]any{"status": "failed"},
+				body: map[string]any{"status": "failed", "completed_at": overTTL},
 			}},
 			want: gcActionClean,
 		},
