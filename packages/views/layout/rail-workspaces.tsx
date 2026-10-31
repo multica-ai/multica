@@ -2,7 +2,7 @@
 
 import { useMemo } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Check, Plus } from "@multica/ui/icons";
+import { AppWindow, Check, Plus } from "@multica/ui/icons";
 import { api } from "@multica/core/api";
 import { useConfigStore } from "@multica/core/config";
 import {
@@ -136,10 +136,12 @@ export function RailWorkspaces() {
   });
   const unreadIds = useMemo(() => unreadWorkspaceIds(unreadSummary), [unreadSummary]);
   const actions = useInvitationActions(invitations);
+  const { openWorkspaceInNewWindow } = useNavigation();
 
   const current = workspaces.find((ws) => ws.id === wsId) ?? workspace;
   if (!current) return null;
   const otherUnread = workspaces.some((ws) => ws.id !== wsId && unreadIds.has(ws.id));
+  const otherWorkspaces = workspaces.filter((ws) => ws.id !== current.id);
   const label = t(($) => $.rail.switch_workspace);
 
   return (
@@ -179,6 +181,32 @@ export function RailWorkspaces() {
             );
           })}
         </DropdownMenuGroup>
+        {openWorkspaceInNewWindow && otherWorkspaces.length > 0 && (
+          <>
+            <DropdownMenuSeparator />
+            <DropdownMenuGroup>
+              <DropdownMenuSub>
+                <DropdownMenuSubTrigger>
+                  <AppWindow />
+                  <span className="min-w-0 flex-1 truncate">
+                    {t(($) => $.rail.open_in_new_window)}
+                  </span>
+                </DropdownMenuSubTrigger>
+                <DropdownMenuSubContent className="max-h-80 min-w-44 overflow-y-auto">
+                  {otherWorkspaces.map((ws) => (
+                    <DropdownMenuItem
+                      key={ws.id}
+                      onClick={() => openWorkspaceInNewWindow(ws.slug)}
+                    >
+                      <WorkspaceAvatar name={ws.name} avatarUrl={ws.avatar_url} size="sm" />
+                      <span className="min-w-0 flex-1 truncate">{ws.name}</span>
+                    </DropdownMenuItem>
+                  ))}
+                </DropdownMenuSubContent>
+              </DropdownMenuSub>
+            </DropdownMenuGroup>
+          </>
+        )}
         {invitations.length > 0 && (
           <>
             <DropdownMenuSeparator />

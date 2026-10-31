@@ -1,5 +1,5 @@
 /**
- * Main-process messages that must wait until the main renderer has installed
+ * Main-process messages that must wait until a main renderer has installed
  * the matching listener. A BrowserWindow finishing `loadURL` is not enough:
  * React effects subscribe later, so an eager deep link can otherwise vanish.
  */
@@ -22,12 +22,19 @@ export function parseTabSelectionShortcutKey(
     : null;
 }
 
+/** Open a workspace-scoped path in the window that shows that workspace. */
+export const WORKSPACE_OPEN_PATH_CHANNEL = "workspace:open-path";
+/** Cmd/Ctrl+Shift+N: the renderer picks which workspace gets the new window. */
+export const NEW_WINDOW_SHORTCUT_CHANNEL = "window:new-by-shortcut";
+
 export const MAIN_RENDERER_MESSAGE_CHANNELS = [
   "auth:token",
   "invite:open",
   "inbox:open",
   "settings:open",
   TAB_SELECTION_SHORTCUT_CHANNEL,
+  WORKSPACE_OPEN_PATH_CHANNEL,
+  NEW_WINDOW_SHORTCUT_CHANNEL,
 ] as const;
 
 export type MainRendererMessageChannel =
@@ -60,57 +67,83 @@ export function parseMainRendererChannelState(
   };
 }
 
-type SendMessage = (
+type SendMessage<W> = (
+  target: W,
   channel: MainRendererMessageChannel,
   payload: unknown,
 ) => void;
 
 /**
- * Holds renderer-bound messages until the specific React listener is ready.
- * Readiness is per BrowserWindow lifecycle; pending messages intentionally
- * survive a main-window close so recreating the window still delivers them.
+ * Holds renderer-bound messages until the specific React listener in the
+ * target main window is ready. Readiness is per window lifecycle; a message
+ * with no target (sent before any window exists), or whose target closed
+ * before it was delivered, goes to the next main window that becomes ready,
+ * so recreating a window still delivers it.
  */
-export class MainRendererMessageQueue {
-  private readonly readyChannels = new Set<MainRendererMessageChannel>();
+export class MainRendererMessageQueue<W> {
+  private readonly readyChannels = new Map<W, Set<MainRendererMessageChannel>>();
   private readonly pending = new Map<
     MainRendererMessageChannel,
-    unknown[]
+    { target: W | null; payload: unknown }[]
   >();
 
+  constructor(
+    private readonly send: SendMessage<W>,
+    private readonly isLive: (window: W) => boolean,
+  ) {}
+
   enqueue(
+    target: W | null,
     channel: MainRendererMessageChannel,
     payload: unknown,
-    send: SendMessage,
   ): void {
-    if (this.readyChannels.has(channel)) {
-      send(channel, payload);
+    if (target !== null && this.readyChannels.get(target)?.has(channel)) {
+      this.send(target, channel, payload);
       return;
     }
     const queued = this.pending.get(channel) ?? [];
-    queued.push(payload);
+    queued.push({ target, payload });
     this.pending.set(channel, queued);
   }
 
-  setReady(
-    channel: MainRendererMessageChannel,
-    ready: boolean,
-    send: SendMessage,
-  ): void {
+  setReady(window: W, channel: MainRendererMessageChannel, ready: boolean): void {
     if (!ready) {
-      this.readyChannels.delete(channel);
+      this.readyChannels.get(window)?.delete(channel);
       return;
     }
 
-    this.readyChannels.add(channel);
+    const channels = this.readyChannels.get(window) ?? new Set();
+    channels.add(channel);
+    this.readyChannels.set(window, channels);
     const queued = this.pending.get(channel);
     if (!queued) return;
-    this.pending.delete(channel);
-    for (const payload of queued) send(channel, payload);
+    const deliver = queued.filter(
+      (entry) =>
+        entry.target === window ||
+        entry.target === null ||
+        !this.isLive(entry.target),
+    );
+    const keep = queued.filter((entry) => !deliver.includes(entry));
+    if (keep.length > 0) this.pending.set(channel, keep);
+    else this.pending.delete(channel);
+    for (const entry of deliver) this.send(window, channel, entry.payload);
   }
 
-  /** Clear readiness when the main renderer is replaced, without losing work. */
-  resetReady(): void {
-    this.readyChannels.clear();
+  /**
+   * Forget a window's readiness when its renderer goes away and hand its
+   * undelivered messages to `successor`, when another main window exists.
+   */
+  release(window: W, successor: W | null): void {
+    this.readyChannels.delete(window);
+    if (!successor) return;
+    for (const [channel, queued] of [...this.pending]) {
+      const moved = queued.filter((entry) => entry.target === window);
+      if (moved.length === 0) continue;
+      const keep = queued.filter((entry) => entry.target !== window);
+      if (keep.length > 0) this.pending.set(channel, keep);
+      else this.pending.delete(channel);
+      for (const entry of moved) this.enqueue(successor, channel, entry.payload);
+    }
   }
 
   /** Drop messages that are no longer safe for the active account. */

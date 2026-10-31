@@ -132,7 +132,7 @@ async function ipc(name: string) {
 async function setupRealGate() {
   const manager = await import("./daemon-manager");
   const { setupAutoUpdater } = await import("./updater");
-  setupAutoUpdater(() => null, {
+  setupAutoUpdater(() => [], {
     platform: "win32",
     daemonGate: {
       prepare: manager.prepareDaemonForUpdateInstall,

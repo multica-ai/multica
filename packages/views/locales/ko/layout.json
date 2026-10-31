@@ -76,7 +76,9 @@
     "chat": "채팅",
     "autopilots": "자동화",
     "switch_workspace": "워크스페이스 전환",
-    "invitation_from": "{{name}} 님이 초대했습니다"
+    "invitation_from": "{{name}} 님이 초대했습니다",
+    "open_in_new_window": "새 창에서 열기",
+    "all_workspaces_open": "모든 워크스페이스가 이미 창에 열려 있습니다"
   },
   "panels": {
     "work": {

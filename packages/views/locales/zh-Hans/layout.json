@@ -76,7 +76,9 @@
     "chat": "聊天",
     "autopilots": "自动化",
     "switch_workspace": "切换工作区",
-    "invitation_from": "{{name}} 邀请你加入"
+    "invitation_from": "{{name}} 邀请你加入",
+    "open_in_new_window": "在新窗口打开",
+    "all_workspaces_open": "所有工作区都已在窗口中打开"
   },
   "panels": {
     "work": {

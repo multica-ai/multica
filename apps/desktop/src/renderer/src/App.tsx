@@ -29,6 +29,12 @@ import { DesktopClientUsageReporter } from "./platform/client-usage-reporter";
 import { DiagnosticRouteReporter } from "./platform/diagnostic-route-reporter";
 import { flushFreezeBreadcrumb } from "./freeze-flush";
 import { DesktopAuthSessionBridge } from "./platform/auth-session-bridge";
+import { WorkspaceWindowBridge } from "./platform/workspace-window-bridge";
+import {
+  launchWorkspaceSlug,
+  otherWindowWorkspaces,
+  resolveWindowWorkspace,
+} from "./platform/workspace-windows";
 import {
   tearDownOnLogout,
   tearDownOnSessionExpiry,
@@ -287,12 +293,17 @@ function AppContent() {
   // while a failed background refetch retains the last successful list.
   useLayoutEffect(() => {
     if (!workspaceListReady) return;
-    const validSlugs = new Set(workspaces.map((w) => w.slug));
-    useTabStore.getState().validateWorkspaceSlugs(validSlugs);
+    const slugs = workspaces.map((w) => w.slug);
+    useTabStore.getState().validateWorkspaceSlugs(new Set(slugs));
     const { activeWorkspaceSlug, switchWorkspace } = useTabStore.getState();
-    if (!activeWorkspaceSlug && workspaces.length > 0) {
-      switchWorkspace(workspaces[0].slug);
-    }
+    if (slugs.length === 0) return;
+    const target = resolveWindowWorkspace(
+      slugs,
+      activeWorkspaceSlug,
+      launchWorkspaceSlug(),
+      otherWindowWorkspaces(),
+    );
+    if (target && target !== activeWorkspaceSlug) switchWorkspace(target);
   }, [workspaces, workspaceListReady]);
 
   // null = undecided (pre-login or list hasn't settled yet)
@@ -471,6 +482,7 @@ export default function App() {
         >
           <DesktopAuthSessionBridge />
           {windowContext.kind === "main" && <DiagnosticRouteReporter />}
+          {windowContext.kind === "main" && <WorkspaceWindowBridge />}
           {windowContext.kind === "main" && (
             <DesktopClientUsageReporter
               apiUrl={runtimeConfigResult.config.apiUrl}

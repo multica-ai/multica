@@ -76,7 +76,9 @@
     "chat": "Chat",
     "autopilots": "Auto",
     "switch_workspace": "Switch workspace",
-    "invitation_from": "{{name}} invited you"
+    "invitation_from": "{{name}} invited you",
+    "open_in_new_window": "Open in new window",
+    "all_workspaces_open": "Every workspace is already open in a window"
   },
   "panels": {
     "work": {

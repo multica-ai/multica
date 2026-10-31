@@ -1,6 +1,17 @@
 import { readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
+// Mirrors parseWorkspaceSlug in shared/workspace-window. Kept local because
+// window-state.node-test.mjs loads this file with Node's type stripping,
+// which cannot resolve extensionless relative imports.
+const WORKSPACE_SLUG_PATTERN = /^[a-z0-9][a-z0-9-]{0,62}$/;
+
+function parseWorkspaceSlug(value: unknown): string | null {
+  return typeof value === "string" && WORKSPACE_SLUG_PATTERN.test(value)
+    ? value
+    : null;
+}
+
 /** Persisted main-window geometry for the next launch (#5244). */
 export type WindowState = {
   x?: number;
@@ -9,6 +20,8 @@ export type WindowState = {
   height?: number;
   isMaximized?: boolean;
   isFullScreen?: boolean;
+  /** Workspace the window showed; absent for files written before multi-window. */
+  workspaceSlug?: string;
 };
 
 export type Rectangle = {
@@ -42,24 +55,29 @@ export function windowStateFilePath(userDataPath: string): string {
  */
 export function parseWindowState(raw: string): WindowState {
   try {
-    const parsed: unknown = JSON.parse(raw);
-    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
-      return {};
-    }
-    const obj = parsed as Record<string, unknown>;
-    const out: WindowState = {};
-    for (const key of ["x", "y", "width", "height"] as const) {
-      const v = obj[key];
-      if (typeof v === "number" && Number.isFinite(v)) {
-        out[key] = Math.round(v);
-      }
-    }
-    if (typeof obj.isMaximized === "boolean") out.isMaximized = obj.isMaximized;
-    if (typeof obj.isFullScreen === "boolean") out.isFullScreen = obj.isFullScreen;
-    return out;
+    return windowStateFromValue(JSON.parse(raw));
   } catch {
     return {};
   }
+}
+
+function windowStateFromValue(parsed: unknown): WindowState {
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+    return {};
+  }
+  const obj = parsed as Record<string, unknown>;
+  const out: WindowState = {};
+  for (const key of ["x", "y", "width", "height"] as const) {
+    const v = obj[key];
+    if (typeof v === "number" && Number.isFinite(v)) {
+      out[key] = Math.round(v);
+    }
+  }
+  if (typeof obj.isMaximized === "boolean") out.isMaximized = obj.isMaximized;
+  if (typeof obj.isFullScreen === "boolean") out.isFullScreen = obj.isFullScreen;
+  const workspaceSlug = parseWorkspaceSlug(obj.workspaceSlug);
+  if (workspaceSlug) out.workspaceSlug = workspaceSlug;
+  return out;
 }
 
 export function loadWindowState(filePath: string): WindowState {
@@ -73,6 +91,62 @@ export function loadWindowState(filePath: string): WindowState {
 export function saveWindowStateToFile(filePath: string, state: WindowState): void {
   try {
     writeFileSync(filePath, JSON.stringify(state), "utf8");
+  } catch {
+    // Disk full / permissions — drop silently; next launch uses defaults.
+  }
+}
+
+/**
+ * Every main window to restore, in creation order. The first window keeps the
+ * original top-level shape so builds that predate multi-window still read its
+ * geometry; the others live under `additionalWindows` and need a workspace,
+ * since a second window without one would just duplicate the first.
+ */
+export function parseWindowSession(raw: string): WindowState[] {
+  try {
+    const parsed: unknown = JSON.parse(raw);
+    const first = windowStateFromValue(parsed);
+    const additional =
+      parsed && typeof parsed === "object" && !Array.isArray(parsed)
+        ? (parsed as Record<string, unknown>).additionalWindows
+        : undefined;
+    if (!Array.isArray(additional)) return [first];
+    const seen = new Set(first.workspaceSlug ? [first.workspaceSlug] : []);
+    const rest: WindowState[] = [];
+    for (const value of additional) {
+      const state = windowStateFromValue(value);
+      if (!state.workspaceSlug || seen.has(state.workspaceSlug)) continue;
+      seen.add(state.workspaceSlug);
+      rest.push(state);
+    }
+    return [first, ...rest];
+  } catch {
+    return [{}];
+  }
+}
+
+export function loadWindowSession(filePath: string): WindowState[] {
+  try {
+    return parseWindowSession(readFileSync(filePath, "utf8"));
+  } catch {
+    return [{}];
+  }
+}
+
+export function serializeWindowSession(windows: WindowState[]): string {
+  const [first = {}, ...rest] = windows;
+  const additionalWindows = rest.filter((state) => state.workspaceSlug);
+  return JSON.stringify(
+    additionalWindows.length > 0 ? { ...first, additionalWindows } : first,
+  );
+}
+
+export function saveWindowSessionToFile(
+  filePath: string,
+  windows: WindowState[],
+): void {
+  try {
+    writeFileSync(filePath, serializeWindowSession(windows), "utf8");
   } catch {
     // Disk full / permissions — drop silently; next launch uses defaults.
   }

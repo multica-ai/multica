@@ -15,6 +15,7 @@ const state = vi.hoisted(() => ({
   invalidateQueries: vi.fn(),
   mutations: [] as Array<Record<string, unknown>>,
   workspaceCreationDisabled: false,
+  openWorkspaceInNewWindow: undefined as undefined | ((slug: string) => void),
 }));
 
 vi.mock("@multica/core/config", () => ({
@@ -28,7 +29,11 @@ vi.mock("../navigation", () => ({
       {children}
     </a>
   ),
-  useNavigation: () => ({ pathname: "/active/issues", push: vi.fn() }),
+  useNavigation: () => ({
+    pathname: "/active/issues",
+    push: vi.fn(),
+    openWorkspaceInNewWindow: state.openWorkspaceInNewWindow,
+  }),
 }));
 vi.mock("@multica/core/paths", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@multica/core/paths")>()),
@@ -89,6 +94,7 @@ beforeEach(() => {
   state.summary = [];
   state.mutations.length = 0;
   state.workspaceCreationDisabled = false;
+  state.openWorkspaceInNewWindow = undefined;
 });
 
 describe("RailWorkspaces", () => {
@@ -139,6 +145,33 @@ describe("RailWorkspaces", () => {
     state.workspaceCreationDisabled = true;
     renderWithI18n(<RailWorkspaces />);
     expect(within(await openMenu()).queryByRole("menuitem", { name: "Create workspace" })).toBeNull();
+  });
+
+  it("opens another workspace in a new window where the platform supports it", async () => {
+    const openWorkspaceInNewWindow = vi.fn();
+    state.openWorkspaceInNewWindow = openWorkspaceInNewWindow;
+    state.workspaces = [ws(1), ws(2), ws(3)];
+    renderWithI18n(<RailWorkspaces />);
+
+    const menu = await openMenu();
+    fireEvent.click(within(menu).getByRole("menuitem", { name: "Open in new window" }));
+    const submenu = (await screen.findAllByRole("menu")).find((el) => el !== menu)!;
+    const choices = within(submenu).getAllByRole("menuitem");
+    expect(choices.map((el) => el.textContent?.slice(1))).toEqual(["WS 2", "WS 3"]);
+
+    fireEvent.click(within(submenu).getByRole("menuitem", { name: /WS 3$/ }));
+    expect(openWorkspaceInNewWindow).toHaveBeenCalledWith("ws3");
+  });
+
+  it("hides the new-window entry on web and with a single workspace", async () => {
+    const { unmount } = renderWithI18n(<RailWorkspaces />);
+    expect(within(await openMenu()).queryByRole("menuitem", { name: "Open in new window" })).toBeNull();
+    unmount();
+
+    state.openWorkspaceInNewWindow = vi.fn();
+    state.workspaces = [ws(1)];
+    renderWithI18n(<RailWorkspaces />);
+    expect(within(await openMenu()).queryByRole("menuitem", { name: "Open in new window" })).toBeNull();
   });
 });
 

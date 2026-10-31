@@ -1643,3 +1643,51 @@ describe("reserved workspace restoration", () => {
     expect(useTabStore.getState().byWorkspace.dingtalk).toBeUndefined();
   });
 });
+
+describe("tabs shared with other windows", () => {
+  /** Rewrite one persisted group the way another window's write would. */
+  function writeFromOtherWindow(slug: string, urls: string[]) {
+    const stored = JSON.parse(localStorage.getItem("multica_tabs") ?? "null");
+    const tabs = urls.map((url, index) => ({
+      id: `${slug}-other-${index}`,
+      url,
+      title: "Issues",
+      pinned: false,
+      history: { stack: [url], index: 0 },
+    }));
+    stored.state.byWorkspace[slug] = {
+      activeTabId: tabs[tabs.length - 1].id,
+      recentTabIds: [],
+      browsingHistory: urls,
+      tabs,
+    };
+    localStorage.setItem("multica_tabs", JSON.stringify(stored));
+  }
+
+  it("picks up tabs another window opened when switching to that workspace", () => {
+    const store = useTabStore.getState();
+    store.switchWorkspace("acme");
+    store.switchWorkspace("beta");
+    writeFromOtherWindow("acme", ["/acme/issues", "/acme/projects"]);
+
+    useTabStore.getState().switchWorkspace("acme");
+
+    const group = useTabStore.getState().byWorkspace.acme;
+    expect(group.tabs.map((tab) => tab.url)).toEqual(["/acme/issues", "/acme/projects"]);
+    expect(group.activeTabId).toBe("acme-other-1");
+  });
+
+  it("does not overwrite another window's group when this window writes", () => {
+    const store = useTabStore.getState();
+    store.switchWorkspace("acme");
+    store.switchWorkspace("beta");
+    writeFromOtherWindow("acme", ["/acme/issues", "/acme/projects"]);
+
+    useTabStore.getState().openTab("/beta/projects", "Projects");
+
+    const stored = JSON.parse(localStorage.getItem("multica_tabs") ?? "null");
+    expect(
+      stored.state.byWorkspace.acme.tabs.map((tab: { url: string }) => tab.url),
+    ).toEqual(["/acme/issues", "/acme/projects"]);
+  });
+});
