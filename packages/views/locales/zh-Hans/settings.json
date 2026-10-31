@@ -644,7 +644,16 @@
     "save": "更新资料",
     "saving": "更新中...",
     "toast_avatar_failed": "上传头像失败",
-    "toast_profile_failed": "更新资料失败"
+    "toast_profile_failed": "更新资料失败",
+    "section_connected": "已连接账号",
+    "github_label": "GitHub",
+    "github_description": "以你的 GitHub 身份在 Multica 中合并、批准和更新 PR。",
+    "github_connected_as": "已连接 @{{login}}",
+    "github_not_connected": "未连接",
+    "github_connect": "连接",
+    "github_disconnect": "断开连接",
+    "github_disconnected": "已断开 GitHub 账号",
+    "github_disconnect_failed": "无法断开 GitHub 账号。"
   },
   "notifications": {
     "title": "收件箱通知",

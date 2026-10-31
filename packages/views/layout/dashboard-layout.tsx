@@ -13,6 +13,7 @@ import { ShellRouteDataPrefetch } from "./route-data-prefetch";
 import { SpacePanel } from "./space-panel";
 import { WorkspacePresencePrefetch } from "./workspace-presence-prefetch";
 import { GlobalShortcuts } from "./global-shortcuts";
+import { GitHubAccountCallback } from "./github-account-callback";
 
 interface DashboardLayoutProps {
   children: ReactNode;
@@ -53,6 +54,7 @@ export function DashboardLayout({
         <AppShellProvider>
           <ShellRouteDataPrefetch>
             <GlobalShortcuts />
+            <GitHubAccountCallback />
             <WorkspacePresencePrefetch />
             <AppRail className="hidden md:flex" />
             <CompactNavSheet />

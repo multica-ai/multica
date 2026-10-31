@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { I18nProvider } from "@multica/core/i18n/react";
 import type { GitHubPullRequest, PRAutoComplete } from "@multica/core/types";
@@ -26,6 +26,13 @@ const apiMock = vi.hoisted(() => ({
   unlinkIssuePullRequest: vi.fn(),
   linkIssuePullRequest: vi.fn(),
   setIssuePRAutoComplete: vi.fn(),
+  getMyGitHubAccount: vi.fn(),
+  getMyGitHubAccountConnectURL: vi.fn(),
+  getIssue: vi.fn(),
+  listAgents: vi.fn(),
+  getPullRequestMergeOptions: vi.fn(),
+  mergePullRequest: vi.fn(),
+  createComment: vi.fn(),
 }));
 vi.mock("@multica/core/api", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@multica/core/api")>()),
@@ -40,6 +47,7 @@ vi.mock("@multica/core/paths", async (importOriginal) => ({
   useCurrentWorkspace: () => ({ id: "ws-1", slug: "acme", settings: {} }),
 }));
 vi.mock("../../navigation", () => ({
+  useNavigation: () => ({ pathname: "/acme/issues/MUL-1", searchParams: new URLSearchParams(), hash: "" }),
   AppLink: ({ href, children, className }: { href: string; children: React.ReactNode; className?: string }) => (
     <a href={href} className={className}>{children}</a>
   ),
@@ -100,6 +108,15 @@ function renderList() {
 async function waitForRender() {
   return screen.findAllByRole("link");
 }
+
+const SIGNED_OUT = { configured: false, connected: false, login: null, avatar_url: null };
+const CONNECTED = { configured: true, connected: true, login: "jiayuan", avatar_url: null };
+
+beforeEach(() => {
+  apiMock.getMyGitHubAccount.mockResolvedValue(SIGNED_OUT);
+  apiMock.getIssue.mockResolvedValue({ id: "issue-1", identifier: "MUL-1", status: "in_progress", assignee_type: null, assignee_id: null });
+  apiMock.listAgents.mockResolvedValue([]);
+});
 
 describe("PullRequestList sidebar rows", () => {
   beforeEach(() => {
@@ -482,5 +499,108 @@ describe("PullRequestList auto-complete", () => {
     fireEvent.click(await screen.findByRole("button", { name: "Pull request actions" }));
     expect(await screen.findByText("Linked by MUL-1 in the title")).toBeInTheDocument();
     expect(screen.getByRole("menuitem", { name: "Remove from issue" })).toBeInTheDocument();
+  });
+});
+
+describe("PullRequestList actions", () => {
+  const waiting = (ids: string[]): PRAutoComplete => ({
+    state: "waiting",
+    pull_request_ids: ids,
+    issue_disabled: false,
+    workspace_enabled: true,
+    target_status: "done",
+  });
+  const readyPR = () =>
+    makePR({ id: "a", number: 12, checks_rollup: "success", checks_total: 3, checks_passed: 3, mergeable: "mergeable", merge_state_status: "clean" });
+
+  beforeEach(() => {
+    mockAutoComplete = waiting(["a"]);
+    apiMock.getPullRequestMergeOptions.mockReset();
+    apiMock.mergePullRequest.mockReset();
+    apiMock.createComment.mockReset();
+    toastMock.success.mockReset();
+  });
+
+  it("offers no GitHub actions when the server can't act on GitHub", async () => {
+    mockPRs = [readyPR()];
+    renderList();
+    await waitForRender();
+    await waitFor(() => expect(apiMock.getMyGitHubAccount).toHaveBeenCalled());
+    expect(screen.queryByRole("button", { name: "Merge" })).toBeNull();
+  });
+
+  it("asks to connect GitHub before the first merge", async () => {
+    apiMock.getMyGitHubAccount.mockResolvedValue({ ...SIGNED_OUT, configured: true });
+    mockPRs = [readyPR()];
+    renderList();
+    fireEvent.click(await screen.findByRole("button", { name: "Merge" }));
+    expect(await screen.findByText("Connect your GitHub account")).toBeInTheDocument();
+    expect(apiMock.getPullRequestMergeOptions).not.toHaveBeenCalled();
+  });
+
+  it("merges the head commit the dialog showed, as the signed-in user", async () => {
+    apiMock.getMyGitHubAccount.mockResolvedValue(CONNECTED);
+    apiMock.getPullRequestMergeOptions.mockResolvedValue({
+      viewer: { login: "jiayuan", did_author: false, can_update_branch: true, can_enable_auto_merge: true },
+      allowed_methods: ["squash", "merge"],
+      default_method: "squash",
+      commit_messages: { squash: { title: "Fix x (#12)", body: "body" }, merge: { title: "Merge pull request #12", body: "" } },
+      delete_branch_on_merge: true,
+      head_is_fork: false,
+      auto_merge_allowed: true,
+      auto_merge: null,
+      review_decision: "approved",
+      merge_state_status: "clean",
+      mergeable: "mergeable",
+      head_sha: "abc123",
+    });
+    apiMock.mergePullRequest.mockResolvedValue({ merged: true, sha: "def", branch_deleted: true });
+    mockPRs = [readyPR()];
+    renderList();
+    fireEvent.click(await screen.findByRole("button", { name: "Merge" }));
+    expect(await screen.findByText("Merges on GitHub as @jiayuan")).toBeInTheDocument();
+    expect(screen.getByTestId("merge-after")).toHaveTextContent("After the merge, MUL-1 moves from In Progress to Done");
+    expect(screen.getByLabelText("Commit title")).toHaveValue("Fix x (#12)");
+    fireEvent.click(within(screen.getByRole("dialog")).getByRole("button", { name: /^Merge/ }));
+    await waitFor(() =>
+      expect(apiMock.mergePullRequest).toHaveBeenCalledWith("issue-1", "a", {
+        method: "squash",
+        commit_title: "Fix x (#12)",
+        commit_message: "body",
+        delete_branch: true,
+        expected_head_sha: "abc123",
+      }),
+    );
+    await waitFor(() => expect(toastMock.success).toHaveBeenCalledWith("Merged #12"));
+  });
+
+  it("hands failing checks to the issue's agent as a comment that mentions it", async () => {
+    apiMock.getIssue.mockResolvedValue({ id: "issue-1", identifier: "MUL-1", status: "in_progress", assignee_type: "agent", assignee_id: "agent-1" });
+    apiMock.listAgents.mockResolvedValue([{ id: "agent-1", name: "Lambda", archived_at: null }]);
+    apiMock.createComment.mockResolvedValue({ id: "c-1", author_type: "member", author_id: "u-1", content: "", created_at: "2026-01-01T00:00:00Z" });
+    mockPRs = [makePR({ id: "a", number: 12, branch: "fix/x", checks_rollup: "failure", checks_total: 3, checks_failed: 1, failed_check_names: ["lint"] })];
+    renderList();
+    fireEvent.click(await screen.findByRole("button", { name: "Ask Lambda to fix" }));
+    expect(await screen.findByLabelText("Comment")).toHaveValue("#12 has failing checks: lint. Please fix them and push to `fix/x`.");
+    fireEvent.click(screen.getByRole("button", { name: "Send" }));
+    await waitFor(() =>
+      expect(apiMock.createComment).toHaveBeenCalledWith(
+        "issue-1",
+        "[@Lambda](mention://agent/agent-1) #12 has failing checks: lint. Please fix them and push to `fix/x`.",
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+      ),
+    );
+    await waitFor(() => expect(toastMock.success).toHaveBeenCalledWith("Handed off to Lambda"));
+  });
+
+  it("marks a PR waiting on a required review", async () => {
+    mockPRs = [makePR({ id: "a", checks_rollup: "success", checks_total: 1, checks_passed: 1, merge_state_status: "blocked", review_decision: "review_required" })];
+    renderList();
+    await waitForRender();
+    expect(screen.getByTestId("pull-request-verdict")).toHaveTextContent("Awaiting approval");
   });
 });

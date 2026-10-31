@@ -649,7 +649,16 @@
     "save": "Mettre à jour le profil",
     "saving": "Mise à jour...",
     "toast_avatar_failed": "Échec de l'envoi de l'avatar",
-    "toast_profile_failed": "Échec de la mise à jour du profil"
+    "toast_profile_failed": "Échec de la mise à jour du profil",
+    "section_connected": "Comptes connectés",
+    "github_label": "GitHub",
+    "github_description": "Fusionnez, approuvez et mettez à jour les pull requests depuis Multica avec votre compte GitHub.",
+    "github_connected_as": "Connecté en tant que @{{login}}",
+    "github_not_connected": "Non connecté",
+    "github_connect": "Connecter",
+    "github_disconnect": "Déconnecter",
+    "github_disconnected": "Compte GitHub déconnecté",
+    "github_disconnect_failed": "Impossible de déconnecter votre compte GitHub."
   },
   "notifications": {
     "title": "Notifications de la boîte de réception",

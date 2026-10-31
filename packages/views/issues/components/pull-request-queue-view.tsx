@@ -9,15 +9,25 @@ import {
   CircleCheck,
   CircleDashed,
   CircleDot,
+  GitMerge,
   TriangleAlert,
   type IconComponent,
 } from "@multica/ui/icons";
 import { cn } from "@multica/ui/lib/utils";
 import { issuePullRequestsOptions, queueDecidingPullRequest } from "@multica/core/github";
-import type { Issue, IssuePullRequestState, IssueTableGroupDescriptor, Project } from "@multica/core/types";
+import type {
+  GitHubPullRequest,
+  Issue,
+  IssuePullRequestState,
+  IssueTableGroupDescriptor,
+  PRAutoComplete,
+  Project,
+} from "@multica/core/types";
+import { Button } from "@multica/ui/components/ui/button";
 import { ListRow, type ChildProgress } from "./list-row";
 import { ListLoadMoreFooter } from "./list-load-more-footer";
 import { PullRequestInlineSummary } from "./pull-request-list";
+import { usePullRequestActions } from "./pull-request-actions";
 import { useIssuePeekActions } from "../surface/peek-context";
 import type { IssueGroupBranches, IssueGroupPageState } from "../surface/use-issue-group-branches";
 import { VirtuosoSeed, VIRTUOSO_SEED_COUNT } from "../../common/virtuoso-seed";
@@ -159,6 +169,7 @@ function QueueGroup({
       childProgress={childProgressMap.get(issue.id)}
       project={issue.project_id ? projectMap?.get(issue.project_id) : undefined}
       trailing={<QueuePullRequestSummary issueId={issue.id} />}
+      actions={state === "ready" ? <QueueMergeAction issue={issue} /> : undefined}
       selectable={false}
     />
   );
@@ -235,6 +246,52 @@ function QueuePullRequestSummary({ issueId }: { issueId: string }) {
     >
       <PullRequestInlineSummary pr={deciding} />
       {others > 0 && <span className="text-micro tabular-nums">+{others}</span>}
+    </span>
+  );
+}
+
+/** Merge straight from the queue, through the same dialog as the issue page. */
+function QueueMergeAction({ issue }: { issue: Issue }) {
+  const { data } = useQuery(issuePullRequestsOptions(issue.id));
+  const deciding = queueDecidingPullRequest(data?.pull_requests ?? []);
+  if (!data || !deciding) return null;
+  return <QueueMergeButton issue={issue} pr={deciding} autoComplete={data.auto_complete} />;
+}
+
+function QueueMergeButton({
+  issue,
+  pr,
+  autoComplete,
+}: {
+  issue: Issue;
+  pr: GitHubPullRequest;
+  autoComplete: PRAutoComplete | null;
+}) {
+  const { t } = useT("issues");
+  const controller = usePullRequestActions({
+    issueId: issue.id,
+    identifier: issue.identifier,
+    pr,
+    autoComplete,
+    knownIssue: issue,
+  });
+  return (
+    // React events from the portaled dialogs bubble through the row; keep its
+    // context menu from opening on them.
+    <span className="contents" onContextMenu={(e) => e.stopPropagation()}>
+      {controller.primary === "merge" ? (
+        <Button
+          variant="outline"
+          size="xs"
+          className="shrink-0 opacity-0 group-hover/row:opacity-100 focus-visible:opacity-100 [@media(pointer:coarse)]:opacity-100"
+          onClick={() => controller.trigger("merge")}
+          data-testid="pull-request-queue-merge"
+        >
+          <GitMerge />
+          {t(($) => $.pr_actions.merge)}
+        </Button>
+      ) : null}
+      {controller.dialogs}
     </span>
   );
 }

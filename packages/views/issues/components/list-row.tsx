@@ -48,6 +48,7 @@ function ListRowContent({
   childProgress,
   project,
   trailing,
+  actions,
   selectable = true,
   isDragging,
   containerRef,
@@ -60,6 +61,8 @@ function ListRowContent({
   project?: Project;
   /** Shown before the assignee. Inside the row link, so it must not be one. */
   trailing?: ReactNode;
+  /** Controls after the row link, such as buttons. */
+  actions?: ReactNode;
   selectable?: boolean;
   isDragging?: boolean;
   containerRef?: Ref<HTMLDivElement>;
@@ -202,6 +205,7 @@ function ListRowContent({
             />
           )}
         </AppLink>
+        {actions}
       </div>
     </IssueActionsContextMenu>
   );
@@ -212,12 +216,14 @@ export const ListRow = memo(function ListRow({
   childProgress,
   project,
   trailing,
+  actions,
   selectable,
 }: {
   issue: Issue;
   childProgress?: ChildProgress;
   project?: Project;
   trailing?: ReactNode;
+  actions?: ReactNode;
   selectable?: boolean;
 }) {
   return (
@@ -226,6 +232,7 @@ export const ListRow = memo(function ListRow({
       childProgress={childProgress}
       project={project}
       trailing={trailing}
+      actions={actions}
       selectable={selectable}
     />
   );

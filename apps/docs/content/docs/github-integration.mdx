@@ -98,6 +98,8 @@ Click an entry to open the PR on GitHub. Turning off the **PR sidebar** only hid
 
 Members can merge, close, approve, request reviews, update the branch, and rerun failed checks on a linked PR without leaving Multica. Each member first connects their own GitHub account once; the connection belongs to that person and works in every workspace they belong to.
 
+Connect it under **Settings → Profile → Connected accounts**, or when Multica asks the first time you act on a PR. Failing checks and merge conflicts need code changes, so those PRs offer to hand the fix to an agent instead: Multica drafts an editable comment on the issue that mentions the issue's agent.
+
 Multica sends each action to GitHub as the member who clicked it, so GitHub applies that person's repository permissions and branch protection, exactly as on github.com, and records them as the author of the action. Agents can't use a member's GitHub account. Merging or closing a PR is also written to the issue timeline under the member's name.
 
 Disconnecting the GitHub account in Multica revokes Multica's access on GitHub as well.

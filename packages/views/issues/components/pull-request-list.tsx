@@ -7,6 +7,7 @@ import {
   CheckCircle2,
   Circle,
   CircleDashed,
+  CircleDot,
   CircleSlash,
   Clock,
   GitMerge,
@@ -52,6 +53,12 @@ import { cn } from "@multica/ui/lib/utils";
 import { useT, useTimeAgo } from "../../i18n";
 import { useStatusLabel } from "../utils/status-label";
 import { StatusIcon } from "./status-icon";
+import {
+  PullRequestActionMenuItems,
+  PullRequestPrimaryAction,
+  usePullRequestActions,
+  type PullRequestActionsController,
+} from "./pull-request-actions";
 
 type IssuesT = ReturnType<typeof useT<"issues">>["t"];
 
@@ -205,7 +212,15 @@ function linkSourceLabel(pr: GitHubPullRequest, identifier: string, t: IssuesT):
   }
 }
 
-function PullRequestRowMenu({ pr, actions }: { pr: GitHubPullRequest; actions: RowActions }) {
+function PullRequestRowMenu({
+  pr,
+  actions,
+  controller,
+}: {
+  pr: GitHubPullRequest;
+  actions: RowActions;
+  controller: PullRequestActionsController;
+}) {
   const { t } = useT("issues");
   const unlink = useUnlinkPullRequest(actions.issueId, actions.autoComplete);
   return (
@@ -223,6 +238,7 @@ function PullRequestRowMenu({ pr, actions }: { pr: GitHubPullRequest; actions: R
         }
       />
       <DropdownMenuContent align="end" className="w-max max-w-(--available-width)">
+        <PullRequestActionMenuItems controller={controller} />
         <DropdownMenuGroup>
           <DropdownMenuLabel className="font-normal">
             {linkSourceLabel(pr, actions.identifier, t)}
@@ -380,17 +396,38 @@ interface VerdictPillConfig {
  * several PRs scan as a column. A failed PR also lists what failed. Owner,
  * author, the full title and exact counts live in the row's tooltip.
  */
-function PullRequestRow({
-  pr,
-  identifier,
-  showRepo,
-  actions,
-}: {
+interface PullRequestRowProps {
   pr: GitHubPullRequest;
   identifier: string;
   showRepo: boolean;
   actions: RowActions | null;
-}) {
+}
+
+function PullRequestRow(props: PullRequestRowProps) {
+  return props.actions ? (
+    <ActionablePullRequestRow {...props} actions={props.actions} />
+  ) : (
+    <PullRequestRowBody {...props} controller={null} />
+  );
+}
+
+function ActionablePullRequestRow(props: PullRequestRowProps & { actions: RowActions }) {
+  const controller = usePullRequestActions({
+    issueId: props.actions.issueId,
+    identifier: props.actions.identifier,
+    pr: props.pr,
+    autoComplete: props.actions.autoComplete,
+  });
+  return <PullRequestRowBody {...props} controller={controller} />;
+}
+
+function PullRequestRowBody({
+  pr,
+  identifier,
+  showRepo,
+  actions,
+  controller,
+}: PullRequestRowProps & { controller: PullRequestActionsController | null }) {
   const { t } = useT("issues");
   const timeAgo = useTimeAgo();
   const cfg = STATE_ICON[pr.state] ?? { icon: GitPullRequest, className: "" };
@@ -486,7 +523,14 @@ function PullRequestRow({
           ) : null}
         </TooltipContent>
       </Tooltip>
-      {actions ? <PullRequestRowMenu pr={pr} actions={actions} /> : null}
+      {controller?.primary ? (
+        // Under the title column, outside the link: a button can't sit in an anchor.
+        <div className="-mt-1 flex min-w-0 pr-2 pb-2 pl-7.5">
+          <PullRequestPrimaryAction controller={controller} />
+        </div>
+      ) : null}
+      {actions && controller ? <PullRequestRowMenu pr={pr} actions={actions} controller={controller} /> : null}
+      {controller?.dialogs}
     </div>
   );
 }
@@ -613,6 +657,8 @@ function getVerdictPill(verdict: PullRequestVerdict, t: IssuesT): VerdictPillCon
       };
     case "behind":
       return { icon: CircleSlash, tone: "muted", label: t(($) => $.detail.pull_request_merge_behind) };
+    case "awaiting_review":
+      return { icon: CircleDot, tone: "amber", label: t(($) => $.detail.pull_request_verdict_awaiting_review) };
     case "blocked":
       return { icon: CircleSlash, tone: "muted", label: t(($) => $.detail.pull_request_merge_blocked) };
     case "draft":

@@ -644,7 +644,16 @@
     "save": "プロフィールを更新",
     "saving": "更新中...",
     "toast_avatar_failed": "アバターをアップロードできませんでした",
-    "toast_profile_failed": "プロフィールを更新できませんでした"
+    "toast_profile_failed": "プロフィールを更新できませんでした",
+    "section_connected": "連携アカウント",
+    "github_label": "GitHub",
+    "github_description": "Multica から GitHub アカウントとしてプルリクエストのマージ、承認、更新を行います。",
+    "github_connected_as": "@{{login}} として連携中",
+    "github_not_connected": "未連携",
+    "github_connect": "連携",
+    "github_disconnect": "連携を解除",
+    "github_disconnected": "GitHub アカウントの連携を解除しました",
+    "github_disconnect_failed": "GitHub アカウントの連携を解除できませんでした。"
   },
   "notifications": {
     "title": "インボックス通知",

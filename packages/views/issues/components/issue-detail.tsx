@@ -392,6 +392,13 @@ function formatActivity(
       });
     case "description_updated":
       return t(($) => $.activity.description_updated);
+    case "pull_request_merged":
+    case "pull_request_closed": {
+      const pr = details.pr_number ? `${details.repo_name ?? ""}#${details.pr_number}` : "?";
+      return entry.action === "pull_request_merged"
+        ? t(($) => $.activity.pull_request_merged, { pr })
+        : t(($) => $.activity.pull_request_closed, { pr });
+    }
     case "duplicate_marked":
       return t(($) => $.activity.duplicate_marked, {
         identifier: details.original_identifier || "?",
