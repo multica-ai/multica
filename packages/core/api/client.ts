@@ -185,6 +185,14 @@ import type {
   ListGitHubInstallationsResponse,
   ListGitHubRepositoriesResponse,
   GitHubConnectResponse,
+  GitHubAccount,
+  GitHubAccountConnectResponse,
+  GitHubMergeMethod,
+  GitHubMergeOptions,
+  GitHubReviewerCandidate,
+  MergePullRequestRequest,
+  MergePullRequestResponse,
+  RerunFailedChecksResponse,
   ListVCSConnectionsResponse,
   ConnectVCSRequest,
   ConnectVCSResponse,
@@ -452,6 +460,14 @@ import {
   ListGitHubInstallationsResponseSchema,
   ListGitHubRepositoriesResponseSchema,
   EMPTY_GITHUB_CONNECT_RESPONSE,
+  GitHubAccountSchema,
+  EMPTY_GITHUB_ACCOUNT,
+  GitHubAccountConnectResponseSchema,
+  GitHubMergeOptionsSchema,
+  EMPTY_GITHUB_MERGE_OPTIONS,
+  MergePullRequestResponseSchema,
+  RerunFailedChecksResponseSchema,
+  GitHubReviewerCandidatesResponseSchema,
   EMPTY_LIST_GITHUB_INSTALLATIONS_RESPONSE,
   EMPTY_LIST_GITHUB_REPOSITORIES_RESPONSE,
   RuntimeModelListRequestSchema,
@@ -5065,6 +5081,120 @@ export class ApiClient {
       EMPTY_ISSUE_PULL_REQUESTS_RESPONSE,
       { endpoint: "PUT /api/issues/:id/pr-auto-complete" },
     );
+  }
+
+  // Personal GitHub account: PR actions run on GitHub as this account.
+  async getMyGitHubAccount(): Promise<GitHubAccount> {
+    const raw = await this.fetch<unknown>("/api/me/github");
+    return parseWithFallback(raw, GitHubAccountSchema, EMPTY_GITHUB_ACCOUNT, {
+      endpoint: "GET /api/me/github",
+    });
+  }
+
+  /** GitHub's authorize URL; the browser comes back to `returnTo` in the web app. */
+  async getMyGitHubAccountConnectURL(returnTo: string): Promise<GitHubAccountConnectResponse> {
+    const raw = await this.fetch<unknown>(
+      `/api/me/github/connect?return_to=${encodeURIComponent(returnTo)}`,
+    );
+    return parseWithFallback(raw, GitHubAccountConnectResponseSchema, { url: "" }, {
+      endpoint: "GET /api/me/github/connect",
+    });
+  }
+
+  /** Finish the OAuth flow with the code and state GitHub returned to the web app. */
+  async completeMyGitHubAccount(body: { code: string; state: string }): Promise<GitHubAccount> {
+    const raw = await this.fetch<unknown>("/api/me/github/complete", {
+      method: "POST",
+      body: JSON.stringify(body),
+    });
+    return parseWithFallback(raw, GitHubAccountSchema, EMPTY_GITHUB_ACCOUNT, {
+      endpoint: "POST /api/me/github/complete",
+    });
+  }
+
+  async disconnectMyGitHubAccount(): Promise<void> {
+    await this.fetch("/api/me/github", { method: "DELETE" });
+  }
+
+  async getPullRequestMergeOptions(issueId: string, pullRequestId: string): Promise<GitHubMergeOptions> {
+    const raw = await this.fetch<unknown>(
+      `/api/issues/${issueId}/pull-requests/${pullRequestId}/merge-options`,
+    );
+    return parseWithFallback(raw, GitHubMergeOptionsSchema, EMPTY_GITHUB_MERGE_OPTIONS, {
+      endpoint: "GET /api/issues/:id/pull-requests/:prId/merge-options",
+    });
+  }
+
+  async mergePullRequest(
+    issueId: string,
+    pullRequestId: string,
+    body: MergePullRequestRequest,
+  ): Promise<MergePullRequestResponse> {
+    const raw = await this.fetch<unknown>(
+      `/api/issues/${issueId}/pull-requests/${pullRequestId}/merge`,
+      { method: "POST", body: JSON.stringify(body) },
+    );
+    return parseWithFallback(
+      raw,
+      MergePullRequestResponseSchema,
+      { merged: true, sha: "", branch_deleted: false },
+      { endpoint: "POST /api/issues/:id/pull-requests/:prId/merge" },
+    );
+  }
+
+  async setPullRequestAutoMerge(
+    issueId: string,
+    pullRequestId: string,
+    method: GitHubMergeMethod | null,
+  ): Promise<void> {
+    await this.fetch(`/api/issues/${issueId}/pull-requests/${pullRequestId}/auto-merge`, method
+      ? { method: "PUT", body: JSON.stringify({ method }) }
+      : { method: "DELETE" });
+  }
+
+  /** Bodyless PR writes: update-branch, ready-for-review, convert-to-draft, approve, close. */
+  async runPullRequestAction(
+    issueId: string,
+    pullRequestId: string,
+    action: "update-branch" | "ready-for-review" | "convert-to-draft" | "approve" | "close",
+  ): Promise<void> {
+    await this.fetch(`/api/issues/${issueId}/pull-requests/${pullRequestId}/${action}`, {
+      method: "POST",
+      body: "{}",
+    });
+  }
+
+  async rerunFailedPullRequestChecks(issueId: string, pullRequestId: string): Promise<RerunFailedChecksResponse> {
+    const raw = await this.fetch<unknown>(
+      `/api/issues/${issueId}/pull-requests/${pullRequestId}/rerun-failed-checks`,
+      { method: "POST", body: "{}" },
+    );
+    return parseWithFallback(
+      raw,
+      RerunFailedChecksResponseSchema,
+      { rerun_count: 0, not_rerunnable: [] },
+      { endpoint: "POST /api/issues/:id/pull-requests/:prId/rerun-failed-checks" },
+    );
+  }
+
+  async listPullRequestReviewerCandidates(
+    issueId: string,
+    pullRequestId: string,
+    query: string,
+  ): Promise<GitHubReviewerCandidate[]> {
+    const raw = await this.fetch<unknown>(
+      `/api/issues/${issueId}/pull-requests/${pullRequestId}/reviewer-candidates?q=${encodeURIComponent(query)}`,
+    );
+    return parseWithFallback(raw, GitHubReviewerCandidatesResponseSchema, { users: [] }, {
+      endpoint: "GET /api/issues/:id/pull-requests/:prId/reviewer-candidates",
+    }).users;
+  }
+
+  async requestPullRequestReview(issueId: string, pullRequestId: string, reviewers: string[]): Promise<void> {
+    await this.fetch(`/api/issues/${issueId}/pull-requests/${pullRequestId}/request-review`, {
+      method: "POST",
+      body: JSON.stringify({ reviewers }),
+    });
   }
 
   // VCS integration (Forgejo / Gitea / GitLab)

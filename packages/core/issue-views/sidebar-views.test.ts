@@ -1,6 +1,12 @@
 import { describe, expect, it } from "vitest";
 import type { IssueView } from "../api/schemas";
-import { defaultSidebarViewOrder, reorderSidebarViewOrder, resolveSidebarViewItems } from "./sidebar-views";
+import {
+  availableBuiltinViewKeys,
+  defaultSidebarViewOrder,
+  reorderSidebarViewOrder,
+  resolveSidebarViewItems,
+  withIntroducedBuiltins,
+} from "./sidebar-views";
 
 const view = (id: string, owner_id: string): IssueView => ({
   id,
@@ -26,9 +32,51 @@ describe("defaultSidebarViewOrder", () => {
       "builtin:my_issues",
       "builtin:my_agents",
       "builtin:all_issues",
+      "builtin:awaiting_merge",
       "view:a",
       "view:c",
     ]);
+  });
+});
+
+describe("availableBuiltinViewKeys", () => {
+  it("offers Awaiting merge only once a code host is known to be connected", () => {
+    expect(availableBuiltinViewKeys(true).has("awaiting_merge")).toBe(true);
+    expect(availableBuiltinViewKeys(false).has("awaiting_merge")).toBe(false);
+    expect(availableBuiltinViewKeys(undefined).has("awaiting_merge")).toBe(false);
+    expect([...availableBuiltinViewKeys(false)]).toEqual(["my_issues", "my_agents", "all_issues"]);
+  });
+});
+
+describe("withIntroducedBuiltins", () => {
+  const all = availableBuiltinViewKeys(true);
+
+  it("puts a new built-in after the last built-in the user kept", () => {
+    expect(withIntroducedBuiltins(["view:a", "builtin:all_issues", "view:b"], [], all)).toEqual([
+      "view:a",
+      "builtin:all_issues",
+      "builtin:awaiting_merge",
+      "view:b",
+    ]);
+  });
+
+  it("appends it when the user kept no built-ins", () => {
+    expect(withIntroducedBuiltins(["view:a"], [], all)).toEqual(["view:a", "builtin:awaiting_merge"]);
+  });
+
+  it("does not bring back a built-in the user was already offered", () => {
+    expect(withIntroducedBuiltins(["builtin:my_issues"], ["awaiting_merge"], all)).toEqual(["builtin:my_issues"]);
+  });
+
+  it("waits for a code host before offering Awaiting merge", () => {
+    expect(withIntroducedBuiltins(["builtin:my_issues"], [], availableBuiltinViewKeys(false))).toEqual([
+      "builtin:my_issues",
+    ]);
+  });
+
+  it("never adds a second copy", () => {
+    const order = ["builtin:awaiting_merge", "builtin:my_issues"];
+    expect(withIntroducedBuiltins(order, [], all)).toEqual(order);
   });
 });
 
@@ -40,6 +88,14 @@ describe("resolveSidebarViewItems", () => {
     );
     expect(items.map((item) => item.id)).toEqual(["view:b", "builtin:all_issues"]);
     expect(items[1]).toMatchObject({ kind: "builtin", key: "all_issues" });
+  });
+
+  it("hides built-ins the workspace cannot use", () => {
+    const order = ["builtin:my_issues", "builtin:awaiting_merge"];
+    expect(resolveSidebarViewItems(order, [], availableBuiltinViewKeys(false)).map((item) => item.id)).toEqual([
+      "builtin:my_issues",
+    ]);
+    expect(resolveSidebarViewItems(order, [], availableBuiltinViewKeys(true)).map((item) => item.id)).toEqual(order);
   });
 });
 

@@ -1,0 +1,1 @@
+ALTER TABLE github_user_connection DROP CONSTRAINT IF EXISTS github_user_connection_pkey;

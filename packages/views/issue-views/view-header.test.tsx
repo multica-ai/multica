@@ -64,33 +64,15 @@ describe("IssueViewHeader copy link", () => {
       search: "scope=agents",
       expected: "/acme/my-issues?scope=agents",
     },
+    {
+      kind: "awaiting_merge",
+      title: "Awaiting merge",
+      pathname: "/acme/views/awaiting-merge",
+      search: "",
+      expected: "/acme/views/awaiting-merge",
+    },
   ] as const)("copies the URL for $title", async ({ kind, title, pathname, search, expected }) => {
-    const adapter: NavigationAdapter = {
-      pathname,
-      searchParams: new URLSearchParams(search),
-      hash: "",
-      push: vi.fn(),
-      replace: vi.fn(),
-      back: vi.fn(),
-      getShareableUrl: (path) => path,
-    };
-    const controller = {
-      hasActiveFilters: false,
-      isRefreshing: false,
-      surfaceIssues: [],
-      workingAgents: [],
-      allowGantt: false,
-      facetCountsExact: false,
-      openCreateIssue: vi.fn(),
-    } as unknown as IssueSurfaceController;
-
-    renderWithI18n(
-      <NavigationProvider value={adapter}>
-        <ViewStoreProvider store={getIssueSurfaceViewStore("header-copy-link")}>
-          <IssueViewHeader controller={controller} base={{ kind }} />
-        </ViewStoreProvider>
-      </NavigationProvider>,
-    );
+    renderHeader(kind, { pathname, search });
 
     const user = userEvent.setup();
     await user.click(screen.getByRole("button", { name: title }));
@@ -98,3 +80,52 @@ describe("IssueViewHeader copy link", () => {
     expect(copyLink).toHaveBeenCalledWith(expected);
   });
 });
+
+describe("IssueViewHeader for Awaiting merge", () => {
+  it("offers no new issue and no way to save its filters as a view", () => {
+    renderHeader("awaiting_merge", { pathname: "/acme/views/awaiting-merge", hasActiveFilters: true });
+
+    expect(screen.getByRole("button", { name: "Reset" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Save as view" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "New issue" })).toBeNull();
+  });
+
+  it("keeps both on the other built-in views", () => {
+    renderHeader("workspace", { pathname: "/acme/issues", hasActiveFilters: true });
+
+    expect(screen.getByRole("button", { name: "Save as view" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "New issue" })).toBeInTheDocument();
+  });
+});
+
+function renderHeader(
+  kind: "workspace" | "my" | "awaiting_merge",
+  { pathname, search = "", hasActiveFilters = false }: { pathname: string; search?: string; hasActiveFilters?: boolean },
+) {
+  const adapter: NavigationAdapter = {
+    pathname,
+    searchParams: new URLSearchParams(search),
+    hash: "",
+    push: vi.fn(),
+    replace: vi.fn(),
+    back: vi.fn(),
+    getShareableUrl: (path) => path,
+  };
+  const controller = {
+    hasActiveFilters,
+    isRefreshing: false,
+    surfaceIssues: [],
+    workingAgents: [],
+    allowGantt: false,
+    facetCountsExact: false,
+    openCreateIssue: vi.fn(),
+  } as unknown as IssueSurfaceController;
+
+  return renderWithI18n(
+    <NavigationProvider value={adapter}>
+      <ViewStoreProvider store={getIssueSurfaceViewStore(`header-${kind}`)}>
+        <IssueViewHeader controller={controller} base={{ kind }} />
+      </ViewStoreProvider>
+    </NavigationProvider>,
+  );
+}

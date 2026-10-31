@@ -27,6 +27,7 @@
     "attachment": "Attachment",
     "create_agent": "Create Agent",
     "my_agents": "My agents' work",
+    "awaiting_merge": "Awaiting merge",
     "unknown": "Unknown page"
   },
   "help": {
@@ -87,6 +88,7 @@
     "work": {
       "my_agents": "My agents' work",
       "all_issues": "All issues",
+      "awaiting_merge": "Awaiting merge",
       "views": "Views",
       "new_project": "New project",
       "new_issue_in_project": "New issue in {{name}}",

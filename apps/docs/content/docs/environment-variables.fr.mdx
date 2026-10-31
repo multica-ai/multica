@@ -183,6 +183,9 @@ Les limites de débit d'authentification nécessitent `REDIS_URL` ; sans cette v
 | GitHub | `GITHUB_WEBHOOK_SECRET` | Secret de signature HMAC des webhooks et de l'état de connexion |
 | GitHub | `GITHUB_APP_ID` | Nécessaire pour le statut CI et la possibilité de fusion sur les cartes de PR, ainsi que pour le sélecteur de dépôts « Choisir depuis GitHub » |
 | GitHub | `GITHUB_APP_PRIVATE_KEY` | Clé privée PEM complète associée à l'App ID ; mêmes usages que ci-dessus |
+| GitHub | `GITHUB_APP_CLIENT_ID` | Client ID de l'App ; nécessaire pour que les membres connectent leur compte GitHub et agissent sur les PR depuis Multica |
+| GitHub | `GITHUB_APP_CLIENT_SECRET` | Client secret généré dans les paramètres de l'App ; mêmes usages que ci-dessus |
+| GitHub | `MULTICA_GITHUB_SECRET_KEY` | Clé de 32 octets encodée en Base64 (`openssl rand -base64 32`) qui chiffre les autorisations GitHub enregistrées des membres ; la changer déconnecte tous les membres |
 | Lark | `MULTICA_LARK_SECRET_KEY` | Clé de chiffrement des identifiants de 32 octets, encodée en Base64 |
 | Slack | `MULTICA_SLACK_SECRET_KEY` | Clé de chiffrement des jetons de 32 octets, encodée en Base64 |
 | Telegram | `MULTICA_TELEGRAM_SECRET_KEY` | Clé de chiffrement du jeton du bot de 32 octets, encodée en Base64 |

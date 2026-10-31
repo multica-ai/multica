@@ -16,6 +16,7 @@ const mocks = vi.hoisted(() => ({
   unstar: vi.fn(),
   open: vi.fn(),
   create: vi.fn(),
+  codeHostConnected: false as boolean | undefined,
 }));
 
 vi.mock("@tanstack/react-query", () => ({
@@ -32,12 +33,14 @@ vi.mock("@multica/core/projects/queries", () => ({
 vi.mock("@multica/core/workspace/queries", () => ({
   memberListOptions: () => ({ queryKey: ["members"] }),
 }));
+vi.mock("@multica/core/vcs", () => ({ useCodeHostConnected: () => mocks.codeHostConnected }));
 vi.mock("@multica/core/hooks", () => ({ useWorkspaceId: () => "ws-1" }));
 vi.mock("@multica/core/paths", () => ({
   useWorkspacePaths: () => ({
     issues: () => "/acme/issues",
     myIssues: () => "/acme/my-issues",
     myAgents: () => "/acme/my-issues?scope=agents",
+    awaitingMerge: () => "/acme/views/awaiting-merge",
     projectDetail: (id: string) => `/acme/projects/${id}`,
   }),
 }));
@@ -110,6 +113,7 @@ beforeEach(() => {
   mocks.unstar.mockReset();
   mocks.open.mockReset();
   mocks.create.mockReset();
+  mocks.codeHostConnected = false;
   useActiveIssueViewStore.setState({ active: {} });
 });
 
@@ -120,6 +124,8 @@ describe("AllViewsPage", () => {
     expect(screen.getByText("Needs review")).toBeInTheDocument();
     expect(screen.getByText("Team backlog")).toBeInTheDocument();
     expect(screen.getByText("2")).toBeInTheDocument();
+    // No code host, so nothing could be awaiting merge.
+    expect(screen.queryByRole("button", { name: "Add Awaiting merge to sidebar" })).not.toBeInTheDocument();
   });
 
   it("titles the page with the scope and switches scope from the title menu", async () => {
@@ -137,6 +143,16 @@ describe("AllViewsPage", () => {
     expect(screen.queryByText("Needs review")).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Add All issues to sidebar" })).not.toBeInTheDocument();
     expect(screen.getByText("Team backlog")).toBeInTheDocument();
+  });
+
+  it("lists Awaiting merge among the built-ins once a code host is connected", async () => {
+    mocks.codeHostConnected = true;
+    const user = userEvent.setup();
+    renderPage();
+
+    expect(screen.getByRole("button", { name: "Add Awaiting merge to sidebar" })).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "All views" }));
+    expect(await screen.findByRole("menuitemradio", { name: /^Built-in/ })).toHaveTextContent("4");
   });
 
   it("has no search in the header", () => {

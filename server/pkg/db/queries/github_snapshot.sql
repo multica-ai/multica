@@ -26,6 +26,9 @@ UPDATE github_pull_request
 SET api_mergeable          = sqlc.narg('api_mergeable'),
     api_merge_state_status = sqlc.narg('api_merge_state_status'),
     checks_rollup_state    = sqlc.narg('checks_rollup_state'),
+    review_decision        = sqlc.narg('review_decision'),
+    auto_merge_method      = sqlc.narg('auto_merge_method'),
+    auto_merge_enabled_by  = sqlc.narg('auto_merge_enabled_by'),
     snapshot_head_sha      = sqlc.arg('head_sha'),
     snapshot_fetched_at    = sqlc.arg('fetched_at'),
     updated_at             = now()

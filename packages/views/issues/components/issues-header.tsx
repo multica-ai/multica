@@ -1758,9 +1758,15 @@ export function IssueDisplayControls({
   viewBaseline,
   hideFilter = false,
   iconOnly = false,
+  sortOptions,
+  hideColumnToggles = false,
 }: {
   scopedIssues: Issue[];
   hideViewToggle?: boolean;
+  /** Replaces the layout's own ordering choices. */
+  sortOptions?: readonly (typeof SORT_OPTIONS)[number][];
+  /** The surface's groups are not statuses, so status columns do not apply. */
+  hideColumnToggles?: boolean;
   /** The host renders its own filter trigger (the view header's chip row). */
   hideFilter?: boolean;
   /** A ghost icon button named only by its tooltip, for the issue view header. */
@@ -1822,6 +1828,7 @@ export function IssueDisplayControls({
     return columnStatuses.flatMap((key) => optionByKey.get(key) ?? []);
   }, [columnStatuses, statusOptions]);
   const showColumnToggles =
+    !hideColumnToggles &&
     columnOptions.length > 0 &&
     (viewMode === "list" || viewMode === "swimlane" || (viewMode === "board" && grouping === "status"));
   // Active custom-property catalog: drives the filter sections, dynamic
@@ -1887,7 +1894,7 @@ export function IssueDisplayControls({
   );
   const hasActiveFilters = activeFilterCount > 0;
 
-  const SORT_LABEL_KEY: Record<typeof SORT_OPTIONS[number]["value"], "sort_manual" | "sort_status" | "sort_priority" | "sort_start_date" | "sort_due_date" | "sort_created" | "sort_updated" | "sort_title"> = {
+  const SORT_LABEL_KEY: Record<typeof SORT_OPTIONS[number]["value"], "sort_manual" | "sort_status" | "sort_priority" | "sort_start_date" | "sort_due_date" | "sort_created" | "sort_updated" | "sort_title" | "sort_pull_request_updated"> = {
     position: "sort_manual",
     status: "sort_status",
     priority: "sort_priority",
@@ -1896,6 +1903,7 @@ export function IssueDisplayControls({
     created_at: "sort_created",
     updated_at: "sort_updated",
     title: "sort_title",
+    pull_request_updated_at: "sort_pull_request_updated",
   };
   const GROUPING_LABEL_KEY: Record<typeof GROUPING_OPTIONS[number]["value"], "group_status" | "group_assignee" | "group_project"> = {
     status: "group_status",
@@ -1918,7 +1926,7 @@ export function IssueDisplayControls({
     childProgress: "card_child_progress",
   };
   const availableCardPropertyOptions = cardPropertyOptionsForView(viewMode);
-  const availableSortOptions = sortOptionsForView(viewMode, grouping);
+  const availableSortOptions = sortOptions ?? sortOptionsForView(viewMode, grouping);
   const sortPropertyId = propertyIdFromViewKey(sortBy);
   const groupingPropertyId = propertyIdFromViewKey(grouping);
   const tableGroupingPropertyId = propertyIdFromViewKey(tableGrouping);

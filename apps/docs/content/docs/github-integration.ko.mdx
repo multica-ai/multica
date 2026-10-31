@@ -9,7 +9,7 @@ import { PrLinkDemo } from "@/components/demos/pr-link-demo";
 
 GitHub를 연결하면 Multica가 태스크 번호를 기준으로 pull request를 자동 연결합니다. 태스크 상세 화면에서 PR 상태, 변경 규모, CI 결과, merge conflict를 바로 확인할 수 있습니다.
 
-GitHub 연동은 설치할 때 승인한 저장소만 읽으며 코드, 댓글, status check를 제출하지 않습니다.
+GitHub 연동은 설치할 때 승인한 저장소에서만 작동하며, App이 스스로 GitHub에 쓰는 일은 없습니다. PR merge나 승인 같은 모든 쓰기 작업은 Multica 사용자가 본인으로서 Multica에서 실행합니다. 자세한 내용은 [Multica에서 PR 다루기](#multica에서-pr-다루기)를 참고하세요.
 
 자체 배포한 Multica에서는 자체 호스팅 Forgejo, Gitea, GitLab 인스턴스도 동시에 연결해 동일한 PR 자동 연결, merge 시 상태 변경, CI 표시 기능을 사용할 수 있습니다. **설정 → 코드**에서 연결하며 자세한 내용은 [자체 호스팅 Git 코드 호스팅](/vcs-integration)을 참고하세요. Multica Cloud에는 이 메뉴가 없습니다.
 
@@ -92,6 +92,16 @@ CI 상태와 merge 가능 여부는 Multica가 GitHub API에서 가져온 snapsh
 
 항목을 클릭하면 GitHub의 PR이 열립니다. **PR 사이드바**를 꺼도 이 영역만 숨겨질 뿐 연결은 해제되지 않습니다.
 
+## Multica에서 PR 다루기
+
+멤버는 Multica를 떠나지 않고 연결된 PR을 merge, 닫기, 승인, 리뷰 요청, 브랜치 업데이트, 실패한 check 재실행할 수 있습니다. 각 멤버는 처음에 한 번 자신의 GitHub 계정을 연결합니다. 이 연결은 멤버 본인에게 속하며 소속된 모든 워크스페이스에서 사용됩니다.
+
+**설정 → 프로필 → 연결된 계정**에서 연결하거나, 처음 PR을 다룰 때 안내에 따라 연결합니다. 실패한 검사와 병합 충돌은 코드 변경이 필요하므로, 이런 PR에서는 에이전트에게 수정을 맡길 수 있습니다. Multica가 태스크의 에이전트를 멘션하는 수정 가능한 댓글을 작성해 둡니다.
+
+Multica는 각 작업을 클릭한 멤버 본인으로서 GitHub에 보냅니다. 따라서 GitHub는 github.com에서와 똑같이 그 사람의 저장소 권한과 브랜치 보호 규칙을 적용하고, 작업 수행자로 그 사람을 기록합니다. 에이전트는 멤버의 GitHub 계정을 사용할 수 없습니다. PR merge와 닫기는 해당 멤버의 이름으로 태스크 타임라인에도 기록됩니다.
+
+Multica에서 GitHub 계정 연결을 해제하면 GitHub에서 Multica의 접근 권한도 함께 취소됩니다.
+
 ## PR 병합 후 상태 변경
 
 PR이 merge되었다고 해서 태스크가 반드시 끝난 것은 아닙니다. 그래서 merge 후에 무엇을 할지는 워크스페이스가 정합니다: **설정 → 코드 → PR 병합 후 태스크 상태**. `Done`(새 워크스페이스의 기본값), 다른 "시작됨" 또는 "완료" 카테고리의 상태("회귀 테스트 대기" 같은 사용자 지정 상태도 가능), 또는 **변경하지 않음**을 고를 수 있습니다. 이 설정이 생기기 전부터 있던 워크스페이스는 기존 동작을 유지합니다. merge해도 태스크가 항상 완료되지는 않았다면 초기값은 **변경하지 않음**입니다.
@@ -137,7 +147,9 @@ GitHub의 **Developer settings → GitHub Apps**에서 App을 만들고 다음 �
 | 필드 | 값 |
 |---|---|
 | Homepage URL | Multica 프런트엔드 주소. 예: `https://multica.example.com` |
-| Callback URL | 비워 둠 |
+| Callback URL | `https://<api-host>/api/github/user/callback`. 멤버가 GitHub 계정을 연결할 때 사용 |
+| Expire user authorization tokens | 활성화 유지 |
+| Request user authorization (OAuth) during installation | 비활성화 유지 |
 | Setup URL | `https://<api-host>/api/github/setup`, **Redirect on update** 활성화 |
 | Webhook URL | `https://<api-host>/api/webhooks/github` |
 | Webhook secret | 장기 보관할 임의 문자열 |
@@ -147,7 +159,9 @@ Repository permissions:
 | 권한 | 수준 |
 |---|---|
 | Metadata | Read-only |
-| Pull requests | Read-only |
+| Contents | Read & write. PR merge, PR 브랜치 업데이트, merge된 브랜치 삭제에 사용 |
+| Pull requests | Read & write. merge, 닫기, 승인, 리뷰 요청에 사용 |
+| Actions | Read & write. 실패한 check 재실행에 사용 |
 | Checks | Read-only. CI 상태 표시에 사용 |
 | Commit statuses | Read-only. legacy status 형식의 CI 집계에 사용 |
 
@@ -156,7 +170,13 @@ Repository permissions:
 - **Pull request**
 - CI와 merge 가능 여부 새로 고침을 트리거할 **Check suite**, **Check run**, **Status**
 
-PR snapshot은 Pull requests, Checks 및 Commit statuses REST API로 가져옵니다. Contents 권한은 필요하지 않습니다.
+PR snapshot은 Pull requests, Checks 및 Commit statuses API로 읽기만 합니다. 쓰기 권한은 멤버가 Multica에서 PR을 다룰 때 그 멤버 본인의 GitHub 승인으로만 사용됩니다.
+
+App을 만든 뒤 설정 페이지의 **Client secrets → Generate a new client secret**에서 client secret을 생성하고, 그 위에 표시된 **Client ID**와 함께 보관합니다.
+
+<Callout type="info">
+**기존 App 업그레이드**: 쓰기 권한을 추가하면 GitHub가 각 installation owner에게 승인을 요청합니다. owner가 승인하기 전까지 해당 installation 저장소에서는 PR 작업이 App 권한이 없다는 메시지와 함께 실패합니다. CI 상태, merge 가능 여부, 자동 연결은 계속 작동합니다.
+</Callout>
 
 <Callout type="warning">
 여기에는 OAuth Client secret이 아니라 **Webhook secret**이 필요합니다. 양쪽에 입력한 Webhook secret이 다르면 GitHub delivery가 `401 invalid signature`를 반환합니다.
@@ -186,6 +206,17 @@ GITHUB_APP_PRIVATE_KEY=<BEGIN/END 줄과 줄바꿈을 유지한 전체 PEM priva
 
 Private key는 GitHub App의 **Private keys → Generate a private key**에서 생성합니다. 이 두 변수가 없어도 PR은 계속 미러링되고 태스크 자동 연결과 merge 시 상태 변경도 작동합니다. PR 카드에 CI 또는 merge 상태가 표시되지 않을 뿐입니다.
 
+멤버가 [Multica에서 PR을 다룰](#multica에서-pr-다루기) 수 있게 하려면 다음 세 변수와, GitHub가 위의 Callback URL로 돌아올 수 있도록 API 공개 주소도 설정합니다.
+
+```dotenv
+GITHUB_APP_CLIENT_ID=<App의 Client ID>
+GITHUB_APP_CLIENT_SECRET=<생성한 client secret>
+MULTICA_GITHUB_SECRET_KEY=<openssl rand -base64 32 출력값>
+MULTICA_PUBLIC_URL=https://<api-host>
+```
+
+`MULTICA_GITHUB_SECRET_KEY`는 멤버가 저장한 GitHub 승인을 암호화합니다. 이 값을 바꾸면 모든 멤버의 GitHub 계정 연결이 해제됩니다. 세 변수 중 하나라도 없으면 멤버는 GitHub 계정을 연결할 수 없고, 나머지 기능은 그대로 작동합니다.
+
 </Step>
 <Step>
 
@@ -208,7 +239,9 @@ API 서비스를 다시 시작한 뒤 **설정 → 코드**에서 연결을 완�
 - **Webhook이 401을 반환함**: GitHub App과 API가 같은 Webhook secret을 사용하는지 확인하고 GitHub의 **Recent Deliveries**에서 다시 전달합니다.
 - **PR이 연결되지 않음**: 저장소가 App 승인 범위에 있는지, 자동 연결이 켜져 있는지, 번호가 현재 워크스페이스에 속하는지, 누군가 태스크에서 PR을 제거하지 않았는지 확인합니다.
 - **본문에 번호를 썼는데 연결되지 않음**: `Closes MUL-123`을 사용하거나, 번호를 브랜치 이름이나 PR 제목에 넣거나, 직접 연결합니다.
-- **CI 상태가 없음**: `GITHUB_APP_ID`와 `GITHUB_APP_PRIVATE_KEY`가 설정되었는지, App에 Pull requests, Checks 및 Commit statuses 읽기 권한이 있고 관련 이벤트를 구독했는지 확인합니다. Contents 권한은 필요하지 않습니다. 설치된 App에 권한을 추가한 뒤에는 각 installation owner가 GitHub에서 승인해야 적용됩니다.
+- **CI 상태가 없음**: `GITHUB_APP_ID`와 `GITHUB_APP_PRIVATE_KEY`가 설정되었는지, App에 위에 나온 Pull requests, Checks 및 Commit statuses 권한이 있고 관련 이벤트를 구독했는지 확인합니다. 설치된 App에 권한을 추가한 뒤에는 각 installation owner가 GitHub에서 승인해야 적용됩니다.
+- **PR 작업 시 App 권한이 없다고 표시됨**: 해당 installation에서 App의 쓰기 권한이 아직 승인되지 않았습니다. installation owner가 GitHub의 개인 또는 조직 **Settings → GitHub Apps**에서 승인합니다.
+- **멤버가 GitHub 계정을 연결할 수 없음**: `GITHUB_APP_CLIENT_ID`, `GITHUB_APP_CLIENT_SECRET`, `MULTICA_GITHUB_SECRET_KEY`가 API 프로세스에 전달되었는지, App의 Callback URL이 `https://<api-host>/api/github/user/callback`인지 확인합니다.
 - **PR merge 후 태스크 상태가 바뀌지 않음**: 태스크의 **Pull requests** 목록 아래 설명을 확인합니다. 아직 merge되지 않았거나 merge 없이 닫힌 PR이 있는지, 또는 이 태스크가 PR 병합 후에도 상태를 유지하도록 설정되어 있는지 알려 줍니다. 설명이 없으면 워크스페이스가 **변경하지 않음**으로 설정되어 있거나 태스크가 이미 대상 상태입니다.
 
 ## 다음 단계

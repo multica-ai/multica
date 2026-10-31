@@ -12,6 +12,8 @@ describe("parseTabSubject", () => {
     ["/acme/my-issues", { kind: "page", page: "myIssues" }],
     ["/acme/my-issues?scope=agents", { kind: "myAgents" }],
     ["/acme/my-issues?scope=created", { kind: "page", page: "myIssues" }],
+    ["/acme/views", { kind: "page", page: "views" }],
+    ["/acme/views/awaiting-merge", { kind: "awaitingMerge" }],
     ["/acme/projects", { kind: "page", page: "projects" }],
     ["/acme/autopilots", { kind: "page", page: "autopilots" }],
     ["/acme/agents", { kind: "page", page: "agents" }],
@@ -96,6 +98,9 @@ describe("tabSubjectKey", () => {
     expect(tabSubjectKey({ kind: "chat", sessionId: "s1" })).toBe("chat:s1");
     expect(tabSubjectKey({ kind: "myAgents" })).not.toBe(
       tabSubjectKey({ kind: "page", page: "myIssues" }),
+    );
+    expect(tabSubjectKey({ kind: "awaitingMerge" })).not.toBe(
+      tabSubjectKey({ kind: "page", page: "views" }),
     );
     expect(
       tabSubjectKey({ kind: "actor", actorType: "member", id: "m1" }),

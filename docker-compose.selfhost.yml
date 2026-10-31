@@ -128,6 +128,11 @@ services:
       # its newlines survive into the container.
       GITHUB_APP_ID: ${GITHUB_APP_ID:-}
       GITHUB_APP_PRIVATE_KEY: ${GITHUB_APP_PRIVATE_KEY:-}
+      # Personal GitHub account connection for PR actions from Multica. All
+      # three are required; unset leaves the feature reporting configured=false.
+      GITHUB_APP_CLIENT_ID: ${GITHUB_APP_CLIENT_ID:-}
+      GITHUB_APP_CLIENT_SECRET: ${GITHUB_APP_CLIENT_SECRET:-}
+      MULTICA_GITHUB_SECRET_KEY: ${MULTICA_GITHUB_SECRET_KEY:-}
       # Public URL the API is reachable at from the open internet, no
       # trailing slash. Used to mint absolute webhook URLs for autopilot
       # webhook triggers. Leave unset behind a same-origin reverse proxy

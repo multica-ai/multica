@@ -16,7 +16,9 @@ export type IssueScope =
       actorId: string;
       relation: "assigned" | "created";
     }
-  | { type: "team"; teamId: string };
+  | { type: "team"; teamId: string }
+  /** The built-in "Awaiting merge" queue: unfinished issues with an open PR. */
+  | { type: "awaiting_merge" };
 
 /**
  * THE single translation between the UI's coarse assignee-type tab and the
@@ -77,5 +79,7 @@ export function issueScopeKey(scope: IssueScope): string {
       return `actor:${scope.actorType}:${scope.actorId}:${scope.relation}`;
     case "team":
       return `team:${scope.teamId}`;
+    case "awaiting_merge":
+      return "awaiting_merge";
   }
 }

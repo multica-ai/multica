@@ -27,6 +27,7 @@
     "attachment": "Pièce jointe",
     "create_agent": "Créer un agent",
     "my_agents": "Travail de mes agents",
+    "awaiting_merge": "En attente de fusion",
     "unknown": "Page inconnue"
   },
   "help": {
@@ -87,6 +88,7 @@
     "work": {
       "my_agents": "Travail de mes agents",
       "all_issues": "Toutes les tâches",
+      "awaiting_merge": "En attente de fusion",
       "views": "Vues",
       "new_project": "Nouveau projet",
       "new_issue_in_project": "Nouvelle tâche dans {{name}}",

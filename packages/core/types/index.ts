@@ -226,6 +226,17 @@ export type {
   GitHubRepository,
   ListGitHubRepositoriesResponse,
   GitHubConnectResponse,
+  GitHubAccount,
+  GitHubAccountConnectResponse,
+  GitHubMergeCommitMessage,
+  GitHubMergeMethod,
+  GitHubMergeOptions,
+  GitHubPullRequestAutoMerge,
+  GitHubPullRequestReviewDecision,
+  GitHubReviewerCandidate,
+  MergePullRequestRequest,
+  MergePullRequestResponse,
+  RerunFailedChecksResponse,
 } from "./github";
 export type {
   VCSProvider,

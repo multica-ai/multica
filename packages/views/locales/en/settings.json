@@ -649,7 +649,16 @@
     "save": "Update Profile",
     "saving": "Updating...",
     "toast_avatar_failed": "Failed to upload avatar",
-    "toast_profile_failed": "Failed to update profile"
+    "toast_profile_failed": "Failed to update profile",
+    "section_connected": "Connected accounts",
+    "github_label": "GitHub",
+    "github_description": "Merge, approve and update pull requests from Multica as your GitHub account.",
+    "github_connected_as": "Connected as @{{login}}",
+    "github_not_connected": "Not connected",
+    "github_connect": "Connect",
+    "github_disconnect": "Disconnect",
+    "github_disconnected": "Disconnected your GitHub account",
+    "github_disconnect_failed": "Couldn't disconnect your GitHub account."
   },
   "notifications": {
     "title": "Inbox Notifications",

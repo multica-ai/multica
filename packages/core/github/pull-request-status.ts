@@ -3,7 +3,9 @@ import type {
   GitHubPullRequestChecksRollup,
   GitHubPullRequestMergeable,
   GitHubPullRequestMergeStateStatus,
+  GitHubPullRequestReviewDecision,
   GitHubPullRequestState,
+  IssuePullRequestState,
 } from "../types";
 
 // A PR's health comes from TWO independent facts, each tri-state and each
@@ -169,6 +171,7 @@ export type PullRequestVerdict =
   | { kind: "conflicting" }
   | { kind: "running"; passed: number; total: number; running: number }
   | { kind: "behind" }
+  | { kind: "awaiting_review" }
   | { kind: "blocked" }
   | { kind: "draft" }
   | { kind: "ready" }
@@ -178,11 +181,15 @@ export type PullRequestVerdict =
 
 export interface PullRequestVerdictInput extends PullRequestChecksInput, PullRequestMergeInput {
   state: GitHubPullRequestState;
+  review_decision?: GitHubPullRequestReviewDecision | null;
 }
 
 // Priority (high → low):
-//   merged / closed → failed → conflicting → running → behind → blocked
-//   → draft → ready → passed → no checks → unknown
+//   merged / closed → failed → conflicting → running → behind
+//   → awaiting review / blocked → draft → ready → passed → no checks → unknown
+//
+// `awaiting_review` is the `blocked` state GitHub explains with a required
+// review that has not been given; every other blocked reason stays `blocked`.
 //
 // `unstable` (non-passing checks) only restates the CI verdict, and `has_hooks`
 // is GitHub's "mergeable, with pre-receive hooks", so neither gets a verdict of
@@ -208,12 +215,57 @@ export function derivePullRequestVerdict(input: PullRequestVerdictInput): PullRe
     return { kind: "running", passed: checks.passed, total: checks.total, running: checks.running };
   }
   if (merge.kind === "behind") return { kind: "behind" };
-  if (merge.kind === "blocked") return { kind: "blocked" };
+  if (merge.kind === "blocked") {
+    return input.state !== "draft" && input.review_decision === "review_required"
+      ? { kind: "awaiting_review" }
+      : { kind: "blocked" };
+  }
   if (input.state === "draft") return { kind: "draft" };
   if (merge.kind === "ready" || merge.kind === "has_hooks") return { kind: "ready" };
   if (checks.kind === "passed") return { kind: "passed", total: checks.total };
   if (checks.kind === "none") return { kind: "no_checks" };
   return { kind: "unknown" };
+}
+
+// Awaiting merge queue
+
+/** Which "Awaiting merge" group an open PR's verdict puts its issue in. The
+ *  server groups by the same rule (issue_table_pull_request.go); change both
+ *  together. */
+export function pullRequestQueueState(
+  verdict: PullRequestVerdict,
+): Exclude<IssuePullRequestState, "none"> {
+  switch (verdict.kind) {
+    case "ready":
+      return "ready";
+    case "failed":
+    case "conflicting":
+    case "behind":
+    case "awaiting_review":
+    case "blocked":
+      return "needs_attention";
+    default:
+      return "checking";
+  }
+}
+
+const QUEUE_STATE_RANK = { ready: 0, checking: 1, needs_attention: 2 } as const;
+
+/** The open PR that decides an issue's group: the worst one, since one
+ *  blocked PR holds the whole issue back. Drafts, merged and closed PRs do
+ *  not count. */
+export function queueDecidingPullRequest<T extends PullRequestVerdictInput>(prs: readonly T[]): T | undefined {
+  let deciding: T | undefined;
+  let rank = -1;
+  for (const pr of prs) {
+    if (pr.state !== "open") continue;
+    const next = QUEUE_STATE_RANK[pullRequestQueueState(derivePullRequestVerdict(pr))];
+    if (next > rank) {
+      deciding = pr;
+      rank = next;
+    }
+  }
+  return deciding;
 }
 
 // Row copy

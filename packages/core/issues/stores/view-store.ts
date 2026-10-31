@@ -61,6 +61,8 @@ export type SortField =
   | "created_at"
   | "updated_at"
   | "title"
+  /** Only offered by the Awaiting merge view. */
+  | "pull_request_updated_at"
   | `property:${string}`;
 export type SortDirection = "asc" | "desc";
 export type IssueDateField = "created_at" | "updated_at";
@@ -226,6 +228,13 @@ export const SORT_OPTIONS: { value: StaticSortField; label: string }[] = [
   { value: "title", label: "Title" },
 ];
 
+/** The Awaiting merge view orders by PR activity first. It has no manual
+ *  order: its groups are not statuses. */
+export const AWAITING_MERGE_SORT_OPTIONS: { value: StaticSortField; label: string }[] = [
+  { value: "pull_request_updated_at", label: "PR updated" },
+  ...SORT_OPTIONS.filter((option) => option.value !== "position"),
+];
+
 export const GROUPING_OPTIONS: { value: StaticIssueGrouping; label: string }[] = [
   { value: "status", label: "Status" },
   { value: "assignee", label: "Assignee" },
@@ -259,7 +268,9 @@ export const DEFAULT_HIDDEN_STATUSES: readonly IssueStatus[] = [
 ];
 
 export function defaultSortDirection(field: SortField): SortDirection {
-  return field === "created_at" || field === "updated_at" ? "desc" : "asc";
+  return field === "created_at" || field === "updated_at" || field === "pull_request_updated_at"
+    ? "desc"
+    : "asc";
 }
 
 /** Only expose card controls that the active renderer can honor. */

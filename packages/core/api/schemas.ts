@@ -52,6 +52,8 @@ import type {
   RedeemTelegramBindingTokenResponse,
   GroupedIssuesResponse,
   GitHubConnectResponse,
+  GitHubAccount,
+  GitHubMergeOptions,
   IssuePullRequestsResponse,
   InboxItem,
   InboxWorkspaceUnread,
@@ -398,6 +400,90 @@ export const EMPTY_LIST_GITHUB_REPOSITORIES_RESPONSE: ListGitHubRepositoriesResp
   next_page: null,
 };
 
+const GitHubPullRequestAutoMergeSchema = z.object({
+  merge_method: z.string(),
+  enabled_by: z.string().nullable().optional().default(null),
+}).loose();
+
+export const GitHubAccountSchema = z.object({
+  configured: z.boolean().optional().default(false),
+  connected: z.boolean().optional().default(false),
+  login: z.string().nullable().optional().default(null),
+  avatar_url: z.string().nullable().optional().default(null),
+}).loose();
+
+export const EMPTY_GITHUB_ACCOUNT: GitHubAccount = {
+  configured: false,
+  connected: false,
+  login: null,
+  avatar_url: null,
+};
+
+export const GitHubAccountConnectResponseSchema = z.object({ url: z.string() }).loose();
+
+const GitHubMergeMethodSchema = z.enum(["merge", "squash", "rebase"]);
+const GitHubMergeCommitMessageSchema = z.object({
+  title: z.string().optional().default(""),
+  body: z.string().optional().default(""),
+}).loose();
+
+export const GitHubMergeOptionsSchema = z.object({
+  viewer: z.object({
+    login: z.string(),
+    did_author: z.boolean().optional().default(false),
+    can_update_branch: z.boolean().optional().default(false),
+    can_enable_auto_merge: z.boolean().optional().default(false),
+  }).loose(),
+  // Methods a newer GitHub may add are dropped rather than failing the dialog.
+  allowed_methods: z.array(z.string()).optional().default([])
+    .transform((methods) => methods.filter((m): m is z.infer<typeof GitHubMergeMethodSchema> =>
+      GitHubMergeMethodSchema.safeParse(m).success)),
+  default_method: GitHubMergeMethodSchema.nullable().optional().catch(null).default(null),
+  commit_messages: z.record(z.string(), GitHubMergeCommitMessageSchema).optional().default({}),
+  delete_branch_on_merge: z.boolean().optional().default(false),
+  head_is_fork: z.boolean().optional().default(false),
+  auto_merge_allowed: z.boolean().optional().default(false),
+  auto_merge: GitHubPullRequestAutoMergeSchema.nullable().optional().catch(null).default(null),
+  review_decision: z.enum(["approved", "changes_requested", "review_required"]).nullable().optional().catch(null).default(null),
+  merge_state_status: z.string().optional().default(""),
+  mergeable: z.string().optional().default(""),
+  head_sha: z.string(),
+}).loose();
+
+/** No head SHA: the dialog cannot merge from this and says so. */
+export const EMPTY_GITHUB_MERGE_OPTIONS: GitHubMergeOptions = {
+  viewer: { login: "", did_author: false, can_update_branch: false, can_enable_auto_merge: false },
+  allowed_methods: [],
+  default_method: null,
+  commit_messages: {},
+  delete_branch_on_merge: false,
+  head_is_fork: false,
+  auto_merge_allowed: false,
+  auto_merge: null,
+  review_decision: null,
+  merge_state_status: "",
+  mergeable: "",
+  head_sha: "",
+};
+
+export const MergePullRequestResponseSchema = z.object({
+  merged: z.boolean().optional().default(true),
+  sha: z.string().optional().default(""),
+  branch_deleted: z.boolean().optional().default(false),
+}).loose();
+
+export const RerunFailedChecksResponseSchema = z.object({
+  rerun_count: z.number().optional().default(0),
+  not_rerunnable: z.array(z.string()).optional().default([]),
+}).loose();
+
+export const GitHubReviewerCandidatesResponseSchema = z.object({
+  users: z.array(z.object({
+    login: z.string(),
+    avatar_url: z.string().optional().default(""),
+  }).loose()).optional().default([]),
+}).loose();
+
 export const GitHubPullRequestSchema = z.object({
   id: z.string(),
   provider: z.string().optional().default("github"),
@@ -429,6 +515,9 @@ export const GitHubPullRequestSchema = z.object({
   failed_check_names: z.array(z.string()).optional().default([]),
   snapshot_stale: z.boolean().optional().default(false),
   snapshot_fetched_at: z.string().nullable().optional(),
+  // A malformed value hides only that hint, never the PR card.
+  review_decision: z.string().nullable().optional().catch(null),
+  auto_merge: GitHubPullRequestAutoMergeSchema.nullable().optional().catch(null),
   mergeable_state: z.string().nullable().optional(),
   additions: z.number().optional().default(0),
   deletions: z.number().optional().default(0),
@@ -1693,6 +1782,10 @@ const IssueTableGroupValueSchema = z.discriminatedUnion("kind", [
     property_id: z.string(),
     value: z.union([z.string(), z.boolean(), z.null()]).optional(),
     value_state: z.enum(["value", "unavailable", "unset"]),
+  }).loose(),
+  z.object({
+    kind: z.literal("pull_request_state"),
+    value: z.enum(["ready", "needs_attention", "checking", "none"]).catch("checking"),
   }).loose(),
 ]);
 

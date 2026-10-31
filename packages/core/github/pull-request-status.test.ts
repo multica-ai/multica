@@ -4,8 +4,11 @@ import {
   deriveMergeStatus,
   derivePullRequestVerdict,
   formatPullRequestDiffCount,
+  pullRequestQueueState,
+  queueDecidingPullRequest,
   shouldShowPullRequestStats,
   stripIssueKeyFromTitle,
+  type PullRequestVerdictInput,
 } from "./pull-request-status";
 
 describe("deriveChecksStatus", () => {
@@ -278,5 +281,55 @@ describe("formatPullRequestDiffCount", () => {
     [123_456, "123k"],
   ])("formats %d as %s", (count, expected) => {
     expect(formatPullRequestDiffCount(count)).toBe(expected);
+  });
+});
+
+// The server groups the Awaiting merge view by the same rule;
+// TestIssueTablePullRequestStateMirrorsVerdict in
+// server/internal/handler/issue_table_awaiting_merge_test.go runs these cases
+// against stored snapshots. Change both together.
+describe("pullRequestQueueState", () => {
+  const open = { state: "open" as const, snapshot_available: true };
+  it.each<[string, PullRequestVerdictInput, ReturnType<typeof pullRequestQueueState>]>([
+    ["no snapshot yet", { state: "open", snapshot_available: false }, "checking"],
+    ["snapshot of an older head", { state: "open", snapshot_available: false, checks_rollup: "failure", mergeable: "conflicting" }, "checking"],
+    ["rollup failure", { ...open, checks_rollup: "failure", merge_state_status: "unstable" }, "needs_attention"],
+    ["rollup error", { ...open, checks_rollup: "error" }, "needs_attention"],
+    ["failed check under a success rollup", { ...open, checks_rollup: "success", checks_failed: 1, merge_state_status: "clean" }, "needs_attention"],
+    ["failure and conflict", { ...open, checks_rollup: "failure", mergeable: "conflicting", merge_state_status: "dirty" }, "needs_attention"],
+    ["conflicting while checks run", { ...open, checks_rollup: "pending", mergeable: "conflicting" }, "needs_attention"],
+    ["dirty merge state", { ...open, checks_rollup: "success", merge_state_status: "dirty" }, "needs_attention"],
+    ["rollup pending", { ...open, checks_rollup: "pending", merge_state_status: "clean" }, "checking"],
+    ["rollup expected", { ...open, checks_rollup: "expected", merge_state_status: "blocked" }, "checking"],
+    ["behind base", { ...open, checks_rollup: "success", merge_state_status: "behind" }, "needs_attention"],
+    ["blocked", { ...open, checks_rollup: "success", merge_state_status: "blocked" }, "needs_attention"],
+    ["clean", { ...open, checks_rollup: "success", merge_state_status: "clean" }, "ready"],
+    ["has hooks without checks", { ...open, checks_rollup: null, merge_state_status: "has_hooks" }, "ready"],
+    ["passed but unstable", { ...open, checks_rollup: "success", merge_state_status: "unstable" }, "checking"],
+    ["passed, mergeability undecided", { ...open, checks_rollup: "success", mergeable: "unknown", merge_state_status: "unknown" }, "checking"],
+    ["no checks", { ...open, checks_rollup: null }, "checking"],
+    ["provider check failed", { state: "open", checks_conclusion: "failed" }, "needs_attention"],
+    ["provider checks passed", { state: "open", checks_conclusion: "passed" }, "checking"],
+  ])("%s", (_name, input, want) => {
+    expect(pullRequestQueueState(derivePullRequestVerdict(input))).toBe(want);
+  });
+});
+
+describe("queueDecidingPullRequest", () => {
+  const ready = { state: "open" as const, snapshot_available: true, checks_rollup: "success" as const, merge_state_status: "clean" as const };
+  const running = { ...ready, checks_rollup: "pending" as const };
+  const failing = { ...ready, checks_rollup: "failure" as const };
+
+  it("picks the open PR holding the issue back", () => {
+    expect(queueDecidingPullRequest([ready, running])).toBe(running);
+    expect(queueDecidingPullRequest([running, failing, ready])).toBe(failing);
+    expect(queueDecidingPullRequest([ready, { ...ready }])).toBe(ready);
+  });
+
+  it("ignores drafts, merged and closed PRs", () => {
+    const draft = { ...failing, state: "draft" as const };
+    const merged = { ...failing, state: "merged" as const };
+    expect(queueDecidingPullRequest([draft, ready, merged])).toBe(ready);
+    expect(queueDecidingPullRequest([draft, merged])).toBeUndefined();
   });
 });

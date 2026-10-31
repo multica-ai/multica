@@ -340,6 +340,7 @@ function makeServerBranches(
     enabled: true,
     descriptors,
     issues,
+    rowsByKey: {},
     pagination,
     total: issues.length,
     isLoading: false,

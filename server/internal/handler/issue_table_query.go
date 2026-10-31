@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 	"sort"
 	"strconv"
@@ -17,6 +18,8 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
+	"github.com/multica-ai/multica/server/internal/issuestatus"
+	"github.com/multica-ai/multica/server/internal/logger"
 	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
@@ -584,6 +587,23 @@ func (h *Handler) compileIssueTableQuery(w http.ResponseWriter, r *http.Request,
 			return issueTableSQL{}, false
 		}
 		where = append(where, fmt.Sprintf("i.creator_type = %s::text AND i.creator_id = %s::uuid", addArg(actor.actorType), addArg(actor.actorID)))
+	case "awaiting_merge":
+		if !appendAssigneeTypes() {
+			return issueTableSQL{}, false
+		}
+		// By category, so a custom status that behaves as done or cancelled
+		// leaves the queue too.
+		finished, err := issuestatus.ExpandCategories(r.Context(), h.issueStatusCatalog(), workspaceUUID,
+			[]string{issuestatus.CategoryDone, issuestatus.CategoryClosed})
+		if err != nil {
+			slog.Warn("resolve awaiting merge statuses failed", append(logger.RequestAttrs(r), "error", err)...)
+			writeIssueTableQueryFailure(w, r, "failed to resolve table scope")
+			return issueTableSQL{}, false
+		}
+		where = append(where,
+			fmt.Sprintf("NOT (i.status = ANY(%s::text[]))", addArg(finished)),
+			issueTableHasOpenPullRequestPredicate(),
+		)
 	case "my":
 		userID, ok := requireUserID(w, r)
 		if !ok {

@@ -281,6 +281,13 @@ END, ''))`,
   ''
 )) END`,
 		}, true
+	case "pull_request_state":
+		// Without the GitHub API snapshot pipeline no stored snapshot is
+		// trusted, the same gate the PR card applies.
+		return resolvedIssueTableGroup{
+			kind:      "pull_request_state",
+			groupExpr: issueTablePullRequestStateExpr(h.PRRefresh.Enabled()),
+		}, true
 	case "compound":
 		if group.Secondary != "status" && group.Secondary != "status_category" {
 			writeIssueTableUnsupportedGroup(w, "secondary_group_unsupported", "Only status is supported as a secondary group.")
@@ -511,6 +518,8 @@ func (group resolvedIssueTableGroup) orderExpression(addArg func(any) string) st
 		return "CASE WHEN group_value = '__no_project__' THEN 0 ELSE 1 END"
 	case "parent":
 		return "CASE WHEN group_value = '__no_parent__' THEN 0 ELSE 1 END"
+	case "pull_request_state":
+		return pullRequestStateOrderExpression()
 	case "property":
 		if group.propertyType == "select" {
 			ref := addArg(group.activeOptionOrder)
@@ -672,6 +681,12 @@ func (group resolvedIssueTableGroup) descriptor(raw string, count int64, context
 		} else {
 			descriptor.Value.ValueState = "value"
 		}
+	case "pull_request_state":
+		if !issueTableContainsString(pullRequestStates, raw) {
+			return descriptor, fmt.Errorf("unexpected pull request state group value %q", raw)
+		}
+		descriptor.Key = pullRequestStateGroupKeyPrefix + raw
+		descriptor.Value = issueTableGroupValueResponse{Kind: "pull_request_state", Value: raw}
 	case "property":
 		state, rawValue, ok := strings.Cut(raw, ":")
 		if !ok {
@@ -835,6 +850,13 @@ func (group resolvedIssueTableGroup) predicate(w http.ResponseWriter, key string
 			return "", false
 		}
 		return fmt.Sprintf("i.parent_issue_id = %s::uuid", addArg(id)), true
+	case "pull_request_state":
+		state, found := strings.CutPrefix(key, pullRequestStateGroupKeyPrefix)
+		if !found || !issueTableContainsString(pullRequestStates, state) {
+			writeError(w, http.StatusBadRequest, "invalid group_key")
+			return "", false
+		}
+		return fmt.Sprintf("(%s) = %s::text", group.groupExpr, addArg(state)), true
 	case "property":
 		prefix := "property:" + group.propertyID + ":"
 		if !strings.HasPrefix(key, prefix) {

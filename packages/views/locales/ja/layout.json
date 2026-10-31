@@ -27,6 +27,7 @@
     "attachment": "添付ファイル",
     "create_agent": "エージェントを作成",
     "my_agents": "マイエージェントの作業",
+    "awaiting_merge": "マージ待ち",
     "unknown": "不明なページ"
   },
   "help": {
@@ -87,6 +88,7 @@
     "work": {
       "my_agents": "マイエージェントの作業",
       "all_issues": "すべてのタスク",
+      "awaiting_merge": "マージ待ち",
       "views": "ビュー",
       "new_project": "新規プロジェクト",
       "new_issue_in_project": "{{name}} に新規タスク",

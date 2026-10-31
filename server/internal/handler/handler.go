@@ -29,6 +29,7 @@ import (
 	composio "github.com/multica-ai/multica/server/internal/integrations/composio"
 	"github.com/multica-ai/multica/server/internal/integrations/dingtalk"
 	"github.com/multica-ai/multica/server/internal/integrations/ghsnapshot"
+	"github.com/multica-ai/multica/server/internal/integrations/ghuser"
 	"github.com/multica-ai/multica/server/internal/integrations/lark"
 	"github.com/multica-ai/multica/server/internal/integrations/slack"
 	"github.com/multica-ai/multica/server/internal/integrations/telegram"
@@ -429,7 +430,13 @@ type Handler struct {
 	// so the feature degrades cleanly on deployments without a private key.
 	// Wired in cmd/server/router.go after New.
 	PRRefresh *ghsnapshot.Manager
-	cfg       Config
+	// GitHubUser holds members' personal GitHub authorizations (MUL-8433);
+	// every PR write made from Multica uses the caller's own token. Nil when
+	// GITHUB_APP_CLIENT_ID / GITHUB_APP_CLIENT_SECRET / MULTICA_GITHUB_SECRET_KEY
+	// are not all set, which the endpoints report as not configured. Wired in
+	// cmd/server/router.go after New.
+	GitHubUser *ghuser.Service
+	cfg        Config
 }
 
 func New(queries *db.Queries, txStarter txStarter, hub *realtime.Hub, bus *events.Bus, emailService *service.EmailService, store storage.Storage, cfSigner *auth.CloudFrontSigner, analyticsClient analytics.Client, cfg Config, daemonHubs ...*daemonws.Hub) *Handler {

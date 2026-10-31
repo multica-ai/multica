@@ -9,7 +9,7 @@ import { PrLinkDemo } from "@/components/demos/pr-link-demo";
 
 Une fois GitHub connecté, Multica associe automatiquement les pull requests à partir des identifiants de tâche. Le détail de la tâche affiche directement l'état de la PR, l'ampleur des modifications, les résultats de la CI et les conflits de fusion.
 
-L'intégration GitHub se contente de lire les dépôts autorisés lors de l'installation ; elle ne pousse jamais de commits, de commentaires ni de status checks.
+L'intégration GitHub ne travaille que sur les dépôts autorisés lors de l'installation, et l'App n'écrit jamais rien sur GitHub de sa propre initiative. Chaque écriture, comme la fusion ou l'approbation d'une PR, est effectuée par un utilisateur Multica, en son propre nom, depuis Multica. Voir [Agir sur les PR depuis Multica](#agir-sur-les-pr-depuis-multica).
 
 Multica auto-hébergé peut aussi connecter en parallèle des instances Forgejo, Gitea ou GitLab auto-hébergées, avec la même association automatique des PR, le même changement de statut à la fusion et le même affichage de la CI. Le point d'entrée est **Paramètres → Code** ; voir [Fournisseurs Git auto-hébergés](/vcs-integration). Multica Cloud ne propose pas ce point d'entrée.
 
@@ -94,6 +94,16 @@ Sous la liste, une ligne indique ce qui va se passer : par exemple *Passe à Ter
 
 Cliquez sur une entrée pour ouvrir la PR sur GitHub. Désactiver la **Barre latérale des pull requests** masque seulement ce bloc ; cela ne déconnecte rien.
 
+## Agir sur les PR depuis Multica
+
+Les membres peuvent fusionner, fermer, approuver une PR associée, demander des revues, mettre à jour sa branche et relancer les vérifications en échec sans quitter Multica. Chaque membre connecte d'abord une fois son propre compte GitHub ; cette connexion lui appartient et fonctionne dans tous les espaces de travail dont il fait partie.
+
+Connectez-le dans **Paramètres → Profil → Comptes connectés**, ou lorsque Multica vous le propose la première fois que vous agissez sur une PR. Les checks en échec et les conflits de fusion demandent des modifications de code : ces PR proposent plutôt de confier la correction à un agent, et Multica rédige sur la tâche un commentaire modifiable qui mentionne l'agent de la tâche.
+
+Multica envoie chaque action à GitHub au nom du membre qui l'a déclenchée : GitHub applique donc ses permissions sur le dépôt et les règles de protection de branche, exactement comme sur github.com, et l'enregistre comme auteur de l'action. Les agents ne peuvent pas utiliser le compte GitHub d'un membre. La fusion ou la fermeture d'une PR est aussi inscrite dans la chronologie de la tâche au nom du membre.
+
+Déconnecter le compte GitHub dans Multica révoque aussi l'accès de Multica côté GitHub.
+
 ## Quand des PR fusionnées changent le statut d'une tâche [#quand-une-pr-fusionnée-fait-passer-une-tâche-à-terminé]
 
 Une PR fusionnée ne signifie pas forcément que la tâche est terminée : c'est donc l'espace de travail qui décide de l'effet d'une fusion, dans **Paramètres → Code → Après la fusion des PR, passer la tâche à**. Choisissez `Done` (la valeur par défaut des nouveaux espaces de travail), un autre statut de type démarré ou terminé (un statut personnalisé comme *En attente de recette* convient aussi), ou **Ne pas changer**. Les espaces de travail qui existaient avant ce réglage conservent leur comportement : si la fusion ne terminait pas toujours leurs tâches, ils démarrent sur **Ne pas changer**.
@@ -139,7 +149,9 @@ Créez l'App dans **Developer settings → GitHub Apps** sur GitHub et renseigne
 | Champ | Valeur |
 |---|---|
 | Homepage URL | L'adresse de votre frontend Multica, par ex. `https://multica.example.com` |
-| Callback URL | Laisser vide |
+| Callback URL | `https://<api-host>/api/github/user/callback`, utilisée quand les membres connectent leur compte GitHub |
+| Expire user authorization tokens | Laisser activé |
+| Request user authorization (OAuth) during installation | Laisser désactivé |
 | Setup URL | `https://<api-host>/api/github/setup`, avec **Redirect on update** activé |
 | Webhook URL | `https://<api-host>/api/webhooks/github` |
 | Webhook secret | Une chaîne aléatoire que vous conservez durablement |
@@ -149,7 +161,9 @@ Permissions de dépôt (Repository permissions) :
 | Permission | Niveau |
 |---|---|
 | Metadata | Read-only |
-| Pull requests | Read-only |
+| Contents | Read & write ; sert à fusionner les PR, mettre à jour leur branche et supprimer les branches fusionnées |
+| Pull requests | Read & write ; sert à fusionner, fermer, approuver et demander des revues |
+| Actions | Read & write ; sert à relancer les vérifications en échec |
 | Checks | Read-only ; sert à afficher le statut CI |
 | Commit statuses | Read-only ; sert à agréger la CI basée sur les statuts hérités (legacy statuses) |
 
@@ -158,7 +172,13 @@ Abonnez-vous à ces événements :
 - **Pull request** ;
 - **Check suite**, **Check run** et **Status**, qui déclenchent l'actualisation de la CI et de la possibilité de fusion.
 
-Les instantanés de PR utilisent les API REST Pull requests, Checks et Commit statuses. La permission Contents n'est pas nécessaire.
+Les instantanés de PR ne font que lire, via les API Pull requests, Checks et Commit statuses. Les permissions d'écriture ne servent qu'avec l'autorisation GitHub d'un membre, lorsque ce membre agit sur une PR depuis Multica.
+
+Une fois l'App créée, ouvrez **Client secrets → Generate a new client secret** sur sa page de paramètres et conservez ce secret avec le **Client ID** affiché au-dessus.
+
+<Callout type="info">
+**Mettre à niveau une App existante** : quand vous ajoutez les permissions d'écriture, GitHub demande au propriétaire de chaque installation de les approuver. Tant qu'il ne l'a pas fait, les actions sur les PR des dépôts de cette installation échouent avec un message indiquant que l'App n'a pas la permission ; le statut CI, la possibilité de fusion et l'association automatique continuent de fonctionner.
+</Callout>
 
 <Callout type="warning">
 Il s'agit du **Webhook secret**, et non du Client secret OAuth. Si les deux côtés n'ont pas le même secret de webhook, les livraisons GitHub renvoient `401 invalid signature`.
@@ -188,6 +208,17 @@ GITHUB_APP_PRIVATE_KEY=<full PEM private key, keeping the BEGIN/END lines and ne
 
 Générez la clé privée dans **Private keys → Generate a private key** de la GitHub App. Sans ces deux variables, les PR sont toujours reflétées et les tâches toujours associées automatiquement et changées de statut à la fusion ; la carte de PR n'affiche simplement ni CI ni état de fusion.
 
+Pour que les membres puissent [agir sur les PR depuis Multica](#agir-sur-les-pr-depuis-multica), définissez aussi ces trois variables, ainsi que l'adresse publique de l'API pour que GitHub revienne vers la Callback URL ci-dessus :
+
+```dotenv
+GITHUB_APP_CLIENT_ID=<the App's Client ID>
+GITHUB_APP_CLIENT_SECRET=<the client secret you generated>
+MULTICA_GITHUB_SECRET_KEY=<output of: openssl rand -base64 32>
+MULTICA_PUBLIC_URL=https://<api-host>
+```
+
+`MULTICA_GITHUB_SECRET_KEY` chiffre les autorisations GitHub enregistrées des membres ; la changer déconnecte le compte GitHub de tous les membres. S'il manque l'une des trois variables, les membres ne peuvent pas connecter de compte GitHub, et tout le reste continue de fonctionner.
+
 </Step>
 <Step>
 
@@ -210,7 +241,9 @@ Redémarrez le serveur API, puis effectuez la connexion dans **Paramètres → C
 - **Le webhook renvoie 401** : vérifiez que la GitHub App et l'API utilisent le même secret de webhook, puis relancez la livraison depuis **Recent Deliveries** sur GitHub.
 - **PR non associée** : vérifiez que le dépôt fait partie du périmètre autorisé de l'App, que l'association automatique est activée, que l'identifiant appartient à l'espace de travail courant et que personne n'a retiré la PR de la tâche.
 - **Identifiant dans la description, mais PR non associée** : placez-le juste après un mot-clé de clôture (`Closes MUL-123`), ou dans le nom de branche ou le titre de la PR, ou associez la PR à la main.
-- **Aucun statut CI** : vérifiez que `GITHUB_APP_ID` et `GITHUB_APP_PRIVATE_KEY` sont configurées, et que l'App dispose des permissions Pull requests, Checks et Commit statuses en lecture seule, avec les événements correspondants souscrits. La permission Contents n'est pas nécessaire. Après l'ajout de permissions à une App déjà installée, le propriétaire de chaque installation doit les approuver sur GitHub pour qu'elles prennent effet.
+- **Aucun statut CI** : vérifiez que `GITHUB_APP_ID` et `GITHUB_APP_PRIVATE_KEY` sont configurées, et que l'App dispose des permissions Pull requests, Checks et Commit statuses indiquées plus haut, avec les événements correspondants souscrits. Après l'ajout de permissions à une App déjà installée, le propriétaire de chaque installation doit les approuver sur GitHub pour qu'elles prennent effet.
+- **Les actions sur une PR indiquent que l'App n'a pas la permission** : les permissions d'écriture de l'App n'ont pas encore été approuvées pour cette installation. Le propriétaire de l'installation les approuve sur GitHub, dans **Settings → GitHub Apps** du compte ou de l'organisation.
+- **Les membres ne peuvent pas connecter de compte GitHub** : vérifiez que `GITHUB_APP_CLIENT_ID`, `GITHUB_APP_CLIENT_SECRET` et `MULTICA_GITHUB_SECRET_KEY` parviennent bien au processus de l'API, et que la Callback URL de l'App est `https://<api-host>/api/github/user/callback`.
 - **Statut de la tâche inchangé après la fusion de la PR** : lisez la ligne sous la liste **Pull requests** de la tâche. Elle nomme les PR encore ouvertes ou fermées sans fusion, ou indique que la tâche garde son statut à la fusion des PR. Si aucune ligne n'apparaît, le réglage de l'espace de travail est **Ne pas changer**, ou la tâche a déjà le statut cible.
 
 ## Étapes suivantes

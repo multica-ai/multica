@@ -466,6 +466,38 @@ func TestApplySnapshotHeadSHAGuard(t *testing.T) {
 	}
 }
 
+// The review decision and auto-merge state are part of the atomic snapshot: a
+// later snapshot without them clears them rather than leaving stale values.
+func TestApplySnapshotStoresReviewDecisionAndAutoMerge(t *testing.T) {
+	pool := testDBPool(t)
+	q := db.New(pool)
+	ctx := context.Background()
+	pr := seedPR(t, pool, q, "B")
+	t.Cleanup(func() {
+		_, _ = pool.Exec(context.Background(), `DELETE FROM github_pull_request WHERE id=$1`, pr.ID)
+	})
+	m := &Manager{queries: q, pool: pool, now: time.Now}
+
+	if _, err := m.applySnapshot(ctx, pr.ID, &PRSnapshot{
+		HeadSHA: "B", Mergeable: "MERGEABLE", MergeStateStatus: "BLOCKED",
+		ReviewDecision: "REVIEW_REQUIRED", AutoMergeMethod: "squash", AutoMergeEnabledBy: "octocat",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	got, _ := q.GetGitHubPullRequestByID(ctx, pr.ID)
+	if got.ReviewDecision.String != "REVIEW_REQUIRED" || got.AutoMergeMethod.String != "squash" || got.AutoMergeEnabledBy.String != "octocat" {
+		t.Fatalf("snapshot fields not written: %+v", got)
+	}
+
+	if _, err := m.applySnapshot(ctx, pr.ID, &PRSnapshot{HeadSHA: "B", Mergeable: "MERGEABLE", MergeStateStatus: "CLEAN"}); err != nil {
+		t.Fatal(err)
+	}
+	got, _ = q.GetGitHubPullRequestByID(ctx, pr.ID)
+	if got.ReviewDecision.Valid || got.AutoMergeMethod.Valid || got.AutoMergeEnabledBy.Valid {
+		t.Fatalf("later snapshot left stale fields: %+v", got)
+	}
+}
+
 // TestInFlightOldHeadKeepsTrailingRefresh covers the synchronize race from the
 // PR review: while head A is fetching, a webhook advances the mirrored row to B
 // and enqueues again. A is discarded by the head guard, but the coalesced
