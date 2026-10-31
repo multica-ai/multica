@@ -4,10 +4,10 @@ import "testing"
 
 func TestPrivateMessagesPreserveLiteralBotMentions(t *testing.T) {
 	for _, text := range []string{
-		"当然是 @IvangelionAI_bot 可以继续",
-		"当然是\n@IvangelionAI_bot\n可以继续",
-		"😀 @IvangelionAI_bot and @another_bot",
-		"@IvangelionAI_bot",
+		"当然是 @example_bot 可以继续",
+		"当然是\n@example_bot\n可以继续",
+		"😀 @example_bot and @another_bot",
+		"@example_bot",
 	} {
 		for _, caption := range []bool{false, true} {
 			m := &Message{MessageID: 7, From: &User{ID: 111}, Chat: Chat{ID: 111, Type: "private"}}
@@ -19,7 +19,7 @@ func TestPrivateMessagesPreserveLiteralBotMentions(t *testing.T) {
 			} else {
 				m.Text = text
 			}
-			msg, ok := inboundFromUpdate(Update{Message: m}, 999, "IvangelionAI_bot")
+			msg, ok := inboundFromUpdate(Update{Message: m}, 999, "example_bot")
 			if !ok || msg.Text != want || msg.CommandText != text {
 				t.Errorf("caption=%v: got text=%q command=%q; want text=%q command=%q", caption, msg.Text, msg.CommandText, want, text)
 			}
