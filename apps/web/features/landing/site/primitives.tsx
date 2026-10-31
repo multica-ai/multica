@@ -4,7 +4,7 @@ import { ArrowUpRight } from "lucide-react";
 import { cn } from "@multica/ui/lib/utils";
 
 export const focusRing =
-  "outline-none focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-site-accent";
+  "outline-none focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-site-ink";
 
 export function Container({ className, ...props }: ComponentProps<"div">) {
   return (

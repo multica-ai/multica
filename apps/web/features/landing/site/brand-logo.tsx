@@ -1,56 +1,118 @@
+import { useId, type CSSProperties } from "react";
 import { cn } from "@multica/ui/lib/utils";
 
 /*
- * Multica lockup, brand guidelines v2.0. Geometry in grid units (u = 10):
- * a 5×5 dot matrix with 0.9u dots, 13 lit dots spelling M, the centre dot
- * in agent amber, the other 12 at 8% of the ink. The outlined Inter Display
- * SemiBold wordmark has the same 4.9u ink height and sits 2u to the right.
- * Do not retype the wordmark or change the proportions.
+ * Multica brand marks, brand guidelines v3.1 (MUL-8444). Black and white only.
+ *
+ * The wordmark is the primary mark and always stands alone: it is drawn as
+ * centre-lines with a 16-unit stroke (arch 62, x-height 76, ascender 30), so
+ * never retype it in a font or set it beside the icon as a lockup. The icon is
+ * for square slots only (app icon, favicon, avatar): an m with a 22-unit
+ * stroke, scaled 0.96 and cropped by its tile, inside a thin edge in the tile
+ * colour so the tile keeps its outline on any background.
  */
-const U = 10;
-const R = 4.5;
-const MARK_INK = 49;
-const WORD_X = MARK_INK + 2 * U;
-const WORD = { w: 3064.1, h: 744.1 };
-const WORD_SCALE = MARK_INK / WORD.h;
-const WIDTH = +(WORD_X + WORD.w * WORD_SCALE).toFixed(2);
 
-const LIT = new Set(["0,0", "0,4", "1,0", "1,1", "1,3", "1,4", "2,0", "2,2", "2,4", "3,0", "3,4", "4,0", "4,4"]);
-const DOTS = Array.from({ length: 25 }, (_, i) => {
-  const r = Math.floor(i / 5);
-  const c = i % 5;
-  const key = `${r},${c}`;
-  return { key, cx: R + c * U, cy: R + r * U, lit: LIT.has(key), agent: key === "2,2" };
-});
+/** Wordmark geometry in its own units; the viewBox runs from the top of the l to the baseline. */
+export const WORDMARK = {
+  top: -30.5,
+  width: 421.36,
+  height: 106.5,
+  stroke: 16,
+  letters: [
+    "M8 76V31A23 23 0 0 1 54 31V76M54 31A23 23 0 0 1 100 31V76",
+    "M128 0V45A23 23 0 0 0 174 45M174 0V76",
+    "M202 -30V76",
+    "M239.6 -19.8V76M219.6 8H259.6",
+    "M277.8 0V76",
+    "M344.103 14.737A23 23 0 0 0 304.84 31V45A23 23 0 0 0 344.103 61.263",
+    "M367.36 31A23 23 0 0 1 413.36 31V45A23 23 0 0 1 367.36 45ZM413.36 0V76",
+  ],
+  /** The tittle of the i, the fifth letter. */
+  tittle: { cx: 277.8, cy: -18.6, r: 8.96 },
+} as const;
 
-const WORDMARK_PATH =
-  "M0 732.4H123V424.8C123 351.1 170.4 311 226.1 311C280.8 311 319.8 347.7 319.8 403.8V732.4H439.5V416C439.5 354.5 478 311 540.5 311C593.3 311 636.2 341.3 636.2 409.7V732.4H759.8V392.1C759.8 271 684.6 206.5 586.9 206.5C511.7 206.5 450.2 244.6 422.9 304.2C401.4 245.1 344.2 206.5 274.4 206.5C209.5 206.5 150.4 239.7 119.1 306.2V216.8H0ZM1022.2 742.7C1093.5 742.7 1145.8 711.4 1180.9 653.3V732.4H1302V216.8H1178.5V508.3C1178.5 596.2 1130.6 634.8 1065.7 634.8C999.8 634.8 961.7 595.2 961.7 519.5V216.8H838.7V539.1C838.7 671.4 914.3 742.7 1022.2 742.7ZM1504.5 4.9H1381.4V732.4H1504.5ZM1860.7 216.8H1755.7V76.2H1632.2V216.8H1542.3V315.9H1632.2V602.5C1632.2 690.9 1681.5 732.4 1786.5 732.4H1860.7V633.3H1807.9C1767.9 633.3 1755.7 621.1 1755.7 584.5V315.9H1860.7ZM1908.3 732.4H2031.4V216.8H1908.3ZM1969.8 140.1C2011.8 140.1 2043.6 109.9 2043.6 69.8C2043.6 30.3 2011.8 0 1969.8 0C1927.9 0 1896.1 30.3 1896.1 69.8C1896.1 109.9 1927.9 140.1 1969.8 140.1ZM2338.8 744.1C2469.1 744.1 2563.9 660.2 2572.7 547.4H2451.1C2439.4 604.5 2404.7 641.6 2340.2 641.6C2259.2 641.6 2211.3 576.7 2211.3 475.1C2211.3 373 2259.7 307.6 2340.2 307.6C2404.2 307.6 2442.8 346.2 2452.1 401.4H2572.7C2561.9 286.6 2468.2 205.1 2338.8 205.1C2187.9 205.1 2086.8 315.9 2086.8 475.1C2086.8 634.3 2187.9 744.1 2338.8 744.1ZM2789.2 740.7C2873.2 740.7 2916.7 705.6 2941.1 659.7H2943V732.4H3064.1V380.9C3064.1 273.4 2984.6 206.5 2850.3 206.5C2715.5 206.5 2631.5 274.4 2625.7 377H2744.3C2747.7 333.5 2787.8 302.2 2847.8 302.2C2906.9 302.2 2942.1 333.5 2942.1 377.4V381.3C2942.1 416.5 2909.4 418 2813.7 428.7C2707.2 439.9 2611 468.8 2611 585.9C2611 689 2686.7 740.7 2789.2 740.7ZM2819.5 649.4C2765.8 649.4 2731.1 625.5 2731.1 585C2731.1 538.1 2776.1 519 2828.8 511.2C2879.6 503.4 2927.4 495.6 2942.6 485.8V541.5C2942.6 601.6 2900.1 649.4 2819.5 649.4Z";
+/** The icon's m, filled, with the transform that places it on its 100-unit tile. */
+export const ICON_M = "M0 85.25V34A34 34 0 0 1 68 34V85.25H46V34A12 12 0 0 0 22 34V85.25ZM46 85.25V34A34 34 0 0 1 114 34V85.25H92V34A12 12 0 0 0 68 34V85.25Z";
+export const ICON_M_TRANSFORM = "translate(-4.72 22) scale(0.96)";
+/** The same m as one centre-line (stroke 22), for the thinking motion. */
+const ICON_M_LINE = "M11 85.25V34A23 23 0 0 1 57 34V85.25V34A23 23 0 0 1 103 34V85.25";
 
-/** Horizontal lockup; `height` is the shared ink height of mark and wordmark (12px minimum on screen). */
-export function BrandLogo({ height = 18, className }: { height?: number; className?: string }) {
+const viewBox = `0 ${WORDMARK.top} ${WORDMARK.width} ${WORDMARK.height}`;
+
+/**
+ * The wordmark. `height` is the full height, top of the l to the baseline.
+ * Inside a `group` link the letters hop one after another on hover.
+ */
+export function BrandWordmark({ height = 22, className }: { height?: number; className?: string }) {
   return (
     <svg
-      viewBox={`0 0 ${WIDTH} ${MARK_INK}`}
+      viewBox={viewBox}
       height={height}
-      width={(height * WIDTH) / MARK_INK}
+      width={+((height * WORDMARK.width) / WORDMARK.height).toFixed(2)}
       aria-hidden
-      className={cn("shrink-0 text-site-ink", className)}
+      className={cn("shrink-0 overflow-visible text-site-ink", className)}
     >
-      {DOTS.map((dot) => (
-        <circle
-          key={dot.key}
-          cx={dot.cx}
-          cy={dot.cy}
-          r={R}
-          className={dot.agent ? "fill-site-agent" : "fill-current"}
-          fillOpacity={dot.lit ? undefined : 0.08}
-        />
-      ))}
-      <path
-        transform={`translate(${WORD_X} 0) scale(${WORD_SCALE.toFixed(6)})`}
-        className="fill-current"
-        d={WORDMARK_PATH}
-      />
+      <g fill="none" stroke="currentColor" strokeWidth={WORDMARK.stroke}>
+        {WORDMARK.letters.map((d, index) => (
+          <g key={d} className="site-letter" style={{ "--i": index } as CSSProperties}>
+            <path d={d} />
+            {index === 4 ? <circle {...WORDMARK.tittle} fill="currentColor" stroke="none" /> : null}
+          </g>
+        ))}
+      </g>
+    </svg>
+  );
+}
+
+/** The app icon: black tile, white m (or reversed with `light`). `size` in px sets the edge. */
+export function BrandIcon({ size, light, className }: { size: number; light?: boolean; className?: string }) {
+  const clip = useId();
+  const edge = Math.max(2.6, 120 / size);
+  return (
+    <svg viewBox="0 0 100 100" width={size} height={size} aria-hidden className={cn("shrink-0", className)}>
+      <defs>
+        <clipPath id={clip}>
+          <rect x={edge} y={edge} width={100 - 2 * edge} height={100 - 2 * edge} rx={Math.max(22.5 - edge, 1)} />
+        </clipPath>
+      </defs>
+      <rect width="100" height="100" rx="22.5" fill={light ? "#fff" : "#0b0b0c"} />
+      <g clipPath={`url(#${clip})`}>
+        <path transform={ICON_M_TRANSFORM} d={ICON_M} fill={light ? "#0b0b0c" : "#fff"} />
+      </g>
+    </svg>
+  );
+}
+
+/** The icon as a round avatar, for people-and-bot lists. */
+export function BrandAvatar({ size, className }: { size: number; className?: string }) {
+  const clip = useId();
+  const edge = Math.max(3, 100 / size);
+  return (
+    <svg viewBox="0 0 100 100" width={size} height={size} aria-hidden className={cn("shrink-0", className)}>
+      <defs>
+        <clipPath id={clip}>
+          <circle cx="50" cy="50" r={50 - edge} />
+        </clipPath>
+      </defs>
+      <circle cx="50" cy="50" r="50" fill="#0b0b0c" />
+      <g clipPath={`url(#${clip})`}>
+        <path transform="translate(-4.72 24) scale(0.96)" d={ICON_M} fill="#fff" />
+      </g>
+    </svg>
+  );
+}
+
+/**
+ * Agent at work: a light runs along the m's centre-line, in the current
+ * colour. Under reduced motion it is the plain m.
+ */
+export function ThinkingMark({ className }: { className?: string }) {
+  return (
+    <svg viewBox="0 0 114 86" aria-hidden className={cn("size-2.5 shrink-0 overflow-visible", className)}>
+      <g fill="none" stroke="currentColor" strokeWidth="22">
+        <path d={ICON_M_LINE} className="opacity-25 motion-reduce:opacity-100" />
+        <path d={ICON_M_LINE} pathLength={1} className="site-thinking motion-reduce:hidden" />
+      </g>
     </svg>
   );
 }

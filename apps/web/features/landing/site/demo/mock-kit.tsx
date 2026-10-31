@@ -17,6 +17,7 @@ import { cn } from "@multica/ui/lib/utils";
 import { ActorAvatar } from "@multica/ui/components/common/actor-avatar";
 import { ShimmerText } from "@multica/ui/components/common/shimmer-text";
 import { HERO_PROVIDERS } from "../../components/provider-marks";
+import { ThinkingMark } from "../brand-logo";
 
 /*
  * Shared pieces for the landing's product mockups: the fictional Acme Labs
@@ -221,7 +222,7 @@ export function WindowHeader({ icon: Icon, title, children }: { icon: LucideIcon
 export function Working({ label = "Working" }: { label?: string }) {
   return (
     <span className="inline-flex items-center gap-1.5">
-      <span className="size-1.5 shrink-0 rounded-full bg-site-agent" />
+      <ThinkingMark className="text-foreground" />
       <ShimmerText className="text-micro text-muted-foreground">{label}</ShimmerText>
     </span>
   );

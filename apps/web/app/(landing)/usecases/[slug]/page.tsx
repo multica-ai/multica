@@ -13,6 +13,7 @@ import {
   useCaseText,
 } from "@/lib/use-cases-i18n";
 import type { SupportedLocale } from "@multica/core/i18n";
+import { SHARE_IMAGE } from "@/features/landing/share-image";
 
 type Params = { slug: string };
 
@@ -30,6 +31,7 @@ export async function generateMetadata(props: {
     title: page.data.title,
     description: page.data.description,
     openGraph: {
+      images: [SHARE_IMAGE],
       title: page.data.title,
       description: page.data.description,
       url: `/usecases/${slug}`,

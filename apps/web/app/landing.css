@@ -11,13 +11,13 @@
  * `site-*` spacing roles cover the structural rhythm that must match across
  * pages (gutters, section padding, header height, heading-to-content gaps).
  *
- * Colour follows the brand: ink and paper carry the page, neutrals the rest.
- * Text hierarchy is expressed by the four solid ink roles. Do not dim text with
- * opacity — `site-muted` is the floor for readable copy on `site-canvas` and
+ * Colour follows the brand: black and white only, with the zinc greys for
+ * interface. Ink and paper carry the page, the greys the rest. Text hierarchy
+ * is expressed by the four solid ink roles. Do not dim text with opacity —
+ * `site-muted` is the floor for readable copy on `site-canvas` and
  * `site-surface`; `site-faint` is for decoration (dividers in text, disabled
- * glyphs) only. Colour paints graphics, never text: `site-accent` is for focus
- * rings and link graphics, and `site-agent` (amber) belongs to agents alone —
- * the logo's centre dot and live agent signals, never buttons or decoration.
+ * glyphs) only. Focus rings are ink. Product mockups keep the product's own
+ * colours, since they show the app as it is.
  * ============================================================================= */
 
 @theme inline {
@@ -32,8 +32,6 @@
     --color-site-line: var(--site-line);
     --color-site-line-strong: var(--site-line-strong);
     --color-site-rule: var(--site-rule);
-    --color-site-accent: var(--site-accent);
-    --color-site-agent: var(--site-agent);
     --color-site-inverse: var(--site-inverse);
     --color-site-inverse-ink: var(--site-inverse-ink);
     --color-site-inverse-muted: var(--site-inverse-muted);
@@ -124,8 +122,6 @@
     --site-line: oklch(0.925 0.004 286.32);
     --site-line-strong: oklch(0.871 0.006 286.286);
     --site-rule: oklch(0.953 0.003 286.32);
-    --site-accent: oklch(0.59 0.18 250);
-    --site-agent: oklch(0.8 0.165 68);
     --site-inverse: oklch(0.141 0.005 285.823);
     --site-inverse-ink: oklch(0.985 0 0);
     --site-inverse-muted: oklch(0.705 0.015 286.067);
@@ -168,20 +164,12 @@
     }
 }
 
-/* Placeholder visual: the brand's dot texture — a screen that is still off.
-   Stands in for product shots until real screenshots or token-built mockups
-   land. 16px pitch, 2.2px dots, ink at the logo's 8%. */
+/* Frame for a product visual: a plain sunken grey, so the mockup inside is
+   the only thing on it. */
 .site-visual {
     position: relative;
     overflow: hidden;
     background-color: var(--site-sunken);
-    background-image: radial-gradient(
-        circle at center,
-        color-mix(in oklab, var(--site-ink) 8%, transparent) 1.1px,
-        transparent 1.3px
-    );
-    background-size: 16px 16px;
-    background-position: 8px 8px;
 }
 
 /* Code blocks scroll sideways on narrow screens; keep their bar thin. */
@@ -234,7 +222,7 @@
     }
 }
 
-/* Feature and story cards: a frosted field per card — a pale, low-chroma warm wash, so
+/* Feature and story cards: a frosted field per card — a pale grey wash, so
    the product screen inside stays the focus — with film grain blended over it. The grain tile
    is drawn at 1:1 device pixels and never smoothed, so it stays fine. Content
    inside must be positioned to paint above the grain. */
@@ -367,5 +355,40 @@
         to {
             transform: translateX(-50%);
         }
+    }
+}
+
+/* Brand motion (guidelines v3.1). Letters of a wordmark inside a hovered
+   `group` hop one after another; `site-thinking` is the light that runs
+   along the m while an agent works. */
+.site-letter {
+    transform-box: fill-box;
+    transform-origin: 50% 100%;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+    .group:hover .site-letter {
+        animation: site-letter-hop 600ms cubic-bezier(0.16, 1, 0.3, 1) both;
+        animation-delay: calc(var(--i) * 40ms);
+    }
+
+    .site-thinking {
+        stroke-dasharray: 0.24 0.76;
+        animation: site-thinking 1.6s cubic-bezier(0.45, 0, 0.55, 1) infinite;
+    }
+}
+
+@keyframes site-letter-hop {
+    40% {
+        transform: translateY(-14%);
+    }
+}
+
+@keyframes site-thinking {
+    from {
+        stroke-dashoffset: 1;
+    }
+    to {
+        stroke-dashoffset: 0;
     }
 }

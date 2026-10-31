@@ -43,6 +43,7 @@ import { ShimmerText } from "@multica/ui/components/common/shimmer-text";
 import { StatusIcon } from "@multica/views/issues/components/status-icon";
 import { PriorityIcon } from "@multica/views/issues/components/priority-icon";
 import { Avatar, usePrefersReducedMotion, type Actor } from "./mock-kit";
+import { ThinkingMark } from "../brand-logo";
 
 /*
  * Hero product mockup: a project board run by a workflow, built from the
@@ -379,7 +380,7 @@ function Toolbar({ working, compact }: { working: number; compact: boolean }) {
       </div>
       <div className="flex items-center gap-1.5">
         <ToolbarButton>
-          <span className="size-1.5 rounded-full bg-site-agent" />
+          <ThinkingMark className="text-foreground" />
           <span className="tabular-nums">{working}</span> agents working
         </ToolbarButton>
         {compact ? null : (
@@ -487,7 +488,7 @@ function WorkingBadge({ actor }: { actor: Actor }) {
   return (
     <span className="inline-flex shrink-0 items-center gap-1 animate-in fade-in duration-300 motion-reduce:animate-none">
       <Avatar actor={actor} size={16} />
-      <span className="size-1.5 rounded-full bg-site-agent" />
+      <ThinkingMark className="text-foreground" />
       <ShimmerText className="text-micro text-muted-foreground">Working</ShimmerText>
     </span>
   );

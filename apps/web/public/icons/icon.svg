@@ -1,43 +1,12 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-label="Multica">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" role="img" aria-label="Multica">
   <!--
     Full-bleed source for the generated home-screen icons (apple-touch-icon.png,
     icon-maskable-512.png). Full-bleed because both surfaces mask the artwork
-    themselves: iOS rounds the corners, Android crops to the launcher shape.
-    The mark is held at 50% of the canvas so it stays inside the maskable safe
-    zone (the centre circle of 80% diameter).
+    themselves: iOS rounds the corners, Android crops to the launcher shape. The
+    m is cropped inside a thin edge in the tile colour (2.6% of the side), the
+    same way the brand's app icon and avatar crop it.
   -->
-  <defs>
-    <linearGradient id="ground" x1="0" y1="0" x2="0" y2="1">
-      <stop offset="0" stop-color="#25252a"/>
-      <stop offset="1" stop-color="#0a0a0c"/>
-    </linearGradient>
-  </defs>
-  <rect width="512" height="512" fill="url(#ground)"/>
-  <g transform="translate(128 128) scale(5.12)">
-    <circle cx="5" cy="5" r="4.5" fill="#fafafa"/>
-    <circle cx="15" cy="5" r="4.5" fill="#fafafa" fill-opacity="0.1"/>
-    <circle cx="25" cy="5" r="4.5" fill="#fafafa" fill-opacity="0.1"/>
-    <circle cx="35" cy="5" r="4.5" fill="#fafafa" fill-opacity="0.1"/>
-    <circle cx="45" cy="5" r="4.5" fill="#fafafa"/>
-    <circle cx="5" cy="15" r="4.5" fill="#fafafa"/>
-    <circle cx="15" cy="15" r="4.5" fill="#fafafa"/>
-    <circle cx="25" cy="15" r="4.5" fill="#fafafa" fill-opacity="0.1"/>
-    <circle cx="35" cy="15" r="4.5" fill="#fafafa"/>
-    <circle cx="45" cy="15" r="4.5" fill="#fafafa"/>
-    <circle cx="5" cy="25" r="4.5" fill="#fafafa"/>
-    <circle cx="15" cy="25" r="4.5" fill="#fafafa" fill-opacity="0.1"/>
-    <circle cx="25" cy="25" r="4.5" fill="#ffa629"/>
-    <circle cx="35" cy="25" r="4.5" fill="#fafafa" fill-opacity="0.1"/>
-    <circle cx="45" cy="25" r="4.5" fill="#fafafa"/>
-    <circle cx="5" cy="35" r="4.5" fill="#fafafa"/>
-    <circle cx="15" cy="35" r="4.5" fill="#fafafa" fill-opacity="0.1"/>
-    <circle cx="25" cy="35" r="4.5" fill="#fafafa" fill-opacity="0.1"/>
-    <circle cx="35" cy="35" r="4.5" fill="#fafafa" fill-opacity="0.1"/>
-    <circle cx="45" cy="35" r="4.5" fill="#fafafa"/>
-    <circle cx="5" cy="45" r="4.5" fill="#fafafa"/>
-    <circle cx="15" cy="45" r="4.5" fill="#fafafa" fill-opacity="0.1"/>
-    <circle cx="25" cy="45" r="4.5" fill="#fafafa" fill-opacity="0.1"/>
-    <circle cx="35" cy="45" r="4.5" fill="#fafafa" fill-opacity="0.1"/>
-    <circle cx="45" cy="45" r="4.5" fill="#fafafa"/>
-  </g>
+  <defs><clipPath id="c"><rect x="2.6" y="2.6" width="94.8" height="94.8" rx="19.9"/></clipPath></defs>
+  <rect width="100" height="100" fill="#0b0b0c"/>
+  <g clip-path="url(#c)"><path transform="translate(-4.72 22) scale(0.96)" d="M0 85.25V34A34 34 0 0 1 68 34V85.25H46V34A12 12 0 0 0 22 34V85.25ZM46 85.25V34A34 34 0 0 1 114 34V85.25H92V34A12 12 0 0 0 68 34V85.25Z" fill="#fff"/></g>
 </svg>

@@ -1,1 +1,8 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" shape-rendering="crispEdges"><style>.f{fill:#09090b}.a{fill:#ffa629}.g{fill:#09090b;fill-opacity:.08}@media (prefers-color-scheme:dark){.f{fill:#fafafa}.a{fill:#ffa629}.g{fill:#fafafa;fill-opacity:.1}}</style><rect class="g" width="15" height="15"/><rect class="f" x="0" y="0" width="3" height="3"/><rect class="f" x="12" y="0" width="3" height="3"/><rect class="f" x="0" y="3" width="3" height="3"/><rect class="f" x="3" y="3" width="3" height="3"/><rect class="f" x="9" y="3" width="3" height="3"/><rect class="f" x="12" y="3" width="3" height="3"/><rect class="f" x="0" y="6" width="3" height="3"/><rect class="a" x="6" y="6" width="3" height="3"/><rect class="f" x="12" y="6" width="3" height="3"/><rect class="f" x="0" y="9" width="3" height="3"/><rect class="f" x="12" y="9" width="3" height="3"/><rect class="f" x="0" y="12" width="3" height="3"/><rect class="f" x="12" y="12" width="3" height="3"/></svg>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">
+  <!-- Multica icon, brand guidelines v3.1: the m cropped by its tile, inside a
+       thin edge in the tile colour. Black tile in light mode, white in dark. -->
+  <style>.t{fill:#0b0b0c}.m{fill:#fff}@media (prefers-color-scheme:dark){.t{fill:#fff}.m{fill:#0b0b0c}}</style>
+  <defs><clipPath id="c"><rect x="7.5" y="7.5" width="85" height="85" rx="15"/></clipPath></defs>
+  <rect class="t" width="100" height="100" rx="22.5"/>
+  <g clip-path="url(#c)"><path class="m" transform="translate(-4.72 22) scale(0.96)" d="M0 85.25V34A34 34 0 0 1 68 34V85.25H46V34A12 12 0 0 0 22 34V85.25ZM46 85.25V34A34 34 0 0 1 114 34V85.25H92V34A12 12 0 0 0 68 34V85.25Z"/></g>
+</svg>

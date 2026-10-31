@@ -162,7 +162,7 @@ export function CliScene() {
 function ToolCall({ name, children }: { name: string; children: ReactNode }) {
   return (
     <p className="text-foreground">
-      <span className="text-site-agent">●</span> <span className="font-semibold">{name}</span>{" "}
+      <span className="text-success">●</span> <span className="font-semibold">{name}</span>{" "}
       <span className="text-muted-foreground">{children}</span>
     </p>
   );

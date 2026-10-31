@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { HomePage } from "@/features/landing/site/home-page";
 import { RedirectIfAuthenticated } from "@/features/landing/components/redirect-if-authenticated";
+import { SHARE_IMAGE } from "@/features/landing/share-image";
 
 export const metadata: Metadata = {
   title: {
@@ -9,6 +10,7 @@ export const metadata: Metadata = {
   description:
     "Source-available platform that turns coding agents into real teammates. Assign tasks, track progress, compound skills.",
   openGraph: {
+    images: [SHARE_IMAGE],
     title: "Multica — Project Management for Human + Agent Teams",
     description:
       "Manage your human + agent workforce in one place.",

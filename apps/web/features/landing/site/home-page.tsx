@@ -576,7 +576,7 @@ function CompareStage({ story, onDrag, className }: { story: (typeof STORIES)[nu
         aria-hidden
         className={cn(
           "pointer-events-none absolute inset-y-0 w-px bg-site-surface",
-          "peer-focus-visible:*:outline-2 peer-focus-visible:*:outline-offset-2 peer-focus-visible:*:outline-site-accent",
+          "peer-focus-visible:*:outline-2 peer-focus-visible:*:outline-offset-2 peer-focus-visible:*:outline-site-ink",
           motion,
         )}
         style={{ left: `${split}%` }}

@@ -5,8 +5,9 @@ import type { MetadataRoute } from "next";
  * opens the workspace or login; the marketing host's root would open the landing
  * page even for a signed-in user.
  *
- * Standard icons share desktop artwork. The maskable SVG supplies full-bleed
- * artwork for launcher cropping; regenerate raster sizes from those source assets.
+ * Standard icons are the brand's app icon (black tile, cropped m) inset on a
+ * transparent canvas. The maskable PNG and apple-touch-icon are rendered from
+ * public/icons/icon.svg, the full-bleed source for launcher cropping.
  */
 
 /** Launch path. Exported so manifest.test.ts can run it through the proxy. */

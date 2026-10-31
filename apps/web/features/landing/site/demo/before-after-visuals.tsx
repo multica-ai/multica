@@ -281,7 +281,7 @@ const BOARD: { title: string; status: "blocked" | "in_progress" | "in_review" | 
 ];
 
 const AGENT_COUNTS = [
-  { count: 12, label: "Working", dot: "bg-site-agent" },
+  { count: 12, label: "Working", dot: "bg-foreground" },
   { count: 1, label: "Waiting", dot: "bg-warning" },
   { count: 17, label: "Idle", dot: "bg-border" },
 ];
@@ -424,7 +424,7 @@ export function DigestBefore() {
           <div className="min-h-0 flex-1 overflow-hidden">
             {UNREAD.map((item) => (
               <p key={item.subject} className="flex items-center gap-2 border-b border-site-line px-3 py-1.5 text-caption">
-                <span className="size-1.5 shrink-0 rounded-full bg-site-accent" />
+                <span className="size-1.5 shrink-0 rounded-full bg-brand" />
                 <span className="min-w-0 flex-1 truncate">{item.subject}</span>
                 <span className="shrink-0 text-muted-foreground tabular-nums">{item.when}</span>
               </p>
