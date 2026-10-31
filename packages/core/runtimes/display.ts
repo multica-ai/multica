@@ -37,7 +37,7 @@ export function runtimeDisplayLabel(
  * (server/internal/daemon/daemon.go): the daemon bakes that display name into
  * `name` for the no-alias case (for example, "Trae (host)"), so the aliased label has to use
  * the exact same names or the two paths drift apart (#5260). `qoderclicn`,
- * `codearts`, `dsh`, `traecli`, `qwen`, `qwenpaw`, `mcode`, `muse`, and `zeroclaw` need overrides today — every other provider is a
+ * `codearts`, `dsh`, `traecli`, `qwen`, `qwenpaw`, `mcode`, `muse`, `museapp`, and `zeroclaw` need overrides today — every other provider is a
  * first-letter capitalization of its slug on both sides. Keep in sync with the daemon map.
  */
 const PROVIDER_DISPLAY_NAMES: Record<string, string> = {
@@ -50,6 +50,7 @@ const PROVIDER_DISPLAY_NAMES: Record<string, string> = {
   qwenpaw: "QwenPaw",
   mcode: "MiniMax Code",
   muse: "Muse Code",
+  museapp: "Muse app",
   omp: "Oh-My-Pi",
   zeroclaw: "ZeroClaw",
 };

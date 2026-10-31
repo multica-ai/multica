@@ -1087,6 +1087,7 @@ func TestInjectRuntimeConfigPreservesUserContent(t *testing.T) {
 		{"zeroclaw", "AGENTS.md"},
 		{"kiro", "AGENTS.md"},
 		{"antigravity", "AGENTS.md"},
+		{"museapp", "AGENTS.md"},
 		{"muse", "AGENTS.md"},
 		{"qwen", "QWEN.md"},
 	}
@@ -1480,6 +1481,7 @@ func TestCleanupRuntimeConfigByProvider(t *testing.T) {
 		{"zeroclaw", "AGENTS.md"},
 		{"kiro", "AGENTS.md"},
 		{"antigravity", "AGENTS.md"},
+		{"museapp", "AGENTS.md"},
 		{"muse", "AGENTS.md"},
 		{"qwen", "QWEN.md"},
 	}

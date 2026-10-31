@@ -2355,6 +2355,11 @@ const (
 	builtinProbeOK builtinProbeVerdict = iota
 	builtinProbeUnavailable
 	builtinProbeBelowMinimum
+	// builtinProbeProtocolSkew: the backend and its remote counterpart
+	// (e.g. the museapp receptionist) speak different protocol versions.
+	// Deterministic like below-minimum: retrying won't fix it, and an
+	// already-registered runtime must be demoted so it stops taking tasks.
+	builtinProbeProtocolSkew
 	// builtinProbeNotExecutable: the file resolved, but the OS rejected it as
 	// not a runnable program (an npm placeholder stub whose postinstall was
 	// blocked is the case in the field — MUL-6164). Deterministic in the same
@@ -2400,7 +2405,7 @@ const (
 // learned this round.
 func demotableBuiltinProbeVerdict(verdict builtinProbeVerdict) bool {
 	switch verdict {
-	case builtinProbeBelowMinimum, builtinProbeNotExecutable, builtinProbeMissingProfile, builtinProbeProfileMigration:
+	case builtinProbeBelowMinimum, builtinProbeProtocolSkew, builtinProbeNotExecutable, builtinProbeMissingProfile, builtinProbeProfileMigration:
 		return true
 	}
 	return false
@@ -2413,10 +2418,11 @@ func demotableBuiltinProbeVerdict(verdict builtinProbeVerdict) bool {
 // string this round already parsed, so a second look reaches the same
 // conclusion. The other demotable verdicts describe deterministic states but
 // rest on an observation that is not — an installer overwriting the bin entry in
-// place (the very repair we tell users to run) or a DSH upgrade moving the
-// profile under a probe. Requiring a second sighting a window later makes those
-// windows impossible to mistake for a verdict, and costs a genuinely broken
-// provider one extra round.
+// place (the very repair we tell users to run), a DSH upgrade moving the
+// profile under a probe, or a museapp receptionist mid-upgrade answering one
+// /v1/health with another protocol version. Requiring a second sighting a
+// window later makes those windows impossible to mistake for a verdict, and
+// costs a genuinely broken provider one extra round.
 func builtinProbeNeedsConfirmation(verdict builtinProbeVerdict) bool {
 	return verdict != builtinProbeBelowMinimum
 }
@@ -2517,6 +2523,12 @@ func newRuntimeVerdict(verdict builtinProbeVerdict, reason, execPath string, ins
 // not installed" apart from "CLI installed but dropped at registration", which
 // was previously only visible in the daemon log (MUL-5439).
 func (d *Daemon) probeBuiltinRuntime(ctx context.Context, name string, entry AgentEntry) (string, string, builtinProbeVerdict) {
+	// museapp has no local binary: version detection runs against the remote
+	// receptionist instead. This must come before any path resolution — an
+	// empty entry.Path is expected here, not a missing CLI.
+	if name == "museapp" {
+		return d.probeMuseAppReceptionist(ctx)
+	}
 	var (
 		lastErr  error
 		attempts int
@@ -2722,6 +2734,37 @@ probeLoop:
 		reason = transientReason
 	}
 	return "", reason, builtinProbeUnavailable
+}
+
+// probeMuseAppReceptionist is the museapp equivalent of CLI version detection.
+// There is no local binary to --version, so reachability and the wire
+// protocol version come from the receptionist's /v1/health endpoint.
+// A protocol-skewed receptionist is builtinProbeProtocolSkew (demotable):
+// the version mismatch is deterministic, so an already-registered runtime
+// must stop taking tasks instead of failing them mid-run. Skew goes
+// through confirmation (builtinProbeNeedsConfirmation) since the verdict
+// rests on a live HTTP response, not a locally parsed string.
+// An unreachable receptionist is builtinProbeUnavailable (transient):
+// the runtime stays unregistered without demoting anything,
+// and a later probe round recovers it — the same rule a CLI whose
+// --version fails gets. A missing MULTICA_MUSEAPP_ENDPOINT simply never reaches
+// here (probeAgentCLIs only advertises museapp when it is set); the guard stays
+// as defense for callers that bypass discovery.
+func (d *Daemon) probeMuseAppReceptionist(ctx context.Context) (string, string, builtinProbeVerdict) {
+	endpoint := strings.TrimSpace(os.Getenv("MULTICA_MUSEAPP_ENDPOINT"))
+	if endpoint == "" {
+		return "", "MULTICA_MUSEAPP_ENDPOINT is not set", builtinProbeUnavailable
+	}
+	version, err := agent.ProbeMuseAppReceptionist(ctx, endpoint, strings.TrimSpace(os.Getenv("MULTICA_MUSEAPP_TOKEN")))
+	if err != nil {
+		d.logger.Warn("skip registering runtime: museapp receptionist probe failed", "error", err)
+		if errors.Is(err, agent.ErrMuseAppProtocolSkew) {
+			return "", err.Error(), builtinProbeProtocolSkew
+		}
+		return "", err.Error(), builtinProbeUnavailable
+	}
+	d.setAgentVersion("museapp", version)
+	return version, "", builtinProbeOK
 }
 
 // detectBuiltinRuntimes probes configured CLIs with bounded concurrency and
@@ -6492,6 +6535,7 @@ var runtimeDisplayNameOverrides = map[string]string{
 	"qwenpaw":    "QwenPaw",
 	"mcode":      "MiniMax Code",
 	"muse":       "Muse Code",
+	"museapp":    "Muse app",
 	"zeroclaw":   "ZeroClaw",
 }
 
@@ -8823,6 +8867,9 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		// can never pay for it twice (MUL-5722).
 		ResumeExpected:         task.PriorSessionID != "",
 		ResumeContinuityNotice: backendResumeContinuityNotice(task),
+		TaskToken:              agentToken,
+		MulticaServerURL:       d.cfg.ServerBaseURL,
+		MulticaWorkspaceID:     task.WorkspaceID,
 		ExtraArgs:              extraArgs,
 		CustomArgs:             customArgs,
 		McpConfig:              mcpConfig,
