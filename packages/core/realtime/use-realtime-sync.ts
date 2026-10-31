@@ -20,6 +20,8 @@ import { labelKeys } from "../labels/queries";
 import { propertyKeys } from "../properties/queries";
 import { issueStatusKeys } from "../issue-statuses/queries";
 import { issueWorkflowKeys } from "../issue-workflows/queries";
+import { issueViewKeys } from "../issue-views/queries";
+import { issueViewPrefKeys } from "../issue-views/preferences";
 import {
   agentTaskSnapshotKeys,
   workspaceWorkingAgentsKeys,
@@ -671,6 +673,8 @@ function invalidateWorkspaceScopedQueries(qc: QueryClient): void {
     // archived, or to keep painting its old name.
     qc.invalidateQueries({ queryKey: issueStatusKeys.all(wsId) });
     qc.invalidateQueries({ queryKey: issueWorkflowKeys.all(wsId) });
+    qc.invalidateQueries({ queryKey: issueViewKeys.all(wsId) });
+    qc.invalidateQueries({ queryKey: issueViewPrefKeys.all(wsId) });
   }
   // Cross-workspace, so outside the wsId guard: a reconnect may have missed
   // inbox events from any workspace, so re-pull the switcher-dot summary.
@@ -846,6 +850,8 @@ export function useRealtimeSync(
           // against, and project writes are rare, so refresh the table
           // queries unconditionally rather than guess.
           qc.invalidateQueries({ queryKey: issueKeys.tableAll(wsId) });
+          // Deleting a project deletes the saved views scoped to it.
+          qc.invalidateQueries({ queryKey: issueViewKeys.all(wsId) });
         }
       },
       squad: () => {
@@ -905,6 +911,19 @@ export function useRealtimeSync(
         const wsId = getCurrentWsId();
         const userId = authStore.getState().user?.id;
         if (wsId && userId) qc.invalidateQueries({ queryKey: pinKeys.all(wsId, userId) });
+      },
+      issue_view: () => {
+        const wsId = getCurrentWsId();
+        if (wsId) qc.invalidateQueries({ queryKey: issueViewKeys.all(wsId) });
+      },
+      // The member's own preferences, saved on another tab or device.
+      issue_view_preference: () => {
+        const wsId = getCurrentWsId();
+        if (!wsId) return;
+        // A write still in flight here refetches when it settles; refetching
+        // now could paint an older document over its optimistic one.
+        if (qc.isMutating({ mutationKey: issueViewPrefKeys.all(wsId) }) > 0) return;
+        qc.invalidateQueries({ queryKey: issueViewPrefKeys.all(wsId) });
       },
       daemon: () => {
         const wsId = getCurrentWsId();

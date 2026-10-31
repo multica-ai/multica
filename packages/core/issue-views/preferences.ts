@@ -5,8 +5,13 @@ import { api } from "../api";
 import type { IssueViewPreference } from "../api/schemas";
 import type { IssueViewScope } from "./queries";
 
-/** A preference container: a view surface, or the user's sidebar list. */
-export type IssueViewPreferenceScope = IssueViewScope | { scope_type: "sidebar"; scope_id?: null };
+/**
+ * A preference container: a view surface, the user's starred sidebar views,
+ * or the sidebar's Projects section.
+ */
+export type IssueViewPreferenceScope =
+  | IssueViewScope
+  | { scope_type: "sidebar" | "sidebar_projects"; scope_id?: null };
 
 export interface ViewBarPrefs {
   hidden: string[];
@@ -14,6 +19,9 @@ export interface ViewBarPrefs {
 }
 
 export const EMPTY_VIEW_BAR_PREFS: ViewBarPrefs = { hidden: [], order: [] };
+
+/** A whole preference document; scopes other than view bars add their own keys. */
+export type IssueViewPreferenceDoc = Partial<ViewBarPrefs> & Record<string, unknown>;
 
 export const issueViewPrefKeys = {
   all: (wsId: string) => ["issue-view-prefs", wsId] as const,
@@ -38,7 +46,8 @@ export function useUpdateIssueViewPreference(wsId: string, scope: IssueViewPrefe
   const queryClient = useQueryClient();
   const queryKey = issueViewPrefKeys.scope(wsId, scope);
   return useMutation({
-    mutationFn: (prefs: ViewBarPrefs) =>
+    mutationKey: queryKey,
+    mutationFn: (prefs: IssueViewPreferenceDoc) =>
       api.putIssueViewPreference({ ...scope, prefs }),
     onMutate: async (prefs) => {
       await queryClient.cancelQueries({ queryKey });
@@ -48,7 +57,7 @@ export function useUpdateIssueViewPreference(wsId: string, scope: IssueViewPrefe
         scope_id: scope.scope_id ?? null,
         // Non-empty: an empty updated_at means "never saved" to readers.
         updated_at: previous?.updated_at || new Date().toISOString(),
-        prefs: { ...prefs },
+        prefs: { ...EMPTY_VIEW_BAR_PREFS, ...prefs },
       };
       queryClient.setQueryData<IssueViewPreference>(queryKey, optimistic);
       return { previous };
@@ -57,7 +66,11 @@ export function useUpdateIssueViewPreference(wsId: string, scope: IssueViewPrefe
       if (context?.previous) queryClient.setQueryData(queryKey, context.previous);
     },
     onSettled: () => {
-      void queryClient.invalidateQueries({ queryKey });
+      // A later write still in flight refetches when it settles; refetching
+      // now could paint this older document over its optimistic one.
+      if (queryClient.isMutating({ mutationKey: queryKey }) === 1) {
+        void queryClient.invalidateQueries({ queryKey });
+      }
     },
   });
 }

@@ -45,20 +45,25 @@ export const DEFAULT_SIDEBAR_PROJECT_SETTINGS: SidebarProjectSettings = {
 };
 
 
+/**
+ * This device's sidebar layout. The Projects section's settings and order are
+ * per user on the server (see `sidebar-project-prefs`); what is left here is
+ * what stays per device: which rows and sections are open.
+ */
 interface SidebarTreeState {
   /** Expanded rows as `project:{id}` / `view:{id}`. */
   expanded: string[];
+  /**
+   * The Projects section's settings from before they followed the user. Read
+   * only, and only until the user's server copy is first saved.
+   */
   issueSettings: SidebarIssueSettings;
   projectSettings: SidebarProjectSettings;
-  /** Manual project order; projects missing from it follow in list order. */
   projectOrder: string[];
   projectsCollapsed: boolean;
   viewsCollapsed: boolean;
   pinnedCollapsed: boolean;
   setExpanded: (key: string, expanded: boolean) => void;
-  setIssueSettings: (patch: Partial<SidebarIssueSettings>) => void;
-  setProjectSettings: (patch: Partial<SidebarProjectSettings>) => void;
-  setProjectOrder: (ids: string[]) => void;
   setProjectsCollapsed: (collapsed: boolean) => void;
   setViewsCollapsed: (collapsed: boolean) => void;
   setPinnedCollapsed: (collapsed: boolean) => void;
@@ -94,9 +99,6 @@ export const useSidebarTreeStore = create<SidebarTreeState>()(
           if (s.expanded.includes(key) === expanded) return s;
           return { expanded: expanded ? [...s.expanded, key] : s.expanded.filter((k) => k !== key) };
         }),
-      setIssueSettings: (patch) => set((s) => ({ issueSettings: { ...s.issueSettings, ...patch } })),
-      setProjectSettings: (patch) => set((s) => ({ projectSettings: { ...s.projectSettings, ...patch } })),
-      setProjectOrder: (ids) => set({ projectOrder: ids }),
       setProjectsCollapsed: (collapsed) => set({ projectsCollapsed: collapsed }),
       setViewsCollapsed: (collapsed) => set({ viewsCollapsed: collapsed }),
       setPinnedCollapsed: (collapsed) => set({ pinnedCollapsed: collapsed }),

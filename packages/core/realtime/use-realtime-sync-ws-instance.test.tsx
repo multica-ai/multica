@@ -14,6 +14,8 @@ import { workspaceWorkingAgentsKeys } from "../agents/queries";
 import { workspaceKeys } from "../workspace/queries";
 import { issueStatusKeys } from "../issue-statuses/queries";
 import { issueWorkflowKeys } from "../issue-workflows/queries";
+import { issueViewKeys } from "../issue-views/queries";
+import { issueViewPrefKeys } from "../issue-views/preferences";
 import {
   markWorkspaceDeletePending,
   unmarkWorkspaceDeletePending,
@@ -127,15 +129,15 @@ describe("useRealtimeSync — ws instance change", () => {
     rerender({ ws: ws2 });
 
     // Should have called invalidateQueries for all workspace-scoped keys
-    // (17 workspace-scoped [incl. property definitions and workflows] + 6
-    // per-issue prefixes + the workspace working-agents projection + 5
-    // per-chat prefixes + 1 workspaceKeys.list() + 1 cross-workspace inbox
-    // unread summary = 32 calls).
+    // (19 workspace-scoped [incl. property definitions, workflows, saved views
+    // and view preferences] + 6 per-issue prefixes + the workspace
+    // working-agents projection + 5 per-chat prefixes + 1 workspaceKeys.list()
+    // + 1 cross-workspace inbox unread summary = 34 calls).
     //
     // Awaited rather than counted synchronously: the inbox unread summary
     // refresh cancels any in-flight request before invalidating (see
     // onInboxSummaryInvalidate), so that one lands after the synchronous ones.
-    await waitFor(() => expect(invalidateSpy).toHaveBeenCalledTimes(32));
+    await waitFor(() => expect(invalidateSpy).toHaveBeenCalledTimes(34));
   });
 
   it("does not re-invalidate when rerendered with the same ws instance", () => {
@@ -172,6 +174,34 @@ describe("useRealtimeSync — ws instance change", () => {
     // A catalog edit made while this client was disconnected is otherwise
     // invisible for the query's whole 5-minute staleTime.
     expect(calls).toContainEqual(issueStatusKeys.all("ws-1"));
+    expect(calls).toContainEqual(issueViewKeys.all("ws-1"));
+    expect(calls).toContainEqual(issueViewPrefKeys.all("ws-1"));
+  });
+
+  it("follows saved views and the member's own preferences changed elsewhere", async () => {
+    const ws = createMockWs();
+    renderHook(() => useRealtimeSync(ws, stores), { wrapper: createWrapper(qc) });
+    const onAny = vi.mocked(ws.onAny).mock.calls[0]![0];
+
+    onAny({ type: "issue_view:changed", payload: { view_id: "v1", action: "created" } } as never);
+    onAny({ type: "issue_view_preference:changed", payload: { scope_type: "sidebar_projects", scope_id: "u1" } } as never);
+    await new Promise((resolve) => setTimeout(resolve, 120));
+
+    expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: issueViewKeys.all("ws-1") });
+    expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: issueViewPrefKeys.all("ws-1") });
+  });
+
+  it("leaves a preference write in flight to refetch when it settles", async () => {
+    const isMutating = vi.spyOn(qc, "isMutating").mockReturnValue(1);
+    const ws = createMockWs();
+    renderHook(() => useRealtimeSync(ws, stores), { wrapper: createWrapper(qc) });
+    const onAny = vi.mocked(ws.onAny).mock.calls[0]![0];
+
+    onAny({ type: "issue_view_preference:changed", payload: { scope_type: "sidebar_projects", scope_id: "u1" } } as never);
+    await new Promise((resolve) => setTimeout(resolve, 120));
+
+    expect(isMutating).toHaveBeenCalledWith({ mutationKey: issueViewPrefKeys.all("ws-1") });
+    expect(invalidateSpy).not.toHaveBeenCalledWith({ queryKey: issueViewPrefKeys.all("ws-1") });
   });
 
   it.each(["project:created", "project:updated", "project:deleted"])("refreshes workflow usage after %s", (type) => {
@@ -187,6 +217,8 @@ describe("useRealtimeSync — ws instance change", () => {
 
       expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: issueWorkflowKeys.all("ws-1") });
       expect(invalidateSpy).not.toHaveBeenCalledWith({ queryKey: issueWorkflowKeys.all("ws-2") });
+      // A deleted project takes its scoped saved views with it.
+      expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: issueViewKeys.all("ws-1") });
     } finally {
       vi.useRealTimers();
     }

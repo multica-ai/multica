@@ -1,22 +1,11 @@
 import { beforeEach, describe, expect, it } from "vitest";
-import { DEFAULT_SIDEBAR_ISSUE_SETTINGS, useSidebarTreeStore } from "./sidebar-tree-store";
+import { useSidebarTreeStore } from "./sidebar-tree-store";
 
 beforeEach(() => {
-  useSidebarTreeStore.setState({ expanded: [], issueSettings: DEFAULT_SIDEBAR_ISSUE_SETTINGS });
+  useSidebarTreeStore.setState({ expanded: [] });
 });
 
 describe("useSidebarTreeStore", () => {
-  it("patches the shared issue settings", () => {
-    const store = useSidebarTreeStore.getState();
-    store.setIssueSettings({ sortBy: "priority" });
-    store.setIssueSettings({ assignee: "me" });
-    expect(useSidebarTreeStore.getState().issueSettings).toEqual({
-      ...DEFAULT_SIDEBAR_ISSUE_SETTINGS,
-      sortBy: "priority",
-      assignee: "me",
-    });
-  });
-
   it("toggles expansion idempotently", () => {
     const store = useSidebarTreeStore.getState();
     store.setExpanded("project:p1", true);

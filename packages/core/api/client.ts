@@ -4656,7 +4656,7 @@ export class ApiClient {
   async putIssueViewPreference(data: {
     scope_type: string;
     scope_id?: string | null;
-    prefs: { hidden: string[]; order: string[] };
+    prefs: Record<string, unknown>;
   }): Promise<IssueViewPreference> {
     const raw = await this.fetch<unknown>("/api/issue-view-preferences", {
       method: "PUT",
