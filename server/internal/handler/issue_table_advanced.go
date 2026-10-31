@@ -199,7 +199,14 @@ func (c *issueTableFilterCompiler) condition(node issueTableFilterNode) (string,
 			}
 			values = append(values, value)
 		}
-		predicate, err = c.fieldPredicate(node.Field, sortedUniqueStrings(values))
+		unique := sortedUniqueStrings(values)
+		// Values that vanish in normalization ("") are the same as no values:
+		// the condition drops out. Letting an empty list through would compile
+		// to "()" in the OR-accumulating fields and fail the whole query.
+		if len(unique) == 0 {
+			return "", nil
+		}
+		predicate, err = c.fieldPredicate(node.Field, unique)
 	}
 	if err != nil {
 		return "", err
