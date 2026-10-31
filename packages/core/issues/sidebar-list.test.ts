@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { Project } from "../types";
 import {
-  projectSidebarParams,
+  projectSidebarRequest,
   shownSidebarStatuses,
   builtinSidebarRequest,
   sidebarProjects,
@@ -23,9 +23,9 @@ const STATUSES = [
   { key: "cancelled", category: "closed" },
 ] as const;
 
-describe("projectSidebarParams", () => {
+describe("projectSidebarRequest", () => {
   it("leaves out finished statuses and sorts by update time by default", () => {
-    expect(projectSidebarParams("p1", DEFAULT_SIDEBAR_ISSUE_SETTINGS, STATUSES, "u1")).toEqual({
+    expect(projectSidebarRequest("p1", DEFAULT_SIDEBAR_ISSUE_SETTINGS, STATUSES, "u1")).toEqual({
       project_id: "p1",
       statuses: ["backlog", "todo", "in_progress", "merged"],
       sort_by: "updated_at",
@@ -40,7 +40,7 @@ describe("projectSidebarParams", () => {
       assignee: "my_agents",
       showSubIssues: false,
     };
-    expect(projectSidebarParams("p1", settings, STATUSES, "u1")).toEqual({
+    expect(projectSidebarRequest("p1", settings, STATUSES, "u1")).toEqual({
       project_id: "p1",
       involves_user_id: "u1",
       top_level_only: true,
@@ -49,10 +49,26 @@ describe("projectSidebarParams", () => {
     });
   });
 
+  it("lists me and my agents through the table query, which can OR the two", () => {
+    const settings: SidebarIssueSettings = { ...DEFAULT_SIDEBAR_ISSUE_SETTINGS, assignee: "me_and_my_agents" };
+    expect(projectSidebarRequest("p1", settings, STATUSES, "u1")).toEqual({
+      table: {
+        scope: { kind: "project", project_id: "p1" },
+        filters: {
+          statuses: ["backlog", "todo", "in_progress", "merged"],
+          relations: ["assigned", "my_agents"],
+          include_sub_issues: true,
+        },
+        sort: { field: "updated_at", direction: "desc" },
+      },
+    });
+    expect(projectSidebarRequest("p1", settings, STATUSES, undefined)).toBeNull();
+  });
+
   it("lists nothing when every status is hidden", () => {
     const settings = { ...DEFAULT_SIDEBAR_ISSUE_SETTINGS, hiddenStatuses: STATUSES.map((s) => s.key) };
     expect(shownSidebarStatuses(settings, STATUSES)).toEqual([]);
-    expect(projectSidebarParams("p1", settings, STATUSES, "u1")).toBeNull();
+    expect(projectSidebarRequest("p1", settings, STATUSES, "u1")).toBeNull();
   });
 });
 
@@ -153,6 +169,11 @@ describe("builtinSidebarRequest", () => {
     const mine = { ...DEFAULT_SIDEBAR_ISSUE_SETTINGS, hiddenStatuses: [], assignee: "my_agents" as const };
     expect(builtinSidebarRequest("all_issues", "assigned", mine, STATUSES)?.table.filters).toEqual({
       relations: ["my_agents"],
+      include_sub_issues: true,
+    });
+    const both = { ...mine, assignee: "me_and_my_agents" as const };
+    expect(builtinSidebarRequest("all_issues", "assigned", both, STATUSES)?.table.filters).toEqual({
+      relations: ["assigned", "my_agents"],
       include_sub_issues: true,
     });
     const none = { ...DEFAULT_SIDEBAR_ISSUE_SETTINGS, hiddenStatuses: STATUSES.map((s) => s.key) };

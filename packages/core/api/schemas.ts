@@ -736,7 +736,7 @@ export const SidebarProjectPrefsDocSchema = z.object({
     sortBy: z.enum(["updated_at", "created_at", "priority", "status", "title", "due_date"]).optional().catch(undefined),
     sortDirection: z.enum(["asc", "desc"]).optional().catch(undefined),
     hiddenStatuses: z.array(z.string()).nullable().optional().catch(undefined),
-    assignee: z.enum(["anyone", "me", "my_agents"]).optional().catch(undefined),
+    assignee: z.enum(["anyone", "me", "my_agents", "me_and_my_agents"]).optional().catch(undefined),
     showSubIssues: z.boolean().optional().catch(undefined),
   }).catch({}),
   order: z.array(z.unknown()).catch([]).transform((ids) => ids.filter((id): id is string => typeof id === "string")),

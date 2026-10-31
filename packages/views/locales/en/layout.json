@@ -101,6 +101,7 @@
       "assignee_anyone": "Anyone",
       "assignee_me": "Me",
       "assignee_my_agents": "My agents",
+      "assignee_me_and_my_agents": "Me and my agents",
       "reset": "Reset",
       "load_more": "Load more",
       "show_less": "Show less",

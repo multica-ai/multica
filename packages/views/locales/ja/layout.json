@@ -100,6 +100,7 @@
       "assignee_anyone": "全員",
       "assignee_me": "自分",
       "assignee_my_agents": "自分のエージェント",
+      "assignee_me_and_my_agents": "自分と自分のエージェント",
       "reset": "リセット",
       "load_more": "さらに表示",
       "show_less": "表示を減らす",

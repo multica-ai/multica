@@ -13,8 +13,9 @@ import { useIssueStatuses } from "@multica/core/issue-statuses/hooks";
 import { issueKeys, sidebarIssuesOptions } from "@multica/core/issues/queries";
 import {
   SIDEBAR_FIRST_PAGE,
-  projectSidebarParams,
+  projectSidebarRequest,
   projectSidebarSource,
+  type SidebarIssuesRequest,
 } from "@multica/core/issues/sidebar-list";
 import { useSidebarProjectPrefs, useUpdateSidebarProjectPrefs } from "@multica/core/issues/sidebar-project-prefs";
 import { openCreateIssueWithPreference } from "@multica/core/issues/stores/create-mode-store";
@@ -22,7 +23,7 @@ import { useSidebarKeptStore } from "@multica/core/issues/stores/sidebar-kept-st
 import { useSidebarTreeStore, type SidebarIssueSettings } from "@multica/core/issues/stores/sidebar-tree-store";
 import { useModalStore } from "@multica/core/modals";
 import { useWorkspacePaths } from "@multica/core/paths";
-import type { Issue, ListIssuesParams, ListIssuesResponse, Project } from "@multica/core/types";
+import type { Issue, ListIssuesResponse, Project } from "@multica/core/types";
 import { useT } from "../../i18n";
 import { PanelCount, PanelLink, PanelList, PanelSection, isPathWithin } from "../panel-nav";
 import { ProjectsSectionSettings } from "./sidebar-settings";
@@ -36,10 +37,10 @@ function useExpanded(key: string) {
   return [expanded, (next: boolean) => setExpanded(key, next)] as const;
 }
 
-function usePrefetch(wsId: string, source: string, params: ListIssuesParams | null | undefined) {
+function usePrefetch(wsId: string, source: string, request: SidebarIssuesRequest | null | undefined) {
   const qc = useQueryClient();
   return () => {
-    if (params) void qc.prefetchQuery(sidebarIssuesOptions(wsId, source, params, SIDEBAR_FIRST_PAGE));
+    if (request) void qc.prefetchQuery(sidebarIssuesOptions(wsId, source, request, SIDEBAR_FIRST_PAGE));
   };
 }
 
@@ -201,7 +202,7 @@ function ProjectTreeItem({
   const [expanded, setExpanded] = useExpanded(source);
   const statusCatalog = useIssueStatuses(wsId);
   const params = statusCatalog.isLoaded
-    ? projectSidebarParams(project.id, issueSettings, statusCatalog.statuses, userId)
+    ? projectSidebarRequest(project.id, issueSettings, statusCatalog.statuses, userId)
     : undefined;
   const prefetch = usePrefetch(wsId, source, params);
 

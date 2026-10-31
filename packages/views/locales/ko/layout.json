@@ -100,6 +100,7 @@
       "assignee_anyone": "모두",
       "assignee_me": "나",
       "assignee_my_agents": "내 에이전트",
+      "assignee_me_and_my_agents": "나와 내 에이전트",
       "reset": "초기화",
       "load_more": "더 보기",
       "show_less": "간단히 보기",

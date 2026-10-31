@@ -100,6 +100,7 @@
       "assignee_anyone": "所有人",
       "assignee_me": "我",
       "assignee_my_agents": "我的智能体",
+      "assignee_me_and_my_agents": "我和我的智能体",
       "reset": "重置",
       "load_more": "加载更多",
       "show_less": "收起",

@@ -68,6 +68,7 @@ import {
   EMPTY_PLUGIN_PREVIEW,
 } from "./schemas";
 import { IssueViewSchema, IssueViewListSchema, SidebarProjectPrefsDocSchema } from "./schemas";
+import type { SidebarIssueAssignee } from "../issues/stores/sidebar-tree-store";
 import {
   ListIssueStatusesResponseSchema,
   IssueStatusEntrySchema,
@@ -1976,6 +1977,13 @@ describe("SidebarProjectPrefsDocSchema", () => {
     };
     expect(SidebarProjectPrefsDocSchema.parse(doc)).toEqual(doc);
   });
+
+  it.each(["anyone", "me", "my_agents", "me_and_my_agents"] satisfies SidebarIssueAssignee[])(
+    "keeps the %s assignee setting",
+    (assignee) => {
+      expect(SidebarProjectPrefsDocSchema.parse({ issues: { assignee } }).issues.assignee).toBe(assignee);
+    },
+  );
 
   it("drops settings saved by another client version instead of failing the document", () => {
     const parsed = SidebarProjectPrefsDocSchema.parse({
