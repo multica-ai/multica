@@ -7,6 +7,7 @@ import {
 } from "@multica/core/issues";
 import { IssueFlowCard } from "../../workflows/issue-flow-card";
 import { useStatusLabel } from "../utils/status-label";
+import { useContentWidth } from "@multica/core/issues/stores/content-width-store";
 import { priorityLabel } from "../utils/priority-label";
 import { useIssueStatuses } from "@multica/core/issue-statuses/hooks";
 import { useState, useEffect, useCallback, useMemo, useRef, useId, Fragment, type ReactNode } from "react";
@@ -1247,7 +1248,9 @@ export function IssueDetailSkeleton({
   leading,
   trailing,
   sidebar = true,
-}: { leading?: ReactNode; trailing?: ReactNode; sidebar?: boolean } = {}) {
+  variant = "page",
+}: { leading?: ReactNode; trailing?: ReactNode; sidebar?: boolean; variant?: "page" | "peek" } = {}) {
+  const contentWidth = useContentWidth();
   return (
     <div className="flex flex-1 min-h-0 flex-col">
       {/* The way back is real from the first frame, not once the issue lands:
@@ -1269,7 +1272,17 @@ export function IssueDetailSkeleton({
         <div className="flex-1 overflow-y-auto [scrollbar-gutter:stable_both-edges]">
           {/* Gutters match the loaded column exactly (see its comment), so the
               skeleton doesn't reflow sideways when real content mounts. */}
-          <div className="mx-auto w-full max-w-4xl px-3 py-6 space-y-6 md:px-8 md:py-8">
+          <div
+            className={cn(
+              "mx-auto w-full space-y-6",
+              variant === "peek"
+                ? "px-6 py-5"
+                : cn(
+                    "px-3 py-6 md:px-8 md:py-8",
+                    contentWidth === "standard" && "max-w-4xl",
+                  ),
+            )}
+          >
             <Skeleton className="h-8 w-3/4" />
             <div className="space-y-2">
               <Skeleton className="h-4 w-full" />
@@ -1314,6 +1327,7 @@ export function IssueDetailSkeleton({
 // IssueDetail
 
 export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = true, layoutId = "multica_issue_detail_layout", highlightCommentId, highlightRequestToken, leadingAction, variant = "page", trailingActions }: IssueDetailProps) {
+  const contentWidth = useContentWidth();
   const isPeek = variant === "peek";
   const { t } = useT("issues");
   const { t: tCommon } = useT("common");
@@ -2726,7 +2740,7 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
   if (loading) {
     // The host's trailing controls hold the peek's only close button, so the
     // waiting and missing states carry them too.
-    return <IssueDetailSkeleton leading={leadingAction} trailing={trailingActions} sidebar={!isPeek} />;
+    return <IssueDetailSkeleton leading={leadingAction} trailing={trailingActions} sidebar={!isPeek} variant={variant} />;
   }
 
   if (!issue) {
@@ -3340,7 +3354,12 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
             "mx-auto w-full",
             // The peek is already a narrow column, so it takes a tighter gutter
             // and never reaches the chat launcher's corner (see IssuePeekHost).
-            isPeek ? "px-6 py-5" : "max-w-4xl px-3 py-6 max-md:pb-chat-launcher md:px-8 md:py-8",
+            isPeek
+              ? "px-6 py-5"
+              : cn(
+                  "px-3 py-6 max-md:pb-chat-launcher md:px-8 md:py-8",
+                  contentWidth === "standard" && "max-w-4xl",
+                ),
           )}
         >
           <IssueDuplicateBanner

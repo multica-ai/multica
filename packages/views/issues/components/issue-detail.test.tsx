@@ -643,12 +643,12 @@ function createTestQueryClient() {
   });
 }
 
-function renderIssueDetail(issueId = "issue-1") {
+function renderIssueDetail(issueId = "issue-1", variant: "page" | "peek" = "page") {
   const queryClient = createTestQueryClient();
   return render(
     <I18nProvider locale="en" resources={TEST_RESOURCES}>
       <QueryClientProvider client={queryClient}>
-        <IssueDetail issueId={issueId} />
+        <IssueDetail issueId={issueId} variant={variant} />
       </QueryClientProvider>
     </I18nProvider>,
   );
@@ -868,7 +868,7 @@ describe("IssueDetail (shared)", () => {
     ).toBe(true);
   });
 
-  it("gives the skeleton the same horizontal gutters as the loaded column", async () => {
+  it.each(["page", "peek"] as const)("gives the %s skeleton the same horizontal gutters as the loaded column", async (variant) => {
     // The skeleton is the loaded column's stand-in, so a gutter change has to
     // land on both or the column jumps sideways at the moment the issue
     // arrives. Horizontal only: the loaded column also reserves the chat
@@ -880,15 +880,15 @@ describe("IssueDetail (shared)", () => {
         .filter((cls) => /(^|:)px-/.test(cls))
         .sort();
 
-    mockApiObj.getIssue.mockReturnValue(new Promise(() => {}));
-    const loadingRender = renderIssueDetail();
+    let resolveIssue!: (issue: Issue) => void;
+    mockApiObj.getIssue.mockReturnValue(new Promise<Issue>((resolve) => {
+      resolveIssue = resolve;
+    }));
+    const loadingRender = renderIssueDetail("issue-1", variant);
     const skeletonGutters = horizontalGutters(
-      loadingRender.container.querySelector(".max-w-4xl"),
+      loadingRender.container.querySelector(".space-y-6"),
     );
-    loadingRender.unmount();
-
-    mockApiObj.getIssue.mockResolvedValue(mockIssue);
-    const { container } = renderIssueDetail();
+    await act(async () => resolveIssue(mockIssue));
     await waitFor(() => {
       expect(screen.getByText("Implement authentication")).toBeInTheDocument();
     });
@@ -896,7 +896,7 @@ describe("IssueDetail (shared)", () => {
     // Non-empty guard: without it a renamed column class passes vacuously.
     expect(skeletonGutters.length).toBeGreaterThan(0);
     expect(skeletonGutters).toEqual(
-      horizontalGutters(container.querySelector(".max-w-4xl")),
+      horizontalGutters(screen.getByText("Implement authentication").closest(".mx-auto.w-full")),
     );
   });
 

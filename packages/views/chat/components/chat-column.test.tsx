@@ -3,6 +3,7 @@ import { render } from "@testing-library/react";
 import { I18nProvider } from "@multica/core/i18n/react";
 import enChat from "../../locales/en/chat.json";
 import { CHAT_COLUMN, CHAT_GUTTER } from "./chat-column";
+import { useContentWidthStore } from "@multica/core/issues/stores/content-width-store";
 import { ChatMessageSkeleton } from "./chat-message-list";
 import { NoAgentBanner } from "./no-agent-banner";
 import { ArchivedAgentBanner } from "./archived-agent-banner";
@@ -79,5 +80,21 @@ describe("chat column geometry", () => {
     const { container } = renderChat(<ChatMessageSkeleton />);
     const gutters = container.querySelectorAll(`.${CSS.escape(GUTTER_CLASSES[0]!)}`);
     expect(gutters).toHaveLength(1);
+  });
+
+  it("lifts the shared reading cap immediately without changing gutters", () => {
+    const { container, rerender } = renderChat(<NoAgentBanner />);
+    const outer = root(container);
+    const inner = outer.firstElementChild as HTMLElement;
+    expect(inner).toHaveClass("max-w-4xl");
+    useContentWidthStore.getState().setContentWidth("full");
+    rerender(
+      <I18nProvider locale="en" resources={TEST_RESOURCES}>
+        <NoAgentBanner />
+      </I18nProvider>,
+    );
+    expect(inner).not.toHaveClass("max-w-4xl");
+    for (const cls of GUTTER_CLASSES) expect(outer).toHaveClass(cls);
+    useContentWidthStore.getState().setContentWidth("standard");
   });
 });
