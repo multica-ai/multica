@@ -736,9 +736,9 @@
   },
   "workspace": {
     "default_chat_agent_clear": "清除默认值",
-    "default_chat_agent_label": "默认聊天代理",
-    "default_chat_agent_none": "不设置工作区默认代理",
-    "default_chat_agent_hint": "未选择代理时用于新聊天，现有会话继续使用原代理。",
+    "default_chat_agent_label": "默认聊天智能体",
+    "default_chat_agent_none": "不设置工作区默认智能体",
+    "default_chat_agent_hint": "未选择智能体时用于新聊天，现有会话继续使用原智能体。",
     "section_general": "工作区信息",
     "logo_label": "工作区图标",
     "change_logo_aria": "更换工作区图标",
