@@ -6,9 +6,11 @@ import { IssueContextMenuProvider } from "../actions";
 import { ScrollRestorationProvider } from "../../platform";
 import type {
   Issue,
+  IssueProperty,
   IssueTableGroupDescriptor,
 } from "@multica/core/types";
 import type { IssueGroupBranches } from "../surface/use-issue-group-branches";
+import { propertyKeys } from "@multica/core/properties";
 import { I18nProvider } from "@multica/core/i18n/react";
 import enCommon from "../../locales/en/common.json";
 import enIssues from "../../locales/en/issues.json";
@@ -28,14 +30,17 @@ const mockListChildrenByParents = vi.hoisted(() =>
 const mockGetAgentTaskSnapshot = vi.hoisted(() =>
   vi.fn().mockResolvedValue([]),
 );
+const mockListProperties = vi.hoisted(() => vi.fn().mockResolvedValue({ properties: [], total: 0 }));
 vi.mock("@multica/core/api", () => ({
   api: {
     listChildrenByParents: mockListChildrenByParents,
     getAgentTaskSnapshot: mockGetAgentTaskSnapshot,
+    listProperties: mockListProperties,
   },
   getApi: () => ({
     listChildrenByParents: mockListChildrenByParents,
     getAgentTaskSnapshot: mockGetAgentTaskSnapshot,
+    listProperties: mockListProperties,
   }),
   setApiInstance: vi.fn(),
 }));
@@ -404,6 +409,8 @@ describe("SwimLaneView", () => {
     mockViewState.agentRunningFilter = false;
     mockListChildrenByParents.mockResolvedValue({ issues: [] });
     mockGetAgentTaskSnapshot.mockResolvedValue([]);
+    mockListProperties.mockResolvedValue({ properties: [], total: 0 });
+    mockViewState.cardPropertyIds = [];
   });
 
   it("renders status columns as headers", () => {
@@ -1428,6 +1435,78 @@ describe("SwimLaneView", () => {
         geometry.mockRestore();
       }
     });
+
+    it("keeps complete offscreen cells measured during refetch but invalidates changed footer content", () => {
+      const geometry = vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(function (this: HTMLElement) {
+        const height = this.classList.contains("space-y-2") && this.closest("[data-swimlane-cell]")?.getAttribute("data-swimlane-cell") === "swim:project:p-0:todo" ? 1800 : 0;
+        return { x: 0, y: 0, width: 280, height, top: 0, bottom: height, left: 0, right: 280, toJSON: () => ({}) };
+      });
+      try {
+        const many = Array.from({ length: 20 }, (_, index) => ({ ...projectIssues[0]!, id: `refetch-${index}`, project_id: `p-${index}` }));
+        const descriptors: IssueTableGroupDescriptor[] = many.map((issue, index) => ({
+          key: `project-${index}`, value: { kind: "project", project_id: issue.project_id }, count: 1,
+          secondary_groups: [{ key: `cell-${index}`, value: { kind: "status", status: "todo" }, count: 1 }],
+        }));
+        const branches = makeServerBranches(descriptors, many);
+        const view = () => <SwimLaneView issues={many} visibleStatuses={["todo"]} onMoveIssue={vi.fn()} groupBranches={{ ...branches, pagination: { ...branches.pagination } }} />;
+        const qc = new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: 0 } } });
+        const { container, rerender } = render(view(), {
+          wrapper: ({ children }) => <QueryClientProvider client={qc}><I18nProvider resources={TEST_RESOURCES} locale="en"><IssueContextMenuProvider>{children}</IssueContextMenuProvider></I18nProvider></QueryClientProvider>,
+        });
+        const row = () => container.querySelector<HTMLElement>("[data-swimlane-status-row=todo]")!;
+        const scroller = container.querySelector("[data-board-scroller]")!;
+        const page = branches.pagination["cell-0"]!;
+        expect(row().style.minHeight).toBe("1808px");
+        fireEvent.scroll(scroller, { target: { scrollLeft: 3000 } });
+        for (const isFetching of [true, false]) {
+          page.isFetching = isFetching;
+          rerender(view());
+          expect(row().style.minHeight).toBe("1808px");
+        }
+        // Error/retry and a newly appearing pagination footer really change
+        // the measured content; an unseen cell must drop its old maximum.
+        page.isError = true;
+        rerender(view());
+        expect(row().style.minHeight).toBe("120px");
+        page.isError = false;
+        rerender(view());
+        expect(row().style.minHeight).toBe("1808px");
+        page.hasMore = true;
+        rerender(view());
+        expect(row().style.minHeight).toBe("120px");
+      } finally {
+        geometry.mockRestore();
+      }
+    });
+
+    it.each(["archive", "option label", "unchanged catalog", "unrelated definition"] as const)(
+      "invalidates only relevant card property rendering changes: %s", async (change) => {
+        const geometry = vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(function (this: HTMLElement) {
+          const height = this.classList.contains("space-y-2") && this.closest("[data-swimlane-cell]")?.getAttribute("data-swimlane-cell") === "swim:project:p-0:todo" ? 1800 : 0;
+          return { x: 0, y: 0, width: 280, height, top: 0, bottom: height, left: 0, right: 280, toJSON: () => ({}) };
+        });
+        try {
+          const property: IssueProperty = { id: "selected", workspace_id: "ws-1", name: "Selection", type: "multi_select", config: { options: [{ id: "option", name: "Long option name", color: "#ffffff" }] }, position: 0, archived: false, created_at: "", updated_at: "" };
+          mockViewState.cardPropertyIds = [property.id];
+          const many = Array.from({ length: 20 }, (_, index) => ({ ...projectIssues[0]!, id: `property-${index}`, project_id: `p-${index}`, properties: { selected: ["option"] } }));
+          const qc = new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: 0, staleTime: Infinity } } });
+          qc.setQueryData(propertyKeys.list("ws-1"), { properties: [property], total: 1 });
+          const { container } = render(<SwimLaneView issues={many} visibleStatuses={["todo"]} onMoveIssue={vi.fn()} />, {
+            wrapper: ({ children }) => <QueryClientProvider client={qc}><I18nProvider resources={TEST_RESOURCES} locale="en"><IssueContextMenuProvider>{children}</IssueContextMenuProvider></I18nProvider></QueryClientProvider>,
+          });
+          const row = () => container.querySelector<HTMLElement>("[data-swimlane-status-row=todo]")!;
+          expect(row().style.minHeight).toBe("1808px");
+          fireEvent.scroll(container.querySelector("[data-board-scroller]")!, { target: { scrollLeft: 3000 } });
+          const properties = change === "archive" ? [] : change === "option label"
+            ? [{ ...property, config: { options: [{ ...property.config.options![0]!, name: "Short" }] } }]
+            : change === "unrelated definition" ? [property, { ...property, id: "not-displayed" }] : [{ ...property }];
+          act(() => { qc.setQueryData(propertyKeys.list("ws-1"), { properties, total: properties.length }); });
+          await waitFor(() => expect(row().style.minHeight).toBe(change === "archive" || change === "option label" ? "120px" : "1808px"));
+        } finally {
+          geometry.mockRestore();
+        }
+      },
+    );
 
     it("windows project cells horizontally and remounts their existing paged cards", () => {
       const many = Array.from({ length: 100 }, (_, index) => ({ ...projectIssues[0]!, id: `many-${index}`, title: `Card ${index}`, project_id: `p-${index}` }));
