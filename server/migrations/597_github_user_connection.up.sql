@@ -8,7 +8,7 @@
 -- GitHub rotates the refresh token on every use, so refreshes lock this row.
 --
 -- No FK to "user" by design (repository rule). The primary key is built
--- concurrently in 597/598, so no migration builds an index inline.
+-- concurrently in 598/599, so no migration builds an index inline.
 CREATE TABLE github_user_connection (
     user_id                  UUID        NOT NULL,
     github_user_id           BIGINT      NOT NULL,
