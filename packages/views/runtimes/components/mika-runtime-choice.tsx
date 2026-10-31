@@ -27,6 +27,7 @@ export interface MikaRuntimeSelection {
  */
 export function MikaRuntimeChoice({
   runtimes,
+  workspaceSlug,
   runtimesLoading,
   currentUserId = null,
   value,
@@ -35,6 +36,7 @@ export function MikaRuntimeChoice({
   layout = "dropdown",
 }: {
   runtimes: AgentRuntime[];
+  workspaceSlug?: string;
   runtimesLoading?: boolean;
   /** Only used by the dropdown layout, to label runtime owners. */
   currentUserId?: string | null;
@@ -82,6 +84,7 @@ export function MikaRuntimeChoice({
         />
       )}
       <ModelDropdown
+        workspaceSlug={workspaceSlug}
         runtimeId={value.runtimeId || null}
         runtimeOnline={selected?.status === "online"}
         value={value.model}

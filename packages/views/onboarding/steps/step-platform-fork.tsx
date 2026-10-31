@@ -13,6 +13,7 @@ import {
 import { cn } from "@multica/ui/lib/utils";
 import type { AgentRuntime } from "@multica/core/types";
 import {
+  countRuntimeComputers,
   runtimeDisplayLabel,
   useDaemonSetupCommands,
 } from "@multica/core/runtimes";
@@ -163,6 +164,7 @@ export function StepPlatformFork({
       </StepFooter>
 
     <CliInstallDialog
+      workspaceSlug={wsSlug}
       open={dialog === "cli"}
       onClose={() => setDialog(null)}
       onConnect={handleCliConnect}
@@ -279,6 +281,7 @@ function ForkAlt({
  * closes the dialog and fires the parent's `onConnect`.
  */
 function CliInstallDialog({
+  workspaceSlug,
   open,
   onClose,
   onConnect,
@@ -291,6 +294,7 @@ function CliInstallDialog({
   connecting,
   cliInstructions,
 }: {
+  workspaceSlug?: string;
   open: boolean;
   onClose: () => void;
   onConnect: () => void | Promise<void>;
@@ -319,13 +323,14 @@ function CliInstallDialog({
               <div className="flex items-center gap-2 pt-1 text-body">
                 <div className="h-2 w-2 rounded-full bg-success" />
                 <span className="font-medium">
-                  {t(($) => $.step_platform.runtimes_connected, { count: runtimes.length })}
+                  {t(($) => $.step_platform.runtimes_connected, { count: countRuntimeComputers(runtimes) })}
                 </span>
               </div>
               {/* Cap the runtime list at ~4 rows visible, scroll the rest.
                   Keeps the commands above always reachable even when
                   a user has many machines registered. */}
               <MikaRuntimeChoice
+                workspaceSlug={workspaceSlug}
                 layout="list"
                 runtimes={runtimes}
                 value={choice}
