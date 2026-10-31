@@ -2,11 +2,13 @@
   "page": {
     "title": "프로젝트",
     "new_project": "새 프로젝트",
+    "scope_all": "전체 프로젝트",
+    "scope_active": "진행 중인 프로젝트",
+    "scope_closed": "종료된 프로젝트",
     "empty": "아직 프로젝트가 없습니다",
     "create_first": "첫 프로젝트 만들기",
     "view_compact": "간결하게",
     "view_comfortable": "넓게",
-    "search_placeholder": "프로젝트 검색...",
     "no_search_results": "검색 결과가 없습니다",
     "view_table": "테이블",
     "view_cards": "카드",
@@ -14,9 +16,7 @@
     "pin": "사이드바에 고정",
     "unpin": "고정 해제",
     "delete": "삭제",
-    "no_matches": "일치하는 프로젝트가 없습니다",
-    "selected_other": "{{count}}개 선택됨",
-    "clear_selection": "선택 해제"
+    "no_matches": "일치하는 프로젝트가 없습니다"
   },
   "table": {
     "name": "이름",
@@ -167,18 +167,9 @@
     "fallback_label": "프로젝트"
   },
   "toolbar": {
-    "result_count_title": "일치하는 프로젝트 / 전체 프로젝트",
-    "filter_label": "필터",
-    "filter_active_count_other": "필터 {{count}}개",
-    "clear_filters": "필터 지우기",
     "section_status": "상태",
     "section_priority": "우선순위",
     "section_lead": "리드",
-    "display": "표시",
-    "sort_by": "정렬",
-    "direction_asc": "오름차순",
-    "direction_desc": "내림차순",
-    "section_columns": "열",
     "view": "보기"
   }
 }

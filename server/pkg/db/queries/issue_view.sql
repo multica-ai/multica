@@ -21,6 +21,15 @@ ORDER BY created_at ASC
 -- data far below it; the LIMIT is the abuse backstop.
 LIMIT 200;
 
+-- name: ListAllIssueViewsForUser :many
+-- Every view the caller can open, across all scopes: the All views
+-- directory and the sidebar's starred list resolve against this.
+SELECT * FROM issue_view
+WHERE workspace_id = $1
+  AND (owner_id = $2 OR visibility = 'workspace')
+ORDER BY created_at ASC
+LIMIT 500;
+
 -- name: CountIssueViewsByOwner :one
 SELECT COUNT(*) FROM issue_view
 WHERE workspace_id = $1 AND owner_id = $2;

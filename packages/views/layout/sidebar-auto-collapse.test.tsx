@@ -4,7 +4,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { SidebarProvider, useSidebar } from "@multica/ui/components/ui/sidebar";
 import { renderWithI18n } from "../test/i18n";
 
-// A width-driven `matchMedia`: the provider watches the `md`–`xl` band and
+// A width-driven `matchMedia`: the provider watches the `md`–`lg` band and
 // `useIsCompact` watches `max-width: 767px`, so both have to answer against
 // the same viewport and both have to be notified when it changes.
 type Listener = (e: MediaQueryListEvent) => void;
@@ -49,7 +49,7 @@ function state() {
   return screen.getByTestId("state").textContent;
 }
 
-describe("sidebar auto-collapse between md and xl", () => {
+describe("sidebar auto-collapse between md and lg", () => {
   beforeEach(() => {
     queries.clear();
     window.matchMedia = ((query: string) => {
@@ -87,8 +87,21 @@ describe("sidebar auto-collapse between md and xl", () => {
     expect(state()).toBe("expanded");
   });
 
-  it("starts collapsed when the page opens inside the band", () => {
+  it("keeps the nav open in a laptop-sized window", () => {
+    // The rail stays on screen beside the panel, so a window just under the
+    // desktop default of 1280 has room for both.
     setWidth(1100);
+    renderWithI18n(
+      <SidebarProvider>
+        <Probe />
+      </SidebarProvider>,
+    );
+
+    expect(state()).toBe("expanded");
+  });
+
+  it("starts collapsed when the page opens inside the band", () => {
+    setWidth(900);
     renderWithI18n(
       <SidebarProvider>
         <Probe />
@@ -105,7 +118,7 @@ describe("sidebar auto-collapse between md and xl", () => {
       </SidebarProvider>,
     );
 
-    setWidth(1100);
+    setWidth(900);
     expect(state()).toBe("collapsed");
 
     setWidth(1440);
@@ -122,11 +135,11 @@ describe("sidebar auto-collapse between md and xl", () => {
       </SidebarProvider>,
     );
 
-    setWidth(1100);
+    setWidth(900);
     fireEvent.click(screen.getByTestId("state"));
     expect(state()).toBe("expanded");
 
-    setWidth(1200);
+    setWidth(1000);
     expect(state()).toBe("expanded");
   });
 
@@ -179,7 +192,7 @@ describe("sidebar auto-collapse between md and xl", () => {
     fireEvent.click(screen.getByTestId("state"));
     expect(document.cookie).not.toContain("sidebar_state");
 
-    setWidth(1100);
+    setWidth(900);
     expect(state()).toBe("collapsed");
     expect(document.cookie).not.toContain("sidebar_state");
   });

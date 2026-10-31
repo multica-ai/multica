@@ -542,7 +542,9 @@ function StatusAccordionItem({
         issue={issue}
         childProgress={childProgressMap.get(issue.id)}
         project={
-          issue.project_id ? projectMap?.get(issue.project_id) : undefined
+          issue.project_id && issue.project_id !== projectId
+            ? projectMap?.get(issue.project_id)
+            : undefined
         }
         disableSorting={disableSorting}
       />
@@ -551,7 +553,9 @@ function StatusAccordionItem({
         issue={issue}
         childProgress={childProgressMap.get(issue.id)}
         project={
-          issue.project_id ? projectMap?.get(issue.project_id) : undefined
+          issue.project_id && issue.project_id !== projectId
+            ? projectMap?.get(issue.project_id)
+            : undefined
         }
       />
     );

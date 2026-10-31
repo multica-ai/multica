@@ -34,6 +34,12 @@ type Event struct {
 	// chat events and chat-task transcript events only to this user, and drops
 	// them when it is empty rather than falling back to workspace fanout.
 	ChatSessionOwnerID string
+
+	// MemberPrivateUserID marks an event as private to one member of
+	// WorkspaceID, such as their own preferences or a private saved view. The
+	// realtime layer delivers it only to that user's connections bound to
+	// WorkspaceID.
+	MemberPrivateUserID string
 }
 
 // Handler is a function that processes an event.

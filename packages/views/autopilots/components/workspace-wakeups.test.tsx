@@ -35,6 +35,7 @@ vi.mock("@multica/core/paths", () => ({
     issueDetail: (id: string) => `/ws/issues/${id}`,
   }),
 }));
+const rowLinks = vi.hoisted(() => [] as string[]);
 vi.mock("../../navigation", () => ({
   AppLink: ({
     href,
@@ -48,6 +49,12 @@ vi.mock("../../navigation", () => ({
       {children}
     </a>
   ),
+  useIntentNavigate: () => () => {},
+  useRowLink: () => (href: string) => ({
+    onClick: () => rowLinks.push(href),
+    onAuxClick: () => {},
+    onMouseEnter: () => {},
+  }),
 }));
 vi.mock("../../common/actor-avatar", () => ({ ActorAvatar: () => null }));
 vi.mock("../../common/task-transcript", () => ({
@@ -89,6 +96,7 @@ function mount() {
 }
 beforeEach(() => {
   queries = [];
+  rowLinks.length = 0;
   rows = ["a", "b"].map((id) => ({
     id,
     issue_id: `issue-${id}`,
@@ -164,14 +172,10 @@ it("shows consumed running work separately from its off state and keeps transcri
   expect(
     within(row).getByRole("button", { name: "Enable again" }),
   ).toBeDisabled();
-  expect(within(row).getByRole("checkbox")).toHaveAttribute(
-    "aria-disabled",
-    "true",
-  );
-  expect(within(row).getByRole("link", { name: /Issue a/ })).toHaveAttribute(
-    "href",
-    "/ws/issues/issue-a",
-  );
+  // A rule that is already off is not part of batch selection.
+  expect(within(row).queryByRole("checkbox")).toBeNull();
+  fireEvent.click(within(row).getByText("Issue a"));
+  expect(rowLinks).toEqual(["/ws/issues/issue-a"]);
 });
 
 it("confirms batch consequences and retains only failed selections for retry", async () => {
@@ -182,7 +186,7 @@ it("confirms batch consequences and retains only failed selections for retry", a
   await screen.findByText("Issue a");
   fireEvent.click(
     screen.getByRole("checkbox", {
-      name: "Select enabled wakeups on this page",
+      name: "Select all enabled wakeups",
     }),
   );
   fireEvent.click(screen.getByRole("button", { name: "Turn off selected" }));
@@ -206,16 +210,19 @@ it("confirms batch consequences and retains only failed selections for retry", a
   ).toBeChecked();
 });
 
-it("resets page and selection on scope or search changes and sends bounded page requests", async () => {
+it("loads more in bounded pages and resets paging and selection on scope changes", async () => {
+  const user = userEvent.setup();
   mount();
   await screen.findByText("Issue a");
-  fireEvent.click(screen.getByRole("button", { name: "Next" }));
-  await waitFor(() => expect(queries.at(-1)?.offset).toBe(50));
+  fireEvent.click(screen.getByRole("button", { name: "Load more" }));
+  await waitFor(() => expect(queries.at(-1)).toMatchObject({ offset: 2, limit: 50 }));
   await screen.findByText("Issue a");
   fireEvent.click(
     screen.getByRole("checkbox", { name: "Select DEV-a, Agent a" }),
   );
-  fireEvent.click(screen.getByRole("button", { name: /^All\s*60/ }));
+  // The scope is the header's title; its menu carries the counts.
+  await user.click(screen.getByRole("button", { name: "Waiting or executing" }));
+  await user.click(await screen.findByRole("menuitemradio", { name: /All wakeups\s*60/ }));
   await waitFor(() =>
     expect(queries.at(-1)).toMatchObject({
       scope: "all",
@@ -223,15 +230,11 @@ it("resets page and selection on scope or search changes and sends bounded page 
       limit: 50,
     }),
   );
-  expect(
-    screen.queryByRole("button", { name: "Turn off selected" }),
-  ).toBeNull();
-  // Search runs once typing pauses; there is no submit button.
-  fireEvent.change(screen.getByRole("searchbox"), {
-    target: { value: "CI & release" },
-  });
-  await waitFor(() => expect(queries.at(-1)?.search).toBe("CI & release"));
-  expect(queries.filter((q) => q.search).length).toBe(1);
+  expect(screen.getByRole("button", { name: "All wakeups" })).toBeVisible();
+  await waitFor(() =>
+    expect(screen.queryByRole("button", { name: "Turn off selected" })).toBeNull(),
+  );
+  expect(screen.queryByRole("button", { name: /search/i })).toBeNull();
 });
 
 it("makes read-only rules non-selectable and surfaces inventory failures", async () => {
@@ -239,8 +242,8 @@ it("makes read-only rules non-selectable and surfaces inventory failures", async
   const view = mount();
   await screen.findByText("Issue a");
   expect(
-    screen.getByRole("checkbox", { name: "Select DEV-a, Agent a" }),
-  ).toHaveAttribute("aria-disabled", "true");
+    screen.queryByRole("checkbox", { name: "Select DEV-a, Agent a" }),
+  ).toBeNull();
   expect(
     screen.getByRole("switch", { name: "Wakeup for Agent a" }),
   ).toHaveAttribute("aria-disabled", "true");
@@ -314,13 +317,28 @@ it("shows who created a rule and how often it ran this week", async () => {
   expect(row).toHaveTextContent("4");
 });
 
-it("filters by source", async () => {
+it("filters by source from the header's filter menu and resets it", async () => {
   const user = userEvent.setup();
   mount();
   await screen.findByRole("row", { name: /Issue a/ });
-  await user.click(screen.getByRole("combobox", { name: "Source" }));
-  await user.click(await screen.findByRole("option", { name: "System" }));
+  await user.click(screen.getByRole("button", { name: "Filter" }));
+  await user.click(await screen.findByRole("menuitem", { name: "Source" }));
+  fireEvent.click(await screen.findByRole("menuitemradio", { name: "System" }));
   await waitFor(() => expect(queries.at(-1)).toMatchObject({ source: "system", offset: 0 }));
+  expect(screen.getByRole("button", { name: "1 filter" })).toBeVisible();
+
+  await user.click(screen.getByRole("button", { name: "Reset" }));
+  await waitFor(() => expect(queries.at(-1)).toMatchObject({ source: "", scope: "active" }));
+  expect(screen.queryByRole("button", { name: "Reset" })).toBeNull();
+});
+
+it("starts a new wakeup from the header", async () => {
+  const user = userEvent.setup();
+  mount();
+  await screen.findByRole("row", { name: /Issue a/ });
+  expect(screen.queryByRole("dialog", { name: "Pick issue" })).toBeNull();
+  await user.click(screen.getByRole("button", { name: "New wakeup" }));
+  expect(await screen.findByRole("dialog", { name: "Pick issue" })).toBeVisible();
 });
 
 it("warns about paused rules and jumps to them", async () => {

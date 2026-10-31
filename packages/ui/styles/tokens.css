@@ -131,6 +131,11 @@
     --dialog-exit-duration: 100ms;
     --dialog-enter-easing: ease;
     --dialog-exit-easing: ease;
+    /* Nav panel collapse, shared by the space panel and list columns. The
+       first frame also pays for the toggle's render and the page relayout, so
+       the curve starts soft instead of jumping. */
+    --nav-panel-duration: 220ms;
+    --nav-panel-easing: ease;
 
     color-scheme: light;
     /* Button geometry. Text and icon-only buttons share the height ladder.

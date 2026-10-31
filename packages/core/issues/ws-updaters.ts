@@ -8,6 +8,7 @@ import {
   bucketedListEntries,
   flatListEntries,
   invalidateIssueDerivatives,
+  invalidateSidebarListsForIssue,
   invalidateLastActivitySortedIssueLists,
   invalidateStaleListKeys,
   invalidateUpdatedAtSortedIssueLists,
@@ -407,6 +408,7 @@ export function onIssueCreated(
   // because a fresh issue isn't necessarily scheduled yet; the active Gantt
   // page (if any) will refetch and pick it up if it qualifies.
   qc.invalidateQueries({ queryKey: issueKeys.projectGanttAll(wsId) });
+  qc.invalidateQueries({ queryKey: issueKeys.sidebarAll(wsId) });
   if (issue.parent_issue_id) {
     qc.invalidateQueries({ queryKey: issueKeys.children(wsId, issue.parent_issue_id) });
     qc.invalidateQueries({ queryKey: issueKeys.childProgress(wsId) });
@@ -499,7 +501,9 @@ export function onIssueUpdated(
   invalidateIssueDerivatives(qc, wsId, {
     statusOrProjectChanged:
       issue.status !== undefined || issue.project_id !== undefined,
+    refreshSidebar: false,
   });
+  invalidateSidebarListsForIssue(qc, wsId, issue.id, [oldProjectId, issue.project_id]);
   // Group counts, branch membership and hierarchy are server-owned. Never
   // guess deltas from a partial branch; refetch the active Table queries.
   qc.invalidateQueries({ queryKey: issueKeys.tableAll(wsId) });

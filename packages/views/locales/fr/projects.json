@@ -2,11 +2,13 @@
   "page": {
     "title": "Projets",
     "new_project": "Nouveau projet",
+    "scope_all": "Tous les projets",
+    "scope_active": "Projets actifs",
+    "scope_closed": "Projets clos",
     "empty": "Aucun projet pour l'instant",
     "create_first": "Créez votre premier projet",
     "view_compact": "Compact",
     "view_comfortable": "Confortable",
-    "search_placeholder": "Rechercher des projets...",
     "no_search_results": "Aucun résultat ne correspond à votre recherche",
     "view_table": "Grille",
     "view_cards": "Cartes",
@@ -14,10 +16,7 @@
     "pin": "Épingler à la barre latérale",
     "unpin": "Détacher",
     "delete": "Supprimer",
-    "no_matches": "Aucun projet correspondant",
-    "selected_one": "{{count}} sélectionné",
-    "selected_other": "{{count}} sélectionnés",
-    "clear_selection": "Effacer la sélection"
+    "no_matches": "Aucun projet correspondant"
   },
   "table": {
     "name": "Nom",
@@ -168,19 +167,9 @@
     "fallback_label": "Projet"
   },
   "toolbar": {
-    "result_count_title": "Projets correspondants / tous les projets",
-    "filter_label": "Filtrer",
-    "filter_active_count_one": "{{count}} filtre",
-    "filter_active_count_other": "{{count}} filtres",
-    "clear_filters": "Effacer les filtres",
     "section_status": "Statut",
     "section_priority": "Priorité",
     "section_lead": "Responsable",
-    "display": "Affichage",
-    "sort_by": "Trier par",
-    "direction_asc": "Croissant",
-    "direction_desc": "Décroissant",
-    "section_columns": "Colonnes",
     "view": "Vue"
   }
 }

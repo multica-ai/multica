@@ -50,7 +50,7 @@ vi.mock("../../navigation", () => ({
       {children}
     </a>
   ),
-  useNavigation: () => ({ push: vi.fn(), pathname: "/issues" }),
+  useNavigation: () => ({ push: vi.fn(), pathname: "/issues", searchParams: new URLSearchParams() }),
   resolveClickIntent: () => "push",
   useIntentNavigate: () => () => {},
   NavigationProvider: ({ children }: { children: React.ReactNode }) => children,
@@ -301,6 +301,10 @@ const mockViewState = {
   includeNoProject: false,
   projectStatusFilters: [] as string[],
   labelFilters: [] as string[],
+  relationFilters: [] as string[],
+  dueDateFilters: [] as string[],
+  advancedFilter: null,
+  negatedFilters: [] as string[],
   propertyFilters: {} as Record<string, string[]>,
   cardPropertyIds: [] as string[],
   sortBy: "position" as const,
@@ -344,6 +348,8 @@ vi.mock("@multica/core/issues/stores/view-store", () => ({
     key.startsWith("property:") ? key.slice("property:".length) : null,
   viewStorePersistOptions: () => ({ name: "test", storage: undefined, partialize: (s: any) => s }),
   mergeViewStatePersisted: (_p: unknown, c: any) => c,
+  effectiveNegatedFilters: () => [],
+  ISSUE_RELATION_FILTERS: ["assigned", "created", "my_agents"],
   viewStoreSlice: vi.fn(),
   useIssueViewStore: Object.assign(
     (selector?: any) => (selector ? selector(mockViewState) : mockViewState),
@@ -778,7 +784,7 @@ describe("IssuesPage (shared)", () => {
     expect(mockListIssues).not.toHaveBeenCalled();
   });
 
-  it("shows the 'Issues' section header without a workspace prefix", async () => {
+  it("titles the page with the built-in view, without a workspace prefix", async () => {
     mockListIssues.mockImplementation((params: any) =>
       Promise.resolve({
         issues: mockIssues.filter((i) => i.status === params?.status),
@@ -788,9 +794,7 @@ describe("IssuesPage (shared)", () => {
 
     renderWithQuery(<IssuesPage />);
 
-    await screen.findByText("Issues");
-    // The list header is now `icon + title`, matching the other list pages.
-    // The workspace/org name is no longer rendered as a breadcrumb prefix.
+    await screen.findByRole("heading", { name: "All issues" });
     expect(screen.queryByText("Test WS")).not.toBeInTheDocument();
   });
 
@@ -802,12 +806,16 @@ describe("IssuesPage (shared)", () => {
     await screen.findByText("No issues yet");
   });
 
-  it("shows scope tab buttons", async () => {
-    renderWithQuery(<IssuesPage />);
+  it("counts the assignee type as a filter only once it narrows the list", async () => {
+    const { unmount } = renderWithQuery(<IssuesPage />);
+    await screen.findByRole("heading", { name: "All issues" });
+    expect(screen.getByRole("button", { name: "Filter" })).toBeInTheDocument();
+    unmount();
 
-    expect(await screen.findAllByText("All")).not.toHaveLength(0);
-    expect(screen.getByText("Members")).toBeInTheDocument();
-    expect(screen.getByText("Agents")).toBeInTheDocument();
+    mockScope = "agents";
+    renderWithQuery(<IssuesPage />);
+    await screen.findByRole("heading", { name: "All issues" });
+    expect(screen.getByRole("button", { name: "1 filter" })).toBeInTheDocument();
   });
 
   // The Members/Agents tabs filter server-side via assignee_types (the same

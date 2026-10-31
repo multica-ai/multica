@@ -59,18 +59,6 @@ vi.mock("./components/no-agent-banner", () => ({
 vi.mock("./components/archived-agent-banner", () => ({
   ArchivedAgentBanner: () => null,
 }));
-vi.mock("react-resizable-panels", () => ({
-  useDefaultLayout: () => ({ defaultLayout: undefined, onLayoutChanged: vi.fn() }),
-}));
-vi.mock("@multica/ui/components/ui/resizable", () => ({
-  ResizablePanelGroup: ({ children }: { children: React.ReactNode }) => (
-    <div>{children}</div>
-  ),
-  ResizablePanel: ({ children }: { children: React.ReactNode }) => (
-    <div>{children}</div>
-  ),
-  ResizableHandle: () => null,
-}));
 // Same width-driven layout mock the inbox page tests use: the deep-link tests
 // all want the desktop two-pane layout, the breakpoint tests at the bottom set
 // their own width.

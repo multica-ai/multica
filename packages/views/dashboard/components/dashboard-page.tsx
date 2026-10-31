@@ -26,8 +26,7 @@ import {
 } from "@multica/core/dashboard";
 import { useCustomPricingStore } from "@multica/core/runtimes/custom-pricing-store";
 import { useViewingTimezone } from "../../common/use-viewing-timezone";
-import { PAGE_GUTTER } from "../../layout/page-header";
-import { CollectionPageHeader } from "../../layout/collection-page";
+import { PageHeader } from "../../layout/page-header";
 import { KpiCard } from "../../runtimes/components/shared";
 import { useNavigation } from "../../navigation";
 import {
@@ -67,7 +66,6 @@ import { ProjectFilter, TimeRangeFilter } from "./dashboard-filters";
 import { UsageTrendCard } from "./usage-trend-card";
 import { Leaderboard } from "./leaderboard";
 import { ErrorsTab } from "./errors-tab";
-import { cn } from "@multica/ui/lib/utils";
 
 // Stable references — `data ?? []` would create a new empty array on
 // every render while the query is loading, which breaks useMemo's
@@ -137,9 +135,9 @@ function useDataFreshness(
  * where the failure breakdown sat below a leaderboard that could itself run to
  * thirty rows, and the only way to chart failures was to hide spend.
  *
- * Scope is expressed by where a control lives: the toolbar under the header
- * carries the tabs and the two page-scoped filters (time range, project),
- * every card carries its own view switches. All six rollups are fetched for
+ * Scope is expressed by where a control lives: the header carries the tabs and
+ * the two page-scoped filters (time range, project), every card carries its
+ * own view switches. All six rollups are fetched for
  * both tabs — they are small, and prefetching is what makes switching tabs
  * instant — but the loading and empty states are per tab, so Usage does not
  * wait on the failure queries.
@@ -462,68 +460,58 @@ export function DashboardPage() {
       onValueChange={handleTabChange}
       className="flex h-full min-h-0 flex-col gap-0"
     >
-      <CollectionPageHeader
-        icon={BarChart3}
-        title={t(($) => $.title)}
-        actions={
-          /* Data freshness cluster: the timestamp and the action that advances
-             it stay together. Refresh re-pulls the same scope, so it lives here
-             with the page metadata rather than among the scope controls. */
-          <div className="flex items-center gap-1">
-            {tzLabel ? (
-              <span className="hidden text-caption text-muted-foreground lg:inline">
-                {updatedLabel
-                  ? t(($) => $.header.timezone_and_updated, {
-                      tz: tzLabel,
-                      time: updatedLabel,
-                    })
-                  : tzLabel}
-              </span>
-            ) : null}
-            <IconButton
-              variant="ghost"
-              size="icon-sm"
-              label={t(($) => $.header.refresh)}
-              tooltipSide="bottom"
-              onClick={handleRefresh}
-              disabled={isRefreshing}
-            >
-              <RefreshCw className={isRefreshing ? "animate-spin" : undefined} />
-            </IconButton>
-          </div>
-        }
-      />
-
-      {/* View toolbar, same grammar as the issues surface header: view
-          switching on the left, page-scoped filters on the right. Both tabs
-          share the range and project filter, which is why the filters live
-          here and not inside a tab. */}
-      <div className={cn("h-12 shrink-0 overflow-x-auto border-b [-webkit-overflow-scrolling:touch]", PAGE_GUTTER)}>
-        <div className="flex h-full w-max min-w-full items-center justify-between gap-2">
-          <TabsList variant="line" className="gap-0 p-0 group-data-horizontal/tabs:h-full">
+      {/* The two tabs are views of the same data, so they sit beside the
+          title; both share the range and project filter, which is why the
+          filters live in the header and not inside a tab. */}
+      <PageHeader>
+        <div className="flex min-w-0 flex-1 items-center gap-2 self-stretch">
+          <h1 className="flex min-w-0 items-center gap-2 px-2 text-body font-medium">
+            <BarChart3 aria-hidden="true" className="size-4 shrink-0 text-muted-foreground" />
+            <span className="truncate">{t(($) => $.title)}</span>
+          </h1>
+          <TabsList variant="line" className="shrink-0 gap-0 p-0 group-data-horizontal/tabs:h-full">
             <TabsTrigger
               value="usage"
-              className="h-full rounded-none px-2.5 text-label group-data-horizontal/tabs:after:bottom-0"
+              className="h-full rounded-none px-2.5 group-data-horizontal/tabs:after:bottom-0"
             >
               {t(($) => $.tab_usage)}
             </TabsTrigger>
             <TabsTrigger
               value="errors"
-              className="h-full rounded-none px-2.5 text-label group-data-horizontal/tabs:after:bottom-0"
+              className="h-full rounded-none px-2.5 group-data-horizontal/tabs:after:bottom-0"
             >
               {t(($) => $.errors.title)}
             </TabsTrigger>
           </TabsList>
-          <div className="flex shrink-0 items-center gap-2">
-            <TimeRangeFilter days={days} onChange={setDays} />
-            <ProjectFilter
-              projects={projects}
-              projectValue={projectValue}
-              onProjectChange={setProjectValue}
-            />
-          </div>
         </div>
-      </div>
+        <div className="flex shrink-0 items-center gap-1">
+          {tzLabel ? (
+            <span className="mr-1 hidden text-caption text-muted-foreground lg:inline">
+              {updatedLabel
+                ? t(($) => $.header.timezone_and_updated, {
+                    tz: tzLabel,
+                    time: updatedLabel,
+                  })
+                : tzLabel}
+            </span>
+          ) : null}
+          <TimeRangeFilter days={days} onChange={setDays} />
+          <ProjectFilter
+            projects={projects}
+            projectValue={projectValue}
+            onProjectChange={setProjectValue}
+          />
+          <IconButton
+            label={t(($) => $.header.refresh)}
+            tooltipSide="bottom"
+            className="text-muted-foreground"
+            onClick={handleRefresh}
+            disabled={isRefreshing}
+          >
+            <RefreshCw className={isRefreshing ? "animate-spin" : undefined} />
+          </IconButton>
+        </div>
+      </PageHeader>
 
       <div className="flex-1 overflow-y-auto">
         <div className="mx-auto max-w-6xl p-6">

@@ -44,4 +44,4 @@ Button 用于执行操作，页面跳转使用链接。每个弹窗或表单保�
 
 `--button-height-*`、`--button-padding-*`、`--button-gap-*` 分别控制各尺寸。颜色使用语义 token。尺寸修改影响所有使用该尺寸的按钮；局部样式覆盖可能优先。
 
-UI Lab 导出 `packages/ui/styles/tokens.css` 的 CSS 补丁。对比浅色、深色下的原始与修改效果，合并到对应区块，再检查代码差异。在浏览器中保存方案不会修改产品代码。
+在 `packages/ui/styles/tokens.css` 中修改这些声明，检查浅色、深色两种主题下的效果，再检查代码差异。

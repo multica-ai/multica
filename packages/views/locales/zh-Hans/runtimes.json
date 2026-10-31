@@ -1,9 +1,7 @@
 {
   "page": {
     "title": "运行时",
-    "learn_more": "了解更多 →",
     "connect_remote": "添加机器",
-    "search_placeholder": "搜索...",
     "scope_mine": "我的",
     "scope_all": "全部",
     "live": "实时",
@@ -25,7 +23,7 @@
       "title": "正在启动本地运行时...",
       "hint": "正在连接工作区..."
     },
-    "add": "添加",
+    "add": "添加运行时",
     "add_menu": {
       "machines": "机器",
       "this_computer": "这台电脑",
@@ -67,7 +65,7 @@
       "no_matches": "没有匹配的机器或云服务"
     },
     "filters": {
-      "all": "全部",
+      "all": "全部运行时",
       "online": "在线",
       "offline": "离线"
     }
@@ -93,7 +91,7 @@
     "this_machine": "本机",
     "local_badge": "本地 · 这台机器",
     "pending_custom_runtimes": "待注册自定义运行时",
-    "runtime_count_other": "{{count}} 个运行时",
+    "daemon_title": "守护进程",
     "busy_count_other": "{{count}} 个忙碌",
     "no_matches_title": "没有机器",
     "no_matches_hint": "没有机器匹配当前搜索或筛选。",
@@ -158,13 +156,10 @@
     "fact_owner": "所有者",
     "fact_device": "设备",
     "fact_runtime": "运行时",
-    "technical_details": "技术详情",
     "fact_daemon_cli": "守护进程 CLI",
     "fact_daemon_id": "守护进程 ID",
-    "serving_title": "服务中",
-    "serving_count_other": "{{count}} 个智能体",
+    "usage_title": "用量",
     "no_agents": "还没有智能体绑定到这个运行时。",
-    "diagnostics_title": "诊断",
     "diagnostics_cli": "CLI",
     "diagnostics_visibility": "可见性",
     "visibility_label": {

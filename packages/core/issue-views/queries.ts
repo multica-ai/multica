@@ -13,7 +13,28 @@ export const issueViewKeys = {
     [...issueViewKeys.all(wsId), scope.scope_type, scope.scope_id ?? null] as const,
   detail: (wsId: string, id: string) =>
     [...issueViewKeys.all(wsId), "detail", id] as const,
+  everywhere: (wsId: string) => [...issueViewKeys.all(wsId), "everywhere"] as const,
 };
+
+/** Every view the caller can open, across workspace, my and project scopes. */
+export function issueViewEverywhereOptions(wsId: string) {
+  return queryOptions({
+    queryKey: issueViewKeys.everywhere(wsId),
+    queryFn: async () => {
+      try {
+        return await api.listIssueViews({ scope_type: "all" });
+      } catch {
+        // Backends without the cross-scope list reject scope_type=all.
+        const [workspace, my] = await Promise.all([
+          api.listIssueViews({ scope_type: "workspace" }),
+          api.listIssueViews({ scope_type: "my" }),
+        ]);
+        return [...workspace, ...my];
+      }
+    },
+    enabled: !!wsId,
+  });
+}
 
 export function issueViewListOptions(wsId: string, scope: IssueViewScope) {
   return queryOptions({

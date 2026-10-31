@@ -149,7 +149,16 @@ export function visibleStatusKeys(
   statusFilters: readonly string[],
   hiddenStatuses: readonly IssueStatus[],
   catalog: Pick<IssueStatusCatalog, "statuses" | "entryOf" | "isLoaded" | "isPending" | "isError">,
+  negated = false,
 ): IssueStatus[] {
+  // "Status is not X" keeps the everyday board and drops X. Exact keys need no
+  // catalog resolution, and archived columns stay hidden as without a filter.
+  if (negated && statusFilters.length > 0) {
+    const excluded = new Set<string>(statusFilters);
+    return statusColumnKeys(catalog).filter(
+      (key) => !excluded.has(key) && !hiddenStatuses.includes(key),
+    );
+  }
   const resolved = statusFilters.length > 0 ? statusFilterColumns(statusFilters, catalog) : null;
   const selected = resolved?.state === "resolved" ? resolved.columns : null;
   // Old archives may still carry issues. An explicit exact-key filter remains

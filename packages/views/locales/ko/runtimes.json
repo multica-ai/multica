@@ -1,9 +1,7 @@
 {
   "page": {
     "title": "런타임",
-    "learn_more": "자세히 보기 →",
     "connect_remote": "머신 추가",
-    "search_placeholder": "검색…",
     "scope_mine": "내 것",
     "scope_all": "전체",
     "live": "실시간",
@@ -25,7 +23,7 @@
       "title": "로컬 런타임 시작 중...",
       "hint": "워크스페이스에 연결 중..."
     },
-    "add": "추가",
+    "add": "런타임 추가",
     "add_menu": {
       "machines": "머신",
       "this_computer": "이 컴퓨터",
@@ -67,7 +65,7 @@
       "no_matches": "일치하는 머신 또는 클라우드 서비스가 없습니다"
     },
     "filters": {
-      "all": "전체",
+      "all": "모든 런타임",
       "online": "온라인",
       "offline": "오프라인"
     }
@@ -93,7 +91,7 @@
     "this_machine": "이 Mac",
     "local_badge": "로컬 · 이 기기",
     "pending_custom_runtimes": "등록 대기 중인 사용자 지정 런타임",
-    "runtime_count_other": "런타임 {{count}}개",
+    "daemon_title": "데몬",
     "busy_count_other": "사용 중 {{count}}개",
     "no_matches_title": "기기 없음",
     "no_matches_hint": "현재 검색 또는 필터와 일치하는 기기가 없습니다.",
@@ -158,13 +156,10 @@
     "fact_owner": "소유자",
     "fact_device": "기기",
     "fact_runtime": "런타임",
-    "technical_details": "기술 세부 정보",
     "fact_daemon_cli": "데몬 CLI",
     "fact_daemon_id": "데몬 ID",
-    "serving_title": "제공 중",
-    "serving_count_other": "에이전트 {{count}}개",
+    "usage_title": "사용량",
     "no_agents": "아직 이 런타임에 연결된 에이전트가 없습니다.",
-    "diagnostics_title": "진단",
     "diagnostics_cli": "CLI",
     "diagnostics_visibility": "공개 범위",
     "visibility_label": {

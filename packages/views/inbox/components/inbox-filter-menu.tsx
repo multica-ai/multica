@@ -168,12 +168,6 @@ export function InboxFilterMenu({
       ).filter((item) => item.read !== true).length,
     [items, effectiveFilters, activeIssueIds],
   );
-  const idleCount = useMemo(
-    () =>
-      filterInboxItems(items, { ...effectiveFilters, idleOnly: true }, { activeIssueIds })
-        .length,
-    [items, effectiveFilters, activeIssueIds],
-  );
   const localStatuses = useMemo(
     () => statusCounts(statusFacetItems),
     [statusFacetItems],
@@ -260,11 +254,6 @@ export function InboxFilterMenu({
           >
             <BotOff className="size-3.5" />
             <span className="flex-1">{t(($) => $.filters.no_agents_working)}</span>
-            {idleCount > 0 && (
-              <span className="text-caption text-muted-foreground">
-                {t(($) => $.filters.notification_count, { count: idleCount })}
-              </span>
-            )}
           </DropdownMenuCheckboxItem>
         )}
         <DropdownMenuSeparator />

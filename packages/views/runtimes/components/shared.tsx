@@ -1,7 +1,16 @@
-import { Cloud, Monitor, Wifi, WifiHigh, WifiOff } from "@multica/ui/icons";
+import {
+  Cloud,
+  Laptop,
+  Monitor,
+  Wifi,
+  WifiHigh,
+  WifiOff,
+  type IconComponent,
+} from "@multica/ui/icons";
 import { Badge } from "@multica/ui/components/ui/badge";
 import type { RuntimeHealth } from "@multica/core/runtimes";
 import { ProviderLogo } from "./provider-logo";
+import type { RuntimeMachine } from "./runtime-machines";
 import { useT } from "../../i18n";
 
 export function RuntimeModeIcon({ mode }: { mode: string }) {
@@ -9,6 +18,42 @@ export function RuntimeModeIcon({ mode }: { mode: string }) {
     <Cloud className="h-3.5 w-3.5" />
   ) : (
     <Monitor className="h-3.5 w-3.5" />
+  );
+}
+
+export function machineIcon(
+  machine: Pick<RuntimeMachine, "isCurrent" | "section">,
+): IconComponent {
+  if (machine.isCurrent) return Laptop;
+  return machine.section === "cloud" ? Cloud : Monitor;
+}
+
+export function shortDaemonId(id: string | null): string | null {
+  if (!id) return null;
+  if (id.length <= 10) return id;
+  return `${id.slice(0, 6)}··${id.slice(-2)}`;
+}
+
+export function ProviderIconStack({ providers }: { providers: string[] }) {
+  const visible = providers.slice(0, 4);
+  const extra = providers.length - visible.length;
+  if (visible.length === 0) return null;
+  return (
+    <span className="flex min-w-0 items-center -space-x-1">
+      {visible.map((provider) => (
+        <span
+          key={provider}
+          className="inline-flex h-5 w-5 items-center justify-center rounded-xs bg-background ring-1 ring-border"
+        >
+          <ProviderLogo provider={provider} className="h-3.5 w-3.5" />
+        </span>
+      ))}
+      {extra > 0 && (
+        <span className="inline-flex h-5 min-w-5 items-center justify-center rounded-xs bg-muted px-1 text-micro font-medium text-muted-foreground ring-1 ring-border">
+          +{extra}
+        </span>
+      )}
+    </span>
   );
 }
 

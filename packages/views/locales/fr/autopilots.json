@@ -1,6 +1,5 @@
 {
   "page": {
-    "title": "Automatisation",
     "new_autopilot": "Nouvelle automatisation",
     "start_blank": "Partir de zéro",
     "table": {
@@ -20,7 +19,6 @@
       "title": "Aucune automatisation pour l'instant",
       "hint": "Planifiez du travail récurrent pour vos agents IA. Choisissez un modèle ou partez de zéro."
     },
-    "scope_all": "Toutes",
     "no_matches": "Aucune automatisation correspondante",
     "retry": "Réessayer"
   },
@@ -87,10 +85,8 @@
     "run_blocked_quota_exceeded": "Non déclenché — la limite d'exécutions de la période est atteinte",
     "run_blocked_issue_limit_reached": "Non déclenchée : l'espace de travail a atteint sa limite de tâches",
     "run_blocked_generic": "Non déclenchée — l'exécution a été bloquée",
-    "section_properties": "Propriétés",
     "section_triggers": "Déclencheurs",
     "section_run_history": "Historique des exécutions",
-    "section_danger": "Zone de danger",
     "field_agent": "Agent",
     "field_created_by": "Créé par",
     "field_output_mode": "Mode de sortie",
@@ -100,6 +96,16 @@
     "field_prompt": "Invite",
     "field_subscribers": "Abonnés",
     "field_subscribers_none": "Aucun",
+    "no_prompt": "Aucune invite pour l'instant.",
+    "copy_link": "Copier le lien",
+    "link_copied": "Lien copié",
+    "link_copy_failed": "Impossible de copier le lien",
+    "open_project": "Ouvrir le projet",
+    "summary": {
+      "create_issue": "{{agent}} crée une tâche à chaque exécution",
+      "run_only": "{{agent}} l'exécute sans créer de tâche",
+      "with_trigger": "{{trigger}} · {{action}}"
+    },
     "add_trigger": "Ajouter un déclencheur",
     "no_triggers": "Aucun déclencheur configuré. Ajoutez une planification pour une exécution automatique.",
     "no_runs": "Aucune exécution pour l'instant. Cliquez sur « Exécuter maintenant » pour déclencher manuellement.",
@@ -441,29 +447,16 @@
     "search_placeholder": "Rechercher un fuseau horaire..."
   },
   "toolbar": {
-    "result_count_title": "Automatisations correspondantes / toutes les automatisations",
-    "filter_label": "Filtrer",
-    "filter_active_count_one": "{{count}} filtre",
-    "filter_active_count_other": "{{count}} filtres",
-    "clear_filters": "Effacer les filtres",
     "section_assignee": "Assigné à",
     "section_mode": "Mode",
     "section_trigger": "Déclencheur",
-    "section_creator": "Créé par",
-    "display": "Affichage",
-    "sort_by": "Trier par",
-    "direction_asc": "Croissant",
-    "direction_desc": "Décroissant",
-    "section_columns": "Colonnes"
+    "section_creator": "Créé par"
   },
   "actions": {
     "row_menu": "Actions de l'automatisation",
     "pause": "Mettre en pause",
     "resume": "Reprendre",
     "delete": "Supprimer",
-    "selected_one": "{{count}} sélectionnée",
-    "selected_other": "{{count}} sélectionnées",
-    "clear_selection": "Effacer la sélection",
     "delete_dialog": {
       "title": "Supprimer l'automatisation ?",
       "description_one": "« {{name}} » et son historique d'exécutions seront définitivement supprimés.",
@@ -476,7 +469,6 @@
   },
   "wakeups": {
     "title": "Réveils de tâches",
-    "scope": "Périmètre",
     "issue": "Tâche",
     "trigger": "Déclencheur",
     "enabled": "Activé",
@@ -485,22 +477,16 @@
     "at": "Ponctuel",
     "recurring": "Récurrent",
     "all_agents": "Tous les agents",
-    "search": "Rechercher des tâches ou agents",
     "running": "En cours",
     "active_runs": "{{count}} exécutions actives",
     "issue_closed": "Tâche fermée",
     "read_only": "Seuls le créateur ou un administrateur peuvent gérer ce réveil",
     "select_row": "Sélectionner {{issue}}, {{agent}}",
-    "select_page": "Sélectionner les réveils activés sur cette page",
+    "select_page": "Sélectionner tous les réveils activés",
     "load_error": "Impossible de charger les réveils",
     "loading": "Chargement des réveils…",
     "empty": "Aucune règle de réveil",
-    "selected": "{{count}} sélectionnés",
     "disable_selected": "Désactiver la sélection",
-    "clear": "Effacer la sélection",
-    "results": "Page {{page}} · {{count}} résultats",
-    "previous": "Précédent",
-    "next_page": "Suivant",
     "confirm_title": "Désactiver {{count}} réveils ?",
     "confirm_body": "Les réveils futurs seront arrêtés. Les exécutions en file non confiées à un agent seront retirées. Les exécutions déjà confiées continueront ; arrêtez-les depuis le journal d’exécution.",
     "cancel": "Annuler",
@@ -509,7 +495,7 @@
     "batch_result": "Désactivés : {{succeeded}}. Échecs : {{failed}}.",
     "scopes": {
       "active": "En attente ou en cours",
-      "all": "Tous",
+      "all": "Tous les réveils",
       "disabled": "Désactivés",
       "ended": "Terminés",
       "paused": "En pause"
@@ -521,7 +507,7 @@
     "batch_partial": "{{succeeded}} désactivées ; {{failed}} échecs. Les éléments en échec restent sélectionnés pour réessayer.",
     "source": "Source",
     "sources": {
-      "all": "Source : toutes",
+      "all": "Toutes les sources",
       "member": "Membres",
       "agent": "Agents",
       "system": "Système"

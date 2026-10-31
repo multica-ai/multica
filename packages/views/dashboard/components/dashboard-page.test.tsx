@@ -718,6 +718,47 @@ describe("DashboardPage — the two questions are separate tabs", () => {
   });
 });
 
+describe("DashboardPage — one header carries the tabs and the filters", () => {
+  beforeEach(() => {
+    queryKeys.length = 0;
+    dashboardDataRef.current = true;
+    manyAgentsRef.current = false;
+    tzRef.current = "UTC";
+    cleanup();
+  });
+
+  it("puts the title, both tabs, the filters and refresh in a single header", () => {
+    renderDashboard();
+
+    const [header, ...rest] = screen.getAllByRole("banner");
+    expect(rest).toHaveLength(0);
+    const bar = within(header as HTMLElement);
+    expect(bar.getByRole("heading", { name: "Analytics" })).toBeInTheDocument();
+    expect(bar.getByRole("tab", { name: "Usage" })).toHaveAttribute("aria-selected", "true");
+    expect(bar.getByRole("tab", { name: /Errors/ })).toBeInTheDocument();
+    expect(bar.getByText(/^GMT/)).toBeInTheDocument();
+    expect(bar.getByRole("button", { name: "Refresh" })).toBeInTheDocument();
+  });
+
+  it("shows each filter's current value on its trigger", () => {
+    renderDashboard();
+
+    const bar = within(screen.getByRole("banner"));
+    expect(bar.getByRole("button", { name: "Period" })).toHaveTextContent("30d");
+    expect(bar.getByRole("button", { name: "Project" })).toHaveTextContent("All projects");
+  });
+
+  it("keeps the header in place when switching to Errors", async () => {
+    const user = userEvent.setup();
+    renderDashboard();
+    await openErrorsTab(user);
+
+    const bar = within(screen.getByRole("banner"));
+    expect(bar.getByRole("tab", { name: /Errors/ })).toHaveAttribute("aria-selected", "true");
+    expect(bar.getByRole("button", { name: "Period" })).toHaveTextContent("30d");
+  });
+});
+
 // MUL-5409. The server folds every agent it won't name — those the viewer may
 // not see, plus the hidden system carriers behind agent-builder sessions — onto
 // one sentinel row. The leaderboard used to have a single synthetic row,
