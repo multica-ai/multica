@@ -19,6 +19,7 @@ import {
   Star,
   EyeOff,
   Filter,
+  GitPullRequest,
   ListTree,
   Trash2,
   Users,
@@ -70,6 +71,7 @@ import {
 } from "@multica/core/issues/stores/issues-scope-store";
 import { actorKindForViewVariant } from "@multica/core/issues/surface/scope";
 import { useViewStore, useViewStoreApi } from "@multica/core/issues/stores/view-store-context";
+import { AWAITING_MERGE_SORT_OPTIONS } from "@multica/core/issues/stores/view-store";
 import {
   countAdvancedConditions,
   type NegatableFilterDimension,
@@ -93,7 +95,9 @@ import { ViewNameInput } from "./view-name-input";
 export type IssueViewHeaderBase =
   | { kind: "workspace" }
   | { kind: "my" }
-  | { kind: "project"; project: Project };
+  | { kind: "project"; project: Project }
+  /** A built-in queue with a fixed condition and no saved views of its own. */
+  | { kind: "awaiting_merge" };
 
 const ASSIGNEE_TYPES: IssuesScope[] = ["all", "members", "agents"];
 const PROJECT_HIDDEN_FIELDS: NegatableFilterDimension[] = ["project"];
@@ -105,10 +109,15 @@ const MY_SAVE_VARIANT: Record<MyIssuesScope, NonNullable<CreateIssueViewRequest[
   agents: "involved",
 };
 
-function viewScopeOf(base: IssueViewHeaderBase): IssueViewScope {
-  return base.kind === "project"
-    ? { scope_type: "project", scope_id: base.project.id }
-    : { scope_type: base.kind };
+function viewScopeOf(base: IssueViewHeaderBase): IssueViewScope | null {
+  switch (base.kind) {
+    case "project":
+      return { scope_type: "project", scope_id: base.project.id };
+    case "awaiting_merge":
+      return null;
+    default:
+      return { scope_type: base.kind };
+  }
 }
 
 /**
@@ -162,8 +171,17 @@ export function IssueViewHeader({
   const agentRunningFilter = useViewStore((s) => s.agentRunningFilter);
   const toggleAgentRunningFilter = useViewStore((s) => s.toggleAgentRunningFilter);
 
+  const awaitingMerge = base.kind === "awaiting_merge";
   const builtinKey: BuiltinViewKey | null =
-    base.kind === "workspace" ? "all_issues" : base.kind === "my" ? (myScope === "agents" ? "my_agents" : "my_issues") : null;
+    base.kind === "workspace"
+      ? "all_issues"
+      : base.kind === "my"
+        ? myScope === "agents"
+          ? "my_agents"
+          : "my_issues"
+        : awaitingMerge
+          ? "awaiting_merge"
+          : null;
   const baseName =
     base.kind === "project"
       ? base.project.title
@@ -175,6 +193,8 @@ export function IssueViewHeader({
       <Bot className="size-4" />
     ) : builtinKey === "my_issues" ? (
       <CircleUser className="size-4" />
+    ) : awaitingMerge ? (
+      <GitPullRequest className="size-4" />
     ) : (
       <ListTodo className="size-4" />
     );
@@ -206,13 +226,15 @@ export function IssueViewHeader({
     }
     setDateFilter(null);
   };
-  const saveAsNew = () =>
+  const saveAsNew = () => {
+    if (!viewScope) return;
     actions.create({
       scope: viewScope,
       scopeVariant,
       definition: issueViewDefinitionFromState(storeApi.getState()),
       renameIn: "header",
     });
+  };
 
   const assigneeTypeLabel = (value: IssuesScope) =>
     t(($) => $.save_view[value === "all" ? "variant_all" : value === "members" ? "variant_members" : "variant_agents"]);
@@ -234,7 +256,14 @@ export function IssueViewHeader({
   // is a read-only row.
   let scopeSection: ReactNode = null;
   let scopeCounts = false;
-  if (activeView) {
+  if (awaitingMerge) {
+    scopeSection = (
+      <DropdownMenuItem disabled title={t(($) => $.views.set_by_view)}>
+        <GitPullRequest className="size-3.5" />
+        <span className="flex-1">{t(($) => $.views.awaiting_merge.fixed_condition)}</span>
+      </DropdownMenuItem>
+    );
+  } else if (activeView) {
     const variant = activeView.scope_variant;
     const fixedScope =
       base.kind === "my"
@@ -421,7 +450,9 @@ export function IssueViewHeader({
                             ? paths.myAgents()
                             : base.kind === "my"
                               ? paths.myIssues()
-                              : paths.issues(),
+                              : awaitingMerge
+                                ? paths.awaitingMerge()
+                                : paths.issues(),
                         )
                       }
                     >
@@ -484,7 +515,8 @@ export function IssueViewHeader({
             <Button variant="ghost" size="sm" className="h-7 px-2 text-muted-foreground" onClick={reset}>
               {t(($) => $.views.reset)}
             </Button>
-            {activeView && canManage ? (
+            {/* A saved view cannot carry the queue's fixed condition. */}
+            {awaitingMerge ? null : activeView && canManage ? (
               <SaveSplitButton
                 viewName={activeView.name}
                 shared={activeView.visibility === "workspace"}
@@ -517,16 +549,22 @@ export function IssueViewHeader({
           tableFacetCounts={controller.tableFacetCounts}
           onTableFacetChange={controller.setActiveTableFacet}
           iconOnly
+          {...(awaitingMerge
+            ? { hideViewToggle: true, hideColumnToggles: true, sortOptions: AWAITING_MERGE_SORT_OPTIONS }
+            : {})}
         />
-        <IconButton
-          label={t(($) => $.views.new_issue)}
-          shortcut={<ActionShortcutKeycaps action="createIssue" />}
-          tooltipSide="bottom"
-          className="text-muted-foreground"
-          onClick={() => controller.openCreateIssue()}
-        >
-          <SquarePen />
-        </IconButton>
+        {/* A new issue has no PR yet, so it would not appear here. */}
+        {!awaitingMerge && (
+          <IconButton
+            label={t(($) => $.views.new_issue)}
+            shortcut={<ActionShortcutKeycaps action="createIssue" />}
+            tooltipSide="bottom"
+            className="text-muted-foreground"
+            onClick={() => controller.openCreateIssue()}
+          >
+            <SquarePen />
+          </IconButton>
+        )}
         {trailing && (
           <>
             <Separator orientation="vertical" className="ml-1 data-vertical:h-4 data-vertical:self-center" />

@@ -160,6 +160,10 @@ func (h *Handler) issueTableOrderBy(
 		resolved.expression = "i." + sortField
 		resolved.castType = "date"
 		resolved.nullsLast = true
+	case "pull_request_updated_at":
+		resolved.expression = issueTablePullRequestUpdatedExpr()
+		resolved.castType = "timestamptz"
+		resolved.nullsLast = true
 	case "status":
 		expr, err := h.issueStatusSortExpression(r.Context(), workspaceID, addArg)
 		if err != nil {

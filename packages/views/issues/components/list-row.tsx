@@ -1,6 +1,6 @@
 "use client";
 
-import { memo, type Ref } from "react";
+import { memo, type ReactNode, type Ref } from "react";
 import { useSortable, defaultAnimateLayoutChanges } from "@dnd-kit/sortable";
 import type { AnimateLayoutChanges } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
@@ -47,6 +47,8 @@ function ListRowContent({
   issue,
   childProgress,
   project,
+  trailing,
+  selectable = true,
   isDragging,
   containerRef,
   containerStyle,
@@ -56,6 +58,9 @@ function ListRowContent({
   issue: Issue;
   childProgress?: ChildProgress;
   project?: Project;
+  /** Shown before the assignee. Inside the row link, so it must not be one. */
+  trailing?: ReactNode;
+  selectable?: boolean;
   isDragging?: boolean;
   containerRef?: Ref<HTMLDivElement>;
   containerStyle?: React.CSSProperties;
@@ -107,17 +112,19 @@ function ListRowContent({
           {storeProperties.priority && issue.priority !== "none" && (
             <PriorityIcon
               priority={issue.priority}
-              className={selected ? "hidden" : "group-hover/row:hidden"}
+              className={!selectable ? undefined : selected ? "hidden" : "group-hover/row:hidden"}
             />
           )}
-          <input
-            type="checkbox"
-            checked={selected}
-            onChange={() => toggle(issue.id)}
-            className={`absolute inset-0 cursor-pointer accent-primary ${
-              selected ? "" : "hidden group-hover/row:block"
-            }`}
-          />
+          {selectable && (
+            <input
+              type="checkbox"
+              checked={selected}
+              onChange={() => toggle(issue.id)}
+              className={`absolute inset-0 cursor-pointer accent-primary ${
+                selected ? "" : "hidden group-hover/row:block"
+              }`}
+            />
+          )}
         </div>
         <AppLink
           href={p.issueDetail(issue.id)}
@@ -185,6 +192,7 @@ function ListRowContent({
               {formatDate(issue.due_date!, locale)}
             </span>
           )}
+          {trailing}
           {showAssignee && (
             <ActorAvatar
               actorType={issue.assignee_type!}
@@ -203,16 +211,22 @@ export const ListRow = memo(function ListRow({
   issue,
   childProgress,
   project,
+  trailing,
+  selectable,
 }: {
   issue: Issue;
   childProgress?: ChildProgress;
   project?: Project;
+  trailing?: ReactNode;
+  selectable?: boolean;
 }) {
   return (
     <ListRowContent
       issue={issue}
       childProgress={childProgress}
       project={project}
+      trailing={trailing}
+      selectable={selectable}
     />
   );
 });

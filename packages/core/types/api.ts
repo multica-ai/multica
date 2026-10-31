@@ -310,7 +310,9 @@ export type IssueTableScope =
   | { kind: "project"; project_id: string; assignee_types?: IssueAssigneeType[] }
   | { kind: "assignee"; actor: IssueActorRef }
   | { kind: "creator"; actor: IssueActorRef }
-  | { kind: "my"; relation: "assigned" | "created" | "involved" | "any" };
+  | { kind: "my"; relation: "assigned" | "created" | "involved" | "any" }
+  /** Issues not done or cancelled with at least one linked open PR. */
+  | { kind: "awaiting_merge" };
 
 export type IssueTableRelation = "assigned" | "created" | "my_agents";
 
@@ -395,6 +397,8 @@ export type IssueTableSortField =
   | "last_activity"
   | "start_date"
   | "due_date"
+  /** Latest update among the issue's linked open PRs; empty sorts last. */
+  | "pull_request_updated_at"
   | `property:${string}`;
 
 export interface IssueTableQuerySpec {
@@ -437,7 +441,13 @@ export type IssueTableGroupSpec =
        * returns `total` for that complete visible result set. */
       secondary_values?: IssueStatus[] | IssueStatusCategory[];
     }
-  | { kind: "property"; property_id: string; include_empty?: boolean };
+  | { kind: "property"; property_id: string; include_empty?: boolean }
+  /** Merge readiness of the issue's open PRs, worst PR first; groups come
+   * back ready, needs_attention, checking, then none. */
+  | { kind: "pull_request_state" };
+
+/** Merge readiness of an issue's open PRs, as the PR pill reads it. */
+export type IssuePullRequestState = "ready" | "needs_attention" | "checking" | "none";
 
 /** Response-side actor reference. Kept open for forward compatibility: an
  * installed desktop client may receive a new actor kind from a newer server. */
@@ -469,7 +479,8 @@ export type IssueTableGroupValue =
       property_id: string;
       value?: string | boolean | null;
       value_state: "value" | "unavailable" | "unset";
-    };
+    }
+  | { kind: "pull_request_state"; value: IssuePullRequestState };
 
 export interface IssueTableGroupDescriptor {
   key: string;

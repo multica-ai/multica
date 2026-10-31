@@ -11,6 +11,7 @@ import type {
   IssueTableGroupsRequest,
   IssueTableNegatableFilter,
   IssueTableQuerySpec,
+  IssueTableSortField,
   Project,
   WorkingAgentSummary,
 } from "@multica/core/types";
@@ -76,6 +77,9 @@ import {
   type IssueGroupBranches,
 } from "./use-issue-group-branches";
 
+/** The window bag with the Table query's sort fields, a superset of the list API's. */
+type IssueSurfaceSort = Omit<IssueSortParam, "sort_by"> & { sort_by?: IssueTableSortField };
+
 interface UseIssueSurfaceControllerInput {
   scope: IssueScope;
   modes: IssueSurfaceMode[];
@@ -100,7 +104,7 @@ export interface IssueSurfaceController {
    *  number it cannot stand behind. */
   workingAgents: WorkingAgentSummary[] | undefined;
   filteredGanttIssues: Issue[];
-  sort: IssueSortParam;
+  sort: IssueSurfaceSort;
   ganttIssues: Issue[];
   visibleStatuses: IssueStatus[];
   /** Columns the viewer can show or hide from Display, in column order. */
@@ -376,8 +380,8 @@ export function useIssueSurfaceController({
     rawPropertySortId && (!catalogSettled || activePropertyIds.has(rawPropertySortId))
       ? rawPropertySortId
       : null;
-  const sort = useMemo<IssueSortParam>(() => {
-    const sortBy_: IssueSortParam["sort_by"] = propertySortId
+  const sort = useMemo<IssueSurfaceSort>(() => {
+    const sortBy_: IssueSurfaceSort["sort_by"] = propertySortId
       ? `property:${propertySortId}`
       : rawPropertySortId
         ? "position"
@@ -407,10 +411,15 @@ export function useIssueSurfaceController({
   const usesTable = effectiveViewMode === "table";
   const activeSearch = usesTable ? tableSearch : search;
   const debouncedActiveSearch = useDebouncedTableSearch(activeSearch);
+  // The Awaiting merge list groups by PR state, which only the server knows.
+  const groupsByPullRequestState =
+    scope.type === "awaiting_merge" && effectiveViewMode === "list";
   const usesServerStatusSurface =
-    effectiveViewMode === "list" ||
-    (effectiveViewMode === "board" && effectiveGrouping === "status");
+    !groupsByPullRequestState &&
+    (effectiveViewMode === "list" ||
+      (effectiveViewMode === "board" && effectiveGrouping === "status"));
   const usesServerGroupSurface =
+    groupsByPullRequestState ||
     (effectiveViewMode === "board" && effectiveGrouping !== "status") ||
     effectiveViewMode === "swimlane";
   const usesServerFacets =
@@ -558,6 +567,9 @@ export function useIssueSurfaceController({
           kind: scope.relation === "assigned" ? "assignee" : "creator",
           actor: { type: scope.actorType, id: scope.actorId },
         };
+        break;
+      case "awaiting_merge":
+        queryScope = { kind: "awaiting_merge" };
         break;
       case "team":
         throw new Error("Team issue scope is not supported by the Table query");
@@ -757,6 +769,7 @@ export function useIssueSurfaceController({
     enabled: usesServerStatusSurface && !statusFilterUnresolved && !workingFilterUnresolved,
   });
   const serverGroupSpec = useMemo<IssueTableGroupsRequest["group"]>(() => {
+    if (groupsByPullRequestState) return { kind: "pull_request_state" };
     if (effectiveViewMode === "swimlane") {
       return {
         kind: "compound",
@@ -778,6 +791,7 @@ export function useIssueSurfaceController({
   }, [
     effectiveGrouping,
     effectiveViewMode,
+    groupsByPullRequestState,
     serverStatuses,
     swimlaneGrouping,
   ]);

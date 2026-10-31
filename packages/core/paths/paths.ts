@@ -79,6 +79,7 @@ function workspaceScoped(slug: string) {
     myIssues: () => `${ws}/my-issues`,
     myAgents: () => `${ws}/my-issues?scope=${MY_AGENTS_SCOPE}`,
     views: () => `${ws}/views`,
+    awaitingMerge: () => `${ws}/views/awaiting-merge`,
     runtimes: () => `${ws}/runtimes`,
     runtimeDetail: (id: string) => `${ws}/runtimes/${encode(id)}`,
     runtimeSettings: (machineId: string, runtimeId: string) =>

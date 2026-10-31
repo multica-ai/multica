@@ -31,6 +31,13 @@ describe("resolveTabPresentation — pages", () => {
       title: { kind: "tab", tabKey: "my_agents" },
     });
   });
+
+  it("titles Awaiting merge as its own page rather than Views", () => {
+    expect(present("/acme/views/awaiting-merge")).toEqual({
+      visual: { kind: "icon", icon: "GitPullRequest" },
+      title: { kind: "tab", tabKey: "awaiting_merge" },
+    });
+  });
 });
 
 describe("resolveTabPresentation — direct resources", () => {

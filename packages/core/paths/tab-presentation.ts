@@ -52,6 +52,7 @@ export type TabLabelKey =
   | "attachment"
   | "create_agent"
   | "my_agents"
+  | "awaiting_merge"
   | "unknown";
 
 /** How a tab's title should be produced. */
@@ -160,6 +161,11 @@ export function resolveTabPresentation(
       return {
         visual: { kind: "icon", icon: "Bot" },
         title: { kind: "tab", tabKey: "my_agents" },
+      };
+    case "awaitingMerge":
+      return {
+        visual: { kind: "icon", icon: "GitPullRequest" },
+        title: { kind: "tab", tabKey: "awaiting_merge" },
       };
     case "issue":
       return {

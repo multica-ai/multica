@@ -1694,6 +1694,10 @@ const IssueTableGroupValueSchema = z.discriminatedUnion("kind", [
     value: z.union([z.string(), z.boolean(), z.null()]).optional(),
     value_state: z.enum(["value", "unavailable", "unset"]),
   }).loose(),
+  z.object({
+    kind: z.literal("pull_request_state"),
+    value: z.enum(["ready", "needs_attention", "checking", "none"]).catch("checking"),
+  }).loose(),
 ]);
 
 const IssueTableGroupDescriptorSchema: z.ZodType<IssueTableGroupDescriptor> = z.lazy(() => z.object({

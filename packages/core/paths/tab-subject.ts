@@ -23,6 +23,8 @@ export type TabSubject =
   | { kind: "page"; page: WorkspacePageKey }
   /** My agents' work: the My issues route's `?scope=agents`. */
   | { kind: "myAgents" }
+  /** The built-in Awaiting merge view, under the Views route. */
+  | { kind: "awaitingMerge" }
   /** A single issue detail. */
   | { kind: "issue"; id: string }
   /** A single project detail. */
@@ -84,7 +86,7 @@ export function parseTabSubject(url: string): TabSubject {
     case "my-issues":
       return isMyAgentsSearch(query) ? { kind: "myAgents" } : { kind: "page", page: "myIssues" };
     case "views":
-      return { kind: "page", page: "views" };
+      return id === "awaiting-merge" ? { kind: "awaitingMerge" } : { kind: "page", page: "views" };
     case "projects":
       return id ? { kind: "project", id } : { kind: "page", page: "projects" };
     case "autopilots":
@@ -148,6 +150,8 @@ export function tabSubjectKey(subject: TabSubject): string {
       return `page:${subject.page}`;
     case "myAgents":
       return "my-agents";
+    case "awaitingMerge":
+      return "awaiting-merge";
     case "issue":
       return `issue:${subject.id}`;
     case "project":

@@ -19,13 +19,25 @@ export function useBuiltinViewNavigation() {
   const setActive = useActiveIssueViewStore((s) => s.setActive);
 
   const hrefFor = useCallback(
-    (key: BuiltinViewKey) =>
-      key === "all_issues" ? p.issues() : key === "my_agents" ? p.myAgents() : p.myIssues(),
+    (key: BuiltinViewKey) => {
+      switch (key) {
+        case "all_issues":
+          return p.issues();
+        case "my_agents":
+          return p.myAgents();
+        case "awaiting_merge":
+          return p.awaitingMerge();
+        case "my_issues":
+          return p.myIssues();
+      }
+    },
     [p],
   );
 
   const prepare = useCallback(
     (key: BuiltinViewKey) => {
+      // Its page has no saved views to leave open.
+      if (key === "awaiting_merge") return;
       if (key === "all_issues") {
         setActive(issueViewContainerKey(wsId, WORKSPACE_SCOPE), null);
         return;

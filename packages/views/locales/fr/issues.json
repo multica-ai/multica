@@ -293,6 +293,7 @@
     "sort_due_date": "Date d'échéance",
     "sort_created": "Date de création",
     "sort_updated": "Date de mise à jour",
+    "sort_pull_request_updated": "Mise à jour de la PR",
     "sort_title": "Titre",
     "card_priority": "Priorité",
     "card_description": "Description",
@@ -1781,7 +1782,8 @@
     "builtin": {
       "my_issues": "Mes tâches",
       "my_agents": "Travail de mes agents",
-      "all_issues": "Toutes les tâches"
+      "all_issues": "Toutes les tâches",
+      "awaiting_merge": "En attente de fusion"
     },
     "untitled": "Vue sans titre",
     "copy_name": "{{name}} (copie)",
@@ -1815,6 +1817,15 @@
     "save_as_new_hint": "« {{name}} » reste inchangée",
     "save_as_view": "Enregistrer comme vue",
     "set_by_view": "Défini par cette vue",
+    "awaiting_merge": {
+      "fixed_condition": "A une pull request ouverte",
+      "group_ready": "Prêtes à fusionner",
+      "group_needs_attention": "À traiter",
+      "group_checking": "Vérification en cours",
+      "group_none": "Aucune pull request ouverte",
+      "empty_title": "Rien en attente de fusion",
+      "empty_description": "Les tâches en cours avec une pull request ouverte apparaissent ici."
+    },
     "new_issue": "Nouvelle tâche",
     "unavailable": "Cette vue n'est plus disponible",
     "toast_saved": "Vue enregistrée",

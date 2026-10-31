@@ -184,13 +184,22 @@ export function builtinSidebarRequest(
     settings.assignee === "me" ? ["assigned"] : settings.assignee === "my_agents" ? ["my_agents"] : [];
   return {
     table: {
-      scope: builtin === "all_issues" ? { kind: "workspace" } : { kind: "my", relation },
+      scope:
+        builtin === "all_issues"
+          ? { kind: "workspace" }
+          : builtin === "awaiting_merge"
+            ? { kind: "awaiting_merge" }
+            : { kind: "my", relation },
       filters: {
         ...(shown.length < statuses.length ? { statuses: shown } : {}),
         ...(relations.length > 0 ? { relations } : {}),
         include_sub_issues: settings.showSubIssues,
       },
-      sort: { field: settings.sortBy, direction: settings.sortDirection },
+      // The queue reads by PR activity, as its page does.
+      sort:
+        builtin === "awaiting_merge"
+          ? { field: "pull_request_updated_at", direction: "desc" }
+          : { field: settings.sortBy, direction: settings.sortDirection },
     },
   };
 }

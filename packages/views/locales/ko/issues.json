@@ -287,6 +287,7 @@
     "sort_due_date": "마감일",
     "sort_created": "생성일",
     "sort_updated": "수정일",
+    "sort_pull_request_updated": "PR 수정일",
     "sort_title": "제목",
     "card_priority": "우선순위",
     "card_description": "설명",
@@ -1713,7 +1714,8 @@
     "builtin": {
       "my_issues": "내 태스크",
       "my_agents": "내 에이전트의 작업",
-      "all_issues": "전체 태스크"
+      "all_issues": "전체 태스크",
+      "awaiting_merge": "병합 대기"
     },
     "untitled": "제목 없는 뷰",
     "copy_name": "{{name}} (사본)",
@@ -1746,6 +1748,15 @@
     "save_as_new_hint": "「{{name}}」은(는) 그대로 유지됩니다",
     "save_as_view": "뷰로 저장",
     "set_by_view": "이 뷰에서 설정됨",
+    "awaiting_merge": {
+      "fixed_condition": "병합되지 않은 PR 있음",
+      "group_ready": "병합 가능",
+      "group_needs_attention": "조치 필요",
+      "group_checking": "확인 중",
+      "group_none": "병합되지 않은 PR 없음",
+      "empty_title": "병합 대기 중인 태스크가 없습니다",
+      "empty_description": "병합되지 않은 PR이 있는 미완료 태스크가 여기에 표시됩니다."
+    },
     "new_issue": "새 태스크",
     "unavailable": "이 뷰는 더 이상 사용할 수 없습니다",
     "toast_saved": "뷰가 저장되었습니다",

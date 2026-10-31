@@ -42,6 +42,8 @@ export interface IssueGroupBranches {
   enabled: boolean;
   descriptors: IssueTableGroupDescriptor[];
   issues: Issue[];
+  /** Loaded rows per branch key, for groups the issue itself cannot name. */
+  rowsByKey: Record<string, Issue[]>;
   pagination: Record<string, IssueGroupPageState>;
   total: number;
   isLoading: boolean;
@@ -129,6 +131,9 @@ function issueMatchesDescriptor(
     }
     case "status":
       return issue.status === owner.status;
+    case "pull_request_state":
+      // Not on the issue: the server's answer stands.
+      return true;
   }
 }
 
@@ -459,6 +464,10 @@ export function useIssueGroupBranches({
     () => branchKeys.flatMap((key) => branchData.get(key)?.rows ?? []),
     [branchData, branchKeys],
   );
+  const rowsByKey = useMemo(
+    () => Object.fromEntries(branchKeys.map((key) => [key, branchData.get(key)?.rows ?? []])),
+    [branchData, branchKeys],
+  );
   const rowsPending = branchKeys.some(
     (key) => branchData.get(key)?.isLoading,
   );
@@ -486,6 +495,7 @@ export function useIssueGroupBranches({
     enabled,
     descriptors,
     issues,
+    rowsByKey,
     pagination,
     // `/groups` owns the exact query-wide visible total. Deriving it from
     // loaded descriptors made a hidden-only first group page look globally

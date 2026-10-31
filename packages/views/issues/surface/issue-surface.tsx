@@ -34,6 +34,7 @@ import { BOARD_COL_WIDTH } from "../components/board-column";
 import { BatchActionToolbar } from "../components/batch-action-toolbar";
 import { GanttView } from "../components/gantt-view";
 import { ListView } from "../components/list-view";
+import { PullRequestQueueView } from "../components/pull-request-queue-view";
 import { SwimLaneView } from "../components/swimlane-view";
 import { TableView } from "../components/table-view";
 import { useT } from "../../i18n";
@@ -317,7 +318,14 @@ function IssueSurfaceContent({
                 groupBranches={controller.groupBranches}
               />
             )}
-            {controller.viewMode === "list" && (
+            {controller.viewMode === "list" && scope.type === "awaiting_merge" && controller.groupBranches && (
+              <PullRequestQueueView
+                groupBranches={controller.groupBranches}
+                childProgressMap={controller.childProgressMap}
+                projectMap={controller.projectMap}
+              />
+            )}
+            {controller.viewMode === "list" && scope.type !== "awaiting_merge" && (
               <ListView
                 issues={issues}
                 visibleStatuses={controller.visibleStatuses}
