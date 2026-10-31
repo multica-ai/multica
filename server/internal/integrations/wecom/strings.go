@@ -193,6 +193,28 @@ type copyPack struct {
 	StreamFailed           string
 	StreamCancelled        string
 
+	// StreamContinued — the run outlived one stream's window, so the bubble is
+	// sealed with this and the run carries on in a fresh bubble right
+	// underneath it. A statement of fact, not a promise: nothing is owed on the
+	// strength of it, the next bubble is already on screen.
+	StreamContinued string
+
+	// StreamStuck is the odd one out among the Stream* lines: it does not close
+	// a bubble, it explains one that can no longer be closed. The server has
+	// disowned the stream mid-run — another connection owns this conversation
+	// now — so the spinner on the user's screen will turn for good and the rest
+	// of the round has to arrive as new messages. Said once per bubble.
+	StreamStuck string
+
+	// StreamProgressPrefix heads the list of steps inside an open bubble. It
+	// has to be there: without a heading, a list of actions sitting in a chat
+	// reads as the answer arriving rather than as a status.
+	StreamProgressPrefix string
+
+	// Progress words each step the run takes. Kept in its own struct because
+	// there are twenty-odd of them and they are only ever read together.
+	Progress progressCopy
+
 	// InboxDetailLink is the anchor text on the inbox card's deep link;
 	// InboxTypeLabels names each notification kind, with InboxTypeFallback
 	// covering a kind this adapter has not been taught yet.
@@ -282,6 +304,76 @@ func copyFor(l Locale) copyPack {
 	return copyPacks[deploymentLocale()]
 }
 
+// progressCopy is what the bubble says while the run is still going: one whole
+// line per kind of work the agent can be doing.
+//
+// Every line comes in two forms, and which one is used depends on whether the
+// call named anything. The %s is the argument that identifies the work, and it
+// has been through progress_render.go's own cleaning first — never a content
+// block, never a control character, never longer than a few lines on a phone.
+// See the two rules at the top of that file.
+type progressCopy struct {
+	// Starting is the run getting under way, before its first tool call — on a
+	// slow start the longest silence there is. The daemon's own milestone text
+	// is English for operators and is never shown.
+	Starting string
+
+	// Read / Edit name the file; the Plain variants cover a call that names
+	// no file this adapter recognises.
+	Read      string
+	ReadPlain string
+	Edit      string
+	EditPlain string
+
+	// Command is a shell call; CommandNamed carries the command line.
+	Command      string
+	CommandNamed string
+
+	// Four kinds whose plain form says only what sort of work it was. Each
+	// Named variant carries the one thing that separates this call from the
+	// next one: the search term, the URL, the subagent's brief, the plan.
+	Search       string
+	SearchNamed  string
+	Web          string
+	WebNamed     string
+	Subtask      string
+	SubtaskNamed string
+	Plan         string
+	PlanNamed    string
+
+	// Service words an MCP call as "<server> · <tool>"; ServiceArgs adds the
+	// call's parameters, which for an MCP tool are the only description of
+	// what it is doing that this adapter can produce.
+	Service     string
+	ServiceArgs string
+
+	// Skill / SkillPlain name the packaged procedure a Skill call ran. The
+	// tool is always called Skill, so the skill's own name is the line.
+	Skill      string
+	SkillPlain string
+
+	// Tool / ToolArgs / Fallback cover a tool this adapter has not been
+	// taught. Saying something vague beats saying nothing: a step the user
+	// never sees happen is indistinguishable from a run that has stalled.
+	Tool     string
+	ToolArgs string
+	Fallback string
+
+	// Failed marks a step that errored; FailedNamed carries the message. The
+	// run may still recover, which is why the line says so either way.
+	Failed      string
+	FailedNamed string
+
+	// Thinking heads the agent's own reasoning, which sits under the step
+	// list. It needs a heading because without one a paragraph of prose in
+	// the middle of a status block reads as the answer arriving early.
+	Thinking string
+
+	// Elapsed closes the list with how long the user has been waiting. A
+	// spinner with no clock on it reads as stuck.
+	Elapsed string
+}
+
 var copyPacks = map[Locale]copyPack{
 	LocaleZhHans: {
 		AgentOffline:         "⚠️ 智能体当前不在线，你的消息已收到，等它上线后会处理。",
@@ -310,6 +402,38 @@ var copyPacks = map[Locale]copyPack{
 		MediaLookupFailed:      "⚠️ 我这边没查到这条回答带没带文件，所以要是有，这次没发出来。需要的话我再试一次。",
 		UnsupportedMsgType:     "抱歉，我暂时无法处理这类消息。",
 		StreamCancelled:        "⏹️ 这次处理已取消。",
+		StreamContinued:        "处理时间较长，接下一条",
+		StreamStuck:            "⚠️ 上面那条进度不会再更新了，这轮的结果我用新消息发你。",
+
+		StreamProgressPrefix: "正在处理：",
+		Progress: progressCopy{
+			Starting:     "正在启动智能体",
+			Read:         "正在读取 %s",
+			ReadPlain:    "正在读取文件",
+			Edit:         "正在修改 %s",
+			EditPlain:    "正在修改文件",
+			Command:      "正在执行命令",
+			CommandNamed: "正在执行 %s",
+			Search:       "正在检索代码",
+			SearchNamed:  "正在检索 %s",
+			Web:          "正在查资料",
+			WebNamed:     "正在查 %s",
+			Subtask:      "正在派子任务",
+			SubtaskNamed: "正在派子任务：%s",
+			Plan:         "正在梳理计划",
+			PlanNamed:    "正在梳理计划：%s",
+			Service:      "正在调用 %s · %s",
+			ServiceArgs:  "正在调用 %s · %s：%s",
+			Skill:        "正在启用技能 %s",
+			SkillPlain:   "正在启用技能",
+			Tool:         "正在使用 %s",
+			ToolArgs:     "正在使用 %s：%s",
+			Fallback:     "正在处理",
+			Failed:       "上一步出错了，正在继续",
+			FailedNamed:  "上一步出错了：%s，正在继续",
+			Thinking:     "思考：",
+			Elapsed:      "已用时 %s",
+		},
 
 		InboxDetailLink: "查看详情",
 		InboxTypeLabels: map[string]string{
@@ -355,6 +479,38 @@ var copyPacks = map[Locale]copyPack{
 		MediaLookupFailed:      "⚠️ I couldn't check whether this answer had a file with it, so if it did, it didn't go out. Say the word and I'll try again.",
 		UnsupportedMsgType:     "Sorry, I can't read that kind of message.",
 		StreamCancelled:        "⏹️ That run was cancelled.",
+		StreamContinued:        "Still working, continued below",
+		StreamStuck:            "⚠️ The status above won't update any further. I'll send this round's result as a new message.",
+
+		StreamProgressPrefix: "Working on it: ",
+		Progress: progressCopy{
+			Starting:     "Starting the agent",
+			Read:         "Reading %s",
+			ReadPlain:    "Reading a file",
+			Edit:         "Editing %s",
+			EditPlain:    "Editing a file",
+			Command:      "Running a command",
+			CommandNamed: "Running %s",
+			Search:       "Searching the code",
+			SearchNamed:  "Searching for %s",
+			Web:          "Looking things up",
+			WebNamed:     "Looking up %s",
+			Subtask:      "Handing off a subtask",
+			SubtaskNamed: "Handing off a subtask: %s",
+			Plan:         "Working out a plan",
+			PlanNamed:    "Working out a plan: %s",
+			Service:      "Calling %s · %s",
+			ServiceArgs:  "Calling %s · %s: %s",
+			Skill:        "Using the %s skill",
+			SkillPlain:   "Using a skill",
+			Tool:         "Using %s",
+			ToolArgs:     "Using %s: %s",
+			Fallback:     "Working",
+			Failed:       "That step errored — carrying on",
+			FailedNamed:  "That step errored: %s — carrying on",
+			Thinking:     "Thinking:",
+			Elapsed:      "%s elapsed",
+		},
 
 		InboxDetailLink: "View details",
 		InboxTypeLabels: map[string]string{

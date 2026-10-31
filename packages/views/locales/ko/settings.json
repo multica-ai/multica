@@ -1146,7 +1146,7 @@
     "not_enabled_self_host_hint": "셀프 호스트 운영자: 자세한 내용은 프로젝트 README를 참고하세요.",
     "preview_title": "Lark 봇 설치 곧 출시 예정",
     "preview_description": "이 배포 환경에서는 Lark 연결이 활성화되지 않았습니다. 관리자에게 문의하세요.",
-    "connected_bots": "연결된 봇",
+    "connected_bots": "봇",
     "loading": "불러오는 중…",
     "empty_title": "아직 연결된 봇이 없어요",
     "empty_description_prefix": "이 워크스페이스의 에이전트를 열고",
@@ -1193,7 +1193,7 @@
     "install_starting": "QR 코드를 준비하는 중…",
     "install_scan_hint": "Lark → 스캔 → 새 PersonalAgent를 승인하세요.",
     "install_open_link_fallback": "또는 여기를 눌러 Lark에서 열기",
-    "install_success": "설치 완료 — 봇이 온라인 상태입니다.",
+    "install_success": "봇이 등록되었습니다. Feishu/Lark에서 메시지를 보내 수신을 확인하세요.",
     "install_success_toast": "Lark 봇이 설치되었어요",
     "install_open_link_fallback_feishu": "또는 여기를 눌러 Feishu에서 열기",
     "install_open_link_fallback_lark": "또는 여기를 눌러 Lark에서 열기",
@@ -1210,7 +1210,12 @@
     "install_error_installer_bind": "봇은 설치되었지만 Lark 신원을 연결하지 못했어요. 다시 시도하거나 지원팀에 문의하세요.",
     "install_error_session_lost": "설치 세션이 만료되었거나 유실되었어요. 다시 스캔해 처음부터 진행하세요.",
     "install_error_forbidden": "이 워크스페이스에 Lark 봇을 설치할 권한이 더 이상 없어요. 워크스페이스 관리자에게 문의하세요.",
-    "install_error_generic": "설치에 실패했어요. 다시 시도하세요."
+    "install_error_generic": "설치에 실패했어요. 다시 시도하세요.",
+    "bound_label": "연결 등록됨",
+    "inbound_pending": "등록됨 · 메시지 확인 대기",
+    "inbound_verified": "메시지 수신 확인됨",
+    "inbound_pending_hint": "Feishu/Lark에서 이 봇에 메시지를 보내 수신을 확인하세요. 도착하지 않으면 지속 연결 모드, im.message.receive_v1 구독, 앱 게시 및 승인 상태를 확인하세요. 기존 연결에는 확인 기록이 없을 수 있습니다.",
+    "inbound_verified_hint": "이번 연결에서 유효한 메시지를 받았습니다. 지속적인 연결, 에이전트 실행 또는 답장 성공을 의미하지는 않습니다."
   },
   "composio": {
     "page_description": "에이전트가 사용할 앱을 연결하세요.",

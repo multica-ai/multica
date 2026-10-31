@@ -115,7 +115,12 @@ vi.mock("@multica/ui/components/ui/tooltip", () => ({
   TooltipContent: () => null,
 }));
 vi.mock("./create-skill-dialog", () => ({ CreateSkillDialog: () => null }));
-vi.mock("./skill-list-toolbar", () => ({ SkillListToolbar: () => null }));
+vi.mock("./skill-list-controls", () => ({
+  countActiveFilterDimensions: () => 0,
+  SkillFilterMenu: () => null,
+  SkillDisplayMenu: () => null,
+  SkillCreateMenu: () => null,
+}));
 vi.mock("./skill-list-actions", () => ({
   SkillBatchToolbar: () => null,
   SkillRowActions: () => null,
@@ -218,15 +223,5 @@ describe("SkillsPage source link vs row navigation", () => {
       "/acme/skills/skill-1",
       "animations",
     );
-  });
-});
-
-describe("SkillsPage docs link", () => {
-  it("points Learn more at the viewer's docs locale", () => {
-    renderPage(makeAdapter(), "fr");
-
-    expect(
-      screen.getByRole("link", { name: "En savoir plus →" }),
-    ).toHaveAttribute("href", "https://multica.ai/docs/fr/skills");
   });
 });

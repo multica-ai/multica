@@ -1,19 +1,21 @@
 {
   "page": {
     "title": "エージェント",
-    "learn_more": "詳細はこちら →",
     "new_agent": "新規エージェント",
-    "search_placeholder": "エージェントを検索...",
     "show_archived": "アーカイブ済みを表示 ({{count}}) →",
     "of_total": "{{total}} 件中 {{visible}} 件",
     "list_load_failed": "エージェントを読み込めませんでした",
     "list_load_failed_default": "エージェント一覧の取得中に問題が発生しました。",
-    "try_again": "再試行"
+    "try_again": "再試行",
+    "scope_title": {
+      "mine": "自分のエージェント",
+      "all": "すべてのエージェント",
+      "archived": "アーカイブ済みのエージェント"
+    }
   },
   "scope": {
     "mine": "自分のもの",
-    "all": "すべて",
-    "archived": "アーカイブ済み"
+    "all": "すべて"
   },
   "sort": {
     "label_recent": "最近のアクティビティ",
@@ -47,10 +49,7 @@
   },
   "no_matches": {
     "title": "一致する結果なし",
-    "search_archived": "\"{{query}}\" に一致するアーカイブ済みエージェントがありません。",
     "no_archived": "まだアーカイブ済みのエージェントはありません。",
-    "search_active": "\"{{query}}\" に一致するエージェントがありません。",
-    "search_active_filtered": "このフィルターで \"{{query}}\" に一致するエージェントがありません。",
     "no_filter_match": "このフィルターに一致するエージェントがありません。",
     "search_runtime_filtered": "\"{{machine}}\" 上に \"{{query}}\" に一致するエージェントがありません。",
     "runtime_filtered": "\"{{machine}}\" 上にエージェントがありません。"
@@ -119,7 +118,6 @@
     "archive_dialog_confirm": "アーカイブ"
   },
   "detail": {
-    "back_to_agents": "エージェント",
     "back_to_agents_full": "エージェントに戻る",
     "not_found_title": "エージェントが見つかりません",
     "not_found_default": "このエージェントはアーカイブまたは削除された可能性があります。",
@@ -148,7 +146,11 @@
     "runtime_required_toast": "このエージェントを実行する前にランタイムを設定してください。",
     "assign_work": "作業を割り当てる",
     "more_actions_aria": "エージェントの操作",
-    "updated": "{{when}}に更新"
+    "advanced_settings": "詳細設定",
+    "copy_link": "リンクをコピー",
+    "copy_id": "エージェント ID をコピー",
+    "link_copied_toast": "リンクをコピーしました",
+    "id_copied_toast": "エージェント ID をコピーしました"
   },
   "inspector": {
     "section_profile": "プロフィール",
@@ -158,7 +160,6 @@
     "section_properties": "プロパティ",
     "section_details": "詳細",
     "section_details_hint": "所有者とライフサイクルに関する読み取り専用情報です。",
-    "section_skills": "スキル",
     "section_integrations": "連携",
     "prop_runtime": "ランタイム",
     "prop_model": "モデル",
@@ -169,7 +170,6 @@
     "prop_owner": "オーナー",
     "prop_created": "作成日",
     "prop_updated": "更新日",
-    "no_description_placeholder": "説明なし",
     "avatar_label": "アバター",
     "name_label": "名前",
     "description_label": "説明",
@@ -185,10 +185,23 @@
     "cancel": "キャンセル"
   },
   "overview": {
-    "agent_context": "エージェント",
-    "access": "アクセス",
     "attention_title": "対応が必要な実行",
     "attention_queued_other": "ランタイムが利用できないため、{{count}}件の実行が待機中です。"
+  },
+  "sections": {
+    "runs_count_other": "{{count}} 件の実行",
+    "recent_this_week_other": "今週 {{count}} 件",
+    "view_all": "すべて表示",
+    "open": "開く",
+    "edit": "編集",
+    "add": "追加",
+    "manage": "管理",
+    "instructions_empty": "まだ指示はありません。"
+  },
+  "panel": {
+    "status": "ステータス",
+    "runs_7d": "実行 (7日)",
+    "edit_access_aria": "アクセス: {{value}}。アクセスを変更"
   },
   "skill_attach": {
     "trigger_aria": "ワークスペースのスキルを追加",
@@ -243,13 +256,11 @@
     "clear_full": "選択をクリア（プロバイダーのデフォルトを使用）"
   },
   "tabs": {
-    "overview": "概要",
     "work": "作業",
     "capabilities": "機能",
     "settings": "設定",
     "general": "一般",
     "access": "アクセス",
-    "page_navigation_aria": "エージェントページ",
     "section_navigation_aria": "エージェントセクション",
     "activity": "アクティビティ",
     "tasks": "実行",
@@ -618,12 +629,6 @@
       "section_now": "現在",
       "section_last_30d": "過去30日",
       "section_recent": "最近の作業",
-      "subtitle_no_active": "アクティブな作業なし",
-      "subtitle_active_other": "アクティブな実行 {{count}} 件",
-      "subtitle_performance": "パフォーマンス",
-      "subtitle_no_recent": "まだ完了した実行はありません",
-      "subtitle_recent_progress": "{{total}} 回の実行中 {{shown}} 回",
-      "subtitle_recent_latest": "最新 {{count}} 回の実行",
       "empty_now": "このエージェントは現在何も実行していません。",
       "empty_30d": "過去30日間に完了した作業はありません。",
       "empty_recent": "このエージェントはまだ何も完了していません。",
@@ -634,9 +639,7 @@
       "success_hint": "完了した実行数を、完了と失敗の実行数の合計で割った割合です。キャンセルした実行は含みません。",
       "success_unavailable": "この期間に完了または失敗した実行がないため、成功率を計算できません。",
       "cancelled_count": "{{count}} 件キャンセル",
-      "avg_duration": "平均 {{value}}",
       "avg_duration_label": "平均時間",
-      "failed_count": "{{count}} 回失敗",
       "failed_label": "失敗",
       "source_issue": "タスク",
       "source_chat": "チャット",
@@ -868,18 +871,9 @@
     "none": "30 日間アクティビティなし"
   },
   "toolbar": {
-    "result_count_title": "該当エージェント / スコープ内全体",
-    "filter_label": "フィルター",
-    "filter_active_count_other": "{{count}} 件のフィルター",
-    "clear_filters": "フィルターをクリア",
     "section_availability": "可用性",
     "section_access": "アクセス",
     "section_runtime": "ランタイム",
-    "display": "表示",
-    "sort_by": "並び替え",
-    "direction_asc": "昇順",
-    "direction_desc": "降順",
-    "section_columns": "列",
     "section_owner": "オーナー",
     "section_model": "モデル"
   },
@@ -887,7 +881,6 @@
     "title": "エージェントを作成",
     "squad_title": "このスクワッド用のエージェントを作成",
     "duplicate_title": "{{name}} を複製",
-    "back": "戻る",
     "step_ai": "会話で作成",
     "modes": {
       "template": {
@@ -971,7 +964,8 @@
       "runtime": "ランタイムを選択",
       "configure": "設定",
       "done": "完了",
-      "aria": "エージェント作成の手順"
+      "aria": "エージェント作成の手順",
+      "progress": "ステップ {{current}}/{{total}}"
     },
     "configure_title": "エージェントを設定",
     "ask_ai": "AI に書いてもらう",
@@ -1032,8 +1026,5 @@
       "next": "次へ"
     }
   },
-  "actions": {
-    "selected_other": "{{count}} 件選択中",
-    "clear_selection": "選択を解除"
-  }
+  "actions": {}
 }

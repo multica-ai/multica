@@ -145,26 +145,13 @@ export function StatusPicker({
         if (!v) setQuery("");
         setOpen(v);
       }}
-      width={workflow || defaultScope ? "w-60" : "w-52"}
+      width={workflow ? "w-60" : "w-52"}
       align={align}
       triggerRender={triggerRender}
       tooltip={tooltip}
       searchable={searchable}
       searchPlaceholder={t(($) => $.filters.search_status)}
       onSearchChange={setQuery}
-      header={
-        workflow ? (
-          <div className="truncate px-2 pb-1 pt-1.5 text-caption text-muted-foreground">
-            {project
-              ? t(($) => $.workflows.picker.header, { workflow: workflow.name, project: project.title })
-              : workflow.name}
-          </div>
-        ) : defaultScope ? (
-          <div className="truncate px-2 pb-1 pt-1.5 text-caption text-muted-foreground">
-            {t(($) => $.workflows.picker.header_no_project, { workflow: defaultScope.name })}
-          </div>
-        ) : undefined
-      }
       footer={markDuplicate ?? undefined}
       trigger={
         customTrigger ??

@@ -10,9 +10,6 @@ vi.mock("sonner", () => ({
   toast: { success: vi.fn(), error: vi.fn() },
 }));
 
-vi.mock("react-resizable-panels", () => ({
-  useDefaultLayout: () => ({ defaultLayout: undefined, onLayoutChanged: vi.fn() }),
-}));
 
 // The page runs two queries — the active list and the archived one. They are
 // told apart by the queryKey their options carry, so each test can stock the
@@ -156,34 +153,6 @@ const layout = { width: PHONE };
 vi.mock("@multica/ui/hooks/use-mobile", () => ({
   useIsMobile: () => layout.width < 768,
   useIsCompact: () => layout.width < 768,
-}));
-vi.mock("@multica/ui/components/ui/resizable", () => ({
-  ResizablePanelGroup: ({ children }: { children: React.ReactNode }) => (
-    <div>{children}</div>
-  ),
-  ResizablePanel: ({
-    children,
-    id,
-    defaultSize,
-    minSize,
-    maxSize,
-  }: {
-    children: React.ReactNode;
-    id: string;
-    defaultSize?: number;
-    minSize?: number | string;
-    maxSize?: number | string;
-  }) => (
-    <div
-      data-testid={`panel-${id}`}
-      data-default-size={defaultSize}
-      data-min-size={minSize}
-      data-max-size={maxSize}
-    >
-      {children}
-    </div>
-  ),
-  ResizableHandle: () => null,
 }));
 vi.mock("./inbox-list", () => ({
   InboxList: ({
@@ -353,16 +322,17 @@ describe("InboxPage", () => {
     expect(screen.queryByTestId("row")).toBeNull();
   });
 
-  it("keeps the list subordinate to the detail pane on desktop", () => {
+  // The list takes the space panel's width, so its divider lines up with the
+  // panel's when switching spaces.
+  it("sizes the desktop list with the shared panel width", () => {
     reset();
     layout.width = DESKTOP;
 
-    render(<InboxPage />);
+    const { container } = render(<InboxPage />);
 
-    const listPanel = screen.getByTestId("panel-list");
-    expect(listPanel).toHaveAttribute("data-default-size", "260");
-    expect(listPanel).toHaveAttribute("data-min-size", "240");
-    expect(listPanel).toHaveAttribute("data-max-size", "400");
+    expect(container.querySelector("[data-slot='list-column']")).toHaveClass(
+      "w-(--sidebar-width)",
+    );
   });
 
   it("keeps the title unread count static", () => {
@@ -594,17 +564,36 @@ describe("InboxPage", () => {
     expect(screen.getByTestId("row").textContent).toBe("archived-1");
   });
 
+  it("switches between the inbox and the archive from the title menu", async () => {
+    reset();
+    layout.width = DESKTOP;
+    searchParams = new URLSearchParams("issue=issue-1");
+    listData.active = [item({ id: "active-1", issue_id: "issue-1" })];
+    const { container } = render(<InboxPage />);
+
+    const titleMenu = container.querySelector("h1 [aria-haspopup='menu']") as HTMLElement;
+    fireEvent.click(titleMenu);
+    // The test's `useT` labels every option "Inbox", so they are located by order.
+    const [inboxOption, archivedOption] = await screen.findAllByRole("menuitemradio");
+    expect(inboxOption).toHaveAttribute("aria-checked", "true");
+    fireEvent.click(archivedOption!);
+
+    expect(replace).toHaveBeenLastCalledWith("/acme/inbox?view=archived");
+    expect(screen.getByTestId("list").dataset.view).toBe("archived");
+  });
+
   it("hides the batch-actions menu in the archived view", () => {
     // Every batch action archives from the MAIN inbox; offering them over the
     // archived list would read as "archive all of these" and do the opposite.
     reset();
     listData.archived = [item({ id: "archived-1", archived: true })];
+    const batchMenu = ':not(h1) > [aria-haspopup="menu"]';
     const { container: mainView } = render(<InboxPage />);
-    expect(mainView.querySelector('[aria-haspopup="menu"]')).not.toBeNull();
+    expect(mainView.querySelector(batchMenu)).not.toBeNull();
 
     searchParams = new URLSearchParams("view=archived");
     const { container: archivedView } = render(<InboxPage />);
-    expect(archivedView.querySelector('[aria-haspopup="menu"]')).toBeNull();
+    expect(archivedView.querySelector(batchMenu)).toBeNull();
   });
 
   it("ignores a carried-over idle selection in the archive", () => {
