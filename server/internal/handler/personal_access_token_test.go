@@ -365,3 +365,67 @@ func TestRenewPAT_RejectsTokenBelongingToDifferentUser(t *testing.T) {
 		t.Fatalf("expected 401 on user mismatch, got %d: %s", w.Code, w.Body.String())
 	}
 }
+
+// TestUpdatePersonalAccessTokenLastUsed_SkipsFreshStamp pins the guard that
+// stops the per-request cache-miss call from rewriting the row: a missing,
+// stale or future stamp is written, a stamp within a minute of now is left
+// alone.
+func TestUpdatePersonalAccessTokenLastUsed_SkipsFreshStamp(t *testing.T) {
+	ctx := context.Background()
+	_, patID := insertTestPAT(t, time.Time{})
+	id := parseUUID(patID)
+
+	// xmin changes on every write to the row, so an equal xmin proves the
+	// UPDATE matched nothing.
+	stamp := func() (pgtype.Timestamptz, string) {
+		t.Helper()
+		var lastUsed pgtype.Timestamptz
+		var xmin string
+		err := testPool.QueryRow(ctx,
+			`SELECT last_used_at, xmin::text FROM personal_access_token WHERE id = $1`, id,
+		).Scan(&lastUsed, &xmin)
+		if err != nil {
+			t.Fatalf("read pat: %v", err)
+		}
+		return lastUsed, xmin
+	}
+	touch := func() {
+		t.Helper()
+		if err := testHandler.Queries.UpdatePersonalAccessTokenLastUsed(ctx, id); err != nil {
+			t.Fatalf("update last_used_at: %v", err)
+		}
+	}
+
+	touch()
+	first, firstXmin := stamp()
+	if !first.Valid {
+		t.Fatal("expected a never-used token to get last_used_at")
+	}
+
+	touch()
+	if again, xmin := stamp(); xmin != firstXmin || !again.Time.Equal(first.Time) {
+		t.Fatalf("expected a fresh stamp to be left alone, got %s (xmin %s -> %s)", again.Time, firstXmin, xmin)
+	}
+
+	if _, err := testPool.Exec(ctx,
+		`UPDATE personal_access_token SET last_used_at = now() - interval '2 minutes' WHERE id = $1`, id,
+	); err != nil {
+		t.Fatalf("backdate last_used_at: %v", err)
+	}
+	stale, _ := stamp()
+	touch()
+	if refreshed, _ := stamp(); !refreshed.Time.After(stale.Time) {
+		t.Fatalf("expected a stale stamp to be refreshed, still %s", refreshed.Time)
+	}
+
+	if _, err := testPool.Exec(ctx,
+		`UPDATE personal_access_token SET last_used_at = now() + interval '2 hours' WHERE id = $1`, id,
+	); err != nil {
+		t.Fatalf("forward-date last_used_at: %v", err)
+	}
+	future, _ := stamp()
+	touch()
+	if corrected, _ := stamp(); !corrected.Time.Before(future.Time) {
+		t.Fatalf("expected a future stamp to be corrected, still %s", corrected.Time)
+	}
+}

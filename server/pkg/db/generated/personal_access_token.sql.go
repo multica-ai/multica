@@ -167,8 +167,17 @@ const updatePersonalAccessTokenLastUsed = `-- name: UpdatePersonalAccessTokenLas
 UPDATE personal_access_token
 SET last_used_at = now()
 WHERE id = $1
+  AND (last_used_at IS NULL
+       OR last_used_at < now() - interval '1 minute'
+       OR last_used_at > now() + interval '1 minute')
 `
 
+// Callers fire this on every PAT cache miss, and without Redis every
+// request misses. Skipping a stamp within a minute of now() keeps that
+// path a read instead of rewriting one hot row per request. A stamp more
+// than a minute ahead (the clock stepped back) is rewritten; the minute
+// of slack stops concurrent callers, whose now() is their own statement
+// start, from re-stamping each other.
 func (q *Queries) UpdatePersonalAccessTokenLastUsed(ctx context.Context, id pgtype.UUID) error {
 	_, err := q.db.Exec(ctx, updatePersonalAccessTokenLastUsed, id)
 	return err
