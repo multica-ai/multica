@@ -1,17 +1,19 @@
 import { useState, type ReactNode } from "react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { fireEvent, screen } from "@testing-library/react";
+import { act, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { agentTaskSnapshotOptions } from "@multica/core/agents";
 import { EMPTY_ISSUE_VIEW_PREFERENCE } from "@multica/core/api/schemas";
 import { useActiveIssueViewStore } from "@multica/core/issue-views/active-view-store";
 import { issueViewPreferenceOptions } from "@multica/core/issue-views/preferences";
 import { issueViewEverywhereOptions } from "@multica/core/issue-views/queries";
+import { issueDetailOptions, issueKeys } from "@multica/core/issues/queries";
 import { SIDEBAR_PROJECTS_SCOPE } from "@multica/core/issues/sidebar-project-prefs";
+import { useSidebarKeptStore } from "@multica/core/issues/stores/sidebar-kept-store";
 import { useSidebarTreeStore } from "@multica/core/issues/stores/sidebar-tree-store";
 import { pinListOptions } from "@multica/core/pins/queries";
 import { projectListOptions } from "@multica/core/projects/queries";
-import type { Issue, IssueTableRowsResponse, PinnedItem } from "@multica/core/types";
+import type { Issue, IssueTableRowsResponse, PinnedItem, Project } from "@multica/core/types";
 import { renderWithI18n } from "../../test/i18n";
 import { NavigationProvider, type NavigationAdapter } from "../../navigation";
 import { WorkPanel } from "./work-panel";
@@ -116,9 +118,21 @@ const PIN: PinnedItem = {
   created_at: "",
 };
 
-function renderPanel(initialPath: string, pins: PinnedItem[] = []) {
+const PROJECT = {
+  id: "5d4c3b2a-1f0e-4d9c-8b7a-6f5e4d3c2b1a",
+  title: "Launch",
+  status: "in_progress",
+  lead_type: null,
+  lead_id: null,
+  issue_count: 0,
+  done_count: 0,
+  created_at: "",
+  updated_at: "",
+} as unknown as Project;
+
+function renderPanel(initialPath: string, pins: PinnedItem[] = [], projects: Project[] = []) {
   const qc = new QueryClient({ defaultOptions: { queries: { staleTime: Infinity, retry: false } } });
-  qc.setQueryData(projectListOptions("ws-1").queryKey, { projects: [], total: 0 });
+  qc.setQueryData(projectListOptions("ws-1").queryKey, { projects, total: projects.length });
   qc.setQueryData(pinListOptions("ws-1", "u1").queryKey, pins);
   qc.setQueryData(issueViewEverywhereOptions("ws-1").queryKey, []);
   qc.setQueryData(issueViewPreferenceOptions("ws-1", SIDEBAR_PROJECTS_SCOPE).queryKey, EMPTY_ISSUE_VIEW_PREFERENCE);
@@ -126,6 +140,8 @@ function renderPanel(initialPath: string, pins: PinnedItem[] = []) {
 
   function Harness() {
     const [pathname, setPathname] = useState(initialPath);
+    // A collapsed sidebar mounts a second panel as its hover peek.
+    const [peek, setPeek] = useState(false);
     const adapter: NavigationAdapter = {
       push: setPathname,
       replace: setPathname,
@@ -138,6 +154,14 @@ function renderPanel(initialPath: string, pins: PinnedItem[] = []) {
     return (
       <NavigationProvider value={adapter}>
         <WorkPanel />
+        <button type="button" onClick={() => setPeek(true)}>
+          Open peek
+        </button>
+        {peek && (
+          <div data-testid="peek">
+            <WorkPanel />
+          </div>
+        )}
       </NavigationProvider>
     );
   }
@@ -147,6 +171,7 @@ function renderPanel(initialPath: string, pins: PinnedItem[] = []) {
       <Harness />
     </QueryClientProvider>,
   );
+  return qc;
 }
 
 const issueRow = () => screen.getByRole("link", { name: ISSUE.title });
@@ -160,6 +185,7 @@ beforeEach(() => {
     projectsCollapsed: false,
   });
   useActiveIssueViewStore.setState({ active: {} });
+  useSidebarKeptStore.setState({ held: {} });
   apiMock.listIssueTableRows.mockResolvedValue({
     rows: [ISSUE, OTHER].map((issue) => ({ issue })),
     total: 2,
@@ -197,5 +223,62 @@ describe("WorkPanel issue highlight", () => {
 
     await screen.findByRole("link", { name: ISSUE.title });
     expect(allIssues()).toHaveAttribute("aria-current", "page");
+  });
+
+  it("keeps an issue its list drops lit in place until another issue opens", async () => {
+    const qc = renderPanel("/acme/my-issues");
+    fireEvent.click(await screen.findByRole("link", { name: ISSUE.title }));
+    qc.setQueryData(issueDetailOptions("ws-1", ISSUE.id).queryKey, { ...ISSUE, title: "Fixed the sidebar", status: "done" });
+    apiMock.listIssueTableRows.mockResolvedValue({ rows: [{ issue: OTHER }], total: 1, next_cursor: null });
+    await act(() => qc.invalidateQueries({ queryKey: issueKeys.sidebarAll("ws-1") }));
+
+    expect(await screen.findByRole("link", { name: "Fixed the sidebar" })).toHaveAttribute("aria-current", "page");
+    expect(allIssues()).not.toHaveAttribute("aria-current");
+
+    fireEvent.click(screen.getByRole("link", { name: OTHER.title }));
+    expect(screen.queryByRole("link", { name: "Fixed the sidebar" })).toBeNull();
+  });
+
+  it("drops a kept issue once it is deleted", async () => {
+    const qc = renderPanel("/acme/my-issues");
+    fireEvent.click(await screen.findByRole("link", { name: ISSUE.title }));
+    qc.setQueryData(issueDetailOptions("ws-1", ISSUE.id).queryKey, ISSUE);
+    apiMock.listIssueTableRows.mockResolvedValue({ rows: [{ issue: OTHER }], total: 1, next_cursor: null });
+    await act(async () => {
+      qc.removeQueries({ queryKey: issueKeys.detail("ws-1", ISSUE.id) });
+      await qc.invalidateQueries({ queryKey: issueKeys.sidebarAll("ws-1") });
+    });
+
+    await waitFor(() => expect(screen.queryByRole("link", { name: ISSUE.title })).toBeNull());
+  });
+
+  it("keeps the dropped issue lit in a peek opened afterwards", async () => {
+    const qc = renderPanel("/acme/my-issues");
+    fireEvent.click(await screen.findByRole("link", { name: ISSUE.title }));
+    qc.setQueryData(issueDetailOptions("ws-1", ISSUE.id).queryKey, { ...ISSUE, title: "Fixed the sidebar", status: "done" });
+    apiMock.listIssueTableRows.mockResolvedValue({ rows: [{ issue: OTHER }], total: 1, next_cursor: null });
+    await act(() => qc.invalidateQueries({ queryKey: issueKeys.sidebarAll("ws-1") }));
+    await screen.findByRole("link", { name: "Fixed the sidebar" });
+    fireEvent.click(screen.getByRole("button", { name: "Open peek" }));
+
+    const peek = within(screen.getByTestId("peek"));
+    expect(peek.getByRole("link", { name: "Fixed the sidebar" })).toHaveAttribute("aria-current", "page");
+    expect(peek.getByRole("link", { name: "All issues" })).not.toHaveAttribute("aria-current");
+  });
+
+  it("keeps the open project in the tree after it leaves the projects filter", async () => {
+    const qc = renderPanel(`/acme/projects/${PROJECT.id}`, [], [PROJECT]);
+    expect(screen.getByRole("link", { name: PROJECT.title })).toHaveAttribute("aria-current", "page");
+
+    act(() => {
+      qc.setQueryData(projectListOptions("ws-1").queryKey, {
+        projects: [{ ...PROJECT, title: "Launched", status: "completed" }],
+        total: 1,
+      });
+    });
+    expect(await screen.findByRole("link", { name: "Launched" })).toHaveAttribute("aria-current", "page");
+
+    fireEvent.click(allIssues());
+    expect(screen.queryByRole("link", { name: "Launched" })).toBeNull();
   });
 });

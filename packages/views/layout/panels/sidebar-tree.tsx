@@ -1,6 +1,6 @@
 "use client";
 
-import { forwardRef, memo, useCallback, useState } from "react";
+import { forwardRef, memo, useCallback, useLayoutEffect, useState } from "react";
 import { keepPreviousData, useQuery } from "@tanstack/react-query";
 import { ChevronDown, ChevronRight, ChevronUp } from "@multica/ui/icons";
 import { cn } from "@multica/ui/lib/utils";
@@ -8,8 +8,9 @@ import { ShimmerText } from "@multica/ui/components/common/shimmer-text";
 import { agentTaskSnapshotOptions } from "@multica/core/agents";
 import { useIssueStatuses } from "@multica/core/issue-statuses/hooks";
 import { issueStatusCategory } from "@multica/core/issues";
-import { sidebarIssuesOptions } from "@multica/core/issues/queries";
+import { issueDetailOptions, sidebarIssuesOptions } from "@multica/core/issues/queries";
 import { SIDEBAR_FIRST_PAGE, SIDEBAR_PAGE_STEP, type SidebarIssuesRequest } from "@multica/core/issues/sidebar-list";
+import { useSidebarKeptStore } from "@multica/core/issues/stores/sidebar-kept-store";
 import { useWorkspacePaths } from "@multica/core/paths";
 import type { AgentTask, Issue, ListIssuesParams } from "@multica/core/types";
 import { AppLink } from "../../navigation";
@@ -161,6 +162,30 @@ export function issueRowMenuOpenClass(active: boolean) {
 }
 
 const EMPTY_PARAMS: ListIssuesParams = {};
+const EMPTY_ISSUES: Issue[] = [];
+
+/**
+ * `items` with the open item put back at its last place in `list` once it
+ * drops out, until another item opens: an edit on its page (marking it done,
+ * reassigning it, moving it) must not take away its row or move the
+ * highlight elsewhere. `latest` is the open item's current data; without it
+ * (deleted, or not loaded) nothing is kept.
+ */
+export function useKeptActiveItem<T extends { id: string }>(
+  list: string,
+  items: readonly T[],
+  activeId: string | null,
+  latest: T | undefined,
+): readonly T[] {
+  const index = activeId ? items.findIndex((item) => item.id === activeId) : -1;
+  const held = useSidebarKeptStore((s) => s.held[list]);
+  useLayoutEffect(() => {
+    if (activeId && index !== -1) useSidebarKeptStore.getState().hold(list, activeId, index);
+  }, [list, activeId, index]);
+  if (index !== -1 || !activeId || !held || held.id !== activeId || !latest || latest.id !== activeId) return items;
+  const at = Math.min(held.index, items.length);
+  return [...items.slice(0, at), latest, ...items.slice(at)];
+}
 
 /**
  * The issues under an expanded row: the first page, then "Load more" in
@@ -192,8 +217,15 @@ export function SidebarIssueList({
     enabled: !!params,
     placeholderData: keepPreviousData,
   });
-  const issues = params ? (query.data?.issues ?? []) : [];
+  const listed = params ? (query.data?.issues ?? EMPTY_ISSUES) : EMPTY_ISSUES;
   const total = params ? (query.data?.total ?? 0) : 0;
+  // The list no longer carries a kept issue; the detail cache follows its
+  // edits, and dropping it on delete ends the keep.
+  const { data: activeIssue } = useQuery({
+    ...issueDetailOptions(wsId, activeIssueId ?? ""),
+    enabled: false,
+  });
+  const issues = useKeptActiveItem(source, listed, activeIssueId, activeIssue);
 
   const onKeyDown = (event: React.KeyboardEvent) => {
     if (event.key !== "ArrowLeft") return;
@@ -232,23 +264,23 @@ export function SidebarIssueList({
               />
             </li>
           ))}
-          {total > issues.length ? (
+          {total > listed.length ? (
             <li>
               <button
                 type="button"
                 className={tailClass}
                 disabled={query.isFetching}
                 onKeyDown={onKeyDown}
-                onClick={() => setLimit(issues.length + SIDEBAR_PAGE_STEP)}
+                onClick={() => setLimit(listed.length + SIDEBAR_PAGE_STEP)}
               >
                 <ChevronDown className="size-3.5" />
                 {t(($) => $.panels.work.load_more)}{" "}
-                <span className="tabular-nums">{total - issues.length}</span>
+                <span className="tabular-nums">{total - listed.length}</span>
               </button>
             </li>
           ) : (
             limit > SIDEBAR_FIRST_PAGE &&
-            issues.length > SIDEBAR_FIRST_PAGE && (
+            listed.length > SIDEBAR_FIRST_PAGE && (
               <li>
                 <button type="button" className={tailClass} onKeyDown={onKeyDown} onClick={() => setLimit(SIDEBAR_FIRST_PAGE)}>
                   <ChevronUp className="size-3.5" />

@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useLayoutEffect, useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useAuthStore } from "@multica/core/auth";
 import { useCurrentWorkspace, useWorkspacePaths } from "@multica/core/paths";
@@ -8,18 +8,22 @@ import { isIssueUuid } from "@multica/core/issues/canonical-id";
 import { issueDetailOptions } from "@multica/core/issues/queries";
 import { projectSidebarSource, sidebarProjects } from "@multica/core/issues/sidebar-list";
 import { useSidebarProjectPrefs } from "@multica/core/issues/sidebar-project-prefs";
+import { useSidebarKeptStore } from "@multica/core/issues/stores/sidebar-kept-store";
 import { useSidebarTreeStore } from "@multica/core/issues/stores/sidebar-tree-store";
 import { projectListOptions } from "@multica/core/projects/queries";
 import type { Project } from "@multica/core/types";
 import { useNavigation } from "../../navigation";
 import { IssueContextMenuProvider } from "../../issues/actions";
 import { useT } from "../../i18n";
-import { PanelBody, PanelHeader } from "../panel-nav";
+import { PanelBody, PanelHeader, isPathWithin } from "../panel-nav";
 import { PinnedSection, usePanelPins } from "./pinned-section";
+import { useKeptActiveItem } from "./sidebar-tree";
 import { ProjectsSection, useIssueIdInTree } from "./work-tree";
 import { ViewsSection } from "./views-section";
 
 const EMPTY_PROJECTS: Project[] = [];
+/** The Projects section's key in the kept-rows store, apart from every sidebar source. */
+const PROJECTS_LIST = "projects";
 
 /** The `{id}` of an `/issues/{id}` route — a UUID or an identifier like `MUL-123`. */
 function issueRouteSegment(pathname: string, issuesPath: string): string | null {
@@ -80,11 +84,21 @@ export function WorkPanel() {
   }, [revealProjectId, setExpanded]);
 
   const { projectSettings, projectOrder } = useSidebarProjectPrefs(wsId ?? "");
+  const filteredProjects = useMemo(
+    () => sidebarProjects(projects, projectSettings, projectOrder, userId),
+    [projects, projectSettings, projectOrder, userId],
+  );
+  const openProject = projects.find((project) => isPathWithin(pathname, p.projectDetail(project.id)));
+  const keptProjects = useKeptActiveItem(PROJECTS_LIST, filteredProjects, openProject?.id ?? null, openProject);
   const shownProjects = useMemo(() => {
-    const shown = sidebarProjects(projects, projectSettings, projectOrder, userId);
     const revealed = projects.find((project) => project.id === revealProjectId);
-    return revealed && !shown.includes(revealed) ? [...shown, revealed] : shown;
-  }, [projects, projectSettings, projectOrder, userId, revealProjectId]);
+    return revealed && !keptProjects.includes(revealed) ? [...keptProjects, revealed] : [...keptProjects];
+  }, [projects, keptProjects, revealProjectId]);
+  // Once another item opens, the lists stop keeping the one that was open.
+  const openProjectId = openProject?.id ?? null;
+  useLayoutEffect(() => {
+    useSidebarKeptStore.getState().release([currentIssueId, openProjectId].filter((id) => id !== null));
+  }, [currentIssueId, openProjectId]);
   const issueLitInTree = treeIssueId !== null;
   const plainRowsLit = !pins.isActivePinnedRoute;
 
