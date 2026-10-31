@@ -1332,3 +1332,52 @@ func unhex(c byte) byte {
 	}
 	return 0
 }
+
+// TestFailHardTimedOutTasksIgnoresLiveRuntime pins the FIN-611 backstop: a
+// running task older than the hard cap is failed even when its runtime is
+// still heartbeating, which is precisely the case the liveness-gated
+// FailStaleTasks branch cannot catch.
+func TestFailHardTimedOutTasksIgnoresLiveRuntime(t *testing.T) {
+	if testPool == nil {
+		t.Skip("no database connection")
+	}
+
+	issueID, agentID, taskID := setupSweeperTestFixture(t, "running")
+	t.Cleanup(func() { cleanupSweeperFixture(t, issueID, agentID) })
+
+	// Keep the runtime fresh: the hard cap must not depend on runtime liveness.
+	if _, err := testPool.Exec(context.Background(), `
+		UPDATE agent_runtime SET status = 'online', last_seen_at = now()
+		WHERE id = (SELECT runtime_id FROM agent WHERE id = $1)
+	`, agentID); err != nil {
+		t.Fatalf("refresh runtime heartbeat: %v", err)
+	}
+
+	svc := &service.TaskService{Queries: db.New(testPool), TxStarter: testPool}
+	failedTasks, err := svc.FailHardTimedOutTasks(context.Background(), 3600, 50)
+	if err != nil {
+		t.Fatalf("FailHardTimedOutTasks failed: %v", err)
+	}
+
+	found := false
+	for _, ft := range failedTasks {
+		if ft.ID.Bytes == parseUUIDBytes(taskID) {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatalf("expected task %s to be failed by the hard run cap", taskID)
+	}
+
+	task, err := db.New(testPool).GetAgentTask(context.Background(), parseUUID(taskID))
+	if err != nil {
+		t.Fatalf("load failed task: %v", err)
+	}
+	if task.Status != "failed" {
+		t.Fatalf("status = %q, want failed", task.Status)
+	}
+	if task.FailureReason.String != "timeout" {
+		t.Fatalf("failure_reason = %q, want timeout", task.FailureReason.String)
+	}
+}
