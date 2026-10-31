@@ -36,7 +36,7 @@ Multica 当前会检测以下命令：
 | Kiro CLI | `kiro-cli` | [安装 Kiro CLI](https://kiro.dev/docs/cli/installation/) |
 | MiniMax Code | `mcode` | [安装 MiniMax Code CLI](https://www.npmjs.com/package/@minimax-ai/code) |
 | Muse Code | `muse` | [安装 Muse Code](https://dev.meta.ai/docs/muse-code) |
-| Devin CLI | `devin` | [安装 Devin CLI](https://docs.devin.ai/cli/quickstart)（3000.3.22+）；本机 ACP，先运行 `devin auth login` |
+| ZCode | `zcode` / ZCode Desktop | [ZCode](https://zcode.z.ai/) |
 | OpenClaw | `openclaw` | [安装 OpenClaw](https://docs.openclaw.ai/install) |
 | OpenCode | `opencode` | [OpenCode 快速开始](https://opencode.ai/en/docs) |
 | Pi coding agent | `pi` | [Pi coding agent](https://github.com/earendil-works/pi) |
@@ -48,6 +48,7 @@ Multica 当前会检测以下命令：
 | Reasonix | `reasonix` | [Reasonix](https://github.com/esengine/DeepSeek-Reasonix) |
 | TRAE CLI | `traecli` | [TRAE 官方站](https://www.trae.cn/) |
 | Dim | `dim` | [DimCode](https://dimagent.cn/docs/cli) |
+| Devin CLI | `devin` | [安装 Devin CLI](https://docs.devin.ai/cli/quickstart)（3000.3.22+）；本机 ACP，先运行 `devin auth login` |
 | ZeroClaw | `zeroclaw` | [ZeroClaw 快速开始](https://github.com/zeroclaw-labs/zeroclaw/blob/master/docs/book/src/getting-started/quickstart.md#install) |
 
 "受支持"表示 Multica 能够调用对应 CLI，不代表 Multica 会替你提供该工具的账号、订阅或模型额度。
@@ -209,3 +210,5 @@ multica daemon restart
 - [创建和配置智能体](/agents-create) — 选择刚刚连接的运行时。
 - [守护进程与运行时](/daemon-runtimes) — 了解在线状态、并发和自定义运行时。
 - [AI 编程工具对照](/providers) — 比较各工具在 Multica 中的能力。
+
+ZCode Desktop 的 macOS 应用包可被自动发现；请同时安装 Node.js，并在桌面端启用可用的 API 连接。模型与思考强度由 ZCode 原生目录提供。详见[运行时对照](/providers#zcode)。

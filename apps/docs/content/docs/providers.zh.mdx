@@ -49,6 +49,7 @@ Multica 不替代你在用的 AI 编程工具：运行时调用电脑上已经�
 | Trae CLI | `traecli` | ✓ | ✓ | ✓ | `.traecli/skills/` |
 | Dim | `dim` | ✓ | ✓ | ✓ | — |
 | ZeroClaw | `zeroclaw` | ✓ | — | — | — |
+| ZCode | `zcode` / ZCode Desktop | ✓ | ✓ | ✓ | `.zcode/skills/` |
 
 "Multica 管理 MCP"指可以在智能体配置中填写 MCP server，由 Multica 在执行前传给对应工具。这一列只说明 Multica 能否代为配置，不说明工具自身有没有别的 MCP 配置方式。
 
@@ -113,3 +114,9 @@ Codex、Hermes 和 OpenClaw 的处理稍有不同：
 - [创建和配置智能体](/agents-create) — 模型与思考强度设置。
 - [安装 AI 编程工具](/install-agent-runtime) — 安装与检测步骤。
 - [守护进程与运行时](/daemon-runtimes) — 运行时注册与并发。
+
+## ZCode
+
+ZCode 使用原生 NDJSON `app-server` 协议，支持会话创建、续接、取消、模型发现、思考强度和 MCP。任务通过 yolo 模式执行，无需等待交互式工具审批。每个模型的思考档位来自运行时目录，创建智能体时会保留对应默认值。
+
+macOS 可自动发现 ZCode Desktop 内置的 Node 入口；需要本机已安装 Node.js。运行时读取桌面端已启用的 API-key/Coding Plan 连接，为当前进程生成独占临时配置，退出后删除，原配置不变。Start Plan 登录身份令牌不作为 API key 导入，目前不支持这条账号鉴权路径。若模型列表为空，请先在桌面端配置一个可用的 API 连接。

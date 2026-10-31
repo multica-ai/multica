@@ -340,6 +340,19 @@ var probeAgentCLIs = func() map[string]AgentEntry {
 	if e, ok := probe("MULTICA_ZEROCLAW_PATH", "zeroclaw", ""); ok {
 		agents["zeroclaw"] = e
 	}
+	if e, ok := probe("MULTICA_ZCODE_PATH", "zcode", "MULTICA_ZCODE_MODEL"); ok {
+		agents["zcode"] = e
+	} else if strings.TrimSpace(os.Getenv("MULTICA_ZCODE_PATH")) == "" {
+		for _, candidate := range zcodeDesktopAppBundlePaths() {
+			if executableCandidate(candidate) {
+				agents["zcode"] = AgentEntry{
+					Path: candidate, Command: "zcode",
+					Model: os.Getenv("MULTICA_ZCODE_MODEL"),
+				}
+				break
+			}
+		}
+	}
 	return agents
 }
 

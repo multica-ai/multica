@@ -254,6 +254,8 @@ func localSkillRootsForProvider(provider string) ([]localSkillRoot, bool, error)
 				configHome = filepath.Join(home, ".config")
 			}
 			providerRoot = filepath.Join(configHome, "muse", "skills")
+		case "zcode":
+			providerRoot = filepath.Join(home, ".zcode", "skills")
 		default:
 			return nil, false, nil
 		}

@@ -279,6 +279,7 @@ The daemon auto-detects these AI CLIs on your PATH:
 | [Codex](https://github.com/openai/codex) | `codex` | OpenAI's coding agent |
 | [GitHub Copilot CLI](https://docs.github.com/en/copilot) | `copilot` | GitHub's coding agent (model routed by your GitHub entitlement) |
 | OpenCode | `opencode` | Open-source coding agent |
+| [ZCode](https://zcode.z.ai/) | `zcode` / ZCode Desktop | Native NDJSON app-server, sessions, model discovery, thinking levels, MCP and yolo execution |
 | OpenClaw | `openclaw` | Open-source coding agent |
 | Hermes | `hermes` | Nous Research coding agent |
 | [Pi](https://pi.dev/) | `pi` | Pi coding agent |
