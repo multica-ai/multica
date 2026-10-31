@@ -229,3 +229,30 @@ func TestCompleteTaskSkipsFallbackCommentOnlyAfterCheckIn(t *testing.T) {
 		t.Fatalf("assignment run posted %d fallback comments, want 1", n)
 	}
 }
+
+func TestCompleteTaskPreservesBackslashesInFallbackComment(t *testing.T) {
+	f, s, issue, agent := conditionFixture(t)
+	ctx := context.Background()
+	want := `$n \neq -1$; $n \to \infty$; $\text{for } i=1,\dots,n$; $\right. \\`
+	output, err := json.Marshal(protocol.TaskCompletedPayload{Output: want})
+	if err != nil {
+		t.Fatalf("marshal completion payload: %v", err)
+	}
+	taskID := parseTestUUID(t, f.Task(t, agent, testutil.Cols{
+		"issue_id":   issue,
+		"status":     "running",
+		"started_at": testutil.Raw("now()"),
+		"context":    "{}",
+		"runtime_id": testutil.Raw("(SELECT runtime_id FROM agent WHERE id='" + agent + "')"),
+	}))
+	if _, err := s.Tasks.CompleteTask(ctx, taskID, output, "", "", "", false, "", ""); err != nil {
+		t.Fatalf("CompleteTask: %v", err)
+	}
+	var got string
+	if err := f.QueryRow(t, "SELECT content FROM comment WHERE issue_id=$1 AND source_task_id=$2", issue, taskID).Scan(&got); err != nil {
+		t.Fatalf("read fallback comment: %v", err)
+	}
+	if got != want {
+		t.Fatalf("stored fallback comment = %q, want %q", got, want)
+	}
+}
