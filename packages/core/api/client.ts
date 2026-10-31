@@ -1,3 +1,4 @@
+import { EmptyAgentBuilderSessionPageSchema, type EmptyAgentBuilderSessionPage } from "./schemas";
 import type { ZodType } from "zod";
 import { AgentRuntimeSchema, EMPTY_RUNTIME } from "../runtimes/schema";
 import type { IssueWakeup, IssueWakeupInput, IssueWakeupSummaryRow, PausedWakeup, SystemWakeup, WakeupRun, WorkspaceSystemWakeup } from "../types/issue-wakeup";
@@ -1933,6 +1934,36 @@ export class ApiClient {
       EMPTY_AGENT_BUILDER_SESSION_LIST,
       { endpoint: "GET /api/agent-builder/sessions" },
     ).sessions;
+  }
+
+  async listEmptyAgentBuilderSessions(
+    wsId: string,
+    profileId: string,
+    cursor?: string,
+  ): Promise<EmptyAgentBuilderSessionPage> {
+    const search = new URLSearchParams({ profile_id: profileId });
+    if (cursor) search.set("cursor", cursor);
+    const raw = await this.fetch<unknown>(`/api/agent-builder/sessions/empty?${search}`, {
+      headers: { "X-Workspace-Slug": "", "X-Workspace-ID": wsId },
+    });
+    const page = parseWithFallback(raw, EmptyAgentBuilderSessionPageSchema, null as EmptyAgentBuilderSessionPage | null, {
+      endpoint: "GET /api/agent-builder/sessions/empty",
+    });
+    if (!page) throw new Error("Invalid empty builder session response");
+    return page;
+  }
+
+  async discardEmptyAgentBuilderSession(
+    wsId: string,
+    profileId: string,
+    sessionId: string,
+    snapshot: string,
+  ): Promise<void> {
+    await this.fetch(`/api/agent-builder/sessions/${encodeURIComponent(sessionId)}/discard-empty`, {
+      method: "POST",
+      headers: { "X-Workspace-Slug": "", "X-Workspace-ID": wsId },
+      body: JSON.stringify({ profile_id: profileId, snapshot }),
+    });
   }
 
   /**

@@ -469,6 +469,24 @@
       "toast_deleted": "Runtime personnalisé supprimé de l'espace de travail",
       "error_bound": "Ce runtime ne peut pas être supprimé tant que des agents l'utilisent.",
       "error_generic": "Échec de la suppression du runtime."
+    },
+    "recovery": {
+      "check": "Vérifier mes sessions Builder vides",
+      "scope": "Seules vos sessions Builder vides et actives sont affichées. Le travail enregistré, les exécutions, les sessions archivées et celles d’autres personnes peuvent encore bloquer la suppression.",
+      "empty": "Aucune session admissible. D’autres dépendances peuvent encore bloquer la suppression du profil.",
+      "loading": "Vérification des sessions...",
+      "error": "La requête n’a pas pu aboutir. Votre session est conservée. Réessayez.",
+      "unavailable": "La récupération sécurisée est indisponible sur ce serveur ou cette session n’existe plus. Actualisez pour vérifier.",
+      "forbidden": "Vous n’avez pas l’autorisation de récupérer cette session.",
+      "changed": "La session a changé et a été conservée. La liste a été actualisée.",
+      "more": "Charger la suite",
+      "discard": "Abandonner...",
+      "title": "Abandonner la session Builder vide ?",
+      "description": "Abandonner définitivement la session Builder vide créée le {{created}} sur {{machine}} ?",
+      "confirm": "Abandonner la session",
+      "cancel": "Annuler",
+      "discarding": "Abandon en cours...",
+      "unknown_machine": "Machine inconnue"
     }
   },
   "usage": {

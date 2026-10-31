@@ -13,3 +13,4 @@ export * from "./custom-pricing-store";
 export * from "./cloud-runtime";
 export * from "./commands";
 export * from "./use-daemon-setup-commands";
+export * from "./builder-recovery";

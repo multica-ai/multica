@@ -469,6 +469,24 @@
       "toast_deleted": "Custom runtime deleted from workspace",
       "error_bound": "This custom runtime can't be deleted while agents are still using it — including agents on other machines that registered it.",
       "error_generic": "Failed to delete the runtime."
+    },
+    "recovery": {
+      "check": "Check my empty Builder sessions",
+      "scope": "Only your empty, active Builder sessions are listed. Saved work, runs, archived sessions and other people’s sessions may still block deletion.",
+      "empty": "No eligible sessions found. Other profile dependencies may still block deletion.",
+      "loading": "Checking sessions...",
+      "error": "Could not complete the request. Your session has been kept. Try again.",
+      "unavailable": "Safe Builder recovery is unavailable on this server, or this session no longer exists. Refresh to check.",
+      "forbidden": "You do not have permission to recover this session.",
+      "changed": "The session changed and was kept. The list has been refreshed.",
+      "more": "Load more",
+      "discard": "Discard...",
+      "title": "Discard empty Builder session?",
+      "description": "Permanently discard the empty Builder session created {{created}} on {{machine}}?",
+      "confirm": "Discard session",
+      "cancel": "Cancel",
+      "discarding": "Discarding...",
+      "unknown_machine": "Unknown machine"
     }
   },
   "usage": {

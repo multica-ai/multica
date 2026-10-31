@@ -535,6 +535,7 @@ describe("RuntimeDetail visibility section", () => {
       }),
     );
 
+    expect(screen.getByRole("button", { name: "Check my empty Builder sessions" })).toBeInTheDocument();
     expect(
       within(screen.getByRole("banner")).queryByRole("button", { name: "More actions" }),
     ).not.toBeInTheDocument();
