@@ -55,6 +55,7 @@ import type {
   InboxItem,
   InboxWorkspaceUnread,
   IssueSubscriber,
+  IssueUnread,
   Comment,
   CommentTriggerPreview,
   IssueTriggerPreview,
@@ -408,6 +409,8 @@ import {
   EMPTY_CREATE_FEEDBACK_RESPONSE,
   InboxUnreadSummarySchema,
   EMPTY_INBOX_UNREAD_SUMMARY,
+  IssueUnreadListSchema,
+  EMPTY_ISSUE_UNREAD,
   InboxItemListSchema,
   ArchivedInboxPageSchema,
   ArchivedInboxFacetsSchema,
@@ -2911,6 +2914,21 @@ export class ApiClient {
     });
     if (!task) throw new Error("Invalid source-context retry response");
     return task;
+  }
+
+  async listIssueUnread(): Promise<IssueUnread[]> {
+    const raw = await this.fetch<unknown>("/api/issues/unread");
+    return parseWithFallback(raw, IssueUnreadListSchema, EMPTY_ISSUE_UNREAD, {
+      endpoint: "GET /api/issues/unread",
+    });
+  }
+
+  async markIssueRead(issueId: string): Promise<void> {
+    await this.fetch(`/api/issues/${issueId}/read`, { method: "POST" });
+  }
+
+  async markIssueUnread(issueId: string): Promise<void> {
+    await this.fetch(`/api/issues/${issueId}/unread`, { method: "POST" });
   }
 
   // Inbox

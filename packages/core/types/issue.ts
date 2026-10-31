@@ -159,6 +159,18 @@ export interface IssueSourceContext {
   snapshot: SourceContextSnapshot;
 }
 
+/**
+ * An issue with an agent result the viewer has not seen yet
+ * (`GET /api/issues/unread`). `outcome` is `completed` | `failed` for a run, or
+ * `manual` when the viewer marked it unread; `agent_id` is null for manual.
+ */
+export interface IssueUnread {
+  issue_id: string;
+  outcome: string;
+  agent_id: string | null;
+  created_at: string;
+}
+
 /** The original a duplicate points at: enough to link it and show its status. */
 export interface IssueDuplicateOf {
   id: string;
