@@ -256,6 +256,9 @@
     "advanced_summary": "筛选：{{summary}}"
   },
   "display": {
+    "swimlane_axes": "泳道方向",
+    "status_columns_project_rows": "状态列 / 项目行",
+    "project_columns_status_rows": "项目列 / 状态行",
     "tooltip": "显示设置",
     "button": "显示",
     "grouping_section": "分组",

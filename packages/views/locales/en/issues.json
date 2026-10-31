@@ -262,6 +262,9 @@
     "advanced_summary": "Shows issues where {{summary}}"
   },
   "display": {
+    "swimlane_axes": "Axes",
+    "status_columns_project_rows": "Status columns / Project rows",
+    "project_columns_status_rows": "Project columns / Status rows",
     "tooltip": "Display settings",
     "button": "Display",
     "grouping_section": "Grouping",

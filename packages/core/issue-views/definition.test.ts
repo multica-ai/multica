@@ -36,6 +36,42 @@ describe("isIssueViewModified", () => {
     expect(isIssueViewModified(view, store.getState())).toEqual({ filters: false, display: true });
   });
 
+  it("round-trips project axes and layout through the saved definition", () => {
+    const store = liveStateFor(view);
+    store.setState({
+      viewMode: "swimlane",
+      swimlaneGrouping: "project",
+      swimlaneProjectAxis: "project-columns",
+      swimlaneProjectColumnOrder: ["p2", "p1", "none"],
+      collapsedSwimlaneStatusRows: ["qa"],
+      agentRunningFilter: true,
+    });
+    const saved = issueViewDefinitionFromState(store.getState());
+    expect(saved.display).toMatchObject({
+      swimlaneProjectAxis: "project-columns",
+      swimlaneProjectColumnOrder: ["p2", "p1", "none"],
+      collapsedSwimlaneStatusRows: ["qa"],
+    });
+    const reopened = liveStateFor(saved);
+    expect(isIssueViewModified(saved, reopened.getState())).toEqual({ filters: false, display: false });
+    expect(reopened.getState().agentRunningFilter).toBe(true);
+    reopened.getState().setSwimlaneProjectAxis("status-columns");
+    expect(isIssueViewModified(saved, reopened.getState()).display).toBe(true);
+    const seed = issueViewSeedDefinition(saved);
+    reopened.setState({ ...seed.query, ...seed.display } as Partial<IssueViewState>);
+    expect(isIssueViewModified(saved, reopened.getState()).display).toBe(false);
+    expect(reopened.getState().swimlaneProjectAxis).toBe("project-columns");
+  });
+
+  it.each([
+    ["swimlaneProjectColumnOrder", ["p2", "p1"]],
+    ["collapsedSwimlaneStatusRows", ["qa"]],
+  ] as const)("detects edits to %s even when the axis is unchanged", (key, value) => {
+    const store = liveStateFor(view);
+    store.setState({ [key]: [...value] });
+    expect(isIssueViewModified(view, store.getState())).toEqual({ filters: false, display: true });
+  });
+
   it("treats 'is not' on an empty dimension as no change", () => {
     const store = liveStateFor(view);
     store.getState().setFilterNegated("label", true);

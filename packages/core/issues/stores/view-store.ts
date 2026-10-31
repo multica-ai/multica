@@ -47,6 +47,7 @@ export type IssueGrouping =
   | "project"
   | `property:${string}`;
 export type SwimlaneGrouping = "parent" | "project" | "assignee";
+export type SwimlaneProjectAxis = "status-columns" | "project-columns";
 /**
  * Sort key. `property:<definitionId>` is resolved server-side against the
  * active property catalog; stale or unsupported definitions degrade to
@@ -372,6 +373,10 @@ export interface IssueViewState {
   ganttShowCompleted: boolean;
   /** Active swimlane grouping dimension. */
   swimlaneGrouping: SwimlaneGrouping;
+  swimlaneProjectAxis: SwimlaneProjectAxis;
+  /** Project columns and status rows have their own layout preferences. */
+  swimlaneProjectColumnOrder: string[];
+  collapsedSwimlaneStatusRows: IssueStatus[];
   /** Persisted lane order, keyed by grouping. Entries are raw lane ids
    *  (parent issue id, project id, or `<assigneeType>:<assigneeId>`). */
   swimlaneOrders: Record<SwimlaneGrouping, string[]>;
@@ -433,6 +438,9 @@ export interface IssueViewState {
   toggleShowSubIssues: () => void;
   toggleListCollapsed: (status: IssueStatus) => void;
   setSwimlaneGrouping: (grouping: SwimlaneGrouping) => void;
+  setSwimlaneProjectAxis: (axis: SwimlaneProjectAxis) => void;
+  setSwimlaneProjectColumnOrder: (order: string[]) => void;
+  toggleSwimlaneStatusRow: (status: IssueStatus) => void;
   /** Update the lane order for the currently active swimlane grouping. */
   setSwimlaneOrder: (order: string[]) => void;
   /** Toggle a lane key in the currently active swimlane grouping. */
@@ -477,6 +485,9 @@ export const viewStoreSlice = (set: StoreApi<IssueViewState>["setState"]): Issue
   ganttZoom: "week",
   ganttShowCompleted: false,
   swimlaneGrouping: "assignee",
+  swimlaneProjectAxis: "status-columns",
+  swimlaneProjectColumnOrder: [],
+  collapsedSwimlaneStatusRows: [],
   swimlaneOrders: { parent: [], project: [], assignee: [] },
   collapsedSwimlanes: { parent: [], project: [], assignee: [] },
   tableColumns: DEFAULT_TABLE_COLUMNS.map((column) => ({ ...column })),
@@ -728,6 +739,14 @@ export const viewStoreSlice = (set: StoreApi<IssueViewState>["setState"]): Issue
         : [...state.listCollapsedStatuses, status],
     })),
   setSwimlaneGrouping: (grouping) => set({ swimlaneGrouping: grouping }),
+  setSwimlaneProjectAxis: (axis) => set({ swimlaneProjectAxis: axis }),
+  setSwimlaneProjectColumnOrder: (order) => set({ swimlaneProjectColumnOrder: order }),
+  toggleSwimlaneStatusRow: (status) =>
+    set((state) => ({
+      collapsedSwimlaneStatusRows: state.collapsedSwimlaneStatusRows.includes(status)
+        ? state.collapsedSwimlaneStatusRows.filter((key) => key !== status)
+        : [...state.collapsedSwimlaneStatusRows, status],
+    })),
   setSwimlaneOrder: (order) =>
     set((state) => ({
       swimlaneOrders: { ...state.swimlaneOrders, [state.swimlaneGrouping]: order },
@@ -825,6 +844,9 @@ export const viewStorePersistOptions = (name: string) => ({
     ganttZoom: state.ganttZoom,
     ganttShowCompleted: state.ganttShowCompleted,
     swimlaneGrouping: state.swimlaneGrouping,
+    swimlaneProjectAxis: state.swimlaneProjectAxis,
+    swimlaneProjectColumnOrder: state.swimlaneProjectColumnOrder,
+    collapsedSwimlaneStatusRows: state.collapsedSwimlaneStatusRows,
     swimlaneOrders: state.swimlaneOrders,
     collapsedSwimlanes: state.collapsedSwimlanes,
     tableColumns: state.tableColumns,
@@ -899,6 +921,9 @@ export function mergeViewStatePersisted<T extends IssueViewState>(
   const merged = {
     ...current,
     ...p,
+    swimlaneProjectAxis: p.swimlaneProjectAxis === "project-columns" ? "project-columns" : "status-columns",
+    swimlaneProjectColumnOrder: statusesFromStorage(p.swimlaneProjectColumnOrder, current.swimlaneProjectColumnOrder),
+    collapsedSwimlaneStatusRows: statusesFromStorage(p.collapsedSwimlaneStatusRows, current.collapsedSwimlaneStatusRows),
     hiddenStatuses: statusesFromStorage(p.hiddenStatuses ?? legacy?.hiddenStatusCategories, current.hiddenStatuses, p.hiddenStatuses === undefined),
     listCollapsedStatuses: statusesFromStorage(p.listCollapsedStatuses, current.listCollapsedStatuses, p.hiddenStatuses === undefined),
     cardProperties: {

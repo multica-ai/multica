@@ -1806,6 +1806,7 @@ export function IssueDisplayControls({
   const sortDirection = useViewStore((s) => s.sortDirection);
   const grouping = useViewStore((s) => s.grouping);
   const swimlaneGrouping = useViewStore((s) => s.swimlaneGrouping);
+  const swimlaneProjectAxis = useViewStore((s) => s.swimlaneProjectAxis);
   const cardProperties = useViewStore((s) => s.cardProperties);
   const tableGrouping = useViewStore((s) => s.tableGrouping ?? "none");
   const tableHierarchy = useViewStore((s) => s.tableHierarchy ?? true);
@@ -2120,6 +2121,37 @@ export function IssueDisplayControls({
                         </SelectItem>
                       ))}
                     </SelectGroup>
+                    </SelectContent>
+                  </Select>
+                </div>
+              )}
+              {viewMode === "swimlane" && swimlaneGrouping === "project" && (
+                <div className="flex items-center justify-between gap-3">
+                  <span className="text-caption font-medium text-muted-foreground">
+                    {t(($) => $.display.swimlane_axes)}
+                  </span>
+                  <Select
+                    items={[
+                      { value: "status-columns", label: t(($) => $.display.status_columns_project_rows) },
+                      { value: "project-columns", label: t(($) => $.display.project_columns_status_rows) },
+                    ]}
+                    value={swimlaneProjectAxis}
+                    onValueChange={(value) => {
+                      if (value === "status-columns" || value === "project-columns") {
+                        act.setSwimlaneProjectAxis(value);
+                      }
+                    }}
+                  >
+                    <SelectTrigger size="sm" className="w-56" aria-label={t(($) => $.display.swimlane_axes)}>
+                      <SelectValue>
+                        {swimlaneProjectAxis === "project-columns"
+                          ? t(($) => $.display.project_columns_status_rows)
+                          : t(($) => $.display.status_columns_project_rows)}
+                      </SelectValue>
+                    </SelectTrigger>
+                    <SelectContent align="end">
+                      <SelectItem value="status-columns">{t(($) => $.display.status_columns_project_rows)}</SelectItem>
+                      <SelectItem value="project-columns">{t(($) => $.display.project_columns_status_rows)}</SelectItem>
                     </SelectContent>
                   </Select>
                 </div>
