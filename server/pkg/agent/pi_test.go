@@ -66,6 +66,37 @@ func TestBuildPiArgsPreservesProjectTrustFlags(t *testing.T) {
 	}
 }
 
+func TestBuildPiArgsLoadsMulticaSkills(t *testing.T) {
+	cwd := t.TempDir()
+	skill := filepath.Join(cwd, ".pi", "skills", "local-ci")
+	if err := os.MkdirAll(skill, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(skill, "SKILL.md"), []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(cwd, ".pi", "skills", "empty"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	args := buildPiArgs("/tmp/s.jsonl", ExecOptions{Cwd: cwd}, slog.Default())
+	found := false
+	for i, a := range args {
+		if a == "--skill" && i+1 < len(args) && args[i+1] == skill {
+			found = true
+		}
+	}
+	if !found || countArg(args, "--skill") != 1 {
+		t.Fatalf("want one --skill %s in %v", skill, args)
+	}
+	if countArg(args, "--approve") != 0 {
+		t.Fatalf("--approve must not be injected: %v", args)
+	}
+	if got := buildOmpArgs("", "", ExecOptions{Cwd: cwd}, slog.Default()); countArg(got, "--skill") != 0 {
+		t.Fatalf("omp must not get --skill: %v", got)
+	}
+}
+
 func TestBuildPiArgsAppendsMcpExtension(t *testing.T) {
 	extensionPath := "/tmp/multica-pi-mcp-test/mcp-extension.mjs"
 	args := buildPiArgs("/tmp/s.jsonl", ExecOptions{

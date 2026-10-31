@@ -1137,6 +1137,35 @@ var piCustomArgModes = map[string]blockedArgMode{
 // print/JSON mode; using that supported path prevents Windows PowerShell's npm
 // shim from re-tokenising prompt content into options.
 func buildPiArgs(sessionPath string, opts ExecOptions, logger *slog.Logger) []string {
+	return buildPiArgsFor("pi", sessionPath, opts, logger)
+}
+
+// piSkillArgs returns an explicit --skill flag for each skill the daemon wrote
+// to <cwd>/.pi/skills. Pi 1.x ignores project-local files unless the project
+// is trusted, so native discovery never sees them. Passing the paths loads
+// only what Multica wrote, without --approve trusting every other project-local
+// resource (extensions, prompts) that may come from the checked-out branch.
+// OMP is left alone: its --skill flag is unverified.
+func piSkillArgs(cwd, label string) []string {
+	if cwd == "" || label != "pi" {
+		return nil
+	}
+	root := filepath.Join(cwd, ".pi", "skills")
+	entries, err := os.ReadDir(root)
+	if err != nil {
+		return nil
+	}
+	var args []string
+	for _, e := range entries {
+		dir := filepath.Join(root, e.Name())
+		if _, err := os.Stat(filepath.Join(dir, "SKILL.md")); err == nil {
+			args = append(args, "--skill", dir)
+		}
+	}
+	return args
+}
+
+func buildPiArgsFor(label, sessionPath string, opts ExecOptions, logger *slog.Logger) []string {
 	args := []string{
 		"-p",
 		"--mode", "json",
@@ -1160,6 +1189,7 @@ func buildPiArgs(sessionPath string, opts ExecOptions, logger *slog.Logger) []st
 	if opts.ThinkingLevel != "" {
 		args = append(args, "--thinking", opts.ThinkingLevel)
 	}
+	args = append(args, piSkillArgs(opts.Cwd, label)...)
 	// Note: we intentionally do NOT pass --tools here. Omitting it lets
 	// Pi use its full tool registry, including user-installed extension
 	// tools. Passing --tools acts as a restrictive allowlist that
