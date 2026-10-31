@@ -287,6 +287,7 @@
     "sort_due_date": "截止日期",
     "sort_created": "建立時間",
     "sort_updated": "更新時間",
+    "sort_pull_request_updated": "PR 更新時間",
     "sort_title": "標題",
     "card_priority": "優先順序",
     "card_description": "描述",
@@ -1713,7 +1714,8 @@
     "builtin": {
       "my_issues": "我的任務",
       "my_agents": "我的智慧體在做",
-      "all_issues": "全部任務"
+      "all_issues": "全部任務",
+      "awaiting_merge": "待合併"
     },
     "untitled": "未命名檢視",
     "copy_name": "{{name}}（副本）",
@@ -1746,6 +1748,15 @@
     "save_as_new_hint": "「{{name}}」保持不變",
     "save_as_view": "儲存為檢視",
     "set_by_view": "由此檢視設定",
+    "awaiting_merge": {
+      "fixed_condition": "有未合併的 PR",
+      "group_ready": "可合入",
+      "group_needs_attention": "需要處理",
+      "group_checking": "檢查中",
+      "group_none": "沒有未合併的 PR",
+      "empty_title": "沒有待合併的任務",
+      "empty_description": "有未合併 PR 的未完成任務會出現在這裡。"
+    },
     "new_issue": "新增任務",
     "unavailable": "此檢視已無法使用",
     "toast_saved": "檢視已儲存",

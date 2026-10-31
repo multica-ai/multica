@@ -97,6 +97,8 @@ export function buildIssueSurfaceQueryPlan(
               }
             : {},
       };
+    case "awaiting_merge":
+      return { scopeKey, queryFilter: {}, createDefaults: {} };
     case "team":
       throw new UnsupportedIssueScopeError(scope, "issue surface query plan");
   }

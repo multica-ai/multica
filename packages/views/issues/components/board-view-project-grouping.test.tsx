@@ -156,6 +156,7 @@ function makeGroupBranches(
     enabled: true,
     descriptors,
     issues,
+    rowsByKey: {},
     pagination: {},
     total: issues.length,
     isLoading: false,

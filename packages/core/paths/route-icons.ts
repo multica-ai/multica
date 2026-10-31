@@ -26,6 +26,7 @@ export type RouteIconName =
   | "ListTodo"
   | "FolderKanban"
   | "Layers"
+  | "GitPullRequest"
   | "Zap"
   | "Bot"
   | "Users"

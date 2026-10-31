@@ -200,7 +200,7 @@ Object.assign(DRAWINGS, {
   WifiOff: `${wifi(3)}<path d="m3 3 18 18"/>`,
   SignalHigh: `<path d="M3.25 20.5h.01M7.75 20.5V16M12.25 20.5V12M16.75 20.5V8"/>`,
   GitBranch: `<circle cx="6.5" cy="18" r="2.75"/><circle cx="17.5" cy="6.5" r="2.75"/><path d="M6.5 3v12.25M17.5 9.25c0 4.8-3.45 8.75-8.25 8.75"/>`,
-  GitPullRequest: `<circle cx="6.25" cy="6" r="2.75"/><circle cx="17.75" cy="18" r="2.75"/>
+  GitPullRequest: `<circle class="b" cx="6.25" cy="6" r="2.75"/><circle class="b" cx="17.75" cy="18" r="2.75"/>
     <path d="M6.25 8.75v12.5M12.75 6h2.5a2.5 2.5 0 0 1 2.5 2.5v6.75M15 3.5L12.75 6 15 8.5"/>`,
 
   // Layout and lists

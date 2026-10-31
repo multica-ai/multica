@@ -22,7 +22,7 @@ export function sortDirectionLabelKey(
   field: SortField,
   direction: SortDirection,
 ): SortDirectionLabelKey {
-  if (field === "created_at" || field === "updated_at") {
+  if (field === "created_at" || field === "updated_at" || field === "pull_request_updated_at") {
     return direction === "desc" ? "newest_first" : "oldest_first";
   }
   if (field === "start_date" || field === "due_date") {

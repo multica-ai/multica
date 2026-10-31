@@ -287,6 +287,7 @@
     "sort_due_date": "期限",
     "sort_created": "作成日",
     "sort_updated": "更新日",
+    "sort_pull_request_updated": "PR 更新日",
     "sort_title": "タイトル",
     "card_priority": "優先度",
     "card_description": "説明",
@@ -1713,7 +1714,8 @@
     "builtin": {
       "my_issues": "マイタスク",
       "my_agents": "マイエージェントの作業",
-      "all_issues": "すべてのタスク"
+      "all_issues": "すべてのタスク",
+      "awaiting_merge": "マージ待ち"
     },
     "untitled": "無題のビュー",
     "copy_name": "{{name}}（コピー）",
@@ -1746,6 +1748,15 @@
     "save_as_new_hint": "「{{name}}」は変更されません",
     "save_as_view": "ビューとして保存",
     "set_by_view": "このビューで設定",
+    "awaiting_merge": {
+      "fixed_condition": "未マージの PR あり",
+      "group_ready": "マージ可能",
+      "group_needs_attention": "対応が必要",
+      "group_checking": "チェック中",
+      "group_none": "未マージの PR なし",
+      "empty_title": "マージ待ちのタスクはありません",
+      "empty_description": "未マージの PR がある未完了のタスクがここに表示されます。"
+    },
     "new_issue": "新規タスク",
     "unavailable": "このビューは利用できなくなりました",
     "toast_saved": "ビューを保存しました",

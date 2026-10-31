@@ -287,6 +287,7 @@
     "sort_due_date": "截止日期",
     "sort_created": "创建时间",
     "sort_updated": "更新时间",
+    "sort_pull_request_updated": "PR 更新时间",
     "sort_title": "标题",
     "card_priority": "优先级",
     "card_description": "描述",
@@ -1713,7 +1714,8 @@
     "builtin": {
       "my_issues": "我的任务",
       "my_agents": "我的智能体在做",
-      "all_issues": "全部任务"
+      "all_issues": "全部任务",
+      "awaiting_merge": "待合并"
     },
     "untitled": "未命名视图",
     "copy_name": "{{name}}（副本）",
@@ -1746,6 +1748,15 @@
     "save_as_new_hint": "「{{name}}」保持不变",
     "save_as_view": "保存为视图",
     "set_by_view": "由此视图设定",
+    "awaiting_merge": {
+      "fixed_condition": "有未合并的 PR",
+      "group_ready": "可合入",
+      "group_needs_attention": "需要处理",
+      "group_checking": "检查中",
+      "group_none": "没有未合并的 PR",
+      "empty_title": "没有待合并的任务",
+      "empty_description": "有未合并 PR 的未完成任务会出现在这里。"
+    },
     "new_issue": "新建任务",
     "unavailable": "此视图已不可用",
     "toast_saved": "视图已保存",

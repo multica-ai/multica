@@ -293,6 +293,7 @@
     "sort_due_date": "Due date",
     "sort_created": "Created date",
     "sort_updated": "Updated date",
+    "sort_pull_request_updated": "PR updated",
     "sort_title": "Title",
     "card_priority": "Priority",
     "card_description": "Description",
@@ -1781,7 +1782,8 @@
     "builtin": {
       "my_issues": "My Issues",
       "my_agents": "My agents' work",
-      "all_issues": "All issues"
+      "all_issues": "All issues",
+      "awaiting_merge": "Awaiting merge"
     },
     "untitled": "Untitled view",
     "copy_name": "{{name}} (copy)",
@@ -1815,6 +1817,15 @@
     "save_as_new_hint": "Keeps “{{name}}” unchanged",
     "save_as_view": "Save as view",
     "set_by_view": "Set by this view",
+    "awaiting_merge": {
+      "fixed_condition": "Has an open pull request",
+      "group_ready": "Ready to merge",
+      "group_needs_attention": "Needs attention",
+      "group_checking": "Checking",
+      "group_none": "No open pull request",
+      "empty_title": "Nothing waiting to merge",
+      "empty_description": "Open issues with an open pull request show up here."
+    },
     "new_issue": "New issue",
     "unavailable": "This view is no longer available",
     "toast_saved": "View saved",

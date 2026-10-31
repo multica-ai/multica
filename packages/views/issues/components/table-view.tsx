@@ -1850,6 +1850,9 @@ export function TableView({
         }
         return value.parent?.title ?? t(($) => $.table.value_unavailable);
       }
+      if (value.kind === "pull_request_state") {
+        return t(($) => $.views.awaiting_merge[`group_${value.value}`]);
+      }
       if (value.value_state === "unset") return t(($) => $.table.no_value);
       if (value.value_state === "unavailable") {
         return t(($) => $.table.value_unavailable);

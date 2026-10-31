@@ -707,21 +707,25 @@ function invalidateWorkspaceScopedQueries(qc: QueryClient): void {
   qc.invalidateQueries({ queryKey: workspaceKeys.list() });
 }
 
+/** The query spec inside an issue-table cache key (rows, groups or facets). */
+function tableQuerySpecOf(queryKey: readonly unknown[]): IssueTableQuerySpec | undefined {
+  const kind = queryKey[3];
+  if (kind === "facets") return (queryKey[4] as IssueTableFacetsRequest).query;
+  if (kind === "rows" || kind === "groups") return queryKey[4] as IssueTableQuerySpec;
+  return undefined;
+}
+
 async function refreshWorkingAgentQueries(qc: QueryClient, wsId: string): Promise<void> {
   const filters: QueryFilters[] = [
     { queryKey: workspaceWorkingAgentsKeys.all(wsId) },
     {
       queryKey: issueKeys.tableAll(wsId),
       predicate: ({ queryKey }) => {
-        const kind = queryKey[3];
-        let spec: IssueTableQuerySpec | undefined;
-        if (kind === "facets") {
+        if (queryKey[3] === "facets") {
           const request = queryKey[4] as IssueTableFacetsRequest;
           if (request.facets.some((facet) => facet.kind === "working_agents")) return true;
-          spec = request.query;
-        } else if (kind === "rows" || kind === "groups") {
-          spec = queryKey[4] as IssueTableQuerySpec;
         }
+        const spec = tableQuerySpecOf(queryKey);
         // An explicit empty id list is still a working filter: its next
         // projection may contain newly started work. Other facets also
         // depend on this membership, not only rows and group descriptors.
@@ -978,6 +982,15 @@ export function useRealtimeSync(
         // PR list is keyed by issue id, not workspace, so we invalidate all
         // PR queries — the open issue detail page will refetch its own list.
         qc.invalidateQueries({ queryKey: ["github", "pull-requests"] });
+        // Awaiting merge is the one issue list whose membership and grouping
+        // are PR state; every other list ignores PR events.
+        const wsId = getCurrentWsId();
+        if (!wsId) return;
+        qc.invalidateQueries({
+          queryKey: issueKeys.tableAll(wsId),
+          predicate: ({ queryKey }) => tableQuerySpecOf(queryKey)?.scope?.kind === "awaiting_merge",
+        });
+        qc.invalidateQueries({ queryKey: [...issueKeys.sidebarAll(wsId), "builtin:awaiting_merge"] });
       },
       // Powers the agent presence cache: any task lifecycle change
       // (dispatch / completed / failed / cancelled) refreshes the

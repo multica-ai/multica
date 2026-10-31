@@ -6,6 +6,7 @@ import {
   Bot,
   CircleUser,
   Copy,
+  GitPullRequest,
   Layers,
   Link2,
   ListTodo,
@@ -29,10 +30,12 @@ import { issueViewFilterCount } from "@multica/core/issue-views/baseline";
 import { issueViewSeedDefinition } from "@multica/core/issue-views/definition";
 import {
   BUILTIN_VIEW_KEYS,
+  availableBuiltinViewKeys,
   builtinViewItemId,
   savedViewItemId,
   type BuiltinViewKey,
 } from "@multica/core/issue-views/sidebar-views";
+import { useCodeHostConnected } from "@multica/core/vcs";
 import { issueViewTarget } from "@multica/core/issue-views/view-target";
 import { useActiveIssueViewStore } from "@multica/core/issue-views/active-view-store";
 import { ActorAvatar } from "../common/actor-avatar";
@@ -67,6 +70,7 @@ const BUILTIN_ICON: Record<BuiltinViewKey, React.ReactNode> = {
   my_issues: <CircleUser className="size-4 shrink-0 text-muted-foreground" />,
   my_agents: <Bot className="size-4 shrink-0 text-muted-foreground" />,
   all_issues: <ListTodo className="size-4 shrink-0 text-muted-foreground" />,
+  awaiting_merge: <GitPullRequest className="size-4 shrink-0 text-muted-foreground" />,
 };
 
 /** Every view the user can open, and the switch that puts it in the sidebar. */
@@ -87,7 +91,11 @@ export function AllViewsPage() {
   const projectTitle = useMemo(() => new Map(projects.map((p) => [p.id, p.title])), [projects]);
   const memberName = useMemo(() => new Map(members.map((m) => [m.user_id, m.name])), [members]);
 
-  const builtins = BUILTIN_VIEW_KEYS.map((key) => ({ key, name: t(($) => $.views.builtin[key]) }));
+  const available = availableBuiltinViewKeys(useCodeHostConnected(wsId));
+  const builtins = BUILTIN_VIEW_KEYS.filter((key) => available.has(key)).map((key) => ({
+    key,
+    name: t(($) => $.views.builtin[key]),
+  }));
   const sortedViews = useMemo(
     () => [...views].sort((a, b) => a.name.localeCompare(b.name)),
     [views],

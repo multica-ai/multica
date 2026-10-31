@@ -42,6 +42,14 @@ function defaultsForSurface(
   set: StoreApi<IssueViewState>["setState"],
 ): IssueViewState {
   const defaults = viewStoreSlice(set);
+  if (surfaceKey === "awaiting_merge") {
+    return {
+      ...defaults,
+      viewMode: "list",
+      sortBy: "pull_request_updated_at",
+      sortDirection: "desc",
+    };
+  }
   if (!surfaceKey.startsWith("project:")) return defaults;
   return {
     ...defaults,

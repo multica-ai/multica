@@ -7,7 +7,7 @@ import { DndContext, PointerSensor, closestCenter, useSensor, useSensors, type D
 import { SortableContext, arrayMove, useSortable, verticalListSortingStrategy } from "@dnd-kit/sortable";
 import { restrictToFirstScrollableAncestor, restrictToVerticalAxis } from "@dnd-kit/modifiers";
 import { CSS } from "@dnd-kit/utilities";
-import { Bot, CircleUser, Copy, EyeOff, Layers, Link2, ListTodo, MoreHorizontal, Pencil, Plus, Trash2 } from "@multica/ui/icons";
+import { Bot, CircleUser, Copy, EyeOff, GitPullRequest, Layers, Link2, ListTodo, MoreHorizontal, Pencil, Plus, Trash2 } from "@multica/ui/icons";
 import { cn } from "@multica/ui/lib/utils";
 import { IconButton } from "@multica/ui/components/common/icon-button";
 import {
@@ -44,7 +44,13 @@ import {
 import { issueViewEverywhereOptions } from "@multica/core/issue-views/queries";
 import { issueViewSeedDefinition } from "@multica/core/issue-views/definition";
 import { useIssueViewRenameStore } from "@multica/core/issue-views/rename-store";
-import { builtinViewItemId, type BuiltinViewKey, type SidebarViewItem } from "@multica/core/issue-views/sidebar-views";
+import {
+  availableBuiltinViewKeys,
+  builtinViewItemId,
+  type BuiltinViewKey,
+  type SidebarViewItem,
+} from "@multica/core/issue-views/sidebar-views";
+import { useCodeHostConnected } from "@multica/core/vcs";
 import { issueViewTarget } from "@multica/core/issue-views/view-target";
 import { useIssueViewActions, type IssueViewActions } from "../../issue-views/use-view-actions";
 import { DeleteViewDialog } from "../../issue-views/delete-view-dialog";
@@ -90,6 +96,7 @@ export function ViewsSection({
   const actions = useIssueViewActions();
   const { items, reorder } = actions.sidebar;
   const { data: allViews = EMPTY_VIEWS } = useQuery(issueViewEverywhereOptions(wsId));
+  const builtinCount = availableBuiltinViewKeys(useCodeHostConnected(wsId)).size;
   const [deleteTarget, setDeleteTarget] = useState<IssueView | null>(null);
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 5 } }));
   const collapsed = useSidebarTreeStore((s) => s.viewsCollapsed);
@@ -173,7 +180,7 @@ export function ViewsSection({
           icon={<span className="size-4" aria-hidden />}
           label={t(($) => $.panels.work.all_views)}
           active={pathname === p.views()}
-          trailing={<PanelCount value={allViews.length + 3} />}
+          trailing={<PanelCount value={allViews.length + builtinCount} />}
           className="text-caption"
         />
       </PanelList>
@@ -264,6 +271,7 @@ const BUILTIN_ICON: Record<BuiltinViewKey, React.ReactNode> = {
   my_issues: <CircleUser className="size-4 shrink-0" />,
   my_agents: <Bot className="size-4 shrink-0" />,
   all_issues: <ListTodo className="size-4 shrink-0" />,
+  awaiting_merge: <GitPullRequest className="size-4 shrink-0" />,
 };
 
 function BuiltinViewRow({
@@ -305,14 +313,18 @@ function BuiltinViewRow({
       ? t(($) => $.nav.my_issues)
       : builtin === "my_agents"
         ? t(($) => $.panels.work.my_agents)
-        : t(($) => $.panels.work.all_issues);
+        : builtin === "awaiting_merge"
+          ? t(($) => $.panels.work.awaiting_merge)
+          : t(($) => $.panels.work.all_issues);
   const active =
     plainRowsLit &&
     (builtin === "all_issues"
       ? pathname === p.issues()
         ? activeWorkspaceView === null
         : !issueLitInTree && isPathWithin(pathname, p.issues())
-      : onMyIssues && activeMyView === null && (builtin === "my_agents") === isMyAgentsSearch(searchParams));
+      : builtin === "awaiting_merge"
+        ? pathname === p.awaitingMerge()
+        : onMyIssues && activeMyView === null && (builtin === "my_agents") === isMyAgentsSearch(searchParams));
 
   const source = builtinSidebarSource(builtin);
   const expanded = useSidebarTreeStore((s) => s.expanded.includes(source));

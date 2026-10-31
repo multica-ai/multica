@@ -4,6 +4,7 @@ import type {
   GitHubPullRequestMergeable,
   GitHubPullRequestMergeStateStatus,
   GitHubPullRequestState,
+  IssuePullRequestState,
 } from "../types";
 
 // A PR's health comes from TWO independent facts, each tri-state and each
@@ -214,6 +215,46 @@ export function derivePullRequestVerdict(input: PullRequestVerdictInput): PullRe
   if (checks.kind === "passed") return { kind: "passed", total: checks.total };
   if (checks.kind === "none") return { kind: "no_checks" };
   return { kind: "unknown" };
+}
+
+// Awaiting merge queue
+
+/** Which "Awaiting merge" group an open PR's verdict puts its issue in. The
+ *  server groups by the same rule (issue_table_pull_request.go); change both
+ *  together. */
+export function pullRequestQueueState(
+  verdict: PullRequestVerdict,
+): Exclude<IssuePullRequestState, "none"> {
+  switch (verdict.kind) {
+    case "ready":
+      return "ready";
+    case "failed":
+    case "conflicting":
+    case "behind":
+    case "blocked":
+      return "needs_attention";
+    default:
+      return "checking";
+  }
+}
+
+const QUEUE_STATE_RANK = { ready: 0, checking: 1, needs_attention: 2 } as const;
+
+/** The open PR that decides an issue's group: the worst one, since one
+ *  blocked PR holds the whole issue back. Drafts, merged and closed PRs do
+ *  not count. */
+export function queueDecidingPullRequest<T extends PullRequestVerdictInput>(prs: readonly T[]): T | undefined {
+  let deciding: T | undefined;
+  let rank = -1;
+  for (const pr of prs) {
+    if (pr.state !== "open") continue;
+    const next = QUEUE_STATE_RANK[pullRequestQueueState(derivePullRequestVerdict(pr))];
+    if (next > rank) {
+      deciding = pr;
+      rank = next;
+    }
+  }
+  return deciding;
 }
 
 // Row copy

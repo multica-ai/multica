@@ -13,6 +13,7 @@ const actions = vi.hoisted(() => ({
   remove: vi.fn(),
   canManage: () => true,
 }));
+const codeHost = vi.hoisted(() => ({ github: false }));
 
 vi.mock("../../issue-views/use-view-actions", () => ({ useIssueViewActions: () => actions }));
 vi.mock("../../issue-views/delete-view-dialog", () => ({ DeleteViewDialog: () => null }));
@@ -46,7 +47,14 @@ vi.mock("@multica/core/issue-statuses/hooks", async () => {
 });
 vi.mock("@tanstack/react-query", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@tanstack/react-query")>()),
-  useQuery: () => ({ data: [] }),
+  useQuery: ({ queryKey }: { queryKey: readonly unknown[] }) => {
+    const last = queryKey[queryKey.length - 1];
+    if (last === "installations") {
+      return { data: { installations: codeHost.github ? [{ id: "inst-1" }] : [] }, isPending: false };
+    }
+    if (last === "connections") return { data: { connections: [] }, isPending: false };
+    return { data: [] };
+  },
   useQueryClient: () => ({}),
 }));
 
@@ -91,6 +99,7 @@ const SAVED_VIEW = {
 beforeEach(() => {
   actions.create.mockReset();
   actions.sidebar.items = [];
+  codeHost.github = false;
   useSidebarTreeStore.setState({ viewsCollapsed: false });
   useActiveIssueViewStore.setState({ active: {} });
 });
@@ -123,6 +132,29 @@ describe("ViewsSection", () => {
     renderSection();
     expect(screen.getByRole("button", { name: "Issues in All issues" })).toHaveAttribute("aria-expanded", "false");
     expect(screen.getByRole("button", { name: "Issues in Not done" })).toHaveAttribute("aria-expanded", "false");
+  });
+
+  it("links Awaiting merge to its own page", () => {
+    codeHost.github = true;
+    actions.sidebar.items = [{ id: "builtin:awaiting_merge", kind: "builtin", key: "awaiting_merge" }];
+    const push = vi.fn();
+    renderSection(makeAdapter({ push }));
+
+    const link = screen.getByRole("link", { name: "Awaiting merge" });
+    expect(link).toHaveAttribute("href", "/acme/views/awaiting-merge");
+    fireEvent.click(link);
+    expect(push).toHaveBeenCalledWith("/acme/views/awaiting-merge");
+  });
+
+  it("counts Awaiting merge among all views only when a code host is connected", () => {
+    const allViewsCount = () => screen.getByRole("link", { name: /All views/ }).textContent;
+    const { unmount } = renderSection();
+    expect(allViewsCount()).toContain("3");
+    unmount();
+
+    codeHost.github = true;
+    renderSection();
+    expect(allViewsCount()).toContain("4");
   });
 
   describe("view state follows where the click actually navigates", () => {
