@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"crypto/rand"
 	"encoding/base64"
+	"encoding/hex"
+	"errors"
 	"testing"
 )
 
@@ -77,11 +79,25 @@ func TestLoadKey(t *testing.T) {
 	const envVar = "TEST_SECRETBOX_KEY"
 	t.Run("missing", func(t *testing.T) {
 		t.Setenv(envVar, "")
-		if _, err := LoadKey(envVar); err == nil {
+		_, err := LoadKey(envVar)
+		if err == nil {
 			t.Fatal("expected error on missing env var")
 		}
+		if !errors.Is(err, ErrKeyNotSet) {
+			t.Fatalf("expected ErrKeyNotSet, got %v", err)
+		}
 	})
-	t.Run("bad base64", func(t *testing.T) {
+	t.Run("whitespace missing", func(t *testing.T) {
+		t.Setenv(envVar, "   \n\t  ")
+		_, err := LoadKey(envVar)
+		if err == nil {
+			t.Fatal("expected error on whitespace env var")
+		}
+		if !errors.Is(err, ErrKeyNotSet) {
+			t.Fatalf("expected ErrKeyNotSet, got %v", err)
+		}
+	})
+	t.Run("bad format", func(t *testing.T) {
 		t.Setenv(envVar, "not!base64!")
 		if _, err := LoadKey(envVar); err == nil {
 			t.Fatal("expected error on invalid base64")
@@ -93,7 +109,7 @@ func TestLoadKey(t *testing.T) {
 			t.Fatal("expected error on short key")
 		}
 	})
-	t.Run("happy path", func(t *testing.T) {
+	t.Run("happy path std base64", func(t *testing.T) {
 		key := make([]byte, KeySize)
 		_, _ = rand.Read(key)
 		t.Setenv(envVar, base64.StdEncoding.EncodeToString(key))
@@ -102,6 +118,91 @@ func TestLoadKey(t *testing.T) {
 			t.Fatalf("LoadKey: %v", err)
 		}
 		if !bytes.Equal(got, key) {
+			t.Fatalf("LoadKey returned wrong bytes")
+		}
+	})
+	t.Run("whitespace trimmed", func(t *testing.T) {
+		key := make([]byte, KeySize)
+		_, _ = rand.Read(key)
+		t.Setenv(envVar, "  \n"+base64.StdEncoding.EncodeToString(key)+"\r\n  ")
+		got, err := LoadKey(envVar)
+		if err != nil {
+			t.Fatalf("LoadKey: %v", err)
+		}
+		if !bytes.Equal(got, key) {
+			t.Fatalf("LoadKey returned wrong bytes")
+		}
+	})
+	t.Run("double quoted", func(t *testing.T) {
+		key := make([]byte, KeySize)
+		_, _ = rand.Read(key)
+		t.Setenv(envVar, `"`+base64.StdEncoding.EncodeToString(key)+`"`)
+		got, err := LoadKey(envVar)
+		if err != nil {
+			t.Fatalf("LoadKey: %v", err)
+		}
+		if !bytes.Equal(got, key) {
+			t.Fatalf("LoadKey returned wrong bytes")
+		}
+	})
+	t.Run("single quoted", func(t *testing.T) {
+		key := make([]byte, KeySize)
+		_, _ = rand.Read(key)
+		t.Setenv(envVar, `'`+base64.StdEncoding.EncodeToString(key)+`'`)
+		got, err := LoadKey(envVar)
+		if err != nil {
+			t.Fatalf("LoadKey: %v", err)
+		}
+		if !bytes.Equal(got, key) {
+			t.Fatalf("LoadKey returned wrong bytes")
+		}
+	})
+	t.Run("url safe base64", func(t *testing.T) {
+		key := make([]byte, KeySize)
+		// Ensure characters like 62/63 are present to exercise - and _
+		key[0] = 0xfb
+		key[1] = 0xff
+		t.Setenv(envVar, base64.URLEncoding.EncodeToString(key))
+		got, err := LoadKey(envVar)
+		if err != nil {
+			t.Fatalf("LoadKey: %v", err)
+		}
+		if !bytes.Equal(got, key) {
+			t.Fatalf("LoadKey returned wrong bytes")
+		}
+	})
+	t.Run("unpadded base64", func(t *testing.T) {
+		key := make([]byte, KeySize)
+		_, _ = rand.Read(key)
+		t.Setenv(envVar, base64.RawStdEncoding.EncodeToString(key))
+		got, err := LoadKey(envVar)
+		if err != nil {
+			t.Fatalf("LoadKey: %v", err)
+		}
+		if !bytes.Equal(got, key) {
+			t.Fatalf("LoadKey returned wrong bytes")
+		}
+	})
+	t.Run("hex encoded", func(t *testing.T) {
+		key := make([]byte, KeySize)
+		_, _ = rand.Read(key)
+		t.Setenv(envVar, hex.EncodeToString(key))
+		got, err := LoadKey(envVar)
+		if err != nil {
+			t.Fatalf("LoadKey: %v", err)
+		}
+		if !bytes.Equal(got, key) {
+			t.Fatalf("LoadKey returned wrong bytes")
+		}
+	})
+	t.Run("raw 32 bytes", func(t *testing.T) {
+		raw := "12345678901234567890123456789012"
+		t.Setenv(envVar, raw)
+		got, err := LoadKey(envVar)
+		if err != nil {
+			t.Fatalf("LoadKey: %v", err)
+		}
+		if !bytes.Equal(got, []byte(raw)) {
 			t.Fatalf("LoadKey returned wrong bytes")
 		}
 	})
