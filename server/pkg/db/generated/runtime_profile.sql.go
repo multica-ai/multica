@@ -23,9 +23,10 @@ INSERT INTO runtime_profile (
     visibility,
     created_by,
     enabled,
-    runtime_type
-) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
-RETURNING id, workspace_id, display_name, protocol_family, command_name, description, fixed_args, visibility, created_by, enabled, created_at, updated_at, runtime_type
+    runtime_type,
+    skip_if_missing
+) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+RETURNING id, workspace_id, display_name, protocol_family, command_name, description, fixed_args, visibility, created_by, enabled, created_at, updated_at, runtime_type, skip_if_missing
 `
 
 type CreateRuntimeProfileParams struct {
@@ -39,6 +40,7 @@ type CreateRuntimeProfileParams struct {
 	CreatedBy      pgtype.UUID `json:"created_by"`
 	Enabled        bool        `json:"enabled"`
 	RuntimeType    string      `json:"runtime_type"`
+	SkipIfMissing  bool        `json:"skip_if_missing"`
 }
 
 // Custom Runtime profiles (MUL-3284). Workspace-level definitions of a custom
@@ -56,6 +58,7 @@ func (q *Queries) CreateRuntimeProfile(ctx context.Context, arg CreateRuntimePro
 		arg.CreatedBy,
 		arg.Enabled,
 		arg.RuntimeType,
+		arg.SkipIfMissing,
 	)
 	var i RuntimeProfile
 	err := row.Scan(
@@ -72,6 +75,7 @@ func (q *Queries) CreateRuntimeProfile(ctx context.Context, arg CreateRuntimePro
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.RuntimeType,
+		&i.SkipIfMissing,
 	)
 	return i, err
 }
@@ -141,7 +145,7 @@ func (q *Queries) DeleteRuntimeProfile(ctx context.Context, arg DeleteRuntimePro
 }
 
 const getRuntimeProfile = `-- name: GetRuntimeProfile :one
-SELECT id, workspace_id, display_name, protocol_family, command_name, description, fixed_args, visibility, created_by, enabled, created_at, updated_at, runtime_type FROM runtime_profile
+SELECT id, workspace_id, display_name, protocol_family, command_name, description, fixed_args, visibility, created_by, enabled, created_at, updated_at, runtime_type, skip_if_missing FROM runtime_profile
 WHERE id = $1
 `
 
@@ -162,12 +166,13 @@ func (q *Queries) GetRuntimeProfile(ctx context.Context, id pgtype.UUID) (Runtim
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.RuntimeType,
+		&i.SkipIfMissing,
 	)
 	return i, err
 }
 
 const getRuntimeProfileForWorkspace = `-- name: GetRuntimeProfileForWorkspace :one
-SELECT id, workspace_id, display_name, protocol_family, command_name, description, fixed_args, visibility, created_by, enabled, created_at, updated_at, runtime_type FROM runtime_profile
+SELECT id, workspace_id, display_name, protocol_family, command_name, description, fixed_args, visibility, created_by, enabled, created_at, updated_at, runtime_type, skip_if_missing FROM runtime_profile
 WHERE id = $1 AND workspace_id = $2
 `
 
@@ -193,6 +198,7 @@ func (q *Queries) GetRuntimeProfileForWorkspace(ctx context.Context, arg GetRunt
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.RuntimeType,
+		&i.SkipIfMissing,
 	)
 	return i, err
 }
@@ -377,7 +383,7 @@ func (q *Queries) ListAgentRuntimeIDsByProfile(ctx context.Context, arg ListAgen
 }
 
 const listEnabledRuntimeProfilesForWorkspace = `-- name: ListEnabledRuntimeProfilesForWorkspace :many
-SELECT id, workspace_id, display_name, protocol_family, command_name, description, fixed_args, visibility, created_by, enabled, created_at, updated_at, runtime_type FROM runtime_profile
+SELECT id, workspace_id, display_name, protocol_family, command_name, description, fixed_args, visibility, created_by, enabled, created_at, updated_at, runtime_type, skip_if_missing FROM runtime_profile
 WHERE workspace_id = $1 AND enabled = true
 ORDER BY created_at ASC
 `
@@ -407,6 +413,7 @@ func (q *Queries) ListEnabledRuntimeProfilesForWorkspace(ctx context.Context, wo
 			&i.CreatedAt,
 			&i.UpdatedAt,
 			&i.RuntimeType,
+			&i.SkipIfMissing,
 		); err != nil {
 			return nil, err
 		}
@@ -419,7 +426,7 @@ func (q *Queries) ListEnabledRuntimeProfilesForWorkspace(ctx context.Context, wo
 }
 
 const listRuntimeProfiles = `-- name: ListRuntimeProfiles :many
-SELECT id, workspace_id, display_name, protocol_family, command_name, description, fixed_args, visibility, created_by, enabled, created_at, updated_at, runtime_type FROM runtime_profile
+SELECT id, workspace_id, display_name, protocol_family, command_name, description, fixed_args, visibility, created_by, enabled, created_at, updated_at, runtime_type, skip_if_missing FROM runtime_profile
 WHERE workspace_id = $1
 ORDER BY created_at ASC
 `
@@ -447,6 +454,7 @@ func (q *Queries) ListRuntimeProfiles(ctx context.Context, workspaceID pgtype.UU
 			&i.CreatedAt,
 			&i.UpdatedAt,
 			&i.RuntimeType,
+			&i.SkipIfMissing,
 		); err != nil {
 			return nil, err
 		}
@@ -459,7 +467,7 @@ func (q *Queries) ListRuntimeProfiles(ctx context.Context, workspaceID pgtype.UU
 }
 
 const lockRuntimeProfileForDelete = `-- name: LockRuntimeProfileForDelete :one
-SELECT id, workspace_id, display_name, protocol_family, command_name, description, fixed_args, visibility, created_by, enabled, created_at, updated_at, runtime_type FROM runtime_profile
+SELECT id, workspace_id, display_name, protocol_family, command_name, description, fixed_args, visibility, created_by, enabled, created_at, updated_at, runtime_type, skip_if_missing FROM runtime_profile
 WHERE id = $1 AND workspace_id = $2
 FOR UPDATE
 `
@@ -488,12 +496,13 @@ func (q *Queries) LockRuntimeProfileForDelete(ctx context.Context, arg LockRunti
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.RuntimeType,
+		&i.SkipIfMissing,
 	)
 	return i, err
 }
 
 const lockRuntimeProfileForRegistration = `-- name: LockRuntimeProfileForRegistration :one
-SELECT id, workspace_id, display_name, protocol_family, command_name, description, fixed_args, visibility, created_by, enabled, created_at, updated_at, runtime_type FROM runtime_profile
+SELECT id, workspace_id, display_name, protocol_family, command_name, description, fixed_args, visibility, created_by, enabled, created_at, updated_at, runtime_type, skip_if_missing FROM runtime_profile
 WHERE id = $1 AND workspace_id = $2
 FOR KEY SHARE
 `
@@ -524,6 +533,7 @@ func (q *Queries) LockRuntimeProfileForRegistration(ctx context.Context, arg Loc
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.RuntimeType,
+		&i.SkipIfMissing,
 	)
 	return i, err
 }
@@ -536,20 +546,22 @@ SET display_name = COALESCE($1, display_name),
     fixed_args   = COALESCE($4, fixed_args),
     visibility   = COALESCE($5, visibility),
     enabled      = COALESCE($6, enabled),
+    skip_if_missing = COALESCE($7, skip_if_missing),
     updated_at   = now()
-WHERE id = $7 AND workspace_id = $8
-RETURNING id, workspace_id, display_name, protocol_family, command_name, description, fixed_args, visibility, created_by, enabled, created_at, updated_at, runtime_type
+WHERE id = $8 AND workspace_id = $9
+RETURNING id, workspace_id, display_name, protocol_family, command_name, description, fixed_args, visibility, created_by, enabled, created_at, updated_at, runtime_type, skip_if_missing
 `
 
 type UpdateRuntimeProfileParams struct {
-	DisplayName pgtype.Text `json:"display_name"`
-	CommandName pgtype.Text `json:"command_name"`
-	Description pgtype.Text `json:"description"`
-	FixedArgs   []byte      `json:"fixed_args"`
-	Visibility  pgtype.Text `json:"visibility"`
-	Enabled     pgtype.Bool `json:"enabled"`
-	ID          pgtype.UUID `json:"id"`
-	WorkspaceID pgtype.UUID `json:"workspace_id"`
+	DisplayName   pgtype.Text `json:"display_name"`
+	CommandName   pgtype.Text `json:"command_name"`
+	Description   pgtype.Text `json:"description"`
+	FixedArgs     []byte      `json:"fixed_args"`
+	Visibility    pgtype.Text `json:"visibility"`
+	Enabled       pgtype.Bool `json:"enabled"`
+	SkipIfMissing pgtype.Bool `json:"skip_if_missing"`
+	ID            pgtype.UUID `json:"id"`
+	WorkspaceID   pgtype.UUID `json:"workspace_id"`
 }
 
 // Partial update via COALESCE: NULL args leave the column unchanged. The
@@ -564,6 +576,7 @@ func (q *Queries) UpdateRuntimeProfile(ctx context.Context, arg UpdateRuntimePro
 		arg.FixedArgs,
 		arg.Visibility,
 		arg.Enabled,
+		arg.SkipIfMissing,
 		arg.ID,
 		arg.WorkspaceID,
 	)
@@ -582,6 +595,7 @@ func (q *Queries) UpdateRuntimeProfile(ctx context.Context, arg UpdateRuntimePro
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.RuntimeType,
+		&i.SkipIfMissing,
 	)
 	return i, err
 }
