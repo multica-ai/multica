@@ -92,7 +92,7 @@ export function useSidebarViews(wsId: string, userId: string | undefined) {
     enabled: !!wsId && !!userId,
   });
   const pins = pinsQuery.data ?? EMPTY_PINS;
-  const update = useUpdateIssueViewPreference(wsId, SIDEBAR_VIEWS_SCOPE);
+  const save = useUpdateIssueViewPreference(wsId, SIDEBAR_VIEWS_SCOPE);
 
   const preference = preferenceQuery.data;
   const savedOrder = preference && preference.updated_at !== "" ? preference.prefs.order : null;
@@ -115,9 +115,9 @@ export function useSidebarViews(wsId: string, userId: string | undefined) {
     (savedOrder !== null || (viewsQuery.isSuccess && (!userId || pinsQuery.isSuccess)));
   const write = useCallback(
     (next: string[]) => {
-      if (ready) update.mutate({ hidden: [], order: next });
+      if (ready) save({ hidden: [], order: next });
     },
-    [ready, update],
+    [ready, save],
   );
 
   return {

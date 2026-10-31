@@ -30,6 +30,7 @@ import {
 } from "@multica/core/issues/sidebar-list";
 import { todayDateOnly } from "@multica/core/issues/date";
 import { useIssueStatuses } from "@multica/core/issue-statuses/hooks";
+import { useSidebarProjectPrefs } from "@multica/core/issues/sidebar-project-prefs";
 import { useSidebarTreeStore } from "@multica/core/issues/stores/sidebar-tree-store";
 import {
   myIssuesRelationFromScope,
@@ -317,9 +318,9 @@ function BuiltinViewRow({
   const expanded = useSidebarTreeStore((s) => s.expanded.includes(source));
   const setExpanded = useSidebarTreeStore((s) => s.setExpanded);
   const statusCatalog = useIssueStatuses(wsId);
-  const settings = useSidebarTreeStore((s) => s.issueSettings);
+  const { issueSettings } = useSidebarProjectPrefs(wsId);
   const request = statusCatalog.isLoaded
-    ? builtinSidebarRequest(builtin, myIssuesRelationFromScope(myScope), settings, statusCatalog.statuses)
+    ? builtinSidebarRequest(builtin, myIssuesRelationFromScope(myScope), issueSettings, statusCatalog.statuses)
     : undefined;
   const prefetch = usePrefetch(wsId, source, request);
 

@@ -103,3 +103,16 @@ describe("issueViewFilterCount", () => {
     expect(issueViewFilterCount({ priorityFilters: ["bogus"], projectStatusFilters: ["nope"] })).toBe(0);
   });
 });
+
+describe("baselineFromQuery agent running", () => {
+  it("fixes the filter only when the view saved it as true", () => {
+    expect(baselineFromQuery({ agentRunningFilter: true }).agentRunning).toBe(true);
+    expect(baselineFromQuery({ agentRunningFilter: true }).raw.agentRunningFilter).toBe(true);
+    expect(baselineFromQuery({ agentRunningFilter: "yes" }).agentRunning).toBe(false);
+    expect(baselineFromQuery({}).raw.agentRunningFilter).toBe(false);
+  });
+
+  it("counts as one condition in the view summary", () => {
+    expect(issueViewFilterCount({ agentRunningFilter: true, statusFilters: ["todo"] })).toBe(2);
+  });
+});

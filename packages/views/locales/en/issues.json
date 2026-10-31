@@ -178,6 +178,8 @@
     "relation_assigned": "Assigned to me",
     "relation_created": "Created by me",
     "relation_my_agents": "Assigned to my agents",
+    "section_agent_status": "Agent status",
+    "agent_status_running": "Running",
     "operator_label": "Match",
     "operator_is": "is",
     "operator_is_not": "is not",
@@ -1654,8 +1656,6 @@
       "picker_more": "Create more workflows in Settings → Workflows."
     },
     "picker": {
-      "header": "{{workflow}} · from project “{{project}}”",
-      "header_no_project": "{{workflow}} statuses · no project",
       "footer": "Only this issue’s workflow statuses are shown. The right side is who entering the status hands it to."
     },
     "confirm": {

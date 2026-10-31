@@ -76,3 +76,30 @@ describe("modifiedFilterDimensions", () => {
     );
   });
 });
+
+describe("agent running in a saved view", () => {
+  const view = { query: { agentRunningFilter: true }, display: {} };
+
+  it("saves the filter and opens with it on, unmodified", () => {
+    const store = liveStateFor(view);
+    expect(store.getState().agentRunningFilter).toBe(true);
+    expect(issueViewDefinitionFromState(store.getState()).query).toMatchObject({
+      agentRunningFilter: true,
+    });
+    expect(isIssueViewModified(view, store.getState()).filters).toBe(false);
+  });
+
+  it("reports turning it off as a modified filter", () => {
+    const store = liveStateFor(view);
+    store.getState().toggleAgentRunningFilter();
+    expect(isIssueViewModified(view, store.getState()).filters).toBe(true);
+    expect([...modifiedFilterDimensions(view, store.getState())]).toEqual(["agentRunning"]);
+  });
+
+  it("treats a view saved before the filter existed as off", () => {
+    const legacy = { query: { statusFilters: ["todo"] }, display: {} };
+    const store = liveStateFor(legacy);
+    expect(store.getState().agentRunningFilter).toBe(false);
+    expect(isIssueViewModified(legacy, store.getState()).filters).toBe(false);
+  });
+});

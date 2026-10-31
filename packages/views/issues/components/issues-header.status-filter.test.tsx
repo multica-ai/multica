@@ -173,7 +173,7 @@ describe("IssueFilterMenu active dimensions", () => {
 
     const rows = dimensionRows();
     expect(rows[0]).toBe("PriorityisHigh");
-    expect(rows.slice(1, 3)).toEqual(["Status", "Assignee"]);
+    expect(rows.slice(1, 4)).toEqual(["Status", "Agent status", "Assignee"]);
   });
 
   it("keeps a dimension in place while the menu stays open", async () => {

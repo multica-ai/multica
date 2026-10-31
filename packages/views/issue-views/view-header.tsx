@@ -205,7 +205,6 @@ export function IssueViewHeader({
       storeApi.getState().clearFilters();
     }
     setDateFilter(null);
-    if (agentRunningFilter) toggleAgentRunningFilter();
   };
   const saveAsNew = () =>
     actions.create({

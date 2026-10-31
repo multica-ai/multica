@@ -7,6 +7,7 @@ import { useCurrentWorkspace, useWorkspacePaths } from "@multica/core/paths";
 import { isIssueUuid } from "@multica/core/issues/canonical-id";
 import { issueDetailOptions } from "@multica/core/issues/queries";
 import { projectSidebarSource, sidebarProjects } from "@multica/core/issues/sidebar-list";
+import { useSidebarProjectPrefs } from "@multica/core/issues/sidebar-project-prefs";
 import { useSidebarTreeStore } from "@multica/core/issues/stores/sidebar-tree-store";
 import { projectListOptions } from "@multica/core/projects/queries";
 import type { Project } from "@multica/core/types";
@@ -78,8 +79,7 @@ export function WorkPanel() {
     if (revealProjectId) setExpanded(projectSidebarSource(revealProjectId), true);
   }, [revealProjectId, setExpanded]);
 
-  const projectSettings = useSidebarTreeStore((s) => s.projectSettings);
-  const projectOrder = useSidebarTreeStore((s) => s.projectOrder);
+  const { projectSettings, projectOrder } = useSidebarProjectPrefs(wsId ?? "");
   const shownProjects = useMemo(() => {
     const shown = sidebarProjects(projects, projectSettings, projectOrder, userId);
     const revealed = projects.find((project) => project.id === revealProjectId);

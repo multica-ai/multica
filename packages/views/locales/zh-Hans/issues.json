@@ -176,6 +176,8 @@
     "relation_assigned": "分配给我的",
     "relation_created": "我创建的",
     "relation_my_agents": "分配给我的智能体的",
+    "section_agent_status": "智能体状态",
+    "agent_status_running": "运行中",
     "operator_label": "关系",
     "operator_is": "是",
     "operator_is_not": "不是",
@@ -1589,8 +1591,6 @@
       "picker_more": "在「设置 → 工作流」里可以新建更多工作流。"
     },
     "picker": {
-      "header": "{{workflow}} · 跟随项目「{{project}}」",
-      "header_no_project": "{{workflow}} 状态 · 无项目",
       "footer": "只显示这个任务所在工作流里的状态。右侧是进入该状态时的处理人。"
     },
     "confirm": {

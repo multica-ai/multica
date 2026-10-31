@@ -98,6 +98,7 @@ describe("viewSidebarRequest", () => {
         },
       }),
     ).toMatchObject({ advanced: { match: "any", children: [{ field: "priorities", values: ["urgent"] }] } });
+    expect(filters({ agentRunningFilter: true })).toMatchObject({ working_only: true });
     // "Is not" with nothing selected is not a condition, and no due-date rule needs no day.
     expect(filters({ negatedFilters: ["status"] })).toEqual({ include_sub_issues: true });
   });

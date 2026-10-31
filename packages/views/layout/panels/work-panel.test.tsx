@@ -3,8 +3,11 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { fireEvent, screen } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { agentTaskSnapshotOptions } from "@multica/core/agents";
+import { EMPTY_ISSUE_VIEW_PREFERENCE } from "@multica/core/api/schemas";
 import { useActiveIssueViewStore } from "@multica/core/issue-views/active-view-store";
+import { issueViewPreferenceOptions } from "@multica/core/issue-views/preferences";
 import { issueViewEverywhereOptions } from "@multica/core/issue-views/queries";
+import { SIDEBAR_PROJECTS_SCOPE } from "@multica/core/issues/sidebar-project-prefs";
 import { useSidebarTreeStore } from "@multica/core/issues/stores/sidebar-tree-store";
 import { pinListOptions } from "@multica/core/pins/queries";
 import { projectListOptions } from "@multica/core/projects/queries";
@@ -118,6 +121,7 @@ function renderPanel(initialPath: string, pins: PinnedItem[] = []) {
   qc.setQueryData(projectListOptions("ws-1").queryKey, { projects: [], total: 0 });
   qc.setQueryData(pinListOptions("ws-1", "u1").queryKey, pins);
   qc.setQueryData(issueViewEverywhereOptions("ws-1").queryKey, []);
+  qc.setQueryData(issueViewPreferenceOptions("ws-1", SIDEBAR_PROJECTS_SCOPE).queryKey, EMPTY_ISSUE_VIEW_PREFERENCE);
   qc.setQueryData(agentTaskSnapshotOptions("ws-1").queryKey, []);
 
   function Harness() {

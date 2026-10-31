@@ -1,14 +1,29 @@
-import { fireEvent, screen } from "@testing-library/react";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { fireEvent, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import type { IssueViewPreference } from "@multica/core/api/schemas";
+import { issueViewPreferenceOptions } from "@multica/core/issue-views/preferences";
 import { buildIssueStatusCatalog } from "@multica/core/issue-statuses/queries";
+import { SIDEBAR_PROJECTS_SCOPE } from "@multica/core/issues/sidebar-project-prefs";
 import {
   DEFAULT_SIDEBAR_ISSUE_SETTINGS,
   DEFAULT_SIDEBAR_PROJECT_SETTINGS,
-  useSidebarTreeStore,
 } from "@multica/core/issues/stores/sidebar-tree-store";
 import { renderWithI18n } from "../../test/i18n";
 import { ProjectsSectionSettings } from "./sidebar-settings";
 
+const server = vi.hoisted(() => ({
+  doc: null as unknown as IssueViewPreference,
+  getIssueViewPreference: vi.fn(),
+  putIssueViewPreference: vi.fn(),
+}));
+vi.mock("@multica/core/api", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@multica/core/api")>()),
+  api: {
+    getIssueViewPreference: server.getIssueViewPreference,
+    putIssueViewPreference: server.putIssueViewPreference,
+  },
+}));
 vi.mock("@multica/core/issue-statuses/hooks", () => ({
   useIssueStatuses: () =>
     buildIssueStatusCatalog(
@@ -34,50 +49,71 @@ vi.mock("@multica/core/issue-statuses/hooks", () => ({
 }));
 vi.mock("../../issues/components/status-icon", () => ({ StatusIcon: () => <span /> }));
 
-beforeEach(() => {
-  useSidebarTreeStore.setState({
-    issueSettings: DEFAULT_SIDEBAR_ISSUE_SETTINGS,
-    projectSettings: DEFAULT_SIDEBAR_PROJECT_SETTINGS,
-  });
+const saved = (prefs: Record<string, unknown>): IssueViewPreference => ({
+  scope_type: "sidebar_projects",
+  scope_id: "u1",
+  updated_at: "2026-10-31T00:00:00Z",
+  prefs: { hidden: [], order: [], ...prefs },
 });
 
+let qc: QueryClient;
+
+beforeEach(() => {
+  server.doc = saved({});
+  server.getIssueViewPreference.mockReset().mockImplementation(async () => server.doc);
+  server.putIssueViewPreference
+    .mockReset()
+    .mockImplementation(async ({ prefs }: { prefs: Record<string, unknown> }) => (server.doc = saved(prefs)));
+  qc = new QueryClient({ defaultOptions: { queries: { staleTime: Infinity, retry: false } } });
+  qc.setQueryData(issueViewPreferenceOptions("ws-1", SIDEBAR_PROJECTS_SCOPE).queryKey, server.doc);
+});
+
+function openSettings() {
+  renderWithI18n(
+    <QueryClientProvider client={qc}>
+      <ProjectsSectionSettings wsId="ws-1" />
+    </QueryClientProvider>,
+  );
+  fireEvent.click(screen.getByRole("button", { name: "Project display" }));
+}
+
 const chip = (name: string) => screen.getByRole("button", { name });
+const lastSaved = () => server.putIssueViewPreference.mock.lastCall![0].prefs;
 
 describe("ProjectsSectionSettings", () => {
   it("covers both the project list and every project's issues", () => {
-    renderWithI18n(<ProjectsSectionSettings wsId="ws-1" />);
-    fireEvent.click(screen.getByRole("button", { name: "Project display" }));
+    openSettings();
 
     expect(screen.getByRole("heading", { name: "Projects" })).toBeInTheDocument();
     expect(screen.getByRole("heading", { name: "Issues in projects" })).toBeInTheDocument();
   });
 
-  it("toggles issue statuses from their chips", () => {
-    renderWithI18n(<ProjectsSectionSettings wsId="ws-1" />);
-    fireEvent.click(screen.getByRole("button", { name: "Project display" }));
+  it("saves issue statuses toggled from their chips for every device", async () => {
+    openSettings();
 
     expect(chip("Todo")).toHaveAttribute("aria-pressed", "true");
     expect(chip("Done")).toHaveAttribute("aria-pressed", "false");
 
     fireEvent.click(chip("Todo"));
-    const hidden = useSidebarTreeStore.getState().issueSettings.hiddenStatuses;
-    expect(hidden).toContain("todo");
-    expect(hidden).toContain("done");
-    expect(chip("Todo")).toHaveAttribute("aria-pressed", "false");
+    await waitFor(() => expect(chip("Todo")).toHaveAttribute("aria-pressed", "false"));
+    expect(lastSaved().issues.hiddenStatuses).toEqual(expect.arrayContaining(["todo", "done"]));
   });
 
-  it("toggles a project status and resets everything at once", () => {
-    renderWithI18n(<ProjectsSectionSettings wsId="ws-1" />);
-    fireEvent.click(screen.getByRole("button", { name: "Project display" }));
+  it("toggles a project status and resets everything at once", async () => {
+    openSettings();
 
     expect(screen.queryByRole("button", { name: "Reset" })).toBeNull();
     fireEvent.click(chip("Completed"));
+    await waitFor(() => expect(chip("Completed")).toHaveAttribute("aria-pressed", "true"));
     fireEvent.click(chip("Todo"));
-    expect(useSidebarTreeStore.getState().projectSettings.statuses).toContain("completed");
+    await waitFor(() => expect(chip("Todo")).toHaveAttribute("aria-pressed", "false"));
+    await waitFor(() => expect(server.putIssueViewPreference).toHaveBeenCalledTimes(2));
+    expect(lastSaved().projects.statuses).toContain("completed");
 
     fireEvent.click(screen.getByRole("button", { name: "Reset" }));
-    const state = useSidebarTreeStore.getState();
-    expect(state.projectSettings).toEqual(DEFAULT_SIDEBAR_PROJECT_SETTINGS);
-    expect(state.issueSettings).toEqual(DEFAULT_SIDEBAR_ISSUE_SETTINGS);
+    await waitFor(() => expect(screen.queryByRole("button", { name: "Reset" })).toBeNull());
+    // Writes go out one at a time; the reset is the last to be sent.
+    await waitFor(() => expect(lastSaved().projects).toEqual(DEFAULT_SIDEBAR_PROJECT_SETTINGS));
+    expect(lastSaved().issues).toEqual(DEFAULT_SIDEBAR_ISSUE_SETTINGS);
   });
 });

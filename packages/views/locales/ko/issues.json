@@ -176,6 +176,8 @@
     "relation_assigned": "내가 담당",
     "relation_created": "내가 생성",
     "relation_my_agents": "내 에이전트가 담당",
+    "section_agent_status": "에이전트 상태",
+    "agent_status_running": "실행 중",
     "operator_label": "조건",
     "operator_is": "일치",
     "operator_is_not": "제외",
@@ -1589,8 +1591,6 @@
       "picker_more": "설정 → 워크플로에서 워크플로를 더 만들 수 있습니다."
     },
     "picker": {
-      "header": "{{workflow}} · 프로젝트 “{{project}}” 기준",
-      "header_no_project": "{{workflow}} 상태 · 프로젝트 없음",
       "footer": "이 태스크 워크플로의 상태만 표시합니다. 오른쪽은 해당 상태에 들어갈 때의 처리자입니다."
     },
     "confirm": {

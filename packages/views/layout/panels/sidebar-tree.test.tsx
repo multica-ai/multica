@@ -1,4 +1,4 @@
-import type { ReactNode } from "react";
+import { cloneElement, type ReactNode } from "react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { fireEvent, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
@@ -16,7 +16,30 @@ vi.mock("../../issues/actions/issue-actions-menu-items", () => ({
     <div>{`${variant} menu: ${issue.title}`}</div>
   ),
 }));
-vi.mock("../../issues/actions/use-issue-actions", () => ({ useIssueActions: () => ({}) }));
+const updateField = vi.hoisted(() => vi.fn());
+vi.mock("../../issues/actions/use-issue-actions", () => ({ useIssueActions: () => ({ updateField }) }));
+vi.mock("../../issues/components/pickers/status-picker", () => ({
+  StatusPicker: ({
+    open,
+    onUpdate,
+    trigger,
+    triggerRender,
+  }: {
+    open: boolean;
+    onUpdate: (updates: { status: string }) => void;
+    trigger: ReactNode;
+    triggerRender: React.ReactElement;
+  }) => (
+    <>
+      {cloneElement(triggerRender, {}, trigger)}
+      {open && (
+        <button type="button" onClick={() => onUpdate({ status: "done" })}>
+          Pick Done
+        </button>
+      )}
+    </>
+  ),
+}));
 
 vi.mock("@multica/core/issue-statuses/hooks", () => ({
   useIssueStatuses: () => buildIssueStatusCatalog([]),
@@ -101,7 +124,7 @@ describe("SidebarIssueList", () => {
   it("offers neither control when everything fits", () => {
     renderList({ total: 4 });
     expect(rows()).toHaveLength(4);
-    expect(screen.queryByRole("button")).toBeNull();
+    expect(screen.queryByRole("button", { name: /Load more|Show less/ })).toBeNull();
   });
 
   it("shows the empty state when the settings match nothing", () => {
@@ -133,8 +156,8 @@ describe("SidebarIssueList", () => {
 
   it("opens the sidebar issue menu on right-click and keeps the row lit while it is open", async () => {
     renderList();
-    const row = screen.getByRole("link", { name: "Issue 3" });
-    const selected = screen.getByRole("link", { name: "Issue 2" });
+    const row = screen.getByRole("link", { name: "Issue 3" }).parentElement!;
+    const selected = screen.getByRole("link", { name: "Issue 2" }).parentElement!;
     fireEvent.contextMenu(row);
 
     expect(await screen.findByText("sidebar menu: Issue 3")).toBeInTheDocument();
@@ -142,5 +165,16 @@ describe("SidebarIssueList", () => {
     expect(row.className).toContain("data-popup-open:bg-surface-hover");
     // The selected row keeps its own fill.
     expect(selected.className).not.toContain("data-popup-open:");
+  });
+
+  it("changes the status from the row's status icon without opening the issue", () => {
+    updateField.mockReset();
+    renderList({ total: 1 });
+    const status = screen.getByRole("button", { name: "Todo" });
+    expect(status.closest("a")).toBeNull();
+
+    fireEvent.click(status);
+    fireEvent.click(screen.getByRole("button", { name: "Pick Done" }));
+    expect(updateField).toHaveBeenCalledWith({ status: "done" });
   });
 });

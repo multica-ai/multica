@@ -217,7 +217,7 @@ describe("StatusPicker in a project that uses a workflow", () => {
     expect(rows).toEqual(["Todo", "QAHands off to Sentinel", "Done"]);
     expect(screen.getByText("Hands off to Sentinel").className).toContain("sr-only");
     expect(screen.getByTestId("avatar-agent-1")).toBeTruthy();
-    expect(screen.getByText("Delivery")).toBeTruthy();
+    expect(screen.queryByText("Delivery")).toBeNull();
     expect(screen.queryByText("In Review")).toBeNull();
   });
 
@@ -258,14 +258,14 @@ describe("StatusPicker on an issue outside any project (MUL-8121)", () => {
     return Array.from(document.querySelectorAll("button[data-picker-item]")).map((el) => el.textContent?.trim());
   }
 
-  it("offers only the Default workflow's statuses, headed as such, without handoff hints", () => {
+  it("offers only the Default workflow's statuses, without a header or handoff hints", () => {
     catalogEntries = [TODO, IN_REVIEW, QA, MERGED, DONE];
     workspaceDefault = DEFAULT;
     renderWithI18n(
       <StatusPicker status="todo" projectId={null} onUpdate={() => {}} open onOpenChange={() => {}} />,
     );
     expect(rows()).toEqual(["Todo", "In Review", "Done"]);
-    expect(screen.getByText("Default statuses · no project")).toBeTruthy();
+    expect(screen.queryByText(/Default statuses/)).toBeNull();
     expect(screen.queryByText(/Hands off to/)).toBeNull();
   });
 

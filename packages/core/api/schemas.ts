@@ -727,6 +727,30 @@ export const EMPTY_ISSUE_VIEW_PREFERENCE: IssueViewPreference = {
   updated_at: "",
 };
 
+/**
+ * The `sidebar_projects` preference document. Another client version may have
+ * saved values this one does not know; every field that does not parse comes
+ * out undefined so the caller's default stands in for it.
+ */
+export const SidebarProjectPrefsDocSchema = z.object({
+  projects: z.object({
+    ordering: z.enum(["manual", "name", "updated", "created"]).optional().catch(undefined),
+    statuses: z.array(z.string()).optional().catch(undefined),
+    onlyMine: z.boolean().optional().catch(undefined),
+    showCount: z.boolean().optional().catch(undefined),
+  }).catch({}),
+  issues: z.object({
+    sortBy: z.enum(["updated_at", "created_at", "priority", "status", "title", "due_date"]).optional().catch(undefined),
+    sortDirection: z.enum(["asc", "desc"]).optional().catch(undefined),
+    hiddenStatuses: z.array(z.string()).nullable().optional().catch(undefined),
+    assignee: z.enum(["anyone", "me", "my_agents"]).optional().catch(undefined),
+    showSubIssues: z.boolean().optional().catch(undefined),
+  }).catch({}),
+  order: z.array(z.unknown()).catch([]).transform((ids) => ids.filter((id): id is string => typeof id === "string")),
+});
+
+export type SidebarProjectPrefsDoc = z.infer<typeof SidebarProjectPrefsDocSchema>;
+
 export interface CreateIssueViewRequest {
   name: string;
   scope_type: "workspace" | "my" | "project";

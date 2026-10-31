@@ -8,13 +8,15 @@ import { Select, SelectContent, SelectGroup, SelectItem, SelectTrigger, SelectVa
 import { Switch } from "@multica/ui/components/ui/switch";
 import { useIssueStatuses } from "@multica/core/issue-statuses/hooks";
 import { shownSidebarStatuses } from "@multica/core/issues/sidebar-list";
+import { useSidebarProjectPrefs, useUpdateSidebarProjectPrefs } from "@multica/core/issues/sidebar-project-prefs";
 import {
   DEFAULT_SIDEBAR_ISSUE_SETTINGS,
   DEFAULT_SIDEBAR_PROJECT_SETTINGS,
-  useSidebarTreeStore,
   type SidebarIssueAssignee,
+  type SidebarIssueSettings,
   type SidebarIssueSort,
   type SidebarProjectOrdering,
+  type SidebarProjectSettings,
 } from "@multica/core/issues/stores/sidebar-tree-store";
 import { PROJECT_STATUS_CONFIG, PROJECT_STATUS_ORDER } from "@multica/core/projects/config";
 import type { ProjectStatus } from "@multica/core/types";
@@ -99,11 +101,15 @@ function SortSelect<T extends string>({
   );
 }
 
-function ProjectsGroup() {
+function ProjectsGroup({
+  settings,
+  update,
+}: {
+  settings: SidebarProjectSettings;
+  update: (patch: Partial<SidebarProjectSettings>) => void;
+}) {
   const { t } = useT("layout");
   const statusLabels = useProjectStatusLabels();
-  const settings = useSidebarTreeStore((s) => s.projectSettings);
-  const update = useSidebarTreeStore((s) => s.setProjectSettings);
   const toggleStatus = (status: ProjectStatus, on: boolean) =>
     update({ statuses: PROJECT_STATUS_ORDER.filter((s) => (s === status ? on : settings.statuses.includes(s))) });
 
@@ -156,12 +162,18 @@ function ProjectsGroup() {
   );
 }
 
-function ProjectIssuesGroup({ wsId }: { wsId: string }) {
+function ProjectIssuesGroup({
+  wsId,
+  settings,
+  update,
+}: {
+  wsId: string;
+  settings: SidebarIssueSettings;
+  update: (patch: Partial<SidebarIssueSettings>) => void;
+}) {
   const { t } = useT("layout");
   const { t: ti } = useT("issues");
   const statusCatalog = useIssueStatuses(wsId);
-  const settings = useSidebarTreeStore((s) => s.issueSettings);
-  const update = useSidebarTreeStore((s) => s.setIssueSettings);
   const shown = new Set(shownSidebarStatuses(settings, statusCatalog.statuses));
   const toggleStatus = (key: string, on: boolean) =>
     update({
@@ -237,16 +249,13 @@ function ProjectIssuesGroup({ wsId }: { wsId: string }) {
  */
 export function ProjectsSectionSettings({ wsId, className }: { wsId: string; className?: string }) {
   const { t } = useT("layout");
-  const changed = useSidebarTreeStore(
-    (s) =>
-      !sameSettings(s.projectSettings, DEFAULT_SIDEBAR_PROJECT_SETTINGS) ||
-      !sameSettings(s.issueSettings, DEFAULT_SIDEBAR_ISSUE_SETTINGS),
-  );
-  const reset = () => {
-    const store = useSidebarTreeStore.getState();
-    store.setProjectSettings(DEFAULT_SIDEBAR_PROJECT_SETTINGS);
-    store.setIssueSettings(DEFAULT_SIDEBAR_ISSUE_SETTINGS);
-  };
+  const { projectSettings, issueSettings } = useSidebarProjectPrefs(wsId);
+  const update = useUpdateSidebarProjectPrefs(wsId);
+  const changed =
+    !sameSettings(projectSettings, DEFAULT_SIDEBAR_PROJECT_SETTINGS) ||
+    !sameSettings(issueSettings, DEFAULT_SIDEBAR_ISSUE_SETTINGS);
+  const reset = () =>
+    update({ projectSettings: DEFAULT_SIDEBAR_PROJECT_SETTINGS, issueSettings: DEFAULT_SIDEBAR_ISSUE_SETTINGS });
 
   return (
     <Popover>
@@ -272,8 +281,12 @@ export function ProjectsSectionSettings({ wsId, className }: { wsId: string; cla
         className="max-h-(--available-height) w-80 gap-0 overflow-y-auto p-3"
       >
         {/* Spacing separates sections — no dividers, as in the Display panel. */}
-        <ProjectsGroup />
-        <ProjectIssuesGroup wsId={wsId} />
+        <ProjectsGroup settings={projectSettings} update={(patch) => update({ projectSettings: patch })} />
+        <ProjectIssuesGroup
+          wsId={wsId}
+          settings={issueSettings}
+          update={(patch) => update({ issueSettings: patch })}
+        />
         {changed && (
           <div className="-mr-1.5 mt-4 flex justify-end">
             <Button variant="ghost" size="sm" className="text-muted-foreground" onClick={reset}>

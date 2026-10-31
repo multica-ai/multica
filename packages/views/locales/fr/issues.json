@@ -178,6 +178,8 @@
     "relation_assigned": "Qui me sont assignés",
     "relation_created": "Créés par moi",
     "relation_my_agents": "Assignés à mes agents",
+    "section_agent_status": "Statut de l'agent",
+    "agent_status_running": "En cours d'exécution",
     "operator_label": "Condition",
     "operator_is": "est",
     "operator_is_not": "n'est pas",
@@ -1654,8 +1656,6 @@
       "picker_more": "Créez d’autres workflows dans Paramètres → Workflows."
     },
     "picker": {
-      "header": "{{workflow}} · selon le projet « {{project}} »",
-      "header_no_project": "Statuts {{workflow}} · sans projet",
       "footer": "Seuls les états du workflow de cette tâche sont affichés. À droite : à qui elle est confiée en entrant dans l’état."
     },
     "confirm": {

@@ -16,8 +16,9 @@ import {
   projectSidebarParams,
   projectSidebarSource,
 } from "@multica/core/issues/sidebar-list";
+import { useSidebarProjectPrefs, useUpdateSidebarProjectPrefs } from "@multica/core/issues/sidebar-project-prefs";
 import { openCreateIssueWithPreference } from "@multica/core/issues/stores/create-mode-store";
-import { useSidebarTreeStore } from "@multica/core/issues/stores/sidebar-tree-store";
+import { useSidebarTreeStore, type SidebarIssueSettings } from "@multica/core/issues/stores/sidebar-tree-store";
 import { useModalStore } from "@multica/core/modals";
 import { useWorkspacePaths } from "@multica/core/paths";
 import type { ListIssuesParams, ListIssuesResponse, Project } from "@multica/core/types";
@@ -87,7 +88,8 @@ export function ProjectsSection({
   const p = useWorkspacePaths();
   const collapsed = useSidebarTreeStore((s) => s.projectsCollapsed);
   const setCollapsed = useSidebarTreeStore((s) => s.setProjectsCollapsed);
-  const showCount = useSidebarTreeStore((s) => s.projectSettings.showCount);
+  const { projectSettings, issueSettings, projectOrder } = useSidebarProjectPrefs(wsId);
+  const updatePrefs = useUpdateSidebarProjectPrefs(wsId);
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 5 } }));
 
   const onDragEnd = useCallback(
@@ -97,13 +99,14 @@ export function ProjectsSection({
       const from = ids.indexOf(String(active.id));
       const to = ids.indexOf(String(over.id));
       if (from === -1 || to === -1) return;
-      const store = useSidebarTreeStore.getState();
       const moved = arrayMove(ids, from, to);
-      // Projects the filter hides keep their relative place after the shown ones.
-      store.setProjectOrder([...moved, ...store.projectOrder.filter((id) => !moved.includes(id))]);
-      if (store.projectSettings.ordering !== "manual") store.setProjectSettings({ ordering: "manual" });
+      updatePrefs({
+        // Projects the filter hides keep their relative place after the shown ones.
+        projectOrder: [...moved, ...projectOrder.filter((id) => !moved.includes(id))],
+        projectSettings: { ordering: "manual" },
+      });
     },
-    [projects],
+    [projects, projectOrder, updatePrefs],
   );
 
   return (
@@ -135,7 +138,8 @@ export function ProjectsSection({
                 userId={userId}
                 project={project}
                 active={plainRowsLit && isPathWithin(pathname, p.projectDetail(project.id))}
-                showCount={showCount}
+                showCount={projectSettings.showCount}
+                issueSettings={issueSettings}
                 activeIssueId={activeIssueId}
               />
             ))}
@@ -161,6 +165,7 @@ function ProjectTreeItem({
   project,
   active,
   showCount,
+  issueSettings,
   activeIssueId,
 }: {
   wsId: string;
@@ -168,6 +173,7 @@ function ProjectTreeItem({
   project: Project;
   active: boolean;
   showCount: boolean;
+  issueSettings: SidebarIssueSettings;
   activeIssueId: string | null;
 }) {
   const { t } = useT("layout");
@@ -177,9 +183,8 @@ function ProjectTreeItem({
   const source = projectSidebarSource(project.id);
   const [expanded, setExpanded] = useExpanded(source);
   const statusCatalog = useIssueStatuses(wsId);
-  const settings = useSidebarTreeStore((s) => s.issueSettings);
   const params = statusCatalog.isLoaded
-    ? projectSidebarParams(project.id, settings, statusCatalog.statuses, userId)
+    ? projectSidebarParams(project.id, issueSettings, statusCatalog.statuses, userId)
     : undefined;
   const prefetch = usePrefetch(wsId, source, params);
 
