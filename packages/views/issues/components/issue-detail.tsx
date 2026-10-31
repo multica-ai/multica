@@ -99,7 +99,7 @@ import { IssueProjectPicker } from "../../projects/components/issue-project-pick
 import { IssuePropertyPills } from "./issue-property-pills";
 import { LocalDirectoryHint } from "../../projects/components/local-directory-hint";
 import { useNewRunIds } from "./use-run-comment-motion";
-import { AgentRunComment, CommentCard } from "./comment-card";
+import { AgentRunComment, AttachmentList, CommentCard } from "./comment-card";
 import { EMPTY_COMMENT_RUNS, buildCommentRunView, orderTimelineWithRuns, type CommentRun } from "./comment-runs";
 import { issueTasksOptions } from "@multica/core/issues/queries";
 import { SourceContextBadge } from "./source-context-viewer";
@@ -3579,6 +3579,12 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
                 attachments={descEditorAttachments}
               />
             </div>
+
+            <AttachmentList
+              attachments={issueAttachments?.filter((attachment) => !attachment.comment_id)}
+              content={issue.description ?? ""}
+              className="mt-1.5"
+            />
 
             <div className="flex items-center gap-1 mt-3">
               <ReactionBar
