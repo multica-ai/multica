@@ -96,6 +96,7 @@
     "./projects/queries": "./projects/queries.ts",
     "./projects/mutations": "./projects/mutations.ts",
     "./projects/config": "./projects/config.ts",
+    "./projects/lifecycle": "./projects/lifecycle.ts",
     "./plugins": "./plugins/index.ts",
     "./plugins/queries": "./plugins/queries.ts",
     "./plugins/mutations": "./plugins/mutations.ts",

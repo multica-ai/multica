@@ -171,5 +171,12 @@
     "section_priority": "Priority",
     "section_lead": "Lead",
     "view": "View"
+  },
+  "lifecycle": {
+    "empty": {
+      "active": "No active projects",
+      "all": "No projects yet",
+      "closed": "No closed projects"
+    }
   }
 }

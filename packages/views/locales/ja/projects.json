@@ -171,5 +171,12 @@
     "section_priority": "優先度",
     "section_lead": "リード",
     "view": "ビュー"
+  },
+  "lifecycle": {
+    "empty": {
+      "active": "アクティブなプロジェクトはありません",
+      "all": "プロジェクトはまだありません",
+      "closed": "終了したプロジェクトはありません"
+    }
   }
 }

@@ -171,5 +171,12 @@
     "section_priority": "優先順序",
     "section_lead": "負責人",
     "view": "檢視"
+  },
+  "lifecycle": {
+    "empty": {
+      "active": "沒有活躍專案",
+      "all": "尚無專案",
+      "closed": "暫無已關閉專案"
+    }
   }
 }

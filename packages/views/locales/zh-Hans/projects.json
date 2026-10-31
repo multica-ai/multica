@@ -171,5 +171,12 @@
     "section_priority": "优先级",
     "section_lead": "负责人",
     "view": "视图"
+  },
+  "lifecycle": {
+    "empty": {
+      "active": "没有活跃项目",
+      "all": "暂无项目",
+      "closed": "暂无已关闭项目"
+    }
   }
 }

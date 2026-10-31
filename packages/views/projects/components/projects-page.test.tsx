@@ -19,6 +19,8 @@ const mocks = vi.hoisted(() => ({
   openModal: vi.fn(),
   projectViewState: {
     viewMode: "compact",
+    lifecycleView: "active",
+    setLifecycleView: vi.fn(),
     sortField: "name",
     sortDirection: "asc",
     hiddenColumns: [] as string[],
@@ -278,6 +280,10 @@ beforeEach(() => {
   mocks.openModal.mockClear();
   mocks.projectViewState.setViewMode.mockClear();
   mocks.projectViewState.clearFilters.mockClear();
+  mocks.projectViewState.lifecycleView = "active";
+  mocks.projectViewState.setLifecycleView.mockImplementation((view: string) => {
+    mocks.projectViewState.lifecycleView = view;
+  });
   mocks.projectViewState.viewMode = "compact";
   mocks.projectViewState.sortField = "name";
   mocks.projectViewState.sortDirection = "asc";
@@ -391,18 +397,11 @@ describe("ProjectsPage header", () => {
     mocks.projects = [PROJECT, CLOSED];
     renderProjects();
 
-    expect(screen.getByRole("heading", { level: 1, name: "All projects" })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: /^Active projects/ })).toHaveTextContent("1");
-    expect(screen.getByText("Old Roadmap")).toBeInTheDocument();
-
-    await user.click(screen.getByRole("button", { name: /^Active projects/ }));
     expect(screen.getByRole("heading", { level: 1, name: "Active projects" })).toBeInTheDocument();
-    expect(screen.getByText(PROJECT.title)).toBeInTheDocument();
     expect(screen.queryByText("Old Roadmap")).not.toBeInTheDocument();
 
     await user.click(screen.getByRole("button", { name: /^Closed projects/ }));
-    expect(screen.queryByText(PROJECT.title)).not.toBeInTheDocument();
-    expect(screen.getByText("Old Roadmap")).toBeInTheDocument();
+    expect(mocks.projectViewState.setLifecycleView).toHaveBeenCalledWith("closed");
   });
 
   it("has no search, and offers Reset only while a filter narrows the list", () => {

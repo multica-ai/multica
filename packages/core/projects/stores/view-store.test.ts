@@ -47,6 +47,7 @@ describe("useProjectViewStore", () => {
     expect(Object.keys(parsed.state).sort()).toEqual([
       "filters",
       "hiddenColumns",
+      "lifecycleView",
       "sortDirection",
       "sortField",
       "viewMode",
@@ -92,4 +93,52 @@ describe("useProjectViewStore", () => {
     expect(useProjectViewStore.getState().viewMode).toBe("compact");
     expect(localStorage.getItem("multica_projects_view:acme")).not.toBeNull();
   });
+});
+
+
+describe("project lifecycle preferences", () => {
+  it("defaults to Active and moves explicit status filters to All", () => {
+    useProjectViewStore.getState().setLifecycleView("active");
+    useProjectViewStore.getState().toggleFilter("statuses", "completed");
+    expect(useProjectViewStore.getState()).toMatchObject({
+      lifecycleView: "all", filters: { statuses: ["completed"] },
+    });
+    useProjectViewStore.getState().toggleFilter("priorities", "high");
+    useProjectViewStore.getState().setLifecycleView("closed");
+    expect(useProjectViewStore.getState()).toMatchObject({
+      lifecycleView: "closed", filters: { statuses: [], priorities: ["high"] },
+    });
+    useProjectViewStore.getState().clearFilters();
+    expect(useProjectViewStore.getState().lifecycleView).toBe("closed");
+  });
+
+  it("loads old status filters in All and isolates saved lifecycle views per workspace", async () => {
+    localStorage.setItem("multica_projects_view:acme", JSON.stringify({
+      state: { filters: { statuses: ["completed", "cancelled"] } }, version: 0,
+    }));
+    setCurrentWorkspace("acme", "ws_a");
+    await flush();
+    expect(useProjectViewStore.getState().lifecycleView).toBe("all");
+    expect(useProjectViewStore.getState().filters.statuses).toEqual(["completed", "cancelled"]);
+    useProjectViewStore.getState().setLifecycleView("closed");
+    setCurrentWorkspace("beta", "ws_b");
+    await flush();
+    expect(useProjectViewStore.getState().lifecycleView).toBe("active");
+    expect(useProjectViewStore.getState().filters.statuses).toEqual([]);
+    setCurrentWorkspace("acme", "ws_a");
+    await flush();
+    expect(useProjectViewStore.getState().lifecycleView).toBe("closed");
+  });
+  it("migrates the former Completed preference to the single Closed history entry", async () => {
+    localStorage.setItem("multica_projects_view:acme", JSON.stringify({
+      state: { lifecycleView: "completed", sortField: "name", sortDirection: "asc", viewMode: "comfortable" }, version: 0,
+    }));
+    setCurrentWorkspace("acme", "ws_a");
+    await flush();
+    expect(useProjectViewStore.getState()).toMatchObject({
+      lifecycleView: "closed", sortField: "name", sortDirection: "asc", viewMode: "comfortable",
+      filters: { statuses: [], priorities: [], leads: [] },
+    });
+  });
+
 });

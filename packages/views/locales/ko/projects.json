@@ -171,5 +171,12 @@
     "section_priority": "우선순위",
     "section_lead": "리드",
     "view": "보기"
+  },
+  "lifecycle": {
+    "empty": {
+      "active": "활성 프로젝트가 없습니다",
+      "all": "아직 프로젝트가 없습니다",
+      "closed": "종료된 프로젝트가 없습니다"
+    }
   }
 }

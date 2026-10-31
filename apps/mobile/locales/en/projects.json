@@ -72,5 +72,16 @@
   "runs": {
     "working": "Working",
     "count": "Runs · {{count}}"
+  },
+  "lifecycle": {
+    "label": "Project lifecycle",
+    "active": "Active",
+    "all": "All",
+    "empty": {
+      "active": "No active projects",
+      "all": "No projects yet",
+      "closed": "No closed projects"
+    },
+    "closed": "Closed"
   }
 }
