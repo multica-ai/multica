@@ -409,6 +409,84 @@ func (h *Handler) PatchPluginIssue(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, h.pluginIssuePayload(r, caller, updated))
 }
 
+// ListPluginTaskMessages — GET /v1/tasks/{task_id}/messages
+//
+// The task-event twin of GetPluginIssue: task.completed/task.failed deliver a
+// task id under the tasks:read grant, and this endpoint is what makes that
+// grant worth something — the persisted run transcript (thinking, tool_use,
+// tool_result, text) for memory/archive/audit plugins, so they no longer need
+// a human PAT plus the CLI to read what an agent did.
+//
+// ?since=<seq> returns only messages after that sequence (incremental
+// catch-up, same semantics as the daemon endpoint). ?include=thinking=false
+// drops thinking messages for audit-style consumers; memory plugins want
+// reasoning traces as distillation input, so they ship by default.
+func (h *Handler) ListPluginTaskMessages(w http.ResponseWriter, r *http.Request) {
+	caller, _, ok := h.pluginCaller(w, r, plugincontract.ScopeTasksRead)
+	if !ok {
+		return
+	}
+	taskID := chi.URLParam(r, "task_id")
+	parsed, err := util.ParseUUID(taskID)
+	if err != nil {
+		publicapiv1.WriteProblem(w, r, http.StatusNotFound, "not_found", "task not found")
+		return
+	}
+	task, err := h.Queries.GetAgentTask(r.Context(), parsed)
+	if err != nil {
+		publicapiv1.WriteProblem(w, r, http.StatusNotFound, "not_found", "task not found")
+		return
+	}
+	// Same reach rule as pluginIssueForUser: workspace membership was
+	// established by pluginCaller, and a task uuid from another workspace
+	// 404s rather than 403s for the same enumeration reason.
+	wsID, err := h.TaskService.ResolveTaskWorkspaceIDChecked(r.Context(), task)
+	if err != nil || wsID != uuidToString(caller.WorkspaceID) {
+		publicapiv1.WriteProblem(w, r, http.StatusNotFound, "not_found", "task not found")
+		return
+	}
+	// A callback grant issued about one issue reaches only that issue's
+	// tasks (chat/autopilot tasks carry no issue and skip this check).
+	if caller.IssueScope.Valid && task.IssueID.Valid &&
+		uuidToString(task.IssueID) != uuidToString(caller.IssueScope) {
+		publicapiv1.WriteProblem(w, r, http.StatusNotFound, "not_found", "task not found")
+		return
+	}
+
+	var messages []db.TaskMessage
+	if sinceStr := r.URL.Query().Get("since"); sinceStr != "" {
+		sinceSeq, parseErr := strconv.Atoi(sinceStr)
+		if parseErr != nil || sinceSeq < 0 {
+			publicapiv1.WriteProblem(w, r, http.StatusBadRequest, "invalid_request", "invalid since parameter")
+			return
+		}
+		messages, err = h.Queries.ListTaskMessagesSince(r.Context(), db.ListTaskMessagesSinceParams{
+			TaskID: parsed,
+			Seq:    int32(sinceSeq),
+		})
+	} else {
+		messages, err = h.Queries.ListTaskMessages(r.Context(), parsed)
+	}
+	if err != nil {
+		publicapiv1.WriteProblem(w, r, http.StatusInternalServerError, "internal_error", "failed to list task messages")
+		return
+	}
+
+	includeThinking := r.URL.Query().Get("include") != "thinking=false"
+	issueID := ""
+	if task.IssueID.Valid {
+		issueID = uuidToString(task.IssueID)
+	}
+	resp := make([]protocol.TaskMessagePayload, 0, len(messages))
+	for _, m := range messages {
+		if !includeThinking && m.Type == "thinking" {
+			continue
+		}
+		resp = append(resp, taskMessageToPayload(m, taskID, issueID))
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"messages": resp})
+}
+
 func setPublicIssueETag(w http.ResponseWriter, revision int64) {
 	w.Header().Set("ETag", fmt.Sprintf(`W/"%d"`, revision))
 }

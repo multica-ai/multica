@@ -108,6 +108,39 @@ paths:
                 $ref: "#/components/schemas/Comment"
         default:
           $ref: "#/components/responses/Problem"
+  /tasks/{task_id}/messages:
+    parameters:
+      - $ref: "#/components/parameters/TaskId"
+    get:
+      operationId: listTaskMessages
+      summary: List the persisted run messages of one task in seq order
+      description: >-
+        The transcript companion to the task lifecycle events: plugins holding
+        tasks:read can read what an agent actually did during a run (thinking,
+        tool_use, tool_result, text) without a user PAT. ?since=<seq> returns
+        only newer messages; ?include=thinking=false drops thinking messages.
+      x-multica-contract: shared_resource
+      x-multica-scope: tasks:read
+      parameters:
+        - name: since
+          in: query
+          schema: { type: integer, minimum: 0 }
+          description: Return only messages with seq greater than this value.
+        - name: include
+          in: query
+          schema: { type: string, enum: [thinking, thinking=false] }
+          description: >-
+            thinking messages ship by default because memory plugins use them
+            as distillation input; pass thinking=false to drop them.
+      responses:
+        "200":
+          description: Task messages
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TaskMessageListResponse"
+        default:
+          $ref: "#/components/responses/Problem"
   /storage/{scope}:
     get:
       operationId: listPluginStorageKeys
@@ -179,6 +212,12 @@ components:
       description: Issue UUID or workspace identifier such as MUL-123
       schema:
         type: string
+    TaskId:
+      name: task_id
+      in: path
+      required: true
+      schema: { type: string, format: uuid }
+      description: The task (run) whose persisted messages to list.
     StorageScope:
       name: scope
       in: path
@@ -375,6 +414,31 @@ components:
           type: array
           items:
             $ref: "#/components/schemas/Comment"
+    TaskMessage:
+      type: object
+      required: [task_id, seq, type, created_at]
+      properties:
+        task_id: { type: string }
+        issue_id:
+          type: string
+          description: Empty for chat and autopilot tasks that carry no issue.
+        seq: { type: integer }
+        type: { type: string, enum: [thinking, tool_use, tool_result, text] }
+        tool: { type: string }
+        call_id: { type: string }
+        content: { type: string }
+        input: { type: object, additionalProperties: true }
+        output: { type: string }
+        output_truncated: { type: boolean }
+        created_at: { type: string, format: date-time }
+    TaskMessageListResponse:
+      type: object
+      required: [messages]
+      properties:
+        messages:
+          type: array
+          items:
+            $ref: "#/components/schemas/TaskMessage"
     CreateCommentRequest:
       type: object
       required: [content]
