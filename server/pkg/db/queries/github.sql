@@ -181,6 +181,7 @@ SELECT
     pr.additions, pr.deletions, pr.changed_files,
     pr.api_mergeable, pr.api_merge_state_status, pr.checks_rollup_state,
     pr.snapshot_head_sha, pr.snapshot_fetched_at,
+    pr.review_decision, pr.auto_merge_method, pr.auto_merge_enabled_by,
     pr.created_at, pr.updated_at,
     COALESCE(ipr.linked_by_type, 'system')::text AS linked_by_type,
     COALESCE(c.total, 0)::bigint   AS checks_total,
@@ -267,6 +268,24 @@ WHERE pull_request_id = $1
 -- name: UnlinkIssueFromPullRequest :execrows
 DELETE FROM issue_pull_request
 WHERE issue_id = $1 AND pull_request_id = $2;
+
+-- name: IsPullRequestLinkedToIssue :one
+-- A PR the issue explicitly unlinked never counts as linked, even if a link
+-- row reappeared.
+SELECT EXISTS (
+    SELECT 1 FROM issue_pull_request ipr
+    WHERE ipr.issue_id = $1 AND ipr.pull_request_id = $2
+      AND NOT EXISTS (
+          SELECT 1 FROM issue_pull_request_exclusion ex
+          WHERE ex.issue_id = ipr.issue_id AND ex.pull_request_id = ipr.pull_request_id
+      )
+)::boolean AS linked;
+
+-- name: IsGitHubInstallationBoundToWorkspace :one
+SELECT EXISTS (
+    SELECT 1 FROM github_installation
+    WHERE workspace_id = $1 AND installation_id = $2
+)::boolean AS bound;
 
 -- name: GetGitHubPullRequestInWorkspace :one
 SELECT * FROM github_pull_request

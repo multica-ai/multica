@@ -23,7 +23,7 @@ func (q *Queries) DeleteGitHubPRCheckRuns(ctx context.Context, prID pgtype.UUID)
 }
 
 const getGitHubPullRequestByID = `-- name: GetGitHubPullRequestByID :one
-SELECT id, workspace_id, installation_id, repo_owner, repo_name, pr_number, title, state, html_url, branch, author_login, author_avatar_url, merged_at, closed_at, pr_created_at, pr_updated_at, created_at, updated_at, head_sha, mergeable_state, additions, deletions, changed_files, api_mergeable, api_merge_state_status, checks_rollup_state, snapshot_head_sha, snapshot_fetched_at FROM github_pull_request WHERE id = $1
+SELECT id, workspace_id, installation_id, repo_owner, repo_name, pr_number, title, state, html_url, branch, author_login, author_avatar_url, merged_at, closed_at, pr_created_at, pr_updated_at, created_at, updated_at, head_sha, mergeable_state, additions, deletions, changed_files, api_mergeable, api_merge_state_status, checks_rollup_state, snapshot_head_sha, snapshot_fetched_at, review_decision, auto_merge_method, auto_merge_enabled_by FROM github_pull_request WHERE id = $1
 `
 
 func (q *Queries) GetGitHubPullRequestByID(ctx context.Context, id pgtype.UUID) (GithubPullRequest, error) {
@@ -58,6 +58,9 @@ func (q *Queries) GetGitHubPullRequestByID(ctx context.Context, id pgtype.UUID) 
 		&i.ChecksRollupState,
 		&i.SnapshotHeadSha,
 		&i.SnapshotFetchedAt,
+		&i.ReviewDecision,
+		&i.AutoMergeMethod,
+		&i.AutoMergeEnabledBy,
 	)
 	return i, err
 }
@@ -428,16 +431,22 @@ UPDATE github_pull_request
 SET api_mergeable          = $1,
     api_merge_state_status = $2,
     checks_rollup_state    = $3,
-    snapshot_head_sha      = $4,
-    snapshot_fetched_at    = $5,
+    review_decision        = $4,
+    auto_merge_method      = $5,
+    auto_merge_enabled_by  = $6,
+    snapshot_head_sha      = $7,
+    snapshot_fetched_at    = $8,
     updated_at             = now()
-WHERE id = $6 AND head_sha = $4
+WHERE id = $9 AND head_sha = $7
 `
 
 type UpdateGitHubPRSnapshotParams struct {
 	ApiMergeable        pgtype.Text        `json:"api_mergeable"`
 	ApiMergeStateStatus pgtype.Text        `json:"api_merge_state_status"`
 	ChecksRollupState   pgtype.Text        `json:"checks_rollup_state"`
+	ReviewDecision      pgtype.Text        `json:"review_decision"`
+	AutoMergeMethod     pgtype.Text        `json:"auto_merge_method"`
+	AutoMergeEnabledBy  pgtype.Text        `json:"auto_merge_enabled_by"`
 	HeadSha             string             `json:"head_sha"`
 	FetchedAt           pgtype.Timestamptz `json:"fetched_at"`
 	PrID                pgtype.UUID        `json:"pr_id"`
@@ -453,6 +462,9 @@ func (q *Queries) UpdateGitHubPRSnapshot(ctx context.Context, arg UpdateGitHubPR
 		arg.ApiMergeable,
 		arg.ApiMergeStateStatus,
 		arg.ChecksRollupState,
+		arg.ReviewDecision,
+		arg.AutoMergeMethod,
+		arg.AutoMergeEnabledBy,
 		arg.HeadSha,
 		arg.FetchedAt,
 		arg.PrID,

@@ -116,7 +116,7 @@ func (q *Queries) DeletePendingGitHubInstallation(ctx context.Context, installat
 }
 
 const findGitHubPullRequestByURL = `-- name: FindGitHubPullRequestByURL :one
-SELECT id, workspace_id, installation_id, repo_owner, repo_name, pr_number, title, state, html_url, branch, author_login, author_avatar_url, merged_at, closed_at, pr_created_at, pr_updated_at, created_at, updated_at, head_sha, mergeable_state, additions, deletions, changed_files, api_mergeable, api_merge_state_status, checks_rollup_state, snapshot_head_sha, snapshot_fetched_at FROM github_pull_request
+SELECT id, workspace_id, installation_id, repo_owner, repo_name, pr_number, title, state, html_url, branch, author_login, author_avatar_url, merged_at, closed_at, pr_created_at, pr_updated_at, created_at, updated_at, head_sha, mergeable_state, additions, deletions, changed_files, api_mergeable, api_merge_state_status, checks_rollup_state, snapshot_head_sha, snapshot_fetched_at, review_decision, auto_merge_method, auto_merge_enabled_by FROM github_pull_request
 WHERE workspace_id = $1
   AND lower(rtrim(html_url, '/')) = lower($2::text)
 ORDER BY pr_updated_at DESC
@@ -162,6 +162,9 @@ func (q *Queries) FindGitHubPullRequestByURL(ctx context.Context, arg FindGitHub
 		&i.ChecksRollupState,
 		&i.SnapshotHeadSha,
 		&i.SnapshotFetchedAt,
+		&i.ReviewDecision,
+		&i.AutoMergeMethod,
+		&i.AutoMergeEnabledBy,
 	)
 	return i, err
 }
@@ -189,7 +192,7 @@ func (q *Queries) GetGitHubInstallationByID(ctx context.Context, id pgtype.UUID)
 }
 
 const getGitHubPullRequest = `-- name: GetGitHubPullRequest :one
-SELECT id, workspace_id, installation_id, repo_owner, repo_name, pr_number, title, state, html_url, branch, author_login, author_avatar_url, merged_at, closed_at, pr_created_at, pr_updated_at, created_at, updated_at, head_sha, mergeable_state, additions, deletions, changed_files, api_mergeable, api_merge_state_status, checks_rollup_state, snapshot_head_sha, snapshot_fetched_at FROM github_pull_request
+SELECT id, workspace_id, installation_id, repo_owner, repo_name, pr_number, title, state, html_url, branch, author_login, author_avatar_url, merged_at, closed_at, pr_created_at, pr_updated_at, created_at, updated_at, head_sha, mergeable_state, additions, deletions, changed_files, api_mergeable, api_merge_state_status, checks_rollup_state, snapshot_head_sha, snapshot_fetched_at, review_decision, auto_merge_method, auto_merge_enabled_by FROM github_pull_request
 WHERE workspace_id = $1 AND repo_owner = $2 AND repo_name = $3 AND pr_number = $4
 `
 
@@ -237,12 +240,15 @@ func (q *Queries) GetGitHubPullRequest(ctx context.Context, arg GetGitHubPullReq
 		&i.ChecksRollupState,
 		&i.SnapshotHeadSha,
 		&i.SnapshotFetchedAt,
+		&i.ReviewDecision,
+		&i.AutoMergeMethod,
+		&i.AutoMergeEnabledBy,
 	)
 	return i, err
 }
 
 const getGitHubPullRequestInWorkspace = `-- name: GetGitHubPullRequestInWorkspace :one
-SELECT id, workspace_id, installation_id, repo_owner, repo_name, pr_number, title, state, html_url, branch, author_login, author_avatar_url, merged_at, closed_at, pr_created_at, pr_updated_at, created_at, updated_at, head_sha, mergeable_state, additions, deletions, changed_files, api_mergeable, api_merge_state_status, checks_rollup_state, snapshot_head_sha, snapshot_fetched_at FROM github_pull_request
+SELECT id, workspace_id, installation_id, repo_owner, repo_name, pr_number, title, state, html_url, branch, author_login, author_avatar_url, merged_at, closed_at, pr_created_at, pr_updated_at, created_at, updated_at, head_sha, mergeable_state, additions, deletions, changed_files, api_mergeable, api_merge_state_status, checks_rollup_state, snapshot_head_sha, snapshot_fetched_at, review_decision, auto_merge_method, auto_merge_enabled_by FROM github_pull_request
 WHERE id = $1 AND workspace_id = $2
 `
 
@@ -283,6 +289,9 @@ func (q *Queries) GetGitHubPullRequestInWorkspace(ctx context.Context, arg GetGi
 		&i.ChecksRollupState,
 		&i.SnapshotHeadSha,
 		&i.SnapshotFetchedAt,
+		&i.ReviewDecision,
+		&i.AutoMergeMethod,
+		&i.AutoMergeEnabledBy,
 	)
 	return i, err
 }
@@ -339,6 +348,50 @@ func (q *Queries) GetPendingGitHubInstallation(ctx context.Context, installation
 		&i.UpdatedAt,
 	)
 	return i, err
+}
+
+const isGitHubInstallationBoundToWorkspace = `-- name: IsGitHubInstallationBoundToWorkspace :one
+SELECT EXISTS (
+    SELECT 1 FROM github_installation
+    WHERE workspace_id = $1 AND installation_id = $2
+)::boolean AS bound
+`
+
+type IsGitHubInstallationBoundToWorkspaceParams struct {
+	WorkspaceID    pgtype.UUID `json:"workspace_id"`
+	InstallationID int64       `json:"installation_id"`
+}
+
+func (q *Queries) IsGitHubInstallationBoundToWorkspace(ctx context.Context, arg IsGitHubInstallationBoundToWorkspaceParams) (bool, error) {
+	row := q.db.QueryRow(ctx, isGitHubInstallationBoundToWorkspace, arg.WorkspaceID, arg.InstallationID)
+	var bound bool
+	err := row.Scan(&bound)
+	return bound, err
+}
+
+const isPullRequestLinkedToIssue = `-- name: IsPullRequestLinkedToIssue :one
+SELECT EXISTS (
+    SELECT 1 FROM issue_pull_request ipr
+    WHERE ipr.issue_id = $1 AND ipr.pull_request_id = $2
+      AND NOT EXISTS (
+          SELECT 1 FROM issue_pull_request_exclusion ex
+          WHERE ex.issue_id = ipr.issue_id AND ex.pull_request_id = ipr.pull_request_id
+      )
+)::boolean AS linked
+`
+
+type IsPullRequestLinkedToIssueParams struct {
+	IssueID       pgtype.UUID `json:"issue_id"`
+	PullRequestID pgtype.UUID `json:"pull_request_id"`
+}
+
+// A PR the issue explicitly unlinked never counts as linked, even if a link
+// row reappeared.
+func (q *Queries) IsPullRequestLinkedToIssue(ctx context.Context, arg IsPullRequestLinkedToIssueParams) (bool, error) {
+	row := q.db.QueryRow(ctx, isPullRequestLinkedToIssue, arg.IssueID, arg.PullRequestID)
+	var linked bool
+	err := row.Scan(&linked)
+	return linked, err
 }
 
 const linkIssueToPullRequest = `-- name: LinkIssueToPullRequest :execrows
@@ -570,6 +623,7 @@ SELECT
     pr.additions, pr.deletions, pr.changed_files,
     pr.api_mergeable, pr.api_merge_state_status, pr.checks_rollup_state,
     pr.snapshot_head_sha, pr.snapshot_fetched_at,
+    pr.review_decision, pr.auto_merge_method, pr.auto_merge_enabled_by,
     pr.created_at, pr.updated_at,
     COALESCE(ipr.linked_by_type, 'system')::text AS linked_by_type,
     COALESCE(c.total, 0)::bigint   AS checks_total,
@@ -611,6 +665,9 @@ type ListPullRequestsByIssueRow struct {
 	ChecksRollupState   pgtype.Text        `json:"checks_rollup_state"`
 	SnapshotHeadSha     string             `json:"snapshot_head_sha"`
 	SnapshotFetchedAt   pgtype.Timestamptz `json:"snapshot_fetched_at"`
+	ReviewDecision      pgtype.Text        `json:"review_decision"`
+	AutoMergeMethod     pgtype.Text        `json:"auto_merge_method"`
+	AutoMergeEnabledBy  pgtype.Text        `json:"auto_merge_enabled_by"`
 	CreatedAt           pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt           pgtype.Timestamptz `json:"updated_at"`
 	LinkedByType        string             `json:"linked_by_type"`
@@ -667,6 +724,9 @@ func (q *Queries) ListPullRequestsByIssue(ctx context.Context, issueID pgtype.UU
 			&i.ChecksRollupState,
 			&i.SnapshotHeadSha,
 			&i.SnapshotFetchedAt,
+			&i.ReviewDecision,
+			&i.AutoMergeMethod,
+			&i.AutoMergeEnabledBy,
 			&i.CreatedAt,
 			&i.UpdatedAt,
 			&i.LinkedByType,
@@ -796,7 +856,7 @@ ON CONFLICT (workspace_id, repo_owner, repo_name, pr_number) DO UPDATE SET
     changed_files = EXCLUDED.changed_files,
     updated_at = now()
 WHERE EXCLUDED.pr_updated_at >= github_pull_request.pr_updated_at
-RETURNING id, workspace_id, installation_id, repo_owner, repo_name, pr_number, title, state, html_url, branch, author_login, author_avatar_url, merged_at, closed_at, pr_created_at, pr_updated_at, created_at, updated_at, head_sha, mergeable_state, additions, deletions, changed_files, api_mergeable, api_merge_state_status, checks_rollup_state, snapshot_head_sha, snapshot_fetched_at
+RETURNING id, workspace_id, installation_id, repo_owner, repo_name, pr_number, title, state, html_url, branch, author_login, author_avatar_url, merged_at, closed_at, pr_created_at, pr_updated_at, created_at, updated_at, head_sha, mergeable_state, additions, deletions, changed_files, api_mergeable, api_merge_state_status, checks_rollup_state, snapshot_head_sha, snapshot_fetched_at, review_decision, auto_merge_method, auto_merge_enabled_by
 `
 
 type UpsertGitHubPullRequestParams struct {
@@ -894,6 +954,9 @@ func (q *Queries) UpsertGitHubPullRequest(ctx context.Context, arg UpsertGitHubP
 		&i.ChecksRollupState,
 		&i.SnapshotHeadSha,
 		&i.SnapshotFetchedAt,
+		&i.ReviewDecision,
+		&i.AutoMergeMethod,
+		&i.AutoMergeEnabledBy,
 	)
 	return i, err
 }

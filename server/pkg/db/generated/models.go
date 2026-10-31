@@ -781,6 +781,9 @@ type GithubPullRequest struct {
 	ChecksRollupState   pgtype.Text        `json:"checks_rollup_state"`
 	SnapshotHeadSha     string             `json:"snapshot_head_sha"`
 	SnapshotFetchedAt   pgtype.Timestamptz `json:"snapshot_fetched_at"`
+	ReviewDecision      pgtype.Text        `json:"review_decision"`
+	AutoMergeMethod     pgtype.Text        `json:"auto_merge_method"`
+	AutoMergeEnabledBy  pgtype.Text        `json:"auto_merge_enabled_by"`
 }
 
 type GithubPullRequestCheckRun struct {
@@ -802,6 +805,19 @@ type GithubPullRequestCheckSuite struct {
 	Conclusion pgtype.Text        `json:"conclusion"`
 	Status     string             `json:"status"`
 	UpdatedAt  pgtype.Timestamptz `json:"updated_at"`
+}
+
+type GithubUserConnection struct {
+	UserID                pgtype.UUID        `json:"user_id"`
+	GithubUserID          int64              `json:"github_user_id"`
+	Login                 string             `json:"login"`
+	AvatarUrl             pgtype.Text        `json:"avatar_url"`
+	AccessTokenEncrypted  []byte             `json:"access_token_encrypted"`
+	AccessTokenExpiresAt  pgtype.Timestamptz `json:"access_token_expires_at"`
+	RefreshTokenEncrypted []byte             `json:"refresh_token_encrypted"`
+	RefreshTokenExpiresAt pgtype.Timestamptz `json:"refresh_token_expires_at"`
+	CreatedAt             pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt             pgtype.Timestamptz `json:"updated_at"`
 }
 
 type InboxItem struct {

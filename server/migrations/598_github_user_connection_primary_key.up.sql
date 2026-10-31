@@ -1,0 +1,1 @@
+ALTER TABLE github_user_connection ADD CONSTRAINT github_user_connection_pkey PRIMARY KEY USING INDEX github_user_connection_user_uidx;
