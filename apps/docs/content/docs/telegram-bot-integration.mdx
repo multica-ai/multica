@@ -168,6 +168,14 @@ until the member returns to the category menu. Duplicate callbacks are
 acknowledged without resubmitting. One channel retains at most 128 menus and
 256 callback IDs per menu.
 
+Menu acknowledgement, edit, and notice errors are logged without restarting
+polling; later ordinary messages can still arrive. A failed acknowledgement
+does not submit the business request, and the update is acknowledged by the next
+polling offset. There is no automatic retry guarantee. A handler infrastructure
+error still reconnects the channel and loses its in-memory menu state: replayed
+clicks from the old menu are rejected rather than resubmitted. Check task status
+before opening a fresh menu and deliberately submitting another request.
+
 Register matching slash-command labels separately using Telegram's
 [setMyCommands](https://core.telegram.org/bots/api#setmycommands), with chat scope
 for particular private chats. Multica does not change global command menus.

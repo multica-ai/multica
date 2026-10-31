@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"log/slog"
 	"strings"
 	"time"
 
@@ -19,6 +20,24 @@ type menuSession struct {
 	expires time.Time
 	used    bool
 	seen    map[string]bool
+}
+
+// Menu UI failures must not restart polling: a rebuilt channel loses its
+// menu state and Telegram can keep redelivering the same unacknowledged update.
+func (c *telegramChannel) menuAPIFailed(ctx context.Context, method string, err error) bool {
+	if err == nil {
+		return false
+	}
+	logger := c.logger
+	if logger == nil {
+		logger = slog.Default()
+	}
+	logger.WarnContext(ctx, "telegram: menu API call failed", "bot_id", c.botID, "method", method, "error", err)
+	return true
+}
+
+func (c *telegramChannel) answerMenuCallback(ctx context.Context, id, text string) bool {
+	return !c.menuAPIFailed(ctx, "answerCallbackQuery", c.api.AnswerCallbackQuery(ctx, id, text))
 }
 
 func (c *telegramChannel) menuView(page string) (string, *inlineKeyboardMarkup) {
@@ -70,7 +89,8 @@ func (c *telegramChannel) dispatchMenuCommand(ctx context.Context, u Update, msg
 	}
 	if err := c.authorizeMenu(ctx, msg); err != nil {
 		_, sendErr := c.api.SendMessage(ctx, sendMessageParams{ChatID: u.Message.Chat.ID, Text: "Menu unavailable. Check account binding, workspace membership, and agent access."})
-		return true, sendErr
+		c.menuAPIFailed(ctx, "sendMessage", sendErr)
+		return true, nil
 	}
 	if c.menus == nil {
 		c.menus = make(map[string]*menuSession)
@@ -82,14 +102,15 @@ func (c *telegramChannel) dispatchMenuCommand(ctx context.Context, u Update, msg
 	}
 	if len(c.menus) >= 128 {
 		_, err := c.api.SendMessage(ctx, sendMessageParams{ChatID: u.Message.Chat.ID, Text: "Too many open menus. Try again later."})
-		return true, err
+		c.menuAPIFailed(ctx, "sendMessage", err)
+		return true, nil
 	}
 	title, markup := c.menuView(page)
 	m, err := c.api.SendMessage(ctx, sendMessageParams{ChatID: u.Message.Chat.ID, Text: title, ReplyMarkup: markup})
-	if err == nil {
+	if !c.menuAPIFailed(ctx, "sendMessage", err) {
 		c.menus[messageKey(u.Message.Chat.ID, m.MessageID)] = &menuSession{owner: u.Message.From.ID, page: page, expires: time.Now().Add(15 * time.Minute), seen: make(map[string]bool)}
 	}
-	return true, err
+	return true, nil
 }
 
 func (c *telegramChannel) dispatchMenuCallback(ctx context.Context, q *CallbackQuery) error {
@@ -97,7 +118,8 @@ func (c *telegramChannel) dispatchMenuCallback(ctx context.Context, q *CallbackQ
 		return nil
 	}
 	reject := func() error {
-		return c.api.AnswerCallbackQuery(ctx, q.ID, "Menu expired or access denied. Send the menu command again.")
+		c.answerMenuCallback(ctx, q.ID, "Menu expired or access denied. Send the menu command again.")
+		return nil
 	}
 	if q.From == nil || q.From.IsBot || q.Message == nil || q.Message.Date == 0 || q.Message.From == nil ||
 		q.Message.From.ID != c.botID || !q.Message.From.IsBot {
@@ -138,19 +160,21 @@ func (c *telegramChannel) dispatchMenuCallback(ctx context.Context, q *CallbackQ
 			}
 		}
 		if s.seen[q.ID] {
-			return c.api.AnswerCallbackQuery(ctx, q.ID, "Already handled.")
+			c.answerMenuCallback(ctx, q.ID, "Already handled.")
+			return nil
 		}
 		if len(s.seen) >= 256 {
 			return reject()
 		}
-		if err := c.api.AnswerCallbackQuery(ctx, q.ID, ""); err != nil {
-			return err
+		if !c.answerMenuCallback(ctx, q.ID, "") {
+			return nil
 		}
 		title, markup := c.menuView(page)
 		if err := c.api.EditMessageText(ctx, editMessageTextParams{ChatID: q.Message.Chat.ID, MessageID: q.Message.MessageID, Text: title, ReplyMarkup: markup}); err != nil {
 			var ae *apiError
 			if !errors.As(err, &ae) || !strings.Contains(ae.Description, "message is not modified") {
-				return err
+				c.menuAPIFailed(ctx, "editMessageText", err)
+				return nil
 			}
 		}
 		s.page = page
@@ -176,13 +200,14 @@ func (c *telegramChannel) dispatchMenuCallback(ctx context.Context, q *CallbackQ
 		return reject()
 	}
 	if s.used || s.seen[q.ID] {
-		return c.api.AnswerCallbackQuery(ctx, q.ID, "Already submitted. Wait for a reply or return to the menu.")
+		c.answerMenuCallback(ctx, q.ID, "Already submitted. Wait for a reply or return to the menu.")
+		return nil
 	}
 	if len(s.seen) >= 256 {
 		return reject()
 	}
-	if err := c.api.AnswerCallbackQuery(ctx, q.ID, "Submitting."); err != nil {
-		return err
+	if !c.answerMenuCallback(ctx, q.ID, "Submitting.") {
+		return nil
 	}
 	msg.EventID = "callback:" + q.ID
 	msg.MessageID = msg.EventID
@@ -193,7 +218,8 @@ func (c *telegramChannel) dispatchMenuCallback(ctx context.Context, q *CallbackQ
 	msg.Text = request
 	msg.CommandText = msg.Text
 	if err := c.handler(ctx, msg); err != nil {
-		_, _ = c.api.SendMessage(ctx, sendMessageParams{ChatID: q.Message.Chat.ID, Text: "Could not submit the request. Send the menu command and try again."})
+		_, sendErr := c.api.SendMessage(ctx, sendMessageParams{ChatID: q.Message.Chat.ID, Text: "Could not confirm request submission. Check task status, then open the menu again if needed."})
+		c.menuAPIFailed(ctx, "sendMessage", sendErr)
 		return err
 	}
 	s.used = true

@@ -176,56 +176,24 @@ func TestReplyToMenuCallbackDoesNotQuoteCallbackID(t *testing.T) {
 	}
 }
 
-func TestMenuFailuresDoNotLoseOrDuplicateRequests(t *testing.T) {
-	for _, failure := range []string{"ack", "handler"} {
-		t.Run(failure, func(t *testing.T) {
-			failACK := failure == "ack"
-			var routed, notices int
-			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				if strings.HasSuffix(r.URL.Path, "/answerCallbackQuery") && failACK {
-					_, _ = io.WriteString(w, `{"ok":false,"error_code":500,"description":"test failure"}`)
-					return
-				}
-				if strings.HasSuffix(r.URL.Path, "/sendMessage") {
-					notices++
-				}
-				_, _ = io.WriteString(w, `{"ok":true,"result":{"message_id":30}}`)
-			}))
-			defer srv.Close()
-			c := &telegramChannel{botID: 999, menu: testMenu(), api: newBotAPI(srv.URL, "fake", srv.Client()),
-				menuAuthorize: func(context.Context, channel.InboundMessage) error { return nil },
-				menus:         map[string]*menuSession{"111:20": {owner: 111, page: "tools", expires: time.Now().Add(time.Minute)}},
-				handler: func(_ context.Context, msg channel.InboundMessage) error {
-					routed++
-					if failure == "handler" && routed == 1 {
-						return errors.New("queue unavailable")
-					}
-					return nil
-				},
-			}
-			q := &CallbackQuery{ID: "123", From: &User{ID: 111}, Data: "menu:v1:tools:status",
-				Message: &Message{MessageID: 20, Date: 1, From: &User{ID: 999, IsBot: true}, Chat: Chat{ID: 111, Type: "private"}}}
-			if err := c.dispatch(context.Background(), Update{CallbackQuery: q}); err == nil {
-				t.Fatal("failure was swallowed")
-			}
-			if failure == "ack" && routed != 0 {
-				t.Fatal("unacknowledged request routed")
-			}
-			if failure == "handler" && notices != 1 {
-				t.Fatal("failed submission needs a visible retry notice")
-			}
-			failACK = false
-			if err := c.dispatch(context.Background(), Update{CallbackQuery: q}); err != nil {
-				t.Fatal(err)
-			}
-			before := routed
-			if err := c.dispatch(context.Background(), Update{CallbackQuery: q}); err != nil {
-				t.Fatal(err)
-			}
-			if routed != before {
-				t.Fatal("successful retry was submitted twice")
-			}
-		})
+func TestMenuACKFailureDoesNotSubmitRequest(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = io.WriteString(w, `{"ok":false,"error_code":400,"description":"query is too old"}`)
+	}))
+	defer srv.Close()
+	routed := 0
+	c := &telegramChannel{botID: 999, menu: testMenu(), api: newBotAPI(srv.URL, "fake", srv.Client()),
+		menuAuthorize: func(context.Context, channel.InboundMessage) error { return nil },
+		menus:         map[string]*menuSession{"111:20": {owner: 111, page: "tools", expires: time.Now().Add(time.Minute)}},
+		handler:       func(context.Context, channel.InboundMessage) error { routed++; return nil },
+	}
+	q := &CallbackQuery{ID: "123", From: &User{ID: 111}, Data: "menu:v1:tools:status",
+		Message: &Message{MessageID: 20, Date: 1, From: &User{ID: 999, IsBot: true}, Chat: Chat{ID: 111, Type: "private"}}}
+	if err := c.dispatch(context.Background(), Update{CallbackQuery: q}); err != nil {
+		t.Fatal(err)
+	}
+	if routed != 0 {
+		t.Fatal("unacknowledged request submitted")
 	}
 }
 
