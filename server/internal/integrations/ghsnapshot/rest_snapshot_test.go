@@ -15,6 +15,15 @@ import (
 // Fork PRs deliberately have a head repository outside the installation.
 func snapshotServer(t *testing.T, handler http.HandlerFunc) *httptest.Server {
 	t.Helper()
+	return snapshotServerWithGraphQL(t, handler, func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(`{"data":{"repository":{"pullRequest":{"reviewDecision":null}}}}`))
+	})
+}
+
+// snapshotServerWithGraphQL also answers the review-decision GraphQL read,
+// which needs only the Pull requests read permission.
+func snapshotServerWithGraphQL(t *testing.T, handler, graphql http.HandlerFunc) *httptest.Server {
+	t.Helper()
 	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		if r.URL.Path == "/app/installations/1/access_tokens" {
@@ -23,6 +32,10 @@ func snapshotServer(t *testing.T, handler http.HandlerFunc) *httptest.Server {
 				"token": "ghs_secret", "expires_at": time.Now().Add(time.Hour).Format(time.RFC3339),
 				"permissions": map[string]string{"pull_requests": "read", "checks": "read", "statuses": "read"},
 			})
+			return
+		}
+		if r.Method == http.MethodPost && r.URL.Path == "/graphql" && r.Header.Get("Authorization") == "Bearer ghs_secret" {
+			graphql(w, r)
 			return
 		}
 		if r.Method != http.MethodGet || r.Header.Get("Authorization") != "Bearer ghs_secret" {
@@ -144,6 +157,69 @@ func TestFetchPRSnapshotRESTResults(t *testing.T) {
 			}
 			if snap.RollupState != tc.want || snap.HasChecks != (tc.want != "") || snap.Mergeable != "UNKNOWN" || snap.MergeStateStatus != "UNKNOWN" || snap.Decided() {
 				t.Fatalf("snapshot = %+v, want rollup %q", snap, tc.want)
+			}
+		})
+	}
+}
+
+func reviewSnapshotREST(w http.ResponseWriter, r *http.Request) {
+	switch r.URL.Path {
+	case "/repos/o/r/pulls/5":
+		_, _ = w.Write([]byte(`{"head":{"sha":"sha1"},"mergeable":true,"mergeable_state":"blocked",` +
+			`"auto_merge":{"merge_method":"squash","enabled_by":{"login":"octocat"}}}`))
+	case "/repos/o/r/commits/sha1/check-runs":
+		_, _ = w.Write([]byte(`{"total_count":0,"check_runs":[]}`))
+	case "/repos/o/r/commits/sha1/status":
+		_, _ = w.Write([]byte(`{"total_count":0,"statuses":[]}`))
+	default:
+		w.WriteHeader(http.StatusNotFound)
+	}
+}
+
+func TestFetchPRSnapshotReviewDecisionAndAutoMerge(t *testing.T) {
+	srv := snapshotServerWithGraphQL(t, reviewSnapshotREST, func(w http.ResponseWriter, r *http.Request) {
+		var body struct {
+			Query     string         `json:"query"`
+			Variables map[string]any `json:"variables"`
+		}
+		_ = json.NewDecoder(r.Body).Decode(&body)
+		if !strings.Contains(body.Query, "reviewDecision") || body.Variables["owner"] != "o" || body.Variables["name"] != "r" || body.Variables["number"] != float64(5) {
+			t.Errorf("graphql request = %+v", body)
+		}
+		_, _ = w.Write([]byte(`{"data":{"repository":{"pullRequest":{"reviewDecision":"REVIEW_REQUIRED"}}}}`))
+	})
+	defer srv.Close()
+	snap, err := FetchPRSnapshot(context.Background(), newTestClient(t, srv.URL), 1, "o", "r", 5)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if snap.ReviewDecision != "REVIEW_REQUIRED" || snap.AutoMergeMethod != "squash" || snap.AutoMergeEnabledBy != "octocat" {
+		t.Fatalf("snapshot = %+v", snap)
+	}
+}
+
+// The review decision is a nicety on top of the REST snapshot: a GraphQL
+// failure must leave it empty without costing the CI / mergeability data.
+func TestFetchPRSnapshotReviewDecisionFailureKeepsSnapshot(t *testing.T) {
+	for name, graphql := range map[string]http.HandlerFunc{
+		"http error": func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(http.StatusBadGateway) },
+		"graphql error": func(w http.ResponseWriter, r *http.Request) {
+			_, _ = w.Write([]byte(`{"data":null,"errors":[{"type":"FORBIDDEN","message":"Resource not accessible by integration"}]}`))
+		},
+		"rate limited": func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Retry-After", "30")
+			w.WriteHeader(http.StatusTooManyRequests)
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			srv := snapshotServerWithGraphQL(t, reviewSnapshotREST, graphql)
+			defer srv.Close()
+			snap, err := FetchPRSnapshot(context.Background(), newTestClient(t, srv.URL), 1, "o", "r", 5)
+			if err != nil {
+				t.Fatalf("GraphQL failure failed the snapshot: %v", err)
+			}
+			if snap.ReviewDecision != "" || snap.MergeStateStatus != "BLOCKED" || snap.Mergeable != "MERGEABLE" || snap.AutoMergeMethod != "squash" {
+				t.Fatalf("snapshot = %+v", snap)
 			}
 		})
 	}

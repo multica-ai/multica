@@ -40,6 +40,22 @@ export type GitHubPullRequestChecksRollup =
   | "error"
   | "expected";
 
+/** GitHub's review verdict (`reviewDecision`). Tells "waiting for approval"
+ * apart from the other reasons `merge_state_status` is `blocked`. */
+export type GitHubPullRequestReviewDecision =
+  | "approved"
+  | "changes_requested"
+  | "review_required";
+
+export type GitHubMergeMethod = "merge" | "squash" | "rebase";
+
+/** Auto-merge queued on a PR. */
+export interface GitHubPullRequestAutoMerge {
+  merge_method: GitHubMergeMethod | (string & {});
+  /** GitHub login that enabled auto-merge, when known. */
+  enabled_by: string | null;
+}
+
 export interface GitHubInstallation {
   id: string;
   workspace_id: string;
@@ -143,6 +159,12 @@ export interface GitHubPullRequest {
   snapshot_stale?: boolean;
   /** RFC3339 timestamp of when the snapshot was fetched, for the stale hint. */
   snapshot_fetched_at?: string | null;
+  /** Review verdict from the snapshot. `null` when the repository requires no
+   * review or GitHub didn't report one; older backends omit it. */
+  review_decision?: GitHubPullRequestReviewDecision | null;
+  /** Auto-merge state from the snapshot; `null` when auto-merge is off.
+   * Older backends omit it. */
+  auto_merge?: GitHubPullRequestAutoMerge | null;
   /** Legacy mirror of GitHub's `mergeable_state`. Optional; superseded by
    * `mergeable` + `merge_state_status`. */
   mergeable_state?: GitHubMergeableState | null;

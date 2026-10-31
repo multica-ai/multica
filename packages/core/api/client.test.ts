@@ -267,6 +267,25 @@ describe("ApiClient pull-request response schema", () => {
     expect(result.pull_requests).toHaveLength(1);
     expect(result.pull_requests[0]?.link_source).toBeUndefined();
   });
+
+  it("parses the review decision and auto-merge state", async () => {
+    stubPullRequests({
+      pull_requests: [{ ...validPR, review_decision: "review_required", auto_merge: { merge_method: "squash", enabled_by: "octocat" } }],
+    });
+    const result = await new ApiClient("https://api.example.test").listIssuePullRequests("issue-1");
+    expect(result.pull_requests[0]?.review_decision).toBe("review_required");
+    expect(result.pull_requests[0]?.auto_merge).toEqual({ merge_method: "squash", enabled_by: "octocat" });
+  });
+
+  it("keeps the PR when the review decision or auto-merge state is malformed", async () => {
+    stubPullRequests({
+      pull_requests: [{ ...validPR, review_decision: 1, auto_merge: { enabled_by: "octocat" } }],
+    });
+    const result = await new ApiClient("https://api.example.test").listIssuePullRequests("issue-1");
+    expect(result.pull_requests).toHaveLength(1);
+    expect(result.pull_requests[0]?.review_decision).toBeNull();
+    expect(result.pull_requests[0]?.auto_merge).toBeNull();
+  });
 });
 
 describe("ApiClient Plugin preview response schema", () => {

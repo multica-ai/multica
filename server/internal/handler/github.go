@@ -132,6 +132,12 @@ type GitHubPullRequestResponse struct {
 	SnapshotStale bool `json:"snapshot_stale"`
 	// SnapshotFetchedAt is when the snapshot was last fetched (RFC3339), or null.
 	SnapshotFetchedAt *string `json:"snapshot_fetched_at"`
+	// ReviewDecision is GitHub's review verdict, lowercased: "approved" |
+	// "changes_requested" | "review_required" | null. It tells "waiting for
+	// approval" apart from the other reasons merge_state_status is "blocked".
+	ReviewDecision *string `json:"review_decision"`
+	// AutoMerge is set while auto-merge is queued on the PR, else null.
+	AutoMerge *GitHubPullRequestAutoMerge `json:"auto_merge"`
 	// Diff stats (lines added/removed and file count) sourced from the
 	// `pull_request` webhook payload. Legacy rows that pre-date this
 	// field default to 0; the frontend treats total == 0 as "unknown"
@@ -139,6 +145,13 @@ type GitHubPullRequestResponse struct {
 	Additions    int32 `json:"additions"`
 	Deletions    int32 `json:"deletions"`
 	ChangedFiles int32 `json:"changed_files"`
+}
+
+type GitHubPullRequestAutoMerge struct {
+	// MergeMethod is "merge" | "squash" | "rebase".
+	MergeMethod string `json:"merge_method"`
+	// EnabledBy is the GitHub login that enabled auto-merge, when known.
+	EnabledBy *string `json:"enabled_by"`
 }
 
 type GitHubConnectResponse struct {
@@ -278,8 +291,20 @@ func issuePullRequestRowToResponse(p db.ListPullRequestsByIssueRow, snapshotEnab
 		resp.ChecksPending = p.ChecksRunning
 		resp.FailedCheckNames = failedNames
 		resp.SnapshotFetchedAt = timestampToPtr(p.SnapshotFetchedAt)
+		resp.ReviewDecision = lowerTextPtr(p.ReviewDecision)
+		resp.AutoMerge = autoMergeFromColumns(p.AutoMergeMethod, p.AutoMergeEnabledBy)
 	}
 	return resp
+}
+
+func autoMergeFromColumns(method, enabledBy pgtype.Text) *GitHubPullRequestAutoMerge {
+	if !method.Valid || method.String == "" {
+		return nil
+	}
+	return &GitHubPullRequestAutoMerge{
+		MergeMethod: strings.ToLower(method.String),
+		EnabledBy:   textToPtr(enabledBy),
+	}
 }
 
 func currentGitHubSnapshotAvailable(

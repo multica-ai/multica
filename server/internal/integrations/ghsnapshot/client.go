@@ -18,6 +18,7 @@
 package ghsnapshot
 
 import (
+	"bytes"
 	"context"
 	"crypto/rsa"
 	"encoding/json"
@@ -243,6 +244,55 @@ func (c *Client) restGet(ctx context.Context, installationID int64, path string)
 		return nil, errors.New("github REST: response exceeds size limit")
 	}
 	return body, nil
+}
+
+// graphQL runs one read query with the installation token. Like restGet, it
+// never puts a response body or a token into an error.
+func (c *Client) graphQL(ctx context.Context, installationID int64, query string, variables map[string]any, out any) error {
+	token, err := c.installationToken(ctx, installationID)
+	if err != nil {
+		return err
+	}
+	payload, err := json.Marshal(map[string]any{"query": query, "variables": variables})
+	if err != nil {
+		return err
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, strings.TrimRight(c.apiBase, "/")+"/graphql", bytes.NewReader(payload))
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Accept", "application/vnd.github+json")
+	req.Header.Set("Authorization", "Bearer "+token)
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	body, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+	if err != nil {
+		return errors.New("github graphql: failed to read response")
+	}
+	if isRateLimited(resp, body) {
+		return rateLimitFromResponse(resp, c.now())
+	}
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("github graphql: unexpected status %d", resp.StatusCode)
+	}
+	var envelope struct {
+		Data   json.RawMessage   `json:"data"`
+		Errors []json.RawMessage `json:"errors"`
+	}
+	if json.Unmarshal(body, &envelope) != nil {
+		return errors.New("github graphql: malformed response")
+	}
+	if len(envelope.Errors) > 0 {
+		return fmt.Errorf("github graphql: %d error(s)", len(envelope.Errors))
+	}
+	if json.Unmarshal(envelope.Data, out) != nil {
+		return errors.New("github graphql: malformed data")
+	}
+	return nil
 }
 
 func isRateLimited(resp *http.Response, body []byte) bool {

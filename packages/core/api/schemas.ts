@@ -398,6 +398,11 @@ export const EMPTY_LIST_GITHUB_REPOSITORIES_RESPONSE: ListGitHubRepositoriesResp
   next_page: null,
 };
 
+const GitHubPullRequestAutoMergeSchema = z.object({
+  merge_method: z.string(),
+  enabled_by: z.string().nullable().optional().default(null),
+}).loose();
+
 export const GitHubPullRequestSchema = z.object({
   id: z.string(),
   provider: z.string().optional().default("github"),
@@ -429,6 +434,9 @@ export const GitHubPullRequestSchema = z.object({
   failed_check_names: z.array(z.string()).optional().default([]),
   snapshot_stale: z.boolean().optional().default(false),
   snapshot_fetched_at: z.string().nullable().optional(),
+  // A malformed value hides only that hint, never the PR card.
+  review_decision: z.string().nullable().optional().catch(null),
+  auto_merge: GitHubPullRequestAutoMergeSchema.nullable().optional().catch(null),
   mergeable_state: z.string().nullable().optional(),
   additions: z.number().optional().default(0),
   deletions: z.number().optional().default(0),

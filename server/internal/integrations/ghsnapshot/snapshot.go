@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"net/url"
 	"strings"
 )
@@ -38,6 +39,14 @@ type PRSnapshot struct {
 	// as passed (acceptance criterion 5).
 	HasChecks bool
 	Contexts  []CheckContext
+	// ReviewDecision is GraphQL `reviewDecision` (APPROVED / CHANGES_REQUESTED
+	// / REVIEW_REQUIRED). Empty when the repository requires no review, or
+	// when the GraphQL read failed — that read never fails the snapshot.
+	ReviewDecision string
+	// AutoMergeMethod and AutoMergeEnabledBy mirror REST `auto_merge`; both
+	// empty when auto-merge is off.
+	AutoMergeMethod    string
+	AutoMergeEnabledBy string
 }
 
 // Decided reports whether the snapshot has settled: no check is still running
@@ -72,6 +81,12 @@ type restPullRequest struct {
 	} `json:"head"`
 	Mergeable      *bool  `json:"mergeable"`
 	MergeableState string `json:"mergeable_state"`
+	AutoMerge      *struct {
+		MergeMethod string `json:"merge_method"`
+		EnabledBy   *struct {
+			Login string `json:"login"`
+		} `json:"enabled_by"`
+	} `json:"auto_merge"`
 }
 
 type restCheckRun struct {
@@ -146,6 +161,12 @@ func FetchPRSnapshot(ctx context.Context, c *Client, installationID int64, owner
 		snap.Contexts = append(snap.Contexts, CheckContext{Name: entry.Context, Status: status, Conclusion: conclusion, DetailsURL: entry.TargetURL, IsStatusContext: true})
 	}
 
+	if decision, err := fetchReviewDecision(ctx, c, installationID, owner, repo, number); err != nil {
+		slog.Warn("ghsnapshot: review decision unavailable", "owner", owner, "repo", repo, "number", number, "err", err.Error())
+	} else {
+		snap.ReviewDecision = decision
+	}
+
 	latest, err := fetchSnapshotPR(ctx, c, installationID, prPath)
 	if err != nil {
 		return nil, err
@@ -165,11 +186,46 @@ func FetchPRSnapshot(ctx context.Context, c *Client, installationID int64, owner
 	if latest.Mergeable == nil || snap.MergeStateStatus == "" {
 		snap.MergeStateStatus = "UNKNOWN"
 	}
+	if latest.AutoMerge != nil {
+		snap.AutoMergeMethod = strings.ToLower(latest.AutoMerge.MergeMethod)
+		if latest.AutoMerge.EnabledBy != nil {
+			snap.AutoMergeEnabledBy = latest.AutoMerge.EnabledBy.Login
+		}
+	}
 	snap.HasChecks = len(snap.Contexts) > 0
 	if snap.HasChecks {
 		snap.RollupState = rollupContexts(snap.Contexts)
 	}
 	return snap, nil
+}
+
+const reviewDecisionQuery = `query($owner: String!, $name: String!, $number: Int!) {
+  repository(owner: $owner, name: $name) {
+    pullRequest(number: $number) { reviewDecision }
+  }
+}`
+
+// fetchReviewDecision reads the one snapshot field REST does not expose.
+func fetchReviewDecision(ctx context.Context, c *Client, installationID int64, owner, repo string, number int32) (string, error) {
+	var data struct {
+		Repository *struct {
+			PullRequest *struct {
+				ReviewDecision *string `json:"reviewDecision"`
+			} `json:"pullRequest"`
+		} `json:"repository"`
+	}
+	if err := c.graphQL(ctx, installationID, reviewDecisionQuery, map[string]any{
+		"owner": owner, "name": repo, "number": number,
+	}, &data); err != nil {
+		return "", err
+	}
+	if data.Repository == nil || data.Repository.PullRequest == nil {
+		return "", errors.New("ghsnapshot: pull request missing from graphql response")
+	}
+	if data.Repository.PullRequest.ReviewDecision == nil {
+		return "", nil
+	}
+	return *data.Repository.PullRequest.ReviewDecision, nil
 }
 
 func fetchSnapshotPR(ctx context.Context, c *Client, installationID int64, path string) (*restPullRequest, error) {
