@@ -408,7 +408,7 @@ func workspaceReposResponse(workspaceID string, raw []byte, settingsRaw []byte, 
 		CACerts:      string(caCerts),
 	}
 	if len(settingsRaw) > 0 {
-		resp.Settings = json.RawMessage(settingsRaw)
+		resp.Settings = json.RawMessage(withoutDefaultChatAgent(settingsRaw))
 	}
 	return resp
 }

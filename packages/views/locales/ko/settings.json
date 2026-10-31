@@ -735,6 +735,10 @@
     "usage_help": "사용 방법"
   },
   "workspace": {
+    "default_chat_agent_clear": "기본값 지우기",
+    "default_chat_agent_label": "기본 채팅 에이전트",
+    "default_chat_agent_none": "워크스페이스 기본값 없음",
+    "default_chat_agent_hint": "에이전트를 선택하지 않은 새 채팅에 사용됩니다. 기존 대화의 에이전트는 유지됩니다.",
     "section_general": "워크스페이스 정보",
     "logo_label": "워크스페이스 아이콘",
     "change_logo_aria": "워크스페이스 로고 변경",

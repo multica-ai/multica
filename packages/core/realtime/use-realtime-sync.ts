@@ -513,8 +513,19 @@ export function applyWorkspaceUpdatedToCache(
     if (cached && list) {
       qc.setQueryData<Workspace[]>(
         workspaceKeys.list(),
-        list.map((workspace) => (workspace.id === next.id ? next : workspace)),
+        list.map((workspace) => workspace.id === next.id ? {
+          ...next,
+          // Broadcast settings intentionally omit the user-specific default.
+          // Preserve our projection until the authorized HTTP refresh settles.
+          settings: {
+            ...next.settings,
+            ...(workspace.settings?.default_chat_agent_id !== undefined
+              ? { default_chat_agent_id: workspace.settings.default_chat_agent_id }
+              : {}),
+          },
+        } : workspace),
       );
+      qc.invalidateQueries({ queryKey: workspaceKeys.list() });
       return;
     }
     // Do not seed an absent list with one workspace: staleTime is Infinity,
@@ -799,6 +810,7 @@ export function useRealtimeSync(
         void onInboxSummaryInvalidate(qc);
       },
       agent: () => {
+        qc.invalidateQueries({ queryKey: workspaceKeys.list() });
         const wsId = getCurrentWsId();
         if (wsId) {
           qc.invalidateQueries({ queryKey: workspaceKeys.agents(wsId) });
@@ -810,6 +822,7 @@ export function useRealtimeSync(
         }
       },
       member: () => {
+        qc.invalidateQueries({ queryKey: workspaceKeys.list() });
         const wsId = getCurrentWsId();
         if (wsId) qc.invalidateQueries({ queryKey: workspaceKeys.members(wsId) });
       },
@@ -899,6 +912,7 @@ export function useRealtimeSync(
         if (wsId && userId) qc.invalidateQueries({ queryKey: pinKeys.all(wsId, userId) });
       },
       daemon: () => {
+        qc.invalidateQueries({ queryKey: workspaceKeys.list() });
         const wsId = getCurrentWsId();
         if (wsId) {
           qc.invalidateQueries({ queryKey: runtimeKeys.all(wsId) });

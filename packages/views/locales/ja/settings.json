@@ -735,6 +735,10 @@
     "usage_help": "使い方"
   },
   "workspace": {
+    "default_chat_agent_clear": "既定を解除",
+    "default_chat_agent_label": "チャットの既定エージェント",
+    "default_chat_agent_none": "既定のエージェントなし",
+    "default_chat_agent_hint": "エージェントが未選択の新規チャットに適用します。既存の会話は元のエージェントを使用します。",
     "section_general": "ワークスペース情報",
     "logo_label": "ワークスペースのアイコン",
     "name_label": "名前",

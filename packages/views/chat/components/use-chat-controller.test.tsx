@@ -92,6 +92,7 @@ vi.mock("@multica/core/auth", () => ({
     sel({ user: { id: "user-1" } }),
 }));
 vi.mock("@multica/core/workspace/queries", () => ({
+  workspaceListOptions: () => ({ queryKey: ["workspaces", "list"] }),
   agentListOptions: () => ({ queryKey: ["agents"] }),
   memberListOptions: () => ({ queryKey: ["members"] }),
 }));
@@ -148,7 +149,8 @@ vi.mock("@multica/core/chat/mutations", () => ({
 vi.mock("../../common/use-app-foreground", () => ({
   useAppForeground: () => h.appForeground.value,
 }));
-vi.mock("@multica/core/chat", () => ({
+vi.mock("@multica/core/chat", async (importOriginal) => ({
+  ...await importOriginal<typeof import("@multica/core/chat")>(),
   useChatStore: Object.assign(
     (sel: (s: typeof h.store) => unknown) => sel(h.store),
     { getState: () => h.store },
@@ -169,9 +171,10 @@ vi.mock("@tanstack/react-query", async (importOriginal) => {
     ...actual,
     useQuery: (options: { queryKey?: unknown[] }) => {
       const key = options.queryKey ?? [];
-      if (key.includes("agents")) return { data: h.agents };
+      if (key.includes("workspaces")) return { data: [], isSuccess: true };
+      if (key.includes("agents")) return { data: h.agents, isSuccess: true };
       if (key.includes("members")) {
-        return { data: [{ user_id: "user-1", role: "admin" }] };
+        return { data: [{ user_id: "user-1", role: "admin" }], isSuccess: true };
       }
       if (key.includes("runtimes")) return { data: [] };
       if (key.includes("sessions")) return { data: h.sessions, isSuccess: true };

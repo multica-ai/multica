@@ -740,6 +740,10 @@
     "usage_help": "Utilisation"
   },
   "workspace": {
+    "default_chat_agent_clear": "Effacer le défaut",
+    "default_chat_agent_label": "Agent de chat par défaut",
+    "default_chat_agent_none": "Aucun agent par défaut",
+    "default_chat_agent_hint": "Utilisé pour les nouveaux chats sans agent sélectionné. Les conversations existantes conservent leur agent.",
     "section_general": "Détails de l'espace de travail",
     "logo_label": "Logo de l'espace de travail",
     "change_logo_aria": "Changer le logo de l'espace de travail",
