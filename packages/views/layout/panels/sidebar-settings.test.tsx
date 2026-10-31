@@ -107,11 +107,13 @@ describe("ProjectsSectionSettings", () => {
     await waitFor(() => expect(chip("Completed")).toHaveAttribute("aria-pressed", "true"));
     fireEvent.click(chip("Todo"));
     await waitFor(() => expect(chip("Todo")).toHaveAttribute("aria-pressed", "false"));
+    await waitFor(() => expect(server.putIssueViewPreference).toHaveBeenCalledTimes(2));
     expect(lastSaved().projects.statuses).toContain("completed");
 
     fireEvent.click(screen.getByRole("button", { name: "Reset" }));
     await waitFor(() => expect(screen.queryByRole("button", { name: "Reset" })).toBeNull());
-    expect(lastSaved().projects).toEqual(DEFAULT_SIDEBAR_PROJECT_SETTINGS);
+    // Writes go out one at a time; the reset is the last to be sent.
+    await waitFor(() => expect(lastSaved().projects).toEqual(DEFAULT_SIDEBAR_PROJECT_SETTINGS));
     expect(lastSaved().issues).toEqual(DEFAULT_SIDEBAR_ISSUE_SETTINGS);
   });
 });

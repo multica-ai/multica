@@ -47,6 +47,10 @@ export function useUpdateIssueViewPreference(wsId: string, scope: IssueViewPrefe
   const queryKey = issueViewPrefKeys.scope(wsId, scope);
   return useMutation({
     mutationKey: queryKey,
+    // Each write replaces the whole document and builds on the one before it,
+    // so writes to one document go out one at a time, in order: run side by
+    // side, an older write could land last and undo a newer one.
+    scope: { id: queryKey.join(":") },
     mutationFn: (prefs: IssueViewPreferenceDoc) =>
       api.putIssueViewPreference({ ...scope, prefs }),
     onMutate: async (prefs) => {
@@ -66,9 +70,9 @@ export function useUpdateIssueViewPreference(wsId: string, scope: IssueViewPrefe
       if (context?.previous) queryClient.setQueryData(queryKey, context.previous);
     },
     onSettled: () => {
-      // A later write still in flight refetches when it settles; refetching
-      // now could paint this older document over its optimistic one.
-      if (queryClient.isMutating({ mutationKey: queryKey }) === 1) {
+      // A later write still queued refetches when it settles; refetching now
+      // could paint this older document over its optimistic one.
+      if (queryClient.isMutating({ mutationKey: queryKey, exact: true }) === 1) {
         void queryClient.invalidateQueries({ queryKey });
       }
     },

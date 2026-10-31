@@ -6,6 +6,7 @@ import { cleanup, renderHook, waitFor } from "@testing-library/react";
 import type { ReactNode } from "react";
 import { describe, expect, it, vi, beforeEach, afterEach } from "vitest";
 import type { WSClient } from "../api/ws-client";
+import { EMPTY_ISSUE_VIEW_PREFERENCE } from "../api/schemas";
 import { defaultStorage } from "../platform/storage";
 import { issueKeys } from "../issues/queries";
 import { chatKeys } from "../chat/queries";
@@ -188,20 +189,25 @@ describe("useRealtimeSync — ws instance change", () => {
     await new Promise((resolve) => setTimeout(resolve, 120));
 
     expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: issueViewKeys.all("ws-1") });
-    expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: issueViewPrefKeys.all("ws-1") });
+    expect(invalidateSpy).toHaveBeenCalledWith(expect.objectContaining({ queryKey: issueViewPrefKeys.all("ws-1") }));
   });
 
-  it("leaves a preference write in flight to refetch when it settles", async () => {
-    const isMutating = vi.spyOn(qc, "isMutating").mockReturnValue(1);
+  it("refreshes every preference document except one with a write still in flight here", async () => {
+    const projectsKey = issueViewPrefKeys.scope("ws-1", { scope_type: "sidebar_projects" });
+    const sidebarKey = issueViewPrefKeys.scope("ws-1", { scope_type: "sidebar" });
+    qc.setQueryData(projectsKey, EMPTY_ISSUE_VIEW_PREFERENCE);
+    qc.setQueryData(sidebarKey, EMPTY_ISSUE_VIEW_PREFERENCE);
+    const write = qc.getMutationCache().build(qc, { mutationKey: projectsKey, mutationFn: () => new Promise(() => {}) });
+    void write.execute(undefined);
     const ws = createMockWs();
     renderHook(() => useRealtimeSync(ws, stores), { wrapper: createWrapper(qc) });
     const onAny = vi.mocked(ws.onAny).mock.calls[0]![0];
 
-    onAny({ type: "issue_view_preference:changed", payload: { scope_type: "sidebar_projects", scope_id: "u1" } } as never);
+    onAny({ type: "issue_view_preference:changed", payload: { scope_type: "sidebar", scope_id: "u1" } } as never);
     await new Promise((resolve) => setTimeout(resolve, 120));
 
-    expect(isMutating).toHaveBeenCalledWith({ mutationKey: issueViewPrefKeys.all("ws-1") });
-    expect(invalidateSpy).not.toHaveBeenCalledWith({ queryKey: issueViewPrefKeys.all("ws-1") });
+    expect(qc.getQueryState(sidebarKey)?.isInvalidated).toBe(true);
+    expect(qc.getQueryState(projectsKey)?.isInvalidated).toBe(false);
   });
 
   it.each(["project:created", "project:updated", "project:deleted"])("refreshes workflow usage after %s", (type) => {

@@ -920,10 +920,13 @@ export function useRealtimeSync(
       issue_view_preference: () => {
         const wsId = getCurrentWsId();
         if (!wsId) return;
-        // A write still in flight here refetches when it settles; refetching
-        // now could paint an older document over its optimistic one.
-        if (qc.isMutating({ mutationKey: issueViewPrefKeys.all(wsId) }) > 0) return;
-        qc.invalidateQueries({ queryKey: issueViewPrefKeys.all(wsId) });
+        // A document with a write still in flight here refetches when that
+        // write settles; refetching it now could paint an older copy over the
+        // optimistic one. Every other document refreshes now.
+        qc.invalidateQueries({
+          queryKey: issueViewPrefKeys.all(wsId),
+          predicate: (query) => qc.isMutating({ mutationKey: query.queryKey, exact: true }) === 0,
+        });
       },
       daemon: () => {
         const wsId = getCurrentWsId();

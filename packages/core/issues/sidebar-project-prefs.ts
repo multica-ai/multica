@@ -3,6 +3,10 @@
 import { useCallback, useMemo } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useShallow } from "zustand/react/shallow";
+import { parseWithFallback } from "../api/schema";
+import { SidebarProjectPrefsDocSchema, type SidebarProjectPrefsDoc } from "../api/schemas";
+import { PROJECT_STATUS_ORDER } from "../projects/config";
+import type { ProjectStatus } from "../types";
 import {
   issueViewPreferenceOptions,
   useUpdateIssueViewPreference,
@@ -33,15 +37,35 @@ export interface SidebarProjectPrefsPatch {
   projectOrder?: string[];
 }
 
-const asRecord = (value: unknown): Record<string, unknown> =>
-  typeof value === "object" && value !== null && !Array.isArray(value) ? (value as Record<string, unknown>) : {};
+const EMPTY_DOC: SidebarProjectPrefsDoc = { projects: {}, issues: {}, order: [] };
 
-/** Settings missing from a stored document take their defaults, so older documents keep working. */
+const isProjectStatus = (status: string): status is ProjectStatus =>
+  (PROJECT_STATUS_ORDER as readonly string[]).includes(status);
+
+function withDefaults<T extends object>(defaults: T, saved: { [K in keyof T]?: T[K] }): T {
+  const merged = { ...defaults };
+  for (const key of Object.keys(saved) as (keyof T)[]) {
+    const value = saved[key];
+    if (value !== undefined) merged[key] = value;
+  }
+  return merged;
+}
+
+/**
+ * Settings a stored document lacks, or holds in a shape this client does not
+ * know, take their defaults, so older and newer documents both keep working.
+ */
 export function sidebarProjectPrefsFromDoc(doc: Record<string, unknown>): SidebarProjectPrefs {
+  const { projects, issues, order } = parseWithFallback(doc, SidebarProjectPrefsDocSchema, EMPTY_DOC, {
+    endpoint: "issue-view-preferences:sidebar_projects",
+  });
   return {
-    projectSettings: { ...DEFAULT_SIDEBAR_PROJECT_SETTINGS, ...(asRecord(doc.projects) as Partial<SidebarProjectSettings>) },
-    issueSettings: { ...DEFAULT_SIDEBAR_ISSUE_SETTINGS, ...(asRecord(doc.issues) as Partial<SidebarIssueSettings>) },
-    projectOrder: Array.isArray(doc.order) ? doc.order.filter((id): id is string => typeof id === "string") : [],
+    projectSettings: withDefaults(DEFAULT_SIDEBAR_PROJECT_SETTINGS, {
+      ...projects,
+      statuses: projects.statuses?.filter(isProjectStatus),
+    }),
+    issueSettings: withDefaults(DEFAULT_SIDEBAR_ISSUE_SETTINGS, issues),
+    projectOrder: order,
   };
 }
 

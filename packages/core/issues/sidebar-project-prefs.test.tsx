@@ -7,9 +7,14 @@ import { QueryClientProvider, type QueryClient } from "@tanstack/react-query";
 import type { ReactNode } from "react";
 import { setApiInstance } from "../api";
 import type { ApiClient } from "../api/client";
-import type { IssueViewPreference } from "../api/schemas";
+import { IssueViewPreferenceSchema, type IssueViewPreference } from "../api/schemas";
 import { createQueryClient } from "../query-client";
-import { useSidebarProjectPrefs, useUpdateSidebarProjectPrefs } from "./sidebar-project-prefs";
+import { sidebarProjects } from "./sidebar-list";
+import {
+  sidebarProjectPrefsFromDoc,
+  useSidebarProjectPrefs,
+  useUpdateSidebarProjectPrefs,
+} from "./sidebar-project-prefs";
 import {
   DEFAULT_SIDEBAR_ISSUE_SETTINGS,
   DEFAULT_SIDEBAR_PROJECT_SETTINGS,
@@ -95,7 +100,7 @@ describe("sidebar project prefs", () => {
     expect(putIssueViewPreference).not.toHaveBeenCalled();
   });
 
-  it("builds a quick second change on the first, without the first refetching over it", async () => {
+  it("sends a quick second change after the first lands, so the newer document is saved last", async () => {
     let server = doc({ order: [] });
     const pending: Array<() => void> = [];
     const { result } = setup(
@@ -113,19 +118,47 @@ describe("sidebar project prefs", () => {
     act(() => result.current.update({ projectSettings: { showCount: false } }));
     await waitFor(() => expect(result.current.prefs.projectSettings.showCount).toBe(false));
     act(() => result.current.update({ issueSettings: { assignee: "me" } }));
+    await waitFor(() => expect(result.current.prefs.issueSettings.assignee).toBe("me"));
+    expect(putIssueViewPreference).toHaveBeenCalledTimes(1);
+
+    await act(async () => pending[0]!());
     await waitFor(() => expect(putIssueViewPreference).toHaveBeenCalledTimes(2));
     expect(putIssueViewPreference.mock.calls[1]![0].prefs).toMatchObject({
       projects: { showCount: false },
       issues: { assignee: "me" },
     });
-
-    await act(async () => pending[0]!());
     expect(getIssueViewPreference).toHaveBeenCalledTimes(1);
     expect(result.current.prefs.issueSettings.assignee).toBe("me");
 
     await act(async () => pending[1]!());
     await waitFor(() => expect(getIssueViewPreference).toHaveBeenCalledTimes(2));
+    expect(server.prefs).toMatchObject({ projects: { showCount: false }, issues: { assignee: "me" } });
     expect(result.current.prefs.issueSettings.assignee).toBe("me");
     expect(result.current.prefs.projectSettings.showCount).toBe(false);
+  });
+
+  it("falls back to defaults for settings this client does not know", async () => {
+    const { result } = setup(async () =>
+      IssueViewPreferenceSchema.parse(
+        doc({
+          projects: { ordering: "future-order", statuses: ["planned", "archived"], showCount: "yes" },
+          issues: { sortBy: "magic", hiddenStatuses: null, assignee: 7 },
+          order: ["p1"],
+        }),
+      ),
+    );
+    await waitFor(() => expect(result.current.prefs.projectOrder).toEqual(["p1"]));
+    expect(result.current.prefs.projectSettings).toEqual({ ...DEFAULT_SIDEBAR_PROJECT_SETTINGS, statuses: ["planned"] });
+    expect(result.current.prefs.issueSettings).toEqual({ ...DEFAULT_SIDEBAR_ISSUE_SETTINGS, hiddenStatuses: null });
+    const { projectSettings, projectOrder } = result.current.prefs;
+    expect(sidebarProjects([], projectSettings, projectOrder, "u1")).toEqual([]);
+  });
+
+  it.each([null, "settings", 42, [1, 2]])("falls back to defaults when the document holds %j", (value) => {
+    expect(sidebarProjectPrefsFromDoc({ projects: value, issues: value, order: value })).toEqual({
+      projectSettings: DEFAULT_SIDEBAR_PROJECT_SETTINGS,
+      issueSettings: DEFAULT_SIDEBAR_ISSUE_SETTINGS,
+      projectOrder: [],
+    });
   });
 });
