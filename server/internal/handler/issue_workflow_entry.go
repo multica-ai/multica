@@ -104,14 +104,25 @@ func (h *Handler) applyIssueWorkflow(ctx context.Context, prev db.Issue, params 
 // workflowHandoffPayload describes a handoff on the issue:updated event, so
 // the activity log can record the status change and the handoff as one
 // timeline entry.
-func workflowHandoffPayload(issue db.Issue, hand *workflowHandoff, note string, runStarted bool) map[string]string {
+func workflowHandoffPayload(issue db.Issue, hand *workflowHandoff, note string, willEnqueue bool, reason string) map[string]string {
 	out := map[string]string{
 		"workflow": hand.def.Name,
 		"to_type":  issue.AssigneeType.String,
 		"to_id":    uuidToString(issue.AssigneeID),
-		"run":      strconv.FormatBool(runStarted),
+		"run":      strconv.FormatBool(willEnqueue),
 	}
-	if runStarted && note != "" {
+	// The legacy run field is a prediction made before dispatch, including
+	// on older history. Add reasons only for the scoped direct-agent path.
+	if issue.AssigneeType.String == "agent" {
+		if !willEnqueue && reason == "enqueue_allowed" {
+			reason = "suppressed"
+		}
+		if reason == "" {
+			reason = "not_triggered"
+		}
+		out["run_reason"] = reason
+	}
+	if willEnqueue && note != "" {
 		out["note"] = note
 	}
 	return out

@@ -57,7 +57,9 @@ func (h *Handler) noteTriggerFailure(ctx context.Context, issue db.Issue, conten
 	created, err := h.createTriggerFailureComment(ctx, params)
 	if err != nil {
 		if !errors.Is(err, pgx.ErrNoRows) {
-			logAttrs = append(logAttrs, slog.Any("error", err), slog.String("issue_id", uuidToString(issue.ID)))
+			// A failed insert can contain SQL parameters. Keep notices best-effort
+			// without copying those values into the diagnostic log.
+			logAttrs = append(logAttrs, slog.String("issue_id", uuidToString(issue.ID)))
 			slog.LogAttrs(ctx, slog.LevelWarn, "trigger failure notice: create system comment failed", logAttrs...)
 		}
 		return

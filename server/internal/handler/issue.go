@@ -4112,11 +4112,11 @@ func (h *Handler) UpdateIssue(w http.ResponseWriter, r *http.Request) {
 
 	// A workflow handoff (MUL-7420) is decided before the event goes out so
 	// the timeline can record it as one entry: the status change, who the
-	// issue went to, whether their run started, and the brief it reads. The
+	// issue went to, whether an enqueue was predicted, and its brief. The
 	// run gets that brief from its claim; its handoff note stays the
 	// caller's own.
 	handoffNote := req.HandoffNote
-	trigger, willRun := h.IssueService.WillEnqueueRun(r.Context(),
+	decision := h.IssueService.EvaluateIssueRun(r.Context(),
 		service.IssueTriggerInput{
 			Issue:              issue,
 			PrevStatus:         prevIssue.Status,
@@ -4126,7 +4126,7 @@ func (h *Handler) UpdateIssue(w http.ResponseWriter, r *http.Request) {
 		},
 		h.issueTriggerWriteProbe(r, actorType, actorID, issue),
 	)
-	willRun = willRun && !req.SuppressRun
+	trigger, willRun := decision.Trigger, decision.Enqueue && !req.SuppressRun
 
 	updatedPayload := map[string]any{
 		"issue":               resp,
@@ -4154,7 +4154,7 @@ func (h *Handler) UpdateIssue(w http.ResponseWriter, r *http.Request) {
 		"prev_duplicate_of_issue_id": liveDuplicateMark(prevIssue.Status, prevIssue.DuplicateOfIssueID),
 	}
 	if handoff != nil {
-		updatedPayload["workflow_handoff"] = workflowHandoffPayload(issue, handoff, h.workflowHandoffBrief(r.Context(), issue, handoff), willRun)
+		updatedPayload["workflow_handoff"] = workflowHandoffPayload(issue, handoff, h.workflowHandoffBrief(r.Context(), issue, handoff), willRun, decision.Reason)
 	}
 	h.publish(protocol.EventIssueUpdated, workspaceID, actorType, actorID, updatedPayload)
 	if attachmentsChanged {
@@ -4192,7 +4192,10 @@ func (h *Handler) UpdateIssue(w http.ResponseWriter, r *http.Request) {
 		h.stopPreviousAssigneeRuns(r.Context(), prevIssue, issue, actorType, actorID)
 	}
 	if willRun {
-		h.dispatchIssueRun(r.Context(), issue, trigger, actorType, actorID, handoffNote)
+		task, err := h.dispatchIssueRun(r.Context(), issue, trigger, actorType, actorID, handoffNote)
+		if handoff != nil && trigger.AssigneeType == "agent" {
+			h.noteWorkflowHandoffEnqueueFailure(r.Context(), issue, task, err)
+		}
 	}
 
 	// Sub-issue rules on the parent (the child_done system rule and sub-issue
@@ -4911,7 +4914,7 @@ func (h *Handler) BatchUpdateIssues(w http.ResponseWriter, r *http.Request) {
 		projectChanged := req.Updates.ProjectID != nil && uuidToString(prevIssue.ProjectID) != uuidToString(issue.ProjectID)
 
 		batchHandoffNote := req.Updates.HandoffNote
-		trigger, willRun := h.IssueService.WillEnqueueRun(r.Context(),
+		decision := h.IssueService.EvaluateIssueRun(r.Context(),
 			service.IssueTriggerInput{
 				Issue:              issue,
 				PrevStatus:         prevIssue.Status,
@@ -4921,7 +4924,7 @@ func (h *Handler) BatchUpdateIssues(w http.ResponseWriter, r *http.Request) {
 			},
 			h.issueTriggerWriteProbe(r, actorType, actorID, issue),
 		)
-		willRun = willRun && !req.Updates.SuppressRun
+		trigger, willRun := decision.Trigger, decision.Enqueue && !req.Updates.SuppressRun
 		batchPayload := map[string]any{
 			"issue":                      resp,
 			"assignee_changed":           assigneeChanged,
@@ -4933,7 +4936,7 @@ func (h *Handler) BatchUpdateIssues(w http.ResponseWriter, r *http.Request) {
 			"prev_duplicate_of_issue_id": liveDuplicateMark(prevIssue.Status, prevIssue.DuplicateOfIssueID),
 		}
 		if handoff != nil {
-			batchPayload["workflow_handoff"] = workflowHandoffPayload(issue, handoff, h.workflowHandoffBrief(r.Context(), issue, handoff), willRun)
+			batchPayload["workflow_handoff"] = workflowHandoffPayload(issue, handoff, h.workflowHandoffBrief(r.Context(), issue, handoff), willRun, decision.Reason)
 		}
 		h.publish(protocol.EventIssueUpdated, workspaceID, actorType, actorID, batchPayload)
 
@@ -4947,7 +4950,10 @@ func (h *Handler) BatchUpdateIssues(w http.ResponseWriter, r *http.Request) {
 			h.stopPreviousAssigneeRuns(r.Context(), prevIssue, issue, actorType, actorID)
 		}
 		if willRun {
-			h.dispatchIssueRun(r.Context(), issue, trigger, actorType, actorID, batchHandoffNote)
+			task, err := h.dispatchIssueRun(r.Context(), issue, trigger, actorType, actorID, batchHandoffNote)
+			if handoff != nil && trigger.AssigneeType == "agent" {
+				h.noteWorkflowHandoffEnqueueFailure(r.Context(), issue, task, err)
+			}
 		}
 
 		// No status change — not even → cancelled — cancels active tasks here,

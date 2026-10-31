@@ -9,8 +9,9 @@ import { BriefBlock } from "./handoff-form";
 
 /**
  * The handoff half of a status-change timeline entry (MUL-7420): who the
- * workflow step handed the issue to, whether their run started, and the brief
- * that run received. Renders nothing for an ordinary status change.
+ * workflow step handed the issue to, the enqueue prediction and its reason,
+ * and the brief. Actual enqueue/execution is recorded by runs.
+ * Renders nothing for an ordinary status change.
  */
 export function TimelineHandoff({ details }: { details: Record<string, string> }) {
   const { t } = useT("issues");
@@ -20,8 +21,26 @@ export function TimelineHandoff({ details }: { details: Record<string, string> }
   const id = details.handoff_to_id;
   if (!type || !id) return null;
   const note = details.handoff_note ?? "";
-  const ran = details.handoff_run === "true";
+  const predicted = details.handoff_run === "true";
   const name = getActorName(type, id);
+  const reason = details.handoff_run_reason;
+  const explanation = (() => {
+    switch (reason) {
+      case "enqueue_allowed": return t(($) => $.workflows.timeline.run_predicted);
+      case "pending_task": return t(($) => $.workflows.timeline.pending_run);
+      case "pending_check_failed":
+      case "agent_check_failed": return t(($) => $.workflows.timeline.check_failed);
+      case "no_runtime": return t(($) => $.workflows.timeline.no_runtime);
+      case "suppressed": return t(($) => $.workflows.timeline.run_suppressed);
+      case "agent_unavailable": return t(($) => $.workflows.timeline.agent_unavailable);
+      case "invocation_not_allowed": return t(($) => $.workflows.timeline.not_allowed);
+      case "active_self_assignment":
+      case "not_triggered": return t(($) => $.workflows.timeline.no_run);
+      case undefined:
+      case "": return predicted ? t(($) => $.workflows.timeline.run_predicted) : null;
+      default: return t(($) => $.workflows.timeline.unknown_reason);
+    }
+  })();
   return (
     <div className="mt-1 space-y-2">
       <div className="flex flex-wrap items-center gap-1.5 text-caption text-muted-foreground">
@@ -31,10 +50,10 @@ export function TimelineHandoff({ details }: { details: Record<string, string> }
         <span className="font-medium text-foreground">{name}</span>
         {type === "member" ? (
           <span>{t(($) => $.workflows.timeline.member_no_run)}</span>
-        ) : ran ? (
+        ) : (
           <>
-            <span>{t(($) => $.workflows.timeline.run_started)}</span>
-            {note && (
+            {explanation && <span>{explanation}</span>}
+            {predicted && note && (
               <button
                 type="button"
                 onClick={() => setOpen((v) => !v)}
@@ -45,7 +64,7 @@ export function TimelineHandoff({ details }: { details: Record<string, string> }
               </button>
             )}
           </>
-        ) : null}
+        )}
       </div>
       {open && note && (
         <div className="space-y-1.5">

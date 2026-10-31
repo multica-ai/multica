@@ -72,6 +72,15 @@ type IssueRunTrigger struct {
 	Source       RunEnqueueSource
 }
 
+// IssueRunDecision keeps the prediction and the reason from the same evaluation.
+// Reason is deliberately coarse: it carries no target or pending-task metadata.
+// An allowed prediction is not evidence of enqueue or execution.
+type IssueRunDecision struct {
+	Trigger IssueRunTrigger
+	Enqueue bool
+	Reason  string
+}
+
 func allowAllAgents(db.Agent) bool { return true }
 
 // WillEnqueueRun is the single predicate answering "will this issue write
@@ -100,9 +109,16 @@ func allowAllAgents(db.Agent) bool { return true }
 //     assignee already holds a pending task the insert simply no-ops on the
 //     same unique index, so the assignee still ends up with one pending run.
 func (s *IssueService) WillEnqueueRun(ctx context.Context, in IssueTriggerInput, probe IssueTriggerProbe) (IssueRunTrigger, bool) {
+	decision := s.EvaluateIssueRun(ctx, in, probe)
+	return decision.Trigger, decision.Enqueue
+}
+
+// EvaluateIssueRun applies the same gates as WillEnqueueRun, retaining the
+// direct-agent branch's observed reason without another readiness/pending query.
+func (s *IssueService) EvaluateIssueRun(ctx context.Context, in IssueTriggerInput, probe IssueTriggerProbe) IssueRunDecision {
 	issue := in.Issue
 	if !issue.AssigneeType.Valid || !issue.AssigneeID.Valid {
-		return IssueRunTrigger{}, false
+		return IssueRunDecision{}
 	}
 	canAccess := probe.CanAccessAgent
 	if canAccess == nil {
@@ -125,7 +141,7 @@ func (s *IssueService) WillEnqueueRun(ctx context.Context, in IssueTriggerInput,
 	// clears this field and then takes the ordinary create / assign path; there
 	// is no "was in triage" transition for this predicate to recognise.
 	if issue.TriageState.Valid {
-		return IssueRunTrigger{}, false
+		return IssueRunDecision{}
 	}
 
 	var source RunEnqueueSource
@@ -133,44 +149,56 @@ func (s *IssueService) WillEnqueueRun(ctx context.Context, in IssueTriggerInput,
 	case in.IsCreate || in.AssigneeChanged:
 		// Backlog is the parking lot: assigning into backlog never starts a run.
 		if currentStatus == "backlog" {
-			return IssueRunTrigger{}, false
+			return IssueRunDecision{}
 		}
 		source = RunSourceAssign
 	case in.StatusChanged && prevStatus == "backlog" &&
 		currentStatus != "backlog" &&
 		currentStatus != "done" && currentStatus != "cancelled":
 		if probe.IsSelfLoop != nil && probe.IsSelfLoop() {
-			return IssueRunTrigger{}, false
+			return IssueRunDecision{}
 		}
 		source = RunSourceStatus
 	default:
-		return IssueRunTrigger{}, false
+		return IssueRunDecision{}
 	}
 
 	switch issue.AssigneeType.String {
 	case "agent":
 		agent, err := s.Queries.GetAgent(ctx, issue.AssigneeID)
-		if err != nil || !agent.RuntimeID.Valid || agent.ArchivedAt.Valid {
-			return IssueRunTrigger{}, false
+		if err != nil {
+			return IssueRunDecision{Reason: "agent_check_failed"}
+		}
+		if agent.ArchivedAt.Valid {
+			return IssueRunDecision{Reason: "agent_unavailable"}
+		}
+		if !agent.RuntimeID.Valid {
+			return IssueRunDecision{Reason: "no_runtime"}
 		}
 		if !canAccess(agent) {
-			return IssueRunTrigger{}, false
+			return IssueRunDecision{Reason: "invocation_not_allowed"}
 		}
 		if source == RunSourceAssign && !in.IsCreate && !in.EnteredHandoffStep && probe.SuppressActiveSelfAssignment != nil &&
 			probe.SuppressActiveSelfAssignment(issue.AssigneeID) {
-			return IssueRunTrigger{}, false
+			return IssueRunDecision{Reason: "active_self_assignment"}
 		}
 		// A step entered under the agent's own run queues behind it; one
 		// already queued covers the new step too.
-		if (source == RunSourceStatus || in.EnteredHandoffStep) && s.hasPendingRun(ctx, issue.ID, issue.AssigneeID) {
-			return IssueRunTrigger{}, false
+		if source == RunSourceStatus || in.EnteredHandoffStep {
+			pending, err := s.pendingRun(ctx, issue.ID, issue.AssigneeID)
+			if err != nil {
+				return IssueRunDecision{Reason: "pending_check_failed"}
+			}
+			if pending {
+				return IssueRunDecision{Reason: "pending_task"}
+			}
 		}
-		return IssueRunTrigger{
+		return IssueRunDecision{Enqueue: true, Reason: "enqueue_allowed", Trigger: IssueRunTrigger{
 			IssueID:      issue.ID,
 			AgentID:      issue.AssigneeID,
 			AssigneeType: "agent",
 			Source:       source,
-		}, true
+		}}
 
 	case "squad":
 		// Pair-scoped self-assignment suppression intentionally applies only to
@@ -184,36 +212,41 @@ func (s *IssueService) WillEnqueueRun(ctx context.Context, in IssueTriggerInput,
 			WorkspaceID: issue.WorkspaceID,
 		})
 		if err != nil {
-			return IssueRunTrigger{}, false
+			return IssueRunDecision{}
 		}
 		leader, err := s.Queries.GetAgent(ctx, squad.LeaderID)
 		if err != nil {
-			return IssueRunTrigger{}, false
+			return IssueRunDecision{}
 		}
 		verdict, err := AgentReadiness(ctx, s.runtimeLookup(s.Queries), leader)
 		if err != nil || !verdict.Ready() {
-			return IssueRunTrigger{}, false
+			return IssueRunDecision{}
 		}
 		if !canAccess(leader) {
-			return IssueRunTrigger{}, false
+			return IssueRunDecision{}
 		}
 		if source == RunSourceStatus && s.hasPendingRun(ctx, issue.ID, squad.LeaderID) {
-			return IssueRunTrigger{}, false
+			return IssueRunDecision{}
 		}
-		return IssueRunTrigger{
+		return IssueRunDecision{Enqueue: true, Trigger: IssueRunTrigger{
 			IssueID:      issue.ID,
 			AgentID:      squad.LeaderID,
 			AssigneeType: "squad",
 			Source:       source,
-		}, true
+		}}
 	}
-	return IssueRunTrigger{}, false
+	return IssueRunDecision{}
 }
 
 // hasPendingRun reports whether the agent already holds a queued or dispatched
 // task for the issue (the (issue_id, agent_id) unique-index slot). Errors fail
 // closed to "pending" so preview never over-promises a run.
 func (s *IssueService) hasPendingRun(ctx context.Context, issueID, agentID pgtype.UUID) bool {
+	pending, err := s.pendingRun(ctx, issueID, agentID)
+	return pending || err != nil
+}
+
+func (s *IssueService) pendingRun(ctx context.Context, issueID, agentID pgtype.UUID) (bool, error) {
 	pending, err := s.Queries.HasPendingTaskForIssueAndAgent(ctx, db.HasPendingTaskForIssueAndAgentParams{
 		IssueID: issueID,
 		AgentID: agentID,
@@ -221,8 +254,5 @@ func (s *IssueService) hasPendingRun(ctx context.Context, issueID, agentID pgtyp
 		// does not shadow a request after HEAD advanced (TEN-356).
 		HeadSha: headShaText(s.TaskService.ResolveIssueReviewSHA(ctx, issueID)),
 	})
-	if err != nil {
-		return true
-	}
-	return pending
+	return pending, err
 }

@@ -42,7 +42,7 @@ func timelineFixture() []map[string]any {
 		{
 			"type": "activity", "id": "a2", "actor_type": "member", "actor_id": "m1",
 			"created_at": "2026-08-19T09:00:00Z", "action": "status_changed",
-			"details": map[string]any{"from": "in_progress", "to": "in_review"},
+			"details": map[string]any{"from": "in_progress", "to": "in_review", "handoff_run": "false", "handoff_run_reason": "pending_check_failed"},
 		},
 		{
 			"type": "activity", "id": "a3", "actor_type": "system", "actor_id": "",
@@ -295,7 +295,7 @@ func TestRunIssueTimelineReportsTruncationOnStderr(t *testing.T) {
 
 	t.Setenv("MULTICA_SERVER_URL", srv.URL)
 	t.Setenv("MULTICA_WORKSPACE_ID", "ws-1")
-	t.Setenv("MULTICA_TOKEN", "test-token")
+	t.Setenv("MULTICA_TOKEN", "mat_test-token")
 
 	cmd := newIssueTimelineTestCmd()
 	_ = cmd.Flags().Set("output", "json")
@@ -327,6 +327,10 @@ func TestRunIssueTimelineReportsTruncationOnStderr(t *testing.T) {
 	if len(entries) != len(timelineFixture()) {
 		t.Fatalf("entries = %d, want %d", len(entries), len(timelineFixture()))
 	}
+	details, ok := entries[2]["details"].(map[string]any)
+	if !ok || details["handoff_run_reason"] != "pending_check_failed" || details["handoff_run"] != "false" {
+		t.Fatalf("JSON output dropped the handoff prediction or diagnostic: %+v", entries[2])
+	}
 }
 
 func TestRunIssueTimelineSilentWhenNotTruncated(t *testing.T) {
@@ -344,7 +348,7 @@ func TestRunIssueTimelineSilentWhenNotTruncated(t *testing.T) {
 
 	t.Setenv("MULTICA_SERVER_URL", srv.URL)
 	t.Setenv("MULTICA_WORKSPACE_ID", "ws-1")
-	t.Setenv("MULTICA_TOKEN", "test-token")
+	t.Setenv("MULTICA_TOKEN", "mat_test-token")
 
 	cmd := newIssueTimelineTestCmd()
 	_ = cmd.Flags().Set("output", "json")
@@ -406,7 +410,7 @@ func TestRunIssueTimelineRequestsFlatShapeAndFilters(t *testing.T) {
 
 	t.Setenv("MULTICA_SERVER_URL", srv.URL)
 	t.Setenv("MULTICA_WORKSPACE_ID", "ws-1")
-	t.Setenv("MULTICA_TOKEN", "test-token")
+	t.Setenv("MULTICA_TOKEN", "mat_test-token")
 
 	cmd := newIssueTimelineTestCmd()
 	_ = cmd.Flags().Set("output", "json")
@@ -457,7 +461,7 @@ func TestRunIssueTimelineEmptyResultPrintsEmptyJSONArray(t *testing.T) {
 
 	t.Setenv("MULTICA_SERVER_URL", srv.URL)
 	t.Setenv("MULTICA_WORKSPACE_ID", "ws-1")
-	t.Setenv("MULTICA_TOKEN", "test-token")
+	t.Setenv("MULTICA_TOKEN", "mat_test-token")
 
 	cmd := newIssueTimelineTestCmd()
 	_ = cmd.Flags().Set("output", "json")

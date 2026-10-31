@@ -1626,11 +1626,19 @@
     },
     "timeline": {
       "handed_to": "已交給",
-      "run_started": "並開始執行 ·",
+      "run_predicted": "交接時允許入列；執行情況請查看執行記錄",
+      "pending_run": "交接時已有待處理執行涵蓋",
+      "check_failed": "無法檢查執行是否可入列",
+      "no_runtime": "交接時未綁定執行環境",
+      "run_suppressed": "本次更新已抑制執行",
+      "agent_unavailable": "交接時智慧體無法使用",
+      "not_allowed": "無權呼叫執行",
+      "no_run": "交接時未預計新增執行",
+      "unknown_reason": "執行預測無法取得；請查看執行記錄",
       "member_no_run": "（成員，不啟動執行）",
       "show_brief": "檢視交接說明",
       "hide_brief": "收起交接說明",
-      "brief_header": "這次執行收到的工作流說明"
+      "brief_header": "工作流交接說明"
     },
     "detail": {
       "follows_project": "（跟隨專案）",

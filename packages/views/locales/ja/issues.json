@@ -1626,11 +1626,19 @@
     },
     "timeline": {
       "handed_to": "引き継ぎ先",
-      "run_started": "実行を開始 ·",
+      "run_predicted": "引き継ぎ時点ではキューに追加可能（実行状況は実行履歴を確認）",
+      "pending_run": "引き継ぎ時点で既存の待機中の実行が対応",
+      "check_failed": "実行をキューに追加できるか確認できませんでした",
+      "no_runtime": "引き継ぎ時点でランタイム未設定",
+      "run_suppressed": "この更新では実行を抑制",
+      "agent_unavailable": "引き継ぎ時点でエージェントを利用できませんでした",
+      "not_allowed": "実行の呼び出しが許可されていません",
+      "no_run": "引き継ぎ時点では新たな実行を予定していません",
+      "unknown_reason": "実行予測を取得できません（実行履歴を確認）",
       "member_no_run": "（メンバー、実行なし）",
       "show_brief": "引き継ぎの説明を見る",
       "hide_brief": "引き継ぎの説明を閉じる",
-      "brief_header": "この実行が受け取ったワークフローの説明"
+      "brief_header": "ワークフローの引き継ぎ説明"
     },
     "detail": {
       "follows_project": "（プロジェクトに従う）",
