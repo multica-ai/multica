@@ -27,6 +27,10 @@ var MinVersions = map[string]string{
 	"muse":        "1.4.10",    // MSP stable surface: session/start, turn/start, item stream
 	"devin":       "3000.3.22", // devin acp --model was introduced in 3000.3.22
 	"zeroclaw":    "0.8.0",     // persistent ACP sessions and session/resume were added in 0.8.0
+	// zcode: verified against 0.16.9 (NDJSON framing, session/subscribe,
+	// requestRuntimePreferences reverse request, reasoning-level validation).
+	// Older CLIs may lack session/subscribe or the current framing details.
+	"zcode": "0.16.0",
 	// opencode: honors TMPDIR/TMP/TEMP from 1.1.54. Earlier builds ignore all
 	// three when their embedded Bun runtime extracts a native module, writing
 	// into the shared system temp dir whatever the daemon exports — one 4-8 MB
