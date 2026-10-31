@@ -688,6 +688,19 @@ func (q *Queries) SetAgentSkillEnabled(ctx context.Context, arg SetAgentSkillEna
 	return result.RowsAffected(), nil
 }
 
+const touchAgentForSkillChange = `-- name: TouchAgentForSkillChange :exec
+UPDATE agent
+SET updated_at = now()
+WHERE id = $1
+`
+
+// Skill assignments already persist in agent_skill. Touch the parent Agent's
+// last-modified timestamp in the same transaction as each assignment change.
+func (q *Queries) TouchAgentForSkillChange(ctx context.Context, id pgtype.UUID) error {
+	_, err := q.db.Exec(ctx, touchAgentForSkillChange, id)
+	return err
+}
+
 const updateSkill = `-- name: UpdateSkill :one
 UPDATE skill SET
     name = COALESCE($2, name),
