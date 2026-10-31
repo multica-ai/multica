@@ -74,13 +74,13 @@ import {
   EMPTY_LIST_ISSUE_STATUSES_RESPONSE,
   EMPTY_ISSUE_STATUS_ENTRY,
 } from "./schemas";
-import { IssueUnreadListSchema, EMPTY_ISSUE_UNREAD } from "./schemas";
+import { IssueUnreadPageSchema, EMPTY_ISSUE_UNREAD_PAGE } from "./schemas";
 import { parseWithFallback } from "./schema";
 
-describe("IssueUnreadListSchema", () => {
+describe("IssueUnreadPageSchema", () => {
   const endpoint = "GET /api/issues/unread";
 
-  it("unwraps items and defaults a missing agent_id to null", () => {
+  it("defaults a missing agent_id and next_cursor to null", () => {
     const parsed = parseWithFallback(
       {
         items: [
@@ -88,19 +88,24 @@ describe("IssueUnreadListSchema", () => {
           { issue_id: "i-2", outcome: "manual", created_at: "2026-01-01T00:00:00Z", extra: true },
         ],
       },
-      IssueUnreadListSchema,
-      EMPTY_ISSUE_UNREAD,
+      IssueUnreadPageSchema,
+      EMPTY_ISSUE_UNREAD_PAGE,
       { endpoint },
     );
-    expect(parsed.map((u) => [u.issue_id, u.agent_id])).toEqual([
+    expect(parsed.items.map((u) => [u.issue_id, u.agent_id])).toEqual([
       ["i-1", "a-1"],
       ["i-2", null],
     ]);
+    expect(parsed.next_cursor).toBeNull();
   });
 
-  it("falls back to an empty list for a malformed body", () => {
-    expect(parseWithFallback({ items: "nope" }, IssueUnreadListSchema, EMPTY_ISSUE_UNREAD, { endpoint })).toEqual([]);
-    expect(parseWithFallback(null, IssueUnreadListSchema, EMPTY_ISSUE_UNREAD, { endpoint })).toEqual([]);
+  it("falls back to an empty last page for a malformed body", () => {
+    expect(parseWithFallback({ items: "nope" }, IssueUnreadPageSchema, EMPTY_ISSUE_UNREAD_PAGE, { endpoint })).toEqual(
+      EMPTY_ISSUE_UNREAD_PAGE,
+    );
+    expect(parseWithFallback(null, IssueUnreadPageSchema, EMPTY_ISSUE_UNREAD_PAGE, { endpoint })).toEqual(
+      EMPTY_ISSUE_UNREAD_PAGE,
+    );
   });
 });
 

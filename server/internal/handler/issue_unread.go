@@ -18,7 +18,11 @@ type IssueUnreadResponse struct {
 	CreatedAt string  `json:"created_at"`
 }
 
-// ListIssueUnread returns the caller's unread issues in the current workspace.
+const issueUnreadPageSize = 500
+
+// ListIssueUnread returns one page of the caller's unread issues in the
+// current workspace, newest first. next_cursor is set while more remain; the
+// client reads every page, since a missing row would read as "read".
 func (h *Handler) ListIssueUnread(w http.ResponseWriter, r *http.Request) {
 	userID, ok := requireUserID(w, r)
 	if !ok {
@@ -28,14 +32,30 @@ func (h *Handler) ListIssueUnread(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-
-	rows, err := h.Queries.ListIssueUnread(r.Context(), db.ListIssueUnreadParams{
+	params := db.ListIssueUnreadParams{
 		WorkspaceID: wsUUID,
 		UserID:      parseUUID(userID),
-	})
+		PageLimit:   int32(issueUnreadPageSize + 1),
+	}
+	if cursor := r.URL.Query().Get("cursor"); cursor != "" {
+		params.BeforeCreatedAt, params.BeforeIssueID = parseTranscriptCursor(cursor)
+		if !params.BeforeCreatedAt.Valid {
+			writeError(w, http.StatusBadRequest, "invalid cursor")
+			return
+		}
+	}
+
+	rows, err := h.Queries.ListIssueUnread(r.Context(), params)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to list unread issues")
 		return
+	}
+	var nextCursor *string
+	if len(rows) > issueUnreadPageSize {
+		rows = rows[:issueUnreadPageSize]
+		last := rows[len(rows)-1]
+		cursor := transcriptCursor(last.CreatedAt.Time, last.IssueID)
+		nextCursor = &cursor
 	}
 
 	items := make([]IssueUnreadResponse, len(rows))
@@ -47,7 +67,7 @@ func (h *Handler) ListIssueUnread(w http.ResponseWriter, r *http.Request) {
 			CreatedAt: timestampToString(row.CreatedAt),
 		}
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"items": items})
+	writeJSON(w, http.StatusOK, map[string]any{"items": items, "next_cursor": nextCursor})
 }
 
 // MarkIssueRead clears the caller's unread mark on an issue.

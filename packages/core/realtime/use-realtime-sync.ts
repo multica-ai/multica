@@ -12,7 +12,7 @@ import { defaultStorage } from "../platform/storage";
 import { getCurrentWsId, getCurrentSlug } from "../platform/workspace-storage";
 import { issueKeys } from "../issues/queries";
 import { isSidebarTableRequest, type SidebarIssuesRequest } from "../issues/sidebar-list";
-import { issueUnreadKeys } from "../issues/unread";
+import { refreshIssueUnread } from "../issues/unread";
 import { projectKeys } from "../projects/queries";
 import { pinKeys } from "../pins/queries";
 import { autopilotKeys } from "../autopilots/queries";
@@ -651,7 +651,7 @@ function invalidateWorkspaceScopedQueries(qc: QueryClient): void {
   const wsId = getCurrentWsId();
   if (wsId) {
     qc.invalidateQueries({ queryKey: issueKeys.all(wsId) });
-    qc.invalidateQueries({ queryKey: issueUnreadKeys.all(wsId) });
+    void refreshIssueUnread(qc, wsId);
     // Through the inbox's own entry point, not a plain invalidate: a reconnect
     // can land during the list's first load, and a plain invalidate would be
     // answered by the request already on the wire (see refreshInboxQuery).
@@ -1168,7 +1168,7 @@ export function useRealtimeSync(
     // Personal; may belong to a workspace other than the open one.
     const unsubIssueUnreadChanged = ws.on("issue_unread:changed", (p) => {
       const { workspace_id } = p as IssueUnreadChangedPayload;
-      if (workspace_id) void qc.invalidateQueries({ queryKey: issueUnreadKeys.all(workspace_id) });
+      if (workspace_id) void refreshIssueUnread(qc, workspace_id);
     });
 
     const unsubIssueAttachmentsChanged = ws.on("issue_attachments:changed", (p) => {

@@ -409,8 +409,8 @@ import {
   EMPTY_CREATE_FEEDBACK_RESPONSE,
   InboxUnreadSummarySchema,
   EMPTY_INBOX_UNREAD_SUMMARY,
-  IssueUnreadListSchema,
-  EMPTY_ISSUE_UNREAD,
+  IssueUnreadPageSchema,
+  EMPTY_ISSUE_UNREAD_PAGE,
   InboxItemListSchema,
   ArchivedInboxPageSchema,
   ArchivedInboxFacetsSchema,
@@ -2916,11 +2916,20 @@ export class ApiClient {
     return task;
   }
 
+  /** Every unread mark, across all pages: a row missing here reads as "read". */
   async listIssueUnread(): Promise<IssueUnread[]> {
-    const raw = await this.fetch<unknown>("/api/issues/unread");
-    return parseWithFallback(raw, IssueUnreadListSchema, EMPTY_ISSUE_UNREAD, {
-      endpoint: "GET /api/issues/unread",
-    });
+    const items: IssueUnread[] = [];
+    let cursor: string | null = null;
+    do {
+      const query: string = cursor ? `?cursor=${encodeURIComponent(cursor)}` : "";
+      const raw = await this.fetch<unknown>(`/api/issues/unread${query}`);
+      const page = parseWithFallback(raw, IssueUnreadPageSchema, EMPTY_ISSUE_UNREAD_PAGE, {
+        endpoint: "GET /api/issues/unread",
+      });
+      items.push(...page.items);
+      cursor = page.next_cursor === cursor ? null : page.next_cursor;
+    } while (cursor);
+    return items;
   }
 
   async markIssueRead(issueId: string): Promise<void> {

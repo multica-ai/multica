@@ -9,6 +9,11 @@ import { useAppForeground } from "../../common/use-app-foreground";
  * opened, and when a run ends while it stays open. A mark the viewer set by
  * hand while the issue is open is kept, or "Mark as unread" would undo itself.
  * Nothing is cleared while the app is in the background.
+ *
+ * Each unread mark is cleared at most once per viewing. A failed write rolls
+ * the cache back to that same mark; trying again on it would loop. The
+ * mutation's own retries cover transient failures, and a newer mark (another
+ * run ending) or reopening the issue tries again.
  */
 export function useMarkIssueReadWhileViewing(wsId: string, issueId: string) {
   const foreground = useAppForeground();
@@ -23,11 +28,17 @@ export function useMarkIssueReadWhileViewing(wsId: string, issueId: string) {
   });
   const { mutate: markRead } = useMarkIssueRead(wsId);
   const viewedIssueId = useRef<string | null>(null);
+  const clearedMark = useRef<string | null>(null);
 
   useEffect(() => {
     if (!issueId || !isSuccess || !foreground) return;
     const opening = viewedIssueId.current !== issueId;
     viewedIssueId.current = issueId;
-    if (unread && (opening || unread.outcome !== "manual")) markRead(issueId);
+    if (opening) clearedMark.current = null;
+    if (!unread || (!opening && unread.outcome === "manual")) return;
+    const mark = `${unread.outcome}|${unread.created_at}`;
+    if (clearedMark.current === mark) return;
+    clearedMark.current = mark;
+    markRead(issueId);
   }, [issueId, isSuccess, foreground, unread, markRead]);
 }

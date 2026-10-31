@@ -14,14 +14,22 @@ import (
 const listIssueUnread = `-- name: ListIssueUnread :many
 SELECT issue_id, outcome, agent_id, created_at
 FROM issue_unread
-WHERE workspace_id = $1 AND user_id = $2
-ORDER BY created_at DESC
-LIMIT 500
+WHERE workspace_id = $1
+  AND user_id = $2
+  AND (
+    $3::timestamptz IS NULL
+    OR (created_at, issue_id) < ($3::timestamptz, $4::uuid)
+  )
+ORDER BY created_at DESC, issue_id DESC
+LIMIT $5
 `
 
 type ListIssueUnreadParams struct {
-	WorkspaceID pgtype.UUID `json:"workspace_id"`
-	UserID      pgtype.UUID `json:"user_id"`
+	WorkspaceID     pgtype.UUID        `json:"workspace_id"`
+	UserID          pgtype.UUID        `json:"user_id"`
+	BeforeCreatedAt pgtype.Timestamptz `json:"before_created_at"`
+	BeforeIssueID   pgtype.UUID        `json:"before_issue_id"`
+	PageLimit       int32              `json:"page_limit"`
 }
 
 type ListIssueUnreadRow struct {
@@ -31,9 +39,17 @@ type ListIssueUnreadRow struct {
 	CreatedAt pgtype.Timestamptz `json:"created_at"`
 }
 
-// The caller's unread issues in one workspace, newest first.
+// One page of the caller's unread issues in one workspace, newest first. Pages
+// continue strictly after the (created_at, issue_id) of the previous page's
+// last row, so every row is reachable however many there are.
 func (q *Queries) ListIssueUnread(ctx context.Context, arg ListIssueUnreadParams) ([]ListIssueUnreadRow, error) {
-	rows, err := q.db.Query(ctx, listIssueUnread, arg.WorkspaceID, arg.UserID)
+	rows, err := q.db.Query(ctx, listIssueUnread,
+		arg.WorkspaceID,
+		arg.UserID,
+		arg.BeforeCreatedAt,
+		arg.BeforeIssueID,
+		arg.PageLimit,
+	)
 	if err != nil {
 		return nil, err
 	}

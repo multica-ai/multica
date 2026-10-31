@@ -21,12 +21,19 @@ SET outcome = EXCLUDED.outcome,
 RETURNING workspace_id, user_id;
 
 -- name: ListIssueUnread :many
--- The caller's unread issues in one workspace, newest first.
+-- One page of the caller's unread issues in one workspace, newest first. Pages
+-- continue strictly after the (created_at, issue_id) of the previous page's
+-- last row, so every row is reachable however many there are.
 SELECT issue_id, outcome, agent_id, created_at
 FROM issue_unread
-WHERE workspace_id = $1 AND user_id = $2
-ORDER BY created_at DESC
-LIMIT 500;
+WHERE workspace_id = sqlc.arg(workspace_id)
+  AND user_id = sqlc.arg(user_id)
+  AND (
+    sqlc.narg(before_created_at)::timestamptz IS NULL
+    OR (created_at, issue_id) < (sqlc.narg(before_created_at)::timestamptz, sqlc.narg(before_issue_id)::uuid)
+  )
+ORDER BY created_at DESC, issue_id DESC
+LIMIT sqlc.arg(page_limit);
 
 -- name: MarkIssueRead :execrows
 DELETE FROM issue_unread

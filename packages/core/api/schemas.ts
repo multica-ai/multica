@@ -2765,7 +2765,7 @@ export const EMPTY_INBOX_UNREAD_SUMMARY: InboxWorkspaceUnread[] = [];
 // unread dot. `outcome` stays a string so a future kind still lights the dot;
 // on malformed JSON parseWithFallback returns the empty list, which hides it.
 
-export const IssueUnreadListSchema = z
+export const IssueUnreadPageSchema = z
   .object({
     items: z.array(
       z
@@ -2777,11 +2777,14 @@ export const IssueUnreadListSchema = z
         })
         .loose(),
     ),
+    next_cursor: z.string().nullish().transform((v) => v ?? null),
   })
-  .loose()
-  .transform((body) => body.items);
+  .loose();
 
-export const EMPTY_ISSUE_UNREAD: IssueUnread[] = [];
+export const EMPTY_ISSUE_UNREAD_PAGE: { items: IssueUnread[]; next_cursor: string | null } = {
+  items: [],
+  next_cursor: null,
+};
 
 // Inbox items (`/api/inbox` and `/api/inbox/archived` GET).
 // Lenient per the usual rules: `severity` / `type` / `recipient_type` stay

@@ -1,5 +1,5 @@
 import { useCallback } from "react";
-import { queryOptions, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { queryOptions, useMutation, useQuery, useQueryClient, type QueryClient } from "@tanstack/react-query";
 import { api } from "../api";
 import type { IssueUnread } from "../types";
 
@@ -19,6 +19,18 @@ export function issueUnreadOptions(wsId: string) {
   });
 }
 
+/**
+ * Re-reads the unread list after a server-side change. Cancels first: an
+ * invalidation during the list's first load is otherwise answered by the
+ * request already on the wire, which predates the change, and with
+ * `staleTime: Infinity` nothing asks again (see `refreshInboxQuery`).
+ */
+export async function refreshIssueUnread(qc: QueryClient, wsId: string) {
+  const queryKey = issueUnreadKeys.all(wsId);
+  await qc.cancelQueries({ queryKey });
+  await qc.invalidateQueries({ queryKey });
+}
+
 /** The viewer's unread mark on one issue, or `null` when it is read. */
 export function useIssueUnread(wsId: string, issueId: string): IssueUnread | null {
   const select = useCallback(
@@ -34,6 +46,12 @@ function useSetIssueUnread(wsId: string, unread: boolean) {
   const key = issueUnreadKeys.all(wsId);
   return useMutation({
     mutationFn: (issueId: string) => (unread ? api.markIssueUnread(issueId) : api.markIssueRead(issueId)),
+    // Both writes are idempotent. A 4xx will not change on retry.
+    retry: (failures, err) => {
+      const status = (err as { status?: number }).status;
+      return failures < 2 && (status === undefined || status >= 500);
+    },
+    retryDelay: (attempt) => Math.min(1000 * 2 ** attempt, 8000),
     onMutate: async (issueId) => {
       await qc.cancelQueries({ queryKey: key });
       const prev = qc.getQueryData<IssueUnread[]>(key);
