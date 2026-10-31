@@ -93,11 +93,11 @@ export function useSidebarProjectPrefs(wsId: string): SidebarProjectPrefs & { lo
  */
 export function useUpdateSidebarProjectPrefs(wsId: string) {
   const { projectSettings, issueSettings, projectOrder, loaded } = useSidebarProjectPrefs(wsId);
-  const { mutate } = useUpdateIssueViewPreference(wsId, SIDEBAR_PROJECTS_SCOPE);
+  const save = useUpdateIssueViewPreference(wsId, SIDEBAR_PROJECTS_SCOPE);
   return useCallback(
     (patch: SidebarProjectPrefsPatch) => {
       if (!loaded) return;
-      mutate(
+      save(
         sidebarProjectPrefsToDoc({
           projectSettings: { ...projectSettings, ...patch.projectSettings },
           issueSettings: { ...issueSettings, ...patch.issueSettings },
@@ -105,6 +105,6 @@ export function useUpdateSidebarProjectPrefs(wsId: string) {
         }),
       );
     },
-    [loaded, mutate, projectSettings, issueSettings, projectOrder],
+    [loaded, save, projectSettings, issueSettings, projectOrder],
   );
 }

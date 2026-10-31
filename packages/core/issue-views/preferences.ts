@@ -1,8 +1,11 @@
 "use client";
 
+import { useCallback } from "react";
 import { queryOptions, useMutation, useQueryClient } from "@tanstack/react-query";
 import { api } from "../api";
 import type { IssueViewPreference } from "../api/schemas";
+import { useWorkspaceSlug } from "../paths/hooks";
+import { getCurrentSlug } from "../platform/workspace-storage";
 import type { IssueViewScope } from "./queries";
 
 /**
@@ -37,25 +40,35 @@ export function issueViewPreferenceOptions(wsId: string, scope: IssueViewPrefere
   });
 }
 
+interface PreferenceWrite {
+  prefs: IssueViewPreferenceDoc;
+  workspaceId: string;
+  workspaceSlug?: string;
+}
+
 /**
  * Whole-document upsert with an optimistic patch: show/hide toggles and
  * drag-reorder are the canonical optimistic case (locally predictable, same
- * screen, trivial rollback).
+ * screen, trivial rollback). Returns `save(prefs)`.
  */
 export function useUpdateIssueViewPreference(wsId: string, scope: IssueViewPreferenceScope) {
   const queryClient = useQueryClient();
+  const routeSlug = useWorkspaceSlug();
   const queryKey = issueViewPrefKeys.scope(wsId, scope);
-  return useMutation({
+  const { mutate } = useMutation({
     mutationKey: queryKey,
     // Each write replaces the whole document and builds on the one before it,
     // so writes to one document go out one at a time, in order: run side by
     // side, an older write could land last and undo a newer one.
     scope: { id: queryKey.join(":") },
-    mutationFn: (prefs: IssueViewPreferenceDoc) =>
-      api.putIssueViewPreference({ ...scope, prefs }),
-    onMutate: async (prefs) => {
-      await queryClient.cancelQueries({ queryKey });
-      const previous = queryClient.getQueryData<IssueViewPreference>(queryKey);
+    // A queued write can go out after the user has switched workspace, so the
+    // write names its own workspace rather than inherit the current one.
+    mutationFn: ({ prefs, workspaceSlug }: PreferenceWrite) =>
+      api.putIssueViewPreference({ ...scope, prefs }, workspaceSlug),
+    onMutate: async ({ prefs, workspaceId }) => {
+      const key = issueViewPrefKeys.scope(workspaceId, scope);
+      await queryClient.cancelQueries({ queryKey: key });
+      const previous = queryClient.getQueryData<IssueViewPreference>(key);
       const optimistic: IssueViewPreference = {
         scope_type: scope.scope_type,
         scope_id: scope.scope_id ?? null,
@@ -63,20 +76,28 @@ export function useUpdateIssueViewPreference(wsId: string, scope: IssueViewPrefe
         updated_at: previous?.updated_at || new Date().toISOString(),
         prefs: { ...EMPTY_VIEW_BAR_PREFS, ...prefs },
       };
-      queryClient.setQueryData<IssueViewPreference>(queryKey, optimistic);
+      queryClient.setQueryData<IssueViewPreference>(key, optimistic);
       return { previous };
     },
-    onError: (_err, _prefs, context) => {
-      if (context?.previous) queryClient.setQueryData(queryKey, context.previous);
+    onError: (_err, { workspaceId }, context) => {
+      if (context?.previous) {
+        queryClient.setQueryData(issueViewPrefKeys.scope(workspaceId, scope), context.previous);
+      }
     },
-    onSettled: () => {
+    onSettled: (_data, _err, { workspaceId }) => {
+      const key = issueViewPrefKeys.scope(workspaceId, scope);
       // A later write still queued refetches when it settles; refetching now
       // could paint this older document over its optimistic one.
-      if (queryClient.isMutating({ mutationKey: queryKey, exact: true }) === 1) {
-        void queryClient.invalidateQueries({ queryKey });
+      if (queryClient.isMutating({ mutationKey: key, exact: true }) === 1) {
+        void queryClient.invalidateQueries({ queryKey: key });
       }
     },
   });
+  return useCallback(
+    (prefs: IssueViewPreferenceDoc) =>
+      mutate({ prefs, workspaceId: wsId, workspaceSlug: routeSlug ?? getCurrentSlug() ?? undefined }),
+    [mutate, wsId, routeSlug],
+  );
 }
 
 /**
