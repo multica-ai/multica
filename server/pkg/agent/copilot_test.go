@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -1091,6 +1092,36 @@ func TestBuildCopilotArgsFiltersBlockedCustomArgs(t *testing.T) {
 	}
 	if !found {
 		t.Fatalf("expected --max-turns 50 to pass through, got %v", args)
+	}
+}
+
+func TestBuildCopilotArgsBlocksPromptAlias(t *testing.T) {
+	t.Parallel()
+
+	for _, tt := range []struct {
+		name       string
+		customArgs []string
+	}{
+		{"separate value", []string{"--prompt", "custom prompt", "--log-level", "debug"}},
+		{"inline value", []string{"--prompt=custom prompt", "--log-level", "debug"}},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			args := buildCopilotArgs("managed prompt", ExecOptions{
+				CustomArgs: tt.customArgs,
+			}, slog.Default())
+			want := []string{
+				"-p", "managed prompt",
+				"--output-format", "json",
+				"--allow-all",
+				"--no-ask-user",
+				"--log-level", "debug",
+			}
+			if !slices.Equal(args, want) {
+				t.Fatalf("expected managed prompt and allowed custom args, got %q; want %q", args, want)
+			}
+		})
 	}
 }
 
