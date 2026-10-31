@@ -15,7 +15,7 @@ import {
 import { toast } from "sonner";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { useAuthStore } from "@multica/core/auth";
-import { agentListOptions, memberListOptions } from "@multica/core/workspace/queries";
+import { agentListOptions, memberListOptions, workspaceListOptions } from "@multica/core/workspace/queries";
 import { projectListOptions } from "@multica/core/projects/queries";
 import { canAssignAgent } from "../../issues/components/pickers/assignee-picker";
 import { api, dispatchReasonCode } from "@multica/core/api";
@@ -60,7 +60,7 @@ import {
   useSetChatSessionProject,
   useUpdateChatSession,
 } from "@multica/core/chat/mutations";
-import { useChatStore } from "@multica/core/chat";
+import { useChatStore, resolveChatAgent, workspaceDefaultChatAgentId } from "@multica/core/chat";
 import { upsertChatMessageToCaches } from "@multica/core/chat/message-cache";
 import { chatQuickActionsPendingOptions } from "@multica/core/chat/queries";
 import { useQuickActionsPendingTimeout } from "@multica/core/chat/use-quick-actions-pending-timeout";
@@ -115,8 +115,8 @@ export function ChatWindow() {
   const setSelectedAgentId = useChatStore((s) => s.setSelectedAgentId);
   const setSelectedProjectId = useChatStore((s) => s.setSelectedProjectId);
   const user = useAuthStore((s) => s.user);
-  const { data: agents = [] } = useQuery(agentListOptions(wsId));
-  const { data: members = [] } = useQuery(memberListOptions(wsId));
+  const { data: agents = [], isSuccess: agentsLoaded } = useQuery(agentListOptions(wsId));
+  const { data: members = [], isSuccess: membersLoaded } = useQuery(memberListOptions(wsId));
   // Single sessions cache — eliminates the separate active/all queries
   // that used to drift during the WS-invalidate window.
   const { data: sessions = [], isSuccess: sessionsLoaded } = useQuery(
@@ -207,11 +207,13 @@ export function ChatWindow() {
   const markRead = useMarkChatSessionRead();
   const setSessionProject = useSetChatSessionProject();
 
+  const { data: workspaces = [], isSuccess: workspacesLoaded } = useQuery(workspaceListOptions());
+  const workspace = workspaces.find((item) => item.id === wsId);
   const currentMember = members.find((m) => m.user_id === user?.id);
   const memberRole = currentMember?.role;
-  const availableAgents = agents.filter(
+  const availableAgents = agentsLoaded && membersLoaded ? agents.filter(
     (a) => !a.archived_at && canAssignAgent(a, user?.id, memberRole),
-  );
+  ) : [];
 
   // The agent bound to the OPEN session, resolved from the full agent list
   // (archived included). An archived agent is filtered out of availableAgents,
@@ -224,13 +226,15 @@ export function ChatWindow() {
     : null;
   const isAgentArchived = !!sessionAgent?.archived_at;
 
-  // Resolve selected agent: open session's agent → stored preference → first
-  // available. New chats have no session, so they fall through to the picker.
-  const activeAgent =
-    sessionAgent ??
-    availableAgents.find((a) => a.id === selectedAgentId) ??
-    availableAgents[0] ??
-    null;
+  const activeAgent = resolveChatAgent({
+    agents,
+    availableAgents,
+    agentsSettled: agentsLoaded && membersLoaded,
+    sessionId: activeSessionId,
+    sessionAgentId: currentSession?.agent_id ?? null,
+    selectedAgentId,
+    defaultAgentId: workspacesLoaded ? workspaceDefaultChatAgentId(workspace?.settings) : null,
+  });
   const activeAgentRuntimeBound =
     !!activeAgent && isAgentRuntimeBound(activeAgent);
 

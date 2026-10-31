@@ -112,7 +112,7 @@ type WorkspaceResponse struct {
 func (h *Handler) workspaceToResponse(w db.Workspace) WorkspaceResponse {
 	var settings any
 	if w.Settings != nil {
-		json.Unmarshal(w.Settings, &settings)
+		json.Unmarshal(withoutDefaultChatAgent(w.Settings), &settings)
 	}
 	if settings == nil {
 		settings = map[string]any{}
@@ -171,7 +171,7 @@ func (h *Handler) ListWorkspaces(w http.ResponseWriter, r *http.Request) {
 
 	resp := make([]WorkspaceResponse, len(workspaces))
 	for i, ws := range workspaces {
-		resp[i] = h.workspaceToResponse(ws)
+		resp[i] = h.workspaceResponseForUser(r, ws)
 	}
 
 	writeJSON(w, http.StatusOK, resp)
@@ -189,7 +189,7 @@ func (h *Handler) GetWorkspace(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusNotFound, "workspace not found")
 		return
 	}
-	writeJSON(w, http.StatusOK, h.workspaceToResponse(ws))
+	writeJSON(w, http.StatusOK, h.workspaceResponseForUser(r, ws))
 }
 
 type CreateWorkspaceRequest struct {
@@ -343,13 +343,14 @@ func (h *Handler) CreateWorkspace(w http.ResponseWriter, r *http.Request) {
 }
 
 type UpdateWorkspaceRequest struct {
-	Name        *string `json:"name"`
-	Description *string `json:"description"`
-	Context     *string `json:"context"`
-	Settings    any     `json:"settings"`
-	Repos       any     `json:"repos"`
-	IssuePrefix *string `json:"issue_prefix"`
-	AvatarURL   *string `json:"avatar_url"`
+	DefaultChatAgentID json.RawMessage `json:"default_chat_agent_id"`
+	Name               *string         `json:"name"`
+	Description        *string         `json:"description"`
+	Context            *string         `json:"context"`
+	Settings           any             `json:"settings"`
+	Repos              any             `json:"repos"`
+	IssuePrefix        *string         `json:"issue_prefix"`
+	AvatarURL          *string         `json:"avatar_url"`
 }
 
 type workspaceRepoRef struct {
@@ -423,18 +424,40 @@ func (h *Handler) UpdateWorkspace(w http.ResponseWriter, r *http.Request) {
 	if req.Context != nil {
 		params.Context = pgtype.Text{String: *req.Context, Valid: true}
 	}
-	if req.Settings != nil {
-		if incoming, ok := req.Settings.(map[string]any); ok {
-			// Only an old client's flip of the retired PR switch needs the
-			// stored value; see reconcilePRMergeSettings.
-			var stored map[string]any
-			if _, sent := incoming[prAutoCompleteLegacyKey]; sent {
-				if existing, err := h.Queries.GetWorkspace(r.Context(), idUUID); err == nil {
-					_ = json.Unmarshal(existing.Settings, &stored)
-				}
+	if len(req.DefaultChatAgentID) > 0 {
+		params.DefaultChatAgentPresent = true
+		if string(req.DefaultChatAgentID) != "null" {
+			var id string
+			if json.Unmarshal(req.DefaultChatAgentID, &id) != nil {
+				writeError(w, http.StatusBadRequest, "invalid default chat agent id")
+				return
 			}
-			reconcilePRMergeSettings(stored, incoming)
+			agentID, ok := parseUUIDOrBadRequest(w, id, "default chat agent id")
+			if !ok {
+				return
+			}
+			if !h.usableDefaultChatAgent(r.Context(), idUUID, agentID, requestUserID(r)) {
+				writeError(w, http.StatusBadRequest, "default chat agent is not available")
+				return
+			}
+			params.DefaultChatAgentID = pgtype.Text{String: uuidToString(agentID), Valid: true}
 		}
+	}
+	if req.Settings != nil {
+		incoming, ok := req.Settings.(map[string]any)
+		if !ok {
+			writeError(w, http.StatusBadRequest, "settings must be an object")
+			return
+		}
+		// Only an old client's flip of the retired PR switch needs the
+		// stored value; see reconcilePRMergeSettings.
+		var stored map[string]any
+		if _, sent := incoming[prAutoCompleteLegacyKey]; sent {
+			if existing, err := h.Queries.GetWorkspace(r.Context(), idUUID); err == nil {
+				_ = json.Unmarshal(existing.Settings, &stored)
+			}
+		}
+		reconcilePRMergeSettings(stored, incoming)
 		s, _ := json.Marshal(req.Settings)
 		params.Settings = s
 	}
@@ -495,7 +518,7 @@ func (h *Handler) UpdateWorkspace(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	writeJSON(w, http.StatusOK, h.workspaceToResponse(ws))
+	writeJSON(w, http.StatusOK, h.workspaceResponseForUser(r, ws))
 }
 
 func (h *Handler) ListMembers(w http.ResponseWriter, r *http.Request) {

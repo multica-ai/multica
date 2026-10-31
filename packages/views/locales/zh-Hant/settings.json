@@ -735,6 +735,10 @@
     "usage_help": "使用方法"
   },
   "workspace": {
+    "default_chat_agent_clear": "清除預設值",
+    "default_chat_agent_label": "預設聊天智慧體",
+    "default_chat_agent_none": "不設定工作區預設智慧體",
+    "default_chat_agent_hint": "未選擇智慧體時用於新聊天，現有對話繼續使用原智慧體。",
     "section_general": "工作區資訊",
     "logo_label": "工作區圖示",
     "change_logo_aria": "更換工作區圖示",

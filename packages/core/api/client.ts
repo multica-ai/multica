@@ -1,3 +1,5 @@
+import { z } from "zod";
+import { WorkspaceSchema, EMPTY_WORKSPACE } from "./schemas";
 import type { ZodType } from "zod";
 import { AgentRuntimeSchema, EMPTY_RUNTIME } from "../runtimes/schema";
 import type { IssueWakeup, IssueWakeupInput, IssueWakeupSummaryRow, PausedWakeup, SystemWakeup, WakeupRun, WorkspaceSystemWakeup } from "../types/issue-wakeup";
@@ -3090,11 +3092,13 @@ export class ApiClient {
 
   // Workspaces
   async listWorkspaces(): Promise<Workspace[]> {
-    return this.fetch("/api/workspaces");
+    const raw = await this.fetch<unknown>("/api/workspaces");
+    return parseWithFallback<Workspace[]>(raw, z.array(WorkspaceSchema), [], { endpoint: "GET /api/workspaces" });
   }
 
   async getWorkspace(id: string): Promise<Workspace> {
-    return this.fetch(`/api/workspaces/${id}`);
+    const raw = await this.fetch<unknown>(`/api/workspaces/${id}`);
+    return parseWithFallback<Workspace>(raw, WorkspaceSchema, EMPTY_WORKSPACE, { endpoint: "GET /api/workspaces/:id" });
   }
 
   async createWorkspace(data: { name: string; slug: string; description?: string; context?: string; issue_prefix?: string }): Promise<Workspace> {
@@ -3104,11 +3108,12 @@ export class ApiClient {
     });
   }
 
-  async updateWorkspace(id: string, data: { name?: string; description?: string; context?: string; settings?: Record<string, unknown>; repos?: WorkspaceRepo[]; issue_prefix?: string; avatar_url?: string }): Promise<Workspace> {
-    return this.fetch(`/api/workspaces/${id}`, {
+  async updateWorkspace(id: string, data: { default_chat_agent_id?: string | null; name?: string; description?: string; context?: string; settings?: Record<string, unknown>; repos?: WorkspaceRepo[]; issue_prefix?: string; avatar_url?: string }): Promise<Workspace> {
+    const raw = await this.fetch<unknown>(`/api/workspaces/${id}`, {
       method: "PATCH",
       body: JSON.stringify(data),
     });
+    return parseWithFallback<Workspace>(raw, WorkspaceSchema, EMPTY_WORKSPACE, { endpoint: "PATCH /api/workspaces/:id" });
   }
 
   async listPluginInstallations(workspaceId: string): Promise<PluginInstallationListResponse> {

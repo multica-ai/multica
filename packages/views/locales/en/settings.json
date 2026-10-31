@@ -740,6 +740,10 @@
     "usage_help": "Usage"
   },
   "workspace": {
+    "default_chat_agent_clear": "Clear default",
+    "default_chat_agent_label": "Default chat agent",
+    "default_chat_agent_none": "No workspace default",
+    "default_chat_agent_hint": "Used for new chats when no agent is selected. Existing conversations keep their agent.",
     "section_general": "Workspace details",
     "logo_label": "Workspace logo",
     "change_logo_aria": "Change workspace logo",

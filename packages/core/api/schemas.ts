@@ -3912,3 +3912,26 @@ export const EMPTY_LIST_LARK_INSTALLATIONS_RESPONSE: ListLarkInstallationsRespon
   installations: [],
   configured: false,
 };
+
+// Workspace settings tolerate historical non-objects and malformed defaults.
+// Unknown settings remain available to installed clients.
+export const WorkspaceSchema = z.object({
+  id: z.string(),
+  name: z.string(),
+  slug: z.string(),
+  description: z.string().nullable().optional().default(null),
+  context: z.string().nullable().optional().default(null),
+  settings: z.object({
+    default_chat_agent_id: z.string().uuid().optional().catch(undefined),
+  }).loose().catch({}),
+  repos: z.array(z.object({ url: z.string(), description: z.string().optional() })).catch([]),
+  issue_prefix: z.string().optional().default(""),
+  avatar_url: z.string().nullable().optional().default(null),
+  created_at: z.string().optional().default(""),
+  updated_at: z.string().optional().default(""),
+}).loose();
+
+export const EMPTY_WORKSPACE = {
+  id: "", name: "", slug: "", description: null, context: null, settings: {},
+  repos: [], issue_prefix: "", avatar_url: null, created_at: "", updated_at: "",
+};
