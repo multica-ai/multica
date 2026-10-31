@@ -18,7 +18,8 @@ import (
 // This file is the minimal Telegram Bot API surface the adapter needs:
 // getMe (install-time validation), getUpdates (inbound long polling),
 // sendMessage / editMessageText (outbound + streaming), sendChatAction
-// (typing indicator). It is a thin hand-rolled client over net/http — the
+// (typing indicator), answerCallbackQuery and inline keyboards. It is a
+// thin hand-rolled client over net/http — the
 // Bot API is plain JSON-over-HTTPS, so no SDK dependency is warranted.
 
 // defaultAPIBase is the production Bot API host. Tests point apiBase at an
@@ -315,11 +316,34 @@ type MessageEntity struct {
 	Length int    `json:"length"`
 }
 
-// Update is the getUpdates envelope entry. Only new messages are consumed;
-// edits, channel posts, and callback queries are ignored in v1.
+// Update is the getUpdates envelope entry. Edits and channel posts are ignored.
 type Update struct {
-	UpdateID int64    `json:"update_id"`
-	Message  *Message `json:"message"`
+	UpdateID      int64          `json:"update_id"`
+	Message       *Message       `json:"message"`
+	CallbackQuery *CallbackQuery `json:"callback_query,omitempty"`
+}
+
+type CallbackQuery struct {
+	ID      string   `json:"id"`
+	From    *User    `json:"from"`
+	Message *Message `json:"message,omitempty"`
+	Data    string   `json:"data,omitempty"`
+}
+
+type inlineKeyboardButton struct {
+	Text         string `json:"text"`
+	CallbackData string `json:"callback_data"`
+}
+
+type inlineKeyboardMarkup struct {
+	InlineKeyboard [][]inlineKeyboardButton `json:"inline_keyboard"`
+}
+
+func (a *botAPI) AnswerCallbackQuery(ctx context.Context, id, text string) error {
+	return a.call(ctx, "answerCallbackQuery", struct {
+		ID   string `json:"callback_query_id"`
+		Text string `json:"text,omitempty"`
+	}{id, text}, nil)
 }
 
 // GetMe validates the token and returns the bot's own identity.
@@ -353,11 +377,9 @@ type getUpdatesParams struct {
 func (a *botAPI) GetUpdates(ctx context.Context, offset int64) ([]Update, error) {
 	var updates []Update
 	err := a.call(ctx, "getUpdates", getUpdatesParams{
-		Offset:  offset,
-		Timeout: longPollTimeoutSecs,
-		// Restrict the stream to plain messages: fewer wakeups, and edits /
-		// reactions / channel posts never enter the pipeline.
-		AllowedUpdates: []string{"message"},
+		Offset:         offset,
+		Timeout:        longPollTimeoutSecs,
+		AllowedUpdates: []string{"message", "callback_query"},
 	}, &updates)
 	if err != nil {
 		var ae *apiError
@@ -370,11 +392,12 @@ func (a *botAPI) GetUpdates(ctx context.Context, offset int64) ([]Update, error)
 }
 
 type sendMessageParams struct {
-	ChatID          int64            `json:"chat_id"`
-	Text            string           `json:"text"`
-	ParseMode       string           `json:"parse_mode,omitempty"`
-	MessageThreadID int64            `json:"message_thread_id,omitempty"`
-	ReplyParameters *replyParameters `json:"reply_parameters,omitempty"`
+	ReplyMarkup     *inlineKeyboardMarkup `json:"reply_markup,omitempty"`
+	ChatID          int64                 `json:"chat_id"`
+	Text            string                `json:"text"`
+	ParseMode       string                `json:"parse_mode,omitempty"`
+	MessageThreadID int64                 `json:"message_thread_id,omitempty"`
+	ReplyParameters *replyParameters      `json:"reply_parameters,omitempty"`
 }
 
 // replyParameters is Telegram's current quote-reply shape. The legacy
@@ -407,10 +430,11 @@ func sendMessageWithRetryAfter(ctx context.Context, a *botAPI, p sendMessagePara
 }
 
 type editMessageTextParams struct {
-	ChatID    int64  `json:"chat_id"`
-	MessageID int64  `json:"message_id"`
-	Text      string `json:"text"`
-	ParseMode string `json:"parse_mode,omitempty"`
+	ReplyMarkup *inlineKeyboardMarkup `json:"reply_markup,omitempty"`
+	ChatID      int64                 `json:"chat_id"`
+	MessageID   int64                 `json:"message_id"`
+	Text        string                `json:"text"`
+	ParseMode   string                `json:"parse_mode,omitempty"`
 }
 
 // EditMessageText replaces a previously sent message's text — the streaming

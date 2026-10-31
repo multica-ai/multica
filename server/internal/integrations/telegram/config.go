@@ -46,9 +46,10 @@ const TypeTelegram channel.Type = "telegram"
 // bot_token_encrypted is base64-encoded secretbox ciphertext, never plaintext,
 // mirroring Slack's bot_token_encrypted and Feishu's app_secret_encrypted.
 type installConfig struct {
-	AppID             string `json:"app_id"`
-	BotUsername       string `json:"bot_username,omitempty"`
-	BotTokenEncrypted string `json:"bot_token_encrypted"`
+	Menu              *MenuConfig `json:"menu,omitempty"`
+	AppID             string      `json:"app_id"`
+	BotUsername       string      `json:"bot_username,omitempty"`
+	BotTokenEncrypted string      `json:"bot_token_encrypted"`
 }
 
 // credentials is the decoded, decrypted form the transports run on. The

@@ -123,6 +123,55 @@ Without object storage, the Bot answers media with the unsupported-message notic
 </Accordion>
 </Accordions>
 
+## Optional private-chat menus
+
+Owners/admins can include a `menu` in the existing
+`POST /api/workspaces/{id}/telegram/install?agent_id=…` request alongside
+`bot_token`. This is API configuration; the settings UI does not edit menus.
+For example, the non-secret `menu` field can be:
+
+```json
+{
+  "private_chat_ids": [123456789],
+  "root_text": "Choose a category",
+  "back_text": "Back",
+  "pages": [{
+    "command": "tasks",
+    "title": "Tasks",
+    "actions": [{
+      "id": "status",
+      "label": "Task status",
+      "request": "Ask which task I want to check, then wait for my answer."
+    }]
+  }]
+}
+```
+
+Use the member's private-chat ID; do not publish it or the bot token. An omitted
+`menu` or empty `private_chat_ids` disables menus. Reinstalling/rotating a token
+replaces the config: resend the definition to retain it.
+
+In an allowed private chat, `/tasks` shows inline buttons. Navigation edits the
+menu without running an agent. A business button sends its fixed `request` to
+the installation's agent as the clicking member, through normal permission and
+persistent deduplication checks. Navigation also checks account binding,
+workspace membership, and agent access. Menus are installation-specific and
+never enabled in groups. Requests do not grant extra permissions: parameter
+questions and business confirmations remain the agent/tool policy's responsibility.
+
+Commands/action IDs use 1–24 lowercase ASCII letters, digits, or underscores;
+`root`, `new`, `clear`, and `issue` are reserved commands. Limits are 32 pages,
+32 actions per page, and 100 private chats. Titles/labels/requests are limited to
+128/64/4096 UTF-8 bytes; root/back text to 512/64 bytes. Menus expire after
+15 minutes or a polling-channel restart. A page accepts one business submission
+until the member returns to the category menu. Duplicate callbacks are
+acknowledged without resubmitting. One channel retains at most 128 menus and
+256 callback IDs per menu.
+
+Register matching slash-command labels separately using Telegram's
+[setMyCommands](https://core.telegram.org/bots/api#setmycommands), with chat scope
+for particular private chats. Multica does not change global command menus.
+
 ## Manage connections
 
 Open **Settings → Messaging → Telegram** to view connected Bots. Owners and admins can disconnect one. Disconnecting stops long polling and outbound replies but preserves Multica conversations and audit records.
