@@ -1312,6 +1312,32 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 		slog.Info("composio integration disabled (COMPOSIO_API_KEY not set)")
 	}
 
+	// Claim constraint policy SPI (#6650 admission/preflight; follow-up to the
+	// #9184 claim decision funnel). Double-gated like Composio above: the
+	// MULTICA_CLAIM_CONSTRAINT_POLICY env var names the policy to wire and the
+	// claim_constraint_policy feature flag must also be on. With either gate
+	// closed the whole block is skipped and TaskService.ClaimConstraints stays
+	// nil, so every claim path behaves exactly as before. "log" wires the
+	// built-in canary policy; its decisions are shadow-only — recorded as
+	// metrics and debug logs, never consulted by dispatch.
+	if claimConstraintPolicy := strings.TrimSpace(os.Getenv("MULTICA_CLAIM_CONSTRAINT_POLICY")); claimConstraintPolicy != "" {
+		if !featureflags.ClaimConstraintPolicyEnabled(context.Background(), opts.FeatureFlags) {
+			slog.Info("claim constraint policy disabled (feature flag off)")
+		} else if claimConstraintPolicy == "log" {
+			// h.TaskService was constructed inside NewHandler and exposes
+			// ClaimConstraints for exactly this kind of late wiring, same as
+			// the Composio seam above.
+			if h.TaskService != nil {
+				h.TaskService.ClaimConstraints = &service.ClaimConstraintCanaryPolicy{}
+			}
+			slog.Info("claim constraint policy enabled (canary, shadow-only)")
+		} else {
+			slog.Warn("claim constraint policy disabled (unknown MULTICA_CLAIM_CONSTRAINT_POLICY)", "policy", claimConstraintPolicy)
+		}
+	} else {
+		slog.Info("claim constraint policy disabled (MULTICA_CLAIM_CONSTRAINT_POLICY not set)")
+	}
+
 	// VCS at-rest encryption: the box encrypts per-workspace access tokens and
 	// webhook secrets for token-based providers (Forgejo / Gitea / GitLab).
 	// Without it, connect/webhook handlers return 503 (so a misconfigured

@@ -35,6 +35,12 @@ const (
 	// makes those endpoints answer 404, so clients stop syncing and search
 	// through the server again without a client release.
 	LocalSearchIndex = "local_search_index"
+	// ClaimConstraintPolicy gates the claim constraint policy SPI (#6650
+	// admission/preflight). It is the second half of the same double gate as
+	// MULTICA_CLAIM_CONSTRAINT_POLICY in router.go: the env var alone, or the
+	// flag alone, leaves the SPI unwired and every claim path exactly as
+	// before. Decisions are shadow-only either way — recorded, never enforced.
+	ClaimConstraintPolicy = "claim_constraint_policy"
 	// agentBuilderCompat is no longer a release flag. Keep publishing the key
 	// as enabled so installed desktop clients that still gate the AI creation
 	// entry on this config decision receive the permanently enabled behavior.
@@ -79,6 +85,10 @@ func TriageV1Enabled(ctx context.Context, flags *featureflag.Service) bool {
 
 func LocalSearchIndexEnabled(ctx context.Context, flags *featureflag.Service) bool {
 	return flags.IsEnabled(ctx, LocalSearchIndex, true)
+}
+
+func ClaimConstraintPolicyEnabled(ctx context.Context, flags *featureflag.Service) bool {
+	return flags.IsEnabled(ctx, ClaimConstraintPolicy, false)
 }
 
 func EvaluateFrontendPublicFlags(ctx context.Context, flags *featureflag.Service) map[string]bool {
