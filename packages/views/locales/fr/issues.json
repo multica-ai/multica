@@ -3,7 +3,7 @@
     "label": "Exécution de {{name}}",
     "stop": "Arrêter",
     "stopping": "Arrêt...",
-    "queued": "En attente d'un agent disponible.",
+    "queued": "En attente de la prise en charge de cette exécution par un runtime.",
     "starting": "Préparation de la session de l'agent.",
     "waiting_directory": "En attente de la libération du répertoire de travail par une autre exécution.",
     "thinking": "Réflexion",
