@@ -12,11 +12,13 @@ import {
   agentDetailOptions,
   squadListOptions,
 } from "@multica/core/workspace/queries";
+import { Button } from "@multica/ui/components/ui/button";
 import { Skeleton } from "@multica/ui/components/ui/skeleton";
 import { cn } from "@multica/ui/lib/utils";
 import { ActorAvatar } from "../../common/actor-avatar";
 import { AppLink, useNavigation } from "../../navigation";
 import { useT } from "../../i18n";
+import { CreateFlowFooter } from "./create-agent-footer";
 import { AgentCreateShell } from "./create-shell";
 
 /**
@@ -42,8 +44,7 @@ export function AgentCreatedPage({ agentId }: { agentId: string }) {
       title={t(($) => $.creation_studio.title)}
       step={t(($) => $.creation_studio.steps.done)}
       stepIndex={3}
-      closeIcon
-      onBack={() => navigation.replace(paths.agentDetail(agentId))}
+      onClose={() => navigation.replace(paths.agentDetail(agentId))}
     >
       <main className="flex min-h-0 flex-1 flex-col overflow-y-auto px-5 py-12">
         <div className="m-auto w-full max-w-xl">
@@ -115,24 +116,16 @@ export function AgentCreatedPage({ agentId }: { agentId: string }) {
               href={squad ? paths.squadDetail(squad.id) : paths.squads()}
             />
           </div>
-
-          <div className="mt-8 flex items-center justify-center gap-4 text-label">
-            <AppLink
-              href={paths.agentDetail(agentId)}
-              className="font-medium text-foreground underline-offset-4 hover:underline"
-            >
-              {t(($) => $.creation_studio.done.open_agent)}
-            </AppLink>
-            <span aria-hidden="true" className="text-muted-foreground">·</span>
-            <AppLink
-              href={paths.agents()}
-              className="text-muted-foreground underline-offset-4 hover:text-foreground hover:underline"
-            >
-              {t(($) => $.creation_studio.done.back_to_list)}
-            </AppLink>
-          </div>
         </div>
       </main>
+      <CreateFlowFooter stepIndex={3}>
+        <Button variant="ghost" render={<AppLink href={paths.agents()} />} nativeButton={false}>
+          {t(($) => $.creation_studio.done.back_to_list)}
+        </Button>
+        <Button render={<AppLink href={paths.agentDetail(agentId)} />} nativeButton={false}>
+          {t(($) => $.creation_studio.done.open_agent)}
+        </Button>
+      </CreateFlowFooter>
     </AgentCreateShell>
   );
 }

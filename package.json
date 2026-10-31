@@ -29,8 +29,7 @@
     "clean": "turbo clean && rm -rf node_modules",
     "ui:add": "cd packages/ui && npx shadcn@latest add",
     "generate:attachment-text-preview": "node scripts/generate-attachment-text-preview.mjs",
-    "generate:reserved-slugs": "node scripts/generate-reserved-slugs.mjs",
-    "dev:ui-lab": "pnpm --filter @multica/ui-lab dev"
+    "generate:reserved-slugs": "node scripts/generate-reserved-slugs.mjs"
   },
   "engines": {
     "node": ">=22"

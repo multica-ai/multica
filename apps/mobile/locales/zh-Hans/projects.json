@@ -78,12 +78,12 @@
   "lifecycle": {
     "label": "项目生命周期",
     "active": "活跃",
-    "completed": "已完成",
     "all": "全部",
     "empty": {
       "active": "没有活跃项目",
-      "completed": "没有已完成项目",
-      "all": "暂无项目"
-    }
+      "all": "暂无项目",
+      "closed": "暂无已关闭项目"
+    },
+    "closed": "已关闭"
   }
 }

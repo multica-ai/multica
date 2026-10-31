@@ -1,22 +1,28 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import {
   AlertCircle,
   AlertTriangle,
-  Clock3,
-  Download,
+  ChevronRight,
+  File,
   FileText,
-  HardDrive,
+  Link2,
   Loader2,
   Lock,
+  MoreHorizontal,
   Pencil,
   Plus,
   RotateCw,
   Save,
   Trash2,
-  UserPlus,
-  Users,
 } from "@multica/ui/icons";
 import { SkillIcon } from "../lib/skill-icon";
 import type {
@@ -31,7 +37,6 @@ import { toast } from "sonner";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "@multica/core/api";
 import { useAuthStore } from "@multica/core/auth";
-import { useTimeAgo } from "../../i18n";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { useWorkspacePaths } from "@multica/core/paths";
 import {
@@ -42,11 +47,10 @@ import {
   workspaceKeys,
 } from "@multica/core/workspace/queries";
 import { resolvePublicFileUrl } from "@multica/core/workspace/avatar-url";
-import {
-  runtimeDisplayLabel,
-  runtimeListOptions,
-} from "@multica/core/runtimes";
+import { runtimeListOptions } from "@multica/core/runtimes";
+import { parseFrontmatter } from "@multica/core/skills/frontmatter";
 import { ActorAvatar } from "@multica/ui/components/common/actor-avatar";
+import { IconButton } from "@multica/ui/components/common/icon-button";
 import { Button, buttonVariants } from "@multica/ui/components/ui/button";
 import {
   Dialog,
@@ -56,39 +60,42 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@multica/ui/components/ui/dialog";
-import { Input } from "@multica/ui/components/ui/input";
-import { Skeleton } from "@multica/ui/components/ui/skeleton";
-import { Textarea } from "@multica/ui/components/ui/textarea";
 import {
-  Tooltip,
-  TooltipContent,
-  TooltipTrigger,
-} from "@multica/ui/components/ui/tooltip";
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@multica/ui/components/ui/dropdown-menu";
+import { Skeleton } from "@multica/ui/components/ui/skeleton";
+import { copyText } from "@multica/ui/lib/clipboard";
 import { cn } from "@multica/ui/lib/utils";
 import { AppLink, useNavigation } from "../../navigation";
-import { BreadcrumbHeader } from "../../layout/breadcrumb-header";
 import { PAGE_GUTTER, PAGE_RAIL } from "../../layout/page-header";
+import { CollectionPageState } from "../../layout/collection-page";
+import {
+  OBJECT_PAGE_BODY,
+  ObjectIconMark,
+  ObjectIdentity,
+  ObjectPage,
+  ObjectSection,
+  ObjectSectionAction,
+  ObjectSectionCard,
+} from "../../layout/object-page";
+import { RichContent } from "../../rich-content";
 import { useCanEditSkill } from "../hooks/use-can-edit-skill";
 import { useSkillPermissions } from "@multica/core/permissions";
 import { CapabilityBanner } from "@multica/ui/components/common/capability-banner";
-import {
-  isRefreshableOrigin,
-  originSourceUrl,
-  readOrigin,
-  totalFileCount,
-  type OriginInfo,
-} from "../lib/origin";
-import { FileTree } from "./file-tree";
-import { FileViewer, isMarkdownPath, type FileMode } from "./file-viewer";
+import { isRefreshableOrigin, readOrigin } from "../lib/origin";
+import { isMarkdownPath, type FileMode } from "./file-viewer";
+import { SKILL_MD, SkillFilesEditor } from "./skill-files-editor";
+import { SkillPropertiesPanel } from "./skill-properties-panel";
 import {
   AddToAgentDialog,
   type SkillActionsContext,
 } from "./skill-list-actions";
 import { RefreshSkillDialog } from "./refresh-skill-dialog";
 import { useT } from "../../i18n";
-import { ResourceLabelPicker } from "../../labels/resource-label-picker";
-
-const SKILL_MD = "SKILL.md";
 
 type DraftFile = { id?: string; path: string; content: string };
 
@@ -159,249 +166,147 @@ function hasLocalEdits(draft: SkillDraft, baseline: SkillDraft | null): boolean 
 }
 
 /**
- * Two tabs, not three. A skill has no settings axis to speak of:
- * `UpdateSkillRequest` carries only name / description / content / config /
- * files, and edit rights are derived (creator or workspace admin) with no
- * writable counterpart — so a Settings tab would hold a delete button and a
- * read-only sentence. Delete lives in the header instead, matching the agent
- * detail page where Archive sits in the header.
+ * The page body: the skill's sections, or its files beside an editor. The
+ * files need more width than the reading column, so they take the body over
+ * instead of being a section of it. `?view=files` is also what the retired
+ * Files tab wrote, so its links still land on the files.
  */
 type DetailView = "overview" | "files";
 
-function isDetailView(value: string | null): value is DetailView {
-  return value === "overview" || value === "files";
+function readView(value: string | null): DetailView {
+  return value === "files" ? "files" : "overview";
 }
 
-// File path validation + inline add
+const SKILL_DETAIL_LAYOUT_ID = "multica_skill_detail_layout";
 
-export function useValidateNewFilePath() {
-  const { t } = useT("skills");
-  return (path: string, existing: string[]): string => {
-    const p = path.trim();
-    if (!p) return t(($) => $.detail.add_file.errors.empty);
-    if (p.startsWith("/")) return t(($) => $.detail.add_file.errors.absolute);
-    if (p.split("/").includes("..")) return t(($) => $.detail.add_file.errors.double_dot);
-    if (p === SKILL_MD) return t(($) => $.detail.add_file.errors.reserved);
-    if (existing.includes(p)) return t(($) => $.detail.add_file.errors.exists);
-    // Directories are inferred from paths, not stored, so a file named after
-    // one merges into that folder's node when the tree is built — it drops off
-    // the rail while still sitting in the draft. Rejected in both directions:
-    // a file cannot take a folder's name, and cannot take a name that an
-    // existing file is already nested under.
-    if (existing.some((other) => other.startsWith(`${p}/`))) {
-      return t(($) => $.detail.add_file.errors.is_directory);
-    }
-    if (existing.some((other) => p.startsWith(`${other}/`))) {
-      return t(($) => $.detail.add_file.errors.under_file);
-    }
-    return "";
-  };
-}
-
-function AddFileInline({
-  existingPaths,
-  onAdd,
-  onCancel,
-}: {
-  existingPaths: string[];
-  onAdd: (path: string) => void;
-  onCancel: () => void;
-}) {
-  const { t } = useT("skills");
-  const validate = useValidateNewFilePath();
-  const [path, setPath] = useState("");
-  const [error, setError] = useState("");
-
-  const submit = () => {
-    const err = validate(path, existingPaths);
-    if (err) {
-      setError(err);
-      return;
-    }
-    onAdd(path.trim());
-  };
-
-  return (
-    <div className="mt-1.5">
-      <Input
-        autoFocus
-        value={path}
-        onChange={(e) => {
-          setPath(e.target.value);
-          setError("");
-        }}
-        onKeyDown={(e) => {
-          if (e.key === "Enter") submit();
-          if (e.key === "Escape") onCancel();
-        }}
-        placeholder={t(($) => $.detail.add_file.placeholder)}
-        className="h-7 font-mono text-caption"
-      />
-      {error && (
-        <p role="alert" className="mt-1 text-caption text-destructive">
-          {error}
-        </p>
-      )}
-      <div className="mt-1.5 flex items-center gap-1.5">
-        <Button type="button" size="xs" onClick={submit}>
-          {t(($) => $.detail.add_file.add)}
-        </Button>
-        <Button type="button" size="xs" variant="ghost" onClick={onCancel}>
-          {t(($) => $.detail.add_file.cancel)}
-        </Button>
-      </div>
-    </div>
-  );
-}
-
-// Header
-
-function useOriginLabel(origin: OriginInfo | null, runtime: AgentRuntime | null) {
-  const { t } = useT("skills");
-  if (!origin) return null;
-  if (origin.type === "runtime_local") {
-    return runtime
-      ? t(($) => $.detail.subline.origin_runtime_named, {
-          name: runtimeDisplayLabel(runtime),
-        })
-      : origin.provider
-        ? t(($) => $.detail.subline.origin_runtime_provider, { provider: origin.provider })
-        : t(($) => $.detail.subline.origin_runtime_unknown);
-  }
-  if (origin.type === "clawhub") return t(($) => $.detail.subline.origin_clawhub);
-  if (origin.type === "skills_sh") return t(($) => $.detail.subline.origin_skills_sh);
-  if (origin.type === "github") return t(($) => $.detail.subline.origin_github);
-  return t(($) => $.detail.subline.origin_workspace);
-}
-
-/**
- * Identity strip under the breadcrumb: mark, name, and the counts that say
- * what this skill is made of. One line, because everything a reader would
- * scroll past it for is a field on the Overview tab.
- *
- * The description is not repeated here. It used to be, above an editable copy
- * of itself two tabs' worth of chrome below — every visit to a page whose only
- * verbs are edit, add and delete paid for a read-only restatement of a field
- * the next screenful lets you change. The list this page is reached from
- * already carries the description for anyone deciding whether to open it.
- *
- * The agent detail header still has the taller form. Bringing it across is a
- * separate change to a page this branch does not otherwise touch.
- */
-function SkillIdentity({
-  skill,
-  origin,
-  originRuntime,
-  agentCount,
-  creator,
-}: {
-  skill: Skill;
-  origin: OriginInfo | null;
-  originRuntime: AgentRuntime | null;
-  agentCount: number;
-  creator: MemberWithUser | null;
-}) {
-  const { t } = useT("skills");
-  const timeAgo = useTimeAgo();
-  const originLabel = useOriginLabel(origin, originRuntime);
-  const isRuntimeOrigin = origin?.type === "runtime_local";
-  const sourceUrl = originSourceUrl(origin);
-
-  return (
-    <div className="shrink-0 border-b py-3">
-      <div
-        className={cn(
-          PAGE_RAIL,
-          PAGE_GUTTER,
-          "flex flex-wrap items-center gap-x-4 gap-y-1.5",
-        )}
-      >
-        <div className="flex min-w-0 items-center gap-2.5">
-          <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border bg-muted text-muted-foreground">
-            <SkillIcon className="h-4 w-4" aria-hidden="true" />
-          </div>
-          <h1 className="min-w-0 truncate font-mono text-title font-semibold tracking-tight">
-
-            {skill.name}
-          </h1>
-        </div>
-        <div className="flex min-w-0 flex-wrap items-center gap-x-4 gap-y-1 text-caption text-muted-foreground sm:ml-auto">
-          {originLabel && (
-            <span className="inline-flex min-w-0 items-center gap-1.5">
-              {/* Same three-way split as the list's Source column: runtime,
-                  created here, imported. */}
-              {isRuntimeOrigin ? (
-                <HardDrive className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
-              ) : origin?.type === "manual" ? (
-                <Pencil className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
-              ) : (
-                <Download className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
-              )}
-              {sourceUrl ? (
-                <Tooltip>
-                  <TooltipTrigger
-                    render={
-                      <a
-                        href={sourceUrl}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="truncate hover:underline"
-                      >
-                        {originLabel}
-                      </a>
-                    }
-                  />
-                  <TooltipContent side="top">{sourceUrl}</TooltipContent>
-                </Tooltip>
-              ) : (
-                <span className="truncate">{originLabel}</span>
-              )}
-            </span>
-          )}
-          <span className="inline-flex items-center gap-1.5">
-            <FileText className="h-3.5 w-3.5" aria-hidden="true" />
-            {t(($) => $.detail.header.files, { count: totalFileCount(skill) })}
-          </span>
-          <span className="inline-flex items-center gap-1.5">
-            <Users className="h-3.5 w-3.5" aria-hidden="true" />
-            {t(($) => $.detail.header.used_by, { count: agentCount })}
-          </span>
-          <span className="inline-flex items-center gap-1.5">
-            <Clock3 className="h-3.5 w-3.5" aria-hidden="true" />
-            {creator
-              ? t(($) => $.detail.header.updated_by, {
-                  when: timeAgo(skill.updated_at),
-                  name: creator.name,
-                })
-              : t(($) => $.detail.header.updated, { when: timeAgo(skill.updated_at) })}
-          </span>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-// Overview tab
-
-function PropertyRow({
-  label,
-  htmlFor,
+function Notice({
+  title,
   children,
 }: {
-  label: string;
-  htmlFor?: string;
+  title?: React.ReactNode;
   children: React.ReactNode;
 }) {
   return (
-    <div className="grid gap-1.5 py-2.5 sm:grid-cols-[128px_minmax(0,1fr)] sm:gap-4">
-      <label
-        htmlFor={htmlFor}
-        className="pt-1.5 text-caption text-muted-foreground sm:text-body"
-      >
-        {label}
-      </label>
-      <div className="min-w-0">{children}</div>
+    <div
+      role="status"
+      aria-live="polite"
+      className="flex items-start gap-2 rounded-lg border border-warning/30 bg-warning/10 px-3 py-2 text-caption"
+    >
+      <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0 text-warning" />
+      <div className="min-w-0 flex-1">
+        {title && <div className="font-medium text-foreground">{title}</div>}
+        <div className={cn("text-muted-foreground", title && "mt-0.5")}>
+          {children}
+        </div>
+      </div>
     </div>
+  );
+}
+
+/**
+ * SKILL.md as it reads, frontmatter stripped since name and description are
+ * properties of their own. Clamped, with a toggle only when something is
+ * clamped: a long skill would otherwise push every section below it out of
+ * sight.
+ */
+function SkillContentPreview({ content }: { content: string }) {
+  const { t } = useT("skills");
+  const { t: tCommon } = useT("common");
+  const body = useMemo(() => parseFrontmatter(content).body, [content]);
+  const [expanded, setExpanded] = useState(false);
+  const [clamped, setClamped] = useState(false);
+  const frameRef = useRef<HTMLDivElement | null>(null);
+  const innerRef = useRef<HTMLDivElement | null>(null);
+
+  const measure = useCallback(() => {
+    const frame = frameRef.current;
+    const inner = innerRef.current;
+    if (!frame || !inner || expanded) return;
+    setClamped(inner.scrollHeight > frame.clientHeight + 1);
+  }, [expanded]);
+
+  useLayoutEffect(() => {
+    measure();
+    if (typeof ResizeObserver === "undefined") return;
+    const observer = new ResizeObserver(measure);
+    if (frameRef.current) observer.observe(frameRef.current);
+    if (innerRef.current) observer.observe(innerRef.current);
+    return () => observer.disconnect();
+  }, [measure, body]);
+
+  return (
+    <ObjectSectionCard>
+      <div
+        ref={frameRef}
+        className={cn("relative px-4 py-3", !expanded && "max-h-80 overflow-hidden")}
+      >
+        <div ref={innerRef} data-testid="skill-content-preview">
+          <RichContent
+            content={body || t(($) => $.file_viewer.no_content)}
+            density="document"
+            phase="settled"
+          />
+        </div>
+        {clamped && !expanded && (
+          <div
+            aria-hidden="true"
+            className="pointer-events-none absolute inset-x-0 bottom-0 h-12 bg-gradient-to-t from-card to-transparent"
+          />
+        )}
+      </div>
+      {(clamped || expanded) && (
+        <button
+          type="button"
+          onClick={() => setExpanded((value) => !value)}
+          className="flex h-9 w-full items-center px-4 text-caption text-muted-foreground transition-colors hover:text-foreground focus-visible:text-foreground focus-visible:outline-none"
+        >
+          {expanded
+            ? tCommon(($) => $.expandable_description.collapse)
+            : tCommon(($) => $.expandable_description.expand)}
+        </button>
+      )}
+    </ObjectSectionCard>
+  );
+}
+
+function SupportingFileList({
+  paths,
+  onOpen,
+}: {
+  paths: string[];
+  onOpen: (path: string) => void;
+}) {
+  const { t } = useT("skills");
+  if (paths.length === 0) {
+    return (
+      <div className="rounded-lg border border-dashed px-3 py-6 text-center text-caption text-muted-foreground">
+        {t(($) => $.detail.files.supporting_empty)}
+      </div>
+    );
+  }
+  return (
+    <ObjectSectionCard>
+      {[...paths].sort().map((path) => {
+        const Icon = isMarkdownPath(path) ? FileText : File;
+        return (
+          <button
+            key={path}
+            type="button"
+            onClick={() => onOpen(path)}
+            className="group/file flex h-10 w-full items-center gap-2.5 px-3 text-left text-body transition-colors hover:bg-accent/50 focus-visible:bg-accent/50 focus-visible:outline-none"
+          >
+            <Icon className="size-3.5 shrink-0 text-muted-foreground" aria-hidden="true" />
+            <span className="min-w-0 flex-1 truncate font-mono text-caption">
+              {path}
+            </span>
+            <ChevronRight
+              className="size-3.5 shrink-0 text-muted-foreground opacity-0 transition-opacity group-hover/file:opacity-100"
+              aria-hidden="true"
+            />
+          </button>
+        );
+      })}
+    </ObjectSectionCard>
   );
 }
 
@@ -415,9 +320,9 @@ function UsedByList({ agents }: { agents: Agent[] }) {
     );
   }
   return (
-    <ul className="divide-y overflow-hidden rounded-lg border bg-card">
+    <ObjectSectionCard>
       {agents.map((a) => (
-        <li key={a.id} className="flex items-center gap-2.5 px-3 py-2.5">
+        <div key={a.id} className="flex min-h-11 items-center gap-2.5 px-3 py-2">
           <ActorAvatar
             name={a.name}
             initials={a.name.slice(0, 2).toUpperCase()}
@@ -433,318 +338,9 @@ function UsedByList({ agents }: { agents: Agent[] }) {
               </div>
             )}
           </div>
-        </li>
+        </div>
       ))}
-    </ul>
-  );
-}
-
-function OverviewTab({
-  skill,
-  name,
-  description,
-  canEdit,
-  creatorName,
-  skillAgents,
-  onNameChange,
-  onDescriptionChange,
-  onAddToAgents,
-}: {
-  skill: Skill;
-  name: string;
-  description: string;
-  canEdit: boolean;
-  creatorName: string | null;
-  skillAgents: Agent[];
-  onNameChange: (value: string) => void;
-  onDescriptionChange: (value: string) => void;
-  onAddToAgents: () => void;
-}) {
-  const { t } = useT("skills");
-
-  return (
-    <div className={cn(PAGE_RAIL, PAGE_GUTTER, "py-4 sm:py-6 md:py-8")}>
-      <div className="w-full max-w-3xl">
-        <section>
-          <h2 className="text-title-sm font-medium">{t(($) => $.detail.overview.properties)}</h2>
-          <details className="mt-1 text-caption text-muted-foreground">
-            <summary className="cursor-pointer rounded-sm py-2 focus-visible:outline-2 focus-visible:outline-ring">
-              {t(($) => $.detail.overview.properties_help)}
-            </summary>
-            <p className="mt-1">{t(($) => $.detail.overview.properties_hint)}</p>
-          </details>
-          <div className="mt-4 divide-y">
-            <PropertyRow label={t(($) => $.detail.overview.name)} htmlFor="skill-name">
-              <Input
-                id="skill-name"
-                value={name}
-                readOnly={!canEdit}
-                onChange={(e) => onNameChange(e.target.value)}
-                placeholder={t(($) => $.detail.name_placeholder)}
-                className="font-mono text-body read-only:cursor-default"
-              />
-            </PropertyRow>
-
-            <PropertyRow
-              label={t(($) => $.detail.overview.description)}
-              htmlFor="skill-description"
-            >
-              {/* Real descriptions run 500–900 characters (they carry the
-                  trigger vocabulary an agent matches on), so this field is
-                  sized for the data rather than the two rows it had before. */}
-              <Textarea
-                id="skill-description"
-                value={description}
-                readOnly={!canEdit}
-                onChange={(e) => onDescriptionChange(e.target.value)}
-                placeholder={t(($) => $.detail.description_placeholder)}
-                rows={6}
-                className="text-body leading-relaxed read-only:cursor-default"
-              />
-              <div className="mt-1.5 flex flex-wrap justify-between gap-x-4 gap-y-1 text-caption text-muted-foreground">
-                <p>{t(($) => $.detail.overview.description_hint)}</p>
-                <span className="tabular-nums">
-                  {t(($) => $.detail.overview.character_count, { count: description.length })}
-                </span>
-              </div>
-            </PropertyRow>
-
-            <PropertyRow label={t(($) => $.detail.overview.labels)}>
-              <ResourceLabelPicker
-                resourceType="skill"
-                resourceId={skill.id}
-                canEdit={canEdit}
-              />
-            </PropertyRow>
-          </div>
-        </section>
-
-        <section className="mt-10">
-          <div className="flex items-center justify-between gap-3">
-            <h2 className="min-w-0 text-title-sm font-medium">
-              {t(($) => $.detail.overview.used_by, { count: skillAgents.length })}
-            </h2>
-            <Button
-              variant="outline"
-              size="xs"
-              className="shrink-0 gap-1"
-              onClick={onAddToAgents}
-            >
-              <UserPlus className="h-3 w-3" />
-              {t(($) => $.actions.add_to_agent)}
-            </Button>
-          </div>
-          <div className="mt-3">
-            <UsedByList agents={skillAgents} />
-          </div>
-        </section>
-
-        <p className="mt-10 rounded-lg bg-muted px-3 py-2.5 text-caption leading-relaxed text-muted-foreground">
-          {canEdit
-            ? t(($) => $.detail.overview.permissions_owner)
-            : creatorName
-              ? t(($) => $.detail.overview.permissions_locked_creator, { name: creatorName })
-              : t(($) => $.detail.overview.permissions_locked)}
-        </p>
-      </div>
-    </div>
-  );
-}
-
-// Files tab
-
-function FilesTab({
-  filePaths,
-  selectedPath,
-  selectedContent,
-  mode,
-  canEdit,
-  addingFile,
-  focusEditor,
-  onSelectPath,
-  onModeChange,
-  onStartAddFile,
-  onAddFile,
-  onCancelAddFile,
-  onDeleteFile,
-  onRenameFile,
-  onEditFile,
-  onContentChange,
-  onFocusHandled,
-}: {
-  filePaths: string[];
-  selectedPath: string;
-  selectedContent: string;
-  mode: FileMode;
-  canEdit: boolean;
-  addingFile: boolean;
-  focusEditor: boolean;
-  onSelectPath: (path: string) => void;
-  onModeChange: (mode: FileMode) => void;
-  onStartAddFile: () => void;
-  onAddFile: (path: string) => void;
-  onCancelAddFile: () => void;
-  onDeleteFile: (path?: string) => void;
-  onRenameFile: (from: string, to: string) => void;
-  onEditFile: (path: string) => void;
-  onContentChange: (content: string) => void;
-  onFocusHandled: () => void;
-}) {
-  const { t } = useT("skills");
-  const validatePath = useValidateNewFilePath();
-  const supportingPaths = filePaths.filter((p) => p !== SKILL_MD);
-  const isMd = isMarkdownPath(selectedPath);
-  // Absent for read-only viewers so the tree never offers an action it would
-  // then refuse. Both rails get the same object: SKILL.md keeps Edit and loses
-  // rename/delete, which the tree derives from reservedPath.
-  const treeActions = canEdit
-    ? {
-        onEdit: onEditFile,
-        validatePath,
-        onRename: onRenameFile,
-        onDelete: onDeleteFile,
-        reservedPath: SKILL_MD,
-      }
-    : undefined;
-
-  return (
-    <div className={cn(PAGE_RAIL, "flex min-h-full flex-col md:h-full md:flex-row")}>
-      {/* The file list IS the second-level navigation, so it uses the same
-          rail treatment as the agent detail page's capability/settings nav
-          instead of inventing a third sidebar style. */}
-      <aside
-        role="tablist"
-        aria-orientation="vertical"
-        aria-label={t(($) => $.detail.files.list_aria)}
-        className={cn(
-          "shrink-0 border-b border-surface-border py-3 md:w-52 md:overflow-y-auto md:border-b-0 md:border-r md:py-4",
-          PAGE_GUTTER,
-        )}
-      >
-        <p className="px-2.5 pb-1 text-micro font-semibold uppercase tracking-wider text-muted-foreground">
-          {t(($) => $.detail.files.main)}
-        </p>
-        <FileTree
-          actions={treeActions}
-          filePaths={[SKILL_MD]}
-          selectedPath={selectedPath}
-          onSelect={onSelectPath}
-        />
-
-        <p className="px-2.5 pb-1 pt-3 text-micro font-semibold uppercase tracking-wider text-muted-foreground">
-          {t(($) => $.detail.files.supporting, { count: supportingPaths.length })}
-        </p>
-        {supportingPaths.length > 0 ? (
-          <FileTree
-            actions={treeActions}
-            filePaths={supportingPaths}
-            selectedPath={selectedPath}
-            onSelect={onSelectPath}
-          />
-        ) : (
-          !addingFile && (
-            <p className="px-2.5 py-1 text-caption text-muted-foreground">
-              {t(($) => $.detail.files.supporting_empty)}
-            </p>
-          )
-        )}
-
-        {canEdit &&
-          (addingFile ? (
-            <AddFileInline
-              existingPaths={filePaths}
-              onAdd={onAddFile}
-              onCancel={onCancelAddFile}
-            />
-          ) : (
-            <Button
-              type="button"
-              variant="ghost"
-              size="xs"
-              onClick={onStartAddFile}
-              className="mt-2 h-8 w-full justify-start px-2.5 text-muted-foreground"
-            >
-              <Plus className="h-3.5 w-3.5" />
-              {t(($) => $.detail.files.add_file)}
-            </Button>
-          ))}
-      </aside>
-
-      <section className="flex min-h-[32rem] min-w-0 flex-1 flex-col md:min-h-0">
-        <div className="flex h-10 shrink-0 items-center gap-3 border-b px-3 sm:px-4">
-          <span className="truncate font-mono text-caption text-muted-foreground">
-            {selectedPath}
-          </span>
-          <div className="ml-auto flex shrink-0 items-center gap-1">
-            {isMd && (
-              // The second segment is named for what it does for THIS viewer:
-              // "Edit" when the pane it opens accepts typing, "Plain text"
-              // when the same pane is read-only. Same mode either way — only
-              // the promise differs, and offering an edit the page would
-              // refuse is the thing this rail is careful not to do.
-              <div
-                role="group"
-                aria-label={t(($) => $.detail.files.mode_aria)}
-                className="flex items-center gap-0.5 rounded-md bg-muted p-0.5"
-              >
-                {(["preview", "raw"] as const).map((value) => (
-                  <button
-                    key={value}
-                    type="button"
-                    aria-pressed={mode === value}
-                    onClick={() => onModeChange(value)}
-                    className={cn(
-                      "h-6 rounded-xs px-2 text-caption font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
-                      mode === value
-                        ? "bg-surface text-foreground shadow-sm"
-                        : "text-muted-foreground hover:text-foreground",
-                    )}
-                  >
-                    {value === "preview"
-                      ? t(($) => $.detail.files.mode_preview)
-                      : canEdit
-                        ? t(($) => $.detail.files.mode_edit)
-                        : t(($) => $.detail.files.mode_raw)}
-                  </button>
-                ))}
-              </div>
-            )}
-            {selectedPath !== SKILL_MD && canEdit && (
-              <Tooltip>
-                <TooltipTrigger
-                  render={
-                    <Button
-                      type="button"
-                      variant="ghost"
-                      size="icon-sm"
-                      onClick={() => onDeleteFile()}
-                      className="text-muted-foreground hover:text-destructive"
-                      aria-label={t(($) => $.detail.delete_file)}
-                    >
-                      <Trash2 className="h-3.5 w-3.5" />
-                    </Button>
-                  }
-                />
-                <TooltipContent>{t(($) => $.detail.delete_file)}</TooltipContent>
-              </Tooltip>
-            )}
-          </div>
-        </div>
-
-        <div className="min-h-0 flex-1">
-          <FileViewer
-            key={selectedPath}
-            path={selectedPath}
-            content={selectedContent}
-            mode={mode}
-            readOnly={!canEdit}
-            autoFocus={focusEditor}
-            onChange={onContentChange}
-            onFocusHandled={onFocusHandled}
-          />
-        </div>
-      </section>
-    </div>
+    </ObjectSectionCard>
   );
 }
 
@@ -752,6 +348,7 @@ function FilesTab({
 
 export function SkillDetailPage({ skillId }: { skillId: string }) {
   const { t } = useT("skills");
+  const { t: tCommon } = useT("common");
   const wsId = useWorkspaceId();
   const qc = useQueryClient();
   const paths = useWorkspacePaths();
@@ -815,27 +412,15 @@ export function SkillDetailPage({ skillId }: { skillId: string }) {
 
   const urlView = navigation.searchParams.get("view");
   const [activeView, setActiveView] = useState<DetailView>(() =>
-    isDetailView(urlView) ? urlView : "overview",
+    readView(urlView),
   );
   const lastUrlViewRef = useRef(urlView);
 
   useEffect(() => {
     if (urlView === lastUrlViewRef.current) return;
     lastUrlViewRef.current = urlView;
-    setActiveView(isDetailView(urlView) ? urlView : "overview");
+    setActiveView(readView(urlView));
   }, [urlView]);
-
-  const selectView = useCallback(
-    (next: DetailView) => {
-      setActiveView(next);
-      const params = new URLSearchParams(navigation.searchParams);
-      if (next === "overview") params.delete("view");
-      else params.set("view", next);
-      const query = params.toString();
-      navigation.replace(`${navigation.pathname}${query ? `?${query}` : ""}`);
-    },
-    [navigation],
-  );
 
   const draftRef = useRef({ name, description, content, files });
   draftRef.current = { name, description, content, files };
@@ -977,6 +562,33 @@ export function SkillDetailPage({ skillId }: { skillId: string }) {
     dirtySummary.descChanged ||
     dirtySummary.changedFileCount > 0;
 
+  const viewHref = (view: DetailView) => {
+    const params = new URLSearchParams(navigation.searchParams);
+    if (view === "overview") params.delete("view");
+    else params.set("view", view);
+    const query = params.toString();
+    return `${navigation.pathname}${query ? `?${query}` : ""}`;
+  };
+
+  /**
+   * Opens the files on `path`. "Edit" owes three things in one gesture: the
+   * file is open, the pane is the editor rather than the preview, and the
+   * caret is in it — fewer would leave the user a click away from typing.
+   */
+  const openFiles = (
+    path: string,
+    { edit = false, add = false }: { edit?: boolean; add?: boolean } = {},
+  ) => {
+    setSelectedPath(path);
+    if (edit && canEdit) {
+      setFileMode("raw");
+      setFocusPath(path);
+    }
+    if (add && canEdit) setAddingFile(true);
+    setActiveView("files");
+    navigation.push(viewHref("files"));
+  };
+
   const handleSave = async () => {
     if (!skill || !canEdit) return;
     const trimmedName = name.trim();
@@ -1031,6 +643,14 @@ export function SkillDetailPage({ skillId }: { skillId: string }) {
     }
   };
 
+  const handleCopyLink = () => {
+    void copyText(navigation.getShareableUrl(paths.skillDetail(skillId))).then(
+      (ok) => {
+        if (ok) toast.success(t(($) => $.detail.menu.link_copied));
+      },
+    );
+  };
+
   const handleAddFile = (path: string) => {
     setFiles((prev) => [...prev, { path, content: "" }]);
     setSelectedPath(path);
@@ -1045,10 +665,6 @@ export function SkillDetailPage({ skillId }: { skillId: string }) {
     if (path === selectedPath) setSelectedPath(SKILL_MD);
   };
 
-  // "Edit" from a row menu is one gesture that owes three things: the file is
-  // open, the pane is the editor rather than the preview, and the caret is in
-  // it. Doing fewer would leave the user another click away from typing, which
-  // is the whole reason the entry exists.
   const handleEditFile = useCallback(
     (path: string) => {
       if (!canEdit) return;
@@ -1085,56 +701,66 @@ export function SkillDetailPage({ skillId }: { skillId: string }) {
   };
 
   const supportingQueryDown = !!agentsError || !!membersError || !!runtimesError;
+  const listSegment = { href: paths.skills(), label: t(($) => $.page.title) };
 
   if (isLoading) {
     return (
-      <div className="flex flex-1 min-h-0 flex-col">
-        <div className="flex h-12 shrink-0 items-center gap-2 border-b px-4">
-          <Skeleton className="h-4 w-16" />
-          <Skeleton className="h-3 w-3 rounded-xs" />
-          <Skeleton className="h-4 w-40" />
+      <ObjectPage
+        layoutId={SKILL_DETAIL_LAYOUT_ID}
+        segments={[listSegment]}
+        leaf={<Skeleton className="h-4 w-40" />}
+      >
+        <div className={cn(OBJECT_PAGE_BODY, "space-y-8")}>
+          <div className="flex items-center gap-3">
+            <Skeleton className="size-12 rounded-xl" />
+            <div className="flex-1 space-y-2">
+              <Skeleton className="h-5 w-48" />
+              <Skeleton className="h-4 w-3/4" />
+            </div>
+          </div>
+          <div className="space-y-3">
+            <Skeleton className="h-4 w-full" />
+            <Skeleton className="h-4 w-5/6" />
+            <Skeleton className="h-4 w-3/4" />
+          </div>
         </div>
-        <div className={cn(PAGE_RAIL, PAGE_GUTTER, "space-y-3 py-6")}>
-          <Skeleton className="h-4 w-full" />
-          <Skeleton className="h-4 w-5/6" />
-          <Skeleton className="h-4 w-3/4" />
-        </div>
-      </div>
+      </ObjectPage>
     );
   }
 
   if (error || !skill) {
     return (
-      <div className="flex flex-1 min-h-0 flex-col">
-        <div className="flex h-12 shrink-0 items-center gap-2 border-b px-3">
-          <Button
-            variant="ghost"
-            size="xs"
-            render={<AppLink href={paths.skills()} />}
-            nativeButton={false}
-          >
-            {t(($) => $.detail.all_skills)}
-          </Button>
-        </div>
-        <div className="flex flex-1 flex-col items-center justify-center gap-2 text-center">
-          <AlertCircle className="h-8 w-8 text-faint-foreground" />
-          <p className="text-body font-medium">{t(($) => $.detail.not_found.title)}</p>
-          <p className="max-w-xs text-caption text-muted-foreground">
-            {error instanceof Error ? error.message : t(($) => $.detail.not_found.fallback)}
-          </p>
-          <AppLink
-            href={paths.skills()}
-            className={`${buttonVariants({ variant: "outline", size: "xs" })} mt-2`}
-          >
-            {t(($) => $.detail.not_found.back)}
-          </AppLink>
-        </div>
-      </div>
+      <ObjectPage
+        layoutId={SKILL_DETAIL_LAYOUT_ID}
+        segments={[listSegment]}
+        leaf={
+          <span className="truncate text-muted-foreground">
+            {t(($) => $.detail.not_found.title)}
+          </span>
+        }
+      >
+        <CollectionPageState
+          role="alert"
+          icon={AlertCircle}
+          title={t(($) => $.detail.not_found.title)}
+          description={
+            error instanceof Error ? error.message : t(($) => $.detail.not_found.fallback)
+          }
+          actions={
+            <AppLink
+              href={paths.skills()}
+              className={buttonVariants({ variant: "outline", size: "xs" })}
+            >
+              {t(($) => $.detail.not_found.back)}
+            </AppLink>
+          }
+        />
+      </ObjectPage>
     );
   }
 
-  // Segments reuse the overview field labels so the pill and the fields it
-  // points at never use different words for the same thing.
+  // Segments reuse the property labels so the pill and the fields it points
+  // at never use different words for the same thing.
   const changedParts = [
     dirtySummary.nameChanged ? t(($) => $.detail.overview.name) : null,
     dirtySummary.descChanged ? t(($) => $.detail.overview.description) : null,
@@ -1145,204 +771,236 @@ export function SkillDetailPage({ skillId }: { skillId: string }) {
       : null,
   ].filter((part): part is string => part !== null);
 
-  const TABS: { id: DetailView; label: string }[] = [
-    { id: "overview", label: t(($) => $.detail.tabs.overview) },
-    {
-      id: "files",
-      label: t(($) => $.detail.tabs.files, { count: totalFileCount(skill) }),
-    },
-  ];
+  const canRefresh = canEdit && !!origin && isRefreshableOrigin(origin);
+  const displayName = name.trim() || skill.name;
+  const supportingPaths = filePaths.filter((p) => p !== SKILL_MD);
+
+  const notices = [
+    !canEdit && (
+      <CapabilityBanner
+        key="capability"
+        reason={skillPermissions.canEdit.reason}
+        resource="skill"
+        ownerName={creator?.name}
+      />
+    ),
+    supportingQueryDown && (
+      <Notice key="supporting">{t(($) => $.detail.supporting_data_warning)}</Notice>
+    ),
+    conflictPending && canEdit && (
+      <Notice key="conflict" title={t(($) => $.detail.conflict_banner.title)}>
+        {t(($) => $.detail.conflict_banner.body)}
+      </Notice>
+    ),
+  ].filter(Boolean);
+
+  const headerActions = (
+    <>
+      <Button size="sm" onClick={() => setShowAddToAgents(true)}>
+        <Plus />
+        {t(($) => $.actions.add_to_agent)}
+      </Button>
+      <DropdownMenu>
+        <DropdownMenuTrigger
+          render={
+            <IconButton
+              label={tCommon(($) => $.more_actions)}
+              tooltipSide="bottom"
+              className="text-muted-foreground"
+            >
+              <MoreHorizontal />
+            </IconButton>
+          }
+        />
+        <DropdownMenuContent align="end" className="w-auto min-w-48">
+          <DropdownMenuItem onClick={handleCopyLink}>
+            <Link2 />
+            {t(($) => $.detail.menu.copy_link)}
+          </DropdownMenuItem>
+          {canRefresh && (
+            <DropdownMenuItem onClick={() => setConfirmRefresh(true)}>
+              <RotateCw />
+              {t(($) => $.actions.refresh)}
+            </DropdownMenuItem>
+          )}
+          {canEdit && (
+            <>
+              <DropdownMenuSeparator />
+              <DropdownMenuItem
+                variant="destructive"
+                onClick={() => setConfirmDelete(true)}
+              >
+                <Trash2 />
+                {t(($) => $.detail.menu.delete)}
+              </DropdownMenuItem>
+            </>
+          )}
+        </DropdownMenuContent>
+      </DropdownMenu>
+    </>
+  );
+
+  const panel = origin && (
+    <SkillPropertiesPanel
+      skill={skill}
+      name={name}
+      description={description}
+      canEdit={canEdit}
+      origin={origin}
+      originRuntime={originRuntime}
+      creator={creator}
+      onNameChange={setName}
+      onDescriptionChange={setDescription}
+    />
+  );
+
+  const skillLeaf = (
+    <span className="flex min-w-0 items-center gap-1.5 text-foreground">
+      <SkillIcon className="size-3.5 shrink-0 text-muted-foreground" aria-hidden="true" />
+      <span className="truncate">{displayName}</span>
+    </span>
+  );
+
+  const overview = (
+    <div className={cn(OBJECT_PAGE_BODY, "space-y-8 pb-24")}>
+      <div className="space-y-4">
+        <ObjectIdentity
+          media={<ObjectIconMark icon={SkillIcon} />}
+          title={displayName}
+          description={description.trim() || undefined}
+          trailing={
+            !canEdit && (
+              <span className="inline-flex shrink-0 items-center gap-1 rounded-md bg-muted px-1.5 py-0.5 text-caption text-muted-foreground">
+                <Lock className="size-3" aria-hidden="true" />
+                {t(($) => $.detail.read_only)}
+              </span>
+            )
+          }
+        />
+        {notices.length > 0 && <div className="space-y-2">{notices}</div>}
+      </div>
+
+      <ObjectSection
+        title={t(($) => $.detail.sections.content)}
+        count={<span className="font-mono">{SKILL_MD}</span>}
+        action={
+          canEdit ? (
+            <ObjectSectionAction
+              icon={Pencil}
+              onClick={() => openFiles(SKILL_MD, { edit: true })}
+            >
+              {t(($) => $.detail.sections.edit)}
+            </ObjectSectionAction>
+          ) : (
+            <ObjectSectionAction
+              icon={FileText}
+              onClick={() => openFiles(SKILL_MD)}
+            >
+              {t(($) => $.detail.sections.open)}
+            </ObjectSectionAction>
+          )
+        }
+      >
+        <SkillContentPreview content={content} />
+      </ObjectSection>
+
+      <ObjectSection
+        title={t(($) => $.detail.sections.files)}
+        count={supportingPaths.length}
+        action={
+          canEdit && (
+            <ObjectSectionAction
+              icon={Plus}
+              onClick={() => openFiles(selectedPath, { add: true })}
+            >
+              {t(($) => $.detail.sections.add)}
+            </ObjectSectionAction>
+          )
+        }
+      >
+        <SupportingFileList paths={supportingPaths} onOpen={openFiles} />
+      </ObjectSection>
+
+      <ObjectSection
+        title={t(($) => $.table.used_by)}
+        count={skillAgents.length}
+        action={
+          <ObjectSectionAction icon={Plus} onClick={() => setShowAddToAgents(true)}>
+            {t(($) => $.actions.add_to_agent)}
+          </ObjectSectionAction>
+        }
+      >
+        <UsedByList agents={skillAgents} />
+      </ObjectSection>
+    </div>
+  );
+
+  const filesView = (
+    <div className="flex min-h-full flex-col md:h-full">
+      {notices.length > 0 && (
+        <div className={cn(PAGE_RAIL, PAGE_GUTTER, "space-y-2 pt-3")}>
+          {notices}
+        </div>
+      )}
+      <div className="flex min-h-0 flex-1 flex-col">
+        <SkillFilesEditor
+          filePaths={filePaths}
+          selectedPath={selectedPath}
+          selectedContent={selectedContent}
+          mode={fileMode}
+          canEdit={canEdit}
+          addingFile={addingFile}
+          focusEditor={focusPath === selectedPath}
+          onSelectPath={setSelectedPath}
+          onModeChange={setFileMode}
+          onStartAddFile={() => setAddingFile(true)}
+          onAddFile={handleAddFile}
+          onCancelAddFile={() => setAddingFile(false)}
+          onDeleteFile={handleDeleteFile}
+          onRenameFile={handleRenameFile}
+          onEditFile={handleEditFile}
+          onContentChange={handleFileContentChange}
+          onFocusHandled={handleFocusHandled}
+        />
+      </div>
+    </div>
+  );
 
   return (
     // relative: positioning anchor for the floating save pill (page-centered,
     // same rule as the skills list batch toolbar).
-    <div className="relative flex flex-1 min-h-0 flex-col">
-      <BreadcrumbHeader
-        segments={[{ href: paths.skills(), label: t(($) => $.page.title) }]}
+    <div className="relative flex min-h-0 flex-1 flex-col">
+      <ObjectPage
+        layoutId={SKILL_DETAIL_LAYOUT_ID}
+        segments={
+          activeView === "files"
+            ? [
+                listSegment,
+                {
+                  href: paths.skillDetail(skill.id),
+                  label: displayName,
+                  className: "min-w-0 max-w-72 truncate",
+                },
+              ]
+            : [listSegment]
+        }
         leaf={
-          <span className="truncate font-mono text-caption text-foreground">
-            {skill.name}
-          </span>
+          activeView === "files" ? (
+            <span className="truncate font-mono text-caption text-foreground">
+              {selectedPath}
+            </span>
+          ) : (
+            skillLeaf
+          )
         }
-        actions={
-          <>
-            {!canEdit && (
-              <span className="inline-flex items-center gap-1 text-caption text-muted-foreground">
-                <Lock className="h-3 w-3" />
-                {t(($) => $.detail.read_only)}
-              </span>
-            )}
-            {canEdit && origin && isRefreshableOrigin(origin) && (
-              <Tooltip>
-                <TooltipTrigger
-                  render={
-                    <Button
-                      variant="outline"
-                      size="xs"
-                      className="gap-1"
-                      onClick={() => setConfirmRefresh(true)}
-                    >
-                      <RotateCw className="h-3 w-3" />
-                      {t(($) => $.detail.refresh.button)}
-                    </Button>
-                  }
-                />
-                <TooltipContent>
-                  {t(($) => $.detail.refresh.tooltip)}
-                </TooltipContent>
-              </Tooltip>
-            )}
-            <Button
-              variant="outline"
-              size="xs"
-              className="gap-1"
-              onClick={() => setShowAddToAgents(true)}
-            >
-              <UserPlus className="h-3 w-3" />
-              {t(($) => $.actions.add_to_agent)}
-            </Button>
-            {canEdit && (
-              <Tooltip>
-                <TooltipTrigger
-                  render={
-                    <Button
-                      variant="ghost"
-                      size="icon-sm"
-                      onClick={() => setConfirmDelete(true)}
-                      className="text-muted-foreground hover:text-destructive"
-                      aria-label={t(($) => $.detail.delete_aria)}
-                    >
-                      <Trash2 className="h-3.5 w-3.5" />
-                    </Button>
-                  }
-                />
-                <TooltipContent>{t(($) => $.detail.delete_tooltip)}</TooltipContent>
-              </Tooltip>
-            )}
-          </>
-        }
-      />
-
-      {!canEdit && (
-        <div className={cn(PAGE_RAIL, PAGE_GUTTER, "pt-3")}>
-          <CapabilityBanner
-            reason={skillPermissions.canEdit.reason}
-            resource="skill"
-            ownerName={creator?.name}
-          />
-        </div>
-      )}
-
-      {supportingQueryDown && (
-        <div
-          role="status"
-          className="shrink-0 border-b bg-warning/10 py-2 text-caption text-muted-foreground"
-        >
-          <div className={cn(PAGE_RAIL, PAGE_GUTTER, "flex items-start gap-2")}>
-            <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0 text-warning" />
-            <span>{t(($) => $.detail.supporting_data_warning)}</span>
-          </div>
-        </div>
-      )}
-
-      <SkillIdentity
-        skill={skill}
-        origin={origin}
-        originRuntime={originRuntime}
-        agentCount={skillAgents.length}
-        creator={creator}
-      />
-
-      <div
-        className="shrink-0 overflow-x-auto border-b"
-        role="tablist"
-        aria-label={t(($) => $.detail.tabs.aria)}
+        actions={headerActions}
+        panel={panel}
       >
-        <div className={cn(PAGE_RAIL, PAGE_GUTTER, "flex items-center gap-6")}>
-          {TABS.map((tab) => (
-            <button
-              key={tab.id}
-              type="button"
-              role="tab"
-              aria-selected={activeView === tab.id}
-              onClick={() => selectView(tab.id)}
-              className={cn(
-                "relative shrink-0 py-3 text-body font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring",
-                activeView === tab.id
-                  ? "text-foreground after:absolute after:inset-x-0 after:bottom-0 after:h-0.5 after:bg-foreground"
-                  : "text-muted-foreground hover:text-foreground",
-              )}
-            >
-              {tab.label}
-            </button>
-          ))}
-        </div>
-      </div>
+        {activeView === "files" ? filesView : overview}
+      </ObjectPage>
 
-      {conflictPending && canEdit && (
-        <div
-          role="status"
-          aria-live="polite"
-          className="shrink-0 border-b border-warning/30 bg-warning/10 py-2 text-caption"
-        >
-          <div className={cn(PAGE_RAIL, PAGE_GUTTER, "flex items-start gap-2")}>
-            <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0 text-warning" />
-            <div className="flex-1">
-              <div className="font-medium text-foreground">
-                {t(($) => $.detail.conflict_banner.title)}
-              </div>
-              <div className="mt-0.5 text-muted-foreground">
-                {t(($) => $.detail.conflict_banner.body)}
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
-
-      <div
-        className={cn(
-          "min-h-0 flex-1 overflow-y-auto",
-          activeView === "files" && "md:overflow-hidden",
-        )}
-      >
-        {activeView === "overview" ? (
-          <OverviewTab
-            skill={skill}
-            name={name}
-            description={description}
-            canEdit={canEdit}
-            creatorName={creator?.name ?? null}
-            skillAgents={skillAgents}
-            onNameChange={setName}
-            onDescriptionChange={setDescription}
-            onAddToAgents={() => setShowAddToAgents(true)}
-          />
-        ) : (
-          <FilesTab
-            filePaths={filePaths}
-            selectedPath={selectedPath}
-            selectedContent={selectedContent}
-            mode={fileMode}
-            canEdit={canEdit}
-            addingFile={addingFile}
-            focusEditor={focusPath === selectedPath}
-            onSelectPath={setSelectedPath}
-            onModeChange={setFileMode}
-            onStartAddFile={() => setAddingFile(true)}
-            onAddFile={handleAddFile}
-            onCancelAddFile={() => setAddingFile(false)}
-            onDeleteFile={handleDeleteFile}
-            onRenameFile={handleRenameFile}
-            onEditFile={handleEditFile}
-            onContentChange={handleFileContentChange}
-            onFocusHandled={handleFocusHandled}
-          />
-        )}
-      </div>
-
-      {/* Page-level so it covers edits made on either tab. Dirty-only and
-          floating, matching the skills list batch toolbar; anchored to the
-          page root (relative), NOT the viewport. */}
+      {/* Dirty-only and floating, matching the skills list batch toolbar;
+          anchored to the page root (relative), NOT the viewport. */}
       {canEdit && isDirty && (
         <div
           role="status"

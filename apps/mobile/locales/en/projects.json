@@ -76,12 +76,12 @@
   "lifecycle": {
     "label": "Project lifecycle",
     "active": "Active",
-    "completed": "Completed",
     "all": "All",
     "empty": {
       "active": "No active projects",
-      "completed": "No completed projects",
-      "all": "No projects yet"
-    }
+      "all": "No projects yet",
+      "closed": "No closed projects"
+    },
+    "closed": "Closed"
   }
 }

@@ -10,7 +10,8 @@ import {
 import { autopilotListOptions } from "@multica/core/autopilots/queries";
 import { chatSessionsOptions } from "@multica/core/chat/queries";
 import { inboxListOptions } from "@multica/core/inbox/queries";
-import { useWorkspacePaths } from "@multica/core/paths";
+import { useAuthStore } from "@multica/core/auth";
+import { paths, useCurrentWorkspace, useWorkspaceSlug } from "@multica/core/paths";
 import { pinListOptions } from "@multica/core/pins/queries";
 import { projectListOptions } from "@multica/core/projects/queries";
 import { runtimeProfileListOptions } from "@multica/core/runtimes";
@@ -97,15 +98,16 @@ export function RouteDataPrefetch({
   children: ReactNode;
 }) {
   const qc = useQueryClient();
-  const p = useWorkspacePaths();
+  // Null-safe: the desktop shell mounts before a workspace is open.
+  const slug = useWorkspaceSlug();
 
-  const routeByHref = useMemo(
-    () =>
-      new Map<string, WarmRoute>(
-        (Object.keys(ROUTES) as RouteKey[]).map((key) => [p[key](), ROUTES[key]]),
-      ),
-    [p],
-  );
+  const routeByHref = useMemo(() => {
+    if (!slug) return new Map<string, WarmRoute>();
+    const p = paths.workspace(slug);
+    return new Map<string, WarmRoute>(
+      (Object.keys(ROUTES) as RouteKey[]).map((key) => [p[key](), ROUTES[key]]),
+    );
+  }, [slug]);
 
   const prefetch = useCallback(
     (href: string) => {
@@ -133,5 +135,16 @@ export function RouteDataPrefetch({
     <RouteDataPrefetchProvider value={prefetch}>
       {children}
     </RouteDataPrefetchProvider>
+  );
+}
+
+/** `RouteDataPrefetch` for the app shell, scoped to the open workspace and user. */
+export function ShellRouteDataPrefetch({ children }: { children: ReactNode }) {
+  const wsId = useCurrentWorkspace()?.id;
+  const userId = useAuthStore((s) => s.user?.id ?? null);
+  return (
+    <RouteDataPrefetch wsId={wsId} userId={userId}>
+      {children}
+    </RouteDataPrefetch>
   );
 }

@@ -14,7 +14,7 @@ import { ProjectsPage } from "./projects-page";
 const context = vi.hoisted(() => ({ wsId: "ws-1" }));
 vi.mock("@multica/core/hooks", () => ({ useWorkspaceId: () => context.wsId }));
 vi.mock("@multica/core/auth", () => {
-  const state = { user: null };
+  const state = { user: { id: "user-1" } };
   return { useAuthStore: Object.assign((selector: (s: typeof state) => unknown) => selector(state), {
     getState: () => state,
   }) };
@@ -48,6 +48,13 @@ function page() {
   </QueryClientProvider>;
 }
 
+async function scope(name: string) {
+  await userEvent.click(within(screen.getByRole("heading", { level: 1 })).getByRole("button"));
+  const item = await screen.findByRole("menuitemradio", { name: new RegExp("^" + name.replace(/ \d+$/, "")) });
+  expect(item).toHaveTextContent(name.match(/\d+$/)![0]!);
+  await userEvent.click(item);
+}
+
 async function chooseStatus(id: string, current: string, next: string) {
   const row = screen.getByText(`Project ${id}`).closest('[role="row"]')!;
   await userEvent.click(within(row as HTMLElement).getByRole("button", { name: current }));
@@ -66,13 +73,13 @@ beforeEach(async () => {
     listProjects: vi.fn(async () => ({ projects: server, total: server.length })),
     getProject: vi.fn(async (id: string) => server.find((p) => p.id === id)),
     updateProject: update,
-    listMembers: vi.fn(async () => []),
-    listPins: vi.fn(async () => ({ pins: [] })),
+    listMembers: vi.fn(async () => [{ user_id: "user-1", role: "admin", name: "Fixture Admin" }]),
+    listPins: vi.fn(async () => []),
     listAgents: vi.fn(async () => []),
   } as unknown as ApiClient);
   qc = new QueryClient({ defaultOptions: { queries: { retry: false, staleTime: Infinity } } });
   qc.setQueryData(projectKeys.list("ws-1"), { projects: server, total: server.length });
-  qc.setQueryData(["workspaces", "ws-1", "members"], []);
+  qc.setQueryData(["workspaces", "ws-1", "members"], [{ user_id: "user-1", role: "admin", name: "Fixture Admin" }]);
   qc.setQueryData(["workspaces", "ws-1", "agents"], []);
   setCurrentWorkspace("acme", "ws-1");
   await Promise.resolve();
@@ -89,11 +96,11 @@ describe("project lifecycle browse integration", () => {
     for (const status of statuses.slice(0, 3)) expect(screen.getByText(`Project ${status}`)).toBeVisible();
     expect(screen.queryByText("Project completed")).toBeNull();
     expect(screen.queryByText("Project cancelled")).toBeNull();
-    expect(screen.getByRole("tab", { name: "Active 3" })).toHaveAttribute("aria-selected", "true");
-    await userEvent.click(screen.getByRole("tab", { name: "Completed 1" }));
+    expect(screen.getByRole("heading", { level: 1 })).toHaveTextContent("Active projects");
+    await scope("Closed projects 2");
     expect(screen.getByText("Project completed")).toBeVisible();
     expect(screen.queryByText("Project planned")).toBeNull();
-    await userEvent.click(screen.getByRole("tab", { name: "All 5" }));
+    await scope("All projects 5");
     for (const status of statuses) expect(screen.getByText(`Project ${status}`)).toBeVisible();
     expect(qc.getQueryData<ListProjectsResponse>(projectKeys.list("ws-1"))?.projects).toHaveLength(5);
     expect(await qc.fetchQuery(projectDetailOptions("ws-1", "completed"))).toMatchObject({ description: "Preserved history" });
@@ -103,10 +110,10 @@ describe("project lifecycle browse integration", () => {
     renderWithI18n(page());
     await chooseStatus("planned", "Planned", "Completed");
     await waitFor(() => expect(screen.queryByText("Project planned")).toBeNull());
-    await userEvent.click(screen.getByRole("tab", { name: "Completed 2" }));
+    await scope("Closed projects 3");
     await chooseStatus("planned", "Completed", "Paused");
     await waitFor(() => expect(screen.queryByText("Project planned")).toBeNull());
-    await userEvent.click(screen.getByRole("tab", { name: "Active 3" }));
+    await scope("Active projects 3");
     expect(screen.getByText("Project planned")).toBeVisible();
     expect(update).toHaveBeenCalledTimes(2);
     expect(qc.getQueryData<ListProjectsResponse>(projectKeys.list("ws-1"))?.projects).toHaveLength(5);
@@ -117,7 +124,7 @@ describe("project lifecycle browse integration", () => {
     update.mockImplementationOnce(() => new Promise((_resolve, rejectPromise) => { reject = rejectPromise; }));
     renderWithI18n(page());
     const row = screen.getByText("Project planned").closest('[role="row"]')!;
-    await userEvent.click(within(row as HTMLElement).getByRole("button", { pressed: false }));
+    await userEvent.click(within(row as HTMLElement).getByRole("checkbox", { checked: false }));
     expect(screen.getByText("1 selected")).toBeVisible();
     await chooseStatus("planned", "Planned", "Completed");
     await waitFor(() => expect(screen.queryByText("Project planned")).toBeNull());
@@ -127,11 +134,11 @@ describe("project lifecycle browse integration", () => {
     expect(screen.queryByText("1 selected")).toBeNull();
   });
 
-  it("projects realtime cache changes and clears hidden selections on lifecycle, search and workspace changes", async () => {
+  it("projects realtime cache changes and clears hidden selections on lifecycle, filters and workspace changes", async () => {
     const view = renderWithI18n(page());
     const select = async () => {
       const row = screen.getByText("Project planned").closest('[role="row"]')!;
-      await userEvent.click(within(row as HTMLElement).getByRole("button", { pressed: false }));
+      await userEvent.click(within(row as HTMLElement).getByRole("checkbox", { checked: false }));
     };
     await select();
     await act(async () => {
@@ -141,29 +148,47 @@ describe("project lifecycle browse integration", () => {
     });
     await waitFor(() => expect(screen.queryByText("Project planned")).toBeNull());
     expect(screen.queryByText("1 selected")).toBeNull();
-    await userEvent.click(screen.getByRole("tab", { name: "All 5" }));
+    await scope("All projects 5");
     await select();
-    await userEvent.type(screen.getByRole("textbox", { name: "Search projects..." }), "missing");
+    await act(async () => useProjectViewStore.getState().toggleFilter("priorities", "urgent"));
     expect(screen.getByText("No projects match")).toBeVisible();
-    await userEvent.clear(screen.getByRole("textbox", { name: "Search projects..." }));
+    await act(async () => useProjectViewStore.getState().clearFilters());
     expect(screen.queryByText("1 selected")).toBeNull();
     await select();
     qc.setQueryData(projectKeys.list("ws-2"), { projects: server, total: 5 });
     context.wsId = "ws-2";
     await act(async () => setCurrentWorkspace("beta", "ws-2"));
     view.rerender(page());
-    expect(screen.getByRole("tab", { name: "Active 3" })).toHaveAttribute("aria-selected", "true");
+    expect(screen.getByRole("heading", { level: 1 })).toHaveTextContent("Active projects");
     expect(screen.queryByText("1 selected")).toBeNull();
+  });
+
+  it("closes pending batch deletion when a selected project is hidden and does not revive it", async () => {
+    renderWithI18n(page());
+    const row = screen.getByText("Project planned").closest('[role="row"]')!;
+    await userEvent.click(within(row as HTMLElement).getByRole("checkbox", { checked: false }));
+    await userEvent.click(screen.getByRole("button", { name: "Delete" }));
+    expect(screen.getByRole("dialog")).toBeVisible();
+    await act(async () => {
+      qc.setQueryData<ListProjectsResponse>(projectKeys.list("ws-1"), (old) => ({
+        ...old!, projects: old!.projects.map((p) => p.id === "planned" ? { ...p, status: "completed" } : p),
+      }));
+    });
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+    await scope("Closed projects 3");
+    expect(screen.getByText("Project planned")).toBeVisible();
+    expect(screen.queryByText("1 selected")).toBeNull();
+    expect(screen.queryByRole("dialog")).toBeNull();
   });
 
   it("distinguishes workspace, lifecycle and filtered emptiness and preserves density and sorting", async () => {
     qc.setQueryData(projectKeys.list("ws-1"), { projects: [fixtures[3]], total: 1 });
     renderWithI18n(page());
     expect(screen.getByText("No active projects")).toBeVisible();
-    await userEvent.click(screen.getByRole("tab", { name: "Completed 1" }));
+    await scope("Closed projects 1");
     await act(async () => useProjectViewStore.getState().toggleFilter("priorities", "high"));
     expect(screen.getByText("No projects match")).toBeVisible();
-    await userEvent.click(screen.getAllByRole("button", { name: "Clear filters" }).find((el) => el.tagName === "BUTTON")!);
+    await userEvent.click(screen.getByRole("button", { name: "Reset" }));
     await act(async () => useProjectViewStore.getState().setViewMode("comfortable"));
     expect(screen.getByRole("link", { name: /Project completed/ })).toHaveAttribute("href", "/acme/projects/completed");
     await act(async () => qc.setQueryData(projectKeys.list("ws-1"), { projects: [], total: 0 }));
@@ -173,11 +198,11 @@ describe("project lifecycle browse integration", () => {
   it("combines explicit status filters in All and retains other filters and sort order when switching lifecycle", async () => {
     renderWithI18n(page());
     await act(async () => useProjectViewStore.getState().toggleFilter("statuses", "cancelled"));
-    expect(screen.getByRole("tab", { name: "All 5" })).toHaveAttribute("aria-selected", "true");
+    expect(screen.getByRole("heading", { level: 1 })).toHaveTextContent("All projects");
     expect(screen.getByText("Project cancelled")).toBeVisible();
     expect(screen.queryByText("Project completed")).toBeNull();
     await act(async () => useProjectViewStore.getState().toggleFilter("priorities", "high"));
-    await userEvent.click(screen.getByRole("tab", { name: "Active 3" }));
+    await scope("Active projects 3");
     expect(screen.getByText("Project planned")).toBeVisible();
     expect(screen.queryByText("Project paused")).toBeNull();
     expect(useProjectViewStore.getState().filters).toEqual({ statuses: [], priorities: ["high"], leads: [] });

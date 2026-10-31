@@ -1,9 +1,7 @@
 {
   "page": {
     "title": "執行時",
-    "learn_more": "瞭解更多 →",
     "connect_remote": "新增機器",
-    "search_placeholder": "搜尋...",
     "scope_mine": "我的",
     "scope_all": "全部",
     "live": "實時",
@@ -25,7 +23,7 @@
       "title": "正在啟動本地執行時...",
       "hint": "正在連線工作區..."
     },
-    "add": "新增",
+    "add": "新增執行時",
     "add_menu": {
       "machines": "機器",
       "this_computer": "這臺電腦",
@@ -67,7 +65,7 @@
       "no_matches": "沒有匹配的機器或雲服務"
     },
     "filters": {
-      "all": "全部",
+      "all": "全部執行時",
       "online": "線上",
       "offline": "離線"
     }
@@ -93,7 +91,7 @@
     "this_machine": "本機",
     "local_badge": "本地 · 這臺機器",
     "pending_custom_runtimes": "待註冊自定義執行時",
-    "runtime_count_other": "{{count}} 個執行時",
+    "daemon_title": "守護程序",
     "busy_count_other": "{{count}} 個忙碌",
     "no_matches_title": "沒有機器",
     "no_matches_hint": "沒有機器匹配當前搜尋或篩選。",
@@ -158,13 +156,10 @@
     "fact_owner": "所有者",
     "fact_device": "裝置",
     "fact_runtime": "執行時",
-    "technical_details": "技術詳情",
     "fact_daemon_cli": "守護程序 CLI",
     "fact_daemon_id": "守護程序 ID",
-    "serving_title": "服務中",
-    "serving_count_other": "{{count}} 個智慧體",
+    "usage_title": "用量",
     "no_agents": "還沒有智慧體繫結到這個執行時。",
-    "diagnostics_title": "診斷",
     "diagnostics_cli": "CLI",
     "diagnostics_visibility": "可見性",
     "visibility_label": {

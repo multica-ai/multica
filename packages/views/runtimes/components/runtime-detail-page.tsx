@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { AlertCircle, Cloud, Monitor, Pencil, Plus, Server } from "@multica/ui/icons";
+import { AlertCircle, MoreHorizontal, Pencil, Plus, Server } from "@multica/ui/icons";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useAuthStore } from "@multica/core/auth";
 import { useWorkspaceId } from "@multica/core/hooks";
@@ -14,23 +14,56 @@ import {
   agentListOptions,
   memberListOptions,
 } from "@multica/core/workspace/queries";
+import type { MemberWithUser } from "@multica/core/types";
 import { Button } from "@multica/ui/components/ui/button";
+import { IconButton } from "@multica/ui/components/common/icon-button";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@multica/ui/components/ui/dropdown-menu";
 import { Skeleton } from "@multica/ui/components/ui/skeleton";
-import { PAGE_GUTTER, PAGE_RAIL } from "../../layout/page-header";
 import { cn } from "@multica/ui/lib/utils";
+import { ActorAvatar } from "../../common/actor-avatar";
+import { CollectionPageState } from "../../layout/collection-page";
+import {
+  OBJECT_PAGE_BODY,
+  ObjectIconMark,
+  ObjectIdentity,
+  ObjectPage,
+  ObjectPanelSection,
+  ObjectProperty,
+  ObjectSection,
+  ObjectSectionAction,
+  ObjectSectionCard,
+} from "../../layout/object-page";
 import { AppLink } from "../../navigation";
 import { buildWorkloadIndex, RuntimeList } from "./runtime-list";
 import {
   buildRuntimeMachines,
   sharedCustomName,
+  type RuntimeMachine,
 } from "./runtime-machines";
 import { RenameMachineDialog } from "./rename-machine-dialog";
 import { RuntimeProfilesDialog } from "./runtime-profiles-dialog";
 import { pendingRuntimesForProfiles } from "./pending-runtime";
-import { MachineCliSection } from "./machine-cli-section";
+import {
+  MachineCliSection,
+  machineHasCliInfo,
+  machineUpdateRuntime,
+} from "./machine-cli-section";
 import { isQoderLocator, QoderDetailPage } from "./qoder-detail-page";
-import { HealthIcon, useHealthLabel } from "./shared";
+import {
+  HealthIcon,
+  ProviderIconStack,
+  machineIcon,
+  shortDaemonId,
+  useHealthLabel,
+} from "./shared";
 import { useT, useTimeAgo } from "../../i18n";
+
+const LAYOUT_ID = "multica_runtime_detail_layout";
 
 export interface RuntimeDetailPageProps {
   /** A machine id, or a legacy runtime id that locates its machine. */
@@ -93,7 +126,6 @@ export function RuntimeDetailPage({
   const paths = useWorkspacePaths();
   const qc = useQueryClient();
   const healthLabel = useHealthLabel();
-  const timeAgo = useTimeAgo();
   const currentUserId = useAuthStore((state) => state.user?.id);
   const { data: runtimes = [], isLoading } = useQuery(runtimeListOptions(wsId));
   const { data: agents = [] } = useQuery(agentListOptions(wsId));
@@ -185,175 +217,160 @@ export function RuntimeDetailPage({
   ) {
     return <QoderDetailPage />;
   }
-  if (isLoading) return <MachineDetailSkeleton />;
 
-  if (!machine) {
+  const segments = [{ href: paths.runtimes(), label: t(($) => $.page.title) }];
+
+  if (isLoading) {
     return (
-      <div className="flex min-h-0 flex-1 flex-col">
-        <div className="flex flex-1 flex-col items-center justify-center gap-3 px-6 py-16 text-center">
-          <AlertCircle className="h-8 w-8 text-destructive" />
-          <div>
-            <p className="text-body font-medium">
-              {t(($) => $.machine.not_found_title)}
-            </p>
-            <p className="mt-1 text-caption text-muted-foreground">
-              {t(($) => $.machine.not_found_hint)}
-            </p>
-          </div>
-          <Button
-            size="sm"
-            render={<AppLink href={paths.runtimes()} />}
-            nativeButton={false}
-          >
-            {t(($) => $.detail.all_runtimes)}
-          </Button>
-        </div>
-      </div>
+      <ObjectPage
+        layoutId={LAYOUT_ID}
+        segments={segments}
+        leaf={<Skeleton className="h-4 w-40" />}
+        panel={<PropertiesSkeleton />}
+      >
+        <MachineBodySkeleton />
+      </ObjectPage>
     );
   }
 
-  const Icon = machine.section === "cloud" ? Cloud : Monitor;
-  const busyCount = machine.runningCount + machine.queuedCount;
-  return (
-    <div className="flex min-h-0 flex-1 flex-col">
-      <header className="shrink-0 border-b bg-background pb-5 pt-3">
-        <div className={cn(PAGE_RAIL, PAGE_GUTTER)}>
-          <div className="flex min-w-0 items-center gap-1.5 text-caption text-muted-foreground">
-            <AppLink
-              href={paths.runtimes()}
-              className="rounded-sm transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+  if (!machine) {
+    return (
+      <ObjectPage
+        layoutId={LAYOUT_ID}
+        segments={segments}
+        leaf={
+          <span className="truncate text-muted-foreground">
+            {t(($) => $.machine.not_found_title)}
+          </span>
+        }
+      >
+        <CollectionPageState
+          icon={AlertCircle}
+          tone="destructive"
+          title={t(($) => $.machine.not_found_title)}
+          description={t(($) => $.machine.not_found_hint)}
+          actions={
+            <Button
+              size="sm"
+              variant="outline"
+              render={<AppLink href={paths.runtimes()} />}
+              nativeButton={false}
             >
-              {t(($) => $.page.title)}
-            </AppLink>
-            <span aria-hidden="true">/</span>
-            <span className="truncate text-foreground">{machine.title}</span>
-          </div>
+              {t(($) => $.detail.all_runtimes)}
+            </Button>
+          }
+        />
+      </ObjectPage>
+    );
+  }
 
-          <div className="mt-4 flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
-            <div className="flex min-w-0 items-start gap-4">
-              <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl border bg-card sm:h-14 sm:w-14">
-                <Icon
-                  aria-hidden="true"
-                  className="h-5 w-5 text-muted-foreground sm:h-6 sm:w-6"
-                />
-              </div>
-              <div className="min-w-0 pt-0.5">
-                <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5">
-                  <h1 className="min-w-0 text-balance text-title-lg font-semibold tracking-tight sm:text-display-sm">
-                    {machine.title}
-                  </h1>
-                  <span className="inline-flex items-center gap-1.5 text-caption">
-                    <HealthIcon health={machine.health} />
-                    {healthLabel(machine.health)}
-                  </span>
-                  {machine.isCurrent && (
-                    <span className="rounded-xs bg-foreground px-1.5 py-0.5 text-micro font-medium text-background">
-                      {t(($) => $.machine.this_machine)}
-                    </span>
-                  )}
-                </div>
-                {machine.subtitle && (
-                  <p className="mt-1 text-body text-muted-foreground">
-                    {machine.subtitle}
-                  </p>
-                )}
-                <div className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-2 text-caption text-muted-foreground">
-                  <span>
-                    {t(($) => $.machine.runtime_count, {
-                      count: machineRuntimes.length,
-                    })}
-                  </span>
-                  <span>
-                    {busyCount > 0
-                      ? t(($) => $.machine.metrics.workload_hint, {
-                          running: machine.runningCount,
-                          queued: machine.queuedCount,
-                        })
-                      : t(($) => $.machine.metrics.workload_idle)}
-                  </span>
+  const Icon = machineIcon(machine);
+  const updateRuntime = machineUpdateRuntime(machine, currentUserId, isAdmin);
+  const daemonActions = machine.isCurrent ? localMachineActions : null;
+  const hasCliInfo = machineHasCliInfo(machine, updateRuntime);
+  const summary = [
+    machine.subtitle,
+    machine.cliVersion ? `CLI ${machine.cliVersion}` : null,
+    healthLabel(machine.health),
+  ]
+    .filter(Boolean)
+    .join(" · ");
+
+  return (
+    <>
+      <ObjectPage
+        layoutId={LAYOUT_ID}
+        segments={segments}
+        leaf={
+          <span className="flex min-w-0 items-center gap-1.5">
+            <Icon aria-hidden="true" className="size-3.5 shrink-0 text-muted-foreground" />
+            <span className="truncate">{machine.title}</span>
+          </span>
+        }
+        actions={
+          renameTarget ? (
+            <MachineActionsMenu onRename={() => setRenameOpen(true)} />
+          ) : undefined
+        }
+        panel={<MachineProperties machine={machine} members={members} />}
+      >
+        <div className={cn(OBJECT_PAGE_BODY, "space-y-8")}>
+          <ObjectIdentity
+            media={<ObjectIconMark icon={Icon} />}
+            title={machine.title}
+            trailing={
+              machine.isCurrent ? (
+                <span className="shrink-0 rounded-xs bg-foreground px-1.5 py-0.5 text-micro font-medium text-background">
+                  {t(($) => $.machine.this_machine)}
+                </span>
+              ) : null
+            }
+            description={summary}
+          />
+
+          {(hasCliInfo || daemonActions) && (
+            <ObjectSection
+              title={t(($) => $.machine.daemon_title)}
+              action={daemonActions}
+            >
+              {hasCliInfo && (
+                <ObjectSectionCard className="px-3 py-2.5 text-caption">
                   <MachineCliSection
                     machine={machine}
                     currentUserId={currentUserId}
                     canManagePublicRuntimes={isAdmin}
                   />
-                  {machine.lastSeenAt && (
-                    <span>{timeAgo(machine.lastSeenAt)}</span>
-                  )}
-                </div>
-              </div>
-            </div>
-
-            <div className="flex shrink-0 items-center gap-2 self-end lg:self-start">
-              {renameTarget && (
-                <Button
-                  type="button"
-                  size="sm"
-                  variant="outline"
-                  onClick={() => setRenameOpen(true)}
-                >
-                  <Pencil aria-hidden="true" className="h-3.5 w-3.5" />
-                  {t(($) => $.machine.rename)}
-                </Button>
+                </ObjectSectionCard>
               )}
-              {machine.isCurrent && localMachineActions}
-            </div>
-          </div>
-        </div>
-      </header>
-
-      <div className="min-h-0 flex-1 overflow-y-auto bg-background">
-        <div className={cn(PAGE_RAIL, PAGE_GUTTER, "py-4 sm:py-6")}>
-          <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
-            <div className="min-w-0">
-              <h2 className="text-body font-semibold">
-                {t(($) => $.machine.metrics.runtimes)}
-              </h2>
-              <p className="mt-1 text-caption text-muted-foreground">
-                {t(($) => $.machine.select_runtime)}
-              </p>
-            </div>
-            {canAddRuntime && (
-              <Button
-                type="button"
-                size="sm"
-                onClick={() => setCreateProfileOpen(true)}
-              >
-                <Plus aria-hidden="true" className="h-3.5 w-3.5" />
-                {t(($) => $.profiles.add_custom)}
-              </Button>
-            )}
-          </div>
-          {machineRuntimes.length > 0 ? (
-            <div className="overflow-hidden rounded-lg border bg-card">
-              <RuntimeList
-                runtimes={machineRuntimes}
-                now={now}
-                machineTitle={machine.title}
-                runtimeHref={(childRuntimeId) =>
-                  paths.runtimeSettings(machine.id, childRuntimeId)
-                }
-              />
-            </div>
-          ) : (
-            <div className="flex min-h-48 flex-col items-center justify-center rounded-lg border border-dashed px-6 text-center">
-              <Server
-                aria-hidden="true"
-                className="h-7 w-7 text-faint-foreground"
-              />
-              <p className="mt-3 text-body font-medium">
-                {bootstrapping
-                  ? t(($) => $.page.bootstrapping.title)
-                  : t(($) => $.machine.no_runtimes_title)}
-              </p>
-              <p className="mt-1 max-w-sm text-caption text-muted-foreground">
-                {bootstrapping
-                  ? t(($) => $.page.bootstrapping.hint)
-                  : t(($) => $.machine.no_runtimes_hint)}
-              </p>
-            </div>
+            </ObjectSection>
           )}
+
+          <ObjectSection
+            title={t(($) => $.machine.metrics.runtimes)}
+            count={machineRuntimes.length}
+            action={
+              canAddRuntime ? (
+                <ObjectSectionAction
+                  icon={Plus}
+                  onClick={() => setCreateProfileOpen(true)}
+                >
+                  {t(($) => $.profiles.add_custom)}
+                </ObjectSectionAction>
+              ) : null
+            }
+          >
+            {machineRuntimes.length > 0 ? (
+              <div className="-mx-2">
+                <RuntimeList
+                  runtimes={machineRuntimes}
+                  now={now}
+                  machineTitle={machine.title}
+                  runtimeHref={(childRuntimeId) =>
+                    paths.runtimeSettings(machine.id, childRuntimeId)
+                  }
+                />
+              </div>
+            ) : (
+              <div className="flex min-h-40 flex-col items-center justify-center rounded-lg border border-dashed px-6 text-center">
+                <Server
+                  aria-hidden="true"
+                  className="size-6 text-faint-foreground"
+                />
+                <p className="mt-3 text-body font-medium">
+                  {bootstrapping
+                    ? t(($) => $.page.bootstrapping.title)
+                    : t(($) => $.machine.no_runtimes_title)}
+                </p>
+                <p className="mt-1 max-w-sm text-caption text-muted-foreground">
+                  {bootstrapping
+                    ? t(($) => $.page.bootstrapping.hint)
+                    : t(($) => $.machine.no_runtimes_hint)}
+                </p>
+              </div>
+            )}
+          </ObjectSection>
         </div>
-      </div>
+      </ObjectPage>
 
       {renameTarget && (
         <RenameMachineDialog
@@ -372,32 +389,140 @@ export function RuntimeDetailPage({
           onClose={() => setCreateProfileOpen(false)}
         />
       )}
+    </>
+  );
+}
+
+function MachineActionsMenu({ onRename }: { onRename: () => void }) {
+  const { t } = useT("runtimes");
+  const { t: tCommon } = useT("common");
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger
+        render={
+          <IconButton
+            label={tCommon(($) => $.more_actions)}
+            tooltipSide="bottom"
+            className="text-muted-foreground"
+          >
+            <MoreHorizontal />
+          </IconButton>
+        }
+      />
+      <DropdownMenuContent align="end" className="w-auto">
+        <DropdownMenuItem onClick={onRename}>
+          <Pencil className="size-3.5" />
+          {t(($) => $.machine.rename)}
+        </DropdownMenuItem>
+      </DropdownMenuContent>
+    </DropdownMenu>
+  );
+}
+
+function MachineProperties({
+  machine,
+  members,
+}: {
+  machine: RuntimeMachine;
+  members: MemberWithUser[];
+}) {
+  const { t } = useT("runtimes");
+  const { t: tLayout } = useT("layout");
+  const healthLabel = useHealthLabel();
+  const timeAgo = useTimeAgo();
+  const ownerId = machine.runtimes[0]?.owner_id ?? null;
+  const owner = ownerId
+    ? members.find((member) => member.user_id === ownerId) ?? null
+    : null;
+  const busy = machine.runningCount + machine.queuedCount > 0;
+  const daemonShort = shortDaemonId(machine.daemonId);
+
+  return (
+    <ObjectPanelSection title={tLayout(($) => $.object_page.properties)}>
+      <ObjectProperty label={t(($) => $.page.columns.status)}>
+        <HealthIcon health={machine.health} />
+        <span className="truncate">
+          {healthLabel(machine.health)}
+          {machine.lastSeenAt && machine.health !== "online"
+            ? ` · ${timeAgo(machine.lastSeenAt)}`
+            : null}
+        </span>
+      </ObjectProperty>
+      <ObjectProperty label={t(($) => $.detail.fact_owner)}>
+        {owner ? (
+          <>
+            <ActorAvatar
+              actorType="member"
+              actorId={owner.user_id}
+              size="xs"
+              enableHoverCard
+            />
+            <span className="truncate">{owner.name}</span>
+          </>
+        ) : (
+          <span className="text-muted-foreground">—</span>
+        )}
+      </ObjectProperty>
+      <ObjectProperty label={t(($) => $.detail.fact_device)}>
+        <span className={machine.deviceSummary ? "truncate" : "text-muted-foreground"}>
+          {machine.deviceSummary ?? "—"}
+        </span>
+      </ObjectProperty>
+      <ObjectProperty label={t(($) => $.page.columns.harness)}>
+        {machine.providerNames.length > 0 ? (
+          <ProviderIconStack providers={machine.providerNames} />
+        ) : (
+          <span className="text-muted-foreground">—</span>
+        )}
+      </ObjectProperty>
+      <ObjectProperty label={t(($) => $.page.columns.workload)}>
+        <span className={busy ? "truncate tabular-nums" : "text-muted-foreground"}>
+          {busy
+            ? t(($) => $.machine.metrics.workload_hint, {
+                running: machine.runningCount,
+                queued: machine.queuedCount,
+              })
+            : t(($) => $.machine.metrics.workload_idle)}
+        </span>
+      </ObjectProperty>
+      {daemonShort && (
+        <ObjectProperty label={t(($) => $.detail.fact_daemon_id)}>
+          <span className="truncate font-mono">{daemonShort}</span>
+        </ObjectProperty>
+      )}
+    </ObjectPanelSection>
+  );
+}
+
+function PropertiesSkeleton() {
+  return (
+    <div className="space-y-3 px-2">
+      <Skeleton className="h-3 w-20" />
+      {Array.from({ length: 5 }).map((_, index) => (
+        <Skeleton key={index} className="h-4 w-full" />
+      ))}
     </div>
   );
 }
 
-function MachineDetailSkeleton() {
+function MachineBodySkeleton() {
   return (
-    <div className="flex min-h-0 flex-1 flex-col">
-      <div className="border-b pb-5 pt-3">
-        <div className={cn(PAGE_RAIL, PAGE_GUTTER)}>
-          <Skeleton className="h-3 w-36" />
-          <div className="mt-4 flex items-start gap-4">
-            <Skeleton className="h-14 w-14 rounded-xl" />
-            <div className="flex-1">
-              <Skeleton className="h-7 w-64" />
-              <Skeleton className="mt-2 h-4 w-40" />
-              <Skeleton className="mt-3 h-3 w-72" />
-            </div>
-          </div>
+    <div className={cn(OBJECT_PAGE_BODY, "space-y-8")}>
+      <div className="flex items-center gap-3">
+        <Skeleton className="size-12 rounded-xl" />
+        <div className="flex-1 space-y-2">
+          <Skeleton className="h-5 w-56" />
+          <Skeleton className="h-4 w-40" />
         </div>
       </div>
-      <div className={cn(PAGE_RAIL, PAGE_GUTTER, "py-6")}>
+      <div className="space-y-2">
         <Skeleton className="h-4 w-24" />
-        <Skeleton className="mt-2 h-3 w-72" />
-        <div className="mt-4 overflow-hidden rounded-lg border">
-          {Array.from({ length: 4 }).map((_, index) => (
-            <Skeleton key={index} className="h-14 w-full rounded-none border-b last:border-b-0" />
+        <div className="overflow-hidden rounded-lg border">
+          {Array.from({ length: 3 }).map((_, index) => (
+            <Skeleton
+              key={index}
+              className="h-14 w-full rounded-none border-b last:border-b-0"
+            />
           ))}
         </div>
       </div>

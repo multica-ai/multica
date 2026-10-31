@@ -26,6 +26,10 @@ import { useIssueSurfaceController } from "./use-issue-surface-controller";
  */
 
 vi.mock("@multica/core/hooks", () => ({ useWorkspaceId: () => "ws-1" }));
+vi.mock("@multica/core/auth", () => ({
+  useAuthStore: (selector: (state: { user: { id: string } }) => unknown) =>
+    selector({ user: { id: "user-1" } }),
+}));
 
 const QA_ENTRY: IssueStatusEntry = {
   id: "s-qa",

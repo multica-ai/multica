@@ -63,6 +63,20 @@ describe("resourceKeyForUrl", () => {
     expect(resourceKeyForUrl("/acme/issues#anchor")).toBe("/acme/issues");
     expect(resourceKeyForUrl("/acme/issues?filter=a#x")).toBe("/acme/issues");
   });
+
+  it("keeps the saved view a URL opens, and nothing else of its search", () => {
+    expect(resourceKeyForUrl("/acme/issues?view=v1")).toBe("/acme/issues?view=v1");
+    expect(resourceKeyForUrl("/acme/issues?filter=a&view=v1#x")).toBe("/acme/issues?view=v1");
+    expect(resourceKeyForUrl("/acme/issues#view=v1")).toBe("/acme/issues");
+  });
+
+  it("keeps the built-in scope a URL opens, unless a saved view names the list", () => {
+    expect(resourceKeyForUrl("/acme/my-issues?scope=agents")).toBe("/acme/my-issues?scope=agents");
+    expect(resourceKeyForUrl("/acme/my-issues?filter=a&scope=agents#x")).toBe(
+      "/acme/my-issues?scope=agents",
+    );
+    expect(resourceKeyForUrl("/acme/my-issues?scope=agents&view=v1")).toBe("/acme/my-issues?view=v1");
+  });
 });
 
 describe("browsingHistoryKeyForUrl", () => {
@@ -264,6 +278,40 @@ describe("useTabStore actions", () => {
     // The existing tab's own view state (url) wins; the incoming filter does
     // not overwrite it.
     expect(s.byWorkspace.acme.tabs[0].url).toBe("/acme/issues");
+  });
+
+  it("openTab of another saved view opens its own tab; the same view focuses it", () => {
+    const store = useTabStore.getState();
+    store.switchWorkspace("acme");
+    store.navigateActiveSession("/acme/issues?view=a");
+    const viewA = getActiveTab(useTabStore.getState())!.id;
+
+    const viewB = store.openTab("/acme/issues?view=b", "B");
+    const allIssues = store.openTab("/acme/issues", "Issues");
+    const viewAgain = store.openTab("/acme/issues?view=a&filter=urgent", "A");
+
+    const urls = useTabStore.getState().byWorkspace.acme.tabs.map((t) => t.url);
+    expect(new Set([viewA, viewB, allIssues]).size).toBe(3);
+    expect(viewAgain).toBe(viewA);
+    expect(urls).toEqual(expect.arrayContaining(["/acme/issues?view=a", "/acme/issues?view=b", "/acme/issues"]));
+  });
+
+  it("openTab of My agents' work opens beside My issues; reopening either focuses it", () => {
+    const store = useTabStore.getState();
+    store.switchWorkspace("acme");
+    store.navigateActiveSession("/acme/my-issues");
+    const myIssues = getActiveTab(useTabStore.getState())!.id;
+
+    const myAgents = store.openTab("/acme/my-issues?scope=agents", "My agents' work");
+    const myIssuesAgain = store.openTab("/acme/my-issues", "My issues");
+    const myAgentsAgain = store.openTab("/acme/my-issues?scope=agents&filter=urgent", "My agents' work");
+
+    expect(myAgents).not.toBe(myIssues);
+    expect(myIssuesAgain).toBe(myIssues);
+    expect(myAgentsAgain).toBe(myAgents);
+    expect(useTabStore.getState().byWorkspace.acme.tabs.map((t) => t.url)).toEqual(
+      expect.arrayContaining(["/acme/my-issues", "/acme/my-issues?scope=agents"]),
+    );
   });
 
   describe("openTab insertion position (MUL-5860)", () => {

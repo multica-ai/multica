@@ -81,6 +81,8 @@ export type WSEventType =
   | "property:updated"
   | "issue_status:changed"
   | "issue_workflow:changed"
+  | "issue_view:changed"
+  | "issue_view_preference:changed"
   | "pin:created"
   | "pin:deleted"
   | "pin:reordered"
@@ -174,6 +176,21 @@ export interface IssueStatusChangedPayload {
 
 export interface IssueWorkflowChangedPayload {
   action?: "created" | "updated" | "deleted";
+}
+
+/**
+ * A saved view was created, edited or deleted. Clients re-read their views;
+ * the payload names the view only, so a view going private carries nothing out.
+ */
+export interface IssueViewChangedPayload {
+  view_id: string;
+  action?: "created" | "updated" | "deleted";
+}
+
+/** One of this member's own preference documents was saved, on any device. */
+export interface IssueViewPreferenceChangedPayload {
+  scope_type: string;
+  scope_id: string | null;
 }
 
 export interface AgentStatusPayload {
@@ -596,6 +613,8 @@ export interface WSEventPayloadMap {
   "property:updated": PropertyChangedPayload;
   "issue_status:changed": IssueStatusChangedPayload;
   "issue_workflow:changed": IssueWorkflowChangedPayload;
+  "issue_view:changed": IssueViewChangedPayload;
+  "issue_view_preference:changed": IssueViewPreferenceChangedPayload;
   "issue_reaction:added": IssueReactionAddedPayload;
   "issue_reaction:removed": IssueReactionRemovedPayload;
   "comment:created": CommentCreatedPayload;
