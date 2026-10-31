@@ -144,6 +144,8 @@ type Config struct {
 	//   - LLMMaxRetries    -> MULTICA_LLM_MAX_RETRIES (transport retry budget)
 	//   - LLMDisableThinking -> MULTICA_LLM_DISABLE_THINKING (gateway hint to
 	//     turn model reasoning off; see llm.Config.DisableThinking)
+	//   - LLMDisableFollowUps -> MULTICA_LLM_DISABLE_FOLLOW_UP_QUESTIONS
+	//     (turn chat follow-up questions off while keeping auto-titling)
 	LLMAPIKey       string
 	LLMBaseURL      string
 	LLMDefaultModel string
@@ -157,6 +159,12 @@ type Config struct {
 	// cmd/server validates the raw value before the boot continues, so a
 	// non-boolean never reaches this struct.
 	LLMDisableThinking bool
+	// LLMDisableFollowUps is the parsed MULTICA_LLM_DISABLE_FOLLOW_UP_QUESTIONS
+	// switch. When true, chat follow-up questions (the suggestion pills) are
+	// off for the whole deployment — no automatic pass, no manual refresh, no
+	// upstream request — while the rest of the LLM layer (chat auto-titling)
+	// keeps running. Validated by cmd/server like LLMDisableThinking.
+	LLMDisableFollowUps bool
 	// ServerVersion is the build version of the running API binary (the same
 	// value main.go stamps via -X main.version and reports on /metrics).
 	// Surfaced through /api/config so self-hosted operators can confirm which
@@ -486,6 +494,7 @@ func New(queries *db.Queries, txStarter txStarter, hub *realtime.Hub, bus *event
 		"request_timeout", llmRetry.RequestTimeout,
 		"enabled", llmClient.Enabled(),
 		"disable_thinking", llmClient.DisableThinking(),
+		"follow_up_questions", llmClient.Enabled() && !cfg.LLMDisableFollowUps,
 	)
 
 	taskSvc := service.NewTaskService(queries, txStarter, hub, bus, daemonHub)
@@ -494,7 +503,13 @@ func New(queries *db.Queries, txStarter txStarter, hub *realtime.Hub, bus *event
 	// Chat follow-up suggestions run through the same internal LLM layer that
 	// backs auto-titling. A deployment with no MULTICA_LLM_* configuration gets
 	// a disabled client, which turns the feature off rather than failing.
-	taskSvc.QuickActions = llmClient
+	// MULTICA_LLM_DISABLE_FOLLOW_UP_QUESTIONS turns only this feature off: a
+	// nil QuickActions takes the exact same path as an unconfigured layer, so
+	// no pass is scheduled, chat:done never promises a supplement, and a manual
+	// refresh is refused — no request reaches the upstream (GitHub #9578).
+	if !cfg.LLMDisableFollowUps {
+		taskSvc.QuickActions = llmClient
+	}
 	h := &Handler{
 		Queries:                      queries,
 		ReadSelector:                 dbreader.NewPrimaryOnly(queries),

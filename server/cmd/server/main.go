@@ -197,13 +197,14 @@ func parseLLMMaxRetries(raw string) (*llm.RetryOverride, error) {
 	return override, nil
 }
 
-// parseLLMDisableThinking turns the raw MULTICA_LLM_DISABLE_THINKING value
-// into the bool llm.Config.DisableThinking expects. It follows the
-// parseLLMMaxRetries contract: unset is a valid state (the knob stays off),
-// and anything that does not read as a deliberate true/false stops the boot
-// instead of being coerced — a typo'd "ture" that silently did nothing would
-// leave an operator debugging latency the configuration claims to remove.
-func parseLLMDisableThinking(raw string) (bool, error) {
+// parseStrictBool turns the raw value of a boolean MULTICA_LLM_* switch
+// (MULTICA_LLM_DISABLE_THINKING, MULTICA_LLM_DISABLE_FOLLOW_UP_QUESTIONS) into
+// a bool. It follows the parseLLMMaxRetries contract: unset is a valid state
+// (the switch stays off), and anything that does not read as a deliberate
+// true/false stops the boot instead of being coerced — a typo'd "ture" that
+// silently did nothing would leave an operator debugging behavior the
+// configuration claims to change.
+func parseStrictBool(raw string) (bool, error) {
 	switch strings.ToLower(strings.TrimSpace(raw)) {
 	case "":
 		return false, nil
@@ -673,9 +674,15 @@ func main() {
 
 	// Same contract for the thinking-off hint: an unparseable value must stop
 	// the boot rather than read as "disabled" and look configured.
-	llmDisableThinking, err := parseLLMDisableThinking(os.Getenv("MULTICA_LLM_DISABLE_THINKING"))
+	llmDisableThinking, err := parseStrictBool(os.Getenv("MULTICA_LLM_DISABLE_THINKING"))
 	if err != nil {
 		slog.Error("invalid MULTICA_LLM_DISABLE_THINKING", "error", err)
+		os.Exit(1)
+	}
+	// Same contract for the follow-up questions opt-out (GitHub #9578).
+	llmDisableFollowUps, err := parseStrictBool(os.Getenv("MULTICA_LLM_DISABLE_FOLLOW_UP_QUESTIONS"))
+	if err != nil {
+		slog.Error("invalid MULTICA_LLM_DISABLE_FOLLOW_UP_QUESTIONS", "error", err)
 		os.Exit(1)
 	}
 
@@ -693,6 +700,7 @@ func main() {
 		HeartbeatScheduler:  heartbeatScheduler,
 		LLMMaxRetries:       llmMaxRetries,
 		LLMDisableThinking:  llmDisableThinking,
+		LLMDisableFollowUps: llmDisableFollowUps,
 	})
 	// member_delegation_day exists only for self-host telemetry; DO_NOT_TRACK
 	// stops writing it as well as sending the snapshot.

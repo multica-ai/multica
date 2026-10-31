@@ -261,8 +261,12 @@ type RouterOptions struct {
 	// LLMDisableThinking carries the parsed MULTICA_LLM_DISABLE_THINKING
 	// switch. It follows its LLMMaxRetries sibling in being injected rather
 	// than read here, for the same fail-the-boot-in-main-only reason: the raw
-	// value is validated by parseLLMDisableThinking before the router exists.
+	// value is validated by parseStrictBool before the router exists.
 	LLMDisableThinking bool
+	// LLMDisableFollowUps carries the parsed
+	// MULTICA_LLM_DISABLE_FOLLOW_UP_QUESTIONS switch, injected for the same
+	// reason as its siblings above.
+	LLMDisableFollowUps bool
 }
 
 func buildChannelSupervisor(
@@ -447,6 +451,7 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 		LLMDefaultModel:                strings.TrimSpace(os.Getenv("MULTICA_LLM_DEFAULT_MODEL")),
 		LLMMaxRetries:                  opts.LLMMaxRetries,
 		LLMDisableThinking:             opts.LLMDisableThinking,
+		LLMDisableFollowUps:            opts.LLMDisableFollowUps,
 		ServerVersion:                  normalizeServerVersion(version),
 		GitExtraCACerts:                gitca.Load(slog.Default()),
 	}
