@@ -85,7 +85,7 @@ describe("left sidebar resizing", () => {
     expect(
       liveWidthConsumer.style.getPropertyValue("--sidebar-live-width"),
     ).toBe("300px");
-    expect(wrapper.style.getPropertyValue("--sidebar-width")).toBe("256px");
+    expect(wrapper.style.getPropertyValue("--sidebar-width")).toBe("240px");
     expect(localStorage.getItem("sidebar_width")).toBeNull();
     expect(stableConsumerRender).toHaveBeenCalledTimes(1);
 
@@ -157,7 +157,7 @@ describe("left sidebar resizing", () => {
     expect(
       liveWidthConsumer.style.getPropertyValue("--sidebar-live-width"),
     ).toBe("");
-    expect(wrapper.style.getPropertyValue("--sidebar-width")).toBe("256px");
+    expect(wrapper.style.getPropertyValue("--sidebar-width")).toBe("240px");
     expect(localStorage.getItem("sidebar_width")).toBeNull();
     expect(wrapper).not.toHaveAttribute("data-sidebar-resizing");
     expect(document.documentElement).not.toHaveAttribute("data-sidebar-resizing");

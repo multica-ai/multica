@@ -81,10 +81,17 @@ func isChatPrivateEvent(e events.Event) bool {
 	return e.Type == protocol.EventTaskMessage && e.ChatSessionID != ""
 }
 
+// memberPrivateEvents never leave their member, so one published without
+// MemberPrivateUserID is dropped instead of reaching the workspace.
+var memberPrivateEvents = map[string]bool{
+	protocol.EventIssueViewPreferenceChanged: true,
+}
+
 // registerListeners wires up event bus listeners for WS broadcasting.
 // Personal events (inbox, invites) are sent only to the target user via
-// SendToUser, and chat content only to the chat session's creator. All other
-// events are broadcast to the workspace room.
+// SendToUser, chat content only to the chat session's creator, and
+// member-private events only to that member's connections to the workspace.
+// All other events are broadcast to the workspace room.
 //
 // The broadcaster parameter is intentionally typed as the realtime.Broadcaster
 // interface (not *realtime.Hub) so that this layer can later be swapped out
@@ -282,6 +289,16 @@ func registerListeners(bus *events.Bus, b realtime.Broadcaster) {
 		data, err := json.Marshal(msg)
 		if err != nil {
 			slog.Error("failed to marshal event", "event_type", e.Type, "error", err)
+			return
+		}
+
+		if e.MemberPrivateUserID != "" || memberPrivateEvents[e.Type] {
+			if e.MemberPrivateUserID == "" || e.WorkspaceID == "" {
+				slog.Warn("realtime: dropping member-private event without recipient", "event_type", e.Type)
+				return
+			}
+			realtime.M.RecordEvent(e.Type)
+			b.BroadcastToScope(realtime.ScopeWorkspaceMember, realtime.WorkspaceMemberScopeID(e.WorkspaceID, e.MemberPrivateUserID), data)
 			return
 		}
 
