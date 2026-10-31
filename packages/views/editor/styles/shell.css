@@ -42,7 +42,8 @@
 
 /* The table NodeView (TableView) is a block, and Tiptap marks ProseMirror's
    <tbody> inside it as a wrapper too; it keeps its table display. */
-.rich-text-editor [data-node-view-wrapper].table-node {
+.rich-text-editor [data-node-view-wrapper].table-node,
+.rich-text-editor [data-node-view-wrapper].details-node {
   display: block;
 }
 

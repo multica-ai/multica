@@ -178,5 +178,38 @@
     "clear_filter": "清除筛选",
     "no_matches": "没有匹配的行",
     "close": "关闭"
+  },
+  "details": {
+    "expand": "展开",
+    "collapse": "折叠",
+    "summary_placeholder": "折叠块标题"
+  },
+  "block_menu": {
+    "turn_into": "转换为",
+    "insert": "插入",
+    "divider": "分割线",
+    "table": "表格",
+    "code_block": "代码块",
+    "mermaid": "Mermaid 图表",
+    "details": "折叠块",
+    "file": "图片或文件"
+  },
+  "block_handle": {
+    "label": "拖动以移动，点击打开菜单",
+    "duplicate": "复制",
+    "delete": "删除"
+  },
+  "table_edit": {
+    "row_options": "行操作",
+    "column_options": "列操作",
+    "insert_row_above": "在上方插入行",
+    "insert_row_below": "在下方插入行",
+    "delete_row": "删除行",
+    "insert_column_left": "在左侧插入列",
+    "insert_column_right": "在右侧插入列",
+    "delete_column": "删除列",
+    "delete_table": "删除表格",
+    "add_row": "添加行",
+    "add_column": "添加列"
   }
 }

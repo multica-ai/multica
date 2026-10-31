@@ -3539,6 +3539,8 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
                 key={id}
                 value={issue.description ?? ""}
                 placeholder={t(($) => $.detail.desc_placeholder)}
+                enableSlashCommands
+                slashCommandMode="block"
                 onUpdate={(md, baseMarkdown) => {
                   // Bind any pending uploads still referenced in the markdown
                   // so they appear in `issueAttachments` after refresh and the

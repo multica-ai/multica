@@ -182,5 +182,38 @@
     "clear_filter": "Effacer le filtre",
     "no_matches": "Aucune ligne correspondante",
     "close": "Fermer"
+  },
+  "details": {
+    "expand": "Développer",
+    "collapse": "Réduire",
+    "summary_placeholder": "Résumé"
+  },
+  "block_menu": {
+    "turn_into": "Transformer en",
+    "insert": "Insérer",
+    "divider": "Séparateur",
+    "table": "Tableau",
+    "code_block": "Bloc de code",
+    "mermaid": "Diagramme Mermaid",
+    "details": "Bloc repliable",
+    "file": "Image ou fichier"
+  },
+  "block_handle": {
+    "label": "Glisser pour déplacer, cliquer pour les options",
+    "duplicate": "Dupliquer",
+    "delete": "Supprimer"
+  },
+  "table_edit": {
+    "row_options": "Options de ligne",
+    "column_options": "Options de colonne",
+    "insert_row_above": "Insérer une ligne au-dessus",
+    "insert_row_below": "Insérer une ligne en dessous",
+    "delete_row": "Supprimer la ligne",
+    "insert_column_left": "Insérer une colonne à gauche",
+    "insert_column_right": "Insérer une colonne à droite",
+    "delete_column": "Supprimer la colonne",
+    "delete_table": "Supprimer le tableau",
+    "add_row": "Ajouter une ligne",
+    "add_column": "Ajouter une colonne"
   }
 }

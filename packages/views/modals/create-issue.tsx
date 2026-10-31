@@ -1020,6 +1020,8 @@ export function ManualCreatePanel({
                 ref={descEditorRef}
                 defaultValue={draft.manual.description}
                 placeholder={t(($) => $.create_issue.description_placeholder)}
+                enableSlashCommands
+                slashCommandMode="block"
                 onUpdate={(md) => setManual({ description: md })}
                 onSubmit={handleSubmit}
                 onUploadFile={handleUpload}

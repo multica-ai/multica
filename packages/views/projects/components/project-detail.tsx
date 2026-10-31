@@ -475,6 +475,8 @@ export function ProjectDetail({ projectId }: { projectId: string }) {
             key={projectId}
             value={project.description || ""}
             placeholder={t(($) => $.detail.description_placeholder)}
+            enableSlashCommands
+            slashCommandMode="block"
             onUpdate={(md) => handleUpdateField({ description: md || null })}
             debounceMs={1500}
           />

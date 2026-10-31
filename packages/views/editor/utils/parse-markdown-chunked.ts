@@ -42,16 +42,23 @@ export function parseMarkdownChunked(
   let current: string[] = [];
   let currentLen = 0;
   let inFence = false;
+  let detailsDepth = 0;
 
   for (const line of lines) {
     // Track fenced code blocks so a cut never lands inside one.
     if (/^\s*(```|~~~)/.test(line)) inFence = !inFence;
+    // A <details> body holds blank lines; cutting there would split the block.
+    if (!inFence) {
+      for (const tag of line.matchAll(/<(\/?)details(?=[\s>])[^>]*>/gi)) {
+        detailsDepth = Math.max(0, detailsDepth + (tag[1] ? -1 : 1));
+      }
+    }
     current.push(line);
     currentLen += line.length + 1;
 
-    // Cut only at a paragraph boundary (blank line) outside a fence, once the
-    // accumulated chunk is large enough.
-    if (currentLen >= chunkSize && !inFence && line.trim() === "") {
+    // Cut only at a paragraph boundary (blank line) outside a fence or a
+    // details block, once the accumulated chunk is large enough.
+    if (currentLen >= chunkSize && !inFence && detailsDepth === 0 && line.trim() === "") {
       chunks.push(current.join("\n"));
       current = [];
       currentLen = 0;

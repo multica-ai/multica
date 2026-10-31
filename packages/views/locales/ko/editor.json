@@ -178,5 +178,38 @@
     "clear_filter": "필터 지우기",
     "no_matches": "일치하는 행이 없습니다",
     "close": "닫기"
+  },
+  "details": {
+    "expand": "펼치기",
+    "collapse": "접기",
+    "summary_placeholder": "요약"
+  },
+  "block_menu": {
+    "turn_into": "변환",
+    "insert": "삽입",
+    "divider": "구분선",
+    "table": "표",
+    "code_block": "코드 블록",
+    "mermaid": "Mermaid 다이어그램",
+    "details": "접기 블록",
+    "file": "이미지 또는 파일"
+  },
+  "block_handle": {
+    "label": "드래그하여 이동, 클릭하여 메뉴 열기",
+    "duplicate": "복제",
+    "delete": "삭제"
+  },
+  "table_edit": {
+    "row_options": "행 옵션",
+    "column_options": "열 옵션",
+    "insert_row_above": "위에 행 삽입",
+    "insert_row_below": "아래에 행 삽입",
+    "delete_row": "행 삭제",
+    "insert_column_left": "왼쪽에 열 삽입",
+    "insert_column_right": "오른쪽에 열 삽입",
+    "delete_column": "열 삭제",
+    "delete_table": "표 삭제",
+    "add_row": "행 추가",
+    "add_column": "열 추가"
   }
 }
