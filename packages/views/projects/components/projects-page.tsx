@@ -1,22 +1,15 @@
 "use client";
 
-import { useCallback, useMemo, useState, type MouseEvent } from "react";
+import { useCallback, useMemo, useState } from "react";
 import {
-  ArrowDown,
-  ArrowUp,
-  ChevronDown,
   ExternalLink,
-  Filter,
   FolderKanban,
   LayoutGrid,
-  MoreHorizontal,
   Pin,
   PinOff,
-  Plus,
   Rows3,
   Search,
   Trash2,
-  X,
 } from "@multica/ui/icons";
 import { useQuery } from "@tanstack/react-query";
 import { toast } from "sonner";
@@ -41,13 +34,11 @@ import { useAuthStore } from "@multica/core/auth";
 import { useActorName } from "@multica/core/workspace/hooks";
 import { memberListOptions } from "@multica/core/workspace/queries";
 import { useModalStore } from "@multica/core/modals";
-import { AppLink, useIntentNavigate, useRowLink } from "../../navigation";
+import { AppLink, useIntentNavigate } from "../../navigation";
 import { ActorAvatar } from "../../common/actor-avatar";
 import { FILTER_ITEM_CLASS, HoverCheck } from "../../common/hover-check";
 import { Skeleton } from "@multica/ui/components/ui/skeleton";
 import { Button } from "@multica/ui/components/ui/button";
-import { Checkbox } from "@multica/ui/components/ui/checkbox";
-import { Input } from "@multica/ui/components/ui/input";
 import {
   Dialog,
   DialogContent,
@@ -60,39 +51,14 @@ import {
   DropdownMenu,
   DropdownMenuCheckboxItem,
   DropdownMenuContent,
-  DropdownMenuGroup,
   DropdownMenuItem,
-  DropdownMenuLabel,
-  DropdownMenuRadioGroup,
-  DropdownMenuRadioItem,
   DropdownMenuSeparator,
   DropdownMenuSub,
   DropdownMenuSubContent,
   DropdownMenuSubTrigger,
   DropdownMenuTrigger,
 } from "@multica/ui/components/ui/dropdown-menu";
-import {
-  ListGrid,
-  ListGridCell,
-  ListGridHeader,
-  ListGridHeaderCell,
-  ListGridRow,
-  LIST_GRID_BOTTOM_CLEARANCE,
-  type ListGridSortDirection,
-} from "@multica/ui/components/ui/list-grid";
-import {
-  Popover,
-  PopoverContent,
-  PopoverTrigger,
-} from "@multica/ui/components/ui/popover";
-import { Switch } from "@multica/ui/components/ui/switch";
-import {
-  Tooltip,
-  TooltipContent,
-  TooltipTrigger,
-} from "@multica/ui/components/ui/tooltip";
-import { IconButton } from "@multica/ui/components/common/icon-button";
-import { TooltipHint } from "@multica/ui/components/common/tooltip-hint";
+import { Toggle } from "@multica/ui/components/ui/toggle";
 import type {
   MemberWithUser,
   Project,
@@ -101,19 +67,30 @@ import type {
   UpdateProjectRequest,
 } from "@multica/core/types";
 import {
+  CollectionCreateButton,
+  CollectionFilterButton,
   CollectionPageHeader,
-  CollectionPageHeaderAction,
   CollectionPageState,
+  CollectionResetButton,
+  CollectionScopeItems,
 } from "../../layout/collection-page";
+import {
+  CollectionBatchBar,
+  CollectionDisplayMenu,
+  CollectionEmptyValue,
+  CollectionList,
+  CollectionNameCell,
+  CollectionRowMenu,
+  type CollectionColumn,
+  type CollectionSort,
+} from "../../layout/collection-list";
 import { ProjectIcon } from "./project-icon";
 import { useT } from "../../i18n";
-import { matchesPinyin } from "../../editor/extensions/pinyin-match";
 import { useFormatRelativeDate } from "./labels";
 import { ProjectStatusBadge, ProjectPriorityBadge } from "./project-badge";
 import { ProjectLeadPicker } from "./project-lead-picker";
-import { PAGE_GUTTER, PAGE_TOOLBAR } from "../../layout/page-header";
+import { PAGE_GUTTER } from "../../layout/page-header";
 import { cn } from "@multica/ui/lib/utils";
-import { DeferredTooltip } from "@multica/ui/components/common/deferred-tooltip";
 
 // Sort order maps for the enum columns (header sort needs a total order).
 const PRIORITY_ORDER: Record<ProjectPriority, number> = {
@@ -140,60 +117,8 @@ function leadFilterValue(p: Project): string | null {
   return p.lead_type && p.lead_id ? `${p.lead_type}:${p.lead_id}` : null;
 }
 
-// Table (compact) view — ListGrid. Name + status are the core columns;
-// priority/progress/lead/issues/created collapse below @2xl, with min-width
-// + the wrapper's overflow as the escape valve. Rows use whole-row mouse
-// navigation; inline controls stop propagation so edit/menu clicks stay local.
-
-const COLUMN_WIDTHS: Record<ProjectColumnKey, number> = {
-  priority: 116,
-  progress: 88,
-  lead: 132,
-  issues: 80,
-  created: 104,
-};
-
-// Fixed tracks: edges 12+12, checkbox 16, name min 200, status 116,
-// kebab 28 = 384, plus the 10 gap-x-3 gaps between the wide template's
-// 11 tracks.
-const FIXED_TRACKS_WIDTH = 384 + 10 * 12;
-
-// Render/track order: checkbox, name, status (core, fixed 116px), priority,
-// progress, lead, issues, created, kebab. MUST be a literal string —
-// Tailwind can't see interpolated `grid-cols-[...]` arbitrary values, so an
-// interpolated width silently drops the whole template and the grid
-// collapses to one column.
-const GRID_COLS =
-  "grid-cols-[0.75rem_1rem_minmax(120px,1fr)_116px_1.75rem_0.75rem] " +
-  "@2xl:grid-cols-[0.75rem_1rem_minmax(200px,1fr)_116px_var(--pjc-priority)_var(--pjc-progress)_var(--pjc-lead)_var(--pjc-issues)_var(--pjc-created)_1.75rem_0.75rem]";
-
-const stopRowNavigation = (e: MouseEvent) => e.stopPropagation();
-
-function columnTrackVars(
-  isVisible: (key: ProjectColumnKey) => boolean,
-): React.CSSProperties {
-  const width = (key: ProjectColumnKey) =>
-    isVisible(key) ? `${COLUMN_WIDTHS[key]}px` : "0px";
-  const minWidth =
-    FIXED_TRACKS_WIDTH +
-    (Object.keys(COLUMN_WIDTHS) as ProjectColumnKey[]).reduce(
-      (sum, key) => sum + (isVisible(key) ? COLUMN_WIDTHS[key] : 0),
-      0,
-    );
-  return {
-    "--pjc-priority": width("priority"),
-    "--pjc-progress": width("progress"),
-    "--pjc-lead": width("lead"),
-    "--pjc-issues": width("issues"),
-    "--pjc-created": width("created"),
-    "--pjc-minw": `${minWidth}px`,
-  } as React.CSSProperties;
-}
-
 function ProgressRing({ project }: { project: Project }) {
-  if (project.issue_count === 0) {
-    return <span className="text-caption text-faint-foreground">—</span>;
-  }
+  if (project.issue_count === 0) return <CollectionEmptyValue />;
   const pct = Math.round((project.done_count / project.issue_count) * 100);
   return (
     <span className="flex items-center gap-1.5">
@@ -213,15 +138,14 @@ function ProgressRing({ project }: { project: Project }) {
           />
         </svg>
       </span>
-      <span className="text-caption tabular-nums text-muted-foreground">
+      <span className="tabular-nums">
         {project.done_count}/{project.issue_count}
       </span>
     </span>
   );
 }
 
-// Compact rows own whole-row navigation; callers stop propagation around this
-// menu so action clicks do not bubble into the rowLink handler.
+// Shared by table rows (⋯ and right-click) and cards.
 function ProjectRowActions({
   project,
   pinned,
@@ -247,59 +171,41 @@ function ProjectRowActions({
 
   return (
     <>
-      <DropdownMenu>
-        <DeferredTooltip
-          content={t(($) => $.page.row_menu)}
-          trigger={
-            <DropdownMenuTrigger
-              render={
-                <button
-                  type="button"
-                  aria-label={t(($) => $.page.row_menu)}
-                  className="flex size-7 items-center justify-center rounded-md text-muted-foreground opacity-0 transition-opacity hover:bg-accent hover:text-accent-foreground group-hover/row:opacity-100 data-popup-open:bg-accent data-popup-open:opacity-100 data-popup-open:text-accent-foreground"
-                >
-                  <MoreHorizontal className="size-4" />
-                </button>
-              }
-            />
+      <CollectionRowMenu label={t(($) => $.page.row_menu)} contentClassName="w-44">
+        <DropdownMenuItem
+          onClick={() =>
+            intentNavigate(
+              wsPaths.projectDetail(project.id),
+              "foreground-tab",
+              project.title,
+            )
           }
-        />
-        <DropdownMenuContent align="end" className="w-44">
-          <DropdownMenuItem
-            onClick={() =>
-              intentNavigate(
-                wsPaths.projectDetail(project.id),
-                "foreground-tab",
-                project.title,
-              )
-            }
-          >
-            <ExternalLink className="size-3.5" />
-            {tCommon(($) => $.navigation.open_in_new_tab)}
-          </DropdownMenuItem>
-          <DropdownMenuSeparator />
-          <DropdownMenuItem onClick={togglePin}>
-            {pinned ? (
-              <PinOff className="size-3.5" />
-            ) : (
-              <Pin className="size-3.5" />
-            )}
-            {pinned ? t(($) => $.page.unpin) : t(($) => $.page.pin)}
-          </DropdownMenuItem>
-          {canDelete && (
-            <>
-              <DropdownMenuSeparator />
-              <DropdownMenuItem
-                variant="destructive"
-                onClick={() => setDeleteOpen(true)}
-              >
-                <Trash2 className="size-3.5" />
-                {t(($) => $.page.delete)}
-              </DropdownMenuItem>
-            </>
+        >
+          <ExternalLink className="size-3.5" />
+          {tCommon(($) => $.navigation.open_in_new_tab)}
+        </DropdownMenuItem>
+        <DropdownMenuSeparator />
+        <DropdownMenuItem onClick={togglePin}>
+          {pinned ? (
+            <PinOff className="size-3.5" />
+          ) : (
+            <Pin className="size-3.5" />
           )}
-        </DropdownMenuContent>
-      </DropdownMenu>
+          {pinned ? t(($) => $.page.unpin) : t(($) => $.page.pin)}
+        </DropdownMenuItem>
+        {canDelete && (
+          <>
+            <DropdownMenuSeparator />
+            <DropdownMenuItem
+              variant="destructive"
+              onClick={() => setDeleteOpen(true)}
+            >
+              <Trash2 className="size-3.5" />
+              {t(($) => $.page.delete)}
+            </DropdownMenuItem>
+          </>
+        )}
+      </CollectionRowMenu>
 
       <Dialog open={deleteOpen} onOpenChange={setDeleteOpen}>
         <DialogContent className="sm:max-w-md">
@@ -341,241 +247,19 @@ function ProjectRowActions({
   );
 }
 
-function CheckboxCell({
-  checked,
-  onToggle,
-}: {
-  checked: boolean;
-  onToggle: () => void;
-}) {
-  return (
-    <ListGridCell className="justify-center px-0">
-      <button
-        type="button"
-        aria-pressed={checked}
-        onClick={(e) => {
-          stopRowNavigation(e);
-          onToggle();
-        }}
-        onAuxClick={stopRowNavigation}
-        className={`-m-1.5 flex items-center p-1.5 ${
-          checked ? "" : "opacity-0 transition-opacity group-hover/row:opacity-100"
-        }`}
-      >
-        <Checkbox checked={checked} tabIndex={-1} className="pointer-events-none" />
-      </button>
-    </ListGridCell>
-  );
-}
-
-function ProjectTableRow({
+function ProjectInlineCell({
   project,
-  pinned,
-  canDelete,
-  isColVisible,
-  selected,
-  onToggleSelect,
-  rowHref,
-  rowLink,
+  children,
 }: {
   project: Project;
-  pinned: boolean;
-  canDelete: boolean;
-  isColVisible: (key: ProjectColumnKey) => boolean;
-  selected: boolean;
-  onToggleSelect: () => void;
-  rowHref: string;
-  rowLink: ReturnType<typeof useRowLink>;
+  children: (handleUpdate: (data: UpdateProjectRequest) => void) => React.ReactNode;
 }) {
-  const formatRelativeDate = useFormatRelativeDate();
   const updateProject = useUpdateProject();
   const handleUpdate = useCallback(
     (data: UpdateProjectRequest) => updateProject.mutate({ id: project.id, ...data }),
     [project.id, updateProject],
   );
-
-  return (
-    <ListGridRow
-      className={`h-11 cursor-pointer ${selected ? "bg-accent/30" : ""}`}
-      {...rowLink(rowHref, project.title)}
-    >
-      <CheckboxCell checked={selected} onToggle={onToggleSelect} />
-      <ListGridCell className="gap-2">
-        <ProjectIcon project={project} size="sm" />
-        <span className="min-w-0 truncate text-body font-medium">
-          {project.title}
-        </span>
-      </ListGridCell>
-
-      {/* status — core column, always visible */}
-      <ListGridCell onClick={stopRowNavigation} onAuxClick={stopRowNavigation}>
-        <ProjectStatusBadge project={project} handleUpdate={handleUpdate} align="start" />
-      </ListGridCell>
-
-      {isColVisible("priority") ? (
-        <ListGridCell className="hidden @2xl:flex" onClick={stopRowNavigation} onAuxClick={stopRowNavigation}>
-          <ProjectPriorityBadge project={project} handleUpdate={handleUpdate} align="start" />
-        </ListGridCell>
-      ) : (
-        <ListGridCell className="hidden px-0 @2xl:flex" />
-      )}
-
-      {isColVisible("progress") ? (
-        <ListGridCell className="hidden @2xl:flex">
-          <ProgressRing project={project} />
-        </ListGridCell>
-      ) : (
-        <ListGridCell className="hidden px-0 @2xl:flex" />
-      )}
-
-      {isColVisible("lead") ? (
-        <ListGridCell className="hidden @2xl:flex" onClick={stopRowNavigation} onAuxClick={stopRowNavigation}>
-          <ProjectLeadPicker
-            project={project}
-            handleUpdate={handleUpdate}
-            align="start"
-            renderTrigger={(leadName) => (
-              <button
-                type="button"
-                className="flex min-w-0 items-center gap-1.5 rounded-xs px-1 py-0.5 transition-colors hover:bg-accent/60"
-              >
-                {project.lead_type && project.lead_id ? (
-                  <ActorAvatar actorType={project.lead_type} actorId={project.lead_id} size="sm" enableHoverCard />
-                ) : (
-                  <span className="inline-flex h-[18px] w-[18px] rounded-full border border-dashed border-muted-foreground/30" />
-                )}
-                <span className="min-w-0 truncate text-caption text-muted-foreground">
-                  {leadName ?? "—"}
-                </span>
-              </button>
-            )}
-          />
-        </ListGridCell>
-      ) : (
-        <ListGridCell className="hidden px-0 @2xl:flex" />
-      )}
-
-      {isColVisible("issues") ? (
-        <ListGridCell className="hidden justify-end font-mono text-caption tabular-nums text-muted-foreground @2xl:flex">
-          {project.issue_count}
-        </ListGridCell>
-      ) : (
-        <ListGridCell className="hidden px-0 @2xl:flex" />
-      )}
-
-      {isColVisible("created") ? (
-        <ListGridCell className="hidden whitespace-nowrap text-caption tabular-nums text-muted-foreground @2xl:flex">
-          {formatRelativeDate(project.created_at)}
-        </ListGridCell>
-      ) : (
-        <ListGridCell className="hidden px-0 @2xl:flex" />
-      )}
-
-      <ListGridCell className="justify-end px-0">
-        <span onClick={stopRowNavigation} onAuxClick={stopRowNavigation} className="flex items-center">
-          <ProjectRowActions project={project} pinned={pinned} canDelete={canDelete} />
-        </span>
-      </ListGridCell>
-    </ListGridRow>
-  );
-}
-
-function ProjectTableHeader({
-  sortField,
-  sortDirection,
-  onSort,
-  isColVisible,
-  allSelected,
-  someSelected,
-  onToggleAll,
-}: {
-  sortField: ProjectSortField;
-  sortDirection: ListGridSortDirection;
-  onSort: (field: ProjectSortField) => void;
-  isColVisible: (key: ProjectColumnKey) => boolean;
-  allSelected: boolean;
-  someSelected: boolean;
-  onToggleAll: () => void;
-}) {
-  const { t } = useT("projects");
-  const sorted = (field: ProjectSortField) =>
-    sortField === field ? sortDirection : false;
-  const anySelected = allSelected || someSelected;
-  return (
-    <ListGridHeader>
-      <div className="flex items-center justify-center">
-        <button
-          type="button"
-          aria-pressed={allSelected}
-          onClick={onToggleAll}
-          className={`-m-1.5 flex items-center p-1.5 ${
-            anySelected ? "" : "opacity-0 transition-opacity group-hover/header:opacity-100"
-          }`}
-        >
-          <Checkbox
-            checked={allSelected}
-            indeterminate={someSelected && !allSelected}
-            tabIndex={-1}
-            className="pointer-events-none"
-          />
-        </button>
-      </div>
-      <ListGridHeaderCell sorted={sorted("name")} onSort={() => onSort("name")}>
-        {t(($) => $.table.name)}
-      </ListGridHeaderCell>
-      <ListGridHeaderCell sorted={sorted("status")} onSort={() => onSort("status")}>
-        {t(($) => $.table.status)}
-      </ListGridHeaderCell>
-      {isColVisible("priority") ? (
-        <ListGridHeaderCell
-          className="hidden @2xl:flex"
-          sorted={sorted("priority")}
-          onSort={() => onSort("priority")}
-        >
-          {t(($) => $.table.priority)}
-        </ListGridHeaderCell>
-      ) : (
-        <ListGridHeaderCell className="hidden px-0 @2xl:flex" />
-      )}
-      {isColVisible("progress") ? (
-        <ListGridHeaderCell
-          className="hidden @2xl:flex"
-          sorted={sorted("progress")}
-          onSort={() => onSort("progress")}
-        >
-          {t(($) => $.table.progress)}
-        </ListGridHeaderCell>
-      ) : (
-        <ListGridHeaderCell className="hidden px-0 @2xl:flex" />
-      )}
-      {isColVisible("lead") ? (
-        <ListGridHeaderCell className="hidden @2xl:flex">
-          {t(($) => $.table.lead)}
-        </ListGridHeaderCell>
-      ) : (
-        <ListGridHeaderCell className="hidden px-0 @2xl:flex" />
-      )}
-      {isColVisible("issues") ? (
-        <ListGridHeaderCell className="hidden justify-end @2xl:flex" align="right">
-          {t(($) => $.table.issues)}
-        </ListGridHeaderCell>
-      ) : (
-        <ListGridHeaderCell className="hidden px-0 @2xl:flex" />
-      )}
-      {isColVisible("created") ? (
-        <ListGridHeaderCell
-          className="hidden @2xl:flex"
-          sorted={sorted("created")}
-          onSort={() => onSort("created")}
-        >
-          {t(($) => $.table.created)}
-        </ListGridHeaderCell>
-      ) : (
-        <ListGridHeaderCell className="hidden px-0 @2xl:flex" />
-      )}
-      <span aria-hidden="true" />
-    </ListGridHeader>
-  );
+  return <>{children(handleUpdate)}</>;
 }
 
 // Card (comfortable) view — kept from the prior page.
@@ -674,8 +358,23 @@ function ProjectCard({
   );
 }
 
-// Toolbar — search + result count + filter + display (compact only) + view
-// toggle.
+// Header tools — scope menu, filter, display (view, sort, columns).
+
+// Scope splits the lifecycle in two: still being worked on, or closed. The
+// status filter narrows further within it.
+type ProjectScope = "all" | "active" | "closed";
+const PROJECT_SCOPES: ProjectScope[] = ["all", "active", "closed"];
+const CLOSED_STATUSES: ReadonlySet<ProjectStatus> = new Set(["completed", "cancelled"]);
+
+function inScope(project: Project, scope: ProjectScope): boolean {
+  if (scope === "all") return true;
+  return CLOSED_STATUSES.has(project.status) === (scope === "closed");
+}
+
+const VIEW_MODES: { mode: ProjectViewMode; Icon: typeof Rows3 }[] = [
+  { mode: "compact", Icon: Rows3 },
+  { mode: "comfortable", Icon: LayoutGrid },
+];
 
 const STATUS_VALUES: ProjectStatus[] = [
   "planned",
@@ -685,8 +384,6 @@ const STATUS_VALUES: ProjectStatus[] = [
   "cancelled",
 ];
 const PRIORITY_VALUES: ProjectPriority[] = ["urgent", "high", "medium", "low", "none"];
-const COLUMN_KEYS: ProjectColumnKey[] = ["priority", "progress", "lead", "issues", "created"];
-const SORT_FIELDS: ProjectSortField[] = ["name", "priority", "status", "progress", "created"];
 
 function countActiveFilters(f: ProjectListFilters): number {
   let c = 0;
@@ -714,27 +411,11 @@ function ProjectBatchToolbar({
   const deleteProject = useDeleteProject();
   const [confirmDelete, setConfirmDelete] = useState(false);
 
-  if (rows.length === 0) return null;
   const anyUnpinned = rows.some((p) => !pinnedIds.has(p.id));
 
   return (
     <>
-      <div className="absolute bottom-6 left-1/2 z-50 flex -translate-x-1/2 items-center gap-1 rounded-lg border bg-background px-2 py-1.5 shadow-lg max-md:above-chat-launcher">
-        <div className="mr-1 flex items-center gap-1.5 border-r pl-1 pr-2">
-          <span className="text-body font-medium">
-            {t(($) => $.page.selected, { count: rows.length })}
-          </span>
-          <TooltipHint label={t(($) => $.page.clear_selection)}>
-            <button
-              type="button"
-              aria-label={t(($) => $.page.clear_selection)}
-              onClick={onClear}
-              className="rounded-xs p-0.5 transition-colors hover:bg-accent"
-            >
-              <X className="size-3.5 text-muted-foreground" />
-            </button>
-          </TooltipHint>
-        </div>
+      <CollectionBatchBar count={rows.length} onClear={onClear}>
         {anyUnpinned && (
           <Button
             variant="ghost"
@@ -763,7 +444,7 @@ function ProjectBatchToolbar({
             {t(($) => $.page.delete)}
           </Button>
         )}
-      </div>
+      </CollectionBatchBar>
 
       <Dialog open={confirmDelete} onOpenChange={setConfirmDelete}>
         <DialogContent className="sm:max-w-md">
@@ -800,7 +481,6 @@ export function ProjectsPage() {
   const { t } = useT("projects");
   const wsId = useWorkspaceId();
   const wsPaths = useWorkspacePaths();
-  const rowLink = useRowLink();
   const currentUser = useAuthStore((s) => s.user);
   const { getActorName } = useActorName();
 
@@ -817,7 +497,7 @@ export function ProjectsPage() {
   const toggleFilter = useProjectViewStore((s) => s.toggleFilter);
   const clearFilters = useProjectViewStore((s) => s.clearFilters);
   const isCompact = viewMode === "compact";
-  const isColVisible = (key: ProjectColumnKey) => !hiddenColumns.includes(key);
+  const formatRelativeDate = useFormatRelativeDate();
 
   const { data: projects = [], isLoading } = useQuery(projectListOptions(wsId));
   const { data: members = [] } = useQuery(memberListOptions(wsId));
@@ -839,15 +519,8 @@ export function ProjectsPage() {
     return s;
   }, [pins]);
 
-  const [search, setSearch] = useState("");
+  const [scope, setScope] = useState<ProjectScope>("all");
   const [selectedIds, setSelectedIds] = useState<ReadonlySet<string>>(new Set());
-  const toggleSelected = (id: string) =>
-    setSelectedIds((prev) => {
-      const next = new Set(prev);
-      if (next.has(id)) next.delete(id);
-      else next.add(id);
-      return next;
-    });
 
   const activeFilterCount = countActiveFilters(filters);
   const hasActiveFilters = activeFilterCount > 0;
@@ -866,12 +539,15 @@ export function ProjectsPage() {
     return m;
   }, [projects]);
 
+  const scopeCounts = useMemo<Record<ProjectScope, number>>(() => {
+    const counts = { all: projects.length, active: 0, closed: 0 };
+    for (const p of projects) counts[inScope(p, "closed") ? "closed" : "active"] += 1;
+    return counts;
+  }, [projects]);
+
   const visible = useMemo(() => {
-    const q = search.trim().toLowerCase();
     const filtered = projects.filter((p) => {
-      if (q && !p.title.toLowerCase().includes(q) && !matchesPinyin(p.title, q)) {
-        return false;
-      }
+      if (!inScope(p, scope)) return false;
       if (filters.statuses.length && !filters.statuses.includes(p.status)) return false;
       if (filters.priorities.length && !filters.priorities.includes(p.priority)) {
         return false;
@@ -904,53 +580,268 @@ export function ProjectsPage() {
       return (Date.parse(a.created_at) - Date.parse(b.created_at)) * dir;
     });
     return sorted;
-  }, [projects, search, filters, sortField, sortDirection]);
+  }, [projects, scope, filters, sortField, sortDirection]);
 
   const selectedProjects = visible.filter((p) => selectedIds.has(p.id));
-  const allSelected = visible.length > 0 && selectedProjects.length === visible.length;
-  const someSelected = selectedProjects.length > 0 && !allSelected;
-  const handleToggleAll = () =>
-    setSelectedIds(allSelected ? new Set() : new Set(visible.map((p) => p.id)));
 
-  const sortLabel = (f: ProjectSortField) =>
-    f === "name"
-      ? t(($) => $.table.name)
-      : f === "priority"
-        ? t(($) => $.table.priority)
-        : f === "status"
-          ? t(($) => $.table.status)
-          : f === "progress"
-            ? t(($) => $.table.progress)
-            : t(($) => $.table.created);
-  const columnLabel = (k: ProjectColumnKey) =>
-    k === "priority"
-      ? t(($) => $.table.priority)
-      : k === "progress"
-        ? t(($) => $.table.progress)
-        : k === "lead"
-          ? t(($) => $.table.lead)
-          : k === "issues"
-            ? t(($) => $.table.issues)
-            : t(($) => $.table.created);
+  const columns = useMemo<CollectionColumn<Project>[]>(
+    () => [
+      {
+        key: "name",
+        header: t(($) => $.table.name),
+        sortKey: "name",
+        cell: (project) => (
+          <CollectionNameCell
+            icon={<ProjectIcon project={project} size="sm" />}
+            title={project.title}
+          />
+        ),
+      },
+      {
+        // The project's defining lifecycle field: always visible.
+        key: "status",
+        header: t(($) => $.table.status),
+        width: 116,
+        sortKey: "status",
+        core: true,
+        interactive: true,
+        cell: (project) => (
+          <ProjectInlineCell project={project}>
+            {(handleUpdate) => (
+              <ProjectStatusBadge project={project} handleUpdate={handleUpdate} align="start" />
+            )}
+          </ProjectInlineCell>
+        ),
+      },
+      {
+        key: "priority",
+        header: t(($) => $.table.priority),
+        width: 116,
+        sortKey: "priority",
+        hideable: true,
+        interactive: true,
+        cell: (project) => (
+          <ProjectInlineCell project={project}>
+            {(handleUpdate) => (
+              <ProjectPriorityBadge project={project} handleUpdate={handleUpdate} align="start" />
+            )}
+          </ProjectInlineCell>
+        ),
+      },
+      {
+        key: "progress",
+        header: t(($) => $.table.progress),
+        width: 80,
+        sortKey: "progress",
+        hideable: true,
+        cell: (project) => <ProgressRing project={project} />,
+      },
+      {
+        key: "lead",
+        header: t(($) => $.table.lead),
+        width: 132,
+        hideable: true,
+        interactive: true,
+        cell: (project) => (
+          <ProjectInlineCell project={project}>
+            {(handleUpdate) => (
+              <ProjectLeadPicker
+                project={project}
+                handleUpdate={handleUpdate}
+                align="start"
+                renderTrigger={(leadName) => (
+                  <button
+                    type="button"
+                    className="-mx-1 flex min-w-0 items-center gap-1.5 rounded-xs px-1 py-0.5 transition-colors hover:bg-accent/60"
+                  >
+                    {project.lead_type && project.lead_id ? (
+                      <ActorAvatar
+                        actorType={project.lead_type}
+                        actorId={project.lead_id}
+                        size="sm"
+                        enableHoverCard
+                      />
+                    ) : (
+                      <span className="inline-flex h-[18px] w-[18px] rounded-full border border-dashed border-muted-foreground/30" />
+                    )}
+                    <span className="min-w-0 truncate">{leadName ?? "—"}</span>
+                  </button>
+                )}
+              />
+            )}
+          </ProjectInlineCell>
+        ),
+      },
+      {
+        key: "issues",
+        header: t(($) => $.table.issues),
+        width: 64,
+        align: "end",
+        hideable: true,
+        className: "font-mono tabular-nums",
+        cell: (project) => project.issue_count,
+      },
+      {
+        key: "created",
+        header: t(($) => $.table.created),
+        width: 104,
+        sortKey: "created",
+        hideable: true,
+        cell: (project) => (
+          <span className="tabular-nums">{formatRelativeDate(project.created_at)}</span>
+        ),
+      },
+    ],
+    [t, formatRelativeDate],
+  );
+
+  const sort: CollectionSort = {
+    field: sortField,
+    direction: sortDirection,
+    onToggle: (field) => toggleSort(field as ProjectSortField),
+    onFieldChange: (field) => setSortField(field as ProjectSortField),
+    onDirectionChange: setSortDirection,
+  };
 
   const showEmpty = !isLoading && projects.length === 0;
   const countBadge = (n: number) => (
     <span className="ml-auto pl-3 text-caption text-muted-foreground">{n}</span>
   );
+  const scopeLabels: Record<ProjectScope, string> = {
+    all: t(($) => $.page.scope_all),
+    active: t(($) => $.page.scope_active),
+    closed: t(($) => $.page.scope_closed),
+  };
 
   return (
     // relative: positioning anchor for the page-centered batch toolbar.
     <div className="relative flex flex-1 min-h-0 flex-col">
       <CollectionPageHeader
         icon={FolderKanban}
-        title={t(($) => $.page.title)}
-        count={projects.length}
-        actions={
-          <CollectionPageHeaderAction
-            icon={Plus}
-            label={t(($) => $.page.new_project)}
-            onClick={openCreateProject}
+        title={scopeLabels[scope]}
+        menu={
+          <CollectionScopeItems
+            value={scope}
+            onChange={setScope}
+            options={PROJECT_SCOPES.map((s) => ({
+              value: s,
+              label: scopeLabels[s],
+              count: scopeCounts[s],
+            }))}
           />
+        }
+        tools={
+          <>
+            <DropdownMenu>
+              <DropdownMenuTrigger render={<CollectionFilterButton count={activeFilterCount} />} />
+              <DropdownMenuContent align="start" className="w-auto">
+                <DropdownMenuSub>
+                  <DropdownMenuSubTrigger>
+                    <span className="flex-1">{t(($) => $.toolbar.section_status)}</span>
+                    {filters.statuses.length > 0 && (
+                      <span className="text-caption font-medium text-primary">{filters.statuses.length}</span>
+                    )}
+                  </DropdownMenuSubTrigger>
+                  <DropdownMenuSubContent className="w-auto min-w-44">
+                    {STATUS_VALUES.map((s) => (
+                      <DropdownMenuCheckboxItem
+                        key={s}
+                        checked={filters.statuses.includes(s)}
+                        onCheckedChange={() => toggleFilter("statuses", s)}
+                        className={FILTER_ITEM_CLASS}
+                      >
+                        <HoverCheck checked={filters.statuses.includes(s)} />
+                        {t(($) => $.status[s])}
+                      </DropdownMenuCheckboxItem>
+                    ))}
+                  </DropdownMenuSubContent>
+                </DropdownMenuSub>
+                <DropdownMenuSub>
+                  <DropdownMenuSubTrigger>
+                    <span className="flex-1">{t(($) => $.toolbar.section_priority)}</span>
+                    {filters.priorities.length > 0 && (
+                      <span className="text-caption font-medium text-primary">{filters.priorities.length}</span>
+                    )}
+                  </DropdownMenuSubTrigger>
+                  <DropdownMenuSubContent className="w-auto min-w-44">
+                    {PRIORITY_VALUES.map((pr) => (
+                      <DropdownMenuCheckboxItem
+                        key={pr}
+                        checked={filters.priorities.includes(pr)}
+                        onCheckedChange={() => toggleFilter("priorities", pr)}
+                        className={FILTER_ITEM_CLASS}
+                      >
+                        <HoverCheck checked={filters.priorities.includes(pr)} />
+                        {t(($) => $.priority[pr])}
+                      </DropdownMenuCheckboxItem>
+                    ))}
+                  </DropdownMenuSubContent>
+                </DropdownMenuSub>
+                <DropdownMenuSub>
+                  <DropdownMenuSubTrigger>
+                    <span className="flex-1">{t(($) => $.toolbar.section_lead)}</span>
+                    {filters.leads.length > 0 && (
+                      <span className="text-caption font-medium text-primary">{filters.leads.length}</span>
+                    )}
+                  </DropdownMenuSubTrigger>
+                  <DropdownMenuSubContent className="max-h-72 w-auto min-w-48 overflow-y-auto">
+                    {[...leadOptions.entries()].map(([value, { type, id, count }]) => (
+                      <DropdownMenuCheckboxItem
+                        key={value}
+                        checked={filters.leads.includes(value)}
+                        onCheckedChange={() => toggleFilter("leads", value)}
+                        className={FILTER_ITEM_CLASS}
+                      >
+                        <HoverCheck checked={filters.leads.includes(value)} />
+                        <ActorAvatar actorType={type} actorId={id} size="sm" />
+                        <span className="min-w-0 truncate">{getActorName(type, id)}</span>
+                        {countBadge(count)}
+                      </DropdownMenuCheckboxItem>
+                    ))}
+                  </DropdownMenuSubContent>
+                </DropdownMenuSub>
+              </DropdownMenuContent>
+            </DropdownMenu>
+            {hasActiveFilters ? <CollectionResetButton onClick={clearFilters} /> : null}
+          </>
+        }
+        actions={
+          <>
+            {/* Sort applies to both views; columns only to the table. */}
+            <CollectionDisplayMenu
+              columns={columns}
+              hiddenColumns={hiddenColumns}
+              onToggleColumn={(key) => toggleColumn(key as ProjectColumnKey)}
+              sort={sort}
+              showColumns={isCompact}
+              triggerIcon={isCompact ? Rows3 : LayoutGrid}
+              extra={
+                <div
+                  role="group"
+                  aria-label={t(($) => $.toolbar.view)}
+                  className="grid grid-cols-2 gap-0.5 rounded-lg bg-muted p-0.5"
+                >
+                  {VIEW_MODES.map(({ mode, Icon }) => (
+                    <Toggle
+                      key={mode}
+                      pressed={viewMode === mode}
+                      onPressedChange={() => setViewMode(mode)}
+                      className="h-auto min-w-0 flex-col gap-1 rounded-md px-0.5 py-1.5 text-caption font-normal text-muted-foreground hover:bg-transparent hover:text-foreground aria-pressed:bg-background aria-pressed:text-foreground aria-pressed:shadow-sm aria-pressed:hover:bg-background"
+                    >
+                      <Icon className="size-4" />
+                      <span className="max-w-full truncate">
+                        {mode === "compact" ? t(($) => $.page.view_table) : t(($) => $.page.view_cards)}
+                      </span>
+                    </Toggle>
+                  ))}
+                </div>
+              }
+            />
+            <CollectionCreateButton
+              label={t(($) => $.page.new_project)}
+              onClick={openCreateProject}
+            />
+          </>
         }
       />
 
@@ -966,313 +857,37 @@ export function ProjectsPage() {
         />
       ) : (
         <>
-          {/* Toolbar */}
-          <div className={PAGE_TOOLBAR}>
-            <div className="flex min-w-0 items-center gap-2">
-              <div className="relative hidden md:block">
-                <Search className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
-                <Input
-                  value={search}
-                  onChange={(e) => setSearch(e.target.value)}
-                  aria-label={t(($) => $.page.search_placeholder)}
-                  placeholder={t(($) => $.page.search_placeholder)}
-                  className="h-8 w-56 pl-8 text-body"
+          {isCompact ? (
+            <CollectionList
+              label={scopeLabels[scope]}
+              columns={columns}
+              hiddenColumns={hiddenColumns}
+              rows={visible}
+              loading={isLoading}
+              getRowId={(project) => project.id}
+              getRowHref={(project) => wsPaths.projectDetail(project.id)}
+              getRowTitle={(project) => project.title}
+              rowMenu={(project) => (
+                <ProjectRowActions
+                  project={project}
+                  pinned={pinnedProjectIds.has(project.id)}
+                  canDelete={isWorkspaceAdmin}
                 />
-              </div>
-              {(hasActiveFilters || search.trim().length > 0) && (
-                <span
-                  title={t(($) => $.toolbar.result_count_title)}
-                  className="hidden shrink-0 text-caption tabular-nums text-muted-foreground md:inline"
-                >
-                  {visible.length} / {projects.length}
-                </span>
               )}
-            </div>
-
-            <div className="flex shrink-0 items-center gap-1">
-              {/* Filter */}
-              <DropdownMenu>
-                <DropdownMenuTrigger
-                  render={
-                    <Button
-                      variant={hasActiveFilters ? "default" : "outline"}
-                      size="sm"
-                      className={
-                        hasActiveFilters
-                          ? "h-8 w-8 gap-1 bg-brand px-0 text-white hover:bg-brand/90 md:w-auto md:px-2.5"
-                          : "h-8 w-8 gap-1 px-0 text-muted-foreground md:w-auto md:px-2.5"
-                      }
-                    >
-                      <Filter className="size-3.5" />
-                      {hasActiveFilters ? (
-                        <>
-                          <span className="hidden md:inline">
-                            {t(($) => $.toolbar.filter_active_count, { count: activeFilterCount })}
-                          </span>
-                          <span className="tabular-nums md:hidden">{activeFilterCount}</span>
-                        </>
-                      ) : (
-                        <span className="hidden md:inline">{t(($) => $.toolbar.filter_label)}</span>
-                      )}
-                      {hasActiveFilters && (
-                        <span
-                          role="button"
-                          tabIndex={-1}
-                          aria-label={t(($) => $.toolbar.clear_filters)}
-                          className="-mr-1 ml-0.5 hidden rounded-sm p-0.5 hover:bg-white/20 md:inline-flex"
-                          onClick={(e) => {
-                            e.preventDefault();
-                            e.stopPropagation();
-                            clearFilters();
-                          }}
-                          onPointerDown={(e) => e.stopPropagation()}
-                        >
-                          <X className="size-3" />
-                        </span>
-                      )}
-                    </Button>
-                  }
-                />
-                <DropdownMenuContent align="end" className="w-auto">
-                  <DropdownMenuSub>
-                    <DropdownMenuSubTrigger>
-                      <span className="flex-1">{t(($) => $.toolbar.section_status)}</span>
-                      {filters.statuses.length > 0 && (
-                        <span className="text-caption font-medium text-primary">{filters.statuses.length}</span>
-                      )}
-                    </DropdownMenuSubTrigger>
-                    <DropdownMenuSubContent className="w-auto min-w-44">
-                      {STATUS_VALUES.map((s) => (
-                        <DropdownMenuCheckboxItem
-                          key={s}
-                          checked={filters.statuses.includes(s)}
-                          onCheckedChange={() => toggleFilter("statuses", s)}
-                          className={FILTER_ITEM_CLASS}
-                        >
-                          <HoverCheck checked={filters.statuses.includes(s)} />
-                          {t(($) => $.status[s])}
-                        </DropdownMenuCheckboxItem>
-                      ))}
-                    </DropdownMenuSubContent>
-                  </DropdownMenuSub>
-                  <DropdownMenuSub>
-                    <DropdownMenuSubTrigger>
-                      <span className="flex-1">{t(($) => $.toolbar.section_priority)}</span>
-                      {filters.priorities.length > 0 && (
-                        <span className="text-caption font-medium text-primary">{filters.priorities.length}</span>
-                      )}
-                    </DropdownMenuSubTrigger>
-                    <DropdownMenuSubContent className="w-auto min-w-44">
-                      {PRIORITY_VALUES.map((pr) => (
-                        <DropdownMenuCheckboxItem
-                          key={pr}
-                          checked={filters.priorities.includes(pr)}
-                          onCheckedChange={() => toggleFilter("priorities", pr)}
-                          className={FILTER_ITEM_CLASS}
-                        >
-                          <HoverCheck checked={filters.priorities.includes(pr)} />
-                          {t(($) => $.priority[pr])}
-                        </DropdownMenuCheckboxItem>
-                      ))}
-                    </DropdownMenuSubContent>
-                  </DropdownMenuSub>
-                  <DropdownMenuSub>
-                    <DropdownMenuSubTrigger>
-                      <span className="flex-1">{t(($) => $.toolbar.section_lead)}</span>
-                      {filters.leads.length > 0 && (
-                        <span className="text-caption font-medium text-primary">{filters.leads.length}</span>
-                      )}
-                    </DropdownMenuSubTrigger>
-                    <DropdownMenuSubContent className="max-h-72 w-auto min-w-48 overflow-y-auto">
-                      {[...leadOptions.entries()].map(([value, { type, id, count }]) => (
-                        <DropdownMenuCheckboxItem
-                          key={value}
-                          checked={filters.leads.includes(value)}
-                          onCheckedChange={() => toggleFilter("leads", value)}
-                          className={FILTER_ITEM_CLASS}
-                        >
-                          <HoverCheck checked={filters.leads.includes(value)} />
-                          <ActorAvatar actorType={type} actorId={id} size="sm" />
-                          <span className="min-w-0 truncate">{getActorName(type, id)}</span>
-                          {countBadge(count)}
-                        </DropdownMenuCheckboxItem>
-                      ))}
-                    </DropdownMenuSubContent>
-                  </DropdownMenuSub>
-                </DropdownMenuContent>
-              </DropdownMenu>
-
-              {/* Display (sort + columns). Always present — view mode is a
-                  pure presentation choice and must not reshape the toolbar.
-                  Sort applies to both views; the columns section is shown
-                  only in the table view (cards have no columns). */}
-              <Popover>
-                  <Tooltip>
-                    <PopoverTrigger
-                      render={
-                        <TooltipTrigger
-                          render={
-                            <Button variant="outline" size="sm" className="h-8 w-8 gap-1 px-0 text-muted-foreground md:w-auto md:px-2.5">
-                              {sortDirection === "asc" ? <ArrowUp className="size-3.5" /> : <ArrowDown className="size-3.5" />}
-                              <span className="hidden md:inline">{sortLabel(sortField)}</span>
-                            </Button>
-                          }
-                        />
-                      }
-                    />
-                    <TooltipContent side="bottom">{t(($) => $.toolbar.display)}</TooltipContent>
-                  </Tooltip>
-                  <PopoverContent align="end" className="w-64 p-0">
-                    <div className="border-b px-3 py-2.5">
-                      <span className="text-caption font-medium text-muted-foreground">{t(($) => $.toolbar.sort_by)}</span>
-                      <div className="mt-2 flex items-center gap-1.5">
-                        <DropdownMenu>
-                          <DropdownMenuTrigger
-                            render={
-                              <Button variant="outline" size="sm" className="flex-1 justify-between text-caption">
-                                {sortLabel(sortField)}
-                                <ChevronDown className="size-3 text-muted-foreground" />
-                              </Button>
-                            }
-                          />
-                          <DropdownMenuContent align="start" className="w-auto">
-                            <DropdownMenuRadioGroup
-                              value={sortField}
-                              onValueChange={(v) => setSortField(v as ProjectSortField)}
-                            >
-                              {SORT_FIELDS.map((f) => (
-                                <DropdownMenuRadioItem key={f} value={f}>
-                                  {sortLabel(f)}
-                                </DropdownMenuRadioItem>
-                              ))}
-                            </DropdownMenuRadioGroup>
-                          </DropdownMenuContent>
-                        </DropdownMenu>
-                        <IconButton
-                          variant="outline"
-                          size="icon-sm"
-                          onClick={() => setSortDirection(sortDirection === "asc" ? "desc" : "asc")}
-                          label={sortDirection === "asc" ? t(($) => $.toolbar.direction_asc) : t(($) => $.toolbar.direction_desc)}
-                        >
-                          {sortDirection === "asc" ? <ArrowUp className="size-3.5" /> : <ArrowDown className="size-3.5" />}
-                        </IconButton>
-                      </div>
-                    </div>
-                    {isCompact && (
-                      <div className="px-3 py-2.5">
-                        <span className="text-caption font-medium text-muted-foreground">{t(($) => $.toolbar.section_columns)}</span>
-                        <div className="mt-2 space-y-2">
-                          {COLUMN_KEYS.map((key) => (
-                            <label key={key} className="flex cursor-pointer items-center justify-between">
-                              <span className="text-body">{columnLabel(key)}</span>
-                              <Switch size="sm" checked={!hiddenColumns.includes(key)} onCheckedChange={() => toggleColumn(key)} />
-                            </label>
-                          ))}
-                        </div>
-                      </div>
-                    )}
-                  </PopoverContent>
-                </Popover>
-
-              {/* View selector — a dropdown menu to pick the list view,
-                  aligned with the issue list's view menu. The trigger shows
-                  the active view; the menu carries every mode so new views
-                  can be added as menu items. Pure presentation. */}
-              <DropdownMenu>
-                <Tooltip>
-                  <DropdownMenuTrigger
-                    render={
-                      <TooltipTrigger
-                        render={
-                          <Button
-                            variant="outline"
-                            size="sm"
-                            className="h-8 w-8 gap-1 px-0 text-muted-foreground md:w-auto md:px-2.5"
-                          >
-                            {isCompact ? (
-                              <Rows3 className="size-3.5" />
-                            ) : (
-                              <LayoutGrid className="size-3.5" />
-                            )}
-                            <span className="hidden md:inline">
-                              {isCompact ? t(($) => $.page.view_table) : t(($) => $.page.view_cards)}
-                            </span>
-                          </Button>
-                        }
-                      />
-                    }
-                  />
-                  <TooltipContent side="bottom">{t(($) => $.toolbar.view)}</TooltipContent>
-                </Tooltip>
-                <DropdownMenuContent align="end" className="w-auto">
-                  <DropdownMenuGroup>
-                    <DropdownMenuLabel>{t(($) => $.toolbar.view)}</DropdownMenuLabel>
-                  </DropdownMenuGroup>
-                  <DropdownMenuRadioGroup
-                    value={viewMode}
-                    onValueChange={(v) => setViewMode(v as ProjectViewMode)}
-                  >
-                    <DropdownMenuRadioItem value="compact">
-                      <Rows3 />
-                      {t(($) => $.page.view_table)}
-                    </DropdownMenuRadioItem>
-                    <DropdownMenuRadioItem value="comfortable">
-                      <LayoutGrid />
-                      {t(($) => $.page.view_cards)}
-                    </DropdownMenuRadioItem>
-                  </DropdownMenuRadioGroup>
-                </DropdownMenuContent>
-              </DropdownMenu>
-            </div>
-          </div>
-
-          {/* Body */}
-          {isLoading ? (
-            <LoadingState isCompact={isCompact} />
+              sort={sort}
+              selection={{ selectedIds, onChange: setSelectedIds }}
+              empty={t(($) => $.page.no_matches)}
+            />
+          ) : isLoading ? (
+            <CardsLoading />
           ) : visible.length === 0 ? (
             <div className="flex flex-1 flex-col items-center justify-center py-24 text-muted-foreground">
               <Search className="mb-3 h-10 w-10 opacity-30" />
               <p className="text-body">{t(($) => $.page.no_matches)}</p>
             </div>
-          ) : isCompact ? (
-            <div className="min-h-0 flex-1 overflow-auto @container">
-              <ListGrid
-                className={`${GRID_COLS} @2xl:min-w-[var(--pjc-minw)]`}
-                style={{
-                  ...columnTrackVars(isColVisible),
-                  paddingBottom: LIST_GRID_BOTTOM_CLEARANCE,
-                }}
-              >
-                <ProjectTableHeader
-                  sortField={sortField}
-                  sortDirection={sortDirection}
-                  onSort={toggleSort}
-                  isColVisible={isColVisible}
-                  allSelected={allSelected}
-                  someSelected={someSelected}
-                  onToggleAll={handleToggleAll}
-                />
-                {visible.map((project) => (
-                  <ProjectTableRow
-                    key={project.id}
-                    project={project}
-                    pinned={pinnedProjectIds.has(project.id)}
-                    canDelete={isWorkspaceAdmin}
-                    isColVisible={isColVisible}
-                    selected={selectedIds.has(project.id)}
-                    onToggleSelect={() => toggleSelected(project.id)}
-                    rowHref={wsPaths.projectDetail(project.id)}
-                    rowLink={rowLink}
-                  />
-                ))}
-              </ListGrid>
-            </div>
           ) : (
-            <div className={cn("min-h-0 flex-1 overflow-y-auto pt-4", PAGE_GUTTER)}>
-              <div
-                className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4"
-                style={{ paddingBottom: LIST_GRID_BOTTOM_CLEARANCE }}
-              >
+            <div className={cn("min-h-0 flex-1 overflow-y-auto pt-4 pb-16", PAGE_GUTTER)}>
+              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
                 {visible.map((project) => (
                   <ProjectCard
                     key={project.id}
@@ -1297,18 +912,7 @@ export function ProjectsPage() {
   );
 }
 
-function LoadingState({ isCompact }: { isCompact: boolean }) {
-  if (isCompact) {
-    return (
-      <div className={cn("min-h-0 flex-1 overflow-auto pt-4", PAGE_GUTTER)}>
-        <div className="space-y-2">
-          {Array.from({ length: 6 }).map((_, i) => (
-            <Skeleton key={i} className="h-11 w-full rounded-md" />
-          ))}
-        </div>
-      </div>
-    );
-  }
+function CardsLoading() {
   return (
     <div className={cn("grid grid-cols-1 gap-3 pt-4 sm:grid-cols-2 lg:grid-cols-4", PAGE_GUTTER)}>
       {Array.from({ length: 8 }).map((_, i) => (

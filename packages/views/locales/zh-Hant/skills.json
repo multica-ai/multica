@@ -1,12 +1,10 @@
 {
   "page": {
     "title": "Skills",
-    "learn_more": "瞭解更多 →",
     "new_skill": "新建 skill",
-    "search_placeholder": "搜尋 skill...",
     "scopes": {
       "all": {
-        "label": "全部",
+        "label": "全部 skill",
         "description": "工作區裡所有 skill"
       },
       "used": {
@@ -18,7 +16,7 @@
         "description": "未分配給任何智慧體的 skill"
       },
       "mine": {
-        "label": "我建立的",
+        "label": "我的 skill",
         "description": "你建立的 skill"
       }
     },
@@ -76,8 +74,6 @@
     "added_toast": "已新增到 {{name}}",
     "add_failed_toast": "新增 skill 失敗",
     "delete": "刪除",
-    "selected": "已選 {{count}} 項",
-    "clear_selection": "清除選擇",
     "delete_no_permission": "選中項包含僅建立者或管理員可刪除的 skill",
     "delete_dialog_title_other": "刪除 {{count}} 個 skill？",
     "delete_dialog_desc_other": "將永久刪除選中的 {{count}} 個 skill，並從所有智慧體上移除。",
@@ -98,28 +94,16 @@
     "added_multi_toast_other": "已新增到 {{count}} 個智慧體"
   },
   "toolbar": {
-    "result_count_title": "當前結果 / 全部 skill",
-    "filter_label": "篩選",
-    "filter_active_count_other": "{{count}} 項篩選",
-    "clear_filters": "清除篩選",
     "section_usage": "使用狀態",
     "section_labels": "標籤",
     "filter_search_placeholder": "篩選...",
     "no_labels": "還沒有標籤",
     "no_results": "無結果",
-    "display": "顯示",
-    "sort_by": "排序",
-    "direction_asc": "升序",
-    "direction_desc": "降序",
-    "section_columns": "顯示列",
     "manage_labels": "管理標籤...",
     "manage_labels_title": "Skill 標籤"
   },
   "detail": {
-    "all_skills": "全部 skill",
     "read_only": "只讀",
-    "delete_aria": "刪除 skill",
-    "delete_tooltip": "刪除 skill",
     "supporting_data_warning": "部分工作區資料載入失敗。建立者歸屬、執行時名稱、編輯權限可能要等下次重新整理才完整。",
     "delete_file": "刪除檔案",
     "name_placeholder": "skill-name",
@@ -154,8 +138,6 @@
     "toast_deleted": "已刪除 skill",
     "toast_delete_failed": "刪除 skill 失敗",
     "refresh": {
-      "button": "更新",
-      "tooltip": "從來源重新下載這個 skill",
       "source_github": "GitHub",
       "source_skills_sh": "Skills.sh",
       "source_clawhub": "ClawHub",
@@ -194,29 +176,18 @@
       }
     },
     "header": {
-      "files_other": "{{count}} 個檔案",
-      "used_by_other": "{{count}} 個智慧體在用",
-      "updated": "{{when}}更新",
-      "updated_by": "{{name}} 於{{when}}更新"
-    },
-    "tabs": {
-      "aria": "技能分區",
-      "overview": "概覽",
-      "files_other": "檔案 {{count}}"
+      "files_other": "{{count}} 個檔案"
     },
     "overview": {
       "properties": "屬性",
-      "properties_hint": "這些欄位與 SKILL.md 的 frontmatter 保持同步。",
       "name": "名稱",
       "description": "描述",
       "description_hint": "智慧體據此決定何時載入 skill。",
       "labels": "標籤",
-      "used_by_other": "被 {{count}} 個智慧體使用",
       "used_by_empty": "還未分配給任何智慧體。開啟某個智慧體的 Skills 標籤頁進行分配。",
       "permissions_owner": "你可以編輯和刪除該技能。改動將在智慧體下次執行時生效。",
       "permissions_locked_creator": "只有建立者（{{name}}）或工作區管理員可以編輯該技能。",
       "permissions_locked": "只有建立者或工作區管理員可以編輯該技能。",
-      "properties_help": "關於 skill 屬性",
       "character_count": "{{count}} 個字元"
     },
     "files": {
@@ -229,6 +200,21 @@
       "mode_preview": "預覽",
       "mode_edit": "編輯",
       "mode_raw": "純文字"
+    },
+    "sections": {
+      "content": "內容",
+      "files": "檔案",
+      "edit": "編輯",
+      "open": "開啟",
+      "add": "新增"
+    },
+    "menu": {
+      "copy_link": "複製連結",
+      "link_copied": "已複製連結",
+      "delete": "刪除 skill"
+    },
+    "panel": {
+      "add_description": "新增描述"
     }
   },
   "create": {

@@ -1,9 +1,7 @@
 {
   "page": {
     "title": "ランタイム",
-    "learn_more": "詳しく見る →",
     "connect_remote": "マシンを追加",
-    "search_placeholder": "検索…",
     "scope_mine": "自分のもの",
     "scope_all": "すべて",
     "live": "ライブ",
@@ -25,7 +23,7 @@
       "title": "ローカルランタイムを起動中…",
       "hint": "ワークスペースに接続中..."
     },
-    "add": "追加",
+    "add": "ランタイムを追加",
     "add_menu": {
       "machines": "マシン",
       "this_computer": "このコンピューター",
@@ -67,7 +65,7 @@
       "no_matches": "一致するマシンやクラウドサービスはありません"
     },
     "filters": {
-      "all": "すべて",
+      "all": "すべてのランタイム",
       "online": "オンライン",
       "offline": "オフライン"
     }
@@ -93,7 +91,7 @@
     "this_machine": "このデバイス",
     "local_badge": "ローカル · このマシン",
     "pending_custom_runtimes": "登録待ちのカスタムランタイム",
-    "runtime_count_other": "ランタイム {{count}} 個",
+    "daemon_title": "デーモン",
     "busy_count_other": "使用中 {{count}} 個",
     "no_matches_title": "マシンなし",
     "no_matches_hint": "現在の検索またはフィルターに一致するマシンがありません。",
@@ -158,13 +156,10 @@
     "fact_owner": "所有者",
     "fact_device": "デバイス",
     "fact_runtime": "ランタイム",
-    "technical_details": "技術的な詳細",
     "fact_daemon_cli": "デーモン CLI",
     "fact_daemon_id": "デーモン ID",
-    "serving_title": "提供中",
-    "serving_count_other": "エージェント {{count}} 個",
+    "usage_title": "使用量",
     "no_agents": "まだこのランタイムに紐づいたエージェントがありません。",
-    "diagnostics_title": "診断",
     "diagnostics_cli": "CLI",
     "diagnostics_visibility": "公開範囲",
     "visibility_label": {

@@ -2043,6 +2043,9 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 				r.Get("/child-progress", h.ChildIssueProgress)
 				r.Get("/children", h.ListChildrenByParents)
 				r.Get("/grouped", h.ListGroupedIssues)
+				// The caller's issues with an agent result they have not seen
+				// yet; backs the sidebar's unread dot.
+				r.Get("/unread", h.ListIssueUnread)
 				r.Get("/", h.ListIssues)
 				// POST twin of GET /api/issues for oversized filter sets
 				// (agents-working ids facet) — see QueryIssues.
@@ -2070,6 +2073,8 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					r.Post("/subscribe", h.SubscribeToIssue)
 					r.Post("/unsubscribe", h.UnsubscribeFromIssue)
 					r.Post("/unsubscribe/subtree", h.UnsubscribeFromIssueSubtree)
+					r.Post("/read", h.MarkIssueRead)
+					r.Post("/unread", h.MarkIssueUnread)
 					r.Get("/wakeups", h.ListIssueWakeups)
 					r.Post("/wakeups", h.CreateIssueWakeup)
 					r.Put("/wakeups/{wakeupID}", h.CreateIssueWakeup)

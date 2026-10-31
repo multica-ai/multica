@@ -43,6 +43,7 @@ import type {
   CreateCommentSubIssueManualRequest,
   CreateIssueRequest,
   ListIssuesCache,
+  ListIssuesResponse,
   MoveIssueRequest,
   UpdateIssueRequest,
 } from "../types";
@@ -162,6 +163,7 @@ function useIssueCreateMutation<TVariables>(
       qc.invalidateQueries({ queryKey: issueKeys.assigneeGroupsAll(wsId) });
       qc.invalidateQueries({ queryKey: issueKeys.myAssigneeGroupsAll(wsId) });
       qc.invalidateQueries({ queryKey: issueKeys.projectGanttAll(wsId) });
+      qc.invalidateQueries({ queryKey: issueKeys.sidebarAll(wsId) });
       qc.invalidateQueries({ queryKey: projectKeys.all(wsId) });
     },
   });
@@ -540,6 +542,7 @@ export function useDeleteIssue() {
       qc.invalidateQueries({ queryKey: issueKeys.assigneeGroupsAll(wsId) });
       qc.invalidateQueries({ queryKey: issueKeys.myAssigneeGroupsAll(wsId) });
       qc.invalidateQueries({ queryKey: issueKeys.projectGanttAll(wsId) });
+      qc.invalidateQueries({ queryKey: issueKeys.sidebarAll(wsId) });
       qc.invalidateQueries({ queryKey: projectKeys.all(wsId) });
       if (ctx?.metadata) invalidateDeletedIssueParentCaches(qc, wsId, ctx.metadata);
     },
@@ -550,6 +553,7 @@ interface BatchUpdateSnapshots {
   prevLists?: Iterable<readonly [QueryKey, unknown]>;
   prevFlatLists?: Iterable<readonly [QueryKey, unknown]>;
   prevTableRows?: Iterable<readonly [QueryKey, unknown]>;
+  prevSidebarLists?: Iterable<readonly [QueryKey, unknown]>;
   prevDetailById?: Iterable<readonly [string, unknown]>;
   prevInboxList?: unknown;
   prevArchivedInboxCaches?: Iterable<readonly [QueryKey, unknown]>;
@@ -563,6 +567,7 @@ export function useBatchUpdateIssues() {
     for (const [key, snapshot] of ctx?.prevLists ?? []) qc.setQueryData(key, snapshot);
     for (const [key, snapshot] of ctx?.prevFlatLists ?? []) qc.setQueryData(key, snapshot);
     for (const [key, snapshot] of ctx?.prevTableRows ?? []) qc.setQueryData(key, snapshot);
+    for (const [key, snapshot] of ctx?.prevSidebarLists ?? []) qc.setQueryData(key, snapshot);
     for (const [id, snapshot] of ctx?.prevDetailById ?? []) qc.setQueryData(issueKeys.detail(wsId, id), snapshot);
     if (ctx?.prevInboxList !== undefined) qc.setQueryData(inboxKeys.list(wsId), ctx.prevInboxList);
     for (const [key, snapshot] of ctx?.prevArchivedInboxCaches ?? []) qc.setQueryData(key, snapshot);
@@ -613,6 +618,7 @@ export function useBatchUpdateIssues() {
         string,
         [QueryKey, IssueTableRowCache]
       >();
+      const prevSidebarListByHash = new Map<string, [QueryKey, ListIssuesResponse]>();
       const prevDetailById = new Map<string, Issue>();
       let prevInboxList: InboxItem[] | undefined;
       let prevArchivedInboxCaches: [QueryKey, ArchivedInboxCache | undefined][] | undefined;
@@ -637,6 +643,12 @@ export function useBatchUpdateIssues() {
           const hash = hashKey(key);
           if (!prevTableRowByHash.has(hash)) {
             prevTableRowByHash.set(hash, [key, snapshot]);
+          }
+        }
+        for (const [key, snapshot] of change.prevSidebarLists) {
+          const hash = hashKey(key);
+          if (!prevSidebarListByHash.has(hash)) {
+            prevSidebarListByHash.set(hash, [key, snapshot]);
           }
         }
         if (change.prevDetail) prevDetailById.set(id, change.prevDetail);
@@ -675,6 +687,7 @@ export function useBatchUpdateIssues() {
         prevLists: [...prevListByHash.values()],
         prevFlatLists: [...prevFlatListByHash.values()],
         prevTableRows: [...prevTableRowByHash.values()],
+        prevSidebarLists: [...prevSidebarListByHash.values()],
         prevDetailById,
         prevInboxList,
         prevArchivedInboxCaches,
@@ -852,6 +865,7 @@ export function useBatchDeleteIssues() {
       qc.invalidateQueries({ queryKey: issueKeys.assigneeGroupsAll(wsId) });
       qc.invalidateQueries({ queryKey: issueKeys.myAssigneeGroupsAll(wsId) });
       qc.invalidateQueries({ queryKey: issueKeys.projectGanttAll(wsId) });
+      qc.invalidateQueries({ queryKey: issueKeys.sidebarAll(wsId) });
       qc.invalidateQueries({ queryKey: projectKeys.all(wsId) });
       if (ctx?.parentIssueIds && ctx.parentIssueIds.size > 0) {
         invalidateDeletedIssueParentCaches(qc, wsId, {

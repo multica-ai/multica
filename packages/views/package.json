@@ -14,6 +14,7 @@
     "./common/cli-install-command": "./common/cli-install-command.tsx",
     "./common/shortcut-keycaps": "./common/shortcut-keycaps.tsx",
     "./editor": "./editor/index.ts",
+    "./issue-views": "./issue-views/index.ts",
     "./issues/components": "./issues/components/index.ts",
     "./issues/hooks": "./issues/hooks/index.ts",
     "./issues/utils/filter": "./issues/utils/filter.ts",
