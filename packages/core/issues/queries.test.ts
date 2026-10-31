@@ -26,6 +26,7 @@ import {
   issueListOptions,
   issueTableRowPageOptions,
   projectGanttIssuesOptions,
+  sidebarIssuesOptions,
   sourceContextPreviewOptions,
 } from "./queries";
 import { onIssueUpdated } from "./ws-updaters";
@@ -712,6 +713,59 @@ describe("issueIdentifierOptions", () => {
       WS_ID,
       "identifier",
       "MUL-7",
+    ]);
+  });
+});
+
+describe("sidebarIssuesOptions", () => {
+  const issues = Array.from({ length: 120 }, (_, i) => makeIssue(i));
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it("walks table pages past the server's 100-row cap", async () => {
+    const listIssueTableRows = vi.fn(async (params: IssueTableRowsRequest): Promise<IssueTableRowsResponse> => {
+      const start = params.page?.cursor ? Number(params.page.cursor) : 0;
+      const end = start + Math.min(params.page?.limit ?? 50, 100);
+      return {
+        query_fingerprint: "fp",
+        group_key: null,
+        parent_id: null,
+        total: issues.length,
+        rows: issues.slice(start, end).map((issue) => ({ issue, direct_child_count: 0 })),
+        branch_total: issues.length,
+        next_cursor: end < issues.length ? String(end) : null,
+      };
+    });
+    setApiInstance({ listIssueTableRows } as unknown as ApiClient);
+    const table = { scope: { kind: "workspace" }, filters: {}, sort: { field: "position", direction: "asc" } } as const;
+
+    const result = await new QueryClient().fetchQuery(sidebarIssuesOptions(WS_ID, "view:a", { table }, 120));
+
+    expect(result.issues).toHaveLength(120);
+    expect(result.total).toBe(120);
+    expect(listIssueTableRows.mock.calls.map(([params]) => params.page)).toEqual([
+      { limit: 100, cursor: null },
+      { limit: 20, cursor: "100" },
+    ]);
+  });
+
+  it("walks list pages past the server's 100-row cap", async () => {
+    const listIssues = vi.fn(async (params?: ListIssuesParams): Promise<ListIssuesResponse> => {
+      const offset = params?.offset ?? 0;
+      return { issues: issues.slice(offset, offset + Math.min(params?.limit ?? 100, 100)), total: issues.length };
+    });
+    installFakeApi(listIssues);
+
+    const result = await new QueryClient().fetchQuery(
+      sidebarIssuesOptions(WS_ID, "builtin:my_issues", { assignee_id: "u1" }, 130),
+    );
+
+    expect(result.issues.map((issue) => issue.id)).toEqual(issues.map((issue) => issue.id));
+    expect(listIssues.mock.calls.map(([params]) => [params?.limit, params?.offset])).toEqual([
+      [100, 0],
+      [30, 100],
     ]);
   });
 });

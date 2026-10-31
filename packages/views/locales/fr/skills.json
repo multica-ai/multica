@@ -1,12 +1,10 @@
 {
   "page": {
     "title": "Skills",
-    "learn_more": "En savoir plus →",
     "new_skill": "Nouveau skill",
-    "search_placeholder": "Rechercher des skills…",
     "scopes": {
       "all": {
-        "label": "Tous",
+        "label": "Tous les skills",
         "description": "Tous les skills de cet espace de travail"
       },
       "used": {
@@ -18,7 +16,7 @@
         "description": "Skills assignés à aucun agent"
       },
       "mine": {
-        "label": "Créés par moi",
+        "label": "Mes skills",
         "description": "Les skills que vous avez créés"
       }
     },
@@ -76,8 +74,6 @@
     "added_toast": "Ajouté à {{name}}",
     "add_failed_toast": "Échec de l'ajout du skill",
     "delete": "Supprimer",
-    "selected": "{{count}} sélectionnés",
-    "clear_selection": "Effacer la sélection",
     "delete_no_permission": "La sélection contient des skills que seuls leur créateur ou un administrateur peuvent supprimer",
     "delete_dialog_title_one": "Supprimer {{count}} skill ?",
     "delete_dialog_title_other": "Supprimer {{count}} skills ?",
@@ -105,29 +101,16 @@
     "added_multi_toast_other": "Ajouté à {{count}} agents"
   },
   "toolbar": {
-    "result_count_title": "Skills correspondants / tous les skills",
-    "filter_label": "Filtrer",
-    "filter_active_count_one": "{{count}} filtre",
-    "filter_active_count_other": "{{count}} filtres",
-    "clear_filters": "Effacer les filtres",
     "section_usage": "Utilisation",
     "section_labels": "Étiquettes",
     "filter_search_placeholder": "Filtrer...",
     "no_labels": "Aucune étiquette pour l'instant",
     "no_results": "Aucun résultat",
-    "display": "Affichage",
-    "sort_by": "Trier par",
-    "direction_asc": "Croissant",
-    "direction_desc": "Décroissant",
-    "section_columns": "Colonnes",
     "manage_labels": "Gérer les étiquettes...",
     "manage_labels_title": "Étiquettes des skills"
   },
   "detail": {
-    "all_skills": "Tous les skills",
     "read_only": "Lecture seule",
-    "delete_aria": "Supprimer le skill",
-    "delete_tooltip": "Supprimer le skill",
     "supporting_data_warning": "Certaines données de l'espace de travail n'ont pas pu être chargées. L'attribution des créateurs, les noms de runtimes ou les droits de modification peuvent apparaître incomplets jusqu'à la prochaine actualisation.",
     "delete_file": "Supprimer le fichier",
     "name_placeholder": "nom-du-skill",
@@ -163,8 +146,6 @@
     "toast_deleted": "Skill supprimé",
     "toast_delete_failed": "Échec de la suppression du skill",
     "refresh": {
-      "button": "Mettre à jour",
-      "tooltip": "Retélécharger ce skill depuis sa source",
       "source_github": "GitHub",
       "source_skills_sh": "Skills.sh",
       "source_clawhub": "ClawHub",
@@ -205,32 +186,18 @@
     },
     "header": {
       "files_one": "{{count}} fichier",
-      "files_other": "{{count}} fichiers",
-      "used_by_one": "{{count}} agent",
-      "used_by_other": "{{count}} agents",
-      "updated": "Mis à jour {{when}}",
-      "updated_by": "Mis à jour {{when}} par {{name}}"
-    },
-    "tabs": {
-      "aria": "Sections du skill",
-      "overview": "Vue d'ensemble",
-      "files_one": "Fichiers {{count}}",
-      "files_other": "Fichiers {{count}}"
+      "files_other": "{{count}} fichiers"
     },
     "overview": {
       "properties": "Propriétés",
-      "properties_hint": "Ces champs restent synchronisés avec le frontmatter du SKILL.md.",
       "name": "Nom",
       "description": "Description",
       "description_hint": "Les agents s’en servent pour décider quand charger le skill.",
       "labels": "Étiquettes",
-      "used_by_one": "Utilisé par {{count}} agent",
-      "used_by_other": "Utilisé par {{count}} agents",
       "used_by_empty": "Assigné à aucun agent pour l'instant. Ouvrez l'onglet Skills d'un agent pour l'assigner.",
       "permissions_owner": "Vous pouvez modifier et supprimer ce skill. Les changements prennent effet à la prochaine exécution d'agent.",
       "permissions_locked_creator": "Seuls le créateur ({{name}}) ou un administrateur de l'espace de travail peuvent modifier ce skill.",
       "permissions_locked": "Seuls le créateur ou un administrateur de l'espace de travail peuvent modifier ce skill.",
-      "properties_help": "À propos des propriétés du skill",
       "character_count": "{{count}} caractères"
     },
     "files": {
@@ -244,6 +211,21 @@
       "mode_preview": "Aperçu",
       "mode_edit": "Modifier",
       "mode_raw": "Texte brut"
+    },
+    "sections": {
+      "content": "Contenu",
+      "files": "Fichiers",
+      "edit": "Modifier",
+      "open": "Ouvrir",
+      "add": "Ajouter"
+    },
+    "menu": {
+      "copy_link": "Copier le lien",
+      "link_copied": "Lien copié",
+      "delete": "Supprimer le skill"
+    },
+    "panel": {
+      "add_description": "Ajouter une description"
     }
   },
   "create": {

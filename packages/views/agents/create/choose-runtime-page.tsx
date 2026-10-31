@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { ArrowRight, Search } from "@multica/ui/icons";
+import { ChevronRight, Search } from "@multica/ui/icons";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { agentBuilderSessionListOptions } from "@multica/core/agents";
 import { useAuthStore } from "@multica/core/auth";
@@ -19,6 +19,7 @@ import { ConnectRemoteDialog } from "../../runtimes/components/connect-remote-di
 import { RemoteRuntimeDialog } from "../../runtimes/components/remote-runtime-dialog";
 import { QODER_RUNTIME_LOCATOR } from "../../runtimes/components/qoder-detail-page";
 import { buildRuntimeMachines } from "../../runtimes/components/runtime-machines";
+import { CreateFlowFooter } from "./create-agent-footer";
 import { AgentCreateShell } from "./create-shell";
 import { buildRuntimeChoiceGroups, type HarnessOption } from "./runtime-choice";
 import { RuntimeChoiceList, qoderChoiceState } from "./runtime-choice-list";
@@ -200,8 +201,7 @@ export function ChooseRuntimePage({
       }
       step={t(($) => $.creation_studio.steps.runtime)}
       stepIndex={1}
-      onBack={() => backOrReplace(paths.agents())}
-      closeIcon
+      onClose={() => backOrReplace(paths.agents())}
     >
       <main className="min-h-0 flex-1 overflow-y-auto">
         <div className="mx-auto w-full max-w-3xl px-5 py-8 sm:px-8">
@@ -273,23 +273,25 @@ export function ChooseRuntimePage({
           </div>
         </div>
       </main>
-      <footer className="flex shrink-0 items-center gap-3 border-t bg-background px-5 py-3">
-        <p className="min-w-0 flex-1 truncate text-label text-muted-foreground">
-          {summary ? (
-            <>
+      <CreateFlowFooter
+        stepIndex={1}
+        status={
+          summary ? (
+            <p className="min-w-0 truncate text-caption text-muted-foreground">
               {t(($) => $.creation_studio.runtime_step.footer_selected)}{" "}
               <span className="font-medium text-foreground">{summary}</span>
-            </>
-          ) : null}
-        </p>
+            </p>
+          ) : null
+        }
+      >
         <Button variant="ghost" onClick={() => backOrReplace(paths.agents())}>
           {t(($) => $.creation_studio.runtime_step.cancel)}
         </Button>
         <Button disabled={!nextRuntimeId} onClick={() => nextRuntimeId && goNext(nextRuntimeId)}>
           {t(($) => $.creation_studio.runtime_step.next)}
-          <ArrowRight aria-hidden="true" className="size-3.5" />
+          <ChevronRight aria-hidden="true" className="size-3.5" />
         </Button>
-      </footer>
+      </CreateFlowFooter>
       {showConnectRemote ? (
         <ConnectRemoteDialog onClose={() => setShowConnectRemote(false)} />
       ) : null}

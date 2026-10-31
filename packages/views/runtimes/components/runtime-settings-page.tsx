@@ -7,6 +7,9 @@ import { useWorkspaceId } from "@multica/core/hooks";
 import { useWorkspacePaths } from "@multica/core/paths";
 import { runtimeListOptions } from "@multica/core/runtimes/queries";
 import { Skeleton } from "@multica/ui/components/ui/skeleton";
+import { cn } from "@multica/ui/lib/utils";
+import { CollectionPageState } from "../../layout/collection-page";
+import { OBJECT_PAGE_BODY, ObjectPage } from "../../layout/object-page";
 import { RuntimeDetail } from "./runtime-detail";
 import { buildRuntimeMachines } from "./runtime-machines";
 import { QoderDetailPage } from "./qoder-detail-page";
@@ -26,17 +29,26 @@ export function RuntimeSettingsPage({
   const decodedMachineId = decodeRouteParam(machineId);
   const decodedRuntimeId = decodeRouteParam(runtimeId);
 
+  const segments = [{ href: paths.runtimes(), label: t(($) => $.page.title) }];
+
   if (isLoading) {
     return (
-      <div className="flex h-full flex-col p-6">
-        <Skeleton className="h-12 w-1/2" />
-        <div className="mt-6 grid grid-cols-3 gap-3">
-          <Skeleton className="h-20 rounded-lg" />
-          <Skeleton className="h-20 rounded-lg" />
-          <Skeleton className="h-20 rounded-lg" />
+      <ObjectPage
+        layoutId="multica_runtime_detail_layout"
+        segments={segments}
+        leaf={<Skeleton className="h-4 w-40" />}
+      >
+        <div className={cn(OBJECT_PAGE_BODY, "space-y-8")}>
+          <div className="flex items-center gap-3">
+            <Skeleton className="size-12 rounded-xl" />
+            <div className="flex-1 space-y-2">
+              <Skeleton className="h-5 w-56" />
+              <Skeleton className="h-4 w-40" />
+            </div>
+          </div>
+          <Skeleton className="h-48 w-full rounded-lg" />
         </div>
-        <Skeleton className="mt-4 h-48 w-full rounded-lg" />
-      </div>
+      </ObjectPage>
     );
   }
 
@@ -47,16 +59,21 @@ export function RuntimeSettingsPage({
   );
   if (!target) {
     return (
-      <div className="flex h-full flex-col items-center justify-center text-muted-foreground">
-        <Server
-          aria-hidden="true"
-          className="h-10 w-10 text-faint-foreground"
+      <ObjectPage
+        layoutId="multica_runtime_detail_layout"
+        segments={segments}
+        leaf={
+          <span className="truncate text-muted-foreground">
+            {t(($) => $.detail_page.not_found_title)}
+          </span>
+        }
+      >
+        <CollectionPageState
+          icon={Server}
+          title={t(($) => $.detail_page.not_found_title)}
+          description={t(($) => $.detail_page.not_found_hint)}
         />
-        <p className="mt-3 text-body">{t(($) => $.detail_page.not_found_title)}</p>
-        <p className="mt-1 text-caption text-muted-foreground">
-          {t(($) => $.detail_page.not_found_hint)}
-        </p>
-      </div>
+      </ObjectPage>
     );
   }
   const { machine, runtime } = target;

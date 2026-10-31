@@ -50,21 +50,40 @@ func issueTableQueryWithoutFacet(input issueTableQuerySpec, facet issueTableFace
 		}
 	}
 
+	withoutNegate := func(field string) {
+		kept := make([]string, 0, len(input.Filters.Negate))
+		for _, negated := range input.Filters.Negate {
+			if negated != field {
+				kept = append(kept, negated)
+			}
+		}
+		if len(kept) == 0 {
+			kept = nil
+		}
+		output.Filters.Negate = kept
+	}
+
 	switch facet.Kind {
 	case "status":
 		output.Filters.Statuses = nil
+		withoutNegate("statuses")
 	case "priority":
 		output.Filters.Priorities = nil
+		withoutNegate("priorities")
 	case "assignee":
 		output.Filters.Assignees = nil
 		output.Filters.IncludeNoAssignee = false
+		withoutNegate("assignees")
 	case "creator":
 		output.Filters.Creators = nil
+		withoutNegate("creators")
 	case "project":
 		output.Filters.ProjectIDs = nil
 		output.Filters.IncludeNoProject = false
+		withoutNegate("project_ids")
 	case "label":
 		output.Filters.LabelIDs = nil
+		withoutNegate("label_ids")
 	case "property":
 		delete(output.Filters.Properties, facet.PropertyID)
 	case "working_agents":

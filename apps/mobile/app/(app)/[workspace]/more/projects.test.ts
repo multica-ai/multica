@@ -64,10 +64,10 @@ describe("native project browse screen wiring", () => {
   it("starts Active, switches using the native control and keeps all five states in the source list", () => {
     const first = render();
     expect(first.segment.props.selectedIndex).toBe(0);
-    expect(first.segment.props.values).toEqual(["lifecycle.active (3)", "lifecycle.completed (1)", "lifecycle.all (5)"]);
+    expect(first.segment.props.values).toEqual(["lifecycle.active (3)", "lifecycle.closed (2)", "lifecycle.all (5)"]);
     expect(first.list.props.data.map((p: Project) => p.status)).toEqual(["paused", "in_progress", "planned"]);
     first.segment.props.onChange({ nativeEvent: { selectedSegmentIndex: 1 } });
-    expect(render().list.props.data.map((p: Project) => p.status)).toEqual(["completed"]);
+    expect(render().list.props.data.map((p: Project) => p.status)).toEqual(["cancelled", "completed"]);
     first.segment.props.onChange({ nativeEvent: { selectedSegmentIndex: 2 } });
     const all = render().list;
     expect(all.props.data).toHaveLength(5);

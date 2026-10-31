@@ -15,10 +15,6 @@
     "row_menu": "Actions du squad",
     "archive_action": "Archiver"
   },
-  "inspector": {
-    "details_section": "Détails",
-    "archive_button": "Archiver"
-  },
   "member_type": {
     "agent": "Agent",
     "member": "Membre"
@@ -65,16 +61,8 @@
     "responsibility_placeholder": "De quoi ce squad est-il responsable ?",
     "save": "Enregistrer"
   },
-  "discard_changes_dialog": {
-    "title": "Abandonner les modifications non enregistrées ?",
-    "description": "Cet onglet contient des modifications non enregistrées. Changer d'onglet les abandonnera.",
-    "keep_editing": "Continuer à modifier",
-    "discard_button": "Abandonner"
-  },
   "members_tab": {
     "section_title": "Membres",
-    "section_count_one": "{{count}} membre dans ce squad",
-    "section_count_other": "{{count}} membres dans ce squad",
     "add_member_button": "Ajouter un membre",
     "create_agent_button": "Créer un agent",
     "leader_chip": "Chef",
@@ -87,19 +75,29 @@
     "status_unstable": "Instable",
     "status_archived": "Archivé",
     "issue_status_blocked": "bloqué",
-    "active_issue_more": "et {{count}} de plus",
-    "last_active_label": "dernière activité {{time}}"
+    "active_issue_more": "et {{count}} de plus"
   },
-  "detail_tabs": {
-    "members": "Membres",
-    "instructions": "Instructions"
+  "detail": {
+    "assign_work": "Assigner du travail",
+    "copy_link": "Copier le lien",
+    "link_copied": "Lien copié",
+    "not_found": "Squad introuvable",
+    "instructions": "Instructions",
+    "edit": "Modifier",
+    "cancel": "Annuler",
+    "recent_work": "Travail récent",
+    "recent_work_empty": "Aucune tâche n'a encore été assignée à ce squad.",
+    "member_menu": "Actions pour {{name}}",
+    "working_on": "Travaille sur"
   },
   "details": {
     "leader": "Chef",
     "members": "Membres",
     "created_by": "Créé par",
     "created": "Créé",
-    "updated": "Mis à jour"
+    "updated": "Mis à jour",
+    "visibility": "Visibilité",
+    "visibility_workspace": "Espace de travail"
   },
   "toasts": {
     "member_added": "Membre ajouté",
@@ -130,19 +128,8 @@
     "placeholder": "Par exemple : commencez toujours par écrire un test qui échoue. Privilégiez des commits petits et atomiques."
   },
   "scope": {
-    "mine": "Les miens",
-    "all": "Tous"
+    "mine": "Mes squads",
+    "all": "Tous les squads"
   },
-  "toolbar": {
-    "display": "Affichage",
-    "sort_by": "Trier par",
-    "direction_asc": "Croissant",
-    "direction_desc": "Décroissant",
-    "section_columns": "Colonnes",
-    "result_count_title": "Squads correspondants / tous les squads",
-    "filter_label": "Filtrer",
-    "filter_active_count_one": "{{count}} filtre",
-    "filter_active_count_other": "{{count}} filtres",
-    "clear_filters": "Effacer les filtres"
-  }
+  "toolbar": {}
 }

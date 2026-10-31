@@ -9,7 +9,6 @@ import {
   FolderGit2,
   Keyboard,
   KeyRound,
-  Laptop,
   ListPlus,
   Lock,
   MessagesSquare,
@@ -25,7 +24,6 @@ import {
   Workflow,
   Zap,
 } from "@multica/ui/icons";
-import { useAuthStore } from "@multica/core/auth";
 import { useCurrentWorkspace } from "@multica/core/paths";
 import { useFeatureEnabled } from "@multica/core/config";
 import { useCurrentMember } from "@multica/core/permissions";
@@ -33,13 +31,10 @@ import {
   BILLING_WORKSPACE_SUBSCRIPTIONS_FLAG,
   PLUGINS_V1_FLAG,
 } from "@multica/core/feature-flags";
-import { resolvePublicFileUrl } from "@multica/core/workspace/avatar-url";
-import { ActorAvatar } from "@multica/ui/components/common/actor-avatar";
 import { TooltipHint } from "@multica/ui/components/common/tooltip-hint";
 import { cn } from "@multica/ui/lib/utils";
 import { resolveSettingsLocation, settingsHref } from "./settings-navigation";
 import { AppLink, useNavigation } from "../../navigation";
-import { WorkspaceAvatar } from "../../workspace/workspace-avatar";
 import { AccountTab } from "./account-tab";
 import { PreferencesTab } from "./preferences-tab";
 import { TokensTab } from "./tokens-tab";
@@ -57,12 +52,19 @@ import { KeyboardShortcutsTab } from "./keyboard-shortcuts-tab";
 import { PluginsTab } from "./plugins-tab";
 import { McpTab } from "./mcp-tab";
 import { BillingTab } from "./billing-tab";
-import { SETTINGS_ANCHOR_ATTR } from "./settings-layout";
+import {
+  SETTINGS_ANCHOR_ATTR,
+  SettingsHeaderContext,
+  type SettingsHeaderSlots,
+} from "./settings-layout";
 import { searchSettings } from "./settings-search";
 import { HighlightText } from "../../search/highlight-text";
 import { useSettingsSearchIndex } from "./use-settings-search-index";
 import { WakeupsTab } from "./wakeups-tab";
-import { CollapsedNavTrigger } from "../../layout/page-header";
+import { CollapsedNavTrigger, PageHeader } from "../../layout/page-header";
+import { PanelHeader } from "../../layout/panel-nav";
+import { useListColumnCollapsed } from "../../layout/app-shell-context";
+import { ListColumn } from "../../layout/list-column";
 import { useT } from "../../i18n";
 
 export interface ExtraSettingsTab {
@@ -92,10 +94,8 @@ interface SettingsSubgroup {
 interface SettingsScopeGroup {
   key: "personal" | "workspace" | "device";
   label: string;
-  /** Leading mark: whose settings these are. */
-  mark: React.ReactNode;
-  /** Trailing detail (the user's name, "Workspace"). */
-  tag?: string;
+  /** Nav heading of the unlabeled first subgroup, when it differs from `label`. */
+  navLabel?: string;
   subgroups: SettingsSubgroup[];
 }
 
@@ -106,10 +106,10 @@ export function SettingsPage({ extraDeviceTabs = [] }: SettingsPageProps = {}) {
   const { t } = useT("settings");
   const workspace = useCurrentWorkspace();
   const workspaceName = workspace?.name ?? t(($) => $.page.workspace_fallback);
-  const user = useAuthStore((s) => s.user);
   const { role } = useCurrentMember(workspace?.id ?? "");
   const isMember = role === "member";
   const navigation = useNavigation();
+  const listCollapsed = useListColumnCollapsed();
   const pluginsEnabled = useFeatureEnabled(PLUGINS_V1_FLAG, false);
   const billingEnabled = useFeatureEnabled(
     BILLING_WORKSPACE_SUBSCRIPTIONS_FLAG,
@@ -128,15 +128,6 @@ export function SettingsPage({ extraDeviceTabs = [] }: SettingsPageProps = {}) {
     {
       key: "personal",
       label: t(($) => $.page.groups.personal),
-      mark: (
-        <ActorAvatar
-          name={user?.name ?? ""}
-          initials={(user?.name ?? "U").charAt(0).toUpperCase()}
-          avatarUrl={resolvePublicFileUrl(user?.avatar_url)}
-          size="xs"
-        />
-      ),
-      tag: user?.name,
       subgroups: [
         {
           key: "personal",
@@ -171,15 +162,7 @@ export function SettingsPage({ extraDeviceTabs = [] }: SettingsPageProps = {}) {
     {
       key: "workspace",
       label: workspaceName,
-      mark: (
-        <WorkspaceAvatar
-          name={workspaceName}
-          avatarUrl={workspace?.avatar_url}
-          size="sm"
-          className="size-4 rounded-xs"
-        />
-      ),
-      tag: t(($) => $.page.groups.workspace),
+      navLabel: t(($) => $.page.groups.workspace),
       subgroups: [
         {
           key: "workspace",
@@ -264,7 +247,6 @@ export function SettingsPage({ extraDeviceTabs = [] }: SettingsPageProps = {}) {
           {
             key: "device" as const,
             label: t(($) => $.page.groups.device),
-            mark: <Laptop aria-hidden="true" className="size-4 text-muted-foreground" />,
             subgroups: [{ key: "device", entries: extraDeviceTabs as SettingsEntry[] }],
           },
         ]
@@ -287,6 +269,22 @@ export function SettingsPage({ extraDeviceTabs = [] }: SettingsPageProps = {}) {
         subgroup.entries.some((item) => item.value === value),
       ),
     );
+
+  // --- header ---------------------------------------------------------------
+  const [headerTrail, setHeaderTrail] = useState<HTMLElement | null>(null);
+  const [headerMeta, setHeaderMeta] = useState<HTMLElement | null>(null);
+  const [headerActions, setHeaderActions] = useState<HTMLElement | null>(null);
+  const [detailOpen, setDetailOpen] = useState(false);
+  const headerSlots = useMemo<SettingsHeaderSlots>(
+    () => ({
+      trail: headerTrail,
+      meta: headerMeta,
+      actions: headerActions,
+      onDetailChange: setDetailOpen,
+    }),
+    [headerTrail, headerMeta, headerActions],
+  );
+  const ActiveIcon = active.icon;
 
   // --- search ---------------------------------------------------------------
   const [query, setQuery] = useState("");
@@ -358,7 +356,7 @@ export function SettingsPage({ extraDeviceTabs = [] }: SettingsPageProps = {}) {
         className={cn(
           "flex min-h-8 items-center gap-2.5 rounded-lg px-3 py-1.5 text-body transition-colors focus-visible:outline-2 focus-visible:outline-ring",
           active.value === item.value
-            ? "bg-surface-selected font-medium text-surface-selected-foreground hover:bg-surface-selected"
+            ? "bg-surface-selected text-surface-selected-foreground hover:bg-surface-selected"
             : "text-muted-foreground hover:bg-surface-hover hover:text-foreground",
         )}
       >
@@ -424,13 +422,13 @@ export function SettingsPage({ extraDeviceTabs = [] }: SettingsPageProps = {}) {
 
   return (
     <div className="flex min-h-0 flex-1 flex-col overflow-hidden bg-background md:flex-row">
-      <aside className="shrink-0 border-b border-surface-border md:flex md:w-60 md:flex-col md:border-b-0 md:border-r">
-        <div className="flex h-16 shrink-0 items-center gap-1 px-4 md:px-5">
-          <CollapsedNavTrigger />
-          <h1 className="text-title font-semibold tracking-tight">
-            {t(($) => $.page.title)}
-          </h1>
-        </div>
+      <ListColumn
+        collapsed={listCollapsed}
+        // Below md the navigation stacks above the content as a select.
+        className="max-md:h-auto max-md:w-full"
+        innerClassName="border-surface-border max-md:h-auto max-md:w-full max-md:border-r-0 max-md:border-b"
+      >
+        <PanelHeader as="h1" title={t(($) => $.page.title)} leading={<CollapsedNavTrigger />} />
         <div className="px-4 pb-4 md:hidden">
           <label className="sr-only" htmlFor="settings-navigation">
             {t(($) => $.page.navigate)}
@@ -512,65 +510,66 @@ export function SettingsPage({ extraDeviceTabs = [] }: SettingsPageProps = {}) {
           {query ? (
             searchResults
           ) : (
-            <div className="divide-y divide-surface-border">
-              {groups.map((group) => (
-                <section
-                  key={group.key}
-                  aria-labelledby={`settings-group-${group.key}`}
-                  className="py-2.5 first:pt-0"
-                >
-                  <h2
-                    id={`settings-group-${group.key}`}
-                    className="flex h-8 min-w-0 items-center gap-2.5 px-3 text-label font-semibold text-foreground"
-                  >
-                    <span className="flex size-4 shrink-0 items-center justify-center">
-                      {group.mark}
-                    </span>
-                    <span className="truncate">{group.label}</span>
-                    {group.tag ? (
-                      <span className="ml-auto shrink-0 truncate text-micro font-medium text-muted-foreground">
-                        {group.tag}
-                      </span>
-                    ) : null}
-                  </h2>
-                  {group.subgroups.map((subgroup) => (
-                    <div
-                      key={subgroup.key}
-                      role={subgroup.label ? "group" : undefined}
-                      aria-labelledby={
-                        subgroup.label ? `settings-subgroup-${subgroup.key}` : undefined
-                      }
+            // One level of headings: each page names its own scope in a badge,
+            // so the nav only groups. Same section rhythm as the space panels.
+            groups.flatMap((group) =>
+              group.subgroups.map((subgroup) => {
+                const id = `settings-group-${group.key}-${subgroup.key}`;
+                return (
+                  <section key={id} aria-labelledby={id} className="mt-5 first:mt-0">
+                    <h2
+                      id={id}
+                      className="flex h-7 min-w-0 items-center px-3 text-caption font-medium text-muted-foreground"
                     >
-                      {subgroup.label ? (
-                        <h3
-                          id={`settings-subgroup-${subgroup.key}`}
-                          className="px-3 pb-1 pt-3 text-caption font-medium text-muted-foreground"
-                        >
-                          {subgroup.label}
-                        </h3>
-                      ) : null}
-                      <ul className="space-y-px">{subgroup.entries.map(navItem)}</ul>
-                    </div>
-                  ))}
-                </section>
-              ))}
-            </div>
+                      <span className="truncate">
+                        {subgroup.label ?? group.navLabel ?? group.label}
+                      </span>
+                    </h2>
+                    <ul className="space-y-px">{subgroup.entries.map(navItem)}</ul>
+                  </section>
+                );
+              }),
+            )
           )}
         </nav>
-      </aside>
-      <div
-        ref={contentRef}
-        key={`${active.value}:${location.integration ?? ""}`}
-        className="min-w-0 flex-1 overflow-y-auto overscroll-contain"
-      >
-        <div
-          className={cn(
-            "mx-auto w-full px-4 py-6 sm:px-6 md:px-10 md:py-8",
-            active.wide ? "max-w-5xl" : "max-w-4xl",
-          )}
-        >
-          {active.content}
-        </div>
+      </ListColumn>
+      <div className="flex min-h-0 min-w-0 flex-1 flex-col">
+        <PageHeader leading={listCollapsed ? <CollapsedNavTrigger /> : false}>
+          <div className="flex min-w-0 flex-1 items-center gap-2">
+            <h2 className="flex min-w-0 items-center gap-2 px-2 text-body font-medium">
+              <ActiveIcon className="size-4 shrink-0 text-muted-foreground" aria-hidden="true" />
+              {detailOpen ? (
+                <AppLink
+                  href={href(active.value)}
+                  className="shrink-0 text-muted-foreground transition-colors hover:text-foreground"
+                >
+                  {active.label}
+                </AppLink>
+              ) : (
+                <span className="truncate">{active.label}</span>
+              )}
+              <span ref={setHeaderTrail} className="contents" />
+            </h2>
+            <span ref={setHeaderMeta} className="contents" />
+          </div>
+          <div ref={setHeaderActions} className="flex shrink-0 items-center gap-2 empty:hidden" />
+        </PageHeader>
+        <SettingsHeaderContext.Provider value={headerSlots}>
+          <div
+            ref={contentRef}
+            key={`${active.value}:${location.integration ?? ""}`}
+            className="min-h-0 min-w-0 flex-1 overflow-y-auto overscroll-contain"
+          >
+            <div
+              className={cn(
+                "mx-auto w-full px-4 py-6 sm:px-6 md:px-10 md:py-8",
+                active.wide ? "max-w-5xl" : "max-w-4xl",
+              )}
+            >
+              {active.content}
+            </div>
+          </div>
+        </SettingsHeaderContext.Provider>
       </div>
     </div>
   );

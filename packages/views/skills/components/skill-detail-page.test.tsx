@@ -1,34 +1,19 @@
 // @vitest-environment jsdom
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { fireEvent, render, screen } from "@testing-library/react";
+import { fireEvent, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import type { Skill } from "@multica/core/types";
-import { I18nProvider } from "@multica/core/i18n/react";
-import enCommon from "../../locales/en/common.json";
-import enSkills from "../../locales/en/skills.json";
+import { toast } from "sonner";
+import { renderWithI18n } from "../../test/i18n";
 import { NavigationProvider, type NavigationAdapter } from "../../navigation";
-
-const TEST_RESOURCES = { en: { common: enCommon, skills: enSkills } };
-
-// MUL-7107: every band of a detail page reads the shared rail. The read-only
-// capability banner was the one left behind, so a viewer without edit rights
-// saw a near-full-width card above centred content on a wide window. The
-// constants are overridden with sentinels because their real values are
-// ordinary Tailwind classes a hand-written element could match by accident.
-const RAIL_SENTINEL = "rail-sentinel";
-const GUTTER_SENTINEL = "gutter-sentinel";
-vi.mock("../../layout/page-header", async (importOriginal) => ({
-  ...(await importOriginal<typeof import("../../layout/page-header")>()),
-  PAGE_RAIL: "rail-sentinel",
-  PAGE_GUTTER: "gutter-sentinel",
-}));
 
 const skillRef = vi.hoisted(() => ({ current: null as unknown }));
 const agentsRef = vi.hoisted(() => ({ current: [] as unknown[] }));
 const membersRef = vi.hoisted(() => ({ current: [] as unknown[] }));
 const canEditRef = vi.hoisted(() => ({ current: true }));
+const copyTextMock = vi.hoisted(() => vi.fn(() => Promise.resolve(true)));
 
 vi.mock("@multica/core/hooks", () => ({ useWorkspaceId: () => "ws-1" }));
 vi.mock("@multica/core/workspace/queries", () => ({
@@ -71,7 +56,10 @@ vi.mock("@multica/core/auth", () => {
 // SkillIcon, so the real module has to stay reachable.
 vi.mock("@multica/core/paths", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@multica/core/paths")>()),
-  useWorkspacePaths: () => ({ skills: () => "/acme/skills" }),
+  useWorkspacePaths: () => ({
+    skills: () => "/acme/skills",
+    skillDetail: (id: string) => `/acme/skills/${id}`,
+  }),
 }));
 vi.mock("@multica/core/permissions", () => ({
   useSkillPermissions: () => ({ canEdit: { allowed: true, reason: null } }),
@@ -82,9 +70,24 @@ vi.mock("@multica/core/workspace/avatar-url", () => ({
 vi.mock("@multica/core/api", () => ({
   api: { updateSkill: vi.fn(), deleteSkill: vi.fn() },
 }));
+vi.mock("@multica/ui/lib/clipboard", () => ({ copyText: copyTextMock }));
 vi.mock("sonner", () => ({ toast: { success: vi.fn(), error: vi.fn() } }));
 vi.mock("../hooks/use-can-edit-skill", () => ({
   useCanEditSkill: () => canEditRef.current,
+}));
+
+// jsdom gives every element a zero-size rect, so a live resize handle claims
+// every pointerdown on the page and no menu could open.
+vi.mock("react-resizable-panels", () => ({
+  useDefaultLayout: () => ({ defaultLayout: undefined, onLayoutChanged: vi.fn() }),
+  usePanelRef: () => ({
+    current: { isCollapsed: () => false, expand: vi.fn(), collapse: vi.fn() },
+  }),
+}));
+vi.mock("@multica/ui/components/ui/resizable", () => ({
+  ResizablePanelGroup: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
+  ResizablePanel: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
+  ResizableHandle: () => null,
 }));
 
 // Heavy leaves that carry no behaviour under test.
@@ -96,7 +99,10 @@ vi.mock("../../rich-content", () => ({
 vi.mock("../../labels/resource-label-picker", () => ({
   ResourceLabelPicker: () => <div data-testid="labels" />,
 }));
-vi.mock("./skill-list-actions", () => ({ AddToAgentDialog: () => null }));
+vi.mock("./skill-list-actions", () => ({
+  AddToAgentDialog: ({ open }: { open: boolean }) =>
+    open ? <div data-testid="add-to-agent-dialog" /> : null,
+}));
 vi.mock("@multica/ui/components/common/capability-banner", () => ({
   CapabilityBanner: () => <div data-testid="capability-banner" />,
 }));
@@ -109,6 +115,8 @@ import { SkillDetailPage } from "./skill-detail-page";
 const LONG_DESCRIPTION =
   "Animation for product interfaces — when to animate and when not to. " +
   "Triggers on: animation, easing, cubic-bezier, spring, keyframes.";
+
+const SOURCE_URL = "https://github.com/anthropics/skills/tree/main/animations";
 
 const baseSkill: Skill = {
   id: "skill-1",
@@ -129,26 +137,24 @@ function renderPage(searchParams = new URLSearchParams()) {
   const queryClient = new QueryClient({
     defaultOptions: { queries: { retry: false } },
   });
-  const replace = vi.fn();
+  const push = vi.fn();
   const navigation: NavigationAdapter = {
-    push: vi.fn(),
-    replace,
+    push,
+    replace: vi.fn(),
     back: vi.fn(),
     pathname: "/acme/skills/skill-1",
     searchParams,
     hash: "",
-    getShareableUrl: (path) => path,
+    getShareableUrl: (path) => `https://app.test${path}`,
   };
-  render(
-    <I18nProvider locale="en" resources={TEST_RESOURCES}>
-      <NavigationProvider value={navigation}>
-        <QueryClientProvider client={queryClient}>
-          <SkillDetailPage skillId="skill-1" />
-        </QueryClientProvider>
-      </NavigationProvider>
-    </I18nProvider>,
+  renderWithI18n(
+    <NavigationProvider value={navigation}>
+      <QueryClientProvider client={queryClient}>
+        <SkillDetailPage skillId="skill-1" />
+      </QueryClientProvider>
+    </NavigationProvider>,
   );
-  return { replace, queryClient };
+  return { push, queryClient };
 }
 
 /** Publishes a new server version of the skill, as a `skill:updated` event would. */
@@ -162,40 +168,178 @@ async function remoteUpdate(queryClient: QueryClient, next: Partial<Skill>) {
   await new Promise((resolve) => setTimeout(resolve, 0));
 }
 
+function section(name: string) {
+  return screen.getByRole("heading", { name, level: 2 }).closest("section")!;
+}
+
+/** The description lives behind its panel row; opening it yields the field. */
+async function openDescription(current = LONG_DESCRIPTION) {
+  await userEvent.click(await screen.findByRole("button", { name: current }));
+  return (await screen.findByLabelText("Description")) as HTMLTextAreaElement;
+}
+
+async function openMoreActions() {
+  await userEvent.click(await screen.findByRole("button", { name: "More actions" }));
+  return screen.findByRole("menu");
+}
+
 beforeEach(() => {
   vi.clearAllMocks();
   skillRef.current = baseSkill;
   agentsRef.current = [];
-  membersRef.current = [{ user_id: "user-1", role: "member" }];
+  membersRef.current = [
+    { user_id: "user-1", role: "member", name: "Ada Lovelace", avatar_url: null },
+  ];
   canEditRef.current = true;
 });
 
-describe("SkillDetailPage tabs", () => {
-  it("opens on Overview and exposes exactly two tabs", async () => {
+describe("SkillDetailPage header", () => {
+  it("puts the skill under Skills in the breadcrumb, with Add to agent as the one solid action", async () => {
     renderPage();
-    const tabs = await screen.findAllByRole("tab", { name: /Overview|Files/ });
-    expect(tabs.map((t) => t.textContent)).toEqual(["Overview", "Files 2"]);
-    // A Settings tab would only hold a delete button and a read-only
-    // sentence — the skill update payload has no settings-shaped fields.
-    expect(screen.queryByRole("tab", { name: "Settings" })).toBeNull();
+    await screen.findByRole("heading", { name: "aiforui-animations", level: 1 });
+    const header = screen.getByRole("banner");
+    expect(within(header).getByRole("link", { name: "Skills" })).toHaveAttribute(
+      "href",
+      "/acme/skills",
+    );
+    expect(within(header).getByText("aiforui-animations")).toBeInTheDocument();
+
+    await userEvent.click(within(header).getByRole("button", { name: "Add to agent" }));
+    expect(screen.getByTestId("add-to-agent-dialog")).toBeInTheDocument();
+  });
+
+  it("keeps copy link, update from source and delete in the ⋯ menu", async () => {
+    skillRef.current = {
+      ...baseSkill,
+      config: { origin: { type: "github", source_url: SOURCE_URL } },
+    };
+    renderPage();
+    const menu = await openMoreActions();
     expect(
-      screen.getByRole("tab", { name: "Overview" }).getAttribute("aria-selected"),
+      within(menu).getAllByRole("menuitem").map((item) => item.textContent),
+    ).toEqual(["Copy link", "Update from source", "Delete skill"]);
+  });
+
+  it("copies the skill's shareable link", async () => {
+    renderPage();
+    const menu = await openMoreActions();
+    await userEvent.click(within(menu).getByRole("menuitem", { name: "Copy link" }));
+    expect(copyTextMock).toHaveBeenCalledWith("https://app.test/acme/skills/skill-1");
+    await vi.waitFor(() => expect(toast.success).toHaveBeenCalledWith("Link copied"));
+  });
+
+  it("confirms before deleting", async () => {
+    renderPage();
+    const menu = await openMoreActions();
+    await userEvent.click(within(menu).getByRole("menuitem", { name: "Delete skill" }));
+    expect(await screen.findByRole("dialog")).toHaveTextContent("Delete skill");
+  });
+
+  it("offers read-only viewers only what they can do", async () => {
+    canEditRef.current = false;
+    renderPage();
+    const menu = await openMoreActions();
+    expect(
+      within(menu).getAllByRole("menuitem").map((item) => item.textContent),
+    ).toEqual(["Copy link"]);
+  });
+});
+
+describe("SkillDetailPage body", () => {
+  it("reads as identity, then Content, Files and Used by — with no tabs", async () => {
+    renderPage();
+    expect(
+      await screen.findByRole("heading", { name: "aiforui-animations", level: 1 }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getAllByRole("heading", { level: 2 }).map((h) => h.textContent),
+    ).toEqual(["Content", "Files", "Used by"]);
+    expect(screen.queryAllByRole("tab")).toHaveLength(0);
+  });
+
+  it("previews SKILL.md without its frontmatter", async () => {
+    renderPage();
+    const preview = await screen.findByTestId("skill-content-preview");
+    expect(preview.textContent).toContain("# Interface Animations");
+    expect(preview.textContent).not.toContain("name: aiforui-animations");
+  });
+
+  it("lists supporting files with their count", async () => {
+    renderPage();
+    await screen.findByRole("heading", { name: "Files", level: 2 });
+    const files = section("Files");
+    expect(within(files).getByText("1")).toBeInTheDocument();
+    expect(within(files).getByRole("button", { name: "patterns.md" })).toBeInTheDocument();
+  });
+
+  it("opens Add to agent from the Used by section too", async () => {
+    renderPage();
+    await screen.findByRole("heading", { name: "Used by", level: 2 });
+    await userEvent.click(
+      within(section("Used by")).getByRole("button", { name: "Add to agent" }),
+    );
+    expect(screen.getByTestId("add-to-agent-dialog")).toBeInTheDocument();
+  });
+
+  it("gives read-only viewers Open instead of Edit, and no Add", async () => {
+    canEditRef.current = false;
+    renderPage();
+    await screen.findByRole("heading", { name: "Content", level: 2 });
+    expect(within(section("Content")).getByRole("button", { name: "Open" })).toBeInTheDocument();
+    expect(within(section("Content")).queryByRole("button", { name: "Edit" })).toBeNull();
+    expect(within(section("Files")).queryByRole("button", { name: "Add" })).toBeNull();
+    expect(screen.getByText("Read-only")).toBeInTheDocument();
+  });
+});
+
+describe("SkillDetailPage files view", () => {
+  it("Content › Edit opens SKILL.md in a focused editor", async () => {
+    const { push } = renderPage();
+    await screen.findByRole("heading", { name: "Content", level: 2 });
+    await userEvent.click(within(section("Content")).getByRole("button", { name: "Edit" }));
+
+    expect(push).toHaveBeenCalledWith("/acme/skills/skill-1?view=files");
+    expect(document.activeElement).toBe(
+      screen.getByRole("textbox", { name: /SKILL\.md/ }),
+    );
+    // The breadcrumb walks back to the skill, then names the open file.
+    const header = screen.getByRole("banner");
+    expect(
+      within(header).getByRole("link", { name: "aiforui-animations" }),
+    ).toHaveAttribute("href", "/acme/skills/skill-1");
+    expect(within(header).getByText("SKILL.md")).toBeInTheDocument();
+  });
+
+  it("opens a supporting file from the Files section", async () => {
+    renderPage();
+    await screen.findByRole("heading", { name: "Files", level: 2 });
+    await userEvent.click(
+      within(section("Files")).getByRole("button", { name: "patterns.md" }),
+    );
+    expect(
+      screen.getByRole("tab", { name: "patterns.md" }).getAttribute("aria-selected"),
     ).toBe("true");
   });
 
-  it("mirrors the active tab into ?view= so the pane survives a reload", async () => {
-    const { replace } = renderPage();
-    fireEvent.click(await screen.findByRole("tab", { name: "Files 2" }));
-    expect(replace).toHaveBeenCalledWith("/acme/skills/skill-1?view=files");
+  it("Files › Add opens the editor on the new-file field", async () => {
+    renderPage();
+    await screen.findByRole("heading", { name: "Files", level: 2 });
+    await userEvent.click(within(section("Files")).getByRole("button", { name: "Add" }));
+    expect(await screen.findByPlaceholderText("templates/review.md")).toBeInTheDocument();
   });
 
-  it("restores the Files tab from ?view=files", async () => {
+  it("restores the files from ?view=files, the link the retired Files tab wrote", async () => {
     renderPage(new URLSearchParams("view=files"));
     expect(
-      (await screen.findByRole("tab", { name: "Files 2" })).getAttribute(
-        "aria-selected",
-      ),
+      (await screen.findByRole("tab", { name: "SKILL.md" })).getAttribute("aria-selected"),
     ).toBe("true");
+  });
+
+  it("lands on the overview for an old ?tab= link", async () => {
+    renderPage(new URLSearchParams("tab=settings"));
+    expect(
+      await screen.findByRole("heading", { name: "Content", level: 2 }),
+    ).toBeInTheDocument();
   });
 });
 
@@ -284,15 +428,71 @@ describe("SkillDetailPage edit action (MUL-5654)", () => {
   });
 });
 
+describe("SkillDetailPage properties panel", () => {
+  it("edits the name in place", async () => {
+    renderPage();
+    const field = (await screen.findByLabelText("Name")) as HTMLInputElement;
+    expect(field.value).toBe("aiforui-animations");
+  });
+
+  it("opens the whole description in a field sized for it", async () => {
+    renderPage();
+    const field = await openDescription();
+    expect(field.value).toBe(LONG_DESCRIPTION);
+    expect(Number(field.rows)).toBeGreaterThanOrEqual(4);
+    expect(
+      screen.getByText(`${LONG_DESCRIPTION.length} characters`, { exact: false }),
+    ).toBeTruthy();
+  });
+
+  it("links an imported origin to its source", async () => {
+    skillRef.current = {
+      ...baseSkill,
+      config: { origin: { type: "github", source_url: SOURCE_URL } },
+    };
+    renderPage();
+    const link = (await screen.findByRole("link", {
+      name: "Imported · GitHub",
+    })) as HTMLAnchorElement;
+    expect(link.getAttribute("href")).toBe(SOURCE_URL);
+    expect(link.getAttribute("target")).toBe("_blank");
+    expect(link.getAttribute("rel")).toContain("noopener");
+  });
+
+  it("keeps manual origins as plain text", async () => {
+    renderPage();
+    expect(await screen.findByText("Created manually")).toBeTruthy();
+    expect(
+      screen.queryByRole("link", { name: "Created manually" }),
+    ).toBeNull();
+  });
+
+  // Which source_urls are linkable is originSourceUrl's contract; its full
+  // matrix lives in ../lib/origin.test.ts. What belongs here is the row's
+  // behaviour when the helper refuses: it degrades to plain text, still
+  // naming the origin, rather than dropping the label along with the href.
+  it("degrades a refused source_url to plain text, keeping the label", async () => {
+    skillRef.current = {
+      ...baseSkill,
+      config: {
+        origin: { type: "github", source_url: "https://evil.example/skills" },
+      },
+    };
+    renderPage();
+    expect(await screen.findByText("Imported · GitHub")).toBeTruthy();
+    expect(
+      screen.queryByRole("link", { name: "Imported · GitHub" }),
+    ).toBeNull();
+  });
+});
+
 describe("SkillDetailPage save pill", () => {
   it("is absent while clean and floats in with a change summary once dirty", async () => {
     renderPage();
-    await screen.findByRole("tab", { name: "Overview" });
+    const field = await openDescription();
     expect(screen.queryByRole("button", { name: /Save changes/ })).toBeNull();
 
-    fireEvent.change(screen.getByLabelText("Description"), {
-      target: { value: "changed" },
-    });
+    fireEvent.change(field, { target: { value: "changed" } });
     expect(screen.getByText("Changed: Description")).toBeTruthy();
     expect(
       screen.getByRole("button", { name: /Save changes/ }).hasAttribute("disabled"),
@@ -304,7 +504,7 @@ describe("SkillDetailPage save pill", () => {
     fireEvent.change(await screen.findByLabelText("Name"), {
       target: { value: "renamed-skill" },
     });
-    fireEvent.change(screen.getByLabelText("Description"), {
+    fireEvent.change(await openDescription(), {
       target: { value: "changed" },
     });
     expect(screen.getByText("Changed: Name · Description")).toBeTruthy();
@@ -328,18 +528,6 @@ describe("SkillDetailPage save pill", () => {
   });
 });
 
-describe("SkillDetailPage properties", () => {
-  it("renders the whole description in an editable field sized for it", async () => {
-    renderPage();
-    const field = (await screen.findByLabelText("Description")) as HTMLTextAreaElement;
-    expect(field.value).toBe(LONG_DESCRIPTION);
-    expect(Number(field.rows)).toBeGreaterThanOrEqual(4);
-    expect(
-      screen.getByText(`${LONG_DESCRIPTION.length} characters`, { exact: false }),
-    ).toBeTruthy();
-  });
-});
-
 /**
  * MUL-5645. Dirty state is measured against the seeded baseline, not against
  * the latest server skill. The two failures that rule prevents:
@@ -358,37 +546,36 @@ describe("SkillDetailPage draft baseline (MUL-5645)", () => {
   it("opens clean when the description carries a trailing newline", async () => {
     skillRef.current = { ...baseSkill, description: `${LONG_DESCRIPTION}\n` };
     renderPage();
-    await screen.findAllByRole("tab", { name: /Overview|Files/ });
+    await screen.findByRole("heading", { name: "Content", level: 2 });
     expect(screen.queryByText(/^Changed:/)).toBeNull();
   });
 
   it("stays clean after Discard on a trailing-newline description", async () => {
     skillRef.current = { ...baseSkill, description: `${LONG_DESCRIPTION}\n` };
     renderPage();
-    const field = (await screen.findByLabelText(
-      "Description",
-    )) as HTMLTextAreaElement;
-    fireEvent.change(field, { target: { value: "edited" } });
+    fireEvent.change(await openDescription(), { target: { value: "edited" } });
     fireEvent.click(await screen.findByRole("button", { name: "Discard" }));
     expect(screen.queryByText(/^Changed:/)).toBeNull();
   });
 
   it("pulls a remote edit in silently while the draft is untouched", async () => {
     const { queryClient } = renderPage();
-    await screen.findAllByRole("tab", { name: /Overview|Files/ });
+    await screen.findByRole("heading", { name: "Content", level: 2 });
 
     await remoteUpdate(queryClient, { description: "Rewritten by the agent" });
 
     // The new text reaching the field IS the fix: the old code left the editor
     // frozen on the pre-update value behind a conflict banner.
-    expect(await screen.findByDisplayValue("Rewritten by the agent")).toBeTruthy();
+    expect(await openDescription("Rewritten by the agent")).toHaveValue(
+      "Rewritten by the agent",
+    );
     expect(screen.queryByText(CONFLICT_BANNER)).toBeNull();
     expect(screen.queryByText(/^Changed:/)).toBeNull();
   });
 
   it("pulls a remote SKILL.md edit in silently too", async () => {
     const { queryClient } = renderPage(new URLSearchParams("view=files"));
-    await screen.findAllByRole("tab", { name: /Overview|Files/ });
+    await screen.findByRole("tab", { name: "SKILL.md" });
 
     await remoteUpdate(queryClient, {
       content: `${baseSkill.content}\n## Added remotely\n`,
@@ -402,9 +589,7 @@ describe("SkillDetailPage draft baseline (MUL-5645)", () => {
 
   it("releases the conflict once the user reverts their own edits", async () => {
     const { queryClient } = renderPage();
-    const field = (await screen.findByLabelText(
-      "Description",
-    )) as HTMLTextAreaElement;
+    const field = await openDescription();
     fireEvent.change(field, { target: { value: "my unsaved edit" } });
 
     await remoteUpdate(queryClient, { description: "Rewritten by the agent" });
@@ -421,85 +606,12 @@ describe("SkillDetailPage draft baseline (MUL-5645)", () => {
 
   it("keeps the draft and warns when a remote edit lands on real local edits", async () => {
     const { queryClient } = renderPage();
-    const field = (await screen.findByLabelText(
-      "Description",
-    )) as HTMLTextAreaElement;
+    const field = await openDescription();
     fireEvent.change(field, { target: { value: "my unsaved edit" } });
 
     await remoteUpdate(queryClient, { description: "Rewritten by the agent" });
 
     expect(await screen.findByText(CONFLICT_BANNER)).toBeTruthy();
-    expect(
-      (screen.getByLabelText("Description") as HTMLTextAreaElement).value,
-    ).toBe("my unsaved edit");
-  });
-});
-
-describe("SkillDetailPage origin link", () => {
-  const SOURCE_URL = "https://github.com/anthropics/skills/tree/main/animations";
-
-  it("links the imported-origin chip to its source", async () => {
-    skillRef.current = {
-      ...baseSkill,
-      config: { origin: { type: "github", source_url: SOURCE_URL } },
-    };
-    renderPage();
-    const link = (await screen.findByRole("link", {
-      name: "Imported · GitHub",
-    })) as HTMLAnchorElement;
-    expect(link.getAttribute("href")).toBe(SOURCE_URL);
-    expect(link.getAttribute("target")).toBe("_blank");
-    expect(link.getAttribute("rel")).toContain("noopener");
-  });
-
-  it("keeps manual origins as plain text", async () => {
-    renderPage();
-    expect(await screen.findByText("Created manually")).toBeTruthy();
-    expect(
-      screen.queryByRole("link", { name: "Created manually" }),
-    ).toBeNull();
-  });
-
-  // Which source_urls are linkable is originSourceUrl's contract; its full
-  // matrix lives in ../lib/origin.test.ts. What belongs here is the chip's
-  // behaviour when the helper refuses: it degrades to plain text, still
-  // naming the origin, rather than dropping the label along with the href.
-  it("degrades a refused source_url to plain text, keeping the chip", async () => {
-    skillRef.current = {
-      ...baseSkill,
-      config: {
-        origin: { type: "github", source_url: "https://evil.example/skills" },
-      },
-    };
-    renderPage();
-    expect(await screen.findByText("Imported · GitHub")).toBeTruthy();
-    expect(
-      screen.queryByRole("link", { name: "Imported · GitHub" }),
-    ).toBeNull();
-  });
-});
-
-
-describe("SkillDetailPage rail", () => {
-  it("keeps the read-only capability banner on the shared rail", async () => {
-    canEditRef.current = false;
-    renderPage();
-    await screen.findAllByRole("tab", { name: /Overview|Files/ });
-
-    const banner = document.body.querySelector(
-      `.${RAIL_SENTINEL}.${GUTTER_SENTINEL}.pt-3`,
-    );
-    expect(banner).toBeTruthy();
-  });
-
-  it("puts the identity strip and the tab row on that same rail", async () => {
-    renderPage();
-    await screen.findAllByRole("tab", { name: /Overview|Files/ });
-
-    const railed = document.body.querySelectorAll(
-      `.${RAIL_SENTINEL}.${GUTTER_SENTINEL}`,
-    );
-    // Identity strip, tab row and the Overview panel at minimum.
-    expect(railed.length).toBeGreaterThanOrEqual(3);
+    expect(field.value).toBe("my unsaved edit");
   });
 });

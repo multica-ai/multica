@@ -71,9 +71,9 @@ describe("rowMatchesFilters — access dimension", () => {
       permission_mode: "public_to",
       invocation_targets: [{ target_type: "member", target_id: "u" }],
     });
-    expect(rowMatchesFilters(ownerOnly, noFilters, "")).toBe(true);
-    expect(rowMatchesFilters(workspace, noFilters, "")).toBe(true);
-    expect(rowMatchesFilters(specific, noFilters, "")).toBe(true);
+    expect(rowMatchesFilters(ownerOnly, noFilters)).toBe(true);
+    expect(rowMatchesFilters(workspace, noFilters)).toBe(true);
+    expect(rowMatchesFilters(specific, noFilters)).toBe(true);
   });
 
   it("filters to owner-only", () => {
@@ -82,8 +82,8 @@ describe("rowMatchesFilters — access dimension", () => {
       permission_mode: "public_to",
       invocation_targets: [{ target_type: "workspace", target_id: null }],
     });
-    expect(rowMatchesFilters(ownerOnly, withAccess(noFilters, "owner-only"), "")).toBe(true);
-    expect(rowMatchesFilters(workspace, withAccess(noFilters, "owner-only"), "")).toBe(false);
+    expect(rowMatchesFilters(ownerOnly, withAccess(noFilters, "owner-only"))).toBe(true);
+    expect(rowMatchesFilters(workspace, withAccess(noFilters, "owner-only"))).toBe(false);
   });
 
   it("filters to workspace", () => {
@@ -96,9 +96,9 @@ describe("rowMatchesFilters — access dimension", () => {
       permission_mode: "public_to",
       invocation_targets: [{ target_type: "member", target_id: "u" }],
     });
-    expect(rowMatchesFilters(workspace, withAccess(noFilters, "workspace"), "")).toBe(true);
-    expect(rowMatchesFilters(ownerOnly, withAccess(noFilters, "workspace"), "")).toBe(false);
-    expect(rowMatchesFilters(specific, withAccess(noFilters, "workspace"), "")).toBe(false);
+    expect(rowMatchesFilters(workspace, withAccess(noFilters, "workspace"))).toBe(true);
+    expect(rowMatchesFilters(ownerOnly, withAccess(noFilters, "workspace"))).toBe(false);
+    expect(rowMatchesFilters(specific, withAccess(noFilters, "workspace"))).toBe(false);
   });
 
   it("filters to specific-people", () => {
@@ -111,9 +111,9 @@ describe("rowMatchesFilters — access dimension", () => {
       permission_mode: "public_to",
       invocation_targets: [{ target_type: "member", target_id: "u" }],
     });
-    expect(rowMatchesFilters(specific, withAccess(noFilters, "specific-people"), "")).toBe(true);
-    expect(rowMatchesFilters(workspace, withAccess(noFilters, "specific-people"), "")).toBe(false);
-    expect(rowMatchesFilters(ownerOnly, withAccess(noFilters, "specific-people"), "")).toBe(false);
+    expect(rowMatchesFilters(specific, withAccess(noFilters, "specific-people"))).toBe(true);
+    expect(rowMatchesFilters(workspace, withAccess(noFilters, "specific-people"))).toBe(false);
+    expect(rowMatchesFilters(ownerOnly, withAccess(noFilters, "specific-people"))).toBe(false);
   });
 
   it("multi-select access filter is OR-combined", () => {
@@ -123,8 +123,8 @@ describe("rowMatchesFilters — access dimension", () => {
       invocation_targets: [{ target_type: "workspace", target_id: null }],
     });
     const filters: AgentListFilters = { ...noFilters, access: ["owner-only", "workspace"] };
-    expect(rowMatchesFilters(ownerOnly, filters, "")).toBe(true);
-    expect(rowMatchesFilters(workspace, filters, "")).toBe(true);
+    expect(rowMatchesFilters(ownerOnly, filters)).toBe(true);
+    expect(rowMatchesFilters(workspace, filters)).toBe(true);
   });
 
   it("access filter combines with other dimensions (AND)", () => {
@@ -141,8 +141,8 @@ describe("rowMatchesFilters — access dimension", () => {
       access: ["owner-only"],
       owners: ["user-1"],
     };
-    expect(rowMatchesFilters(ownerUser1, filters, "")).toBe(true);
-    expect(rowMatchesFilters(ownerUser2, filters, "")).toBe(false);
+    expect(rowMatchesFilters(ownerUser1, filters)).toBe(true);
+    expect(rowMatchesFilters(ownerUser2, filters)).toBe(false);
   });
 
   it("access + availability filter: both must pass (AND)", () => {
@@ -159,8 +159,8 @@ describe("rowMatchesFilters — access dimension", () => {
       access: ["workspace"],
       availability: ["online"],
     };
-    expect(rowMatchesFilters(onlineAgent, filters, "")).toBe(true);
-    expect(rowMatchesFilters(offlineAgent, filters, "")).toBe(false);
+    expect(rowMatchesFilters(onlineAgent, filters)).toBe(true);
+    expect(rowMatchesFilters(offlineAgent, filters)).toBe(false);
   });
 
   it("access + runtimes filter: both must pass (AND)", () => {
@@ -175,8 +175,8 @@ describe("rowMatchesFilters — access dimension", () => {
       access: ["owner-only"],
       runtimes: ["rt-local"],
     };
-    expect(rowMatchesFilters(localAgent, filters, "")).toBe(true);
-    expect(rowMatchesFilters(cloudAgent, filters, "")).toBe(false);
+    expect(rowMatchesFilters(localAgent, filters)).toBe(true);
+    expect(rowMatchesFilters(cloudAgent, filters)).toBe(false);
   });
 
   it("access filter value matches the same derivation as effectiveAccessScope", () => {

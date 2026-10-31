@@ -1,9 +1,7 @@
 {
   "page": {
     "title": "Runtimes",
-    "learn_more": "Learn more →",
     "connect_remote": "Add a machine",
-    "search_placeholder": "Search…",
     "scope_mine": "Mine",
     "scope_all": "All",
     "live": "Live",
@@ -25,7 +23,7 @@
       "title": "Starting local runtime…",
       "hint": "Connecting to the workspace..."
     },
-    "add": "Add",
+    "add": "Add runtime",
     "add_menu": {
       "machines": "Machines",
       "this_computer": "This computer",
@@ -67,7 +65,7 @@
       "no_matches": "No machines or cloud services match"
     },
     "filters": {
-      "all": "All",
+      "all": "All runtimes",
       "online": "Online",
       "offline": "Offline"
     }
@@ -93,8 +91,7 @@
     "this_machine": "This device",
     "local_badge": "Local · this machine",
     "pending_custom_runtimes": "Pending custom runtimes",
-    "runtime_count_one": "{{count}} runtime",
-    "runtime_count_other": "{{count}} runtimes",
+    "daemon_title": "Daemon",
     "busy_count_one": "{{count}} busy",
     "busy_count_other": "{{count}} busy",
     "no_matches_title": "No machines",
@@ -162,14 +159,10 @@
     "fact_owner": "Owner",
     "fact_device": "Device",
     "fact_runtime": "Runtime",
-    "technical_details": "Technical details",
     "fact_daemon_cli": "Daemon CLI",
     "fact_daemon_id": "Daemon ID",
-    "serving_title": "Serving",
-    "serving_count_one": "{{count}} agent",
-    "serving_count_other": "{{count}} agents",
+    "usage_title": "Usage",
     "no_agents": "No agents are bound to this runtime yet.",
-    "diagnostics_title": "Diagnostics",
     "diagnostics_cli": "CLI",
     "diagnostics_visibility": "Visibility",
     "visibility_label": {

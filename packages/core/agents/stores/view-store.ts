@@ -1,20 +1,16 @@
 "use client";
 
-import { create } from "zustand";
-import { createJSONStorage, persist } from "zustand/middleware";
 import {
-  createWorkspaceAwareStorage,
-  registerForWorkspaceRehydration,
-} from "../../platform/workspace-storage";
-import { defaultStorage } from "../../platform/storage";
+  createCollectionViewStore,
+  type CollectionSortDirection,
+  type CollectionViewCore,
+} from "../../collections/view-store";
 import type { AccessScope } from "../effective-access";
 
 // View preferences for the agents list page: scope, sort, column visibility,
 // and filters. Persisted per workspace, per user/device. Row selection is
 // session-scoped on purpose (same rationale as the skills/autopilots view
-// stores). The search query lives here too but is session-only (never
-// persisted): it must survive opening an agent and coming back to the list,
-// yet a stale query restored days later would read as "my agents vanished".
+// stores).
 
 // Scope mixes the ownership lens (mine/all) with the archived lifecycle
 // stage. Impure on paper, but the three are mutually exclusive in practice
@@ -27,7 +23,7 @@ export const AGENT_SCOPES: AgentsScope[] = ["mine", "all", "archived"];
 
 export type AgentSortField = "lastActive" | "name" | "runs" | "created";
 
-export type AgentSortDirection = "asc" | "desc";
+export type AgentSortDirection = CollectionSortDirection;
 
 /** Per-field direction applied when the user switches TO that field. */
 export const AGENT_SORT_DEFAULT_DIRECTION: Record<
@@ -78,145 +74,75 @@ export type AgentColumnKey =
   | "model"
   | "created";
 
-/** Created is opt-in: hidden until the user enables it. Owner and model are
- *  shown by default — comparing which model each agent runs is a core use of
- *  the list (GitHub #9500). */
-export const AGENT_DEFAULT_HIDDEN_COLUMNS: AgentColumnKey[] = ["created"];
+/** Model stays on by default — comparing which model each agent runs is a
+ *  core use of the list (GitHub #9500). Owner, access and created are opt-in
+ *  so the default columns fit a 1280px window without horizontal scrolling;
+ *  owner is also constant in the default "mine" scope. */
+export const AGENT_DEFAULT_HIDDEN_COLUMNS: AgentColumnKey[] = [
+  "owner",
+  "access",
+  "created",
+];
 
-/** Persist schema version. v0 hid the model column by default; v1 shows it. */
-const AGENT_VIEW_STORE_VERSION = 1;
+/** Persist schema version. v0 hid the model column by default; v1 shows it;
+ *  v2 also hides owner and access by default. */
+const AGENT_VIEW_STORE_VERSION = 2;
 
-export interface AgentsViewState {
+export interface AgentsViewState
+  extends CollectionViewCore<AgentSortField, AgentColumnKey, AgentListFilters> {
   scope: AgentsScope;
-  sortField: AgentSortField;
-  sortDirection: AgentSortDirection;
-  hiddenColumns: AgentColumnKey[];
-  filters: AgentListFilters;
-  /** Free-text list search. Session-only — excluded from persistence. */
-  search: string;
-  setSearch: (search: string) => void;
   setScope: (scope: AgentsScope) => void;
-  /** Header click: toggles direction on the active field, otherwise switches
-   *  to the field with its default direction. */
-  toggleSort: (field: AgentSortField) => void;
-  /** Display panel select: switches field (default direction), no toggle. */
-  setSortField: (field: AgentSortField) => void;
-  setSortDirection: (direction: AgentSortDirection) => void;
-  toggleColumn: (key: AgentColumnKey) => void;
-  toggleFilter: (key: keyof AgentListFilters, value: string) => void;
-  clearFilters: () => void;
 }
 
-const DEFAULTS = {
+export const useAgentsViewStore = createCollectionViewStore<
+  AgentSortField,
+  AgentColumnKey,
+  AgentListFilters,
+  { scope: AgentsScope },
+  { setScope: (scope: AgentsScope) => void }
+>({
+  name: "multica_agents_view",
+  version: AGENT_VIEW_STORE_VERSION,
+  // v0 → v1: model went from hidden-by-default to shown-by-default. Every v0
+  // payload carried "model" in hiddenColumns unless the user had turned it
+  // on, so un-hide it once; the user can re-hide it from the Display panel.
+  // v1 → v2: a payload still on the v1 default (only "created" hidden) moves
+  // to the new default; any other column choice is the user's and stays.
+  // Other persisted prefs pass through untouched.
+  migrate: (persisted, version) => {
+    let p = (persisted ?? {}) as Partial<AgentsViewState>;
+    if (version < 1 && Array.isArray(p.hiddenColumns)) {
+      p = { ...p, hiddenColumns: p.hiddenColumns.filter((k) => k !== "model") };
+    }
+    if (
+      version < 2 &&
+      Array.isArray(p.hiddenColumns) &&
+      p.hiddenColumns.length === 1 &&
+      p.hiddenColumns[0] === "created"
+    ) {
+      p = { ...p, hiddenColumns: [...AGENT_DEFAULT_HIDDEN_COLUMNS] };
+    }
+    return p;
+  },
+  defaultSortField: "lastActive",
+  sortDefaultDirection: AGENT_SORT_DEFAULT_DIRECTION,
+  defaultHiddenColumns: AGENT_DEFAULT_HIDDEN_COLUMNS,
+  emptyFilters: EMPTY_AGENT_FILTERS,
   // "mine" is the historical default — most members care about their own
   // agents first; admins flip to "all".
-  scope: "mine" as AgentsScope,
-  sortField: "lastActive" as AgentSortField,
-  sortDirection: AGENT_SORT_DEFAULT_DIRECTION.lastActive,
-  hiddenColumns: AGENT_DEFAULT_HIDDEN_COLUMNS,
-  filters: EMPTY_AGENT_FILTERS,
-  search: "",
-};
-
-export const useAgentsViewStore = create<AgentsViewState>()(
-  persist(
-    (set) => ({
-      ...DEFAULTS,
-      setSearch: (search) => set({ search }),
-      // "Mine" is the clean personal view: entering it clears all filters,
-      // so Mine never carries filters. Switching to all/archived leaves
-      // filters intact (you can carry "owner = Bob" between them).
-      setScope: (scope) =>
-        set(scope === "mine" ? { scope, filters: EMPTY_AGENT_FILTERS } : { scope }),
-      toggleSort: (field) =>
-        set((state) =>
-          state.sortField === field
-            ? {
-                sortDirection: state.sortDirection === "asc" ? "desc" : "asc",
-              }
-            : {
-                sortField: field,
-                sortDirection: AGENT_SORT_DEFAULT_DIRECTION[field],
-              },
-        ),
-      setSortField: (field) =>
-        set((state) =>
-          state.sortField === field
-            ? {}
-            : {
-                sortField: field,
-                sortDirection: AGENT_SORT_DEFAULT_DIRECTION[field],
-              },
-        ),
-      setSortDirection: (direction) => set({ sortDirection: direction }),
-      toggleColumn: (key) =>
-        set((state) => ({
-          hiddenColumns: state.hiddenColumns.includes(key)
-            ? state.hiddenColumns.filter((k) => k !== key)
-            : [...state.hiddenColumns, key],
-        })),
-      toggleFilter: (key, value) =>
-        set((state) => {
-          const list = state.filters[key] as string[];
-          const next = list.includes(value)
-            ? list.filter((v) => v !== value)
-            : [...list, value];
-          // Applying any filter leaves the clean "mine" view for "all" —
-          // Mine is the no-filter mode (see setScope). Archived keeps its
-          // own scope (it can carry filters).
-          const scope = state.scope === "mine" ? "all" : state.scope;
-          return { scope, filters: { ...state.filters, [key]: next } };
-        }),
-      clearFilters: () => set({ filters: EMPTY_AGENT_FILTERS }),
-    }),
-    {
-      name: "multica_agents_view",
-      version: AGENT_VIEW_STORE_VERSION,
-      storage: createJSONStorage(() =>
-        createWorkspaceAwareStorage(defaultStorage),
+  extraState: { scope: "mine" },
+  // "Mine" is the clean personal view: entering it clears all filters, so
+  // Mine never carries filters. Switching to all/archived leaves filters
+  // intact (you can carry "owner = Bob" between them).
+  extraActions: (set) => ({
+    setScope: (scope) =>
+      set(
+        scope === "mine" ? { scope, filters: EMPTY_AGENT_FILTERS } : { scope },
       ),
-      partialize: (state) => ({
-        scope: state.scope,
-        sortField: state.sortField,
-        sortDirection: state.sortDirection,
-        hiddenColumns: state.hiddenColumns,
-        filters: state.filters,
-      }),
-      // v0 → v1: model went from hidden-by-default to shown-by-default.
-      // Every v0 payload carried "model" in hiddenColumns unless the user
-      // had turned it on, so un-hide it once; the user can re-hide it from
-      // the Display panel. Other persisted prefs pass through untouched.
-      migrate: (persisted, version) => {
-        const p = (persisted ?? {}) as Partial<AgentsViewState>;
-        if (version < 1 && Array.isArray(p.hiddenColumns)) {
-          return {
-            ...p,
-            hiddenColumns: p.hiddenColumns.filter((k) => k !== "model"),
-          } as AgentsViewState;
-        }
-        return p as AgentsViewState;
-      },
-      // On rehydrate, if the new workspace has no persisted value, reset to
-      // the defaults instead of leaving the previous workspace's in-memory
-      // view state in place. Default merge keeps current state when
-      // persisted is undefined, which would leak state across workspaces.
-      merge: (persisted, current) => {
-        // `search` is session-only and must not leak across workspaces, so
-        // every rehydrate (i.e. workspace switch) clears it.
-        if (!persisted) return { ...current, ...DEFAULTS };
-        const p = persisted as Partial<AgentsViewState>;
-        // Deep-merge filters so a payload persisted before a new filter
-        // dimension existed (e.g. `owners`) still gets that key's default
-        // instead of dropping it to `undefined` and crashing `.length`.
-        return {
-          ...current,
-          ...p,
-          filters: { ...EMPTY_AGENT_FILTERS, ...(p.filters ?? {}) },
-          search: "",
-        };
-      },
-    },
-  ),
-);
-
-registerForWorkspaceRehydration(() => useAgentsViewStore.persist.rehydrate());
+  }),
+  // Applying any filter leaves the clean "mine" view for "all". Archived
+  // keeps its own scope (it can carry filters).
+  onToggleFilter: (state) => ({
+    scope: state.scope === "mine" ? "all" : state.scope,
+  }),
+});

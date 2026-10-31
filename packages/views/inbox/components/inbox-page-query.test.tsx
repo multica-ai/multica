@@ -12,9 +12,6 @@ import type { InboxItem } from "@multica/core/types";
 import { InboxPage } from "./inbox-page";
 
 vi.mock("sonner", () => ({ toast: { success: vi.fn(), error: vi.fn() } }));
-vi.mock("react-resizable-panels", () => ({
-  useDefaultLayout: () => ({ defaultLayout: undefined, onLayoutChanged: vi.fn() }),
-}));
 vi.mock("@multica/core/hooks", () => ({ useWorkspaceId: () => "workspace-1" }));
 vi.mock("@multica/core/paths", () => ({
   useWorkspacePaths: () => ({
@@ -41,11 +38,6 @@ vi.mock("../../navigation", () => ({
   useReportNavigating: () => {},
 }));
 vi.mock("@multica/ui/hooks/use-mobile", () => ({ useIsCompact: () => false }));
-vi.mock("@multica/ui/components/ui/resizable", () => ({
-  ResizablePanelGroup: ({ children }: { children: ReactNode }) => <div>{children}</div>,
-  ResizablePanel: ({ children }: { children: ReactNode }) => <div>{children}</div>,
-  ResizableHandle: () => null,
-}));
 vi.mock("./inbox-list", () => ({
   InboxList: ({ items, onSelect }: { items: InboxItem[]; onSelect: (item: InboxItem) => void }) => (
     <div>{items.map((row) => (

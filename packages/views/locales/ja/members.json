@@ -11,8 +11,11 @@
     "more_agents_other": "他 {{count}} 件のエージェント"
   },
   "detail": {
-    "workspace_fallback": "ワークスペース",
     "members_breadcrumb": "メンバー",
+    "role": "ロール",
+    "email": "メールアドレス",
+    "joined": "参加日",
+    "relation": "関係",
     "breadcrumb_fallback": "メンバー",
     "not_found_title": "メンバーが見つかりません",
     "not_found_description": "このメンバーはワークスペースから退出した可能性があります。"

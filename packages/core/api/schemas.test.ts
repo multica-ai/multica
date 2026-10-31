@@ -67,7 +67,7 @@ import {
   EMPTY_PLUGIN_INSTALLATION_LIST,
   EMPTY_PLUGIN_PREVIEW,
 } from "./schemas";
-import { IssueViewSchema, IssueViewListSchema } from "./schemas";
+import { IssueViewSchema, IssueViewListSchema, SidebarProjectPrefsDocSchema } from "./schemas";
 import {
   ListIssueStatusesResponseSchema,
   IssueStatusEntrySchema,
@@ -1931,6 +1931,41 @@ describe("IssueViewSchema", () => {
         endpoint: "GET /api/issue-views/{id}",
       }),
     ).toBeNull();
+  });
+});
+
+describe("SidebarProjectPrefsDocSchema", () => {
+  it("keeps every setting this client knows", () => {
+    const doc = {
+      projects: { ordering: "name", statuses: ["planned"], onlyMine: true, showCount: false },
+      issues: { sortBy: "priority", sortDirection: "asc", hiddenStatuses: ["done"], assignee: "me", showSubIssues: false },
+      order: ["p2", "p1"],
+    };
+    expect(SidebarProjectPrefsDocSchema.parse(doc)).toEqual(doc);
+  });
+
+  it("drops settings saved by another client version instead of failing the document", () => {
+    const parsed = SidebarProjectPrefsDocSchema.parse({
+      projects: { ordering: "future-order", statuses: "planned", onlyMine: "no", showCount: true },
+      issues: { sortBy: "magic", sortDirection: "up", hiddenStatuses: null, assignee: 1, showSubIssues: "yes" },
+      order: ["p1", 2, null],
+    });
+    expect(parsed.projects).toEqual({ ordering: undefined, statuses: undefined, onlyMine: undefined, showCount: true });
+    expect(parsed.issues).toEqual({
+      sortBy: undefined,
+      sortDirection: undefined,
+      hiddenStatuses: null,
+      assignee: undefined,
+      showSubIssues: undefined,
+    });
+    expect(parsed.order).toEqual(["p1"]);
+  });
+
+  it.each([{}, { projects: null, issues: "x", order: {} }])("parses an empty or malformed document %j", (doc) => {
+    const parsed = SidebarProjectPrefsDocSchema.parse(doc);
+    expect(parsed.order).toEqual([]);
+    expect(Object.values(parsed.projects).every((v) => v === undefined)).toBe(true);
+    expect(Object.values(parsed.issues).every((v) => v === undefined)).toBe(true);
   });
 });
 

@@ -12,7 +12,6 @@ import { I18nProvider } from "@multica/core/i18n/react";
 import type { SupportedLocale } from "@multica/core/i18n";
 import { RESOURCES } from "@multica/views/locales";
 import { useScrollFade } from "@multica/ui/hooks/use-scroll-fade";
-import { SIDEBAR_WRAPPER_FILL_CLASS } from "@multica/ui/components/ui/sidebar";
 
 type MockTab = {
   id: string;
@@ -271,76 +270,26 @@ describe("TabBar active-tab title persistence", () => {
   });
 });
 
-describe("TabBar merged-tab chrome", () => {
-  // Keep the fill inside the translucent keyline so the merged border is even.
-  it("keeps the active tab's page-canvas fill out from under its keyline", () => {
-    const { getByLabelText } = render(<TabBar />);
-    const cap = getByLabelText("Issues")
-      .closest("[data-tab-frame]")
-      ?.querySelector(".rounded-t-lg");
+describe("TabBar pill chrome", () => {
+  const pillOf = (label: string, getByLabelText: (text: string) => HTMLElement) =>
+    getByLabelText(label).closest("[data-tab-frame]")?.querySelector(".rounded-lg");
 
-    expect(cap).toHaveClass(
-      "border-surface-border",
+  // The active pill is the content card's material, so it reads as that
+  // card's tab while standing apart from it on the title bar.
+  it("paints the active tab with the content card's surface", () => {
+    const { getByLabelText } = render(<TabBar />);
+    expect(pillOf("Issues", getByLabelText)).toHaveClass(
       "bg-page-canvas",
-      "bg-clip-padding",
+      "ring-surface-border",
+      "shadow-[var(--surface-shadow)]",
     );
   });
 
-  // The opaque backing keeps the flare and card keylines from stacking, and has
-  // to equal the strip's backdrop at every width. It reads that colour off the
-  // sidebar wrapper's published fill rather than naming a token, so no token may
-  // appear here or in the gradient — a pinned one is exactly the regression this
-  // covers. The wrapper's end of the contract is covered in packages/views.
-  it("paints each flare on the sidebar wrapper's own fill", () => {
+  it("keeps inactive tabs as lighter pills without the card's edge", () => {
     const { getByLabelText } = render(<TabBar />);
-    const flares = getByLabelText("Issues")
-      .closest("[data-tab-frame]")
-      ?.querySelectorAll('[style*="radial-gradient"]');
-
-    expect(flares).toHaveLength(2);
-    for (const flare of flares ?? []) {
-      expect(flare).toHaveClass(SIDEBAR_WRAPPER_FILL_CLASS);
-      expect(flare.getAttribute("style")).toContain("var(--page-canvas) 10.2px)");
-      expect(flare.getAttribute("style")).not.toContain("var(--sidebar)");
-      expect(flare.getAttribute("style")).not.toContain("var(--app-shell)");
-      expect(flare.className).not.toContain("bg-app-shell");
-      expect(flare.className).not.toContain("bg-sidebar");
-    }
-  });
-
-  // A flare overhangs the neighbouring tab by 9px, so the backing above may only
-  // cover the arc and the canvas fill: left over the notch it prints a square of
-  // strip colour on top of whatever the neighbour draws there, which is how the
-  // hover pill lost its corner to a dark bite (MUL-6160). The notch is therefore
-  // masked out of the flare entirely, and the mask has to close before the arc's
-  // anti-aliasing starts (r - 1.2) or the arc loses the backing it needs.
-  it("punches the notch out rather than filling it with strip colour", () => {
-    const { getByLabelText } = render(<TabBar />);
-    const flares = getByLabelText("Issues")
-      .closest("[data-tab-frame]")
-      ?.querySelectorAll<HTMLElement>('[style*="radial-gradient"]');
-
-    expect(flares).toHaveLength(2);
-    for (const flare of flares ?? []) {
-      const corner = /circle at top (left|right), transparent 8\.8px/.exec(
-        flare.style.backgroundImage,
-      )?.[1];
-      const mask = flare.style.maskImage;
-
-      expect(corner).toBeDefined();
-      expect(mask).toContain(`radial-gradient(circle at top ${corner}, transparent 8.4px`);
-      expect(mask).toMatch(/ 8\.8px\)$/);
-      expect(flare.style.getPropertyValue("-webkit-mask-image")).toBe(mask);
-    }
-  });
-
-  it("draws the merged cap only on the active tab", () => {
-    const { getByLabelText } = render(<TabBar />);
-    expect(
-      getByLabelText("Projects")
-        .closest("[data-tab-frame]")
-        ?.querySelector(".rounded-t-lg"),
-    ).toBeNull();
+    const pill = pillOf("Projects", getByLabelText);
+    expect(pill).toHaveClass("bg-page-canvas/50");
+    expect(pill).not.toHaveClass("ring-surface-border");
   });
 });
 
@@ -365,7 +314,7 @@ describe("TabBar overflow", () => {
       "overflow-y-hidden",
     );
     expect(getByLabelText("Tab 1").closest("[data-tab-frame]")).toHaveClass(
-      "w-40",
+      "w-56",
       "min-w-32",
     );
 

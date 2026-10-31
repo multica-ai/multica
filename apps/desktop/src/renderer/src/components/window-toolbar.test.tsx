@@ -19,9 +19,8 @@ const historyState = vi.hoisted(() => ({
   goToHistoryIndex: vi.fn(),
 }));
 
-const sidebarState = vi.hoisted(() => ({
-  state: "expanded" as "expanded" | "collapsed",
-  isCompact: false,
+const shellState = vi.hoisted(() => ({
+  current: { toggleNav: () => {} } as { toggleNav: () => void } | null,
 }));
 
 vi.mock("@/hooks/use-tab-history", () => ({
@@ -34,10 +33,10 @@ vi.mock("@multica/views/layout", () => ({
     title: fallbackTitle ?? `Title ${url}`,
   }),
   ResourceLeadingVisual: () => <span aria-hidden />,
+  useAppShell: () => shellState.current,
 }));
 
 vi.mock("@multica/ui/components/ui/sidebar", () => ({
-  useSidebar: () => sidebarState,
   SidebarTrigger: (props: ComponentProps<"button">) => (
     <button type="button" aria-label="Toggle sidebar" {...props} />
   ),
@@ -71,8 +70,7 @@ beforeEach(() => {
   historyState.goBack.mockReset();
   historyState.goForward.mockReset();
   historyState.goToHistoryIndex.mockReset();
-  sidebarState.state = "expanded";
-  sidebarState.isCompact = false;
+  shellState.current = { toggleNav: vi.fn() };
   vi.useFakeTimers();
 });
 
@@ -97,28 +95,34 @@ describe("historyIndicesForMenu", () => {
 });
 
 describe("WindowToolbar history controls", () => {
-  it("left-aligns the controls past the traffic lights across the expanded sidebar", () => {
+  it("left-aligns the controls past the traffic lights at a fixed width", () => {
     render(<WindowToolbar />, { wrapper: I18nWrapper });
 
     const toolbar = document.querySelector('[data-slot="window-toolbar"]');
+    expect(WINDOW_TOOLBAR_CLEARANCE).toBe(200);
     expect(toolbar).not.toHaveClass("justify-end");
-    expect(toolbar).toHaveStyle({
-      paddingLeft: "88px",
-      width:
-        "max(var(--sidebar-live-width, var(--sidebar-width)), 200px)",
-    });
-    expect(toolbar).toHaveAttribute("data-sidebar-resize-consumer");
-    expect(toolbar).not.toHaveClass("transition-[width]");
+    expect(toolbar).toHaveStyle({ paddingLeft: "88px", width: "200px" });
   });
 
-  it("keeps the controls clear of the traffic lights after toggling the sidebar", () => {
-    const { rerender } = render(<WindowToolbar />, { wrapper: I18nWrapper });
-    sidebarState.state = "collapsed";
-    rerender(<WindowToolbar />);
+  it("keeps the controls clear of the traffic lights after toggling the panel", () => {
+    render(<WindowToolbar />, { wrapper: I18nWrapper });
+    fireEvent.click(screen.getByRole("button", { name: "Toggle sidebar" }));
 
     const toolbar = document.querySelector('[data-slot="window-toolbar"]');
-    expect(WINDOW_TOOLBAR_CLEARANCE).toBe(200);
     expect(toolbar).toHaveStyle({ paddingLeft: "88px", width: "200px" });
+  });
+
+  // Inside the shell the toggle routes through toggleNav, which collapses the
+  // space panel or, in Inbox, Chat and Settings, the page's own list column.
+  it("routes the panel toggle through the shell", () => {
+    const toggleNav = vi.fn();
+    shellState.current = { toggleNav };
+    render(<WindowToolbar />, { wrapper: I18nWrapper });
+
+    const toggle = screen.getByRole("button", { name: "Toggle sidebar" });
+    expect(toggle).toBeEnabled();
+    fireEvent.click(toggle);
+    expect(toggleNav).toHaveBeenCalledOnce();
   });
 
   it("orders Back, Forward, then the sidebar toggle with no separate History button", () => {

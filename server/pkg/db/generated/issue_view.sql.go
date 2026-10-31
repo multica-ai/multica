@@ -213,6 +213,56 @@ func (q *Queries) GetIssueView(ctx context.Context, arg GetIssueViewParams) (Iss
 	return i, err
 }
 
+const listAllIssueViewsForUser = `-- name: ListAllIssueViewsForUser :many
+SELECT id, workspace_id, owner_id, name, scope_type, scope_id, scope_variant, visibility, definition_version, query, display, revision, created_at, updated_at FROM issue_view
+WHERE workspace_id = $1
+  AND (owner_id = $2 OR visibility = 'workspace')
+ORDER BY created_at ASC
+LIMIT 500
+`
+
+type ListAllIssueViewsForUserParams struct {
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
+	OwnerID     pgtype.UUID `json:"owner_id"`
+}
+
+// Every view the caller can open, across all scopes: the All views
+// directory and the sidebar's starred list resolve against this.
+func (q *Queries) ListAllIssueViewsForUser(ctx context.Context, arg ListAllIssueViewsForUserParams) ([]IssueView, error) {
+	rows, err := q.db.Query(ctx, listAllIssueViewsForUser, arg.WorkspaceID, arg.OwnerID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []IssueView{}
+	for rows.Next() {
+		var i IssueView
+		if err := rows.Scan(
+			&i.ID,
+			&i.WorkspaceID,
+			&i.OwnerID,
+			&i.Name,
+			&i.ScopeType,
+			&i.ScopeID,
+			&i.ScopeVariant,
+			&i.Visibility,
+			&i.DefinitionVersion,
+			&i.Query,
+			&i.Display,
+			&i.Revision,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listIssueViewsForUser = `-- name: ListIssueViewsForUser :many
 SELECT id, workspace_id, owner_id, name, scope_type, scope_id, scope_variant, visibility, definition_version, query, display, revision, created_at, updated_at FROM issue_view
 WHERE workspace_id = $1

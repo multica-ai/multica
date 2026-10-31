@@ -1,6 +1,5 @@
 {
   "page": {
-    "title": "自動化",
     "new_autopilot": "新建自動化",
     "start_blank": "從空白開始",
     "table": {
@@ -20,7 +19,6 @@
       "title": "還沒有自動化",
       "hint": "為你的智慧體安排週期性工作。從模板選一個，或從空白開始。"
     },
-    "scope_all": "全部",
     "no_matches": "沒有匹配的自動化",
     "retry": "重試"
   },
@@ -87,10 +85,8 @@
     "run_blocked_quota_exceeded": "未觸發——本週期的執行額度已用盡",
     "run_blocked_issue_limit_reached": "未觸發——工作區任務總數已達到上限",
     "run_blocked_generic": "未觸發——本次執行已被攔截",
-    "section_properties": "屬性",
     "section_triggers": "觸發器",
     "section_run_history": "執行歷史",
-    "section_danger": "危險操作",
     "field_agent": "智慧體",
     "field_created_by": "建立者",
     "field_output_mode": "輸出模式",
@@ -100,6 +96,16 @@
     "field_prompt": "Prompt",
     "field_subscribers": "訂閱者",
     "field_subscribers_none": "無",
+    "no_prompt": "還沒有 Prompt。",
+    "copy_link": "複製連結",
+    "link_copied": "連結已複製",
+    "link_copy_failed": "無法複製連結",
+    "open_project": "開啟專案",
+    "summary": {
+      "create_issue": "{{agent}} 每次執行建立一個任務",
+      "run_only": "{{agent}} 直接執行，不建立任務",
+      "with_trigger": "{{trigger}} · {{action}}"
+    },
     "add_trigger": "新增觸發器",
     "no_triggers": "未配置觸發器。新增一個時間表讓它自動執行。",
     "no_runs": "暫無執行記錄。點選\"立即執行\"手動觸發。",
@@ -441,27 +447,16 @@
     "search_placeholder": "搜尋時區..."
   },
   "toolbar": {
-    "result_count_title": "當前結果 / 全部自動化",
-    "filter_label": "篩選",
-    "filter_active_count_other": "{{count}} 項篩選",
-    "clear_filters": "清除篩選",
     "section_assignee": "執行者",
     "section_mode": "模式",
     "section_trigger": "觸發器",
-    "section_creator": "建立者",
-    "display": "顯示",
-    "sort_by": "排序",
-    "direction_asc": "升序",
-    "direction_desc": "降序",
-    "section_columns": "列"
+    "section_creator": "建立者"
   },
   "actions": {
     "row_menu": "自動化操作",
     "pause": "暫停",
     "resume": "恢復",
     "delete": "刪除",
-    "selected_other": "已選 {{count}} 項",
-    "clear_selection": "清除選擇",
     "delete_dialog": {
       "title": "刪除自動化？",
       "description_other": "將永久刪除 {{count}} 個自動化及其執行歷史。",
@@ -473,7 +468,6 @@
   },
   "wakeups": {
     "title": "任務喚醒",
-    "scope": "範圍",
     "issue": "任務",
     "trigger": "觸發條件",
     "enabled": "開啟",
@@ -482,22 +476,16 @@
     "at": "單次定時",
     "recurring": "週期",
     "all_agents": "所有智慧體",
-    "search": "搜尋任務或智慧體",
     "running": "執行中",
     "active_runs": "{{count}} 個執行未結束",
     "issue_closed": "任務已關閉",
     "read_only": "僅建立者或工作區管理員可管理此喚醒",
     "select_row": "選擇 {{issue}}，{{agent}}",
-    "select_page": "選擇本頁已開啟的喚醒",
+    "select_page": "選擇所有已開啟的喚醒",
     "load_error": "無法載入喚醒",
     "loading": "正在載入喚醒…",
     "empty": "暫無喚醒規則",
-    "selected": "已選擇 {{count}} 項",
     "disable_selected": "關閉所選",
-    "clear": "清除選擇",
-    "results": "第 {{page}} 頁 · 共 {{count}} 項",
-    "previous": "上一頁",
-    "next_page": "下一頁",
     "confirm_title": "關閉 {{count}} 個喚醒？",
     "confirm_body": "關閉後將停止後續喚醒，並撤回仍在排隊、尚未交給智慧體的執行。已交給智慧體的執行會繼續，可在執行日誌中停止。",
     "cancel": "取消",
@@ -506,7 +494,7 @@
     "batch_result": "已關閉 {{succeeded}} 項，失敗 {{failed}} 項。",
     "scopes": {
       "active": "待喚醒或執行中",
-      "all": "全部",
+      "all": "全部喚醒",
       "disabled": "已關閉",
       "ended": "已結束",
       "paused": "已暫停"
@@ -518,7 +506,7 @@
     "batch_partial": "已關閉 {{succeeded}} 條，{{failed}} 條失敗；失敗項仍保留選中，可重試。",
     "source": "來源",
     "sources": {
-      "all": "來源：全部",
+      "all": "全部來源",
       "member": "成員",
       "agent": "智慧體",
       "system": "系統"

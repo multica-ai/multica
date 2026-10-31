@@ -1,19 +1,21 @@
 {
   "page": {
     "title": "Agents",
-    "learn_more": "Learn more →",
     "new_agent": "New agent",
-    "search_placeholder": "Search agents…",
     "show_archived": "Show archived ({{count}}) →",
     "of_total": "{{visible}} of {{total}}",
     "list_load_failed": "Couldn't load agents",
     "list_load_failed_default": "Something went wrong fetching the agent list.",
-    "try_again": "Try again"
+    "try_again": "Try again",
+    "scope_title": {
+      "mine": "My agents",
+      "all": "All agents",
+      "archived": "Archived agents"
+    }
   },
   "scope": {
     "mine": "Mine",
-    "all": "All",
-    "archived": "Archived"
+    "all": "All"
   },
   "sort": {
     "label_recent": "Recent activity",
@@ -48,10 +50,7 @@
   },
   "no_matches": {
     "title": "No matches",
-    "search_archived": "No archived agents match \"{{query}}\".",
     "no_archived": "No archived agents yet.",
-    "search_active": "No agents match \"{{query}}\".",
-    "search_active_filtered": "No agents match \"{{query}}\" in this filter.",
     "no_filter_match": "No agents match this filter.",
     "search_runtime_filtered": "No agents on \"{{machine}}\" match \"{{query}}\".",
     "runtime_filtered": "No agents on \"{{machine}}\"."
@@ -136,7 +135,6 @@
     "archive_dialog_confirm": "Archive"
   },
   "detail": {
-    "back_to_agents": "Agents",
     "back_to_agents_full": "Back to agents",
     "not_found_title": "Agent not found",
     "not_found_default": "This agent may have been archived or deleted.",
@@ -165,7 +163,11 @@
     "runtime_required_toast": "Bind a runtime before running this agent.",
     "assign_work": "Assign work",
     "more_actions_aria": "Agent actions",
-    "updated": "Updated {{when}}"
+    "advanced_settings": "Advanced settings",
+    "copy_link": "Copy link",
+    "copy_id": "Copy agent ID",
+    "link_copied_toast": "Link copied",
+    "id_copied_toast": "Agent ID copied"
   },
   "inspector": {
     "section_profile": "Profile",
@@ -175,7 +177,6 @@
     "section_properties": "Properties",
     "section_details": "Details",
     "section_details_hint": "Read-only ownership and lifecycle information.",
-    "section_skills": "Skills",
     "section_integrations": "Integrations",
     "prop_runtime": "Runtime",
     "prop_model": "Model",
@@ -186,7 +187,6 @@
     "prop_owner": "Owner",
     "prop_created": "Created",
     "prop_updated": "Updated",
-    "no_description_placeholder": "No description",
     "avatar_label": "Avatar",
     "name_label": "Name",
     "description_label": "Description",
@@ -202,11 +202,26 @@
     "cancel": "Cancel"
   },
   "overview": {
-    "agent_context": "Agent",
-    "access": "Access",
     "attention_title": "Runs need attention",
     "attention_queued_one": "{{count}} run is queued while the runtime is unavailable.",
     "attention_queued_other": "{{count}} runs are queued while the runtime is unavailable."
+  },
+  "sections": {
+    "runs_count_one": "{{count}} run",
+    "runs_count_other": "{{count}} runs",
+    "recent_this_week_one": "{{count}} this week",
+    "recent_this_week_other": "{{count}} this week",
+    "view_all": "View all",
+    "open": "Open",
+    "edit": "Edit",
+    "add": "Add",
+    "manage": "Manage",
+    "instructions_empty": "No instructions yet."
+  },
+  "panel": {
+    "status": "Status",
+    "runs_7d": "Runs (7d)",
+    "edit_access_aria": "Access: {{value}}. Change access"
   },
   "skill_attach": {
     "trigger_aria": "Attach a workspace skill",
@@ -261,13 +276,11 @@
     "clear_full": "Clear selection (use provider default)"
   },
   "tabs": {
-    "overview": "Overview",
     "work": "Work",
     "capabilities": "Capabilities",
     "settings": "Settings",
     "general": "General",
     "access": "Access",
-    "page_navigation_aria": "Agent page",
     "section_navigation_aria": "Agent section",
     "activity": "Activity",
     "tasks": "Runs",
@@ -289,7 +302,6 @@
     "title": "Create an agent",
     "squad_title": "Create an agent for this squad",
     "duplicate_title": "Duplicate {{name}}",
-    "back": "Go back",
     "step_ai": "Build through conversation",
     "modes": {
       "template": {
@@ -373,7 +385,8 @@
       "runtime": "Choose runtime",
       "configure": "Configure",
       "done": "Done",
-      "aria": "Agent creation steps"
+      "aria": "Agent creation steps",
+      "progress": "Step {{current}} of {{total}}"
     },
     "configure_title": "Configure the agent",
     "ask_ai": "Let AI write it",
@@ -793,13 +806,6 @@
       "section_now": "Now",
       "section_last_30d": "Last 30 days",
       "section_recent": "Recent work",
-      "subtitle_no_active": "No active work",
-      "subtitle_active_one": "{{count}} active run",
-      "subtitle_active_other": "{{count}} active runs",
-      "subtitle_performance": "Performance",
-      "subtitle_no_recent": "Nothing finished yet",
-      "subtitle_recent_progress": "{{shown}} of {{total}} runs",
-      "subtitle_recent_latest": "{{count}} latest runs",
       "empty_now": "This agent isn't running anything right now.",
       "empty_30d": "No completions in the last 30 days.",
       "empty_recent": "This agent hasn't completed anything yet.",
@@ -811,9 +817,7 @@
       "success_hint": "Completed runs divided by completed and failed runs. Cancelled runs are excluded.",
       "success_unavailable": "No completed or failed runs in this period, so there is no success rate to show.",
       "cancelled_count": "{{count}} cancelled",
-      "avg_duration": "avg {{value}}",
       "avg_duration_label": "average duration",
-      "failed_count": "{{count}} failed",
       "failed_label": "failed",
       "source_issue": "Issue",
       "source_chat": "Chat",
@@ -1042,25 +1046,11 @@
     "none": "No activity (30d)"
   },
   "toolbar": {
-    "result_count_title": "Matching agents / agents in scope",
-    "filter_label": "Filter",
-    "filter_active_count_one": "{{count}} filter",
-    "filter_active_count_other": "{{count}} filters",
-    "clear_filters": "Clear filters",
     "section_availability": "Availability",
     "section_access": "Access",
     "section_runtime": "Runtime",
-    "display": "Display",
-    "sort_by": "Sort by",
-    "direction_asc": "Ascending",
-    "direction_desc": "Descending",
-    "section_columns": "Columns",
     "section_owner": "Owner",
     "section_model": "Model"
   },
-  "actions": {
-    "selected_one": "{{count}} selected",
-    "selected_other": "{{count}} selected",
-    "clear_selection": "Clear selection"
-  }
+  "actions": {}
 }

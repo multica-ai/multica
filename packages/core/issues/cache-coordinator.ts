@@ -56,6 +56,7 @@ export interface IssueCacheChangeResult {
   prevLists: [QueryKey, ListIssuesCache][];
   prevFlatLists: [QueryKey, IssueFlatCache][];
   prevTableRows: [QueryKey, IssueTableRowCache][];
+  prevSidebarLists: [QueryKey, ListIssuesResponse][];
   prevDetail: Issue | undefined;
   prevInboxList: InboxItem[] | undefined;
   prevArchivedInboxCaches: [QueryKey, ArchivedInboxCache | undefined][] | undefined;
@@ -140,6 +141,20 @@ export function tableRowEntries(
         !!entry[1] &&
         typeof entry[1] === "object" &&
         Array.isArray((entry[1] as IssueTableRowCache).rows),
+    );
+}
+
+export function sidebarListEntries(
+  qc: QueryClient,
+  wsId: string,
+): [QueryKey, ListIssuesResponse][] {
+  return qc
+    .getQueriesData<unknown>({ queryKey: issueKeys.sidebarAll(wsId) })
+    .filter(
+      (entry): entry is [QueryKey, ListIssuesResponse] =>
+        !!entry[1] &&
+        typeof entry[1] === "object" &&
+        Array.isArray((entry[1] as ListIssuesResponse).issues),
     );
 }
 
@@ -315,6 +330,7 @@ export function applyIssueChange(
   const prevLists: [QueryKey, ListIssuesCache][] = [];
   const prevFlatLists: [QueryKey, IssueFlatCache][] = [];
   const prevTableRows: [QueryKey, IssueTableRowCache][] = [];
+  const prevSidebarLists: [QueryKey, ListIssuesResponse][] = [];
   const staleKeys: QueryKey[] = [];
   let prevIssue: Issue | undefined = baseIssue;
 
@@ -490,6 +506,23 @@ export function applyIssueChange(
     qc.setQueryData<IssueTableRowCache>(key, { ...data, rows });
   }
 
+  // Sidebar lists are server-filtered and sorted too; their membership and
+  // order refresh through invalidateIssueDerivatives. A loaded row's entity is
+  // patched now, so a status picked from the sidebar shows at once.
+  for (const [key, data] of sidebarListEntries(qc, wsId)) {
+    let found: Issue | undefined;
+    const issues = data.issues.map((issue) => {
+      if (issue.id !== id) return issue;
+      if (!acceptCurrent(issue)) return issue;
+      found = issue;
+      return { ...issue, ...patch };
+    });
+    if (!found) continue;
+    if (!prevIssue) prevIssue = found;
+    prevSidebarLists.push([key, data]);
+    qc.setQueryData<ListIssuesResponse>(key, { ...data, issues });
+  }
+
   const prevDetail = qc.getQueryData<Issue>(issueKeys.detail(wsId, id));
   if (prevDetail && acceptCurrent(prevDetail)) {
     qc.setQueryData<Issue>(issueKeys.detail(wsId, id), {
@@ -528,6 +561,7 @@ export function applyIssueChange(
     prevLists,
     prevFlatLists,
     prevTableRows,
+    prevSidebarLists,
     prevDetail,
     prevInboxList,
     prevArchivedInboxCaches,
@@ -547,6 +581,7 @@ export function rollbackIssueChange(
     | "prevLists"
     | "prevFlatLists"
     | "prevTableRows"
+    | "prevSidebarLists"
     | "prevDetail"
     | "prevInboxList"
     | "prevArchivedInboxCaches"
@@ -559,6 +594,9 @@ export function rollbackIssueChange(
     qc.setQueryData(key, snapshot);
   }
   for (const [key, snapshot] of result.prevTableRows) {
+    qc.setQueryData(key, snapshot);
+  }
+  for (const [key, snapshot] of result.prevSidebarLists) {
     qc.setQueryData(key, snapshot);
   }
   if (result.prevDetail !== undefined) {
@@ -575,13 +613,17 @@ export function rollbackIssueChange(
 /**
  * Refresh the aggregate projections a single-entity patch cannot recompute:
  * assignee-grouped boards (regrouping is server logic), every Project Gantt
- * (schedule membership + row mirrors), and project metrics when the change
- * could shift per-project counts.
+ * (schedule membership + row mirrors), and project metrics plus sidebar
+ * lists when the change could shift per-project counts.
  */
 export function invalidateIssueDerivatives(
   qc: QueryClient,
   wsId: string,
-  opts: { statusOrProjectChanged: boolean },
+  opts: {
+    statusOrProjectChanged: boolean;
+    /** False when the caller refreshes the sidebar lists it can target. */
+    refreshSidebar?: boolean;
+  },
 ) {
   qc.invalidateQueries({ queryKey: issueKeys.assigneeGroupsAll(wsId) });
   qc.invalidateQueries({ queryKey: issueKeys.myAssigneeGroupsAll(wsId) });
@@ -589,6 +631,35 @@ export function invalidateIssueDerivatives(
   if (opts.statusOrProjectChanged) {
     qc.invalidateQueries({ queryKey: projectKeys.all(wsId) });
   }
+  if (opts.refreshSidebar ?? opts.statusOrProjectChanged) {
+    qc.invalidateQueries({ queryKey: issueKeys.sidebarAll(wsId) });
+  }
+}
+
+/**
+ * Refresh the sidebar lists one issue change can reorder or move it across:
+ * lists showing it, its old and new project's lists, and every view list,
+ * built-in ones included (view membership is a server-side filter the client
+ * cannot re-evaluate).
+ */
+export function invalidateSidebarListsForIssue(
+  qc: QueryClient,
+  wsId: string,
+  issueId: string,
+  projectIds: readonly (string | null | undefined)[],
+) {
+  const projectSources = new Set(projectIds.filter(Boolean).map((id) => `project:${id}`));
+  const prefix = issueKeys.sidebarAll(wsId);
+  qc.invalidateQueries({
+    queryKey: prefix,
+    predicate: (query) => {
+      const source = query.queryKey[prefix.length];
+      if (typeof source !== "string") return false;
+      if (source.startsWith("view:") || source.startsWith("builtin:") || projectSources.has(source)) return true;
+      const data = query.state.data as ListIssuesResponse | undefined;
+      return !!data?.issues?.some((issue) => issue.id === issueId);
+    },
+  });
 }
 
 /** True when any object part of a query key encodes the requested ordering.

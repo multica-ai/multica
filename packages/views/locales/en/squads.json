@@ -1,7 +1,7 @@
 {
   "page": {
     "title": "Squads",
-    "new_button": "New Squad",
+    "new_button": "New squad",
     "empty_no_squads": "No squads yet.",
     "empty_no_match": "No squads match your filters.",
     "table": {
@@ -14,10 +14,6 @@
     "no_matches": "No squads match",
     "row_menu": "Squad actions",
     "archive_action": "Archive"
-  },
-  "inspector": {
-    "details_section": "Details",
-    "archive_button": "Archive"
   },
   "member_type": {
     "agent": "Agent",
@@ -65,17 +61,9 @@
     "responsibility_placeholder": "What is this squad responsible for?",
     "save": "Save"
   },
-  "discard_changes_dialog": {
-    "title": "Discard unsaved changes?",
-    "description": "You have unsaved changes on this tab. Switching tabs will discard them.",
-    "keep_editing": "Keep editing",
-    "discard_button": "Discard"
-  },
   "members_tab": {
     "section_title": "Members",
-    "section_count_one": "{{count}} member in this squad",
-    "section_count_other": "{{count}} members in this squad",
-    "add_member_button": "Add Member",
+    "add_member_button": "Add member",
     "create_agent_button": "Create Agent",
     "leader_chip": "Leader",
     "view_agent_tooltip": "Open agent detail",
@@ -87,19 +75,29 @@
     "status_unstable": "Unstable",
     "status_archived": "Archived",
     "issue_status_blocked": "blocked",
-    "active_issue_more": "and {{count}} more",
-    "last_active_label": "last active {{time}}"
+    "active_issue_more": "and {{count}} more"
   },
-  "detail_tabs": {
-    "members": "Members",
-    "instructions": "Instructions"
+  "detail": {
+    "assign_work": "Assign work",
+    "copy_link": "Copy link",
+    "link_copied": "Link copied",
+    "not_found": "Squad not found",
+    "instructions": "Instructions",
+    "edit": "Edit",
+    "cancel": "Cancel",
+    "recent_work": "Recent work",
+    "recent_work_empty": "No issues have been assigned to this squad yet.",
+    "member_menu": "Actions for {{name}}",
+    "working_on": "Working on"
   },
   "details": {
     "leader": "Leader",
     "members": "Members",
     "created_by": "Created by",
     "created": "Created",
-    "updated": "Updated"
+    "updated": "Updated",
+    "visibility": "Visibility",
+    "visibility_workspace": "Workspace"
   },
   "toasts": {
     "member_added": "Member added",
@@ -130,19 +128,8 @@
     "placeholder": "e.g. Always start by writing a failing test. Prefer small, atomic commits."
   },
   "scope": {
-    "mine": "Mine",
-    "all": "All"
+    "mine": "My squads",
+    "all": "All squads"
   },
-  "toolbar": {
-    "display": "Display",
-    "sort_by": "Sort by",
-    "direction_asc": "Ascending",
-    "direction_desc": "Descending",
-    "section_columns": "Columns",
-    "result_count_title": "Matching squads / all squads",
-    "filter_label": "Filter",
-    "filter_active_count_one": "{{count}} filter",
-    "filter_active_count_other": "{{count}} filters",
-    "clear_filters": "Clear filters"
-  }
+  "toolbar": {}
 }

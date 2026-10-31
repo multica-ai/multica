@@ -4653,14 +4653,18 @@ export class ApiClient {
     });
   }
 
-  async putIssueViewPreference(data: {
-    scope_type: string;
-    scope_id?: string | null;
-    prefs: { hidden: string[]; order: string[] };
-  }): Promise<IssueViewPreference> {
+  async putIssueViewPreference(
+    data: {
+      scope_type: string;
+      scope_id?: string | null;
+      prefs: Record<string, unknown>;
+    },
+    workspaceSlug?: string,
+  ): Promise<IssueViewPreference> {
     const raw = await this.fetch<unknown>("/api/issue-view-preferences", {
       method: "PUT",
       body: JSON.stringify(data),
+      headers: workspaceHeader(workspaceSlug),
     });
     return parseWithFallback(raw, IssueViewPreferenceSchema, EMPTY_ISSUE_VIEW_PREFERENCE, {
       endpoint: "PUT /api/issue-view-preferences",

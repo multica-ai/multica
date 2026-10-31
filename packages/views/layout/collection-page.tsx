@@ -1,8 +1,22 @@
 "use client";
 
 import type { ComponentProps, ReactNode } from "react";
-import type { IconComponent } from "@multica/ui/icons";
+import {
+  ChevronDown,
+  Filter,
+  Plus,
+  SlidersHorizontal,
+  type IconComponent,
+} from "@multica/ui/icons";
 import { Button } from "@multica/ui/components/ui/button";
+import { IconButton } from "@multica/ui/components/common/icon-button";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuRadioGroup,
+  DropdownMenuRadioItem,
+  DropdownMenuTrigger,
+} from "@multica/ui/components/ui/dropdown-menu";
 import {
   Empty,
   EmptyContent,
@@ -12,105 +26,210 @@ import {
   EmptyTitle,
 } from "@multica/ui/components/ui/empty";
 import { cn } from "@multica/ui/lib/utils";
+import { useT } from "../i18n";
 import { PageHeader } from "./page-header";
 
 interface CollectionPageHeaderProps {
   icon: IconComponent;
+  /** The scope being looked at, e.g. "All agents" — not the bare noun. */
   title: ReactNode;
-  count?: number;
-  description?: ReactNode;
-  learnMore?: {
-    href: string;
-    label: ReactNode;
-  };
+  /**
+   * Items of the title's menu, usually `CollectionScopeItems`. Without one the
+   * title is plain text.
+   */
+  menu?: ReactNode;
+  /** Filter and search, right after the title. */
+  tools?: ReactNode;
+  /** Icon controls on the right: display settings, then create. */
   actions?: ReactNode;
   className?: string;
 }
 
 /**
- * Shared dashboard collection header: entity icon, title, optional count and
- * supporting copy on the left; page-level actions on the right.
+ * The one header row of a list page, laid out like the issues header: the
+ * title names the scope and opens the scope menu, filter and search follow
+ * it, and the right side holds icon controls whose names live in tooltips.
+ * Counts belong to the sidebar rows, so the row carries none.
  */
 export function CollectionPageHeader({
   icon: Icon,
   title,
-  count,
-  description,
-  learnMore,
+  menu,
+  tools,
   actions,
   className,
 }: CollectionPageHeaderProps) {
+  const label = (
+    <>
+      <Icon aria-hidden="true" className="size-4 shrink-0 text-muted-foreground" />
+      <span className="min-w-0 truncate">{title}</span>
+    </>
+  );
   return (
     <PageHeader className={className}>
-      <div className="flex min-w-0 flex-1 items-center gap-2">
-        <Icon
-          aria-hidden="true"
-          className="size-4 shrink-0 text-muted-foreground"
-        />
-        <h1 className="truncate text-body font-medium">{title}</h1>
-        {typeof count === "number" && count > 0 ? (
-          <span className="shrink-0 font-mono text-caption tabular-nums text-muted-foreground">
-            {count}
-          </span>
-        ) : null}
-        {description || learnMore ? (
-          <p className="ml-2 hidden min-w-0 truncate text-caption text-muted-foreground md:block">
-            {description}
-            {learnMore ? (
-              <>
-                {description ? " " : null}
-                <a
-                  href={learnMore.href}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="underline decoration-muted-foreground/30 underline-offset-4 transition-colors hover:text-foreground"
-                >
-                  {learnMore.label}
-                </a>
-              </>
-            ) : null}
-          </p>
-        ) : null}
+      <div className="flex min-w-0 flex-1 items-center gap-1">
+        {menu ? (
+          <DropdownMenu>
+            <h1 className="flex min-w-20">
+              <DropdownMenuTrigger
+                render={
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className="h-7 min-w-0 max-w-64 shrink gap-2 px-2 text-body font-medium text-foreground"
+                  />
+                }
+              >
+                {label}
+                <ChevronDown className="size-3 shrink-0 text-muted-foreground" />
+              </DropdownMenuTrigger>
+            </h1>
+            <DropdownMenuContent align="start" className="w-auto min-w-52">
+              {menu}
+            </DropdownMenuContent>
+          </DropdownMenu>
+        ) : (
+          <h1 className="flex min-w-0 items-center gap-2 px-2 text-body font-medium">
+            {label}
+          </h1>
+        )}
+        {tools}
       </div>
       {actions ? (
-        <div className="flex shrink-0 items-center justify-end gap-2">
-          {actions}
-        </div>
+        <div className="flex shrink-0 items-center gap-1">{actions}</div>
       ) : null}
     </PageHeader>
   );
 }
 
-interface CollectionPageHeaderActionProps
-  extends Omit<ComponentProps<typeof Button>, "children"> {
-  icon: IconComponent;
-  label: string;
+export interface CollectionScopeOption<T extends string> {
+  value: T;
+  label: ReactNode;
+  /** Shown in the menu only; the header never carries a count. */
+  count?: number;
 }
 
-/** Responsive collection action: icon-only below md, labelled above md. */
-export function CollectionPageHeaderAction({
-  icon: Icon,
+export function CollectionScopeItems<T extends string>({
+  value,
+  options,
+  onChange,
+}: {
+  value: T;
+  options: CollectionScopeOption<T>[];
+  onChange: (value: T) => void;
+}) {
+  return (
+    <DropdownMenuRadioGroup value={value} onValueChange={(next) => onChange(next as T)}>
+      {options.map((option) => (
+        <DropdownMenuRadioItem key={option.value} value={option.value}>
+          <span className="flex-1">{option.label}</span>
+          {option.count !== undefined ? (
+            <span className="ml-3 text-caption tabular-nums text-muted-foreground">
+              {option.count}
+            </span>
+          ) : null}
+        </DropdownMenuRadioItem>
+      ))}
+    </DropdownMenuRadioGroup>
+  );
+}
+
+type HeaderIconButtonProps = Omit<ComponentProps<typeof IconButton>, "label" | "children"> & {
+  /** Overrides the default tooltip and accessible name. */
+  label?: string;
+};
+
+/**
+ * The filter control: an icon that turns into a count once filters are on.
+ * Pass it as the `render` of the filter menu's trigger.
+ */
+export function CollectionFilterButton({
+  count = 0,
   label,
   className,
-  type = "button",
-  size = "sm",
-  variant = "outline",
   ...props
-}: CollectionPageHeaderActionProps) {
-  const accessibleLabel = props["aria-label"] ?? label;
+}: HeaderIconButtonProps & { count?: number }) {
+  const { t } = useT("layout");
+  return (
+    <IconButton
+      {...props}
+      size="sm"
+      tooltipSide="bottom"
+      label={
+        label ??
+        (count > 0
+          ? t(($) => $.collection.filter_count, { count })
+          : t(($) => $.collection.filter))
+      }
+      className={cn(
+        "h-7 min-w-7 shrink-0 gap-1.5 px-1.5 text-muted-foreground",
+        count > 0 && "text-foreground",
+        className,
+      )}
+    >
+      <Filter className="size-4" />
+      {count > 0 ? (
+        <span className="rounded-sm bg-brand/10 px-1 text-caption font-medium tabular-nums text-brand">
+          {count}
+        </span>
+      ) : null}
+    </IconButton>
+  );
+}
 
+/** Clears the filters and search; render it only while one is on. */
+export function CollectionResetButton({ onClick }: { onClick: () => void }) {
+  const { t } = useT("layout");
   return (
     <Button
-      type={type}
-      size={size}
-      variant={variant}
-      className={cn("h-8 w-8 gap-1 px-0 md:w-auto md:px-2.5", className)}
-      aria-label={accessibleLabel}
-      {...props}
+      variant="ghost"
+      size="sm"
+      className="h-7 shrink-0 px-2 text-muted-foreground"
+      onClick={onClick}
     >
-      <Icon aria-hidden="true" className="size-3.5" />
-      <span className="hidden md:inline">{label}</span>
+      {t(($) => $.collection.reset)}
     </Button>
+  );
+}
+
+/**
+ * Display settings (sort, columns, layout). Pass it as the `render` of the
+ * popover that holds them; `icon` shows the current layout when there is one.
+ */
+export function CollectionDisplayButton({
+  icon: Icon = SlidersHorizontal,
+  label,
+  className,
+  ...props
+}: HeaderIconButtonProps & { icon?: IconComponent }) {
+  const { t } = useT("layout");
+  return (
+    <IconButton
+      {...props}
+      tooltipSide="bottom"
+      label={label ?? t(($) => $.collection.display)}
+      className={cn("shrink-0 text-muted-foreground", className)}
+    >
+      <Icon />
+    </IconButton>
+  );
+}
+
+/** Create is always an icon; the page's one solid button is never "New". */
+export function CollectionCreateButton({
+  label,
+  className,
+  ...props
+}: Omit<ComponentProps<typeof IconButton>, "children">) {
+  return (
+    <IconButton
+      {...props}
+      tooltipSide="bottom"
+      label={label}
+      className={cn("shrink-0 text-muted-foreground", className)}
+    >
+      <Plus />
+    </IconButton>
   );
 }
 

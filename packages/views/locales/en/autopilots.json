@@ -1,6 +1,5 @@
 {
   "page": {
-    "title": "Autopilot",
     "new_autopilot": "New autopilot",
     "start_blank": "Start from scratch",
     "table": {
@@ -20,7 +19,6 @@
       "title": "No autopilots yet",
       "hint": "Schedule recurring work for your AI agents. Pick a template or start from scratch."
     },
-    "scope_all": "All",
     "no_matches": "No automations match",
     "retry": "Retry"
   },
@@ -87,19 +85,27 @@
     "run_blocked_quota_exceeded": "Not triggered — the run limit for this period has been reached",
     "run_blocked_issue_limit_reached": "Not triggered — the workspace has reached its issue limit",
     "run_blocked_generic": "Not triggered — the run was blocked",
-    "section_properties": "Properties",
     "section_triggers": "Triggers",
-    "section_run_history": "Run History",
-    "section_danger": "Danger Zone",
+    "section_run_history": "Run history",
     "field_agent": "Agent",
     "field_created_by": "Created by",
-    "field_output_mode": "Output Mode",
+    "field_output_mode": "Output mode",
     "field_project": "Project",
     "no_project": "No project",
     "project_unavailable": "Project unavailable",
     "field_prompt": "Prompt",
     "field_subscribers": "Subscribers",
     "field_subscribers_none": "None",
+    "no_prompt": "No prompt yet.",
+    "copy_link": "Copy link",
+    "link_copied": "Link copied",
+    "link_copy_failed": "Couldn't copy the link",
+    "open_project": "Open project",
+    "summary": {
+      "create_issue": "{{agent}} creates an issue each run",
+      "run_only": "{{agent}} runs it without creating an issue",
+      "with_trigger": "{{trigger}} · {{action}}"
+    },
     "add_trigger": "Add trigger",
     "no_triggers": "No triggers configured. Add a schedule to run automatically.",
     "no_runs": "No runs yet. Click \"Run now\" to trigger manually.",
@@ -196,7 +202,7 @@
     }
   },
   "deliveries": {
-    "section_title": "Webhook Deliveries",
+    "section_title": "Webhook deliveries",
     "empty": "No webhook deliveries yet. Send a POST to the webhook URL to see entries here.",
     "row": {
       "attempts": "{{count}}× attempts",
@@ -441,29 +447,16 @@
     "search_placeholder": "Search timezone..."
   },
   "toolbar": {
-    "result_count_title": "Matching automations / all automations",
-    "filter_label": "Filter",
-    "filter_active_count_one": "{{count}} filter",
-    "filter_active_count_other": "{{count}} filters",
-    "clear_filters": "Clear filters",
     "section_assignee": "Assignee",
     "section_mode": "Mode",
     "section_trigger": "Trigger",
-    "section_creator": "Created by",
-    "display": "Display",
-    "sort_by": "Sort by",
-    "direction_asc": "Ascending",
-    "direction_desc": "Descending",
-    "section_columns": "Columns"
+    "section_creator": "Created by"
   },
   "actions": {
     "row_menu": "Automation actions",
     "pause": "Pause",
     "resume": "Resume",
     "delete": "Delete",
-    "selected_one": "{{count}} selected",
-    "selected_other": "{{count}} selected",
-    "clear_selection": "Clear selection",
     "delete_dialog": {
       "title": "Delete automation?",
       "description_one": "This will permanently delete \"{{name}}\" and its run history.",
@@ -476,7 +469,6 @@
   },
   "wakeups": {
     "title": "Issue wakeups",
-    "scope": "Scope",
     "issue": "Issue",
     "trigger": "Trigger",
     "enabled": "Enabled",
@@ -485,22 +477,16 @@
     "at": "One-time",
     "recurring": "Recurring",
     "all_agents": "All agents",
-    "search": "Search issues or agents",
     "running": "Running",
     "active_runs": "{{count}} active runs",
     "issue_closed": "Issue closed",
     "read_only": "Only the creator or a workspace admin can manage this wakeup",
     "select_row": "Select {{issue}}, {{agent}}",
-    "select_page": "Select enabled wakeups on this page",
+    "select_page": "Select all enabled wakeups",
     "load_error": "Could not load wakeups",
     "loading": "Loading wakeups…",
     "empty": "No wakeup rules yet",
-    "selected": "{{count}} selected",
     "disable_selected": "Turn off selected",
-    "clear": "Clear selection",
-    "results": "Page {{page}} · {{count}} results",
-    "previous": "Previous",
-    "next_page": "Next",
     "confirm_title": "Turn off {{count}} wakeups?",
     "confirm_body": "Future wakeups will stop. Runs still queued and not handed to an agent will be withdrawn. Dispatched runs will continue; stop them from the execution log.",
     "cancel": "Cancel",
@@ -509,7 +495,7 @@
     "batch_result": "Turned off: {{succeeded}}. Failed: {{failed}}.",
     "scopes": {
       "active": "Waiting or executing",
-      "all": "All",
+      "all": "All wakeups",
       "disabled": "Turned off",
       "ended": "Ended",
       "paused": "Paused"
@@ -521,7 +507,7 @@
     "batch_partial": "Turned off {{succeeded}}; {{failed}} failed. Failed items remain selected for retry.",
     "source": "Source",
     "sources": {
-      "all": "Source: All",
+      "all": "All sources",
       "member": "Members",
       "agent": "Agents",
       "system": "System"
