@@ -3,6 +3,7 @@ import type {
   GitHubPullRequestChecksRollup,
   GitHubPullRequestMergeable,
   GitHubPullRequestMergeStateStatus,
+  GitHubPullRequestReviewDecision,
   GitHubPullRequestState,
   IssuePullRequestState,
 } from "../types";
@@ -170,6 +171,7 @@ export type PullRequestVerdict =
   | { kind: "conflicting" }
   | { kind: "running"; passed: number; total: number; running: number }
   | { kind: "behind" }
+  | { kind: "awaiting_review" }
   | { kind: "blocked" }
   | { kind: "draft" }
   | { kind: "ready" }
@@ -179,11 +181,15 @@ export type PullRequestVerdict =
 
 export interface PullRequestVerdictInput extends PullRequestChecksInput, PullRequestMergeInput {
   state: GitHubPullRequestState;
+  review_decision?: GitHubPullRequestReviewDecision | null;
 }
 
 // Priority (high → low):
-//   merged / closed → failed → conflicting → running → behind → blocked
-//   → draft → ready → passed → no checks → unknown
+//   merged / closed → failed → conflicting → running → behind
+//   → awaiting review / blocked → draft → ready → passed → no checks → unknown
+//
+// `awaiting_review` is the `blocked` state GitHub explains with a required
+// review that has not been given; every other blocked reason stays `blocked`.
 //
 // `unstable` (non-passing checks) only restates the CI verdict, and `has_hooks`
 // is GitHub's "mergeable, with pre-receive hooks", so neither gets a verdict of
@@ -209,7 +215,11 @@ export function derivePullRequestVerdict(input: PullRequestVerdictInput): PullRe
     return { kind: "running", passed: checks.passed, total: checks.total, running: checks.running };
   }
   if (merge.kind === "behind") return { kind: "behind" };
-  if (merge.kind === "blocked") return { kind: "blocked" };
+  if (merge.kind === "blocked") {
+    return input.state !== "draft" && input.review_decision === "review_required"
+      ? { kind: "awaiting_review" }
+      : { kind: "blocked" };
+  }
   if (input.state === "draft") return { kind: "draft" };
   if (merge.kind === "ready" || merge.kind === "has_hooks") return { kind: "ready" };
   if (checks.kind === "passed") return { kind: "passed", total: checks.total };
@@ -231,6 +241,7 @@ export function pullRequestQueueState(
     case "failed":
     case "conflicting":
     case "behind":
+    case "awaiting_review":
     case "blocked":
       return "needs_attention";
     default:

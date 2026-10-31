@@ -56,6 +56,70 @@ export interface GitHubPullRequestAutoMerge {
   enabled_by: string | null;
 }
 
+/** The signed-in user's own GitHub account, which PR actions run as. */
+export interface GitHubAccount {
+  /** False when this server has no GitHub user authorization configured. */
+  configured: boolean;
+  connected: boolean;
+  login: string | null;
+  avatar_url: string | null;
+}
+
+export interface GitHubAccountConnectResponse {
+  url: string;
+}
+
+export interface GitHubMergeCommitMessage {
+  title: string;
+  body: string;
+}
+
+/** What the merge dialog needs, read from GitHub as the viewer. */
+export interface GitHubMergeOptions {
+  viewer: {
+    login: string;
+    did_author: boolean;
+    can_update_branch: boolean;
+    can_enable_auto_merge: boolean;
+  };
+  allowed_methods: GitHubMergeMethod[];
+  default_method: GitHubMergeMethod | null;
+  commit_messages: Partial<Record<GitHubMergeMethod, GitHubMergeCommitMessage>>;
+  delete_branch_on_merge: boolean;
+  head_is_fork: boolean;
+  auto_merge_allowed: boolean;
+  auto_merge: GitHubPullRequestAutoMerge | null;
+  review_decision: GitHubPullRequestReviewDecision | null;
+  merge_state_status: string;
+  mergeable: string;
+  head_sha: string;
+}
+
+export interface MergePullRequestRequest {
+  method: GitHubMergeMethod;
+  commit_title?: string;
+  commit_message?: string;
+  delete_branch: boolean;
+  expected_head_sha: string;
+}
+
+export interface MergePullRequestResponse {
+  merged: boolean;
+  sha: string;
+  branch_deleted: boolean;
+}
+
+export interface RerunFailedChecksResponse {
+  rerun_count: number;
+  /** Failing checks GitHub would not rerun for this user (non-Actions checks, commit statuses). */
+  not_rerunnable: string[];
+}
+
+export interface GitHubReviewerCandidate {
+  login: string;
+  avatar_url: string;
+}
+
 export interface GitHubInstallation {
   id: string;
   workspace_id: string;
