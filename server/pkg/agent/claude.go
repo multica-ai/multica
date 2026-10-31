@@ -228,6 +228,20 @@ func (b *claudeBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 		unreadableAssistantCount := 0
 		controlErrors := make(chan error, 1)
 		var controlWrites sync.WaitGroup
+		var controlMu sync.Mutex
+		pendingControls := 0
+		closeRequested := false
+		closeAfterControls := func() {
+			if supplements != nil {
+				supplements.end()
+			}
+			controlMu.Lock()
+			defer controlMu.Unlock()
+			closeRequested = true
+			if pendingControls == 0 {
+				closeStdin()
+			}
+		}
 		var stopAfterErrorResultOnce sync.Once
 		// stopAfterErrorResult terminates a claude that outlives its error
 		// result past the grace period, the same way cancellation does.
@@ -337,7 +351,9 @@ func (b *claudeBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 						usage = resultUsage
 					}
 				}
-				closeStdin()
+				// Keep draining stdout while accepted control replies finish writing.
+				// shortcut: requests arriving after the drain still need a run-end signal.
+				closeAfterControls()
 				if resultIsError || terminalReasonError != "" {
 					stopAfterErrorResultOnce.Do(func() { go stopAfterErrorResult() })
 				}
@@ -354,9 +370,20 @@ func (b *claudeBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 				if supplements != nil {
 					reply, _ = supplements.prepareHook(msg)
 				}
+				controlMu.Lock()
+				pendingControls++
+				controlMu.Unlock()
 				controlWrites.Add(1)
 				go func(msg claudeSDKMessage, reply func(io.Writer) error) {
 					defer controlWrites.Done()
+					defer func() {
+						controlMu.Lock()
+						defer controlMu.Unlock()
+						pendingControls--
+						if closeRequested && pendingControls == 0 {
+							closeStdin()
+						}
+					}()
 					if reply == nil {
 						b.handleControlRequest(msg, inputWriter)
 						return
