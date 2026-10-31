@@ -17,23 +17,31 @@ import (
 )
 
 type fakePatcherQueries struct {
-	mu                  sync.Mutex
-	task                db.AgentTaskQueue
-	taskErr             error
-	taskChannelIngested bool
-	binding             ChatSessionBinding
-	bindingErr          error
-	delivery            db.ChannelTaskDelivery
-	deliveryErr         error
-	installation        Installation
-	installationErr     error
-	agent               db.Agent
-	agentErr            error
-	card                OutboundCardMessage
-	cardErr             error
-	created             []CreateOutboundCardMessageParams
-	createReturn        OutboundCardMessage
-	statusUpdates       []UpdateOutboundCardStatusParams
+	mu                   sync.Mutex
+	task                 db.AgentTaskQueue
+	taskErr              error
+	taskChannelIngested  bool
+	binding              ChatSessionBinding
+	bindingErr           error
+	delivery             db.ChannelTaskDelivery
+	deliveryErr          error
+	installation         Installation
+	installationErr      error
+	agent                db.Agent
+	agentErr             error
+	card                 OutboundCardMessage
+	cardErr              error
+	issueDelivery        db.ChannelIssueDelivery
+	issueDeliveryErr     error
+	issueDeliveryLookups int
+	commentClaims        map[string]bool
+	commentSent          map[string]bool
+	commentClaimCount    int
+	commentMarkCount     int
+	commentReleaseCount  int
+	created              []CreateOutboundCardMessageParams
+	createReturn         OutboundCardMessage
+	statusUpdates        []UpdateOutboundCardStatusParams
 	// deliveriesByTask overrides the derived delivery row per task_id, so a
 	// test can give two concurrent runs different frozen trigger snapshots.
 	// Empty falls back to the binding-derived row below.
@@ -90,6 +98,47 @@ func (f *fakePatcherQueries) GetChannelTaskDelivery(_ context.Context, taskID pg
 		}, f.deliveryErr
 	}
 	return f.delivery, f.deliveryErr
+}
+func (f *fakePatcherQueries) GetChannelIssueDelivery(_ context.Context, issueID pgtype.UUID) (db.ChannelIssueDelivery, error) {
+	f.mu.Lock()
+	f.issueDeliveryLookups++
+	f.mu.Unlock()
+	return f.issueDelivery, f.issueDeliveryErr
+}
+func (f *fakePatcherQueries) ClaimChannelIssueCommentNotification(_ context.Context, arg db.ClaimChannelIssueCommentNotificationParams) (db.ChannelIssueCommentNotification, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.commentClaims == nil {
+		f.commentClaims = make(map[string]bool)
+	}
+	if f.commentSent == nil {
+		f.commentSent = make(map[string]bool)
+	}
+	key := uuidString(arg.CommentID)
+	if f.commentClaims[key] || f.commentSent[key] {
+		return db.ChannelIssueCommentNotification{}, pgx.ErrNoRows
+	}
+	f.commentClaims[key] = true
+	f.commentClaimCount++
+	return db.ChannelIssueCommentNotification{CommentID: arg.CommentID, IssueID: arg.IssueID}, nil
+}
+func (f *fakePatcherQueries) MarkChannelIssueCommentNotificationSent(_ context.Context, commentID pgtype.UUID) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.commentMarkCount++
+	delete(f.commentClaims, uuidString(commentID))
+	if f.commentSent == nil {
+		f.commentSent = make(map[string]bool)
+	}
+	f.commentSent[uuidString(commentID)] = true
+	return nil
+}
+func (f *fakePatcherQueries) ReleaseChannelIssueCommentNotification(_ context.Context, commentID pgtype.UUID) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.commentReleaseCount++
+	delete(f.commentClaims, uuidString(commentID))
+	return nil
 }
 func (f *fakePatcherQueries) GetChatSession(ctx context.Context, id pgtype.UUID) (db.ChatSession, error) {
 	if f.mediaSession != nil {
@@ -319,6 +368,183 @@ func TestPatcherSendsPlainTextOnChatDone(t *testing.T) {
 		t.Errorf("ChatDone must NOT send / patch any card; got sent=%d patched=%d",
 			len(api.sent), len(api.patched))
 	}
+}
+
+func TestPatcherSendsAgentIssueCommentToFrozenTrigger(t *testing.T) {
+	p, q, api := newTestPatcher(t)
+	q.issueDelivery = db.ChannelIssueDelivery{
+		IssueID:          uuidFromString(t, "eeeeeeee-eeee-eeee-eeee-eeeeeeeeeeee"),
+		ChannelType:      channelTypeFeishu,
+		InstallationID:   q.installation.ID,
+		BindingID:        uuidFromString(t, "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb"),
+		ChannelChatID:    "oc_frozen_chat",
+		ChatType:         "group",
+		ChannelMessageID: pgtype.Text{String: "om_frozen_trigger", Valid: true},
+		ChannelSenderID:  pgtype.Text{String: "ou_sender", Valid: true},
+		Config:           []byte(`{}`),
+	}
+	bus := events.New()
+	p.Register(bus)
+
+	bus.Publish(events.Event{
+		Type: protocol.EventCommentCreated,
+		Payload: map[string]any{
+			"issue_title": "Notify Mika",
+			"comment": map[string]any{
+				"id":          "dddddddd-dddd-dddd-dddd-dddddddddddd",
+				"issue_id":    "eeeeeeee-eeee-eeee-eeee-eeeeeeeeeeee",
+				"author_type": "agent",
+				"type":        "comment",
+				"content":     "Task finished",
+			},
+		},
+	})
+
+	api.mu.Lock()
+	defer api.mu.Unlock()
+	if len(api.textSent) != 1 {
+		t.Fatalf("expected one issue comment text send; got %d", len(api.textSent))
+	}
+	if got, want := api.textSent[0].Text, "【Notify Mika】\nTask finished"; got != want {
+		t.Errorf("text = %q, want %q", got, want)
+	}
+	if got, want := api.textSent[0].ChatID, ChatID("oc_frozen_chat"); got != want {
+		t.Errorf("chat_id = %q, want frozen route %q", got, want)
+	}
+	if got, want := api.textSent[0].ReplyTarget, (ReplyTarget{MessageID: "om_frozen_trigger"}); got != want {
+		t.Errorf("reply target = %+v, want frozen trigger %+v", got, want)
+	}
+	if q.commentMarkCount != 1 || q.commentReleaseCount != 0 {
+		t.Errorf("claim result mark=%d release=%d, want mark=1 release=0", q.commentMarkCount, q.commentReleaseCount)
+	}
+}
+
+func TestPatcherSendsAgentIssueCommentToFrozenTopic(t *testing.T) {
+	p, q, api := newTestPatcher(t)
+	q.issueDelivery = db.ChannelIssueDelivery{
+		IssueID:          uuidFromString(t, "eeeeeeee-eeee-eeee-eeee-eeeeeeeeeeee"),
+		ChannelType:      channelTypeFeishu,
+		InstallationID:   q.installation.ID,
+		BindingID:        uuidFromString(t, "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb"),
+		ChannelChatID:    "oc_group:omt_topic",
+		ChatType:         "group",
+		ChannelMessageID: pgtype.Text{String: "om_topic_trigger", Valid: true},
+		ChannelThreadID:  pgtype.Text{String: "omt_topic", Valid: true},
+		Config:           []byte(`{"chat_id":"oc_group"}`),
+	}
+	p.handleEvent(events.Event{
+		Type: protocol.EventCommentCreated,
+		Payload: map[string]any{
+			"comment": map[string]any{
+				"id":          "dddddddd-dddd-dddd-dddd-dddddddddddd",
+				"issue_id":    "eeeeeeee-eeee-eeee-eeee-eeeeeeeeeeee",
+				"author_type": "agent",
+				"type":        "comment",
+				"content":     "Topic update",
+			},
+		},
+	})
+
+	api.mu.Lock()
+	defer api.mu.Unlock()
+	if len(api.textSent) != 1 {
+		t.Fatalf("expected one topic comment send; got %d", len(api.textSent))
+	}
+	if got, want := api.textSent[0].ChatID, ChatID("oc_group"); got != want {
+		t.Errorf("chat_id = %q, want real topic chat %q", got, want)
+	}
+	if got, want := api.textSent[0].ReplyTarget, (ReplyTarget{MessageID: "om_topic_trigger", InThread: true}); got != want {
+		t.Errorf("reply target = %+v, want topic reply %+v", got, want)
+	}
+}
+
+func TestPatcherSkipsNonAgentAndNonCommentIssueEvents(t *testing.T) {
+	p, q, api := newTestPatcher(t)
+	q.issueDelivery = db.ChannelIssueDelivery{ChannelType: channelTypeFeishu}
+	bus := events.New()
+	p.Register(bus)
+
+	for _, comment := range []map[string]any{
+		{"author_type": "member", "type": "comment", "content": "human comment"},
+		{"author_type": "agent", "type": "system", "content": "status update"},
+		{"author_type": "agent", "type": "progress_update", "content": "still working"},
+	} {
+		comment["id"] = "dddddddd-dddd-dddd-dddd-dddddddddddd"
+		comment["issue_id"] = "eeeeeeee-eeee-eeee-eeee-eeeeeeeeeeee"
+		bus.Publish(events.Event{Type: protocol.EventCommentCreated, Payload: map[string]any{"comment": comment}})
+	}
+	api.mu.Lock()
+	defer api.mu.Unlock()
+	if len(api.textSent) != 0 || q.issueDeliveryLookups != 0 || q.commentClaimCount != 0 {
+		t.Fatalf("filtered comments caused outbound work: sends=%d delivery_lookups=%d claims=%d", len(api.textSent), q.issueDeliveryLookups, q.commentClaimCount)
+	}
+}
+
+func TestPatcherIssueCommentDeliveryFiltersAndDeduplicates(t *testing.T) {
+	t.Run("non Feishu issue", func(t *testing.T) {
+		p, q, api := newTestPatcher(t)
+		q.issueDelivery = db.ChannelIssueDelivery{ChannelType: "slack"}
+		publishIssueComment(p)
+		if len(api.textSent) != 0 || q.commentClaimCount != 0 {
+			t.Fatalf("non Feishu issue should not claim or send: claims=%d sends=%d", q.commentClaimCount, len(api.textSent))
+		}
+	})
+
+	t.Run("duplicate event", func(t *testing.T) {
+		p, q, api := newTestPatcher(t)
+		q.issueDelivery = validIssueDelivery(t, q)
+		publishIssueComment(p)
+		publishIssueComment(p)
+		if len(api.textSent) != 1 || q.commentClaimCount != 1 || q.commentMarkCount != 1 {
+			t.Fatalf("duplicate event was not idempotent: sends=%d claims=%d marks=%d", len(api.textSent), q.commentClaimCount, q.commentMarkCount)
+		}
+	})
+
+	t.Run("failed send releases claim", func(t *testing.T) {
+		p, q, api := newTestPatcher(t)
+		q.issueDelivery = validIssueDelivery(t, q)
+		api.textSendErr = errors.New("send failed")
+		publishIssueComment(p)
+		if q.commentReleaseCount != 1 || q.commentMarkCount != 0 {
+			t.Fatalf("failed send claim state: releases=%d marks=%d", q.commentReleaseCount, q.commentMarkCount)
+		}
+		api.textSendErr = nil
+		publishIssueComment(p)
+		if len(api.textSent) != 2 || q.commentMarkCount != 1 {
+			t.Fatalf("retry after failed send did not proceed: sends=%d marks=%d", len(api.textSent), q.commentMarkCount)
+		}
+	})
+}
+
+func validIssueDelivery(t *testing.T, q *fakePatcherQueries) db.ChannelIssueDelivery {
+	t.Helper()
+	return db.ChannelIssueDelivery{
+		IssueID:          uuidFromString(t, "eeeeeeee-eeee-eeee-eeee-eeeeeeeeeeee"),
+		ChannelType:      channelTypeFeishu,
+		InstallationID:   q.installation.ID,
+		BindingID:        uuidFromString(t, "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb"),
+		ChannelChatID:    "oc_frozen_chat",
+		ChatType:         "group",
+		ChannelMessageID: pgtype.Text{String: "om_frozen_trigger", Valid: true},
+		ChannelSenderID:  pgtype.Text{String: "ou_sender", Valid: true},
+		Config:           []byte(`{}`),
+	}
+}
+
+func publishIssueComment(p *Patcher) {
+	p.handleEvent(events.Event{
+		Type: protocol.EventCommentCreated,
+		Payload: map[string]any{
+			"issue_title": "Notify Mika",
+			"comment": map[string]any{
+				"id":          "dddddddd-dddd-dddd-dddd-dddddddddddd",
+				"issue_id":    "eeeeeeee-eeee-eeee-eeee-eeeeeeeeeeee",
+				"author_type": "agent",
+				"type":        "comment",
+				"content":     "Task finished",
+			},
+		},
+	})
 }
 
 // TestPatcherRoutesMarkdownReplyToCard pins the two-path chat reply:

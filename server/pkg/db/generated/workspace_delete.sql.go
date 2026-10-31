@@ -358,6 +358,14 @@ deleted_issue_subscribers AS (
     DELETE FROM issue_subscriber
     WHERE issue_id IN (SELECT id FROM ws_issues)
 ),
+deleted_channel_issue_comment_notifications AS (
+    DELETE FROM channel_issue_comment_notification
+    WHERE issue_id IN (SELECT id FROM ws_issues)
+),
+deleted_channel_issue_deliveries AS (
+    DELETE FROM channel_issue_delivery
+    WHERE issue_id IN (SELECT id FROM ws_issues)
+),
 deleted_issue_labels AS (
     DELETE FROM issue_to_label
     WHERE issue_id IN (SELECT id FROM ws_issues)

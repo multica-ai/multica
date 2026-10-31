@@ -148,6 +148,10 @@ type PatcherQueries interface {
 	GetAgentTask(ctx context.Context, id pgtype.UUID) (db.AgentTaskQueue, error)
 	TaskHasChannelIngestedMessages(ctx context.Context, taskID pgtype.UUID) (bool, error)
 	GetChannelTaskDelivery(ctx context.Context, taskID pgtype.UUID) (db.ChannelTaskDelivery, error)
+	GetChannelIssueDelivery(ctx context.Context, issueID pgtype.UUID) (db.ChannelIssueDelivery, error)
+	ClaimChannelIssueCommentNotification(ctx context.Context, arg db.ClaimChannelIssueCommentNotificationParams) (db.ChannelIssueCommentNotification, error)
+	MarkChannelIssueCommentNotificationSent(ctx context.Context, commentID pgtype.UUID) error
+	ReleaseChannelIssueCommentNotification(ctx context.Context, commentID pgtype.UUID) error
 	GetChatSession(ctx context.Context, id pgtype.UUID) (db.ChatSession, error)
 	GetAgent(ctx context.Context, id pgtype.UUID) (db.Agent, error)
 	GetLarkInstallation(ctx context.Context, id pgtype.UUID) (Installation, error)
@@ -287,6 +291,7 @@ func (p *Patcher) Register(bus *events.Bus) {
 	bus.Subscribe(protocol.EventTaskFailed, p.handleEvent)
 	bus.Subscribe(protocol.EventChatDone, p.handleEvent)
 	bus.Subscribe(protocol.EventTaskCancelled, p.handleEvent)
+	bus.Subscribe(protocol.EventCommentCreated, p.handleEvent)
 }
 
 func (p *Patcher) handleEvent(e events.Event) {
@@ -306,6 +311,9 @@ func (p *Patcher) handleEvent(e events.Event) {
 }
 
 func (p *Patcher) processEvent(ctx context.Context, e events.Event) error {
+	if e.Type == protocol.EventCommentCreated {
+		return p.processIssueComment(ctx, e)
+	}
 	taskID, chatSessionID, ok := taskAndSessionFromEvent(e)
 	if !ok {
 		return nil
@@ -391,6 +399,127 @@ func (p *Patcher) processEvent(ctx context.Context, e events.Event) error {
 		return p.fail(ctx, creds, binding, taskID, agentName, e.Payload)
 	}
 	return nil
+}
+
+func (p *Patcher) processIssueComment(ctx context.Context, e events.Event) error {
+	issueID, commentID, title, content, authorType, commentType, ok := issueCommentFromEvent(e.Payload)
+	if !ok || authorType != "agent" || commentType != "comment" || content == "" {
+		return nil
+	}
+
+	delivery, err := p.queries.GetChannelIssueDelivery(ctx, issueID)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil
+		}
+		return fmt.Errorf("lookup lark issue delivery: %w", err)
+	}
+	if delivery.ChannelType != channelTypeFeishu {
+		return nil
+	}
+	if _, err := p.queries.ClaimChannelIssueCommentNotification(ctx, db.ClaimChannelIssueCommentNotificationParams{
+		CommentID: commentID,
+		IssueID:   issueID,
+	}); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil
+		}
+		return fmt.Errorf("claim lark issue comment notification: %w", err)
+	}
+	sendSucceeded := false
+	defer func() {
+		if !sendSucceeded {
+			if releaseErr := p.queries.ReleaseChannelIssueCommentNotification(ctx, commentID); releaseErr != nil {
+				p.cfg.Logger.Warn("lark: release issue comment notification claim failed", "comment_id", uuidString(commentID), "error", releaseErr)
+			}
+		}
+	}()
+
+	inst, err := p.queries.GetLarkInstallation(ctx, delivery.InstallationID)
+	if err != nil {
+		return fmt.Errorf("load installation for issue comment: %w", err)
+	}
+	if InstallationStatus(inst.Status) != InstallationActive {
+		return nil
+	}
+	creds, err := p.installationCredentials(inst)
+	if err != nil {
+		return err
+	}
+	binding := ChatSessionBinding{
+		ID:             delivery.BindingID,
+		InstallationID: delivery.InstallationID,
+		ChannelChatID:  delivery.ChannelChatID,
+		ChatType:       delivery.ChatType,
+		Config:         delivery.Config,
+		LastMessageID:  delivery.ChannelMessageID,
+		LastThreadID:   delivery.ChannelThreadID,
+		LastSenderID:   delivery.ChannelSenderID,
+	}
+	body := content
+	if title != "" {
+		body = "【" + title + "】\n" + body
+	}
+	if err := sendWithReplyFallback(p.cfg.Logger, "send issue comment", threadReplyTarget(binding), func(target ReplyTarget) error {
+		if containsMarkdown(body) {
+			_, sendErr := p.client.SendMarkdownCard(ctx, SendMarkdownCardParams{
+				InstallationID: creds,
+				ChatID:         outboundChatID(binding),
+				Markdown:       body,
+				ReplyTarget:    target,
+			})
+			return sendErr
+		}
+		_, sendErr := p.client.SendTextMessage(ctx, SendTextParams{
+			InstallationID: creds,
+			ChatID:         outboundChatID(binding),
+			Text:           body,
+			ReplyTarget:    target,
+		})
+		return sendErr
+	}); err != nil {
+		return err
+	}
+	sendSucceeded = true
+	if err := p.queries.MarkChannelIssueCommentNotificationSent(ctx, commentID); err != nil {
+		return fmt.Errorf("mark lark issue comment notification sent: %w", err)
+	}
+	return nil
+}
+
+func issueCommentFromEvent(payload any) (issueID, commentID pgtype.UUID, title, content, authorType, commentType string, ok bool) {
+	var event struct {
+		IssueTitle string `json:"issue_title"`
+		Comment    struct {
+			ID         string `json:"id"`
+			IssueID    string `json:"issue_id"`
+			AuthorType string `json:"author_type"`
+			Type       string `json:"type"`
+			Content    string `json:"content"`
+		} `json:"comment"`
+	}
+	raw, err := json.Marshal(payload)
+	if err != nil || json.Unmarshal(raw, &event) != nil {
+		return pgtype.UUID{}, pgtype.UUID{}, "", "", "", "", false
+	}
+	issueID, issueOK := parseEventUUID(event.Comment.IssueID)
+	commentID, commentOK := parseEventUUID(event.Comment.ID)
+	if !issueOK || !commentOK {
+		return pgtype.UUID{}, pgtype.UUID{}, "", "", "", "", false
+	}
+	return issueID, commentID, event.IssueTitle, event.Comment.Content, event.Comment.AuthorType, event.Comment.Type, true
+}
+
+func parseEventUUID(value any) (pgtype.UUID, bool) {
+	s, ok := value.(string)
+	if !ok || s == "" {
+		return pgtype.UUID{}, false
+	}
+	var id pgtype.UUID
+	if err := id.Scan(s); err != nil {
+		return pgtype.UUID{}, false
+	}
+	return id, true
 }
 
 // sweepTypingForTask uses the frozen trigger message. Session deletion carries

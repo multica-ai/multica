@@ -297,6 +297,41 @@ func (q *Queries) ClaimChannelInboundDedup(ctx context.Context, arg ClaimChannel
 	return i, err
 }
 
+const claimChannelIssueCommentNotification = `-- name: ClaimChannelIssueCommentNotification :one
+WITH inserted AS (
+    INSERT INTO channel_issue_comment_notification (comment_id, issue_id)
+    VALUES ($1, $2)
+    ON CONFLICT (comment_id) DO NOTHING
+)
+UPDATE channel_issue_comment_notification AS notification
+SET claimed_at = now()
+WHERE notification.comment_id = $1
+  AND notification.sent_at IS NULL
+  AND (
+      notification.claimed_at IS NULL
+      OR notification.claimed_at < now() - INTERVAL '5 minutes'
+  )
+RETURNING comment_id, issue_id, claimed_at, sent_at, created_at
+`
+
+type ClaimChannelIssueCommentNotificationParams struct {
+	CommentID pgtype.UUID `json:"comment_id"`
+	IssueID   pgtype.UUID `json:"issue_id"`
+}
+
+func (q *Queries) ClaimChannelIssueCommentNotification(ctx context.Context, arg ClaimChannelIssueCommentNotificationParams) (ChannelIssueCommentNotification, error) {
+	row := q.db.QueryRow(ctx, claimChannelIssueCommentNotification, arg.CommentID, arg.IssueID)
+	var i ChannelIssueCommentNotification
+	err := row.Scan(
+		&i.CommentID,
+		&i.IssueID,
+		&i.ClaimedAt,
+		&i.SentAt,
+		&i.CreatedAt,
+	)
+	return i, err
+}
+
 const claimChannelMediaPendingObjectsForBind = `-- name: ClaimChannelMediaPendingObjectsForBind :many
 DELETE FROM channel_media_pending_object
 WHERE storage_key = ANY($1::text[])
@@ -892,6 +927,73 @@ func (q *Queries) CreateChannelChatSessionBindingGeneration(ctx context.Context,
 	return i, err
 }
 
+const createChannelIssueDelivery = `-- name: CreateChannelIssueDelivery :one
+
+
+INSERT INTO channel_issue_delivery (
+    issue_id, channel_type, installation_id, binding_id, channel_chat_id,
+    chat_type, channel_message_id, channel_thread_id, channel_sender_id,
+    route_revision, config
+) VALUES (
+    $1, $2, $3, $4, $5,
+    $6, $7, $8, $9,
+    $10, $11
+)
+RETURNING issue_id, channel_type, installation_id, binding_id, channel_chat_id, chat_type, channel_message_id, channel_thread_id, channel_sender_id, route_revision, config, created_at
+`
+
+type CreateChannelIssueDeliveryParams struct {
+	IssueID          pgtype.UUID `json:"issue_id"`
+	ChannelType      string      `json:"channel_type"`
+	InstallationID   pgtype.UUID `json:"installation_id"`
+	BindingID        pgtype.UUID `json:"binding_id"`
+	ChannelChatID    string      `json:"channel_chat_id"`
+	ChatType         string      `json:"chat_type"`
+	ChannelMessageID pgtype.Text `json:"channel_message_id"`
+	ChannelThreadID  pgtype.Text `json:"channel_thread_id"`
+	ChannelSenderID  pgtype.Text `json:"channel_sender_id"`
+	RouteRevision    int64       `json:"route_revision"`
+	Config           []byte      `json:"config"`
+}
+
+// =====================
+// channel_task_delivery
+// =====================
+// =====================
+// channel_issue_delivery
+// =====================
+func (q *Queries) CreateChannelIssueDelivery(ctx context.Context, arg CreateChannelIssueDeliveryParams) (ChannelIssueDelivery, error) {
+	row := q.db.QueryRow(ctx, createChannelIssueDelivery,
+		arg.IssueID,
+		arg.ChannelType,
+		arg.InstallationID,
+		arg.BindingID,
+		arg.ChannelChatID,
+		arg.ChatType,
+		arg.ChannelMessageID,
+		arg.ChannelThreadID,
+		arg.ChannelSenderID,
+		arg.RouteRevision,
+		arg.Config,
+	)
+	var i ChannelIssueDelivery
+	err := row.Scan(
+		&i.IssueID,
+		&i.ChannelType,
+		&i.InstallationID,
+		&i.BindingID,
+		&i.ChannelChatID,
+		&i.ChatType,
+		&i.ChannelMessageID,
+		&i.ChannelThreadID,
+		&i.ChannelSenderID,
+		&i.RouteRevision,
+		&i.Config,
+		&i.CreatedAt,
+	)
+	return i, err
+}
+
 const createChannelOutboundCardMessage = `-- name: CreateChannelOutboundCardMessage :one
 
 INSERT INTO channel_outbound_card_message (
@@ -940,7 +1042,6 @@ func (q *Queries) CreateChannelOutboundCardMessage(ctx context.Context, arg Crea
 }
 
 const createChannelTaskDeliveryFromSession = `-- name: CreateChannelTaskDeliveryFromSession :one
-
 INSERT INTO channel_task_delivery (
     task_id, binding_id, installation_id, channel_type, channel_chat_id, chat_type,
     channel_message_id, channel_thread_id, channel_sender_id, route_revision, config
@@ -986,9 +1087,6 @@ type CreateChannelTaskDeliveryFromSessionParams struct {
 	ChatSessionID   pgtype.UUID `json:"chat_session_id"`
 }
 
-// =====================
-// channel_task_delivery
-// =====================
 // Freezes one task's outbound delivery, from two different sources on purpose.
 //
 // ROUTE — chat, type, config, revision — comes from the session binding. It is
@@ -1886,6 +1984,30 @@ func (q *Queries) GetChannelInstallationSlotOwnerByAppID(ctx context.Context, ar
 	return i, err
 }
 
+const getChannelIssueDelivery = `-- name: GetChannelIssueDelivery :one
+SELECT issue_id, channel_type, installation_id, binding_id, channel_chat_id, chat_type, channel_message_id, channel_thread_id, channel_sender_id, route_revision, config, created_at FROM channel_issue_delivery WHERE issue_id = $1
+`
+
+func (q *Queries) GetChannelIssueDelivery(ctx context.Context, issueID pgtype.UUID) (ChannelIssueDelivery, error) {
+	row := q.db.QueryRow(ctx, getChannelIssueDelivery, issueID)
+	var i ChannelIssueDelivery
+	err := row.Scan(
+		&i.IssueID,
+		&i.ChannelType,
+		&i.InstallationID,
+		&i.BindingID,
+		&i.ChannelChatID,
+		&i.ChatType,
+		&i.ChannelMessageID,
+		&i.ChannelThreadID,
+		&i.ChannelSenderID,
+		&i.RouteRevision,
+		&i.Config,
+		&i.CreatedAt,
+	)
+	return i, err
+}
+
 const getChannelOutboundCardByTask = `-- name: GetChannelOutboundCardByTask :one
 SELECT id, chat_session_id, task_id, channel_type, channel_chat_id, channel_card_message_id, status, last_patched_at, created_at FROM channel_outbound_card_message
 WHERE task_id = $1
@@ -2592,6 +2714,17 @@ func (q *Queries) MarkChannelInboundDedupProcessed(ctx context.Context, arg Mark
 	return result.RowsAffected(), nil
 }
 
+const markChannelIssueCommentNotificationSent = `-- name: MarkChannelIssueCommentNotificationSent :exec
+UPDATE channel_issue_comment_notification
+SET sent_at = now(), claimed_at = NULL
+WHERE comment_id = $1 AND sent_at IS NULL
+`
+
+func (q *Queries) MarkChannelIssueCommentNotificationSent(ctx context.Context, commentID pgtype.UUID) error {
+	_, err := q.db.Exec(ctx, markChannelIssueCommentNotificationSent, commentID)
+	return err
+}
+
 const markChannelReplyDeliverySendUnknown = `-- name: MarkChannelReplyDeliverySendUnknown :execrows
 UPDATE channel_reply_delivery
 SET send_state = 'unknown', updated_at = now()
@@ -3009,6 +3142,17 @@ func (q *Queries) ReleaseChannelInboundDedup(ctx context.Context, arg ReleaseCha
 		return 0, err
 	}
 	return result.RowsAffected(), nil
+}
+
+const releaseChannelIssueCommentNotification = `-- name: ReleaseChannelIssueCommentNotification :exec
+UPDATE channel_issue_comment_notification
+SET claimed_at = NULL
+WHERE comment_id = $1 AND sent_at IS NULL
+`
+
+func (q *Queries) ReleaseChannelIssueCommentNotification(ctx context.Context, commentID pgtype.UUID) error {
+	_, err := q.db.Exec(ctx, releaseChannelIssueCommentNotification, commentID)
+	return err
 }
 
 const releaseChannelMediaPendingObject = `-- name: ReleaseChannelMediaPendingObject :exec

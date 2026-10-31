@@ -404,6 +404,29 @@ type ChannelInstallation struct {
 	UpdatedAt        pgtype.Timestamptz `json:"updated_at"`
 }
 
+type ChannelIssueCommentNotification struct {
+	CommentID pgtype.UUID        `json:"comment_id"`
+	IssueID   pgtype.UUID        `json:"issue_id"`
+	ClaimedAt pgtype.Timestamptz `json:"claimed_at"`
+	SentAt    pgtype.Timestamptz `json:"sent_at"`
+	CreatedAt pgtype.Timestamptz `json:"created_at"`
+}
+
+type ChannelIssueDelivery struct {
+	IssueID          pgtype.UUID        `json:"issue_id"`
+	ChannelType      string             `json:"channel_type"`
+	InstallationID   pgtype.UUID        `json:"installation_id"`
+	BindingID        pgtype.UUID        `json:"binding_id"`
+	ChannelChatID    string             `json:"channel_chat_id"`
+	ChatType         string             `json:"chat_type"`
+	ChannelMessageID pgtype.Text        `json:"channel_message_id"`
+	ChannelThreadID  pgtype.Text        `json:"channel_thread_id"`
+	ChannelSenderID  pgtype.Text        `json:"channel_sender_id"`
+	RouteRevision    int64              `json:"route_revision"`
+	Config           []byte             `json:"config"`
+	CreatedAt        pgtype.Timestamptz `json:"created_at"`
+}
+
 type ChannelMediaPendingObject struct {
 	StorageKey     string             `json:"storage_key"`
 	WorkspaceID    pgtype.UUID        `json:"workspace_id"`

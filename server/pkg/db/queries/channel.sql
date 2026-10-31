@@ -937,6 +937,51 @@ WHERE binding.installation_id = sqlc.arg('installation_id')
 -- channel_task_delivery
 -- =====================
 
+-- =====================
+-- channel_issue_delivery
+-- =====================
+
+-- name: CreateChannelIssueDelivery :one
+INSERT INTO channel_issue_delivery (
+    issue_id, channel_type, installation_id, binding_id, channel_chat_id,
+    chat_type, channel_message_id, channel_thread_id, channel_sender_id,
+    route_revision, config
+) VALUES (
+    @issue_id, @channel_type, @installation_id, @binding_id, @channel_chat_id,
+    @chat_type, @channel_message_id, @channel_thread_id, @channel_sender_id,
+    @route_revision, @config
+)
+RETURNING *;
+
+-- name: GetChannelIssueDelivery :one
+SELECT * FROM channel_issue_delivery WHERE issue_id = $1;
+
+-- name: ClaimChannelIssueCommentNotification :one
+WITH inserted AS (
+    INSERT INTO channel_issue_comment_notification (comment_id, issue_id)
+    VALUES (@comment_id, @issue_id)
+    ON CONFLICT (comment_id) DO NOTHING
+)
+UPDATE channel_issue_comment_notification AS notification
+SET claimed_at = now()
+WHERE notification.comment_id = @comment_id
+  AND notification.sent_at IS NULL
+  AND (
+      notification.claimed_at IS NULL
+      OR notification.claimed_at < now() - INTERVAL '5 minutes'
+  )
+RETURNING *;
+
+-- name: MarkChannelIssueCommentNotificationSent :exec
+UPDATE channel_issue_comment_notification
+SET sent_at = now(), claimed_at = NULL
+WHERE comment_id = $1 AND sent_at IS NULL;
+
+-- name: ReleaseChannelIssueCommentNotification :exec
+UPDATE channel_issue_comment_notification
+SET claimed_at = NULL
+WHERE comment_id = $1 AND sent_at IS NULL;
+
 -- name: CreateChannelTaskDeliveryFromSession :one
 -- Freezes one task's outbound delivery, from two different sources on purpose.
 --

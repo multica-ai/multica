@@ -101,6 +101,10 @@ type IssueCreateParams struct {
 // IssueCreateOpts groups optional knobs for IssueService.Create. Most
 // callers leave it zero-valued.
 type IssueCreateOpts struct {
+	// ChannelDelivery freezes the originating channel route for an issue created
+	// by a channel command. It is written in the same transaction as the issue
+	// so later comments can be delivered to the message that started the work.
+	ChannelDelivery *ChannelIssueDelivery
 	// BroadcastPayload, if non-nil, is invoked after the issue row is
 	// created and attachments are linked. Its return value is sent as
 	// the EventIssueCreated payload via the event bus. The HTTP handler
@@ -137,6 +141,21 @@ type IssueCreateOpts struct {
 	// still resolving, then promotes the returned task after attachment binding.
 	// Zero preserves the ordinary immediate enqueue path.
 	AssignedAgentRunFireAt time.Time
+}
+
+// ChannelIssueDelivery is the immutable route snapshot for a channel-created
+// issue. The platform-specific config is opaque to the service layer.
+type ChannelIssueDelivery struct {
+	ChannelType      string
+	InstallationID   pgtype.UUID
+	BindingID        pgtype.UUID
+	ChannelChatID    string
+	ChatType         string
+	ChannelMessageID pgtype.Text
+	ChannelThreadID  pgtype.Text
+	ChannelSenderID  pgtype.Text
+	RouteRevision    int64
+	Config           []byte
 }
 
 // ErrActiveDuplicate signals that the duplicate guard found an active
@@ -508,6 +527,24 @@ func (s *IssueService) Create(ctx context.Context, p IssueCreateParams, opts Iss
 		assignedTask, err = s.TaskService.createDeferredChannelIssueTaskWithQueries(ctx, qtx, issue, opts.AssignedAgentRunFireAt)
 		if err != nil {
 			return IssueCreateResult{}, fmt.Errorf("create deferred channel issue task: %w", err)
+		}
+	}
+	if opts.ChannelDelivery != nil {
+		delivery := opts.ChannelDelivery
+		if _, err := qtx.CreateChannelIssueDelivery(ctx, db.CreateChannelIssueDeliveryParams{
+			IssueID:          issue.ID,
+			ChannelType:      delivery.ChannelType,
+			InstallationID:   delivery.InstallationID,
+			BindingID:        delivery.BindingID,
+			ChannelChatID:    delivery.ChannelChatID,
+			ChatType:         delivery.ChatType,
+			ChannelMessageID: delivery.ChannelMessageID,
+			ChannelThreadID:  delivery.ChannelThreadID,
+			ChannelSenderID:  delivery.ChannelSenderID,
+			RouteRevision:    delivery.RouteRevision,
+			Config:           delivery.Config,
+		}); err != nil {
+			return IssueCreateResult{}, fmt.Errorf("create channel issue delivery: %w", err)
 		}
 	}
 
