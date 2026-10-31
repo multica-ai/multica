@@ -357,6 +357,10 @@ function formatActivity(
         from: statusLabel(details.from ?? "?", t, resolveStatusLabel),
         to: statusLabel(details.to ?? "?", t, resolveStatusLabel),
       });
+    case "workflow_handoff":
+      return t(($) => $.activity.workflow_entered, {
+        status: statusLabel(details.step ?? "?", t, resolveStatusLabel),
+      });
     case "pr_auto_complete_changed":
       return (entry.details as { disabled?: unknown } | undefined)?.disabled === true
         ? t(($) => $.activity.pr_auto_complete_disabled)
@@ -796,7 +800,7 @@ function ActivityBlock({
           );
         }
 
-        const handoff = isStatusChange && !!details.handoff_to_id;
+        const handoff = (isStatusChange || entry.action === "workflow_handoff") && !!details.handoff_to_id;
         return (
           <div key={entry.id} className="text-label text-muted-foreground">
             <div className="flex items-center">

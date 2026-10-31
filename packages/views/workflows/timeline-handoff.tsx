@@ -8,7 +8,7 @@ import { useT } from "../i18n";
 import { BriefBlock } from "./handoff-form";
 
 /**
- * The handoff half of a status-change timeline entry (MUL-7420): who the
+ * The handoff half of a status-change or project-entry timeline row: who the
  * workflow step handed the issue to, the enqueue prediction and its reason,
  * and the brief. Actual enqueue/execution is recorded by runs.
  * Renders nothing for an ordinary status change.

@@ -574,6 +574,7 @@
     "due_date_removed": "移除了截止日期",
     "title_renamed": "把这个任务从\"{{from}}\"重命名为\"{{to}}\"",
     "description_updated": "更新了描述",
+    "workflow_entered": "进入工作流步骤「{{status}}」",
     "task_completed_other": "完成了运行（{{count}} 次）",
     "task_failed_other": "运行失败（{{count}} 次）",
     "squad_leader_evaluated": "评估了小队触发",

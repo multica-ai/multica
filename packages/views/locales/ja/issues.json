@@ -574,6 +574,7 @@
     "due_date_removed": "期限を削除しました",
     "title_renamed": "このタスクのタイトルを \"{{from}}\" から \"{{to}}\" に変更しました",
     "description_updated": "説明を更新しました",
+    "workflow_entered": "ワークフローのステップ「{{status}}」に入りました",
     "task_completed_other": "実行を完了しました（{{count}} 回）",
     "task_failed_other": "実行が失敗しました（{{count}} 回）",
     "squad_leader_evaluated": "スクワッドのトリガーを評価しました",

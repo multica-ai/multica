@@ -2100,6 +2100,48 @@ describe("IssueDetail (shared)", () => {
     expect(screen.getAllByRole("link", { name: "MUL-9" })).toHaveLength(2);
   });
 
+  it.each(["workflow_handoff", "status_changed"])("renders persisted %s diagnostics in the issue activity branch", async (action) => {
+    mockApiObj.listTimeline.mockResolvedValue([
+      {
+        type: "activity",
+        id: "act-project-handoff",
+        actor_type: "member",
+        actor_id: "user-1",
+        action,
+        details: {
+          ...(action === "status_changed" ? { from: "todo", to: "in_progress" } : { step: "in_progress" }),
+          handoff_to_type: "agent",
+          handoff_to_id: "agent-1",
+          handoff_run: "false",
+          handoff_run_reason: "pending_task",
+        },
+        created_at: "2026-01-18T00:00:00Z",
+      },
+    ] as TimelineEntry[]);
+    const first = renderIssueDetail();
+    expect(await screen.findByText(enIssues.workflows.timeline.pending_run)).toBeInTheDocument();
+    expect(screen.getAllByText(enIssues.workflows.timeline.handed_to)).toHaveLength(1);
+    if (action === "workflow_handoff") {
+      expect(screen.getByText("entered workflow step In Progress")).toBeInTheDocument();
+      expect(screen.queryByText(/changed status from/i)).not.toBeInTheDocument();
+    }
+    first.unmount();
+    renderIssueDetail();
+    expect(await screen.findByText(enIssues.workflows.timeline.pending_run)).toBeInTheDocument();
+    expect(screen.getAllByText(enIssues.workflows.timeline.handed_to)).toHaveLength(1);
+  });
+
+  it("does not invent handoff diagnostics for an ordinary assignment", async () => {
+    mockApiObj.listTimeline.mockResolvedValue([{
+      type: "activity", id: "act-ordinary-assignment", actor_type: "member", actor_id: "user-1",
+      action: "assignee_changed", details: { from_type: "agent", from_id: "agent-2", to_type: "agent", to_id: "agent-1" },
+      created_at: "2026-01-18T00:00:00Z",
+    }] as TimelineEntry[]);
+    renderIssueDetail();
+    expect(await screen.findByText("assigned to Claude Agent")).toBeInTheDocument();
+    expect(screen.queryByText(enIssues.workflows.timeline.handed_to)).not.toBeInTheDocument();
+  });
+
   // MUL-7429: an automatic status change says why, and the per-issue switch
   // shows on the timeline.
   it("explains PR merge automation activity", async () => {
