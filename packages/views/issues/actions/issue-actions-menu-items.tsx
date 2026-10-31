@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useMemo, type ReactNode } from "react";
+import { useCallback, useMemo, useRef, type ReactNode } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { toast } from "sonner";
 import {
@@ -44,6 +44,7 @@ import { issueKeys } from "@multica/core/issues/queries";
 import { StatusIcon } from "../components/status-icon";
 import { PriorityIcon } from "../components/priority-icon";
 import { selectIssueTasks } from "../surface/activity";
+import { AssigneePickerPanel } from "../components/pickers";
 import {
   DropdownMenuItem,
   DropdownMenuSub,
@@ -97,11 +98,9 @@ interface IssueActionsMenuItemsProps {
   issue: Issue;
   actions: UseIssueActionsResult;
   primitives: MenuPrimitives;
-  /** Called when the user clicks the Assignee menu item. The parent should
-   *  close the surrounding menu and open the shared `AssigneePicker` popover.
-   *  Decoupled this way so the same item can drive both the dropdown
-   *  (3-dot button) and the context menu (right-click) wrappers. */
-  onOpenAssignee: () => void;
+  /** Closes the surrounding menu. Menu items close it themselves; the
+   *  assignee list is not made of menu items, so it calls this after a pick. */
+  onClose: () => void;
   /** If set, leave the page after the issue is deleted (used by the detail
    *  page, which renders the issue being deleted). The delete modal goes back
    *  to the list the user came from and only falls back to this path when
@@ -121,7 +120,7 @@ export function IssueActionsMenuItems({
   issue,
   actions,
   primitives: P,
-  onOpenAssignee,
+  onClose,
   onDeletedFallbackPath,
   variant = "full",
   onStopRun,
@@ -312,18 +311,29 @@ export function IssueActionsMenuItems({
         </P.SubContent>
       </P.Sub>
 
-      {/* Assignee — closes this menu and hands off to the shared
-          AssigneePicker (members + agents + squads, with search and
-          permission checks). Keeps a single source of truth for the
-          assignee UX across detail sidebar, board cards, and right-click /
-          3-dot menus. */}
-      <P.Item onClick={onOpenAssignee}>
-        <UserMinus className="h-3.5 w-3.5" />
-        <ItemLabel
-          label={t(($) => $.actions.assignee)}
-          value={sidebar ? <AssigneeName issue={issue} /> : undefined}
-        />
-      </P.Item>
+      {/* Assignee — a submenu like Status and Priority, filled with the
+          shared assignee picker's own list (members + agents + squads, with
+          search and permission checks) rather than menu items of its own, so
+          every entry point offers the same choices. (MUL-2157) */}
+      <P.Sub>
+        <P.SubTrigger>
+          <UserMinus className="h-3.5 w-3.5" />
+          <ItemLabel
+            label={t(($) => $.actions.assignee)}
+            value={sidebar ? <AssigneeName issue={issue} /> : undefined}
+          />
+        </P.SubTrigger>
+        <P.SubContent className="w-64 p-0">
+          <SubmenuPanel>
+            <AssigneePickerPanel
+              assigneeType={issue.assignee_type}
+              assigneeId={issue.assignee_id}
+              onUpdate={updateField}
+              onPicked={onClose}
+            />
+          </SubmenuPanel>
+        </P.SubContent>
+      </P.Sub>
 
       {!sidebar && (
         <>
@@ -494,6 +504,28 @@ function ItemLabel({ label, value }: { label: string; value?: ReactNode }) {
       <span className="flex-1">{label}</span>
       <span className="max-w-28 truncate text-muted-foreground">{value}</span>
     </>
+  );
+}
+
+/** Hosts a search box and list inside a submenu. The menu's typeahead and
+ *  arrow-key navigation would otherwise take the keys typed into the search
+ *  box; Escape and Tab still reach the menu so it can close. */
+function SubmenuPanel({ children }: { children: ReactNode }) {
+  const ref = useRef<HTMLDivElement>(null);
+  return (
+    <div
+      ref={ref}
+      onKeyDown={(e) => {
+        // Hold the height from the first keystroke: a shorter, filtered list
+        // would re-position a submenu shifted to fit the viewport, moving the
+        // search box while the user types in it.
+        const el = ref.current;
+        if (el && !el.style.minHeight) el.style.minHeight = `${el.offsetHeight}px`;
+        if (e.key !== "Escape" && e.key !== "Tab") e.stopPropagation();
+      }}
+    >
+      {children}
+    </div>
   );
 }
 

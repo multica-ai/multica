@@ -23,7 +23,6 @@ import {
   IssueActionsMenuItems,
   contextPrimitives,
 } from "./issue-actions-menu-items";
-import { AssigneePicker } from "../components/pickers";
 import { TerminateTaskConfirmDialog } from "../components/terminate-task-confirm-dialog";
 import { useT } from "../../i18n";
 
@@ -119,7 +118,6 @@ function IssueContextMenuSingleton({
   variant: IssueContextMenuVariant;
 }) {
   const actions = useIssueActions(issue);
-  const [assigneeOpen, setAssigneeOpen] = useState(false);
   const [stopTask, setStopTask] = useState<AgentTask | null>(null);
 
   // Point-sized virtual anchor at the right-click position — replaces the
@@ -147,7 +145,7 @@ function IssueContextMenuSingleton({
             issue={issue}
             actions={actions}
             primitives={contextPrimitives}
-            onOpenAssignee={() => setAssigneeOpen(true)}
+            onClose={() => onOpenChange(false)}
             variant={variant}
             onStopRun={setStopTask}
           />
@@ -158,33 +156,6 @@ function IssueContextMenuSingleton({
           issueId={issue.id}
           task={stopTask}
           onClose={() => setStopTask(null)}
-        />
-      )}
-
-      {/* Mount the picker only once the user actually opens it, anchored at
-          the right-click position so it opens where the context menu just
-          was instead of jumping to the row's top-left corner. */}
-      {assigneeOpen && (
-        <AssigneePicker
-          assigneeType={issue.assignee_type}
-          assigneeId={issue.assignee_id}
-          onUpdate={actions.updateField}
-          open={assigneeOpen}
-          onOpenChange={setAssigneeOpen}
-          triggerRender={
-            <span
-              aria-hidden
-              className="pointer-events-none fixed"
-              style={{
-                left: position.x,
-                top: position.y,
-                width: 0,
-                height: 0,
-              }}
-            />
-          }
-          trigger={<span />}
-          align="start"
         />
       )}
     </>

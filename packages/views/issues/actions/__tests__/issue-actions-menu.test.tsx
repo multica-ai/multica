@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen, fireEvent, waitFor } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import type { AgentTask, Issue } from "@multica/core/types";
 import { I18nProvider } from "@multica/core/i18n/react";
@@ -75,10 +76,13 @@ vi.mock("@multica/core/pins", () => ({
   useDeletePin: () => ({ mutate: vi.fn() }),
 }));
 
-const { cancelRunMock } = vi.hoisted(() => ({ cancelRunMock: vi.fn() }));
+const { cancelRunMock, updateIssueMock } = vi.hoisted(() => ({
+  cancelRunMock: vi.fn(),
+  updateIssueMock: vi.fn(),
+}));
 
 vi.mock("@multica/core/issues/mutations", () => ({
-  useUpdateIssue: () => ({ mutate: vi.fn() }),
+  useUpdateIssue: () => ({ mutate: updateIssueMock }),
   useCancelIssueRun: () => ({ mutateAsync: cancelRunMock }),
 }));
 
@@ -203,6 +207,7 @@ beforeEach(() => {
   apiMocks.getAgentTaskSnapshot.mockResolvedValue([]);
   cancelRunMock.mockReset();
   cancelRunMock.mockResolvedValue(undefined);
+  updateIssueMock.mockReset();
 });
 
 describe("IssueActionsDropdown", () => {
@@ -253,7 +258,7 @@ describe("IssueActionsDropdown", () => {
     expect(labels.slice(0, 3)).toEqual(["Rename issue", "Create sub-issue", "Status"]);
   });
 
-  it("clicking the Assignee item opens the shared AssigneePicker popover", async () => {
+  it("opens Assignee as a submenu holding the shared assignee picker", async () => {
     render(
       wrap(
         <IssueActionsDropdown
@@ -266,14 +271,19 @@ describe("IssueActionsDropdown", () => {
     fireEvent.click(screen.getByTestId("trigger"));
     fireEvent.click(await screen.findByText("Assignee"));
 
-    // The shared picker exposes a search input and renders the workspace
-    // member under a "Members" group — both come from `AssigneePicker`, not
-    // the legacy submenu (which had neither).
+    // The search box and the "Members" group come from the shared assignee
+    // picker, so the submenu offers what every other assignee entry point does.
     expect(
       await screen.findByPlaceholderText("Assign to..."),
     ).toBeInTheDocument();
     expect(await screen.findByText("Members")).toBeInTheDocument();
-    expect(await screen.findByText("Test User")).toBeInTheDocument();
+    fireEvent.click(await screen.findByText("Test User"));
+
+    expect(updateIssueMock).toHaveBeenCalledWith(
+      { id: "issue-1", assignee_type: "member", assignee_id: "user-1" },
+      expect.anything(),
+    );
+    await waitFor(() => expect(screen.queryByText("Status")).not.toBeInTheDocument());
   });
 
   it("shows 'Remove parent issue' in the Relations submenu only when the issue has a parent", async () => {
@@ -512,6 +522,36 @@ describe("IssueActionsContextMenu", () => {
     expect(screen.getByText("Rename issue")).toBeInTheDocument();
     expect(screen.getByText("Open in new tab")).toBeInTheDocument();
     expect(screen.getByText("Delete issue")).toBeInTheDocument();
+  });
+
+  it("keeps typed keys in the assignee search box and assigns the match on Enter", async () => {
+    const user = userEvent.setup();
+    render(
+      wrap(
+        <IssueContextMenuProvider>
+          <IssueActionsContextMenu issue={mockIssue}>
+            <div data-testid="row">Row</div>
+          </IssueActionsContextMenu>
+        </IssueContextMenuProvider>,
+      ),
+    );
+
+    fireEvent.contextMenu(screen.getByTestId("row"));
+    await user.click(await screen.findByText("Assignee"));
+    const search = await screen.findByPlaceholderText("Assign to...");
+    await screen.findByText("Test User");
+    await waitFor(() => expect(search).toHaveFocus());
+
+    // The menu's typeahead would otherwise swallow these keys.
+    await user.keyboard("test");
+    expect(search).toHaveValue("test");
+    await user.keyboard("{Enter}");
+
+    expect(updateIssueMock).toHaveBeenCalledWith(
+      { id: "issue-1", assignee_type: "member", assignee_id: "user-1" },
+      expect.anything(),
+    );
+    await waitFor(() => expect(screen.queryByText("Rename issue")).not.toBeInTheDocument());
   });
 });
 
