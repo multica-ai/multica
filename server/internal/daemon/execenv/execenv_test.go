@@ -5906,7 +5906,7 @@ func TestInjectRuntimeConfigBriefOmitsResumedThreadAnchor(t *testing.T) {
 	}
 	s := string(data)
 
-	for _, banned := range []string{triggerID, "thread-root-1", "triggering comment is already included above"} {
+	for _, banned := range []string{triggerID, "thread-root-1", "excluding the triggering comment and your own replies"} {
 		if strings.Contains(s, banned) {
 			t.Errorf("brief must not carry per-run resume routing %q (MUL-5377)\n---\n%s", banned, s)
 		}
@@ -5914,9 +5914,9 @@ func TestInjectRuntimeConfigBriefOmitsResumedThreadAnchor(t *testing.T) {
 
 	hint := BuildResumedCommentsHint(issueID, triggerID, "thread-root-1")
 	for _, want := range []string{
-		"triggering comment is already included above",
-		"No other new comments on this issue since your last run",
-		"issue-wide delta is empty",
+		"excluding the triggering comment and your own replies",
+		"Comment delta: no other new comments on this issue since the previous run",
+		"Comment delta: no other new comments",
 		"if resumed memory is not enough",
 		"multica issue comment list " + issueID + " --thread thread-root-1 --tail 30 --compact --output json",
 	} {

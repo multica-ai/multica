@@ -47,6 +47,10 @@ describe("failureClassOf", () => {
     expect(failureClassOf("unclassified")).toBe("other");
   });
 
+  it("counts content-policy blocks as provider failures", () => {
+    expect(failureClassOf("agent_error.provider_content_filter")).toBe("provider");
+  });
+
   it("returns a class every FAILURE_CLASSES member can be produced for", () => {
     // Guards against a class being declared but unreachable — a colour and a
     // translated label with no reason behind it.

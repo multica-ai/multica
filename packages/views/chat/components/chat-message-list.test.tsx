@@ -857,6 +857,14 @@ describe("ChatMessageList failure copy (MUL-5370 regression)", () => {
     expect(screen.queryByText(FALLBACK)).not.toBeInTheDocument();
   });
 
+  it("shows content-policy guidance instead of network recovery for filtering", async () => {
+    renderFailure("agent_error.provider_content_filter");
+    expect(
+      await screen.findByText(enChat.message_list.failure.provider_content_filter),
+    ).toBeInTheDocument();
+    expect(screen.queryByText(enChat.message_list.failure.provider_network)).not.toBeInTheDocument();
+  });
+
   it("degrades a reason newer than this build to its agent_error family", async () => {
     renderFailure("agent_error.some_future_bucket");
     expect(

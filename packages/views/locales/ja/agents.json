@@ -837,6 +837,7 @@
       "agent_error_provider_capacity_or_rate_limit": "プロバイダーによるレート制限",
       "agent_error_provider_server_error": "プロバイダーのサーバーエラー",
       "agent_error_provider_network": "プロバイダーへの接続でネットワークエラー",
+      "agent_error_provider_content_filter": "プロバイダーのコンテンツポリシーによりリクエストまたは応答がブロックされました",
       "agent_error_process_failure": "エージェントプロセスがクラッシュしました",
       "agent_error_empty_or_unparseable_output": "エージェントから使用可能な出力がありません",
       "agent_error_agent_timeout": "エージェントがタイムアウトしました",

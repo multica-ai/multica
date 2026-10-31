@@ -994,6 +994,7 @@
       "agent_error_provider_capacity_or_rate_limit": "受到提供商速率限制",
       "agent_error_provider_server_error": "提供商服务器出错",
       "agent_error_provider_network": "连接提供商时网络出错",
+      "agent_error_provider_content_filter": "提供商内容策略拦截了请求或回复",
       "agent_error_process_failure": "智能体进程崩溃",
       "agent_error_empty_or_unparseable_output": "智能体未返回可用输出",
       "agent_error_agent_timeout": "智能体运行超时",
