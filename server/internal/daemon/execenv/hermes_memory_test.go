@@ -232,6 +232,9 @@ func TestPrepareHermesHomeWithoutStoreKeepsTaskLocalMemories(t *testing.T) {
 // directory as soon as migration reports success.
 func TestMigrateHermesTaskMemoriesFailureKeepsSource(t *testing.T) {
 	t.Parallel()
+	if os.Geteuid() == 0 {
+		t.Skip("root ignores directory permissions")
+	}
 	taskDir := t.TempDir()
 	storeDir := t.TempDir()
 
