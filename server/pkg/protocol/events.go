@@ -232,4 +232,9 @@ const (
 	// front-ends invalidate the Telegram installations query on either.
 	EventTelegramInstallationCreated = "telegram_installation:created"
 	EventTelegramInstallationRevoked = "telegram_installation:revoked"
+
+	// Discord installation lifecycle. Same contract as the Telegram pair:
+	// front-ends invalidate the Discord installations query on either.
+	EventDiscordInstallationCreated = "discord_installation:created"
+	EventDiscordInstallationRevoked = "discord_installation:revoked"
 )

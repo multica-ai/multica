@@ -135,5 +135,20 @@
   },
   "navigation": {
     "open_in_new_tab": "新しいタブで開く"
+  },
+  "discord_bind": {
+    "page_title": "Discord アカウントを連携",
+    "redeeming": "アカウントを連携しています…",
+    "needs_auth_description": "連携を完了するには Multica にサインインしてください。リンク内のトークンが Discord アカウントをこの Multica ユーザーに紐付けるため、先にログインが必要です。",
+    "sign_in": "サインイン",
+    "done_title": "連携しました。",
+    "done_description": "Discord でボットに送る次のメッセージはエージェントに直接届きます。このタブは閉じてかまいません。",
+    "error_title": "連携を完了できませんでした",
+    "error_admin_hint": "解決しない場合は、Discord でもう一度ボットにメッセージを送って新しいリンクを取得してください。",
+    "error_missing_token": "リンクにトークンがありません。Discord でもう一度ボットにメッセージを送って新しいリンクを取得してください。",
+    "error_expired": "このリンクは無効か期限切れです（有効期限は 15 分）。もう一度ボットにメッセージを送って新しいリンクを取得してください。",
+    "error_already_bound": "この Discord アカウントは別の Multica ユーザーに連携済みです。アカウントの移行には先に明示的な解除が必要です。",
+    "error_not_member": "サインインしている Multica アカウントはこのワークスペースのメンバーではありません。",
+    "error_unknown": "問題が発生しました。もう一度お試しください。解決しない場合はワークスペース管理者に連絡してください。"
   }
 }

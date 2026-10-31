@@ -33,6 +33,7 @@ import (
 	"github.com/multica-ai/multica/server/internal/integrations/channel/engine"
 	composiointeg "github.com/multica-ai/multica/server/internal/integrations/composio"
 	"github.com/multica-ai/multica/server/internal/integrations/dingtalk"
+	"github.com/multica-ai/multica/server/internal/integrations/discord"
 	"github.com/multica-ai/multica/server/internal/integrations/lark"
 	"github.com/multica-ai/multica/server/internal/integrations/slack"
 	"github.com/multica-ai/multica/server/internal/integrations/telegram"
@@ -1255,6 +1256,49 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 		slog.Info("telegram integration disabled (MULTICA_TELEGRAM_SECRET_KEY not set)")
 	}
 
+	// Discord integration. Same shape as Telegram: BYO bot token pasted at
+	// install, one Gateway WebSocket connection per active installation
+	// supervised by the shared engine.Supervisor, resolvers on the generic
+	// channel_* tables, outbound replies posted on the event bus. Gated by
+	// MULTICA_DISCORD_SECRET_KEY (the at-rest token encryption key); when unset
+	// the handlers return 503 and no Factory is registered.
+	if discordKey, err := secretbox.LoadKey("MULTICA_DISCORD_SECRET_KEY"); err == nil {
+		box, err := secretbox.New(discordKey)
+		if err != nil {
+			slog.Error("discord: secretbox.New failed; discord integration disabled", "error", err)
+		} else {
+			discordBindingSvc := discord.NewBindingTokenService(queries, pool)
+			h.DiscordBindingTokens = discordBindingSvc
+			discordReplier := discord.NewOutboundReplier(discord.OutboundReplierConfig{
+				Binding: discordBindingSvc,
+				Decrypt: box.Open,
+				// The bind link (/discord/bind) is a web-app page: app URL, not
+				// the API URL. Mirrors the Slack and Telegram repliers.
+				AppURL: appURLFromEnv(),
+				Logger: slog.Default(),
+			})
+			channelRouter.Register(discord.TypeDiscord, discord.NewDiscordResolverSet(queries, pool, discordReplier))
+			discord.NewOutbound(queries, box.Open, "", slog.Default()).Register(bus)
+
+			// Per-installation inbound: the Supervisor builds + supervises one
+			// Gateway connection per active Discord installation.
+			discord.RegisterDiscord(channelRegistry, discord.ChannelDeps{
+				Decrypt: box.Open,
+				Logger:  slog.Default(),
+			})
+
+			installSvc, ierr := discord.NewInstallService(queries, pool, box, slog.Default())
+			if ierr != nil {
+				slog.Error("discord: InstallService init failed; install disabled", "error", ierr)
+			} else {
+				h.DiscordInstall = installSvc
+			}
+			slog.Info("discord integration enabled (per-installation gateway)")
+		}
+	} else {
+		slog.Info("discord integration disabled (MULTICA_DISCORD_SECRET_KEY not set)")
+	}
+
 	// Composio integration (MUL-3720). Gated by COMPOSIO_API_KEY plus the
 	// composio_mcp_apps feature flag. The env var is the project-scoped key the
 	// standalone SDK authenticates Composio with (sent as x-api-key; the project
@@ -1894,6 +1938,18 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					r.Delete("/telegram/installations/{installationId}", h.RevokeTelegramInstallation)
 					r.Post("/telegram/install", h.RegisterTelegramBot)
 				})
+
+				// Discord integration. Same admin/member split: listing is
+				// member-visible; install + revoke are admin-only.
+				r.Group(func(r chi.Router) {
+					r.Use(middleware.RequireWorkspaceMemberFromURL(queries, "id"))
+					r.Get("/discord/installations", h.ListDiscordInstallations)
+				})
+				r.Group(func(r chi.Router) {
+					r.Use(middleware.RequireWorkspaceRoleFromURL(queries, "id", "owner", "admin"))
+					r.Delete("/discord/installations/{installationId}", h.RevokeDiscordInstallation)
+					r.Post("/discord/install", h.RegisterDiscordBot)
+				})
 			})
 		})
 
@@ -1921,6 +1977,10 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 		// workspace-scoped, identity from the session, token proves only
 		// "this Telegram user id requested binding".
 		r.Post("/api/telegram/binding/redeem", h.RedeemTelegramBindingToken)
+		// Discord binding-token redemption. Same rationale: not workspace-scoped,
+		// identity from the session, token proves only "this Discord user id
+		// requested binding".
+		r.Post("/api/discord/binding/redeem", h.RedeemDiscordBindingToken)
 
 		// Composio integration (MUL-3720). User-scoped (no workspace context):
 		// a connection belongs to a user. These four require a logged-in
