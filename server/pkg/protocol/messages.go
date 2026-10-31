@@ -103,6 +103,10 @@ const (
 	AppCapabilityChatDraftRestoreV1 = "chat-draft-restore-v1"
 )
 
+// DaemonTaskClaimGenerationMismatchCode identifies a terminal report rejected
+// because a later claim owns the task row.
+const DaemonTaskClaimGenerationMismatchCode = "task_claim_generation_mismatch"
+
 // ChatQuickAction is a server-validated follow-up attached to one assistant
 // reply. Label is the concise chip text; Prompt is the full next user turn.
 type ChatQuickAction struct {

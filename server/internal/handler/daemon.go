@@ -4816,7 +4816,8 @@ type TaskCompleteRequest struct {
 	// (GH #6066). Distinct from an empty SessionID, which only means "nothing
 	// to report" — this says "never hand this id to a later run". Older
 	// daemons omit it, which is exactly the pre-fix behaviour.
-	RetiredSessionID string `json:"retired_session_id,omitempty"`
+	RetiredSessionID     string `json:"retired_session_id,omitempty"`
+	ExpectedDispatchedAt string `json:"expected_dispatched_at,omitempty"`
 }
 
 // sanitizeTaskCompleteRequest / sanitizeTaskFailRequest scrub every
@@ -4834,6 +4835,7 @@ func sanitizeTaskCompleteRequest(req *TaskCompleteRequest) {
 	req.DurableWorkDir = util.SanitizeTextForPostgres(req.DurableWorkDir)
 	req.BranchName = util.SanitizeTextForPostgres(req.BranchName)
 	req.RetiredSessionID = util.SanitizeTextForPostgres(req.RetiredSessionID)
+	req.ExpectedDispatchedAt = util.SanitizeTextForPostgres(req.ExpectedDispatchedAt)
 }
 
 func sanitizeTaskFailRequest(req *TaskFailRequest) {
@@ -4844,6 +4846,18 @@ func sanitizeTaskFailRequest(req *TaskFailRequest) {
 	req.FailureReason = util.SanitizeTextForPostgres(req.FailureReason)
 	req.BranchName = util.SanitizeTextForPostgres(req.BranchName)
 	req.RetiredSessionID = util.SanitizeTextForPostgres(req.RetiredSessionID)
+	req.ExpectedDispatchedAt = util.SanitizeTextForPostgres(req.ExpectedDispatchedAt)
+}
+
+func parseExpectedDispatchedAt(raw string) (time.Time, error) {
+	if raw == "" {
+		return time.Time{}, nil
+	}
+	parsed, err := time.Parse(time.RFC3339Nano, raw)
+	if err != nil || parsed.IsZero() {
+		return time.Time{}, fmt.Errorf("invalid claim generation: %q", raw)
+	}
+	return parsed, nil
 }
 
 func (h *Handler) CompleteTask(w http.ResponseWriter, r *http.Request) {
@@ -4869,6 +4883,11 @@ func (h *Handler) CompleteTask(w http.ResponseWriter, r *http.Request) {
 	// re-route below feeds req.Output into the failure classifier, and that
 	// classifier must see exactly the text we are going to persist.
 	sanitizeTaskCompleteRequest(&req)
+	expectedDispatchedAt, err := parseExpectedDispatchedAt(req.ExpectedDispatchedAt)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid expected_dispatched_at")
+		return
+	}
 
 	// GH #6402: a daemon whose backend does not (yet) read the provider's
 	// structured terminal reason reports a context-exhausted run as a clean
@@ -4898,7 +4917,8 @@ func (h *Handler) CompleteTask(w http.ResponseWriter, r *http.Request) {
 			BranchName:            req.BranchName,
 			SessionRolloutMissing: req.SessionRolloutMissing,
 			RetiredSessionID:      req.RetiredSessionID,
-		})
+			ExpectedDispatchedAt:  req.ExpectedDispatchedAt,
+		}, expectedDispatchedAt)
 		return
 	}
 
@@ -4907,8 +4927,12 @@ func (h *Handler) CompleteTask(w http.ResponseWriter, r *http.Request) {
 	// transaction (force session_id NULL + flag the row), so an auto-retry the
 	// same commit creates and wakes can never observe the withheld pointer or a
 	// missing continuity-gap flag.
-	task, transitioned, err := h.TaskService.CompleteTaskWithTransition(r.Context(), parseUUID(taskID), result, req.SessionID, req.WorkDir, req.BranchName, req.SessionRolloutMissing, req.RetiredSessionID, req.DurableWorkDir)
+	task, transitioned, err := h.TaskService.CompleteTaskWithTransition(r.Context(), parseUUID(taskID), result, req.SessionID, req.WorkDir, req.BranchName, req.SessionRolloutMissing, req.RetiredSessionID, req.DurableWorkDir, expectedDispatchedAt)
 	if err != nil {
+		if errors.Is(err, service.ErrTaskClaimGenerationMismatch) {
+			writeErrorCode(w, http.StatusConflict, protocol.DaemonTaskClaimGenerationMismatchCode, "task claim generation is no longer current")
+			return
+		}
 		// A CompleteTask error is an infrastructure failure (transaction /
 		// assistant-outcome write), not a bad request: an already-finalized
 		// callback is treated as idempotent success and returns no error. Return
@@ -5583,7 +5607,8 @@ type TaskFailRequest struct {
 	// (GH #6066). Distinct from an empty SessionID, which only means "nothing
 	// to report" — this says "never hand this id to a later run". Older
 	// daemons omit it, which is exactly the pre-fix behaviour.
-	RetiredSessionID string `json:"retired_session_id,omitempty"`
+	RetiredSessionID     string `json:"retired_session_id,omitempty"`
+	ExpectedDispatchedAt string `json:"expected_dispatched_at,omitempty"`
 }
 
 func (h *Handler) FailTask(w http.ResponseWriter, r *http.Request) {
@@ -5604,8 +5629,13 @@ func (h *Handler) FailTask(w http.ResponseWriter, r *http.Request) {
 	// here lands in a TEXT column too and a NUL in any one of them fails the
 	// same transaction (GH #7098).
 	sanitizeTaskFailRequest(&req)
+	expectedDispatchedAt, err := parseExpectedDispatchedAt(req.ExpectedDispatchedAt)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid expected_dispatched_at")
+		return
+	}
 
-	h.failTask(w, r, taskID, workspaceID, req)
+	h.failTask(w, r, taskID, workspaceID, req, expectedDispatchedAt)
 }
 
 // failTask records a terminal failure and writes the response. Shared by the
@@ -5613,14 +5643,18 @@ func (h *Handler) FailTask(w http.ResponseWriter, r *http.Request) {
 // run re-classified at the /complete boundary lands through exactly the same
 // transaction, token revocation and runtime wake-up as one the daemon reported
 // as failed itself.
-func (h *Handler) failTask(w http.ResponseWriter, r *http.Request, taskID, workspaceID string, req TaskFailRequest) {
+func (h *Handler) failTask(w http.ResponseWriter, r *http.Request, taskID, workspaceID string, req TaskFailRequest, expectedDispatchedAt time.Time) {
 	// MUL-5305: SessionRolloutMissing is applied inside FailTask's terminal
 	// transaction — forcing session_id NULL (overriding the COALESCE that would
 	// keep a stale mid-flight pin) and flagging the row in the same commit that
 	// creates and wakes the auto-retry, so the retry can never claim the withheld
 	// pointer or miss the continuity gap.
-	task, transitioned, err := h.TaskService.FailTaskWithTransition(r.Context(), parseUUID(taskID), req.Error, req.SessionID, req.WorkDir, req.BranchName, req.FailureReason, req.SessionRolloutMissing, req.RetiredSessionID, req.DurableWorkDir)
+	task, transitioned, err := h.TaskService.FailTaskWithTransition(r.Context(), parseUUID(taskID), req.Error, req.SessionID, req.WorkDir, req.BranchName, req.FailureReason, req.SessionRolloutMissing, req.RetiredSessionID, req.DurableWorkDir, expectedDispatchedAt)
 	if err != nil {
+		if errors.Is(err, service.ErrTaskClaimGenerationMismatch) {
+			writeErrorCode(w, http.StatusConflict, protocol.DaemonTaskClaimGenerationMismatchCode, "task claim generation is no longer current")
+			return
+		}
 		// A FailTask error is an infrastructure failure (the terminal
 		// transaction that also clears the withheld session, writes the
 		// continuity-gap flag, and creates the auto-retry rolled back), not a bad
