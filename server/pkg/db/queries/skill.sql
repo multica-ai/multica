@@ -44,6 +44,14 @@ UPDATE skill SET
 WHERE id = $1
 RETURNING *;
 
+-- name: TouchSkill :one
+-- Supporting-file writes change the skill as a whole, so they bump the parent's
+-- updated_at in the same transaction. Updating the row also takes its lock,
+-- which serializes concurrent file writes on one skill with UpdateSkill.
+UPDATE skill SET updated_at = now()
+WHERE id = $1
+RETURNING *;
+
 -- name: DeleteSkill :exec
 -- Defense-in-depth: workspace_id is a SQL-layer tenant guard. See DeleteIssue.
 DELETE FROM skill WHERE id = $1 AND workspace_id = $2;
