@@ -183,6 +183,11 @@
       "search": "Search time zones...",
       "empty": "No matching time zone"
     },
+    "activity_order": {
+      "title": "Issue activity order",
+      "oldest_first": "Oldest first",
+      "newest_first": "Newest first"
+    },
     "sticky_comment_bar": {
       "title": "Pin comment bar to bottom"
     },

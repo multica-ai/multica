@@ -129,6 +129,7 @@ import {
 import { collectDeliverableFiles } from "@multica/core/attachments/deliverables";
 import { AttachmentVersionsProvider } from "./deliverables/attachment-versions";
 import { useQuery } from "@tanstack/react-query";
+import { selectIssueTimelineDirection, useIssueActivityStore } from "@multica/core/issues/stores/issue-activity-store";
 import { useAuthStore } from "@multica/core/auth";
 import { useWorkspacePaths } from "@multica/core/paths";
 import { useActorName } from "@multica/core/workspace/hooks";
@@ -665,6 +666,7 @@ const LAST_ACTIVITY_BLOCK_VISIBLE_LIMIT = 8;
 // parent so it survives Virtuoso's mount/unmount on scroll.
 function ActivityBlock({
   entries,
+  newestFirst,
   expanded,
   onToggle,
   truncateOlder,
@@ -680,6 +682,7 @@ function ActivityBlock({
   locale,
 }: {
   entries: TimelineEntry[];
+  newestFirst: boolean;
   expanded: boolean;
   onToggle: () => void;
   // Trailing block only: when true, the body shows only the most recent
@@ -718,8 +721,11 @@ function ActivityBlock({
     truncateOlder && !showOlder && entries.length > LAST_ACTIVITY_BLOCK_VISIBLE_LIMIT
       ? entries.length - LAST_ACTIVITY_BLOCK_VISIBLE_LIMIT
       : 0;
-  const visibleEntries =
-    hiddenOlderCount > 0 ? entries.slice(-LAST_ACTIVITY_BLOCK_VISIBLE_LIMIT) : entries;
+  const recentEntries =
+    hiddenOlderCount > 0
+      ? newestFirst ? entries.slice(0, LAST_ACTIVITY_BLOCK_VISIBLE_LIMIT) : entries.slice(-LAST_ACTIVITY_BLOCK_VISIBLE_LIMIT)
+      : entries;
+  const visibleEntries = recentEntries;
   // Hide the "v N activities" collapse header while we're in the truncated
   // default state. The "Show N more" link is the only control users need
   // when they're glancing at recent activity — stacking two chevron rows
@@ -1419,7 +1425,10 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
   // detail.
   // The peek gets its own key: it is an overlay on the board's route, and
   // must neither restore the full page's offset nor leave one behind for it.
-  const scrollContainerKey = `${isPeek ? "peek" : "main"}:${id}`;
+  const activityOrder = useIssueActivityStore((s) => s.order);
+  const direction = useIssueActivityStore(selectIssueTimelineDirection);
+  const newestFirst = direction === "desc";
+  const scrollContainerKey = `${isPeek ? "peek" : "main"}:${id}:${activityOrder}`;
   const restoredScrollTop = useRestoredScrollOffset(scrollContainerKey);
   const restoreScrollRef = useRestoredScrollRef(scrollContainerKey);
   // Whether this issue's comment-highlight deep link already landed here
@@ -1449,7 +1458,7 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
     [isPeek, restoreScrollRef],
   );
   const [pendingPostedCommentId, setPendingPostedCommentId] = useState<string | null>(null);
-  const scrollToTimelineBottom = useCallback((commentId: string) => {
+  const scrollToPostedComment = useCallback((commentId: string) => {
     setPendingPostedCommentId(commentId);
   }, []);
   const [highlightedId, setHighlightedId] = useState<string | null>(null);
@@ -1459,7 +1468,7 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
   // Mobile only: desktop already reaches the latest entry through the
   // ThreadMinimap rail, which is not rendered below `md`. Passing null keeps
   // the hook's scroll and resize listeners off on desktop.
-  const jumpToLatest = useJumpToLatest(isMobile ? scrollContainerEl : null);
+  const jumpToLatest = useJumpToLatest(isMobile && !newestFirst ? scrollContainerEl : null);
 
   // Per-session: which resolved threads the user has temporarily expanded.
   // Not persisted (matches Linear) — reload collapses everything back to bars.
@@ -1638,10 +1647,10 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
   const enteringRunIds = useNewRunIds(id, commentTasks);
   const previousCommentRuns = useRef(new Map<string, CommentRun[]>());
   const { runs: commentRuns, timeline: displayTimeline, standaloneRuns } = useMemo(() => {
-    const next = buildCommentRunView(commentTasks ?? [], timeline, previousCommentRuns.current);
+    const next = buildCommentRunView(commentTasks ?? [], timeline, previousCommentRuns.current, direction);
     previousCommentRuns.current = next.runs;
     return next;
-  }, [commentTasks, timeline]);
+  }, [commentTasks, timeline, direction]);
 
   // Resolve / unresolve must always clear the per-session expand entry so
   // re-resolving an already-expanded thread folds it back to the bar (the
@@ -1726,14 +1735,18 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
     // Unanchored runs keep their enqueue-time slot while working, then use
     // the published reply's time or the run's end time.
     const entryById = new Map(displayTimeline.map((entry) => [entry.id, entry]));
-    const chronological = orderTimelineWithRuns(topLevel, standaloneRuns, entryById);
+    const ordered = orderTimelineWithRuns(topLevel, standaloneRuns, entryById, direction);
     const coalesced: (TimelineEntry | CommentRun)[] = [];
-    for (const entry of chronological) {
+    let previousActivityTimestamp = 0;
+    for (const entry of ordered) {
       if ("task" in entry) {
         coalesced.push(entry);
         continue;
       }
       if (entry.type === "activity") {
+        const timestamp = Date.parse(entry.created_at);
+        const withinWindow = Math.abs(timestamp - previousActivityTimestamp) <= COALESCE_MS;
+        previousActivityTimestamp = timestamp;
         const prev = coalesced[coalesced.length - 1];
         if (
           !NEVER_COALESCE_ACTIONS.has(entry.action!) &&
@@ -1742,9 +1755,9 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
           prev.actor_type === entry.actor_type &&
           prev.actor_id === entry.actor_id &&
           (NO_TIME_LIMIT_ACTIONS.has(entry.action!) ||
-            Math.abs(new Date(entry.created_at).getTime() - new Date(prev.created_at).getTime()) <= COALESCE_MS)
+            withinWindow)
         ) {
-          coalesced[coalesced.length - 1] = { ...entry, coalesced_count: (prev.coalesced_count ?? 1) + 1 };
+          coalesced[coalesced.length - 1] = { ...(newestFirst ? prev : entry), coalesced_count: (prev.coalesced_count ?? 1) + 1 };
           continue;
         }
       }
@@ -1769,7 +1782,7 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
     }
 
     return { threadReplies, groups };
-  }, [displayTimeline, standaloneRuns]);
+  }, [displayTimeline, standaloneRuns, newestFirst, direction]);
 
   // Flat array consumed by <Virtuoso>. Recomputed when timelineView.groups
   // changes (timeline events) or expandedResolved flips (user toggles a
@@ -1786,7 +1799,7 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
   // timeline to render flat below so every comment is in the DOM to match.
   const find = useInPageFind({
     container: scrollContainerEl,
-    contentKey: items.length,
+    contentKey: `${activityOrder}:${items.length}`,
     enabled: !!issue,
   });
   // Close the bar (and drop highlights) when navigating to another issue —
@@ -1796,14 +1809,15 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
     closeFind();
   }, [id, closeFind]);
 
-  // ID of the trailing activity block — the only one expanded by default.
+  // ID of the most recent activity block — the only one expanded by default.
   const lastActivityGroupId = useMemo(() => {
-    for (let i = timelineView.groups.length - 1; i >= 0; i--) {
-      const g = timelineView.groups[i]!;
+    const groups = timelineView.groups;
+    for (let offset = 0; offset < groups.length; offset++) {
+      const g = groups[newestFirst ? offset : groups.length - 1 - offset]!;
       if (g.type === "activities") return g.entries[0]!.id;
     }
     return null;
-  }, [timelineView.groups]);
+  }, [timelineView.groups, newestFirst]);
 
   // Map of reply-comment id → root-comment id, so a deep-link to a reply
   // (which lives inside a CommentCard, not in the flat items array) can fall
@@ -1883,7 +1897,8 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
     let timer: number | undefined;
     const scrollEnd = () => {
       const composerHeight = composerRef.current?.getBoundingClientRect().height ?? 0;
-      virtuosoRef.current?.scrollToIndex({ index, align: "end", offset: composerHeight });
+      const rootPost = newestFirst && rootId === pendingPostedCommentId;
+      virtuosoRef.current?.scrollToIndex({ index, align: rootPost ? "start" : "end", offset: rootPost ? -16 : composerHeight });
     };
     const frame = requestAnimationFrame(() => {
       scrollEnd();
@@ -1896,7 +1911,7 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
       cancelAnimationFrame(frame);
       if (timer !== undefined) window.clearTimeout(timer);
     };
-  }, [pendingPostedCommentId, items, replyToRoot, isFlatTimeline]);
+  }, [pendingPostedCommentId, items, replyToRoot, isFlatTimeline, newestFirst]);
 
   // Flat mode (find bar / deep link) has no Virtuoso, so drive scrollTop by
   // hand: align the row's bottom to the composer's top edge. The comment's
@@ -1917,7 +1932,11 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
         const c = container.getBoundingClientRect();
         const e = el.getBoundingClientRect();
         const composerHeight = composerRef.current?.getBoundingClientRect().height ?? 0;
-        const target = Math.max(0, container.scrollTop + (e.bottom - c.bottom) + composerHeight);
+        const target = Math.max(0, container.scrollTop + (
+          newestFirst && rootId === pendingPostedCommentId
+            ? e.top - c.top - 16
+            : e.bottom - c.bottom + composerHeight
+        ));
         container.scrollTop = target;
         if (Math.abs(target - last) > 1 && ++frames < 30) {
           last = target;
@@ -1929,7 +1948,7 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
     };
     rafId = requestAnimationFrame(alignBottom);
     return () => cancelAnimationFrame(rafId);
-  }, [pendingPostedCommentId, items, replyToRoot, isFlatTimeline, scrollContainerEl]);
+  }, [pendingPostedCommentId, items, replyToRoot, isFlatTimeline, scrollContainerEl, newestFirst]);
   const jumpFlashTimerRef = useRef<number | null>(null);
   useEffect(
     () => () => {
@@ -2696,7 +2715,7 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
   useRightSidebarShortcut(rightSidebarShortcutTargetRef, handleToggleSidebar);
 
   useIssueDetailScrollRestore({
-    restoreKey: `${wsId}:${id}`,
+    restoreKey: `${wsId}:${id}:${activityOrder}`,
     scrollContainerEl,
     ready: !!issue && !loading && !timelineLoading,
     // Disabled only while the comment deep link still has a landing to run —
@@ -3090,7 +3109,7 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
           commentProps={reply ? {
             issueId: id, entry: reply, replies: timelineView.threadReplies.get(reply.id) ?? EMPTY_REPLIES,
             currentUserId: user?.id, canModerate: canModerateComments, onReply: submitReply,
-            onReplyAccepted: scrollToTimelineBottom, onEdit: editComment, onDelete: deleteComment,
+            onReplyAccepted: scrollToPostedComment, onEdit: editComment, onDelete: deleteComment,
             onToggleReaction: handleToggleReaction, onCreateSubIssue: openCommentSubIssue,
             onResolveToggle: handleResolveToggle,
             onCopyLink: actions.copyCommentLink, onJumpToComment: jumpToComment,
@@ -3125,7 +3144,7 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
             currentUserId={user?.id}
             canModerate={canModerateComments}
             onReply={submitReply}
-            onReplyAccepted={scrollToTimelineBottom}
+            onReplyAccepted={scrollToPostedComment}
             onEdit={editComment}
             onDelete={deleteComment}
             onToggleReaction={handleToggleReaction}
@@ -3152,6 +3171,7 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
     return (
       <ActivityBlock
         entries={item.entries}
+        newestFirst={newestFirst}
         expanded={expanded}
         onToggle={() => toggleActivityBlock(item.id, expanded)}
         truncateOlder={truncateOlder}
@@ -3168,6 +3188,29 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
       />
     );
   };
+
+  const commentComposer = (
+    <div
+      ref={composerRef}
+      className={cn(
+        "mt-4",
+        stickyComposer &&
+          "sticky bottom-0 z-10 -mb-4 bg-background pb-4 before:pointer-events-none before:absolute before:inset-x-0 before:bottom-full before:h-4 before:bg-gradient-to-t before:from-background before:to-transparent",
+      )}
+    >
+      {stickyComposer && jumpToLatest.visible && (
+        <JumpToLatestButton onClick={jumpToLatest.jump} label={t(($) => $.timeline.jump_to_latest)} />
+      )}
+      {/* Web routes reuse this component across issues; isolate editor drafts. */}
+      <CommentInput
+        key={id}
+        issueId={id}
+        onSubmit={submitComment}
+        onAccepted={scrollToPostedComment}
+        onEditAnnotation={(annotationId) => descriptionAnnotations.editAnnotation(annotationId, true)}
+      />
+    </div>
+  );
 
   // Breadcrumb shows the single most-direct container, never a fabricated chain.
   // project_id and parent_issue_id are orthogonal (a sub-issue can live in a
@@ -3855,6 +3898,8 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
                 The per-task timeline + past runs live in the right panel
                 via ExecutionLogSection. */}
 
+            {newestFirst && commentComposer}
+
             {/* Timeline entries — virtualized via react-virtuoso to keep
                 first-paint cost O(viewport) instead of O(N). On a 500-comment
                 issue the unvirtualized .map froze the page for several
@@ -3896,7 +3941,7 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
                 ) : (
                   <div className="mt-4">
                     <Virtuoso
-                      key={`${wsId}:${id}`}
+                      key={`${wsId}:${id}:${activityOrder}`}
                       ref={virtuosoRef}
                       customScrollParent={scrollContainerEl}
                       data={items}
@@ -3947,30 +3992,7 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
               <JumpToLatestButton onClick={jumpToLatest.jump} label={t(($) => $.timeline.jump_to_latest)} />
             </div>
           )}
-          <div
-            ref={composerRef}
-            className={cn(
-              "mt-4",
-              stickyComposer &&
-                "sticky bottom-0 z-10 -mb-4 bg-background pb-4 before:pointer-events-none before:absolute before:inset-x-0 before:bottom-full before:h-4 before:bg-gradient-to-t before:from-background before:to-transparent",
-            )}
-          >
-            {/* key={id}: web's /issues/[id] route doesn't remount on
-                issueId change, so without an explicit key the editor
-                keeps the previous issue's in-memory content and the
-                next keystroke would flush it into the new issue's
-                draft key. */}
-            {stickyComposer && jumpToLatest.visible && (
-              <JumpToLatestButton onClick={jumpToLatest.jump} label={t(($) => $.timeline.jump_to_latest)} />
-            )}
-            <CommentInput
-              key={id}
-              issueId={id}
-              onSubmit={submitComment}
-              onAccepted={scrollToTimelineBottom}
-              onEditAnnotation={(annotationId) => descriptionAnnotations.editAnnotation(annotationId, true)}
-            />
-          </div>
+          {!newestFirst && commentComposer}
         </div>
         </div>
 

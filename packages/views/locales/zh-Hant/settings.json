@@ -181,6 +181,11 @@
       "search": "搜尋時區...",
       "empty": "沒有匹配的時區"
     },
+    "activity_order": {
+      "title": "任務動態順序",
+      "oldest_first": "最早在前",
+      "newest_first": "最新在前"
+    },
     "sticky_comment_bar": {
       "title": "固定底部評論欄"
     },

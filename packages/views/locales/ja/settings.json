@@ -181,6 +181,11 @@
       "search": "タイムゾーンを検索...",
       "empty": "一致するタイムゾーンはありません"
     },
+    "activity_order": {
+      "title": "タスクのアクティビティの順序",
+      "oldest_first": "古い順",
+      "newest_first": "新しい順"
+    },
     "sticky_comment_bar": {
       "title": "コメント欄を下部に固定"
     },

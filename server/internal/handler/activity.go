@@ -136,7 +136,8 @@ type timelinePaginatedResponse struct {
 // ListTimeline returns the full issue timeline (comments + activities merged).
 // Two response shapes coexist for boundary compatibility (#1929):
 //
-//   - No pagination params → flat ASC `TimelineEntry[]`. Matches the legacy
+//   - No pagination params → flat `TimelineEntry[]`, ordered by direction
+//     (ASC by default). Matches the legacy
 //     desktop contract (Multica.app ≤ v0.2.25) and the new client.
 //   - Any of `limit` / `before` / `after` / `around` present → wrapped object
 //     with DESC entries + null cursors + has_more_after=false. Matches what a
@@ -159,6 +160,12 @@ func (h *Handler) ListTimeline(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	q := r.URL.Query()
+	direction := q.Get("direction")
+	if direction != "" && direction != "asc" && direction != "desc" {
+		writeError(w, http.StatusBadRequest, "invalid direction value")
+		return
+	}
 	ctx := r.Context()
 
 	comments, err := h.Queries.ListCommentsForIssue(ctx, db.ListCommentsForIssueParams{
@@ -179,7 +186,6 @@ func (h *Handler) ListTimeline(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	q := r.URL.Query()
 	wantWrapped := q.Get("limit") != "" || q.Get("before") != "" ||
 		q.Get("after") != "" || q.Get("around") != ""
 
@@ -221,7 +227,7 @@ func (h *Handler) ListTimeline(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set(HeaderTimelineTruncated, kinds)
 	}
 
-	entries := h.mergeTimeline(r, comments, activities, !wantWrapped)
+	entries := h.mergeTimeline(r, comments, activities, !wantWrapped && direction != "desc")
 	// The current-member directory deliberately excludes departed members, but
 	// timeline attribution must remain readable after they leave. Hydrate only
 	// the member ids already present in this authorised issue response; lookup

@@ -6,6 +6,7 @@ import { buildIssueStatusCatalog } from "@multica/core/issue-statuses/queries";
 import { useCommandBarContextStore, type CommandBarContext } from "@multica/core/command-bar";
 import { inboxUnreadSummaryOptions } from "@multica/core/inbox/queries";
 import { I18nProvider } from "@multica/core/i18n/react";
+import { useIssueActivityStore } from "@multica/core/issues/stores/issue-activity-store";
 import { issueDetailOptions, issueTimelineOptions } from "@multica/core/issues/queries";
 import { WORKSPACE_PAGES } from "@multica/core/paths";
 import type { Issue } from "@multica/core/types";
@@ -358,6 +359,7 @@ const rowText = (text: string) =>
 
 describe("SearchCommand", () => {
   beforeEach(() => {
+    useIssueActivityStore.setState({ order: "oldest_first" });
     queryData.clear();
     apiFns.clear();
     apiFns.set("getBaseUrl", vi.fn(() => "http://127.0.0.1:8080"));
@@ -821,6 +823,28 @@ describe("SearchCommand", () => {
       await waitFor(() => expect(writeSpy).toHaveBeenCalledWith("MUL-42"));
       expect(mockToast.success).toHaveBeenCalledWith("Copied MUL-42");
       writeSpy.mockRestore();
+    });
+
+    it.each([
+      { query: "fold", label: "Fold all comments" },
+      { query: "unfold", label: "Unfold all comments" },
+    ])("uses newest-first visible threads for $query commands", async ({ query, label }) => {
+      useIssueActivityStore.getState().setOrder("newest_first");
+      const user = userEvent.setup();
+      const oldRoot = { type: "comment", id: "old-root", actor_type: "member", actor_id: "u1", created_at: "2026-01-01T00:00:00Z", parent_id: null };
+      seed(issueTimelineOptions("issue-1"), [oldRoot]);
+      seed(issueTimelineOptions("issue-1", "desc"), [
+        { ...oldRoot, id: "new-root", created_at: "2026-01-02T00:00:00Z", resolved_at: "2026-01-03T00:00:00Z" },
+        oldRoot,
+      ]);
+      renderSearch();
+      await user.type(input(), query);
+      await user.click(await rowText(label));
+      if (query === "fold") {
+        await waitFor(() => expect(mockCommentCollapseAll).toHaveBeenCalledWith("issue-1", ["new-root", "old-root"]));
+      } else {
+        await waitFor(() => expect(mockResolvedExpandAll).toHaveBeenCalledWith("issue-1", ["new-root"]));
+      }
     });
 
     it("folds all comments, including expanded resolved threads", async () => {

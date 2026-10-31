@@ -181,6 +181,11 @@
       "search": "시간대 검색...",
       "empty": "일치하는 시간대가 없습니다"
     },
+    "activity_order": {
+      "title": "태스크 활동 순서",
+      "oldest_first": "오래된 순",
+      "newest_first": "최신순"
+    },
     "sticky_comment_bar": {
       "title": "댓글 입력란을 하단에 고정"
     },

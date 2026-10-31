@@ -103,6 +103,7 @@ vi.mock("@multica/core/auth", async () => {
   return { ...actual, useAuthStore };
 });
 
+import { useIssueActivityStore } from "@multica/core/issues/stores/issue-activity-store";
 import { PreferencesTab } from "./preferences-tab";
 import { useCommentComposerStore } from "@multica/core/issues/stores";
 import { useIssueOpeningStore } from "@multica/core/issues/stores/issue-opening-store";
@@ -448,5 +449,24 @@ describe("PreferencesTab — Scope", () => {
     await user.click(preview);
     expect(useIssueOpeningStore.getState().openMode).toBe("peek");
     expect(preview).toHaveAttribute("aria-pressed", "true");
+  });
+});
+
+
+describe("PreferencesTab — issue activity order", () => {
+  beforeEach(() => {
+    useIssueActivityStore.setState({ order: "oldest_first" });
+  });
+
+  it("changes the device preference in Comments & chat", async () => {
+    const user = userEvent.setup();
+    render(<PreferencesTab />, { wrapper: I18nWrapper });
+    const group = screen.getByRole("group", { name: "Issue activity order" });
+    expect(within(group).getByRole("button", { name: "Oldest first" })).toHaveAttribute("aria-pressed", "true");
+    await user.click(within(group).getByRole("button", { name: "Newest first" }));
+    expect(useIssueActivityStore.getState().order).toBe("newest_first");
+    expect(within(group).getByRole("button", { name: "Newest first" })).toHaveAttribute("aria-pressed", "true");
+    await user.click(within(group).getByRole("button", { name: "Oldest first" }));
+    expect(useIssueActivityStore.getState().order).toBe("oldest_first");
   });
 });

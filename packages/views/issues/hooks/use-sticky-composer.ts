@@ -1,10 +1,12 @@
 "use client";
 
+import { useIssueActivityStore } from "@multica/core/issues/stores/issue-activity-store";
 import { useIsMobile } from "@multica/ui/hooks/use-mobile";
 import { useCommentComposerStore } from "@multica/core/issues/stores";
 
 /**
- * Whether the bottom comment composer is pinned to the scroll viewport.
+ * Whether the oldest-first bottom composer is pinned to the scroll viewport.
+ * Newest-first places the composer inline above the activity instead.
  *
  * The stored preference (Settings → Preferences) is the user's answer for a
  * screen with room to spare. A narrow viewport is not that screen:
@@ -25,5 +27,6 @@ import { useCommentComposerStore } from "@multica/core/issues/stores";
 export function useStickyComposer(): boolean {
   const preferred = useCommentComposerStore((s) => s.sticky);
   const isMobile = useIsMobile();
-  return preferred && !isMobile;
+  const order = useIssueActivityStore((s) => s.order);
+  return preferred && !isMobile && order === "oldest_first";
 }
