@@ -78,6 +78,9 @@
     "switch_workspace": "워크스페이스 전환",
     "invitation_from": "{{name}} 님이 초대했습니다",
     "open_in_new_window": "새 창에서 열기",
+    "open_in_new_window_click": "클릭",
+    "open_in_other_window": "다른 창에서 열려 있음",
+    "in_other_window": "다른 창",
     "all_workspaces_open": "모든 워크스페이스가 이미 창에 열려 있습니다"
   },
   "panels": {

@@ -78,6 +78,9 @@
     "switch_workspace": "Switch workspace",
     "invitation_from": "{{name}} invited you",
     "open_in_new_window": "Open in new window",
+    "open_in_new_window_click": "Click",
+    "open_in_other_window": "Already open in another window",
+    "in_other_window": "Other window",
     "all_workspaces_open": "Every workspace is already open in a window"
   },
   "panels": {

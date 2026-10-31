@@ -1,8 +1,8 @@
 "use client";
 
-import { useMemo } from "react";
+import { useMemo, useState, type MouseEvent } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { AppWindow, Check, Plus } from "@multica/ui/icons";
+import { AppWindow, ArrowBigUp, Check, Plus } from "@multica/ui/icons";
 import { api } from "@multica/core/api";
 import { useConfigStore } from "@multica/core/config";
 import {
@@ -30,6 +30,7 @@ import {
   DropdownMenuSubTrigger,
   DropdownMenuTrigger,
 } from "@multica/ui/components/ui/dropdown-menu";
+import { Kbd, KbdGroup } from "@multica/ui/components/ui/kbd";
 import { cn } from "@multica/ui/lib/utils";
 import { useT } from "../i18n";
 import { AppLink, useNavigation } from "../navigation";
@@ -39,9 +40,66 @@ import { WorkspaceAvatar } from "../workspace/workspace-avatar";
 const EMPTY_WORKSPACES: Workspace[] = [];
 const EMPTY_INVITATIONS: Invitation[] = [];
 const EMPTY_INBOX_SUMMARY: Awaited<ReturnType<typeof api.getInboxUnreadSummary>> = [];
+const EMPTY_SLUGS: ReadonlySet<string> = new Set();
 
 function UnreadDot({ className }: { className?: string }) {
   return <span aria-hidden className={cn("size-2 shrink-0 rounded-full bg-brand", className)} />;
+}
+
+// Shift alone, the browser's "open in new window" gesture. Cmd/Ctrl+Shift
+// stays the foreground-tab gesture AppLink already handles.
+function isNewWindowClick(event: MouseEvent) {
+  return event.shiftKey && !event.metaKey && !event.ctrlKey && !event.altKey;
+}
+
+/**
+ * Trailing row button that opens the workspace in a new window. It sits
+ * inside the row link, so its click cancels the link's navigation and still
+ * reaches the menu item, which closes the menu.
+ */
+function NewWindowButton({ onOpen }: { onOpen: () => void }) {
+  const { t } = useT("layout");
+  const label = t(($) => $.rail.open_in_new_window);
+  return (
+    <TooltipHint
+      label={label}
+      side="right"
+      shortcut={
+        <KbdGroup>
+          <Kbd>
+            <ArrowBigUp />
+          </Kbd>
+          <Kbd>{t(($) => $.rail.open_in_new_window_click)}</Kbd>
+        </KbdGroup>
+      }
+    >
+      <button
+        type="button"
+        tabIndex={-1}
+        aria-label={label}
+        className="-my-1 -mr-1 inline-flex size-6 shrink-0 items-center justify-center rounded-md text-muted-foreground opacity-0 group-hover/workspace:opacity-100 group-data-highlighted/workspace:opacity-100 hover:bg-surface-selected hover:text-foreground"
+        onClick={(event) => {
+          event.preventDefault();
+          onOpen();
+        }}
+      >
+        <AppWindow />
+      </button>
+    </TooltipHint>
+  );
+}
+
+// A text tag rather than a window glyph, so it never reads as the row
+// button that opens a new window.
+function OtherWindowMarker() {
+  const { t } = useT("layout");
+  return (
+    <TooltipHint label={t(($) => $.rail.open_in_other_window)} side="right">
+      <span className="shrink-0 text-caption text-muted-foreground">
+        {t(($) => $.rail.in_other_window)}
+      </span>
+    </TooltipHint>
+  );
 }
 
 function useInvitationActions(invitations: Invitation[]) {
@@ -136,16 +194,23 @@ export function RailWorkspaces() {
   });
   const unreadIds = useMemo(() => unreadWorkspaceIds(unreadSummary), [unreadSummary]);
   const actions = useInvitationActions(invitations);
-  const { openWorkspaceInNewWindow } = useNavigation();
+  const { openWorkspaceInNewWindow, workspacesInOtherWindows } = useNavigation();
+  // Read when the menu opens: other windows switch workspaces independently.
+  const [inOtherWindows, setInOtherWindows] = useState(EMPTY_SLUGS);
 
   const current = workspaces.find((ws) => ws.id === wsId) ?? workspace;
   if (!current) return null;
   const otherUnread = workspaces.some((ws) => ws.id !== wsId && unreadIds.has(ws.id));
-  const otherWorkspaces = workspaces.filter((ws) => ws.id !== current.id);
   const label = t(($) => $.rail.switch_workspace);
 
   return (
-    <DropdownMenu>
+    <DropdownMenu
+      onOpenChange={(open) => {
+        if (open && workspacesInOtherWindows) {
+          setInOtherWindows(new Set(workspacesInOtherWindows()));
+        }
+      }}
+    >
       <TooltipHint label={current.name} side="right">
         <DropdownMenuTrigger
           aria-label={label}
@@ -168,45 +233,38 @@ export function RailWorkspaces() {
           </DropdownMenuLabel>
           {workspaces.map((ws) => {
             const isCurrent = ws.id === wsId;
+            // A workspace shown by another window is focused there by a
+            // plain click, so it offers no new window of its own.
+            const inOtherWindow = !isCurrent && inOtherWindows.has(ws.slug);
+            const openInNewWindow =
+              openWorkspaceInNewWindow && !isCurrent && !inOtherWindow
+                ? () => openWorkspaceInNewWindow(ws.slug)
+                : null;
             return (
               <DropdownMenuItem
                 key={ws.id}
                 aria-current={isCurrent ? "page" : undefined}
+                className="group/workspace"
+                onClick={
+                  openInNewWindow
+                    ? (event: MouseEvent) => {
+                        if (event.defaultPrevented || !isNewWindowClick(event)) return;
+                        event.preventDefault();
+                        openInNewWindow();
+                      }
+                    : undefined
+                }
                 render={<AppLink href={paths.workspace(ws.slug).issues()} />}
               >
                 <WorkspaceAvatar name={ws.name} avatarUrl={ws.avatar_url} size="sm" />
                 <span className="min-w-0 flex-1 truncate">{ws.name}</span>
                 {isCurrent ? <Check /> : unreadIds.has(ws.id) && <UnreadDot />}
+                {inOtherWindow && <OtherWindowMarker />}
+                {openInNewWindow && <NewWindowButton onOpen={openInNewWindow} />}
               </DropdownMenuItem>
             );
           })}
         </DropdownMenuGroup>
-        {openWorkspaceInNewWindow && otherWorkspaces.length > 0 && (
-          <>
-            <DropdownMenuSeparator />
-            <DropdownMenuGroup>
-              <DropdownMenuSub>
-                <DropdownMenuSubTrigger>
-                  <AppWindow />
-                  <span className="min-w-0 flex-1 truncate">
-                    {t(($) => $.rail.open_in_new_window)}
-                  </span>
-                </DropdownMenuSubTrigger>
-                <DropdownMenuSubContent className="max-h-80 min-w-44 overflow-y-auto">
-                  {otherWorkspaces.map((ws) => (
-                    <DropdownMenuItem
-                      key={ws.id}
-                      onClick={() => openWorkspaceInNewWindow(ws.slug)}
-                    >
-                      <WorkspaceAvatar name={ws.name} avatarUrl={ws.avatar_url} size="sm" />
-                      <span className="min-w-0 flex-1 truncate">{ws.name}</span>
-                    </DropdownMenuItem>
-                  ))}
-                </DropdownMenuSubContent>
-              </DropdownMenuSub>
-            </DropdownMenuGroup>
-          </>
-        )}
         {invitations.length > 0 && (
           <>
             <DropdownMenuSeparator />

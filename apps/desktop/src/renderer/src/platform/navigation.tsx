@@ -16,6 +16,7 @@ import { useWindowOverlayStore } from "@/stores/window-overlay-store";
 import {
   handOffToWorkspaceWindow,
   openWorkspaceInNewWindow,
+  otherWindowWorkspaces,
 } from "./workspace-windows";
 
 function requireRuntimeAppUrl(scope: string): string {
@@ -249,6 +250,7 @@ export function DesktopNavigationProvider({
         store.openTab(path, title ?? "", { activate: opts?.activate });
       },
       openWorkspaceInNewWindow,
+      workspacesInOtherWindows: () => [...otherWindowWorkspaces()],
       getShareableUrl: (path: string) => `${appUrl}${path}`,
     }),
     [appUrl, location],

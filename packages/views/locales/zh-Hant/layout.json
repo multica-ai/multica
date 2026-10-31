@@ -78,6 +78,9 @@
     "switch_workspace": "切換工作區",
     "invitation_from": "{{name}} 邀請你加入",
     "open_in_new_window": "在新視窗開啟",
+    "open_in_new_window_click": "點擊",
+    "open_in_other_window": "已在其他視窗開啟",
+    "in_other_window": "其他視窗",
     "all_workspaces_open": "所有工作區都已在視窗中開啟"
   },
   "panels": {

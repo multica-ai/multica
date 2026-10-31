@@ -78,6 +78,9 @@
     "switch_workspace": "ワークスペースを切り替え",
     "invitation_from": "{{name}} さんから招待されています",
     "open_in_new_window": "新しいウィンドウで開く",
+    "open_in_new_window_click": "クリック",
+    "open_in_other_window": "別のウィンドウで開いています",
+    "in_other_window": "別ウィンドウ",
     "all_workspaces_open": "すべてのワークスペースがすでにウィンドウで開いています"
   },
   "panels": {
