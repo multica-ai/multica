@@ -283,6 +283,7 @@ export function HandoffFields({
   onPatch,
   onPreview,
   defaultNextLabel,
+  targetLabel,
 }: {
   step: IssueWorkflowStep;
   /** The statuses next and back may name. */
@@ -295,6 +296,8 @@ export function HandoffFields({
    * against more columns than `workflow` lists — the editor's unsaved ones.
    */
   defaultNextLabel?: string;
+  /** Resolves request-local draft IDs as well as saved status keys. */
+  targetLabel?: (key: string) => string;
 }) {
   const { t } = useT("issues");
   const wsId = useWorkspaceId();
@@ -386,6 +389,7 @@ export function HandoffFields({
             nextDefaultLabel={nextDefaultLabel}
             onPatch={onPatch}
             onPreview={onPreview}
+            targetLabel={targetLabel}
           />
         </>
       )}
@@ -496,6 +500,7 @@ function NextBackFields({
   nextDefaultLabel,
   onPatch,
   onPreview,
+  targetLabel,
 }: {
   step: IssueWorkflowStep;
   workflow: Pick<IssueWorkflow, "steps">;
@@ -504,11 +509,13 @@ function NextBackFields({
   nextDefaultLabel: string;
   onPatch: (patch: Partial<IssueWorkflowStep>) => void;
   onPreview?: () => void;
+  targetLabel?: (key: string) => string;
 }) {
   const { t } = useT("issues");
   const wsId = useWorkspaceId();
   const catalog = useIssueStatuses(wsId);
   const labelOf = useStatusLabel(wsId);
+  const label = targetLabel ?? labelOf;
   const others = workflow.steps.filter((s) => s.status_key !== step.status_key).map((s) => s.status_key);
   const statusIcon = (key: string) => (
     <StatusIcon
@@ -530,7 +537,7 @@ function NextBackFields({
             kind === "next" && nextDefaultLabel
               ? t(($) => $.workflows.handoff.next_default, { status: nextDefaultLabel })
               : t(($) => $.workflows.editor.none_option);
-          const options = [{ value: NOT_SET, label: unsetLabel }, ...others.map((key) => ({ value: key, label: labelOf(key) }))];
+          const options = [{ value: NOT_SET, label: unsetLabel }, ...others.map((key) => ({ value: key, label: label(key) }))];
           return (
             <div key={kind} className="min-w-0 space-y-1.5">
               <span className="block text-caption font-medium">{t(($) => $.workflows.editor[kind])}</span>
@@ -544,7 +551,7 @@ function NextBackFields({
                   {value ? (
                     <span className="flex min-w-0 items-center gap-2">
                       {statusIcon(value)}
-                      <span className="truncate">{labelOf(value)}</span>
+                      <span className="truncate">{label(value)}</span>
                     </span>
                   ) : (
                     <span className="truncate text-muted-foreground">{unsetLabel}</span>

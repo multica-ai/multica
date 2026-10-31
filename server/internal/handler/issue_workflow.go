@@ -292,8 +292,8 @@ type NewWorkflowStatus struct {
 }
 
 // IssueWorkflowStepInput names a step by an existing status key or by a
-// status to create, with its handoff. Next and back statuses must name
-// existing statuses.
+// status to create, with its handoff. Request-local step IDs allow handoffs
+// to reference statuses created by the same write.
 type IssueWorkflowStepInput struct {
 	StatusKey     string                       `json:"status_key,omitempty"`
 	NewStatus     *NewWorkflowStatus           `json:"new_status,omitempty"`
@@ -301,6 +301,9 @@ type IssueWorkflowStepInput struct {
 	Instructions  string                       `json:"instructions,omitempty"`
 	NextStatusKey string                       `json:"next_status_key,omitempty"`
 	BackStatusKey string                       `json:"back_status_key,omitempty"`
+	ClientID      string                       `json:"client_id,omitempty"`
+	NextStepID    string                       `json:"next_step_id,omitempty"`
+	BackStepID    string                       `json:"back_step_id,omitempty"`
 }
 
 type IssueWorkflowWriteRequest struct {
@@ -341,6 +344,18 @@ var errStatusCreateForbidden = errors.New("only workspace admins can create stat
 func resolveStepInputs(ctx context.Context, qtx *db.Queries, wsUUID pgtype.UUID, inputs []IssueWorkflowStepInput, allowCreate bool) ([]issueworkflow.Step, []db.IssueStatus, string, error) {
 	steps := make([]issueworkflow.Step, 0, len(inputs))
 	var created []db.IssueStatus
+	byClientID := make(map[string]string, len(inputs))
+	for _, in := range inputs {
+		if in.ClientID != "" {
+			if _, exists := byClientID[in.ClientID]; exists {
+				return nil, nil, "duplicate client_id", nil
+			}
+			byClientID[in.ClientID] = ""
+		}
+		if (in.NextStepID != "" && in.NextStatusKey != "") || (in.BackStepID != "" && in.BackStatusKey != "") {
+			return nil, nil, "specify either a step ID or a status key for each handoff target", nil
+		}
+	}
 	for _, in := range inputs {
 		step := issueworkflow.Step{
 			StatusKey:     in.StatusKey,
@@ -362,6 +377,24 @@ func resolveStepInputs(ctx context.Context, qtx *db.Queries, wsUUID pgtype.UUID,
 			step.StatusKey = entry.Key
 		}
 		steps = append(steps, step)
+		if in.ClientID != "" {
+			byClientID[in.ClientID] = step.StatusKey
+		}
+	}
+	for i, in := range inputs {
+		for _, ref := range []struct {
+			id     string
+			target *string
+		}{{in.NextStepID, &steps[i].NextStatusKey}, {in.BackStepID, &steps[i].BackStatusKey}} {
+			if ref.id == "" {
+				continue
+			}
+			key, exists := byClientID[ref.id]
+			if !exists || key == "" {
+				return nil, nil, "unknown handoff step ID", nil
+			}
+			*ref.target = key
+		}
 	}
 	return steps, created, "", nil
 }

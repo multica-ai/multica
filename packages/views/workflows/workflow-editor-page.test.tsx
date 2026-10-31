@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 
 import { cleanup, fireEvent, screen, waitFor } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { buildIssueStatusCatalog } from "@multica/core/issue-statuses";
@@ -69,13 +70,14 @@ describe("WorkflowEditorPage", () => {
     await waitFor(() => expect(createWorkflow).toHaveBeenCalled());
     const steps = createWorkflow.mock.calls[0]![0].steps as unknown[];
     expect(steps).toContainEqual({
+      client_id: expect.any(String),
       new_status: { name: "Deploy" },
       handler: { type: "agent", id: "agent-1" },
       instructions: "",
     });
   });
 
-  it("resolves a default next over the unsaved steps, as the save will", async () => {
+  it("selects unsaved next/back targets and submits their request-local IDs", async () => {
     renderEditor();
     await addNewStatus("QA");
     await addNewStatus("Deploy");
@@ -89,9 +91,48 @@ describe("WorkflowEditorPage", () => {
 
     expect(screen.getByRole("combobox", { name: "When done, move to" }).textContent).toContain("Next column (Deploy)");
     expect(stepCard("QA").textContent).toContain("then → Deploy");
-    // The explicit choices still list only statuses that exist before the save.
     fireEvent.click(screen.getByRole("combobox", { name: "When done, move to" }));
-    expect(screen.queryByRole("option", { name: "Deploy" })).toBeNull();
+    await userEvent.click(await screen.findByRole("option", { name: "Deploy" }));
+    expect(screen.getByRole("combobox", { name: "When done, move to" }).textContent).toContain("Deploy");
+    await waitFor(() => expect(screen.queryByRole("option", { name: "Deploy" })).toBeNull());
+
+    fireEvent.click(screen.getByRole("combobox", { name: "If rejected, send back to" }));
+    await userEvent.click(await screen.findByRole("option", { name: "Deploy" }));
+    fireEvent.change(screen.getByRole("textbox", { name: "Name" }), { target: { value: "Release" } });
+    createWorkflow.mockResolvedValue({ id: "wf-1" });
+    fireEvent.click(screen.getByRole("button", { name: "Create" }));
+    await waitFor(() => expect(createWorkflow).toHaveBeenCalled());
+    const steps = createWorkflow.mock.calls[0]![0].steps;
+    const deploy = steps.find((s: { new_status?: { name: string } }) => s.new_status?.name === "Deploy");
+    expect(steps).toContainEqual(expect.objectContaining({
+      new_status: { name: "QA" },
+      next_step_id: deploy.client_id,
+      back_step_id: deploy.client_id,
+    }));
+  }, 15_000);
+
+  it.each(["remove", "replace"] as const)("updates references when a draft target is %s", async (action) => {
+    renderEditor();
+    fireEvent.click(stepCard("In Progress"));
+    fireEvent.click(screen.getByRole("button", { name: "Remove column" }));
+    await addNewStatus("QA");
+    await addNewStatus("Deploy");
+    fireEvent.click(stepCard("QA"));
+    fireEvent.click(screen.getByRole("radio", { name: /Hand to an agent/ }));
+    fireEvent.click(screen.getByRole("combobox", { name: "When done, move to" }));
+    await userEvent.click(await screen.findByRole("option", { name: "Deploy" }));
+    await waitFor(() => expect(screen.queryByRole("option", { name: "Deploy" })).toBeNull());
+    fireEvent.click(stepCard("Deploy"));
+    if (action === "remove") {
+      fireEvent.click(screen.getByRole("button", { name: "Remove column" }));
+    } else {
+      fireEvent.click(screen.getByRole("button", { name: "Deploy" }));
+      fireEvent.click(await screen.findByRole("menuitem", { name: "In Progress" }));
+    }
+    fireEvent.click(stepCard("QA"));
+    const next = screen.getByRole("combobox", { name: "When done, move to" });
+    expect(next.textContent).not.toContain("Deploy");
+    expect(next.textContent).toContain(action === "remove" ? "Next column" : "In Progress");
   });
 });
 

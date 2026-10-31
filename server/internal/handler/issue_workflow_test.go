@@ -285,6 +285,77 @@ func lookupStatusName(t *testing.T, key string) string {
 	return name
 }
 
+func TestWorkflowDraftStepReferences(t *testing.T) {
+	seedTestCatalog(t)
+	resetDefaultWorkflow(t)
+	suffix := workflowTestSuffix()
+	firstName, secondName := "Draft A "+suffix[10:], "Draft B "+suffix[10:]
+	t.Cleanup(func() {
+		testPool.Exec(context.Background(), `DELETE FROM issue_status WHERE workspace_id = $1 AND name IN ($2, $3)`, testWorkspaceID, firstName, secondName)
+	})
+	created := createTestWorkflowSteps(t, "Draft refs "+suffix, []map[string]any{
+		{"status_key": "todo", "next_step_id": "a"},
+		{"client_id": "a", "new_status": map[string]any{"name": firstName}, "next_step_id": "b"},
+		{"client_id": "b", "new_status": map[string]any{"name": secondName}, "back_step_id": "a"},
+	})
+	a, b := created.Steps[1], created.Steps[2]
+	if created.Steps[0].NextStatusKey != a.StatusKey || a.NextStatusKey != b.StatusKey || b.BackStatusKey != a.StatusKey {
+		t.Fatalf("draft references were not resolved: %+v", created.Steps)
+	}
+	var updated IssueWorkflowResponse
+	req := withURLParam(workflowRequest("PATCH", "/api/issue-workflows/"+created.ID, map[string]any{
+		"steps": []map[string]any{
+			{"status_key": "todo", "next_step_id": "reuse"},
+			{"client_id": "reuse", "new_status": map[string]any{"name": secondName}},
+		},
+	}), "id", created.ID)
+	testutil.Call(t, testHandler.UpdateIssueWorkflow, req).Want(http.StatusOK).JSON(&updated)
+	if updated.Steps[0].NextStatusKey != b.StatusKey {
+		t.Fatalf("update did not resolve reused status: %+v", updated.Steps)
+	}
+	var list struct {
+		Workflows []IssueWorkflowResponse `json:"workflows"`
+	}
+	testutil.Call(t, testHandler.ListIssueWorkflows, workflowRequest("GET", "/api/issue-workflows", nil)).Want(http.StatusOK).JSON(&list)
+	for _, workflow := range list.Workflows {
+		if workflow.ID == created.ID {
+			if workflow.Steps[0].NextStatusKey != b.StatusKey {
+				t.Fatalf("reloaded workflow lost its target: %+v", workflow.Steps)
+			}
+			return
+		}
+	}
+	t.Fatal("saved workflow missing from list")
+}
+
+func TestWorkflowRejectsInvalidDraftStepReferences(t *testing.T) {
+	seedTestCatalog(t)
+	resetDefaultWorkflow(t)
+	withFeatureFlag(t, testHandler, featureflags.ProjectWorkflowsV1, true)
+	for name, steps := range map[string][]map[string]any{
+		"unknown":      {{"status_key": "todo", "next_step_id": "missing"}},
+		"unknown back": {{"status_key": "todo", "back_step_id": "missing"}},
+		"duplicate":    {{"status_key": "todo", "client_id": "a"}, {"status_key": "in_review", "client_id": "a"}},
+		"ambiguous":    {{"status_key": "todo", "next_status_key": "done", "next_step_id": "a"}},
+	} {
+		t.Run(name, func(t *testing.T) {
+			testutil.Call(t, testHandler.CreateIssueWorkflow, workflowRequest("POST", "/api/issue-workflows", map[string]any{
+				"name": "Invalid refs " + workflowTestSuffix(), "steps": steps,
+			})).Want(http.StatusBadRequest)
+		})
+	}
+	statusName := "Rollback " + workflowTestSuffix()[10:]
+	testutil.Call(t, testHandler.CreateIssueWorkflow, workflowRequest("POST", "/api/issue-workflows", map[string]any{
+		"name":  "Rollback refs " + workflowTestSuffix(),
+		"steps": []map[string]any{{"client_id": "a", "new_status": map[string]any{"name": statusName}, "next_step_id": "missing"}},
+	})).Want(http.StatusBadRequest)
+	var count int
+	dbfx.QueryRow(t, `SELECT count(*) FROM issue_status WHERE workspace_id = $1 AND name = $2`, testWorkspaceID, statusName).Scan(&count)
+	if count != 0 {
+		t.Fatal("invalid reference left a new status behind")
+	}
+}
+
 func TestDefaultWorkflowIsEditableButNotDeletable(t *testing.T) {
 	seedTestCatalog(t)
 	resetDefaultWorkflow(t)
