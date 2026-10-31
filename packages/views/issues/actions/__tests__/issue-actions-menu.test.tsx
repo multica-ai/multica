@@ -58,8 +58,12 @@ vi.mock("@multica/core/workspace/queries", () => ({
   }),
 }));
 
+const { ACTOR_NAMES } = vi.hoisted(() => ({
+  ACTOR_NAMES: { "user-1": "Test User", "agent-1": "Lambda" } as Record<string, string>,
+}));
+
 vi.mock("@multica/core/workspace/hooks", () => ({
-  useActorName: () => ({ getActorName: (_t: string, _id: string) => "" }),
+  useActorName: () => ({ getActorName: (_t: string, id: string) => ACTOR_NAMES[id] ?? "" }),
 }));
 
 vi.mock("@multica/core/pins", () => ({
@@ -71,8 +75,11 @@ vi.mock("@multica/core/pins", () => ({
   useDeletePin: () => ({ mutate: vi.fn() }),
 }));
 
+const { cancelRunMock } = vi.hoisted(() => ({ cancelRunMock: vi.fn() }));
+
 vi.mock("@multica/core/issues/mutations", () => ({
   useUpdateIssue: () => ({ mutate: vi.fn() }),
+  useCancelIssueRun: () => ({ mutateAsync: cancelRunMock }),
 }));
 
 vi.mock("@multica/core/paths", async () => {
@@ -120,6 +127,7 @@ const { apiMocks, copyTextMock } = vi.hoisted(() => ({
     listTasksByIssue: vi.fn(),
     listIssueWorkflows: vi.fn(),
     listProjects: vi.fn(),
+    getAgentTaskSnapshot: vi.fn(),
   },
   copyTextMock: vi.fn(),
 }));
@@ -191,6 +199,10 @@ beforeEach(() => {
   apiMocks.listIssueWorkflows.mockResolvedValue({ workflows: [] });
   apiMocks.listProjects.mockReset();
   apiMocks.listProjects.mockResolvedValue({ projects: [] });
+  apiMocks.getAgentTaskSnapshot.mockReset();
+  apiMocks.getAgentTaskSnapshot.mockResolvedValue([]);
+  cancelRunMock.mockReset();
+  cancelRunMock.mockResolvedValue(undefined);
 });
 
 describe("IssueActionsDropdown", () => {
@@ -500,6 +512,72 @@ describe("IssueActionsContextMenu", () => {
     expect(screen.getByText("Rename issue")).toBeInTheDocument();
     expect(screen.getByText("Open in new tab")).toBeInTheDocument();
     expect(screen.getByText("Delete issue")).toBeInTheDocument();
+  });
+});
+
+describe("Sidebar variant (MUL-8425)", () => {
+  function openSidebarMenu(issue: Issue = mockIssue) {
+    render(
+      wrap(
+        <IssueContextMenuProvider variant="sidebar">
+          <IssueActionsContextMenu issue={issue}>
+            <div data-testid="row">Row</div>
+          </IssueActionsContextMenu>
+        </IssueContextMenuProvider>,
+      ),
+    );
+    fireEvent.contextMenu(screen.getByTestId("row"));
+  }
+
+  const menuLabels = () =>
+    screen.getAllByRole("menuitem").map((item) => item.textContent?.trim());
+
+  it("names the issue and keeps the triage and navigation entries, with current values", async () => {
+    openSidebarMenu({ ...mockIssue, assignee_type: "member", assignee_id: "user-1" } as Issue);
+
+    expect(await screen.findByText("TES-1")).toBeInTheDocument();
+    expect(screen.getByText("Example")).toBeInTheDocument();
+    expect(menuLabels()).toEqual([
+      "StatusTodo",
+      "PriorityMedium",
+      "AssigneeTest User",
+      "Open in new tab",
+      "Pin to sidebar",
+      "Copy link",
+      "Copy identifier",
+    ]);
+    expect(screen.getByTestId("row")).toHaveAttribute("data-popup-open");
+    // No workdir entry, so the menu has no reason to fetch the task list.
+    expect(listTasksByIssueMock).not.toHaveBeenCalled();
+  });
+
+  it("shows Unassigned when nobody owns the issue", async () => {
+    openSidebarMenu();
+    expect(await screen.findByText("Unassigned")).toBeInTheDocument();
+  });
+
+  it("copies the identifier", async () => {
+    openSidebarMenu();
+    fireEvent.click(await screen.findByText("Copy identifier"));
+
+    await waitFor(() => {
+      expect(copyTextMock).toHaveBeenCalledWith("TES-1");
+      expect(toastSuccessMock).toHaveBeenCalledWith("Copied TES-1");
+    });
+  });
+
+  it("stops a running agent's run after confirming", async () => {
+    apiMocks.getAgentTaskSnapshot.mockResolvedValue([
+      { id: "task-1", issue_id: "issue-1", agent_id: "agent-1", status: "running" },
+      { id: "task-2", issue_id: "issue-2", agent_id: "agent-1", status: "running" },
+    ] as AgentTask[]);
+    openSidebarMenu();
+
+    fireEvent.click(await screen.findByText("Stop Lambda’s run"));
+    expect(cancelRunMock).not.toHaveBeenCalled();
+    fireEvent.click(await screen.findByRole("button", { name: "Stop run" }));
+
+    expect(cancelRunMock).toHaveBeenCalledWith("task-1");
   });
 });
 

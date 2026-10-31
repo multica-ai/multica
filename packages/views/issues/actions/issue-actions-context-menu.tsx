@@ -11,7 +11,9 @@ import {
   type ReactElement,
   type ReactNode,
 } from "react";
-import type { Issue } from "@multica/core/types";
+import { toast } from "sonner";
+import type { AgentTask, Issue } from "@multica/core/types";
+import { useCancelIssueRun } from "@multica/core/issues/mutations";
 import {
   ContextMenu,
   ContextMenuContent,
@@ -22,6 +24,8 @@ import {
   contextPrimitives,
 } from "./issue-actions-menu-items";
 import { AssigneePicker } from "../components/pickers";
+import { TerminateTaskConfirmDialog } from "../components/terminate-task-confirm-dialog";
+import { useT } from "../../i18n";
 
 /**
  * One shared context menu per surface instead of one Base UI ContextMenu
@@ -48,10 +52,15 @@ const IssueContextMenuContext = createContext<OpenIssueContextMenu | null>(
   null,
 );
 
+type IssueContextMenuVariant = "full" | "sidebar";
+
 export function IssueContextMenuProvider({
   children,
+  variant = "full",
 }: {
   children: ReactNode;
+  /** Which menu the surface's rows open; see `IssueActionsMenuItems`. */
+  variant?: IssueContextMenuVariant;
 }) {
   const [active, setActive] = useState<ActiveMenu | null>(null);
   const [open, setOpen] = useState(false);
@@ -91,6 +100,7 @@ export function IssueContextMenuProvider({
           position={active.position}
           open={open}
           onOpenChange={handleOpenChange}
+          variant={variant}
         />
       )}
     </IssueContextMenuContext.Provider>
@@ -102,12 +112,15 @@ function IssueContextMenuSingleton({
   position,
   open,
   onOpenChange,
+  variant,
 }: ActiveMenu & {
   open: boolean;
   onOpenChange: (v: boolean) => void;
+  variant: IssueContextMenuVariant;
 }) {
   const actions = useIssueActions(issue);
   const [assigneeOpen, setAssigneeOpen] = useState(false);
+  const [stopTask, setStopTask] = useState<AgentTask | null>(null);
 
   // Point-sized virtual anchor at the right-click position — replaces the
   // cursor anchor Base UI's own trigger would have registered.
@@ -127,15 +140,27 @@ function IssueContextMenuSingleton({
   return (
     <>
       <ContextMenu open={open} onOpenChange={(v) => onOpenChange(v)}>
-        <ContextMenuContent anchor={anchor}>
+        {/* A fixed width keeps the sidebar menu from resizing with the
+            header title, which is clamped to two lines instead. */}
+        <ContextMenuContent anchor={anchor} className={variant === "sidebar" ? "w-62" : undefined}>
           <IssueActionsMenuItems
             issue={issue}
             actions={actions}
             primitives={contextPrimitives}
             onOpenAssignee={() => setAssigneeOpen(true)}
+            variant={variant}
+            onStopRun={setStopTask}
           />
         </ContextMenuContent>
       </ContextMenu>
+      {stopTask && (
+        <StopRunConfirmDialog
+          issueId={issue.id}
+          task={stopTask}
+          onClose={() => setStopTask(null)}
+        />
+      )}
+
       {/* Mount the picker only once the user actually opens it, anchored at
           the right-click position so it opens where the context menu just
           was instead of jumping to the row's top-left corner. */}
@@ -163,6 +188,35 @@ function IssueContextMenuSingleton({
         />
       )}
     </>
+  );
+}
+
+function StopRunConfirmDialog({
+  issueId,
+  task,
+  onClose,
+}: {
+  issueId: string;
+  task: AgentTask;
+  onClose: () => void;
+}) {
+  const { t } = useT("issues");
+  const cancelRun = useCancelIssueRun(issueId);
+  return (
+    <TerminateTaskConfirmDialog
+      open
+      onOpenChange={(v) => {
+        if (!v) onClose();
+      }}
+      onConfirm={() => {
+        // The dialog closes (and unmounts this component) before the request
+        // settles, so per-call mutate callbacks would never fire.
+        void cancelRun.mutateAsync(task.id).catch((e: unknown) => {
+          toast.error(e instanceof Error ? e.message : t(($) => $.execution_log.cancel_failed));
+        });
+      }}
+      showRunningNote
+    />
   );
 }
 
