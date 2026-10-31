@@ -415,7 +415,17 @@ export function IssueViewHeader({
               ) : (
                 <>
                   {baseMenu ?? (
-                    <DropdownMenuItem onClick={() => actions.copyLink(base.kind === "my" ? paths.myIssues() : paths.issues())}>
+                    <DropdownMenuItem
+                      onClick={() =>
+                        actions.copyLink(
+                          builtinKey === "my_agents"
+                            ? paths.myAgents()
+                            : base.kind === "my"
+                              ? paths.myIssues()
+                              : paths.issues(),
+                        )
+                      }
+                    >
                       <Link2 className="size-3.5" />
                       {t(($) => $.views.copy_link)}
                     </DropdownMenuItem>
