@@ -801,7 +801,7 @@ func TestGrokAuthFailureFailsTask(t *testing.T) {
 }
 
 func TestGrokNoUsableAuthMethodFailsBeforeSession(t *testing.T) {
-	for _, methods := range []string{"none", "unknown", "api"} {
+	for _, methods := range []string{"none", "unknown"} {
 		t.Run(methods, func(t *testing.T) {
 			tempDir := t.TempDir()
 			requestsFile := filepath.Join(tempDir, "requests.jsonl")
@@ -1224,7 +1224,7 @@ func TestGrokSelectAuthMethod(t *testing.T) {
 		{"cached only", []string{"cached_token"}, false, "cached_token", false},
 		{"api key preferred when present", []string{"cached_token", "xai.api_key"}, true, "xai.api_key", false},
 		{"api key ignored without env", []string{"cached_token", "xai.api_key"}, false, "cached_token", false},
-		{"api only requires env", []string{"xai.api_key"}, false, "", true},
+		{"api only delegates credential resolution", []string{"xai.api_key"}, false, "xai.api_key", false},
 		{"unknown fails closed", []string{"future_method"}, true, "", true},
 	}
 	for _, tc := range cases {
@@ -1245,4 +1245,84 @@ func grokMustFindModel(t *testing.T, models []Model, id string) Model {
 	}
 	t.Fatalf("model %q not in catalog: %+v", id, models)
 	return Model{}
+}
+
+// Grok accepts per-model api_key/env_key credentials through xai.api_key.
+// Keep the profile in the child: Multica must not extract or reassign its key.
+func TestGrokProviderProfileAuthentication(t *testing.T) {
+	for _, tc := range []struct {
+		name, credential, envKey string
+		wantOK                   bool
+	}{
+		{"inline", `api_key = "synthetic-profile-key"`, "", true},
+		{"environment", `env_key = "SYNTHETIC_GROK_KEY"`, "synthetic-profile-key", true},
+		{"missing", `env_key = "SYNTHETIC_GROK_KEY"`, "", false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			dir := t.TempDir()
+			profile := `[models]
+default = "relay"
+[model.relay]
+model = "synthetic-model"
+base_url = "https://provider.invalid/v1"
+name = "Synthetic relay"
+api_backend = "responses"
+context_window = 500000
+` + tc.credential + "\n"
+			configPath := filepath.Join(dir, "config.toml")
+			if err := os.WriteFile(configPath, []byte(profile), 0600); err != nil {
+				t.Fatal(err)
+			}
+			// Model the upstream authenticate credential gate without any network or
+			// real CLI access. The fixture reads the selected profile from GROK_HOME.
+			script := strings.Replace(fakeGrokACPScript(), "authenticated=", `
+if ! grep -q 'default = "relay"' "$GROK_HOME/config.toml"; then exit 65; fi
+if ! grep -q 'api_key = "synthetic-profile-key"' "$GROK_HOME/config.toml"; then
+  if ! grep -q 'env_key = "SYNTHETIC_GROK_KEY"' "$GROK_HOME/config.toml" || [ -z "$SYNTHETIC_GROK_KEY" ]; then
+    GROK_AUTH_FAIL=1
+  fi
+fi
+authenticated=`, 1)
+			fakePath := filepath.Join(dir, "grok")
+			writeTestExecutable(t, fakePath, []byte(script))
+			requestsPath := filepath.Join(dir, "requests.jsonl")
+			backend, err := New("grok", Config{ExecutablePath: fakePath, Logger: slog.Default(), Env: map[string]string{
+				"GROK_HOME": dir, "XAI_API_KEY": "", "SYNTHETIC_GROK_KEY": tc.envKey,
+				"GROK_AUTH_METHODS": "api", "GROK_REQUESTS_FILE": requestsPath, "GROK_AUTH_FAIL": "",
+			}})
+			if err != nil {
+				t.Fatal(err)
+			}
+			session, err := backend.Execute(context.Background(), "hello", ExecOptions{Timeout: 5 * time.Second})
+			if err != nil {
+				t.Fatal(err)
+			}
+			for range session.Messages {
+			}
+			result := <-session.Result
+			if tc.wantOK && result.Status != "completed" {
+				t.Fatalf("profile authentication failed: %s", result.Error)
+			}
+			if !tc.wantOK && (result.Status != "failed" || !strings.Contains(result.Error, "authenticate")) {
+				t.Fatalf("expected provider auth rejection, got %+v", result)
+			}
+			raw, err := os.ReadFile(requestsPath)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !strings.Contains(string(raw), `"methodId":"xai.api_key"`) {
+				t.Fatal("profile auth method was not attempted")
+			}
+			if got := strings.Contains(string(raw), `"method":"session/new"`); got != tc.wantOK {
+				t.Fatalf("session started = %v, want %v", got, tc.wantOK)
+			}
+			after, err := os.ReadFile(configPath)
+			if err != nil || string(after) != profile {
+				t.Fatal("provider profile changed")
+			}
+			if strings.Contains(string(raw), "synthetic-profile-key") {
+				t.Fatal("profile credential leaked into ACP requests")
+			}
+		})
+	}
 }
