@@ -672,6 +672,12 @@ type DaemonToken struct {
 	OwnerID     pgtype.UUID        `json:"owner_id"`
 }
 
+type DeletedIssue struct {
+	WorkspaceID pgtype.UUID        `json:"workspace_id"`
+	Number      int32              `json:"number"`
+	DeletedAt   pgtype.Timestamptz `json:"deleted_at"`
+}
+
 type DingtalkBotIdentity struct {
 	WorkspaceID      pgtype.UUID        `json:"workspace_id"`
 	InstallationID   pgtype.UUID        `json:"installation_id"`

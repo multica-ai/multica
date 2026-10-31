@@ -1142,6 +1142,23 @@ func runIssueGet(cmd *cobra.Command, args []string) error {
 
 	issueRef, err := resolveIssueRef(ctx, client, args[0])
 	if err != nil {
+		// A deleted identifier resolves to a tombstone, not an error of its
+		// own (#9070): print it so callers can tell "once existed, now gone"
+		// apart from a never-issued key without parsing error text.
+		var deleted *DeletedIssueError
+		if errors.As(err, &deleted) {
+			if output, _ := cmd.Flags().GetString("output"); output == "table" {
+				cli.PrintTable(os.Stdout,
+					[]string{"KEY", "STATUS", "DELETED AT"},
+					[][]string{{
+						strVal(deleted.Detail, "identifier"),
+						strVal(deleted.Detail, "status"),
+						strVal(deleted.Detail, "deleted_at"),
+					}})
+				return nil
+			}
+			return cli.PrintJSON(os.Stdout, deleted.Detail)
+		}
 		return fmt.Errorf("resolve issue: %w", err)
 	}
 

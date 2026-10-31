@@ -559,6 +559,12 @@ WITH deleted_wakeup_receipts AS (
 deleted_child_events AS (
  DELETE FROM issue_child_event WHERE workspace_id=$1
 ),
+deleted_issue_tombstones AS (
+    -- Issue-number tombstones recorded by DeleteIssue (#9070). With the
+    -- workspace going away there is no prefix left to resolve an identifier
+    -- against, so the tombstones have no one left to answer.
+    DELETE FROM deleted_issue WHERE workspace_id=$1
+),
 deleted_unread AS (
  DELETE FROM issue_unread WHERE workspace_id=$1
 ),
