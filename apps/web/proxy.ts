@@ -6,6 +6,7 @@ import {
 } from "./lib/locale-routing";
 import { runtimeRewriteDestination } from "./config/runtime-urls";
 import { isOfficialMarketingHost } from "./lib/public-host";
+import { MAX_UPLOAD_REQUEST_SIZE } from "./config/upload-limit";
 
 // Old workspace-scoped route segments that existed before the URL refactor
 // (pre-#1131). Any URL with these as the FIRST segment is a legacy URL that
@@ -48,6 +49,12 @@ function nextWithLocale(req: NextRequest): NextResponse {
 // edge.
 export function proxy(req: NextRequest) {
   const { pathname } = req.nextUrl;
+  if (pathname === "/api/upload-file" && req.method === "POST") {
+    const contentLength = Number(req.headers.get("content-length"));
+    if (contentLength > MAX_UPLOAD_REQUEST_SIZE) {
+      return NextResponse.json({ error: "file too large" }, { status: 413 });
+    }
+  }
   const runtimeDestination = runtimeRewriteDestination(pathname, process.env);
   if (runtimeDestination) {
     const url = new URL(runtimeDestination);

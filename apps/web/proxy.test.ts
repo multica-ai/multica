@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { NextRequest } from "next/server";
 import { MULTICA_LOCALE_HEADER } from "./lib/locale-routing";
 import { config, proxy } from "./proxy";
+import { MAX_UPLOAD_REQUEST_SIZE } from "./config/upload-limit";
 
 function makeRequest(
   path: string,
@@ -134,6 +135,18 @@ describe("proxy legacy workspace route redirects", () => {
 });
 
 describe("proxy runtime upstream rewrites", () => {
+  it("rejects oversized upload requests before rewriting", async () => {
+    const request = new NextRequest("https://app.multica.test/api/upload-file", {
+      method: "POST",
+      headers: { "content-length": String(MAX_UPLOAD_REQUEST_SIZE + 1) },
+    });
+    const response = proxy(request);
+
+    expect(response.status).toBe(413);
+    expect(await response.json()).toEqual({ error: "file too large" });
+    expect(response.headers.get("x-middleware-rewrite")).toBeNull();
+  });
+
   it("matches globally versioned Plugin API requests", () => {
     expect(config.matcher).toContain("/v1/:path*");
   });
