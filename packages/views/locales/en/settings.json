@@ -882,7 +882,7 @@
     "not_enabled_self_host_hint": "Self-hosters: see the project README for details.",
     "preview_title": "Lark Bot installation coming soon",
     "preview_description": "Lark connections aren't enabled on this deployment. Contact your administrator.",
-    "connected_bots": "Connected bots",
+    "connected_bots": "Bots",
     "loading": "Loading…",
     "empty_title": "No bots connected yet",
     "empty_description_prefix": "Open an Agent in this workspace and click",
@@ -929,7 +929,7 @@
     "install_starting": "Preparing QR code…",
     "install_scan_hint": "Lark → Scan → authorize the new PersonalAgent.",
     "install_open_link_fallback": "Or tap here to open in Lark",
-    "install_success": "Install complete — your Bot is online.",
+    "install_success": "Bot bound. Send it a message in Feishu/Lark to verify reception.",
     "install_success_toast": "Lark Bot installed",
     "install_open_link_fallback_feishu": "Or tap here to open in Feishu",
     "install_open_link_fallback_lark": "Or tap here to open in Lark",
@@ -946,7 +946,12 @@
     "install_error_installer_bind": "Installed the bot, but could not bind your Lark identity. Try again or contact support.",
     "install_error_session_lost": "Install session expired or was lost. Scan again to start over.",
     "install_error_forbidden": "You no longer have permission to install Lark Bots in this workspace. Ask a workspace admin to continue.",
-    "install_error_generic": "Install failed. Try again."
+    "install_error_generic": "Install failed. Try again.",
+    "bound_label": "Bound",
+    "inbound_pending": "Bound — awaiting message verification",
+    "inbound_verified": "Message reception verified",
+    "inbound_pending_hint": "Send this bot a message in Feishu/Lark to verify reception. If it does not arrive, check long connection mode, the im.message.receive_v1 subscription, and app publication/approval. Existing bindings may have no recorded verification yet.",
+    "inbound_verified_hint": "This binding received a valid message. This does not confirm ongoing connectivity, agent execution, or replies."
   },
   "composio": {
     "page_description": "Connect apps your agents can use.",

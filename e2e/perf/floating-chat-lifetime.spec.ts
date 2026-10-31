@@ -98,6 +98,7 @@ test("closing floating chat releases its list and preserves the live composer", 
         id: "member-1", user_id: userId, workspace_id: wsId, role: "owner",
         name: "Fixture User", email: "fixture@example.test", avatar_url: null,
       }];
+      case "/api/skills": case "/api/autopilots":
       case "/api/runtimes": case "/api/squads": case "/api/agent-task-snapshot":
       case "/api/invitations": case "/api/inbox": case "/api/inbox/unread-summary":
       case "/api/pins": case "/api/chat/pending-tasks": case "/api/assignee-frequency":
@@ -176,8 +177,30 @@ test("closing floating chat releases its list and preserves the live composer", 
   }
   await expect(page.locator('[data-tab-scroll-root]').filter({ hasText: "Latest fixture message" })).toHaveCount(0);
   invalidateMessages();
+  // MUL-8417: the reopened window must not paint before its message list does.
+  await page.evaluate(() => {
+    const frames: Array<{ opacity: number; listVisible: boolean }> = [];
+    Object.assign(window, { __reopenFrames: frames });
+    const sample = () => {
+      const panel = [...document.querySelectorAll<HTMLElement>("div[aria-hidden]")]
+        .find(element => element.querySelector(".tiptap"));
+      const list = panel?.querySelector<HTMLElement>("[data-tab-scroll-root]");
+      frames.push({
+        opacity: panel ? Number(getComputedStyle(panel).opacity) : 0,
+        listVisible: !!list && getComputedStyle(list).visibility === "visible",
+      });
+      if (frames.length < 60) requestAnimationFrame(sample);
+    };
+    requestAnimationFrame(sample);
+  });
   await page.getByRole("button", { name: "Multica is working...", exact: true }).click();
   await expect(page.getByText("Arrived while closed", { exact: true })).toBeVisible();
+  const reopenFrames = () => page.evaluate(() =>
+    (window as unknown as { __reopenFrames: Array<{ opacity: number; listVisible: boolean }> }).__reopenFrames);
+  await expect.poll(async () => (await reopenFrames()).length).toBe(60);
+  const frames = await reopenFrames();
+  expect(frames.some(frame => frame.opacity === 1)).toBe(true);
+  expect(frames.filter(frame => frame.opacity > 0 && !frame.listVisible)).toEqual([]);
   await expect(page.getByText(/Streaming fixture\. Hidden chunk 0\./)).toContainText("Hidden chunk 9.");
   expect(await composer?.evaluate(element => element.isConnected)).toBe(true);
   expect(await composer?.textContent()).toContain("Last edit before closing");

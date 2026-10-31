@@ -9,6 +9,7 @@ const state = vi.hoisted(() => ({
   // The IM channels keep revoked rows for audit, so the fixture carries a real
   // status — a row without one is not evidence of a live connection (#8496).
   installationStatus: "active" as string,
+  larkInstallations: null as { status: string; first_message_received_at?: string }[] | null,
   push: vi.fn(),
 }));
 vi.mock("../../navigation/context", async (importOriginal) => ({
@@ -28,9 +29,11 @@ vi.mock("@multica/core/permissions", () => ({
 }));
 vi.mock("@tanstack/react-query", () => ({
   queryOptions: <T,>(opts: T) => opts,
-  useQuery: (opts: { select?: (data: unknown) => unknown }) => ({
+  useQuery: (opts: { queryKey?: readonly unknown[]; select?: (data: unknown) => unknown }) => ({
     data: opts.select?.({
-      installations: [{ id: "one", status: state.installationStatus }],
+      installations: opts.queryKey?.[0] === "lark" && state.larkInstallations
+        ? state.larkInstallations
+        : [{ id: "one", status: state.installationStatus }],
     }),
     isPending: state.pending,
     isError: state.connectionError,
@@ -49,6 +52,7 @@ beforeEach(() => {
   state.connectionError = false;
   state.pending = false;
   state.installationStatus = "active";
+  state.larkInstallations = null;
   state.push.mockClear();
 });
 
@@ -102,4 +106,41 @@ describe("ChannelsTab", () => {
     renderWithI18n(<ChannelsTab />);
     expect(screen.getByText("Lark detail")).toBeInTheDocument();
   });
+});
+
+
+it("labels an installed Feishu bot as bound without claiming connectivity", () => {
+  renderWithI18n(<ChannelsTab />);
+  expect(screen.getByRole("link", { name: /Lark Bound/ })).toBeInTheDocument();
+  expect(screen.queryByRole("link", { name: /Lark Connected/ })).toBeNull();
+});
+
+
+it("updates the Lark overview from pending to verified and back on rebind/revoke", () => {
+  state.larkInstallations = [{ status: "active" }];
+  const { rerender } = renderWithI18n(<ChannelsTab />);
+  const status = () => screen.getByRole("link", { name: /^Lark / });
+  expect(status()).toHaveTextContent("Bound");
+  expect(status().querySelector(".bg-success")).toBeNull();
+
+  state.larkInstallations = [{ status: "active" }, { status: "active", first_message_received_at: "2026-10-30T00:00:00Z" }];
+  rerender(<ChannelsTab />);
+  expect(status()).toHaveTextContent("Message reception verified");
+  expect(status().querySelector(".bg-success")).not.toBeNull();
+
+  state.larkInstallations[1]!.first_message_received_at = undefined;
+  rerender(<ChannelsTab />);
+  expect(status()).toHaveTextContent("Bound");
+  expect(status().querySelector(".bg-success")).toBeNull();
+
+  state.larkInstallations[1]!.first_message_received_at = "2026-10-30T00:00:00Z";
+  state.larkInstallations[1]!.status = "revoked";
+  rerender(<ChannelsTab />);
+  expect(status()).toHaveTextContent("Bound");
+  expect(status().querySelector(".bg-success")).toBeNull();
+
+  state.larkInstallations = [{ status: "revoked", first_message_received_at: "2026-10-30T00:00:00Z" }];
+  rerender(<ChannelsTab />);
+  expect(status()).toHaveTextContent("Not connected");
+  expect(status().querySelector(".bg-success")).toBeNull();
 });

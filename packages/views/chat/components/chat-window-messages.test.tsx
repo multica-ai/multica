@@ -11,12 +11,28 @@ vi.mock("@multica/core/api", () => ({ api: { listChatMessagesPage: fetchMessages
 vi.mock("@multica/core/chat/mutations", () => ({
   useRegenerateChatQuickActions: () => ({ mutateAsync: vi.fn() }),
 }));
+const listProps = vi.hoisted(() => ({
+  current: null as null | { revealKey?: string | null; onRevealed?: () => void },
+}));
 vi.mock("./chat-message-list", () => ({
-  ChatMessageList: ({ active, messages }: { active: boolean; messages: ChatMessage[] }) => (
-    <div data-testid="messages" data-active={active}>
-      {messages.map((message) => <p key={message.id}>{message.content}</p>)}
-    </div>
-  ),
+  ChatMessageList: ({
+    active,
+    messages,
+    revealKey,
+    onRevealed,
+  }: {
+    active: boolean;
+    messages: ChatMessage[];
+    revealKey?: string | null;
+    onRevealed?: () => void;
+  }) => {
+    listProps.current = { revealKey, onRevealed };
+    return (
+      <div data-testid="messages" data-active={active}>
+        {messages.map((message) => <p key={message.id}>{message.content}</p>)}
+      </div>
+    );
+  },
   ChatMessageSkeleton: () => <div data-testid="skeleton" />,
 }));
 
@@ -31,22 +47,30 @@ function pages(messages: ChatMessage[]) {
   return { pages: [{ messages, limit: 50, has_more: false }], pageParams: [null] };
 }
 
-function renderWindow(open: boolean) {
+function renderWindow(
+  open: boolean,
+  {
+    sessionId = "session-1",
+    cached = true,
+    onReady,
+  }: { sessionId?: string | null; cached?: boolean; onReady?: () => void } = {},
+) {
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   const key = chatKeys.messagesPage("session-1");
-  qc.setQueryData(key, pages([message("initial message")]));
+  if (cached) qc.setQueryData(key, pages([message("initial message")]));
   const content = (isOpen: boolean) => (
     <QueryClientProvider client={qc}>
       <AnimatePresence initial={false}>
         {isOpen && (
           <ChatWindowMessages
-            sessionId="session-1"
+            sessionId={sessionId}
             pendingTask={undefined}
             pendingTaskLoading={false}
             availability={undefined}
             onQuickAction={vi.fn()}
             quickActionsDisabled={false}
             quickActionsPendingMessageId={null}
+            onReady={onReady}
           >
             <div>empty</div>
           </ChatWindowMessages>
@@ -63,7 +87,46 @@ function renderWindow(open: boolean) {
   };
 }
 
-beforeEach(() => { fetchMessages.mockReset(); });
+beforeEach(() => {
+  fetchMessages.mockReset();
+  listProps.current = null;
+});
+
+// MUL-8417: the window fades in around this area, so it must say when the area
+// has something to show rather than an empty, hidden list.
+describe("floating chat message readiness", () => {
+  it("is ready at once for the empty state of a new chat", () => {
+    const onReady = vi.fn();
+    renderWindow(true, { sessionId: null, onReady });
+    expect(screen.getByText("empty")).toBeInTheDocument();
+    expect(onReady).toHaveBeenCalled();
+  });
+
+  it("is ready at once for the skeleton of an uncached session", () => {
+    fetchMessages.mockReturnValue(new Promise(() => {}));
+    const onReady = vi.fn();
+    renderWindow(true, { cached: false, onReady });
+    expect(screen.getByTestId("skeleton")).toBeInTheDocument();
+    expect(onReady).toHaveBeenCalled();
+  });
+
+  it("leaves a list's readiness to the list, named by its session", () => {
+    const onReady = vi.fn();
+    renderWindow(true, { onReady });
+    expect(screen.getByTestId("messages")).toBeInTheDocument();
+    expect(onReady).not.toHaveBeenCalled();
+    expect(listProps.current?.revealKey).toBe("session-1");
+    expect(listProps.current?.onRevealed).toBe(onReady);
+  });
+
+  it("does not report ready while the area is leaving", () => {
+    const onReady = vi.fn();
+    const { setOpen } = renderWindow(true, { sessionId: null, onReady });
+    onReady.mockClear();
+    setOpen(false);
+    expect(onReady).not.toHaveBeenCalled();
+  });
+});
 
 describe("floating chat message lifetime", () => {
   it("keeps message observers absent when the window starts closed", () => {

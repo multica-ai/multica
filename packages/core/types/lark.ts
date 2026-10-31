@@ -19,6 +19,8 @@ export interface LarkInstallation {
    * server that predates the field — defaults to Feishu in the UI
    * (see CLAUDE.md → API Response Compatibility). */
   region?: "feishu" | "lark" | string;
+  /** First valid message observed for this binding; absence means no recorded proof. */
+  first_message_received_at?: string | null;
   installed_at: string;
   created_at: string;
   updated_at: string;

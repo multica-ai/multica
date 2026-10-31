@@ -61,6 +61,10 @@ type WSConnectorConfig struct {
 	// disables enrichment (the decoded body is emitted as-is).
 	Enricher Enricher
 
+	// InboundVerifier records receipt evidence independently of business routing.
+	// A failed write must not change dispatch or acknowledgement behavior.
+	InboundVerifier InboundVerifier
+
 	// EnrichTimeout caps a single message's enrichment (at most two
 	// GetMessage calls). It MUST stay well under Lark's ~3s long-conn
 	// ACK window, since enrichment runs before the frame is ACKed.
@@ -226,6 +230,7 @@ func (c *WSLongConnConnector) Run(ctx context.Context, inst Installation, emit E
 	// type once per connection rather than once per frame. Read-loop-local:
 	// no lock, and a reconnect re-reports.
 	reportedDrops := make(map[string]struct{})
+	receiptRecorded := false
 
 	// Ping loop: app-layer binary ping frames at the server's PingInterval.
 	pingDone := make(chan struct{})
@@ -396,6 +401,19 @@ func (c *WSLongConnConnector) Run(ctx context.Context, inst Installation, emit E
 				return fmt.Errorf("write ack: %w", werr)
 			}
 			continue
+		}
+
+		if !receiptRecorded && c.cfg.InboundVerifier != nil &&
+			frame.Method == FrameMethodData && frame.HeaderValue(FrameHeaderTypeKey) == FrameHeaderTypeEvent &&
+			validReceiptMessage(inst, msg) {
+			verifyCtx, cancelVerify := context.WithTimeout(ctx, 250*time.Millisecond)
+			verifyErr := c.cfg.InboundVerifier.RecordInboundReceipt(verifyCtx, inst, msg)
+			cancelVerify()
+			if verifyErr != nil {
+				log.Warn("lark ws connector: record inbound receipt failed", "err", verifyErr.Error())
+			} else {
+				receiptRecorded = true
+			}
 		}
 
 		// Enrich the decoded body with explicitly-attached context

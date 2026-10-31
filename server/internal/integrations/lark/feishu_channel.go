@@ -212,8 +212,9 @@ func newFeishuFactory(deps FeishuChannelDeps) channel.Factory {
 		// cfg.Raw is the per-installation config blob (the channel_installation
 		// .config JSONB): app_id, encrypted app_secret, tenant_key, region, ….
 		// We build a credentials-only Installation from it; the workspace /
-		// agent identity is resolved per message by the Router, not needed here.
+		// agent identity is resolved per message by the Router; ID also scopes receipt verification.
 		inst, err := installationFromRow(db.ChannelInstallation{
+			ID:          cfg.ID,
 			ChannelType: channelTypeFeishu,
 			Config:      cfg.Raw,
 		})
@@ -317,12 +318,22 @@ var _ engine.LeaseStore = (*channelInstallationStore)(nil)
 // channel_installation row into an opaque string. Any change to the platform
 // config (Feishu rotates app_id / app_secret / region on re-install) flips the
 // fingerprint and the Supervisor restarts the connection. The config JSONB
-// carries only the secret ciphertext (never plaintext), so hashing it is safe
-// and channel-agnostic — no platform field is read directly.
+// carries only the secret ciphertext (never plaintext). Feishu receipt
+// evidence is excluded because it does not change
+// credentials or routing.
 func rowFingerprint(row db.ChannelInstallation) string {
 	h := sha256.New()
 	_, _ = h.Write([]byte(row.ChannelType))
 	_, _ = h.Write([]byte{0})
-	_, _ = h.Write(row.Config)
+	config := row.Config
+	// Receipt evidence must not rotate an otherwise healthy connection.
+	if row.ChannelType == channelTypeFeishu {
+		var fields map[string]json.RawMessage
+		if json.Unmarshal(config, &fields) == nil {
+			delete(fields, "first_message_received_at")
+			config, _ = json.Marshal(fields)
+		}
+	}
+	_, _ = h.Write(config)
 	return hex.EncodeToString(h.Sum(nil))
 }

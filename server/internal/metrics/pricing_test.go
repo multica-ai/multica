@@ -59,8 +59,8 @@ func TestPriceForModelAliasAnthropicCurrentGeneration(t *testing.T) {
 }
 
 func TestPriceForModelAliasCodexCurrentGeneration(t *testing.T) {
-	// Official rates from OpenAI's GPT-5.6 announcement: cache read = 0.1x
-	// input (90% cached-input discount), cache write = 1.25x input.
+	// OpenAI's standard short-context rates: cache read = 0.1x input (90%
+	// cached-input discount; 0.05x on GPT-6.1), cache write = 1.25x input.
 	cases := []struct {
 		model string
 		want  ModelPrice
@@ -99,11 +99,25 @@ func TestPriceForModelAliasCodexCurrentGeneration(t *testing.T) {
 		},
 		{
 			model: "openai:gpt-5.6-terra",
-			want:  ModelPrice{Provider: "openai", Model: "gpt-5.6-terra", InputPerM: 2.5, CacheReadPerM: 0.25, CacheWritePerM: 3.125, OutputPerM: 15},
+			want:  ModelPrice{Provider: "openai", Model: "gpt-5.6-terra", InputPerM: 2, CacheReadPerM: 0.2, CacheWritePerM: 2.5, OutputPerM: 12},
 		},
 		{
 			model: "openai/gpt-5.6-luna",
-			want:  ModelPrice{Provider: "openai", Model: "gpt-5.6-luna", InputPerM: 1, CacheReadPerM: 0.1, CacheWritePerM: 1.25, OutputPerM: 6},
+			want:  ModelPrice{Provider: "openai", Model: "gpt-5.6-luna", InputPerM: 0.2, CacheReadPerM: 0.02, CacheWritePerM: 0.25, OutputPerM: 1.2},
+		},
+		// Pre-5.6 SKUs don't bill cache writes separately: written tokens are
+		// ordinary input, never the discounted cache-read rate.
+		{
+			model: "gpt-5.5",
+			want:  ModelPrice{Provider: "openai", Model: "gpt-5.5", InputPerM: 5, CacheReadPerM: 0.5, CacheWritePerM: 5, OutputPerM: 30},
+		},
+		{
+			model: "gpt-5.4-mini",
+			want:  ModelPrice{Provider: "openai", Model: "gpt-5.4-mini", InputPerM: 0.75, CacheReadPerM: 0.075, CacheWritePerM: 0.75, OutputPerM: 4.5},
+		},
+		{
+			model: "gpt-5.3-codex",
+			want:  ModelPrice{Provider: "openai", Model: "gpt-5.3-codex", InputPerM: 1.75, CacheReadPerM: 0.175, CacheWritePerM: 1.75, OutputPerM: 14},
 		},
 	}
 
@@ -441,7 +455,7 @@ func TestPriceForModelAliasContextTagStripping(t *testing.T) {
 		},
 		{
 			model: "gpt-5.6-luna[1m]",
-			want:  ModelPrice{Provider: "openai", Model: "gpt-5.6-luna", InputPerM: 1.00, CacheReadPerM: 0.10, CacheWritePerM: 1.25, OutputPerM: 6.00},
+			want:  ModelPrice{Provider: "openai", Model: "gpt-5.6-luna", InputPerM: 0.20, CacheReadPerM: 0.02, CacheWritePerM: 0.25, OutputPerM: 1.20},
 		},
 		{
 			model: "kimi-k3[1m]",

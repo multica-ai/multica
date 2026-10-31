@@ -173,9 +173,12 @@ func buildFeishuChannel(t *testing.T, deps FeishuChannelDeps, cfg channel.Config
 }
 
 func TestFeishuFactory_DecodesConfigCredentials(t *testing.T) {
-	cfg := channel.Config{Type: channel.TypeFeishu, Raw: feishuConfigJSON(t, "cli_app", "lark")}
+	cfg := channel.Config{ID: uuidFromString(t, "a1000000-0000-4000-8000-000000000001"), Type: channel.TypeFeishu, Raw: feishuConfigJSON(t, "cli_app", "lark")}
 	fc := buildFeishuChannel(t, FeishuChannelDeps{Connector: NewNoopConnector(nil)}, cfg)
 
+	if fc.inst.ID != cfg.ID {
+		t.Fatal("factory lost installation identity for receipt verification")
+	}
 	if fc.inst.AppID != "cli_app" {
 		t.Fatalf("app_id = %q, want cli_app", fc.inst.AppID)
 	}

@@ -227,6 +227,33 @@ describe("PreviewSequenceProvider", () => {
     expectCounter("2 / 3");
   });
 
+  it("keeps the counter between its buttons, on a strip that is not backdrop", () => {
+    render(
+      <PreviewSequenceProvider items={sequenceOf(THREE)}>
+        <Opener openKey={THREE[0]!.id} />
+      </PreviewSequenceProvider>,
+    );
+    act(() => {
+      fireEvent.click(screen.getByText("open"));
+    });
+
+    const pager = screen.getByText("1 / 3").parentElement!;
+    expect(pager).toContainElement(prevButton());
+    expect(pager).toContainElement(nextButton());
+    expect(prevButton()).toHaveAttribute("aria-keyshortcuts", "ArrowLeft");
+    expect(nextButton()).toHaveAttribute("aria-keyshortcuts", "ArrowRight");
+
+    // A click that misses both buttons must leave the viewer open: a closing
+    // viewer drops its key handler, so the arrow would no longer page.
+    act(() => {
+      fireEvent.click(pager);
+    });
+    act(() => {
+      fireEvent.keyDown(document, { key: "ArrowRight" });
+    });
+    expectCounter("2 / 3");
+  });
+
   it("moves with the left / right arrow keys", () => {
     render(
       <PreviewSequenceProvider items={sequenceOf(THREE)}>
