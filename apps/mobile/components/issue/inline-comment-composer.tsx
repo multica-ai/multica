@@ -41,7 +41,7 @@ export function InlineCommentComposer({ issueId }: { issueId: string }) {
           attachmentIds: attachmentIds.length > 0 ? attachmentIds : undefined,
         });
       } catch (err) {
-        // Rethrow so MessageComposer's catch path restores text + chips.
+        // Rethrow so MessageComposer keeps the draft for retry.
         // The optimistic timeline row stays with its inline
         // Failed · Retry · Discard affordance.
         throw err;

@@ -87,9 +87,11 @@
   "devDependencies": {
     "@babel/core": "^7.25.0",
     "@types/react": "~19.0.0",
+    "@types/react-test-renderer": "19.3.0",
     "cross-env": "^7.0.3",
     "dotenv-cli": "^7.4.4",
     "eslint-config-expo": "~57.0.2",
+    "react-test-renderer": "19.2.3",
     "typescript": "~6.0.3",
     "vitest": "catalog:"
   }
