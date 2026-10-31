@@ -2,6 +2,7 @@
 
 import { cloneElement, useEffect, useMemo, useRef, useState } from "react";
 import {
+  Activity,
   Bot,
   CalendarClock,
   CalendarDays,
@@ -211,7 +212,7 @@ function getActiveFilterCount(
     if (deltaCount > 0) count++;
   }
   if (state.dateFilter) count++;
-  if (state.agentRunningFilter) count++;
+  if (state.agentRunningFilter && !baseline?.agentRunning) count++;
   return count;
 }
 
@@ -1129,7 +1130,7 @@ export function IssueFilterMenu({
     key === "date"
       ? t(($) => $.filters.section_date)
       : key === "agentRunning"
-        ? t(($) => $.filters.agent_running)
+        ? `${t(($) => $.filters.section_agent_status)} ${t(($) => $.filters.agent_status_running)}`
         : key.startsWith("property:")
           ? filterableProperties.find((p) => `property:${p.id}` === key)?.name ?? ""
           : fieldLabels[key as NegatableFilterDimension] ?? "";
@@ -1192,19 +1193,28 @@ export function IssueFilterMenu({
             </DropdownMenuSub>
             )}
 
-            {/* Agent is running — a yes/no condition, so the row itself
-                toggles. The check sits where the other rows keep their
-                chevron, keeping the icons in one column. */}
+            {/* Agent status */}
             {show("agentRunning") && (
-            <DropdownMenuCheckboxItem
-              checked={agentRunningFilter}
-              onCheckedChange={() => act.toggleAgentRunningFilter()}
-              className={cn(FILTER_ITEM_CLASS, "pr-2!")}
-            >
-              <Bot className="size-3.5" />
-              <span className="flex-1">{t(($) => $.filters.agent_running)}</span>
-              <HoverCheck checked={agentRunningFilter} />
-            </DropdownMenuCheckboxItem>
+            <DropdownMenuSub>
+              <DropdownMenuSubTrigger>
+                <Bot className="size-3.5" />
+                <span className="flex-1">{t(($) => $.filters.section_agent_status)}</span>
+                {triggerValue("agentRunning")}
+              </DropdownMenuSubTrigger>
+              <DropdownMenuSubContent className="w-auto min-w-44">
+                <DropdownMenuCheckboxItem
+                  checked={agentRunningFilter}
+                  disabled={viewBaseline?.agentRunning === true}
+                  title={viewBaseline?.agentRunning === true ? fixedTitle : undefined}
+                  onCheckedChange={() => act.toggleAgentRunningFilter()}
+                  className={FILTER_ITEM_CLASS}
+                >
+                  <HoverCheck checked={agentRunningFilter} />
+                  <Activity className="size-3.5 text-muted-foreground" />
+                  {t(($) => $.filters.agent_status_running)}
+                </DropdownMenuCheckboxItem>
+              </DropdownMenuSubContent>
+            </DropdownMenuSub>
             )}
 
             {/* Priority */}
@@ -1628,7 +1638,6 @@ export function IssueFilterMenu({
               // Inside a saved view, reset returns to the view's own
               // conditions, never to nothing.
               act.resetFiltersTo(viewBaseline.raw);
-              if (agentRunningFilter) act.toggleAgentRunningFilter();
             } else {
               act.clearFilters();
             }

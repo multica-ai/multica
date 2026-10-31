@@ -158,6 +158,7 @@ export function viewSidebarRequest(view: SidebarViewFields, today: string): Side
         ...(negate.length > 0 ? { negate } : {}),
         ...(advanced ? { advanced } : {}),
         ...(Object.keys(fields.propertyFilters).length > 0 ? { properties: fields.propertyFilters } : {}),
+        ...(fields.agentRunningFilter ? { working_only: true } : {}),
         include_sub_issues: display.showSubIssues !== false,
       },
       sort: viewTableSort(display),

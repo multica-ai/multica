@@ -234,10 +234,6 @@ export function useFilterChips(
   const agentRunningFilter = useViewStore((s) => s.agentRunningFilter);
   const store = useViewStoreApi();
   const negated = new Set(negatedFilters);
-  const clearAgentRunning = () => {
-    const s = store.getState();
-    if (s.agentRunningFilter) s.toggleAgentRunningFilter();
-  };
 
   const hasStoreFilters =
     statusFilters.length > 0 ||
@@ -324,6 +320,7 @@ export function useFilterChips(
         : otherNegations,
       propertyFilters: s.propertyFilters,
       advancedFilter: s.advancedFilter,
+      agentRunningFilter: s.agentRunningFilter,
     };
     switch (dimension) {
       case "status":
@@ -448,14 +445,16 @@ export function useFilterChips(
       onRemove: () => clearDimension("status"),
     });
   }
-  // Never part of a saved view, so inside one it is always an addition.
-  if (agentRunningFilter) {
+  if (agentRunningFilter && !baseline?.agentRunning) {
     chips.push({
       key: "agentRunning",
       icon: <Bot className={CHIP_ICON_CLASS} />,
-      label: t(($) => $.filters.section_agent),
-      value: t(($) => $.filters.agent_running_value),
-      onRemove: clearAgentRunning,
+      label: t(($) => $.filters.section_agent_status),
+      value: t(($) => $.filters.agent_status_running),
+      onRemove: () => {
+        const s = store.getState();
+        if (s.agentRunningFilter) s.toggleAgentRunningFilter();
+      },
     });
   }
   const [onlyPriority] = deltaPriority;
@@ -659,7 +658,6 @@ export function useFilterChips(
     if (baseline) {
       // Back to exactly the view's own conditions.
       store.getState().resetFiltersTo(baseline.raw);
-      clearAgentRunning();
       onDateFilterChange?.(null);
       return;
     }

@@ -158,6 +158,8 @@ export interface FilterSnapshot {
   negatedFilters: NegatableFilterDimension[];
   propertyFilters: Record<string, PropertyFilterValue[]>;
   advancedFilter: AdvancedFilterGroup | null;
+  /** Only issues an agent is running on right now. */
+  agentRunningFilter: boolean;
 }
 
 /** Filter-bar chip dimensions. Date is excluded: `dateFilter` lives outside
@@ -340,10 +342,8 @@ export interface IssueViewState {
   advancedFilter: AdvancedFilterGroup | null;
   dateFilter: IssueDateFilter | null;
   // When true, the list only shows issues that currently have at least one
-  // agent task in `running` status. Drives the workspace "agents working"
-  // quick filter chip in the issues header. Not persisted across reloads —
-  // running state changes second-to-second, a persisted toggle would let
-  // users return to an empty list with no obvious cause.
+  // agent task in `running` status. Saved into views and persisted like the
+  // other filters.
   agentRunningFilter: boolean;
   sortBy: SortField;
   sortDirection: SortDirection;
@@ -795,11 +795,7 @@ export const viewStorePersistOptions = (name: string) => ({
   name,
   storage: createJSONStorage(() => createWorkspaceAwareStorage(defaultStorage)),
   partialize: (state: IssueViewState) => ({
-    // NOTE: `agentRunningFilter` is intentionally NOT persisted — running
-    // state changes second-to-second, and a stored toggle would let users
-    // return to an unexplained empty list. Keep it ephemeral. See the
-    // field comment on IssueViewState.
-    // `dateFilter` is also intentionally not persisted: relative presets such
+    // `dateFilter` is intentionally not persisted: relative presets such
     // as Today would otherwise become stale after a calendar-day rollover.
     viewMode: state.viewMode,
     grouping: state.grouping,
@@ -817,6 +813,7 @@ export const viewStorePersistOptions = (name: string) => ({
     negatedFilters: state.negatedFilters,
     propertyFilters: state.propertyFilters,
     advancedFilter: state.advancedFilter,
+    agentRunningFilter: state.agentRunningFilter,
     sortBy: state.sortBy,
     sortDirection: state.sortDirection,
     sortDirections: state.sortDirections,
@@ -951,6 +948,9 @@ export function mergeViewStatePersisted<T extends IssueViewState>(
     advancedFilter: p.advancedFilter === undefined
       ? current.advancedFilter
       : sanitizeAdvancedFilter(p.advancedFilter),
+    agentRunningFilter: p.agentRunningFilter === undefined
+      ? current.agentRunningFilter
+      : p.agentRunningFilter === true,
     negatedFilters: Array.isArray(p.negatedFilters)
       ? [...new Set(p.negatedFilters.filter((dimension): dimension is NegatableFilterDimension =>
           (NEGATABLE_FILTER_DIMENSIONS as readonly unknown[]).includes(dimension),
