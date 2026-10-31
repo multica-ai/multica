@@ -1693,11 +1693,19 @@
     },
     "timeline": {
       "handed_to": "Handed to",
-      "run_started": "and started a run ·",
+      "run_predicted": "enqueue was allowed at handoff; check runs for execution",
+      "pending_run": "an existing pending run covered this handoff",
+      "check_failed": "run eligibility could not be checked",
+      "no_runtime": "no runtime was assigned at handoff",
+      "run_suppressed": "run suppressed by this update",
+      "agent_unavailable": "agent unavailable at handoff",
+      "not_allowed": "run invocation not allowed",
+      "no_run": "no new run was predicted at handoff",
+      "unknown_reason": "run prediction unavailable; check runs",
       "member_no_run": "(member, no run)",
       "show_brief": "View handoff brief",
       "hide_brief": "Hide handoff brief",
-      "brief_header": "The workflow brief this run received"
+      "brief_header": "Workflow handoff brief"
     },
     "detail": {
       "follows_project": "(from project)",
