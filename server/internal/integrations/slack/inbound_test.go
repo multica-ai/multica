@@ -97,6 +97,58 @@ func TestInboundFromMessage_ChannelMention(t *testing.T) {
 	}
 }
 
+func TestInboundFromMessage_SeparatesForwardsFromOrdinaryAttachments(t *testing.T) {
+	raw := json.RawMessage(`{
+		"type": "event_callback",
+		"event": {
+			"type": "message",
+			"user": "UALICE",
+			"text": "compare these",
+			"channel": "D123",
+			"channel_type": "im",
+			"ts": "1700000000.000260",
+			"attachments": [
+				{
+					"is_msg_unfurl": true,
+					"author_name": "Bob",
+					"text": "Deploy at 3pm.",
+					"files": [{"id": "F1", "url_private": "https://files.slack.com/files-pri/T1-F1/report.pdf"}]
+				},
+				{
+					"original_url": "https://example.com",
+					"text": "This ordinary attachment must stay out."
+				},
+				{
+					"is_msg_unfurl": true,
+					"author_name": "Carol",
+					"text": "Rollback if checks fail."
+				}
+			]
+		}
+	}`)
+	e, err := slackevents.ParseEvent(raw, slackevents.OptionNoVerifyToken())
+	if err != nil {
+		t.Fatalf("parse forwarded message event: %v", err)
+	}
+	m, ok := e.InnerEvent.Data.(*slackevents.MessageEvent)
+	if !ok {
+		t.Fatalf("inner event = %T, want *slackevents.MessageEvent", e.InnerEvent.Data)
+	}
+
+	msg, ingestable := translateMessage("UBOT", e, m)
+	if !ingestable {
+		t.Fatal("forwarded message should be ingestable")
+	}
+	const want = "compare these\n\nForwarded message:\nBob:\nDeploy at 3pm.\n\nCarol:\nRollback if checks fail."
+	if msg.Text != want || msg.CommandText != want {
+		t.Errorf("Text/CommandText = %q/%q, want %q", msg.Text, msg.CommandText, want)
+	}
+	resolver := NewMediaResolver(nil, newFakeMediaStorage(), &fakeMediaLedger{}, nil)
+	if resolver.HasMedia(msg) {
+		t.Error("forwarded attachment must not be treated as ordinary Slack file media")
+	}
+}
+
 func TestInboundFromMessage_ChannelNoMention(t *testing.T) {
 	msg, ok := translateMessage("UBOT", eventsAPI(nil), &slackevents.MessageEvent{
 		User:        "UALICE",
