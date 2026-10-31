@@ -132,6 +132,9 @@ type semver struct {
 func SupportsTaskSupplement(provider, version string) bool {
 	var minimum string
 	switch provider {
+	case "pi":
+		// Pi 1.4 RPC reports authoritative prompt/steer dispositions.
+		minimum = "1.4.0"
 	case "codex":
 		// v0.100.0 exposes turn/steer with the expectedTurnId precondition.
 		minimum = "0.100.0"
