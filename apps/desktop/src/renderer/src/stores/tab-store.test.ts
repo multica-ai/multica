@@ -69,6 +69,14 @@ describe("resourceKeyForUrl", () => {
     expect(resourceKeyForUrl("/acme/issues?filter=a&view=v1#x")).toBe("/acme/issues?view=v1");
     expect(resourceKeyForUrl("/acme/issues#view=v1")).toBe("/acme/issues");
   });
+
+  it("keeps the built-in scope a URL opens, unless a saved view names the list", () => {
+    expect(resourceKeyForUrl("/acme/my-issues?scope=agents")).toBe("/acme/my-issues?scope=agents");
+    expect(resourceKeyForUrl("/acme/my-issues?filter=a&scope=agents#x")).toBe(
+      "/acme/my-issues?scope=agents",
+    );
+    expect(resourceKeyForUrl("/acme/my-issues?scope=agents&view=v1")).toBe("/acme/my-issues?view=v1");
+  });
 });
 
 describe("browsingHistoryKeyForUrl", () => {
@@ -286,6 +294,24 @@ describe("useTabStore actions", () => {
     expect(new Set([viewA, viewB, allIssues]).size).toBe(3);
     expect(viewAgain).toBe(viewA);
     expect(urls).toEqual(expect.arrayContaining(["/acme/issues?view=a", "/acme/issues?view=b", "/acme/issues"]));
+  });
+
+  it("openTab of My agents' work opens beside My issues; reopening either focuses it", () => {
+    const store = useTabStore.getState();
+    store.switchWorkspace("acme");
+    store.navigateActiveSession("/acme/my-issues");
+    const myIssues = getActiveTab(useTabStore.getState())!.id;
+
+    const myAgents = store.openTab("/acme/my-issues?scope=agents", "My agents' work");
+    const myIssuesAgain = store.openTab("/acme/my-issues", "My issues");
+    const myAgentsAgain = store.openTab("/acme/my-issues?scope=agents&filter=urgent", "My agents' work");
+
+    expect(myAgents).not.toBe(myIssues);
+    expect(myIssuesAgain).toBe(myIssues);
+    expect(myAgentsAgain).toBe(myAgents);
+    expect(useTabStore.getState().byWorkspace.acme.tabs.map((t) => t.url)).toEqual(
+      expect.arrayContaining(["/acme/my-issues", "/acme/my-issues?scope=agents"]),
+    );
   });
 
   describe("openTab insertion position (MUL-5860)", () => {

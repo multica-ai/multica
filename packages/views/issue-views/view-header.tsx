@@ -84,6 +84,7 @@ import { useFilterChips } from "../issues/components/filter-chips-bar";
 import { WorkspaceAgentWorkingChip } from "../issues/components/workspace-agent-working-chip";
 import type { IssueSurfaceController } from "../issues/surface/use-issue-surface-controller";
 import { useT } from "../i18n";
+import { useMyIssuesScope } from "../my-issues/use-my-issues-scope";
 import { DeleteViewDialog } from "./delete-view-dialog";
 import { useIssueViewActions } from "./use-view-actions";
 import { ViewNameInput } from "./view-name-input";
@@ -151,7 +152,7 @@ export function IssueViewHeader({
   const assigneeType = useIssuesScope(scopePage);
   const setAssigneeTypeForPage = useIssuesScopeStore((s) => s.setScope);
   const setAssigneeType = (next: IssuesScope) => setAssigneeTypeForPage(scopePage, next);
-  const myScope = useStore(myIssuesViewStore, (s) => s.scope);
+  const myScope = useMyIssuesScope();
   const setMyScope = useStore(myIssuesViewStore, (s) => s.setScope);
 
   const storeApi = useViewStoreApi();

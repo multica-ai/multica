@@ -1,23 +1,20 @@
 "use client";
 
-import { useStore } from "zustand";
 import { ListTodo } from "@multica/ui/icons";
 import { useAuthStore } from "@multica/core/auth";
-import {
-  myIssuesRelationFromScope,
-  myIssuesViewStore,
-} from "@multica/core/issues/stores/my-issues-view-store";
+import { myIssuesRelationFromScope } from "@multica/core/issues/stores/my-issues-view-store";
 import { PageHeader } from "../../layout/page-header";
 import { IssueSurface } from "../../issues/surface/issue-surface";
 import { IssueViewHeader } from "../../issue-views/view-header";
 import { useT } from "../../i18n";
+import { useMyIssuesScope } from "../use-my-issues-scope";
 
 const MY_BASE = { kind: "my" } as const;
 
 export function MyIssuesPage() {
   const { t } = useT("my-issues");
   const user = useAuthStore((s) => s.user);
-  const scope = useStore(myIssuesViewStore, (s) => s.scope);
+  const scope = useMyIssuesScope();
 
   return (
     <div className="flex flex-1 min-h-0 flex-col">

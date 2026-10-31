@@ -26,6 +26,7 @@
     "runtime": "ランタイム",
     "attachment": "添付ファイル",
     "create_agent": "エージェントを作成",
+    "my_agents": "マイエージェントの作業",
     "unknown": "不明なページ"
   },
   "help": {

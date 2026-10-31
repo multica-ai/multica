@@ -26,6 +26,7 @@
     "runtime": "Runtime",
     "attachment": "Attachment",
     "create_agent": "Create Agent",
+    "my_agents": "My agents' work",
     "unknown": "Unknown page"
   },
   "help": {

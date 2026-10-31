@@ -37,6 +37,7 @@ vi.mock("@multica/core/paths", () => ({
   useWorkspacePaths: () => ({
     issues: () => "/acme/issues",
     myIssues: () => "/acme/my-issues",
+    myAgents: () => "/acme/my-issues?scope=agents",
     projectDetail: (id: string) => `/acme/projects/${id}`,
   }),
 }));
@@ -198,5 +199,25 @@ describe("AllViewsPage", () => {
     expect(openInNewTab).toHaveBeenCalledWith("/acme/issues?view=v2", "Team backlog");
     expect(openInNewTab).toHaveBeenCalledWith("/acme/issues", "All issues");
     expect(useActiveIssueViewStore.getState().active[WORKSPACE_KEY]).toBe("v-open");
+  });
+
+  it("gives My Issues and My agents' work their own URLs", async () => {
+    const user = userEvent.setup();
+    const openInNewTab = vi.fn();
+    const { push } = renderPage({ openInNewTab });
+    const row = (name: string) =>
+      screen
+        .getByRole("button", { name: new RegExp(`^(Add ${name} to|Remove ${name} from) sidebar$`) })
+        .closest('[role="row"]')!;
+
+    await user.keyboard("{Meta>}");
+    await user.click(row("My Issues"));
+    await user.click(row("My agents' work"));
+    await user.keyboard("{/Meta}");
+    expect(openInNewTab).toHaveBeenCalledWith("/acme/my-issues", "My Issues");
+    expect(openInNewTab).toHaveBeenCalledWith("/acme/my-issues?scope=agents", "My agents' work");
+
+    await user.click(row("My agents' work"));
+    expect(push).toHaveBeenCalledWith("/acme/my-issues?scope=agents");
   });
 });

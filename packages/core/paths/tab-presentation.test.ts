@@ -24,6 +24,13 @@ describe("resolveTabPresentation — pages", () => {
       title: { kind: "nav", navKey: "projects" },
     });
   });
+
+  it("titles My agents' work as its own page rather than My issues", () => {
+    expect(present("/acme/my-issues?scope=agents")).toEqual({
+      visual: { kind: "icon", icon: "Bot" },
+      title: { kind: "tab", tabKey: "my_agents" },
+    });
+  });
 });
 
 describe("resolveTabPresentation — direct resources", () => {

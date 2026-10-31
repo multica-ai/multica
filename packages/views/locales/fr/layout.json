@@ -26,6 +26,7 @@
     "runtime": "Runtime",
     "attachment": "Pièce jointe",
     "create_agent": "Créer un agent",
+    "my_agents": "Travail de mes agents",
     "unknown": "Page inconnue"
   },
   "help": {

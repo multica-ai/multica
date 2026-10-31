@@ -311,13 +311,17 @@ export function splitTabUrl(url: string): { pathname: string; suffix: string } {
 
 /**
  * Dedup identity of a tab URL: its pathname (search/hash are view state),
- * plus the saved view it opens — `?view=` names a different list, so
- * cmd+clicking view B from a tab showing view A must open B, not focus A.
+ * plus the list it opens — `?view=` names a saved view and `?scope=` a
+ * built-in one (My agents' work), so cmd+clicking list B from a tab showing
+ * list A must open B, not focus A. A saved view carries its own scope.
  */
 export function resourceKeyForUrl(url: string): string {
   const { pathname, suffix } = splitTabUrl(url);
-  const view = searchParamsOfSuffix(suffix).get("view");
-  return view ? `${pathname}?view=${encodeURIComponent(view)}` : pathname;
+  const params = searchParamsOfSuffix(suffix);
+  const view = params.get("view");
+  if (view) return `${pathname}?view=${encodeURIComponent(view)}`;
+  const scope = params.get("scope");
+  return scope ? `${pathname}?scope=${encodeURIComponent(scope)}` : pathname;
 }
 
 function searchParamsOfSuffix(suffix: string): URLSearchParams {

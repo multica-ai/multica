@@ -18,7 +18,7 @@ import {
   DropdownMenuTrigger,
 } from "@multica/ui/components/ui/dropdown-menu";
 import type { IssueView } from "@multica/core/api/schemas";
-import { useWorkspacePaths } from "@multica/core/paths";
+import { isMyAgentsSearch, useWorkspacePaths } from "@multica/core/paths";
 import { sidebarIssuesOptions } from "@multica/core/issues/queries";
 import {
   SIDEBAR_FIRST_PAGE,
@@ -31,7 +31,11 @@ import {
 import { todayDateOnly } from "@multica/core/issues/date";
 import { useIssueStatuses } from "@multica/core/issue-statuses/hooks";
 import { useSidebarTreeStore } from "@multica/core/issues/stores/sidebar-tree-store";
-import { myIssuesRelationFromScope, myIssuesViewStore } from "@multica/core/issues/stores/my-issues-view-store";
+import {
+  myIssuesRelationFromScope,
+  myIssuesScopeFor,
+  myIssuesViewStore,
+} from "@multica/core/issues/stores/my-issues-view-store";
 import {
   issueViewContainerKey,
   useActiveIssueViewStore,
@@ -45,6 +49,7 @@ import { useIssueViewActions, type IssueViewActions } from "../../issue-views/us
 import { DeleteViewDialog } from "../../issue-views/delete-view-dialog";
 import { ViewNameInput } from "../../issue-views/view-name-input";
 import { useBuiltinViewNavigation } from "../../issue-views/builtin-views";
+import { useNavigation } from "../../navigation";
 import { useT } from "../../i18n";
 import { PANEL_ROW_CLASS, PanelCount, PanelLink, PanelList, PanelSection, isPathWithin, panelRowStateClass } from "../panel-nav";
 import { SidebarIssueList, TREE_ROW_BUTTON_CLASS, TreeRow } from "./sidebar-tree";
@@ -53,6 +58,7 @@ const DRAG_MODIFIERS = [restrictToVerticalAxis, restrictToFirstScrollableAncesto
 const EMPTY_VIEWS: IssueView[] = [];
 const WORKSPACE_SCOPE = { scope_type: "workspace" } as const;
 const MY_SCOPE = { scope_type: "my" } as const;
+const NO_SEARCH = new URLSearchParams();
 const ROW_MENU_CLASS = cn(
   TREE_ROW_BUTTON_CLASS,
   "text-muted-foreground opacity-0 group-hover/row:opacity-100 data-[popup-open]:opacity-100 [@media(pointer:coarse)]:opacity-100",
@@ -284,7 +290,8 @@ function BuiltinViewRow({
   const linkRef = useRef<HTMLAnchorElement>(null);
   const [menuOpen, setMenuOpen] = useState(false);
   const builtinNav = useBuiltinViewNavigation();
-  const myScope = useStore(myIssuesViewStore, (s) => s.scope);
+  const { searchParams } = useNavigation();
+  const myScope = useStore(myIssuesViewStore, (s) => myIssuesScopeFor(NO_SEARCH, s.scope));
   const workspaceKey = issueViewContainerKey(wsId, WORKSPACE_SCOPE);
   const myKey = issueViewContainerKey(wsId, MY_SCOPE);
   const activeWorkspaceView = useActiveIssueViewStore((s) => s.active[workspaceKey] ?? null);
@@ -304,7 +311,7 @@ function BuiltinViewRow({
       ? pathname === p.issues()
         ? activeWorkspaceView === null
         : !issueLitInTree && isPathWithin(pathname, p.issues())
-      : onMyIssues && activeMyView === null && (builtin === "my_agents") === (myScope === "agents"));
+      : onMyIssues && activeMyView === null && (builtin === "my_agents") === isMyAgentsSearch(searchParams));
 
   const source = builtinSidebarSource(builtin);
   const expanded = useSidebarTreeStore((s) => s.expanded.includes(source));

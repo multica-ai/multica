@@ -18,6 +18,9 @@ vi.mock("@multica/core/issues/stores/my-issues-view-store", () => {
     myIssuesViewStore: { getState: () => scopeState, getInitialState: () => scopeState, subscribe: () => () => {} },
   };
 });
+vi.mock("../my-issues/use-my-issues-scope", () => ({
+  useMyIssuesScope: () => "all",
+}));
 vi.mock("../issues/surface/issue-surface", () => ({
   IssueSurface: ({ renderHeader }: { renderHeader: (context: object) => React.ReactNode }) => (
     <>{renderHeader({ controller: { isRefreshing: state.refreshing, surfaceIssues: [] } })}</>

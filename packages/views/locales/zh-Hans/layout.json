@@ -26,6 +26,7 @@
     "runtime": "运行时",
     "attachment": "附件",
     "create_agent": "创建智能体",
+    "my_agents": "我的智能体在做",
     "unknown": "未知页面"
   },
   "help": {
