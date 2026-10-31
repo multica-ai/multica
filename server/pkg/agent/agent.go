@@ -252,9 +252,9 @@ type TokenUsage struct {
 	OutputTokens     int64
 	CacheReadTokens  int64
 	CacheWriteTokens int64
-	// CostUSDTicks is the provider's own statement of what this usage cost,
-	// in ticks of 1e-10 USD. Zero means "not reported" — only a few agents
-	// return it (xAI Grok Build does, via `_meta.usage.costUsdTicks`).
+	// CostUSDTicks is the upstream runtime's accounted cost in 1e-10 USD.
+	// Zero means unavailable. xAI reports its provider charge directly;
+	// OpenCode uses a gateway charge when present and a catalog estimate otherwise.
 	//
 	// It matters because a token-times-rate estimate cannot reproduce
 	// request-level pricing rules. xAI bills a request at 2x once its prompt
@@ -264,8 +264,8 @@ type TokenUsage struct {
 	CostUSDTicks int64
 }
 
-// CostUSDTicksPerUSD is the scale of the provider-reported cost unit: xAI
-// reports whole ticks of 1e-10 USD, which keeps sub-cent turn costs exact in
+// CostUSDTicksPerUSD is the scale of the runtime cost unit: xAI
+// reports whole ticks of 1e-10 USD, which keeps sub-cent turn costs precise in
 // int64 all the way to the database instead of drifting through float64.
 const CostUSDTicksPerUSD = 10_000_000_000
 
