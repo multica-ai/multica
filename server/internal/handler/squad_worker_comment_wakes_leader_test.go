@@ -180,6 +180,8 @@ func TestCreateComment_WorkerAgentCommentWakesSquadLeader_MUL4015(t *testing.T) 
 	ctx := context.Background()
 	fx := newSquadCommentTriggerFixture(t)
 	issueID := uuidToString(fx.Issue.ID)
+	// Parking prevents member status updates, not results from existing work.
+	dbfx.Exec(t, "UPDATE issue SET status = 'backlog' WHERE id = $1", issueID)
 
 	t.Cleanup(func() {
 		testPool.Exec(context.Background(), `DELETE FROM agent_task_queue WHERE issue_id = $1`, issueID)
