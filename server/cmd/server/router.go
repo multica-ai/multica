@@ -33,6 +33,7 @@ import (
 	"github.com/multica-ai/multica/server/internal/integrations/channel/engine"
 	composiointeg "github.com/multica-ai/multica/server/internal/integrations/composio"
 	"github.com/multica-ai/multica/server/internal/integrations/dingtalk"
+	"github.com/multica-ai/multica/server/internal/integrations/ghuser"
 	"github.com/multica-ai/multica/server/internal/integrations/lark"
 	"github.com/multica-ai/multica/server/internal/integrations/slack"
 	"github.com/multica-ai/multica/server/internal/integrations/telegram"
@@ -1328,6 +1329,18 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 		slog.Info("vcs integration disabled (MULTICA_VCS_SECRET_KEY not set)")
 	}
 
+	// Personal GitHub account connection for PR writes made from Multica
+	// (MUL-8433). Needs the App's OAuth client credentials plus a dedicated
+	// MULTICA_GITHUB_SECRET_KEY; without all three it reports configured=false.
+	if ghUser, err := ghuser.NewFromEnv(queries, pool); err != nil {
+		slog.Error("github user authorization disabled (invalid configuration)", "error", err)
+	} else if ghUser != nil {
+		h.GitHubUser = ghUser
+		slog.Info("github user authorization enabled")
+	} else {
+		slog.Info("github user authorization disabled (GITHUB_APP_CLIENT_ID / GITHUB_APP_CLIENT_SECRET / MULTICA_GITHUB_SECRET_KEY not all set)")
+	}
+
 	// Plugin secrets use a dedicated deployment key. Keeping this separate from
 	// VCS and channel secrets gives operators an isolated rotation and blast
 	// radius; without it, saving a `secret` config field fails closed rather
@@ -1544,6 +1557,9 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 	// HMAC-SHA256 signature in the handler) and post-install setup callback.
 	r.Post("/api/webhooks/github", h.HandleGitHubWebhook)
 	r.Get("/api/github/setup", h.GitHubSetupCallback)
+	// GitHub's OAuth redirect after a member authorizes their personal
+	// account. The signed state carries the Multica user.
+	r.Get("/api/github/user/callback", h.GitHubUserCallback)
 	// Slack OAuth callback (no Multica auth in the path — it is hit by Slack's
 	// browser redirect; the workspace/agent/initiator are recovered from the
 	// sealed state). It exchanges the code, upserts the install, then bounces
@@ -1686,6 +1702,14 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 		r.Post("/api/upload-file", h.UploadFile)
 		r.Post("/api/feedback", h.CreateFeedback)
 		r.With(handler.RequireHumanActor).Post("/api/client-usage", h.UpsertClientUsage)
+		// Personal GitHub account (MUL-8433). Human-only: an agent must never
+		// connect, inspect or revoke the GitHub identity its owner acts with.
+		r.Group(func(r chi.Router) {
+			r.Use(handler.RequireHumanActor)
+			r.Get("/api/me/github", h.GetMyGitHubAccount)
+			r.Get("/api/me/github/connect", h.ConnectMyGitHubAccount)
+			r.Delete("/api/me/github", h.DisconnectMyGitHubAccount)
+		})
 
 		// Note (MUL-4309): the generic OpenAI-compatible passthrough endpoints
 		// (POST /api/llm/v1/chat/completions[/stream]) were intentionally
@@ -2101,6 +2125,23 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					r.Get("/pull-requests", h.ListPullRequestsForIssue)
 					r.Post("/pull-requests", h.LinkIssuePullRequest)
 					r.Delete("/pull-requests/{prId}", h.UnlinkIssuePullRequest)
+					// PR writes go to GitHub as the calling member, so an agent
+					// must never reach them with someone else's identity.
+					r.Group(func(r chi.Router) {
+						r.Use(handler.RequireHumanActor)
+						r.Get("/pull-requests/{prId}/merge-options", h.GetPullRequestMergeOptions)
+						r.Post("/pull-requests/{prId}/merge", h.MergePullRequest)
+						r.Put("/pull-requests/{prId}/auto-merge", h.EnablePullRequestAutoMerge)
+						r.Delete("/pull-requests/{prId}/auto-merge", h.DisablePullRequestAutoMerge)
+						r.Post("/pull-requests/{prId}/update-branch", h.UpdatePullRequestBranch)
+						r.Post("/pull-requests/{prId}/rerun-failed-checks", h.RerunFailedChecks)
+						r.Post("/pull-requests/{prId}/ready-for-review", h.MarkPullRequestReadyForReview)
+						r.Post("/pull-requests/{prId}/convert-to-draft", h.ConvertPullRequestToDraft)
+						r.Post("/pull-requests/{prId}/approve", h.ApprovePullRequest)
+						r.Get("/pull-requests/{prId}/reviewer-candidates", h.ListPullRequestReviewerCandidates)
+						r.Post("/pull-requests/{prId}/request-review", h.RequestPullRequestReview)
+						r.Post("/pull-requests/{prId}/close", h.ClosePullRequest)
+					})
 					r.Put("/pr-auto-complete", h.SetIssuePRAutoComplete)
 				})
 			})
