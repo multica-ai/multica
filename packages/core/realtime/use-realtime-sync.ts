@@ -841,6 +841,8 @@ export function useRealtimeSync(
         const wsId = getCurrentWsId();
         if (wsId) {
           qc.invalidateQueries({ queryKey: projectKeys.all(wsId) });
+          // Project deletion clears chat project_id without emitting chat updates.
+          qc.invalidateQueries({ queryKey: chatKeys.all(wsId) });
           // Workflow responses include the projects using them. Creating,
           // deleting or changing a project also changes that usage list.
           qc.invalidateQueries({ queryKey: issueWorkflowKeys.all(wsId) });

@@ -251,5 +251,17 @@
     "archive": "Archive chat",
     "unarchive": "Unarchive chat",
     "delete": "Delete chat"
+  },
+  "project_filter": {
+    "label": "Project",
+    "all": "All projects",
+    "clear": "Clear project filter"
+  },
+  "project_chats": {
+    "title": "Chats",
+    "empty": "No active chats in this project",
+    "loading": "Loading chats...",
+    "error": "Couldn't load chats",
+    "retry": "Retry"
   }
 }

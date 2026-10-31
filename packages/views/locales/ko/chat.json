@@ -247,5 +247,17 @@
     "delete": "채팅 삭제",
     "archive": "채팅 보관",
     "unarchive": "채팅 보관 해제"
+  },
+  "project_filter": {
+    "label": "프로젝트",
+    "all": "모든 프로젝트",
+    "clear": "프로젝트 필터 지우기"
+  },
+  "project_chats": {
+    "title": "채팅",
+    "empty": "이 프로젝트에 활성 채팅이 없습니다",
+    "loading": "채팅 로딩 중...",
+    "error": "채팅을 불러올 수 없습니다",
+    "retry": "다시 시도"
   }
 }

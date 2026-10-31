@@ -251,5 +251,17 @@
     "archive": "Archiver la discussion",
     "unarchive": "Désarchiver la discussion",
     "delete": "Supprimer la discussion"
+  },
+  "project_filter": {
+    "label": "Projet",
+    "all": "Tous les projets",
+    "clear": "Effacer le filtre de projet"
+  },
+  "project_chats": {
+    "title": "Discussions",
+    "empty": "Aucune discussion active dans ce projet",
+    "loading": "Chargement des discussions...",
+    "error": "Impossible de charger les discussions",
+    "retry": "Réessayer"
   }
 }

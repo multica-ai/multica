@@ -39,29 +39,9 @@ import { createLogger } from "@multica/core/logger";
 import { removeChatMessageFromCaches } from "@multica/core/realtime";
 import { useLocale, useT } from "../../i18n";
 
+import { formatChatTime, toPreview } from "./chat-session-preview";
+
 const apiLogger = createLogger("chat.api");
-
-// IM-style timestamp: today → clock, this year → M/D, else full date.
-function formatChatTime(dateStr: string, locale: string): string {
-  const d = new Date(dateStr);
-  const now = new Date();
-  if (d.toDateString() === now.toDateString()) {
-    return d.toLocaleTimeString(locale, { hour: "2-digit", minute: "2-digit" });
-  }
-  if (d.getFullYear() === now.getFullYear()) {
-    return d.toLocaleDateString(locale, { month: "numeric", day: "numeric" });
-  }
-  return d.toLocaleDateString(locale);
-}
-
-// Collapse a (possibly markdown / multi-line) message into a one-line preview.
-function toPreview(content: string): string {
-  return content
-    .replace(/```[\s\S]*?```/g, " ")
-    .replace(/[#*`>~]/g, "")
-    .replace(/\s+/g, " ")
-    .trim();
-}
 
 /**
  * IM-style conversation list: each row is agent avatar + session title + agent

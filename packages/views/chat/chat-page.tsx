@@ -24,6 +24,7 @@ import { useT } from "../i18n";
 import { ChatMessageList, ChatMessageSkeleton } from "./components/chat-message-list";
 import { ChatInput } from "./components/chat-input";
 import { ChatQueue } from "./components/chat-queue";
+import { ChatProjectFilter } from "./components/chat-project-filter";
 import { ChatThreadList } from "./components/chat-thread-list";
 import { ChatSessionHeader } from "./components/chat-session-header";
 import { EmptyState } from "./components/chat-empty-state";
@@ -70,6 +71,27 @@ export function ChatPage() {
   const c = useChatController({
     isActive: isCurrentChatRoute && getCurrentSlug() === workspaceSlug,
   });
+  const [projectFilter, setProjectFilter] = useState<{ wsId: string; id: string | null }>({
+    wsId: c.wsId, id: null,
+  });
+  const projects = useMemo(() => c.projects ?? [], [c.projects]);
+  const filterId = projectFilter.wsId === c.wsId && projects.some((p) => p.id === projectFilter.id)
+    ? projectFilter.id
+    : null;
+  const visibleSessions = useMemo(
+    () => filterId
+      ? c.sessions.filter((s) => s.workspace_id === c.wsId && s.project_id === filterId)
+      : c.sessions,
+    [c.sessions, c.wsId, filterId],
+  );
+  // Discard the pointer, rather than merely hide its label: switching back or
+  // recreating a project must not resurrect a filter from a previous scope.
+  useEffect(() => {
+    if (projectFilter.wsId !== c.wsId
+      || (c.projectsLoaded && projectFilter.id && !projects.some((p) => p.id === projectFilter.id))) {
+      setProjectFilter({ wsId: c.wsId, id: null });
+    }
+  }, [c.wsId, c.projectsLoaded, projects, projectFilter]);
   const { data: quickActionsPending = null } = useQuery(
     chatQuickActionsPendingOptions(c.activeSessionId ?? ""),
   );
@@ -147,6 +169,40 @@ export function ChatPage() {
     setComposingNew(false);
   };
 
+  const changeProjectFilter = (id: string | null) => {
+    supersedeAgentIntent();
+    setProjectFilter({ wsId: c.wsId, id });
+    if (id && c.currentSession?.project_id !== id) {
+      c.setActiveSession(null);
+      setComposingNew(false);
+    }
+  };
+  const { currentSession: filteredCurrentSession, setActiveSession: setFilteredActiveSession } = c;
+  const previousSelection = useRef<{ wsId: string; id: string; projectId: string | null } | null>(null);
+  useEffect(() => {
+    if (!isCurrentChatRoute || getCurrentSlug() !== workspaceSlug) {
+      previousSelection.current = null;
+      return;
+    }
+    // URL reconciliation may have selected a different session earlier in this
+    // commit. Wait for its render rather than acting on the outgoing snapshot.
+    if ((filteredCurrentSession?.id ?? null) !== useChatStore.getState().activeSessionId) return;
+    const previous = previousSelection.current;
+    previousSelection.current = filteredCurrentSession
+      ? { wsId: c.wsId, id: filteredCurrentSession.id, projectId: filteredCurrentSession.project_id ?? null }
+      : null;
+    if (filterId && filteredCurrentSession && filteredCurrentSession.project_id !== filterId) {
+      if (previous?.wsId === c.wsId && previous.id === filteredCurrentSession.id && previous.projectId === filterId) {
+        // The selected conversation moved out of this project in the cache.
+        setFilteredActiveSession(null);
+        setComposingNew(false);
+      } else {
+        // Opening/creating another conversation takes precedence over a filter.
+        setProjectFilter({ wsId: c.wsId, id: null });
+      }
+    }
+  }, [c.wsId, filterId, filteredCurrentSession, setFilteredActiveSession, isCurrentChatRoute, workspaceSlug]);
+
   // Single archive path for both entry points (thread-list row + conversation
   // header). When the archived chat is the one in view, move the pane off it:
   // on desktop advance to the next chat (Inbox-style); when compact drop back to
@@ -159,7 +215,7 @@ export function ChatPage() {
         c.setActiveSession(null);
         setComposingNew(false);
       } else {
-        c.advanceSelectionAfterArchive(session);
+        c.advanceSelectionAfterArchive(session, visibleSessions);
       }
     }
     c.archiveSession(session.id);
@@ -169,6 +225,7 @@ export function ChatPage() {
     // A manual ⊕ pick outranks a pending deep link; when called FROM the
     // intent effect the ref is already set to this param, so this is a no-op.
     supersedeAgentIntent();
+    setProjectFilter({ wsId: c.wsId, id: null });
     if (agent) c.handleStartNewChat(agent);
     else c.handleNewChat();
     setComposingNew(true);
@@ -255,15 +312,30 @@ export function ChatPage() {
   );
 
   const listBody = (
-    <div className="px-2 py-1">
-      <ChatThreadList
-        sessions={c.sessions}
-        agents={c.agents}
-        activeSessionId={c.activeSessionId}
-        onSelectSession={handleSelect}
-        onArchive={handleArchive}
-      />
-    </div>
+    <>
+      <ChatProjectFilter projects={projects} projectId={filterId} onChange={changeProjectFilter} />
+      <div className="px-2 py-1">
+        {c.sessionsLoading ? (
+          <p role="status" className="px-2 text-caption text-muted-foreground">{t(($) => $.project_chats.loading)}</p>
+        ) : c.sessionsError ? (
+          <div role="alert" className="px-2 text-caption text-muted-foreground">
+            <p>{t(($) => $.project_chats.error)}</p>
+            <Button variant="ghost" size="xs" onClick={() => void c.refetchSessions()}>
+              {t(($) => $.project_chats.retry)}
+            </Button>
+          </div>
+        ) : (
+          <ChatThreadList
+            key={c.wsId}
+            sessions={visibleSessions}
+            agents={c.agents}
+            activeSessionId={c.activeSessionId}
+            onSelectSession={handleSelect}
+            onArchive={handleArchive}
+          />
+        )}
+      </div>
+    </>
   );
 
   const compactConversation = isCompact && (!!c.activeSessionId || composingNew);
