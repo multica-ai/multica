@@ -64,14 +64,14 @@
     "show_fewer_pins": "表示を減らす"
   },
   "spaces": {
-    "work": "タスク",
+    "work": "作業",
     "team": "チーム"
   },
   "rail": {
     "label": "アプリナビゲーション",
     "sheet_description": "スペースとワークスペースを切り替えます。",
     "inbox": "受信箱",
-    "work": "タスク",
+    "work": "作業",
     "team": "チーム",
     "chat": "チャット",
     "autopilots": "自動化",

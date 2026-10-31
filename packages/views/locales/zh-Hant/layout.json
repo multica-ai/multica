@@ -64,14 +64,14 @@
     "show_fewer_pins": "收起"
   },
   "spaces": {
-    "work": "任務",
+    "work": "工作",
     "team": "團隊"
   },
   "rail": {
     "label": "應用導覽",
     "sheet_description": "切換空間和工作區。",
     "inbox": "收件箱",
-    "work": "任務",
+    "work": "工作",
     "team": "團隊",
     "chat": "聊天",
     "autopilots": "自動化",

@@ -64,14 +64,14 @@
     "show_fewer_pins": "Afficher moins"
   },
   "spaces": {
-    "work": "Tâches",
+    "work": "Travail",
     "team": "Équipe"
   },
   "rail": {
     "label": "Navigation de l'application",
     "sheet_description": "Changer d'espace et d'espace de travail.",
     "inbox": "Boîte",
-    "work": "Tâches",
+    "work": "Travail",
     "team": "Équipe",
     "chat": "Chat",
     "autopilots": "Auto",

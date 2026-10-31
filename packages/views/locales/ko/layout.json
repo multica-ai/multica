@@ -64,14 +64,14 @@
     "show_fewer_pins": "접기"
   },
   "spaces": {
-    "work": "태스크",
+    "work": "작업",
     "team": "팀"
   },
   "rail": {
     "label": "앱 탐색",
     "sheet_description": "스페이스와 워크스페이스를 전환합니다.",
     "inbox": "인박스",
-    "work": "태스크",
+    "work": "작업",
     "team": "팀",
     "chat": "채팅",
     "autopilots": "자동화",

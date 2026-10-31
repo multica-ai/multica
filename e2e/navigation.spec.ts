@@ -23,7 +23,8 @@ test.describe("Navigation", () => {
     await waitForPageText(page, "Agents");
     await expect(page).toHaveTitle("Agents | Multica");
 
-    await rail.getByRole("link", { name: "Issues", exact: true }).click();
+    // Work lands on its first page, Issues.
+    await rail.getByRole("link", { name: "Work", exact: true }).click();
     await expect(page).toHaveURL(/\/issues/, { timeout: ROUTE_CHANGE_TIMEOUT });
     await waitForPageText(page, "Issues");
     await expect(page).toHaveTitle("Issues | Multica");

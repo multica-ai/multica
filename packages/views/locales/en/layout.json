@@ -64,14 +64,14 @@
     "show_fewer_pins": "Show fewer"
   },
   "spaces": {
-    "work": "Issues",
+    "work": "Work",
     "team": "Team"
   },
   "rail": {
     "label": "App navigation",
     "sheet_description": "Switch spaces and workspaces.",
     "inbox": "Inbox",
-    "work": "Issues",
+    "work": "Work",
     "team": "Team",
     "chat": "Chat",
     "autopilots": "Auto",

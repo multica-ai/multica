@@ -64,14 +64,14 @@
     "show_fewer_pins": "收起"
   },
   "spaces": {
-    "work": "任务",
+    "work": "工作",
     "team": "团队"
   },
   "rail": {
     "label": "应用导航",
     "sheet_description": "切换空间和工作区。",
     "inbox": "收件箱",
-    "work": "任务",
+    "work": "工作",
     "team": "团队",
     "chat": "聊天",
     "autopilots": "自动化",
