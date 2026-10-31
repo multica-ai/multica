@@ -49,6 +49,47 @@ func EnsureDefault(ctx context.Context, q DefaultStore, workspaceID pgtype.UUID)
 	return q.GetDefaultIssueWorkflow(ctx, workspaceID)
 }
 
+// DefaultUpdater is what adding a status to a stored Default needs.
+type DefaultUpdater interface {
+	GetDefaultIssueWorkflow(ctx context.Context, workspaceID pgtype.UUID) (db.IssueWorkflow, error)
+	UpdateIssueWorkflow(ctx context.Context, arg db.UpdateIssueWorkflowParams) (db.IssueWorkflow, error)
+}
+
+// AddToDefault lists a status created outside any workflow in the stored
+// Default, the way the first snapshot takes every status no workflow lists. A
+// workspace that has not stored Default yet picks it up in that snapshot.
+func AddToDefault(ctx context.Context, q DefaultUpdater, workspaceID pgtype.UUID, key string) error {
+	row, err := q.GetDefaultIssueWorkflow(ctx, workspaceID)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	steps, err := DecodeSteps(row.Steps)
+	if err != nil {
+		return err
+	}
+	for _, s := range steps {
+		if s.StatusKey == key {
+			return nil
+		}
+	}
+	raw, err := EncodeSteps(Arrange(append(steps, Step{StatusKey: key, Handler: Handler{Type: HandlerNone}})))
+	if err != nil {
+		return err
+	}
+	_, err = q.UpdateIssueWorkflow(ctx, db.UpdateIssueWorkflowParams{
+		ID:               row.ID,
+		WorkspaceID:      workspaceID,
+		Name:             row.Name,
+		Description:      row.Description,
+		InitialStatusKey: row.InitialStatusKey,
+		Steps:            raw,
+	})
+	return err
+}
+
 // DefaultSnapshotKeys lists what a new Default row holds: the built-in
 // statuses, backlog and blocked included, plus every active custom status no
 // other workflow lists, in catalog order.

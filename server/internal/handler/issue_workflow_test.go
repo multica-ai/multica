@@ -437,6 +437,17 @@ func TestDefaultLimitsStatusesInAndOutsideProjects(t *testing.T) {
 	testutil.Call(t, testHandler.CreateIssue, newRequest("POST", "/api/issues?workspace_id="+testWorkspaceID, map[string]any{
 		"title": "created outside Default", "status": shipKey,
 	})).Want(http.StatusBadRequest)
+
+	// A status created in Settings belongs to no workflow, so it joins Default.
+	var settingsStatus IssueStatusResponse
+	testutil.Call(t, testHandler.CreateIssueStatus, newRequest(http.MethodPost, "/api/issue-statuses", map[string]any{
+		"name": "Parked " + workflowTestSuffix()[10:], "category": "unstarted", "color": "#123456",
+	})).Want(http.StatusCreated).JSON(&settingsStatus)
+	t.Cleanup(func() {
+		testPool.Exec(context.Background(), `DELETE FROM issue_status WHERE id = $1`, parseUUID(settingsStatus.ID))
+	})
+	updateIssueForTest(t, outside, map[string]any{"status": settingsStatus.Key}).Want(http.StatusOK)
+	updateIssueForTest(t, onDefault, map[string]any{"status": settingsStatus.Key}).Want(http.StatusOK)
 }
 
 func TestStatusChangeHandsOffOnDefaultProject(t *testing.T) {
