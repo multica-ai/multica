@@ -47,8 +47,21 @@ type workflowHandoff struct {
 // triggers, or nil.
 func (h *Handler) applyIssueWorkflow(ctx context.Context, prev db.Issue, params *db.UpdateIssueParams, statusExplicit, assigneeTouched, enterOnMove bool, run *db.AgentTaskQueue) (*workflowHandoff, error) {
 	def, project, err := issueworkflow.ForProject(ctx, h.Queries, prev.WorkspaceID, params.ProjectID)
-	if err != nil || def == nil {
+	if err != nil {
 		return nil, err
+	}
+	// Keeping the current status is never a rejected write, even when the
+	// workflow no longer lists it.
+	statusChanging := params.Status.Valid && params.Status.String != prev.Status
+	if def == nil {
+		if !statusChanging {
+			return nil, nil
+		}
+		outside, err := issueworkflow.OutsideProject(ctx, h.Queries, prev.WorkspaceID)
+		if err != nil {
+			return nil, err
+		}
+		return nil, issueworkflow.CheckStatusOutsideProject(outside, params.Status.String)
 	}
 	projectMoving := params.ProjectID != prev.ProjectID
 	if projectMoving && !statusExplicit && !def.IsDefault && !def.Has(prev.Status) {
@@ -57,7 +70,9 @@ func (h *Handler) applyIssueWorkflow(ctx context.Context, prev db.Issue, params 
 		})
 		params.Status = pgtype.Text{String: target, Valid: true}
 	}
-	if params.Status.Valid {
+	// A move into a Default project keeps the issue's status, as it is never
+	// mapped; a named workflow must list the status the issue lands on.
+	if params.Status.Valid && (statusChanging || (projectMoving && !def.IsDefault)) {
 		if err := issueworkflow.CheckStatus(def, params.Status.String); err != nil {
 			return nil, err
 		}
