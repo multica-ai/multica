@@ -5,14 +5,17 @@ import { keepPreviousData, useQuery } from "@tanstack/react-query";
 import { ChevronDown, ChevronRight, ChevronUp } from "@multica/ui/icons";
 import { cn } from "@multica/ui/lib/utils";
 import { ShimmerText } from "@multica/ui/components/common/shimmer-text";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@multica/ui/components/ui/tooltip";
 import { agentTaskSnapshotOptions } from "@multica/core/agents";
 import { useIssueStatuses } from "@multica/core/issue-statuses/hooks";
 import { issueStatusCategory } from "@multica/core/issues";
 import { issueDetailOptions, sidebarIssuesOptions } from "@multica/core/issues/queries";
 import { SIDEBAR_FIRST_PAGE, SIDEBAR_PAGE_STEP, type SidebarIssuesRequest } from "@multica/core/issues/sidebar-list";
 import { useSidebarKeptStore } from "@multica/core/issues/stores/sidebar-kept-store";
+import { useIssueUnread } from "@multica/core/issues/unread";
 import { useWorkspacePaths } from "@multica/core/paths";
-import type { AgentTask, Issue, ListIssuesParams } from "@multica/core/types";
+import { useActorName } from "@multica/core/workspace/hooks";
+import type { AgentTask, Issue, IssueUnread, ListIssuesParams } from "@multica/core/types";
 import { AppLink } from "../../navigation";
 import { AgentAvatarStack } from "../../agents/components/agent-avatar-stack";
 import { StatusIcon } from "../../issues/components/status-icon";
@@ -22,7 +25,7 @@ import { useIssueActions } from "../../issues/actions/use-issue-actions";
 import { selectIssueTasks } from "../../issues/surface/activity";
 import { useStatusLabel } from "../../issues/utils/status-label";
 import { DeferredPopup } from "../../common/deferred-popup";
-import { useT } from "../../i18n";
+import { useT, useTimeAgo } from "../../i18n";
 import { PANEL_ROW_CLASS, panelRowStateClass } from "../panel-nav";
 
 /** A working agent's issue title: dimmer at rest and a wider highlight than
@@ -406,7 +409,34 @@ function SidebarStatusPicker({
   );
 }
 
-/** The title shimmers while an agent runs on the issue; queued agents show dimmed. */
+/** An agent result the viewer has not seen yet. It takes the avatar's place
+ *  once the run ends, so the two never show together. */
+export function IssueUnreadDot({ unread }: { unread: IssueUnread }) {
+  const { t } = useT("issues");
+  const timeAgo = useTimeAgo();
+  const { getActorName } = useActorName();
+  const label =
+    unread.outcome === "manual" || !unread.agent_id
+      ? t(($) => $.agent_activity.unread_manual)
+      : unread.outcome === "failed"
+        ? t(($) => $.agent_activity.unread_failed, { agent: getActorName("agent", unread.agent_id), time: timeAgo(unread.created_at) })
+        : t(($) => $.agent_activity.unread_completed, { agent: getActorName("agent", unread.agent_id), time: timeAgo(unread.created_at) });
+  return (
+    <Tooltip>
+      <TooltipTrigger
+        render={
+          <span role="img" aria-label={label} className="flex size-4 shrink-0 items-center justify-center">
+            <span className="size-2 rounded-full bg-brand" />
+          </span>
+        }
+      />
+      <TooltipContent>{label}</TooltipContent>
+    </Tooltip>
+  );
+}
+
+/** The title shimmers while an agent runs on the issue; queued agents show
+ *  dimmed. Once the run ends, an unread result shows a dot and a brighter title. */
 const SidebarIssueRow = memo(function SidebarIssueRow({
   wsId,
   issue,
@@ -427,6 +457,7 @@ const SidebarIssueRow = memo(function SidebarIssueRow({
   onKeyDown: (event: React.KeyboardEvent) => void;
 }) {
   const agents = useIssueAgentState(wsId, issue.id);
+  const unread = useIssueUnread(wsId, issue.id);
 
   return (
     <IssueActionsContextMenu issue={issue}>
@@ -445,10 +476,13 @@ const SidebarIssueRow = memo(function SidebarIssueRow({
           onKeyDown={onKeyDown}
           className={ISSUE_ROW_LINK_CLASS}
         >
-          <ShimmerText active={!!agents?.running} className={cn("min-w-0 flex-1 truncate", SIDEBAR_SHIMMER_CLASS)}>
+          <ShimmerText
+            active={!!agents?.running}
+            className={cn("min-w-0 flex-1 truncate", SIDEBAR_SHIMMER_CLASS, !agents && unread && "text-foreground")}
+          >
             {issue.title}
           </ShimmerText>
-          {agents && <IssueAgentBadge agents={agents} />}
+          {agents ? <IssueAgentBadge agents={agents} /> : unread && <IssueUnreadDot unread={unread} />}
         </AppLink>
       </div>
     </IssueActionsContextMenu>
