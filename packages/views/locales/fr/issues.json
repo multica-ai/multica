@@ -1654,8 +1654,6 @@
       "picker_more": "Créez d’autres workflows dans Paramètres → Workflows."
     },
     "picker": {
-      "header": "{{workflow}} · selon le projet « {{project}} »",
-      "header_no_project": "Statuts {{workflow}} · sans projet",
       "footer": "Seuls les états du workflow de cette tâche sont affichés. À droite : à qui elle est confiée en entrant dans l’état."
     },
     "confirm": {

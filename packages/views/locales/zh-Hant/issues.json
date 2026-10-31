@@ -1589,8 +1589,6 @@
       "picker_more": "在「設定 → 工作流」裡可以新建更多工作流。"
     },
     "picker": {
-      "header": "{{workflow}} · 跟隨專案「{{project}}」",
-      "header_no_project": "{{workflow}} 狀態 · 無專案",
       "footer": "只顯示這個任務所在工作流裡的狀態。右側是進入該狀態時的處理人。"
     },
     "confirm": {
