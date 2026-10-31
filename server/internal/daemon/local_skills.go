@@ -254,6 +254,16 @@ func localSkillRootsForProvider(provider string) ([]localSkillRoot, bool, error)
 				configHome = filepath.Join(home, ".config")
 			}
 			providerRoot = filepath.Join(configHome, "muse", "skills")
+		case "zcode":
+			// ZCode's user-level skill root is ~/.zcode/skills (symlink imports
+			// supported); project skills are injected under
+			// <workDir>/.zcode/skills. ZCODE_DATA_BASE_DIR relocates the whole
+			// runtime base directory including the skills root.
+			zcodeBase := strings.TrimSpace(os.Getenv("ZCODE_DATA_BASE_DIR"))
+			if zcodeBase == "" {
+				zcodeBase = home
+			}
+			providerRoot = filepath.Join(zcodeBase, ".zcode", "skills")
 		default:
 			return nil, false, nil
 		}

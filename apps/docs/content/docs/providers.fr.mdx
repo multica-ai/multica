@@ -49,6 +49,7 @@ Les étapes d'installation se trouvent dans [Installer les outils de codage IA](
 | Trae CLI | `traecli` | ✓ | ✓ | ✓ | `.traecli/skills/` |
 | Dim | `dim` | ✓ | ✓ | ✓ | — |
 | ZeroClaw | `zeroclaw` | ✓ | — | — | — |
+| ZCode | `zcode` | ✓ | — | ✓ | `.zcode/skills/` |
 
 « MCP géré par Multica » signifie que vous pouvez définir des serveurs MCP dans la configuration de l'agent et que Multica les transmet à l'outil avant une exécution. Cette colonne indique seulement si Multica peut s'en charger, pas si l'outil dispose d'autres moyens de configurer MCP.
 
@@ -68,6 +69,8 @@ Si vous ne choisissez pas de modèle, Multica utilise le modèle par défaut de 
 
 QwenPaw, MiniMax Code et ZeroClaw font exception : ils n'acceptent pas de modèle choisi depuis Multica, donc le sélecteur est inactif et affiche « Géré par le runtime ». Choisissez plutôt le modèle dans la configuration propre à l'outil. Pour ces outils, une liste de modèles vide est normale et n'indique pas que le runtime est hors ligne.
 
+La liste de modèles de ZCode est vide elle aussi, mais la sélection d'un modèle reste prise en charge : les fournisseurs et les modèles se trouvent dans la configuration propre à ZCode (`~/.zcode/v2/provider_config.json`), et aucune commande ne permet de les énumérer. Saisissez manuellement un identifiant qualifié `provider/model` pour en épingler un — Multica le transmet via `zcode -p --model` — ou laissez le champ vide pour utiliser le modèle par défaut enregistré dans ZCode.
+
 DeepSeek Harness publie son catalogue de modèles depuis le runtime lui-même (`dsh --profile multica --list-models`). Ses identifiants de modèle utilisent la forme `provider/model` (par exemple `deepseek-official/deepseek-chat`) ; sélectionnez donc l'identifiant complet dans la liste.
 
 <Callout type="info">
@@ -84,7 +87,7 @@ Les règles de relance et de reprise de session se trouvent dans [Exécutions](/
 
 ## Configuration MCP
 
-Antigravity, GitHub Copilot CLI, DevEco Code, Muse Code et ZeroClaw ne lisent pas encore la configuration MCP d'un agent ; le champ n'est donc pas affiché lors de la création d'agents pour ces outils.
+Antigravity, GitHub Copilot CLI, DevEco Code, Muse Code, ZCode et ZeroClaw ne lisent pas encore la configuration MCP d'un agent ; le champ n'est donc pas affiché lors de la création d'agents pour ces outils.
 
 La transmission d'une configuration MCP gérée à Pi nécessite Pi 0.99.0 ou une version ultérieure. Les versions antérieures de Pi continuent d'exécuter les agents sans configuration MCP.
 

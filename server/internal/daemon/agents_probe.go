@@ -340,6 +340,15 @@ var probeAgentCLIs = func() map[string]AgentEntry {
 	if e, ok := probe("MULTICA_ZEROCLAW_PATH", "zeroclaw", ""); ok {
 		agents["zeroclaw"] = e
 	}
+	// ZCode (`zcode`) is the community CLI distribution of the ZCode agent
+	// runtime (zcode-app-cli), driven headlessly with `-p <prompt>
+	// --output-format stream-json`. Providers, models and the saved default
+	// selection live in the user's own ~/.zcode/v2/provider_config.json after
+	// `zcode login` / `/setup`, so there is no model env var: ExecOptions.Model
+	// only carries a per-agent manual override (provider-qualified id).
+	if e, ok := probe("MULTICA_ZCODE_PATH", "zcode", ""); ok {
+		agents["zcode"] = e
+	}
 	return agents
 }
 

@@ -44,6 +44,7 @@ const TOOLS: { name: string; resume: boolean; mcp: boolean; model: boolean }[] =
   { name: "Trae CLI", resume: true, mcp: true, model: true },
   { name: "Dim", resume: true, mcp: true, model: true },
   { name: "ZeroClaw", resume: true, mcp: false, model: false },
+  { name: "ZCode", resume: true, mcp: false, model: true },
 ];
 
 const copy = {

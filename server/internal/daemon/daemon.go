@@ -6493,6 +6493,7 @@ var runtimeDisplayNameOverrides = map[string]string{
 	"mcode":      "MiniMax Code",
 	"muse":       "Muse Code",
 	"zeroclaw":   "ZeroClaw",
+	"zcode":      "ZCode",
 }
 
 func init() {

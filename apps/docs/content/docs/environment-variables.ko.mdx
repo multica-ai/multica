@@ -327,12 +327,15 @@ API key와 base URL이 모두 비어 있으면 이 레이어가 꺼지고 업스
 | QwenPaw | `MULTICA_QWENPAW` | — |
 | Reasonix | `MULTICA_REASONIX` | ✓ |
 | Trae CLI | `MULTICA_TRAECLI` | ✓ |
+| ZCode | `MULTICA_ZCODE` | —(모델은 ZCode 자체 설정에서 관리) |
 | ZeroClaw | `MULTICA_ZEROCLAW` | —(모델은 ZeroClaw의 에이전트 설정에서 관리) |
 
 </Accordion>
 </Accordions>
 
 QwenPaw와 MiniMax Code에는 Multica가 모델을 전달하지 않으므로 모델 변수가 없습니다. 자세한 내용은 [AI 코딩 도구 비교](/providers#모델-출처)를 참고하세요. DeepSeek Harness에는 `MULTICA_DSH_PROFILE_BUNDLE`과 `MULTICA_DSH_PLUGIN_PATH`도 있으며 다음 섹션에서 설명합니다.
+
+ZCode에는 의도적으로 모델 변수도 인수 변수도 없습니다. 공급자, 모델, 저장된 기본 선택은 ZCode 자체 설정(`~/.zcode/v2/provider_config.json`)에서 가져오며, 에이전트별로 입력한 모델은 `zcode -p --model`로 전달됩니다.
 
 컴퓨터 전체 기본 인수 `MULTICA_<PREFIX>_ARGS`는 현재 Claude Code, Codex, CodeBuddy, Qwen Code, QwenPaw 다섯 도구를 지원합니다. 해당 변수는 `MULTICA_CLAUDE_ARGS`, `MULTICA_CODEX_ARGS`, `MULTICA_CODEBUDDY_ARGS`, `MULTICA_QWEN_ARGS`, `MULTICA_QWENPAW_ARGS`입니다. 예시:
 

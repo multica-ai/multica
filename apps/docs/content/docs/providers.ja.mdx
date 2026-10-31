@@ -49,6 +49,7 @@ Multica は、普段使っている AI コーディングツールの代わり�
 | Trae CLI | `traecli` | ✓ | ✓ | ✓ | `.traecli/skills/` |
 | Dim | `dim` | ✓ | ✓ | ✓ | — |
 | ZeroClaw | `zeroclaw` | ✓ | — | — | — |
+| ZCode | `zcode` | ✓ | — | ✓ | `.zcode/skills/` |
 
 「Multica による MCP 管理」とは、エージェント設定に MCP server を入力し、Multica が実行前にその設定を対応ツールへ渡せることを意味します。この列が示すのは Multica が代わりに設定できるかどうかで、ツール自体にほかの MCP 設定方法があるかどうかではありません。
 
@@ -68,6 +69,8 @@ Devin は `WINDSURF_API_KEY` があれば使用し、なければ `devin auth lo
 
 QwenPaw、MiniMax Code、ZeroClaw は例外です。Multica 側で選んだモデルを受け付けないため、選択欄は操作できず「ランタイムで管理」と表示されます。モデルは各ツール側の設定で選んでください。これらのツールでモデル一覧が空なのは正常で、ランタイムがオフラインという意味ではありません。
 
+ZCode のモデル一覧も空ですが、モデル選択には対応しています。プロバイダーとモデルは ZCode 自身の設定（`~/.zcode/v2/provider_config.json`）にあり、それを列挙するコマンドはありません。モデルを固定したい場合は `provider/model` 形式の ID を手動で入力してください。Multica はそれを `zcode -p --model` として渡します。空欄のままにすれば、ZCode で保存済みのデフォルトが使われます。
+
 DeepSeek Harness のモデルカタログはランタイム自身が提供します（`dsh --profile multica --list-models`）。モデル ID は `provider/model` 形式（例: `deepseek-official/deepseek-chat`）なので、一覧から完全な ID を選択してください。
 
 <Callout type="info">
@@ -84,7 +87,7 @@ Multica はツールから返されたセッション識別子を保存します
 
 ## MCP 設定
 
-Antigravity、GitHub Copilot CLI、DevEco Code、Muse Code、ZeroClaw は、現時点ではエージェントの MCP 設定を読み取らないため、これらのツールではエージェント作成画面にこの項目が表示されません。
+Antigravity、GitHub Copilot CLI、DevEco Code、Muse Code、ZCode、ZeroClaw は、現時点ではエージェントの MCP 設定を読み取らないため、これらのツールではエージェント作成画面にこの項目が表示されません。
 
 Pi への管理 MCP 設定の引き渡しには Pi 0.99.0 以降が必要です。それより古い Pi でも、MCP 設定のないエージェントは引き続き実行できます。
 

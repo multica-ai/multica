@@ -49,6 +49,7 @@ Multica は現在、次のコマンドを検出します。
 | TRAE CLI | `traecli` | [TRAE 公式サイト](https://www.trae.cn/) |
 | Dim | `dim` | [DimCode](https://dimagent.cn/en/docs/cli) |
 | ZeroClaw | `zeroclaw` | [ZeroClaw クイックスタート](https://github.com/zeroclaw-labs/zeroclaw/blob/master/docs/book/src/getting-started/quickstart.md#install) |
+| ZCode | `zcode` | [ZCode CLI のインストール](https://www.npmjs.com/package/zcode-app-cli) |
 
 ここでの「対応」とは、Multica が該当する CLI を呼び出せるという意味です。そのツールのアカウント、サブスクリプション、モデルの利用枠を Multica が提供するわけではありません。
 
@@ -119,6 +120,11 @@ QwenPaw 側の設定でプロバイダーとモデルを選んでください。
 <Accordion title="Reasonix" id="reasonix">
 
 デーモンを起動する前に `reasonix setup` を実行し、デフォルトのプロバイダーとモデルを設定してください。
+
+</Accordion>
+<Accordion title="ZCode" id="zcode">
+
+コミュニティ版 CLI を `npm install -g zcode-app-cli` でインストールし、`zcode login`（Z.AI または BigModel のブラウザ認証）か初回起動時のセットアップウィザードを完了してください。Multica は ZCode のモデル一覧を表示しません。プロバイダーとモデルは ZCode 自身の設定（`~/.zcode/v2/provider_config.json`）にあり、エージェントに `provider/model` 形式のモデル ID を手動入力すると、Multica はそれを `zcode -p --model` として渡します。
 
 </Accordion>
 </Accordions>

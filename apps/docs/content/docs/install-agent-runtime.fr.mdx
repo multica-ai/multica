@@ -49,6 +49,7 @@ Multica détecte actuellement ces commandes :
 | TRAE CLI | `traecli` | [Site officiel de TRAE](https://www.trae.cn/) |
 | Dim | `dim` | [DimCode](https://dimagent.cn/en/docs/cli) |
 | ZeroClaw | `zeroclaw` | [Démarrage rapide de ZeroClaw](https://github.com/zeroclaw-labs/zeroclaw/blob/master/docs/book/src/getting-started/quickstart.md#install) |
+| ZCode | `zcode` | [Installer le CLI ZCode](https://www.npmjs.com/package/zcode-app-cli) |
 
 « Pris en charge » signifie que Multica peut invoquer ce CLI. Cela ne signifie pas que Multica vous fournit le compte, l'abonnement ou le quota de modèle de l'outil.
 
@@ -119,6 +120,11 @@ Choisissez le fournisseur et le modèle dans la configuration propre de QwenPaw.
 <Accordion title="Reasonix" id="reasonix">
 
 Exécutez `reasonix setup` et configurez un fournisseur et un modèle par défaut avant de démarrer le daemon.
+
+</Accordion>
+<Accordion title="ZCode" id="zcode">
+
+Installez le CLI communautaire avec `npm install -g zcode-app-cli`, puis lancez `zcode login` (autorisation via le navigateur, Z.AI ou BigModel) ou terminez l'assistant de configuration du premier lancement. Multica n'affiche aucun catalogue de modèles pour ZCode : les fournisseurs et les modèles se trouvent dans la configuration propre à ZCode (`~/.zcode/v2/provider_config.json`), et un identifiant de modèle qualifié (`provider/model`) saisi sur l'agent est transmis à `zcode -p --model`.
 
 </Accordion>
 </Accordions>

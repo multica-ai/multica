@@ -154,7 +154,7 @@ Windows 上先设 `$env:MULTICA_MODE="with-server"`，再跑 PowerShell 安装�
 
 ## 运行时
 
-Multica 不自带模型。它驱动的是你本来就装好、登录好的那些智能体 CLI——目前支持 26 种——所以换提供方
+Multica 不自带模型。它驱动的是你本来就装好、登录好的那些智能体 CLI——目前支持 27 种——所以换提供方
 就是切个下拉框，谈不上迁移。
 
 | Provider | CLI | Provider | CLI |
@@ -172,6 +172,7 @@ Multica 不自带模型。它驱动的是你本来就装好、登录好的那些
 | DeepSeek Harness | `dsh` | Oh-My-Pi | `omp` |
 | MiniMax Code | `mcode` | Dim | `dim` |
 | 华为云 CodeArts | `codearts` | ZeroClaw | `zeroclaw` |
+| ZCode | `zcode` | | |
 
 怎么装、怎么登录：[安装智能体运行时](https://multica.ai/docs/zh/install-agent-runtime) ·
 [AI 编程工具对照](https://multica.ai/docs/zh/providers)

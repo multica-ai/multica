@@ -324,12 +324,15 @@ Chaque outil intégré a une variable de chemin, `MULTICA_<PREFIX>_PATH`. Quand 
 | QwenPaw | `MULTICA_QWENPAW` | — |
 | Reasonix | `MULTICA_REASONIX` | ✓ |
 | Trae CLI | `MULTICA_TRAECLI` | ✓ |
+| ZCode | `MULTICA_ZCODE` | — (le modèle vient de la configuration propre à ZCode) |
 | ZeroClaw | `MULTICA_ZEROCLAW` | — (le modèle est géré par le profil d'agent ZeroClaw) |
 
 </Accordion>
 </Accordions>
 
 QwenPaw et MiniMax Code n'ont pas de variable de modèle, car Multica ne leur envoie jamais de modèle ; consultez [Comparaison des outils de codage IA](/providers#sources-des-modèles). DeepSeek Harness a aussi `MULTICA_DSH_PROFILE_BUNDLE` et `MULTICA_DSH_PLUGIN_PATH`, décrits dans la section suivante.
+
+ZCode n'a délibérément ni variable de modèle ni variable d'arguments : les fournisseurs, les modèles et la sélection par défaut enregistrée proviennent de la configuration propre à ZCode (`~/.zcode/v2/provider_config.json`), et un modèle saisi par agent est transmis via `zcode -p --model`.
 
 Les arguments par défaut à l'échelle de la machine via `MULTICA_<PREFIX>_ARGS` sont actuellement pris en charge pour cinq outils : Claude Code, Codex, CodeBuddy, Qwen Code et QwenPaw. Les variables sont `MULTICA_CLAUDE_ARGS`, `MULTICA_CODEX_ARGS`, `MULTICA_CODEBUDDY_ARGS`, `MULTICA_QWEN_ARGS` et `MULTICA_QWENPAW_ARGS`. Par exemple :
 

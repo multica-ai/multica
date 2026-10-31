@@ -297,6 +297,7 @@ The daemon auto-detects these AI CLIs on your PATH:
 | [QwenPaw](https://github.com/agentscope-ai/QwenPaw) | `qwenpaw` | QwenPaw ACP coding agent (ACP via `qwenpaw acp`; model is fixed by its own configuration) |
 | [MiniMax Code](https://github.com/MiniMax-AI/minimax-code) | `mcode` | MiniMax Code ACP coding agent (ACP via `mcode acp`; model is managed by MCode) |
 | [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) | `dsh` | DeepSeek Harness (`dsh --profile multica --stdio`; requires the Multica runtime profile to be installed; reads AGENTS.md and .dsh/skills/) |
+| [ZCode](https://github.com/zai-org/ZCode) | `zcode` | ZCode agent runtime (community CLI distribution `zcode-app-cli`; native `zcode -p <prompt> --output-format stream-json` protocol, not ACP; run `zcode login` first; models come from its own configuration) |
 
 You need at least one installed. The daemon registers each detected CLI as an available runtime.
 
@@ -423,6 +424,7 @@ Agent-specific overrides:
 | `MULTICA_QWENPAW_PATH` | Custom path to the `qwenpaw` binary |
 | `MULTICA_QWENPAW_ARGS` | Daemon-wide extra QwenPaw arguments (POSIX shellword parsing; managed protocol flags are filtered) |
 | `MULTICA_MCODE_PATH` | Custom path to the `mcode` binary |
+| `MULTICA_ZCODE_PATH` | Custom path to the `zcode` binary (no model variable: models come from the user's own ZCode configuration) |
 | `MULTICA_DSH_PATH` | Custom path to the `dsh` binary |
 | `MULTICA_DSH_MODEL` | Override the DeepSeek Harness model used (a model id from the dsh catalog, e.g. `deepseek-official/deepseek-chat`) |
 
@@ -448,6 +450,8 @@ If a configured server produces no tools, check the daemon log for those warning
 The daemon launches QwenPaw as `qwenpaw acp --workspace <per-task dir>`. It writes the task brief to `AGENTS.md`, and materialises the run's bound skills into `<per-task dir>/skills/` plus a `skill.json` manifest, so QwenPaw discovers them through its own workspace skill discovery. `acp` and `--workspace` are reserved: `custom_args` cannot override them. QwenPaw is the one runtime with no `MULTICA_QWENPAW_MODEL`: its `session/set_model` writes to a shared, persistent agent config rather than the session, so Multica never sends it a model and leaves that choice to QwenPaw's own configuration.
 
 The daemon launches MiniMax Code as `mcode acp`, writes the task brief to `AGENTS.md`, and injects bound skills under `.minimax/skills/`. MCode owns model selection and currently advertises `loadSession: false`; Multica therefore starts a fresh MCode session when a later run cannot load the saved session.
+
+The daemon launches ZCode as `zcode -p <prompt> --output-format stream-json --no-color` — ZCode's native stream-json protocol, not ACP. Providers, models, and the saved default selection come from the user's own `~/.zcode/v2/provider_config.json` (written by `zcode login` or the setup wizard), so there is no `MULTICA_ZCODE_MODEL`; a provider-qualified id (`provider/model`) entered per agent is passed as `zcode -p --model <provider/model>`. Resume passes `--resume <session id>` (ZCode `sess_…` ids). The task brief is delivered via `AGENTS.md` in the workdir, and bound skills are injected into `.zcode/skills/`.
 
 #### Hermes agent memory
 

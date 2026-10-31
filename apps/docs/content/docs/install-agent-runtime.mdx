@@ -49,6 +49,7 @@ Multica currently detects these commands:
 | Dim | `dim` | [DimCode](https://dimagent.cn/en/docs/cli) |
 | Devin CLI | `devin` | [Install Devin CLI](https://docs.devin.ai/cli/quickstart) |
 | ZeroClaw | `zeroclaw` | [ZeroClaw quickstart](https://github.com/zeroclaw-labs/zeroclaw/blob/master/docs/book/src/getting-started/quickstart.md#install) |
+| ZCode | `zcode` | [Install ZCode CLI](https://www.npmjs.com/package/zcode-app-cli) |
 
 "Supported" means Multica can invoke that CLI. It does not mean Multica provides the tool's account, subscription, or model quota for you.
 
@@ -125,6 +126,11 @@ Choose the provider and model in QwenPaw's own configuration. Multica cannot ove
 <Accordion title="Reasonix" id="reasonix">
 
 Run `reasonix setup` and configure a default provider and model before starting the daemon.
+
+</Accordion>
+<Accordion title="ZCode" id="zcode">
+
+Install the community CLI with `npm install -g zcode-app-cli`, then run `zcode login` (browser authorization with Z.AI or BigModel) or complete the first-run setup wizard. Multica shows no model catalog for ZCode: providers and models live in ZCode's own configuration (`~/.zcode/v2/provider_config.json`), and a provider-qualified model id (`provider/model`) entered on the agent is passed to `zcode -p --model`.
 
 </Accordion>
 </Accordions>

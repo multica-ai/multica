@@ -296,6 +296,15 @@ func ListModels(ctx context.Context, providerType string, runtimeCmd Command) (C
 		// empty list keeps the runtime default and manual model entry available
 		// without advertising a Token-Plan-specific model to other accounts.
 		return Catalog{Models: []Model{}}, nil
+	case "zcode":
+		// ZCode resolves providers and models from the user's own
+		// provider_config.json (account plans from `zcode login`, personal
+		// API-key providers, plus the saved default selection). There is no
+		// headless catalog command to enumerate them, so return an empty list:
+		// the runtime default applies, and manual model entry stays available
+		// for users who want to pin a specific provider-qualified id
+		// (`provider/model`) per agent — which `zcode -p --model` accepts.
+		return Catalog{Models: []Model{}}, nil
 	case "qwenpaw":
 		// QwenPaw's model selection is unsupported (session/set_model
 		// persists to agent scope, not session scope), so there is no

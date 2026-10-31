@@ -49,6 +49,7 @@ Install steps are in [Install AI coding tools](/install-agent-runtime).
 | Trae CLI | `traecli` | ✓ | ✓ | ✓ | `.traecli/skills/` |
 | Dim | `dim` | ✓ | ✓ | ✓ | — |
 | ZeroClaw | `zeroclaw` | ✓ | — | — | — |
+| ZCode | `zcode` | ✓ | — | ✓ | `.zcode/skills/` |
 
 "Multica-managed MCP" means you can define MCP servers in the agent configuration and Multica passes them to the tool before a run. The column only says whether Multica can configure it for you, not whether the tool has other ways to configure MCP.
 
@@ -68,6 +69,8 @@ Devin reads `WINDSURF_API_KEY` when set, otherwise the login saved by `devin aut
 
 QwenPaw, MiniMax Code, and ZeroClaw are exceptions: they do not accept a model chosen from Multica, so the picker is inert and shows "Managed by runtime". Choose the model in the tool's own configuration instead. An empty model list for these tools is expected and does not mean the runtime is offline.
 
+ZCode's model list is empty too, but model selection is still supported: providers and models live in ZCode's own configuration (`~/.zcode/v2/provider_config.json`), and there is no command to enumerate them. Enter a provider-qualified id (`provider/model`) manually to pin one — Multica passes it to `zcode -p --model` — or leave the model empty to use the default saved in ZCode.
+
 DeepSeek Harness advertises its model catalog from the runtime itself (`dsh --profile multica --list-models`). Its model ids use the `provider/model` form (for example `deepseek-official/deepseek-chat`), so select the full id from the list.
 
 <Callout type="info">
@@ -84,7 +87,7 @@ Retry and session-resumption rules are in [Runs](/tasks#manual-retry).
 
 ## MCP configuration
 
-Antigravity, GitHub Copilot CLI, DevEco Code, Muse Code, and ZeroClaw do not read the MCP configuration on an agent yet, so the field is not shown when creating agents for them.
+Antigravity, GitHub Copilot CLI, DevEco Code, Muse Code, ZCode, and ZeroClaw do not read the MCP configuration on an agent yet, so the field is not shown when creating agents for them.
 
 Managed MCP delivery for Pi requires Pi 0.99.0 or later. Older Pi versions continue to run agents that have no MCP configuration.
 

@@ -49,6 +49,7 @@ Multica 当前会检测以下命令：
 | TRAE CLI | `traecli` | [TRAE 官方站](https://www.trae.cn/) |
 | Dim | `dim` | [DimCode](https://dimagent.cn/docs/cli) |
 | ZeroClaw | `zeroclaw` | [ZeroClaw 快速开始](https://github.com/zeroclaw-labs/zeroclaw/blob/master/docs/book/src/getting-started/quickstart.md#install) |
+| ZCode | `zcode` | [安装 ZCode CLI](https://www.npmjs.com/package/zcode-app-cli) |
 
 "受支持"表示 Multica 能够调用对应 CLI，不代表 Multica 会替你提供该工具的账号、订阅或模型额度。
 
@@ -119,6 +120,11 @@ Muse Code 需要 1.4.10 或更高版本。按[官方安装和登录指南](https
 <Accordion title="Reasonix" id="reasonix">
 
 先运行 `reasonix setup`，配置默认的模型服务和模型，再启动守护进程。
+
+</Accordion>
+<Accordion title="ZCode" id="zcode">
+
+用 `npm install -g zcode-app-cli` 安装社区版 CLI，然后运行 `zcode login`（浏览器授权，使用 Z.AI 或 BigModel），或完成首次运行的设置向导。Multica 不提供 ZCode 的模型列表：模型服务和模型都来自 ZCode 自己的配置（`~/.zcode/v2/provider_config.json`），在智能体上手动填写 `provider/model` 形式的模型 id 时，Multica 会通过 `zcode -p --model` 传入。
 
 </Accordion>
 </Accordions>

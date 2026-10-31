@@ -386,6 +386,27 @@ function ZeroClawLogo({ className }: { className: string }) {
   );
 }
 
+// ZCode has no standalone logo asset to reference (multica-ai/multica#1543),
+// so this is a deliberately simple placeholder mark (a blocky Z on a rounded
+// tile) rather than a claimed "official" logo. currentColor keeps it legible
+// in both themes; swap for a real asset once ZCode ships one.
+function ZCodeLogo({ className }: { className: string }) {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      className={className}
+    >
+      <rect x="3.5" y="3.5" width="17" height="17" rx="4" />
+      <path d="M8.5 8.5h7l-7 7h7" />
+    </svg>
+  );
+}
+
 export function ProviderLogo({
   provider,
   className = "h-4 w-4",
@@ -450,6 +471,8 @@ export function ProviderLogo({
       return <DimLogo className={className} />;
     case "zeroclaw":
       return <ZeroClawLogo className={className} />;
+    case "zcode":
+      return <ZCodeLogo className={className} />;
     default:
       return <Monitor className={className} />;
   }

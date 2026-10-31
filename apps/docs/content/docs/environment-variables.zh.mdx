@@ -327,12 +327,15 @@ API key 与 base URL 都为空时，这一层关闭，不会发出任何上游�
 | QwenPaw | `MULTICA_QWENPAW` | — |
 | Reasonix | `MULTICA_REASONIX` | ✓ |
 | Trae CLI | `MULTICA_TRAECLI` | ✓ |
+| ZCode | `MULTICA_ZCODE` | —（模型来自 ZCode 自己的配置） |
 | ZeroClaw | `MULTICA_ZEROCLAW` | —（模型由 ZeroClaw 的智能体配置管理） |
 
 </Accordion>
 </Accordions>
 
 QwenPaw 和 MiniMax Code 没有模型变量，因为 Multica 不会向它们传模型，详见 [AI 编程工具对比](/providers#模型来源)。DeepSeek Harness 另有 `MULTICA_DSH_PROFILE_BUNDLE` 和 `MULTICA_DSH_PLUGIN_PATH`，见下一节。
+
+ZCode 刻意不设模型变量和参数变量：提供方、模型和默认选择都来自 ZCode 自己的配置（`~/.zcode/v2/provider_config.json`），在智能体上手动填写的模型会改由 `zcode -p --model` 传入。
 
 全机默认参数 `MULTICA_<前缀>_ARGS` 目前支持 Claude Code、Codex、CodeBuddy、Qwen Code 和 QwenPaw 五款工具，对应变量是 `MULTICA_CLAUDE_ARGS`、`MULTICA_CODEX_ARGS`、`MULTICA_CODEBUDDY_ARGS`、`MULTICA_QWEN_ARGS` 和 `MULTICA_QWENPAW_ARGS`。例如：
 
