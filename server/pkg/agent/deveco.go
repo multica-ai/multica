@@ -198,6 +198,12 @@ func (b *devecoBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 
 		exitErr := cmd.Wait()
 		close(procDone)
+		// Reap the group on the normal-exit path: deveco neuters cmd.Cancel to
+		// drive its own shutdown, so nothing signals the group when the leader
+		// exits on its own, and releaseProcessGroup is a Unix no-op — a descendant
+		// the agent left running would otherwise outlive the completed task
+		// (#8153). Mirrors runOwned; harmless if the group is already empty.
+		reapProcessTree(cmd)
 		releaseProcessGroup(cmd)
 		duration := time.Since(startTime)
 
