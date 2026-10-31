@@ -151,5 +151,16 @@
     },
     "language": "Language",
     "shortcuts": "Keyboard shortcuts"
+  },
+  "collection": {
+    "filter": "Filter",
+    "filter_count_one": "{{count}} filter",
+    "filter_count_other": "{{count}} filters",
+    "reset": "Reset",
+    "display": "Display settings"
+  },
+  "object_page": {
+    "toggle_panel": "Toggle right sidebar",
+    "properties": "Properties"
   }
 }

@@ -52,12 +52,16 @@ import { KeyboardShortcutsTab } from "./keyboard-shortcuts-tab";
 import { PluginsTab } from "./plugins-tab";
 import { McpTab } from "./mcp-tab";
 import { BillingTab } from "./billing-tab";
-import { SETTINGS_ANCHOR_ATTR } from "./settings-layout";
+import {
+  SETTINGS_ANCHOR_ATTR,
+  SettingsHeaderContext,
+  type SettingsHeaderSlots,
+} from "./settings-layout";
 import { searchSettings } from "./settings-search";
 import { HighlightText } from "../../search/highlight-text";
 import { useSettingsSearchIndex } from "./use-settings-search-index";
 import { WakeupsTab } from "./wakeups-tab";
-import { CollapsedNavTrigger } from "../../layout/page-header";
+import { CollapsedNavTrigger, PageHeader } from "../../layout/page-header";
 import { PanelHeader } from "../../layout/panel-nav";
 import { useListColumnCollapsed } from "../../layout/app-shell-context";
 import { ListColumn } from "../../layout/list-column";
@@ -265,6 +269,22 @@ export function SettingsPage({ extraDeviceTabs = [] }: SettingsPageProps = {}) {
         subgroup.entries.some((item) => item.value === value),
       ),
     );
+
+  // --- header ---------------------------------------------------------------
+  const [headerTrail, setHeaderTrail] = useState<HTMLElement | null>(null);
+  const [headerMeta, setHeaderMeta] = useState<HTMLElement | null>(null);
+  const [headerActions, setHeaderActions] = useState<HTMLElement | null>(null);
+  const [detailOpen, setDetailOpen] = useState(false);
+  const headerSlots = useMemo<SettingsHeaderSlots>(
+    () => ({
+      trail: headerTrail,
+      meta: headerMeta,
+      actions: headerActions,
+      onDetailChange: setDetailOpen,
+    }),
+    [headerTrail, headerMeta, headerActions],
+  );
+  const ActiveIcon = active.icon;
 
   // --- search ---------------------------------------------------------------
   const [query, setQuery] = useState("");
@@ -513,24 +533,43 @@ export function SettingsPage({ extraDeviceTabs = [] }: SettingsPageProps = {}) {
           )}
         </nav>
       </ListColumn>
-      <div
-        ref={contentRef}
-        key={`${active.value}:${location.integration ?? ""}`}
-        className="relative min-w-0 flex-1 overflow-y-auto overscroll-contain"
-      >
-        {listCollapsed && (
-          <div className="absolute left-3 top-3">
-            <CollapsedNavTrigger />
+      <div className="flex min-h-0 min-w-0 flex-1 flex-col">
+        <PageHeader leading={listCollapsed ? <CollapsedNavTrigger /> : false}>
+          <div className="flex min-w-0 flex-1 items-center gap-2">
+            <h2 className="flex min-w-0 items-center gap-2 px-2 text-body font-medium">
+              <ActiveIcon className="size-4 shrink-0 text-muted-foreground" aria-hidden="true" />
+              {detailOpen ? (
+                <AppLink
+                  href={href(active.value)}
+                  className="shrink-0 text-muted-foreground transition-colors hover:text-foreground"
+                >
+                  {active.label}
+                </AppLink>
+              ) : (
+                <span className="truncate">{active.label}</span>
+              )}
+              <span ref={setHeaderTrail} className="contents" />
+            </h2>
+            <span ref={setHeaderMeta} className="contents" />
           </div>
-        )}
-        <div
-          className={cn(
-            "mx-auto w-full px-4 py-6 sm:px-6 md:px-10 md:py-8",
-            active.wide ? "max-w-5xl" : "max-w-4xl",
-          )}
-        >
-          {active.content}
-        </div>
+          <div ref={setHeaderActions} className="flex shrink-0 items-center gap-2 empty:hidden" />
+        </PageHeader>
+        <SettingsHeaderContext.Provider value={headerSlots}>
+          <div
+            ref={contentRef}
+            key={`${active.value}:${location.integration ?? ""}`}
+            className="min-h-0 min-w-0 flex-1 overflow-y-auto overscroll-contain"
+          >
+            <div
+              className={cn(
+                "mx-auto w-full px-4 py-6 sm:px-6 md:px-10 md:py-8",
+                active.wide ? "max-w-5xl" : "max-w-4xl",
+              )}
+            >
+              {active.content}
+            </div>
+          </div>
+        </SettingsHeaderContext.Provider>
       </div>
     </div>
   );

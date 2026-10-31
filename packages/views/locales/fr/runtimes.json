@@ -1,9 +1,7 @@
 {
   "page": {
     "title": "Runtimes",
-    "learn_more": "En savoir plus →",
     "connect_remote": "Ajouter une machine",
-    "search_placeholder": "Rechercher…",
     "scope_mine": "Les miens",
     "scope_all": "Tous",
     "live": "En direct",
@@ -25,7 +23,7 @@
       "title": "Démarrage du runtime local…",
       "hint": "Connexion à l’espace de travail..."
     },
-    "add": "Ajouter",
+    "add": "Ajouter un runtime",
     "add_menu": {
       "machines": "Machines",
       "this_computer": "Cet ordinateur",
@@ -67,7 +65,7 @@
       "no_matches": "Aucune machine ni aucun service cloud ne correspond"
     },
     "filters": {
-      "all": "Tous",
+      "all": "Tous les runtimes",
       "online": "En ligne",
       "offline": "Hors ligne"
     }
@@ -93,8 +91,7 @@
     "this_machine": "Cet appareil",
     "local_badge": "Local · cette machine",
     "pending_custom_runtimes": "Runtimes personnalisés en attente",
-    "runtime_count_one": "{{count}} runtime",
-    "runtime_count_other": "{{count}} runtimes",
+    "daemon_title": "Daemon",
     "busy_count_one": "{{count}} occupé",
     "busy_count_other": "{{count}} occupés",
     "no_matches_title": "Aucune machine",
@@ -162,14 +159,10 @@
     "fact_owner": "Propriétaire",
     "fact_device": "Appareil",
     "fact_runtime": "Runtime",
-    "technical_details": "Détails techniques",
     "fact_daemon_cli": "CLI du daemon",
     "fact_daemon_id": "Identifiant du daemon",
-    "serving_title": "Au service de",
-    "serving_count_one": "{{count}} agent",
-    "serving_count_other": "{{count}} agents",
+    "usage_title": "Consommation",
     "no_agents": "Aucun agent n'est encore associé à ce runtime.",
-    "diagnostics_title": "Diagnostics",
     "diagnostics_cli": "CLI",
     "diagnostics_visibility": "Visibilité",
     "visibility_label": {

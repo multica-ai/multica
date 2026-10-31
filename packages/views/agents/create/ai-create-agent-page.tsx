@@ -7,7 +7,7 @@ import { useWorkspaceId } from "@multica/core/hooks";
 import { useWorkspacePaths } from "@multica/core/paths";
 import { runtimeDisplayLabel } from "@multica/core/runtimes";
 import type { RuntimeDevice } from "@multica/core/types";
-import { useBackOrReplace, useNavigation } from "../../navigation";
+import { useNavigation } from "../../navigation";
 import { useT } from "../../i18n";
 import { BuilderSetupPanel } from "./builder-setup-panel";
 import { AgentCreateChip, AgentCreateShell } from "./create-shell";
@@ -33,7 +33,6 @@ export function AiCreateAgentPage() {
   const wsId = useWorkspaceId();
   const paths = useWorkspacePaths();
   const navigation = useNavigation();
-  const backOrReplace = useBackOrReplace();
   const squadId = navigation.searchParams.get("squad");
 
   const builderSessions = useQuery(agentBuilderSessionListOptions(wsId));
@@ -66,7 +65,9 @@ export function AiCreateAgentPage() {
           : t(($) => $.creation_studio.title)
       }
       step={t(($) => $.creation_studio.step_ai)}
-      onBack={() => backOrReplace(paths.newAgent())}
+      onClose={() =>
+        navigation.push(squadId ? paths.squadDetail(squadId) : paths.agents())
+      }
       chips={
         <>
           <AgentCreateChip>

@@ -4,6 +4,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { ArrowLeft, MessageSquare } from "@multica/ui/icons";
 import { toast } from "sonner";
 import { Button } from "@multica/ui/components/ui/button";
+import { IconButton } from "@multica/ui/components/common/icon-button";
 import { useIsCompact } from "@multica/ui/hooks/use-mobile";
 import { useRequiredWorkspaceSlug, useWorkspacePaths } from "@multica/core/paths";
 import { getCurrentSlug } from "@multica/core/platform";
@@ -265,6 +266,12 @@ export function ChatPage() {
     </div>
   );
 
+  const compactConversation = isCompact && (!!c.activeSessionId || composingNew);
+  const backToList = () => {
+    c.setActiveSession(null);
+    setComposingNew(false);
+  };
+
   // The conversation pane: message list / skeleton / empty above a persistent
   // banner + input. Identical composition to the floating window's body, so a
   // brand-new chat (no active session) shows the agent-aware empty state + input.
@@ -276,7 +283,20 @@ export function ChatPage() {
     <div className="flex flex-1 flex-col min-h-0 @container">
       {c.currentSession && (
         <ChatSessionHeader
-          leading={listCollapsed ? <CollapsedNavTrigger /> : undefined}
+          leading={
+            compactConversation ? (
+              <IconButton
+                label={t(($) => $.page.title)}
+                tooltipSide="bottom"
+                className="text-muted-foreground"
+                onClick={backToList}
+              >
+                <ArrowLeft />
+              </IconButton>
+            ) : listCollapsed ? (
+              <CollapsedNavTrigger />
+            ) : undefined
+          }
           session={c.currentSession}
           agent={c.activeAgent}
           onArchive={handleArchive}
@@ -380,23 +400,24 @@ export function ChatPage() {
 
   // -- Compact: list / conversation toggle -----------------------------------
   if (isCompact) {
-    if (c.activeSessionId || composingNew) {
+    if (compactConversation) {
+      // An open session carries the way back in its own header; a new chat
+      // has no session header yet, so it gets a bar of its own.
       return (
         <div className="flex flex-1 flex-col min-h-0">
-          <div className="flex h-12 shrink-0 items-center border-b px-2">
-            <Button
-              variant="ghost"
-              size="sm"
-              onClick={() => {
-                c.setActiveSession(null);
-                setComposingNew(false);
-              }}
-              className="gap-1.5 text-muted-foreground"
-            >
-              <ArrowLeft className="h-4 w-4" />
-              {t(($) => $.page.title)}
-            </Button>
-          </div>
+          {!c.currentSession && (
+            <div className="flex h-12 shrink-0 items-center border-b px-2">
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={backToList}
+                className="gap-1.5 text-muted-foreground"
+              >
+                <ArrowLeft className="h-4 w-4" />
+                {t(($) => $.page.title)}
+              </Button>
+            </div>
+          )}
           {conversation}
         </div>
       );

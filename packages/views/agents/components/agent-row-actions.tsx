@@ -285,7 +285,7 @@ export function AgentRowActions({
 
 type AgentsT = ReturnType<typeof useT<"agents">>["t"];
 
-function describeCancelImpact(running: number, queued: number, t: AgentsT): string {
+export function describeCancelImpact(running: number, queued: number, t: AgentsT): string {
   if (running === 0 && queued === 0) {
     return t(($) => $.row_actions.cancel_dialog_no_tasks);
   }

@@ -13,16 +13,13 @@ export interface SkillRow {
 
 /**
  * Pure row-filter predicate: returns true if the row matches all active
- * filter dimensions plus name search. Empty arrays are inactive. Label
- * matching is OR-within-labels, matching Issue list semantics.
+ * filter dimensions. Empty arrays are inactive. Label matching is
+ * OR-within-labels, matching Issue list semantics.
  */
 export function rowMatchesFilters(
   row: SkillRow,
   filters: SkillListFilters,
-  query: string,
 ): boolean {
-  const q = query.trim().toLowerCase();
-  if (q && !row.skill.name.toLowerCase().includes(q)) return false;
   if (filters.usage.length > 0) {
     const usage = row.agents.length > 0 ? "used" : "unused";
     if (!filters.usage.includes(usage)) return false;

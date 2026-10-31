@@ -1,8 +1,8 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
+import { useCallback, useRef, useState, type ReactNode } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { Bell, Clock3, AlertCircle, ListChecks, Search, TriangleAlert } from "@multica/ui/icons";
+import { AlarmClock, Bell, Clock3, AlertCircle, ListChecks, TriangleAlert } from "@multica/ui/icons";
 import { toast } from "sonner";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { useWorkspacePaths } from "@multica/core/paths";
@@ -21,14 +21,16 @@ import type {
 import { Switch } from "@multica/ui/components/ui/switch";
 import { Button } from "@multica/ui/components/ui/button";
 import { Checkbox } from "@multica/ui/components/ui/checkbox";
-import { Input } from "@multica/ui/components/ui/input";
 import {
-  Select,
-  SelectTrigger,
-  SelectValue,
-  SelectContent,
-  SelectItem,
-} from "@multica/ui/components/ui/select";
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuRadioGroup,
+  DropdownMenuRadioItem,
+  DropdownMenuSub,
+  DropdownMenuSubContent,
+  DropdownMenuSubTrigger,
+  DropdownMenuTrigger,
+} from "@multica/ui/components/ui/dropdown-menu";
 import {
   Table,
   TableHeader,
@@ -48,7 +50,14 @@ import {
 import { cn } from "@multica/ui/lib/utils";
 import { AppLink } from "../../navigation";
 import { useLocale, useT } from "../../i18n";
-import { CollectionPageState } from "../../layout/collection-page";
+import {
+  CollectionCreateButton,
+  CollectionFilterButton,
+  CollectionPageHeader,
+  CollectionPageState,
+  CollectionResetButton,
+  CollectionScopeItems,
+} from "../../layout/collection-page";
 import { ActorAvatar } from "../../common/actor-avatar";
 import { TranscriptButton } from "../../common/task-transcript";
 import { useViewingTimezone } from "../../common/use-viewing-timezone";
@@ -61,6 +70,9 @@ import {
   isActiveWakeupRun,
   useWakeupText,
 } from "../../issues/components/wakeup-presentation";
+import { wakeupCountsOptions } from "./wakeups-tab";
+
+const SCOPES = ["active", "paused", "disabled", "ended", "all"] as const;
 
 // Per-row controls (selection, prompt editing, the last run's transcript)
 // stay out of the way until the pointer or focus is on the row.
@@ -375,40 +387,43 @@ export function WorkspaceWakeupCreate({ open, onOpenChange }: { open: boolean; o
   );
 }
 
-function FilterSelect<T extends string>({
+/** One filter dimension of the header's filter menu; the first item is "any". */
+function FilterSub<T extends string>({
   label,
   value,
   items,
-  disabled,
   onChange,
 }: {
   label: string;
   value: T;
   items: { value: T; label: string }[];
-  disabled: boolean;
   onChange: (value: T) => void;
 }) {
+  const current = value !== items[0]?.value ? items.find((item) => item.value === value) : undefined;
   return (
-    <Select
-      items={items}
-      value={value}
-      disabled={disabled}
-      onValueChange={(next) => {
-        const item = items.find((candidate) => candidate.value === next);
-        if (item) onChange(item.value);
-      }}
-    >
-      <SelectTrigger size="sm" className="max-w-44" aria-label={label}>
-        <SelectValue />
-      </SelectTrigger>
-      <SelectContent>
-        {items.map((item) => (
-          <SelectItem key={item.value} value={item.value}>
-            {item.label}
-          </SelectItem>
-        ))}
-      </SelectContent>
-    </Select>
+    <DropdownMenuSub>
+      <DropdownMenuSubTrigger>
+        <span className="flex-1">{label}</span>
+        {current && (
+          <span className="max-w-32 truncate pl-3 text-caption font-medium text-primary">{current.label}</span>
+        )}
+      </DropdownMenuSubTrigger>
+      <DropdownMenuSubContent className="max-h-72 w-auto min-w-44 overflow-y-auto">
+        <DropdownMenuRadioGroup
+          value={value}
+          onValueChange={(next) => {
+            const item = items.find((candidate) => candidate.value === next);
+            if (item) onChange(item.value);
+          }}
+        >
+          {items.map((item) => (
+            <DropdownMenuRadioItem key={item.value} value={item.value}>
+              <span className="truncate">{item.label}</span>
+            </DropdownMenuRadioItem>
+          ))}
+        </DropdownMenuRadioGroup>
+      </DropdownMenuSubContent>
+    </DropdownMenuSub>
   );
 }
 
@@ -425,7 +440,7 @@ export function WorkspaceWakeups() {
     offset: 0,
     limit: 50,
   });
-  const [search, setSearch] = useState("");
+  const [createOpen, setCreateOpen] = useState(false);
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [confirmation, setConfirmation] = useState<WorkspaceWakeup[]>([]);
   const [batchResult, setBatchResult] = useState<{
@@ -435,7 +450,7 @@ export function WorkspaceWakeups() {
   const query = useQuery(workspaceWakeupsOptions(wsId, filters));
   // The newest rule the platform paused, for the banner above the list.
   const pausedQuery = useQuery({
-    ...workspaceWakeupsOptions(wsId, { scope: "paused", kind: "all", source: "", search: "", agent_id: "", offset: 0, limit: 1 }),
+    ...wakeupCountsOptions(wsId),
     enabled: !!wsId && (query.data?.counts.paused ?? 0) > 0,
   });
   const batch = useDisableWorkspaceWakeups(wsId);
@@ -447,13 +462,6 @@ export function WorkspaceWakeups() {
     setSelected(new Set());
     setBatchResult(null);
   }, []);
-  // Search as you type, once typing pauses.
-  useEffect(() => {
-    const next = search.trim();
-    if (next === filters.search) return;
-    const timer = setTimeout(() => change({ search: next }), 300);
-    return () => clearTimeout(timer);
-  }, [search, filters.search, change]);
   const kinds = [
     { value: "all" as const, label: t(($) => $.wakeups.all_triggers) },
     { value: "event" as const, label: t(($) => $.wakeups.event) },
@@ -472,7 +480,8 @@ export function WorkspaceWakeups() {
   ];
   const pausedCount = query.data?.counts.paused ?? 0;
   const latestPaused = pausedQuery.data?.items[0];
-  const filtered = filters.scope !== "all" || !!filters.search || filters.kind !== "all" || !!filters.source || !!filters.agent_id;
+  const filtered = filters.scope !== "all" || filters.kind !== "all" || !!filters.source || !!filters.agent_id;
+  const filterCount = [filters.kind !== "all", !!filters.source, !!filters.agent_id].filter(Boolean).length;
   let body: ReactNode;
   if (query.isError) {
     body = (
@@ -501,10 +510,7 @@ export function WorkspaceWakeups() {
             <Button
               variant="outline"
               size="sm"
-              onClick={() => {
-                setSearch("");
-                change({ scope: "all", kind: "all", source: "", search: "", agent_id: "" });
-              }}
+              onClick={() => change({ scope: "all", kind: "all", source: "", agent_id: "" })}
             >
               {t(($) => $.wakeups.clear_filters)}
             </Button>
@@ -517,8 +523,8 @@ export function WorkspaceWakeups() {
     body = (
       <div className="min-h-0 flex-1 overflow-auto">
         <Table className="min-w-[900px]">
-          <TableHeader>
-            <TableRow className="group/row">
+          <TableHeader className="[&_th]:h-9 [&_th]:text-caption [&_th]:font-normal [&_th]:text-muted-foreground">
+            <TableRow className="group/row hover:bg-transparent">
               <TableHead className="w-8 pl-4 pr-0">
                 <div className={cn(rowIntent, selecting && "opacity-100")}>
                   <Checkbox
@@ -570,6 +576,46 @@ export function WorkspaceWakeups() {
   }
   return (
     <>
+      <CollectionPageHeader
+        icon={AlarmClock}
+        title={t(($) => $.wakeups.scopes[filters.scope])}
+        menu={
+          <CollectionScopeItems
+            value={filters.scope}
+            options={SCOPES.map((scope) => ({
+              value: scope,
+              label: t(($) => $.wakeups.scopes[scope]),
+              count: query.data?.counts[scope],
+            }))}
+            onChange={(scope) => {
+              if (!batch.isPending) change({ scope });
+            }}
+          />
+        }
+        tools={
+          <>
+            <DropdownMenu>
+              <DropdownMenuTrigger
+                disabled={batch.isPending}
+                render={<CollectionFilterButton count={filterCount} />}
+              />
+              <DropdownMenuContent align="start" className="w-auto min-w-44">
+                <FilterSub label={t(($) => $.wakeups.source)} value={filters.source} items={sources} onChange={(source) => change({ source })} />
+                <FilterSub label={t(($) => $.wakeups.trigger)} value={filters.kind} items={kinds} onChange={(kind) => change({ kind })} />
+                <FilterSub label={t(($) => $.wakeups.target_agent)} value={filters.agent_id} items={agents} onChange={(agent_id) => change({ agent_id })} />
+              </DropdownMenuContent>
+            </DropdownMenu>
+            {filterCount > 0 && (
+              <CollectionResetButton
+                onClick={() => change({ kind: "all", source: "", agent_id: "" })}
+              />
+            )}
+          </>
+        }
+        actions={
+          <CollectionCreateButton label={t(($) => $.wakeups.create)} onClick={() => setCreateOpen(true)} />
+        }
+      />
       {pausedCount > 0 && latestPaused && filters.scope !== "paused" && (
         <div
           role="status"
@@ -589,49 +635,6 @@ export function WorkspaceWakeups() {
           </Button>
         </div>
       )}
-      {/* One row: scope on the left, the narrowing filters and search on the
-          right. It only wraps on narrow windows. */}
-      <div className="flex shrink-0 flex-wrap items-center gap-2 px-4 pb-2 pt-3">
-        <div role="group" aria-label={t(($) => $.wakeups.scope)} className="flex shrink-0 items-center gap-0.5 rounded-lg bg-muted p-0.5">
-          {(["active", "paused", "disabled", "ended", "all"] as const).map((scope) => {
-            const active = filters.scope === scope;
-            return (
-              <button
-                key={scope}
-                type="button"
-                aria-pressed={active}
-                disabled={batch.isPending}
-                onClick={() => change({ scope })}
-                className={cn(
-                  "inline-flex h-7 items-center gap-1 rounded-md px-2.5 text-caption text-muted-foreground outline-none hover:text-foreground focus-visible:ring-3 focus-visible:ring-ring/50 disabled:opacity-50",
-                  active && "bg-surface font-medium text-foreground shadow-[var(--surface-shadow)]",
-                )}
-              >
-                {t(($) => $.wakeups.scopes[scope])}
-                <span className="tabular-nums text-muted-foreground">{query.data?.counts[scope] ?? "—"}</span>
-              </button>
-            );
-          })}
-        </div>
-        <div className="ml-auto flex items-center gap-2">
-          <FilterSelect label={t(($) => $.wakeups.source)} value={filters.source} items={sources} disabled={batch.isPending} onChange={(source) => change({ source })} />
-          <FilterSelect label={t(($) => $.wakeups.trigger)} value={filters.kind} items={kinds} disabled={batch.isPending} onChange={(kind) => change({ kind })} />
-          <FilterSelect label={t(($) => $.wakeups.target_agent)} value={filters.agent_id} items={agents} disabled={batch.isPending} onChange={(agent_id) => change({ agent_id })} />
-          <div className="relative">
-            <Search className="pointer-events-none absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" aria-hidden="true" />
-            <Input
-              type="search"
-              className="h-8 w-52 pl-8"
-              value={search}
-              maxLength={256}
-              disabled={batch.isPending}
-              onChange={(event) => setSearch(event.target.value)}
-              aria-label={t(($) => $.wakeups.search)}
-              placeholder={t(($) => $.wakeups.search)}
-            />
-          </div>
-        </div>
-      </div>
       {batchResult && (
         <p
           role="status"
@@ -711,6 +714,7 @@ export function WorkspaceWakeups() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+      <WorkspaceWakeupCreate open={createOpen} onOpenChange={setCreateOpen} />
     </>
   );
 }

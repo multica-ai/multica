@@ -1,6 +1,5 @@
 {
   "page": {
-    "title": "自动化",
     "new_autopilot": "新建自动化",
     "start_blank": "从空白开始",
     "table": {
@@ -20,7 +19,6 @@
       "title": "还没有自动化",
       "hint": "为你的智能体安排周期性工作。从模板选一个，或从空白开始。"
     },
-    "scope_all": "全部",
     "no_matches": "没有匹配的自动化",
     "retry": "重试"
   },
@@ -87,10 +85,8 @@
     "run_blocked_quota_exceeded": "未触发——本周期的运行额度已用尽",
     "run_blocked_issue_limit_reached": "未触发——工作区任务总数已达到上限",
     "run_blocked_generic": "未触发——本次运行已被拦截",
-    "section_properties": "属性",
     "section_triggers": "触发器",
     "section_run_history": "运行历史",
-    "section_danger": "危险操作",
     "field_agent": "智能体",
     "field_created_by": "创建者",
     "field_output_mode": "输出模式",
@@ -100,6 +96,16 @@
     "field_prompt": "Prompt",
     "field_subscribers": "订阅者",
     "field_subscribers_none": "无",
+    "no_prompt": "还没有 Prompt。",
+    "copy_link": "复制链接",
+    "link_copied": "链接已复制",
+    "link_copy_failed": "无法复制链接",
+    "open_project": "打开项目",
+    "summary": {
+      "create_issue": "{{agent}} 每次运行创建一个任务",
+      "run_only": "{{agent}} 直接运行，不创建任务",
+      "with_trigger": "{{trigger}} · {{action}}"
+    },
     "add_trigger": "添加触发器",
     "no_triggers": "未配置触发器。添加一个时间表让它自动运行。",
     "no_runs": "暂无运行记录。点击\"立即运行\"手动触发。",
@@ -441,15 +447,10 @@
     "search_placeholder": "搜索时区..."
   },
   "toolbar": {
-    "result_count_title": "当前结果 / 全部自动化",
-    "filter_label": "筛选",
-    "filter_active_count_other": "{{count}} 项筛选",
-    "clear_filters": "清除筛选",
     "section_assignee": "执行者",
     "section_mode": "模式",
     "section_trigger": "触发器",
     "section_creator": "创建者",
-    "display": "显示",
     "sort_by": "排序",
     "direction_asc": "升序",
     "direction_desc": "降序",
@@ -473,7 +474,6 @@
   },
   "wakeups": {
     "title": "任务唤醒",
-    "scope": "范围",
     "issue": "任务",
     "trigger": "触发条件",
     "enabled": "开启",
@@ -482,7 +482,6 @@
     "at": "单次定时",
     "recurring": "周期",
     "all_agents": "所有智能体",
-    "search": "搜索任务或智能体",
     "running": "运行中",
     "active_runs": "{{count}} 个运行未结束",
     "issue_closed": "任务已关闭",
@@ -506,7 +505,7 @@
     "batch_result": "已关闭 {{succeeded}} 项，失败 {{failed}} 项。",
     "scopes": {
       "active": "待唤醒或执行中",
-      "all": "全部",
+      "all": "全部唤醒",
       "disabled": "已关闭",
       "ended": "已结束",
       "paused": "已暂停"
@@ -518,7 +517,7 @@
     "batch_partial": "已关闭 {{succeeded}} 条，{{failed}} 条失败；失败项仍保留选中，可重试。",
     "source": "来源",
     "sources": {
-      "all": "来源：全部",
+      "all": "全部来源",
       "member": "成员",
       "agent": "智能体",
       "system": "系统"

@@ -62,21 +62,22 @@ import {
 import { TruncatedTooltip } from "@multica/ui/components/common/truncated-tooltip";
 import { useNavigation, useRowLink } from "../../navigation";
 import { ActorAvatar } from "../../common/actor-avatar";
-import { docsLocalePrefix } from "../../common/docs-locale";
 import { ProviderLogo } from "../../runtimes/components/provider-logo";
 import {
+  CollectionCreateButton,
   CollectionPageHeader,
-  CollectionPageHeaderAction,
   CollectionPageState,
+  CollectionResetButton,
+  CollectionScopeItems,
 } from "../../layout/collection-page";
 import { availabilityConfig } from "../presence";
 import { AgentRowActions } from "./agent-row-actions";
 import {
-  AgentListToolbar,
+  AgentListDisplayMenu,
+  AgentListFilterMenu,
   countActiveFilterDimensions,
 } from "./agent-list-toolbar";
 import { useLocale, useT } from "../../i18n";
-import { matchesPinyin } from "../../editor/extensions/pinyin-match";
 
 // Column template — single source of truth for header, rows, and skeletons.
 // Same conventions as the skills/autopilots lists (see list-grid.tsx):
@@ -166,17 +167,6 @@ function lastActiveDaysAgo(activity: AgentActivity | null): number | null {
   return null;
 }
 
-function matchesAgentSearch(row: AgentListRow, query: string): boolean {
-  if (!query) return true;
-  const { agent } = row;
-  return (
-    agent.name.toLowerCase().includes(query) ||
-    matchesPinyin(agent.name, query) ||
-    (agent.description?.toLowerCase().includes(query) ?? false) ||
-    (agent.description ? matchesPinyin(agent.description, query) : false)
-  );
-}
-
 /**
  * Pure row-filter predicate: returns true if the row matches all active
  * filter dimensions. Empty filter arrays are inactive (the row passes). The
@@ -187,9 +177,7 @@ function matchesAgentSearch(row: AgentListRow, query: string): boolean {
 export function rowMatchesFilters(
   row: AgentListRow,
   filters: AgentListFilters,
-  query: string,
 ): boolean {
-  if (!matchesAgentSearch(row, query.trim().toLowerCase())) return false;
   if (
     filters.availability.length > 0 &&
     (!row.presence || !filters.availability.includes(row.presence.availability))
@@ -249,64 +237,31 @@ export interface AgentsPageProps {
 
 // Page header
 
-function PageHeaderBar({
-  totalCount,
-  onCreate,
-}: {
-  totalCount: number;
-  onCreate: () => void;
-}) {
-  const { t, i18n } = useT("agents");
-  return (
-    <CollectionPageHeader
-      icon={Bot}
-      title={t(($) => $.page.title)}
-      count={totalCount}
-      learnMore={{
-        href: `https://multica.ai/docs${docsLocalePrefix(i18n.language)}/agents`,
-        label: t(($) => $.page.learn_more),
-      }}
-      actions={
-        <CollectionPageHeaderAction
-          icon={Plus}
-          label={t(($) => $.page.new_agent)}
-          onClick={onCreate}
-        />
-      }
-    />
-  );
-}
-
 function ListError({
-  onCreate,
   listError,
   onRetry,
 }: {
-  onCreate: () => void;
   listError: unknown;
   onRetry: () => void;
 }) {
   const { t } = useT("agents");
   return (
-    <div className="flex flex-1 min-h-0 flex-col">
-      <PageHeaderBar totalCount={0} onCreate={onCreate} />
-      <CollectionPageState
-        role="alert"
-        tone="destructive"
-        icon={AlertCircle}
-        title={t(($) => $.page.list_load_failed)}
-        description={
-          listError instanceof Error
-            ? listError.message
-            : t(($) => $.page.list_load_failed_default)
-        }
-        actions={
-          <Button type="button" variant="outline" size="sm" onClick={onRetry}>
-            {t(($) => $.page.try_again)}
-          </Button>
-        }
-      />
-    </div>
+    <CollectionPageState
+      role="alert"
+      tone="destructive"
+      icon={AlertCircle}
+      title={t(($) => $.page.list_load_failed)}
+      description={
+        listError instanceof Error
+          ? listError.message
+          : t(($) => $.page.list_load_failed_default)
+      }
+      actions={
+        <Button type="button" variant="outline" size="sm" onClick={onRetry}>
+          {t(($) => $.page.try_again)}
+        </Button>
+      }
+    />
   );
 }
 
@@ -790,11 +745,6 @@ export function AgentsPage(_props: AgentsPageProps = {}) {
   const [selectedIds, setSelectedIds] = useState<ReadonlySet<string>>(
     new Set(),
   );
-  // Search lives in the view store (session-only) so it survives opening an
-  // agent and navigating back to the list.
-  const search = useAgentsViewStore((s) => s.search);
-  const setSearch = useAgentsViewStore((s) => s.setSearch);
-
   const rawScope = useAgentsViewStore((s) => s.scope);
   const scope = AGENT_SCOPES.includes(rawScope) ? rawScope : "mine";
   const setScope = useAgentsViewStore((s) => s.setScope);
@@ -862,8 +812,8 @@ export function AgentsPage(_props: AgentsPageProps = {}) {
   }, [agents, currentUser]);
 
   // Rows within the current scope, unfiltered, fully assembled — the
-  // toolbar's option lists and the "n / total" denominator derive from
-  // this; cells never pull their own queries.
+  // filter menu's option lists derive from this; cells never pull their
+  // own queries.
   const scopeRows = useMemo<AgentListRow[]>(() => {
     const inScope = agents.filter((a) => {
       if (scope === "archived") return !!a.archived_at;
@@ -900,9 +850,9 @@ export function AgentsPage(_props: AgentsPageProps = {}) {
     isWorkspaceAdmin,
   ]);
 
-  // Visible rows: local search + filters, then sort.
+  // Visible rows: filters, then sort.
   const rows = useMemo<AgentListRow[]>(() => {
-    const filtered = scopeRows.filter((row) => rowMatchesFilters(row, filters, search));
+    const filtered = scopeRows.filter((row) => rowMatchesFilters(row, filters));
 
     const dir = sortDirection === "asc" ? 1 : -1;
     filtered.sort((a, b) => {
@@ -931,25 +881,15 @@ export function AgentsPage(_props: AgentsPageProps = {}) {
       );
     });
     return filtered;
-  }, [scopeRows, search, filters, sortField, sortDirection]);
+  }, [scopeRows, filters, sortField, sortDirection]);
 
   const noMatchText = useMemo(() => {
-    const query = search.trim();
-    if (query) {
-      if (scope === "archived") {
-        return t(($) => $.no_matches.search_archived, { query });
-      }
-      if (countActiveFilterDimensions(filters) > 0) {
-        return t(($) => $.no_matches.search_active_filtered, { query });
-      }
-      return t(($) => $.no_matches.search_active, { query });
-    }
     if (scope === "archived") return t(($) => $.no_matches.no_archived);
     if (countActiveFilterDimensions(filters) > 0) {
       return t(($) => $.no_matches.no_filter_match);
     }
     return t(($) => $.no_matches.title);
-  }, [filters, scope, search, t]);
+  }, [filters, scope, t]);
 
   // Row virtualization — headless math, offsets as padding on the rows
   // wrapper, fixed-height rows. The scroll element is the SINGLE outer
@@ -994,18 +934,14 @@ export function AgentsPage(_props: AgentsPageProps = {}) {
       : 0,
   };
 
-  if (listError) {
-    return (
-      <ListError
-        onCreate={() => navigation.push(paths.newAgent())}
-        listError={listError}
-        onRetry={() => refetchList()}
-      />
-    );
-  }
-
-  const totalCount = agents.filter((a) => !a.archived_at).length;
-  const showEmpty = !isLoading && agents.length === 0;
+  const showEmpty = !listError && !isLoading && agents.length === 0;
+  const hasNarrowing = countActiveFilterDimensions(filters) > 0;
+  const scopeTitles: Record<AgentsScope, string> = {
+    mine: t(($) => $.page.scope_title.mine),
+    all: t(($) => $.page.scope_title.all),
+    archived: t(($) => $.page.scope_title.archived),
+  };
+  const openCreate = () => navigation.push(paths.newAgent());
 
   // The active sort field / availability filter reads columns that arrive in
   // separate queries from the main agent list (activity → lastActiveDays,
@@ -1032,38 +968,57 @@ export function AgentsPage(_props: AgentsPageProps = {}) {
     // relative: positioning anchor for the batch toolbar (page-centered,
     // not viewport-centered).
     <div className="relative flex flex-1 min-h-0 flex-col">
-      <PageHeaderBar
-        totalCount={totalCount}
-        onCreate={() => navigation.push(paths.newAgent())}
+      <CollectionPageHeader
+        icon={Bot}
+        title={scopeTitles[scope]}
+        menu={
+          <CollectionScopeItems
+            value={scope}
+            onChange={setScope}
+            options={AGENT_SCOPES.map((value) => ({
+              value,
+              label: scopeTitles[value],
+              count: scopeCounts[value],
+            }))}
+          />
+        }
+        tools={
+          <>
+            <AgentListFilterMenu
+              filters={filters}
+              onToggleFilter={toggleFilter}
+              allRows={scopeRows}
+              members={members}
+            />
+            {hasNarrowing ? <CollectionResetButton onClick={clearFilters} /> : null}
+          </>
+        }
+        actions={
+          <>
+            <AgentListDisplayMenu
+              sortField={sortField}
+              sortDirection={sortDirection}
+              onSortFieldChange={handleSortFieldSelect}
+              onSortDirectionChange={setSortDirection}
+              hiddenColumns={hiddenColumns}
+              onToggleColumn={toggleColumn}
+            />
+            <CollectionCreateButton
+              label={t(($) => $.page.new_agent)}
+              onClick={openCreate}
+            />
+          </>
+        }
       />
 
-      {showEmpty ? (
+      {listError ? (
+        <ListError listError={listError} onRetry={() => refetchList()} />
+      ) : showEmpty ? (
         <div className="flex flex-1 items-center justify-center">
-          <EmptyState onCreate={() => navigation.push(paths.newAgent())} />
+          <EmptyState onCreate={openCreate} />
         </div>
       ) : (
         <>
-          {/* Mounted through loading so the rows don't drop by a toolbar's
-              height when the list lands. */}
-          <AgentListToolbar
-            scope={scope}
-            onScopeChange={setScope}
-            scopeCounts={scopeCounts}
-            search={search}
-            onSearchChange={setSearch}
-            filters={filters}
-            onToggleFilter={toggleFilter}
-            onClearFilters={clearFilters}
-            sortField={sortField}
-            sortDirection={sortDirection}
-            onSortFieldChange={handleSortFieldSelect}
-            onSortDirectionChange={setSortDirection}
-            hiddenColumns={hiddenColumns}
-            onToggleColumn={toggleColumn}
-            allRows={scopeRows}
-            members={members}
-            visibleCount={rows.length}
-          />
           {isLoading || !listReady ? (
             <div className="flex-1 overflow-y-auto @container">
               <LoadingSkeleton />

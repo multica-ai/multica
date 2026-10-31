@@ -2,14 +2,20 @@
 
 import { useMemo } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { Code, Clock, Plus, Webhook, Zap } from "@multica/ui/icons";
+import { AlarmClock, Code, Clock, Plus, Webhook, Zap } from "@multica/ui/icons";
 import { IconButton } from "@multica/ui/components/common/icon-button";
 import { autopilotListOptions } from "@multica/core/autopilots/queries";
+import { useAutopilotsViewStore } from "@multica/core/autopilots/stores";
 import { useCurrentWorkspace, useWorkspacePaths } from "@multica/core/paths";
 import type { Autopilot } from "@multica/core/types";
 import { useNavigation } from "../../navigation";
 import { useT } from "../../i18n";
 import { AUTOPILOT_TEMPLATES } from "../../autopilots/components/autopilot-templates";
+import {
+  isWakeupsTab,
+  wakeupCountsOptions,
+  wakeupsHref,
+} from "../../autopilots/components/wakeups-tab";
 import {
   PanelBody,
   PanelCount,
@@ -75,16 +81,23 @@ export function AutopilotsPanel() {
   const { t } = useT("layout");
   const { t: tAutopilots } = useT("autopilots");
   const p = useWorkspacePaths();
-  const { pathname, push } = useNavigation();
+  const { pathname, searchParams, push } = useNavigation();
   const wsId = useCurrentWorkspace()?.id;
+  const setScope = useAutopilotsViewStore((s) => s.setScope);
   const { data: autopilots = EMPTY_AUTOPILOTS } = useQuery({
     ...autopilotListOptions(wsId ?? ""),
+    enabled: !!wsId,
+  });
+  const { data: wakeups } = useQuery({
+    ...wakeupCountsOptions(wsId ?? ""),
     enabled: !!wsId,
   });
   const visible = useMemo(
     () => autopilots.filter((autopilot) => autopilot.status !== "archived"),
     [autopilots],
   );
+  const onList = pathname === p.autopilots();
+  const onWakeups = onList && isWakeupsTab(searchParams);
 
   return (
     <>
@@ -104,8 +117,16 @@ export function AutopilotsPanel() {
             href={p.autopilots()}
             icon={<Zap />}
             label={t(($) => $.panels.autopilots.all)}
-            active={pathname === p.autopilots()}
+            active={onList && !onWakeups}
             trailing={<PanelCount value={visible.length} />}
+            onNavigate={() => setScope("all")}
+          />
+          <PanelLink
+            href={wakeupsHref(p.autopilots())}
+            icon={<AlarmClock />}
+            label={tAutopilots(($) => $.wakeups.title)}
+            active={onWakeups}
+            trailing={<PanelCount value={wakeups?.counts.active ?? 0} />}
           />
         </PanelList>
 

@@ -6,13 +6,11 @@ import {
   ArrowUp,
   ChevronDown,
   ExternalLink,
-  Filter,
   Loader2,
   MoreHorizontal,
   Plus,
   Trash2,
   Users,
-  X,
 } from "@multica/ui/icons";
 import { useQuery, useQueryClient, useMutation } from "@tanstack/react-query";
 import { toast } from "sonner";
@@ -76,22 +74,20 @@ import {
 } from "@multica/ui/components/ui/popover";
 import { Skeleton } from "@multica/ui/components/ui/skeleton";
 import { Switch } from "@multica/ui/components/ui/switch";
-import {
-  Tooltip,
-  TooltipContent,
-  TooltipTrigger,
-} from "@multica/ui/components/ui/tooltip";
 import { ActorAvatar as ActorAvatarBase } from "@multica/ui/components/common/actor-avatar";
 import { ActorAvatar } from "../../common/actor-avatar";
 import { FILTER_ITEM_CLASS, HoverCheck } from "../../common/hover-check";
 import { useIntentNavigate, useRowLink } from "../../navigation";
 import {
+  CollectionCreateButton,
+  CollectionDisplayButton,
+  CollectionFilterButton,
   CollectionPageHeader,
-  CollectionPageHeaderAction,
   CollectionPageState,
+  CollectionResetButton,
+  CollectionScopeItems,
 } from "../../layout/collection-page";
 import { useLocale, useT } from "../../i18n";
-import { PAGE_TOOLBAR } from "../../layout/page-header";
 import { DeferredTooltip } from "@multica/ui/components/common/deferred-tooltip";
 
 // Column template — the simplest member of the ListGrid family (squads are
@@ -441,17 +437,87 @@ interface ActorOption {
   count: number;
 }
 
-function SquadListToolbar({
-  scope,
-  onScopeChange,
-  scopeCounts,
+function countActiveFilters(filters: SquadListFilters): number {
+  return (
+    (filters.leaders.length > 0 ? 1 : 0) +
+    (filters.creators.length > 0 ? 1 : 0)
+  );
+}
+
+function SquadFilterMenu({
   filters,
   onToggleFilter,
-  onClearFilters,
   leaderOptions,
   creatorOptions,
-  visibleCount,
-  totalCount,
+}: {
+  filters: SquadListFilters;
+  onToggleFilter: (key: keyof SquadListFilters, value: string) => void;
+  leaderOptions: ActorOption[];
+  creatorOptions: ActorOption[];
+}) {
+  const { t } = useT("squads");
+  const countBadge = (n: number) => (
+    <span className="ml-auto pl-3 text-caption text-muted-foreground">{n}</span>
+  );
+
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger
+        render={<CollectionFilterButton count={countActiveFilters(filters)} />}
+      />
+      <DropdownMenuContent align="start" className="w-auto">
+        <DropdownMenuSub>
+          <DropdownMenuSubTrigger>
+            <span className="flex-1">{t(($) => $.page.table.leader)}</span>
+            {filters.leaders.length > 0 && (
+              <span className="text-caption font-medium text-primary">{filters.leaders.length}</span>
+            )}
+          </DropdownMenuSubTrigger>
+          <DropdownMenuSubContent className="max-h-72 w-auto min-w-48 overflow-y-auto">
+            {leaderOptions.map((o) => (
+              <DropdownMenuCheckboxItem
+                key={o.id}
+                checked={filters.leaders.includes(o.id)}
+                onCheckedChange={() => onToggleFilter("leaders", o.id)}
+                className={FILTER_ITEM_CLASS}
+              >
+                <HoverCheck checked={filters.leaders.includes(o.id)} />
+                <ActorAvatar actorType="agent" actorId={o.id} size="sm" />
+                <span className="min-w-0 truncate">{o.name}</span>
+                {countBadge(o.count)}
+              </DropdownMenuCheckboxItem>
+            ))}
+          </DropdownMenuSubContent>
+        </DropdownMenuSub>
+        <DropdownMenuSub>
+          <DropdownMenuSubTrigger>
+            <span className="flex-1">{t(($) => $.page.table.creator)}</span>
+            {filters.creators.length > 0 && (
+              <span className="text-caption font-medium text-primary">{filters.creators.length}</span>
+            )}
+          </DropdownMenuSubTrigger>
+          <DropdownMenuSubContent className="max-h-72 w-auto min-w-48 overflow-y-auto">
+            {creatorOptions.map((o) => (
+              <DropdownMenuCheckboxItem
+                key={o.id}
+                checked={filters.creators.includes(o.id)}
+                onCheckedChange={() => onToggleFilter("creators", o.id)}
+                className={FILTER_ITEM_CLASS}
+              >
+                <HoverCheck checked={filters.creators.includes(o.id)} />
+                <ActorAvatar actorType="member" actorId={o.id} size="sm" />
+                <span className="min-w-0 truncate">{o.name}</span>
+                {countBadge(o.count)}
+              </DropdownMenuCheckboxItem>
+            ))}
+          </DropdownMenuSubContent>
+        </DropdownMenuSub>
+      </DropdownMenuContent>
+    </DropdownMenu>
+  );
+}
+
+function SquadDisplayMenu({
   sortField,
   sortDirection,
   onSortFieldChange,
@@ -459,16 +525,6 @@ function SquadListToolbar({
   hiddenColumns,
   onToggleColumn,
 }: {
-  scope: SquadsScope;
-  onScopeChange: (scope: SquadsScope) => void;
-  scopeCounts: Record<SquadsScope, number>;
-  filters: SquadListFilters;
-  onToggleFilter: (key: keyof SquadListFilters, value: string) => void;
-  onClearFilters: () => void;
-  leaderOptions: ActorOption[];
-  creatorOptions: ActorOption[];
-  visibleCount: number;
-  totalCount: number;
   sortField: SquadSortField;
   sortDirection: ListGridSortDirection;
   onSortFieldChange: (field: SquadSortField) => void;
@@ -477,17 +533,6 @@ function SquadListToolbar({
   onToggleColumn: (key: SquadColumnKey) => void;
 }) {
   const { t } = useT("squads");
-  const activeFilterCount =
-    (filters.leaders.length > 0 ? 1 : 0) +
-    (filters.creators.length > 0 ? 1 : 0);
-  const hasActiveFilters = activeFilterCount > 0;
-  const countBadge = (n: number) => (
-    <span className="ml-auto pl-3 text-caption text-muted-foreground">{n}</span>
-  );
-  const SCOPE_LABELS: Record<SquadsScope, string> = {
-    mine: t(($) => $.scope.mine),
-    all: t(($) => $.scope.all),
-  };
   const SORT_LABELS: Record<SquadSortField, string> = {
     name: t(($) => $.page.table.name),
     members: t(($) => $.page.table.members),
@@ -501,269 +546,86 @@ function SquadListToolbar({
   const sortLabel = SORT_LABELS[sortField];
 
   return (
-    <div className={PAGE_TOOLBAR}>
-      <div className="flex min-w-0 items-center gap-2">
-        <div className="hidden shrink-0 items-center gap-1 md:flex">
-          {SQUAD_SCOPES.map((s) => (
-            <Button
-              key={s}
-              variant="outline"
-              size="sm"
-              className={
-                scope === s
-                  ? "gap-1.5 bg-accent text-accent-foreground hover:bg-accent/80"
-                  : "gap-1.5 text-muted-foreground"
-              }
-              onClick={() => onScopeChange(s)}
-            >
-              {SCOPE_LABELS[s]}
-              <span className="tabular-nums text-caption text-muted-foreground">
-                {scopeCounts[s]}
-              </span>
-            </Button>
-          ))}
-        </div>
-        <DropdownMenu>
-          <DropdownMenuTrigger
-            render={
-              <Button
-                variant="outline"
-                size="sm"
-                className="shrink-0 gap-1 text-muted-foreground md:hidden"
-              >
-                <span className="truncate">{SCOPE_LABELS[scope]}</span>
-                <ChevronDown className="size-3 text-muted-foreground" />
-              </Button>
-            }
-          />
-          <DropdownMenuContent align="start" className="w-auto">
-            <DropdownMenuRadioGroup
-              value={scope}
-              onValueChange={(value) => onScopeChange(value as SquadsScope)}
-            >
-              {SQUAD_SCOPES.map((s) => (
-                <DropdownMenuRadioItem key={s} value={s}>
-                  {SCOPE_LABELS[s]}
-                  <span className="ml-2 tabular-nums text-caption text-muted-foreground">
-                    {scopeCounts[s]}
-                  </span>
-                </DropdownMenuRadioItem>
-              ))}
-            </DropdownMenuRadioGroup>
-          </DropdownMenuContent>
-        </DropdownMenu>
-
-        {hasActiveFilters && (
-          <span
-            title={t(($) => $.toolbar.result_count_title)}
-            className="hidden shrink-0 text-caption tabular-nums text-muted-foreground md:inline"
-          >
-            {visibleCount} / {totalCount}
+    <Popover>
+      <PopoverTrigger render={<CollectionDisplayButton />} />
+      <PopoverContent align="end" className="w-64 p-0">
+        <div className="border-b px-3 py-2.5">
+          <span className="text-caption font-medium text-muted-foreground">
+            {t(($) => $.toolbar.sort_by)}
           </span>
-        )}
-      </div>
-
-      <div className="flex shrink-0 items-center gap-1">
-      {/* Filter */}
-      <DropdownMenu>
-        <DropdownMenuTrigger
-          render={
-            <Button
-              variant={hasActiveFilters ? "default" : "outline"}
-              size="sm"
-              className={
-                hasActiveFilters
-                  ? "h-8 w-8 gap-1 bg-brand px-0 text-white hover:bg-brand/90 md:w-auto md:px-2.5"
-                  : "h-8 w-8 gap-1 px-0 text-muted-foreground md:w-auto md:px-2.5"
-              }
-            >
-              <Filter className="size-3.5" />
-              {hasActiveFilters ? (
-                <>
-                  <span className="hidden md:inline">
-                    {t(($) => $.toolbar.filter_active_count, { count: activeFilterCount })}
-                  </span>
-                  <span className="tabular-nums md:hidden">{activeFilterCount}</span>
-                </>
-              ) : (
-                <span className="hidden md:inline">{t(($) => $.toolbar.filter_label)}</span>
-              )}
-              {hasActiveFilters && (
-                <span
-                  role="button"
-                  tabIndex={-1}
-                  aria-label={t(($) => $.toolbar.clear_filters)}
-                  className="-mr-1 ml-0.5 hidden rounded-sm p-0.5 hover:bg-white/20 md:inline-flex"
-                  onClick={(e) => {
-                    e.preventDefault();
-                    e.stopPropagation();
-                    onClearFilters();
-                  }}
-                  onPointerDown={(e) => e.stopPropagation()}
-                >
-                  <X className="size-3" />
-                </span>
-              )}
-            </Button>
-          }
-        />
-        <DropdownMenuContent align="end" className="w-auto">
-          <DropdownMenuSub>
-            <DropdownMenuSubTrigger>
-              <span className="flex-1">{t(($) => $.page.table.leader)}</span>
-              {filters.leaders.length > 0 && (
-                <span className="text-caption font-medium text-primary">{filters.leaders.length}</span>
-              )}
-            </DropdownMenuSubTrigger>
-            <DropdownMenuSubContent className="max-h-72 w-auto min-w-48 overflow-y-auto">
-              {leaderOptions.map((o) => (
-                <DropdownMenuCheckboxItem
-                  key={o.id}
-                  checked={filters.leaders.includes(o.id)}
-                  onCheckedChange={() => onToggleFilter("leaders", o.id)}
-                  className={FILTER_ITEM_CLASS}
-                >
-                  <HoverCheck checked={filters.leaders.includes(o.id)} />
-                  <ActorAvatar actorType="agent" actorId={o.id} size="sm" />
-                  <span className="min-w-0 truncate">{o.name}</span>
-                  {countBadge(o.count)}
-                </DropdownMenuCheckboxItem>
-              ))}
-            </DropdownMenuSubContent>
-          </DropdownMenuSub>
-          <DropdownMenuSub>
-            <DropdownMenuSubTrigger>
-              <span className="flex-1">{t(($) => $.page.table.creator)}</span>
-              {filters.creators.length > 0 && (
-                <span className="text-caption font-medium text-primary">{filters.creators.length}</span>
-              )}
-            </DropdownMenuSubTrigger>
-            <DropdownMenuSubContent className="max-h-72 w-auto min-w-48 overflow-y-auto">
-              {creatorOptions.map((o) => (
-                <DropdownMenuCheckboxItem
-                  key={o.id}
-                  checked={filters.creators.includes(o.id)}
-                  onCheckedChange={() => onToggleFilter("creators", o.id)}
-                  className={FILTER_ITEM_CLASS}
-                >
-                  <HoverCheck checked={filters.creators.includes(o.id)} />
-                  <ActorAvatar actorType="member" actorId={o.id} size="sm" />
-                  <span className="min-w-0 truncate">{o.name}</span>
-                  {countBadge(o.count)}
-                </DropdownMenuCheckboxItem>
-              ))}
-            </DropdownMenuSubContent>
-          </DropdownMenuSub>
-        </DropdownMenuContent>
-      </DropdownMenu>
-
-      {/* Display settings */}
-      <Popover>
-        <Tooltip>
-          <PopoverTrigger
-            render={
-              <TooltipTrigger
+          <div className="mt-2 flex items-center gap-1.5">
+            <DropdownMenu>
+              <DropdownMenuTrigger
                 render={
                   <Button
                     variant="outline"
                     size="sm"
-                    className="h-8 w-8 gap-1 px-0 text-muted-foreground md:w-auto md:px-2.5"
+                    className="flex-1 justify-between text-caption"
                   >
-                    {sortDirection === "asc" ? (
-                      <ArrowUp className="size-3.5" />
-                    ) : (
-                      <ArrowDown className="size-3.5" />
-                    )}
-                    <span className="hidden md:inline">{sortLabel}</span>
+                    {sortLabel}
+                    <ChevronDown className="size-3 text-muted-foreground" />
                   </Button>
                 }
               />
-            }
-          />
-          <TooltipContent side="bottom">
-            {t(($) => $.toolbar.display)}
-          </TooltipContent>
-        </Tooltip>
-        <PopoverContent align="end" className="w-64 p-0">
-          <div className="border-b px-3 py-2.5">
-            <span className="text-caption font-medium text-muted-foreground">
-              {t(($) => $.toolbar.sort_by)}
-            </span>
-            <div className="mt-2 flex items-center gap-1.5">
-              <DropdownMenu>
-                <DropdownMenuTrigger
-                  render={
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      className="flex-1 justify-between text-caption"
-                    >
-                      {sortLabel}
-                      <ChevronDown className="size-3 text-muted-foreground" />
-                    </Button>
+              <DropdownMenuContent align="start" className="w-auto">
+                <DropdownMenuRadioGroup
+                  value={sortField}
+                  onValueChange={(v) =>
+                    onSortFieldChange(v as SquadSortField)
                   }
-                />
-                <DropdownMenuContent align="start" className="w-auto">
-                  <DropdownMenuRadioGroup
-                    value={sortField}
-                    onValueChange={(v) =>
-                      onSortFieldChange(v as SquadSortField)
-                    }
-                  >
-                    {SORT_FIELDS.map((field) => (
-                      <DropdownMenuRadioItem key={field} value={field}>
-                        {SORT_LABELS[field]}
-                      </DropdownMenuRadioItem>
-                    ))}
-                  </DropdownMenuRadioGroup>
-                </DropdownMenuContent>
-              </DropdownMenu>
-              <IconButton
-                variant="outline"
-                size="icon-sm"
-                onClick={() =>
-                  onSortDirectionChange(
-                    sortDirection === "asc" ? "desc" : "asc",
-                  )
-                }
-                label={
-                  sortDirection === "asc"
-                    ? t(($) => $.toolbar.direction_asc)
-                    : t(($) => $.toolbar.direction_desc)
-                }
-              >
-                {sortDirection === "asc" ? (
-                  <ArrowUp className="size-3.5" />
-                ) : (
-                  <ArrowDown className="size-3.5" />
-                )}
-              </IconButton>
-            </div>
-          </div>
-          <div className="px-3 py-2.5">
-            <span className="text-caption font-medium text-muted-foreground">
-              {t(($) => $.toolbar.section_columns)}
-            </span>
-            <div className="mt-2 space-y-2">
-              {COLUMN_KEYS.map((key) => (
-                <label
-                  key={key}
-                  className="flex cursor-pointer items-center justify-between"
                 >
-                  <span className="text-body">{COLUMN_LABELS[key]}</span>
-                  <Switch
-                    size="sm"
-                    checked={!hiddenColumns.includes(key)}
-                    onCheckedChange={() => onToggleColumn(key)}
-                  />
-                </label>
-              ))}
-            </div>
+                  {SORT_FIELDS.map((field) => (
+                    <DropdownMenuRadioItem key={field} value={field}>
+                      {SORT_LABELS[field]}
+                    </DropdownMenuRadioItem>
+                  ))}
+                </DropdownMenuRadioGroup>
+              </DropdownMenuContent>
+            </DropdownMenu>
+            <IconButton
+              variant="outline"
+              size="icon-sm"
+              onClick={() =>
+                onSortDirectionChange(
+                  sortDirection === "asc" ? "desc" : "asc",
+                )
+              }
+              label={
+                sortDirection === "asc"
+                  ? t(($) => $.toolbar.direction_asc)
+                  : t(($) => $.toolbar.direction_desc)
+              }
+            >
+              {sortDirection === "asc" ? (
+                <ArrowUp className="size-3.5" />
+              ) : (
+                <ArrowDown className="size-3.5" />
+              )}
+            </IconButton>
           </div>
-        </PopoverContent>
-      </Popover>
-      </div>
-    </div>
+        </div>
+        <div className="px-3 py-2.5">
+          <span className="text-caption font-medium text-muted-foreground">
+            {t(($) => $.toolbar.section_columns)}
+          </span>
+          <div className="mt-2 space-y-2">
+            {COLUMN_KEYS.map((key) => (
+              <label
+                key={key}
+                className="flex cursor-pointer items-center justify-between"
+              >
+                <span className="text-body">{COLUMN_LABELS[key]}</span>
+                <Switch
+                  size="sm"
+                  checked={!hiddenColumns.includes(key)}
+                  onCheckedChange={() => onToggleColumn(key)}
+                />
+              </label>
+            ))}
+          </div>
+        </div>
+      </PopoverContent>
+    </Popover>
   );
 }
 
@@ -817,6 +679,13 @@ export function SquadsPage() {
   const clearFilters = useSquadsViewStore((s) => s.clearFilters);
 
   const isColVisible = (key: SquadColumnKey) => !hiddenColumns.includes(key);
+  const hasActiveFilters = countActiveFilters(filters) > 0;
+  const openCreateSquad = () => useModalStore.getState().open("create-squad");
+
+  const scopeLabels: Record<SquadsScope, string> = {
+    mine: t(($) => $.scope.mine),
+    all: t(($) => $.scope.all),
+  };
 
   const scopeCounts = useMemo<Record<SquadsScope, number>>(() => {
     let mine = 0;
@@ -826,8 +695,8 @@ export function SquadsPage() {
     return { mine, all: squads.length };
   }, [squads, currentUser]);
 
-  // Rows within the current scope, unfiltered — filter option lists + the
-  // "n / total" denominator derive from this.
+  // Rows within the current scope, unfiltered — the filter option lists
+  // derive from this.
   const scopeRows = useMemo<Squad[]>(() => {
     return squads.filter((s) => {
       if (scope === "mine") {
@@ -912,14 +781,44 @@ export function SquadsPage() {
     <div className="flex flex-1 min-h-0 flex-col">
       <CollectionPageHeader
         icon={Users}
-        title={t(($) => $.page.title)}
-        count={squads.length}
-        actions={
-          <CollectionPageHeaderAction
-            icon={Plus}
-            label={t(($) => $.page.new_button)}
-            onClick={() => useModalStore.getState().open("create-squad")}
+        title={scopeLabels[scope]}
+        menu={
+          <CollectionScopeItems
+            value={scope}
+            onChange={setScope}
+            options={SQUAD_SCOPES.map((s) => ({
+              value: s,
+              label: scopeLabels[s],
+              count: scopeCounts[s],
+            }))}
           />
+        }
+        tools={
+          <>
+            <SquadFilterMenu
+              filters={filters}
+              onToggleFilter={toggleFilter}
+              leaderOptions={leaderOptions}
+              creatorOptions={creatorOptions}
+            />
+            {hasActiveFilters ? <CollectionResetButton onClick={clearFilters} /> : null}
+          </>
+        }
+        actions={
+          <>
+            <SquadDisplayMenu
+              sortField={sortField}
+              sortDirection={sortDirection}
+              onSortFieldChange={handleSortFieldSelect}
+              onSortDirectionChange={setSortDirection}
+              hiddenColumns={hiddenColumns}
+              onToggleColumn={toggleColumn}
+            />
+            <CollectionCreateButton
+              label={t(($) => $.page.new_button)}
+              onClick={openCreateSquad}
+            />
+          </>
         }
       />
 
@@ -928,110 +827,83 @@ export function SquadsPage() {
           icon={Users}
           title={t(($) => $.page.empty_no_squads)}
           actions={
-            <Button
-              size="sm"
-              onClick={() => useModalStore.getState().open("create-squad")}
-            >
+            <Button size="sm" variant="outline" onClick={openCreateSquad}>
               <Plus aria-hidden="true" className="size-3.5" />
               {t(($) => $.page.new_button)}
             </Button>
           }
         />
+      ) : isLoading ? (
+        <LoadingSkeleton />
       ) : (
-        <>
-          {/* Mounted through loading so the rows don't drop by a toolbar's
-              height when the list lands. */}
-          <SquadListToolbar
-            scope={scope}
-            onScopeChange={setScope}
-            scopeCounts={scopeCounts}
-            filters={filters}
-            onToggleFilter={toggleFilter}
-            onClearFilters={clearFilters}
-            leaderOptions={leaderOptions}
-            creatorOptions={creatorOptions}
-            visibleCount={rows.length}
-            totalCount={scopeRows.length}
-            sortField={sortField}
-            sortDirection={sortDirection}
-            onSortFieldChange={handleSortFieldSelect}
-            onSortDirectionChange={setSortDirection}
-            hiddenColumns={hiddenColumns}
-            onToggleColumn={toggleColumn}
-          />
-          {isLoading ? (
-            <LoadingSkeleton />
-          ) : (
-          <div className="min-h-0 flex-1 overflow-auto @container">
-            <ListGrid
-              className={`${GRID_COLS} @2xl:min-w-[var(--sqc-minw)]`}
-              style={{
-                ...columnTrackVars(isColVisible, canManageAnyRow),
-                paddingBottom: LIST_GRID_BOTTOM_CLEARANCE,
-              }}
-            >
-              <SquadListHeader
-                sortField={sortField}
-                sortDirection={sortDirection}
-                onSort={handleSort}
-                isColVisible={isColVisible}
-              />
-              {rows.length === 0 ? (
-                <div className="col-span-full py-16 text-center text-body text-muted-foreground">
-                  {t(($) => $.page.no_matches)}
-                </div>
-              ) : (
-                rows.map((squad) => (
-                  <ListGridRow
-                    key={squad.id}
-                    className="cursor-pointer"
-                    {...rowLink(p.squadDetail(squad.id), squad.name)}
-                  >
-                    <NameCell squad={squad} />
-                    <LeaderCell
-                      leaderId={squad.leader_id}
-                      leader={agentsById.get(squad.leader_id)}
-                    />
-                    {isColVisible("members") ? (
-                      <MembersCell squad={squad} />
-                    ) : (
-                      <ListGridCell className="hidden px-0 @2xl:flex" />
-                    )}
-                    {isColVisible("creator") ? (
-                      <ListGridCell className="hidden gap-1.5 @2xl:flex">
-                        <ActorAvatar
-                          actorType="member"
-                          actorId={squad.creator_id}
-                          size="sm"
-                        />
-                        <span className="min-w-0 truncate text-caption text-muted-foreground">
-                          {membersById.get(squad.creator_id)?.name ??
-                            squad.creator_id.slice(0, 8)}
-                        </span>
-                      </ListGridCell>
-                    ) : (
-                      <ListGridCell className="hidden px-0 @2xl:flex" />
-                    )}
-                    {isColVisible("created") ? (
-                      <ListGridCell className="hidden whitespace-nowrap text-caption tabular-nums text-muted-foreground @2xl:flex">
-                        {new Date(squad.created_at).toLocaleDateString(locale)}
-                      </ListGridCell>
-                    ) : (
-                      <ListGridCell className="hidden px-0 @2xl:flex" />
-                    )}
-                    <ListGridCell className="justify-end px-0">
-                      {isWorkspaceAdmin ||
-                      (!!currentUser && squad.creator_id === currentUser.id) ? (
-                        <SquadRowActions squad={squad} />
-                      ) : null}
+        <div className="min-h-0 flex-1 overflow-auto @container">
+          <ListGrid
+            className={`${GRID_COLS} @2xl:min-w-[var(--sqc-minw)]`}
+            style={{
+              ...columnTrackVars(isColVisible, canManageAnyRow),
+              paddingBottom: LIST_GRID_BOTTOM_CLEARANCE,
+            }}
+          >
+            <SquadListHeader
+              sortField={sortField}
+              sortDirection={sortDirection}
+              onSort={handleSort}
+              isColVisible={isColVisible}
+            />
+            {rows.length === 0 ? (
+              <div className="col-span-full py-16 text-center text-body text-muted-foreground">
+                {t(($) => $.page.no_matches)}
+              </div>
+            ) : (
+              rows.map((squad) => (
+                <ListGridRow
+                  key={squad.id}
+                  className="cursor-pointer"
+                  {...rowLink(p.squadDetail(squad.id), squad.name)}
+                >
+                  <NameCell squad={squad} />
+                  <LeaderCell
+                    leaderId={squad.leader_id}
+                    leader={agentsById.get(squad.leader_id)}
+                  />
+                  {isColVisible("members") ? (
+                    <MembersCell squad={squad} />
+                  ) : (
+                    <ListGridCell className="hidden px-0 @2xl:flex" />
+                  )}
+                  {isColVisible("creator") ? (
+                    <ListGridCell className="hidden gap-1.5 @2xl:flex">
+                      <ActorAvatar
+                        actorType="member"
+                        actorId={squad.creator_id}
+                        size="sm"
+                      />
+                      <span className="min-w-0 truncate text-caption text-muted-foreground">
+                        {membersById.get(squad.creator_id)?.name ??
+                          squad.creator_id.slice(0, 8)}
+                      </span>
                     </ListGridCell>
-                  </ListGridRow>
-                ))
-              )}
-            </ListGrid>
-          </div>
-          )}
-        </>
+                  ) : (
+                    <ListGridCell className="hidden px-0 @2xl:flex" />
+                  )}
+                  {isColVisible("created") ? (
+                    <ListGridCell className="hidden whitespace-nowrap text-caption tabular-nums text-muted-foreground @2xl:flex">
+                      {new Date(squad.created_at).toLocaleDateString(locale)}
+                    </ListGridCell>
+                  ) : (
+                    <ListGridCell className="hidden px-0 @2xl:flex" />
+                  )}
+                  <ListGridCell className="justify-end px-0">
+                    {isWorkspaceAdmin ||
+                    (!!currentUser && squad.creator_id === currentUser.id) ? (
+                      <SquadRowActions squad={squad} />
+                    ) : null}
+                  </ListGridCell>
+                </ListGridRow>
+              ))
+            )}
+          </ListGrid>
+        </div>
       )}
     </div>
   );

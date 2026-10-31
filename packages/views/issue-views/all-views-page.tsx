@@ -10,14 +10,10 @@ import {
   Link2,
   ListTodo,
   MoreHorizontal,
-  Plus,
-  Search,
   Star,
   Trash2,
 } from "@multica/ui/icons";
 import { cn } from "@multica/ui/lib/utils";
-import { Button } from "@multica/ui/components/ui/button";
-import { Input } from "@multica/ui/components/ui/input";
 import { IconButton } from "@multica/ui/components/common/icon-button";
 import {
   DropdownMenu,
@@ -52,16 +48,19 @@ import {
 import { issueViewTarget } from "@multica/core/issue-views/view-target";
 import { useActiveIssueViewStore } from "@multica/core/issue-views/active-view-store";
 import { ActorAvatar } from "../common/actor-avatar";
-import { CollectionPageHeader, CollectionPageHeaderAction } from "../layout/collection-page";
-import { PAGE_TOOLBAR } from "../layout/page-header";
+import {
+  CollectionCreateButton,
+  CollectionPageHeader,
+  CollectionScopeItems,
+} from "../layout/collection-page";
 import { rowLinkInteractiveProps, useRowLink } from "../navigation";
 import { useT } from "../i18n";
 import { useBuiltinViewNavigation } from "./builtin-views";
 import { DeleteViewDialog } from "./delete-view-dialog";
 import { useIssueViewActions } from "./use-view-actions";
 
-type DirectoryTab = "all" | "builtin" | "mine" | "shared";
-const TABS: readonly DirectoryTab[] = ["all", "builtin", "mine", "shared"];
+type DirectoryScope = "all" | "builtin" | "mine" | "shared";
+const SCOPES: readonly DirectoryScope[] = ["all", "builtin", "mine", "shared"];
 
 const EMPTY_VIEWS: IssueView[] = [];
 const WORKSPACE_SCOPE = { scope_type: "workspace" } as const;
@@ -90,8 +89,7 @@ export function AllViewsPage() {
   const { data: views = EMPTY_VIEWS } = useQuery(issueViewEverywhereOptions(wsId));
   const { data: projects = [] } = useQuery(projectListOptions(wsId));
   const { data: members = [] } = useQuery(memberListOptions(wsId));
-  const [tab, setTab] = useState<DirectoryTab>("all");
-  const [search, setSearch] = useState("");
+  const [scope, setScope] = useState<DirectoryScope>("all");
   const [deleteTarget, setDeleteTarget] = useState<IssueView | null>(null);
 
   const projectTitle = useMemo(() => new Map(projects.map((p) => [p.id, p.title])), [projects]);
@@ -102,31 +100,28 @@ export function AllViewsPage() {
     () => [...views].sort((a, b) => a.name.localeCompare(b.name)),
     [views],
   );
-  const counts: Record<DirectoryTab, number> = {
+  const counts: Record<DirectoryScope, number> = {
     all: builtins.length + views.length,
     builtin: builtins.length,
     mine: views.filter((view) => view.owner_id === userId).length,
     shared: views.filter((view) => view.visibility === "workspace").length,
   };
 
-  const query = search.trim().toLowerCase();
-  const matches = (name: string) => !query || name.toLowerCase().includes(query);
-  const shownBuiltins = tab === "all" || tab === "builtin" ? builtins.filter((b) => matches(b.name)) : [];
+  const shownBuiltins = scope === "all" || scope === "builtin" ? builtins : [];
   const shownViews =
-    tab === "builtin"
+    scope === "builtin"
       ? []
       : sortedViews.filter(
           (view) =>
-            matches(view.name) &&
-            (tab === "all" ||
-              (tab === "mine" ? view.owner_id === userId : view.visibility === "workspace")),
+            scope === "all" ||
+            (scope === "mine" ? view.owner_id === userId : view.visibility === "workspace"),
         );
 
-  const tabLabel: Record<DirectoryTab, string> = {
-    all: t(($) => $.views.directory.tab_all),
-    builtin: t(($) => $.views.directory.tab_builtin),
-    mine: t(($) => $.views.directory.tab_mine),
-    shared: t(($) => $.views.directory.tab_shared),
+  const scopeLabel: Record<DirectoryScope, string> = {
+    all: t(($) => $.views.directory.scope_all),
+    builtin: t(($) => $.views.directory.scope_builtin),
+    mine: t(($) => $.views.directory.scope_mine),
+    shared: t(($) => $.views.directory.scope_shared),
   };
 
   const location = (view: IssueView) => {
@@ -171,44 +166,16 @@ export function AllViewsPage() {
     <div className="flex flex-1 min-h-0 flex-col">
       <CollectionPageHeader
         icon={Layers}
-        title={t(($) => $.views.directory.title)}
-        count={counts.all}
-        description={t(($) => $.views.directory.description)}
-        actions={
-          <CollectionPageHeaderAction icon={Plus} label={t(($) => $.views.directory.new_view)} onClick={newView} />
-        }
-      />
-      <div className={PAGE_TOOLBAR}>
-        <div className="flex min-w-0 items-center gap-1">
-          {TABS.map((value) => (
-            <Button
-              key={value}
-              variant="outline"
-              size="sm"
-              aria-pressed={tab === value}
-              className={
-                tab === value
-                  ? "gap-1.5 bg-accent text-accent-foreground hover:bg-accent/80"
-                  : "gap-1.5 text-muted-foreground"
-              }
-              onClick={() => setTab(value)}
-            >
-              {tabLabel[value]}
-              <span className="tabular-nums text-caption text-muted-foreground">{counts[value]}</span>
-            </Button>
-          ))}
-        </div>
-        <div className="relative w-56 shrink-0">
-          <Search className="pointer-events-none absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />
-          <Input
-            value={search}
-            onChange={(event) => setSearch(event.target.value)}
-            placeholder={t(($) => $.views.directory.search_placeholder)}
-            aria-label={t(($) => $.views.directory.search_placeholder)}
-            className="h-8 pl-8"
+        title={scopeLabel[scope]}
+        menu={
+          <CollectionScopeItems
+            value={scope}
+            onChange={setScope}
+            options={SCOPES.map((value) => ({ value, label: scopeLabel[value], count: counts[value] }))}
           />
-        </div>
-      </div>
+        }
+        actions={<CollectionCreateButton label={t(($) => $.views.directory.new_view)} onClick={newView} />}
+      />
       <div className="min-h-0 flex-1 overflow-auto @container">
         <ListGrid className={GRID_COLS} style={{ paddingBottom: LIST_GRID_BOTTOM_CLEARANCE }}>
           <ListGridHeader>

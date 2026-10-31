@@ -151,5 +151,16 @@
     },
     "language": "Langue",
     "shortcuts": "Raccourcis clavier"
+  },
+  "collection": {
+    "filter": "Filtrer",
+    "filter_count_one": "{{count}} filtre",
+    "filter_count_other": "{{count}} filtres",
+    "reset": "Réinitialiser",
+    "display": "Affichage"
+  },
+  "object_page": {
+    "toggle_panel": "Afficher ou masquer le panneau de droite",
+    "properties": "Propriétés"
   }
 }

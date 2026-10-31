@@ -4,10 +4,26 @@ export { CompactNavSheet } from "./compact-nav-sheet";
 export { ShellRouteDataPrefetch } from "./route-data-prefetch";
 export { SpacePanel } from "./space-panel";
 export {
+  CollectionCreateButton,
+  CollectionDisplayButton,
+  CollectionFilterButton,
   CollectionPageHeader,
-  CollectionPageHeaderAction,
   CollectionPageState,
+  CollectionResetButton,
+  CollectionScopeItems,
+  type CollectionScopeOption,
 } from "./collection-page";
+export {
+  OBJECT_PAGE_BODY,
+  ObjectIconMark,
+  ObjectIdentity,
+  ObjectPage,
+  ObjectPanelSection,
+  ObjectProperty,
+  ObjectSection,
+  ObjectSectionAction,
+  ObjectSectionCard,
+} from "./object-page";
 export { ROUTE_ICON_COMPONENTS, routeIconForPath } from "./route-icon-components";
 export {
   useTabPresentation,

@@ -2,10 +2,10 @@
 
 import { useEffect, useState } from "react";
 import {
-  Trash2,
   ChevronRight,
-  Cpu,
   Lock,
+  MoreHorizontal,
+  Trash2,
 } from "@multica/ui/icons";
 import { toast } from "sonner";
 import { useQuery } from "@tanstack/react-query";
@@ -29,12 +29,27 @@ import {
   useWorkspacePresenceMap,
 } from "@multica/core/agents";
 import { useWorkspacePaths } from "@multica/core/paths";
-import { Button } from "@multica/ui/components/ui/button";
+import { IconButton } from "@multica/ui/components/common/icon-button";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@multica/ui/components/ui/dropdown-menu";
+import { cn } from "@multica/ui/lib/utils";
 import { ActorAvatar } from "../../common/actor-avatar";
-import { BreadcrumbHeader } from "../../layout/breadcrumb-header";
+import {
+  OBJECT_PAGE_BODY,
+  ObjectIdentity,
+  ObjectPage,
+  ObjectPanelSection,
+  ObjectProperty,
+  ObjectSection,
+  ObjectSectionCard,
+} from "../../layout/object-page";
 import { AppLink, useNavigation } from "../../navigation";
 import { availabilityConfig, workloadConfig } from "../../agents/presence";
-import { HealthBadge } from "./shared";
+import { HealthBadge, HealthIcon, shortDaemonId, useHealthLabel } from "./shared";
 import { ProviderLogo } from "./provider-logo";
 import { UsageSection } from "./usage-section";
 import { DeleteRuntimeDialog } from "./delete-runtime-dialog";
@@ -53,12 +68,6 @@ function getCliVersion(metadata: Record<string, unknown>): string | null {
     return metadata.cli_version;
   }
   return null;
-}
-
-function shortDaemonId(id: string | null): string | null {
-  if (!id) return null;
-  if (id.length <= 10) return id;
-  return `${id.slice(0, 6)}··${id.slice(-2)}`;
 }
 
 // 30s tick keeps derived runtime health honest as time-based windows
@@ -141,17 +150,21 @@ export function RuntimeDetail({
     navigation.replace(deleteDestination);
   };
 
-  const daemonShort = shortDaemonId(runtime.daemon_id);
   const lastSeen = runtime.last_seen_at
     ? timeAgo(runtime.last_seen_at)
     : t(($) => $.detail.never_seen);
   const runtimeName = machineLabel
     ? runtimeRowLabel(runtime, machineLabel)
     : runtimeDisplayName(runtime);
+  const device = runtime.device_info ? parseDeviceInfo(runtime.device_info) : null;
+  const summary = [device?.runtime, t(($) => $.detail.last_seen, { when: lastSeen })]
+    .filter(Boolean)
+    .join(" · ");
 
   return (
-    <div className="flex h-full flex-col">
-      <BreadcrumbHeader
+    <>
+      <ObjectPage
+        layoutId="multica_runtime_detail_layout"
         segments={[
           { href: paths.runtimes(), label: t(($) => $.page.title) },
           ...(machineHref && machineLabel
@@ -159,56 +172,68 @@ export function RuntimeDetail({
             : []),
         ]}
         leaf={
-          <span className="truncate font-mono text-caption text-foreground">
-            {runtimeName}
+          <span className="flex min-w-0 items-center gap-1.5">
+            <ProviderLogo provider={runtime.provider} className="size-3.5 shrink-0" />
+            <span className="truncate">{runtimeName}</span>
           </span>
         }
         actions={
-          !canEditRuntime ? (
-            <span className="inline-flex items-center gap-1 text-caption text-muted-foreground">
-              <Lock className="h-3 w-3" />
-              {t(($) => $.detail.read_only)}
-            </span>
-          ) : null
+          canDelete ? (
+            <RuntimeActionsMenu onDelete={() => setDeleteOpen(true)} />
+          ) : undefined
         }
-      />
+        panel={
+          <RuntimeProperties
+            runtime={runtime}
+            health={health}
+            lastSeen={lastSeen}
+            ownerMember={ownerMember}
+            device={device}
+            cliVersion={cliVersion}
+            canEditVisibility={!!isRuntimeOwner}
+          />
+        }
+      >
+        <div className={cn(OBJECT_PAGE_BODY, "space-y-8")}>
+          <ObjectIdentity
+            media={
+              <div className="flex size-12 items-center justify-center rounded-xl border bg-muted/50">
+                <ProviderLogo provider={runtime.provider} className="size-6" />
+              </div>
+            }
+            title={runtimeName}
+            trailing={
+              <>
+                <HealthBadge health={health} />
+                {!canEditRuntime && (
+                  <span className="inline-flex shrink-0 items-center gap-1 text-caption text-muted-foreground">
+                    <Lock className="size-3" />
+                    {t(($) => $.detail.read_only)}
+                  </span>
+                )}
+              </>
+            }
+            description={summary}
+          />
 
-      {/* Body — single scroll container that owns the Hero card AND the
-          analytic blocks below. Putting Hero inside the scroll (instead of
-          pinning it under the topbar) means the scroll bar starts at the
-          page boundary rather than mid-content; the topbar stays sticky on
-          its own because it's navigation, not data. */}
-      <div className="flex-1 min-h-0 overflow-y-auto">
-        <div className="grid grid-cols-1 gap-4 p-6 lg:grid-cols-[minmax(0,1fr)_320px]">
-          <div className="min-w-0 space-y-5">
-            <HeroCard
-              runtime={runtime}
-              runtimeName={runtimeName}
-              health={health}
-              lastSeen={lastSeen}
-              ownerMember={ownerMember}
-              cliVersion={cliVersion}
-              daemonShort={daemonShort}
-            />
-            {canReadRuntime && <UsageSection runtime={runtime} />}
-          </div>
-
-          {/* Right rail: serving agents + diagnostics */}
-          <div className="space-y-4">
-            <ServingAgentsCard
+          <ObjectSection
+            title={t(($) => $.page.columns.agents)}
+            count={servingAgents.length}
+          >
+            <ServingAgentList
               agents={servingAgents}
               presenceMap={presenceMap}
               agentHref={(id) => paths.agentDetail(id)}
             />
-            <DiagnosticsCard
-              runtime={runtime}
-              canEditVisibility={!!isRuntimeOwner}
-              canDelete={!!canDelete}
-              onDelete={() => setDeleteOpen(true)}
-            />
-          </div>
+          </ObjectSection>
+
+          {canReadRuntime && (
+            <ObjectSection title={t(($) => $.detail.usage_title)}>
+              <UsageSection runtime={runtime} />
+            </ObjectSection>
+          )}
         </div>
-      </div>
+      </ObjectPage>
 
       {isCustomRuntime && runtimeProfile ? (
         <DeleteRuntimeProfileDialog
@@ -227,15 +252,15 @@ export function RuntimeDetail({
           onDeleted={handleRuntimeDeleted}
         />
       )}
-    </div>
+    </>
   );
 }
 
 // `device_info` arrives as a single composite string the daemon assembles
 // (e.g. "host.local · 2.1.121 (Claude Code)"). Splitting on the first
 // " · " gives us a hostname half + a runtime-version half so each can be
-// labelled separately in the Hero card. Older runtimes that report just a
-// hostname still work — `runtime` is undefined in that case.
+// labelled separately. Older runtimes that report just a hostname still
+// work — `runtime` is undefined in that case.
 function parseDeviceInfo(raw: string): { hostname: string; runtime?: string } {
   const idx = raw.indexOf(" · ");
   if (idx < 0) return { hostname: raw };
@@ -245,146 +270,124 @@ function parseDeviceInfo(raw: string): { hostname: string; runtime?: string } {
   };
 }
 
-function HeroCard({
+function RuntimeActionsMenu({ onDelete }: { onDelete: () => void }) {
+  const { t } = useT("runtimes");
+  const { t: tCommon } = useT("common");
+  // Delete stays available even when the runtime is a live local daemon
+  // (self-healing, MUL-3352); the dialog explains the trade-off.
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger
+        render={
+          <IconButton
+            label={tCommon(($) => $.more_actions)}
+            tooltipSide="bottom"
+            className="text-muted-foreground"
+          >
+            <MoreHorizontal />
+          </IconButton>
+        }
+      />
+      <DropdownMenuContent align="end" className="w-auto">
+        <DropdownMenuItem variant="destructive" onClick={onDelete}>
+          <Trash2 className="size-3.5" />
+          {t(($) => $.detail.delete_button)}
+        </DropdownMenuItem>
+      </DropdownMenuContent>
+    </DropdownMenu>
+  );
+}
+
+function RuntimeProperties({
   runtime,
-  runtimeName,
   health,
   lastSeen,
   ownerMember,
+  device,
   cliVersion,
-  daemonShort,
+  canEditVisibility,
 }: {
   runtime: AgentRuntime;
-  runtimeName: string;
   health: ReturnType<typeof deriveRuntimeHealth>;
   lastSeen: string;
   ownerMember: MemberWithUser | null;
+  device: { hostname: string; runtime?: string } | null;
   cliVersion: string | null;
-  daemonShort: string | null;
+  /**
+   * Runtime owner only (MUL-6126). Sharing a machine with the workspace is
+   * the owner's call, so a workspace admin sees the read-only chip even
+   * though they may still rename or delete the runtime.
+   */
+  canEditVisibility: boolean;
 }) {
   const { t } = useT("runtimes");
-  const [showDetails, setShowDetails] = useState(false);
-  const device = runtime.device_info ? parseDeviceInfo(runtime.device_info) : null;
-  const hasTechDetails = !!cliVersion || !!daemonShort;
+  const { t: tLayout } = useT("layout");
+  const healthLabel = useHealthLabel();
+  const daemonShort = shortDaemonId(runtime.daemon_id);
 
   return (
-    <div className="rounded-lg border bg-card">
-      {/* Identity row — provider logo, name, status badge, last seen. */}
-      <div className="flex items-start gap-3 border-b p-4">
-        <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-md border bg-card">
-          <ProviderLogo provider={runtime.provider} className="h-5 w-5" />
-        </div>
-        <div className="min-w-0 flex-1">
-          <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
-            <h2 className="truncate text-title-sm font-semibold tracking-tight">
-              {runtimeName}
-            </h2>
-            <HealthBadge health={health} />
-            <span className="text-caption text-muted-foreground">
-              {t(($) => $.detail.last_seen, { when: lastSeen })}
-            </span>
-          </div>
-        </div>
-      </div>
-
-      {/* User-visible facts — Owner / Device / Runtime, each labelled.
-          Replaces the older dense `·`-separated meta strip that mixed
-          everything (including dev-only IDs) at the same visual weight. */}
-      <dl className="grid grid-cols-1 divide-y sm:grid-cols-3 sm:divide-x sm:divide-y-0">
-        <Fact label={t(($) => $.detail.fact_owner)}>
+    <div className="space-y-5">
+      <ObjectPanelSection title={tLayout(($) => $.object_page.properties)}>
+        <ObjectProperty label={t(($) => $.page.columns.status)}>
+          <HealthIcon health={health} />
+          <span className="truncate">
+            {health === "online" ? healthLabel(health) : `${healthLabel(health)} · ${lastSeen}`}
+          </span>
+        </ObjectProperty>
+        <ObjectProperty label={t(($) => $.detail.fact_owner)}>
           {ownerMember ? (
-            <span className="inline-flex min-w-0 items-center gap-1.5">
+            <>
               <ActorAvatar
                 actorType="member"
                 actorId={ownerMember.user_id}
-                size="sm"
+                size="xs"
                 enableHoverCard
               />
-              <span className="cursor-pointer truncate text-body">{ownerMember.name}</span>
-            </span>
+              <span className="truncate">{ownerMember.name}</span>
+            </>
           ) : (
-            <span className="text-body text-muted-foreground">—</span>
+            <span className="text-muted-foreground">—</span>
           )}
-        </Fact>
-        <Fact label={t(($) => $.detail.fact_device)}>
+        </ObjectProperty>
+        <ObjectProperty label={t(($) => $.detail.fact_device)}>
           {device?.hostname ? (
             <TruncatedTooltip content={device.hostname}>
-              <span className="block truncate font-mono text-caption">
-                {device.hostname}
-              </span>
+              <span className="block truncate font-mono">{device.hostname}</span>
             </TruncatedTooltip>
           ) : (
-            <span className="text-body text-muted-foreground">—</span>
+            <span className="text-muted-foreground">—</span>
           )}
-        </Fact>
-        <Fact label={t(($) => $.detail.fact_runtime)}>
-          <span className="block truncate text-body">
-            {device?.runtime ?? (
-              <span className="capitalize">{runtime.provider}</span>
-            )}
+        </ObjectProperty>
+        <ObjectProperty label={t(($) => $.detail.fact_runtime)}>
+          <span className="truncate">
+            {device?.runtime ?? <span className="capitalize">{runtime.provider}</span>}
           </span>
-        </Fact>
-      </dl>
-
-      {/* Diagnostic IDs — multica CLI git hash + truncated daemon UUID.
-          Only useful when filing an issue or reading logs; folded by
-          default so they don't compete with the user-visible facts above. */}
-      {hasTechDetails && (
-        <div className="border-t">
-          <button
-            type="button"
-            onClick={() => setShowDetails((v) => !v)}
-            className="flex w-full items-center gap-1 px-4 py-2 text-caption text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
-          >
-            <ChevronRight
-              className={`h-3 w-3 transition-transform ${
-                showDetails ? "rotate-90" : ""
-              }`}
-            />
-            {t(($) => $.detail.technical_details)}
-          </button>
-          {showDetails && (
-            <dl className="grid grid-cols-1 gap-y-2 border-t bg-muted/30 px-4 py-3 sm:grid-cols-2">
-              {cliVersion && (
-                <Fact label={t(($) => $.detail.fact_daemon_cli)} mono compact>
-                  {cliVersion}
-                </Fact>
-              )}
-              {daemonShort && (
-                <Fact label={t(($) => $.detail.fact_daemon_id)} mono compact>
-                  {daemonShort}
-                </Fact>
-              )}
-            </dl>
+        </ObjectProperty>
+        {cliVersion && (
+          <ObjectProperty label={t(($) => $.detail.fact_daemon_cli)}>
+            <span className="truncate font-mono">{cliVersion}</span>
+          </ObjectProperty>
+        )}
+        {daemonShort && (
+          <ObjectProperty label={t(($) => $.detail.fact_daemon_id)}>
+            <span className="truncate font-mono">{daemonShort}</span>
+          </ObjectProperty>
+        )}
+      </ObjectPanelSection>
+      <ObjectPanelSection title={t(($) => $.detail.diagnostics_visibility)}>
+        <div className="pr-0.5 pt-1">
+          {canEditVisibility ? (
+            <RuntimeAccessEditor runtime={runtime} />
+          ) : (
+            <RuntimeAccessReadout runtime={runtime} />
           )}
         </div>
-      )}
+      </ObjectPanelSection>
     </div>
   );
 }
 
-function Fact({
-  label,
-  children,
-  mono,
-  compact,
-}: {
-  label: string;
-  children: React.ReactNode;
-  mono?: boolean;
-  compact?: boolean;
-}) {
-  return (
-    <div className={`min-w-0 ${compact ? "" : "px-4 py-3"}`}>
-      <dt className="text-micro uppercase tracking-wider text-muted-foreground">
-        {label}
-      </dt>
-      <dd className={`mt-1 ${mono ? "font-mono text-caption" : ""}`}>{children}</dd>
-    </div>
-  );
-}
-
-export function ServingAgentsCard({
+export function ServingAgentList({
   agents,
   presenceMap,
   agentHref,
@@ -395,129 +398,59 @@ export function ServingAgentsCard({
 }) {
   const { t } = useT("runtimes");
   const { t: tAgents } = useT("agents");
+  if (agents.length === 0) {
+    return (
+      <p className="rounded-lg border border-dashed px-4 py-6 text-center text-caption text-muted-foreground">
+        {t(($) => $.detail.no_agents)}
+      </p>
+    );
+  }
   return (
-    <div className="rounded-lg border">
-      <div className="flex items-center justify-between border-b px-4 py-2.5">
-        <span className="text-caption font-semibold">{t(($) => $.detail.serving_title)}</span>
-        <span className="text-caption text-muted-foreground">
-          {t(($) => $.detail.serving_count, { count: agents.length })}
-        </span>
-      </div>
-      {agents.length === 0 ? (
-        <div className="flex flex-col items-center px-4 py-6 text-center">
-          <Cpu className="h-5 w-5 text-faint-foreground" />
-          <p className="mt-2 text-caption text-muted-foreground">
-            {t(($) => $.detail.no_agents)}
-          </p>
-        </div>
-      ) : (
-        <div className="divide-y">
-          {agents.map((agent) => {
-            const detail = presenceMap.get(agent.id);
-            const av = detail
-              ? availabilityConfig[detail.availability]
-              : availabilityConfig.offline;
-            const avLabel = tAgents(($) => $.availability[detail?.availability ?? "offline"]);
-            const wl = detail ? workloadConfig[detail.workload] : null;
-            const running = detail?.runningCount ?? 0;
-            const queued = detail?.queuedCount ?? 0;
-            return (
-              <AppLink
-                key={agent.id}
-                href={agentHref(agent.id)}
-                className="group flex items-center gap-2 px-4 py-2 transition-colors hover:bg-accent/40 focus-visible:bg-accent/40 focus-visible:outline-none"
-              >
-                <ActorAvatar actorType="agent" actorId={agent.id} size="sm" enableHoverCard showStatusDot />
-                <div className="min-w-0 flex-1">
-                  <div className="truncate text-caption font-medium">
-                    {agent.name}
-                  </div>
-                  <div className="mt-0.5 flex flex-wrap items-center gap-x-1.5 gap-y-0.5 text-caption">
-                    <span className="inline-flex items-center gap-1.5">
-                      <span className={`h-1.5 w-1.5 rounded-full ${av.dotClass}`} />
-                      <span className={av.textClass}>{avLabel}</span>
-                    </span>
-                    {wl && detail && detail.workload !== "idle" && (
-                      <span className={`inline-flex items-center gap-1 ${wl.textClass}`}>
-                        <span className="text-muted-foreground">·</span>
-                        <wl.icon
-                          className={`h-3 w-3 ${detail.workload === "working" ? "animate-spin" : ""}`}
-                        />
-                        {tAgents(($) => $.workload[detail.workload])}
-                        {running > 0 && (
-                          <span className="text-muted-foreground">{t(($) => $.detail.running_chip, { count: running })}</span>
-                        )}
-                        {queued > 0 && (
-                          <span className="text-muted-foreground">{t(($) => $.detail.queued_chip, { count: queued })}</span>
-                        )}
-                      </span>
-                    )}
-                  </div>
-                </div>
-                <ChevronRight className="h-3.5 w-3.5 shrink-0 text-faint-foreground transition-colors group-hover:text-muted-foreground" />
-              </AppLink>
-            );
-          })}
-        </div>
-      )}
-    </div>
-  );
-}
-
-function DiagnosticsCard({
-  runtime,
-  canEditVisibility,
-  canDelete,
-  onDelete,
-}: {
-  runtime: AgentRuntime;
-  /**
-   * Runtime owner only — narrower than the card's other affordances on
-   * purpose (MUL-6126). Sharing a machine with the workspace is the owner's
-   * call, so a workspace admin sees the read-only chip here even though they
-   * may still rename or delete the runtime.
-   */
-  canEditVisibility: boolean;
-  canDelete: boolean;
-  onDelete: () => void;
-}) {
-  const { t } = useT("runtimes");
-  return (
-    <div className="rounded-lg border">
-      <div className="border-b px-4 py-2.5">
-        <span className="text-caption font-semibold">{t(($) => $.detail.diagnostics_title)}</span>
-      </div>
-      <div className="space-y-3 p-4">
-        <div>
-          <div className="mb-1.5 text-micro uppercase tracking-wide text-muted-foreground">
-            {t(($) => $.detail.diagnostics_visibility)}
-          </div>
-          {canEditVisibility ? (
-            <RuntimeAccessEditor runtime={runtime} />
-          ) : (
-            <RuntimeAccessReadout runtime={runtime} />
-          )}
-        </div>
-        {canDelete && (
-          // The button stays clickable even when the runtime is a live
-          // local daemon (self-healing). The owner explicitly asked for
-          // it (MUL-3352) — disabling here left them looking at a button
-          // they had every permission to click but couldn't. The dialog
-          // raises a self-heal banner so the user sees the trade-off
-          // before confirming.
-          <div className="border-t pt-3">
-            <Button
-              variant="ghost"
-              size="sm"
-              className="h-8 w-full justify-start gap-2 text-destructive hover:bg-destructive/10 hover:text-destructive"
-              onClick={onDelete}
-            >
-              <Trash2 className="h-3.5 w-3.5" />
-              {t(($) => $.detail.delete_button)}
-            </Button>
-          </div>
-        )}
-      </div>
-    </div>
+    <ObjectSectionCard>
+      {agents.map((agent) => {
+        const detail = presenceMap.get(agent.id);
+        const av = detail
+          ? availabilityConfig[detail.availability]
+          : availabilityConfig.offline;
+        const avLabel = tAgents(($) => $.availability[detail?.availability ?? "offline"]);
+        const wl = detail ? workloadConfig[detail.workload] : null;
+        const running = detail?.runningCount ?? 0;
+        const queued = detail?.queuedCount ?? 0;
+        return (
+          <AppLink
+            key={agent.id}
+            href={agentHref(agent.id)}
+            className="group flex items-center gap-2.5 px-3 py-2 transition-colors hover:bg-accent/40 focus-visible:bg-accent/40 focus-visible:outline-none"
+          >
+            <ActorAvatar actorType="agent" actorId={agent.id} size="sm" enableHoverCard showStatusDot />
+            <span className="min-w-0 flex-1 truncate text-body font-medium">
+              {agent.name}
+            </span>
+            <span className="flex shrink-0 items-center gap-x-1.5 text-caption">
+              <span className="inline-flex items-center gap-1.5">
+                <span className={`h-1.5 w-1.5 rounded-full ${av.dotClass}`} />
+                <span className={av.textClass}>{avLabel}</span>
+              </span>
+              {wl && detail && detail.workload !== "idle" && (
+                <span className={`inline-flex items-center gap-1 ${wl.textClass}`}>
+                  <span className="text-muted-foreground">·</span>
+                  <wl.icon
+                    className={`h-3 w-3 ${detail.workload === "working" ? "animate-spin" : ""}`}
+                  />
+                  {tAgents(($) => $.workload[detail.workload])}
+                  {running > 0 && (
+                    <span className="text-muted-foreground">{t(($) => $.detail.running_chip, { count: running })}</span>
+                  )}
+                  {queued > 0 && (
+                    <span className="text-muted-foreground">{t(($) => $.detail.queued_chip, { count: queued })}</span>
+                  )}
+                </span>
+              )}
+            </span>
+            <ChevronRight className="h-3.5 w-3.5 shrink-0 text-faint-foreground transition-colors group-hover:text-muted-foreground" />
+          </AppLink>
+        );
+      })}
+    </ObjectSectionCard>
   );
 }

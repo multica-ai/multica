@@ -1,4 +1,4 @@
-import { ListTodo, Plus, Zap } from "@multica/ui/icons";
+import { ListTodo, Zap } from "@multica/ui/icons";
 import { act, within } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 
@@ -6,8 +6,8 @@ import { SidebarProvider, useSidebar } from "@multica/ui/components/ui/sidebar";
 import { renderWithI18n } from "../test/i18n";
 import { AppShellProvider } from "./app-shell-context";
 import {
+  CollectionCreateButton,
   CollectionPageHeader,
-  CollectionPageHeaderAction,
 } from "./collection-page";
 import { CollapsedNavTrigger, PAGE_GUTTER, PageHeader } from "./page-header";
 
@@ -46,10 +46,7 @@ describe("PageHeader title alignment", () => {
       <CollectionPageHeader
         icon={Zap}
         title="Autopilot"
-        count={2}
-        actions={
-          <CollectionPageHeaderAction icon={Plus} label="New autopilot" />
-        }
+        actions={<CollectionCreateButton label="New autopilot" />}
       />,
     );
 

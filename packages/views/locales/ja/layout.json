@@ -146,5 +146,15 @@
     },
     "language": "言語",
     "shortcuts": "キーボードショートカット"
+  },
+  "collection": {
+    "filter": "フィルター",
+    "filter_count_other": "{{count}} 件のフィルター",
+    "reset": "リセット",
+    "display": "表示設定"
+  },
+  "object_page": {
+    "toggle_panel": "右サイドバーを切り替え",
+    "properties": "プロパティ"
   }
 }

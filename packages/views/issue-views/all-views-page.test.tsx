@@ -15,6 +15,7 @@ const mocks = vi.hoisted(() => ({
   star: vi.fn(),
   unstar: vi.fn(),
   open: vi.fn(),
+  create: vi.fn(),
 }));
 
 vi.mock("@tanstack/react-query", () => ({
@@ -52,7 +53,7 @@ vi.mock("./use-view-actions", () => ({
     },
     canManage: () => true,
     open: mocks.open,
-    create: vi.fn(),
+    create: mocks.create,
     duplicate: vi.fn(),
     remove: vi.fn(),
     copyLink: vi.fn(),
@@ -107,6 +108,7 @@ beforeEach(() => {
   mocks.star.mockReset();
   mocks.unstar.mockReset();
   mocks.open.mockReset();
+  mocks.create.mockReset();
   useActiveIssueViewStore.setState({ active: {} });
 });
 
@@ -119,19 +121,38 @@ describe("AllViewsPage", () => {
     expect(screen.getByText("2")).toBeInTheDocument();
   });
 
-  it("narrows by tab and search", async () => {
+  it("titles the page with the scope and switches scope from the title menu", async () => {
     const user = userEvent.setup();
     renderPage();
 
-    await user.click(screen.getByRole("button", { name: /^Shared/ }));
+    expect(screen.getByRole("heading", { level: 1, name: "All views" })).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "All views" }));
+    expect(await screen.findByRole("menuitemradio", { name: /^All views/ })).toHaveTextContent("5");
+    expect(screen.getByRole("menuitemradio", { name: /^Built-in/ })).toHaveTextContent("3");
+    expect(screen.getByRole("menuitemradio", { name: /^Created by me/ })).toHaveTextContent("1");
+    await user.click(screen.getByRole("menuitemradio", { name: /^Shared/ }));
+
+    expect(screen.getByRole("heading", { level: 1, name: "Shared" })).toBeInTheDocument();
     expect(screen.queryByText("Needs review")).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Add All issues to sidebar" })).not.toBeInTheDocument();
     expect(screen.getByText("Team backlog")).toBeInTheDocument();
+  });
 
-    await user.click(screen.getByRole("button", { name: /^All/ }));
-    await user.type(screen.getByRole("textbox", { name: "Search views" }), "review");
-    expect(screen.getByText("Needs review")).toBeInTheDocument();
-    expect(screen.queryByText("Team backlog")).not.toBeInTheDocument();
+  it("has no search in the header", () => {
+    renderPage();
+
+    expect(screen.queryByRole("button", { name: "Search views" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("textbox")).not.toBeInTheDocument();
+  });
+
+  it("creates a view from the header", async () => {
+    const user = userEvent.setup();
+    renderPage();
+
+    await user.click(screen.getByRole("button", { name: "New view" }));
+    expect(mocks.create).toHaveBeenCalledWith(
+      expect.objectContaining({ scope: { scope_type: "workspace" }, renameIn: "header" }),
+    );
   });
 
   it("stars and unstars without opening the view", async () => {

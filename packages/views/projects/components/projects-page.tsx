@@ -6,13 +6,11 @@ import {
   ArrowUp,
   ChevronDown,
   ExternalLink,
-  Filter,
   FolderKanban,
   LayoutGrid,
   MoreHorizontal,
   Pin,
   PinOff,
-  Plus,
   Rows3,
   Search,
   Trash2,
@@ -47,7 +45,6 @@ import { FILTER_ITEM_CLASS, HoverCheck } from "../../common/hover-check";
 import { Skeleton } from "@multica/ui/components/ui/skeleton";
 import { Button } from "@multica/ui/components/ui/button";
 import { Checkbox } from "@multica/ui/components/ui/checkbox";
-import { Input } from "@multica/ui/components/ui/input";
 import {
   Dialog,
   DialogContent,
@@ -60,9 +57,7 @@ import {
   DropdownMenu,
   DropdownMenuCheckboxItem,
   DropdownMenuContent,
-  DropdownMenuGroup,
   DropdownMenuItem,
-  DropdownMenuLabel,
   DropdownMenuRadioGroup,
   DropdownMenuRadioItem,
   DropdownMenuSeparator,
@@ -86,11 +81,7 @@ import {
   PopoverTrigger,
 } from "@multica/ui/components/ui/popover";
 import { Switch } from "@multica/ui/components/ui/switch";
-import {
-  Tooltip,
-  TooltipContent,
-  TooltipTrigger,
-} from "@multica/ui/components/ui/tooltip";
+import { Toggle } from "@multica/ui/components/ui/toggle";
 import { IconButton } from "@multica/ui/components/common/icon-button";
 import { TooltipHint } from "@multica/ui/components/common/tooltip-hint";
 import type {
@@ -101,17 +92,20 @@ import type {
   UpdateProjectRequest,
 } from "@multica/core/types";
 import {
+  CollectionCreateButton,
+  CollectionDisplayButton,
+  CollectionFilterButton,
   CollectionPageHeader,
-  CollectionPageHeaderAction,
   CollectionPageState,
+  CollectionResetButton,
+  CollectionScopeItems,
 } from "../../layout/collection-page";
 import { ProjectIcon } from "./project-icon";
 import { useT } from "../../i18n";
-import { matchesPinyin } from "../../editor/extensions/pinyin-match";
 import { useFormatRelativeDate } from "./labels";
 import { ProjectStatusBadge, ProjectPriorityBadge } from "./project-badge";
 import { ProjectLeadPicker } from "./project-lead-picker";
-import { PAGE_GUTTER, PAGE_TOOLBAR } from "../../layout/page-header";
+import { PAGE_GUTTER } from "../../layout/page-header";
 import { cn } from "@multica/ui/lib/utils";
 import { DeferredTooltip } from "@multica/ui/components/common/deferred-tooltip";
 
@@ -674,8 +668,23 @@ function ProjectCard({
   );
 }
 
-// Toolbar — search + result count + filter + display (compact only) + view
-// toggle.
+// Header tools — scope menu, filter, display (view, sort, columns).
+
+// Scope splits the lifecycle in two: still being worked on, or closed. The
+// status filter narrows further within it.
+type ProjectScope = "all" | "active" | "closed";
+const PROJECT_SCOPES: ProjectScope[] = ["all", "active", "closed"];
+const CLOSED_STATUSES: ReadonlySet<ProjectStatus> = new Set(["completed", "cancelled"]);
+
+function inScope(project: Project, scope: ProjectScope): boolean {
+  if (scope === "all") return true;
+  return CLOSED_STATUSES.has(project.status) === (scope === "closed");
+}
+
+const VIEW_MODES: { mode: ProjectViewMode; Icon: typeof Rows3 }[] = [
+  { mode: "compact", Icon: Rows3 },
+  { mode: "comfortable", Icon: LayoutGrid },
+];
 
 const STATUS_VALUES: ProjectStatus[] = [
   "planned",
@@ -839,7 +848,7 @@ export function ProjectsPage() {
     return s;
   }, [pins]);
 
-  const [search, setSearch] = useState("");
+  const [scope, setScope] = useState<ProjectScope>("all");
   const [selectedIds, setSelectedIds] = useState<ReadonlySet<string>>(new Set());
   const toggleSelected = (id: string) =>
     setSelectedIds((prev) => {
@@ -866,12 +875,15 @@ export function ProjectsPage() {
     return m;
   }, [projects]);
 
+  const scopeCounts = useMemo<Record<ProjectScope, number>>(() => {
+    const counts = { all: projects.length, active: 0, closed: 0 };
+    for (const p of projects) counts[inScope(p, "closed") ? "closed" : "active"] += 1;
+    return counts;
+  }, [projects]);
+
   const visible = useMemo(() => {
-    const q = search.trim().toLowerCase();
     const filtered = projects.filter((p) => {
-      if (q && !p.title.toLowerCase().includes(q) && !matchesPinyin(p.title, q)) {
-        return false;
-      }
+      if (!inScope(p, scope)) return false;
       if (filters.statuses.length && !filters.statuses.includes(p.status)) return false;
       if (filters.priorities.length && !filters.priorities.includes(p.priority)) {
         return false;
@@ -904,7 +916,7 @@ export function ProjectsPage() {
       return (Date.parse(a.created_at) - Date.parse(b.created_at)) * dir;
     });
     return sorted;
-  }, [projects, search, filters, sortField, sortDirection]);
+  }, [projects, scope, filters, sortField, sortDirection]);
 
   const selectedProjects = visible.filter((p) => selectedIds.has(p.id));
   const allSelected = visible.length > 0 && selectedProjects.length === visible.length;
@@ -937,20 +949,190 @@ export function ProjectsPage() {
   const countBadge = (n: number) => (
     <span className="ml-auto pl-3 text-caption text-muted-foreground">{n}</span>
   );
+  const scopeLabels: Record<ProjectScope, string> = {
+    all: t(($) => $.page.scope_all),
+    active: t(($) => $.page.scope_active),
+    closed: t(($) => $.page.scope_closed),
+  };
 
   return (
     // relative: positioning anchor for the page-centered batch toolbar.
     <div className="relative flex flex-1 min-h-0 flex-col">
       <CollectionPageHeader
         icon={FolderKanban}
-        title={t(($) => $.page.title)}
-        count={projects.length}
-        actions={
-          <CollectionPageHeaderAction
-            icon={Plus}
-            label={t(($) => $.page.new_project)}
-            onClick={openCreateProject}
+        title={scopeLabels[scope]}
+        menu={
+          <CollectionScopeItems
+            value={scope}
+            onChange={setScope}
+            options={PROJECT_SCOPES.map((s) => ({
+              value: s,
+              label: scopeLabels[s],
+              count: scopeCounts[s],
+            }))}
           />
+        }
+        tools={
+          <>
+            <DropdownMenu>
+              <DropdownMenuTrigger render={<CollectionFilterButton count={activeFilterCount} />} />
+              <DropdownMenuContent align="start" className="w-auto">
+                <DropdownMenuSub>
+                  <DropdownMenuSubTrigger>
+                    <span className="flex-1">{t(($) => $.toolbar.section_status)}</span>
+                    {filters.statuses.length > 0 && (
+                      <span className="text-caption font-medium text-primary">{filters.statuses.length}</span>
+                    )}
+                  </DropdownMenuSubTrigger>
+                  <DropdownMenuSubContent className="w-auto min-w-44">
+                    {STATUS_VALUES.map((s) => (
+                      <DropdownMenuCheckboxItem
+                        key={s}
+                        checked={filters.statuses.includes(s)}
+                        onCheckedChange={() => toggleFilter("statuses", s)}
+                        className={FILTER_ITEM_CLASS}
+                      >
+                        <HoverCheck checked={filters.statuses.includes(s)} />
+                        {t(($) => $.status[s])}
+                      </DropdownMenuCheckboxItem>
+                    ))}
+                  </DropdownMenuSubContent>
+                </DropdownMenuSub>
+                <DropdownMenuSub>
+                  <DropdownMenuSubTrigger>
+                    <span className="flex-1">{t(($) => $.toolbar.section_priority)}</span>
+                    {filters.priorities.length > 0 && (
+                      <span className="text-caption font-medium text-primary">{filters.priorities.length}</span>
+                    )}
+                  </DropdownMenuSubTrigger>
+                  <DropdownMenuSubContent className="w-auto min-w-44">
+                    {PRIORITY_VALUES.map((pr) => (
+                      <DropdownMenuCheckboxItem
+                        key={pr}
+                        checked={filters.priorities.includes(pr)}
+                        onCheckedChange={() => toggleFilter("priorities", pr)}
+                        className={FILTER_ITEM_CLASS}
+                      >
+                        <HoverCheck checked={filters.priorities.includes(pr)} />
+                        {t(($) => $.priority[pr])}
+                      </DropdownMenuCheckboxItem>
+                    ))}
+                  </DropdownMenuSubContent>
+                </DropdownMenuSub>
+                <DropdownMenuSub>
+                  <DropdownMenuSubTrigger>
+                    <span className="flex-1">{t(($) => $.toolbar.section_lead)}</span>
+                    {filters.leads.length > 0 && (
+                      <span className="text-caption font-medium text-primary">{filters.leads.length}</span>
+                    )}
+                  </DropdownMenuSubTrigger>
+                  <DropdownMenuSubContent className="max-h-72 w-auto min-w-48 overflow-y-auto">
+                    {[...leadOptions.entries()].map(([value, { type, id, count }]) => (
+                      <DropdownMenuCheckboxItem
+                        key={value}
+                        checked={filters.leads.includes(value)}
+                        onCheckedChange={() => toggleFilter("leads", value)}
+                        className={FILTER_ITEM_CLASS}
+                      >
+                        <HoverCheck checked={filters.leads.includes(value)} />
+                        <ActorAvatar actorType={type} actorId={id} size="sm" />
+                        <span className="min-w-0 truncate">{getActorName(type, id)}</span>
+                        {countBadge(count)}
+                      </DropdownMenuCheckboxItem>
+                    ))}
+                  </DropdownMenuSubContent>
+                </DropdownMenuSub>
+              </DropdownMenuContent>
+            </DropdownMenu>
+            {hasActiveFilters ? <CollectionResetButton onClick={clearFilters} /> : null}
+          </>
+        }
+        actions={
+          <>
+            {/* Display: view, sort, columns. Sort applies to both views; the
+                columns section is shown only in the table view (cards have
+                no columns). */}
+            <Popover>
+              <PopoverTrigger
+                render={<CollectionDisplayButton icon={isCompact ? Rows3 : LayoutGrid} />}
+              />
+              <PopoverContent align="end" className="w-64 p-0">
+                <div className="border-b px-3 py-2.5">
+                  <div
+                    role="group"
+                    aria-label={t(($) => $.toolbar.view)}
+                    className="grid grid-cols-2 gap-0.5 rounded-lg bg-muted p-0.5"
+                  >
+                    {VIEW_MODES.map(({ mode, Icon }) => (
+                      <Toggle
+                        key={mode}
+                        pressed={viewMode === mode}
+                        onPressedChange={() => setViewMode(mode)}
+                        className="h-auto min-w-0 flex-col gap-1 rounded-md px-0.5 py-1.5 text-caption font-normal text-muted-foreground hover:bg-transparent hover:text-foreground aria-pressed:bg-background aria-pressed:text-foreground aria-pressed:shadow-sm aria-pressed:hover:bg-background"
+                      >
+                        <Icon className="size-4" />
+                        <span className="max-w-full truncate">
+                          {mode === "compact" ? t(($) => $.page.view_table) : t(($) => $.page.view_cards)}
+                        </span>
+                      </Toggle>
+                    ))}
+                  </div>
+                </div>
+                <div className={cn("px-3 py-2.5", isCompact && "border-b")}>
+                  <span className="text-caption font-medium text-muted-foreground">{t(($) => $.toolbar.sort_by)}</span>
+                  <div className="mt-2 flex items-center gap-1.5">
+                    <DropdownMenu>
+                      <DropdownMenuTrigger
+                        render={
+                          <Button variant="outline" size="sm" className="flex-1 justify-between text-caption">
+                            {sortLabel(sortField)}
+                            <ChevronDown className="size-3 text-muted-foreground" />
+                          </Button>
+                        }
+                      />
+                      <DropdownMenuContent align="start" className="w-auto">
+                        <DropdownMenuRadioGroup
+                          value={sortField}
+                          onValueChange={(v) => setSortField(v as ProjectSortField)}
+                        >
+                          {SORT_FIELDS.map((f) => (
+                            <DropdownMenuRadioItem key={f} value={f}>
+                              {sortLabel(f)}
+                            </DropdownMenuRadioItem>
+                          ))}
+                        </DropdownMenuRadioGroup>
+                      </DropdownMenuContent>
+                    </DropdownMenu>
+                    <IconButton
+                      variant="outline"
+                      size="icon-sm"
+                      onClick={() => setSortDirection(sortDirection === "asc" ? "desc" : "asc")}
+                      label={sortDirection === "asc" ? t(($) => $.toolbar.direction_asc) : t(($) => $.toolbar.direction_desc)}
+                    >
+                      {sortDirection === "asc" ? <ArrowUp className="size-3.5" /> : <ArrowDown className="size-3.5" />}
+                    </IconButton>
+                  </div>
+                </div>
+                {isCompact && (
+                  <div className="px-3 py-2.5">
+                    <span className="text-caption font-medium text-muted-foreground">{t(($) => $.toolbar.section_columns)}</span>
+                    <div className="mt-2 space-y-2">
+                      {COLUMN_KEYS.map((key) => (
+                        <label key={key} className="flex cursor-pointer items-center justify-between">
+                          <span className="text-body">{columnLabel(key)}</span>
+                          <Switch size="sm" checked={!hiddenColumns.includes(key)} onCheckedChange={() => toggleColumn(key)} />
+                        </label>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </PopoverContent>
+            </Popover>
+            <CollectionCreateButton
+              label={t(($) => $.page.new_project)}
+              onClick={openCreateProject}
+            />
+          </>
         }
       />
 
@@ -966,266 +1148,6 @@ export function ProjectsPage() {
         />
       ) : (
         <>
-          {/* Toolbar */}
-          <div className={PAGE_TOOLBAR}>
-            <div className="flex min-w-0 items-center gap-2">
-              <div className="relative hidden md:block">
-                <Search className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
-                <Input
-                  value={search}
-                  onChange={(e) => setSearch(e.target.value)}
-                  aria-label={t(($) => $.page.search_placeholder)}
-                  placeholder={t(($) => $.page.search_placeholder)}
-                  className="h-8 w-56 pl-8 text-body"
-                />
-              </div>
-              {(hasActiveFilters || search.trim().length > 0) && (
-                <span
-                  title={t(($) => $.toolbar.result_count_title)}
-                  className="hidden shrink-0 text-caption tabular-nums text-muted-foreground md:inline"
-                >
-                  {visible.length} / {projects.length}
-                </span>
-              )}
-            </div>
-
-            <div className="flex shrink-0 items-center gap-1">
-              {/* Filter */}
-              <DropdownMenu>
-                <DropdownMenuTrigger
-                  render={
-                    <Button
-                      variant={hasActiveFilters ? "default" : "outline"}
-                      size="sm"
-                      className={
-                        hasActiveFilters
-                          ? "h-8 w-8 gap-1 bg-brand px-0 text-white hover:bg-brand/90 md:w-auto md:px-2.5"
-                          : "h-8 w-8 gap-1 px-0 text-muted-foreground md:w-auto md:px-2.5"
-                      }
-                    >
-                      <Filter className="size-3.5" />
-                      {hasActiveFilters ? (
-                        <>
-                          <span className="hidden md:inline">
-                            {t(($) => $.toolbar.filter_active_count, { count: activeFilterCount })}
-                          </span>
-                          <span className="tabular-nums md:hidden">{activeFilterCount}</span>
-                        </>
-                      ) : (
-                        <span className="hidden md:inline">{t(($) => $.toolbar.filter_label)}</span>
-                      )}
-                      {hasActiveFilters && (
-                        <span
-                          role="button"
-                          tabIndex={-1}
-                          aria-label={t(($) => $.toolbar.clear_filters)}
-                          className="-mr-1 ml-0.5 hidden rounded-sm p-0.5 hover:bg-white/20 md:inline-flex"
-                          onClick={(e) => {
-                            e.preventDefault();
-                            e.stopPropagation();
-                            clearFilters();
-                          }}
-                          onPointerDown={(e) => e.stopPropagation()}
-                        >
-                          <X className="size-3" />
-                        </span>
-                      )}
-                    </Button>
-                  }
-                />
-                <DropdownMenuContent align="end" className="w-auto">
-                  <DropdownMenuSub>
-                    <DropdownMenuSubTrigger>
-                      <span className="flex-1">{t(($) => $.toolbar.section_status)}</span>
-                      {filters.statuses.length > 0 && (
-                        <span className="text-caption font-medium text-primary">{filters.statuses.length}</span>
-                      )}
-                    </DropdownMenuSubTrigger>
-                    <DropdownMenuSubContent className="w-auto min-w-44">
-                      {STATUS_VALUES.map((s) => (
-                        <DropdownMenuCheckboxItem
-                          key={s}
-                          checked={filters.statuses.includes(s)}
-                          onCheckedChange={() => toggleFilter("statuses", s)}
-                          className={FILTER_ITEM_CLASS}
-                        >
-                          <HoverCheck checked={filters.statuses.includes(s)} />
-                          {t(($) => $.status[s])}
-                        </DropdownMenuCheckboxItem>
-                      ))}
-                    </DropdownMenuSubContent>
-                  </DropdownMenuSub>
-                  <DropdownMenuSub>
-                    <DropdownMenuSubTrigger>
-                      <span className="flex-1">{t(($) => $.toolbar.section_priority)}</span>
-                      {filters.priorities.length > 0 && (
-                        <span className="text-caption font-medium text-primary">{filters.priorities.length}</span>
-                      )}
-                    </DropdownMenuSubTrigger>
-                    <DropdownMenuSubContent className="w-auto min-w-44">
-                      {PRIORITY_VALUES.map((pr) => (
-                        <DropdownMenuCheckboxItem
-                          key={pr}
-                          checked={filters.priorities.includes(pr)}
-                          onCheckedChange={() => toggleFilter("priorities", pr)}
-                          className={FILTER_ITEM_CLASS}
-                        >
-                          <HoverCheck checked={filters.priorities.includes(pr)} />
-                          {t(($) => $.priority[pr])}
-                        </DropdownMenuCheckboxItem>
-                      ))}
-                    </DropdownMenuSubContent>
-                  </DropdownMenuSub>
-                  <DropdownMenuSub>
-                    <DropdownMenuSubTrigger>
-                      <span className="flex-1">{t(($) => $.toolbar.section_lead)}</span>
-                      {filters.leads.length > 0 && (
-                        <span className="text-caption font-medium text-primary">{filters.leads.length}</span>
-                      )}
-                    </DropdownMenuSubTrigger>
-                    <DropdownMenuSubContent className="max-h-72 w-auto min-w-48 overflow-y-auto">
-                      {[...leadOptions.entries()].map(([value, { type, id, count }]) => (
-                        <DropdownMenuCheckboxItem
-                          key={value}
-                          checked={filters.leads.includes(value)}
-                          onCheckedChange={() => toggleFilter("leads", value)}
-                          className={FILTER_ITEM_CLASS}
-                        >
-                          <HoverCheck checked={filters.leads.includes(value)} />
-                          <ActorAvatar actorType={type} actorId={id} size="sm" />
-                          <span className="min-w-0 truncate">{getActorName(type, id)}</span>
-                          {countBadge(count)}
-                        </DropdownMenuCheckboxItem>
-                      ))}
-                    </DropdownMenuSubContent>
-                  </DropdownMenuSub>
-                </DropdownMenuContent>
-              </DropdownMenu>
-
-              {/* Display (sort + columns). Always present — view mode is a
-                  pure presentation choice and must not reshape the toolbar.
-                  Sort applies to both views; the columns section is shown
-                  only in the table view (cards have no columns). */}
-              <Popover>
-                  <Tooltip>
-                    <PopoverTrigger
-                      render={
-                        <TooltipTrigger
-                          render={
-                            <Button variant="outline" size="sm" className="h-8 w-8 gap-1 px-0 text-muted-foreground md:w-auto md:px-2.5">
-                              {sortDirection === "asc" ? <ArrowUp className="size-3.5" /> : <ArrowDown className="size-3.5" />}
-                              <span className="hidden md:inline">{sortLabel(sortField)}</span>
-                            </Button>
-                          }
-                        />
-                      }
-                    />
-                    <TooltipContent side="bottom">{t(($) => $.toolbar.display)}</TooltipContent>
-                  </Tooltip>
-                  <PopoverContent align="end" className="w-64 p-0">
-                    <div className="border-b px-3 py-2.5">
-                      <span className="text-caption font-medium text-muted-foreground">{t(($) => $.toolbar.sort_by)}</span>
-                      <div className="mt-2 flex items-center gap-1.5">
-                        <DropdownMenu>
-                          <DropdownMenuTrigger
-                            render={
-                              <Button variant="outline" size="sm" className="flex-1 justify-between text-caption">
-                                {sortLabel(sortField)}
-                                <ChevronDown className="size-3 text-muted-foreground" />
-                              </Button>
-                            }
-                          />
-                          <DropdownMenuContent align="start" className="w-auto">
-                            <DropdownMenuRadioGroup
-                              value={sortField}
-                              onValueChange={(v) => setSortField(v as ProjectSortField)}
-                            >
-                              {SORT_FIELDS.map((f) => (
-                                <DropdownMenuRadioItem key={f} value={f}>
-                                  {sortLabel(f)}
-                                </DropdownMenuRadioItem>
-                              ))}
-                            </DropdownMenuRadioGroup>
-                          </DropdownMenuContent>
-                        </DropdownMenu>
-                        <IconButton
-                          variant="outline"
-                          size="icon-sm"
-                          onClick={() => setSortDirection(sortDirection === "asc" ? "desc" : "asc")}
-                          label={sortDirection === "asc" ? t(($) => $.toolbar.direction_asc) : t(($) => $.toolbar.direction_desc)}
-                        >
-                          {sortDirection === "asc" ? <ArrowUp className="size-3.5" /> : <ArrowDown className="size-3.5" />}
-                        </IconButton>
-                      </div>
-                    </div>
-                    {isCompact && (
-                      <div className="px-3 py-2.5">
-                        <span className="text-caption font-medium text-muted-foreground">{t(($) => $.toolbar.section_columns)}</span>
-                        <div className="mt-2 space-y-2">
-                          {COLUMN_KEYS.map((key) => (
-                            <label key={key} className="flex cursor-pointer items-center justify-between">
-                              <span className="text-body">{columnLabel(key)}</span>
-                              <Switch size="sm" checked={!hiddenColumns.includes(key)} onCheckedChange={() => toggleColumn(key)} />
-                            </label>
-                          ))}
-                        </div>
-                      </div>
-                    )}
-                  </PopoverContent>
-                </Popover>
-
-              {/* View selector — a dropdown menu to pick the list view,
-                  aligned with the issue list's view menu. The trigger shows
-                  the active view; the menu carries every mode so new views
-                  can be added as menu items. Pure presentation. */}
-              <DropdownMenu>
-                <Tooltip>
-                  <DropdownMenuTrigger
-                    render={
-                      <TooltipTrigger
-                        render={
-                          <Button
-                            variant="outline"
-                            size="sm"
-                            className="h-8 w-8 gap-1 px-0 text-muted-foreground md:w-auto md:px-2.5"
-                          >
-                            {isCompact ? (
-                              <Rows3 className="size-3.5" />
-                            ) : (
-                              <LayoutGrid className="size-3.5" />
-                            )}
-                            <span className="hidden md:inline">
-                              {isCompact ? t(($) => $.page.view_table) : t(($) => $.page.view_cards)}
-                            </span>
-                          </Button>
-                        }
-                      />
-                    }
-                  />
-                  <TooltipContent side="bottom">{t(($) => $.toolbar.view)}</TooltipContent>
-                </Tooltip>
-                <DropdownMenuContent align="end" className="w-auto">
-                  <DropdownMenuGroup>
-                    <DropdownMenuLabel>{t(($) => $.toolbar.view)}</DropdownMenuLabel>
-                  </DropdownMenuGroup>
-                  <DropdownMenuRadioGroup
-                    value={viewMode}
-                    onValueChange={(v) => setViewMode(v as ProjectViewMode)}
-                  >
-                    <DropdownMenuRadioItem value="compact">
-                      <Rows3 />
-                      {t(($) => $.page.view_table)}
-                    </DropdownMenuRadioItem>
-                    <DropdownMenuRadioItem value="comfortable">
-                      <LayoutGrid />
-                      {t(($) => $.page.view_cards)}
-                    </DropdownMenuRadioItem>
-                  </DropdownMenuRadioGroup>
-                </DropdownMenuContent>
-              </DropdownMenu>
-            </div>
-          </div>
-
           {/* Body */}
           {isLoading ? (
             <LoadingState isCompact={isCompact} />

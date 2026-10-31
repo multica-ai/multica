@@ -206,7 +206,8 @@ it("confirms batch consequences and retains only failed selections for retry", a
   ).toBeChecked();
 });
 
-it("resets page and selection on scope or search changes and sends bounded page requests", async () => {
+it("resets page and selection on scope changes and sends bounded page requests", async () => {
+  const user = userEvent.setup();
   mount();
   await screen.findByText("Issue a");
   fireEvent.click(screen.getByRole("button", { name: "Next" }));
@@ -215,7 +216,9 @@ it("resets page and selection on scope or search changes and sends bounded page 
   fireEvent.click(
     screen.getByRole("checkbox", { name: "Select DEV-a, Agent a" }),
   );
-  fireEvent.click(screen.getByRole("button", { name: /^All\s*60/ }));
+  // The scope is the header's title; its menu carries the counts.
+  await user.click(screen.getByRole("button", { name: "Waiting or executing" }));
+  await user.click(await screen.findByRole("menuitemradio", { name: /All wakeups\s*60/ }));
   await waitFor(() =>
     expect(queries.at(-1)).toMatchObject({
       scope: "all",
@@ -223,15 +226,11 @@ it("resets page and selection on scope or search changes and sends bounded page 
       limit: 50,
     }),
   );
+  expect(screen.getByRole("button", { name: "All wakeups" })).toBeVisible();
   expect(
     screen.queryByRole("button", { name: "Turn off selected" }),
   ).toBeNull();
-  // Search runs once typing pauses; there is no submit button.
-  fireEvent.change(screen.getByRole("searchbox"), {
-    target: { value: "CI & release" },
-  });
-  await waitFor(() => expect(queries.at(-1)?.search).toBe("CI & release"));
-  expect(queries.filter((q) => q.search).length).toBe(1);
+  expect(screen.queryByRole("button", { name: /search/i })).toBeNull();
 });
 
 it("makes read-only rules non-selectable and surfaces inventory failures", async () => {
@@ -314,13 +313,28 @@ it("shows who created a rule and how often it ran this week", async () => {
   expect(row).toHaveTextContent("4");
 });
 
-it("filters by source", async () => {
+it("filters by source from the header's filter menu and resets it", async () => {
   const user = userEvent.setup();
   mount();
   await screen.findByRole("row", { name: /Issue a/ });
-  await user.click(screen.getByRole("combobox", { name: "Source" }));
-  await user.click(await screen.findByRole("option", { name: "System" }));
+  await user.click(screen.getByRole("button", { name: "Filter" }));
+  await user.click(await screen.findByRole("menuitem", { name: "Source" }));
+  fireEvent.click(await screen.findByRole("menuitemradio", { name: "System" }));
   await waitFor(() => expect(queries.at(-1)).toMatchObject({ source: "system", offset: 0 }));
+  expect(screen.getByRole("button", { name: "1 filter" })).toBeVisible();
+
+  await user.click(screen.getByRole("button", { name: "Reset" }));
+  await waitFor(() => expect(queries.at(-1)).toMatchObject({ source: "", scope: "active" }));
+  expect(screen.queryByRole("button", { name: "Reset" })).toBeNull();
+});
+
+it("starts a new wakeup from the header", async () => {
+  const user = userEvent.setup();
+  mount();
+  await screen.findByRole("row", { name: /Issue a/ });
+  expect(screen.queryByRole("dialog", { name: "Pick issue" })).toBeNull();
+  await user.click(screen.getByRole("button", { name: "New wakeup" }));
+  expect(await screen.findByRole("dialog", { name: "Pick issue" })).toBeVisible();
 });
 
 it("warns about paused rules and jumps to them", async () => {

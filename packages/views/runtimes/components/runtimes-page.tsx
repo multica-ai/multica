@@ -3,15 +3,11 @@
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
 import {
   Check,
-  ChevronDown,
   ChevronRight,
   Cloud,
   Download,
   Laptop,
   Loader2,
-  Monitor,
-  Plus,
-  Search,
   Server,
   SquareTerminal,
 } from "@multica/ui/icons";
@@ -44,7 +40,6 @@ import type { AgentRuntime, MemberWithUser } from "@multica/core/types";
 import type { QoderConnection } from "@multica/core/runtimes/qoder";
 import { Badge } from "@multica/ui/components/ui/badge";
 import { Button, buttonVariants } from "@multica/ui/components/ui/button";
-import { Input } from "@multica/ui/components/ui/input";
 import {
   Dialog,
   DialogContent,
@@ -73,7 +68,11 @@ import {
   type MikaRuntimeSelection,
 } from "./mika-runtime-choice";
 import { Skeleton } from "@multica/ui/components/ui/skeleton";
-import { CollectionPageHeader } from "../../layout/collection-page";
+import {
+  CollectionCreateButton,
+  CollectionPageHeader,
+  CollectionScopeItems,
+} from "../../layout/collection-page";
 import { PAGE_GUTTER, PAGE_RAIL } from "../../layout/page-header";
 import { cn } from "@multica/ui/lib/utils";
 import {
@@ -92,9 +91,14 @@ import { ProviderLogo } from "./provider-logo";
 import { RuntimeList, buildWorkloadIndex } from "./runtime-list";
 import { pendingRuntimeFromProfile } from "./pending-runtime";
 import { buildRuntimeMachines, type RuntimeMachine } from "./runtime-machines";
-import { HealthDot, HealthIcon, useHealthLabel } from "./shared";
+import {
+  HealthDot,
+  HealthIcon,
+  ProviderIconStack,
+  machineIcon,
+  useHealthLabel,
+} from "./shared";
 import { useT, useTimeAgo } from "../../i18n";
-import { daemonRuntimesDocsHref } from "./runtime-docs";
 
 export interface RuntimesPageProps {
   /** Desktop-only daemon id used to identify this device. */
@@ -151,7 +155,7 @@ export function RuntimesPage({
   bootstrapping,
   cloudRuntimeEnabled = false,
 }: RuntimesPageProps = {}) {
-  const { t, i18n } = useT("runtimes");
+  const { t } = useT("runtimes");
   const isAuthLoading = useAuthStore((state) => state.isLoading);
   const currentUserId = useAuthStore((state) => state.user?.id);
   const wsId = useWorkspaceId();
@@ -162,7 +166,6 @@ export function RuntimesPage({
   const [qoderDialogOpen, setQoderDialogOpen] = useState(false);
   const [showConnectDialog, setShowConnectDialog] = useState(false);
   const [showCloudRuntimeDialog, setShowCloudRuntimeDialog] = useState(false);
-  const [query, setQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("all");
 
   const { data: runtimes = [], isLoading: runtimesLoading } = useQuery(
@@ -258,30 +261,19 @@ export function RuntimesPage({
   ).length;
   const localMachine = machineList.find((machine) => machine.isCurrent);
 
-  const needle = query.trim().toLowerCase();
-  const filtering = needle.length > 0 || statusFilter !== "all";
-  const matchesQuery = (...fields: (string | null | undefined)[]) =>
-    !needle || fields.some((field) => field?.toLowerCase().includes(needle));
+  const filtering = statusFilter !== "all";
   const matchesStatus = (online: boolean) =>
     statusFilter === "all" || (statusFilter === "online") === online;
 
-  const visibleMachines = machineList.filter(
-    (machine) =>
-      matchesStatus(machine.health === "online") &&
-      matchesQuery(machine.title, machine.subtitle, ...machine.providerNames),
+  const visibleMachines = machineList.filter((machine) =>
+    matchesStatus(machine.health === "online"),
   );
   const qoderConfigured = qoder?.configured === true;
   const showQoderRow =
     qoder !== null &&
-    matchesQuery(t(($) => $.qoder.cloud_title), "qoder") &&
     (statusFilter === "all" ||
       (qoderConfigured && matchesStatus(qoderIsOnline(qoder))));
-  const visibleComingSoon =
-    statusFilter === "all"
-      ? COMING_SOON_SERVICES.filter((service) =>
-          matchesQuery(service.name, service.vendor),
-        )
-      : [];
+  const visibleComingSoon = statusFilter === "all" ? COMING_SOON_SERVICES : [];
   const showThisComputerRow =
     !filtering && !isDesktop && machineList.length === 0;
   const showAddMachineRow = !filtering && machineList.length === 0;
@@ -302,6 +294,12 @@ export function RuntimesPage({
     offline: totalCount - onlineCount,
   };
 
+  const scopeLabels: Record<StatusFilter, string> = {
+    all: t(($) => $.page.filters.all),
+    online: t(($) => $.page.filters.online),
+    offline: t(($) => $.page.filters.offline),
+  };
+
   const openQoder = () =>
     qoderConfigured ? navigation.push(qoderHref) : setQoderDialogOpen(true);
 
@@ -309,12 +307,18 @@ export function RuntimesPage({
     <div className="flex min-h-0 flex-1 flex-col">
       <CollectionPageHeader
         icon={Server}
-        title={t(($) => $.page.title)}
-        count={totalCount}
-        learnMore={{
-          href: daemonRuntimesDocsHref(i18n.language),
-          label: t(($) => $.page.learn_more),
-        }}
+        title={scopeLabels[statusFilter]}
+        menu={
+          <CollectionScopeItems
+            value={statusFilter}
+            onChange={setStatusFilter}
+            options={STATUS_FILTERS.map((filter) => ({
+              value: filter,
+              label: scopeLabels[filter],
+              count: statusCounts[filter],
+            }))}
+          />
+        }
         actions={
           <AddRuntimeMenu
             isDesktop={isDesktop}
@@ -330,14 +334,6 @@ export function RuntimesPage({
 
       <div className="min-h-0 flex-1 overflow-y-auto">
         <div className={cn(PAGE_RAIL, PAGE_GUTTER, "flex flex-col gap-3 py-4 sm:py-6")}>
-          <RuntimesToolbar
-            query={query}
-            onQueryChange={setQuery}
-            statusFilter={statusFilter}
-            onStatusFilterChange={setStatusFilter}
-            counts={statusCounts}
-          />
-
           <div className="@container overflow-hidden rounded-lg border bg-card">
             <ListGrid className={cn(GRID_COLS, "[&>[role=row]:last-child]:border-b-0")}>
               <ListGridHeader className="static border-b bg-card after:hidden">
@@ -496,13 +492,7 @@ function AddRuntimeMenu({
   return (
     <DropdownMenu>
       <DropdownMenuTrigger
-        render={
-          <Button size="sm" className="gap-1">
-            <Plus aria-hidden="true" className="size-3.5" />
-            {t(($) => $.page.add)}
-            <ChevronDown aria-hidden="true" className="size-3.5 opacity-70" />
-          </Button>
-        }
+        render={<CollectionCreateButton label={t(($) => $.page.add)} />}
       />
       <DropdownMenuContent align="end" className="w-80">
         <DropdownMenuGroup>
@@ -613,62 +603,6 @@ function AddMenuItem({
       </span>
       {trailing}
     </DropdownMenuItem>
-  );
-}
-
-function RuntimesToolbar({
-  query,
-  onQueryChange,
-  statusFilter,
-  onStatusFilterChange,
-  counts,
-}: {
-  query: string;
-  onQueryChange: (query: string) => void;
-  statusFilter: StatusFilter;
-  onStatusFilterChange: (filter: StatusFilter) => void;
-  counts: Record<StatusFilter, number>;
-}) {
-  const { t } = useT("runtimes");
-  const labels: Record<StatusFilter, string> = {
-    all: t(($) => $.page.filters.all),
-    online: t(($) => $.page.filters.online),
-    offline: t(($) => $.page.filters.offline),
-  };
-  return (
-    <div className="flex min-w-0 items-center gap-2">
-      <div className="relative min-w-0 flex-1 sm:flex-none">
-        <Search className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
-        <Input
-          value={query}
-          onChange={(e) => onQueryChange(e.target.value)}
-          aria-label={t(($) => $.page.search_placeholder)}
-          placeholder={t(($) => $.page.search_placeholder)}
-          className="h-8 w-full pl-8 text-body sm:w-64"
-        />
-      </div>
-      <div className="flex shrink-0 items-center gap-1">
-        {STATUS_FILTERS.map((filter) => (
-          <Button
-            key={filter}
-            variant="outline"
-            size="sm"
-            aria-pressed={statusFilter === filter}
-            className={
-              statusFilter === filter
-                ? "gap-1.5 bg-accent text-accent-foreground hover:bg-accent/80"
-                : "gap-1.5 text-muted-foreground"
-            }
-            onClick={() => onStatusFilterChange(filter)}
-          >
-            {labels[filter]}
-            <span className="tabular-nums text-caption text-muted-foreground">
-              {counts[filter]}
-            </span>
-          </Button>
-        ))}
-      </div>
-    </div>
   );
 }
 
@@ -837,11 +771,7 @@ function MachineRow({
   const paths = useWorkspacePaths();
   const rowLink = useRowLink();
   const href = paths.runtimeDetail(machine.id);
-  const Icon = machine.isCurrent
-    ? Laptop
-    : machine.section === "cloud"
-      ? Cloud
-      : Monitor;
+  const Icon = machineIcon(machine);
   const ownerId = machine.runtimes[0]?.owner_id ?? null;
   const owner =
     ownerId && ownerId === currentUserId
@@ -1235,29 +1165,6 @@ function OrphanRuntimeProfiles({
         <RuntimeList runtimes={runtimes} now={now} />
       </div>
     </section>
-  );
-}
-
-function ProviderIconStack({ providers }: { providers: string[] }) {
-  const visible = providers.slice(0, 4);
-  const extra = providers.length - visible.length;
-  if (visible.length === 0) return null;
-  return (
-    <span className="flex min-w-0 items-center -space-x-1">
-      {visible.map((provider) => (
-        <span
-          key={provider}
-          className="inline-flex h-5 w-5 items-center justify-center rounded-xs bg-background ring-1 ring-border"
-        >
-          <ProviderLogo provider={provider} className="h-3.5 w-3.5" />
-        </span>
-      ))}
-      {extra > 0 && (
-        <span className="inline-flex h-5 min-w-5 items-center justify-center rounded-xs bg-muted px-1 text-micro font-medium text-muted-foreground ring-1 ring-border">
-          +{extra}
-        </span>
-      )}
-    </span>
   );
 }
 

@@ -10,17 +10,47 @@ import {
 import { renderWithI18n } from "../../test/i18n";
 
 // This file tests the settings SHELL — the chrome around the tabs — so every
-// tab panel is stubbed out. Their contents have their own test files.
+// tab panel is stubbed out. Their contents have their own test files. Profile
+// and Messaging keep the real SettingsTab, which is what feeds the page header.
 const stub = vi.hoisted(() => (name: string) => () => ({
   [name]: () => <div>{name}</div>,
 }));
-vi.mock("./account-tab", stub("AccountTab"));
+const tabs = vi.hoisted(() => ({ channelDetail: false }));
+vi.mock("./account-tab", async () => {
+  const { SettingsTab } = await import("./settings-layout");
+  return {
+    AccountTab: () => (
+      <SettingsTab
+        title="Profile"
+        description="How you appear to your team."
+        scope="account"
+        actions={<button type="button">Sign out</button>}
+      >
+        <div>AccountTab</div>
+      </SettingsTab>
+    ),
+  };
+});
+vi.mock("./channels-tab", async () => {
+  const { SettingsTab } = await import("./settings-layout");
+  return {
+    ChannelsTab: () =>
+      tabs.channelDetail ? (
+        <SettingsTab title="Slack" scope="workspace" breadcrumb={<nav>Messaging</nav>}>
+          <div>SlackDetail</div>
+        </SettingsTab>
+      ) : (
+        <SettingsTab title="Messaging" scope="workspace">
+          <div>ChannelsTab</div>
+        </SettingsTab>
+      ),
+  };
+});
 vi.mock("./preferences-tab", stub("PreferencesTab"));
 vi.mock("./tokens-tab", stub("TokensTab"));
 vi.mock("./workspace-tab", stub("WorkspaceTab"));
 vi.mock("./members-tab", stub("MembersTab"));
 vi.mock("./code-tab", stub("CodeTab"));
-vi.mock("./channels-tab", stub("ChannelsTab"));
 vi.mock("./notifications-tab", stub("NotificationsTab"));
 vi.mock("./labels-tab", stub("LabelsTab"));
 vi.mock("../../workflows/workflows-tab", stub("WorkflowsTab"));
@@ -101,6 +131,7 @@ beforeEach(() => {
   navigationState.search = "";
   shell.appsAvailable = false;
   shell.role = "owner";
+  tabs.channelDetail = false;
   configStore.getState().setFeatureFlags({});
   replace.mockClear();
   push.mockClear();
@@ -108,9 +139,9 @@ beforeEach(() => {
 
 describe("SettingsPage nav trigger", () => {
   it("opens the nav from settings at compact widths", () => {
-    // Settings builds its own chrome instead of a PageHeader, so without this
-    // control a touch user who lands here has no way back to the nav at all —
-    // the keyboard shortcut is not an answer on a tablet.
+    // At compact widths the nav is a sheet, so without this control a touch
+    // user who lands here has no way back to it at all — the keyboard
+    // shortcut is not an answer on a tablet.
     renderWithI18n(
       <SidebarProvider>
         <NavStateProbe />
@@ -146,6 +177,52 @@ describe("SettingsPage nav trigger", () => {
       screen.queryByRole("button", { name: "Toggle left sidebar" }),
     ).not.toBeInTheDocument();
     expect(screen.getByRole("heading", { name: "Settings" })).toBeInTheDocument();
+  });
+});
+
+describe("SettingsPage header", () => {
+  function pageHeader() {
+    return within(screen.getByRole("banner"));
+  }
+
+  it.each([
+    { search: "", label: "Profile" },
+    { search: "tab=preferences", label: "Preferences" },
+    { search: "tab=shortcuts", label: "Shortcuts" },
+    { search: "tab=members", label: "Members" },
+    { search: "tab=channels", label: "Messaging" },
+    { search: "tab=mcp", label: "MCP servers" },
+  ])("names the $label section in the page header", ({ search, label }) => {
+    navigationState.search = search;
+    renderWithI18n(<SettingsPage />);
+
+    expect(pageHeader().getByRole("heading", { level: 2 })).toHaveTextContent(label);
+  });
+
+  it("moves the section's scope and actions into the header and drops the body title", () => {
+    renderWithI18n(<SettingsPage />);
+
+    const header = pageHeader();
+    expect(header.getByText("Account · synced")).toBeInTheDocument();
+    expect(header.getByRole("button", { name: "Sign out" })).toBeInTheDocument();
+    expect(screen.getAllByRole("heading", { name: "Profile" })).toHaveLength(1);
+    expect(screen.getByText("How you appear to your team.")).toBeInTheDocument();
+    expect(header.queryByText("How you appear to your team.")).toBeNull();
+  });
+
+  it("shows a detail page as a trail back to its section", () => {
+    navigationState.search = "tab=channels&integration=slack";
+    tabs.channelDetail = true;
+    renderWithI18n(<SettingsPage />);
+
+    const header = pageHeader();
+    const title = within(header.getByRole("heading", { level: 2 }));
+    expect(title.getByText("Slack")).toHaveAttribute("aria-current", "page");
+    const back = title.getByRole("link", { name: "Messaging" });
+    expect(back.getAttribute("href")).toContain("tab=channels");
+    expect(back.getAttribute("href")).not.toContain("integration");
+    expect(header.getByText("Acme workspace")).toBeInTheDocument();
+    expect(screen.queryByText("Messaging", { selector: "nav" })).toBeNull();
   });
 });
 

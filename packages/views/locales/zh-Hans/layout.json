@@ -146,5 +146,15 @@
     },
     "language": "语言",
     "shortcuts": "快捷键"
+  },
+  "collection": {
+    "filter": "筛选",
+    "filter_count_other": "{{count}} 个筛选",
+    "reset": "重置",
+    "display": "显示设置"
+  },
+  "object_page": {
+    "toggle_panel": "切换右侧边栏",
+    "properties": "属性"
   }
 }

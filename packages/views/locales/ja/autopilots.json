@@ -1,6 +1,5 @@
 {
   "page": {
-    "title": "オートパイロット",
     "new_autopilot": "新規オートパイロット",
     "start_blank": "ゼロから始める",
     "table": {
@@ -20,7 +19,6 @@
       "title": "まだオートパイロットがありません",
       "hint": "AI エージェントの繰り返し作業をスケジュールしましょう。テンプレートを選ぶか、ゼロから始められます。"
     },
-    "scope_all": "すべて",
     "no_matches": "該当する自動化はありません",
     "retry": "再試行"
   },
@@ -87,10 +85,8 @@
     "run_blocked_quota_exceeded": "実行されませんでした — この期間の実行上限に達しました",
     "run_blocked_issue_limit_reached": "実行されませんでした — ワークスペースのタスク数上限に達しました",
     "run_blocked_generic": "実行されませんでした — 実行がブロックされました",
-    "section_properties": "プロパティ",
     "section_triggers": "トリガー",
     "section_run_history": "実行履歴",
-    "section_danger": "危険な操作",
     "field_agent": "エージェント",
     "field_created_by": "作成者",
     "field_output_mode": "出力モード",
@@ -100,6 +96,16 @@
     "field_prompt": "プロンプト",
     "field_subscribers": "購読者",
     "field_subscribers_none": "なし",
+    "no_prompt": "プロンプトはまだありません。",
+    "copy_link": "リンクをコピー",
+    "link_copied": "リンクをコピーしました",
+    "link_copy_failed": "リンクをコピーできませんでした",
+    "open_project": "プロジェクトを開く",
+    "summary": {
+      "create_issue": "{{agent}} が実行ごとにタスクを作成",
+      "run_only": "{{agent}} がタスクを作成せずに実行",
+      "with_trigger": "{{trigger}} · {{action}}"
+    },
     "add_trigger": "トリガーを追加",
     "no_triggers": "設定されたトリガーがありません。自動で実行するスケジュールを追加してください。",
     "no_runs": "まだ実行履歴がありません。手動で実行するには「今すぐ実行」をクリックしてください。",
@@ -441,15 +447,10 @@
     "search_placeholder": "タイムゾーンを検索..."
   },
   "toolbar": {
-    "result_count_title": "該当する自動化 / すべての自動化",
-    "filter_label": "フィルター",
-    "filter_active_count_other": "{{count}} 件のフィルター",
-    "clear_filters": "フィルターをクリア",
     "section_assignee": "担当",
     "section_mode": "モード",
     "section_trigger": "トリガー",
     "section_creator": "作成者",
-    "display": "表示",
     "sort_by": "並び替え",
     "direction_asc": "昇順",
     "direction_desc": "降順",
@@ -473,7 +474,6 @@
   },
   "wakeups": {
     "title": "タスクのウェイクアップ",
-    "scope": "範囲",
     "issue": "タスク",
     "trigger": "トリガー",
     "enabled": "有効",
@@ -482,7 +482,6 @@
     "at": "一回限り",
     "recurring": "繰り返し",
     "all_agents": "すべてのエージェント",
-    "search": "タスク・エージェントを検索",
     "running": "実行中",
     "active_runs": "{{count}} 件の実行が進行中",
     "issue_closed": "タスクは終了済み",
@@ -506,7 +505,7 @@
     "batch_result": "無効化：{{succeeded}} 件。失敗：{{failed}} 件。",
     "scopes": {
       "active": "起動待ち・実行中",
-      "all": "すべて",
+      "all": "すべてのウェイクアップ",
       "disabled": "無効",
       "ended": "終了",
       "paused": "一時停止中"
@@ -518,7 +517,7 @@
     "batch_partial": "{{succeeded}} 件を無効化、{{failed}} 件が失敗しました。失敗した項目を選択したまま再試行できます。",
     "source": "作成元",
     "sources": {
-      "all": "作成元：すべて",
+      "all": "すべての作成元",
       "member": "メンバー",
       "agent": "エージェント",
       "system": "システム"

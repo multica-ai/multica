@@ -8,7 +8,6 @@ import {
   HardDrive,
   Lock,
   Pencil,
-  Plus,
 } from "@multica/ui/icons";
 import { SkillIcon } from "../lib/skill-icon";
 import type {
@@ -57,27 +56,35 @@ import {
 } from "../../navigation";
 import {
   CollectionPageHeader,
-  CollectionPageHeaderAction,
   CollectionPageState,
+  CollectionResetButton,
+  CollectionScopeItems,
 } from "../../layout/collection-page";
 import { canEditSkill } from "../hooks/use-can-edit-skill";
 import { originSourceUrl, readOrigin } from "../lib/origin";
 import { rowMatchesFilters, type SkillRow } from "./skill-list-filter";
-import { CreateSkillDialog } from "./create-skill-dialog";
+import {
+  CreateSkillDialog,
+  type CreateSkillMethod,
+} from "./create-skill-dialog";
 import {
   useSkillsViewStore,
   DEFAULT_HIDDEN_COLUMNS,
   type SkillColumnKey,
   type SkillSortField,
 } from "@multica/core/skills/stores";
-import { SkillListToolbar } from "./skill-list-toolbar";
+import {
+  SkillCreateMenu,
+  SkillDisplayMenu,
+  SkillFilterMenu,
+  countActiveFilterDimensions,
+} from "./skill-list-controls";
 import {
   SkillBatchToolbar,
   SkillRowActions,
   type SkillActionsContext,
 } from "./skill-list-actions";
 import { useT, useTimeAgo } from "../../i18n";
-import { docsLocalePrefix } from "../../common/docs-locale";
 
 // Column template — single source of truth for header, rows, and skeletons.
 // Tracks: [edge 0.75rem] [checkbox 1rem] [name, only fr track]
@@ -156,36 +163,7 @@ function columnTrackVars(
 export type SortField = SkillSortField;
 export { rowMatchesFilters, type SkillRow } from "./skill-list-filter";
 
-// Page header bar — uses shared PageHeader so the mobile sidebar trigger and
-// h-12 chrome stay consistent with every other dashboard list page.
-
-function PageHeaderBar({
-  totalCount,
-  onCreate,
-}: {
-  totalCount: number;
-  onCreate: () => void;
-}) {
-  const { t, i18n } = useT("skills");
-  return (
-    <CollectionPageHeader
-      icon={SkillIcon}
-      title={t(($) => $.page.title)}
-      count={totalCount}
-      learnMore={{
-        href: `https://multica.ai/docs${docsLocalePrefix(i18n.language)}/skills`,
-        label: t(($) => $.page.learn_more),
-      }}
-      actions={
-        <CollectionPageHeaderAction
-          icon={Plus}
-          label={t(($) => $.page.new_skill)}
-          onClick={onCreate}
-        />
-      }
-    />
-  );
-}
+type SkillScope = "all" | "mine";
 
 // Cells
 
@@ -394,19 +372,13 @@ function CreatorCell({ creator }: { creator: MemberWithUser | null }) {
 
 // Empty state
 
-function EmptyState({ onCreate }: { onCreate: () => void }) {
+function EmptyState() {
   const { t } = useT("skills");
   return (
     <CollectionPageState
       icon={SkillIcon}
       title={t(($) => $.page.empty.title)}
       description={t(($) => $.page.empty.description)}
-      actions={
-        <Button type="button" onClick={onCreate} size="sm">
-          <Plus aria-hidden="true" className="size-3" />
-          {t(($) => $.page.new_skill)}
-        </Button>
-      }
     />
   );
 }
@@ -591,16 +563,17 @@ export default function SkillsPage() {
     runtimeListOptions(wsId),
   );
 
-  const [createOpen, setCreateOpen] = useState(false);
+  const [createMethod, setCreateMethod] = useState<CreateSkillMethod | null>(
+    null,
+  );
   const [selectedIds, setSelectedIds] = useState<ReadonlySet<string>>(
     new Set(),
   );
-  const [search, setSearch] = useState("");
+  const [scope, setScope] = useState<SkillScope>("all");
 
   // Persisted view preferences (per workspace, per user/device). Header sort
-  // buttons and the toolbar's display panel mutate the SAME store, so both
-  // surfaces always agree. Search and selection stay session-local on
-  // purpose.
+  // buttons and the header's display panel mutate the SAME store, so both
+  // surfaces always agree. Selection stays session-local on purpose.
   const sortField = useSkillsViewStore((s) => s.sortField);
   const sortDirection = useSkillsViewStore((s) => s.sortDirection);
   const hiddenColumns = useSkillsViewStore((s) => s.hiddenColumns);
@@ -649,7 +622,6 @@ export default function SkillsPage() {
     isAdmin,
   };
 
-  // Full assembled set — toolbar option lists and counts derive from this.
   const allRows = useMemo<SkillRow[]>(() => {
     return skills.map((skill) => {
       const origin = readOrigin(skill);
@@ -670,11 +642,20 @@ export default function SkillsPage() {
     });
   }, [skills, assignments, membersById, runtimesById, currentUserId, myRole]);
 
-  // Visible rows: name search + filters, then sort.
+  const mineRows = useMemo(
+    () =>
+      currentUserId
+        ? allRows.filter((row) => row.skill.created_by === currentUserId)
+        : [],
+    [allRows, currentUserId],
+  );
+  // The current scope, unfiltered — filter option lists and counts derive
+  // from this.
+  const scopeRows = scope === "mine" ? mineRows : allRows;
+
+  // Visible rows: filters, then sort.
   const rows = useMemo<SkillRow[]>(() => {
-    const filtered = allRows.filter((row) =>
-      rowMatchesFilters(row, filters, search),
-    );
+    const filtered = scopeRows.filter((row) => rowMatchesFilters(row, filters));
 
     const dir = sortDirection === "asc" ? 1 : -1;
     filtered.sort((a, b) => {
@@ -698,7 +679,7 @@ export default function SkillsPage() {
       );
     });
     return filtered;
-  }, [allRows, search, filters, sortField, sortDirection]);
+  }, [scopeRows, filters, sortField, sortDirection]);
 
   // Row virtualization — Linear-style: the virtualizer only does the math
   // (visible index range + offsets); the DOM stays ours. Offsets become
@@ -728,11 +709,65 @@ export default function SkillsPage() {
     );
   };
 
+  const narrowed = countActiveFilterDimensions(filters) > 0;
+  const scopeLabels: Record<SkillScope, string> = {
+    all: t(($) => $.page.scopes.all.label),
+    mine: t(($) => $.page.scopes.mine.label),
+  };
+
+  const header = (
+    <CollectionPageHeader
+      icon={SkillIcon}
+      title={scopeLabels[scope]}
+      menu={
+        <CollectionScopeItems
+          value={scope}
+          onChange={setScope}
+          options={[
+            { value: "all", label: scopeLabels.all, count: allRows.length },
+            { value: "mine", label: scopeLabels.mine, count: mineRows.length },
+          ]}
+        />
+      }
+      tools={
+        <>
+          <SkillFilterMenu
+            filters={filters}
+            onToggleFilter={toggleFilter}
+            rows={scopeRows}
+          />
+          {narrowed && <CollectionResetButton onClick={clearFilters} />}
+        </>
+      }
+      actions={
+        <>
+          <SkillDisplayMenu
+            sortField={sortField}
+            sortDirection={sortDirection}
+            onSortFieldChange={handleSortFieldSelect}
+            onSortDirectionChange={setSortDirection}
+            hiddenColumns={hiddenColumns}
+            onToggleColumn={toggleColumn}
+          />
+          <SkillCreateMenu onCreate={setCreateMethod} />
+        </>
+      }
+    />
+  );
+
+  const createDialog = createMethod && (
+    <CreateSkillDialog
+      initialMethod={createMethod}
+      onClose={() => setCreateMethod(null)}
+      onCreated={handleCreated}
+    />
+  );
+
   // --- List request error ---
   if (listError) {
     return (
       <div className="flex flex-1 min-h-0 flex-col">
-        <PageHeaderBar totalCount={0} onCreate={() => setCreateOpen(true)} />
+        {header}
         <CollectionPageState
           role="alert"
           tone="destructive"
@@ -754,12 +789,12 @@ export default function SkillsPage() {
             </Button>
           }
         />
+        {createDialog}
       </div>
     );
   }
 
-  const totalCount = skills.length;
-  const showEmpty = !isLoading && totalCount === 0;
+  const showEmpty = !isLoading && skills.length === 0;
   const supportingQueryDown =
     !!agentsError || !!membersError || !!runtimesError;
 
@@ -779,10 +814,7 @@ export default function SkillsPage() {
     // relative: positioning anchor for the batch toolbar (page-centered,
     // not viewport-centered).
     <div className="relative flex flex-1 min-h-0 flex-col">
-      <PageHeaderBar
-        totalCount={totalCount}
-        onCreate={() => setCreateOpen(true)}
-      />
+      {header}
 
       {supportingQueryDown && (
         <div
@@ -796,27 +828,10 @@ export default function SkillsPage() {
 
       {showEmpty ? (
         <div className="flex flex-1 items-center justify-center">
-          <EmptyState onCreate={() => setCreateOpen(true)} />
+          <EmptyState />
         </div>
       ) : (
         <>
-          {/* Mounted through loading so the rows don't drop by a toolbar's
-              height when the list lands. */}
-          <SkillListToolbar
-            search={search}
-            onSearchChange={setSearch}
-            filters={filters}
-            onToggleFilter={toggleFilter}
-            onClearFilters={clearFilters}
-            sortField={sortField}
-            sortDirection={sortDirection}
-            onSortFieldChange={handleSortFieldSelect}
-            onSortDirectionChange={setSortDirection}
-            hiddenColumns={hiddenColumns}
-            onToggleColumn={toggleColumn}
-            allRows={allRows}
-            visibleCount={rows.length}
-          />
           {isLoading ? (
             <div className="flex-1 overflow-y-auto @container">
               <LoadingSkeleton />
@@ -915,12 +930,7 @@ export default function SkillsPage() {
         onClear={() => setSelectedIds(new Set())}
       />
 
-      {createOpen && (
-        <CreateSkillDialog
-          onClose={() => setCreateOpen(false)}
-          onCreated={handleCreated}
-        />
-      )}
+      {createDialog}
     </div>
   );
 }

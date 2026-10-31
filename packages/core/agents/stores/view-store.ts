@@ -12,9 +12,7 @@ import type { AccessScope } from "../effective-access";
 // View preferences for the agents list page: scope, sort, column visibility,
 // and filters. Persisted per workspace, per user/device. Row selection is
 // session-scoped on purpose (same rationale as the skills/autopilots view
-// stores). The search query lives here too but is session-only (never
-// persisted): it must survive opening an agent and coming back to the list,
-// yet a stale query restored days later would read as "my agents vanished".
+// stores).
 
 // Scope mixes the ownership lens (mine/all) with the archived lifecycle
 // stage. Impure on paper, but the three are mutually exclusive in practice
@@ -92,9 +90,6 @@ export interface AgentsViewState {
   sortDirection: AgentSortDirection;
   hiddenColumns: AgentColumnKey[];
   filters: AgentListFilters;
-  /** Free-text list search. Session-only — excluded from persistence. */
-  search: string;
-  setSearch: (search: string) => void;
   setScope: (scope: AgentsScope) => void;
   /** Header click: toggles direction on the active field, otherwise switches
    *  to the field with its default direction. */
@@ -115,14 +110,12 @@ const DEFAULTS = {
   sortDirection: AGENT_SORT_DEFAULT_DIRECTION.lastActive,
   hiddenColumns: AGENT_DEFAULT_HIDDEN_COLUMNS,
   filters: EMPTY_AGENT_FILTERS,
-  search: "",
 };
 
 export const useAgentsViewStore = create<AgentsViewState>()(
   persist(
     (set) => ({
       ...DEFAULTS,
-      setSearch: (search) => set({ search }),
       // "Mine" is the clean personal view: entering it clears all filters,
       // so Mine never carries filters. Switching to all/archived leaves
       // filters intact (you can carry "owner = Bob" between them).
@@ -201,8 +194,6 @@ export const useAgentsViewStore = create<AgentsViewState>()(
       // view state in place. Default merge keeps current state when
       // persisted is undefined, which would leak state across workspaces.
       merge: (persisted, current) => {
-        // `search` is session-only and must not leak across workspaces, so
-        // every rehydrate (i.e. workspace switch) clears it.
         if (!persisted) return { ...current, ...DEFAULTS };
         const p = persisted as Partial<AgentsViewState>;
         // Deep-merge filters so a payload persisted before a new filter
@@ -212,7 +203,6 @@ export const useAgentsViewStore = create<AgentsViewState>()(
           ...current,
           ...p,
           filters: { ...EMPTY_AGENT_FILTERS, ...(p.filters ?? {}) },
-          search: "",
         };
       },
     },

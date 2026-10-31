@@ -134,7 +134,7 @@ describe("Agent creation errors", () => {
 
     const error = screen.getByRole("alert");
     const button = screen.getByRole("button", { name: "Create agent" });
-    expect(error.parentElement).toBe(button.parentElement);
+    expect(error.closest("footer")).toContainElement(button);
     expect(
       error.compareDocumentPosition(button) & Node.DOCUMENT_POSITION_FOLLOWING,
     ).toBeTruthy();

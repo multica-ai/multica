@@ -146,5 +146,15 @@
     },
     "language": "語言",
     "shortcuts": "快捷鍵"
+  },
+  "collection": {
+    "filter": "篩選",
+    "filter_count_other": "{{count}} 個篩選",
+    "reset": "重設",
+    "display": "顯示設定"
+  },
+  "object_page": {
+    "toggle_panel": "切換右側邊欄",
+    "properties": "屬性"
   }
 }

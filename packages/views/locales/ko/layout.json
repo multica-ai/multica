@@ -146,5 +146,15 @@
     },
     "language": "언어",
     "shortcuts": "키보드 단축키"
+  },
+  "collection": {
+    "filter": "필터",
+    "filter_count_other": "필터 {{count}}개",
+    "reset": "초기화",
+    "display": "표시 설정"
+  },
+  "object_page": {
+    "toggle_panel": "오른쪽 사이드바 전환",
+    "properties": "속성"
   }
 }
