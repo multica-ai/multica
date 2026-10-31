@@ -303,7 +303,7 @@ func prepareCodexHomeWithOpts(codexHome string, opts CodexHomeOptions, logger *s
 	// so the parent thread's `turn/completed` is not interpreted as task
 	// completion while spawned subagents are still running. See
 	// codex_multi_agent.go for the full rationale and escape hatch.
-	if err := ensureCodexMultiAgentConfig(filepath.Join(codexHome, "config.toml"), logger); err != nil {
+	if err := ensureCodexMultiAgentConfig(filepath.Join(codexHome, "config.toml"), opts.CodexVersion, logger); err != nil {
 		logger.Warn("execenv: codex-home ensure multi-agent config failed", "error", err)
 	}
 
