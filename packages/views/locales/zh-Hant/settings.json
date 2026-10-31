@@ -171,6 +171,7 @@
       "korean": "한국어",
       "japanese": "日本語",
       "french": "Français",
+      "russian": "Русский",
       "sync_failed": "語言已在本裝置儲存，但同步到帳號失敗。其他裝置可能仍顯示舊語言。"
     },
     "timezone": {
