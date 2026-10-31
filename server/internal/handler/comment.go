@@ -1503,7 +1503,7 @@ func (h *Handler) commentAgentTriggerToResponse(trigger commentAgentTrigger) Com
 	return CommentTriggerAgentResponse{
 		ID:        uuidToString(trigger.Agent.ID),
 		Name:      trigger.Agent.Name,
-		AvatarURL: h.resolveAvatarURLPtr(textToPtr(trigger.Agent.AvatarUrl)),
+		AvatarURL: h.projectAvatarDisplay(trigger.Agent.AvatarUrl, trigger.Agent.AvatarSeed),
 		Source:    string(trigger.Source),
 		Reason:    commentAgentTriggerReason(trigger),
 	}

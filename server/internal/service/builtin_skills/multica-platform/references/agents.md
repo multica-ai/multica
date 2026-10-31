@@ -120,7 +120,7 @@ multica agent copy <source-agent-id> --runtime-id <target> --model <model>  # cr
 | `description` | `description` | 400 if > 255 code points | catalog/listing only — NOT the runtime prompt |
 | `instructions` | `instructions` | none | daemon → provider at claim time |
 | `conversation_starters` | `conversation_starters` (JSON array) | at most 3 items; each requires a label (≤80 code points) and prompt (≤4000 code points) | human-facing Chat empty state only; selecting one prefills the composer and does not start a run |
-| `avatar_url` | `avatar_url` | none; an explicit non-empty value is preserved, while omitted/empty creates a random `emoji:<glyph>` avatar | catalog/listing UI only — NOT the runtime prompt |
+| `avatar_url` | `avatar_url` | none; an explicit non-empty value (an uploaded image or an `emoji:<glyph>`) is stored and preferred; omitted/empty stores nothing and the agent shows a deterministic illustrated avatar | catalog/listing UI only — NOT the runtime prompt |
 | `runtime_id` | `runtime_id` (nullable) | required at create (400) + must resolve to a runtime in this workspace | selects runtime/provider; `NULL` means unbound — see above |
 | `model` | `model` (nullable) | none beyond runtime support | daemon reads; empty = runtime default |
 | `thinking_level` | `thinking_level` (nullable) | provider-level enum/safe-token gate; unknown literal → 400. Pi accepts only `off\|minimal\|low\|medium\|high\|xhigh\|max`, then the daemon checks the selected model's RPC-discovered subset. ACP runtimes that advertise an effort selector in `session/new` (currently `reasonix` and `hermes`) take the safe-token path and are checked against the discovered catalog by the daemon; that catalog covers only the model the discovery session was on, so other models show no picker until per-model probing exists. `hermes` covers two binaries — jcode advertises and applies an effort, Hermes Agent advertises none and gets no picker — so the answer there comes from the runtime's discovered catalog, not the provider name. Because that catalog is only written once a client requests a model list, a `hermes` runtime that has never been discovered is refused with a distinct "has not reported a model catalog yet" 400 rather than being assumed capable; `reasonix`, whose provider name does determine the binary, is allowed in that state. A runtime with no reasoning control at all (e.g. `copilot`, which executes outside ACP) rejects EVERY non-empty value and says so — that 400 is a capability answer, not a bad token | daemon; empty = runtime default |
@@ -134,7 +134,10 @@ multica agent copy <source-agent-id> --runtime-id <target> --model <model>  # cr
 
 Defaults when omitted or explicitly `null`: `max_concurrent_tasks` → `6`.
 Other defaults when omitted: `runtime_config` → `{}`, `custom_env` → `{}`,
-`custom_args` → `[]`, `avatar_url` → a random `emoji:<glyph>`, `visibility` →
+`custom_args` → `[]`, `avatar_url` → nothing is stored (the agent displays a
+deterministic illustrated avatar derived from its persisted `avatar_seed`; an
+uploaded image is preferred over an `emoji:<glyph>`, which is preferred over the
+illustrated avatar), `visibility` →
 `private` (all materialized server-side before the insert).
 `custom_args`/`runtime_config` are stored as given — the JSON-shape rejection
 happens in the CLI, not on the server.
