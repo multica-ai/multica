@@ -728,6 +728,10 @@
     "failed_indicator": "失敗"
   },
   "transcript": {
+    "quiet_minutes_other": "{{count}} 分間、新しい動きがありません",
+    "quiet_tool": "{{tool}} の完了を待っています。",
+    "quiet_running": "処理は続いている可能性があります。",
+    "quiet_stop_description": "現在の実行を停止します。待機中のコメントは新しい実行で処理できます。保存済みの作業は保持されます。",
     "dialog_title": "エージェント実行トランスクリプト",
     "status_running": "実行中",
     "status_completed": "完了",

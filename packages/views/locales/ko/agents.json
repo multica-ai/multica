@@ -736,6 +736,10 @@
     "failed_indicator": "실패"
   },
   "transcript": {
+    "quiet_minutes_other": "{{count}}분 동안 새 활동이 없습니다",
+    "quiet_tool": "{{tool}} 완료를 기다리고 있습니다.",
+    "quiet_running": "실행이 계속 진행 중일 수 있습니다.",
+    "quiet_stop_description": "현재 실행을 중지합니다. 대기 중인 댓글은 새 실행에서 처리할 수 있습니다. 이미 저장된 작업은 유지됩니다.",
     "dialog_title": "에이전트 실행 트랜스크립트",
     "status_running": "실행 중",
     "status_completed": "완료됨",

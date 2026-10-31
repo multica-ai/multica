@@ -79,6 +79,7 @@ import {
   type TraceStep,
 } from "./build-steps";
 import { buildRunOutcome } from "./run-outcome";
+import { RunActivityNotice } from "./run-activity-notice";
 import { RunTimeline } from "./run-timeline";
 import {
   base64ByteLength,
@@ -1094,6 +1095,10 @@ export function AgentTranscriptDialog({
 
         {/* ── What the run produced ──────────────────────────────────── */}
         <RunOutcomeRow outcome={outcome} branch={task.branch_name} />
+
+        {open && isLive && !contentState && (
+          <RunActivityNotice task={task} items={items} steps={steps} className="mx-4 my-2 shrink-0" />
+        )}
 
         {/* ── Where the time went ────────────────────────────────────── */}
         {lanes && (
