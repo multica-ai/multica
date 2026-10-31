@@ -470,6 +470,10 @@ describe("useRealtimeSync — Table server membership invalidation", () => {
       ];
       (filters.working_only || filters.working_issue_ids ? affected : untouched).push(...keys);
     }
+    // A saved view's sidebar preview filters on working_only server-side.
+    affected.push(issueKeys.sidebar("ws-1", "view:v1", { table: { ...spec, filters: { working_only: true } } }, 5));
+    untouched.push(issueKeys.sidebar("ws-1", "view:v2", { table: spec }, 5));
+    untouched.push(issueKeys.sidebar("ws-1", "project:p1", { project_id: "p1" }, 5));
     for (const key of [...untouched, ...affected]) qc.setQueryData(key, []);
     emit("task:completed");
     await vi.advanceTimersByTimeAsync(1_000);

@@ -11,6 +11,7 @@ import { clearWorkspaceStorage } from "../platform/storage-cleanup";
 import { defaultStorage } from "../platform/storage";
 import { getCurrentWsId, getCurrentSlug } from "../platform/workspace-storage";
 import { issueKeys } from "../issues/queries";
+import { isSidebarTableRequest, type SidebarIssuesRequest } from "../issues/sidebar-list";
 import { projectKeys } from "../projects/queries";
 import { pinKeys } from "../pins/queries";
 import { autopilotKeys } from "../autopilots/queries";
@@ -722,6 +723,13 @@ async function refreshWorkingAgentQueries(qc: QueryClient, wsId: string): Promis
         // depend on this membership, not only rows and group descriptors.
         return spec?.filters.working_only === true ||
           spec?.filters.working_issue_ids !== undefined;
+      },
+    },
+    {
+      queryKey: issueKeys.sidebarAll(wsId),
+      predicate: ({ queryKey }) => {
+        const request = queryKey[4] as SidebarIssuesRequest | undefined;
+        return !!request && isSidebarTableRequest(request) && request.table.filters.working_only === true;
       },
     },
   ];
