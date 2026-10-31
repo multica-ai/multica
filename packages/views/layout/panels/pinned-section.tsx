@@ -25,12 +25,18 @@ import { pinListOptions } from "@multica/core/pins/queries";
 import { useSidebarTreeStore } from "@multica/core/issues/stores/sidebar-tree-store";
 import { useDeletePin, useReorderPins } from "@multica/core/pins/mutations";
 import { useWorkspacePaths, type WorkspacePaths } from "@multica/core/paths";
-import type { PinnedItem } from "@multica/core/types";
+import type { Issue, PinnedItem } from "@multica/core/types";
 import { AppLink } from "../../navigation";
 import { StatusIcon } from "../../issues/components/status-icon";
+import { IssueActionsContextMenu } from "../../issues/actions";
 import { useT } from "../../i18n";
 import { PANEL_ROW_CLASS, PanelList, PanelSection, isPathWithin, panelRowStateClass } from "../panel-nav";
-import { IssueAgentBadge, SIDEBAR_SHIMMER_CLASS, useIssueAgentState } from "./sidebar-tree";
+import {
+  IssueAgentBadge,
+  SIDEBAR_SHIMMER_CLASS,
+  issueRowMenuOpenClass,
+  useIssueAgentState,
+} from "./sidebar-tree";
 
 // Stable empty default: an inline `= []` on useQuery is a new reference every
 // render while the query is disabled, which re-fires the sync effect below.
@@ -184,6 +190,7 @@ function SortablePinItem({
   running = false,
   trailing,
   onNavigate,
+  issue,
 }: {
   pin: PinnedItem;
   href: string;
@@ -196,6 +203,8 @@ function SortablePinItem({
   trailing?: React.ReactNode;
   /** Runs on a real click (not a drag-release) before navigation. */
   onNavigate?: () => void;
+  /** A pinned issue's row opens the issue context menu on right-click. */
+  issue?: Issue;
 }) {
   const { t } = useT("layout");
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: pin.id });
@@ -205,6 +214,42 @@ function SortablePinItem({
     if (isDragging) wasDragged.current = true;
   }, [isDragging]);
 
+  const link = (
+    <AppLink
+      href={href}
+      newTabTitle={label}
+      draggable={false}
+      aria-current={active ? "page" : undefined}
+      onClick={(event) => {
+        if (wasDragged.current) {
+          wasDragged.current = false;
+          event.preventDefault();
+          return;
+        }
+        onNavigate?.();
+      }}
+      className={cn(
+        PANEL_ROW_CLASS,
+        panelRowStateClass(active),
+        issue && issueRowMenuOpenClass(active),
+        trailing ? "pr-2" : "pr-8",
+        isDragging && "pointer-events-none",
+      )}
+    >
+      {iconNode}
+      <ShimmerText active={running} className={cn("min-w-0 flex-1 truncate", SIDEBAR_SHIMMER_CLASS)}>
+        {label}
+      </ShimmerText>
+      {/* Holds the same right-edge slot as a tree row's avatars, and yields
+          it to the unpin button on hover. */}
+      {trailing && (
+        <span className="flex shrink-0 items-center group-hover/pin:invisible group-focus-within/pin:invisible">
+          {trailing}
+        </span>
+      )}
+    </AppLink>
+  );
+
   return (
     <li
       ref={setNodeRef}
@@ -213,38 +258,7 @@ function SortablePinItem({
       {...attributes}
       {...listeners}
     >
-      <AppLink
-        href={href}
-        newTabTitle={label}
-        draggable={false}
-        aria-current={active ? "page" : undefined}
-        onClick={(event) => {
-          if (wasDragged.current) {
-            wasDragged.current = false;
-            event.preventDefault();
-            return;
-          }
-          onNavigate?.();
-        }}
-        className={cn(
-          PANEL_ROW_CLASS,
-          panelRowStateClass(active),
-          trailing ? "pr-2" : "pr-8",
-          isDragging && "pointer-events-none",
-        )}
-      >
-        {iconNode}
-        <ShimmerText active={running} className={cn("min-w-0 flex-1 truncate", SIDEBAR_SHIMMER_CLASS)}>
-          {label}
-        </ShimmerText>
-        {/* Holds the same right-edge slot as a tree row's avatars, and yields
-            it to the unpin button on hover. */}
-        {trailing && (
-          <span className="flex shrink-0 items-center group-hover/pin:invisible group-focus-within/pin:invisible">
-            {trailing}
-          </span>
-        )}
-      </AppLink>
+      {issue ? <IssueActionsContextMenu issue={issue}>{link}</IssueActionsContextMenu> : link}
       <TooltipHint label={t(($) => $.sidebar.unpin_tooltip)}>
         <button
           type="button"
@@ -317,6 +331,7 @@ function PinRow({
         active={active}
         running={!!agents?.running}
         trailing={agents && <IssueAgentBadge agents={agents} />}
+        issue={issue}
         iconNode={
           <StatusIcon
             status={issue.status}

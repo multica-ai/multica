@@ -15,6 +15,7 @@ import type { AgentTask, Issue, ListIssuesParams } from "@multica/core/types";
 import { AppLink } from "../../navigation";
 import { AgentAvatarStack } from "../../agents/components/agent-avatar-stack";
 import { StatusIcon } from "../../issues/components/status-icon";
+import { IssueActionsContextMenu } from "../../issues/actions";
 import { selectIssueTasks } from "../../issues/surface/activity";
 import { useT } from "../../i18n";
 import { PANEL_ROW_CLASS, panelRowStateClass } from "../panel-nav";
@@ -148,6 +149,12 @@ export const TreeRow = forwardRef<HTMLAnchorElement, TreeRowProps>(function Tree
  *  around them, so a group reads as one block. */
 const TREE_CHILD_ROW_CLASS =
   "flex min-h-[26px] w-full items-center gap-2 rounded-lg px-2 py-[3px] text-left text-label transition-colors outline-none focus-visible:outline-2 focus-visible:outline-ring";
+
+/** An issue row whose context menu is open stays lit as if hovered. The
+ *  selected row keeps its own fill. */
+export function issueRowMenuOpenClass(active: boolean) {
+  return active ? undefined : "data-popup-open:bg-surface-hover data-popup-open:text-foreground";
+}
 
 const EMPTY_PARAMS: ListIssuesParams = {};
 
@@ -302,24 +309,26 @@ const SidebarIssueRow = memo(function SidebarIssueRow({
   const agents = useIssueAgentState(wsId, issue.id);
 
   return (
-    <AppLink
-      href={href}
-      newTabTitle={issue.title}
-      aria-current={active ? "page" : undefined}
-      onKeyDown={onKeyDown}
-      className={cn(TREE_CHILD_ROW_CLASS, panelRowStateClass(active))}
-    >
-      <StatusIcon
-        status={issue.status}
-        color={statusColor}
-        icon={statusIcon}
-        category={issueStatusCategory(issue) ?? undefined}
-        className="size-3 shrink-0"
-      />
-      <ShimmerText active={!!agents?.running} className={cn("min-w-0 flex-1 truncate", SIDEBAR_SHIMMER_CLASS)}>
-        {issue.title}
-      </ShimmerText>
-      {agents && <IssueAgentBadge agents={agents} />}
-    </AppLink>
+    <IssueActionsContextMenu issue={issue}>
+      <AppLink
+        href={href}
+        newTabTitle={issue.title}
+        aria-current={active ? "page" : undefined}
+        onKeyDown={onKeyDown}
+        className={cn(TREE_CHILD_ROW_CLASS, panelRowStateClass(active), issueRowMenuOpenClass(active))}
+      >
+        <StatusIcon
+          status={issue.status}
+          color={statusColor}
+          icon={statusIcon}
+          category={issueStatusCategory(issue) ?? undefined}
+          className="size-3 shrink-0"
+        />
+        <ShimmerText active={!!agents?.running} className={cn("min-w-0 flex-1 truncate", SIDEBAR_SHIMMER_CLASS)}>
+          {issue.title}
+        </ShimmerText>
+        {agents && <IssueAgentBadge agents={agents} />}
+      </AppLink>
+    </IssueActionsContextMenu>
   );
 });

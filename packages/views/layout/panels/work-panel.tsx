@@ -11,6 +11,7 @@ import { useSidebarTreeStore } from "@multica/core/issues/stores/sidebar-tree-st
 import { projectListOptions } from "@multica/core/projects/queries";
 import type { Project } from "@multica/core/types";
 import { useNavigation } from "../../navigation";
+import { IssueContextMenuProvider } from "../../issues/actions";
 import { useT } from "../../i18n";
 import { PanelBody, PanelHeader } from "../panel-nav";
 import { PinnedSection, usePanelPins } from "./pinned-section";
@@ -90,35 +91,39 @@ export function WorkPanel() {
   return (
     <>
       <PanelHeader title={t(($) => $.spaces.work)} />
-      <PanelBody onClickCapture={rememberClickedIssue}>
-        {wsId && (
-          <ViewsSection
-            wsId={wsId}
-            pathname={pathname}
-            plainRowsLit={plainRowsLit}
-            issueLitInTree={issueLitInTree}
-            activeIssueId={plainRowsLit ? currentIssueId : null}
-          />
-        )}
+      {/* Outside PanelBody: clicks inside the menu's portal still bubble
+          through the React tree, and must not reach rememberClickedIssue. */}
+      <IssueContextMenuProvider variant="sidebar">
+        <PanelBody onClickCapture={rememberClickedIssue}>
+          {wsId && (
+            <ViewsSection
+              wsId={wsId}
+              pathname={pathname}
+              plainRowsLit={plainRowsLit}
+              issueLitInTree={issueLitInTree}
+              activeIssueId={plainRowsLit ? currentIssueId : null}
+            />
+          )}
 
-        {wsId && (
-          <div data-pinned-section className="contents">
-            <PinnedSection pins={pins} wsId={wsId} />
-          </div>
-        )}
+          {wsId && (
+            <div data-pinned-section className="contents">
+              <PinnedSection pins={pins} wsId={wsId} />
+            </div>
+          )}
 
-        {wsId && (
-          <ProjectsSection
-            wsId={wsId}
-            userId={userId}
-            pathname={pathname}
-            projects={shownProjects}
-            totalProjects={projects.length}
-            plainRowsLit={plainRowsLit}
-            activeIssueId={plainRowsLit ? currentIssueId : null}
-          />
-        )}
-      </PanelBody>
+          {wsId && (
+            <ProjectsSection
+              wsId={wsId}
+              userId={userId}
+              pathname={pathname}
+              projects={shownProjects}
+              totalProjects={projects.length}
+              plainRowsLit={plainRowsLit}
+              activeIssueId={plainRowsLit ? currentIssueId : null}
+            />
+          )}
+        </PanelBody>
+      </IssueContextMenuProvider>
     </>
   );
 }

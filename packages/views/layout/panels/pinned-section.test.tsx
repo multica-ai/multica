@@ -6,7 +6,16 @@ import { buildIssueStatusCatalog } from "@multica/core/issue-statuses/queries";
 import type { PinnedItem } from "@multica/core/types";
 import { useSidebarTreeStore } from "@multica/core/issues/stores/sidebar-tree-store";
 import { renderWithI18n } from "../../test/i18n";
+import { IssueContextMenuProvider } from "../../issues/actions";
 import { PinnedSection, usePanelPins } from "./pinned-section";
+
+vi.mock("../../issues/actions/issue-actions-menu-items", () => ({
+  contextPrimitives: {},
+  IssueActionsMenuItems: ({ issue, variant }: { issue: { title: string }; variant?: string }) => (
+    <div>{`${variant} menu: ${issue.title}`}</div>
+  ),
+}));
+vi.mock("../../issues/actions/use-issue-actions", () => ({ useIssueActions: () => ({}) }));
 
 const state = vi.hoisted(() => ({
   pins: [] as PinnedItem[],
@@ -79,7 +88,11 @@ let activePinnedRoute = false;
 function Harness({ pathname, currentIssueId = null }: { pathname: string; currentIssueId?: string | null }) {
   const pins = usePanelPins("ws-1", "user-1", pathname, currentIssueId);
   activePinnedRoute = pins.isActivePinnedRoute;
-  return <PinnedSection pins={pins} wsId="ws-1" />;
+  return (
+    <IssueContextMenuProvider variant="sidebar">
+      <PinnedSection pins={pins} wsId="ws-1" />
+    </IssueContextMenuProvider>
+  );
 }
 
 beforeEach(() => {
@@ -116,6 +129,21 @@ describe("PinnedSection", () => {
     expect(row).toHaveAttribute("aria-current", "page");
     expect(screen.queryByText("MUL-123 Keep this pin")).toBeNull();
     expect(activePinnedRoute).toBe(true);
+  });
+
+  it("opens the sidebar issue menu when a pinned issue is right-clicked", async () => {
+    state.detail = {
+      isPending: false,
+      isError: false,
+      data: { identifier: "MUL-123", title: "Keep this pin", status: "todo" },
+      error: null,
+    };
+    renderWithI18n(<Harness pathname="/acme/issues" />);
+    const row = (await screen.findByText("Keep this pin")).closest("a")!;
+    fireEvent.contextMenu(row);
+
+    expect(await screen.findByText("sidebar menu: Keep this pin")).toBeInTheDocument();
+    expect(row).toHaveAttribute("data-popup-open");
   });
 
   it("previews five pins and only counts a hidden pin as active once expanded", () => {

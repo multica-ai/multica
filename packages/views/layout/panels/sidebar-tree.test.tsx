@@ -7,7 +7,16 @@ import { buildIssueStatusCatalog } from "@multica/core/issue-statuses/queries";
 import { issueKeys } from "@multica/core/issues/queries";
 import type { AgentTask, Issue, ListIssuesParams } from "@multica/core/types";
 import { renderWithI18n } from "../../test/i18n";
+import { IssueContextMenuProvider } from "../../issues/actions";
 import { SidebarIssueList } from "./sidebar-tree";
+
+vi.mock("../../issues/actions/issue-actions-menu-items", () => ({
+  contextPrimitives: {},
+  IssueActionsMenuItems: ({ issue, variant }: { issue: Issue; variant?: string }) => (
+    <div>{`${variant} menu: ${issue.title}`}</div>
+  ),
+}));
+vi.mock("../../issues/actions/use-issue-actions", () => ({ useIssueActions: () => ({}) }));
 
 vi.mock("@multica/core/issue-statuses/hooks", () => ({
   useIssueStatuses: () => buildIssueStatusCatalog([]),
@@ -57,14 +66,16 @@ function renderList({
   qc.setQueryData(agentTaskSnapshotOptions("ws-1").queryKey, tasks as AgentTask[]);
   renderWithI18n(
     <QueryClientProvider client={qc}>
-      <SidebarIssueList
-        id="list"
-        wsId="ws-1"
-        source={SOURCE}
-        params={params}
-        activeIssueId="issue-2"
-        onCollapse={onCollapse}
-      />
+      <IssueContextMenuProvider variant="sidebar">
+        <SidebarIssueList
+          id="list"
+          wsId="ws-1"
+          source={SOURCE}
+          params={params}
+          activeIssueId="issue-2"
+          onCollapse={onCollapse}
+        />
+      </IssueContextMenuProvider>
     </QueryClientProvider>,
   );
   return { onCollapse };
@@ -118,5 +129,18 @@ describe("SidebarIssueList", () => {
     const { onCollapse } = renderList();
     fireEvent.keyDown(rows()[0]!, { key: "ArrowLeft" });
     expect(onCollapse).toHaveBeenCalled();
+  });
+
+  it("opens the sidebar issue menu on right-click and keeps the row lit while it is open", async () => {
+    renderList();
+    const row = screen.getByRole("link", { name: "Issue 3" });
+    const selected = screen.getByRole("link", { name: "Issue 2" });
+    fireEvent.contextMenu(row);
+
+    expect(await screen.findByText("sidebar menu: Issue 3")).toBeInTheDocument();
+    expect(row).toHaveAttribute("data-popup-open");
+    expect(row.className).toContain("data-popup-open:bg-surface-hover");
+    // The selected row keeps its own fill.
+    expect(selected.className).not.toContain("data-popup-open:");
   });
 });
