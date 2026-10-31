@@ -11,12 +11,13 @@ import { issueDetailOptions, issueKeys } from "@multica/core/issues/queries";
 import { SIDEBAR_PROJECTS_SCOPE } from "@multica/core/issues/sidebar-project-prefs";
 import { useSidebarKeptStore } from "@multica/core/issues/stores/sidebar-kept-store";
 import { useSidebarTreeStore } from "@multica/core/issues/stores/sidebar-tree-store";
+import { spaceForPath } from "@multica/core/paths";
 import { pinListOptions } from "@multica/core/pins/queries";
 import { projectListOptions } from "@multica/core/projects/queries";
 import type { Issue, IssueTableRowsResponse, PinnedItem, Project } from "@multica/core/types";
 import { renderWithI18n } from "../../test/i18n";
 import { NavigationProvider, type NavigationAdapter } from "../../navigation";
-import { WorkPanel } from "./work-panel";
+import { KeptRowsRelease, WorkPanel } from "./work-panel";
 
 const apiMock = vi.hoisted(() => ({ listIssueTableRows: vi.fn(), getIssue: vi.fn() }));
 const actions = vi.hoisted(() => ({
@@ -142,6 +143,8 @@ function renderPanel(initialPath: string, pins: PinnedItem[] = [], projects: Pro
     const [pathname, setPathname] = useState(initialPath);
     // A collapsed sidebar mounts a second panel as its hover peek.
     const [peek, setPeek] = useState(false);
+    // A compact sheet unmounts the panel whenever it closes.
+    const [sheetOpen, setSheetOpen] = useState(true);
     const adapter: NavigationAdapter = {
       push: setPathname,
       replace: setPathname,
@@ -153,7 +156,17 @@ function renderPanel(initialPath: string, pins: PinnedItem[] = [], projects: Pro
     };
     return (
       <NavigationProvider value={adapter}>
-        <WorkPanel />
+        <KeptRowsRelease />
+        {sheetOpen && spaceForPath(pathname) === "work" && <WorkPanel />}
+        <button type="button" onClick={() => setPathname("/acme/inbox")}>
+          Visit inbox
+        </button>
+        <button type="button" onClick={() => setPathname(`/acme/issues/${ISSUE.id}`)}>
+          Return to issue
+        </button>
+        <button type="button" onClick={() => setSheetOpen((open) => !open)}>
+          Toggle sheet
+        </button>
         <button type="button" onClick={() => setPeek(true)}>
           Open peek
         </button>
@@ -264,6 +277,36 @@ describe("WorkPanel issue highlight", () => {
     const peek = within(screen.getByTestId("peek"));
     expect(peek.getByRole("link", { name: "Fixed the sidebar" })).toHaveAttribute("aria-current", "page");
     expect(peek.getByRole("link", { name: "All issues" })).not.toHaveAttribute("aria-current");
+  });
+
+  it("keeps the dropped issue while the panel remounts on the same page", async () => {
+    const qc = renderPanel("/acme/my-issues");
+    fireEvent.click(await screen.findByRole("link", { name: ISSUE.title }));
+    qc.setQueryData(issueDetailOptions("ws-1", ISSUE.id).queryKey, { ...ISSUE, title: "Fixed the sidebar", status: "done" });
+    apiMock.listIssueTableRows.mockResolvedValue({ rows: [{ issue: OTHER }], total: 1, next_cursor: null });
+    await act(() => qc.invalidateQueries({ queryKey: issueKeys.sidebarAll("ws-1") }));
+    await screen.findByRole("link", { name: "Fixed the sidebar" });
+
+    fireEvent.click(screen.getByRole("button", { name: "Toggle sheet" }));
+    fireEvent.click(screen.getByRole("button", { name: "Toggle sheet" }));
+
+    expect(await screen.findByRole("link", { name: "Fixed the sidebar" })).toHaveAttribute("aria-current", "page");
+  });
+
+  it("ends the keep after leaving Work and coming back to the issue", async () => {
+    const qc = renderPanel("/acme/my-issues");
+    fireEvent.click(await screen.findByRole("link", { name: ISSUE.title }));
+    qc.setQueryData(issueDetailOptions("ws-1", ISSUE.id).queryKey, { ...ISSUE, title: "Fixed the sidebar", status: "done" });
+    apiMock.listIssueTableRows.mockResolvedValue({ rows: [{ issue: OTHER }], total: 1, next_cursor: null });
+    await act(() => qc.invalidateQueries({ queryKey: issueKeys.sidebarAll("ws-1") }));
+    await screen.findByRole("link", { name: "Fixed the sidebar" });
+
+    fireEvent.click(screen.getByRole("button", { name: "Visit inbox" }));
+    fireEvent.click(screen.getByRole("button", { name: "Return to issue" }));
+
+    expect(await screen.findByRole("link", { name: OTHER.title })).toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: "Fixed the sidebar" })).toBeNull();
+    expect(allIssues()).toHaveAttribute("aria-current", "page");
   });
 
   it("keeps the open project in the tree after it leaves the projects filter", async () => {

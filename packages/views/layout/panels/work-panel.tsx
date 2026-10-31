@@ -25,11 +25,39 @@ const EMPTY_PROJECTS: Project[] = [];
 /** The Projects section's key in the kept-rows store, apart from every sidebar source. */
 const PROJECTS_LIST = "projects";
 
-/** The `{id}` of an `/issues/{id}` route — a UUID or an identifier like `MUL-123`. */
-function issueRouteSegment(pathname: string, issuesPath: string): string | null {
-  if (!pathname.startsWith(issuesPath + "/")) return null;
-  const segment = pathname.slice(issuesPath.length + 1).split("/")[0];
+/**
+ * The `{id}` of a `{base}/{id}` route — for `/issues/{id}`, a UUID or an
+ * identifier like `MUL-123`.
+ */
+function routeSegment(pathname: string, base: string): string | null {
+  if (!pathname.startsWith(base + "/")) return null;
+  const segment = pathname.slice(base.length + 1).split("/")[0];
   return segment ? decodeURIComponent(segment) : null;
+}
+
+/**
+ * Ends the rows the sidebar lists keep (`useKeptActiveItem`) once their issue
+ * or project is no longer the page. Mounted with the shell rather than the
+ * Work panel, which unmounts on leaving Work and with every compact sheet
+ * close.
+ */
+export function KeptRowsRelease() {
+  const p = useWorkspacePaths();
+  const { pathname } = useNavigation();
+  const wsId = useCurrentWorkspace()?.id ?? "";
+  const issueSegment = routeSegment(pathname, p.issues());
+  const { data: issue } = useQuery({
+    ...issueDetailOptions(wsId, issueSegment ?? ""),
+    enabled: false,
+  });
+  // `undefined` while an identifier route waits for the page to load its issue.
+  const issueId = issueSegment ? (issue?.id ?? (isIssueUuid(issueSegment) ? issueSegment : undefined)) : null;
+  const projectId = routeSegment(pathname, p.projects());
+  useLayoutEffect(() => {
+    if (issueId === undefined) return;
+    useSidebarKeptStore.getState().release([issueId, projectId].filter((id) => id !== null));
+  }, [issueId, projectId]);
+  return null;
 }
 
 export function WorkPanel() {
@@ -44,7 +72,7 @@ export function WorkPanel() {
     enabled: !!wsId,
   });
   // Cache read only: the detail page owns resolving the route's issue.
-  const issueSegment = issueRouteSegment(pathname, p.issues());
+  const issueSegment = routeSegment(pathname, p.issues());
   const { data: currentIssue } = useQuery({
     ...issueDetailOptions(wsId ?? "", issueSegment ?? ""),
     enabled: false,
@@ -70,7 +98,7 @@ export function WorkPanel() {
     const link = (event.target as HTMLElement).closest("a[href]");
     if (!link) return;
     const path = new URL(link.getAttribute("href") ?? "", window.location.href).pathname;
-    const segment = issueRouteSegment(path, p.issues());
+    const segment = routeSegment(path, p.issues());
     setClickedIssue(segment ? { segment, fromPins: !!link.closest("[data-pinned-section]") } : null);
   };
   // A lit pin already marks the issue; opening its project would only push
@@ -94,11 +122,6 @@ export function WorkPanel() {
     const revealed = projects.find((project) => project.id === revealProjectId);
     return revealed && !keptProjects.includes(revealed) ? [...keptProjects, revealed] : [...keptProjects];
   }, [projects, keptProjects, revealProjectId]);
-  // Once another item opens, the lists stop keeping the one that was open.
-  const openProjectId = openProject?.id ?? null;
-  useLayoutEffect(() => {
-    useSidebarKeptStore.getState().release([currentIssueId, openProjectId].filter((id) => id !== null));
-  }, [currentIssueId, openProjectId]);
   const issueLitInTree = treeIssueId !== null;
   const plainRowsLit = !pins.isActivePinnedRoute;
 
