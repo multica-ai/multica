@@ -242,3 +242,8 @@ func chatDoneContent(payload any) string {
 	}
 	return ""
 }
+
+// TaskDeliveryTarget resolves platform-native routing from a sealed task snapshot.
+func TaskDeliveryTarget(delivery db.ChannelTaskDelivery) (channelID, threadTS string) {
+	return outboundTarget(slackBindingFromTaskDelivery(delivery))
+}

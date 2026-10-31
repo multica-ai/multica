@@ -3757,7 +3757,6 @@ func (h *Handler) buildClaimedTaskResponse(r *http.Request, task *db.AgentTaskQu
 			applyFreshSessionRetryWorkdir(*task, &resp, requestHasClientCapability(r, protocol.DaemonCapabilityCheckoutKeepsWorkV1))
 		}
 
-		parts := make([]string, 0, len(unanswered))
 		// Batch attachment lookups instead of one query per unanswered message
 		// (N+1). The batch orders globally by created_at, so grouping by
 		// chat_message_id keeps each message's attachments in created_at order,
@@ -3797,9 +3796,6 @@ func (h *Handler) buildClaimedTaskResponse(r *http.Request, task *db.AgentTaskQu
 			}
 		}
 		for _, m := range unanswered {
-			if strings.TrimSpace(m.Content) != "" {
-				parts = append(parts, m.Content)
-			}
 			for _, a := range attsByMessage[uuidToString(m.ID)] {
 				resp.ChatMessageAttachments = append(resp.ChatMessageAttachments, ChatAttachmentMeta{
 					ID:          uuidToString(a.ID),
@@ -3808,7 +3804,7 @@ func (h *Handler) buildClaimedTaskResponse(r *http.Request, task *db.AgentTaskQu
 				})
 			}
 		}
-		resp.ChatMessage = strings.Join(parts, "\n\n")
+		resp.ChatMessage = sealedChatInput(unanswered)
 
 		// Fail closed: a task-owned direct task that resolves to no user text
 		// (and is not the agent's proactive intro) must never dispatch an
