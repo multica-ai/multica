@@ -2243,6 +2243,53 @@ func TestHermesProviderErrorSnifferStillCapturesErrorRootRecords(t *testing.T) {
 	}
 }
 
+// A fail-open startup warning is diagnostic context, not the task's causal
+// failure. If execution continues and the provider later exhausts its retries,
+// the terminal provider error must be the result surfaced to the daemon.
+func TestHermesProviderErrorSnifferTerminalErrorWinsOverRelayWarning(t *testing.T) {
+	t.Parallel()
+
+	relayWarning := "2026-09-24 14:49:35 [WARNING] agent.relay_runtime: Hermes Relay runtime initialization failed\n" +
+		"Traceback (most recent call last):\n" +
+		"ModuleNotFoundError: No module named 'nemo_relay'\n"
+	providerFailure := "⚠️  Attempt 3/3 failed: HTTP 429: rate limit exceeded\n" +
+		"❌ Rate limited after 3 retries — HTTP 429: rate limit exceeded\n" +
+		"💀 Final error: HTTP 429: rate limit exceeded\n"
+
+	s := newACPProviderErrorSniffer("hermes")
+	if _, err := s.Write([]byte(relayWarning + providerFailure)); err != nil {
+		t.Fatalf("Write: %v", err)
+	}
+
+	status, errStr := promoteACPResultOnProviderError("completed", "", "", s)
+	if status != "failed" {
+		t.Fatalf("terminal provider failure must fail the run, got %q", status)
+	}
+	if !strings.Contains(errStr, "HTTP 429") {
+		t.Fatalf("terminal provider failure must be surfaced, got %q", errStr)
+	}
+	if strings.Contains(errStr, "nemo_relay") {
+		t.Fatalf("fail-open Relay warning replaced the terminal provider failure: %q", errStr)
+	}
+}
+
+func TestHermesProviderErrorSnifferRelayWarningStaysFailOpen(t *testing.T) {
+	t.Parallel()
+
+	s := newACPProviderErrorSniffer("hermes")
+	if _, err := s.Write([]byte(
+		"2026-09-24 14:49:35 [WARNING] agent.relay_runtime: Hermes Relay runtime initialization failed\n" +
+			"ModuleNotFoundError: No module named 'nemo_relay'\n",
+	)); err != nil {
+		t.Fatalf("Write: %v", err)
+	}
+
+	status, errStr := promoteACPResultOnProviderError("completed", "", "Done.", s)
+	if status != "completed" || errStr != "" {
+		t.Fatalf("fail-open Relay warning changed a successful run: status=%q error=%q", status, errStr)
+	}
+}
+
 // TestHermesProviderErrorSnifferIgnoresMultiLineInfoRecords guards the
 // second pollution shape from GitHub multica#5862. Hermes echoes a
 // conversation/tool record whose JSON spans several physical lines: only
