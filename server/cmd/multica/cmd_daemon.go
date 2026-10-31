@@ -532,6 +532,12 @@ var daemonExecutable = selfexec.Resolve
 // immediate, actionable error. Mirrors daemon.resolveAuth: the daemon only
 // authenticates via the stored config token, never MULTICA_TOKEN.
 func requireDaemonAuth(profile string) error {
+	if raw := strings.TrimSpace(os.Getenv("MULTICA_DAEMON_ENROLLMENT_TOKEN")); raw != "" {
+		if !strings.HasPrefix(raw, "mde_") {
+			return fmt.Errorf("invalid daemon enrollment credential")
+		}
+		return nil
+	}
 	cfg, err := cli.LoadCLIConfigForProfile(profile)
 	if err != nil {
 		return fmt.Errorf("load CLI config: %w", err)

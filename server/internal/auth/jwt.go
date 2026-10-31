@@ -75,6 +75,19 @@ func GenerateDaemonToken() (string, error) {
 	return "mdt_" + hex.EncodeToString(b), nil
 }
 
+// DaemonEnrollmentTokenPrefix identifies administrator-managed host credentials.
+// It is distinct from internal mdt_ credentials and is never a user PAT.
+const DaemonEnrollmentTokenPrefix = "mde_"
+
+// GenerateDaemonEnrollmentToken creates a random, single-workspace host secret.
+func GenerateDaemonEnrollmentToken() (string, error) {
+	b := make([]byte, 32)
+	if _, err := rand.Read(b); err != nil {
+		return "", fmt.Errorf("generate daemon enrollment token: %w", err)
+	}
+	return DaemonEnrollmentTokenPrefix + hex.EncodeToString(b), nil
+}
+
 // GenerateAgentTaskToken creates a new task-scoped agent auth token:
 // "mat_" + 40 random hex chars. The token is single-purpose — bound to a
 // specific (agent_id, task_id) pair on the server side — and is what the

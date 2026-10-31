@@ -72,6 +72,10 @@ func (h *Handler) revokeAndRemoveMember(ctx context.Context, workspaceID, userID
 		return empty, err
 	}
 
+	if err := qtx.DeleteDaemonEnrollmentsByCreator(ctx, db.DeleteDaemonEnrollmentsByCreatorParams{WorkspaceID: workspaceID, CreatorID: userID}); err != nil {
+		return empty, err
+	}
+
 	runtimes, err := qtx.ListAgentRuntimesByOwner(ctx, db.ListAgentRuntimesByOwnerParams{
 		WorkspaceID: workspaceID,
 		OwnerID:     userID,

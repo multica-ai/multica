@@ -651,3 +651,28 @@ func TestTerminalReportsCarryDurableWorkDir(t *testing.T) {
 		})
 	}
 }
+
+func TestClient_EnrollmentDoesNotFallBackToAccountDiscovery(t *testing.T) {
+	var legacyCalls atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/api/workspaces" {
+			legacyCalls.Add(1)
+		}
+		http.NotFound(w, r)
+	}))
+	defer srv.Close()
+	c := NewClient(srv.URL)
+	c.SetToken("mde_workspace-credential")
+	for i := 0; i < 2; i++ {
+		if _, err := c.ListWorkspaces(context.Background()); err == nil {
+			t.Fatal("scoped endpoint absence must fail")
+		}
+	}
+	c.legacyWorkspaceEndpointEnabled = true // a client previously using a PAT
+	if _, err := c.ListWorkspaces(context.Background()); err == nil {
+		t.Fatal("enrollment must also reject a cached legacy fallback")
+	}
+	if legacyCalls.Load() != 0 {
+		t.Fatalf("account discovery called %d times", legacyCalls.Load())
+	}
+}

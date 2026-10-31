@@ -14,6 +14,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/multica-ai/multica/server/internal/auth"
 	"github.com/multica-ai/multica/server/pkg/agent"
 	"github.com/multica-ai/multica/server/pkg/httptransport"
 	"github.com/multica-ai/multica/server/pkg/protocol"
@@ -218,6 +219,11 @@ func daemonCommonCapabilities() []string {
 // SetToken sets the auth token for authenticated requests.
 func (c *Client) SetToken(token string) {
 	c.token = token
+}
+
+// UsesEnrollmentToken distinguishes host enrollment from user credentials.
+func (c *Client) UsesEnrollmentToken() bool {
+	return strings.HasPrefix(c.token, auth.DaemonEnrollmentTokenPrefix)
 }
 
 // Token returns the current auth token.
@@ -798,6 +804,9 @@ type RenewTokenResponse struct {
 // so this is safe to call on any cadence; the only thing extra calls cost is
 // one round trip and one cheap SELECT.
 func (c *Client) RenewToken(ctx context.Context) (*RenewTokenResponse, error) {
+	if c.UsesEnrollmentToken() {
+		return nil, fmt.Errorf("enrollment credentials must be rotated by a workspace administrator")
+	}
 	var resp RenewTokenResponse
 	if err := c.postJSON(ctx, "/api/tokens/current/renew", map[string]any{}, &resp); err != nil {
 		return nil, err
@@ -813,6 +822,9 @@ func (c *Client) ListWorkspaces(ctx context.Context) ([]WorkspaceInfo, error) {
 	c.workspaceMu.Lock()
 	defer c.workspaceMu.Unlock()
 
+	if c.legacyWorkspaceEndpointEnabled && c.UsesEnrollmentToken() {
+		return nil, fmt.Errorf("enrolled daemon requires scoped workspace discovery")
+	}
 	if c.legacyWorkspaceEndpointEnabled {
 		return c.listLegacyWorkspaces(ctx)
 	}
@@ -836,6 +848,9 @@ func (c *Client) ListWorkspaces(ctx context.Context) ([]WorkspaceInfo, error) {
 	}
 	defer resp.Body.Close()
 
+	if resp.StatusCode == http.StatusNotFound && c.UsesEnrollmentToken() {
+		return nil, fmt.Errorf("enrolled daemon requires scoped workspace discovery")
+	}
 	if resp.StatusCode == http.StatusNotFound {
 		_, _ = io.Copy(io.Discard, resp.Body)
 		c.legacyWorkspaceEndpointEnabled = true
@@ -852,7 +867,11 @@ func (c *Client) ListWorkspaces(ctx context.Context) ([]WorkspaceInfo, error) {
 	}
 	if resp.StatusCode >= 400 {
 		data, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
-		return nil, &requestError{Method: http.MethodGet, Path: path, StatusCode: resp.StatusCode, Body: strings.TrimSpace(string(data))}
+		reqErr := &requestError{Method: http.MethodGet, Path: path, StatusCode: resp.StatusCode, Body: strings.TrimSpace(string(data))}
+		if c.UsesEnrollmentToken() && resp.StatusCode == http.StatusUnauthorized {
+			return nil, fmt.Errorf("host credential rejected; ask a workspace administrator to rotate the enrollment and restart with the replacement credential: %w", reqErr)
+		}
+		return nil, reqErr
 	}
 
 	var workspaces []WorkspaceInfo

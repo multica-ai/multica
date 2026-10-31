@@ -1573,7 +1573,7 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 
 	// Daemon API routes (require daemon token or valid user token)
 	r.Route("/api/daemon", func(r chi.Router) {
-		r.Use(middleware.DaemonAuth(queries, patCache, daemonTokenCache, cloudPATVerifier))
+		r.Use(middleware.DaemonAuth(queries, patCache, daemonTokenCache, cloudPATVerifier, h.EnrollmentTxStarter))
 
 		r.Post("/register", h.DaemonRegister)
 		r.Post("/deregister", h.DaemonDeregister)
@@ -1755,6 +1755,10 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 				// Admin-level access
 				r.Group(func(r chi.Router) {
 					r.Use(middleware.RequireWorkspaceRoleFromURL(queries, "id", "owner", "admin"))
+					r.With(handler.RequireHumanActor).Post("/daemon-enrollments", h.CreateDaemonEnrollment)
+					r.With(handler.RequireHumanActor).Get("/daemon-enrollments", h.ListDaemonEnrollments)
+					r.With(handler.RequireHumanActor).Post("/daemon-enrollments/{enrollmentId}/rotate", h.RotateDaemonEnrollment)
+					r.With(handler.RequireHumanActor).Delete("/daemon-enrollments/{enrollmentId}", h.RevokeDaemonEnrollment)
 					r.Put("/", h.UpdateWorkspace)
 					r.Patch("/", h.UpdateWorkspace)
 					r.Post("/members", h.CreateInvitation)

@@ -1,8 +1,8 @@
 -- name: CreateDaemonToken :one
 -- owner_id binds the token to the runtime owner it was issued for (MUL-8154);
 -- NULL only for Qoder-managed tokens.
-INSERT INTO daemon_token (token_hash, workspace_id, daemon_id, expires_at, owner_id)
-VALUES (@token_hash, @workspace_id, @daemon_id, @expires_at, sqlc.narg('owner_id'))
+INSERT INTO daemon_token (token_hash, workspace_id, daemon_id, expires_at, owner_id, enrollment_token_hash)
+VALUES (@token_hash, @workspace_id, @daemon_id, @expires_at, sqlc.narg('owner_id'), sqlc.narg('enrollment_token_hash'))
 RETURNING *;
 
 -- name: GetDaemonTokenByHash :one
