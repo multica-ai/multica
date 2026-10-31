@@ -233,6 +233,8 @@ describe("IssueLimitUpgradeDialog", () => {
     renderPrompt({ layered: true });
     const user = await openPrompt();
 
+    // Focus transfers after mount; Escape must reach the top dialog.
+    await waitFor(() => expect(queryRecoveryDialog()?.contains(document.activeElement)).toBe(true));
     await user.keyboard("{Escape}");
 
     await waitFor(() => expect(queryRecoveryDialog()).not.toBeInTheDocument());

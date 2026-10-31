@@ -143,8 +143,11 @@ describe("floating chat message lifetime", () => {
 
     setOpen(false);
     expect(screen.getByTestId("messages")).toHaveAttribute("data-active", "false");
-    await waitFor(() => expect(screen.queryByTestId("messages")).not.toBeInTheDocument());
-    expect(observers()).toBe(0);
+    await waitFor(() => {
+      expect(screen.queryByTestId("messages")).not.toBeInTheDocument();
+      // DOM removal can precede the passive effect that unsubscribes the query.
+      expect(observers()).toBe(0);
+    });
 
     act(() => qc.setQueryData(key, pages([message("arrived while closed")])));
     setOpen(true);
@@ -165,9 +168,12 @@ describe("floating chat message lifetime", () => {
   });
 
   it("fetches the full message window when its inactive cache was collected", async () => {
-    const { qc, key, setOpen } = renderWindow(true);
+    const { qc, key, setOpen, observers } = renderWindow(true);
     setOpen(false);
-    await waitFor(() => expect(screen.queryByTestId("messages")).not.toBeInTheDocument());
+    await waitFor(() => {
+      expect(screen.queryByTestId("messages")).not.toBeInTheDocument();
+      expect(observers()).toBe(0);
+    });
     qc.removeQueries({ queryKey: key });
     fetchMessages.mockResolvedValue({ messages: [message("refetched after collection")], limit: 50, has_more: false });
 
