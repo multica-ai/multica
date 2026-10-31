@@ -73,7 +73,7 @@ const (
 	DefaultGCInterval                     = 2 * time.Hour
 	DefaultGCTTL                          = 24 * time.Hour      // 1 day — AI-coding issues rarely stay open long
 	DefaultGCCompletedTaskTTLCloud        = 14 * 24 * time.Hour // 14 days — Multica Cloud bounds completed issue-task env retention by default; see defaultGCCompletedTaskTTL
-	DefaultGCCompletedTaskTTLSelfHost     = 0                   // disabled — self-host keeps every completed env until its issue goes terminal, unless an operator opts in
+	DefaultGCCompletedTaskTTLSelfHost     = 14 * 24 * time.Hour // 14 days — self-host bounds completed issue-task env retention by default too (GH #9176: one unattended host piled up ~900 completed envs, ~515GB, whose issues never went terminal); see defaultGCCompletedTaskTTL
 	DefaultGCOrphanTTL                    = 72 * time.Hour      // 3 days — orphans with no meta (crashes, pre-GC leftovers)
 	DefaultGCArtifactTTL                  = 12 * time.Hour      // 12h — drop regenerable artifacts once a task has been completed this long
 	DefaultGCCodexSessionTTL              = 14 * 24 * time.Hour // 14 days — reclaim per-issue Codex session stores untouched this long
@@ -118,7 +118,7 @@ type Config struct {
 	GCEnabled                      bool                  // enable periodic workspace garbage collection (default: true)
 	GCInterval                     time.Duration         // how often the GC loop runs (default: 2h)
 	GCTTL                          time.Duration         // clean dirs whose issue is done/cancelled and updated_at < now()-TTL (default: 24h)
-	GCCompletedTaskTTL             time.Duration         // fully clean inactive issue-task envs completed at least this long ago, regardless of parent issue status (default: 14d on Multica Cloud, 0/disabled elsewhere; local_directory envs are never fully removed)
+	GCCompletedTaskTTL             time.Duration         // fully clean inactive issue-task envs completed at least this long ago, regardless of parent issue status (default: 14d everywhere; set 0 to disable; local_directory envs are never fully removed)
 	GCOrphanTTL                    time.Duration         // clean orphan dirs with no meta, or dirs whose issue gc-check returns 404, once they exceed this age (default: 72h). The 404 path uses the same TTL — a scoped-down token can't instantly wipe live workspaces.
 	GCArtifactTTL                  time.Duration         // once a task has been completed for at least this long, drop regenerable artifacts: pattern-matched build outputs when the parent record keeps the directory (an open issue), and the exact daemon-managed Codex cache for every task kind (default: 12h, set 0 to disable both)
 	GCArtifactPatterns             []string              // basename patterns whose subtrees are removed during artifact cleanup (default: node_modules, .next, .turbo)
@@ -674,13 +674,12 @@ func LoadConfig(overrides Overrides) (Config, error) {
 const officialCloudHost = "api.multica.ai"
 
 // isOfficialCloudServer reports whether the resolved server base URL points
-// at Multica's hosted cloud. Used to pick defaults that are safe on
-// infrastructure we operate but not on someone else's: auto-update (cloud
-// users run a server that publishes the matching CLI release, so opt-in
-// self-update is safe, while self-host users may run a fork or pin to an
-// older server) and the completed-task retention TTL (see
-// defaultGCCompletedTaskTTL). Matching is host-only and case-insensitive —
-// port and path are ignored.
+// at Multica's hosted cloud. Used to pick defaults that depend on who
+// operates the node (auto-update: cloud users run a server that publishes the
+// matching CLI release, so opt-in self-update is safe, while self-host users
+// may run a fork or pin to an older server) and for the completed-task
+// retention seam (see defaultGCCompletedTaskTTL). Matching is host-only and
+// case-insensitive — port and path are ignored.
 func isOfficialCloudServer(baseURL string) bool {
 	u, err := url.Parse(strings.TrimSpace(baseURL))
 	if err != nil {
@@ -694,17 +693,22 @@ func isOfficialCloudServer(baseURL string) bool {
 //
 // Full removal of a completed task environment is irreversible: it takes the
 // checkout, .git (including work an agent left uncommitted), output/ and logs/
-// with it. On Multica Cloud that trade is ours to make — we operate the nodes,
-// a full disk is our incident rather than a user's, and unbounded retention has
-// no operator watching it. On self-host the same default would turn a routine
-// daemon upgrade into a silent deletion of data the operator never agreed to
-// give up, so it stays disabled until they set MULTICA_GC_COMPLETED_TASK_TTL
-// themselves. Either side can override in either direction; cloud disables it
-// again with an explicit 0.
+// with it. That cost is bounded by design — this path only fires after a
+// successful parent-issue status check that answers with a recognized status,
+// never on an active environment, never on a local_directory env, and a rerun
+// provisions a fresh checkout — and it now trades against measured evidence
+// from both deployment kinds: unbounded-by-default retention is what operators
+// actually get hurt by. A task completed two weeks ago whose parent issue sits
+// blocked or in review is a stale env, not a workspace (GH #9176: one
+// unattended self-host accumulated ~900 completed envs, ~515GB, purely because
+// their issues never went terminal). Both kinds therefore bound retention at
+// the same 14 days. An operator who keeps long-lived debug envs restores the
+// old behavior with an explicit MULTICA_GC_COMPLETED_TASK_TTL=0; the
+// deployment-kind seam stays because the right bound is a per-deployment
+// policy, not because the defaults must differ.
 //
 // Non-production cloud origins (staging, previews) fall to the self-host value
-// along with everything else officialCloudHost excludes, and opt in explicitly
-// if they want the bound.
+// along with everything else officialCloudHost excludes.
 func defaultGCCompletedTaskTTL(serverBaseURL string) time.Duration {
 	if isOfficialCloudServer(serverBaseURL) {
 		return DefaultGCCompletedTaskTTLCloud

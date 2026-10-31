@@ -1037,6 +1037,72 @@ func TestShouldCleanTaskDir_CompletedTaskTTLRemovesOpenIssue(t *testing.T) {
 	}
 }
 
+// The self-host default bounds completed-env retention too (GH #9176: ~900
+// completed envs, ~515GB, piled up on one unattended host purely because their
+// parent issues sat blocked/in_review forever). An issue that never goes
+// terminal must not exempt a task the default TTL has outlived — with the
+// default in effect this is the difference between reclaiming the env and
+// keeping it until the disk fills. GCArtifactTTL is switched off so the only
+// decision this can measure is the full-cleanup one.
+func TestShouldCleanTaskDir_SelfHostDefaultTTLCleansNeverTerminalIssue(t *testing.T) {
+	t.Parallel()
+	issueID := "88888888-8888-8888-8888-888888888890"
+
+	mux := http.NewServeMux()
+	mux.HandleFunc(fmt.Sprintf("/api/daemon/issues/%s/gc-check", issueID), func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]any{
+			"status":     "blocked",
+			"updated_at": time.Now(),
+		})
+	})
+
+	d := newGCTestDaemon(t, mux)
+	d.cfg.GCCompletedTaskTTL = DefaultGCCompletedTaskTTLSelfHost
+	d.cfg.GCArtifactTTL = 0
+	taskDir := createTaskDir(t, d.cfg.WorkspacesRoot, "ws1", "never-terminal", &execenv.GCMeta{
+		Kind:        execenv.GCKindIssue,
+		IssueID:     issueID,
+		WorkspaceID: "ws1",
+		CompletedAt: time.Now().Add(-15 * 24 * time.Hour), // beyond the 14d default
+	})
+
+	if action := d.shouldCleanTaskDir(context.Background(), taskDir); action != gcActionClean {
+		t.Fatalf("expected the self-host default TTL to clean an env whose issue never went terminal, got %d", action)
+	}
+}
+
+// The explicit opt-out survives the bounded default: MULTICA_GC_COMPLETED_TASK_TTL=0
+// puts an operator back on unbounded retention for exactly this never-terminal
+// fixture.
+func TestShouldCleanTaskDir_CompletedTaskTTLZeroExplicitStillSkips(t *testing.T) {
+	t.Parallel()
+	issueID := "88888888-8888-8888-8888-888888888891"
+
+	mux := http.NewServeMux()
+	mux.HandleFunc(fmt.Sprintf("/api/daemon/issues/%s/gc-check", issueID), func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]any{
+			"status":     "blocked",
+			"updated_at": time.Now(),
+		})
+	})
+
+	d := newGCTestDaemon(t, mux)
+	d.cfg.GCCompletedTaskTTL = 0 // explicit opt-out, not the zero value by accident
+	d.cfg.GCArtifactTTL = 0
+	taskDir := createTaskDir(t, d.cfg.WorkspacesRoot, "ws1", "opted-out", &execenv.GCMeta{
+		Kind:        execenv.GCKindIssue,
+		IssueID:     issueID,
+		WorkspaceID: "ws1",
+		CompletedAt: time.Now().Add(-15 * 24 * time.Hour),
+	})
+
+	if action := d.shouldCleanTaskDir(context.Background(), taskDir); action != gcActionSkip {
+		t.Fatalf("expected an explicit completed-task TTL of 0 to keep the env, got %d", action)
+	}
+}
+
 func TestShouldCleanTaskDir_CompletedTaskTTLUnknownIssueStatusFailsClosed(t *testing.T) {
 	t.Parallel()
 	issueID := "88888888-8888-8888-8888-888888888884"
