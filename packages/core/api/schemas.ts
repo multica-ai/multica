@@ -3912,3 +3912,26 @@ export const EMPTY_LIST_LARK_INSTALLATIONS_RESPONSE: ListLarkInstallationsRespon
   installations: [],
   configured: false,
 };
+
+// Recovery is destructive: malformed metadata/pagination disables the operation
+// instead of appearing to be an authoritative empty result.
+export const EmptyAgentBuilderSessionPageSchema = z.object({
+  sessions: z.array(z.object({
+    session_id: z.uuid(),
+    runtime_id: z.uuid(),
+    machine_label: z.string(),
+    created_at: z.iso.datetime({ offset: true }),
+    snapshot: z.string().regex(/^[a-f0-9]{64}$/),
+  }).transform((row) => ({
+    sessionId: row.session_id,
+    runtimeId: row.runtime_id,
+    machineLabel: row.machine_label,
+    createdAt: row.created_at,
+    snapshot: row.snapshot,
+  }))),
+  next_cursor: z.string(),
+}).refine((page) => new Set(page.sessions.map((row) => row.sessionId)).size === page.sessions.length)
+  .transform((page) => ({ sessions: page.sessions, nextCursor: page.next_cursor }));
+
+export type EmptyAgentBuilderSessionPage = z.infer<typeof EmptyAgentBuilderSessionPageSchema>;
+export type EmptyAgentBuilderSession = EmptyAgentBuilderSessionPage["sessions"][number];

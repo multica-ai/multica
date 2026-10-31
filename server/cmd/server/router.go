@@ -2338,6 +2338,8 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 				// so this is the only route back to one.
 				r.Get("/", h.ListAgentBuilderSessions)
 				r.Post("/", h.CreateAgentBuilderSession)
+				r.Get("/empty", h.ListEmptyAgentBuilderSessions)
+				r.Post("/{sessionId}/discard-empty", h.DiscardEmptyAgentBuilderSession)
 				r.Patch("/{sessionId}/runtime", h.SwitchAgentBuilderRuntime)
 				// Autosaved configuration, including edits the user has typed
 				// but not sent. Read back through the list above.

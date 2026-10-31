@@ -43,6 +43,85 @@ func (q *Queries) DeleteAgentBuilderDraftsBySystemRuntimeAgents(ctx context.Cont
 	return err
 }
 
+const listEmptyAgentBuilderSessions = `-- name: ListEmptyAgentBuilderSessions :many
+SELECT cs.id, a.runtime_id, ar.profile_id, cs.created_at,
+       cs.updated_at AS session_updated_at, a.updated_at AS agent_updated_at,
+       COALESCE(NULLIF(btrim(ar.custom_name), ''), ar.name)::text AS machine_label
+FROM chat_session cs
+JOIN agent a ON a.id = cs.agent_id AND a.workspace_id = cs.workspace_id
+JOIN agent_runtime ar ON ar.id = a.runtime_id AND ar.workspace_id = cs.workspace_id
+JOIN runtime_profile rp ON rp.id = ar.profile_id AND rp.workspace_id = cs.workspace_id
+WHERE cs.workspace_id = $1 AND cs.creator_id = $2
+  AND ar.profile_id = $3
+  AND cs.status = 'active' AND a.archived_at IS NULL
+  AND a.kind = 'system' AND starts_with(a.system_key, 'agent_builder:')
+  AND ($4::uuid IS NULL OR cs.id = $4)
+  AND cs.id > $5::uuid
+  AND NOT EXISTS (SELECT 1 FROM chat_message m WHERE m.chat_session_id = cs.id)
+  AND NOT EXISTS (SELECT 1 FROM agent_builder_draft d WHERE d.chat_session_id = cs.id)
+  AND NOT EXISTS (SELECT 1 FROM chat_draft_restore d WHERE d.chat_session_id = cs.id)
+  AND NOT EXISTS (SELECT 1 FROM agent_task_queue t WHERE t.chat_session_id = cs.id OR t.agent_id = a.id)
+  AND NOT EXISTS (SELECT 1 FROM chat_session other WHERE other.agent_id = a.id AND other.id <> cs.id)
+ORDER BY cs.id
+LIMIT $6
+`
+
+type ListEmptyAgentBuilderSessionsParams struct {
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
+	CreatorID   pgtype.UUID `json:"creator_id"`
+	ProfileID   pgtype.UUID `json:"profile_id"`
+	SessionID   pgtype.UUID `json:"session_id"`
+	AfterID     pgtype.UUID `json:"after_id"`
+	PageLimit   int32       `json:"page_limit"`
+}
+
+type ListEmptyAgentBuilderSessionsRow struct {
+	ID               pgtype.UUID        `json:"id"`
+	RuntimeID        pgtype.UUID        `json:"runtime_id"`
+	ProfileID        pgtype.UUID        `json:"profile_id"`
+	CreatedAt        pgtype.Timestamptz `json:"created_at"`
+	SessionUpdatedAt pgtype.Timestamptz `json:"session_updated_at"`
+	AgentUpdatedAt   pgtype.Timestamptz `json:"agent_updated_at"`
+	MachineLabel     string             `json:"machine_label"`
+}
+
+// Metadata only. Ordinary unfinished drafts intentionally exclude these rows.
+// Call again with session_id under session -> agent locks before discarding.
+func (q *Queries) ListEmptyAgentBuilderSessions(ctx context.Context, arg ListEmptyAgentBuilderSessionsParams) ([]ListEmptyAgentBuilderSessionsRow, error) {
+	rows, err := q.db.Query(ctx, listEmptyAgentBuilderSessions,
+		arg.WorkspaceID,
+		arg.CreatorID,
+		arg.ProfileID,
+		arg.SessionID,
+		arg.AfterID,
+		arg.PageLimit,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListEmptyAgentBuilderSessionsRow{}
+	for rows.Next() {
+		var i ListEmptyAgentBuilderSessionsRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.RuntimeID,
+			&i.ProfileID,
+			&i.CreatedAt,
+			&i.SessionUpdatedAt,
+			&i.AgentUpdatedAt,
+			&i.MachineLabel,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const upsertAgentBuilderDraft = `-- name: UpsertAgentBuilderDraft :one
 INSERT INTO agent_builder_draft (chat_session_id, workspace_id, draft)
 VALUES ($1, $2, $3)
