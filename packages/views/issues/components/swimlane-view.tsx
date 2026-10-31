@@ -34,6 +34,7 @@ import type {
   Project,
   UpdateIssueRequest,
 } from "@multica/core/types";
+import { actorRefsFromValue, isActorPropertyType } from "@multica/core/types";
 import { useViewStore, useViewStoreApi } from "@multica/core/issues/stores/view-store-context";
 import { useViewBaseline } from "../surface/view-baseline-context";
 import { filterIssues, type IssueFilters } from "../utils/filter";
@@ -45,6 +46,7 @@ import type { IssueStatusCatalog } from "@multica/core/issue-statuses";
 import { useIssueStatuses } from "@multica/core/issue-statuses/hooks";
 import { useActorName } from "@multica/core/workspace/hooks";
 import { childrenByParentsOptions, issueKeys } from "@multica/core/issues/queries";
+import { propertyListOptions } from "@multica/core/properties";
 import {
   DropdownMenu,
   DropdownMenuTrigger,
@@ -69,7 +71,7 @@ import { DeferredPopup } from "../../common/deferred-popup";
 import { useRestoredScrollOffset, useRestoredScrollRef } from "../../platform";
 import { DeferredTooltip } from "../../common/deferred-tooltip";
 import type { ChildProgress } from "./list-row";
-import { useT } from "../../i18n";
+import { useLocale, useT } from "../../i18n";
 import type { IssueCreateDefaults } from "../surface/types";
 import type {
   IssueGroupBranches,
@@ -1742,13 +1744,23 @@ function ProjectStatusRow({
   collapsed: boolean;
   total: number;
 }) {
-  const labelOf = useStatusLabel(useWorkspaceId());
+  const wsId = useWorkspaceId();
+  const labelOf = useStatusLabel(wsId);
+  const locale = useLocale();
+  const { getActorName } = useActorName();
+  const { data: workspaceProperties = [] } = useQuery(propertyListOptions(wsId));
   const store = useViewStoreApi();
   const cardProperties = useViewStore((state) => state.cardProperties);
   const cardPropertyIds = useViewStore((state) => state.cardPropertyIds);
   const { measurements } = useMemo(() => ({
     store,
-    measurements: new Map<string, { signature: string; height: number }>(),
+    // One previous content variant lets a display toggle/undo reuse a valid
+    // measurement without retaining an unbounded history of edits.
+    measurements: new Map<string, {
+      signature: string;
+      height: number;
+      previous?: { signature: string; height: number };
+    }>(),
   }), [store]);
   const [, redraw] = useState(0);
   const signatures = new Map<string, string>();
@@ -1759,17 +1771,29 @@ function ProjectStatusRow({
     const signature = JSON.stringify([
       (localCells[lane.key]?.[status] ?? []).map((issueId) => {
         const issue = issueMap.get(issueId);
-        return [issue, childProgressMap.get(issueId), issue?.project_id ? projectMap?.get(issue.project_id) : null];
+        const customProperties = (cardPropertyIds ?? [])
+          .map((id) => workspaceProperties.find((property) => property.id === id))
+          .flatMap((property) => {
+            if (!property || issue?.properties?.[property.id] === undefined) return [];
+            return [[property.id, property.name, property.type, property.icon, property.config,
+              isActorPropertyType(property.type)
+                ? actorRefsFromValue(issue.properties[property.id]).map((ref) => getActorName(ref.kind, ref.id))
+                : null]];
+          });
+        return [issue, childProgressMap.get(issueId), issue?.project_id ? projectMap?.get(issue.project_id) : null, customProperties];
       }),
-      cardProperties, cardPropertyIds, !!onCreateIssue, statusCatalog.entryOf(status),
-      page && [page.total, page.hasMore, page.isLoading, page.isFetching, page.isError],
+      cardProperties, locale, !!onCreateIssue, statusCatalog.entryOf(status),
+      // Fetching only changes the footer's content while it has a sentinel.
+      // A background refresh of a complete cell renders the same footer.
+      page && [page.total, page.hasMore, page.hasMore && (page.isLoading || page.isFetching), page.isError],
     ]);
     signatures.set(id, signature);
     const known = measurements.get(id);
     // Mounted cells are remeasured before paint; retain their old height until
     // then so appending a page cannot briefly shrink the scroll container.
-    if (known && (known.signature === signature || visibleLanes.includes(lane))) {
-      rowHeight = Math.max(rowHeight, known.height);
+    const matching = known?.signature === signature ? known : known?.previous?.signature === signature ? known.previous : undefined;
+    if (matching || (known && visibleLanes.includes(lane))) {
+      rowHeight = Math.max(rowHeight, matching?.height ?? known!.height);
     }
   }
   useLayoutEffect(() => {
@@ -1799,7 +1823,12 @@ function ProjectStatusRow({
               const signature = signatures.get(id)!;
               const previous = measurements.get(id);
               if (previous?.signature === signature && previous.height === height) return;
-              measurements.set(id, { signature, height });
+              const previousVariant = previous?.signature === signature ? previous.previous : previous;
+              measurements.set(id, {
+                signature,
+                height,
+                ...(previousVariant && { previous: { signature: previousVariant.signature, height: previousVariant.height } }),
+              });
               redraw((version) => version + 1);
             }}
             cellId={cellId(lane.key, status)}
