@@ -201,6 +201,15 @@ func subscribeDelegatedHuman(bus *events.Bus, pool *pgxpool.Pool, queries *db.Qu
 		return
 	}
 
+	// Direct requests retain their subscription regardless of automatic following.
+	if issue.ParentIssueID.Valid && issue.OriginType.String != "quick_create" {
+		humanID := util.UUIDToString(human)
+		prefs := loadUserPrefs(ctx, queries, workspaceID, []string{humanID})
+		if prefs[humanID]["sub_issue_following"] == "muted" {
+			return
+		}
+	}
+
 	// Two conditions decide whether this subscription may exist, and BOTH can
 	// be invalidated by a concurrent request between a check and the write:
 	//

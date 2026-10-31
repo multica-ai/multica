@@ -314,7 +314,7 @@ func notifySubscribers(
 ) {
 	notified, tierSuppressed := notifyIssueSubscribers(ctx, queries, bus,
 		issueID, issueID, issueStatus, workspaceID, e, exclude,
-		notifType, severity, title, body, details)
+		notifType, severity, title, body, details, false)
 
 	// Only a small allowlist of event types bubbles to parent subscribers.
 	if !parentBubbleNotifTypes[notifType] {
@@ -356,7 +356,7 @@ func notifySubscribers(
 	parentID := util.UUIDToString(issue.ParentIssueID)
 	notifyIssueSubscribers(ctx, queries, bus,
 		parentID, issueID, issueStatus, workspaceID, e, parentExclude,
-		notifType, severity, title, body, details)
+		notifType, severity, title, body, details, issue.CreatorType == "agent")
 }
 
 // notifyIssueSubscribers sends inbox notifications to subscribers of
@@ -383,6 +383,7 @@ func notifyIssueSubscribers(
 	title string,
 	body string,
 	details []byte,
+	inheritedFromAgent bool,
 ) (map[string]bool, map[string]bool) {
 	notified := map[string]bool{}
 	tierSuppressed := map[string]bool{}
@@ -433,6 +434,11 @@ func notifyIssueSubscribers(
 
 		// Skip any extra excluded IDs
 		if exclude[subID] {
+			continue
+		}
+
+		// A parent subscription must respect this person's automatic-following choice.
+		if inheritedFromAgent && userPrefs[subID]["sub_issue_following"] == "muted" {
 			continue
 		}
 

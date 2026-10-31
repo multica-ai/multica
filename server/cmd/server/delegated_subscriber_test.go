@@ -147,6 +147,41 @@ func TestDelegatedSubscribe_AgentCreatedSubIssue(t *testing.T) {
 	if got := subscriberReason(t, queries, issueID, "member", testUserID); got != "delegated" {
 		t.Fatalf("reason = %q, want delegated", got)
 	}
+
+	f := workspaceFixture(t)
+	f.Insert(t, "notification_preference", testutil.Cols{
+		"workspace_id": testWorkspaceID, "user_id": testUserID,
+		"preferences": `{"sub_issue_following":"muted"}`,
+	})
+	child := createAgentOriginIssue(t, agentID, "agent_create", task, util.MustParseUUID(parentID))
+	t.Cleanup(func() { cleanupInboxForIssue(t, child) })
+	publishAgentIssueCreated(bus, child, agentID)
+	if isSubscribed(t, queries, child, "member", testUserID) {
+		t.Fatal("opted-out user was automatically subscribed")
+	}
+
+	otherUser := f.User(t, "Other subscriber", "following-"+parentID+"@example.com")
+	f.Member(t, testWorkspaceID, otherUser, "member")
+	addTestSubscriber(t, parentID, "member", otherUser, "manual")
+	addTestSubscriber(t, parentID, "member", testUserID, "creator")
+	notify := func() {
+		notifySubscribers(context.Background(), queries, bus, child, "done", testWorkspaceID,
+			events.Event{ActorType: "agent", ActorID: agentID}, nil,
+			"status_changed", "info", "Child finished", "", emptyDetails)
+	}
+	notify()
+	if got := len(inboxItemsForRecipient(t, queries, testUserID)); got != 0 {
+		t.Fatalf("opted-out parent subscriber received %d child updates", got)
+	}
+	if got := len(inboxItemsForRecipient(t, queries, otherUser)); got != 1 {
+		t.Fatalf("another user's updates were affected: got %d, want 1", got)
+	}
+	addTestSubscriber(t, child, "member", testUserID, "manual")
+	notify()
+	if got := len(inboxItemsForRecipient(t, queries, testUserID)); got != 1 {
+		t.Fatalf("manual child subscription received %d updates, want 1", got)
+	}
+
 }
 
 // TestDelegatedSubscribe_QuickCreateKeepsDirectReason: quick create is direct
