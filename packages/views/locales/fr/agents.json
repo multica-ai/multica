@@ -349,6 +349,7 @@
       "switch_runtime_failed": "Impossible de changer de runtime. La conversation se poursuit sur le précédent.",
       "switch_runtime_pending": "Arrêtez la réponse en cours pour changer de runtime.",
       "switch_runtime_success": "Runtime changé. Votre brouillon est conservé et la conversation se poursuit sur le nouveau runtime avec une session de modèle neuve.",
+      "conversation_tab": "Conversation",
       "chat_title": "Agent Builder",
       "runtime_online": "Runtime en ligne",
       "runtime_offline": "Runtime hors ligne",

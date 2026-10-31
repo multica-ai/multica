@@ -337,6 +337,7 @@
       "switch_runtime_failed": "切換執行時失敗，對話仍在原來的執行時上執行。",
       "switch_runtime_pending": "停止當前回覆後即可切換執行時。",
       "switch_runtime_success": "已切換執行時。配置草稿保留，後續對話將在新執行時上重新開始一段模型會話。",
+      "conversation_tab": "對話",
       "chat_title": "智慧體構建器",
       "runtime_online": "執行時線上",
       "runtime_offline": "執行時離線",

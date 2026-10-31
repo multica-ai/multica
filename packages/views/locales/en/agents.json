@@ -349,6 +349,7 @@
       "switch_runtime_failed": "Could not switch runtime. The conversation is still running on the previous one.",
       "switch_runtime_pending": "Stop the current reply to switch runtime.",
       "switch_runtime_success": "Runtime switched. Your draft is kept and the conversation continues on the new runtime with a fresh model session.",
+      "conversation_tab": "Conversation",
       "chat_title": "Agent Builder",
       "runtime_online": "Runtime online",
       "runtime_offline": "Runtime offline",

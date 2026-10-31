@@ -928,6 +928,7 @@
       "switch_runtime_failed": "ランタイムを切り替えられませんでした。会話は引き続き元のランタイムで実行されています。",
       "switch_runtime_pending": "現在の返信を停止するとランタイムを切り替えられます。",
       "switch_runtime_success": "ランタイムを切り替えました。下書き設定はそのまま残り、以降の会話は新しいランタイムで新しいモデルセッションとして続きます。",
+      "conversation_tab": "会話",
       "chat_title": "Agent Builder",
       "runtime_online": "ランタイムはオンライン",
       "runtime_offline": "ランタイムはオフライン",
