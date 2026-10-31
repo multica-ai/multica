@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useAuthStore } from "@multica/core/auth";
 import { useCurrentWorkspace, useWorkspacePaths } from "@multica/core/paths";
+import { isIssueUuid } from "@multica/core/issues/canonical-id";
 import { issueDetailOptions } from "@multica/core/issues/queries";
 import { projectSidebarSource, sidebarProjects } from "@multica/core/issues/sidebar-list";
 import { useSidebarTreeStore } from "@multica/core/issues/stores/sidebar-tree-store";
@@ -13,7 +14,7 @@ import { useNavigation } from "../../navigation";
 import { useT } from "../../i18n";
 import { PanelBody, PanelHeader } from "../panel-nav";
 import { PinnedSection, usePanelPins } from "./pinned-section";
-import { ProjectsSection, useIssueShownInTree } from "./work-tree";
+import { ProjectsSection, useIssueIdInTree } from "./work-tree";
 import { ViewsSection } from "./views-section";
 
 const EMPTY_PROJECTS: Project[] = [];
@@ -42,7 +43,13 @@ export function WorkPanel() {
     ...issueDetailOptions(wsId ?? "", issueSegment ?? ""),
     enabled: false,
   });
-  const currentIssueId = issueSegment ? (currentIssue?.id ?? null) : null;
+  // A tree row takes the highlight from "All issues" while it lists the issue.
+  const treeIssueId = useIssueIdInTree(wsId ?? "", issueSegment);
+  // The tree and a UUID route name the issue before the page has loaded it;
+  // waiting for the load would light "All issues" first.
+  const currentIssueId = issueSegment
+    ? (currentIssue?.id ?? treeIssueId ?? (isIssueUuid(issueSegment) ? issueSegment : null))
+    : null;
   // An issue can sit in Pinned and in the tree at once. The row that was
   // clicked keeps the highlight; arriving any other way (search, a link, a
   // shortcut) lights the pin.
@@ -50,8 +57,8 @@ export function WorkPanel() {
   const treeClaimsIssue =
     !!clickedIssue &&
     !clickedIssue.fromPins &&
-    !!currentIssue &&
-    (clickedIssue.segment === currentIssue.id || clickedIssue.segment === currentIssue.identifier);
+    !!currentIssueId &&
+    (clickedIssue.segment === currentIssueId || clickedIssue.segment === currentIssue?.identifier);
   const pins = usePanelPins(wsId, userId, pathname, treeClaimsIssue ? null : currentIssueId);
   const rememberClickedIssue = (event: React.MouseEvent) => {
     const link = (event.target as HTMLElement).closest("a[href]");
@@ -77,8 +84,7 @@ export function WorkPanel() {
     const revealed = projects.find((project) => project.id === revealProjectId);
     return revealed && !shown.includes(revealed) ? [...shown, revealed] : shown;
   }, [projects, projectSettings, projectOrder, userId, revealProjectId]);
-  // A tree row takes the highlight from "All issues" while it lists the issue.
-  const issueLitInTree = useIssueShownInTree(wsId ?? "", currentIssueId);
+  const issueLitInTree = treeIssueId !== null;
   const plainRowsLit = !pins.isActivePinnedRoute;
 
   return (

@@ -41,20 +41,26 @@ function usePrefetch(wsId: string, source: string, params: ListIssuesParams | nu
   };
 }
 
-/** Whether an expanded row currently lists the issue. */
-export function useIssueShownInTree(wsId: string, issueId: string | null): boolean {
+/**
+ * The id of the issue an expanded row lists under `ref` — its UUID, or an
+ * identifier like `MUL-123` matched case-insensitively as the server does —
+ * or `null` when no expanded row lists it.
+ */
+export function useIssueIdInTree(wsId: string, ref: string | null): string | null {
   const cache = useQueryClient().getQueryCache();
   const subscribe = useCallback((onChange: () => void) => cache.subscribe(onChange), [cache]);
-  return useSyncExternalStore(subscribe, () =>
-    !!issueId &&
-    cache
-      .findAll({ queryKey: issueKeys.sidebarAll(wsId) })
-      .some(
-        (query) =>
-          query.getObserversCount() > 0 &&
-          !!(query.state.data as ListIssuesResponse | undefined)?.issues?.some((issue) => issue.id === issueId),
-      ),
-  );
+  return useSyncExternalStore(subscribe, () => {
+    if (!ref) return null;
+    const identifier = ref.toUpperCase();
+    for (const query of cache.findAll({ queryKey: issueKeys.sidebarAll(wsId) })) {
+      if (query.getObserversCount() === 0) continue;
+      const issue = (query.state.data as ListIssuesResponse | undefined)?.issues?.find(
+        (issue) => issue.id === ref || issue.identifier.toUpperCase() === identifier,
+      );
+      if (issue) return issue.id;
+    }
+    return null;
+  });
 }
 
 interface ProjectsSectionProps {
