@@ -252,6 +252,7 @@
       "sent_label": "Envoyé",
       "sent_count": "{{count}} envoyé",
       "version_blocked_tooltip": "Le CLI du daemon doit être ≥ {{min}}",
+      "qoder_attachments_unsupported": "Qoder Cloud Agents ne peut pas lire les pièces jointes. Retirez-les ou choisissez un autre agent.",
       "toast_sent": "Envoyé à l'agent — vous recevrez une notification dans votre boîte de réception une fois terminé",
       "error_agent_unavailable_fallback": "L'agent est indisponible. Choisissez-en un autre.",
       "error_daemon_version": "Le CLI du daemon de cet agent ({{current}}) est inférieur au minimum requis {{min}}. Mettez le daemon à jour pour utiliser la création avec un agent.",

@@ -252,6 +252,7 @@
       "sent_label": "Sent",
       "sent_count": "{{count}} sent",
       "version_blocked_tooltip": "Daemon CLI must be ≥ {{min}}",
+      "qoder_attachments_unsupported": "Qoder Cloud Agents can't read attachments. Remove them or pick another agent.",
       "toast_sent": "Sent to agent — you'll get an inbox notification when it's done",
       "error_agent_unavailable_fallback": "Agent is unavailable. Pick another agent.",
       "error_daemon_version": "This agent's daemon CLI ({{current}}) is below the required {{min}}. Upgrade the daemon to use Create with agent.",

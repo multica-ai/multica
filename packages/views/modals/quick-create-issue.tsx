@@ -167,21 +167,36 @@ export function AgentCreatePanel({
         (a) =>
           !a.archived_at &&
           isAgentRuntimeBound(a) &&
-          !runtimes.some((r) => r.id === a.runtime_id && r.provider === "qoder_cloud") &&
           canAssignAgent(a, userId, memberRole),
       ),
-    [agents, runtimes, userId, memberRole],
+    [agents, userId, memberRole],
   );
   const visibleAgentIds = useMemo(
     () => new Set(visibleAgents.map((a) => a.id)),
     [visibleAgents],
   );
+  // Qoder Cloud Agents can draft a quick-create issue as a single agent, but
+  // its bridge cannot run the squad-leader task that follows a squad
+  // assignment, so squads led by a Qoder agent stay hidden.
+  const qoderAgentIds = useMemo(() => {
+    const qoderRuntimeIds = new Set(
+      runtimes.filter((r) => r.provider === "qoder_cloud").map((r) => r.id),
+    );
+    return new Set(
+      visibleAgents
+        .filter((a) => a.runtime_id != null && qoderRuntimeIds.has(a.runtime_id))
+        .map((a) => a.id),
+    );
+  }, [visibleAgents, runtimes]);
   const visibleSquads = useMemo(
     () =>
       squads.filter(
-        (s) => !s.archived_at && visibleAgentIds.has(s.leader_id),
+        (s) =>
+          !s.archived_at &&
+          visibleAgentIds.has(s.leader_id) &&
+          !qoderAgentIds.has(s.leader_id),
       ),
-    [squads, visibleAgentIds],
+    [squads, visibleAgentIds, qoderAgentIds],
   );
 
   const lastActorType = useQuickCreateStore((s) => s.lastActorType);
@@ -351,7 +366,11 @@ export function AgentCreatePanel({
   // can't pre-check, defer to the server's authoritative gate
   // (checkQuickCreateDaemonVersion, which reads the row by id regardless of
   // role) instead of failing closed in the UI.
-  const canPrecheckVersion = selectedAgent?.runtime_id != null && selectedRuntime != null;
+  // Qoder Cloud Agents runs through the managed bridge, which has no CLI.
+  const canPrecheckVersion =
+    selectedAgent?.runtime_id != null &&
+    selectedRuntime != null &&
+    selectedRuntime.provider !== "qoder_cloud";
   const runtimeCliVersion = readRuntimeCliVersion(selectedRuntime?.metadata);
   const baseVersionCheck = useMemo(
     () => checkQuickCreateCliVersion(runtimeCliVersion),
@@ -387,6 +406,12 @@ export function AgentCreatePanel({
     handleUpload: handleUploadFile,
     gate,
   } = useIssueCreateUploads("agent", uploadGate, editorRef);
+  // The Qoder bridge cannot read attachments, so the issue it creates would be
+  // assigned to an agent whose run fails immediately. Block instead of
+  // silently dropping the attachment; the server re-checks.
+  const qoderAttachmentBlocked =
+    selectedRuntime?.provider === "qoder_cloud" &&
+    pendingAttachments.some((a) => contentReferencesAttachment(draft.agent.prompt, a));
   const { isDragOver, dropZoneProps } = useFileDropZone({
     onDrop: (files) => files.forEach((f) => editorRef.current?.uploadFile(f)),
   });
@@ -426,6 +451,12 @@ export function AgentCreatePanel({
       // The button already disables on !actor / versionBlocked, but the
       // ⌘+Enter path bypasses it — re-guard here and keep the draft in place.
       if (!actor || versionBlocked || (anchorCommentId && !sourcePreview)) return false;
+      if (
+        selectedRuntime?.provider === "qoder_cloud" &&
+        pendingAttachments.some((a) => contentReferencesAttachment(md, a))
+      ) {
+        return false;
+      }
       // Flush the prompt editor's pending debounce before snapshotting — see
       // ManualCreatePanel.
       const pendingPrompt = editorRef.current?.flushPendingUpdate?.();
@@ -618,7 +649,7 @@ export function AgentCreatePanel({
     <Button
       size="sm"
       onClick={submit}
-      disabled={!hasContent || !actor || submitting || versionBlocked || gate.uploading || (!!anchorCommentId && !sourcePreview)}
+      disabled={!hasContent || !actor || submitting || versionBlocked || qoderAttachmentBlocked || gate.uploading || (!!anchorCommentId && !sourcePreview)}
       aria-disabled={gate.uploading || versionBlocked || undefined}
       // Sending is a busy state too, not just uploading.
       aria-busy={gate.uploading || submitting || undefined}
@@ -726,6 +757,12 @@ export function AgentCreatePanel({
                   current: versionCheck.current,
                   min: versionCheck.min,
                 })}
+          </div>
+        )}
+
+        {selectedAgent && qoderAttachmentBlocked && (
+          <div className="mx-5 mb-2 shrink-0 rounded-md border border-amber-500/30 bg-amber-500/5 px-3 py-2 text-caption text-amber-700 dark:text-amber-300">
+            {t(($) => $.create_issue.agent.qoder_attachments_unsupported)}
           </div>
         )}
 

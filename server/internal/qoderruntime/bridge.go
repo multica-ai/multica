@@ -576,6 +576,11 @@ func (b *Bridge) cancelSession(ctx context.Context, sessionID string) error {
 	return nil
 }
 func (b *Bridge) deliver(ctx context.Context, r *run) error {
+	if r.QuickCreate != nil && !r.QuickCreate.Created && r.Outcome == "completed" {
+		if err := b.createQuickIssue(ctx, r); err != nil {
+			return err
+		}
+	}
 	body := map[string]any{"session_id": r.SessionID}
 	suffix := "/complete"
 	if r.Outcome == "completed" {

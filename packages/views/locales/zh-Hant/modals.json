@@ -250,6 +250,7 @@
       "sent_label": "已傳送",
       "sent_count": "已傳送 {{count}}",
       "version_blocked_tooltip": "守護程序 CLI 必須 ≥ {{min}}",
+      "qoder_attachments_unsupported": "Qoder Cloud Agents 無法讀取附件。請移除附件，或換一個智慧體。",
       "toast_sent": "已交給智慧體——完成後會在收件箱通知你",
       "error_agent_unavailable_fallback": "智慧體不可用，請換一個。",
       "error_daemon_version": "該智慧體的守護程序 CLI（{{current}}）低於要求的 {{min}}。請升級守護程序後再使用透過智慧體建立。",

@@ -250,6 +250,7 @@
       "sent_label": "전송됨",
       "sent_count": "{{count}}개 전송됨",
       "version_blocked_tooltip": "데몬 CLI는 {{min}} 이상이어야 합니다",
+      "qoder_attachments_unsupported": "Qoder Cloud Agents는 첨부 파일을 읽을 수 없습니다. 첨부 파일을 제거하거나 다른 에이전트를 선택하세요.",
       "toast_sent": "에이전트에게 보냈습니다. 완료되면 인박스 알림을 받습니다",
       "error_agent_unavailable_fallback": "에이전트를 사용할 수 없습니다. 다른 에이전트를 선택하세요.",
       "error_daemon_version": "이 에이전트의 데몬 CLI({{current}})가 필요한 버전 {{min}}보다 낮습니다. 에이전트로 만들기를 사용하려면 데몬을 업그레이드하세요.",

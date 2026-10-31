@@ -16,8 +16,9 @@ func (b *Bridge) prepare(ctx context.Context, t *claimedTask) (*run, error) {
 		return nil, fmt.Errorf("claim identity does not match bridge")
 	}
 	chat := t.ChatSessionID != ""
-	if (t.IssueID != "") == chat || t.IsLeaderTask {
-		return nil, fmt.Errorf("Qoder bridge currently supports issue and chat runs only")
+	quickCreate := !chat && t.IssueID == "" && t.QuickCreatePrompt != ""
+	if (t.IssueID != "") == (chat || quickCreate) || t.IsLeaderTask {
+		return nil, fmt.Errorf("Qoder bridge currently supports issue, chat and quick-create runs only")
 	}
 	if !strings.HasPrefix(t.AuthToken, "mat_") {
 		return nil, fmt.Errorf("claim is missing a task-scoped credential")
@@ -36,6 +37,14 @@ func (b *Bridge) prepare(ctx context.Context, t *claimedTask) (*run, error) {
 		return nil, err
 	}
 	r.AgentID = binding.AgentID
+	if quickCreate {
+		// The created issue would carry the attachments, and the run on it
+		// would then fail below; refuse before creating anything.
+		if len(t.QuickCreateAttachmentIDs) > 0 {
+			return nil, fmt.Errorf("attachments are not supported by the Qoder bridge; create the issue without them")
+		}
+		return prepareQuickCreate(t, r), nil
+	}
 	var p strings.Builder
 	if chat {
 		if len(t.ChatAttachments) > 0 {
