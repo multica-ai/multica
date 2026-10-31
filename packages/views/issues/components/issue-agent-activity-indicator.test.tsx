@@ -170,6 +170,39 @@ describe("IssueAgentActivityIndicator", () => {
 
     expect(container.firstChild).toBeNull();
   });
+
+  it("renders an accessible implicit child-wait fallback", () => {
+    mockState.snapshot = [];
+    render(
+      <IssueAgentActivityIndicator
+        issueId="issue-1"
+        statusCategory="started"
+        childProgress={{ done: 0, total: 1 }}
+      />,
+    );
+
+    expect(screen.getByTestId("hover-card")).not.toBeNull();
+    expect(
+      screen.getByLabelText("Waiting on sub-issues · 0/1 complete"),
+    ).not.toBeNull();
+    expect(screen.getByText("0/1 complete")).not.toBeNull();
+  });
+
+  it("prefers an explicit wakeup over the implicit child-wait fallback", () => {
+    mockState.snapshot = [];
+    mockState.summaries = [eventSummary];
+    render(
+      <IssueAgentActivityIndicator
+        issueId="issue-1"
+        statusCategory="started"
+        childProgress={{ done: 0, total: 1 }}
+        hoverCard={false}
+      />,
+    );
+
+    expect(screen.getByText("Waiting for a run to end")).toBeInTheDocument();
+    expect(screen.queryByText("Waiting on sub-issues")).toBeNull();
+  });
 });
 
 const eventSummary = {
