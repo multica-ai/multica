@@ -6465,6 +6465,17 @@ func IsDelegatedFailureRecoveryComment(comment db.Comment) bool {
 		comment.SourceTaskID.Valid
 }
 
+// Capacity refusals require restored provider availability, not more coordination.
+// Keep their notice visible but settle the outbox without waking another agent.
+func delegatedFailureNeedsCapacity(failed db.AgentTaskQueue) bool {
+	switch taskfailure.Reason(failed.FailureReason.String) {
+	case taskfailure.ReasonAgentProviderQuotaLimit, taskfailure.ReasonAgentProviderCapacityOrRateLimit:
+		return failed.FailureReason.Valid
+	default:
+		return false
+	}
+}
+
 func delegatedFailureRecoveryContent(failed, source db.AgentTaskQueue) string {
 	reason := "agent_error"
 	if failed.FailureReason.Valid && failed.FailureReason.String != "" {
@@ -6474,6 +6485,9 @@ func delegatedFailureRecoveryContent(failed, source db.AgentTaskQueue) string {
 		"Delegated task `%s` ended in a final failure (`%s`) and no automatic retry is pending. Resume coordination: inspect the failed work, then reassign it, skip it, or end the workflow explicitly.",
 		util.UUIDToString(failed.ID), reason,
 	)
+	if delegatedFailureNeedsCapacity(failed) {
+		content = fmt.Sprintf("Delegated task `%s` failed because provider quota or capacity is unavailable (`%s`). Automatic coordinator recovery is stopped. Retry manually after restoring quota or provider capacity, or choose an available runtime.", util.UUIDToString(failed.ID), reason)
+	}
 	if failed.Error.Valid && failed.Error.String != "" {
 		summary := truncateForSummary(redact.Text(failed.Error.String), delegatedFailureErrorSummaryRunes)
 		if summary != "" {
@@ -6801,6 +6815,13 @@ func (s *TaskService) exhaustDelegatedFailureRecovery(ctx context.Context, targe
 // reconciliation schedule the follow-up. The three-pass loop closes state
 // changes around those writes.
 func (s *TaskService) dispatchDelegatedFailureRecovery(ctx context.Context, target *delegatedFailureRecoveryTarget, excludeTaskID pgtype.UUID) (delegatedFailureRecoveryDispatchOutcome, error) {
+	if delegatedFailureNeedsCapacity(target.failed) {
+		if _, err := s.Queries.SettleDelegatedFailureRecoveryComment(ctx, target.comment.ID); err != nil {
+			return delegatedFailureRecoveryCovered, fmt.Errorf("settle capacity recovery notice: %w", err)
+		}
+		return delegatedFailureRecoveryCovered, nil
+	}
+
 	// Signal creation has committed before reaching this shared dispatch path.
 	// Refresh the issue because its status may have changed since creation or
 	// sweep selection; a paused/unreadable lifecycle never settles the signal.
