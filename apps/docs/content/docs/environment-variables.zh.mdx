@@ -183,6 +183,9 @@ MULTICA_PUBLIC_URL=https://api.multica.example.com
 | GitHub | `GITHUB_WEBHOOK_SECRET` | Webhook HMAC 与连接 state 签名密钥 |
 | GitHub | `GITHUB_APP_ID` | PR 卡片的 CI 状态、可合并性和"从 GitHub 选择"仓库都需要它 |
 | GitHub | `GITHUB_APP_PRIVATE_KEY` | 与 App ID 配套的完整 PEM 私钥，用途同上 |
+| GitHub | `GITHUB_APP_CLIENT_ID` | App 的 Client ID；成员连接自己的 GitHub 账号、在 Multica 中操作 PR 时需要 |
+| GitHub | `GITHUB_APP_CLIENT_SECRET` | 在 App 设置中生成的 client secret，用途同上 |
+| GitHub | `MULTICA_GITHUB_SECRET_KEY` | Base64 编码的 32 字节密钥（`openssl rand -base64 32`），用于加密成员保存的 GitHub 授权；更换后所有成员都需要重新连接 |
 | 飞书 | `MULTICA_LARK_SECRET_KEY` | base64 编码的 32 字节凭据加密密钥 |
 | Slack | `MULTICA_SLACK_SECRET_KEY` | base64 编码的 32 字节 token 加密密钥 |
 | Telegram | `MULTICA_TELEGRAM_SECRET_KEY` | base64 编码的 32 字节 Bot token 加密密钥 |

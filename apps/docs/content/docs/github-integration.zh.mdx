@@ -9,7 +9,7 @@ import { PrLinkDemo } from "@/components/demos/pr-link-demo";
 
 连接 GitHub 后，Multica 根据任务编号自动关联 pull request。任务详情中可直接查看 PR 状态、改动规模、CI 结果和合并冲突。
 
-GitHub 集成只读取安装时授权的仓库，不会提交代码、评论或 status check。
+GitHub 集成只作用于安装时授权的仓库，App 不会自行向 GitHub 写入任何内容。每一次写操作，例如合并或批准 PR，都由某位 Multica 用户以自己的身份在 Multica 中发起，详见[在 Multica 中操作 PR](#在-multica-中操作-pr)。
 
 自部署的 Multica 还可以并行连接自托管的 Forgejo、Gitea 或 GitLab 实例，获得同样的 PR 自动关联、合并后改状态和 CI 展示，入口在 **设置 → 代码**，详见[自托管 Git 代码托管](/vcs-integration)。Multica Cloud 不提供该入口。
 
@@ -94,6 +94,14 @@ CI 状态和可合并性来自 Multica 从 GitHub API 拉取的快照，两者�
 
 点击记录可以打开 GitHub 上的 PR。关闭 **PR 侧栏** 只会隐藏这个区块，不会断开连接。
 
+## 在 Multica 中操作 PR
+
+成员不用离开 Multica，就能对关联的 PR 执行合并、关闭、批准、请求评审、更新分支和重跑失败的 check。每位成员需要先连接一次自己的 GitHub 账号；这个连接属于成员本人，在其加入的所有工作区中通用。
+
+Multica 以点击操作的成员身份把每个操作发送到 GitHub，所以 GitHub 会照常应用这个人的仓库权限和分支保护规则，与在 github.com 上操作完全一致，操作记录上的作者也是这个人。智能体无法使用成员的 GitHub 账号。合并或关闭 PR 还会以该成员的名义写入任务时间线。
+
+在 Multica 中断开 GitHub 账号时，也会同时撤销 Multica 在 GitHub 上的访问权限。
+
 ## PR 合并后怎样改状态
 
 PR 合并不一定代表任务已完成，所以由工作区决定合并后做什么：**设置 → 代码 → PR 合并后，任务状态改为**。可以选 `Done`（新工作区的默认值）、其他"已开始"或"已完成"类的状态（也可以是自定义状态，例如"待回归"），或者**不改变**。这项设置出现之前就已存在的工作区保持原来的行为：如果以前的合并并不总会完成任务，初始值就是**不改变**。
@@ -139,7 +147,9 @@ Multica Cloud 无需执行本节。自托管需要先创建自己的 GitHub App�
 | 字段 | 值 |
 |---|---|
 | Homepage URL | Multica 前端地址，例如 `https://multica.example.com` |
-| Callback URL | 留空 |
+| Callback URL | `https://<api-host>/api/github/user/callback`，成员连接 GitHub 账号时使用 |
+| Expire user authorization tokens | 保持启用 |
+| Request user authorization (OAuth) during installation | 保持关闭 |
 | Setup URL | `https://<api-host>/api/github/setup`，并启用 **Redirect on update** |
 | Webhook URL | `https://<api-host>/api/webhooks/github` |
 | Webhook secret | 一段长期保存的随机字符串 |
@@ -149,7 +159,9 @@ Repository permissions：
 | 权限 | 级别 |
 |---|---|
 | Metadata | Read-only |
-| Pull requests | Read-only |
+| Contents | Read & write；用于合并 PR、更新 PR 分支和删除已合并的分支 |
+| Pull requests | Read & write；用于合并、关闭、批准和请求评审 |
+| Actions | Read & write；用于重跑失败的 check |
 | Checks | Read-only；用于显示 CI 状态 |
 | Commit statuses | Read-only；用于汇总 legacy status 形式的 CI |
 
@@ -158,7 +170,13 @@ Repository permissions：
 - **Pull request**；
 - **Check suite**、**Check run** 和 **Status**，用于触发 CI 与可合并性刷新。
 
-PR 快照通过 Pull requests、Checks 和 Commit statuses 的 REST API 获取，不需要 Contents 权限。
+PR 快照只读取数据，通过 Pull requests、Checks 和 Commit statuses 的 API 获取。写权限只会在成员从 Multica 操作 PR 时，配合该成员自己的 GitHub 授权使用。
+
+创建 App 后，在设置页的 **Client secrets → Generate a new client secret** 生成一个 client secret，并与上方显示的 **Client ID** 一起保存。
+
+<Callout type="info">
+**升级已有的 App**：补加写权限后，GitHub 会请各 installation 的所有者批准。所有者批准之前，该 installation 下仓库的 PR 操作会失败，并提示 App 缺少权限；CI 状态、可合并性和自动关联不受影响。
+</Callout>
 
 <Callout type="warning">
 这里需要的是 **Webhook secret**，不是 OAuth Client secret。两边填写的 Webhook secret 不一致时，GitHub delivery 会返回 `401 invalid signature`。
@@ -188,6 +206,17 @@ GITHUB_APP_PRIVATE_KEY=<完整 PEM 私钥，保留 BEGIN/END 行和换行>
 
 私钥在 GitHub App 的 **Private keys → Generate a private key** 中生成。不配置这两个变量时，PR 照常镜像，任务照常自动关联并在合并时改状态，只是 PR 卡片不显示 CI 或合并状态。
 
+要让成员[在 Multica 中操作 PR](#在-multica-中操作-pr)，还需要配置下面三个变量，以及 API 的公网地址，让 GitHub 能跳转回上面的 Callback URL：
+
+```dotenv
+GITHUB_APP_CLIENT_ID=<App 的 Client ID>
+GITHUB_APP_CLIENT_SECRET=<你生成的 client secret>
+MULTICA_GITHUB_SECRET_KEY=<openssl rand -base64 32 的输出>
+MULTICA_PUBLIC_URL=https://<api-host>
+```
+
+`MULTICA_GITHUB_SECRET_KEY` 用于加密成员保存的 GitHub 授权；更换它会断开所有成员的 GitHub 账号。三个变量缺少任意一个时，成员无法连接 GitHub 账号，其他功能照常工作。
+
 </Step>
 <Step>
 
@@ -210,7 +239,9 @@ make migrate-up
 - **Webhook 返回 401**：确认 GitHub App 与 API 使用同一个 Webhook secret，然后在 GitHub 的 **Recent Deliveries** 中重新投递。
 - **PR 没有关联**：检查仓库是否在 App 授权范围内、自动关联是否开启、编号是否属于当前工作区，以及是否有人把它从任务上移除过。
 - **正文写了编号但没关联**：改用 `Closes MUL-123`，或把编号放到分支名、PR 标题中，或者手动关联。
-- **没有 CI 状态**：确认 `GITHUB_APP_ID` 和 `GITHUB_APP_PRIVATE_KEY` 已配置，App 具有 Pull requests、Checks 与 Commit statuses 的只读权限并订阅了对应事件。不需要 Contents 权限。给已安装的 App 补加权限后，需要各 installation 的所有者在 GitHub 上批准才会生效。
+- **没有 CI 状态**：确认 `GITHUB_APP_ID` 和 `GITHUB_APP_PRIVATE_KEY` 已配置，App 具有上文列出的 Pull requests、Checks 与 Commit statuses 权限并订阅了对应事件。给已安装的 App 补加权限后，需要各 installation 的所有者在 GitHub 上批准才会生效。
+- **PR 操作提示 App 缺少权限**：该 installation 还没有批准 App 的写权限。installation 的所有者需要在 GitHub 个人或组织的 **Settings → GitHub Apps** 中批准。
+- **成员无法连接 GitHub 账号**：检查 `GITHUB_APP_CLIENT_ID`、`GITHUB_APP_CLIENT_SECRET` 和 `MULTICA_GITHUB_SECRET_KEY` 是否已进入 API 进程，以及 App 的 Callback URL 是否为 `https://<api-host>/api/github/user/callback`。
 - **PR 合并后任务状态没变**：看任务 **Pull requests** 列表下方的说明，它会指出仍未合并或已关闭未合并的 PR，或者说明此任务合并后不改状态。没有这行说明，表示工作区设置为**不改变**，或者任务已经是目标状态。
 
 ## 接下来

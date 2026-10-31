@@ -9,7 +9,7 @@ import { PrLinkDemo } from "@/components/demos/pr-link-demo";
 
 Once GitHub is connected, Multica automatically links pull requests based on issue identifiers. Issue detail shows PR state, change size, CI results, and merge conflicts in place.
 
-The GitHub integration only reads the repositories authorized at install time; it never pushes commits, comments, or status checks.
+The GitHub integration only works with the repositories authorized at install time, and the App never writes to GitHub on its own. Every write, such as merging or approving a PR, is performed by a Multica user, as themselves, from Multica. See [Act on PRs from Multica](#act-on-prs-from-multica).
 
 Self-hosted Multica can also connect self-hosted Forgejo, Gitea, or GitLab instances in parallel, with the same PR auto-linking, merge-driven status changes, and CI display. The entry point is **Settings → Code**; see [Self-hosted Git hosting](/vcs-integration). Multica Cloud does not offer this entry point.
 
@@ -94,6 +94,14 @@ Under the list, one line says what happens next: for example *Moves to Done when
 
 Click an entry to open the PR on GitHub. Turning off the **PR sidebar** only hides this block; it doesn't disconnect anything.
 
+## Act on PRs from Multica
+
+Members can merge, close, approve, request reviews, update the branch, and rerun failed checks on a linked PR without leaving Multica. Each member first connects their own GitHub account once; the connection belongs to that person and works in every workspace they belong to.
+
+Multica sends each action to GitHub as the member who clicked it, so GitHub applies that person's repository permissions and branch protection, exactly as on github.com, and records them as the author of the action. Agents can't use a member's GitHub account. Merging or closing a PR is also written to the issue timeline under the member's name.
+
+Disconnecting the GitHub account in Multica revokes Multica's access on GitHub as well.
+
 ## When merged PRs move an issue
 
 A merged PR doesn't necessarily mean the issue is finished, so the workspace decides what a merge does: **Settings → Code → After PRs merge, move the issue to**. Pick `Done` (the default for new workspaces), another started or done status (a custom one such as *Awaiting regression* works too), or **Don't change**. Workspaces that existed before this setting keep their behavior: if merging didn't always complete their issues, they start on **Don't change**.
@@ -139,7 +147,9 @@ Create the App under GitHub's **Developer settings → GitHub Apps** and fill in
 | Field | Value |
 |---|---|
 | Homepage URL | Your Multica frontend address, e.g. `https://multica.example.com` |
-| Callback URL | Leave blank |
+| Callback URL | `https://<api-host>/api/github/user/callback`, used when members connect their GitHub accounts |
+| Expire user authorization tokens | Keep enabled |
+| Request user authorization (OAuth) during installation | Keep disabled |
 | Setup URL | `https://<api-host>/api/github/setup`, with **Redirect on update** enabled |
 | Webhook URL | `https://<api-host>/api/webhooks/github` |
 | Webhook secret | A random string you keep long-term |
@@ -149,7 +159,9 @@ Repository permissions:
 | Permission | Level |
 |---|---|
 | Metadata | Read-only |
-| Pull requests | Read-only |
+| Contents | Read & write; used to merge PRs, update PR branches, and delete merged branches |
+| Pull requests | Read & write; used to merge, close, approve, and request reviews |
+| Actions | Read & write; used to rerun failed checks |
 | Checks | Read-only; used to show CI status |
 | Commit statuses | Read-only; used to aggregate legacy-status CI |
 
@@ -158,7 +170,13 @@ Subscribe to these events:
 - **Pull request**;
 - **Check suite**, **Check run**, and **Status**, which trigger CI and mergeability refreshes.
 
-PR snapshots use the Pull requests, Checks, and Commit statuses REST APIs. Contents access is not required.
+PR snapshots only read, through the Pull requests, Checks, and Commit statuses APIs. The write permissions are only ever used with a member's own GitHub authorization, when that member acts on a PR from Multica.
+
+After creating the App, open **Client secrets → Generate a new client secret** on its settings page and keep the secret together with the **Client ID** shown above it.
+
+<Callout type="info">
+**Upgrading an existing App**: when you add the write permissions, GitHub asks the owner of each installation to approve them. Until an owner approves, PR actions in that installation's repositories fail with a message saying the App lacks permission; CI status, mergeability, and auto-linking keep working.
+</Callout>
 
 <Callout type="warning">
 This is the **Webhook secret**, not the OAuth Client secret. If the two sides have different webhook secrets, GitHub deliveries return `401 invalid signature`.
@@ -188,6 +206,17 @@ GITHUB_APP_PRIVATE_KEY=<full PEM private key, keeping the BEGIN/END lines and ne
 
 Generate the private key under the GitHub App's **Private keys → Generate a private key**. Without these two variables, PRs still mirror and issues still auto-link and change status on merge; the PR card just shows no CI or merge state.
 
+To let members [act on PRs from Multica](#act-on-prs-from-multica), also set these three variables, plus the API's public address so GitHub redirects back to the Callback URL above:
+
+```dotenv
+GITHUB_APP_CLIENT_ID=<the App's Client ID>
+GITHUB_APP_CLIENT_SECRET=<the client secret you generated>
+MULTICA_GITHUB_SECRET_KEY=<output of: openssl rand -base64 32>
+MULTICA_PUBLIC_URL=https://<api-host>
+```
+
+`MULTICA_GITHUB_SECRET_KEY` encrypts the members' stored GitHub authorizations; changing it disconnects every member. Without all three variables, members can't connect GitHub accounts, and everything else keeps working.
+
 </Step>
 <Step>
 
@@ -210,7 +239,9 @@ Restart the API server, then complete the connection in **Settings → Code**.
 - **Webhook returns 401**: confirm the GitHub App and the API use the same webhook secret, then redeliver from GitHub's **Recent Deliveries**.
 - **PR not linked**: check that the repository is in the App's authorized scope, auto-linking is on, the identifier belongs to the current workspace, and nobody removed the PR from the issue.
 - **Identifier in the body but not linked**: put it right after a closing keyword (`Closes MUL-123`), or in the branch name or PR title, or link the PR by hand.
-- **No CI status**: confirm `GITHUB_APP_ID` and `GITHUB_APP_PRIVATE_KEY` are configured, and that the App has read-only Pull requests, Checks, and Commit statuses permissions with the matching events subscribed. Contents access is not required. If permissions were added to an installed App, each installation owner must approve them on GitHub before they take effect.
+- **No CI status**: confirm `GITHUB_APP_ID` and `GITHUB_APP_PRIVATE_KEY` are configured, and that the App has the Pull requests, Checks, and Commit statuses permissions listed above with the matching events subscribed. If permissions were added to an installed App, each installation owner must approve them on GitHub before they take effect.
+- **PR actions say the App lacks permission**: the App's write permissions haven't been approved for that installation yet. An installation owner approves them on GitHub under the account's or organization's **Settings → GitHub Apps**.
+- **Members can't connect a GitHub account**: check that `GITHUB_APP_CLIENT_ID`, `GITHUB_APP_CLIENT_SECRET`, and `MULTICA_GITHUB_SECRET_KEY` reached the API process, and that the App's Callback URL is `https://<api-host>/api/github/user/callback`.
 - **Issue didn't move after the PR merged**: read the line under the issue's **Pull requests** list. It names any PR still open or closed without merging, or says the issue keeps its status when PRs merge. No line means the workspace setting is **Don't change**, or the issue already has the target status.
 
 ## Next steps
