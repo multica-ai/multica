@@ -32,7 +32,10 @@ type telegramChannel struct {
 	// acceptsMedia says a photo or file a member sends can actually be
 	// stored (see ChannelDeps.AcceptsMedia). Without it media keeps getting
 	// the unsupported notice instead of a placeholder nothing stands behind.
-	acceptsMedia bool
+	acceptsMedia  bool
+	menu          *MenuConfig
+	menuAuthorize func(context.Context, channel.InboundMessage) error
+	menus         map[string]*menuSession
 }
 
 // pollRetryDelay spaces retries after a transient getUpdates failure inside
@@ -122,9 +125,15 @@ func (c *telegramChannel) Connect(ctx context.Context) error {
 // location, …), they get a courteous notice in a private chat or when
 // explicitly addressed to the bot in a group.
 func (c *telegramChannel) dispatch(ctx context.Context, u Update) error {
+	if u.CallbackQuery != nil {
+		return c.dispatchMenuCallback(ctx, u.CallbackQuery)
+	}
 	msg, ok := inboundFromUpdateWithContext(u, c.botID, c.botUsername, c.recent)
 	if !ok {
 		return nil
+	}
+	if handled, err := c.dispatchMenuCommand(ctx, u, msg); handled {
+		return err
 	}
 	c.recordRecent(u.Message, msg)
 	if msg.Type != channel.MsgTypeText {
@@ -237,8 +246,11 @@ func sleepCtx(ctx context.Context, d time.Duration) bool {
 // ChannelDeps are the shared dependencies the Telegram Factory closes over.
 // The engine inbound handler is supplied per-build via channel.Config.Handler.
 type ChannelDeps struct {
-	Decrypt Decrypter
-	Logger  *slog.Logger
+	// MenuAuthorize rechecks installation, identity, membership and agent access.
+	// Nil disables menu handling even if an installation carries a menu.
+	MenuAuthorize func(context.Context, channel.InboundMessage) error
+	Decrypt       Decrypter
+	Logger        *slog.Logger
 	// APIBase overrides the Bot API host (tests). Empty uses production.
 	APIBase string
 	// HTTPClient overrides the polling client (tests). Nil uses a default with
@@ -275,6 +287,9 @@ func newTelegramFactory(deps ChannelDeps) channel.Factory {
 		if err := json.Unmarshal(cfg.Raw, &ic); err != nil {
 			return nil, fmt.Errorf("telegram: decode installation config: %w", err)
 		}
+		if err := ValidateMenuConfig(ic.Menu); err != nil {
+			return nil, err
+		}
 		token, err := decryptToken(ic.BotTokenEncrypted, deps.Decrypt)
 		if err != nil {
 			return nil, fmt.Errorf("telegram: decrypt bot token: %w", err)
@@ -287,13 +302,15 @@ func newTelegramFactory(deps ChannelDeps) channel.Factory {
 			return nil, fmt.Errorf("telegram: installation app_id is not a bot id: %w", err)
 		}
 		return &telegramChannel{
-			botID:        botID,
-			botUsername:  ic.BotUsername,
-			api:          newBotAPI(deps.APIBase, token, deps.HTTPClient),
-			handler:      cfg.Handler,
-			logger:       logger,
-			recent:       newRecentContextBuffer(deps.RecentContextSize),
-			acceptsMedia: deps.AcceptsMedia,
+			menu:          ic.Menu,
+			menuAuthorize: deps.MenuAuthorize,
+			botID:         botID,
+			botUsername:   ic.BotUsername,
+			api:           newBotAPI(deps.APIBase, token, deps.HTTPClient),
+			handler:       cfg.Handler,
+			logger:        logger,
+			recent:        newRecentContextBuffer(deps.RecentContextSize),
+			acceptsMedia:  deps.AcceptsMedia,
 		}, nil
 	}
 }

@@ -1237,6 +1237,7 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 			// Per-installation inbound: the Supervisor builds + supervises one
 			// long-polling loop per active Telegram installation.
 			telegram.RegisterTelegram(channelRegistry, telegram.ChannelDeps{
+				MenuAuthorize:     telegram.NewMenuAuthorizer(queries, h.TaskService.MemberMayInvokeAgent),
 				Decrypt:           box.Open,
 				Logger:            slog.Default(),
 				RecentContextSize: telegram.DefaultRecentContextSize,

@@ -118,6 +118,10 @@ func (s *sender) Send(ctx context.Context, out channel.OutboundMessage) (channel
 // parseMessageRef extracts the numeric message id from either a bare id or
 // the composite "chat:message" key this adapter stores.
 func parseMessageRef(ref string) int64 {
+	// A callback has its own dedup identity, not a Telegram message to quote.
+	if strings.HasPrefix(ref, "callback:") {
+		return 0
+	}
 	if _, after, ok := strings.Cut(ref, ":"); ok {
 		ref = after
 	}
