@@ -109,6 +109,7 @@ func registerListeners(bus *events.Bus, b realtime.Broadcaster) {
 		protocol.EventInboxBatchArchived: true,
 		protocol.EventInvitationCreated:  true,
 		protocol.EventInvitationRevoked:  true,
+		protocol.EventIssueUnreadChanged: true,
 	}
 
 	// Helper: marshal event and send to a specific user.
@@ -139,10 +140,12 @@ func registerListeners(bus *events.Bus, b realtime.Broadcaster) {
 	})
 
 	// inbox:read, inbox:archived, inbox:unarchived, inbox:batch-read,
-	// inbox:batch-archived — extract recipient from top-level payload
+	// inbox:batch-archived, issue_unread:changed — extract recipient from
+	// top-level payload
 	for _, eventType := range []string{
 		protocol.EventInboxRead, protocol.EventInboxArchived, protocol.EventInboxUnarchived,
 		protocol.EventInboxBatchRead, protocol.EventInboxBatchArchived,
+		protocol.EventIssueUnreadChanged,
 	} {
 		bus.Subscribe(eventType, func(e events.Event) {
 			payload, ok := e.Payload.(map[string]any)

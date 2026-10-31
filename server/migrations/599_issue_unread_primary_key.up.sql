@@ -1,0 +1,1 @@
+ALTER TABLE issue_unread ADD CONSTRAINT issue_unread_pkey PRIMARY KEY USING INDEX issue_unread_workspace_user_issue_uidx;
