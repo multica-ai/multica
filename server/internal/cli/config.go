@@ -104,6 +104,13 @@ type CLIConfig struct {
 	// DefaultAgentTimeout.
 	AgentTimeout *string `json:"agent_timeout,omitempty"`
 
+	// AgentIdleWatchdog is the no-message safety window. Empty means unset;
+	// 0s disables the watchdog.
+	AgentIdleWatchdog string `json:"agent_idle_watchdog,omitempty"`
+	// AgentToolWatchdog is the maximum silent in-flight tool window. Empty
+	// means unset; 0s disables the tool-specific bound.
+	AgentToolWatchdog string `json:"agent_tool_watchdog,omitempty"`
+
 	// CodexSemanticInactivityTimeout is the Codex-specific inactivity
 	// watchdog window (Go duration string). Persist-once semantics match
 	// PollInterval: empty = not set, positive = use this value.
