@@ -104,6 +104,22 @@ describe("buildRuntimeChoiceGroups", () => {
     ]);
     expect(result.qoderRuntime?.id).toBe("qoder-new");
   });
+
+  it("gives the managed Claude runtime its own tile and leaves a standalone bridge in the cloud list", () => {
+    const cloud = {
+      runtime_mode: "cloud" as const,
+      provider: "claude_managed",
+      owner_id: "admin",
+      visibility: "public" as const,
+    };
+    const result = groups([
+      makeRuntime({ ...cloud, id: "claude-old", daemon_id: "claude-managed-ws-1", status: "offline" }),
+      makeRuntime({ ...cloud, id: "claude-new", daemon_id: "claude-managed-ws-1" }),
+      makeRuntime({ ...cloud, id: "claude-bridge", daemon_id: "claude-bridge-abc" }),
+    ]);
+    expect(result.claudeRuntime?.id).toBe("claude-new");
+    expect(result.cloud.map((option) => option.runtime.id)).toEqual(["claude-bridge"]);
+  });
 });
 
 describe("harness helpers", () => {

@@ -164,6 +164,7 @@
     "section_profile": "資料",
     "section_execution": "執行配置",
     "qoder_execution_note": "模型、工具和 skill 在 Qoder Cloud Agents 中的智慧體上設定。",
+    "claude_execution_note": "模型、工具和 skill 在 Claude 智慧體上設定。",
     "section_access": "訪問權限",
     "section_properties": "屬性",
     "section_details": "詳情",
@@ -284,7 +285,8 @@
     "discard_dialog_title": "放棄未儲存的修改？",
     "discard_dialog_description": "當前 tab 有未儲存的修改，離開會丟棄這些修改。",
     "discard_keep": "繼續編輯",
-    "discard_confirm": "放棄修改"
+    "discard_confirm": "放棄修改",
+    "claude_agent": "Claude 智慧體"
   },
   "creation_studio": {
     "title": "建立智慧體",

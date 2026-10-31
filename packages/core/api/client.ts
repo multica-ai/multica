@@ -6,6 +6,7 @@ import { WorkspaceWakeupPageSchema, IssueWakeupSchema, IssueWakeupSummaryRowSche
 import type { ArchivedInboxFilters } from "../inbox/filter-store";
 import type { ArchivedInboxPage, ArchivedInboxFacets } from "../types/inbox";
 import { parseQoderConnection, parseQoderCatalog, type QoderInput } from "../runtimes/qoder-schema";
+import { parseClaudeConnection, parseClaudeCatalog, type ClaudeInput } from "../runtimes/claude-managed-schema";
 import { configStore } from "../config";
 import type {
   Issue,
@@ -2046,6 +2047,34 @@ export class ApiClient {
   }
   async checkQoderConnection(wsId: string, input: QoderInput): Promise<void> {
     await this.fetch(`/api/workspaces/${wsId}/qoder/check`, { method: "POST", body: JSON.stringify({ name: input.name, base_url: input.baseUrl, environment_id: input.environmentId, qoder_token: input.qoderToken, github_tokens: input.githubTokens, max_concurrency: input.maxConcurrency, run_timeout_minutes: input.runTimeoutMinutes }) });
+  }
+
+  async getClaudeConnection(wsId: string) {
+    return parseClaudeConnection(await this.fetch(`/api/workspaces/${wsId}/claude-managed`));
+  }
+  // Saving keeps a paused connection paused; use resumeClaudeConnection to run again.
+  async saveClaudeConnection(wsId: string, input: ClaudeInput) {
+    return parseClaudeConnection(await this.fetch(`/api/workspaces/${wsId}/claude-managed`, { method: "PUT", body: JSON.stringify(claudeInputBody(input)) }));
+  }
+  async resumeClaudeConnection(wsId: string, input: ClaudeInput) {
+    return parseClaudeConnection(await this.fetch(`/api/workspaces/${wsId}/claude-managed/resume`, { method: "POST", body: JSON.stringify(claudeInputBody(input)) }));
+  }
+  async checkClaudeConnection(wsId: string, input: ClaudeInput): Promise<void> {
+    await this.fetch(`/api/workspaces/${wsId}/claude-managed/check`, { method: "POST", body: JSON.stringify(claudeInputBody(input)) });
+  }
+  async stopClaudeConnection(wsId: string) {
+    return parseClaudeConnection(await this.fetch(`/api/workspaces/${wsId}/claude-managed/stop`, { method: "POST" }));
+  }
+  // Refuses with 409 `runtime_delete_plan_changed` and the current
+  // `active_agents` when the confirmed list no longer matches.
+  async disconnectClaudeConnection(wsId: string, expectedActiveAgentIds: string[]) {
+    return parseClaudeConnection(await this.fetch(`/api/workspaces/${wsId}/claude-managed`, { method: "DELETE", body: JSON.stringify({ expected_active_agent_ids: expectedActiveAgentIds }) }));
+  }
+  async listClaudeAgents(wsId: string) {
+    return parseClaudeCatalog(await this.fetch(`/api/workspaces/${wsId}/claude-managed/agents`));
+  }
+  async listClaudeEnvironments(wsId: string, token: string, signal?: AbortSignal) {
+    return parseClaudeCatalog(await this.fetch(`/api/workspaces/${wsId}/claude-managed/environments`, { method: "POST", body: JSON.stringify({ anthropic_token: token }), signal }));
   }
 
   async listRuntimes(
@@ -5440,4 +5469,16 @@ export class ApiClient {
       { endpoint: "POST /api/telegram/binding/redeem" },
     );
   }
+}
+
+function claudeInputBody(input: ClaudeInput) {
+  return {
+    name: input.name,
+    environment_id: input.environmentId,
+    anthropic_token: input.anthropicToken,
+    github_tokens: input.githubTokens,
+    vault_ids: input.vaultIds,
+    max_concurrency: input.maxConcurrency,
+    run_timeout_minutes: input.runTimeoutMinutes,
+  };
 }

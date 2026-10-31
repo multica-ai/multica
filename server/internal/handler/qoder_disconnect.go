@@ -4,14 +4,17 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
+	"strings"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 
+	"github.com/multica-ai/multica/server/internal/claudemanagedruntime"
 	"github.com/multica-ai/multica/server/internal/service"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
@@ -209,22 +212,36 @@ func (h *Handler) checkQoderDisconnectPlan(w http.ResponseWriter, ctx context.Co
 	return runtimeIDs, false
 }
 
-// qoderManagesRuntime reports whether a runtime belongs to a live Qoder
-// connection, whose lifecycle is owned by connect and disconnect rather than
-// the generic runtime endpoints.
-func (h *Handler) qoderManagesRuntime(ctx context.Context, rt db.AgentRuntime) (bool, error) {
-	if rt.Provider != "qoder_cloud" {
+// connectionName is how refusals name the connection that owns a runtime.
+func connectionName(provider string) string {
+	if provider == "qoder_cloud" {
+		return "Qoder"
+	}
+	return cloudAgentServiceName(provider)
+}
+
+// connectionManagesRuntime reports whether a runtime belongs to a live cloud
+// agent connection, whose lifecycle is owned by connect and disconnect rather
+// than the generic runtime endpoints.
+func (h *Handler) connectionManagesRuntime(ctx context.Context, rt db.AgentRuntime) (bool, error) {
+	if !isCloudAgentProvider(rt.Provider) {
+		return false, nil
+	}
+	// A standalone Claude bridge may share the workspace with the managed one;
+	// only the managed daemon's runtime belongs to the connection.
+	if rt.Provider == claudemanagedruntime.Provider && !strings.HasPrefix(rt.DaemonID.String, claudeManagedDaemonPrefix) {
 		return false, nil
 	}
 	var managed bool
-	err := h.DB.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM cloud_agent_connection WHERE provider='qoder_cloud' AND workspace_id=$1)`, rt.WorkspaceID).Scan(&managed)
+	err := h.DB.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM cloud_agent_connection WHERE provider=$2 AND workspace_id=$1)`, rt.WorkspaceID, rt.Provider).Scan(&managed)
 	return managed, err
 }
 
-// refuseQoderManagedRuntime writes the refusal for generic runtime mutations
-// on a Qoder-managed runtime and reports whether it did.
-func (h *Handler) refuseQoderManagedRuntime(w http.ResponseWriter, ctx context.Context, rt db.AgentRuntime, message string) bool {
-	managed, err := h.qoderManagesRuntime(ctx, rt)
+// refuseManagedRuntime writes the refusal for generic runtime mutations on a
+// connection-managed runtime and reports whether it did. format names the
+// connection with one %s.
+func (h *Handler) refuseManagedRuntime(w http.ResponseWriter, ctx context.Context, rt db.AgentRuntime, format string) bool {
+	managed, err := h.connectionManagesRuntime(ctx, rt)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to check runtime connection")
 		return true
@@ -233,7 +250,7 @@ func (h *Handler) refuseQoderManagedRuntime(w http.ResponseWriter, ctx context.C
 		return false
 	}
 	writeJSON(w, http.StatusConflict, map[string]any{
-		"error": message,
+		"error": fmt.Sprintf(format, connectionName(rt.Provider)),
 		"code":  "runtime_managed_by_connection",
 	})
 	return true

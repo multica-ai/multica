@@ -167,7 +167,11 @@ export function AgentCreatePanel({
         (a) =>
           !a.archived_at &&
           isAgentRuntimeBound(a) &&
-          !runtimes.some((r) => r.id === a.runtime_id && r.provider === "qoder_cloud") &&
+          !runtimes.some(
+            (r) =>
+              r.id === a.runtime_id &&
+              (r.provider === "qoder_cloud" || r.provider === "claude_managed"),
+          ) &&
           canAssignAgent(a, userId, memberRole),
       ),
     [agents, runtimes, userId, memberRole],

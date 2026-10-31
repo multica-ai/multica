@@ -88,6 +88,13 @@ describe("runtimeDisplayLabel", () => {
     ).toBe("box (Qoder CN)");
     expect(
       runtimeDisplayLabel({
+        name: "Claude Managed Agents",
+        custom_name: "box",
+        provider: "claude_managed",
+      }),
+    ).toBe("box (Claude Managed Agents)");
+    expect(
+      runtimeDisplayLabel({
         name: "Trae (host)",
         custom_name: "box",
         provider: "traecli",

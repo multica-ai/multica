@@ -109,6 +109,14 @@ describe("AgentDetailInspector conversation starters", () => {
     expect(screen.getByText("New chat preview")).toBeInTheDocument();
   });
 
+  it("offers no starters or chat preview for a Claude Managed Agents agent, which has no chat", () => {
+    renderInspector({
+      runtime: { id: "runtime-1", provider: "claude_managed" } as AgentRuntime,
+    });
+
+    expect(screen.queryByText("Conversation starters")).toBeNull();
+  });
+
   it("omits the editor on a backend that does not persist starters", () => {
     configStore.getState().setAgentConversationStartersSupported(false);
     renderInspector();

@@ -35,7 +35,8 @@ function runtime(id: string, provider: string): AgentRuntime {
     workspace_id: "workspace-1",
     daemon_id: null,
     name: id,
-    runtime_mode: provider === "qoder_cloud" ? "cloud" : "local",
+    runtime_mode:
+      provider === "qoder_cloud" || provider === "claude_managed" ? "cloud" : "local",
     provider,
     launch_header: "",
     status: "online",
@@ -51,6 +52,7 @@ function runtime(id: string, provider: string): AgentRuntime {
 
 const claude = runtime("rt-claude", "claude");
 const qoder = runtime("rt-qoder", "qoder_cloud");
+const managedClaude = runtime("rt-managed", "claude_managed");
 
 function renderInspector(bound: AgentRuntime) {
   const agent = {
@@ -69,7 +71,7 @@ function renderInspector(bound: AgentRuntime) {
       <AgentDetailInspector
         agent={agent}
         runtime={bound}
-        runtimes={[claude, qoder]}
+        runtimes={[claude, qoder, managedClaude]}
         members={[]}
         currentUserId="user-1"
         canEdit
@@ -79,7 +81,7 @@ function renderInspector(bound: AgentRuntime) {
   );
 }
 
-describe("AgentDetailInspector and the Qoder runtime", () => {
+describe("AgentDetailInspector and the cloud agent runtimes", () => {
   beforeEach(() => {
     picker.props = null;
     mockInitiateListModels.mockReset();
@@ -102,5 +104,16 @@ describe("AgentDetailInspector and the Qoder runtime", () => {
     expect(picker.props?.canEdit).toBe(true);
     expect(picker.props?.runtimes.map((r) => r.id)).toEqual(["rt-claude"]);
     expect(screen.getByText("Model")).toBeInTheDocument();
+  });
+
+  it("locks the runtime and drops model overrides for a Claude Managed Agents agent", () => {
+    renderInspector(managedClaude);
+    expect(picker.props?.canEdit).toBe(false);
+    expect(screen.queryByText("Model")).toBeNull();
+    expect(
+      screen.getByText("Model, tools and skills are set on the Claude agent."),
+    ).toBeInTheDocument();
+    expect(screen.getByLabelText("Concurrency")).toHaveValue(6);
+    expect(mockInitiateListModels).not.toHaveBeenCalled();
   });
 });

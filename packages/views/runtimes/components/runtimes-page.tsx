@@ -37,6 +37,7 @@ import {
 } from "@multica/core/workspace/queries";
 import type { AgentRuntime, MemberWithUser } from "@multica/core/types";
 import type { QoderConnection } from "@multica/core/runtimes/qoder";
+import type { ClaudeConnection } from "@multica/core/runtimes/claude-managed";
 import { Badge } from "@multica/ui/components/ui/badge";
 import { Button, buttonVariants } from "@multica/ui/components/ui/button";
 import {
@@ -76,7 +77,15 @@ import { cn } from "@multica/ui/lib/utils";
 import { useNavigation } from "../../navigation";
 import { getMikaOnboarding, pickContentLang } from "../../onboarding/templates";
 import { qoderOptions } from "@multica/core/runtimes/qoder";
+import {
+  claudeManagedOptions,
+  isManagedClaudeRuntime,
+} from "@multica/core/runtimes/claude-managed";
 import { QODER_RUNTIME_LOCATOR } from "./qoder-detail-page";
+import {
+  CLAUDE_MANAGED_LOCATOR,
+  ClaudeConnectDialog,
+} from "./claude-managed-page";
 import { RemoteRuntimeDialog } from "./remote-runtime-dialog";
 import { ConnectRemoteDialog } from "./connect-remote-dialog";
 import { CloudRuntimeDialog } from "./cloud-runtime-dialog";
@@ -115,7 +124,16 @@ const COMING_SOON_SERVICES = [
 
 type RuntimeRow =
   | { kind: "machine"; id: string; machine: RuntimeMachine; agentCount: number }
-  | { kind: "qoder"; id: string; connection: QoderConnection; agentCount: number }
+  | {
+      kind: "cloud";
+      id: string;
+      provider: string;
+      title: string;
+      vendor: string;
+      connection: CloudConnection;
+      agentCount: number;
+      href: string;
+    }
   | { kind: "coming-soon"; id: string; provider: string; name: string; vendor: string }
   | {
       kind: "action";
@@ -125,6 +143,16 @@ type RuntimeRow =
       description: string;
       action: ReactNode;
     };
+
+// The part of a cloud agent connection (Qoder Cloud Agents, Claude Managed
+// Agents) the runtimes list renders.
+type CloudConnection = Pick<
+  QoderConnection,
+  "configured" | "enabled" | "status" | "lastError" | "activeRuns" | "queuedRuns"
+>;
+
+// Cloud agent bridges run issues only, so they cannot host Mika's chat.
+const CLOUD_AGENT_PROVIDERS = new Set(["qoder_cloud", "claude_managed"]);
 
 type QoderStatus = "stopped" | "online" | "error" | "offline" | "starting";
 
@@ -137,7 +165,7 @@ function useNowTick(intervalMs = 30_000): number {
   return now;
 }
 
-function qoderIsOnline(connection: QoderConnection): boolean {
+function qoderIsOnline(connection: CloudConnection): boolean {
   return (
     connection.configured &&
     connection.enabled &&
@@ -145,7 +173,7 @@ function qoderIsOnline(connection: QoderConnection): boolean {
   );
 }
 
-function qoderStatus(connection: QoderConnection): QoderStatus {
+function qoderStatus(connection: CloudConnection): QoderStatus {
   if (!connection.enabled) return "stopped";
   if (connection.status === "online") return "online";
   if (connection.status === "error") return "error";
@@ -175,8 +203,10 @@ export function RuntimesPage({
   const qc = useQueryClient();
   const paths = useWorkspacePaths();
   const { data: qoderConnection } = useQuery(qoderOptions(wsId));
+  const { data: claudeConnection } = useQuery(claudeManagedOptions(wsId));
   const navigation = useNavigation();
   const [qoderDialogOpen, setQoderDialogOpen] = useState(false);
+  const [claudeDialogOpen, setClaudeDialogOpen] = useState(false);
   const [showConnectDialog, setShowConnectDialog] = useState(false);
   const [showCloudRuntimeDialog, setShowCloudRuntimeDialog] = useState(false);
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("all");
@@ -258,18 +288,28 @@ export function RuntimesPage({
   const qoderHref = paths.runtimeDetail(QODER_RUNTIME_LOCATOR);
   // Qoder's runtime registers like a machine, but it is listed once, as a
   // cloud service — never as a machine, even when this server cannot run
-  // Qoder and the cloud row is hidden.
+  // Qoder and the cloud row is hidden. The managed Claude runtime is listed
+  // the same way; a standalone Claude bridge stays a machine.
   const machineList = machines.filter(
     (machine) =>
       !(
         machine.runtimes.length > 0 &&
-        machine.runtimes.every((runtime) => runtime.provider === "qoder_cloud")
+        (machine.runtimes.every((runtime) => runtime.provider === "qoder_cloud") ||
+          machine.runtimes.every(isManagedClaudeRuntime))
       ),
   );
   const qoderAgentCount = agents.filter((agent) =>
     runtimes.some(
       (runtime) =>
         runtime.id === agent.runtime_id && runtime.provider === "qoder_cloud",
+    ),
+  ).length;
+  const claude = claudeConnection?.available === true ? claudeConnection : null;
+  const claudeHref = paths.runtimeDetail(CLAUDE_MANAGED_LOCATOR);
+  const claudeAgentCount = agents.filter((agent) =>
+    runtimes.some(
+      (runtime) =>
+        runtime.id === agent.runtime_id && isManagedClaudeRuntime(runtime),
     ),
   ).length;
   const localMachine = machineList.find((machine) => machine.isCurrent);
@@ -286,7 +326,16 @@ export function RuntimesPage({
     qoder !== null &&
     (statusFilter === "all" ||
       (qoderConfigured && matchesStatus(qoderIsOnline(qoder))));
-  const visibleComingSoon = statusFilter === "all" ? COMING_SOON_SERVICES : [];
+  const claudeConfigured = claude?.configured === true;
+  const showClaudeRow =
+    claude !== null &&
+    (statusFilter === "all" ||
+      (claudeConfigured && matchesStatus(qoderIsOnline(claude))));
+  // Once the server can run Claude Managed Agents, its real row replaces the placeholder.
+  const comingSoonServices = COMING_SOON_SERVICES.filter(
+    (service) => !(claude && service.provider === "claude"),
+  );
+  const visibleComingSoon = statusFilter === "all" ? comingSoonServices : [];
   const showThisComputerRow =
     !filtering && !isDesktop && machineList.length === 0;
   const showAddMachineRow = !filtering && machineList.length === 0;
@@ -294,13 +343,15 @@ export function RuntimesPage({
     filtering &&
     visibleMachines.length === 0 &&
     !showQoderRow &&
+    !showClaudeRow &&
     visibleComingSoon.length === 0;
 
-  const configuredCloudCount = qoderConfigured ? 1 : 0;
+  const configuredCloudCount = (qoderConfigured ? 1 : 0) + (claudeConfigured ? 1 : 0);
   const totalCount = machineList.length + configuredCloudCount;
   const onlineCount =
     machineList.filter((machine) => machine.health === "online").length +
-    (qoder && qoderIsOnline(qoder) ? 1 : 0);
+    (qoder && qoderIsOnline(qoder) ? 1 : 0) +
+    (claude && qoderIsOnline(claude) ? 1 : 0);
   const statusCounts: Record<StatusFilter, number> = {
     all: totalCount,
     online: onlineCount,
@@ -315,6 +366,8 @@ export function RuntimesPage({
 
   const openQoder = () =>
     qoderConfigured ? navigation.push(qoderHref) : setQoderDialogOpen(true);
+  const openClaude = () =>
+    claudeConfigured ? navigation.push(claudeHref) : setClaudeDialogOpen(true);
 
   const columns = useMemo<CollectionColumn<RuntimeRow>[]>(
     () => [
@@ -326,7 +379,11 @@ export function RuntimesPage({
             row={row}
             currentUserId={currentUserId ?? null}
             members={members}
-            onConnectQoder={() => setQoderDialogOpen(true)}
+            onConnectCloud={(provider) =>
+              provider === "claude_managed"
+                ? setClaudeDialogOpen(true)
+                : setQoderDialogOpen(true)
+            }
           />
         ),
       },
@@ -337,7 +394,7 @@ export function RuntimesPage({
         cell: (row) =>
           row.kind === "machine" ? (
             <ProviderIconStack providers={row.machine.providerNames} />
-          ) : row.kind === "qoder" ? (
+          ) : row.kind === "cloud" ? (
             <CollectionEmptyValue />
           ) : null,
       },
@@ -348,9 +405,9 @@ export function RuntimesPage({
         align: "end",
         className: "tabular-nums",
         cell: (row) =>
-          row.kind === "machine" || (row.kind === "qoder" && row.connection.configured)
+          row.kind === "machine" || (row.kind === "cloud" && row.connection.configured)
             ? row.agentCount
-            : row.kind === "qoder"
+            : row.kind === "cloud"
               ? <CollectionEmptyValue />
               : null,
       },
@@ -417,10 +474,26 @@ export function RuntimesPage({
   const cloudRows: RuntimeRow[] = [];
   if (showQoderRow && qoder) {
     cloudRows.push({
-      kind: "qoder",
+      kind: "cloud",
       id: "qoder",
+      provider: "qoder_cloud",
+      title: t(($) => $.qoder.cloud_title),
+      vendor: "Qoder",
       connection: qoder,
       agentCount: qoderAgentCount,
+      href: qoderHref,
+    });
+  }
+  if (showClaudeRow && claude) {
+    cloudRows.push({
+      kind: "cloud",
+      id: "claude_managed",
+      provider: "claude_managed",
+      title: t(($) => $.claude_managed.cloud_title),
+      vendor: "Anthropic",
+      connection: claude,
+      agentCount: claudeAgentCount,
+      href: claudeHref,
     });
   }
   for (const service of visibleComingSoon) {
@@ -445,8 +518,8 @@ export function RuntimesPage({
   const rowHref = (row: RuntimeRow) =>
     row.kind === "machine"
       ? paths.runtimeDetail(row.machine.id)
-      : row.kind === "qoder" && row.connection.configured
-        ? qoderHref
+      : row.kind === "cloud" && row.connection.configured
+        ? row.href
         : null;
 
   return (
@@ -470,9 +543,12 @@ export function RuntimesPage({
             isDesktop={isDesktop}
             localMachineName={localMachineName ?? localMachine?.title ?? null}
             qoder={qoder}
+            claude={claude}
+            comingSoon={comingSoonServices}
             cloudRuntimeEnabled={cloudRuntimeEnabled}
             onAddMachine={() => setShowConnectDialog(true)}
             onQoder={openQoder}
+            onClaude={openClaude}
             onCloudRuntime={() => setShowCloudRuntimeDialog(true)}
           />
         }
@@ -491,8 +567,8 @@ export function RuntimesPage({
           getRowTitle={(row) =>
             row.kind === "machine"
               ? row.machine.title
-              : row.kind === "qoder"
-                ? t(($) => $.qoder.cloud_title)
+              : row.kind === "cloud"
+                ? row.title
                 : undefined
           }
           empty={t(($) => $.page.rows.no_matches)}
@@ -501,11 +577,11 @@ export function RuntimesPage({
           {!agentsLoading &&
             !chatSessionsLoading &&
             memberNeedsMikaSetup(agents, chatSessions) &&
-            runtimes.some((runtime) => runtime.provider !== "qoder_cloud") && (
+            runtimes.some((runtime) => !CLOUD_AGENT_PROVIDERS.has(runtime.provider)) && (
               <MikaSetupCard
                 workspaceId={wsId}
                 runtimes={runtimes.filter(
-                  (runtime) => runtime.provider !== "qoder_cloud",
+                  (runtime) => !CLOUD_AGENT_PROVIDERS.has(runtime.provider),
                 )}
                 runtimesLoading={runtimesLoading}
                 currentUserId={currentUserId ?? null}
@@ -523,6 +599,9 @@ export function RuntimesPage({
       {qoderDialogOpen && (
         <RemoteRuntimeDialog onClose={() => setQoderDialogOpen(false)} />
       )}
+      {claudeDialogOpen && (
+        <ClaudeConnectDialog onClose={() => setClaudeDialogOpen(false)} />
+      )}
       {showConnectDialog && (
         <ConnectRemoteDialog onClose={() => setShowConnectDialog(false)} />
       )}
@@ -537,17 +616,23 @@ function AddRuntimeMenu({
   isDesktop,
   localMachineName,
   qoder,
+  claude,
+  comingSoon,
   cloudRuntimeEnabled,
   onAddMachine,
   onQoder,
+  onClaude,
   onCloudRuntime,
 }: {
   isDesktop: boolean;
   localMachineName: string | null;
   qoder: QoderConnection | null;
+  claude: ClaudeConnection | null;
+  comingSoon: typeof COMING_SOON_SERVICES;
   cloudRuntimeEnabled: boolean;
   onAddMachine: () => void;
   onQoder: () => void;
+  onClaude: () => void;
   onCloudRuntime: () => void;
 }) {
   const { t } = useT("runtimes");
@@ -608,6 +693,19 @@ function AddRuntimeMenu({
               onClick={onQoder}
             />
           )}
+          {claude && (
+            <AddMenuItem
+              icon={<ProviderLogo provider="claude_managed" className="size-4" />}
+              title={t(($) => $.claude_managed.cloud_title)}
+              description={t(($) => $.page.rows.provided_by, { vendor: "Anthropic" })}
+              trailing={
+                claude.configured ? (
+                  <Check className="size-4 text-muted-foreground" />
+                ) : undefined
+              }
+              onClick={onClaude}
+            />
+          )}
           {cloudRuntimeEnabled && (
             <AddMenuItem
               icon={<Cloud className="size-4 text-muted-foreground" />}
@@ -616,7 +714,7 @@ function AddRuntimeMenu({
               onClick={onCloudRuntime}
             />
           )}
-          {COMING_SOON_SERVICES.map((service) => (
+          {comingSoon.map((service) => (
             <AddMenuItem
               key={service.provider}
               icon={<ProviderLogo provider={service.provider} className="size-4" />}
@@ -672,12 +770,12 @@ function RuntimeNameCell({
   row,
   currentUserId,
   members,
-  onConnectQoder,
+  onConnectCloud,
 }: {
   row: RuntimeRow;
   currentUserId: string | null;
   members: MemberWithUser[];
-  onConnectQoder: () => void;
+  onConnectCloud: (provider: string) => void;
 }) {
   const { t } = useT("runtimes");
   switch (row.kind) {
@@ -707,21 +805,21 @@ function RuntimeNameCell({
         />
       );
     }
-    case "qoder": {
+    case "cloud": {
       const { connection } = row;
-      const byQoder = t(($) => $.page.rows.provided_by, { vendor: "Qoder" });
+      const byVendor = t(($) => $.page.rows.provided_by, { vendor: row.vendor });
       const error =
         connection.configured &&
         qoderStatus(connection) === "error" &&
         connection.lastError;
       return (
         <CollectionNameCell
-          icon={<ProviderLogo provider="qoder_cloud" className="size-4 shrink-0" />}
-          title={t(($) => $.qoder.cloud_title)}
-          description={error || byQoder}
+          icon={<ProviderLogo provider={row.provider} className="size-4 shrink-0" />}
+          title={row.title}
+          description={error || byVendor}
           trailing={
             connection.configured ? undefined : (
-              <Button variant="outline" size="xs" onClick={onConnectQoder}>
+              <Button variant="outline" size="xs" onClick={() => onConnectCloud(row.provider)}>
                 {t(($) => $.page.rows.connect)}
               </Button>
             )
@@ -784,7 +882,7 @@ function RuntimeWorkloadCell({ row }: { row: RuntimeRow }) {
       <CollectionEmptyValue />
     );
   }
-  if (row.kind === "qoder") {
+  if (row.kind === "cloud") {
     return row.connection.configured && qoderStatus(row.connection) === "online" ? (
       <WorkloadText running={row.connection.activeRuns} queued={row.connection.queuedRuns} />
     ) : (
@@ -826,7 +924,7 @@ function RuntimeStatusCell({
         </>
       );
     }
-    case "qoder": {
+    case "cloud": {
       if (!row.connection.configured) {
         return (
           <Badge variant="secondary" className="bg-warning/10 text-warning">
@@ -845,7 +943,9 @@ function RuntimeStatusCell({
               status === "error" && "text-destructive",
             )}
           >
-            {t(($) => $.qoder[status])}
+            {row.provider === "claude_managed"
+              ? t(($) => $.claude_managed.status[status])
+              : t(($) => $.qoder[status])}
           </span>
         </>
       );

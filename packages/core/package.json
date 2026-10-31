@@ -177,7 +177,8 @@
     "./skills/pack-archive": "./skills/pack-archive.ts",
     "./skills/stores": "./skills/stores/index.ts",
     "./autopilots/stores": "./autopilots/stores/index.ts",
-    "./runtimes/qoder": "./runtimes/qoder.ts"
+    "./runtimes/qoder": "./runtimes/qoder.ts",
+    "./runtimes/claude-managed": "./runtimes/claude-managed.ts"
   },
   "dependencies": {
     "@formatjs/intl-localematcher": "catalog:",

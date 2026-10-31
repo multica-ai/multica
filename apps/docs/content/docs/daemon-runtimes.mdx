@@ -298,6 +298,27 @@ This first version supports issue runs, chat, progress reporting, cancellation, 
 
 For standalone bridge setup and operational limitations, see the [Qoder runtime README](https://github.com/multica-ai/multica/blob/main/server/cmd/qoder-runtime/README.md).
 
+## Claude Managed Agents remote runtime
+
+Claude Managed Agents runs assigned issues in Claude-hosted sessions through a standalone bridge, `claude-managed-runtime`, that you run on a server able to reach both Multica and the Anthropic API. The bridge uses the existing daemon task protocol and registers one runtime for one workspace.
+
+### Before you start
+
+- A workspace administrator's Multica personal access token (PAT) and the workspace ID.
+- An Anthropic API key from the Anthropic workspace that owns your Claude environment and agents, an existing environment, and the Claude agents you want to use. Models, tools, and skills are configured on the Claude agent. Set every tool's permission policy to `always_allow`: the bridge cannot answer tool confirmations.
+- For each GitHub repository agents work in, a token file the bridge can read.
+
+### Connect and add an agent
+
+1. Configure the bridge with environment variables or a JSON file, run `claude-managed-runtime --check`, then start it. The runtime appears on the Runtimes page.
+2. Create an agent on that runtime with `runtime_config` set to `{"claude_agent_id": "agent_..."}`, optionally with a default repository, using `multica agent create --runtime-config` or the API. The agent form has no Claude agent picker yet.
+
+### How runs work
+
+A follow-up on the same issue continues the previous Claude session when it is idle. The agent is asked to push a branch named after the issue identifier. To open the pull request as well, add the GitHub MCP server to the Claude agent and attach a vault holding its credential. This first version supports issue runs only: chat, quick-create, attachments, and local directories are refused.
+
+For configuration and limits, see the [Claude Managed Agents runtime README](https://github.com/multica-ai/multica/blob/main/server/cmd/claude-managed-runtime/README.md).
+
 ## Troubleshooting an offline runtime
 
 Check in this order:

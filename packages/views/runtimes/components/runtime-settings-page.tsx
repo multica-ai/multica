@@ -13,6 +13,8 @@ import { OBJECT_PAGE_BODY, ObjectPage } from "../../layout/object-page";
 import { RuntimeDetail } from "./runtime-detail";
 import { buildRuntimeMachines } from "./runtime-machines";
 import { QoderDetailPage } from "./qoder-detail-page";
+import { isManagedClaudeRuntime } from "@multica/core/runtimes/claude-managed";
+import { ClaudeManagedPage } from "./claude-managed-page";
 import { useT } from "../../i18n";
 
 export function RuntimeSettingsPage({
@@ -78,6 +80,7 @@ export function RuntimeSettingsPage({
   }
   const { machine, runtime } = target;
   if (runtime.provider === "qoder_cloud") return <QoderDetailPage />;
+  if (isManagedClaudeRuntime(runtime)) return <ClaudeManagedPage />;
 
   return (
     <RuntimeDetail

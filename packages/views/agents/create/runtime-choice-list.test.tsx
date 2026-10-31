@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { I18nProvider } from "@multica/core/i18n/react";
+import type { ClaudeConnection } from "@multica/core/runtimes/claude-managed";
 import type { QoderConnection } from "@multica/core/runtimes/qoder";
 import type { AgentRuntime } from "@multica/core/types";
 import enAgents from "../../locales/en/agents.json";
@@ -88,6 +89,23 @@ const unconnectedQoder: QoderConnection = {
   queuedRuns: 0,
 };
 
+const unconnectedClaude: ClaudeConnection = {
+  configured: false,
+  available: true,
+  name: "",
+  environmentId: "",
+  hasToken: false,
+  repositories: [],
+  vaultIds: [],
+  enabled: false,
+  status: "",
+  lastError: "",
+  maxConcurrency: 0,
+  runTimeoutMinutes: 0,
+  activeRuns: 0,
+  queuedRuns: 0,
+};
+
 function mount(overrides: Partial<RuntimeChoiceListProps> = {}) {
   const props: RuntimeChoiceListProps = {
     local: groups.local,
@@ -99,6 +117,9 @@ function mount(overrides: Partial<RuntimeChoiceListProps> = {}) {
     qoder: unconnectedQoder,
     qoderState: qoderChoiceState(unconnectedQoder, false),
     qoderSelected: false,
+    claude: null,
+    claudeState: null,
+    claudeSelected: false,
     selectedRuntimeId: null,
     query: "",
     currentUserId: "me",
@@ -108,6 +129,9 @@ function mount(overrides: Partial<RuntimeChoiceListProps> = {}) {
     onSelectQoder: vi.fn(),
     onConnectQoder: vi.fn(),
     onManageQoder: vi.fn(),
+    onSelectClaude: vi.fn(),
+    onConnectClaude: vi.fn(),
+    onManageClaude: vi.fn(),
     onAddRemote: vi.fn(),
     ...overrides,
   };
@@ -183,5 +207,25 @@ describe("RuntimeChoiceList", () => {
   it("says so when nothing matches the search", () => {
     mount({ query: "zzz" });
     expect(screen.getByText("Nothing matches “zzz”")).toBeInTheDocument();
+  });
+
+  it("lists Claude Managed Agents as a cloud service, connectable in place and selectable once ready", () => {
+    const props = mount({
+      claude: unconnectedClaude,
+      claudeState: qoderChoiceState(unconnectedClaude, false),
+    });
+    expect(screen.getByText("Claude Managed Agents")).toBeInTheDocument();
+    expect(screen.getAllByText("Coming soon")).toHaveLength(1);
+    fireEvent.click(screen.getAllByRole("button", { name: "Connect" })[1]!);
+    expect(props.onConnectClaude).toHaveBeenCalledTimes(1);
+
+    cleanup();
+    const ready = { ...unconnectedClaude, configured: true, enabled: true, status: "online" };
+    const readyProps = mount({
+      claude: ready,
+      claudeState: qoderChoiceState(ready, true),
+    });
+    fireEvent.click(screen.getByRole("button", { name: /Claude Managed Agents/ }));
+    expect(readyProps.onSelectClaude).toHaveBeenCalledTimes(1);
   });
 });

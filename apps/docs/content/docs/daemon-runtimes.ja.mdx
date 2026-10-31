@@ -296,6 +296,27 @@ Qoder Cloud Agents は割り当てられたタスクをリモートセッショ�
 
 初期版はタスク実行、進捗同期、キャンセル、永続化された実行記録からの復旧に対応します。チャット、ローカルディレクトリ、添付ファイル、Qoder Cloud Agents のエージェントの新規作成は未対応です。詳細は [README](https://github.com/multica-ai/multica/blob/main/server/cmd/qoder-runtime/README.md) を参照してください。
 
+## Claude Managed Agents リモートランタイム
+
+Claude Managed Agents は、スタンドアロンのブリッジ `claude-managed-runtime` を通じて、割り当てられたタスクを Claude がホストするセッションで実行します。ブリッジは Multica と Anthropic API の両方に接続できるサーバーで動かし、既存のデーモンプロトコルで 1 つのワークスペースに 1 つのランタイムを登録します。
+
+### 準備
+
+- ワークスペース管理者の Multica パーソナルアクセストークン（PAT）とワークスペース ID。
+- Claude の environment とエージェントを所有する Anthropic workspace の API キー、既存の environment、使用する Claude エージェント。モデル、ツール、skill は Claude エージェントで設定します。ブリッジはツールの確認に応答できないため、すべてのツールの権限ポリシーを `always_allow` にしてください。
+- エージェントが扱う GitHub リポジトリごとに、ブリッジが読めるトークンファイル。
+
+### 接続とエージェントの追加
+
+1. 環境変数か JSON ファイルでブリッジを設定し、`claude-managed-runtime --check` を実行してから起動します。ランタイムがランタイムページに表示されます。
+2. そのランタイムでエージェントを作成し、`runtime_config` を `{"claude_agent_id": "agent_..."}` に設定します（既定のリポジトリも指定可能）。`multica agent create --runtime-config` か API を使います。エージェントのフォームにはまだ Claude エージェントの選択欄がありません。
+
+### 実行の仕組み
+
+同じタスクの後続の実行は、前回の Claude セッションがアイドルならそれを継続します。エージェントにはタスクの識別子を含む名前でブランチを push するよう指示します。PR も作成するには、Claude エージェントに GitHub MCP サーバーを追加し、その認証情報を入れた vault を割り当ててください。初版はタスクの実行のみに対応し、チャット、クイック作成、添付ファイル、ローカルディレクトリは拒否されます。
+
+設定と制限は [Claude Managed Agents runtime README](https://github.com/multica-ai/multica/blob/main/server/cmd/claude-managed-runtime/README.md) を参照してください。
+
 ## ランタイムがオフラインのときの確認手順
 
 次の順に確認します。

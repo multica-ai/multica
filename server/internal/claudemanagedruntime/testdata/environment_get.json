@@ -1,0 +1,33 @@
+{
+  "id": "env_1",
+  "type": "environment",
+  "name": "multica-t8",
+  "description": null,
+  "created_at": "2026-10-26T05:04:00.725090Z",
+  "updated_at": "2026-10-26T05:04:00.725090Z",
+  "archived_at": null,
+  "state": "active",
+  "config": {
+    "type": "cloud",
+    "packages": {
+      "type": "packages",
+      "pip": [],
+      "npm": [],
+      "apt": [],
+      "cargo": [],
+      "gem": [],
+      "go": []
+    },
+    "networking": {
+      "type": "limited",
+      "allow_mcp_servers": false,
+      "allow_package_managers": true,
+      "allowed_hosts": [
+        "github.com",
+        "api.github.com"
+      ]
+    }
+  },
+  "metadata": {},
+  "scope": "organization"
+}

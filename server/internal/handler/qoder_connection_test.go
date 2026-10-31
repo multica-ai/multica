@@ -210,7 +210,7 @@ func TestQoderManagedRegistrationAndRevocation(t *testing.T) {
 	req.Header.Set("Authorization", "Bearer "+cfg.MulticaToken)
 	testutil.Call(t, testHandler.DaemonRegister, req).Want(200)
 	testutil.Call(t, testHandler.StopQoderConnection, vcsHandlerRequest("POST", "/qoder/stop", nil, "")).Want(200)
-	allowed, err := testHandler.qoderCredentialAllowed(req, testWorkspaceID, daemonID)
+	allowed, err := testHandler.managedCredentialAllowed(req, testWorkspaceID, daemonID)
 	if err != nil || allowed {
 		t.Fatalf("stopped credential accepted: %v %v", allowed, err)
 	}

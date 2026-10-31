@@ -1733,6 +1733,8 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					r.Get("/vcs/connections", h.ListVCSConnections)
 					r.Get("/qoder", h.GetQoderConnection)
 					r.Get("/qoder/agents", h.ListQoderAgents)
+					r.Get("/claude-managed", h.GetClaudeConnection)
+					r.Get("/claude-managed/agents", h.ListClaudeAgents)
 					// Custom runtime profiles — listing/reading is member-visible
 					// (the Runtime page renders for everyone; create/edit/delete
 					// are admin-gated below).
@@ -1824,6 +1826,12 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					r.Post("/qoder/stop", h.StopQoderConnection)
 					r.Post("/qoder/resume", h.ResumeQoderConnection)
 					r.Delete("/qoder", h.DisconnectQoderConnection)
+					r.Put("/claude-managed", h.SaveClaudeConnection)
+					r.Post("/claude-managed/check", h.CheckClaudeConnection)
+					r.Post("/claude-managed/environments", h.ListClaudeEnvironments)
+					r.Post("/claude-managed/stop", h.StopClaudeConnection)
+					r.Post("/claude-managed/resume", h.ResumeClaudeConnection)
+					r.Delete("/claude-managed", h.DisconnectClaudeConnection)
 					r.Post("/vcs/connections/{connectionId}/rotate-webhook", h.RotateVCSConnectionWebhook)
 					r.Delete("/vcs/connections/{connectionId}", h.DeleteVCSConnection)
 				})

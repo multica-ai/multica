@@ -719,6 +719,7 @@ export type AgentPermissionScope = "private" | "workspace" | "members";
  */
 export interface StoredAgentDraft {
   qoder_agent_id?: string;
+  claude_agent_id?: string;
   name: string;
   description: string;
   instructions: string;

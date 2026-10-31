@@ -673,8 +673,9 @@ export function AgentDetailPage({ agentId }: AgentDetailPageProps) {
             onUpdate={handleUpdate}
           />
 
-          {/* Qoder agents take their skills from Qoder Cloud Agents. */}
-          {runtime?.provider === "qoder_cloud" ? null : (
+          {/* Cloud agents take their skills from their own service. */}
+          {runtime?.provider === "qoder_cloud" ||
+          runtime?.provider === "claude_managed" ? null : (
             <AgentSkillsSection
               agent={agent}
               canEdit={canEdit.allowed}

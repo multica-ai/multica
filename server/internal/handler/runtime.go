@@ -713,7 +713,7 @@ func (h *Handler) updateRuntimeAccessIfNoDependencies(ctx context.Context, rt db
 	if !canSetRuntimeVisibility(member, lockedRuntime) {
 		return db.AgentRuntime{}, runtimeWorkspaceAccessRevocationPlan{}, false, errRuntimeOwnerChanged
 	}
-	managed, err := h.qoderManagesRuntime(ctx, lockedRuntime)
+	managed, err := h.connectionManagesRuntime(ctx, lockedRuntime)
 	if err != nil {
 		return db.AgentRuntime{}, runtimeWorkspaceAccessRevocationPlan{}, false, err
 	}
@@ -1100,7 +1100,7 @@ func (h *Handler) RevokeRuntimeWorkspaceAccess(w http.ResponseWriter, r *http.Re
 		}
 		return
 	}
-	if h.refuseQoderManagedRuntime(w, r.Context(), lockedRuntime, "the Qoder runtime is always shared with the workspace") {
+	if h.refuseManagedRuntime(w, r.Context(), lockedRuntime, "the %s runtime is always shared with the workspace") {
 		return
 	}
 	if sameRuntimeAccess(lockedRuntime, next) {
@@ -1271,7 +1271,7 @@ func (h *Handler) DeleteAgentRuntime(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusForbidden, "you can only delete your own runtimes")
 		return
 	}
-	if h.refuseQoderManagedRuntime(w, r.Context(), rt, "disconnect Qoder to remove its runtime") {
+	if h.refuseManagedRuntime(w, r.Context(), rt, "disconnect %s to remove its runtime") {
 		return
 	}
 	userID := uuidToString(member.UserID)
@@ -1492,7 +1492,7 @@ func (h *Handler) UnbindAgentsAndDeleteRuntime(w http.ResponseWriter, r *http.Re
 		writeError(w, http.StatusForbidden, "you can only delete your own runtimes")
 		return
 	}
-	if h.refuseQoderManagedRuntime(w, r.Context(), rt, "disconnect Qoder to remove its runtime") {
+	if h.refuseManagedRuntime(w, r.Context(), rt, "disconnect %s to remove its runtime") {
 		return
 	}
 	userID := uuidToString(member.UserID)

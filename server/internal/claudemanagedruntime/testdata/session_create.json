@@ -1,0 +1,102 @@
+{
+  "agent": {
+    "description": null,
+    "execution_identity": {
+      "type": "service_account"
+    },
+    "id": "agent_1",
+    "mcp_servers": [],
+    "model": {
+      "effort": {
+        "type": "medium"
+      },
+      "id": "claude-haiku-5-5",
+      "speed": "standard"
+    },
+    "multiagent": null,
+    "name": "multica-t8",
+    "skills": [],
+    "system": "<redacted 77 chars>",
+    "tools": [
+      {
+        "configs": [
+          {
+            "enabled": false,
+            "name": "web_fetch",
+            "permission_policy": {
+              "type": "always_allow"
+            },
+            "type": "web_fetch",
+            "url_sources": null
+          },
+          {
+            "enabled": false,
+            "name": "web_search",
+            "permission_policy": {
+              "type": "always_allow"
+            },
+            "type": "web_search"
+          }
+        ],
+        "default_config": {
+          "enabled": true,
+          "permission_policy": {
+            "type": "always_allow"
+          }
+        },
+        "type": "agent_toolset_20260401"
+      }
+    ],
+    "type": "agent",
+    "version": 1
+  },
+  "archived_at": null,
+  "budget": null,
+  "created_at": "2026-10-26T05:04:06.071743Z",
+  "environment_id": "env_1",
+  "id": "sess_1",
+  "metadata": {
+    "multica_resources": "1defdff733ab87a5041a38dc0b6070c36bf3873a75eec970877fa2c0e1dc583b",
+    "multica_task_id": "00000000-0000-4000-8000-000000000000",
+    "multica_workspace_id": "00000000-0000-4000-8000-000000000000"
+  },
+  "outcome_evaluations": [],
+  "resources": [
+    {
+      "checkout": {
+        "name": "main",
+        "type": "branch"
+      },
+      "created_at": "2026-10-26T05:04:06.070079632Z",
+      "id": "sesrsc_01SFw2ExKHbv2m6rQXHBVXpY",
+      "mount_path": "/workspace/repo",
+      "type": "github_repository",
+      "updated_at": "2026-10-26T05:04:06.070079632Z",
+      "url": "https://github.com/OWNER/REPO"
+    }
+  ],
+  "stats": {
+    "active_seconds": 0,
+    "duration_seconds": 0
+  },
+  "status": "running",
+  "title": "<redacted 48 chars>",
+  "type": "session",
+  "updated_at": "2026-10-26T05:04:06.071743Z",
+  "usage": {
+    "active_seconds": 0,
+    "cache_creation": null,
+    "cache_read_input_tokens": 0,
+    "input_tokens": 0,
+    "list_cost": {
+      "amount": "0",
+      "currency": "USD"
+    },
+    "output_tokens": 0,
+    "server_tool_use": {
+      "web_fetch_requests": 0,
+      "web_search_requests": 0
+    }
+  },
+  "vault_ids": []
+}

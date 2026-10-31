@@ -14,6 +14,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/multica-ai/multica/server/internal/analytics"
+	"github.com/multica-ai/multica/server/internal/claudemanagedruntime"
 	"github.com/multica-ai/multica/server/internal/events"
 	"github.com/multica-ai/multica/server/internal/logger"
 	obsmetrics "github.com/multica-ai/multica/server/internal/metrics"
@@ -904,6 +905,14 @@ func (h *Handler) SendChatMessage(w http.ResponseWriter, r *http.Request) {
 	if verdict, err := service.AgentReadiness(r.Context(), h.runtimeLookup(obsmetrics.RuntimeLookupSourceChat), agent); err == nil && verdict.Blocked() {
 		h.writeDispatchBlocked(w, http.StatusConflict, verdict.Reason)
 		return
+	}
+	if provider, ok := h.resolveAgentProvider(r, agent.WorkspaceID, agent.RuntimeID); ok {
+		// Qoder Cloud Agents runs chat turns; the Claude Managed Agents bridge
+		// runs issue runs only.
+		if provider == claudemanagedruntime.Provider {
+			writeError(w, http.StatusUnprocessableEntity, cloudAgentServiceName(provider)+" supports issue runs only; assign an issue to this agent instead of chatting")
+			return
+		}
 	}
 
 	// Re-run the INVOKE gate on every send, not just the softer view gate in

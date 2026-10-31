@@ -26,21 +26,26 @@ export function useExecutionControls({
   currentUserId: string | null;
   update: (data: Record<string, unknown>) => Promise<void>;
 }) {
-  // A Qoder agent is bound to an agent in Qoder Cloud Agents, and the model lives there. Moving
-  // between Qoder and any other runtime would need a different configuration
-  // the server either rejects or the bridge refuses, so neither direction is
+  // A cloud agent (Qoder Cloud Agents, Claude Managed Agents) is bound to an
+  // agent in that service, and the model lives there. Moving between a cloud
+  // runtime and any other runtime would need a different configuration the
+  // server either rejects or the bridge refuses, so neither direction is
   // offered.
   const qoderRuntime = runtime?.provider === "qoder_cloud";
+  const claudeRuntime = runtime?.provider === "claude_managed";
+  const cloudRuntime = qoderRuntime || claudeRuntime;
   const isOnline = runtime?.status === "online";
   const canReadRuntime =
     runtime != null && isRuntimeUsableForUser(runtime, currentUserId);
-  const canDiscoverRuntimeModels = isOnline && canReadRuntime && !qoderRuntime;
+  const canDiscoverRuntimeModels = isOnline && canReadRuntime && !cloudRuntime;
   const runtimeOptions = useMemo(
     () =>
-      qoderRuntime
+      cloudRuntime
         ? runtimes
-        : runtimes.filter((r) => r.provider !== "qoder_cloud"),
-    [qoderRuntime, runtimes],
+        : runtimes.filter(
+            (r) => r.provider !== "qoder_cloud" && r.provider !== "claude_managed",
+          ),
+    [cloudRuntime, runtimes],
   );
 
   // Same query the Thinking / Speed fields already use, so switching model
@@ -89,6 +94,8 @@ export function useExecutionControls({
 
   return {
     qoderRuntime,
+    claudeRuntime,
+    cloudRuntime,
     canDiscoverRuntimeModels,
     runtimeOptions,
     changeModel,

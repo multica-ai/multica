@@ -1,0 +1,636 @@
+{
+  "data": [
+    {
+      "id": "sevt_01VFwQEZzsLS2gLNb1vvR3T1",
+      "processed_at": "2026-10-26T05:04:06.483532Z",
+      "type": "session.status_running"
+    },
+    {
+      "content": [
+        {
+          "text": "<redacted 814 chars>",
+          "type": "text"
+        }
+      ],
+      "id": "sevt_01MVastTjtzEdidAgFUP1t2C",
+      "processed_at": "2026-10-26T05:04:07.157292Z",
+      "type": "user.message"
+    },
+    {
+      "agent_name": "multica-t8",
+      "id": "sevt_018tD13KhwpXFsqvC33oM462",
+      "processed_at": "2026-10-26T05:04:07.118161Z",
+      "session_thread_id": "sthr_01WKEvCkjXL5iYZhNxCm4i9o",
+      "type": "session.thread_status_running"
+    },
+    {
+      "id": "sevt_01XE2k8Ja4tKtQgPQfC4guVN",
+      "processed_at": "2026-10-26T05:04:07.157293Z",
+      "type": "span.model_request_start"
+    },
+    {
+      "evaluated_permission": "allow",
+      "evaluation": {
+        "type": "always_allow"
+      },
+      "id": "sevt_011SnYbWSi6XBF7E8maziF6M",
+      "input": {
+        "command": "<redacted>"
+      },
+      "name": "bash",
+      "processed_at": "2026-10-26T05:04:08.108238Z",
+      "type": "agent.tool_use"
+    },
+    {
+      "id": "sevt_012ZuKu2CgKFasmVbaH3Y2Le",
+      "is_error": false,
+      "model_request_start_id": "sevt_01XE2k8Ja4tKtQgPQfC4guVN",
+      "model_usage": {
+        "cache_creation_input_tokens": 5592,
+        "cache_read_input_tokens": 0,
+        "input_tokens": 4,
+        "output_tokens": 96,
+        "speed": "standard"
+      },
+      "processed_at": "2026-10-26T05:04:08.108239Z",
+      "type": "span.model_request_end"
+    },
+    {
+      "content": [
+        {
+          "text": "<redacted 336 chars>",
+          "type": "text"
+        }
+      ],
+      "id": "sevt_01NgboRpy2qZjEoYuxWAjQeK",
+      "is_error": true,
+      "processed_at": "2026-10-26T05:04:13.336082Z",
+      "tool_use_id": "sevt_011SnYbWSi6XBF7E8maziF6M",
+      "type": "agent.tool_result"
+    },
+    {
+      "id": "sevt_01Xd2bFkPGK7AJUrQD7X9M2B",
+      "processed_at": "2026-10-26T05:04:13.377969Z",
+      "type": "span.model_request_start"
+    },
+    {
+      "id": "sevt_01J3h7eB5cpqf3iDX6za1VWL",
+      "processed_at": "2026-10-26T05:04:14.075671Z",
+      "type": "agent.thinking"
+    },
+    {
+      "content": [
+        {
+          "text": "<redacted 95 chars>",
+          "type": "text"
+        }
+      ],
+      "id": "sevt_01TmBdcCUPrpcJmV3QJC514H",
+      "processed_at": "2026-10-26T05:04:14.497959Z",
+      "type": "agent.message"
+    },
+    {
+      "evaluated_permission": "allow",
+      "evaluation": {
+        "type": "always_allow"
+      },
+      "id": "sevt_01Gf7HC4Vivnd7pLqkXiS2y5",
+      "input": {
+        "command": "<redacted>"
+      },
+      "name": "bash",
+      "processed_at": "2026-10-26T05:04:14.497960Z",
+      "type": "agent.tool_use"
+    },
+    {
+      "id": "sevt_01ABzrTPgppqPL97JB82WfuQ",
+      "is_error": false,
+      "model_request_start_id": "sevt_01Xd2bFkPGK7AJUrQD7X9M2B",
+      "model_usage": {
+        "cache_creation_input_tokens": 232,
+        "cache_read_input_tokens": 5592,
+        "input_tokens": 2,
+        "output_tokens": 148,
+        "speed": "standard"
+      },
+      "processed_at": "2026-10-26T05:04:14.497961Z",
+      "type": "span.model_request_end"
+    },
+    {
+      "content": [
+        {
+          "text": "<redacted 142 chars>",
+          "type": "text"
+        }
+      ],
+      "id": "sevt_011E2GP7JYTg6vgmHEEKF2ae",
+      "is_error": true,
+      "processed_at": "2026-10-26T05:04:14.967855Z",
+      "tool_use_id": "sevt_01Gf7HC4Vivnd7pLqkXiS2y5",
+      "type": "agent.tool_result"
+    },
+    {
+      "id": "sevt_01TyKZyV7aAcV7iy3aPwU3Tk",
+      "processed_at": "2026-10-26T05:04:15.003781Z",
+      "type": "span.model_request_start"
+    },
+    {
+      "id": "sevt_01N7YiLt9BJjyNzg7iwB4SCT",
+      "processed_at": "2026-10-26T05:04:15.809198Z",
+      "type": "agent.thinking"
+    },
+    {
+      "evaluated_permission": "allow",
+      "evaluation": {
+        "type": "always_allow"
+      },
+      "id": "sevt_01N5phKDDB15XBto9uaHJAWs",
+      "input": {
+        "command": "<redacted>"
+      },
+      "name": "bash",
+      "processed_at": "2026-10-26T05:04:16.216682Z",
+      "type": "agent.tool_use"
+    },
+    {
+      "id": "sevt_018GSLoqu5D8fGBpdwD8sEf4",
+      "is_error": false,
+      "model_request_start_id": "sevt_01TyKZyV7aAcV7iy3aPwU3Tk",
+      "model_usage": {
+        "cache_creation_input_tokens": 255,
+        "cache_read_input_tokens": 5824,
+        "input_tokens": 2,
+        "output_tokens": 177,
+        "speed": "standard"
+      },
+      "processed_at": "2026-10-26T05:04:16.216683Z",
+      "type": "span.model_request_end"
+    },
+    {
+      "content": [
+        {
+          "text": "<redacted 286 chars>",
+          "type": "text"
+        }
+      ],
+      "id": "sevt_01ERwwkqgTZbTS5v3fsbn3J9",
+      "is_error": false,
+      "processed_at": "2026-10-26T05:04:16.725888Z",
+      "tool_use_id": "sevt_01N5phKDDB15XBto9uaHJAWs",
+      "type": "agent.tool_result"
+    },
+    {
+      "id": "sevt_01BtCsgsiegcRq1UdrbjpD7X",
+      "processed_at": "2026-10-26T05:04:16.758933Z",
+      "type": "span.model_request_start"
+    },
+    {
+      "id": "sevt_0163RECttL9gtf73hiyiT3mo",
+      "processed_at": "2026-10-26T05:04:17.906754Z",
+      "type": "agent.thinking"
+    },
+    {
+      "content": [
+        {
+          "text": "<redacted 143 chars>",
+          "type": "text"
+        }
+      ],
+      "id": "sevt_01WQUntxdv6W7o5LLawiBEMi",
+      "processed_at": "2026-10-26T05:04:18.820087Z",
+      "type": "agent.message"
+    },
+    {
+      "evaluated_permission": "allow",
+      "evaluation": {
+        "type": "always_allow"
+      },
+      "id": "sevt_01XtpYrsazc2huU5txnHaLPq",
+      "input": {
+        "command": "<redacted>"
+      },
+      "name": "bash",
+      "processed_at": "2026-10-26T05:04:18.820088Z",
+      "type": "agent.tool_use"
+    },
+    {
+      "id": "sevt_01F46MgSRTsNzJWptW8MwagK",
+      "is_error": false,
+      "model_request_start_id": "sevt_01BtCsgsiegcRq1UdrbjpD7X",
+      "model_usage": {
+        "cache_creation_input_tokens": 307,
+        "cache_read_input_tokens": 6079,
+        "input_tokens": 2,
+        "output_tokens": 380,
+        "speed": "standard"
+      },
+      "processed_at": "2026-10-26T05:04:18.820089Z",
+      "type": "span.model_request_end"
+    },
+    {
+      "content": [
+        {
+          "text": "<redacted 538 chars>",
+          "type": "text"
+        }
+      ],
+      "id": "sevt_014Y2nYyvZEPcban8rXaZ358",
+      "is_error": false,
+      "processed_at": "2026-10-26T05:04:20.615242Z",
+      "tool_use_id": "sevt_01XtpYrsazc2huU5txnHaLPq",
+      "type": "agent.tool_result"
+    },
+    {
+      "id": "sevt_01BPY4Ea5oj6vsLbtGEjgZRS",
+      "processed_at": "2026-10-26T05:04:20.642794Z",
+      "type": "span.model_request_start"
+    },
+    {
+      "id": "sevt_01DXYqa7DZExA6zasErWbuR1",
+      "processed_at": "2026-10-26T05:04:21.515898Z",
+      "type": "agent.thinking"
+    },
+    {
+      "content": [
+        {
+          "text": "<redacted 155 chars>",
+          "type": "text"
+        }
+      ],
+      "id": "sevt_01AG2qGf1U14vaYiSJkRq33L",
+      "processed_at": "2026-10-26T05:04:22.243479Z",
+      "type": "agent.message"
+    },
+    {
+      "evaluated_permission": "allow",
+      "evaluation": {
+        "type": "always_allow"
+      },
+      "id": "sevt_01AijCc5Fgz4SGWFawNK2G3L",
+      "input": {
+        "command": "<redacted>"
+      },
+      "name": "bash",
+      "processed_at": "2026-10-26T05:04:22.243480Z",
+      "type": "agent.tool_use"
+    },
+    {
+      "id": "sevt_01NWZwb7jRW5W3AL8QdmaRxi",
+      "is_error": false,
+      "model_request_start_id": "sevt_01BPY4Ea5oj6vsLbtGEjgZRS",
+      "model_usage": {
+        "cache_creation_input_tokens": 632,
+        "cache_read_input_tokens": 6386,
+        "input_tokens": 2,
+        "output_tokens": 278,
+        "speed": "standard"
+      },
+      "processed_at": "2026-10-26T05:04:22.243481Z",
+      "type": "span.model_request_end"
+    },
+    {
+      "content": [
+        {
+          "text": "<redacted 316 chars>",
+          "type": "text"
+        }
+      ],
+      "id": "sevt_01512anW493UXvyT8scp7rk7",
+      "is_error": false,
+      "processed_at": "2026-10-26T05:04:22.747829Z",
+      "tool_use_id": "sevt_01AijCc5Fgz4SGWFawNK2G3L",
+      "type": "agent.tool_result"
+    },
+    {
+      "id": "sevt_0185UQZKrgvtrGxBuSkUaWTz",
+      "processed_at": "2026-10-26T05:04:22.781719Z",
+      "type": "span.model_request_start"
+    },
+    {
+      "evaluated_permission": "allow",
+      "evaluation": {
+        "type": "always_allow"
+      },
+      "id": "sevt_01GsCKcKAFeBn5oCBsubdhGR",
+      "input": {
+        "command": "<redacted>"
+      },
+      "name": "bash",
+      "processed_at": "2026-10-26T05:04:24.107718Z",
+      "type": "agent.tool_use"
+    },
+    {
+      "id": "sevt_01SjowovHrcy7eoEQ9fHgjbn",
+      "is_error": false,
+      "model_request_start_id": "sevt_0185UQZKrgvtrGxBuSkUaWTz",
+      "model_usage": {
+        "cache_creation_input_tokens": 449,
+        "cache_read_input_tokens": 7018,
+        "input_tokens": 2,
+        "output_tokens": 282,
+        "speed": "standard"
+      },
+      "processed_at": "2026-10-26T05:04:24.107719Z",
+      "type": "span.model_request_end"
+    },
+    {
+      "content": [
+        {
+          "text": "<redacted 112 chars>",
+          "type": "text"
+        }
+      ],
+      "id": "sevt_018EfaqcdPADsKzE9deMyw9J",
+      "is_error": false,
+      "processed_at": "2026-10-26T05:04:24.505746Z",
+      "tool_use_id": "sevt_01GsCKcKAFeBn5oCBsubdhGR",
+      "type": "agent.tool_result"
+    },
+    {
+      "id": "sevt_01Ts2ufQSf9NSEWcevQgJp73",
+      "processed_at": "2026-10-26T05:04:24.538869Z",
+      "type": "span.model_request_start"
+    },
+    {
+      "id": "sevt_01NYCZsyw9nnEAbg81L9SanC",
+      "processed_at": "2026-10-26T05:04:25.361131Z",
+      "type": "agent.thinking"
+    },
+    {
+      "content": [
+        {
+          "text": "<redacted 1490 chars>",
+          "type": "text"
+        }
+      ],
+      "id": "sevt_01A3Lin3CGtpZ6jUiVWQyFw7",
+      "processed_at": "2026-10-26T05:04:27.756617Z",
+      "type": "agent.message"
+    },
+    {
+      "id": "sevt_01QbjH5HGbPEQ2umobrubKmP",
+      "is_error": false,
+      "model_request_start_id": "sevt_01Ts2ufQSf9NSEWcevQgJp73",
+      "model_usage": {
+        "cache_creation_input_tokens": 333,
+        "cache_read_input_tokens": 7467,
+        "input_tokens": 2,
+        "output_tokens": 645,
+        "speed": "standard"
+      },
+      "processed_at": "2026-10-26T05:04:27.756618Z",
+      "type": "span.model_request_end"
+    },
+    {
+      "agent_name": "multica-t8",
+      "id": "sevt_014h7dsbBh4nnNAhjYZHdyhE",
+      "processed_at": "2026-10-26T05:04:27.893704Z",
+      "session_thread_id": "sthr_01WKEvCkjXL5iYZhNxCm4i9o",
+      "stop_details": null,
+      "stop_reason": {
+        "type": "end_turn"
+      },
+      "type": "session.thread_status_idle"
+    },
+    {
+      "id": "sevt_01HAq4JhDaF9N2ECWTqNN9zy",
+      "processed_at": "2026-10-26T05:04:27.893705Z",
+      "type": "session.usage",
+      "usage": {
+        "active_seconds": 21.245,
+        "cache_creation": {
+          "ephemeral_1h_input_tokens": 0,
+          "ephemeral_5m_input_tokens": 7800
+        },
+        "cache_read_input_tokens": 38366,
+        "input_tokens": 16,
+        "list_cost": {
+          "amount": "0",
+          "currency": "USD"
+        },
+        "output_tokens": 2006,
+        "server_tool_use": {
+          "web_fetch_requests": 0,
+          "web_search_requests": 0
+        }
+      }
+    },
+    {
+      "id": "sevt_013JrhqJRQWWkx8hTSjUyUzN",
+      "processed_at": "2026-10-26T05:04:27.893706Z",
+      "stop_details": null,
+      "stop_reason": {
+        "type": "end_turn"
+      },
+      "type": "session.status_idle"
+    },
+    {
+      "id": "sevt_011Cxn8zmreuWxzd3ubZZZrF",
+      "processed_at": "2026-10-26T05:04:35.983396Z",
+      "type": "session.status_running"
+    },
+    {
+      "agent_name": "multica-t8",
+      "id": "sevt_019w7HzdSzMVMtUHTxfmTNFH",
+      "processed_at": "2026-10-26T05:04:35.983397Z",
+      "session_thread_id": "sthr_01WKEvCkjXL5iYZhNxCm4i9o",
+      "type": "session.thread_status_running"
+    },
+    {
+      "content": [
+        {
+          "text": "<redacted 1044 chars>",
+          "type": "text"
+        }
+      ],
+      "id": "sevt_01RFdJZMtB6cJ3W1qx7K9vkn",
+      "processed_at": "2026-10-26T05:04:36.041291Z",
+      "type": "user.message"
+    },
+    {
+      "id": "sevt_01MeDxbUXNzVFjr7VB5Z5wmm",
+      "processed_at": "2026-10-26T05:04:36.041292Z",
+      "type": "span.model_request_start"
+    },
+    {
+      "id": "sevt_01Sr8wfGncKfmq3HG45piQ1F",
+      "processed_at": "2026-10-26T05:04:37.027835Z",
+      "type": "agent.thinking"
+    },
+    {
+      "evaluated_permission": "allow",
+      "evaluation": {
+        "type": "always_allow"
+      },
+      "id": "sevt_01RQwPzStkCgHwUFbrixV1k5",
+      "input": {
+        "command": "<redacted>"
+      },
+      "name": "bash",
+      "processed_at": "2026-10-26T05:04:37.138992Z",
+      "type": "agent.tool_use"
+    },
+    {
+      "id": "sevt_01KWmVPVUyoi37X1yGq7h62B",
+      "is_error": false,
+      "model_request_start_id": "sevt_01MeDxbUXNzVFjr7VB5Z5wmm",
+      "model_usage": {
+        "cache_creation_input_tokens": 1006,
+        "cache_read_input_tokens": 7800,
+        "input_tokens": 4,
+        "output_tokens": 123,
+        "speed": "standard"
+      },
+      "processed_at": "2026-10-26T05:04:37.138993Z",
+      "type": "span.model_request_end"
+    },
+    {
+      "content": [
+        {
+          "text": "<redacted 115 chars>",
+          "type": "text"
+        }
+      ],
+      "id": "sevt_01BFmyZJL9fmXZS2ejsyHp3z",
+      "is_error": false,
+      "processed_at": "2026-10-26T05:04:37.542563Z",
+      "tool_use_id": "sevt_01RQwPzStkCgHwUFbrixV1k5",
+      "type": "agent.tool_result"
+    },
+    {
+      "id": "sevt_01ES3UoPsCnzsPyW1nJtdxCb",
+      "processed_at": "2026-10-26T05:04:37.576114Z",
+      "type": "span.model_request_start"
+    },
+    {
+      "content": [
+        {
+          "text": "<redacted 115 chars>",
+          "type": "text"
+        }
+      ],
+      "id": "sevt_01WGoEGf3RnqckR5hgg2ftFn",
+      "processed_at": "2026-10-26T05:04:38.859722Z",
+      "type": "agent.message"
+    },
+    {
+      "evaluated_permission": "allow",
+      "evaluation": {
+        "type": "always_allow"
+      },
+      "id": "sevt_01MGgqpbMF9qjVYHm42eDhar",
+      "input": {
+        "command": "<redacted>"
+      },
+      "name": "bash",
+      "processed_at": "2026-10-26T05:04:38.859723Z",
+      "type": "agent.tool_use"
+    },
+    {
+      "id": "sevt_01E8yUuS5hHEKPpTBKwS5UFw",
+      "is_error": false,
+      "model_request_start_id": "sevt_01ES3UoPsCnzsPyW1nJtdxCb",
+      "model_usage": {
+        "cache_creation_input_tokens": 190,
+        "cache_read_input_tokens": 8806,
+        "input_tokens": 2,
+        "output_tokens": 236,
+        "speed": "standard"
+      },
+      "processed_at": "2026-10-26T05:04:38.859724Z",
+      "type": "span.model_request_end"
+    },
+    {
+      "content": [
+        {
+          "text": "<redacted 526 chars>",
+          "type": "text"
+        }
+      ],
+      "id": "sevt_01178afAyp72T8cFkJ7iEW9v",
+      "is_error": false,
+      "processed_at": "2026-10-26T05:04:40.835054Z",
+      "tool_use_id": "sevt_01MGgqpbMF9qjVYHm42eDhar",
+      "type": "agent.tool_result"
+    },
+    {
+      "id": "sevt_01RCJFWSS22s6Px5q7N3bBQD",
+      "processed_at": "2026-10-26T05:04:40.880140Z",
+      "type": "span.model_request_start"
+    },
+    {
+      "id": "sevt_019V53dcWwGYCvh3mW973NaH",
+      "processed_at": "2026-10-26T05:04:41.787142Z",
+      "type": "agent.thinking"
+    },
+    {
+      "content": [
+        {
+          "text": "<redacted 1130 chars>",
+          "type": "text"
+        }
+      ],
+      "id": "sevt_01NyPcy2Fd3xYFMYaZPKXRCT",
+      "processed_at": "2026-10-26T05:04:43.382395Z",
+      "type": "agent.message"
+    },
+    {
+      "id": "sevt_01SD8AReaMuDPpJKfyBTunwx",
+      "is_error": false,
+      "model_request_start_id": "sevt_01RCJFWSS22s6Px5q7N3bBQD",
+      "model_usage": {
+        "cache_creation_input_tokens": 513,
+        "cache_read_input_tokens": 8996,
+        "input_tokens": 2,
+        "output_tokens": 527,
+        "speed": "standard"
+      },
+      "processed_at": "2026-10-26T05:04:43.382396Z",
+      "type": "span.model_request_end"
+    },
+    {
+      "agent_name": "multica-t8",
+      "id": "sevt_01HmbRorngGrvTzAsDiYzwgJ",
+      "processed_at": "2026-10-26T05:04:43.487998Z",
+      "session_thread_id": "sthr_01WKEvCkjXL5iYZhNxCm4i9o",
+      "stop_details": null,
+      "stop_reason": {
+        "type": "end_turn"
+      },
+      "type": "session.thread_status_idle"
+    },
+    {
+      "id": "sevt_01JzX9AKv69hhLn5KU8mM7Yb",
+      "processed_at": "2026-10-26T05:04:43.487999Z",
+      "type": "session.usage",
+      "usage": {
+        "active_seconds": 28.885,
+        "cache_creation": {
+          "ephemeral_1h_input_tokens": 0,
+          "ephemeral_5m_input_tokens": 9509
+        },
+        "cache_read_input_tokens": 63968,
+        "input_tokens": 24,
+        "list_cost": {
+          "amount": "0",
+          "currency": "USD"
+        },
+        "output_tokens": 2892,
+        "server_tool_use": {
+          "web_fetch_requests": 0,
+          "web_search_requests": 0
+        }
+      }
+    },
+    {
+      "id": "sevt_016aco48PUb2MhjyRxXSiW7e",
+      "processed_at": "2026-10-26T05:04:43.488Z",
+      "stop_details": null,
+      "stop_reason": {
+        "type": "end_turn"
+      },
+      "type": "session.status_idle"
+    }
+  ],
+  "next_page": null
+}

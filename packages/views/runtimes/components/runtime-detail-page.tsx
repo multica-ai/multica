@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { isManagedClaudeRuntime } from "@multica/core/runtimes/claude-managed";
 import { AlertCircle, MoreHorizontal, Pencil, Plus, Server } from "@multica/ui/icons";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useAuthStore } from "@multica/core/auth";
@@ -54,6 +55,10 @@ import {
   machineUpdateRuntime,
 } from "./machine-cli-section";
 import { isQoderLocator, QoderDetailPage } from "./qoder-detail-page";
+import {
+  ClaudeManagedPage,
+  isClaudeManagedLocator,
+} from "./claude-managed-page";
 import {
   HealthIcon,
   ProviderIconStack,
@@ -216,6 +221,12 @@ export function RuntimeDetailPage({
       machine.runtimes.every((runtime) => runtime.provider === "qoder_cloud"))
   ) {
     return <QoderDetailPage />;
+  }
+  if (
+    isClaudeManagedLocator(machineLocator, runtimes) ||
+    (machine?.runtimes.length && machine.runtimes.every(isManagedClaudeRuntime))
+  ) {
+    return <ClaudeManagedPage />;
   }
 
   const segments = [{ href: paths.runtimes(), label: t(($) => $.page.title) }];

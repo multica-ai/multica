@@ -299,6 +299,27 @@ Qoder Cloud Agents 通过远端会话执行分配的任务。Multica 服务端�
 
 独立桥接进程的配置与限制见 [Qoder runtime README](https://github.com/multica-ai/multica/blob/main/server/cmd/qoder-runtime/README.md)。
 
+## Claude Managed Agents 远端运行时
+
+Claude Managed Agents 通过独立桥接进程 `claude-managed-runtime`，在 Claude 托管的会话中执行分配的任务。桥接进程运行在能同时访问 Multica 和 Anthropic API 的服务器上，复用现有守护进程任务协议，为一个工作区注册一个运行时。
+
+### 准备工作
+
+- 工作区管理员的 Multica 个人访问令牌（PAT）和工作区 ID。
+- Anthropic API key（需属于拥有 Claude environment 和智能体的 Anthropic workspace）、一个已有的 environment，以及要使用的 Claude 智能体。模型、工具和 skill 在 Claude 智能体上配置。所有工具的权限策略都要设为 `always_allow`，因为桥接进程无法响应工具确认。
+- 智能体要用到的每个 GitHub 仓库，各准备一个桥接进程可读取的 token 文件。
+
+### 连接并添加智能体
+
+1. 用环境变量或 JSON 文件配置桥接进程，先运行 `claude-managed-runtime --check`，再启动它。运行时会出现在运行时页面。
+2. 在该运行时上创建智能体，把 `runtime_config` 设为 `{"claude_agent_id": "agent_..."}`（可选默认仓库），使用 `multica agent create --runtime-config` 或 API。智能体表单暂时还没有 Claude 智能体选择器。
+
+### 运行方式
+
+同一任务的后续运行会在上一会话空闲时继续使用该 Claude 会话。智能体会被要求以任务标识命名并推送分支。如需同时创建 PR，请在 Claude 智能体上添加 GitHub MCP server，并挂载存有其凭据的 vault。首版只支持任务运行：聊天、快速创建、附件和本地目录都会被拒绝。
+
+配置与限制见 [Claude Managed Agents runtime README](https://github.com/multica-ai/multica/blob/main/server/cmd/claude-managed-runtime/README.md)。
+
 ## 运行时离线的排查
 
 按以下顺序检查：

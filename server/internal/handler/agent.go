@@ -1516,14 +1516,14 @@ func (h *Handler) CreateAgent(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	if runtime.Provider == "qoder_cloud" {
+	if isCloudAgentProvider(runtime.Provider) {
 		raw, _ := json.Marshal(req.RuntimeConfig)
-		if err := validateQoderAgentConfig(raw); err != nil {
+		if err := validateCloudAgentConfig(runtime.Provider, raw); err != nil {
 			writeError(w, 400, err.Error())
 			return
 		}
 		overrides := qoderOverrides{skills: len(req.SkillIDs), customEnv: len(req.CustomEnv), customArgs: len(req.CustomArgs), mcpConfig: req.McpConfig, model: req.Model, thinkingLevel: req.ThinkingLevel, serviceTier: req.ServiceTier}
-		if err := overrides.validate(); err != nil {
+		if err := overrides.validate(runtime.Provider); err != nil {
 			writeError(w, 400, err.Error())
 			return
 		}
@@ -2094,7 +2094,7 @@ func (h *Handler) UpdateAgent(w http.ResponseWriter, r *http.Request) {
 		targetProvider = runtime.Provider
 	}
 	// Validate the settings the agent will have after this update, not only the
-	// fields in the request: a Qoder agent must never be left with settings the
+	// fields in the request: a cloud agent must never be left with settings the
 	// bridge refuses at run time.
 	runtimeChange := req.RuntimeConfig != nil || req.RuntimeID != nil
 	if runtimeChange || req.CustomArgs != nil || req.McpConfig != nil || req.Model != nil || req.ThinkingLevel != nil || req.ServiceTier != nil {
@@ -2122,13 +2122,13 @@ func (h *Handler) UpdateAgent(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 		}
-		if provider == "qoder_cloud" {
+		if isCloudAgentProvider(provider) {
 			if runtimeChange {
 				raw := existing.RuntimeConfig
 				if req.RuntimeConfig != nil {
 					raw, _ = json.Marshal(req.RuntimeConfig)
 				}
-				if err := validateQoderAgentConfig(raw); err != nil {
+				if err := validateCloudAgentConfig(provider, raw); err != nil {
 					writeError(w, 400, err.Error())
 					return
 				}
@@ -2157,7 +2157,7 @@ func (h *Handler) UpdateAgent(w http.ResponseWriter, r *http.Request) {
 			if req.ServiceTier != nil {
 				overrides.serviceTier = *req.ServiceTier
 			}
-			if err := overrides.validate(); err != nil {
+			if err := overrides.validate(provider); err != nil {
 				writeError(w, 400, err.Error())
 				return
 			}

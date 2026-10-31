@@ -13,6 +13,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5"
+	"github.com/multica-ai/multica/server/internal/claudemanagedruntime"
 	"github.com/multica-ai/multica/server/internal/qoderruntime"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
@@ -196,21 +197,54 @@ func (h *Handler) ListQoderEnvironments(w http.ResponseWriter, r *http.Request) 
 	writeJSON(w, 200, map[string]any{"items": items})
 }
 
-// qoderOverrides lists per-agent execution settings the Qoder bridge refuses
-// at run time (see qoderruntime.prepare); saving them would create an agent
-// that fails every task.
+// qoderOverrides lists per-agent execution settings the cloud agent bridges
+// refuse at run time (see qoderruntime.prepare and claudemanagedruntime's
+// buildPrompt); saving them would create an agent that fails every task.
 type qoderOverrides struct {
 	skills, customEnv, customArgs     int
 	mcpConfig                         json.RawMessage
 	model, thinkingLevel, serviceTier string
 }
 
-func (o qoderOverrides) validate() error {
+func (o qoderOverrides) validate(provider string) error {
 	mcp := strings.TrimSpace(string(o.mcpConfig))
 	if o.skills > 0 || o.customEnv > 0 || o.customArgs > 0 || (mcp != "" && mcp != "null" && mcp != "{}") || o.model != "" || o.thinkingLevel != "" || o.serviceTier != "" {
+		if provider == claudemanagedruntime.Provider {
+			return fmt.Errorf("Agents on Claude Managed Agents take skills, tools, credentials and model from the Claude agent; remove them from this agent")
+		}
 		return fmt.Errorf("Qoder agents take skills, tools, credentials and model from the Qoder Agent; remove them from this agent")
 	}
 	return nil
+}
+
+// isCloudAgentProvider reports whether agents on provider run on a cloud agent
+// provider's own configuration and are validated at save time.
+func isCloudAgentProvider(provider string) bool {
+	return provider == qoderruntime.Provider || provider == claudemanagedruntime.Provider
+}
+
+// cloudAgentServiceName names the cloud agent provider behind provider, or ""
+// for other providers. Quick-create is refused for both bridges before any
+// work is persisted; chat only for Claude Managed Agents, whose bridge runs
+// issue runs only.
+func cloudAgentServiceName(provider string) string {
+	switch provider {
+	case qoderruntime.Provider:
+		return "Qoder Cloud Agents"
+	case claudemanagedruntime.Provider:
+		return "Claude Managed Agents"
+	}
+	return ""
+}
+
+// validateCloudAgentConfig checks the runtime_config binding the provider's
+// bridge reads when it claims a task.
+func validateCloudAgentConfig(provider string, raw []byte) error {
+	if provider == claudemanagedruntime.Provider {
+		_, err := claudemanagedruntime.ParseAgentConfig(raw)
+		return err
+	}
+	return validateQoderAgentConfig(raw)
 }
 
 // storedQoderOverrides reads an agent's saved execution settings. Skills live
@@ -228,14 +262,15 @@ func storedQoderOverrides(agent db.Agent) qoderOverrides {
 	}
 }
 
-// rejectQoderOverrides writes a 400 and reports true when the agent runs on
-// Qoder and o would leave it with settings the bridge refuses at run time.
+// rejectQoderOverrides writes a 400 and reports true when the agent runs on a
+// cloud agent provider and o would leave it with settings the bridge refuses
+// at run time.
 func (h *Handler) rejectQoderOverrides(w http.ResponseWriter, r *http.Request, agent db.Agent, o qoderOverrides) bool {
 	provider, ok := h.resolveAgentProvider(r, agent.WorkspaceID, agent.RuntimeID)
-	if !ok || provider != "qoder_cloud" {
+	if !ok || !isCloudAgentProvider(provider) {
 		return false
 	}
-	if err := o.validate(); err != nil {
+	if err := o.validate(provider); err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return true
 	}
