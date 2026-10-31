@@ -61,6 +61,7 @@ func TestGitHubUserRoutesRejectTaskTokens(t *testing.T) {
 	for _, tc := range []struct{ method, path string }{
 		{http.MethodGet, "/api/me/github"},
 		{http.MethodGet, "/api/me/github/connect"},
+		{http.MethodPost, "/api/me/github/complete"},
 		{http.MethodDelete, "/api/me/github"},
 		{http.MethodGet, pr + "/merge-options"},
 		{http.MethodPost, pr + "/merge"},

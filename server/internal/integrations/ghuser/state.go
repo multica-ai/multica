@@ -12,9 +12,7 @@ import (
 	"time"
 )
 
-// StateTTL bounds how long a connect link stays usable. The public callback
-// trusts only the signed state for who is connecting, so a short life limits
-// how long a leaked link can attach an account.
+// StateTTL bounds how long a connect link stays usable.
 const StateTTL = 10 * time.Minute
 
 // ErrInvalidState covers a malformed, tampered, or expired state. Callers do

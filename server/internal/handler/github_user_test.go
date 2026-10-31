@@ -169,20 +169,19 @@ func TestGitHubUserCallback(t *testing.T) {
 			t.Fatalf("location = %s", loc)
 		}
 	})
-	t.Run("bad code", func(t *testing.T) {
-		loc := callback(url.Values{"code": {"stolen"}, "state": {state("/acme/issues/MUL-7")}})
-		if loc != "https://app.multica.test/acme/issues/MUL-7?github_account_error=exchange_failed" || connected() {
-			t.Fatalf("location = %s connected=%v", loc, connected())
+	t.Run("hands the code to the web app without connecting", func(t *testing.T) {
+		signed := state("/acme/issues/MUL-7?tab=activity#prs")
+		loc := callback(url.Values{"code": {"good-code"}, "state": {signed}})
+		want := "https://app.multica.test/acme/issues/MUL-7?" + url.Values{
+			"github_account_code":  {"good-code"},
+			"github_account_state": {signed},
+			"tab":                  {"activity"},
+		}.Encode() + "#prs"
+		if loc != want {
+			t.Fatalf("location = %s (want %s)", loc, want)
 		}
-	})
-	t.Run("success", func(t *testing.T) {
-		loc := callback(url.Values{"code": {"good-code"}, "state": {state("/acme/issues/MUL-7?tab=activity#prs")}})
-		want := "https://app.multica.test/acme/issues/MUL-7?github_account_connected=1&tab=activity#prs"
-		if loc != want || !connected() {
-			t.Fatalf("location = %s (want %s) connected=%v", loc, want, connected())
-		}
-		if got := getMyGitHubAccount(t); !got.Connected || *got.Login != "octocat" {
-			t.Fatalf("account = %+v", got)
+		if connected() {
+			t.Fatal("the public callback must leave connecting to the signed-in web app")
 		}
 	})
 	t.Run("not configured", func(t *testing.T) {
@@ -191,6 +190,80 @@ func TestGitHubUserCallback(t *testing.T) {
 		defer func() { testHandler.GitHubUser = previous }()
 		if loc := callback(url.Values{"code": {"good-code"}}); loc != "https://app.multica.test/?github_account_error=not_configured" {
 			t.Fatalf("location = %s", loc)
+		}
+	})
+}
+
+func TestCompleteMyGitHubAccount(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("handler test fixture not initialized (no DB?)")
+	}
+	complete := func(code, state string) *httptest.ResponseRecorder {
+		t.Helper()
+		body := map[string]string{"code": code, "state": state}
+		w := httptest.NewRecorder()
+		testHandler.CompleteMyGitHubAccount(w, newRequest(http.MethodPost, "/api/me/github/complete", body))
+		return w
+	}
+	connected := func() bool {
+		var n int
+		dbfx.QueryRow(t, `SELECT count(*) FROM github_user_connection WHERE user_id = $1`, testUserID).Scan(&n)
+		return n == 1
+	}
+
+	previous := testHandler.GitHubUser
+	testHandler.GitHubUser = nil
+	expectErrorCode(t, complete("good-code", "x"), http.StatusServiceUnavailable, "github_user_auth_not_configured")
+	testHandler.GitHubUser = previous
+
+	svc := installGitHubUserService(t, newFakeGitHubAPI(t))
+	sign := func(userID string) string {
+		s, err := svc.SignState(userID, "/acme/issues/MUL-7")
+		if err != nil {
+			t.Fatal(err)
+		}
+		return s
+	}
+
+	t.Run("missing fields", func(t *testing.T) {
+		if w := complete("", sign(testUserID)); w.Code != http.StatusBadRequest {
+			t.Fatalf("status = %d", w.Code)
+		}
+	})
+	t.Run("tampered state", func(t *testing.T) {
+		expectErrorCode(t, complete("good-code", sign(testUserID)+"x"), http.StatusBadRequest, "github_account_invalid_state")
+	})
+	t.Run("state signed for another user", func(t *testing.T) {
+		expectErrorCode(t, complete("good-code", sign("00000000-0000-0000-0000-0000000000aa")),
+			http.StatusForbidden, "github_account_state_mismatch")
+		if connected() {
+			t.Fatal("a link started by someone else must not attach this GitHub account")
+		}
+	})
+	t.Run("bad code", func(t *testing.T) {
+		expectErrorCode(t, complete("stolen", sign(testUserID)), http.StatusBadGateway, "github_account_exchange_failed")
+		if connected() {
+			t.Fatal("a rejected code must not connect")
+		}
+	})
+	t.Run("success", func(t *testing.T) {
+		w := complete("good-code", sign(testUserID))
+		if w.Code != http.StatusOK {
+			t.Fatalf("status = %d: %s", w.Code, w.Body.String())
+		}
+		var resp GitHubAccountResponse
+		_ = json.Unmarshal(w.Body.Bytes(), &resp)
+		if !resp.Connected || resp.Login == nil || *resp.Login != "octocat" || !connected() {
+			t.Fatalf("resp = %+v connected=%v", resp, connected())
+		}
+	})
+	t.Run("agent actor", func(t *testing.T) {
+		req := newRequest(http.MethodPost, "/api/me/github/complete", map[string]string{"code": "good-code", "state": sign(testUserID)})
+		req.Header.Set("X-Actor-Source", "task_token")
+		w := httptest.NewRecorder()
+		testHandler.CompleteMyGitHubAccount(w, req)
+		if w.Code != http.StatusForbidden {
+			t.Fatalf("status = %d", w.Code)
 		}
 	})
 }

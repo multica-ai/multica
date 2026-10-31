@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"encoding/json"
 	"log/slog"
 	"net/http"
 	"net/url"
@@ -107,15 +108,17 @@ func (h *Handler) ConnectMyGitHubAccount(w http.ResponseWriter, r *http.Request)
 }
 
 // GitHubUserCallback (GET /api/github/user/callback) is GitHub's browser
-// redirect after the user authorizes. It is public: the signed state carries
-// the Multica user. Like the App install callback, it always ends in a
-// redirect back to the web app, with github_account_connected=1 or
-// github_account_error=<reason> appended.
+// redirect after the user authorizes. It is public and does not connect
+// anything: the browser that authorized on GitHub may belong to someone other
+// than the Multica user who signed the state (a connect link handed to a
+// colleague), so it forwards the code and state to the web app, whose
+// signed-in session completes the connection with CompleteMyGitHubAccount.
+// Failures it can already tell return with github_account_error=<reason>.
 func (h *Handler) GitHubUserCallback(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
 	origin := h.githubUserReturnOrigin()
 	fail := func(returnTo, reason string) {
-		http.Redirect(w, r, githubUserReturnURL(origin, returnTo, "github_account_error", reason), http.StatusFound)
+		http.Redirect(w, r, githubUserReturnURL(origin, returnTo, map[string]string{"github_account_error": reason}), http.StatusFound)
 	}
 	if !h.GitHubUser.Configured() {
 		fail("/", "not_configured")
@@ -148,17 +151,67 @@ func (h *Handler) GitHubUserCallback(w http.ResponseWriter, r *http.Request) {
 		fail(returnTo, "missing_params")
 		return
 	}
-	uid, err := util.ParseUUID(state.UserID)
+	http.Redirect(w, r, githubUserReturnURL(origin, returnTo, map[string]string{
+		"github_account_code":  code,
+		"github_account_state": stateToken,
+	}), http.StatusFound)
+}
+
+type CompleteGitHubAccountRequest struct {
+	Code  string `json:"code"`
+	State string `json:"state"`
+}
+
+// CompleteMyGitHubAccount (POST /api/me/github/complete) finishes the OAuth
+// flow from the web app. The state must have been signed for the caller, so
+// a connect link opened by anyone else cannot attach their GitHub account to
+// the link's creator.
+func (h *Handler) CompleteMyGitHubAccount(w http.ResponseWriter, r *http.Request) {
+	if isMachineCredentialActor(r) {
+		writeError(w, http.StatusForbidden, "this endpoint is only available to human actors")
+		return
+	}
+	userID, ok := requireUserID(w, r)
+	if !ok {
+		return
+	}
+	if !h.GitHubUser.Configured() {
+		writeGitHubUserAuthNotConfigured(w)
+		return
+	}
+	var req CompleteGitHubAccountRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.Code == "" || req.State == "" {
+		writeError(w, http.StatusBadRequest, "code and state are required")
+		return
+	}
+	state, err := h.GitHubUser.VerifyState(req.State)
 	if err != nil {
-		fail(returnTo, "invalid_state")
+		writeErrorCode(w, http.StatusBadRequest, "github_account_invalid_state",
+			"This GitHub connect link is invalid or has expired")
 		return
 	}
-	if _, err := h.GitHubUser.Connect(r.Context(), uid, code, h.githubUserRedirectURI()); err != nil {
-		slog.Warn("github account: connect failed", "user_id", state.UserID, "err", err)
-		fail(returnTo, "exchange_failed")
+	if state.UserID != userID {
+		writeErrorCode(w, http.StatusForbidden, "github_account_state_mismatch",
+			"This GitHub connect link was started by another Multica account")
 		return
 	}
-	http.Redirect(w, r, githubUserReturnURL(origin, returnTo, "github_account_connected", "1"), http.StatusFound)
+	uid, err := util.ParseUUID(userID)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid user id")
+		return
+	}
+	account, err := h.GitHubUser.Connect(r.Context(), uid, req.Code, h.githubUserRedirectURI())
+	if err != nil {
+		slog.Warn("github account: connect failed", "user_id", userID, "err", err)
+		writeErrorCode(w, http.StatusBadGateway, "github_account_exchange_failed",
+			"GitHub did not accept the authorization. Try connecting again.")
+		return
+	}
+	resp := GitHubAccountResponse{Configured: true, Connected: true, Login: &account.Login}
+	if account.AvatarURL != "" {
+		resp.AvatarURL = &account.AvatarURL
+	}
+	writeJSON(w, http.StatusOK, resp)
 }
 
 // DisconnectMyGitHubAccount (DELETE /api/me/github) revokes the grant on
@@ -235,13 +288,15 @@ func normalizeGitHubUserReturnTo(raw string) (string, bool) {
 	return raw, true
 }
 
-func githubUserReturnURL(origin, returnTo, key, value string) string {
+func githubUserReturnURL(origin, returnTo string, params map[string]string) string {
 	u, err := url.Parse(returnTo)
 	if err != nil {
 		u = &url.URL{Path: "/"}
 	}
 	q := u.Query()
-	q.Set(key, value)
+	for key, value := range params {
+		q.Set(key, value)
+	}
 	u.RawQuery = q.Encode()
 	return origin + u.String()
 }

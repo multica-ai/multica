@@ -1708,6 +1708,7 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 			r.Use(handler.RequireHumanActor)
 			r.Get("/api/me/github", h.GetMyGitHubAccount)
 			r.Get("/api/me/github/connect", h.ConnectMyGitHubAccount)
+			r.Post("/api/me/github/complete", h.CompleteMyGitHubAccount)
 			r.Delete("/api/me/github", h.DisconnectMyGitHubAccount)
 		})
 
