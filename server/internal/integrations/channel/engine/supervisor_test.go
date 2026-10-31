@@ -1073,3 +1073,39 @@ func TestSupervisorExitLogOmitsLeaseTokenField(t *testing.T) {
 		}
 	}
 }
+
+// Notify is how a freshly installed bot gets its connection now instead of on
+// the next scheduled sweep. The poll interval here is an hour, so only the wake
+// can explain a connect.
+func TestSupervisorNotifySweepsBeforeTheNextTick(t *testing.T) {
+	q := newFakeStore()
+	fc := &fakeChannel{typ: channel.TypeFeishu}
+	var builds int32
+	reg := fakeRegistry(fc, &builds, nil)
+
+	cfg := fastConfig()
+	cfg.PollInterval = time.Hour
+	cfg.LeaseRenewInterval = 2 * time.Hour
+	cfg.LeaseTTL = 3 * time.Hour
+	sup := NewSupervisor(q, q, reg, nil, cfg)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer func() {
+		cancel()
+		sup.Wait()
+	}()
+	go sup.Run(ctx)
+
+	// Let the start-up sweep run against an empty store, then install a bot.
+	time.Sleep(50 * time.Millisecond)
+	q.mu.Lock()
+	q.installations = []Installation{activeInst(uuidFromString(t, "22222222-2222-2222-2222-222222222222"), "fp1")}
+	q.mu.Unlock()
+	if fc.Connects() != 0 {
+		t.Fatalf("connected before any sweep could see the installation")
+	}
+
+	sup.Notify()
+	if !waitFor(time.Second, func() bool { return fc.Connects() >= 1 }) {
+		t.Fatal("the new installation did not connect after Notify; it waits for the hourly tick")
+	}
+}
