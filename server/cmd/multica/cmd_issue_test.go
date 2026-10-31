@@ -182,6 +182,75 @@ func TestResolveTextFlag(t *testing.T) {
 		}
 	})
 
+	// MUL-7352 / #8381: the ConstrainedLanguage-safe way for a Windows agent
+	// to write a body file is `Set-Content -Encoding utf8`, which emits a BOM
+	// on Windows PowerShell 5.1 but not on PowerShell 7. Normalizing one
+	// leading BOM here is what makes the same agent instructions produce the
+	// same issue body on both shells, instead of an invisible U+FEFF ahead of
+	// the first `##` heading on 5.1 only.
+	t.Run("single leading UTF-8 BOM is stripped from a file body", func(t *testing.T) {
+		t.Chdir(t.TempDir())
+		if err := os.WriteFile("desc.md", []byte("\ufeff## 背景\n\n中文正文\n"), 0o644); err != nil {
+			t.Fatalf("write tempfile: %v", err)
+		}
+		c := newFlagTestCmd("description")
+		_ = c.Flags().Set("description-file", "desc.md")
+		got, ok, err := resolveTextFlag(c, "description")
+		if err != nil || !ok {
+			t.Fatalf("unexpected: ok=%v err=%v", ok, err)
+		}
+		if want := "## 背景\n\n中文正文"; got != want {
+			t.Errorf("got %q, want %q", got, want)
+		}
+	})
+
+	t.Run("single leading UTF-8 BOM is stripped from a stdin body", func(t *testing.T) {
+		c := newFlagTestCmd("content")
+		_ = c.Flags().Set("content-stdin", "true")
+		pipeStdin(t, "\ufeff中文正文\n", func() {
+			got, ok, err := resolveTextFlag(c, "content")
+			if err != nil || !ok {
+				t.Fatalf("unexpected: ok=%v err=%v", ok, err)
+			}
+			if got != "中文正文" {
+				t.Errorf("got %q, want %q", got, "中文正文")
+			}
+		})
+	})
+
+	// Only the encoding artifact is undone. A second U+FEFF is a zero-width
+	// no-break space in the author's text, and a loop here would silently edit
+	// body content.
+	t.Run("only one BOM is stripped", func(t *testing.T) {
+		t.Chdir(t.TempDir())
+		if err := os.WriteFile("desc.md", []byte("\ufeff\ufeffbody\n"), 0o644); err != nil {
+			t.Fatalf("write tempfile: %v", err)
+		}
+		c := newFlagTestCmd("description")
+		_ = c.Flags().Set("description-file", "desc.md")
+		got, _, err := resolveTextFlag(c, "description")
+		if err != nil {
+			t.Fatalf("unexpected err: %v", err)
+		}
+		if want := "\ufeffbody"; got != want {
+			t.Errorf("got %q, want %q", got, want)
+		}
+	})
+
+	// A file holding nothing but a BOM carries no body, so it must fail loudly
+	// rather than create an issue whose description is one invisible rune.
+	t.Run("BOM-only file is rejected as empty", func(t *testing.T) {
+		t.Chdir(t.TempDir())
+		if err := os.WriteFile("desc.md", []byte("\ufeff\n"), 0o644); err != nil {
+			t.Fatalf("write tempfile: %v", err)
+		}
+		c := newFlagTestCmd("description")
+		_ = c.Flags().Set("description-file", "desc.md")
+		if _, _, err := resolveTextFlag(c, "description"); err == nil {
+			t.Fatalf("expected empty-body error for a BOM-only file")
+		}
+	})
+
 	t.Run("file path that doesn't exist surfaces a useful error", func(t *testing.T) {
 		// A missing file inside the workdir clears the containment check and
 		// fails at the read, not at the guardrail.

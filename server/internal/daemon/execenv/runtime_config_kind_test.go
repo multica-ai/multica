@@ -230,9 +230,11 @@ func TestQuickCreateBriefOwnsRunAndOutputRules(t *testing.T) {
 	})
 
 	for _, want := range []string{
-		// exactly one create, no retry — a retry would duplicate the issue
+		// exactly one create, no retry — a retry would duplicate the issue.
+		// Scoped to the create call itself: MUL-7352 found agents reading the
+		// unqualified ban as covering the local description-file write too.
 		"Run exactly one `multica issue create --output json` invocation",
-		"Do not retry for any reason",
+		"Do not retry that call for any reason",
 		// no issue to query, transition, or comment on
 		"Do NOT call `multica issue get`, `multica issue status`, or `multica issue comment add`",
 		// the success line, and the reason it must not be scraped or
@@ -303,6 +305,85 @@ func TestSlimQuickCreateAvailableCommands(t *testing.T) {
 	} {
 		if strings.Contains(out, banned) {
 			t.Errorf("quick_create slim Available Commands should NOT advertise %q (hard guardrails forbid the call)", banned)
+		}
+	}
+}
+
+// TestQuickCreateDescriptionWriteContract is the regression guard for
+// MUL-7352 / #8381.
+//
+// Quick-create is the one kind that does NOT receive `## Comment Formatting`,
+// which was the brief's only statement of HOW to write a rich-text body file
+// on Windows. So the quick-create brief required a `--description-file` write,
+// called a failed write fatal, and named no mechanism: models reached for
+// `[System.IO.File]::WriteAllText`, a managed agent's ConstrainedLanguage
+// PowerShell refused the method invocation, and the run exited having created
+// nothing.
+//
+// The two properties pinned here are what turn that into a recoverable step:
+// the brief names a write mechanism, and it scopes the no-retry guardrail to
+// the non-idempotent `multica issue create` call rather than to the local
+// write that precedes it. Both must hold on every host — the Windows-only
+// PowerShell fallback is asserted separately below.
+//
+// Not parallel: mutates the package-level runtimeGOOS.
+func TestQuickCreateDescriptionWriteContract(t *testing.T) {
+	saved := runtimeGOOS
+	t.Cleanup(func() { runtimeGOOS = saved })
+
+	ctx := TaskContextForEnv{
+		QuickCreatePrompt: "创建一个带中文描述的任务",
+		AgentName:         "Eve", AgentID: "eve-1",
+	}
+
+	for _, host := range []string{"linux", "darwin", "windows"} {
+		runtimeGOOS = host
+		out := buildMetaSkillContent("claude", ctx)
+
+		for _, want := range []string{
+			// the mechanism the brief never named
+			"Use your own file-write tool",
+			// a local write creates nothing, so it is retryable — and the
+			// agent must confirm the text actually landed
+			"A failed write is recoverable, not fatal",
+			"read the file back to confirm the full text",
+			// the guardrail it is NOT allowed to be confused with
+			"The one-shot rule covers `multica issue create` only",
+			"Do not retry that call for any reason",
+		} {
+			if !strings.Contains(out, want) {
+				t.Errorf("[%s] quick-create brief missing description-write rule %q\n---\n%s", host, want, out)
+			}
+		}
+
+		// The fix must never route around the agent's own security posture.
+		for _, banned := range []string{"FullLanguage", "disable the sandbox"} {
+			if strings.Contains(out, banned) {
+				t.Errorf("[%s] quick-create brief must not tell the user to relax the sandbox (%q)\n---\n%s", host, banned, out)
+			}
+		}
+
+		// The unqualified "treat a failed write as fatal" wording is the exact
+		// sentence that made agents abort instead of retrying locally.
+		if strings.Contains(out, "treat a failed write as fatal") {
+			t.Errorf("[%s] quick-create brief still calls a local description write fatal\n---\n%s", host, out)
+		}
+
+		hasPowerShellFallback := strings.Contains(out, "Set-Content -LiteralPath ./description.md")
+		hasConstrainedLanguageWarning := strings.Contains(out, "[System.IO.File]::WriteAllText")
+		if host == "windows" {
+			if !hasPowerShellFallback {
+				t.Errorf("[windows] quick-create brief missing the ConstrainedLanguage-safe Set-Content fallback\n---\n%s", out)
+			}
+			if !hasConstrainedLanguageWarning {
+				t.Errorf("[windows] quick-create brief missing the non-core .NET write ban\n---\n%s", out)
+			}
+			continue
+		}
+		// Non-Windows hosts have no ConstrainedLanguage, so the PowerShell
+		// cookbook is pure token cost there.
+		if hasPowerShellFallback || hasConstrainedLanguageWarning {
+			t.Errorf("[%s] quick-create brief leaks the Windows PowerShell fallback onto a non-Windows host\n---\n%s", host, out)
 		}
 	}
 }
