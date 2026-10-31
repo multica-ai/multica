@@ -6,6 +6,7 @@ import { Menu, X } from "@multica/ui/icons";
 import { MulticaIcon } from "@multica/ui/components/common/multica-icon";
 import { cn } from "@multica/ui/lib/utils";
 import { useAuthStore } from "@multica/core/auth";
+import { SmartLink } from "./docs-link";
 import { docsHrefForLocale, useLocale } from "../i18n";
 import { useDashboardCtaHref } from "../utils/use-dashboard-cta";
 import { formatStarCount, useGithubStars } from "../utils/use-github-stars";
@@ -64,13 +65,13 @@ export function LandingHeader({
             className="hidden items-center gap-1 md:flex"
           >
             {navLinks.map((link) => (
-              <Link
+              <SmartLink
                 key={link.href}
                 href={link.href}
                 className={navLinkClassName(variant)}
               >
                 {link.label}
-              </Link>
+              </SmartLink>
             ))}
           </nav>
         </div>
@@ -125,14 +126,14 @@ export function LandingHeader({
         >
           <nav aria-label={t.header.navigation} className="flex flex-col">
             {navLinks.map((link) => (
-              <Link
+              <SmartLink
                 key={link.href}
                 href={link.href}
                 onClick={() => setIsMenuOpen(false)}
                 className={mobileNavLinkClassName(variant)}
               >
                 {link.label}
-              </Link>
+              </SmartLink>
             ))}
           </nav>
           <div
