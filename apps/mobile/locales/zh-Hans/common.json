@@ -51,5 +51,8 @@
     "weeks_ago_other": "{{count}} 周前"
   },
   "states.empty": "暂无内容",
-  "states.error": "出现错误"
+  "states.error": "出现错误",
+  "attachments": {
+    "open_failed": "无法打开文件"
+  }
 }
