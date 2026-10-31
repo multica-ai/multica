@@ -102,8 +102,8 @@ func (h *Handler) applyIssueWorkflow(ctx context.Context, prev db.Issue, params 
 }
 
 // workflowHandoffPayload describes a handoff on the issue:updated event, so
-// the activity log can record the status change and the handoff as one
-// timeline entry.
+// the activity log can record a status change or same-status project entry
+// and its handoff as one timeline row.
 func workflowHandoffPayload(issue db.Issue, hand *workflowHandoff, note string, willEnqueue bool, reason string) map[string]string {
 	out := map[string]string{
 		"workflow": hand.def.Name,

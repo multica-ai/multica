@@ -574,6 +574,7 @@
     "due_date_removed": "마감일을 제거했습니다",
     "title_renamed": "태스크 제목을 \"{{from}}\"에서 \"{{to}}\"로 바꿨습니다",
     "description_updated": "설명을 업데이트했습니다",
+    "workflow_entered": "워크플로 단계 {{status}}에 진입했습니다",
     "task_completed_other": "실행을 완료했습니다({{count}}회)",
     "task_failed_other": "실행이 실패했습니다({{count}}회)",
     "squad_leader_evaluated": "스쿼드 트리거를 평가했습니다",

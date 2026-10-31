@@ -582,6 +582,7 @@
     "due_date_removed": "removed due date",
     "title_renamed": "renamed this issue from \"{{from}}\" to \"{{to}}\"",
     "description_updated": "updated the description",
+    "workflow_entered": "entered workflow step {{status}}",
     "task_completed_one": "completed a run",
     "task_completed_other": "completed a run ({{count}} times)",
     "task_failed_one": "run failed",

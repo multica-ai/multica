@@ -582,6 +582,7 @@
     "due_date_removed": "a retiré la date d'échéance",
     "title_renamed": "a renommé cette tâche de « {{from}} » en « {{to}} »",
     "description_updated": "a mis à jour la description",
+    "workflow_entered": "a rejoint l’étape {{status}} du workflow",
     "task_completed_one": "a terminé une exécution",
     "task_completed_other": "a terminé une exécution ({{count}} fois)",
     "task_failed_one": "exécution en échec",
