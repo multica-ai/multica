@@ -582,6 +582,7 @@
     "due_date_removed": "a retiré la date d'échéance",
     "title_renamed": "a renommé cette tâche de « {{from}} » en « {{to}} »",
     "description_updated": "a mis à jour la description",
+    "workflow_entered": "a rejoint l’étape {{status}} du workflow",
     "task_completed_one": "a terminé une exécution",
     "task_completed_other": "a terminé une exécution ({{count}} fois)",
     "task_failed_one": "exécution en échec",
@@ -1693,11 +1694,19 @@
     },
     "timeline": {
       "handed_to": "Confiée à",
-      "run_started": "exécution lancée ·",
+      "run_predicted": "mise en file autorisée au transfert ; consultez les exécutions",
+      "pending_run": "une exécution en attente couvrait déjà ce transfert",
+      "check_failed": "impossible de vérifier si une exécution pouvait être mise en file",
+      "no_runtime": "aucun runtime affecté lors du transfert",
+      "run_suppressed": "exécution désactivée pour cette mise à jour",
+      "agent_unavailable": "agent indisponible lors du transfert",
+      "not_allowed": "appel de l’exécution non autorisé",
+      "no_run": "aucune nouvelle exécution prévue lors du transfert",
+      "unknown_reason": "prévision indisponible ; consultez les exécutions",
       "member_no_run": "(membre, sans exécution)",
       "show_brief": "Voir les consignes",
       "hide_brief": "Masquer les consignes",
-      "brief_header": "Les consignes de workflow reçues par cette exécution"
+      "brief_header": "Consignes du transfert du workflow"
     },
     "detail": {
       "follows_project": "(selon le projet)",

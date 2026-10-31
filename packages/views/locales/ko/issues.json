@@ -574,6 +574,7 @@
     "due_date_removed": "마감일을 제거했습니다",
     "title_renamed": "태스크 제목을 \"{{from}}\"에서 \"{{to}}\"로 바꿨습니다",
     "description_updated": "설명을 업데이트했습니다",
+    "workflow_entered": "워크플로 단계 {{status}}에 진입했습니다",
     "task_completed_other": "실행을 완료했습니다({{count}}회)",
     "task_failed_other": "실행이 실패했습니다({{count}}회)",
     "squad_leader_evaluated": "스쿼드 트리거를 평가했습니다",
@@ -1626,11 +1627,19 @@
     },
     "timeline": {
       "handed_to": "인계 대상",
-      "run_started": "실행 시작 ·",
+      "run_predicted": "인계 시 대기열 추가 가능 (실행 여부는 실행 기록 확인)",
+      "pending_run": "인계 시 기존 대기 중인 실행이 처리 대상에 포함",
+      "check_failed": "실행을 대기열에 추가할 수 있는지 확인하지 못함",
+      "no_runtime": "인계 시 런타임이 지정되지 않음",
+      "run_suppressed": "이번 업데이트에서 실행 억제",
+      "agent_unavailable": "인계 시 에이전트를 사용할 수 없음",
+      "not_allowed": "실행 호출이 허용되지 않음",
+      "no_run": "인계 시 새 실행을 예상하지 않음",
+      "unknown_reason": "실행 예측을 확인할 수 없음 (실행 기록 확인)",
       "member_no_run": "(멤버, 실행 없음)",
       "show_brief": "인계 설명 보기",
       "hide_brief": "인계 설명 접기",
-      "brief_header": "이번 실행이 받은 워크플로 설명"
+      "brief_header": "워크플로 인계 설명"
     },
     "detail": {
       "follows_project": "(프로젝트 기준)",

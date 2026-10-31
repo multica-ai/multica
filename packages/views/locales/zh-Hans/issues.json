@@ -574,6 +574,7 @@
     "due_date_removed": "移除了截止日期",
     "title_renamed": "把这个任务从\"{{from}}\"重命名为\"{{to}}\"",
     "description_updated": "更新了描述",
+    "workflow_entered": "进入工作流步骤「{{status}}」",
     "task_completed_other": "完成了运行（{{count}} 次）",
     "task_failed_other": "运行失败（{{count}} 次）",
     "squad_leader_evaluated": "评估了小队触发",
@@ -1626,11 +1627,19 @@
     },
     "timeline": {
       "handed_to": "已交给",
-      "run_started": "并开始运行 ·",
+      "run_predicted": "交接时允许入队；执行情况请查看运行记录",
+      "pending_run": "交接时已有待处理运行覆盖",
+      "check_failed": "无法检查运行是否可入队",
+      "no_runtime": "交接时未绑定运行时",
+      "run_suppressed": "本次更新已抑制运行",
+      "agent_unavailable": "交接时智能体不可用",
+      "not_allowed": "无权调用运行",
+      "no_run": "交接时未预计新增运行",
+      "unknown_reason": "运行预测不可用；请查看运行记录",
       "member_no_run": "（成员，不启动运行）",
       "show_brief": "查看交接说明",
       "hide_brief": "收起交接说明",
-      "brief_header": "这次运行收到的工作流说明"
+      "brief_header": "工作流交接说明"
     },
     "detail": {
       "follows_project": "（跟随项目）",
