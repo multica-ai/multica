@@ -533,6 +533,13 @@ func (h *Handler) DeleteSquad(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// A parent's stage dispatch to an archived squad has nowhere to go.
+	if err := h.Queries.DeleteIssueStageDispatchesBySquad(r.Context(), db.DeleteIssueStageDispatchesBySquadParams{
+		WorkspaceID: squad.WorkspaceID, SquadID: squad.ID,
+	}); err != nil {
+		slog.Warn("delete squad stage dispatches failed", "squad_id", uuidToString(squad.ID), "error", err)
+	}
+
 	h.publish(protocol.EventSquadDeleted, workspaceID, "member", userID, map[string]any{
 		"squad_id":  uuidToString(squad.ID),
 		"leader_id": uuidToString(squad.LeaderID),

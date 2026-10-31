@@ -35,6 +35,12 @@ const (
 	// makes those endpoints answer 404, so clients stop syncing and search
 	// through the server again without a client release.
 	LocalSearchIndex = "local_search_index"
+	// StageDispatchV1 gates server-side stage dispatch of sub-issues (#7345):
+	// the per-issue opt-in endpoint, the dispatch pass after a sub-issue
+	// change, the sweep, and the child_done wake it replaces. Off by default.
+	// Turning it off stops dispatch and brings back the child_done wake; the
+	// per-issue settings stay and apply again when it is turned back on.
+	StageDispatchV1 = "stage_dispatch_v1"
 	// agentBuilderCompat is no longer a release flag. Keep publishing the key
 	// as enabled so installed desktop clients that still gate the AI creation
 	// entry on this config decision receive the permanently enabled behavior.
@@ -75,6 +81,10 @@ func PluginsV1Enabled(ctx context.Context, flags *featureflag.Service) bool {
 
 func TriageV1Enabled(ctx context.Context, flags *featureflag.Service) bool {
 	return flags.IsEnabled(ctx, TriageV1, false)
+}
+
+func StageDispatchV1Enabled(ctx context.Context, flags *featureflag.Service) bool {
+	return flags.IsEnabled(ctx, StageDispatchV1, false)
 }
 
 func LocalSearchIndexEnabled(ctx context.Context, flags *featureflag.Service) bool {

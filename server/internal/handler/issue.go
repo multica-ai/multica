@@ -4542,6 +4542,9 @@ func (h *Handler) deleteIssuesAndCollectAttachmentURLs(ctx context.Context, issu
 		} else if !errors.Is(contextErr, pgx.ErrNoRows) {
 			return issueDeleteResult{}, fmt.Errorf("load issue source context for delete: %w", contextErr)
 		}
+		if err := qtx.DeleteIssueStageDispatch(ctx, db.DeleteIssueStageDispatchParams{IssueID: issue.ID, WorkspaceID: issue.WorkspaceID}); err != nil {
+			return issueDeleteResult{}, fmt.Errorf("delete stage dispatch: %w", err)
+		}
 		if err := qtx.DeleteIssue(ctx, db.DeleteIssueParams{ID: issue.ID, WorkspaceID: issue.WorkspaceID}); err != nil {
 			return issueDeleteResult{}, fmt.Errorf("delete issue: %w", err)
 		}

@@ -218,6 +218,15 @@ func (h *Handler) revokeAndRemoveMember(ctx context.Context, workspaceID, userID
 		return empty, err
 	}
 
+	// Stage dispatch answers to the member who turned it on, and the table has
+	// no FK: once they are gone the runs it would start belong to nobody.
+	if err := qtx.DeleteIssueStageDispatchesByMember(ctx, db.DeleteIssueStageDispatchesByMemberParams{
+		WorkspaceID: workspaceID,
+		DispatchBy:  userID,
+	}); err != nil {
+		return empty, err
+	}
+
 	// Member row deletion lives inside the same tx so a successful revoke is
 	// never followed by a failed member-delete (which would leave the user
 	// still a member with a dead runtime), and a failed revoke never leaves

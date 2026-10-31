@@ -553,6 +553,19 @@ func (s *IssueWakeupService) dispatchSystem(ctx context.Context, prev db.IssueWa
 	if current.Type != "none" {
 		facts["target_type"], facts["target_id"] = current.Type, util.UUIDToString(current.ID)
 	}
+	// A closed stage whose next stage the server just started is already
+	// answered. A pass that started nothing, the end of all work and a stage
+	// that closed with cancelled work still reach the assignee.
+	if strings.HasPrefix(state, "stage:") && !stageCancelled(observed) && stageDispatchStarted(ctx, issue.ID) {
+		facts["outcome"] = "stage_dispatch"
+		if err = q.ConsumeWakeupReceipts(ctx, db.ConsumeWakeupReceiptsParams{Ids: ids}); err != nil {
+			return err
+		}
+		if err = note(wakeupActivityTriggered, facts); err != nil {
+			return err
+		}
+		return commit()
+	}
 	// Recorded without a run: nobody to wake, a member to notify, or an
 	// assignee whose agent cannot run.
 	if current.Type == "member" || !current.Agent.ID.Valid {
@@ -818,4 +831,24 @@ func (s *IssueWakeupService) SetChildDoneDefault(ctx context.Context, workspaceI
 		}
 	}
 	return int64(len(changed)), tx.Commit(ctx)
+}
+
+type stageDispatchStartedKey struct{}
+
+// WithStageDispatchStarted marks the parents whose stage dispatch pass just
+// started a run, so the child_done wake that pass answers is not sent too.
+func WithStageDispatchStarted(ctx context.Context, parentIDs ...pgtype.UUID) context.Context {
+	if len(parentIDs) == 0 {
+		return ctx
+	}
+	started := map[pgtype.UUID]bool{}
+	for _, id := range parentIDs {
+		started[id] = true
+	}
+	return context.WithValue(ctx, stageDispatchStartedKey{}, started)
+}
+
+func stageDispatchStarted(ctx context.Context, parentID pgtype.UUID) bool {
+	started, _ := ctx.Value(stageDispatchStartedKey{}).(map[pgtype.UUID]bool)
+	return started[parentID]
 }

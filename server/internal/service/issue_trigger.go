@@ -127,6 +127,10 @@ func (s *IssueService) WillEnqueueRun(ctx context.Context, in IssueTriggerInput,
 	if issue.TriageState.Valid {
 		return IssueRunTrigger{}, false
 	}
+	// A sub-issue of a stage that has not opened yet waits for the stage.
+	if s.stageHeld(ctx, issue) {
+		return IssueRunTrigger{}, false
+	}
 
 	var source RunEnqueueSource
 	switch {
