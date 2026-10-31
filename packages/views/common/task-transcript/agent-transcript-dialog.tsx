@@ -602,6 +602,9 @@ export function AgentTranscriptDialog({
     virtuosoRef.current?.scrollToIndex({ index: 0, align: "start", behavior: "auto" });
   }, [followCtl, displayCount]);
 
+  const isOpenclawEmpty = task.status === "running" && steps.length === 0
+    && runtimeInfo?.id === task.runtime_id && runtimeInfo?.provider === "openclaw";
+
   // Fetch agent and runtime metadata when dialog opens
   useEffect(() => {
     if (!open) return;
@@ -613,6 +616,7 @@ export function AgentTranscriptDialog({
       }).catch(() => {});
     }
 
+    setRuntimeInfo(null);
     if (task.runtime_id) {
       api.listRuntimes().then((runtimes) => {
         if (cancelled) return;
@@ -1226,9 +1230,9 @@ export function AgentTranscriptDialog({
             {contentState ? <div className="flex h-full items-center justify-center p-4">{contentState}</div> : displayRows.length === 0 ? (
               <div className="flex h-full items-center justify-center text-body text-muted-foreground">
                 {isLive && steps.length === 0 ? (
-                  <div className="flex items-center gap-2">
-                    <Loader2 className="h-4 w-4 animate-spin" />
-                    {t(($) => $.transcript.waiting_events)}
+                  <div className="flex max-w-lg items-center gap-2 p-4">
+                    <Loader2 className="h-4 w-4 shrink-0 animate-spin motion-reduce:animate-none" />
+                    {isOpenclawEmpty ? t(($) => $.transcript.openclaw_live_unavailable) : t(($) => $.transcript.waiting_events)}
                   </div>
                 ) : steps.length === 0 ? (
                   t(($) => $.transcript.no_data)

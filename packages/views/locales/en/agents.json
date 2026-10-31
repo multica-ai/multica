@@ -916,6 +916,7 @@
     "copy_filtered": "Copy filtered",
     "copied": "Copied",
     "waiting_events": "Waiting for events...",
+    "openclaw_live_unavailable": "OpenClaw does not provide live logs. The reply appears when the run finishes.",
     "no_data": "No execution data recorded.",
     "sort_chronological": "Oldest first",
     "sort_newest_first": "Newest first",

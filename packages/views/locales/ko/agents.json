@@ -746,6 +746,7 @@
     "copy_filtered": "필터 결과 복사",
     "copied": "복사했습니다",
     "waiting_events": "이벤트를 기다리는 중...",
+    "openclaw_live_unavailable": "OpenClaw는 실시간 로그를 제공하지 않습니다. 실행이 끝나면 응답이 표시됩니다.",
     "no_data": "기록된 실행 데이터가 없습니다.",
     "sort_chronological": "오래된 순",
     "sort_newest_first": "최신 순",
