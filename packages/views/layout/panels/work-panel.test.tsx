@@ -61,10 +61,15 @@ vi.mock("@multica/core/hooks", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@multica/core/hooks")>()),
   useWorkspaceId: () => "ws-1",
 }));
-vi.mock("@multica/core/auth", async (importOriginal) => ({
-  ...(await importOriginal<typeof import("@multica/core/auth")>()),
-  useAuthStore: (selector: (state: { user: { id: string } }) => unknown) => selector({ user: { id: "u1" } }),
-}));
+vi.mock("@multica/core/auth", async (importOriginal) => {
+  const state = { user: { id: "u1" } };
+  return {
+    ...(await importOriginal<typeof import("@multica/core/auth")>()),
+    useAuthStore: Object.assign((selector: (s: typeof state) => unknown) => selector(state), {
+      getState: () => state,
+    }),
+  };
+});
 vi.mock("@multica/core/issue-statuses/hooks", async () => {
   const { buildIssueStatusCatalog } = await import("@multica/core/issue-statuses/queries");
   const catalog = buildIssueStatusCatalog([
