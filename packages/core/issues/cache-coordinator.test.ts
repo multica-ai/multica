@@ -15,6 +15,7 @@ import type {
   Issue,
   IssueTableRowsResponse,
   ListIssuesCache,
+  ListIssuesResponse,
 } from "../types";
 
 const WS_ID = "ws-1";
@@ -264,6 +265,26 @@ describe("applyIssueChange", () => {
 
     rollbackIssueChange(qc, WS_ID, "issue-1", result);
     expect(qc.getQueryData(tableRowKey)).toEqual(snapshot);
+  });
+
+  it("patches and rolls back loaded sidebar rows", () => {
+    const sidebarKey = issueKeys.sidebar(WS_ID, "project:p1", { project_id: "p1" }, 5);
+    const snapshot: ListIssuesResponse = { issues: [issue()], total: 1 };
+    qc.setQueryData(sidebarKey, snapshot);
+
+    const patch = { status: "in_progress" as const };
+    const result = applyIssueChange(qc, WS_ID, "issue-1", patch, {
+      changed: issueChangedDims(patch, issue()),
+      baseIssue: issue(),
+    });
+
+    const patched = qc.getQueryData<ListIssuesResponse>(sidebarKey)?.issues[0];
+    expect(patched?.status).toBe("in_progress");
+    expect(patched?.status_category).toBe("started");
+    expect(result.prevSidebarLists).toEqual([[sidebarKey, snapshot]]);
+
+    rollbackIssueChange(qc, WS_ID, "issue-1", result);
+    expect(qc.getQueryData(sidebarKey)).toEqual(snapshot);
   });
 
   it("marks only flat windows whose sort or facet depends on the changed field", () => {
