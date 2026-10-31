@@ -155,6 +155,7 @@ export function DraftDefinitionFields() {
   const viewMode = useViewStore((s) => s.viewMode);
   const grouping = useViewStore((s) => s.grouping);
   const swimlaneGrouping = useViewStore((s) => s.swimlaneGrouping);
+  const swimlaneProjectAxis = useViewStore((s) => s.swimlaneProjectAxis);
   const sortBy = useViewStore((s) => s.sortBy);
   const sortDirection = useViewStore((s) => s.sortDirection);
   const cardProperties = useViewStore((s) => s.cardProperties);
@@ -341,6 +342,37 @@ export function DraftDefinitionFields() {
                         </SelectItem>
                       ))}
                     </SelectGroup>
+                  </SelectContent>
+                </Select>
+              </div>
+            )}
+            {viewMode === "swimlane" && swimlaneGrouping === "project" && (
+              <div className="flex items-center gap-3">
+                <Label className={ROW_LABEL}>
+                  {t(($) => $.display.swimlane_axes)}
+                </Label>
+                <Select
+                  items={[
+                    { value: "status-columns", label: t(($) => $.display.status_columns_project_rows) },
+                    { value: "project-columns", label: t(($) => $.display.project_columns_status_rows) },
+                  ]}
+                  value={swimlaneProjectAxis}
+                  onValueChange={(value) => {
+                    if (value === "status-columns" || value === "project-columns") {
+                      act.setSwimlaneProjectAxis(value);
+                    }
+                  }}
+                >
+                  <SelectTrigger size="sm" className="w-64" aria-label={t(($) => $.display.swimlane_axes)}>
+                    <SelectValue>
+                      {swimlaneProjectAxis === "project-columns"
+                        ? t(($) => $.display.project_columns_status_rows)
+                        : t(($) => $.display.status_columns_project_rows)}
+                    </SelectValue>
+                  </SelectTrigger>
+                  <SelectContent align="start">
+                    <SelectItem value="status-columns">{t(($) => $.display.status_columns_project_rows)}</SelectItem>
+                    <SelectItem value="project-columns">{t(($) => $.display.project_columns_status_rows)}</SelectItem>
                   </SelectContent>
                 </Select>
               </div>
@@ -611,6 +643,9 @@ export function SaveViewDialog({
         tableHierarchy: state.tableHierarchy,
         tableCalculation: state.tableCalculation,
         swimlaneGrouping: state.swimlaneGrouping,
+        swimlaneProjectAxis: state.swimlaneProjectAxis,
+        swimlaneProjectColumnOrder: state.swimlaneProjectColumnOrder,
+        collapsedSwimlaneStatusRows: state.collapsedSwimlaneStatusRows,
         ganttZoom: state.ganttZoom,
         ganttShowCompleted: state.ganttShowCompleted,
       },

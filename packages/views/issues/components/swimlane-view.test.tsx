@@ -171,10 +171,12 @@ const mockViewState: {
 const mockSetSwimlaneOrder = mockViewState.setSwimlaneOrder as ReturnType<typeof vi.fn>;
 const mockToggleSwimlaneCollapsed = mockViewState.toggleSwimlaneCollapsed as ReturnType<typeof vi.fn>;
 
+const mockViewStoreApi = { getState: () => mockViewState, setState: vi.fn(), subscribe: vi.fn() };
+
 vi.mock("@multica/core/issues/stores/view-store-context", () => ({
   ViewStoreProvider: ({ children }: { children: React.ReactNode }) => children,
   useViewStore: (selector?: any) => (selector ? selector(mockViewState) : mockViewState),
-  useViewStoreApi: () => ({ getState: () => mockViewState, setState: vi.fn(), subscribe: vi.fn() }),
+  useViewStoreApi: () => mockViewStoreApi,
 }));
 
 // Mock modal store
@@ -1391,6 +1393,40 @@ describe("SwimLaneView", () => {
       renderWithI18n(<SwimLaneView issues={[]} visibleStatuses={["todo"]} onMoveIssue={vi.fn()} groupBranches={branches} />);
       fireEvent.click(screen.getByRole("button", { name: "Loading more failed — Retry" }));
       expect(branches.retryGroups).toHaveBeenCalledOnce();
+    });
+
+    it("retains measured row height across windows and invalidates changed offscreen content", () => {
+      // jsdom does not lay out cards. Supply natural content measurements;
+      // real scroll clamping and variable card sizes are covered in Chromium.
+      const geometry = vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(function (this: HTMLElement) {
+        const id = this.closest("[data-swimlane-cell]")?.getAttribute("data-swimlane-cell");
+        const height = this.classList.contains("space-y-2") && id === "swim:project:p-0:todo" ? 1800 : 0;
+        return { x: 0, y: 0, width: 280, height, top: 0, bottom: height, left: 0, right: 280, toJSON: () => ({}) };
+      });
+      try {
+        const many = Array.from({ length: 20 }, (_, index) => ({ ...projectIssues[0]!, id: `measured-${index}`, title: `Measured ${index}`, project_id: `p-${index}` }));
+        const view = (issues: Issue[]) => <SwimLaneView issues={issues} visibleStatuses={["todo"]} onMoveIssue={vi.fn()} />;
+        const qc = new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: 0 } } });
+        const { container, rerender } = render(view(many), {
+          wrapper: ({ children }) => <QueryClientProvider client={qc}><I18nProvider resources={TEST_RESOURCES} locale="en"><IssueContextMenuProvider>{children}</IssueContextMenuProvider></I18nProvider></QueryClientProvider>,
+        });
+        const row = () => container.querySelector<HTMLElement>("[data-swimlane-status-row=todo]")!;
+        const scroller = container.querySelector("[data-board-scroller]")!;
+        expect(row().style.minHeight).toBe("1808px");
+        fireEvent.scroll(scroller, { target: { scrollLeft: 3000 } });
+        expect(screen.queryByText("Measured 0")).not.toBeInTheDocument();
+        expect(row().style.minHeight).toBe("1808px");
+        fireEvent.scroll(scroller, { target: { scrollLeft: 0 } });
+        expect(row().style.minHeight).toBe("1808px");
+        fireEvent.scroll(scroller, { target: { scrollLeft: 3000 } });
+        rerender(view(many.map((issue, i) => i === 0 ? { ...issue, title: "Edited offscreen" } : issue)));
+        expect(row().style.minHeight).toBe("120px");
+        mockViewState.collapsedSwimlaneStatusRows = ["todo"];
+        rerender(view(many));
+        expect(row().style.minHeight).toBe("");
+      } finally {
+        geometry.mockRestore();
+      }
     });
 
     it("windows project cells horizontally and remounts their existing paged cards", () => {
