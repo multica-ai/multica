@@ -1,0 +1,45 @@
+{
+  "page": {
+    "breadcrumb": "Mis incidencias",
+    "workspace_fallback": "Espacio de trabajo",
+    "empty_title": "No tienes incidencias asignadas",
+    "empty_description": "Las incidencias que crees o que te asignen aparecerán aquí."
+  },
+  "header": {
+    "scope": {
+      "all_label": "Todas",
+      "all_description": "Asignadas a mí, creadas por mí o que involucren a mis agentes y equipos",
+      "assigned_label": "Asignadas",
+      "assigned_description": "Incidencias asignadas a mí",
+      "created_label": "Creadas",
+      "created_description": "Incidencias que he creado",
+      "agents_label": "Mis agentes y equipos",
+      "agents_description": "Incidencias asignadas a mis agentes"
+    },
+    "filter_button": "Filtrar",
+    "filter_status": "Estado",
+    "filter_priority": "Prioridad",
+    "issue_count_one": "{{count}} incidencia",
+    "issue_count_other": "{{count}} incidencias",
+    "reset_filters": "Restablecer todos los filtros",
+    "display_settings": "Opciones de visualización",
+    "grouping": "Agrupación",
+    "group_status": "Estado",
+    "group_assignee": "Asignado",
+    "ordering": "Ordenación",
+    "ascending": "Ascendente",
+    "descending": "Descendente",
+    "card_properties": "Propiedades de la tarjeta",
+    "view_board": "Vista de tablero",
+    "view_list": "Vista de lista",
+    "view_swimlane": "Vista de carriles",
+    "view_label": "Vista",
+    "view_board_short": "Tablero",
+    "view_list_short": "Lista",
+    "view_swimlane_short": "Carriles",
+    "sort_manual": "Manual"
+  },
+  "errors": {
+    "move_failed": "No se pudo mover la incidencia"
+  }
+}

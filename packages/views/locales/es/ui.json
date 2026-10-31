@@ -1,0 +1,11 @@
+{
+  "attach_file": "Adjuntar archivo",
+  "toggle_sidebar": "Mostrar u ocultar la barra lateral izquierda",
+  "copy_code": "Copiar código",
+  "plain_text": "texto sin formato",
+  "error_boundary": {
+    "title": "Algo salió mal al mostrar esta sección.",
+    "description": "Se produjo un error inesperado.",
+    "try_again": "Reintentar"
+  }
+}

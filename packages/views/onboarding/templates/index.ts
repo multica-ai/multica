@@ -1,7 +1,4 @@
-import {
-  matchLocale,
-  type SupportedLocale,
-} from "@multica/core/i18n";
+import { matchLocale, type SupportedLocale } from "@multica/core/i18n";
 
 export {
   INSTALL_RUNTIME_ISSUE_TITLE,
@@ -22,9 +19,11 @@ const CONTENT_LANG_BY_LOCALE: Record<SupportedLocale, ContentLang> = {
   "zh-Hant": "zh",
   ko: "ko",
   ja: "ja",
-  // Mika's onboarding content has no French variant yet, so French users
-  // read the English copy rather than an untranslated placeholder.
+  // Mika's onboarding content has no French or Spanish variant yet, so
+  // those users read the English copy rather than an untranslated
+  // placeholder.
   fr: "en",
+  es: "en",
 };
 
 /**
