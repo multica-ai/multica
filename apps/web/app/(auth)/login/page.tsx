@@ -29,6 +29,7 @@ import { setLoggedInCookie } from "@/features/auth/auth-cookie";
 import Link from "next/link";
 import { LoginPage, validateCliCallback } from "@multica/views/auth";
 import { useT } from "@multica/views/i18n";
+import { buildGoogleOAuthState } from "../../auth/oauth-state";
 
 /**
  * Pick where a logged-in user with no explicit `?next=` should land.
@@ -149,21 +150,20 @@ function LoginPageContent() {
     router.push(await resolveLoggedInDestination(qc, onboarded, list));
   };
 
-  // Build Google OAuth state: encode platform, next URL, and CLI callback
-  // params so the callback can redirect to the right place after login.
-  // CLI callback/state must survive the Google OAuth round-trip so the
-  // post-login callback page can redirect the JWT back to the CLI's local
-  // HTTP listener (critical for headless / WSL2 environments).
-  const googleState = [
-    platform === "desktop" ? "platform:desktop" : "",
-    nextUrl ? `next:${nextUrl}` : "",
-    cliCallbackRaw && validateCliCallback(cliCallbackRaw)
-      ? `cli_callback:${encodeURIComponent(cliCallbackRaw)}`
-      : "",
-    cliState ? `cli_state:${encodeURIComponent(cliState)}` : "",
-  ]
-    .filter(Boolean)
-    .join(",") || undefined;
+  // Build Google OAuth state so the callback can redirect to the right
+  // place after login. CLI callback/state must survive the round-trip so
+  // the post-login page can hand the JWT to the CLI's local listener
+  // (headless / WSL2). `next` is encoded like the other fields. State is a
+  // comma-separated list, and a raw comma in the path would split it.
+  const googleState = buildGoogleOAuthState({
+    platform,
+    nextUrl,
+    cliCallback:
+      cliCallbackRaw && validateCliCallback(cliCallbackRaw)
+        ? cliCallbackRaw
+        : null,
+    cliState,
+  });
 
   // While the desktop handoff is in progress (or has produced a token/error),
   // render a dedicated screen instead of flashing the login form or redirecting
