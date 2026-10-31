@@ -659,8 +659,9 @@ func writeDerivedHermesConfig(sharedHome, hermesHome string, env map[string]stri
 }
 
 // HermesTaskEnvPassthroughNames lists the daemon-owned task context that Hermes
-// tool subprocesses need, including optional autopilot and quick-create fields.
-// Only names are persisted; Hermes ignores names absent from the process env.
+// tool subprocesses need, including optional autopilot, quick-create, and
+// external-session fields. Only names are persisted; Hermes ignores names
+// absent from the process env.
 func HermesTaskEnvPassthroughNames() []string {
 	return []string{
 		"MULTICA_TOKEN",
@@ -677,6 +678,7 @@ func HermesTaskEnvPassthroughNames() []string {
 		"MULTICA_AUTOPILOT_ID",
 		"MULTICA_QUICK_CREATE_TASK_ID",
 		"MULTICA_QUICK_CREATE_ATTACHMENT_IDS",
+		"MULTICA_EXTERNAL_SESSION_ID",
 	}
 }
 

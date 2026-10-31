@@ -34,6 +34,7 @@ body:
         - Chat integration — DingTalk (community-maintained)
         - Chat integration — WeCom (community-maintained)
         - Chat integration — Telegram (community-maintained)
+        - Chat integration — ShareCRM (community-maintained)
         - Self-hosting and deployment
         - Other / not sure
     validations:
