@@ -409,6 +409,18 @@ multica config show
 
 `DO_NOT_TRACK` と `ANALYTICS_DISABLED` は独立しています。前者はこの匿名スナップショットを、後者は任意の PostHog 連携を制御します。
 
+## 会社のナレッジベース
+
+これらの変数は、オプションの[ナレッジベース](/knowledge-base)を有効にします。`KNOWLEDGE_URL` が空の場合、ナレッジは提供されず、ほかの部分も変わりません。サイドカー自身の変数と既定値は[高度な設定](https://github.com/multica-ai/multica/blob/main/SELF_HOSTING_ADVANCED.md#company-knowledge-base)にあります。
+
+| 変数 | 既定値 | 説明 |
+|---|---|---|
+| `KNOWLEDGE_URL` | 空 | バックエンドが WeKnora に接続するアドレス（例：`http://knowledge-app:8080`） |
+| `MULTICA_KNOWLEDGE_SECRET_KEY` | 空 | 各ワークスペースの WeKnora キーを暗号化する Base64 の 32 バイトのキー。ないとナレッジは提供されません。 |
+| `KNOWLEDGE_SERVICE_EMAIL` / `KNOWLEDGE_SERVICE_PASSWORD` | 空 | 各ワークスペースを作成する WeKnora のサービスアカウント |
+| `KNOWLEDGE_PUBLIC_URL` | `KNOWLEDGE_URL` と同じ | エージェントのデーモンが読み取り専用の MCP エンドポイントに接続するアドレス |
+| `KNOWLEDGE_UI_URL` | 空 | **WeKnora で開く** リンクに使う WeKnora の Web インターフェース |
+
 ## 次のステップ
 
 - [ログインとサインアップ](/auth-setup) — ログイン方式とサインアップ制限。

@@ -500,7 +500,7 @@ Back up these named volumes together, plus `KNOWLEDGE_SYSTEM_AES_KEY` and `MULTI
 | `knowledge-postgres-data` | Documents, chunks, embeddings, workspaces and API keys |
 | `knowledge-data-files` | Uploaded original files |
 
-Losing `KNOWLEDGE_SYSTEM_AES_KEY` makes WeKnora's encrypted credentials unrecoverable; losing `MULTICA_KNOWLEDGE_SECRET_KEY` means each workspace's stored key can no longer be read, and knowledge must be re-provisioned. `knowledge-docreader-tmp` and `knowledge-redis-data` are transient. For a consistent copy, stop the profile (`docker compose -f docker-compose.selfhost.yml --profile knowledge stop`) before copying the volumes, or use `pg_dump` against `knowledge-postgres`.
+Losing `KNOWLEDGE_SYSTEM_AES_KEY` makes WeKnora's encrypted credentials unrecoverable; losing `MULTICA_KNOWLEDGE_SECRET_KEY` means each workspace's stored key can no longer be read, and knowledge must be re-provisioned. `knowledge-docreader-tmp` is scratch space and does not need a backup. `knowledge-redis-data` holds Redis stream state, not documents, so it is optional in a backup. For a consistent copy, stop the profile (`docker compose -f docker-compose.selfhost.yml --profile knowledge stop`) before copying the volumes, or use `pg_dump` against `knowledge-postgres`.
 
 ### Upgrading WeKnora
 
@@ -549,6 +549,31 @@ Pin `MULTICA_IMAGE_TAG` in `.env` to an exact version like `v0.2.4` if you want 
 If the selected GHCR tag has not been published yet, fall back to `make selfhost-build` or `docker compose -f docker-compose.selfhost.yml -f docker-compose.selfhost.build.yml up -d --build`.
 
 > **Upgrading from `v0.3.4` to `v0.3.5+` fails with `refusing to drop legacy daily rollups: ...`?** That's migration `103`'s fail-closed guard: it requires `task_usage_hourly` to be seeded before the legacy daily rollups are dropped. As of MUL-2957 `migrate up` runs that backfill automatically right before applying `103`, so the upgrade completes in a single invocation. If you are still on a pre-MUL-2957 binary or the auto-hook fails, run `backfill_task_usage_hourly` manually first, then re-run the upgrade. Full instructions in [Advanced Configuration → Usage Dashboard Rollup](SELF_HOSTING_ADVANCED.md#usage-dashboard-rollup).
+
+---
+
+## Upgrade notes: digital company office
+
+This release adds floors and squad seats to the office, proposals, the Secretary's daily briefs, and an optional knowledge base. Migrations 600 to 650 run automatically on backend startup.
+
+What changes for operators:
+
+- **`agent.office_room` is removed.** Migration 608 drops the column. Its per-agent room labels had no link to a squad, so nothing is carried over. Agents are drawn at the desks of their home squad.
+- **Existing squads start unseated.** No migration places them on a floor. An owner or admin sees a **Seat all** banner in the office, and nothing moves until they press it.
+- **The knowledge base is an optional sidecar.** WeKnora runs only when you start the `knowledge` compose profile and set `KNOWLEDGE_URL`. Without it, nothing changes. See [Company Knowledge Base (Optional)](#company-knowledge-base-optional) for the steps, the variables, and the one service account you register by hand.
+- **Secretary setup has no button yet.** Setup runs through the API. It needs an online Hermes runtime, and an owner's or admin's token:
+
+```bash
+curl -X POST "$MULTICA_API_URL/api/office/setup" \
+  -H "Authorization: Bearer $MULTICA_TOKEN" \
+  -H "X-Workspace-ID: $MULTICA_WORKSPACE_ID" \
+  -H 'Content-Type: application/json' \
+  -d '{"secretary_instructions": "<the text of the secretary template in packages/core/agents/instruction-templates.ts>", "timezone": "Europe/Berlin"}'
+```
+
+Setup is idempotent. It creates the Secretary, the Executive floor and squad, the daily brief autopilot, and the paused weekly review, and it returns the readiness checklist. A second call changes nothing that already exists.
+
+After upgrading, check the office: seat the squads you want on a floor, and see the [Office](https://multica.ai/docs/office) and [Secretary and briefs](https://multica.ai/docs/secretary) pages for what members will see.
 
 ---
 

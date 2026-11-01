@@ -409,6 +409,18 @@ multica config show
 
 `DO_NOT_TRACK`과 `ANALYTICS_DISABLED`는 서로 독립적입니다. 전자는 이 익명 스냅샷을, 후자는 선택 사항인 PostHog 연동을 제어합니다.
 
+## 회사 지식 베이스
+
+이 변수들은 선택 기능인 [지식 베이스](/knowledge-base)를 켭니다. `KNOWLEDGE_URL`이 비어 있으면 지식은 제공되지 않으며, 다른 부분도 바뀌지 않습니다. 사이드카 자체의 변수와 기본값은 [고급 설정](https://github.com/multica-ai/multica/blob/main/SELF_HOSTING_ADVANCED.md#company-knowledge-base)에 있습니다.
+
+| 변수 | 기본값 | 설명 |
+|---|---|---|
+| `KNOWLEDGE_URL` | 비어 있음 | 백엔드가 WeKnora에 접속하는 주소(예: `http://knowledge-app:8080`) |
+| `MULTICA_KNOWLEDGE_SECRET_KEY` | 비어 있음 | 워크스페이스별 WeKnora 키를 암호화하는 Base64 32바이트 키. 없으면 지식이 제공되지 않습니다. |
+| `KNOWLEDGE_SERVICE_EMAIL` / `KNOWLEDGE_SERVICE_PASSWORD` | 비어 있음 | 워크스페이스마다 리소스를 만드는 WeKnora 서비스 계정 |
+| `KNOWLEDGE_PUBLIC_URL` | `KNOWLEDGE_URL`과 같음 | 에이전트의 데몬이 읽기 전용 MCP 엔드포인트에 접속하는 주소 |
+| `KNOWLEDGE_UI_URL` | 비어 있음 | **WeKnora에서 열기** 링크에 쓰는 WeKnora 웹 인터페이스 |
+
 ## 다음 단계
 
 - [로그인과 가입](/auth-setup) — 로그인 방식과 가입 제한을 알아봅니다.
