@@ -1,0 +1,2 @@
+ALTER TABLE squad DROP COLUMN IF EXISTS office_slot;
+ALTER TABLE squad DROP COLUMN IF EXISTS floor_id;
