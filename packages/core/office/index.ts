@@ -6,3 +6,5 @@ export * from "./queries";
 export * from "./mutations";
 export * from "./proposals";
 export * from "./proposal-schema";
+export * from "./seat-plan";
+export * from "./floor-store";
