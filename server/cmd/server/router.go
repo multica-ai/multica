@@ -1328,6 +1328,10 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 		slog.Info("vcs integration disabled (MULTICA_VCS_SECRET_KEY not set)")
 	}
 
+	// Company knowledge base (optional WeKnora sidecar). Always wired so the
+	// status endpoint can say "not offered"; see knowledge.go.
+	h.Knowledge = newKnowledgeService(queries, pool)
+
 	// Plugin secrets use a dedicated deployment key. Keeping this separate from
 	// VCS and channel secrets gives operators an isolated rotation and blast
 	// radius; without it, saving a `secret` config field fails closed rather
@@ -2022,6 +2026,15 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 
 			// Assignee frequency
 			r.Get("/api/assignee-frequency", h.GetAssigneeFrequency)
+
+			// Company knowledge base: status and one-time provisioning. Human
+			// owners and admins only.
+			r.Route("/api/knowledge", func(r chi.Router) {
+				r.Use(handler.RequireHumanActor)
+				r.Use(middleware.RequireWorkspaceRole(queries, "owner", "admin"))
+				r.Get("/", h.GetKnowledge)
+				r.Post("/enable", h.EnableKnowledge)
+			})
 
 			// Local search index sync for Web/Desktop (MUL-7754). Human clients
 			// only: agents search through /api/issues/search.
