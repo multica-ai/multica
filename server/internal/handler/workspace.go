@@ -105,8 +105,11 @@ type WorkspaceResponse struct {
 	Repos       any     `json:"repos"`
 	IssuePrefix string  `json:"issue_prefix"`
 	AvatarURL   *string `json:"avatar_url"`
-	CreatedAt   string  `json:"created_at"`
-	UpdatedAt   string  `json:"updated_at"`
+	// SecretaryAgentID names the agent that writes the boss's briefs; null when
+	// the workspace has none.
+	SecretaryAgentID *string `json:"secretary_agent_id"`
+	CreatedAt        string  `json:"created_at"`
+	UpdatedAt        string  `json:"updated_at"`
 }
 
 func (h *Handler) workspaceToResponse(w db.Workspace) WorkspaceResponse {
@@ -125,17 +128,18 @@ func (h *Handler) workspaceToResponse(w db.Workspace) WorkspaceResponse {
 		repos = []any{}
 	}
 	return WorkspaceResponse{
-		ID:          uuidToString(w.ID),
-		Name:        w.Name,
-		Slug:        w.Slug,
-		Description: textToPtr(w.Description),
-		Context:     textToPtr(w.Context),
-		Settings:    settings,
-		Repos:       repos,
-		IssuePrefix: w.IssuePrefix,
-		AvatarURL:   h.resolveAvatarURLPtr(textToPtr(w.AvatarUrl)),
-		CreatedAt:   timestampToString(w.CreatedAt),
-		UpdatedAt:   timestampToString(w.UpdatedAt),
+		ID:               uuidToString(w.ID),
+		Name:             w.Name,
+		Slug:             w.Slug,
+		Description:      textToPtr(w.Description),
+		Context:          textToPtr(w.Context),
+		Settings:         settings,
+		Repos:            repos,
+		IssuePrefix:      w.IssuePrefix,
+		AvatarURL:        h.resolveAvatarURLPtr(textToPtr(w.AvatarUrl)),
+		SecretaryAgentID: uuidToPtr(w.SecretaryAgentID),
+		CreatedAt:        timestampToString(w.CreatedAt),
+		UpdatedAt:        timestampToString(w.UpdatedAt),
 	}
 }
 
@@ -350,6 +354,9 @@ type UpdateWorkspaceRequest struct {
 	Repos       any     `json:"repos"`
 	IssuePrefix *string `json:"issue_prefix"`
 	AvatarURL   *string `json:"avatar_url"`
+	// SecretaryAgentID is tri-state: absent leaves the Secretary alone, null
+	// unsets it, a string names the agent. Hence the raw message.
+	SecretaryAgentID json.RawMessage `json:"secretary_agent_id"`
 }
 
 type workspaceRepoRef struct {
@@ -469,6 +476,26 @@ func (h *Handler) UpdateWorkspace(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		params.AvatarUrl = pgtype.Text{String: accepted, Valid: true}
+	}
+	if len(req.SecretaryAgentID) > 0 {
+		params.SetSecretaryAgent = true
+		if string(req.SecretaryAgentID) != "null" {
+			var agentID string
+			if err := json.Unmarshal(req.SecretaryAgentID, &agentID); err != nil {
+				writeError(w, http.StatusBadRequest, "secretary_agent_id must be an agent id or null")
+				return
+			}
+			agentUUID, ok := parseUUIDOrBadRequest(w, agentID, "secretary_agent_id")
+			if !ok {
+				return
+			}
+			agent, err := h.Queries.GetAgentInWorkspace(r.Context(), db.GetAgentInWorkspaceParams{ID: agentUUID, WorkspaceID: idUUID})
+			if err != nil || agent.ArchivedAt.Valid {
+				writeError(w, http.StatusBadRequest, "secretary_agent_id must be a live agent of this workspace")
+				return
+			}
+			params.SecretaryAgentID = agentUUID
+		}
 	}
 
 	ws, err := h.Queries.UpdateWorkspace(r.Context(), params)

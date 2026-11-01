@@ -1,7 +1,7 @@
 -- name: ListWorkspaces :many
 SELECT w.id, w.name, w.slug, w.description, w.settings,
        w.created_at, w.updated_at, w.context, w.repos,
-       w.issue_prefix, w.issue_counter, w.avatar_url, w.attribution_fail_closed
+       w.issue_prefix, w.issue_counter, w.avatar_url, w.attribution_fail_closed, w.secretary_agent_id
 FROM member m
 JOIN workspace w ON w.id = m.workspace_id
 WHERE m.user_id = $1
@@ -53,6 +53,9 @@ UPDATE workspace SET
     repos = COALESCE(sqlc.narg('repos'), repos),
     issue_prefix = COALESCE(sqlc.narg('issue_prefix'), issue_prefix),
     avatar_url = COALESCE(sqlc.narg('avatar_url'), avatar_url),
+    -- COALESCE cannot clear a column, so the secretary is written only when
+    -- set_secretary_agent is true; a NULL secretary_agent_id then unsets it.
+    secretary_agent_id = CASE WHEN sqlc.arg('set_secretary_agent')::bool THEN sqlc.narg('secretary_agent_id')::uuid ELSE secretary_agent_id END,
     updated_at = now()
 WHERE id = $1
 RETURNING *;
