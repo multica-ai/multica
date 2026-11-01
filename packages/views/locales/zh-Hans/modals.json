@@ -273,6 +273,10 @@
         "name": "SDLC · 新产品",
         "description": "把一个需求从想法推进到经过验证的产品：简报、PRD、UX、架构、排队构建和最终报告。"
       },
+      "market_research": {
+        "name": "市场调研",
+        "description": "每周扫描市场与竞品，由评审员质疑证据，只把有依据的提案交给老板。"
+      },
       "sdlc_maintenance": {
         "name": "SDLC · 现有产品",
         "description": "对缺陷、功能、优化或升级进行分诊，分派给合适的智能体，验证后汇报。"

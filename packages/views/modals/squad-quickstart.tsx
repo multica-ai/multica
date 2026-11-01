@@ -35,7 +35,8 @@ function hasProblems(outcome: QuickstartOutcome): boolean {
     outcome.agents.some((a) => a.status === "failed") ||
     outcome.squad.status === "failed" ||
     !!outcome.squad.error ||
-    outcome.workflow.status === "failed"
+    outcome.workflow.status === "failed" ||
+    outcome.routine.status === "failed"
   );
 }
 

@@ -273,6 +273,10 @@
         "name": "SDLC · 新產品",
         "description": "把一個需求從想法推進到經過驗證的產品：簡報、PRD、UX、架構、排隊建置與最終報告。"
       },
+      "market_research": {
+        "name": "市場調研",
+        "description": "每週掃描市場與競品，由審查員質疑證據，只把有依據的提案交給老闆。"
+      },
       "sdlc_maintenance": {
         "name": "SDLC · 既有產品",
         "description": "對缺陷、功能、最佳化或升級進行分流，分派給合適的智慧體，驗證後回報。"

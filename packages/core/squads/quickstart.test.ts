@@ -27,6 +27,9 @@ function fakeClient(over: Partial<FakeClient> = {}): FakeClient {
     addSquadMember: vi.fn(async () => ({}) as never),
     listIssueWorkflows: vi.fn(async () => ({ workflows: [], total: 0 })),
     createIssueWorkflow: vi.fn(async () => ({}) as IssueWorkflow),
+    listAutopilots: vi.fn(async () => ({ autopilots: [], total: 0 })),
+    createAutopilot: vi.fn(async () => ({ id: "ap-1" }) as never),
+    createAutopilotTrigger: vi.fn(async () => ({}) as never),
     ...over,
   } as FakeClient;
   return client;
@@ -179,6 +182,106 @@ describe("runSquadQuickstart", () => {
 
     expect(onProgress.mock.calls.length).toBeGreaterThan(greenfield.roles.length);
     expect(onProgress.mock.calls[0]![0].agents).toHaveLength(1);
+  });
+});
+
+describe("runSquadQuickstart for market research", () => {
+  const market = SQUAD_TEMPLATES.find((t) => t.id === "market_research")!;
+
+  it("leads the squad with the research lead and passes the Research floor name", async () => {
+    const client = fakeClient();
+
+    const out = await runSquadQuickstart(client, market, options);
+
+    expect(client.createAgent.mock.calls[0]![0]).toMatchObject({
+      name: SQUAD_ROLES.research_lead.name,
+      runtime_id: "rt-1",
+    });
+    expect(client.createSquad).toHaveBeenCalledWith(
+      expect.objectContaining({ name: market.name, leader_id: "agent-1", floor_name: "Research" }),
+    );
+    expect(out.squad).toEqual({ id: "squad-1", status: "created" });
+  });
+
+  it("creates a squad-assigned autopilot that opens an issue, then its weekly schedule", async () => {
+    const client = fakeClient();
+
+    const out = await runSquadQuickstart(client, market, { ...options, timezone: "Europe/Paris" });
+
+    expect(client.createAutopilot).toHaveBeenCalledWith({
+      title: "Market scan",
+      description: market.routine!.description,
+      assignee_type: "squad",
+      assignee_id: "squad-1",
+      execution_mode: "create_issue",
+      issue_title_template: "Market scan, week of {{date}}",
+    });
+    expect(client.createAutopilotTrigger).toHaveBeenCalledWith("ap-1", {
+      kind: "schedule",
+      cron_expression: "0 8 * * 1",
+      timezone: "Europe/Paris",
+    });
+    expect(out.routine).toEqual({ status: "created" });
+  });
+
+  it("uses the browser's timezone when the caller passes none", async () => {
+    const client = fakeClient();
+
+    await runSquadQuickstart(client, market, options);
+
+    expect(client.createAutopilotTrigger.mock.calls[0]![1].timezone).toBe(
+      Intl.DateTimeFormat().resolvedOptions().timeZone,
+    );
+  });
+
+  it("keeps a routine with the same name on the squad instead of making another", async () => {
+    const client = fakeClient({
+      listAutopilots: vi.fn(async () => ({
+        autopilots: [
+          { id: "old", title: "Market scan", assignee_type: "squad", assignee_id: "squad-1" },
+        ] as never[],
+        total: 1,
+      })),
+    });
+
+    const out = await runSquadQuickstart(client, market, options);
+
+    expect(client.createAutopilot).not.toHaveBeenCalled();
+    expect(out.routine).toEqual({ status: "existing" });
+  });
+
+  it("reports a routine whose schedule could not be set, so the boss can add it", async () => {
+    const client = fakeClient({
+      createAutopilotTrigger: vi.fn(async () => {
+        throw new Error("bad cron");
+      }),
+    });
+
+    const out = await runSquadQuickstart(client, market, options);
+
+    expect(out.routine).toEqual({ status: "failed", error: "schedule: bad cron" });
+  });
+
+  it("makes no routine for a template without one, or when the squad was not made", async () => {
+    const greenfieldClient = fakeClient();
+    expect((await runSquadQuickstart(greenfieldClient, greenfield, options)).routine.status).toBe("skipped");
+    expect(greenfieldClient.createAutopilot).not.toHaveBeenCalled();
+
+    const failedClient = fakeClient({
+      createSquad: vi.fn(async () => {
+        throw new Error("nope");
+      }),
+    });
+    expect((await runSquadQuickstart(failedClient, market, options)).routine.status).toBe("skipped");
+    expect(failedClient.createAutopilot).not.toHaveBeenCalled();
+  });
+
+  it("sends no floor name for the SDLC squads", async () => {
+    const client = fakeClient();
+
+    await runSquadQuickstart(client, greenfield, options);
+
+    expect(client.createSquad.mock.calls[0]![0]).not.toHaveProperty("floor_name");
   });
 });
 

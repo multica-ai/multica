@@ -290,6 +290,12 @@ import {
   type DigestParams,
 } from "../office/digest-schema";
 import {
+  FALLBACK_OFFICE_SETUP_READINESS,
+  OfficeSetupReadinessSchema,
+  type OfficeSetupReadiness,
+  type OfficeSetupRequest,
+} from "../office/setup-schema";
+import {
   FALLBACK_KNOWLEDGE_BASES,
   FALLBACK_KNOWLEDGE_DOCUMENT,
   FALLBACK_KNOWLEDGE_DOCUMENT_LIST,
@@ -5637,6 +5643,26 @@ export class ApiClient {
     const raw = await this.fetch<unknown>(`/api/office/digest${qs ? `?${qs}` : ""}`);
     return parseWithFallback(raw, DigestSchema, FALLBACK_DIGEST, {
       endpoint: "GET /api/office/digest",
+    });
+  }
+
+  // The Secretary setup and its readiness checklist (owner or admin).
+  async getOfficeSetup(): Promise<OfficeSetupReadiness> {
+    const raw = await this.fetch<unknown>("/api/office/setup");
+    return parseWithFallback(raw, OfficeSetupReadinessSchema, FALLBACK_OFFICE_SETUP_READINESS, {
+      endpoint: "GET /api/office/setup",
+    });
+  }
+
+  // Idempotent: a second call changes nothing. Without an online Hermes runtime
+  // it rejects with an ApiError whose body parseOfficeSetupRefusal reads.
+  async setupOffice(data: OfficeSetupRequest): Promise<OfficeSetupReadiness> {
+    const raw = await this.fetch<unknown>("/api/office/setup", {
+      method: "POST",
+      body: JSON.stringify(data),
+    });
+    return parseWithFallback(raw, OfficeSetupReadinessSchema, FALLBACK_OFFICE_SETUP_READINESS, {
+      endpoint: "POST /api/office/setup",
     });
   }
 

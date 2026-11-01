@@ -427,6 +427,26 @@
           "name": "DevOps 工程師",
           "description": "將同一個已驗證的 digest 逐環境提升，在正式環境前等待人工核准。"
         },
+        "secretary": {
+          "name": "秘書",
+          "description": "透過每日摘要掌握公司狀況，撰寫老闆的簡報，並在聊天中回答問題。只拉取資訊，從不推送。"
+        },
+        "research_lead": {
+          "name": "研究負責人",
+          "description": "確定市場問題、分派偵查與競品工作，只提交有證據支持的提案。"
+        },
+        "market_scout": {
+          "name": "市場偵查員",
+          "description": "查找並閱讀市場、客戶與趨勢來源，每項論斷都附上日期與連結。"
+        },
+        "competitor_analyst": {
+          "name": "競品分析師",
+          "description": "依據第一手來源比較競品的產品、定價與動態，每個事實旁註明出處。"
+        },
+        "critic": {
+          "name": "審查員",
+          "description": "在任何內容提交前質疑證據，自己不撰寫結論。"
+        },
         "ux_designer": {
           "name": "UX 設計師",
           "description": "依據需求設計頁面、狀態與設計系統，優先重用既有元件。"

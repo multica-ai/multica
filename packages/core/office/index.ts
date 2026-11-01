@@ -12,3 +12,5 @@ export * from "./digest-schema";
 export * from "./digest";
 export * from "./seat-plan";
 export * from "./floor-store";
+export * from "./setup-schema";
+export * from "./setup-query";
