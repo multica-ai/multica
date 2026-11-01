@@ -2214,6 +2214,17 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 				})
 			})
 
+			// Proposals: a squad's request for a decision by the boss. Decisions
+			// are refused to agent actors inside the handler.
+			r.Route("/api/proposals", func(r chi.Router) {
+				r.Get("/", h.ListProposals)
+				r.Post("/", h.CreateProposal)
+				r.Route("/{id}", func(r chi.Router) {
+					r.Get("/", h.GetProposal)
+					r.Post("/decision", h.DecideProposal)
+				})
+			})
+
 			// Squad leader evaluation (writes to activity_log)
 			r.Post("/api/issues/{id}/squad-evaluated", h.RecordSquadLeaderEvaluation)
 

@@ -261,6 +261,15 @@ import { createRequestId, createSafeId } from "../utils";
 import { getCurrentSlug } from "../platform/workspace-storage";
 import { parseWithFallback } from "./schema";
 import {
+  FALLBACK_PROPOSAL,
+  ProposalListSchema,
+  ProposalSchema,
+  type CreateProposalRequest,
+  type DecideProposalRequest,
+  type ListProposalsParams,
+  type Proposal,
+} from "../office/proposal-schema";
+import {
   RuntimeProfileSchema,
   RuntimeProfileListSchema,
   AgentTaskListSchema,
@@ -5532,5 +5541,44 @@ export class ApiClient {
       EMPTY_REDEEM_TELEGRAM_BINDING_TOKEN_RESPONSE,
       { endpoint: "POST /api/telegram/binding/redeem" },
     );
+  }
+
+  // Proposals (squad requests for a decision by the boss)
+  async listProposals(params?: ListProposalsParams): Promise<Proposal[]> {
+    const search = new URLSearchParams();
+    if (params?.state) search.set("state", params.state);
+    if (params?.squad_id) search.set("squad_id", params.squad_id);
+    const qs = search.toString();
+    const raw = await this.fetch<unknown>(`/api/proposals${qs ? `?${qs}` : ""}`);
+    return parseWithFallback<Proposal[]>(raw, ProposalListSchema, [], {
+      endpoint: "GET /api/proposals",
+    });
+  }
+
+  async getProposal(id: string): Promise<Proposal> {
+    const raw = await this.fetch<unknown>(`/api/proposals/${id}`);
+    return parseWithFallback(raw, ProposalSchema, FALLBACK_PROPOSAL, {
+      endpoint: "GET /api/proposals/:id",
+    });
+  }
+
+  async createProposal(data: CreateProposalRequest): Promise<Proposal> {
+    const raw = await this.fetch<unknown>("/api/proposals", {
+      method: "POST",
+      body: JSON.stringify(data),
+    });
+    return parseWithFallback(raw, ProposalSchema, FALLBACK_PROPOSAL, {
+      endpoint: "POST /api/proposals",
+    });
+  }
+
+  async decideProposal(id: string, data: DecideProposalRequest): Promise<Proposal> {
+    const raw = await this.fetch<unknown>(`/api/proposals/${id}/decision`, {
+      method: "POST",
+      body: JSON.stringify(data),
+    });
+    return parseWithFallback(raw, ProposalSchema, FALLBACK_PROPOSAL, {
+      endpoint: "POST /api/proposals/:id/decision",
+    });
   }
 }

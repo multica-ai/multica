@@ -1398,6 +1398,23 @@ type ProjectResource struct {
 	CreatedBy    pgtype.UUID        `json:"created_by"`
 }
 
+type Proposal struct {
+	ID             pgtype.UUID        `json:"id"`
+	WorkspaceID    pgtype.UUID        `json:"workspace_id"`
+	SquadID        pgtype.UUID        `json:"squad_id"`
+	IssueID        pgtype.UUID        `json:"issue_id"`
+	HandoffSquadID pgtype.UUID        `json:"handoff_squad_id"`
+	Urgent         bool               `json:"urgent"`
+	UrgentReason   string             `json:"urgent_reason"`
+	State          string             `json:"state"`
+	CreatedByType  string             `json:"created_by_type"`
+	CreatedByID    pgtype.UUID        `json:"created_by_id"`
+	DecidedBy      pgtype.UUID        `json:"decided_by"`
+	DecidedAt      pgtype.Timestamptz `json:"decided_at"`
+	DecisionNote   string             `json:"decision_note"`
+	CreatedAt      pgtype.Timestamptz `json:"created_at"`
+}
+
 type QuickAction struct {
 	ID            pgtype.UUID        `json:"id"`
 	WorkspaceID   pgtype.UUID        `json:"workspace_id"`

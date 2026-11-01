@@ -101,6 +101,12 @@ const (
 	EventProjectResourceUpdated = "project_resource:updated"
 	EventProjectResourceDeleted = "project_resource:deleted"
 
+	// Proposal events. A decision is a state change on one proposal, so the
+	// payload carries the whole proposal either way and clients invalidate the
+	// proposal and issue queries.
+	EventProposalCreated = "proposal:created"
+	EventProposalDecided = "proposal:decided"
+
 	// Label events
 	EventLabelCreated       = "label:created"
 	EventLabelUpdated       = "label:updated"
