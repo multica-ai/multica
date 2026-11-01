@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState, type MouseEvent, type ReactNode } from "react";
+import { cn } from "@multica/ui/lib/utils";
 import {
   unitsFor,
   type FromWorker,
@@ -20,6 +21,8 @@ export interface OfficeStage {
   tank: OfficePoint | null;
   /** The desk rooms, in the page's room order. */
   rooms: readonly OfficeRoom[];
+  /** The whiteboards, which open the kanban board. */
+  boards: readonly OfficeRoom[];
 }
 
 /** A worker's figure, in layout units, from its tag's anchor (the top of its head) down. */
@@ -61,6 +64,7 @@ export function OfficeCanvas({
   const labelsRef = useRef<readonly OfficeLabel[]>([]);
   const [rooms, setRooms] = useState<readonly OfficeRoom[]>([]);
   const [tank, setTank] = useState<OfficePoint | null>(null);
+  const [boards, setBoards] = useState<readonly OfficeRoom[]>([]);
   const [units, setUnits] = useState<OfficeUnits>(() => unitsFor(0, 0));
   const unitsRef = useRef(units);
   unitsRef.current = units;
@@ -94,6 +98,7 @@ export function OfficeCanvas({
       if (event.data.type === "rooms") {
         setRooms(event.data.rooms);
         setTank(event.data.tank);
+        setBoards(event.data.boards);
         return;
       }
       if (event.data.type !== "labels") return;
@@ -172,19 +177,28 @@ export function OfficeCanvas({
     >
       <div ref={stageRef} className="relative size-full">
         <div ref={tagsRef} className="pointer-events-none absolute inset-0" />
-        {rooms.map((room, index) => (
-          <span
-            key={index}
-            className="pointer-events-none absolute -translate-x-1/2 -translate-y-full whitespace-nowrap rounded-[3px] bg-[#2c2418]/85 px-2 py-0.5 text-micro font-semibold text-[#fff8ea]"
-            style={{
-              left: `${((room.x + room.w / 2) / units.w) * 100}%`,
-              top: `${(room.y / units.h) * 100}%`,
-            }}
-          >
-            {roomNames?.[index]}
-          </span>
-        ))}
-        <div className="pointer-events-none absolute inset-0">{children?.({ units, tank, rooms })}</div>
+        {rooms.map((room, index) => {
+          // A worker's tag hangs over its head, which is at the room's north wall. The name of a top-row room
+          // clears the tag row above it; the name of a lower room goes under the room, where nothing hangs.
+          const topRow = room.y === Math.min(...rooms.map((other) => other.y));
+          return (
+            <span
+              key={index}
+              data-room-name={topRow ? "above" : "below"}
+              className={cn(
+                "pointer-events-none absolute -translate-x-1/2 whitespace-nowrap rounded-[3px] bg-[#2c2418]/85 px-2 py-0.5 text-micro font-semibold text-[#fff8ea]",
+                topRow ? "-translate-y-full -mt-7" : "mt-1",
+              )}
+              style={{
+                left: `${((room.x + room.w / 2) / units.w) * 100}%`,
+                top: `${((topRow ? room.y : room.y + room.h) / units.h) * 100}%`,
+              }}
+            >
+              {roomNames?.[index]}
+            </span>
+          );
+        })}
+        <div className="pointer-events-none absolute inset-0">{children?.({ units, tank, rooms, boards })}</div>
       </div>
     </div>
   );

@@ -60,6 +60,7 @@ class FakeWorker {
             { x: 160, y: 60, w: 66, h: 44 },
           ],
           tank: { x: 146, y: 50 },
+          boards: [{ x: 20, y: 40, w: 14, h: 11 }],
         },
       });
       this.onmessage?.({ data: { type: "labels", labels } });
@@ -82,6 +83,11 @@ vi.mock("./office-agent-panel", () => ({
         </button>
       </div>
     ) : null,
+}));
+
+// The board dialog has its own tests; here it only reports that it is open.
+vi.mock("./office-board-dialog", () => ({
+  OfficeBoardDialog: ({ open }: { open: boolean }) => (open ? <div role="dialog" aria-label="Board" /> : null),
 }));
 
 vi.mock("@multica/core/properties", async (importOriginal) => ({
@@ -326,14 +332,12 @@ describe("OfficeView", () => {
     await vi.waitFor(() => expect(engine.ends).toEqual(["agent-1"]));
   });
 
-  it("lists the backlog in its chest and opens an issue from it", async () => {
-    const open = vi.fn();
-    setup([makeIssue("b", "backlog")], { open });
+  it("opens the kanban board from the wall board", async () => {
+    setup([makeIssue("b", "backlog")]);
 
-    fireEvent.click(await screen.findByRole("button", { name: "Backlog, 1 issues" }));
-    fireEvent.click(screen.getByRole("button", { name: /MUL-b/ }));
+    fireEvent.click(await screen.findByRole("button", { name: "Open the board" }));
 
-    expect(open).toHaveBeenCalledWith("b");
+    expect(await screen.findByRole("dialog", { name: "Board" })).toBeTruthy();
   });
 
   it("seats each worker in the room its agent sits in", async () => {

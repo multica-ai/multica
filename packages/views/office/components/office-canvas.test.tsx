@@ -7,15 +7,20 @@
  * showing at its sides.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { act, cleanup, render } from "@testing-library/react";
+import { act, cleanup, render, screen } from "@testing-library/react";
 import { unitsFor, type ToWorker } from "../lib/pixtuoid/office-protocol";
 import { OfficeCanvas } from "./office-canvas";
 
 const posted: ToWorker[] = [];
 const observers: Array<() => void> = [];
 
+const workers: FakeWorker[] = [];
+
 class FakeWorker {
-  onmessage: unknown = null;
+  onmessage: ((event: { data: unknown }) => void) | null = null;
+  constructor() {
+    workers.push(this);
+  }
   postMessage(message: ToWorker) {
     posted.push(message);
   }
@@ -41,6 +46,7 @@ describe("OfficeCanvas", () => {
 
   beforeEach(() => {
     posted.length = 0;
+    workers.length = 0;
     observers.length = 0;
     width = 1180;
     height = 780;
@@ -92,5 +98,31 @@ describe("OfficeCanvas", () => {
 
     const canvas = container.querySelector("canvas")!;
     expect(canvas.className).toContain("absolute inset-0 size-full");
+  });
+
+  it("names the top rooms above their workers' tags and the lower rooms below the room", () => {
+    render(
+      <OfficeCanvas sessions={[]} tagText={() => ""} onPick={() => {}} onMove={() => {}} roomNames={["North", "East", "South", "West"]} />,
+    );
+    act(() =>
+      workers[0]!.onmessage?.({
+        data: {
+          type: "rooms",
+          rooms: [
+            { x: 104, y: 60, w: 66, h: 44 },
+            { x: 184, y: 60, w: 66, h: 44 },
+            { x: 104, y: 112, w: 66, h: 44 },
+            { x: 184, y: 112, w: 66, h: 44 },
+          ],
+          tank: null,
+          boards: [],
+        },
+      }),
+    );
+
+    expect(screen.getByText("North").dataset.roomName).toBe("above");
+    expect(screen.getByText("East").dataset.roomName).toBe("above");
+    expect(screen.getByText("South").dataset.roomName).toBe("below");
+    expect(screen.getByText("West").dataset.roomName).toBe("below");
   });
 });
