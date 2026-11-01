@@ -80,6 +80,7 @@
     "quick_create_unconfirmed": "エージェントでの作成結果は未確認",
     "autopilot_paused": "自動化を一時停止しました",
     "children_done": "サブタスクがすべて終わりました",
+    "brief_ready": "ブリーフが届きました",
     "autopilot_quota_exceeded": "自動化の実行上限に達しました"
   },
   "labels": {

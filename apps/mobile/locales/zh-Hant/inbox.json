@@ -65,6 +65,7 @@
     "quick_create_unconfirmed": "快速建立需要確認",
     "autopilot_paused": "自動化已暫停",
     "children_done": "子任務已全部結束",
+    "brief_ready": "簡報已產生",
     "autopilot_quota_exceeded": "自動化執行次數已達上限",
     "set_status": "狀態設為",
     "set_priority": "優先順序設為",

@@ -174,6 +174,16 @@ func (q *Queries) DecideProposal(ctx context.Context, arg DecideProposalParams) 
 	return i, err
 }
 
+const deleteWorkspaceProposals = `-- name: DeleteWorkspaceProposals :exec
+DELETE FROM proposal WHERE proposal.workspace_id = $1
+`
+
+// Workspace teardown: proposals have no foreign keys to cascade.
+func (q *Queries) DeleteWorkspaceProposals(ctx context.Context, workspaceID pgtype.UUID) error {
+	_, err := q.db.Exec(ctx, deleteWorkspaceProposals, workspaceID)
+	return err
+}
+
 const getOldestWorkspaceOwnerMember = `-- name: GetOldestWorkspaceOwnerMember :one
 SELECT id, workspace_id, user_id, role, created_at FROM member
 WHERE workspace_id = $1 AND role = 'owner'

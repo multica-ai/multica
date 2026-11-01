@@ -85,3 +85,7 @@ SELECT * FROM member
 WHERE workspace_id = $1 AND role = 'owner'
 ORDER BY created_at ASC, id ASC
 LIMIT 1;
+
+-- name: DeleteWorkspaceProposals :exec
+-- Workspace teardown: proposals have no foreign keys to cascade.
+DELETE FROM proposal WHERE proposal.workspace_id = $1;
