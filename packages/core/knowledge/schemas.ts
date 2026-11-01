@@ -6,6 +6,7 @@ import type {
   KnowledgeDocumentState,
   KnowledgeSearchResult,
   KnowledgeState,
+  KnowledgeStatus,
   KnowledgeVisibility,
 } from "./types";
 
@@ -55,6 +56,20 @@ export const KnowledgeBasesSchema = z
       .array(KnowledgeBaseSchema)
       .nullish()
       .transform((v) => v ?? []),
+  })
+  .loose();
+
+export const KnowledgeStatusSchema = z
+  .object({
+    offered: z.boolean().default(false),
+    reason: z.string().default(""),
+    enabled: z.boolean().default(false),
+    state: KnowledgeStateSchema,
+    knowledge_bases: z
+      .array(KnowledgeBaseSchema)
+      .nullish()
+      .transform((v) => v ?? []),
+    ui_url: z.string().default(""),
   })
   .loose();
 
@@ -113,6 +128,15 @@ export const FALLBACK_KNOWLEDGE_BASES: KnowledgeBases = {
   offered: false,
   state: "unknown",
   knowledge_bases: [],
+};
+
+export const FALLBACK_KNOWLEDGE_STATUS: KnowledgeStatus = {
+  offered: false,
+  reason: "",
+  enabled: false,
+  state: "unknown",
+  knowledge_bases: [],
+  ui_url: "",
 };
 
 export const FALLBACK_KNOWLEDGE_DOCUMENT_LIST: KnowledgeDocumentList = {

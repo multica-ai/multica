@@ -36,6 +36,18 @@ export interface KnowledgeBases {
   knowledge_bases: KnowledgeBase[];
 }
 
+/** The owner and admin view: the state, and the knowledge service's web UI. */
+export interface KnowledgeStatus {
+  offered: boolean;
+  /** Why `offered` is false, for example `not_configured`; empty otherwise. */
+  reason: string;
+  enabled: boolean;
+  state: KnowledgeState;
+  knowledge_bases: KnowledgeBase[];
+  /** The knowledge service's web UI; empty when knowledge is not offered. */
+  ui_url: string;
+}
+
 export interface KnowledgeDocument {
   /** The record id used by publish, discard and delete. Empty for a document
    *  that exists only in the knowledge service (added there directly). */

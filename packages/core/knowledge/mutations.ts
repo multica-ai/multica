@@ -1,11 +1,25 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { api } from "../api";
 import { knowledgeKeys } from "./queries";
-import type { CreateKnowledgeDocumentRequest, KnowledgeDocument } from "./types";
+import type { CreateKnowledgeDocumentRequest, KnowledgeDocument, KnowledgeStatus } from "./types";
 
 // None of these patch a cache optimistically: whether a write lands depends on
 // the knowledge service, which can be offline, and publishing changes what
 // search returns. Each awaits the server and refetches once it has answered.
+
+/**
+ * Provisions knowledge for the workspace. Idempotent and resumable: a failed
+ * setup is retried by calling it again. Owners and admins only.
+ */
+export function useEnableKnowledge(wsId: string) {
+  const qc = useQueryClient();
+  return useMutation<KnowledgeStatus, Error, void>({
+    mutationFn: () => api.enableKnowledge(),
+    onSettled: () => {
+      qc.invalidateQueries({ queryKey: knowledgeKeys.all(wsId) });
+    },
+  });
+}
 
 /**
  * Writes a document. An agent or a member without `publish` creates a draft;

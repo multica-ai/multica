@@ -10,6 +10,7 @@ import {
   canEditAgent,
   canEditComment,
   canEditSkill,
+  canManageKnowledge,
   canManageMembers,
   canUpdateWorkspaceSettings,
 } from "./rules";
@@ -394,6 +395,15 @@ describe("workspace-level rules", () => {
     expect(
       canUpdateWorkspaceSettings({ userId: ALICE, role: "member" }).allowed,
     ).toBe(false);
+  });
+  it("knowledge management is owner and admin only", () => {
+    expect(canManageKnowledge({ userId: ALICE, role: "owner" }).allowed).toBe(true);
+    expect(canManageKnowledge({ userId: ALICE, role: "admin" }).allowed).toBe(true);
+    expect(canManageKnowledge({ userId: ALICE, role: "member" })).toMatchObject({
+      allowed: false,
+      reason: "not_admin_role",
+    });
+    expect(canManageKnowledge({ userId: null, role: null }).allowed).toBe(false);
   });
   it("manage members same gate as settings", () => {
     expect(canManageMembers({ userId: ALICE, role: "admin" }).allowed).toBe(
