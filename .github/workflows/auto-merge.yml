@@ -1,0 +1,46 @@
+name: Auto-merge gated PRs (minimal)
+
+# Minimal version of "merge and act on PRs": merge only PRs whose head
+# checks have no failures. Advisory until branch protection is configured;
+# the job itself never merges a PR with a failing check.
+on:
+  pull_request:
+    types: [opened, reopened, synchronize, ready_for_review]
+  schedule:
+    - cron: "*/15 * * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: write
+
+concurrency:
+  group: auto-merge
+  cancel-in-progress: false
+
+jobs:
+  merge:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: main
+      - name: Merge eligible PRs
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          repo="$GITHUB_REPOSITORY"
+          mapfile -t prs < <(gh pr list --repo "$repo" --state open --json number,isDraft \
+            --jq '.[] | select(.isDraft == false) | .number')
+          for n in "${prs[@]}"; do
+            head=$(gh pr view "$n" --repo "$repo" --json headRefOid --jq .headRefOid)
+            summary=$(gh api "repos/$repo/commits/$head/check-runs" --jq \
+              '{total: .check_runs|length, not_green: [.check_runs[]|select(.conclusion != "success")]|length}')
+            echo "PR #$n: ${summary[total]} checks, ${summary[not_green]} not green"
+            # Merge only when every check on the head commit reports success.
+            if [ "${summary[total]}" -gt 0 ] && [ "${summary[not_green]}" -eq 0 ]; then
+              gh pr merge "$n" --repo "$repo" --squash --delete-branch || true
+            fi
+          done
