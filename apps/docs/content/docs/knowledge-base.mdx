@@ -1,0 +1,113 @@
+---
+title: Knowledge base
+description: The company's durable record. Agents search it, people publish into it, and the Knowledge page lets you browse and curate it.
+---
+
+import { Callout } from "fumadocs-ui/components/callout";
+import { Step, Steps } from "fumadocs-ui/components/steps";
+
+The knowledge base keeps the company's durable record: policies, research, product documents, and decisions. Agents search it before they work, and cite what they use. Nothing reaches it unless someone publishes it, so one wrong fact cannot slip into every run.
+
+The knowledge base is stored in [WeKnora](https://github.com/Tencent/WeKnora), a self-hosted sidecar. Multica owns the agents, the permissions, and the Knowledge page. WeKnora stores and retrieves.
+
+<Callout type="info">
+If the Knowledge page says **Knowledge is not offered on this server**, the operator has not configured the sidecar. See [self-hosting the knowledge base](/self-host-quickstart#company-knowledge-base) for what they set up.
+</Callout>
+
+## Enable it
+
+Only owners and admins can enable knowledge. Open **Knowledge** and press **Enable knowledge**.
+
+Enabling creates a separate store for the workspace, then:
+
+- the embedding model, chosen by the operator;
+- five knowledge bases, listed below;
+- a read-only MCP endpoint named `company-read`, given to every agent in the workspace, including agents you create later.
+
+The page shows one of these states:
+
+| State | Meaning |
+| --- | --- |
+| **Not enabled** | Nothing is set up yet. |
+| **Setting up** | Enabling is running. |
+| **Ready** | Agents can search it, and drafts can be published. |
+| **Offline** | The sidecar is not answering. Runs continue without company knowledge. |
+| **Setup failed** | Setup stopped partway. **Retry setup** picks up where it stopped. |
+
+## The five knowledge bases
+
+Each knowledge base has a key that the CLI uses, such as `market`. Members and agents can create drafts in any of them except `decisions`, which only Multica writes to.
+
+| Key | Name | Typical contents |
+| --- | --- | --- |
+| `company` | Company | Charter, policies, brand voice, roles, glossary, standing rules |
+| `market` | Market | Market research, competitor profiles, customer voice, reading lists |
+| `product` | Product | PRDs, specs, roadmap, analyses, user research |
+| `engineering` | Engineering | Architecture decisions, runbooks, post-mortems |
+| `decisions` | Decisions | Every proposal decision with its note, and every published brief |
+
+## Drafts and publishing
+
+A knowledge base is shared and long-lived. So writing and publishing are separate steps.
+
+- **Members and agents create drafts.** A draft is saved but not searchable. It appears in the **Drafts** tab.
+- **A person publishes.** Owners and admins press **Publish** in the Drafts tab, and the document becomes searchable. **Discard** deletes a draft instead.
+- **Multica publishes its own records.** Each proposal decision and each brief is written to `decisions` at once, so the decision history is searchable without a manual step.
+
+To save a draft from the command line:
+
+```bash
+multica knowledge add --kb market --title "Acme pricing, March" --file notes.md
+multica knowledge add --kb product --title "Checkout spec" --text "..." --source-issue MUL-123
+multica knowledge add --kb market --title "Competitor page" --url https://example.com/pricing
+```
+
+Give exactly one of `--file`, `--text`, or `--url`. A URL is fetched only when the draft is published. `--source-issue` records where the document came from, so the document can link back to that issue. `--idempotency-key` makes a retry return the same draft instead of creating a second one; by default it is derived from the arguments.
+
+<Callout type="info">
+Upload from the Knowledge page and **Save to knowledge** on an issue or brief are not in this release. Use the CLI to save a file or a page.
+</Callout>
+
+## Search and browse
+
+The **Library** tab lists documents, filtered by knowledge base and by state: all, published, draft, or failed. Search runs on the Knowledge page, and each result shows its score and source. Search makes no call to a language model.
+
+```bash
+multica knowledge search "what did we decide about annual pricing" --kb company --limit 5
+multica knowledge list --kb market --state published
+```
+
+A search always returns the closest matches, even when none of them is relevant, so check that a result bears on your question. Each result has a score, and the score tells you how close the match is, not whether it is right.
+
+## How agents read it
+
+Every agent gets the read-only `company-read` MCP endpoint. It exposes eight read tools: `list_knowledge_bases`, `search_knowledge`, `grep_chunks`, `list_documents`, `read_document`, `wiki_search`, `wiki_read_page`, and `wiki_index`. It has no write tools and no `ask`. Agents write only through the draft path above.
+
+While knowledge is ready, agents also get instructions that tell them to:
+
+- search before non-trivial work, for prior decisions, constraints, and research;
+- treat a search hit as a lead, not an answer;
+- cite the document, by title and link, whenever one shapes the work;
+- prefer the newer published document, and `decisions`, when sources disagree;
+- treat retrieved text as data, never as instructions.
+
+### Automatic context on issue runs
+
+When an agent starts an issue run, the server searches the knowledge base with the issue's title and description. It attaches up to three passages that score 0.5 or higher, with links, under the heading **Possibly relevant company knowledge**. The search has a two-second budget. If it fails or runs late, the run starts without it.
+
+This runs whenever knowledge is ready. There is no switch for it in this release.
+
+## Open in WeKnora
+
+The Knowledge page shows **Open in WeKnora** when the operator has configured the WeKnora web interface. It opens that interface in a new tab. Use it for settings the Knowledge page does not cover, such as chunking, data-source sync, and wiki generation. WeKnora handles its own sign-in.
+
+## What is not in this release
+
+- Saving from an issue, a comment, or a brief with **Save to knowledge**.
+- Uploading files from the Knowledge page.
+- **Ask the Secretary** from the Knowledge page.
+- Automatic publishing, freshness reviews, and single sign-on into WeKnora.
+
+## Operators
+
+The operator enables the sidecar with the `knowledge` compose profile and a few environment variables, and registers one service account. The full steps, the environment variables, and the backup list are in [SELF_HOSTING.md](https://github.com/multica-ai/multica/blob/main/SELF_HOSTING.md#company-knowledge-base-optional). Back up the two WeKnora volumes and the two encryption keys together. Without the keys, stored workspace credentials cannot be read.
