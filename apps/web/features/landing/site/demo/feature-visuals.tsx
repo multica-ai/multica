@@ -3,42 +3,49 @@
 import type { ReactNode } from "react";
 import {
   ArrowUp,
-  BookOpen,
+  BookOpenText,
   ChevronDown,
-  ChevronRight,
   Cloud,
   CornerDownRight,
-  FileText,
-  FolderKanban,
   Hash,
   Laptop,
-  Monitor,
   Plus,
-  Search,
   Server,
+  SlidersHorizontal,
+  Workflow,
   Zap,
   type IconComponent,
 } from "@multica/ui/icons";
 import { cn } from "@multica/ui/lib/utils";
 import { MulticaIcon } from "@multica/ui/components/common/multica-icon";
 import { StatusIcon } from "@multica/views/issues/components/status-icon";
-import { PriorityIcon } from "@multica/views/issues/components/priority-icon";
 import type { Status } from "./hero-board";
 import {
   AppWindow,
   Avatar,
   BACKEND,
+  BreadcrumbHeader,
   CONTENT,
   FRONTEND,
+  HeaderButton,
   LEAD,
+  LIST,
+  LIST_CELL,
+  ListGroup,
+  ListHead,
+  ListRow,
   MIA,
+  NameCell,
+  PageHeader,
   PROVIDER_MARKS,
+  ProviderStack,
   QA,
   RAISED,
   TRIAGE,
   Working,
   ZoomCanvas,
   type Actor,
+  type Space,
 } from "./mock-kit";
 
 /*
@@ -52,37 +59,13 @@ import {
 const CANVAS = { width: 440, height: 330 } as const;
 const BLEED = 48;
 
-function Screen({ active, children }: { active: string; children: ReactNode }) {
+function Screen({ active, children }: { active: Space; children: ReactNode }) {
   return (
     <ZoomCanvas {...CANVAS}>
       <AppWindow className="top-8 left-8 -right-12 -bottom-12" active={active} bleed={BLEED}>
         {children}
       </AppWindow>
     </ZoomCanvas>
-  );
-}
-
-export function Header({ icon: Icon, children }: { icon: IconComponent; children: ReactNode }) {
-  return (
-    <div className="flex h-11 shrink-0 items-center gap-2 border-b border-border px-4">
-      <Icon className="size-4 shrink-0 text-muted-foreground" />
-      {children}
-    </div>
-  );
-}
-
-function Marks({ names }: { names: string[] }) {
-  return (
-    <span className="flex shrink-0 -space-x-1">
-      {names.map((name) => {
-        const Mark = PROVIDER_MARKS.get(name);
-        return (
-          <span key={name} className="inline-flex size-5 items-center justify-center rounded-full bg-background ring-1 ring-border">
-            {Mark ? <Mark className="size-3" /> : null}
-          </span>
-        );
-      })}
-    </span>
   );
 }
 
@@ -95,73 +78,46 @@ export function Chip({ actor }: { actor: Actor }) {
   );
 }
 
-export function GroupBand({ title, count }: { title: string; count: number }) {
-  return (
-    <div className="flex h-8 shrink-0 items-center gap-2 border-b border-border bg-muted/40 px-4 text-caption">
-      <span className="font-semibold">{title}</span>
-      <span className="tabular-nums text-muted-foreground">{count}</span>
-    </div>
-  );
-}
-
 // --- Runtimes ---------------------------------------------------------------
 
-type Runtime = { name: string; icon: IconComponent; detail: string; agents: string[]; load: string; fresh?: boolean };
+type Runtime = { name: string; icon: IconComponent; detail: string; tools: string[]; fresh?: boolean };
 
 const MACHINES: Runtime[] = [
-  { name: "build-02", icon: Server, detail: "Linux · Leo Park", agents: ["Claude Code", "Codex", "OpenCode"], load: "Connected", fresh: true },
-  { name: "Mia’s MacBook Pro", icon: Laptop, detail: "macOS · This device", agents: ["Claude Code", "Codex", "Cursor"], load: "1 running" },
-  { name: "build-01", icon: Server, detail: "Linux · Leo Park", agents: ["Claude Code", "Codex"], load: "2 running" },
-  { name: "Sam’s Mac mini", icon: Monitor, detail: "macOS · Sam Rivera", agents: ["Claude Code"], load: "Idle" },
+  { name: "build-02", icon: Server, detail: "Linux · Leo Park", tools: ["Claude Code", "Codex", "OpenCode"], fresh: true },
+  { name: "Mia’s MacBook Pro", icon: Laptop, detail: "This device", tools: ["Claude Code", "Cursor"] },
 ];
 
-const CLOUD: Runtime[] = [
-  { name: "Multica Cloud", icon: Cloud, detail: "Managed sandboxes", agents: ["Claude Code", "Codex"], load: "1 running" },
-];
+const CLOUD: Runtime[] = [{ name: "Multica Cloud", icon: Cloud, detail: "Cloud sandboxes", tools: ["Claude Code", "Codex"] }];
+
+const RUNTIME_COLUMNS = "minmax(0,1fr) auto";
 
 function RuntimeRow({ runtime }: { runtime: Runtime }) {
   return (
-    <div className={cn("flex h-12 shrink-0 items-center gap-3 border-b border-border px-4", runtime.fresh && "bg-brand/5")}>
-      <span className={cn(RAISED, "relative flex size-7 shrink-0 items-center justify-center")}>
-        <runtime.icon className="size-3.5 text-muted-foreground" />
-        <span className="absolute -right-0.5 -bottom-0.5 size-2 rounded-full bg-success ring-2 ring-background" />
+    <ListRow columns={RUNTIME_COLUMNS} className={cn(runtime.fresh && "bg-brand/5")}>
+      <NameCell
+        icon={<runtime.icon className="size-4 shrink-0 text-muted-foreground" />}
+        title={runtime.name}
+        description={runtime.detail}
+      />
+      <span className={LIST_CELL}>
+        <ProviderStack names={runtime.tools} />
       </span>
-      <span className="min-w-0 flex-1">
-        <span className="block truncate text-label font-medium">{runtime.name}</span>
-        <span className="block truncate text-caption text-muted-foreground">{runtime.detail}</span>
-      </span>
-      <Marks names={runtime.agents} />
-      <span
-        className={cn(
-          "w-[72px] shrink-0 text-right text-caption whitespace-nowrap tabular-nums",
-          runtime.fresh ? "font-medium text-brand" : runtime.load === "Idle" && "text-muted-foreground",
-        )}
-      >
-        {runtime.load}
-      </span>
-    </div>
+    </ListRow>
   );
 }
 
 export function RuntimesVisual() {
   return (
-    <Screen active="runtimes">
-      <Header icon={Monitor}>
-        <span className="text-label font-medium">Runtimes</span>
-        <span className="text-caption tabular-nums text-muted-foreground">5</span>
-      </Header>
-      <div className="flex shrink-0 items-center gap-1 px-3 py-2.5">
-        <span className="flex h-7 items-center rounded-md border border-border bg-muted px-2.5 text-caption font-medium">All</span>
-        <span className="flex h-7 items-center rounded-md px-2.5 text-caption text-muted-foreground">Machines</span>
-        <span className="flex h-7 items-center rounded-md px-2.5 text-caption text-muted-foreground">Cloud</span>
-        <Search className="ml-auto size-3.5 text-muted-foreground" />
-      </div>
-      <div className="border-t border-border">
-        <GroupBand title="Machines" count={MACHINES.length} />
+    <Screen active="team">
+      <PageHeader icon={Server} title="All runtimes" filter={false}>
+        <HeaderButton icon={Plus} />
+      </PageHeader>
+      <div className={LIST}>
+        <ListGroup title="Machines" count={MACHINES.length} />
         {MACHINES.map((runtime) => (
           <RuntimeRow key={runtime.name} runtime={runtime} />
         ))}
-        <GroupBand title="Cloud services" count={CLOUD.length} />
+        <ListGroup title="Cloud services" count={CLOUD.length} />
         {CLOUD.map((runtime) => (
           <RuntimeRow key={runtime.name} runtime={runtime} />
         ))}
@@ -197,7 +153,7 @@ function Field({ label, children }: { label: string; children: ReactNode }) {
 
 function Select({ children }: { children: ReactNode }) {
   return (
-    <div className="flex h-8 items-center gap-2 rounded-md border border-border bg-background px-2.5 text-caption">
+    <div className="flex h-8 items-center gap-1.5 rounded-md border border-border bg-background px-2 text-caption">
       <span className="flex min-w-0 flex-1 items-center gap-1.5 truncate">{children}</span>
       <ChevronDown className="size-3.5 shrink-0 text-muted-foreground" />
     </div>
@@ -206,14 +162,17 @@ function Select({ children }: { children: ReactNode }) {
 
 export function WorkflowVisual() {
   return (
-    <Screen active="projects">
-      <Header icon={FolderKanban}>
-        <span className="flex items-center gap-1.5 text-caption text-muted-foreground">
-          Workflows <ChevronRight className="size-3" /> <span className="font-medium text-foreground">Ship a feature</span>
-        </span>
-      </Header>
-      <div className="flex min-h-0 flex-1 gap-4 p-3">
-        <ol className="flex w-[176px] shrink-0 flex-col max-sm:w-[148px] gap-1.5 self-start rounded-xl bg-muted/40 p-1.5">
+    <Screen active="settings">
+      <BreadcrumbHeader
+        parent={
+          <>
+            <Workflow className="size-3.5" /> Workflows
+          </>
+        }
+        leaf="Ship a feature"
+      />
+      <div className="flex min-h-0 flex-1 gap-3 p-3">
+        <ol className="flex w-[150px] shrink-0 flex-col gap-1.5 self-start rounded-xl bg-muted/40 p-1.5">
           {STEPS.map((step) => (
             <li key={step.key} className={cn(RAISED, "px-2.5 py-2", step === SELECTED_STEP && "ring-2 ring-brand/50")}>
               <p className="flex items-center gap-2">
@@ -224,7 +183,6 @@ export function WorkflowVisual() {
                 {step.handler ? (
                   <>
                     <CornerDownRight className="size-3 shrink-0" />
-                    <Avatar actor={step.handler} size={16} />
                     <span className="truncate text-foreground">{step.handler.name}</span>
                   </>
                 ) : (
@@ -249,20 +207,9 @@ export function WorkflowVisual() {
               <StepIcon step={STEPS[2]!} className="h-3.5 w-3.5 shrink-0" /> Code review
             </Select>
           </Field>
-          <Field label="In this step">
-            <div className={cn(RAISED, "px-2.5 py-2.5")}>
-              <div className="flex items-center justify-between gap-2">
-                <span className="flex min-w-0 items-center gap-1.5">
-                  <PriorityIcon priority="high" />
-                  <span className="truncate text-caption text-muted-foreground">ACM-136</span>
-                </span>
-                <Working />
-              </div>
-              <p className="mt-1 line-clamp-2 text-label leading-snug font-medium">Move auth webhooks onto the job queue</p>
-              <p className="mt-2 flex items-center gap-1.5 text-caption">
-                <Avatar actor={BACKEND} size={16} />
-                <span className="truncate">Backend Agent</span>
-              </p>
+          <Field label="Handoff instructions">
+            <div className="rounded-md border border-border bg-background px-2.5 py-2 text-caption leading-snug">
+              Build to the spec, then open a pull request.
             </div>
           </Field>
         </div>
@@ -391,100 +338,95 @@ export function ChatVisual() {
 
 // --- Autopilots -------------------------------------------------------------
 
-const AUTOPILOTS: { name: string; when: string; agent: Actor }[] = [
-  { name: "Nightly triage", when: "Every day · 02:00", agent: TRIAGE },
-  { name: "Flaky test sweep", when: "Every 6 hours", agent: QA },
-  { name: "Dependency bumps", when: "Mondays · 09:00", agent: BACKEND },
-  { name: "Weekly digest", when: "Fridays · 17:00", agent: CONTENT },
-  { name: "Visual regression pass", when: "Every release", agent: FRONTEND },
+const AUTOPILOTS: { name: string; next: string; agent: Actor }[] = [
+  { name: "Nightly triage", next: "Tonight 02:00", agent: TRIAGE },
+  { name: "Flaky tests", next: "In 4 hours", agent: QA },
+  { name: "Dependency bumps", next: "Mon 09:00", agent: BACKEND },
+  { name: "Weekly digest", next: "Fri 17:00", agent: CONTENT },
+  { name: "Visual checks", next: "Next release", agent: FRONTEND },
 ];
 
-function Toggle() {
-  return (
-    <span className="flex h-[18px] w-8 shrink-0 items-center rounded-full bg-primary p-px">
-      <span className="ml-auto size-4 rounded-full bg-background" />
-    </span>
-  );
-}
+const AUTOPILOT_COLUMNS = "minmax(0,1fr) 44px 84px";
 
 export function AutopilotsVisual() {
   return (
     <Screen active="autopilots">
-      <Header icon={Zap}>
-        <span className="text-label font-medium">Autopilots</span>
-        <span className="text-caption tabular-nums text-muted-foreground">{AUTOPILOTS.length}</span>
-        <Plus className="ml-auto size-4 text-muted-foreground" />
-      </Header>
-      <ul>
+      <PageHeader icon={Zap} title="All autopilots">
+        <HeaderButton icon={SlidersHorizontal} />
+        <HeaderButton icon={Plus} />
+      </PageHeader>
+      <div className={LIST}>
+        <ListHead columns={AUTOPILOT_COLUMNS}>
+          <span>Name</span>
+          <span>Agent</span>
+          <span>Next run</span>
+        </ListHead>
         {AUTOPILOTS.map((autopilot) => (
-          <li key={autopilot.name} className="flex h-14 items-center gap-3 border-b border-border px-4">
-            <Toggle />
-            <span className="min-w-0 flex-1">
-              <span className="block truncate text-label font-medium">{autopilot.name}</span>
-              <span className="block truncate text-caption text-muted-foreground tabular-nums">{autopilot.when}</span>
+          <ListRow key={autopilot.name} columns={AUTOPILOT_COLUMNS}>
+            <NameCell title={autopilot.name} />
+            <span className={LIST_CELL}>
+              <Avatar actor={autopilot.agent} size={20} />
             </span>
-            <span className="flex max-w-[128px] shrink-0">
-              <Chip actor={autopilot.agent} />
+            <span className={cn(LIST_CELL, "tabular-nums")}>
+              <span className="truncate">{autopilot.next}</span>
             </span>
-          </li>
+          </ListRow>
         ))}
-      </ul>
+      </div>
     </Screen>
   );
 }
 
 // --- Skills -----------------------------------------------------------------
 
-const SKILLS = ["Write release notes", "Review a migration", "Triage a bug report", "Deploy checklist", "Write a changelog", "Reply to a customer"];
-const SKILL_RULES = ["Group changes by product area.", "Link every pull request.", "Lead with what users can do now.", "Keep it under 200 words."];
-const SKILL_USERS: Actor[] = [LEAD, BACKEND, FRONTEND, CONTENT];
+const SKILLS: { name: string; agents: Actor[] }[] = [
+  { name: "Write release notes", agents: [LEAD, CONTENT, FRONTEND, BACKEND] },
+  { name: "Review a migration", agents: [BACKEND, QA] },
+  { name: "Triage a bug report", agents: [TRIAGE, QA, LEAD] },
+  { name: "Deploy checklist", agents: [BACKEND] },
+  { name: "Reply to a customer", agents: [CONTENT, TRIAGE] },
+];
+
+const SKILL_COLUMNS = "minmax(0,1fr) 84px";
+
+function UsedBy({ agents }: { agents: Actor[] }) {
+  const extra = agents.length - 3;
+  return (
+    <span className="flex items-center -space-x-1.5">
+      {agents.slice(0, 3).map((agent) => (
+        <span key={agent.name} className="inline-flex rounded-full ring-2 ring-page-canvas">
+          <Avatar actor={agent} size={20} />
+        </span>
+      ))}
+      {extra > 0 ? (
+        <span className="inline-flex size-5 items-center justify-center rounded-full bg-muted text-micro font-medium text-muted-foreground ring-2 ring-page-canvas">
+          +{extra}
+        </span>
+      ) : null}
+    </span>
+  );
+}
 
 export function SkillsVisual() {
   return (
-    <Screen active="skills">
-      <div className="flex min-h-0 flex-1">
-        <div className="w-40 shrink-0 border-r border-border bg-muted/40 p-2">
-          <p className="flex h-8 items-center gap-2 px-2 text-label font-medium">
-            <BookOpen className="size-4 text-muted-foreground" /> Skills
-          </p>
-          <ul className="mt-1 flex flex-col gap-0.5">
-            {SKILLS.map((skill, index) => (
-              <li
-                key={skill}
-                className={cn(
-                  "truncate rounded-md px-2 py-1.5 text-caption",
-                  index === 0 ? cn(RAISED, "font-medium") : "text-muted-foreground",
-                )}
-              >
-                {skill}
-              </li>
-            ))}
-          </ul>
-        </div>
-        <div className="flex min-w-0 flex-1 flex-col px-5 py-4">
-          <p className="flex items-center gap-1.5 text-caption text-muted-foreground">
-            <FileText className="size-3.5 shrink-0" /> SKILL.md
-          </p>
-          <p className="mt-1.5 truncate text-title-sm font-semibold">Write release notes</p>
-          <div className="mt-1.5 flex items-center gap-2 text-caption whitespace-nowrap text-muted-foreground">
-            <span className="flex -space-x-1">
-              {SKILL_USERS.map((agent) => (
-                <span key={agent.name} className="rounded-full ring-2 ring-background">
-                  <Avatar actor={agent} size={20} />
-                </span>
-              ))}
+    <Screen active="team">
+      <PageHeader icon={BookOpenText} title="All skills">
+        <HeaderButton icon={SlidersHorizontal} />
+        <HeaderButton icon={Plus} />
+      </PageHeader>
+      <div className={LIST}>
+        <ListHead columns={SKILL_COLUMNS}>
+          <span>Name</span>
+          <span>Used by</span>
+        </ListHead>
+        {SKILLS.map((skill, index) => (
+          <ListRow key={skill.name} columns={SKILL_COLUMNS} className={cn(index === 0 && "bg-surface-selected")}>
+            <NameCell icon={<BookOpenText className="size-4 shrink-0 text-muted-foreground" />} title={skill.name} />
+            <span className={LIST_CELL}>
+              <UsedBy agents={skill.agents} />
             </span>
-            4 agents
-          </div>
-          <ul className="mt-4 flex flex-col gap-1.5 border-t border-border pt-4">
-            {SKILL_RULES.map((rule) => (
-              <li key={rule} className="flex gap-2 text-label">
-                <span className="mt-2 size-1 shrink-0 rounded-full bg-foreground" />
-                {rule}
-              </li>
-            ))}
-          </ul>
-        </div>
+          </ListRow>
+        ))}
       </div>
     </Screen>
   );

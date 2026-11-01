@@ -198,7 +198,7 @@ const FEATURES: { id: string; title: string; body: string; alt: string; visual: 
     id: "runtimes",
     title: "Runs on your machines, or in our cloud",
     body: "Connect a laptop or a server with one command and Multica finds the coding agents installed on it. Or run them in managed cloud sandboxes.",
-    alt: "The Runtimes page listing three machines and Multica Cloud, all online, with the coding agents on each and what they are running",
+    alt: "The Runtimes page listing two machines and Multica Cloud, with the coding tools found on each",
     visual: RuntimesVisual,
   },
   {
@@ -219,14 +219,14 @@ const FEATURES: { id: string; title: string; body: string; alt: string; visual: 
     id: "autopilots",
     title: "Autopilots run on a schedule",
     body: "Upgrades, triage, and reports file themselves and land with an agent, every hour or every Monday.",
-    alt: "The Autopilots list: four scheduled jobs, each with its schedule, its agent, and its next run",
+    alt: "The Autopilots list: five scheduled jobs, each with its agent and its next run",
     visual: AutopilotsVisual,
   },
   {
     id: "skills",
     title: "Skills the whole team shares",
     body: "Write down how your team does a thing once, and every agent follows it.",
-    alt: "A Write release notes skill with its rules, used by four agents",
+    alt: "The Skills list: five skills the team wrote, each with the agents that use it",
     visual: SkillsVisual,
   },
 ];

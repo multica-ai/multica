@@ -1,13 +1,31 @@
 "use client";
 
 import type { ReactNode } from "react";
-import { Check, ChevronDown, CircleCheck, GitBranch, GitPullRequest, Laptop, Lock, Monitor, Plus, Server, X, type IconComponent } from "@multica/ui/icons";
+import { Check, ChevronDown, CircleCheck, GitBranch, GitPullRequest, Laptop, Lock, Plus, Server, X, type IconComponent } from "@multica/ui/icons";
 import { cn } from "@multica/ui/lib/utils";
 import { StatusIcon } from "@multica/views/issues/components/status-icon";
 import { PriorityIcon } from "@multica/views/issues/components/priority-icon";
 import { ProviderLogo } from "@multica/views/runtimes/components/provider-logo";
-import { Chip, GroupBand } from "./feature-visuals";
-import { AppWindow, Avatar, BACKEND, FLOATING, LEO, PROVIDER_MARKS, RAISED, Working, ZoomCanvas } from "./mock-kit";
+import { Chip } from "./feature-visuals";
+import {
+  AppWindow,
+  Avatar,
+  BACKEND,
+  FLOATING,
+  HeaderButton,
+  LEO,
+  LIST,
+  LIST_CELL,
+  ListGroup,
+  ListHead,
+  ListRow,
+  NameCell,
+  Online,
+  PageHeader,
+  ProviderStack,
+  Working,
+  ZoomCanvas,
+} from "./mock-kit";
 
 /*
  * Mockups for the Multica Cloud page: agents that run on cloud agent services
@@ -38,35 +56,11 @@ function BrowserWindow({ path, className, children }: { path: string; className:
   );
 }
 
-function Marks({ names }: { names: string[] }) {
-  return (
-    <span className="flex shrink-0 -space-x-1">
-      {names.map((name) => {
-        const Mark = PROVIDER_MARKS.get(name);
-        return (
-          <span key={name} className="inline-flex size-5 items-center justify-center rounded-full bg-background ring-1 ring-border">
-            {Mark ? <Mark className="size-3" /> : null}
-          </span>
-        );
-      })}
-    </span>
-  );
-}
-
-function Tile({ online, muted, children }: { online?: boolean; muted?: boolean; children: ReactNode }) {
-  return (
-    <span className={cn(RAISED, "relative flex size-7 shrink-0 items-center justify-center", muted && "opacity-60")}>
-      {children}
-      {online ? <span className="absolute -right-0.5 -bottom-0.5 size-2 rounded-full bg-success ring-2 ring-background" /> : null}
-    </span>
-  );
-}
-
-type Machine = { icon: IconComponent; name: string; detail: string; agents: string[]; load: string };
+type Machine = { icon: IconComponent; name: string; detail: string; tools: string[]; agents: number; workload: string; tag?: string };
 
 const MACHINES: Machine[] = [
-  { icon: Laptop, name: "Mia’s MacBook Pro", detail: "macOS · Mia Chen", agents: ["Claude Code", "Cursor"], load: "1 running" },
-  { icon: Server, name: "build-01", detail: "Linux · Leo Park", agents: ["Claude Code", "Codex"], load: "Idle" },
+  { icon: Laptop, name: "Mia’s MacBook Pro", detail: "macOS", tools: ["Claude Code", "Cursor"], agents: 2, workload: "1 running · 0 queued", tag: "This device" },
+  { icon: Server, name: "build-01", detail: "Linux · Leo Park", tools: ["Claude Code", "Codex"], agents: 3, workload: "All idle" },
 ];
 
 const COMING: { provider: string; name: string; vendor: string }[] = [
@@ -74,93 +68,112 @@ const COMING: { provider: string; name: string; vendor: string }[] = [
   { provider: "claude", name: "Claude Managed Agents", vendor: "Anthropic" },
 ];
 
-function RuntimeRow({ tile, name, detail, trailing, compact }: { tile: ReactNode; name: string; detail: string; trailing: ReactNode; compact?: boolean }) {
+const WIDE_COLUMNS = "minmax(0,1fr) 64px 48px 120px 80px";
+const COMPACT_COLUMNS = "minmax(0,1fr) 88px";
+
+/** Name, harness, agents, workload, status; the compact list keeps the bare name and status. */
+function RuntimeRow({ compact, name, cells, className }: { compact?: boolean; name: ReactNode; cells: [ReactNode, ReactNode, ReactNode, ReactNode]; className?: string }) {
+  const [harness, agents, workload, status] = cells;
   return (
-    <div className={cn("flex shrink-0 items-center gap-3 border-b border-border px-4", compact ? "h-12" : "h-[52px]")}>
-      {tile}
-      <span className="min-w-0 flex-1">
-        <span className="block truncate text-label font-medium">{name}</span>
-        <span className="block truncate text-caption text-muted-foreground">{detail}</span>
-      </span>
-      {trailing}
-    </div>
+    <ListRow columns={compact ? COMPACT_COLUMNS : WIDE_COLUMNS} className={className}>
+      {name}
+      {compact ? null : (
+        <>
+          <span className={LIST_CELL}>{harness}</span>
+          <span className={cn(LIST_CELL, "justify-end tabular-nums")}>{agents}</span>
+          <span className={cn(LIST_CELL, "tabular-nums")}>{workload}</span>
+        </>
+      )}
+      <span className={LIST_CELL}>{status}</span>
+    </ListRow>
   );
 }
+
+const EMPTY = <span className="text-faint-foreground">—</span>;
 
 function RuntimesPage({ compact }: { compact?: boolean }) {
   return (
     <>
-      <div className="flex h-11 shrink-0 items-center gap-2 border-b border-border px-4">
-        <Monitor className="size-4 text-muted-foreground" />
-        <span className="flex-1 text-label font-medium">Runtimes</span>
-        <span className="flex h-7 items-center gap-1 rounded-md bg-foreground px-2.5 text-caption font-medium text-background">
-          <Plus className="size-3.5" />
-          Add
-        </span>
+      <PageHeader icon={Server} title="All runtimes" filter={false}>
+        <HeaderButton icon={Plus} />
+      </PageHeader>
+      <div className={LIST}>
+        <ListHead columns={compact ? COMPACT_COLUMNS : WIDE_COLUMNS}>
+          <span>Name</span>
+          {compact ? null : (
+            <>
+              <span>Harness</span>
+              <span className="text-right">Agents</span>
+              <span>Workload</span>
+            </>
+          )}
+          <span>Status</span>
+        </ListHead>
+        <ListGroup title="Machines" count={MACHINES.length} />
+        {MACHINES.map((machine) => (
+          <RuntimeRow
+            key={machine.name}
+            compact={compact}
+            name={
+              <NameCell
+                icon={<machine.icon className="size-4 shrink-0 text-muted-foreground" />}
+                title={machine.name}
+                tag={compact ? undefined : machine.tag}
+                description={compact ? undefined : machine.detail}
+              />
+            }
+            cells={[
+              <ProviderStack key="harness" names={machine.tools} />,
+              machine.agents,
+              <span key="workload" className={cn("truncate", machine.workload !== "All idle" && "text-foreground")}>
+                {machine.workload}
+              </span>,
+              <Online key="status" />,
+            ]}
+          />
+        ))}
+        <ListGroup title="Cloud services" count={1} />
+        <RuntimeRow
+          compact={compact}
+          className="bg-surface-selected"
+          name={<NameCell icon={<ProviderLogo provider="qoder_cloud" className="size-4 shrink-0" />} title={QODER} description={compact ? undefined : "By Qoder"} />}
+          cells={[
+            EMPTY,
+            3,
+            <span key="workload" className="truncate text-foreground">2 running · 1 queued</span>,
+            <>
+              <span className="size-1.5 shrink-0 rounded-full bg-success" />
+              <span className="truncate text-foreground">Online</span>
+            </>,
+          ]}
+        />
+        {COMING.map((service) => (
+          <RuntimeRow
+            key={service.provider}
+            compact={compact}
+            name={
+              <NameCell
+                icon={
+                  <span className="shrink-0 opacity-60">
+                    <ProviderLogo provider={service.provider} className="size-4" />
+                  </span>
+                }
+                title={service.name}
+                description={compact ? undefined : `By ${service.vendor}`}
+                muted
+              />
+            }
+            cells={[
+              null,
+              null,
+              null,
+              <span key="status" className="rounded-md bg-secondary px-1.5 py-0.5 text-micro font-medium text-secondary-foreground">
+                Coming soon
+              </span>,
+            ]}
+          />
+        ))}
       </div>
-      <GroupBand title="Cloud services" count={3} />
-      <RuntimeRow
-        compact={compact}
-        tile={
-          <Tile online>
-            <ProviderLogo provider="qoder_cloud" className="size-4" />
-          </Tile>
-        }
-        name={QODER}
-        detail="By Qoder"
-        trailing={
-          <span className="flex shrink-0 items-center gap-3">
-            {compact ? null : <span className="text-caption text-muted-foreground tabular-nums">2 of 3 running · 1 queued</span>}
-            <span className="flex items-center gap-1.5 text-caption">
-              <span className="size-1.5 rounded-full bg-success" />
-              Online
-            </span>
-          </span>
-        }
-      />
-      {COMING.map((service) => (
-        <RuntimeRow
-          key={service.provider}
-          compact={compact}
-          tile={
-            <Tile muted>
-              <ProviderLogo provider={service.provider} className="size-4" />
-            </Tile>
-          }
-          name={service.name}
-          detail={`By ${service.vendor}`}
-          trailing={
-            <span className="shrink-0 rounded-md bg-muted px-1.5 py-0.5 text-micro font-medium text-muted-foreground">Coming soon</span>
-          }
-        />
-      ))}
-      <GroupBand title="Machines" count={MACHINES.length} />
-      {MACHINES.map((machine) => (
-        <RuntimeRow
-          key={machine.name}
-          compact={compact}
-          tile={
-            <Tile online>
-              <machine.icon className="size-3.5 text-muted-foreground" />
-            </Tile>
-          }
-          name={machine.name}
-          detail={machine.detail}
-          trailing={
-            <span className="flex shrink-0 items-center gap-3">
-              {compact ? null : <Marks names={machine.agents} />}
-              <span
-                className={cn(
-                  "w-[60px] text-right text-caption whitespace-nowrap tabular-nums",
-                  machine.load === "Idle" && "text-muted-foreground",
-                )}
-              >
-                {machine.load}
-              </span>
-            </span>
-          }
-        />
-      ))}
     </>
   );
 }
@@ -230,7 +243,7 @@ export function CloudScene() {
       <div className="relative aspect-[440/440] sm:hidden">
         <ZoomCanvas {...SCENE_NARROW}>
           <BrowserWindow path="multica.ai/acme/runtimes" className="top-6 left-6 -right-10 -bottom-10">
-            <AppWindow className="inset-0 rounded-none border-0 shadow-none" active="runtimes" bleed={40}>
+            <AppWindow className="inset-0 rounded-none border-0 shadow-none" active="team" bleed={40}>
               <RuntimesPage compact />
             </AppWindow>
           </BrowserWindow>
@@ -240,7 +253,7 @@ export function CloudScene() {
       <div className="relative hidden aspect-[1100/600] sm:block">
         <ZoomCanvas {...SCENE}>
           <BrowserWindow path="multica.ai/acme/runtimes" className="top-10 right-[19%] -bottom-12 left-[7%]">
-            <AppWindow className="inset-0 rounded-none border-0 shadow-none" active="runtimes" bleed={48}>
+            <AppWindow className="inset-0 rounded-none border-0 shadow-none" active="team" bleed={48}>
               <RuntimesPage />
             </AppWindow>
           </BrowserWindow>

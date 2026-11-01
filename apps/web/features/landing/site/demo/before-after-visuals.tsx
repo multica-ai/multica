@@ -1,24 +1,27 @@
 "use client";
 
-import { Fragment, type CSSProperties, type ReactNode } from "react";
+import { type CSSProperties, type ReactNode } from "react";
 import {
   Bot,
   Check,
-  ChevronRight,
-  CircleUser,
+  ChevronDown,
+  Folder,
   Inbox,
   ListTodo,
-  Server,
   Zap,
   type IconComponent,
 } from "@multica/ui/icons";
+import { ShimmerText } from "@multica/ui/components/common/shimmer-text";
 import { cn } from "@multica/ui/lib/utils";
 import { StatusIcon } from "@multica/views/issues/components/status-icon";
-import { GroupBand } from "./feature-visuals";
+import { PriorityIcon } from "@multica/views/issues/components/priority-icon";
+import { TimelineRow, type Priority, type Status, type TimelineItem } from "./hero-board";
 import {
   AppWindow,
   Avatar,
+  BreadcrumbHeader,
   FLOATING,
+  PageHeader,
   BACKEND,
   CONTENT,
   FRONTEND,
@@ -29,8 +32,8 @@ import {
   RESEARCH,
   SAM,
   TRIAGE,
-  Working,
   type Actor,
+  type Space,
 } from "./mock-kit";
 
 /*
@@ -102,7 +105,7 @@ const PROMPT = "rounded bg-[#fdf3c4] px-1.5 py-1 whitespace-normal! text-[#6b5a1
 
 // --- After: the Multica app ---------------------------------------------------
 
-function App({ active, children }: { active: string; children: ReactNode }) {
+function App({ active, children }: { active: Space; children: ReactNode }) {
   return (
     <AppWindow className="top-[12%] right-[4%] -bottom-6 left-[52%]" active={active}>
       {children}
@@ -110,8 +113,13 @@ function App({ active, children }: { active: string; children: ReactNode }) {
   );
 }
 
-function AppHeader({ children }: { children: ReactNode }) {
-  return <div className="flex h-11 shrink-0 items-center gap-2 border-b border-border px-4">{children}</div>;
+function ProjectCrumb({ name }: { name: string }) {
+  return (
+    <>
+      <Folder className="size-3.5 shrink-0" />
+      {name}
+    </>
+  );
 }
 
 /** The column of floating Multica cards in the left half, top-aligned with the app window. */
@@ -241,44 +249,74 @@ export function TabsBefore() {
   );
 }
 
-type Row = { id: string; title: string; actor: Actor; working?: boolean; note?: string };
+type Row = { id: string; title: string; actor: Actor; priority: Priority; working?: boolean };
 
 const BOARD: { title: string; status: "blocked" | "in_progress" | "in_review" | "todo" | "done"; rows: Row[] }[] = [
-  { title: "Blocked", status: "blocked", rows: [{ id: "ACM-151", title: "Apply export migration", actor: BACKEND, note: "Waiting for you" }] },
+  { title: "Blocked", status: "blocked", rows: [{ id: "ACM-151", title: "Apply export migration", actor: BACKEND, priority: "urgent" }] },
   {
     title: "In progress",
     status: "in_progress",
     rows: [
-      { id: "ACM-152", title: "Redesign the settings page", actor: FRONTEND, working: true },
-      { id: "ACM-148", title: "Fix failing auth tests", actor: QA, working: true },
-      { id: "ACM-146", title: "Speed up the CI cache", actor: LEO },
+      { id: "ACM-152", title: "Redesign the settings page", actor: FRONTEND, priority: "high", working: true },
+      { id: "ACM-148", title: "Fix failing auth tests", actor: QA, priority: "high", working: true },
+      { id: "ACM-146", title: "Speed up the CI cache", actor: LEO, priority: "medium" },
     ],
   },
   {
     title: "In review",
     status: "in_review",
     rows: [
-      { id: "ACM-147", title: "Add an audit log", actor: BACKEND },
-      { id: "ACM-144", title: "Document the export API", actor: CONTENT },
+      { id: "ACM-147", title: "Add an audit log", actor: BACKEND, priority: "medium" },
+      { id: "ACM-144", title: "Document the export API", actor: CONTENT, priority: "low" },
     ],
   },
   {
     title: "Todo",
     status: "todo",
     rows: [
-      { id: "ACM-153", title: "Rate-limit the public API", actor: LEAD },
-      { id: "ACM-154", title: "Triage new bug reports", actor: TRIAGE },
+      { id: "ACM-153", title: "Rate-limit the public API", actor: LEAD, priority: "high" },
+      { id: "ACM-154", title: "Triage new bug reports", actor: TRIAGE, priority: "medium" },
     ],
   },
   {
     title: "Done",
     status: "done",
     rows: [
-      { id: "ACM-143", title: "Add a dark theme to settings", actor: FRONTEND },
-      { id: "ACM-141", title: "Update test snapshots", actor: QA },
+      { id: "ACM-143", title: "Add a dark theme to settings", actor: FRONTEND, priority: "low" },
+      { id: "ACM-141", title: "Update test snapshots", actor: QA, priority: "low" },
     ],
   },
 ];
+
+/** A status group of the issue list: an expanded section bar, then its rows. */
+function StatusGroup({ status, title, rows }: { status: (typeof BOARD)[number]["status"]; title: string; rows: Row[] }) {
+  return (
+    <div className="flex shrink-0 flex-col">
+      <div className="flex h-10 shrink-0 items-center gap-2 rounded-lg bg-muted px-3">
+        <ChevronDown className="size-3.5 shrink-0 text-muted-foreground" />
+        <span className="inline-flex items-center gap-1.5 text-caption font-semibold whitespace-nowrap">
+          <StatusIcon status={status} className="h-3 w-3" />
+          {title}
+        </span>
+        <span className="text-caption text-muted-foreground tabular-nums">{rows.length}</span>
+      </div>
+      {rows.map((row) => (
+        <div key={row.id} className="flex h-9 shrink-0 items-center gap-2 px-3 text-body">
+          <span className="flex size-4 shrink-0 items-center justify-center">
+            <PriorityIcon priority={row.priority} />
+          </span>
+          <span className="min-w-14 shrink-0 text-caption whitespace-nowrap text-muted-foreground tabular-nums max-sm:hidden">
+            {row.id}
+          </span>
+          <ShimmerText active={row.working} className="min-w-0 flex-1 truncate">
+            {row.title}
+          </ShimmerText>
+          <Avatar actor={row.actor} size={20} />
+        </div>
+      ))}
+    </div>
+  );
+}
 
 const AGENT_COUNTS = [
   { count: 12, label: "Working", dot: "bg-foreground" },
@@ -311,28 +349,13 @@ export function TabsAfter() {
           </div>
         </Card>
       </Side>
-      <App active="issues">
-        <AppHeader>
-          <span className="text-label font-medium">Issues</span>
-          <span className="ml-2 rounded-md bg-accent px-2 py-0.5 text-caption">All</span>
-          <span className="px-2 py-0.5 text-caption text-muted-foreground">Agents</span>
-          <span className="px-2 py-0.5 text-caption text-muted-foreground">Members</span>
-        </AppHeader>
-        {BOARD.map((group) => (
-          <Fragment key={group.title}>
-            <GroupBand title={group.title} count={group.rows.length} />
-            {group.rows.map((row) => (
-              <div key={row.id} className="flex h-9 shrink-0 items-center gap-2.5 border-b border-border px-4">
-                <StatusIcon status={group.status} className="h-3.5 w-3.5 shrink-0" />
-                <span className="w-[56px] shrink-0 whitespace-nowrap text-caption text-muted-foreground tabular-nums">{row.id}</span>
-                <span className="min-w-0 flex-1 truncate text-label">{row.title}</span>
-                {row.working ? <Working /> : null}
-                {row.note ? <span className="shrink-0 whitespace-nowrap text-caption font-medium text-warning">{row.note}</span> : null}
-                <Avatar actor={row.actor} size={20} />
-              </div>
-            ))}
-          </Fragment>
-        ))}
+      <App active="work">
+        <PageHeader icon={ListTodo} title="All issues" />
+        <div className="flex flex-col gap-1 p-2">
+          {BOARD.map((group) => (
+            <StatusGroup key={group.title} status={group.status} title={group.title} rows={group.rows} />
+          ))}
+        </div>
       </App>
     </>
   );
@@ -493,13 +516,8 @@ export function DigestAfter() {
           </div>
         </Card>
       </Side>
-      <App active="autopilots">
-        <AppHeader>
-          <span className="flex min-w-0 items-center gap-1.5 truncate text-caption text-muted-foreground">
-            Support digest <ChevronRight className="size-3 shrink-0" />
-            <span className="text-foreground">Oct 25</span>
-          </span>
-        </AppHeader>
+      <App active="work">
+        <BreadcrumbHeader parent={<ProjectCrumb name="Support" />} leaf="ACM-150 Support digest · Oct 25" />
         <div className="flex flex-col gap-3 p-4">
           <div className="flex gap-2.5">
             <Avatar actor={CONTENT} size={24} />
@@ -661,28 +679,20 @@ export function PipelineBefore() {
   );
 }
 
-const STAGES: { step: string; actor: Actor; when: string }[] = [
-  { step: "Analyze", actor: RESEARCH, when: "Day 1" },
-  { step: "Fix", actor: BACKEND, when: "Day 1" },
-  { step: "Test", actor: QA, when: "Day 2" },
-  { step: "Approve", actor: MIA, when: "Day 3" },
-  { step: "Ship", actor: BACKEND, when: "Day 3" },
+const STEPS: Status[] = [
+  { key: "analyze", name: "Analyze", category: "unstarted", icon: "circle", color: "#8b5cf6", handler: RESEARCH },
+  { key: "fix", name: "Fix", category: "started", icon: "half", color: "#f97316", handler: BACKEND },
+  { key: "test", name: "Test", category: "started", icon: "three_quarters", color: "#3b82f6", handler: QA },
+  { key: "approve", name: "Approve", category: "started", icon: "three_quarters", color: "#ec4899", handler: MIA },
+  { key: "shipped", name: "Shipped", category: "done", icon: "check", color: "#22c55e" },
 ];
 
-const ACTIVITY: { actor: Actor; when: string; text: ReactNode }[] = [
-  { actor: RESEARCH, when: "Day 1 · 09:20", text: "Found the cause and handed the issue to Fix." },
-  { actor: BACKEND, when: "Day 1 · 15:05", text: "Opened a pull request. Checks are passing." },
-  { actor: QA, when: "Day 2 · 11:40", text: "Ran 1,204 test cases with no regressions." },
-  {
-    actor: MIA,
-    when: "Day 3 · 10:30",
-    text: (
-      <span className="inline-flex items-center gap-1.5 font-medium text-foreground">
-        <Check className="size-3 text-success" /> Approved the release
-      </span>
-    ),
-  },
-  { actor: BACKEND, when: "Day 3 · 11:05", text: "Shipped in v2.14.1 and closed the issue." },
+/** Each status change hands the issue to the next step's owner. */
+const ACTIVITY: TimelineItem[] = [
+  { kind: "status", actor: RESEARCH, from: "analyze", to: "fix", handoff: BACKEND, when: "3d ago" },
+  { kind: "status", actor: BACKEND, from: "fix", to: "test", handoff: QA, when: "3d ago" },
+  { kind: "status", actor: QA, from: "test", to: "approve", handoff: MIA, when: "2d ago" },
+  { kind: "status", actor: MIA, from: "approve", to: "shipped", when: "1d ago" },
 ];
 
 const CYCLE = [
@@ -717,36 +727,13 @@ export function PipelineAfter() {
           ))}
         </Card>
       </Side>
-      <App active="issues">
-        <AppHeader>
-          <span className="text-caption text-muted-foreground tabular-nums">ACM-160</span>
-          <span className="truncate text-label font-medium">Refunds flagged as fraud</span>
-          <span className="ml-auto flex shrink-0 items-center gap-1.5 rounded-full border border-border px-2 py-0.5 text-caption">
-            <StatusIcon status="done" className="h-3 w-3" /> Shipped
-          </span>
-        </AppHeader>
+      <App active="work">
+        <BreadcrumbHeader parent={<ProjectCrumb name="Payments" />} leaf="ACM-160 Refunds flagged as fraud" />
         <div className="flex flex-col gap-4 p-4">
-          <ol className="isolate flex items-start">
-            {STAGES.map((stage, index) => (
-              <li key={stage.step} className="relative flex flex-1 flex-col items-center gap-1 text-center">
-                {index > 0 ? <span className="absolute top-3 right-1/2 left-[-50%] h-px bg-brand" /> : null}
-                <span className="relative z-10 flex h-6 items-center rounded-full bg-background px-1">
-                  <Avatar actor={stage.actor} size={24} />
-                </span>
-                <span className="text-caption font-medium">{stage.step}</span>
-                <span className="text-micro text-muted-foreground">{stage.when}</span>
-              </li>
-            ))}
-          </ol>
-          <div className="flex flex-col gap-2.5 border-t border-border pt-3">
-            {ACTIVITY.map((item) => (
-              <div key={item.when} className="flex gap-2.5">
-                <Avatar actor={item.actor} size={20} />
-                <div className="min-w-0 text-caption">
-                  <span className="font-medium">{item.actor.name}</span> <span className="text-muted-foreground tabular-nums">{item.when}</span>
-                  <span className="block text-muted-foreground">{item.text}</span>
-                </div>
-              </div>
+          <p className="text-title font-semibold">Refunds flagged as fraud</p>
+          <div className="flex flex-col gap-3">
+            {ACTIVITY.map((item, index) => (
+              <TimelineRow key={index} item={item} statuses={STEPS} />
             ))}
           </div>
         </div>

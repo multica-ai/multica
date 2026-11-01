@@ -115,6 +115,8 @@ function Install() {
 const COMMANDS: { name: string; body: string }[] = [
   { name: "issue", body: "Create, assign, search, and comment on issues, and follow their runs" },
   { name: "project", body: "Manage projects and the repositories attached to them" },
+  { name: "workflow", body: "Set each status’s owner and handoff, and pick the workflow a project uses" },
+  { name: "property", body: "Define the custom properties issues carry across the workspace" },
   { name: "agent", body: "Create agents, set their instructions, skills, and MCP servers" },
   { name: "squad", body: "Group agents under a leader that routes the work" },
   { name: "autopilot", body: "Schedule recurring work and trigger runs by hand" },

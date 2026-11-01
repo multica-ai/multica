@@ -1,10 +1,21 @@
 "use client";
 
 import type { ReactNode } from "react";
-import { Laptop, Monitor, Server } from "@multica/ui/icons";
+import { Laptop, Plus, Server } from "@multica/ui/icons";
 import { cn } from "@multica/ui/lib/utils";
-import { GroupBand } from "./feature-visuals";
-import { FLOATING, PROVIDER_MARKS, ZoomCanvas } from "./mock-kit";
+import {
+  FLOATING,
+  HeaderButton,
+  LIST,
+  LIST_CELL,
+  ListGroup,
+  ListRow,
+  NameCell,
+  Online,
+  PageHeader,
+  ProviderStack,
+  ZoomCanvas,
+} from "./mock-kit";
 
 /*
  * Mockups for the Multica CLI page: a terminal connecting a computer with
@@ -84,50 +95,37 @@ function SetupSession({ compact }: { compact?: boolean }) {
 }
 
 const MACHINES = [
-  { icon: Server, name: "build-01", detail: "Linux · Leo Park", agents: ["Claude Code", "Codex", "OpenCode"], fresh: true },
-  { icon: Laptop, name: "Mia’s MacBook Pro", detail: "macOS · Mia Chen", agents: ["Claude Code", "Cursor"] },
-  { icon: Laptop, name: "Sam’s ThinkPad", detail: "Windows · Sam Rivera", agents: ["Codex"] },
+  { icon: Server, name: "build-01", agents: ["Claude Code", "Codex", "OpenCode"], fresh: true },
+  { icon: Laptop, name: "Mia’s MacBook Pro", agents: ["Claude Code", "Cursor"] },
+  { icon: Laptop, name: "Sam’s ThinkPad", agents: ["Codex"] },
 ];
 
-function Marks({ names }: { names: string[] }) {
-  return (
-    <span className="flex shrink-0 -space-x-1">
-      {names.map((name) => {
-        const Mark = PROVIDER_MARKS.get(name);
-        return (
-          <span key={name} className="inline-flex size-5 items-center justify-center rounded-full bg-background ring-1 ring-border">
-            {Mark ? <Mark className="size-3" /> : null}
-          </span>
-        );
-      })}
-    </span>
-  );
-}
-
 function RuntimesPanel({ className, compact }: { className: string; compact?: boolean }) {
+  const columns = compact ? "minmax(0,1fr) 64px" : "minmax(0,1fr) 56px 64px";
   return (
-    <div className={cn(FLOATING, "absolute overflow-hidden", className)}>
-      <div className="flex h-11 items-center gap-2 border-b border-border px-4">
-        <Monitor className="size-4 text-muted-foreground" />
-        <span className="text-label font-medium">Runtimes</span>
-      </div>
-      <GroupBand title="Machines" count={compact ? 2 : MACHINES.length} />
-      {MACHINES.slice(0, compact ? 2 : undefined).map((machine) => (
-        <div key={machine.name} className={cn("flex h-[52px] items-center gap-3 border-b border-border px-4 last:border-b-0", machine.fresh && "bg-brand/[0.04]")}>
-          <span className="relative flex size-7 shrink-0 items-center justify-center rounded-lg bg-muted">
-            <machine.icon className="size-3.5 text-muted-foreground" />
-            <span className="absolute -right-0.5 -bottom-0.5 size-2 rounded-full bg-success ring-2 ring-background" />
-          </span>
-          <span className="min-w-0 flex-1">
-            <span className="flex items-center gap-1.5 text-label font-medium">
-              {machine.name}
-              {machine.fresh ? <span className="rounded bg-brand/10 px-1 text-micro font-medium text-brand">New</span> : null}
+    <div className={cn(FLOATING, "absolute overflow-hidden pb-2", className)}>
+      <PageHeader icon={Server} title="All runtimes" filter={false}>
+        <HeaderButton icon={Plus} />
+      </PageHeader>
+      <div className={LIST}>
+        <ListGroup title="Machines" count={compact ? 2 : MACHINES.length} />
+        {MACHINES.slice(0, compact ? 2 : undefined).map((machine) => (
+          <ListRow key={machine.name} columns={columns} className={cn(machine.fresh && "bg-brand/5")}>
+            <NameCell
+              icon={<machine.icon className="size-4 shrink-0 text-muted-foreground" />}
+              title={machine.name}
+            />
+            {compact ? null : (
+              <span className={LIST_CELL}>
+                <ProviderStack names={machine.agents} />
+              </span>
+            )}
+            <span className={LIST_CELL}>
+              <Online />
             </span>
-            <span className="block truncate text-caption text-muted-foreground">{machine.detail}</span>
-          </span>
-          {compact ? null : <Marks names={machine.agents} />}
-        </div>
-      ))}
+          </ListRow>
+        ))}
+      </div>
     </div>
   );
 }
@@ -152,7 +150,7 @@ export function CliScene() {
           <TerminalWindow title="leo@build-01" className="absolute top-10 left-[6%] w-[56%] -bottom-12">
             <SetupSession />
           </TerminalWindow>
-          <RuntimesPanel className="top-[20%] right-[5%] w-[340px]" />
+          <RuntimesPanel className="top-[20%] right-[5%] w-[360px]" />
         </ZoomCanvas>
       </div>
     </>

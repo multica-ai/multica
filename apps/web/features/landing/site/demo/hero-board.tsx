@@ -9,41 +9,39 @@ import {
 } from "react";
 import {
   ArrowUp,
-  BookOpenText,
   Bot,
   Calendar,
   ChevronDown,
   ChevronRight,
-  CircleCheck,
   CircleUser,
   Columns3,
   CornerDownRight,
-  FolderKanban,
-  Inbox,
-  Layers,
   Filter,
+  Folder,
   ListTodo,
-  Maximize2,
-  MessageSquare,
-  Monitor,
   MoreHorizontal,
+  PanelRight,
   Paperclip,
-  Pin,
   Plus,
-  Search,
-  SlidersHorizontal,
   SquarePen,
-  Users,
   X,
-  Zap,
   type IconComponent,
 } from "@multica/ui/icons";
 import { cn } from "@multica/ui/lib/utils";
 import { ShimmerText } from "@multica/ui/components/common/shimmer-text";
 import { StatusIcon } from "@multica/views/issues/components/status-icon";
 import { PriorityIcon } from "@multica/views/issues/components/priority-icon";
-import { Avatar, usePrefersReducedMotion, type Actor } from "./mock-kit";
-import { ThinkingMark } from "../brand-logo";
+import {
+  APP_CARD,
+  AppRail,
+  Avatar,
+  AvatarStack,
+  HeaderButton,
+  Working,
+  WorkingChip,
+  usePrefersReducedMotion,
+  type Actor,
+} from "./mock-kit";
 
 /*
  * Hero product mockup: a project board run by a workflow, built from the
@@ -55,10 +53,12 @@ import { ThinkingMark } from "../brand-logo";
  * issue is never under the peek. Data is fictional.
  */
 
-const WIDE_WIDTH = 1360;
+const WIDE_WIDTH = 1440;
 const NARROW_WIDTH = 540;
 const NARROW_BELOW = 600;
-const SIDEBAR_WIDTH = 200;
+const RAIL_WIDTH = 64;
+const PANEL_WIDTH = 240;
+const CARD_MARGIN = 8;
 const COLUMN_WIDTH = 280;
 const COLUMN_GAP = 16;
 const BOARD_PAD = 8;
@@ -88,8 +88,8 @@ export type Card = {
 };
 
 export type TimelineItem =
-  | { kind: "created"; by: string; icon: ReactNode; handoff?: Actor }
-  | { kind: "status"; actor: Actor; from: string; to: string; handoff?: Actor }
+  | { kind: "created"; by: string; icon: ReactNode; handoff?: Actor; when?: string }
+  | { kind: "status"; actor: Actor; from: string; to: string; handoff?: Actor; when?: string }
   | { kind: "comment"; actor: Actor; body: ReactNode };
 
 /** One beat of the story: where the issue is, how much of its timeline shows, and how long to hold. */
@@ -213,14 +213,18 @@ export function HeroBoard({ workflow, onLoop }: { workflow: Workflow; onLoop?: (
     updated: "just now",
   };
   const peekOpen = stage.panel && !narrow;
-  const working =
-    Object.values(workflow.cards).flatMap((column) => column.cards).filter((card) => card.working).length +
-    (focus.working ? 1 : 0);
+  const working = [
+    ...new Set(
+      [...(focus.working ? [focus] : []), ...Object.values(workflow.cards).flatMap((column) => column.cards)]
+        .filter((card) => card.working && card.assignee)
+        .map((card) => card.assignee!),
+    ),
+  ];
 
-  // Pan so the focus column is fully in view: right of the sidebar, left of
+  // Pan so the focus column is fully in view: right of the panel, left of
   // the peek when it is open.
   const canvasWidth = narrow ? NARROW_WIDTH : WIDE_WIDTH;
-  const mainWidth = canvasWidth - (narrow ? 12 : SIDEBAR_WIDTH + 6);
+  const mainWidth = canvasWidth - (narrow ? 12 : RAIL_WIDTH + CARD_MARGIN + PANEL_WIDTH);
   const viewport = mainWidth - (peekOpen ? PEEK_WIDTH + PEEK_INSET * 2 : 0);
   const stride = COLUMN_WIDTH + COLUMN_GAP;
   const boardWidth = statuses.length * stride - COLUMN_GAP + BOARD_PAD * 2;
@@ -241,22 +245,11 @@ export function HeroBoard({ workflow, onLoop }: { workflow: Workflow; onLoop?: (
         className={cn("flex text-foreground", !fit && "opacity-0")}
         style={{ width: canvasWidth, height: fit?.height, zoom: fit?.zoom }}
       >
-        {narrow ? null : <Sidebar />}
-        <main
-          className={cn(
-            "relative flex min-w-0 flex-1 flex-col overflow-hidden rounded-lg border border-surface-border bg-background",
-            narrow ? "m-1.5" : "my-1.5 mr-1.5",
-          )}
-        >
-          <div className="flex h-11 shrink-0 items-center gap-1.5 border-b border-border px-4 text-label">
-            <span className="text-muted-foreground">Projects</span>
-            <ChevronRight className="size-3.5 text-muted-foreground" />
-            <FolderKanban className="size-4 text-muted-foreground" />
-            <span key={workflow.project} className="font-medium animate-in fade-in duration-300 motion-reduce:animate-none">
-              {workflow.project}
-            </span>
-          </div>
-          <Toolbar working={working} compact={narrow} />
+        {narrow ? null : <AppRail active="work" />}
+        <div className={cn(APP_CARD, narrow ? "m-1.5" : "my-2 mr-2")}>
+          {narrow ? null : <WorkPanel workflow={workflow} focus={focus} status={stage.status} peeked={peekOpen} />}
+          <main className="relative flex min-w-0 flex-1 flex-col">
+          <BoardHeader project={workflow.project} working={working} compact={narrow} />
           <div
             key={`board-${workflow.id}`}
             className="min-h-0 flex-1 overflow-hidden animate-in fade-in duration-500 motion-reduce:animate-none"
@@ -284,7 +277,8 @@ export function HeroBoard({ workflow, onLoop }: { workflow: Workflow; onLoop?: (
           {narrow ? null : (
             <IssuePeek key={`peek-${workflow.id}`} workflow={workflow} focus={focus} stage={stage} open={peekOpen} />
           )}
-        </main>
+          </main>
+        </div>
       </div>
     </div>
   );
@@ -299,108 +293,135 @@ function assigneeAt(workflow: Workflow, index: number): Actor | undefined {
   return undefined;
 }
 
-function Sidebar() {
+// --- The Work panel -----------------------------------------------------------
+
+const PROJECTS = [
+  { name: "API Platform", open: 12 },
+  { name: "Autopilots launch", open: 9 },
+  { name: "Customer feedback", open: 7 },
+  { name: "Mobile app", open: 5 },
+];
+
+const PANEL_ROW = "flex min-h-8 items-center gap-2.5 rounded-lg px-3 py-1.5 text-body";
+const PANEL_ROW_ACTIVE = "bg-surface-selected text-surface-selected-foreground";
+/** A working agent's issue title in the panel: dimmer at rest, with a wider highlight. */
+const PANEL_SHIMMER = "[--shimmer-text-base:var(--faint-foreground)] [--shimmer-text-spread:22%]";
+const TREE_SIZE = 5;
+
+function PanelSection({ label, children }: { label: string; children: ReactNode }) {
   return (
-    <aside className="flex shrink-0 flex-col px-2 py-2.5" style={{ width: SIDEBAR_WIDTH }}>
-      <div className="flex h-8 items-center gap-2 px-2">
-        <span className="flex size-5 items-center justify-center rounded-md bg-surface text-micro font-semibold shadow-[var(--surface-shadow)]">
-          A
+    <section className="mt-5 first:mt-0">
+      <div className="flex h-7 items-center gap-1 pr-1 pl-3">
+        <h3 className="min-w-0 flex-1 truncate text-caption font-medium text-muted-foreground">{label}</h3>
+        <span className="flex size-6 items-center justify-center text-muted-foreground">
+          <Plus className="size-3.5" />
         </span>
-        <span className="flex-1 text-label font-semibold">Acme Labs</span>
-        <ChevronDown className="size-3.5 text-muted-foreground" />
       </div>
-      <div className="mt-2 flex flex-col">
-        <NavRow icon={Search} label="Search…" hint="⌘ K" />
-        <NavRow icon={SquarePen} label="New Issue" hint="C" />
+      <ul className="space-y-px">{children}</ul>
+    </section>
+  );
+}
+
+function PanelRow({ icon: Icon, label, count, active }: { icon?: IconComponent; label: string; count?: number; active?: boolean }) {
+  return (
+    <li className={cn(PANEL_ROW, active ? PANEL_ROW_ACTIVE : "text-muted-foreground")}>
+      {Icon ? <Icon className="size-4 shrink-0" /> : <span className="size-4 shrink-0" />}
+      <span className="min-w-0 flex-1 truncate">{label}</span>
+      {count ? <span className="shrink-0 text-caption tabular-nums text-faint-foreground">{count}</span> : null}
+    </li>
+  );
+}
+
+/**
+ * The Work space's panel: views, then projects with the open one expanded into
+ * its issues. Titles shimmer while an agent runs on them, and the issue in the
+ * peek is the lit row.
+ */
+function WorkPanel({ workflow, focus, status, peeked }: { workflow: Workflow; focus: Card; status: string; peeked: boolean }) {
+  const byStatus = workflow.statuses.flatMap((s) => (workflow.cards[s.key]?.cards ?? []).map((card) => ({ card, status: s })));
+  const others = [...byStatus.filter((row) => row.card.working), ...byStatus.filter((row) => !row.card.working)];
+  const tree = [{ card: focus, status: workflow.statuses.find((s) => s.key === status)! }, ...others].slice(0, TREE_SIZE);
+  return (
+    <aside className="flex shrink-0 flex-col border-r border-border" style={{ width: PANEL_WIDTH }}>
+      <div className="flex h-12 shrink-0 items-center pr-2 pl-5">
+        <h2 className="text-title-sm font-semibold">Work</h2>
       </div>
-      <div className="mt-4 flex flex-col">
-        <NavRow icon={Inbox} label="Inbox" badge="2" />
-        <NavRow icon={CircleUser} label="My Issues" />
-        <NavRow icon={MessageSquare} label="Chat" />
+      <div className="min-h-0 flex-1 overflow-hidden px-2 pb-4">
+        <PanelSection label="Views">
+          <PanelRow icon={CircleUser} label="My Issues" />
+          <PanelRow icon={Bot} label="My agents’ work" />
+          <PanelRow icon={ListTodo} label="All issues" />
+          <PanelRow label="All views" count={3} />
+        </PanelSection>
+        <PanelSection label="Projects">
+          {PROJECTS.map((project) => {
+            const open = project.name === workflow.project;
+            return (
+              <li key={project.name}>
+                <div className={cn(PANEL_ROW, open ? (peeked ? "text-foreground" : PANEL_ROW_ACTIVE) : "text-muted-foreground")}>
+                  <Folder className="size-4 shrink-0" />
+                  <span className="min-w-0 flex-1 truncate">{project.name}</span>
+                  <span className="shrink-0 text-caption tabular-nums text-faint-foreground">{project.open}</span>
+                </div>
+                {open ? (
+                  <ul key={workflow.id} className="mb-2 ml-5 border-l border-surface-border pl-1.5">
+                    {tree.map((row) => (
+                      <li
+                        key={row.card.id}
+                        className={cn(
+                          "flex min-h-[26px] items-center gap-2 rounded-lg px-2 py-[3px] text-label",
+                          peeked && row.card.id === focus.id ? PANEL_ROW_ACTIVE : "text-muted-foreground",
+                        )}
+                      >
+                        <CustomStatusIcon key={row.status.key} status={row.status} className="size-3 shrink-0" />
+                        <ShimmerText active={row.card.working} className={cn("min-w-0 flex-1 truncate", PANEL_SHIMMER)}>
+                          {row.card.title}
+                        </ShimmerText>
+                        {row.card.working && row.card.assignee ? <AvatarStack actors={[row.card.assignee]} size={16} ring="ring-page-canvas" /> : null}
+                      </li>
+                    ))}
+                  </ul>
+                ) : null}
+              </li>
+            );
+          })}
+          <PanelRow label="All 8 projects" />
+        </PanelSection>
       </div>
-      <NavGroup label="Work">
-        <NavRow icon={ListTodo} label="Issues" />
-        <NavRow icon={FolderKanban} label="Projects" active />
-        <NavRow icon={Zap} label="Autopilot" />
-      </NavGroup>
-      <NavGroup label="AI Team">
-        <NavRow icon={Bot} label="Agents" />
-        <NavRow icon={Users} label="Squads" />
-        <NavRow icon={BookOpenText} label="Skills" />
-        <NavRow icon={Monitor} label="Runtimes" />
-      </NavGroup>
     </aside>
   );
 }
 
-function NavGroup({ label, children }: { label: string; children: ReactNode }) {
-  return (
-    <div className="mt-4 flex flex-col">
-      <p className="px-2 pb-1 text-caption text-muted-foreground">{label}</p>
-      {children}
-    </div>
-  );
-}
+// --- The board ----------------------------------------------------------------
 
-function NavRow({
-  icon: Icon,
-  label,
-  hint,
-  badge,
-  active,
-}: {
-  icon: IconComponent;
-  label: string;
-  hint?: string;
-  badge?: string;
-  active?: boolean;
-}) {
+/** The project page's header: the project as a menu and the filter, then the page's actions. */
+function BoardHeader({ project, working, compact }: { project: string; working: Actor[]; compact: boolean }) {
   return (
-    <div className={cn("flex h-7 items-center gap-2 rounded-md px-2 text-label", active && "bg-surface-selected font-medium")}>
-      <Icon className="size-4 text-muted-foreground" />
-      <span className="flex-1">{label}</span>
-      {hint ? <span className="text-micro text-muted-foreground">{hint}</span> : null}
-      {badge ? (
-        <span className="rounded-full bg-surface px-1.5 text-micro font-medium tabular-nums text-muted-foreground shadow-[var(--surface-shadow)]">
-          {badge}
+    <div className="flex h-12 shrink-0 items-center gap-2 border-b border-border px-4">
+      <div className="flex min-w-0 flex-1 items-center gap-1">
+        <span className="flex h-7 min-w-0 items-center gap-2 px-2 text-body font-medium">
+          <Folder className="size-4 shrink-0 text-muted-foreground" />
+          <span key={project} className="min-w-0 truncate animate-in fade-in duration-300 motion-reduce:animate-none">
+            {project}
+          </span>
+          <ChevronDown className="size-3 shrink-0 text-muted-foreground" />
         </span>
-      ) : null}
-    </div>
-  );
-}
-
-function Toolbar({ working, compact }: { working: number; compact: boolean }) {
-  return (
-    <div className="flex h-12 shrink-0 items-center justify-between px-3">
-      <div className="flex items-center gap-1">
-        <span className="flex h-7 items-center rounded-md border border-border bg-muted px-2.5 text-caption font-medium">All</span>
-        <span className="flex h-7 items-center rounded-md px-2.5 text-caption text-muted-foreground">Members</span>
-        <span className="flex h-7 items-center rounded-md px-2.5 text-caption text-muted-foreground">Agents</span>
-        {compact ? null : <Layers className="ml-1 size-3.5 text-muted-foreground" />}
+        <span className="flex size-7 shrink-0 items-center justify-center text-muted-foreground">
+          <Filter className="size-4" />
+        </span>
       </div>
-      <div className="flex items-center gap-1.5">
-        <ToolbarButton>
-          <ThinkingMark className="text-foreground" />
-          <span className="tabular-nums">{working}</span> agents working
-        </ToolbarButton>
+      <div className="flex shrink-0 items-center gap-1">
+        {working.length > 0 ? <WorkingChip agents={working} compact={compact} /> : null}
+        {compact ? null : <HeaderButton icon={Columns3} />}
+        <HeaderButton icon={SquarePen} />
         {compact ? null : (
           <>
-            <ToolbarButton icon={Filter}>Filter</ToolbarButton>
-            <ToolbarButton icon={SlidersHorizontal}>Display</ToolbarButton>
-            <ToolbarButton icon={Columns3}>Board</ToolbarButton>
+            <span className="mx-1 h-4 w-px bg-border" />
+            <HeaderButton icon={PanelRight} />
           </>
         )}
       </div>
     </div>
-  );
-}
-
-function ToolbarButton({ icon: Icon, children }: { icon?: IconComponent; children: ReactNode }) {
-  return (
-    <span className="flex h-7 items-center gap-1.5 rounded-md border border-border bg-background px-2.5 text-caption">
-      {Icon ? <Icon className="size-3.5 text-muted-foreground" /> : null}
-      {children}
-    </span>
   );
 }
 
@@ -438,7 +459,9 @@ function BoardColumn({
               <span className="truncate">{status.handler.name}</span>
             </span>
           ) : null}
-          <Plus className="size-3.5 shrink-0 text-muted-foreground" />
+          <span className="flex size-6 shrink-0 items-center justify-center text-muted-foreground">
+            <Plus className="size-3.5" />
+          </span>
         </div>
       </div>
       <div className="flex flex-col gap-2 p-1">
@@ -466,7 +489,11 @@ function BoardCard({ card, peeked }: { card: Card; peeked: boolean }) {
           </span>
           <p className="truncate text-caption text-muted-foreground">{card.id}</p>
         </div>
-        {card.working && card.assignee ? <WorkingBadge key={card.assignee.name} actor={card.assignee} /> : null}
+        {card.working && card.assignee ? (
+          <span key={card.assignee.name} className="animate-in fade-in duration-300 motion-reduce:animate-none">
+            <Working agents={[card.assignee]} />
+          </span>
+        ) : null}
       </div>
       <p className="mt-1 line-clamp-2 text-body leading-snug font-medium">{card.title}</p>
       <div className="mt-2 flex items-center justify-between gap-2">
@@ -481,16 +508,6 @@ function BoardCard({ card, peeked }: { card: Card; peeked: boolean }) {
         <span className="shrink-0 text-caption text-muted-foreground">{card.updated}</span>
       </div>
     </div>
-  );
-}
-
-function WorkingBadge({ actor }: { actor: Actor }) {
-  return (
-    <span className="inline-flex shrink-0 items-center gap-1 animate-in fade-in duration-300 motion-reduce:animate-none">
-      <Avatar actor={actor} size={16} />
-      <ThinkingMark className="text-foreground" />
-      <ShimmerText className="text-micro text-muted-foreground">Working</ShimmerText>
-    </span>
   );
 }
 
@@ -525,23 +542,27 @@ function IssuePeek({ workflow, focus, stage, open }: { workflow: Workflow; focus
       )}
       style={{ width: PEEK_WIDTH }}
     >
-      <div className="flex h-12 shrink-0 items-center gap-2 border-b border-border px-4">
-        <span className="flex min-w-0 flex-1 items-center gap-1 text-caption text-muted-foreground">
-          {workflow.project} <ChevronRight className="size-3" />
-          <span className="font-medium text-foreground">{focus.id}</span>
-        </span>
-        {focus.working && focus.assignee ? (
-          <span key={focus.assignee.name} className="inline-flex items-center gap-1.5 rounded-full bg-muted px-2 py-0.5 text-caption animate-in fade-in duration-300 motion-reduce:animate-none">
-            <Avatar actor={focus.assignee} size={16} />
-            <ShimmerText className="text-caption text-muted-foreground">Working</ShimmerText>
+      <div className="flex h-12 shrink-0 items-center gap-2 border-b border-border pr-2 pl-4 text-body">
+        <span className="flex min-w-0 flex-1 items-center gap-1.5 overflow-hidden">
+          <span className="flex min-w-0 items-center gap-1 text-muted-foreground">
+            <Folder className="size-3.5 shrink-0" />
+            <span className="truncate">{workflow.project}</span>
           </span>
-        ) : null}
-        <span className="flex items-center gap-3 text-muted-foreground">
-          <CircleCheck className="size-4" />
-          <Pin className="size-4" />
-          <MoreHorizontal className="size-4" />
-          <Maximize2 className="size-3.5" />
-          <X className="size-4" />
+          <ChevronRight className="size-3 shrink-0 text-faint-foreground" />
+          <span className="shrink-0 font-medium">{focus.id}</span>
+        </span>
+        <span className="flex shrink-0 items-center gap-1">
+          {focus.working && focus.assignee ? (
+            <span
+              key={focus.assignee.name}
+              className="flex h-7 items-center gap-1.5 rounded-md bg-brand/5 px-1.5 animate-in fade-in duration-300 motion-reduce:animate-none"
+            >
+              <AvatarStack actors={[focus.assignee]} />
+              <span className="text-caption whitespace-nowrap text-info">{focus.assignee.name} is working</span>
+            </span>
+          ) : null}
+          <HeaderButton icon={MoreHorizontal} />
+          <HeaderButton icon={X} />
         </span>
       </div>
       <div ref={scrollRef} className="min-h-0 flex-1 overflow-hidden">
@@ -563,7 +584,7 @@ function IssuePeek({ workflow, focus, stage, open }: { workflow: Workflow; focus
               </Pill>
             ) : null}
             <Pill>
-              <FolderKanban className="size-3.5 text-muted-foreground" />
+              <Folder className="size-3.5 text-muted-foreground" />
               {workflow.project}
             </Pill>
             <Pill>
@@ -605,7 +626,7 @@ function IssuePeek({ workflow, focus, stage, open }: { workflow: Workflow; focus
 
 function Pill({ children }: { children: ReactNode }) {
   return (
-    <span className="inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-caption animate-in fade-in duration-300 motion-reduce:animate-none">
+    <span className="inline-flex items-center gap-1.5 h-[var(--button-height-xs)] rounded-full border px-2.5 text-caption animate-in fade-in duration-300 motion-reduce:animate-none">
       {children}
     </span>
   );
@@ -615,7 +636,8 @@ function Entry({ children }: { children: ReactNode }) {
   return <div className="animate-in fade-in slide-in-from-bottom-1 duration-300 motion-reduce:animate-none">{children}</div>;
 }
 
-function TimelineRow({ item, statuses }: { item: TimelineItem; statuses: Status[] }) {
+/** One entry of an issue's activity: a comment, or a status change and the handoff it made. */
+export function TimelineRow({ item, statuses }: { item: TimelineItem; statuses: Status[] }) {
   if (item.kind === "comment") {
     return (
       <div className="overflow-clip rounded-xl border border-border bg-card">
@@ -640,17 +662,17 @@ function TimelineRow({ item, statuses }: { item: TimelineItem; statuses: Status[
       ? "created this issue"
       : `changed status from ${statuses.find((s) => s.key === item.from)?.name} to ${statuses.find((s) => s.key === item.to)?.name}`;
   return (
-    <div className="text-caption text-muted-foreground">
+    <div className="text-label text-muted-foreground">
       <div className="flex items-center">
         <div className="mr-2 flex w-4 shrink-0 justify-center">{lead}</div>
         <div className="flex min-w-0 flex-1 items-center gap-1">
           <span className="shrink-0 font-medium">{byName}</span>
           <span className="truncate">{text}</span>
-          <span className="ml-auto shrink-0">just now</span>
+          <span className="ml-auto shrink-0">{item.when ?? "just now"}</span>
         </div>
       </div>
       {item.handoff ? (
-        <div className="mt-1 ml-6 flex flex-wrap items-center gap-1.5">
+        <div className="mt-1 ml-6 flex flex-wrap items-center gap-1.5 text-caption">
           <CornerDownRight className="size-3 shrink-0" />
           <span>Handed to</span>
           <Avatar actor={item.handoff} size={16} />

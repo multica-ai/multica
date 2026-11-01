@@ -37,7 +37,7 @@ function Hero() {
       eyebrow="Multica Desktop"
       title="Multica, as a native app."
       subtitle="Your computer becomes a runtime."
-      lead="Multica Desktop for macOS, Windows, and Linux starts the daemon for you after sign-in, so the coding tools on your computer can take issues. Each workspace keeps its own tabs."
+      lead="Multica Desktop for macOS, Windows, and Linux starts the daemon for you after sign-in, so the coding tools on your computer can take issues. Each workspace opens in a window of its own."
       actions={
         <>
           <ActionLink href="/download" size="lg">
@@ -50,7 +50,7 @@ function Hero() {
         </>
       }
       frost="desktop"
-      label="Multica Desktop with four tabs open in the title bar. The active tab shows issue ACM-152, which Backend Agent is working on Mia’s MacBook Pro. Beside it, that computer appears as a runtime managed by Desktop, with Claude Code, Codex, and Cursor detected."
+      label="Multica Desktop with three tabs open in the title bar. The active tab shows issue ACM-152, which Backend Agent is working on Mia’s MacBook Pro. Beside it, that computer appears as a runtime managed by Desktop, with Claude Code, Codex, and Cursor detected."
     >
       <DesktopScene />
     </SurfaceHero>
@@ -70,15 +70,15 @@ const HIGHLIGHTS: { title: string; body: string; points: string[]; visual: Compo
     label: "Desktop’s Daemon settings: running on the desktop-multica.ai profile, CLI managed by Desktop, with Claude Code, Codex, and Cursor detected and ready.",
   },
   {
-    title: "Tabs for every workspace",
-    body: "Open issues, chats, and projects in tabs, and switch workspaces without losing them. Come back to a workspace and its tabs are where you left them.",
+    title: "A window for every workspace",
+    body: "Open each workspace in a window of its own, with its own tabs for issues, chats, and projects. Quit and reopen, and every window comes back with its tabs.",
     points: [
+      "Open a new window from the workspace menu, or with ⌘⇧N / Ctrl+Shift+N",
       "Pin the tabs you keep coming back to",
-      "Each tab keeps its own history and scroll position",
       "Multica links open in a tab instead of the browser",
     ],
     visual: TabsVisual,
-    label: "Two workspaces, each keeping its own tabs: Acme Labs with its pinned Inbox, issue ACM-152, and a chat with Backend Agent; Mia’s workspace with its Inbox and MIA-12.",
+    label: "Two workspaces, each in its own window with its own tabs: Acme Labs with its pinned Inbox and issue ACM-152; Mia’s workspace with its Inbox and MIA-12.",
   },
 ];
 
@@ -115,7 +115,7 @@ function Highlights() {
 const COMPARE: CompareRow[] = [
   { label: "How you open it", values: ["Install the app", "Any browser"] },
   { label: "Your computer as a runtime", values: ["Started for you after sign-in", "Install and start the CLI yourself"] },
-  { label: "Tabs", values: ["Saved for each workspace", "Your browser’s tabs"] },
+  { label: "Windows and tabs", values: ["A window for each workspace, restored on relaunch", "Your browser’s windows and tabs"] },
   { label: "Updates", values: ["In the background, installed on restart", "Refresh the page"] },
 ];
 
