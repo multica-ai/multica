@@ -1,0 +1,81 @@
+{
+  "data": {
+    "asr_config": {
+      "enabled": false,
+      "language": "",
+      "model_id": ""
+    },
+    "auto_tag_config": null,
+    "capabilities": {
+      "faq": false,
+      "graph": false,
+      "keyword": true,
+      "vector": true,
+      "wiki": false
+    },
+    "chunk_count": 0,
+    "chunking_config": {
+      "chunk_overlap": 0,
+      "chunk_size": 0,
+      "separators": null
+    },
+    "created_at": "2026-11-01T18:51:05.739318982+08:00",
+    "creator_id": "",
+    "deleted_at": null,
+    "description": "Charter, policies, brand voice",
+    "embedding_model_id": "69969a78-e405-4a6b-907e-60091b70ba8c",
+    "extract_config": null,
+    "faq_config": null,
+    "id": "6230f301-de2c-4009-bd05-120bc0e6b2a0",
+    "image_processing_config": {
+      "model_id": ""
+    },
+    "indexing_strategy": {
+      "graph_enabled": false,
+      "keyword_enabled": true,
+      "vector_enabled": true,
+      "wiki_enabled": false
+    },
+    "is_pinned": false,
+    "is_processing": false,
+    "is_temporary": false,
+    "knowledge_count": 0,
+    "name": "Company",
+    "pinned_at": null,
+    "processing_count": 0,
+    "profile_config": null,
+    "question_generation_config": null,
+    "share_count": 0,
+    "storage_backend_id": "1a8786b0-dcf8-4272-8fc2-2e3cc34f6f45",
+    "storage_config": {
+      "app_id": "",
+      "bucket_name": "",
+      "path_prefix": "",
+      "provider": "",
+      "region": "",
+      "secret_id": "",
+      "secret_key": ""
+    },
+    "storage_provider_config": {
+      "provider": "local"
+    },
+    "summary_model_id": "",
+    "tenant_id": 10002,
+    "type": "document",
+    "updated_at": "2026-11-01T18:51:05.739319364+08:00",
+    "vector_store_engine_type": "postgres",
+    "vector_store_name": "System default",
+    "vector_store_source": "env",
+    "vector_store_status": "available",
+    "vlm_config": {
+      "api_key": "",
+      "base_url": "",
+      "enabled": false,
+      "interface_type": "",
+      "model_id": "",
+      "model_name": ""
+    },
+    "wiki_config": null
+  },
+  "success": true
+}

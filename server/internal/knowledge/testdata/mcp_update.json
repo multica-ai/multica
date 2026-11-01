@@ -1,0 +1,30 @@
+{
+  "data": {
+    "created_at": "2026-11-01T18:52:17.983235+08:00",
+    "default_agent_id": "",
+    "description": "Read-only company knowledge for Multica agents",
+    "enabled": true,
+    "id": "11a56d5f-13c7-40c0-b683-e8bc44742e34",
+    "knowledge_base_ids": [
+      "6230f301-de2c-4009-bd05-120bc0e6b2a0"
+    ],
+    "last_used_at": null,
+    "name": "company-read",
+    "path": "/mcp/11a56d5f-13c7-40c0-b683-e8bc44742e34",
+    "rate_limit_per_minute": 60,
+    "tenant_id": 10002,
+    "token_hint": "mcp_REDACTED",
+    "tools": [
+      "list_knowledge_bases",
+      "search_knowledge",
+      "grep_chunks",
+      "list_documents",
+      "read_document",
+      "wiki_search",
+      "wiki_read_page",
+      "wiki_index"
+    ],
+    "updated_at": "2026-11-01T10:52:59.036324087Z"
+  },
+  "success": true
+}

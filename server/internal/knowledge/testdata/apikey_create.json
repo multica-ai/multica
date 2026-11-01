@@ -1,0 +1,14 @@
+{
+  "data": {
+    "api_key": "enc:v1:REDACTED",
+    "capabilities": [],
+    "created_at": "2026-11-01T10:50:30.73045343Z",
+    "full_access": true,
+    "id": 3,
+    "knowledge_base_ids": [],
+    "name": "multica-workspace-key",
+    "scope_type": "tenant",
+    "token": "sk-REDACTED-FIXTURE"
+  },
+  "success": true
+}

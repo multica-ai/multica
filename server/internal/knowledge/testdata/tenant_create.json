@@ -1,0 +1,29 @@
+{
+  "data": {
+    "assistant_config": null,
+    "business": "",
+    "chat_history_config": null,
+    "context_config": null,
+    "created_at": "2026-11-01T19:03:31.306297258+08:00",
+    "credentials": null,
+    "default_settings": null,
+    "default_storage_backend_id": "80107de7-d83c-4f16-990b-e33d2182bd6a",
+    "deleted_at": null,
+    "description": "throwaway fixture tenant",
+    "id": 10004,
+    "memory_config": null,
+    "name": "mcl-fixture-ws2",
+    "parser_engine_config": null,
+    "retrieval_config": null,
+    "retriever_engines": {
+      "engines": []
+    },
+    "status": "active",
+    "storage_engine_config": null,
+    "storage_quota": 10737418240,
+    "storage_used": 0,
+    "updated_at": "2026-11-01T19:03:31.306297309+08:00",
+    "web_search_config": null
+  },
+  "success": true
+}

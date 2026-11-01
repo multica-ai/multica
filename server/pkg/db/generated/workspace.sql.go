@@ -156,6 +156,15 @@ cleared_agent_mcp_bindings AS (
 cleared_workspace_mcp_servers AS (
     DELETE FROM workspace_mcp_server WHERE workspace_id = $1
 ),
+cleared_knowledge_links AS (
+    DELETE FROM knowledge_link WHERE workspace_id = $1
+),
+cleared_knowledge_bases AS (
+    DELETE FROM knowledge_base WHERE workspace_id = $1
+),
+cleared_workspace_knowledge AS (
+    DELETE FROM workspace_knowledge WHERE workspace_id = $1
+),
 deleted_pending_check_suites AS (
     DELETE FROM github_pending_check_suite WHERE workspace_id = $1
 ),

@@ -1735,6 +1735,12 @@ func (h *Handler) CreateAgent(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
+	// A workspace with company knowledge enabled gives every new agent the
+	// read-only company-read MCP server; a no-op otherwise.
+	if err := qtx.AssignKnowledgeMcpToAgent(r.Context(), db.AssignKnowledgeMcpToAgentParams{AgentID: created.ID, WorkspaceID: wsUUID}); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to attach company knowledge")
+		return
+	}
 	if err := tx.Commit(r.Context()); err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to commit agent create")
 		return

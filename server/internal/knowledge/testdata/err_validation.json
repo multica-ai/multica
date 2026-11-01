@@ -1,0 +1,8 @@
+{
+  "error": {
+    "code": 1000,
+    "details": null,
+    "message": "name cannot be empty"
+  },
+  "success": false
+}

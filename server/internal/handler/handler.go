@@ -422,6 +422,10 @@ type Handler struct {
 	// PluginSurfaceTokens seal short-lived launch claims. Nil disables surface
 	// launches; wired from a domain-separated MULTICA_PLUGIN_SECRET_KEY at boot.
 	PluginSurfaceTokens *secretbox.Box
+	// Knowledge provisions and reports on the optional company knowledge base
+	// (a WeKnora sidecar). Nil-safe: a nil service reports the feature as not
+	// offered. Wired in cmd/server/router.go after New.
+	Knowledge *service.KnowledgeService
 	// PRRefresh drives the GitHub API snapshot pipeline for PR cards (MUL-5265):
 	// webhook / page-visit / TTL triggers → authenticated GraphQL fetch →
 	// head-SHA-guarded atomic snapshot write. Always non-nil, but inert (every
