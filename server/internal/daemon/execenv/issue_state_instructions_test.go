@@ -22,11 +22,11 @@ func TestBuildIssueStateHintUnchangedReplacesTheRead(t *testing.T) {
 	hint := BuildIssueStateHint(issueStateTestIssueID, "in_progress", "agent", "agent-1", nil, true, true)
 
 	for _, want := range []string{
-		"The issue is unchanged since your last run",
-		"the server compared title and description",
+		"Title and description are unchanged since the previous run",
+		"Title and description are unchanged",
 		"status: in_progress; assignee: agent agent-1",
-		"That answers workflow step 1",
-		"only if resumed memory is not enough",
+		"Issue state:",
+		"if more issue context is needed",
 	} {
 		if !strings.Contains(hint, want) {
 			t.Errorf("unchanged hint missing %q\n---\n%s", want, hint)
@@ -46,7 +46,7 @@ func TestBuildIssueStateHintNamesChangedFields(t *testing.T) {
 		[]string{"description", "status"}, true, true)
 
 	for _, want := range []string{
-		"Since your last run the issue changed: description, status",
+		"Issue changes since the previous run: description, status",
 		"status: todo; assignee: member user-9",
 		"Read it: `multica issue get " + issueStateTestIssueID + " --output json`",
 	} {

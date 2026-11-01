@@ -313,12 +313,12 @@ func TestPerRunCommentContextStaysOutOfBrief(t *testing.T) {
 	for _, banned := range []string{
 		"reply-abc", "thread-abc", "reply-def", "thread-def", since,
 		"4 new comment(s) on this issue since your last run",
-		"DISTINCT threads",
+		"distinct threads",
 		// MUL-7344's issue-state report is per-run for the same reason the
 		// comment delta is, and TaskContextForEnv deliberately has no field to
 		// carry it. These pin the rendered text so a future "just pass it
 		// through to the brief" cannot land quietly.
-		"The issue is unchanged since your last run",
+		"Title and description are unchanged since the previous run",
 		"Since your last run the issue changed",
 	} {
 		if strings.Contains(out, banned) {
@@ -388,7 +388,7 @@ func TestCommentHintsCarryNoModality(t *testing.T) {
 	if strings.Contains(hints["warm"], "--roots-only --summary") {
 		t.Errorf("warm hint must not also hand over the scan the delta read answers:\n%s", hints["warm"])
 	}
-	if !strings.Contains(hints["resumed"], "issue-wide delta is empty") {
+	if !strings.Contains(hints["resumed"], "Comment delta: no other new comments") {
 		t.Errorf("resumed hint must report the empty delta as the scan's answer:\n%s", hints["resumed"])
 	}
 }
@@ -417,9 +417,9 @@ func TestResumedCommentsHintSkipsDefaultThreadRead(t *testing.T) {
 	hint := BuildResumedCommentsHint(issueID, "trigger-1", "thread-root-1")
 
 	for _, want := range []string{
-		"triggering comment is already included above",
-		"No other new comments on this issue since your last run",
-		"issue-wide delta is empty",
+		"excluding the triggering comment and your own replies",
+		"Comment delta: no other new comments on this issue since the previous run",
+		"Comment delta: no other new comments",
 		"if resumed memory is not enough",
 		"multica issue comment list " + issueID + " --thread thread-root-1 --tail 30 --compact --output json",
 	} {
@@ -1955,16 +1955,16 @@ func TestMultiThreadReplyInstructionsFanOut(t *testing.T) {
 	}, false)
 
 	for _, want := range []string{
-		"3 DISTINCT threads",
-		"Post ONE reply per thread",
-		"OVERRIDES",
+		"3 distinct threads",
+		"Post one reply per thread",
+		"Each thread receives its own reply",
 		"--parent c1", "--parent c2", "--parent c3",
-		"OLDEST thread first",
+		"oldest thread first",
 		// MUL-5825: the posting mechanism is a pointer at the brief's
 		// canonical section plus the one multi-thread-specific delta.
 		"`## Comment Formatting`",
-		"DISTINCT body file per thread",
-		"never reuse a `--parent` from an earlier turn",
+		"separate body file per thread",
+		"using the target listed for this run",
 	} {
 		if !strings.Contains(out, want) {
 			t.Errorf("cross-thread instructions must contain %q, got:\n%s", want, out)
@@ -2029,7 +2029,7 @@ func TestSingleThreadReplyInstructionsKeepSingleParent(t *testing.T) {
 	t.Parallel()
 	out := BuildCommentReplyInstructions("claude", "55555555-6666-7777-8888-999999999999", "c3", false)
 
-	if strings.Contains(out, "DISTINCT threads") {
+	if strings.Contains(out, "distinct threads") {
 		t.Errorf("single/same-thread instructions must not emit the multi-thread fan-out block, got:\n%s", out)
 	}
 	if !strings.Contains(out, "--parent c3 --content-file ./reply.md") {

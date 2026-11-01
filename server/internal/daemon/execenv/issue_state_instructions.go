@@ -19,7 +19,7 @@ import (
 // Three renderings, and which one applies is decided by the CALLER, not here:
 //
 //   - resumed && known && nothing changed → the comparison is reported as
-//     step 1's answer, and the read becomes conditional on the agent's own
+//     facts, and the read becomes conditional on the agent's own
 //     memory being insufficient. This is the only rendering that may replace
 //     the read, and it is allowed for exactly the reason the empty comment
 //     delta is: an affirmative server report about the whole record.
@@ -58,13 +58,13 @@ func BuildIssueStateHint(issueID, issueStatus, assigneeType, assigneeID string, 
 	state := fmt.Sprintf("status: %s; assignee: %s", issueStatus, issueAssigneeLabel(assigneeType, assigneeID))
 	if len(changedFields) == 0 {
 		return fmt.Sprintf(
-			"The issue is unchanged since your last run — the server compared title and description (%s). "+
-				"That answers workflow step 1: continue from your resumed context, and re-read with %s only if resumed memory is not enough.\n\n",
+			"Issue state: %s. Title and description are unchanged since the previous run. "+
+				"Read %s if more issue context is needed.\n\n",
 			state, readCommand,
 		)
 	}
 	return fmt.Sprintf(
-		"Since your last run the issue changed: %s (%s). Read it: %s.\n\n",
+		"Issue changes since the previous run: %s (%s). Read it: %s.\n\n",
 		strings.Join(changedFields, ", "), state, readCommand,
 	)
 }

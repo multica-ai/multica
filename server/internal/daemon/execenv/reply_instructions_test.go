@@ -30,12 +30,11 @@ func TestBuildCommentReplyInstructionsCodexLinux(t *testing.T) {
 
 	for _, want := range []string{
 		"multica issue comment add " + issueID + " --parent " + triggerID + " --content-file ./reply.md --output table && rm ./reply.md",
-		"Write the body file first",
+		"Write the reply into a UTF-8 file",
 		"--content-file ./reply.md",
-		"#4182",
-		"Keep the `&&`",
-		"Do NOT write literal `\\n` escapes to simulate line breaks",
-		"do NOT reuse --parent values from previous turns",
+		"Cleanup runs only after a successful post",
+		"The file preserves actual newlines",
+		"Reply to the comment identified below",
 	} {
 		if !strings.Contains(got, want) {
 			t.Fatalf("codex/linux reply instructions missing %q\n---\n%s", want, got)
@@ -89,12 +88,10 @@ func TestBuildCommentReplyInstructionsNonCodexLinux(t *testing.T) {
 					// MUL-5442 cross-channel dedup: shell-hazard mechanics live in
 					// the brief's Comment Formatting; the cookbook keeps the
 					// file-first order, the command, and the pointer.
-					"Write the body file first",
-					"## Comment Formatting",
-					"#4182",
-					"Keep the `&&`",
-					"do NOT reuse --parent values from previous turns",
-					"Post your reply as a comment",
+					"Write the reply into a UTF-8 file",
+					"Cleanup runs only after a successful post",
+					"Reply to the comment identified below",
+					"Reply to the comment identified below",
 				} {
 					if !strings.Contains(got, want) {
 						t.Errorf("%s reply instructions missing %q\n---\n%s", name, want, got)
@@ -151,9 +148,9 @@ func TestBuildCommentReplyInstructionsWindowsUsesContentFile(t *testing.T) {
 				// so the Windows cookbook carries a `&&` variant too.
 				"Git Bash",
 				"multica issue comment add " + issueID + " --parent " + triggerID + " --content-file ./reply.md --output table && rm ./reply.md",
-				"Write the body file first",
-				"never pipe via `--content-stdin`",
-				"PowerShell drops non-ASCII",
+				"Write the reply into a UTF-8 file",
+				"use `--content-file`",
+				"PowerShell stdin may lose non-ASCII",
 				"## Comment Formatting",
 			} {
 				if !strings.Contains(got, want) {
@@ -343,15 +340,15 @@ func TestBuildCommentReplyInstructionsSquadLeaderCarveOut(t *testing.T) {
 	t.Parallel()
 
 	leader := BuildCommentReplyInstructions("claude", "issue-1", "comment-1", true)
-	if !strings.Contains(leader, "Unless your outcome is `no_action`, post your reply as a comment") {
+	if !strings.Contains(leader, "Unless your outcome is `no_action`, reply to the comment identified below") {
 		t.Errorf("leader reply instructions missing the no_action carve-out\n---\n%s", leader)
 	}
-	if strings.Contains(leader, "Post your reply as a comment") {
+	if strings.Contains(leader, "Reply to the comment identified below") {
 		t.Errorf("leader reply instructions still carry the unconditional imperative\n---\n%s", leader)
 	}
 
 	ordinary := BuildCommentReplyInstructions("claude", "issue-1", "comment-1", false)
-	if !strings.Contains(ordinary, "Post your reply as a comment") {
+	if !strings.Contains(ordinary, "Reply to the comment identified below") {
 		t.Errorf("ordinary reply instructions missing the imperative\n---\n%s", ordinary)
 	}
 	if strings.Contains(ordinary, "Unless your outcome is") {

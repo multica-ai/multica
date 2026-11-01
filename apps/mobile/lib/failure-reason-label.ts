@@ -45,6 +45,7 @@ export const REASONS = new Set([
   "agent_error.provider_capacity_or_rate_limit",
   "agent_error.provider_server_error",
   "agent_error.provider_network",
+  "agent_error.provider_content_filter",
 
   // Agent process side — agent / runner.
   "agent_error.process_failure",

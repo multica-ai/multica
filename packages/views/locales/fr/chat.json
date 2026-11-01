@@ -67,6 +67,7 @@
       "runtime_cli_timeout": "L'outil OpenClaw local n'a pas répondu à temps, l'exécution n'a donc jamais démarré. C'est un délai de démarrage local, pas un problème de réseau — réessayer ne servira à rien tant que l'outil ne démarrera pas plus vite ou que le délai ne sera pas allongé (MULTICA_OPENCLAW_CLI_TIMEOUT).",
       "environment_prepare_failed": "La machine de l'agent n'a pas pu préparer cette exécution, qui n'a donc jamais démarré. L'erreur ci-dessous indique la cause locale : souvent un manque d'espace disque, une permission, un dossier encore utilisé ou une configuration illisible. Le problème ne vient ni de l'agent ni du fournisseur du modèle.",
       "provider_network": "La connexion au fournisseur du modèle a été perdue avant la fin de la réponse. Vérifiez votre réseau et réessayez.",
+      "provider_content_filter": "Le fournisseur a bloqué la requête ou la réponse en application de sa politique de contenu. Vérifiez la requête et le contexte avant de réessayer.",
       "provider_auth_or_access": "Le compte de modèle de l'agent n'est plus connecté. Reconnectez-vous, puis réessayez.",
       "provider_quota_limit": "Le compte de modèle de l'agent n'a plus de crédit. Rechargez-le ou changez de compte, puis réessayez.",
       "provider_capacity_or_rate_limit": "Le fournisseur du modèle est saturé ou limite le débit de ce compte. Veuillez réessayer dans un instant.",

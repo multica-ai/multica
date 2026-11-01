@@ -1233,14 +1233,14 @@ func TestBuildPromptCommentTriggered(t *testing.T) {
 	for _, want := range []string{
 		issueID,
 		commentContent,
-		"Focus on THIS comment",
+		"Comment update",
 		commentID,
 		"multica issue comment add " + issueID + " --parent " + commentID,
-		"do NOT reuse --parent values from previous turns",
+		"Reply to the comment identified below",
 		// MUL-5442 (2026-08-06): with the generic no-reply rule retired,
 		// the reply command is framed as a plain imperative again — the
 		// squad leader's `no_action` block states its own exception.
-		"Post your reply as a comment",
+		"Reply to the comment identified below",
 	} {
 		if !strings.Contains(prompt, want) {
 			t.Fatalf("prompt missing %q\n---\n%s", want, prompt)
@@ -1309,7 +1309,7 @@ func TestBuildPromptCommentTriggeredByMember(t *testing.T) {
 		Agent:                 &AgentData{Name: "Test"},
 	}, "claude")
 
-	if !strings.Contains(prompt, "A user just left a new comment") {
+	if !strings.Contains(prompt, "Comment author: A user") {
 		t.Fatalf("member-triggered prompt should label the author as a user\n---\n%s", prompt)
 	}
 	if strings.Contains(prompt, "Another agent") {
@@ -1323,7 +1323,7 @@ func TestBuildPromptCommentTriggeredByMember(t *testing.T) {
 	if strings.Contains(prompt, "MUST respond") {
 		t.Fatalf("prompt should not contain unconditional \"MUST respond\" language\n---\n%s", prompt)
 	}
-	if !strings.Contains(prompt, "Post your reply as a comment") {
+	if !strings.Contains(prompt, "Reply to the comment identified below") {
 		t.Fatalf("prompt should carry the imperative reply command\n---\n%s", prompt)
 	}
 }
@@ -6775,7 +6775,7 @@ func TestFreshSessionMayHelp(t *testing.T) {
 // leader prompt and pins the exception's scope relation (MUL-5442 #6493
 // review): the no_action rule and the reply imperative appear in the same
 // prompt, so the imperative must carry the carve-out itself — a bare
-// unconditional "Post your reply as a comment" anywhere in a leader prompt
+// unconditional "Reply to the comment identified below" anywhere in a leader prompt
 // re-opens the contradiction the carve-out exists to close.
 func TestBuildPromptSquadLeaderReplyCommandCarvesOutNoAction(t *testing.T) {
 	t.Parallel()
@@ -6794,10 +6794,10 @@ func TestBuildPromptSquadLeaderReplyCommandCarvesOutNoAction(t *testing.T) {
 		},
 	}, "claude")
 
-	if !strings.Contains(prompt, "Unless your outcome is `no_action`, post your reply as a comment") {
+	if !strings.Contains(prompt, "Unless your outcome is `no_action`, reply to the comment identified below") {
 		t.Fatalf("leader prompt missing the carve-out reply imperative\n---\n%s", prompt)
 	}
-	if strings.Contains(prompt, "Post your reply as a comment") {
+	if strings.Contains(prompt, "Reply to the comment identified below") {
 		t.Fatalf("leader prompt still carries the unconditional reply imperative\n---\n%s", prompt)
 	}
 }
@@ -6829,21 +6829,21 @@ func TestBuildPromptSquadLeaderMultiThreadCarvesOutNoAction(t *testing.T) {
 		},
 	}
 	prompt := BuildPrompt(leaderTask, "claude")
-	scope := strings.Index(prompt, "skip this ENTIRE fan-out block")
+	scope := strings.Index(prompt, "For a `no_action` outcome, post no replies")
 	if scope < 0 {
 		t.Fatalf("leader multi-thread prompt missing the whole-block scope sentence\n---\n%s", prompt)
 	}
 	// Obligation strings track the converged fan-out block (MUL-5825). Pin
 	// ledger: "Post the replies in the order listed below" → the order rule
-	// merged into the targets header ("OLDEST thread first"); "For EACH
+	// merged into the targets header ("oldest thread first"); "For EACH
 	// thread above" → the embedded cookbook collapsed to the
 	// `## Comment Formatting` pointer plus the per-thread file delta
-	// ("DISTINCT body file per thread"). The assertion shape is unchanged:
+	// ("separate body file per thread"). The assertion shape is unchanged:
 	// every obligation must sit AFTER the no_action scope sentence.
 	for _, obligation := range []string{
-		"multiple replies are required and correct",
-		"OLDEST thread first",
-		"DISTINCT body file per thread",
+		"Each thread receives its own reply",
+		"oldest thread first",
+		"separate body file per thread",
 	} {
 		idx := strings.Index(prompt, obligation)
 		if idx < 0 {
@@ -6853,7 +6853,7 @@ func TestBuildPromptSquadLeaderMultiThreadCarvesOutNoAction(t *testing.T) {
 			t.Fatalf("obligation %q precedes the no_action scope sentence — it escapes the carve-out\n---\n%s", obligation, prompt)
 		}
 	}
-	if strings.Contains(prompt, ". Post ONE reply per thread") {
+	if strings.Contains(prompt, ". Post one reply per thread") {
 		t.Fatalf("leader multi-thread prompt still carries the unconditional imperative\n---\n%s", prompt)
 	}
 
@@ -6861,10 +6861,10 @@ func TestBuildPromptSquadLeaderMultiThreadCarvesOutNoAction(t *testing.T) {
 	ordinaryTask.IsLeaderTask = false
 	ordinaryTask.Agent = &AgentData{Name: "Reg", Instructions: "You are a regular agent."}
 	ordinary := BuildPrompt(ordinaryTask, "claude")
-	if !strings.Contains(ordinary, ". Post ONE reply per thread") {
+	if !strings.Contains(ordinary, ". Post one reply per thread") {
 		t.Fatalf("ordinary multi-thread prompt missing the unconditional imperative\n---\n%s", ordinary)
 	}
-	if strings.Contains(ordinary, "Unless your outcome is") || strings.Contains(ordinary, "skip this ENTIRE fan-out block") {
+	if strings.Contains(ordinary, "Unless your outcome is") || strings.Contains(ordinary, "For a `no_action` outcome, post no replies") {
 		t.Fatalf("ordinary multi-thread prompt leaked the leader carve-out\n---\n%s", ordinary)
 	}
 }

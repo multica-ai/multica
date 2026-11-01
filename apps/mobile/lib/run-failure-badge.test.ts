@@ -7,6 +7,9 @@ describe("runFailureBadgeLabel", () => {
     expect(runFailureBadgeLabel("agent_error.provider_network")).toBe(
       "Network error",
     );
+    expect(runFailureBadgeLabel("agent_error.provider_content_filter")).toBe(
+      "Content filtered",
+    );
     expect(runFailureBadgeLabel("skill_bundle_unavailable")).toBe(
       "Skill download failed",
     );

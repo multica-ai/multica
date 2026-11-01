@@ -230,6 +230,10 @@ const (
 	// failures, DNS failures, i/o timeout. Transient.
 	ReasonAgentProviderNetwork Reason = "agent_error.provider_network"
 
+	// ReasonAgentProviderContentFilter: the provider's content policy blocked
+	// the prompt or response. Repeating the same request is not a network retry.
+	ReasonAgentProviderContentFilter Reason = "agent_error.provider_content_filter"
+
 	// ReasonAgentProcessFailure: agent subprocess exited non-zero,
 	// crashed, or returned an unexpected signal. Runner / backend
 	// quality issue.
@@ -277,7 +281,7 @@ const (
 	ReasonAgentUnknown Reason = "agent_error.unknown"
 )
 
-// allReasons is the canonical ordered list of the 27 reasons. Order is
+// allReasons is the canonical ordered list of reasons. Order is
 // stable so callers (e.g. Prometheus collectors that pre-warm series via
 // AllReasons) can build deterministic label sets across restarts.
 //
@@ -311,6 +315,7 @@ var allReasons = []Reason{
 	ReasonAgentProviderCapacityOrRateLimit,
 	ReasonAgentProviderServerError,
 	ReasonAgentProviderNetwork,
+	ReasonAgentProviderContentFilter,
 
 	// Agent process side: agent / runner errors.
 	ReasonAgentProcessFailure,

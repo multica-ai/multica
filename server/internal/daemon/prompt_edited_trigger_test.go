@@ -21,7 +21,7 @@ func TestBuildCommentPromptEditedTrigger(t *testing.T) {
 	t.Run("edited on a resumed session", func(t *testing.T) {
 		out := buildCommentPrompt(base, "claude")
 		for _, want := range []string{
-			"[EDITED COMMENT] A user edited a comment after your previous run in this session started.",
+			"Comment change: edited after the previous run in this session started.",
 			"> Now it connects over TLS",
 			"This comment (comment-1, revision 3) was edited at 2026-10-26T02:20:00Z.",
 			"The text quoted in this prompt is the current version and the only one to act on",
@@ -31,7 +31,7 @@ func TestBuildCommentPromptEditedTrigger(t *testing.T) {
 				t.Errorf("prompt missing %q:\n%s", want, out)
 			}
 		}
-		if strings.Contains(out, "[NEW COMMENT]") {
+		if strings.Contains(out, "Comment change: new.") {
 			t.Error("edited trigger must not be announced as a new comment")
 		}
 	})
@@ -41,10 +41,10 @@ func TestBuildCommentPromptEditedTrigger(t *testing.T) {
 		task.TriggerCommentEditedAt = ""
 		task.TriggerCommentRevision = 0
 		out := buildCommentPrompt(task, "claude")
-		if !strings.Contains(out, "[NEW COMMENT] A user just left a new comment.") {
+		if !strings.Contains(out, "Comment change: new.") {
 			t.Errorf("unedited trigger must keep the new-comment header:\n%s", out)
 		}
-		if strings.Contains(out, "[EDITED COMMENT]") || strings.Contains(out, "was edited at") {
+		if strings.Contains(out, "Comment change: edited") || strings.Contains(out, "was edited at") {
 			t.Error("unedited trigger must not carry the edit note")
 		}
 	})
@@ -59,7 +59,7 @@ func TestBuildCommentPromptEditedTrigger(t *testing.T) {
 			task := base
 			mutate(&task)
 			out := buildCommentPrompt(task, "claude")
-			if strings.Contains(out, "[EDITED COMMENT]") || strings.Contains(out, "was edited at") {
+			if strings.Contains(out, "Comment change: edited") || strings.Contains(out, "was edited at") {
 				t.Errorf("%s: edit note must only render on a resumed session:\n%s", name, out)
 			}
 		})
@@ -82,7 +82,7 @@ func TestBuildCommentPromptEditedCoalescedComment(t *testing.T) {
 
 	out := buildCommentPrompt(base, "claude")
 	for _, want := range []string{
-		"[NEW COMMENT] A user just left a new comment.",
+		"Comment change: new.",
 		"- comment comment-1 (A user) [thread thread-1] [EDITED at 2026-10-26T02:20:00Z, revision 2 — current version]:",
 		"- comment comment-0 (A user) [thread thread-1]:",
 		"1 comment(s) above marked EDITED changed after your previous run in this session started.",
@@ -92,7 +92,7 @@ func TestBuildCommentPromptEditedCoalescedComment(t *testing.T) {
 			t.Errorf("prompt missing %q:\n%s", want, out)
 		}
 	}
-	if strings.Contains(out, "[EDITED COMMENT]") {
+	if strings.Contains(out, "Comment change: edited") {
 		t.Error("an unchanged trigger must keep the new-comment header")
 	}
 

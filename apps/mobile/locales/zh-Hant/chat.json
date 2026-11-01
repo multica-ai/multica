@@ -127,6 +127,7 @@
     "agent_error_provider_capacity_or_rate_limit": "受到提供商速率限制",
     "agent_error_provider_server_error": "提供商伺服器出錯",
     "agent_error_provider_network": "連線提供商時網路出錯",
+    "agent_error_provider_content_filter": "供應商內容政策攔截了請求或回覆",
     "agent_error_process_failure": "智慧體程序崩潰",
     "agent_error_empty_or_unparseable_output": "智慧體未返回可用輸出",
     "agent_error_agent_timeout": "智慧體執行超時",

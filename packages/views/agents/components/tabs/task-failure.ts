@@ -31,6 +31,7 @@ export const FAILURE_REASON_I18N_KEYS = {
     "agent_error_provider_capacity_or_rate_limit",
   "agent_error.provider_server_error": "agent_error_provider_server_error",
   "agent_error.provider_network": "agent_error_provider_network",
+  "agent_error.provider_content_filter": "agent_error_provider_content_filter",
 
   // Agent process side — agent / runner.
   "agent_error.process_failure": "agent_error_process_failure",

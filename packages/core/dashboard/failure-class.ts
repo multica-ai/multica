@@ -50,6 +50,7 @@ const REASON_CLASS: Record<string, FailureClass> = {
   // The upstream model API misbehaved or was asked for something it rejected.
   "agent_error.provider_server_error": "provider",
   "agent_error.provider_network": "provider",
+  "agent_error.provider_content_filter": "provider",
   "agent_error.model_not_found_or_unavailable": "provider",
   api_invalid_request: "provider",
 

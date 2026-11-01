@@ -320,7 +320,7 @@ func TestBuildPromptSquadLeaderReplyCarveOutIgnoresTriggerAuthor(t *testing.T) {
 			},
 		}, "claude")
 
-		if !strings.Contains(out, "Unless your outcome is `no_action`, post your reply as a comment") {
+		if !strings.Contains(out, "Unless your outcome is `no_action`, reply to the comment identified below") {
 			t.Errorf("%s-triggered leader prompt lost the no_action carve-out\n---\n%s", authorType, out)
 		}
 		// The rule is stated by the protocol in Instructions, never restated
@@ -467,7 +467,7 @@ func TestBuildPromptProtocolHeadingInInstructionsIsNotALeader(t *testing.T) {
 			t.Fatalf("ordinary agent prompt leaked squad-leader rule %q\n---\n%s", banned, out)
 		}
 	}
-	if !strings.Contains(out, "Post your reply as a comment") {
+	if !strings.Contains(out, "Reply to the comment identified below") {
 		t.Fatalf("ordinary agent prompt lost the unconditional reply imperative\n---\n%s", out)
 	}
 }
@@ -495,7 +495,7 @@ func TestBuildPromptLegacyServerKeepsBriefingBasedLeaderRole(t *testing.T) {
 		},
 	}, "claude")
 
-	if !strings.Contains(out, "Unless your outcome is `no_action`, post your reply as a comment") {
+	if !strings.Contains(out, "Unless your outcome is `no_action`, reply to the comment identified below") {
 		t.Fatalf("legacy-server leader prompt lost the leader-only reply carve-out\n---\n%s", out)
 	}
 }
@@ -1106,7 +1106,7 @@ func TestBuildPromptNewCommentsHint(t *testing.T) {
 	if !strings.Contains(out, "multica issue comment list "+issueID+" --since "+since+" --compact --output json") {
 		t.Errorf("hint must point at the issue-wide --since delta read, got:\n%s", out)
 	}
-	if !strings.Contains(out, "reading it is the scan workflow step 2 requires") {
+	if !strings.Contains(out, "Comment delta:") {
 		t.Errorf("hint must say the delta read answers the scan, got:\n%s", out)
 	}
 	// The full-thread read stays available for the reply itself, on --tail 30
@@ -1199,9 +1199,9 @@ func TestBuildPromptResumedNoDeltaDoesNotForceThreadRead(t *testing.T) {
 	out := BuildPrompt(task, "claude")
 
 	for _, want := range []string{
-		"triggering comment is already included above",
-		"No other new comments on this issue since your last run",
-		"issue-wide delta is empty",
+		"excluding the triggering comment and your own replies",
+		"Comment delta: no other new comments on this issue since the previous run",
+		"Comment delta: no other new comments",
 		"if resumed memory is not enough",
 		"multica issue comment list " + issueID + " --thread thread-root-1 --tail 30 --compact --output json",
 	} {
@@ -1344,16 +1344,16 @@ func TestBuildPromptResumedDeltaUnavailableStillRequiresScan(t *testing.T) {
 		out := BuildPrompt(base, "claude")
 
 		// The session facts are real and still stated.
-		if !strings.Contains(out, "You're resuming the prior session") {
-			t.Errorf("resumed prompt lost the session fact\n--- output ---\n%s", out)
+		if !strings.Contains(out, "Comment delta: unknown") {
+			t.Errorf("resumed prompt lost the unknown-delta fact\n--- output ---\n%s", out)
 		}
 		// The scan is handed over, not waived.
 		if !strings.Contains(out, "multica issue comment list "+issueID+" --roots-only --summary --compact --output json") {
 			t.Errorf("resumed prompt with no delta must hand over the scan\n--- output ---\n%s", out)
 		}
 		for _, banned := range []string{
-			"No other new comments on this issue since your last run",
-			"which answers the scan workflow step 2 requires",
+			"Comment delta: no other new comments on this issue since the previous run",
+			"excluding the triggering comment and your own replies",
 		} {
 			if strings.Contains(out, banned) {
 				t.Errorf("resumed prompt claims an answer it does not have (%q)\n--- output ---\n%s", banned, out)
@@ -1367,16 +1367,16 @@ func TestBuildPromptResumedDeltaUnavailableStillRequiresScan(t *testing.T) {
 		out := BuildPrompt(task, "claude")
 
 		for _, want := range []string{
-			"No other new comments on this issue since your last run",
-			"which answers the scan workflow step 2 requires",
+			"Comment delta: no other new comments on this issue since the previous run",
+			"excluding the triggering comment and your own replies",
 		} {
 			if !strings.Contains(out, want) {
-				t.Errorf("authoritative empty delta lost the waiver %q\n--- output ---\n%s", want, out)
+				t.Errorf("authoritative empty delta lost the fact %q\n--- output ---\n%s", want, out)
 			}
 		}
 		// The waiver is the whole point of this branch: it must not also hand
 		// the scan over, or the two branches are indistinguishable.
-		if strings.Contains(out, "nothing here answers the scan workflow step 2 requires") {
+		if strings.Contains(out, "Comment delta: unknown") {
 			t.Errorf("authoritative empty delta rendered the unknown-delta hint\n--- output ---\n%s", out)
 		}
 	})
@@ -1438,10 +1438,10 @@ func TestBuildCommentPromptLabelsDelegatedFailureSignalAsPlatform(t *testing.T) 
 		TriggerAuthorType:     "system",
 	}
 	out := BuildPrompt(task, "codex")
-	if !strings.Contains(out, "[NEW COMMENT] The platform just left a new comment") {
+	if !strings.Contains(out, "Comment author: The platform") {
 		t.Fatalf("system recovery comment was mislabeled in prompt:\n%s", out)
 	}
-	if strings.Contains(out, "[NEW COMMENT] A user just left a new comment") {
+	if strings.Contains(out, "Comment author: A user") {
 		t.Fatalf("system recovery comment must not be labeled as a user:\n%s", out)
 	}
 }
@@ -1664,9 +1664,9 @@ func TestBuildCommentPromptCrossThreadFansOutReplies(t *testing.T) {
 	out := BuildPrompt(task, "claude")
 
 	for _, want := range []string{
-		"3 DISTINCT threads",
-		"Post ONE reply per thread",
-		"OVERRIDES",
+		"3 distinct threads",
+		"Post one reply per thread",
+		"Each thread receives its own reply",
 		"--parent c1",
 		"--parent c2",
 		"--parent c3",
@@ -1693,7 +1693,7 @@ func TestBuildCommentPromptCrossThreadFansOutReplies(t *testing.T) {
 	// Chronological ordering (MUL-4348 test-round-2 problem #1): replies must be
 	// posted oldest thread first, the newest (triggering) thread last — so the
 	// coalesced comments c1 (oldest) and c2 come before the trigger c3.
-	if !strings.Contains(out, "OLDEST thread first") {
+	if !strings.Contains(out, "oldest thread first") {
 		t.Errorf("cross-thread prompt must instruct oldest-first chronological order, got:\n%s", out)
 	}
 	posC1 := strings.Index(out, "--parent c1")
@@ -1723,7 +1723,7 @@ func TestBuildCommentPromptSameThreadKeepsSingleReply(t *testing.T) {
 	}
 	out := BuildPrompt(task, "claude")
 
-	if strings.Contains(out, "DISTINCT threads") {
+	if strings.Contains(out, "distinct threads") {
 		t.Errorf("same-thread coalescing must not emit the multi-thread fan-out block, got:\n%s", out)
 	}
 	// The single-parent cookbook is used, threading the one reply under the
@@ -2157,10 +2157,10 @@ func TestBuildPromptIssueUnchangedDropsTheIssueRead(t *testing.T) {
 		t.Errorf("an unchanged issue must not carry the unconditional read imperative, got:\n%s", out)
 	}
 	for _, want := range []string{
-		"The issue is unchanged since your last run",
-		"the server compared title and description",
+		"Title and description are unchanged since the previous run",
+		"Title and description are unchanged",
 		"status: in_progress; assignee: agent agent-7",
-		"only if resumed memory is not enough",
+		"if more issue context is needed",
 	} {
 		if !strings.Contains(out, want) {
 			t.Errorf("prompt missing %q, got:\n%s", want, out)
@@ -2187,7 +2187,7 @@ func TestBuildPromptIssueChangedNamesFieldsAndReads(t *testing.T) {
 	out := BuildPrompt(task, "claude")
 
 	for _, want := range []string{
-		"Since your last run the issue changed: description, status",
+		"Issue changes since the previous run: description, status",
 		"status: todo; assignee: member user-3",
 		"Read it: `multica issue get " + issueID + " --output json`",
 	} {

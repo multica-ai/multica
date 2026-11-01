@@ -38,6 +38,7 @@ const FAILURE_REASON_BADGE: Record<string, string> = {
   "agent_error.provider_capacity_or_rate_limit": "Rate limited",
   "agent_error.provider_server_error": "Provider error",
   "agent_error.provider_network": "Network error",
+  "agent_error.provider_content_filter": "Content filtered",
   "agent_error.process_failure": "Process crashed",
   "agent_error.empty_or_unparseable_output": "No usable output",
   "agent_error.agent_timeout": "Agent timeout",
