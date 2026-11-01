@@ -2246,6 +2246,8 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 			r.Put("/api/office/floors/{id}", h.UpdateOfficeFloor)
 			r.Delete("/api/office/floors/{id}", h.DeleteOfficeFloor)
 			r.Put("/api/office/seats", h.PutOfficeSeats)
+			// The Secretary's digest: facts about the company, any member.
+			r.Get("/api/office/digest", h.GetOfficeDigest)
 
 			// Squad leader evaluation (writes to activity_log)
 			r.Post("/api/issues/{id}/squad-evaluated", h.RecordSquadLeaderEvaluation)
