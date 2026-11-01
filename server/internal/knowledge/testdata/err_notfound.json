@@ -1,0 +1,8 @@
+{
+  "error": {
+    "code": 1003,
+    "details": null,
+    "message": "Knowledge not found"
+  },
+  "success": false
+}

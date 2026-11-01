@@ -1,0 +1,37 @@
+{
+  "data": {
+    "created_at": "2026-11-01T18:50:55.268533+08:00",
+    "credentials": {
+      "api_key": {
+        "configured": false
+      },
+      "app_secret": {
+        "configured": false
+      }
+    },
+    "description": "",
+    "display_name": "",
+    "id": "69969a78-e405-4a6b-907e-60091b70ba8c",
+    "is_builtin": false,
+    "is_default": false,
+    "name": "bge-m3",
+    "parameters": {
+      "base_url": "http://ollama.test:11434",
+      "embedding_parameters": {
+        "dimension": 1024,
+        "supports_dimension_override": false,
+        "truncate_prompt_tokens": 0
+      },
+      "interface_type": "",
+      "parameter_size": "",
+      "provider": "ollama",
+      "supports_vision": false
+    },
+    "source": "local",
+    "status": "active",
+    "tenant_id": 10002,
+    "type": "Embedding",
+    "updated_at": "2026-11-01T18:50:55.473886+08:00"
+  },
+  "success": true
+}

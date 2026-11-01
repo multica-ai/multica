@@ -1,0 +1,15 @@
+{
+  "data": [],
+  "meta": {
+    "rerank": {
+      "applied": false,
+      "candidate_count": 0,
+      "effective_threshold": 0.2,
+      "outcome": "no_candidates",
+      "result_count": 0,
+      "threshold": 0.2,
+      "top_score": 0
+    }
+  },
+  "success": true
+}
