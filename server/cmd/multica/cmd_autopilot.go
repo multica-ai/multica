@@ -164,6 +164,8 @@ func init() {
 	autopilotTriggerAddCmd.Flags().String("cron", "", "Cron expression (required for --kind schedule)")
 	autopilotTriggerAddCmd.Flags().String("timezone", "", "IANA timezone (default UTC; schedule only)")
 	autopilotTriggerAddCmd.Flags().String("label", "", "Optional human-readable label")
+	autopilotTriggerAddCmd.Flags().Int64("execution-limit", 0, "Schedule lifetime count (1-2147483647); omitted defaults to Unlimited")
+	autopilotTriggerAddCmd.Flags().Bool("unlimited", false, "Clear the schedule lifetime limit; preserve its execution count")
 	autopilotTriggerAddCmd.Flags().String("output", "json", "Output format: table or json")
 
 	// trigger-list
@@ -179,6 +181,8 @@ func init() {
 	autopilotTriggerUpdateCmd.Flags().String("cron", "", "New cron expression")
 	autopilotTriggerUpdateCmd.Flags().String("timezone", "", "New IANA timezone")
 	autopilotTriggerUpdateCmd.Flags().String("label", "", "New label")
+	autopilotTriggerUpdateCmd.Flags().Int64("execution-limit", 0, "Schedule lifetime count (1-2147483647); omitted preserves the current limit")
+	autopilotTriggerUpdateCmd.Flags().Bool("unlimited", false, "Clear the schedule lifetime limit; preserve its execution count")
 	autopilotTriggerUpdateCmd.Flags().String("output", "json", "Output format: table or json")
 }
 
@@ -756,7 +760,7 @@ func runAutopilotTriggerList(cmd *cobra.Command, args []string) error {
 	}
 
 	fullID, _ := cmd.Flags().GetBool("full-id")
-	headers := []string{"ID", "KIND", "ENABLED", "SCHEDULE", "NEXT_RUN", "LABEL"}
+	headers := []string{"ID", "KIND", "ENABLED", "SCHEDULE", "NEXT_RUN", "EXECUTIONS", "LABEL"}
 	rows := make([][]string, 0, len(triggers))
 	for _, t := range triggers {
 		enabled := "no"
@@ -767,12 +771,28 @@ func runAutopilotTriggerList(cmd *cobra.Command, args []string) error {
 		if tz := strVal(t, "timezone"); schedule != "" && tz != "" {
 			schedule += " (" + tz + ")"
 		}
+		executions := ""
+		if strVal(t, "kind") == "schedule" {
+			limit := "unlimited"
+			if t["execution_limit"] != nil {
+				limit = numVal(t, "execution_limit")
+			}
+			used := numVal(t, "execution_count")
+			if used == "" {
+				used = "0"
+			}
+			executions = used + "/" + limit
+			if exhausted, _ := t["exhausted"].(bool); exhausted {
+				executions += " (completed)"
+			}
+		}
 		rows = append(rows, []string{
 			displayID(strVal(t, "id"), fullID),
 			strVal(t, "kind"),
 			enabled,
 			schedule,
 			relativeTimestamp(strVal(t, "next_run_at")),
+			executions,
 			strVal(t, "label"),
 		})
 	}
@@ -807,6 +827,14 @@ func runAutopilotTriggerAdd(cmd *cobra.Command, args []string) error {
 	}
 
 	body := map[string]any{"kind": kind}
+	if err := applyAutopilotExecutionLimitFlags(cmd, body); err != nil {
+		return err
+	}
+	if kind != "schedule" {
+		if _, ok := body["execution_limit"]; ok {
+			return fmt.Errorf("execution limits are only valid with --kind schedule")
+		}
+	}
 	if kind == "schedule" {
 		body["cron_expression"] = cron
 		if v, _ := cmd.Flags().GetString("timezone"); v != "" {
@@ -911,6 +939,9 @@ func runAutopilotTriggerUpdate(cmd *cobra.Command, args []string) error {
 	}
 
 	body := map[string]any{}
+	if err := applyAutopilotExecutionLimitFlags(cmd, body); err != nil {
+		return err
+	}
 	if cmd.Flags().Changed("enabled") {
 		v, _ := cmd.Flags().GetBool("enabled")
 		body["enabled"] = v
@@ -928,7 +959,7 @@ func runAutopilotTriggerUpdate(cmd *cobra.Command, args []string) error {
 		body["label"] = v
 	}
 	if len(body) == 0 {
-		return fmt.Errorf("no fields to update; use --enabled, --cron, --timezone, or --label")
+		return fmt.Errorf("no fields to update; use --enabled, --cron, --timezone, --label, --execution-limit, or --unlimited")
 	}
 
 	ctx, cancel := cli.APIContext(context.Background())
@@ -1053,4 +1084,24 @@ func resolveAgent(ctx context.Context, client *cli.APIClient, nameOrID string) (
 		}
 		return "", fmt.Errorf("ambiguous agent %q; matches:\n%s", nameOrID, strings.Join(parts, "\n"))
 	}
+}
+
+// Omission is a PATCH no-op. Only --unlimited sends explicit JSON null.
+func applyAutopilotExecutionLimitFlags(cmd *cobra.Command, body map[string]any) error {
+	unlimited, _ := cmd.Flags().GetBool("unlimited")
+	changed := cmd.Flags().Changed("execution-limit")
+	if changed && unlimited {
+		return fmt.Errorf("--execution-limit and --unlimited are mutually exclusive")
+	}
+	if unlimited {
+		body["execution_limit"] = nil
+	}
+	if changed {
+		limit, err := cmd.Flags().GetInt64("execution-limit")
+		if err != nil || limit < 1 || limit > 2147483647 {
+			return fmt.Errorf("--execution-limit must be between 1 and 2147483647")
+		}
+		body["execution_limit"] = limit
+	}
+	return nil
 }

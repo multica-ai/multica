@@ -1057,6 +1057,26 @@ may be passed as a short prefix as long as it is unique within that autopilot; u
 `--full-id` to print canonical UUIDs. Webhook credentials are redacted in this
 output — use `autopilot get <id> --output json --show-secrets` to reveal them.
 
+Schedule triggers accept `--execution-limit N` (1–2147483647). `1` means Once,
+using the next accepted cron occurrence. Omit it on creation for Unlimited;
+omit it on update to preserve the limit. `--unlimited` explicitly clears the
+limit and cannot be combined with `--execution-limit`.
+
+```bash
+multica autopilot trigger-add <autopilot-id> --cron "0 9 * * *" --execution-limit 1
+multica autopilot trigger-update <autopilot-id> <trigger-id> --execution-limit 5
+multica autopilot trigger-update <autopilot-id> <trigger-id> --unlimited
+```
+
+The API equivalents are `execution_limit: N`, omitted (preserve), and
+`execution_limit: null` (Unlimited). Responses include `execution_limit`,
+`execution_count` and `exhausted`. Counts advance only when downstream work is
+accepted; later run failure still counts. Pre-dispatch skips and transaction
+rollback do not count; retries of one planned occurrence count once. Manual
+runs and webhooks do not consume schedule counts. Cron/limit edits keep the
+count: increasing the limit or clearing it resumes future cron occurrences,
+while enabling an exhausted schedule does not bypass its limit.
+
 The CLI exposes cron-based `schedule` triggers via `trigger-add`, and `webhook`
 triggers via `trigger-add --kind webhook` plus `trigger-rotate-url`. The data model
 also defines an `api` kind, which is not surfaced here.

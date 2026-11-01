@@ -65,6 +65,12 @@ Le cron n'a pas de champ pour les secondes, et les fuseaux horaires utilisent de
 
 ![L'éditeur d'automatisation : procédure, paramètres de planification et aperçu des prochaines exécutions](/images/docs/autopilot-schedule.webp)
 
+### Planifications limitées
+
+Choisissez **Illimité** (par défaut), **Une fois** (la prochaine occurrence cron acceptée) ou **Nombre personnalisé**. Le compteur avance après la création d’une tâche ou la mise en file d’une exécution. Un échec ultérieur reste compté ; un refus d’admission ou une création annulée ne compte pas. Les reprises d’une même occurrence comptent une seule fois. **Exécuter maintenant** et les webhooks ne consomment pas ce compteur.
+
+Modifier le cron ou la limite conserve le compteur. Augmenter la limite ou choisir Illimité permet les prochaines occurrences cron. Une limite inférieure ou égale au compteur maintient la planification terminée. Réactiver le déclencheur ne remet pas le compteur à zéro.
+
 ## Exécuter depuis un webhook
 
 Après l'ajout d'un déclencheur webhook, Multica génère une URL unique. Envoyez-lui un objet ou un tableau JSON pour déclencher l'automatisation :

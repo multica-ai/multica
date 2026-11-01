@@ -62,6 +62,7 @@ import { ProjectIcon } from "../../projects/components/project-icon";
 import { AgentPicker, type AssigneeSelection } from "./pickers/agent-picker";
 import { SubscriberMultiSelect } from "./subscriber-multi-select";
 import { AutopilotAccessManager } from "./autopilot-access-manager";
+import { ExecutionLimitEditor, validExecutionLimit } from "./schedule-editor/execution-limit";
 import { ScheduleEditor } from "./schedule-editor/schedule-editor";
 import { getDefaultScheduleConfig, type ScheduleConfig } from "./schedule-editor/model";
 import { browserTimezone } from "../../common/timezone-select";
@@ -174,6 +175,9 @@ export function AutopilotDialog(props: AutopilotDialogProps) {
     }
     return getDefaultScheduleConfig(browserTimezone());
   })();
+  const [executionLimit, setExecutionLimit] = useState<number | null>(existingSchedule?.execution_limit ?? null);
+  const initialLimitRef = useRef(existingSchedule?.execution_limit ?? null);
+  const limitDirty = executionLimit !== initialLimitRef.current;
   const [schedule, setSchedule] = useState<ScheduleConfig>(initialCfg);
 
   // Editing an autopilot that has no schedule: the panel has nothing to
@@ -278,7 +282,7 @@ export function AutopilotDialog(props: AutopilotDialogProps) {
   const scheduleWillBeWritten =
     triggerKind === "schedule" &&
     !schedulePillDisabled &&
-    (isCreate || (existingSchedule !== null ? scheduleDirty : scheduleAdded));
+    (isCreate || (existingSchedule !== null ? scheduleDirty || limitDirty : scheduleAdded));
 
   // The FIRST empty required field in reading order — the user fills one, the
   // next surfaces. Only these two are answered here: a rejected schedule is
@@ -307,7 +311,11 @@ export function AutopilotDialog(props: AutopilotDialogProps) {
     }
     setSubmitting(true);
     try {
-      if (scheduleWillBeWritten && !(await scheduleGate.ensureAccepted(schedule))) {
+      if (scheduleWillBeWritten && !validExecutionLimit(executionLimit)) {
+        setSubmitting(false);
+        return;
+      }
+      if (scheduleWillBeWritten && (isCreate || existingSchedule === null || scheduleDirty) && !(await scheduleGate.ensureAccepted(schedule))) {
         setSubmitting(false);
         return;
       }
@@ -340,6 +348,7 @@ export function AutopilotDialog(props: AutopilotDialogProps) {
               kind: "schedule",
               cron_expression: toCron(schedule),
               timezone: schedule.timezone,
+              execution_limit: executionLimit,
             });
           }
         } catch (err) {
@@ -389,8 +398,8 @@ export function AutopilotDialog(props: AutopilotDialogProps) {
               await updateTrigger.mutateAsync({
                 autopilotId: props.autopilotId,
                 triggerId: snapshottedTriggerId,
-                cron_expression: toCron(schedule),
-                timezone: schedule.timezone,
+                ...(scheduleDirty ? { cron_expression: toCron(schedule), timezone: schedule.timezone } : {}),
+                ...(limitDirty ? { execution_limit: executionLimit } : {}),
               });
             } else {
               await createTrigger.mutateAsync({
@@ -398,6 +407,7 @@ export function AutopilotDialog(props: AutopilotDialogProps) {
                 kind: "schedule",
                 cron_expression: toCron(schedule),
                 timezone: schedule.timezone,
+                execution_limit: executionLimit,
               });
             }
           } catch (err) {
@@ -660,16 +670,24 @@ export function AutopilotDialog(props: AutopilotDialogProps) {
                      `scheduleValid` would have no reader. The editor still shows
                      its own inline rejection, and `ensureAccepted` re-asks the
                      server on submit and toasts what it says. */
-                  <ScheduleEditor
-                    value={schedule}
-                    onChange={setSchedule}
-                    wsId={wsId}
-                    // Locked while the save is in flight: the submit path validates
-                    // over the network and then writes the schedule it read before
-                    // that round trip, so an edit made in between would be dropped
-                    // on the floor with a success toast over it.
-                    disabled={submitting}
-                  />
+                  <>
+                    <ScheduleEditor
+                      value={schedule}
+                      onChange={setSchedule}
+                      wsId={wsId}
+                      // Locked while the save is in flight: the submit path validates
+                      // over the network and then writes the schedule it read before
+                      // that round trip, so an edit made in between would be dropped
+                      // on the floor with a success toast over it.
+                      disabled={submitting}
+                    />
+                    <ExecutionLimitEditor
+                      value={executionLimit}
+                      onChange={setExecutionLimit}
+                      used={existingSchedule?.execution_count}
+                      disabled={submitting}
+                    />
+                  </>
                 )}
               </div>
             ) : (

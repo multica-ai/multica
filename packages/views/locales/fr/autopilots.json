@@ -524,5 +524,16 @@
     "create": "Nouveau réveil",
     "create_pick_issue": "Choisissez la tâche où ajouter un réveil",
     "create_pick_issue_description": "Le réveil appartient à cette tâche et s’arrête avec elle."
-  }
+  },
+  "execution_limit": {
+    "label": "Limite d’exécutions",
+    "unlimited": "Illimité",
+    "once": "Une fois",
+    "custom": "Nombre personnalisé",
+    "count": "Nombre d’exécutions",
+    "invalid": "Saisissez un entier de 1 à 2147483647.",
+    "used": "{{count}} exécutions acceptées. Modifier conserve ce compteur.",
+    "completed": "Terminé",
+    "progress": "{{used}} / {{limit}} acceptées"
+}
 }

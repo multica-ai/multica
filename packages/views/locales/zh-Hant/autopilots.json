@@ -522,5 +522,16 @@
     "create": "新建喚醒",
     "create_pick_issue": "選擇要新增喚醒的任務",
     "create_pick_issue_description": "喚醒屬於該任務，並隨任務結束而停止。"
-  }
+  },
+  "execution_limit": {
+    "label": "執行次數",
+    "unlimited": "不限",
+    "once": "一次",
+    "custom": "自訂次數",
+    "count": "次數",
+    "invalid": "請輸入 1 到 2147483647 之間的整數。",
+    "used": "已接受 {{count}} 次，編輯後保留此計數。",
+    "completed": "已完成",
+    "progress": "已接受 {{used}} / {{limit}} 次"
+}
 }

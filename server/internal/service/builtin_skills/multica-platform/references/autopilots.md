@@ -37,6 +37,17 @@ multica autopilot trigger <autopilot-id> --output json
 multica autopilot trigger-rotate-url <autopilot-id> <trigger-id> --yes --output json
 ```
 
+Schedule `trigger-add` / `trigger-update` accept `--execution-limit N`
+(1–2147483647); `1` is Once at the next accepted cron occurrence. Omission on
+create defaults to Unlimited; omission on update preserves the existing limit.
+`--unlimited` clears the limit, mutually exclusive with `--execution-limit`.
+The API uses `execution_limit: null` to clear and returns `execution_limit`,
+`execution_count`, `exhausted`. Count only accepted downstream issues/runs, once
+per planned occurrence; later failure counts, admission skips and rolled-back
+creation do not. Manual runs and webhooks bypass schedule counts. Edits retain
+used counts; raising/clearing the limit resumes future occurrences, while
+`enabled=true` cannot bypass exhaustion.
+
 Do not run `trigger`, `delete`, `trigger-delete`, or `trigger-rotate-url` to
 test — those are real side effects. Use `trigger` only when the user explicitly
 asks for a manual run, and `trigger-rotate-url` only when rotating a webhook

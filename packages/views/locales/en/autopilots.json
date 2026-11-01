@@ -524,5 +524,16 @@
     "create": "New wakeup",
     "create_pick_issue": "Choose the issue to add a wakeup to",
     "create_pick_issue_description": "The wakeup belongs to this issue and ends with it."
-  }
+  },
+  "execution_limit": {
+    "label": "Execution limit",
+    "unlimited": "Unlimited",
+    "once": "Once",
+    "custom": "Custom count",
+    "count": "Execution count",
+    "invalid": "Enter a whole number from 1 to 2147483647.",
+    "used": "{{count}} accepted so far. Editing keeps this count.",
+    "completed": "Completed",
+    "progress": "{{used}} / {{limit}} accepted"
+}
 }

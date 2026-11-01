@@ -11,6 +11,8 @@ import type {
   AgentBuilderSessionSummary,
   Attachment,
   AutopilotRun,
+  AutopilotTrigger,
+  GetAutopilotResponse,
   BillingBalance,
   BillingBatchesPage,
   BillingCheckoutSessionStatus,
@@ -2615,6 +2617,67 @@ export const ListAutopilotsResponseSchema = z.object({
 export const EMPTY_LIST_AUTOPILOTS_RESPONSE = {
   autopilots: [],
   total: 0,
+};
+
+// Trigger count fields default for servers predating finite schedules.
+export const AutopilotTriggerSchema = z
+  .object({
+    id: z.string(),
+    autopilot_id: z.string(),
+    kind: z.string(),
+    enabled: z.boolean(),
+    cron_expression: z.string().nullable().default(null),
+    timezone: z.string().nullable().default(null),
+    next_run_at: z.string().nullable().default(null),
+    webhook_token: z.string().nullable().default(null),
+    label: z.string().nullable().default(null),
+    last_fired_at: z.string().nullable().default(null),
+    created_at: z.string().default(""),
+    updated_at: z.string().default(""),
+    execution_limit: z.number().int().min(1).max(2147483647).nullable().default(null),
+    execution_count: z.number().int().nonnegative().default(0),
+    exhausted: z.boolean().default(false),
+  })
+  .loose();
+export const AutopilotTriggerListSchema = z.array(AutopilotTriggerSchema);
+export const GetAutopilotResponseSchema = z
+  .object({
+    autopilot: AutopilotListItemSchema,
+    triggers: AutopilotTriggerListSchema.default([]),
+  })
+  .loose();
+export const EMPTY_GET_AUTOPILOT_RESPONSE: GetAutopilotResponse = {
+  autopilot: {
+    id: "",
+    workspace_id: "",
+    title: "",
+    description: null,
+    assignee_type: "agent",
+    assignee_id: "",
+    status: "paused",
+    execution_mode: "run_only",
+    issue_title_template: null,
+    created_by_type: "",
+    created_by_id: "",
+    last_run_at: null,
+    created_at: "",
+    updated_at: "",
+  },
+  triggers: [],
+};
+export const EMPTY_AUTOPILOT_TRIGGER: AutopilotTrigger = {
+  id: "",
+  autopilot_id: "",
+  kind: "schedule",
+  enabled: false,
+  cron_expression: null,
+  timezone: null,
+  next_run_at: null,
+  webhook_token: null,
+  label: null,
+  last_fired_at: null,
+  created_at: "",
+  updated_at: "",
 };
 
 // Autopilot run (POST /trigger, GET /runs). Consumed by the "run now" flow,

@@ -522,5 +522,16 @@
     "create": "깨우기 추가",
     "create_pick_issue": "깨우기를 추가할 태스크 선택",
     "create_pick_issue_description": "깨우기는 이 태스크에 속하며 태스크가 끝나면 함께 끝납니다."
-  }
+  },
+  "execution_limit": {
+    "label": "실행 횟수 제한",
+    "unlimited": "무제한",
+    "once": "한 번",
+    "custom": "횟수 지정",
+    "count": "실행 횟수",
+    "invalid": "1부터 2147483647까지의 정수를 입력하세요.",
+    "used": "{{count}}회 접수됨. 수정해도 횟수는 유지됩니다.",
+    "completed": "완료",
+    "progress": "{{used}} / {{limit}}회 접수됨"
+}
 }

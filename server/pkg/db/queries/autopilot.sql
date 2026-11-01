@@ -186,14 +186,14 @@ INSERT INTO autopilot_trigger (
     autopilot_id, kind, enabled, cron_expression, timezone,
     next_run_at, webhook_token, label, provider, event_filters,
     published_by_type, published_by_id,
-    created_by_type, created_by_id
+    created_by_type, created_by_id, execution_limit
 ) VALUES (
     $1, $2, $3, sqlc.narg('cron_expression'), sqlc.narg('timezone'),
     sqlc.narg('next_run_at'), sqlc.narg('webhook_token'), sqlc.narg('label'),
     COALESCE(sqlc.narg('provider')::text, 'generic'),
     sqlc.narg('event_filters'),
     sqlc.narg('published_by_type'), sqlc.narg('published_by_id'),
-    sqlc.narg('created_by_type'), sqlc.narg('created_by_id')
+    sqlc.narg('created_by_type'), sqlc.narg('created_by_id'), sqlc.narg('execution_limit')
 ) RETURNING *;
 
 -- name: SetAutopilotTriggerPublisher :exec
@@ -225,19 +225,39 @@ UPDATE autopilot_trigger SET
     enabled = COALESCE(sqlc.narg('enabled')::boolean, enabled),
     cron_expression = COALESCE(sqlc.narg('cron_expression'), cron_expression),
     timezone = COALESCE(sqlc.narg('timezone'), timezone),
-    next_run_at = sqlc.narg('next_run_at'),
+    next_run_at = CASE WHEN (CASE WHEN @set_execution_limit::boolean THEN sqlc.narg('execution_limit')::integer ELSE execution_limit END) <= execution_count THEN NULL ELSE sqlc.narg('next_run_at')::timestamptz END,
     label = COALESCE(sqlc.narg('label'), label),
     event_filters = COALESCE(sqlc.narg('event_filters'), event_filters),
+    execution_limit = CASE WHEN @set_execution_limit::boolean THEN sqlc.narg('execution_limit')::integer ELSE execution_limit END,
     updated_at = now()
 WHERE id = $1
 RETURNING *;
+
+-- name: LockAutopilotRunForScheduleDispatch :one
+-- Fence a stale recovery against an in-progress downstream transaction.
+SELECT * FROM autopilot_run WHERE id = $1 FOR UPDATE;
+
+-- name: AcceptAutopilotScheduleOccurrence :one
+-- Called only inside the transaction that creates and links the downstream
+-- issue/task. Rollback refunds admission; committing keeps it counted even
+-- when the agent later fails. UPDATE serializes the last slot across replicas.
+UPDATE autopilot_trigger t
+SET execution_count = execution_count + 1,
+    next_run_at = CASE WHEN execution_limit IS NOT NULL AND execution_count + 1 >= execution_limit THEN NULL ELSE next_run_at END,
+    updated_at = now()
+FROM autopilot a
+WHERE t.id = @trigger_id AND t.autopilot_id = @autopilot_id
+  AND a.id = t.autopilot_id AND a.workspace_id = @workspace_id
+  AND t.kind = 'schedule' AND t.enabled AND a.status = 'active'
+  AND (t.execution_limit IS NULL OR t.execution_count < t.execution_limit)
+RETURNING t.*;
 
 -- name: DeleteAutopilotTrigger :exec
 DELETE FROM autopilot_trigger WHERE id = $1;
 
 -- name: AdvanceTriggerNextRun :exec
 UPDATE autopilot_trigger
-SET next_run_at = sqlc.narg('next_run_at'),
+SET next_run_at = CASE WHEN execution_limit IS NOT NULL AND execution_count >= execution_limit THEN NULL ELSE sqlc.narg('next_run_at')::timestamptz END,
     last_fired_at = now(),
     updated_at = now()
 WHERE id = $1;
@@ -545,6 +565,7 @@ FROM autopilot_trigger t
 JOIN autopilot a ON a.id = t.autopilot_id
 WHERE t.kind = 'schedule'
   AND t.enabled = TRUE
+  AND (t.execution_limit IS NULL OR t.execution_count < t.execution_limit)
   AND a.status = 'active'
   AND t.cron_expression IS NOT NULL
   AND t.cron_expression <> ''

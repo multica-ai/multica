@@ -522,5 +522,16 @@
     "create": "起動を追加",
     "create_pick_issue": "起動を追加するタスクを選択",
     "create_pick_issue_description": "起動はこのタスクに属し、タスクの終了とともに終わります。"
-  }
+  },
+  "execution_limit": {
+    "label": "実行回数の上限",
+    "unlimited": "無制限",
+    "once": "1回",
+    "custom": "回数を指定",
+    "count": "実行回数",
+    "invalid": "1～2147483647の整数を入力してください。",
+    "used": "受付済み {{count}} 回。編集しても回数は保持されます。",
+    "completed": "完了",
+    "progress": "受付済み {{used}} / {{limit}} 回"
+}
 }

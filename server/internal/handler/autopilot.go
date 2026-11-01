@@ -119,6 +119,9 @@ type AutopilotSubscriberEntry struct {
 }
 
 type AutopilotTriggerResponse struct {
+	ExecutionLimit *int32  `json:"execution_limit"`
+	ExecutionCount int64   `json:"execution_count"`
+	Exhausted      bool    `json:"exhausted"`
 	ID             string  `json:"id"`
 	AutopilotID    string  `json:"autopilot_id"`
 	Kind           string  `json:"kind"`
@@ -221,6 +224,8 @@ func autopilotToResponse(a db.Autopilot, subscribers []db.AutopilotSubscriber) A
 
 func (h *Handler) triggerToResponse(t db.AutopilotTrigger) AutopilotTriggerResponse {
 	resp := AutopilotTriggerResponse{
+		ExecutionCount: t.ExecutionCount,
+		Exhausted:      t.ExecutionLimit.Valid && t.ExecutionCount >= int64(t.ExecutionLimit.Int32),
 		ID:             uuidToString(t.ID),
 		AutopilotID:    uuidToString(t.AutopilotID),
 		Kind:           t.Kind,
@@ -233,6 +238,13 @@ func (h *Handler) triggerToResponse(t db.AutopilotTrigger) AutopilotTriggerRespo
 		LastFiredAt:    timestampToPtr(t.LastFiredAt),
 		CreatedAt:      timestampToString(t.CreatedAt),
 		UpdatedAt:      timestampToString(t.UpdatedAt),
+	}
+	if t.ExecutionLimit.Valid {
+		limit := t.ExecutionLimit.Int32
+		resp.ExecutionLimit = &limit
+	}
+	if resp.Exhausted {
+		resp.NextRunAt = nil
 	}
 	if t.Kind == "webhook" && t.WebhookToken.Valid && t.WebhookToken.String != "" {
 		path := webhookPathForToken(t.WebhookToken.String)
@@ -388,10 +400,11 @@ type SubscriberInput struct {
 }
 
 type CreateAutopilotTriggerRequest struct {
-	Kind           string  `json:"kind"`
-	CronExpression *string `json:"cron_expression"`
-	Timezone       *string `json:"timezone"`
-	Label          *string `json:"label"`
+	ExecutionLimit json.RawMessage `json:"execution_limit"`
+	Kind           string          `json:"kind"`
+	CronExpression *string         `json:"cron_expression"`
+	Timezone       *string         `json:"timezone"`
+	Label          *string         `json:"label"`
 	// Provider is currently only meaningful for kind=webhook. Allowed
 	// values: "generic" (default) or "github". Unset → "generic".
 	Provider *string `json:"provider"`
@@ -414,10 +427,12 @@ type SetSigningSecretRequest struct {
 }
 
 type UpdateAutopilotTriggerRequest struct {
-	Enabled        *bool   `json:"enabled"`
-	CronExpression *string `json:"cron_expression"`
-	Timezone       *string `json:"timezone"`
-	Label          *string `json:"label"`
+	// Omitted preserves the limit; explicit null restores Unlimited.
+	ExecutionLimit json.RawMessage `json:"execution_limit"`
+	Enabled        *bool           `json:"enabled"`
+	CronExpression *string         `json:"cron_expression"`
+	Timezone       *string         `json:"timezone"`
+	Label          *string         `json:"label"`
 	// EventFilters is the desired event-filter set with tri-state PATCH
 	// semantics:
 	//
@@ -1511,6 +1526,23 @@ func (h *Handler) RemoveAutopilotCollaborator(w http.ResponseWriter, r *http.Req
 
 // ── Trigger management ──────────────────────────────────────────────────────
 
+func parseScheduleExecutionLimit(raw json.RawMessage, kind string) (pgtype.Int4, error) {
+	if len(raw) == 0 {
+		return pgtype.Int4{}, nil
+	}
+	if kind != "schedule" {
+		return pgtype.Int4{}, fmt.Errorf("execution_limit is only valid for schedule triggers")
+	}
+	if bytes.Equal(bytes.TrimSpace(raw), []byte("null")) {
+		return pgtype.Int4{}, nil
+	}
+	var limit int32
+	if err := json.Unmarshal(raw, &limit); err != nil || limit <= 0 {
+		return pgtype.Int4{}, fmt.Errorf("execution_limit must be an integer between 1 and 2147483647, or null for Unlimited")
+	}
+	return pgtype.Int4{Int32: limit, Valid: true}, nil
+}
+
 func (h *Handler) CreateAutopilotTrigger(w http.ResponseWriter, r *http.Request) {
 	autopilotID := chi.URLParam(r, "id")
 	workspaceID := h.resolveWorkspaceID(r)
@@ -1554,6 +1586,11 @@ func (h *Handler) CreateAutopilotTrigger(w http.ResponseWriter, r *http.Request)
 		// trigger kind. Surface stragglers with 400 so callers move to
 		// schedule or webhook.
 		writeError(w, http.StatusBadRequest, "kind must be schedule or webhook")
+		return
+	}
+	executionLimit, err := parseScheduleExecutionLimit(req.ExecutionLimit, req.Kind)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
 	if req.Kind == "schedule" && (req.CronExpression == nil || *req.CronExpression == "") {
@@ -1659,6 +1696,7 @@ func (h *Handler) CreateAutopilotTrigger(w http.ResponseWriter, r *http.Request)
 	qtx := h.Queries.WithTx(tx)
 
 	trigger, err := qtx.CreateAutopilotTrigger(r.Context(), db.CreateAutopilotTriggerParams{
+		ExecutionLimit: executionLimit,
 		AutopilotID:    ap.ID,
 		Kind:           req.Kind,
 		Enabled:        true,
@@ -1919,12 +1957,19 @@ func (h *Handler) UpdateAutopilotTrigger(w http.ResponseWriter, r *http.Request)
 		}
 	}
 
+	executionLimit, err := parseScheduleExecutionLimit(req.ExecutionLimit, prev.Kind)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
 	params := db.UpdateAutopilotTriggerParams{
-		ID:             prev.ID,
-		CronExpression: prev.CronExpression,
-		Timezone:       prev.Timezone,
-		NextRunAt:      prev.NextRunAt,
-		Label:          prev.Label,
+		ExecutionLimit:    executionLimit,
+		SetExecutionLimit: len(req.ExecutionLimit) > 0,
+		ID:                prev.ID,
+		CronExpression:    prev.CronExpression,
+		Timezone:          prev.Timezone,
+		NextRunAt:         prev.NextRunAt,
+		Label:             prev.Label,
 	}
 	if req.Enabled != nil {
 		params.Enabled = pgtype.Bool{Bool: *req.Enabled, Valid: true}
@@ -2011,7 +2056,7 @@ func (h *Handler) UpdateAutopilotTrigger(w http.ResponseWriter, r *http.Request)
 	// over-transfer Elon flagged). Comparing the persisted before/after rows captures a
 	// real change and ignores label-only / no-op PATCHes (next_run_at is derived from
 	// cron/timezone, so it is not an independent signal).
-	triggerSubstantiveChange := prev.Enabled != trigger.Enabled ||
+	triggerSubstantiveChange := prev.ExecutionLimit != trigger.ExecutionLimit || prev.Enabled != trigger.Enabled ||
 		prev.CronExpression != trigger.CronExpression ||
 		prev.Timezone != trigger.Timezone ||
 		!bytes.Equal(prev.EventFilters, trigger.EventFilters)
