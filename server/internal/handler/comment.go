@@ -1980,7 +1980,34 @@ func (h *Handler) triggerTasksForComment(ctx context.Context, issue db.Issue, co
 	}
 	outcomes := commentTriggerOutcomes(targets, enqueued)
 	h.noteCommentInvocationDenied(ctx, issue, comment, outcomes)
+	h.noteDelegationZeroRoute(ctx, issue, comment, actorType, triggers, targets)
 	return outcomes
+}
+
+// noteDelegationZeroRoute warns when a delegated worker's comment resolves to
+// zero triggers — no explicit mention and no squad fallback — because that is
+// exactly the moment a delegation chain silently stalls (#9720): the worker's
+// closing report reaches nobody, no run is enqueued, and nothing else records
+// the drop. The warning carries the delegation attribution so the log line
+// alone answers "who was supposed to pick this up". The wake-the-delegator
+// counterpart stays a product decision and is deliberately not part of this.
+func (h *Handler) noteDelegationZeroRoute(ctx context.Context, issue db.Issue, comment db.Comment, actorType string, triggers []commentAgentTrigger, targets []commentMentionTarget) {
+	if actorType != "agent" || !comment.SourceTaskID.Valid {
+		return
+	}
+	if len(triggers) > 0 || len(targets) > 0 {
+		return
+	}
+	task, err := h.Queries.GetAgentTask(ctx, comment.SourceTaskID)
+	if err != nil || !task.DelegatedFromTaskID.Valid {
+		return
+	}
+	slog.Warn("delegated worker comment routed to nobody: no mention and no squad fallback applied; the delegation chain may stall until someone replies",
+		"issue_id", uuidToString(issue.ID),
+		"agent_id", uuidToString(task.AgentID),
+		"task_id", uuidToString(task.ID),
+		"delegated_from_task_id", util.UUIDToString(task.DelegatedFromTaskID),
+	)
 }
 
 // noteBlockedRuntimeTargets leaves one system comment per agent refused for an
