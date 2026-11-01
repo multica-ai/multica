@@ -10,7 +10,6 @@ import { useRequiredWorkspaceSlug, useWorkspacePaths } from "@multica/core/paths
 import { getCurrentSlug } from "@multica/core/platform";
 import { useChatStore } from "@multica/core/chat";
 import { chatQuickActionsPendingOptions } from "@multica/core/chat/queries";
-import { useRegenerateChatQuickActions } from "@multica/core/chat/mutations";
 import { useQuickActionsPendingTimeout } from "@multica/core/chat/use-quick-actions-pending-timeout";
 import { useQuickActionsFailureToast } from "./components/use-quick-actions-failure-toast";
 import { useQuery } from "@tanstack/react-query";
@@ -21,19 +20,11 @@ import { useListColumnCollapsed } from "../layout/app-shell-context";
 import { ListColumn } from "../layout/list-column";
 import { useNavigation } from "../navigation";
 import { useT } from "../i18n";
-import { ChatMessageList, ChatMessageSkeleton } from "./components/chat-message-list";
-import { ChatInput } from "./components/chat-input";
-import { ChatQueue } from "./components/chat-queue";
 import { ChatThreadList } from "./components/chat-thread-list";
 import { ChatSessionHeader } from "./components/chat-session-header";
-import { EmptyState } from "./components/chat-empty-state";
 import { NewChatButton } from "./components/new-chat-button";
+import { ChatConversation } from "./components/chat-conversation";
 import { useChatController } from "./components/use-chat-controller";
-import { OfflineBanner } from "./components/offline-banner";
-import { NoAgentBanner } from "./components/no-agent-banner";
-import { ArchivedAgentBanner } from "./components/archived-agent-banner";
-import { AgentAccessRevokedBanner } from "./components/agent-access-revoked-banner";
-import { RuntimeRequiredBanner } from "./components/runtime-required-banner";
 import { useRegisterCommandBarContext } from "../search/register-context";
 
 /**
@@ -78,7 +69,6 @@ export function ChatPage() {
   useQuickActionsPendingTimeout(c.activeSessionId ?? null, quickActionsPending);
   // Toast when an accepted refresh later fails in the daemon (async half).
   useQuickActionsFailureToast(c.activeSessionId ?? null);
-  const regenerateQuickActions = useRegenerateChatQuickActions();
   const urlSession = searchParams.get("session") || null;
   const urlAgent = searchParams.get("agent") || null;
 
@@ -276,126 +266,35 @@ export function ChatPage() {
   // banner + input. Identical composition to the floating window's body, so a
   // brand-new chat (no active session) shows the agent-aware empty state + input.
   // No compose-box agent selector — the agent is fixed when the chat starts.
-  // `@container`: the conversation column's gutter (CHAT_GUTTER) widens with
-  // THIS pane, which the user resizes independently of the browser window.
-  const queuedTasks = c.pendingTask?.queued_tasks ?? [];
   const conversation = (
-    <div className="flex flex-1 flex-col min-h-0 @container">
-      {c.currentSession && (
-        <ChatSessionHeader
-          leading={
-            compactConversation ? (
-              <IconButton
-                label={t(($) => $.page.title)}
-                tooltipSide="bottom"
-                className="text-muted-foreground"
-                onClick={backToList}
-              >
-                <ArrowLeft />
-              </IconButton>
-            ) : listCollapsed ? (
-              <CollapsedNavTrigger />
-            ) : undefined
-          }
-          session={c.currentSession}
-          agent={c.activeAgent}
-          onArchive={handleArchive}
-        />
-      )}
-      {c.showSkeleton ? (
-        <ChatMessageSkeleton />
-      ) : c.hasMessages ? (
-        <ChatMessageList
-          key={c.activeSessionId}
-          messages={c.messages}
-          pendingTask={c.pendingTask}
-          availability={c.availability}
-          firstItemIndex={c.firstItemIndex}
-          hasOlderMessages={c.hasOlderMessages}
-          isFetchingOlderMessages={c.isFetchingOlderMessages}
-          onLoadOlderMessages={() => void c.fetchOlderMessages()}
-          onQuickAction={(action) => c.handleSend(action.prompt)}
-          quickActionsDisabled={
-            !!c.pendingTaskId ||
-            c.isSessionArchived ||
-            c.isAgentArchived ||
-            c.isAgentAccessRevoked ||
-            !c.isAgentRuntimeBound ||
-            c.noAgent
-          }
-          onRegenerateQuickActions={(message) =>
-            c.activeSessionId
-              ? regenerateQuickActions.mutateAsync({
-                  sessionId: c.activeSessionId,
-                  messageId: message.id,
-                })
-              : undefined
-          }
-          quickActionsPendingMessageId={quickActionsPending?.message_id ?? null}
-        />
-      ) : (
-        <EmptyState
-          agent={c.activeAgent}
-          hasSessions={c.sessions.length > 0}
-          onPickPrompt={c.sendConversationStarter}
-          customizeHref={c.customizeConversationStartersHref}
-        />
-      )}
-
-      {c.isAgentAccessRevoked ? (
-        <AgentAccessRevokedBanner agentName={c.activeAgent?.name} />
-      ) : c.noAgent ? (
-        <NoAgentBanner />
-      ) : c.isAgentArchived ? (
-        <ArchivedAgentBanner agentName={c.activeAgent?.name} />
-      ) : !c.isAgentRuntimeBound && c.activeAgent ? (
-        <RuntimeRequiredBanner
-          agentId={c.activeAgent.id}
-          agentName={c.activeAgent.name}
-        />
-      ) : (
-        <OfflineBanner agentName={c.activeAgent?.name} availability={c.availability} />
-      )}
-
-      <ChatQueue
-        tasks={queuedTasks}
-        headStatus={c.pendingTask?.status}
-        onSendNow={c.handleSendQueuedTaskNow}
-        sendNowDisabled={c.isAgentAccessRevoked}
-        onEdit={c.handleEditQueuedTask}
-        onRemove={c.handleRemoveQueuedTask}
-        onClear={c.handleClearQueuedTasks}
-      />
-
-      <ChatInput
-        onSend={c.handleSend}
-        restoreDraftRequest={c.restoreDraftRequest}
-        conversationStarterRequest={c.conversationStarterRequest}
-        onConversationStarterApplied={c.handleConversationStarterApplied}
-        onRestoreDraftApplied={c.handleRestoreDraftApplied}
-        uploadEnabled={c.uploadEnabled && !c.isAgentAccessRevoked}
-        onStop={c.handleStop}
-        isRunning={!!c.pendingTaskId}
-        allowSubmitWhileRunning={c.pendingTask?.supports_queue === true}
-        disabled={
-          c.isSessionArchived ||
-          c.isAgentArchived ||
-          c.isAgentAccessRevoked ||
-          !c.isAgentRuntimeBound
-        }
-        noAgent={c.noAgent}
-        agentArchived={c.isAgentArchived}
-        agentAccessRevoked={c.isAgentAccessRevoked}
-        agentRuntimeRequired={!c.isAgentRuntimeBound}
-        agentName={c.activeAgent?.name}
-        projects={c.projects}
-        projectId={c.activeProjectId}
-        projectContextUnsupported={c.projectContextUnsupported}
-        onProjectChange={changeProjectContext}
-        isProjectUpdating={c.isProjectUpdating}
-        focusRequest={c.focusInputRequest}
-      />
-    </div>
+    <ChatConversation
+      controller={c}
+      quickActionsPending={quickActionsPending}
+      onProjectChange={changeProjectContext}
+      header={
+        c.currentSession ? (
+          <ChatSessionHeader
+            leading={
+              compactConversation ? (
+                <IconButton
+                  label={t(($) => $.page.title)}
+                  tooltipSide="bottom"
+                  className="text-muted-foreground"
+                  onClick={backToList}
+                >
+                  <ArrowLeft />
+                </IconButton>
+              ) : listCollapsed ? (
+                <CollapsedNavTrigger />
+              ) : undefined
+            }
+            session={c.currentSession}
+            agent={c.activeAgent}
+            onArchive={handleArchive}
+          />
+        ) : null
+      }
+    />
   );
 
   // -- Compact: list / conversation toggle -----------------------------------
