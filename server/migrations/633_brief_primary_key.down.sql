@@ -1,0 +1,1 @@
+ALTER TABLE brief DROP CONSTRAINT IF EXISTS brief_pkey;

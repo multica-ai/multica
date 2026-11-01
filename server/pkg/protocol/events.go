@@ -107,6 +107,10 @@ const (
 	EventProposalCreated = "proposal:created"
 	EventProposalDecided = "proposal:decided"
 
+	// A brief was published; the payload carries the whole brief. The inbox
+	// listener turns it into one brief_ready item per workspace owner.
+	EventBriefCreated = "brief:created"
+
 	// Label events
 	EventLabelCreated       = "label:created"
 	EventLabelUpdated       = "label:updated"

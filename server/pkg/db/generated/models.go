@@ -328,6 +328,20 @@ type AutopilotTrigger struct {
 	CreatedByID pgtype.UUID `json:"created_by_id"`
 }
 
+type Brief struct {
+	ID                pgtype.UUID        `json:"id"`
+	WorkspaceID       pgtype.UUID        `json:"workspace_id"`
+	Kind              string             `json:"kind"`
+	PeriodStart       pgtype.Timestamptz `json:"period_start"`
+	PeriodEnd         pgtype.Timestamptz `json:"period_end"`
+	Title             string             `json:"title"`
+	Body              string             `json:"body"`
+	ProposalIds       []pgtype.UUID      `json:"proposal_ids"`
+	CreatedByAgentID  pgtype.UUID        `json:"created_by_agent_id"`
+	CreatedByMemberID pgtype.UUID        `json:"created_by_member_id"`
+	CreatedAt         pgtype.Timestamptz `json:"created_at"`
+}
+
 type ChannelBindingToken struct {
 	TokenHash      string             `json:"token_hash"`
 	WorkspaceID    pgtype.UUID        `json:"workspace_id"`
@@ -1853,7 +1867,8 @@ type Workspace struct {
 	IssueCounter int32              `json:"issue_counter"`
 	AvatarUrl    pgtype.Text        `json:"avatar_url"`
 	// When TRUE, an agent run that resolves to no precise accountable human (would be owner_fallback) is refused at enqueue instead of degrading to the agent owner (MUL-4302 §3.5). Default FALSE = owner_fallback. Never affects authorization (originator_user_id).
-	AttributionFailClosed bool `json:"attribution_fail_closed"`
+	AttributionFailClosed bool        `json:"attribution_fail_closed"`
+	SecretaryAgentID      pgtype.UUID `json:"secretary_agent_id"`
 }
 
 type WorkspaceInvitation struct {

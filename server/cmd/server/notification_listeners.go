@@ -186,6 +186,9 @@ var notifTypeToGroup = map[string]string{
 	"task_failed":        "agent_activity",
 	"agent_blocked":      "agent_activity",
 	"agent_completed":    "agent_activity",
+	// The Secretary's brief is agent work product, so it follows the same
+	// group as the other agent results.
+	"brief_ready": "agent_activity",
 }
 
 // isNotifMuted returns true if the given notification type is muted for a user
@@ -1040,6 +1043,11 @@ func registerNotificationListeners(bus *events.Bus, queries *db.Queries) {
 			issueTitle, "",
 			details,
 		)
+	})
+
+	// brief:created — one brief_ready item per workspace owner
+	bus.Subscribe(protocol.EventBriefCreated, func(e events.Event) {
+		notifyBriefReady(ctx, queries, bus, e)
 	})
 
 	// task:completed — no inbox notification (completion is visible from status change)

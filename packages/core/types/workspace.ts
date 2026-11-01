@@ -15,6 +15,11 @@ export interface Workspace {
   repos: WorkspaceRepo[];
   issue_prefix: string;
   avatar_url: string | null;
+  /**
+   * The agent that writes the boss's briefs; null when unset. Optional so an
+   * installed client keeps working against a backend that predates it.
+   */
+  secretary_agent_id?: string | null;
   created_at: string;
   updated_at: string;
 }
