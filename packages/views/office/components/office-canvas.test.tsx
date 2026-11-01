@@ -74,13 +74,13 @@ describe("OfficeCanvas", () => {
     expect(sizes().at(-1)?.units).toEqual(unitsFor(1180, 780));
   });
 
-  it("lays the floor out again when the page widens, as it does once the nav panel collapses", () => {
+  it("lays the floor out again when the page widens past the floor's own shape", () => {
     renderCanvas();
-    width = 1460;
+    width = 2000;
 
     act(() => observers.forEach((notify) => notify()));
 
-    expect(sizes().at(-1)?.units).toEqual(unitsFor(1460, 780));
+    expect(sizes().at(-1)?.units).toEqual(unitsFor(2000, 780));
     expect(sizes().at(-1)?.units.w).toBeGreaterThan(unitsFor(1180, 780).w);
   });
 
