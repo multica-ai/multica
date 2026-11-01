@@ -252,8 +252,7 @@
     "advanced_group_match_trailing": "충족",
     "advanced_group_hint": "이 그룹의 조건은 '{{word}}'(으)로 연결됩니다",
     "advanced_add_to_group": "그룹에 추가",
-    "advanced_turn_into_group": "그룹으로 전환",
-    "advanced_summary": "조건: {{summary}}"
+    "advanced_turn_into_group": "그룹으로 전환"
   },
   "display": {
     "tooltip": "보기 설정",

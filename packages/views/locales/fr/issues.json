@@ -258,8 +258,7 @@
     "advanced_group_match_trailing": "de ces conditions",
     "advanced_group_hint": "Les conditions de ce groupe sont reliées par « {{word}} »",
     "advanced_add_to_group": "Ajouter au groupe",
-    "advanced_turn_into_group": "Transformer en groupe",
-    "advanced_summary": "Affiche les tâches où {{summary}}"
+    "advanced_turn_into_group": "Transformer en groupe"
   },
   "display": {
     "tooltip": "Paramètres d'affichage",

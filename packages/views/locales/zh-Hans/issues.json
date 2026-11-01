@@ -252,8 +252,7 @@
     "advanced_group_match_trailing": "条件",
     "advanced_group_hint": "组内条件之间用「{{word}}」连接",
     "advanced_add_to_group": "添加到条件组",
-    "advanced_turn_into_group": "转为条件组",
-    "advanced_summary": "筛选：{{summary}}"
+    "advanced_turn_into_group": "转为条件组"
   },
   "display": {
     "tooltip": "显示设置",

@@ -258,8 +258,7 @@
     "advanced_group_match_trailing": "of these",
     "advanced_group_hint": "Conditions in this group are joined with “{{word}}”",
     "advanced_add_to_group": "Add to group",
-    "advanced_turn_into_group": "Turn into group",
-    "advanced_summary": "Shows issues where {{summary}}"
+    "advanced_turn_into_group": "Turn into group"
   },
   "display": {
     "tooltip": "Display settings",
