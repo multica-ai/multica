@@ -1552,7 +1552,7 @@
       "usage_default_none": "Issues without a project",
       "filter_projects": "Filter projects",
       "no_matching_projects": "No matching projects",
-      "default_covers_no_project": "Also applies to issues without a project",
+      "default_covers_no_project": "Issues without a project use Default’s statuses only, with no handoffs. Add an issue to a project to use workflow handoffs.",
       "new_blank": "Blank workflow",
       "from_template": "From a template"
     },
@@ -1611,7 +1611,7 @@
       "select_step": "Select a column to set who it hands issues to.",
       "unsaved": "Unsaved changes",
       "not_found": "This workflow no longer exists.",
-      "default_note": "Default is the board of every project that doesn’t pick a workflow, and of views outside a project.",
+      "default_note": "Default applies to projects that haven’t selected another workflow. Issues without a project use its statuses only, with no handoffs. Add an issue to a project to use workflow handoffs.",
       "new_badge": "New",
       "columns": "Columns",
       "include_status": "Include {{status}}",

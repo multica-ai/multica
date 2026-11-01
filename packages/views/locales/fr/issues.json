@@ -1552,7 +1552,7 @@
       "usage_default_none": "Tâches sans projet",
       "filter_projects": "Filtrer les projets",
       "no_matching_projects": "Aucun projet correspondant",
-      "default_covers_no_project": "S'applique aussi aux tâches sans projet",
+      "default_covers_no_project": "Les tâches sans projet utilisent uniquement les statuts de Default, sans passage de relais. Ajoutez une tâche à un projet pour utiliser les passages de relais du workflow.",
       "new_blank": "Workflow vide",
       "from_template": "À partir d’un modèle"
     },
@@ -1611,7 +1611,7 @@
       "select_step": "Sélectionnez une colonne pour choisir à qui elle transmet les tickets.",
       "unsaved": "Modifications non enregistrées",
       "not_found": "Ce workflow n’existe plus.",
-      "default_note": "Default est le tableau de tout projet sans workflow choisi, et des vues hors projet.",
+      "default_note": "Default s’applique aux projets qui n’ont pas choisi d’autre workflow. Les tâches sans projet utilisent uniquement ses statuts, sans passage de relais. Ajoutez une tâche à un projet pour utiliser les passages de relais du workflow.",
       "new_badge": "Nouveau",
       "columns": "Colonnes",
       "include_status": "Inclure {{status}}",

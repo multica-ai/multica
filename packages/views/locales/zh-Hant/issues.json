@@ -1495,7 +1495,7 @@
       "usage_default_none": "沒有專案的任務",
       "filter_projects": "篩選專案",
       "no_matching_projects": "沒有符合的專案",
-      "default_covers_no_project": "也適用於沒有專案的任務",
+      "default_covers_no_project": "沒有專案的任務只使用 Default 的狀態，不會觸發交接。要使用工作流交接，請將任務加入專案。",
       "new_blank": "空白工作流",
       "from_template": "從模板建立"
     },
@@ -1553,7 +1553,7 @@
       "select_step": "選擇一列，設定任務進入時交給誰。",
       "unsaved": "有未儲存的修改",
       "not_found": "這個工作流已不存在。",
-      "default_note": "Default 是所有未選擇工作流的專案、以及專案之外檢視使用的看板。",
+      "default_note": "Default 適用於未選擇其他工作流的專案。沒有專案的任務只使用它的狀態，不會觸發交接。要使用工作流交接，請將任務加入專案。",
       "new_badge": "新建",
       "columns": "列",
       "include_status": "包含「{{status}}」",

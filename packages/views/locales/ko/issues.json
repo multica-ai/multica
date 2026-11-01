@@ -1495,7 +1495,7 @@
       "usage_default_none": "프로젝트가 없는 태스크",
       "filter_projects": "프로젝트 필터",
       "no_matching_projects": "일치하는 프로젝트가 없습니다",
-      "default_covers_no_project": "프로젝트가 없는 태스크에도 적용됩니다",
+      "default_covers_no_project": "프로젝트가 없는 태스크에는 Default의 상태만 적용되며, 인계는 이루어지지 않습니다. 워크플로 인계를 사용하려면 태스크를 프로젝트에 추가하세요.",
       "new_blank": "빈 워크플로",
       "from_template": "템플릿으로"
     },
@@ -1553,7 +1553,7 @@
       "select_step": "열을 선택해 이슈를 누구에게 넘길지 설정하세요.",
       "unsaved": "저장하지 않은 변경 사항",
       "not_found": "이 워크플로는 더 이상 없습니다.",
-      "default_note": "Default는 워크플로를 고르지 않은 프로젝트와 프로젝트 밖 보기에서 쓰는 보드입니다.",
+      "default_note": "Default는 다른 워크플로를 선택하지 않은 프로젝트에 적용됩니다. 프로젝트가 없는 태스크에는 상태만 적용되며, 인계는 이루어지지 않습니다. 워크플로 인계를 사용하려면 태스크를 프로젝트에 추가하세요.",
       "new_badge": "새로 만듦",
       "columns": "열",
       "include_status": "{{status}} 포함",
