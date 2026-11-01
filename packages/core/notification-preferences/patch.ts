@@ -11,6 +11,7 @@ const NOTIFICATION_GROUP_KEYS: readonly NotificationGroupKey[] = [
   "mentions",
   "updates",
   "agent_activity",
+  "sub_issue_following",
   "system_notifications",
 ];
 
