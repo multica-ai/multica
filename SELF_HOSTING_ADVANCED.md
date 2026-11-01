@@ -315,6 +315,41 @@ the platform's verdict, match the frame's `req_id` against the `dir=in` line
 answering it and read that line's `errcode` — a frame can be written
 successfully and still be rejected there.
 
+### Company Knowledge Base
+
+Optional WeKnora sidecar, started by the `knowledge` compose profile. Walkthrough and backups: [SELF_HOSTING.md](SELF_HOSTING.md#company-knowledge-base-optional).
+
+Backend variables (all optional; `KNOWLEDGE_URL` unset means the feature is not offered):
+
+| Variable | Default | Purpose |
+| --- | --- | --- |
+| `KNOWLEDGE_URL` | empty | Address the backend uses to reach WeKnora, for example `http://knowledge-app:8080`. |
+| `KNOWLEDGE_PUBLIC_URL` | `KNOWLEDGE_URL` | Address agents' daemons use for the read-only MCP endpoint. Put TLS in front of it. |
+| `KNOWLEDGE_UI_URL` | empty | WeKnora web UI, for "Open in WeKnora". |
+| `KNOWLEDGE_SERVICE_EMAIL` / `KNOWLEDGE_SERVICE_PASSWORD` | empty | The WeKnora user that provisions workspaces. |
+| `MULTICA_KNOWLEDGE_SECRET_KEY` | empty | Base64 32-byte key that encrypts each workspace's WeKnora API key at rest. Required; without it knowledge is not offered. |
+| `KNOWLEDGE_EMBEDDING_PROVIDER` | `ollama` | `ollama`, or any other WeKnora provider such as `generic` (OpenAI-compatible). |
+| `KNOWLEDGE_EMBEDDING_MODEL` | `bge-m3` | Embedding model name. |
+| `KNOWLEDGE_EMBEDDING_DIMENSION` | `1024` | Vector size of the model. |
+| `KNOWLEDGE_EMBEDDING_URL` | `KNOWLEDGE_OLLAMA_URL` | Endpoint as WeKnora sees it. |
+| `KNOWLEDGE_EMBEDDING_API_KEY` | empty | Key for an OpenAI-compatible endpoint. |
+
+Sidecar variables (read by the `knowledge` profile):
+
+| Variable | Default | Purpose |
+| --- | --- | --- |
+| `KNOWLEDGE_SYSTEM_AES_KEY` | none | Required. 32 characters (`openssl rand -hex 16`) encrypting WeKnora's stored credentials. Keep it stable and back it up. |
+| `KNOWLEDGE_JWT_SECRET` | random per start | WeKnora login signing key (`openssl rand -hex 32`). |
+| `KNOWLEDGE_SYSTEM_SIGNING_KEY` | `KNOWLEDGE_SYSTEM_AES_KEY` | Signs preview and embed links. |
+| `KNOWLEDGE_VERSION` | `v0.9.0` | Tag of the app, UI and docreader images. |
+| `KNOWLEDGE_API_PORT` / `KNOWLEDGE_UI_PORT` | `8090` / `8085` | Loopback host ports. |
+| `KNOWLEDGE_SSRF_WHITELIST_EXTRA` | `host.docker.internal` | Private hosts WeKnora may call. Replaces WeKnora's own default list. |
+| `KNOWLEDGE_OLLAMA_URL` | `http://host.docker.internal:11434` | Ollama address for WeKnora's own features and the embedding default. |
+| `KNOWLEDGE_DB_PASSWORD` / `KNOWLEDGE_REDIS_PASSWORD` | `weknora` | Internal credentials; the services are not published. |
+| `KNOWLEDGE_MAX_FILE_SIZE_MB` | `50` | Upload size limit. |
+| `KNOWLEDGE_DISABLE_REGISTRATION` | `false` | Close WeKnora self-registration once the service user exists. |
+| `KNOWLEDGE_TENANT_MAX_OWNED_PER_USER` | `-1` | WeKnora caps a user at 10 workspaces by default; the single service user owns one per Multica workspace, so the cap is lifted. |
+
 ### CLI / Daemon
 
 These are configured on each user's machine, not on the server:

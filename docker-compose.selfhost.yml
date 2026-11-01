@@ -223,6 +223,24 @@ services:
       # (bot_token_encrypted), so this single deployment-wide key is all
       # the operator needs to set here.
       MULTICA_TELEGRAM_SECRET_KEY: ${MULTICA_TELEGRAM_SECRET_KEY:-}
+      # Company knowledge base (optional sidecar, `knowledge` compose profile).
+      # KNOWLEDGE_URL unset = the feature is not offered. KNOWLEDGE_URL is the
+      # address the backend uses to reach WeKnora; KNOWLEDGE_PUBLIC_URL is the
+      # address agents' daemons use to reach it for read-only MCP (defaults to
+      # KNOWLEDGE_URL, which only works when the daemon shares the compose
+      # network). MULTICA_KNOWLEDGE_SECRET_KEY encrypts each workspace's
+      # WeKnora API key at rest. See SELF_HOSTING.md, "Company knowledge base".
+      KNOWLEDGE_URL: ${KNOWLEDGE_URL:-}
+      KNOWLEDGE_PUBLIC_URL: ${KNOWLEDGE_PUBLIC_URL:-}
+      KNOWLEDGE_UI_URL: ${KNOWLEDGE_UI_URL:-}
+      KNOWLEDGE_SERVICE_EMAIL: ${KNOWLEDGE_SERVICE_EMAIL:-}
+      KNOWLEDGE_SERVICE_PASSWORD: ${KNOWLEDGE_SERVICE_PASSWORD:-}
+      MULTICA_KNOWLEDGE_SECRET_KEY: ${MULTICA_KNOWLEDGE_SECRET_KEY:-}
+      KNOWLEDGE_EMBEDDING_PROVIDER: ${KNOWLEDGE_EMBEDDING_PROVIDER:-ollama}
+      KNOWLEDGE_EMBEDDING_MODEL: ${KNOWLEDGE_EMBEDDING_MODEL:-bge-m3}
+      KNOWLEDGE_EMBEDDING_DIMENSION: ${KNOWLEDGE_EMBEDDING_DIMENSION:-1024}
+      KNOWLEDGE_EMBEDDING_URL: ${KNOWLEDGE_EMBEDDING_URL:-${KNOWLEDGE_OLLAMA_URL:-http://host.docker.internal:11434}}
+      KNOWLEDGE_EMBEDDING_API_KEY: ${KNOWLEDGE_EMBEDDING_API_KEY:-}
     restart: unless-stopped
 
   frontend:
@@ -240,6 +258,172 @@ services:
       GOOGLE_ANALYTICS_ID: ${GOOGLE_ANALYTICS_ID:-}
     restart: unless-stopped
 
+  # ---------------------------------------------------------------------------
+  # Company knowledge base: a pinned WeKnora sidecar. Opt-in:
+  #   docker compose -f docker-compose.selfhost.yml --profile knowledge up -d
+  # Nothing below starts without the profile. Only knowledge-app joins the
+  # default network (so the backend can reach it by name); postgres, redis and
+  # docreader live on the `knowledge` network alone. Host ports bind to
+  # loopback; front them with a TLS reverse proxy for remote access (see
+  # SELF_HOSTING.md). Bumping the version is a deliberate step: the Go adapter
+  # (server/internal/knowledge) has contract tests recorded against v0.9.0.
+  # ---------------------------------------------------------------------------
+  knowledge-postgres:
+    profiles: ["knowledge"]
+    image: paradedb/paradedb:v0.25.11-pg17
+    environment:
+      POSTGRES_USER: weknora
+      POSTGRES_PASSWORD: ${KNOWLEDGE_DB_PASSWORD:-weknora}
+      POSTGRES_DB: weknora
+    volumes:
+      - knowledge-postgres-data:/var/lib/postgresql/data
+    networks:
+      - knowledge
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U weknora -d weknora"]
+      interval: 10s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
+    restart: unless-stopped
+    stop_grace_period: 1m
+
+  knowledge-redis:
+    profiles: ["knowledge"]
+    image: redis:7.0-alpine
+    command: ["sh", "-c", "exec redis-server --appendonly yes --requirepass \"$$REDIS_PASSWORD\""]
+    environment:
+      REDIS_PASSWORD: ${KNOWLEDGE_REDIS_PASSWORD:-weknora}
+    volumes:
+      - knowledge-redis-data:/data
+    networks:
+      - knowledge
+    restart: unless-stopped
+
+  knowledge-docreader:
+    profiles: ["knowledge"]
+    image: wechatopenai/weknora-docreader:${KNOWLEDGE_VERSION:-v0.9.0}
+    environment:
+      TZ: ${TZ:-UTC}
+      DOCREADER_IMAGE_OUTPUT_DIR: /tmp/docreader
+      MAX_FILE_SIZE_MB: ${KNOWLEDGE_MAX_FILE_SIZE_MB:-50}
+      SSRF_WHITELIST_EXTRA: ${KNOWLEDGE_SSRF_WHITELIST_EXTRA:-host.docker.internal}
+    volumes:
+      - knowledge-docreader-tmp:/tmp/docreader
+    networks:
+      - knowledge
+    healthcheck:
+      test: ["CMD", "grpc_health_probe", "-addr=localhost:50051"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+    restart: unless-stopped
+
+  knowledge-app:
+    profiles: ["knowledge"]
+    image: wechatopenai/weknora-app:${KNOWLEDGE_VERSION:-v0.9.0}
+    # Refuse to boot without the at-rest encryption key: WeKnora encrypts API
+    # keys and model credentials with it, and losing or changing it later makes
+    # them unrecoverable. (A compose `:?` check would also break the default
+    # stack, because compose interpolates profiled services too.)
+    entrypoint:
+      - sh
+      - -c
+      - 'if [ -z "$$SYSTEM_AES_KEY" ]; then echo "KNOWLEDGE_SYSTEM_AES_KEY is required: generate once with openssl rand -hex 16 and keep it stable" >&2; exit 1; fi; exec ./scripts/docker-entrypoint.sh "$$@"'
+      - --
+    command: ["./WeKnora"]
+    depends_on:
+      knowledge-postgres:
+        condition: service_healthy
+      knowledge-redis:
+        condition: service_started
+      knowledge-docreader:
+        condition: service_healthy
+    ports:
+      - "127.0.0.1:${KNOWLEDGE_API_PORT:-8090}:8080"
+    environment:
+      GIN_MODE: release
+      TZ: ${TZ:-UTC}
+      LOG_LEVEL: ${KNOWLEDGE_LOG_LEVEL:-info}
+      AUTO_MIGRATE: "true"
+      AUTO_RECOVER_DIRTY: "true"
+      DB_DRIVER: postgres
+      DB_HOST: knowledge-postgres
+      DB_PORT: "5432"
+      DB_USER: weknora
+      DB_PASSWORD: ${KNOWLEDGE_DB_PASSWORD:-weknora}
+      DB_NAME: weknora
+      RETRIEVE_DRIVER: postgres
+      STREAM_MANAGER_TYPE: redis
+      REDIS_ADDR: knowledge-redis:6379
+      REDIS_PASSWORD: ${KNOWLEDGE_REDIS_PASSWORD:-weknora}
+      REDIS_DB: "0"
+      REDIS_PREFIX: "stream:"
+      DOCREADER_ADDR: knowledge-docreader:50051
+      DOCREADER_TRANSPORT: grpc
+      STORAGE_TYPE: local
+      LOCAL_STORAGE_BASE_DIR: /data/files
+      MAX_FILE_SIZE_MB: ${KNOWLEDGE_MAX_FILE_SIZE_MB:-50}
+      OLLAMA_BASE_URL: ${KNOWLEDGE_OLLAMA_URL:-http://host.docker.internal:11434}
+      OLLAMA_OPTIONAL: "true"
+      # WeKnora refuses model and import URLs that resolve to private
+      # addresses unless the host is listed here. Setting this REPLACES
+      # WeKnora's own default list, so name every internal host it must reach.
+      SSRF_WHITELIST_EXTRA: ${KNOWLEDGE_SSRF_WHITELIST_EXTRA:-host.docker.internal}
+      JWT_SECRET: ${KNOWLEDGE_JWT_SECRET:-}
+      SYSTEM_AES_KEY: ${KNOWLEDGE_SYSTEM_AES_KEY:-}
+      SYSTEM_SIGNING_KEY: ${KNOWLEDGE_SYSTEM_SIGNING_KEY:-}
+      # Multica provisions one WeKnora workspace (tenant) per Multica workspace
+      # through a single service user, so the per-user tenant cap is lifted and
+      # self-service tenant creation stays on. Registration can be closed once
+      # the service user exists (KNOWLEDGE_DISABLE_REGISTRATION=true).
+      DISABLE_REGISTRATION: ${KNOWLEDGE_DISABLE_REGISTRATION:-false}
+      WEKNORA_TENANT_SELF_SERVICE_CREATION_ENABLED: "true"
+      WEKNORA_TENANT_MAX_OWNED_PER_USER: ${KNOWLEDGE_TENANT_MAX_OWNED_PER_USER:--1}
+      WEKNORA_SANDBOX_DOCKER_ENABLED: "false"
+    volumes:
+      - knowledge-data-files:/data/files
+      - knowledge-docreader-tmp:/tmp/docreader:ro
+    networks:
+      - default
+      - knowledge
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+    restart: unless-stopped
+
+  knowledge-ui:
+    profiles: ["knowledge"]
+    image: wechatopenai/weknora-ui:${KNOWLEDGE_VERSION:-v0.9.0}
+    depends_on:
+      knowledge-app:
+        condition: service_healthy
+    ports:
+      - "127.0.0.1:${KNOWLEDGE_UI_PORT:-8085}:80"
+    environment:
+      APP_HOST: knowledge-app
+      APP_PORT: "8080"
+      APP_SCHEME: http
+      MAX_FILE_SIZE_MB: ${KNOWLEDGE_MAX_FILE_SIZE_MB:-50}
+    networks:
+      - knowledge
+    restart: unless-stopped
+
+networks:
+  knowledge:
+
 volumes:
   pgdata:
   backend_uploads:
+  # Knowledge sidecar. Back up knowledge-postgres-data and knowledge-data-files
+  # together (and keep KNOWLEDGE_SYSTEM_AES_KEY); see SELF_HOSTING.md.
+  knowledge-postgres-data:
+  knowledge-data-files:
+  knowledge-docreader-tmp:
+  knowledge-redis-data:
