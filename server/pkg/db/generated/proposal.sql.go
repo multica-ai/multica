@@ -270,6 +270,27 @@ func (q *Queries) GetProposalWithIssue(ctx context.Context, arg GetProposalWithI
 	return i, err
 }
 
+const hasActiveSquadAutopilot = `-- name: HasActiveSquadAutopilot :one
+SELECT EXISTS(
+    SELECT 1 FROM autopilot
+    WHERE workspace_id = $1 AND assignee_type = 'squad' AND assignee_id = $2 AND status = 'active'
+) AS has_active
+`
+
+type HasActiveSquadAutopilotParams struct {
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
+	AssigneeID  pgtype.UUID `json:"assignee_id"`
+}
+
+// Whether the squad is the assignee of an active autopilot. Squads that work
+// on a schedule are the ones whose leaders are briefed to propose to the boss.
+func (q *Queries) HasActiveSquadAutopilot(ctx context.Context, arg HasActiveSquadAutopilotParams) (bool, error) {
+	row := q.db.QueryRow(ctx, hasActiveSquadAutopilot, arg.WorkspaceID, arg.AssigneeID)
+	var has_active bool
+	err := row.Scan(&has_active)
+	return has_active, err
+}
+
 const listProposals = `-- name: ListProposals :many
 SELECT p.id, p.workspace_id, p.squad_id, p.issue_id, p.handoff_squad_id, p.urgent, p.urgent_reason, p.state, p.created_by_type, p.created_by_id, p.decided_by, p.decided_at, p.decision_note, p.created_at, i.title AS issue_title, i.number AS issue_number, i.status AS issue_status
 FROM proposal p

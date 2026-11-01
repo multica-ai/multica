@@ -71,6 +71,14 @@ SET state = 'pending', decided_by = NULL, decided_at = NULL, decision_note = ''
 WHERE id = $1 AND workspace_id = $2 AND state <> 'pending'
 RETURNING *;
 
+-- name: HasActiveSquadAutopilot :one
+-- Whether the squad is the assignee of an active autopilot. Squads that work
+-- on a schedule are the ones whose leaders are briefed to propose to the boss.
+SELECT EXISTS(
+    SELECT 1 FROM autopilot
+    WHERE workspace_id = $1 AND assignee_type = 'squad' AND assignee_id = $2 AND status = 'active'
+) AS has_active;
+
 -- name: GetOldestWorkspaceOwnerMember :one
 -- The boss: the longest-standing owner of the workspace.
 SELECT * FROM member
