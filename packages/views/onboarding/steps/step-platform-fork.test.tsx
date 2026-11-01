@@ -1,9 +1,10 @@
-import { describe, expect, it, vi, beforeEach } from "vitest";
-import { render, screen, within } from "@testing-library/react";
+import { describe, expect, it, vi, beforeEach, afterEach } from "vitest";
+import { act, cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import type { AgentRuntime } from "@multica/core/types";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { I18nProvider } from "@multica/core/i18n/react";
+import { configStore } from "@multica/core/config";
 import enCommon from "../../locales/en/common.json";
 import enOnboarding from "../../locales/en/onboarding.json";
 
@@ -80,8 +81,50 @@ function resetPicker(patch: Partial<typeof mocks.pickerState> = {}) {
 
 describe("StepPlatformFork", () => {
   beforeEach(() => {
+    configStore.getState().setDaemonConfig({ daemonSetupTarget: "cloud" });
     resetPicker();
     vi.restoreAllMocks();
+  });
+
+  afterEach(() => {
+    cleanup();
+    vi.useRealTimers();
+    configStore.setState({
+      daemonConfigStatus: "loading",
+      daemonSetupTarget: "unknown",
+      daemonServerUrl: "",
+      daemonAppUrl: "",
+    });
+  });
+
+  it("uses the same self-host command throughout the waiting stages", () => {
+    vi.useFakeTimers();
+    configStore.getState().setDaemonConfig({
+      daemonSetupTarget: "self_host",
+      daemonServerUrl: "https://api.example.com",
+      daemonAppUrl: "https://app.example.com",
+    });
+    renderFork();
+    fireEvent.click(screen.getByRole("button", { name: /show steps/i }));
+    const dialog = screen.getByRole("dialog");
+    const command = "multica setup self-host --server-url https://api.example.com --app-url https://app.example.com";
+    expect(within(dialog).getByText(command)).toBeInTheDocument();
+    act(() => vi.advanceTimersByTime(15_000));
+    expect(within(dialog).getByText(command)).toBeInTheDocument();
+    act(() => vi.advanceTimersByTime(30_000));
+    expect(within(dialog).getByText(command)).toBeInTheDocument();
+    expect(within(dialog).queryByText("multica setup")).not.toBeInTheDocument();
+  });
+
+  it("does not show Cloud waiting guidance while configuration is loading or failed", () => {
+    configStore.getState().setDaemonConfigStatus("loading");
+    renderFork();
+    fireEvent.click(screen.getByRole("button", { name: /show steps/i }));
+    const dialog = screen.getByRole("dialog");
+    expect(within(dialog).queryByText("multica setup")).not.toBeInTheDocument();
+    expect(within(dialog).queryByText(/waiting for your computer/i)).not.toBeInTheDocument();
+    act(() => configStore.getState().setDaemonConfigStatus("error"));
+    expect(within(dialog).queryByText("multica setup")).not.toBeInTheDocument();
   });
 
   it("renders the three fork options at rest", () => {

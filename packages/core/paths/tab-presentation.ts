@@ -27,7 +27,7 @@ import type { TabActorType, TabSubject } from "./tab-subject";
 
 /** The leading visual a tab should render. */
 export type TabVisual =
-  /** A static Lucide icon (page icon or resourceless type icon). */
+  /** A static route icon (page icon or resourceless type icon). */
   | { kind: "icon"; icon: RouteIconName }
   /** An issue's live status glyph. `null` while the issue is loading.
    *  `category` is what selects the glyph — carried here so the tab strip
@@ -51,6 +51,7 @@ export type TabLabelKey =
   | "runtime"
   | "attachment"
   | "create_agent"
+  | "my_agents"
   | "unknown";
 
 /** How a tab's title should be produced. */
@@ -155,6 +156,11 @@ export function resolveTabPresentation(
         title: { kind: "nav", navKey: page.navKey },
       };
     }
+    case "myAgents":
+      return {
+        visual: { kind: "icon", icon: "Bot" },
+        title: { kind: "tab", tabKey: "my_agents" },
+      };
     case "issue":
       return {
         visual: {

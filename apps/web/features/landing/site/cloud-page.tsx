@@ -1,7 +1,7 @@
 "use client";
 
 import type { ReactNode } from "react";
-import { ArrowUpRight, GitPullRequest, Laptop, ListOrdered, MessageSquareReply, Pause } from "lucide-react";
+import { ArrowUpRight, GitPullRequest, Laptop, ListOrdered, MessageSquareText, Pause } from "@multica/ui/icons";
 import { cn } from "@multica/ui/lib/utils";
 import { useAuthStore } from "@multica/core/auth";
 import { ProviderLogo } from "@multica/views/runtimes/components/provider-logo";
@@ -110,7 +110,7 @@ const UNATTENDED: Feature[] = [
     body: "Run up to 10 at once on a connection. The rest wait in line and start as slots free up.",
   },
   {
-    icon: MessageSquareReply,
+    icon: MessageSquareText,
     title: "Follow-ups resume the session",
     body: "A new comment on the issue continues the agent’s previous Qoder session.",
   },

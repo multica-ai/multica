@@ -306,19 +306,9 @@ type AddAgentSkillsRequest struct {
 
 // --- Helpers ---
 
-// validateFilePath checks that a file path is safe (no traversal, no absolute paths).
+// validateFilePath checks that a file path uses the shared supporting-file contract.
 func validateFilePath(p string) bool {
-	if p == "" {
-		return false
-	}
-	if filepath.IsAbs(p) {
-		return false
-	}
-	cleaned := filepath.Clean(p)
-	if strings.HasPrefix(cleaned, "..") {
-		return false
-	}
-	return true
+	return skillpkg.IsSafeFilePath(p)
 }
 
 func (h *Handler) loadSkillForUser(w http.ResponseWriter, r *http.Request, id string) (db.Skill, bool) {
@@ -899,7 +889,17 @@ type githubContentEntry struct {
 	Path        string `json:"path"`
 	Type        string `json:"type"` // "file" or "dir"
 	URL         string `json:"url"`
+	GitURL      string `json:"git_url"`
 	DownloadURL string `json:"download_url"`
+}
+
+// isSubmodule reports whether a directory-listing entry is a Git submodule.
+// For backwards compatibility the contents API lists submodules inside a
+// directory as type "file" with a null download_url; their git_url points at
+// the submodule repository's tree rather than a blob. The recursive tree path
+// skips submodules (type "commit"), so the crawl fallback must skip them too.
+func (e githubContentEntry) isSubmodule() bool {
+	return e.Type == "submodule" || (e.DownloadURL == "" && strings.Contains(e.GitURL, "/git/trees/"))
 }
 
 type githubRepoInfo struct {
@@ -1153,26 +1153,16 @@ func fetchFromClawHub(ctx context.Context, httpClient *http.Client, rawURL strin
 	}
 
 	for _, fp := range filePaths {
+		if skillpkg.IsLikelyBinaryFilePath(fp) {
+			continue
+		}
 		fileURL := fmt.Sprintf("%s/skills/%s/file?path=%s", apiBase, url.PathEscape(slug), url.QueryEscape(fp))
 		if latestVersion != "" {
 			fileURL += "&version=" + url.QueryEscape(latestVersion)
 		}
 		body, err := fetchRawFile(ctx, httpClient, fileURL)
 		if err != nil {
-			// Cap violations must abort: silently dropping a file would
-			// produce an incomplete bundle that looks valid. SKILL.md is
-			// load-bearing, so any failure on it is fatal too.
-			if isCapError(err) || fp == "SKILL.md" {
-				return nil, fmt.Errorf("clawhub import: %s: %w", fp, err)
-			}
-			// A cancelled context (overall deadline / client disconnect) is
-			// fatal for the same reason: skipping every remaining file would
-			// persist a half-populated bundle as a success.
-			if ctx.Err() != nil {
-				return nil, fmt.Errorf("clawhub import: fetch aborted at %s: %w", fp, ctx.Err())
-			}
-			slog.Warn("clawhub import: file download failed", "path", fp, "error", err)
-			continue
+			return nil, fmt.Errorf("clawhub import: %s: %w", fp, err)
 		}
 		if fp == "SKILL.md" {
 			result.content = string(body)
@@ -1283,13 +1273,9 @@ func newSkillsShImportedSkill(skillMdBody []byte, skillName, rawURL, owner, repo
 }
 
 // addSupportingFilesViaCrawl is the legacy per-directory enumeration path, used
-// as a fallback only for a truncated recursive tree (and by the github.com
-// importer). A tree-fetch failure no longer routes here — it returns a retryable
-// error instead. It lists skillDir via the contents API, recurses
-// subdirectories, and downloads each file. It stays lenient on a genuine listing
-// failure (returns with only SKILL.md, matching prior behavior under GitHub API
-// rate limiting) but treats a cancelled context as fatal so a mid-crawl deadline
-// or disconnect can't persist an incomplete bundle as a success.
+// for a truncated tree, or an unavailable tree for github.com imports. Every
+// directory and eligible file must be read before a bundle can replace local
+// content; an unavailable listing does not prove that a directory is empty.
 func addSupportingFilesViaCrawl(ctx context.Context, httpClient *http.Client, result *importedSkill, owner, repo, ref, skillDir string) error {
 	apiURL := buildGitHubContentsURL(owner, repo, skillDir, ref)
 	dirResp, err := doGitHubAPIGet(ctx, httpClient, apiURL)
@@ -1303,7 +1289,10 @@ func addSupportingFilesViaCrawl(ctx context.Context, httpClient *http.Client, re
 		if ctx.Err() != nil {
 			return fmt.Errorf("github import: directory listing aborted: %w", ctx.Err())
 		}
-		return nil
+		if err != nil {
+			return fmt.Errorf("%w: listing %s: %w", errImportSourceUnavailable, apiURL, err)
+		}
+		return fmt.Errorf("%w: listing %s: HTTP %d", errImportSourceUnavailable, apiURL, dirResp.StatusCode)
 	}
 	defer dirResp.Body.Close()
 
@@ -1316,16 +1305,15 @@ func addSupportingFilesViaCrawl(ctx context.Context, httpClient *http.Client, re
 		if ctx.Err() != nil {
 			return fmt.Errorf("github import: directory listing read aborted: %w", ctx.Err())
 		}
-		slog.Warn("github import: failed to decode top-level directory listing", "url", apiURL, "error", err)
-		return nil
+		return fmt.Errorf("%w: decoding directory %s: %w", errImportSourceUnavailable, apiURL, err)
+	}
+	if entries == nil {
+		return fmt.Errorf("%w: directory %s is not a file list", errImportSourceUnavailable, apiURL)
 	}
 
 	var allFiles []githubContentEntry
-	collectGitHubFiles(ctx, httpClient, entries, &allFiles, apiURL)
-	// collectGitHubFiles is lenient on a failed subdirectory listing; if the
-	// context was cancelled mid-crawl the collected set is incomplete, so abort.
-	if ctx.Err() != nil {
-		return fmt.Errorf("github import: directory crawl aborted: %w", ctx.Err())
+	if err := collectGitHubFiles(ctx, httpClient, entries, &allFiles, apiURL); err != nil {
+		return err
 	}
 
 	basePath := ""
@@ -1334,18 +1322,11 @@ func addSupportingFilesViaCrawl(ctx context.Context, httpClient *http.Client, re
 	}
 	for _, entry := range allFiles {
 		if entry.DownloadURL == "" {
-			continue
+			return fmt.Errorf("%w: no download URL for %s", errImportSourceUnavailable, entry.Path)
 		}
 		body, err := fetchRawFile(ctx, httpClient, entry.DownloadURL)
 		if err != nil {
-			if isCapError(err) {
-				return fmt.Errorf("github import: %s: %w", entry.Path, err)
-			}
-			if ctx.Err() != nil {
-				return fmt.Errorf("github import: fetch aborted at %s: %w", entry.Path, ctx.Err())
-			}
-			slog.Warn("github import: file download failed", "path", entry.Path, "error", err)
-			continue
+			return fmt.Errorf("github import: %s: %w", entry.Path, err)
 		}
 		relPath := strings.TrimPrefix(entry.Path, basePath)
 		if err := result.addFile(relPath, string(body)); err != nil {
@@ -1375,6 +1356,9 @@ func fetchGitHubTree(ctx context.Context, httpClient *http.Client, owner, repo, 
 	var tree githubTreeResponse
 	if err := json.NewDecoder(resp.Body).Decode(&tree); err != nil {
 		return nil, false, err
+	}
+	if tree.Tree == nil {
+		return nil, false, fmt.Errorf("GitHub tree response has no entries")
 	}
 	return tree.Tree, tree.Truncated, nil
 }
@@ -1547,7 +1531,6 @@ func addSupportingFilesFromTree(ctx context.Context, httpClient *http.Client, re
 
 	// Download concurrently, then append in the pre-sorted order.
 	contents := make([]string, len(eligible))
-	fetched := make([]bool, len(eligible))
 	g, gctx := errgroup.WithContext(ctx)
 	g.SetLimit(treeDownloadConcurrency)
 	for i, f := range eligible {
@@ -1555,26 +1538,9 @@ func addSupportingFilesFromTree(ctx context.Context, httpClient *http.Client, re
 		g.Go(func() error {
 			body, err := fetchRawFile(gctx, httpClient, buildRawGitHubURL(rawPrefix, f.repoPath))
 			if err != nil {
-				if isCapError(err) {
-					return fmt.Errorf("github import: %s: %w", f.repoPath, err)
-				}
-				// A cancelled context (overall import deadline exceeded, or the
-				// client disconnecting) must abort, not be swallowed as a
-				// per-file skip: otherwise every remaining download fails the
-				// same way, g.Wait returns nil, and the user gets a bundle that
-				// looks complete but is silently missing files. Let it surface
-				// so importFetchErrorResponse maps the deadline to a readable
-				// 504.
-				if gctx.Err() != nil {
-					return fmt.Errorf("github import: fetch aborted at %s: %w", f.repoPath, gctx.Err())
-				}
-				// Otherwise match the legacy loop's leniency: a single failed
-				// supporting file is logged and skipped, not fatal.
-				slog.Warn("github import: file download failed", "path", f.repoPath, "error", err)
-				return nil
+				return fmt.Errorf("github import: %s: %w", f.repoPath, err)
 			}
 			contents[i] = string(body)
-			fetched[i] = true
 			return nil
 		})
 	}
@@ -1583,9 +1549,6 @@ func addSupportingFilesFromTree(ctx context.Context, httpClient *http.Client, re
 	}
 
 	for i, f := range eligible {
-		if !fetched[i] {
-			continue
-		}
 		if err := result.addFile(f.relPath, contents[i]); err != nil {
 			return err
 		}
@@ -1603,18 +1566,22 @@ func (e githubTreeEntry) size() int64 {
 }
 
 // collectGitHubFiles recursively collects file entries from a GitHub directory listing.
-func collectGitHubFiles(ctx context.Context, httpClient *http.Client, entries []githubContentEntry, out *[]githubContentEntry, parentURL string) {
+func collectGitHubFiles(ctx context.Context, httpClient *http.Client, entries []githubContentEntry, out *[]githubContentEntry, parentURL string) error {
 	for _, entry := range entries {
-		// Stop descending once the context is cancelled; the caller checks
-		// ctx.Err() afterwards and aborts rather than importing a partial crawl.
 		if ctx.Err() != nil {
-			return
+			return fmt.Errorf("github import: directory crawl aborted: %w", ctx.Err())
 		}
 		lower := strings.ToLower(entry.Name)
 		if lower == "skill.md" || lower == "license" || lower == "license.txt" || lower == "license.md" {
 			continue
 		}
+		if entry.isSubmodule() {
+			continue
+		}
 		if entry.Type == "file" {
+			if skillpkg.IsLikelyBinaryFilePath(entry.Path) {
+				continue
+			}
 			*out = append(*out, entry)
 		} else if entry.Type == "dir" {
 			// Fetch subdirectory contents
@@ -1622,35 +1589,36 @@ func collectGitHubFiles(ctx context.Context, httpClient *http.Client, entries []
 			if subURL == "" {
 				parsed, err := url.Parse(parentURL)
 				if err != nil {
-					slog.Warn("github import: invalid parent directory url", "url", parentURL, "error", err)
-					continue
+					return fmt.Errorf("%w: invalid directory URL: %w", errImportSourceUnavailable, err)
 				}
 				parsed.Path = strings.TrimSuffix(parsed.Path, "/") + "/" + entry.Name
 				subURL = parsed.String()
 			}
 			subResp, err := doGitHubAPIGet(ctx, httpClient, subURL)
 			if err != nil || subResp.StatusCode != http.StatusOK {
-				attrs := []any{"url", subURL}
 				if subResp != nil {
-					attrs = append(attrs, "status", subResp.StatusCode)
 					subResp.Body.Close()
 				}
 				if err != nil {
-					attrs = append(attrs, "error", err)
+					return fmt.Errorf("%w: listing %s: %w", errImportSourceUnavailable, subURL, err)
 				}
-				slog.Warn("github import: failed to list subdirectory", attrs...)
-				continue
+				return fmt.Errorf("%w: listing %s: HTTP %d", errImportSourceUnavailable, subURL, subResp.StatusCode)
 			}
 			var subEntries []githubContentEntry
 			if err := json.NewDecoder(subResp.Body).Decode(&subEntries); err != nil {
 				subResp.Body.Close()
-				slog.Warn("github import: failed to decode subdirectory listing", "url", subURL, "error", err)
-				continue
+				return fmt.Errorf("%w: decoding directory %s: %w", errImportSourceUnavailable, subURL, err)
 			}
 			subResp.Body.Close()
-			collectGitHubFiles(ctx, httpClient, subEntries, out, subURL)
+			if subEntries == nil {
+				return fmt.Errorf("%w: directory %s is not a file list", errImportSourceUnavailable, subURL)
+			}
+			if err := collectGitHubFiles(ctx, httpClient, subEntries, out, subURL); err != nil {
+				return err
+			}
 		}
 	}
+	return nil
 }
 
 func findSkillDirFromConventionalPrefixes(ctx context.Context, httpClient *http.Client, owner, repo, defaultBranch, rawPrefix, skillName string) (string, []byte, bool) {
@@ -2087,9 +2055,8 @@ func fetchFromGitHub(ctx context.Context, httpClient *http.Client, rawURL string
 
 	// Enumerate supporting files from a single recursive tree, checking the
 	// import caps against the tree metadata before downloading anything. Fall
-	// back to the per-directory contents crawl when the tree is unavailable or
-	// truncated (kept lenient so a rate-limited listing doesn't fail an import
-	// that already produced a valid SKILL.md).
+	// back to a complete per-directory contents crawl when the tree is unavailable
+	// or truncated. Neither path may publish a partially fetched bundle.
 	tree, truncated, treeErr := fetchGitHubTree(ctx, httpClient, spec.owner, spec.repo, spec.ref)
 	if treeErr == nil && !truncated {
 		if err := addSupportingFilesFromTree(ctx, httpClient, result, tree, rawPrefix, spec.skillDir); err != nil {

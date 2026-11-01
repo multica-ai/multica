@@ -319,10 +319,10 @@ export function buildBuiltinCommandItems(
 export interface BuiltinCommandSuggestionOptions {
   /**
    * Configured quick actions offered alongside the built-ins. Read lazily on
-   * every keystroke so a newly created action shows up without remounting the
-   * editor.
+   * every keystroke and catalog notification without remounting the editor.
    */
   getQuickActions?: () => { id: string; name: string; description?: string }[];
+  subscribeQuickActions?: (refresh: () => void) => () => void;
   /**
    * Resolves a quick action to the text it would post. Server-rendered, so the
    * inserted body is byte-identical to what clicking the sidebar button sends.
@@ -417,8 +417,11 @@ export function createBuiltinCommandSuggestion(
     render: createSuggestionPopupRender<SlashCommandItem, SlashCommandItem, SlashCommandListRef, SlashCommandListProps>({
       pluginKey,
       component: SlashCommandList,
+      subscribe: options.subscribeQuickActions,
       getProps: (props) => ({
-        items: props.items,
+        // Read the current catalog even when Tiptap finishes an older items
+        // request after a catalog notification.
+        items: buildBuiltinCommandItems(props.query, options.getQuickActions?.() ?? []),
         query: props.query,
         command: props.command,
         hideOnEmpty: true,

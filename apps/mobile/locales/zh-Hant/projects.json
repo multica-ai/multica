@@ -1,0 +1,78 @@
+{
+  "list": {
+    "title": "專案",
+    "empty": "還沒有專案",
+    "search_placeholder": "搜尋專案..."
+  },
+  "status": {
+    "planned": "計劃中",
+    "in_progress": "進行中",
+    "paused": "已暫停",
+    "completed": "已完成",
+    "cancelled": "已取消"
+  },
+  "priority": {
+    "urgent": "緊急",
+    "high": "高",
+    "medium": "中",
+    "low": "低",
+    "none": "無優先順序"
+  },
+  "detail": {
+    "properties": "屬性",
+    "related_issues": "相關任務",
+    "resources": "資源",
+    "lead": "負責人",
+    "no_resources": "尚未新增資源。",
+    "add_resource": "新增資源"
+  },
+  "form": {
+    "icon_emoji": "圖示（emoji）",
+    "title": "標題",
+    "title_placeholder": "專案標題",
+    "description": "描述",
+    "description_placeholder": "這個專案是做什麼的？",
+    "discard_title": "放棄專案？",
+    "discard_message": "草稿將會丟失。",
+    "keep_editing": "繼續編輯",
+    "save_failed": "建立專案失敗",
+    "save_failed_edit": "儲存失敗"
+  },
+  "errors": {
+    "load_failed": "專案載入失敗：{{message}}"
+  },
+  "actions": {
+    "creating": "建立中...",
+    "saving": "儲存中..."
+  },
+  "menu": {
+    "pin": "固定",
+    "unpin": "取消固定",
+    "edit_details": "編輯詳情",
+    "open_web": "在網頁開啟",
+    "project_actions": "專案操作"
+  },
+  "delete": {
+    "title": "刪除專案？",
+    "message": "此操作無法撤銷。該專案中的任務將不再關聯任何專案。"
+  },
+  "properties": {
+    "status": "狀態",
+    "priority": "優先順序",
+    "lead": "負責人",
+    "unassigned": "未分配"
+  },
+  "resources": {
+    "title": "資源",
+    "add": "新增",
+    "detach_title": "移除資源？",
+    "detach": "移除",
+    "empty": "尚未新增資源。"
+  },
+  "runs": {
+    "working": "處理中",
+    "count": "執行 · {{count}}"
+  },
+  "status.planned": "計劃中",
+  "form.description_placeholder": "這個專案是做什麼的？"
+}

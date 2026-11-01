@@ -4,10 +4,9 @@ description: Compare the AI coding tools Multica supports, and how models, MCP, 
 ---
 
 import { Callout } from "fumadocs-ui/components/callout";
+import { ProviderPickerDemo } from "@/components/demos/provider-picker-demo";
 
-Multica does not replace the AI coding tool you use. A runtime invokes the tool already installed and signed in on the computer, then writes progress and results back to the issue.
-
-If you already use one of these tools, you can usually keep it as-is. Four things to weigh when choosing:
+Multica does not replace the AI coding tool you use: a runtime invokes the tool already installed and signed in on the computer, then writes progress and results back to the issue. If you already use one of these tools, you can usually keep it. If you have not picked one yet, weigh four things:
 
 - whether it is already installed on the computer;
 - which models your account can use;
@@ -18,36 +17,44 @@ Install steps are in [Install AI coding tools](/install-agent-runtime).
 
 ## Supported tools
 
-| Tool | Detected command | Session resumption | Multica-managed MCP | Skill injection path |
-|---|---|---:|---:|---|
-| Antigravity | `agy` | ✓ | — | `.agents/skills/` |
-| Claude Code | `claude` | ✓ | ✓ | `.claude/skills/` |
-| CodeBuddy | `codebuddy` | ✓ | ✓ | `.codebuddy/skills/` |
-| CodeArts | `codearts` | ✓ | ✓ | `.codeartsdoer/skills/` |
-| Codex | `codex` | ✓ | ✓ | `$CODEX_HOME/skills/` |
-| GitHub Copilot CLI | `copilot` | ✓ | — | `.github/skills/` |
-| Cursor Agent | `cursor-agent` | ✓ | ✓ | `.cursor/skills/` |
-| DeepSeek Harness | `dsh` | ✓ | ✓ | `.dsh/skills/` |
-| DevEco Code | `deveco` | ✓ | — | `.deveco/skills/` |
-| Grok | `grok` | ✓ | ✓ | `.grok/skills/` |
-| Hermes | `hermes` | ✓ | ✓ | per-run `HERMES_HOME/skills/` |
-| Kimi CLI | `kimi` | ✓ | ✓ | `.kimi/skills/` |
-| Kiro CLI | `kiro-cli` | ✓ | ✓ | `.kiro/skills/` |
-| MiniMax Code | `mcode` | — | ✓ | `.minimax/skills/` |
-| Muse Code | `muse` | ✓ | — | `.agents/skills/` |
-| OpenClaw | `openclaw` | ✓ | ✓ | `skills/` |
-| OpenCode | `opencode` | ✓ | ✓ | `.opencode/skills/` |
-| Pi | `pi` | ✓ | ✓ | `.pi/skills/` |
-| Oh-My-Pi | `omp` | ✓ | ✓ | `.omp/skills/` |
-| Qoder CLI | `qodercli` | ✓ | ✓ | `.qoder/skills/` |
-| Qoder CN CLI | `qoderclicn` | ✓ | ✓ | `.qoder/skills/` |
-| Qwen Code | `qwen` | ✓ | ✓ | `.qwen/skills/` |
-| QwenPaw | `qwenpaw` | ✓ | ✓ | per-run workspace `skills/` |
-| Reasonix | `reasonix` | ✓ | ✓ | `.reasonix/skills/` |
-| Trae CLI | `traecli` | ✓ | ✓ | `.traecli/skills/` |
-| Dim | `dim` | ✓ | ✓ | — |
+<ProviderPickerDemo />
 
-"Multica-managed MCP" means you can define MCP servers in the agent configuration and Multica passes them to the tool before a run. It does not mean the tool has no other way to configure MCP.
+| Tool | Detected command | Session resumption | Multica-managed MCP | Model picked in Multica | Skill injection path |
+|---|---|---:|---:|---:|---|
+| Antigravity | `agy` | ✓ | — | ✓ | `.agents/skills/` |
+| Claude Code | `claude` | ✓ | ✓ | ✓ | `.claude/skills/` |
+| CodeBuddy | `codebuddy` | ✓ | ✓ | ✓ | `.codebuddy/skills/` |
+| CodeArts | `codearts` | ✓ | ✓ | ✓ | `.codeartsdoer/skills/` |
+| Codex | `codex` | ✓ | ✓ | ✓ | `$CODEX_HOME/skills/` |
+| GitHub Copilot CLI | `copilot` | ✓ | — | ✓ | `.github/skills/` |
+| Cursor Agent | `cursor-agent` | ✓ | ✓ | ✓ | `.cursor/skills/` |
+| DeepSeek Harness | `dsh` | ✓ | ✓ | ✓ | `.dsh/skills/` |
+| DevEco Code | `deveco` | ✓ | — | ✓ | `.deveco/skills/` |
+| Grok | `grok` | ✓ | ✓ | ✓ | `.grok/skills/` |
+| Hermes | `hermes` | ✓ | ✓ | ✓ | per-run `HERMES_HOME/skills/` |
+| Kimi CLI | `kimi` | ✓ | ✓ | ✓ | `.kimi/skills/` |
+| Kiro CLI | `kiro-cli` | ✓ | ✓ | ✓ | `.kiro/skills/` |
+| MiniMax Code | `mcode` | — | ✓ | — | `.minimax/skills/` |
+| Muse Code | `muse` | ✓ | — | ✓ | `.agents/skills/` |
+| Devin CLI | `devin` | ✓ | ✓ | ✓ | `.devin/skills/` |
+| OpenClaw | `openclaw` | ✓ | ✓ | ✓ | `skills/` |
+| OpenCode | `opencode` | ✓ | ✓ | ✓ | `.opencode/skills/` |
+| Pi | `pi` | ✓ | ✓ | ✓ | `.pi/skills/` |
+| Oh-My-Pi | `omp` | ✓ | ✓ | ✓ | `.omp/skills/` |
+| Qoder CLI | `qodercli` | ✓ | ✓ | ✓ | `.qoder/skills/` |
+| Qoder CN CLI | `qoderclicn` | ✓ | ✓ | ✓ | `.qoder/skills/` |
+| Qwen Code | `qwen` | ✓ | ✓ | ✓ | `.qwen/skills/` |
+| QwenPaw | `qwenpaw` | ✓ | ✓ | — | per-run workspace `skills/` |
+| Reasonix | `reasonix` | ✓ | ✓ | ✓ | `.reasonix/skills/` |
+| Trae CLI | `traecli` | ✓ | ✓ | ✓ | `.traecli/skills/` |
+| Dim | `dim` | ✓ | ✓ | ✓ | — |
+| ZeroClaw | `zeroclaw` | ✓ | — | — | — |
+
+"Multica-managed MCP" means you can define MCP servers in the agent configuration and Multica passes them to the tool before a run. The column only says whether Multica can configure it for you, not whether the tool has other ways to configure MCP.
+
+Tools with — under "Model picked in Multica" take their model from their own configuration; see [Model sources](#model-sources).
+
+Devin supports stdio MCP servers; HTTP/SSE entries are passed only if the CLI advertises support. Devin skills are imported from `$XDG_CONFIG_HOME/devin/skills` (default `~/.config/devin/skills`) or `%APPDATA%\devin\skills` on Windows, then the legacy `cognition/skills` root, then `~/.codeium/<channel>/skills` (`windsurf`, `windsurf-next`, `windsurf-insiders`, in that order), and finally `~/.agents/skills`. On duplicate skill keys, the first root wins for both listing and import.
 
 ## Model sources
 
@@ -55,25 +62,29 @@ When you create an agent, the model list comes from the corresponding runtime. S
 
 If you do not pick a model, Multica uses the tool's own default. If the list is empty, confirm the runtime is online and the tool is signed in, then refresh the model list.
 
-QwenPaw and MiniMax Code are exceptions: they do not accept a model chosen from Multica, so the picker is inert and shows "Managed by runtime". Choose the model in the tool's own configuration instead. An empty model list is expected there and is not a sign that the runtime is offline.
+Devin's catalog can include models unavailable to your account. Choose a canonical model ID, an unambiguous session model name or catalog family slug/alias (such as `opus`), or leave the model empty for the CLI default. Multica confirms the actual session model before sending the prompt; a fallback to another family is rejected. Ambiguous names, arbitrary partial names, or unavailable variants require a canonical ID rather than a guessed match. Usage is attributed to the reported model, not the launch flag. Adaptive usage stays under the reported Adaptive routing ID, not an inferred underlying model.
+
+Devin reads `WINDSURF_API_KEY` when set, otherwise the login saved by `devin auth login`; unknown ACP auth methods do not block that stored login. Multica preserves Devin's configured session mode rather than raising permissions. If it defaults to `plan`, switch to an editing mode in Devin before dispatching work that must change files.
+
+QwenPaw, MiniMax Code, and ZeroClaw are exceptions: they do not accept a model chosen from Multica, so the picker is inert and shows "Managed by runtime". Choose the model in the tool's own configuration instead. An empty model list for these tools is expected and does not mean the runtime is offline.
 
 DeepSeek Harness advertises its model catalog from the runtime itself (`dsh --profile multica --list-models`). Its model ids use the `provider/model` form (for example `deepseek-official/deepseek-chat`), so select the full id from the list.
 
 <Callout type="info">
-Different tools may use different model names. After switching AI coding tools, the previous model value is invalid in the new tool and needs to be selected again.
+Model names are not shared across tools. After switching AI coding tools, the previous model value is invalid in the new tool and needs to be selected again.
 </Callout>
 
 ## Session resumption
 
-All tools marked ✓ support continuing an existing session in a later run. The prerequisites are that the original session still exists and the run is executed by a runtime that can reach it. MiniMax Code 0.1.2 advertises no session-loading capability over ACP, so Multica starts a fresh MCode session for a later run.
+Tools marked ✓ can continue an existing session in a later run, provided the original session still exists and the run is executed by a runtime that can reach it. MiniMax Code 0.1.2 advertises no session-loading capability over ACP, so Multica starts a fresh MCode session for a later run.
 
-Multica stores the session identifier the tool returns. The next time work continues on the same issue, the runtime tries to resume that session; when it cannot, it creates a new session and keeps going. Pi stores a local session file path, so it depends more on the original computer and file.
+Multica stores the session identifier the tool returns. The next time work continues on the same issue, the runtime tries to resume that session; if it cannot, it starts a new session and keeps going. Pi stores a local session file path, so it depends more on the original computer and file.
 
 Retry and session-resumption rules are in [Runs](/tasks#manual-retry).
 
 ## MCP configuration
 
-Antigravity, GitHub Copilot CLI, and DevEco Code do not read the MCP configuration on an agent yet, so the field is not shown when creating agents for them.
+Antigravity, GitHub Copilot CLI, DevEco Code, Muse Code, and ZeroClaw do not read the MCP configuration on an agent yet, so the field is not shown when creating agents for them.
 
 Managed MCP delivery for Pi requires Pi 0.99.0 or later. Older Pi versions continue to run agents that have no MCP configuration.
 
@@ -81,9 +92,11 @@ Managed MCP delivery for Pi requires Pi 0.99.0 or later. Older Pi versions conti
 MCP server commands, arguments, and environment variables are saved server-side with the agent configuration. Do not write local credentials you have no need to share into the configuration.
 </Callout>
 
+Servers already configured on the runtime's machine are merged with the agent's configuration on that machine; see [Local MCP configuration](/daemon-runtimes#local-mcp).
+
 ## Skill injection
 
-Before a run starts, Multica writes the skills bound to the agent into the paths in the table above, so each tool discovers them through its own native mechanism.
+Before a run starts, Multica writes the skills bound to the agent into the paths in the table above, where each tool discovers them through its own native mechanism.
 
 Skills that already exist in the repository are never overwritten. On a name collision, Multica uses a different directory name for the injected copy; after the run, it cleans up only the files it created.
 

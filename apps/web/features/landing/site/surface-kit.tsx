@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState, type ComponentType, type ReactNode } from "react";
-import { Check, Copy, type LucideIcon } from "lucide-react";
+import { Check, Copy, type IconComponent } from "@multica/ui/icons";
 import { cn } from "@multica/ui/lib/utils";
 import { Container, Eyebrow, focusRing } from "./primitives";
 import { AdvanceLine, useAutoAdvance } from "./auto-advance";
@@ -184,7 +184,7 @@ export function CompareTable({ columns, rows }: { columns: [string, string]; row
   );
 }
 
-export type Feature = { icon: LucideIcon; title: string; body: string };
+export type Feature = { icon: IconComponent; title: string; body: string };
 
 /** Up to four features in a 2×2 grid ruled by hairlines, each led by its icon. */
 export function FeatureGrid({ items }: { items: Feature[] }) {

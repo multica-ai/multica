@@ -1,6 +1,6 @@
 import type { ComponentProps, CSSProperties, ReactNode } from "react";
 import Link from "next/link";
-import { ArrowUpRight } from "lucide-react";
+import { ArrowUpRight } from "@multica/ui/icons";
 import { cn } from "@multica/ui/lib/utils";
 
 export const focusRing =

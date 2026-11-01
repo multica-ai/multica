@@ -46,21 +46,21 @@ describe("runtime access revocation confirmation", () => {
     };
     render(<I18nProvider locale="en" resources={{ en: { runtimes: enRuntimes } }}>
       <QueryClientProvider client={new QueryClient({ defaultOptions: { mutations: { retry: false } } })}>
-        <RevokeRuntimeAccessDialog open onOpenChange={close} runtime={runtime} wsId="ws-1" initialPlan={{ agents: body.nonowner_agents, activeTaskIds: [taskId] }} />
+        <RevokeRuntimeAccessDialog open onOpenChange={close} runtime={runtime} wsId="ws-1" initialPlan={{ agents: body.nonowner_agents, activeTaskIds: [taskId] }} sharedWith={["remaining-member"]} />
       </QueryClientProvider>
     </I18nProvider>);
-    expect(screen.getByRole("alertdialog", { name: "Make this Runtime private?" })).toHaveAccessibleDescription(/pause active autopilots/);
-    const confirm = screen.getByRole("button", { name: "Make Runtime private" });
+    expect(screen.getByRole("alertdialog", { name: "Restrict runtime access?" })).toHaveAccessibleDescription(/pause active autopilots/);
+    const confirm = screen.getByRole("button", { name: "Restrict access" });
     expect(confirm).toBeDisabled();
     fireEvent.click(screen.getByRole("checkbox"));
     fireEvent.click(confirm);
     expect(await screen.findByRole("status")).toHaveTextContent("Review it and confirm again");
     expect(confirm).toBeDisabled();
     expect(close).not.toHaveBeenCalled();
-    expect(revoke).toHaveBeenNthCalledWith(1, runtime.id, [agentId], [taskId]);
+    expect(revoke).toHaveBeenNthCalledWith(1, runtime.id, [agentId], [taskId], ["remaining-member"]);
     fireEvent.click(screen.getByRole("checkbox"));
     fireEvent.click(confirm);
     await waitFor(() => expect(close).toHaveBeenCalledWith(false));
-    expect(revoke).toHaveBeenNthCalledWith(2, runtime.id, [agentId], [taskId, nextTaskId]);
+    expect(revoke).toHaveBeenNthCalledWith(2, runtime.id, [agentId], [taskId, nextTaskId], ["remaining-member"]);
   });
 });

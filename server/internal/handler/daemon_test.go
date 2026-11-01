@@ -3229,6 +3229,13 @@ func TestClaimTask_ManualRetryReusesWorkdir(t *testing.T) {
 		}
 	})
 
+	t.Run("opencode_clock_skew_reuses_workdir_fresh_session", func(t *testing.T) {
+		task := insertRerun(t, runtimeID, "opencode_clock_skew", "", "skewed-session", "/tmp/retry-clock-workdir")
+		if task.PriorWorkDir != "/tmp/retry-clock-workdir" || task.PriorSessionID != "" {
+			t.Fatalf("clock-skew retry must retain workdir and drop session: %+v", task)
+		}
+	})
+
 	t.Run("different_runtime_reuses_workdir_drops_session", func(t *testing.T) {
 		task := insertRerun(t, otherRuntimeID, "timeout", "", "cross-session", "/tmp/retry-cross-workdir")
 		if task.PriorWorkDir != "/tmp/retry-cross-workdir" {

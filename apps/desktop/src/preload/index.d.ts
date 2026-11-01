@@ -120,6 +120,21 @@ interface DesktopAPI {
   openIssueWindow: (
     request: IssueWindowRequest,
   ) => Promise<{ ok: true } | { ok: false; reason: "invalid_request" }>;
+  /** Tell main which workspace this main window shows (null while none). */
+  reportWindowWorkspace: (workspaceSlug: string | null) => void;
+  /** Workspaces shown by the other main windows (synchronous). */
+  getOtherWindowWorkspaces: () => string[];
+  /** Hand a workspace (and optionally a path inside it) to the other main
+   *  window that shows it. Returns false when no other window does. */
+  focusWorkspaceWindow: (workspaceSlug: string, path?: string) => boolean;
+  /** Open a workspace in its own main window, or focus the one showing it. */
+  openWorkspaceWindow: (workspaceSlug: string) => Promise<{ ok: boolean }>;
+  /** Listen for workspace paths routed here from another window.
+   *  Returns an unsubscribe function. */
+  onOpenWorkspacePath: (callback: (path: string) => void) => () => void;
+  /** Listen for Cmd/Ctrl+Shift+N new-window requests. Returns an
+   *  unsubscribe function. */
+  onNewWindowShortcut: (callback: () => void) => () => void;
 }
 
 type DaemonReauthResult =

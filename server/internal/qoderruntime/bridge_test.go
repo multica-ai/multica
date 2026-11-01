@@ -10,13 +10,67 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/multica-ai/multica/server/internal/daemon"
+	"github.com/multica-ai/multica/server/internal/testutil"
 )
 
 const workspaceID = "11111111-1111-4111-8111-111111111111"
+
+func TestAPIRecoversBlackholedHTTP2Connection(t *testing.T) {
+	started := make(chan struct{}, 1)
+	var posts atomic.Int32
+	server, connections := testutil.NewBlackholeHTTP2Server(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.ProtoMajor != 2 {
+			t.Errorf("expected HTTP/2, got %s", r.Proto)
+		}
+		if r.Method == http.MethodPost {
+			posts.Add(1)
+			started <- struct{}{}
+			<-r.Context().Done()
+			return
+		}
+		_, _ = io.WriteString(w, `{}`)
+	}))
+	a, err := newAPI(server.URL, "test-token", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	testutil.TrustHTTP2Server(t, a.client, server)
+	a.client.Timeout = 2 * time.Second
+	ctx, cancel := context.WithTimeout(context.Background(), 6*time.Second)
+	defer cancel()
+	if err := a.call(ctx, http.MethodGet, "/warm", nil, nil); err != nil {
+		t.Fatal(err)
+	}
+	conn := <-connections
+	defer conn.Close()
+	done := make(chan error, 1)
+	go func() { done <- a.call(ctx, http.MethodPost, "/sessions", nil, nil) }()
+	select {
+	case <-started:
+	case <-ctx.Done():
+		t.Fatal("session request did not reach server")
+	}
+	conn.Drop.Store(true)
+	if err := <-done; err == nil {
+		t.Fatal("interrupted request unexpectedly succeeded")
+	}
+	if err := a.call(ctx, http.MethodGet, "/recovered", nil, nil); err != nil {
+		t.Fatalf("Qoder client reused the dead connection: %v", err)
+	}
+	select {
+	case <-connections:
+	default:
+		t.Fatal("Qoder recovery did not open a new connection")
+	}
+	if count := posts.Load(); count != 1 {
+		t.Fatalf("session request was replayed %d times", count)
+	}
+}
 
 type harness struct {
 	b                       *Bridge
@@ -179,6 +233,50 @@ func TestIssueRun(t *testing.T) {
 	}
 	if strings.Contains(string(data), "secret") {
 		t.Fatal("credential persisted")
+	}
+}
+func TestChatRun(t *testing.T) {
+	h := setup(t)
+	ctx := context.Background()
+	h.task.IssueID = ""
+	h.task.ChatSessionID = "chat-1"
+	h.task.ChatMessage = "Introduce yourself"
+	if err := h.b.step(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if h.failure != nil || !strings.Contains(h.prompt, "Introduce yourself") || !strings.Contains(h.prompt, "Audience: direct room.") || strings.Contains(h.prompt, "pull request") {
+		t.Fatalf("incorrect chat prompt: %s (failure %#v)", h.prompt, h.failure)
+	}
+	h.finish("end_turn")
+	if err := h.b.step(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if h.complete["session_id"] != "sess_1" || !strings.Contains(fmt.Sprint(h.complete["output"]), "Tests passed") {
+		t.Fatalf("result: %#v", h.complete)
+	}
+}
+func TestChatAudience(t *testing.T) {
+	for _, tc := range []struct{ channel, chatType, want string }{
+		{"", "", "Audience: direct room."},
+		{"slack", "p2p", "Audience: direct room."},
+		{"slack", "group", "Audience: group room; not private"},
+		{"feishu", "", "Audience: unknown."},
+	} {
+		if got := chatAudience(tc.channel, tc.chatType); !strings.Contains(got, tc.want) {
+			t.Errorf("chatAudience(%q, %q) = %q, want %q", tc.channel, tc.chatType, got, tc.want)
+		}
+	}
+}
+func TestChatAttachmentsFailBeforeExecution(t *testing.T) {
+	h := setup(t)
+	h.task.IssueID = ""
+	h.task.ChatSessionID = "chat-1"
+	h.task.ChatMessageAttachments = []daemon.ChatAttachmentMeta{{ID: "att-1"}}
+	if err := h.b.step(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if h.creates != 0 || !strings.Contains(fmt.Sprint(h.failure["error"]), "attachments") {
+		t.Fatalf("chat attachment ignored: %#v", h.failure)
 	}
 }
 func TestAmbiguousSubmitReconcilesAfterRestart(t *testing.T) {

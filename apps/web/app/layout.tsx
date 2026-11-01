@@ -13,6 +13,8 @@ import {
   resolveBrowserApiBaseUrl,
   resolveBrowserWsUrl,
 } from "@/config/runtime-urls";
+import { resolveGoogleAnalyticsId } from "@/config/google-analytics";
+import { GoogleAnalytics } from "@/components/google-analytics";
 import "./globals.css";
 
 // Inter is the Latin UI face. next/font produces a hashed family (`__Inter_xxx`)
@@ -30,11 +32,12 @@ import "./globals.css";
 // italic face the ~20 semantic italic labels (chat empty states, model-picker's
 // "Managed by runtime", dashboard/squad placeholders) plus every markdown <em> and
 // blockquote rendered as browser-synthesized oblique. Keep in sync with desktop's
-// `@fontsource-variable/inter/wght-italic.css` import.
+// `@fontsource-variable/inter/opsz-italic.css` import.
 //
-// The optical-size axis serves the marketing display ramp (Inter's Display cut
-// above 32px). The product UI stays on the text cut: globals.css pins
-// `font-optical-sizing: none` at the root and only `.landing-light` re-enables it.
+// The `opsz` axis lets Inter draw each size with its own cut: 14px and below
+// keep the open text design, while titles and headings get Inter Display's
+// tighter spacing and finer details automatically (`font-optical-sizing: auto`
+// is the CSS default). Keep in sync with desktop's `opsz.css` import.
 const inter = Inter({
   subsets: ["latin"],
   style: ["normal", "italic"],
@@ -133,6 +136,8 @@ export default async function RootLayout({
   const resources = { [locale]: RESOURCES[locale] };
   const apiBaseUrl = resolveBrowserApiBaseUrl(process.env);
   const wsUrl = resolveBrowserWsUrl(process.env);
+  // Opt-in Google Analytics: omitted entirely unless GOOGLE_ANALYTICS_ID is set.
+  const googleAnalyticsId = resolveGoogleAnalyticsId(process.env);
 
   return (
     <html
@@ -170,6 +175,7 @@ export default async function RootLayout({
           </WebProviders>
           <Toaster />
         </ThemeProvider>
+        {googleAnalyticsId && <GoogleAnalytics measurementId={googleAnalyticsId} />}
       </body>
     </html>
   );

@@ -17,8 +17,8 @@ import {
   Search,
   Server,
   Zap,
-  type LucideIcon,
-} from "lucide-react";
+  type IconComponent,
+} from "@multica/ui/icons";
 import { cn } from "@multica/ui/lib/utils";
 import { MulticaIcon } from "@multica/ui/components/common/multica-icon";
 import { StatusIcon } from "@multica/views/issues/components/status-icon";
@@ -62,7 +62,7 @@ function Screen({ active, children }: { active: string; children: ReactNode }) {
   );
 }
 
-export function Header({ icon: Icon, children }: { icon: LucideIcon; children: ReactNode }) {
+export function Header({ icon: Icon, children }: { icon: IconComponent; children: ReactNode }) {
   return (
     <div className="flex h-11 shrink-0 items-center gap-2 border-b border-border px-4">
       <Icon className="size-4 shrink-0 text-muted-foreground" />
@@ -106,7 +106,7 @@ export function GroupBand({ title, count }: { title: string; count: number }) {
 
 // --- Runtimes ---------------------------------------------------------------
 
-type Runtime = { name: string; icon: LucideIcon; detail: string; agents: string[]; load: string; fresh?: boolean };
+type Runtime = { name: string; icon: IconComponent; detail: string; agents: string[]; load: string; fresh?: boolean };
 
 const MACHINES: Runtime[] = [
   { name: "build-02", icon: Server, detail: "Linux · Leo Park", agents: ["Claude Code", "Codex", "OpenCode"], load: "Connected", fresh: true },

@@ -92,13 +92,19 @@ func (e *HTTPError) Error() string {
 	return fmt.Sprintf("%s %s returned %d: %s", e.Method, e.Path, e.StatusCode, strings.TrimSpace(e.Body))
 }
 
+// maxErrorBodyBytes caps how much of an error response is kept. It must hold
+// a whole structured error: a workflow's 409 status mapping plan lists one row
+// per status in use (up to 50) and runs past 4 KiB, and a truncated body no
+// longer parses as JSON. Only --debug prints the raw body.
+const maxErrorBodyBytes = 64 << 10
+
 // newHTTPError builds a *HTTPError from an error response (status >= 400),
 // reading a capped slice of the body. Every Multica API helper funnels its
 // >= 400 responses through this so the top-level FormatError / ExitCodeFor can
 // classify the failure via errors.As(err, **HTTPError) regardless of which
 // HTTP verb the command used.
 func newHTTPError(method, path string, resp *http.Response) *HTTPError {
-	data, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
+	data, _ := io.ReadAll(io.LimitReader(resp.Body, maxErrorBodyBytes))
 	return &HTTPError{
 		Method:     method,
 		Path:       path,

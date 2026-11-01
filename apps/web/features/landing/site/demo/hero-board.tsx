@@ -21,7 +21,7 @@ import {
   FolderKanban,
   Inbox,
   Layers,
-  ListFilter,
+  Filter,
   ListTodo,
   Maximize2,
   MessageSquare,
@@ -36,8 +36,8 @@ import {
   Users,
   X,
   Zap,
-  type LucideIcon,
-} from "lucide-react";
+  type IconComponent,
+} from "@multica/ui/icons";
 import { cn } from "@multica/ui/lib/utils";
 import { ShimmerText } from "@multica/ui/components/common/shimmer-text";
 import { StatusIcon } from "@multica/views/issues/components/status-icon";
@@ -349,7 +349,7 @@ function NavRow({
   badge,
   active,
 }: {
-  icon: LucideIcon;
+  icon: IconComponent;
   label: string;
   hint?: string;
   badge?: string;
@@ -385,7 +385,7 @@ function Toolbar({ working, compact }: { working: number; compact: boolean }) {
         </ToolbarButton>
         {compact ? null : (
           <>
-            <ToolbarButton icon={ListFilter}>Filter</ToolbarButton>
+            <ToolbarButton icon={Filter}>Filter</ToolbarButton>
             <ToolbarButton icon={SlidersHorizontal}>Display</ToolbarButton>
             <ToolbarButton icon={Columns3}>Board</ToolbarButton>
           </>
@@ -395,7 +395,7 @@ function Toolbar({ working, compact }: { working: number; compact: boolean }) {
   );
 }
 
-function ToolbarButton({ icon: Icon, children }: { icon?: LucideIcon; children: ReactNode }) {
+function ToolbarButton({ icon: Icon, children }: { icon?: IconComponent; children: ReactNode }) {
   return (
     <span className="flex h-7 items-center gap-1.5 rounded-md border border-border bg-background px-2.5 text-caption">
       {Icon ? <Icon className="size-3.5 text-muted-foreground" /> : null}

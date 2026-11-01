@@ -1,6 +1,6 @@
 "use client";
 
-import { ArrowUpRight, Layers, Link2, ShieldCheck, UserCog } from "lucide-react";
+import { ArrowUpRight, Layers, Link2, ShieldCheck, UserPen } from "@multica/ui/icons";
 import { cn } from "@multica/ui/lib/utils";
 import { useAuthStore } from "@multica/core/auth";
 import { useDashboardCtaHref } from "../utils/use-dashboard-cta";
@@ -277,7 +277,7 @@ const ACCESS: Feature[] = [
     body: "In a group the agent reads messages that mention it, never the rest of the channel.",
   },
   {
-    icon: UserCog,
+    icon: UserPen,
     title: "Admins decide which Bots exist",
     body: "Owners and admins connect and disconnect Bots. Conversations and runs are kept after a disconnect.",
   },

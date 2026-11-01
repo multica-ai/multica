@@ -1,7 +1,7 @@
 "use client";
 
 import type { ReactNode } from "react";
-import { ArrowRight, AtSign, CircleCheck, ListPlus, Users } from "lucide-react";
+import { ArrowRight, AtSign, CircleCheck, ListPlus, Users } from "@multica/ui/icons";
 import { useQuery } from "@tanstack/react-query";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { useModalStore } from "@multica/core/modals";
@@ -12,11 +12,13 @@ import {
   agentDetailOptions,
   squadListOptions,
 } from "@multica/core/workspace/queries";
+import { Button } from "@multica/ui/components/ui/button";
 import { Skeleton } from "@multica/ui/components/ui/skeleton";
 import { cn } from "@multica/ui/lib/utils";
 import { ActorAvatar } from "../../common/actor-avatar";
 import { AppLink, useNavigation } from "../../navigation";
 import { useT } from "../../i18n";
+import { CreateFlowFooter } from "./create-agent-footer";
 import { AgentCreateShell } from "./create-shell";
 
 /**
@@ -42,8 +44,7 @@ export function AgentCreatedPage({ agentId }: { agentId: string }) {
       title={t(($) => $.creation_studio.title)}
       step={t(($) => $.creation_studio.steps.done)}
       stepIndex={3}
-      closeIcon
-      onBack={() => navigation.replace(paths.agentDetail(agentId))}
+      onClose={() => navigation.replace(paths.agentDetail(agentId))}
     >
       <main className="flex min-h-0 flex-1 flex-col overflow-y-auto px-5 py-12">
         <div className="m-auto w-full max-w-xl">
@@ -91,7 +92,6 @@ export function AgentCreatedPage({ agentId }: { agentId: string }) {
             <DoneAction
               icon={ListPlus}
               title={t(($) => $.creation_studio.done.assign_title)}
-              description={t(($) => $.creation_studio.done.assign_description)}
               primary
               disabled={!agent}
               onClick={() =>
@@ -104,7 +104,6 @@ export function AgentCreatedPage({ agentId }: { agentId: string }) {
             <DoneAction
               icon={AtSign}
               title={t(($) => $.creation_studio.done.mention_title)}
-              description={t(($) => $.creation_studio.done.mention_description, { name })}
               href={paths.issues()}
             />
             <DoneAction
@@ -114,32 +113,19 @@ export function AgentCreatedPage({ agentId }: { agentId: string }) {
                   ? t(($) => $.creation_studio.done.open_squad_title, { squad: squad.name })
                   : t(($) => $.creation_studio.done.squad_title)
               }
-              description={
-                squad
-                  ? t(($) => $.creation_studio.done.open_squad_description)
-                  : t(($) => $.creation_studio.done.squad_description)
-              }
               href={squad ? paths.squadDetail(squad.id) : paths.squads()}
             />
           </div>
-
-          <div className="mt-8 flex items-center justify-center gap-4 text-label">
-            <AppLink
-              href={paths.agentDetail(agentId)}
-              className="font-medium text-foreground underline-offset-4 hover:underline"
-            >
-              {t(($) => $.creation_studio.done.open_agent)}
-            </AppLink>
-            <span aria-hidden="true" className="text-muted-foreground">·</span>
-            <AppLink
-              href={paths.agents()}
-              className="text-muted-foreground underline-offset-4 hover:text-foreground hover:underline"
-            >
-              {t(($) => $.creation_studio.done.back_to_list)}
-            </AppLink>
-          </div>
         </div>
       </main>
+      <CreateFlowFooter stepIndex={3}>
+        <Button variant="ghost" render={<AppLink href={paths.agents()} />} nativeButton={false}>
+          {t(($) => $.creation_studio.done.back_to_list)}
+        </Button>
+        <Button render={<AppLink href={paths.agentDetail(agentId)} />} nativeButton={false}>
+          {t(($) => $.creation_studio.done.open_agent)}
+        </Button>
+      </CreateFlowFooter>
     </AgentCreateShell>
   );
 }
@@ -147,7 +133,6 @@ export function AgentCreatedPage({ agentId }: { agentId: string }) {
 function DoneAction({
   icon: Icon,
   title,
-  description,
   primary = false,
   disabled = false,
   href,
@@ -155,7 +140,6 @@ function DoneAction({
 }: {
   icon: typeof ListPlus;
   title: string;
-  description: string;
   primary?: boolean;
   disabled?: boolean;
   href?: string;
@@ -177,10 +161,7 @@ function DoneAction({
       >
         <Icon aria-hidden="true" className="size-4" />
       </span>
-      <span className="min-w-0 flex-1">
-        <span className="block text-body font-medium">{title}</span>
-        <span className="block text-caption text-muted-foreground">{description}</span>
-      </span>
+      <span className="min-w-0 flex-1 text-body font-medium">{title}</span>
       <ArrowRight
         aria-hidden="true"
         className="size-4 shrink-0 text-muted-foreground transition-transform group-hover:translate-x-0.5"

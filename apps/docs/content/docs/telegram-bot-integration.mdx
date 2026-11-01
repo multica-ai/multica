@@ -4,10 +4,14 @@ description: Connect a Multica agent to your own Telegram Bot for private chats,
 ---
 
 import { Callout } from "fumadocs-ui/components/callout";
+import { Step, Steps } from "fumadocs-ui/components/steps";
+import { Accordion, Accordions } from "fumadocs-ui/components/accordion";
 
 Multica uses a Bot that you create with Telegram's official [@BotFather](https://t.me/BotFather). One Bot maps to one Multica agent. Create a separate Bot for each agent that needs its own Telegram identity.
 
-Telegram support is [community-maintained](/community-maintained): it ships in every release, but it carries no official support SLA. Report problems in [GitHub issues](https://github.com/multica-ai/multica/issues).
+<Callout type="info">
+Telegram support is [community-maintained](/community-maintained): it ships in every release, but carries no official support SLA. Report problems in [GitHub issues](https://github.com/multica-ai/multica/issues).
+</Callout>
 
 ## Before you start
 
@@ -15,18 +19,26 @@ Telegram support is [community-maintained](/community-maintained): it ships in e
 - The API server must be able to reach `https://api.telegram.org`.
 - You need the Bot token issued by @BotFather. Treat it as a password.
 
-## 1. Create the Bot
+## Connect the Bot
+
+<Steps>
+<Step>
+
+### Create the Bot [#1-create-the-bot]
 
 1. Open [@BotFather](https://t.me/BotFather) and send `/newbot`.
 2. Choose a display name and a username ending in `bot`.
 3. Copy the HTTP API token.
-4. Leave **Group Privacy** enabled for the default, minimal-visibility setup: Telegram then delivers only commands, explicit @-mentions, and replies to the Bot in groups. Turning it off is optional. It lets the Bot include the surrounding group conversation as context, at the cost that the Bot then receives every message in the group — see [Groups and forum topics](#groups-and-forum-topics).
+4. Leave **Group Privacy** enabled for the default, minimal-visibility setup: Telegram then delivers only commands, explicit @-mentions, and replies to the Bot in groups. You can turn it off so the Bot includes the surrounding group conversation as context, at the cost that the Bot then receives every message in the group; see [Group Privacy decides what the Bot sees](#group-privacy).
 
 <Callout type="warning">
 Never paste the token into an issue, chat message, log, or source repository. If it is exposed, use @BotFather to revoke it, then reconnect the Bot with the replacement token.
 </Callout>
 
-## 2. Connect it to an agent
+</Step>
+<Step>
+
+### Connect it to an agent [#2-connect-it-to-an-agent]
 
 1. In Multica, open **Agents**, select an agent, and open **Integrations**.
 2. Click **Connect Telegram**.
@@ -34,7 +46,10 @@ Never paste the token into an issue, chat message, log, or source repository. If
 
 Multica calls Telegram to verify the Bot, checks that no outgoing webhook conflicts with long polling, encrypts the token, and starts one supervised `getUpdates` connection. A Bot already connected to another agent or workspace must be disconnected there first.
 
-## First use and account binding
+</Step>
+</Steps>
+
+## First use [#first-use-and-account-binding]
 
 The first time a member messages the Bot, it sends a single-use Multica account-binding link. Open it, sign in to the same Multica workspace, then return to Telegram and send the message again. The link expires after 15 minutes; message the Bot again to get a new link.
 
@@ -42,7 +57,7 @@ In a group, the Bot never posts the bearer link publicly. It asks the sender to 
 
 Only current workspace members can use the Bot. Membership is checked again for every message.
 
-## Use the Bot
+## Hand work to the agent in Telegram [#use-the-bot]
 
 ### Private chats
 
@@ -50,7 +65,31 @@ Open the Bot and send text directly. No @-mention is required.
 
 ### Groups and forum topics
 
-Add the Bot to a group, then either @-mention it or reply directly to one of its messages. Accepted messages remain in the continued Multica conversation. A group message that does not address the Bot never starts a conversation or a turn on its own. It is, however, held in a short in-memory buffer: the last 10 messages per group (or per forum topic) that the Bot has received, cleared whenever the server restarts. When a member then addresses the Bot — by @-mention or by replying to one of its messages — those buffered messages are prepended to that turn as read-only context, and they are saved together with the turn as part of the conversation. A buffered photo or file appears there only as a marker such as `[Image]` followed by its caption; the file itself is not fetched. `/new` starts a fresh chat without that context. What reaches the buffer depends on what Telegram delivers: with Group Privacy enabled, that is only commands, explicit @-mentions, and replies to the Bot, so the context holds earlier addressed messages only. To include ordinary group chatter, turn Group Privacy off in @BotFather and then remove and re-add the Bot to the group; the Bot receives every group message from then on. A Bot that is a group admin receives every message regardless of the privacy setting, so its context includes ordinary chatter without any change in @BotFather. When replying to another person's message, explicitly @-mention the Bot: only then are that quoted sender and text (or caption) included with your instruction. When a reply that addresses the Bot quotes a message carrying a photo or file, that file is attached as well, whoever sent it. Replying to a human message without mentioning the Bot does not trigger it. Each ordinary group has its own continued Multica chat; forum topics are isolated into separate chats.
+Add the Bot to a group, then either @-mention it or reply directly to one of its messages. Accepted messages remain in the continued Multica conversation: each ordinary group has its own chat, and forum topics are isolated into separate chats.
+
+<Accordions type="multiple">
+<Accordion title="Group messages not addressed to the Bot" id="unaddressed-group-messages">
+
+A group message that does not address the Bot never starts a conversation or a turn on its own. It is, however, held in a short in-memory buffer: the last 10 messages per group (or per forum topic) that the Bot has received, cleared whenever the server restarts. When a member then addresses the Bot, by @-mention or by replying to one of its messages, those buffered messages are prepended to that turn as read-only context and saved with the turn as part of the conversation.
+
+A buffered photo or file appears there only as a marker such as `[Image]` followed by its caption; the file itself is not fetched. `/new` starts a fresh chat without that context.
+
+</Accordion>
+<Accordion title="Group Privacy decides what the Bot sees" id="group-privacy">
+
+What reaches the buffer depends on what Telegram delivers. With Group Privacy enabled, that is only commands, explicit @-mentions, and replies to the Bot, so the context holds earlier addressed messages only.
+
+To include ordinary group chatter, turn Group Privacy off in @BotFather, then remove the Bot from the group and add it again; from then on the Bot receives every group message. A Bot that is a group admin receives every message regardless of the privacy setting, so its context includes ordinary chatter without any change in @BotFather.
+
+</Accordion>
+<Accordion title="Replying to other members" id="replying-to-members">
+
+When replying to another person's message, explicitly @-mention the Bot: only then are the quoted sender and text (or caption) included with your instruction. Replying to a human message without mentioning the Bot does not trigger it.
+
+When a reply that addresses the Bot quotes a message carrying a photo or file, that file is attached as well, whoever sent it.
+
+</Accordion>
+</Accordions>
 
 ### Commands
 
@@ -61,9 +100,28 @@ Add the Bot to a group, then either @-mention it or reply directly to one of its
 
 ### Replies and supported content
 
-The Bot streams text by posting and editing a Telegram message, quotes the triggering message, preserves forum topics, and splits long replies under Telegram's message limit. Final replies are delivered asynchronously by an in-process queue. Normally, one chat's backoff does not occupy a worker; if cache pressure compacts exact backoff state, other chats under the same Bot installation may be conservatively delayed. The terminal queue has fixed capacity: overflow is rejected and logged, and queued replies are not recovered after a service restart.
+The Bot streams text by posting and editing a Telegram message, quotes the triggering message, preserves forum topics, and splits long replies under Telegram's message limit.
 
-Photos, files, video, voice, and audio messages reach the agent as attachments on the same conversation, with the caption as the message text. Replying to a message that carries one of these — in a private chat or, when addressing the Bot, in a group, whoever sent it — quotes that message ahead of your instruction and attaches its file, so you can point the agent at an earlier photo or video. Telegram lets a Bot download files up to 20 MB; when a file can't be fetched (too large, or the download fails) the Bot tells you so, and the agent sees only a placeholder. Files the agent produces are sent back into the chat as separate messages after its reply: photos up to 10 MB render inline, everything else up to 50 MB arrives as a file; if a file can't be confirmed delivered, the Bot says so and the file stays attached to the reply in Multica. Both directions need object storage on the server (see the self-hosting section below); without it the Bot answers media with the unsupported-message notice, and the agent is told it cannot send files. Stickers, locations, polls, and other non-file messages receive the same notice in private chats and when addressed in groups; unaddressed group messages of those kinds remain silent.
+Photos, files, video, voice, and audio messages reach the agent as attachments on the same conversation, with the caption as the message text, and files the agent produces are sent back into the chat after its reply. Both directions need object storage on the server (see the self-hosting section below).
+
+<Accordions type="multiple">
+<Accordion title="How final replies are delivered and queued" id="reply-delivery">
+
+Final replies are delivered asynchronously by an in-process queue. Normally, one chat's backoff does not occupy a worker; if cache pressure compacts exact backoff state, other chats under the same Bot installation may be conservatively delayed. The terminal queue has fixed capacity: overflow is rejected and logged, and queued replies are not recovered after a service restart.
+
+</Accordion>
+<Accordion title="Photos, files, and other media" id="media">
+
+Replying to a message that carries a photo, file, video, voice note, or audio (in a private chat or, when addressing the Bot, in a group, whoever sent it) quotes that message ahead of your instruction and attaches its file, so you can point the agent at an earlier photo or video.
+
+Telegram lets a Bot download files up to 20 MB. When a file can't be fetched (too large, or the download fails), the Bot tells you so, and the agent sees only a placeholder.
+
+Files the agent produces are sent back as separate messages: photos up to 10 MB render inline, and everything else up to 50 MB arrives as a file. If a file can't be confirmed delivered, the Bot says so and the file stays attached to the reply in Multica.
+
+Without object storage, the Bot answers media with the unsupported-message notice, and the agent is told it cannot send files. Stickers, locations, polls, and other non-file messages receive the same notice in private chats and when addressed in groups; unaddressed group messages of those kinds remain silent.
+
+</Accordion>
+</Accordions>
 
 ## Manage connections
 

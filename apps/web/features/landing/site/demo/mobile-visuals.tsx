@@ -16,8 +16,8 @@ import {
   Search,
   Settings,
   SlidersHorizontal,
-  type LucideIcon,
-} from "lucide-react";
+  type IconComponent,
+} from "@multica/ui/icons";
 import { cn } from "@multica/ui/lib/utils";
 import { StatusIcon } from "@multica/views/issues/components/status-icon";
 import { PriorityIcon } from "@multica/views/issues/components/priority-icon";
@@ -32,7 +32,7 @@ import { Avatar, BACKEND, LEO, MIA, QA, SAM, Working, ZoomCanvas, type Actor } f
 
 type TabKey = "inbox" | "my-issues" | "chat" | "more";
 
-const TABS: { key: TabKey; label: string; icon: LucideIcon }[] = [
+const TABS: { key: TabKey; label: string; icon: IconComponent }[] = [
   { key: "inbox", label: "Inbox", icon: Inbox },
   { key: "my-issues", label: "My Issues", icon: CircleUser },
   { key: "chat", label: "Chat", icon: MessageSquare },
@@ -246,7 +246,7 @@ export function ChatScreen() {
   );
 }
 
-const MORE: { icon: LucideIcon; label: string; detail?: string }[] = [
+const MORE: { icon: IconComponent; label: string; detail?: string }[] = [
   { icon: Pin, label: "Pinned", detail: "3" },
   { icon: ListTodo, label: "Issues" },
   { icon: FolderKanban, label: "Projects", detail: "4" },

@@ -561,8 +561,88 @@ func newIssueCommentAddTestCmd() *cobra.Command {
 	cmd.Flags().Bool("allow-external-file", false, "")
 	cmd.Flags().StringSlice("attachment", nil, "")
 	cmd.Flags().String("parent", "", "")
+	cmd.Flags().StringSlice("steer", nil, "")
+	cmd.Flags().Bool("steer-active", false, "")
 	cmd.Flags().String("output", "json", "")
 	return cmd
+}
+
+func TestRunIssueCommentAddSteering(t *testing.T) {
+	const (
+		issueID   = "11111111-1111-4111-8111-111111111111"
+		selfTask  = "22222222-2222-4222-8222-222222222222"
+		selfAgent = "33333333-3333-4333-8333-333333333333"
+		peerTask  = "44444444-4444-4444-8444-444444444444"
+		peerAgent = "55555555-5555-4555-8555-555555555555"
+	)
+	for _, tc := range []struct {
+		name, flag, value, status, report string
+		wantSteerAll                      bool
+	}{
+		{"active runs", "steer-active", "true", "steered", "Steered run " + peerTask + " (Worker): added to the running turn", true},
+		{"finished run keeps its normal trigger", "steer", peerTask[:8], "queued", "Not steered run " + peerTask + " (Worker): queued", false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var posted map[string]any
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				switch {
+				case r.Method == http.MethodGet && r.URL.Path == "/api/issues/"+issueID:
+					_ = json.NewEncoder(w).Encode(map[string]any{"id": issueID, "identifier": "TST-1"})
+				case r.Method == http.MethodGet && r.URL.Path == "/api/issues/"+issueID+"/task-runs":
+					runs := []any{
+						map[string]any{"id": selfTask, "agent_id": selfAgent, "status": "running", "supplement_capability": "task-supplement-v1", "can_supplement": true},
+						map[string]any{"id": "66666666-6666-4666-8666-666666666666", "agent_id": "77777777-7777-4777-8777-777777777777", "status": "running", "supplement_capability": "task-supplement-v1", "can_supplement": false},
+					}
+					if tc.flag == "steer-active" {
+						runs = append(runs, map[string]any{"id": peerTask, "agent_id": peerAgent, "status": "running", "supplement_capability": "task-supplement-v1", "can_supplement": true})
+					} else if r.URL.Query().Get("active") != "true" {
+						// A finished worker is only present in the full history.
+						runs = append(runs, map[string]any{"id": peerTask, "agent_id": peerAgent, "status": "completed"})
+					}
+					_ = json.NewEncoder(w).Encode(runs)
+				case r.Method == http.MethodGet && r.URL.Path == "/api/agents/"+peerAgent:
+					_ = json.NewEncoder(w).Encode(map[string]any{"id": peerAgent, "name": "Worker"})
+				case r.Method == http.MethodPost && r.URL.Path == "/api/issues/"+issueID+"/comments":
+					_ = json.NewDecoder(r.Body).Decode(&posted)
+					_ = json.NewEncoder(w).Encode(map[string]any{"id": "comment-1", "trigger_outcomes": []any{
+						map[string]any{"target_type": "agent", "target_id": peerAgent, "status": tc.status},
+					}})
+				default:
+					t.Errorf("unexpected request: %s %s", r.Method, r.URL.Path)
+					w.WriteHeader(http.StatusNotFound)
+				}
+			}))
+			defer srv.Close()
+			setCLITestServerEnv(t, srv.URL)
+			t.Setenv("MULTICA_TOKEN", "mat_test-token")
+			t.Setenv("MULTICA_TASK_ID", selfTask)
+			t.Setenv("MULTICA_AGENT_ID", selfAgent)
+
+			cmd := newIssueCommentAddTestCmd()
+			_ = cmd.Flags().Set("content", "Only fix web.")
+			_ = cmd.Flags().Set(tc.flag, tc.value)
+			_ = cmd.Flags().Set("output", "table")
+			stderr := captureStderr(t)
+			defer stderr.restore()
+			if err := runIssueCommentAdd(cmd, []string{issueID}); err != nil {
+				t.Fatalf("runIssueCommentAdd: %v", err)
+			}
+			report := stderr.read()
+
+			if got := fmt.Sprint(posted["steer_task_ids"]); got != "["+peerTask+"]" {
+				t.Fatalf("steer_task_ids = %s, want only the worker's run", got)
+			}
+			if want := "[@Worker](mention://agent/" + peerAgent + ") Only fix web."; posted["content"] != want {
+				t.Fatalf("content = %q, want %q so the worker keeps its normal trigger", posted["content"], want)
+			}
+			if !strings.Contains(report, tc.report) {
+				t.Fatalf("stderr = %q, want %q", report, tc.report)
+			}
+			if got := posted["steer"] == true; got != tc.wantSteerAll {
+				t.Fatalf("steer = %v, want %v", posted["steer"], tc.wantSteerAll)
+			}
+		})
+	}
 }
 
 func newIssueCommentUpdateTestCmd() *cobra.Command {

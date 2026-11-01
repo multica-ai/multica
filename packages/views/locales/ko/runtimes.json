@@ -1,10 +1,7 @@
 {
   "page": {
     "title": "런타임",
-    "tagline": "에이전트가 작업을 실행하는 머신과 클라우드 서비스입니다.",
-    "learn_more": "자세히 보기 →",
     "connect_remote": "머신 추가",
-    "search_placeholder": "검색…",
     "scope_mine": "내 것",
     "scope_all": "전체",
     "live": "실시간",
@@ -26,7 +23,7 @@
       "title": "로컬 런타임 시작 중...",
       "hint": "워크스페이스에 연결 중..."
     },
-    "add": "추가",
+    "add": "런타임 추가",
     "add_menu": {
       "machines": "머신",
       "this_computer": "이 컴퓨터",
@@ -68,7 +65,7 @@
       "no_matches": "일치하는 머신 또는 클라우드 서비스가 없습니다"
     },
     "filters": {
-      "all": "전체",
+      "all": "모든 런타임",
       "online": "온라인",
       "offline": "오프라인"
     }
@@ -94,7 +91,7 @@
     "this_machine": "이 Mac",
     "local_badge": "로컬 · 이 기기",
     "pending_custom_runtimes": "등록 대기 중인 사용자 지정 런타임",
-    "runtime_count_other": "런타임 {{count}}개",
+    "daemon_title": "데몬",
     "busy_count_other": "사용 중 {{count}}개",
     "no_matches_title": "기기 없음",
     "no_matches_hint": "현재 검색 또는 필터와 일치하는 기기가 없습니다.",
@@ -159,39 +156,50 @@
     "fact_owner": "소유자",
     "fact_device": "기기",
     "fact_runtime": "런타임",
-    "technical_details": "기술 세부 정보",
     "fact_daemon_cli": "데몬 CLI",
     "fact_daemon_id": "데몬 ID",
-    "serving_title": "제공 중",
-    "serving_count_other": "에이전트 {{count}}개",
+    "usage_title": "사용량",
     "no_agents": "아직 이 런타임에 연결된 에이전트가 없습니다.",
-    "diagnostics_title": "진단",
     "diagnostics_cli": "CLI",
     "diagnostics_visibility": "공개 범위",
     "visibility_label": {
       "private": "비공개",
-      "public": "공개"
+      "public": "공개",
+      "members": "지정 멤버"
+    },
+    "visibility_choice": {
+      "private": "비공개",
+      "public": "공개",
+      "members": "멤버"
     },
     "visibility_hint": {
       "private": "본인만 이 런타임에 에이전트를 만들 수 있습니다.",
-      "public": "워크스페이스 멤버라면 누구나 이 런타임에 에이전트를 만들 수 있습니다."
+      "public": "워크스페이스 멤버라면 누구나 이 런타임에 에이전트를 만들 수 있습니다.",
+      "members": "나와 선택한 멤버만 이 런타임에서 에이전트를 만들 수 있습니다."
     },
     "visibility_hint_readonly": {
       "private": "이 런타임에 에이전트를 만들 수 있는 사람은 런타임 owner뿐이며, 공개로 바꿀 수 있는 사람도 owner뿐입니다.",
-      "public": "워크스페이스 멤버라면 누구나 이 런타임에 에이전트를 만들 수 있습니다. 다시 비공개로 바꿀 수 있는 사람은 런타임 owner뿐입니다."
+      "public": "워크스페이스 멤버라면 누구나 이 런타임에 에이전트를 만들 수 있습니다. 다시 비공개로 바꿀 수 있는 사람은 런타임 owner뿐입니다.",
+      "members": "소유자와 선택한 멤버만 이 런타임에서 에이전트를 만들 수 있습니다."
     },
+    "visibility_members_title": "멤버와 공유",
+    "visibility_members_search": "멤버 검색",
+    "visibility_members_none": "워크스페이스에 다른 멤버가 없습니다.",
+    "visibility_members_no_match": "일치하는 멤버가 없습니다.",
+    "visibility_members_edit": "편집",
+    "visibility_members_count_other": "멤버 {{count}}명",
     "visibility_toast_updated": "공개 범위를 {{visibility}}(으)로 설정했습니다",
     "visibility_toast_failed": "공개 범위를 업데이트하지 못했습니다",
     "visibility_revoke_dialog": {
-      "title": "이 Runtime을 private으로 전환할까요?",
-      "description": "\"{{name}}\"을 private으로 전환하면 다른 멤버의 에이전트 {{count}}개 연결이 해제되고 이 컴퓨터의 활성 실행 {{taskCount}}개가 취소됩니다. 해당 에이전트에 할당된 활성 자동화도 일시 중지됩니다. 본인의 에이전트와 실행에는 영향을 주지 않습니다.",
+      "title": "런타임 접근을 제한할까요?",
+      "description": "\"{{name}}\" 접근을 제한하면 영향받는 에이전트 {{count}}개의 연결을 해제하고 실행 {{taskCount}}개를 취소하며 해당 에이전트의 활성 오토파일럿을 일시 중지합니다. 접근 권한이 유지되는 에이전트와 실행은 영향받지 않습니다.",
       "warning": "서버의 접근 권한은 즉시 취소됩니다. 연결된 데몬은 일반 취소 확인 과정에서 중단합니다. 오프라인 컴퓨터는 다시 연결될 때까지 중단 요청을 받을 수 없으므로 그동안 로컬 프로세스가 계속 실행될 수 있습니다.",
       "plan_changed": "이 대화 상자가 열린 동안 접근 계획이 변경되었습니다. 내용을 검토하고 다시 확인하세요.",
       "checkbox": "목록의 다른 멤버 에이전트 연결이 해제되고 활성 실행이 취소되며 활성 자동화가 일시 중지됨을 이해했습니다.",
       "cancel": "취소",
-      "confirm": "Runtime을 private으로 전환",
+      "confirm": "접근 제한",
       "submitting": "접근을 취소하는 중...",
-      "toast_success": "Runtime이 private으로 전환되었고 다른 멤버의 접근이 취소되었습니다",
+      "toast_success": "런타임 접근 권한을 변경했습니다",
       "toast_failed": "Runtime 접근을 취소하지 못했습니다"
     },
     "delete_dialog": {
@@ -509,7 +517,7 @@
     "no_data": "아직 사용량 데이터가 없습니다"
   },
   "qoder": {
-    "title": "QCA runtime",
+    "title": "Qoder Cloud Agents runtime",
     "description": "Connect Qoder Cloud Agents. Multica manages execution and stores credentials encrypted. Workspace administrators can change this configuration.",
     "loading": "Loading…",
     "unavailable": "서버 설정이 필요합니다: MULTICA_VCS_SECRET_KEY를 설정하세요.",
@@ -524,7 +532,7 @@
     "region_hint": "PAT를 만든 사이트를 선택하세요. PAT는 해당 리전에서만 사용할 수 있습니다.",
     "keep_secret": "Leave blank to keep the saved token",
     "repositories": "GitHub authorization",
-    "repositories_hint": "Bind a token to each repository. Select the repository and starting branch in your project. Tokens are never returned by the server.",
+    "repositories_hint": "저장소마다 토큰을 연결하세요. 저장소와 시작 브랜치는 프로젝트에서 선택합니다.",
     "remove": "Remove",
     "add_repository": "Add repository",
     "saved": "Saved. The server will start the runtime automatically.",
@@ -540,20 +548,20 @@
     "select_environment": "실행 환경 선택",
     "no_environments": "사용 가능한 환경이 없습니다. Qoder에서 생성한 후 새로고침하세요.",
     "refresh_catalog": "목록 새로고침",
-    "agent": "QCA 에이전트",
-    "select_agent": "QCA 에이전트 선택",
-    "agent_hint": "원격 런타임에 저장된 PAT로 QCA 에이전트를 연결합니다. 모델, 도구, 스킬은 Qoder에서 관리합니다.",
-    "no_agents": "사용 가능한 QCA 에이전트가 없습니다. Qoder에서 생성한 후 새로고침하세요.",
-    "agent_unavailable": "연결된 QCA 에이전트를 사용할 수 없습니다. 다른 에이전트를 선택하세요.",
+    "agent": "원격 에이전트",
+    "select_agent": "Qoder Cloud Agents에서 에이전트 선택",
+    "agent_hint": "저장된 Qoder PAT로 원격 에이전트를 연결합니다. 모델, 도구, 스킬은 Qoder Cloud Agents에서 관리합니다.",
+    "no_agents": "사용 가능한 에이전트가 없습니다. Qoder Cloud Agents에서 에이전트를 생성한 후 새로고침하세요.",
+    "agent_unavailable": "연결된 원격 에이전트를 사용할 수 없습니다. 다른 에이전트를 선택하세요.",
     "save_agent": "연결 저장",
-    "agent_saved": "QCA 에이전트 연결을 저장했습니다",
-    "agent_save_failed": "QCA 에이전트 연결을 저장할 수 없습니다",
+    "agent_saved": "Qoder Cloud Agents의 에이전트 연결을 저장했습니다",
+    "agent_save_failed": "Qoder Cloud Agents의 에이전트 연결을 저장할 수 없습니다",
     "cloud_title": "Qoder Cloud Agents",
     "managed": "관리형 서비스",
     "cloud_description": "공유 연결로 Qoder 클라우드에서 에이전트를 실행합니다. 로컬 호스트를 관리할 필요가 없습니다.",
     "configure_credentials": "인증 정보 설정",
     "add_agent": "에이전트 추가",
-    "add_agent_description": "기존 QCA 에이전트에 연결할 Multica 에이전트를 생성합니다. Qoder 클라우드에 설정된 환경과 인증 정보를 사용합니다.",
+    "add_agent_description": "기존 Qoder Cloud Agents 에이전트에 연결할 Multica 에이전트를 생성합니다. Qoder 클라우드에 설정된 환경과 인증 정보를 사용합니다.",
     "agent_name": "에이전트 이름",
     "cancel": "취소",
     "shared_credentials_hint": "인증 정보는 현재 워크스페이스 내에서 공유됩니다. PAT는 암호화하여 저장되며 다시 표시되지 않습니다.",
@@ -595,14 +603,13 @@
       "description_agents_other": "다음 {{count}}개 에이전트는 지침과 기록을 유지하지만 Qoder를 다시 시작하거나 다른 런타임으로 옮기기 전까지 새 작업을 받을 수 없습니다."
     },
     "connect_title": "Qoder Cloud Agents 연결",
-    "connect_description": "Qoder PAT로 한 번 연결하세요. Multica는 Qoder 샌드박스에서 작업을 실행하고 자격 증명을 암호화해 저장합니다.",
+    "connect_description": "Multica는 Qoder 샌드박스에서 작업을 실행합니다.",
     "page": {
       "configuration": "구성",
       "agents_title": "에이전트",
       "pause_title": "Qoder 일시 중지",
       "pause_hint": "Qoder로 새 작업을 보내지 않습니다. 자격 증명과 에이전트는 유지되며 언제든 다시 시작할 수 있습니다.",
       "resume_title": "Qoder 다시 시작",
-      "resume_hint": "저장된 구성으로 작업을 다시 받습니다.",
       "resume": "다시 시작",
       "resumed": "Qoder를 시작하는 중입니다.",
       "disconnect_title": "Qoder 연결 해제",

@@ -28,7 +28,11 @@ vi.mock("./terminate-task-confirm-dialog", () => ({
 }));
 
 vi.mock("@multica/core/workspace/hooks", () => ({
-  useActorName: () => ({ getActorName: () => "Lambda" }),
+  useActorName: () => ({
+    getActorName: () => "Lambda",
+    getActorInitials: () => "L",
+    getActorAvatarUrl: () => null,
+  }),
 }));
 
 import {
@@ -91,6 +95,18 @@ describe("ActiveTaskRow", () => {
     expect(screen.getByText("Includes 3 comments")).toBeInTheDocument();
     expect(screen.getByText("View transcript")).toBeInTheDocument();
     expect(mockState.taskMessagesOptions).not.toHaveBeenCalled();
+  });
+
+  it("makes the trigger a jump button only when given a jump handler", () => {
+    const onJump = vi.fn();
+    const { rerender } = renderWithI18n(<ActiveTaskRow task={makeTask({})} issueId="issue-1" />);
+    expect(screen.queryByRole("button", { name: /Go to run/ })).not.toBeInTheDocument();
+
+    rerender(<ActiveTaskRow task={makeTask({})} issueId="issue-1" onJump={onJump} />);
+    const jump = screen.getByRole("button", { name: /Go to run/ });
+    expect(jump).toHaveTextContent("Started from comment");
+    fireEvent.click(jump);
+    expect(onJump).toHaveBeenCalledOnce();
   });
 });
 
@@ -297,14 +313,7 @@ describe("per-run token usage", () => {
   });
 });
 
-// The sidebar this section lives in is a resizable panel — 260px minimum,
-// 320px default, 420px maximum — so the header's three items (section label,
-// active-run count, issue total) have to hold a width the component does not
-// choose. They stopped holding it once the total moved into the header: at the
-// 260px minimum the row has 227px and the full header wants ~238px, and the
-// label was the only item that could give. It gave by breaking "Execution log"
-// across two lines (MUL-5804). These tests pin the contract that replaced that:
-// one line always, and a width tier that drops the run count whole.
+// Header figures stay readable at every supported sidebar width.
 describe("execution log header geometry", () => {
   function renderSection(tasks: AgentTask[]) {
     // Seed the cache instead of mocking the API: the query is fresh for 30s,
@@ -327,8 +336,31 @@ describe("execution log header geometry", () => {
       makeTask({ id: "old", status: "queued", trigger_summary: "Order: first", created_at: "2026-09-08T03:01:00Z" }),
       makeTask({ id: "running", status: "running", trigger_summary: "Order: running", created_at: "2026-09-08T03:00:00Z" }),
     ]);
+    fireEvent.click(screen.getByRole("button", { name: /2 queued/ }));
     expect(screen.getAllByText(/^Order:/).map((el) => el.textContent))
       .toEqual(["Order: running", "Order: first", "Order: second"]);
+  });
+
+  it("folds several queued runs into one expandable row, but not a lone one", () => {
+    const { unmount } = renderSection([
+      makeTask({ id: "running", status: "running", trigger_summary: "Live run" }),
+      makeTask({ id: "q1", status: "queued", trigger_summary: "Queued one" }),
+      makeTask({ id: "q2", status: "queued", trigger_summary: "Queued two" }),
+    ]);
+    const group = screen.getByRole("button", { name: /2 queued/ });
+    expect(group).toHaveAttribute("aria-expanded", "false");
+    expect(group).toHaveTextContent("Lambda");
+    expect(screen.getByText("Live run")).toBeInTheDocument();
+    expect(screen.queryByText("Queued one")).not.toBeInTheDocument();
+    fireEvent.click(group);
+    expect(group).toHaveAttribute("aria-expanded", "true");
+    expect(screen.getByText("Queued one")).toBeInTheDocument();
+    expect(screen.getByText("Queued two")).toBeInTheDocument();
+    unmount();
+
+    renderSection([makeTask({ id: "q1", status: "queued", trigger_summary: "Queued one" })]);
+    expect(screen.queryByRole("button", { name: /queued/ })).not.toBeInTheDocument();
+    expect(screen.getByText("Queued one")).toBeInTheDocument();
   });
 
   function headerOf(): HTMLElement {
@@ -344,59 +376,30 @@ describe("execution log header geometry", () => {
     usage: [usageSlice()],
   });
 
-  it("tiers on the sidebar's width, not the viewport's", () => {
-    const { container } = renderSection([completed]);
-
-    // Two sidebars of different widths can be open in one window (desktop
-    // split panes, the mobile sheet), so a `lg:` variant would tier this
-    // header on a width that has nothing to do with the panel it sits in.
-    const root = container.firstElementChild as HTMLElement;
-    expect(root.className).toContain("@container/execution-log");
+  it("keeps the header independent of viewport breakpoints", () => {
+    renderSection([completed]);
     for (const el of headerOf().querySelectorAll("*")) {
-      // classList, not className: the chevron is an SVG, whose className is an
-      // SVGAnimatedString.
       for (const cls of el.classList) {
         expect(cls).not.toMatch(/^(sm|md|lg|xl|2xl):/);
       }
     }
+    expect(screen.getByRole("button", { name: "Execution log 1" })).toHaveAttribute("aria-expanded", "true");
   });
 
-  it("drops the run count whole rather than clipping a number", () => {
-    const { unmount } = renderSection([completed]);
-    let header = within(headerOf());
-
-    // Below the tier the count and its separator leave together and the cost
-    // stays — never a clipped "$2.0…", which would read as a different figure
-    // than the issue actually spent.
-    const cost = header.getByText("$2.00");
-    expect(header.getByText("1 run").className).toContain(
-      "@max-[14rem]/execution-log:hidden",
-    );
-    expect(header.getByText("·").className).toContain(
-      "@max-[14rem]/execution-log:hidden",
-    );
-    expect(cost.className).not.toContain("hidden");
-    // And the pill itself never truncates — that is what would clip a digit.
-    const pill = cost.closest("button");
-    expect(pill?.className).toContain("shrink-0");
-    expect(pill?.className).not.toContain("truncate");
-
-    // An active run puts the count chip in the same row, which is the shape
-    // that actually runs out of width — so it tiers earlier. At rest the total
-    // fits the 260px minimum whole and should not be tiered away with it.
-    unmount();
-    renderSection([completed, makeTask({ status: "running" })]);
-    header = within(headerOf());
-    expect(header.getByText("2 runs").className).toContain(
-      "@max-[16rem]/execution-log:hidden",
-    );
+  it("keeps complete cost figures in the summary rather than crowding the header", () => {
+    renderSection([completed]);
+    expect(within(headerOf()).queryByText("$2.00")).not.toBeInTheDocument();
+    const spent = screen.getByText("Spent", { selector: "dt" }).parentElement!;
+    expect(spent).toHaveTextContent("$2.00");
+    fireEvent.click(screen.getByRole("button", { name: "Execution log 1" }));
+    expect(screen.getByRole("button", { name: "Execution log 1" })).toHaveAttribute("aria-expanded", "false");
+    expect(screen.queryByText("Spent", { selector: "dt" })).not.toBeInTheDocument();
   });
 
-  it("keeps the run count when there is no cost to show instead", () => {
+  it("keeps the count without inventing zero cost when no usage was reported", () => {
     renderSection([makeTask({ status: "completed", completed_at: "2026-06-08T08:04:00Z" })]);
-    const count = within(headerOf()).getByText("1 run");
-    expect(count.className).not.toContain("hidden");
-    expect(within(headerOf()).queryByText("$0.00")).not.toBeInTheDocument();
+    expect(within(headerOf()).getByText("1")).toBeVisible();
+    expect(screen.queryByText("$0.00")).not.toBeInTheDocument();
   });
 });
 
@@ -432,28 +435,54 @@ describe("execution log past runs", () => {
       "Past run 4",
       "Past run 3",
     ]);
-    expect(screen.getByText("2 more")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Open timeline · Show 2 more" })).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole("button", { name: /Open timeline/ }));
     expect(screen.getByRole("heading", { name: "Runs" })).toBeInTheDocument();
     expect(screen.getByText("MUL-1 · Wakeups")).toBeInTheDocument();
   });
 
-  it("shows each past run's cost, and who ran it with what on a second line", () => {
+  it("lets active runs take the three rows first and fills the rest with past runs", () => {
+    const active = [
+      makeTask({ id: "running", status: "running", trigger_summary: "Live run" }),
+      makeTask({ id: "q1", status: "queued", trigger_summary: "Queued one" }),
+      makeTask({ id: "q2", status: "queued", trigger_summary: "Queued two" }),
+    ];
+    const { unmount } = renderSection([...active, past(1), past(2), past(3), past(4)]);
+    // One running row + one folded queued row leave a single past slot.
+    expect(screen.getAllByText(/^Past run \d$/).map((el) => el.textContent)).toEqual(["Past run 4"]);
+    expect(screen.getByRole("button", { name: "Open timeline · Show 3 more" })).toBeInTheDocument();
+    unmount();
+
+    renderSection([
+      ...active,
+      makeTask({ id: "running-2", status: "running", trigger_summary: "Second live run" }),
+      makeTask({ id: "running-3", status: "running", trigger_summary: "Third live run" }),
+      past(1),
+    ]);
+    expect(screen.queryByText("Past run 1")).not.toBeInTheDocument();
+    expect(screen.getByText("Third live run")).toBeInTheDocument();
+  });
+
+  it("keeps a finished run to one line, with agent, duration and usage in the tooltip", () => {
     renderSection([past(1)]);
 
     const row = screen.getByText("Past run 1").closest("[title]") as HTMLElement;
     expect(within(row).getByText("$2.00")).toBeInTheDocument();
-    expect(row).toHaveTextContent("Lambda · 10m · 892K tokens · Opus 5");
-    // The exact model id stays one hover away.
-    expect(row.getAttribute("title")).toContain("claude-opus-5");
+    expect(row).not.toHaveTextContent("Lambda");
+    expect(row).not.toHaveTextContent("10m");
+    expect(row).not.toHaveTextContent("892K tokens");
+    const title = row.getAttribute("title");
+    expect(title).toContain("Lambda · 10m");
+    expect(title).toContain("892K tokens");
+    expect(title).toContain("claude-opus-5");
   });
 
   it("puts a failed run's reason where its duration would be", () => {
     renderSection([past(1, { status: "failed", failure_reason: "agent_error.provider_quota_limit" })]);
 
     const row = screen.getByText("Past run 1").closest("[title]") as HTMLElement;
-    expect(row).toHaveTextContent("Lambda · Provider quota exhausted · 892K tokens");
+    expect(row).toHaveTextContent("Lambda · Provider quota exhausted");
     expect(row).not.toHaveTextContent("10m");
   });
 
@@ -466,28 +495,85 @@ describe("execution log past runs", () => {
     expect(term("Agent time")).toHaveTextContent("30m");
   });
 
-  it("draws one bar per run and opens the Runs dialog from it", () => {
+  it("opens the full history from the compact cost chart", () => {
     renderSection([past(1), past(2), past(3, { status: "failed", usage: [] })]);
-
-    const bars = screen.getByRole("button", { name: "Cost per run — open the run timeline" });
-    expect(Array.from(bars.querySelectorAll("[data-run]"), (el) => el.getAttribute("data-run"))).toEqual([
-      "past-1",
-      "past-2",
-      "past-3",
-    ]);
-    // The run without usage is a stub, not a bar sized like a cheap run.
-    expect((bars.querySelector('[data-run="past-3"]') as HTMLElement).className).toContain("bg-destructive");
-
-    fireEvent.click(bars);
+    fireEvent.click(screen.getByRole("button", { name: /Cost per run/ }));
     expect(screen.getByRole("heading", { name: "Runs" })).toBeInTheDocument();
   });
 
-  it("draws the bars from the first priced run", () => {
-    renderSection([past(1)]);
-    expect(screen.getByRole("button", { name: /Cost per run/ })).toBeInTheDocument();
+  it("bounds the chart and recent list while keeping all-run totals and a visible history entry", () => {
+    const tasks = Array.from({ length: 35 }, (_, i) => past(i + 1, {
+      started_at: new Date(Date.UTC(2026, 5, i + 1, 8)).toISOString(),
+      completed_at: new Date(Date.UTC(2026, 5, i + 1, 8, 10)).toISOString(),
+      usage: [usageSlice({ cost_usd_ticks: 20_000_000_000 })],
+    }));
+    renderSection(tasks);
+    const chart = screen.getByRole("button", { name: /Cost per run/ });
+    expect(chart.querySelectorAll("[data-run]")).toHaveLength(30);
+    expect(chart.querySelector("[data-run]")).toHaveAttribute("data-run", "past-6");
+    expect(chart.querySelectorAll("[data-run]")[29]).toHaveAttribute("data-run", "past-35");
+    expect(screen.getByText("Spent", { selector: "dt" }).parentElement).toHaveTextContent("$70.00");
+    expect(screen.getAllByText(/^Past run \d+$/)).toHaveLength(3);
+    expect(screen.queryByText("Latest")).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Open timeline · Show 32 more" }));
+    expect(screen.getByRole("heading", { name: "Runs" })).toBeInTheDocument();
   });
 
-  it("skips the bars when no run recorded usage — there is no cost to compare", () => {
+  it("keeps all active tasks reachable in a separate scrolling region", () => {
+    renderSection(Array.from({ length: 8 }, (_, i) => makeTask({ id: `active-${i}`, status: "queued", trigger_summary: `Queued ${i}`, usage: [] })));
+    const active = screen.getByRole("region", { name: "8 active" });
+    fireEvent.click(within(active).getByRole("button", { name: /8 queued/ }));
+    expect(within(active).getAllByText(/^Queued \d$/)).toHaveLength(8);
+    expect(active).toHaveAttribute("tabindex", "0");
+  });
+
+  it("scales sidebar bars by cost to match the default run history", () => {
+    renderSection([
+      past(1, { usage: [usageSlice({ input_tokens: 100, output_tokens: 0, cache_read_tokens: 0, cache_write_tokens: 0, cost_usd_ticks: 100_000_000_000 })] }),
+      past(2, { usage: [usageSlice({ input_tokens: 1000, output_tokens: 0, cache_read_tokens: 0, cache_write_tokens: 0, cost_usd_ticks: 10_000_000_000 })] }),
+    ]);
+    const bars = screen.getByRole("button", { name: /Cost per run/ }).querySelectorAll("[data-run]");
+    expect((bars[0] as HTMLElement).style.height).toBe("24px");
+    expect(parseFloat((bars[1] as HTMLElement).style.height)).toBeCloseTo(2.4);
+  });
+
+  it.each([1, 8, 15, 30])("preserves upstream slots for %i runs", (count) => {
+    renderSection(Array.from({ length: count }, (_, i) => past(i + 1, {
+      started_at: new Date(Date.UTC(2026, 5, i + 1, 8)).toISOString(),
+      completed_at: new Date(Date.UTC(2026, 5, i + 1, 8, 10)).toISOString(),
+    })));
+    const chart = screen.getByRole("button", { name: /Cost per run/ });
+    const plot = chart.querySelector("[aria-hidden]") as HTMLElement;
+    expect(plot.style.height).toBe("24px");
+    expect(plot.children).toHaveLength(Math.max(20, count));
+    expect(chart.querySelectorAll("[data-run]")).toHaveLength(count);
+    expect(plot.children[plot.children.length - count]).toHaveAttribute("data-run");
+    expect(chart).not.toHaveTextContent("Latest");
+    expect(chart).not.toHaveTextContent("Cost per run");
+    expect(chart).not.toHaveTextContent("#1");
+  });
+
+  it("preserves run status colors and marks missing usage", () => {
+    renderSection([
+      past(1, { status: "failed" }),
+      past(2, { status: "cancelled" }),
+      past(3, { usage: [] }),
+      makeTask({ id: "active", status: "running", usage: [] }),
+    ]);
+    const chart = screen.getByRole("button", { name: /Cost per run/ });
+    expect(chart.querySelector('[data-run="past-1"]')).toHaveClass("bg-destructive");
+    expect(chart.querySelector('[data-run="past-2"]')).toHaveClass("bg-faint-foreground");
+    expect(chart.querySelector('[data-run="past-3"]')).toHaveClass("border-dashed");
+    expect(chart.querySelector('[data-run="active"]')).toHaveClass("bg-info");
+  });
+
+  it("makes full details reachable from the first priced run", () => {
+    renderSection([past(1)]);
+    fireEvent.click(screen.getByRole("button", { name: /Open timeline/ }));
+    expect(screen.getByRole("heading", { name: "Runs" })).toBeInTheDocument();
+  });
+
+  it("skips the bars when no run recorded usage — there are no costs to compare", () => {
     renderSection([past(1, { usage: [] }), past(2, { usage: [] })]);
     expect(screen.queryByRole("button", { name: /Cost per run/ })).not.toBeInTheDocument();
   });

@@ -1,0 +1,87 @@
+{
+  "title": "設定",
+  "account": {
+    "title": "帳號",
+    "sign_out": "退出登入",
+    "sign_out_message": "你需要重新登入才能在此裝置上使用 Multica。",
+    "workspace": "工作區",
+    "workspaces": "工作區",
+    "notifications_subtitle": "收件箱和系統提醒",
+    "load_failed": "工作區載入失敗"
+  },
+  "profile": {
+    "title": "個人資料",
+    "name": "姓名",
+    "email": "信箱",
+    "save": "儲存個人資料",
+    "saving": "儲存中..."
+  },
+  "appearance": {
+    "title": "外觀",
+    "theme": "主題",
+    "light": "淺色",
+    "dark": "深色",
+    "system": "跟隨系統"
+  },
+  "language": {
+    "title": "語言",
+    "system": "跟隨系統",
+    "english": "English",
+    "chinese_simplified": "簡體中文",
+    "chinese_traditional": "繁體中文"
+  },
+  "notifications": {
+    "title": "通知",
+    "issues": "任務",
+    "inbox": "收件箱",
+    "chat": "聊天",
+    "mentions": "提及",
+    "assignments": "分配給我的",
+    "status_changes": "狀態變更",
+    "saved": "通知設定已儲存"
+  },
+  "workspace": {
+    "switch": "切換工作區",
+    "select": "選擇工作區",
+    "empty": "還沒有工作區"
+  },
+  "avatar": {
+    "take": "拍照",
+    "library": "從相簿選擇",
+    "remove": "移除頭像",
+    "change_hint": "點按更換頭像",
+    "permission_title": "需要權限",
+    "permission_message": "拍照需要相機權限。",
+    "too_large_title": "圖片過大",
+    "too_large_message": "請選擇小於 5 MB 的圖片。",
+    "upload_failed": "上傳失敗",
+    "upload_failed_default": "無法上傳頭像。",
+    "remove_failed": "移除失敗",
+    "remove_failed_default": "無法移除頭像。"
+  },
+  "errors": {
+    "load_failed": "通知偏好設定載入失敗。",
+    "save_failed": "個人資料儲存失敗。",
+    "save_failed_default": "無法儲存你的個人資料。"
+  },
+  "email_fixed": "信箱在註冊時設定，無法在這裡修改。",
+  "groups": {
+    "assignments": "分配給我的",
+    "assignments_description": "任務分配給我或取消分配給我時。",
+    "status_changes": "狀態變更",
+    "comments": "評論",
+    "comments_description": "你訂閱的任務有新評論時。",
+    "mentions": "提及",
+    "mentions_description": "有人用 @ 提到你時，包括 @all 和 @squad。",
+    "updates": "任務更新",
+    "updates_description": "標題、描述、標籤、優先順序或截止日期變更時。",
+    "agent_activity": "智慧體動態",
+    "agent_activity_description": "智慧體執行失敗時。",
+    "inbox_notifications": "收件箱通知",
+    "system": "系統",
+    "system_notifications": "系統通知",
+    "system_description": "帳號變更、安全提醒和產品更新。"
+  },
+  "groups.assignments_description": "任務分配給我或取消分配給我時。",
+  "groups.mentions_description": "有人用 @ 提到你時，包括 @all 和 @squad。"
+}

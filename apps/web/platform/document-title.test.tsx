@@ -52,6 +52,28 @@ describe("formatDocumentTitle", () => {
     );
   });
 
+  it("normalizes HTML ASCII whitespace before clipping the page name", () => {
+    expect(formatDocumentTitle("  Chat\t\n\f\r  question  ")).toBe(
+      "Chat question | Multica",
+    );
+    expect(formatDocumentTitle(`Chat${"\n".repeat(MAX_PAGE_TITLE_LENGTH)}question`)).toBe(
+      "Chat question | Multica",
+    );
+  });
+
+  it("round-trips through document.title without changing the intended value", () => {
+    const formatted = formatDocumentTitle("Why did this fail?\n\nhttps://example.test/issue");
+    document.title = formatted;
+
+    expect(document.title).toBe(formatted);
+  });
+
+  it("preserves non-ASCII spaces within the page name", () => {
+    expect(formatDocumentTitle("Chat\u00a0\u2003question")).toBe(
+      "Chat\u00a0\u2003question | Multica",
+    );
+  });
+
   it("falls back to the site title rather than a bare suffix", () => {
     expect(formatDocumentTitle("")).toBe(SITE_TITLE);
     expect(formatDocumentTitle("   ")).toBe(SITE_TITLE);

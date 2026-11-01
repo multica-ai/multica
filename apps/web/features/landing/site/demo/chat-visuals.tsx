@@ -1,7 +1,7 @@
 "use client";
 
 import type { ComponentType, ReactNode } from "react";
-import { Hash, MessageSquare, Plus } from "lucide-react";
+import { Hash, MessageSquare, Plus } from "@multica/ui/icons";
 import { cn } from "@multica/ui/lib/utils";
 import { StatusIcon } from "@multica/views/issues/components/status-icon";
 import { DingTalkMark } from "@multica/views/settings/components/dingtalk-mark";

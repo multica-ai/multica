@@ -1,4 +1,4 @@
-import { Check } from "lucide-react";
+import { Check } from "@multica/ui/icons";
 import { cn } from "@multica/ui/lib/utils";
 import { ActionLink, Container, Section } from "./primitives";
 import { CtaBand, PageHero, SitePage } from "./site-page";

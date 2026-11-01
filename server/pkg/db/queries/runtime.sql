@@ -11,10 +11,10 @@ ORDER BY id ASC;
 -- name: ListVisibleAgentRuntimes :many
 -- A private runtime is another member's machine and must not leak into their
 -- runtime list. The owner can always see their own runtime; everyone else
--- sees only runtimes the owner has explicitly shared with the workspace.
+-- sees only runtimes shared with them or with the entire workspace.
 SELECT * FROM agent_runtime
 WHERE workspace_id = $1
-  AND (owner_id = $2 OR visibility = 'public')
+  AND (owner_id = $2 OR visibility = 'public' OR (visibility = 'private' AND $2 = ANY(shared_with)))
 ORDER BY created_at ASC;
 
 -- name: GetAgentRuntime :one
@@ -149,13 +149,13 @@ WHERE sqlc.narg('required_owner_id')::uuid IS NULL
 RETURNING *, (xmax = 0) AS inserted;
 
 -- name: UpdateAgentRuntimeVisibility :one
--- Toggles a runtime between 'private' (only owner can bind agents) and
--- 'public' (any workspace member can). Default for new rows is 'private'
+-- Replaces the runtime's access policy: private admits owner plus shared_with;
+-- public admits any workspace member. Default for new rows is private
 -- (see migration 083). Gated at the handler layer to the runtime owner only:
 -- visibility is consent to use that person's machine, not a workspace-governance
 -- setting.
 UPDATE agent_runtime
-SET visibility = @visibility, updated_at = now()
+SET visibility = @visibility, shared_with = @shared_with::uuid[], updated_at = now()
 WHERE id = @id
 RETURNING *;
 
@@ -375,15 +375,14 @@ WHERE (runtime_id = ANY(@runtime_ids::uuid[]) OR agent_id = ANY(@agent_ids::uuid
 RETURNING *;
 
 -- name: ListNonOwnerActiveTasksByRuntime :many
--- Lists live tasks targeting a public runtime but belonging to somebody other
--- than its owner, including hidden Builder execution carriers. It forms part of the public-to-private
--- confirmation plan so the owner explicitly approves cancelling work that
--- could otherwise keep running after machine access is revoked.
+-- Lists live tasks whose agent owner will lose runtime access, including
+-- hidden Builder execution carriers. shared_with is the desired recipient list.
 SELECT task.*
 FROM agent_task_queue AS task
 JOIN agent ON agent.id = task.agent_id
 WHERE task.runtime_id = @runtime_id
   AND agent.owner_id IS DISTINCT FROM @runtime_owner_id
+  AND NOT COALESCE(agent.owner_id = ANY(@shared_with::uuid[]), false)
   AND task.status IN ('queued', 'dispatched', 'running', 'waiting_local_directory', 'deferred')
 ORDER BY task.id;
 
@@ -395,6 +394,7 @@ FROM agent_task_queue AS task
 JOIN agent ON agent.id = task.agent_id
 WHERE task.runtime_id = @runtime_id
   AND agent.owner_id IS DISTINCT FROM @runtime_owner_id
+  AND NOT COALESCE(agent.owner_id = ANY(@shared_with::uuid[]), false)
   AND task.status IN ('queued', 'dispatched', 'running', 'waiting_local_directory', 'deferred')
 ORDER BY task.id
 FOR UPDATE OF task;
@@ -415,6 +415,7 @@ WHERE EXISTS (
     WHERE task.chat_session_id = cs.id
       AND task.runtime_id = @runtime_id
       AND agent.owner_id IS DISTINCT FROM @runtime_owner_id
+      AND NOT COALESCE(agent.owner_id = ANY(@shared_with::uuid[]), false)
       AND task.status IN ('queued', 'dispatched', 'running', 'waiting_local_directory', 'deferred')
 )
 ORDER BY cs.id
@@ -437,6 +438,7 @@ FROM agent
 WHERE task.agent_id = agent.id
   AND task.runtime_id = @runtime_id
   AND agent.owner_id IS DISTINCT FROM @runtime_owner_id
+  AND NOT COALESCE(agent.owner_id = ANY(@shared_with::uuid[]), false)
   AND task.status IN ('queued', 'dispatched', 'running', 'waiting_local_directory', 'deferred')
 RETURNING task.*;
 
@@ -483,13 +485,13 @@ WHERE runtime_id = $1 AND kind = 'user'
 RETURNING *;
 
 -- name: UnbindNonOwnerAgentsFromRuntime :many
--- The companion to CancelNonOwnerTasksByRuntime for a public-to-private
--- transition. Only teammates lose the binding; the runtime owner's agents
--- remain bound and usable after the machine becomes private again.
+-- Companion to CancelNonOwnerTasksByRuntime: preserve agents belonging to
+-- the runtime owner or to recipients who retain access.
 UPDATE agent
 SET runtime_id = NULL, updated_at = now()
 WHERE runtime_id = @runtime_id
   AND owner_id IS DISTINCT FROM @runtime_owner_id
+  AND NOT COALESCE(owner_id = ANY(@shared_with::uuid[]), false)
 RETURNING *;
 
 -- name: DeleteAgentRuntime :exec
@@ -663,3 +665,24 @@ SELECT count(*) FROM agent_task_queue WHERE runtime_id = $1;
 -- refused before any write when any of them belongs to someone else.
 SELECT id, owner_id FROM agent_runtime
 WHERE workspace_id = @workspace_id AND daemon_id = @daemon_id;
+
+-- name: LockRuntimeShareMembers :many
+-- Keep grant validation and member removal serialized until commit. NOWAIT
+-- avoids the member-removal path's reverse member/runtime lock order.
+SELECT user_id FROM member
+WHERE workspace_id = @workspace_id AND user_id = ANY(@user_ids::uuid[])
+ORDER BY user_id
+FOR KEY SHARE NOWAIT;
+
+-- name: LockRuntimeShareMemberRemoval :one
+-- Prevent new grants until membership deletion commits. Grant writers use
+-- NOWAIT on this row, so they never wait while holding a runtime we need.
+SELECT id FROM member
+WHERE workspace_id = @workspace_id AND user_id = @user_id
+FOR UPDATE;
+
+-- name: ListSharedAgentRuntimesForUpdate :many
+SELECT * FROM agent_runtime
+WHERE workspace_id = @workspace_id AND @user_id::uuid = ANY(shared_with)
+ORDER BY id
+FOR NO KEY UPDATE;

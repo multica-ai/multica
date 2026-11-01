@@ -547,6 +547,13 @@ func TestPlatformSkillCoversPlatformContracts(t *testing.T) {
 			file: "references/mentions.md",
 			want: []string{
 				"(member|agent|squad|issue|all)/([0-9a-fA-F-]+|all)",
+				"canonical inline links with visible label text",
+				"Text removed by HTML sanitization",
+				"reference links, images, autolinks, titles",
+				"Code examples are inert as mentions",
+				"A fenced `diff` of agent instructions cannot invoke",
+				"paste it into",
+				"Prose mentions in blockquotes still count",
 				"multica workspace member list --output json",
 				"enqueues a run for that agent",
 				"enqueues NOTHING",
@@ -725,8 +732,10 @@ func TestPlatformSkillCoversPlatformContracts(t *testing.T) {
 // reference its value: it proves the skill teaches exactly what
 // util.ParseMentions enforces. The skill's "Incorrect" examples must parse to
 // nothing (the @gpt-boy class of bug: a name where a UUID belongs fails
-// silently), and its "Correct" example must parse. If the mention regex drifts,
-// this breaks and the skill's claims must be re-checked.
+// silently), and its "Correct" example must parse. If ParseMentions drifts,
+// this breaks and the skill's claims must be re-checked. Goldmark link nodes
+// exclude code; parseMentionLink validates canonical source and visible labels
+// in internal/util/mention.go. These assertions replace the retired source map.
 func TestPlatformSkillTeachesTheParserContract(t *testing.T) {
 	const uuid = "7f3a1b2c-0000-4000-8000-000000000abc"
 
@@ -759,6 +768,35 @@ func TestPlatformSkillTeachesTheParserContract(t *testing.T) {
 			name:    "all uses the literal all",
 			content: "[@all](mention://all/all) heads up",
 			want:    []util.Mention{{Type: "all", ID: "all"}},
+		},
+		{
+			name:    "empty label cannot trigger an agent",
+			content: "[](mention://agent/" + uuid + ")",
+		},
+		{
+			name:    "script content cannot make an agent label visible",
+			content: "[<script>Agent</script>@](mention://agent/" + uuid + ")",
+		},
+		{
+			name:    "template content cannot make an agent label visible",
+			content: "[<template>Agent</template>@](mention://agent/" + uuid + ")",
+		},
+		{
+			name:    "reference link cannot trigger an agent",
+			content: "[@Agent][target]\n\n[target]: mention://agent/" + uuid,
+		},
+		{
+			name:    "inline code example is inert",
+			content: "`[@Agent](mention://agent/" + uuid + ")`",
+		},
+		{
+			name:    "details diff example is inert",
+			content: "<details>\n<summary>Instructions</summary>\n\n```diff\n+ [@Agent](mention://agent/" + uuid + ")\n```\n\n</details>",
+		},
+		{
+			name:    "copied example in prose parses",
+			content: "[@Agent](mention://agent/" + uuid + ") please review",
+			want:    []util.Mention{{Type: "agent", ID: uuid}},
 		},
 		{
 			// Skill: "Using the wrong type for a real UUID still parses — it

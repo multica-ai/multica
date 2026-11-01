@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState, type ComponentType, type CSSProperties } from "react";
 import Link from "next/link";
-import { ArrowRight, ArrowUpRight, ChevronRight, ChevronsLeftRight } from "lucide-react";
+import { ArrowRight, ArrowUpRight, ChevronRight, ArrowLeftRight } from "@multica/ui/icons";
 import { cn } from "@multica/ui/lib/utils";
 import { BorderBeam } from "@multica/ui/components/common/border-beam";
 import { useAuthStore } from "@multica/core/auth";
@@ -582,7 +582,7 @@ function CompareStage({ story, onDrag, className }: { story: (typeof STORIES)[nu
         style={{ left: `${split}%` }}
       >
         <span className="absolute top-1/2 left-1/2 flex size-9 -translate-x-1/2 -translate-y-1/2 items-center justify-center rounded-full bg-site-surface text-site-ink shadow-site-float ring-1 ring-site-line">
-          <ChevronsLeftRight className="size-4" />
+          <ArrowLeftRight className="size-4" />
         </span>
       </div>
     </div>

@@ -1,7 +1,7 @@
 "use client";
 
 import type { ReactNode } from "react";
-import { Laptop, Monitor, Server } from "lucide-react";
+import { Laptop, Monitor, Server } from "@multica/ui/icons";
 import { cn } from "@multica/ui/lib/utils";
 import { GroupBand } from "./feature-visuals";
 import { FLOATING, PROVIDER_MARKS, ZoomCanvas } from "./mock-kit";

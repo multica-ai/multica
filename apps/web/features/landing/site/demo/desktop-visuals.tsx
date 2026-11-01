@@ -1,7 +1,7 @@
 "use client";
 
 import type { ReactNode } from "react";
-import { Bot, ChevronDown, ChevronRight, Inbox, Laptop, ListTodo, MessageSquare, Pin, Plus, RotateCw, X, type LucideIcon } from "lucide-react";
+import { Bot, ChevronDown, ChevronRight, Inbox, Laptop, ListTodo, MessageSquare, Pin, Plus, RotateCw, X, type IconComponent } from "@multica/ui/icons";
 import { cn } from "@multica/ui/lib/utils";
 import { StatusIcon } from "@multica/views/issues/components/status-icon";
 import { PriorityIcon } from "@multica/views/issues/components/priority-icon";
@@ -15,7 +15,7 @@ import { AppWindow, Avatar, BACKEND, FLOATING, MIA, PROVIDER_MARKS, Working, Zoo
  * fictional.
  */
 
-type Tab = { icon: LucideIcon; title: string; pinned?: boolean };
+type Tab = { icon: IconComponent; title: string; pinned?: boolean };
 
 const ACME_TABS: Tab[] = [
   { icon: Inbox, title: "Inbox", pinned: true },

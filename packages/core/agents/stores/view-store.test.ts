@@ -185,4 +185,76 @@ describe("useAgentsViewStore", () => {
       expect(useAgentsViewStore.getState().filters.access).toEqual([]);
     });
   });
+  describe("model column default (GitHub #9500)", () => {
+    it("shows the model column by default", async () => {
+      setCurrentWorkspace("acme", "ws_a");
+      await flush();
+      await flush();
+      expect(useAgentsViewStore.getState().hiddenColumns).not.toContain("model");
+    });
+
+    it("migrates a v0 payload by un-hiding model and keeping other hidden columns", async () => {
+      localStorage.setItem(
+        "multica_agents_view:acme",
+        JSON.stringify({
+          state: { scope: "all", hiddenColumns: ["model", "created", "runs"] },
+          version: 0,
+        }),
+      );
+
+      setCurrentWorkspace("acme", "ws_a");
+      await flush();
+      await flush();
+
+      const state = useAgentsViewStore.getState();
+      expect(state.hiddenColumns).toEqual(["created", "runs"]);
+      expect(state.scope).toBe("all");
+    });
+
+    it("respects a v1 payload that hides model explicitly", async () => {
+      localStorage.setItem(
+        "multica_agents_view:acme",
+        JSON.stringify({
+          state: { hiddenColumns: ["model"] },
+          version: 1,
+        }),
+      );
+
+      setCurrentWorkspace("acme", "ws_a");
+      await flush();
+      await flush();
+
+      expect(useAgentsViewStore.getState().hiddenColumns).toEqual(["model"]);
+    });
+
+    it("moves a v1 payload still on the old default to the new default", async () => {
+      localStorage.setItem(
+        "multica_agents_view:acme",
+        JSON.stringify({ state: { hiddenColumns: ["created"] }, version: 1 }),
+      );
+
+      setCurrentWorkspace("acme", "ws_a");
+      await flush();
+      await flush();
+
+      expect(useAgentsViewStore.getState().hiddenColumns).toEqual([
+        "owner",
+        "access",
+        "created",
+      ]);
+    });
+
+    it("keeps a customised v1 column choice", async () => {
+      localStorage.setItem(
+        "multica_agents_view:acme",
+        JSON.stringify({ state: { hiddenColumns: ["created", "runs"] }, version: 1 }),
+      );
+
+      setCurrentWorkspace("acme", "ws_a");
+      await flush();
+      await flush();
+
+      expect(useAgentsViewStore.getState().hiddenColumns).toEqual(["created", "runs"]);
+    });
+  });
 });

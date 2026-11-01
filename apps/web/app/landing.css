@@ -107,7 +107,6 @@
     --site-font-mono: var(--font-mono);
 
     font-family: var(--site-font-sans);
-    font-optical-sizing: auto;
 }
 
 .landing-light {

@@ -11,8 +11,8 @@ import {
   MessageSquare,
   Monitor,
   Zap,
-  type LucideIcon,
-} from "lucide-react";
+  type IconComponent,
+} from "@multica/ui/icons";
 import { cn } from "@multica/ui/lib/utils";
 import { ActorAvatar } from "@multica/ui/components/common/actor-avatar";
 import { ShimmerText } from "@multica/ui/components/common/shimmer-text";
@@ -149,7 +149,7 @@ export const ENTER = "animate-in fade-in slide-in-from-bottom-1 duration-300 mot
 export const RAISED = "rounded-lg border-[0.5px] border-surface-border bg-surface shadow-[var(--surface-shadow)]";
 export const FLOATING = "rounded-xl bg-background shadow-[var(--floating-shadow)] ring-1 ring-surface-border";
 
-const APP_NAV: { key: string; icon: LucideIcon; badge?: boolean }[] = [
+const APP_NAV: { key: string; icon: IconComponent; badge?: boolean }[] = [
   { key: "inbox", icon: Inbox, badge: true },
   { key: "mine", icon: CircleUser },
   { key: "chat", icon: MessageSquare },
@@ -209,7 +209,7 @@ export function AppWindow({
   );
 }
 
-export function WindowHeader({ icon: Icon, title, children }: { icon: LucideIcon; title: string; children?: ReactNode }) {
+export function WindowHeader({ icon: Icon, title, children }: { icon: IconComponent; title: string; children?: ReactNode }) {
   return (
     <div className="flex h-11 shrink-0 items-center gap-2 border-b border-border px-4">
       <Icon className="size-4 text-muted-foreground" />

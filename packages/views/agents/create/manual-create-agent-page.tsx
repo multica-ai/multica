@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Loader2, Sparkles } from "lucide-react";
+import { Loader2, Sparkles } from "@multica/ui/icons";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "@multica/core/api";
 import {
@@ -128,6 +128,14 @@ export function ManualCreateAgentPage() {
       }),
     );
 
+  // A duplicate arrives from the agents list, so going back returns there.
+  // Behind step 2 is step 1, so leaving the flow has to go forward to where it
+  // was opened from instead.
+  const leave = () =>
+    duplicateId
+      ? backOrReplace(paths.agents())
+      : navigation.push(squadId ? paths.squadDetail(squadId) : paths.agents());
+
   // Hands the current draft to a builder conversation on the same runtime.
   const [startingAi, setStartingAi] = useState(false);
   const [aiError, setAiError] = useState<string | null>(null);
@@ -185,11 +193,7 @@ export function ManualCreateAgentPage() {
       }
       step={t(($) => $.creation_studio.steps.configure)}
       stepIndex={duplicateId ? undefined : 2}
-      // A duplicate arrives from the agents list, not from step 1, so it
-      // returns to where it came from instead of offering a runtime to pick.
-      onBack={() =>
-        duplicateId ? backOrReplace(paths.agents()) : changeRuntime()
-      }
+      onClose={leave}
       chips={
         duplicateId && form.selectedRuntime ? (
           <AgentCreateChip>
@@ -212,14 +216,9 @@ export function ManualCreateAgentPage() {
           )}
           {!duplicateId ? (
             <div className="mb-6 flex flex-wrap items-center justify-between gap-3">
-              <div className="min-w-0">
-                <h2 className="text-title font-semibold tracking-tight">
-                  {t(($) => $.creation_studio.configure_title)}
-                </h2>
-                <p className="mt-1 text-body text-muted-foreground">
-                  {t(($) => $.creation_studio.configure_description)}
-                </p>
-              </div>
+              <h2 className="min-w-0 text-title font-semibold tracking-tight">
+                {t(($) => $.creation_studio.configure_title)}
+              </h2>
               {canAskAi ? (
                 <div className="flex flex-col items-end gap-1">
                   <Button
@@ -266,14 +265,16 @@ export function ManualCreateAgentPage() {
             }
           />
         </div>
-        <CreateAgentFooter
-          canCreate={canCreate}
-          creating={submit.creating}
-          squad={!!squadId}
-          error={submit.formError}
-          onCreate={() => void submit.create()}
-        />
       </div>
+      <CreateAgentFooter
+        stepIndex={duplicateId ? undefined : 2}
+        canCreate={canCreate}
+        creating={submit.creating}
+        squad={!!squadId}
+        error={submit.formError}
+        onCreate={() => void submit.create()}
+        onCancel={leave}
+      />
     </AgentCreateShell>
   );
 }

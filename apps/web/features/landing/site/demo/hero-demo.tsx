@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { GitPullRequest, Inbox, Megaphone, UserRound, Zap } from "lucide-react";
+import { GitPullRequest, Inbox, Megaphone, UserRound, Zap } from "@multica/ui/icons";
 import { cn } from "@multica/ui/lib/utils";
 import { focusRing } from "../primitives";
 import { BarList, Checklist, DocPreview, LoadChart, PullRequest, Replies, ReportCluster, TimeoutChart } from "./hero-blocks";

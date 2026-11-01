@@ -10,8 +10,8 @@ import {
   ListTodo,
   Server,
   Zap,
-  type LucideIcon,
-} from "lucide-react";
+  type IconComponent,
+} from "@multica/ui/icons";
 import { cn } from "@multica/ui/lib/utils";
 import { StatusIcon } from "@multica/views/issues/components/status-icon";
 import { GroupBand } from "./feature-visuals";
@@ -119,7 +119,7 @@ function Side({ children }: { children: ReactNode }) {
   return <div className="absolute top-[12%] left-[5%] flex w-[40%] flex-col gap-3">{children}</div>;
 }
 
-function Card({ icon: Icon, title, aside, children }: { icon?: LucideIcon; title: ReactNode; aside?: ReactNode; children: ReactNode }) {
+function Card({ icon: Icon, title, aside, children }: { icon?: IconComponent; title: ReactNode; aside?: ReactNode; children: ReactNode }) {
   return (
     <div className={cn(FLOATING, "p-3")}>
       <p className="flex items-center gap-1.5 text-caption text-muted-foreground">

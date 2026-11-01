@@ -6,7 +6,7 @@ import {
   ArrowRight,
   Loader2,
   RefreshCw,
-} from "lucide-react";
+} from "@multica/ui/icons";
 import { Button } from "@multica/ui/components/ui/button";
 import { cn } from "@multica/ui/lib/utils";
 import { runtimeKeys } from "@multica/core/runtimes/queries";

@@ -1,7 +1,7 @@
 "use client";
 
 import type { ReactNode } from "react";
-import { Check, ChevronDown, CircleCheck, GitBranch, GitPullRequest, Laptop, Lock, Monitor, Plus, Server, X, type LucideIcon } from "lucide-react";
+import { Check, ChevronDown, CircleCheck, GitBranch, GitPullRequest, Laptop, Lock, Monitor, Plus, Server, X, type IconComponent } from "@multica/ui/icons";
 import { cn } from "@multica/ui/lib/utils";
 import { StatusIcon } from "@multica/views/issues/components/status-icon";
 import { PriorityIcon } from "@multica/views/issues/components/priority-icon";
@@ -62,7 +62,7 @@ function Tile({ online, muted, children }: { online?: boolean; muted?: boolean; 
   );
 }
 
-type Machine = { icon: LucideIcon; name: string; detail: string; agents: string[]; load: string };
+type Machine = { icon: IconComponent; name: string; detail: string; agents: string[]; load: string };
 
 const MACHINES: Machine[] = [
   { icon: Laptop, name: "Mia’s MacBook Pro", detail: "macOS · Mia Chen", agents: ["Claude Code", "Cursor"], load: "1 running" },
@@ -165,7 +165,7 @@ function RuntimesPage({ compact }: { compact?: boolean }) {
   );
 }
 
-function Step({ icon: Icon, children, last }: { icon: LucideIcon; children: ReactNode; last?: boolean }) {
+function Step({ icon: Icon, children, last }: { icon: IconComponent; children: ReactNode; last?: boolean }) {
   return (
     <div className="relative flex gap-2.5 pb-3 last:pb-0">
       {last ? null : <span aria-hidden className="absolute top-5 bottom-0 left-[7px] w-px bg-border" />}

@@ -136,19 +136,17 @@ export function TimelineList({
   // appends shouldn't shift the divider — the user wants a stable
   // "where I was when I came back" boundary. The store update happens on
   // unmount, gated on the user having actually scrolled past the divider.
-  const lastViewedSnapshotRef = useRef<string | null | undefined>(undefined);
-  if (lastViewedSnapshotRef.current === undefined) {
-    lastViewedSnapshotRef.current =
-      useLastViewedStore.getState().getLastViewed(issue.id) ?? null;
-  }
+  const [lastViewedSnapshot] = useState(
+    () => useLastViewedStore.getState().getLastViewed(issue.id) ?? null,
+  );
   const dividerAnchorId = useMemo(() => {
-    const snapshot = lastViewedSnapshotRef.current;
+    const snapshot = lastViewedSnapshot;
     if (!snapshot) return null;
     // First entry strictly newer than the snapshot anchors the divider;
     // divider draws ABOVE this row. If everything is older, no divider.
     const found = data.find((r) => r.entry.created_at > snapshot);
     return found ? found.entry.id : null;
-  }, [data]);
+  }, [data, lastViewedSnapshot]);
   const dividerScrolledPastRef = useRef(false);
 
   useEffect(() => {
@@ -264,7 +262,7 @@ export function TimelineList({
     (info: { viewableItems: ViewToken[] }) => handlerRef.current(info),
     [],
   );
-  const viewabilityCallbackPairs = useRef([
+  const [viewabilityCallbackPairs] = useState(() => [
     {
       viewabilityConfig,
       onViewableItemsChanged: stableViewabilityHandler,
@@ -401,7 +399,7 @@ export function TimelineList({
         onMomentumScrollBegin={() =>
           useCommentSelectStore.getState().clear()
         }
-        viewabilityConfigCallbackPairs={viewabilityCallbackPairs.current}
+        viewabilityConfigCallbackPairs={viewabilityCallbackPairs}
         refreshControl={
           <RefreshControl refreshing={refreshing} onRefresh={onRefresh} />
         }

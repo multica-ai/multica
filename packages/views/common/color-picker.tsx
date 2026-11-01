@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Dices, Pipette } from "lucide-react";
+import { Dices, Pipette } from "@multica/ui/icons";
 import {
   Popover,
   PopoverContent,

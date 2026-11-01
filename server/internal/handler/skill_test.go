@@ -5,7 +5,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -188,7 +187,7 @@ func TestFetchFromSkillsSh_FallbackDoesNotDoubleEscapeDirectoryNames(t *testing.
 	}
 }
 
-func TestFetchFromSkillsSh_LogsSubdirectoryFailures(t *testing.T) {
+func TestFetchFromSkillsSh_RejectsSubdirectoryFailures(t *testing.T) {
 	client, _ := newGitHubFixtureClient(t, func(w http.ResponseWriter, r *http.Request) {
 		switch r.Header.Get("X-Test-Original-Host") {
 		case "api.github.com":
@@ -226,30 +225,12 @@ func TestFetchFromSkillsSh_LogsSubdirectoryFailures(t *testing.T) {
 		}
 	})
 
-	var logs bytes.Buffer
-	prev := slog.Default()
-	slog.SetDefault(slog.New(slog.NewTextHandler(&logs, &slog.HandlerOptions{Level: slog.LevelInfo})))
-	t.Cleanup(func() {
-		slog.SetDefault(prev)
-	})
-
 	result, err := fetchFromSkillsSh(t.Context(), client, "https://skills.sh/acme/skills/pptx")
-	if err != nil {
-		t.Fatalf("fetchFromSkillsSh: %v", err)
+	if result != nil || !errors.Is(err, errImportSourceUnavailable) {
+		t.Fatalf("expected incomplete listing to fail, got result=%+v error=%v", result, err)
 	}
-	if len(result.files) != 0 {
-		t.Fatalf("expected no files when subdirectory listing fails, got %v", importedFilePaths(result.files))
-	}
-
-	logOutput := logs.String()
-	if !strings.Contains(logOutput, "github import: failed to list subdirectory") {
-		t.Fatalf("expected warning log, got %q", logOutput)
-	}
-	if !strings.Contains(logOutput, "status=404") {
-		t.Fatalf("expected status in warning log, got %q", logOutput)
-	}
-	if !strings.Contains(logOutput, "skills/pptx/scripts?ref=main") {
-		t.Fatalf("expected subdirectory URL in warning log, got %q", logOutput)
+	if !strings.Contains(err.Error(), "HTTP 404") || !strings.Contains(err.Error(), "skills/pptx/scripts?ref=main") {
+		t.Fatalf("error must identify the failed subdirectory and status: %v", err)
 	}
 }
 
@@ -1570,49 +1551,41 @@ func TestFetchFromGitHub_UnresolvableRefFailsLoudly(t *testing.T) {
 	}
 }
 
-// When the GitHub API responds 403 (rate-limited or auth-blocked) on the
-// ref-resolution probe, the import should NOT fail outright. The optimistic
-// single-segment split (ref = first segment, rest = path) is correct for
-// the overwhelming majority of URLs, so we fall back to it and let the raw
-// SKILL.md fetch be the source of truth. This covers the common case of
-// self-hosted servers hitting GitHub's 60-req/hour unauthenticated limit.
+// Ref resolution may use the optimistic split, but supporting-file enumeration
+// must still succeed before that bundle can be published.
 func TestFetchFromGitHub_FallsBackOnAPIBlocked(t *testing.T) {
-	client, _ := newGitHubFixtureClient(t, func(w http.ResponseWriter, r *http.Request) {
-		switch r.Header.Get("X-Test-Original-Host") {
-		case "api.github.com":
-			// Simulate rate-limit on every commits probe and on contents.
-			if strings.HasPrefix(r.URL.Path, "/repos/anthropics/skills/commits/") {
-				http.Error(w, "rate limit", http.StatusForbidden)
+	for _, enumerationBlocked := range []bool{false, true} {
+		t.Run(fmt.Sprintf("enumeration_blocked_%t", enumerationBlocked), func(t *testing.T) {
+			client, _ := newGitHubFixtureClient(t, func(w http.ResponseWriter, r *http.Request) {
+				switch r.Header.Get("X-Test-Original-Host") {
+				case "api.github.com":
+					if strings.Contains(r.URL.Path, "/contents/") && !enumerationBlocked {
+						writeJSON(w, 200, []githubContentEntry{})
+						return
+					}
+					http.Error(w, "rate limit", http.StatusForbidden)
+				case "raw.githubusercontent.com":
+					if r.URL.Path == "/anthropics/skills/main/skills/pptx/SKILL.md" {
+						fmt.Fprint(w, "---\nname: pptx\ndescription: PowerPoint skill\n---\nbody")
+						return
+					}
+					http.NotFound(w, r)
+				}
+			})
+			result, err := fetchFromGitHub(t.Context(), client, "https://github.com/anthropics/skills/tree/main/skills/pptx")
+			if enumerationBlocked {
+				if result != nil || !errors.Is(err, errImportSourceUnavailable) {
+					t.Fatalf("expected blocked enumeration to fail, got result=%+v error=%v", result, err)
+				}
 				return
 			}
-			if strings.HasPrefix(r.URL.Path, "/repos/anthropics/skills/contents/") {
-				http.Error(w, "rate limit", http.StatusForbidden)
-				return
+			if err != nil {
+				t.Fatal(err)
 			}
-			http.NotFound(w, r)
-		case "raw.githubusercontent.com":
-			switch r.URL.Path {
-			case "/anthropics/skills/main/skills/pptx/SKILL.md":
-				w.Write([]byte("---\nname: pptx\ndescription: PowerPoint skill\n---\nbody"))
-			default:
-				http.NotFound(w, r)
+			if result.name != "pptx" || result.origin["ref"] != "main" || result.origin["path"] != "skills/pptx" {
+				t.Fatalf("unexpected optimistic ref fallback: %+v", result)
 			}
-		default:
-			http.NotFound(w, r)
-		}
-	})
-	result, err := fetchFromGitHub(t.Context(), client, "https://github.com/anthropics/skills/tree/main/skills/pptx")
-	if err != nil {
-		t.Fatalf("fetchFromGitHub: %v", err)
-	}
-	if result.origin["ref"] != "main" {
-		t.Fatalf("origin ref = %v, want main (optimistic fallback)", result.origin["ref"])
-	}
-	if result.origin["path"] != "skills/pptx" {
-		t.Fatalf("origin path = %v, want skills/pptx (optimistic fallback)", result.origin["path"])
-	}
-	if result.name != "pptx" {
-		t.Fatalf("name = %q, want pptx", result.name)
+		})
 	}
 }
 

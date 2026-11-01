@@ -130,6 +130,32 @@ func TestGetConfigUsesDaemonServerURLOverride(t *testing.T) {
 	}
 }
 
+func TestGetConfigDeclaresDaemonSetupTarget(t *testing.T) {
+	for _, tt := range []struct {
+		name, appURL, wantTarget, wantServerURL string
+	}{
+		{"official Cloud", "https://multica.ai", "cloud", ""},
+		{"configured self-host", "https://app.example.com", "self_host", "https://api.example.com"},
+		{"incomplete self-host", "", "self_host", ""},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Setenv("MULTICA_APP_URL", tt.appURL)
+			t.Setenv("FRONTEND_ORIGIN", "")
+			t.Setenv("MULTICA_PUBLIC_URL", "https://api.example.com")
+			t.Setenv("MULTICA_DAEMON_SERVER_URL", "")
+			var cfg AppConfig
+			req := httptest.NewRequest(http.MethodGet, "/api/config", nil)
+			testutil.Call(t, testHandler.GetConfig, req).Want(http.StatusOK).JSON(&cfg)
+			if cfg.DaemonSetupTarget != tt.wantTarget {
+				t.Fatalf("daemon_setup_target = %q, want %q", cfg.DaemonSetupTarget, tt.wantTarget)
+			}
+			if cfg.DaemonServerURL != tt.wantServerURL {
+				t.Fatalf("daemon_server_url = %q, want %q", cfg.DaemonServerURL, tt.wantServerURL)
+			}
+		})
+	}
+}
+
 func TestGetConfigHonorsVCSIntegrationSwitch(t *testing.T) {
 	origCfg := testHandler.cfg
 	t.Cleanup(func() { testHandler.cfg = origCfg })
@@ -457,6 +483,9 @@ func TestGetConfigExposesFrontendFeatureFlags(t *testing.T) {
 	if !cfg.FeatureFlags["settings_resource_labels"] {
 		t.Fatalf("settings_resource_labels: want true for installed clients, got false")
 	}
+	if !cfg.FeatureFlags["project_workflows_v1"] {
+		t.Fatal("project_workflows_v1: want true for installed clients")
+	}
 	if !cfg.FeatureFlags["agents_agent_builder"] {
 		t.Fatalf("agents_agent_builder: want true for installed clients, got false")
 	}
@@ -505,6 +534,24 @@ func TestGetConfigExposesEnabledPluginsV1Flag(t *testing.T) {
 	}
 	if !cfg.FeatureFlags["plugins_v1"] {
 		t.Fatal("plugins_v1: want true with flag enabled, got false")
+	}
+}
+
+func TestGetConfigKeepsProjectWorkflowsEnabledForInstalledClients(t *testing.T) {
+	h := &Handler{}
+	withFeatureFlag(t, h, "project_workflows_v1", false)
+
+	w := httptest.NewRecorder()
+	h.GetConfig(w, httptest.NewRequest(http.MethodGet, "/api/config", nil))
+	if w.Code != http.StatusOK {
+		t.Fatalf("GetConfig: expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	var cfg AppConfig
+	if err := json.Unmarshal(w.Body.Bytes(), &cfg); err != nil {
+		t.Fatalf("decode config: %v", err)
+	}
+	if !cfg.FeatureFlags["project_workflows_v1"] {
+		t.Fatal("retired project_workflows_v1 overrides must not hide workflows in installed clients")
 	}
 }
 

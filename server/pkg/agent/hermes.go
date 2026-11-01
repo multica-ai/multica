@@ -534,7 +534,10 @@ func (b *hermesBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 		return nil, fmt.Errorf("start hermes: %w", err)
 	}
 
-	stderrSink := io.MultiWriter(newLogWriter(b.cfg.Logger, "[hermes:stderr] "), providerErr)
+	// Surface a launch-time dependency reinstall (otherwise only visible at
+	// Debug through the forwarder above); see hermes_depsync.go / GH #9390.
+	depSync := newHermesDepSyncWatcher(b.cfg.Logger, b.cfg.Env["HERMES_HOME"])
+	stderrSink := io.MultiWriter(newLogWriter(b.cfg.Logger, "[hermes:stderr] "), providerErr, depSync)
 	stderrDone := make(chan struct{})
 	go func() {
 		defer close(stderrDone)
@@ -687,6 +690,7 @@ func (b *hermesBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 			},
 			"clientCapabilities": map[string]any{},
 		})
+		depSync.Finish(err == nil)
 		if err != nil {
 			finalStatus = "failed"
 			finalError = fmt.Sprintf("hermes initialize failed: %v", err)
@@ -796,6 +800,7 @@ func (b *hermesBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 		// the MUL-5029 mis-routing hazard it exists to prevent stayed live for
 		// exactly the agents that hit it. See acpModelIDsEquivalent for the
 		// evidence and for what the redundant call actually costs.
+		effortStateIsCurrent := true
 		if opts.Model != "" && acpModelIDsEquivalent(effectiveModel, sessionCurrentModel) {
 			b.cfg.Logger.Info("hermes session already on requested model; skipping redundant set_model",
 				"model", opts.Model,
@@ -803,10 +808,11 @@ func (b *hermesBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 				"session_id", sessionID,
 			)
 		} else if opts.Model != "" {
-			if _, err := c.request(runCtx, "session/set_model", map[string]any{
+			modelResult, err := c.request(runCtx, "session/set_model", map[string]any{
 				"sessionId": sessionID,
 				"modelId":   opts.Model,
-			}); err != nil {
+			})
+			if err != nil {
 				b.cfg.Logger.Warn("hermes set_session_model failed", "error", err, "requested_model", opts.Model)
 				finalStatus = "failed"
 				finalError = fmt.Sprintf("hermes could not switch to model %q: %v", opts.Model, err)
@@ -834,6 +840,21 @@ func (b *hermesBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 				return
 			}
 			b.cfg.Logger.Info("hermes session model set", "model", opts.Model)
+			// Effort options may depend on the model, so re-read them once
+			// the switch lands. A runtime that exposes no post-switch state
+			// leaves sessionResult describing the previous model; flag that
+			// so step 3b skips its local vocabulary check.
+			if opts.ThinkingLevel != "" {
+				options, err := acpOptionsAfterModelSwitch(runCtx, c.request, sessionID, opts.Model, sessionResult, modelResult)
+				if err != nil {
+					b.cfg.Logger.Warn("hermes could not refresh model options", "error", err, "requested_model", opts.Model)
+				}
+				if options != nil {
+					sessionResult = options
+				} else {
+					effortStateIsCurrent = false
+				}
+			}
 		}
 
 		// 3b. Apply a persisted thinking override through whichever effort
@@ -844,10 +865,11 @@ func (b *hermesBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 		// above this must NOT fail the task — an effort we could not apply
 		// still runs the prompt at the runtime's own default.
 		//
-		// sessionResult stops describing the live session once set_model runs,
-		// because an ACP effort option may depend on the current model.
+		// sessionResult is the post-switch state when the runtime exposed one;
+		// otherwise effortStateIsCurrent is false and the helper lets the
+		// runtime validate the level itself.
 		applyACPEffortOption(runCtx, c.request, "hermes", b.cfg.Logger,
-			sessionID, sessionResult, opts.ThinkingLevel, opts.Model == "")
+			sessionID, sessionResult, opts.ThinkingLevel, effortStateIsCurrent)
 
 		// 4. Send the prompt and wait for PromptResponse.
 		//
@@ -1181,6 +1203,31 @@ type hermesClient struct {
 	// Other backends leave it false too — Kimi streams its args across updates,
 	// so for it the start frame is genuinely incomplete.
 	toolStartCarriesFinalInput bool
+
+	// toolInputArrivesInProgress marks a dialect (OpenCode) whose tool_call
+	// start frame is sent while the model is still producing the call, with a
+	// placeholder rawInput (`{}` or just the shell cwd), and whose first
+	// in_progress tool_call_update carries the final input (possibly empty)
+	// at the moment the tool starts executing. MessageToolUse is emitted at that update: early
+	// enough for the daemon to charge a long tool to AgentToolWatchdog, and
+	// late enough to record the actual invocation. Unset keeps the existing
+	// start-frame handling for every other backend.
+	toolInputArrivesInProgress bool
+	// toolName optionally replaces the hermes title-based tool naming for a
+	// dialect that reports its own tool ids. name is the update's `name`
+	// field (absent on some dialects), title its `title`. Nil keeps
+	// hermesToolNameFromTitle.
+	toolName func(name, title, kind string) string
+	// toolOutputFromContent prefers a completed tool call's display content
+	// over its rawOutput. OpenCode's rawOutput is a metadata envelope (on 2.x
+	// it carries no output text at all); the content blocks hold what the tool
+	// printed.
+	toolOutputFromContent bool
+	// acceptUpdate can drop an individual session/update after the
+	// lifecycle gate above, with the update payload in hand. OpenCode 2.x
+	// uses it to keep a subagent's own text out of the parent's transcript.
+	// Nil accepts every update.
+	acceptUpdate func(updateType string, update json.RawMessage) bool
 
 	// pendingTools buffers the args for tool calls whose input streams in
 	// across multiple ACP tool_call_update messages (kimi does this —
@@ -1850,6 +1897,9 @@ func (c *hermesClient) handleNotification(raw map[string]json.RawMessage) {
 	if c.acceptNotification != nil && !c.acceptNotification(updateType) {
 		return
 	}
+	if c.acceptUpdate != nil && !c.acceptUpdate(updateType, updateData) {
+		return
+	}
 	if c.onActivity != nil {
 		c.onActivity()
 	}
@@ -1964,12 +2014,23 @@ func (c *hermesClient) handleToolCallStart(data json.RawMessage) {
 	if toolName == "" {
 		toolName = msg.Name
 	}
+	if c.toolName != nil {
+		toolName = c.toolName(msg.Name, msg.Title, msg.Kind)
+	}
 	rawInput := msg.RawInput
 	if rawInput == nil {
 		rawInput = msg.Input
 	}
 	if rawInput == nil {
 		rawInput = msg.Parameters
+	}
+
+	// The start frame's rawInput is a placeholder on this dialect; buffer
+	// the call and emit it from the first in_progress update instead (see
+	// toolInputArrivesInProgress).
+	if c.toolInputArrivesInProgress {
+		c.trackTool(msg.ToolCallID, &pendingToolCall{toolName: toolName})
+		return
 	}
 
 	// Hermes pre-populates rawInput on the initial tool_call — emit
@@ -2096,6 +2157,23 @@ func (c *hermesClient) handleToolCallUpdate(data json.RawMessage) {
 	// tool call, each carrying the cumulative args JSON so far.
 	if msg.Status != "completed" && msg.Status != "failed" {
 		if pending := c.getPendingTool(msg.ToolCallID); pending != nil && !pending.emitted {
+			if c.toolInputArrivesInProgress {
+				// in_progress means the tool is executing, so its input is
+				// final even when empty (a tool that takes no arguments).
+				if msg.Status == "in_progress" {
+					pending.input = rawInput
+					pending.emitted = true
+					if c.onMessage != nil {
+						c.onMessage(Message{
+							Type:   MessageToolUse,
+							Tool:   pending.toolName,
+							CallID: msg.ToolCallID,
+							Input:  rawInput,
+						})
+					}
+				}
+				return
+			}
 			if text := extractACPToolCallText(msg.Content); text != "" {
 				// kimi streams the full cumulative args on every frame;
 				// overwrite rather than concatenate.
@@ -2109,7 +2187,13 @@ func (c *hermesClient) handleToolCallUpdate(data json.RawMessage) {
 	pending := c.takePendingTool(msg.ToolCallID)
 	c.emitDeferredToolUse(pending, msg.ToolCallID, title, msg.Kind, rawInput)
 
-	output := acpRawText(msg.RawOutput)
+	var output string
+	if c.toolOutputFromContent {
+		output = extractACPToolCallText(msg.Content)
+	}
+	if output == "" {
+		output = acpRawText(msg.RawOutput)
+	}
 	if output == "" {
 		output = acpRawText(msg.Output)
 	}
@@ -2203,6 +2287,9 @@ func (c *hermesClient) emitDeferredToolUse(
 		// No record of the start frame — fall back to the update's own
 		// title/kind/rawInput so the UI at least sees the tool name.
 		toolName = hermesToolNameFromTitle(updateTitle, updateKind)
+		if c.toolName != nil {
+			toolName = c.toolName("", updateTitle, updateKind)
+		}
 		input = updateRawInput
 	}
 

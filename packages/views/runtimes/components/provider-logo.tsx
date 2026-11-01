@@ -1,5 +1,5 @@
 import { useId } from "react";
-import { Monitor } from "lucide-react";
+import { Monitor } from "@multica/ui/icons";
 import codeartsLogo from "./codearts-logo.svg";
 import qwenLogo from "./qwen-logo.svg";
 import reasonixLogo from "./reasonix-logo.svg";
@@ -412,6 +412,8 @@ export function ProviderLogo({
       return <HermesLogo className={className} />;
     case "pi":
       return <PiLogo className={className} />;
+    case "devin":
+      return <Monitor className={className} />;
     case "omp":
       return <PiLogo className={className} />;
     case "copilot":
