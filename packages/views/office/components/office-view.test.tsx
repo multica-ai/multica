@@ -276,7 +276,7 @@ describe("OfficeView", () => {
     await screen.findByRole("button", { name: "In Progress" });
     const canvas = document.querySelector("canvas") as HTMLCanvasElement;
     // The tag is anchored at (20, 30) in layout units; the figure hangs below it.
-    canvas.getBoundingClientRect = () => ({ left: 0, top: 0, width: 256, height: 171 }) as DOMRect;
+    canvas.getBoundingClientRect = () => ({ left: 0, top: 0, width: 416, height: 171 }) as DOMRect;
 
     fireEvent.click(canvas, { clientX: 20, clientY: 40 });
 
