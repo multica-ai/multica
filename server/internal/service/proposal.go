@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log/slog"
 	"strings"
+	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
@@ -108,6 +109,11 @@ func (c ProposalContent) RenderDescription(urgentReason string) string {
 // ProposalService creates and decides proposals.
 type ProposalService struct {
 	Issues *IssueService
+	// Knowledge, when set, receives a record of each decision after it
+	// commits. A failure to record never fails the decision.
+	Knowledge DecisionRecorder
+	// AppURL is the web app origin, for the link in the decision record.
+	AppURL string
 }
 
 func NewProposalService(issues *IssueService) *ProposalService {
@@ -454,7 +460,62 @@ func (s *ProposalService) Decide(ctx context.Context, p ProposalDecideParams) (P
 		}
 		result.Kickoff = &kickoff
 	}
+	s.recordDecision(ctx, p, result)
 	return result, nil
+}
+
+// proposalKnowledgeTimeout bounds the decision record write, so a sidecar that
+// hangs cannot hold the decision response.
+const proposalKnowledgeTimeout = 3 * time.Second
+
+// recordDecision writes the decision to the knowledge base. The decision has
+// already committed, so any failure is logged and left to the retry the
+// knowledge service keeps for its failed writes.
+func (s *ProposalService) recordDecision(ctx context.Context, p ProposalDecideParams, res ProposalDecideResult) {
+	if s.Knowledge == nil {
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), proposalKnowledgeTimeout)
+	defer cancel()
+
+	rec := DecisionRecord{
+		ProposalID:     res.Proposal.ID,
+		Title:          res.Issue.Title,
+		Recommendation: markdownSection(res.Issue.Description.String, "Recommendation"),
+		Decision:       res.Proposal.State,
+		Note:           p.Note,
+		DecidedAt:      time.Now(),
+	}
+	if res.Proposal.DecidedAt.Valid {
+		rec.DecidedAt = res.Proposal.DecidedAt.Time
+	}
+	q := s.Issues.Queries
+	if squad, err := q.GetSquadInWorkspace(ctx, db.GetSquadInWorkspaceParams{ID: res.Proposal.SquadID, WorkspaceID: p.WorkspaceID}); err == nil {
+		rec.Squad = squad.Name
+	}
+	if ws, err := q.GetWorkspace(ctx, p.WorkspaceID); err == nil {
+		rec.Link = s.AppURL + "/" + ws.Slug + "/issues/" + IssueIdentifier(ws.IssuePrefix, res.Issue.Number)
+	}
+	if err := s.Knowledge.WriteDecisionRecord(ctx, p.WorkspaceID, rec); err != nil {
+		slog.Warn("knowledge: could not record a proposal decision; it is kept to retry",
+			"proposal_id", util.UUIDToString(res.Proposal.ID), "error", err)
+	}
+}
+
+// markdownSection returns the body of a "## name" section of a rendered
+// proposal, up to the next "## " heading.
+func markdownSection(markdown, name string) string {
+	_, rest, found := strings.Cut(markdown, "\n## "+name+"\n")
+	if !found {
+		if after, ok := strings.CutPrefix(markdown, "## "+name+"\n"); ok {
+			rest, found = after, true
+		}
+	}
+	if !found {
+		return ""
+	}
+	body, _, _ := strings.Cut(rest, "\n## ")
+	return strings.TrimSpace(body)
 }
 
 // createRejectionComment posts the boss's note on the proposal issue,
