@@ -2853,6 +2853,10 @@ func (h *Handler) buildClaimedTaskResponse(r *http.Request, task *db.AgentTaskQu
 	// not — because its absence is what tells an upgraded daemon it is talking
 	// to a server too old to have answered the question (MUL-5811).
 	resp.LeaderRoleResolved = true
+	// Company knowledge for an issue run, retrieved once per claim. An unready
+	// workspace, a sidecar failure or a spent budget leaves the run without it;
+	// it never fails the claim.
+	resp.KnowledgeContext = h.issueKnowledgeContext(r.Context(), *task, runtimeWorkspaceID)
 	// Agent-trigger plugin hooks, as tools. A failure here degrades to no
 	// tools rather than failing the claim: a plugin that cannot be listed must
 	// not stop an agent from working on the issue.
@@ -4088,6 +4092,13 @@ func (h *Handler) buildClaimedTaskResponse(r *http.Request, task *db.AgentTaskQu
 	// without any branch claiming it.
 	if failure := h.rejectClaimOnWorkspaceMismatch(r.Context(), task, resp.WorkspaceID, runtimeID, runtimeWorkspaceID, hasQuickCreate); failure != nil {
 		return resp, deliveredCommentIDs, issueSnapshot, agentSkillCount, builtinSkillCount, failure
+	}
+
+	// Company knowledge block: one place for every task kind, included only
+	// while the workspace's knowledge is ready. Appended after the squad
+	// briefing so per-agent and squad instructions keep their precedence.
+	if resp.Agent != nil {
+		resp.Agent.Instructions = h.withCompanyKnowledge(r.Context(), parseUUID(resp.WorkspaceID), resp.Agent.Instructions)
 	}
 
 	// Workspace-level Context (workspace.context DB column) — the per-workspace

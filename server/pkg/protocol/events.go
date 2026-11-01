@@ -101,6 +101,16 @@ const (
 	EventProjectResourceUpdated = "project_resource:updated"
 	EventProjectResourceDeleted = "project_resource:deleted"
 
+	// Proposal events. A decision is a state change on one proposal, so the
+	// payload carries the whole proposal either way and clients invalidate the
+	// proposal and issue queries.
+	EventProposalCreated = "proposal:created"
+	EventProposalDecided = "proposal:decided"
+
+	// A brief was published; the payload carries the whole brief. The inbox
+	// listener turns it into one brief_ready item per workspace owner.
+	EventBriefCreated = "brief:created"
+
 	// Label events
 	EventLabelCreated       = "label:created"
 	EventLabelUpdated       = "label:updated"
@@ -159,6 +169,12 @@ const (
 	EventSquadCreated = "squad:created"
 	EventSquadUpdated = "squad:updated"
 	EventSquadDeleted = "squad:deleted"
+
+	// Office floor events. Seat changes ride on squad:updated; these cover the
+	// floors themselves (create, rename/reorder, delete).
+	EventOfficeFloorCreated = "office_floor:created"
+	EventOfficeFloorUpdated = "office_floor:updated"
+	EventOfficeFloorDeleted = "office_floor:deleted"
 
 	// Daemon events
 	EventDaemonHeartbeat               = "daemon:heartbeat"

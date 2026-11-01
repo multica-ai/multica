@@ -438,6 +438,76 @@ If you already have a `pg_cron` job in production, the safe sequence to retire i
 
 External cron / systemd timer / Kubernetes `CronJob` setups that call `SELECT rollup_task_usage_hourly()` directly can be retired the same way — once `sys_cron_executions` shows steady SUCCESS rows from the in-process scheduler, the external job is redundant and can be removed.
 
+## Company Knowledge Base (Optional)
+
+Multica can run a pinned [WeKnora](https://github.com/Tencent/WeKnora) sidecar that stores and retrieves company documents. Agents read it through a read-only MCP server; people publish into it. It is opt-in, and a workspace that never enables it behaves exactly as before. If the sidecar is down, runs continue without it and the Knowledge page shows "offline".
+
+The stack adds five containers behind the `knowledge` compose profile: `knowledge-app`, `knowledge-ui`, `knowledge-docreader`, `knowledge-postgres` (ParadeDB) and `knowledge-redis`, with their own volumes. Only `knowledge-app` joins Multica's network. Together they idle at roughly 650 MB of RAM, plus an embedding model.
+
+### 1. Choose an embedding model
+
+The embedding model is fixed per knowledge base when it is created, and changing it later means re-ingesting everything, so decide first. The default is `bge-m3` (multilingual) served by a local [Ollama](https://ollama.com):
+
+```bash
+ollama pull bge-m3
+```
+
+Ollama must be reachable from containers without being exposed to the network. On Linux, bind it to the Docker bridge address only (for example `OLLAMA_HOST=172.17.0.1:11434`), not `0.0.0.0`. The compose file maps `host.docker.internal` to the Docker host and allow-lists it. To use an OpenAI-compatible endpoint instead, set `KNOWLEDGE_EMBEDDING_PROVIDER=generic`, `KNOWLEDGE_EMBEDDING_URL`, `KNOWLEDGE_EMBEDDING_MODEL`, `KNOWLEDGE_EMBEDDING_DIMENSION` and `KNOWLEDGE_EMBEDDING_API_KEY`.
+
+> WeKnora refuses model URLs that resolve to a private address (its SSRF guard) unless the host is listed in `KNOWLEDGE_SSRF_WHITELIST_EXTRA`. Setting that variable **replaces** WeKnora's own default list, so list every internal host it must reach.
+
+### 2. Configure and start
+
+In `.env`:
+
+```bash
+KNOWLEDGE_SYSTEM_AES_KEY=$(openssl rand -hex 16)   # required, keep it stable
+KNOWLEDGE_JWT_SECRET=$(openssl rand -hex 32)
+MULTICA_KNOWLEDGE_SECRET_KEY=$(openssl rand -base64 32)
+KNOWLEDGE_URL=http://knowledge-app:8080
+KNOWLEDGE_SERVICE_EMAIL=multica-service@example.com
+KNOWLEDGE_SERVICE_PASSWORD=<8-32 characters, letters and digits>
+```
+
+Then start the profile and register the service user once. Multica signs in as this user to create one WeKnora workspace per Multica workspace:
+
+```bash
+docker compose -f docker-compose.selfhost.yml --profile knowledge up -d
+
+curl -X POST http://localhost:8090/api/v1/auth/register \
+  -H 'Content-Type: application/json' \
+  -d '{"username":"multica-service","email":"multica-service@example.com","password":"<the password above>"}'
+
+docker compose -f docker-compose.selfhost.yml up -d backend   # pick up the new .env values
+```
+
+Optionally set `KNOWLEDGE_DISABLE_REGISTRATION=true` afterwards to close WeKnora self-registration. In Multica, a workspace owner or admin then enables knowledge for the workspace; Multica creates the workspace, five default knowledge bases and a read-only `company-read` MCP server that every agent receives.
+
+### 3. Make it reachable by agents
+
+Agents run on your daemons, usually outside Docker, and talk to WeKnora's MCP endpoint (`<KNOWLEDGE_PUBLIC_URL>/mcp/<id>`) with a bearer token. Set `KNOWLEDGE_PUBLIC_URL` to an address those machines can open and put a TLS reverse proxy in front of the loopback port (`KNOWLEDGE_API_PORT`, default `8090`). If you skip it, the MCP URL falls back to `KNOWLEDGE_URL`, which works only for daemons on the compose network. Set `KNOWLEDGE_UI_URL` to the proxied WeKnora UI (`KNOWLEDGE_UI_PORT`, default `8085`) for the "Open in WeKnora" link.
+
+### Ports
+
+WeKnora normally listens on 80 and 8080; 8080 is Multica's. The profile publishes the WeKnora API on `127.0.0.1:${KNOWLEDGE_API_PORT:-8090}` and its UI on `127.0.0.1:${KNOWLEDGE_UI_PORT:-8085}`.
+
+### Backups
+
+Back up these named volumes together, plus `KNOWLEDGE_SYSTEM_AES_KEY` and `MULTICA_KNOWLEDGE_SECRET_KEY`:
+
+| Volume | Holds |
+| --- | --- |
+| `knowledge-postgres-data` | Documents, chunks, embeddings, workspaces and API keys |
+| `knowledge-data-files` | Uploaded original files |
+
+Losing `KNOWLEDGE_SYSTEM_AES_KEY` makes WeKnora's encrypted credentials unrecoverable; losing `MULTICA_KNOWLEDGE_SECRET_KEY` means each workspace's stored key can no longer be read, and knowledge must be re-provisioned. `knowledge-docreader-tmp` is scratch space and does not need a backup. `knowledge-redis-data` holds Redis stream state, not documents, so it is optional in a backup. For a consistent copy, stop the profile (`docker compose -f docker-compose.selfhost.yml --profile knowledge stop`) before copying the volumes, or use `pg_dump` against `knowledge-postgres`.
+
+### Upgrading WeKnora
+
+The three WeKnora images are pinned to `v0.9.0` through `KNOWLEDGE_VERSION`; never use `latest`. Multica's adapter is tested against recorded v0.9.0 responses, so a version bump is a deliberate change that re-records them.
+
+See [Advanced Configuration](SELF_HOSTING_ADVANCED.md#company-knowledge-base) for every variable.
+
 ## Stopping Services
 
 If you installed via the install script:
@@ -479,6 +549,31 @@ Pin `MULTICA_IMAGE_TAG` in `.env` to an exact version like `v0.2.4` if you want 
 If the selected GHCR tag has not been published yet, fall back to `make selfhost-build` or `docker compose -f docker-compose.selfhost.yml -f docker-compose.selfhost.build.yml up -d --build`.
 
 > **Upgrading from `v0.3.4` to `v0.3.5+` fails with `refusing to drop legacy daily rollups: ...`?** That's migration `103`'s fail-closed guard: it requires `task_usage_hourly` to be seeded before the legacy daily rollups are dropped. As of MUL-2957 `migrate up` runs that backfill automatically right before applying `103`, so the upgrade completes in a single invocation. If you are still on a pre-MUL-2957 binary or the auto-hook fails, run `backfill_task_usage_hourly` manually first, then re-run the upgrade. Full instructions in [Advanced Configuration → Usage Dashboard Rollup](SELF_HOSTING_ADVANCED.md#usage-dashboard-rollup).
+
+---
+
+## Upgrade notes: digital company office
+
+This release adds floors and squad seats to the office, proposals, the Secretary's daily briefs, and an optional knowledge base. Migrations 600 to 650 run automatically on backend startup.
+
+What changes for operators:
+
+- **`agent.office_room` is removed.** Migration 608 drops the column. Its per-agent room labels had no link to a squad, so nothing is carried over. Agents are drawn at the desks of their home squad.
+- **Existing squads start unseated.** No migration places them on a floor. An owner or admin sees a **Seat all** banner in the office, and nothing moves until they press it.
+- **The knowledge base is an optional sidecar.** WeKnora runs only when you start the `knowledge` compose profile and set `KNOWLEDGE_URL`. Without it, nothing changes. See [Company Knowledge Base (Optional)](#company-knowledge-base-optional) for the steps, the variables, and the one service account you register by hand.
+- **Secretary setup has no button yet.** Setup runs through the API. It needs an online Hermes runtime, and an owner's or admin's token:
+
+```bash
+curl -X POST "$MULTICA_API_URL/api/office/setup" \
+  -H "Authorization: Bearer $MULTICA_TOKEN" \
+  -H "X-Workspace-ID: $MULTICA_WORKSPACE_ID" \
+  -H 'Content-Type: application/json' \
+  -d '{"secretary_instructions": "<the text of the secretary template in packages/core/agents/instruction-templates.ts>", "timezone": "Europe/Berlin"}'
+```
+
+Setup is idempotent. It creates the Secretary, the Executive floor and squad, the daily brief autopilot, and the paused weekly review, and it returns the readiness checklist. A second call changes nothing that already exists.
+
+After upgrading, check the office: seat the squads you want on a floor, and see the [Office](https://multica.ai/docs/office) and [Secretary and briefs](https://multica.ai/docs/secretary) pages for what members will see.
 
 ---
 

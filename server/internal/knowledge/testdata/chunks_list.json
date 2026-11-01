@@ -1,0 +1,47 @@
+{
+  "data": [
+    {
+      "chunk_index": 0,
+      "chunk_type": "text",
+      "content": "# Runbook\n\nRestart the worker with systemctl restart worker. Pager rotation changes monthly.\n",
+      "content_hash": "",
+      "content_revision": 0,
+      "created_at": "2026-11-01T18:52:01.70729+08:00",
+      "deleted_at": null,
+      "end_at": 93,
+      "flags": 1,
+      "id": "c44092a8-e504-4871-a9fe-788848a6daf1",
+      "image_info": "",
+      "index_status": "ready",
+      "indirect_relation_chunks": null,
+      "is_enabled": true,
+      "knowledge_base_id": "6230f301-de2c-4009-bd05-120bc0e6b2a0",
+      "knowledge_id": "eb3ae08e-d73a-454d-9b4a-b715d1b366b3",
+      "last_editor_id": "",
+      "metadata": null,
+      "next_chunk_id": "",
+      "parent_chunk_id": "",
+      "pre_chunk_id": "",
+      "relation_chunks": null,
+      "seq_id": 100000059,
+      "source_locators": [
+        {
+          "end": 93,
+          "mapping": "exact",
+          "quote": "# Runbook Restart the worker with systemctl restart worker. Pager rotation changes monthly.",
+          "source_hash": "a750d72e4837419fe1a7881f77d7ed7a",
+          "type": "text"
+        }
+      ],
+      "start_at": 0,
+      "status": 0,
+      "tag_id": "",
+      "tenant_id": 10002,
+      "updated_at": "2026-11-01T18:52:01.70729+08:00"
+    }
+  ],
+  "page": 1,
+  "page_size": 100,
+  "success": true,
+  "total": 1
+}

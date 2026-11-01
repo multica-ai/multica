@@ -1,0 +1,1 @@
+ALTER TABLE proposal DROP CONSTRAINT IF EXISTS proposal_pkey;

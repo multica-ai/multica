@@ -415,6 +415,18 @@ First-party self-host telemetry sends one deployment-level snapshot per UTC day 
 
 `DO_NOT_TRACK` and `ANALYTICS_DISABLED` are independent. The former controls this first-party anonymous snapshot; the latter controls the optional PostHog integration.
 
+## Company knowledge base
+
+These variables turn on the optional [knowledge base](/knowledge-base). When `KNOWLEDGE_URL` is empty, knowledge is not offered and nothing else changes. The sidecar's own variables and their defaults are in [Advanced Configuration](https://github.com/multica-ai/multica/blob/main/SELF_HOSTING_ADVANCED.md#company-knowledge-base).
+
+| Variable | Default | Description |
+|---|---|---|
+| `KNOWLEDGE_URL` | empty | Address the backend uses to reach WeKnora, for example `http://knowledge-app:8080` |
+| `MULTICA_KNOWLEDGE_SECRET_KEY` | empty | Base64 32-byte key that encrypts each workspace's WeKnora key. Knowledge is not offered without it. |
+| `KNOWLEDGE_SERVICE_EMAIL` / `KNOWLEDGE_SERVICE_PASSWORD` | empty | The WeKnora service account that provisions each workspace |
+| `KNOWLEDGE_PUBLIC_URL` | same as `KNOWLEDGE_URL` | Address agents' daemons use for the read-only MCP endpoint |
+| `KNOWLEDGE_UI_URL` | empty | WeKnora web interface, for the **Open in WeKnora** link |
+
 ## Next steps
 
 - [Sign-in and signup](/auth-setup) — sign-in methods and signup restrictions.

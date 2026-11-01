@@ -21,7 +21,8 @@ describe("SQUAD_TEMPLATES", () => {
 
   it("starts every squad from a leader and only known roles", () => {
     for (const t of SQUAD_TEMPLATES) {
-      expect(t.roles[0], t.id).toBe("lead");
+      expect(t.roles, t.id).toContain(t.leader);
+      expect(t.roles[0], t.id).toBe(t.leader);
       expect(new Set(t.roles).size, t.id).toBe(t.roles.length);
       for (const role of t.roles) expect(SQUAD_ROLES[role], `${t.id}: ${role}`).toBeDefined();
     }
@@ -59,6 +60,39 @@ describe("SQUAD_TEMPLATES", () => {
 
     expect(last?.handler).toBe("qa");
     expect(SDLC_AUTO_WORKFLOW.steps.every((s) => s.handler !== null)).toBe(true);
+  });
+});
+
+describe("market research template", () => {
+  const market = template("market_research");
+
+  it("leads with the research lead and seats the squad on a Research floor", () => {
+    expect(market.leader).toBe("research_lead");
+    expect(market.roles).toEqual(["research_lead", "scout", "competitor", "critic"]);
+    expect(market.floorName).toBe("Research");
+    expect(market.workflow).toBeNull();
+  });
+
+  it("runs a Monday-morning routine that opens a dated issue for the squad", () => {
+    const routine = market.routine!;
+
+    expect(routine.cron).toBe("0 8 * * 1");
+    expect(routine.issueTitleTemplate).toContain("{{date}}");
+    expect(routine.description).toContain("File zero to three proposals");
+  });
+
+  it("gives the critic the review role and keeps proposals behind it", () => {
+    expect(market.instructions).toContain("multica proposal create --squad");
+    expect(market.instructions).toContain("after the critic has reviewed them");
+    expect(market.instructions).toContain("Do not write product code");
+  });
+
+  it("keeps the SDLC templates without a routine or a floor name", () => {
+    for (const t of SQUAD_TEMPLATES.filter((x) => x.id !== "market_research")) {
+      expect(t.routine, t.id).toBeNull();
+      expect(t.floorName, t.id).toBeNull();
+      expect(t.leader, t.id).toBe("lead");
+    }
   });
 });
 

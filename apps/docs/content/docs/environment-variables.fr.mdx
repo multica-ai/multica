@@ -406,6 +406,18 @@ La télémétrie propre à Multica pour les instances auto-hébergées envoie un
 
 `DO_NOT_TRACK` et `ANALYTICS_DISABLED` sont indépendantes. La première contrôle cet instantané anonyme propre à Multica ; la seconde contrôle l'intégration facultative avec PostHog.
 
+## Base de connaissances de l'entreprise
+
+Ces variables activent la [base de connaissances](/knowledge-base) facultative. Lorsque `KNOWLEDGE_URL` est vide, les connaissances ne sont pas proposées et rien d'autre ne change. Les variables propres au service auxiliaire et leurs valeurs par défaut se trouvent dans la [configuration avancée](https://github.com/multica-ai/multica/blob/main/SELF_HOSTING_ADVANCED.md#company-knowledge-base).
+
+| Variable | Par défaut | Description |
+|---|---|---|
+| `KNOWLEDGE_URL` | vide | Adresse que le backend utilise pour joindre WeKnora, par exemple `http://knowledge-app:8080` |
+| `MULTICA_KNOWLEDGE_SECRET_KEY` | vide | Clé de 32 octets encodée en Base64 qui chiffre la clé WeKnora de chaque espace de travail. Sans elle, les connaissances ne sont pas proposées. |
+| `KNOWLEDGE_SERVICE_EMAIL` / `KNOWLEDGE_SERVICE_PASSWORD` | vide | Le compte de service WeKnora qui provisionne chaque espace de travail |
+| `KNOWLEDGE_PUBLIC_URL` | identique à `KNOWLEDGE_URL` | Adresse que les démons des agents utilisent pour le point de terminaison MCP en lecture seule |
+| `KNOWLEDGE_UI_URL` | vide | Interface web de WeKnora, pour le lien **Ouvrir dans WeKnora** |
+
 ## Étapes suivantes
 
 - [Connexion et inscription](/auth-setup) — méthodes de connexion et restrictions d'inscription.

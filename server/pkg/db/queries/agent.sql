@@ -144,9 +144,75 @@ UPDATE agent SET
     service_tier = COALESCE(sqlc.narg('service_tier'), service_tier),
     conversation_starters = COALESCE(sqlc.narg('conversation_starters'), conversation_starters),
     composio_toolkit_allowlist = COALESCE(sqlc.narg('composio_toolkit_allowlist')::text[], composio_toolkit_allowlist),
-    office_room = COALESCE(sqlc.narg('office_room'), office_room),
     updated_at = now()
 WHERE id = $1
+RETURNING *;
+
+-- name: SetAgentHomeSquad :one
+-- Sets or clears the squad an agent is drawn in on the office. A non-null
+-- squad must be a live squad of the workspace that the agent is a member of; the
+-- guard sits in the statement so a concurrent membership removal cannot leave a
+-- dangling home. No row means the guard failed (or the agent is not in the
+-- workspace).
+UPDATE agent SET home_squad_id = sqlc.narg('home_squad_id'), updated_at = now()
+WHERE agent.id = sqlc.arg('id')
+  AND agent.workspace_id = sqlc.arg('workspace_id')
+  AND (
+    sqlc.narg('home_squad_id')::uuid IS NULL
+    OR EXISTS (
+        SELECT 1 FROM squad_member sm
+        JOIN squad s ON s.id = sm.squad_id
+        WHERE sm.squad_id = sqlc.narg('home_squad_id')::uuid
+          AND sm.member_type = 'agent'
+          AND sm.member_id = agent.id
+          AND s.workspace_id = agent.workspace_id
+          AND s.archived_at IS NULL
+    )
+  )
+RETURNING *;
+
+-- name: SetAgentHomeSquadOnFirstMembership :one
+-- Adding an agent with no home squad to its first live squad makes that squad
+-- its home. An agent that is already a live member of another squad keeps no
+-- home (the boss picks one), so only a truly first membership is claimed.
+UPDATE agent SET home_squad_id = sqlc.arg('squad_id'), updated_at = now()
+WHERE agent.id = sqlc.arg('id')
+  AND agent.workspace_id = sqlc.arg('workspace_id')
+  AND agent.home_squad_id IS NULL
+  AND NOT EXISTS (
+    SELECT 1 FROM squad_member sm
+    JOIN squad s ON s.id = sm.squad_id
+    WHERE sm.member_type = 'agent'
+      AND sm.member_id = agent.id
+      AND sm.squad_id <> sqlc.arg('squad_id')
+      AND s.workspace_id = agent.workspace_id
+      AND s.archived_at IS NULL
+  )
+RETURNING *;
+
+-- name: ReassignAgentHomeSquad :many
+-- Called when a squad stops being a valid home: an agent left it, or it was
+-- archived. Every agent whose home is that squad (or just the one named, when
+-- agent_id is given) moves to another live squad it still belongs to, the
+-- earliest joined, or loses its home when there is none. The removed squad is
+-- excluded explicitly, so the order of this call relative to the membership
+-- delete or the archive does not matter.
+UPDATE agent SET
+    home_squad_id = (
+        SELECT sm.squad_id FROM squad_member sm
+        JOIN squad s ON s.id = sm.squad_id
+        WHERE sm.member_type = 'agent'
+          AND sm.member_id = agent.id
+          AND sm.squad_id <> sqlc.arg('squad_id')
+          AND s.workspace_id = agent.workspace_id
+          AND s.archived_at IS NULL
+        ORDER BY sm.created_at ASC, sm.id ASC
+        LIMIT 1
+    ),
+    updated_at = now()
+WHERE agent.workspace_id = sqlc.arg('workspace_id')
+  AND agent.home_squad_id = sqlc.arg('squad_id')
+  AND (sqlc.narg('agent_id')::uuid IS NULL OR agent.id = sqlc.narg('agent_id')::uuid)
 RETURNING *;
 
 -- name: ClearAgentComposioToolkitAllowlist :one

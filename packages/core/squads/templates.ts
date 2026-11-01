@@ -8,7 +8,7 @@ import type { AgentInstructionTemplate } from "../agents/instruction-templates";
  * names below so that running the quickstart twice reuses them.
  */
 
-export type SquadTemplateId = "sdlc_greenfield" | "sdlc_maintenance";
+export type SquadTemplateId = "sdlc_greenfield" | "sdlc_maintenance" | "market_research";
 
 export type SquadRoleKey =
   | "lead"
@@ -20,7 +20,11 @@ export type SquadRoleKey =
   | "reviewer"
   | "qa"
   | "security"
-  | "devops";
+  | "devops"
+  | "research_lead"
+  | "scout"
+  | "competitor"
+  | "critic";
 
 export interface SquadRole {
   key: SquadRoleKey;
@@ -104,6 +108,34 @@ export const SQUAD_ROLES: Record<SquadRoleKey, SquadRole> = {
     description: "Packages and releases one verified digest; production needs approval.",
     role: "Packaging, run instructions, release notes",
   },
+  research_lead: {
+    key: "research_lead",
+    agentTemplate: "research_lead",
+    name: "Research Lead",
+    description: "Leads market research: sets the scan, delegates, and files only evidenced proposals.",
+    role: "Squad leader",
+  },
+  scout: {
+    key: "scout",
+    agentTemplate: "market_scout",
+    name: "Market Scout",
+    description: "Finds and reads market, customer, and trend sources, with a date and link for each claim.",
+    role: "Market scan",
+  },
+  competitor: {
+    key: "competitor",
+    agentTemplate: "competitor_analyst",
+    name: "Competitor Analyst",
+    description: "Compares competitors' products, pricing, and moves from primary sources.",
+    role: "Competitor analysis",
+  },
+  critic: {
+    key: "critic",
+    agentTemplate: "critic",
+    name: "Research Critic",
+    description: "Challenges the evidence before anything is filed, and writes no findings of its own.",
+    role: "Challenges the evidence",
+  },
 };
 
 export interface SquadWorkflowStep {
@@ -154,13 +186,34 @@ export const SDLC_AUTO_WORKFLOW: SquadWorkflowTemplate = {
   ],
 };
 
+/** A recurring autopilot the template creates for its squad. */
+export interface SquadRoutineTemplate {
+  /** Name of the autopilot. A non-archived autopilot with this name on the squad is reused. */
+  title: string;
+  /** Title of each issue the routine opens. Supports {{date}}. */
+  issueTitleTemplate: string;
+  /** Five-field cron expression, in the timezone the quickstart passes. */
+  cron: string;
+  /** The issue body each run starts from: the scan scope and the bar for a proposal. */
+  description: string;
+}
+
 export interface SquadTemplate {
   id: SquadTemplateId;
   /** Name of the created squad. */
   name: string;
   description: string;
-  /** Roles in the squad; the lead leads and the others are members. */
+  /** Roles in the squad; the leader leads and the others are members. */
   roles: SquadRoleKey[];
+  /** The role that leads. It is created first and is the squad's leader. */
+  leader: SquadRoleKey;
+  /**
+   * Floor name passed as the squad's floor_name. The server uses it only when
+   * it has to make a new floor, so the squad may land on an existing floor.
+   */
+  floorName: string | null;
+  /** The recurring autopilot the template creates for its squad, when it has one. */
+  routine: SquadRoutineTemplate | null;
   /** Squad instructions: what the leader follows. */
   instructions: string;
   /** The workflow its build project needs, when it has one. */
@@ -240,6 +293,21 @@ Rules:
 
 Then post the final report.`;
 
+const MARKET_RESEARCH_INSTRUCTIONS = `${COMMON_INSTRUCTIONS}
+
+Market research: a weekly scan of markets, customers, and competitors. The routine opens one issue each week; the leader carries it to a report and proposals.
+
+Plan:
+- Restate the scan's scope: the markets, the customer segments, and the named competitors. Take the scope from the issue, or else from the company's knowledge base (multica knowledge search "<query>"). Record any scope you choose as an assumption.
+- In the first round, create two sub-issues for research members: the market scout (sources and changes in the window) and the competitor analyst (named competitors, their moves and pricing). Give each the question, the start sources, where to post the report, and the acceptance check: every claim has a dated source link.
+- When both reports are verified, create one sub-issue for the research critic. It challenges each claim in both reports and in the draft proposals. Each blocking objection is answered with evidence or the claim is dropped.
+
+Proposals:
+- File zero to three proposals with multica proposal create --squad "Market Research", after the critic has reviewed them. Each one states the recommendation, the evidence links, the options considered, the cost and risk, and the decision the boss needs. Propose nothing you cannot support with evidence. "No proposal this week" is a valid result.
+- Do not write product code, make product decisions, or contact anyone outside the workspace. A proposal is a request for the boss's decision.
+
+Final report, one comment on the request: the window scanned, the proposals filed with their ids, what the critic objected to, the assumptions you took, and what is not verified.`;
+
 export const SQUAD_TEMPLATES: readonly SquadTemplate[] = [
   {
     id: "sdlc_greenfield",
@@ -257,6 +325,9 @@ export const SQUAD_TEMPLATES: readonly SquadTemplate[] = [
       "security",
       "devops",
     ],
+    leader: "lead",
+    floorName: null,
+    routine: null,
     instructions: GREENFIELD_INSTRUCTIONS,
     workflow: SDLC_AUTO_WORKFLOW,
   },
@@ -277,7 +348,28 @@ export const SQUAD_TEMPLATES: readonly SquadTemplate[] = [
       "security",
       "devops",
     ],
+    leader: "lead",
+    floorName: null,
+    routine: null,
     instructions: MAINTENANCE_INSTRUCTIONS,
+    workflow: null,
+  },
+  {
+    id: "market_research",
+    name: "Market Research",
+    description:
+      "Scans markets and competitors each week, has a critic challenge the evidence, and files only the proposals it supports.",
+    roles: ["research_lead", "scout", "competitor", "critic"],
+    leader: "research_lead",
+    floorName: "Research",
+    routine: {
+      title: "Market scan",
+      issueTitleTemplate: "Market scan, week of {{date}}",
+      cron: "0 8 * * 1",
+      description:
+        "Weekly market scan. Scope: the markets, customer segments, and named competitors in the research notes; if none are named, start from the company knowledge base (multica knowledge search) and say which markets you chose. Look for changes in the last seven days: pricing, product launches, customer wins and complaints, regulation, and funding. Bar for a proposal: a change that touches a decision the company can make this quarter, backed by at least two dated sources, with its cost and risk stated. File zero to three proposals; no proposal this week is a valid result. Write the report in English.",
+    },
+    instructions: MARKET_RESEARCH_INSTRUCTIONS,
     workflow: null,
   },
 ];

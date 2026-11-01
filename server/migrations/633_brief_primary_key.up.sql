@@ -1,0 +1,1 @@
+ALTER TABLE brief ADD CONSTRAINT brief_pkey PRIMARY KEY USING INDEX brief_id_uidx;

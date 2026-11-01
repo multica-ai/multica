@@ -510,5 +510,73 @@ func TestClaimTask_NonLeaderGetsNoBriefing(t *testing.T) {
 	}
 }
 
+// TestBuildSquadLeaderBriefing_ProposingToTheBossOnlyForScheduledSquads pins
+// who gets the "Proposing to the boss" block: leaders of squads with an active
+// autopilot, and nobody else.
+func TestBuildSquadLeaderBriefing_ProposingToTheBossOnlyForScheduledSquads(t *testing.T) {
+	ctx := context.Background()
+	leaderID, _ := seededLeaderAgent(t)
+	squad := seedSquadForBriefing(t, leaderID, "Proposing Squad", "Scan the market.")
+
+	insertSquadAutopilot := func(status string) {
+		t.Helper()
+		var id string
+		if err := testPool.QueryRow(ctx, `
+			INSERT INTO autopilot (workspace_id, title, assignee_type, assignee_id, status, execution_mode, created_by_type, created_by_id)
+			VALUES ($1, 'weekly scan', 'squad', $2, $3, 'create_issue', 'member', $4)
+			RETURNING id
+		`, testWorkspaceID, squad.ID, status, testUserID).Scan(&id); err != nil {
+			t.Fatalf("insert autopilot: %v", err)
+		}
+		t.Cleanup(func() { testPool.Exec(ctx, `DELETE FROM autopilot WHERE id = $1`, id) })
+	}
+	brief := func() string {
+		return buildSquadLeaderBriefing(ctx, testHandler.Queries, squad, true, leaderNoWorkflow, false)
+	}
+
+	if out := brief(); strings.Contains(out, "## Proposing to the boss") {
+		t.Fatalf("a squad with no autopilot must not get the proposing block:\n%s", out)
+	}
+
+	insertSquadAutopilot("paused")
+	if out := brief(); strings.Contains(out, "## Proposing to the boss") {
+		t.Fatalf("a squad whose autopilot is paused must not get the proposing block:\n%s", out)
+	}
+
+	insertSquadAutopilot("active")
+	out := brief()
+	compact := strings.Join(strings.Fields(out), " ")
+	for _, want := range []string{
+		"## Proposing to the boss",
+		"multica proposal create --squad " + uuidToString(squad.ID),
+		"--handoff-squad",
+		"reaches the boss in the Secretary's next brief",
+		"at most 3 waiting",
+		"3 filed in any rolling 7 days",
+		"10 waiting across the whole workspace",
+		"--urgent --urgent-reason",
+		"cannot wait a day",
+		"1 urgent proposal in any rolling 7 days",
+		"No proposal is a valid result",
+		`multica squad activity <issue-id> no_action --reason "..."`,
+	} {
+		if !strings.Contains(compact, want) {
+			t.Errorf("expected the proposing block to contain %q\n--- briefing ---\n%s", want, out)
+		}
+	}
+
+	// It sits after the roster and before the user's instructions, and the
+	// briefing as a whole still carries no live mention syntax.
+	roster := strings.Index(out, "## Squad Roster")
+	proposing := strings.Index(out, "## Proposing to the boss")
+	instructions := strings.Index(out, "## Squad Instructions")
+	if !(roster >= 0 && roster < proposing && proposing < instructions) {
+		t.Errorf("block order wrong: roster=%d proposing=%d instructions=%d", roster, proposing, instructions)
+	}
+	if got := util.ParseMentions(squadProposingBriefing(squad)); len(got) != 0 {
+		t.Errorf("the proposing block must not contain mention syntax, found %v", got)
+	}
+}
+
 // Avoid "imported and not used: pgtype" if helpers above are the only users.
 var _ pgtype.UUID

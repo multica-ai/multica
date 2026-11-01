@@ -54,7 +54,7 @@ type Agent struct {
 	DisabledRuntimeSkills []byte      `json:"disabled_runtime_skills"`
 	ServiceTier           pgtype.Text `json:"service_tier"`
 	ConversationStarters  []byte      `json:"conversation_starters"`
-	OfficeRoom            string      `json:"office_room"`
+	HomeSquadID           pgtype.UUID `json:"home_squad_id"`
 }
 
 type AgentBuilderDraft struct {
@@ -325,6 +325,20 @@ type AutopilotTrigger struct {
 	CreatedByType pgtype.Text `json:"created_by_type"`
 	// The member a schedule/webhook run fires AS: dispatch admission, the task's originator/accountable, and every delegated run all resolve to this one human (MUL-6951). For a trigger created since MUL-6951 it is the creator, written at creation. For a legacy trigger it is a best-effort principal inferred once by backfill and frozen (the last publisher, migration 449, else the autopilot's creator, migration 467), not proof of who created it. Ordinary edits never rewrite it, so editing the trigger cannot re-authorize its runs as the editor. NULL means no principal and the dispatch fails closed. No FK; workspace membership is re-validated on every dispatch.
 	CreatedByID pgtype.UUID `json:"created_by_id"`
+}
+
+type Brief struct {
+	ID                pgtype.UUID        `json:"id"`
+	WorkspaceID       pgtype.UUID        `json:"workspace_id"`
+	Kind              string             `json:"kind"`
+	PeriodStart       pgtype.Timestamptz `json:"period_start"`
+	PeriodEnd         pgtype.Timestamptz `json:"period_end"`
+	Title             string             `json:"title"`
+	Body              string             `json:"body"`
+	ProposalIds       []pgtype.UUID      `json:"proposal_ids"`
+	CreatedByAgentID  pgtype.UUID        `json:"created_by_agent_id"`
+	CreatedByMemberID pgtype.UUID        `json:"created_by_member_id"`
+	CreatedAt         pgtype.Timestamptz `json:"created_at"`
 }
 
 type ChannelBindingToken struct {
@@ -1123,6 +1137,38 @@ type IssueWorkflow struct {
 	OwnerID          pgtype.UUID        `json:"owner_id"`
 }
 
+type KnowledgeBase struct {
+	ID          pgtype.UUID        `json:"id"`
+	WorkspaceID pgtype.UUID        `json:"workspace_id"`
+	WeknoraKbID string             `json:"weknora_kb_id"`
+	Key         string             `json:"key"`
+	Name        string             `json:"name"`
+	Visibility  string             `json:"visibility"`
+	Position    int32              `json:"position"`
+	ArchivedAt  pgtype.Timestamptz `json:"archived_at"`
+	CreatedAt   pgtype.Timestamptz `json:"created_at"`
+}
+
+type KnowledgeLink struct {
+	ID                 pgtype.UUID        `json:"id"`
+	WorkspaceID        pgtype.UUID        `json:"workspace_id"`
+	KnowledgeBaseID    pgtype.UUID        `json:"knowledge_base_id"`
+	WeknoraKnowledgeID string             `json:"weknora_knowledge_id"`
+	SourceType         string             `json:"source_type"`
+	SourceID           pgtype.UUID        `json:"source_id"`
+	IdempotencyKey     string             `json:"idempotency_key"`
+	State              string             `json:"state"`
+	CreatedByType      string             `json:"created_by_type"`
+	CreatedByID        pgtype.UUID        `json:"created_by_id"`
+	CreatedAt          pgtype.Timestamptz `json:"created_at"`
+	PublishedAt        pgtype.Timestamptz `json:"published_at"`
+	Title              string             `json:"title"`
+	SourceUrl          string             `json:"source_url"`
+	PendingContent     string             `json:"pending_content"`
+	PublishRequested   bool               `json:"publish_requested"`
+	Error              string             `json:"error"`
+}
+
 type LarkBindingToken struct {
 	TokenHash      string             `json:"token_hash"`
 	WorkspaceID    pgtype.UUID        `json:"workspace_id"`
@@ -1243,6 +1289,15 @@ type NotificationPreference struct {
 	WorkspaceID pgtype.UUID        `json:"workspace_id"`
 	UserID      pgtype.UUID        `json:"user_id"`
 	Preferences []byte             `json:"preferences"`
+	UpdatedAt   pgtype.Timestamptz `json:"updated_at"`
+}
+
+type OfficeFloor struct {
+	ID          pgtype.UUID        `json:"id"`
+	WorkspaceID pgtype.UUID        `json:"workspace_id"`
+	Name        string             `json:"name"`
+	Position    int32              `json:"position"`
+	CreatedAt   pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt   pgtype.Timestamptz `json:"updated_at"`
 }
 
@@ -1398,6 +1453,23 @@ type ProjectResource struct {
 	CreatedBy    pgtype.UUID        `json:"created_by"`
 }
 
+type Proposal struct {
+	ID             pgtype.UUID        `json:"id"`
+	WorkspaceID    pgtype.UUID        `json:"workspace_id"`
+	SquadID        pgtype.UUID        `json:"squad_id"`
+	IssueID        pgtype.UUID        `json:"issue_id"`
+	HandoffSquadID pgtype.UUID        `json:"handoff_squad_id"`
+	Urgent         bool               `json:"urgent"`
+	UrgentReason   string             `json:"urgent_reason"`
+	State          string             `json:"state"`
+	CreatedByType  string             `json:"created_by_type"`
+	CreatedByID    pgtype.UUID        `json:"created_by_id"`
+	DecidedBy      pgtype.UUID        `json:"decided_by"`
+	DecidedAt      pgtype.Timestamptz `json:"decided_at"`
+	DecisionNote   string             `json:"decision_note"`
+	CreatedAt      pgtype.Timestamptz `json:"created_at"`
+}
+
 type QuickAction struct {
 	ID            pgtype.UUID        `json:"id"`
 	WorkspaceID   pgtype.UUID        `json:"workspace_id"`
@@ -1518,6 +1590,8 @@ type Squad struct {
 	ArchivedBy   pgtype.UUID        `json:"archived_by"`
 	AvatarUrl    pgtype.Text        `json:"avatar_url"`
 	Instructions string             `json:"instructions"`
+	FloorID      pgtype.UUID        `json:"floor_id"`
+	OfficeSlot   pgtype.Int2        `json:"office_slot"`
 }
 
 type SquadMember struct {
@@ -1797,7 +1871,8 @@ type Workspace struct {
 	IssueCounter int32              `json:"issue_counter"`
 	AvatarUrl    pgtype.Text        `json:"avatar_url"`
 	// When TRUE, an agent run that resolves to no precise accountable human (would be owner_fallback) is refused at enqueue instead of degrading to the agent owner (MUL-4302 §3.5). Default FALSE = owner_fallback. Never affects authorization (originator_user_id).
-	AttributionFailClosed bool `json:"attribution_fail_closed"`
+	AttributionFailClosed bool        `json:"attribution_fail_closed"`
+	SecretaryAgentID      pgtype.UUID `json:"secretary_agent_id"`
 }
 
 type WorkspaceInvitation struct {
@@ -1811,6 +1886,14 @@ type WorkspaceInvitation struct {
 	CreatedAt     pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt     pgtype.Timestamptz `json:"updated_at"`
 	ExpiresAt     pgtype.Timestamptz `json:"expires_at"`
+}
+
+type WorkspaceKnowledge struct {
+	WorkspaceID      pgtype.UUID        `json:"workspace_id"`
+	WeknoraTenantID  string             `json:"weknora_tenant_id"`
+	ApiKeyCiphertext []byte             `json:"api_key_ciphertext"`
+	State            string             `json:"state"`
+	CreatedAt        pgtype.Timestamptz `json:"created_at"`
 }
 
 type WorkspaceMcpServer struct {

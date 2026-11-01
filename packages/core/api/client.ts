@@ -7,6 +7,21 @@ import type { ArchivedInboxFilters } from "../inbox/filter-store";
 import type { ArchivedInboxPage, ArchivedInboxFacets } from "../types/inbox";
 import { parseQoderConnection, parseQoderCatalog, type QoderInput } from "../runtimes/qoder-schema";
 import { configStore } from "../config";
+import {
+  EMPTY_OFFICE_FLOOR,
+  EMPTY_OFFICE_FLOOR_LIST,
+  EMPTY_OFFICE_SEATS_RESPONSE,
+  OfficeFloorListSchema,
+  OfficeFloorSchema,
+  OfficeSeatsResponseSchema,
+} from "../office/schemas";
+import type {
+  CreateOfficeFloorRequest,
+  OfficeFloor,
+  OfficeSeatAssignment,
+  OfficeSeatsResponse,
+  UpdateOfficeFloorRequest,
+} from "../office/types";
 import type {
   Issue,
   IssuePriority,
@@ -260,6 +275,57 @@ import { type Logger, noopLogger } from "../logger";
 import { createRequestId, createSafeId } from "../utils";
 import { getCurrentSlug } from "../platform/workspace-storage";
 import { parseWithFallback } from "./schema";
+import {
+  BriefListSchema,
+  BriefSchema,
+  FALLBACK_BRIEF,
+  type Brief,
+  type ListBriefsParams,
+  type PublishBriefRequest,
+} from "../office/brief-schema";
+import {
+  DigestSchema,
+  FALLBACK_DIGEST,
+  type Digest,
+  type DigestParams,
+} from "../office/digest-schema";
+import {
+  FALLBACK_OFFICE_SETUP_READINESS,
+  OfficeSetupReadinessSchema,
+  type OfficeSetupReadiness,
+  type OfficeSetupRequest,
+} from "../office/setup-schema";
+import {
+  FALLBACK_KNOWLEDGE_BASES,
+  FALLBACK_KNOWLEDGE_DOCUMENT,
+  FALLBACK_KNOWLEDGE_DOCUMENT_LIST,
+  FALLBACK_KNOWLEDGE_SEARCH,
+  FALLBACK_KNOWLEDGE_STATUS,
+  KnowledgeBasesSchema,
+  KnowledgeDocumentListSchema,
+  KnowledgeDocumentSchema,
+  KnowledgeSearchResultSchema,
+  KnowledgeStatusSchema,
+} from "../knowledge/schemas";
+import type {
+  CreateKnowledgeDocumentRequest,
+  KnowledgeBases,
+  KnowledgeDocument,
+  KnowledgeDocumentList,
+  KnowledgeSearchResult,
+  KnowledgeStatus,
+  ListKnowledgeDocumentsParams,
+  SearchKnowledgeParams,
+} from "../knowledge/types";
+import {
+  FALLBACK_PROPOSAL,
+  ProposalListSchema,
+  ProposalSchema,
+  type CreateProposalRequest,
+  type DecideProposalRequest,
+  type ListProposalsParams,
+  type Proposal,
+} from "../office/proposal-schema";
 import {
   RuntimeProfileSchema,
   RuntimeProfileListSchema,
@@ -3170,7 +3236,7 @@ export class ApiClient {
     });
   }
 
-  async updateWorkspace(id: string, data: { name?: string; description?: string; context?: string; settings?: Record<string, unknown>; repos?: WorkspaceRepo[]; issue_prefix?: string; avatar_url?: string }): Promise<Workspace> {
+  async updateWorkspace(id: string, data: { name?: string; description?: string; context?: string; settings?: Record<string, unknown>; repos?: WorkspaceRepo[]; issue_prefix?: string; avatar_url?: string; secretary_agent_id?: string | null }): Promise<Workspace> {
     return this.fetch(`/api/workspaces/${id}`, {
       method: "PATCH",
       body: JSON.stringify(data),
@@ -4805,7 +4871,7 @@ export class ApiClient {
     }) as Squad;
   }
 
-  async createSquad(data: { name: string; description?: string; leader_id: string; avatar_url?: string }): Promise<Squad> {
+  async createSquad(data: { name: string; description?: string; leader_id: string; avatar_url?: string; floor_name?: string }): Promise<Squad> {
     const raw = await this.fetch<unknown>("/api/squads", { method: "POST", body: JSON.stringify(data) });
     return parseWithFallback(raw, SquadSchema, EMPTY_SQUAD, {
       endpoint: "POST /api/squads",
@@ -4837,6 +4903,44 @@ export class ApiClient {
 
   async updateSquadMemberRole(squadId: string, data: { member_type: string; member_id: string; role: string }): Promise<SquadMember> {
     return this.fetch(`/api/squads/${squadId}/members/role`, { method: "PATCH", body: JSON.stringify(data) });
+  }
+
+  // Office floors and squad seats (the digital company office).
+  async listOfficeFloors(): Promise<OfficeFloor[]> {
+    const raw = await this.fetch<unknown>("/api/office/floors");
+    return parseWithFallback(raw, OfficeFloorListSchema, EMPTY_OFFICE_FLOOR_LIST, {
+      endpoint: "GET /api/office/floors",
+    }) as OfficeFloor[];
+  }
+
+  async createOfficeFloor(data: CreateOfficeFloorRequest): Promise<OfficeFloor> {
+    const raw = await this.fetch<unknown>("/api/office/floors", { method: "POST", body: JSON.stringify(data) });
+    return parseWithFallback(raw, OfficeFloorSchema, EMPTY_OFFICE_FLOOR, {
+      endpoint: "POST /api/office/floors",
+    }) as OfficeFloor;
+  }
+
+  async updateOfficeFloor(id: string, data: UpdateOfficeFloorRequest): Promise<OfficeFloor> {
+    const raw = await this.fetch<unknown>(`/api/office/floors/${id}`, { method: "PUT", body: JSON.stringify(data) });
+    return parseWithFallback(raw, OfficeFloorSchema, EMPTY_OFFICE_FLOOR, {
+      endpoint: "PUT /api/office/floors/:id",
+    }) as OfficeFloor;
+  }
+
+  /** Empty floors only: a floor that still holds a live squad is refused with 409 `floor_not_empty`. */
+  async deleteOfficeFloor(id: string): Promise<void> {
+    await this.fetch(`/api/office/floors/${id}`, { method: "DELETE" });
+  }
+
+  /**
+   * Applies seat moves in one transaction (a swap is two entries). A taken seat
+   * is a 409 whose `ApiError.body` names the holder; see `parseOfficeSeatConflict`.
+   */
+  async setOfficeSeats(seats: OfficeSeatAssignment[]): Promise<OfficeSeatsResponse> {
+    const raw = await this.fetch<unknown>("/api/office/seats", { method: "PUT", body: JSON.stringify(seats) });
+    return parseWithFallback(raw, OfficeSeatsResponseSchema, EMPTY_OFFICE_SEATS_RESPONSE, {
+      endpoint: "PUT /api/office/seats",
+    }) as OfficeSeatsResponse;
   }
 
   // Per-squad members status snapshot: one row per member with derived
@@ -5532,5 +5636,173 @@ export class ApiClient {
       EMPTY_REDEEM_TELEGRAM_BINDING_TOKEN_RESPONSE,
       { endpoint: "POST /api/telegram/binding/redeem" },
     );
+  }
+
+  // The Secretary's digest and briefs
+  async getOfficeDigest(params?: DigestParams): Promise<Digest> {
+    const search = new URLSearchParams();
+    if (params?.since) search.set("since", params.since);
+    const qs = search.toString();
+    const raw = await this.fetch<unknown>(`/api/office/digest${qs ? `?${qs}` : ""}`);
+    return parseWithFallback(raw, DigestSchema, FALLBACK_DIGEST, {
+      endpoint: "GET /api/office/digest",
+    });
+  }
+
+  // The Secretary setup and its readiness checklist (owner or admin).
+  async getOfficeSetup(): Promise<OfficeSetupReadiness> {
+    const raw = await this.fetch<unknown>("/api/office/setup");
+    return parseWithFallback(raw, OfficeSetupReadinessSchema, FALLBACK_OFFICE_SETUP_READINESS, {
+      endpoint: "GET /api/office/setup",
+    });
+  }
+
+  // Idempotent: a second call changes nothing. Without an online Hermes runtime
+  // it rejects with an ApiError whose body parseOfficeSetupRefusal reads.
+  async setupOffice(data: OfficeSetupRequest): Promise<OfficeSetupReadiness> {
+    const raw = await this.fetch<unknown>("/api/office/setup", {
+      method: "POST",
+      body: JSON.stringify(data),
+    });
+    return parseWithFallback(raw, OfficeSetupReadinessSchema, FALLBACK_OFFICE_SETUP_READINESS, {
+      endpoint: "POST /api/office/setup",
+    });
+  }
+
+  async listBriefs(params?: ListBriefsParams): Promise<Brief[]> {
+    const search = new URLSearchParams();
+    if (params?.kind) search.set("kind", params.kind);
+    if (params?.limit) search.set("limit", String(params.limit));
+    const qs = search.toString();
+    const raw = await this.fetch<unknown>(`/api/briefs${qs ? `?${qs}` : ""}`);
+    return parseWithFallback<Brief[]>(raw, BriefListSchema, [], {
+      endpoint: "GET /api/briefs",
+    });
+  }
+
+  async getBrief(id: string): Promise<Brief> {
+    const raw = await this.fetch<unknown>(`/api/briefs/${encodeURIComponent(id)}`);
+    return parseWithFallback(raw, BriefSchema, FALLBACK_BRIEF, {
+      endpoint: "GET /api/briefs/:id",
+    });
+  }
+
+  async publishBrief(data: PublishBriefRequest): Promise<Brief> {
+    const raw = await this.fetch<unknown>("/api/briefs", {
+      method: "POST",
+      body: JSON.stringify(data),
+    });
+    return parseWithFallback(raw, BriefSchema, FALLBACK_BRIEF, {
+      endpoint: "POST /api/briefs",
+    });
+  }
+
+  // Company knowledge. Status and enabling are for owners and admins; reads and
+  // searches are open to members; writes land as drafts until an owner or
+  // admin publishes them.
+  async getKnowledgeStatus(): Promise<KnowledgeStatus> {
+    const raw = await this.fetch<unknown>("/api/knowledge");
+    return parseWithFallback(raw, KnowledgeStatusSchema, FALLBACK_KNOWLEDGE_STATUS, {
+      endpoint: "GET /api/knowledge",
+    });
+  }
+
+  async enableKnowledge(): Promise<KnowledgeStatus> {
+    const raw = await this.fetch<unknown>("/api/knowledge/enable", { method: "POST" });
+    return parseWithFallback(raw, KnowledgeStatusSchema, FALLBACK_KNOWLEDGE_STATUS, {
+      endpoint: "POST /api/knowledge/enable",
+    });
+  }
+
+  async listKnowledgeBases(): Promise<KnowledgeBases> {
+    const raw = await this.fetch<unknown>("/api/knowledge/bases");
+    return parseWithFallback(raw, KnowledgeBasesSchema, FALLBACK_KNOWLEDGE_BASES, {
+      endpoint: "GET /api/knowledge/bases",
+    });
+  }
+
+  async listKnowledgeDocuments(params?: ListKnowledgeDocumentsParams): Promise<KnowledgeDocumentList> {
+    const search = new URLSearchParams();
+    if (params?.kb) search.set("kb", params.kb);
+    if (params?.state) search.set("state", params.state);
+    const qs = search.toString();
+    const raw = await this.fetch<unknown>(`/api/knowledge/documents${qs ? `?${qs}` : ""}`);
+    return parseWithFallback(raw, KnowledgeDocumentListSchema, FALLBACK_KNOWLEDGE_DOCUMENT_LIST, {
+      endpoint: "GET /api/knowledge/documents",
+    });
+  }
+
+  async searchKnowledge(params: SearchKnowledgeParams): Promise<KnowledgeSearchResult> {
+    const search = new URLSearchParams({ q: params.q });
+    if (params.kb) search.set("kb", params.kb);
+    if (params.limit) search.set("limit", String(params.limit));
+    const raw = await this.fetch<unknown>(`/api/knowledge/search?${search.toString()}`);
+    return parseWithFallback(raw, KnowledgeSearchResultSchema, FALLBACK_KNOWLEDGE_SEARCH, {
+      endpoint: "GET /api/knowledge/search",
+    });
+  }
+
+  async createKnowledgeDocument(data: CreateKnowledgeDocumentRequest): Promise<KnowledgeDocument> {
+    const raw = await this.fetch<unknown>("/api/knowledge/documents", {
+      method: "POST",
+      body: JSON.stringify(data),
+    });
+    return parseWithFallback(raw, KnowledgeDocumentSchema, FALLBACK_KNOWLEDGE_DOCUMENT, {
+      endpoint: "POST /api/knowledge/documents",
+    });
+  }
+
+  async publishKnowledgeDocument(id: string): Promise<KnowledgeDocument> {
+    const raw = await this.fetch<unknown>(`/api/knowledge/documents/${id}/publish`, { method: "POST" });
+    return parseWithFallback(raw, KnowledgeDocumentSchema, FALLBACK_KNOWLEDGE_DOCUMENT, {
+      endpoint: "POST /api/knowledge/documents/:id/publish",
+    });
+  }
+
+  async discardKnowledgeDocument(id: string): Promise<void> {
+    await this.fetch(`/api/knowledge/documents/${id}/discard`, { method: "POST" });
+  }
+
+  async deleteKnowledgeDocument(id: string): Promise<void> {
+    await this.fetch(`/api/knowledge/documents/${id}`, { method: "DELETE" });
+  }
+
+  // Proposals (squad requests for a decision by the boss)
+  async listProposals(params?: ListProposalsParams): Promise<Proposal[]> {
+    const search = new URLSearchParams();
+    if (params?.state) search.set("state", params.state);
+    if (params?.squad_id) search.set("squad_id", params.squad_id);
+    const qs = search.toString();
+    const raw = await this.fetch<unknown>(`/api/proposals${qs ? `?${qs}` : ""}`);
+    return parseWithFallback<Proposal[]>(raw, ProposalListSchema, [], {
+      endpoint: "GET /api/proposals",
+    });
+  }
+
+  async getProposal(id: string): Promise<Proposal> {
+    const raw = await this.fetch<unknown>(`/api/proposals/${id}`);
+    return parseWithFallback(raw, ProposalSchema, FALLBACK_PROPOSAL, {
+      endpoint: "GET /api/proposals/:id",
+    });
+  }
+
+  async createProposal(data: CreateProposalRequest): Promise<Proposal> {
+    const raw = await this.fetch<unknown>("/api/proposals", {
+      method: "POST",
+      body: JSON.stringify(data),
+    });
+    return parseWithFallback(raw, ProposalSchema, FALLBACK_PROPOSAL, {
+      endpoint: "POST /api/proposals",
+    });
+  }
+
+  async decideProposal(id: string, data: DecideProposalRequest): Promise<Proposal> {
+    const raw = await this.fetch<unknown>(`/api/proposals/${id}/decision`, {
+      method: "POST",
+      body: JSON.stringify(data),
+    });
+    return parseWithFallback(raw, ProposalSchema, FALLBACK_PROPOSAL, {
+      endpoint: "POST /api/proposals/:id/decision",
+    });
   }
 }

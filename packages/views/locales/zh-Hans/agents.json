@@ -427,6 +427,26 @@
           "name": "DevOps 工程师",
           "description": "将同一个已验证的 digest 逐环境提升，在生产前等待人工批准。"
         },
+        "secretary": {
+          "name": "秘书",
+          "description": "通过每日摘要了解公司情况，撰写老板的简报，并在聊天中回答问题。只拉取信息，从不推送。"
+        },
+        "research_lead": {
+          "name": "研究负责人",
+          "description": "确定市场问题、分派侦察与竞品工作，只提交有证据支持的提案。"
+        },
+        "market_scout": {
+          "name": "市场侦察员",
+          "description": "查找并阅读市场、客户和趋势来源，每条论断都附上日期和链接。"
+        },
+        "competitor_analyst": {
+          "name": "竞品分析师",
+          "description": "基于一手来源比较竞品的产品、定价和动向，每个事实旁注明出处。"
+        },
+        "critic": {
+          "name": "评审员",
+          "description": "在任何内容提交前质疑证据，自己不撰写结论。"
+        },
         "ux_designer": {
           "name": "UX 设计师",
           "description": "依据需求设计页面、状态和设计系统，优先复用现有组件。"

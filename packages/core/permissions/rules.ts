@@ -201,6 +201,20 @@ export function canDeleteWorkspace(ctx: PermissionContext): Decision {
   );
 }
 
+// ---- Knowledge -------------------------------------------------------------
+
+/**
+ * Enable knowledge, publish and discard drafts, delete documents: owners and
+ * admins. Mirrors the router's role gate on the knowledge endpoints.
+ */
+export function canManageKnowledge(ctx: PermissionContext): Decision {
+  if (isAdminLike(ctx.role)) return ALLOW;
+  return deny(
+    "not_admin_role",
+    "Only workspace owners and admins can manage company knowledge.",
+  );
+}
+
 export function canManageMembers(ctx: PermissionContext): Decision {
   if (isAdminLike(ctx.role)) return ALLOW;
   return deny(

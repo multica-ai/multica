@@ -27,6 +27,7 @@
     "./my-issues": "./my-issues/index.ts",
     "./office": "./office/index.ts",
     "./skills": "./skills/index.ts",
+    "./knowledge": "./knowledge/index.ts",
     "./agents": "./agents/index.ts",
     "./agents/agent-detail-page": "./agents/components/agent-detail-page.tsx",
     "./agents/agents-page": "./agents/components/agents-page.tsx",

@@ -39,14 +39,6 @@ import (
 // char_length and the front-end's String.prototype.length-with-counter UX.
 const maxAgentDescriptionLength = 255
 
-// agentOfficeRooms are the departments an agent can sit in on the office
-// floor. The client names them; the server only stores and checks the keys.
-var agentOfficeRooms = []string{"product", "research", "planning", "general"}
-
-func isKnownOfficeRoom(room string) bool {
-	return slices.Contains(agentOfficeRooms, room)
-}
-
 const (
 	maxAgentConversationStarters      = 3
 	maxAgentConversationStarterLabel  = 80
@@ -128,8 +120,9 @@ type AgentResponse struct {
 	// ServiceTier is the runtime-native Codex execution tier persisted for
 	// this agent (empty = inherit local Codex configuration).
 	ServiceTier string `json:"service_tier"`
-	// OfficeRoom is the office room (department) this agent sits in.
-	OfficeRoom string `json:"office_room"`
+	// HomeSquadID is the squad whose office room this agent is drawn in. Null
+	// when the agent is unassigned. Always a live squad the agent belongs to.
+	HomeSquadID *string `json:"home_squad_id"`
 	// ComposioToolkitAllowlist is the subset of Composio toolkit slugs this
 	// agent is allowed to mount as MCP at task dispatch — for ANY run that
 	// passes the agent's invocation permission, using the agent OWNER's
@@ -243,7 +236,7 @@ func (h *Handler) agentToResponse(a db.Agent) AgentResponse {
 		Model:                    a.Model.String,
 		ThinkingLevel:            a.ThinkingLevel.String,
 		ServiceTier:              a.ServiceTier.String,
-		OfficeRoom:               a.OfficeRoom,
+		HomeSquadID:              uuidToPtr(a.HomeSquadID),
 		ComposioToolkitAllowlist: composioAllowlist,
 		OwnerID:                  uuidToPtr(a.OwnerID),
 		Skills:                   []AgentSkillSummary{},
@@ -413,6 +406,11 @@ type AgentTaskResponse struct {
 	// disabling or uninstalling a plugin takes effect on the next task rather
 	// than whenever a daemon happens to restart.
 	PluginHookTools []service.PluginHookTool `json:"plugin_hook_tools,omitempty"`
+	// KnowledgeContext are the company knowledge passages retrieved for an
+	// issue run at claim time, rendered as "Possibly relevant company
+	// knowledge". Empty unless the workspace's knowledge is ready and something
+	// clears the score floor. Mirror field: internal/daemon/types.go.
+	KnowledgeContext []service.KnowledgeHitView `json:"knowledge_context,omitempty"`
 	// RemoteMCPDaemonToken is a short-lived, workspace-and-daemon scoped
 	// credential used only by the local daemon's write-only Remote MCP broker.
 	// It is never injected into the agent process.
@@ -1731,6 +1729,12 @@ func (h *Handler) CreateAgent(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
+	// A workspace with company knowledge enabled gives every new agent the
+	// read-only company-read MCP server; a no-op otherwise.
+	if err := qtx.AssignKnowledgeMcpToAgent(r.Context(), db.AssignKnowledgeMcpToAgentParams{AgentID: created.ID, WorkspaceID: wsUUID}); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to attach company knowledge")
+		return
+	}
 	if err := tx.Commit(r.Context()); err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to commit agent create")
 		return
@@ -1811,9 +1815,10 @@ type UpdateAgentRequest struct {
 	// ServiceTier follows the same tri-state contract as ThinkingLevel:
 	// omitted preserves, empty clears, and non-empty sets a Codex catalog ID.
 	ServiceTier *string `json:"service_tier"`
-	// OfficeRoom moves the agent to another office room. It is always set to a
-	// known room: there is no clear, because every agent sits in some room.
-	OfficeRoom *string `json:"office_room"`
+	// HomeSquadID sets the squad this agent is drawn in on the office. It is a
+	// tri-state like thinking_level: omitted leaves it alone, null clears it, a
+	// squad id must name a live squad of the workspace the agent belongs to.
+	HomeSquadID *string `json:"home_squad_id"`
 	// ComposioToolkitAllowlist is a tri-state, same pattern as
 	// thinking_level, mcp_config:
 	//   - field omitted → no change (column preserved as-is)
@@ -2239,12 +2244,33 @@ func (h *Handler) UpdateAgent(w http.ResponseWriter, r *http.Request) {
 	if req.Status != nil {
 		params.Status = pgtype.Text{String: *req.Status, Valid: true}
 	}
-	if req.OfficeRoom != nil {
-		if !isKnownOfficeRoom(*req.OfficeRoom) {
-			writeError(w, http.StatusBadRequest, fmt.Sprintf("office_room must be one of %s", strings.Join(agentOfficeRooms, ", ")))
+	// home_squad_id: validated here so a bad value fails the whole request
+	// before anything is written; applied after the main update below.
+	_, hasHomeSquad := rawFields["home_squad_id"]
+	var homeSquadUUID pgtype.UUID
+	if hasHomeSquad && req.HomeSquadID != nil {
+		homeSquadUUID, ok = parseUUIDOrBadRequest(w, *req.HomeSquadID, "home_squad_id")
+		if !ok {
 			return
 		}
-		params.OfficeRoom = pgtype.Text{String: *req.OfficeRoom, Valid: true}
+		homeSquad, err := h.Queries.GetSquadInWorkspace(r.Context(), db.GetSquadInWorkspaceParams{
+			ID: homeSquadUUID, WorkspaceID: existing.WorkspaceID,
+		})
+		if err != nil || homeSquad.ArchivedAt.Valid {
+			writeError(w, http.StatusBadRequest, "home_squad_id must be a live squad of this workspace")
+			return
+		}
+		isMember, err := h.Queries.IsSquadMember(r.Context(), db.IsSquadMemberParams{
+			SquadID: homeSquadUUID, MemberType: "agent", MemberID: existing.ID,
+		})
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "failed to validate home squad")
+			return
+		}
+		if !isMember {
+			writeError(w, http.StatusBadRequest, "home_squad_id must be a squad this agent belongs to")
+			return
+		}
 	}
 	if req.MaxConcurrentTasks != nil {
 		if err := validateAgentMaxConcurrentTasks(*req.MaxConcurrentTasks); err != nil {
@@ -2536,6 +2562,24 @@ func (h *Handler) UpdateAgent(w http.ResponseWriter, r *http.Request) {
 		if err != nil {
 			slog.Warn("clear agent composio_toolkit_allowlist failed", append(logger.RequestAttrs(r), "error", err, "agent_id", id)...)
 			writeError(w, http.StatusInternalServerError, "failed to clear composio_toolkit_allowlist")
+			return
+		}
+	}
+
+	if hasHomeSquad {
+		updated, err = h.Queries.SetAgentHomeSquad(r.Context(), db.SetAgentHomeSquadParams{
+			ID:          updated.ID,
+			WorkspaceID: updated.WorkspaceID,
+			HomeSquadID: homeSquadUUID,
+		})
+		if errors.Is(err, pgx.ErrNoRows) {
+			// The squad membership was removed between validation and write.
+			writeError(w, http.StatusConflict, "home_squad_id must be a squad this agent belongs to")
+			return
+		}
+		if err != nil {
+			slog.Warn("set agent home squad failed", append(logger.RequestAttrs(r), "error", err, "agent_id", id)...)
+			writeError(w, http.StatusInternalServerError, "failed to set home squad")
 			return
 		}
 	}

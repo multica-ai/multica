@@ -1,0 +1,44 @@
+{
+  "data": [
+    {
+      "chunk_index": 0,
+      "chunk_type": "text",
+      "content": "# Brand voice\n\nWe write plainly. Our refund window is 14 days. Support answers within 4 hours.",
+      "end_at": 94,
+      "id": "4211a099-0806-477f-b4ab-56386ddf7523",
+      "image_info": "",
+      "knowledge_base_id": "6230f301-de2c-4009-bd05-120bc0e6b2a0",
+      "knowledge_channel": "web",
+      "knowledge_filename": "Brand voice.md",
+      "knowledge_id": "3654005a-2cda-4b47-b767-25dddae0a291",
+      "knowledge_source": "manual",
+      "knowledge_title": "Brand voice",
+      "match_type": 0,
+      "matched_content": "Brand voice\n# Brand voice\n\nWe write plainly. Our refund window is 14 days. Support answers within 4 hours.",
+      "metadata": {
+        "content": "# Brand voice\n\nWe write plainly. Our refund window is 14 days. Support answers within 4 hours.",
+        "format": "markdown",
+        "status": "publish",
+        "updated_at": "2026-11-01T10:51:34Z",
+        "version": "2"
+      },
+      "parent_chunk_id": "",
+      "score": 0.7152914491107075,
+      "seq": 0,
+      "start_at": 0,
+      "sub_chunk_id": null
+    }
+  ],
+  "meta": {
+    "rerank": {
+      "applied": false,
+      "candidate_count": 1,
+      "effective_threshold": 0.2,
+      "outcome": "no_model",
+      "result_count": 1,
+      "threshold": 0.2,
+      "top_score": 0
+    }
+  },
+  "success": true
+}

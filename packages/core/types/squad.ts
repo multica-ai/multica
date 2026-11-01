@@ -23,6 +23,10 @@ export interface Squad {
   archived_by: string | null;
   member_count?: number;
   member_preview?: SquadMemberPreview[];
+  /** The office floor this squad is seated on. Null while unseated; older backends omit it. */
+  floor_id?: string | null;
+  /** The room slot (0 to 5) on that floor. Set exactly when `floor_id` is. */
+  office_slot?: number | null;
 }
 
 export interface SquadMember {
@@ -50,6 +54,11 @@ export interface CreateSquadRequest {
   description?: string;
   leader_id: string;
   avatar_url?: string;
+  /**
+   * Names the floor this squad creates when every existing floor is full. A
+   * template uses it to name its floor; ignored when a free seat exists.
+   */
+  floor_name?: string;
 }
 
 export interface UpdateSquadRequest {

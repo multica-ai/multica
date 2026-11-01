@@ -1328,6 +1328,10 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 		slog.Info("vcs integration disabled (MULTICA_VCS_SECRET_KEY not set)")
 	}
 
+	// Company knowledge base (optional WeKnora sidecar). Always wired so the
+	// status endpoint can say "not offered"; see knowledge.go.
+	h.Knowledge = newKnowledgeService(queries, pool)
+
 	// Plugin secrets use a dedicated deployment key. Keeping this separate from
 	// VCS and channel secrets gives operators an isolated rotation and blast
 	// radius; without it, saving a `secret` config field fails closed rather
@@ -2023,6 +2027,27 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 			// Assignee frequency
 			r.Get("/api/assignee-frequency", h.GetAssigneeFrequency)
 
+			// Company knowledge base. Status and one-time provisioning are for
+			// human owners and admins. Reading, searching and writing drafts
+			// are open to members and agents. Publish, discard and delete are
+			// for human owners and admins: a person curates what becomes the
+			// company's record.
+			r.Route("/api/knowledge", func(r chi.Router) {
+				r.Group(func(r chi.Router) {
+					r.Use(handler.RequireHumanActor)
+					r.Use(middleware.RequireWorkspaceRole(queries, "owner", "admin"))
+					r.Get("/", h.GetKnowledge)
+					r.Post("/enable", h.EnableKnowledge)
+					r.Post("/documents/{id}/publish", h.PublishKnowledgeDocument)
+					r.Post("/documents/{id}/discard", h.DiscardKnowledgeDocument)
+					r.Delete("/documents/{id}", h.DeleteKnowledgeDocument)
+				})
+				r.Get("/bases", h.ListKnowledgeBases)
+				r.Get("/documents", h.ListKnowledgeDocuments)
+				r.Post("/documents", h.CreateKnowledgeDocument)
+				r.Get("/search", h.SearchKnowledge)
+			})
+
 			// Local search index sync for Web/Desktop (MUL-7754). Human clients
 			// only: agents search through /api/issues/search.
 			r.Route("/api/search-index", func(r chi.Router) {
@@ -2212,6 +2237,39 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					r.Delete("/members", h.RemoveSquadMember)
 					r.Patch("/members/role", h.UpdateSquadMemberRole)
 				})
+			})
+
+			// Proposals: a squad's request for a decision by the boss. Decisions
+			// are refused to agent actors inside the handler.
+			r.Route("/api/proposals", func(r chi.Router) {
+				r.Get("/", h.ListProposals)
+				r.Post("/", h.CreateProposal)
+				r.Route("/{id}", func(r chi.Router) {
+					r.Get("/", h.GetProposal)
+					r.Post("/decision", h.DecideProposal)
+				})
+			})
+			// Digital company office: floors (owner/admin) and squad seats.
+			// Flat registrations on purpose: other office endpoints (digest,
+			// briefs) live under the same prefix, and a second r.Route on it
+			// would panic at startup.
+			r.Get("/api/office/floors", h.ListOfficeFloors)
+			r.Post("/api/office/floors", h.CreateOfficeFloor)
+			r.Put("/api/office/floors/{id}", h.UpdateOfficeFloor)
+			r.Delete("/api/office/floors/{id}", h.DeleteOfficeFloor)
+			r.Put("/api/office/seats", h.PutOfficeSeats)
+			// The Secretary's digest: facts about the company, any member.
+			r.Get("/api/office/digest", h.GetOfficeDigest)
+			// The Secretary setup and its readiness checklist (owner or admin).
+			// Setup is idempotent: a second POST changes nothing.
+			r.Get("/api/office/setup", h.GetOfficeSetup)
+			r.Post("/api/office/setup", h.SetupOffice)
+			// Briefs: the Secretary's reports to the boss. Who may publish is
+			// decided in the handler (secretary agent or admin member).
+			r.Route("/api/briefs", func(r chi.Router) {
+				r.Get("/", h.ListBriefs)
+				r.Post("/", h.CreateBrief)
+				r.Get("/{id}", h.GetBrief)
 			})
 
 			// Squad leader evaluation (writes to activity_log)

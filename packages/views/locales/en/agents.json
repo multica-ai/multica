@@ -439,6 +439,26 @@
           "name": "DevOps Engineer",
           "description": "Promotes one verified digest through the environments and waits for a person before production."
         },
+        "secretary": {
+          "name": "Secretary",
+          "description": "Reads the company through the daily digest, writes the boss's brief, and answers questions in chat. Pulls, never pushes."
+        },
+        "research_lead": {
+          "name": "Research Lead",
+          "description": "Sets the market question, delegates scouting, and files only the proposals the evidence supports."
+        },
+        "market_scout": {
+          "name": "Market Scout",
+          "description": "Finds and reads market, customer, and trend sources, and cites a date and link for every claim."
+        },
+        "competitor_analyst": {
+          "name": "Competitor Analyst",
+          "description": "Compares competitors' products, pricing, and moves from primary sources, with a source beside each fact."
+        },
+        "critic": {
+          "name": "Critic",
+          "description": "Challenges the evidence before anything is filed, and never writes findings of its own."
+        },
         "ux_designer": {
           "name": "UX Designer",
           "description": "Designs screens, states, and the design system from requirements, reusing existing components first."

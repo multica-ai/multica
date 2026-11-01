@@ -2,9 +2,11 @@ package handler
 
 import (
 	"context"
+	"fmt"
 	"strings"
 
 	"github.com/jackc/pgx/v5/pgtype"
+	"github.com/multica-ai/multica/server/internal/service"
 	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
@@ -221,6 +223,50 @@ const squadSteerRule = `- A worker already running on this issue gets a new comm
   the command reports per run whether it was. New work is still a normal
   delegation.`
 
+// squadProposingBriefing is the system-managed "Proposing to the boss" block.
+// It is sent only to leaders of squads that work on a schedule (an active
+// autopilot assigned to the squad), the squads whose runs can end with
+// something the boss must decide. The limits are rendered from the service
+// constants so the text cannot drift from what the server enforces.
+//
+// It repeats nothing from the Operating Protocol; it only points at the
+// protocol's own recording rule for the "nothing to propose" outcome.
+func squadProposingBriefing(squad db.Squad) string {
+	return fmt.Sprintf(`## Proposing to the boss
+
+Your squad works on a schedule, so a run can surface something only the boss
+can decide: a new direction, spend, or a risk. File it as a proposal. Do not
+post it as a comment on the boss or the Secretary.
+
+`+"`"+`multica proposal create --squad %s --title "..." --summary "..." \
+  --evidence <url> [--evidence <url> ...] --recommendation "..." \
+  --option "..." [--option "..."] --cost-risk "..." --ask "..." \
+  [--handoff-squad <squad-id-or-name>]`+"`"+`
+
+- Every part is required: a summary, at least one evidence link, a
+  recommendation, the options you considered, cost and risk, and the exact
+  decision you ask for. Use `+"`"+`--handoff-squad`+"`"+` to name the squad that should
+  start the work if the boss approves.
+- A proposal queues silently and reaches the boss in the Secretary's next
+  brief. It notifies no one, so do not @mention anyone to chase it.
+- The server limits how many proposals a squad may have: at most %d waiting
+  for a decision, %d filed in any rolling 7 days, and %d waiting across the
+  whole workspace. At a limit the command fails with a message saying so;
+  take that as the answer for this turn and do not retry or work around it.
+- `+"`"+`--urgent --urgent-reason "..."`+"`"+` is only for a decision that cannot wait a
+  day. It assigns the proposal to the boss at once, and a squad gets %d urgent
+  proposal in any rolling 7 days. When in doubt, file without it.
+- No proposal is a valid result. File one only when the evidence clears the
+  bar your task states. When nothing does, file nothing and record that with
+  `+"`"+`multica squad activity <issue-id> no_action --reason "..."`+"`"+`.`,
+		util.UUIDToString(squad.ID),
+		service.ProposalMaxPendingPerSquad,
+		service.ProposalMaxCreatedPerSquadPerWeek,
+		service.ProposalMaxPendingPerWorkspace,
+		service.ProposalMaxUrgentPerSquadPerWeek,
+	)
+}
+
 // squadOperatingProtocolFor assembles the protocol, selecting the parent-status
 // responsibility that matches this leader's actual authority over the issue
 // and, for an owner, whether the issue's project workflow governs its moves.
@@ -247,6 +293,9 @@ func squadOperatingProtocolFor(ownsIssueStatus bool, workflow leaderWorkflow) st
 //  3. Squad Instructions (user-defined `squad.instructions`, omitted when
 //     empty so we don't leave a dangling heading).
 //
+// Between the roster and the instructions, a squad with an active autopilot
+// also gets "Proposing to the boss" (see squadProposingBriefing).
+//
 // ownsIssueStatus must be true only when the issue this task is bound to is
 // assigned to this very squad. The briefing is injected on every leader path,
 // including ones where the squad is a guest on someone else's issue, so this
@@ -270,6 +319,15 @@ func buildSquadLeaderBriefing(ctx context.Context, q *db.Queries, squad db.Squad
 	}
 	sb.WriteString("\n\n")
 	sb.WriteString(buildSquadRoster(ctx, q, squad))
+
+	// A failed lookup leaves the block out: the leader works as before, and a
+	// squad that proposes less is the safe direction to fail in.
+	if scheduled, err := q.HasActiveSquadAutopilot(ctx, db.HasActiveSquadAutopilotParams{
+		WorkspaceID: squad.WorkspaceID, AssigneeID: squad.ID,
+	}); err == nil && scheduled {
+		sb.WriteString("\n\n")
+		sb.WriteString(squadProposingBriefing(squad))
+	}
 
 	if trimmed := strings.TrimSpace(squad.Instructions); trimmed != "" {
 		sb.WriteString("\n\n## Squad Instructions (")

@@ -224,3 +224,89 @@ describe("specialist templates", () => {
     }
   });
 });
+
+describe("secretary template", () => {
+  const secretary = AGENT_INSTRUCTION_TEMPLATES.find((t) => t.id === "secretary")?.instructions ?? "";
+
+  it("reads the company only through the digest, and says so first", () => {
+    expect(secretary).toContain("multica brief digest --since 24h --json");
+    expect(secretary).toContain("The digest is the only source of company facts");
+    expect(secretary).toContain("never from memory");
+  });
+
+  it("searches company knowledge before answering what-do-we-know questions", () => {
+    expect(secretary).toContain('multica knowledge search "<question>"');
+  });
+
+  it("writes the brief sections in the agreed order", () => {
+    const headings = [
+      "## Headline",
+      "## Needs your decision",
+      "## Progress",
+      "## Blockers and risks",
+      "## Watch",
+      "## FYI",
+    ];
+    const at = headings.map((h) => secretary.indexOf(h));
+
+    expect(at.every((i) => i >= 0)).toBe(true);
+    expect([...at].sort((a, b) => a - b)).toEqual(at);
+    expect(secretary).toContain("Publish it with `multica brief publish`");
+  });
+
+  it("keeps the brief decision-first and the language rule explicit", () => {
+    expect(secretary).toContain("Decision first");
+    expect(secretary).toContain("Nothing needs you today.");
+    expect(secretary).toContain("the language of the boss's last message");
+    expect(secretary).toContain("the language of your autopilot's description");
+  });
+
+  it("caps inquiries at three per brief and asks only through a comment mention", () => {
+    expect(secretary).toContain("At most three inquiries per brief");
+    expect(secretary).toContain("comment on the flagged issue and mention the squad leader");
+  });
+
+  it("states the authority table: no decisions, no status or assignee changes, no deletes", () => {
+    expect(secretary).toContain("You may not decide a proposal");
+    expect(secretary).toContain("You may not change an issue's status or assignee, delete anything");
+    expect(secretary).toContain("create work nobody asked for");
+    expect(secretary).toContain("contact anything outside this workspace");
+  });
+
+  it("keeps company facts out of memory", () => {
+    expect(secretary).toContain("Company facts never go to memory");
+    expect(secretary).toContain("Save a preference only when the boss states it");
+  });
+});
+
+describe("market research templates", () => {
+  const instructionsOf = (id: AgentInstructionTemplate["id"]) =>
+    AGENT_INSTRUCTION_TEMPLATES.find((t) => t.id === id)?.instructions ?? "";
+
+  it("makes the research lead file only evidenced proposals through the CLI", () => {
+    const lead = instructionsOf("research_lead");
+
+    expect(lead).toContain("multica proposal create");
+    expect(lead).toContain("Propose nothing you cannot support with evidence");
+    expect(lead).toContain("A proposal is a request for the boss's decision");
+  });
+
+  it("sends the findings through the critic before anything is filed", () => {
+    expect(instructionsOf("research_lead")).toContain(
+      "Send the findings to the critic before you decide anything",
+    );
+    expect(instructionsOf("critic")).toContain("PASS WITH CONDITIONS");
+    expect(instructionsOf("critic")).toContain("must not be filed");
+  });
+
+  it("requires a dated source for every scout and competitor claim", () => {
+    for (const id of ["market_scout", "competitor_analyst"] as const) {
+      expect(instructionsOf(id), id).toContain("source");
+      expect(instructionsOf(id), id).toContain("not verified");
+    }
+  });
+
+  it("keeps the critic from doing research or editing the findings", () => {
+    expect(instructionsOf("critic")).toContain("You do not edit the findings or the proposal");
+  });
+});

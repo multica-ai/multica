@@ -439,6 +439,26 @@
           "name": "Ingénieur DevOps",
           "description": "Promeut un seul digest vérifié d'un environnement à l'autre et attend une personne avant la production."
         },
+        "secretary": {
+          "name": "Secrétaire",
+          "description": "Lit l'entreprise à travers le condensé quotidien, rédige le brief du patron et répond aux questions dans le chat. Il interroge, il ne pousse jamais."
+        },
+        "research_lead": {
+          "name": "Responsable de recherche",
+          "description": "Pose la question de marché, délègue la veille et ne dépose que les propositions que les preuves soutiennent."
+        },
+        "market_scout": {
+          "name": "Éclaireur de marché",
+          "description": "Trouve et lit les sources sur les marchés, les clients et les tendances, et cite une date et un lien pour chaque affirmation."
+        },
+        "competitor_analyst": {
+          "name": "Analyste concurrentiel",
+          "description": "Compare les produits, les prix et les mouvements des concurrents à partir de sources primaires, avec la source à côté de chaque fait."
+        },
+        "critic": {
+          "name": "Critique",
+          "description": "Remet en question les preuves avant tout dépôt, et ne rédige jamais de conclusions propres."
+        },
         "ux_designer": {
           "name": "Designer UX",
           "description": "Conçoit écrans, états et design system à partir des exigences, en réutilisant d'abord l'existant."

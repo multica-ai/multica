@@ -1,0 +1,64 @@
+{
+  "data": {
+    "capabilities": {
+      "auto_accept_invitation": false,
+      "can_create_tenant": true
+    },
+    "memberships": [
+      {
+        "role": "owner",
+        "tenant_id": 10000,
+        "tenant_name": "boss's Workspace"
+      },
+      {
+        "role": "owner",
+        "tenant_id": 10001,
+        "tenant_name": "ws-company-A"
+      },
+      {
+        "role": "owner",
+        "tenant_id": 10002,
+        "tenant_name": "mcl-fixture-ws"
+      }
+    ],
+    "preference_defaults": {
+      "browser_search_instructions": "Default search engine: Bing.\nSearch URL: https://www.bing.com/search?q={query}"
+    },
+    "tenant": {
+      "business": "",
+      "context_config": {
+        "compression_strategy": "",
+        "max_tokens": 0,
+        "recent_message_count": 0,
+        "summarize_threshold": 0
+      },
+      "created_at": "2026-11-01T18:00:29.302112+08:00",
+      "deleted_at": null,
+      "description": "Default workspace",
+      "id": 10000,
+      "name": "boss's Workspace",
+      "retriever_engines": {
+        "engines": []
+      },
+      "status": "active",
+      "storage_quota": 10737418240,
+      "storage_used": 378924,
+      "updated_at": "2026-11-01T18:01:54.970487+08:00"
+    },
+    "tenant_required": false,
+    "user": {
+      "avatar": "",
+      "can_access_all_tenants": false,
+      "created_at": "2026-11-01T18:00:29.363959+08:00",
+      "email": "boss@example.test",
+      "id": "73eab53f-20c2-46c9-b274-dd42a6bd807d",
+      "is_active": true,
+      "is_system_admin": false,
+      "preferences": {},
+      "tenant_id": 10000,
+      "updated_at": "2026-11-01T18:00:29.363959+08:00",
+      "username": "boss"
+    }
+  },
+  "success": true
+}
