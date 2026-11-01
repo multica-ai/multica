@@ -4,7 +4,7 @@
  * The office is the pixtuoid engine on a canvas. jsdom has no WebAssembly office,
  * so the engine is replaced by a stub that records the sessions it is given and
  * reports a tag for each seated worker. These tests cover what the view decides:
- * which issues are workers, the tag each one shows, and which panel a click opens.
+ * who sits where (home squad, floor), the tag each worker shows, and which panel a click opens.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, screen } from "@testing-library/react";
@@ -12,10 +12,12 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { ViewStoreProvider } from "@multica/core/issues/stores/view-store-context";
 import { getIssueSurfaceViewStore } from "@multica/core/issues/stores/surface-view-store";
 import { IssuePeekActionsContext } from "../../issues/surface/peek-context";
-import type { Issue, IssueStatus } from "@multica/core/types";
+import type { Issue, IssueStatus, Squad } from "@multica/core/types";
 import { renderWithI18n } from "../../test/i18n";
 import { IssueContextMenuProvider } from "../../issues/actions/issue-actions-context-menu";
 import { workspaceKeys } from "@multica/core/workspace/queries";
+import { officeKeys, useOfficeFloorStore, type OfficeFloor } from "@multica/core/office";
+import { useModalStore } from "@multica/core/modals";
 import type { Agent } from "@multica/core/types";
 import { OfficeView } from "./office-view";
 
@@ -175,9 +177,28 @@ class ObserverStub {
 
 const STATUSES: IssueStatus[] = ["backlog", "todo", "in_progress", "in_review", "blocked", "done"];
 
-function makeAgent(id: string, room: string | undefined): Agent {
-  return { id, name: `Agent ${id}`, office_room: room } as Agent;
+const FLOORS: OfficeFloor[] = [
+  { id: "f1", workspace_id: "ws-1", name: "Floor 1", position: 0, created_at: "", updated_at: "" },
+  { id: "f2", workspace_id: "ws-1", name: "Floor 2", position: 1, created_at: "", updated_at: "" },
+];
+
+function makeSquad(id: string, leader: string, seat?: { floor: string; slot: number }): Squad {
+  return {
+    id,
+    name: `Squad ${id}`,
+    leader_id: leader,
+    archived_at: null,
+    floor_id: seat?.floor ?? null,
+    office_slot: seat?.slot ?? null,
+  } as Squad;
 }
+
+function makeAgent(id: string, home: string | null): Agent {
+  return { id, name: `Agent ${id}`, home_squad_id: home, archived_at: null } as Agent;
+}
+
+const SQUADS = [makeSquad("s1", "agent-1", { floor: "f1", slot: 0 }), makeSquad("s2", "agent-3", { floor: "f2", slot: 2 })];
+const AGENTS = [makeAgent("agent-1", "s1"), makeAgent("agent-2", "s1"), makeAgent("agent-3", "s2"), makeAgent("agent-4", null)];
 
 describe("OfficeView", () => {
   let queryClient: QueryClient;
@@ -186,6 +207,9 @@ describe("OfficeView", () => {
     engine.starts.length = 0;
     engine.working.clear();
     engine.ends.length = 0;
+    engine.rooms.clear();
+    useOfficeFloorStore.setState({ lastFloorId: null });
+    useModalStore.getState().close();
     vi.stubGlobal("Worker", FakeWorker);
     HTMLCanvasElement.prototype.transferControlToOffscreen = () => ({}) as OffscreenCanvas;
     vi.stubGlobal("IntersectionObserver", ObserverStub);
@@ -203,9 +227,25 @@ describe("OfficeView", () => {
 
   function setup(
     issues: Issue[],
-    options: { grouping?: "status" | "assignee"; open?: (issueId: string) => void; agents?: Agent[] } = {},
+    options: {
+      grouping?: "status" | "assignee";
+      open?: (issueId: string) => void;
+      agents?: Agent[];
+      squads?: Squad[];
+      floors?: OfficeFloor[];
+    } = {},
   ) {
-    queryClient.setQueryData(workspaceKeys.agents("ws-1"), options.agents ?? []);
+    queryClient.setQueryData(workspaceKeys.agents("ws-1"), options.agents ?? AGENTS);
+    queryClient.setQueryData(workspaceKeys.squads("ws-1"), options.squads ?? SQUADS);
+    queryClient.setQueryData(officeKeys.floors("ws-1"), options.floors ?? FLOORS);
+    for (const squad of options.squads ?? SQUADS) {
+      queryClient.setQueryData(
+        officeKeys.squadMembers("ws-1", squad.id),
+        (options.agents ?? AGENTS)
+          .filter((agent) => agent.home_squad_id === squad.id)
+          .map((agent) => ({ member_type: "agent", member_id: agent.id })),
+      );
+    }
     const store = getIssueSurfaceViewStore(`office-${Math.floor(Math.random() * 1e9)}`);
     store.getState().setGrouping(options.grouping ?? "status");
     const peek = { open: options.open ?? (() => {}), toggle: () => {}, close: () => {}, publishColumns: () => {} };
@@ -228,16 +268,42 @@ describe("OfficeView", () => {
     return { store, rerender: (list: Issue[]) => result.rerender(view(list)) };
   }
 
-  it("seats one worker for each agent on the project, not one per issue", async () => {
-    setup([
-      makeIssue("a", "todo", "agent-1"),
-      makeIssue("b", "todo"),
-      makeIssue("c", "in_progress", "agent-1"),
-      makeIssue("d", "todo", "agent-2"),
-    ]);
+  it("seats each agent in its home squad's room, with or without an issue", async () => {
+    setup([]);
 
-    await screen.findByRole("button", { name: "Todo" });
+    await vi.waitFor(() => expect(engine.starts).toEqual(["agent-1", "agent-2"]));
+    expect(engine.rooms.get("agent-1")).toBe(0);
+    expect(engine.rooms.get("agent-2")).toBe(0);
+  });
+
+  it("does not seat agents of another floor or agents without a home squad", async () => {
+    setup([makeIssue("a", "todo", "agent-4"), makeIssue("b", "todo", "agent-3")]);
+
+    await screen.findAllByRole("button", { name: "Waiting for work" });
+    expect(screen.queryByRole("button", { name: "Todo" })).toBeNull();
     expect(engine.starts).toEqual(["agent-1", "agent-2"]);
+  });
+
+  it("shows the floor last viewed", async () => {
+    useOfficeFloorStore.setState({ lastFloorId: "f2" });
+    setup([]);
+
+    await vi.waitFor(() => expect(engine.starts).toEqual(["agent-3"]));
+    expect(engine.rooms.get("agent-3")).toBe(2);
+  });
+
+  it("falls back to the first floor when the remembered one is gone", async () => {
+    useOfficeFloorStore.setState({ lastFloorId: "deleted" });
+    setup([]);
+
+    await vi.waitFor(() => expect(engine.starts).toEqual(["agent-1", "agent-2"]));
+  });
+
+  it("shows waiting for work over an agent with no open issue", async () => {
+    setup([makeIssue("d", "done", "agent-2")]);
+
+    expect((await screen.findAllByRole("button", { name: "Waiting for work" })).length).toBe(2);
+    expect(screen.queryByRole("button", { name: "Done" })).toBeNull();
   });
 
   it("shows the status of the agent's issue in progress over its head", async () => {
@@ -247,12 +313,11 @@ describe("OfficeView", () => {
     expect(screen.queryByRole("button", { name: "Todo" })).toBeNull();
   });
 
-  it("shows waiting for work, not the status, when all of an agent's issues are done", async () => {
-    setup([makeIssue("d", "done", "agent-2")]);
+  it("shows a squad's issue over the squad leader", async () => {
+    const squadIssue = { ...makeIssue("q", "in_review"), assignee_type: "squad", assignee_id: "s1" } as Issue;
+    setup([squadIssue]);
 
-    expect(await screen.findByRole("button", { name: "Waiting for work" })).toBeTruthy();
-    expect(screen.queryByRole("button", { name: "Done" })).toBeNull();
-    expect(engine.starts).toEqual(["agent-2"]);
+    expect(await screen.findByRole("button", { name: "In Review" })).toBeTruthy();
   });
 
   it("opens the agent's panel on its current issue when its tag is clicked", async () => {
@@ -266,7 +331,8 @@ describe("OfficeView", () => {
   it("opens the same panel, on its chat, when an idle agent's tag is clicked", async () => {
     setup([makeIssue("d", "done", "agent-1")]);
 
-    fireEvent.click(await screen.findByRole("button", { name: "Waiting for work" }));
+    const tags = await screen.findAllByRole("button", { name: "Waiting for work" });
+    fireEvent.click(tags[0]!);
 
     expect(screen.getByText("panel agent-1 chat")).toBeTruthy();
   });
@@ -299,37 +365,28 @@ describe("OfficeView", () => {
     rerender([makeIssue("a", "in_review", "agent-1")]);
 
     expect(await screen.findByRole("button", { name: "In Review" })).toBeTruthy();
-    expect(engine.starts).toEqual(["agent-1"]);
     expect(engine.ends).toEqual([]);
   });
 
-  it("moves the tag off a worker's issue once that issue is done", async () => {
-    const { rerender } = setup([makeIssue("a", "in_review", "agent-1")]);
-    expect(await screen.findByRole("button", { name: "In Review" })).toBeTruthy();
-
-    rerender([makeIssue("a", "done", "agent-1")]);
-
-    expect(await screen.findByRole("button", { name: "Waiting for work" })).toBeTruthy();
-    expect(screen.queryByRole("button", { name: "In Review" })).toBeNull();
-  });
-
-  it("shows the worker's next open issue once the one it was showing is done", async () => {
-    const { rerender } = setup([makeIssue("a", "in_review", "agent-1"), makeIssue("b", "todo", "agent-1")]);
-    expect(await screen.findByRole("button", { name: "In Review" })).toBeTruthy();
-
-    rerender([makeIssue("a", "done", "agent-1"), makeIssue("b", "todo", "agent-1")]);
-
-    expect(await screen.findByRole("button", { name: "Todo" })).toBeTruthy();
-    expect(screen.queryByRole("button", { name: "In Review" })).toBeNull();
-  });
-
-  it("sends a worker home once its agent has no issues on the project", async () => {
+  it("keeps an agent seated when its issue goes away", async () => {
     const { rerender } = setup([makeIssue("a", "todo", "agent-1")]);
     await screen.findByRole("button", { name: "Todo" });
 
     rerender([makeIssue("a", "todo")]);
 
-    await vi.waitFor(() => expect(engine.ends).toEqual(["agent-1"]));
+    await vi.waitFor(() => expect(screen.queryByRole("button", { name: "Todo" })).toBeNull());
+    expect(engine.ends).toEqual([]);
+  });
+
+  it("names the rooms after their squads and offers to create one in an empty room", async () => {
+    setup([]);
+
+    expect(await screen.findByText("Squad s1")).toBeTruthy();
+    expect(screen.getByText("Empty room")).toBeTruthy();
+
+    fireEvent.click(await screen.findByRole("button", { name: "Create squad" }));
+
+    expect(useModalStore.getState().modal).toBe("create-squad");
   });
 
   it("opens the kanban board from the wall board", async () => {
@@ -338,15 +395,6 @@ describe("OfficeView", () => {
     fireEvent.click(await screen.findByRole("button", { name: "Open the board" }));
 
     expect(await screen.findByRole("dialog", { name: "Board" })).toBeTruthy();
-  });
-
-  it("seats each worker in the room its agent sits in", async () => {
-    setup([makeIssue("a", "todo", "agent-1"), makeIssue("b", "todo", "agent-2")], {
-      agents: [makeAgent("agent-1", "planning"), makeAgent("agent-2", undefined)],
-    });
-
-    await vi.waitFor(() => expect(engine.rooms.get("agent-1")).toBe(2));
-    expect(engine.rooms.get("agent-2")).toBe(3);
   });
 
   it("hands the board back for any grouping other than status", () => {
