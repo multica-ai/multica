@@ -1,0 +1,1 @@
+DROP INDEX CONCURRENTLY IF EXISTS daemon_enrollment_workspace_daemon_idx;

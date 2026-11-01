@@ -516,6 +516,9 @@ func LoadConfig(overrides Overrides) (Config, error) {
 	// the user explicitly pins MULTICA_DAEMON_ID=<hostname>, or when the
 	// canonical id was itself promoted from a pre-change profile file).
 	legacyDaemonIDs = filterLegacyIDs(legacyDaemonIDs, daemonID)
+	if strings.TrimSpace(os.Getenv("MULTICA_DAEMON_ENROLLMENT_TOKEN")) != "" {
+		legacyDaemonIDs = nil
+	}
 
 	deviceName := envOrDefault("MULTICA_DAEMON_DEVICE_NAME", host)
 	if overrides.DeviceName != "" {

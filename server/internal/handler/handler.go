@@ -217,6 +217,7 @@ type Handler struct {
 	ReadSelector           *dbreader.Selector
 	DB                     dbExecutor
 	TxStarter              txStarter
+	EnrollmentTxStarter    middleware.EnrollmentTxStarter
 	Hub                    *realtime.Hub
 	DaemonHub              *daemonws.Hub
 	DaemonProfileRefresh   RuntimeProfileRefreshNotifier
@@ -500,6 +501,7 @@ func New(queries *db.Queries, txStarter txStarter, hub *realtime.Hub, bus *event
 		ReadSelector:                 dbreader.NewPrimaryOnly(queries),
 		DB:                           executor,
 		TxStarter:                    txStarter,
+		EnrollmentTxStarter:          middleware.NewEnrollmentTxStarter(txStarter),
 		Hub:                          hub,
 		DaemonHub:                    daemonHub,
 		DaemonProfileRefresh:         daemonProfileRefresh,

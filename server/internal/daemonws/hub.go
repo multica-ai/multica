@@ -3,6 +3,7 @@ package daemonws
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"log/slog"
 	"net/http"
 	"strings"
@@ -13,6 +14,8 @@ import (
 	"github.com/multica-ai/multica/server/pkg/protocol"
 )
 
+var ErrEnrollmentRevoked = errors.New("daemon enrollment revoked")
+
 const (
 	writeWait  = 10 * time.Second
 	pongWait   = 60 * time.Second
@@ -21,7 +24,8 @@ const (
 
 // ClientIdentity captures the already-authenticated daemon connection scope.
 type ClientIdentity struct {
-	DaemonID string
+	EnrollmentTokenHash string
+	DaemonID            string
 	// DaemonTokenHash is the hash of the mdt_ token that authenticated the
 	// connection (empty for user credentials). RPCs replay requests without
 	// an Authorization header, so credential-specific checks such as Qoder
@@ -946,6 +950,26 @@ func (h *Hub) unregister(c *client) {
 	)
 }
 
+// CloseEnrollment disconnects only connections authenticated with the old
+// credential. A newly rotated credential may already have connected.
+func (h *Hub) CloseEnrollment(hash string) {
+	if hash == "" {
+		return
+	}
+	h.mu.Lock()
+	connections := make([]*client, 0)
+	for c := range h.clients {
+		if c.identity.EnrollmentTokenHash == hash {
+			connections = append(connections, c)
+		}
+	}
+	h.mu.Unlock()
+	for _, c := range connections {
+		c.cancel()
+		_ = c.conn.Close()
+	}
+}
+
 func (c *client) readPump() {
 	defer func() {
 		// Cancel first so async RPC handlers stop before we close the send
@@ -1050,6 +1074,9 @@ func (c *client) handleRPCFrame(raw json.RawMessage) {
 		defer completion.run()
 		status, body, err := handler(hctx, c.identity, req.Method, req.Body)
 		if err != nil {
+			if errors.Is(err, ErrEnrollmentRevoked) {
+				_ = c.conn.Close()
+			}
 			if status < 400 {
 				status = http.StatusInternalServerError
 			}
@@ -1119,6 +1146,9 @@ func (c *client) handleHeartbeatFrame(raw json.RawMessage) {
 	// closes if the daemon goes away) plus Redis's own server-side limits.
 	ack, err := handler(context.Background(), c.identity, payload.RuntimeID, payload.SupportsBatchImport)
 	if err != nil {
+		if errors.Is(err, ErrEnrollmentRevoked) {
+			_ = c.conn.Close()
+		}
 		slog.Warn("daemon websocket heartbeat handler failed",
 			"error", err,
 			"daemon_id", c.identity.DaemonID,

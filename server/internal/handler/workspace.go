@@ -1168,6 +1168,12 @@ func (h *Handler) DeleteWorkspace(w http.ResponseWriter, r *http.Request) {
 		failWorkspaceDelete(w, r, workspaceID, "lock workspace", err)
 		return
 	}
+	// Delete enrollment authority before taking the runtime snapshot. Shared
+	// enrollment request locks drain before this write completes.
+	if err := qtx.DeleteDaemonEnrollmentsByWorkspace(r.Context(), requester.WorkspaceID); err != nil {
+		failWorkspaceDelete(w, r, workspaceID, "delete daemon enrollments", err)
+		return
+	}
 	// Take a best-effort snapshot for post-commit daemon invalidation. Runtime
 	// registration does not participate in the workspace delete lock protocol,
 	// so PR1 retains the heartbeat lookup as the correctness fallback for a
@@ -1372,7 +1378,9 @@ func (h *Handler) DeleteWorkspace(w http.ResponseWriter, r *http.Request) {
 		},
 		{
 			name: "delete administration data",
-			run:  func() error { return qtx.DeleteWorkspaceAdministration(ctx, requester.WorkspaceID) },
+			run: func() error {
+				return qtx.DeleteWorkspaceAdministration(ctx, requester.WorkspaceID)
+			},
 		},
 		{
 			// At this point workspaceMember has resolved → workspaceID is a

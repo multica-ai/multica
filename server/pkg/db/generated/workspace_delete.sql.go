@@ -82,6 +82,9 @@ deleted_notification_preferences AS (
 deleted_pins AS (
     DELETE FROM pinned_item WHERE pinned_item.workspace_id = $1
 ),
+deleted_daemon_enrollments AS (
+    DELETE FROM daemon_enrollment WHERE daemon_enrollment.workspace_id = $1
+),
 deleted_daemon_tokens AS (
     DELETE FROM daemon_token WHERE daemon_token.workspace_id = $1
 ),

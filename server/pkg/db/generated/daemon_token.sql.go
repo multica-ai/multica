@@ -12,17 +12,18 @@ import (
 )
 
 const createDaemonToken = `-- name: CreateDaemonToken :one
-INSERT INTO daemon_token (token_hash, workspace_id, daemon_id, expires_at, owner_id)
-VALUES ($1, $2, $3, $4, $5)
-RETURNING id, token_hash, workspace_id, daemon_id, expires_at, created_at, owner_id
+INSERT INTO daemon_token (token_hash, workspace_id, daemon_id, expires_at, owner_id, enrollment_token_hash)
+VALUES ($1, $2, $3, $4, $5, $6)
+RETURNING id, token_hash, workspace_id, daemon_id, expires_at, created_at, owner_id, enrollment_token_hash
 `
 
 type CreateDaemonTokenParams struct {
-	TokenHash   string             `json:"token_hash"`
-	WorkspaceID pgtype.UUID        `json:"workspace_id"`
-	DaemonID    string             `json:"daemon_id"`
-	ExpiresAt   pgtype.Timestamptz `json:"expires_at"`
-	OwnerID     pgtype.UUID        `json:"owner_id"`
+	TokenHash           string             `json:"token_hash"`
+	WorkspaceID         pgtype.UUID        `json:"workspace_id"`
+	DaemonID            string             `json:"daemon_id"`
+	ExpiresAt           pgtype.Timestamptz `json:"expires_at"`
+	OwnerID             pgtype.UUID        `json:"owner_id"`
+	EnrollmentTokenHash pgtype.Text        `json:"enrollment_token_hash"`
 }
 
 // owner_id binds the token to the runtime owner it was issued for (MUL-8154);
@@ -34,6 +35,7 @@ func (q *Queries) CreateDaemonToken(ctx context.Context, arg CreateDaemonTokenPa
 		arg.DaemonID,
 		arg.ExpiresAt,
 		arg.OwnerID,
+		arg.EnrollmentTokenHash,
 	)
 	var i DaemonToken
 	err := row.Scan(
@@ -44,6 +46,7 @@ func (q *Queries) CreateDaemonToken(ctx context.Context, arg CreateDaemonTokenPa
 		&i.ExpiresAt,
 		&i.CreatedAt,
 		&i.OwnerID,
+		&i.EnrollmentTokenHash,
 	)
 	return i, err
 }
@@ -98,7 +101,7 @@ func (q *Queries) DeleteExpiredDaemonTokens(ctx context.Context) error {
 }
 
 const getDaemonTokenByHash = `-- name: GetDaemonTokenByHash :one
-SELECT id, token_hash, workspace_id, daemon_id, expires_at, created_at, owner_id FROM daemon_token
+SELECT id, token_hash, workspace_id, daemon_id, expires_at, created_at, owner_id, enrollment_token_hash FROM daemon_token
 WHERE token_hash = $1 AND expires_at > now()
 `
 
@@ -113,6 +116,7 @@ func (q *Queries) GetDaemonTokenByHash(ctx context.Context, tokenHash string) (D
 		&i.ExpiresAt,
 		&i.CreatedAt,
 		&i.OwnerID,
+		&i.EnrollmentTokenHash,
 	)
 	return i, err
 }

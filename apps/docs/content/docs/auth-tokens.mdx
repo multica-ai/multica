@@ -92,10 +92,40 @@ The server also recognizes two credentials used in internal or managed scenarios
 | `mcn_` | Multica Cloud Node connections | Multica Cloud Fleet |
 | `mdt_` | Workspace-scoped daemon authentication protocol | Internal server flows |
 
-Regular Cloud, self-hosted, and Desktop installations never need to create them manually. The user-side CLI and daemon always use `mul_` PATs; don't construct tokens with other prefixes yourself.
+Regular Cloud, self-hosted, and Desktop installations never need to create them manually. The user-side CLI and daemon use `mul_` PATs by default. Dedicated hosts can use administrator-managed workspace enrollment as described below; do not construct tokens with other prefixes yourself.
 
 ## Next steps
 
 - [Using the CLI](/cli) — `login`, `auth status`, and profile configuration.
 - [Daemon and runtimes](/daemon-runtimes) — where PAT renewal happens.
 - [Sign-in and signup configuration](/auth-setup) — server-side configuration for session lifetime and signup restrictions.
+
+
+## Workspace daemon enrollment
+
+Workspace owners and administrators can enroll a host without sharing their
+personal account token. `POST /api/workspaces/{id}/daemon-enrollments` accepts
+`daemon_id` and `name`, and returns a workspace-bound `mde_` credential once.
+Keep that credential secret; the list endpoint never returns it. Credentials
+expire after 30 days. The host can discover and operate only in that workspace
+with its enrolled daemon identity.
+
+Configure the host with `MULTICA_DAEMON_ENROLLMENT_TOKEN`,
+`MULTICA_DAEMON_ID` matching the enrollment, and `MULTICA_SERVER_URL`, then run
+`multica daemon start`. No personal login token is required. Enrollment never
+falls back to the user's account workspace list or renews their personal token.
+Do not put the credential in a command argument or source control. Protect the
+host's environment file and process access as you would any other credential.
+
+Administrators can list enrollment metadata and active runtime IDs with
+`GET /api/workspaces/{id}/daemon-enrollments`. Rotate using
+`POST /api/workspaces/{id}/daemon-enrollments/{enrollmentId}/rotate`; replace the
+host's environment credential with the returned token and restart the daemon.
+`DELETE /api/workspaces/{id}/daemon-enrollments/{enrollmentId}` revokes the host.
+Both actions invalidate the previous credential and its derived MCP tokens,
+cancel active tasks on the creator-owned host runtimes, take those runtimes offline, and disconnect old
+WebSockets. Removing the creator's membership or deleting the workspace also
+removes the enrollment. Existing personal-token daemons keep their current
+account-wide behavior; use enrollment for a dedicated workspace host.
+
+Enrollment preserves runtime ownership: it cannot take over another member's existing runtimes, even when they have the same daemon ID. Its runtime owner is the administrator who created the enrollment.

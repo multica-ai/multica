@@ -43,6 +43,26 @@ func (w *rpcResponseCapture) Write(b []byte) (int, error) {
 // set at connect, so the reused handler's per-runtime daemon/workspace checks
 // see the same scope as the HTTP path.
 func (h *Handler) DaemonRPCHandler(ctx context.Context, identity daemonws.ClientIdentity, method string, body json.RawMessage) (int, json.RawMessage, error) {
+	if identity.EnrollmentTokenHash != "" {
+		if h.EnrollmentTxStarter == nil || h.Queries == nil {
+			return http.StatusServiceUnavailable, nil, fmt.Errorf("daemon enrollment unavailable")
+		}
+		tx, err := h.EnrollmentTxStarter.Begin(ctx)
+		if err != nil {
+			return http.StatusServiceUnavailable, nil, err
+		}
+		defer tx.Rollback(ctx)
+		enrollment, err := h.Queries.WithTx(tx).LockLiveDaemonEnrollment(ctx, identity.EnrollmentTokenHash)
+		if err != nil {
+			if isNotFound(err) {
+				return http.StatusUnauthorized, nil, daemonws.ErrEnrollmentRevoked
+			}
+			return http.StatusServiceUnavailable, nil, fmt.Errorf("daemon enrollment unavailable: %w", err)
+		}
+		if enrollment.DaemonID != identity.DaemonID || !identity.AllowsWorkspace(uuidToString(enrollment.WorkspaceID)) {
+			return http.StatusUnauthorized, nil, daemonws.ErrEnrollmentRevoked
+		}
+	}
 	switch method {
 	case "tasks.claim":
 		return h.rpcClaimTasks(ctx, identity, body)
@@ -55,7 +75,7 @@ func (h *Handler) rpcClaimTasks(ctx context.Context, identity daemonws.ClientIde
 	if len(body) == 0 {
 		body = json.RawMessage("{}")
 	}
-	reqCtx := ctx
+	reqCtx := middleware.WithDaemonEnrollmentHash(ctx, identity.EnrollmentTokenHash)
 	// A daemon-token connection is workspace-scoped: pin the daemon context so
 	// the reused handler's daemon_id + workspace checks behave exactly like the
 	// HTTP path. A PAT/cloud connection (no daemon id) authorizes per-workspace

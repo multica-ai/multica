@@ -601,6 +601,7 @@ RETURNING id
 `, neighborSlug).Scan(&neighborWorkspaceID)
 	t.Cleanup(func() {
 		for _, workspaceID := range []string{targetWorkspaceID, neighborWorkspaceID} {
+			_, _ = testPool.Exec(context.Background(), `DELETE FROM daemon_enrollment WHERE workspace_id = $1`, workspaceID)
 			_, _ = testPool.Exec(context.Background(), `DELETE FROM workspace WHERE id = $1`, workspaceID)
 			_, _ = testPool.Exec(context.Background(), `DELETE FROM task_usage_hourly_dirty WHERE workspace_id = $1`, workspaceID)
 			_, _ = testPool.Exec(context.Background(), `DELETE FROM runtime_profile WHERE workspace_id = $1`, workspaceID)
@@ -623,6 +624,7 @@ VALUES ($1, $2, 'owner')
 		{workspaceID: neighborWorkspaceID, mediaKey: neighborMediaKey},
 	}
 	for _, fixture := range fixtures {
+		dbfx.Exec(t, `INSERT INTO daemon_enrollment (workspace_id, daemon_id, name, creator_id, token_hash, expires_at) VALUES ($1, 'tenant-host', 'Tenant host', $2, $3, now() + interval '1 day')`, fixture.workspaceID, testUserID, "enrollment-"+fixture.workspaceID)
 		dbfx.QueryRow(t, `
 INSERT INTO issue (workspace_id, title, creator_type, creator_id)
 VALUES ($1, 'Workspace delete tenant isolation', 'member', $2)
@@ -668,6 +670,7 @@ VALUES ($1, $2, gen_random_uuid(), 's3://workspace-delete/tenant-isolation')
 		"comment":                      "workspace_id",
 		"inbox_item":                   "workspace_id",
 		"runtime_profile":              "workspace_id",
+		"daemon_enrollment":            "workspace_id",
 		"task_usage_hourly_dirty":      "workspace_id",
 		"channel_media_pending_object": "workspace_id",
 	} {
@@ -678,6 +681,12 @@ SELECT COUNT(*) FROM `+table+` WHERE `+predicate+` = $1
 		if count != 1 {
 			t.Fatalf("neighbor %s rows = %d, want 1", table, count)
 		}
+	}
+
+	var targetEnrollments int
+	dbfx.QueryRow(t, `SELECT COUNT(*) FROM daemon_enrollment WHERE workspace_id = $1`, targetWorkspaceID).Scan(&targetEnrollments)
+	if targetEnrollments != 0 {
+		t.Fatalf("deleted workspace enrollment rows = %d, want 0", targetEnrollments)
 	}
 
 	var neighborMediaState string

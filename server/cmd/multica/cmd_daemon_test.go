@@ -1029,3 +1029,14 @@ func clearDaemonTaskEnv(t *testing.T) {
 		t.Setenv(key, "")
 	}
 }
+
+func TestRequireDaemonAuth_Enrollment(t *testing.T) {
+	t.Setenv("MULTICA_DAEMON_ENROLLMENT_TOKEN", "mde_host-credential")
+	if err := requireDaemonAuth(""); err != nil {
+		t.Fatalf("enrollment must not require personal login: %v", err)
+	}
+	t.Setenv("MULTICA_DAEMON_ENROLLMENT_TOKEN", "mul_personal-token")
+	if err := requireDaemonAuth(""); err == nil {
+		t.Fatal("invalid enrollment must not fall back to personal login")
+	}
+}

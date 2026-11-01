@@ -323,3 +323,19 @@ func TestTryRenewToken_RespectsContextTimeout(t *testing.T) {
 	case <-context.Background().Done():
 	}
 }
+
+func TestTryRenewToken_EnrollmentNeverRenewsPersonalToken(t *testing.T) {
+	var calls atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { calls.Add(1); w.WriteHeader(http.StatusUnauthorized) }))
+	defer srv.Close()
+	var buf bytes.Buffer
+	d := &Daemon{client: NewClient(srv.URL), logger: captureLogger(&buf)}
+	d.client.SetToken("mde_host-credential")
+	if _, err := d.client.RenewToken(context.Background()); err == nil {
+		t.Fatal("direct enrolled renewal must also reject PAT endpoint")
+	}
+	d.tryRenewToken(context.Background())
+	if calls.Load() != 0 {
+		t.Fatal("enrolled daemon must not call PAT renewal")
+	}
+}

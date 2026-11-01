@@ -726,3 +726,46 @@ func (p *localFirstDaemonRelayPublisher) PublishWithID(scopeType, scopeID, exclu
 	}
 	return nil
 }
+
+func TestCloseEnrollmentKeepsReplacementConnection(t *testing.T) {
+	hub := NewHub()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		hub.HandleWebSocket(w, r, ClientIdentity{
+			EnrollmentTokenHash: r.URL.Query().Get("credential"),
+			RuntimeIDs:          []string{r.URL.Query().Get("runtime")},
+		})
+	}))
+	defer server.Close()
+	wsURL := "ws" + strings.TrimPrefix(server.URL, "http")
+	old, _, err := websocket.DefaultDialer.Dial(wsURL+"?credential=old-hash&runtime=old-runtime", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer old.Close()
+	replacement, _, err := websocket.DefaultDialer.Dial(wsURL+"?credential=new-hash&runtime=new-runtime", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer replacement.Close()
+	deadline := time.Now().Add(time.Second)
+	for hub.RuntimeConnectionCount("old-runtime") == 0 || hub.RuntimeConnectionCount("new-runtime") == 0 {
+		if time.Now().After(deadline) {
+			t.Fatal("connections were not registered")
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	hub.CloseEnrollment("old-hash")
+	_ = old.SetReadDeadline(time.Now().Add(time.Second))
+	if _, _, err := old.ReadMessage(); err == nil {
+		t.Fatal("old credential connection must close")
+	}
+	hub.NotifyTaskAvailable("new-runtime", "replacement-task")
+	_ = replacement.SetReadDeadline(time.Now().Add(time.Second))
+	_, raw, err := replacement.ReadMessage()
+	if err != nil {
+		t.Fatalf("replacement credential disconnected: %v", err)
+	}
+	if !strings.Contains(string(raw), "replacement-task") {
+		t.Fatalf("unexpected replacement event %s", raw)
+	}
+}

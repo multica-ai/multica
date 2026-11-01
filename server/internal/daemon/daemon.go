@@ -27,6 +27,7 @@ import (
 	"golang.org/x/sync/errgroup"
 	"golang.org/x/sync/singleflight"
 
+	"github.com/multica-ai/multica/server/internal/auth"
 	"github.com/multica-ai/multica/server/internal/cli"
 	"github.com/multica-ai/multica/server/internal/daemon/execenv"
 	"github.com/multica-ai/multica/server/internal/daemon/repocache"
@@ -2207,6 +2208,16 @@ func (d *Daemon) deregisterRuntimes() {
 
 // resolveAuth loads the auth token from the CLI config for the active profile.
 func (d *Daemon) resolveAuth() error {
+	enrollmentToken := strings.TrimSpace(os.Getenv("MULTICA_DAEMON_ENROLLMENT_TOKEN"))
+	if enrollmentToken != "" {
+		if !strings.HasPrefix(enrollmentToken, auth.DaemonEnrollmentTokenPrefix) {
+			return fmt.Errorf("invalid daemon enrollment credential")
+		}
+		d.client.SetToken(enrollmentToken)
+		d.cfg.LegacyDaemonIDs = nil
+		d.logger.Info("authenticated with workspace-scoped host credential")
+		return nil
+	}
 	cfg, err := cli.LoadCLIConfigForProfile(d.cfg.Profile)
 	if err != nil {
 		return fmt.Errorf("load CLI config: %w", err)
@@ -4061,6 +4072,10 @@ func (d *Daemon) tokenRenewalLoop(ctx context.Context) {
 // handle them. Failures are debug-level except for 401, which gets a
 // user-actionable warning.
 func (d *Daemon) tryRenewToken(ctx context.Context) {
+	// Enrollment rotation is an administrator decision, never PAT renewal.
+	if d.client.UsesEnrollmentToken() {
+		return
+	}
 	reqCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
 	defer cancel()
 

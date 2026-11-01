@@ -115,7 +115,7 @@ func WithDaemonContext(ctx context.Context, workspaceID, daemonID string) contex
 // branch — same fail-closed contract as the regular Auth middleware.
 //
 // Cache misses fall back to the original DB-backed behavior.
-func DaemonAuth(queries *db.Queries, patCache *auth.PATCache, daemonCache *auth.DaemonTokenCache, cloudPAT *auth.CloudPATVerifier) func(http.Handler) http.Handler {
+func DaemonAuth(queries *db.Queries, patCache *auth.PATCache, daemonCache *auth.DaemonTokenCache, cloudPAT *auth.CloudPATVerifier, enrollmentStarters ...EnrollmentTxStarter) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			// X-Actor-Source is server-set only — strip any
@@ -147,6 +147,17 @@ func DaemonAuth(queries *db.Queries, patCache *auth.PATCache, daemonCache *auth.
 			if tokenString == authHeader {
 				slog.Debug("daemon_auth: invalid format", "path", r.URL.Path)
 				writeError(w, http.StatusUnauthorized, "invalid authorization format")
+				return
+			}
+
+			// Administrator-managed enrollment credentials never fall back to
+			// user authentication or the best-effort internal-token cache.
+			if strings.HasPrefix(tokenString, auth.DaemonEnrollmentTokenPrefix) || strings.HasPrefix(tokenString, "mds_") {
+				var starter EnrollmentTxStarter
+				if len(enrollmentStarters) > 0 {
+					starter = enrollmentStarters[0]
+				}
+				serveEnrolledDaemon(w, r, next, queries, starter, tokenString)
 				return
 			}
 
