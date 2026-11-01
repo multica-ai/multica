@@ -164,6 +164,13 @@ describe("knowledge status schema", () => {
       ),
     ).toMatchObject({ offered: false, reason: "not_configured", state: "unknown", knowledge_bases: [], ui_url: "" });
   });
+
+  it("falls back to the unoffered status for a malformed response", () => {
+    expect(
+      parseWithFallback(["not", "a", "status"], KnowledgeStatusSchema, FALLBACK_KNOWLEDGE_STATUS, { endpoint: "t" }),
+    ).toEqual(FALLBACK_KNOWLEDGE_STATUS);
+    expect(FALLBACK_KNOWLEDGE_STATUS).toMatchObject({ offered: false, state: "unknown" });
+  });
 });
 
 describe("knowledge api client", () => {
