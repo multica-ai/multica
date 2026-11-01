@@ -1123,6 +1123,33 @@ type IssueWorkflow struct {
 	OwnerID          pgtype.UUID        `json:"owner_id"`
 }
 
+type KnowledgeBase struct {
+	ID          pgtype.UUID        `json:"id"`
+	WorkspaceID pgtype.UUID        `json:"workspace_id"`
+	WeknoraKbID string             `json:"weknora_kb_id"`
+	Key         string             `json:"key"`
+	Name        string             `json:"name"`
+	Visibility  string             `json:"visibility"`
+	Position    int32              `json:"position"`
+	ArchivedAt  pgtype.Timestamptz `json:"archived_at"`
+	CreatedAt   pgtype.Timestamptz `json:"created_at"`
+}
+
+type KnowledgeLink struct {
+	ID                 pgtype.UUID        `json:"id"`
+	WorkspaceID        pgtype.UUID        `json:"workspace_id"`
+	KnowledgeBaseID    pgtype.UUID        `json:"knowledge_base_id"`
+	WeknoraKnowledgeID string             `json:"weknora_knowledge_id"`
+	SourceType         string             `json:"source_type"`
+	SourceID           pgtype.UUID        `json:"source_id"`
+	IdempotencyKey     string             `json:"idempotency_key"`
+	State              string             `json:"state"`
+	CreatedByType      string             `json:"created_by_type"`
+	CreatedByID        pgtype.UUID        `json:"created_by_id"`
+	CreatedAt          pgtype.Timestamptz `json:"created_at"`
+	PublishedAt        pgtype.Timestamptz `json:"published_at"`
+}
+
 type LarkBindingToken struct {
 	TokenHash      string             `json:"token_hash"`
 	WorkspaceID    pgtype.UUID        `json:"workspace_id"`
@@ -1811,6 +1838,14 @@ type WorkspaceInvitation struct {
 	CreatedAt     pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt     pgtype.Timestamptz `json:"updated_at"`
 	ExpiresAt     pgtype.Timestamptz `json:"expires_at"`
+}
+
+type WorkspaceKnowledge struct {
+	WorkspaceID      pgtype.UUID        `json:"workspace_id"`
+	WeknoraTenantID  string             `json:"weknora_tenant_id"`
+	ApiKeyCiphertext []byte             `json:"api_key_ciphertext"`
+	State            string             `json:"state"`
+	CreatedAt        pgtype.Timestamptz `json:"created_at"`
 }
 
 type WorkspaceMcpServer struct {
