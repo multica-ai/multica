@@ -7,6 +7,21 @@ import type { ArchivedInboxFilters } from "../inbox/filter-store";
 import type { ArchivedInboxPage, ArchivedInboxFacets } from "../types/inbox";
 import { parseQoderConnection, parseQoderCatalog, type QoderInput } from "../runtimes/qoder-schema";
 import { configStore } from "../config";
+import {
+  EMPTY_OFFICE_FLOOR,
+  EMPTY_OFFICE_FLOOR_LIST,
+  EMPTY_OFFICE_SEATS_RESPONSE,
+  OfficeFloorListSchema,
+  OfficeFloorSchema,
+  OfficeSeatsResponseSchema,
+} from "../office/schemas";
+import type {
+  CreateOfficeFloorRequest,
+  OfficeFloor,
+  OfficeSeatAssignment,
+  OfficeSeatsResponse,
+  UpdateOfficeFloorRequest,
+} from "../office/types";
 import type {
   Issue,
   IssuePriority,
@@ -4814,7 +4829,7 @@ export class ApiClient {
     }) as Squad;
   }
 
-  async createSquad(data: { name: string; description?: string; leader_id: string; avatar_url?: string }): Promise<Squad> {
+  async createSquad(data: { name: string; description?: string; leader_id: string; avatar_url?: string; floor_name?: string }): Promise<Squad> {
     const raw = await this.fetch<unknown>("/api/squads", { method: "POST", body: JSON.stringify(data) });
     return parseWithFallback(raw, SquadSchema, EMPTY_SQUAD, {
       endpoint: "POST /api/squads",
@@ -4846,6 +4861,44 @@ export class ApiClient {
 
   async updateSquadMemberRole(squadId: string, data: { member_type: string; member_id: string; role: string }): Promise<SquadMember> {
     return this.fetch(`/api/squads/${squadId}/members/role`, { method: "PATCH", body: JSON.stringify(data) });
+  }
+
+  // Office floors and squad seats (the digital company office).
+  async listOfficeFloors(): Promise<OfficeFloor[]> {
+    const raw = await this.fetch<unknown>("/api/office/floors");
+    return parseWithFallback(raw, OfficeFloorListSchema, EMPTY_OFFICE_FLOOR_LIST, {
+      endpoint: "GET /api/office/floors",
+    }) as OfficeFloor[];
+  }
+
+  async createOfficeFloor(data: CreateOfficeFloorRequest): Promise<OfficeFloor> {
+    const raw = await this.fetch<unknown>("/api/office/floors", { method: "POST", body: JSON.stringify(data) });
+    return parseWithFallback(raw, OfficeFloorSchema, EMPTY_OFFICE_FLOOR, {
+      endpoint: "POST /api/office/floors",
+    }) as OfficeFloor;
+  }
+
+  async updateOfficeFloor(id: string, data: UpdateOfficeFloorRequest): Promise<OfficeFloor> {
+    const raw = await this.fetch<unknown>(`/api/office/floors/${id}`, { method: "PUT", body: JSON.stringify(data) });
+    return parseWithFallback(raw, OfficeFloorSchema, EMPTY_OFFICE_FLOOR, {
+      endpoint: "PUT /api/office/floors/:id",
+    }) as OfficeFloor;
+  }
+
+  /** Empty floors only: a floor that still holds a live squad is refused with 409 `floor_not_empty`. */
+  async deleteOfficeFloor(id: string): Promise<void> {
+    await this.fetch(`/api/office/floors/${id}`, { method: "DELETE" });
+  }
+
+  /**
+   * Applies seat moves in one transaction (a swap is two entries). A taken seat
+   * is a 409 whose `ApiError.body` names the holder; see `parseOfficeSeatConflict`.
+   */
+  async setOfficeSeats(seats: OfficeSeatAssignment[]): Promise<OfficeSeatsResponse> {
+    const raw = await this.fetch<unknown>("/api/office/seats", { method: "PUT", body: JSON.stringify(seats) });
+    return parseWithFallback(raw, OfficeSeatsResponseSchema, EMPTY_OFFICE_SEATS_RESPONSE, {
+      endpoint: "PUT /api/office/seats",
+    }) as OfficeSeatsResponse;
   }
 
   // Per-squad members status snapshot: one row per member with derived

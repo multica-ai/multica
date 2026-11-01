@@ -55,6 +55,7 @@ type Agent struct {
 	ServiceTier           pgtype.Text `json:"service_tier"`
 	ConversationStarters  []byte      `json:"conversation_starters"`
 	OfficeRoom            string      `json:"office_room"`
+	HomeSquadID           pgtype.UUID `json:"home_squad_id"`
 }
 
 type AgentBuilderDraft struct {
@@ -1246,6 +1247,15 @@ type NotificationPreference struct {
 	UpdatedAt   pgtype.Timestamptz `json:"updated_at"`
 }
 
+type OfficeFloor struct {
+	ID          pgtype.UUID        `json:"id"`
+	WorkspaceID pgtype.UUID        `json:"workspace_id"`
+	Name        string             `json:"name"`
+	Position    int32              `json:"position"`
+	CreatedAt   pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt   pgtype.Timestamptz `json:"updated_at"`
+}
+
 type PersonalAccessToken struct {
 	ID          pgtype.UUID        `json:"id"`
 	UserID      pgtype.UUID        `json:"user_id"`
@@ -1535,6 +1545,8 @@ type Squad struct {
 	ArchivedBy   pgtype.UUID        `json:"archived_by"`
 	AvatarUrl    pgtype.Text        `json:"avatar_url"`
 	Instructions string             `json:"instructions"`
+	FloorID      pgtype.UUID        `json:"floor_id"`
+	OfficeSlot   pgtype.Int2        `json:"office_slot"`
 }
 
 type SquadMember struct {

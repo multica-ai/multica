@@ -1,0 +1,1 @@
+DROP INDEX CONCURRENTLY IF EXISTS office_floor_workspace_position_idx;

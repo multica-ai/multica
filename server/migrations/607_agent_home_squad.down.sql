@@ -1,0 +1,1 @@
+ALTER TABLE agent DROP COLUMN IF EXISTS home_squad_id;

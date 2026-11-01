@@ -628,6 +628,11 @@ export interface Agent {
    * treat undefined as the default room. See `officeRoomOf`.
    */
   office_room?: string;
+  /**
+   * The squad whose office room this agent is drawn in. `null` means the agent
+   * is unassigned. Older backends omit the field; treat undefined as null.
+   */
+  home_squad_id?: string | null;
   owner_id: string | null;
   skills: AgentSkillSummary[];
   /** Runtime-local skills this agent must not inherit. Older servers omit it. */
@@ -781,6 +786,11 @@ export interface UpdateAgentRequest {
   name?: string;
   /** Moves the agent to another office room. Always a known room; never cleared. */
   office_room?: string;
+  /**
+   * Sets the squad this agent is drawn in on the office. Must be a live squad
+   * the agent is a member of; `null` clears it, omitting it leaves it alone.
+   */
+  home_squad_id?: string | null;
   description?: string;
   instructions?: string;
   conversation_starters?: AgentConversationStarter[];
