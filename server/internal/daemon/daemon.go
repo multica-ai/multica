@@ -6241,13 +6241,22 @@ func (d *Daemon) acquireLocalDirectoryLockIfNeeded(ctx context.Context, task Tas
 		}
 		taskLog.Error("local_directory: lock acquire failed", "error", err)
 		failureReason := "local_directory_error"
+		errorMessage := fmt.Sprintf("local_directory wait cancelled: %s", err.Error())
 		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
-			failureReason = "cancelled"
+			// Same daemon-shutdown exception as cancelledRunOutcome (#9773): a
+			// wait cut short by the daemon going down must stay retryable
+			// instead of dying as a bare "cancelled".
+			if ctx.Err() != nil {
+				failureReason = taskfailure.ReasonRuntimeRecovery.String()
+				errorMessage = "daemon shut down while the task was waiting for its local directory lock"
+			} else {
+				failureReason = "cancelled"
+			}
 		}
 		if failErr := d.reportTerminalTask(ctx, terminalTaskReport{
 			kind:          terminalTaskReportFail,
 			taskID:        task.ID,
-			errorMessage:  fmt.Sprintf("local_directory wait cancelled: %s", err.Error()),
+			errorMessage:  errorMessage,
 			failureReason: failureReason,
 		}); failErr != nil {
 			taskLog.Error("fail task after local_directory lock cancel", "error", failErr)
@@ -9170,13 +9179,16 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		// "cancelled", whose label is localized in every shipped locale, and
 		// it says the same thing — an English sentence beside it would only
 		// be a worse copy of it.
-		return TaskResult{
-			Status:    "cancelled",
-			SessionID: result.SessionID,
-			WorkDir:   env.WorkDir,
-			EnvRoot:   env.RootDir,
-			Usage:     usageEntries,
-		}, nil
+		//
+		// The one exception is a cancellation that arrives because the daemon
+		// itself is shutting down (graceful SIGTERM, /shutdown, restart). That
+		// is the main path under rollout restarts, and reporting it as plain
+		// "cancelled" fails the run with no retry even though max_attempts
+		// allows one (#9773) — the mirror image of a hard kill, which orphan
+		// recovery marks runtime_recovery and retries. See
+		// cancelledRunOutcome.
+		shutdown, _ := cancelledRunOutcome(ctx, result.SessionID, env.WorkDir, env.RootDir, usageEntries)
+		return shutdown, nil
 	default:
 		errMsg := result.Error
 		if errMsg == "" {
@@ -9267,6 +9279,46 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 			FailureReason: failureReason,
 		}, nil
 	}
+}
+
+// cancelledRunOutcome reports whether a backend run that ended "cancelled" was
+// cancelled by the daemon shutting down, and if so, the TaskResult to report
+// instead of the bare cancelled path.
+//
+// The run's own task context is cancelled by both a server-side task cancel
+// and the daemon's root context going away; handleTask discards the server
+// cancel through cancelledByPoll before the result reaches the switch, so what
+// distinguishes a shutdown there is the parent context chain: runTask's ctx is
+// derived from the daemon root, and it is already done exactly when the daemon
+// is shutting down (graceful SIGTERM, /shutdown, restart). Reporting that as
+// plain "cancelled" fails the run with no retry — "cancelled" is not in
+// retryableReasons — even though max_attempts allows one, while a hard kill of
+// the same daemon gets retried via orphan recovery's runtime_recovery (#9773).
+// Report the graceful path the same way: runtime_recovery is already
+// retryable, and its server-side meaning ("daemon restarted while task was in
+// flight") describes a rollout shutdown just as well. The comment is non-empty
+// on this path: it is the error the UI shows, and "daemon shut down while the
+// task was in flight" says what happened where the empty cancelled path
+// deliberately says nothing.
+func cancelledRunOutcome(parentCtx context.Context, sessionID, workDir, envRoot string, usage []TaskUsageEntry) (TaskResult, bool) {
+	if parentCtx == nil || parentCtx.Err() == nil {
+		return TaskResult{
+			Status:    "cancelled",
+			SessionID: sessionID,
+			WorkDir:   workDir,
+			EnvRoot:   envRoot,
+			Usage:     usage,
+		}, false
+	}
+	return TaskResult{
+		Status:        "failed",
+		Comment:       "daemon shut down while the task was in flight",
+		SessionID:     sessionID,
+		WorkDir:       workDir,
+		EnvRoot:       envRoot,
+		Usage:         usage,
+		FailureReason: taskfailure.ReasonRuntimeRecovery.String(),
+	}, true
 }
 
 // shouldRetryWithFreshSession reports whether a failed run that requested
