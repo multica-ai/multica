@@ -226,12 +226,58 @@ func (q *Queries) GetProposalInWorkspace(ctx context.Context, arg GetProposalInW
 	return i, err
 }
 
+const getProposalWithIssue = `-- name: GetProposalWithIssue :one
+SELECT p.id, p.workspace_id, p.squad_id, p.issue_id, p.handoff_squad_id, p.urgent, p.urgent_reason, p.state, p.created_by_type, p.created_by_id, p.decided_by, p.decided_at, p.decision_note, p.created_at, i.title AS issue_title, i.number AS issue_number, i.status AS issue_status
+FROM proposal p
+JOIN issue i ON i.id = p.issue_id AND i.workspace_id = p.workspace_id
+WHERE p.id = $1 AND p.workspace_id = $2
+`
+
+type GetProposalWithIssueParams struct {
+	ID          pgtype.UUID `json:"id"`
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
+}
+
+type GetProposalWithIssueRow struct {
+	Proposal    Proposal `json:"proposal"`
+	IssueTitle  string   `json:"issue_title"`
+	IssueNumber int32    `json:"issue_number"`
+	IssueStatus string   `json:"issue_status"`
+}
+
+func (q *Queries) GetProposalWithIssue(ctx context.Context, arg GetProposalWithIssueParams) (GetProposalWithIssueRow, error) {
+	row := q.db.QueryRow(ctx, getProposalWithIssue, arg.ID, arg.WorkspaceID)
+	var i GetProposalWithIssueRow
+	err := row.Scan(
+		&i.Proposal.ID,
+		&i.Proposal.WorkspaceID,
+		&i.Proposal.SquadID,
+		&i.Proposal.IssueID,
+		&i.Proposal.HandoffSquadID,
+		&i.Proposal.Urgent,
+		&i.Proposal.UrgentReason,
+		&i.Proposal.State,
+		&i.Proposal.CreatedByType,
+		&i.Proposal.CreatedByID,
+		&i.Proposal.DecidedBy,
+		&i.Proposal.DecidedAt,
+		&i.Proposal.DecisionNote,
+		&i.Proposal.CreatedAt,
+		&i.IssueTitle,
+		&i.IssueNumber,
+		&i.IssueStatus,
+	)
+	return i, err
+}
+
 const listProposals = `-- name: ListProposals :many
-SELECT id, workspace_id, squad_id, issue_id, handoff_squad_id, urgent, urgent_reason, state, created_by_type, created_by_id, decided_by, decided_at, decision_note, created_at FROM proposal
-WHERE workspace_id = $1
-  AND ($2::text IS NULL OR state = $2::text)
-  AND ($3::uuid IS NULL OR squad_id = $3::uuid)
-ORDER BY created_at DESC, id DESC
+SELECT p.id, p.workspace_id, p.squad_id, p.issue_id, p.handoff_squad_id, p.urgent, p.urgent_reason, p.state, p.created_by_type, p.created_by_id, p.decided_by, p.decided_at, p.decision_note, p.created_at, i.title AS issue_title, i.number AS issue_number, i.status AS issue_status
+FROM proposal p
+JOIN issue i ON i.id = p.issue_id AND i.workspace_id = p.workspace_id
+WHERE p.workspace_id = $1
+  AND ($2::text IS NULL OR p.state = $2::text)
+  AND ($3::uuid IS NULL OR p.squad_id = $3::uuid)
+ORDER BY p.created_at DESC, p.id DESC
 LIMIT 200
 `
 
@@ -241,31 +287,41 @@ type ListProposalsParams struct {
 	SquadID     pgtype.UUID `json:"squad_id"`
 }
 
+type ListProposalsRow struct {
+	Proposal    Proposal `json:"proposal"`
+	IssueTitle  string   `json:"issue_title"`
+	IssueNumber int32    `json:"issue_number"`
+	IssueStatus string   `json:"issue_status"`
+}
+
 // Newest first. state and squad_id are optional filters.
-func (q *Queries) ListProposals(ctx context.Context, arg ListProposalsParams) ([]Proposal, error) {
+func (q *Queries) ListProposals(ctx context.Context, arg ListProposalsParams) ([]ListProposalsRow, error) {
 	rows, err := q.db.Query(ctx, listProposals, arg.WorkspaceID, arg.State, arg.SquadID)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	items := []Proposal{}
+	items := []ListProposalsRow{}
 	for rows.Next() {
-		var i Proposal
+		var i ListProposalsRow
 		if err := rows.Scan(
-			&i.ID,
-			&i.WorkspaceID,
-			&i.SquadID,
-			&i.IssueID,
-			&i.HandoffSquadID,
-			&i.Urgent,
-			&i.UrgentReason,
-			&i.State,
-			&i.CreatedByType,
-			&i.CreatedByID,
-			&i.DecidedBy,
-			&i.DecidedAt,
-			&i.DecisionNote,
-			&i.CreatedAt,
+			&i.Proposal.ID,
+			&i.Proposal.WorkspaceID,
+			&i.Proposal.SquadID,
+			&i.Proposal.IssueID,
+			&i.Proposal.HandoffSquadID,
+			&i.Proposal.Urgent,
+			&i.Proposal.UrgentReason,
+			&i.Proposal.State,
+			&i.Proposal.CreatedByType,
+			&i.Proposal.CreatedByID,
+			&i.Proposal.DecidedBy,
+			&i.Proposal.DecidedAt,
+			&i.Proposal.DecisionNote,
+			&i.Proposal.CreatedAt,
+			&i.IssueTitle,
+			&i.IssueNumber,
+			&i.IssueStatus,
 		); err != nil {
 			return nil, err
 		}

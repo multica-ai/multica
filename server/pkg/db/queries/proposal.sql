@@ -15,6 +15,12 @@ INSERT INTO proposal (
 -- name: GetProposalInWorkspace :one
 SELECT * FROM proposal WHERE id = $1 AND workspace_id = $2;
 
+-- name: GetProposalWithIssue :one
+SELECT sqlc.embed(p), i.title AS issue_title, i.number AS issue_number, i.status AS issue_status
+FROM proposal p
+JOIN issue i ON i.id = p.issue_id AND i.workspace_id = p.workspace_id
+WHERE p.id = $1 AND p.workspace_id = $2;
+
 -- name: LockProposalInWorkspace :one
 -- Row lock for a decision, so two concurrent decisions cannot both see
 -- state='pending'.
@@ -22,11 +28,13 @@ SELECT * FROM proposal WHERE id = $1 AND workspace_id = $2 FOR UPDATE;
 
 -- name: ListProposals :many
 -- Newest first. state and squad_id are optional filters.
-SELECT * FROM proposal
-WHERE workspace_id = sqlc.arg('workspace_id')
-  AND (sqlc.narg('state')::text IS NULL OR state = sqlc.narg('state')::text)
-  AND (sqlc.narg('squad_id')::uuid IS NULL OR squad_id = sqlc.narg('squad_id')::uuid)
-ORDER BY created_at DESC, id DESC
+SELECT sqlc.embed(p), i.title AS issue_title, i.number AS issue_number, i.status AS issue_status
+FROM proposal p
+JOIN issue i ON i.id = p.issue_id AND i.workspace_id = p.workspace_id
+WHERE p.workspace_id = sqlc.arg('workspace_id')
+  AND (sqlc.narg('state')::text IS NULL OR p.state = sqlc.narg('state')::text)
+  AND (sqlc.narg('squad_id')::uuid IS NULL OR p.squad_id = sqlc.narg('squad_id')::uuid)
+ORDER BY p.created_at DESC, p.id DESC
 LIMIT 200;
 
 -- name: CountPendingProposalsBySquad :one
