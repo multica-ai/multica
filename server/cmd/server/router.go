@@ -2248,6 +2248,13 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 			r.Put("/api/office/seats", h.PutOfficeSeats)
 			// The Secretary's digest: facts about the company, any member.
 			r.Get("/api/office/digest", h.GetOfficeDigest)
+			// Briefs: the Secretary's reports to the boss. Who may publish is
+			// decided in the handler (secretary agent or admin member).
+			r.Route("/api/briefs", func(r chi.Router) {
+				r.Get("/", h.ListBriefs)
+				r.Post("/", h.CreateBrief)
+				r.Get("/{id}", h.GetBrief)
+			})
 
 			// Squad leader evaluation (writes to activity_log)
 			r.Post("/api/issues/{id}/squad-evaluated", h.RecordSquadLeaderEvaluation)
