@@ -276,6 +276,20 @@ import { createRequestId, createSafeId } from "../utils";
 import { getCurrentSlug } from "../platform/workspace-storage";
 import { parseWithFallback } from "./schema";
 import {
+  BriefListSchema,
+  BriefSchema,
+  FALLBACK_BRIEF,
+  type Brief,
+  type ListBriefsParams,
+  type PublishBriefRequest,
+} from "../office/brief-schema";
+import {
+  DigestSchema,
+  FALLBACK_DIGEST,
+  type Digest,
+  type DigestParams,
+} from "../office/digest-schema";
+import {
   FALLBACK_PROPOSAL,
   ProposalListSchema,
   ProposalSchema,
@@ -3194,7 +3208,7 @@ export class ApiClient {
     });
   }
 
-  async updateWorkspace(id: string, data: { name?: string; description?: string; context?: string; settings?: Record<string, unknown>; repos?: WorkspaceRepo[]; issue_prefix?: string; avatar_url?: string }): Promise<Workspace> {
+  async updateWorkspace(id: string, data: { name?: string; description?: string; context?: string; settings?: Record<string, unknown>; repos?: WorkspaceRepo[]; issue_prefix?: string; avatar_url?: string; secretary_agent_id?: string | null }): Promise<Workspace> {
     return this.fetch(`/api/workspaces/${id}`, {
       method: "PATCH",
       body: JSON.stringify(data),
@@ -5594,6 +5608,45 @@ export class ApiClient {
       EMPTY_REDEEM_TELEGRAM_BINDING_TOKEN_RESPONSE,
       { endpoint: "POST /api/telegram/binding/redeem" },
     );
+  }
+
+  // The Secretary's digest and briefs
+  async getOfficeDigest(params?: DigestParams): Promise<Digest> {
+    const search = new URLSearchParams();
+    if (params?.since) search.set("since", params.since);
+    const qs = search.toString();
+    const raw = await this.fetch<unknown>(`/api/office/digest${qs ? `?${qs}` : ""}`);
+    return parseWithFallback(raw, DigestSchema, FALLBACK_DIGEST, {
+      endpoint: "GET /api/office/digest",
+    });
+  }
+
+  async listBriefs(params?: ListBriefsParams): Promise<Brief[]> {
+    const search = new URLSearchParams();
+    if (params?.kind) search.set("kind", params.kind);
+    if (params?.limit) search.set("limit", String(params.limit));
+    const qs = search.toString();
+    const raw = await this.fetch<unknown>(`/api/briefs${qs ? `?${qs}` : ""}`);
+    return parseWithFallback<Brief[]>(raw, BriefListSchema, [], {
+      endpoint: "GET /api/briefs",
+    });
+  }
+
+  async getBrief(id: string): Promise<Brief> {
+    const raw = await this.fetch<unknown>(`/api/briefs/${encodeURIComponent(id)}`);
+    return parseWithFallback(raw, BriefSchema, FALLBACK_BRIEF, {
+      endpoint: "GET /api/briefs/:id",
+    });
+  }
+
+  async publishBrief(data: PublishBriefRequest): Promise<Brief> {
+    const raw = await this.fetch<unknown>("/api/briefs", {
+      method: "POST",
+      body: JSON.stringify(data),
+    });
+    return parseWithFallback(raw, BriefSchema, FALLBACK_BRIEF, {
+      endpoint: "POST /api/briefs",
+    });
   }
 
   // Proposals (squad requests for a decision by the boss)
