@@ -52,7 +52,7 @@ export interface OfficePoint {
   y: number;
 }
 
-/** A walled desk room, in layout units. */
+/** A walled desk room, or a whiteboard's face, in layout units. */
 export interface OfficeRoom {
   x: number;
   y: number;
@@ -60,8 +60,8 @@ export interface OfficeRoom {
   h: number;
 }
 
-/** Worker to page: where the tags go, and where the rooms are. Each is sent only when it changes. */
+/** Worker to page: where the tags go, and where the rooms and the whiteboards are. Each is sent only when it changes. */
 export type FromWorker =
   | { type: "labels"; labels: OfficeLabel[] }
-  | { type: "rooms"; rooms: OfficeRoom[]; tank: OfficePoint | null }
+  | { type: "rooms"; rooms: OfficeRoom[]; tank: OfficePoint | null; boards: OfficeRoom[] }
   | { type: "failed" };

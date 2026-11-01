@@ -1,3 +1,262 @@
+diff --git a/crates/pixtuoid-core/src/sprite/format.rs b/crates/pixtuoid-core/src/sprite/format.rs
+index 3bf1c86..0fb89ee 100644
+--- a/crates/pixtuoid-core/src/sprite/format.rs
++++ b/crates/pixtuoid-core/src/sprite/format.rs
+@@ -1661,6 +1661,9 @@ pub enum Piece {
+     TvStand,
+     PhoneBooth,
+     StandingDesk,
++    StaffDesk,
++    BossDesk,
++    ReceptionSofa,
+     BulletinBoard,
+     ExitSign,
+     DeskChair,
+diff --git a/crates/pixtuoid-scene/sprites/default/boss_desk.sprite b/crates/pixtuoid-scene/sprites/default/boss_desk.sprite
+new file mode 100644
+index 0000000..d0c42be
+--- /dev/null
++++ b/crates/pixtuoid-scene/sprites/default/boss_desk.sprite
+@@ -0,0 +1,16 @@
++# The boss's desk seen from the front: a larger chair, a laptop with its lid to the viewer, a lamp, papers and a nameplate on a closed front.
++@frame 0
++. . . . . . . I I I I I I I I . . . . . .
++. . . . . . . T T T T T T T T . . . . . .
++. . . . . . T T T T T T T T T T . . . . .
++. . . . . . T T T T T T T T T T . . . . .
++. . . . . . . . T T T T T T . . . . . . .
++σ σ σ σ σ σ σ σ σ σ σ σ σ σ σ σ σ σ σ σ σ
++O O O O O O O 3 3 3 3 3 3 O O O O O O O O
++O 9 O O O O O M M M M M M O O ! ! ! $ O O
++O 9 O O O O O M M K K M M O O $ $ $ ! O O
++O O O O O O O O O O O O O O O O O O O O O
++D D D D D D D D D D D D D D D D D D D D D
++d d d d d d d d y y y y d d d d d d d d d
++d d d d d d d d d d d d d d d d d d d d d
++ψ ψ . . . . . . . . . . . . . . . . . ψ ψ
+diff --git a/crates/pixtuoid-scene/sprites/default/boss_desk@4x.sprite b/crates/pixtuoid-scene/sprites/default/boss_desk@4x.sprite
+new file mode 100644
+index 0000000..861363c
+--- /dev/null
++++ b/crates/pixtuoid-scene/sprites/default/boss_desk@4x.sprite
+@@ -0,0 +1,58 @@
++# The boss's desk seen from the front: a larger chair, a laptop with its lid to the viewer, a lamp, papers and a nameplate on a closed front.
++@frame 0
++. . . . . . . . . . . . . . . . . . . . . . . . . . . . I I I I I I I I I I I I I I I I I I I I I I I I I I I I I I I I . . . . . . . . . . . . . . . . . . . . . . . .
++. . . . . . . . . . . . . . . . . . . . . . . . . . . . I I I I I I I I I I I I I I I I I I I I I I I I I I I I I I I I . . . . . . . . . . . . . . . . . . . . . . . .
++. . . . . . . . . . . . . . . . . . . . . . . . . . . . I I I I I I I I I I I I I I I I I I I I I I I I I I I I I I I I . . . . . . . . . . . . . . . . . . . . . . . .
++. . . . . . . . . . . . . . . . . . . . . . . . . . . . I I I I I I I I I I I I I I I I I I I I I I I I I I I I I I I I . . . . . . . . . . . . . . . . . . . . . . . .
++. . . . . . . . . . . . . . . . . . . . . . . . . . . . T T T T T T T T T T T T T T T T T T T T T T T T T T T T T T T T . . . . . . . . . . . . . . . . . . . . . . . .
++. . . . . . . . . . . . . . . . . . . . . . . . . . . . T T T T T T T T T T T T T T T T T T T T T T T T T T T T T T T T . . . . . . . . . . . . . . . . . . . . . . . .
++. . . . . . . . . . . . . . . . . . . . . . . . . . . . T T T T T T T T T T T T T T T T T T T T T T T T T T T T T T T T . . . . . . . . . . . . . . . . . . . . . . . .
++. . . . . . . . . . . . . . . . . . . . . . . . . . . . T T T T T T T T T T T T T T T T T T T T T T T T T T T T T T T T . . . . . . . . . . . . . . . . . . . . . . . .
++. . . . . . . . . . . . . . . . . . . . . . . . T T T T T T T T T T T T T T T T T T T T T T T T T T T T T T T T T T T T T T T T . . . . . . . . . . . . . . . . . . . .
++. . . . . . . . . . . . . . . . . . . . . . . . T T T T T T T T T T T T T T T T T T T T T T T T T T T T T T T T T T T T T T T T . . . . . . . . . . . . . . . . . . . .
++. . . . . . . . . . . . . . . . . . . . . . . . T T T T T T T T T T T T T T T T T T T T T T T T T T T T T T T T T T T T T T T T . . . . . . . . . . . . . . . . . . . .
++. . . . . . . . . . . . . . . . . . . . . . . . T T T T T T T T T T T T T T T T T T T T T T T T T T T T T T T T T T T T T T T T . . . . . . . . . . . . . . . . . . . .
++. . . . . . . . . . . . . . . . . . . . . . . . T T T T T T T T T T T T T T T T T T T T T T T T T T T T T T T T T T T T T T T T . . . . . . . . . . . . . . . . . . . .
++. . . . . . . . . . . . . . . . . . . . . . . . T T T T T T T T T T T T T T T T T T T T T T T T T T T T T T T T T T T T T T T T . . . . . . . . . . . . . . . . . . . .
++. . . . . . . . . . . . . . . . . . . . . . . . T T T T T T T T T T T T T T T T T T T T T T T T T T T T T T T T T T T T T T T T . . . . . . . . . . . . . . . . . . . .
++. . . . . . . . . . . . . . . . . . . . . . . . T T T T T T T T T T T T T T T T T T T T T T T T T T T T T T T T T T T T T T T T . . . . . . . . . . . . . . . . . . . .
++. . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . T T T T T T T T T T T T T T T T T T T T T T T T . . . . . . . . . . . . . . . . . . . . . . . . . . . .
++. . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . T T T T T T T T T T T T T T T T T T T T T T T T . . . . . . . . . . . . . . . . . . . . . . . . . . . .
++. . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . T T T T T T T T T T T T T T T T T T T T T T T T . . . . . . . . . . . . . . . . . . . . . . . . . . . .
++. . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . T T T T T T T T T T T T T T T T T T T T T T T T . . . . . . . . . . . . . . . . . . . . . . . . . . . .
++σ σ σ σ σ σ σ σ σ σ σ σ σ σ σ σ σ σ σ σ σ σ σ σ σ σ σ σ σ σ σ σ σ σ σ σ σ σ σ σ σ σ σ σ σ σ σ σ σ σ σ σ σ σ σ σ σ σ σ σ σ σ σ σ σ σ σ σ σ σ σ σ σ σ σ σ σ σ σ σ σ σ σ σ
++σ σ σ σ σ σ σ σ σ σ σ σ σ σ σ σ σ σ σ σ σ σ σ σ σ σ σ σ σ σ σ σ σ σ σ σ σ σ σ σ σ σ σ σ σ σ σ σ σ σ σ σ σ σ σ σ σ σ σ σ σ σ σ σ σ σ σ σ σ σ σ σ σ σ σ σ σ σ σ σ σ σ σ σ
++σ σ σ σ σ σ σ σ σ σ σ σ σ σ σ σ σ σ σ σ σ σ σ σ σ σ σ σ σ σ σ σ σ σ σ σ σ σ σ σ σ σ σ σ σ σ σ σ σ σ σ σ σ σ σ σ σ σ σ σ σ σ σ σ σ σ σ σ σ σ σ σ σ σ σ σ σ σ σ σ σ σ σ σ
++σ σ σ σ σ σ σ σ σ σ σ σ σ σ σ σ σ σ σ σ σ σ σ σ σ σ σ σ σ σ σ σ σ σ σ σ σ σ σ σ σ σ σ σ σ σ σ σ σ σ σ σ σ σ σ σ σ σ σ σ σ σ σ σ σ σ σ σ σ σ σ σ σ σ σ σ σ σ σ σ σ σ σ σ
++O O O O O O O O O O O O O O O O O O O O O O O O O O O O 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 O O O O O O O O O O O O O O O O O O O O O O O O O O O O O O O O
++O O O O O O O O O O O O O O O O O O O O O O O O O O O O 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 O O O O O O O O O O O O O O O O O O O O O O O O O O O O O O O O
++O O O O O O O O O O O O O O O O O O O O O O O O O O O O 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 O O O O O O O O O O O O O O O O O O O O O O O O O O O O O O O O
++O O O O O O O O O O O O O O O O O O O O O O O O O O O O 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 O O O O O O O O O O O O O O O O O O O O O O O O O O O O O O O O
++O O O O 9 9 9 9 O O O O O O O O O O O O O O O O O O O O M M M M M M M M M M M M M M M M M M M M M M M M O O O O O O O O ! ! ! ! ! ! ! ! ! ! ! ! $ $ $ $ O O O O O O O O
++O O O O 9 9 9 9 O O O O O O O O O O O O O O O O O O O O M M M M M M M M M M M M M M M M M M M M M M M M O O O O O O O O ! ! ! ! ! ! ! ! ! ! ! ! $ $ $ $ O O O O O O O O
++O O O O 9 9 9 9 O O O O O O O O O O O O O O O O O O O O M M M M M M M M M M M M M M M M M M M M M M M M O O O O O O O O ! ! ! ! ! ! ! ! ! ! ! ! $ $ $ $ O O O O O O O O
++O O O O 9 9 9 9 O O O O O O O O O O O O O O O O O O O O M M M M M M M M M M M M M M M M M M M M M M M M O O O O O O O O ! ! ! ! ! ! ! ! ! ! ! ! $ $ $ $ O O O O O O O O
++O O O O 9 9 9 9 O O O O O O O O O O O O O O O O O O O O M M M M M M M M K K K K K K K K M M M M M M M M O O O O O O O O $ $ $ $ $ $ $ $ $ $ $ $ ! ! ! ! O O O O O O O O
++O O O O 9 9 9 9 O O O O O O O O O O O O O O O O O O O O M M M M M M M M K K K K K K K K M M M M M M M M O O O O O O O O $ $ $ $ $ $ $ $ $ $ $ $ ! ! ! ! O O O O O O O O
++O O O O 9 9 9 9 O O O O O O O O O O O O O O O O O O O O M M M M M M M M K K K K K K K K M M M M M M M M O O O O O O O O $ $ $ $ $ $ $ $ $ $ $ $ ! ! ! ! O O O O O O O O
++O O O O 9 9 9 9 O O O O O O O O O O O O O O O O O O O O M M M M M M M M K K K K K K K K M M M M M M M M O O O O O O O O $ $ $ $ $ $ $ $ $ $ $ $ ! ! ! ! O O O O O O O O
++O O O O O O O O O O O O O O O O O O O O O O O O O O O O O O O O O O O O O O O O O O O O O O O O O O O O O O O O O O O O O O O O O O O O O O O O O O O O O O O O O O O O
++O O O O O O O O O O O O O O O O O O O O O O O O O O O O O O O O O O O O O O O O O O O O O O O O O O O O O O O O O O O O O O O O O O O O O O O O O O O O O O O O O O O O
++O O O O O O O O O O O O O O O O O O O O O O O O O O O O O O O O O O O O O O O O O O O O O O O O O O O O O O O O O O O O O O O O O O O O O O O O O O O O O O O O O O O O
++O O O O O O O O O O O O O O O O O O O O O O O O O O O O O O O O O O O O O O O O O O O O O O O O O O O O O O O O O O O O O O O O O O O O O O O O O O O O O O O O O O O O
++D D D D D D D D D D D D D D D D D D D D D D D D D D D D D D D D D D D D D D D D D D D D D D D D D D D D D D D D D D D D D D D D D D D D D D D D D D D D D D D D D D D D
++D D D D D D D D D D D D D D D D D D D D D D D D D D D D D D D D D D D D D D D D D D D D D D D D D D D D D D D D D D D D D D D D D D D D D D D D D D D D D D D D D D D D
++D D D D D D D D D D D D D D D D D D D D D D D D D D D D D D D D D D D D D D D D D D D D D D D D D D D D D D D D D D D D D D D D D D D D D D D D D D D D D D D D D D D D
++D D D D D D D D D D D D D D D D D D D D D D D D D D D D D D D D D D D D D D D D D D D D D D D D D D D D D D D D D D D D D D D D D D D D D D D D D D D D D D D D D D D D
++d d d d d d d d d d d d d d d d d d d d d d d d d d d d d d d d y y y y y y y y y y y y y y y y d d d d d d d d d d d d d d d d d d d d d d d d d d d d d d d d d d d d
++d d d d d d d d d d d d d d d d d d d d d d d d d d d d d d d d y y y y y y y y y y y y y y y y d d d d d d d d d d d d d d d d d d d d d d d d d d d d d d d d d d d d
++d d d d d d d d d d d d d d d d d d d d d d d d d d d d d d d d y y y y y y y y y y y y y y y y d d d d d d d d d d d d d d d d d d d d d d d d d d d d d d d d d d d d
++d d d d d d d d d d d d d d d d d d d d d d d d d d d d d d d d y y y y y y y y y y y y y y y y d d d d d d d d d d d d d d d d d d d d d d d d d d d d d d d d d d d d
++d d d d d d d d d d d d d d d d d d d d d d d d d d d d d d d d d d d d d d d d d d d d d d d d d d d d d d d d d d d d d d d d d d d d d d d d d d d d d d d d d d d d
++d d d d d d d d d d d d d d d d d d d d d d d d d d d d d d d d d d d d d d d d d d d d d d d d d d d d d d d d d d d d d d d d d d d d d d d d d d d d d d d d d d d d
++d d d d d d d d d d d d d d d d d d d d d d d d d d d d d d d d d d d d d d d d d d d d d d d d d d d d d d d d d d d d d d d d d d d d d d d d d d d d d d d d d d d d
++d d d d d d d d d d d d d d d d d d d d d d d d d d d d d d d d d d d d d d d d d d d d d d d d d d d d d d d d d d d d d d d d d d d d d d d d d d d d d d d d d d d d
++ψ ψ ψ ψ ψ ψ ψ ψ . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . ψ ψ ψ ψ ψ ψ ψ ψ
++ψ ψ ψ ψ ψ ψ ψ ψ . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . ψ ψ ψ ψ ψ ψ ψ ψ
++ψ ψ ψ ψ ψ ψ ψ ψ . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . ψ ψ ψ ψ ψ ψ ψ ψ
++ψ ψ ψ ψ ψ ψ ψ ψ . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . ψ ψ ψ ψ ψ ψ ψ ψ
+diff --git a/crates/pixtuoid-scene/sprites/default/pack.toml b/crates/pixtuoid-scene/sprites/default/pack.toml
+index 4a04da8..1856562 100644
+--- a/crates/pixtuoid-scene/sprites/default/pack.toml
++++ b/crates/pixtuoid-scene/sprites/default/pack.toml
+@@ -848,3 +848,27 @@ planes = ["mid"]
+ 
+ [buildings."walkup@4x"]
+ sprite = "building_walkup@4x.sprite"
++
++[animations.staff_desk]
++frames   = ["staff_desk.sprite"]
++frame_ms = 600
++
++[animations."staff_desk@4x"]
++frames   = ["staff_desk@4x.sprite"]
++frame_ms = 600
++
++[animations.boss_desk]
++frames   = ["boss_desk.sprite"]
++frame_ms = 600
++
++[animations."boss_desk@4x"]
++frames   = ["boss_desk@4x.sprite"]
++frame_ms = 600
++
++[animations.reception_sofa]
++frames   = ["reception_sofa.sprite"]
++frame_ms = 600
++
++[animations."reception_sofa@4x"]
++frames   = ["reception_sofa@4x.sprite"]
++frame_ms = 600
+diff --git a/crates/pixtuoid-scene/sprites/default/reception_sofa.sprite b/crates/pixtuoid-scene/sprites/default/reception_sofa.sprite
+new file mode 100644
+index 0000000..10db35e
+--- /dev/null
++++ b/crates/pixtuoid-scene/sprites/default/reception_sofa.sprite
+@@ -0,0 +1,9 @@
++# A two-seat sofa facing north, small enough for a guest corner.
++@frame 0
++. n n n n n n n n n n n n n .
++n n G G G G G n G G G G G n n
++n n n n n n n n n n n n n n n
++n G G G G G G G G G G G G G n
++n C C C C C C C C C C C C C n
++n Λ Λ Λ Λ Λ Λ Λ Λ Λ Λ Λ Λ Λ n
++. n n n n n n n n n n n n n .
+diff --git a/crates/pixtuoid-scene/sprites/default/reception_sofa@4x.sprite b/crates/pixtuoid-scene/sprites/default/reception_sofa@4x.sprite
+new file mode 100644
+index 0000000..626c8d2
+--- /dev/null
++++ b/crates/pixtuoid-scene/sprites/default/reception_sofa@4x.sprite
+@@ -0,0 +1,30 @@
++# A two-seat sofa facing north, small enough for a guest corner.
++@frame 0
++. . . . κ κ κ κ κ κ κ κ κ κ κ κ κ κ κ κ κ κ κ κ κ κ κ κ κ κ κ κ κ κ κ κ κ κ κ κ κ κ κ κ κ κ κ κ κ κ κ κ κ κ κ κ . . . .
++. . . . κ κ κ κ κ κ κ κ κ κ κ κ κ κ κ κ κ κ κ κ κ κ κ κ κ κ κ κ κ κ κ κ κ κ κ κ κ κ κ κ κ κ κ κ κ κ κ κ κ κ κ κ . . . .
++. . . . κ κ κ κ κ κ κ κ κ κ κ κ κ κ κ κ κ κ κ κ κ κ κ κ κ κ κ κ κ κ κ κ κ κ κ κ κ κ κ κ κ κ κ κ κ κ κ κ κ κ κ κ . . . .
++. . . . κ κ κ κ κ κ κ κ κ κ κ κ κ κ κ κ κ κ κ κ κ κ κ κ κ κ κ κ κ κ κ κ κ κ κ κ κ κ κ κ κ κ κ κ κ κ κ κ κ κ κ κ . . . .
++κ κ κ κ κ κ κ κ G G G G G G G G G G G G G G G G G G G G κ κ κ κ G G G G G G G G G G G G G G G G G G G G κ κ κ κ κ κ κ κ
++κ κ κ κ κ κ κ κ G G G G G G G G G G G G G G G G G G G G κ κ κ κ G G G G G G G G G G G G G G G G G G G G κ κ κ κ κ κ κ κ
++κ κ κ κ κ κ κ κ G G G G G G G G G G G G G G G G G G G G κ κ κ κ G G G G G G G G G G G G G G G G G G G G κ κ κ κ κ κ κ κ
++κ κ κ κ κ κ κ κ G G G G G G G G G G G G G G G G G G G G κ κ κ κ G G G G G G G G G G G G G G G G G G G G κ κ κ κ κ κ κ κ
++κ κ κ κ κ κ κ κ κ κ κ κ κ κ κ κ κ κ κ κ κ κ κ κ κ κ κ κ κ κ κ κ κ κ κ κ κ κ κ κ κ κ κ κ κ κ κ κ κ κ κ κ κ κ κ κ κ κ κ κ
++κ κ κ κ κ κ κ κ κ κ κ κ κ κ κ κ κ κ κ κ κ κ κ κ κ κ κ κ κ κ κ κ κ κ κ κ κ κ κ κ κ κ κ κ κ κ κ κ κ κ κ κ κ κ κ κ κ κ κ κ
++κ κ κ κ κ κ κ κ κ κ κ κ κ κ κ κ κ κ κ κ κ κ κ κ κ κ κ κ κ κ κ κ κ κ κ κ κ κ κ κ κ κ κ κ κ κ κ κ κ κ κ κ κ κ κ κ κ κ κ κ
++κ κ κ κ κ κ κ κ κ κ κ κ κ κ κ κ κ κ κ κ κ κ κ κ κ κ κ κ κ κ κ κ κ κ κ κ κ κ κ κ κ κ κ κ κ κ κ κ κ κ κ κ κ κ κ κ κ κ κ κ
++κ κ κ κ G G G G G G G G G G G G G G G G G G G G G G G G G G G G G G G G G G G G G G G G G G G G G G G G G G G G κ κ κ κ
++κ κ κ κ G G G G G G G G G G G G G G G G G G G G G G G G G G G G G G G G G G G G G G G G G G G G G G G G G G G G κ κ κ κ
++κ κ κ κ G G G G G G G G G G G G G G G G G G G G G G G G G G G G G G G G G G G G G G G G G G G G G G G G G G G G κ κ κ κ
++κ κ κ κ G G G G G G G G G G G G G G G G G G G G G G G G G G G G G G G G G G G G G G G G G G G G G G G G G G G G κ κ κ κ
++κ κ κ κ C C C C C C C C C C C C C C C C C C C C C C C C C C C C C C C C C C C C C C C C C C C C C C C C C C C C κ κ κ κ
++κ κ κ κ C C C C C C C C C C C C C C C C C C C C C C C C C C C C C C C C C C C C C C C C C C C C C C C C C C C C κ κ κ κ
++κ κ κ κ C C C C C C C C C C C C C C C C C C C C C C C C C C C C C C C C C C C C C C C C C C C C C C C C C C C C κ κ κ κ
++κ κ κ κ C C C C C C C C C C C C C C C C C C C C C C C C C C C C C C C C C C C C C C C C C C C C C C C C C C C C κ κ κ κ
++κ κ κ κ Λ Λ Λ Λ Λ Λ Λ Λ Λ Λ Λ Λ Λ Λ Λ Λ Λ Λ Λ Λ Λ Λ Λ Λ Λ Λ Λ Λ Λ Λ Λ Λ Λ Λ Λ Λ Λ Λ Λ Λ Λ Λ Λ Λ Λ Λ Λ Λ Λ Λ Λ Λ κ κ κ κ
++κ κ κ κ Λ Λ Λ Λ Λ Λ Λ Λ Λ Λ Λ Λ Λ Λ Λ Λ Λ Λ Λ Λ Λ Λ Λ Λ Λ Λ Λ Λ Λ Λ Λ Λ Λ Λ Λ Λ Λ Λ Λ Λ Λ Λ Λ Λ Λ Λ Λ Λ Λ Λ Λ Λ κ κ κ κ
++κ κ κ κ Λ Λ Λ Λ Λ Λ Λ Λ Λ Λ Λ Λ Λ Λ Λ Λ Λ Λ Λ Λ Λ Λ Λ Λ Λ Λ Λ Λ Λ Λ Λ Λ Λ Λ Λ Λ Λ Λ Λ Λ Λ Λ Λ Λ Λ Λ Λ Λ Λ Λ Λ Λ κ κ κ κ
++κ κ κ κ Λ Λ Λ Λ Λ Λ Λ Λ Λ Λ Λ Λ Λ Λ Λ Λ Λ Λ Λ Λ Λ Λ Λ Λ Λ Λ Λ Λ Λ Λ Λ Λ Λ Λ Λ Λ Λ Λ Λ Λ Λ Λ Λ Λ Λ Λ Λ Λ Λ Λ Λ Λ κ κ κ κ
++. . . . κ κ κ κ κ κ κ κ κ κ κ κ κ κ κ κ κ κ κ κ κ κ κ κ κ κ κ κ κ κ κ κ κ κ κ κ κ κ κ κ κ κ κ κ κ κ κ κ κ κ κ κ . . . .
++. . . . κ κ κ κ κ κ κ κ κ κ κ κ κ κ κ κ κ κ κ κ κ κ κ κ κ κ κ κ κ κ κ κ κ κ κ κ κ κ κ κ κ κ κ κ κ κ κ κ κ κ κ κ . . . .
++. . . . κ κ κ κ κ κ κ κ κ κ κ κ κ κ κ κ κ κ κ κ κ κ κ κ κ κ κ κ κ κ κ κ κ κ κ κ κ κ κ κ κ κ κ κ κ κ κ κ κ κ κ κ . . . .
++. . . . κ κ κ κ κ κ κ κ κ κ κ κ κ κ κ κ κ κ κ κ κ κ κ κ κ κ κ κ κ κ κ κ κ κ κ κ κ κ κ κ κ κ κ κ κ κ κ κ κ κ κ κ . . . .
+diff --git a/crates/pixtuoid-scene/sprites/default/staff_desk.sprite b/crates/pixtuoid-scene/sprites/default/staff_desk.sprite
+new file mode 100644
+index 0000000..bd2661b
+--- /dev/null
++++ b/crates/pixtuoid-scene/sprites/default/staff_desk.sprite
+@@ -0,0 +1,14 @@
++# A staff desk seen from the front: a task chair behind it and an open laptop whose lid faces the viewer, with a mug and papers.
++@frame 0
++. . . . . I I I I I I . . . . .
++. . . . . T T T T T T . . . . .
++. . . . . T T T T T T . . . . .
++. . . . . . T T T T . . . . . .
++σ σ σ σ σ σ σ σ σ σ σ σ σ σ σ σ
++O O O O O 3 3 3 3 3 3 O O O O O
++O % O O O M M M M M M O O ! ! O
++O % O O O M M K K M M O O $ $ O
++D D D D D D D D D D D D D D D D
++d d d d d d d d d d d d d d d d
++ψ . . . . . . . . . . . . . . ψ
++ψ . . . . . . . . . . . . . . ψ
+diff --git a/crates/pixtuoid-scene/sprites/default/staff_desk@4x.sprite b/crates/pixtuoid-scene/sprites/default/staff_desk@4x.sprite
+new file mode 100644
+index 0000000..e598e60
+--- /dev/null
++++ b/crates/pixtuoid-scene/sprites/default/staff_desk@4x.sprite
+@@ -0,0 +1,50 @@
++# A staff desk seen from the front: a task chair behind it and an open laptop whose lid faces the viewer, with a mug and papers.
++@frame 0
++. . . . . . . . . . . . . . . . . . . . I I I I I I I I I I I I I I I I I I I I I I I I . . . . . . . . . . . . . . . . . . . .
++. . . . . . . . . . . . . . . . . . . . I I I I I I I I I I I I I I I I I I I I I I I I . . . . . . . . . . . . . . . . . . . .
++. . . . . . . . . . . . . . . . . . . . I I I I I I I I I I I I I I I I I I I I I I I I . . . . . . . . . . . . . . . . . . . .
++. . . . . . . . . . . . . . . . . . . . I I I I I I I I I I I I I I I I I I I I I I I I . . . . . . . . . . . . . . . . . . . .
++. . . . . . . . . . . . . . . . . . . . T T T T T T T T T T T T T T T T T T T T T T T T . . . . . . . . . . . . . . . . . . . .
++. . . . . . . . . . . . . . . . . . . . T T T T T T T T T T T T T T T T T T T T T T T T . . . . . . . . . . . . . . . . . . . .
++. . . . . . . . . . . . . . . . . . . . T T T T T T T T T T T T T T T T T T T T T T T T . . . . . . . . . . . . . . . . . . . .
++. . . . . . . . . . . . . . . . . . . . T T T T T T T T T T T T T T T T T T T T T T T T . . . . . . . . . . . . . . . . . . . .
++. . . . . . . . . . . . . . . . . . . . T T T T T T T T T T T T T T T T T T T T T T T T . . . . . . . . . . . . . . . . . . . .
++. . . . . . . . . . . . . . . . . . . . T T T T T T T T T T T T T T T T T T T T T T T T . . . . . . . . . . . . . . . . . . . .
++. . . . . . . . . . . . . . . . . . . . T T T T T T T T T T T T T T T T T T T T T T T T . . . . . . . . . . . . . . . . . . . .
++. . . . . . . . . . . . . . . . . . . . T T T T T T T T T T T T T T T T T T T T T T T T . . . . . . . . . . . . . . . . . . . .
++. . . . . . . . . . . . . . . . . . . . . . . . T T T T T T T T T T T T T T T T . . . . . . . . . . . . . . . . . . . . . . . .
++. . . . . . . . . . . . . . . . . . . . . . . . T T T T T T T T T T T T T T T T . . . . . . . . . . . . . . . . . . . . . . . .
++. . . . . . . . . . . . . . . . . . . . . . . . T T T T T T T T T T T T T T T T . . . . . . . . . . . . . . . . . . . . . . . .
++. . . . . . . . . . . . . . . . . . . . . . . . T T T T T T T T T T T T T T T T . . . . . . . . . . . . . . . . . . . . . . . .
++σ σ σ σ σ σ σ σ σ σ σ σ σ σ σ σ σ σ σ σ σ σ σ σ σ σ σ σ σ σ σ σ σ σ σ σ σ σ σ σ σ σ σ σ σ σ σ σ σ σ σ σ σ σ σ σ σ σ σ σ σ σ σ σ
++σ σ σ σ σ σ σ σ σ σ σ σ σ σ σ σ σ σ σ σ σ σ σ σ σ σ σ σ σ σ σ σ σ σ σ σ σ σ σ σ σ σ σ σ σ σ σ σ σ σ σ σ σ σ σ σ σ σ σ σ σ σ σ σ
++σ σ σ σ σ σ σ σ σ σ σ σ σ σ σ σ σ σ σ σ σ σ σ σ σ σ σ σ σ σ σ σ σ σ σ σ σ σ σ σ σ σ σ σ σ σ σ σ σ σ σ σ σ σ σ σ σ σ σ σ σ σ σ σ
++σ σ σ σ σ σ σ σ σ σ σ σ σ σ σ σ σ σ σ σ σ σ σ σ σ σ σ σ σ σ σ σ σ σ σ σ σ σ σ σ σ σ σ σ σ σ σ σ σ σ σ σ σ σ σ σ σ σ σ σ σ σ σ σ
++O O O O O O O O O O O O O O O O O O O O 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 O O O O O O O O O O O O O O O O O O O O
++O O O O O O O O O O O O O O O O O O O O 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 O O O O O O O O O O O O O O O O O O O O
++O O O O O O O O O O O O O O O O O O O O 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 O O O O O O O O O O O O O O O O O O O O
++O O O O O O O O O O O O O O O O O O O O 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 O O O O O O O O O O O O O O O O O O O O
++O O O O % % % % O O O O O O O O O O O O M M M M M M M M M M M M M M M M M M M M M M M M O O O O O O O O ! ! ! ! ! ! ! ! O O O O
++O O O O % % % % O O O O O O O O O O O O M M M M M M M M M M M M M M M M M M M M M M M M O O O O O O O O ! ! ! ! ! ! ! ! O O O O
++O O O O % % % % O O O O O O O O O O O O M M M M M M M M M M M M M M M M M M M M M M M M O O O O O O O O ! ! ! ! ! ! ! ! O O O O
++O O O O % % % % O O O O O O O O O O O O M M M M M M M M M M M M M M M M M M M M M M M M O O O O O O O O ! ! ! ! ! ! ! ! O O O O
++O O O O % % % % O O O O O O O O O O O O M M M M M M M M K K K K K K K K M M M M M M M M O O O O O O O O $ $ $ $ $ $ $ $ O O O O
++O O O O % % % % O O O O O O O O O O O O M M M M M M M M K K K K K K K K M M M M M M M M O O O O O O O O $ $ $ $ $ $ $ $ O O O O
++O O O O % % % % O O O O O O O O O O O O M M M M M M M M K K K K K K K K M M M M M M M M O O O O O O O O $ $ $ $ $ $ $ $ O O O O
++O O O O % % % % O O O O O O O O O O O O M M M M M M M M K K K K K K K K M M M M M M M M O O O O O O O O $ $ $ $ $ $ $ $ O O O O
++D D D D D D D D D D D D D D D D D D D D D D D D D D D D D D D D D D D D D D D D D D D D D D D D D D D D D D D D D D D D D D D D
++D D D D D D D D D D D D D D D D D D D D D D D D D D D D D D D D D D D D D D D D D D D D D D D D D D D D D D D D D D D D D D D D
++D D D D D D D D D D D D D D D D D D D D D D D D D D D D D D D D D D D D D D D D D D D D D D D D D D D D D D D D D D D D D D D D
++D D D D D D D D D D D D D D D D D D D D D D D D D D D D D D D D D D D D D D D D D D D D D D D D D D D D D D D D D D D D D D D D
++d d d d d d d d d d d d d d d d d d d d d d d d d d d d d d d d d d d d d d d d d d d d d d d d d d d d d d d d d d d d d d d d
++d d d d d d d d d d d d d d d d d d d d d d d d d d d d d d d d d d d d d d d d d d d d d d d d d d d d d d d d d d d d d d d d
++d d d d d d d d d d d d d d d d d d d d d d d d d d d d d d d d d d d d d d d d d d d d d d d d d d d d d d d d d d d d d d d d
++d d d d d d d d d d d d d d d d d d d d d d d d d d d d d d d d d d d d d d d d d d d d d d d d d d d d d d d d d d d d d d d d
++ψ ψ ψ ψ . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . ψ ψ ψ ψ
++ψ ψ ψ ψ . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . ψ ψ ψ ψ
++ψ ψ ψ ψ . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . ψ ψ ψ ψ
++ψ ψ ψ ψ . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . ψ ψ ψ ψ
++ψ ψ ψ ψ . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . ψ ψ ψ ψ
++ψ ψ ψ ψ . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . ψ ψ ψ ψ
++ψ ψ ψ ψ . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . ψ ψ ψ ψ
++ψ ψ ψ ψ . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . ψ ψ ψ ψ
 diff --git a/crates/pixtuoid-scene/src/floor/mod.rs b/crates/pixtuoid-scene/src/floor/mod.rs
 index 1d91f6a..53e1dc1 100644
 --- a/crates/pixtuoid-scene/src/floor/mod.rs
@@ -60,7 +319,7 @@ index 1d91f6a..53e1dc1 100644
                  self.layout_memo = Some((key, Arc::clone(&l)));
                  l
 diff --git a/crates/pixtuoid-scene/src/layout/compute.rs b/crates/pixtuoid-scene/src/layout/compute.rs
-index f697a3a..397e970 100644
+index f697a3a..a7230db 100644
 --- a/crates/pixtuoid-scene/src/layout/compute.rs
 +++ b/crates/pixtuoid-scene/src/layout/compute.rs
 @@ -195,15 +195,23 @@ struct FloorPlan {
@@ -112,8 +371,15 @@ index f697a3a..397e970 100644
          let lounge_west_clear = if has_meeting {
              mid_x + super::WALL_THICK_V
          } else {
-@@ -331,6 +344,11 @@ impl FloorPlan {
-             let trio = room_fits_furniture(&mr).then(|| MeetingRoom::place_trio(mr, room_idx != 0));
+@@ -328,9 +341,17 @@ impl FloorPlan {
+         let mut meeting_rooms: Vec<MeetingRoom> = Vec::new();
+         for (room_idx, room) in [meeting_room, meeting_room_2].into_iter().enumerate() {
+             let Some(mr) = room else { continue };
+-            let trio = room_fits_furniture(&mr).then(|| MeetingRoom::place_trio(mr, room_idx != 0));
++            // The studio's meeting room is the product office: it holds desks and a guest
++            // sofa instead of the sofa/table trio.
++            let trio = (!studio && room_fits_furniture(&mr))
++                .then(|| MeetingRoom::place_trio(mr, room_idx != 0));
              meeting_rooms.push(MeetingRoom { bounds: mr, trio });
          }
 +        let desk_rooms = if studio {
@@ -124,7 +390,7 @@ index f697a3a..397e970 100644
          Self {
              buf_w,
              buf_h,
-@@ -342,6 +360,8 @@ impl FloorPlan {
+@@ -342,6 +363,8 @@ impl FloorPlan {
              pantry: pantry_room,
              pantry_counter_size,
              meeting_rooms,
@@ -133,7 +399,7 @@ index f697a3a..397e970 100644
          }
      }
  
-@@ -372,20 +392,32 @@ pub(super) fn compute_with_seed(
+@@ -372,20 +395,35 @@ pub(super) fn compute_with_seed(
          return None;
      }
  
@@ -158,7 +424,10 @@ index f697a3a..397e970 100644
          .collect();
 -    let pod_decor = compute_pod_decor(plan.pod_grid, floor_seed, &desk_art);
 +    let pod_decor = if plan.studio {
-+        Vec::new()
++        plan.meeting_rooms
++            .first()
++            .map(|room| product_office(room.bounds))
++            .unwrap_or_default()
 +    } else {
 +        compute_pod_decor(plan.pod_grid, floor_seed, &desk_art)
 +    };
@@ -170,7 +439,29 @@ index f697a3a..397e970 100644
  
      // Elevator door — in the window wall's last slot; above the lounge gate so
      // that gate can check couch↔door clearance.
-@@ -692,6 +724,7 @@ pub(super) fn compute_with_seed(
+@@ -548,13 +586,20 @@ pub(super) fn compute_with_seed(
+ 
+     // Settle only now — AFTER every waypoint exists; filtering at the candidate site
+     // checked a subset of the final set.
+-    let singleton_rects = plant_obstacle_rects(
++    let mut singleton_rects = plant_obstacle_rects(
+         lounge.and_then(|l| l.fish_tank),
+         lounge.map(|l| l.floor_lamp),
+         lounge.map(|l| l.side_table),
+         kitchen_island,
+         &plan.meeting_rooms,
+     );
++    // The studio's product office is solid too: a pot slides clear of its desks and sofa.
++    if plan.studio {
++        singleton_rects.extend(pod_decor.iter().map(|item| {
++            let v = furniture_def(item.kind.furniture()).visual;
++            (anchored_top_left(Pivot::Center, item.pos, v.w, v.h), v)
++        }));
++    }
+     // Folded, not mapped: the corridor's two pots slide toward each other, so each must
+     // also clear the ones already placed.
+     let mut plants: Vec<PlantItem> = Vec::new();
+@@ -692,6 +737,7 @@ pub(super) fn compute_with_seed(
          door,
          door_threshold,
          meeting_rooms: plan.meeting_rooms,
@@ -178,7 +469,35 @@ index f697a3a..397e970 100644
          pantry: plan.pantry.map(|bounds| PantryRoom {
              bounds,
              counter_size: plan.pantry_counter_size,
-@@ -1362,6 +1395,83 @@ fn pod_row_facing(r: u16) -> Facing {
+@@ -755,6 +801,8 @@ fn place_wall_decor(
+         pos,
+     }));
+     const WHITEBOARD_HINT_DIVISOR: u16 = 3;
++    /// Rows between the studio walkway's top edge and the board's art.
++    const STUDIO_WHITEBOARD_GAP: u16 = 1;
+     // The hint is not a slot: unsnapped it drops the board on a desk row
+     // or in the intra-pod gap, where the wheel strip plugs the pod's own west lane.
+     let wb_def = furniture_def(WallDecor::Whiteboard.furniture());
+@@ -783,9 +831,15 @@ fn place_wall_decor(
+     let snapped = wb_def
+         .ground_rect(Pivot::TopLeft, hint)
+         .and_then(|(ground, size)| {
+-            let y = pod_grid
+-                .snap_inter_pod_ground_y(ground.y, size.h)?
+-                .saturating_sub(ground.y - hint.y);
++            // The studio's board stands against the top of the walkway, where the
++            // eye finds it; the classic floor snaps it into an inter-pod aisle.
++            let y = if plan.studio {
++                top_margin + STUDIO_WHITEBOARD_GAP
++            } else {
++                pod_grid
++                    .snap_inter_pod_ground_y(ground.y, size.h)?
++                    .saturating_sub(ground.y - hint.y)
++            };
+             (hint.x..=band_east.saturating_sub(wb_def.visual.w))
+                 .map(|x| Point { x, y })
+                 .find(|&at| {
+@@ -1362,6 +1416,83 @@ fn pod_row_facing(r: u16) -> Facing {
      if r == 0 { Facing::South } else { Facing::North }
  }
  
@@ -262,7 +581,37 @@ index f697a3a..397e970 100644
  /// Pod-grid desk placement: full pods, partial columns at right edge,
  /// partial row at bottom edge.
  pub(super) fn compute_pod_desks(max_desks: Option<usize>, grid: PodGrid) -> Vec<HomeDesk> {
-@@ -1821,6 +1931,20 @@ fn compute_waypoints(
+@@ -1524,6 +1655,29 @@ fn art_rect(b: Bounds) -> (Point, Size) {
+     )
+ }
+ 
++/// The studio's product office, which fills its meeting room: the boss's desk against
++/// the north, two staff desks below it, and a small guest sofa in the south-west corner. Positions are the pieces' centres.
++fn product_office(room: Bounds) -> Vec<PodDecorItem> {
++    /// Rows between the room's south edge and the guest sofa's centre.
++    const SOFA_FROM_SOUTH: u16 = 9;
++    /// Columns between the room's west edge and the guest sofa's centre.
++    const SOFA_FROM_WEST: u16 = 11;
++    let cx = room.x + room.width / 2;
++    let boss_y = room.y + room.height / 3;
++    let staff_y = room.y + room.height * 2 / 3 + 1;
++    let staff_dx = room.width / 4;
++    vec![
++        PodDecorItem { kind: PodDecor::BossDesk, pos: Point { x: cx, y: boss_y } },
++        PodDecorItem { kind: PodDecor::StaffDesk, pos: Point { x: room.x + staff_dx, y: staff_y } },
++        PodDecorItem { kind: PodDecor::StaffDesk, pos: Point { x: room.x + room.width - staff_dx, y: staff_y } },
++        // By the west wall, clear of the doorway cut in the south wall.
++        PodDecorItem {
++            kind: PodDecor::ReceptionSofa,
++            pos: Point { x: room.x + SOFA_FROM_WEST, y: room.y + room.height - SOFA_FROM_SOUTH },
++        },
++    ]
++}
++
+ /// Decor items placed in aisles between desk pods, clear of every rect in `desk_art`.
+ pub(super) fn compute_pod_decor(
+     grid: PodGrid,
+@@ -1821,6 +1975,20 @@ fn compute_waypoints(
  
  #[cfg(test)]
  mod tests {
@@ -283,7 +632,7 @@ index f697a3a..397e970 100644
      use super::{FloorGeometry, FloorVariant};
  
      /// The lounge is kept exactly while its padded ground ends at or west of the
-@@ -1836,7 +1960,7 @@ mod tests {
+@@ -1836,7 +2004,7 @@ mod tests {
              let scan: Vec<(u16, bool, Option<u16>, u16)> = NARROW_BAND
                  .map(|w| {
                      let l = SceneLayout::compute_with_seed(w, h, None, seed).expect("lays out");
@@ -292,13 +641,130 @@ index f697a3a..397e970 100644
                      let couch =
                          couch_pos(&plan.pod_grid.band, plan.top_margin, plan.lounge_west_clear);
                      (
-@@ -2152,3 +2276,4 @@ mod tests {
+@@ -2152,3 +2320,4 @@ mod tests {
          assert_eq!(compute_pod_decor(grid(3), 0, &narrow), free[1..]);
      }
  }
 +
+diff --git a/crates/pixtuoid-scene/src/layout/decor.rs b/crates/pixtuoid-scene/src/layout/decor.rs
+index 40f983a..6fa5816 100644
+--- a/crates/pixtuoid-scene/src/layout/decor.rs
++++ b/crates/pixtuoid-scene/src/layout/decor.rs
+@@ -381,6 +381,12 @@ pub enum Furniture {
+     /// The filing cabinet beside a home desk. Decor, placed off its desk, so it
+     /// stamps no ground of its own.
+     FilingCabinet,
++    /// A staff desk with a laptop, in the product office.
++    StaffDesk,
++    /// The boss's desk with a laptop, in the product office.
++    BossDesk,
++    /// A small two-seat sofa for guests, in the product office.
++    ReceptionSofa,
+ }
+ 
+ impl Furniture {
+@@ -418,6 +424,9 @@ impl Furniture {
+         Furniture::FishTank,
+         Furniture::DeskChair,
+         Furniture::FilingCabinet,
++        Furniture::StaffDesk,
++        Furniture::BossDesk,
++        Furniture::ReceptionSofa,
+     ];
+ }
+ 
+@@ -459,7 +468,10 @@ pub(crate) const fn repels_plants(kind: Furniture) -> bool {
+         | Furniture::SnackShelf
+         | Furniture::Desk
+         | Furniture::DeskChair
+-        | Furniture::FilingCabinet => false,
++        | Furniture::FilingCabinet
++        | Furniture::StaffDesk
++        | Furniture::BossDesk
++        | Furniture::ReceptionSofa => false,
+     }
+ }
+ 
+@@ -615,6 +627,21 @@ pub const fn furniture_def(kind: Furniture) -> FurnitureDef {
+             visual: Size { w: 5, h: 4 },
+             ..DECOR
+         },
++        Furniture::StaffDesk => FurnitureDef {
++            footprint: Some(Size { w: 14, h: 3 }),
++            visual: Size { w: 16, h: 12 },
++            ..DECOR
++        },
++        Furniture::BossDesk => FurnitureDef {
++            footprint: Some(Size { w: 19, h: 3 }),
++            visual: Size { w: 21, h: 14 },
++            ..DECOR
++        },
++        Furniture::ReceptionSofa => FurnitureDef {
++            footprint: Some(Size { w: 15, h: 3 }),
++            visual: Size { w: 15, h: 7 },
++            ..DECOR
++        },
+         Furniture::Whiteboard => FurnitureDef {
+             footprint: Some(Size { w: 10, h: 3 }),
+             visual: Size { w: 14, h: 11 },
+@@ -1032,6 +1059,12 @@ pub enum PodDecor {
+     PhoneBooth,
+     /// A standing desk.
+     StandingDesk,
++    /// A staff desk with a laptop. Placed by the studio's product office, never drawn from the aisle bag.
++    StaffDesk,
++    /// The boss's desk with a laptop. Placed by the studio's product office.
++    BossDesk,
++    /// A small guest sofa. Placed by the studio's product office.
++    ReceptionSofa,
+ }
+ 
+ impl PodDecor {
+@@ -1055,6 +1088,9 @@ impl PodDecor {
+             PodDecor::Tv => Furniture::Tv,
+             PodDecor::PhoneBooth => Furniture::PhoneBooth,
+             PodDecor::StandingDesk => Furniture::StandingDesk,
++            PodDecor::StaffDesk => Furniture::StaffDesk,
++            PodDecor::BossDesk => Furniture::BossDesk,
++            PodDecor::ReceptionSofa => Furniture::ReceptionSofa,
+         }
+     }
+ 
+@@ -1064,7 +1100,12 @@ impl PodDecor {
+         match self {
+             PodDecor::PhoneBooth => Some(WaypointKind::PhoneBooth),
+             PodDecor::StandingDesk => Some(WaypointKind::StandingDesk),
+-            PodDecor::PlantTall | PodDecor::Whiteboard | PodDecor::Tv => None,
++            PodDecor::PlantTall
++            | PodDecor::Whiteboard
++            | PodDecor::Tv
++            | PodDecor::StaffDesk
++            | PodDecor::BossDesk
++            | PodDecor::ReceptionSofa => None,
+         }
+     }
+ 
+@@ -1076,6 +1117,9 @@ impl PodDecor {
+             PodDecor::Tv => Piece::TvStand,
+             PodDecor::PhoneBooth => Piece::PhoneBooth,
+             PodDecor::StandingDesk => Piece::StandingDesk,
++            PodDecor::StaffDesk => Piece::StaffDesk,
++            PodDecor::BossDesk => Piece::BossDesk,
++            PodDecor::ReceptionSofa => Piece::ReceptionSofa,
+         }
+     }
+ }
+@@ -1207,7 +1251,7 @@ mod tests {
+     fn furniture_def_invariants_hold_for_every_row() {
+         assert_eq!(
+             Furniture::ALL.len(),
+-            29,
++            32,
+             "Furniture variant added/removed — update ALL (and this count)"
+         );
+         for &f in Furniture::ALL {
 diff --git a/crates/pixtuoid-scene/src/layout/mod.rs b/crates/pixtuoid-scene/src/layout/mod.rs
-index 9780a0f..58cc514 100644
+index 9780a0f..2a68c9f 100644
 --- a/crates/pixtuoid-scene/src/layout/mod.rs
 +++ b/crates/pixtuoid-scene/src/layout/mod.rs
 @@ -311,6 +311,8 @@ pub struct SceneLayout {
@@ -310,6 +776,32 @@ index 9780a0f..58cc514 100644
      /// The pantry aggregate (bounds + counter size + island) — `None`
      /// on floors without a pantry (Dense dual-meeting).
      pub pantry: Option<PantryRoom>,
+@@ -485,6 +487,25 @@ pub(crate) const INTER_POD_AISLE_X: u16 = 20;
+ pub(crate) const INTER_POD_AISLE_Y: u16 = 18;
+ 
+ impl SceneLayout {
++    /// The art boxes of every whiteboard, as `[x, y, w, h]`, for a host that makes them clickable.
++    pub fn whiteboards(&self) -> Vec<[u16; 4]> {
++        self.fixtures()
++            .filter(|f| {
++                matches!(
++                    f.kind,
++                    FixtureKind::Wall {
++                        kind: WallDecor::Whiteboard,
++                        ..
++                    } | FixtureKind::Pod {
++                        kind: PodDecor::Whiteboard,
++                        ..
++                    }
++                )
++            })
++            .map(|f| [f.visual.x, f.visual.y, f.visual.width, f.visual.height])
++            .collect()
++    }
++
+     /// Returns `None` if the buffer is too small for even one cubicle plus the
+     /// fixed lounge area — the caller paints a "terminal too small" message.
+     /// Panics where [`Self::compute_with_seed`] does.
 diff --git a/crates/pixtuoid-scene/src/layout/rooms/walls.rs b/crates/pixtuoid-scene/src/layout/rooms/walls.rs
 index 01114e0..94f99e9 100644
 --- a/crates/pixtuoid-scene/src/layout/rooms/walls.rs
@@ -374,10 +866,20 @@ index 01114e0..94f99e9 100644
          let b = room.bounds;
          requests.push(WallRequest {
 diff --git a/crates/pixtuoid-scene/src/layout/roster.rs b/crates/pixtuoid-scene/src/layout/roster.rs
-index a00f9cf..b0f7ba4 100644
+index a00f9cf..501bf76 100644
 --- a/crates/pixtuoid-scene/src/layout/roster.rs
 +++ b/crates/pixtuoid-scene/src/layout/roster.rs
-@@ -463,6 +463,8 @@ impl SceneLayout {
+@@ -276,6 +276,9 @@ impl FixtureKind {
+                 PodDecor::Tv => "TV Stand",
+                 PodDecor::PhoneBooth => "Phone Booth",
+                 PodDecor::StandingDesk => "Standing Desk",
++                PodDecor::StaffDesk => "Staff Desk",
++                PodDecor::BossDesk => "Boss Desk",
++                PodDecor::ReceptionSofa => "Guest Sofa",
+             },
+             FixtureKind::Wall { kind, .. } => match kind {
+                 WallDecor::Whiteboard => "Whiteboard",
+@@ -463,6 +466,8 @@ impl SceneLayout {
              // A walkable point, not a thing.
              door_threshold: _,
              meeting_rooms,
@@ -386,6 +888,20 @@ index a00f9cf..b0f7ba4 100644
              pantry,
              // Architecture, which the painters draw from `wall_pieces`; the
              // pantry mat reads `doorways` through `pantry_entry_mat`.
+diff --git a/crates/pixtuoid-scene/src/layout/roster/tests.rs b/crates/pixtuoid-scene/src/layout/roster/tests.rs
+index 0a652c0..80d6177 100644
+--- a/crates/pixtuoid-scene/src/layout/roster/tests.rs
++++ b/crates/pixtuoid-scene/src/layout/roster/tests.rs
+@@ -542,6 +542,9 @@ fn overlap_key(kind: FixtureKind) -> &'static str {
+             PodDecor::Tv => "Tv",
+             PodDecor::PhoneBooth => "PhoneBooth",
+             PodDecor::StandingDesk => "StandingDesk",
++            PodDecor::StaffDesk => "StaffDesk",
++            PodDecor::BossDesk => "BossDesk",
++            PodDecor::ReceptionSofa => "ReceptionSofa",
+         },
+         _ => kind_key(kind),
+     }
 diff --git a/crates/pixtuoid-scene/src/sim/mod.rs b/crates/pixtuoid-scene/src/sim/mod.rs
 index 461e477..c1ca6b0 100644
 --- a/crates/pixtuoid-scene/src/sim/mod.rs
@@ -401,7 +917,7 @@ index 461e477..c1ca6b0 100644
              );
              (a.agent_id, p)
 diff --git a/crates/pixtuoid-web/src/lib.rs b/crates/pixtuoid-web/src/lib.rs
-index 14fd1b1..a22fa5c 100644
+index 14fd1b1..c40ffed 100644
 --- a/crates/pixtuoid-web/src/lib.rs
 +++ b/crates/pixtuoid-web/src/lib.rs
 @@ -20,7 +20,7 @@ use wasm_bindgen::prelude::*;
@@ -435,7 +951,7 @@ index 14fd1b1..a22fa5c 100644
  #[wasm_bindgen]
  #[derive(Debug)]
  pub struct Office {
-@@ -168,6 +183,12 @@ pub struct Office {
+@@ -168,6 +183,14 @@ pub struct Office {
      shown_badges: Vec<pixtuoid_scene::display::Badge>,
      /// The WebAudio engine — `None` until the site warms the ♩'s buffers.
      audio: Option<audio::WebAudioDriver>,
@@ -445,10 +961,12 @@ index 14fd1b1..a22fa5c 100644
 +    rooms: Vec<[u16; 4]>,
 +    /// The aquarium's centre in layout units, which the page stands the filing cabinets beside.
 +    tank: Option<[u16; 2]>,
++    /// Every whiteboard's art box as `[x, y, w, h]` layout units, which the page makes a button.
++    whiteboards: Vec<[u16; 4]>,
  }
  
  #[wasm_bindgen]
-@@ -179,6 +200,8 @@ impl Office {
+@@ -179,6 +202,8 @@ impl Office {
      /// If the bundled sprite pack fails to parse.
      #[wasm_bindgen(constructor)]
      pub fn new(seed: u32) -> Result<Office, JsError> {
@@ -457,17 +975,18 @@ index 14fd1b1..a22fa5c 100644
          let pack =
              std::sync::Arc::new(load_bundled_pack().map_err(|e| JsError::new(&format!("{e:#}")))?);
          let density = pack.max_density_variant();
-@@ -208,6 +231,9 @@ impl Office {
+@@ -208,6 +233,10 @@ impl Office {
              screen: Screen::on(page_clock()),
              shown_badges: Vec::new(),
              audio: None,
 +            issue_keys: std::collections::HashMap::new(),
 +            rooms: Vec::new(),
 +            tank: None,
++            whiteboards: Vec::new(),
          })
      }
  
-@@ -266,6 +292,110 @@ impl Office {
+@@ -266,6 +295,110 @@ impl Office {
          self.screen.landed();
      }
  
@@ -578,7 +1097,7 @@ index 14fd1b1..a22fa5c 100644
      /// Pointer to the RGBA frame in wasm linear memory ([`Office::frame_len`]
      /// bytes).
      ///
-@@ -362,6 +492,10 @@ impl Office {
+@@ -362,6 +495,10 @@ impl Office {
                  hex(*marker),
                  hex(name.ink)
              ));
@@ -589,7 +1108,7 @@ index 14fd1b1..a22fa5c 100644
              out.push('}');
          }
          out.push_str(&format!(
-@@ -374,7 +508,22 @@ impl Office {
+@@ -374,7 +511,32 @@ impl Office {
          push_board_segments(&mut out, &board.mood, theme);
          out.push_str(",\"context\":");
          push_board_segments(&mut out, &board.context, theme);
@@ -604,6 +1123,16 @@ index 14fd1b1..a22fa5c 100644
 +                room[0], room[1], room[2], room[3]
 +            ));
 +        }
++        out.push_str("],\"whiteboards\":[");
++        for (i, board) in self.whiteboards.iter().enumerate() {
++            if i > 0 {
++                out.push(',');
++            }
++            out.push_str(&format!(
++                "{{\"x\":{},\"y\":{},\"w\":{},\"h\":{}}}",
++                board[0], board[1], board[2], board[3]
++            ));
++        }
 +        out.push_str("],\"tank\":");
 +        match self.tank {
 +            Some([x, y]) => out.push_str(&format!("{{\"x\":{x},\"y\":{y}}}")),
@@ -613,7 +1142,7 @@ index 14fd1b1..a22fa5c 100644
          out
      }
  
-@@ -535,6 +684,26 @@ impl Office {
+@@ -535,6 +697,30 @@ impl Office {
          let cap = floor_capacity(units_w, units_h, self.seed);
          self.scene.floor_capacities = std::array::from_fn(|i| if i == 0 { cap } else { 0 });
          self.caps_units = Some((units_w, units_h));
@@ -633,6 +1162,10 @@ index 14fd1b1..a22fa5c 100644
 +                    .collect()
 +            })
 +            .unwrap_or_default();
++        self.whiteboards = layout
++            .as_ref()
++            .map(|layout| layout.whiteboards())
++            .unwrap_or_default();
 +        self.tank = layout
 +            .and_then(|layout| layout.lounge)
 +            .and_then(|lounge| lounge.fish_tank)
@@ -640,7 +1173,30 @@ index 14fd1b1..a22fa5c 100644
      }
  
      /// Fire every scripted beat due by `now`, each applied at its SCHEDULED time
-@@ -1299,7 +1468,7 @@ mod tests {
+@@ -1046,6 +1232,22 @@ mod tests {
+         );
+     }
+ 
++    #[test]
++    fn overlay_json_exports_the_whiteboards_inside_the_floor() {
++        for (w, h) in [(256u32, 171u32), (300, 171), (330, 190), (400, 220)] {
++            let mut o = office();
++            o.step(T0_MS, w, h);
++            let v: serde_json::Value = serde_json::from_str(&o.overlay_json()).unwrap();
++            let boards = v["whiteboards"].as_array().unwrap();
++            assert!(!boards.is_empty(), "a whiteboard at {w}x{h}");
++            for b in boards {
++                assert!(b["w"].as_u64().unwrap() > 0 && b["h"].as_u64().unwrap() > 0);
++                assert!(b["x"].as_u64().unwrap() + b["w"].as_u64().unwrap() <= u64::from(w), "{b} at {w}x{h}");
++                assert!(b["y"].as_u64().unwrap() + b["h"].as_u64().unwrap() <= u64::from(h), "{b} at {w}x{h}");
++            }
++        }
++    }
++
+     #[test]
+     fn overlay_json_exports_a_board_and_a_label_per_visible_agent() {
+         let mut o = office();
+@@ -1299,7 +1501,7 @@ mod tests {
              "the click past exhaustion is refused outright: {admitted:?}"
          );
          o.step(T0_MS + 32_000.0, w, h);
