@@ -2260,6 +2260,10 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 			r.Put("/api/office/seats", h.PutOfficeSeats)
 			// The Secretary's digest: facts about the company, any member.
 			r.Get("/api/office/digest", h.GetOfficeDigest)
+			// The Secretary setup and its readiness checklist (owner or admin).
+			// Setup is idempotent: a second POST changes nothing.
+			r.Get("/api/office/setup", h.GetOfficeSetup)
+			r.Post("/api/office/setup", h.SetupOffice)
 			// Briefs: the Secretary's reports to the boss. Who may publish is
 			// decided in the handler (secretary agent or admin member).
 			r.Route("/api/briefs", func(r chi.Router) {
