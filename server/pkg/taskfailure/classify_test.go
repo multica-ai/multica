@@ -670,3 +670,49 @@ func TestClassifyKeepsDeadlineExceededAsProviderNetwork(t *testing.T) {
 		t.Errorf("Classify(provider deadline) = %q, want %q", got, ReasonAgentProviderNetwork)
 	}
 }
+
+// TestClassifyTokenQuotaIsCapacity pins per-minute token and request quota
+// rejections to the capacity bucket. Gateways answer them with the "token" and
+// "limit" words that rule 1 matches, so they are a rate limit, not a full
+// context window. Explicit overflow wording still lands in context_overflow.
+func TestClassifyTokenQuotaIsCapacity(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		name string
+		in   string
+		want Reason
+	}{
+		{"TPM quota with rate_limit_error body", `API Error: Request rejected (429) · {"type":"error","error":{"type":"rate_limit_error","code":"429003","message":"Token usage exceeds the current model TPM (tokens per minute) limit 1000000. Please reduce the request frequency."}}`, ReasonAgentProviderCapacityOrRateLimit},
+		{"TPM quota without status line", "Token usage exceeds the current model TPM (tokens per minute) limit 4000000", ReasonAgentProviderCapacityOrRateLimit},
+		{"input tokens per minute rate limit", "This request would exceed your organization's rate limit of 30000 input tokens per minute", ReasonAgentProviderCapacityOrRateLimit},
+		{"explicit overflow beats quota wording", "prompt is too long: 250000 tokens > 200000 maximum (tokens per minute limit also reported)", ReasonAgentContextOverflow},
+		{"plain token limit stays overflow", "Hit the token limit for this conversation", ReasonAgentContextOverflow},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			if got := Classify(tc.in); got != tc.want {
+				t.Errorf("Classify(%q) = %q, want %q", tc.in, got, tc.want)
+			}
+		})
+	}
+}
+
+// TestNormalizeDaemonReasonUpgradesTokenQuota covers a daemon whose rule 1
+// predates the quota guard: it reports context_overflow for a TPM rejection,
+// and the server relabels it. An explicit overflow keeps its label.
+func TestNormalizeDaemonReasonUpgradesTokenQuota(t *testing.T) {
+	t.Parallel()
+
+	quota := "API Error: Request rejected (429) · Token usage exceeds the current model TPM (tokens per minute) limit 1000000"
+	if got := NormalizeDaemonReason(string(ReasonAgentContextOverflow), quota); got != ReasonAgentProviderCapacityOrRateLimit {
+		t.Errorf("NormalizeDaemonReason(context_overflow, TPM quota) = %q, want %q", got, ReasonAgentProviderCapacityOrRateLimit)
+	}
+	if got := NormalizeDaemonReason(string(ReasonAgentContextOverflow), "prompt is too long: tokens per minute limit reached"); got != ReasonAgentContextOverflow {
+		t.Errorf("explicit overflow relabelled to %q", got)
+	}
+	if got := NormalizeDaemonReason(string(ReasonAgentContextOverflow), "you exceeded the token limit"); got != ReasonAgentContextOverflow {
+		t.Errorf("ordinary token overflow changed to %q", got)
+	}
+}
