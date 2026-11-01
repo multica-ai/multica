@@ -2758,6 +2758,72 @@ func (h *Handler) rerunSessionRetired(ctx context.Context, agentID pgtype.UUID, 
 	return retired
 }
 
+// sessionResumeGate measures the (agent, issue) session a follow-up claim is
+// about to hand to the daemon and asks the size policy whether to offer it
+// (STOE-29). The measurement comes from the runs that built the session, so it
+// describes what a resumed turn would have to carry again, not what this run
+// will spend.
+//
+// A metrics query that fails does not block the resume. An unreadable
+// measurement must not silently turn every follow-up into a cold start — that
+// would trade a rare slow run for a permanent loss of continuity — so the
+// resume stands and the run records that the gate could not run.
+func (h *Handler) sessionResumeGate(ctx context.Context, task db.AgentTaskQueue, sessionID pgtype.Text) (decision, reason string, metrics *service.SessionResumeMetrics) {
+	row, err := h.Queries.GetSessionResumeMetrics(ctx, db.GetSessionResumeMetricsParams{
+		AgentID:   task.AgentID,
+		IssueID:   task.IssueID,
+		SessionID: sessionID,
+	})
+	if err != nil {
+		slog.Warn("daemon claim: could not measure the prior session; resuming without the size gate",
+			"task_id", uuidToString(task.ID),
+			"agent_id", uuidToString(task.AgentID),
+			"issue_id", uuidToString(task.IssueID),
+			"error", err,
+		)
+		return service.SessionResumeDecisionResumed, service.SessionResumeReasonMetricsUnavailable, nil
+	}
+	metrics = &service.SessionResumeMetrics{InputTokens: row.MaxInputTokens, Turns: int64(row.Turns)}
+	decision, reason = service.DecideSessionResume(*metrics, service.ResumeSessionLimits())
+	if decision == service.SessionResumeDecisionFresh {
+		slog.Info("daemon claim: prior session exceeds the resume policy, starting fresh",
+			"task_id", uuidToString(task.ID),
+			"agent_id", uuidToString(task.AgentID),
+			"issue_id", uuidToString(task.IssueID),
+			"prior_session_input_tokens", metrics.InputTokens,
+			"prior_session_turns", metrics.Turns,
+			"reason", reason,
+		)
+	}
+	return decision, reason, metrics
+}
+
+// recordSessionResumeDecision writes the resume accounting onto the run that
+// made it (STOE-29). Best-effort by design: the claim has already settled what
+// the run will do, and a bookkeeping write must not fail a claim or delay a
+// launch. A run whose write failed reads as a run that predates the policy.
+func (h *Handler) recordSessionResumeDecision(ctx context.Context, taskID pgtype.UUID, decision, reason string, metrics *service.SessionResumeMetrics) {
+	if decision == "" {
+		return
+	}
+	var tokens pgtype.Int8
+	var turns pgtype.Int4
+	if metrics != nil {
+		tokens = pgtype.Int8{Int64: metrics.InputTokens, Valid: true}
+		turns = pgtype.Int4{Int32: int32(metrics.Turns), Valid: true}
+	}
+	if err := h.Queries.RecordSessionResumeDecision(ctx, db.RecordSessionResumeDecisionParams{
+		PriorSessionInputTokens: tokens,
+		PriorSessionTurns:       turns,
+		SessionResumeDecision:   pgtype.Text{String: decision, Valid: true},
+		SessionResumeReason:     pgtype.Text{String: reason, Valid: reason != ""},
+		ID:                      taskID,
+	}); err != nil {
+		slog.Warn("daemon claim: could not record the session resume decision",
+			"task_id", uuidToString(taskID), "decision", decision, "error", err)
+	}
+}
+
 func rerunSourceMatchesTaskScope(task, source db.AgentTaskQueue) bool {
 	if task.AgentID != source.AgentID {
 		return false
@@ -3134,6 +3200,17 @@ func (h *Handler) buildClaimedTaskResponse(r *http.Request, task *db.AgentTaskQu
 		// too: a cancelled run's transcript is exactly where an edited comment's
 		// earlier text survives (MUL-8218).
 		var resumedRunStartedAt pgtype.Timestamptz
+		// Session-resume accounting for this claim (STOE-29): what was decided
+		// about the prior (agent, issue) session, why, and how big that session
+		// was. Left empty on the paths this policy does not decide on — a manual
+		// rerun's resume is settled by ResumeUnsafeFailure, not by size — and
+		// written to the run row once the chain below has answered.
+		var resumeDecision, resumeReason string
+		var resumeMetrics *service.SessionResumeMetrics
+		if task.ForceFreshSession {
+			resumeDecision = service.SessionResumeDecisionFresh
+			resumeReason = service.SessionResumeReasonForcedFresh
+		}
 
 		// Squad-leader briefing injection: keyed off the task being a
 		// leader-task (is_leader_task) carrying a squad_id — NOT off the
@@ -3467,24 +3544,48 @@ func (h *Handler) buildClaimedTaskResponse(r *http.Request, task *db.AgentTaskQu
 			// context across turns. The "Focus on THIS comment" guard in
 			// prompt.go defends against inheriting the prior turn's "Done."
 			// marker, and GetLastTaskSession already excludes poisoned sessions.
+			//
+			// Size is the question this path can answer before launching anything
+			// (STOE-29). A resumed turn carries the whole prior conversation into
+			// every request it makes, so a session that has outgrown the room a
+			// turn still needs is declined here rather than paid for — or failed
+			// — on the next one. The measurement and the decision land on this
+			// run's row either way; the declined row is the one that explains a
+			// fresh start.
 			if prior, err := h.Queries.GetLastTaskSession(r.Context(), db.GetLastTaskSessionParams{
 				AgentID: task.AgentID,
 				IssueID: task.IssueID,
 			}); err == nil && prior.SessionID.Valid {
 				if prior.RuntimeID == task.RuntimeID {
-					resp.PriorSessionID = prior.SessionID.String
-					resumedRunStartedAt = prior.StartedAt
-					// Same rule as the rerun path: date the deltas from the run
-					// this session belongs to. GetLastTaskSession skips poisoned
-					// and retired sessions, so `prior` can be an older run than
-					// the newest one on the issue; it also accepts failed and
-					// cancelled rows, which keep the session resumable but prove
-					// nothing about delivery (MUL-7344).
-					resumeAnchor = newResumedRunAnchor(prior.Status, prior.StartedAt, prior.IssueSnapshot)
+					resumeDecision, resumeReason, resumeMetrics = h.sessionResumeGate(r.Context(), *task, prior.SessionID)
+					if resumeDecision != service.SessionResumeDecisionFresh {
+						resp.PriorSessionID = prior.SessionID.String
+						resumedRunStartedAt = prior.StartedAt
+						// Same rule as the rerun path: date the deltas from the run
+						// this session belongs to. GetLastTaskSession skips poisoned
+						// and retired sessions, so `prior` can be an older run than
+						// the newest one on the issue; it also accepts failed and
+						// cancelled rows, which keep the session resumable but prove
+						// nothing about delivery (MUL-7344).
+						resumeAnchor = newResumedRunAnchor(prior.Status, prior.StartedAt, prior.IssueSnapshot)
+					}
+				} else {
+					resumeDecision = service.SessionResumeDecisionFresh
+					resumeReason = service.SessionResumeReasonRuntimeMismatch
 				}
+				// The workdir is offered whatever the session decision is: it is
+				// the checkout and the files on disk, not the conversation, and a
+				// run that starts a new session on the same issue should still
+				// find its earlier work where it left it.
 				if prior.WorkDir.Valid {
 					resp.PriorWorkDir = prior.WorkDir.String
 				}
+			} else if errors.Is(err, pgx.ErrNoRows) {
+				// Nothing to resume, which is a fact worth recording: it is what
+				// separates "this run started fresh" from "this run resumed" when
+				// someone reads the run row later.
+				resumeDecision = service.SessionResumeDecisionNone
+				resumeReason = service.SessionResumeReasonNoPriorSession
 			}
 			// MUL-5305: if the most recent terminal task withheld its Codex
 			// session because the rollout was missing, GetLastTaskSession fell
@@ -3504,6 +3605,20 @@ func (h *Handler) buildClaimedTaskResponse(r *http.Request, task *db.AgentTaskQu
 			// retry lineage still resumes nothing.
 			applyFreshSessionRetryWorkdir(*task, &resp, requestHasClientCapability(r, protocol.DaemonCapabilityCheckoutKeepsWorkV1))
 		}
+
+		// What was decided about the prior session, and what it was measured
+		// against, travels with the claim (STOE-29). The daemon turns it into a
+		// per-turn notice so a run that was deliberately started fresh says so
+		// instead of assuming continuity, and the same figures are written on
+		// the run row so "why was this run slow" is answerable from the row
+		// without reading its transcript.
+		resp.SessionResumeDecision = resumeDecision
+		resp.SessionResumeReason = resumeReason
+		if resumeMetrics != nil {
+			resp.PriorSessionInputTokens = resumeMetrics.InputTokens
+			resp.PriorSessionTurns = resumeMetrics.Turns
+		}
+		h.recordSessionResumeDecision(r.Context(), task.ID, resumeDecision, resumeReason, resumeMetrics)
 
 		// MUL-8218: a comment edit cancels the affected run and retriggers from
 		// the edited comment, but the new run resumes that run's session, whose

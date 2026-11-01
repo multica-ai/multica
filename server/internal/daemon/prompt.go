@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"github.com/multica-ai/multica/server/internal/daemon/execenv"
+	"github.com/multica-ai/multica/server/internal/service"
 )
 
 // sessionContinuityNoticeFor picks the notice matching what this surface
@@ -47,6 +48,45 @@ func backendResumeContinuityNotice(task Task) string {
 	return sessionContinuityNoticeFor(task)
 }
 
+// buildSessionResumePolicyBlock discloses a deliberate fresh start (STOE-29):
+// the server had a prior (agent, issue) session for this run and chose not to
+// hand it over, because resuming it would have made every model call this run
+// makes pay for a conversation that had outgrown the room a turn needs.
+//
+// It is not the Session Continuity Notice. Nothing broke and nothing was
+// withheld — the session was measured and declined — so the run has to be told
+// which, or it reasons from a continuity it was not given and reports work it
+// never did. Naming the measured figures is the point: "the previous session
+// was 154k tokens across 12 turns" is what makes the decision legible to the
+// person who reads the reply, and the run row carries the same two numbers.
+//
+// A force-fresh retry already carries its own disclosure (MUL-7034 sets
+// PriorSessionResumeUnavailable), and a run with no session on offer has
+// nothing to explain, so both render nothing here.
+func buildSessionResumePolicyBlock(task Task) string {
+	if task.SessionResumeDecision != service.SessionResumeDecisionFresh {
+		return ""
+	}
+	cause := "the server declined it for this run"
+	switch task.SessionResumeReason {
+	case service.SessionResumeReasonContextLimit:
+		cause = fmt.Sprintf("it had grown to %d input tokens across %d turns on this issue, past the size a resumed turn can carry",
+			task.PriorSessionInputTokens, task.PriorSessionTurns)
+	case service.SessionResumeReasonTurnLimit:
+		cause = fmt.Sprintf("it had already run %d turns on this issue, past the depth this deployment resumes within",
+			task.PriorSessionTurns)
+	case service.SessionResumeReasonRuntimeMismatch:
+		cause = "it belongs to a run on another runtime, so its transcript is not on this machine"
+	case service.SessionResumeReasonForcedFresh, service.SessionResumeReasonNoPriorSession:
+		return ""
+	}
+	return "## Fresh session\n\n" +
+		"This run follows up on the issue under a new provider session: an earlier one exists, but " + cause + ". " +
+		"Nothing about the issue was lost — its comments are the authoritative record of this conversation, and your workflow already reads them. " +
+		"What is gone is your own working memory from those turns: what you already tried, what you ruled out, and how far you had got. " +
+		"Re-derive what you need instead of assuming continuity, and do not open your reply by announcing this.\n\n"
+}
+
 // perTurnContextBlocks renders the run-scoped context blocks that used to live
 // in the runtime brief (CLAUDE.md / AGENTS.md).
 //
@@ -67,6 +107,12 @@ func perTurnContextBlocks(task Task, opts promptOpts) string {
 	b.WriteString(buildWorktreeBranchBlock(opts.worktreeBranch, opts.worktreeBase))
 	if task.PriorSessionResumeUnavailable {
 		b.WriteString(sessionContinuityNoticeFor(task))
+	} else if notice := buildSessionResumePolicyBlock(task); notice != "" {
+		// Only one notice may reach a turn: when the resume is gone for a
+		// reason the run cannot control, that paragraph already says it, and a
+		// second block saying the same thing in different words is noise the
+		// run pays for (MUL-5722).
+		b.WriteString(notice)
 	}
 	b.WriteString(execenv.BuildOnBehalfOfBlock(task.InitiatorName, task.InitiatorEmail))
 	b.WriteString(execenv.BuildConnectedAppsBlock(task.ConnectedApps))

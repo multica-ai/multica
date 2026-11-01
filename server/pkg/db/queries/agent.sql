@@ -1109,6 +1109,52 @@ WHERE session_id NOT IN (SELECT session_id FROM retired_sessions)
 ORDER BY terminal_at DESC
 LIMIT 1;
 
+-- name: GetSessionResumeMetrics :one
+-- How big the session a follow-up run is about to inherit already is, measured
+-- from the runs that built it (STOE-29).
+--
+-- The figure that matters is the largest input-side total any single turn in
+-- the session carried: input + cache read + cache write is everything the
+-- provider held in context on that turn, and a resumed turn has to hold all of
+-- it again. MAX, not SUM — every later turn already contains the earlier
+-- turns' text, so summing charges for the same history once per turn that read
+-- it and overstates what one request has to carry.
+--
+-- turns is the depth of the transcript, the axis the token figure cannot see:
+-- many small turns can carry a session well past its usefulness without any
+-- single turn looking large.
+--
+-- Triage runs are excluded for the same reason GetLastTaskSession excludes them
+-- (MUL-7189 §5.6): a triage session is never offered to an execution run, so
+-- measuring one would gate a resume that cannot happen.
+SELECT
+    COALESCE(MAX(turn.input_side_tokens), 0)::bigint AS max_input_tokens,
+    COUNT(*)::int AS turns
+FROM (
+    SELECT atq.id,
+           COALESCE(SUM(u.input_tokens + u.cache_read_tokens + u.cache_write_tokens), 0)::bigint AS input_side_tokens
+    FROM agent_task_queue atq
+    LEFT JOIN task_usage u ON u.task_id = atq.id
+    WHERE atq.agent_id = @agent_id
+      AND atq.issue_id = @issue_id
+      AND atq.session_id = @session_id
+      AND COALESCE(atq.context->>'type', '') <> 'triage'
+    GROUP BY atq.id
+) turn;
+
+-- name: RecordSessionResumeDecision :exec
+-- Writes the resume accounting onto the run that made the decision (STOE-29),
+-- so "why was this run slow" is answerable from its own row: the size of the
+-- session it was offered, how deep that session was, what was decided, and why.
+-- Written for every claim that considered a resume, including the ones that
+-- declined it — the declined row is the one that explains the fresh start.
+UPDATE agent_task_queue
+SET prior_session_input_tokens = sqlc.narg('prior_session_input_tokens'),
+    prior_session_turns        = sqlc.narg('prior_session_turns'),
+    session_resume_decision    = sqlc.narg('session_resume_decision'),
+    session_resume_reason      = sqlc.narg('session_resume_reason')
+WHERE id = @id;
+
 -- name: GetLatestTaskRolloutMissing :one
 -- Reports whether the most recent terminal task for (agent_id, issue_id)
 -- withheld its Codex session because the rollout was missing (MUL-5305). When

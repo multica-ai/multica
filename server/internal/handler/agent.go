@@ -457,6 +457,22 @@ type AgentTaskResponse struct {
 	// Mirrors internal/daemon/types.go with the same JSON name; empty for other
 	// providers.
 	ModelOverride string `json:"model_override,omitempty"`
+	// SessionResumeDecision / SessionResumeReason say what this run did with the
+	// prior (agent, issue) provider session and why: "resumed", or "fresh" with
+	// the reason that declined the session (context_limit, turn_limit,
+	// forced_fresh, runtime_mismatch), or "none" when nothing was on offer
+	// (STOE-29). Empty on runs that predate the policy and on the manual-rerun
+	// path, whose resume is settled by failure safety rather than size.
+	SessionResumeDecision string `json:"session_resume_decision,omitempty"`
+	SessionResumeReason   string `json:"session_resume_reason,omitempty"`
+	// PriorSessionInputTokens / PriorSessionTurns size the session the claim
+	// considered: the largest input-side total (input + cache read + cache
+	// write) any one of that session's turns carried, and how many runs built
+	// it. They describe the session that was ON OFFER, so they are recorded on
+	// the run that declined it too — that row is the one which explains a slow
+	// or unexpectedly cold follow-up.
+	PriorSessionInputTokens int64 `json:"prior_session_input_tokens,omitempty"`
+	PriorSessionTurns       int64 `json:"prior_session_turns,omitempty"`
 	// PriorSessionResumeUnavailable is set when a more recent Codex session was
 	// withheld because its rollout was missing (MUL-5305); PriorSessionID (if
 	// any) is then an older fallback, and the daemon surfaces the continuity gap
@@ -924,6 +940,13 @@ func taskToResponse(t db.AgentTaskQueue, workspaceID string) AgentTaskResponse {
 		ChatSessionID:  uuidToString(t.ChatSessionID),
 		AutopilotRunID: uuidToString(t.AutopilotRunID),
 		Kind:           computeTaskKind(t),
+		// Resume accounting as the claim recorded it (STOE-29). A run that
+		// predates the policy stays empty on all four, which must not read as
+		// "resumed".
+		SessionResumeDecision:   t.SessionResumeDecision.String,
+		SessionResumeReason:     t.SessionResumeReason.String,
+		PriorSessionInputTokens: t.PriorSessionInputTokens.Int64,
+		PriorSessionTurns:       int64(t.PriorSessionTurns.Int32),
 		// Attribution labels + evidence + lineage + raw user ids (pure). Names are
 		// hydrated separately on user-facing surfaces (MUL-4302 §9).
 		Attribution: taskAttributionBase(t),
