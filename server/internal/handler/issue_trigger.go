@@ -26,6 +26,18 @@ func (h *Handler) issueTriggerWriteProbe(r *http.Request, actorType, actorID str
 	return service.IssueTriggerProbe{
 		CanAccessAgent: nil, // allow-all; gate lives at the write boundary
 		IsSelfLoop: func() bool {
+			// The guard exists to stop an agent waking ITSELF through its own
+			// status write. The wake target is the agent the run would start
+			// on: the assignee for agent issues, the squad leader for squad
+			// issues — never the squad id, which is not an actor and would
+			// let a leader re-wake its own squad's issue from inside its own
+			// run. When the actor is not the wake target, the actor's task
+			// living on this issue does not make the wake a self-loop; a wake
+			// target that IS the actor still goes through the task check
+			// below.
+			if actorType == "agent" && actorID != "" && actorID != h.issueWakeTargetID(r.Context(), issue) {
+				return false
+			}
 			return h.isAgentRunningOnIssue(r, actorType, issue)
 		},
 		SuppressActiveSelfAssignment: func(agentID pgtype.UUID) bool {
@@ -52,12 +64,46 @@ func (h *Handler) issueTriggerPreviewProbe(r *http.Request, actorType, actorID, 
 			return h.canInvokeAgent(r.Context(), agent, actorType, actorID, originatorUserID, workspaceID)
 		},
 		IsSelfLoop: func() bool {
+			// Mirror the write-path guard: the wake target comes from
+			// issueWakeTargetID (assignee for agent issues, squad leader for
+			// squad issues), and a target that is not the actor cannot be a
+			// self-loop, or the preview would say no run while the write
+			// starts one.
+			if actorType == "agent" && actorID != "" && actorID != h.issueWakeTargetID(r.Context(), issue) {
+				return false
+			}
 			return h.isAgentRunningOnIssue(r, actorType, issue)
 		},
 		SuppressActiveSelfAssignment: func(agentID pgtype.UUID) bool {
 			return h.shouldSuppressActiveSelfAssignment(r.Context(), actorType, actorID, issue.ID, agentID)
 		},
 	}
+}
+
+// issueWakeTargetID reports the agent a status write on this issue would wake:
+// the assignee for agent issues, the squad leader for squad issues — the agent
+// a squad run actually executes on (the same leader WillEnqueueRun resolves).
+// Empty when no agent target resolves; callers treat empty as "no shortcut"
+// and fall through to the running-task check, so a squad issue whose leader
+// cannot be resolved stays guarded instead of silently unguarded.
+func (h *Handler) issueWakeTargetID(ctx context.Context, issue db.Issue) string {
+	if !issue.AssigneeType.Valid || !issue.AssigneeID.Valid {
+		return ""
+	}
+	switch issue.AssigneeType.String {
+	case "agent":
+		return uuidToString(issue.AssigneeID)
+	case "squad":
+		squad, err := h.Queries.GetSquadInWorkspace(ctx, db.GetSquadInWorkspaceParams{
+			ID:          issue.AssigneeID,
+			WorkspaceID: issue.WorkspaceID,
+		})
+		if err != nil {
+			return ""
+		}
+		return uuidToString(squad.LeaderID)
+	}
+	return ""
 }
 
 // shouldSuppressActiveSelfAssignment prevents a trusted task-scoped agent
