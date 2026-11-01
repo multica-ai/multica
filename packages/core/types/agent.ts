@@ -623,6 +623,11 @@ export interface Agent {
    * account defaults remain authoritative.
    */
   service_tier?: string;
+  /**
+   * The office room (department) this agent sits in. Older backends omit it;
+   * treat undefined as the default room. See `officeRoomOf`.
+   */
+  office_room?: string;
   owner_id: string | null;
   skills: AgentSkillSummary[];
   /** Runtime-local skills this agent must not inherit. Older servers omit it. */
@@ -774,6 +779,8 @@ export interface AgentBuilderRuntimeSwitch {
 
 export interface UpdateAgentRequest {
   name?: string;
+  /** Moves the agent to another office room. Always a known room; never cleared. */
+  office_room?: string;
   description?: string;
   instructions?: string;
   conversation_starters?: AgentConversationStarter[];

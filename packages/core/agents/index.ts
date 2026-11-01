@@ -9,6 +9,8 @@ export * from "./effective-access";
 export * from "./queries";
 export * from "./use-agent-presence";
 export * from "./use-update-agent-allowlist";
+export * from "./use-update-agent-office-room";
+export * from "./office-room";
 export * from "./use-agent-activity";
 export * from "./use-workspace-presence-prefetch";
 export * from "./constants";

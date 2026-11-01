@@ -144,6 +144,7 @@ UPDATE agent SET
     service_tier = COALESCE(sqlc.narg('service_tier'), service_tier),
     conversation_starters = COALESCE(sqlc.narg('conversation_starters'), conversation_starters),
     composio_toolkit_allowlist = COALESCE(sqlc.narg('composio_toolkit_allowlist')::text[], composio_toolkit_allowlist),
+    office_room = COALESCE(sqlc.narg('office_room'), office_room),
     updated_at = now()
 WHERE id = $1
 RETURNING *;

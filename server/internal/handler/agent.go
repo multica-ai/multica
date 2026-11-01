@@ -39,6 +39,14 @@ import (
 // char_length and the front-end's String.prototype.length-with-counter UX.
 const maxAgentDescriptionLength = 255
 
+// agentOfficeRooms are the departments an agent can sit in on the office
+// floor. The client names them; the server only stores and checks the keys.
+var agentOfficeRooms = []string{"product", "research", "planning", "general"}
+
+func isKnownOfficeRoom(room string) bool {
+	return slices.Contains(agentOfficeRooms, room)
+}
+
 const (
 	maxAgentConversationStarters      = 3
 	maxAgentConversationStarterLabel  = 80
@@ -120,6 +128,8 @@ type AgentResponse struct {
 	// ServiceTier is the runtime-native Codex execution tier persisted for
 	// this agent (empty = inherit local Codex configuration).
 	ServiceTier string `json:"service_tier"`
+	// OfficeRoom is the office room (department) this agent sits in.
+	OfficeRoom string `json:"office_room"`
 	// ComposioToolkitAllowlist is the subset of Composio toolkit slugs this
 	// agent is allowed to mount as MCP at task dispatch — for ANY run that
 	// passes the agent's invocation permission, using the agent OWNER's
@@ -233,6 +243,7 @@ func (h *Handler) agentToResponse(a db.Agent) AgentResponse {
 		Model:                    a.Model.String,
 		ThinkingLevel:            a.ThinkingLevel.String,
 		ServiceTier:              a.ServiceTier.String,
+		OfficeRoom:               a.OfficeRoom,
 		ComposioToolkitAllowlist: composioAllowlist,
 		OwnerID:                  uuidToPtr(a.OwnerID),
 		Skills:                   []AgentSkillSummary{},
@@ -1800,6 +1811,9 @@ type UpdateAgentRequest struct {
 	// ServiceTier follows the same tri-state contract as ThinkingLevel:
 	// omitted preserves, empty clears, and non-empty sets a Codex catalog ID.
 	ServiceTier *string `json:"service_tier"`
+	// OfficeRoom moves the agent to another office room. It is always set to a
+	// known room: there is no clear, because every agent sits in some room.
+	OfficeRoom *string `json:"office_room"`
 	// ComposioToolkitAllowlist is a tri-state, same pattern as
 	// thinking_level, mcp_config:
 	//   - field omitted → no change (column preserved as-is)
@@ -2224,6 +2238,13 @@ func (h *Handler) UpdateAgent(w http.ResponseWriter, r *http.Request) {
 	}
 	if req.Status != nil {
 		params.Status = pgtype.Text{String: *req.Status, Valid: true}
+	}
+	if req.OfficeRoom != nil {
+		if !isKnownOfficeRoom(*req.OfficeRoom) {
+			writeError(w, http.StatusBadRequest, fmt.Sprintf("office_room must be one of %s", strings.Join(agentOfficeRooms, ", ")))
+			return
+		}
+		params.OfficeRoom = pgtype.Text{String: *req.OfficeRoom, Valid: true}
 	}
 	if req.MaxConcurrentTasks != nil {
 		if err := validateAgentMaxConcurrentTasks(*req.MaxConcurrentTasks); err != nil {
