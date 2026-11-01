@@ -28,6 +28,7 @@ import {
   PanelSection,
   isPathWithin,
 } from "../panel-nav";
+import { CollapseNavButton } from "../page-header";
 import { useTeamAgentStatus } from "./team-status";
 
 const EMPTY_TASKS: AgentTask[] = [];
@@ -155,6 +156,7 @@ export function TeamPanel() {
         >
           <Plus />
         </IconButton>
+        <CollapseNavButton />
       </PanelHeader>
       <PanelBody>
         {stuck.length > 0 && (
