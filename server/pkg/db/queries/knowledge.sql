@@ -45,3 +45,57 @@ FROM workspace_mcp_server s
 JOIN workspace_knowledge wk ON wk.workspace_id = s.workspace_id
 WHERE s.workspace_id = @workspace_id AND s.name = 'company-read' AND wk.state = 'ready'
 ON CONFLICT DO NOTHING;
+
+-- name: GetKnowledgeBaseByKey :one
+SELECT * FROM knowledge_base WHERE workspace_id = $1 AND key = $2 AND archived_at IS NULL;
+
+-- name: ClaimKnowledgeLink :execrows
+-- The idempotency claim of a write: the row exists before WeKnora is asked,
+-- in state 'failed' with the pending content, so a crash or an outage leaves
+-- something a retry can finish. A repeated key is a no-op.
+INSERT INTO knowledge_link (
+    workspace_id, knowledge_base_id, weknora_knowledge_id, source_type, source_id,
+    idempotency_key, state, created_by_type, created_by_id,
+    title, source_url, pending_content, publish_requested, error
+) VALUES (
+    $1, $2, '', $3, $4, $5, 'failed', $6, $7, $8, $9, $10, $11, 'not sent yet'
+)
+ON CONFLICT (workspace_id, idempotency_key) DO NOTHING;
+
+-- name: GetKnowledgeLinkByKey :one
+SELECT * FROM knowledge_link WHERE workspace_id = $1 AND idempotency_key = $2;
+
+-- name: GetKnowledgeLink :one
+SELECT * FROM knowledge_link WHERE id = $1 AND workspace_id = $2;
+
+-- name: SettleKnowledgeLink :one
+-- Records the outcome of a write or publish: the WeKnora document, the new
+-- state, and the failure text (empty on success). Pending content is dropped
+-- once the document exists.
+UPDATE knowledge_link SET
+    weknora_knowledge_id = sqlc.arg('weknora_knowledge_id')::text,
+    state = sqlc.arg('state')::text,
+    error = sqlc.arg('error')::text,
+    pending_content = CASE WHEN sqlc.arg('state')::text = 'failed' THEN pending_content ELSE '' END,
+    published_at = CASE WHEN sqlc.arg('state')::text = 'published' THEN COALESCE(published_at, now()) ELSE published_at END
+WHERE id = sqlc.arg('id') AND workspace_id = sqlc.arg('workspace_id')
+RETURNING *;
+
+-- name: ListKnowledgeLinks :many
+-- Newest first. knowledge_base_id and state are optional filters.
+SELECT * FROM knowledge_link
+WHERE workspace_id = sqlc.arg('workspace_id')
+  AND (sqlc.narg('knowledge_base_id')::uuid IS NULL OR knowledge_base_id = sqlc.narg('knowledge_base_id')::uuid)
+  AND (sqlc.narg('state')::text IS NULL OR state = sqlc.narg('state')::text)
+ORDER BY created_at DESC, id DESC
+LIMIT 500;
+
+-- name: ListRetryableKnowledgeLinks :many
+-- Writes WeKnora has not accepted yet whose author is Multica itself.
+SELECT * FROM knowledge_link
+WHERE workspace_id = $1 AND state = 'failed' AND created_by_type = 'system'
+ORDER BY created_at ASC
+LIMIT 20;
+
+-- name: DeleteKnowledgeLink :execrows
+DELETE FROM knowledge_link WHERE id = $1 AND workspace_id = $2;
