@@ -7,7 +7,9 @@ import {
   layoutFloor,
   officeFloorsOptions,
   officeSquadMembersOptions,
+  proposalListOptions,
   useOfficeFloorStore,
+  type Proposal,
 } from "@multica/core/office";
 import { agentListOptions, squadListOptions } from "@multica/core/workspace/queries";
 import { useWorkspaceId } from "@multica/core/hooks";
@@ -20,7 +22,7 @@ import { Button } from "@multica/ui/components/ui/button";
 import { useT } from "../../i18n";
 import { BoardView, type BoardViewProps } from "../../issues/components/board-view";
 import { useStatusLabel } from "../../issues/utils/status-label";
-import { focusIssues, officeTagOf } from "../lib/office-tag";
+import { focusIssues, leadersNeedingYou, officeTagOf } from "../lib/office-tag";
 import { OfficeAgentPanel, type OfficeAgentTarget } from "./office-agent-panel";
 import { OfficeCanvas, type WorkerSession } from "./office-canvas";
 import { OfficeBoardButton } from "./office-board-button";
@@ -28,6 +30,7 @@ import { OfficeBoardDialog } from "./office-board-dialog";
 import { OfficeRoomOverlays } from "./office-room-overlays";
 import { OfficeSeatBanner, OfficeUnseatedTray } from "./office-unseated-tray";
 import { OfficeSquadPanel } from "./office-squad-panel";
+import { OfficeDecisionsDialog } from "./office-decisions-dialog";
 import { OfficeFirstRun } from "./office-first-run";
 import { OfficeFloorTabs } from "./office-floor-tabs";
 import { useOfficeAdmin } from "../lib/use-office-admin";
@@ -37,7 +40,7 @@ const EMPTY_TASKS: AgentTask[] = [];
 const EMPTY_AGENTS: Agent[] = [];
 const EMPTY_SQUADS: Squad[] = [];
 const EMPTY_FLOORS: OfficeFloor[] = [];
-const EMPTY_SET: ReadonlySet<string> = new Set();
+const EMPTY_PROPOSALS: Proposal[] = [];
 
 /** True while no live squad holds a seat on any floor. */
 function noSquadSeated(squads: readonly Squad[], floors: readonly OfficeFloor[]): boolean {
@@ -87,6 +90,7 @@ function OfficeScene({ issues, visibleStatuses, projectId }: BoardViewProps) {
   const selectFloor = useOfficeFloorStore((s) => s.setLastFloorId);
   const canManage = useOfficeAdmin();
   const userId = useAuthStore((s) => s.user?.id);
+  const { data: pending = EMPTY_PROPOSALS } = useQuery(proposalListOptions(wsId, { state: "pending" }));
 
   // The floor on show: the one last viewed, else the first.
   const floor = floors.find((candidate) => candidate.id === lastFloorId) ?? floors[0] ?? null;
@@ -116,7 +120,16 @@ function OfficeScene({ issues, visibleStatuses, projectId }: BoardViewProps) {
 
   // Issues only feed the tag text; they decide nobody's seat.
   const focusOf = useMemo(() => focusIssues(issues, visibleStatuses, squads), [issues, visibleStatuses, squads]);
-  const needsYou = EMPTY_SET;
+  // Leaders of squads with a proposal waiting for the boss, for the Needs you tag.
+  const needsYou = useMemo(
+    () => leadersNeedingYou(squads, new Set(pending.map((proposal) => proposal.squad_id))),
+    [squads, pending],
+  );
+  const pendingBySlot = useMemo(
+    () => layout.rooms.map((room) => (room.squad ? pending.filter((proposal) => proposal.squad_id === room.squad?.id).length : 0)),
+    [layout, pending],
+  );
+  const [decisionsOpen, setDecisionsOpen] = useState(false);
 
   const sessions = useMemo<WorkerSession[]>(
     () =>
@@ -174,7 +187,14 @@ function OfficeScene({ issues, visibleStatuses, projectId }: BoardViewProps) {
         occupied={occupied}
         canManage={canManage}
         onSelect={selectFloor}
-      />
+      >
+        {pending.length > 0 ? (
+          <Button type="button" variant="outline" size="sm" onClick={() => setDecisionsOpen(true)}>
+            {t(($) => $.office.decisions_open)}
+            <span className="tabular-nums text-muted-foreground">{pending.length}</span>
+          </Button>
+        ) : null}
+      </OfficeFloorTabs>
       {canManage && layout.unseatedSquads.length > 0 ? (
         <OfficeSeatBanner count={layout.unseatedSquads.length} pending={seating} onSeatAll={seatAll} />
       ) : null}
@@ -196,8 +216,10 @@ function OfficeScene({ issues, visibleStatuses, projectId }: BoardViewProps) {
               <OfficeRoomOverlays
                 stage={stage}
                 rooms={layout.rooms}
+                pendingBySlot={pendingBySlot}
                 onCreateSquad={openCreateSquad}
                 onOpenSquad={openSquad}
+                onOpenDecisions={() => setDecisionsOpen(true)}
               />
             </>
           )}
@@ -218,7 +240,18 @@ function OfficeScene({ issues, visibleStatuses, projectId }: BoardViewProps) {
           setSquadPanel(null);
           onOpenAgent(agentId);
         }}
+        onReview={() => {
+          setSquadPanel(null);
+          setDecisionsOpen(true);
+        }}
         onClose={() => setSquadPanel(null)}
+      />
+      <OfficeDecisionsDialog
+        open={decisionsOpen}
+        proposals={pending}
+        squads={squads}
+        canDecide={canManage}
+        onClose={() => setDecisionsOpen(false)}
       />
       <OfficeAgentPanel target={panel} issues={issues} projectId={projectId} onClose={() => setPanel(null)} />
     </>

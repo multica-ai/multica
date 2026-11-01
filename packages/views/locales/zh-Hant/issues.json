@@ -1811,7 +1811,21 @@
     "squad_members": "成員",
     "squad_autopilots": "自動化",
     "squad_proposals": "等待決定",
-    "no_desk": "沒有座位"
+    "no_desk": "沒有座位",
+    "decisions_open": "待決定",
+    "decisions_title": "待決定",
+    "decisions_empty": "沒有等待你決定的事項",
+    "decision_from": "來自 {{name}}",
+    "decision_handoff": "交給 {{name}}",
+    "decision_urgent": "緊急",
+    "decision_note": "備註（選填）",
+    "decision_reject": "駁回",
+    "decision_approve": "批准",
+    "decision_approve_handoff": "批准並交給 {{name}} 開始專案",
+    "decision_approved": "已批准 {{identifier}}",
+    "decision_rejected": "已駁回 {{identifier}}",
+    "decision_failed": "無法記錄決定",
+    "decision_badge_other": "{{count}} 件待決定"
   },
   "views": {
     "builtin": {

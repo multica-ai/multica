@@ -1883,7 +1883,22 @@
     "squad_members": "Members",
     "squad_autopilots": "Autopilots",
     "squad_proposals": "Waiting for a decision",
-    "no_desk": "No desk"
+    "no_desk": "No desk",
+    "decisions_open": "Decisions",
+    "decisions_title": "Decisions",
+    "decisions_empty": "Nothing is waiting for you",
+    "decision_from": "From {{name}}",
+    "decision_handoff": "Hands off to {{name}}",
+    "decision_urgent": "Urgent",
+    "decision_note": "Note (optional)",
+    "decision_reject": "Reject",
+    "decision_approve": "Approve",
+    "decision_approve_handoff": "Approve and start a project for {{name}}",
+    "decision_approved": "Approved {{identifier}}",
+    "decision_rejected": "Rejected {{identifier}}",
+    "decision_failed": "Couldn't record the decision",
+    "decision_badge_one": "{{count}} decision waiting",
+    "decision_badge_other": "{{count}} decisions waiting"
   },
   "views": {
     "builtin": {

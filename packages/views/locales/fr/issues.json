@@ -1883,7 +1883,22 @@
     "squad_members": "Membres",
     "squad_autopilots": "Automatisations",
     "squad_proposals": "En attente de décision",
-    "no_desk": "Sans bureau"
+    "no_desk": "Sans bureau",
+    "decisions_open": "Décisions",
+    "decisions_title": "Décisions",
+    "decisions_empty": "Rien n'attend votre décision",
+    "decision_from": "De {{name}}",
+    "decision_handoff": "Transmis à {{name}}",
+    "decision_urgent": "Urgent",
+    "decision_note": "Note (facultative)",
+    "decision_reject": "Refuser",
+    "decision_approve": "Approuver",
+    "decision_approve_handoff": "Approuver et lancer un projet pour {{name}}",
+    "decision_approved": "{{identifier}} approuvé",
+    "decision_rejected": "{{identifier}} refusé",
+    "decision_failed": "Impossible d'enregistrer la décision",
+    "decision_badge_one": "{{count}} décision en attente",
+    "decision_badge_other": "{{count}} décisions en attente"
   },
   "views": {
     "builtin": {

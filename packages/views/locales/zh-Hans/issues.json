@@ -1811,7 +1811,21 @@
     "squad_members": "成员",
     "squad_autopilots": "自动化",
     "squad_proposals": "等待决定",
-    "no_desk": "没有工位"
+    "no_desk": "没有工位",
+    "decisions_open": "待决定",
+    "decisions_title": "待决定",
+    "decisions_empty": "没有等待你决定的事项",
+    "decision_from": "来自 {{name}}",
+    "decision_handoff": "交给 {{name}}",
+    "decision_urgent": "紧急",
+    "decision_note": "备注（可选）",
+    "decision_reject": "驳回",
+    "decision_approve": "批准",
+    "decision_approve_handoff": "批准并交给 {{name}} 开始项目",
+    "decision_approved": "已批准 {{identifier}}",
+    "decision_rejected": "已驳回 {{identifier}}",
+    "decision_failed": "无法记录决定",
+    "decision_badge_other": "{{count}} 件待决定"
   },
   "views": {
     "builtin": {

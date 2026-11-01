@@ -16,7 +16,7 @@ import type { Issue, IssueStatus, Squad } from "@multica/core/types";
 import { renderWithI18n } from "../../test/i18n";
 import { IssueContextMenuProvider } from "../../issues/actions/issue-actions-context-menu";
 import { workspaceKeys } from "@multica/core/workspace/queries";
-import { officeKeys, useOfficeFloorStore, type OfficeFloor } from "@multica/core/office";
+import { officeKeys, proposalKeys, useOfficeFloorStore, type OfficeFloor, type Proposal } from "@multica/core/office";
 import { useModalStore } from "@multica/core/modals";
 import type { Agent } from "@multica/core/types";
 import { OfficeView } from "./office-view";
@@ -85,6 +85,12 @@ vi.mock("./office-agent-panel", () => ({
         </button>
       </div>
     ) : null,
+}));
+
+// The decisions dialog has its own tests; here it only reports what it was given.
+vi.mock("./office-decisions-dialog", () => ({
+  OfficeDecisionsDialog: ({ open, proposals }: { open: boolean; proposals: { id: string }[] }) =>
+    open ? <div role="dialog" aria-label="Decisions">{`decisions ${proposals.length}`}</div> : null,
 }));
 
 // The board dialog has its own tests; here it only reports that it is open.
@@ -197,6 +203,10 @@ function makeAgent(id: string, home: string | null): Agent {
   return { id, name: `Agent ${id}`, home_squad_id: home, archived_at: null } as Agent;
 }
 
+function pendingProposal(squadId: string, id = "p1"): Proposal {
+  return { id, squad_id: squadId, state: "pending", title: "A proposal", issue_identifier: "MUL-1" } as Proposal;
+}
+
 const SQUADS = [makeSquad("s1", "agent-1", { floor: "f1", slot: 0 }), makeSquad("s2", "agent-3", { floor: "f2", slot: 2 })];
 const AGENTS = [makeAgent("agent-1", "s1"), makeAgent("agent-2", "s1"), makeAgent("agent-3", "s2"), makeAgent("agent-4", null)];
 
@@ -234,12 +244,14 @@ describe("OfficeView", () => {
       squads?: Squad[];
       floors?: OfficeFloor[];
       role?: string;
+      proposals?: Proposal[];
     } = {},
   ) {
     queryClient.setQueryData(workspaceKeys.agents("ws-1"), options.agents ?? AGENTS);
     queryClient.setQueryData(workspaceKeys.squads("ws-1"), options.squads ?? SQUADS);
     queryClient.setQueryData(officeKeys.floors("ws-1"), options.floors ?? FLOORS);
     queryClient.setQueryData(workspaceKeys.members("ws-1"), [{ user_id: "viewer-1", role: options.role ?? "owner" }]);
+    queryClient.setQueryData(proposalKeys.listFiltered("ws-1", { state: "pending" }), options.proposals ?? []);
     for (const squad of options.squads ?? SQUADS) {
       queryClient.setQueryData(
         officeKeys.squadMembers("ws-1", squad.id),
@@ -335,6 +347,23 @@ describe("OfficeView", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "Start from a template" }));
     expect(useModalStore.getState().modal).toBe("squad-quickstart");
+  });
+
+  it("tags the leader of a squad with a proposal waiting as Needs you, ahead of the issue status", async () => {
+    setup([makeIssue("c", "in_progress", "agent-1")], { proposals: [pendingProposal("s1")] });
+
+    expect(await screen.findByRole("button", { name: "Needs you" })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "In Progress" })).toBeNull();
+  });
+
+  it("counts the pending proposals over the room of the squad that filed them", async () => {
+    setup([], { proposals: [pendingProposal("s1"), pendingProposal("s1", "p2")] });
+
+    const badge = await screen.findByRole("button", { name: "2 decisions waiting" });
+    fireEvent.click(badge);
+
+    expect(await screen.findByRole("dialog", { name: "Decisions" })).toBeTruthy();
+    expect(screen.getByText("decisions 2")).toBeTruthy();
   });
 
   it("shows waiting for work over an agent with no open issue", async () => {

@@ -1811,7 +1811,21 @@
     "squad_members": "멤버",
     "squad_autopilots": "오토파일럿",
     "squad_proposals": "결정 대기 중",
-    "no_desk": "자리 없음"
+    "no_desk": "자리 없음",
+    "decisions_open": "결정",
+    "decisions_title": "결정",
+    "decisions_empty": "결정 대기 중인 항목이 없습니다",
+    "decision_from": "{{name}} 제출",
+    "decision_handoff": "{{name}}에 인계",
+    "decision_urgent": "긴급",
+    "decision_note": "메모 (선택)",
+    "decision_reject": "반려",
+    "decision_approve": "승인",
+    "decision_approve_handoff": "승인하고 {{name}}과 프로젝트 시작",
+    "decision_approved": "{{identifier}} 승인됨",
+    "decision_rejected": "{{identifier}} 반려됨",
+    "decision_failed": "결정을 기록하지 못했습니다",
+    "decision_badge_other": "결정 대기 {{count}}건"
   },
   "views": {
     "builtin": {

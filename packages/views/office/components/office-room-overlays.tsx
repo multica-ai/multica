@@ -7,20 +7,26 @@ import type { OfficeStage } from "./office-canvas";
 
 /**
  * Controls pinned over the rooms the engine reports, by slot: "Create squad" in
- * an empty room, and the `+N` chip of a room whose squad has more agents than
- * desks. Each sits at its room's own rectangle, in the stage's layout units.
+ * an empty room, the `+N` chip of a room whose squad has more agents than
+ * desks, and a count of the proposals waiting in it. Each sits at its room's
+ * own rectangle, in the stage's layout units.
  */
 export function OfficeRoomOverlays({
   stage,
   rooms,
+  pendingBySlot,
   onCreateSquad,
   onOpenSquad,
+  onOpenDecisions,
 }: {
   stage: OfficeStage;
   /** The floor's rooms, indexed by slot; the stage's rooms are in the same order. */
   rooms: readonly FloorRoom[];
+  /** Pending proposals per slot. */
+  pendingBySlot: readonly number[];
   onCreateSquad: () => void;
   onOpenSquad: (slot: number) => void;
+  onOpenDecisions: () => void;
 }) {
   const { t } = useT("issues");
   const { units } = stage;
@@ -35,8 +41,19 @@ export function OfficeRoomOverlays({
           width: `${(rect.w / units.w) * 100}%`,
           height: `${(rect.h / units.h) * 100}%`,
         };
+        const pending = pendingBySlot[index] ?? 0;
         return (
           <div key={index} className="absolute" style={box}>
+            {pending > 0 ? (
+              <button
+                type="button"
+                aria-label={t(($) => $.office.decision_badge, { count: pending })}
+                onClick={onOpenDecisions}
+                className="pointer-events-auto absolute -right-2 -top-2 flex min-w-5 cursor-pointer items-center justify-center rounded-full bg-[#1d5fd6] px-1.5 py-0.5 text-micro font-semibold text-white shadow hover:bg-[#174db0]"
+              >
+                {pending}
+              </button>
+            ) : null}
             {!room.squad ? (
               <button
                 type="button"

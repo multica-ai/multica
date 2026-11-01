@@ -1811,7 +1811,21 @@
     "squad_members": "メンバー",
     "squad_autopilots": "オートパイロット",
     "squad_proposals": "判断待ち",
-    "no_desk": "席なし"
+    "no_desk": "席なし",
+    "decisions_open": "判断",
+    "decisions_title": "判断",
+    "decisions_empty": "判断待ちはありません",
+    "decision_from": "{{name}}から",
+    "decision_handoff": "{{name}}へ引き継ぎ",
+    "decision_urgent": "緊急",
+    "decision_note": "メモ（任意）",
+    "decision_reject": "却下",
+    "decision_approve": "承認",
+    "decision_approve_handoff": "承認して{{name}}でプロジェクトを開始",
+    "decision_approved": "{{identifier}}を承認しました",
+    "decision_rejected": "{{identifier}}を却下しました",
+    "decision_failed": "判断を記録できませんでした",
+    "decision_badge_other": "判断待ち {{count}}件"
   },
   "views": {
     "builtin": {
