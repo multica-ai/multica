@@ -1163,6 +1163,11 @@ type KnowledgeLink struct {
 	CreatedByID        pgtype.UUID        `json:"created_by_id"`
 	CreatedAt          pgtype.Timestamptz `json:"created_at"`
 	PublishedAt        pgtype.Timestamptz `json:"published_at"`
+	Title              string             `json:"title"`
+	SourceUrl          string             `json:"source_url"`
+	PendingContent     string             `json:"pending_content"`
+	PublishRequested   bool               `json:"publish_requested"`
+	Error              string             `json:"error"`
 }
 
 type LarkBindingToken struct {

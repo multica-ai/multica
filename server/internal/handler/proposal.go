@@ -205,7 +205,13 @@ func (h *Handler) mayFileProposalForSquad(w http.ResponseWriter, r *http.Request
 }
 
 func (h *Handler) proposalService() *service.ProposalService {
-	return service.NewProposalService(h.IssueService)
+	svc := service.NewProposalService(h.IssueService)
+	// Typed nil would make the interface non-nil, so only set it when offered.
+	if h.Knowledge != nil {
+		svc.Knowledge = h.Knowledge
+	}
+	svc.AppURL = h.cfg.AppURL
+	return svc
 }
 
 // CreateProposal files a squad's proposal and its backing issue.

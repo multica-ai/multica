@@ -2027,13 +2027,25 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 			// Assignee frequency
 			r.Get("/api/assignee-frequency", h.GetAssigneeFrequency)
 
-			// Company knowledge base: status and one-time provisioning. Human
-			// owners and admins only.
+			// Company knowledge base. Status and one-time provisioning are for
+			// human owners and admins. Reading, searching and writing drafts
+			// are open to members and agents. Publish, discard and delete are
+			// for human owners and admins: a person curates what becomes the
+			// company's record.
 			r.Route("/api/knowledge", func(r chi.Router) {
-				r.Use(handler.RequireHumanActor)
-				r.Use(middleware.RequireWorkspaceRole(queries, "owner", "admin"))
-				r.Get("/", h.GetKnowledge)
-				r.Post("/enable", h.EnableKnowledge)
+				r.Group(func(r chi.Router) {
+					r.Use(handler.RequireHumanActor)
+					r.Use(middleware.RequireWorkspaceRole(queries, "owner", "admin"))
+					r.Get("/", h.GetKnowledge)
+					r.Post("/enable", h.EnableKnowledge)
+					r.Post("/documents/{id}/publish", h.PublishKnowledgeDocument)
+					r.Post("/documents/{id}/discard", h.DiscardKnowledgeDocument)
+					r.Delete("/documents/{id}", h.DeleteKnowledgeDocument)
+				})
+				r.Get("/bases", h.ListKnowledgeBases)
+				r.Get("/documents", h.ListKnowledgeDocuments)
+				r.Post("/documents", h.CreateKnowledgeDocument)
+				r.Get("/search", h.SearchKnowledge)
 			})
 
 			// Local search index sync for Web/Desktop (MUL-7754). Human clients

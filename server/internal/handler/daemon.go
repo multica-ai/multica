@@ -4090,6 +4090,13 @@ func (h *Handler) buildClaimedTaskResponse(r *http.Request, task *db.AgentTaskQu
 		return resp, deliveredCommentIDs, issueSnapshot, agentSkillCount, builtinSkillCount, failure
 	}
 
+	// Company knowledge block: one place for every task kind, included only
+	// while the workspace's knowledge is ready. Appended after the squad
+	// briefing so per-agent and squad instructions keep their precedence.
+	if resp.Agent != nil {
+		resp.Agent.Instructions = h.withCompanyKnowledge(r.Context(), parseUUID(resp.WorkspaceID), resp.Agent.Instructions)
+	}
+
 	// Workspace-level Context (workspace.context DB column) — the per-workspace
 	// system prompt that workspace owners set in Settings → General. Inject it
 	// into the brief regardless of task kind (issue / chat / autopilot /

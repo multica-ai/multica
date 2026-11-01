@@ -91,6 +91,7 @@
     "./agent-packs": "./agent-packs/index.ts",
     "./squads": "./squads/index.ts",
     "./squads/stores": "./squads/stores/index.ts",
+    "./knowledge": "./knowledge/index.ts",
     "./office": "./office/index.ts",
     "./office/layout": "./office/layout.ts",
     "./office/queries": "./office/queries.ts",

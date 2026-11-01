@@ -56,6 +56,54 @@ func (q *Queries) AssignMcpServerToLiveAgents(ctx context.Context, arg AssignMcp
 	return result.RowsAffected(), nil
 }
 
+const claimKnowledgeLink = `-- name: ClaimKnowledgeLink :execrows
+INSERT INTO knowledge_link (
+    workspace_id, knowledge_base_id, weknora_knowledge_id, source_type, source_id,
+    idempotency_key, state, created_by_type, created_by_id,
+    title, source_url, pending_content, publish_requested, error
+) VALUES (
+    $1, $2, '', $3, $4, $5, 'failed', $6, $7, $8, $9, $10, $11, 'not sent yet'
+)
+ON CONFLICT (workspace_id, idempotency_key) DO NOTHING
+`
+
+type ClaimKnowledgeLinkParams struct {
+	WorkspaceID      pgtype.UUID `json:"workspace_id"`
+	KnowledgeBaseID  pgtype.UUID `json:"knowledge_base_id"`
+	SourceType       string      `json:"source_type"`
+	SourceID         pgtype.UUID `json:"source_id"`
+	IdempotencyKey   string      `json:"idempotency_key"`
+	CreatedByType    string      `json:"created_by_type"`
+	CreatedByID      pgtype.UUID `json:"created_by_id"`
+	Title            string      `json:"title"`
+	SourceUrl        string      `json:"source_url"`
+	PendingContent   string      `json:"pending_content"`
+	PublishRequested bool        `json:"publish_requested"`
+}
+
+// The idempotency claim of a write: the row exists before WeKnora is asked,
+// in state 'failed' with the pending content, so a crash or an outage leaves
+// something a retry can finish. A repeated key is a no-op.
+func (q *Queries) ClaimKnowledgeLink(ctx context.Context, arg ClaimKnowledgeLinkParams) (int64, error) {
+	result, err := q.db.Exec(ctx, claimKnowledgeLink,
+		arg.WorkspaceID,
+		arg.KnowledgeBaseID,
+		arg.SourceType,
+		arg.SourceID,
+		arg.IdempotencyKey,
+		arg.CreatedByType,
+		arg.CreatedByID,
+		arg.Title,
+		arg.SourceUrl,
+		arg.PendingContent,
+		arg.PublishRequested,
+	)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
 const createKnowledgeBase = `-- name: CreateKnowledgeBase :execrows
 INSERT INTO knowledge_base (workspace_id, weknora_kb_id, key, name, visibility, position)
 VALUES ($1, $2, $3, $4, $5, $6)
@@ -107,6 +155,117 @@ func (q *Queries) CreateWorkspaceKnowledge(ctx context.Context, arg CreateWorksp
 		return 0, err
 	}
 	return result.RowsAffected(), nil
+}
+
+const deleteKnowledgeLink = `-- name: DeleteKnowledgeLink :execrows
+DELETE FROM knowledge_link WHERE id = $1 AND workspace_id = $2
+`
+
+type DeleteKnowledgeLinkParams struct {
+	ID          pgtype.UUID `json:"id"`
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
+}
+
+func (q *Queries) DeleteKnowledgeLink(ctx context.Context, arg DeleteKnowledgeLinkParams) (int64, error) {
+	result, err := q.db.Exec(ctx, deleteKnowledgeLink, arg.ID, arg.WorkspaceID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
+const getKnowledgeBaseByKey = `-- name: GetKnowledgeBaseByKey :one
+SELECT id, workspace_id, weknora_kb_id, key, name, visibility, position, archived_at, created_at FROM knowledge_base WHERE workspace_id = $1 AND key = $2 AND archived_at IS NULL
+`
+
+type GetKnowledgeBaseByKeyParams struct {
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
+	Key         string      `json:"key"`
+}
+
+func (q *Queries) GetKnowledgeBaseByKey(ctx context.Context, arg GetKnowledgeBaseByKeyParams) (KnowledgeBase, error) {
+	row := q.db.QueryRow(ctx, getKnowledgeBaseByKey, arg.WorkspaceID, arg.Key)
+	var i KnowledgeBase
+	err := row.Scan(
+		&i.ID,
+		&i.WorkspaceID,
+		&i.WeknoraKbID,
+		&i.Key,
+		&i.Name,
+		&i.Visibility,
+		&i.Position,
+		&i.ArchivedAt,
+		&i.CreatedAt,
+	)
+	return i, err
+}
+
+const getKnowledgeLink = `-- name: GetKnowledgeLink :one
+SELECT id, workspace_id, knowledge_base_id, weknora_knowledge_id, source_type, source_id, idempotency_key, state, created_by_type, created_by_id, created_at, published_at, title, source_url, pending_content, publish_requested, error FROM knowledge_link WHERE id = $1 AND workspace_id = $2
+`
+
+type GetKnowledgeLinkParams struct {
+	ID          pgtype.UUID `json:"id"`
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
+}
+
+func (q *Queries) GetKnowledgeLink(ctx context.Context, arg GetKnowledgeLinkParams) (KnowledgeLink, error) {
+	row := q.db.QueryRow(ctx, getKnowledgeLink, arg.ID, arg.WorkspaceID)
+	var i KnowledgeLink
+	err := row.Scan(
+		&i.ID,
+		&i.WorkspaceID,
+		&i.KnowledgeBaseID,
+		&i.WeknoraKnowledgeID,
+		&i.SourceType,
+		&i.SourceID,
+		&i.IdempotencyKey,
+		&i.State,
+		&i.CreatedByType,
+		&i.CreatedByID,
+		&i.CreatedAt,
+		&i.PublishedAt,
+		&i.Title,
+		&i.SourceUrl,
+		&i.PendingContent,
+		&i.PublishRequested,
+		&i.Error,
+	)
+	return i, err
+}
+
+const getKnowledgeLinkByKey = `-- name: GetKnowledgeLinkByKey :one
+SELECT id, workspace_id, knowledge_base_id, weknora_knowledge_id, source_type, source_id, idempotency_key, state, created_by_type, created_by_id, created_at, published_at, title, source_url, pending_content, publish_requested, error FROM knowledge_link WHERE workspace_id = $1 AND idempotency_key = $2
+`
+
+type GetKnowledgeLinkByKeyParams struct {
+	WorkspaceID    pgtype.UUID `json:"workspace_id"`
+	IdempotencyKey string      `json:"idempotency_key"`
+}
+
+func (q *Queries) GetKnowledgeLinkByKey(ctx context.Context, arg GetKnowledgeLinkByKeyParams) (KnowledgeLink, error) {
+	row := q.db.QueryRow(ctx, getKnowledgeLinkByKey, arg.WorkspaceID, arg.IdempotencyKey)
+	var i KnowledgeLink
+	err := row.Scan(
+		&i.ID,
+		&i.WorkspaceID,
+		&i.KnowledgeBaseID,
+		&i.WeknoraKnowledgeID,
+		&i.SourceType,
+		&i.SourceID,
+		&i.IdempotencyKey,
+		&i.State,
+		&i.CreatedByType,
+		&i.CreatedByID,
+		&i.CreatedAt,
+		&i.PublishedAt,
+		&i.Title,
+		&i.SourceUrl,
+		&i.PendingContent,
+		&i.PublishRequested,
+		&i.Error,
+	)
+	return i, err
 }
 
 const getWorkspaceKnowledge = `-- name: GetWorkspaceKnowledge :one
@@ -187,6 +346,106 @@ func (q *Queries) ListKnowledgeBases(ctx context.Context, workspaceID pgtype.UUI
 	return items, nil
 }
 
+const listKnowledgeLinks = `-- name: ListKnowledgeLinks :many
+SELECT id, workspace_id, knowledge_base_id, weknora_knowledge_id, source_type, source_id, idempotency_key, state, created_by_type, created_by_id, created_at, published_at, title, source_url, pending_content, publish_requested, error FROM knowledge_link
+WHERE workspace_id = $1
+  AND ($2::uuid IS NULL OR knowledge_base_id = $2::uuid)
+  AND ($3::text IS NULL OR state = $3::text)
+ORDER BY created_at DESC, id DESC
+LIMIT 500
+`
+
+type ListKnowledgeLinksParams struct {
+	WorkspaceID     pgtype.UUID `json:"workspace_id"`
+	KnowledgeBaseID pgtype.UUID `json:"knowledge_base_id"`
+	State           pgtype.Text `json:"state"`
+}
+
+// Newest first. knowledge_base_id and state are optional filters.
+func (q *Queries) ListKnowledgeLinks(ctx context.Context, arg ListKnowledgeLinksParams) ([]KnowledgeLink, error) {
+	rows, err := q.db.Query(ctx, listKnowledgeLinks, arg.WorkspaceID, arg.KnowledgeBaseID, arg.State)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []KnowledgeLink{}
+	for rows.Next() {
+		var i KnowledgeLink
+		if err := rows.Scan(
+			&i.ID,
+			&i.WorkspaceID,
+			&i.KnowledgeBaseID,
+			&i.WeknoraKnowledgeID,
+			&i.SourceType,
+			&i.SourceID,
+			&i.IdempotencyKey,
+			&i.State,
+			&i.CreatedByType,
+			&i.CreatedByID,
+			&i.CreatedAt,
+			&i.PublishedAt,
+			&i.Title,
+			&i.SourceUrl,
+			&i.PendingContent,
+			&i.PublishRequested,
+			&i.Error,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listRetryableKnowledgeLinks = `-- name: ListRetryableKnowledgeLinks :many
+SELECT id, workspace_id, knowledge_base_id, weknora_knowledge_id, source_type, source_id, idempotency_key, state, created_by_type, created_by_id, created_at, published_at, title, source_url, pending_content, publish_requested, error FROM knowledge_link
+WHERE workspace_id = $1 AND state = 'failed' AND created_by_type = 'system'
+ORDER BY created_at ASC
+LIMIT 20
+`
+
+// Writes WeKnora has not accepted yet whose author is Multica itself.
+func (q *Queries) ListRetryableKnowledgeLinks(ctx context.Context, workspaceID pgtype.UUID) ([]KnowledgeLink, error) {
+	rows, err := q.db.Query(ctx, listRetryableKnowledgeLinks, workspaceID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []KnowledgeLink{}
+	for rows.Next() {
+		var i KnowledgeLink
+		if err := rows.Scan(
+			&i.ID,
+			&i.WorkspaceID,
+			&i.KnowledgeBaseID,
+			&i.WeknoraKnowledgeID,
+			&i.SourceType,
+			&i.SourceID,
+			&i.IdempotencyKey,
+			&i.State,
+			&i.CreatedByType,
+			&i.CreatedByID,
+			&i.CreatedAt,
+			&i.PublishedAt,
+			&i.Title,
+			&i.SourceUrl,
+			&i.PendingContent,
+			&i.PublishRequested,
+			&i.Error,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const setWorkspaceKnowledgeState = `-- name: SetWorkspaceKnowledgeState :execrows
 UPDATE workspace_knowledge SET state = $2 WHERE workspace_id = $1
 `
@@ -202,4 +461,57 @@ func (q *Queries) SetWorkspaceKnowledgeState(ctx context.Context, arg SetWorkspa
 		return 0, err
 	}
 	return result.RowsAffected(), nil
+}
+
+const settleKnowledgeLink = `-- name: SettleKnowledgeLink :one
+UPDATE knowledge_link SET
+    weknora_knowledge_id = $1::text,
+    state = $2::text,
+    error = $3::text,
+    pending_content = CASE WHEN $2::text = 'failed' THEN pending_content ELSE '' END,
+    published_at = CASE WHEN $2::text = 'published' THEN COALESCE(published_at, now()) ELSE published_at END
+WHERE id = $4 AND workspace_id = $5
+RETURNING id, workspace_id, knowledge_base_id, weknora_knowledge_id, source_type, source_id, idempotency_key, state, created_by_type, created_by_id, created_at, published_at, title, source_url, pending_content, publish_requested, error
+`
+
+type SettleKnowledgeLinkParams struct {
+	WeknoraKnowledgeID string      `json:"weknora_knowledge_id"`
+	State              string      `json:"state"`
+	Error              string      `json:"error"`
+	ID                 pgtype.UUID `json:"id"`
+	WorkspaceID        pgtype.UUID `json:"workspace_id"`
+}
+
+// Records the outcome of a write or publish: the WeKnora document, the new
+// state, and the failure text (empty on success). Pending content is dropped
+// once the document exists.
+func (q *Queries) SettleKnowledgeLink(ctx context.Context, arg SettleKnowledgeLinkParams) (KnowledgeLink, error) {
+	row := q.db.QueryRow(ctx, settleKnowledgeLink,
+		arg.WeknoraKnowledgeID,
+		arg.State,
+		arg.Error,
+		arg.ID,
+		arg.WorkspaceID,
+	)
+	var i KnowledgeLink
+	err := row.Scan(
+		&i.ID,
+		&i.WorkspaceID,
+		&i.KnowledgeBaseID,
+		&i.WeknoraKnowledgeID,
+		&i.SourceType,
+		&i.SourceID,
+		&i.IdempotencyKey,
+		&i.State,
+		&i.CreatedByType,
+		&i.CreatedByID,
+		&i.CreatedAt,
+		&i.PublishedAt,
+		&i.Title,
+		&i.SourceUrl,
+		&i.PendingContent,
+		&i.PublishRequested,
+		&i.Error,
+	)
+	return i, err
 }

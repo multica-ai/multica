@@ -290,6 +290,25 @@ import {
   type DigestParams,
 } from "../office/digest-schema";
 import {
+  FALLBACK_KNOWLEDGE_BASES,
+  FALLBACK_KNOWLEDGE_DOCUMENT,
+  FALLBACK_KNOWLEDGE_DOCUMENT_LIST,
+  FALLBACK_KNOWLEDGE_SEARCH,
+  KnowledgeBasesSchema,
+  KnowledgeDocumentListSchema,
+  KnowledgeDocumentSchema,
+  KnowledgeSearchResultSchema,
+} from "../knowledge/schemas";
+import type {
+  CreateKnowledgeDocumentRequest,
+  KnowledgeBases,
+  KnowledgeDocument,
+  KnowledgeDocumentList,
+  KnowledgeSearchResult,
+  ListKnowledgeDocumentsParams,
+  SearchKnowledgeParams,
+} from "../knowledge/types";
+import {
   FALLBACK_PROPOSAL,
   ProposalListSchema,
   ProposalSchema,
@@ -5647,6 +5666,61 @@ export class ApiClient {
     return parseWithFallback(raw, BriefSchema, FALLBACK_BRIEF, {
       endpoint: "POST /api/briefs",
     });
+  }
+
+  // Company knowledge. Reads and searches are open to members; writes land as
+  // drafts until an owner or admin publishes them.
+  async listKnowledgeBases(): Promise<KnowledgeBases> {
+    const raw = await this.fetch<unknown>("/api/knowledge/bases");
+    return parseWithFallback(raw, KnowledgeBasesSchema, FALLBACK_KNOWLEDGE_BASES, {
+      endpoint: "GET /api/knowledge/bases",
+    });
+  }
+
+  async listKnowledgeDocuments(params?: ListKnowledgeDocumentsParams): Promise<KnowledgeDocumentList> {
+    const search = new URLSearchParams();
+    if (params?.kb) search.set("kb", params.kb);
+    if (params?.state) search.set("state", params.state);
+    const qs = search.toString();
+    const raw = await this.fetch<unknown>(`/api/knowledge/documents${qs ? `?${qs}` : ""}`);
+    return parseWithFallback(raw, KnowledgeDocumentListSchema, FALLBACK_KNOWLEDGE_DOCUMENT_LIST, {
+      endpoint: "GET /api/knowledge/documents",
+    });
+  }
+
+  async searchKnowledge(params: SearchKnowledgeParams): Promise<KnowledgeSearchResult> {
+    const search = new URLSearchParams({ q: params.q });
+    if (params.kb) search.set("kb", params.kb);
+    if (params.limit) search.set("limit", String(params.limit));
+    const raw = await this.fetch<unknown>(`/api/knowledge/search?${search.toString()}`);
+    return parseWithFallback(raw, KnowledgeSearchResultSchema, FALLBACK_KNOWLEDGE_SEARCH, {
+      endpoint: "GET /api/knowledge/search",
+    });
+  }
+
+  async createKnowledgeDocument(data: CreateKnowledgeDocumentRequest): Promise<KnowledgeDocument> {
+    const raw = await this.fetch<unknown>("/api/knowledge/documents", {
+      method: "POST",
+      body: JSON.stringify(data),
+    });
+    return parseWithFallback(raw, KnowledgeDocumentSchema, FALLBACK_KNOWLEDGE_DOCUMENT, {
+      endpoint: "POST /api/knowledge/documents",
+    });
+  }
+
+  async publishKnowledgeDocument(id: string): Promise<KnowledgeDocument> {
+    const raw = await this.fetch<unknown>(`/api/knowledge/documents/${id}/publish`, { method: "POST" });
+    return parseWithFallback(raw, KnowledgeDocumentSchema, FALLBACK_KNOWLEDGE_DOCUMENT, {
+      endpoint: "POST /api/knowledge/documents/:id/publish",
+    });
+  }
+
+  async discardKnowledgeDocument(id: string): Promise<void> {
+    await this.fetch(`/api/knowledge/documents/${id}/discard`, { method: "POST" });
+  }
+
+  async deleteKnowledgeDocument(id: string): Promise<void> {
+    await this.fetch(`/api/knowledge/documents/${id}`, { method: "DELETE" });
   }
 
   // Proposals (squad requests for a decision by the boss)
