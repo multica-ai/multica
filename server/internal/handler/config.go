@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"net"
 	"net/http"
 	"net/url"
 	"os"
@@ -100,6 +101,15 @@ type AppConfig struct {
 	// which is continuously deployed so its users can't act on the version —
 	// and empty for dev builds that aren't stamped via -X main.version.
 	ServerVersion string `json:"server_version,omitempty"`
+
+	// DevLoginHint is the fixed verification code from
+	// MULTICA_DEV_VERIFICATION_CODE so a developer's browser can show it on
+	// the login page. Never a production thing: it is only set on
+	// non-production deployments with a valid six-digit dev code, and only
+	// for requests originating on the machine running the server — the code
+	// is an auth credential and must not be handed to callers the server
+	// cannot physically see. Omitted in every other case.
+	DevLoginHint string `json:"dev_login_hint,omitempty"`
 }
 
 // GetConfig is mounted on the public (unauthenticated) route group because
@@ -130,6 +140,11 @@ func (h *Handler) GetConfig(w http.ResponseWriter, r *http.Request) {
 	// the Help popover's version row would just be noise there (MUL-4108).
 	if !isOfficialCloudDeployment() {
 		config.ServerVersion = h.cfg.ServerVersion
+	}
+	// Local-only dev hint, re-read per request like the other env-derived
+	// fields so toggling the env var doesn't require a restart.
+	if hint := devLoginHintForRequest(r); hint != "" {
+		config.DevLoginHint = hint
 	}
 
 	// Re-read from env on every request so operators can rotate keys via
@@ -190,6 +205,31 @@ func normalizePublicURL(raw string) string {
 // cloud deployment that forgot MULTICA_PUBLIC_URL fell through and emitted a
 // `setup self-host --server-url https://multica.ai` command — pointing the
 // daemon's backend at the frontend (no /health, no WebSocket proxy).
+// devLoginHintForRequest returns the fixed dev verification code when this
+// server is a non-production deployment with MULTICA_DEV_VERIFICATION_CODE
+// configured AND the request originated on the machine running the server
+// (loopback). The code is a working credential: /api/config is public, so
+// the hint must never reach a browser on another host — a dev server bound
+// to a LAN address must not leak it to passers-by. Mirrors the production
+// gate in isDevVerificationCode (handler/auth.go).
+func devLoginHintForRequest(r *http.Request) string {
+	if isProductionEnv() {
+		return ""
+	}
+	devCode := strings.TrimSpace(os.Getenv(devVerificationCodeEnv))
+	if !isSixDigitCode(devCode) {
+		return ""
+	}
+	host, _, err := net.SplitHostPort(r.RemoteAddr)
+	if err != nil {
+		return ""
+	}
+	if ip := net.ParseIP(host); ip == nil || !ip.IsLoopback() {
+		return ""
+	}
+	return devCode
+}
+
 func isOfficialCloudDaemonConfig(appURL string) bool {
 	return urlHostEquals(appURL, "multica.ai")
 }

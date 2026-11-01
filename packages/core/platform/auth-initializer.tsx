@@ -106,6 +106,9 @@ export function AuthInitializer({
           .setCommentDeleteKeepRepliesSupported(
             cfg.comment_delete_keep_replies_supported === true,
           );
+        // Dev-only fixed login code; absent (undefined) on production and on
+        // servers that predate the hint, so default to no banner.
+        configStore.getState().setDevLoginHint(cfg.dev_login_hint);
         if (cfg.posthog_key) {
           initAnalytics({
             key: cfg.posthog_key,

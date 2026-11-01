@@ -599,3 +599,60 @@ func TestGetConfigDeclaresCommentDeleteKeepsReplies(t *testing.T) {
 		t.Fatalf("comment_delete_keep_replies_supported = %v, want true", raw["comment_delete_keep_replies_supported"])
 	}
 }
+
+// The dev login hint lets a developer's browser show the fixed code on the
+// login page, but the code is a working credential: it may only reach requests
+// from the machine running the server, on a non-production deployment with a
+// valid six-digit dev code configured.
+func TestGetConfigDevLoginHint(t *testing.T) {
+	const devCode = "888888"
+	t.Setenv("MULTICA_DEV_VERIFICATION_CODE", devCode)
+	t.Setenv("APP_ENV", "")
+
+	fetch := func(remoteAddr string) map[string]any {
+		t.Helper()
+		req := httptest.NewRequest(http.MethodGet, "/api/config", nil)
+		if remoteAddr != "" {
+			req.RemoteAddr = remoteAddr
+		}
+		w := httptest.NewRecorder()
+		testHandler.GetConfig(w, req)
+		if w.Code != http.StatusOK {
+			t.Fatalf("GetConfig: expected 200, got %d: %s", w.Code, w.Body.String())
+		}
+		var raw map[string]any
+		if err := json.Unmarshal(w.Body.Bytes(), &raw); err != nil {
+			t.Fatalf("decode raw config: %v", err)
+		}
+		return raw
+	}
+
+	if got := fetch("127.0.0.1:54321")["dev_login_hint"]; got != devCode {
+		t.Fatalf("dev_login_hint for loopback request = %v, want %q", got, devCode)
+	}
+	if got := fetch("[::1]:54321")["dev_login_hint"]; got != devCode {
+		t.Fatalf("dev_login_hint for IPv6 loopback request = %v, want %q", got, devCode)
+	}
+	for _, remote := range []string{"192.168.1.20:54321", "10.0.0.7:54321", "example.com:54321"} {
+		if got, ok := fetch(remote)["dev_login_hint"]; ok {
+			t.Fatalf("dev_login_hint leaked to remote request %s: %v", remote, got)
+		}
+	}
+
+	// Production never hints, even to loopback.
+	t.Setenv("APP_ENV", "production")
+	if got, ok := fetch("127.0.0.1:54321")["dev_login_hint"]; ok {
+		t.Fatalf("dev_login_hint leaked in production: %v", got)
+	}
+
+	// Invalid / missing dev codes never hint.
+	t.Setenv("APP_ENV", "")
+	t.Setenv("MULTICA_DEV_VERIFICATION_CODE", "12345")
+	if got, ok := fetch("127.0.0.1:54321")["dev_login_hint"]; ok {
+		t.Fatalf("dev_login_hint leaked with five-digit dev code: %v", got)
+	}
+	t.Setenv("MULTICA_DEV_VERIFICATION_CODE", "")
+	if got, ok := fetch("127.0.0.1:54321")["dev_login_hint"]; ok {
+		t.Fatalf("dev_login_hint leaked without a dev code configured: %v", got)
+	}
+}

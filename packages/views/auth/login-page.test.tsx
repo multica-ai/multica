@@ -3,6 +3,7 @@ import { render, screen, waitFor, act } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import type { ReactElement, ReactNode } from "react";
 import { I18nProvider } from "@multica/core/i18n/react";
+import { configStore } from "@multica/core/config";
 import enCommon from "../locales/en/common.json";
 import enAuth from "../locales/en/auth.json";
 import enSettings from "../locales/en/settings.json";
@@ -103,6 +104,8 @@ describe("LoginPage", () => {
     vi.useFakeTimers({ shouldAdvanceTime: true });
     vi.clearAllMocks();
     mockAuthState.expired = false;
+    // No dev hint unless a test opts in.
+    configStore.setState({ devLoginHint: "" });
     // Default: no existing session (getMe rejects when no auth)
     mockApiGetMe.mockRejectedValue(new Error("unauthorized"));
     localStorage.clear();
@@ -725,6 +728,39 @@ describe("LoginPage", () => {
     expect(
       screen.getByText(/sign in to multica/i),
     ).toBeInTheDocument();
+  });
+
+  // -------------------------------------------------------------------------
+  // Dev login hint (server-served fixed code for local dev instances)
+  // -------------------------------------------------------------------------
+
+  it("shows the dev login hint with the fixed code when the server provides one", () => {
+    configStore.setState({ devLoginHint: "888888" });
+    renderWithI18n(<LoginPage onSuccess={onSuccess} />);
+
+    const banner = screen.getByTestId("dev-login-hint");
+    expect(banner).toHaveTextContent("dev@localhost");
+    expect(banner).toHaveTextContent("888888");
+  });
+
+  it("keeps the dev hint visible on the code step", async () => {
+    configStore.setState({ devLoginHint: "888888" });
+    mockSendCode.mockResolvedValueOnce(undefined);
+    renderWithI18n(<LoginPage onSuccess={onSuccess} />);
+
+    const user = userEvent.setup();
+    await user.type(screen.getByLabelText(/email/i), "dev@localhost");
+    await user.click(screen.getByRole("button", { name: /continue/i }));
+
+    await waitFor(() => {
+      expect(screen.getByText(/check your email/i)).toBeInTheDocument();
+    });
+    expect(screen.getByTestId("dev-login-hint")).toHaveTextContent("888888");
+  });
+
+  it("renders no dev hint banner without a server-provided hint", () => {
+    renderWithI18n(<LoginPage onSuccess={onSuccess} />);
+    expect(screen.queryByTestId("dev-login-hint")).not.toBeInTheDocument();
   });
 
 });

@@ -772,6 +772,11 @@ export interface AppConfigResponse {
   /** Whether issue create atomically validates and persists `properties`.
    * Older servers silently ignore the field, so absent means unsupported. */
   issue_create_properties_supported?: boolean;
+  /** Fixed dev verification code, sent only by non-production servers to
+   * loopback requests when MULTICA_DEV_VERIFICATION_CODE is configured, so a
+   * developer's browser can show it on the login page. Absent everywhere else
+   * — treat that as "no hint". */
+  dev_login_hint?: string;
   /** Whether deleting a comment keeps its replies and the server routes
    * DELETE /api/comments/{id}/keep-replies. Older servers deleted the replies
    * too, so absent must be treated as false (#8296). */

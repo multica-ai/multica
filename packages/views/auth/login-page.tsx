@@ -20,6 +20,7 @@ import {
   InputOTPSlot,
 } from "@multica/ui/components/ui/input-otp";
 import { useAuthStore } from "@multica/core/auth";
+import { useConfigStore } from "@multica/core/config";
 import { workspaceKeys } from "@multica/core/workspace/queries";
 import { api } from "@multica/core/api";
 import type { User } from "@multica/core/types";
@@ -109,6 +110,9 @@ export function LoginPage({
 }: LoginPageProps) {
   const { t } = useT("auth");
   const qc = useQueryClient();
+  // Fixed code for local dev instances, served only to loopback requests by
+  // non-production servers (dev_login_hint in /api/config). Empty elsewhere.
+  const devLoginHint = useConfigStore((state) => state.devLoginHint);
   const [step, setStep] = useState<"email" | "code" | "cli_confirm">("email");
   const [email, setEmail] = useState("");
   const [code, setCode] = useState("");
@@ -123,6 +127,20 @@ export function LoginPage({
   // because the user asked to leave. Without saying so, landing here reads as
   // the app having lost their work for no reason.
   const sessionExpired = useAuthStore((state) => state.expired);
+
+  // Dev instances tell the developer how to get in; see dev_login_hint in
+  // the server's public config. Rendered on both steps so the code is still
+  // visible when the OTP box asks for it.
+  const devHintBanner = devLoginHint ? (
+    <Alert data-testid="dev-login-hint">
+      <AlertDescription>
+        {t(($) => $.web.dev_hint.message, {
+          email: "dev@localhost",
+          code: devLoginHint,
+        })}
+      </AlertDescription>
+    </Alert>
+  ) : null;
 
   // Check for existing session when CLI callback is present.
   // Prioritises cookie auth (= current browser session) to avoid authorising
@@ -359,6 +377,7 @@ export function LoginPage({
             </CardDescription>
           </CardHeader>
           <CardContent className="flex flex-col items-center gap-4">
+            {devHintBanner}
             <InputOTP
               autoFocus
               maxLength={6}
@@ -430,6 +449,7 @@ export function LoginPage({
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
+          {devHintBanner}
           {sessionExpired && (
             <Alert>
               <AlertDescription>
