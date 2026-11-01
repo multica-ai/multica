@@ -1850,7 +1850,22 @@
     "home_squad_empty": "Not in any squad",
     "home_squad_set": "{{name}} now sits in {{squad}}",
     "home_squad_cleared": "{{name}} has no home squad",
-    "home_squad_failed": "Couldn't change the home squad"
+    "home_squad_failed": "Couldn't change the home squad",
+    "floors": "Floors",
+    "floor_default_name": "Floor {{n}}",
+    "floor_add": "Add floor",
+    "floor_add_failed": "Couldn't add the floor",
+    "floor_rename": "Rename",
+    "floor_rename_failed": "Couldn't rename the floor",
+    "floor_move_left": "Move left",
+    "floor_move_right": "Move right",
+    "floor_move_failed": "Couldn't move the floor",
+    "floor_delete": "Delete floor",
+    "floor_delete_failed": "Couldn't delete the floor",
+    "floor_menu": "{{name}} options",
+    "floor_attention": "Waiting for a decision",
+    "first_run_title": "No squads in the office",
+    "first_run_template": "Start from a template"
   },
   "views": {
     "builtin": {

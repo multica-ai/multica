@@ -1781,7 +1781,22 @@
     "home_squad_empty": "どのスクワッドにも未所属",
     "home_squad_set": "{{name}}を{{squad}}の席に着けました",
     "home_squad_cleared": "{{name}}の所属スクワッドを外しました",
-    "home_squad_failed": "所属スクワッドを変更できませんでした"
+    "home_squad_failed": "所属スクワッドを変更できませんでした",
+    "floors": "フロア",
+    "floor_default_name": "フロア{{n}}",
+    "floor_add": "フロアを追加",
+    "floor_add_failed": "フロアを追加できませんでした",
+    "floor_rename": "名前を変更",
+    "floor_rename_failed": "フロア名を変更できませんでした",
+    "floor_move_left": "左へ移動",
+    "floor_move_right": "右へ移動",
+    "floor_move_failed": "フロアを移動できませんでした",
+    "floor_delete": "フロアを削除",
+    "floor_delete_failed": "フロアを削除できませんでした",
+    "floor_menu": "{{name}}のオプション",
+    "floor_attention": "判断待ち",
+    "first_run_title": "オフィスにスクワッドがありません",
+    "first_run_template": "テンプレートから始める"
   },
   "views": {
     "builtin": {

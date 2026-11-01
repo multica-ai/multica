@@ -1781,7 +1781,22 @@
     "home_squad_empty": "어느 스쿼드에도 속하지 않음",
     "home_squad_set": "{{name}}의 자리를 {{squad}}로 옮겼습니다",
     "home_squad_cleared": "{{name}}의 소속 스쿼드를 해제했습니다",
-    "home_squad_failed": "소속 스쿼드를 변경하지 못했습니다"
+    "home_squad_failed": "소속 스쿼드를 변경하지 못했습니다",
+    "floors": "층",
+    "floor_default_name": "{{n}}층",
+    "floor_add": "층 추가",
+    "floor_add_failed": "층을 추가하지 못했습니다",
+    "floor_rename": "이름 바꾸기",
+    "floor_rename_failed": "층 이름을 바꾸지 못했습니다",
+    "floor_move_left": "왼쪽으로 이동",
+    "floor_move_right": "오른쪽으로 이동",
+    "floor_move_failed": "층을 이동하지 못했습니다",
+    "floor_delete": "층 삭제",
+    "floor_delete_failed": "층을 삭제하지 못했습니다",
+    "floor_menu": "{{name}} 옵션",
+    "floor_attention": "결정 대기 중",
+    "first_run_title": "오피스에 스쿼드가 없습니다",
+    "first_run_template": "템플릿으로 시작"
   },
   "views": {
     "builtin": {

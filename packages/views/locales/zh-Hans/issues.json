@@ -1781,7 +1781,22 @@
     "home_squad_empty": "未加入任何小队",
     "home_squad_set": "{{name}} 现在坐在 {{squad}}",
     "home_squad_cleared": "{{name}} 已无所属小队",
-    "home_squad_failed": "无法更改所属小队"
+    "home_squad_failed": "无法更改所属小队",
+    "floors": "楼层",
+    "floor_default_name": "楼层 {{n}}",
+    "floor_add": "添加楼层",
+    "floor_add_failed": "无法添加楼层",
+    "floor_rename": "重命名",
+    "floor_rename_failed": "无法重命名楼层",
+    "floor_move_left": "左移",
+    "floor_move_right": "右移",
+    "floor_move_failed": "无法移动楼层",
+    "floor_delete": "删除楼层",
+    "floor_delete_failed": "无法删除楼层",
+    "floor_menu": "{{name}} 选项",
+    "floor_attention": "等待决定",
+    "first_run_title": "办公室里还没有小队",
+    "first_run_template": "从模板开始"
   },
   "views": {
     "builtin": {

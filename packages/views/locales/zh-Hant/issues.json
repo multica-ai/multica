@@ -1781,7 +1781,22 @@
     "home_squad_empty": "未加入任何小隊",
     "home_squad_set": "{{name}} 現在坐在 {{squad}}",
     "home_squad_cleared": "{{name}} 已無所屬小隊",
-    "home_squad_failed": "無法變更所屬小隊"
+    "home_squad_failed": "無法變更所屬小隊",
+    "floors": "樓層",
+    "floor_default_name": "樓層 {{n}}",
+    "floor_add": "新增樓層",
+    "floor_add_failed": "無法新增樓層",
+    "floor_rename": "重新命名",
+    "floor_rename_failed": "無法重新命名樓層",
+    "floor_move_left": "左移",
+    "floor_move_right": "右移",
+    "floor_move_failed": "無法移動樓層",
+    "floor_delete": "刪除樓層",
+    "floor_delete_failed": "無法刪除樓層",
+    "floor_menu": "{{name}} 選項",
+    "floor_attention": "等待決定",
+    "first_run_title": "辦公室裡還沒有小隊",
+    "first_run_template": "從範本開始"
   },
   "views": {
     "builtin": {

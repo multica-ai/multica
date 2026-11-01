@@ -238,6 +238,7 @@ describe("OfficeView", () => {
     queryClient.setQueryData(workspaceKeys.agents("ws-1"), options.agents ?? AGENTS);
     queryClient.setQueryData(workspaceKeys.squads("ws-1"), options.squads ?? SQUADS);
     queryClient.setQueryData(officeKeys.floors("ws-1"), options.floors ?? FLOORS);
+    queryClient.setQueryData(workspaceKeys.members("ws-1"), [{ user_id: "viewer-1", role: "owner" }]);
     for (const squad of options.squads ?? SQUADS) {
       queryClient.setQueryData(
         officeKeys.squadMembers("ws-1", squad.id),
@@ -297,6 +298,27 @@ describe("OfficeView", () => {
     setup([]);
 
     await vi.waitFor(() => expect(engine.starts).toEqual(["agent-1", "agent-2"]));
+  });
+
+  it("switches floors from the tabs and remembers the choice", async () => {
+    setup([]);
+    await vi.waitFor(() => expect(engine.starts).toEqual(["agent-1", "agent-2"]));
+
+    fireEvent.click(screen.getByRole("tab", { name: "Floor 2" }));
+
+    await vi.waitFor(() => expect(engine.starts).toContain("agent-3"));
+    expect(useOfficeFloorStore.getState().lastFloorId).toBe("f2");
+    expect(screen.getByRole("tab", { name: "Floor 2" }).getAttribute("aria-selected")).toBe("true");
+  });
+
+  it("shows a first-run card, not an empty floor, while no squad is seated", async () => {
+    setup([], { squads: [], agents: [] });
+
+    expect(await screen.findByText("No squads in the office")).toBeTruthy();
+    expect(document.querySelector("canvas")).toBeNull();
+
+    fireEvent.click(screen.getByRole("button", { name: "Start from a template" }));
+    expect(useModalStore.getState().modal).toBe("squad-quickstart");
   });
 
   it("shows waiting for work over an agent with no open issue", async () => {

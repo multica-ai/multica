@@ -1850,7 +1850,22 @@
     "home_squad_empty": "Dans aucun squad",
     "home_squad_set": "{{name}} siège désormais dans {{squad}}",
     "home_squad_cleared": "{{name}} n'a plus de squad d'attache",
-    "home_squad_failed": "Impossible de changer le squad d'attache"
+    "home_squad_failed": "Impossible de changer le squad d'attache",
+    "floors": "Étages",
+    "floor_default_name": "Étage {{n}}",
+    "floor_add": "Ajouter un étage",
+    "floor_add_failed": "Impossible d'ajouter l'étage",
+    "floor_rename": "Renommer",
+    "floor_rename_failed": "Impossible de renommer l'étage",
+    "floor_move_left": "Déplacer à gauche",
+    "floor_move_right": "Déplacer à droite",
+    "floor_move_failed": "Impossible de déplacer l'étage",
+    "floor_delete": "Supprimer l'étage",
+    "floor_delete_failed": "Impossible de supprimer l'étage",
+    "floor_menu": "Options de {{name}}",
+    "floor_attention": "En attente de décision",
+    "first_run_title": "Aucun squad dans le bureau",
+    "first_run_template": "Partir d'un modèle"
   },
   "views": {
     "builtin": {

@@ -20,12 +20,21 @@ import { OfficeCanvas, type WorkerSession } from "./office-canvas";
 import { OfficeBoardButton } from "./office-board-button";
 import { OfficeBoardDialog } from "./office-board-dialog";
 import { OfficeRoomOverlays } from "./office-room-overlays";
+import { OfficeFirstRun } from "./office-first-run";
+import { OfficeFloorTabs } from "./office-floor-tabs";
+import { useOfficeAdmin } from "../lib/use-office-admin";
 
 const EMPTY_TASKS: AgentTask[] = [];
 const EMPTY_AGENTS: Agent[] = [];
 const EMPTY_SQUADS: Squad[] = [];
 const EMPTY_FLOORS: OfficeFloor[] = [];
 const EMPTY_SET: ReadonlySet<string> = new Set();
+
+/** True while no live squad holds a seat on any floor. */
+function noSquadSeated(squads: readonly Squad[], floors: readonly OfficeFloor[]): boolean {
+  const floorIds = new Set(floors.map((floor) => floor.id));
+  return !squads.some((squad) => !squad.archived_at && squad.floor_id && floorIds.has(squad.floor_id));
+}
 
 /**
  * The company, drawn as the pixtuoid office. A floor holds six squad rooms; each
@@ -61,9 +70,13 @@ function OfficeScene({ issues, visibleStatuses, projectId }: BoardViewProps) {
   const labelOf = useStatusLabel(wsId);
   const { data: tasks = EMPTY_TASKS } = useQuery(agentTaskSnapshotOptions(wsId));
   const { data: agents = EMPTY_AGENTS } = useQuery(agentListOptions(wsId));
-  const { data: squads = EMPTY_SQUADS } = useQuery(squadListOptions(wsId));
-  const { data: floors = EMPTY_FLOORS } = useQuery(officeFloorsOptions(wsId));
+  const squadsQuery = useQuery(squadListOptions(wsId));
+  const floorsQuery = useQuery(officeFloorsOptions(wsId));
+  const squads = squadsQuery.data ?? EMPTY_SQUADS;
+  const floors = floorsQuery.data ?? EMPTY_FLOORS;
   const lastFloorId = useOfficeFloorStore((s) => s.lastFloorId);
+  const selectFloor = useOfficeFloorStore((s) => s.setLastFloorId);
+  const canManage = useOfficeAdmin();
 
   // The floor on show: the one last viewed, else the first.
   const floor = floors.find((candidate) => candidate.id === lastFloorId) ?? floors[0] ?? null;
@@ -130,16 +143,35 @@ function OfficeScene({ issues, visibleStatuses, projectId }: BoardViewProps) {
   );
   const openCreateSquad = useCallback(() => useModalStore.getState().open("create-squad"), []);
 
+  // Floors that still hold a live squad, and whether any squad is seated at all.
+  const occupied = useMemo(
+    () => new Set(squads.filter((squad) => !squad.archived_at && squad.floor_id).map((squad) => squad.floor_id as string)),
+    [squads],
+  );
+  const loaded = squadsQuery.isSuccess && floorsQuery.isSuccess;
+  const firstRun = loaded && noSquadSeated(squads, floors);
+
   return (
     <>
-      <OfficeCanvas sessions={sessions} tagText={tagText} onPick={onPick} onMove={onOpenAgent} roomNames={roomNames}>
-        {(stage) => (
-          <>
-            <OfficeBoardButton stage={stage} onOpen={() => setBoardOpen(true)} />
-            <OfficeRoomOverlays stage={stage} rooms={layout.rooms} onCreateSquad={openCreateSquad} onOpenSquad={() => {}} />
-          </>
-        )}
-      </OfficeCanvas>
+      <OfficeFloorTabs
+        floors={floors}
+        currentId={floor?.id ?? null}
+        occupied={occupied}
+        canManage={canManage}
+        onSelect={selectFloor}
+      />
+      {firstRun ? (
+        <OfficeFirstRun />
+      ) : (
+        <OfficeCanvas sessions={sessions} tagText={tagText} onPick={onPick} onMove={onOpenAgent} roomNames={roomNames}>
+          {(stage) => (
+            <>
+              <OfficeBoardButton stage={stage} onOpen={() => setBoardOpen(true)} />
+              <OfficeRoomOverlays stage={stage} rooms={layout.rooms} onCreateSquad={openCreateSquad} onOpenSquad={() => {}} />
+            </>
+          )}
+        </OfficeCanvas>
+      )}
       <OfficeBoardDialog open={boardOpen} initialProjectId={projectId} onClose={() => setBoardOpen(false)} />
       <OfficeAgentPanel target={panel} issues={issues} projectId={projectId} onClose={() => setPanel(null)} />
     </>
