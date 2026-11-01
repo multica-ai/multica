@@ -1197,10 +1197,10 @@ func TestZcodeEmptyThinkingLevelResolvesDefault(t *testing.T) {
 	}
 }
 
-// TestZcodeResumeSendsYoloMode captures the session/resume frame and asserts
-// mode "yolo" is restated — create already pins it; resume must too in case the
-// server does not restore the persisted mode.
-func TestZcodeResumeSendsYoloMode(t *testing.T) {
+// TestZcodeResumeOmitsMode captures the session/resume frame and asserts
+// mode is absent. Desktop 0.17.0 rejects the key with -32602; session/create
+// pins mode "yolo" and the server restores that persisted mode on resume.
+func TestZcodeResumeOmitsMode(t *testing.T) {
 	capture := filepath.Join(t.TempDir(), "resume.txt")
 	t.Setenv("ZCODE_RESUME_CAPTURE", capture)
 	bin := writeFakeZcodeScript(t, `#!/bin/sh
@@ -1235,15 +1235,17 @@ done
 		t.Fatalf("session/resume frame not captured: %v", err)
 	}
 	var frame struct {
-		Params struct {
-			Mode string `json:"mode"`
-		} `json:"params"`
+		Params map[string]json.RawMessage `json:"params"`
 	}
 	if err := json.Unmarshal(raw, &frame); err != nil {
 		t.Fatalf("parse captured frame: %v", err)
 	}
-	if frame.Params.Mode != "yolo" {
-		t.Fatalf("session/resume mode = %q, want yolo; frame=%s", frame.Params.Mode, raw)
+	if _, ok := frame.Params["mode"]; ok {
+		t.Fatalf("session/resume must omit mode (Desktop 0.17.0 rejects it with -32602); frame=%s", raw)
+	}
+	sessionID := strings.Trim(string(frame.Params["sessionId"]), `"`)
+	if sessionID != "ses_old" {
+		t.Fatalf("session/resume sessionId = %q, want ses_old; frame=%s", sessionID, raw)
 	}
 }
 

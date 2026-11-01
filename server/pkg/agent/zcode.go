@@ -397,13 +397,15 @@ func (b *zcodeBackend) Execute(ctx context.Context, prompt string, opts ExecOpti
 		//    once deliveryKind is set (server-operations.ts subscribeSession).
 		// 4. session/send — returns immediately; the turn streams as events.
 		if opts.ResumeSessionID != "" {
+			// Desktop 0.17.0's session/resume schema is strict: an unknown
+			// "mode" key is rejected with -32602 (Unrecognized key: "mode")
+			// and the resume hard-fails. session/create already pins mode
+			// "yolo", and the server restores that persisted mode on resume
+			// (verified against the Desktop 3.16.3 bundled CLI), so the key
+			// must be omitted here. session/create and model discovery still
+			// send it — those methods accept it.
 			params := map[string]any{
 				"sessionId": opts.ResumeSessionID,
-				// Headless execution cannot answer permission prompts. Create
-				// already pins mode "yolo"; resume must restate it in case the
-				// server does not restore the persisted mode (fail-closed
-				// requestPermission would otherwise deny every tool call).
-				"mode": "yolo",
 			}
 			if opts.ThinkingLevel != "" {
 				params["thoughtLevel"] = opts.ThinkingLevel
