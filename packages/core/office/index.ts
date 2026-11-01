@@ -10,3 +10,5 @@ export * from "./brief-schema";
 export * from "./briefs";
 export * from "./digest-schema";
 export * from "./digest";
+export * from "./setup-schema";
+export * from "./setup-query";
