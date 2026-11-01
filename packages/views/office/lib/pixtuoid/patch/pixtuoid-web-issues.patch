@@ -1,13 +1,19 @@
 diff --git a/crates/pixtuoid-scene/src/floor/mod.rs b/crates/pixtuoid-scene/src/floor/mod.rs
-index 1d91f6a..77b4211 100644
+index 1d91f6a..53e1dc1 100644
 --- a/crates/pixtuoid-scene/src/floor/mod.rs
 +++ b/crates/pixtuoid-scene/src/floor/mod.rs
-@@ -39,10 +39,40 @@ pub fn floor_seed(floor_idx: usize) -> u64 {
+@@ -39,10 +39,46 @@ pub fn floor_seed(floor_idx: usize) -> u64 {
      (floor_idx as u64).wrapping_mul(crate::GOLDEN_GAMMA)
  }
  
-+/// The studio office's desk count.
-+pub const OFFICE_DESKS: usize = 12;
++/// The studio office's desk cap. A cap of 16 is the classic floor's count, so the
++/// studio asks for one more and lays out its own 16 desks, four rooms of four.
++pub const OFFICE_DESKS: usize = 17;
++/// The studio office's desk rooms, in a 2x2 grid.
++pub const OFFICE_ROOMS: u32 = 4;
++/// The desks in each of those rooms.
++pub const OFFICE_ROOM_DESKS: usize = 4;
++const _: () = assert!(OFFICE_DESKS == OFFICE_ROOMS as usize * OFFICE_ROOM_DESKS + 1);
 +
 +static DESK_CAP: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
 +
@@ -44,7 +50,7 @@ index 1d91f6a..77b4211 100644
          .map(|l| l.home_desks.len())
          .unwrap_or(0)
  }
-@@ -221,7 +251,7 @@ impl FloorCtx {
+@@ -221,7 +257,7 @@ impl FloorCtx {
              Some((k, l)) if *k == key => Arc::clone(l),
              _ => {
                  let l = Arc::new(crate::layout::SceneLayout::compute_with_seed(
@@ -54,7 +60,7 @@ index 1d91f6a..77b4211 100644
                  self.layout_memo = Some((key, Arc::clone(&l)));
                  l
 diff --git a/crates/pixtuoid-scene/src/layout/compute.rs b/crates/pixtuoid-scene/src/layout/compute.rs
-index f697a3a..4eba251 100644
+index f697a3a..397e970 100644
 --- a/crates/pixtuoid-scene/src/layout/compute.rs
 +++ b/crates/pixtuoid-scene/src/layout/compute.rs
 @@ -195,15 +195,23 @@ struct FloorPlan {
@@ -111,7 +117,7 @@ index f697a3a..4eba251 100644
              meeting_rooms.push(MeetingRoom { bounds: mr, trio });
          }
 +        let desk_rooms = if studio {
-+            studio_rooms(&pod_grid.band, top_margin)
++            studio_rooms(&pod_grid.band, top_margin, buf_h)
 +        } else {
 +            Vec::new()
 +        };
@@ -133,7 +139,7 @@ index f697a3a..4eba251 100644
  
 -    let plan = FloorPlan::new(buf_w, buf_h, floor_seed);
 +    // The studio floor is the web office's: its desk count is the cap, and it needs room for its walls.
-+    let studio = max_desks == Some(STUDIO_DESKS)
++    let studio = max_desks == Some(crate::floor::OFFICE_DESKS)
 +        && buf_w >= STUDIO_MIN_W
 +        && buf_h >= STUDIO_MIN_H;
 +    let plan = FloorPlan::new(buf_w, buf_h, floor_seed, studio);
@@ -172,80 +178,83 @@ index f697a3a..4eba251 100644
          pantry: plan.pantry.map(|bounds| PantryRoom {
              bounds,
              counter_size: plan.pantry_counter_size,
-@@ -1362,6 +1395,80 @@ fn pod_row_facing(r: u16) -> Facing {
+@@ -1362,6 +1395,83 @@ fn pod_row_facing(r: u16) -> Facing {
      if r == 0 { Facing::South } else { Facing::North }
  }
  
-+/// The studio floor's desk count: 4 in each of two rooms and 4 in a row in the open.
-+pub(crate) const STUDIO_DESKS: usize = 12;
-+/// The smallest buffer the studio floor lays out in.
-+const STUDIO_MIN_W: u16 = 220;
-+const STUDIO_MIN_H: u16 = 150;
++/// The studio floor's desk count: four desk rooms of four desks each, in a 2x2 grid.
++pub(crate) const STUDIO_DESKS: usize = 16;
++/// The smallest buffer the studio floor lays out in: the page's own minimum.
++const STUDIO_MIN_W: u16 = 256;
++const STUDIO_MIN_H: u16 = 171;
 +/// The studio's left column, narrower than the standard floor's so the desk rooms have the width.
 +const STUDIO_MID_X_PCT: u16 = 20;
 +/// A desk room's interior, walls to walls: a 2x2 pod and its aisles.
-+const STUDIO_ROOM_W: u16 = 60;
-+const STUDIO_ROOM_H: u16 = 42;
-+const STUDIO_ROOM_GAP: u16 = 18;
++const STUDIO_ROOM_W: u16 = 66;
++const STUDIO_ROOM_H: u16 = 44;
++const STUDIO_ROOM_GAP_X: u16 = 14;
++const STUDIO_ROOM_GAP_Y: u16 = 8;
 +/// How far below the wall band the rooms start, clear of the lounge's couch.
-+const STUDIO_ROOMS_BELOW_TOP: u16 = 22;
-+/// The open row's desks are this far apart, edge to edge.
-+const STUDIO_ROW_GAP_X: u16 = 22;
-+/// The open row sits this far below the rooms' south walls.
-+const STUDIO_ROW_BELOW_ROOMS: u16 = 14;
++const STUDIO_ROOMS_BELOW_TOP: u16 = 10;
++/// The corridor left between the rooms' south doors and the floor's bottom edge: the
++/// grid is centred between the lounge and this corridor, so a tall floor keeps the
++/// doors open.
++const STUDIO_CORRIDOR_BELOW: u16 = 12;
++/// The desks of a room's pod are this far apart, edge to edge: roomier than the standard floor's pods.
++const STUDIO_POD_GAP_X: u16 = 22;
++const STUDIO_POD_GAP_Y: u16 = 10;
++/// The pod's first row sits this far below its room's north wall.
++const STUDIO_POD_TOP: u16 = 8;
 +
-+/// The two desk rooms, side by side under the lounge, centred in the band.
-+fn studio_rooms(band: &Bounds, top_margin: u16) -> Vec<Bounds> {
-+    let total = 2 * STUDIO_ROOM_W + STUDIO_ROOM_GAP;
-+    let x0 = band.x + band.width.saturating_sub(total) / 2;
-+    let y = top_margin + STUDIO_ROOMS_BELOW_TOP;
-+    (0..2)
-+        .map(|i| Bounds {
-+            x: x0 + i * (STUDIO_ROOM_W + STUDIO_ROOM_GAP),
-+            y,
-+            width: STUDIO_ROOM_W,
-+            height: STUDIO_ROOM_H,
-+        })
-+        .collect()
++/// Rounds `v` down to the coarse grid the walkable mask routes on, so the studio's
++/// rooms and desks sit on its cells and a desk's approach is never half a cell.
++fn snap_to_coarse(v: u16) -> u16 {
++    v - v % COARSE_CELL_SIZE
 +}
 +
-+/// The studio's twelve desks: a 2x2 pod centred in each desk room, then a row of four
-+/// in the open below, all facing south.
++/// The four desk rooms in a 2x2 grid centred in the band, in desk order: top
++/// west, top east, bottom west, bottom east. The grid sits between the lounge and
++/// the floor's bottom edge, with a corridor below it for the rooms' south doors.
++fn studio_rooms(band: &Bounds, top_margin: u16, buf_h: u16) -> Vec<Bounds> {
++    let total_w = 2 * STUDIO_ROOM_W + STUDIO_ROOM_GAP_X;
++    let grid_h = 2 * STUDIO_ROOM_H + STUDIO_ROOM_GAP_Y;
++    let x0 = snap_to_coarse(band.x + band.width.saturating_sub(total_w) / 2);
++    let top = top_margin + STUDIO_ROOMS_BELOW_TOP;
++    let floor_end = buf_h.saturating_sub(STUDIO_CORRIDOR_BELOW);
++    let y0 = snap_to_coarse(top + floor_end.saturating_sub(top + grid_h) / 2);
++    let mut rooms = Vec::with_capacity(4);
++    for row in 0..2u16 {
++        for col in 0..2u16 {
++            rooms.push(Bounds {
++                x: x0 + col * (STUDIO_ROOM_W + STUDIO_ROOM_GAP_X),
++                y: y0 + row * (STUDIO_ROOM_H + STUDIO_ROOM_GAP_Y),
++                width: STUDIO_ROOM_W,
++                height: STUDIO_ROOM_H,
++            });
++        }
++    }
++    rooms
++}
++
++/// The studio's sixteen desks: a 2x2 pod centred in each desk room, all facing
++/// south in the pod's first row and north in its second, room by room.
 +fn studio_desks(plan: &FloorPlan) -> Vec<HomeDesk> {
 +    let mut desks = Vec::with_capacity(STUDIO_DESKS);
 +    for room in &plan.desk_rooms {
-+        let pod_w = POD_SIDE * DESK_W + (POD_SIDE - 1) * INTRA_POD_GAP_X;
-+        let pod_h = POD_SIDE * DESK_H + (POD_SIDE - 1) * INTRA_POD_GAP_Y;
++        let pod_w = POD_SIDE * DESK_W + (POD_SIDE - 1) * STUDIO_POD_GAP_X;
 +        let ox = room.x + room.width.saturating_sub(pod_w) / 2;
-+        let oy = room.y + room.height.saturating_sub(pod_h) / 2;
++        let oy = room.y + STUDIO_POD_TOP;
 +        for r in 0..POD_SIDE {
 +            for c in 0..POD_SIDE {
 +                desks.push(HomeDesk {
 +                    at: Point {
-+                        x: ox + c * (DESK_W + INTRA_POD_GAP_X),
-+                        y: oy + r * (DESK_H + INTRA_POD_GAP_Y),
++                        x: ox + c * (DESK_W + STUDIO_POD_GAP_X),
++                        y: oy + r * (DESK_H + STUDIO_POD_GAP_Y),
 +                    },
 +                    facing: pod_row_facing(r),
 +                });
 +            }
 +        }
-+    }
-+    let band = plan.pod_grid.band;
-+    let row_w = 4 * DESK_W + 3 * STUDIO_ROW_GAP_X;
-+    let x0 = band.x + band.width.saturating_sub(row_w) / 2;
-+    let rooms_south = plan
-+        .desk_rooms
-+        .first()
-+        .map_or(band.y, |room| room.y + room.height);
-+    let y = rooms_south + STUDIO_ROW_BELOW_ROOMS;
-+    for i in 0..4 {
-+        desks.push(HomeDesk {
-+            at: Point {
-+                x: x0 + i * (DESK_W + STUDIO_ROW_GAP_X),
-+                y,
-+            },
-+            facing: Facing::South,
-+        });
 +    }
 +    desks
 +}
@@ -253,7 +262,28 @@ index f697a3a..4eba251 100644
  /// Pod-grid desk placement: full pods, partial columns at right edge,
  /// partial row at bottom edge.
  pub(super) fn compute_pod_desks(max_desks: Option<usize>, grid: PodGrid) -> Vec<HomeDesk> {
-@@ -1836,7 +1943,7 @@ mod tests {
+@@ -1821,6 +1931,20 @@ fn compute_waypoints(
+ 
+ #[cfg(test)]
+ mod tests {
++    /// The web office's page is never smaller than its minimum units, and grows past them
++    /// on either axis. The studio floor must lay out at every size it can be drawn at.
++    #[test]
++    fn the_studio_floor_lays_out_at_every_page_size() {
++        for w in (256..=340).step_by(2) {
++            for h in (171..=240).step_by(2) {
++                let layout = super::super::SceneLayout::compute_with_seed(w, h, Some(crate::floor::OFFICE_DESKS), 2);
++                let layout = layout.unwrap_or_else(|| panic!("no studio floor at {w}x{h}"));
++                assert_eq!(layout.home_desks.len(), 16, "at {w}x{h}");
++                assert_eq!(layout.desk_rooms.len(), 4, "at {w}x{h}");
++            }
++        }
++    }
++
+     use super::{FloorGeometry, FloorVariant};
+ 
+     /// The lounge is kept exactly while its padded ground ends at or west of the
+@@ -1836,7 +1960,7 @@ mod tests {
              let scan: Vec<(u16, bool, Option<u16>, u16)> = NARROW_BAND
                  .map(|w| {
                      let l = SceneLayout::compute_with_seed(w, h, None, seed).expect("lays out");
@@ -262,6 +292,11 @@ index f697a3a..4eba251 100644
                      let couch =
                          couch_pos(&plan.pod_grid.band, plan.top_margin, plan.lounge_west_clear);
                      (
+@@ -2152,3 +2276,4 @@ mod tests {
+         assert_eq!(compute_pod_decor(grid(3), 0, &narrow), free[1..]);
+     }
+ }
++
 diff --git a/crates/pixtuoid-scene/src/layout/mod.rs b/crates/pixtuoid-scene/src/layout/mod.rs
 index 9780a0f..58cc514 100644
 --- a/crates/pixtuoid-scene/src/layout/mod.rs
@@ -366,20 +401,41 @@ index 461e477..c1ca6b0 100644
              );
              (a.agent_id, p)
 diff --git a/crates/pixtuoid-web/src/lib.rs b/crates/pixtuoid-web/src/lib.rs
-index 14fd1b1..6778ba3 100644
+index 14fd1b1..a22fa5c 100644
 --- a/crates/pixtuoid-web/src/lib.rs
 +++ b/crates/pixtuoid-web/src/lib.rs
-@@ -132,6 +132,9 @@ fn page_clock() -> ScreenClock {
+@@ -20,7 +20,7 @@ use wasm_bindgen::prelude::*;
+ use pixtuoid_core::source::daemon::apply_presence;
+ use pixtuoid_core::state::SceneState;
+ use pixtuoid_core::state::reducer::Reducer;
+-use pixtuoid_core::{AgentEvent, AgentId, Transport};
++use pixtuoid_core::{AgentEvent, AgentId, GlobalDeskIndex, Transport};
+ 
+ use crate::script::{
+     Beat, LOOP_MS, PresenceBeat, hero_gateway, hero_script, hire_beats, lobster_beats,
+@@ -132,6 +132,21 @@ fn page_clock() -> ScreenClock {
  
  /// A live office rendered to a reusable RGBA buffer across frames. Keeping ONE
  /// handle alive across `step` calls is what keeps walks/poses continuous.
 +/// How long before its first frame a seated worker started, so it is already at its desk.
 +const SEAT_LEAD: Duration = Duration::from_secs(60);
 +
++/// The office's rooms, in the order the page lays them out: a 2x2 grid of
++/// desk rooms, each with its own desks.
++const OFFICE_ROOMS: u32 = pixtuoid_scene::floor::OFFICE_ROOMS;
++
++/// The global desk indices a room's desks take. Room `r` owns the desks
++/// `r * room_size .. (r + 1) * room_size`, as the studio floor lays them out.
++fn room_desk_range(room: u32) -> std::ops::Range<usize> {
++    let room = room.min(OFFICE_ROOMS - 1) as usize;
++    let size = pixtuoid_scene::floor::OFFICE_ROOM_DESKS;
++    room * size..(room + 1) * size
++}
++
  #[wasm_bindgen]
  #[derive(Debug)]
  pub struct Office {
-@@ -168,6 +171,10 @@ pub struct Office {
+@@ -168,6 +183,12 @@ pub struct Office {
      shown_badges: Vec<pixtuoid_scene::display::Badge>,
      /// The WebAudio engine — `None` until the site warms the ♩'s buffers.
      audio: Option<audio::WebAudioDriver>,
@@ -387,10 +443,12 @@ index 14fd1b1..6778ba3 100644
 +    issue_keys: std::collections::HashMap<AgentId, String>,
 +    /// The studio's desk rooms as `[x, y, w, h]` layout units, for the page to name.
 +    rooms: Vec<[u16; 4]>,
++    /// The aquarium's centre in layout units, which the page stands the filing cabinets beside.
++    tank: Option<[u16; 2]>,
  }
  
  #[wasm_bindgen]
-@@ -179,6 +186,8 @@ impl Office {
+@@ -179,6 +200,8 @@ impl Office {
      /// If the bundled sprite pack fails to parse.
      #[wasm_bindgen(constructor)]
      pub fn new(seed: u32) -> Result<Office, JsError> {
@@ -399,16 +457,17 @@ index 14fd1b1..6778ba3 100644
          let pack =
              std::sync::Arc::new(load_bundled_pack().map_err(|e| JsError::new(&format!("{e:#}")))?);
          let density = pack.max_density_variant();
-@@ -208,6 +217,8 @@ impl Office {
+@@ -208,6 +231,9 @@ impl Office {
              screen: Screen::on(page_clock()),
              shown_badges: Vec::new(),
              audio: None,
 +            issue_keys: std::collections::HashMap::new(),
 +            rooms: Vec::new(),
++            tank: None,
          })
      }
  
-@@ -266,6 +277,82 @@ impl Office {
+@@ -266,6 +292,110 @@ impl Office {
          self.screen.landed();
      }
  
@@ -418,9 +477,11 @@ index 14fd1b1..6778ba3 100644
 +        self.presence_beats.clear();
 +    }
 +
-+    /// Seat a worker for the issue `key`: a session that walks in to a free desk.
-+    /// `false` before the first `step` or when the office has no desk left.
-+    pub fn issue_start(&mut self, key: &str) -> bool {
++    /// Seat a worker for the issue `key` at a free desk of office room `room`
++    /// (0..[`OFFICE_ROOMS`]). `seated` puts it at its desk from the first frame;
++    /// otherwise it walks in from the door. `false` before the first `step`,
++    /// when that room has no desk left, or when the office has none left.
++    pub fn issue_start(&mut self, key: &str, room: u32, seated: bool) -> bool {
 +        let Some(now) = self.last_now else {
 +            return false;
 +        };
@@ -429,12 +490,26 @@ index 14fd1b1..6778ba3 100644
 +        if self.scene.agents.contains_key(&id) {
 +            return true;
 +        }
++        let room_desks = room_desk_range(room);
++        let taken: std::collections::BTreeSet<usize> = self
++            .scene
++            .agents
++            .values()
++            .map(|a| a.desk_index.0)
++            .collect();
++        let Some(desk) = room_desks.clone().find(|d| !taken.contains(d)) else {
++            return false;
++        };
 +        if self.scene.agents.len() >= self.scene.total_capacity() {
 +            return false;
 +        }
 +        self.issue_keys.insert(id, key.to_string());
-+        // Dated before now, so the walk in from the door is over by the first frame: the worker is already at its desk.
-+        let at = now.checked_sub(SEAT_LEAD).unwrap_or(now);
++        // Dated before now when seated, so the walk in from the door is over by the first frame.
++        let at = if seated {
++            now.checked_sub(SEAT_LEAD).unwrap_or(now)
++        } else {
++            now
++        };
 +        let event = AgentEvent::SessionStart {
 +            agent_id: id,
 +            source: source.to_string(),
@@ -443,7 +518,19 @@ index 14fd1b1..6778ba3 100644
 +            parent_id: None,
 +        };
 +        self.reducer.apply(&mut self.scene, event, at, Transport::Hook);
++        // The reducer seats a new worker at the lowest free desk of the office;
++        // move it to the room's desk, which is free by the check above.
++        if let Some(slot) = self.scene.agents.get_mut(&id) {
++            slot.desk_index = GlobalDeskIndex(desk);
++        }
 +        true
++    }
++
++    /// Whether a worker for `key` is still in the office: a worker that has
++    /// been ended stays until it has walked out of the door.
++    pub fn issue_present(&self, key: &str) -> bool {
++        let id = AgentId::from_parts(pixtuoid_core::source::claude_code::SOURCE_NAME, key);
++        self.scene.agents.contains_key(&id)
 +    }
 +
 +    /// The worker for `key` works (`true`) or sits idle (`false`).
@@ -491,7 +578,7 @@ index 14fd1b1..6778ba3 100644
      /// Pointer to the RGBA frame in wasm linear memory ([`Office::frame_len`]
      /// bytes).
      ///
-@@ -362,6 +449,10 @@ impl Office {
+@@ -362,6 +492,10 @@ impl Office {
                  hex(*marker),
                  hex(name.ink)
              ));
@@ -502,7 +589,7 @@ index 14fd1b1..6778ba3 100644
              out.push('}');
          }
          out.push_str(&format!(
-@@ -374,7 +465,17 @@ impl Office {
+@@ -374,7 +508,22 @@ impl Office {
          push_board_segments(&mut out, &board.mood, theme);
          out.push_str(",\"context\":");
          push_board_segments(&mut out, &board.context, theme);
@@ -517,32 +604,43 @@ index 14fd1b1..6778ba3 100644
 +                room[0], room[1], room[2], room[3]
 +            ));
 +        }
-+        out.push_str("]}");
++        out.push_str("],\"tank\":");
++        match self.tank {
++            Some([x, y]) => out.push_str(&format!("{{\"x\":{x},\"y\":{y}}}")),
++            None => out.push_str("null"),
++        }
++        out.push('}');
          out
      }
  
-@@ -535,6 +636,20 @@ impl Office {
+@@ -535,6 +684,26 @@ impl Office {
          let cap = floor_capacity(units_w, units_h, self.seed);
          self.scene.floor_capacities = std::array::from_fn(|i| if i == 0 { cap } else { 0 });
          self.caps_units = Some((units_w, units_h));
-+        self.rooms = pixtuoid_scene::layout::SceneLayout::compute_with_seed(
++        let layout = pixtuoid_scene::layout::SceneLayout::compute_with_seed(
 +            units_w,
 +            units_h,
 +            Some(pixtuoid_scene::floor::OFFICE_DESKS),
 +            self.seed,
-+        )
-+        .map(|layout| {
-+            layout
-+                .desk_rooms
-+                .iter()
-+                .map(|room| [room.x, room.y, room.width, room.height])
-+                .collect()
-+        })
-+        .unwrap_or_default();
++        );
++        self.rooms = layout
++            .as_ref()
++            .map(|layout| {
++                layout
++                    .desk_rooms
++                    .iter()
++                    .map(|room| [room.x, room.y, room.width, room.height])
++                    .collect()
++            })
++            .unwrap_or_default();
++        self.tank = layout
++            .and_then(|layout| layout.lounge)
++            .and_then(|lounge| lounge.fish_tank)
++            .map(|tank| [tank.x, tank.y]);
      }
  
      /// Fire every scripted beat due by `now`, each applied at its SCHEDULED time
-@@ -1299,7 +1414,7 @@ mod tests {
+@@ -1299,7 +1468,7 @@ mod tests {
              "the click past exhaustion is refused outright: {admitted:?}"
          );
          o.step(T0_MS + 32_000.0, w, h);
