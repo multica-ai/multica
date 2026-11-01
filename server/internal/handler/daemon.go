@@ -2853,6 +2853,10 @@ func (h *Handler) buildClaimedTaskResponse(r *http.Request, task *db.AgentTaskQu
 	// not — because its absence is what tells an upgraded daemon it is talking
 	// to a server too old to have answered the question (MUL-5811).
 	resp.LeaderRoleResolved = true
+	// Company knowledge for an issue run, retrieved once per claim. An unready
+	// workspace, a sidecar failure or a spent budget leaves the run without it;
+	// it never fails the claim.
+	resp.KnowledgeContext = h.issueKnowledgeContext(r.Context(), *task, runtimeWorkspaceID)
 	// Agent-trigger plugin hooks, as tools. A failure here degrades to no
 	// tools rather than failing the claim: a plugin that cannot be listed must
 	// not stop an agent from working on the issue.

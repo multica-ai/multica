@@ -417,6 +417,11 @@ type AgentTaskResponse struct {
 	// disabling or uninstalling a plugin takes effect on the next task rather
 	// than whenever a daemon happens to restart.
 	PluginHookTools []service.PluginHookTool `json:"plugin_hook_tools,omitempty"`
+	// KnowledgeContext are the company knowledge passages retrieved for an
+	// issue run at claim time, rendered as "Possibly relevant company
+	// knowledge". Empty unless the workspace's knowledge is ready and something
+	// clears the score floor. Mirror field: internal/daemon/types.go.
+	KnowledgeContext []service.KnowledgeHitView `json:"knowledge_context,omitempty"`
 	// RemoteMCPDaemonToken is a short-lived, workspace-and-daemon scoped
 	// credential used only by the local daemon's write-only Remote MCP broker.
 	// It is never injected into the agent process.
