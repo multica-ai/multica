@@ -98,16 +98,17 @@ function frame(): void {
       labels: OfficeLabel[];
       rooms: OfficeRoom[];
       tank: OfficePoint | null;
+      whiteboards: OfficeRoom[];
     };
     const encoded = JSON.stringify(overlay.labels);
     if (encoded !== lastLabels) {
       lastLabels = encoded;
       post({ type: "labels", labels: overlay.labels });
     }
-    const layout = JSON.stringify([overlay.rooms, overlay.tank]);
+    const layout = JSON.stringify([overlay.rooms, overlay.tank, overlay.whiteboards]);
     if (layout !== lastRooms) {
       lastRooms = layout;
-      post({ type: "rooms", rooms: overlay.rooms, tank: overlay.tank });
+      post({ type: "rooms", rooms: overlay.rooms, tank: overlay.tank, boards: overlay.whiteboards });
     }
   }
   scope.setTimeout(frame, FRAME_MS);

@@ -16,11 +16,11 @@ import { useViewStore } from "@multica/core/issues/stores/view-store-context";
 import { Button } from "@multica/ui/components/ui/button";
 import { useT } from "../../i18n";
 import { BoardView, type BoardViewProps } from "../../issues/components/board-view";
-import { useIssuePeekActions } from "../../issues/surface/peek-context";
 import { useStatusLabel } from "../../issues/utils/status-label";
 import { OfficeAgentPanel, type OfficeAgentTarget } from "./office-agent-panel";
 import { OfficeCanvas, type WorkerSession } from "./office-canvas";
-import { OfficeStorage } from "./office-storage";
+import { OfficeBoardButton } from "./office-board-button";
+import { OfficeBoardDialog } from "./office-board-dialog";
 
 const EMPTY_TASKS: AgentTask[] = [];
 const EMPTY_AGENTS: Agent[] = [];
@@ -56,7 +56,6 @@ function OfficeScene({ issues, visibleStatuses, projectId }: BoardViewProps) {
   const { t } = useT("issues");
   const wsId = useWorkspaceId();
   const labelOf = useStatusLabel(wsId);
-  const peek = useIssuePeekActions();
   const { data: tasks = EMPTY_TASKS } = useQuery(agentTaskSnapshotOptions(wsId));
   const { data: agents = EMPTY_AGENTS } = useQuery(agentListOptions(wsId));
   const moveAgent = useUpdateAgentOfficeRoom();
@@ -125,6 +124,7 @@ function OfficeScene({ issues, visibleStatuses, projectId }: BoardViewProps) {
 
   // One panel manages an agent, whether the click landed on the agent or on its tag.
   const [panel, setPanel] = useState<OfficeAgentTarget | null>(null);
+  const [boardOpen, setBoardOpen] = useState(false);
 
   const onPick = useCallback(
     (agentId: string) => setPanel({ agentId, issueId: focusOf.get(agentId)?.id }),
@@ -148,14 +148,13 @@ function OfficeScene({ issues, visibleStatuses, projectId }: BoardViewProps) {
     [moveAgent],
   );
 
-  const onOpenIssue = useCallback((issueId: string) => peek?.open(issueId), [peek]);
-
   if (visibleStatuses.length === 0) return <OfficeEmpty />;
   return (
     <>
       <OfficeCanvas sessions={sessions} tagText={tagText} onPick={onPick} onMove={onMove} roomNames={roomNameList}>
-        {(stage) => <OfficeStorage stage={stage} issues={issues} onOpen={onOpenIssue} />}
+        {(stage) => <OfficeBoardButton stage={stage} onOpen={() => setBoardOpen(true)} />}
       </OfficeCanvas>
+      <OfficeBoardDialog open={boardOpen} initialProjectId={projectId} onClose={() => setBoardOpen(false)} />
       <OfficeAgentPanel
         target={panel}
         issues={issues}
