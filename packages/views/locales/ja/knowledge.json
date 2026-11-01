@@ -32,14 +32,14 @@
     "description": "復旧するまで、エージェントは会社のナレッジなしで動作を続けます。"
   },
   "kb": {
-    "all": "すべて",
-    "empty": "ナレッジベースがありません"
+    "all": "すべて"
   },
   "documents": {
     "filter": {
       "all": "すべて",
       "published": "公開済み",
-      "failed": "失敗"
+      "failed": "失敗",
+      "draft": "下書き"
     },
     "empty": "ドキュメントがありません"
   },
@@ -50,7 +50,8 @@
     "results": "検索結果",
     "no_results": "一致する結果がありません",
     "score": "スコア {{score}}",
-    "source": "出典"
+    "source": "出典",
+    "error": "検索に失敗しました"
   },
   "drafts": {
     "empty": "下書きはありません",
@@ -60,8 +61,7 @@
       "agent": "エージェント",
       "member": "メンバー",
       "system": "システム"
-    },
-    "error": "エラー"
+    }
   },
   "discard_title": "下書きを破棄しますか？",
   "discard_description": "下書きは削除され、元に戻せません。",
@@ -74,5 +74,9 @@
     "publish_failed": "下書きを公開できませんでした",
     "discarded": "下書きを破棄しました",
     "discard_failed": "下書きを破棄できませんでした"
+  },
+  "load_error": {
+    "title": "ナレッジを読み込めませんでした",
+    "retry": "再試行"
   }
 }

@@ -32,14 +32,14 @@
     "description": "Agents keep working without company knowledge until it is back."
   },
   "kb": {
-    "all": "All",
-    "empty": "No knowledge bases"
+    "all": "All"
   },
   "documents": {
     "filter": {
       "all": "All",
       "published": "Published",
-      "failed": "Failed"
+      "failed": "Failed",
+      "draft": "Draft"
     },
     "empty": "No documents"
   },
@@ -50,7 +50,8 @@
     "results": "Results",
     "no_results": "No matches",
     "score": "Score {{score}}",
-    "source": "Source"
+    "source": "Source",
+    "error": "Search failed"
   },
   "drafts": {
     "empty": "No drafts",
@@ -60,8 +61,7 @@
       "agent": "Agent",
       "member": "Member",
       "system": "System"
-    },
-    "error": "Error"
+    }
   },
   "discard_title": "Discard draft?",
   "discard_description": "The draft is deleted and cannot be recovered.",
@@ -74,5 +74,9 @@
     "publish_failed": "Could not publish the draft",
     "discarded": "Draft discarded",
     "discard_failed": "Could not discard the draft"
+  },
+  "load_error": {
+    "title": "Could not load knowledge",
+    "retry": "Try again"
   }
 }

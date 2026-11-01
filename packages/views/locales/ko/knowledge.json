@@ -32,14 +32,14 @@
     "description": "복구될 때까지 에이전트는 회사 지식 없이 계속 작업합니다."
   },
   "kb": {
-    "all": "전체",
-    "empty": "지식 베이스가 없습니다"
+    "all": "전체"
   },
   "documents": {
     "filter": {
       "all": "전체",
       "published": "게시됨",
-      "failed": "실패"
+      "failed": "실패",
+      "draft": "초안"
     },
     "empty": "문서가 없습니다"
   },
@@ -50,7 +50,8 @@
     "results": "검색 결과",
     "no_results": "일치하는 결과가 없습니다",
     "score": "점수 {{score}}",
-    "source": "출처"
+    "source": "출처",
+    "error": "검색하지 못했습니다"
   },
   "drafts": {
     "empty": "초안이 없습니다",
@@ -60,8 +61,7 @@
       "agent": "에이전트",
       "member": "멤버",
       "system": "시스템"
-    },
-    "error": "오류"
+    }
   },
   "discard_title": "초안을 삭제할까요?",
   "discard_description": "초안이 삭제되며 복구할 수 없습니다.",
@@ -74,5 +74,9 @@
     "publish_failed": "초안을 게시하지 못했습니다",
     "discarded": "초안을 삭제했습니다",
     "discard_failed": "초안을 삭제하지 못했습니다"
+  },
+  "load_error": {
+    "title": "지식 베이스를 불러오지 못했습니다",
+    "retry": "다시 시도"
   }
 }

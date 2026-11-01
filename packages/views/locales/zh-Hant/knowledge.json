@@ -32,14 +32,14 @@
     "description": "服務恢復前，智慧體將在沒有公司知識的情況下繼續工作。"
   },
   "kb": {
-    "all": "全部",
-    "empty": "沒有知識庫"
+    "all": "全部"
   },
   "documents": {
     "filter": {
       "all": "全部",
       "published": "已發布",
-      "failed": "失敗"
+      "failed": "失敗",
+      "draft": "草稿"
     },
     "empty": "沒有文件"
   },
@@ -50,7 +50,8 @@
     "results": "搜尋結果",
     "no_results": "沒有符合的結果",
     "score": "相關度 {{score}}",
-    "source": "來源"
+    "source": "來源",
+    "error": "搜尋失敗"
   },
   "drafts": {
     "empty": "沒有草稿",
@@ -60,8 +61,7 @@
       "agent": "智慧體",
       "member": "成員",
       "system": "系統"
-    },
-    "error": "錯誤"
+    }
   },
   "discard_title": "捨棄草稿？",
   "discard_description": "草稿將被刪除，無法復原。",
@@ -74,5 +74,9 @@
     "publish_failed": "無法發布草稿",
     "discarded": "草稿已捨棄",
     "discard_failed": "無法捨棄草稿"
+  },
+  "load_error": {
+    "title": "無法載入知識庫",
+    "retry": "重試"
   }
 }

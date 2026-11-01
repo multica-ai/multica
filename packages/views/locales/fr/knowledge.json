@@ -32,14 +32,14 @@
     "description": "Les agents continuent sans les connaissances de l'entreprise jusqu'à son retour."
   },
   "kb": {
-    "all": "Toutes",
-    "empty": "Aucune base de connaissances"
+    "all": "Toutes"
   },
   "documents": {
     "filter": {
       "all": "Tous",
       "published": "Publiés",
-      "failed": "En échec"
+      "failed": "En échec",
+      "draft": "Brouillon"
     },
     "empty": "Aucun document"
   },
@@ -50,7 +50,8 @@
     "results": "Résultats",
     "no_results": "Aucun résultat",
     "score": "Score {{score}}",
-    "source": "Source"
+    "source": "Source",
+    "error": "La recherche a échoué"
   },
   "drafts": {
     "empty": "Aucun brouillon",
@@ -60,8 +61,7 @@
       "agent": "Agent",
       "member": "Membre",
       "system": "Système"
-    },
-    "error": "Erreur"
+    }
   },
   "discard_title": "Supprimer le brouillon ?",
   "discard_description": "Le brouillon est supprimé et ne peut pas être récupéré.",
@@ -74,5 +74,9 @@
     "publish_failed": "Impossible de publier le brouillon",
     "discarded": "Brouillon supprimé",
     "discard_failed": "Impossible de supprimer le brouillon"
+  },
+  "load_error": {
+    "title": "Impossible de charger les connaissances",
+    "retry": "Réessayer"
   }
 }
