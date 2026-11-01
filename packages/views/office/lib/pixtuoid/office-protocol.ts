@@ -1,8 +1,9 @@
 /**
- * The least the office measures in layout units. Fewer units draw each desk larger on the page; 256 by 171
- * is the size the floor was drawn for, and a larger page grows the floor past it rather than leaving bars.
+ * The least the office measures in layout units. Fewer units draw each desk larger on the page; 416 by 171
+ * is the smallest floor that holds the studio's 3 by 2 desk rooms (`STUDIO_MIN_W/H` in the engine patch, which
+ * change together with these), and a larger page grows the floor past it rather than leaving bars.
  */
-const MIN_UNITS_W = 256;
+const MIN_UNITS_W = 416;
 const MIN_UNITS_H = 171;
 
 /** The office's size in layout units. */
