@@ -29,7 +29,7 @@ vi.mock("@multica/core/workspace", () => ({
 vi.mock("@multica/core/paths", () => ({
   useHasOnboarded: () => true,
   resolvePostAuthDestination: (workspaces: { slug: string }[]) =>
-    workspaces[0] ? `/${workspaces[0].slug}/issues` : "/workspaces/new",
+    workspaces[0] ? `/${workspaces[0].slug}/office` : "/workspaces/new",
 }));
 
 vi.mock("@/lib/public-host", () => ({
@@ -60,7 +60,7 @@ describe("RedirectIfAuthenticated", () => {
     render(<RedirectIfAuthenticated />);
 
     await waitFor(() => {
-      expect(state.replace).toHaveBeenCalledWith("/acme/issues");
+      expect(state.replace).toHaveBeenCalledWith("/acme/office");
     });
   });
 });
