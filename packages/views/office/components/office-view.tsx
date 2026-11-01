@@ -3,7 +3,12 @@
 import { memo, useCallback, useMemo, useState } from "react";
 import { useQueries, useQuery } from "@tanstack/react-query";
 import { agentTaskSnapshotOptions } from "@multica/core/agents";
-import { layoutFloor, officeFloorsOptions, officeSquadMembersOptions, useOfficeFloorStore } from "@multica/core/office";
+import {
+  layoutFloor,
+  officeFloorsOptions,
+  officeSquadMembersOptions,
+  useOfficeFloorStore,
+} from "@multica/core/office";
 import { agentListOptions, squadListOptions } from "@multica/core/workspace/queries";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { useAuthStore } from "@multica/core/auth";
@@ -22,6 +27,7 @@ import { OfficeBoardButton } from "./office-board-button";
 import { OfficeBoardDialog } from "./office-board-dialog";
 import { OfficeRoomOverlays } from "./office-room-overlays";
 import { OfficeSeatBanner, OfficeUnseatedTray } from "./office-unseated-tray";
+import { OfficeSquadPanel } from "./office-squad-panel";
 import { OfficeFirstRun } from "./office-first-run";
 import { OfficeFloorTabs } from "./office-floor-tabs";
 import { useOfficeAdmin } from "../lib/use-office-admin";
@@ -134,6 +140,7 @@ function OfficeScene({ issues, visibleStatuses, projectId }: BoardViewProps) {
   // One panel manages an agent, whether the click landed on the agent or on its tag.
   const [panel, setPanel] = useState<OfficeAgentTarget | null>(null);
   const [boardOpen, setBoardOpen] = useState(false);
+  const [squadPanel, setSquadPanel] = useState<string | null>(null);
 
   const onPick = useCallback(
     (agentId: string) => setPanel({ agentId, issueId: focusOf.get(agentId)?.id }),
@@ -145,6 +152,8 @@ function OfficeScene({ issues, visibleStatuses, projectId }: BoardViewProps) {
     () => layout.rooms.map((room) => room.squad?.name ?? t(($) => $.office.room_empty)),
     [layout, t],
   );
+  const openSquad = useCallback((slot: number) => setSquadPanel(layout.rooms[slot]?.squad?.id ?? null), [layout]);
+  const roomPickable = useCallback((slot: number) => !!layout.rooms[slot]?.squad, [layout]);
   const openCreateSquad = useCallback(() => useModalStore.getState().open("create-squad"), []);
 
   // Floors that still hold a live squad, and whether any squad is seated at all.
@@ -172,11 +181,24 @@ function OfficeScene({ issues, visibleStatuses, projectId }: BoardViewProps) {
       {firstRun ? (
         <OfficeFirstRun />
       ) : (
-        <OfficeCanvas sessions={sessions} tagText={tagText} onPick={onPick} onMove={onOpenAgent} roomNames={roomNames}>
+        <OfficeCanvas
+          sessions={sessions}
+          tagText={tagText}
+          onPick={onPick}
+          onMove={onOpenAgent}
+          roomNames={roomNames}
+          roomPickable={roomPickable}
+          onRoomPick={openSquad}
+        >
           {(stage) => (
             <>
               <OfficeBoardButton stage={stage} onOpen={() => setBoardOpen(true)} />
-              <OfficeRoomOverlays stage={stage} rooms={layout.rooms} onCreateSquad={openCreateSquad} onOpenSquad={() => {}} />
+              <OfficeRoomOverlays
+                stage={stage}
+                rooms={layout.rooms}
+                onCreateSquad={openCreateSquad}
+                onOpenSquad={openSquad}
+              />
             </>
           )}
         </OfficeCanvas>
@@ -189,6 +211,15 @@ function OfficeScene({ issues, visibleStatuses, projectId }: BoardViewProps) {
         canSeat={canSeat}
       />
       <OfficeBoardDialog open={boardOpen} initialProjectId={projectId} onClose={() => setBoardOpen(false)} />
+      <OfficeSquadPanel
+        squadId={squadPanel}
+        room={layout.rooms.find((room) => room.squad?.id === squadPanel) ?? null}
+        onPickAgent={(agentId) => {
+          setSquadPanel(null);
+          onOpenAgent(agentId);
+        }}
+        onClose={() => setSquadPanel(null)}
+      />
       <OfficeAgentPanel target={panel} issues={issues} projectId={projectId} onClose={() => setPanel(null)} />
     </>
   );

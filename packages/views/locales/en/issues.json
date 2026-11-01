@@ -1879,7 +1879,11 @@
     "seat_room": "Room {{n}}",
     "seat_done": "{{name}} now has a room",
     "seat_taken": "That room is taken by {{name}}",
-    "seat_failed": "Couldn't seat the squad"
+    "seat_failed": "Couldn't seat the squad",
+    "squad_members": "Members",
+    "squad_autopilots": "Autopilots",
+    "squad_proposals": "Waiting for a decision",
+    "no_desk": "No desk"
   },
   "views": {
     "builtin": {

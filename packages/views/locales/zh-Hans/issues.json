@@ -1807,7 +1807,11 @@
     "seat_room": "房间 {{n}}",
     "seat_done": "已为 {{name}} 安排房间",
     "seat_taken": "该房间已被 {{name}} 占用",
-    "seat_failed": "无法安排小队"
+    "seat_failed": "无法安排小队",
+    "squad_members": "成员",
+    "squad_autopilots": "自动化",
+    "squad_proposals": "等待决定",
+    "no_desk": "没有工位"
   },
   "views": {
     "builtin": {

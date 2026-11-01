@@ -1807,7 +1807,11 @@
     "seat_room": "{{n}}번 방",
     "seat_done": "{{name}}에 방을 배정했습니다",
     "seat_taken": "{{name}}이(가) 이미 사용 중인 방입니다",
-    "seat_failed": "스쿼드를 배정하지 못했습니다"
+    "seat_failed": "스쿼드를 배정하지 못했습니다",
+    "squad_members": "멤버",
+    "squad_autopilots": "오토파일럿",
+    "squad_proposals": "결정 대기 중",
+    "no_desk": "자리 없음"
   },
   "views": {
     "builtin": {

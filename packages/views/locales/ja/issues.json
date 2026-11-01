@@ -1807,7 +1807,11 @@
     "seat_room": "部屋{{n}}",
     "seat_done": "{{name}}に部屋を割り当てました",
     "seat_taken": "その部屋は{{name}}が使用中です",
-    "seat_failed": "スクワッドを配置できませんでした"
+    "seat_failed": "スクワッドを配置できませんでした",
+    "squad_members": "メンバー",
+    "squad_autopilots": "オートパイロット",
+    "squad_proposals": "判断待ち",
+    "no_desk": "席なし"
   },
   "views": {
     "builtin": {

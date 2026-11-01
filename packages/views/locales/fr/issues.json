@@ -1879,7 +1879,11 @@
     "seat_room": "Salle {{n}}",
     "seat_done": "{{name}} a maintenant une salle",
     "seat_taken": "Cette salle est prise par {{name}}",
-    "seat_failed": "Impossible de placer le squad"
+    "seat_failed": "Impossible de placer le squad",
+    "squad_members": "Membres",
+    "squad_autopilots": "Automatisations",
+    "squad_proposals": "En attente de décision",
+    "no_desk": "Sans bureau"
   },
   "views": {
     "builtin": {
