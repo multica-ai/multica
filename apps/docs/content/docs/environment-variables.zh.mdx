@@ -409,6 +409,18 @@ multica config show
 
 `DO_NOT_TRACK` 与 `ANALYTICS_DISABLED` 相互独立：前者控制这份首方匿名快照，后者控制可选的 PostHog 集成。
 
+## 企业知识库
+
+这些变量用于开启可选的[知识库](/knowledge-base)。当 `KNOWLEDGE_URL` 为空时，知识库不会提供，其他部分也不会改变。边车服务自身的变量及其默认值见[高级配置](https://github.com/multica-ai/multica/blob/main/SELF_HOSTING_ADVANCED.md#company-knowledge-base)。
+
+| 变量 | 默认值 | 说明 |
+|---|---|---|
+| `KNOWLEDGE_URL` | 空 | 后端访问 WeKnora 的地址，例如 `http://knowledge-app:8080` |
+| `MULTICA_KNOWLEDGE_SECRET_KEY` | 空 | Base64 编码的 32 字节密钥，用于加密每个工作区的 WeKnora 密钥。没有它就不会提供知识库。 |
+| `KNOWLEDGE_SERVICE_EMAIL` / `KNOWLEDGE_SERVICE_PASSWORD` | 空 | 为每个工作区创建资源的 WeKnora 服务账号 |
+| `KNOWLEDGE_PUBLIC_URL` | 与 `KNOWLEDGE_URL` 相同 | 智能体的守护进程访问只读 MCP 端点所用的地址 |
+| `KNOWLEDGE_UI_URL` | 空 | WeKnora 网页界面的地址，用于 **在 WeKnora 中打开** 链接 |
+
 ## 接下来
 
 - [登录与注册](/auth-setup) — 登录方式与注册限制。
