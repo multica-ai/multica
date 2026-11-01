@@ -1,0 +1,340 @@
+---
+title: 開發規範
+description: 程式碼命名規範、i18n 翻譯術語表、中文風格指南的唯一權威來源。
+---
+
+寫 Multica 程式碼、改翻譯、寫中文產品文案，都從這一頁查。
+
+---
+
+## 1. 程式碼命名
+
+### 路由
+
+工作區前置路由（使用者進入工作區之前能訪問的路由）必須用單個單詞，或者 `/{noun}/{verb}` 格式。
+
+- ✅ `/login`、`/inbox`、`/workspaces/new`
+- ❌ `/new-workspace`、`/create-team`、`/accept-invite`
+
+根目錄的連字元詞組會跟使用者自選 workspace slug 衝突，逼著團隊不停審保留字列表。把名詞（`workspaces`）保留下來，整個 `/workspaces/*` 子樹自動受保護。
+
+### 工作區路由
+
+永遠用 `/{slug}/{section}` —— `/{slug}/issues`、`/{slug}/agents`、`/{slug}/settings`。共享程式碼不要複製路由邏輯，統一走 `useNavigation().push()`，不要直接用框架的 link API。
+
+### 包與模組
+
+monorepo 的包邊界是硬約束：
+
+| 包 | 可依賴 | 不能依賴 |
+| --- | --- | --- |
+| `packages/core` | 僅平臺無關基礎庫 | `react-dom`、`localStorage`、`process.env`、`next/*`、UI 庫 |
+| `packages/ui` | 無業務依賴 | `@multica/core`、業務邏輯 |
+| `packages/views` | `core/`、`ui/` | `next/*`、`react-router-dom`、stores |
+| `apps/web/platform/` | `next/*` | 其他 app |
+| `apps/desktop/.../platform/` | `react-router-dom`、electron | 其他 app |
+| `apps/mobile/` | `@multica/core` 的類型和純函式 | Web/Desktop 的 React 頁面、store 和平臺實現 |
+
+Web 和 Desktop 都有的邏輯，**必須**抽到共享包。"小段重複"也不算例外。Mobile 擁有獨立的 UI、資料層和發布流程，只共享類型與純函式。
+
+### 檔案與元件
+
+- 檔名：`kebab-case.tsx` / `kebab-case.ts`（如 `agent-row-actions.tsx`）
+- 元件：`PascalCase`（如 `AgentRowActions`）
+- Hook：`useCamelCase`（如 `useWorkspaceId`）
+- 測試：與原始檔同目錄，命名 `<file>.test.ts(x)`
+- Zustand store：`<feature>-store.ts`，匯出名 `use<Feature>Store`
+
+### 資料庫（Go + sqlc）
+
+- 表名：`snake_case` 單數（`user`、`workspace`、`agent_runtime`）
+- 欄位：`snake_case`（`workspace_id`、`created_at`、`last_seen_at`）
+- 關聯欄位：`<table>_id`
+- 布林：`is_<state>` 或者 `<state>_at`（狀態變化優先用時間戳形式）
+- 遷移檔案：`NNN_descriptive_name.up.sql` + `.down.sql`，**永遠寫雙向**
+- 不建立資料庫 foreign key，也不使用級聯刪除或級聯更新；關係校驗和清理由應用層完成
+- 所有索引都使用 `CREATE INDEX CONCURRENTLY` 或 `CREATE UNIQUE INDEX CONCURRENTLY`，每條 concurrent index 單獨佔一個 migration 檔案
+
+### Go
+
+- 標準 `gofmt` + `go vet`，無例外
+- Handler 檔案依領域命名：`agent.go`、`auth.go`、`runtime.go`
+- 測試：`<file>_test.go` 同目錄
+- handler 裡 UUID 解析遵守根 `AGENTS.md` 的規則：邊界輸入用 `parseUUIDOrBadRequest`，可信迴環用 `parseUUID`（panic 版），永遠不要直接用 `util.ParseUUID` 不查 error
+
+### TypeScript
+
+- 網路上 API 響應是 `snake_case`，api client 在邊界處轉成 `camelCase`。**TS 程式碼內部一律 camelCase**
+- 類型：`PascalCase`（`Issue`、`AgentRuntime`），不加 `IPrefix`，不加 `_t` 後綴
+- 枚舉：優先用 string literal union，需要 runtime 迭代時才用 `enum`
+- TanStack Query key：用 `<feature>/queries.ts` 裡的工廠函式，例如 `issueKeys.detail(id)`
+
+### API 邊界
+
+- 網路響應必須用 `packages/core/api/schema.ts` 中的 `parseWithFallback` 和 zod schema 解析，不能直接 `as T`
+- 新增或修改 endpoint 時，同步更新 schema，並覆蓋欄位缺失或格式錯誤的測試
+- 下游 UI 對可選欄位提供預設值；服務端枚舉的 `switch` 必須有 `default` 分支
+- 已安裝的 Desktop 可能連接更新的 backend，不能假設前後端永遠同版本
+
+### Runtime 顯示名
+
+`AgentRuntime.name` 是 daemon 的原始技術名（例如 `Codex (host)`），使用者別名在 `custom_name`。使用者可見文案不得直接渲染 `runtime.name`，要用共享 helper，保證別名和 provider 一致（MUL-5248、#5260）：
+
+- 獨立展示 runtime（列表、標籤、確認彈窗、視窗標題）：`runtimeDisplayLabel(runtime)` → 別名 + provider，無別名時回退 daemon 名。
+- 旁邊已經單獨顯示 provider 圖標/文字時：`runtimeDisplayName(runtime)` → 只顯示別名，避免重複 provider。
+- 在機器分組內：機器標題用 `machine.title`，子行用 `runtimeRowLabel(runtime, machine.title)`。
+- runtime 選擇器用 `buildRuntimeMachines` 按機器分組，不要自己拼扁平的原始名列表。
+
+原始 `runtime.name` 只允許用於內部識別——hostname 解析、分組、搜尋 haystack、協議 payload——絕不能進入 JSX 文本、i18n 引數、`<Select>` label 或視窗標題。
+
+### Issue 編號
+
+每個 issue 有人類可讀的編號，比如 `MUL-123`：工作區 `issue_prefix`（大寫字母和數字，通常 3 個字元，最長 10 個）+ 流水號。工作區管理員可以在**設定 → 常規**中修改前綴；修改會讓所有現有 issue 重新編號，外部引用——PR 標題、分支名、文件與聊天裡的連結——裡的舊前綴會失效。
+
+### 程式碼註釋
+
+**只允許英文**。Go 和 TypeScript 都強制。如果在程式碼裡看到中文註釋，那就是 bug，替換掉。
+
+### Commit message
+
+Conventional 格式：`feat(scope)`、`fix(scope)`、`refactor(scope)`、`docs`、`test(scope)`、`chore(scope)`。按意圖原子化分組。
+
+---
+
+## 2. i18n 翻譯術語表
+
+這是每個翻譯 PR 都必須遵守的術語表。原本在 `packages/views/locales/glossary.md`，那個文件已刪除，由這一頁取代。
+
+### 核心區分：日常詞 vs Multica 專有詞
+
+Multica 的產品名詞分兩類：
+
+- **日常詞** —— 使用者會直接說出口的詞。**完整翻譯成中文**，是不是資料庫實體都一樣：`issue` → 任務、`workspace` → 工作區、`project` → 專案。
+- **Multica 專有詞** —— 中文裡沒有對應詞的概念（`skill`），或使用者可能要照著敲、照著比對的 schema 識別碼（`todo`、`in_progress`、`task_id`）。**用小寫英文**呈現，讀起來像類型名。
+
+其餘規則以 `apps/docs/content/docs/*.zh.mdx` 為準 —— docs 是已經實戰 20+ 篇的 CN voice 標準。`*.zh.mdx`、`*.ja.mdx`、`*.ko.mdx` 的正文現在也一律按下面的表格來。
+
+### `issue` 就是產品裡的「任務」，必須翻譯
+
+`issue` 是這個「使用者提出、AI 代理去做的事」的英文產品名。在英文之外的每種語言裡，它就是當地最日常的那個「任務」詞：
+
+| 实体 | en | zh-Hans | ja | ko | fr |
+| --- | --- | --- | --- | --- | --- |
+| 提交出来的一件事（`issue`） | Issue | **任务** | **タスク** | **태스크** | **Tâche** |
+| 智能体的一次执行记录（API / DB 中为 `task`） | **Run** | **运行** | **実行** | **실행** | **Exécution** |
+
+這兩個概念使用者都看得到，而且**不是一回事** —— 一個任務下面可以有多次執行。任何一種語言都不能把兩者寫成同一個詞。`Task` 不再是 AI 代理單次執行的使用者側產品名，只保留為已經穩定的內部識別碼。
+
+不跟著改的部分：
+
+- **API / DB 欄位**永遠是 `issue` / `task` / `skill`：`issue_status`、`task_id`、`skill_uuid`。開發者正文稱產品物件為 Run；需要對照協議時可寫成「Run（API 中為 `task_id`）」。
+- **程式碼引用和字面命令**保持英文：`multica issue ...`、Slack 與飛書的 `/issue` 斜槓命令。
+- **`skill`** 在中文裡仍用小寫英文 —— Multica 特有概念，沒有公認中文譯法；標題可大寫為 `Skills`。
+- **表示「問題」的 issue** 不是這個實體：機器卡片上的 `{{count}} issues` 是 `{{count}} 個異常` / `問題 {{count}} 件` / `문제 {{count}}개`，不要用實體那個詞。
+
+**為什麼 `issue` 要譯，而 `skill` 不譯**：使用者每天都在提任務、看任務，而 "issue" 這個詞在中文、日文、韓文裡除了開發圈黑話之外沒有含義，當地人本來就用「任務」在說這件事。`skill` 則是 Multica 特有概念，沒有哪個中文詞能承載它的意思。
+
+其它產品名詞同樣按「有沒有穩定的本地日常詞」來判斷：
+
+- **`project` 翻成"專案"**：中文裡早就穩定的日常詞。飛書 / Tower / Teambition / PingCode / GitHub Projects 中文版 0 例外都翻譯成"專案"，沒有產品保留 `project`。
+- **`autopilot` 翻成"自動化"**：autopilot 在中文裡聯想到特斯拉的"自動駕駛"，跟產品功能（按週期啟動 AI 代理執行）對應不上。Notion / 飛書都用"自動化"，是行業共識。
+
+### 完整翻譯 —— 概念詞
+
+| 英 | 中 |
+| --- | --- |
+| Workspace | **工作区** |
+| Agent | **智能体** |
+| Project | **项目** |
+| Autopilot | **自动化** |
+| Daemon | **守护进程** |
+| Runtime | **运行时** |
+| Inbox | **收件箱** |
+| Comment | **评论** |
+| Reply | **回复** |
+| Notifications | **通知** |
+| Member | **成员** |
+| Label | **标签** |
+| Settings | **设置** |
+| Onboarding | **上手引导** |
+
+### 不翻 —— 品牌名 + 通用縮寫
+
+| 类别 | 词 |
+| --- | --- |
+| 品牌 | **Multica**、GitHub、Slack、Google、Anthropic、OpenAI、Claude、Codex、Cursor、Linear、Jira、Qoder、Qoder Cloud Agents |
+| 缩写 | API、CLI、URL、SDK、OAuth、JWT、SSO、WebSocket、HTTP、JSON、YAML、SQL |
+
+使用者可見文案明確提及該產品時，使用 **Qoder Cloud Agents**。入口及可脫離頁面展示的提示應能獨立識別服務。上下文已明確服務時，欄位可用**遠端 AI 代理**等通用名稱，與 Multica AI 代理區分。品牌拼寫保持一致，周邊文案按各語言自然表達。內部識別碼和外部技術名稱保持原樣，包括 **QCA Assistant**。
+
+首次說明憑據時寫 **Qoder 個人訪問令牌（PAT）**，後文統一為 **Qoder PAT**，並與 GitHub 倉庫令牌區分。
+
+### 完整翻譯 —— 通用 UI 詞
+
+| 英 | 中 |
+| --- | --- |
+| Invite / Invitation | 邀请 |
+| Search | 搜索 |
+| Email | 邮箱（label）/ 邮件（action） |
+| Password | 密码 |
+| Sign in / Log in | 登录 |
+| Sign up | 注册 |
+| Sign out / Log out | 退出登录 |
+| Save / Cancel / Delete | 保存 / 取消 / 删除 |
+| Confirm / Continue / Back | 确认 / 继续 / 返回 |
+| Edit / New / Create / Add | 编辑 / 新建 / 创建 / 添加 |
+| Remove / Send / Open / Close | 移除 / 发送 / 打开 / 关闭 |
+| Preview / Download / Upload | 预览 / 下载 / 上传 |
+| Done / Loading... | 完成 / 加载中... |
+| Profile / Account / Appearance | 个人资料 / 账号 / 外观 |
+| Theme / Language | 主题 / 语言 |
+| Light / Dark / System | 浅色 / 深色 / 跟随系统 |
+| Active / Archived | 活跃（或 启用）/ 已归档 |
+| Status / Priority | 状态 / 优先级 |
+| Assignee / Reporter | 负责人 / 报告人 |
+| Description / Title | 描述 / 标题 |
+| Date / Time | 日期 / 时间 |
+| Today / Yesterday / Tomorrow | 今天 / 昨天 / 明天 |
+| Empty / Failed / Success | 空 / 失败 / 成功 |
+| Error / Warning | 错误 / 警告 |
+
+### 角色名 + 狀態名（小寫英文，不翻）
+
+這些是 schema-level 識別碼，中文環境也保持小寫英文：
+
+- 角色：`owner` / `admin` / `member`
+- Issue 狀態：`backlog` / `todo` / `in_progress` / `in_review` / `done` / `blocked` / `cancelled`
+- Issue 狀態分類：`unstarted` / `started` / `done` / `closed`
+
+UI 裡展示這些值時保持英文（必要時用 code-style 包起來）：
+
+- "你需要 owner 權限"
+- "已切換到 in_progress"
+
+### 詞組組合規則
+
+英文詞（實體名 + 品牌名 + 縮寫）與中文之間**加單空格**：
+
+- "Create new issue" → "新建任務"（`任務` 是中文，不加空格）
+- "Assign to agent" → "分配給 AI 代理"
+- "Configure runtime" → "配置執行時"
+- "Stop daemon" → "停止守護程序"
+
+### 複數與計數
+
+i18next 用 `_one` / `_other`；中文不區分語法單複數，只填 `_other`。
+
+```json
+// en/issues.json
+{
+  "issue_count_one": "{{count}} issue",
+  "issue_count_other": "{{count}} issues"
+}
+
+// zh-Hans/issues.json
+{
+  "issue_count_other": "{{count}} 个任务"
+}
+```
+
+常見計數格式：
+
+- `{{count}} issues` → `{{count}} 個任務`
+- `{{count}} agents` → `{{count}} 個 AI 代理`
+- `{{count}} workspaces` → `{{count}} 個工作區`
+- `{{count}} comments` → `{{count}} 條評論`
+- `{{count}} members` → `{{count}} 位成員`
+- `{{count}} skills` → `{{count}} 個 skill`
+
+### 插值
+
+用 `{{var}}` 形式。中文翻譯可以調整位置以符合中文語序。
+
+```json
+// en
+{ "welcome_message": "Welcome back, {{name}}!" }
+
+// zh-Hans
+{ "welcome_message": "欢迎回来，{{name}}！" }
+```
+
+### Key 命名約定
+
+3 層嵌套：`feature.component.action`。
+
+```json
+{
+  "feature_or_component": {
+    "subcomponent_or_section": {
+      "action_or_label": "..."
+    }
+  }
+}
+```
+
+實例：
+
+- `issues.toolbar.batch_update_success`
+- `issues.detail.comment_form.placeholder`
+- `inbox.empty.title`
+- `settings.preferences.language.title`
+
+### Web-only / Desktop-only 文案位置
+
+- 共享文案：放 namespace JSON 頂層
+- Web-only：放 `web` 段
+- Desktop-only：放 `desktop` 段
+
+參考 `auth.json`（`web` 段含 `prefer_desktop` / `desktop_handoff.*`）。
+
+---
+
+## 3. 中文風格
+
+### 標點
+
+- 中文用全角標點：`，。：；！？`
+- 引號：用 `"..."`（直引號），與英文 source 保持一致。**不要**用 `「」` 或彎引號
+- 省略號：用 `...`（三點）而非 `…`（單字元），與英文 source 保持一致
+- 中英混排：英文詞左右各加 1 個空格（詳見詞組組合規則）
+
+### 風格原則
+
+- **簡潔直白**：避免翻譯腔，"對於 X 來說"、"作為 X"、"我們的"
+- **錯誤資訊**：溫和但明確，"無法儲存修改" 優於 "儲存修改失敗了！"
+- **按鈕**：動詞開頭，2-4 字最佳。"取消"、"儲存修改"、"立即同步"
+- **Tooltip**：完整短句。"複製連結到剪貼板"
+- **placeholder**：示例性提示。"輸入任務標題..."
+
+### UI 描述性文案
+
+description 預設省略。新增前先問：**沒有這句話，使用者會誤解什麼或做錯什麼？** 如果標題、標籤、控件、當前值或按鈕已經表達清楚，就不新增。
+
+- 同一事實只說一次，放在最相關的控件旁，不在頁頭、分組、欄位、空狀態和彈窗中反覆解釋。
+- 優先用準確的標籤或具體示例，避免用一段話講解顯然的操作。除非能消除實際歧義，不寫“建立一個開始使用”“點擊下方”“之後可以修改”等通用提示。
+- 權限、費用、不可撤銷後果、執行前提、輸入限制和錯誤恢復資訊應在相關狀態下直接可見，不藏進只能懸停查看的幫助中。
+- 首次使用說明只在需要的位置展示；高級用法與診斷細節放入可明確開啟、支援鍵盤操作的幫助中。
+- 保留輸入標籤、無障礙名稱和必要的描述關聯。不要把刪掉的視覺廢話全部轉成螢幕閱讀器專用文本。
+- 同時檢查英文、各語言翻譯和移動端獨立文案。PR 評審檢查新增資訊、同屏重複、顯示條件和保留的約束；字數只是複查信號，不是自動刪除標準。
+
+共享設定元件已經支援可選 description。示例與新增呼叫預設省略，不增加強制填寫描述的元件屬性，也不另建一份文案規範。
+
+### 拿不準的時候去哪查
+
+術語表沒覆蓋的詞，按這個順序查：
+
+1. `apps/docs/content/docs/*.zh.mdx` —— CN voice 事實標準，20+ 篇高度一致
+2. `packages/views/locales/zh-Hans/auth.json` 和 `editor.json` —— JSON 結構 + selector API 用法參考
+3. `packages/views/auth/login-page.tsx` —— 元件層 selector API 呼叫參考
+4. `packages/views/settings/components/preferences-tab.tsx` —— 語言切換器參考
+
+---
+
+## 修改這一頁時
+
+改本頁規則的同時還要：
+
+1. 把規則在相關 locale JSON / AGENTS.md / docs 頁面裡同步落地
+2. PR 描述裡寫明改了什麼，方便 reviewer 檢查下游是否跟著改了
+
+本頁是契約，其他文件不能 override。

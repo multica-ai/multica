@@ -1,0 +1,115 @@
+---
+title: AI 程式設計工具對照
+description: 比較 Multica 支援的 AI 程式設計工具，以及模型、MCP、會話和 Skill 的差異。
+---
+
+import { Callout } from "fumadocs-ui/components/callout";
+import { ProviderPickerDemo } from "@/components/demos/provider-picker-demo";
+
+Multica 不替代你在用的 AI 程式設計工具：執行時呼叫電腦上已經安裝並登入的工具，再把執行進度和結果寫回任務。已經在用其中一款的，通常直接沿用就行。還沒定的話，看四件事：
+
+- 電腦上是否已經安裝；
+- 帳號可以使用哪些模型；
+- 是否需要由 Multica 配置 MCP；
+- 團隊要重複使用哪些 skill。
+
+安裝方法見 [安裝 AI 程式設計工具](/install-agent-runtime)。
+
+## 支援的工具
+
+<ProviderPickerDemo />
+
+| 工具 | 檢測命令 | 會話恢復 | Multica 管理 MCP | 在 Multica 選模型 | Skill 注入位置 |
+|---|---|---:|---:|---:|---|
+| Antigravity | `agy` | ✓ | — | ✓ | `.agents/skills/` |
+| Claude Code | `claude` | ✓ | ✓ | ✓ | `.claude/skills/` |
+| CodeBuddy | `codebuddy` | ✓ | ✓ | ✓ | `.codebuddy/skills/` |
+| CodeArts | `codearts` | ✓ | ✓ | ✓ | `.codeartsdoer/skills/` |
+| Codex | `codex` | ✓ | ✓ | ✓ | `$CODEX_HOME/skills/` |
+| GitHub Copilot CLI | `copilot` | ✓ | — | ✓ | `.github/skills/` |
+| Cursor Agent | `cursor-agent` | ✓ | ✓ | ✓ | `.cursor/skills/` |
+| DeepSeek Harness | `dsh` | ✓ | ✓ | ✓ | `.dsh/skills/` |
+| DevEco Code | `deveco` | ✓ | — | ✓ | `.deveco/skills/` |
+| Grok | `grok` | ✓ | ✓ | ✓ | `.grok/skills/` |
+| Hermes | `hermes` | ✓ | ✓ | ✓ | 單次執行的 `HERMES_HOME/skills/` |
+| Kimi CLI | `kimi` | ✓ | ✓ | ✓ | `.kimi/skills/` |
+| Kiro CLI | `kiro-cli` | ✓ | ✓ | ✓ | `.kiro/skills/` |
+| MiniMax Code | `mcode` | — | ✓ | — | `.minimax/skills/` |
+| Muse Code | `muse` | ✓ | — | ✓ | `.agents/skills/` |
+| Devin CLI | `devin` | ✓ | ✓ | ✓ | `.devin/skills/` |
+| OpenClaw | `openclaw` | ✓ | ✓ | ✓ | `skills/` |
+| OpenCode | `opencode` | ✓ | ✓ | ✓ | `.opencode/skills/` |
+| Pi | `pi` | ✓ | ✓ | ✓ | `.pi/skills/` |
+| Oh-My-Pi | `omp` | ✓ | ✓ | ✓ | `.omp/skills/` |
+| Qoder CLI | `qodercli` | ✓ | ✓ | ✓ | `.qoder/skills/` |
+| Qoder CN CLI | `qoderclicn` | ✓ | ✓ | ✓ | `.qoder/skills/` |
+| Qwen Code | `qwen` | ✓ | ✓ | ✓ | `.qwen/skills/` |
+| QwenPaw | `qwenpaw` | ✓ | ✓ | — | 單次執行的工作區 `skills/` |
+| Reasonix | `reasonix` | ✓ | ✓ | ✓ | `.reasonix/skills/` |
+| Trae CLI | `traecli` | ✓ | ✓ | ✓ | `.traecli/skills/` |
+| Dim | `dim` | ✓ | ✓ | ✓ | — |
+| ZeroClaw | `zeroclaw` | ✓ | — | — | — |
+
+"Multica 管理 MCP"指可以在 AI 代理配置中填寫 MCP server，由 Multica 在執行前傳給對應工具。這一列只說明 Multica 能否代為配置，不說明工具自身有沒有別的 MCP 配置方式。
+
+"在 Multica 選模型"為 — 的工具，模型要在工具自己的配置裡選，見[模型來源](#模型來源)。
+
+## 模型來源
+
+Devin 透過本機 ACP 執行，支援 stdio MCP；只有 CLI 宣告支援時才會傳入 HTTP/SSE 配置。全域性 skill 依次從 `$XDG_CONFIG_HOME/devin/skills`（預設 `~/.config/devin/skills`，Windows 為 `%APPDATA%\devin\skills`）、舊版 `cognition/skills`、`~/.codeium/<channel>/skills`（依次為 `windsurf`、`windsurf-next`、`windsurf-insiders`）和 `~/.agents/skills` 匯入。同名 skill 在列表和匯入時都以前面的目錄為準。
+
+Devin 模型列表可能包含當前帳號無權使用的模型。可以選擇完整模型 ID、無歧義的會話模型名稱或目錄中的系列 slug/別名（如 `opus`），也可以留空使用 CLI 預設模型。Multica 會在傳送任務前確認實際模型，拒絕回退到其他系列；有歧義的名稱、任意截斷名稱或不可用的變體需要改選完整 ID，不會猜測匹配。用量按實際返回的模型歸屬；Adaptive 按返回的 Adaptive 路由 ID 記錄，不推測底層模型。
+
+Devin 優先讀取 `WINDSURF_API_KEY`，否則使用 `devin auth login` 儲存的憑據；未知的 ACP 認證方式不會阻斷已儲存的登入。Multica 保留 Devin 配置的會話模式，不自動提升權限。如果預設為 `plan`，請先在 Devin 中切換到可編輯模式，再派發需要修改檔案的任務。
+
+建立 AI 代理時，模型列表來自對應的執行時。有的工具給出固定的模型名稱，有的按本機配置、登入帳號和訂閱權益返回可用模型。
+
+不選擇模型時，Multica 使用該工具的預設設定。列表為空時，先確認執行時線上並且工具已經登入，再重新整理模型列表。
+
+QwenPaw、MiniMax Code 和 ZeroClaw 例外：它們不接受在 Multica 側選擇的模型，選擇框不可用，顯示為"由執行時管理"，模型要在工具自身的配置裡選。它們的模型列表為空是正常的，不表示執行時離線。
+
+DeepSeek Harness 的模型目錄由執行時自身提供（`dsh --profile multica --list-models`）。它的模型 id 採用 `provider/model` 形式（例如 `deepseek-official/deepseek-chat`），請從列表中選擇完整 id。
+
+<Callout type="info">
+各工具的模型名稱不通用。更換 AI 程式設計工具後，原來的模型值在新工具中無效，需要重新選擇。
+</Callout>
+
+## 會話恢復
+
+表格中標 ✓ 的工具支援在後續執行中繼續已有會話，前提是原會話還在，並且執行由能訪問它的執行時執行。MiniMax Code 0.1.2 尚未透過 ACP 宣告會話載入能力，因此後續執行會新建 MCode 會話。
+
+Multica 儲存工具返回的會話標識。下次在同一任務中繼續工作時，執行時先嚐試恢復這段會話，恢復不了就新建會話接著執行。Pi 儲存的是本地會話檔案路徑，所以更依賴原來的電腦和檔案。
+
+有關重試和會話恢復的規則，見 [執行](/tasks#手動重試)。
+
+## MCP 配置
+
+Antigravity、GitHub Copilot CLI、DevEco Code、Muse Code 和 ZeroClaw 暫不讀取 AI 代理中的 MCP 配置，建立 AI 代理時不顯示這一項。
+
+向 Pi 下發受管 MCP 配置需要 Pi 0.99.0 或更高版本。舊版 Pi 仍可執行未配置 MCP 的 AI 代理。
+
+<Callout type="warning">
+MCP server 的命令、引數和環境變數會隨 AI 代理配置儲存在伺服器端。不要把不需要共享的本地憑據直接寫入配置。
+</Callout>
+
+執行時所在電腦上已經配置的 MCP server，會在那臺電腦上和 AI 代理的配置合併，見[本機 MCP 配置](/daemon-runtimes#local-mcp)。
+
+## Skill 注入方式
+
+執行開始前，Multica 把 AI 代理繫結的 skill 寫入上表對應的位置，工具用自己的原生機制發現它們。
+
+倉庫裡原有的 skill 不會被覆蓋。名稱衝突時，Multica 給注入的副本換一個目錄名；執行結束後，只清理自己建立的檔案。
+
+Codex、Hermes 和 OpenClaw 的處理稍有不同：
+
+- Codex 使用單次執行的 `CODEX_HOME`，不會把 skill 寫進系統級 Codex 目錄。
+- Hermes 使用單次執行的 `HERMES_HOME`。已有的本地配置仍然可以被讀取，但繫結的 skill 與會話資料按執行隔離。這套隔離只在 AI 代理繫結了 skill 時啟用，沒有繫結 skill 的執行使用本機原有的 Hermes 主目錄。
+- OpenClaw 使用當前執行工作目錄下的 `skills/`，並由單次執行配置把該目錄設為工作區。
+
+如何建立和繫結 skill，見 [Skills](/skills)。
+
+## 接下來
+
+- [建立和配置 AI 代理](/agents-create) — 模型與思考強度設定。
+- [安裝 AI 程式設計工具](/install-agent-runtime) — 安裝與檢測步驟。
+- [守護程序與執行時](/daemon-runtimes) — 執行時註冊與併發。
