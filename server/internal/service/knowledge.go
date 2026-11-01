@@ -479,3 +479,16 @@ func (s *KnowledgeService) assignToLiveAgents(ctx context.Context, workspaceID, 
 	}
 	return nil
 }
+
+// Ready reports whether the workspace finished enabling knowledge. It reads
+// the registry only and never asks the sidecar, so claiming a task does not
+// wait on it; a sidecar that is down surfaces to the agent as a failed MCP
+// call, which is the degradation the spec asks for. A nil service, an
+// unoffered deployment and a lookup failure are all "not ready".
+func (s *KnowledgeService) Ready(ctx context.Context, workspaceID pgtype.UUID) bool {
+	if ok, _ := s.offeredReason(); !ok {
+		return false
+	}
+	row, err := s.Queries.GetWorkspaceKnowledge(ctx, workspaceID)
+	return err == nil && row.State == KnowledgeStateReady
+}
