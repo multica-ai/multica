@@ -2,10 +2,8 @@
 
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { toast } from "sonner";
-import { ArrowLeft, ListTodo } from "@multica/ui/icons";
-import type { OfficeRoom } from "@multica/core/agents";
-import { agentListOptions } from "@multica/core/workspace/queries";
+import { ArrowLeft, Building2, ChevronDown, ListTodo } from "@multica/ui/icons";
+import { agentListOptions, squadListOptions } from "@multica/core/workspace/queries";
 import { useWorkspaceId } from "@multica/core/hooks";
 import type { Agent, Issue } from "@multica/core/types";
 import { Button } from "@multica/ui/components/ui/button";
@@ -17,7 +15,7 @@ import { IssueDetail } from "../../issues/components/issue-detail";
 import { OfficeAgentChat } from "./office-agent-chat";
 import { OfficeAgentNewIssue } from "./office-agent-new-issue";
 import { OfficeAgentWork } from "./office-agent-work";
-import { OfficeRoomMenu } from "./office-room-menu";
+import { OfficeHomeSquadMenu } from "./office-home-squad-menu";
 
 /** What the right-hand side shows: the agent's chat, one issue's thread, or the new-issue form. */
 type Pane = { kind: "chat" } | { kind: "issue"; issueId: string } | { kind: "new" };
@@ -34,27 +32,19 @@ export interface OfficeAgentTarget {
 /**
  * The one place an agent is managed from. It opens from a click on the agent or on
  * its status tag, and holds everything an admin does with one agent: change its
- * room, see and hand over its work, create issues for it, talk to it, and talk to
- * it inside an issue.
+ * home squad, see and hand over its work, create issues for it, talk to it, and
+ * talk to it inside an issue.
  */
 export function OfficeAgentPanel({
   target,
   issues,
   projectId,
-  currentRoom,
-  occupancy,
-  roomNames,
-  onMoveRoom,
   onClose,
 }: {
   /** The agent to manage; the panel is closed while this is null. */
   target: OfficeAgentTarget | null;
   issues: readonly Issue[];
   projectId?: string;
-  currentRoom: (agentId: string) => OfficeRoom;
-  occupancy: Record<OfficeRoom, number>;
-  roomNames: Record<OfficeRoom, string>;
-  onMoveRoom: (agentId: string, room: OfficeRoom) => Promise<void>;
   onClose: () => void;
 }) {
   const wsId = useWorkspaceId();
@@ -71,10 +61,6 @@ export function OfficeAgentPanel({
             initialIssueId={target.issueId}
             issues={issues}
             projectId={projectId}
-            room={currentRoom(agent.id)}
-            occupancy={occupancy}
-            roomNames={roomNames}
-            onMoveRoom={onMoveRoom}
           />
         ) : null}
       </DialogContent>
@@ -87,32 +73,18 @@ function PanelBody({
   initialIssueId,
   issues,
   projectId,
-  room,
-  occupancy,
-  roomNames,
-  onMoveRoom,
 }: {
   agent: Agent;
   initialIssueId?: string;
   issues: readonly Issue[];
   projectId?: string;
-  room: OfficeRoom;
-  occupancy: Record<OfficeRoom, number>;
-  roomNames: Record<OfficeRoom, string>;
-  onMoveRoom: (agentId: string, room: OfficeRoom) => Promise<void>;
 }) {
   const { t } = useT("issues");
+  const wsId = useWorkspaceId();
+  const { data: squads = [] } = useQuery(squadListOptions(wsId));
+  const homeSquad = squads.find((squad) => squad.id === agent.home_squad_id && !squad.archived_at);
   const [pane, setPane] = useState<Pane>(initialIssueId ? { kind: "issue", issueId: initialIssueId } : { kind: "chat" });
   const [side, setSide] = useState<NarrowSide>("main");
-  const [moving, setMoving] = useState(false);
-
-  const move = (next: OfficeRoom) => {
-    setMoving(true);
-    onMoveRoom(agent.id, next).then(
-      () => toast.success(t(($) => $.office.room_moved, { name: agent.name, room: roomNames[next] })),
-      () => toast.error(t(($) => $.office.room_move_failed)),
-    ).finally(() => setMoving(false));
-  };
 
   const show = (next: Pane) => {
     setPane(next);
@@ -129,7 +101,16 @@ function PanelBody({
           <ListTodo className="size-4" />
           {t(($) => $.office.panel_work)}
         </Button>
-        <OfficeRoomMenu current={room} occupancy={occupancy} roomNames={roomNames} disabled={moving} onMove={move} />
+        <OfficeHomeSquadMenu
+          agent={agent}
+          trigger={
+            <Button type="button" variant="outline" size="sm" aria-label={t(($) => $.office.home_squad)}>
+              <Building2 className="size-4" />
+              {homeSquad?.name ?? t(($) => $.office.home_squad_none)}
+              <ChevronDown className="size-3.5 text-muted-foreground" />
+            </Button>
+          }
+        />
       </header>
       <div className="flex min-h-0 flex-1">
         <aside

@@ -39,14 +39,6 @@ import (
 // char_length and the front-end's String.prototype.length-with-counter UX.
 const maxAgentDescriptionLength = 255
 
-// agentOfficeRooms are the departments an agent can sit in on the office
-// floor. The client names them; the server only stores and checks the keys.
-var agentOfficeRooms = []string{"product", "research", "planning", "general"}
-
-func isKnownOfficeRoom(room string) bool {
-	return slices.Contains(agentOfficeRooms, room)
-}
-
 const (
 	maxAgentConversationStarters      = 3
 	maxAgentConversationStarterLabel  = 80
@@ -128,8 +120,6 @@ type AgentResponse struct {
 	// ServiceTier is the runtime-native Codex execution tier persisted for
 	// this agent (empty = inherit local Codex configuration).
 	ServiceTier string `json:"service_tier"`
-	// OfficeRoom is the office room (department) this agent sits in.
-	OfficeRoom string `json:"office_room"`
 	// HomeSquadID is the squad whose office room this agent is drawn in. Null
 	// when the agent is unassigned. Always a live squad the agent belongs to.
 	HomeSquadID *string `json:"home_squad_id"`
@@ -246,7 +236,6 @@ func (h *Handler) agentToResponse(a db.Agent) AgentResponse {
 		Model:                    a.Model.String,
 		ThinkingLevel:            a.ThinkingLevel.String,
 		ServiceTier:              a.ServiceTier.String,
-		OfficeRoom:               a.OfficeRoom,
 		HomeSquadID:              uuidToPtr(a.HomeSquadID),
 		ComposioToolkitAllowlist: composioAllowlist,
 		OwnerID:                  uuidToPtr(a.OwnerID),
@@ -1821,9 +1810,6 @@ type UpdateAgentRequest struct {
 	// ServiceTier follows the same tri-state contract as ThinkingLevel:
 	// omitted preserves, empty clears, and non-empty sets a Codex catalog ID.
 	ServiceTier *string `json:"service_tier"`
-	// OfficeRoom moves the agent to another office room. It is always set to a
-	// known room: there is no clear, because every agent sits in some room.
-	OfficeRoom *string `json:"office_room"`
 	// HomeSquadID sets the squad this agent is drawn in on the office. It is a
 	// tri-state like thinking_level: omitted leaves it alone, null clears it, a
 	// squad id must name a live squad of the workspace the agent belongs to.
@@ -2252,13 +2238,6 @@ func (h *Handler) UpdateAgent(w http.ResponseWriter, r *http.Request) {
 	}
 	if req.Status != nil {
 		params.Status = pgtype.Text{String: *req.Status, Valid: true}
-	}
-	if req.OfficeRoom != nil {
-		if !isKnownOfficeRoom(*req.OfficeRoom) {
-			writeError(w, http.StatusBadRequest, fmt.Sprintf("office_room must be one of %s", strings.Join(agentOfficeRooms, ", ")))
-			return
-		}
-		params.OfficeRoom = pgtype.Text{String: *req.OfficeRoom, Valid: true}
 	}
 	// home_squad_id: validated here so a bad value fails the whole request
 	// before anything is written; applied after the main update below.

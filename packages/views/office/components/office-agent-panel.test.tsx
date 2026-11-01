@@ -11,12 +11,21 @@ import { cleanup, fireEvent, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { workspaceKeys } from "@multica/core/workspace/queries";
-import type { OfficeRoom } from "@multica/core/agents";
 import type { Agent, Issue } from "@multica/core/types";
 import { renderWithI18n } from "../../test/i18n";
 import { OfficeAgentPanel } from "./office-agent-panel";
 
 const update = vi.hoisted(() => ({ mutate: vi.fn() }));
+const setHome = vi.hoisted(() => ({ mutate: vi.fn() }));
+
+vi.mock("@multica/core/office", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@multica/core/office")>()),
+  useSetAgentHomeSquad: () => ({ mutate: setHome.mutate }),
+  officeSquadMembersOptions: (_wsId: string, squadId: string) => ({
+    queryKey: ["squad-members", squadId],
+    queryFn: async () => (squadId === "elsewhere" ? [] : [{ member_type: "agent", member_id: "ada" }]),
+  }),
+}));
 
 vi.mock("@multica/core/hooks", () => ({ useWorkspaceId: () => "ws-1" }));
 vi.mock("@multica/core/issues/mutations", () => ({ useUpdateIssue: () => ({ mutate: update.mutate, isPending: false }) }));
@@ -48,14 +57,6 @@ vi.mock("../../issues/components/issue-detail", () => ({
   ),
 }));
 
-const NAMES: Record<OfficeRoom, string> = {
-  product: "Product development",
-  research: "Market research",
-  planning: "Planning",
-  general: "General",
-};
-const OCCUPANCY: Record<OfficeRoom, number> = { product: 1, research: 4, planning: 0, general: 2 };
-
 function makeIssue(id: string, status: string, assignee?: string): Issue {
   return {
     id,
@@ -82,8 +83,14 @@ describe("OfficeAgentPanel", () => {
 
   beforeEach(() => {
     update.mutate.mockReset();
+    setHome.mutate.mockReset();
     queryClient = new QueryClient({ defaultOptions: { queries: { retry: false, staleTime: Infinity } } });
-    queryClient.setQueryData(workspaceKeys.agents("ws-1"), [{ id: "ada", name: "Ada" } as Agent]);
+    queryClient.setQueryData(workspaceKeys.agents("ws-1"), [{ id: "ada", name: "Ada", home_squad_id: "build" } as Agent]);
+    queryClient.setQueryData(workspaceKeys.squads("ws-1"), [
+      { id: "build", name: "Build", archived_at: null },
+      { id: "research", name: "Research", archived_at: null },
+      { id: "elsewhere", name: "Elsewhere", archived_at: null },
+    ]);
   });
 
   afterEach(() => {
@@ -94,10 +101,6 @@ describe("OfficeAgentPanel", () => {
     const props = {
       target: { agentId: "ada" },
       issues: ISSUES,
-      currentRoom: () => "general" as OfficeRoom,
-      occupancy: OCCUPANCY,
-      roomNames: NAMES,
-      onMoveRoom: vi.fn(() => Promise.resolve()),
       onClose: vi.fn(),
       ...overrides,
     };
@@ -109,13 +112,13 @@ describe("OfficeAgentPanel", () => {
     return props;
   }
 
-  it("opens on the agent's chat, under its name and room", () => {
+  it("opens on the agent's chat, under its name and home squad", () => {
     setup();
 
     expect(screen.getByRole("dialog")).toBeTruthy();
     expect(screen.getByText("Ada")).toBeTruthy();
     expect(screen.getByText("chat with Ada")).toBeTruthy();
-    expect(screen.getByRole("button", { name: "Room" }).textContent).toContain("General");
+    expect(screen.getByRole("button", { name: "Home squad" }).textContent).toContain("Build");
   });
 
   it("is closed while there is no target", () => {
@@ -202,13 +205,15 @@ describe("OfficeAgentPanel", () => {
     expect(screen.getByTestId("chat").getAttribute("data-active")).toBe("true");
   });
 
-  it("moves the agent to another room", async () => {
-    const props = setup();
+  it("moves the agent's home to another squad it belongs to", async () => {
     const user = userEvent.setup();
+    setup();
 
-    await user.click(screen.getByRole("button", { name: "Room" }));
-    await user.click(await screen.findByRole("menuitem", { name: /Planning/ }));
+    await user.click(screen.getByRole("button", { name: "Home squad" }));
+    await user.click(await screen.findByRole("menuitem", { name: /Research/ }));
 
-    expect(props.onMoveRoom).toHaveBeenCalledWith("ada", "planning");
+    expect(setHome.mutate).toHaveBeenCalledWith({ agentId: "ada", squadId: "research" }, expect.any(Object));
+    // The squad the agent does not belong to is not offered.
+    expect(screen.queryByRole("menuitem", { name: /Elsewhere/ })).toBeNull();
   });
 });

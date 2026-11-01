@@ -10,3 +10,5 @@ export * from "./brief-schema";
 export * from "./briefs";
 export * from "./digest-schema";
 export * from "./digest";
+export * from "./seat-plan";
+export * from "./floor-store";

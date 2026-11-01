@@ -24,8 +24,8 @@ export const LAYOUT_SEED = 2;
 export const FRAME_MS = 33;
 
 /**
- * A worker on the floor: one per agent, seated at a desk in its room while its issue is being worked on.
- * `room` is the index of the room in the page's `OFFICE_ROOMS` order.
+ * A worker on the floor: one per agent, seated at a desk of its home squad's room.
+ * `room` is the room's slot on the floor, 0 to `OFFICE_SLOTS - 1` (see `@multica/core/office`).
  */
 export interface WorkerSession {
   key: string;

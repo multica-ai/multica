@@ -1,0 +1,1 @@
+ALTER TABLE agent ADD COLUMN IF NOT EXISTS office_room TEXT NOT NULL DEFAULT 'general';

@@ -624,11 +624,6 @@ export interface Agent {
    */
   service_tier?: string;
   /**
-   * The office room (department) this agent sits in. Older backends omit it;
-   * treat undefined as the default room. See `officeRoomOf`.
-   */
-  office_room?: string;
-  /**
    * The squad whose office room this agent is drawn in. `null` means the agent
    * is unassigned. Older backends omit the field; treat undefined as null.
    */
@@ -784,8 +779,6 @@ export interface AgentBuilderRuntimeSwitch {
 
 export interface UpdateAgentRequest {
   name?: string;
-  /** Moves the agent to another office room. Always a known room; never cleared. */
-  office_room?: string;
   /**
    * Sets the squad this agent is drawn in on the office. Must be a live squad
    * the agent is a member of; `null` clears it, omitting it leaves it alone.

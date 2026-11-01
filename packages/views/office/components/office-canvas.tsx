@@ -42,6 +42,8 @@ export function OfficeCanvas({
   onPick,
   onMove,
   roomNames,
+  onRoomPick,
+  roomPickable,
   children,
 }: {
   sessions: readonly WorkerSession[];
@@ -49,10 +51,13 @@ export function OfficeCanvas({
   tagText: (key: string) => string;
   /** A click on a tag: the worker's issue. */
   onPick: (key: string) => void;
-  /** A click on a worker's figure: move it to another room. */
+  /** A click on a worker's figure: open its panel. */
   onMove: (key: string) => void;
-  /** The names of the desk rooms, in the page's room order. */
+  /** The names of the desk rooms, in slot order. */
   roomNames?: readonly string[];
+  /** A click on a room's name. With `roomPickable`, only the rooms it accepts are clickable. */
+  onRoomPick?: (index: number) => void;
+  roomPickable?: (index: number) => boolean;
   /** Overlays pinned to the office's floor, placed in the stage's layout units. */
   children?: (stage: OfficeStage) => ReactNode;
 }) {
@@ -181,19 +186,31 @@ export function OfficeCanvas({
           // A worker's tag hangs over its head, which is at the room's north wall. The name of a top-row room
           // clears the tag row above it; the name of a lower room goes under the room, where nothing hangs.
           const topRow = room.y === Math.min(...rooms.map((other) => other.y));
+          const className = cn(
+            "absolute -translate-x-1/2 whitespace-nowrap rounded-[3px] bg-[#2c2418]/85 px-2 py-0.5 text-micro font-semibold text-[#fff8ea]",
+            topRow ? "-translate-y-full -mt-7" : "mt-1",
+          );
+          const style = {
+            left: `${((room.x + room.w / 2) / units.w) * 100}%`,
+            top: `${((topRow ? room.y : room.y + room.h) / units.h) * 100}%`,
+          };
+          const position = topRow ? "above" : "below";
+          if (onRoomPick && (roomPickable?.(index) ?? true)) {
+            return (
+              <button
+                key={index}
+                type="button"
+                data-room-name={position}
+                onClick={() => onRoomPick(index)}
+                className={cn(className, "pointer-events-auto cursor-pointer hover:bg-[#1d5fd6]")}
+                style={style}
+              >
+                {roomNames?.[index]}
+              </button>
+            );
+          }
           return (
-            <span
-              key={index}
-              data-room-name={topRow ? "above" : "below"}
-              className={cn(
-                "pointer-events-none absolute -translate-x-1/2 whitespace-nowrap rounded-[3px] bg-[#2c2418]/85 px-2 py-0.5 text-micro font-semibold text-[#fff8ea]",
-                topRow ? "-translate-y-full -mt-7" : "mt-1",
-              )}
-              style={{
-                left: `${((room.x + room.w / 2) / units.w) * 100}%`,
-                top: `${((topRow ? room.y : room.y + room.h) / units.h) * 100}%`,
-              }}
-            >
+            <span key={index} data-room-name={position} className={cn(className, "pointer-events-none")} style={style}>
               {roomNames?.[index]}
             </span>
           );
