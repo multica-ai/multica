@@ -1865,7 +1865,21 @@
     "floor_menu": "{{name}} options",
     "floor_attention": "Waiting for a decision",
     "first_run_title": "No squads in the office",
-    "first_run_template": "Start from a template"
+    "first_run_template": "Start from a template",
+    "unseated": "Not on a floor",
+    "unseated_agent": "{{name}}: set home squad",
+    "unseated_squad": "{{name}}: seat in a room",
+    "seat_banner_one": "{{count}} squad has no room",
+    "seat_banner_other": "{{count}} squads have no room",
+    "seat_all": "Seat all",
+    "seat_all_done_one": "Seated {{count}} squad",
+    "seat_all_done_other": "Seated {{count}} squads",
+    "seat_all_skipped_one": "Floor limit reached; {{count}} squad not seated",
+    "seat_all_skipped_other": "Floor limit reached; {{count}} squads not seated",
+    "seat_room": "Room {{n}}",
+    "seat_done": "{{name}} now has a room",
+    "seat_taken": "That room is taken by {{name}}",
+    "seat_failed": "Couldn't seat the squad"
   },
   "views": {
     "builtin": {

@@ -233,12 +233,13 @@ describe("OfficeView", () => {
       agents?: Agent[];
       squads?: Squad[];
       floors?: OfficeFloor[];
+      role?: string;
     } = {},
   ) {
     queryClient.setQueryData(workspaceKeys.agents("ws-1"), options.agents ?? AGENTS);
     queryClient.setQueryData(workspaceKeys.squads("ws-1"), options.squads ?? SQUADS);
     queryClient.setQueryData(officeKeys.floors("ws-1"), options.floors ?? FLOORS);
-    queryClient.setQueryData(workspaceKeys.members("ws-1"), [{ user_id: "viewer-1", role: "owner" }]);
+    queryClient.setQueryData(workspaceKeys.members("ws-1"), [{ user_id: "viewer-1", role: options.role ?? "owner" }]);
     for (const squad of options.squads ?? SQUADS) {
       queryClient.setQueryData(
         officeKeys.squadMembers("ws-1", squad.id),
@@ -309,6 +310,21 @@ describe("OfficeView", () => {
     await vi.waitFor(() => expect(engine.starts).toContain("agent-3"));
     expect(useOfficeFloorStore.getState().lastFloorId).toBe("f2");
     expect(screen.getByRole("tab", { name: "Floor 2" }).getAttribute("aria-selected")).toBe("true");
+  });
+
+  it("offers the owner Seat all for squads without a room, and lists them in the tray", async () => {
+    setup([], { squads: [...SQUADS, makeSquad("loose", "agent-4")] });
+
+    expect(await screen.findByText("1 squad has no room")).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Seat all" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: /Not on a floor/ })).toBeTruthy();
+  });
+
+  it("keeps Seat all for the owner or an admin", async () => {
+    setup([], { squads: [...SQUADS, makeSquad("loose", "agent-4")], role: "member" });
+
+    await screen.findByRole("button", { name: /Not on a floor/ });
+    expect(screen.queryByRole("button", { name: "Seat all" })).toBeNull();
   });
 
   it("shows a first-run card, not an empty floor, while no squad is seated", async () => {

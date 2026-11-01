@@ -1865,7 +1865,21 @@
     "floor_menu": "Options de {{name}}",
     "floor_attention": "En attente de décision",
     "first_run_title": "Aucun squad dans le bureau",
-    "first_run_template": "Partir d'un modèle"
+    "first_run_template": "Partir d'un modèle",
+    "unseated": "Hors d'un étage",
+    "unseated_agent": "{{name}} : choisir le squad d'attache",
+    "unseated_squad": "{{name}} : placer dans une salle",
+    "seat_banner_one": "{{count}} squad n'a pas de salle",
+    "seat_banner_other": "{{count}} squads n'ont pas de salle",
+    "seat_all": "Tout placer",
+    "seat_all_done_one": "{{count}} squad placé",
+    "seat_all_done_other": "{{count}} squads placés",
+    "seat_all_skipped_one": "Limite d'étages atteinte ; {{count}} squad non placé",
+    "seat_all_skipped_other": "Limite d'étages atteinte ; {{count}} squads non placés",
+    "seat_room": "Salle {{n}}",
+    "seat_done": "{{name}} a maintenant une salle",
+    "seat_taken": "Cette salle est prise par {{name}}",
+    "seat_failed": "Impossible de placer le squad"
   },
   "views": {
     "builtin": {

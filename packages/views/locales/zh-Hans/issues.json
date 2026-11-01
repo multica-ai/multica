@@ -1796,7 +1796,18 @@
     "floor_menu": "{{name}} 选项",
     "floor_attention": "等待决定",
     "first_run_title": "办公室里还没有小队",
-    "first_run_template": "从模板开始"
+    "first_run_template": "从模板开始",
+    "unseated": "未上楼层",
+    "unseated_agent": "{{name}}：设置所属小队",
+    "unseated_squad": "{{name}}：安排到房间",
+    "seat_banner_other": "{{count}} 个小队还没有房间",
+    "seat_all": "全部入座",
+    "seat_all_done_other": "已安排 {{count}} 个小队入座",
+    "seat_all_skipped_other": "已达楼层上限，{{count}} 个小队未安排",
+    "seat_room": "房间 {{n}}",
+    "seat_done": "已为 {{name}} 安排房间",
+    "seat_taken": "该房间已被 {{name}} 占用",
+    "seat_failed": "无法安排小队"
   },
   "views": {
     "builtin": {

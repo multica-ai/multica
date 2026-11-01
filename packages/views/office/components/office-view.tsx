@@ -6,6 +6,7 @@ import { agentTaskSnapshotOptions } from "@multica/core/agents";
 import { layoutFloor, officeFloorsOptions, officeSquadMembersOptions, useOfficeFloorStore } from "@multica/core/office";
 import { agentListOptions, squadListOptions } from "@multica/core/workspace/queries";
 import { useWorkspaceId } from "@multica/core/hooks";
+import { useAuthStore } from "@multica/core/auth";
 import { useModalStore } from "@multica/core/modals";
 import type { Agent, AgentTask, IssueStatus, Squad, SquadMember } from "@multica/core/types";
 import type { OfficeFloor } from "@multica/core/office";
@@ -20,9 +21,11 @@ import { OfficeCanvas, type WorkerSession } from "./office-canvas";
 import { OfficeBoardButton } from "./office-board-button";
 import { OfficeBoardDialog } from "./office-board-dialog";
 import { OfficeRoomOverlays } from "./office-room-overlays";
+import { OfficeSeatBanner, OfficeUnseatedTray } from "./office-unseated-tray";
 import { OfficeFirstRun } from "./office-first-run";
 import { OfficeFloorTabs } from "./office-floor-tabs";
 import { useOfficeAdmin } from "../lib/use-office-admin";
+import { useSeatAll } from "../lib/use-seat-all";
 
 const EMPTY_TASKS: AgentTask[] = [];
 const EMPTY_AGENTS: Agent[] = [];
@@ -77,6 +80,7 @@ function OfficeScene({ issues, visibleStatuses, projectId }: BoardViewProps) {
   const lastFloorId = useOfficeFloorStore((s) => s.lastFloorId);
   const selectFloor = useOfficeFloorStore((s) => s.setLastFloorId);
   const canManage = useOfficeAdmin();
+  const userId = useAuthStore((s) => s.user?.id);
 
   // The floor on show: the one last viewed, else the first.
   const floor = floors.find((candidate) => candidate.id === lastFloorId) ?? floors[0] ?? null;
@@ -148,6 +152,8 @@ function OfficeScene({ issues, visibleStatuses, projectId }: BoardViewProps) {
     () => new Set(squads.filter((squad) => !squad.archived_at && squad.floor_id).map((squad) => squad.floor_id as string)),
     [squads],
   );
+  const { seatAll, pending: seating } = useSeatAll(floors, squads);
+  const canSeat = useCallback((squad: Squad) => canManage || squad.creator_id === userId, [canManage, userId]);
   const loaded = squadsQuery.isSuccess && floorsQuery.isSuccess;
   const firstRun = loaded && noSquadSeated(squads, floors);
 
@@ -160,6 +166,9 @@ function OfficeScene({ issues, visibleStatuses, projectId }: BoardViewProps) {
         canManage={canManage}
         onSelect={selectFloor}
       />
+      {canManage && layout.unseatedSquads.length > 0 ? (
+        <OfficeSeatBanner count={layout.unseatedSquads.length} pending={seating} onSeatAll={seatAll} />
+      ) : null}
       {firstRun ? (
         <OfficeFirstRun />
       ) : (
@@ -172,6 +181,13 @@ function OfficeScene({ issues, visibleStatuses, projectId }: BoardViewProps) {
           )}
         </OfficeCanvas>
       )}
+      <OfficeUnseatedTray
+        squads={layout.unseatedSquads}
+        agents={layout.unassignedAgents}
+        floors={floors}
+        allSquads={squads}
+        canSeat={canSeat}
+      />
       <OfficeBoardDialog open={boardOpen} initialProjectId={projectId} onClose={() => setBoardOpen(false)} />
       <OfficeAgentPanel target={panel} issues={issues} projectId={projectId} onClose={() => setPanel(null)} />
     </>

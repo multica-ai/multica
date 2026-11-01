@@ -1796,7 +1796,18 @@
     "floor_menu": "{{name}} 옵션",
     "floor_attention": "결정 대기 중",
     "first_run_title": "오피스에 스쿼드가 없습니다",
-    "first_run_template": "템플릿으로 시작"
+    "first_run_template": "템플릿으로 시작",
+    "unseated": "층 밖",
+    "unseated_agent": "{{name}}: 소속 스쿼드 설정",
+    "unseated_squad": "{{name}}: 방에 배정",
+    "seat_banner_other": "스쿼드 {{count}}개에 방이 없습니다",
+    "seat_all": "모두 배정",
+    "seat_all_done_other": "스쿼드 {{count}}개를 배정했습니다",
+    "seat_all_skipped_other": "층 수 한도에 도달해 스쿼드 {{count}}개를 배정하지 못했습니다",
+    "seat_room": "{{n}}번 방",
+    "seat_done": "{{name}}에 방을 배정했습니다",
+    "seat_taken": "{{name}}이(가) 이미 사용 중인 방입니다",
+    "seat_failed": "스쿼드를 배정하지 못했습니다"
   },
   "views": {
     "builtin": {
