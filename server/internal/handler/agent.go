@@ -130,6 +130,9 @@ type AgentResponse struct {
 	ServiceTier string `json:"service_tier"`
 	// OfficeRoom is the office room (department) this agent sits in.
 	OfficeRoom string `json:"office_room"`
+	// HomeSquadID is the squad whose office room this agent is drawn in. Null
+	// when the agent is unassigned. Always a live squad the agent belongs to.
+	HomeSquadID *string `json:"home_squad_id"`
 	// ComposioToolkitAllowlist is the subset of Composio toolkit slugs this
 	// agent is allowed to mount as MCP at task dispatch — for ANY run that
 	// passes the agent's invocation permission, using the agent OWNER's
@@ -244,6 +247,7 @@ func (h *Handler) agentToResponse(a db.Agent) AgentResponse {
 		ThinkingLevel:            a.ThinkingLevel.String,
 		ServiceTier:              a.ServiceTier.String,
 		OfficeRoom:               a.OfficeRoom,
+		HomeSquadID:              uuidToPtr(a.HomeSquadID),
 		ComposioToolkitAllowlist: composioAllowlist,
 		OwnerID:                  uuidToPtr(a.OwnerID),
 		Skills:                   []AgentSkillSummary{},
@@ -1814,6 +1818,10 @@ type UpdateAgentRequest struct {
 	// OfficeRoom moves the agent to another office room. It is always set to a
 	// known room: there is no clear, because every agent sits in some room.
 	OfficeRoom *string `json:"office_room"`
+	// HomeSquadID sets the squad this agent is drawn in on the office. It is a
+	// tri-state like thinking_level: omitted leaves it alone, null clears it, a
+	// squad id must name a live squad of the workspace the agent belongs to.
+	HomeSquadID *string `json:"home_squad_id"`
 	// ComposioToolkitAllowlist is a tri-state, same pattern as
 	// thinking_level, mcp_config:
 	//   - field omitted → no change (column preserved as-is)
@@ -2246,6 +2254,34 @@ func (h *Handler) UpdateAgent(w http.ResponseWriter, r *http.Request) {
 		}
 		params.OfficeRoom = pgtype.Text{String: *req.OfficeRoom, Valid: true}
 	}
+	// home_squad_id: validated here so a bad value fails the whole request
+	// before anything is written; applied after the main update below.
+	_, hasHomeSquad := rawFields["home_squad_id"]
+	var homeSquadUUID pgtype.UUID
+	if hasHomeSquad && req.HomeSquadID != nil {
+		homeSquadUUID, ok = parseUUIDOrBadRequest(w, *req.HomeSquadID, "home_squad_id")
+		if !ok {
+			return
+		}
+		homeSquad, err := h.Queries.GetSquadInWorkspace(r.Context(), db.GetSquadInWorkspaceParams{
+			ID: homeSquadUUID, WorkspaceID: existing.WorkspaceID,
+		})
+		if err != nil || homeSquad.ArchivedAt.Valid {
+			writeError(w, http.StatusBadRequest, "home_squad_id must be a live squad of this workspace")
+			return
+		}
+		isMember, err := h.Queries.IsSquadMember(r.Context(), db.IsSquadMemberParams{
+			SquadID: homeSquadUUID, MemberType: "agent", MemberID: existing.ID,
+		})
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "failed to validate home squad")
+			return
+		}
+		if !isMember {
+			writeError(w, http.StatusBadRequest, "home_squad_id must be a squad this agent belongs to")
+			return
+		}
+	}
 	if req.MaxConcurrentTasks != nil {
 		if err := validateAgentMaxConcurrentTasks(*req.MaxConcurrentTasks); err != nil {
 			writeError(w, http.StatusBadRequest, err.Error())
@@ -2536,6 +2572,24 @@ func (h *Handler) UpdateAgent(w http.ResponseWriter, r *http.Request) {
 		if err != nil {
 			slog.Warn("clear agent composio_toolkit_allowlist failed", append(logger.RequestAttrs(r), "error", err, "agent_id", id)...)
 			writeError(w, http.StatusInternalServerError, "failed to clear composio_toolkit_allowlist")
+			return
+		}
+	}
+
+	if hasHomeSquad {
+		updated, err = h.Queries.SetAgentHomeSquad(r.Context(), db.SetAgentHomeSquadParams{
+			ID:          updated.ID,
+			WorkspaceID: updated.WorkspaceID,
+			HomeSquadID: homeSquadUUID,
+		})
+		if errors.Is(err, pgx.ErrNoRows) {
+			// The squad membership was removed between validation and write.
+			writeError(w, http.StatusConflict, "home_squad_id must be a squad this agent belongs to")
+			return
+		}
+		if err != nil {
+			slog.Warn("set agent home squad failed", append(logger.RequestAttrs(r), "error", err, "agent_id", id)...)
+			writeError(w, http.StatusInternalServerError, "failed to set home squad")
 			return
 		}
 	}

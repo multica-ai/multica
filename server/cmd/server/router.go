@@ -2214,6 +2214,16 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 				})
 			})
 
+			// Digital company office: floors (owner/admin) and squad seats.
+			// Flat registrations on purpose: other office endpoints (digest,
+			// briefs) live under the same prefix, and a second r.Route on it
+			// would panic at startup.
+			r.Get("/api/office/floors", h.ListOfficeFloors)
+			r.Post("/api/office/floors", h.CreateOfficeFloor)
+			r.Put("/api/office/floors/{id}", h.UpdateOfficeFloor)
+			r.Delete("/api/office/floors/{id}", h.DeleteOfficeFloor)
+			r.Put("/api/office/seats", h.PutOfficeSeats)
+
 			// Squad leader evaluation (writes to activity_log)
 			r.Post("/api/issues/{id}/squad-evaluated", h.RecordSquadLeaderEvaluation)
 

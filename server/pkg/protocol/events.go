@@ -160,6 +160,12 @@ const (
 	EventSquadUpdated = "squad:updated"
 	EventSquadDeleted = "squad:deleted"
 
+	// Office floor events. Seat changes ride on squad:updated; these cover the
+	// floors themselves (create, rename/reorder, delete).
+	EventOfficeFloorCreated = "office_floor:created"
+	EventOfficeFloorUpdated = "office_floor:updated"
+	EventOfficeFloorDeleted = "office_floor:deleted"
+
 	// Daemon events
 	EventDaemonHeartbeat               = "daemon:heartbeat"
 	EventDaemonHeartbeatAck            = "daemon:heartbeat_ack"

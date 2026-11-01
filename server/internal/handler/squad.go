@@ -36,6 +36,10 @@ type SquadResponse struct {
 	ArchivedBy    *string                      `json:"archived_by"`
 	MemberCount   int                          `json:"member_count"`
 	MemberPreview []SquadMemberPreviewResponse `json:"member_preview"`
+	// FloorID and OfficeSlot are the squad's seat on the office, both null
+	// while the squad is unseated.
+	FloorID    *string `json:"floor_id"`
+	OfficeSlot *int16  `json:"office_slot"`
 }
 
 type SquadMemberPreviewResponse struct {
@@ -61,6 +65,11 @@ type SquadMemberResponse struct {
 // ── Converters ──────────────────────────────────────────────────────────────
 
 func (h *Handler) squadToResponse(s db.Squad) SquadResponse {
+	var officeSlot *int16
+	if s.OfficeSlot.Valid {
+		slot := s.OfficeSlot.Int16
+		officeSlot = &slot
+	}
 	return SquadResponse{
 		ID:            uuidToString(s.ID),
 		WorkspaceID:   uuidToString(s.WorkspaceID),
@@ -75,6 +84,8 @@ func (h *Handler) squadToResponse(s db.Squad) SquadResponse {
 		ArchivedAt:    timestampToPtr(s.ArchivedAt),
 		ArchivedBy:    uuidToPtr(s.ArchivedBy),
 		MemberPreview: []SquadMemberPreviewResponse{},
+		FloorID:       uuidToPtr(s.FloorID),
+		OfficeSlot:    officeSlot,
 	}
 }
 
@@ -239,6 +250,10 @@ func (h *Handler) CreateSquad(w http.ResponseWriter, r *http.Request) {
 		Description string  `json:"description"`
 		LeaderID    string  `json:"leader_id"`
 		AvatarURL   *string `json:"avatar_url"`
+		// FloorName names the floor this squad creates when every existing
+		// floor is full (a template names its own floor). It is ignored when
+		// the squad fits on an existing floor.
+		FloorName string `json:"floor_name"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid request body")
@@ -251,6 +266,15 @@ func (h *Handler) CreateSquad(w http.ResponseWriter, r *http.Request) {
 	if req.LeaderID == "" {
 		writeError(w, http.StatusBadRequest, "leader_id is required")
 		return
+	}
+	floorName := ""
+	if req.FloorName != "" {
+		var ok bool
+		floorName, ok = normalizeOfficeFloorName(req.FloorName)
+		if !ok {
+			writeError(w, http.StatusBadRequest, "floor_name must be 1 to 64 characters")
+			return
+		}
 	}
 
 	leaderUUID, ok := parseUUIDOrBadRequest(w, req.LeaderID, "leader_id")
@@ -287,7 +311,21 @@ func (h *Handler) CreateSquad(w http.ResponseWriter, r *http.Request) {
 		avatarURL = pgtype.Text{String: accepted, Valid: true}
 	}
 
-	squad, err := h.Queries.CreateSquad(r.Context(), db.CreateSquadParams{
+	// Create, seat and wire the leader in one transaction: the squad takes the
+	// lowest free office seat (a new floor when every floor is full), and the
+	// leader's first squad becomes its home squad.
+	tx, err := h.TxStarter.Begin(r.Context())
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to create squad")
+		return
+	}
+	defer tx.Rollback(r.Context())
+	qtx := h.Queries.WithTx(tx)
+	if err := qtx.LockOfficeLayout(r.Context(), wsUUID); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to create squad")
+		return
+	}
+	squad, err := qtx.CreateSquad(r.Context(), db.CreateSquadParams{
 		WorkspaceID: wsUUID,
 		Name:        req.Name,
 		Description: req.Description,
@@ -301,21 +339,60 @@ func (h *Handler) CreateSquad(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Auto-add leader as a member with role "leader".
-	h.Queries.AddSquadMember(r.Context(), db.AddSquadMemberParams{
+	if _, err := qtx.AddSquadMember(r.Context(), db.AddSquadMemberParams{
 		SquadID:    squad.ID,
 		MemberType: "agent",
 		MemberID:   leaderUUID,
 		Role:       "leader",
-	})
+	}); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to create squad")
+		return
+	}
+	var changedAgents []db.Agent
+	homed, err := claimHomeSquad(r.Context(), qtx, wsUUID, leaderUUID, squad.ID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to create squad")
+		return
+	}
+	if homed != nil {
+		changedAgents = append(changedAgents, *homed)
+	}
+
+	seat, err := pickOfficeAutoSeat(r.Context(), qtx, wsUUID, floorName)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to create squad")
+		return
+	}
+	if seat != nil {
+		squad, err = qtx.SetSquadSeat(r.Context(), db.SetSquadSeatParams{
+			ID:          squad.ID,
+			WorkspaceID: wsUUID,
+			FloorID:     seat.Floor.ID,
+			OfficeSlot:  pgtype.Int2{Int16: seat.Slot, Valid: true},
+		})
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "failed to create squad")
+			return
+		}
+	}
+	if err := tx.Commit(r.Context()); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to create squad")
+		return
+	}
 
 	resp, err := h.squadToResponseWithPreview(r.Context(), squad)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to load squad member preview")
 		return
 	}
-	h.publish(protocol.EventSquadCreated, workspaceID, "member", uuidToString(member.UserID), map[string]any{"squad": resp})
+	userID := uuidToString(member.UserID)
+	if seat != nil && seat.NewFloor {
+		h.publish(protocol.EventOfficeFloorCreated, workspaceID, "member", userID, map[string]any{"floor": officeFloorToResponse(seat.Floor)})
+	}
+	h.publishAgentsChanged(workspaceID, userID, changedAgents)
+	h.publish(protocol.EventSquadCreated, workspaceID, "member", userID, map[string]any{"squad": resp})
 	obsmetrics.RecordEvent(h.Analytics, h.Metrics, analytics.SquadCreated(
-		uuidToString(member.UserID),
+		userID,
 		workspaceID,
 		uuidToString(squad.ID),
 		1,
@@ -407,6 +484,7 @@ func (h *Handler) UpdateSquad(w http.ResponseWriter, r *http.Request) {
 	}
 
 	newLeaderRuntimeBound := true
+	var homedAgents []db.Agent
 	if req.LeaderID != nil {
 		lid, ok := parseUUIDOrBadRequest(w, *req.LeaderID, "leader_id")
 		if !ok {
@@ -443,6 +521,14 @@ func (h *Handler) UpdateSquad(w http.ResponseWriter, r *http.Request) {
 				writeError(w, http.StatusInternalServerError, "failed to update squad")
 				return
 			}
+			homed, err := claimHomeSquad(r.Context(), qtx, wsUUID, lid, squad.ID)
+			if err != nil {
+				writeError(w, http.StatusInternalServerError, "failed to update squad")
+				return
+			}
+			if homed != nil {
+				homedAgents = append(homedAgents, *homed)
+			}
 		}
 		params.LeaderID = lid
 		newLeaderRuntimeBound = newLeader.RuntimeID.Valid
@@ -471,6 +557,7 @@ func (h *Handler) UpdateSquad(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "failed to load squad member preview")
 		return
 	}
+	h.publishAgentsChanged(workspaceID, requestUserID(r), homedAgents)
 	h.publish(protocol.EventSquadUpdated, workspaceID, "member", requestUserID(r), map[string]any{"squad": resp})
 	for _, autopilot := range pausedAutopilots {
 		h.publish(protocol.EventAutopilotUpdated, workspaceID, "member", requestUserID(r), map[string]any{
@@ -525,14 +612,33 @@ func (h *Handler) DeleteSquad(w http.ResponseWriter, r *http.Request) {
 	userID := requestUserID(r)
 	userUUID, _ := parseUUIDOrBadRequest(w, userID, "user_id")
 
-	if _, err := h.Queries.ArchiveSquad(r.Context(), db.ArchiveSquadParams{
+	// Archiving frees the squad's office seat; agents homed here move to another
+	// squad they still belong to, or become unassigned.
+	tx, err := h.TxStarter.Begin(r.Context())
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to archive squad")
+		return
+	}
+	defer tx.Rollback(r.Context())
+	qtx := h.Queries.WithTx(tx)
+	if _, err := qtx.ArchiveSquad(r.Context(), db.ArchiveSquadParams{
 		ID:         squad.ID,
 		ArchivedBy: userUUID,
 	}); err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to archive squad")
 		return
 	}
+	rehomed, err := releaseHomeSquad(r.Context(), qtx, squad.WorkspaceID, squad.ID, pgtype.UUID{})
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to archive squad")
+		return
+	}
+	if err := tx.Commit(r.Context()); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to archive squad")
+		return
+	}
 
+	h.publishAgentsChanged(workspaceID, userID, rehomed)
 	h.publish(protocol.EventSquadDeleted, workspaceID, "member", userID, map[string]any{
 		"squad_id":  uuidToString(squad.ID),
 		"leader_id": uuidToString(squad.LeaderID),
@@ -832,7 +938,15 @@ func (h *Handler) AddSquadMember(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	sm, err := h.Queries.AddSquadMember(r.Context(), db.AddSquadMemberParams{
+	// An agent added to its first squad makes it its home squad (office desk).
+	tx, err := h.TxStarter.Begin(r.Context())
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to add squad member")
+		return
+	}
+	defer tx.Rollback(r.Context())
+	qtx := h.Queries.WithTx(tx)
+	sm, err := qtx.AddSquadMember(r.Context(), db.AddSquadMemberParams{
 		SquadID:    squad.ID,
 		MemberType: req.MemberType,
 		MemberID:   memberUUID,
@@ -846,7 +960,22 @@ func (h *Handler) AddSquadMember(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "failed to add squad member")
 		return
 	}
+	var homed *db.Agent
+	if req.MemberType == "agent" {
+		homed, err = claimHomeSquad(r.Context(), qtx, wsUUID, memberUUID, squad.ID)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "failed to add squad member")
+			return
+		}
+	}
+	if err := tx.Commit(r.Context()); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to add squad member")
+		return
+	}
 
+	if homed != nil {
+		h.publishAgentsChanged(workspaceID, requestUserID(r), []db.Agent{*homed})
+	}
 	writeJSON(w, http.StatusCreated, squadMemberToResponse(sm))
 	h.publish(protocol.EventSquadUpdated, workspaceID, "member", requestUserID(r), map[string]any{
 		"squad_id": uuidToString(squad.ID),
@@ -889,7 +1018,16 @@ func (h *Handler) RemoveSquadMember(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	rows, err := h.Queries.RemoveSquadMember(r.Context(), db.RemoveSquadMemberParams{
+	// Removing an agent from its home squad moves its home to another squad it
+	// still belongs to, or clears it.
+	tx, err := h.TxStarter.Begin(r.Context())
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to remove squad member")
+		return
+	}
+	defer tx.Rollback(r.Context())
+	qtx := h.Queries.WithTx(tx)
+	rows, err := qtx.RemoveSquadMember(r.Context(), db.RemoveSquadMemberParams{
 		SquadID:    squad.ID,
 		MemberType: req.MemberType,
 		MemberID:   memberUUID,
@@ -902,7 +1040,20 @@ func (h *Handler) RemoveSquadMember(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusNotFound, "squad member not found")
 		return
 	}
+	var rehomed []db.Agent
+	if req.MemberType == "agent" {
+		rehomed, err = releaseHomeSquad(r.Context(), qtx, squad.WorkspaceID, squad.ID, memberUUID)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "failed to remove squad member")
+			return
+		}
+	}
+	if err := tx.Commit(r.Context()); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to remove squad member")
+		return
+	}
 
+	h.publishAgentsChanged(workspaceID, requestUserID(r), rehomed)
 	h.publish(protocol.EventSquadUpdated, workspaceID, "member", requestUserID(r), map[string]any{
 		"squad_id": uuidToString(squad.ID),
 	})
