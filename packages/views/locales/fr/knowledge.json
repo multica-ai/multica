@@ -1,0 +1,78 @@
+{
+  "title": "Connaissances",
+  "tabs": {
+    "library": "Bibliothèque",
+    "drafts": "Brouillons"
+  },
+  "state": {
+    "ready": "Prête",
+    "provisioning": "Configuration",
+    "offline": "Hors ligne",
+    "failed": "Échec de la configuration",
+    "disabled": "Non activée",
+    "unknown": "Inconnu"
+  },
+  "not_offered": {
+    "title": "Ce serveur ne propose pas les connaissances"
+  },
+  "disabled": {
+    "title": "Les connaissances ne sont pas activées",
+    "description": "Demandez à un propriétaire ou à un administrateur de les activer."
+  },
+  "enable": "Activer les connaissances",
+  "retry": "Réessayer la configuration",
+  "provisioning": {
+    "title": "Configuration des connaissances"
+  },
+  "failed": {
+    "title": "La configuration des connaissances n'a pas abouti"
+  },
+  "offline": {
+    "title": "Le service de connaissances est hors ligne",
+    "description": "Les agents continuent sans les connaissances de l'entreprise jusqu'à son retour."
+  },
+  "kb": {
+    "all": "Toutes",
+    "empty": "Aucune base de connaissances"
+  },
+  "documents": {
+    "filter": {
+      "all": "Tous",
+      "published": "Publiés",
+      "failed": "En échec"
+    },
+    "empty": "Aucun document"
+  },
+  "search": {
+    "label": "Rechercher dans les connaissances",
+    "placeholder": "Rechercher dans les connaissances",
+    "submit": "Rechercher",
+    "results": "Résultats",
+    "no_results": "Aucun résultat",
+    "score": "Score {{score}}",
+    "source": "Source"
+  },
+  "drafts": {
+    "empty": "Aucun brouillon",
+    "publish": "Publier",
+    "discard": "Supprimer",
+    "author": {
+      "agent": "Agent",
+      "member": "Membre",
+      "system": "Système"
+    },
+    "error": "Erreur"
+  },
+  "discard_title": "Supprimer le brouillon ?",
+  "discard_description": "Le brouillon est supprimé et ne peut pas être récupéré.",
+  "cancel": "Annuler",
+  "open_in_weknora": "Ouvrir dans WeKnora",
+  "toast": {
+    "enabled": "Les connaissances sont activées",
+    "enable_failed": "Impossible d'activer les connaissances",
+    "published": "Brouillon publié",
+    "publish_failed": "Impossible de publier le brouillon",
+    "discarded": "Brouillon supprimé",
+    "discard_failed": "Impossible de supprimer le brouillon"
+  }
+}

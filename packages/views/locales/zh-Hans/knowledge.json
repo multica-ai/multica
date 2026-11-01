@@ -1,0 +1,78 @@
+{
+  "title": "知识库",
+  "tabs": {
+    "library": "资料",
+    "drafts": "草稿"
+  },
+  "state": {
+    "ready": "就绪",
+    "provisioning": "设置中",
+    "offline": "离线",
+    "failed": "设置失败",
+    "disabled": "未启用",
+    "unknown": "未知"
+  },
+  "not_offered": {
+    "title": "此服务器未提供知识库"
+  },
+  "disabled": {
+    "title": "知识库未启用",
+    "description": "请工作区的所有者或管理员启用。"
+  },
+  "enable": "启用知识库",
+  "retry": "重试设置",
+  "provisioning": {
+    "title": "正在设置知识库"
+  },
+  "failed": {
+    "title": "知识库设置未完成"
+  },
+  "offline": {
+    "title": "知识服务离线",
+    "description": "服务恢复前，智能体将在没有公司知识的情况下继续工作。"
+  },
+  "kb": {
+    "all": "全部",
+    "empty": "没有知识库"
+  },
+  "documents": {
+    "filter": {
+      "all": "全部",
+      "published": "已发布",
+      "failed": "失败"
+    },
+    "empty": "没有文档"
+  },
+  "search": {
+    "label": "搜索公司知识",
+    "placeholder": "搜索公司知识",
+    "submit": "搜索",
+    "results": "搜索结果",
+    "no_results": "没有匹配结果",
+    "score": "相关度 {{score}}",
+    "source": "来源"
+  },
+  "drafts": {
+    "empty": "没有草稿",
+    "publish": "发布",
+    "discard": "丢弃",
+    "author": {
+      "agent": "智能体",
+      "member": "成员",
+      "system": "系统"
+    },
+    "error": "错误"
+  },
+  "discard_title": "丢弃草稿？",
+  "discard_description": "草稿将被删除，无法恢复。",
+  "cancel": "取消",
+  "open_in_weknora": "在 WeKnora 中打开",
+  "toast": {
+    "enabled": "已启用知识库",
+    "enable_failed": "无法启用知识库",
+    "published": "草稿已发布",
+    "publish_failed": "无法发布草稿",
+    "discarded": "草稿已丢弃",
+    "discard_failed": "无法丢弃草稿"
+  }
+}

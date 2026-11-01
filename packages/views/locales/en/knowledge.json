@@ -1,0 +1,78 @@
+{
+  "title": "Knowledge",
+  "tabs": {
+    "library": "Library",
+    "drafts": "Drafts"
+  },
+  "state": {
+    "ready": "Ready",
+    "provisioning": "Setting up",
+    "offline": "Offline",
+    "failed": "Setup failed",
+    "disabled": "Not enabled",
+    "unknown": "Unknown"
+  },
+  "not_offered": {
+    "title": "Knowledge is not offered on this server"
+  },
+  "disabled": {
+    "title": "Knowledge is not enabled",
+    "description": "Ask an owner or admin to enable it."
+  },
+  "enable": "Enable knowledge",
+  "retry": "Retry setup",
+  "provisioning": {
+    "title": "Setting up knowledge"
+  },
+  "failed": {
+    "title": "Knowledge setup did not finish"
+  },
+  "offline": {
+    "title": "The knowledge service is offline",
+    "description": "Agents keep working without company knowledge until it is back."
+  },
+  "kb": {
+    "all": "All",
+    "empty": "No knowledge bases"
+  },
+  "documents": {
+    "filter": {
+      "all": "All",
+      "published": "Published",
+      "failed": "Failed"
+    },
+    "empty": "No documents"
+  },
+  "search": {
+    "label": "Search company knowledge",
+    "placeholder": "Search company knowledge",
+    "submit": "Search",
+    "results": "Results",
+    "no_results": "No matches",
+    "score": "Score {{score}}",
+    "source": "Source"
+  },
+  "drafts": {
+    "empty": "No drafts",
+    "publish": "Publish",
+    "discard": "Discard",
+    "author": {
+      "agent": "Agent",
+      "member": "Member",
+      "system": "System"
+    },
+    "error": "Error"
+  },
+  "discard_title": "Discard draft?",
+  "discard_description": "The draft is deleted and cannot be recovered.",
+  "cancel": "Cancel",
+  "open_in_weknora": "Open in WeKnora",
+  "toast": {
+    "enabled": "Knowledge is enabled",
+    "enable_failed": "Could not enable knowledge",
+    "published": "Draft published",
+    "publish_failed": "Could not publish the draft",
+    "discarded": "Draft discarded",
+    "discard_failed": "Could not discard the draft"
+  }
+}
