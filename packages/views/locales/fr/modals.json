@@ -275,6 +275,10 @@
         "name": "SDLC · Nouveau produit",
         "description": "Mène une demande de l'idée à un produit vérifié : brief, PRD, UX, architecture, build en file d'attente et rapport final."
       },
+      "market_research": {
+        "name": "Étude de marché",
+        "description": "Scanne chaque semaine les marchés et les concurrents, fait challenger les preuves par le critique et ne soumet au patron que les propositions qu'elles soutiennent."
+      },
       "sdlc_maintenance": {
         "name": "SDLC · Produit existant",
         "description": "Trie un bug, une fonctionnalité, une optimisation ou une mise à niveau, l'oriente vers les bons agents, la vérifie et rend compte."

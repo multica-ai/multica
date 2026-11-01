@@ -275,6 +275,10 @@
         "name": "SDLC · New product",
         "description": "Takes a request from idea to a verified product: brief, PRD, UX, architecture, a queued build, and a final report."
       },
+      "market_research": {
+        "name": "Market research",
+        "description": "Scans markets and competitors each week, has the critic challenge the evidence, and brings the boss only the proposals it supports."
+      },
       "sdlc_maintenance": {
         "name": "SDLC · Existing product",
         "description": "Triages a bug, feature, optimization, or upgrade, routes it to the right agents, verifies it, and reports."

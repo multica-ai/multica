@@ -1,11 +1,16 @@
 import { AGENT_INSTRUCTION_TEMPLATES } from "../agents/instruction-templates";
 import type {
   Agent,
+  Autopilot,
+  AutopilotTrigger,
   CreateAgentRequest,
+  CreateAutopilotRequest,
+  CreateAutopilotTriggerRequest,
   IssueWorkflow,
   IssueWorkflowHandler,
   IssueWorkflowStepInput,
   IssueWorkflowWriteRequest,
+  ListAutopilotsResponse,
   ListIssueWorkflowsResponse,
   Squad,
   SquadMember,
@@ -13,6 +18,7 @@ import type {
 import {
   SQUAD_ROLES,
   type SquadRoleKey,
+  type SquadRoutineTemplate,
   type SquadTemplate,
   type SquadWorkflowStep,
 } from "./templates";
@@ -26,6 +32,7 @@ export interface SquadQuickstartClient {
     name: string;
     description?: string;
     leader_id: string;
+    floor_name?: string;
   }): Promise<Squad>;
   updateSquad(id: string, data: { instructions?: string }): Promise<Squad>;
   addSquadMember(
@@ -34,6 +41,12 @@ export interface SquadQuickstartClient {
   ): Promise<SquadMember>;
   listIssueWorkflows(): Promise<ListIssueWorkflowsResponse>;
   createIssueWorkflow(data: IssueWorkflowWriteRequest): Promise<IssueWorkflow>;
+  listAutopilots(params?: { status?: string }): Promise<ListAutopilotsResponse>;
+  createAutopilot(data: CreateAutopilotRequest): Promise<Autopilot>;
+  createAutopilotTrigger(
+    autopilotId: string,
+    data: CreateAutopilotTriggerRequest,
+  ): Promise<AutopilotTrigger>;
 }
 
 export type QuickstartAgentStatus = "created" | "reused" | "failed";
@@ -61,12 +74,20 @@ export interface QuickstartOutcome {
     note?: "qa_step_left_out";
     error?: string;
   };
+  routine: {
+    /** "existing": the squad already has an autopilot with the routine's name, left as it is. */
+    status: "created" | "existing" | "skipped" | "failed";
+    /** A routine created without its schedule reports that here; add the schedule on the autopilot. */
+    error?: string;
+  };
 }
 
 export interface QuickstartOptions {
   runtimeId: string;
   /** Also create the template's workflow when the workspace has none by that name. */
   createWorkflow: boolean;
+  /** IANA timezone for the routine's schedule. Defaults to the browser's; the server uses UTC when none is sent. */
+  timezone?: string;
 }
 
 function errorMessage(err: unknown): string {
@@ -80,6 +101,15 @@ function errorCode(err: unknown): string | undefined {
     return typeof code === "string" ? code : undefined;
   }
   return undefined;
+}
+
+/** The browser's IANA timezone, or undefined when the runtime cannot tell. */
+function browserTimezone(): string | undefined {
+  try {
+    return Intl.DateTimeFormat().resolvedOptions().timeZone || undefined;
+  } catch {
+    return undefined;
+  }
 }
 
 function instructionsFor(role: SquadRoleKey): string {
@@ -132,10 +162,47 @@ function workflowSteps(
 }
 
 /**
+ * Creates the routine's autopilot for the squad, assigned to the squad so each
+ * run opens an issue for its leader, and its weekly schedule. A squad that
+ * already has an autopilot with the routine's name keeps it as it is.
+ */
+async function ensureRoutine(
+  client: SquadQuickstartClient,
+  squadId: string,
+  routine: SquadRoutineTemplate,
+  timezone: string | undefined,
+): Promise<QuickstartOutcome["routine"]> {
+  const { autopilots } = await client.listAutopilots();
+  const exists = autopilots.some(
+    (a) => a.assignee_type === "squad" && a.assignee_id === squadId && a.title === routine.title,
+  );
+  if (exists) return { status: "existing" };
+
+  const autopilot = await client.createAutopilot({
+    title: routine.title,
+    description: routine.description,
+    assignee_type: "squad",
+    assignee_id: squadId,
+    execution_mode: "create_issue",
+    issue_title_template: routine.issueTitleTemplate,
+  });
+  try {
+    await client.createAutopilotTrigger(autopilot.id, {
+      kind: "schedule",
+      cron_expression: routine.cron,
+      ...(timezone ? { timezone } : {}),
+    });
+  } catch (err) {
+    return { status: "failed", error: `schedule: ${errorMessage(err)}` };
+  }
+  return { status: "created" };
+}
+
+/**
  * Creates the agents a squad template needs (reusing agents that already have
  * the template's names), the squad with its instructions and roster, and
- * optionally its workflow. It never edits something that already exists, so
- * running it again after a partial failure finishes the job.
+ * optionally its workflow and routine. It never edits something that already
+ * exists, so running it again after a partial failure finishes the job.
  */
 export async function runSquadQuickstart(
   client: SquadQuickstartClient,
@@ -147,6 +214,7 @@ export async function runSquadQuickstart(
     agents: [],
     squad: { id: null, status: "failed" },
     workflow: { status: "skipped" },
+    routine: { status: "skipped" },
   };
   const report = () => onProgress?.(structuredClone(outcome));
 
@@ -186,7 +254,7 @@ export async function runSquadQuickstart(
     report();
   }
 
-  const leaderId = agentIds.lead;
+  const leaderId = agentIds[template.leader];
   if (!leaderId) {
     outcome.squad = {
       id: null,
@@ -207,6 +275,7 @@ export async function runSquadQuickstart(
         name: template.name,
         description: template.description,
         leader_id: leaderId,
+        ...(template.floorName ? { floor_name: template.floorName } : {}),
       });
       outcome.squad = { id: squad.id, status: "created" };
       const failures: string[] = [];
@@ -217,7 +286,7 @@ export async function runSquadQuickstart(
       }
       for (const role of template.roles) {
         const memberId = agentIds[role];
-        if (role === "lead" || !memberId) continue;
+        if (role === template.leader || !memberId) continue;
         try {
           await client.addSquadMember(squad.id, {
             member_type: "agent",
@@ -263,6 +332,20 @@ export async function runSquadQuickstart(
       }
     } catch (err) {
       outcome.workflow = { status: "failed", error: errorMessage(err) };
+    }
+    report();
+  }
+
+  if (template.routine && outcome.squad.id) {
+    try {
+      outcome.routine = await ensureRoutine(
+        client,
+        outcome.squad.id,
+        template.routine,
+        options.timezone ?? browserTimezone(),
+      );
+    } catch (err) {
+      outcome.routine = { status: "failed", error: errorMessage(err) };
     }
     report();
   }
