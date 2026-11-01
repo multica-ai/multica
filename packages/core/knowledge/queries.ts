@@ -4,6 +4,7 @@ import type { ListKnowledgeDocumentsParams, SearchKnowledgeParams } from "./type
 
 export const knowledgeKeys = {
   all: (wsId: string) => ["knowledge", wsId] as const,
+  status: (wsId: string) => [...knowledgeKeys.all(wsId), "status"] as const,
   bases: (wsId: string) => [...knowledgeKeys.all(wsId), "bases"] as const,
   documents: (wsId: string) => [...knowledgeKeys.all(wsId), "documents"] as const,
   /** Full key for a filtered listing; the unfiltered one shares the prefix. */
@@ -12,6 +13,14 @@ export const knowledgeKeys = {
   search: (wsId: string, params: SearchKnowledgeParams) =>
     [...knowledgeKeys.all(wsId), "search", params.kb ?? "", params.limit ?? 0, params.q] as const,
 };
+
+/** Owners and admins only: the state with the knowledge service's web UI link. */
+export function knowledgeStatusOptions(wsId: string) {
+  return queryOptions({
+    queryKey: knowledgeKeys.status(wsId),
+    queryFn: () => api.getKnowledgeStatus(),
+  });
+}
 
 /** The knowledge bases a member may use, and the workspace's knowledge state. */
 export function knowledgeBasesOptions(wsId: string) {

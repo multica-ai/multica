@@ -25,6 +25,7 @@ describe("spaceForPath", () => {
     [ws.memberDetail("m-1"), "team"],
     [ws.runtimeDetail("r-1"), "team"],
     [ws.skills(), "team"],
+    [ws.knowledge(), "team"],
     [ws.usage(), "team"],
     [ws.chatSession("c-1"), "chat"],
     [ws.autopilotDetail("ap-1"), "autopilots"],

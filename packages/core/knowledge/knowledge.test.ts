@@ -3,16 +3,18 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { ApiClient, ApiError } from "../api/client";
 import { parseWithFallback } from "../api/schema";
 import { knowledgeErrorState } from "./errors";
-import { knowledgeKeys, knowledgeSearchOptions } from "./queries";
+import { knowledgeKeys, knowledgeSearchOptions, knowledgeStatusOptions } from "./queries";
 import {
   FALLBACK_KNOWLEDGE_BASES,
   FALLBACK_KNOWLEDGE_DOCUMENT,
   FALLBACK_KNOWLEDGE_DOCUMENT_LIST,
   FALLBACK_KNOWLEDGE_SEARCH,
+  FALLBACK_KNOWLEDGE_STATUS,
   KnowledgeBasesSchema,
   KnowledgeDocumentListSchema,
   KnowledgeDocumentSchema,
   KnowledgeSearchResultSchema,
+  KnowledgeStatusSchema,
 } from "./schemas";
 import type { KnowledgeBases, KnowledgeDocument, KnowledgeDocumentList, KnowledgeSearchResult } from "./types";
 
@@ -134,6 +136,43 @@ describe("knowledge schemas", () => {
   });
 });
 
+describe("knowledge status schema", () => {
+  it("parses the owner view with the web UI link", () => {
+    expect(
+      parseWithFallback(
+        {
+          offered: true,
+          enabled: true,
+          state: "ready",
+          knowledge_bases: [{ id: "b1", key: "company", name: "Company", visibility: "workspace", position: 0 }],
+          ui_url: "https://kb.example.test",
+        },
+        KnowledgeStatusSchema,
+        FALLBACK_KNOWLEDGE_STATUS,
+        { endpoint: "t" },
+      ),
+    ).toMatchObject({ offered: true, state: "ready", ui_url: "https://kb.example.test" });
+  });
+
+  it("reads a not-offered deployment as unoffered with an unknown state left unknown", () => {
+    expect(
+      parseWithFallback(
+        { offered: false, reason: "not_configured", state: "rocket" },
+        KnowledgeStatusSchema,
+        FALLBACK_KNOWLEDGE_STATUS,
+        { endpoint: "t" },
+      ),
+    ).toMatchObject({ offered: false, reason: "not_configured", state: "unknown", knowledge_bases: [], ui_url: "" });
+  });
+
+  it("falls back to the unoffered status for a malformed response", () => {
+    expect(
+      parseWithFallback(["not", "a", "status"], KnowledgeStatusSchema, FALLBACK_KNOWLEDGE_STATUS, { endpoint: "t" }),
+    ).toEqual(FALLBACK_KNOWLEDGE_STATUS);
+    expect(FALLBACK_KNOWLEDGE_STATUS).toMatchObject({ offered: false, state: "unknown" });
+  });
+});
+
 describe("knowledge api client", () => {
   const client = () => new ApiClient("http://api.test");
 
@@ -187,6 +226,19 @@ describe("knowledge api client", () => {
     expect((fetchMock.mock.calls[0]![1] as RequestInit).method).toBe("DELETE");
   });
 
+  it("reads the status and enables knowledge with a POST", async () => {
+    let fetchMock = respond({ offered: true, enabled: false, state: "disabled", ui_url: "" });
+    const status = await client().getKnowledgeStatus();
+    expect(String(fetchMock.mock.calls[0]![0])).toBe("http://api.test/api/knowledge");
+    expect(status).toMatchObject({ offered: true, state: "disabled" });
+
+    fetchMock = respond({ offered: true, enabled: true, state: "ready", ui_url: "https://kb.example.test" });
+    const enabled = await client().enableKnowledge();
+    expect(String(fetchMock.mock.calls[0]![0])).toBe("http://api.test/api/knowledge/enable");
+    expect((fetchMock.mock.calls[0]![1] as RequestInit).method).toBe("POST");
+    expect(enabled).toMatchObject({ state: "ready", ui_url: "https://kb.example.test" });
+  });
+
   it("surfaces the offline state of a failed write", async () => {
     respond({ error: "the knowledge service is offline", state: "offline" }, 503);
     const error = await client()
@@ -235,6 +287,11 @@ describe("knowledge query keys", () => {
   it("keys searches by query, base and limit", () => {
     expect(knowledgeKeys.search("ws1", { q: "a" })).not.toEqual(knowledgeKeys.search("ws1", { q: "b" }));
     expect(knowledgeKeys.search("ws1", { q: "a", kb: "x" })).not.toEqual(knowledgeKeys.search("ws1", { q: "a" }));
+  });
+
+  it("scopes the status key to the workspace", () => {
+    expect(knowledgeKeys.status("ws1")).toEqual(["knowledge", "ws1", "status"]);
+    expect(knowledgeStatusOptions("ws1").queryKey).toEqual(knowledgeKeys.status("ws1"));
   });
 
   it("does not search for a blank query", () => {

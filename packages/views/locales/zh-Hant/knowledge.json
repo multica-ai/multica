@@ -1,0 +1,82 @@
+{
+  "title": "知識庫",
+  "tabs": {
+    "library": "資料",
+    "drafts": "草稿"
+  },
+  "state": {
+    "ready": "就緒",
+    "provisioning": "設定中",
+    "offline": "離線",
+    "failed": "設定失敗",
+    "disabled": "未啟用",
+    "unknown": "未知"
+  },
+  "not_offered": {
+    "title": "此伺服器未提供知識庫"
+  },
+  "disabled": {
+    "title": "知識庫未啟用",
+    "description": "請工作區的擁有者或管理員啟用。"
+  },
+  "enable": "啟用知識庫",
+  "retry": "重試設定",
+  "provisioning": {
+    "title": "正在設定知識庫"
+  },
+  "failed": {
+    "title": "知識庫設定未完成"
+  },
+  "offline": {
+    "title": "知識服務離線",
+    "description": "服務恢復前，智慧體將在沒有公司知識的情況下繼續工作。"
+  },
+  "kb": {
+    "all": "全部"
+  },
+  "documents": {
+    "filter": {
+      "all": "全部",
+      "published": "已發布",
+      "failed": "失敗",
+      "draft": "草稿"
+    },
+    "empty": "沒有文件"
+  },
+  "search": {
+    "label": "搜尋公司知識",
+    "placeholder": "搜尋公司知識",
+    "submit": "搜尋",
+    "results": "搜尋結果",
+    "no_results": "沒有符合的結果",
+    "score": "相關度 {{score}}",
+    "source": "來源",
+    "error": "搜尋失敗"
+  },
+  "drafts": {
+    "empty": "沒有草稿",
+    "publish": "發布",
+    "discard": "捨棄",
+    "author": {
+      "agent": "智慧體",
+      "member": "成員",
+      "system": "系統"
+    }
+  },
+  "discard_title": "捨棄草稿？",
+  "discard_description": "草稿將被刪除，無法復原。",
+  "cancel": "取消",
+  "open_in_weknora": "在 WeKnora 中開啟",
+  "toast": {
+    "enabled": "已啟用知識庫",
+    "enable_failed": "無法啟用知識庫",
+    "published": "草稿已發布",
+    "publish_failed": "無法發布草稿",
+    "discarded": "草稿已捨棄",
+    "discard_failed": "無法捨棄草稿"
+  },
+  "load_error": {
+    "title": "無法載入知識庫",
+    "retry": "重試"
+  }
+}

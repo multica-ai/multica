@@ -300,10 +300,12 @@ import {
   FALLBACK_KNOWLEDGE_DOCUMENT,
   FALLBACK_KNOWLEDGE_DOCUMENT_LIST,
   FALLBACK_KNOWLEDGE_SEARCH,
+  FALLBACK_KNOWLEDGE_STATUS,
   KnowledgeBasesSchema,
   KnowledgeDocumentListSchema,
   KnowledgeDocumentSchema,
   KnowledgeSearchResultSchema,
+  KnowledgeStatusSchema,
 } from "../knowledge/schemas";
 import type {
   CreateKnowledgeDocumentRequest,
@@ -311,6 +313,7 @@ import type {
   KnowledgeDocument,
   KnowledgeDocumentList,
   KnowledgeSearchResult,
+  KnowledgeStatus,
   ListKnowledgeDocumentsParams,
   SearchKnowledgeParams,
 } from "../knowledge/types";
@@ -5694,8 +5697,23 @@ export class ApiClient {
     });
   }
 
-  // Company knowledge. Reads and searches are open to members; writes land as
-  // drafts until an owner or admin publishes them.
+  // Company knowledge. Status and enabling are for owners and admins; reads and
+  // searches are open to members; writes land as drafts until an owner or
+  // admin publishes them.
+  async getKnowledgeStatus(): Promise<KnowledgeStatus> {
+    const raw = await this.fetch<unknown>("/api/knowledge");
+    return parseWithFallback(raw, KnowledgeStatusSchema, FALLBACK_KNOWLEDGE_STATUS, {
+      endpoint: "GET /api/knowledge",
+    });
+  }
+
+  async enableKnowledge(): Promise<KnowledgeStatus> {
+    const raw = await this.fetch<unknown>("/api/knowledge/enable", { method: "POST" });
+    return parseWithFallback(raw, KnowledgeStatusSchema, FALLBACK_KNOWLEDGE_STATUS, {
+      endpoint: "POST /api/knowledge/enable",
+    });
+  }
+
   async listKnowledgeBases(): Promise<KnowledgeBases> {
     const raw = await this.fetch<unknown>("/api/knowledge/bases");
     return parseWithFallback(raw, KnowledgeBasesSchema, FALLBACK_KNOWLEDGE_BASES, {

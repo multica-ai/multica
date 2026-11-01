@@ -1,0 +1,82 @@
+{
+  "title": "ナレッジ",
+  "tabs": {
+    "library": "ライブラリ",
+    "drafts": "下書き"
+  },
+  "state": {
+    "ready": "利用可能",
+    "provisioning": "設定中",
+    "offline": "オフライン",
+    "failed": "設定に失敗",
+    "disabled": "未有効",
+    "unknown": "不明"
+  },
+  "not_offered": {
+    "title": "このサーバーではナレッジを利用できません"
+  },
+  "disabled": {
+    "title": "ナレッジは有効になっていません",
+    "description": "オーナーまたは管理者に有効化を依頼してください。"
+  },
+  "enable": "ナレッジを有効にする",
+  "retry": "設定を再試行",
+  "provisioning": {
+    "title": "ナレッジを設定しています"
+  },
+  "failed": {
+    "title": "ナレッジの設定が完了しませんでした"
+  },
+  "offline": {
+    "title": "ナレッジサービスがオフラインです",
+    "description": "復旧するまで、エージェントは会社のナレッジなしで動作を続けます。"
+  },
+  "kb": {
+    "all": "すべて"
+  },
+  "documents": {
+    "filter": {
+      "all": "すべて",
+      "published": "公開済み",
+      "failed": "失敗",
+      "draft": "下書き"
+    },
+    "empty": "ドキュメントがありません"
+  },
+  "search": {
+    "label": "会社のナレッジを検索",
+    "placeholder": "会社のナレッジを検索",
+    "submit": "検索",
+    "results": "検索結果",
+    "no_results": "一致する結果がありません",
+    "score": "スコア {{score}}",
+    "source": "出典",
+    "error": "検索に失敗しました"
+  },
+  "drafts": {
+    "empty": "下書きはありません",
+    "publish": "公開",
+    "discard": "破棄",
+    "author": {
+      "agent": "エージェント",
+      "member": "メンバー",
+      "system": "システム"
+    }
+  },
+  "discard_title": "下書きを破棄しますか？",
+  "discard_description": "下書きは削除され、元に戻せません。",
+  "cancel": "キャンセル",
+  "open_in_weknora": "WeKnora で開く",
+  "toast": {
+    "enabled": "ナレッジを有効にしました",
+    "enable_failed": "ナレッジを有効にできませんでした",
+    "published": "下書きを公開しました",
+    "publish_failed": "下書きを公開できませんでした",
+    "discarded": "下書きを破棄しました",
+    "discard_failed": "下書きを破棄できませんでした"
+  },
+  "load_error": {
+    "title": "ナレッジを読み込めませんでした",
+    "retry": "再試行"
+  }
+}

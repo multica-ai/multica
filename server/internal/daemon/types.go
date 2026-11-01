@@ -93,6 +93,11 @@ type Task struct {
 	// the local MCP server presents to the agent as tools. Resolved by the
 	// server at claim time; the daemon never reads plugin state itself.
 	PluginHookTools []PluginHookTool `json:"plugin_hook_tools,omitempty"`
+	// KnowledgeContext are the company knowledge passages the server retrieved
+	// for this issue run. Rendered per run as "Possibly relevant company
+	// knowledge"; the daemon never queries the knowledge base itself. Mirror of
+	// the server's knowledge_context on the claim response.
+	KnowledgeContext []KnowledgeHit `json:"knowledge_context,omitempty"`
 	// WorkspaceContext mirrors workspace.context (the per-workspace system
 	// prompt set in Settings → General). Server populates this on every claim
 	// regardless of task kind so the daemon can inject `## Workspace Context`
@@ -337,6 +342,17 @@ type TaskResult struct {
 // Mirrors service.PluginHookTool on the wire. Declared here rather than
 // imported so the daemon does not depend on the server's service package —
 // same reason Task itself is a daemon-side type.
+// KnowledgeHit is one company knowledge passage retrieved for an issue run.
+// Mirror of the server's knowledge_context items.
+type KnowledgeHit struct {
+	DocumentID    string  `json:"document_id"`
+	KnowledgeBase string  `json:"knowledge_base"`
+	Title         string  `json:"title"`
+	Content       string  `json:"content"`
+	Source        string  `json:"source"`
+	Score         float64 `json:"score"`
+}
+
 type PluginHookTool struct {
 	InstallationID string          `json:"installation_id"`
 	HookKey        string          `json:"hook_key"`
