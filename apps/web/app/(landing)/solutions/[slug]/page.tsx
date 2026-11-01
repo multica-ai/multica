@@ -1,7 +1,7 @@
 import type { Metadata } from "next";
 import { notFound } from "next/navigation";
 import { PlaceholderPage } from "@/features/landing/site/site-page";
-import { SOLUTION_GROUPS, findPage, solutionHref } from "@/features/landing/site/sitemap";
+import { SOLUTION_GROUPS, findPage, solutionHref, liveMetadata, requireLiveRoute } from "@/features/landing/site/sitemap";
 
 type Params = { slug: string };
 
@@ -15,12 +15,12 @@ export async function generateMetadata(props: { params: Promise<Params> }): Prom
   const { slug } = await props.params;
   const page = findPage(SOLUTION_GROUPS, slug);
   if (!page) return {};
-  return {
+  return liveMetadata(solutionHref(page.slug), {
     title: page.title,
     description: page.summary,
     alternates: { canonical: solutionHref(page.slug) },
     robots: { index: false, follow: true },
-  };
+  });
 }
 
 export default async function Page(props: { params: Promise<Params> }) {
@@ -28,5 +28,6 @@ export default async function Page(props: { params: Promise<Params> }) {
   const group = SOLUTION_GROUPS.find((g) => g.pages.some((page) => page.slug === slug));
   const page = findPage(SOLUTION_GROUPS, slug);
   if (!group || !page) notFound();
+  requireLiveRoute(solutionHref(page.slug));
   return <PlaceholderPage eyebrow={group.title} page={page} />;
 }

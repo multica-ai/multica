@@ -1,14 +1,15 @@
 import type { Metadata } from "next";
 import { DirectoryPage } from "@/features/landing/site/site-page";
-import { PRODUCT_GROUPS, productHref } from "@/features/landing/site/sitemap";
+import { PRODUCT_GROUPS, productHref, liveMetadata, requireLiveRoute } from "@/features/landing/site/sitemap";
 
-export const metadata: Metadata = {
+export const metadata: Metadata = liveMetadata("/product", {
   title: "Product",
   alternates: { canonical: "/product" },
   robots: { index: false, follow: true },
-};
+});
 
 export default function Page() {
+  requireLiveRoute("/product");
   return (
     <DirectoryPage
       title="Product"

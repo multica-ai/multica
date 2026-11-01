@@ -13,14 +13,16 @@ import { GitHubMark, githubUrl } from "../components/shared";
 import { HERO_PROVIDERS } from "../components/provider-marks";
 import { BrandWordmark } from "./brand-logo";
 import { ActionLink, SiteTextLink, focusRing } from "./primitives";
-import { TOP_LINKS, buildMenus, type SiteLink, type SiteLinkGroup, type SiteMenu, type SiteMenuId } from "./sitemap";
+import { buildMenus, buildTopLinks, isLiveRoute, type SiteLink, type SiteLinkGroup, type SiteMenu, type SiteMenuId } from "./sitemap";
 
 const HOVER_OPEN_DELAY = 60;
 const HOVER_CLOSE_DELAY = 140;
 
 export function SiteHeader() {
-  const { locale } = useLocale();
-  const menus = useMemo(() => buildMenus(docsHrefForLocale(locale)), [locale]);
+  const { locale, t } = useLocale();
+  const labels = t.site.header;
+  const menus = useMemo(() => buildMenus(docsHrefForLocale(locale), t.site.nav), [locale, t]);
+  const topLinks = useMemo(() => buildTopLinks(docsHrefForLocale(locale), t.site.nav), [locale, t]);
   const user = useAuthStore((s) => s.user);
   const ctaHref = useDashboardCtaHref();
   const stars = useGithubStars();
@@ -82,7 +84,7 @@ export function SiteHeader() {
   }
   const panelMenu = openMenu ?? menus.find((menu) => menu.id === lastId) ?? menus[0]!;
   const barRef = useRef<HTMLDivElement>(null);
-  const ctaLabel = user ? "Dashboard" : "Get started";
+  const ctaLabel = user ? labels.dashboard : labels.getStarted;
 
   return (
     <>
@@ -112,14 +114,14 @@ export function SiteHeader() {
           <div className="flex min-w-0 items-center gap-8">
             <Link
               href="/"
-              aria-label="Multica home"
+              aria-label={labels.home}
               className={cn("group flex shrink-0 items-center rounded-sm", focusRing)}
               onClick={() => close()}
             >
               <BrandWordmark />
             </Link>
 
-            <nav aria-label="Primary" className="hidden items-center gap-0.5 lg:flex">
+            <nav aria-label={labels.primary} className="hidden items-center gap-0.5 lg:flex">
               {menus.map((menu) => (
                 <button
                   key={menu.id}
@@ -151,10 +153,11 @@ export function SiteHeader() {
                   />
                 </button>
               ))}
-              {TOP_LINKS.map((link) => (
+              {topLinks.map((link) => (
                 <Link
                   key={link.href}
                   href={link.href}
+                  {...(link.external ? { target: "_blank", rel: "noreferrer" } : {})}
                   className={navItemClassName}
                   onPointerEnter={(event) => {
                     if (event.pointerType === "mouse") scheduleOpen(null, HOVER_CLOSE_DELAY);
@@ -171,7 +174,7 @@ export function SiteHeader() {
               href={githubUrl}
               target="_blank"
               rel="noreferrer"
-              aria-label={stars != null ? `GitHub, ${formatStarCount(stars)} stars` : "GitHub"}
+              aria-label={stars != null ? labels.githubStars.replace("{count}", formatStarCount(stars)) : "GitHub"}
               className={cn(navItemClassName, "hidden md:inline-flex")}
             >
               <GitHubMark className="size-4" />
@@ -181,13 +184,13 @@ export function SiteHeader() {
             </Link>
             {user ? null : (
               <ActionLink href="/login" tone="secondary" className="hidden sm:inline-flex">
-                Log in
+                {labels.logIn}
               </ActionLink>
             )}
             <ActionLink href={ctaHref}>{ctaLabel}</ActionLink>
             <button
               type="button"
-              aria-label="Open menu"
+              aria-label={labels.openMenu}
               aria-expanded={mobileOpen}
               onClick={() => setMobileOpen(true)}
               className={cn(navItemClassName, "px-2 lg:hidden")}
@@ -211,6 +214,7 @@ export function SiteHeader() {
         open={mobileOpen}
         onOpenChange={setMobileOpen}
         menus={menus}
+        topLinks={topLinks}
         ctaHref={ctaHref}
         ctaLabel={ctaLabel}
         showLogin={!user}
@@ -373,6 +377,7 @@ function MobileMenu({
   open,
   onOpenChange,
   menus,
+  topLinks,
   ctaHref,
   ctaLabel,
   showLogin,
@@ -380,11 +385,17 @@ function MobileMenu({
   open: boolean;
   onOpenChange: (open: boolean) => void;
   menus: SiteMenu[];
+  topLinks: SiteLink[];
   ctaHref: string;
   ctaLabel: string;
   showLogin: boolean;
 }) {
   const close = () => onOpenChange(false);
+  const { t } = useLocale();
+  const labels = t.site.header;
+  const extraLinks: SiteLink[] = [...topLinks, { label: t.site.nav.contactSales, href: "/contact-sales" }].filter(
+    (link) => link.external || isLiveRoute(link.href),
+  );
 
   return (
     <Sheet open={open} onOpenChange={onOpenChange}>
@@ -393,17 +404,17 @@ function MobileMenu({
         showCloseButton={false}
         className="landing-light inset-0 gap-0 border-0 bg-site-canvas text-site-ink shadow-none data-[side=top]:h-dvh lg:hidden"
       >
-        <SheetTitle className="sr-only">Menu</SheetTitle>
+        <SheetTitle className="sr-only">{labels.menu}</SheetTitle>
         <div className="flex h-site-header shrink-0 items-center justify-between px-site-gutter">
-          <Link href="/" aria-label="Multica home" onClick={close} className={cn("flex items-center rounded-sm", focusRing)}>
+          <Link href="/" aria-label={labels.home} onClick={close} className={cn("flex items-center rounded-sm", focusRing)}>
               <BrandWordmark />
           </Link>
-          <button type="button" aria-label="Close menu" onClick={close} className={cn(navItemClassName, "px-2")}>
+          <button type="button" aria-label={labels.closeMenu} onClick={close} className={cn(navItemClassName, "px-2")}>
             <X className="size-5" aria-hidden />
           </button>
         </div>
 
-        <nav aria-label="Primary" className="min-h-0 flex-1 overflow-y-auto px-site-gutter">
+        <nav aria-label={labels.primary} className="min-h-0 flex-1 overflow-y-auto px-site-gutter">
           {menus.map((menu) => (
             <details key={menu.id} className="group border-b border-site-line">
               <summary
@@ -438,11 +449,12 @@ function MobileMenu({
               </div>
             </details>
           ))}
-          {[...TOP_LINKS, { label: "Contact sales", href: "/contact-sales" }].map((link) => (
+          {extraLinks.map((link) => (
             <Link
               key={link.href}
               href={link.href}
               onClick={close}
+              {...(link.external ? { target: "_blank", rel: "noreferrer" } : {})}
               className={cn("flex h-14 items-center border-b border-site-line text-site-card", focusRing)}
             >
               {link.label}
@@ -453,7 +465,7 @@ function MobileMenu({
         <div className="grid shrink-0 grid-cols-2 gap-2.5 px-site-gutter pt-4 pb-8">
           {showLogin ? (
             <ActionLink href="/login" tone="secondary" size="lg" onClick={close}>
-              Log in
+              {labels.logIn}
             </ActionLink>
           ) : null}
           <ActionLink href={ctaHref} size="lg" onClick={close} className={showLogin ? undefined : "col-span-2"}>

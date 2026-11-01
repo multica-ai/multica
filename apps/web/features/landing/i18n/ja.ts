@@ -1,12 +1,14 @@
 import { githubUrl, discordUrl } from "../components/shared";
 import { createEnDict } from "./en";
 import type { LandingDict } from "./types";
+import { jaSiteCopy } from "./site-ja";
 
 export function createJaDict(): LandingDict {
   const base = createEnDict();
 
   return {
     ...base,
+    ...jaSiteCopy,
     faq: {
       label: "FAQ",
       headline: "よくある質問。",

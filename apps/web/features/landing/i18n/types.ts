@@ -41,7 +41,103 @@ export type DocumentSection = {
 
 export type ContactSalesOption = { value: string; label: string };
 
+type Copy = { title: string; body: string; alt: string };
+type Outcome = { value: string; caption: string };
+type Story = { title: string; outcomes: [Outcome, Outcome]; before: string; after: string };
+type HeroWorkflow = { label: string; short: string; description: string };
+
+/** Labels for the marketing site's header, menus, footer, and closing call to action. */
+export type SiteDict = {
+  nav: {
+    product: string;
+    solutions: string;
+    resources: string;
+    customers: string;
+    pricing: string;
+    docs: string;
+    worksWith: string;
+    allAgents: string;
+    learn: string;
+    documentation: string;
+    changelog: string;
+    useCases: string;
+    blog: string;
+    download: string;
+    community: string;
+    company: string;
+    about: string;
+    careers: string;
+    press: string;
+    contactSales: string;
+    trust: string;
+    security: string;
+    licensing: string;
+    privacy: string;
+  };
+  header: {
+    home: string;
+    primary: string;
+    menu: string;
+    openMenu: string;
+    closeMenu: string;
+    /** `{count}` is the formatted star count. */
+    githubStars: string;
+    logIn: string;
+    getStarted: string;
+    dashboard: string;
+  };
+  footer: {
+    tagline: string;
+    navigation: string;
+    language: string;
+    /** `{year}` is the current year. */
+    copyright: string;
+  };
+  cta: { title: string; lead: string; getStarted: string; bookDemo: string };
+};
+
+/** Copy for the home page. Product mockups stay in English, like screenshots of the app. */
+export type HomeDict = {
+  hero: {
+    /** The headline reads `{headlinePrefix}{agent}{headlineSuffix}`. */
+    headlinePrefix: string;
+    headlineSuffix: string;
+    lead: string;
+    getStarted: string;
+    openDashboard: string;
+    bookDemo: string;
+    workflowGroup: string;
+    workflows: { ship: HeroWorkflow; launch: HeroWorkflow; triage: HeroWorkflow };
+  };
+  logoWall: { title: string };
+  stories: {
+    title: string;
+    lead: string;
+    beforeLabel: string;
+    afterLabel: string;
+    compare: string;
+    /** `{value}` is the share of the stage showing the before scene. */
+    compareValue: string;
+    items: { board: Story; digest: Story; pipeline: Story };
+  };
+  features: {
+    title: string;
+    items: { runtimes: Copy; workflows: Copy; chat: Copy; autopilots: Copy; skills: Copy };
+  };
+  agents: { lead: string; title: string; all: string };
+  updates: {
+    eyebrow: string;
+    title: string;
+    latest: string;
+    /** `{count}` is how many more changes the release has. */
+    more: string;
+    all: string;
+  };
+};
+
 export type LandingDict = {
+  site: SiteDict;
+  home: HomeDict;
   faq: {
     label: string;
     headline: string;

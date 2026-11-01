@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { GitPullRequest, Inbox, Megaphone, UserRound, Zap } from "@multica/ui/icons";
 import { cn } from "@multica/ui/lib/utils";
+import { useLocale } from "../../i18n";
 import { focusRing } from "../primitives";
 import { BarList, Checklist, DocPreview, LoadChart, PullRequest, Replies, ReportCluster, TimeoutChart } from "./hero-blocks";
 import { HeroBoard, type Workflow } from "./hero-board";
@@ -16,9 +17,6 @@ import { BACKEND, CONTENT, FRONTEND, LEAD, LEO, MIA, QA, RESEARCH, SAM, TRIAGE }
 
 const SHIP: Workflow = {
   id: "ship",
-  label: "Ship a feature",
-  description:
-    "A Multica project board run by a workflow: an issue moves from Spec to Build, Code review, Approve and Shipped, handed to a planning agent, a coding agent, a review agent and a teammate in turn",
   project: "API Platform",
   statuses: [
     { key: "spec", name: "Spec", category: "unstarted", icon: "circle", color: "#8b5cf6", handler: LEAD },
@@ -130,9 +128,6 @@ const SHIP: Workflow = {
 
 const LAUNCH: Workflow = {
   id: "launch",
-  label: "Launch content",
-  description:
-    "A Multica project board for marketing run by a workflow: a launch post moves from Brief to Research, Draft, Edit and Published, handed to a research agent, a writing agent and an editor in turn",
   project: "Autopilots launch",
   statuses: [
     { key: "brief", name: "Brief", category: "unstarted", icon: "circle", color: "#64748b", handler: SAM },
@@ -240,9 +235,6 @@ const LAUNCH: Workflow = {
 
 const FEEDBACK: Workflow = {
   id: "triage",
-  label: "Triage feedback",
-  description:
-    "A Multica project board for support run by a workflow: an autopilot files user reports into Inbox, and the issue moves to Reproduce, Fix, Reply and Resolved, handed to a triage agent, a QA agent and a coding agent in turn",
   project: "Customer feedback",
   statuses: [
     { key: "inbox", name: "Inbox", category: "unstarted", icon: "dotted", color: "#64748b", handler: TRIAGE },
@@ -369,32 +361,34 @@ const FEEDBACK: Workflow = {
 };
 
 const WORKFLOWS = [
-  { workflow: SHIP, icon: GitPullRequest, short: "Ship" },
-  { workflow: LAUNCH, icon: Megaphone, short: "Launch" },
-  { workflow: FEEDBACK, icon: Inbox, short: "Triage" },
+  { key: "ship", workflow: SHIP, icon: GitPullRequest },
+  { key: "launch", workflow: LAUNCH, icon: Megaphone },
+  { key: "triage", workflow: FEEDBACK, icon: Inbox },
 ] as const;
 
 export function HeroDemo() {
   const [active, setActive] = useState(0);
   const [pinned, setPinned] = useState(false);
-  const { workflow } = WORKFLOWS[active]!;
+  const { key, workflow } = WORKFLOWS[active]!;
+  const copy = useLocale().t.home.hero;
 
   return (
     <>
       <div className="flex justify-center">
         <div
           role="group"
-          aria-label="Workflow"
+          aria-label={copy.workflowGroup}
           className="inline-flex items-center gap-0.5 rounded-full border border-site-line bg-site-sunken p-0.5"
         >
-          {WORKFLOWS.map(({ workflow: item, icon: Icon, short }, index) => {
+          {WORKFLOWS.map(({ key: itemKey, workflow: item, icon: Icon }, index) => {
             const selected = index === active;
+            const { label, short } = copy.workflows[itemKey];
             return (
               <button
                 key={item.id}
                 type="button"
                 aria-pressed={selected}
-                aria-label={item.label}
+                aria-label={label}
                 onClick={() => {
                   setActive(index);
                   setPinned(true);
@@ -409,7 +403,7 @@ export function HeroDemo() {
               >
                 <Icon className="size-3.5 shrink-0" aria-hidden />
                 <span className="sm:hidden">{short}</span>
-                <span className="hidden sm:inline">{item.label}</span>
+                <span className="hidden sm:inline">{label}</span>
               </button>
             );
           })}
@@ -418,6 +412,7 @@ export function HeroDemo() {
       <div className="relative mt-3 aspect-square sm:aspect-[16/10]">
         <HeroBoard
           workflow={workflow}
+          label={copy.workflows[key].description}
           onLoop={() => {
             if (!pinned) setActive((current) => (current + 1) % WORKFLOWS.length);
           }}

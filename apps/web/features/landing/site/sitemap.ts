@@ -1,4 +1,6 @@
+import { notFound } from "next/navigation";
 import { discordUrl, githubUrl, twitterUrl } from "../components/shared";
+import type { SiteDict } from "../i18n/types";
 
 /**
  * Information architecture of the marketing site: every page, the header
@@ -113,6 +115,31 @@ const EXISTING_ROUTES = [
   "/usecases",
 ] as const;
 
+/**
+ * Routes released to the public. Every other page is still being built: it is
+ * left out of the menus, the footer, and the sitemap, and its route answers
+ * 404, unless the build sets NEXT_PUBLIC_SITE_PREVIEW=1. Release a page by
+ * adding its route here.
+ */
+const LIVE_ROUTES: ReadonlySet<string> = new Set(["/", ...EXISTING_ROUTES]);
+
+export const SITE_PREVIEW = process.env.NEXT_PUBLIC_SITE_PREVIEW === "1";
+
+export function isLiveRoute(href: string): boolean {
+  return SITE_PREVIEW || LIVE_ROUTES.has(href);
+}
+
+/** Call at the top of a page that may not be released yet. */
+export function requireLiveRoute(href: string) {
+  if (!isLiveRoute(href)) notFound();
+}
+
+// The not-found fallback streams after the page's metadata, so an unreleased
+// page must not publish its own title and description.
+export function liveMetadata<T extends object>(href: string, metadata: T): T | Record<string, never> {
+  return isLiveRoute(href) ? metadata : {};
+}
+
 export const productHref = (slug: string) => `/product/${slug}`;
 export const solutionHref = (slug: string) => `/solutions/${slug}`;
 
@@ -123,141 +150,165 @@ export function findPage(groups: PageGroup[], slug: string): SitePage | undefine
   return groups.flatMap((group) => group.pages).find((page) => page.slug === slug);
 }
 
-export const TOP_LINKS: SiteLink[] = [
-  { label: PLACEHOLDER_PAGES.customers.title, href: "/customers" },
-  { label: PLACEHOLDER_PAGES.pricing.title, href: "/pricing" },
-];
+type NavLabels = SiteDict["nav"];
+type IsLive = (href: string) => boolean;
 
-export function buildMenus(docsHref: string): SiteMenu[] {
+/** Drops unreleased links, then the groups they leave empty. */
+function released(groups: SiteLinkGroup[], isLive: IsLive): SiteLinkGroup[] {
+  return groups
+    .map((group) => ({ ...group, links: group.links.filter((link) => link.external || isLive(link.href)) }))
+    .filter((group) => group.links.length > 0);
+}
+
+export function buildTopLinks(docsHref: string, nav: NavLabels, isLive: IsLive = isLiveRoute): SiteLink[] {
   return [
+    { label: nav.customers, href: "/customers" },
+    { label: nav.pricing, href: "/pricing" },
+    { label: nav.docs, href: docsHref, external: true },
+  ].filter((link) => link.external || isLive(link.href));
+}
+
+export function buildMenus(docsHref: string, nav: NavLabels, isLive: IsLive = isLiveRoute): SiteMenu[] {
+  const productGroups = released(
+    PRODUCT_GROUPS.map((group) => ({ title: group.title, links: toLinks(group.pages, productHref) })),
+    isLive,
+  );
+  const menus: SiteMenu[] = [
     {
       id: "product",
-      label: "Product",
-      groups: [
-        ...PRODUCT_GROUPS.map((group) => ({
-          title: group.title,
-          links: toLinks(group.pages, productHref),
-        })),
-        {
-          title: "Works with",
-          links: [
-            { label: "Claude Code", href: `${docsHref}/providers`, external: true },
-            { label: "Codex", href: `${docsHref}/providers`, external: true },
-            { label: "Cursor", href: `${docsHref}/providers`, external: true },
-            { label: "GitHub Copilot", href: `${docsHref}/providers`, external: true },
-            { label: "All 27 agents", href: `${docsHref}/providers`, external: true },
-          ],
-        },
-      ],
+      label: nav.product,
+      // The agent list only frames the product pages; without them the menu goes.
+      groups: productGroups.length
+        ? [
+            ...productGroups,
+            {
+              title: nav.worksWith,
+              links: [
+                { label: "Claude Code", href: `${docsHref}/providers`, external: true },
+                { label: "Codex", href: `${docsHref}/providers`, external: true },
+                { label: "Cursor", href: `${docsHref}/providers`, external: true },
+                { label: "GitHub Copilot", href: `${docsHref}/providers`, external: true },
+                { label: nav.allAgents, href: `${docsHref}/providers`, external: true },
+              ],
+            },
+          ]
+        : [],
     },
     {
       id: "solutions",
-      label: "Solutions",
-      groups: SOLUTION_GROUPS.map((group) => ({
-        title: group.title,
-        links: toLinks(group.pages, solutionHref),
-      })),
+      label: nav.solutions,
+      groups: released(
+        SOLUTION_GROUPS.map((group) => ({ title: group.title, links: toLinks(group.pages, solutionHref) })),
+        isLive,
+      ),
     },
     {
       id: "resources",
-      label: "Resources",
-      groups: [
-        {
-          title: "Learn",
-          links: [
-            { label: "Documentation", href: docsHref, external: true },
-            { label: "Changelog", href: "/changelog" },
-            { label: "Use cases", href: "/usecases" },
-            { label: "Blog", href: "/blog" },
-            { label: "Download", href: "/download" },
-          ],
-        },
-        {
-          title: "Community",
-          links: [
-            { label: "GitHub", href: githubUrl, external: true },
-            { label: "Discord", href: discordUrl, external: true },
-            { label: "X", href: twitterUrl, external: true },
-          ],
-        },
-        {
-          title: "Company",
-          links: [
-            { label: "About", href: "/about" },
-            { label: "Careers", href: "/careers" },
-            { label: "Press & brand", href: "/press" },
-            { label: "Contact sales", href: "/contact-sales" },
-          ],
-        },
-        {
-          title: "Trust",
-          links: [
-            { label: "Security", href: "/security" },
-            { label: "Licensing", href: "/licensing" },
-            { label: "Privacy", href: "/privacy" },
-          ],
-        },
-      ],
+      label: nav.resources,
+      groups: released(
+        [
+          {
+            title: nav.learn,
+            links: [
+              { label: nav.documentation, href: docsHref, external: true },
+              { label: nav.changelog, href: "/changelog" },
+              { label: nav.useCases, href: "/usecases" },
+              { label: nav.blog, href: "/blog" },
+              { label: nav.download, href: "/download" },
+            ],
+          },
+          {
+            title: nav.community,
+            links: [
+              { label: "GitHub", href: githubUrl, external: true },
+              { label: "Discord", href: discordUrl, external: true },
+              { label: "X", href: twitterUrl, external: true },
+            ],
+          },
+          {
+            title: nav.company,
+            links: [
+              { label: nav.about, href: "/about" },
+              { label: nav.careers, href: "/careers" },
+              { label: nav.press, href: "/press" },
+              { label: nav.contactSales, href: "/contact-sales" },
+            ],
+          },
+          {
+            title: nav.trust,
+            links: [
+              { label: nav.security, href: "/security" },
+              { label: nav.licensing, href: "/licensing" },
+              { label: nav.privacy, href: "/privacy" },
+            ],
+          },
+        ],
+        isLive,
+      ),
     },
   ];
+  return menus.filter((menu) => menu.groups.length > 0);
 }
 
-export function buildFooterGroups(docsHref: string): SiteLinkGroup[] {
+export function buildFooterGroups(docsHref: string, nav: NavLabels, isLive: IsLive = isLiveRoute): SiteLinkGroup[] {
   const pick = (groups: PageGroup[], slugs: string[], href: (slug: string) => string) =>
     slugs.map((slug) => {
       const page = findPage(groups, slug);
       if (!page) throw new Error(`Unknown page in footer: ${slug}`);
       return { label: page.title, href: href(page.slug) };
     });
-  return [
-    {
-      title: "Product",
-      links: [
-        ...pick(
-          PRODUCT_GROUPS,
-          ["cloud", "desktop", "cli", "agents", "squads", "skills", "autopilots", "runtimes", "self-hosting"],
-          productHref,
+  return released(
+    [
+      {
+        title: nav.product,
+        links: [
+          ...pick(
+            PRODUCT_GROUPS,
+            ["cloud", "desktop", "cli", "agents", "squads", "skills", "autopilots", "runtimes", "self-hosting"],
+            productHref,
+          ),
+          { label: nav.pricing, href: "/pricing" },
+        ],
+      },
+      {
+        title: nav.solutions,
+        links: pick(
+          SOLUTION_GROUPS,
+          ["software-delivery", "code-review", "bug-triage", "data-analysis", "startups", "enterprise"],
+          solutionHref,
         ),
-        { label: PLACEHOLDER_PAGES.pricing.title, href: "/pricing" },
-      ],
-    },
-    {
-      title: "Solutions",
-      links: pick(
-        SOLUTION_GROUPS,
-        ["software-delivery", "code-review", "bug-triage", "data-analysis", "startups", "enterprise"],
-        solutionHref,
-      ),
-    },
-    {
-      title: "Resources",
-      links: [
-        { label: "Documentation", href: docsHref, external: true },
-        { label: "Changelog", href: "/changelog" },
-        { label: "Use cases", href: "/usecases" },
-        { label: "Blog", href: "/blog" },
-        { label: "Download", href: "/download" },
-      ],
-    },
-    {
-      title: "Company",
-      links: [
-        { label: "About", href: "/about" },
-        { label: "Customers", href: "/customers" },
-        { label: "Careers", href: "/careers" },
-        { label: "Press & brand", href: "/press" },
-        { label: "Contact sales", href: "/contact-sales" },
-      ],
-    },
-    {
-      title: "Trust",
-      links: [
-        { label: "Security", href: "/security" },
-        { label: "Licensing", href: "/licensing" },
-        { label: "Privacy", href: "/privacy" },
-      ],
-    },
-  ];
+      },
+      {
+        title: nav.resources,
+        links: [
+          { label: nav.documentation, href: docsHref, external: true },
+          { label: nav.changelog, href: "/changelog" },
+          { label: nav.useCases, href: "/usecases" },
+          { label: nav.blog, href: "/blog" },
+          { label: nav.download, href: "/download" },
+        ],
+      },
+      {
+        title: nav.company,
+        links: [
+          { label: nav.about, href: "/about" },
+          { label: nav.customers, href: "/customers" },
+          { label: nav.careers, href: "/careers" },
+          { label: nav.press, href: "/press" },
+          { label: nav.contactSales, href: "/contact-sales" },
+        ],
+      },
+      {
+        title: nav.trust,
+        links: [
+          { label: nav.security, href: "/security" },
+          { label: nav.licensing, href: "/licensing" },
+          { label: nav.privacy, href: "/privacy" },
+        ],
+      },
+    ],
+    isLive,
+  );
 }
 
 /** Every internal route the marketing site serves, for `sitemap.xml` and link checks. */

@@ -104,8 +104,6 @@ export type Stage = {
 
 export type Workflow = {
   id: string;
-  label: string;
-  description: string;
   project: string;
   statuses: Status[];
   cards: Record<string, { total: number; cards: Card[] }>;
@@ -118,7 +116,8 @@ export type Workflow = {
 
 const MOVE_EASE = "cubic-bezier(0.32, 0.72, 0, 1)";
 
-export function HeroBoard({ workflow, onLoop }: { workflow: Workflow; onLoop?: () => void }) {
+/** `label` describes the board for assistive tech, in the page's language. */
+export function HeroBoard({ workflow, label, onLoop }: { workflow: Workflow; label: string; onLoop?: () => void }) {
   const windowRef = useRef<HTMLDivElement>(null);
   const boardRef = useRef<HTMLDivElement>(null);
   const positions = useRef<{ key: string; at: Map<string, { x: number; y: number }> } | null>(null);
@@ -237,7 +236,7 @@ export function HeroBoard({ workflow, onLoop }: { workflow: Workflow; onLoop?: (
     <div
       ref={windowRef}
       role="img"
-      aria-label={workflow.description}
+      aria-label={label}
       className="absolute inset-0 overflow-hidden rounded-[12px] border border-site-line-strong bg-app-shell shadow-site-float"
     >
       <div

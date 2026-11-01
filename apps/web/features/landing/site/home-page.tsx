@@ -19,6 +19,7 @@ import {
 } from "./primitives";
 import { HERO_PROVIDERS } from "../components/provider-marks";
 import { docsHrefForLocale, useLocale } from "../i18n";
+import type { HomeDict } from "../i18n/types";
 import { CUSTOMER_LOGOS } from "./customer-logos";
 import { AutopilotsVisual, ChatVisual, RuntimesVisual, SkillsVisual, WorkflowVisual } from "./demo/feature-visuals";
 import { HeroDemo } from "./demo/hero-demo";
@@ -34,13 +35,14 @@ import {
 } from "./demo/before-after-visuals";
 import { CtaBand, SitePage } from "./site-page";
 import { AdvanceLine, useAutoAdvance } from "./auto-advance";
-import { PLACEHOLDER_PAGES } from "./sitemap";
+import { SITE_PREVIEW } from "./sitemap";
 
 export function HomePage() {
   return (
     <SitePage>
       <Hero />
-      <LogoWall />
+      {/* The logo wall waits for an approved customer list; previews show placeholder logos. */}
+      {SITE_PREVIEW ? <LogoWall /> : null}
       <div className="site-rails">
         <BeforeAfter />
         <Features />
@@ -53,34 +55,40 @@ export function HomePage() {
   );
 }
 
+/** The pill above the headline; it shows only while there is something to announce. */
+const ANNOUNCEMENT: { label: string; href: string } | null = SITE_PREVIEW
+  ? { label: "Announcement placeholder", href: "/blog" }
+  : null;
+
 function Hero() {
   const user = useAuthStore((s) => s.user);
   const ctaHref = useDashboardCtaHref();
+  const copy = useLocale().t.home.hero;
 
   return (
     <section className="pt-site-hero pb-site-section">
       <Container className="max-w-site-wide">
-        <Link
-          href={`/${PLACEHOLDER_PAGES.blog.slug}`}
-          className={cn(
-            "inline-flex items-center gap-2 rounded-site-control border border-site-line bg-site-surface py-1 pr-3 pl-1 text-site-small text-site-ink-secondary transition-colors hover:border-site-line-strong",
-            focusRing,
-          )}
-        >
-          <span className="rounded-site-control bg-site-sunken px-2 py-0.5 text-site-ink">New</span>
-          Announcement placeholder
-          <ArrowRight className="size-3.5 text-site-muted" aria-hidden />
-        </Link>
+        {ANNOUNCEMENT ? (
+          <Link
+            href={ANNOUNCEMENT.href}
+            className={cn(
+              "mb-5 inline-flex items-center gap-2 rounded-site-control border border-site-line bg-site-surface py-1 pr-3 pl-1 text-site-small text-site-ink-secondary transition-colors hover:border-site-line-strong",
+              focusRing,
+            )}
+          >
+            <span className="rounded-site-control bg-site-sunken px-2 py-0.5 text-site-ink">New</span>
+            {ANNOUNCEMENT.label}
+            <ArrowRight className="size-3.5 text-site-muted" aria-hidden />
+          </Link>
+        ) : null}
         <HeroHeadline />
-        <p className="mt-3 max-w-[38rem] text-site-body text-site-muted text-pretty">
-          One workspace for your team and its agents: assign the work, track it, and review it. You stay in control.
-        </p>
+        <p className="mt-3 max-w-[38rem] text-site-body text-site-muted text-pretty">{copy.lead}</p>
         <div className="mt-6 flex flex-wrap gap-2.5">
           <ActionLink href={ctaHref} size="lg">
-            {user ? "Open dashboard" : "Get started"}
+            {user ? copy.openDashboard : copy.getStarted}
           </ActionLink>
           <ActionLink href="/contact-sales" size="lg" tone="secondary">
-            Book a demo
+            {copy.bookDemo}
           </ActionLink>
         </div>
       </Container>
@@ -95,6 +103,8 @@ const HERO_AGENTS = ["Claude Code", "Codex", "Hermes", "OpenCode"] as const;
 const HERO_AGENT_HOLDS = HERO_AGENTS.map(() => 3600);
 
 function HeroHeadline() {
+  const { t, locale } = useLocale();
+  const { headlinePrefix, headlineSuffix } = t.home.hero;
   const { ref, step } = useStoryLoop(HERO_AGENT_HOLDS, 0);
   const measures = useRef<(HTMLSpanElement | null)[]>([]);
   const [widths, setWidths] = useState<number[] | null>(null);
@@ -109,12 +119,14 @@ function HeroHeadline() {
 
   return (
     <div ref={ref}>
-      <h1 className="mt-5 font-site-display text-site-heading text-site-ink">
+      <h1 className="font-site-display text-site-heading text-site-ink">
         <span className="sr-only">
-          Turn {HERO_AGENTS.slice(0, -1).join(", ")}, or {HERO_AGENTS.at(-1)} into a teammate.
+          {headlinePrefix}
+          {new Intl.ListFormat(locale, { type: "disjunction" }).format(HERO_AGENTS)}
+          {headlineSuffix}
         </span>
         <span aria-hidden className="block text-balance">
-          Turn{" "}
+          {headlinePrefix}
           <span className="relative inline-flex rounded-full bg-brand/5 px-[0.36em] [--border-beam-width:1.5px]">
             <span
               className="inline-grid overflow-hidden transition-[width] duration-500 ease-[cubic-bezier(0.22,1,0.36,1)] motion-reduce:transition-none"
@@ -137,8 +149,8 @@ function HeroHeadline() {
               ))}
             </span>
             <BorderBeam />
-          </span>{" "}
-          into a teammate.
+          </span>
+          {headlineSuffix}
         </span>
       </h1>
     </div>
@@ -151,11 +163,12 @@ function ProviderMark({ name }: { name: string }) {
 }
 
 function LogoWall() {
+  const { t } = useLocale();
   return (
     <section aria-labelledby="logo-wall-title" className="pb-site-section">
       <Container className="max-w-site-wide">
         <h2 id="logo-wall-title" className="text-center text-site-small text-site-muted">
-          Used by engineers at
+          {t.home.logoWall.title}
         </h2>
         <div className="group/wall mt-6 overflow-hidden mask-x-from-85% mask-x-to-100% motion-reduce:mask-none">
           <div className="flex w-max animate-site-marquee group-hover/wall:[animation-play-state:paused] motion-reduce:w-auto motion-reduce:animate-none">
@@ -193,49 +206,22 @@ function LogoWall() {
   );
 }
 
-const FEATURES: { id: string; title: string; body: string; alt: string; visual: ComponentType }[] = [
-  {
-    id: "runtimes",
-    title: "Runs on your machines, or in our cloud",
-    body: "Connect a laptop or a server with one command and Multica finds the coding agents installed on it. Or run them in managed cloud sandboxes.",
-    alt: "The Runtimes page listing two machines and Multica Cloud, with the coding tools found on each",
-    visual: RuntimesVisual,
-  },
-  {
-    id: "workflows",
-    title: "Workflows hand off every step",
-    body: "Give every status an owner. Moving an issue to the next step hands it to that step’s agent or teammate.",
-    alt: "The Ship a feature workflow: Spec handed to Lead Agent, Build to Backend Agent, Code review to QA Agent, Approve to Mia Chen, then Shipped, with the Build step's handoff settings open",
-    visual: WorkflowVisual,
-  },
-  {
-    id: "chat",
-    title: "Mention an agent in chat",
-    body: "From Slack, Lark, DingTalk, WeCom, or Telegram. The agent reads the thread, files the issue, and gets to work.",
-    alt: "A team chat channel where Mia mentions Backend Agent about failing exports, and the agent replies in the channel with a link to the Multica issue it filed and is working on",
-    visual: ChatVisual,
-  },
-  {
-    id: "autopilots",
-    title: "Autopilots run on a schedule",
-    body: "Upgrades, triage, and reports file themselves and land with an agent, every hour or every Monday.",
-    alt: "The Autopilots list: five scheduled jobs, each with its agent and its next run",
-    visual: AutopilotsVisual,
-  },
-  {
-    id: "skills",
-    title: "Skills the whole team shares",
-    body: "Write down how your team does a thing once, and every agent follows it.",
-    alt: "The Skills list: five skills the team wrote, each with the agents that use it",
-    visual: SkillsVisual,
-  },
+type FeatureId = keyof HomeDict["features"]["items"];
+
+const FEATURES: { id: FeatureId; visual: ComponentType }[] = [
+  { id: "runtimes", visual: RuntimesVisual },
+  { id: "workflows", visual: WorkflowVisual },
+  { id: "chat", visual: ChatVisual },
+  { id: "autopilots", visual: AutopilotsVisual },
+  { id: "skills", visual: SkillsVisual },
 ];
 
 function Features() {
+  const { t } = useLocale();
   return (
     <Section>
       <Container>
-        <SectionHeader title="Built for teams of people and agents" />
+        <SectionHeader title={t.home.features.title} />
         <div className="mt-site-block grid gap-x-site-grid-col gap-y-site-grid-row md:grid-cols-2">
           {FEATURES.slice(0, 2).map((feature) => (
             <FeatureCard key={feature.id} {...feature} />
@@ -255,14 +241,15 @@ const POPULAR_AGENTS = ["Claude Code", "Codex", "Cursor", "GitHub Copilot", "Ope
 
 function Agents() {
   const agents = POPULAR_AGENTS.map((name) => HERO_PROVIDERS.find((provider) => provider.name === name)!);
-  const { locale } = useLocale();
+  const { locale, t } = useLocale();
+  const copy = t.home.agents;
   const docsHref = docsHrefForLocale(locale);
   return (
     <Section>
       <Container>
         <h2 className="max-w-[44rem] font-site-display text-site-heading text-balance">
-          <span className="block text-site-muted">No new agent to learn.</span>
-          <span className="block text-site-ink">Bring the ones you already use.</span>
+          <span className="block text-site-muted">{copy.lead}</span>
+          <span className="block text-site-ink">{copy.title}</span>
         </h2>
         <ul className="mt-site-block grid grid-cols-2 gap-y-8 md:grid-cols-4 md:gap-y-10">
           {agents.map(({ name, Mark, size }, index) => (
@@ -283,7 +270,7 @@ function Agents() {
           ))}
         </ul>
         <ActionLink href={`${docsHref}/providers`} tone="ghost" className="mt-8 ml-1 md:mt-10 md:ml-2">
-          All 27 agents
+          {copy.all}
           <ArrowUpRight className="size-4" aria-hidden />
         </ActionLink>
       </Container>
@@ -293,14 +280,18 @@ function Agents() {
 
 const UPDATE_COUNT = 7;
 
-/** Release titles list their changes ("A, B, and C"); the home page leads with the first and counts the rest. */
+/**
+ * Release titles list their changes ("A, B, and C", or "A、B、C"); the home
+ * page leads with the first and counts the rest.
+ */
 function releaseHeadline(title: string) {
-  const [headline = title, ...rest] = title.split(/, (?:and )?/);
+  const [headline = title, ...rest] = title.split(/, (?:and )?|、/);
   return { headline, more: rest.length };
 }
 
 function Updates() {
   const { t, locale } = useLocale();
+  const copy = t.home.updates;
   const releases = t.changelog.entries.slice(0, UPDATE_COUNT);
   const latest = releases[0];
   const day = new Intl.DateTimeFormat(locale, { month: "short", day: "numeric", timeZone: "UTC" });
@@ -311,7 +302,7 @@ function Updates() {
     <Section>
       <Container className="grid gap-site-block lg:grid-cols-[minmax(0,1fr)_minmax(0,2fr)] lg:gap-16">
         <div className="flex flex-col justify-between gap-site-block">
-          <SectionHeader eyebrow="Changelog" title="Recently shipped." />
+          <SectionHeader eyebrow={copy.eyebrow} title={copy.title} />
           <Link
             href={`/changelog#${anchorId(latest.version)}`}
             data-frost="changelog"
@@ -320,7 +311,7 @@ function Updates() {
               focusRing,
             )}
           >
-            <span className="relative text-site-small text-site-ink-secondary">Latest · {dateLabel(latest.date)}</span>
+            <span className="relative text-site-small text-site-ink-secondary">{copy.latest} · {dateLabel(latest.date)}</span>
             <span className="relative">
               <span className="block font-site-display text-site-heading text-site-ink">v{latest.version}</span>
               <span className="mt-1 block text-site-body text-site-ink-secondary">{releaseHeadline(latest.title).headline}</span>
@@ -342,7 +333,10 @@ function Updates() {
                   <span className="line-clamp-2 text-site-ink sm:truncate">
                     {releaseHeadline(release.title).headline}
                     {releaseHeadline(release.title).more > 0 ? (
-                      <span className="text-site-muted"> +{releaseHeadline(release.title).more} more</span>
+                      <span className="text-site-muted">
+                        {" "}
+                        {copy.more.replace("{count}", String(releaseHeadline(release.title).more))}
+                      </span>
                     ) : null}
                   </span>
                   <span className="text-site-small text-site-muted tabular-nums max-sm:hidden">v{release.version}</span>
@@ -355,7 +349,7 @@ function Updates() {
             ))}
           </ul>
           <ActionLink href="/changelog" tone="ghost" className="mt-6 -ml-3">
-            All releases
+            {copy.all}
             <ArrowRight className="size-4" aria-hidden />
           </ActionLink>
         </div>
@@ -364,7 +358,8 @@ function Updates() {
   );
 }
 
-function FeatureCard({ id, title, body, visual: Visual, alt }: (typeof FEATURES)[number]) {
+function FeatureCard({ id, visual: Visual }: (typeof FEATURES)[number]) {
+  const { title, body, alt } = useLocale().t.home.features.items[id];
   return (
     <div>
       <div role="img" aria-label={alt} data-frost={id} className="site-frost aspect-[4/3] rounded-site-panel">
@@ -376,68 +371,29 @@ function FeatureCard({ id, title, body, visual: Visual, alt }: (typeof FEATURES)
   );
 }
 
-type Outcome = { value: string; caption: string };
+type StoryId = keyof HomeDict["stories"]["items"];
 
-const STORIES: {
-  id: string;
-  title: string;
-  outcomes: [Outcome, Outcome];
-  before: string;
-  after: string;
-  scenes: [ComponentType, ComponentType];
-}[] = [
-  {
-    id: "board",
-    title: "Thirty agents, thirty tabs",
-    outcomes: [
-      { value: "30 tabs", caption: "to check for the agent that’s stuck" },
-      { value: "1 inbox", caption: "tells you which agent needs you" },
-    ],
-    before: "Every agent runs in its own terminal tab, and a question waits in the one you aren’t watching.",
-    after: "All their work sits on one board, and anything waiting on you lands in your inbox.",
-    scenes: [TabsBefore, TabsAfter],
-  },
-  {
-    id: "digest",
-    title: "The work nobody has time to do",
-    outcomes: [
-      { value: "2%", caption: "of support conversations get read" },
-      { value: "100%", caption: "read every night by an agent" },
-    ],
-    before: "Someone spot-checks a few dozen support conversations a day. The rest are never read.",
-    after: "An autopilot reads every one overnight and files what needs fixing. You review the digest in the morning.",
-    scenes: [DigestBefore, DigestAfter],
-  },
-  {
-    id: "pipeline",
-    title: "A process that waits on people",
-    outcomes: [
-      { value: "9 days", caption: "per fix, 4 of them spent waiting" },
-      { value: "3 days", caption: "agents hand off, people approve" },
-    ],
-    before: "Each step of a fix waits for someone to notice it’s their turn.",
-    after: "Agents hand each step to the next, and people step in only to approve.",
-    scenes: [PipelineBefore, PipelineAfter],
-  },
+const STORIES: { id: StoryId; scenes: [ComponentType, ComponentType] }[] = [
+  { id: "board", scenes: [TabsBefore, TabsAfter] },
+  { id: "digest", scenes: [DigestBefore, DigestAfter] },
+  { id: "pipeline", scenes: [PipelineBefore, PipelineAfter] },
 ];
-
-const OUTCOME_LABELS = ["Before", "With Multica"] as const;
 
 const STORY_ENTER = "animate-in fade-in duration-500 motion-reduce:animate-none";
 
 const STORY_HOLD = 8000;
 
 function BeforeAfter() {
+  const copy = useLocale().t.home.stories;
   const cycle = useAutoAdvance(STORIES.length);
   const story = STORIES[cycle.active]!;
+  const text = copy.items[story.id];
+  const outcomeLabels = [copy.beforeLabel, copy.afterLabel];
 
   return (
     <Section>
       <Container>
-        <SectionHeader
-          title="What changes when agents join your team"
-          lead="Three stories from teams that moved their agent work into Multica."
-        />
+        <SectionHeader title={copy.title} lead={copy.lead} />
         <div
           ref={cycle.ref}
           className="mt-site-block grid gap-8 xl:grid-cols-[minmax(0,19rem)_minmax(0,1fr)] xl:gap-14"
@@ -464,7 +420,7 @@ function BeforeAfter() {
                       focusRing,
                     )}
                   >
-                    {item.title}
+                    {copy.items[item.id].title}
                   </button>
                 </li>
               );
@@ -472,9 +428,9 @@ function BeforeAfter() {
           </ol>
           <div key={story.id} className={cn("order-1 xl:order-2", STORY_ENTER)}>
             <dl className="grid grid-cols-2">
-              {story.outcomes.map((outcome, index) => (
-                <div key={OUTCOME_LABELS[index]} className={index === 0 ? "pr-4 sm:pr-6" : "border-l border-site-line pl-4 sm:pl-6"}>
-                  <dt className="text-site-small text-site-muted">{OUTCOME_LABELS[index]}</dt>
+              {text.outcomes.map((outcome, index) => (
+                <div key={index} className={index === 0 ? "pr-4 sm:pr-6" : "border-l border-site-line pl-4 sm:pl-6"}>
+                  <dt className="text-site-small text-site-muted">{outcomeLabels[index]}</dt>
                   <dd
                     className={cn(
                       "mt-2 font-site-display text-site-heading tabular-nums",
@@ -497,6 +453,8 @@ function BeforeAfter() {
 
 function CompareStage({ story, onDrag, className }: { story: (typeof STORIES)[number]; onDrag: () => void; className?: string }) {
   const [Before, After] = story.scenes;
+  const copy = useLocale().t.home.stories;
+  const text = copy.items[story.id];
   const ref = useRef<HTMLDivElement>(null);
   const [split, setSplit] = useState(100);
   const [sweeping, setSweeping] = useState(false);
@@ -534,11 +492,11 @@ function CompareStage({ story, onDrag, className }: { story: (typeof STORIES)[nu
     <div
       ref={ref}
       role="group"
-      aria-label={story.title}
+      aria-label={text.title}
       className={cn("relative aspect-[4/3] overflow-hidden rounded-site-panel select-none sm:aspect-[3/2]", className)}
     >
       <p className="sr-only">
-        Before: {story.before} With Multica: {story.after}
+        {copy.beforeLabel}: {text.before} {copy.afterLabel}: {text.after}
       </p>
       <div className="absolute inset-0">
         <div data-frost={story.id} className="site-frost size-full">
@@ -563,8 +521,8 @@ function CompareStage({ story, onDrag, className }: { story: (typeof STORIES)[nu
         min={0}
         max={100}
         value={split}
-        aria-label="Compare before and with Multica"
-        aria-valuetext={`${split}% before`}
+        aria-label={copy.compare}
+        aria-valuetext={copy.compareValue.replace("{value}", String(split))}
         onChange={(event) => {
           onDrag();
           setSweeping(false);

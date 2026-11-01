@@ -23,19 +23,23 @@ const SOCIAL_LINKS = [
   { label: "X", href: twitterUrl, Mark: XMark },
 ];
 
+/** One column per group on wide screens, so a short footer doesn't leave empty columns. */
+const WIDE_COLUMNS: Record<number, string> = { 3: "lg:grid-cols-3", 4: "lg:grid-cols-4" };
+
 export function SiteFooter() {
-  const { locale, setLocale } = useLocale();
-  const groups = useMemo(() => buildFooterGroups(docsHrefForLocale(locale)), [locale]);
+  const { locale, setLocale, t } = useLocale();
+  const labels = t.site.footer;
+  const groups = useMemo(() => buildFooterGroups(docsHrefForLocale(locale), t.site.nav), [locale, t]);
 
   return (
     <footer className="border-t border-site-rule bg-site-canvas text-site-ink">
       <Container className="grid gap-site-block py-site-section lg:grid-cols-[minmax(0,1fr)_minmax(0,3fr)] lg:gap-16">
         <div>
-          <Link href="/" aria-label="Multica home" className={cn("group inline-flex items-center rounded-sm", focusRing)}>
+          <Link href="/" aria-label={t.site.header.home} className={cn("group inline-flex items-center rounded-sm", focusRing)}>
               <BrandWordmark />
           </Link>
           <p className="mt-4 max-w-[18rem] text-site-small text-site-muted">
-            The workspace for human and agent teams.
+            {labels.tagline}
           </p>
           <ul className="mt-6 flex items-center gap-1">
             {SOCIAL_LINKS.map(({ label, href, Mark }) => (
@@ -55,7 +59,7 @@ export function SiteFooter() {
               </li>
             ))}
           </ul>
-          <div role="group" aria-label="Language" className="mt-6 flex flex-wrap items-center gap-1">
+          <div role="group" aria-label={labels.language} className="mt-6 flex flex-wrap items-center gap-1">
             {locales.map((l) => (
               <button
                 type="button"
@@ -75,11 +79,14 @@ export function SiteFooter() {
             ))}
           </div>
           <p className="mt-4 text-site-small text-site-muted">
-            © {new Date().getFullYear()} Multica. All rights reserved.
+            {labels.copyright.replace("{year}", String(new Date().getFullYear()))}
           </p>
         </div>
 
-        <nav aria-label="Footer" className="grid grid-cols-2 gap-x-4 gap-y-site-block sm:grid-cols-3 lg:grid-cols-5">
+        <nav
+          aria-label={labels.navigation}
+          className={cn("grid grid-cols-2 gap-x-4 gap-y-site-block sm:grid-cols-3", WIDE_COLUMNS[groups.length] ?? "lg:grid-cols-5")}
+        >
           {groups.map((group) => (
             <div key={group.title}>
               <p className="text-site-small text-site-ink">{group.title}</p>

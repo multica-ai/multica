@@ -7,7 +7,7 @@ import { CloudPage } from "@/features/landing/site/cloud-page";
 import { DesktopPage } from "@/features/landing/site/desktop-page";
 import { MobilePage } from "@/features/landing/site/mobile-page";
 import { PlaceholderPage } from "@/features/landing/site/site-page";
-import { PRODUCT_GROUPS, findPage, productHref } from "@/features/landing/site/sitemap";
+import { PRODUCT_GROUPS, findPage, productHref, liveMetadata, requireLiveRoute } from "@/features/landing/site/sitemap";
 
 type Params = { slug: string };
 
@@ -29,12 +29,12 @@ export async function generateMetadata(props: { params: Promise<Params> }): Prom
   const { slug } = await props.params;
   const page = findPage(PRODUCT_GROUPS, slug);
   if (!page) return {};
-  return {
+  return liveMetadata(productHref(page.slug), {
     title: page.title,
     description: page.summary,
     alternates: { canonical: productHref(page.slug) },
     robots: { index: false, follow: true },
-  };
+  });
 }
 
 export default async function Page(props: { params: Promise<Params> }) {
@@ -42,6 +42,7 @@ export default async function Page(props: { params: Promise<Params> }) {
   const group = PRODUCT_GROUPS.find((g) => g.pages.some((page) => page.slug === slug));
   const page = findPage(PRODUCT_GROUPS, slug);
   if (!group || !page) notFound();
+  requireLiveRoute(productHref(page.slug));
   const Built = BUILT_PAGES[page.slug];
   if (Built) return <Built />;
   return <PlaceholderPage eyebrow={group.title} page={page} />;
