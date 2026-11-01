@@ -94,6 +94,28 @@ export function CollapsedNavTrigger() {
   );
 }
 
+/**
+ * The way to collapse the space panel while it is open, in the panel's own
+ * header. `CollapsedNavTrigger` is its counterpart in the page header, which
+ * only has a job once the panel is gone. Below `md` the nav is a sheet the page
+ * header already opens.
+ */
+export function CollapseNavButton() {
+  const sidebar = useSidebarSafe();
+  const shell = useAppShell();
+  if (!sidebar || !shell || sidebar.hasExternalTrigger) return null;
+  return (
+    <SidebarTrigger
+      className="text-muted-foreground max-md:hidden"
+      shortcut={<ActionShortcutKeycaps action="toggleSidebar" />}
+      onClick={(event) => {
+        event.preventDefault();
+        shell.toggleNav();
+      }}
+    />
+  );
+}
+
 interface PageHeaderProps {
   children: React.ReactNode;
   /**

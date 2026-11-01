@@ -25,6 +25,7 @@ import {
   PanelSection,
   isPathWithin,
 } from "../panel-nav";
+import { CollapseNavButton } from "../page-header";
 
 const EMPTY_AUTOPILOTS: Autopilot[] = [];
 const PANEL_TEMPLATE_LIMIT = 3;
@@ -110,6 +111,7 @@ export function AutopilotsPanel() {
         >
           <Plus />
         </IconButton>
+        <CollapseNavButton />
       </PanelHeader>
       <PanelBody>
         <PanelList>

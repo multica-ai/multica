@@ -204,7 +204,11 @@ EOF
 # a function aborts the script under `set -e` when fn's last command fails, and
 # "no process is listening" is the normal answer here, not an error.
 port_listener_pid() {
-  lsof -nP -iTCP:"$1" -sTCP:LISTEN -t 2>/dev/null | head -1 || true
+  local pid
+  pid="$(lsof -nP -iTCP:"$1" -sTCP:LISTEN -t 2>/dev/null | head -1 || true)"
+  # lsof misses sockets of some processes (e.g. next-server); ss still sees them.
+  [ -n "$pid" ] || pid="$(ss -ltnpH "sport = :$1" 2>/dev/null | sed -n 's/.*pid=\([0-9][0-9]*\).*/\1/p' | head -1 || true)"
+  printf '%s\n' "$pid"
 }
 
 port_free() { [ -z "$(port_listener_pid "$1")" ]; }

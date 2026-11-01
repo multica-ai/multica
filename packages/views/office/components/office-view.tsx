@@ -1,25 +1,35 @@
 "use client";
 
-import { memo, useCallback, useMemo } from "react";
+import { memo, useCallback, useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { agentTaskSnapshotOptions } from "@multica/core/agents";
+import {
+  OFFICE_ROOMS,
+  agentTaskSnapshotOptions,
+  officeRoomOf,
+  useUpdateAgentOfficeRoom,
+  type OfficeRoom,
+} from "@multica/core/agents";
+import { agentListOptions } from "@multica/core/workspace/queries";
 import { useWorkspaceId } from "@multica/core/hooks";
-import type { AgentTask, Issue } from "@multica/core/types";
+import type { Agent, AgentTask, Issue } from "@multica/core/types";
 import { useViewStore } from "@multica/core/issues/stores/view-store-context";
 import { Button } from "@multica/ui/components/ui/button";
 import { useT } from "../../i18n";
 import { BoardView, type BoardViewProps } from "../../issues/components/board-view";
 import { useIssuePeekActions } from "../../issues/surface/peek-context";
 import { useStatusLabel } from "../../issues/utils/status-label";
+import { OfficeAgentPanel, type OfficeAgentTarget } from "./office-agent-panel";
 import { OfficeCanvas, type WorkerSession } from "./office-canvas";
 import { OfficeStorage } from "./office-storage";
 
 const EMPTY_TASKS: AgentTask[] = [];
+const EMPTY_AGENTS: Agent[] = [];
 
 /**
- * The board, drawn as the pixtuoid office. Each issue that has an assignee is a
- * worker at a desk: the tag over the worker names the issue's status, and a click
- * opens the issue in peek. Any other grouping falls back to the classic board.
+ * The board, drawn as the pixtuoid office. Each agent with an issue is a worker at
+ * a desk, and the tag over the worker names its issue's status. A click on the
+ * worker or on its tag opens the one panel that manages the agent: its room, its
+ * work, new issues and chat. Any other grouping falls back to the classic board.
  */
 export const OfficeView = memo(function OfficeView(props: BoardViewProps) {
   const grouping = useViewStore((s) => s.grouping);
@@ -42,12 +52,15 @@ export const OfficeView = memo(function OfficeView(props: BoardViewProps) {
   return <OfficeScene {...props} />;
 });
 
-function OfficeScene({ issues, visibleStatuses }: BoardViewProps) {
+function OfficeScene({ issues, visibleStatuses, projectId }: BoardViewProps) {
   const { t } = useT("issues");
   const wsId = useWorkspaceId();
   const labelOf = useStatusLabel(wsId);
   const peek = useIssuePeekActions();
   const { data: tasks = EMPTY_TASKS } = useQuery(agentTaskSnapshotOptions(wsId));
+  const { data: agents = EMPTY_AGENTS } = useQuery(agentListOptions(wsId));
+  const moveAgent = useUpdateAgentOfficeRoom();
+  const agentById = useMemo(() => new Map(agents.map((agent) => [agent.id, agent])), [agents]);
 
   // The project's agents: every agent assigned to one of its issues, each seated once.
   const agentIds = useMemo(() => {
@@ -78,10 +91,29 @@ function OfficeScene({ issues, visibleStatuses }: BoardViewProps) {
     return map;
   }, [issues, visibleStatuses]);
 
-  const sessions = useMemo<WorkerSession[]>(
-    () => agentIds.map((id) => ({ key: id, working: workingAgents.has(id) })),
-    [agentIds, workingAgents],
+  const roomOf = useCallback(
+    (agentId: string): OfficeRoom => {
+      const agent = agentById.get(agentId);
+      return agent ? officeRoomOf(agent) : officeRoomOf({});
+    },
+    [agentById],
   );
+
+  const sessions = useMemo<WorkerSession[]>(
+    () =>
+      agentIds.map((id) => ({
+        key: id,
+        working: workingAgents.has(id),
+        room: OFFICE_ROOMS.indexOf(roomOf(id)),
+      })),
+    [agentIds, workingAgents, roomOf],
+  );
+
+  const occupancy = useMemo(() => {
+    const counts: Record<OfficeRoom, number> = { product: 0, research: 0, planning: 0, general: 0 };
+    for (const id of agentIds) counts[roomOf(id)] += 1;
+    return counts;
+  }, [agentIds, roomOf]);
 
   const tagText = useCallback(
     (key: string) => {
@@ -91,26 +123,50 @@ function OfficeScene({ issues, visibleStatuses }: BoardViewProps) {
     [focusOf, labelOf, t],
   );
 
-  const onPick = useCallback(
-    (agentId: string) => {
-      const issue = focusOf.get(agentId);
-      if (issue) peek?.open(issue.id);
-    },
-    [focusOf, peek],
-  );
+  // One panel manages an agent, whether the click landed on the agent or on its tag.
+  const [panel, setPanel] = useState<OfficeAgentTarget | null>(null);
 
-  const roomNames = useMemo(
-    () => [t(($) => $.office.room_product), t(($) => $.office.room_research)],
+  const onPick = useCallback(
+    (agentId: string) => setPanel({ agentId, issueId: focusOf.get(agentId)?.id }),
+    [focusOf],
+  );
+  const onMove = useCallback((agentId: string) => setPanel({ agentId }), []);
+
+  const roomNames = useMemo<Record<OfficeRoom, string>>(
+    () => ({
+      product: t(($) => $.office.room_product),
+      research: t(($) => $.office.room_research),
+      planning: t(($) => $.office.room_planning),
+      general: t(($) => $.office.room_general),
+    }),
     [t],
+  );
+  const roomNameList = useMemo(() => OFFICE_ROOMS.map((room) => roomNames[room]), [roomNames]);
+
+  const moveTo = useCallback(
+    (agentId: string, room: OfficeRoom) => moveAgent.mutateAsync({ agentId, room }).then(() => undefined),
+    [moveAgent],
   );
 
   const onOpenIssue = useCallback((issueId: string) => peek?.open(issueId), [peek]);
 
   if (visibleStatuses.length === 0) return <OfficeEmpty />;
   return (
-    <OfficeCanvas sessions={sessions} tagText={tagText} onPick={onPick} roomNames={roomNames}>
-      <OfficeStorage issues={issues} onOpen={onOpenIssue} />
-    </OfficeCanvas>
+    <>
+      <OfficeCanvas sessions={sessions} tagText={tagText} onPick={onPick} onMove={onMove} roomNames={roomNameList}>
+        {(stage) => <OfficeStorage stage={stage} issues={issues} onOpen={onOpenIssue} />}
+      </OfficeCanvas>
+      <OfficeAgentPanel
+        target={panel}
+        issues={issues}
+        projectId={projectId}
+        currentRoom={roomOf}
+        occupancy={occupancy}
+        roomNames={roomNames}
+        onMoveRoom={moveTo}
+        onClose={() => setPanel(null)}
+      />
+    </>
   );
 }
 

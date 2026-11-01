@@ -111,10 +111,17 @@ export class Office {
      */
     issue_end(key: string): void;
     /**
-     * Seat a worker for the issue `key`: a session that walks in to a free desk.
-     * `false` before the first `step` or when the office has no desk left.
+     * Whether a worker for `key` is still in the office: a worker that has
+     * been ended stays until it has walked out of the door.
      */
-    issue_start(key: string): boolean;
+    issue_present(key: string): boolean;
+    /**
+     * Seat a worker for the issue `key` at a free desk of office room `room`
+     * (0..[`OFFICE_ROOMS`]). `seated` puts it at its desk from the first frame;
+     * otherwise it walks in from the door. `false` before the first `step`,
+     * when that room has no desk left, or when the office has none left.
+     */
+    issue_start(key: string, room: number, seated: boolean): boolean;
     /**
      * The worker for `key` works (`true`) or sits idle (`false`).
      */
@@ -192,7 +199,8 @@ export interface InitOutput {
     readonly office_hire: (a: number) => number;
     readonly office_is_day: (a: number, b: number) => number;
     readonly office_issue_end: (a: number, b: number, c: number) => void;
-    readonly office_issue_start: (a: number, b: number, c: number) => number;
+    readonly office_issue_present: (a: number, b: number, c: number) => number;
+    readonly office_issue_start: (a: number, b: number, c: number, d: number, e: number) => number;
     readonly office_issue_working: (a: number, b: number, c: number, d: number) => void;
     readonly office_new: (a: number) => [number, number, number];
     readonly office_overlay_json: (a: number) => [number, number];

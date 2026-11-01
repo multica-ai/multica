@@ -16,6 +16,7 @@ import { useNavigation } from "../../navigation";
 import { IssueContextMenuProvider } from "../../issues/actions";
 import { useT } from "../../i18n";
 import { Building2 } from "@multica/ui/icons";
+import { CollapseNavButton } from "../page-header";
 import { PanelBody, PanelHeader, PanelLink, PanelList, isPathWithin } from "../panel-nav";
 import { PinnedSection, usePanelPins } from "./pinned-section";
 import { useKeptActiveItem } from "./sidebar-tree";
@@ -128,7 +129,9 @@ export function WorkPanel() {
 
   return (
     <>
-      <PanelHeader title={t(($) => $.spaces.work)} />
+      <PanelHeader title={t(($) => $.spaces.work)}>
+        <CollapseNavButton />
+      </PanelHeader>
       {/* Outside PanelBody: clicks inside the menu's portal still bubble
           through the React tree, and must not reach rememberClickedIssue. */}
       <IssueContextMenuProvider variant="sidebar">

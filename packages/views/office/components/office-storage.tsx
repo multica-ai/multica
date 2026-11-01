@@ -5,21 +5,39 @@ import type { Issue } from "@multica/core/types";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { useT } from "../../i18n";
 import { useStatusLabel } from "../../issues/utils/status-label";
-import { UNITS_H, UNITS_W } from "../lib/pixtuoid/office-protocol";
+import type { OfficeStage } from "./office-canvas";
 
 /**
- * The lounge's storage: two filing cabinets set on the floor either side of the
- * rug in the reading room, one for the project's backlog and one for its done
- * issues. A click opens the drawer's list. Their feet stand at the points below.
+ * The lounge's storage: two filing cabinets side by side on the floor just east
+ * of the research room, one for the project's backlog and one for its done
+ * issues. A click opens the drawer's list.
  */
 const CABINETS = [
-  { status: "backlog", at: { x: 8, y: 98 }, tint: "#e4e8ee" },
-  { status: "done", at: { x: 43, y: 98 }, tint: "#dcebd9" },
+  { status: "backlog", tint: "#e4e8ee" },
+  { status: "done", tint: "#dcebd9" },
 ] as const;
 
 type ChestStatus = (typeof CABINETS)[number]["status"];
 
-export function OfficeStorage({ issues, onOpen }: { issues: readonly Issue[]; onOpen: (issueId: string) => void }) {
+/** The cabinets stand just east of the research room, their feet this far below its north wall, in layout units. */
+const FROM_ROOM = 4;
+const FEET_BELOW_ROOM_TOP = 18;
+const CABINET_WIDTH = 11;
+const CABINET_GAP = 2;
+const LABEL_FONT = 2;
+const COUNT_FONT = 2.2;
+/** A size in layout units as a share of the stage's width, as a container-query length. */
+const inStageWidths = (size: number, unitsW: number) => `${(size / unitsW) * 100}cqw`;
+
+export function OfficeStorage({
+  stage,
+  issues,
+  onOpen,
+}: {
+  stage: OfficeStage;
+  issues: readonly Issue[];
+  onOpen: (issueId: string) => void;
+}) {
   const { t } = useT("issues");
   const wsId = useWorkspaceId();
   const labelOf = useStatusLabel(wsId);
@@ -34,16 +52,21 @@ export function OfficeStorage({ issues, onOpen }: { issues: readonly Issue[]; on
     return map;
   }, [issues]);
 
+  const { units, rooms } = stage;
+  const research = rooms[1];
+  if (!research) return null;
   return (
     <>
-      {CABINETS.map((cabinet) => {
+      {CABINETS.map((cabinet, index) => {
+        const x = research.x + research.w + FROM_ROOM + index * (CABINET_WIDTH + CABINET_GAP) + CABINET_WIDTH / 2;
+        const y = research.y + FEET_BELOW_ROOM_TOP;
         const listed = byStatus.get(cabinet.status) ?? [];
         const name = labelOf(cabinet.status);
         return (
           <div
             key={cabinet.status}
             className="pointer-events-none absolute h-0 w-0"
-            style={{ left: `${(cabinet.at.x / UNITS_W) * 100}%`, top: `${(cabinet.at.y / UNITS_H) * 100}%` }}
+            style={{ left: `${(x / units.w) * 100}%`, top: `${(y / units.h) * 100}%` }}
           >
             <button
               type="button"
@@ -51,11 +74,11 @@ export function OfficeStorage({ issues, onOpen }: { issues: readonly Issue[]; on
               aria-label={t(($) => $.office.storage_count, { name, count: listed.length })}
               onClick={() => setOpen(open === cabinet.status ? null : cabinet.status)}
               className="pointer-events-auto group absolute bottom-0 left-0 flex -translate-x-1/2 flex-col rounded-[2px] p-[3px] shadow-[2px_3px_0_rgba(20,22,28,0.35)] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-black"
-              style={{ width: "calc(min(100cqw, calc(100cqh * 3 / 2)) * 0.034)", aspectRatio: "2 / 3", background: "#9ea4ad", border: "1px solid #4f545c" }}
+              style={{ width: inStageWidths(CABINET_WIDTH, units.w), aspectRatio: "2 / 3", background: "#9ea4ad", border: "1px solid #4f545c" }}
             >
               <span
                 className="mb-[3px] truncate whitespace-nowrap rounded-[1px] px-0.5 text-center font-semibold leading-tight text-[#2c2418]"
-                style={{ background: cabinet.tint, fontSize: "max(8px, 0.62cqw)" }}
+                style={{ background: cabinet.tint, fontSize: `max(8px, ${inStageWidths(LABEL_FONT, units.w)})` }}
               >
                 {name}
               </span>
@@ -71,7 +94,7 @@ export function OfficeStorage({ issues, onOpen }: { issues: readonly Issue[]; on
               ))}
               <span
                 className="absolute -right-2 -top-2 rounded-full bg-[#2c2418] px-1.5 font-semibold text-[#fff8ea]"
-                style={{ fontSize: "max(9px, 0.7cqw)" }}
+                style={{ fontSize: `max(9px, ${inStageWidths(COUNT_FONT, units.w)})` }}
               >
                 {listed.length}
               </span>

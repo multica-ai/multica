@@ -221,15 +221,31 @@ export class Office {
         wasm.office_issue_end(this.__wbg_ptr, ptr0, len0);
     }
     /**
-     * Seat a worker for the issue `key`: a session that walks in to a free desk.
-     * `false` before the first `step` or when the office has no desk left.
+     * Whether a worker for `key` is still in the office: a worker that has
+     * been ended stays until it has walked out of the door.
      * @param {string} key
      * @returns {boolean}
      */
-    issue_start(key) {
+    issue_present(key) {
         const ptr0 = passStringToWasm0(key, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
         const len0 = WASM_VECTOR_LEN;
-        const ret = wasm.office_issue_start(this.__wbg_ptr, ptr0, len0);
+        const ret = wasm.office_issue_present(this.__wbg_ptr, ptr0, len0);
+        return ret !== 0;
+    }
+    /**
+     * Seat a worker for the issue `key` at a free desk of office room `room`
+     * (0..[`OFFICE_ROOMS`]). `seated` puts it at its desk from the first frame;
+     * otherwise it walks in from the door. `false` before the first `step`,
+     * when that room has no desk left, or when the office has none left.
+     * @param {string} key
+     * @param {number} room
+     * @param {boolean} seated
+     * @returns {boolean}
+     */
+    issue_start(key, room, seated) {
+        const ptr0 = passStringToWasm0(key, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len0 = WASM_VECTOR_LEN;
+        const ret = wasm.office_issue_start(this.__wbg_ptr, ptr0, len0, room, seated);
         return ret !== 0;
     }
     /**

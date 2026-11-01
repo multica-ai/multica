@@ -9,7 +9,7 @@ import {
   CollectionCreateButton,
   CollectionPageHeader,
 } from "./collection-page";
-import { CollapsedNavTrigger, PAGE_GUTTER, PageHeader } from "./page-header";
+import { CollapseNavButton, CollapsedNavTrigger, PAGE_GUTTER, PageHeader } from "./page-header";
 
 const navigation = vi.hoisted(() => ({ pathname: "/acme/issues" }));
 vi.mock("../navigation", async (importOriginal) => ({
@@ -161,5 +161,52 @@ describe("CollapsedNavTrigger in the app shell", () => {
     act(() => (trigger() as HTMLButtonElement).click());
     expect(trigger()).not.toHaveClass("md:hidden");
     expect(sidebar!.state).toBe("collapsed");
+  });
+});
+
+// The panel's own header carries the way to collapse it while it is open; the
+// page header's trigger only has a job once the panel is gone.
+describe("CollapseNavButton in the app shell", () => {
+  let sidebar: ReturnType<typeof useSidebar> | null = null;
+  function Reader() {
+    sidebar = useSidebar();
+    return null;
+  }
+  function renderInShell(pathname: string) {
+    navigation.pathname = pathname;
+    const { container } = renderWithI18n(
+      <SidebarProvider>
+        <AppShellProvider>
+          <Reader />
+          <CollapseNavButton />
+        </AppShellProvider>
+      </SidebarProvider>,
+    );
+    return () => container.querySelector<HTMLButtonElement>("[data-slot='sidebar-trigger']");
+  }
+
+  it("collapses the open panel", () => {
+    const button = renderInShell("/acme/issues");
+    expect(sidebar!.state).toBe("expanded");
+
+    act(() => button()!.click());
+
+    expect(sidebar!.state).toBe("collapsed");
+  });
+
+  it("is hidden below md, where the nav is a sheet the page header opens", () => {
+    const button = renderInShell("/acme/issues");
+
+    expect(button()).toHaveClass("max-md:hidden");
+  });
+
+  it("renders nothing outside the app shell", () => {
+    const { container } = renderWithI18n(
+      <SidebarProvider>
+        <CollapseNavButton />
+      </SidebarProvider>,
+    );
+
+    expect(container.querySelector("[data-slot='sidebar-trigger']")).toBeNull();
   });
 });
