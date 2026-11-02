@@ -882,7 +882,7 @@
     "not_enabled_self_host_hint": "Auto-hébergement : voir le README du projet pour les détails.",
     "preview_title": "Installation de bot Lark bientôt disponible",
     "preview_description": "Les connexions Lark ne sont pas activées sur ce déploiement. Contactez votre administrateur.",
-    "connected_bots": "Bots connectés",
+    "connected_bots": "Bots",
     "loading": "Chargement…",
     "empty_title": "Aucun bot connecté pour l'instant",
     "empty_description_prefix": "Ouvrez un agent de cet espace de travail et cliquez sur",
@@ -929,7 +929,7 @@
     "install_starting": "Préparation du QR code…",
     "install_scan_hint": "Lark → Scanner → autorisez le nouveau PersonalAgent.",
     "install_open_link_fallback": "Ou touchez ici pour ouvrir dans Lark",
-    "install_success": "Installation terminée — votre bot est en ligne.",
+    "install_success": "Bot associé. Envoyez-lui un message dans Feishu/Lark pour vérifier la réception.",
     "install_success_toast": "Bot Lark installé",
     "install_open_link_fallback_feishu": "Ou touchez ici pour ouvrir dans Feishu",
     "install_open_link_fallback_lark": "Ou touchez ici pour ouvrir dans Lark",
@@ -946,7 +946,12 @@
     "install_error_installer_bind": "Le bot a été installé, mais votre identité Lark n'a pas pu être associée. Réessayez ou contactez le support.",
     "install_error_session_lost": "La session d'installation a expiré ou a été perdue. Scannez à nouveau pour recommencer.",
     "install_error_forbidden": "Vous n'avez plus la permission d'installer des bots Lark dans cet espace de travail. Demandez à un administrateur de l'espace de travail pour continuer.",
-    "install_error_generic": "Échec de l'installation. Réessayez."
+    "install_error_generic": "Échec de l'installation. Réessayez.",
+    "bound_label": "Associé",
+    "inbound_pending": "Associé — en attente de vérification",
+    "inbound_verified": "Réception des messages vérifiée",
+    "inbound_pending_hint": "Envoyez un message à ce bot dans Feishu/Lark pour vérifier la réception. Si rien n’arrive, vérifiez la connexion persistante, l’abonnement im.message.receive_v1 et la publication/approbation de l’application. Les associations existantes peuvent ne pas encore avoir de vérification enregistrée.",
+    "inbound_verified_hint": "Cette association a reçu un message valide. Cela ne confirme ni la connexion continue, ni l’exécution de l’agent, ni ses réponses."
   },
   "composio": {
     "page_description": "Connectez des applications que vos agents peuvent utiliser.",

@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen, fireEvent, waitFor } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import type { AgentTask, Issue } from "@multica/core/types";
 import { I18nProvider } from "@multica/core/i18n/react";
@@ -58,8 +59,12 @@ vi.mock("@multica/core/workspace/queries", () => ({
   }),
 }));
 
+const { ACTOR_NAMES } = vi.hoisted(() => ({
+  ACTOR_NAMES: { "user-1": "Test User", "agent-1": "Lambda" } as Record<string, string>,
+}));
+
 vi.mock("@multica/core/workspace/hooks", () => ({
-  useActorName: () => ({ getActorName: (_t: string, _id: string) => "" }),
+  useActorName: () => ({ getActorName: (_t: string, id: string) => ACTOR_NAMES[id] ?? "" }),
 }));
 
 vi.mock("@multica/core/pins", () => ({
@@ -71,8 +76,14 @@ vi.mock("@multica/core/pins", () => ({
   useDeletePin: () => ({ mutate: vi.fn() }),
 }));
 
+const { cancelRunMock, updateIssueMock } = vi.hoisted(() => ({
+  cancelRunMock: vi.fn(),
+  updateIssueMock: vi.fn(),
+}));
+
 vi.mock("@multica/core/issues/mutations", () => ({
-  useUpdateIssue: () => ({ mutate: vi.fn() }),
+  useUpdateIssue: () => ({ mutate: updateIssueMock }),
+  useCancelIssueRun: () => ({ mutateAsync: cancelRunMock }),
 }));
 
 vi.mock("@multica/core/paths", async () => {
@@ -120,6 +131,10 @@ const { apiMocks, copyTextMock } = vi.hoisted(() => ({
     listTasksByIssue: vi.fn(),
     listIssueWorkflows: vi.fn(),
     listProjects: vi.fn(),
+    getAgentTaskSnapshot: vi.fn(),
+    listIssueUnread: vi.fn(),
+    markIssueRead: vi.fn(),
+    markIssueUnread: vi.fn(),
   },
   copyTextMock: vi.fn(),
 }));
@@ -191,6 +206,17 @@ beforeEach(() => {
   apiMocks.listIssueWorkflows.mockResolvedValue({ workflows: [] });
   apiMocks.listProjects.mockReset();
   apiMocks.listProjects.mockResolvedValue({ projects: [] });
+  apiMocks.getAgentTaskSnapshot.mockReset();
+  apiMocks.getAgentTaskSnapshot.mockResolvedValue([]);
+  apiMocks.listIssueUnread.mockReset();
+  apiMocks.listIssueUnread.mockResolvedValue([]);
+  apiMocks.markIssueRead.mockReset();
+  apiMocks.markIssueRead.mockResolvedValue({ unread: false });
+  apiMocks.markIssueUnread.mockReset();
+  apiMocks.markIssueUnread.mockResolvedValue({ unread: true });
+  cancelRunMock.mockReset();
+  cancelRunMock.mockResolvedValue(undefined);
+  updateIssueMock.mockReset();
 });
 
 describe("IssueActionsDropdown", () => {
@@ -241,7 +267,7 @@ describe("IssueActionsDropdown", () => {
     expect(labels.slice(0, 3)).toEqual(["Rename issue", "Create sub-issue", "Status"]);
   });
 
-  it("clicking the Assignee item opens the shared AssigneePicker popover", async () => {
+  it("opens Assignee as a submenu holding the shared assignee picker", async () => {
     render(
       wrap(
         <IssueActionsDropdown
@@ -254,14 +280,19 @@ describe("IssueActionsDropdown", () => {
     fireEvent.click(screen.getByTestId("trigger"));
     fireEvent.click(await screen.findByText("Assignee"));
 
-    // The shared picker exposes a search input and renders the workspace
-    // member under a "Members" group — both come from `AssigneePicker`, not
-    // the legacy submenu (which had neither).
+    // The search box and the "Members" group come from the shared assignee
+    // picker, so the submenu offers what every other assignee entry point does.
     expect(
       await screen.findByPlaceholderText("Assign to..."),
     ).toBeInTheDocument();
     expect(await screen.findByText("Members")).toBeInTheDocument();
-    expect(await screen.findByText("Test User")).toBeInTheDocument();
+    fireEvent.click(await screen.findByText("Test User"));
+
+    expect(updateIssueMock).toHaveBeenCalledWith(
+      { id: "issue-1", assignee_type: "member", assignee_id: "user-1" },
+      expect.anything(),
+    );
+    await waitFor(() => expect(screen.queryByText("Status")).not.toBeInTheDocument());
   });
 
   it("shows 'Remove parent issue' in the Relations submenu only when the issue has a parent", async () => {
@@ -500,6 +531,120 @@ describe("IssueActionsContextMenu", () => {
     expect(screen.getByText("Rename issue")).toBeInTheDocument();
     expect(screen.getByText("Open in new tab")).toBeInTheDocument();
     expect(screen.getByText("Delete issue")).toBeInTheDocument();
+  });
+
+  it("keeps typed keys in the assignee search box and assigns the match on Enter", async () => {
+    const user = userEvent.setup();
+    render(
+      wrap(
+        <IssueContextMenuProvider>
+          <IssueActionsContextMenu issue={mockIssue}>
+            <div data-testid="row">Row</div>
+          </IssueActionsContextMenu>
+        </IssueContextMenuProvider>,
+      ),
+    );
+
+    fireEvent.contextMenu(screen.getByTestId("row"));
+    await user.click(await screen.findByText("Assignee"));
+    const search = await screen.findByPlaceholderText("Assign to...");
+    await screen.findByText("Test User");
+    await waitFor(() => expect(search).toHaveFocus());
+
+    // The menu's typeahead would otherwise swallow these keys.
+    await user.keyboard("test");
+    expect(search).toHaveValue("test");
+    await user.keyboard("{Enter}");
+
+    expect(updateIssueMock).toHaveBeenCalledWith(
+      { id: "issue-1", assignee_type: "member", assignee_id: "user-1" },
+      expect.anything(),
+    );
+    await waitFor(() => expect(screen.queryByText("Rename issue")).not.toBeInTheDocument());
+  });
+});
+
+describe("Sidebar variant (MUL-8425)", () => {
+  function openSidebarMenu(issue: Issue = mockIssue) {
+    render(
+      wrap(
+        <IssueContextMenuProvider variant="sidebar">
+          <IssueActionsContextMenu issue={issue}>
+            <div data-testid="row">Row</div>
+          </IssueActionsContextMenu>
+        </IssueContextMenuProvider>,
+      ),
+    );
+    fireEvent.contextMenu(screen.getByTestId("row"));
+  }
+
+  const menuLabels = () =>
+    screen.getAllByRole("menuitem").map((item) => item.textContent?.trim());
+
+  it("names the issue and keeps the triage and navigation entries, with current values", async () => {
+    openSidebarMenu({ ...mockIssue, assignee_type: "member", assignee_id: "user-1" } as Issue);
+
+    expect(await screen.findByText("TES-1")).toBeInTheDocument();
+    expect(screen.getByText("Example")).toBeInTheDocument();
+    expect(menuLabels()).toEqual([
+      "StatusTodo",
+      "PriorityMedium",
+      "AssigneeTest User",
+      "Open in new tab",
+      "Pin to sidebar",
+      "Mark as unread",
+      "Copy link",
+      "Copy identifier",
+    ]);
+    expect(screen.getByTestId("row")).toHaveAttribute("data-popup-open");
+    // No workdir entry, so the menu has no reason to fetch the task list.
+    expect(listTasksByIssueMock).not.toHaveBeenCalled();
+  });
+
+  it("marks an unread issue as read", async () => {
+    apiMocks.listIssueUnread.mockResolvedValue([
+      { issue_id: "issue-1", outcome: "completed", agent_id: "agent-1", created_at: "2026-01-01T00:00:00Z" },
+    ]);
+    openSidebarMenu();
+    fireEvent.click(await screen.findByText("Mark as read"));
+
+    await waitFor(() => expect(apiMocks.markIssueRead).toHaveBeenCalledWith("issue-1"));
+  });
+
+  it("marks a read issue as unread", async () => {
+    openSidebarMenu();
+    fireEvent.click(await screen.findByText("Mark as unread"));
+
+    await waitFor(() => expect(apiMocks.markIssueUnread).toHaveBeenCalledWith("issue-1"));
+  });
+
+  it("shows Unassigned when nobody owns the issue", async () => {
+    openSidebarMenu();
+    expect(await screen.findByText("Unassigned")).toBeInTheDocument();
+  });
+
+  it("copies the identifier", async () => {
+    openSidebarMenu();
+    fireEvent.click(await screen.findByText("Copy identifier"));
+
+    await waitFor(() => {
+      expect(copyTextMock).toHaveBeenCalledWith("TES-1");
+      expect(toastSuccessMock).toHaveBeenCalledWith("Copied TES-1");
+    });
+  });
+
+  it("stops a running agent's run after confirming", async () => {
+    apiMocks.getAgentTaskSnapshot.mockResolvedValue([
+      { id: "task-1", issue_id: "issue-1", agent_id: "agent-1", status: "running" },
+      { id: "task-2", issue_id: "issue-2", agent_id: "agent-1", status: "running" },
+    ] as AgentTask[]);
+    openSidebarMenu();
+
+    fireEvent.click(await screen.findByText("Stop Lambda’s run"));
+    expect(cancelRunMock).not.toHaveBeenCalled();
+    fireEvent.click(await screen.findByRole("button", { name: "Stop run" }));
+
+    expect(cancelRunMock).toHaveBeenCalledWith("task-1");
   });
 });
 

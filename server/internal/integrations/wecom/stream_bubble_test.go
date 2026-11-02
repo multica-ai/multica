@@ -43,6 +43,15 @@ type bubbleConn struct {
 	// process, and nothing says whether it did.
 	failClosingWrite error
 
+	// disownAfterFrames makes the connection behave like a stream another
+	// replica or a reconnect has taken over: the first n stream frames land,
+	// and every one after that is refused with 846608 — a refresh, a closing
+	// frame, the answer, all of them. Refusing only some of them would hide
+	// the whole cost of a refresh loop, which is that every attempt is a write
+	// counted against the bot's shared rate limit.
+	disownAfterFrames int
+	streamWrites      int
+
 	// loseClosingAcks is how many closing frames, counted from the first one
 	// written, are entered and never answered — the ack is swallowed the way
 	// a socket that dropped right after the write swallows it. The frames are
@@ -84,6 +93,12 @@ func (c *bubbleConn) WriteMessage(_ int, data []byte) error {
 	c.frames = append(c.frames, env)
 	s := c.sender
 	code := 0
+	if _, isStream := streamOf(env); isStream {
+		c.streamWrites++
+		if c.disownAfterFrames > 0 && c.streamWrites > c.disownAfterFrames {
+			code = errcodeStreamExpired
+		}
+	}
 	lost := false
 	// afterRecord runs once the frame is recorded and before its verdict is
 	// routed: onClosing for a closing frame, onPush for a push.
@@ -237,6 +252,11 @@ type bubbleRig struct {
 	// frames, so the log line is the only thing that separates it from a
 	// handler that returned for some unrelated reason. See failure_origin_test.
 	logs *logRecorder
+
+	// installer is whose bot this is. Left invalid by default, which is what
+	// the bubble tests want — no principal means no round shows its steps, so
+	// nothing here writes a refresh frame. progress_rounds_test.go sets it.
+	installer pgtype.UUID
 }
 
 func newBubbleRig(t *testing.T) *bubbleRig {
@@ -270,6 +290,7 @@ func newBubbleRig(t *testing.T) *bubbleRig {
 		},
 		installation: db.ChannelInstallation{ID: instID, Status: string(InstallationActive)},
 		tasks:        map[string]db.AgentTaskQueue{},
+		transcript:   newFakeTranscript(),
 		// Every round in this file was opened by a WeCom message, which is
 		// what the origin gate in processEvent asks before it touches the
 		// room — or the room's bubble.
@@ -291,6 +312,8 @@ func newBubbleRig(t *testing.T) *bubbleRig {
 		// cannot run at all.
 		Deliveries: q,
 	})
+	// No guard: these tests drive the endings themselves.
+	rig.typing.guardAfter = -1
 	rig.out = NewOutbound(q, reg, streams, nil)
 	// Both halves go on a real bus, subscribed the way boot subscribes them.
 	// Driving the endings through Publish rather than by calling the handlers
@@ -303,6 +326,9 @@ func newBubbleRig(t *testing.T) *bubbleRig {
 }
 
 const bubbleSession = "22222222-2222-2222-2222-222222222222"
+
+// bubbleSender is the WeCom userid every question in these tests comes from.
+const bubbleSender = "USER_1"
 
 func bubbleSessionID(t *testing.T) pgtype.UUID {
 	t.Helper()
@@ -321,10 +347,21 @@ func bubbleSessionID(t *testing.T) pgtype.UUID {
 // runs" by queueing one.
 func (r *bubbleRig) ask(t *testing.T, reqID string) {
 	t.Helper()
+	r.askFrom(t, reqID, channel.ChatTypeP2P)
+}
+
+// askFrom is ask with the kind of chat the question came from, which is half of
+// what decides whether that round's bubble may show the run's steps.
+func (r *bubbleRig) askFrom(t *testing.T, reqID string, chatType channel.ChatType) {
+	t.Helper()
+	wire := "single"
+	if chatType == channel.ChatTypeGroup {
+		wire = "group"
+	}
 	raw, err := json.Marshal(InboundMessage{
 		BotID:        "BOT",
 		ChatID:       "CHAT_1",
-		ChatType:     "single",
+		ChatType:     wire,
 		SenderUserID: "USER_1",
 		ReqID:        reqID,
 	})
@@ -332,10 +369,10 @@ func (r *bubbleRig) ask(t *testing.T, reqID string) {
 		t.Fatalf("marshal raw: %v", err)
 	}
 	r.typing.OnIngested(context.Background(),
-		engine.ResolvedInstallation{ID: r.instID},
+		engine.ResolvedInstallation{ID: r.instID, InstallerUserID: r.installer},
 		channel.InboundMessage{
 			Text:   "a question",
-			Source: channel.Source{ChannelType: TypeWecom, ChatID: "CHAT_1", ChatType: channel.ChatTypeP2P, SenderID: "USER_1"},
+			Source: channel.Source{ChannelType: TypeWecom, ChatID: "CHAT_1", ChatType: chatType, SenderID: bubbleSender},
 			Raw:    raw,
 		},
 		bubbleSessionID(t), bubbleSessionID(t))
@@ -465,6 +502,87 @@ func mustParseTestUUID(t *testing.T, name string) pgtype.UUID {
 		t.Fatalf("parse test task %q: %v", name, err)
 	}
 	return id
+}
+
+// streamIDOf reads the stream id a run's bubble is on right now, out of the
+// store — which changes when the guard rotates the round onto a fresh one.
+func (r *bubbleRig) streamIDOf(t *testing.T, taskName string) string {
+	t.Helper()
+	r.streams.mu.Lock()
+	defer r.streams.mu.Unlock()
+	e := r.streams.boundLocked(bubbleSession, taskUUID(t, taskName))
+	if e == nil || !e.painted {
+		t.Fatalf("%s has no bubble on file", taskName)
+	}
+	return e.handle.StreamID
+}
+
+// unboundStreamID is the stream id of the bubble a question opened that no run
+// has been bound to yet — the state every fresh question is in for the three
+// seconds before its flush enqueues anything.
+func (r *bubbleRig) unboundStreamID(t *testing.T) string {
+	t.Helper()
+	r.streams.mu.Lock()
+	defer r.streams.mu.Unlock()
+	e := r.streams.collectingLocked(bubbleSession)
+	if e == nil || !e.painted {
+		t.Fatal("no bubble is waiting for a run")
+	}
+	return e.handle.StreamID
+}
+
+// rotated is the nine-minute guard firing on one round: it seals the bubble
+// with "处理时间较长，接下一条" and opens a fresh stream on the same req_id for
+// the run to carry on in. It runs the manager's own guard body, so a test gets
+// the real thing without waiting out the window. The round stays on file, on
+// the new stream, which is what the two ids returned say.
+func (r *bubbleRig) rotated(t *testing.T, taskName string) (old, next string) {
+	t.Helper()
+	old = r.streamIDOf(t, taskName)
+	// A rotation is for a run that is alive: one step since the stream opened.
+	r.stepped(t, taskName)
+	r.typing.fireGuard(context.Background(), bubbleSessionID(t), r.seqOf(t, taskName))
+	next = r.streamIDOf(t, taskName)
+	if next == old {
+		t.Fatalf("could not rotate %s: its bubble is still on stream %s", taskName, old)
+	}
+	return old, next
+}
+
+// seqOf is the store's own name for the round a run is bound to — what the
+// guard was armed with, and the one name that survives a rotation.
+func (r *bubbleRig) seqOf(t *testing.T, taskName string) roundSeq {
+	t.Helper()
+	r.streams.mu.Lock()
+	defer r.streams.mu.Unlock()
+	e := r.streams.boundLocked(bubbleSession, taskUUID(t, taskName))
+	if e == nil {
+		t.Fatalf("%s has no round on file", taskName)
+	}
+	return e.seq
+}
+
+// stepped records one sign of life for a run, the way a task:message reaching
+// recordStep does.
+func (r *bubbleRig) stepped(t *testing.T, taskName string) {
+	t.Helper()
+	if slot, _ := r.streams.progressFor(bubbleSessionID(t), taskUUID(t, taskName), taskUUID(t, taskName), 0); !slot.writable {
+		t.Fatalf("%s has no bubble to step into", taskName)
+	}
+}
+
+// streamIDOfSeq reads a round's current stream id by the store's own name for
+// it, so a test can follow one round across a rotation without going through
+// the run bound to it — which is the very thing some of them are checking.
+func (r *bubbleRig) streamIDOfSeq(t *testing.T, seq roundSeq) string {
+	t.Helper()
+	r.streams.mu.Lock()
+	defer r.streams.mu.Unlock()
+	e := r.streams.seqLocked(bubbleSession, seq)
+	if e == nil || !e.painted {
+		t.Fatalf("round %d has no bubble on file", seq)
+	}
+	return e.handle.StreamID
 }
 
 // testTaskUUIDs maps the readable ids these tests use to real UUIDs.
@@ -855,5 +973,130 @@ func TestAnOpeningFrameTheSocketMayHaveTakenKeepsItsHandle(t *testing.T) {
 		t.Fatalf("the store holds %d rounds after an opening frame the socket may have taken, "+
 			"want 1 — if the placeholder is on screen, the handle is the only thing that could "+
 			"ever close it", got)
+	}
+}
+
+// A run whose bubble the guard has rotated must not seize the NEXT question's
+// bubble as its own ending: that question's asker would read the previous
+// answer, and its own run would find no bubble left. Its answer belongs in
+// the stream the rotation opened for it.
+func TestARotatedRunDoesNotSealTheNextQuestionsBubble(t *testing.T) {
+	t.Parallel()
+	rig := newBubbleRig(t)
+
+	// The first round's run is known, and its bubble is rotated mid-run.
+	rig.ran(t, "REQ-J1", "task-1")
+	_, first := rig.rotated(t, "task-1")
+
+	// The next question opens a bubble of its own, and its own run.
+	rig.ran(t, "REQ-J2", "task-2")
+	second := rig.streamIDOf(t, "task-2")
+
+	rig.answer(t, "the first run's answer", "task-1")
+
+	frames := rig.conn.streamFrames(t)
+	sealed := frames[len(frames)-1]
+	if sealed["content"] != "the first run's answer" || sealed["finish"] != true {
+		t.Fatalf("the first run's answer did not seal a bubble: %v", sealed)
+	}
+	if sealed["id"] == second {
+		t.Fatal("the first run seized the second question's bubble; that question's asker reads the wrong answer and its own run has nowhere to land")
+	}
+	if sealed["id"] != first {
+		t.Fatalf("the first run's answer sealed stream %v, want the one its rotation opened (%s)", sealed["id"], first)
+	}
+	if rig.streams.depth() != 1 {
+		t.Fatalf("store holds %d open rounds, want 1 — the second question kept its bubble", rig.streams.depth())
+	}
+	// And the second round's own answer still lands where it belongs.
+	rig.answer(t, "the second run's answer", "task-2")
+	frames = rig.conn.streamFrames(t)
+	last := frames[len(frames)-1]
+	if last["id"] != second || last["content"] != "the second run's answer" || last["finish"] != true {
+		t.Fatalf("the second question's own answer did not seal its bubble: %v", last)
+	}
+}
+
+// The guard is what keeps a run longer than the protocol's window from leaving
+// a spinner nobody can touch. It does not end the round: it seals the stream
+// that is about to expire and opens a fresh one on the same req_id, so the
+// user keeps a live bubble and the answer still lands in place — in the newest
+// one. This drives the real timer; the rotation itself, step by step, is
+// stream_rotation_test.go.
+//
+// It waits for the guard to fire TWICE, which is what pins the re-arm: a
+// rotation that did not arm the next guard would leave the second stream to
+// run into its own window.
+//
+// REVERSE VERIFICATION: make armGuard return without arming (take its
+// guardAfter <= 0 branch unconditionally) and this fails waiting for the third
+// frame; drop the trailing armGuard call in fireGuard instead and it fails
+// waiting for the fifth.
+func TestTheGuardRotatesABubbleTheWindowIsAboutToStrand(t *testing.T) {
+	t.Parallel()
+	rig := newBubbleRig(t)
+	rig.typing.guardAfter = 100 * time.Millisecond
+	rig.ask(t, "REQ-I")
+	rig.queued(t, "task-1")
+	opened := rig.conn.streamFrames(t)[0]["id"]
+
+	// The run keeps stepping the whole time: a rotation is only for a run
+	// that is alive (TestTheGuardLeavesAQuietRoundAlone).
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) && len(rig.conn.streamFrames(t)) < 5 {
+		rig.stepped(t, "task-1")
+		time.Sleep(time.Millisecond)
+	}
+	frames := rig.conn.streamFrames(t)
+	if len(frames) < 5 {
+		t.Fatalf("the guard wrote %d stream frames, want at least 5 (open, seal, reopen, seal, reopen) — the bubble runs into the window and strands", len(frames))
+	}
+	if frames[1]["id"] != opened || frames[1]["finish"] != true || frames[1]["content"] != streamCopyContinued {
+		t.Fatalf("the guard's hand-over frame is %v, want %s sealed with %q", frames[1], opened, streamCopyContinued)
+	}
+	if frames[2]["id"] == opened || frames[2]["finish"] != false {
+		t.Fatalf("the guard did not open a fresh stream after sealing the old one: %v", frames[2])
+	}
+	// The round is NOT over: the answer lands in whichever stream the round is
+	// on by then — a second rotation may have fired under load, so it is read
+	// off the store rather than assumed.
+	rig.answer(t, "the answer to a long question", "task-1")
+	frames = rig.conn.streamFrames(t)
+	last := frames[len(frames)-1]
+	var lastOpened any
+	for _, f := range frames[:len(frames)-1] {
+		if f["finish"] == false && f["content"] == streamThinkingPlaceholder {
+			lastOpened = f["id"]
+		}
+	}
+	if last["id"] != lastOpened || last["finish"] != true || last["content"] != "the answer to a long question" {
+		t.Fatalf("the answer did not seal the newest bubble %v: %v", lastOpened, last)
+	}
+	if pushes := rig.conn.pushes(t); len(pushes) != 0 {
+		t.Errorf("the answer went out as %d plain message(s) instead of into the rotated bubble", len(pushes))
+	}
+}
+
+// TestTheGuardRotatesTheBubbleWhileTheServerStillAcceptsFrames pins the other
+// constant, as the relationship that gives it its meaning.
+//
+// The guard's whole job is to hand the run over to a fresh stream before the
+// server stops accepting frames on the old one. Its hand-over frame is written
+// at streamGuardAfter and has to be accepted, so it needs real headroom under
+// the measured ceiling — not merely a value below streamMaxAge. Without this, a
+// guard moved up to the window's edge still passes every test in this file and
+// fails only in production, where the hand-over is refused and the user is
+// left watching the spinner it was supposed to replace.
+func TestTheGuardRotatesTheBubbleWhileTheServerStillAcceptsFrames(t *testing.T) {
+	t.Parallel()
+	const headroom = time.Minute
+	if streamGuardAfter >= streamMaxAge {
+		t.Fatalf("the guard fires at %v and the window closes at %v — the guard's own frame is "+
+			"refused, so the bubble it exists to hand over spins for good", streamGuardAfter, streamMaxAge)
+	}
+	if got := streamMaxAge - streamGuardAfter; got < headroom {
+		t.Fatalf("the guard fires %v before the window closes, want at least %v — one slow frame "+
+			"and the hand-over is refused, leaving the asker the spinner the guard was there to "+
+			"replace", got, headroom)
 	}
 }

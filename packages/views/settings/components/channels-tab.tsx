@@ -38,6 +38,8 @@ interface ChannelEntry {
   description: string;
   content: ReactNode;
   state: ConnectionState;
+  boundLabel?: string;
+  connectedLabel?: string;
 }
 
 // The IM channels soft-revoke: the row survives with status 'revoked', so a row
@@ -64,7 +66,13 @@ export function ChannelsTab() {
   const lark = useQuery({
     ...larkInstallationsOptions(wsId),
     enabled: canView,
-    select: hasActiveInstallation,
+    select: (data) => {
+      const active = data.installations.filter((inst) => inst.status === "active");
+      return {
+        active: active.length > 0,
+        verified: active.some((inst) => !!inst.first_message_received_at),
+      };
+    },
   });
   const slack = useQuery({
     ...slackInstallationsOptions(wsId),
@@ -92,7 +100,9 @@ export function ChannelsTab() {
       label: t(($) => $.lark.section_title),
       description: t(($) => $.lark.page_description),
       content: <LarkTab />,
-      state: lark,
+      state: { ...lark, data: lark.data?.active },
+      boundLabel: lark.data?.verified ? undefined : t(($) => $.lark.bound_label),
+      connectedLabel: t(($) => $.lark.inbound_verified),
     },
     {
       id: "slack",
@@ -179,7 +189,7 @@ export function ChannelsTab() {
                 <span className="text-body font-medium text-foreground">
                   {channel.label}
                 </span>{" "}
-                <ConnectionBadge state={channel.state} />
+                <ConnectionBadge state={channel.state} boundLabel={channel.boundLabel} connectedLabel={channel.connectedLabel} />
               </span>
               <span className="mt-1 block text-caption leading-5 text-muted-foreground">
                 {channel.description}
@@ -196,7 +206,11 @@ export function ChannelsTab() {
   );
 }
 
-export function ConnectionBadge({ state }: { state: ConnectionState }) {
+export function ConnectionBadge({ state, boundLabel, connectedLabel }: {
+  state: ConnectionState;
+  boundLabel?: string;
+  connectedLabel?: string;
+}) {
   const { t } = useT("settings");
   const connected = !state.isError && !state.isPending && state.data === true;
   const label = state.isError
@@ -204,16 +218,16 @@ export function ConnectionBadge({ state }: { state: ConnectionState }) {
     : state.isPending
       ? t(($) => $.integrations.status_loading)
       : connected
-        ? t(($) => $.integrations.status_connected)
+        ? (boundLabel ?? connectedLabel ?? t(($) => $.integrations.status_connected))
         : t(($) => $.integrations.status_not_connected);
   return (
     <span
       className={cn(
         "inline-flex items-center gap-1.5 text-caption",
-        connected ? "text-success" : "text-muted-foreground",
+        connected && !boundLabel ? "text-success" : "text-muted-foreground",
       )}
     >
-      {connected && (
+      {connected && !boundLabel && (
         <span aria-hidden="true" className="size-1.5 rounded-full bg-success" />
       )}
       {label}

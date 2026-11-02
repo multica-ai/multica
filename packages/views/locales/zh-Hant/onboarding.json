@@ -95,7 +95,7 @@
     },
     "use_case": {
       "question": "你打算用 Multica 做什麼？",
-      "ship_code": "讓 AI AI 代理幫我寫程式碼",
+      "ship_code": "讓 AI 代理幫我寫程式碼",
       "manage_team": "給團隊做任務管理",
       "personal_tasks": "管理我自己的任務",
       "plan_research": "計劃、頭腦風暴、調研",

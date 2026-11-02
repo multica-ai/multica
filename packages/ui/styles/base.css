@@ -102,7 +102,9 @@
  * per-frame text repaint caused by animating a clipped background-position.
  * The old 200%-wide gradient travelled four label widths per 2.5s cycle.
  * A six-width window with a repeating two-width mask preserves that spacing
- * and covers the label throughout the sweep, including the loop seam. */
+ * and covers the label throughout the sweep, including the loop seam.
+ * Hosts can raise contrast through the --shimmer-text-* variables (base and
+ * highlight colors, and how far the highlight band spreads from its peak). */
 @keyframes shimmer-text-window {
   from { transform: translateX(-66.6666666667%); }
   to { transform: translateX(0%); }
@@ -121,7 +123,7 @@
   vertical-align: bottom;
   white-space: nowrap;
   text-overflow: ellipsis;
-  color: var(--muted-foreground);
+  color: var(--shimmer-text-base, var(--muted-foreground));
 }
 
 .shimmer-text-window {
@@ -132,7 +134,12 @@
   height: 100%;
   pointer-events: none;
   user-select: none;
-  mask-image: linear-gradient(90deg, transparent 35%, black 50%, transparent 65%);
+  mask-image: linear-gradient(
+    90deg,
+    transparent calc(50% - var(--shimmer-text-spread, 15%)),
+    black 50%,
+    transparent calc(50% + var(--shimmer-text-spread, 15%))
+  );
   mask-size: calc(100% / 3) 100%;
   mask-repeat: repeat-x;
   animation: shimmer-text-window 2.5s linear infinite;
@@ -146,7 +153,7 @@
   width: calc(100% / 6);
   overflow: hidden;
   text-overflow: ellipsis;
-  color: var(--foreground);
+  color: var(--shimmer-text-highlight, var(--foreground));
   animation: shimmer-text-copy 2.5s linear infinite;
 }
 
@@ -280,12 +287,23 @@ html[data-dnd-dragging="true"] * {
 
 [data-sidebar-resizing="true"] [data-slot="sidebar-gap"],
 [data-sidebar-resizing="true"] [data-slot="sidebar-container"],
-[data-sidebar-resizing="true"] [data-sidebar-resize-consumer] {
+[data-sidebar-resizing="true"] [data-sidebar-resize-consumer],
+[data-sidebar-resizing="true"] [data-slot="space-panel"],
+[data-sidebar-resizing="true"] [data-slot="list-column"] {
   transition: none !important;
 }
 
 [data-sidebar-resizing="true"] [data-sidebar="rail"]::after {
   background-color: var(--sidebar-border);
+}
+
+[data-sidebar-resizing="true"] [data-slot="space-panel-resize"]::after {
+  background-color: color-mix(in oklab, var(--ring) 60%, transparent);
+}
+
+html[data-sidebar-resizing="true"] {
+  cursor: ew-resize;
+  user-select: none;
 }
 
 /* Right detail sidebars use react-resizable-panels, which sizes panels by

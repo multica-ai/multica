@@ -1,12 +1,10 @@
 {
   "page": {
     "title": "Skills",
-    "learn_more": "了解更多 →",
     "new_skill": "新建 skill",
-    "search_placeholder": "搜索 skill...",
     "scopes": {
       "all": {
-        "label": "全部",
+        "label": "全部 skill",
         "description": "工作区里所有 skill"
       },
       "used": {
@@ -18,7 +16,7 @@
         "description": "未分配给任何智能体的 skill"
       },
       "mine": {
-        "label": "我创建的",
+        "label": "我的 skill",
         "description": "你创建的 skill"
       }
     },
@@ -76,8 +74,6 @@
     "added_toast": "已添加到 {{name}}",
     "add_failed_toast": "添加 skill 失败",
     "delete": "删除",
-    "selected": "已选 {{count}} 项",
-    "clear_selection": "清除选择",
     "delete_no_permission": "选中项包含仅创建者或管理员可删除的 skill",
     "delete_dialog_title_other": "删除 {{count}} 个 skill？",
     "delete_dialog_desc_other": "将永久删除选中的 {{count}} 个 skill，并从所有智能体上移除。",
@@ -98,28 +94,16 @@
     "added_multi_toast_other": "已添加到 {{count}} 个智能体"
   },
   "toolbar": {
-    "result_count_title": "当前结果 / 全部 skill",
-    "filter_label": "筛选",
-    "filter_active_count_other": "{{count}} 项筛选",
-    "clear_filters": "清除筛选",
     "section_usage": "使用状态",
     "section_labels": "标签",
     "filter_search_placeholder": "筛选...",
     "no_labels": "还没有标签",
     "no_results": "无结果",
-    "display": "显示",
-    "sort_by": "排序",
-    "direction_asc": "升序",
-    "direction_desc": "降序",
-    "section_columns": "显示列",
     "manage_labels": "管理标签...",
     "manage_labels_title": "Skill 标签"
   },
   "detail": {
-    "all_skills": "全部 skill",
     "read_only": "只读",
-    "delete_aria": "删除 skill",
-    "delete_tooltip": "删除 skill",
     "supporting_data_warning": "部分工作区数据加载失败。创建者归属、运行时名称、编辑权限可能要等下次刷新才完整。",
     "delete_file": "删除文件",
     "name_placeholder": "skill-name",
@@ -154,8 +138,6 @@
     "toast_deleted": "已删除 skill",
     "toast_delete_failed": "删除 skill 失败",
     "refresh": {
-      "button": "更新",
-      "tooltip": "从来源重新下载这个 skill",
       "source_github": "GitHub",
       "source_skills_sh": "Skills.sh",
       "source_clawhub": "ClawHub",
@@ -194,29 +176,18 @@
       }
     },
     "header": {
-      "files_other": "{{count}} 个文件",
-      "used_by_other": "{{count}} 个智能体在用",
-      "updated": "{{when}}更新",
-      "updated_by": "{{name}} 于{{when}}更新"
-    },
-    "tabs": {
-      "aria": "技能分区",
-      "overview": "概览",
-      "files_other": "文件 {{count}}"
+      "files_other": "{{count}} 个文件"
     },
     "overview": {
       "properties": "属性",
-      "properties_hint": "这些字段与 SKILL.md 的 frontmatter 保持同步。",
       "name": "名称",
       "description": "描述",
       "description_hint": "智能体据此决定何时加载 skill。",
       "labels": "标签",
-      "used_by_other": "被 {{count}} 个智能体使用",
       "used_by_empty": "还未分配给任何智能体。打开某个智能体的 Skills 标签页进行分配。",
       "permissions_owner": "你可以编辑和删除该技能。改动将在智能体下次运行时生效。",
       "permissions_locked_creator": "只有创建者（{{name}}）或工作区管理员可以编辑该技能。",
       "permissions_locked": "只有创建者或工作区管理员可以编辑该技能。",
-      "properties_help": "关于 skill 属性",
       "character_count": "{{count}} 个字符"
     },
     "files": {
@@ -229,6 +200,21 @@
       "mode_preview": "预览",
       "mode_edit": "编辑",
       "mode_raw": "纯文本"
+    },
+    "sections": {
+      "content": "内容",
+      "files": "文件",
+      "edit": "编辑",
+      "open": "打开",
+      "add": "添加"
+    },
+    "menu": {
+      "copy_link": "复制链接",
+      "link_copied": "已复制链接",
+      "delete": "删除 skill"
+    },
+    "panel": {
+      "add_description": "添加描述"
     }
   },
   "create": {

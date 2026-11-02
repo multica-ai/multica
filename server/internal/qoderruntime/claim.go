@@ -10,6 +10,10 @@ type claimedTask struct {
 	WorkspaceID           string            `json:"workspace_id"`
 	IssueID               string            `json:"issue_id"`
 	ChatSessionID         string            `json:"chat_session_id,omitempty"`
+	ChatMessage           string            `json:"chat_message,omitempty"`
+	ChatAttachments       []json.RawMessage `json:"chat_message_attachments,omitempty"`
+	ChatChannelType       string            `json:"chat_channel_type,omitempty"`
+	ChatType              string            `json:"chat_type,omitempty"`
 	IsLeaderTask          bool              `json:"is_leader_task,omitempty"`
 	AuthToken             string            `json:"auth_token,omitempty"`
 	RemoteMCPConnections  []json.RawMessage `json:"remote_mcp_connections,omitempty"`
@@ -27,9 +31,19 @@ type claimedTask struct {
 	TriggerAuthorName     string            `json:"trigger_author_name,omitempty"`
 	ProjectResources      []claimedResource `json:"project_resources,omitempty"`
 	Repos                 []claimedRepo     `json:"repos,omitempty"`
+
+	QuickCreatePrompt        string          `json:"quick_create_prompt,omitempty"`
+	QuickCreatePriority      string          `json:"quick_create_priority,omitempty"`
+	QuickCreateDueDate       string          `json:"quick_create_due_date,omitempty"`
+	QuickCreateAttachmentIDs []string        `json:"quick_create_attachment_ids,omitempty"`
+	QuickCreateSourceContext json.RawMessage `json:"quick_create_source_context,omitempty"`
+	ProjectID                string          `json:"project_id,omitempty"`
+	ParentIssueID            string          `json:"parent_issue_id,omitempty"`
+	SquadID                  string          `json:"squad_id,omitempty"`
 }
 
 type claimedAgent struct {
+	ID            string            `json:"id"`
 	Instructions  string            `json:"instructions"`
 	Skills        []claimedSkill    `json:"skills,omitempty"`
 	SkillRefs     []json.RawMessage `json:"skill_refs,omitempty"`

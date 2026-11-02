@@ -877,7 +877,7 @@
     "not_enabled_self_host_hint": "自托管用户：详见项目 README。",
     "preview_title": "飞书 Bot 安装即将上线",
     "preview_description": "此部署尚未启用飞书连接，请联系管理员。",
-    "connected_bots": "已连接的 Bot",
+    "connected_bots": "机器人",
     "loading": "加载中…",
     "empty_title": "尚未连接 Bot",
     "empty_description_prefix": "在本工作区打开一个智能体，点击",
@@ -924,7 +924,7 @@
     "install_starting": "正在准备二维码…",
     "install_scan_hint": "飞书 → 扫一扫 → 授权新 PersonalAgent。",
     "install_open_link_fallback": "或点这里直接在飞书中打开",
-    "install_success": "安装完成，Bot 已上线。",
+    "install_success": "机器人已绑定。请在飞书/Lark 中发送消息以验证接收。",
     "install_success_toast": "飞书 Bot 已安装",
     "install_open_link_fallback_feishu": "或点这里直接在飞书中打开",
     "install_open_link_fallback_lark": "或点这里直接在 Lark 中打开",
@@ -941,7 +941,12 @@
     "install_error_installer_bind": "已安装 Bot，但未能绑定你的飞书身份。请重试或联系管理员。",
     "install_error_session_lost": "安装会话已失效或丢失，请重新扫码。",
     "install_error_forbidden": "你已没有在此工作区安装飞书 Bot 的权限，请联系工作区管理员。",
-    "install_error_generic": "安装失败，请重试。"
+    "install_error_generic": "安装失败，请重试。",
+    "bound_label": "已绑定",
+    "inbound_pending": "已绑定，等待消息验证",
+    "inbound_verified": "消息接收已验证",
+    "inbound_pending_hint": "请在飞书/Lark 中给此机器人发送消息以验证接收。若未收到，请检查长连接模式、im.message.receive_v1 事件订阅以及应用发布和审批状态。已有绑定可能尚无验证记录。",
+    "inbound_verified_hint": "本次绑定已收到有效消息；这不代表持续在线、智能体执行成功或回复成功。"
   },
   "composio": {
     "page_description": "连接智能体可使用的应用。",

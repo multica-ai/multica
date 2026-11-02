@@ -1,26 +1,26 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRegisterCommandBarContext } from "../../search/register-context";
 import {
   AlertCircle,
-  ArrowLeft,
-  Bot,
-  Clock3,
+  Archive,
+  Copy,
+  Hash,
+  Link2,
   Lock,
   MessageSquare,
   MoreHorizontal,
   Plus,
+  RotateCcw,
   Server,
+  Settings2,
+  Square,
   Trash2,
 } from "@multica/ui/icons";
 import { toast } from "sonner";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import type {
-  Agent,
-  AgentRuntime,
-  UpdateAgentRequest,
-} from "@multica/core/types";
+import type { Agent, UpdateAgentRequest } from "@multica/core/types";
 import {
   type AgentPresenceDetail,
   isAgentRuntimeBound,
@@ -38,11 +38,21 @@ import {
   memberListOptions,
   workspaceKeys,
 } from "@multica/core/workspace/queries";
-import { runtimeDisplayLabel, runtimeListOptions } from "@multica/core/runtimes";
+import { runtimeListOptions } from "@multica/core/runtimes";
 import { useAgentPermissions } from "@multica/core/permissions";
 import { Button } from "@multica/ui/components/ui/button";
 import { IconButton } from "@multica/ui/components/common/icon-button";
 import { CapabilityBanner } from "@multica/ui/components/common/capability-banner";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@multica/ui/components/ui/alert-dialog";
 import {
   Dialog,
   DialogContent,
@@ -55,18 +65,49 @@ import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
+  DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@multica/ui/components/ui/dropdown-menu";
 import { Skeleton } from "@multica/ui/components/ui/skeleton";
+import { copyText } from "@multica/ui/lib/clipboard";
 import { cn } from "@multica/ui/lib/utils";
 import { AppLink, useNavigation } from "../../navigation";
-import { PAGE_GUTTER, PAGE_RAIL, PageHeader } from "../../layout/page-header";
+import { CollectionPageState } from "../../layout/collection-page";
+import {
+  OBJECT_PAGE_BODY,
+  ObjectIdentity,
+  ObjectPage,
+} from "../../layout/object-page";
 import { ActorAvatar } from "../../common/actor-avatar";
-import { AgentPresenceIndicator } from "./agent-presence-indicator";
-import { VisibilityBadge } from "./visibility-badge";
-import { AgentOverviewPane, type DetailTab } from "./agent-overview-pane";
-import { ExpandableDescription } from "../../common/expandable-description";
-import { useT, useTimeAgo } from "../../i18n";
+import { useT } from "../../i18n";
+import { availabilityConfig } from "../presence";
+import {
+  AgentAdvancedSettings,
+  isAdvancedSection,
+  type AdvancedSection,
+} from "./agent-advanced-settings";
+import { AgentInstructionsSection } from "./agent-instructions-section";
+import { AgentPropertiesPanel } from "./agent-properties-panel";
+import { describeCancelImpact } from "./agent-row-actions";
+import { AgentSkillsSection } from "./agent-skills-section";
+import { AgentWorkDialog } from "./agent-work-dialog";
+import { AgentWorkSections } from "./tabs/activity-tab";
+
+const AGENT_DETAIL_LAYOUT_ID = "multica_agent_detail_layout";
+
+/**
+ * The page's `?view=` deep link. Every view the old tabbed page had stays
+ * linkable: settings sections open Advanced settings there, `work` opens the
+ * work list, and the rest are the page itself. `?tab=` predates `?view=`.
+ */
+function viewFromParams(params: URLSearchParams): string | null {
+  const view = params.get("view");
+  if (view !== null) return view;
+  const tab = params.get("tab");
+  if (tab === "settings") return "general";
+  if (tab === "capabilities") return "skills";
+  return tab;
+}
 
 interface AgentDetailPageProps {
   agentId: string;
@@ -120,10 +161,8 @@ export function AgentDetailPage({ agentId }: AgentDetailPageProps) {
     useMemo(() => (agent ? { kind: "agent", agent } : null), [agent]),
   );
 
-  // Permission hook MUST be called unconditionally — its `agent | null`
-  // signature handles the not-found / loading case internally so the early
-  // returns below don't violate the rules of hooks. Backend gates archive
-  // and restore identically to edit, so a single `canEdit` covers them all.
+  // Backend gates archive and restore identically to edit, so a single
+  // `canEdit` covers them all.
   const {
     canAssign,
     canEdit,
@@ -131,80 +170,121 @@ export function AgentDetailPage({ agentId }: AgentDetailPageProps) {
   } = useAgentPermissions(agent, wsId);
 
   const [confirmArchive, setConfirmArchive] = useState(false);
+  const [confirmCancelRuns, setConfirmCancelRuns] = useState(false);
 
-  // One-shot channel: the inspector's compact Lark status row asks the
-  // overview pane to focus a tab. The pane clears it after consuming.
-  const [tabNavIntent, setTabNavIntent] = useState<DetailTab | null>(null);
+  const urlView = viewFromParams(navigation.searchParams);
+  const [advancedSection, setAdvancedSection] = useState<AdvancedSection | null>(
+    () => (isAdvancedSection(urlView) ? urlView : null),
+  );
+  const [workOpen, setWorkOpen] = useState(() => urlView === "work");
+  const lastUrlViewRef = useRef(urlView);
 
-  const handleUpdate = async (id: string, data: Record<string, unknown>) => {
-    // Optimistic update: patch the matching agent in the cached list
-    // BEFORE the network round-trip so the inspector picker chips flip to
-    // the new value immediately on click. Without this, every inspector
-    // picker (thinking / visibility / concurrency / model / runtime) waits
-    // 0.5-2s for the API response + invalidate + refetch before the trigger
-    // updates — readable as obvious lag in the UI.
-    //
-    // On error we rollback only the fields THIS call wrote, leaving any
-    // other concurrently-mutated fields untouched, then invalidate so the
-    // cache converges with the server. A whole-list snapshot rollback
-    // would clobber a concurrent successful mutation if the failing call
-    // resolves last (e.g. flipping visibility then runtime simultaneously
-    // and only the visibility PATCH fails).
-    const optimisticData =
-      typeof data.runtime_id === "string"
-        ? { ...data, runtime_bound: data.runtime_id.trim().length > 0 }
-        : data;
-    const queryKey = workspaceKeys.agents(wsId);
-    const detailQueryKey = workspaceKeys.agent(wsId, id);
-    const prevAgents = qc.getQueryData<Agent[]>(queryKey);
-    const prevListAgent = prevAgents?.find((a) => a.id === id);
-    const prevDetailAgent = qc.getQueryData<Agent>(detailQueryKey);
-    const previousFields = (previousAgent: Agent | undefined) => {
-      const fields: Record<string, unknown> = {};
-      if (!previousAgent) return fields;
-      for (const key of Object.keys(optimisticData)) {
-        fields[key] = (
-          previousAgent as unknown as Record<string, unknown>
-        )[key];
-      }
-      return fields;
-    };
-    const prevListFields = previousFields(prevListAgent);
-    const prevDetailFields = previousFields(prevDetailAgent);
-    qc.setQueryData<Agent[]>(queryKey, (old) =>
-      old?.map((a) =>
-        a.id === id ? ({ ...a, ...optimisticData } as Agent) : a,
-      ),
-    );
-    qc.setQueryData<Agent>(detailQueryKey, (old) =>
-      old ? ({ ...old, ...optimisticData } as Agent) : old,
-    );
-    try {
-      const updatedAgent = await api.updateAgent(
-        id,
-        data as UpdateAgentRequest,
+  // Back/forward or a link landing on this mounted page.
+  useEffect(() => {
+    if (urlView === lastUrlViewRef.current) return;
+    lastUrlViewRef.current = urlView;
+    setAdvancedSection(isAdvancedSection(urlView) ? urlView : null);
+    setWorkOpen(urlView === "work");
+  }, [urlView]);
+
+  const writeView = useCallback(
+    (view: string | null) => {
+      lastUrlViewRef.current = view;
+      const params = new URLSearchParams(navigation.searchParams);
+      params.delete("tab");
+      if (view === null) params.delete("view");
+      else params.set("view", view);
+      const query = params.toString();
+      navigation.replace(`${navigation.pathname}${query ? `?${query}` : ""}`);
+    },
+    [navigation],
+  );
+  const openAdvanced = useCallback(
+    (section: AdvancedSection | null) => {
+      setAdvancedSection(section);
+      writeView(section);
+    },
+    [writeView],
+  );
+  const openWork = useCallback(
+    (open: boolean) => {
+      setWorkOpen(open);
+      writeView(open ? "work" : null);
+    },
+    [writeView],
+  );
+
+  const handleUpdate = useCallback(
+    async (id: string, data: Record<string, unknown>) => {
+      // Optimistic update: patch the matching agent in the cached list
+      // BEFORE the network round-trip so the pickers flip to the new value
+      // immediately on click. Without this, every picker waits 0.5-2s for
+      // the API response + invalidate + refetch before the trigger updates —
+      // readable as obvious lag in the UI.
+      //
+      // On error we rollback only the fields THIS call wrote, leaving any
+      // other concurrently-mutated fields untouched, then invalidate so the
+      // cache converges with the server. A whole-list snapshot rollback
+      // would clobber a concurrent successful mutation if the failing call
+      // resolves last (e.g. flipping visibility then runtime simultaneously
+      // and only the visibility PATCH fails).
+      const optimisticData =
+        typeof data.runtime_id === "string"
+          ? { ...data, runtime_bound: data.runtime_id.trim().length > 0 }
+          : data;
+      const queryKey = workspaceKeys.agents(wsId);
+      const detailQueryKey = workspaceKeys.agent(wsId, id);
+      const prevAgents = qc.getQueryData<Agent[]>(queryKey);
+      const prevListAgent = prevAgents?.find((a) => a.id === id);
+      const prevDetailAgent = qc.getQueryData<Agent>(detailQueryKey);
+      const previousFields = (previousAgent: Agent | undefined) => {
+        const fields: Record<string, unknown> = {};
+        if (!previousAgent) return fields;
+        for (const key of Object.keys(optimisticData)) {
+          fields[key] = (
+            previousAgent as unknown as Record<string, unknown>
+          )[key];
+        }
+        return fields;
+      };
+      const prevListFields = previousFields(prevListAgent);
+      const prevDetailFields = previousFields(prevDetailAgent);
+      qc.setQueryData<Agent[]>(queryKey, (old) =>
+        old?.map((a) =>
+          a.id === id ? ({ ...a, ...optimisticData } as Agent) : a,
+        ),
       );
-      cacheAgentResponse(qc, wsId, updatedAgent, { insertIntoList: false });
-      void qc.invalidateQueries({ queryKey });
-      toast.success(t(($) => $.detail.agent_updated_toast));
-    } catch (e) {
-      if (prevListAgent) {
-        qc.setQueryData<Agent[]>(queryKey, (old) =>
-          old?.map((a) =>
-            a.id === id ? ({ ...a, ...prevListFields } as Agent) : a,
-          ),
+      qc.setQueryData<Agent>(detailQueryKey, (old) =>
+        old ? ({ ...old, ...optimisticData } as Agent) : old,
+      );
+      try {
+        const updatedAgent = await api.updateAgent(
+          id,
+          data as UpdateAgentRequest,
         );
+        cacheAgentResponse(qc, wsId, updatedAgent, { insertIntoList: false });
+        void qc.invalidateQueries({ queryKey });
+        toast.success(t(($) => $.detail.agent_updated_toast));
+      } catch (e) {
+        if (prevListAgent) {
+          qc.setQueryData<Agent[]>(queryKey, (old) =>
+            old?.map((a) =>
+              a.id === id ? ({ ...a, ...prevListFields } as Agent) : a,
+            ),
+          );
+        }
+        if (prevDetailAgent) {
+          qc.setQueryData<Agent>(detailQueryKey, (old) =>
+            old ? ({ ...old, ...prevDetailFields } as Agent) : old,
+          );
+        }
+        void qc.invalidateQueries({ queryKey });
+        toast.error(e instanceof Error ? e.message : t(($) => $.detail.update_failed_toast));
+        throw e;
       }
-      if (prevDetailAgent) {
-        qc.setQueryData<Agent>(detailQueryKey, (old) =>
-          old ? ({ ...old, ...prevDetailFields } as Agent) : old,
-        );
-      }
-      void qc.invalidateQueries({ queryKey });
-      toast.error(e instanceof Error ? e.message : t(($) => $.detail.update_failed_toast));
-      throw e;
-    }
-  };
+    },
+    [qc, t, wsId],
+  );
 
   const handleArchive = async (id: string) => {
     try {
@@ -226,79 +306,114 @@ export function AgentDetailPage({ agentId }: AgentDetailPageProps) {
     }
   };
 
+  const handleCancelRuns = async (id: string) => {
+    try {
+      const { cancelled } = await api.cancelAgentTasks(id);
+      qc.invalidateQueries({ queryKey: workspaceKeys.agents(wsId) });
+      toast.success(
+        cancelled === 0
+          ? t(($) => $.row_actions.no_tasks_to_cancel_toast)
+          : t(($) => $.row_actions.cancelled_tasks_toast, { count: cancelled }),
+      );
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : t(($) => $.row_actions.cancel_failed_toast));
+    }
+  };
+
+  const listSegment = { href: paths.agents(), label: t(($) => $.page.title) };
+
   // --- Loading ---
   if (!agent && (agentsLoading || detailQuery.isPending)) {
-    return <DetailLoadingSkeleton />;
+    return (
+      <ObjectPage
+        layoutId={AGENT_DETAIL_LAYOUT_ID}
+        segments={[listSegment]}
+        leaf={<Skeleton className="h-4 w-40" />}
+      >
+        <DetailLoadingSkeleton />
+      </ObjectPage>
+    );
   }
 
   // --- No permission (private agent the caller is not in allowed_principals for) ---
   if (!agent && isForbidden) {
     return (
-      <div className="flex flex-1 min-h-0 flex-col">
-        <BackHeader paths={paths.agents()} title={t(($) => $.detail.back_to_agents)} />
-        <div className="flex flex-1 flex-col items-center justify-center gap-3 px-6 py-16 text-center">
-          <Lock className="h-8 w-8 text-muted-foreground" />
-          <div>
-            <p className="text-body font-medium">{t(($) => $.detail.no_access_title)}</p>
-            <p className="mt-1 text-caption text-muted-foreground">
-              {t(($) => $.detail.no_access_hint)}
-            </p>
-          </div>
-          <Button
-            size="sm"
-            render={<AppLink href={paths.agents()} />}
-            nativeButton={false}
-          >
-            {t(($) => $.detail.back_to_agents_full)}
-          </Button>
-        </div>
-      </div>
+      <ObjectPage
+        layoutId={AGENT_DETAIL_LAYOUT_ID}
+        segments={[listSegment]}
+        leaf={
+          <span className="truncate text-muted-foreground">
+            {t(($) => $.detail.no_access_title)}
+          </span>
+        }
+      >
+        <CollectionPageState
+          icon={Lock}
+          title={t(($) => $.detail.no_access_title)}
+          description={t(($) => $.detail.no_access_hint)}
+          actions={
+            <Button
+              size="sm"
+              variant="outline"
+              render={<AppLink href={paths.agents()} />}
+              nativeButton={false}
+            >
+              {t(($) => $.detail.back_to_agents_full)}
+            </Button>
+          }
+        />
+      </ObjectPage>
     );
   }
 
   // --- Not found / error ---
   if (!agent) {
     const loadError = detailError ?? agentsError;
+    const title = isNotFound
+      ? t(($) => $.detail.not_found_title)
+      : t(($) => $.detail.load_failed_title);
     return (
-      <div className="flex flex-1 min-h-0 flex-col">
-        <BackHeader paths={paths.agents()} title={t(($) => $.detail.back_to_agents)} />
-        <div className="flex flex-1 flex-col items-center justify-center gap-3 px-6 py-16 text-center">
-          <AlertCircle className="h-8 w-8 text-destructive" />
-          <div>
-            <p className="text-body font-medium">
-              {isNotFound
-                ? t(($) => $.detail.not_found_title)
-                : t(($) => $.detail.load_failed_title)}
-            </p>
-            <p className="mt-1 text-caption text-muted-foreground">
-              {isNotFound
-                ? t(($) => $.detail.not_found_default)
-                : loadError instanceof Error
-                  ? loadError.message
-                  : t(($) => $.detail.load_failed_default)}
-            </p>
-          </div>
-          <div className="flex items-center gap-2">
-            <Button
-              type="button"
-              variant="outline"
-              size="sm"
-              onClick={() => {
-                void Promise.all([refetchAgents(), detailQuery.refetch()]);
-              }}
-            >
-              {t(($) => $.detail.try_again)}
-            </Button>
-            <Button
-              size="sm"
-              render={<AppLink href={paths.agents()} />}
-              nativeButton={false}
-            >
-              {t(($) => $.detail.back_to_agents_full)}
-            </Button>
-          </div>
-        </div>
-      </div>
+      <ObjectPage
+        layoutId={AGENT_DETAIL_LAYOUT_ID}
+        segments={[listSegment]}
+        leaf={<span className="truncate text-muted-foreground">{title}</span>}
+      >
+        <CollectionPageState
+          role="alert"
+          tone="destructive"
+          icon={AlertCircle}
+          title={title}
+          description={
+            isNotFound
+              ? t(($) => $.detail.not_found_default)
+              : loadError instanceof Error
+                ? loadError.message
+                : t(($) => $.detail.load_failed_default)
+          }
+          actions={
+            <>
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={() => {
+                  void Promise.all([refetchAgents(), detailQuery.refetch()]);
+                }}
+              >
+                {t(($) => $.detail.try_again)}
+              </Button>
+              <Button
+                size="sm"
+                variant="outline"
+                render={<AppLink href={paths.agents()} />}
+                nativeButton={false}
+              >
+                {t(($) => $.detail.back_to_agents_full)}
+              </Button>
+            </>
+          }
+        />
+      </ObjectPage>
     );
   }
 
@@ -310,6 +425,12 @@ export function AgentDetailPage({ agentId }: AgentDetailPageProps) {
   const owner = agent.owner_id
     ? members.find((m) => m.user_id === agent.owner_id) ?? null
     : null;
+  const currentUserId = currentUser?.id ?? null;
+  const runningCount = presence?.runningCount ?? 0;
+  const queuedCount = presence?.queuedCount ?? 0;
+  const hasActiveWork = runningCount + queuedCount > 0;
+  // Multica's built-in agents cannot be archived — the server refuses it.
+  const canArchive = canEdit.allowed && !isArchived && !agent.system_key;
 
   // Chat shares the invocation gate with assignment (MUL-3963): starting a
   // chat triggers agent runs. The button stays visible either way — a denied
@@ -343,91 +464,273 @@ export function AgentDetailPage({ agentId }: AgentDetailPageProps) {
       .getState()
       .open("quick-create-issue", { agent_id: agent.id });
   };
+  const handleCopy = (text: string, toastText: string) => {
+    void copyText(text).then((ok) => {
+      if (ok) toast.success(toastText);
+    });
+  };
+
+  const actions = (
+    <>
+      {!isArchived && (
+        <IconButton
+          label={t(($) => $.detail.dm)}
+          tooltipSide="bottom"
+          className="text-muted-foreground data-disabled:pointer-events-none data-disabled:opacity-50"
+          disabled={permissionsLoading}
+          render={
+            <AppLink href={`${paths.chat()}?agent=${agent.id}`} onClick={handleDm} />
+          }
+          nativeButton={false}
+        >
+          <MessageSquare />
+        </IconButton>
+      )}
+      {!isArchived && canAssign.allowed && (
+        <Button type="button" size="sm" onClick={handleAssign}>
+          <Plus />
+          {t(($) => $.detail.assign_work)}
+        </Button>
+      )}
+      <DropdownMenu>
+        <DropdownMenuTrigger
+          render={
+            <IconButton
+              label={t(($) => $.detail.more_actions_aria)}
+              tooltipSide="bottom"
+              className="text-muted-foreground"
+            >
+              <MoreHorizontal />
+            </IconButton>
+          }
+        />
+        <DropdownMenuContent align="end" className="w-auto min-w-48">
+          <DropdownMenuItem onClick={() => openAdvanced("general")}>
+            <Settings2 />
+            {t(($) => $.detail.advanced_settings)}
+          </DropdownMenuItem>
+          <DropdownMenuSeparator />
+          <DropdownMenuItem
+            onClick={() =>
+              handleCopy(
+                navigation.getShareableUrl(paths.agentDetail(agent.id)),
+                t(($) => $.detail.link_copied_toast),
+              )
+            }
+          >
+            <Link2 />
+            {t(($) => $.detail.copy_link)}
+          </DropdownMenuItem>
+          <DropdownMenuItem
+            onClick={() => handleCopy(agent.id, t(($) => $.detail.id_copied_toast))}
+          >
+            <Hash />
+            {t(($) => $.detail.copy_id)}
+          </DropdownMenuItem>
+          {!isArchived && (
+            <DropdownMenuItem
+              render={
+                <AppLink href={`${paths.newAgentManual()}?duplicate=${agent.id}`} />
+              }
+            >
+              <Copy />
+              {t(($) => $.row_actions.duplicate)}
+            </DropdownMenuItem>
+          )}
+          {canEdit.allowed && !isArchived && hasActiveWork && (
+            <DropdownMenuItem onClick={() => setConfirmCancelRuns(true)}>
+              <Square />
+              {t(($) => $.row_actions.cancel_all_tasks)}
+            </DropdownMenuItem>
+          )}
+          {canEdit.allowed && isArchived && (
+            <DropdownMenuItem onClick={() => handleRestore(agent.id)}>
+              <RotateCcw />
+              {t(($) => $.detail.restore)}
+            </DropdownMenuItem>
+          )}
+          {canArchive && (
+            <>
+              <DropdownMenuSeparator />
+              <DropdownMenuItem
+                variant="destructive"
+                onClick={() => setConfirmArchive(true)}
+              >
+                <Trash2 />
+                {t(($) => $.detail.more_archive)}
+              </DropdownMenuItem>
+            </>
+          )}
+        </DropdownMenuContent>
+      </DropdownMenu>
+    </>
+  );
+
+  const notices = [
+    !canEdit.allowed && (
+      <CapabilityBanner
+        key="capability"
+        reason={canEdit.reason}
+        resource="agent"
+        ownerName={owner?.name}
+      />
+    ),
+    isArchived && (
+      <Notice
+        key="archived"
+        icon={<Archive className="size-3.5 shrink-0 text-muted-foreground" aria-hidden="true" />}
+        action={
+          canEdit.allowed ? (
+            <Button
+              variant="outline"
+              size="xs"
+              onClick={() => handleRestore(agent.id)}
+            >
+              {t(($) => $.detail.restore)}
+            </Button>
+          ) : null
+        }
+      >
+        {t(($) => $.detail.archived_banner)}
+      </Notice>
+    ),
+    !isArchived && !runtimeBound && (
+      <Notice
+        key="runtime"
+        tone="warning"
+        icon={<Server className="size-3.5 shrink-0 text-warning" aria-hidden="true" />}
+        action={
+          canEdit.allowed ? (
+            <Button
+              variant="outline"
+              size="xs"
+              onClick={() => openAdvanced("general")}
+            >
+              {t(($) => $.detail.bind_runtime)}
+            </Button>
+          ) : null
+        }
+      >
+        {t(($) => $.detail.runtime_required_banner)}
+      </Notice>
+    ),
+  ].filter(Boolean);
 
   return (
-    <div className="flex flex-1 min-h-0 flex-col">
-      <DetailHeader
+    <>
+      <ObjectPage
+        layoutId={AGENT_DETAIL_LAYOUT_ID}
+        segments={[listSegment]}
+        leaf={
+          <span className="flex min-w-0 items-center gap-1.5 text-foreground">
+            <ActorAvatar
+              actorType="agent"
+              actorId={agent.id}
+              size="xs"
+              profileLink={false}
+            />
+            <span className="truncate">{agent.name}</span>
+          </span>
+        }
+        actions={actions}
+        panel={
+          <AgentPropertiesPanel
+            agent={agent}
+            runtime={runtime}
+            runtimes={runtimes}
+            presence={presence}
+            owner={owner}
+            members={members}
+            currentUserId={currentUserId}
+            canEdit={canEdit.allowed}
+            onUpdate={handleUpdate}
+            onEditAccess={() => openAdvanced("access")}
+          />
+        }
+      >
+        <div className={cn(OBJECT_PAGE_BODY, "space-y-8")}>
+          <div className="space-y-4">
+            <ObjectIdentity
+              media={<AgentMark agent={agent} presence={presence} />}
+              title={agent.name}
+              description={agent.description || undefined}
+              trailing={
+                isArchived ? (
+                  <span className="inline-flex shrink-0 items-center rounded-md bg-muted px-1.5 py-0.5 text-caption text-muted-foreground">
+                    {t(($) => $.row.archived)}
+                  </span>
+                ) : null
+              }
+            />
+            {notices.length > 0 && <div className="space-y-2">{notices}</div>}
+          </div>
+
+          <AgentWorkSections agent={agent} onViewAll={() => openWork(true)} />
+
+          <AgentInstructionsSection
+            agent={agent}
+            canEdit={canEdit.allowed}
+            onUpdate={handleUpdate}
+          />
+
+          {/* Qoder agents take their skills from Qoder Cloud Agents. */}
+          {runtime?.provider === "qoder_cloud" ? null : (
+            <AgentSkillsSection
+              agent={agent}
+              canEdit={canEdit.allowed}
+              onManage={() => openAdvanced("skills")}
+            />
+          )}
+        </div>
+      </ObjectPage>
+
+      <AgentAdvancedSettings
         agent={agent}
         runtime={runtime}
-        presence={presence}
-        backHref={paths.agents()}
-        canAssign={canAssign.allowed}
-        canArchive={canEdit.allowed}
-        dmPending={permissionsLoading}
-        dmHref={`${paths.chat()}?agent=${agent.id}`}
-        onDm={handleDm}
-        onAssign={handleAssign}
-        onArchive={
-          agent.system_key ? undefined : () => setConfirmArchive(true)
-        }
+        runtimes={runtimes}
+        members={members}
+        onUpdate={handleUpdate}
+        currentUserId={currentUserId}
+        canEdit={canEdit.allowed}
+        section={advancedSection}
+        onSectionChange={openAdvanced}
       />
 
-      {!canEdit.allowed && (
-        <div className={cn(PAGE_RAIL, PAGE_GUTTER, "pt-3")}>
-          <CapabilityBanner
-            reason={canEdit.reason}
-            resource="agent"
-            ownerName={owner?.name}
-          />
-        </div>
-      )}
+      <AgentWorkDialog agent={agent} open={workOpen} onOpenChange={openWork} />
 
-      {isArchived && (
-        <div className="shrink-0 border-b bg-muted/50 py-2 text-caption text-muted-foreground">
-          <div className={cn(PAGE_RAIL, PAGE_GUTTER, "flex items-center gap-2")}>
-            <AlertCircle className="h-3.5 w-3.5 shrink-0" />
-            <span className="flex-1">
-              {t(($) => $.detail.archived_banner)}
-            </span>
-            {canEdit.allowed && (
-              <Button
-                variant="outline"
-                size="sm"
-                className="h-6 text-caption"
-                onClick={() => handleRestore(agent.id)}
+      {confirmCancelRuns && (
+        <AlertDialog
+          open
+          onOpenChange={(v) => {
+            if (!v) setConfirmCancelRuns(false);
+          }}
+        >
+          <AlertDialogContent>
+            <AlertDialogHeader>
+              <AlertDialogTitle>
+                {t(($) => $.row_actions.cancel_dialog_title, { name: agent.name })}
+              </AlertDialogTitle>
+              <AlertDialogDescription>
+                {describeCancelImpact(runningCount, queuedCount, t)}
+                {runningCount > 0 && t(($) => $.row_actions.cancel_dialog_running_note)}
+                {t(($) => $.row_actions.cancel_dialog_irreversible)}
+              </AlertDialogDescription>
+            </AlertDialogHeader>
+            <AlertDialogFooter>
+              <AlertDialogCancel>{t(($) => $.row_actions.cancel_dialog_keep)}</AlertDialogCancel>
+              <AlertDialogAction
+                variant="destructive"
+                onClick={() => {
+                  setConfirmCancelRuns(false);
+                  void handleCancelRuns(agent.id);
+                }}
               >
-                {t(($) => $.detail.restore)}
-              </Button>
-            )}
-          </div>
-        </div>
+                {t(($) => $.row_actions.cancel_dialog_confirm)}
+              </AlertDialogAction>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
       )}
-
-      {!isArchived && !runtimeBound && (
-        <div className="shrink-0 border-b border-amber-500/30 bg-amber-500/10 py-2 text-caption text-amber-900 dark:text-amber-100">
-          <div className={cn(PAGE_RAIL, PAGE_GUTTER, "flex items-center gap-2")}>
-            <Server className="h-3.5 w-3.5 shrink-0" />
-            <span className="flex-1">
-              {t(($) => $.detail.runtime_required_banner)}
-            </span>
-            {canEdit.allowed && (
-              <Button
-                variant="outline"
-                size="sm"
-                className="h-6 border-amber-500/40 bg-background/70 text-caption"
-                onClick={() => setTabNavIntent("general")}
-              >
-                {t(($) => $.detail.bind_runtime)}
-              </Button>
-            )}
-          </div>
-        </div>
-      )}
-
-      <div className="flex flex-1 min-h-0 flex-col overflow-hidden">
-        <AgentOverviewPane
-          agent={agent}
-          runtime={runtime}
-          owner={owner}
-          runtimes={runtimes}
-          members={members}
-          onUpdate={handleUpdate}
-          currentUserId={currentUser?.id ?? null}
-          canEdit={canEdit.allowed}
-          navIntent={tabNavIntent}
-          onNavIntentHandled={() => setTabNavIntent(null)}
-        />
-      </div>
 
       {confirmArchive && (
         <Dialog
@@ -471,200 +774,89 @@ export function AgentDetailPage({ agentId }: AgentDetailPageProps) {
           </DialogContent>
         </Dialog>
       )}
-    </div>
+    </>
   );
 }
 
-function DetailHeader({
+/** The 48px avatar with the agent's availability dot on its edge. */
+function AgentMark({
   agent,
-  runtime,
   presence,
-  backHref,
-  canAssign,
-  canArchive,
-  dmPending,
-  dmHref,
-  onDm,
-  onAssign,
-  onArchive,
 }: {
   agent: Agent;
-  runtime: AgentRuntime | null;
   presence: AgentPresenceDetail | null;
-  backHref: string;
-  canAssign: boolean;
-  canArchive: boolean;
-  dmPending: boolean;
-  dmHref: string;
-  /** Runs before the link navigates; calls preventDefault when a gate denies
-   *  the chat, which is what stops AppLink from pushing. */
-  onDm: (e: React.MouseEvent<HTMLAnchorElement>) => void;
-  onAssign: () => void;
-  /** Absent for Multica's built-in agents, which the server refuses to
-   *  archive — the menu hides the action rather than offering a failure. */
-  onArchive?: () => void;
 }) {
   const { t } = useT("agents");
-  const timeAgo = useTimeAgo();
-  const isArchived = !!agent.archived_at;
-  const hasMoreActions = !!onArchive;
-
   return (
-    <header
-      className="shrink-0 border-b bg-background pb-5 pt-3"
-    >
-      <div className={cn(PAGE_RAIL, PAGE_GUTTER)}>
-        <div className="flex min-w-0 items-center gap-1.5 text-caption text-muted-foreground">
-          <AppLink
-            href={backHref}
-            className="rounded-sm transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-          >
-            {t(($) => $.page.title)}
-          </AppLink>
-          <span aria-hidden="true">/</span>
-          <span className="truncate text-foreground">{agent.name}</span>
-        </div>
-
-        <div className="mt-4 flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
-          <div className="flex min-w-0 items-start gap-4">
-            <ActorAvatar
-              actorType="agent"
-              actorId={agent.id}
-              size="2xl"
-              profileLink={false}
-              className="ring-1 ring-border"
-            />
-            <div className="min-w-0 pt-0.5">
-              <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5">
-                <h1 className="min-w-0 text-balance text-title-lg font-semibold tracking-tight sm:text-display-sm">
-                  {agent.name}
-                </h1>
-                <AgentPresenceIndicator detail={presence} />
-              </div>
-              <ExpandableDescription>
-                {agent.description ||
-                  t(($) => $.inspector.no_description_placeholder)}
-              </ExpandableDescription>
-              <div className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-2 text-caption text-muted-foreground">
-                {runtime?.provider === "qoder_cloud" ? null : (
-                  <span className="inline-flex min-w-0 items-center gap-1.5">
-                    <Bot className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
-                    <span className="truncate">{agent.model || t(($) => $.pickers.model_default)}</span>
-                  </span>
-                )}
-                <span className="inline-flex min-w-0 items-center gap-1.5">
-                  <Server className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
-                  <span className="truncate">
-                    {runtime
-                      ? runtimeDisplayLabel(runtime)
-                      : t(($) => $.pickers.runtime_none)}
-                  </span>
-                </span>
-                <VisibilityBadge value={agent.visibility} />
-                <span className="inline-flex items-center gap-1.5">
-                  <Clock3 className="h-3.5 w-3.5" aria-hidden="true" />
-                  {t(($) => $.detail.updated, { when: timeAgo(agent.updated_at) })}
-                </span>
-              </div>
-            </div>
-          </div>
-
-          <div className="flex shrink-0 items-center gap-2 self-end lg:self-start">
-            {!isArchived && (
-              <Button
-                variant="outline"
-                size="sm"
-                disabled={dmPending}
-                // An anchor never matches `:disabled`, so the base variant's
-                // `disabled:` rules never fire here — Base UI's data-disabled
-                // is what carries the dimmed, inert look.
-                className="data-disabled:pointer-events-none data-disabled:opacity-50"
-                render={<AppLink href={dmHref} onClick={onDm} />}
-                nativeButton={false}
-              >
-                <MessageSquare className="h-4 w-4" aria-hidden="true" />
-                {t(($) => $.detail.dm)}
-              </Button>
-            )}
-            {!isArchived && canAssign && (
-              <Button type="button" size="sm" onClick={onAssign}>
-                <Plus className="h-4 w-4" aria-hidden="true" />
-                {t(($) => $.detail.assign_work)}
-              </Button>
-            )}
-            {!isArchived && canArchive && hasMoreActions ? (
-              <DropdownMenu>
-                <DropdownMenuTrigger
-                  render={
-                    <IconButton
-                      variant="ghost"
-                      size="icon-sm"
-                      label={t(($) => $.detail.more_actions_aria)}
-                      tooltipSide="bottom"
-                    />
-                  }
-                >
-                  <MoreHorizontal
-                    className="h-4 w-4 text-muted-foreground"
-                    aria-hidden="true"
-                  />
-                </DropdownMenuTrigger>
-                <DropdownMenuContent align="end" className="w-auto">
-                  {onArchive && (
-                    <DropdownMenuItem variant="destructive" onClick={onArchive}>
-                      <Trash2 className="h-3.5 w-3.5" aria-hidden="true" />
-                      {t(($) => $.detail.more_archive)}
-                    </DropdownMenuItem>
-                  )}
-                </DropdownMenuContent>
-              </DropdownMenu>
-            ) : null}
-          </div>
-        </div>
-      </div>
-    </header>
+    <span className="relative inline-flex [--avatar-slot-size:3rem]">
+      <ActorAvatar
+        actorType="agent"
+        actorId={agent.id}
+        size="2xl"
+        profileLink={false}
+        className="ring-1 ring-border"
+      />
+      {presence ? (
+        <span
+          role="img"
+          aria-label={t(($) => $.presence_status_aria, {
+            status: t(($) => $.availability[presence.availability]),
+          })}
+          className={cn(
+            "absolute -right-0.5 -bottom-0.5 size-3 rounded-full ring-2 ring-background",
+            availabilityConfig[presence.availability].dotClass,
+          )}
+        />
+      ) : null}
+    </span>
   );
 }
 
-function BackHeader({ paths, title }: { paths: string; title: string }) {
+function Notice({
+  tone = "neutral",
+  icon,
+  action,
+  children,
+}: {
+  tone?: "neutral" | "warning";
+  icon: React.ReactNode;
+  action?: React.ReactNode;
+  children: React.ReactNode;
+}) {
   return (
-    <PageHeader>
-      <AppLink
-        href={paths}
-        className="inline-flex h-7 items-center gap-1 rounded-md px-2 text-caption text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
-      >
-        <ArrowLeft className="h-3.5 w-3.5" />
-        {title}
-      </AppLink>
-    </PageHeader>
+    <div
+      role="status"
+      className={cn(
+        "flex items-center gap-2 rounded-lg border px-3 py-2 text-caption",
+        tone === "warning"
+          ? "border-warning/30 bg-warning/10 text-foreground"
+          : "bg-muted/40 text-muted-foreground",
+      )}
+    >
+      {icon}
+      <span className="min-w-0 flex-1">{children}</span>
+      {action}
+    </div>
   );
 }
 
 function DetailLoadingSkeleton() {
   return (
-    <div className="flex flex-1 min-h-0 flex-col">
-      <div className="shrink-0 border-b pb-5 pt-3">
-        <div className={cn(PAGE_RAIL, PAGE_GUTTER)}>
-          <Skeleton className="h-4 w-48" />
-          <div className="mt-4 flex items-start gap-4">
-            <Skeleton className="h-14 w-14 rounded-full" />
-            <div className="flex-1 space-y-3">
-              <Skeleton className="h-7 w-64" />
-              <Skeleton className="h-4 w-full max-w-xl" />
-              <Skeleton className="h-4 w-full max-w-lg" />
-            </div>
-          </div>
+    <div className={cn(OBJECT_PAGE_BODY, "space-y-8")}>
+      <div className="flex items-center gap-3">
+        <Skeleton className="size-12 rounded-full" />
+        <div className="flex-1 space-y-2">
+          <Skeleton className="h-5 w-48" />
+          <Skeleton className="h-4 w-3/4" />
         </div>
       </div>
-      <div className={cn(PAGE_RAIL, PAGE_GUTTER, "flex flex-1 flex-col py-6")}>
-        <Skeleton className="h-9 w-96" />
-        <div className="mt-6 grid flex-1 gap-6 xl:grid-cols-[minmax(0,1fr)_320px]">
-          <div className="space-y-5">
-            <Skeleton className="h-48 w-full" />
-            <Skeleton className="h-64 w-full" />
-          </div>
-          <Skeleton className="h-96 w-full" />
-        </div>
+      <div className="space-y-2">
+        <Skeleton className="h-4 w-24" />
+        <Skeleton className="h-14 w-full rounded-lg" />
+      </div>
+      <div className="space-y-2">
+        <Skeleton className="h-4 w-32" />
+        <Skeleton className="h-32 w-full rounded-lg" />
       </div>
     </div>
   );

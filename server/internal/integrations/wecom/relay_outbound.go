@@ -259,7 +259,7 @@ func (c RelayConfig) retryPlan() []time.Duration {
 // read for itself, so an attachment is fetched by the replica that will send
 // it rather than shipped through Redis.
 type relayFrame struct {
-	Kind           string `json:"kind"` // relayKindReply | relayKindInbox | relayKindSeal
+	Kind           string `json:"kind"` // relayKindReply | relayKindInbox | relayKindSeal | relayKindProgress
 	InstallationID string `json:"installation_id"`
 	ChatID         string `json:"chat_id"`
 	ChatType       int    `json:"chat_type"`
@@ -274,6 +274,15 @@ type relayFrame struct {
 	WorkspaceID  string `json:"workspace_id,omitempty"`
 	SessionID    string `json:"session_id,omitempty"`
 	CarriesFiles bool   `json:"carries_files,omitempty"`
+
+	// RoundID, Seq and Milestone are a relayKindProgress frame's whole
+	// content: which round (chat_input_task_id, for an auto-retry clone), how
+	// far the reporting run's transcript had got (task_message.seq), and
+	// whether this is the "starting the agent" milestone instead. No text: the
+	// round's holder reads the rows itself (see relayKindProgress).
+	RoundID   string `json:"round_id,omitempty"`
+	Seq       int32  `json:"seq,omitempty"`
+	Milestone bool   `json:"milestone,omitempty"`
 }
 
 const (
@@ -303,7 +312,41 @@ const (
 	// finds no round and returns, and a copy that reaches the holder twice
 	// finds the round already taken.
 	relayKindSeal = "seal"
+
+	// relayKindProgress says a run has new progress — a tool call, reasoning,
+	// the starting milestone — to the replica holding that run's bubble. It
+	// is a nudge, not a delivery, and none of the machinery above applies to
+	// it:
+	//
+	//   - It never enters the dispatcher's shard queues. DeliverWecomOutbound
+	//     hands it straight to the progress sink, so a burst of progress takes
+	//     no queue space from an answer and never waits in line ahead of one.
+	//   - It takes no claim. Its dedupe is the round's own record of how far
+	//     the run's transcript is already shown (roundEntry.folded), on the
+	//     one replica that holds the round, so a copy, a replay or an
+	//     out-of-order frame is a no-op there, and the terminal claim key is
+	//     never touched.
+	//   - It carries no text. The holder reads the rows the daemon's request
+	//     already committed to task_message, and redacts them itself; reasoning
+	//     cannot be redacted before it is joined (safeThinking), and this
+	//     relay keeps every frame in a Redis stream for its replay window.
+	//   - Like a seal it is for whoever holds the ROUND, not the socket: a
+	//     replica with no round for it does nothing.
+	relayKindProgress = "progress"
 )
+
+// progressSink is the half of the typing indicator the relay hands progress
+// frames to. It must not block: it is called on the shard read loop.
+type progressSink interface {
+	acceptRelayedProgress(f relayFrame)
+}
+
+// progressAttacher is how the typing indicator registers as that sink.
+// *RelayOutbound satisfies it; a test relay that does not is simply never
+// handed progress.
+type progressAttacher interface {
+	attachProgress(s progressSink)
+}
 
 // relayHandler performs a delivery on the replica that holds the socket.
 // *Outbound implements it; the indirection is what lets this object be
@@ -493,6 +536,13 @@ type RelayOutbound struct {
 	ready   chan struct{}
 	handler relayHandler
 
+	// progress is where relayKindProgress frames go. Set during boot by the
+	// typing indicator (attachProgress) while the shard readers may already
+	// be running, hence atomic. Without one, a progress frame is dropped and
+	// that is said once (warnNoProgress).
+	progress       atomic.Value // progressSink
+	warnNoProgress sync.Once
+
 	queues []chan queued
 	wg     sync.WaitGroup
 }
@@ -539,6 +589,27 @@ func (r *RelayOutbound) mx() Metrics {
 		return v.(Metrics)
 	}
 	return nopMetrics{}
+}
+
+// attachProgress makes s the receiver of progress frames.
+func (r *RelayOutbound) attachProgress(s progressSink) {
+	if r != nil && s != nil {
+		r.progress.Store(s)
+	}
+}
+
+// deliverProgress hands a progress frame to the sink, on the shard reader's
+// goroutine, and never to the dispatcher's queues (see relayKindProgress).
+func (r *RelayOutbound) deliverProgress(f relayFrame) {
+	if s, ok := r.progress.Load().(progressSink); ok {
+		s.acceptRelayedProgress(f)
+		return
+	}
+	r.warnNoProgress.Do(func() {
+		r.logger.Warn("wecom relay: progress frames are arriving and nothing here shows them; " +
+			"a run whose reports reach another replica shows no steps in its bubble, and a long run's " +
+			"bubble is not handed over before the stream window ends")
+	})
 }
 
 // Attach supplies the handler that performs deliveries. Called once, after the
@@ -1000,6 +1071,10 @@ func (r *RelayOutbound) DeliverWecomOutbound(scopeID string, frame []byte, event
 	var f relayFrame
 	if err := json.Unmarshal(frame, &f); err != nil {
 		r.logger.Warn("wecom relay: undecodable frame", "error", err, "installation_id", scopeID)
+		return
+	}
+	if f.Kind == relayKindProgress {
+		r.deliverProgress(f)
 		return
 	}
 	select {

@@ -33,6 +33,7 @@ import { copyText } from "@multica/ui/lib/clipboard";
 import { TruncatedTooltip } from "@multica/ui/components/common/truncated-tooltip";
 import { toast } from "sonner";
 import { useLocale, useT } from "../../i18n";
+import { ObjectSection, ObjectSectionCard } from "../../layout/object-page";
 import type {
   WebhookDelivery,
   WebhookDeliveryStatus,
@@ -51,8 +52,8 @@ type StatusVisual = {
 };
 
 const STATUS_VISUAL: Record<WebhookDeliveryStatus, StatusVisual> = {
-  queued: { color: "text-blue-500", icon: Loader2, spin: true },
-  dispatched: { color: "text-emerald-500", icon: CheckCircle2 },
+  queued: { color: "text-info", icon: Loader2, spin: true },
+  dispatched: { color: "text-success", icon: CheckCircle2 },
   // Signature failures and pre-flight bouncebacks land here. Read as a
   // failure visually, the dialog footer explains the reason.
   rejected: { color: "text-destructive", icon: ShieldOff },
@@ -120,10 +121,10 @@ export function WebhookDeliveriesSection({
   if (!hasWebhookTrigger) return null;
 
   return (
-    <section className="space-y-3">
-      <h2 className="text-body font-medium text-muted-foreground uppercase tracking-wider">
-        {t(($) => $.deliveries.section_title)}
-      </h2>
+    <ObjectSection
+      title={t(($) => $.deliveries.section_title)}
+      count={isLoading ? undefined : deliveries.length}
+    >
       {isLoading ? (
         <div className="space-y-1">
           {Array.from({ length: 3 }).map((_, i) => (
@@ -131,11 +132,11 @@ export function WebhookDeliveriesSection({
           ))}
         </div>
       ) : deliveries.length === 0 ? (
-        <div className="rounded-md border border-dashed p-4 text-center text-body text-muted-foreground">
+        <div className="rounded-lg border border-dashed p-4 text-center text-body text-muted-foreground">
           {t(($) => $.deliveries.empty)}
         </div>
       ) : (
-        <div className="rounded-md border overflow-hidden">
+        <ObjectSectionCard>
           {deliveries.map((delivery) => (
             <DeliveryRow
               key={delivery.id}
@@ -143,9 +144,9 @@ export function WebhookDeliveriesSection({
               autopilotId={autopilotId}
             />
           ))}
-        </div>
+        </ObjectSectionCard>
       )}
-    </section>
+    </ObjectSection>
   );
 }
 
@@ -174,7 +175,7 @@ function DeliveryRow({
       <button
         type="button"
         onClick={() => setOpen(true)}
-        className="flex w-full items-center gap-3 px-4 py-2.5 text-left text-body hover:bg-accent/30 transition-colors"
+        className="flex min-h-10 w-full items-center gap-3 px-3 py-2 text-left text-body hover:bg-accent/30 transition-colors"
       >
         <StatusIcon
           className={cn(

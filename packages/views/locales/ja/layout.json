@@ -11,7 +11,8 @@
     "usage": "分析",
     "runtimes": "ランタイム",
     "skills": "スキル",
-    "settings": "設定"
+    "settings": "設定",
+    "views": "ビュー"
   },
   "tab": {
     "issue": "タスク",
@@ -25,6 +26,7 @@
     "runtime": "ランタイム",
     "attachment": "添付ファイル",
     "create_agent": "エージェントを作成",
+    "my_agents": "マイエージェントの作業",
     "unknown": "不明なページ"
   },
   "help": {
@@ -57,16 +59,120 @@
     "invitation_decline": "辞退",
     "log_out": "ログアウト",
     "new_issue": "新規タスク",
-    "new_issue_shortcut": "C",
     "pinned_label": "ピン留め済み",
-    "work_group": "仕事",
-    "ai_team_group": "AI チーム",
     "show_more_pins": "さらに {{count}} 件を表示…",
-    "show_fewer_pins": "表示を減らす",
-    "unread_overflow": "99+",
-    "discord_card": {
-      "title": "Discord に参加",
-      "dismiss": "閉じる"
+    "show_fewer_pins": "表示を減らす"
+  },
+  "spaces": {
+    "work": "作業",
+    "team": "チーム"
+  },
+  "rail": {
+    "label": "アプリナビゲーション",
+    "sheet_description": "スペースとワークスペースを切り替えます。",
+    "inbox": "受信箱",
+    "work": "作業",
+    "team": "チーム",
+    "chat": "チャット",
+    "autopilots": "自動化",
+    "switch_workspace": "ワークスペースを切り替え",
+    "invitation_from": "{{name}} さんから招待されています",
+    "open_in_new_window": "新しいウィンドウで開く",
+    "open_in_new_window_click": "クリック",
+    "open_in_other_window": "別のウィンドウで開いています",
+    "in_other_window": "別ウィンドウ",
+    "all_workspaces_open": "すべてのワークスペースがすでにウィンドウで開いています"
+  },
+  "panels": {
+    "work": {
+      "my_agents": "マイエージェントの作業",
+      "all_issues": "すべてのタスク",
+      "views": "ビュー",
+      "new_project": "新規プロジェクト",
+      "new_issue_in_project": "{{name}} に新規タスク",
+      "all_projects_other": "すべてのプロジェクト（{{count}}）",
+      "project_issues": "{{name}} のタスク",
+      "project_issues_empty": "タスクはありません",
+      "project_issues_error": "タスクを読み込めませんでした",
+      "project_issues_settings": "プロジェクトのタスク",
+      "settings_status": "ステータス",
+      "settings_assignee": "担当者",
+      "assignee_anyone": "全員",
+      "assignee_me": "自分",
+      "assignee_my_agents": "自分のエージェント",
+      "assignee_me_and_my_agents": "自分と自分のエージェント",
+      "reset": "リセット",
+      "load_more": "さらに表示",
+      "show_less": "表示を減らす",
+      "projects_settings": "プロジェクトの表示",
+      "projects_ordering": "並び順",
+      "projects_order_manual": "手動",
+      "projects_order_name": "名前",
+      "projects_order_updated": "最近更新",
+      "projects_order_created": "最近作成",
+      "projects_show": "表示",
+      "projects_only_mine": "自分がリードするプロジェクトのみ",
+      "projects_show_count": "未完了タスク数",
+      "new_view": "新規ビュー",
+      "all_views": "すべてのビュー",
+      "view_actions": "{{name}} の操作",
+      "view_copy_link": "リンクをコピー",
+      "view_remove": "サイドバーから削除",
+      "view_rename": "名前を変更",
+      "view_duplicate": "複製",
+      "view_delete": "ビューを削除"
+    },
+    "team": {
+      "new_agent": "新規エージェント",
+      "needs_attention": "要対応",
+      "stuck_other": "{{count}} 件のタスクがオフラインのランタイムを待機中",
+      "working_now": "作業中",
+      "running_tasks_other": "{{count}} 件のタスクを実行中",
+      "all_agents": "すべてのエージェント",
+      "my_agents": "マイエージェント",
+      "squads_and_members": "スクワッドとメンバー",
+      "members_other": "メンバー {{count}} 人",
+      "resources": "リソース",
+      "runtimes_offline_other": "{{count}} 件オフライン",
+      "invite_member": "メンバーを招待"
+    },
+    "autopilots": {
+      "all": "すべてのオートパイロット",
+      "list": "オートパイロット",
+      "templates": "テンプレートから"
     }
+  },
+  "account": {
+    "trigger": "アカウント",
+    "profile": "プロフィール",
+    "theme": "テーマ",
+    "themes": {
+      "light": "ライト",
+      "dark": "ダーク",
+      "system": "システム"
+    },
+    "language": "言語",
+    "shortcuts": "キーボードショートカット"
+  },
+  "collection": {
+    "filter": "フィルター",
+    "filter_count_other": "{{count}} 件のフィルター",
+    "reset": "リセット",
+    "display": "表示設定",
+    "selected_other": "{{count}} 件選択中",
+    "clear_selection": "選択を解除",
+    "select_all": "すべて選択",
+    "select_row": "行を選択",
+    "row_actions": "行の操作",
+    "sort_by": "並び替え",
+    "direction_asc": "昇順",
+    "direction_desc": "降順",
+    "section_columns": "列",
+    "load_more": "さらに読み込む",
+    "loading_more": "読み込み中…"
+  },
+  "object_page": {
+    "toggle_panel": "右サイドバーを切り替え",
+    "properties": "プロパティ"
   }
 }
