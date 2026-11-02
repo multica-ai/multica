@@ -30,6 +30,8 @@ vi.mock("@multica/core/api", () => ({
 }));
 vi.mock("@multica/core/hooks", () => ({ useWorkspaceId: () => "ws-1" }));
 vi.mock("sonner", () => ({ toast: { success: vi.fn(), error: vi.fn() } }));
+// The search's Ask the Secretary entry routes through the navigation adapter.
+vi.mock("../navigation", () => ({ useNavigation: () => ({ push: vi.fn() }) }));
 
 let role: string | null = "admin";
 vi.mock("@multica/core/permissions", async (importOriginal) => ({
