@@ -5853,7 +5853,10 @@ func (d *Daemon) handleTask(ctx context.Context, task Task, slot int) {
 	default:
 	}
 
-	if err != nil {
+	// Setup and lock waits can return cancellation as an error rather than a
+	// cancelled result. Let those reach the same detached terminal-state check.
+	shutdownCancellation := result.FailureReason == "" && errors.Is(ctx.Err(), context.Canceled) && onlyContextCancellation(err)
+	if err != nil && !shutdownCancellation {
 		taskLog.Error("task failed", "error", err)
 		// runTask may have reached worktree finalization before returning the
 		// error. Preserve any delivery metadata that defer attached to the named
@@ -5889,8 +5892,9 @@ func (d *Daemon) handleTask(ctx context.Context, task Task, slot int) {
 			"status", status, "error", err, "branch_name", result.BranchName)
 		// Same contract as the poll-cancelled path above: the transcript is
 		// flushed, so let the server settle its deferred chat finalization, and
-		// carry the finalized branch so cancelled work stays discoverable. No
-		// error to carry here — this branch is only reached with err == nil.
+		// carry the finalized branch so cancelled work stays discoverable.
+		// Only cancellation noise can accompany this path; delivery errors
+		// remain on the failure path above.
 		// This fires for ANY observed terminal status; the server applies the
 		// payload only to a cancelled row (status CAS), because for
 		// completed/failed rows the complete/fail callback is the
@@ -5900,6 +5904,12 @@ func (d *Daemon) handleTask(ctx context.Context, task Task, slot int) {
 			taskLog.Warn("cancel ack failed; server sweeper will finalize", "error", ackErr)
 		}
 		return
+	}
+
+	if shutdownCancellation {
+		result.Status = "blocked"
+		result.FailureReason = taskfailure.ReasonRuntimeRecovery.String()
+		result.Comment = "daemon shut down while task was in flight: " + err.Error()
 	}
 
 	// Only the parent (daemon) context identifies shutdown. A cancelled agent
@@ -5979,6 +5989,34 @@ func (e *environmentSetupError) Unwrap() error { return e.err }
 // failure. The message is untouched, so the wrapper is invisible to everything
 // except taskRunFailureReason.
 func asEnvironmentSetupFailure(err error) error { return &environmentSetupError{err: err} }
+
+// Every leaf must be cancellation. A joined genuine failure or incomplete
+// worktree finalization must not become an automatic shutdown retry.
+func onlyContextCancellation(err error) bool {
+	if err == context.Canceled {
+		return true
+	}
+	if _, preserved := err.(*worktreePreservedError); preserved {
+		return false
+	}
+	switch wrapped := err.(type) {
+	case interface{ Unwrap() []error }:
+		children := wrapped.Unwrap()
+		if len(children) == 0 {
+			return false
+		}
+		for _, child := range children {
+			if !onlyContextCancellation(child) {
+				return false
+			}
+		}
+		return true
+	case interface{ Unwrap() error }:
+		return onlyContextCancellation(wrapped.Unwrap())
+	default:
+		return false
+	}
+}
 
 func taskCancelAcknowledgement(result TaskResult, runErr error, provider string) TaskCancelAck {
 	ack := TaskCancelAck{BranchName: result.BranchName, DurableWorkDir: result.DurableWorkDir, RetiredSessionID: result.RetiredSessionID}
