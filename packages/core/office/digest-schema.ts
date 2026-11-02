@@ -1,4 +1,10 @@
 import { z } from "zod";
+import {
+  ROUTINE_EXPECTED_OUTPUTS,
+  ROUTINE_STATES,
+  type RoutineExpectedOutput,
+  type RoutineState,
+} from "./charter-schema";
 
 /**
  * The company digest (`GET /api/office/digest`): facts about the company since
@@ -20,6 +26,33 @@ export interface DigestProposalRef {
   title: string;
 }
 
+/** A routine of a chartered squad, as the digest lists it (the first ten). */
+export interface DigestRoutine {
+  autopilot_id: string;
+  title: string;
+  purpose: string;
+  expected_output: RoutineExpectedOutput;
+  required: boolean;
+  state: RoutineState;
+}
+
+/** The charter section of a squad that has a charter. */
+export interface DigestSquadCharter {
+  /** Nothing has happened in the squad for more than seven days. */
+  silent: boolean;
+  routine_count: number;
+  routines: DigestRoutine[];
+}
+
+/** A required routine that is not on time, for the workspace section. */
+export interface DigestRoutineRef {
+  autopilot_id: string;
+  squad_id: string;
+  squad_name: string;
+  title: string;
+  state: RoutineState;
+}
+
 export interface DigestSquad {
   id: string;
   name: string;
@@ -39,6 +72,8 @@ export interface DigestSquad {
   pending_proposals: DigestProposalRef[];
   /** Up to five, newest first. */
   recent_done: DigestIssueRef[];
+  /** Null when the squad has no charter. */
+  charter: DigestSquadCharter | null;
 }
 
 export interface DigestQuietSquad {
@@ -62,6 +97,8 @@ export interface DigestWorkspace {
   offline_runtimes: DigestList<{ id: string; name: string; provider: string }>;
   agents_with_failed_runs: DigestList<{ id: string; name: string; failed_runs: number }>;
   unseated_squads: DigestList<{ id: string; name: string }>;
+  /** Required routines not on time, at most ten; `count` is the total. */
+  routines_not_on_time: DigestList<DigestRoutineRef>;
 }
 
 export interface DigestKnowledgeDocument {
@@ -80,6 +117,14 @@ export interface DigestKnowledge {
   pending_drafts: number;
 }
 
+/** A question the Secretary put to a squad leader (`multica brief ask`). */
+export interface DigestInquiry {
+  question: string;
+  answered: boolean;
+  /** The first characters of the leader's reply, once answered. */
+  answer_excerpt: string | null;
+}
+
 export interface Digest {
   since: string;
   until: string;
@@ -90,6 +135,8 @@ export interface Digest {
   omitted_squad_count: number;
   quiet: { count: number; squads: DigestQuietSquad[] };
   knowledge: DigestKnowledge;
+  /** The Secretary's questions asked today or yesterday, newest first. */
+  inquiries: DigestInquiry[];
 }
 
 export interface DigestParams {
@@ -112,6 +159,35 @@ const DigestProposalRefSchema = z
   .object({ id: z.string().default(""), title: z.string().default("") })
   .loose();
 
+const DigestRoutineSchema = z
+  .object({
+    autopilot_id: z.string().default(""),
+    title: z.string().default(""),
+    purpose: z.string().default(""),
+    expected_output: z.enum([...ROUTINE_EXPECTED_OUTPUTS, "unknown"] as const).catch("unknown"),
+    required: z.boolean().default(true),
+    state: z.enum([...ROUTINE_STATES, "unknown"] as const).catch("unknown"),
+  })
+  .loose();
+
+const DigestSquadCharterSchema = z
+  .object({
+    silent: z.boolean().default(false),
+    routine_count: num,
+    routines: z.array(DigestRoutineSchema).nullable().default([]).transform((v) => v ?? []),
+  })
+  .loose();
+
+const DigestRoutineRefSchema = z
+  .object({
+    autopilot_id: z.string().default(""),
+    squad_id: z.string().default(""),
+    squad_name: z.string().default(""),
+    title: z.string().default(""),
+    state: z.enum([...ROUTINE_STATES, "unknown"] as const).catch("unknown"),
+  })
+  .loose();
+
 export const DigestSquadSchema = z
   .object({
     id: z.string().default(""),
@@ -126,6 +202,8 @@ export const DigestSquadSchema = z
     pending_proposal_count: num,
     pending_proposals: z.array(DigestProposalRefSchema).nullable().default([]).transform((v) => v ?? []),
     recent_done: z.array(DigestIssueRefSchema).nullable().default([]).transform((v) => v ?? []),
+    // A malformed charter section drops only that section; the squad still shows.
+    charter: DigestSquadCharterSchema.nullable().default(null).catch(null),
   })
   .loose();
 
@@ -157,6 +235,7 @@ const DigestWorkspaceSchema = z
       z.object({ id: z.string().default(""), name: z.string().default(""), failed_runs: num }).loose(),
     ),
     unseated_squads: listSchema(z.object({ id: z.string().default(""), name: z.string().default("") }).loose()),
+    routines_not_on_time: listSchema(DigestRoutineRefSchema),
   })
   .loose();
 
@@ -171,8 +250,18 @@ const emptyDigestWorkspace = {
   offline_runtimes: { count: 0, items: [] },
   agents_with_failed_runs: { count: 0, items: [] },
   unseated_squads: { count: 0, items: [] },
+  routines_not_on_time: { count: 0, items: [] },
 };
 export const EMPTY_DIGEST_WORKSPACE: DigestWorkspace = emptyDigestWorkspace;
+
+// An unreadable inquiry is dropped alone; the other inquiries and the digest still load.
+const DigestInquirySchema = z
+  .object({
+    question: z.string().default(""),
+    answered: z.boolean().catch(false).default(false),
+    answer_excerpt: z.string().nullable().catch(null).default(null),
+  })
+  .loose();
 
 const DigestKnowledgeDocumentSchema = z
   .object({
@@ -213,6 +302,15 @@ export const DigestSchema = z
       .loose()
       .default({ count: 0, squads: [] }),
     knowledge: DigestKnowledgeSchema,
+    // Not a list (or missing) reads as none; the rest of the digest still loads.
+    inquiries: z.unknown().transform((value) =>
+      Array.isArray(value)
+        ? value.flatMap((item) => {
+            const parsed = DigestInquirySchema.safeParse(item);
+            return parsed.success ? [parsed.data] : [];
+          })
+        : [],
+    ),
   })
   .loose();
 
@@ -225,4 +323,5 @@ export const FALLBACK_DIGEST: Digest = {
   omitted_squad_count: 0,
   quiet: { count: 0, squads: [] },
   knowledge: EMPTY_DIGEST_KNOWLEDGE,
+  inquiries: [],
 };

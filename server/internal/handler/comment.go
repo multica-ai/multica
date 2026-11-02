@@ -1891,6 +1891,14 @@ func (h *Handler) CreateComment(w http.ResponseWriter, r *http.Request) {
 	}
 	comment := created.Comment()
 
+	// An agent's reply answers the Secretary's open questions on this issue
+	// (brief inquiries). The comment is saved either way.
+	if authorType == "agent" && comment.Type == "comment" {
+		if err := service.RecordBriefInquiryAnswer(r.Context(), h.Queries, issue.WorkspaceID, issue.ID, parseUUID(authorID), comment.Content); err != nil {
+			slog.Warn("record brief inquiry answer failed", append(logger.RequestAttrs(r), "error", err, "issue_id", issueID)...)
+		}
+	}
+
 	// Fetch linked attachments so the response includes them.
 	groupedAtt := h.groupAttachments(r, []pgtype.UUID{comment.ID})
 	resp := commentToResponse(comment, nil, groupedAtt[uuidToString(comment.ID)])

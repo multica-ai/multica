@@ -33,6 +33,25 @@ const squad = {
   updated_at: "t",
 };
 
+describe("proposal revisions", () => {
+  const revision = {
+    revision: 1,
+    body: "First filing",
+    created_by_type: "agent",
+    created_by_id: "a1",
+    created_at: "2026-11-01T00:00:00Z",
+  };
+
+  it("GET /api/proposals/:id/revisions parses the history and tolerates a malformed body", async () => {
+    const fetchMock = respond([revision]);
+    expect(await new ApiClient("https://api.test").listProposalRevisions("p1")).toEqual([revision]);
+    expect(fetchMock.mock.calls[0]?.[0]).toBe("https://api.test/api/proposals/p1/revisions");
+
+    respond({ revisions: [revision] });
+    expect(await new ApiClient("https://api.test").listProposalRevisions("p1")).toEqual([]);
+  });
+});
+
 describe("office floor schemas", () => {
   it("defaults the optional fields", () => {
     expect(OfficeFloorSchema.parse({ id: "f", name: "X" })).toMatchObject({ position: 0, workspace_id: "", created_at: "" });

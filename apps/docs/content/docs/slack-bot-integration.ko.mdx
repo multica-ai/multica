@@ -47,6 +47,10 @@ features:
     - command: /clear
       description: Clear the current Multica chat context
       usage_hint: "[message]"
+    - command: /brief
+      description: Show the latest Multica brief
+    - command: /decisions
+      description: Show the decisions waiting for you in Multica
 oauth_config:
   scopes:
     bot:
@@ -55,6 +59,7 @@ oauth_config:
       - files:read
       - groups:history
       - im:history
+      - im:write
       - mpim:history
       - chat:write
       - reactions:write
@@ -69,16 +74,20 @@ settings:
       - message.groups
       - message.mpim
   interactivity:
-    is_enabled: false
+    is_enabled: true
   org_deploy_enabled: false
   socket_mode_enabled: true
   token_rotation_enabled: false
 ```
 
-만들기 전에 두 `Multica` 값을 에이전트 이름으로 바꿀 수 있습니다. manifest의 권한이나 이벤트를 삭제하지 마세요. 삭제하면 DM, 채널 멘션, 답글, `/issue`, `/new`, `/clear`가 작동하지 않을 수 있습니다.
+만들기 전에 두 `Multica` 값을 에이전트 이름으로 바꿀 수 있습니다. manifest의 권한이나 이벤트를 삭제하지 마세요. 삭제하면 DM, 채널 멘션, 답글, `/issue`, `/new`, `/clear`, `/brief`, `/decisions`, brief의 결정 버튼이 작동하지 않을 수 있습니다.
 
 <Callout type="warning">
-Slack slash command 이름은 workspace 전체에서 공유됩니다. 설치된 다른 app이 이미 `/new` 또는 `/clear`를 사용 중이면 app을 만들거나 업데이트할 때 충돌하는 명령이 거부됩니다. 충돌을 해결하거나 메시지 형식인 `@Multica /new [메시지]` 또는 `@Multica /clear [메시지]`를 보내 네이티브 slash command 가로채기를 우회하세요.
+Slack slash command 이름은 workspace 전체에서 공유됩니다. 설치된 다른 app이 이미 `/new`, `/clear`, `/brief` 또는 `/decisions`를 사용 중이면 app을 만들거나 업데이트할 때 충돌하는 명령이 거부됩니다. 충돌을 해결하거나 메시지 형식인 `@Multica /new [메시지]` 또는 `@Multica /clear [메시지]`를 보내 네이티브 slash command 가로채기를 우회하세요. `/brief`와 `/decisions`에는 메시지 형식이 없으므로 slash command가 필요합니다.
+</Callout>
+
+<Callout type="warning">
+brief 버튼이 나오기 전에 만든 Slack app이라면 **Features → Interactivity & Shortcuts**에서 **Interactivity**를 켜고 (Request URL은 비워 둡니다. Bot이 Socket Mode로 버튼 입력을 받습니다), **Features → Slash Commands**에 `/brief`와 `/decisions`를 추가하고, **OAuth & Permissions**에서 Bot scope `im:write`를 추가한 뒤 app을 workspace에 다시 설치하세요. 이 설정이 없으면 brief는 Slack에 도착하지만 버튼이 동작하지 않고, brief DM이 거부될 수 있습니다.
 </Callout>
 
 <Callout type="warning">

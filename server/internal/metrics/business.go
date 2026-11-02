@@ -460,7 +460,7 @@ func (m *BusinessMetrics) RecordAutopilotQuotaDecision(action, source, result st
 		return
 	}
 	switch source {
-	case "schedule", "webhook", "manual", "api":
+	case "schedule", "webhook", "manual", "api", "catchup":
 	default:
 		source = "other"
 	}

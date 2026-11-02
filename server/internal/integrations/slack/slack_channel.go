@@ -9,6 +9,7 @@ import (
 	"regexp"
 	"time"
 
+	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/slack-go/slack"
 	"github.com/slack-go/slack/slackevents"
 	"github.com/slack-go/slack/socketmode"
@@ -38,6 +39,11 @@ type slackChannel struct {
 	handler   channel.InboundHandler
 	slash     *SlashCommandProcessor // nil disables /issue and /new slash-command handling
 	logger    *slog.Logger
+	// installationID is the channel_installation row this connection belongs
+	// to. The server looks the presser's binding up within it.
+	installationID pgtype.UUID
+	// actions answers button presses (plan 9.11a). Nil leaves presses unanswered.
+	actions channel.ActionHandler
 }
 
 // slashCommandTimeout bounds detached `/issue`, `/new`, and `/clear` processing
@@ -162,6 +168,19 @@ func (c *slackChannel) handleSocketEvent(ctx context.Context, sm *socketmode.Cli
 			c.dispatchSlashCommand(cmd, envelopeID)
 		}
 		return nil
+	case socketmode.EventTypeInteractive:
+		// ACK first: Slack expires an un-ACKed interaction in about three
+		// seconds. The press is answered out-of-band on its response_url, so an
+		// empty ACK is correct.
+		if evt.Request != nil {
+			if err := sm.Ack(*evt.Request); err != nil {
+				c.logger.WarnContext(ctx, "slack: ack interaction failed", "error", err)
+			}
+		}
+		if cb, ok := evt.Data.(slack.InteractionCallback); ok {
+			c.dispatchInteraction(cb)
+		}
+		return nil
 	case socketmode.EventTypeConnecting, socketmode.EventTypeConnected, socketmode.EventTypeHello:
 		c.logger.DebugContext(ctx, "slack: socket mode", "event", evt.Type, "app_id", c.appID)
 	case socketmode.EventTypeIncomingError, socketmode.EventTypeErrorBadMessage:
@@ -224,6 +243,8 @@ type ChannelDeps struct {
 	// leaves slash-command handling off (the connection still serves messages
 	// and @-mentions); tests that only exercise inbound messages pass nil.
 	Slash *SlashCommandProcessor
+	// Actions answers brief push button presses (plan 9.11a). Nil disables them.
+	Actions channel.ActionHandler
 }
 
 // RegisterSlack registers the per-installation Slack Factory so the
@@ -256,13 +277,15 @@ func newSlackFactory(deps ChannelDeps) channel.Factory {
 			return nil, fmt.Errorf("slack: decrypt bot token: %w", err)
 		}
 		return &slackChannel{
-			appID:     ic.AppID,
-			botUserID: ic.BotUserID,
-			appToken:  appToken,
-			botAPI:    slack.New(botToken),
-			handler:   cfg.Handler,
-			slash:     deps.Slash,
-			logger:    logger,
+			appID:          ic.AppID,
+			botUserID:      ic.BotUserID,
+			appToken:       appToken,
+			botAPI:         slack.New(botToken),
+			handler:        cfg.Handler,
+			slash:          deps.Slash,
+			logger:         logger,
+			installationID: cfg.ID,
+			actions:        deps.Actions,
 		}, nil
 	}
 }

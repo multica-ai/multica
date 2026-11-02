@@ -105,7 +105,12 @@ var workspaceDeletionManifest = map[string]workspaceDeleteAction{
 	"member_delegation_day":              workspaceDeleteKeep, // user-scoped telemetry ledger, no workspace_id
 	"agent_mcp_server":                   workspaceDelete,
 	"brief":                              workspaceDelete,
+	"brief_feedback":                     workspaceDelete,
+	"brief_delivery":                     workspaceDelete,
+	"brief_inquiry":                      workspaceDelete,
+	"brief_push_preference":              workspaceDelete,
 	"proposal":                           workspaceDelete,
+	"proposal_revision":                  workspaceDelete,
 	"workspace_mcp_server":               workspaceDelete,
 	"workspace_knowledge":                workspaceDelete, // the WeKnora tenant is not removed here
 	"knowledge_base":                     workspaceDelete,
@@ -135,7 +140,10 @@ var workspaceDeletionManifest = map[string]workspaceDeleteAction{
 	"skill_file":                         workspaceDelete,
 	"skill_to_label":                     workspaceDelete,
 	"squad":                              workspaceDelete,
+	"squad_attention":                    workspaceDelete,
+	"squad_charter":                      workspaceDelete,
 	"squad_member":                       workspaceDelete,
+	"squad_routine":                      workspaceDelete,
 	"sys_cron_executions":                workspaceDeleteKeep,
 	"task_message":                       workspaceDelete,
 	"task_supplement":                    workspaceDelete,

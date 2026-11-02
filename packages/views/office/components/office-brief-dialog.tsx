@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useQueries, useQuery } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { useChatStore } from "@multica/core/chat";
@@ -13,8 +13,10 @@ import {
   prefillSecretaryChat,
   proposalDetailOptions,
   splitBriefSections,
+  isProposalSnoozed,
   type Brief,
   type BriefSection,
+  type Proposal,
 } from "@multica/core/office";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { useWorkspacePaths } from "@multica/core/paths";
@@ -27,7 +29,10 @@ import { isFloatingChatRouteSuppressed } from "../../chat/floating-chat-visibili
 import { ReadonlyContent } from "../../editor/readonly-content";
 import { useT } from "../../i18n";
 import { useNavigation } from "../../navigation";
+import { OfficeBriefDelivery } from "./office-brief-delivery";
+import { OfficeBriefFeedback } from "./office-brief-feedback";
 import { OfficeProposalDecision } from "./office-proposal-decision";
+import { OfficeProposalHistory, OfficeProposalRelated, OfficeProposalStatus } from "./office-proposal-details";
 
 /** The knowledge base a brief is saved into. */
 const DECISIONS_BASE = "decisions";
@@ -42,6 +47,7 @@ export function OfficeBriefDialog({
   open,
   briefs,
   canManage,
+  focusBriefId = null,
   onClose,
 }: {
   open: boolean;
@@ -49,11 +55,17 @@ export function OfficeBriefDialog({
   briefs: readonly Brief[];
   /** Owners and admins may decide proposals and save a brief to knowledge. */
   canManage: boolean;
+  /** A brief to show instead of today's (a link from the chat app). */
+  focusBriefId?: string | null;
   onClose: () => void;
 }) {
   const { t } = useT("issues");
   const wsId = useWorkspaceId();
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  useEffect(() => {
+    if (focusBriefId) setSelectedId(focusBriefId);
+  }, [focusBriefId]);
+  const [delivery, setDelivery] = useState(false);
   const setup = useQuery(officeSetupOptions(wsId));
   const autopilots = useQuery(autopilotListOptions(wsId));
   const trigger = useTriggerAutopilot();
@@ -83,9 +95,23 @@ export function OfficeBriefDialog({
   return (
     <Dialog open={open} onOpenChange={(next) => !next && onClose()}>
       <DialogContent className="flex max-h-[min(88dvh,48rem)] flex-col gap-0 overflow-hidden p-0 sm:max-w-3xl">
-        <header className="shrink-0 border-b px-4 py-3 pr-12">
+        <header className="flex shrink-0 items-center justify-between gap-3 border-b px-4 py-3 pr-12">
           <DialogTitle className="text-heading">{t(($) => $.office.brief_open)}</DialogTitle>
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            aria-expanded={delivery}
+            onClick={() => setDelivery((open) => !open)}
+          >
+            {t(($) => $.office.delivery_toggle)}
+          </Button>
         </header>
+        {delivery ? (
+          <div className="shrink-0 border-b px-4 py-3">
+            <OfficeBriefDelivery />
+          </div>
+        ) : null}
         <div className="flex min-h-0 flex-1 flex-col md:flex-row">
           <div className="min-h-0 flex-1 overflow-y-auto px-4 py-3">
             {shown ? (
@@ -165,6 +191,11 @@ function BriefBody({
   const sections = splitBriefSections(brief.body);
 
   const proposals = useQueries({ queries: brief.proposal_ids.map((id) => proposalDetailOptions(wsId, id)) });
+  // A proposal put aside with Decide later is hidden until its date, as in "Needs your decision".
+  const now = Date.now();
+  const raised = proposals
+    .map((query) => query.data)
+    .filter((proposal): proposal is Proposal => !!proposal && !isProposalSnoozed(proposal, now));
   const squads = useQuery(squadListOptions(wsId));
   const bases = useQuery(knowledgeBasesOptions(wsId));
   const saveToKnowledge = useCreateKnowledgeDocument(wsId);
@@ -257,37 +288,35 @@ function BriefBody({
         <ReadonlyContent content={brief.body} />
       )}
 
-      {proposals.length > 0 ? (
+      <OfficeBriefFeedback briefId={brief.id} canManage={canManage} />
+
+      {raised.length > 0 ? (
         <section className="flex flex-col gap-2">
           <h4 className="text-body font-medium">{t(($) => $.office.brief_proposals)}</h4>
           <ul className="flex flex-col gap-3">
-            {proposals.map((query, index) => {
-              const proposal = query.data;
-              if (!proposal) return null;
+            {raised.map((proposal) => {
+              const squadName = squads.data?.find((squad) => squad.id === proposal.squad_id)?.name ?? null;
               const handoffName = squads.data?.find((squad) => squad.id === proposal.handoff_squad_id)?.name ?? null;
               return (
-                <li key={brief.proposal_ids[index]} className={cn("rounded-lg border", proposal.state !== "pending" && "bg-muted/40")}>
-                  <div className="flex flex-col gap-0.5 px-4 py-3">
-                    <span className="text-caption text-muted-foreground">{proposal.issue_identifier}</span>
-                    <span className="text-body font-medium">{proposal.title}</span>
-                    {proposal.state === "approved" ? (
-                      <span className="text-caption text-muted-foreground">{t(($) => $.office.brief_proposal_approved)}</span>
-                    ) : null}
-                    {proposal.state === "rejected" ? (
-                      <span className="text-caption text-muted-foreground">{t(($) => $.office.brief_proposal_rejected)}</span>
-                    ) : null}
+                <li key={proposal.id} className={cn("rounded-lg border", proposal.state !== "pending" && "bg-muted/40")}>
+                  <div className="flex flex-col gap-2 px-4 py-3">
+                    <div className="flex flex-col gap-0.5">
+                      <span className="text-caption text-muted-foreground">{proposal.issue_identifier}</span>
+                      <span className="text-body font-medium">{proposal.title}</span>
+                    </div>
+                    <OfficeProposalStatus proposal={proposal} squadName={squadName} />
                     {proposal.state === "pending" && !canManage ? (
                       <span className="text-caption text-muted-foreground">{t(($) => $.office.squad_proposals)}</span>
                     ) : null}
+                    <OfficeProposalRelated related={proposal.related} />
+                    <OfficeProposalHistory proposal={proposal} />
                   </div>
-                  {proposal.state === "pending" ? (
-                    <OfficeProposalDecision
-                      proposal={proposal}
-                      handoffName={handoffName}
-                      canDecide={canManage}
-                      className="px-4 pt-2 pb-3"
-                    />
-                  ) : null}
+                  <OfficeProposalDecision
+                    proposal={proposal}
+                    handoffName={handoffName}
+                    canDecide={canManage}
+                    className="px-4 pt-2 pb-3"
+                  />
                 </li>
               );
             })}

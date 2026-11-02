@@ -1366,6 +1366,10 @@ func (h *Handler) DeleteWorkspace(w http.ResponseWriter, r *http.Request) {
 			},
 		},
 		{
+			name: "delete squad routines",
+			run:  func() error { return qtx.DeleteWorkspaceSquadRoutines(ctx, requester.WorkspaceID) },
+		},
+		{
 			name: "delete autopilot children",
 			run:  func() error { return qtx.DeleteWorkspaceAutopilotChildren(ctx, requester.WorkspaceID) },
 		},
@@ -1382,12 +1386,45 @@ func (h *Handler) DeleteWorkspace(w http.ResponseWriter, r *http.Request) {
 			run:  func() error { return qtx.DeleteWorkspaceConnections(ctx, requester.WorkspaceID) },
 		},
 		{
+			name: "delete squad charters",
+			run:  func() error { return qtx.DeleteWorkspaceSquadCharters(ctx, requester.WorkspaceID) },
+		},
+		{
+			name: "delete squad attention",
+			run:  func() error { return qtx.DeleteWorkspaceSquadAttention(ctx, requester.WorkspaceID) },
+		},
+		{
 			name: "delete squads and skills",
 			run:  func() error { return qtx.DeleteWorkspaceSquadsAndSkills(ctx, requester.WorkspaceID) },
 		},
 		{
+			// Brief pushes and the member preferences behind them carry no
+			// foreign keys, so they are swept explicitly (plan 9.10).
+			name: "delete brief deliveries",
+			run:  func() error { return qtx.DeleteWorkspaceBriefDeliveries(ctx, requester.WorkspaceID) },
+		},
+		{
+			name: "delete brief push preferences",
+			run:  func() error { return qtx.DeleteWorkspaceBriefPushPreferences(ctx, requester.WorkspaceID) },
+		},
+		{
+			// Ratings of briefs have no foreign keys either, and rate the briefs
+			// swept next, so they go first (plan 9.12).
+			name: "delete brief feedback",
+			run:  func() error { return qtx.DeleteWorkspaceBriefFeedback(ctx, requester.WorkspaceID) },
+		},
+		{
 			name: "delete briefs",
 			run:  func() error { return qtx.DeleteWorkspaceBriefs(ctx, requester.WorkspaceID) },
+		},
+		{
+			name: "delete brief inquiries",
+			run:  func() error { return qtx.DeleteWorkspaceBriefInquiries(ctx, requester.WorkspaceID) },
+		},
+		{
+			// Revisions of proposals; the proposals themselves go next.
+			name: "delete proposal revisions",
+			run:  func() error { return qtx.DeleteWorkspaceProposalRevisions(ctx, requester.WorkspaceID) },
 		},
 		{
 			name: "delete proposals",

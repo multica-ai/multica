@@ -943,6 +943,49 @@ text is kept for the reasoning. Phases 2 to 4 below are written against these fa
   documented variables, and WeKnora's tenant cap per user is lifted by the profile.
 - A worker figure is 12 layout units tall; the engine acceptance is about 37 px at
   1280 x 720.
+- Phase 2 deviations
+  - Migrations 730 to 735 are used: 730 to 734 for brief feedback, 735 for the catch-up
+    run source. WS10 therefore starts at 736, not 730.
+  - Charter `revision` is a body field, not an `If-Match` header. The first save sends
+    `revision: 0`. A stale revision returns 409 with `code: charter_revision_conflict` and
+    the current revision.
+  - The `biweekly` preset is `0 9 1,15 * *` (the 1st and 15th at 09:00), because cron
+    cannot express every 14 days.
+  - `multica brief ask` requires `--issue`, because the question is posted as a comment on
+    that issue. Answer capture reads agent comments on that issue by members of the asked
+    squad, not only the leader; other issues are not read.
+  - Chat Revise is a link into the app, because its note needs typing. Chat Snooze applies
+    a fixed seven days. Signed buttons carry approve, reject and snooze only.
+  - A snooze may be at most 30 days ahead. A snooze moves `expires_at` to the snooze date
+    plus 14 days when that is later, and a resubmitted revision starts a new 14-day window.
+  - A charter save counts as squad activity for `silent`, so a squad chartered yesterday is
+    not silent.
+  - The attention job's 24-hour cadence is aligned to UTC midnight by the scheduler
+    (`FloorPlan` truncates to the cadence), not to the server's start time.
+  - The routine state `report` counts a non-system comment by a squad agent on the run's
+    issue. Multica has no document entity, so a document is not counted.
+  - The operating review's output is a proposal filed during its run, or a recorded
+    `no action` with a reason. Either counts as delivered.
+  - The digest lists a snoozed proposal only once it is due. `pending_proposal_count` leaves
+    snoozed proposals out, but the squad and workspace caps still count them.
+  - The Telegram binding's chat id is the Telegram user id, because bindings are created only
+    in a direct chat. The plan's 9.10 fallback (storing a chat id at the first inbound
+    message) is not built.
+  - Brief push delivery is at-least-once. A send that reaches the platform but whose outcome
+    is not recorded (for example, the run is cancelled first) keeps its ten-minute lease and
+    is sent again when the lease expires.
+  - Slack press handling uses the Socket Mode connection the integration already holds, so no
+    request URL or signing check is needed. Slack needs the `im:write` scope and Interactivity
+    turned on.
+  - Lark press handling uses the existing long connection (`card.action.trigger`). The
+    connector acknowledges the press at once with an empty response, then the handler runs.
+    The result goes to the presser as a direct message, not a toast.
+  - Slack and Lark bindings store no display name, so they are labelled by the platform until
+    the binding config carries a `display_name` or `username`.
+  - DingTalk and WeCom have no brief push or press handling. The spec lists them with Slack
+    and Lark, but the plan's steps cover only Slack (9.11a) and Lark (9.11b).
+  - The brief dialog hides a proposal put aside with Decide later until its date. The
+    decisions dialog still lists put-aside proposals under "Decide later".
 
 ## Phase 2: proactive operations
 

@@ -70,6 +70,11 @@ type Source struct {
 	// merging; the core treats an empty value as "not available".
 	SenderStableID string
 
+	// SenderIsBot says the platform marks the sender as an application or bot
+	// rather than a person (Lark sender_type "app"). A bot's command gets no
+	// reply.
+	SenderIsBot bool
+
 	// ThreadID is the platform thread / topic the message belongs to,
 	// when threading applies and the message is inside a thread. Empty
 	// means a top-level conversation message. The core persists it so a

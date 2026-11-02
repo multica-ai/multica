@@ -58,6 +58,7 @@ import {
   type SettingsSaveStatus,
 } from "./settings-layout";
 import { useAutoSave } from "./use-auto-save";
+import { BriefCatchupSetting } from "./brief-catchup-setting";
 
 interface WorkspaceDetailsDraft {
   name: string;
@@ -476,6 +477,10 @@ export function WorkspaceTab() {
             </span>
           </SettingsRow>
         </SettingsCard>
+      </SettingsSection>
+
+      <SettingsSection title={t(($) => $.workspace.brief_catchup_section)} anchor="daily-brief">
+        <BriefCatchupSetting workspace={workspace} canManage={canManageWorkspace} />
       </SettingsSection>
 
       {/* Danger Zone — gated on the member query settling so the owner-only

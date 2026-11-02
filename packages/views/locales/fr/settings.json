@@ -783,7 +783,14 @@
     "prefix_new_label": "Nouveau préfixe",
     "prefix_rule": "Lettres et chiffres uniquement, 10 caractères au maximum.",
     "prefix_confirm_action": "Remplacer par {{prefix}}",
-    "prefix_external_warning": "Les anciens identifiants comme {{oldExample}} dans les titres de PR, noms de branche, documents et discussions ne sont pas mis à jour : ces liens cesseront de fonctionner."
+    "prefix_external_warning": "Les anciens identifiants comme {{oldExample}} dans les titres de PR, noms de branche, documents et discussions ne sont pas mis à jour : ces liens cesseront de fonctionner.",
+    "brief_catchup_section": "Briefing quotidien",
+    "brief_catchup_label": "Rattraper un briefing manqué",
+    "brief_catchup_description": "Si le briefing quotidien n'a pas été lancé, le secrétaire le rédige une fois l'heure ci-dessous passée.",
+    "brief_catchup_hour_label": "Heure de rattrapage",
+    "brief_catchup_hour_option": "{{hour}}:00",
+    "brief_catchup_saved": "Paramètres du briefing quotidien enregistrés",
+    "brief_catchup_failed": "Impossible d'enregistrer les paramètres du briefing quotidien"
   },
   "delete_workspace_dialog": {
     "title": "Supprimer l'espace de travail",

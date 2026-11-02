@@ -121,6 +121,10 @@ function proposal(id: string, patch: Partial<Proposal> = {}): Proposal {
     decided_at: null,
     decision_note: "",
     created_at: "2026-01-01T00:00:00Z",
+    revision: 1,
+    expires_at: null,
+    snoozed_until: null,
+    related: [],
     handoff: null,
     ...patch,
   } as Proposal;
@@ -174,6 +178,13 @@ describe("OfficeBriefDialog", () => {
     );
     return { onClose };
   }
+
+  it("opens on the brief a link names instead of the latest one", async () => {
+    const earlier = brief("b0", { title: "Earlier brief", body: "## Headline\nThe old news." });
+    setup({ briefs: [brief("b1"), earlier], focusBriefId: "b0" });
+
+    expect(await screen.findByText("The old news.")).toBeTruthy();
+  });
 
   it("renders the latest brief's body by section, with an Ask on each", () => {
     setup();
@@ -235,6 +246,74 @@ describe("OfficeBriefDialog", () => {
     expect(mocks.chat.appendToInputDraft.mock.calls[0]?.[1]).toContain("Two decisions wait for you.");
     expect(mocks.chat.setOpen).toHaveBeenCalledWith(true);
     expect(onClose).toHaveBeenCalled();
+  });
+
+  it("asks for changes from the card, and only with a note", () => {
+    setup({ briefs: [brief("b1", { proposal_ids: ["p1"] })] });
+
+    fireEvent.click(screen.getByRole("button", { name: "Ask for changes" }));
+    expect(mocks.decide).not.toHaveBeenCalled();
+    expect(screen.getByRole("alert").textContent).toBe("Write what should change first.");
+
+    fireEvent.change(screen.getByRole("textbox"), { target: { value: "Add the cost" } });
+    fireEvent.click(screen.getByRole("button", { name: "Ask for changes" }));
+    expect(mocks.decide.mock.calls[0]?.[0]).toEqual({ id: "p1", decision: "revise", note: "Add the cost" });
+  });
+
+  it("hides a proposal put aside with Decide later until its date, as the decision queue does", () => {
+    queryClient.setQueryData(
+      proposalKeys.detail("ws-1", "p4"),
+      proposal("p4", {
+        snoozed_until: new Date(Date.now() + 3 * 24 * 60 * 60 * 1000).toISOString(),
+        related: [
+          { kind: "decision", id: "d1", title: "Usage pricing memo", score: 0.9, state: null, issue_identifier: null, created_at: null },
+        ],
+      }),
+    );
+    setup({ briefs: [brief("b1", { proposal_ids: ["p4"] })] });
+
+    expect(screen.queryByText("Proposal p4")).toBeNull();
+    expect(screen.queryByText(/Decide later until/)).toBeNull();
+    expect(screen.queryByText("Usage pricing memo")).toBeNull();
+    expect(screen.queryByRole("button", { name: "Approve" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Revision history" })).toBeNull();
+  });
+
+  it("shows a proposal again on the brief once its snooze date has passed", () => {
+    queryClient.setQueryData(
+      proposalKeys.detail("ws-1", "p7"),
+      proposal("p7", { snoozed_until: new Date(Date.now() - 60 * 1000).toISOString() }),
+    );
+    setup({ briefs: [brief("b1", { proposal_ids: ["p7"] })] });
+
+    expect(screen.getByText("Proposal p7")).toBeTruthy();
+    expect(screen.queryByText(/Decide later until/)).toBeNull();
+    expect(screen.getByRole("button", { name: "Approve" })).toBeTruthy();
+  });
+
+  it("shows a revising proposal with its squad and note, and no decide controls", () => {
+    queryClient.setQueryData(workspaceKeys.squads("ws-1"), [{ id: "research", name: "Research", archived_at: null }] as Squad[]);
+    queryClient.setQueryData(
+      proposalKeys.detail("ws-1", "p5"),
+      proposal("p5", { state: "revising", squad_id: "research", decision_note: "Cite the pilot" }),
+    );
+    setup({ briefs: [brief("b1", { proposal_ids: ["p5"] })] });
+
+    expect(screen.getByText("Revising")).toBeTruthy();
+    expect(screen.getByText("Research is revising it")).toBeTruthy();
+    expect(screen.getByText("Cite the pilot")).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Approve" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Ask for changes" })).toBeNull();
+  });
+
+  it("shows an expired proposal as expired, with no decide controls for an owner", () => {
+    queryClient.setQueryData(proposalKeys.detail("ws-1", "p6"), proposal("p6", { state: "expired" }));
+    setup({ briefs: [brief("b1", { proposal_ids: ["p6"] })] });
+
+    expect(screen.getByText("Expired")).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Approve" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Decide later" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Ask for changes" })).toBeNull();
   });
 
   describe("with no brief today", () => {

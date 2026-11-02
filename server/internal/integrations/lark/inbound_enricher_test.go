@@ -95,6 +95,10 @@ func (f *enricherFakeClient) SendTextMessage(context.Context, SendTextParams) (s
 func (f *enricherFakeClient) SendMarkdownCard(context.Context, SendMarkdownCardParams) (string, error) {
 	return "", nil
 }
+func (f *enricherFakeClient) SendUserMessage(context.Context, InstallationCredentials, SendUserMessageParams) (string, error) {
+	panic("SendUserMessage is not expected in this test")
+}
+
 func (f *enricherFakeClient) SendBindingPromptCard(context.Context, BindingPromptParams) error {
 	return nil
 }

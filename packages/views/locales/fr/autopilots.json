@@ -145,7 +145,8 @@
     "schedule": "Planification",
     "manual": "Manuelle",
     "webhook": "Webhook",
-    "api": "API"
+    "api": "API",
+    "catchup": "Rattrapage"
   },
   "run": {
     "issue_linked": "Tâche liée",

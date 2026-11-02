@@ -10,6 +10,8 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/jackc/pgx/v5/pgtype"
+
 	"github.com/multica-ai/multica/server/internal/integrations/channel"
 )
 
@@ -33,6 +35,12 @@ type telegramChannel struct {
 	// stored (see ChannelDeps.AcceptsMedia). Without it media keeps getting
 	// the unsupported notice instead of a placeholder nothing stands behind.
 	acceptsMedia bool
+	// installationID is the channel_installation row this bot belongs to. The
+	// server looks the presser's binding up within it.
+	installationID pgtype.UUID
+	// actions answers button presses and the /brief and /decisions commands.
+	// Nil leaves presses unanswered and commands to the agent path.
+	actions channel.ActionHandler
 }
 
 // pollRetryDelay spaces retries after a transient getUpdates failure inside
@@ -122,8 +130,17 @@ func (c *telegramChannel) Connect(ctx context.Context) error {
 // location, …), they get a courteous notice in a private chat or when
 // explicitly addressed to the bot in a group.
 func (c *telegramChannel) dispatch(ctx context.Context, u Update) error {
+	if u.CallbackQuery != nil {
+		c.press(ctx, *u.CallbackQuery)
+		return nil
+	}
 	msg, ok := inboundFromUpdateWithContext(u, c.botID, c.botUsername, c.recent)
 	if !ok {
+		return nil
+	}
+	// A command a linked member sent is answered here and never becomes a
+	// message in the agent's chat, so it is not recorded as recent context.
+	if c.command(ctx, msg) {
 		return nil
 	}
 	c.recordRecent(u.Message, msg)
@@ -255,6 +272,9 @@ type ChannelDeps struct {
 	// sets it from the same condition, so the loop never accepts a photo the
 	// pipeline cannot keep.
 	AcceptsMedia bool
+	// Actions answers button presses and the /brief and /decisions commands
+	// (plan 9.11). Nil disables both; presses are then answered with nothing.
+	Actions channel.ActionHandler
 }
 
 // RegisterTelegram registers the per-installation Telegram Factory so the
@@ -287,13 +307,15 @@ func newTelegramFactory(deps ChannelDeps) channel.Factory {
 			return nil, fmt.Errorf("telegram: installation app_id is not a bot id: %w", err)
 		}
 		return &telegramChannel{
-			botID:        botID,
-			botUsername:  ic.BotUsername,
-			api:          newBotAPI(deps.APIBase, token, deps.HTTPClient),
-			handler:      cfg.Handler,
-			logger:       logger,
-			recent:       newRecentContextBuffer(deps.RecentContextSize),
-			acceptsMedia: deps.AcceptsMedia,
+			botID:          botID,
+			botUsername:    ic.BotUsername,
+			api:            newBotAPI(deps.APIBase, token, deps.HTTPClient),
+			handler:        cfg.Handler,
+			logger:         logger,
+			recent:         newRecentContextBuffer(deps.RecentContextSize),
+			acceptsMedia:   deps.AcceptsMedia,
+			installationID: cfg.ID,
+			actions:        deps.Actions,
 		}, nil
 	}
 }

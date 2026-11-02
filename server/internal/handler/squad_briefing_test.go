@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/jackc/pgx/v5/pgtype"
+	"github.com/multica-ai/multica/server/internal/service"
 	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
@@ -573,8 +574,129 @@ func TestBuildSquadLeaderBriefing_ProposingToTheBossOnlyForScheduledSquads(t *te
 	if !(roster >= 0 && roster < proposing && proposing < instructions) {
 		t.Errorf("block order wrong: roster=%d proposing=%d instructions=%d", roster, proposing, instructions)
 	}
-	if got := util.ParseMentions(squadProposingBriefing(squad)); len(got) != 0 {
+	if got := util.ParseMentions(squadProposingBriefing(squad, service.DefaultSquadCaps())); len(got) != 0 {
 		t.Errorf("the proposing block must not contain mention syntax, found %v", got)
+	}
+}
+
+// insertBriefingCharter stores a charter for the squad through the query the
+// charter endpoint uses, and removes it when the test ends.
+func insertBriefingCharter(t *testing.T, squad db.Squad, over db.InsertSquadCharterParams) {
+	t.Helper()
+	params := db.InsertSquadCharterParams{
+		SquadID:                squad.ID,
+		WorkspaceID:            squad.WorkspaceID,
+		ResponseHours:          48,
+		OperatingReviewEnabled: true,
+		UpdatedByType:          "member",
+		UpdatedByID:            util.MustParseUUID(testUserID),
+		Responsibilities:       []byte("[]"),
+		Outputs:                []byte("[]"),
+	}
+	if over.Mission != "" {
+		params.Mission = over.Mission
+	}
+	if over.Responsibilities != nil {
+		params.Responsibilities = over.Responsibilities
+	}
+	if over.Outputs != nil {
+		params.Outputs = over.Outputs
+	}
+	params.Boundaries = over.Boundaries
+	params.Escalation = over.Escalation
+	if _, err := testHandler.Queries.InsertSquadCharter(context.Background(), params); err != nil {
+		t.Fatalf("insert charter: %v", err)
+	}
+	dbfx.Cleanup(t, `DELETE FROM squad_charter WHERE squad_id = $1`, uuidToString(squad.ID))
+}
+
+// TestBuildSquadLeaderBriefing_CharterBlock pins the "Your charter" block. A squad
+// with a charter gets its sections and the standing rules, placed between the
+// roster and the instructions. A squad without one gets no such block.
+func TestBuildSquadLeaderBriefing_CharterBlock(t *testing.T) {
+	ctx := context.Background()
+	leaderID, _ := seededLeaderAgent(t)
+	squad := seedSquadForBriefing(t, leaderID, "Charter Briefing Squad", "Use the weekly template.")
+	brief := func() string {
+		return buildSquadLeaderBriefing(ctx, testHandler.Queries, squad, true, leaderNoWorkflow, false)
+	}
+
+	if out := brief(); strings.Contains(out, "## Your charter") || strings.Contains(out, "Standing rules:") {
+		t.Fatalf("a squad with no charter must get no charter block:\n%s", out)
+	}
+
+	insertBriefingCharter(t, squad, db.InsertSquadCharterParams{
+		Mission:          "Grow paid signups without new spend.",
+		Responsibilities: []byte(`[{"key":"triage","text":"Triage the signup queue each morning"},{"key":"digest","text":"Summarise last week's churn"}]`),
+		Outputs:          []byte(`[{"key":"churn-digest","kind":"report","kb_key":"growth/churn","cadence_hint":"weekly"},{"key":"followups","kind":"issue","kb_key":"","cadence_hint":""}]`),
+		Boundaries:       "Do not change prices.",
+		Escalation:       "Tell the boss about any churn spike above 5%.",
+	})
+
+	out := brief()
+	for _, want := range []string{
+		"## Your charter",
+		"Mission: Grow paid signups without new spend.",
+		"Responsibilities:",
+		"- Triage the signup queue each morning",
+		"- Summarise last week's churn",
+		"Outputs:",
+		"- churn-digest: report, cadence weekly, knowledge base growth/churn",
+		"- followups: issue\n",
+		"Boundaries:",
+		"Do not change prices.",
+		"Escalation:",
+		"Tell the boss about any churn spike above 5%.",
+		"Standing rules:",
+		"Search the company knowledge before you start",
+		"File a proposal instead of acting when the work involves money, an effect outside the company, or a change to how the company is organized.",
+		"record `no action` with a reason",
+		"Respect the attention limits",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("expected the charter block to contain %q\n--- briefing ---\n%s", want, out)
+		}
+	}
+
+	roster := strings.Index(out, "## Squad Roster")
+	charter := strings.Index(out, "## Your charter")
+	instructions := strings.Index(out, "## Squad Instructions")
+	if !(roster >= 0 && roster < charter && charter < instructions) {
+		t.Errorf("block order wrong: roster=%d charter=%d instructions=%d", roster, charter, instructions)
+	}
+}
+
+// TestBuildSquadLeaderBriefing_CharterBlockOmitsEmptySections: a charter that only
+// has a mission renders that mission and the standing rules, and no empty headings.
+func TestBuildSquadLeaderBriefing_CharterBlockOmitsEmptySections(t *testing.T) {
+	ctx := context.Background()
+	leaderID, _ := seededLeaderAgent(t)
+	squad := seedSquadForBriefing(t, leaderID, "Sparse Charter Squad", "")
+	insertBriefingCharter(t, squad, db.InsertSquadCharterParams{Mission: "Just the mission."})
+
+	out := buildSquadLeaderBriefing(ctx, testHandler.Queries, squad, true, leaderNoWorkflow, false)
+	for _, want := range []string{"## Your charter", "Mission: Just the mission.", "Standing rules:"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("expected %q in sparse charter block\n--- briefing ---\n%s", want, out)
+		}
+	}
+	for _, absent := range []string{"Responsibilities:", "Outputs:", "Boundaries:", "Escalation:"} {
+		if strings.Contains(out, absent) {
+			t.Errorf("an empty section %q must be left out\n--- briefing ---\n%s", absent, out)
+		}
+	}
+}
+
+// TestSquadCharterBriefingDropsUnreadableCharter: a charter whose stored lists do
+// not parse renders no block, so the leader does not act on a wrong charter.
+func TestSquadCharterBriefingDropsUnreadableCharter(t *testing.T) {
+	bad := db.SquadCharter{
+		Mission:          "Looks fine",
+		Responsibilities: []byte(`{"not":"a list"}`),
+		Outputs:          []byte(`[]`),
+	}
+	if got := squadCharterBriefing(bad); got != "" {
+		t.Fatalf("expected no block for unreadable responsibilities, got:\n%s", got)
 	}
 }
 

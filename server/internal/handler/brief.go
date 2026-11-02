@@ -150,7 +150,14 @@ type CreateBriefRequest struct {
 // mayPublishBrief reports whether the actor may publish: the workspace's
 // secretary agent, or an owner or admin member. It writes the refusal.
 func (h *Handler) mayPublishBrief(w http.ResponseWriter, r *http.Request, workspaceID, userID, actorType, actorID string) bool {
-	const refusal = "only the workspace's secretary agent or an admin member may publish a brief"
+	return h.requireSecretaryOrAdmin(w, r, workspaceID, userID, actorType, actorID, "publish a brief")
+}
+
+// requireSecretaryOrAdmin is the gate for the Secretary's own work product:
+// the workspace's secretary agent, or an owner or admin member. action completes
+// the refusal, which it writes when the actor fails the gate.
+func (h *Handler) requireSecretaryOrAdmin(w http.ResponseWriter, r *http.Request, workspaceID, userID, actorType, actorID, action string) bool {
+	refusal := "only the workspace's secretary agent or an admin member may " + action
 	if actorType == "agent" {
 		wsUUID, ok := parseUUIDOrBadRequest(w, workspaceID, "workspace_id")
 		if !ok {

@@ -10,6 +10,7 @@ import {
 import { SQUAD_ROLES, SQUAD_TEMPLATES } from "./templates";
 
 const greenfield = SQUAD_TEMPLATES.find((t) => t.id === "sdlc_greenfield")!;
+const marketTemplate = SQUAD_TEMPLATES.find((t) => t.id === "market_research")!;
 const asAgent = (id: string, name: string, archived = false) =>
   ({ id, name, archived_at: archived ? "2026-01-01" : null }) as unknown as Agent;
 const asFloor = (id: string, name: string, position = 0) =>
@@ -27,6 +28,8 @@ function fakeClient(over: Partial<FakeClient> = {}): FakeClient {
     listSquads: vi.fn(async () => [] as Squad[]),
     createSquad: vi.fn(async () => ({ id: "squad-1" }) as Squad),
     updateSquad: vi.fn(async () => ({}) as Squad),
+    updateSquadCharter: vi.fn(async () => ({}) as never),
+    createSquadRoutine: vi.fn(async () => ({}) as never),
     addSquadMember: vi.fn(async () => ({}) as never),
     listIssueWorkflows: vi.fn(async () => ({ workflows: [], total: 0 })),
     createIssueWorkflow: vi.fn(async () => ({}) as IssueWorkflow),
@@ -154,6 +157,95 @@ describe("runSquadQuickstart", () => {
 
     expect(out.squad.status).toBe("created");
     expect(out.squad.error).toContain("instructions: too long");
+  });
+
+  it("saves the template's charter at revision 0 on the new squad", async () => {
+    const client = fakeClient();
+
+    await runSquadQuickstart(client, greenfield, options);
+
+    expect(client.updateSquadCharter).toHaveBeenCalledTimes(1);
+    const [squadId, request] = client.updateSquadCharter.mock.calls[0]!;
+    expect(squadId).toBe("squad-1");
+    expect(request).toMatchObject({
+      revision: 0,
+      mission: greenfield.charter.mission,
+      boundaries: greenfield.charter.boundaries,
+      escalation: greenfield.charter.escalation,
+      intake: greenfield.charter.intake,
+      response_hours: 48,
+      responsibilities: greenfield.charter.responsibilities,
+      outputs: greenfield.charter.outputs.map((o) => ({
+        key: o.key,
+        kind: o.kind,
+        kb_key: "",
+        cadence_hint: o.cadenceHint,
+      })),
+    });
+    expect(request).not.toHaveProperty("operating_review_enabled");
+  });
+
+  it("reports a charter the server refuses, and keeps the squad", async () => {
+    const client = fakeClient({
+      updateSquadCharter: vi.fn(async () => {
+        throw new Error("mission too long");
+      }),
+    });
+
+    const out = await runSquadQuickstart(client, marketTemplate, options);
+
+    expect(out.squad.status).toBe("created");
+    expect(out.squad.error).toContain("charter: mission too long");
+  });
+
+  it("links the template's routine as a squad routine with its purpose", async () => {
+    const client = fakeClient();
+
+    await runSquadQuickstart(client, marketTemplate, options);
+
+    expect(client.createSquadRoutine).toHaveBeenCalledWith("squad-1", {
+      autopilot_id: "ap-1",
+      purpose: "Market scan",
+      expected_output: "report",
+      required: true,
+    });
+  });
+
+  it("links an existing unlinked routine on a retry and counts a routine already linked as existing", async () => {
+    const existing = {
+      listAutopilots: vi.fn(async () => ({
+        autopilots: [{ id: "old", title: "Market scan", assignee_type: "squad", assignee_id: "squad-1" }] as never[],
+        total: 1,
+      })),
+    };
+
+    const linked = fakeClient(existing);
+    const relinked = await runSquadQuickstart(linked, marketTemplate, options);
+    expect(linked.createSquadRoutine).toHaveBeenCalledWith("squad-1", expect.objectContaining({ autopilot_id: "old" }));
+    expect(relinked.routine).toEqual({ status: "existing" });
+
+    const alreadyLinked = fakeClient({
+      ...existing,
+      createSquadRoutine: vi.fn(async () => {
+        throw Object.assign(new Error("already"), { body: { code: "routine_already_linked" } });
+      }),
+    });
+    expect((await runSquadQuickstart(alreadyLinked, marketTemplate, options)).routine).toEqual({ status: "existing" });
+  });
+
+  it("reports a routine the server refuses to link, with the autopilot left for the boss", async () => {
+    const client = fakeClient({
+      createSquadRoutine: vi.fn(async () => {
+        throw new Error("autopilot must be assigned to this squad");
+      }),
+    });
+
+    const out = await runSquadQuickstart(client, marketTemplate, options);
+
+    expect(out.routine).toEqual({
+      status: "failed",
+      error: "routine: autopilot must be assigned to this squad",
+    });
   });
 
   it("builds the workflow without a QA step when the workspace admin has not allowed new statuses", async () => {
@@ -417,6 +509,43 @@ describe("runSquadQuickstart for market research", () => {
     expect(client.listOfficeFloors).not.toHaveBeenCalled();
     expect(client.setOfficeSeats).not.toHaveBeenCalled();
   });
+});
+
+// Spec 2.10: every squad created from a template has a charter and its routines.
+// The charter's first save creates the operating review, which is the SDLC squads' routine.
+describe("runSquadQuickstart for every template", () => {
+  it.each(SQUAD_TEMPLATES.map((template) => [template.id, template] as const))(
+    "%s saves its charter on the squad it creates",
+    async (_id, template) => {
+      const client = fakeClient();
+
+      const out = await runSquadQuickstart(client, template, options);
+
+      expect(out.squad.status).toBe("created");
+      expect(out.squad.error).toBeUndefined();
+      expect(client.updateSquadCharter).toHaveBeenCalledTimes(1);
+      const [squadId, request] = client.updateSquadCharter.mock.calls[0]!;
+      expect(squadId).toBe("squad-1");
+      expect(request).toMatchObject({ revision: 0, mission: template.charter.mission });
+    },
+  );
+
+  it.each(SQUAD_TEMPLATES.map((template) => [template.id, template] as const))(
+    "%s has the routine its template names, and no other",
+    async (_id, template) => {
+      const client = fakeClient();
+
+      const out = await runSquadQuickstart(client, template, options);
+
+      if (template.routine) {
+        expect(out.routine.status).toBe("created");
+        expect(client.createAutopilot).toHaveBeenCalledTimes(1);
+      } else {
+        expect(out.routine.status).toBe("skipped");
+        expect(client.createAutopilot).not.toHaveBeenCalled();
+      }
+    },
+  );
 });
 
 describe("planQuickstartAgents", () => {

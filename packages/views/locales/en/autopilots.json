@@ -145,7 +145,8 @@
     "schedule": "Schedule",
     "manual": "Manual",
     "webhook": "Webhook",
-    "api": "API"
+    "api": "API",
+    "catchup": "Catch-up"
   },
   "run": {
     "issue_linked": "Issue linked",

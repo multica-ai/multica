@@ -65,6 +65,12 @@ type WSConnectorConfig struct {
 	// A failed write must not change dispatch or acknowledgement behavior.
 	InboundVerifier InboundVerifier
 
+	// CardActions receives card.action.trigger events (button presses). The
+	// connector ACKs a press at once, with an empty response that keeps the card
+	// as it is, and runs the handler on its own goroutine. Nil leaves presses to
+	// the decoder, which drops them as unhandled events.
+	CardActions CardActionHandler
+
 	// EnrichTimeout caps a single message's enrichment (at most two
 	// GetMessage calls). It MUST stay well under Lark's ~3s long-conn
 	// ACK window, since enrichment runs before the frame is ACKed.
@@ -357,6 +363,18 @@ func (c *WSLongConnConnector) Run(ctx context.Context, inst Installation, emit E
 				"chunks", sum,
 				"bytes", len(payload),
 			)
+		}
+
+		// A card press is answered before anything else runs: Lark allows
+		// three seconds, and an empty ACK keeps the card as it is. The press
+		// itself is settled on a goroutine, so the read loop never waits on
+		// the decision or on the Open Platform.
+		if c.cfg.CardActions != nil && PeekEventType(payload) == cardActionEventType {
+			if werr := c.writeFrame(&writeMu, conn, NewAckFrame(frame, true)); werr != nil {
+				return fmt.Errorf("write ack: %w", werr)
+			}
+			go c.cfg.CardActions.HandleCardAction(context.Background(), inst, payload)
+			continue
 		}
 
 		// Data frames: hand the (possibly reassembled) JSON payload to

@@ -1,0 +1,1 @@
+DROP INDEX CONCURRENTLY IF EXISTS idx_brief_delivery_state_next_attempt;

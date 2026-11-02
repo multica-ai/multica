@@ -35,8 +35,11 @@ SELECT
         AND al.action = 'squad_leader_evaluated'
         AND al.details->>'outcome' = 'no_action'
         AND al.created_at >= sqlc.arg('since')::timestamptz)::int AS leader_no_action_count,
+    -- A snoozed proposal is hidden until its snooze passes, as the list below is.
+    -- The pending caps are counted by their own queries and still include it.
     (SELECT count(*) FROM proposal p
-      WHERE p.workspace_id = s.workspace_id AND p.squad_id = s.id AND p.state = 'pending')::int AS pending_proposal_count
+      WHERE p.workspace_id = s.workspace_id AND p.squad_id = s.id AND p.state = 'pending'
+        AND (p.snoozed_until IS NULL OR p.snoozed_until <= sqlc.arg('now')::timestamptz))::int AS pending_proposal_count
 FROM squad s
 LEFT JOIN issue i
        ON i.workspace_id = s.workspace_id
@@ -50,7 +53,8 @@ GROUP BY s.id, s.name, s.floor_id;
 
 -- name: DigestPendingProposals :many
 -- Pending proposals of the given squads, newest first, up to
--- @per_squad_limit per squad. The title is the backing issue's.
+-- @per_squad_limit per squad. The title is the backing issue's. A snoozed
+-- proposal is left out until @now passes its snoozed_until (spec 2.4).
 SELECT squad_id, proposal_id, title
 FROM (
     SELECT p.squad_id, p.id AS proposal_id, i.title,
@@ -60,6 +64,7 @@ FROM (
     WHERE p.workspace_id = sqlc.arg('workspace_id')::uuid
       AND p.state = 'pending'
       AND p.squad_id = ANY(sqlc.arg('squad_ids')::uuid[])
+      AND (p.snoozed_until IS NULL OR p.snoozed_until <= sqlc.arg('now')::timestamptz)
 ) ranked
 WHERE rn <= sqlc.arg('per_squad_limit')::int
 ORDER BY squad_id, rn;
@@ -164,3 +169,24 @@ JOIN workspace_knowledge wk ON wk.workspace_id = l.workspace_id AND wk.state = '
 WHERE l.workspace_id = sqlc.arg('workspace_id')::uuid
   AND l.state = 'draft'
   AND kb.archived_at IS NULL;
+
+-- name: DigestCharterActivity :many
+-- Each chartered squad's latest activity: a save of its charter, an issue assigned
+-- to it, a proposal it filed, or a run of one of its routines. The digest reports
+-- a squad as silent when this is more than seven days old. The charter's own save
+-- counts, so a squad chartered yesterday is not silent.
+SELECT c.squad_id,
+    GREATEST(
+        c.updated_at,
+        (SELECT max(i.updated_at) FROM issue i
+          WHERE i.workspace_id = c.workspace_id
+            AND i.assignee_type = 'squad'
+            AND i.assignee_id = c.squad_id),
+        (SELECT max(p.created_at) FROM proposal p
+          WHERE p.workspace_id = c.workspace_id
+            AND p.squad_id = c.squad_id),
+        (SELECT max(run.triggered_at) FROM autopilot_run run
+          WHERE run.squad_id = c.squad_id)
+    )::timestamptz AS last_activity_at
+FROM squad_charter c
+WHERE c.workspace_id = sqlc.arg('workspace_id')::uuid;

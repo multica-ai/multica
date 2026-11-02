@@ -58,6 +58,7 @@ import {
 } from "../notification-preferences/queries";
 import { workspaceKeys, workspaceListOptions } from "../workspace/queries";
 import { officeKeys } from "../office/queries";
+import { proposalKeys } from "../office/proposals";
 import { isWorkspaceDeletePending } from "../workspace/pending-delete";
 import {
   showWebNotification,
@@ -870,6 +871,17 @@ export function useRealtimeSync(
       office_floor: () => {
         const wsId = getCurrentWsId();
         if (wsId) qc.invalidateQueries({ queryKey: officeKeys.floors(wsId) });
+      },
+      // Created, resubmitted, decided and expired proposals. A decision moves the
+      // backing issue and may start a project, so refresh those as the decider's own
+      // mutation does (useDecideProposal).
+      proposal: () => {
+        const wsId = getCurrentWsId();
+        if (wsId) {
+          qc.invalidateQueries({ queryKey: proposalKeys.all(wsId) });
+          qc.invalidateQueries({ queryKey: issueKeys.all(wsId) });
+          qc.invalidateQueries({ queryKey: projectKeys.all(wsId) });
+        }
       },
       label: () => {
         // Label catalogs are independently scoped to issues, agents, and

@@ -1,8 +1,16 @@
 // @vitest-environment node
 import { describe, expect, it } from "vitest";
-import { FALLBACK_PROPOSAL, ProposalListSchema, ProposalSchema, type Proposal } from "./proposal-schema";
+import {
+  FALLBACK_PROPOSAL,
+  ProposalListSchema,
+  ProposalRevisionListSchema,
+  ProposalSchema,
+  type Proposal,
+  type ProposalRevision,
+} from "./proposal-schema";
 import { parseWithFallback } from "../api/schema";
-import { proposalKeys } from "./proposals";
+import { proposalKeys, proposalRefusalCode } from "./proposals";
+import { ApiError } from "../api/client";
 
 const full = {
   id: "p1",
@@ -22,6 +30,20 @@ const full = {
   decided_at: null,
   decision_note: "",
   created_at: "2026-11-01T00:00:00Z",
+  revision: 2,
+  expires_at: "2026-11-15T00:00:00Z",
+  snoozed_until: null,
+  related: [
+    {
+      kind: "proposal",
+      id: "p0",
+      title: "Pilot pricing",
+      score: 0.8,
+      state: "approved",
+      issue_identifier: "MUL-3",
+      created_at: "2026-10-01T00:00:00Z",
+    },
+  ],
 };
 
 describe("ProposalSchema", () => {
@@ -66,6 +88,63 @@ describe("ProposalSchema", () => {
     }
   });
 
+  it("reads the revision, window, snooze and related entries", () => {
+    const p = parseWithFallback(full, ProposalSchema, FALLBACK_PROPOSAL, { endpoint: "t" });
+    expect(p.revision).toBe(2);
+    expect(p.expires_at).toBe("2026-11-15T00:00:00Z");
+    expect(p.snoozed_until).toBeNull();
+    expect(p.related).toEqual([
+      {
+        kind: "proposal",
+        id: "p0",
+        title: "Pilot pricing",
+        score: 0.8,
+        state: "approved",
+        issue_identifier: "MUL-3",
+        created_at: "2026-10-01T00:00:00Z",
+      },
+    ]);
+  });
+
+  it("keeps the new lifecycle states", () => {
+    for (const state of ["revising", "expired", "approved", "rejected", "pending"] as const) {
+      expect(parseWithFallback({ ...full, state }, ProposalSchema, FALLBACK_PROPOSAL, { endpoint: "t" }).state).toBe(state);
+    }
+  });
+
+  it("defaults the new fields for an older server", () => {
+    const p = parseWithFallback({ id: "p1", state: "pending" }, ProposalSchema, FALLBACK_PROPOSAL, { endpoint: "t" });
+    expect(p).toMatchObject({ revision: 1, expires_at: null, snoozed_until: null, related: [] });
+  });
+
+  it("degrades an unknown related kind and state without failing the proposal", () => {
+    const p = parseWithFallback(
+      {
+        ...full,
+        related: [
+          { kind: "memo", id: "x", title: "Old memo", score: 0.9, state: "withdrawn", issue_identifier: null, created_at: null },
+          { kind: "decision", id: "d1", title: "Kb decision", score: 0.8, state: null, issue_identifier: null, created_at: null },
+        ],
+      },
+      ProposalSchema,
+      FALLBACK_PROPOSAL,
+      { endpoint: "t" },
+    );
+    expect(p.related.map((r) => [r.kind, r.state])).toEqual([
+      ["unknown", "unknown"],
+      ["decision", null],
+    ]);
+  });
+
+  it("returns the fallback when the related list is malformed", () => {
+    expect(parseWithFallback({ ...full, related: "none" }, ProposalSchema, FALLBACK_PROPOSAL, { endpoint: "t" })).toBe(
+      FALLBACK_PROPOSAL,
+    );
+    expect(parseWithFallback({ ...full, related: [7] }, ProposalSchema, FALLBACK_PROPOSAL, { endpoint: "t" })).toBe(
+      FALLBACK_PROPOSAL,
+    );
+  });
+
   it("tolerates extra fields", () => {
     const p = parseWithFallback({ ...full, brand_new: 1 }, ProposalSchema, FALLBACK_PROPOSAL, { endpoint: "t" });
     expect(p.id).toBe("p1");
@@ -95,10 +174,63 @@ describe("ProposalListSchema", () => {
 });
 
 describe("proposalKeys", () => {
+  it("keys the revision history by workspace and proposal", () => {
+    expect(proposalKeys.revisions("w1", "p1")).toEqual(["proposals", "w1", "revisions", "p1"]);
+    expect(proposalKeys.revisions("w1", "p1")).not.toEqual(proposalKeys.revisions("w2", "p1"));
+  });
+
   it("scopes every key by workspace and nests filtered lists under the list prefix", () => {
     expect(proposalKeys.all("w1")).toEqual(["proposals", "w1"]);
     expect(proposalKeys.listFiltered("w1", { state: "pending" }).slice(0, 3)).toEqual(proposalKeys.list("w1"));
     expect(proposalKeys.listFiltered("w1")).not.toEqual(proposalKeys.listFiltered("w2"));
     expect(proposalKeys.detail("w1", "p1")).toEqual(["proposals", "w1", "detail", "p1"]);
+  });
+});
+
+
+describe("ProposalRevisionListSchema", () => {
+  const revision = {
+    revision: 2,
+    body: "## Summary\nRevised.",
+    created_by_type: "agent",
+    created_by_id: "a1",
+    created_at: "2026-11-02T00:00:00Z",
+  };
+
+  it("parses the history and keeps its order", () => {
+    const list = parseWithFallback<ProposalRevision[]>(
+      [revision, { ...revision, revision: 1 }],
+      ProposalRevisionListSchema,
+      [],
+      { endpoint: "t" },
+    );
+    expect(list.map((r) => r.revision)).toEqual([2, 1]);
+    expect(list[0]?.body).toBe("## Summary\nRevised.");
+  });
+
+  it("defaults the fields an older server omits", () => {
+    expect(parseWithFallback([{}], ProposalRevisionListSchema, [], { endpoint: "t" })).toEqual([
+      { revision: 1, body: "", created_by_type: "", created_by_id: "", created_at: "" },
+    ]);
+  });
+
+  it("returns the empty fallback for a malformed body", () => {
+    const fallback: ProposalRevision[] = [];
+    for (const bad of [null, "oops", { revisions: [] }, [7], [{ revision: "two" }]]) {
+      expect(parseWithFallback(bad, ProposalRevisionListSchema, fallback, { endpoint: "t" })).toBe(fallback);
+    }
+  });
+});
+
+describe("proposalRefusalCode", () => {
+  it("reads the code from a coded refusal", () => {
+    const err = new ApiError("the squad is revising", 409, "Conflict", { code: "proposal_revising" });
+    expect(proposalRefusalCode(err)).toBe("proposal_revising");
+  });
+
+  it("returns null for an uncoded or non-API failure", () => {
+    expect(proposalRefusalCode(new ApiError("boom", 500, "Server Error", "text"))).toBeNull();
+    expect(proposalRefusalCode(new ApiError("boom", 500, "Server Error", { code: 7 }))).toBeNull();
+    expect(proposalRefusalCode(new Error("network"))).toBeNull();
   });
 });

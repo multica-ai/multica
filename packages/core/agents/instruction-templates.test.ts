@@ -228,6 +228,30 @@ describe("specialist templates", () => {
 describe("secretary template", () => {
   const secretary = AGENT_INSTRUCTION_TEMPLATES.find((t) => t.id === "secretary")?.instructions ?? "";
 
+  it("reads the boss's feedback before anything else in every run", () => {
+    const feedback = secretary.indexOf("multica brief feedback --recent 14d --json");
+
+    expect(secretary).toContain("At the start of every run");
+    expect(feedback).toBeGreaterThan(-1);
+    expect(feedback).toBeLessThan(secretary.indexOf("multica brief digest --since 24h --json"));
+    expect(feedback).toBeLessThan(secretary.indexOf("Pull, not push:"));
+  });
+
+  it("records standing preferences from feedback in memory", () => {
+    expect(secretary).toContain('"always lead with decisions"');
+    expect(secretary).toContain('"skip floor X"');
+    expect(secretary).toContain("One unexplained \"not useful\" is not a preference");
+    expect(secretary).toContain("Save a preference only when the boss states it");
+    expect(secretary).toContain("or the feedback shows it (see Feedback first)");
+  });
+
+  it("maps each feedback tag to a change in the next brief", () => {
+    for (const tag of ["too_long", "missing_something", "wrong", "too_vague", "not_for_me"]) {
+      expect(secretary).toContain(`"${tag}"`);
+    }
+    expect(secretary).toContain("Do not invent a preference from silence");
+  });
+
   it("reads the company only through the digest, and says so first", () => {
     expect(secretary).toContain("multica brief digest --since 24h --json");
     expect(secretary).toContain("The digest is the only source of company facts");
@@ -254,6 +278,18 @@ describe("secretary template", () => {
     expect(secretary).toContain("Publish it with `multica brief publish`");
   });
 
+  it("names the required routines not on time and the silent squads under Blockers and risks", () => {
+    const blockers = secretary.indexOf("4. ## Blockers and risks");
+    const watch = secretary.indexOf("5. ## Watch");
+    const sentence = secretary.indexOf("`routines_not_on_time`");
+
+    expect(sentence).toBeGreaterThan(blockers);
+    expect(sentence).toBeLessThan(watch);
+    expect(secretary.slice(blockers, watch)).toContain("with its state");
+    expect(secretary.slice(blockers, watch)).toContain("`charter.silent` is `true`");
+    expect(secretary.slice(blockers, watch)).toContain("give each one a proposed fix");
+  });
+
   it("keeps the brief decision-first and the language rule explicit", () => {
     expect(secretary).toContain("Decision first");
     expect(secretary).toContain("Nothing needs you today.");
@@ -261,9 +297,16 @@ describe("secretary template", () => {
     expect(secretary).toContain("the language of your autopilot's description");
   });
 
-  it("caps inquiries at three per brief and asks only through a comment mention", () => {
-    expect(secretary).toContain("At most three inquiries per brief");
-    expect(secretary).toContain("comment on the flagged issue and mention the squad leader");
+  it("asks leaders only with multica brief ask, under the daily cap", () => {
+    expect(secretary).toContain("multica brief ask --squad <squad-id> --issue <issue-id>");
+    expect(secretary).toContain("At most three inquiries per workspace per UTC day");
+    expect(secretary).toContain("inquiry_limit");
+    expect(secretary).toContain("Do not ask with a raw comment");
+  });
+
+  it("reads the answer from the digest's inquiries, not from the issue", () => {
+    expect(secretary).toContain("`inquiries`");
+    expect(secretary).toContain("`answer_excerpt`");
   });
 
   it("states the authority table: no decisions, no status or assignee changes, no deletes", () => {

@@ -778,7 +778,14 @@
     "prefix_new_label": "新字首",
     "prefix_rule": "只能使用字母和數字，最多 10 個字元。",
     "prefix_confirm_action": "修改為 {{prefix}}",
-    "prefix_external_warning": "PR 標題、分支名、文件和聊天裡的舊編號（如 {{oldExample}}）不會自動更新，這些連結會失效。"
+    "prefix_external_warning": "PR 標題、分支名、文件和聊天裡的舊編號（如 {{oldExample}}）不會自動更新，這些連結會失效。",
+    "brief_catchup_section": "每日簡報",
+    "brief_catchup_label": "補寫漏掉的簡報",
+    "brief_catchup_description": "如果每日簡報沒有執行，秘書會在下面的時間過後補寫。",
+    "brief_catchup_hour_label": "補寫時間",
+    "brief_catchup_hour_option": "{{hour}}:00",
+    "brief_catchup_saved": "每日簡報設定已儲存",
+    "brief_catchup_failed": "無法儲存每日簡報設定"
   },
   "delete_workspace_dialog": {
     "title": "刪除工作區",

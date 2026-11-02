@@ -198,6 +198,16 @@ export interface SquadRoutineTemplate {
   description: string;
 }
 
+/** The charter a template saves for its squad on creation. */
+export interface SquadCharterTemplate {
+  mission: string;
+  responsibilities: { key: string; text: string }[];
+  outputs: { key: string; kind: "issue" | "proposal" | "kb_document" | "report"; cadenceHint: string }[];
+  boundaries: string;
+  escalation: string;
+  intake: string;
+}
+
 export interface SquadTemplate {
   id: SquadTemplateId;
   /** Name of the created squad. */
@@ -214,11 +224,18 @@ export interface SquadTemplate {
   floorName: string | null;
   /** The recurring autopilot the template creates for its squad, when it has one. */
   routine: SquadRoutineTemplate | null;
+  /** The charter saved on creation. Saving it also creates the squad's operating review. */
+  charter: SquadCharterTemplate;
   /** Squad instructions: what the leader follows. */
   instructions: string;
   /** The workflow its build project needs, when it has one. */
   workflow: SquadWorkflowTemplate | null;
 }
+
+const SDLC_CHARTER_BOUNDARIES =
+  "No production deploys and no deletions without the boss. Spending money needs the boss.";
+const SDLC_CHARTER_ESCALATION =
+  "A blocked request or an open decision goes to the requester, named on the request.";
 
 const COMMON_INSTRUCTIONS = `You lead an SDLC squad. A request arrives as an issue assigned to this squad. You carry it to the end without asking the requester again. You coordinate and verify; the members do the work.
 
@@ -328,6 +345,18 @@ export const SQUAD_TEMPLATES: readonly SquadTemplate[] = [
     leader: "lead",
     floorName: null,
     routine: null,
+    charter: {
+      mission: "Take a product request from brief to a verified build, with a report the boss can act on.",
+      responsibilities: [
+        { key: "analysis", text: "Turn each request into a brief, PRD, epics and stories the build can follow." },
+        { key: "build", text: "Build the queued epics and verify them on the running app." },
+        { key: "verification", text: "Run the final regression, security and packaging checks before anyone calls it done." },
+      ],
+      outputs: [{ key: "final_report", kind: "report", cadenceHint: "per request" }],
+      boundaries: SDLC_CHARTER_BOUNDARIES,
+      escalation: SDLC_CHARTER_ESCALATION,
+      intake: "Requests arrive as issues assigned to this squad.",
+    },
     instructions: GREENFIELD_INSTRUCTIONS,
     workflow: SDLC_AUTO_WORKFLOW,
   },
@@ -351,6 +380,18 @@ export const SQUAD_TEMPLATES: readonly SquadTemplate[] = [
     leader: "lead",
     floorName: null,
     routine: null,
+    charter: {
+      mission: "Keep an existing product correct, safe and current: fix bugs, ship changes, and keep it up to date.",
+      responsibilities: [
+        { key: "triage", text: "Triage each bug or change: type, risk tier, and the route it takes." },
+        { key: "delivery", text: "Deliver the change through review and QA, with evidence for each claim." },
+        { key: "upkeep", text: "Keep dependencies, the build and the documentation current." },
+      ],
+      outputs: [{ key: "change_report", kind: "report", cadenceHint: "per change" }],
+      boundaries: SDLC_CHARTER_BOUNDARIES,
+      escalation: SDLC_CHARTER_ESCALATION,
+      intake: "Bugs and changes arrive as issues assigned to this squad.",
+    },
     instructions: MAINTENANCE_INSTRUCTIONS,
     workflow: null,
   },
@@ -368,6 +409,22 @@ export const SQUAD_TEMPLATES: readonly SquadTemplate[] = [
       cron: "0 8 * * 1",
       description:
         "Weekly market scan. Scope: the markets, customer segments, and named competitors in the research notes; if none are named, start from the company knowledge base (multica knowledge search) and say which markets you chose. Look for changes in the last seven days: pricing, product launches, customer wins and complaints, regulation, and funding. Bar for a proposal: a change that touches a decision the company can make this quarter, backed by at least two dated sources, with its cost and risk stated. File zero to three proposals; no proposal this week is a valid result. Write the report in English.",
+    },
+    charter: {
+      mission: "Scan markets, customers and competitors each week, and file only the proposals the evidence supports.",
+      responsibilities: [
+        { key: "market_scan", text: "Watch markets and customers for changes in the last seven days, with a dated source for each claim." },
+        { key: "competitors", text: "Track named competitors' products, pricing and moves from primary sources." },
+        { key: "challenge", text: "Have the critic challenge the evidence before anything is filed." },
+      ],
+      outputs: [
+        { key: "weekly_report", kind: "report", cadenceHint: "weekly" },
+        { key: "market_proposals", kind: "proposal", cadenceHint: "0 to 3 a week" },
+      ],
+      boundaries:
+        "Does not write product code, make product decisions, or contact anyone outside the workspace.",
+      escalation: "Questions for the boss go in a proposal, not in a chat.",
+      intake: "The weekly market scan routine opens each week's issue.",
     },
     instructions: MARKET_RESEARCH_INSTRUCTIONS,
     workflow: null,

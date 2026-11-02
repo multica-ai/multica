@@ -10,6 +10,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/multica-ai/multica/server/internal/events"
 	"github.com/multica-ai/multica/server/internal/handler"
+	"github.com/multica-ai/multica/server/internal/service"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 	"github.com/multica-ai/multica/server/pkg/protocol"
 )
@@ -106,10 +107,10 @@ func TestNotification_BriefCreated_OneItemPerOwner(t *testing.T) {
 }
 
 func TestBriefHeadlineBody(t *testing.T) {
-	if got := briefHeadlineBody("## Progress\nx\n\n## Headline\nLine one\nLine two\n## FYI\nz"); got != "Line one Line two" {
+	if got := service.BriefHeadline("## Progress\nx\n\n## Headline\nLine one\nLine two\n## FYI\nz"); got != "Line one Line two" {
 		t.Fatalf("headline = %q", got)
 	}
-	if got := briefHeadlineBody("## Progress\nx"); got != "" {
+	if got := service.BriefHeadline("## Progress\nx"); got != "" {
 		t.Fatalf("no headline should give empty, got %q", got)
 	}
 }

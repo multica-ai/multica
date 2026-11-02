@@ -246,7 +246,7 @@ func TestCreateProposal_Limits(t *testing.T) {
 		{
 			name: "3 pending in the squad blocks the 4th",
 			seed: func(t *testing.T, fx proposalTestFixture) {
-				for i := 0; i < service.ProposalMaxPendingPerSquad; i++ {
+				for i := 0; i < service.ProposalDefaultPendingPerSquad; i++ {
 					seedProposalRow(t, fx.SquadID, "pending", false, time.Hour)
 				}
 			},
@@ -263,7 +263,7 @@ func TestCreateProposal_Limits(t *testing.T) {
 		{
 			name: "3 created this week blocks the 4th even when decided",
 			seed: func(t *testing.T, fx proposalTestFixture) {
-				for i := 0; i < service.ProposalMaxCreatedPerSquadPerWeek; i++ {
+				for i := 0; i < service.ProposalDefaultWeeklyPerSquad; i++ {
 					seedProposalRow(t, fx.SquadID, "rejected", false, 2*day)
 				}
 			},
@@ -272,7 +272,7 @@ func TestCreateProposal_Limits(t *testing.T) {
 		{
 			name: "3 created more than 7 days ago do not count",
 			seed: func(t *testing.T, fx proposalTestFixture) {
-				for i := 0; i < service.ProposalMaxCreatedPerSquadPerWeek; i++ {
+				for i := 0; i < service.ProposalDefaultWeeklyPerSquad; i++ {
 					seedProposalRow(t, fx.SquadID, "approved", false, 8*day)
 				}
 			},
@@ -322,7 +322,7 @@ func TestCreateProposal_Limits(t *testing.T) {
 		{
 			name: "another squad's proposals do not count",
 			seed: func(t *testing.T, fx proposalTestFixture) {
-				for i := 0; i < service.ProposalMaxPendingPerSquad; i++ {
+				for i := 0; i < service.ProposalDefaultPendingPerSquad; i++ {
 					seedProposalRow(t, dbidString(t), "pending", true, time.Hour)
 				}
 			},
@@ -383,8 +383,8 @@ func TestCreateProposal_ConcurrentCreatesRespectTheSquadLimit(t *testing.T) {
 			t.Fatalf("unexpected status %d", code)
 		}
 	}
-	if created != service.ProposalMaxPendingPerSquad {
-		t.Fatalf("concurrent creates produced %d proposals, want exactly %d", created, service.ProposalMaxPendingPerSquad)
+	if created != service.ProposalDefaultPendingPerSquad {
+		t.Fatalf("concurrent creates produced %d proposals, want exactly %d", created, service.ProposalDefaultPendingPerSquad)
 	}
 }
 

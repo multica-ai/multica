@@ -7829,6 +7829,13 @@ func (s *TaskService) createAgentComment(ctx context.Context, issueID, agentID p
 		return
 	}
 	comment := created.Comment()
+	if commentType == "comment" {
+		// A squad agent's reply answers the Secretary's open questions on this
+		// issue (brief inquiries). The comment stands if the update fails.
+		if err := RecordBriefInquiryAnswer(ctx, s.Queries, issue.WorkspaceID, issueID, agentID, comment.Content); err != nil {
+			slog.Warn("record brief inquiry answer failed", "issue_id", util.UUIDToString(issueID), "error", err)
+		}
+	}
 	commentFields := commentEventFields(comment)
 	commentFields["revision"] = comment.Revision
 	s.Bus.Publish(events.Event{

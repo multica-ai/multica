@@ -1,12 +1,12 @@
 ---
 title: Slack Bot
-description: Create a Slack Bot for an agent and use it in DMs, channels, and the /issue, /new, and /clear commands.
+description: Create a Slack Bot for an agent and use it in DMs, channels, the /issue, /new, /clear, /brief, and /decisions commands, and the brief's decision buttons.
 ---
 
 import { Callout } from "fumadocs-ui/components/callout";
 import { Step, Steps } from "fumadocs-ui/components/steps";
 
-Multica uses your own Slack app. Once connected, team members can DM the Bot or @-mention it in a channel, and use `/issue` to create issues, `/new` to start a new Multica Chat, and `/clear` to reset the current Chat's agent context.
+Multica uses your own Slack app. Once connected, team members can DM the Bot or @-mention it in a channel, and use `/issue` to create issues, `/new` to start a new Multica Chat, and `/clear` to reset the current Chat's agent context. `/brief` and `/decisions` show the latest brief and the decisions waiting for you, and the brief pushed to a member's DM carries buttons to decide from Slack.
 
 One Slack app maps to one Multica agent. To connect several agents, create a separate app for each.
 
@@ -47,6 +47,10 @@ features:
     - command: /clear
       description: Clear the current Multica chat context
       usage_hint: "[message]"
+    - command: /brief
+      description: Show the latest Multica brief
+    - command: /decisions
+      description: Show the decisions waiting for you in Multica
 oauth_config:
   scopes:
     bot:
@@ -55,6 +59,7 @@ oauth_config:
       - files:read
       - groups:history
       - im:history
+      - im:write
       - mpim:history
       - chat:write
       - reactions:write
@@ -69,16 +74,20 @@ settings:
       - message.groups
       - message.mpim
   interactivity:
-    is_enabled: false
+    is_enabled: true
   org_deploy_enabled: false
   socket_mode_enabled: true
   token_rotation_enabled: false
 ```
 
-Before creating, you can replace both occurrences of `Multica` with the agent's name. Do not remove scopes or events from the manifest, or DMs, channel mentions, replies, `/issue`, `/new`, or `/clear` may stop working.
+Before creating, you can replace both occurrences of `Multica` with the agent's name. Do not remove scopes or events from the manifest, or DMs, channel mentions, replies, `/issue`, `/new`, `/clear`, `/brief`, `/decisions`, or the brief's decision buttons may stop working.
 
 <Callout type="warning">
-Slack slash-command names are workspace-global. If another installed app already owns `/new` or `/clear`, Slack rejects the conflicting command when you create or update the app. Resolve the collision, or send the message form `@Multica /new [message]` or `@Multica /clear [message]` to bypass native slash-command interception.
+Slack slash-command names are workspace-global. If another installed app already owns `/new`, `/clear`, `/brief`, or `/decisions`, Slack rejects the conflicting command when you create or update the app. Resolve the collision, or send the message form `@Multica /new [message]` or `@Multica /clear [message]` to bypass native slash-command interception. `/brief` and `/decisions` have no message form, so they need the slash command.
+</Callout>
+
+<Callout type="warning">
+If this Slack app was created before brief buttons were available, turn on **Interactivity** under **Features → Interactivity & Shortcuts** (leave the Request URL empty; the Bot receives button presses over Socket Mode), add the `/brief` and `/decisions` slash commands under **Features → Slash Commands**, add the `im:write` Bot scope under **OAuth & Permissions**, and reinstall the app to the workspace. Without these, the brief still arrives in Slack, but its buttons do nothing, and a brief DM may be refused.
 </Callout>
 
 <Callout type="warning">
@@ -149,6 +158,16 @@ The Bot only responds to channel messages that explicitly @-mention it. When it 
 Attach files to a DM, or to a channel message that @-mentions the Bot. They reach the agent as attachments and are handled together with the message.
 
 This needs the `files:read` scope; if the app was installed before attachment support existed, see the note in step 1. Each file must be 20 MiB or smaller, and one message carries at most 10. Files that are larger, still uploading, or hosted outside Slack (a Google Drive or Dropbox link, for example) are skipped; the message text still reaches the agent.
+
+### See the brief and decisions with `/brief` and `/decisions`
+
+In a DM or a channel, type `/brief` to see the headline of the latest brief with a link to it, or `/decisions` to see the decisions waiting for you, each with a link to the Office. Only you see the reply. You need to be linked to a Multica member of the workspace, as for the other commands.
+
+### Decide from the brief in Slack
+
+When a brief is ready and brief push is on for you, the Bot sends it to your DM with the headline, the number of decisions, the top three decisions and a link to the brief. Each decision has **Approve**, **Reject** and **Snooze 7 days** buttons, and **Revise** opens the decision in Multica because a revision needs a note.
+
+Only an owner or admin of the workspace can decide from Slack. Anyone else is shown a link to the app instead. A button works for 24 hours after the brief is sent; after that, open the decision in Multica. Once a decision is decided, its buttons are removed from the message.
 
 ### Create issues with `/issue`
 

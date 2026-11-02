@@ -591,7 +591,9 @@ func (s *AutopilotService) dispatchAutopilot(
 	})
 	if err != nil {
 		var quotaErr *AutopilotQuotaExceededError
-		if errors.As(err, &quotaErr) && source == "schedule" {
+		// A scheduled or caught-up run has no person waiting on it, so an
+		// exhausted quota is recorded as a skip rather than a failed dispatch.
+		if errors.As(err, &quotaErr) && (source == "schedule" || source == BriefCatchupSource) {
 			skipped, skipErr := s.recordSkippedRun(ctx, autopilot, triggerID, source, payload, plannedAt, webhookDeliveryID, quotaErr.Error(), dispatch.ReasonQuotaExceeded)
 			return skipped, dispatch.ReasonQuotaExceeded, skipErr
 		}

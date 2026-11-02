@@ -1,12 +1,13 @@
 "use client";
 
-import { memo, useCallback, useMemo, useState } from "react";
+import { memo, useCallback, useEffect, useMemo, useState } from "react";
 import { useQueries, useQuery } from "@tanstack/react-query";
 import { agentTaskSnapshotOptions } from "@multica/core/agents";
 import {
   layoutFloor,
   officeFloorsOptions,
   officeSquadMembersOptions,
+  proposalDetailOptions,
   proposalListOptions,
   useOfficeFloorStore,
   type Proposal,
@@ -20,6 +21,7 @@ import type { OfficeFloor } from "@multica/core/office";
 import { useViewStore } from "@multica/core/issues/stores/view-store-context";
 import { Button } from "@multica/ui/components/ui/button";
 import { useT } from "../../i18n";
+import { useNavigation } from "../../navigation";
 import { BoardView, type BoardViewProps } from "../../issues/components/board-view";
 import { useStatusLabel } from "../../issues/utils/status-label";
 import { focusIssues, leadersNeedingYou, officeTagOf } from "../lib/office-tag";
@@ -36,6 +38,7 @@ import { OfficeDecisionsDialog } from "./office-decisions-dialog";
 import { OfficeFirstRun } from "./office-first-run";
 import { OfficeFloorTabs } from "./office-floor-tabs";
 import { useOfficeAdmin } from "../lib/use-office-admin";
+import { useDecisionQueue } from "../lib/decision-queue";
 import { useSeatAll } from "../lib/use-seat-all";
 
 const EMPTY_TASKS: AgentTask[] = [];
@@ -92,7 +95,12 @@ function OfficeScene({ issues, visibleStatuses, projectId }: BoardViewProps) {
   const selectFloor = useOfficeFloorStore((s) => s.setLastFloorId);
   const canManage = useOfficeAdmin();
   const userId = useAuthStore((s) => s.user?.id);
-  const { data: pending = EMPTY_PROPOSALS } = useQuery(proposalListOptions(wsId, { state: "pending" }));
+  const { data: pendingAll = EMPTY_PROPOSALS } = useQuery(proposalListOptions(wsId, { state: "pending" }));
+  const { data: revisingAll = EMPTY_PROPOSALS } = useQuery(proposalListOptions(wsId, { state: "revising" }));
+  // The queue leaves out proposals put aside with Decide later until their date.
+  const { needsDecision: pending } = useDecisionQueue(pendingAll);
+  // The dialog lists the whole decision book: the queue, the put aside and the revising.
+  const decisionBook = useMemo(() => [...pendingAll, ...revisingAll], [pendingAll, revisingAll]);
 
   // The floor on show: the one last viewed, else the first.
   const floor = floors.find((candidate) => candidate.id === lastFloorId) ?? floors[0] ?? null;
@@ -132,6 +140,39 @@ function OfficeScene({ issues, visibleStatuses, projectId }: BoardViewProps) {
     [layout, pending],
   );
   const [decisionsOpen, setDecisionsOpen] = useState(false);
+
+  // Telegram links land here as ?decision=<proposal> and ?brief=<brief>. They are read
+  // once: the parameters leave the URL, so a reload does not open the dialog again.
+  const navigation = useNavigation();
+  const { pathname, hash, replace, searchParams } = navigation;
+  const decisionParam = searchParams.get("decision");
+  const briefParam = searchParams.get("brief");
+  const [decisionFocus, setDecisionFocus] = useState<string | null>(null);
+  const [briefFocus, setBriefFocus] = useState<string | null>(null);
+  useEffect(() => {
+    if (!decisionParam && !briefParam) return;
+    if (decisionParam) {
+      setDecisionFocus(decisionParam);
+      setDecisionsOpen(true);
+    }
+    if (briefParam) setBriefFocus(briefParam);
+    const rest = new URLSearchParams(searchParams);
+    rest.delete("decision");
+    rest.delete("brief");
+    const search = rest.toString();
+    replace(`${pathname}${search ? `?${search}` : ""}${hash}`);
+  }, [decisionParam, briefParam, searchParams, pathname, hash, replace]);
+
+  // A linked proposal that is no longer pending or revising is fetched, so the dialog can show its state.
+  const linkedInBook = decisionFocus !== null && decisionBook.some((proposal) => proposal.id === decisionFocus);
+  const { data: linkedProposal } = useQuery({
+    ...proposalDetailOptions(wsId, decisionFocus ?? ""),
+    enabled: !!wsId && !!decisionFocus && !linkedInBook,
+  });
+  const decisionProposals = useMemo(
+    () => (linkedProposal && !linkedInBook ? [...decisionBook, linkedProposal] : decisionBook),
+    [decisionBook, linkedProposal, linkedInBook],
+  );
 
   const sessions = useMemo<WorkerSession[]>(
     () =>
@@ -190,11 +231,11 @@ function OfficeScene({ issues, visibleStatuses, projectId }: BoardViewProps) {
         canManage={canManage}
         onSelect={selectFloor}
       >
-        <OfficeBriefButton />
-        {pending.length > 0 ? (
+        <OfficeBriefButton focusBriefId={briefFocus} />
+        {pendingAll.length > 0 ? (
           <Button type="button" variant="outline" size="sm" onClick={() => setDecisionsOpen(true)}>
             {t(($) => $.office.decisions_open)}
-            <span className="tabular-nums text-muted-foreground">{pending.length}</span>
+            {pending.length > 0 ? <span className="tabular-nums text-muted-foreground">{pending.length}</span> : null}
           </Button>
         ) : null}
       </OfficeFloorTabs>
@@ -252,10 +293,14 @@ function OfficeScene({ issues, visibleStatuses, projectId }: BoardViewProps) {
       />
       <OfficeDecisionsDialog
         open={decisionsOpen}
-        proposals={pending}
+        proposals={decisionProposals}
         squads={squads}
         canDecide={canManage}
-        onClose={() => setDecisionsOpen(false)}
+        focusId={decisionFocus}
+        onClose={() => {
+          setDecisionsOpen(false);
+          setDecisionFocus(null);
+        }}
       />
       <OfficeAgentPanel target={panel} issues={issues} projectId={projectId} onClose={() => setPanel(null)} />
     </>

@@ -42,6 +42,12 @@ const (
 	// DigestKnowledgeListLimit bounds the stale documents listed; the count
 	// carries the total.
 	DigestKnowledgeListLimit = 10
+	// DigestSilentAfter is how long a chartered squad may go without activity
+	// before the digest reports it as silent.
+	DigestSilentAfter = 7 * 24 * time.Hour
+	// DigestMaxRoutines bounds the routines a squad's charter section lists; the
+	// routine_count carries the total.
+	DigestMaxRoutines = 10
 )
 
 // ErrDigestWindow reports a `since` the digest refuses.
@@ -63,6 +69,52 @@ type DigestProposalRef struct {
 	Title string `json:"title"`
 }
 
+// DigestInquiry is a question the Secretary put to a squad leader on the day or
+// the day before (UTC). Answered is set when the squad has replied on the issue,
+// and AnswerExcerpt then carries the first characters of the reply. The JSON keys
+// are question, answered and answer_excerpt; the Secretary reads them without
+// searching.
+type DigestInquiry struct {
+	Question      string  `json:"question"`
+	Answered      bool    `json:"answered"`
+	AnswerExcerpt *string `json:"answer_excerpt"`
+}
+
+// DigestRoutine is one of a chartered squad's routines with its derived state.
+type DigestRoutine struct {
+	AutopilotID    string `json:"autopilot_id"`
+	Title          string `json:"title"`
+	Purpose        string `json:"purpose"`
+	ExpectedOutput string `json:"expected_output"`
+	Required       bool   `json:"required"`
+	State          string `json:"state"`
+}
+
+// DigestSquadCharter is a chartered squad's section: its routine states and
+// whether it has gone quiet. The routine states are facts; the Secretary asks
+// the leader about a fix (see the brief's blockers).
+type DigestSquadCharter struct {
+	// Silent is set when nothing has happened in the squad for more than
+	// DigestSilentAfter. The charter's own save counts as activity.
+	Silent       bool            `json:"silent"`
+	RoutineCount int             `json:"routine_count"`
+	Routines     []DigestRoutine `json:"routines"`
+}
+
+// DigestRoutineRef is a required routine the workspace is not delivering.
+type DigestRoutineRef struct {
+	AutopilotID string `json:"autopilot_id"`
+	SquadID     string `json:"squad_id"`
+	SquadName   string `json:"squad_name"`
+	Title       string `json:"title"`
+	State       string `json:"state"`
+}
+
+type DigestRoutineRefList struct {
+	Count int                `json:"count"`
+	Items []DigestRoutineRef `json:"items"`
+}
+
 // DigestSquad is one squad reported in full.
 type DigestSquad struct {
 	ID      string  `json:"id"`
@@ -80,6 +132,12 @@ type DigestSquad struct {
 	PendingProposalCount int                 `json:"pending_proposal_count"`
 	PendingProposals     []DigestProposalRef `json:"pending_proposals"`
 	RecentDone           []DigestIssueRef    `json:"recent_done"`
+	// Charter is nil when the squad has no charter.
+	Charter *DigestSquadCharter `json:"charter"`
+
+	// routinesOffTrack counts the squad's required routines not on time. It
+	// ranks the squad and keeps it in full; the list is in the workspace section.
+	routinesOffTrack int
 }
 
 // DigestQuietSquad is the single line a squad with nothing new gets.
@@ -138,6 +196,9 @@ type DigestWorkspace struct {
 	OfflineRuntimes DigestRuntimeList `json:"offline_runtimes"`
 	AgentsFailed    DigestAgentList   `json:"agents_with_failed_runs"`
 	UnseatedSquads  DigestSquadList   `json:"unseated_squads"`
+	// RoutinesNotOnTime lists the required routines whose state is not on_time,
+	// for the brief's blockers and risks. Count is the total.
+	RoutinesNotOnTime DigestRoutineRefList `json:"routines_not_on_time"`
 }
 
 // DigestKnowledgeDocRef is a published knowledge document the digest flags.
@@ -174,6 +235,9 @@ type Digest struct {
 	OmittedSquadCount int             `json:"omitted_squad_count"`
 	Quiet             DigestQuiet     `json:"quiet"`
 	Knowledge         DigestKnowledge `json:"knowledge"`
+	// Inquiries are the Secretary's questions to squad leaders asked today or
+	// yesterday (UTC), newest first. The daily cap keeps the list short.
+	Inquiries []DigestInquiry `json:"inquiries"`
 }
 
 // DigestService computes the digest.
@@ -213,16 +277,26 @@ func ParseDigestSince(raw string, now time.Time) (time.Time, error) {
 
 // quiet reports whether a squad has nothing worth the boss's attention. A squad
 // with work merely in flight is quiet: it still gets its in-progress count on
-// its single line.
+// its single line. A squad with an off-track routine or gone silent is not.
 func (q DigestSquad) quiet() bool {
 	return q.Done == 0 && q.Blocked == 0 && q.Stale == 0 && q.FailedRuns == 0 &&
-		q.LeaderNoAction == 0 && q.PendingProposalCount == 0
+		q.LeaderNoAction == 0 && q.PendingProposalCount == 0 &&
+		q.routinesOffTrack == 0 && !q.silent()
+}
+
+func (q DigestSquad) silent() bool { return q.Charter != nil && q.Charter.Silent }
+
+func digestBoolInt(b bool) int {
+	if b {
+		return 1
+	}
+	return 0
 }
 
 // attentionLess orders squads by what needs the boss first: pending proposals
 // (only the boss can clear them), then blocked work, failed runs, stale work,
-// leaders that did nothing, then plain activity. Ties break on name and id so
-// the order is stable.
+// leaders that did nothing, routines off track, silence, then plain activity.
+// Ties break on name and id so the order is stable.
 func attentionLess(a, b DigestSquad) bool {
 	keys := [][2]int{
 		{a.PendingProposalCount, b.PendingProposalCount},
@@ -230,6 +304,8 @@ func attentionLess(a, b DigestSquad) bool {
 		{a.FailedRuns, b.FailedRuns},
 		{a.Stale, b.Stale},
 		{a.LeaderNoAction, b.LeaderNoAction},
+		{a.routinesOffTrack, b.routinesOffTrack},
+		{digestBoolInt(a.silent()), digestBoolInt(b.silent())},
 		{a.Done + a.InProgress, b.Done + b.InProgress},
 	}
 	for _, k := range keys {
@@ -288,6 +364,7 @@ func (s *DigestService) Compute(ctx context.Context, workspaceID pgtype.UUID, si
 		WorkspaceID: workspaceID,
 		Since:       sinceTS,
 		StaleBefore: pgtype.Timestamptz{Time: now.Add(-DigestStaleAfter), Valid: true},
+		Now:         pgtype.Timestamptz{Time: now, Valid: true},
 	})
 	if err != nil {
 		return Digest{}, fmt.Errorf("digest squad stats: %w", err)
@@ -310,6 +387,11 @@ func (s *DigestService) Compute(ctx context.Context, workspaceID pgtype.UUID, si
 		})
 	}
 
+	offTrack, err := s.attachRoutines(ctx, workspaceID, now, all)
+	if err != nil {
+		return Digest{}, err
+	}
+
 	squads, omitted, quiet := rankSquads(all)
 
 	// Details only for the squads reported in full.
@@ -322,6 +404,7 @@ func (s *DigestService) Compute(ctx context.Context, workspaceID pgtype.UUID, si
 		}
 		proposals, err := s.Queries.DigestPendingProposals(ctx, db.DigestPendingProposalsParams{
 			WorkspaceID: workspaceID, SquadIds: ids, PerSquadLimit: DigestProposalListLimit,
+			Now: pgtype.Timestamptz{Time: now, Valid: true},
 		})
 		if err != nil {
 			return Digest{}, fmt.Errorf("digest pending proposals: %w", err)
@@ -348,7 +431,12 @@ func (s *DigestService) Compute(ctx context.Context, workspaceID pgtype.UUID, si
 	if err != nil {
 		return Digest{}, err
 	}
+	ws.RoutinesNotOnTime = offTrack
 	know, err := s.computeKnowledge(ctx, workspaceID, now)
+	if err != nil {
+		return Digest{}, err
+	}
+	inquiries, err := s.computeInquiries(ctx, workspaceID, now)
 	if err != nil {
 		return Digest{}, err
 	}
@@ -361,7 +449,104 @@ func (s *DigestService) Compute(ctx context.Context, workspaceID pgtype.UUID, si
 		OmittedSquadCount: omitted,
 		Quiet:             quiet,
 		Knowledge:         know,
+		Inquiries:         inquiries,
 	}, nil
+}
+
+// computeInquiries lists the inquiries asked today or yesterday (UTC). The
+// window is the day, not the digest's since: the Secretary reads an answer in the
+// next digest after it arrives, whatever period that digest covers.
+func (s *DigestService) computeInquiries(ctx context.Context, workspaceID pgtype.UUID, now time.Time) ([]DigestInquiry, error) {
+	yesterday := briefInquiryDay(now).AddDate(0, 0, -1)
+	rows, err := s.Queries.ListBriefInquiriesForDigest(ctx, db.ListBriefInquiriesForDigestParams{
+		WorkspaceID: workspaceID, AskedOn: pgtype.Date{Time: yesterday, Valid: true},
+	})
+	if err != nil {
+		return nil, fmt.Errorf("digest inquiries: %w", err)
+	}
+	out := make([]DigestInquiry, 0, len(rows))
+	for _, row := range rows {
+		item := DigestInquiry{Question: row.Question, Answered: row.AnsweredAt.Valid}
+		if item.Answered && row.AnswerExcerpt.Valid {
+			excerpt := row.AnswerExcerpt.String
+			item.AnswerExcerpt = &excerpt
+		}
+		out = append(out, item)
+	}
+	return out, nil
+}
+
+// attachRoutines derives every routine's state, gives each chartered squad its
+// charter section, and returns the required routines not on time, for the
+// workspace section. A routine of a squad that is not live (archived) is left out.
+// A squad without a charter gets no section, but its routines still count.
+func (s *DigestService) attachRoutines(ctx context.Context, workspaceID pgtype.UUID, now time.Time, squads []DigestSquad) (DigestRoutineRefList, error) {
+	index := make(map[string]int, len(squads))
+	for i := range squads {
+		index[squads[i].ID] = i
+	}
+
+	states, err := RoutineComplianceStates(ctx, s.Queries, workspaceID, pgtype.UUID{}, now)
+	if err != nil {
+		return DigestRoutineRefList{}, fmt.Errorf("digest routine states: %w", err)
+	}
+	bySquad := make(map[int][]RoutineCompliance)
+	var offTrack []DigestRoutineRef
+	for _, rs := range states {
+		i, ok := index[rs.SquadID]
+		if !ok {
+			continue
+		}
+		bySquad[i] = append(bySquad[i], rs)
+		if rs.Required && rs.State != RoutineStateOnTime {
+			squads[i].routinesOffTrack++
+			offTrack = append(offTrack, DigestRoutineRef{
+				AutopilotID: rs.AutopilotID, SquadID: rs.SquadID, SquadName: squads[i].Name,
+				Title: rs.Title, State: rs.State,
+			})
+		}
+	}
+	sort.SliceStable(offTrack, func(i, j int) bool {
+		a, b := offTrack[i], offTrack[j]
+		if a.SquadName != b.SquadName {
+			return a.SquadName < b.SquadName
+		}
+		if a.Title != b.Title {
+			return a.Title < b.Title
+		}
+		return a.AutopilotID < b.AutopilotID
+	})
+	list := DigestRoutineRefList{Count: len(offTrack), Items: []DigestRoutineRef{}}
+	if len(offTrack) > DigestWorkspaceListLimit {
+		offTrack = offTrack[:DigestWorkspaceListLimit]
+	}
+	list.Items = append(list.Items, offTrack...)
+
+	activity, err := s.Queries.DigestCharterActivity(ctx, workspaceID)
+	if err != nil {
+		return DigestRoutineRefList{}, fmt.Errorf("digest charter activity: %w", err)
+	}
+	for _, a := range activity {
+		i, ok := index[util.UUIDToString(a.SquadID)]
+		if !ok {
+			continue
+		}
+		charter := &DigestSquadCharter{
+			Silent:   now.Sub(a.LastActivityAt.Time) > DigestSilentAfter,
+			Routines: []DigestRoutine{},
+		}
+		for _, rs := range bySquad[i] {
+			charter.RoutineCount++
+			if len(charter.Routines) < DigestMaxRoutines {
+				charter.Routines = append(charter.Routines, DigestRoutine{
+					AutopilotID: rs.AutopilotID, Title: rs.Title, Purpose: rs.Purpose,
+					ExpectedOutput: rs.ExpectedOutput, Required: rs.Required, State: rs.State,
+				})
+			}
+		}
+		squads[i].Charter = charter
+	}
+	return list, nil
 }
 
 // computeKnowledge reads the knowledge registry only, never the sidecar: the

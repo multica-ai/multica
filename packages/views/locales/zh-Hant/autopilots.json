@@ -145,7 +145,8 @@
     "schedule": "時間表",
     "manual": "手動",
     "webhook": "Webhook",
-    "api": "API"
+    "api": "API",
+    "catchup": "補寫"
   },
   "run": {
     "issue_linked": "已關聯任務",

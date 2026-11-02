@@ -44,13 +44,15 @@ func larkMsgFromRaw(msg channel.InboundMessage) (InboundMessage, error) {
 // shared session service, audit logger, and (optional) outbound replier +
 // typing indicator. Feishu is just another consumer of the channel-agnostic
 // engine.ChatSession — there is no Feishu-specific session implementation.
-func NewFeishuResolverSet(store *ChannelStore, session *engine.ChatSession, audit AuditLogger, replier OutcomeReplier, typing *TypingIndicatorManager, media engine.MediaResolver) engine.ResolverSet {
+// commands answers /brief and /decisions; nil leaves them as ordinary text.
+func NewFeishuResolverSet(store *ChannelStore, session *engine.ChatSession, audit AuditLogger, replier OutcomeReplier, typing *TypingIndicatorManager, media engine.MediaResolver, commands engine.ChatCommander) engine.ResolverSet {
 	set := engine.ResolverSet{
 		Installation: &feishuInstallationResolver{store: store},
 		Identity:     &feishuIdentityResolver{store: store},
 		Dedup:        &feishuDeduper{store: store},
 		Session:      &feishuSessionBinder{session: session},
 		Audit:        &feishuAuditor{audit: audit},
+		Commands:     commands,
 		OriginType:   originFeishuChat,
 	}
 	if replier != nil {
@@ -313,6 +315,7 @@ func dispatchResultFromEngine(res engine.Result) DispatchResult {
 		IssueTitle:         res.IssueTitle,
 		IssueDuplicate:     res.IssueDuplicate,
 		IssueUsageHadMedia: res.IssueUsageHadMedia,
+		CommandReply:       res.CommandReply,
 	}
 }
 

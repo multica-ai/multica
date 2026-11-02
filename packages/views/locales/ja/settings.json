@@ -778,7 +778,14 @@
     "prefix_new_label": "新しいプレフィックス",
     "prefix_rule": "英字と数字のみ、最大 10 文字です。",
     "prefix_confirm_action": "{{prefix}} に変更",
-    "prefix_external_warning": "PR タイトル、ブランチ名、ドキュメント、チャット内の古いキー（{{oldExample}} など）は更新されないため、それらのリンクは機能しなくなります。"
+    "prefix_external_warning": "PR タイトル、ブランチ名、ドキュメント、チャット内の古いキー（{{oldExample}} など）は更新されないため、それらのリンクは機能しなくなります。",
+    "brief_catchup_section": "デイリーブリーフ",
+    "brief_catchup_label": "逃したブリーフを後から作成",
+    "brief_catchup_description": "デイリーブリーフが実行されなかった場合、下の時刻を過ぎると秘書が作成します。",
+    "brief_catchup_hour_label": "後から作成する時刻",
+    "brief_catchup_hour_option": "{{hour}}:00",
+    "brief_catchup_saved": "デイリーブリーフの設定を保存しました",
+    "brief_catchup_failed": "デイリーブリーフの設定を保存できませんでした"
   },
   "delete_workspace_dialog": {
     "title": "ワークスペースを削除",

@@ -64,6 +64,53 @@ func (q *Queries) DigestAgentsWithFailedRuns(ctx context.Context, arg DigestAgen
 	return items, nil
 }
 
+const digestCharterActivity = `-- name: DigestCharterActivity :many
+SELECT c.squad_id,
+    GREATEST(
+        c.updated_at,
+        (SELECT max(i.updated_at) FROM issue i
+          WHERE i.workspace_id = c.workspace_id
+            AND i.assignee_type = 'squad'
+            AND i.assignee_id = c.squad_id),
+        (SELECT max(p.created_at) FROM proposal p
+          WHERE p.workspace_id = c.workspace_id
+            AND p.squad_id = c.squad_id),
+        (SELECT max(run.triggered_at) FROM autopilot_run run
+          WHERE run.squad_id = c.squad_id)
+    )::timestamptz AS last_activity_at
+FROM squad_charter c
+WHERE c.workspace_id = $1::uuid
+`
+
+type DigestCharterActivityRow struct {
+	SquadID        pgtype.UUID        `json:"squad_id"`
+	LastActivityAt pgtype.Timestamptz `json:"last_activity_at"`
+}
+
+// Each chartered squad's latest activity: a save of its charter, an issue assigned
+// to it, a proposal it filed, or a run of one of its routines. The digest reports
+// a squad as silent when this is more than seven days old. The charter's own save
+// counts, so a squad chartered yesterday is not silent.
+func (q *Queries) DigestCharterActivity(ctx context.Context, workspaceID pgtype.UUID) ([]DigestCharterActivityRow, error) {
+	rows, err := q.db.Query(ctx, digestCharterActivity, workspaceID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []DigestCharterActivityRow{}
+	for rows.Next() {
+		var i DigestCharterActivityRow
+		if err := rows.Scan(&i.SquadID, &i.LastActivityAt); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const digestKnowledgePendingDrafts = `-- name: DigestKnowledgePendingDrafts :one
 SELECT count(*)::int AS pending_drafts
 FROM knowledge_link l
@@ -196,15 +243,17 @@ FROM (
     WHERE p.workspace_id = $1::uuid
       AND p.state = 'pending'
       AND p.squad_id = ANY($2::uuid[])
+      AND (p.snoozed_until IS NULL OR p.snoozed_until <= $3::timestamptz)
 ) ranked
-WHERE rn <= $3::int
+WHERE rn <= $4::int
 ORDER BY squad_id, rn
 `
 
 type DigestPendingProposalsParams struct {
-	WorkspaceID   pgtype.UUID   `json:"workspace_id"`
-	SquadIds      []pgtype.UUID `json:"squad_ids"`
-	PerSquadLimit int32         `json:"per_squad_limit"`
+	WorkspaceID   pgtype.UUID        `json:"workspace_id"`
+	SquadIds      []pgtype.UUID      `json:"squad_ids"`
+	Now           pgtype.Timestamptz `json:"now"`
+	PerSquadLimit int32              `json:"per_squad_limit"`
 }
 
 type DigestPendingProposalsRow struct {
@@ -214,9 +263,15 @@ type DigestPendingProposalsRow struct {
 }
 
 // Pending proposals of the given squads, newest first, up to
-// @per_squad_limit per squad. The title is the backing issue's.
+// @per_squad_limit per squad. The title is the backing issue's. A snoozed
+// proposal is left out until @now passes its snoozed_until (spec 2.4).
 func (q *Queries) DigestPendingProposals(ctx context.Context, arg DigestPendingProposalsParams) ([]DigestPendingProposalsRow, error) {
-	rows, err := q.db.Query(ctx, digestPendingProposals, arg.WorkspaceID, arg.SquadIds, arg.PerSquadLimit)
+	rows, err := q.db.Query(ctx, digestPendingProposals,
+		arg.WorkspaceID,
+		arg.SquadIds,
+		arg.Now,
+		arg.PerSquadLimit,
+	)
 	if err != nil {
 		return nil, err
 	}
@@ -326,8 +381,11 @@ SELECT
         AND al.action = 'squad_leader_evaluated'
         AND al.details->>'outcome' = 'no_action'
         AND al.created_at >= $1::timestamptz)::int AS leader_no_action_count,
+    -- A snoozed proposal is hidden until its snooze passes, as the list below is.
+    -- The pending caps are counted by their own queries and still include it.
     (SELECT count(*) FROM proposal p
-      WHERE p.workspace_id = s.workspace_id AND p.squad_id = s.id AND p.state = 'pending')::int AS pending_proposal_count
+      WHERE p.workspace_id = s.workspace_id AND p.squad_id = s.id AND p.state = 'pending'
+        AND (p.snoozed_until IS NULL OR p.snoozed_until <= $3::timestamptz))::int AS pending_proposal_count
 FROM squad s
 LEFT JOIN issue i
        ON i.workspace_id = s.workspace_id
@@ -335,7 +393,7 @@ LEFT JOIN issue i
       AND i.assignee_id = s.id
 LEFT JOIN issue_status st
        ON st.workspace_id = i.workspace_id AND st.key = i.status
-WHERE s.workspace_id = $3::uuid
+WHERE s.workspace_id = $4::uuid
   AND s.archived_at IS NULL
 GROUP BY s.id, s.name, s.floor_id
 `
@@ -343,6 +401,7 @@ GROUP BY s.id, s.name, s.floor_id
 type DigestSquadStatsParams struct {
 	Since       pgtype.Timestamptz `json:"since"`
 	StaleBefore pgtype.Timestamptz `json:"stale_before"`
+	Now         pgtype.Timestamptz `json:"now"`
 	WorkspaceID pgtype.UUID        `json:"workspace_id"`
 }
 
@@ -370,7 +429,12 @@ type DigestSquadStatsRow struct {
 // category), moved there since @since. "blocked" is the built-in `blocked`
 // status. "stale" is in_progress with no activity since @stale_before.
 func (q *Queries) DigestSquadStats(ctx context.Context, arg DigestSquadStatsParams) ([]DigestSquadStatsRow, error) {
-	rows, err := q.db.Query(ctx, digestSquadStats, arg.Since, arg.StaleBefore, arg.WorkspaceID)
+	rows, err := q.db.Query(ctx, digestSquadStats,
+		arg.Since,
+		arg.StaleBefore,
+		arg.Now,
+		arg.WorkspaceID,
+	)
 	if err != nil {
 		return nil, err
 	}

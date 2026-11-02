@@ -451,6 +451,7 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 		GitExtraCACerts:                gitca.Load(slog.Default()),
 	}
 	h := handler.New(queries, pool, hub, bus, emailSvc, store, cfSigner, analyticsClient, signupConfig, daemonHub)
+	h.BriefPush = service.NewBriefPushService(queries, appURLFromEnv())
 	invitationRateLimits := handler.DefaultInvitationRateLimits()
 	invitationRateLimits.Actor.Limit = envNonNegativeInt("RATE_LIMIT_INVITATION_ACTOR_10M", invitationRateLimits.Actor.Limit)
 	invitationRateLimits.Workspace.Limit = envNonNegativeInt("RATE_LIMIT_INVITATION_WORKSPACE_24H", invitationRateLimits.Workspace.Limit)
@@ -567,6 +568,13 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 		opts,
 	)
 
+	// Chat buttons (plan 9.11) sign their tokens with a key derived from the JWT
+	// secret, and their presses are settled by the handler's decision path. Lark,
+	// Slack and Telegram share the signer and the handler, so it is built before
+	// the Lark block, which uses it.
+	actionSigner := service.NewActionSigner(auth.JWTSecret())
+	channelActions := handler.NewChannelActions(h, actionSigner)
+
 	// Lark integration. Only wired when MULTICA_LARK_SECRET_KEY is set:
 	// the InstallationService refuses to fall back to plaintext storage
 	// for app_secret, and the BindingTokenService cannot mint usable
@@ -681,7 +689,8 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 				// Registering the Factory (connect/send) + ResolverSet
 				// (inbound pipeline seams) is all it takes to add the platform
 				// to the engine — no engine edit.
-				connector, connectorLabel := buildLarkConnector(installSvc, larkClient)
+				cardActions := lark.NewCardActionHandler(larkClient, installSvc, channelActions, slog.Default())
+				connector, connectorLabel := buildLarkConnector(installSvc, larkClient, cardActions)
 				lark.RegisterFeishu(channelRegistry, lark.FeishuChannelDeps{
 					Connector:   connector,
 					APIClient:   larkClient,
@@ -690,9 +699,15 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 				})
 				mediaResolver := lark.NewFeishuMediaResolver(larkClient, installSvc, store, engine.NewDBMediaIntentLedger(queries), slog.Default())
 				channelRouter.Register(channel.TypeFeishu, lark.NewFeishuResolverSet(
-					cs, feishuSession, auditLogger, resolverReplier, typingIndicator, mediaResolver,
+					cs, feishuSession, auditLogger, resolverReplier, typingIndicator, mediaResolver, channelActions,
 				))
 				slog.Info("lark inbound pipeline wired", "connector", connectorLabel)
+
+				// Brief push to a Lark member's direct message (plan 9.11b). The
+				// decision buttons are signed by the same signer as Telegram and
+				// Slack; their presses come back on the connector built above.
+				h.BriefPush.RegisterNotifier(channel.TypeFeishu, lark.NewNotifier(queries, installSvc, larkClient))
+				h.BriefPush.EnableActionButtons(actionSigner, channel.TypeFeishu)
 
 				// One-shot union_id backfill for installations created
 				// before migration 112 added bot_union_id. Runs off the
@@ -855,13 +870,19 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 				Binding: slackBindingSvc,
 				AppURL:  appURLFromEnv(),
 				Logger:  slog.Default(),
+				// /brief and /decisions answer from the same chat commands Telegram uses (plan 9.11a).
+				Actions: channelActions,
 			})
 
 			// Per-installation inbound: the Supervisor builds + supervises one
 			// Socket Mode connection per active Slack installation, authenticated
 			// with that installation's OWN app-level token (xapp-, pasted at BYO
 			// install) — no deployment-level app token, no single connection.
-			slack.RegisterSlack(channelRegistry, slack.ChannelDeps{Decrypt: box.Open, Logger: slog.Default(), Slash: slackSlash})
+			slack.RegisterSlack(channelRegistry, slack.ChannelDeps{Decrypt: box.Open, Logger: slog.Default(), Slash: slackSlash, Actions: channelActions})
+			// Brief push to Slack (plan 9.11a): the notifier sends the member's direct
+			// message, and presses come back over the same Socket Mode connection.
+			h.BriefPush.RegisterNotifier(slack.TypeSlack, slack.NewNotifier(queries, box.Open, "", nil))
+			h.BriefPush.EnableActionButtons(actionSigner, slack.TypeSlack)
 
 			// BYO self-serve install (paste bot token + app-level token). The
 			// InstallService needs only the at-rest encryption key — there is no
@@ -1233,6 +1254,10 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 			channelRouter.Register(telegram.TypeTelegram, telegram.NewTelegramResolverSet(queries, pool, telegramReplier, telegramTyping, telegramMedia))
 			telegramOutbound.Register(bus)
 			h.TelegramOutbound = telegramOutbound
+			h.BriefPush.RegisterNotifier(telegram.TypeTelegram, telegram.NewNotifier(queries, box.Open, "", nil))
+			// Decision buttons in the brief push: presses come back through the
+			// polling loop and are settled by the same decision path as the app.
+			h.BriefPush.EnableActionButtons(actionSigner, telegram.TypeTelegram)
 
 			// Per-installation inbound: the Supervisor builds + supervises one
 			// long-polling loop per active Telegram installation.
@@ -1241,6 +1266,7 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 				Logger:            slog.Default(),
 				RecentContextSize: telegram.DefaultRecentContextSize,
 				AcceptsMedia:      store != nil,
+				Actions:           channelActions,
 			})
 
 			installSvc, ierr := telegram.NewInstallService(queries, pool, box, slog.Default())
@@ -2236,6 +2262,13 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					r.Post("/members", h.AddSquadMember)
 					r.Delete("/members", h.RemoveSquadMember)
 					r.Patch("/members/role", h.UpdateSquadMemberRole)
+					r.Get("/charter", h.GetSquadCharter)
+					r.Put("/charter", h.UpdateSquadCharter)
+					r.Get("/attention", h.GetSquadAttention)
+					r.Put("/attention/pin", h.PinSquadAttention)
+					r.Get("/routines", h.ListSquadRoutines)
+					r.Post("/routines", h.CreateSquadRoutine)
+					r.Delete("/routines/{routine_id}", h.DeleteSquadRoutine)
 				})
 			})
 
@@ -2246,7 +2279,9 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 				r.Post("/", h.CreateProposal)
 				r.Route("/{id}", func(r chi.Router) {
 					r.Get("/", h.GetProposal)
+					r.Get("/revisions", h.ListProposalRevisions)
 					r.Post("/decision", h.DecideProposal)
+					r.Post("/revision", h.ReviseProposal)
 				})
 			})
 			// Digital company office: floors (owner/admin) and squad seats.
@@ -2264,12 +2299,26 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 			// Setup is idempotent: a second POST changes nothing.
 			r.Get("/api/office/setup", h.GetOfficeSetup)
 			r.Post("/api/office/setup", h.SetupOffice)
+			// The caller's brief push to a chat app (plan 9.10). Member scope only:
+			// the handler reads and writes the caller's own row and refuses agents.
+			r.Get("/api/office/brief-push", h.GetBriefPushPreference)
+			r.Put("/api/office/brief-push", h.UpdateBriefPushPreference)
+			// The chats the caller can pick for that preference, with labels.
+			r.Get("/api/office/brief-push/bindings", h.ListBriefPushBindings)
 			// Briefs: the Secretary's reports to the boss. Who may publish is
 			// decided in the handler (secretary agent or admin member).
 			r.Route("/api/briefs", func(r chi.Router) {
 				r.Get("/", h.ListBriefs)
 				r.Post("/", h.CreateBrief)
+				// The Secretary's accounted questions to squad leaders (daily cap).
+				r.Post("/inquiries", h.AskBriefInquiry)
+				// The boss's ratings of briefs (plan 9.12). The reads are the Secretary's
+				// and an admin's; the rating itself is the caller's own.
+				r.Get("/feedback/recent", h.ListBriefFeedbackRecent)
+				r.Get("/feedback/summary", h.GetBriefFeedbackSummary)
 				r.Get("/{id}", h.GetBrief)
+				r.Get("/{id}/feedback", h.GetMyBriefFeedback)
+				r.Post("/{id}/feedback", h.SubmitBriefFeedback)
 			})
 
 			// Squad leader evaluation (writes to activity_log)
@@ -2615,7 +2664,7 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 //
 // Returns the connector plus a short label for the boot log:
 // "ws-long-conn" in the healthy case, "noop" in the fallback case.
-func buildLarkConnector(installSvc *lark.InstallationService, apiClient lark.APIClient) (lark.EventConnector, string) {
+func buildLarkConnector(installSvc *lark.InstallationService, apiClient lark.APIClient, cardActions lark.CardActionHandler) (lark.EventConnector, string) {
 	endpointFetcher, err := lark.NewHTTPConnectionTokenFetcher(lark.HTTPConnectionTokenConfig{
 		BaseURL: strings.TrimSpace(os.Getenv("MULTICA_LARK_CALLBACK_BASE_URL")),
 		Logger:  slog.Default(),
@@ -2660,6 +2709,7 @@ func buildLarkConnector(installSvc *lark.InstallationService, apiClient lark.API
 		Enricher:            enricher,
 		CredentialsProvider: credsProvider,
 		InboundVerifier:     installSvc,
+		CardActions:         cardActions,
 		Logger:              slog.Default(),
 	})
 	if err != nil {

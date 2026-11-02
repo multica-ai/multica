@@ -70,7 +70,7 @@ func NewRequestIdempotencyKey() string { return newAutopilotIdempotencyKey() }
 
 func validAutopilotExecutionSource(source string) bool {
 	switch source {
-	case "schedule", "manual", "webhook", "api":
+	case "schedule", "manual", "webhook", "api", BriefCatchupSource:
 		return true
 	default:
 		return false

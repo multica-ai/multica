@@ -1,0 +1,1 @@
+ALTER TABLE proposal_revision ADD CONSTRAINT proposal_revision_pkey PRIMARY KEY USING INDEX proposal_revision_id_uidx;

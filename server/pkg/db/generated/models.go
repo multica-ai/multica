@@ -341,6 +341,58 @@ type Brief struct {
 	CreatedAt         pgtype.Timestamptz `json:"created_at"`
 }
 
+type BriefDelivery struct {
+	ID            pgtype.UUID        `json:"id"`
+	WorkspaceID   pgtype.UUID        `json:"workspace_id"`
+	BriefID       pgtype.UUID        `json:"brief_id"`
+	MemberID      pgtype.UUID        `json:"member_id"`
+	BindingID     pgtype.UUID        `json:"binding_id"`
+	State         string             `json:"state"`
+	Attempts      int32              `json:"attempts"`
+	NextAttemptAt pgtype.Timestamptz `json:"next_attempt_at"`
+	LastError     string             `json:"last_error"`
+	DeliveredAt   pgtype.Timestamptz `json:"delivered_at"`
+	CreatedAt     pgtype.Timestamptz `json:"created_at"`
+}
+
+type BriefFeedback struct {
+	ID          pgtype.UUID        `json:"id"`
+	WorkspaceID pgtype.UUID        `json:"workspace_id"`
+	BriefID     pgtype.UUID        `json:"brief_id"`
+	MemberID    pgtype.UUID        `json:"member_id"`
+	Rating      string             `json:"rating"`
+	Tags        []string           `json:"tags"`
+	Note        string             `json:"note"`
+	CreatedAt   pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt   pgtype.Timestamptz `json:"updated_at"`
+}
+
+type BriefInquiry struct {
+	ID             pgtype.UUID        `json:"id"`
+	WorkspaceID    pgtype.UUID        `json:"workspace_id"`
+	AskedByAgentID pgtype.UUID        `json:"asked_by_agent_id"`
+	SquadID        pgtype.UUID        `json:"squad_id"`
+	IssueID        pgtype.UUID        `json:"issue_id"`
+	CommentID      pgtype.UUID        `json:"comment_id"`
+	Question       string             `json:"question"`
+	AskedOn        pgtype.Date        `json:"asked_on"`
+	AnsweredAt     pgtype.Timestamptz `json:"answered_at"`
+	AnswerExcerpt  pgtype.Text        `json:"answer_excerpt"`
+	CreatedAt      pgtype.Timestamptz `json:"created_at"`
+}
+
+type BriefPushPreference struct {
+	ID              pgtype.UUID        `json:"id"`
+	WorkspaceID     pgtype.UUID        `json:"workspace_id"`
+	MemberID        pgtype.UUID        `json:"member_id"`
+	BriefPush       bool               `json:"brief_push"`
+	BindingID       pgtype.UUID        `json:"binding_id"`
+	QuietHoursStart pgtype.Int2        `json:"quiet_hours_start"`
+	QuietHoursEnd   pgtype.Int2        `json:"quiet_hours_end"`
+	CreatedAt       pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt       pgtype.Timestamptz `json:"updated_at"`
+}
+
 type ChannelBindingToken struct {
 	TokenHash      string             `json:"token_hash"`
 	WorkspaceID    pgtype.UUID        `json:"workspace_id"`
@@ -1468,6 +1520,20 @@ type Proposal struct {
 	DecidedAt      pgtype.Timestamptz `json:"decided_at"`
 	DecisionNote   string             `json:"decision_note"`
 	CreatedAt      pgtype.Timestamptz `json:"created_at"`
+	Revision       int32              `json:"revision"`
+	ExpiresAt      pgtype.Timestamptz `json:"expires_at"`
+	SnoozedUntil   pgtype.Timestamptz `json:"snoozed_until"`
+}
+
+type ProposalRevision struct {
+	ID            pgtype.UUID        `json:"id"`
+	WorkspaceID   pgtype.UUID        `json:"workspace_id"`
+	ProposalID    pgtype.UUID        `json:"proposal_id"`
+	Revision      int32              `json:"revision"`
+	Body          string             `json:"body"`
+	CreatedByType string             `json:"created_by_type"`
+	CreatedByID   pgtype.UUID        `json:"created_by_id"`
+	CreatedAt     pgtype.Timestamptz `json:"created_at"`
 }
 
 type QuickAction struct {
@@ -1594,6 +1660,36 @@ type Squad struct {
 	OfficeSlot   pgtype.Int2        `json:"office_slot"`
 }
 
+type SquadAttention struct {
+	SquadID          pgtype.UUID        `json:"squad_id"`
+	WorkspaceID      pgtype.UUID        `json:"workspace_id"`
+	PendingCap       int32              `json:"pending_cap"`
+	WeeklyCap        int32              `json:"weekly_cap"`
+	AcceptanceRate   pgtype.Numeric     `json:"acceptance_rate"`
+	SampleSize       int32              `json:"sample_size"`
+	Pinned           bool               `json:"pinned"`
+	PinnedPendingCap pgtype.Int4        `json:"pinned_pending_cap"`
+	PinnedWeeklyCap  pgtype.Int4        `json:"pinned_weekly_cap"`
+	ComputedAt       pgtype.Timestamptz `json:"computed_at"`
+}
+
+type SquadCharter struct {
+	SquadID                pgtype.UUID        `json:"squad_id"`
+	WorkspaceID            pgtype.UUID        `json:"workspace_id"`
+	Mission                string             `json:"mission"`
+	Responsibilities       []byte             `json:"responsibilities"`
+	Outputs                []byte             `json:"outputs"`
+	Boundaries             string             `json:"boundaries"`
+	Escalation             string             `json:"escalation"`
+	Intake                 string             `json:"intake"`
+	ResponseHours          int32              `json:"response_hours"`
+	OperatingReviewEnabled bool               `json:"operating_review_enabled"`
+	Revision               int64              `json:"revision"`
+	UpdatedByType          string             `json:"updated_by_type"`
+	UpdatedByID            pgtype.UUID        `json:"updated_by_id"`
+	UpdatedAt              pgtype.Timestamptz `json:"updated_at"`
+}
+
 type SquadMember struct {
 	ID         pgtype.UUID        `json:"id"`
 	SquadID    pgtype.UUID        `json:"squad_id"`
@@ -1601,6 +1697,17 @@ type SquadMember struct {
 	MemberID   pgtype.UUID        `json:"member_id"`
 	Role       string             `json:"role"`
 	CreatedAt  pgtype.Timestamptz `json:"created_at"`
+}
+
+type SquadRoutine struct {
+	AutopilotID    pgtype.UUID        `json:"autopilot_id"`
+	WorkspaceID    pgtype.UUID        `json:"workspace_id"`
+	SquadID        pgtype.UUID        `json:"squad_id"`
+	Purpose        string             `json:"purpose"`
+	ExpectedOutput string             `json:"expected_output"`
+	Required       bool               `json:"required"`
+	GraceHours     int32              `json:"grace_hours"`
+	CreatedAt      pgtype.Timestamptz `json:"created_at"`
 }
 
 type SysCronExecution struct {

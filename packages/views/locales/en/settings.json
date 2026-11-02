@@ -783,7 +783,14 @@
     "prefix_new_label": "New prefix",
     "prefix_rule": "Letters and numbers only, up to 10 characters.",
     "prefix_confirm_action": "Change to {{prefix}}",
-    "prefix_external_warning": "Old keys such as {{oldExample}} in PR titles, branch names, docs, and chat are not updated, so those links stop working."
+    "prefix_external_warning": "Old keys such as {{oldExample}} in PR titles, branch names, docs, and chat are not updated, so those links stop working.",
+    "brief_catchup_section": "Daily brief",
+    "brief_catchup_label": "Catch up a missed brief",
+    "brief_catchup_description": "If the daily brief did not run, the Secretary writes it once the hour below has passed.",
+    "brief_catchup_hour_label": "Catch-up hour",
+    "brief_catchup_hour_option": "{{hour}}:00",
+    "brief_catchup_saved": "Daily brief settings saved",
+    "brief_catchup_failed": "Could not save daily brief settings"
   },
   "delete_workspace_dialog": {
     "title": "Delete workspace",

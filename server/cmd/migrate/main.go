@@ -140,6 +140,9 @@ var pgBigmOperatorClass = extensionOperatorClass{
 // they are still pending: a fresh self-hosted install, which is exactly where an
 // interrupted build would otherwise leave a permanently unusable index.
 var concurrentIndexCleanups = map[string]string{
+	"704_squad_routine_squad_index":                             "idx_squad_routine_squad",
+	"702_squad_routine_pkey_index":                              "squad_routine_pkey_uidx",
+	"701_squad_charter_pkey_index":                              "squad_charter_pkey_uidx",
 	"594_agent_task_process_cleanup_index":                      "idx_agent_task_queue_process_cleanup",
 	"563_search_index_change_changed_at_index":                  "idx_search_index_change_changed_at",
 	"562_search_index_change_workspace_index":                   "idx_search_index_change_workspace_xid",
@@ -379,6 +382,21 @@ var concurrentIndexCleanups = map[string]string{
 	"615_proposal_issue_uidx":                                   "proposal_issue_id_uidx",
 	"632_brief_pkey_index":                                      "brief_id_uidx",
 	"634_brief_workspace_created_index":                         "idx_brief_workspace_created",
+	"708_proposal_expiry_index":                                 "idx_proposal_pending_expires",
+	"710_proposal_revision_pkey_index":                          "proposal_revision_id_uidx",
+	"712_proposal_revision_number_index":                        "proposal_revision_proposal_number_uidx",
+	"713_proposal_revision_workspace_index":                     "idx_proposal_revision_workspace_proposal",
+	"715_brief_inquiry_pkey_index":                              "brief_inquiry_id_uidx",
+	"717_brief_inquiry_workspace_day_index":                     "idx_brief_inquiry_workspace_asked",
+	"719_squad_attention_pkey_index":                            "squad_attention_squad_uidx",
+	"722_brief_push_preference_pkey_index":                      "brief_push_preference_id_uidx",
+	"724_brief_push_preference_member_index":                    "brief_push_preference_member_uidx",
+	"726_brief_delivery_pkey_index":                             "brief_delivery_id_uidx",
+	"728_brief_delivery_brief_member_index":                     "brief_delivery_brief_member_uidx",
+	"729_brief_delivery_due_index":                              "idx_brief_delivery_state_next_attempt",
+	"731_brief_feedback_pkey_index":                             "brief_feedback_id_uidx",
+	"733_brief_feedback_brief_member_index":                     "brief_feedback_brief_member_uidx",
+	"734_brief_feedback_workspace_updated_index":                "idx_brief_feedback_workspace_updated",
 }
 
 // concurrentDownIndexCleanups covers every migration whose down direction
