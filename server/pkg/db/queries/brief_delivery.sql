@@ -94,6 +94,18 @@ WHERE p.workspace_id = @workspace_id
 SELECT * FROM channel_user_binding
 WHERE id = @id AND workspace_id = @workspace_id;
 
+-- name: ListBriefPushBindingsForMember :many
+-- The member's own chat bindings in this workspace whose installation is active,
+-- the same status check as FindChannelBindingForMember. The handler keeps the
+-- platforms that have a notifier.
+SELECT b.id, b.channel_type, b.config
+FROM channel_user_binding b
+JOIN channel_installation ci ON ci.id = b.installation_id
+WHERE b.workspace_id = @workspace_id
+  AND b.multica_user_id = @member_id
+  AND ci.status = 'active'
+ORDER BY b.bound_at DESC, b.id ASC;
+
 -- name: DeleteWorkspaceBriefDeliveries :exec
 DELETE FROM brief_delivery WHERE workspace_id = $1;
 

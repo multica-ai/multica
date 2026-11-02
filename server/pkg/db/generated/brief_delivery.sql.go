@@ -221,6 +221,50 @@ func (q *Queries) ListBriefPendingDecisions(ctx context.Context, arg ListBriefPe
 	return items, nil
 }
 
+const listBriefPushBindingsForMember = `-- name: ListBriefPushBindingsForMember :many
+SELECT b.id, b.channel_type, b.config
+FROM channel_user_binding b
+JOIN channel_installation ci ON ci.id = b.installation_id
+WHERE b.workspace_id = $1
+  AND b.multica_user_id = $2
+  AND ci.status = 'active'
+ORDER BY b.bound_at DESC, b.id ASC
+`
+
+type ListBriefPushBindingsForMemberParams struct {
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
+	MemberID    pgtype.UUID `json:"member_id"`
+}
+
+type ListBriefPushBindingsForMemberRow struct {
+	ID          pgtype.UUID `json:"id"`
+	ChannelType string      `json:"channel_type"`
+	Config      []byte      `json:"config"`
+}
+
+// The member's own chat bindings in this workspace whose installation is active,
+// the same status check as FindChannelBindingForMember. The handler keeps the
+// platforms that have a notifier.
+func (q *Queries) ListBriefPushBindingsForMember(ctx context.Context, arg ListBriefPushBindingsForMemberParams) ([]ListBriefPushBindingsForMemberRow, error) {
+	rows, err := q.db.Query(ctx, listBriefPushBindingsForMember, arg.WorkspaceID, arg.MemberID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListBriefPushBindingsForMemberRow{}
+	for rows.Next() {
+		var i ListBriefPushBindingsForMemberRow
+		if err := rows.Scan(&i.ID, &i.ChannelType, &i.Config); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listBriefPushRecipients = `-- name: ListBriefPushRecipients :many
 SELECT p.workspace_id, p.member_id, p.binding_id
 FROM brief_push_preference p

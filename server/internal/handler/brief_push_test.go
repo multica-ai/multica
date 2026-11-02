@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"net/http"
+	"strings"
 	"testing"
 
 	"github.com/google/uuid"
@@ -59,15 +60,39 @@ func newBriefPushEnv(t *testing.T) briefPushEnv {
 	return env
 }
 
-// briefPushBinding inserts a chat binding for userID in ws.
+// briefPushBinding inserts a chat binding for userID in ws, on an active
+// installation of the same chat app.
 func briefPushBinding(t *testing.T, ws, userID, channelType string) string {
+	t.Helper()
+	installation := briefPushInstallation(t, ws, channelType, "active", `{}`)
+	return briefPushBindingOn(t, ws, userID, channelType, installation, uuid.NewString(), `{}`)
+}
+
+// briefPushInstallation inserts a chat installation in ws with the given status
+// and config.
+func briefPushInstallation(t *testing.T, ws, channelType, status, config string) string {
+	t.Helper()
+	return dbfx.Insert(t, "channel_installation", testutil.Cols{
+		"workspace_id":      ws,
+		"agent_id":          uuid.NewString(),
+		"channel_type":      channelType,
+		"config":            []byte(config),
+		"installer_user_id": testUserID,
+		"status":            status,
+	})
+}
+
+// briefPushBindingOn inserts a binding of userID on installationID, with the
+// platform user id and config given.
+func briefPushBindingOn(t *testing.T, ws, userID, channelType, installationID, channelUserID, config string) string {
 	t.Helper()
 	return dbfx.Insert(t, "channel_user_binding", testutil.Cols{
 		"workspace_id":    ws,
 		"multica_user_id": userID,
-		"installation_id": uuid.NewString(),
+		"installation_id": installationID,
 		"channel_type":    channelType,
-		"channel_user_id": uuid.NewString(),
+		"channel_user_id": channelUserID,
+		"config":          []byte(config),
 	})
 }
 
@@ -227,4 +252,141 @@ func TestBriefPushPreference_NoServiceRefusesBindings(t *testing.T) {
 	env := newBriefPushEnv(t)
 	testHandler.BriefPush = nil
 	env.put(t, env.Alice, map[string]any{"brief_push": true, "binding_id": env.AliceChat}).Want(http.StatusBadRequest)
+}
+
+func (e briefPushEnv) listBindings(t *testing.T, userID string) *testutil.Response {
+	t.Helper()
+	req := newRequest("GET", "/api/office/brief-push/bindings", nil)
+	req.Header.Set("X-Workspace-ID", e.WorkspaceID)
+	req = asUser(req, userID)
+	return testutil.Call(t, testHandler.ListBriefPushBindings, req)
+}
+
+func TestBriefPushBindings_ListsOnlyTheCallersOwnChats(t *testing.T) {
+	env := newBriefPushEnv(t)
+
+	var alice []BriefPushBinding
+	env.listBindings(t, env.Alice).Want(http.StatusOK).JSON(&alice)
+	if len(alice) != 1 || alice[0].ID != env.AliceChat || alice[0].Channel != "telegram" {
+		t.Fatalf("Alice's chats = %+v, want only her Telegram chat %s", alice, env.AliceChat)
+	}
+
+	var bob []BriefPushBinding
+	env.listBindings(t, env.Bob).Want(http.StatusOK).JSON(&bob)
+	if len(bob) != 1 || bob[0].ID != env.BobChat {
+		t.Fatalf("Bob's chats = %+v, want only his Telegram chat %s", bob, env.BobChat)
+	}
+}
+
+func TestBriefPushBindings_ListsOnlyThisWorkspace(t *testing.T) {
+	env := newBriefPushEnv(t)
+	other := dbfx.Workspace(t, "Other "+uuid.NewString(), "brief-push-list-other-"+uuid.NewString())
+	briefPushBinding(t, other, env.Alice, string(briefPushChatApp))
+
+	var alice []BriefPushBinding
+	env.listBindings(t, env.Alice).Want(http.StatusOK).JSON(&alice)
+	if len(alice) != 1 || alice[0].ID != env.AliceChat {
+		t.Fatalf("Alice's chats in this workspace = %+v, want only %s", alice, env.AliceChat)
+	}
+}
+
+func TestBriefPushBindings_EmptyListIsAnArray(t *testing.T) {
+	env := newBriefPushEnv(t)
+	carol := dbfx.User(t, "Carol", fmt.Sprintf("brief-push-carol-%s@example.com", uuid.NewString()))
+	dbfx.Member(t, env.WorkspaceID, carol, "member")
+
+	res := env.listBindings(t, carol).Want(http.StatusOK)
+	if got := res.Text(); got != "[]" && got != "[]\n" {
+		t.Fatalf("empty list body = %q, want []", got)
+	}
+}
+
+func TestBriefPushBindings_LabelFallsBackToThePlatformName(t *testing.T) {
+	env := newBriefPushEnv(t)
+
+	var got []BriefPushBinding
+	env.listBindings(t, env.Alice).Want(http.StatusOK).JSON(&got)
+	if len(got) != 1 || got[0].Label != "telegram" {
+		t.Fatalf("label with no stored name = %+v, want the platform name telegram", got)
+	}
+}
+
+func TestBriefPushBindings_LabelUsesTheStoredDisplayNameThenUsername(t *testing.T) {
+	env := newBriefPushEnv(t)
+	dan := dbfx.User(t, "Dan", fmt.Sprintf("brief-push-dan-%s@example.com", uuid.NewString()))
+	dbfx.Member(t, env.WorkspaceID, dan, "member")
+	installation := briefPushInstallation(t, env.WorkspaceID, "telegram", "active", `{}`)
+	named := briefPushBindingOn(t, env.WorkspaceID, dan, "telegram", installation, uuid.NewString(), `{"display_name":"Dan Chat"}`)
+	handle := briefPushBindingOn(t, env.WorkspaceID, dan, "telegram", briefPushInstallation(t, env.WorkspaceID, "telegram", "active", `{}`), uuid.NewString(), `{"username":"dan_handle"}`)
+
+	var got []BriefPushBinding
+	env.listBindings(t, dan).Want(http.StatusOK).JSON(&got)
+	labels := map[string]string{}
+	for _, b := range got {
+		labels[b.ID] = b.Label
+	}
+	if labels[named] != "Dan Chat" || labels[handle] != "dan_handle" {
+		t.Fatalf("labels = %+v, want display name Dan Chat and username dan_handle", labels)
+	}
+}
+
+// The list carries no secret and no platform identifier: the bot token in the
+// installation config and the Telegram user id stay on the server.
+func TestBriefPushBindings_ResponseOmitsSecretsAndPlatformIDs(t *testing.T) {
+	env := newBriefPushEnv(t)
+	const token = "telegram-bot-secret-token-7788"
+	const platformUserID = "5550001234"
+	installation := briefPushInstallation(t, env.WorkspaceID, "telegram", "active",
+		`{"app_id":"9001","bot_token":"`+token+`"}`)
+	binding := briefPushBindingOn(t, env.WorkspaceID, env.Alice, "telegram", installation, platformUserID, `{}`)
+
+	res := env.listBindings(t, env.Alice).Want(http.StatusOK)
+	for _, leak := range []string{token, platformUserID, installation, "bot_token"} {
+		if strings.Contains(res.Text(), leak) {
+			t.Fatalf("list leaks %q: %s", leak, res.Text())
+		}
+	}
+	var got []BriefPushBinding
+	res.JSON(&got)
+	found := false
+	for _, b := range got {
+		found = found || b.ID == binding
+	}
+	if !found {
+		t.Fatalf("list = %+v, want the new binding %s", got, binding)
+	}
+}
+
+func TestBriefPushBindings_HidesInactiveInstallations(t *testing.T) {
+	env := newBriefPushEnv(t)
+	revoked := briefPushInstallation(t, env.WorkspaceID, "telegram", "revoked", `{}`)
+	briefPushBindingOn(t, env.WorkspaceID, env.Alice, "telegram", revoked, uuid.NewString(), `{}`)
+
+	var got []BriefPushBinding
+	env.listBindings(t, env.Alice).Want(http.StatusOK).JSON(&got)
+	if len(got) != 1 || got[0].ID != env.AliceChat {
+		t.Fatalf("chats = %+v, want only the active Telegram chat %s", got, env.AliceChat)
+	}
+}
+
+// A chat app with no notifier cannot take a brief, so its bindings are not offered.
+func TestBriefPushBindings_HidesChatAppsWithoutANotifier(t *testing.T) {
+	env := newBriefPushEnv(t)
+	briefPushBinding(t, env.WorkspaceID, env.Alice, "slack")
+
+	var got []BriefPushBinding
+	env.listBindings(t, env.Alice).Want(http.StatusOK).JSON(&got)
+	if len(got) != 1 || got[0].Channel != "telegram" {
+		t.Fatalf("chats = %+v, want only the Telegram chat", got)
+	}
+}
+
+func TestBriefPushBindings_NoServiceListsNothing(t *testing.T) {
+	env := newBriefPushEnv(t)
+	testHandler.BriefPush = nil
+
+	res := env.listBindings(t, env.Alice).Want(http.StatusOK)
+	if got := strings.TrimSpace(res.Text()); got != "[]" {
+		t.Fatalf("list without a chat app = %s, want []", got)
+	}
 }

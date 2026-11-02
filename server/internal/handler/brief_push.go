@@ -3,6 +3,7 @@ package handler
 import (
 	"encoding/json"
 	"net/http"
+	"strings"
 
 	"github.com/jackc/pgx/v5/pgtype"
 
@@ -26,6 +27,33 @@ type BriefPushPreference struct {
 type BriefPushQuietHours struct {
 	Start int `json:"start"`
 	End   int `json:"end"`
+}
+
+// BriefPushBinding is a chat the member can choose for brief push. ID is the
+// binding_id the preference takes; Channel is the platform; Label names the chat.
+type BriefPushBinding struct {
+	ID      string `json:"id"`
+	Channel string `json:"channel"`
+	Label   string `json:"label"`
+}
+
+// briefPushBindingLabel names a chat from the binding's config: the account's
+// display name, then its username, when the config carries one. Otherwise it is
+// the platform name. Telegram bindings are written with an empty config, so they
+// are labelled by the platform until a binding stores a name.
+func briefPushBindingLabel(channelType string, config []byte) string {
+	var names struct {
+		DisplayName string `json:"display_name"`
+		Username    string `json:"username"`
+	}
+	_ = json.Unmarshal(config, &names)
+	if name := strings.TrimSpace(names.DisplayName); name != "" {
+		return name
+	}
+	if name := strings.TrimSpace(names.Username); name != "" {
+		return name
+	}
+	return channelType
 }
 
 func briefPushPreferenceToResponse(p db.BriefPushPreference) BriefPushPreference {
@@ -85,6 +113,37 @@ func (h *Handler) GetBriefPushPreference(w http.ResponseWriter, r *http.Request)
 		return
 	}
 	writeJSON(w, http.StatusOK, briefPushPreferenceToResponse(pref))
+}
+
+// ListBriefPushBindings lists the chats the caller can choose for brief push: their
+// own bindings in this workspace on an active installation, for chat apps that
+// have a notifier. The list is an empty array when there are none.
+//
+//	GET /api/office/brief-push/bindings
+func (h *Handler) ListBriefPushBindings(w http.ResponseWriter, r *http.Request) {
+	wsUUID, userUUID, ok := h.briefPushMember(w, r)
+	if !ok {
+		return
+	}
+	rows, err := h.Queries.ListBriefPushBindingsForMember(r.Context(), db.ListBriefPushBindingsForMemberParams{
+		WorkspaceID: wsUUID, MemberID: userUUID,
+	})
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to load chats for brief push")
+		return
+	}
+	out := make([]BriefPushBinding, 0, len(rows))
+	for _, row := range rows {
+		if !h.BriefPush.ChatAppSupported(channel.Type(row.ChannelType)) {
+			continue
+		}
+		out = append(out, BriefPushBinding{
+			ID:      uuidToString(row.ID),
+			Channel: row.ChannelType,
+			Label:   briefPushBindingLabel(row.ChannelType, row.Config),
+		})
+	}
+	writeJSON(w, http.StatusOK, out)
 }
 
 // UpdateBriefPushPreference replaces the caller's brief push preference. The

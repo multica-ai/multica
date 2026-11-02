@@ -2287,6 +2287,8 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 			// the handler reads and writes the caller's own row and refuses agents.
 			r.Get("/api/office/brief-push", h.GetBriefPushPreference)
 			r.Put("/api/office/brief-push", h.UpdateBriefPushPreference)
+			// The chats the caller can pick for that preference, with labels.
+			r.Get("/api/office/brief-push/bindings", h.ListBriefPushBindings)
 			// Briefs: the Secretary's reports to the boss. Who may publish is
 			// decided in the handler (secretary agent or admin member).
 			r.Route("/api/briefs", func(r chi.Router) {
