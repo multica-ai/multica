@@ -5,7 +5,6 @@ import {
   AlertCircle,
   Copy,
   ExternalLink,
-  MoreHorizontal,
   RotateCcw,
   Square,
   Trash2,
@@ -29,15 +28,12 @@ import {
   AlertDialogTitle,
 } from "@multica/ui/components/ui/alert-dialog";
 import {
-  DropdownMenu,
-  DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuSeparator,
-  DropdownMenuTrigger,
 } from "@multica/ui/components/ui/dropdown-menu";
 import { useT } from "../../i18n";
 import { AppLink, useIntentNavigate } from "../../navigation";
-import { DeferredTooltip } from "@multica/ui/components/common/deferred-tooltip";
+import { CollectionRowMenu } from "../../layout/collection-list";
 
 interface AgentRowActionsProps {
   agent: Agent;
@@ -57,12 +53,7 @@ interface AgentRowActionsProps {
  * Per-row dropdown menu for the agents list. The set of actions is derived
  * from (a) the agent's lifecycle state (active vs archived) and (b) the
  * caller's permission level. "Open in new tab" applies to every row, so the
- * trigger always renders.
- *
- * The row is a plain `<div>` whose whole-row navigation is a mouse `onClick`
- * (see `useRowLink`), not an ancestor `<a>`. The host cell stops click
- * propagation so opening this menu never navigates the row; the trigger
- * itself needs no guard. Menu and dialog content is portaled out of the row.
+ * trigger always renders. The same items open on right-click.
  */
 export function AgentRowActions({
   agent,
@@ -137,75 +128,57 @@ export function AgentRowActions({
 
   return (
     <>
-      <DropdownMenu>
-        <DeferredTooltip
-          content={t(($) => $.row.actions_aria)}
-          trigger={
-            <DropdownMenuTrigger
-              render={
-                <button
-                  type="button"
-                  aria-label={t(($) => $.row.actions_aria)}
-                  className="flex size-7 items-center justify-center rounded-md text-muted-foreground opacity-100 @2xl:opacity-0 transition-opacity hover:bg-accent hover:text-accent-foreground group-hover/row:opacity-100 data-popup-open:bg-accent data-popup-open:opacity-100 data-popup-open:text-accent-foreground"
-                >
-                  <MoreHorizontal className="size-4" />
-                </button>
-              }
-            />
+      <CollectionRowMenu label={t(($) => $.row.actions_aria)} contentClassName="w-auto">
+        {/* Same shape as every other entity row menu: an explicit CTA is a
+            foreground open executed through the adapter (an anchor-based
+            item would depend on native activation surviving the menu
+            closing under it). */}
+        <DropdownMenuItem
+          onClick={() =>
+            intentNavigate(
+              paths.agentDetail(agent.id),
+              "foreground-tab",
+              agent.name,
+            )
           }
-        />
-        <DropdownMenuContent align="end" className="w-auto">
-          {/* Same shape as every other entity row menu: an explicit CTA is a
-              foreground open executed through the adapter (an anchor-based
-              item would depend on native activation surviving the menu
-              closing under it). */}
+        >
+          <ExternalLink className="h-3.5 w-3.5" />
+          {tCommon(($) => $.navigation.open_in_new_tab)}
+        </DropdownMenuItem>
+        <DropdownMenuSeparator />
+        {showStop && (
           <DropdownMenuItem
-            onClick={() =>
-              intentNavigate(
-                paths.agentDetail(agent.id),
-                "foreground-tab",
-                agent.name,
-              )
-            }
+            onClick={() => setConfirmCancel(true)}
           >
-            <ExternalLink className="h-3.5 w-3.5" />
-            {tCommon(($) => $.navigation.open_in_new_tab)}
+            <Square className="h-3.5 w-3.5" />
+            {t(($) => $.row_actions.cancel_all_tasks)}
           </DropdownMenuItem>
-          <DropdownMenuSeparator />
-          {showStop && (
+        )}
+        {showDuplicate && (
+          <DropdownMenuItem render={<AppLink href={duplicateHref} />}>
+            <Copy className="h-3.5 w-3.5" />
+            {t(($) => $.row_actions.duplicate)}
+          </DropdownMenuItem>
+        )}
+        {showRestore && (
+          <DropdownMenuItem onClick={handleRestore}>
+            <RotateCcw className="h-3.5 w-3.5" />
+            {t(($) => $.row_actions.restore)}
+          </DropdownMenuItem>
+        )}
+        {showArchive && (
+          <>
+            <DropdownMenuSeparator />
             <DropdownMenuItem
-              onClick={() => setConfirmCancel(true)}
+              variant="destructive"
+              onClick={() => setConfirmArchive(true)}
             >
-              <Square className="h-3.5 w-3.5" />
-              {t(($) => $.row_actions.cancel_all_tasks)}
+              <Trash2 className="h-3.5 w-3.5" />
+              {t(($) => $.row_actions.archive)}
             </DropdownMenuItem>
-          )}
-          {showDuplicate && (
-            <DropdownMenuItem render={<AppLink href={duplicateHref} />}>
-              <Copy className="h-3.5 w-3.5" />
-              {t(($) => $.row_actions.duplicate)}
-            </DropdownMenuItem>
-          )}
-          {showRestore && (
-            <DropdownMenuItem onClick={handleRestore}>
-              <RotateCcw className="h-3.5 w-3.5" />
-              {t(($) => $.row_actions.restore)}
-            </DropdownMenuItem>
-          )}
-          {showArchive && (
-            <>
-              <DropdownMenuSeparator />
-              <DropdownMenuItem
-                variant="destructive"
-                onClick={() => setConfirmArchive(true)}
-              >
-                <Trash2 className="h-3.5 w-3.5" />
-                {t(($) => $.row_actions.archive)}
-              </DropdownMenuItem>
-            </>
-          )}
-        </DropdownMenuContent>
-      </DropdownMenu>
+          </>
+        )}
+      </CollectionRowMenu>
 
       {confirmCancel && (
         <AlertDialog
@@ -285,7 +258,7 @@ export function AgentRowActions({
 
 type AgentsT = ReturnType<typeof useT<"agents">>["t"];
 
-function describeCancelImpact(running: number, queued: number, t: AgentsT): string {
+export function describeCancelImpact(running: number, queued: number, t: AgentsT): string {
   if (running === 0 && queued === 0) {
     return t(($) => $.row_actions.cancel_dialog_no_tasks);
   }

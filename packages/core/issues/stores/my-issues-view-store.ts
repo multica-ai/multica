@@ -9,6 +9,7 @@ import {
   mergeViewStatePersisted,
 } from "./view-store";
 import { registerForWorkspaceRehydration } from "../../platform/workspace-storage";
+import { isMyAgentsSearch } from "../../paths/paths";
 
 export type MyIssuesScope = "all" | "assigned" | "created" | "agents";
 export type MyIssuesRelation = "all" | "assigned" | "created" | "involved";
@@ -20,6 +21,19 @@ export function myIssuesRelationFromScope(
 ): MyIssuesRelation {
   if (scope === "agents") return "involved";
   return scope;
+}
+
+/**
+ * The scope a My issues page shows. My agents' work comes from the URL
+ * (`?scope=agents`); the store keeps only My issues' own relation, so an
+ * "agents" persisted before the two were split reads as the default.
+ */
+export function myIssuesScopeFor(
+  searchParams: URLSearchParams,
+  stored: MyIssuesScope,
+): MyIssuesScope {
+  if (isMyAgentsSearch(searchParams)) return "agents";
+  return stored === "agents" ? "assigned" : stored;
 }
 
 export interface MyIssuesViewState extends IssueViewState {

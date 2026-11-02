@@ -56,7 +56,7 @@ vi.mock("@multica/core/agents", async (importOriginal) => {
   };
 });
 
-import { ActivityTab, AgentPerformanceSummary } from "./activity-tab";
+import { AgentPerformanceSummary, AgentWorkSections } from "./activity-tab";
 
 const baseAgent = {
   id: "agent-1",
@@ -65,7 +65,7 @@ const baseAgent = {
 
 const EMPTY_RECENT = "This agent hasn't completed anything yet.";
 
-function renderTab(performance = false) {
+function renderTab(performance = false, onViewAll = vi.fn()) {
   const queryClient = new QueryClient({
     defaultOptions: { queries: { retry: false } },
   });
@@ -84,7 +84,7 @@ function renderTab(performance = false) {
         <QueryClientProvider client={queryClient}>
           <WorkspaceSlugProvider slug="acme">
             {performance && <AgentPerformanceSummary agent={baseAgent} />}
-            <ActivityTab agent={baseAgent} showPerformance={performance} />
+            <AgentWorkSections agent={baseAgent} onViewAll={onViewAll} />
           </WorkspaceSlugProvider>
         </QueryClientProvider>
       </NavigationProvider>
@@ -98,7 +98,7 @@ beforeEach(() => {
 });
 
 describe("agent outcome presentation", () => {
-  it("uses completed and failed outcomes in both summaries and shows cancellations separately", () => {
+  it("uses completed and failed outcomes for success and shows cancellations separately", () => {
     activityRef.current = [{
       agent_id: "agent-1",
       bucket_at: new Date().toISOString(),
@@ -109,8 +109,7 @@ describe("agent outcome presentation", () => {
     }];
     renderTab(true);
     expect(screen.getByText("50%")).toBeInTheDocument();
-    expect(screen.getByText("50% success")).toBeInTheDocument();
-    expect(screen.getAllByText("8 cancelled")).toHaveLength(2);
+    expect(screen.getByText("8 cancelled")).toBeInTheDocument();
     expect(screen.queryByText("90%")).not.toBeInTheDocument();
   });
 
@@ -131,7 +130,7 @@ describe("agent outcome presentation", () => {
   });
 });
 
-describe("ActivityTab Recent work loading state", () => {
+describe("AgentWorkSections Recent work loading state", () => {
   it("shows a skeleton, not the empty state, while the task list is loading", () => {
     // Never-resolving queryFn keeps the per-agent task query pending, which is
     // exactly the first-paint window the skeleton is meant to cover.
@@ -153,7 +152,7 @@ describe("ActivityTab Recent work loading state", () => {
 });
 
 
-describe("ActivityTab server pagination", () => {
+describe("AgentWorkSections server pagination", () => {
   it("requests older history only on demand, disables duplicate fetches, and retries failures", async () => {
     let finish: (value: unknown) => void = () => {};
     const query = vi.fn()
@@ -203,7 +202,7 @@ function historyTask(index: number): AgentTask {
   };
 }
 
-describe("ActivityTab loaded history rows", () => {
+describe("AgentWorkSections loaded history rows", () => {
   it("reveals cached rows before requesting older history and deduplicates overlapping pages", async () => {
     const tasks = Array.from({ length: 31 }, (_, i) => historyTask(i));
     const query = vi.fn()
@@ -248,50 +247,39 @@ describe("ActivityTab loaded history rows", () => {
   });
 });
 
-// A loaded page is not the total history. Keep the denominator unknown until
-// the server reports that the last page has been reached.
-describe("ActivityTab history completeness", () => {
-  it.each([
-    { nextCursor: "older", subtitle: "10 latest runs" },
-    { nextCursor: null, subtitle: "10 of 200 runs" },
-  ])("shows '$subtitle' for a 200-row page with cursor $nextCursor", async ({ nextCursor, subtitle }) => {
+// The Recent work count is the 7-day run total from the activity window, not
+// the number of history rows loaded so far.
+describe("AgentWorkSections section counts", () => {
+  it("counts this week's runs from the activity window, whatever history has loaded", async () => {
+    activityRef.current = [
+      { agent_id: "agent-1", bucket_at: new Date().toISOString(), task_count: 38,
+        failed_count: 2, completed_count: 36, cancelled_count: 0 },
+      { agent_id: "agent-1", bucket_at: new Date(Date.now() - 20 * 86_400_000).toISOString(),
+        task_count: 90, failed_count: 0, completed_count: 90, cancelled_count: 0 },
+    ];
     agentTasksRef.current = () => Promise.resolve({
       tasks: Array.from({ length: 200 }, (_, i) => historyTask(i)),
-      nextCursor,
+      nextCursor: "older",
     });
     renderTab();
-    expect(await screen.findByText(subtitle)).toBeInTheDocument();
-    if (nextCursor) {
-      expect(screen.queryByText("10 of 200 runs")).not.toBeInTheDocument();
-    }
+    await screen.findByTestId("task-0");
+    expect(screen.getByText("38 this week")).toBeInTheDocument();
     expect(screen.getAllByTestId(/^task-/)).toHaveLength(10);
   });
 
-  it.each([
-    { nextCursor: "oldest", subtitle: "50 latest runs" },
-    { nextCursor: null, subtitle: "50 of 220 runs" },
-  ])("shows '$subtitle' after loading more history with cursor $nextCursor", async ({ nextCursor, subtitle }) => {
-    const query = vi.fn()
-      .mockResolvedValueOnce({
-        tasks: Array.from({ length: 20 }, (_, i) => historyTask(i)),
-        nextCursor: "older",
-      })
-      .mockResolvedValueOnce({
-        tasks: Array.from({ length: 200 }, (_, i) => historyTask(i + 20)),
-        nextCursor,
-      });
-    agentTasksRef.current = query;
+  it("shows no Now count and a quiet line while nothing is running", async () => {
+    agentTasksRef.current = () => Promise.resolve({ tasks: [], nextCursor: null });
     renderTab();
-    expect(await screen.findByText("10 latest runs")).toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: /Show more/ }));
-    expect(screen.getByText("20 latest runs")).toBeInTheDocument();
-    expect(query).toHaveBeenCalledTimes(1);
-    fireEvent.click(screen.getByRole("button", { name: /Show more/ }));
-    expect(await screen.findByText(subtitle)).toBeInTheDocument();
-    if (nextCursor) {
-      expect(screen.queryByText(/of 220 runs/)).not.toBeInTheDocument();
-    }
-    expect(screen.getAllByTestId(/^task-/)).toHaveLength(50);
-    expect(query.mock.calls[1]?.[0]).toBe("older");
+    expect(
+      await screen.findByText("This agent isn't running anything right now."),
+    ).toBeInTheDocument();
+    expect(screen.queryByText(/^\d+ runs?$/)).not.toBeInTheDocument();
+  });
+
+  it("opens the full work list from View all", () => {
+    const onViewAll = vi.fn();
+    renderTab(false, onViewAll);
+    fireEvent.click(screen.getByRole("button", { name: "View all" }));
+    expect(onViewAll).toHaveBeenCalledTimes(1);
   });
 });

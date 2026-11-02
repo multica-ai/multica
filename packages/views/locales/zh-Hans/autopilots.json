@@ -1,6 +1,5 @@
 {
   "page": {
-    "title": "自动化",
     "new_autopilot": "新建自动化",
     "start_blank": "从空白开始",
     "table": {
@@ -20,7 +19,6 @@
       "title": "还没有自动化",
       "hint": "为你的智能体安排周期性工作。从模板选一个，或从空白开始。"
     },
-    "scope_all": "全部",
     "no_matches": "没有匹配的自动化",
     "retry": "重试"
   },
@@ -87,10 +85,8 @@
     "run_blocked_quota_exceeded": "未触发——本周期的运行额度已用尽",
     "run_blocked_issue_limit_reached": "未触发——工作区任务总数已达到上限",
     "run_blocked_generic": "未触发——本次运行已被拦截",
-    "section_properties": "属性",
     "section_triggers": "触发器",
     "section_run_history": "运行历史",
-    "section_danger": "危险操作",
     "field_agent": "智能体",
     "field_created_by": "创建者",
     "field_output_mode": "输出模式",
@@ -100,6 +96,16 @@
     "field_prompt": "Prompt",
     "field_subscribers": "订阅者",
     "field_subscribers_none": "无",
+    "no_prompt": "还没有 Prompt。",
+    "copy_link": "复制链接",
+    "link_copied": "链接已复制",
+    "link_copy_failed": "无法复制链接",
+    "open_project": "打开项目",
+    "summary": {
+      "create_issue": "{{agent}} 每次运行创建一个任务",
+      "run_only": "{{agent}} 直接运行，不创建任务",
+      "with_trigger": "{{trigger}} · {{action}}"
+    },
     "add_trigger": "添加触发器",
     "no_triggers": "未配置触发器。添加一个时间表让它自动运行。",
     "no_runs": "暂无运行记录。点击\"立即运行\"手动触发。",
@@ -441,27 +447,16 @@
     "search_placeholder": "搜索时区..."
   },
   "toolbar": {
-    "result_count_title": "当前结果 / 全部自动化",
-    "filter_label": "筛选",
-    "filter_active_count_other": "{{count}} 项筛选",
-    "clear_filters": "清除筛选",
     "section_assignee": "执行者",
     "section_mode": "模式",
     "section_trigger": "触发器",
-    "section_creator": "创建者",
-    "display": "显示",
-    "sort_by": "排序",
-    "direction_asc": "升序",
-    "direction_desc": "降序",
-    "section_columns": "列"
+    "section_creator": "创建者"
   },
   "actions": {
     "row_menu": "自动化操作",
     "pause": "暂停",
     "resume": "恢复",
     "delete": "删除",
-    "selected_other": "已选 {{count}} 项",
-    "clear_selection": "清除选择",
     "delete_dialog": {
       "title": "删除自动化？",
       "description_other": "将永久删除 {{count}} 个自动化及其运行历史。",
@@ -473,7 +468,6 @@
   },
   "wakeups": {
     "title": "任务唤醒",
-    "scope": "范围",
     "issue": "任务",
     "trigger": "触发条件",
     "enabled": "开启",
@@ -482,22 +476,16 @@
     "at": "单次定时",
     "recurring": "周期",
     "all_agents": "所有智能体",
-    "search": "搜索任务或智能体",
     "running": "运行中",
     "active_runs": "{{count}} 个运行未结束",
     "issue_closed": "任务已关闭",
     "read_only": "仅创建者或工作区管理员可管理此唤醒",
     "select_row": "选择 {{issue}}，{{agent}}",
-    "select_page": "选择本页已开启的唤醒",
+    "select_page": "选择所有已开启的唤醒",
     "load_error": "无法加载唤醒",
     "loading": "正在加载唤醒…",
     "empty": "暂无唤醒规则",
-    "selected": "已选择 {{count}} 项",
     "disable_selected": "关闭所选",
-    "clear": "清除选择",
-    "results": "第 {{page}} 页 · 共 {{count}} 项",
-    "previous": "上一页",
-    "next_page": "下一页",
     "confirm_title": "关闭 {{count}} 个唤醒？",
     "confirm_body": "关闭后将停止后续唤醒，并撤回仍在排队、尚未交给智能体的运行。已交给智能体的运行会继续，可在执行日志中停止。",
     "cancel": "取消",
@@ -506,7 +494,7 @@
     "batch_result": "已关闭 {{succeeded}} 项，失败 {{failed}} 项。",
     "scopes": {
       "active": "待唤醒或执行中",
-      "all": "全部",
+      "all": "全部唤醒",
       "disabled": "已关闭",
       "ended": "已结束",
       "paused": "已暂停"
@@ -518,7 +506,7 @@
     "batch_partial": "已关闭 {{succeeded}} 条，{{failed}} 条失败；失败项仍保留选中，可重试。",
     "source": "来源",
     "sources": {
-      "all": "来源：全部",
+      "all": "全部来源",
       "member": "成员",
       "agent": "智能体",
       "system": "系统"

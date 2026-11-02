@@ -59,8 +59,8 @@ func TestPriceForModelAliasAnthropicCurrentGeneration(t *testing.T) {
 }
 
 func TestPriceForModelAliasCodexCurrentGeneration(t *testing.T) {
-	// Official rates from OpenAI's GPT-5.6 announcement: cache read = 0.1x
-	// input (90% cached-input discount), cache write = 1.25x input.
+	// OpenAI's standard short-context rates: cache read = 0.1x input (90%
+	// cached-input discount; 0.05x on GPT-6.1), cache write = 1.25x input.
 	cases := []struct {
 		model string
 		want  ModelPrice
@@ -99,11 +99,25 @@ func TestPriceForModelAliasCodexCurrentGeneration(t *testing.T) {
 		},
 		{
 			model: "openai:gpt-5.6-terra",
-			want:  ModelPrice{Provider: "openai", Model: "gpt-5.6-terra", InputPerM: 2.5, CacheReadPerM: 0.25, CacheWritePerM: 3.125, OutputPerM: 15},
+			want:  ModelPrice{Provider: "openai", Model: "gpt-5.6-terra", InputPerM: 2, CacheReadPerM: 0.2, CacheWritePerM: 2.5, OutputPerM: 12},
 		},
 		{
 			model: "openai/gpt-5.6-luna",
-			want:  ModelPrice{Provider: "openai", Model: "gpt-5.6-luna", InputPerM: 1, CacheReadPerM: 0.1, CacheWritePerM: 1.25, OutputPerM: 6},
+			want:  ModelPrice{Provider: "openai", Model: "gpt-5.6-luna", InputPerM: 0.2, CacheReadPerM: 0.02, CacheWritePerM: 0.25, OutputPerM: 1.2},
+		},
+		// Pre-5.6 SKUs don't bill cache writes separately: written tokens are
+		// ordinary input, never the discounted cache-read rate.
+		{
+			model: "gpt-5.5",
+			want:  ModelPrice{Provider: "openai", Model: "gpt-5.5", InputPerM: 5, CacheReadPerM: 0.5, CacheWritePerM: 5, OutputPerM: 30},
+		},
+		{
+			model: "gpt-5.4-mini",
+			want:  ModelPrice{Provider: "openai", Model: "gpt-5.4-mini", InputPerM: 0.75, CacheReadPerM: 0.075, CacheWritePerM: 0.75, OutputPerM: 4.5},
+		},
+		{
+			model: "gpt-5.3-codex",
+			want:  ModelPrice{Provider: "openai", Model: "gpt-5.3-codex", InputPerM: 1.75, CacheReadPerM: 0.175, CacheWritePerM: 1.75, OutputPerM: 14},
 		},
 	}
 
@@ -223,6 +237,50 @@ func TestPriceForModelAliasGrok(t *testing.T) {
 		"grok",
 		"unknown",
 	} {
+		if got, ok := PriceForModelAlias(model); ok {
+			t.Fatalf("PriceForModelAlias(%q) unexpectedly resolved to %+v; want unmapped", model, got)
+		}
+	}
+}
+
+// TestPriceForModelAliasMinimaxM3 pins the standard-tier fallback estimate.
+// Aggregate usage cannot identify per-request long-context tiers. Cache writes
+// mirror input for newly cached tokens; existing M2.7 rates remain unchanged.
+func TestPriceForModelAliasMinimaxM3(t *testing.T) {
+	cases := []struct {
+		model string
+		want  ModelPrice
+	}{
+		{
+			model: "minimax-m3",
+			want:  ModelPrice{Provider: "minimax", Model: "m3", InputPerM: 0.3, CacheReadPerM: 0.06, CacheWritePerM: 0.3, OutputPerM: 1.2},
+		},
+		{
+			model: "codebuddy/minimax-m3",
+			want:  ModelPrice{Provider: "minimax", Model: "m3", InputPerM: 0.3, CacheReadPerM: 0.06, CacheWritePerM: 0.3, OutputPerM: 1.2},
+		},
+		{
+			model: "MiniMax-M3",
+			want:  ModelPrice{Provider: "minimax", Model: "m3", InputPerM: 0.3, CacheReadPerM: 0.06, CacheWritePerM: 0.3, OutputPerM: 1.2},
+		},
+		// The older M2.7 row must stay separate and keep its distinct rates.
+		{
+			model: "minimax-m2.7",
+			want:  ModelPrice{Provider: "minimax", Model: "m2.7", InputPerM: 0.3, CacheReadPerM: 0.06, CacheWritePerM: 0.375, OutputPerM: 1.2},
+		},
+	}
+
+	for _, tc := range cases {
+		got, ok := PriceForModelAlias(tc.model)
+		if !ok {
+			t.Fatalf("PriceForModelAlias(%q) did not resolve", tc.model)
+		}
+		if got != tc.want {
+			t.Fatalf("PriceForModelAlias(%q) = %+v, want %+v", tc.model, got, tc.want)
+		}
+	}
+
+	for _, model := range []string{"minimax-m3.5", "minimax-m3-highspeed", "some-vendor/minimax-m3-preview"} {
 		if got, ok := PriceForModelAlias(model); ok {
 			t.Fatalf("PriceForModelAlias(%q) unexpectedly resolved to %+v; want unmapped", model, got)
 		}
@@ -397,7 +455,7 @@ func TestPriceForModelAliasContextTagStripping(t *testing.T) {
 		},
 		{
 			model: "gpt-5.6-luna[1m]",
-			want:  ModelPrice{Provider: "openai", Model: "gpt-5.6-luna", InputPerM: 1.00, CacheReadPerM: 0.10, CacheWritePerM: 1.25, OutputPerM: 6.00},
+			want:  ModelPrice{Provider: "openai", Model: "gpt-5.6-luna", InputPerM: 0.20, CacheReadPerM: 0.02, CacheWritePerM: 0.25, OutputPerM: 1.20},
 		},
 		{
 			model: "kimi-k3[1m]",

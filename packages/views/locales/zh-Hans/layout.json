@@ -11,7 +11,8 @@
     "usage": "统计",
     "runtimes": "运行时",
     "skills": "Skills",
-    "settings": "设置"
+    "settings": "设置",
+    "views": "视图"
   },
   "tab": {
     "issue": "任务",
@@ -25,6 +26,7 @@
     "runtime": "运行时",
     "attachment": "附件",
     "create_agent": "创建智能体",
+    "my_agents": "我的智能体在做",
     "unknown": "未知页面"
   },
   "help": {
@@ -57,16 +59,120 @@
     "invitation_decline": "拒绝",
     "log_out": "退出登录",
     "new_issue": "新建任务",
-    "new_issue_shortcut": "C",
     "pinned_label": "固定",
-    "work_group": "工作",
-    "ai_team_group": "AI 团队",
     "show_more_pins": "再显示 {{count}} 项...",
-    "show_fewer_pins": "收起",
-    "unread_overflow": "99+",
-    "discord_card": {
-      "title": "加入 Discord",
-      "dismiss": "关闭"
+    "show_fewer_pins": "收起"
+  },
+  "spaces": {
+    "work": "工作",
+    "team": "团队"
+  },
+  "rail": {
+    "label": "应用导航",
+    "sheet_description": "切换空间和工作区。",
+    "inbox": "收件箱",
+    "work": "工作",
+    "team": "团队",
+    "chat": "聊天",
+    "autopilots": "自动化",
+    "switch_workspace": "切换工作区",
+    "invitation_from": "{{name}} 邀请你加入",
+    "open_in_new_window": "在新窗口打开",
+    "open_in_new_window_click": "点击",
+    "open_in_other_window": "已在其他窗口打开",
+    "in_other_window": "其他窗口",
+    "all_workspaces_open": "所有工作区都已在窗口中打开"
+  },
+  "panels": {
+    "work": {
+      "my_agents": "我的智能体在做",
+      "all_issues": "全部任务",
+      "views": "视图",
+      "new_project": "新建项目",
+      "new_issue_in_project": "在 {{name}} 中新建任务",
+      "all_projects_other": "全部 {{count}} 个项目",
+      "project_issues": "{{name}} 的任务",
+      "project_issues_empty": "没有任务",
+      "project_issues_error": "无法加载任务",
+      "project_issues_settings": "项目中的任务",
+      "settings_status": "状态",
+      "settings_assignee": "负责人",
+      "assignee_anyone": "所有人",
+      "assignee_me": "我",
+      "assignee_my_agents": "我的智能体",
+      "assignee_me_and_my_agents": "我和我的智能体",
+      "reset": "重置",
+      "load_more": "加载更多",
+      "show_less": "收起",
+      "projects_settings": "项目显示",
+      "projects_ordering": "排序",
+      "projects_order_manual": "手动",
+      "projects_order_name": "名称",
+      "projects_order_updated": "最近更新",
+      "projects_order_created": "最近创建",
+      "projects_show": "显示",
+      "projects_only_mine": "只看我负责的项目",
+      "projects_show_count": "未完成任务数",
+      "new_view": "新建视图",
+      "all_views": "全部视图",
+      "view_actions": "{{name}} 的操作",
+      "view_copy_link": "复制链接",
+      "view_remove": "从侧栏移除",
+      "view_rename": "重命名",
+      "view_duplicate": "创建副本",
+      "view_delete": "删除视图"
+    },
+    "team": {
+      "new_agent": "新建智能体",
+      "needs_attention": "需要处理",
+      "stuck_other": "{{count}} 个任务在等待离线的运行时",
+      "working_now": "正在工作",
+      "running_tasks_other": "{{count}} 个任务运行中",
+      "all_agents": "全部智能体",
+      "my_agents": "我的智能体",
+      "squads_and_members": "小队与成员",
+      "members_other": "{{count}} 位成员",
+      "resources": "资源",
+      "runtimes_offline_other": "{{count}} 个离线",
+      "invite_member": "邀请成员"
+    },
+    "autopilots": {
+      "all": "全部自动化",
+      "list": "自动化",
+      "templates": "从模板开始"
     }
+  },
+  "account": {
+    "trigger": "账户",
+    "profile": "个人资料",
+    "theme": "主题",
+    "themes": {
+      "light": "浅色",
+      "dark": "深色",
+      "system": "跟随系统"
+    },
+    "language": "语言",
+    "shortcuts": "快捷键"
+  },
+  "collection": {
+    "filter": "筛选",
+    "filter_count_other": "{{count}} 个筛选",
+    "reset": "重置",
+    "display": "显示设置",
+    "selected_other": "已选 {{count}} 项",
+    "clear_selection": "清除选择",
+    "select_all": "全选",
+    "select_row": "选择此行",
+    "row_actions": "更多操作",
+    "sort_by": "排序",
+    "direction_asc": "升序",
+    "direction_desc": "降序",
+    "section_columns": "列",
+    "load_more": "加载更多",
+    "loading_more": "加载中…"
+  },
+  "object_page": {
+    "toggle_panel": "切换右侧边栏",
+    "properties": "属性"
   }
 }

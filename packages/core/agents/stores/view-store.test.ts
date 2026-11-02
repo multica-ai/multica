@@ -26,7 +26,7 @@ beforeAll(() => {
 
 beforeEach(() => {
   localStorage.clear();
-  useAgentsViewStore.setState({ scope: "mine", search: "" });
+  useAgentsViewStore.setState({ scope: "mine" });
   setCurrentWorkspace(null, null);
 });
 
@@ -226,41 +226,35 @@ describe("useAgentsViewStore", () => {
 
       expect(useAgentsViewStore.getState().hiddenColumns).toEqual(["model"]);
     });
-  });
 
-  describe("search (session-only)", () => {
-    it("keeps the query in the store but never persists it", async () => {
+    it("moves a v1 payload still on the old default to the new default", async () => {
+      localStorage.setItem(
+        "multica_agents_view:acme",
+        JSON.stringify({ state: { hiddenColumns: ["created"] }, version: 1 }),
+      );
+
       setCurrentWorkspace("acme", "ws_a");
       await flush();
-      useAgentsViewStore.getState().setSearch("reviewer");
       await flush();
 
-      expect(useAgentsViewStore.getState().search).toBe("reviewer");
-      const raw = localStorage.getItem("multica_agents_view:acme");
-      expect(raw).not.toBeNull();
-      expect(JSON.parse(raw as string).state).not.toHaveProperty("search");
+      expect(useAgentsViewStore.getState().hiddenColumns).toEqual([
+        "owner",
+        "access",
+        "created",
+      ]);
     });
 
-    it("clears the query on workspace switch", async () => {
+    it("keeps a customised v1 column choice", async () => {
       localStorage.setItem(
-        "multica_agents_view:beta",
-        JSON.stringify({ state: { scope: "all" }, version: 1 }),
+        "multica_agents_view:acme",
+        JSON.stringify({ state: { hiddenColumns: ["created", "runs"] }, version: 1 }),
       );
+
       setCurrentWorkspace("acme", "ws_a");
       await flush();
       await flush();
-      useAgentsViewStore.getState().setSearch("reviewer");
 
-      setCurrentWorkspace("beta", "ws_b");
-      await flush();
-      await flush();
-      expect(useAgentsViewStore.getState().search).toBe("");
-
-      useAgentsViewStore.getState().setSearch("reviewer");
-      setCurrentWorkspace("gamma", "ws_c");
-      await flush();
-      await flush();
-      expect(useAgentsViewStore.getState().search).toBe("");
+      expect(useAgentsViewStore.getState().hiddenColumns).toEqual(["created", "runs"]);
     });
   });
 });
