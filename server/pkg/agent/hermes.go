@@ -2933,6 +2933,10 @@ type acpProviderErrorSniffer struct {
 // status code or a non-retryable-error tag.
 var acpErrorHeaderRe = regexp.MustCompile(`(?:⚠️|❌|\[ERROR\]).*(?:BadRequestError|AuthenticationError|RateLimitError|HTTP [0-9]{3}|Non-retryable|API call failed)`)
 
+// Attempt headers start a new error block. Terminal summaries close that
+// block and can follow its actionable detail, so they are not block starts.
+var acpErrorAttemptRe = regexp.MustCompile(`(?:API call failed \(attempt \d+/\d+\)|Attempt \d+/\d+ failed)`)
+
 // acpErrorDetailRe pulls the most useful single-line messages out of
 // the subsequent lines of the error block (the one whose "Error:" or
 // "Details:" tag actually spells out what happened).
@@ -3076,6 +3080,12 @@ func (s *acpProviderErrorSniffer) Write(p []byte) (int, error) {
 		if acpTerminalErrorRe.MatchString(line) || (s.kimiStyle && kimiTerminalErrorRe.MatchString(line)) {
 			s.terminal = true
 		}
+		// The same detail can recur after a different retry error. Retain it
+		// in the new attempt's block instead of deduplicating it into an old
+		// one. Kimi's provider.api_error parsing keeps its existing dedup scope.
+		if !s.kimiStyle && acpErrorAttemptRe.MatchString(line) {
+			clear(s.seen)
+		}
 		if s.seen[line] {
 			continue
 		}
@@ -3155,9 +3165,10 @@ func (s *acpProviderErrorSniffer) resetEchoJSON() {
 }
 
 // message returns a single-line summary suitable for the task
-// error field. Prefers the latest specific "Error:" / "detail:"
-// fragment; falls back to the latest captured header line; empty
-// when nothing useful was seen.
+// error field. Prefers a specific "Error:" / "detail:" fragment from
+// the latest provider-error block; falls back to that block's header.
+// Bare runtime errors keep their first detail; empty when nothing useful
+// was seen.
 //
 // NOTE: a non-empty message() can describe a *transient* per-attempt
 // warning that was followed by a successful retry. Code that flips
@@ -3268,18 +3279,30 @@ func (s *acpProviderErrorSniffer) messageLocked() string {
 	}
 
 	// Common path: non-kimi or kimi without a terminal provider.api_error line.
-	// Walk backwards so a terminal provider failure wins over an earlier
-	// fail-open diagnostic captured during startup (for example, an optional
-	// Relay import warning followed by an exhausted HTTP 429). Once a terminal
-	// marker exists, exclude every detail that preceded its error block.
-	firstDetail := 0
-	for i := len(s.lines) - 1; i >= 0; i-- {
-		if acpTerminalErrorRe.MatchString(s.lines[i]) {
-			firstDetail = i
-			break
+	// Skip startup diagnostics before the first provider header, advancing
+	// only when a new attempt starts. Hermes can emit a generic abort summary
+	// AFTER the useful detail, so a terminal marker cannot define the start.
+	blockStart := -1
+	for i, line := range s.lines {
+		if acpErrorHeaderRe.MatchString(line) || (s.kimiStyle && kimiProviderApiErrorRe.MatchString(line)) {
+			if blockStart < 0 || acpErrorAttemptRe.MatchString(line) {
+				blockStart = i
+			}
 		}
 	}
-	for i := len(s.lines) - 1; i >= firstDetail; i-- {
+	if blockStart < 0 {
+		// Configuration failures such as "RuntimeError: No LLM provider
+		// configured" have no provider header. Preserve their existing path.
+		for _, line := range s.lines {
+			if m := acpErrorDetailRe.FindStringSubmatch(line); m != nil {
+				if detail := strings.TrimSpace(m[1]); detail != "" {
+					return acpTruncateError(prefix + detail)
+				}
+			}
+		}
+		return ""
+	}
+	for i := len(s.lines) - 1; i >= blockStart; i-- {
 		line := s.lines[i]
 		if m := acpErrorDetailRe.FindStringSubmatch(line); m != nil {
 			detail := strings.TrimSpace(m[1])
@@ -3288,13 +3311,9 @@ func (s *acpProviderErrorSniffer) messageLocked() string {
 			}
 		}
 	}
-	for i := len(s.lines) - 1; i >= 0; i-- {
-		line := s.lines[i]
-		if acpErrorHeaderRe.MatchString(line) || (s.kimiStyle && kimiProviderApiErrorRe.MatchString(line)) {
-			return acpTruncateError(prefix + line)
-		}
-	}
-	return ""
+	// The opening header can itself contain the cause; a later generic
+	// "Aborting" summary must not replace it when no tagged detail exists.
+	return acpTruncateError(prefix + s.lines[blockStart])
 }
 
 // acpTruncateError bounds a persisted provider-error summary to

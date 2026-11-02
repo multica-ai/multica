@@ -2290,6 +2290,115 @@ func TestHermesProviderErrorSnifferRelayWarningStaysFailOpen(t *testing.T) {
 	}
 }
 
+func TestHermesProviderErrorSnifferPreservesFailureDetails(t *testing.T) {
+	t.Parallel()
+
+	const relayWarning = "ModuleNotFoundError: No module named 'nemo_relay'\n"
+	const rateLimitDetail = "📝 Error: HTTP 429: rate limit exceeded\n"
+	const historyDetail = "📝 Error: HTTP 400: the message at position 43 with role 'assistant' must not be empty\n"
+	const abort400 = "❌ Non-retryable client error (HTTP 400). Aborting.\n"
+	const exhausted429 = "❌ API call failed after 3 retries: RateLimitError [HTTP 429]\n"
+
+	tests := []struct {
+		name     string
+		stderr   string
+		want     string
+		unwanted string
+		poisoned bool
+	}{
+		{
+			// Hermes emits the actionable detail before its generic abort summary:
+			// https://github.com/NousResearch/hermes-agent/issues/14387.
+			name: "detail before abort summary",
+			stderr: "⚠️ API call failed (attempt 1/3): TypeError\n" +
+				"📝 Error: Completions.create() got an unexpected keyword argument 'stream_options'\n" +
+				"⚠️ Non-retryable error (HTTP None) — trying fallback...\n" +
+				"❌ Non-retryable error (HTTP None): Completions.create() got an unexpected keyword argument 'stream_options'\n" +
+				"❌ Non-retryable client error (HTTP None). Aborting.\n",
+			want: "stream_options",
+		},
+		{
+			name: "poisoned history before abort summary",
+			stderr: "⚠️ API call failed (attempt 1/3): BadRequestError [HTTP 400]\n" +
+				historyDetail + abort400,
+			want:     "must not be empty",
+			poisoned: true,
+		},
+		{
+			name: "repeated retry details",
+			stderr: "⚠️ API call failed (attempt 1/3): RateLimitError [HTTP 429]\n" + rateLimitDetail +
+				"⚠️ API call failed (attempt 2/3): RateLimitError [HTTP 429]\n" + rateLimitDetail +
+				"⚠️ API call failed (attempt 3/3): RateLimitError [HTTP 429]\n" + rateLimitDetail + exhausted429,
+			want: "rate limit exceeded",
+		},
+		{
+			name: "rate limit then poisoned history",
+			stderr: "⚠️ API call failed (attempt 1/3): RateLimitError [HTTP 429]\n" + rateLimitDetail +
+				"⚠️ API call failed (attempt 2/3): BadRequestError [HTTP 400]\n" + historyDetail + abort400,
+			want:     "must not be empty",
+			unwanted: "rate limit exceeded",
+			poisoned: true,
+		},
+		{
+			name: "stale history detail does not poison final rate limit",
+			stderr: "⚠️ API call failed (attempt 1/3): BadRequestError [HTTP 400]\n" + historyDetail +
+				"⚠️ API call failed (attempt 2/3): RateLimitError [HTTP 429]\n" + rateLimitDetail + exhausted429,
+			want:     "rate limit exceeded",
+			unwanted: "must not be empty",
+		},
+		{
+			name: "final retry repeats an earlier error",
+			stderr: "⚠️ API call failed (attempt 1/3): RateLimitError [HTTP 429]\n" + rateLimitDetail +
+				"⚠️ API call failed (attempt 2/3): HTTP 503\n📝 Error: HTTP 503: service unavailable\n" +
+				"⚠️ API call failed (attempt 3/3): RateLimitError [HTTP 429]\n" + rateLimitDetail + exhausted429,
+			want:     "rate limit exceeded",
+			unwanted: "service unavailable",
+		},
+		{
+			name: "final attempt without detail uses its own header",
+			stderr: "⚠️ API call failed (attempt 1/3): RateLimitError [HTTP 429]\n" + rateLimitDetail +
+				"⚠️ API call failed (attempt 2/3): BadRequestError [HTTP 400]\n" + abort400,
+			want:     "HTTP 400",
+			unwanted: "rate limit exceeded",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			for _, warning := range []string{"", relayWarning} {
+				t.Run(fmt.Sprintf("relay=%t", warning != ""), func(t *testing.T) {
+					s := newACPProviderErrorSniffer("hermes")
+					for _, line := range strings.SplitAfter(warning+tt.stderr, "\n") {
+						if _, err := s.Write([]byte(line)); err != nil {
+							t.Fatalf("Write: %v", err)
+						}
+					}
+					status, message := promoteACPResultOnProviderError("completed", "", "", s)
+					if status != "failed" || !strings.Contains(message, tt.want) {
+						t.Errorf("status=%q error=%q, want failed with %q", status, message, tt.want)
+					}
+					if strings.Contains(message, "nemo_relay") || (tt.unwanted != "" && strings.Contains(message, tt.unwanted)) {
+						t.Errorf("unrelated error detail surfaced: %q", message)
+					}
+					if got := s.isPoisonedHistory(); got != tt.poisoned {
+						t.Errorf("isPoisonedHistory()=%v, want %v; error=%q", got, tt.poisoned, message)
+					}
+				})
+			}
+		})
+	}
+}
+
+func TestHermesProviderErrorSnifferWithoutHeader(t *testing.T) {
+	t.Parallel()
+
+	s := newACPProviderErrorSniffer("hermes")
+	s.Write([]byte("RuntimeError: No LLM provider configured\n"))
+	status, message := promoteACPResultOnProviderError("completed", "", "", s)
+	if status != "failed" || !strings.Contains(message, "No LLM provider configured") {
+		t.Fatalf("bare runtime error lost: status=%q error=%q", status, message)
+	}
+}
+
 // TestHermesProviderErrorSnifferIgnoresMultiLineInfoRecords guards the
 // second pollution shape from GitHub multica#5862. Hermes echoes a
 // conversation/tool record whose JSON spans several physical lines: only
@@ -3296,6 +3405,7 @@ while IFS= read -r line; do
       ;;
     *'"method":"session/prompt"'*)
       printf '%s\n' "2026-01-01 00:00:01 [ERROR] root: ❌ API call failed after 3 retries: BadRequestError the message at position 43 with role 'assistant' must not be empty" >&2
+      printf '%s\n' '❌ Non-retryable client error (HTTP 400). Aborting.' >&2
       printf '{"jsonrpc":"2.0","id":%s,"result":{"stopReason":"end_turn"}}\n' "$id"
       exit 0
       ;;
