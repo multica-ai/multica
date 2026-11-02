@@ -2,6 +2,7 @@
   "page": {
     "title": "Agents",
     "new_agent": "Nouvel agent",
+    "search": "Rechercher des agents",
     "show_archived": "Afficher les archivés ({{count}}) →",
     "of_total": "{{visible}} sur {{total}}",
     "list_load_failed": "Impossible de charger les agents",
@@ -50,7 +51,10 @@
   },
   "no_matches": {
     "title": "Aucune correspondance",
+    "search_active": "Aucun agent ne correspond à « {{query}} ».",
+    "search_active_filtered": "Aucun agent ne correspond à « {{query}} » dans ce filtre.",
     "no_archived": "Aucun agent archivé pour l'instant.",
+    "search_archived": "Aucun agent archivé ne correspond à « {{query}} ».",
     "no_filter_match": "Aucun agent ne correspond à ce filtre.",
     "search_runtime_filtered": "Aucun agent sur « {{machine}} » ne correspond à « {{query}} ».",
     "runtime_filtered": "Aucun agent sur « {{machine}} »."

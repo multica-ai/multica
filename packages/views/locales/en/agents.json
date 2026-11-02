@@ -2,6 +2,7 @@
   "page": {
     "title": "Agents",
     "new_agent": "New agent",
+    "search": "Search agents",
     "show_archived": "Show archived ({{count}}) →",
     "of_total": "{{visible}} of {{total}}",
     "list_load_failed": "Couldn't load agents",
@@ -50,7 +51,10 @@
   },
   "no_matches": {
     "title": "No matches",
+    "search_active": "No agents match \"{{query}}\".",
+    "search_active_filtered": "No agents match \"{{query}}\" in this filter.",
     "no_archived": "No archived agents yet.",
+    "search_archived": "No archived agents match \"{{query}}\".",
     "no_filter_match": "No agents match this filter.",
     "search_runtime_filtered": "No agents on \"{{machine}}\" match \"{{query}}\".",
     "runtime_filtered": "No agents on \"{{machine}}\"."
