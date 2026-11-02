@@ -49,7 +49,7 @@ func larkInstallationToResponse(row lark.Installation) LarkInstallationResponse 
 		InstallerUserID:        uuidToString(row.InstallerUserID),
 		Status:                 row.Status,
 		Region:                 row.Region,
-		InstalledAt:            row.InstalledAt.Time.UTC().Format(time.RFC3339),
+		InstalledAt:            row.InstalledAt.Time.UTC().Format(time.RFC3339Nano),
 		CreatedAt:              row.CreatedAt.Time.UTC().Format(time.RFC3339),
 		UpdatedAt:              row.UpdatedAt.Time.UTC().Format(time.RFC3339),
 	}

@@ -46,18 +46,18 @@ it.each(["forbidden", "malformed"])("does not show missing evidence or stale con
   expect(screen.queryByText("secret provider text")).not.toBeInTheDocument();
 });
 
-it("does not show cached evidence from the previous binding during a rebind fetch", async () => {
+it("does not show cached evidence during a same-second rebind fetch", async () => {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: 0 } } });
   const wrapper = ({ children }: { children: ReactNode }) => <QueryClientProvider client={client}>
     <I18nProvider locale="en" resources={{ en: { common: enCommon, settings: enSettings } }}>{children}</I18nProvider>
   </QueryClientProvider>;
   vi.mocked(api.getLarkSendObservation).mockResolvedValueOnce({ available: true, observation: { observed_at: "2026-11-02T00:00:00Z", result: "api_confirmed", reason: "none" } });
-  const { rerender } = render(<LarkSendObservation wsId="ws" installationId="inst" revision="old" />, { wrapper });
+  const { rerender } = render(<LarkSendObservation wsId="ws" installationId="inst" revision="2026-11-02T10:00:00.123456Z" />, { wrapper });
   await userEvent.setup().click(screen.getByText("Last text/card send observation"));
   expect(await screen.findByText("API confirmed the request")).toBeInTheDocument();
   let resolve: (value: LarkSendObservationResponse) => void = () => {};
   vi.mocked(api.getLarkSendObservation).mockReturnValueOnce(new Promise((r) => { resolve = r; }));
-  rerender(<LarkSendObservation wsId="ws" installationId="inst" revision="new" />);
+  rerender(<LarkSendObservation wsId="ws" installationId="inst" revision="2026-11-02T10:00:00.123457Z" />);
   await waitFor(() => expect(api.getLarkSendObservation).toHaveBeenCalledTimes(2));
   expect(screen.queryByText("API confirmed the request")).not.toBeInTheDocument();
   resolve({ available: true, observation: null });

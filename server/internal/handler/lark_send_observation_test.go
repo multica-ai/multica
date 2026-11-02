@@ -6,12 +6,33 @@ import (
 	"net/http"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/multica-ai/multica/server/internal/integrations/lark"
 	"github.com/multica-ai/multica/server/internal/testutil"
 	"github.com/multica-ai/multica/server/internal/util/secretbox"
 )
+
+func TestLarkInstallationSameSecondRebindRevision(t *testing.T) {
+	firstBinding := time.Date(2026, 11, 2, 10, 0, 0, 123456000, time.UTC)
+	secondBinding := firstBinding.Add(time.Microsecond)
+	first := larkInstallationToResponse(lark.Installation{InstalledAt: pgtype.Timestamptz{Time: firstBinding, Valid: true}})
+	second := larkInstallationToResponse(lark.Installation{InstalledAt: pgtype.Timestamptz{Time: secondBinding, Valid: true}})
+	if first.InstalledAt == second.InstalledAt {
+		t.Fatal("same-second rebinds share the send-observation cache revision")
+	}
+	for _, tc := range []struct {
+		wire string
+		want time.Time
+	}{{first.InstalledAt, firstBinding}, {second.InstalledAt, secondBinding}} {
+		parsed, err := time.Parse(time.RFC3339Nano, tc.wire)
+		if err != nil || !parsed.Equal(tc.want) {
+			t.Fatalf("installation timestamp lost precision: %q", tc.wire)
+		}
+	}
+}
 
 func TestLarkSendObservationAccessAndWire(t *testing.T) {
 	if testHandler == nil {
