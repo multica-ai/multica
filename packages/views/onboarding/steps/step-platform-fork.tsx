@@ -13,7 +13,6 @@ import {
 import { cn } from "@multica/ui/lib/utils";
 import type { AgentRuntime } from "@multica/core/types";
 import {
-  countRuntimeComputers,
   runtimeDisplayLabel,
   useDaemonSetupCommands,
 } from "@multica/core/runtimes";
@@ -25,6 +24,7 @@ import {
   MikaRuntimeChoice,
   type MikaRuntimeSelection,
 } from "../../runtimes/components/mika-runtime-choice";
+import { countRuntimeMachines } from "../../runtimes/components/runtime-machines";
 import { useRuntimePicker } from "../components/use-runtime-picker";
 import { useT } from "../../i18n";
 
@@ -323,7 +323,7 @@ function CliInstallDialog({
               <div className="flex items-center gap-2 pt-1 text-body">
                 <div className="h-2 w-2 rounded-full bg-success" />
                 <span className="font-medium">
-                  {t(($) => $.step_platform.runtimes_connected, { count: countRuntimeComputers(runtimes) })}
+                  {t(($) => $.step_platform.runtimes_connected, { count: countRuntimeMachines(runtimes) })}
                 </span>
               </div>
               {/* Cap the runtime list at ~4 rows visible, scroll the rest.
