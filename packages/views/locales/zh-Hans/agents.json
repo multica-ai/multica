@@ -2,6 +2,7 @@
   "page": {
     "title": "智能体",
     "new_agent": "新建智能体",
+    "search": "搜索智能体",
     "show_archived": "显示已归档（{{count}}）→",
     "of_total": "{{visible}} / {{total}}",
     "list_load_failed": "无法加载智能体列表",
@@ -49,7 +50,10 @@
   },
   "no_matches": {
     "title": "无匹配项",
+    "search_active": "没有智能体匹配\"{{query}}\"。",
+    "search_active_filtered": "在该筛选下没有智能体匹配\"{{query}}\"。",
     "no_archived": "还没有已归档智能体。",
+    "search_archived": "没有已归档智能体匹配\"{{query}}\"。",
     "no_filter_match": "该筛选下没有匹配的智能体。",
     "search_runtime_filtered": "\"{{machine}}\"上没有匹配\"{{query}}\"的智能体。",
     "runtime_filtered": "\"{{machine}}\"上还没有智能体。"
