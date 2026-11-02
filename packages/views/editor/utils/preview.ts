@@ -4,15 +4,20 @@
  * Add new previewable kinds here. To add a type:
  *   1. Add a new branch returning a new PreviewKind literal.
  *   2. Add the corresponding renderer in attachment-preview-modal.tsx's dispatch.
- *   3. If the renderer needs the file body as text, also extend isTextPreviewable
- *      in server/internal/handler/file.go so the proxy endpoint accepts it, and
- *      add the type to the case table both sides test (preview.test.ts and
- *      TestIsTextPreviewable in file_test.go).
+ *   3. If the renderer needs the file body as text, update
+ *      server/internal/handler/attachment_text_preview.json and regenerate the
+ *      TypeScript whitelist so the proxy endpoint accepts it too.
  *   4. If the renderer fetches a binary, decide whether to use download_url
  *      (CloudFront, no auth on the client side) or a new authenticated proxy.
  */
 
 import { isImageAttachment } from "@multica/core/attachments/image-sequence";
+import {
+  TEXT_PREVIEW_BASENAMES,
+  TEXT_PREVIEW_CONTENT_TYPE_PREFIXES,
+  TEXT_PREVIEW_CONTENT_TYPES,
+  TEXT_PREVIEW_EXTENSIONS,
+} from "./text-preview-whitelist.generated";
 
 export type PreviewKind =
   | "image"
@@ -100,47 +105,6 @@ const BASENAME_LANGUAGE_MAP: Record<string, string> = {
   ".gitignore": "plaintext",
 };
 
-// IMPORTANT — KEEP IN SYNC with isTextPreviewable() in
-// server/internal/handler/file.go. If an extension lands here but the proxy
-// rejects it, the user sees a 415 fallback in the modal. If the proxy accepts
-// but this set doesn't, the Eye button doesn't appear at all.
-//
-// TODO(follow-up): extract to a JSON single-source-of-truth + generator
-// (mirror reserved-slugs pattern in server/internal/handler/reserved_slugs.json).
-const TEXT_EXTENSIONS = new Set<string>([
-  "md", "markdown", "txt", "log", "csv", "tsv",
-  "html", "htm", "json", "jsonl", "ndjson", "xml",
-  "yml", "yaml", "toml", "ini", "conf",
-  "dockerfile", "makefile", "gitignore",
-  "sh", "bash", "zsh",
-  "py", "rb", "go", "rs",
-  "ts", "tsx", "js", "jsx", "mjs", "cjs",
-  "css", "scss", "sass", "less",
-  "sql",
-  "java", "kt", "swift",
-  "c", "cc", "cpp", "h", "hpp",
-  "cs", "php", "lua", "vim",
-]);
-
-const TEXT_CONTENT_TYPES = new Set<string>([
-  "application/json",
-  "application/x-ndjson",
-  "application/javascript",
-  "application/xml",
-  "application/x-yaml",
-  "application/yaml",
-  "application/toml",
-  "application/x-sh",
-  "application/x-httpd-php",
-]);
-
-const TEXT_BASENAMES = new Set<string>([
-  "dockerfile",
-  "makefile",
-  ".env",
-  ".gitignore",
-]);
-
 const TABLE_CONTENT_TYPES = new Set<string>([
   "text/csv",
   "text/tab-separated-values",
@@ -194,11 +158,13 @@ function normalizeContentType(contentType: string): string {
 
 function isTextLike(contentType: string, filename: string): boolean {
   const ct = normalizeContentType(contentType);
-  if (ct.startsWith("text/")) return true;
-  if (TEXT_CONTENT_TYPES.has(ct)) return true;
+  for (const prefix of TEXT_PREVIEW_CONTENT_TYPE_PREFIXES) {
+    if (ct.startsWith(prefix)) return true;
+  }
+  if (TEXT_PREVIEW_CONTENT_TYPES.has(ct)) return true;
   const ext = extOf(filename);
-  if (ext && TEXT_EXTENSIONS.has(ext)) return true;
-  return TEXT_BASENAMES.has(baseOf(filename));
+  if (ext && TEXT_PREVIEW_EXTENSIONS.has(ext)) return true;
+  return TEXT_PREVIEW_BASENAMES.has(baseOf(filename));
 }
 
 // Dispatch on PreviewKind. New cases go in attachment-preview-modal.tsx;
@@ -221,6 +187,9 @@ export function getPreviewKind(
   // that isTextLike would otherwise catch.
   if (isImageAttachment(contentType, filename)) return "image";
 
+  // Every text-backed renderer fetches through the same allowlisted proxy.
+  if (!isTextLike(contentType, filename)) return null;
+
   // Markdown — covers both the well-typed case and the common
   // server-side sniffer fallback (text/plain for .md).
   if (ct === "text/markdown" || ext === "md" || ext === "markdown") {
@@ -234,8 +203,7 @@ export function getPreviewKind(
   }
   if (structuredFormat(contentType, filename)) return "structured";
 
-  if (isTextLike(contentType, filename)) return "text";
-  return null;
+  return "text";
 }
 
 /**

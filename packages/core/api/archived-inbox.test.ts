@@ -1,7 +1,7 @@
 // @vitest-environment node
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { ApiClient } from "./client";
-import { EMPTY_INBOX_FILTERS } from "../inbox/filter-store";
+import { EMPTY_INBOX_FILTERS, type InboxFilters } from "../inbox/filter-store";
 
 afterEach(() => vi.unstubAllGlobals());
 
@@ -12,12 +12,15 @@ function respond(body: unknown) {
 }
 
 describe("archived inbox API", () => {
-  it("sends cursor, lookup and every filter dimension and maps the page", async () => {
+  it("sends cursor, lookup and every archive filter dimension and maps the page", async () => {
     const fetch = respond({ items: [], next_cursor: null, has_more: false });
     const api = new ApiClient("https://api.example.test");
-    await expect(api.listArchivedInboxPage({
-      statuses: ["in_review"], priorities: ["high"], actors: ["system"], unreadOnly: true,
-    }, { cursor: "cursor-value", groupId: "group" })).resolves.toEqual({ items: [], nextCursor: null, hasMore: false });
+    // The archive has no idle dimension; a selection carried in from the
+    // active inbox must not reach the server.
+    const filters: InboxFilters = {
+      statuses: ["in_review"], priorities: ["high"], actors: ["system"], unreadOnly: true, idleOnly: true,
+    };
+    await expect(api.listArchivedInboxPage(filters, { cursor: "cursor-value", groupId: "group" })).resolves.toEqual({ items: [], nextCursor: null, hasMore: false });
     const url = new URL(fetch.mock.calls[0]![0]);
     expect(url.pathname).toBe("/api/inbox/archived/page");
     expect(Object.fromEntries(url.searchParams)).toEqual({

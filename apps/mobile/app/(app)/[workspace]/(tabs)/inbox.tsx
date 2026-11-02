@@ -1,4 +1,4 @@
-import { useMemo } from "react";
+import { useCallback, useMemo } from "react";
 import {
   ActionSheetIOS,
   Alert,
@@ -55,7 +55,7 @@ export default function Inbox() {
   const archiveAllRead = useArchiveAllReadInbox();
   const archiveCompleted = useArchiveCompletedInbox();
 
-  const onPressItem = (item: InboxItem) => {
+  const onPressItem = useCallback((item: InboxItem) => {
     if (!item.read) {
       // Optimistic read flip lives in useMarkInboxRead.onMutate — fires
       // setQueryData synchronously before the cancelQueries await, so the
@@ -65,7 +65,7 @@ export default function Inbox() {
     }
     const target = getInboxNavigationTarget(item, wsSlug, String(Date.now()));
     if (target) router.push(target);
-  };
+  }, [markRead, wsSlug]);
 
   // Trailing batch menu — mirrors web's dropdown
   // (packages/views/inbox/components/inbox-page.tsx). "Mark all read" is

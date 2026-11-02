@@ -7,7 +7,6 @@ export type AgentRuntimeMode = "local" | "cloud";
 
 export type AgentVisibility = "workspace" | "private";
 
-// ---------------------------------------------------------------------------
 // Agent invocation permissions (MUL-3963)
 //
 // `permission_mode` + `invocation_targets` are the AUTHORITATIVE gate for who
@@ -24,7 +23,6 @@ export type AgentVisibility = "workspace" | "private";
 //   - permission_mode "public_to" + workspace target: any workspace member
 //   - permission_mode "public_to" + member target: only the matching user
 //   - team target: reserved, INERT in v1 (never grants)
-// ---------------------------------------------------------------------------
 
 export type AgentPermissionMode = "private" | "public_to";
 
@@ -50,8 +48,8 @@ export interface AgentInvocationTargetInput {
 
 // Runtime visibility is a separate axis from agent visibility — different
 // vocabulary because it gates a different action. "private" (default) means
-// only the runtime owner can bind agents to it — workspace admins included,
-// and only the owner may flip the flag (MUL-6126); "public" opens binding to
+// the runtime owner and shared_with members can bind agents to it;
+// only the owner may edit access (MUL-6126); "public" opens binding to
 // any workspace member. Older backends that haven't shipped MUL-2062 omit the
 // field; the consumer must default to "private" so the strictest behavior is
 // the fallback.
@@ -78,6 +76,8 @@ export interface RuntimeDevice {
   owner_id: string | null;
   /** Defaults to "private" when the backend predates the visibility flag. */
   visibility: RuntimeVisibility;
+  /** Workspace user IDs granted access while visibility is private. */
+  shared_with?: string[];
   /**
    * The custom runtime profile this registered runtime was launched from,
    * or `null` for a built-in protocol family. The UI uses this to stamp a
@@ -93,7 +93,6 @@ export interface RuntimeDevice {
 
 export type AgentRuntime = RuntimeDevice;
 
-// ---------------------------------------------------------------------------
 // Custom runtime profiles (MUL-3284)
 //
 // A RuntimeProfile is a workspace-level *definition* of a custom runtime
@@ -101,7 +100,6 @@ export type AgentRuntime = RuntimeDevice;
 // *instance*. An admin authors a profile (display name + base protocol
 // family + the CLI command to launch), and daemons can then register
 // runtimes against it; those instances carry `profile_id` pointing back here.
-// ---------------------------------------------------------------------------
 
 // The fixed allow-list of base protocol families a custom runtime can wrap.
 // These are the only backends the create flow may select; the server rejects
@@ -132,6 +130,8 @@ export const RUNTIME_PROFILE_PROTOCOL_FAMILIES = [
   "qwen",
   "qwenpaw",
   "mcode",
+  "muse",
+  "devin",
   "zeroclaw",
 ] as const;
 
@@ -198,6 +198,7 @@ export type TaskFailureReason =
   | "timeout"
   | "codex_semantic_inactivity"
   | "runtime_offline"
+  | "runtime_access_revoked"
   | "runtime_reconnect_timeout"
   | "runtime_recovery"
   | "manual";
@@ -717,6 +718,7 @@ export type AgentPermissionScope = "private" | "workspace" | "members";
  * over edits the user made after it.
  */
 export interface StoredAgentDraft {
+  qoder_agent_id?: string;
   name: string;
   description: string;
   instructions: string;
@@ -730,6 +732,8 @@ export interface StoredAgentDraft {
   member_ids: string[];
   team_ids: string[];
   applied_message_id: string | null;
+  /** Recovery notice acknowledged by manual editing or dismissal. */
+  dismissed_message_id?: string | null;
 }
 
 /** One unfinished agent-creation conversation, as listed by the studio. */

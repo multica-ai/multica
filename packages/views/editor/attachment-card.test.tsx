@@ -50,9 +50,9 @@ describe("AttachmentCard — chrome row", () => {
         onDownload={() => {}}
       />,
     );
-    expect(screen.queryByTitle("Preview")).toBeNull();
+    expect(screen.queryByRole("button", { name: "Preview" })).toBeNull();
     // Download stays available — the underlying URL is still reachable.
-    expect(screen.getByTitle("Download")).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Download" })).toBeTruthy();
   });
 
   it("shows the Eye button for an html source when an attachmentId is available", () => {
@@ -66,7 +66,7 @@ describe("AttachmentCard — chrome row", () => {
         onDownload={() => {}}
       />,
     );
-    expect(screen.getByTitle("Preview")).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Preview" })).toBeTruthy();
   });
 
   it("shows the Eye button for a URL-only pdf source (modal renders pdfs directly from URL)", () => {
@@ -82,7 +82,7 @@ describe("AttachmentCard — chrome row", () => {
         onDownload={() => {}}
       />,
     );
-    expect(screen.getByTitle("Preview")).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Preview" })).toBeTruthy();
   });
 });
 
@@ -99,7 +99,7 @@ describe("AttachmentCard — Eye / Download buttons", () => {
         onDownload={() => {}}
       />,
     );
-    fireEvent.mouseDown(screen.getByTitle("Preview"));
+    fireEvent.mouseDown(screen.getByRole("button", { name: "Preview" }));
     expect(onPreview).toHaveBeenCalled();
   });
 
@@ -115,7 +115,7 @@ describe("AttachmentCard — Eye / Download buttons", () => {
         onDownload={onDownload}
       />,
     );
-    fireEvent.mouseDown(screen.getByTitle("Download"));
+    fireEvent.mouseDown(screen.getByRole("button", { name: "Download" }));
     expect(onDownload).toHaveBeenCalled();
   });
 
@@ -131,8 +131,8 @@ describe("AttachmentCard — Eye / Download buttons", () => {
         onDownload={() => {}}
       />,
     );
-    expect(screen.queryByTitle("Preview")).toBeNull();
-    expect(screen.queryByTitle("Download")).toBeNull();
+    expect(screen.queryByRole("button", { name: "Preview" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Download" })).toBeNull();
     // The mock `t()` returns the i18n template as-is; the production t-fn
     // interpolates {{filename}} → "report.html". Asserting the template
     // proves the uploading branch was selected without depending on the

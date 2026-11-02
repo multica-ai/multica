@@ -3,11 +3,12 @@ title: 환경 변수
 description: 자체 호스팅 Multica에서 자주 사용하는 서버, 저장소, 연동, 런타임 설정입니다.
 ---
 
+import { Accordion, Accordions } from "fumadocs-ui/components/accordion";
 import { Callout } from "fumadocs-ui/components/callout";
 
 Multica는 프로세스를 시작할 때 환경 변수를 읽습니다. 수정 후에는 보통 해당 API, Web 또는 데몬을 다시 시작해야 합니다. Docker Compose의 `docker compose restart`는 `.env`를 다시 읽지 않으므로 `up -d`로 컨테이너를 다시 만들어야 적용됩니다.
 
-이 페이지에는 배포자를 위한 설정만 나열하며 테스트 변수와 내부 실행 변수는 다루지 않습니다. 여기서는 그룹별 참조를 제공하고 전체 배포 단계는 [자체 호스팅 빠른 시작](/self-host-quickstart)을 참고하세요.
+이 페이지는 배포자를 위한 설정을 그룹별로 정리하며 테스트 변수와 내부 실행 변수는 다루지 않습니다. 전체 배포 단계는 [자체 호스팅 빠른 시작](/self-host-quickstart)을 참고하세요.
 
 ## 프로덕션 최소 설정
 
@@ -67,7 +68,7 @@ primary와 복제본의 연결 한도는 서로 독립적입니다. 모든 API �
 `MULTICA_DAEMON_SERVER_URL`은 인증이 필요 없는 `/api/config` 엔드포인트에서 반환되며 클라이언트가 읽을 수 있습니다. 공개 설정으로 취급하고 자격 증명, 토큰 또는 기타 비밀을 절대 포함하지 마세요.
 </Callout>
 
-프런트엔드와 API가 서로 다른 host를 사용하고 브라우저가 API 도메인에 직접 접근한다면 `COOKIE_DOMAIN`을 설정해야 합니다. 설정하지 않으면 브라우저가 CSRF cookie를 읽지 못해 모든 쓰기 요청이 `403 CSRF validation failed`를 반환하고 읽기 요청만 정상 작동합니다. 두 host를 모두 포함하는 가장 좁은 상위 도메인을 사용하세요(`.example.com`보다 `.agent.example.com`이 더 적합). 이 설정은 로그인 세션 cookie를 해당 도메인의 모든 host로 확장하므로 모든 host를 같은 신뢰 주체가 운영할 때만 사용할 수 있습니다. 수정 후 두 host에서 이전 cookie를 삭제하고 다시 로그인해야 합니다. [자체 호스팅 빠른 시작](/self-host-quickstart#3-접근-방식-선택)의 same-origin 구성을 사용해 브라우저가 app 도메인에만 접근한다면 비워 두세요. IP 주소는 입력하지 마세요. 브라우저가 IP Domain이 포함된 cookie를 무시합니다.
+프런트엔드와 API가 서로 다른 host를 사용하고 브라우저가 API 도메인에 직접 접근한다면 `COOKIE_DOMAIN`을 설정해야 합니다. 설정하지 않으면 브라우저가 CSRF cookie를 읽지 못해 모든 쓰기 요청이 `403 CSRF validation failed`를 반환하고 읽기 요청만 정상 작동합니다. 두 host를 모두 포함하는 가장 좁은 상위 도메인을 사용하세요(`.example.com`보다 `.agent.example.com`이 더 적합). 이 설정은 로그인 세션 cookie를 해당 도메인의 모든 host로 확장하므로 모든 host를 같은 신뢰 주체가 운영할 때만 사용할 수 있습니다. 수정 후 두 host에서 이전 cookie를 삭제하고 다시 로그인해야 합니다. [자체 호스팅 빠른 시작](/self-host-quickstart#remote-access)의 same-origin 구성을 사용해 브라우저가 app 도메인에만 접근한다면 비워 두세요. IP 주소는 입력하지 마세요. 브라우저가 IP Domain이 포함된 cookie를 무시합니다.
 
 <Callout type="warning">
 자체 호스팅 배포에서는 `FRONTEND_ORIGIN`을 설정해야 합니다. 없으면 초대 링크, cookie 보안 속성, WebSocket origin 검증이 실제 도메인과 맞지 않을 수 있습니다.
@@ -113,6 +114,7 @@ primary와 복제본의 연결 한도는 서로 독립적입니다. 모든 API �
 | `ALLOWED_EMAILS` | 비어 있음 | 가입을 허용할 전체 이메일 주소, 쉼표로 구분 |
 | `ALLOWED_EMAIL_DOMAINS` | 비어 있음 | 가입을 허용할 이메일 도메인, 쉼표로 구분 |
 | `DISABLE_WORKSPACE_CREATION` | `false` | 모든 사용자의 새 워크스페이스 생성을 금지. owner/admin 예외 없음 |
+| `WORKSPACE_CREATION_ALLOWED_EMAILS` | 비어 있음 | 워크스페이스 생성을 허용할 전체 이메일 주소, 쉼표로 구분. 설정하면 그 외 사용자는 403을 받습니다. `DISABLE_WORKSPACE_CREATION=true`가 우선합니다. 다른 워크스페이스에 대한 접근 권한은 부여하지 않습니다 |
 | `MULTICA_DEV_VERIFICATION_CODE` | 비어 있음 | production이 아닌 환경에서 사용하는 고정 6자리 테스트 인증 코드 |
 
 allowlist의 정확한 판단 순서는 [로그인과 가입](/auth-setup#가입-범위-제어)을 참고하세요.
@@ -133,6 +135,8 @@ allowlist의 정확한 판단 순서는 [로그인과 가입](/auth-setup#가입
 | `S3_USE_PATH_STYLE` | 사용자 지정 endpoint에서는 `true` | path-style 주소 사용 여부 |
 | `ATTACHMENT_DOWNLOAD_MODE` | `auto` | `auto`, `cloudfront`, `presign`, `proxy` 중 하나 |
 | `ATTACHMENT_DOWNLOAD_URL_TTL` | `30m` | 서명된 다운로드 주소의 유효 기간 |
+
+`AWS_ENDPOINT_URL`이 Google Cloud Storage를 가리키면 `Accept-Encoding`이 요청 서명에서 자동으로 제외됩니다.
 
 내부 네트워크의 MinIO처럼 브라우저에서 endpoint에 직접 접근할 수 없다면 `ATTACHMENT_DOWNLOAD_MODE=proxy`를 사용하세요.
 
@@ -204,13 +208,13 @@ reverse proxy 뒤에 배포한다면 실제 proxy 네트워크를 입력해야 �
 |---|---|---|
 | `MULTICA_LLM_API_KEY` | 비어 있음 | OpenAI 호환 API key |
 | `MULTICA_LLM_BASE_URL` | 비어 있음 | OpenAI 호환 endpoint |
-| `MULTICA_LLM_DEFAULT_MODEL` | `gpt-5.6-luna` | 요청에 모델이 지정되지 않았을 때 사용 |
+| `MULTICA_LLM_DEFAULT_MODEL` | `gpt-6-luna` | 요청에 모델이 지정되지 않았을 때 사용 |
 | `MULTICA_LLM_MAX_RETRIES` | `2` | 호출당 재시도 상한. `0`은 재시도 비활성화, `1`–`5`는 최대 N회 |
 | `MULTICA_LLM_DISABLE_THINKING` | `false` | 모든 요청에 `chat_template_kwargs: {"enable_thinking": false}`를 첨부. 해당 필드를 해석하는 gateway용 |
 
 `MULTICA_LLM_MAX_RETRIES`는 재시도 정책의 유일한 설정 소스입니다. 설정하지 않으면 기본값 2회, `0`이면 호출당 요청을 정확히 한 번만 보내고, 1–5면 재시도를 최대 그 횟수까지만 합니다. 할당량이 아니라 상한입니다. 재시도 대상 실패만 이를 소모하며, 성공하거나 호출자 자신의 데드라인에 걸리면 더 일찍 끝납니다. 그 밖의 값(음수, 숫자가 아닌 값, 5 초과)은 조용히 보정되지 않고 시작에 실패합니다. 상한은 지연 예산입니다. 백오프는 0.5초에서 시작해 8초 상한까지 두 배씩 늘어나므로, 더 큰 예산은 호출자 자신의 타임아웃을 넘겨 재시도 가능한 실패를 타임아웃으로 바꿉니다. 재시도는 연결 실패와 HTTP 408, 409, 429, 5xx를 대상으로 하며 그 외 4xx는 그대로 반환됩니다. 서버는 시작 시 유효한 정책을 `llm retry policy`로 기록하며 해당 줄에는 자격 증명이 포함되지 않습니다.
 
-`MULTICA_LLM_DISABLE_THINKING`은 모델이 추론(thinking) 패스를 실행해 어시스트 호출의 지연 예산을 잠식하는 gateway를 위한 설정입니다. `true`(또는 `1`)로 설정하면 서버가 모든 요청 본문에 `chat_template_kwargs: {"enable_thinking": false}`를 첨부하며, 이 필드를 전달하는 gateway(vLLM/sglang 계열 배포, 일부 GLM/Qwen 계열 LiteLLM 라우트)는 thinking 패스를 건너뜁니다. 표준 OpenAI endpoint는 알 수 없는 본문 필드를 거부하므로, 업스트림이 이를 받아들이는 경우에만 활성화하세요. GPT-5.6 계열 모델은 후속 질문 요청에서 서버가 이미 `reasoning_effort: none`을 붙입니다. 채팅 자동 제목 생성은 추론 필드를 보내지 않습니다. 이 설정이 그것에 영향을 주는 것은 구성된 업스트림이 `chat_template_kwargs`를 받아들이는 경우뿐입니다. 허용되는 값은 `true`/`false`와 `1`/`0`(대소문자 구분 없음)이며, 그 외 값은 시작에 실패합니다. 시작 로그에 재시도 정책과 함께 유효 상태가 기록됩니다.
+`MULTICA_LLM_DISABLE_THINKING`은 모델이 추론(thinking) 패스를 실행해 어시스트 호출의 지연 예산을 잠식하는 gateway를 위한 설정입니다. `true`(또는 `1`)로 설정하면 서버가 모든 요청 본문에 `chat_template_kwargs: {"enable_thinking": false}`를 첨부하며, 이 필드를 전달하는 gateway(vLLM/sglang 계열 배포, 일부 GLM/Qwen 계열 LiteLLM 라우트)는 thinking 패스를 건너뜁니다. 표준 OpenAI endpoint는 알 수 없는 본문 필드를 거부하므로, 업스트림이 이를 받아들이는 경우에만 활성화하세요. GPT-5.6 계열 모델과 GPT-6 Luna는 후속 질문 요청에서 서버가 이미 `reasoning_effort: none`을 붙입니다. 채팅 자동 제목 생성은 추론 필드를 보내지 않습니다. 이 설정이 그것에 영향을 주는 것은 구성된 업스트림이 `chat_template_kwargs`를 받아들이는 경우뿐입니다. 허용되는 값은 `true`/`false`와 `1`/`0`(대소문자 구분 없음)이며, 그 외 값은 시작에 실패합니다. 시작 로그에 재시도 정책과 함께 유효 상태가 기록됩니다.
 
 이 레이어를 사용하는 기능은 두 가지이며, 둘 다 설정한 endpoint로 채팅 내용을 전송합니다.
 
@@ -243,28 +247,115 @@ API key와 base URL이 모두 비어 있으면 이 레이어가 꺼지고 업스
 | `MULTICA_CODEX_SEMANTIC_INACTIVITY_TIMEOUT` | `MULTICA_AGENT_IDLE_WATCHDOG`와 동일 | Codex 의미 활동 없음 기준값. Codex 자체 타이머는 도구 실행 중인지 알 수 없으므로 별도의 짧은 상한 대신 idle / tool 예산 중 큰 값을 따릅니다 |
 | `MULTICA_CODEX_FIRST_TURN_TIMEOUT` | `0` | Codex 첫 턴 무진행 상한의 명시적 재정의; `0` 은 기본값 유지. 실제 첫 턴 대기는 여전히 `MULTICA_CODEX_SEMANTIC_INACTIVITY_TIMEOUT` 및 전체 실행 타임아웃으로 제한됨 — `MULTICA_CODEX_SEMANTIC_INACTIVITY_TIMEOUT` 을 이 값보다 엄격히 크게(여유를 두고) 설정해야 하며, 그렇지 않으면 대기가 그 값으로 잘리고 모델 카탈로그 시작 재시도가 건너뛰어짐. 값이 같으면 충분하지 않음: 의미 타이머가 먼저 시작되므로 값이 같을 때도 재시도가 손실될 수 있음 |
 | `MULTICA_CODEX_HANDSHAKE_TIMEOUT` | `30s`, `thread/start`·`thread/resume`: `60s` | Codex app-server 시작 handshake 상한. 명시적으로 설정한 값은 두 예산을 모두 일괄 재정의합니다 |
+| `MULTICA_CODEX_MEMORY` | 끔 | `1`, `true`, `yes`, `on` 중 하나로 설정하면 데몬이 관리하는 Codex 실행에서 Codex 기본 메모리를 유지합니다. 기본값은 실행마다 끄는 것입니다. [Codex 기본 메모리와 하위 에이전트](/daemon-runtimes#codex-memory) 참고 |
+| `MULTICA_CODEX_MULTI_AGENT` | 끔 | 값은 위와 같으며 Codex 기본 하위 에이전트를 유지합니다. 상위 스레드가 끝나면 실행이 끝난 것으로 처리되므로 하위 에이전트가 아직 돌려주지 않은 결과는 사라집니다 |
 | `MULTICA_CODEX_TURN_INTERRUPT_TIMEOUT` | `2s` | 취소 후 Codex app-server가 `turn/interrupt`를 확인하고 `turn/completed`를 보낼 때까지의 유예 시간입니다. 프로세스를 강제 정리하기 전에 최종 토큰 사용량을 보존합니다. 특히 느린 호스트에서는 daemon 로그에 기록된 인터럽트 지연을 기준으로 조정할 수 있습니다 |
 | `MULTICA_DAEMON_AUTO_UPDATE` | Cloud `true`, 자체 호스팅 `false` | CLI 자동 확인 및 업데이트 여부 |
 | `MULTICA_DAEMON_AUTO_UPDATE_INTERVAL` | `6h` | 업데이트 확인 간격 |
 | `MULTICA_DAEMON_AUTO_RELOAD` | `true` | 외부에서 교체된 `multica` 바이너리(`brew upgrade`, 재다운로드, 로컬 빌드)로 재시작할지 여부. `MULTICA_DAEMON_AUTO_UPDATE`와 독립적 |
 | `MULTICA_WORKSPACES_ROOT` | `~/multica_workspaces` | 실행용 작업 디렉터리의 루트 |
 | `MULTICA_AGENT_TEMP_BASE` | `/tmp`(Linux/macOS) | Linux/macOS 전용. 실행별 비공개 임시 디렉터리의 상위 디렉터리입니다. 기존의 쓰기 가능한 절대 경로여야 하며, 값이 잘못되면 `/tmp`로 대체하지 않고 실행 시작에 실패합니다. 짧은 경로를 선택하세요. 하위 도구가 그 아래에 AF_UNIX 소켓을 만들 수 있으며 `sun_path` 제한은 Linux에서 108바이트, macOS에서 104바이트입니다 |
-| `MULTICA_KEEP_ENV_AFTER_TASK` | `false` | 디버깅을 위해 작업 디렉터리 유지 |
 
-데몬이 에이전트 작업에 주입하는 내부 컨텍스트는 [작업 런타임 환경](/daemon-runtimes#작업-런타임-환경)을 참고하세요.
+데몬이 에이전트 작업에 주입하는 내부 컨텍스트는 [작업 런타임 환경](/daemon-runtimes#작업-런타임-환경)을 참고하세요. `MULTICA_REPO_CHECKOUT_MODE`도 여기에 속합니다. 데몬은 Linux와 Windows의 Codex 실행에서만 이 값을 `isolated`로 설정하며, 직접 설정할 수는 없습니다. 데몬 자체 환경의 `MULTICA_*` 변수는 실행으로 전달되지 않습니다.
 
-각 AI 코딩 도구는 `MULTICA_<PROVIDER>_PATH`로 명령 경로를 덮어쓸 수 있으며 모델 재정의를 지원하는 도구는 `MULTICA_<PROVIDER>_MODEL`도 사용할 수 있습니다. QwenPaw와 MiniMax Code에는 모델 변수가 없고 MiniMax Code의 경로 변수는 `MULTICA_MCODE_PATH`입니다. 자세한 내용은 [AI 코딩 도구 비교](/providers#모델-출처)를 참고하세요. DeepSeek Harness는 `MULTICA_DSH_PATH`와 `MULTICA_DSH_MODEL`을 지원합니다(값은 dsh 모델 카탈로그의 모델 ID, 예: `deepseek-official/deepseek-chat`). DeepSeek Harness는 `MULTICA_DSH_PROFILE_BUNDLE`도 지원합니다. `multica` 프로필이 없을 때 설치할 번들을 지정하며, 쉼표로 구분한 여러 후보를 순서대로 시도합니다. 각 항목은 npm 패키지 이름, 디렉터리 또는 패키징된 tarball입니다. 기본값은 설정하지 않는 것입니다. Multica가 사용하는 `--stdio` 프로토콜은 이 프로필이 제공하므로, 설정하지 않으면 DSH 설치를 건드리지 않고 데몬은 사용할 수 없는 런타임을 등록하는 대신 프로필 누락을 보고합니다. Multica 자체 브리지는 아직 공개 npm 레지스트리에 없으므로 값 선택 방법은 [에이전트 런타임 설치](/install-agent-runtime)를 참고하세요. 여기에 설정한 값은 추가 확인 없이 모든 데몬 호스트의 DSH 홈에 설치되므로 공급망에 관한 결정으로 다루세요. `MULTICA_DSH_PROFILE_BUNDLE`이 활성화하는 설치는 범위를 의도적으로 제한합니다. 실행은 데몬 수명당 최대 한 번, 프로브가 프로필 부재를 확인한 경우에만 수행됩니다. 실패하면 패키지 관리자 자체의 출력을 로그에 남기고 재시도는 데몬을 재시작한 뒤에만 이루어집니다. 프로브가 시간 초과되거나 이 데몬이 다루지 않는 프로토콜 버전을 반환하면 보고만 하고 덮어쓰지 않습니다. 의도적으로 설치된 프로필을 데몬이 덮어쓰는 일은 없습니다. 진단은 데몬 로그에서 `DSH runtime profile`을 검색하세요. 되돌리려면 `$DSH_HOME/profiles/multica`(기본값 `~/.dsh/profiles/multica`)를 삭제합니다. `MULTICA_DSH_PLUGIN_PATH`는 설치 시 pnpm을 찾을 디렉터리를 덮어씁니다. `dsh plugin`이 전달하는 pnpm은 macOS와 Windows 모두 DSH Desktop 전용 runtime-commands 디렉터리에 있으며, 데몬이 이를 자동으로 찾아 PATH 앞에 추가합니다(최신 Desktop이 쓰는 버전별 구조도 포함). 따라서 이 변수는 데몬이 찾지 못하는 위치에 설치된 경우나 직접 준비한 pnpm을 쓰게 하려는 경우에만 필요합니다. 설정하면 자동 탐색을 완전히 대체하며, 지정한 디렉터리가 없으면 설치는 번들된 pnpm이 아니라 데몬 `PATH`의 pnpm으로 넘어갑니다. Linux에는 DSH Desktop이 없으므로 항상 `PATH`를 사용합니다. ZeroClaw는 `MULTICA_ZEROCLAW_PATH`를 지원하지만 모델 변수는 없습니다. 모델은 ZeroClaw의 에이전트 설정에서 관리합니다. 컴퓨터 전체 기본 인수 `MULTICA_<PROVIDER>_ARGS`는 현재 Claude Code, Codex, CodeBuddy, Qwen Code, QwenPaw 다섯 도구를 지원합니다. 해당 변수는 `MULTICA_CLAUDE_ARGS`, `MULTICA_CODEX_ARGS`, `MULTICA_CODEBUDDY_ARGS`, `MULTICA_QWEN_ARGS`, `MULTICA_QWENPAW_ARGS`입니다. 예시:
+우선순위는 명령줄 flag → 환경 변수 → `~/.multica/config.json` → 내장 기본값입니다. watchdog 동작은 [데몬과 런타임](/daemon-runtimes)을 참고하세요.
+
+### 정리와 보존 [#gc]
+
+데몬은 실행 디렉터리, 저장소 캐시, 세션 기록, 임시 디렉터리를 주기적으로 정리합니다. 무엇이 언제 삭제되는지는 [정리와 보존](/daemon-runtimes#cleanup)을 참고하세요. 기간은 Go duration 형식에 더해 일 단위 `d`(예: `14d`, `1d12h`)도 받습니다.
+
+| 변수 | 기본값 | 설명 |
+|---|---|---|
+| `MULTICA_GC_ENABLED` | `true` | `false` 또는 `0`이면 정리 전체를 끕니다 |
+| `MULTICA_GC_INTERVAL` | `2h` | 정리 간격. 데몬 시작 약 30초 뒤에 첫 정리를 합니다 |
+| `MULTICA_GC_TTL` | `24h` | 태스크가 `done` 또는 `closed` 분류에 들어가거나 채팅 세션이 보관된 뒤, 실행 디렉터리를 삭제하기까지의 시간 |
+| `MULTICA_GC_COMPLETED_TASK_TTL` | Multica Cloud `14d`, 셀프 호스팅 `0` | 태스크 실행이 완료된 뒤 디렉터리 전체를 삭제하기까지의 시간. 태스크가 닫혔는지와 관계없음. `0`이면 끔. 프로젝트 로컬 디렉터리에서의 실행에는 적용되지 않음 |
+| `MULTICA_GC_ORPHAN_TTL` | `72h` | 소속을 찾을 수 없는 디렉터리가 변경 없이 얼마나 지나면 삭제할지 |
+| `MULTICA_GC_ARTIFACT_TTL` | `12h` | 실행 완료 후 다시 만들 수 있는 내용(다음 행의 디렉터리와 데몬이 Codex용으로 준비하는 캐시)을 삭제하기까지의 시간. `0`이면 삭제하지 않음 |
+| `MULTICA_GC_ARTIFACT_PATTERNS` | `node_modules,.next,.turbo` | 다시 만들 수 있다고 보는 디렉터리 이름(쉼표로 구분). 설정하면 기본 목록을 **대체**하므로 기본 항목도 유지하려면 함께 적어야 함. `/`나 `\`가 들어간 항목은 무시됨 |
+| `MULTICA_GC_REPO_TTL` | `30d` | 더 이상 참조되지 않고 worktree도 없는 bare 저장소 캐시를, 체크아웃 없이 얼마나 지나면 삭제할지. `0`이면 삭제하지 않음 |
+| `MULTICA_GC_REPO_MAINTENANCE_ENABLED` | `true` | 오래된 에이전트 브랜치를 지운 뒤 저장소 캐시에 `git reflog expire`와 `git gc`를 실행할지. `false`면 이 단계만 끔 |
+| `MULTICA_GC_CODEX_SESSION_TTL` | `14d` | 사용하지 않은 Codex 세션 기록을 삭제하기까지의 시간. `0`이면 삭제하지 않음 |
+| `MULTICA_GC_HERMES_SESSION_TTL` | `14d` | 사용하지 않은 Hermes 세션 기록을 삭제하기까지의 시간. `0`이면 삭제하지 않음 |
+| `MULTICA_GC_HERMES_MEMORY_TTL` | `90d` | 사용하지 않은 Hermes 메모리를 삭제하기까지의 시간. `0`이면 삭제하지 않음 |
+| `MULTICA_GC_TASK_TEMP_LEGACY_TTL` | `0` | 이전 버전 데몬이 남긴, 실행 잠금이 없는 임시 디렉터리만 대상. 변경 없이 얼마나 지나면 삭제할지. `0`이면 삭제하지 않음. 실행 잠금이 있는 임시 디렉터리는 실행이 끝나면 삭제되며 이 값의 영향을 받지 않음 |
+
+### 데몬 로그 [#daemon-logs]
+
+데몬이 백그라운드에서(터미널에 연결되지 않은 채) 실행될 때 로그는 `~/.multica/daemon.log`(이름 있는 프로필은 `~/.multica/profiles/<name>/daemon.log`)에 기록되고 크기에 따라 순환됩니다. 순환된 파일은 gzip으로 압축됩니다.
+
+| 변수 | 기본값 | 설명 |
+|---|---|---|
+| `MULTICA_DAEMON_LOG_MAX_SIZE_MB` | `20` | `daemon.log`를 순환할 크기(MB) |
+| `MULTICA_DAEMON_LOG_MAX_BACKUPS` | `5` | 보관할 순환 파일의 최대 개수 |
+| `MULTICA_DAEMON_LOG_MAX_AGE_DAYS` | `30` | 순환 파일을 보관할 일수 |
+
+세 변수 모두 양의 정수를 받습니다. `0`, 음수, 해석할 수 없는 값은 기본값으로 처리되며 "무제한"이 되지 않습니다. 순환 파일은 개수와 일수 중 먼저 도달한 한도에 따라 삭제됩니다. 충돌 출력은 같은 디렉터리의 `daemon.err.log`에 기록되며, 시작할 때 5MB를 넘으면 `daemon.err.log.1`로 이름이 바뀝니다.
+
+### 도구별 경로, 모델, 인수
+
+기본 제공 도구마다 경로 변수 `MULTICA_<PREFIX>_PATH`가 있습니다. 설정하면 데몬은 `PATH`에서 명령을 찾는 대신 이 경로를 사용합니다. 경로가 없으면 해당 도구는 등록되지 않고, `PATH`에 있는 같은 이름의 명령으로 대체되지도 않습니다. 대부분의 도구에는 모델 변수 `MULTICA_<PREFIX>_MODEL`도 있어, 에이전트에 모델이 선택되지 않았을 때 이 컴퓨터의 기본 모델로 쓰입니다. 둘 다 비어 있으면 모델을 전달하지 않고 도구가 정합니다.
+
+<Accordions>
+<Accordion title="도구별 변수 접두사" id="tool-env-prefixes" value="tool-env-prefixes">
+
+| 도구 | 접두사 | 모델 변수 |
+|---|---|---|
+| Antigravity | `MULTICA_ANTIGRAVITY` | ✓(값은 `agy models`에 표시되는 이름 그대로) |
+| Claude Code | `MULTICA_CLAUDE` | ✓ |
+| CodeArts | `MULTICA_CODEARTS` | ✓ |
+| CodeBuddy | `MULTICA_CODEBUDDY` | ✓ |
+| Codex | `MULTICA_CODEX` | ✓ |
+| Cursor Agent | `MULTICA_CURSOR` | ✓ |
+| DeepSeek Harness | `MULTICA_DSH` | ✓(값은 dsh 모델 카탈로그의 ID, 예: `deepseek-official/deepseek-chat`) |
+| DevEco Code | `MULTICA_DEVECO` | ✓ |
+| Dim | `MULTICA_DIM` | ✓(값은 dim 모델 카탈로그의 ID) |
+| GitHub Copilot CLI | `MULTICA_COPILOT` | ✓ |
+| Grok | `MULTICA_GROK` | ✓ |
+| Hermes | `MULTICA_HERMES` | ✓ |
+| Kimi CLI | `MULTICA_KIMI` | ✓ |
+| Kiro CLI | `MULTICA_KIRO` | ✓ |
+| MiniMax Code | `MULTICA_MCODE` | — |
+| Muse Code | `MULTICA_MUSE` | ✓(값은 런타임 모델 목록의 ID) |
+| Oh-My-Pi | `MULTICA_OMP` | ✓ |
+| OpenClaw | `MULTICA_OPENCLAW` | ✓ |
+| OpenCode | `MULTICA_OPENCODE` | ✓ |
+| Pi | `MULTICA_PI` | ✓ |
+| Qoder CLI | `MULTICA_QODER` | ✓ |
+| Qoder CN CLI | `MULTICA_QODERCLICN` | ✓ |
+| Qwen Code | `MULTICA_QWEN` | ✓ |
+| QwenPaw | `MULTICA_QWENPAW` | — |
+| Reasonix | `MULTICA_REASONIX` | ✓ |
+| Trae CLI | `MULTICA_TRAECLI` | ✓ |
+| ZeroClaw | `MULTICA_ZEROCLAW` | —(모델은 ZeroClaw의 에이전트 설정에서 관리) |
+
+</Accordion>
+</Accordions>
+
+QwenPaw와 MiniMax Code에는 Multica가 모델을 전달하지 않으므로 모델 변수가 없습니다. 자세한 내용은 [AI 코딩 도구 비교](/providers#모델-출처)를 참고하세요. DeepSeek Harness에는 `MULTICA_DSH_PROFILE_BUNDLE`과 `MULTICA_DSH_PLUGIN_PATH`도 있으며 다음 섹션에서 설명합니다.
+
+컴퓨터 전체 기본 인수 `MULTICA_<PREFIX>_ARGS`는 현재 Claude Code, Codex, CodeBuddy, Qwen Code, QwenPaw 다섯 도구를 지원합니다. 해당 변수는 `MULTICA_CLAUDE_ARGS`, `MULTICA_CODEX_ARGS`, `MULTICA_CODEBUDDY_ARGS`, `MULTICA_QWEN_ARGS`, `MULTICA_QWENPAW_ARGS`입니다. 예시:
 
 ```dotenv
 MULTICA_CLAUDE_PATH=/opt/bin/claude
 MULTICA_CLAUDE_ARGS=--max-turns 40
 ```
 
+### DeepSeek Harness 프로필 설치
+
+`MULTICA_DSH_PROFILE_BUNDLE`은 `multica` 프로필이 없을 때 설치할 번들을 지정하며, 쉼표로 구분한 여러 후보를 순서대로 시도합니다. 각 항목은 npm 패키지 이름, 디렉터리 또는 패키징된 tarball입니다. 기본값은 설정하지 않는 것입니다. Multica가 사용하는 `--stdio` 프로토콜은 이 프로필이 제공하므로, 설정하지 않으면 DSH 설치를 건드리지 않고 데몬은 사용할 수 없는 런타임을 등록하지 않고 프로필 누락을 보고합니다.
+
+Multica 자체 브리지는 아직 공개 npm 레지스트리에 없으므로 값 선택 방법은 [에이전트 런타임 설치](/install-agent-runtime)를 참고하세요. 여기에 설정한 값은 추가 확인 없이 모든 데몬 호스트의 DSH 홈에 설치되므로 공급망에 관한 결정으로 다루세요.
+
+이 설치는 범위를 의도적으로 제한합니다. 실행은 데몬 수명당 최대 한 번, 프로브가 프로필 부재를 확인한 경우에만 수행됩니다. 실패하면 패키지 관리자 자체의 출력을 로그에 남기고 재시도는 데몬을 재시작한 뒤에만 이루어집니다. 프로브가 시간 초과되거나 이 데몬이 다루지 않는 프로토콜 버전을 반환하면 보고만 하고 덮어쓰지 않습니다. 의도적으로 설치된 프로필을 데몬이 덮어쓰는 일은 없습니다. 진단은 데몬 로그에서 `DSH runtime profile`을 검색하세요. 되돌리려면 `$DSH_HOME/profiles/multica`(기본값 `~/.dsh/profiles/multica`)를 삭제합니다.
+
+`MULTICA_DSH_PLUGIN_PATH`는 설치 시 pnpm을 찾을 디렉터리를 덮어씁니다. `dsh plugin`이 전달하는 pnpm은 macOS와 Windows 모두 DSH Desktop 전용 runtime-commands 디렉터리에 있으며, 데몬이 이를 자동으로 찾아 PATH 앞에 추가합니다(최신 Desktop이 쓰는 버전별 구조도 포함). 따라서 이 변수는 데몬이 찾지 못하는 위치에 설치된 경우나 직접 준비한 pnpm을 쓰게 하려는 경우에만 필요합니다. 설정하면 자동 탐색을 완전히 대체하며, 지정한 디렉터리가 없으면 설치는 번들된 pnpm이 아닌 데몬 `PATH`의 pnpm으로 넘어갑니다. Linux에는 DSH Desktop이 없으므로 항상 `PATH`를 사용합니다.
+
+### Cursor 백그라운드 프로세스 정리
+
 Cursor의 검증된 백그라운드 정리에는 Linux 6.9 이상(프로세스 그룹 pidfd), 프로세스 신원 조회와 audit token 시그널링에 대한 macOS 커널 지원, 또는 Windows에서 성공적으로 할당된 중첩 Job Object가 필요합니다. macOS에서는 커널이 검증하는 PID version으로 각 프로세스에 시그널을 보내므로 같은 세션의 그룹에 합류할 필요가 없습니다. 이 macOS API들은 비공개이며 확보 시점에 확인합니다. 소유권을 확보하지 못한 실행은 원래의 도구 결과를 반환하고, 도구 watchdog이 `0`인 경우를 포함해 일반적인 idle watchdog을 따릅니다. 이미 확보한 작업은 정리를 확인할 수 없을 때 계속 실행 중으로 남습니다. 도구 watchdog을 `0`으로 두면 이러한 경계 자체가 없습니다. 확보한 백그라운드 작업이 살아 있는 동안 실행이 계속되며, 이때 실행은 기본값이 역시 `0`인 `MULTICA_AGENT_TIMEOUT`에만 제한됩니다.
 
 확보한 Cursor 백그라운드 프로세스는 실행이 정상적으로 완료될 때도 정리됩니다. 따라서 해당 실행이 시작한 백그라운드 서버가 의도적으로 종료 처리 이후까지 살아남지는 않습니다. macOS는 보존된 원래 부모 프로세스 신원을 통해 나중에 생성된 자식 프로세스를 인식할 수 있지만, 관찰 이전에 중간 프로세스가 사라진 연결 고리는 증명할 수 없습니다. 그러한 프로세스, 추적 중인 그룹을 벗어난 작업, 그리고 지속적인 소유권 또는 시그널링 오류는 백그라운드 작업을 남길 수 있습니다. 확인되지 않은 정리는 로그로 남으며 '정리 성공'에 따른 복구 창을 부여하지 않습니다. 숫자 PID나 프로세스 그룹만을 근거로 알 수 없는 프로세스를 종료하지 않습니다.
-
-우선순위는 명령줄 flag → 환경 변수 → `~/.multica/config.json` → 내장 기본값입니다. watchdog 동작은 [데몬과 런타임](/daemon-runtimes)을 참고하세요.
 
 ### 데몬 설정 영속화
 
@@ -314,7 +405,7 @@ multica config show
 | `METRICS_ADDR` | 비어 있음 | Prometheus metrics listen 주소. 비어 있으면 시작하지 않음 |
 | `REALTIME_METRICS_TOKEN` | 비어 있음 | `/health/realtime`을 보호하는 bearer token |
 
-자사 셀프 호스트 텔레메트리는 UTC 기준 하루에 한 번 배포 단위 스냅샷을 고정되어 설정할 수 없는 `https://telemetry.multica.ai/v1/telemetry/events` 주소로 전송합니다. 정식 릴리스 버전, 작업 공간 수·중복을 제거한 멤버 수·활성 에이전트 수·지난 24시간 활성 데몬 수의 버킷, 그리고 지난 24시간 시작·완료·실패·취소된 실행의 집계만 포함합니다. 이름, 이메일 주소나 도메인, IP, 업무 ID, 호스트나 기기 정보, 저장소, 모델이나 plugin, prompt/output, 댓글이나 채팅, 파일 경로, token/비용, 자격 증명, 오류, stack, 로그는 전송하지 않습니다. 이 데이터는 셀프 호스트 버전 사용 현황, 배포 규모, 집계 사용량을 파악하는 데만 쓰며 결제, 라이선스, 인증, 보안 판단에는 사용하지 않습니다.
+자사 셀프 호스트 텔레메트리는 UTC 기준 하루에 한 번 배포 단위 스냅샷을 고정되어 설정할 수 없는 `https://telemetry.multica.ai/v1/telemetry/events` 주소로 전송합니다. 정식 릴리스 버전, 작업 공간 수·중복을 제거한 멤버 수·활성 에이전트 수·지난 24시간 활성 데몬 수의 버킷, 그리고 지난 24시간 시작·완료·실패·취소된 실행의 집계, 그리고 지난 1·7·28 완전한 UTC 일 동안 로그인해 웹 또는 데스크톱 앱을 연 멤버 수와 직접 에이전트 실행을 시작한(할당, 멘션, 댓글, 채팅, 수동 실행, 재실행. autopilot과 에이전트 간 위임은 제외) 멤버 수의 버킷만 포함합니다. 멤버는 배포 안에서만 집계되며 식별되지 않습니다. 이름, 이메일 주소나 도메인, IP, 업무 ID, 호스트나 기기 정보, 저장소, 모델이나 plugin, prompt/output, 댓글이나 채팅, 파일 경로, token/비용, 자격 증명, 오류, stack, 로그는 전송하지 않습니다. 이 데이터는 셀프 호스트 버전 사용 현황, 배포 규모, 집계 사용량, 멤버 활동을 파악하는 데만 쓰며 결제, 라이선스, 인증, 보안 판단에는 사용하지 않습니다.
 
 `DO_NOT_TRACK`과 `ANALYTICS_DISABLED`는 서로 독립적입니다. 전자는 이 익명 스냅샷을, 후자는 선택 사항인 PostHog 연동을 제어합니다.
 

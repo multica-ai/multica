@@ -3,6 +3,7 @@
 package daemon
 
 import (
+	"context"
 	"net/http"
 	"os"
 	"os/exec"
@@ -58,7 +59,7 @@ func TestCleanTaskArtifacts_DoesNotFollowDirectoryJunction(t *testing.T) {
 	// user's ~/.codex/skills/<name>.
 	createJunction(t, userSkill, filepath.Join(taskDir, "codex-home", "skills", "alpha"))
 
-	removed, _, _ := d.cleanTaskArtifacts(taskDir, []string{"node_modules"})
+	removed, _, _ := d.cleanTaskArtifacts(context.Background(), taskDir, []string{"node_modules"})
 	if removed != 0 {
 		t.Errorf("removed %d artifacts through a junction, want 0", removed)
 	}

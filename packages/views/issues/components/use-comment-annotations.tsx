@@ -1,10 +1,11 @@
 "use client";
 
 import { useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
-import { MessageSquarePlus, Trash2 } from "lucide-react";
+import { MessageSquarePlus, Trash2 } from "@multica/ui/icons";
 import { toast } from "sonner";
 import { isImeComposing } from "@multica/core/utils";
 import { Button } from "@multica/ui/components/ui/button";
+import { IconButton } from "@multica/ui/components/common/icon-button";
 import { useCommentDraftStore, type CommentDraftKey } from "@multica/core/issues/stores";
 import { MAX_ANNOTATION_QUOTE_LENGTH, MAX_REPLY_ANNOTATIONS, type ReplyAnnotation } from "@multica/core/drafts/reply-annotation";
 import { useT } from "../../i18n";
@@ -256,10 +257,10 @@ export function useCommentAnnotations({ draftKey, sources, enabled, onAdded, edi
         if (index < 0) return null;
         return <CommentSelectionBubble key={anchor.id} range={anchor.range} source={anchor.root} owner={draftKey}
           markerRanges={markerRanges.get(anchor.root)}>
-          <Button variant="brandSubtle" size="icon-sm" className="size-6 rounded-full text-caption tabular-nums aria-expanded:ring-2 aria-expanded:ring-brand"
+          <IconButton variant="brandSubtle" size="icon-sm" className="size-6 rounded-full text-caption tabular-nums aria-expanded:ring-2 aria-expanded:ring-brand"
             aria-expanded={editingId === anchor.id}
-            aria-label={t(($) => $.reply.annotations.edit, { number: index + 1 })}
-            onClick={() => editAnnotation(anchor.id)}>{index + 1}</Button>
+            label={t(($) => $.reply.annotations.edit, { number: index + 1 })}
+            onClick={() => editAnnotation(anchor.id)}>{index + 1}</IconButton>
         </CommentSelectionBubble>;
       })}
       {enabled && selection && <CommentSelectionBubble range={selection.range} source={selection.root} owner={draftKey} onPositioned={focusNote}>
@@ -281,15 +282,14 @@ export function useCommentAnnotations({ draftKey, sources, enabled, onAdded, edi
               }
             }} />
             <div className="flex items-center justify-end gap-1 px-1 pb-1">
-              {editingExisting && <Button variant="ghost" size="icon-sm" className="mr-auto text-muted-foreground hover:text-destructive"
-                aria-label={t(($) => $.reply.annotations.remove, { number: annotations.findIndex((a) => a.id === editing.id) + 1 })}
-                title={t(($) => $.reply.annotations.remove, { number: annotations.findIndex((a) => a.id === editing.id) + 1 })}
+              {editingExisting && <IconButton variant="ghost" size="icon-sm" className="mr-auto text-muted-foreground hover:text-destructive"
+                label={t(($) => $.reply.annotations.remove, { number: annotations.findIndex((a) => a.id === editing.id) + 1 })}
                 onClick={() => {
                   useCommentDraftStore.getState().removeAnnotation(draftKey, editing.id);
                   close(true);
-                }}><Trash2 /></Button>}
+                }}><Trash2 /></IconButton>}
               <Button size="sm" disabled={!editing.note.trim()}
-                aria-label={confirmLabel} title={confirmLabel} aria-keyshortcuts="Enter"
+                aria-label={confirmLabel} aria-keyshortcuts="Enter"
                 onClick={confirmNote}>{confirmLabel}</Button>
             </div>
             </div> : <Button ref={actionRef} variant="ghost" size="sm"

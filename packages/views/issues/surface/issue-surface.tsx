@@ -4,7 +4,7 @@ import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react
 import type { StoreApi } from "zustand/vanilla";
 import type { IssueViewState } from "@multica/core/issues/stores/view-store";
 import type { IssueViewBaseline } from "@multica/core/issue-views/baseline";
-import { AlertTriangle, FilterX, ListTodo, Plus } from "lucide-react";
+import { AlertTriangle, FilterX, ListTodo, Plus } from "@multica/ui/icons";
 import { Button } from "@multica/ui/components/ui/button";
 import { Skeleton } from "@multica/ui/components/ui/skeleton";
 import { cn } from "@multica/ui/lib/utils";
@@ -20,7 +20,6 @@ import {
   seedIssueSurfaceViewState,
 } from "@multica/core/issues/stores/surface-view-store";
 import { useActiveIssueView } from "@multica/core/issue-views/use-active-view";
-import { baselineFromQuery } from "@multica/core/issue-views/baseline";
 import { ViewBaselineProvider, useViewBaseline } from "./view-baseline-context";
 import type { IssueViewScope } from "@multica/core/issue-views/queries";
 import {
@@ -31,9 +30,9 @@ import {
 } from "@multica/core/issues/surface/scope";
 import type { Issue } from "@multica/core/types";
 import { BoardView } from "../components/board-view";
+import { BOARD_COL_WIDTH } from "../components/board-column";
 import { BatchActionToolbar } from "../components/batch-action-toolbar";
 import { GanttView } from "../components/gantt-view";
-import { IssuesHeader } from "../components/issues-header";
 import { ListView } from "../components/list-view";
 import { SwimLaneView } from "../components/swimlane-view";
 import { TableView } from "../components/table-view";
@@ -42,6 +41,7 @@ import { IssueContextMenuProvider } from "../actions";
 import { IssueSurfaceActionsProvider } from "./actions-context";
 import { IssuePeekHost } from "../components/issue-peek";
 import { IssueSurfaceSelectionProvider } from "./selection-context";
+import { ColumnStatusesProvider } from "./column-statuses-context";
 import type { IssueCreateDefaults, IssueSurfaceProps } from "./types";
 import {
   useIssueSurfaceController,
@@ -111,10 +111,6 @@ export function IssueSurface({
   const seedDefinition = activeView
     ? { ...activeView.query, ...activeView.display }
     : null;
-  const viewBaseline = useMemo(
-    () => (activeView ? baselineFromQuery(activeView.query) : null),
-    [activeView],
-  );
   // While a view is open, the scope axis the view captured belongs to the
   // VIEW, not to whichever tab the user stood on: workspace/project views
   // carry an assignee-type variant, my views a relation variant. The user's
@@ -153,7 +149,6 @@ export function IssueSurface({
 
   return (
     <ViewStoreProvider store={store}>
-      <ViewBaselineProvider baseline={viewBaseline}>
       {/* Remount on data-window change: the list queries keep the previous
           key's data as a placeholder (keepPreviousData) so sort/filter
           changes within ONE surface never flash a skeleton — but reusing the
@@ -179,7 +174,6 @@ export function IssueSurface({
         batchToolbar={batchToolbar}
         contentClassName={contentClassName}
       />
-      </ViewBaselineProvider>
     </ViewStoreProvider>
   );
 }
@@ -261,28 +255,8 @@ function IssueSurfaceContent({
           actions. */}
       <IssueContextMenuProvider>
       <IssueSurfaceSelectionProvider selection={controller.selection}>
-        {renderHeader ? (
-          renderHeader(renderContext)
-        ) : (
-          <IssuesHeader
-            scopedIssues={controller.surfaceIssues}
-            workingAgents={controller.workingAgents}
-            allowGantt={controller.allowGantt}
-            isRefreshing={controller.isRefreshing}
-            facetCountsExact={
-              controller.facetCountsExact
-            }
-            tableFacetCounts={controller.tableFacetCounts}
-            onTableFacetChange={controller.setActiveTableFacet}
-            saveViewScope={
-              scope.type === "project"
-                ? { kind: "project", projectId: scope.projectId }
-                : scope.type === "workspace"
-                  ? { kind: "workspace" }
-                  : null
-            }
-          />
-        )}
+      <ColumnStatusesProvider statuses={controller.columnStatuses}>
+        {renderHeader?.(renderContext)}
         {/* Every view opens the side peek on Shift+Click. The host wraps the
             loading and empty states too, so a view switch that briefly shows
             a skeleton keeps the peek open. */}
@@ -334,7 +308,6 @@ function IssueSurfaceContent({
               <BoardView
                 issues={issues}
                 visibleStatuses={controller.visibleStatuses}
-                hiddenStatuses={controller.hiddenStatuses}
                 onMoveIssue={controller.moveIssue}
                 childProgressMap={controller.childProgressMap}
                 projectMap={controller.projectMap}
@@ -348,7 +321,6 @@ function IssueSurfaceContent({
               <ListView
                 issues={issues}
                 visibleStatuses={controller.visibleStatuses}
-                hiddenStatuses={controller.hiddenStatuses}
                 childProgressMap={controller.childProgressMap}
                 projectMap={controller.projectMap}
                 projectId={controller.projectId}
@@ -378,7 +350,6 @@ function IssueSurfaceContent({
                 unfilteredIssues={swimlaneIssues}
                 activeFilters={controller.activeFilters}
                 visibleStatuses={controller.visibleStatuses}
-                hiddenStatuses={controller.hiddenStatuses}
                 onMoveIssue={controller.moveIssue}
                 childProgressMap={controller.childProgressMap}
                 projectMap={controller.projectMap}
@@ -397,6 +368,7 @@ function IssueSurfaceContent({
             }
           />
         )}
+      </ColumnStatusesProvider>
       </IssueSurfaceSelectionProvider>
       </IssueContextMenuProvider>
     </IssueSurfaceActionsProvider>
@@ -461,25 +433,63 @@ function FilteredEmptyState() {
 // Table is deliberately absent. It owns its own placeholders, drawn as rows
 // inside its real grid so the header, column widths and toolbar are up before
 // any data is — a surface-level stand-in would replace all of that with bars
-// of a different shape and then jump when the rows arrived.
+// of a different shape and then jump when the rows arrived. For the same
+// reason list and board are drawn box-for-box with `ListView` (40px group
+// header, issue-row-height rows) and `BoardView` (fixed-width columns, plain
+// one-line cards).
 function IssueSurfaceSkeleton({ mode }: { mode: string }) {
   if (mode === "list") {
     return (
-      <div className="flex min-h-0 flex-1 flex-col gap-1 overflow-y-auto p-2">
-        {Array.from({ length: 4 }).map((_, i) => (
-          <Skeleton key={i} className="h-10 w-full rounded-lg" />
-        ))}
+      <div className="flex-1 min-h-0 overflow-hidden p-2 pt-0">
+        <div className="space-y-1">
+          {[4, 3].map((rows, g) => (
+            <div key={g}>
+              <div className="flex h-10 items-center gap-2 rounded-lg bg-muted px-3">
+                <Skeleton className="size-3.5 rounded-full" />
+                <Skeleton className="h-3.5 w-20" />
+              </div>
+              {Array.from({ length: rows }).map((_, i) => (
+                <div key={i} className="flex h-[var(--issue-row-height)] items-center gap-2 px-4">
+                  <Skeleton className="size-4 shrink-0 rounded-full" />
+                  <span className="min-w-16 shrink-0">
+                    <Skeleton className="h-3 w-12" />
+                  </span>
+                  <Skeleton className="h-3.5 w-full max-w-80" />
+                </div>
+              ))}
+            </div>
+          ))}
+        </div>
       </div>
     );
   }
 
   return (
-    <div className="flex flex-1 min-h-0 gap-4 overflow-x-auto p-4">
-      {Array.from({ length: 5 }).map((_, i) => (
-        <div key={i} className="flex min-w-52 flex-1 flex-col gap-2">
-          <Skeleton className="h-4 w-20" />
-          <Skeleton className="h-24 w-full rounded-lg" />
-          <Skeleton className="h-24 w-full rounded-lg" />
+    <div className="flex flex-1 min-h-0 gap-4 overflow-hidden p-2">
+      {[3, 2, 2, 1, 1].map((cards, c) => (
+        <div
+          key={c}
+          style={{ width: BOARD_COL_WIDTH }}
+          className="flex shrink-0 flex-col rounded-xl bg-muted/40 p-2"
+        >
+          <div className="mb-2 flex h-6 items-center gap-2 px-1.5">
+            <Skeleton className="size-2.5 rounded-full" />
+            <Skeleton className="h-3.5 w-20" />
+          </div>
+          <div className="p-1">
+            {Array.from({ length: cards }).map((_, i) => (
+              <div key={i} className={i === 0 ? undefined : "pt-2"}>
+                <div className="rounded-lg border-[0.5px] border-surface-border bg-surface px-2.5 py-3">
+                  <div className="flex h-4 items-center">
+                    <Skeleton className="h-3 w-14" />
+                  </div>
+                  <div className="mt-1 flex h-5 items-center">
+                    <Skeleton className="h-3.5 w-4/5" />
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
         </div>
       ))}
     </div>

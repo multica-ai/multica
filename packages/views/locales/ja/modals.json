@@ -19,6 +19,16 @@
     "toast_deleted": "タスクを削除しました",
     "toast_delete_failed": "タスクを削除できませんでした"
   },
+  "rename_issue": {
+    "title": "タスク名を変更",
+    "placeholder": "タスク名",
+    "input_aria_label": "{{identifier}} の名前を変更",
+    "submit": "保存",
+    "saving": "保存中...",
+    "title_required": "タイトルを入力してください",
+    "toast_renamed": "タスク名を変更しました",
+    "toast_failed": "タスク名を変更できませんでした"
+  },
   "feedback": {
     "title": "フィードバック",
     "placeholder": "使用感、見つけたバグ、追加してほしい機能などをお聞かせください…",
@@ -240,6 +250,7 @@
       "sent_label": "送信済み",
       "sent_count": "{{count}} 件送信済み",
       "version_blocked_tooltip": "デーモン CLI は {{min}} 以上である必要があります",
+      "qoder_attachments_unsupported": "Qoder Cloud Agents は添付ファイルを読み取れません。添付ファイルを削除するか、別のエージェントを選択してください。",
       "toast_sent": "エージェントに送信しました。完了するとインボックス通知が届きます",
       "error_agent_unavailable_fallback": "エージェントを利用できません。別のエージェントを選択してください。",
       "error_daemon_version": "このエージェントのデーモン CLI（{{current}}）が必要なバージョン {{min}} を下回っています。エージェントで作成を使用するには、デーモンをアップグレードしてください。",

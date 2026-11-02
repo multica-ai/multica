@@ -413,7 +413,7 @@ type slackTypingNotifier struct{ mgr *TypingIndicatorManager }
 // the bot is processing it. The resolved installation carries the bot token in
 // its Config blob — the InstallationResolver stashed the db.ChannelInstallation
 // row in Platform, the documented adapter boundary the core never reads.
-func (n *slackTypingNotifier) OnIngested(ctx context.Context, inst engine.ResolvedInstallation, msg channel.InboundMessage, sessionID pgtype.UUID) {
+func (n *slackTypingNotifier) OnIngested(ctx context.Context, inst engine.ResolvedInstallation, msg channel.InboundMessage, sessionID pgtype.UUID, chatMessageID pgtype.UUID) {
 	ci, ok := inst.Platform.(db.ChannelInstallation)
 	if !ok {
 		return
@@ -424,6 +424,6 @@ func (n *slackTypingNotifier) OnIngested(ctx context.Context, inst engine.Resolv
 // OnSettled clears the reaction when the run trigger enqueued no task (agent
 // offline / archived, or an enqueue failure) — the bus-driven clear on
 // chat-done / task-failed never fires for those, so without this the 👀 sticks.
-func (n *slackTypingNotifier) OnSettled(ctx context.Context, sessionID pgtype.UUID) {
+func (n *slackTypingNotifier) OnSettled(ctx context.Context, sessionID pgtype.UUID, scope engine.TypingSettlement) {
 	n.mgr.Clear(ctx, sessionID)
 }

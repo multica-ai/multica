@@ -76,6 +76,13 @@ type Config struct {
 	// invitation only. The public /api/config endpoint mirrors this flag so
 	// the UI can hide every "Create workspace" affordance — see #3433.
 	DisableWorkspaceCreation bool
+	// WorkspaceCreationAllowedEmails, when non-empty, restricts
+	// POST /api/workspaces to callers whose account email matches one of
+	// the entries (case-insensitive). Empty means every signed-in user may
+	// create workspaces. DisableWorkspaceCreation takes precedence. This only
+	// decides who may create a workspace; it grants no cross-workspace
+	// visibility or admin rights (#9400).
+	WorkspaceCreationAllowedEmails []string
 	// VCSIntegrationEnabled gates the self-hosted Git provider integration
 	// (Forgejo / Gitea / GitLab) at the deployment level, independent of whether
 	// MULTICA_VCS_SECRET_KEY is set. It is the product boundary: the feature is
@@ -155,6 +162,11 @@ type Config struct {
 	// Surfaced through /api/config so self-hosted operators can confirm which
 	// server build is deployed. Empty in dev builds.
 	ServerVersion string
+	// GitExtraCACerts is the PEM of the private CAs the operator added to the
+	// backend's trust store through SSL_CERT_DIR (see internal/gitca). It is
+	// handed to daemons with the workspace repos so their git can reach a
+	// repository host the backend already trusts. Empty when none are set.
+	GitExtraCACerts []byte
 }
 
 type cloudRuntimeProxy interface {
@@ -259,6 +271,7 @@ type Handler struct {
 	PATCache                     *auth.PATCache
 	DaemonTokenCache             *auth.DaemonTokenCache
 	MembershipCache              *auth.MembershipCache
+	QoderRateLimiter             WebhookRateLimiter
 	WebhookRateLimiter           WebhookRateLimiter
 	WebhookIPRateLimiter         WebhookRateLimiter
 	WebhookAbsoluteIPRateLimiter WebhookRateLimiter
@@ -318,6 +331,8 @@ type Handler struct {
 	// where the storage backend exists; main.go starts it as an independent
 	// worker goroutine. Nil when no storage backend is configured.
 	ChannelMediaReconciler *service.ChannelMediaReconciler
+	// LarkTyping owns the durable reaction cleanup worker, started under sweepCtx.
+	LarkTyping *lark.TypingIndicatorManager
 	// SlackInstall owns the bring-your-own-app Slack install lifecycle (register
 	// pasted tokens / list / revoke) and the at-rest encryption of each app's bot
 	// + app tokens (MUL-3666). Nil unless MULTICA_SLACK_SECRET_KEY is set.
@@ -343,6 +358,14 @@ type Handler struct {
 	// WecomCredentials unseals a wecom installation's smart-bot secret for the
 	// WebSocket subscribe frame. Nil disables the wecom integration.
 	WecomCredentials wecom.CredentialsResolver
+	// WecomInstall drives the scan-code install sessions (QR generate + poll).
+	// Nil unless MULTICA_WECOM_SECRET_KEY is set; Configured() is additionally
+	// false without a QR provider, in which case the endpoints return 503 but
+	// in-flight sessions still terminate cleanly.
+	WecomInstall *wecom.InstallService
+	// WecomInstallWorker drives those sessions. Built in cmd/server/router.go;
+	// main.go starts it as an independent worker.
+	WecomInstallWorker *wecom.InstallWorker
 	// WecomBindingTokens mints/redeems the user-binding tokens behind the
 	// "link your Multica account" prompt sent to first-time WeCom users
 	// (their aibot userid is a "T"-prefixed anonymized id with no relation
@@ -506,6 +529,7 @@ func New(queries *db.Queries, txStarter txStarter, hub *realtime.Hub, bus *event
 		Storage:                      store,
 		CFSigner:                     cfSigner,
 		Analytics:                    analyticsClient,
+		QoderRateLimiter:             NewMemoryWebhookRateLimiter(WebhookRateLimit{Limit: 6, Window: time.Minute}),
 		WebhookRateLimiter:           NewMemoryWebhookRateLimiter(DefaultWebhookRateLimit()),
 		WebhookIPRateLimiter:         NewMemoryWebhookIPRateLimiter(DefaultWebhookIPRateLimit()),
 		WebhookAbsoluteIPRateLimiter: NewMemoryWebhookAbsoluteIPRateLimiter(DefaultWebhookAbsoluteIPRateLimit()),
@@ -534,6 +558,7 @@ func New(queries *db.Queries, txStarter txStarter, hub *realtime.Hub, bus *event
 		slog.Warn("github: PR snapshot pipeline disabled (invalid App private key)", "err", err)
 	}
 	h.PRRefresh = ghsnapshot.NewManager(ghClient, queries, txStarter, h.broadcastPRSnapshotApplied)
+	taskSvc.PRSnapshotsEnabled = h.PRRefresh.Enabled()
 
 	return h
 }
@@ -804,16 +829,19 @@ func (h *Handler) publishTask(eventType, workspaceID, actorType, actorID, taskID
 	})
 }
 
-// publishChat is publish() plus a ChatSessionID hint so the realtime layer
-// can route the event to the per-chat-session scope.
+// publishChat is publish() plus the chat session routing hints. actorID must
+// be the session's creator: every chat endpoint gates on creator ownership
+// before publishing, and the realtime layer delivers the event to that user
+// only.
 func (h *Handler) publishChat(eventType, workspaceID, actorType, actorID, chatSessionID string, payload any) {
 	h.Bus.Publish(events.Event{
-		Type:          eventType,
-		WorkspaceID:   workspaceID,
-		ActorType:     actorType,
-		ActorID:       actorID,
-		ChatSessionID: chatSessionID,
-		Payload:       payload,
+		Type:               eventType,
+		WorkspaceID:        workspaceID,
+		ActorType:          actorType,
+		ActorID:            actorID,
+		ChatSessionID:      chatSessionID,
+		ChatSessionOwnerID: actorID,
+		Payload:            payload,
 	})
 }
 

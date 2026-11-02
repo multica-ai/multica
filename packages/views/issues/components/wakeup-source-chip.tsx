@@ -2,7 +2,7 @@
 
 import { useCallback, type ReactNode } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { Bell } from "lucide-react";
+import { Bell } from "@multica/ui/icons";
 import { issueTasksOptions, issueWakeupsOptions } from "@multica/core/issues";
 import type { AgentTask, IssueWakeup } from "@multica/core/types";
 import { useWorkspaceId } from "@multica/core/hooks";

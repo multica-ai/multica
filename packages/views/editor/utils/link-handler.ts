@@ -5,7 +5,11 @@
  * (react-markdown link component), and link-hover-card (Open button).
  */
 
-import { isGlobalPath, isReservedSlug } from "@multica/core/paths";
+import {
+  isGlobalPath,
+  isKnownWorkspacePath,
+  workspaceSlugForPath,
+} from "@multica/core/paths";
 import { isIssueIdentifier } from "@multica/ui/markdown";
 import type { LinkClickIntent } from "../../navigation/click-intent";
 
@@ -33,29 +37,6 @@ const WORKSPACE_ROUTE_SEGMENTS = new Set([
   "skills",
   "settings",
 ]);
-
-/**
- * Report whether a path is a workspace-scoped app page — `/{slug}/...` where the
- * first segment is a slug a workspace could actually own.
- *
- * The app origin also serves things the app router does not own: `/api/*`,
- * `/uploads/*` (local-storage attachments, proxied by web), `/_next/*`,
- * `/favicon.ico`, and the pre-workspace routes. Every one of those first
- * segments is already a reserved slug, so the reserved list — the same one the
- * backend enforces at workspace creation — answers this question without a
- * parallel deny-list that has to be kept in sync with the backend's routes.
- */
-function isWorkspaceScopedPath(pathname: string): boolean {
-  const first = pathname.split("/")[1] ?? "";
-  if (!first) return false;
-  let segment: string;
-  try {
-    segment = decodeURIComponent(first);
-  } catch {
-    return false;
-  }
-  return !isReservedSlug(segment.toLowerCase());
-}
 
 /**
  * Convert an absolute URL that points at a workspace page on this deployment's
@@ -87,7 +68,7 @@ export function toInternalAppPath(
   // Opaque origins (file:, data:) compare equal to each other; only real web
   // origins identify the app.
   if (target.protocol !== "http:" && target.protocol !== "https:") return null;
-  if (!isWorkspaceScopedPath(target.pathname)) return null;
+  if (!workspaceSlugForPath(target.pathname)) return null;
   return `${target.pathname}${target.search}${target.hash}`;
 }
 
@@ -220,7 +201,7 @@ export function parseWorkspaceEntityLink(
   let id: string | undefined;
   if (segments.length === 3) {
     const [first, second, third] = segments;
-    if (!first || isReservedSlug(first.toLowerCase())) return null;
+    if (!first || !workspaceSlugForPath(path)) return null;
     slug = first;
     route = second;
     id = third;
@@ -265,8 +246,14 @@ export function openLink(
     let path = internalPath;
     if (currentSlug && !isGlobalPath(path)) {
       const firstSegment = path.split("/")[1];
-      if (firstSegment && WORKSPACE_ROUTE_SEGMENTS.has(firstSegment)) {
-        // Path looks like /issues/abc (no slug) — prepend current slug.
+      if (
+        firstSegment &&
+        WORKSPACE_ROUTE_SEGMENTS.has(firstSegment) &&
+        !isKnownWorkspacePath(path)
+      ) {
+        // Path looks like /issues/abc (no slug) — prepend current slug. A
+        // member workspace whose slug happens to be a route name
+        // (/issues/issues/MUL-1) is already scoped and is left as is.
         path = `/${currentSlug}${path}`;
       }
       // Otherwise the first segment is either already a slug (e.g. "acme" in

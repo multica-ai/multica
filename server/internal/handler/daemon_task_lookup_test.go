@@ -61,7 +61,7 @@ func TestGetTaskStatus_DoesNotResolveSourceWorkspace(t *testing.T) {
 			})
 			fault := &lookupFaultPool{DBTX: testPool, query: tc.query}
 			h := &Handler{Queries: db.New(fault), TaskService: &service.TaskService{Queries: db.New(fault)}}
-			req := newDaemonTokenRequest(http.MethodGet, "/api/daemon/tasks/"+taskID+"/status", nil, testWorkspaceID, "test-daemon")
+			req := newOwnerDaemonRequest(http.MethodGet, "/api/daemon/tasks/"+taskID+"/status", nil)
 			req = withURLParam(req, "taskId", taskID)
 
 			var response map[string]string
@@ -84,7 +84,7 @@ func TestGetTaskStatus_TaskRowPresenceContract(t *testing.T) {
 
 	t.Run("task row missing", func(t *testing.T) {
 		missing := uuid.NewString()
-		req := newDaemonTokenRequest(http.MethodGet, "/api/daemon/tasks/"+missing+"/status", nil, testWorkspaceID, "test-daemon")
+		req := newOwnerDaemonRequest(http.MethodGet, "/api/daemon/tasks/"+missing+"/status", nil)
 		req = withURLParam(req, "taskId", missing)
 		w := testutil.Call(t, testHandler.GetTaskStatus, req).Want(http.StatusNotFound)
 		if !strings.Contains(w.Body.String(), "task not found") {
@@ -105,7 +105,7 @@ func TestGetTaskStatus_TaskRowPresenceContract(t *testing.T) {
 		})
 		dbfx.Exec(t, "DELETE FROM chat_session WHERE id = $1", chatID)
 
-		req := newDaemonTokenRequest(http.MethodGet, "/api/daemon/tasks/"+taskID+"/status", nil, testWorkspaceID, "test-daemon")
+		req := newOwnerDaemonRequest(http.MethodGet, "/api/daemon/tasks/"+taskID+"/status", nil)
 		req = withURLParam(req, "taskId", taskID)
 		var response map[string]string
 		testutil.Call(t, testHandler.GetTaskStatus, req).Want(http.StatusOK).JSON(&response)

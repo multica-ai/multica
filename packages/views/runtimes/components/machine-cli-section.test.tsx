@@ -52,6 +52,7 @@ function machine(runtimes: AgentRuntime[]): RuntimeMachine {
     daemonId: "daemon-1",
     title: "dev.local",
     subtitle: null,
+    deviceSummary: null,
     deviceInfo: "dev.local",
     cliVersion: "0.3.17",
     launchedBy: launchedBy ?? null,

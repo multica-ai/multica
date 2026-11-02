@@ -1304,13 +1304,17 @@ describe("MentionList cancelled demotion", () => {
       expect(headings()).not.toContain("Cancelled");
     });
 
-    it("keeps a cancelled direct hit visible behind a full window of live candidates", async () => {
+    it.each([
+      ["MUL-99", "MUL-99"],
+      ["V2-99", "v2-99"],
+      ["V2-99", "99"],
+    ])("keeps cancelled %s visible behind a full window when searching %s", async (identifier, query) => {
       // 20 non-cancelled cached candidates already fill every slot. Exempting
       // the direct hit from the demotion would leave it at position 21 and the
       // truncation would still delete it, so it has to be pinned to the front.
       searchIssuesMock.mockResolvedValue({
         issues: [
-          { id: "i-hit", identifier: "MUL-99", title: "Abandoned plan", status: "cancelled" },
+          { id: "i-hit", identifier, title: "Abandoned plan", status: "cancelled" },
         ],
         total: 1,
       });
@@ -1322,15 +1326,15 @@ describe("MentionList cancelled demotion", () => {
         status: "todo" as const,
       }));
 
-      render(<I18nWrapper><MentionList items={items} query="MUL-99" command={vi.fn()} /></I18nWrapper>);
+      render(<I18nWrapper><MentionList items={items} query={query} command={vi.fn()} /></I18nWrapper>);
 
       await waitFor(() => {
-        expect(screen.getByText("MUL-99")).toBeInTheDocument();
+        expect(screen.getByText(identifier)).toBeInTheDocument();
       });
 
       const labels = rowLabels();
       expect(labels).toHaveLength(20);
-      expect(labels[0]).toBe("MUL-99");
+      expect(labels[0]).toBe(identifier);
       // A live candidate gave up the last slot, not the record the user typed.
       expect(labels).not.toContain("MUL-219");
     });

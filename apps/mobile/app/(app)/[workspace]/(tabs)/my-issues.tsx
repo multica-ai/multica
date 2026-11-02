@@ -15,8 +15,7 @@
 import { useMemo } from "react";
 import { Pressable, SectionList, View } from "react-native";
 import { useQuery } from "@tanstack/react-query";
-import { useIsFocused } from "@react-navigation/native";
-import { router } from "expo-router";
+import { router, useIsFocused } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import type {
   IssuePriority,

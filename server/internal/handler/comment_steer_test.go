@@ -43,8 +43,8 @@ func runningSteerableTask(t *testing.T, f supplementFixture, name string) (agent
 
 func completeTaskViaDaemon(t *testing.T, taskID string) {
 	t.Helper()
-	req := newDaemonTokenRequest(http.MethodPost, "/api/daemon/tasks/"+taskID+"/complete",
-		map[string]any{"output": "done"}, testWorkspaceID, "legit-daemon")
+	req := newOwnerDaemonRequest(http.MethodPost, "/api/daemon/tasks/"+taskID+"/complete",
+		map[string]any{"output": "done"})
 	testutil.Call(t, testHandler.CompleteTask, withURLParam(req, "taskId", taskID)).Want(http.StatusOK)
 }
 
@@ -58,31 +58,35 @@ func outcomeFor(outcomes []CommentTriggerOutcome, agentID string) (CommentTrigge
 }
 
 func TestCreateCommentSteersTheThreadAgentsRunningTurn(t *testing.T) {
-	f := newSupplementFixture(t, "codex", "running", true)
-	dbfx.Exec(t, `UPDATE comment SET content = $2 WHERE id = $1`, f.triggerID,
-		agentMention("Supplement", f.agentID)+" original objective")
-	dbfx.Exec(t, `UPDATE agent_task_queue SET delivered_comment_ids = ARRAY[trigger_comment_id] WHERE id = $1`, f.taskID)
-	dbfx.Cleanup(t, `DELETE FROM agent_task_queue WHERE issue_id = $1`, f.issueID)
+	for _, provider := range []string{"codex", "grok", "cursor", "kiro"} {
+		t.Run(provider, func(t *testing.T) {
+			f := newSupplementFixture(t, provider, "running", true)
+			dbfx.Exec(t, `UPDATE comment SET content = $2 WHERE id = $1`, f.triggerID,
+				agentMention("Supplement", f.agentID)+" original objective")
+			dbfx.Exec(t, `UPDATE agent_task_queue SET delivered_comment_ids = ARRAY[trigger_comment_id] WHERE id = $1`, f.taskID)
+			dbfx.Cleanup(t, `DELETE FROM agent_task_queue WHERE issue_id = $1`, f.issueID)
 
-	var created CommentResponse
-	postSteeredComment(t, f.issueID, f.triggerID, "Only fix web.", f.taskID).Want(http.StatusCreated).JSON(&created)
-	if len(created.Supplements) != 1 {
-		t.Fatalf("receipts = %+v, want one for the running turn", created.Supplements)
-	}
-	receipt := created.Supplements[0]
-	if receipt.TaskID != f.taskID || receipt.AgentID != f.agentID || receipt.Status != "pending" {
-		t.Fatalf("receipt = %+v, want pending for task %s / agent %s", receipt, f.taskID, f.agentID)
-	}
-	if created.SupplementTaskID != f.taskID || created.SupplementStatus != "pending" {
-		t.Fatalf("legacy receipt fields = %s/%s, want the first receipt", created.SupplementTaskID, created.SupplementStatus)
-	}
-	if n := dbfx.Count(t, `SELECT count(*) FROM agent_task_queue WHERE issue_id = $1`, f.issueID); n != 1 {
-		t.Fatalf("steering created %d runs, want the running turn only", n)
-	}
+			var created CommentResponse
+			postSteeredComment(t, f.issueID, f.triggerID, "Only fix web.", f.taskID).Want(http.StatusCreated).JSON(&created)
+			if len(created.Supplements) != 1 {
+				t.Fatalf("receipts = %+v, want one for the running turn", created.Supplements)
+			}
+			receipt := created.Supplements[0]
+			if receipt.TaskID != f.taskID || receipt.AgentID != f.agentID || receipt.Status != "pending" {
+				t.Fatalf("receipt = %+v, want pending for task %s / agent %s", receipt, f.taskID, f.agentID)
+			}
+			if created.SupplementTaskID != f.taskID || created.SupplementStatus != "pending" {
+				t.Fatalf("legacy receipt fields = %s/%s, want the first receipt", created.SupplementTaskID, created.SupplementStatus)
+			}
+			if n := dbfx.Count(t, `SELECT count(*) FROM agent_task_queue WHERE issue_id = $1`, f.issueID); n != 1 {
+				t.Fatalf("steering created %d runs, want the running turn only", n)
+			}
 
-	completeTaskViaDaemon(t, f.taskID)
-	if n := dbfx.Count(t, `SELECT count(*) FROM agent_task_queue WHERE issue_id = $1`, f.issueID); n != 1 {
-		t.Fatalf("completion replayed a steered comment into %d runs", n)
+			completeTaskViaDaemon(t, f.taskID)
+			if n := dbfx.Count(t, `SELECT count(*) FROM agent_task_queue WHERE issue_id = $1`, f.issueID); n != 1 {
+				t.Fatalf("completion replayed a steered comment into %d runs", n)
+			}
+		})
 	}
 }
 

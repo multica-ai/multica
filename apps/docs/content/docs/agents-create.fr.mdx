@@ -1,26 +1,37 @@
 ---
 title: Créer et configurer un agent
-description: Choisissez un point de départ, puis définissez les responsabilités, les capacités, la configuration d'exécution et l'Accès de l'agent.
+description: Choisissez un runtime, puis définissez les responsabilités, les capacités, la configuration d'exécution et l'Accès de l'agent.
 ---
 
 import { Callout } from "fumadocs-ui/components/callout";
+import { Step, Steps } from "fumadocs-ui/components/steps";
+import { CreateAgentDemo } from "@/components/demos/create-agent-demo";
 
 Pour créer un agent, il faut d'abord un [runtime](/daemon-runtimes) fonctionnel. Le runtime détermine l'ordinateur et l'outil de codage IA utilisés par l'agent ; l'agent porte l'identité durable, les instructions et les capacités.
 
-Sur la page **Agents** de l'espace de travail, cliquez sur **Nouvel agent**.
+## Étapes de création
 
-## Points de départ
+Sur la page **Agents** de l'espace de travail, cliquez sur **Nouvel agent**, puis suivez trois étapes :
 
-La page de création propose deux options :
+<Steps>
+<Step>
 
-| Option | Quand l'utiliser |
-|---|---|
-| **Partir de zéro** | Vous connaissez déjà les responsabilités de l'agent et souhaitez remplir vous-même chaque champ. |
-| **Construire avec l'IA** | Décrivez d'abord l'objectif, puis laissez l'Agent Builder poser les questions clés et générer un brouillon. |
+**Choisissez le runtime.** La page liste les outils de codage IA (harness) de chaque machine ; seuls ceux en ligne permettent de continuer. Les modèles proposés ensuite, et la disponibilité des skills, dépendent de ce choix.
 
-**Construire avec l'IA** nécessite un runtime en ligne pour la conversation avec le Builder. Dans les deux cas, vous pouvez relire et modifier la configuration finale avant la création.
+</Step>
+<Step>
 
-![Points de départ de la création d'un agent : Partir de zéro et Construire avec l'IA](/images/docs/quickstart-new-agent.webp)
+**Configurez l'agent.** Renseignez le nom, la description, les instructions, les skills, le modèle et l'Accès. Pour ne pas tout rédiger vous-même, cliquez sur **Laisser l'IA rédiger** : le brouillon actuel est confié à l'Agent Builder, qui pose les questions clés dans une conversation et complète la configuration. Ce bouton n'apparaît que si le runtime choisi est en ligne et n'est pas un runtime cloud. Pendant la conversation, vous pouvez modifier à tout moment le brouillon affiché à côté.
+
+</Step>
+<Step>
+
+**Cliquez sur Créer l'agent.** La page de fin indique sur quel runtime l'agent s'exécute et propose la suite : lui confier une première tâche, le mentionner dans une tâche ou l'ajouter à un squad.
+
+</Step>
+</Steps>
+
+<CreateAgentDemo />
 
 ## Champs obligatoires
 
@@ -67,7 +78,7 @@ Les skills conviennent aux méthodes et aux supports réutilisés par plusieurs 
 
 Ajoutez jusqu'à trois **amorces de conversation** pour montrer ce que cet agent sait bien faire avant que l'on envoie un premier message dans une discussion. Elles apparaissent au-dessus du champ de saisie lorsque quelqu'un ouvre une nouvelle discussion avec l'agent. Chaque amorce comporte un libellé court et un prompt complet. En choisir une remplit le champ de saisie pour que l'utilisateur puisse la relire ou la modifier ; elle ne lance jamais d'exécution automatiquement.
 
-L'éditeur affiche un aperçu exact de ce que montrera une nouvelle discussion, et toute personne pouvant modifier l'agent voit, dans cet état vide, un lien **Personnaliser les amorces** qui ramène directement ici.
+À la création, elles sont une ligne facultative de la section **Identité**. Ensuite, elles se trouvent dans **Paramètres → Général**, avec l'avatar, le nom et la description, à côté d'un aperçu exact de ce que montrera une nouvelle discussion. Toute personne pouvant modifier l'agent voit aussi, dans cet état vide, un lien **Personnaliser les amorces** qui y mène directement.
 
 Si vous laissez la liste vide, la Discussion affiche des amorces génériques par défaut, localisées. Des exemples propres à l'agent sont généralement plus utiles, car ils peuvent refléter le rôle et les limites définis dans les instructions.
 
@@ -95,7 +106,7 @@ L'Accès détermine quels membres peuvent exécuter cet agent (l'assigner, l'@me
 
 ![Paramètres d'Accès : Moi uniquement, Tout l'espace de travail, Personnes précises](/images/docs/agent-access-settings.webp)
 
-Seul le propriétaire de l'agent peut modifier l'Accès — les administrateurs de l'espace de travail ne le peuvent pas. Les `owner` et `admin` de l'espace de travail peuvent gérer le reste de la configuration, mais ne peuvent pas se servir de leur rôle d'administrateur pour exécuter des agents auxquels ils n'ont pas accès.
+Seul le propriétaire de l'agent peut modifier l'Accès ; les administrateurs de l'espace de travail ne le peuvent pas. Les `owner` et `admin` de l'espace de travail peuvent gérer le reste de la configuration, mais ne peuvent pas se servir de leur rôle d'administrateur pour exécuter des agents auxquels ils n'ont pas accès.
 
 ## Configuration après la création
 
@@ -106,7 +117,7 @@ Sur la page de détail de l'agent, vous pouvez continuer à ajuster :
 | **Parallélisme** | Nombre d'exécutions que l'agent peut mener en même temps. La valeur par défaut est 6 ; les exécutions au-delà de ce plafond restent en file d'attente. |
 | **Variables d'environnement** | Injectent des variables au démarrage de l'outil de codage IA. |
 | **Arguments personnalisés** | Ajoutés un par un aux arguments CLI de l'outil de codage IA. |
-| **MCP** | Fournit une configuration de serveurs MCP aux outils de codage IA qui la prennent en charge. |
+| **MCP** | Configure les serveurs MCP des outils de codage IA qui les prennent en charge : ajoutez-en un propre à cet agent, ou choisissez parmi les serveurs MCP partagés de l'espace de travail. |
 | **Intégrations** | Connecte les services externes que cet agent peut utiliser. |
 
 Le daemon qui héberge le runtime a aussi un plafond global de parallélisme (20 par défaut) ; le parallélisme effectif est le plus petit des deux.
@@ -133,13 +144,59 @@ Les arguments personnalisés sont transmis à l'outil de codage IA sous forme de
 Ne placez pas d'identifiants ni d'autres secrets dans les arguments personnalisés. Ils restent dans l'argv du processus enfant et peuvent être visibles par d'autres processus locaux via `ps` ou `/proc` ; utilisez plutôt les variables d'environnement (`custom_env`). Les journaux du daemon masquent les valeurs des arguments, mais cela ne protège pas la liste des processus du système d'exploitation.
 </Callout>
 
-La configuration MCP peut contenir des jetons ; ses règles de stockage et d'affichage sont les mêmes que pour les variables d'environnement. Seuls les runtimes qui prennent en charge la configuration MCP gérée affichent cette section ; les outils sans prise en charge de MCP ne l'acquièrent pas simplement parce qu'une configuration est enregistrée.
+La configuration MCP peut contenir des jetons ; ses règles de stockage et d'affichage sont les mêmes que pour les variables d'environnement. Seuls les runtimes qui prennent en charge la configuration MCP gérée affichent cette section ; les outils sans prise en charge de MCP ne l'acquièrent pas simplement parce qu'une configuration est enregistrée. Quand un agent a une configuration MCP, le daemon y fusionne aussi les serveurs MCP déjà configurés sur la machine du runtime ; voir [Configuration MCP locale](/daemon-runtimes#local-mcp).
+
+L'onglet **MCP** d'un agent répartit les serveurs MCP qu'il peut utiliser en trois groupes :
+
+| Groupe | Origine |
+|---|---|
+| **Géré par Multica** | Serveurs propres à cet agent. Cliquez sur **Ajouter un MCP** et saisissez une commande STDIO ou une URL Streamable HTTP, dans l'éditeur visuel ou en JSON. |
+| **Depuis la bibliothèque de l'espace de travail** | Serveurs partagés de l'espace de travail assignés à cet agent ; voir la section suivante. |
+| **Hérité du runtime** | La configuration utilisateur de l'outil de codage IA sur la machine du runtime, en lecture seule. Elle n'est lisible que lorsqu'un runtime local est en ligne. |
+
+En cas de noms identiques, l'entrée propre à l'agent l'emporte sur un serveur assigné depuis l'espace de travail, et les deux l'emportent sur un serveur du runtime du même nom. L'entrée écartée porte la mention **Remplacé** ou **Remplacé par Multica**.
+
+### Serveurs MCP partagés de l'espace de travail
+
+Quand plusieurs agents ont besoin du même serveur MCP, inutile de saisir son URL et son jeton sur chacun. Un `owner` ou un `admin` de l'espace de travail l'ajoute une fois dans **Paramètres → Serveurs MCP**, puis l'assigne aux agents qui en ont besoin.
+
+<Steps>
+<Step>
+
+Un administrateur ouvre **Paramètres → Serveurs MCP**, clique sur **Ajouter un serveur** et saisit un nom et une configuration.
+
+</Step>
+<Step>
+
+Un serveur ajouté n'appartient encore à aucun agent. Ouvrez l'onglet **MCP** de chaque agent qui doit l'utiliser, cliquez sur **Ajouter depuis l'espace de travail** dans le groupe **Depuis la bibliothèque de l'espace de travail**, puis choisissez-le.
+
+</Step>
+<Step>
+
+Chaque assignation a son propre interrupteur : vous pouvez désactiver un serveur pour un agent sans le retirer. Les changements s'appliquent à partir de la prochaine exécution de cet agent.
+
+</Step>
+</Steps>
+
+Dans la liste **Paramètres → Serveurs MCP**, chaque serveur indique « Utilisé par N agents » ou « Attribué à aucun agent ». À savoir :
+
+- **La configuration est en écriture seule.** Une fois enregistrées, les URL, commandes, en-têtes et valeurs d'environnement ne sont plus jamais affichés, à personne, owners compris. Pour les changer, cliquez sur **Remplacer la configuration** et saisissez une configuration complète. Renommer conserve la configuration et toutes les assignations.
+- **La suppression touche tous les agents.** Supprimer un serveur dans les paramètres le retire aussi de tous les agents auxquels il était assigné, à partir de leur prochaine exécution. Pour qu'un seul agent cesse de l'utiliser, désactivez-le ou retirez-le dans l'onglet **MCP** de cet agent.
+- **Permissions.** Les membres voient la liste mais ne peuvent ni ajouter ni modifier de serveur. Assigner ou retirer un serveur sur un agent demande d'être owner de cet agent, ou `owner` ou `admin` de l'espace de travail. Un agent en cours d'exécution ne peut ni ajouter de serveur ni changer les assignations via le CLI.
+
+Le CLI permet les mêmes opérations. Les configurations contiennent souvent des jetons : passez-les par un fichier ou par stdin plutôt qu'en argument de ligne de commande.
+
+```bash
+multica workspace mcp add linear --server-config-file ./linear.json
+multica workspace mcp list
+multica agent mcp add <agent-id> <server-id>
+```
 
 ## Dupliquer un agent
 
 La duplication reprend l'essentiel de la configuration de travail, sauf le nom : instructions, amorces de conversation, skills, arguments personnalisés, avatar, limite de parallélisme et paramètres d'Accès. Le modèle, le niveau de réflexion et la vitesse (niveau de service) sont également repris ; si le runtime d'origine est indisponible et que la copie doit passer sur un autre runtime, ces trois valeurs sont effacées et doivent être choisies à nouveau.
 
-Les valeurs des variables d'environnement et la configuration MCP ne sont jamais copiées et doivent être redéfinies sur le nouvel agent. La duplication conserve le rattachement au runtime et les paramètres d'Accès de l'agent d'origine.
+Les valeurs des variables d'environnement, la configuration MCP et les assignations de serveurs MCP de l'espace de travail ne sont jamais copiées et doivent être redéfinies sur le nouvel agent.
 
 ## Créer avec le CLI
 

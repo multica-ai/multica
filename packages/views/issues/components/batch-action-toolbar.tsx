@@ -1,8 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { AnimatePresence, motion, useReducedMotion } from "motion/react";
-import { X, Trash2 } from "lucide-react";
+import { Trash2 } from "@multica/ui/icons";
 import { toast } from "sonner";
 import { Button } from "@multica/ui/components/ui/button";
 import {
@@ -15,23 +14,25 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@multica/ui/components/ui/alert-dialog";
+import { useQuery } from "@tanstack/react-query";
 import type { Issue, UpdateIssueRequest } from "@multica/core/types";
+import { useWorkspaceId } from "@multica/core/hooks";
 import { commonIssueFields } from "@multica/core/issues/batch";
+import { sharedWorkflowStatusKeys, useIssueWorkflows } from "@multica/core/issue-workflows";
+import { projectListOptions } from "@multica/core/projects/queries";
 import { useBatchUpdateIssues, useBatchDeleteIssues } from "@multica/core/issues/mutations";
 import { useModalStore } from "@multica/core/modals";
 import { StatusPicker, PriorityPicker, AssigneePicker } from "./pickers";
 import { useT } from "../../i18n";
-import { cn } from "@multica/ui/lib/utils";
-import {
-  UI_EASE_OUT,
-  UI_MOTION_DURATION,
-} from "@multica/ui/lib/motion";
+import { CollectionBatchBar } from "../../layout/collection-list";
 import { useIssueSurfaceActionsOptional } from "../surface/actions-context";
 import { useIssueSurfaceSelection } from "../surface/selection-context";
+import { useRegisterCommandBarContext } from "../../search/register-context";
 
 export function BatchActionToolbar({
   issues,
   placement = "fixed-bottom",
+  clearSelectionOnApply = false,
 }: {
   /**
    * The universe of selectable issues at this call site (the same list the
@@ -47,12 +48,19 @@ export function BatchActionToolbar({
    * the selected rows (used inside scrollable sections like sub-issues).
    */
   placement?: "fixed-bottom" | "inline";
+  /**
+   * Drop the selection once a status / priority / assignee change fully
+   * applies. Off for full-screen lists, where the selection stays so several
+   * edits can be chained; on for sub-issues, where a batch edit is a one-shot
+   * dispatch and a lingering inline toolbar reads as unfinished. A partial or
+   * failed write keeps the selection so the user can retry.
+   */
+  clearSelectionOnApply?: boolean;
 }) {
   const { t } = useT("issues");
   const selection = useIssueSurfaceSelection();
   const selectedIds = selection.selectedIds;
   const clear = selection.clear;
-  const shouldReduceMotion = useReducedMotion() ?? false;
 
   // The authoritative selection is selectedIds ∩ the visible universe. Acting
   // on raw selectedIds while other consumers (Export selected, common fields)
@@ -65,12 +73,34 @@ export function BatchActionToolbar({
   );
   const count = selectedIssues.length;
 
+  useRegisterCommandBarContext(
+    useMemo(
+      () => (count > 0 ? { kind: "issues", issues: selectedIssues, clearSelection: clear } : null),
+      [count, selectedIssues, clear],
+    ),
+  );
+
   // Reflect the real shared value of the selected issues in each picker; fall
   // back to an empty (no-checkmark) state when the selection is mixed, instead
   // of asserting a hardcoded default.
   const common = useMemo(
     () => commonIssueFields(selectedIssues),
     [selectedIssues],
+  );
+
+  // A selection inside one project offers that project's workflow statuses;
+  // one spanning projects offers the statuses every selected issue's
+  // workflow allows. (MUL-7420)
+  const sharedProjectId = useMemo(() => {
+    const first = selectedIssues[0]?.project_id ?? null;
+    return first && selectedIssues.every((i) => i.project_id === first) ? first : null;
+  }, [selectedIssues]);
+  const wsId = useWorkspaceId();
+  const { workflows } = useIssueWorkflows(wsId);
+  const { data: projects } = useQuery({ ...projectListOptions(wsId), enabled: count > 0 && !sharedProjectId });
+  const allowedStatuses = useMemo(
+    () => (sharedProjectId ? null : sharedWorkflowStatusKeys(workflows, projects, selectedIssues)),
+    [sharedProjectId, workflows, projects, selectedIssues],
   );
 
   const [statusOpen, setStatusOpen] = useState(false);
@@ -95,12 +125,15 @@ export function BatchActionToolbar({
 
   const handleBatchUpdate = async (updates: Partial<UpdateIssueRequest>) => {
     try {
-      if (surfaceActions) {
-        await surfaceActions.batchUpdate(ids, updates);
+      const { updated } = surfaceActions
+        ? await surfaceActions.batchUpdate(ids, updates)
+        : await batchUpdate.mutateAsync({ ids, updates });
+      if (updated < count) {
+        toast.warning(t(($) => $.batch.update_partial, { updated, count }));
       } else {
-        await batchUpdate.mutateAsync({ ids, updates });
+        if (clearSelectionOnApply) clear();
+        toast.success(t(($) => $.batch.update_success, { count }));
       }
-      toast.success(t(($) => $.batch.update_success, { count }));
     } catch (err) {
       toast.error(
         err instanceof Error && err.message
@@ -139,6 +172,7 @@ export function BatchActionToolbar({
           mode: "assign",
           assigneeType: updates.assignee_type,
           assigneeId: updates.assignee_id,
+          onApplied: clearSelectionOnApply ? clear : undefined,
         });
         return;
       }
@@ -168,60 +202,19 @@ export function BatchActionToolbar({
 
   return (
     <>
-      <AnimatePresence initial={false}>
-        {count > 0 && (
-          <div
-            key="issue-batch-toolbar"
-            className={cn(
-              "z-50",
-              placement === "fixed-bottom"
-                ? "fixed bottom-6 left-1/2 -translate-x-1/2 max-md:above-chat-launcher"
-                : "mb-2 w-fit",
-            )}
-          >
-            <motion.div
-              className="flex items-center gap-1 rounded-lg border bg-background px-2 py-1.5 shadow-lg"
-              initial={{
-                opacity: 0,
-                transform: shouldReduceMotion
-                  ? "translateY(0)"
-                  : "translateY(8px)",
-              }}
-              animate={{
-                opacity: 1,
-                transform: "translateY(0)",
-                transition: {
-                  duration: UI_MOTION_DURATION.fast,
-                  ease: UI_EASE_OUT,
-                },
-              }}
-              exit={{
-                opacity: 0,
-                transform: shouldReduceMotion
-                  ? "translateY(0)"
-                  : "translateY(8px)",
-                transition: {
-                  duration: shouldReduceMotion
-                    ? UI_MOTION_DURATION.fast
-                    : UI_MOTION_DURATION.micro,
-                  ease: UI_EASE_OUT,
-                },
-              }}
-            >
-        <div className="flex items-center gap-1.5 pl-1 pr-2 border-r mr-1">
-          <span className="text-body font-medium">{t(($) => $.batch.selected, { count })}</span>
-          <button
-            type="button"
-            onClick={clear}
-            className="rounded-xs p-0.5 hover:bg-accent transition-colors"
-          >
-            <X className="size-3.5 text-muted-foreground" />
-          </button>
-        </div>
-
+      <CollectionBatchBar
+        count={count}
+        onClear={clear}
+        placement={placement === "fixed-bottom" ? "fixed" : "inline"}
+        label={t(($) => $.batch.selected, { count })}
+      >
         {/* Status */}
         <StatusPicker
           status={common.status}
+          // No shared project spans projects (or none): not the Default-only
+          // list of a single issue outside a project. (MUL-8121)
+          projectId={sharedProjectId ?? undefined}
+          allowedStatuses={allowedStatuses}
           onUpdate={handleBatchStatus}
           open={statusOpen}
           onOpenChange={setStatusOpen}
@@ -265,10 +258,7 @@ export function BatchActionToolbar({
           <Trash2 className="size-3.5 mr-1" />
           {t(($) => $.batch.delete)}
         </Button>
-            </motion.div>
-          </div>
-        )}
-      </AnimatePresence>
+      </CollectionBatchBar>
 
       {count > 0 && <AlertDialog open={deleteOpen} onOpenChange={setDeleteOpen}>
         <AlertDialogContent>

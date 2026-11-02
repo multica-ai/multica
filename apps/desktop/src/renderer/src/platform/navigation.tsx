@@ -5,7 +5,7 @@ import {
   type NavigationAdapter,
 } from "@multica/views/navigation";
 import { useAuthStore } from "@multica/core/auth";
-import { isReservedSlug } from "@multica/core/paths";
+import { workspaceSlugForPath, paths } from "@multica/core/paths";
 import {
   useTabStore,
   getActiveTab,
@@ -13,6 +13,11 @@ import {
   useActiveTabUrl,
 } from "@/stores/tab-store";
 import { useWindowOverlayStore } from "@/stores/window-overlay-store";
+import {
+  handOffToWorkspaceWindow,
+  openWorkspaceInNewWindow,
+  otherWindowWorkspaces,
+} from "./workspace-windows";
 
 function requireRuntimeAppUrl(scope: string): string {
   const runtimeConfig = window.desktopAPI.runtimeConfig;
@@ -22,17 +27,6 @@ function requireRuntimeAppUrl(scope: string): string {
     );
   }
   return runtimeConfig.config.appUrl;
-}
-
-/**
- * Extract the leading workspace slug from a path, or null if the path isn't
- * workspace-scoped (root, login, any reserved prefix).
- */
-function extractWorkspaceSlug(path: string): string | null {
-  const first = path.split("/").filter(Boolean)[0] ?? "";
-  if (!first) return null;
-  if (isReservedSlug(first)) return null;
-  return first;
 }
 
 /**
@@ -60,7 +54,7 @@ function tryRouteToOverlay(path: string): boolean {
     overlay.open({ type: "invitations" });
     return true;
   }
-  if (path.startsWith("/invite/")) {
+  if (path.startsWith("/invite/") && !workspaceSlugForPath(path)) {
     let id = "";
     try {
       id = decodeURIComponent(path.slice("/invite/".length));
@@ -86,13 +80,21 @@ function tryRouteToOverlay(path: string): boolean {
  * invite-accept flow — they all call `useNavigation().push(path)` with a
  * full workspace URL, and on desktop we translate "target slug differs
  * from active" into "switch the tab-group that's visible in the TabBar".
+ *
+ * The target's bare Issues root (what the workspace switchers send, and where
+ * web lands) resumes the workspace's last active tab instead, or Issues if it
+ * has none. Any deeper path opens exactly that path. When another window
+ * already shows the target workspace, that window takes the navigation.
  */
 function tryRouteToOtherWorkspace(path: string): boolean {
-  const targetSlug = extractWorkspaceSlug(path);
+  const targetSlug = workspaceSlugForPath(path);
   if (!targetSlug) return false;
   const { activeWorkspaceSlug, switchWorkspace } = useTabStore.getState();
   if (targetSlug === activeWorkspaceSlug) return false;
-  switchWorkspace(targetSlug, path);
+  const resume = path === paths.workspace(targetSlug).issues();
+  const openPath = resume ? undefined : path;
+  if (handOffToWorkspaceWindow(targetSlug, openPath)) return true;
+  switchWorkspace(targetSlug, openPath);
   return true;
 }
 
@@ -113,9 +115,9 @@ export function routeContentLinkPath(
   disposition: LinkClickIntent = "push",
 ): void {
   const store = useTabStore.getState();
-  const slug = extractWorkspaceSlug(path);
+  const slug = workspaceSlugForPath(path);
   if (slug && slug !== store.activeWorkspaceSlug) {
-    store.switchWorkspace(slug, path);
+    if (!handOffToWorkspaceWindow(slug, path)) store.switchWorkspace(slug, path);
     return;
   }
   if (disposition === "push") {
@@ -237,14 +239,18 @@ export function DesktopNavigationProvider({
         // defaults to background tab (browser cmd+click semantics); callers
         // that represent an explicit "Open in new tab" CTA pass
         // `activate: true` to bring the new tab to the foreground.
-        const slug = extractWorkspaceSlug(path);
+        const slug = workspaceSlugForPath(path);
         const store = useTabStore.getState();
         if (slug && slug !== store.activeWorkspaceSlug) {
-          store.switchWorkspace(slug, path);
+          if (!handOffToWorkspaceWindow(slug, path)) {
+            store.switchWorkspace(slug, path);
+          }
           return;
         }
         store.openTab(path, title ?? "", { activate: opts?.activate });
       },
+      openWorkspaceInNewWindow,
+      workspacesInOtherWindows: () => [...otherWindowWorkspaces()],
       getShareableUrl: (path: string) => `${appUrl}${path}`,
     }),
     [appUrl, location],

@@ -4,10 +4,16 @@ description: 対応する AI コーディングツールをインストールし
 ---
 
 import { Callout } from "fumadocs-ui/components/callout";
+import { Step, Steps } from "fumadocs-ui/components/steps";
+import { Tab, Tabs } from "fumadocs-ui/components/tabs";
+import { Accordion, Accordions } from "fumadocs-ui/components/accordion";
 
-ローカルランタイムは、Multica デーモンと、デーモンが呼び出せる AI コーディングツールの 2 つで構成されます。使用するツールだけをインストールすればよく、すべてをインストールする必要はありません。
+ローカルランタイムは、Multica デーモンと、デーモンが呼び出せる AI コーディングツールの 2 つで構成されます。使うツールだけをインストールすればよく、すべてをそろえる必要はありません。
 
-## 1. ツールを選ぶ
+<Steps>
+<Step>
+
+## ツールを選ぶ [#1-ツールを選ぶ]
 
 すでにインストールしてログイン済みのツールには、追加設定は不要です。モデル、MCP、セッション再開、スキルの対応状況はツールごとに異なります。詳しくは [AI コーディングツール比較](/providers)を参照してください。
 
@@ -29,6 +35,8 @@ Multica は現在、次のコマンドを検出します。
 | Kimi CLI | `kimi` | [Kimi CLI](https://github.com/MoonshotAI/kimi-cli) |
 | Kiro CLI | `kiro-cli` | [Kiro CLI のインストール](https://kiro.dev/docs/cli/installation/) |
 | MiniMax Code | `mcode` | [MiniMax Code CLI のインストール](https://www.npmjs.com/package/@minimax-ai/code) |
+| Muse Code | `muse` | [Muse Code のインストール](https://dev.meta.ai/docs/muse-code) |
+| Devin CLI | `devin` | [Devin CLI のインストール](https://docs.devin.ai/cli/quickstart)（3000.3.22+）。ローカル ACP。先に `devin auth login` を実行 |
 | OpenClaw | `openclaw` | [OpenClaw のインストール](https://docs.openclaw.ai/install) |
 | OpenCode | `opencode` | [OpenCode クイックスタート](https://opencode.ai/en/docs) |
 | Pi coding agent | `pi` | [Pi coding agent](https://github.com/earendil-works/pi) |
@@ -40,30 +48,90 @@ Multica は現在、次のコマンドを検出します。
 | Reasonix | `reasonix` | [Reasonix](https://github.com/esengine/DeepSeek-Reasonix) |
 | TRAE CLI | `traecli` | [TRAE 公式サイト](https://www.trae.cn/) |
 | Dim | `dim` | [DimCode](https://dimagent.cn/en/docs/cli) |
+| ZeroClaw | `zeroclaw` | [ZeroClaw クイックスタート](https://github.com/zeroclaw-labs/zeroclaw/blob/master/docs/book/src/getting-started/quickstart.md#install) |
 
 ここでの「対応」とは、Multica が該当する CLI を呼び出せるという意味です。そのツールのアカウント、サブスクリプション、モデルの利用枠を Multica が提供するわけではありません。
 
-## 2. ローカル環境でログインする
+</Step>
+<Step>
+
+## ローカル環境でログインする [#2-ローカル環境でログインする]
 
 インストール後、まずターミナルからツールを単独で起動し、各ツールの手順に従ってログインするか、モデルプロバイダーを設定してください。ターミナル上でリクエストを実行できない場合は、デーモンから呼び出しても失敗します。
 
-CodeArts では、TUI だけでなく `codearts run --model provider/model "OK とだけ返してください"` で非対話モードを確認してください。現在の CodeArts CLI では、カスタム provider が TUI で動作しても、`run`、`models`、`serve` には引き続き [`CODEARTS_CLI_AK` / `CODEARTS_CLI_SK`](https://support.huaweicloud.com/usermanual-cli/codeartsagent_cli_0026.html) が必要な場合があります。Multica は `~/.codeartsdoer/codearts_cli.json` または `.jsonc` からカスタムモデルを検出できますが、実行には `codearts run` を使用するため、その認証要件に従います。
-
-Reasonix を使う場合は、デーモンを起動する前に `reasonix setup` を実行し、デフォルトのプロバイダーとモデルを設定してください。
-
-QwenPaw を使う場合は、QwenPaw 側の設定でプロバイダーとモデルを選んでください。Multica が実行時に QwenPaw のモデルを上書きすることはできません。
-
-MiniMax Code を使う場合は、対応する Node.js バージョン（`>=22.19 <23` または `>=24 <27`）をインストールし、`npm install --global @minimax-ai/code@latest` を実行してください。npm のグローバルインストールによって `mcode` は npm のグローバル実行ファイルディレクトリに配置されます。`command -v mcode` または `Get-Command mcode` で見つからない場合は、そのディレクトリを `PATH` に追加してください。その後 `mcode login` を実行します。モデルは MiniMax Code が管理し、Multica から ACP 経由で上書きすることはできません。
-
-DeepSeek Harness を使う場合は、Node.js 20+ をインストールして `npm install -g @deepseek-ai/dsh` を実行し、Multica ランタイムプロファイルを追加してください。このバンドルが Multica の利用する `--stdio` プロトコルを提供しており、素の `dsh` だけでは使えない理由でもあります。`MULTICA_DSH_PROFILE_BUNDLE` にインストールするバンドルを設定すればデーモンが追加します。手動で行う場合は `dsh plugin --profile multica add <bundle>` を実行します。`<bundle>` は `dsh plugin` が受け付けるもの、つまり npm のパッケージ名、ディレクトリ、パック済み tarball のいずれかで、Multica 自身のブリッジは [multica-ai/dsh-multica-runtime](https://github.com/multica-ai/dsh-multica-runtime) にあります。これはまだ公開 npm レジストリに公開されていないため（[multica#6936](https://github.com/multica-ai/multica/issues/6936)）、現時点でセルフホストのチームはそのリポジトリからビルドし、変数をビルド出力のディレクトリに向けます。デーモンを動かすマシンとビルドしたマシンが別なら、`npm pack` が生成する tarball を指定してください。ブリッジが公開されれば、パッケージ名を指定するのが最も簡単になります。いずれの場合も、自チームが公開・ビルドしたものを優先してください。この値は追加の確認なしに各デーモンホストの DSH ホームへインストールされるため、素性の分からないサードパーティのパッケージを指定することは利便性の問題ではなくサプライチェーンの判断です。npm パッケージではなく DeepSeek Harness Desktop をインストールした場合、デーモンはそのアプリが生成する CLI シムも、アプリ自身のユーザーデータディレクトリから探します。macOS は `~/Library/Application Support/DSH Desktop`、Windows は `%APPDATA%\DSH Desktop` です。Windows のそれはローミングのアプリケーションデータであり、インストール先ではありません。アプリ自体は Program Files または `%LOCALAPPDATA%\Programs` に入りますが、駆動される CLI はユーザーごとの他の状態と同じ場所に置かれます。これらのパスのバージョン部分は生成された ID なので、デーモンは列挙して最新のものを優先します。PATH に他のものは必要ありません。生成されたシムはアプリ同梱のランタイムを絶対パスで起動します。DSH Desktop が既定以外の場所にある場合は `MULTICA_DSH_PATH` でそのシムを指定してください。デーモンは `dsh --profile multica --probe` が成功した場合のみ DeepSeek Harness を登録し、失敗した場合は `/health` にプロファイルの欠落を報告します。デーモンを起動する前に `DEEPSEEK_API_KEY` を設定（または dsh の設定に保存）してください。
-
 ログイン情報はツールがローカル環境に保存します。Multica が Claude、Codex、Cursor などの CLI のログイントークンを受け取ることはありません。
 
-<Callout type="info">
-Antigravity は 1.1.10 以降、Claude Code は 2.0.0 以降、Codex は 0.100.0 以降、Copilot は 1.0.0 以降、Grok は 0.2.89 以降、Qwen Code は 0.20.0 以降、MiniMax Code は 0.1.2 以降、OpenCode は 1.1.54 以降が必要です。最低バージョンを満たしていない場合、デーモンはそのランタイムを登録しません。
+最低バージョンを満たしていない場合、デーモンはそのランタイムを登録しません。
+
+| ツール | 最低バージョン |
+| --- | --- |
+| Antigravity | 1.1.10 |
+| Claude Code | 2.0.0 |
+| Codex | 0.100.0 |
+| Copilot | 1.0.0 |
+| Grok | 0.2.89 |
+| Qwen Code | 0.20.0 |
+| MiniMax Code | 0.1.2 |
+| OpenCode | 1.1.54 |
+| Dim | 0.3.10 |
+| ZeroClaw | 0.8.0 |
+
+次のツールは、ログインのほかに追加の設定が必要です。
+
+<Accordions type="multiple">
+<Accordion title="CodeArts" id="codearts">
+
+TUI だけでなく、`codearts run --model provider/model "OK とだけ返してください"` で非対話モードを確認してください。現在の CodeArts CLI では、カスタム provider が TUI で動作しても、`run`、`models`、`serve` には引き続き [`CODEARTS_CLI_AK` / `CODEARTS_CLI_SK`](https://support.huaweicloud.com/usermanual-cli/codeartsagent_cli_0026.html) が必要な場合があります。Multica は `~/.codeartsdoer/codearts_cli.json` または `.jsonc` からカスタムモデルを検出できますが、実行には `codearts run` を使用するため、その認証要件に従います。
+
+</Accordion>
+<Accordion title="DeepSeek Harness" id="deepseek-harness">
+
+Node.js 20+ をインストールして `npm install -g @deepseek-ai/dsh` を実行し、Multica ランタイムプロファイルを追加してください。このバンドルが Multica の利用する `--stdio` プロトコルを提供しており、素の `dsh` だけでは使えない理由でもあります。デーモンを起動する前に `DEEPSEEK_API_KEY` を設定（または dsh の設定に保存）してください。
+
+**プロファイルのインストール。** `MULTICA_DSH_PROFILE_BUNDLE` にインストールするバンドルを設定すればデーモンが追加します。手動で行う場合は `dsh plugin --profile multica add <bundle>` を実行します。`<bundle>` は `dsh plugin` が受け付けるもの、つまり npm のパッケージ名、ディレクトリ、パック済み tarball のいずれかで、Multica 自身のブリッジは [multica-ai/dsh-multica-runtime](https://github.com/multica-ai/dsh-multica-runtime) にあります。これはまだ公開 npm レジストリに公開されていないため（[multica#6936](https://github.com/multica-ai/multica/issues/6936)）、現時点でセルフホストのチームはそのリポジトリからビルドし、変数をビルド出力のディレクトリに向けます。デーモンを動かすマシンとビルドしたマシンが別なら、`npm pack` が生成する tarball を指定してください。ブリッジが公開されれば、パッケージ名を指定するのが最も簡単になります。
+
+**既存プロファイルの移行。** プロファイルをバックアップし、ブリッジの README に従って DSH のバージョンに対応するバンドルをビルドしてください。そのディレクトリまたは tarball を手動でインストールし、`dsh.profile.bundles` が `@multica-ai/dsh-runtime` を読み込むようにします。`dsh-profile-multica` があれば置き換え、両方ある場合は `dsh-profile-multica` を削除してください。依存関係に記載するだけでは読み込まれません。`MULTICA_DSH_PROFILE_BUNDLE` は既存のブリッジ設定を移行しません。`dsh --profile multica --probe` で結果を確認してください。
+
+<Callout type="warning">
+自チームが公開・ビルドしたものを優先してください。この値は追加の確認なしに各デーモンホストの DSH ホームへインストールされるため、素性の分からないサードパーティのパッケージを指定することは、サプライチェーンに関わる判断になります。
 </Callout>
 
-## 3. デーモンからコマンドを見つけられることを確認する
+**DSH Desktop。** npm パッケージではなく DeepSeek Harness Desktop をインストールした場合、デーモンはそのアプリが生成する CLI シムも、アプリ自身のユーザーデータディレクトリから探します。macOS は `~/Library/Application Support/DSH Desktop`、Windows は `%APPDATA%\DSH Desktop` です。Windows のそれはローミングのアプリケーションデータであり、インストール先ではありません。アプリ自体は Program Files または `%LOCALAPPDATA%\Programs` に入りますが、駆動される CLI はユーザーごとの他の状態と同じ場所に置かれます。これらのパスのバージョン部分は生成された ID なので、デーモンは列挙して最新のものを優先します。PATH に他のものは必要ありません。生成されたシムはアプリ同梱のランタイムを絶対パスで起動します。DSH Desktop が既定以外の場所にある場合は `MULTICA_DSH_PATH` でそのシムを指定してください。
+
+デーモンは `dsh --profile multica --probe` が成功した場合のみ DeepSeek Harness を登録し、失敗した場合は `/health` にプロファイルの欠落を報告します。
+
+</Accordion>
+<Accordion title="MiniMax Code" id="minimax-code">
+
+対応する Node.js バージョン（`>=22.19 <23` または `>=24 <27`）をインストールし、`npm install --global @minimax-ai/code@latest` を実行してください。npm のグローバルインストールによって `mcode` は npm のグローバル実行ファイルディレクトリに配置されます。`command -v mcode` または `Get-Command mcode` で見つからない場合は、そのディレクトリを `PATH` に追加してください。その後 `mcode login` を実行します。モデルは MiniMax Code が管理し、Multica から ACP 経由で上書きすることはできません。
+
+</Accordion>
+<Accordion title="Muse Code" id="muse-code">
+
+Muse Code は 1.4.10 以降が必要です。[公式のインストールとサインイン手順](https://dev.meta.ai/docs/muse-code)に従い、`muse` が `PATH` にあることを確認してください。Multica は MSP からモデル一覧を取得し、既存のセッションを再開できます。
+
+</Accordion>
+<Accordion title="QwenPaw" id="qwenpaw">
+
+QwenPaw 側の設定でプロバイダーとモデルを選んでください。Multica が実行時に QwenPaw のモデルを上書きすることはできません。
+
+</Accordion>
+<Accordion title="Reasonix" id="reasonix">
+
+デーモンを起動する前に `reasonix setup` を実行し、デフォルトのプロバイダーとモデルを設定してください。
+
+</Accordion>
+</Accordions>
+
+</Step>
+<Step>
+
+## デーモンからコマンドを見つけられることを確認する [#3-デーモンからコマンドを見つけられることを確認する]
+
+`<command>` は表にあるコマンド名に置き換えてください。たとえば `claude`、`codex`、`cursor-agent` です。最初のコマンドで実行ファイルのパスが表示されます。
+
+<Tabs groupId="os" persist items={["macOS / Linux", "Windows"]}>
+<Tab value="macOS / Linux">
 
 macOS、Linux、WSL では、次を実行します。
 
@@ -72,6 +140,9 @@ command -v <command>
 <command> --version
 ```
 
+</Tab>
+<Tab value="Windows">
+
 Windows PowerShell では、次を実行します。
 
 ```powershell
@@ -79,13 +150,20 @@ Get-Command <command>
 <command> --version
 ```
 
-`<command>` は表にあるコマンド名に置き換えてください。たとえば `claude`、`codex`、`cursor-agent` です。最初のコマンドで実行ファイルのパスが返れば、検出できています。
+</Tab>
+</Tabs>
 
-ターミナルではツールを見つけられるのに、Desktop やバックグラウンドのデーモンでは見つからない場合、両者が異なる `PATH` を使っていることが一般的な原因です。アプリを再起動するか、対応する `MULTICA_<PROVIDER>_PATH` 環境変数で絶対パスを指定してください。設定の詳細は[環境変数](/environment-variables#デーモン設定)を参照してください。
+ターミナルではツールを見つけられるのに、Desktop やバックグラウンドのデーモンでは見つからない場合、たいていは両者が異なる `PATH` を使っています。アプリを再起動するか、対応する `MULTICA_<PROVIDER>_PATH` 環境変数で絶対パスを指定してください。設定の詳細は[環境変数](/environment-variables#デーモン設定)を参照してください。
 
-## 4. 再検出してオンライン状態を確認する
+</Step>
+<Step>
 
-CLI でデーモンを起動します。
+## 再検出してオンライン状態を確認する [#4-再検出してオンライン状態を確認する]
+
+<Tabs items={["CLI", "Desktop"]}>
+<Tab value="CLI">
+
+デーモンを起動します。
 
 ```bash
 multica daemon start
@@ -97,13 +175,22 @@ multica daemon start
 multica daemon restart
 ```
 
-Multica Desktop を使っている場合は、アプリを終了して開き直してください。
+</Tab>
+<Tab value="Desktop">
+
+Multica Desktop を終了して開き直してください。
+
+</Tab>
+</Tabs>
 
 次に Multica の**ランタイム**ページを開きます。対象のコンピューターの下にツールが表示され、オンライン状態になっていることを確認してください。これで、エージェントを作成または編集するときにこのランタイムを選択できます。
 
 <Callout type="warning">
 デーモンの起動時には、標準対応している CLI が少なくとも 1 つ検出される必要があります。カスタムランタイム設定はデーモンの起動後に同期されるため、ツールが何もないコンピューターで唯一の起動条件として使うことはできません。例外は 1 つだけです。デーモンが DSH ランタイムプロファイルのインストール（`MULTICA_DSH_PROFILE_BUNDLE`）を開始した直後は、ランタイムが 1 つもない状態で起動し、そのインストールが完了した時点で DeepSeek Harness を登録します。そうしないと、プロファイルを必要とする DSH しかないコンピューターではインストールを完了できません。デーモンが完了前に終了し、インストール処理も道連れにしてしまうからです。
 </Callout>
+
+</Step>
+</Steps>
 
 ## ツールが検出されない場合
 

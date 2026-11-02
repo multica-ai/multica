@@ -1,47 +1,10 @@
 /**
- * Hybrid-render segment splitter.
+ * Split Markdown into native prose, React code blocks, and interactive images.
+ * Use lexer token boundaries so fenced/indented code and paragraph images are
+ * handled without fragile regex reconstruction. Preserve prose through token.raw.
  *
- * react-native-enriched-markdown gives us native-quality rendering of
- * prose (paragraphs / headings / lists / quotes / tables / inline code /
- * links / mentions) but does NOT let us inject React for any leaf node
- * (see issues #54, #232, #246 — maintainer's stance is "no custom
- * renderers, ever, by design"). That blocks three product needs:
- *
- *   1. Shiki syntax-highlighted code blocks (web parity).
- *   2. Tap-to-lightbox on images.
- *   3. Horizontal scroll + copy button on code.
- *
- * Maintainer-endorsed workaround (issue #246): split the markdown at
- * those boundaries, render each fragment as its own enriched instance
- * for prose and as React for the rest. This file is that splitter.
- *
- * Strategy:
- *
- *   - Run `marked.lexer` (we already depend on it for preprocess).
- *   - Walk the top-level token list.
- *   - `code` token → emit a `code` segment.
- *   - `paragraph` token containing image tokens → split the paragraph
- *     at each image boundary. Each image becomes its own `image`
- *     segment; the surrounding text rejoins the prose stream. (RN's
- *     <Image> can't be inline in a <Text>, and tap-to-lightbox needs a
- *     Pressable wrapper that's not viable inside an attributed string
- *     anyway. GitHub mobile and Linear iOS both promote inline images
- *     to block-level — we follow.)
- *   - Every other block stays in the prose buffer and is handed to
- *     enriched verbatim via `token.raw`.
- *
- * Why not regex: code inside lists, indented code, paragraph-embedded
- * images, and consecutive code blocks without a blank line all have
- * boundaries regex can't reliably detect. marked.lexer already knows;
- * reuse it.
- *
- * Known trade-off: code blocks nested inside a list item stay with the
- * list and render via enriched (no Shiki). That's because the splitter
- * only inspects top-level tokens — descending into list/quote children
- * would force us to also re-serialise their surrounding markdown,
- * complicating prose reconstruction. Top-level code is the >95% case
- * for issue descriptions / comments; revisit if real content shows
- * otherwise.
+ * Only top-level code is extracted. Nested list/quote code stays in the native
+ * renderer to preserve its surrounding Markdown structure.
  */
 import { marked, type Tokens } from "marked";
 

@@ -40,7 +40,7 @@ import (
 //     values but keep existing ones resolvable.
 const (
 	maxActivePropertiesPerWorkspace = 20
-	maxPropertySelectOptions        = 50
+	maxPropertySelectOptions        = 200
 	maxPropertyNameLen              = 32
 	maxPropertyIconLen              = 32
 	maxPropertyDescriptionLen       = 500
@@ -52,10 +52,10 @@ const (
 	maxPropertyActorValues = 20
 )
 
-var validPropertyTypes = []string{"text", "number", "select", "multi_select", "date", "checkbox", "url", "actor", "multi_actor"}
+var validPropertyTypes = []string{"text", "number", "select", "multi_select", "date", "checkbox", "url", "actor", "multi_actor", "multi_text", "multi_url"}
 
-// Property icons use stable catalog keys that the Web client maps to Lucide
-// glyphs. Keeping this allowlist at the API boundary prevents arbitrary text
+// Property icons use stable catalog keys that the Web client maps to its
+// icon glyphs. Keeping this allowlist at the API boundary prevents arbitrary text
 // (including emoji) from leaking into every issue surface that renders icons.
 var validPropertyIcons = map[string]struct{}{
 	"circle-dot": {}, "signal-high": {}, "user-round": {}, "folder-kanban": {},
@@ -83,9 +83,7 @@ var reservedPropertyNames = map[string]struct{}{
 	"metadata": {}, "properties": {},
 }
 
-// ---------------------------------------------------------------------------
 // Types
-// ---------------------------------------------------------------------------
 
 type PropertyOption struct {
 	ID    string `json:"id"`
@@ -178,9 +176,7 @@ type UpdatePropertyRequest struct {
 	Archived    *bool           `json:"archived"`
 }
 
-// ---------------------------------------------------------------------------
 // Validation
-// ---------------------------------------------------------------------------
 
 func normalizePropertyName(name string) string {
 	return strings.ReplaceAll(strings.ToLower(strings.TrimSpace(name)), " ", "_")
@@ -238,7 +234,7 @@ func propertyTypeHasOptions(t string) bool {
 }
 
 // validatePropertyConfig canonicalizes the config for storage. Select-type
-// properties require 1..50 options; each option gets a stable server-assigned
+// properties require 1..200 options; each option gets a stable server-assigned
 // UUID if the caller didn't provide one (values reference option IDs, so
 // option renames never touch issue rows). Non-select types must not carry
 // options and are stored as {}.
@@ -303,9 +299,7 @@ func selectOptionsHint(cfg PropertyConfig) string {
 	return strings.Join(parts, ", ")
 }
 
-// ---------------------------------------------------------------------------
 // Actor values (MUL-6286)
-// ---------------------------------------------------------------------------
 
 // Compatibility aliases keep the focused handler tests on the same helper
 // names while the implementation is shared with IssueService.Create.
@@ -393,9 +387,7 @@ func parseIssueProperties(raw []byte) map[string]any {
 	return util.JSONObjectOrEmpty(raw)
 }
 
-// ---------------------------------------------------------------------------
 // Definition handlers
-// ---------------------------------------------------------------------------
 
 // requirePropertyAdmin gates definition writes: human owner/admin members
 // only. Agent actors are rejected before the role check — an agent inherits
@@ -664,9 +656,7 @@ func (h *Handler) UpdateProperty(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, resp)
 }
 
-// ---------------------------------------------------------------------------
 // Issue value handlers
-// ---------------------------------------------------------------------------
 
 type SetIssuePropertyRequest struct {
 	Value json.RawMessage `json:"value"`
@@ -846,9 +836,7 @@ func (h *Handler) withPropertyLock(r *http.Request, lockKeys []string, fn func(q
 	return tx.Commit(r.Context())
 }
 
-// ---------------------------------------------------------------------------
 // List-endpoint support: properties filter + property sort expressions
-// ---------------------------------------------------------------------------
 
 const (
 	maxPropertiesFilterDefinitions = 20
@@ -1003,33 +991,41 @@ func parsePropertiesFilterParam(w http.ResponseWriter, raw string) ([][]json.Raw
 		writeError(w, http.StatusBadRequest, "properties filter must be a JSON object of {definitionId: [values]}")
 		return nil, false
 	}
-	if len(parsed) > maxPropertiesFilterDefinitions {
-		writeError(w, http.StatusBadRequest, fmt.Sprintf("properties filter cannot cover more than %d definitions", maxPropertiesFilterDefinitions))
+	groups, err := compilePropertiesFilter(parsed)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
 		return nil, false
+	}
+	return groups, true
+}
+
+// compilePropertiesFilter is parsePropertiesFilterParam after decoding; the
+// error is the 400 message. Returns nil when nothing constrains.
+func compilePropertiesFilter(parsed map[string][]json.RawMessage) ([][]json.RawMessage, error) {
+	errInvalid := errors.New("properties filter is invalid")
+	if len(parsed) > maxPropertiesFilterDefinitions {
+		return nil, fmt.Errorf("properties filter cannot cover more than %d definitions", maxPropertiesFilterDefinitions)
 	}
 	groups := make([][]json.RawMessage, 0, len(parsed))
 	totalAlternatives := 0
 	for definitionID, values := range parsed {
 		if _, err := uuid.Parse(definitionID); err != nil {
-			writeError(w, http.StatusBadRequest, fmt.Sprintf("properties filter key %q is not a definition id", definitionID))
-			return nil, false
+			return nil, fmt.Errorf("properties filter key %q is not a definition id", definitionID)
 		}
 		if len(values) == 0 {
 			continue
 		}
 		if len(values) > maxPropertiesFilterValues {
-			writeError(w, http.StatusBadRequest, fmt.Sprintf("properties filter for %s cannot list more than %d values", definitionID, maxPropertiesFilterValues))
-			return nil, false
+			return nil, fmt.Errorf("properties filter for %s cannot list more than %d values", definitionID, maxPropertiesFilterValues)
 		}
 		alternatives := make([]json.RawMessage, 0, len(values)*3)
-		appendAlt := func(v any) bool {
+		appendAlt := func(v any) error {
 			buf, err := json.Marshal(map[string]any{definitionID: v})
 			if err != nil {
-				writeError(w, http.StatusBadRequest, "properties filter is invalid")
-				return false
+				return errInvalid
 			}
 			alternatives = append(alternatives, buf)
-			return true
+			return nil
 		}
 		hasNoValue := false
 		for _, rawValue := range values {
@@ -1038,8 +1034,7 @@ func parsePropertiesFilterParam(w http.ResponseWriter, raw string) ([][]json.Raw
 			if err := json.Unmarshal(rawValue, &stringValue); err == nil {
 				value := stringValue
 				if value == "" {
-					writeError(w, http.StatusBadRequest, "properties filter values cannot be empty")
-					return nil, false
+					return nil, errors.New("properties filter values cannot be empty")
 				}
 				if value == noPropertyValue {
 					if hasNoValue {
@@ -1047,19 +1042,22 @@ func parsePropertiesFilterParam(w http.ResponseWriter, raw string) ([][]json.Raw
 					}
 					marker, err := json.Marshal(map[string]string{noPropertyValue: definitionID})
 					if err != nil {
-						writeError(w, http.StatusBadRequest, "properties filter is invalid")
-						return nil, false
+						return nil, errInvalid
 					}
 					alternatives = append(alternatives, marker)
 					hasNoValue = true
 					continue
 				}
-				if !appendAlt(value) || !appendAlt([]string{value}) { // select string / multi_select element
-					return nil, false
+				// select string / multi_select element
+				if err := appendAlt(value); err != nil {
+					return nil, err
+				}
+				if err := appendAlt([]string{value}); err != nil {
+					return nil, err
 				}
 				if value == "true" || value == "false" {
-					if !appendAlt(value == "true") { // checkbox boolean
-						return nil, false
+					if err := appendAlt(value == "true"); err != nil { // checkbox boolean
+						return nil, err
 					}
 				}
 				if num, err := strconv.ParseFloat(value, 64); err == nil &&
@@ -1068,8 +1066,8 @@ func parsePropertiesFilterParam(w http.ResponseWriter, raw string) ([][]json.Raw
 					// stored jsonb number, not the string form appended above. NaN /
 					// Infinity are skipped: they are not representable as JSON, so
 					// marshaling them would 400 the whole filter.
-					if !appendAlt(num) {
-						return nil, false
+					if err := appendAlt(num); err != nil {
+						return nil, err
 					}
 				}
 				continue
@@ -1077,18 +1075,15 @@ func parsePropertiesFilterParam(w http.ResponseWriter, raw string) ([][]json.Raw
 			// An object member is a scalar operator.
 			var op propertyFilterOperator
 			if err := json.Unmarshal(rawValue, &op); err != nil || op.Op == "" {
-				writeError(w, http.StatusBadRequest, "properties filter values must be strings or {op, value} objects")
-				return nil, false
+				return nil, errors.New("properties filter values must be strings or {op, value} objects")
 			}
 			pattern, err := validatePropertyFilterOperator(definitionID, op)
 			if err != nil {
-				writeError(w, http.StatusBadRequest, err.Error())
-				return nil, false
+				return nil, err
 			}
-			buf, marshalErr := json.Marshal(pattern)
-			if marshalErr != nil {
-				writeError(w, http.StatusBadRequest, "properties filter is invalid")
-				return nil, false
+			buf, err := json.Marshal(pattern)
+			if err != nil {
+				return nil, errInvalid
 			}
 			alternatives = append(alternatives, buf)
 		}
@@ -1096,15 +1091,14 @@ func parsePropertiesFilterParam(w http.ResponseWriter, raw string) ([][]json.Raw
 		groups = append(groups, alternatives)
 	}
 	if len(groups) == 0 {
-		return nil, true
+		return nil, nil
 	}
 	// Bound the OR fan-out: each alternative becomes one bind parameter in
 	// the SQL below, and a runaway filter would bloat the statement.
 	if totalAlternatives > 256 {
-		writeError(w, http.StatusBadRequest, "properties filter is too large")
-		return nil, false
+		return nil, errors.New("properties filter is too large")
 	}
-	return groups, true
+	return groups, nil
 }
 
 // parseNoPropertyValuePattern reports whether an alternative is the synthesized

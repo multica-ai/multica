@@ -17,7 +17,7 @@ SET status = 'cancelled', completed_at = now(),
     cancelled_by_type = 'system', cancelled_by_id = NULL, cancelled_by_name = NULL
 WHERE (runtime_id = ANY($1::uuid[]) OR agent_id = ANY($2::uuid[]))
   AND status IN ('queued', 'dispatched', 'running', 'waiting_local_directory', 'deferred')
-RETURNING id, agent_id, issue_id, status, priority, dispatched_at, started_at, completed_at, result, error, created_at, context, runtime_id, session_id, work_dir, trigger_comment_id, chat_session_id, autopilot_run_id, attempt, max_attempts, parent_task_id, failure_reason, trigger_summary, force_fresh_session, is_leader_task, wait_reason, initiator_user_id, handoff_note, prepare_lease_expires_at, squad_id, runtime_mcp_overlay, escalation_for_task_id, fire_at, originator_user_id, runtime_connected_apps, coalesced_comment_ids, delivered_comment_ids, chat_input_task_id, chat_finalize_deferred_at, originator_source, delegated_from_task_id, retry_of_task_id, rerun_of_task_id, rule_version_id, trigger_evidence_kind, trigger_evidence_ref_id, accountable_user_id, session_rollout_missing, retired_session_id, quick_actions_disabled, regenerate_quick_actions_for, branch_name, durable_work_dir, channel_context_revision, comment_thread_id, cancelled_by_type, cancelled_by_id, cancelled_by_name, issue_snapshot
+RETURNING id, agent_id, issue_id, status, priority, dispatched_at, started_at, completed_at, result, error, created_at, context, runtime_id, session_id, work_dir, trigger_comment_id, chat_session_id, autopilot_run_id, attempt, max_attempts, parent_task_id, failure_reason, trigger_summary, force_fresh_session, is_leader_task, wait_reason, initiator_user_id, handoff_note, prepare_lease_expires_at, squad_id, runtime_mcp_overlay, escalation_for_task_id, fire_at, originator_user_id, runtime_connected_apps, coalesced_comment_ids, delivered_comment_ids, chat_input_task_id, chat_finalize_deferred_at, originator_source, delegated_from_task_id, retry_of_task_id, rerun_of_task_id, rule_version_id, trigger_evidence_kind, trigger_evidence_ref_id, accountable_user_id, session_rollout_missing, retired_session_id, quick_actions_disabled, regenerate_quick_actions_for, branch_name, durable_work_dir, channel_context_revision, comment_thread_id, cancelled_by_type, cancelled_by_id, cancelled_by_name, issue_snapshot, workflow_step
 `
 
 type CancelAgentTasksByRuntimeOrAgentParams struct {
@@ -116,6 +116,122 @@ func (q *Queries) CancelAgentTasksByRuntimeOrAgent(ctx context.Context, arg Canc
 			&i.CancelledByID,
 			&i.CancelledByName,
 			&i.IssueSnapshot,
+			&i.WorkflowStep,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const cancelNonOwnerTasksByRuntime = `-- name: CancelNonOwnerTasksByRuntime :many
+UPDATE agent_task_queue AS task
+SET status = 'cancelled',
+    completed_at = now(), prepare_lease_expires_at = NULL,
+    error = 'runtime access was revoked',
+    failure_reason = $1::text,
+    cancelled_by_type = 'system', cancelled_by_id = NULL, cancelled_by_name = NULL,
+    wait_reason = NULL
+FROM agent
+WHERE task.agent_id = agent.id
+  AND task.runtime_id = $2
+  AND agent.owner_id IS DISTINCT FROM $3
+  AND NOT COALESCE(agent.owner_id = ANY($4::uuid[]), false)
+  AND task.status IN ('queued', 'dispatched', 'running', 'waiting_local_directory', 'deferred')
+RETURNING task.id, task.agent_id, task.issue_id, task.status, task.priority, task.dispatched_at, task.started_at, task.completed_at, task.result, task.error, task.created_at, task.context, task.runtime_id, task.session_id, task.work_dir, task.trigger_comment_id, task.chat_session_id, task.autopilot_run_id, task.attempt, task.max_attempts, task.parent_task_id, task.failure_reason, task.trigger_summary, task.force_fresh_session, task.is_leader_task, task.wait_reason, task.initiator_user_id, task.handoff_note, task.prepare_lease_expires_at, task.squad_id, task.runtime_mcp_overlay, task.escalation_for_task_id, task.fire_at, task.originator_user_id, task.runtime_connected_apps, task.coalesced_comment_ids, task.delivered_comment_ids, task.chat_input_task_id, task.chat_finalize_deferred_at, task.originator_source, task.delegated_from_task_id, task.retry_of_task_id, task.rerun_of_task_id, task.rule_version_id, task.trigger_evidence_kind, task.trigger_evidence_ref_id, task.accountable_user_id, task.session_rollout_missing, task.retired_session_id, task.quick_actions_disabled, task.regenerate_quick_actions_for, task.branch_name, task.durable_work_dir, task.channel_context_revision, task.comment_thread_id, task.cancelled_by_type, task.cancelled_by_id, task.cancelled_by_name, task.issue_snapshot, task.workflow_step
+`
+
+type CancelNonOwnerTasksByRuntimeParams struct {
+	FailureReason  string        `json:"failure_reason"`
+	RuntimeID      pgtype.UUID   `json:"runtime_id"`
+	RuntimeOwnerID pgtype.UUID   `json:"runtime_owner_id"`
+	SharedWith     []pgtype.UUID `json:"shared_with"`
+}
+
+// Server-side execution revocation for a public runtime made private. The
+// join deliberately classifies work by its agent owner rather than cancelling
+// every task on the runtime, so the runtime owner's own tasks keep running.
+// cancellation polling on an online daemon observes the state change; an
+// offline daemon cannot run new work and will observe it after reconnecting.
+func (q *Queries) CancelNonOwnerTasksByRuntime(ctx context.Context, arg CancelNonOwnerTasksByRuntimeParams) ([]AgentTaskQueue, error) {
+	rows, err := q.db.Query(ctx, cancelNonOwnerTasksByRuntime,
+		arg.FailureReason,
+		arg.RuntimeID,
+		arg.RuntimeOwnerID,
+		arg.SharedWith,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []AgentTaskQueue{}
+	for rows.Next() {
+		var i AgentTaskQueue
+		if err := rows.Scan(
+			&i.ID,
+			&i.AgentID,
+			&i.IssueID,
+			&i.Status,
+			&i.Priority,
+			&i.DispatchedAt,
+			&i.StartedAt,
+			&i.CompletedAt,
+			&i.Result,
+			&i.Error,
+			&i.CreatedAt,
+			&i.Context,
+			&i.RuntimeID,
+			&i.SessionID,
+			&i.WorkDir,
+			&i.TriggerCommentID,
+			&i.ChatSessionID,
+			&i.AutopilotRunID,
+			&i.Attempt,
+			&i.MaxAttempts,
+			&i.ParentTaskID,
+			&i.FailureReason,
+			&i.TriggerSummary,
+			&i.ForceFreshSession,
+			&i.IsLeaderTask,
+			&i.WaitReason,
+			&i.InitiatorUserID,
+			&i.HandoffNote,
+			&i.PrepareLeaseExpiresAt,
+			&i.SquadID,
+			&i.RuntimeMcpOverlay,
+			&i.EscalationForTaskID,
+			&i.FireAt,
+			&i.OriginatorUserID,
+			&i.RuntimeConnectedApps,
+			&i.CoalescedCommentIds,
+			&i.DeliveredCommentIds,
+			&i.ChatInputTaskID,
+			&i.ChatFinalizeDeferredAt,
+			&i.OriginatorSource,
+			&i.DelegatedFromTaskID,
+			&i.RetryOfTaskID,
+			&i.RerunOfTaskID,
+			&i.RuleVersionID,
+			&i.TriggerEvidenceKind,
+			&i.TriggerEvidenceRefID,
+			&i.AccountableUserID,
+			&i.SessionRolloutMissing,
+			&i.RetiredSessionID,
+			&i.QuickActionsDisabled,
+			&i.RegenerateQuickActionsFor,
+			&i.BranchName,
+			&i.DurableWorkDir,
+			&i.ChannelContextRevision,
+			&i.CommentThreadID,
+			&i.CancelledByType,
+			&i.CancelledByID,
+			&i.CancelledByName,
+			&i.IssueSnapshot,
+			&i.WorkflowStep,
 		); err != nil {
 			return nil, err
 		}
@@ -218,7 +334,7 @@ SET status = 'failed', completed_at = now(), error = 'runtime went offline',
 FROM victims
 WHERE task.id = victims.id
   AND task.status IN ('dispatched', 'running', 'waiting_local_directory')
-RETURNING task.id, task.agent_id, task.issue_id, task.status, task.priority, task.dispatched_at, task.started_at, task.completed_at, task.result, task.error, task.created_at, task.context, task.runtime_id, task.session_id, task.work_dir, task.trigger_comment_id, task.chat_session_id, task.autopilot_run_id, task.attempt, task.max_attempts, task.parent_task_id, task.failure_reason, task.trigger_summary, task.force_fresh_session, task.is_leader_task, task.wait_reason, task.initiator_user_id, task.handoff_note, task.prepare_lease_expires_at, task.squad_id, task.runtime_mcp_overlay, task.escalation_for_task_id, task.fire_at, task.originator_user_id, task.runtime_connected_apps, task.coalesced_comment_ids, task.delivered_comment_ids, task.chat_input_task_id, task.chat_finalize_deferred_at, task.originator_source, task.delegated_from_task_id, task.retry_of_task_id, task.rerun_of_task_id, task.rule_version_id, task.trigger_evidence_kind, task.trigger_evidence_ref_id, task.accountable_user_id, task.session_rollout_missing, task.retired_session_id, task.quick_actions_disabled, task.regenerate_quick_actions_for, task.branch_name, task.durable_work_dir, task.channel_context_revision, task.comment_thread_id, task.cancelled_by_type, task.cancelled_by_id, task.cancelled_by_name, task.issue_snapshot
+RETURNING task.id, task.agent_id, task.issue_id, task.status, task.priority, task.dispatched_at, task.started_at, task.completed_at, task.result, task.error, task.created_at, task.context, task.runtime_id, task.session_id, task.work_dir, task.trigger_comment_id, task.chat_session_id, task.autopilot_run_id, task.attempt, task.max_attempts, task.parent_task_id, task.failure_reason, task.trigger_summary, task.force_fresh_session, task.is_leader_task, task.wait_reason, task.initiator_user_id, task.handoff_note, task.prepare_lease_expires_at, task.squad_id, task.runtime_mcp_overlay, task.escalation_for_task_id, task.fire_at, task.originator_user_id, task.runtime_connected_apps, task.coalesced_comment_ids, task.delivered_comment_ids, task.chat_input_task_id, task.chat_finalize_deferred_at, task.originator_source, task.delegated_from_task_id, task.retry_of_task_id, task.rerun_of_task_id, task.rule_version_id, task.trigger_evidence_kind, task.trigger_evidence_ref_id, task.accountable_user_id, task.session_rollout_missing, task.retired_session_id, task.quick_actions_disabled, task.regenerate_quick_actions_for, task.branch_name, task.durable_work_dir, task.channel_context_revision, task.comment_thread_id, task.cancelled_by_type, task.cancelled_by_id, task.cancelled_by_name, task.issue_snapshot, task.workflow_step
 `
 
 type FailTasksForOfflineRuntimesParams struct {
@@ -303,6 +419,7 @@ func (q *Queries) FailTasksForOfflineRuntimes(ctx context.Context, arg FailTasks
 			&i.CancelledByID,
 			&i.CancelledByName,
 			&i.IssueSnapshot,
+			&i.WorkflowStep,
 		); err != nil {
 			return nil, err
 		}
@@ -315,7 +432,7 @@ func (q *Queries) FailTasksForOfflineRuntimes(ctx context.Context, arg FailTasks
 }
 
 const findLegacyRuntimesByDaemonID = `-- name: FindLegacyRuntimesByDaemonID :many
-SELECT id, workspace_id, daemon_id, name, runtime_mode, provider, status, device_info, metadata, last_seen_at, created_at, updated_at, owner_id, legacy_daemon_id, visibility, profile_id, custom_name FROM agent_runtime
+SELECT id, workspace_id, daemon_id, name, runtime_mode, provider, status, device_info, metadata, last_seen_at, created_at, updated_at, owner_id, legacy_daemon_id, visibility, profile_id, custom_name, shared_with FROM agent_runtime
 WHERE workspace_id = $1
   AND provider = $2
   AND LOWER(daemon_id) = LOWER($3)
@@ -369,6 +486,7 @@ func (q *Queries) FindLegacyRuntimesByDaemonID(ctx context.Context, arg FindLega
 			&i.Visibility,
 			&i.ProfileID,
 			&i.CustomName,
+			&i.SharedWith,
 		); err != nil {
 			return nil, err
 		}
@@ -428,7 +546,7 @@ func (q *Queries) ForceOfflineRuntimesByIDs(ctx context.Context, runtimeIds []pg
 }
 
 const getAgentRuntime = `-- name: GetAgentRuntime :one
-SELECT id, workspace_id, daemon_id, name, runtime_mode, provider, status, device_info, metadata, last_seen_at, created_at, updated_at, owner_id, legacy_daemon_id, visibility, profile_id, custom_name FROM agent_runtime
+SELECT id, workspace_id, daemon_id, name, runtime_mode, provider, status, device_info, metadata, last_seen_at, created_at, updated_at, owner_id, legacy_daemon_id, visibility, profile_id, custom_name, shared_with FROM agent_runtime
 WHERE id = $1
 `
 
@@ -453,12 +571,13 @@ func (q *Queries) GetAgentRuntime(ctx context.Context, id pgtype.UUID) (AgentRun
 		&i.Visibility,
 		&i.ProfileID,
 		&i.CustomName,
+		&i.SharedWith,
 	)
 	return i, err
 }
 
 const getAgentRuntimeForWorkspace = `-- name: GetAgentRuntimeForWorkspace :one
-SELECT id, workspace_id, daemon_id, name, runtime_mode, provider, status, device_info, metadata, last_seen_at, created_at, updated_at, owner_id, legacy_daemon_id, visibility, profile_id, custom_name FROM agent_runtime
+SELECT id, workspace_id, daemon_id, name, runtime_mode, provider, status, device_info, metadata, last_seen_at, created_at, updated_at, owner_id, legacy_daemon_id, visibility, profile_id, custom_name, shared_with FROM agent_runtime
 WHERE id = $1 AND workspace_id = $2
 `
 
@@ -488,12 +607,13 @@ func (q *Queries) GetAgentRuntimeForWorkspace(ctx context.Context, arg GetAgentR
 		&i.Visibility,
 		&i.ProfileID,
 		&i.CustomName,
+		&i.SharedWith,
 	)
 	return i, err
 }
 
 const getAgentRuntimeHeartbeatLeases = `-- name: GetAgentRuntimeHeartbeatLeases :many
-SELECT id, workspace_id, daemon_id, status, last_seen_at
+SELECT id, workspace_id, daemon_id, owner_id, status, last_seen_at
 FROM agent_runtime
 WHERE id = ANY($1::uuid[])
 `
@@ -502,6 +622,7 @@ type GetAgentRuntimeHeartbeatLeasesRow struct {
 	ID          pgtype.UUID        `json:"id"`
 	WorkspaceID pgtype.UUID        `json:"workspace_id"`
 	DaemonID    pgtype.Text        `json:"daemon_id"`
+	OwnerID     pgtype.UUID        `json:"owner_id"`
 	Status      string             `json:"status"`
 	LastSeenAt  pgtype.Timestamptz `json:"last_seen_at"`
 }
@@ -510,6 +631,9 @@ type GetAgentRuntimeHeartbeatLeasesRow struct {
 // WebSocket authenticates its whole runtime set in one round trip and then
 // keeps these immutable ownership fields plus liveness state in its connection
 // lease, avoiding a GetAgentRuntime call on every heartbeat.
+//
+// owner_id is carried so the WS handshake can enforce runtime ownership for
+// user-credential connections (MUL-8154) with the same single round trip.
 func (q *Queries) GetAgentRuntimeHeartbeatLeases(ctx context.Context, ids []pgtype.UUID) ([]GetAgentRuntimeHeartbeatLeasesRow, error) {
 	rows, err := q.db.Query(ctx, getAgentRuntimeHeartbeatLeases, ids)
 	if err != nil {
@@ -523,6 +647,7 @@ func (q *Queries) GetAgentRuntimeHeartbeatLeases(ctx context.Context, ids []pgty
 			&i.ID,
 			&i.WorkspaceID,
 			&i.DaemonID,
+			&i.OwnerID,
 			&i.Status,
 			&i.LastSeenAt,
 		); err != nil {
@@ -537,7 +662,7 @@ func (q *Queries) GetAgentRuntimeHeartbeatLeases(ctx context.Context, ids []pgty
 }
 
 const getAgentRuntimes = `-- name: GetAgentRuntimes :many
-SELECT id, workspace_id, daemon_id, name, runtime_mode, provider, status, device_info, metadata, last_seen_at, created_at, updated_at, owner_id, legacy_daemon_id, visibility, profile_id, custom_name FROM agent_runtime
+SELECT id, workspace_id, daemon_id, name, runtime_mode, provider, status, device_info, metadata, last_seen_at, created_at, updated_at, owner_id, legacy_daemon_id, visibility, profile_id, custom_name, shared_with FROM agent_runtime
 WHERE id = ANY($1::uuid[])
 `
 
@@ -573,6 +698,7 @@ func (q *Queries) GetAgentRuntimes(ctx context.Context, ids []pgtype.UUID) ([]Ag
 			&i.Visibility,
 			&i.ProfileID,
 			&i.CustomName,
+			&i.SharedWith,
 		); err != nil {
 			return nil, err
 		}
@@ -643,7 +769,7 @@ func (q *Queries) ListAgentRuntimeIDsByWorkspace(ctx context.Context, workspaceI
 }
 
 const listAgentRuntimes = `-- name: ListAgentRuntimes :many
-SELECT id, workspace_id, daemon_id, name, runtime_mode, provider, status, device_info, metadata, last_seen_at, created_at, updated_at, owner_id, legacy_daemon_id, visibility, profile_id, custom_name FROM agent_runtime
+SELECT id, workspace_id, daemon_id, name, runtime_mode, provider, status, device_info, metadata, last_seen_at, created_at, updated_at, owner_id, legacy_daemon_id, visibility, profile_id, custom_name, shared_with FROM agent_runtime
 WHERE workspace_id = $1
 ORDER BY created_at ASC
 `
@@ -675,6 +801,7 @@ func (q *Queries) ListAgentRuntimes(ctx context.Context, workspaceID pgtype.UUID
 			&i.Visibility,
 			&i.ProfileID,
 			&i.CustomName,
+			&i.SharedWith,
 		); err != nil {
 			return nil, err
 		}
@@ -687,7 +814,7 @@ func (q *Queries) ListAgentRuntimes(ctx context.Context, workspaceID pgtype.UUID
 }
 
 const listAgentRuntimesByOwner = `-- name: ListAgentRuntimesByOwner :many
-SELECT id, workspace_id, daemon_id, name, runtime_mode, provider, status, device_info, metadata, last_seen_at, created_at, updated_at, owner_id, legacy_daemon_id, visibility, profile_id, custom_name FROM agent_runtime
+SELECT id, workspace_id, daemon_id, name, runtime_mode, provider, status, device_info, metadata, last_seen_at, created_at, updated_at, owner_id, legacy_daemon_id, visibility, profile_id, custom_name, shared_with FROM agent_runtime
 WHERE workspace_id = $1 AND owner_id = $2
 ORDER BY created_at ASC
 `
@@ -724,6 +851,7 @@ func (q *Queries) ListAgentRuntimesByOwner(ctx context.Context, arg ListAgentRun
 			&i.Visibility,
 			&i.ProfileID,
 			&i.CustomName,
+			&i.SharedWith,
 		); err != nil {
 			return nil, err
 		}
@@ -768,6 +896,296 @@ func (q *Queries) ListDaemonCustomNames(ctx context.Context, arg ListDaemonCusto
 			return nil, err
 		}
 		items = append(items, custom_name)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listNonOwnerActiveTasksByRuntime = `-- name: ListNonOwnerActiveTasksByRuntime :many
+SELECT task.id, task.agent_id, task.issue_id, task.status, task.priority, task.dispatched_at, task.started_at, task.completed_at, task.result, task.error, task.created_at, task.context, task.runtime_id, task.session_id, task.work_dir, task.trigger_comment_id, task.chat_session_id, task.autopilot_run_id, task.attempt, task.max_attempts, task.parent_task_id, task.failure_reason, task.trigger_summary, task.force_fresh_session, task.is_leader_task, task.wait_reason, task.initiator_user_id, task.handoff_note, task.prepare_lease_expires_at, task.squad_id, task.runtime_mcp_overlay, task.escalation_for_task_id, task.fire_at, task.originator_user_id, task.runtime_connected_apps, task.coalesced_comment_ids, task.delivered_comment_ids, task.chat_input_task_id, task.chat_finalize_deferred_at, task.originator_source, task.delegated_from_task_id, task.retry_of_task_id, task.rerun_of_task_id, task.rule_version_id, task.trigger_evidence_kind, task.trigger_evidence_ref_id, task.accountable_user_id, task.session_rollout_missing, task.retired_session_id, task.quick_actions_disabled, task.regenerate_quick_actions_for, task.branch_name, task.durable_work_dir, task.channel_context_revision, task.comment_thread_id, task.cancelled_by_type, task.cancelled_by_id, task.cancelled_by_name, task.issue_snapshot, task.workflow_step
+FROM agent_task_queue AS task
+JOIN agent ON agent.id = task.agent_id
+WHERE task.runtime_id = $1
+  AND agent.owner_id IS DISTINCT FROM $2
+  AND NOT COALESCE(agent.owner_id = ANY($3::uuid[]), false)
+  AND task.status IN ('queued', 'dispatched', 'running', 'waiting_local_directory', 'deferred')
+ORDER BY task.id
+`
+
+type ListNonOwnerActiveTasksByRuntimeParams struct {
+	RuntimeID      pgtype.UUID   `json:"runtime_id"`
+	RuntimeOwnerID pgtype.UUID   `json:"runtime_owner_id"`
+	SharedWith     []pgtype.UUID `json:"shared_with"`
+}
+
+// Lists live tasks whose agent owner will lose runtime access, including
+// hidden Builder execution carriers. shared_with is the desired recipient list.
+func (q *Queries) ListNonOwnerActiveTasksByRuntime(ctx context.Context, arg ListNonOwnerActiveTasksByRuntimeParams) ([]AgentTaskQueue, error) {
+	rows, err := q.db.Query(ctx, listNonOwnerActiveTasksByRuntime, arg.RuntimeID, arg.RuntimeOwnerID, arg.SharedWith)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []AgentTaskQueue{}
+	for rows.Next() {
+		var i AgentTaskQueue
+		if err := rows.Scan(
+			&i.ID,
+			&i.AgentID,
+			&i.IssueID,
+			&i.Status,
+			&i.Priority,
+			&i.DispatchedAt,
+			&i.StartedAt,
+			&i.CompletedAt,
+			&i.Result,
+			&i.Error,
+			&i.CreatedAt,
+			&i.Context,
+			&i.RuntimeID,
+			&i.SessionID,
+			&i.WorkDir,
+			&i.TriggerCommentID,
+			&i.ChatSessionID,
+			&i.AutopilotRunID,
+			&i.Attempt,
+			&i.MaxAttempts,
+			&i.ParentTaskID,
+			&i.FailureReason,
+			&i.TriggerSummary,
+			&i.ForceFreshSession,
+			&i.IsLeaderTask,
+			&i.WaitReason,
+			&i.InitiatorUserID,
+			&i.HandoffNote,
+			&i.PrepareLeaseExpiresAt,
+			&i.SquadID,
+			&i.RuntimeMcpOverlay,
+			&i.EscalationForTaskID,
+			&i.FireAt,
+			&i.OriginatorUserID,
+			&i.RuntimeConnectedApps,
+			&i.CoalescedCommentIds,
+			&i.DeliveredCommentIds,
+			&i.ChatInputTaskID,
+			&i.ChatFinalizeDeferredAt,
+			&i.OriginatorSource,
+			&i.DelegatedFromTaskID,
+			&i.RetryOfTaskID,
+			&i.RerunOfTaskID,
+			&i.RuleVersionID,
+			&i.TriggerEvidenceKind,
+			&i.TriggerEvidenceRefID,
+			&i.AccountableUserID,
+			&i.SessionRolloutMissing,
+			&i.RetiredSessionID,
+			&i.QuickActionsDisabled,
+			&i.RegenerateQuickActionsFor,
+			&i.BranchName,
+			&i.DurableWorkDir,
+			&i.ChannelContextRevision,
+			&i.CommentThreadID,
+			&i.CancelledByType,
+			&i.CancelledByID,
+			&i.CancelledByName,
+			&i.IssueSnapshot,
+			&i.WorkflowStep,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listNonOwnerActiveTasksByRuntimeForUpdate = `-- name: ListNonOwnerActiveTasksByRuntimeForUpdate :many
+SELECT task.id, task.agent_id, task.issue_id, task.status, task.priority, task.dispatched_at, task.started_at, task.completed_at, task.result, task.error, task.created_at, task.context, task.runtime_id, task.session_id, task.work_dir, task.trigger_comment_id, task.chat_session_id, task.autopilot_run_id, task.attempt, task.max_attempts, task.parent_task_id, task.failure_reason, task.trigger_summary, task.force_fresh_session, task.is_leader_task, task.wait_reason, task.initiator_user_id, task.handoff_note, task.prepare_lease_expires_at, task.squad_id, task.runtime_mcp_overlay, task.escalation_for_task_id, task.fire_at, task.originator_user_id, task.runtime_connected_apps, task.coalesced_comment_ids, task.delivered_comment_ids, task.chat_input_task_id, task.chat_finalize_deferred_at, task.originator_source, task.delegated_from_task_id, task.retry_of_task_id, task.rerun_of_task_id, task.rule_version_id, task.trigger_evidence_kind, task.trigger_evidence_ref_id, task.accountable_user_id, task.session_rollout_missing, task.retired_session_id, task.quick_actions_disabled, task.regenerate_quick_actions_for, task.branch_name, task.durable_work_dir, task.channel_context_revision, task.comment_thread_id, task.cancelled_by_type, task.cancelled_by_id, task.cancelled_by_name, task.issue_snapshot, task.workflow_step
+FROM agent_task_queue AS task
+JOIN agent ON agent.id = task.agent_id
+WHERE task.runtime_id = $1
+  AND agent.owner_id IS DISTINCT FROM $2
+  AND NOT COALESCE(agent.owner_id = ANY($3::uuid[]), false)
+  AND task.status IN ('queued', 'dispatched', 'running', 'waiting_local_directory', 'deferred')
+ORDER BY task.id
+FOR UPDATE OF task
+`
+
+type ListNonOwnerActiveTasksByRuntimeForUpdateParams struct {
+	RuntimeID      pgtype.UUID   `json:"runtime_id"`
+	RuntimeOwnerID pgtype.UUID   `json:"runtime_owner_id"`
+	SharedWith     []pgtype.UUID `json:"shared_with"`
+}
+
+// Acquired after the affected agent and chat-session locks. Bindings serialize
+// on LockAgentRuntimeForAccessChange; claim/delivery rechecks authorization.
+func (q *Queries) ListNonOwnerActiveTasksByRuntimeForUpdate(ctx context.Context, arg ListNonOwnerActiveTasksByRuntimeForUpdateParams) ([]AgentTaskQueue, error) {
+	rows, err := q.db.Query(ctx, listNonOwnerActiveTasksByRuntimeForUpdate, arg.RuntimeID, arg.RuntimeOwnerID, arg.SharedWith)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []AgentTaskQueue{}
+	for rows.Next() {
+		var i AgentTaskQueue
+		if err := rows.Scan(
+			&i.ID,
+			&i.AgentID,
+			&i.IssueID,
+			&i.Status,
+			&i.Priority,
+			&i.DispatchedAt,
+			&i.StartedAt,
+			&i.CompletedAt,
+			&i.Result,
+			&i.Error,
+			&i.CreatedAt,
+			&i.Context,
+			&i.RuntimeID,
+			&i.SessionID,
+			&i.WorkDir,
+			&i.TriggerCommentID,
+			&i.ChatSessionID,
+			&i.AutopilotRunID,
+			&i.Attempt,
+			&i.MaxAttempts,
+			&i.ParentTaskID,
+			&i.FailureReason,
+			&i.TriggerSummary,
+			&i.ForceFreshSession,
+			&i.IsLeaderTask,
+			&i.WaitReason,
+			&i.InitiatorUserID,
+			&i.HandoffNote,
+			&i.PrepareLeaseExpiresAt,
+			&i.SquadID,
+			&i.RuntimeMcpOverlay,
+			&i.EscalationForTaskID,
+			&i.FireAt,
+			&i.OriginatorUserID,
+			&i.RuntimeConnectedApps,
+			&i.CoalescedCommentIds,
+			&i.DeliveredCommentIds,
+			&i.ChatInputTaskID,
+			&i.ChatFinalizeDeferredAt,
+			&i.OriginatorSource,
+			&i.DelegatedFromTaskID,
+			&i.RetryOfTaskID,
+			&i.RerunOfTaskID,
+			&i.RuleVersionID,
+			&i.TriggerEvidenceKind,
+			&i.TriggerEvidenceRefID,
+			&i.AccountableUserID,
+			&i.SessionRolloutMissing,
+			&i.RetiredSessionID,
+			&i.QuickActionsDisabled,
+			&i.RegenerateQuickActionsFor,
+			&i.BranchName,
+			&i.DurableWorkDir,
+			&i.ChannelContextRevision,
+			&i.CommentThreadID,
+			&i.CancelledByType,
+			&i.CancelledByID,
+			&i.CancelledByName,
+			&i.IssueSnapshot,
+			&i.WorkflowStep,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listRuntimeOwnersByDaemon = `-- name: ListRuntimeOwnersByDaemon :many
+SELECT id, owner_id FROM agent_runtime
+WHERE workspace_id = $1 AND daemon_id = $2
+`
+
+type ListRuntimeOwnersByDaemonParams struct {
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
+	DaemonID    pgtype.Text `json:"daemon_id"`
+}
+
+type ListRuntimeOwnersByDaemonRow struct {
+	ID      pgtype.UUID `json:"id"`
+	OwnerID pgtype.UUID `json:"owner_id"`
+}
+
+// Registration pre-check (MUL-8154): every runtime row a daemon_id already
+// holds in a workspace, with its owner. A user-credential registration is
+// refused before any write when any of them belongs to someone else.
+func (q *Queries) ListRuntimeOwnersByDaemon(ctx context.Context, arg ListRuntimeOwnersByDaemonParams) ([]ListRuntimeOwnersByDaemonRow, error) {
+	rows, err := q.db.Query(ctx, listRuntimeOwnersByDaemon, arg.WorkspaceID, arg.DaemonID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListRuntimeOwnersByDaemonRow{}
+	for rows.Next() {
+		var i ListRuntimeOwnersByDaemonRow
+		if err := rows.Scan(&i.ID, &i.OwnerID); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listSharedAgentRuntimesForUpdate = `-- name: ListSharedAgentRuntimesForUpdate :many
+SELECT id, workspace_id, daemon_id, name, runtime_mode, provider, status, device_info, metadata, last_seen_at, created_at, updated_at, owner_id, legacy_daemon_id, visibility, profile_id, custom_name, shared_with FROM agent_runtime
+WHERE workspace_id = $1 AND $2::uuid = ANY(shared_with)
+ORDER BY id
+FOR NO KEY UPDATE
+`
+
+type ListSharedAgentRuntimesForUpdateParams struct {
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
+	UserID      pgtype.UUID `json:"user_id"`
+}
+
+func (q *Queries) ListSharedAgentRuntimesForUpdate(ctx context.Context, arg ListSharedAgentRuntimesForUpdateParams) ([]AgentRuntime, error) {
+	rows, err := q.db.Query(ctx, listSharedAgentRuntimesForUpdate, arg.WorkspaceID, arg.UserID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []AgentRuntime{}
+	for rows.Next() {
+		var i AgentRuntime
+		if err := rows.Scan(
+			&i.ID,
+			&i.WorkspaceID,
+			&i.DaemonID,
+			&i.Name,
+			&i.RuntimeMode,
+			&i.Provider,
+			&i.Status,
+			&i.DeviceInfo,
+			&i.Metadata,
+			&i.LastSeenAt,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.OwnerID,
+			&i.LegacyDaemonID,
+			&i.Visibility,
+			&i.ProfileID,
+			&i.CustomName,
+			&i.SharedWith,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
 	}
 	if err := rows.Err(); err != nil {
 		return nil, err
@@ -827,9 +1245,9 @@ func (q *Queries) ListStaleOfflineRuntimeGCCandidates(ctx context.Context, arg L
 }
 
 const listVisibleAgentRuntimes = `-- name: ListVisibleAgentRuntimes :many
-SELECT id, workspace_id, daemon_id, name, runtime_mode, provider, status, device_info, metadata, last_seen_at, created_at, updated_at, owner_id, legacy_daemon_id, visibility, profile_id, custom_name FROM agent_runtime
+SELECT id, workspace_id, daemon_id, name, runtime_mode, provider, status, device_info, metadata, last_seen_at, created_at, updated_at, owner_id, legacy_daemon_id, visibility, profile_id, custom_name, shared_with FROM agent_runtime
 WHERE workspace_id = $1
-  AND (owner_id = $2 OR visibility = 'public')
+  AND (owner_id = $2 OR visibility = 'public' OR (visibility = 'private' AND $2 = ANY(shared_with)))
 ORDER BY created_at ASC
 `
 
@@ -840,7 +1258,7 @@ type ListVisibleAgentRuntimesParams struct {
 
 // A private runtime is another member's machine and must not leak into their
 // runtime list. The owner can always see their own runtime; everyone else
-// sees only runtimes the owner has explicitly shared with the workspace.
+// sees only runtimes shared with them or with the entire workspace.
 func (q *Queries) ListVisibleAgentRuntimes(ctx context.Context, arg ListVisibleAgentRuntimesParams) ([]AgentRuntime, error) {
 	rows, err := q.db.Query(ctx, listVisibleAgentRuntimes, arg.WorkspaceID, arg.OwnerID)
 	if err != nil {
@@ -868,6 +1286,7 @@ func (q *Queries) ListVisibleAgentRuntimes(ctx context.Context, arg ListVisibleA
 			&i.Visibility,
 			&i.ProfileID,
 			&i.CustomName,
+			&i.SharedWith,
 		); err != nil {
 			return nil, err
 		}
@@ -880,7 +1299,7 @@ func (q *Queries) ListVisibleAgentRuntimes(ctx context.Context, arg ListVisibleA
 }
 
 const lockAgentRuntime = `-- name: LockAgentRuntime :one
-SELECT id, workspace_id, daemon_id, name, runtime_mode, provider, status, device_info, metadata, last_seen_at, created_at, updated_at, owner_id, legacy_daemon_id, visibility, profile_id, custom_name FROM agent_runtime
+SELECT id, workspace_id, daemon_id, name, runtime_mode, provider, status, device_info, metadata, last_seen_at, created_at, updated_at, owner_id, legacy_daemon_id, visibility, profile_id, custom_name, shared_with FROM agent_runtime
 WHERE id = $1
 FOR UPDATE
 `
@@ -919,16 +1338,153 @@ func (q *Queries) LockAgentRuntime(ctx context.Context, id pgtype.UUID) (AgentRu
 		&i.Visibility,
 		&i.ProfileID,
 		&i.CustomName,
+		&i.SharedWith,
 	)
 	return i, err
 }
 
+const lockAgentRuntimeForAccessChange = `-- name: LockAgentRuntimeForAccessChange :one
+SELECT id, workspace_id, daemon_id, name, runtime_mode, provider, status, device_info, metadata, last_seen_at, created_at, updated_at, owner_id, legacy_daemon_id, visibility, profile_id, custom_name, shared_with FROM agent_runtime WHERE id = $1 FOR NO KEY UPDATE
+`
+
+// Binding and visibility writers share this lock and recheck access under it.
+// NO KEY UPDATE deliberately permits legacy FK KEY SHARE locks: a chat enqueue
+// holding session/agent locks must not wait here while revocation locks them.
+func (q *Queries) LockAgentRuntimeForAccessChange(ctx context.Context, id pgtype.UUID) (AgentRuntime, error) {
+	row := q.db.QueryRow(ctx, lockAgentRuntimeForAccessChange, id)
+	var i AgentRuntime
+	err := row.Scan(
+		&i.ID,
+		&i.WorkspaceID,
+		&i.DaemonID,
+		&i.Name,
+		&i.RuntimeMode,
+		&i.Provider,
+		&i.Status,
+		&i.DeviceInfo,
+		&i.Metadata,
+		&i.LastSeenAt,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.OwnerID,
+		&i.LegacyDaemonID,
+		&i.Visibility,
+		&i.ProfileID,
+		&i.CustomName,
+		&i.SharedWith,
+	)
+	return i, err
+}
+
+const lockRuntimeRevocationChatSessions = `-- name: LockRuntimeRevocationChatSessions :many
+SELECT cs.id FROM chat_session cs
+WHERE EXISTS (
+    SELECT 1 FROM agent_task_queue task JOIN agent ON agent.id = task.agent_id
+    WHERE task.chat_session_id = cs.id
+      AND task.runtime_id = $1
+      AND agent.owner_id IS DISTINCT FROM $2
+      AND NOT COALESCE(agent.owner_id = ANY($3::uuid[]), false)
+      AND task.status IN ('queued', 'dispatched', 'running', 'waiting_local_directory', 'deferred')
+)
+ORDER BY cs.id
+FOR UPDATE OF cs NOWAIT
+`
+
+type LockRuntimeRevocationChatSessionsParams struct {
+	RuntimeID      pgtype.UUID   `json:"runtime_id"`
+	RuntimeOwnerID pgtype.UUID   `json:"runtime_owner_id"`
+	SharedWith     []pgtype.UUID `json:"shared_with"`
+}
+
+// Revocation already holds affected agents. Never wait in the reverse of the
+// normal session -> agent/task order: a concurrent chat writer yields a 409
+// and the entire revocation rolls back before changing anything.
+func (q *Queries) LockRuntimeRevocationChatSessions(ctx context.Context, arg LockRuntimeRevocationChatSessionsParams) ([]pgtype.UUID, error) {
+	rows, err := q.db.Query(ctx, lockRuntimeRevocationChatSessions, arg.RuntimeID, arg.RuntimeOwnerID, arg.SharedWith)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []pgtype.UUID{}
+	for rows.Next() {
+		var id pgtype.UUID
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		items = append(items, id)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const lockRuntimeShareMemberRemoval = `-- name: LockRuntimeShareMemberRemoval :one
+SELECT id FROM member
+WHERE workspace_id = $1 AND user_id = $2
+FOR UPDATE
+`
+
+type LockRuntimeShareMemberRemovalParams struct {
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
+	UserID      pgtype.UUID `json:"user_id"`
+}
+
+// Prevent new grants until membership deletion commits. Grant writers use
+// NOWAIT on this row, so they never wait while holding a runtime we need.
+func (q *Queries) LockRuntimeShareMemberRemoval(ctx context.Context, arg LockRuntimeShareMemberRemovalParams) (pgtype.UUID, error) {
+	row := q.db.QueryRow(ctx, lockRuntimeShareMemberRemoval, arg.WorkspaceID, arg.UserID)
+	var id pgtype.UUID
+	err := row.Scan(&id)
+	return id, err
+}
+
+const lockRuntimeShareMembers = `-- name: LockRuntimeShareMembers :many
+SELECT user_id FROM member
+WHERE workspace_id = $1 AND user_id = ANY($2::uuid[])
+ORDER BY user_id
+FOR KEY SHARE NOWAIT
+`
+
+type LockRuntimeShareMembersParams struct {
+	WorkspaceID pgtype.UUID   `json:"workspace_id"`
+	UserIds     []pgtype.UUID `json:"user_ids"`
+}
+
+// Keep grant validation and member removal serialized until commit. NOWAIT
+// avoids the member-removal path's reverse member/runtime lock order.
+func (q *Queries) LockRuntimeShareMembers(ctx context.Context, arg LockRuntimeShareMembersParams) ([]pgtype.UUID, error) {
+	rows, err := q.db.Query(ctx, lockRuntimeShareMembers, arg.WorkspaceID, arg.UserIds)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []pgtype.UUID{}
+	for rows.Next() {
+		var user_id pgtype.UUID
+		if err := rows.Scan(&user_id); err != nil {
+			return nil, err
+		}
+		items = append(items, user_id)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const lockRuntimesForMerge = `-- name: LockRuntimesForMerge :many
-SELECT id FROM agent_runtime
+SELECT id, workspace_id, owner_id FROM agent_runtime
 WHERE id = ANY($1::uuid[])
 ORDER BY id
 FOR UPDATE
 `
+
+type LockRuntimesForMergeRow struct {
+	ID          pgtype.UUID `json:"id"`
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
+	OwnerID     pgtype.UUID `json:"owner_id"`
+}
 
 // Step 2: the runtime rows themselves, FOR UPDATE, in id order.
 //
@@ -946,19 +1502,21 @@ FOR UPDATE
 //
 // Returns the ids it actually locked: a caller that asked for two and got fewer
 // knows a runtime disappeared before it got there and must abandon the merge.
-func (q *Queries) LockRuntimesForMerge(ctx context.Context, runtimeIds []pgtype.UUID) ([]pgtype.UUID, error) {
+// workspace_id and owner_id come back with the lock so the merge can verify,
+// against the locked rows, that the caller owns both sides (MUL-8154).
+func (q *Queries) LockRuntimesForMerge(ctx context.Context, runtimeIds []pgtype.UUID) ([]LockRuntimesForMergeRow, error) {
 	rows, err := q.db.Query(ctx, lockRuntimesForMerge, runtimeIds)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	items := []pgtype.UUID{}
+	items := []LockRuntimesForMergeRow{}
 	for rows.Next() {
-		var id pgtype.UUID
-		if err := rows.Scan(&id); err != nil {
+		var i LockRuntimesForMergeRow
+		if err := rows.Scan(&i.ID, &i.WorkspaceID, &i.OwnerID); err != nil {
 			return nil, err
 		}
-		items = append(items, id)
+		items = append(items, i)
 	}
 	if err := rows.Err(); err != nil {
 		return nil, err
@@ -989,7 +1547,7 @@ const markAgentRuntimeOnline = `-- name: MarkAgentRuntimeOnline :one
 UPDATE agent_runtime
 SET status = 'online', last_seen_at = now(), updated_at = now()
 WHERE id = $1
-RETURNING id, workspace_id, daemon_id, name, runtime_mode, provider, status, device_info, metadata, last_seen_at, created_at, updated_at, owner_id, legacy_daemon_id, visibility, profile_id, custom_name
+RETURNING id, workspace_id, daemon_id, name, runtime_mode, provider, status, device_info, metadata, last_seen_at, created_at, updated_at, owner_id, legacy_daemon_id, visibility, profile_id, custom_name, shared_with
 `
 
 // Used on the offline→online transition (and on first heartbeat after
@@ -1016,6 +1574,7 @@ func (q *Queries) MarkAgentRuntimeOnline(ctx context.Context, id pgtype.UUID) (A
 		&i.Visibility,
 		&i.ProfileID,
 		&i.CustomName,
+		&i.SharedWith,
 	)
 	return i, err
 }
@@ -1330,6 +1889,73 @@ func (q *Queries) TouchAgentRuntimesLastSeenBatch(ctx context.Context, ids []pgt
 	return items, nil
 }
 
+const unbindNonOwnerAgentsFromRuntime = `-- name: UnbindNonOwnerAgentsFromRuntime :many
+UPDATE agent
+SET runtime_id = NULL, updated_at = now()
+WHERE runtime_id = $1
+  AND owner_id IS DISTINCT FROM $2
+  AND NOT COALESCE(owner_id = ANY($3::uuid[]), false)
+RETURNING id, workspace_id, name, avatar_url, runtime_mode, runtime_config, visibility, status, max_concurrent_tasks, owner_id, created_at, updated_at, description, runtime_id, instructions, archived_at, archived_by, custom_env, custom_args, mcp_config, model, thinking_level, composio_toolkit_allowlist, permission_mode, kind, system_key, disabled_runtime_skills, service_tier, conversation_starters
+`
+
+type UnbindNonOwnerAgentsFromRuntimeParams struct {
+	RuntimeID      pgtype.UUID   `json:"runtime_id"`
+	RuntimeOwnerID pgtype.UUID   `json:"runtime_owner_id"`
+	SharedWith     []pgtype.UUID `json:"shared_with"`
+}
+
+// Companion to CancelNonOwnerTasksByRuntime: preserve agents belonging to
+// the runtime owner or to recipients who retain access.
+func (q *Queries) UnbindNonOwnerAgentsFromRuntime(ctx context.Context, arg UnbindNonOwnerAgentsFromRuntimeParams) ([]Agent, error) {
+	rows, err := q.db.Query(ctx, unbindNonOwnerAgentsFromRuntime, arg.RuntimeID, arg.RuntimeOwnerID, arg.SharedWith)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []Agent{}
+	for rows.Next() {
+		var i Agent
+		if err := rows.Scan(
+			&i.ID,
+			&i.WorkspaceID,
+			&i.Name,
+			&i.AvatarUrl,
+			&i.RuntimeMode,
+			&i.RuntimeConfig,
+			&i.Visibility,
+			&i.Status,
+			&i.MaxConcurrentTasks,
+			&i.OwnerID,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.Description,
+			&i.RuntimeID,
+			&i.Instructions,
+			&i.ArchivedAt,
+			&i.ArchivedBy,
+			&i.CustomEnv,
+			&i.CustomArgs,
+			&i.McpConfig,
+			&i.Model,
+			&i.ThinkingLevel,
+			&i.ComposioToolkitAllowlist,
+			&i.PermissionMode,
+			&i.Kind,
+			&i.SystemKey,
+			&i.DisabledRuntimeSkills,
+			&i.ServiceTier,
+			&i.ConversationStarters,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const unbindTasksFromRuntime = `-- name: UnbindTasksFromRuntime :execrows
 UPDATE agent_task_queue
 SET runtime_id = NULL
@@ -1423,7 +2049,7 @@ const updateAgentRuntimeCustomName = `-- name: UpdateAgentRuntimeCustomName :one
 UPDATE agent_runtime
 SET custom_name = $1, updated_at = now()
 WHERE id = $2
-RETURNING id, workspace_id, daemon_id, name, runtime_mode, provider, status, device_info, metadata, last_seen_at, created_at, updated_at, owner_id, legacy_daemon_id, visibility, profile_id, custom_name
+RETURNING id, workspace_id, daemon_id, name, runtime_mode, provider, status, device_info, metadata, last_seen_at, created_at, updated_at, owner_id, legacy_daemon_id, visibility, profile_id, custom_name, shared_with
 `
 
 type UpdateAgentRuntimeCustomNameParams struct {
@@ -1457,6 +2083,7 @@ func (q *Queries) UpdateAgentRuntimeCustomName(ctx context.Context, arg UpdateAg
 		&i.Visibility,
 		&i.ProfileID,
 		&i.CustomName,
+		&i.SharedWith,
 	)
 	return i, err
 }
@@ -1467,7 +2094,7 @@ SET custom_name = $1, updated_at = now()
 WHERE workspace_id = $2
   AND daemon_id = $3
   AND ($4::uuid IS NULL OR owner_id = $4)
-RETURNING id, workspace_id, daemon_id, name, runtime_mode, provider, status, device_info, metadata, last_seen_at, created_at, updated_at, owner_id, legacy_daemon_id, visibility, profile_id, custom_name
+RETURNING id, workspace_id, daemon_id, name, runtime_mode, provider, status, device_info, metadata, last_seen_at, created_at, updated_at, owner_id, legacy_daemon_id, visibility, profile_id, custom_name, shared_with
 `
 
 type UpdateAgentRuntimeCustomNameByDaemonParams struct {
@@ -1515,6 +2142,7 @@ func (q *Queries) UpdateAgentRuntimeCustomNameByDaemon(ctx context.Context, arg 
 			&i.Visibility,
 			&i.ProfileID,
 			&i.CustomName,
+			&i.SharedWith,
 		); err != nil {
 			return nil, err
 		}
@@ -1528,22 +2156,24 @@ func (q *Queries) UpdateAgentRuntimeCustomNameByDaemon(ctx context.Context, arg 
 
 const updateAgentRuntimeVisibility = `-- name: UpdateAgentRuntimeVisibility :one
 UPDATE agent_runtime
-SET visibility = $1, updated_at = now()
-WHERE id = $2
-RETURNING id, workspace_id, daemon_id, name, runtime_mode, provider, status, device_info, metadata, last_seen_at, created_at, updated_at, owner_id, legacy_daemon_id, visibility, profile_id, custom_name
+SET visibility = $1, shared_with = $2::uuid[], updated_at = now()
+WHERE id = $3
+RETURNING id, workspace_id, daemon_id, name, runtime_mode, provider, status, device_info, metadata, last_seen_at, created_at, updated_at, owner_id, legacy_daemon_id, visibility, profile_id, custom_name, shared_with
 `
 
 type UpdateAgentRuntimeVisibilityParams struct {
-	Visibility string      `json:"visibility"`
-	ID         pgtype.UUID `json:"id"`
+	Visibility string        `json:"visibility"`
+	SharedWith []pgtype.UUID `json:"shared_with"`
+	ID         pgtype.UUID   `json:"id"`
 }
 
-// Toggles a runtime between 'private' (only owner can bind agents) and
-// 'public' (any workspace member can). Default for new rows is 'private'
-// (see migration 083). Gated at the handler layer to owner / workspace
-// admin only.
+// Replaces the runtime's access policy: private admits owner plus shared_with;
+// public admits any workspace member. Default for new rows is private
+// (see migration 083). Gated at the handler layer to the runtime owner only:
+// visibility is consent to use that person's machine, not a workspace-governance
+// setting.
 func (q *Queries) UpdateAgentRuntimeVisibility(ctx context.Context, arg UpdateAgentRuntimeVisibilityParams) (AgentRuntime, error) {
-	row := q.db.QueryRow(ctx, updateAgentRuntimeVisibility, arg.Visibility, arg.ID)
+	row := q.db.QueryRow(ctx, updateAgentRuntimeVisibility, arg.Visibility, arg.SharedWith, arg.ID)
 	var i AgentRuntime
 	err := row.Scan(
 		&i.ID,
@@ -1563,6 +2193,7 @@ func (q *Queries) UpdateAgentRuntimeVisibility(ctx context.Context, arg UpdateAg
 		&i.Visibility,
 		&i.ProfileID,
 		&i.CustomName,
+		&i.SharedWith,
 	)
 	return i, err
 }
@@ -1579,7 +2210,10 @@ INSERT INTO agent_runtime (
     metadata,
     owner_id,
     last_seen_at
-) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, now())
+) VALUES (
+    $1, $2, $3, $4, $5, $6,
+    $7, $8, $9, now()
+)
 ON CONFLICT (workspace_id, daemon_id, provider) WHERE profile_id IS NULL
 DO UPDATE SET
     name = EXCLUDED.name,
@@ -1590,19 +2224,22 @@ DO UPDATE SET
     owner_id = COALESCE(EXCLUDED.owner_id, agent_runtime.owner_id),
     last_seen_at = now(),
     updated_at = now()
-RETURNING id, workspace_id, daemon_id, name, runtime_mode, provider, status, device_info, metadata, last_seen_at, created_at, updated_at, owner_id, legacy_daemon_id, visibility, profile_id, custom_name, (xmax = 0) AS inserted
+WHERE $10::uuid IS NULL
+   OR agent_runtime.owner_id = $10::uuid
+RETURNING id, workspace_id, daemon_id, name, runtime_mode, provider, status, device_info, metadata, last_seen_at, created_at, updated_at, owner_id, legacy_daemon_id, visibility, profile_id, custom_name, shared_with, (xmax = 0) AS inserted
 `
 
 type UpsertAgentRuntimeParams struct {
-	WorkspaceID pgtype.UUID `json:"workspace_id"`
-	DaemonID    pgtype.Text `json:"daemon_id"`
-	Name        string      `json:"name"`
-	RuntimeMode string      `json:"runtime_mode"`
-	Provider    string      `json:"provider"`
-	Status      string      `json:"status"`
-	DeviceInfo  string      `json:"device_info"`
-	Metadata    []byte      `json:"metadata"`
-	OwnerID     pgtype.UUID `json:"owner_id"`
+	WorkspaceID     pgtype.UUID `json:"workspace_id"`
+	DaemonID        pgtype.Text `json:"daemon_id"`
+	Name            string      `json:"name"`
+	RuntimeMode     string      `json:"runtime_mode"`
+	Provider        string      `json:"provider"`
+	Status          string      `json:"status"`
+	DeviceInfo      string      `json:"device_info"`
+	Metadata        []byte      `json:"metadata"`
+	OwnerID         pgtype.UUID `json:"owner_id"`
+	RequiredOwnerID pgtype.UUID `json:"required_owner_id"`
 }
 
 type UpsertAgentRuntimeRow struct {
@@ -1623,12 +2260,21 @@ type UpsertAgentRuntimeRow struct {
 	Visibility     string             `json:"visibility"`
 	ProfileID      pgtype.UUID        `json:"profile_id"`
 	CustomName     pgtype.Text        `json:"custom_name"`
+	SharedWith     []pgtype.UUID      `json:"shared_with"`
 	Inserted       bool               `json:"inserted"`
 }
 
 // (xmax = 0) AS inserted distinguishes a fresh insert (true) from an upsert
 // that updated an existing row (false). Analytics reads this to fire
 // runtime_registered/runtime_ready only on first-time registration.
+//
+// Ownership fence (MUL-8154): when required_owner_id is set (user-credential
+// registration), the conflict branch only updates a row already owned by that
+// user. A row owned by someone else - or by nobody - is left untouched and the
+// statement returns no row, so a workspace member cannot take over another
+// member's runtime by re-registering its (daemon_id, provider). Daemon-token
+// registration passes NULL here and NULL owner_id, which keeps the existing
+// owner via the COALESCE below.
 // Built-in runtimes carry no profile_id. The arbiter is the partial unique
 // index from migration 121 (WHERE profile_id IS NULL); the predicate must be
 // spelled out so Postgres selects that partial index, not the custom-runtime
@@ -1644,6 +2290,7 @@ func (q *Queries) UpsertAgentRuntime(ctx context.Context, arg UpsertAgentRuntime
 		arg.DeviceInfo,
 		arg.Metadata,
 		arg.OwnerID,
+		arg.RequiredOwnerID,
 	)
 	var i UpsertAgentRuntimeRow
 	err := row.Scan(
@@ -1664,6 +2311,7 @@ func (q *Queries) UpsertAgentRuntime(ctx context.Context, arg UpsertAgentRuntime
 		&i.Visibility,
 		&i.ProfileID,
 		&i.CustomName,
+		&i.SharedWith,
 		&i.Inserted,
 	)
 	return i, err
@@ -1682,7 +2330,10 @@ INSERT INTO agent_runtime (
     owner_id,
     profile_id,
     last_seen_at
-) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, now())
+) VALUES (
+    $1, $2, $3, $4, $5, $6,
+    $7, $8, $9, $10, now()
+)
 ON CONFLICT (workspace_id, daemon_id, profile_id) WHERE profile_id IS NOT NULL
 DO UPDATE SET
     name = EXCLUDED.name,
@@ -1694,20 +2345,23 @@ DO UPDATE SET
     owner_id = COALESCE(EXCLUDED.owner_id, agent_runtime.owner_id),
     last_seen_at = now(),
     updated_at = now()
-RETURNING id, workspace_id, daemon_id, name, runtime_mode, provider, status, device_info, metadata, last_seen_at, created_at, updated_at, owner_id, legacy_daemon_id, visibility, profile_id, custom_name, (xmax = 0) AS inserted
+WHERE $11::uuid IS NULL
+   OR agent_runtime.owner_id = $11::uuid
+RETURNING id, workspace_id, daemon_id, name, runtime_mode, provider, status, device_info, metadata, last_seen_at, created_at, updated_at, owner_id, legacy_daemon_id, visibility, profile_id, custom_name, shared_with, (xmax = 0) AS inserted
 `
 
 type UpsertAgentRuntimeWithProfileParams struct {
-	WorkspaceID pgtype.UUID `json:"workspace_id"`
-	DaemonID    pgtype.Text `json:"daemon_id"`
-	Name        string      `json:"name"`
-	RuntimeMode string      `json:"runtime_mode"`
-	Provider    string      `json:"provider"`
-	Status      string      `json:"status"`
-	DeviceInfo  string      `json:"device_info"`
-	Metadata    []byte      `json:"metadata"`
-	OwnerID     pgtype.UUID `json:"owner_id"`
-	ProfileID   pgtype.UUID `json:"profile_id"`
+	WorkspaceID     pgtype.UUID `json:"workspace_id"`
+	DaemonID        pgtype.Text `json:"daemon_id"`
+	Name            string      `json:"name"`
+	RuntimeMode     string      `json:"runtime_mode"`
+	Provider        string      `json:"provider"`
+	Status          string      `json:"status"`
+	DeviceInfo      string      `json:"device_info"`
+	Metadata        []byte      `json:"metadata"`
+	OwnerID         pgtype.UUID `json:"owner_id"`
+	ProfileID       pgtype.UUID `json:"profile_id"`
+	RequiredOwnerID pgtype.UUID `json:"required_owner_id"`
 }
 
 type UpsertAgentRuntimeWithProfileRow struct {
@@ -1728,6 +2382,7 @@ type UpsertAgentRuntimeWithProfileRow struct {
 	Visibility     string             `json:"visibility"`
 	ProfileID      pgtype.UUID        `json:"profile_id"`
 	CustomName     pgtype.Text        `json:"custom_name"`
+	SharedWith     []pgtype.UUID      `json:"shared_with"`
 	Inserted       bool               `json:"inserted"`
 }
 
@@ -1737,7 +2392,8 @@ type UpsertAgentRuntimeWithProfileRow struct {
 // single daemon can host the built-in provider AND any number of custom
 // profiles of the same protocol family. provider carries the base runtime
 // identity so ResolveBackend applies its descriptor; profile_id preserves
-// custom-profile provenance. (xmax = 0) AS inserted mirrors UpsertAgentRuntime.
+// custom-profile provenance. (xmax = 0) AS inserted mirrors UpsertAgentRuntime,
+// and the required_owner_id fence matches it too.
 func (q *Queries) UpsertAgentRuntimeWithProfile(ctx context.Context, arg UpsertAgentRuntimeWithProfileParams) (UpsertAgentRuntimeWithProfileRow, error) {
 	row := q.db.QueryRow(ctx, upsertAgentRuntimeWithProfile,
 		arg.WorkspaceID,
@@ -1750,6 +2406,7 @@ func (q *Queries) UpsertAgentRuntimeWithProfile(ctx context.Context, arg UpsertA
 		arg.Metadata,
 		arg.OwnerID,
 		arg.ProfileID,
+		arg.RequiredOwnerID,
 	)
 	var i UpsertAgentRuntimeWithProfileRow
 	err := row.Scan(
@@ -1770,6 +2427,7 @@ func (q *Queries) UpsertAgentRuntimeWithProfile(ctx context.Context, arg UpsertA
 		&i.Visibility,
 		&i.ProfileID,
 		&i.CustomName,
+		&i.SharedWith,
 		&i.Inserted,
 	)
 	return i, err

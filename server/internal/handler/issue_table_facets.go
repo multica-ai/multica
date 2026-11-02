@@ -50,21 +50,40 @@ func issueTableQueryWithoutFacet(input issueTableQuerySpec, facet issueTableFace
 		}
 	}
 
+	withoutNegate := func(field string) {
+		kept := make([]string, 0, len(input.Filters.Negate))
+		for _, negated := range input.Filters.Negate {
+			if negated != field {
+				kept = append(kept, negated)
+			}
+		}
+		if len(kept) == 0 {
+			kept = nil
+		}
+		output.Filters.Negate = kept
+	}
+
 	switch facet.Kind {
 	case "status":
 		output.Filters.Statuses = nil
+		withoutNegate("statuses")
 	case "priority":
 		output.Filters.Priorities = nil
+		withoutNegate("priorities")
 	case "assignee":
 		output.Filters.Assignees = nil
 		output.Filters.IncludeNoAssignee = false
+		withoutNegate("assignees")
 	case "creator":
 		output.Filters.Creators = nil
+		withoutNegate("creators")
 	case "project":
 		output.Filters.ProjectIDs = nil
 		output.Filters.IncludeNoProject = false
+		withoutNegate("project_ids")
 	case "label":
 		output.Filters.LabelIDs = nil
+		withoutNegate("label_ids")
 	case "property":
 		delete(output.Filters.Properties, facet.PropertyID)
 	case "working_agents":
@@ -265,13 +284,15 @@ GROUP BY r.agent_id`, len(compiled.args)+1, compiled.where)
 			// Unset issues count under the "__none__" bucket so the filter menu's
 			// "No value" option carries a real count (issues without the key).
 			query = fmt.Sprintf(`SELECT COALESCE(i.properties ->> %s, '__none__'), COUNT(*)::bigint FROM issue i WHERE %s AND (jsonb_typeof(i.properties -> %s) = 'string' OR NOT (i.properties ? %s)) GROUP BY 1`, propertyKey, compiled.where, propertyKey, propertyKey)
-		case "text", "url", "date", "number":
-			// Scalar values are free-form, so grouping by distinct value would
-			// return one row per observed value with no bound. The filter menu
-			// only reads the "__none__" bucket for these types, so compute just
-			// the two bounded buckets instead of pulling the whole value space.
-			// Key existence is exact for "no value": stored values can never be
-			// null or empty, so a present key is always a set value.
+		case "text", "url", "date", "number", "multi_text", "multi_url":
+			// Scalar and free-form-list values are unbounded distinct-value
+			// spaces (multi_text/multi_url enumerate arbitrary user strings),
+			// so grouping by distinct value would return one row per observed
+			// value with no bound. The filter menu only reads the "__none__"
+			// bucket for these types, so compute just the two bounded buckets
+			// instead of pulling the whole value space. Key existence is exact
+			// for "no value": stored values can never be null or empty, so a
+			// present key is always a set value.
 			query = fmt.Sprintf(`SELECT CASE WHEN i.properties ? %s THEN '__set__' ELSE '__none__' END, COUNT(*)::bigint FROM issue i WHERE %s GROUP BY 1`, propertyKey, compiled.where)
 		case "multi_select", "multi_actor":
 			query = fmt.Sprintf(`SELECT COALESCE(property_value.value, '__none__'), COUNT(DISTINCT i.id)::bigint FROM issue i JOIN LATERAL (SELECT jsonb_array_elements_text(CASE WHEN jsonb_typeof(i.properties -> %s) = 'array' THEN i.properties -> %s ELSE '[]'::jsonb END) AS value UNION ALL SELECT NULL WHERE NOT (i.properties ? %s)) property_value(value) ON TRUE WHERE %s GROUP BY 1`, propertyKey, propertyKey, propertyKey, compiled.where)

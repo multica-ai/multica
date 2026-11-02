@@ -11,8 +11,11 @@
     "more_agents_other": "외 에이전트 {{count}}개"
   },
   "detail": {
-    "workspace_fallback": "워크스페이스",
     "members_breadcrumb": "멤버",
+    "role": "역할",
+    "email": "이메일",
+    "joined": "참여일",
+    "relation": "관계",
     "breadcrumb_fallback": "멤버",
     "not_found_title": "멤버를 찾을 수 없습니다",
     "not_found_description": "이 멤버가 워크스페이스를 떠났을 수 있습니다."

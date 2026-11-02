@@ -34,6 +34,19 @@ func TestGitEnv(t *testing.T) {
 		t.Error("gitEnv() must include GIT_TERMINAL_PROMPT=0")
 	}
 
+	// Must contain GCM_INTERACTIVE=never so the Windows Git Credential
+	// Manager cannot spray login dialogs from background sync.
+	found = false
+	for _, entry := range env {
+		if entry == "GCM_INTERACTIVE=never" {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Error("gitEnv() must include GCM_INTERACTIVE=never")
+	}
+
 	// Must contain HOME from the current environment.
 	home := os.Getenv("HOME")
 	if home == "" {
@@ -759,6 +772,72 @@ func TestCreateWorktree(t *testing.T) {
 	}
 	if got := strings.TrimSpace(string(out)); got != result.BranchName {
 		t.Errorf("expected branch %q, got %q", result.BranchName, got)
+	}
+}
+
+func TestCreateWorktreeReportsFailedFetch(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct {
+		name     string
+		isolated bool
+	}{
+		{name: "shared worktree"},
+		{name: "isolated checkout", isolated: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			sourceRepo := createTestRepo(t)
+			cache := New(t.TempDir(), testLogger())
+			if err := cache.Sync("ws-1", []RepoInfo{{URL: sourceRepo}}); err != nil {
+				t.Fatalf("sync failed: %v", err)
+			}
+			params := WorktreeParams{
+				WorkspaceID:         "ws-1",
+				RepoURL:             sourceRepo,
+				WorkDir:             t.TempDir(),
+				AgentName:           "QA",
+				TaskID:              "b2c3d4e5-f6a7-8901-bcde-f12345678901",
+				IsolatedGitMetadata: tc.isolated,
+			}
+
+			result, err := cache.CreateWorktree(params)
+			if err != nil {
+				t.Fatalf("CreateWorktree failed: %v", err)
+			}
+			if result.FetchError != "" {
+				t.Fatalf("FetchError = %q after a successful fetch, want empty", result.FetchError)
+			}
+			if got := isIsolatedCheckout(result.Path); got != tc.isolated {
+				t.Fatalf("isolated checkout = %v, want %v", got, tc.isolated)
+			}
+
+			if err := os.RemoveAll(sourceRepo); err != nil {
+				t.Fatalf("remove origin: %v", err)
+			}
+
+			// The reused checkout and a new one for another task both come from the
+			// cached copy and must say so instead of reading as current.
+			result, err = cache.CreateWorktree(params)
+			if err != nil {
+				t.Fatalf("CreateWorktree on the existing checkout failed: %v", err)
+			}
+			if !strings.Contains(result.FetchError, "git fetch") {
+				t.Fatalf("existing checkout FetchError = %q, want the git fetch error", result.FetchError)
+			}
+
+			params.WorkDir = t.TempDir()
+			params.TaskID = "c3d4e5f6-a7b8-9012-cdef-123456789012"
+			result, err = cache.CreateWorktree(params)
+			if err != nil {
+				t.Fatalf("CreateWorktree with an unreachable origin failed: %v", err)
+			}
+			if !strings.Contains(result.FetchError, "git fetch") {
+				t.Fatalf("new checkout FetchError = %q, want the git fetch error", result.FetchError)
+			}
+			if _, err := os.Stat(result.Path); err != nil {
+				t.Fatalf("checkout from the cached copy is missing: %v", err)
+			}
+		})
 	}
 }
 

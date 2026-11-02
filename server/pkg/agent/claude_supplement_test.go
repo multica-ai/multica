@@ -252,6 +252,13 @@ func runFakeClaudeSupplement() {
 		}
 		return frame
 	}
+	if delay := os.Getenv("CLAUDE_SUPPLEMENT_INIT_DELAY"); delay != "" {
+		d, err := time.ParseDuration(delay)
+		if err != nil {
+			os.Exit(20)
+		}
+		time.Sleep(d)
+	}
 	init := read()
 	if init["type"] != "control_request" {
 		os.Exit(12)
@@ -321,14 +328,21 @@ func runFakeClaudeSupplement() {
 }
 
 func TestClaudeSupplementExecuteUsesSamePromptUnderBackpressure(t *testing.T) {
+	t.Run("immediate initialization", func(t *testing.T) { testClaudeSupplementExecute(t, "", 0) })
+	t.Run("slow default initialization", func(t *testing.T) { testClaudeSupplementExecute(t, "3.2s", 0) })
+	t.Run("configured initialization budget", func(t *testing.T) { testClaudeSupplementExecute(t, "3.2s", 5*time.Second) })
+}
+
+func testClaudeSupplementExecute(t *testing.T, delay string, handshakeTimeout time.Duration) {
+	t.Helper()
 	self, err := os.Executable()
 	if err != nil {
 		t.Fatal(err)
 	}
-	b := &claudeBackend{cfg: Config{ExecutablePath: self, Logger: slog.Default(), Env: map[string]string{"CLAUDE_FAKE_MODE": "supplement", "IS_SANDBOX": "1"}}}
+	b := &claudeBackend{cfg: Config{ExecutablePath: self, Logger: slog.Default(), Env: map[string]string{"CLAUDE_FAKE_MODE": "supplement", "CLAUDE_SUPPLEMENT_INIT_DELAY": delay, "IS_SANDBOX": "1"}}}
 	ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
 	defer cancel()
-	session, err := b.Execute(ctx, "original goal", ExecOptions{EnableTaskSupplement: true})
+	session, err := b.Execute(ctx, "original goal", ExecOptions{EnableTaskSupplement: true, HandshakeTimeout: handshakeTimeout})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -373,9 +387,9 @@ func TestClaudeSupplementInitializeFailure(t *testing.T) {
 			b := &claudeBackend{cfg: Config{ExecutablePath: self, Logger: slog.Default(), Env: map[string]string{
 				"CLAUDE_FAKE_MODE": "supplement", "CLAUDE_SUPPLEMENT_INIT_FAILURE": failure, "IS_SANDBOX": "1",
 			}}}
-			ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
+			ctx, cancel := context.WithTimeout(t.Context(), 2*time.Second)
 			defer cancel()
-			session, err := b.Execute(ctx, "original goal", ExecOptions{EnableTaskSupplement: true, HandshakeTimeout: time.Hour})
+			session, err := b.Execute(ctx, "original goal", ExecOptions{EnableTaskSupplement: true, HandshakeTimeout: 50 * time.Millisecond})
 			if err != nil {
 				t.Fatal(err)
 			}

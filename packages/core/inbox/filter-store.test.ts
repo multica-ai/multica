@@ -170,6 +170,82 @@ describe("unread filtering", () => {
       filterInboxItems(rows, { ...EMPTY_INBOX_FILTERS, unreadOnly: true }),
     ).toEqual(rows);
   });
+
+  it("keeps the open notification visible after opening marks it read", () => {
+    const filters = { ...EMPTY_INBOX_FILTERS, unreadOnly: true };
+    const opened = item("opened", "todo", "high", { read: true });
+    const read = item("read", "todo", "high", { read: true });
+
+    expect(
+      filterInboxItems([opened, read], filters, { pinnedUnreadKey: "issue-opened" }).map(
+        (candidate) => candidate.id,
+      ),
+    ).toEqual(["opened"]);
+
+    // Pinning only crosses the unread dimension: an explicit issue filter
+    // still removes the open row, and the page clears its selection.
+    expect(
+      filterInboxItems([opened], { ...filters, statuses: ["done"] }, { pinnedUnreadKey: "issue-opened" }),
+    ).toEqual([]);
+  });
+});
+
+describe("idle filtering", () => {
+  it("keeps only issues no agent is active on and counts as one filter", () => {
+    const rows = [
+      item("busy", "todo", "high", { issue_id: "issue-busy" }),
+      item("idle", "todo", "high", { issue_id: "issue-idle" }),
+      // Idle is a property of an issue; a row without one has none to report.
+      item("no-issue", null, null),
+    ];
+    const filters = { ...EMPTY_INBOX_FILTERS, idleOnly: true };
+
+    expect(
+      filterInboxItems(rows, filters, { activeIssueIds: new Set(["issue-busy"]) }).map(
+        (candidate) => candidate.id,
+      ),
+    ).toEqual(["idle"]);
+    expect(inboxFilterCount(filters)).toBe(1);
+  });
+});
+
+describe("pinned row with idle filtering", () => {
+  it("keeps the open notification after an agent starts on its issue", () => {
+    const filters = { ...EMPTY_INBOX_FILTERS, idleOnly: true };
+    const opened = item("opened", "todo", "high", { issue_id: "issue-opened" });
+    const other = item("other", "todo", "high", { issue_id: "issue-other" });
+    const activeIssueIds = new Set(["issue-opened", "issue-other"]);
+
+    expect(
+      filterInboxItems([opened, other], filters, {
+        activeIssueIds,
+        pinnedIdleKey: "issue-opened",
+      }).map((candidate) => candidate.id),
+    ).toEqual(["opened"]);
+
+    // Each pin crosses only its own dimension.
+    expect(
+      filterInboxItems([opened], filters, {
+        activeIssueIds,
+        pinnedUnreadKey: "issue-opened",
+      }),
+    ).toEqual([]);
+    expect(
+      filterInboxItems(
+        [{ ...opened, read: true }],
+        { ...filters, idleOnly: false, unreadOnly: true },
+        { pinnedIdleKey: "issue-opened" },
+      ),
+    ).toEqual([]);
+
+    // The pin still never crosses an explicit issue filter.
+    expect(
+      filterInboxItems([opened], { ...filters, statuses: ["done"] }, {
+        activeIssueIds,
+        pinnedIdleKey: "issue-opened",
+      }),
+    ).toEqual([]);
+  });
 });
 
 describe("inboxPriorityFilterSupport", () => {

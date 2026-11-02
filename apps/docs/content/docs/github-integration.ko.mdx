@@ -4,6 +4,8 @@ description: pull request를 Multica 태스크에 연결하고 태스크에서 �
 ---
 
 import { Callout } from "fumadocs-ui/components/callout";
+import { Step, Steps } from "fumadocs-ui/components/steps";
+import { PrLinkDemo } from "@/components/demos/pr-link-demo";
 
 GitHub를 연결하면 Multica가 태스크 번호를 기준으로 pull request를 자동 연결합니다. 태스크 상세 화면에서 PR 상태, 변경 규모, CI 결과, merge conflict를 바로 확인할 수 있습니다.
 
@@ -15,10 +17,20 @@ GitHub 연동은 설치할 때 승인한 저장소만 읽으며 코드, 댓글, 
 
 워크스페이스 owner 또는 admin이 연결할 수 있습니다.
 
-1. **설정 → 코드**를 엽니다.
-2. **GitHub** 행에서 **GitHub 연결**을 클릭합니다.
-3. GitHub에서 계정 또는 조직을 선택하고 모든 저장소나 지정한 저장소를 승인합니다.
-4. 설치가 끝나면 Multica로 돌아옵니다.
+<Steps>
+<Step>
+**설정 → 코드**를 엽니다.
+</Step>
+<Step>
+**GitHub** 행에서 **GitHub 연결**을 클릭합니다.
+</Step>
+<Step>
+GitHub에서 계정 또는 조직을 선택하고 모든 저장소나 지정한 저장소를 승인합니다.
+</Step>
+<Step>
+설치가 끝나면 Multica로 돌아옵니다.
+</Step>
+</Steps>
 
 연결 상태는 같은 페이지에 표시됩니다. 일반 멤버는 상태를 볼 수 있지만 연결, 연결 해제, 스위치 변경은 할 수 없습니다.
 
@@ -35,9 +47,8 @@ GitHub 연동은 설치할 때 승인한 저장소만 읽으며 코드, 댓글, 
 | PR 사이드바 | 태스크 상세 화면에 연결된 pull request를 표시합니다. |
 | Co-authored-by | 에이전트가 만든 commit에 `Co-authored-by: multica-agent <github@multica.ai>`를 추가합니다. |
 | PR 자동 연결 | 브랜치 이름이나 제목에 태스크 번호가 있거나, 본문에서 closing keyword 바로 뒤에 태스크 번호를 쓴 PR을 해당 태스크에 연결합니다. |
-| PR 병합 후 태스크 상태 | 태스크에 연결된 PR이 모두 병합되면 태스크를 특정 상태(기본값 `Done`)로 바꿀지, 바꾸지 않을지 정합니다. 아래 **PR 병합 후 상태 변경**을 참고하세요. |
-| **PR 카드 → CI와 머지 가능 여부** | 연결된 각 PR에 대해 Multica는 인증된 GitHub API 스냅샷을 가져와, 그 **CI 상태**와 **머지 가능 여부**를 카드에 미러링합니다(아래 **PR 카드에 표시되는 것** 참조). |
-
+| PR 병합 후 태스크 상태 | 태스크에 연결된 PR이 모두 병합되면 태스크를 특정 상태(기본값 `Done`)로 바꿀지, 바꾸지 않을지 정합니다. [PR 병합 후 상태 변경](#pr-병합-후-상태-변경)을 참고하세요. |
+| PR 카드 → CI와 merge 가능 여부 | 연결된 각 PR에 대해 Multica는 App 신원으로 GitHub API에서 snapshot을 가져와 CI 상태와 merge 가능 여부를 카드에 표시합니다. [태스크에서 PR 확인](#태스크에서-pr-확인)을 참고하세요. |
 
 ## PR을 태스크에 연결
 
@@ -75,7 +86,7 @@ Resolves MUL-123
 - CI 상태: 모두 통과(개수 표시), 일부 실패(실패한 check 이름 표시), 일부 진행 중. 설정된 check가 없는 PR에는 이 항목을 표시하지 않으며 "check 없음"을 통과로 간주하지 않습니다.
 - merge 가능 여부: merge 가능(GitHub가 merge 상태를 clean으로 보고한 경우만), conflict 있음, blocked, behind
 
-CI 상태와 merge 가능 여부는 Multica가 GitHub API에서 가져온 snapshot이며 서로 독립적입니다. 이미 merge되거나 닫힌 PR에는 두 항목을 더 이상 표시하지 않습니다. GitHub를 일시적으로 사용할 수 없으면 카드가 비워지는 대신 마지막 snapshot을 유지하고 만료된 정보라고 표시합니다.
+CI 상태와 merge 가능 여부는 Multica가 GitHub API에서 가져온 snapshot이며 서로 독립적입니다. 이미 merge되거나 닫힌 PR에는 두 항목을 더 이상 표시하지 않습니다. GitHub를 일시적으로 사용할 수 없으면 카드는 마지막 snapshot을 유지하고 만료된 정보라고 표시합니다.
 
 목록 아래에는 다음에 일어날 일을 한 줄로 보여 줍니다. 예를 들어 "#19 병합 시 완료(으)로 변경"이나 병합되지 않고 닫힌 PR입니다. 워크스페이스가 "변경하지 않음"으로 설정되어 있거나 태스크가 이미 대상 상태이면 표시되지 않습니다.
 
@@ -90,7 +101,9 @@ PR이 merge되었다고 해서 태스크가 반드시 끝난 것은 아닙니다
 1. 태스크에 연결된 PR이 모두 `Merged` 상태입니다. `Open`이나 `Draft` PR이 남아 있으면 태스크는 계속 기다립니다. merge되지 않고 닫힌 PR도 태스크에서 제거할 때까지 마찬가지입니다.
 2. 태스크가 `done` 또는 `cancelled`가 아니고, Triage 중이 아니며, 이미 대상 상태가 아니고, 이 태스크만 상태 변경을 끄지 않았습니다(**Pull requests → ⋯ → PR 병합 후에도 상태 유지**).
 
-PR을 어떻게 연결했는지는 결과에 영향을 주지 않습니다. 제목, 브랜치 이름, 본문의 `Closes MUL-123`은 모두 연결만 하고, merge 후 동작을 정하지 않습니다. PR이 태스크의 일부만 전달하거나 merge 후에 릴리스나 확인이 필요하면 그 태스크의 **Pull requests** 메뉴에서 상태를 유지하도록 설정하세요.
+<PrLinkDemo />
+
+PR을 어떻게 연결했는지는 결과에 영향을 주지 않습니다. 제목, 브랜치 이름, 본문의 `Closes MUL-123`은 모두 연결만 합니다. PR이 태스크의 일부만 전달하거나 merge 후에 릴리스나 확인이 필요하면 그 태스크의 **Pull requests** 메뉴에서 상태를 유지하도록 설정하세요.
 
 판단은 PR 이벤트가 태스크에 닿을 때만 이루어집니다. 연결된 PR의 merge, 연결 추가, 연결 제거입니다. 태스크를 다시 열어도 원래대로 돌아가지 않으며, 다음에 연결된 PR이 merge될 때 바뀝니다. 설정을 바꿔도 이전에 merge된 태스크에는 영향을 주지 않습니다.
 
@@ -114,7 +127,10 @@ GitHub 측의 저장소 승인을 취소하려면 개인 또는 조직의 GitHub
 
 Multica Cloud에서는 이 절차가 필요 없습니다. 자체 호스팅 환경에서는 자신의 GitHub App을 먼저 만들어야 합니다.
 
-### 1. GitHub App 만들기
+<Steps>
+<Step>
+
+### GitHub App 만들기 [#1-github-app-만들기]
 
 GitHub의 **Developer settings → GitHub Apps**에서 App을 만들고 다음 값을 입력합니다.
 
@@ -131,7 +147,6 @@ Repository permissions:
 | 권한 | 수준 |
 |---|---|
 | Metadata | Read-only |
-| Contents | Read-only. PR snapshot 쿼리가 head commit과 머지 가능 여부, CI rollup을 함께 읽는 데 필요 |
 | Pull requests | Read-only |
 | Checks | Read-only. CI 상태 표시에 사용 |
 | Commit statuses | Read-only. legacy status 형식의 CI 집계에 사용 |
@@ -141,13 +156,16 @@ Repository permissions:
 - **Pull request**
 - CI와 merge 가능 여부 새로 고침을 트리거할 **Check suite**, **Check run**, **Status**
 
-Multica에서 CI를 표시할 필요가 없다면 Checks 및 Commit statuses 권한을 부여하거나 관련 이벤트를 구독하지 않아도 됩니다. 단, Contents는 반드시 필요합니다. 없으면 snapshot 쿼리 자체가 실패해 PR 카드에서 머지 상태도 사라집니다.
+PR snapshot은 Pull requests, Checks 및 Commit statuses REST API로 가져옵니다. Contents 권한은 필요하지 않습니다.
 
 <Callout type="warning">
 여기에는 OAuth Client secret이 아니라 **Webhook secret**이 필요합니다. 양쪽에 입력한 Webhook secret이 다르면 GitHub delivery가 `401 invalid signature`를 반환합니다.
 </Callout>
 
-### 2. 환경 변수 설정
+</Step>
+<Step>
+
+### 환경 변수 설정 [#2-환경-변수-설정]
 
 App의 공개 주소에서 slug를 확인합니다. 예를 들어 `https://github.com/apps/multica-acme`의 slug는 `multica-acme`입니다.
 
@@ -159,16 +177,19 @@ FRONTEND_ORIGIN=https://multica.example.com
 
 `GITHUB_APP_SLUG`와 `GITHUB_WEBHOOK_SECRET` 중 하나라도 없으면 연결 버튼이 비활성화되고 webhook endpoint도 이벤트 처리를 거부합니다.
 
-다음 두 변수는 PR 카드에서 CI 상태와 merge 가능 여부를 표시하기 위해 필요합니다. Multica는 이 값으로 App 신원을 인증하고 snapshot을 가져옵니다.
+PR 카드에 CI 상태와 merge 가능 여부를 표시하려면 다음 두 변수도 필요합니다. Multica는 이 값으로 App 신원을 인증하고 snapshot을 가져옵니다.
 
 ```dotenv
 GITHUB_APP_ID=<GitHub App 숫자 ID>
 GITHUB_APP_PRIVATE_KEY=<BEGIN/END 줄과 줄바꿈을 유지한 전체 PEM private key>
 ```
 
-Private key는 GitHub App의 **Private keys → Generate a private key**에서 생성합니다. 설정하지 않으면 연동 기능이 자연스럽게 축소됩니다. PR은 계속 미러링되고 태스크 자동 연결과 merge 시 상태 변경도 정상적으로 작동하지만 PR 카드에 CI 또는 merge 상태가 표시되지 않습니다.
+Private key는 GitHub App의 **Private keys → Generate a private key**에서 생성합니다. 이 두 변수가 없어도 PR은 계속 미러링되고 태스크 자동 연결과 merge 시 상태 변경도 작동합니다. PR 카드에 CI 또는 merge 상태가 표시되지 않을 뿐입니다.
 
-### 3. 데이터베이스 업데이트 및 연결
+</Step>
+<Step>
+
+### 데이터베이스 업데이트 및 연결 [#3-데이터베이스-업데이트-및-연결]
 
 기존 배포를 업그레이드할 때는 먼저 일반 데이터베이스 migration을 실행합니다.
 
@@ -178,13 +199,16 @@ make migrate-up
 
 API 서비스를 다시 시작한 뒤 **설정 → 코드**에서 연결을 완료합니다.
 
+</Step>
+</Steps>
+
 ## 자주 묻는 문제
 
 - **연결 버튼을 사용할 수 없음**: `GITHUB_APP_SLUG`와 `GITHUB_WEBHOOK_SECRET`이 API 프로세스에 전달되었는지 확인합니다.
 - **Webhook이 401을 반환함**: GitHub App과 API가 같은 Webhook secret을 사용하는지 확인하고 GitHub의 **Recent Deliveries**에서 다시 전달합니다.
 - **PR이 연결되지 않음**: 저장소가 App 승인 범위에 있는지, 자동 연결이 켜져 있는지, 번호가 현재 워크스페이스에 속하는지, 누군가 태스크에서 PR을 제거하지 않았는지 확인합니다.
 - **본문에 번호를 썼는데 연결되지 않음**: `Closes MUL-123`을 사용하거나, 번호를 브랜치 이름이나 PR 제목에 넣거나, 직접 연결합니다.
-- **CI 상태가 없음**: `GITHUB_APP_ID`와 `GITHUB_APP_PRIVATE_KEY`가 설정되었는지, App에 Contents, Checks 및 Commit statuses 읽기 권한이 있고 관련 이벤트를 구독했는지 확인합니다. Contents가 없으면 snapshot 전체가 실패해 PR 카드에 CI도 머지 상태도 표시되지 않습니다. 설치된 App에 권한을 추가한 뒤에는 각 installation owner가 GitHub에서 승인해야 적용됩니다.
+- **CI 상태가 없음**: `GITHUB_APP_ID`와 `GITHUB_APP_PRIVATE_KEY`가 설정되었는지, App에 Pull requests, Checks 및 Commit statuses 읽기 권한이 있고 관련 이벤트를 구독했는지 확인합니다. Contents 권한은 필요하지 않습니다. 설치된 App에 권한을 추가한 뒤에는 각 installation owner가 GitHub에서 승인해야 적용됩니다.
 - **PR merge 후 태스크 상태가 바뀌지 않음**: 태스크의 **Pull requests** 목록 아래 설명을 확인합니다. 아직 merge되지 않았거나 merge 없이 닫힌 PR이 있는지, 또는 이 태스크가 PR 병합 후에도 상태를 유지하도록 설정되어 있는지 알려 줍니다. 설명이 없으면 워크스페이스가 **변경하지 않음**으로 설정되어 있거나 태스크가 이미 대상 상태입니다.
 
 ## 다음 단계

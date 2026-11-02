@@ -4,10 +4,16 @@ description: Install and sign in to a supported AI coding tool so Multica can ex
 ---
 
 import { Callout } from "fumadocs-ui/components/callout";
+import { Step, Steps } from "fumadocs-ui/components/steps";
+import { Tab, Tabs } from "fumadocs-ui/components/tabs";
+import { Accordion, Accordions } from "fumadocs-ui/components/accordion";
 
 A local runtime has two parts: the Multica daemon, and one AI coding tool it can invoke. Install only the tool you intend to use — you do not need all of them.
 
-## 1. Choose a tool
+<Steps>
+<Step>
+
+## Choose a tool [#1-choose-a-tool]
 
 A tool that is already installed and signed in needs no extra setup. Tools differ in models, MCP, session resumption, and skill support; the details are in [AI coding tools comparison](/providers).
 
@@ -29,6 +35,7 @@ Multica currently detects these commands:
 | Kimi CLI | `kimi` | [Kimi CLI](https://github.com/MoonshotAI/kimi-cli) |
 | Kiro CLI | `kiro-cli` | [Install Kiro CLI](https://kiro.dev/docs/cli/installation/) |
 | MiniMax Code | `mcode` | [Install MiniMax Code CLI](https://www.npmjs.com/package/@minimax-ai/code) |
+| Muse Code | `muse` | [Install Muse Code](https://dev.meta.ai/docs/muse-code) |
 | OpenClaw | `openclaw` | [Install OpenClaw](https://docs.openclaw.ai/install) |
 | OpenCode | `opencode` | [OpenCode quickstart](https://opencode.ai/en/docs) |
 | Pi coding agent | `pi` | [Pi coding agent](https://github.com/earendil-works/pi) |
@@ -40,52 +47,129 @@ Multica currently detects these commands:
 | Reasonix | `reasonix` | [Reasonix](https://github.com/esengine/DeepSeek-Reasonix) |
 | TRAE CLI | `traecli` | [TRAE official site](https://www.trae.cn/) |
 | Dim | `dim` | [DimCode](https://dimagent.cn/en/docs/cli) |
+| Devin CLI | `devin` | [Install Devin CLI](https://docs.devin.ai/cli/quickstart) |
+| ZeroClaw | `zeroclaw` | [ZeroClaw quickstart](https://github.com/zeroclaw-labs/zeroclaw/blob/master/docs/book/src/getting-started/quickstart.md#install) |
 
 "Supported" means Multica can invoke that CLI. It does not mean Multica provides the tool's account, subscription, or model quota for you.
 
-## 2. Sign in on your machine
+</Step>
+<Step>
+
+## Sign in on your machine [#2-sign-in-on-your-machine]
 
 After installing, launch the tool once in a terminal on its own and complete its sign-in or model provider setup. If the tool cannot complete requests in the terminal, the daemon's invocations fail the same way.
 
-For CodeArts, verify the non-interactive path with `codearts run --model provider/model "Reply OK"`, not only the TUI. The current CodeArts CLI can let a custom provider work in the TUI while `run`, `models`, and `serve` still require [`CODEARTS_CLI_AK` / `CODEARTS_CLI_SK`](https://support.huaweicloud.com/usermanual-cli/codeartsagent_cli_0026.html). Multica can discover custom models from `~/.codeartsdoer/codearts_cli.json` or `.jsonc`, but agent runs use `codearts run` and therefore follow its authorization requirements.
-
-For Reasonix, run `reasonix setup` and configure a default provider and model before starting the daemon.
-
-For QwenPaw, choose the provider and model in QwenPaw's own configuration. Multica cannot override a QwenPaw model at run time.
-
-For MiniMax Code, install a supported Node.js release (`>=22.19 <23` or `>=24 <27`) and run `npm install --global @minimax-ai/code@latest`. A global npm install places `mcode` on npm's global binary path; if `command -v mcode` or `Get-Command mcode` cannot find it, add that path to `PATH`. Then run `mcode login`. MiniMax Code owns the model selection; Multica cannot override it through ACP.
-
-For DeepSeek Harness, install Node.js 20+ and run `npm install -g @deepseek-ai/dsh`, then give it the Multica runtime profile — the bundle that implements the `--stdio` protocol Multica drives, and the reason a bare `dsh` is not usable on its own. Set `MULTICA_DSH_PROFILE_BUNDLE` to the bundle to install and the daemon adds it for you, or add it yourself with `dsh plugin --profile multica add <bundle>`. `<bundle>` is anything `dsh plugin` accepts — an npm package name, a directory, or a packed tarball — and Multica's own bridge lives at [multica-ai/dsh-multica-runtime](https://github.com/multica-ai/dsh-multica-runtime). It is not on a public npm registry yet ([multica#6936](https://github.com/multica-ai/multica/issues/6936)), so today a self-hosted team builds it from that repository and points the variable at the build directory, or at the tarball `npm pack` produces — the latter if the machine running the daemon is not the machine that built it. A package name becomes the simplest option once the bridge is published. Whatever you choose, prefer something your own team publishes or builds: this value is installed into every daemon host's DSH home without further confirmation, so an unvetted third-party package is a supply-chain decision, not a convenience. If you installed DeepSeek Harness Desktop instead of the npm package, the daemon also looks for the CLI shims that app generates, under its own per-user data directory — `~/Library/Application Support/DSH Desktop` on macOS, `%APPDATA%\DSH Desktop` on Windows. On Windows that is roaming application data, not the install directory: the app installs to Program Files or `%LOCALAPPDATA%\Programs`, but the CLI it drives lives beside its other per-user state. The version segment in those paths is a generated id, so the daemon enumerates them and prefers the newest. Nothing else is needed on `PATH` — a generated shim runs the Desktop app's own runtime by absolute path. If DSH Desktop is installed somewhere non-default, point `MULTICA_DSH_PATH` at the shim. The daemon registers DeepSeek Harness only after `dsh --profile multica --probe` succeeds, and reports the missing profile on `/health` when it does not. Set `DEEPSEEK_API_KEY` (or store it in dsh's own settings) before starting the daemon.
-
 Those login credentials are stored locally by the tool itself. Multica never receives login tokens from Claude, Codex, Cursor, or any other CLI.
 
-<Callout type="info">
-Antigravity requires 1.1.10 or later, Claude Code requires 2.0.0 or later, Codex 0.100.0 or later, Copilot 1.0.0 or later, Grok 0.2.89 or later, Qwen Code 0.20.0 or later, MiniMax Code 0.1.2 or later, and OpenCode 1.1.54 or later. Below the minimum version, the daemon does not register the corresponding runtime.
+Below the minimum version, the daemon does not register the corresponding runtime:
+
+| Tool | Minimum version |
+| --- | --- |
+| Antigravity | 1.1.10 |
+| Claude Code | 2.0.0 |
+| Codex | 0.100.0 |
+| Copilot | 1.0.0 |
+| Grok | 0.2.89 |
+| Qwen Code | 0.20.0 |
+| MiniMax Code | 0.1.2 |
+| OpenCode | 1.1.54 |
+| Dim | 0.3.10 |
+| Devin CLI | 3000.3.22 |
+| ZeroClaw | 0.8.0 |
+
+A few tools need extra setup beyond signing in:
+
+<Accordions type="multiple">
+<Accordion title="CodeArts" id="codearts">
+
+Verify the non-interactive path with `codearts run --model provider/model "Reply OK"`, not only the TUI. The current CodeArts CLI can let a custom provider work in the TUI while `run`, `models`, and `serve` still require [`CODEARTS_CLI_AK` / `CODEARTS_CLI_SK`](https://support.huaweicloud.com/usermanual-cli/codeartsagent_cli_0026.html). Multica can discover custom models from `~/.codeartsdoer/codearts_cli.json` or `.jsonc`, but agent runs use `codearts run` and therefore follow its authorization requirements.
+
+</Accordion>
+<Accordion title="DeepSeek Harness" id="deepseek-harness">
+
+Install Node.js 20+ and run `npm install -g @deepseek-ai/dsh`, then give it the Multica runtime profile — the bundle that implements the `--stdio` protocol Multica drives, and the reason a bare `dsh` is not usable on its own. Set `DEEPSEEK_API_KEY` (or store it in dsh's own settings) before starting the daemon.
+
+**Installing the profile.** Set `MULTICA_DSH_PROFILE_BUNDLE` to the bundle to install and the daemon adds it for you, or add it yourself with `dsh plugin --profile multica add <bundle>`. `<bundle>` is anything `dsh plugin` accepts — an npm package name, a directory, or a packed tarball — and Multica's own bridge lives at [multica-ai/dsh-multica-runtime](https://github.com/multica-ai/dsh-multica-runtime). It is not on a public npm registry yet ([multica#6936](https://github.com/multica-ai/multica/issues/6936)), so today a self-hosted team builds it from that repository and points the variable at the build directory, or at the tarball `npm pack` produces — the latter if the machine running the daemon is not the machine that built it. A package name becomes the simplest option once the bridge is published.
+
+**Migrating an existing profile.** Back up the profile and follow the bridge repository's README to build a bundle compatible with your DSH version. Install that directory or tarball manually, then ensure `dsh.profile.bundles` loads `@multica-ai/dsh-runtime`: replace `dsh-profile-multica` if present, or remove it if both bridges are listed. A dependency entry alone does not load the runtime. `MULTICA_DSH_PROFILE_BUNDLE` will not migrate an existing bridge configuration. Verify the result with `dsh --profile multica --probe`.
+
+<Callout type="warning">
+Prefer a bundle your own team publishes or builds: this value is installed into every daemon host's DSH home without further confirmation, so an unvetted third-party package is a supply-chain decision, not a convenience.
 </Callout>
 
-## 3. Confirm the daemon can find the command
+**DSH Desktop.** If you installed DeepSeek Harness Desktop instead of the npm package, the daemon also looks for the CLI shims that app generates, under its own per-user data directory — `~/Library/Application Support/DSH Desktop` on macOS, `%APPDATA%\DSH Desktop` on Windows. On Windows that is roaming application data, not the install directory: the app installs to Program Files or `%LOCALAPPDATA%\Programs`, but the CLI it drives lives beside its other per-user state. The version segment in those paths is a generated id, so the daemon enumerates them and prefers the newest. Nothing else is needed on `PATH` — a generated shim runs the Desktop app's own runtime by absolute path. If DSH Desktop is installed somewhere non-default, point `MULTICA_DSH_PATH` at the shim.
 
-On macOS, Linux, or WSL, run:
+The daemon registers DeepSeek Harness only after `dsh --profile multica --probe` succeeds, and reports the missing profile on `/health` when it does not.
+
+</Accordion>
+<Accordion title="Devin CLI" id="devin-cli">
+
+Devin runs locally through `devin acp`, not cloud Devin VMs. Run `devin auth login` first. Multica checks the binary's version, not ACP's `agentInfo.version` (which can be `0.0.0-dev`).
+
+</Accordion>
+<Accordion title="MiniMax Code" id="minimax-code">
+
+Install a supported Node.js release (`>=22.19 <23` or `>=24 <27`) and run `npm install --global @minimax-ai/code@latest`. A global npm install places `mcode` on npm's global binary path; if `command -v mcode` or `Get-Command mcode` cannot find it, add that path to `PATH`. Then run `mcode login`. MiniMax Code owns the model selection; Multica cannot override it through ACP.
+
+</Accordion>
+<Accordion title="Muse Code" id="muse-code">
+
+Muse Code requires 1.4.10 or later. Follow the [official installation and sign-in guide](https://dev.meta.ai/docs/muse-code), then confirm `muse` is on `PATH`. Multica discovers its models over MSP and supports continuing sessions.
+
+</Accordion>
+<Accordion title="QwenPaw" id="qwenpaw">
+
+Choose the provider and model in QwenPaw's own configuration. Multica cannot override a QwenPaw model at run time.
+
+</Accordion>
+<Accordion title="Reasonix" id="reasonix">
+
+Run `reasonix setup` and configure a default provider and model before starting the daemon.
+
+</Accordion>
+</Accordions>
+
+</Step>
+<Step>
+
+## Confirm the daemon can find the command [#3-confirm-the-daemon-can-find-the-command]
+
+Replace `<command>` with a command from the table, such as `claude`, `codex`, or `cursor-agent`. The first command prints the executable path.
+
+<Tabs groupId="os" persist items={["macOS / Linux", "Windows"]}>
+<Tab value="macOS / Linux">
+
+On macOS, Linux, or WSL:
 
 ```bash
 command -v <command>
 <command> --version
 ```
 
-In Windows PowerShell, run:
+</Tab>
+<Tab value="Windows">
+
+In Windows PowerShell:
 
 ```powershell
 Get-Command <command>
 <command> --version
 ```
 
-Replace `<command>` with a command from the table, such as `claude`, `codex`, or `cursor-agent`. The first command prints the executable path.
+</Tab>
+</Tabs>
 
 If the terminal finds the tool but Desktop or the background daemon does not, the two are usually using different `PATH` values. Restart the app, or set an absolute path through the matching `MULTICA_<PROVIDER>_PATH` environment variable; full configuration is in [Environment variables](/environment-variables#daemon-configuration).
 
-## 4. Re-detect and confirm the runtime is online
+</Step>
+<Step>
 
-Start the daemon with the CLI:
+## Re-detect and confirm the runtime is online [#4-re-detect-and-confirm-the-runtime-is-online]
+
+<Tabs items={["CLI", "Desktop"]}>
+<Tab value="CLI">
+
+Start the daemon:
 
 ```bash
 multica daemon start
@@ -97,13 +181,22 @@ If the daemon is already running, restart it after installing a new tool:
 multica daemon restart
 ```
 
-With Multica Desktop, quit and reopen the app.
+</Tab>
+<Tab value="Desktop">
+
+Quit and reopen Multica Desktop.
+
+</Tab>
+</Tabs>
 
 Then open Multica's **Runtimes** page. The tool appears under the target computer and shows as online. You can now select this runtime when creating or editing an agent.
 
 <Callout type="warning">
 The daemon must detect at least one built-in supported CLI before it will start. Custom runtime profiles sync after the daemon is up, so they cannot be the sole startup condition on a blank machine. There is one exception: when the daemon has just begun installing the DSH runtime profile itself (`MULTICA_DSH_PROFILE_BUNDLE`), it starts with no runtimes and registers DeepSeek Harness once that install finishes. Without it, a host whose only tool is a DSH that needs the profile could never complete the install — the daemon would exit before it finished and take it down with it.
 </Callout>
+
+</Step>
+</Steps>
 
 ## No tools detected
 

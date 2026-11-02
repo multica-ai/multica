@@ -3,11 +3,12 @@ title: Variables d'environnement
 description: Configuration courante du serveur, du stockage, des intégrations et du runtime pour auto-héberger Multica.
 ---
 
+import { Accordion, Accordions } from "fumadocs-ui/components/accordion";
 import { Callout } from "fumadocs-ui/components/callout";
 
 Multica lit les variables d'environnement au démarrage du processus. Après en avoir modifié une, redémarrez le processus API, web ou daemon concerné. La commande `docker compose restart` de Docker Compose ne relit pas `.env` ; recréez les conteneurs avec `up -d` pour que les modifications prennent effet.
 
-Cette page ne liste que la configuration liée au déploiement ; les variables de test et les variables internes aux exécutions n'y figurent pas. Il s'agit d'une référence organisée par thème — pour les étapes complètes de déploiement, consultez le [démarrage rapide de l'auto-hébergement](/self-host-quickstart).
+Cette page regroupe par thème la configuration liée au déploiement ; les variables de test et les variables internes aux exécutions n'y figurent pas. Pour les étapes complètes de déploiement, consultez le [démarrage rapide de l'auto-hébergement](/self-host-quickstart).
 
 ## Configuration minimale pour la production
 
@@ -67,7 +68,7 @@ Les limites de connexions du primaire et du réplica sont indépendantes. Dimens
 `MULTICA_DAEMON_SERVER_URL` est renvoyée par le point de terminaison `/api/config`, qui ne requiert aucune authentification, et elle est visible par les clients. Considérez-la comme une configuration publique ; n'y placez jamais d'identifiants, de jetons ni d'autres secrets.
 </Callout>
 
-Lorsque le frontend et l'API s'exécutent sur des hôtes différents et que le navigateur communique directement avec le domaine de l'API, vous devez définir `COOKIE_DOMAIN` — sinon le navigateur ne peut pas lire le cookie CSRF : toutes les requêtes d'écriture renvoient `403 CSRF validation failed`, alors que les lectures fonctionnent normalement. Utilisez le domaine parent le plus restreint qui couvre les deux hôtes (`.agent.example.com` plutôt que `.example.com`). Il étend le cookie de session de connexion à tous les hôtes de ce domaine, ce qui n'est acceptable que si tous ces hôtes sont exploités par la même entité de confiance. Après l'avoir modifié, effacez les anciens cookies sur les deux hôtes et reconnectez-vous. Si vous suivez la configuration en origine unique du [démarrage rapide de l'auto-hébergement](/self-host-quickstart#3-choisir-le-mode-daccès) (le navigateur ne visite que le domaine de l'application), laissez-le vide. N'utilisez pas d'adresse IP — les navigateurs ignorent les cookies dont le Domain est une adresse IP.
+Lorsque le frontend et l'API s'exécutent sur des hôtes différents et que le navigateur communique directement avec le domaine de l'API, vous devez définir `COOKIE_DOMAIN` — sinon le navigateur ne peut pas lire le cookie CSRF : toutes les requêtes d'écriture renvoient `403 CSRF validation failed`, alors que les lectures fonctionnent normalement. Utilisez le domaine parent le plus restreint qui couvre les deux hôtes (`.agent.example.com` plutôt que `.example.com`). Il étend le cookie de session de connexion à tous les hôtes de ce domaine, ce qui n'est acceptable que si tous ces hôtes sont exploités par la même entité de confiance. Après l'avoir modifié, effacez les anciens cookies sur les deux hôtes et reconnectez-vous. Si vous suivez la configuration en origine unique du [démarrage rapide de l'auto-hébergement](/self-host-quickstart#remote-access) (le navigateur ne visite que le domaine de l'application), laissez-le vide. N'utilisez pas d'adresse IP — les navigateurs ignorent les cookies dont le Domain est une adresse IP.
 
 <Callout type="warning">
 Les déploiements auto-hébergés doivent définir `FRONTEND_ORIGIN`. Sans cette variable, les liens d'invitation, les attributs de sécurité des cookies et les vérifications d'origine WebSocket peuvent tous diverger de votre domaine réel.
@@ -113,6 +114,7 @@ SMTP est prioritaire sur Resend dès que `SMTP_HOST` n'est pas vide.
 | `ALLOWED_EMAILS` | vide | Adresses e-mail complètes autorisées à s'inscrire, séparées par des virgules |
 | `ALLOWED_EMAIL_DOMAINS` | vide | Domaines e-mail autorisés à s'inscrire, séparés par des virgules |
 | `DISABLE_WORKSPACE_CREATION` | `false` | Empêche tous les utilisateurs de créer des espaces de travail ; aucune exception pour les propriétaires ou les administrateurs |
+| `WORKSPACE_CREATION_ALLOWED_EMAILS` | vide | Adresses e-mail complètes autorisées à créer des espaces de travail, séparées par des virgules. Si défini, les autres utilisateurs reçoivent une 403. `DISABLE_WORKSPACE_CREATION=true` est prioritaire. N'accorde aucun accès aux autres espaces de travail |
 | `MULTICA_DEV_VERIFICATION_CODE` | vide | Code de test fixe à 6 chiffres pour les environnements hors production |
 
 Pour l'ordre exact d'évaluation des listes d'autorisation, consultez [Connexion et inscription](/auth-setup#restrictions-dinscription).
@@ -133,6 +135,8 @@ Lorsque `S3_BUCKET` n'est pas défini, Multica utilise le disque local.
 | `S3_USE_PATH_STYLE` | `true` avec un point de terminaison personnalisé | Utiliser ou non l'adressage de type chemin (path-style) |
 | `ATTACHMENT_DOWNLOAD_MODE` | `auto` | `auto`, `cloudfront`, `presign` ou `proxy` |
 | `ATTACHMENT_DOWNLOAD_URL_TTL` | `30m` | Durée de vie des URL de téléchargement signées |
+
+Lorsque `AWS_ENDPOINT_URL` pointe vers Google Cloud Storage, `Accept-Encoding` est automatiquement exclu de la signature des requêtes.
 
 Utilisez `ATTACHMENT_DOWNLOAD_MODE=proxy` lorsque le point de terminaison — un MinIO interne, par exemple — n'est pas accessible depuis le navigateur.
 
@@ -204,7 +208,7 @@ Ce groupe configure la génération d'assistance côté serveur, comme les titre
 |---|---|---|
 | `MULTICA_LLM_API_KEY` | vide | Clé d'API compatible OpenAI |
 | `MULTICA_LLM_BASE_URL` | vide | Point de terminaison compatible OpenAI |
-| `MULTICA_LLM_DEFAULT_MODEL` | `gpt-5.6-luna` | Utilisé lorsqu'une requête ne précise pas de modèle |
+| `MULTICA_LLM_DEFAULT_MODEL` | `gpt-6-luna` | Utilisé lorsqu'une requête ne précise pas de modèle |
 | `MULTICA_LLM_MAX_RETRIES` | `2` | Plafond de nouvelles tentatives par appel ; `0` désactive les nouvelles tentatives, `1`–`5` les plafonnent à N |
 
 `MULTICA_LLM_MAX_RETRIES` est la seule source de la politique de nouvelles tentatives. Laissez-la non définie pour la valeur par défaut de 2, définissez `0` pour envoyer exactement une requête par appel, ou une valeur de 1 à 5 pour plafonner les nouvelles tentatives à ce nombre. C'est un plafond, pas un quota : seuls les échecs réessayables le consomment, et un succès ou l'échéance propre de l'appelant peut mettre fin à l'appel plus tôt. Toute autre valeur — négative, non numérique ou supérieure à 5 — fait échouer le démarrage au lieu d'être corrigée silencieusement. Ce plafond est un budget de latence : le délai entre deux tentatives commence à 0,5 s et double jusqu'à un maximum de 8 s, si bien qu'un budget plus élevé dépasserait les échéances des appelants et transformerait un échec réessayable en expiration de délai. Les nouvelles tentatives couvrent les échecs de connexion et les codes HTTP 408, 409, 429 et 5xx ; toutes les autres réponses 4xx sont renvoyées telles quelles. Au démarrage, le serveur journalise la politique effective sous la forme `llm retry policy`, sans aucun identifiant dans la ligne.
@@ -240,28 +244,115 @@ Les variables ci-dessous sont lues sur l'ordinateur qui exécute vos agents, et 
 | `MULTICA_CODEX_SEMANTIC_INACTIVITY_TIMEOUT` | identique à `MULTICA_AGENT_IDLE_WATCHDOG` | Seuil de silence sémantique de Codex. Le minuteur propre à Codex ne peut pas voir qu'un outil est en cours d'exécution ; il suit donc le plus grand des budgets d'inactivité et d'outil au lieu de maintenir un plafond distinct et plus court |
 | `MULTICA_CODEX_FIRST_TURN_TIMEOUT` | `0` | Surcharge explicite du plafond d'absence de progression du premier tour de Codex ; `0` conserve la valeur par défaut. L'attente effective du premier tour reste bornée par `MULTICA_CODEX_SEMANTIC_INACTIVITY_TIMEOUT` et par le délai d'exécution global — définissez `MULTICA_CODEX_SEMANTIC_INACTIVITY_TIMEOUT` strictement au-dessus de cette valeur (avec une certaine marge), sinon l'attente est tronquée à cette valeur et la nouvelle tentative de démarrage du catalogue de modèles est ignorée. Des valeurs égales ne suffisent pas : le minuteur sémantique est armé en premier, donc à durées égales la nouvelle tentative peut quand même être perdue |
 | `MULTICA_CODEX_HANDSHAKE_TIMEOUT` | `30s` ; `thread/start`, `thread/resume` : `60s` | Plafonds de la poignée de main au démarrage du Codex app-server. Une valeur explicite remplace globalement les deux budgets |
+| `MULTICA_CODEX_MEMORY` | désactivé | `1`, `true`, `yes` ou `on` conserve la mémoire native de Codex dans les exécutions Codex gérées par le daemon ; par défaut, elle est désactivée pour chaque exécution. Voir [Mémoire native et sous-agents de Codex](/daemon-runtimes#codex-memory) |
+| `MULTICA_CODEX_MULTI_AGENT` | désactivé | Mêmes valeurs ; conserve les sous-agents natifs de Codex. L'exécution est considérée comme terminée dès que le fil parent se termine, et les résultats que les sous-agents n'ont pas encore rendus sont perdus |
 | `MULTICA_CODEX_TURN_INTERRUPT_TIMEOUT` | `2s` | Délai de grâce, après une annulation, accordé au Codex app-server pour accuser réception de `turn/interrupt` et émettre `turn/completed`, afin de conserver la consommation finale de tokens avant le nettoyage forcé du processus. Sur des hôtes inhabituellement lents, ajustez-le à partir de la latence d'interruption enregistrée dans les journaux du daemon |
 | `MULTICA_DAEMON_AUTO_UPDATE` | Cloud `true` ; auto-hébergé `false` | Vérifier et appliquer automatiquement ou non les mises à jour du CLI |
 | `MULTICA_DAEMON_AUTO_UPDATE_INTERVAL` | `6h` | Intervalle de vérification des mises à jour |
 | `MULTICA_DAEMON_AUTO_RELOAD` | `true` | Redémarrer ou non sur un binaire `multica` remplacé sur disque par un moyen externe (`brew upgrade`, un nouveau téléchargement, une compilation locale). Indépendant de `MULTICA_DAEMON_AUTO_UPDATE` |
 | `MULTICA_WORKSPACES_ROOT` | `~/multica_workspaces` | Répertoire racine des répertoires de travail des exécutions |
 | `MULTICA_AGENT_TEMP_BASE` | `/tmp` (Linux/macOS) | Linux/macOS uniquement. Répertoire parent des répertoires temporaires privés de chaque exécution ; doit être un répertoire absolu existant et accessible en écriture, et une valeur invalide fait échouer le démarrage de l'exécution au lieu de se rabattre sur `/tmp`. Choisissez un chemin court — les outils enfants peuvent y lier des sockets AF_UNIX, et `sun_path` est limité à 108 octets sous Linux et à 104 sous macOS |
-| `MULTICA_KEEP_ENV_AFTER_TASK` | `false` | Conserver les répertoires des exécutions pour le débogage |
 
-Pour le contexte interne que le daemon injecte dans les exécutions des agents, consultez [Environnement des exécutions](/daemon-runtimes#environnement-du-runtime-pendant-une-exécution).
+Pour le contexte interne que le daemon injecte dans les exécutions des agents, consultez [Environnement des exécutions](/daemon-runtimes#environnement-du-runtime-pendant-une-exécution). `MULTICA_REPO_CHECKOUT_MODE` en fait partie : le daemon la définit à `isolated` uniquement pour les exécutions Codex sous Linux et Windows, et elle ne se configure pas à la main. Les variables `MULTICA_*` de l'environnement du daemon lui-même ne sont pas transmises aux exécutions.
 
-Chaque outil de codage IA accepte `MULTICA_<PROVIDER>_PATH` et `MULTICA_<PROVIDER>_MODEL` pour remplacer le chemin de la commande et le modèle par défaut. QwenPaw et MiniMax Code n'ont pas de variable de modèle, car Multica ne leur envoie jamais de modèle ; la variable de chemin de MiniMax Code est `MULTICA_MCODE_PATH` — consultez [Comparaison des outils de codage IA](/providers#sources-des-modèles). DeepSeek Harness prend en charge `MULTICA_DSH_PATH` et `MULTICA_DSH_MODEL` (un ID de modèle du catalogue dsh, par exemple `deepseek-official/deepseek-chat`). DeepSeek Harness accepte en outre `MULTICA_DSH_PROFILE_BUNDLE` : une liste de bundles, séparés par des virgules, à installer dans son profil `multica` lorsque ce profil est absent, essayés dans l'ordre, chaque entrée étant une spécification npm, un répertoire ou une archive tarball empaquetée. Elle n'est pas définie par défaut, et c'est ce profil qui fournit le protocole `--stdio` que pilote Multica : si la variable n'est pas définie, l'installation DSH reste intacte et le daemon signale le profil manquant au lieu d'enregistrer un runtime inutilisable. Le bridge de Multica n'est pas encore publié sur un registre npm public ; le choix d'une valeur est donc traité dans [Installer un runtime d'agent](/install-agent-runtime). Ce que vous définissez est installé dans le répertoire DSH de chaque hôte de daemon sans autre confirmation : considérez donc ce choix comme une décision relative à la chaîne d'approvisionnement. L'installation qu'active `MULTICA_DSH_PROFILE_BUNDLE` est volontairement limitée : elle s'exécute au plus une fois par durée de vie du daemon, uniquement lorsque la sonde signale que le profil est réellement absent, et un échec est journalisé avec la sortie du gestionnaire de paquets lui-même et n'est retenté qu'après un redémarrage du daemon. Une sonde qui expire, ou qui répond avec une version de protocole que ce daemon ne pilote pas, est signalée et ne donne jamais lieu à une installation par-dessus — le daemon n'écrase pas un profil présent à dessein. Pour diagnostiquer, recherchez `DSH runtime profile` dans le journal du daemon ; pour annuler une installation, supprimez `$DSH_HOME/profiles/multica` (par défaut `~/.dsh/profiles/multica`). `MULTICA_DSH_PLUGIN_PATH` remplace le répertoire à partir duquel l'installation résout pnpm. DSH Desktop conserve le pnpm vers lequel `dsh plugin` redirige dans son propre répertoire de commandes du runtime, sous macOS comme sous Windows, et le daemon le trouve et l'ajoute automatiquement en tête — y compris dans l'arborescence versionnée qu'utilise une version plus récente de Desktop. Cette variable n'est donc nécessaire que pour une installation que le daemon ne parvient pas à trouver, ou pour que l'installation utilise votre propre pnpm. La définir remplace entièrement la recherche : si le répertoire n'existe pas, l'installation se rabat sur le pnpm présent dans le `PATH` du daemon plutôt que sur celui fourni. Linux n'a pas de DSH Desktop ; l'installation y utilise donc toujours le `PATH`. Dim prend en charge `MULTICA_DIM_PATH` et `MULTICA_DIM_MODEL` (un ID de modèle du catalogue dim). ZeroClaw prend en charge `MULTICA_ZEROCLAW_PATH` mais n'a pas de variable de modèle ; c'est son profil d'agent qui détermine le choix du modèle. Les arguments par défaut à l'échelle de la machine via `MULTICA_<PROVIDER>_ARGS` sont actuellement pris en charge pour cinq outils : Claude Code, Codex, CodeBuddy, Qwen Code et QwenPaw. Les variables sont `MULTICA_CLAUDE_ARGS`, `MULTICA_CODEX_ARGS`, `MULTICA_CODEBUDDY_ARGS`, `MULTICA_QWEN_ARGS` et `MULTICA_QWENPAW_ARGS`. Par exemple :
+L'ordre de priorité est : option de ligne de commande → variable d'environnement → `~/.multica/config.json` → valeur par défaut intégrée. Pour le comportement du watchdog, consultez [Daemon et runtimes](/daemon-runtimes).
+
+### Nettoyage et conservation [#gc]
+
+Le daemon nettoie régulièrement les répertoires des exécutions, les caches de dépôts, les historiques de session et les répertoires temporaires ; ce qui est supprimé et quand est décrit dans [Nettoyage et conservation](/daemon-runtimes#cleanup). Les durées acceptent la syntaxe Go, plus `d` pour les jours (par exemple `14d` ou `1d12h`).
+
+| Variable | Valeur par défaut | Description |
+|---|---|---|
+| `MULTICA_GC_ENABLED` | `true` | `false` ou `0` désactive toute la boucle de nettoyage |
+| `MULTICA_GC_INTERVAL` | `2h` | Intervalle entre deux passes ; la première a lieu environ 30 secondes après le démarrage du daemon |
+| `MULTICA_GC_TTL` | `24h` | Délai après lequel les répertoires d'exécution sont supprimés une fois la tâche passée dans la catégorie `done` ou `closed`, ou la session de chat archivée |
+| `MULTICA_GC_COMPLETED_TASK_TTL` | Multica Cloud `14d` ; auto-hébergé `0` | Délai après la fin d'une exécution de tâche au bout duquel tout son répertoire est supprimé, que la tâche soit fermée ou non ; `0` désactive. Ne s'applique pas aux exécutions sur le répertoire local d'un projet |
+| `MULTICA_GC_ORPHAN_TTL` | `72h` | Durée sans modification après laquelle un répertoire sans propriétaire identifié est supprimé |
+| `MULTICA_GC_ARTIFACT_TTL` | `12h` | Délai après la fin d'une exécution au bout duquel le contenu régénérable est supprimé (les répertoires de la ligne suivante et le cache que le daemon prépare pour Codex) ; `0` le conserve |
+| `MULTICA_GC_ARTIFACT_PATTERNS` | `node_modules,.next,.turbo` | Noms de répertoires considérés comme régénérables, séparés par des virgules. La définir **remplace** la liste par défaut : ajoutez les valeurs par défaut si vous voulez les garder. Les entrées contenant `/` ou `\` sont ignorées |
+| `MULTICA_GC_REPO_TTL` | `30d` | Durée sans checkout après laquelle un cache de dépôt nu qui n'est plus référencé et n'a plus de worktree est supprimé ; `0` le conserve |
+| `MULTICA_GC_REPO_MAINTENANCE_ENABLED` | `true` | Exécuter ou non `git reflog expire` et `git gc` sur un cache de dépôt après la suppression des branches d'agent périmées ; `false` désactive seulement cette étape |
+| `MULTICA_GC_CODEX_SESSION_TTL` | `14d` | Durée d'inutilisation avant suppression des historiques de session Codex ; `0` les conserve |
+| `MULTICA_GC_HERMES_SESSION_TTL` | `14d` | Durée d'inutilisation avant suppression des historiques de session Hermes ; `0` les conserve |
+| `MULTICA_GC_HERMES_MEMORY_TTL` | `90d` | Durée d'inutilisation avant suppression de la mémoire Hermes ; `0` la conserve |
+| `MULTICA_GC_TASK_TEMP_LEGACY_TTL` | `0` | Uniquement pour les répertoires temporaires laissés par d'anciens daemons, sans verrou d'exécution : durée sans modification avant suppression. `0` les conserve. Les répertoires temporaires avec verrou sont supprimés à la fin de l'exécution et ne sont pas concernés |
+
+### Journaux du daemon [#daemon-logs]
+
+Quand le daemon tourne en arrière-plan (sans terminal attaché), il écrit ses journaux dans `~/.multica/daemon.log`, ou `~/.multica/profiles/<name>/daemon.log` pour un profil nommé, avec une rotation par taille ; les fichiers issus de la rotation sont compressés en gzip.
+
+| Variable | Valeur par défaut | Description |
+|---|---|---|
+| `MULTICA_DAEMON_LOG_MAX_SIZE_MB` | `20` | Taille en Mo à partir de laquelle `daemon.log` tourne |
+| `MULTICA_DAEMON_LOG_MAX_BACKUPS` | `5` | Nombre maximal de fichiers tournés conservés |
+| `MULTICA_DAEMON_LOG_MAX_AGE_DAYS` | `30` | Nombre de jours de conservation des fichiers tournés |
+
+Les trois attendent un entier positif ; `0`, une valeur négative ou illisible reprend la valeur par défaut au lieu de signifier « illimité ». Un fichier tourné est supprimé dès que la limite de nombre ou d'âge est atteinte. La sortie des plantages va dans `daemon.err.log`, dans le même répertoire, renommé en `daemon.err.log.1` au démarrage s'il dépasse 5 Mo.
+
+### Chemins, modèles et arguments par outil
+
+Chaque outil intégré a une variable de chemin, `MULTICA_<PREFIX>_PATH`. Quand elle est définie, le daemon utilise ce chemin au lieu de chercher la commande dans le `PATH` ; si le chemin n'existe pas, l'outil n'est pas enregistré et le daemon ne se rabat pas sur une commande du même nom dans le `PATH`. La plupart des outils ont aussi une variable de modèle, `MULTICA_<PREFIX>_MODEL`, utilisée comme modèle par défaut de cette machine quand l'agent n'en a pas choisi. Si les deux sont vides, aucun modèle n'est transmis et l'outil décide.
+
+<Accordions>
+<Accordion title="Préfixe des variables pour chaque outil" id="tool-env-prefixes" value="tool-env-prefixes">
+
+| Outil | Préfixe | Variable de modèle |
+|---|---|---|
+| Antigravity | `MULTICA_ANTIGRAVITY` | ✓ (le nom exact affiché par `agy models`) |
+| Claude Code | `MULTICA_CLAUDE` | ✓ |
+| CodeArts | `MULTICA_CODEARTS` | ✓ |
+| CodeBuddy | `MULTICA_CODEBUDDY` | ✓ |
+| Codex | `MULTICA_CODEX` | ✓ |
+| Cursor Agent | `MULTICA_CURSOR` | ✓ |
+| DeepSeek Harness | `MULTICA_DSH` | ✓ (un ID du catalogue dsh, par exemple `deepseek-official/deepseek-chat`) |
+| DevEco Code | `MULTICA_DEVECO` | ✓ |
+| Dim | `MULTICA_DIM` | ✓ (un ID du catalogue dim) |
+| GitHub Copilot CLI | `MULTICA_COPILOT` | ✓ |
+| Grok | `MULTICA_GROK` | ✓ |
+| Hermes | `MULTICA_HERMES` | ✓ |
+| Kimi CLI | `MULTICA_KIMI` | ✓ |
+| Kiro CLI | `MULTICA_KIRO` | ✓ |
+| MiniMax Code | `MULTICA_MCODE` | — |
+| Muse Code | `MULTICA_MUSE` | ✓ (un ID du catalogue de modèles du runtime) |
+| Oh-My-Pi | `MULTICA_OMP` | ✓ |
+| OpenClaw | `MULTICA_OPENCLAW` | ✓ |
+| OpenCode | `MULTICA_OPENCODE` | ✓ |
+| Pi | `MULTICA_PI` | ✓ |
+| Qoder CLI | `MULTICA_QODER` | ✓ |
+| Qoder CN CLI | `MULTICA_QODERCLICN` | ✓ |
+| Qwen Code | `MULTICA_QWEN` | ✓ |
+| QwenPaw | `MULTICA_QWENPAW` | — |
+| Reasonix | `MULTICA_REASONIX` | ✓ |
+| Trae CLI | `MULTICA_TRAECLI` | ✓ |
+| ZeroClaw | `MULTICA_ZEROCLAW` | — (le modèle est géré par le profil d'agent ZeroClaw) |
+
+</Accordion>
+</Accordions>
+
+QwenPaw et MiniMax Code n'ont pas de variable de modèle, car Multica ne leur envoie jamais de modèle ; consultez [Comparaison des outils de codage IA](/providers#sources-des-modèles). DeepSeek Harness a aussi `MULTICA_DSH_PROFILE_BUNDLE` et `MULTICA_DSH_PLUGIN_PATH`, décrits dans la section suivante.
+
+Les arguments par défaut à l'échelle de la machine via `MULTICA_<PREFIX>_ARGS` sont actuellement pris en charge pour cinq outils : Claude Code, Codex, CodeBuddy, Qwen Code et QwenPaw. Les variables sont `MULTICA_CLAUDE_ARGS`, `MULTICA_CODEX_ARGS`, `MULTICA_CODEBUDDY_ARGS`, `MULTICA_QWEN_ARGS` et `MULTICA_QWENPAW_ARGS`. Par exemple :
 
 ```dotenv
 MULTICA_CLAUDE_PATH=/opt/bin/claude
 MULTICA_CLAUDE_ARGS=--max-turns 40
 ```
 
+### Installation du profil DeepSeek Harness
+
+`MULTICA_DSH_PROFILE_BUNDLE` est une liste de bundles, séparés par des virgules, à installer dans le profil `multica` lorsque ce profil est absent, essayés dans l'ordre, chaque entrée étant une spécification npm, un répertoire ou une archive tarball empaquetée. Elle n'est pas définie par défaut. C'est ce profil qui fournit le protocole `--stdio` que pilote Multica : si la variable n'est pas définie, l'installation DSH reste intacte et le daemon signale le profil manquant au lieu d'enregistrer un runtime inutilisable.
+
+Le bridge de Multica n'est pas encore publié sur un registre npm public ; le choix d'une valeur est traité dans [Installer un runtime d'agent](/install-agent-runtime). Ce que vous définissez est installé dans le répertoire DSH de chaque hôte de daemon sans autre confirmation : considérez ce choix comme une décision relative à la chaîne d'approvisionnement.
+
+Cette installation est volontairement limitée : elle s'exécute au plus une fois par durée de vie du daemon, uniquement lorsque la sonde signale que le profil est réellement absent, et un échec est journalisé avec la sortie du gestionnaire de paquets lui-même et n'est retenté qu'après un redémarrage du daemon. Une sonde qui expire, ou qui répond avec une version de protocole que ce daemon ne pilote pas, est signalée et ne donne jamais lieu à une installation par-dessus : le daemon n'écrase pas un profil présent à dessein. Pour diagnostiquer, recherchez `DSH runtime profile` dans le journal du daemon ; pour annuler une installation, supprimez `$DSH_HOME/profiles/multica` (par défaut `~/.dsh/profiles/multica`).
+
+`MULTICA_DSH_PLUGIN_PATH` remplace le répertoire à partir duquel l'installation résout pnpm. DSH Desktop conserve le pnpm vers lequel `dsh plugin` redirige dans son propre répertoire de commandes du runtime, sous macOS comme sous Windows, et le daemon le trouve et l'ajoute automatiquement en tête du `PATH`, y compris dans l'arborescence versionnée qu'utilise une version plus récente de Desktop. Cette variable n'est donc nécessaire que pour une installation que le daemon ne parvient pas à trouver, ou pour que l'installation utilise votre propre pnpm. La définir remplace entièrement la recherche : si le répertoire n'existe pas, l'installation se rabat sur le pnpm présent dans le `PATH` du daemon, et non sur celui fourni. Linux n'a pas de DSH Desktop ; l'installation y utilise donc toujours le `PATH`.
+
+### Nettoyage des processus d'arrière-plan de Cursor
+
 Le nettoyage vérifié des processus d'arrière-plan de Cursor nécessite Linux 6.9 ou une version ultérieure (pidfd de groupe de processus), la prise en charge par le noyau macOS des requêtes d'identité de processus et de l'envoi de signaux par audit token, ou un Job Object imbriqué correctement attribué sous Windows. Sous macOS, chaque processus reçoit ses signaux au moyen d'une version de PID vérifiée par le noyau ; aucune adhésion à un groupe de la même session n'est nécessaire. Ces API macOS sont privées et vérifiées au moment de la capture. Un lancement qui ne peut pas être revendiqué renvoie son résultat d'outil d'origine et utilise le watchdog d'inactivité ordinaire, y compris lorsque le watchdog d'outil vaut `0`. Le travail déjà revendiqué reste en cours si le nettoyage ne peut pas être confirmé. Avec un watchdog d'outil à `0`, cette limite n'existe pas du tout : le travail d'arrière-plan revendiqué maintient l'exécution en cours aussi longtemps qu'il vit, si bien que l'exécution n'est bornée que par `MULTICA_AGENT_TIMEOUT`, qui vaut `0` par défaut.
 
 Les processus d'arrière-plan de Cursor qui appartiennent à l'exécution sont aussi arrêtés lorsque celle-ci se termine normalement : un serveur d'arrière-plan lancé par cette exécution ne survit donc pas intentionnellement à la finalisation. macOS peut reconnaître des enfants tardifs grâce aux identités de parent d'origine conservées, mais ne peut pas prouver une chaîne dont les processus intermédiaires ont disparu avant d'être observés. De tels processus, le travail qui quitte le groupe suivi, ou des erreurs persistantes d'appartenance ou d'envoi de signaux peuvent laisser du travail d'arrière-plan derrière eux. Un nettoyage non confirmé est journalisé et n'ouvre jamais la fenêtre de récupération réservée aux nettoyages réussis ; les processus inconnus ne sont pas tués sur la seule base de leur PID numérique ou de leur groupe de processus.
-
-L'ordre de priorité est : option de ligne de commande → variable d'environnement → `~/.multica/config.json` → valeur par défaut intégrée. Pour le comportement du watchdog, consultez [Daemon et runtimes](/daemon-runtimes).
 
 ### Rendre persistante la configuration du daemon
 
@@ -311,7 +402,7 @@ Quelques règles concernant les valeurs :
 | `METRICS_ADDR` | vide | Adresse d'écoute des métriques Prometheus ; vide signifie non démarré |
 | `REALTIME_METRICS_TOKEN` | vide | Jeton Bearer qui protège `/health/realtime` |
 
-La télémétrie propre à Multica pour les instances auto-hébergées envoie un instantané par jour UTC, au niveau du déploiement, au point de terminaison fixe et non configurable `https://telemetry.multica.ai/v1/telemetry/events`. Il contient la version officielle publiée ; les nombres, regroupés par tranches, d'espaces de travail, de membres humains distincts, d'agents actifs et de daemons actifs sur 24 heures ; ainsi que le nombre agrégé d'exécutions des 24 heures précédentes. Il n'inclut jamais de noms, d'adresses ou de domaines e-mail, d'adresses IP, d'identifiants métier, de détails sur les hôtes ou les appareils, de dépôts, de modèles ou de plugins, de prompts ou de sorties, de commentaires ou de discussions, de chemins, de données de tokens ou de coûts, d'identifiants de connexion, d'erreurs, de piles d'appels ni de journaux. Il sert uniquement à comprendre l'adoption des versions auto-hébergées, les tranches de taille des déploiements et l'usage agrégé — et non à la facturation, aux licences, à l'authentification ou aux décisions de sécurité.
+La télémétrie propre à Multica pour les instances auto-hébergées envoie un instantané par jour UTC, au niveau du déploiement, au point de terminaison fixe et non configurable `https://telemetry.multica.ai/v1/telemetry/events`. Il contient la version officielle publiée ; les nombres, regroupés par tranches, d'espaces de travail, de membres humains distincts, d'agents actifs et de daemons actifs sur 24 heures ; le nombre agrégé d'exécutions des 24 heures précédentes ; ainsi que les nombres, regroupés par tranches, de membres ayant ouvert l'application web ou de bureau connectée et de membres ayant lancé eux-mêmes une exécution d'agent (attribution, mention, commentaire, chat, exécution manuelle ou relance — hors autopilot et délégation entre agents) au cours des 1, 7 et 28 jours UTC complets précédents. Les membres sont comptés au sein du déploiement et ne sont jamais identifiés. Il n'inclut jamais de noms, d'adresses ou de domaines e-mail, d'adresses IP, d'identifiants métier, de détails sur les hôtes ou les appareils, de dépôts, de modèles ou de plugins, de prompts ou de sorties, de commentaires ou de discussions, de chemins, de données de tokens ou de coûts, d'identifiants de connexion, d'erreurs, de piles d'appels ni de journaux. Il sert uniquement à comprendre l'adoption des versions auto-hébergées, les tranches de taille des déploiements, l'usage agrégé et l'activité des membres — et non à la facturation, aux licences, à l'authentification ou aux décisions de sécurité.
 
 `DO_NOT_TRACK` et `ANALYTICS_DISABLED` sont indépendantes. La première contrôle cet instantané anonyme propre à Multica ; la seconde contrôle l'intégration facultative avec PostHog.
 

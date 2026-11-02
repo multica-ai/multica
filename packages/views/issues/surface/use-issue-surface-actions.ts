@@ -23,6 +23,7 @@ export type MoveIssueUpdates = Pick<
   | "assignee_type"
   | "assignee_id"
   | "position"
+  | "stop_previous_assignee_runs"
   | "parent_issue_id"
   | "project_id"
 > & {
@@ -131,9 +132,7 @@ export function useIssueSurfaceActions({
           errorMessage: t(($) => $.detail.toast_move_issue_failed),
           ...options,
         }),
-      batchUpdate: async (issueIds, updates) => {
-        await batchUpdateMutation.mutateAsync({ ids: issueIds, updates });
-      },
+      batchUpdate: (issueIds, updates) => batchUpdateMutation.mutateAsync({ ids: issueIds, updates }),
       batchDelete: async (issueIds) => {
         await batchDeleteMutation.mutateAsync(issueIds);
       },

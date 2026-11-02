@@ -1,25 +1,26 @@
 ---
 title: Mettre les agents au travail
-description: Les quatre façons de déclencher un agent, et où suivre l'avancement ensuite.
+description: Choisissez comment commencer un travail, le transmettre ou demander de l’aide.
 ---
 
-Dans Multica, les agents ne se mettent pas au travail d'eux-mêmes. Chaque exécution est déclenchée par une action explicite. Il existe quatre façons de le faire :
+import { TriggerChooserDemo } from "@/components/demos/trigger-chooser-demo";
 
-| Méthode | Idéal pour | Comment |
-| --- | --- | --- |
-| **Assigner une tâche** | L'agent prend en charge ce travail de bout en bout | [Assignez la tâche à un agent](/assigning-issues) ; il démarre immédiatement lorsque la tâche est en `todo` ou dans un statut ultérieur |
-| **@mention dans un commentaire** | Demander à un agent de traiter une demande précise sans changer l'assigné de la tâche | [@mentionnez-le dans un commentaire](/mentioning-agents), ou répondez au commentaire de l'agent pour poursuivre la conversation |
-| **Discussion directe** | Une question ou un essai rapide qui ne nécessite pas de tâche | [Démarrez une discussion avec l'agent](/chat) ; chaque message déclenche une exécution |
-| **Automatisation** | Un travail récurrent qui doit s'exécuter selon une planification ou sur des événements externes | [Créez une automatisation](/autopilots), déclenchée par une planification, un webhook ou manuellement |
+Partez de ce que vous attendez d’un agent : lui confier une tâche, lui demander une aide ponctuelle ou organiser un travail récurrent.
 
-Les quatre méthodes partagent ces règles :
+<TriggerChooserDemo />
 
-- Vous ne pouvez déclencher que les agents que vous **avez la permission d'exécuter**, ce que détermine le paramètre Accès de l'agent — et non votre rôle dans l'espace de travail.
-- Avant de déclencher depuis une tâche, un **aperçu des déclenchements** sous le champ de saisie indique exactement qui ce contenu va réveiller ; utilisez `/note` pour laisser un message sans déclencher aucun agent.
-- Les tâches en `backlog` ne déclenchent pas d'exécution ; passez la tâche en `todo` et l'agent assigné démarre.
+| Votre besoin | Fonction à utiliser |
+|---|---|
+| Confier une tâche à un agent | [Assignez-la](/assigning-issues) à un agent ou un squad. |
+| Demander de l’aide sans changer le responsable | [@mentionnez l’agent](/mentioning-agents) dans un commentaire ou répondez à son commentaire. |
+| Envoyer souvent le même type de demande | Enregistrez une [action rapide](/quick-actions), comme une revue de code. |
+| Transmettre le travail selon des étapes répétées | Choisissez un [workflow](/workflows) de projet avec un responsable par étape. |
+| Poser une question sans créer de tâche | Démarrez une [discussion](/chat) avec l’agent. |
+| Commencer un travail récurrent selon une date ou un événement extérieur | Créez une [automatisation](/autopilots). |
+| Faire revenir un agent sur une tâche plus tard | Ajoutez à la tâche un [réveil](/issue-wakeups) avec l’heure ou l’événement à attendre. |
 
-## Suivre l'avancement
+Vous ne pouvez appeler que les agents que vous avez le droit d’exécuter. Avant d’envoyer un commentaire, vérifiez l’aperçu sous le champ ; utilisez `/note` pour laisser un message sans réveiller d’agent. Une tâche en `backlog` attend que vous soyez prêt à la commencer.
 
-Chaque déclenchement crée une [exécution](/tasks). L'avancement s'affiche en direct là où vous l'avez déclenchée — le fil d'activité de la tâche ou la fenêtre de discussion ; le journal d'exécution affiche l'exécution complète et permet de l'arrêter ou de la relancer.
+## Suivre l’avancement
 
-Lorsqu'une exécution tarde à démarrer, c'est généralement que le runtime est hors ligne — consultez la section sur les exécutions qui ne démarrent pas dans [Dépannage](/troubleshooting).
+Suivez les réponses dans la tâche ou la discussion où vous avez demandé le travail. Le [journal d’exécution](/tasks) permet de voir l’avancement, d’arrêter ou de réessayer. Si rien n’a commencé, vérifiez que l’ordinateur de l’agent est en ligne ; le [dépannage](/troubleshooting) indique la suite.

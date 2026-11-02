@@ -4,10 +4,11 @@ description: Installez Multica sur votre iPhone à partir des sources, et connec
 ---
 
 import { Callout } from "fumadocs-ui/components/callout";
+import { Step, Steps } from "fumadocs-ui/components/steps";
 
 Le client iOS de Multica n'est pas encore disponible sur l'App Store. Vous pouvez compiler une version Release à partir du dépôt de code source public sur un Mac et l'installer sur votre propre iPhone. Il n'existe pas encore de client Android.
 
-L'application installée se connecte par défaut à Multica Cloud ; connectez-vous avec votre compte existant. Les espaces de travail, les tâches, les commentaires et l'historique des exécutions sont tous stockés sur le serveur — rien n'a besoin d'être synchronisé manuellement depuis le web ou Desktop.
+L'application installée se connecte par défaut à Multica Cloud ; connectez-vous avec votre compte existant. Les espaces de travail, les tâches, les commentaires et l'historique des exécutions sont tous stockés sur le serveur : rien n'a besoin d'être synchronisé depuis le web ou Desktop.
 
 ## Prérequis
 
@@ -23,6 +24,8 @@ Si Xcode ou l'environnement de développement sur appareil n'est pas encore conf
 
 ## Installer sur votre iPhone
 
+<Steps>
+<Step>
 Clonez le dépôt et installez les dépendances :
 
 ```bash
@@ -30,16 +33,20 @@ git clone https://github.com/multica-ai/multica.git
 cd multica
 pnpm install
 ```
-
-Puis exécutez depuis la racine du dépôt :
+</Step>
+<Step>
+Exécutez depuis la racine du dépôt :
 
 ```bash
 pnpm ios:mobile:device:prod:release
 ```
 
 Cette commande compile une version Release sans dépendance à Metro et l'installe sur l'iPhone connecté. La première compilation télécharge les dépendances iOS et compile React Native ; les suivantes réutilisent le cache de Xcode.
-
-Si l'iPhone empêche l'ouverture de l'application, faites confiance au certificat de développeur dans **Réglages → Général → VPN et gestion de l'appareil**.
+</Step>
+<Step>
+Ouvrez l'application sur l'iPhone. Si iOS en bloque l'ouverture, faites confiance au certificat de développeur dans **Réglages → Général → VPN et gestion de l'appareil**.
+</Step>
+</Steps>
 
 ## Limite de 7 jours de la signature gratuite
 
@@ -70,19 +77,28 @@ pnpm ios:mobile:device:prod:release
 
 ## Se connecter à une instance auto-hébergée
 
-Les builds Release intègrent l'adresse de l'API dans l'application. Pour vous connecter à une instance auto-hébergée, modifiez d'abord `apps/mobile/.env.production` :
+Les builds Release intègrent l'adresse de l'API dans l'application. `apps/mobile/.env.production` est commité avec les valeurs publiques par défaut de multica.ai : un clone neuf compile donc directement la version de production.
+
+Pour vous connecter à une instance auto-hébergée :
+
+<Steps>
+<Step>
+Copiez `apps/mobile/.env.production.example` vers `apps/mobile/.env.production.local`, puis renseignez les adresses dans la copie :
 
 ```dotenv
 EXPO_PUBLIC_API_URL=https://api.example.com
 EXPO_PUBLIC_WEB_URL=https://app.example.com
 ```
 
-`EXPO_PUBLIC_API_URL` est obligatoire. `EXPO_PUBLIC_WEB_URL` est facultative et alimente des entrées comme « Copier le lien » et « Ouvrir sur le web » ; lorsqu'elle n'est pas définie, ces éléments de menu sont masqués.
-
-Relancez la commande de compilation après la modification. L'iPhone doit pouvoir joindre l'adresse de l'API ; si vous utilisez une adresse du réseau local, n'écrivez pas `localhost` — sur l'iPhone, cette adresse désigne le téléphone lui-même.
+Le fichier `.local` remplace les valeurs commitées clé par clé et est ignoré par git : vos adresses personnelles n'arrivent jamais dans le dépôt. `EXPO_PUBLIC_API_URL` est obligatoire. `EXPO_PUBLIC_WEB_URL` alimente des entrées comme « Copy link » et « Open on web ». Définissez les deux : une clé omise reprend la valeur par défaut de multica.ai, et ces entrées ouvriraient alors multica.ai au lieu de votre instance.
+</Step>
+<Step>
+Relancez la commande de compilation `pnpm ios:mobile:device:prod:release`. L'iPhone doit pouvoir joindre l'adresse de l'API ; si vous utilisez une adresse du réseau local, n'écrivez pas `localhost`, qui désigne sur l'iPhone le téléphone lui-même.
+</Step>
+</Steps>
 
 <Callout type="warning">
-Modifier `.env.production` change la configuration de production de la copie de travail actuelle. Commiter cette modification inscrit votre adresse d'API personnelle dans la configuration de production du dépôt.
+Modifier directement `.env.production` change la configuration de production de la copie de travail actuelle. Gardez vos valeurs personnelles dans `.env.production.local`, ignoré par git.
 </Callout>
 
 Pour le développement mobile, l'utilisation du Simulateur ou la connexion à l'environnement de staging, consultez [`apps/mobile/README.md`](https://github.com/multica-ai/multica/blob/main/apps/mobile/README.md) dans le dépôt.

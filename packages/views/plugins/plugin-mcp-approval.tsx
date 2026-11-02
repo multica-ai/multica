@@ -2,7 +2,7 @@
 
 import { useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { AlertCircle, Loader2 } from "lucide-react";
+import { AlertCircle, Loader2 } from "@multica/ui/icons";
 import { pluginMCPToolsOptions, useApprovePluginMCPTools } from "@multica/core/plugins";
 import type { PluginHook, PluginMCPTool } from "@multica/core/types";
 import { Alert, AlertDescription, AlertTitle } from "@multica/ui/components/ui/alert";

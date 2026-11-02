@@ -13,6 +13,7 @@ package wecom
 
 import (
 	"context"
+	"github.com/multica-ai/multica/server/internal/integrations/channel/engine"
 	"testing"
 	"time"
 )
@@ -187,7 +188,7 @@ func TestAFlushThatStartedNoRunClosesTheBubbleWithNoRun(t *testing.T) {
 	rig.ran(t, "REQ-S1", "task-1") // running, bound
 	rig.ask(t, "REQ-S2")           // the flush that found no runtime
 
-	rig.typing.OnSettled(context.Background(), sessionID)
+	rig.typing.OnSettled(context.Background(), sessionID, engine.TypingSettlement{})
 
 	frames := rig.conn.streamFrames(t)
 	if len(frames) != 3 {
@@ -213,7 +214,7 @@ func TestASettledFlushLeavesARoundWaitingForItsRetry(t *testing.T) {
 	rig.ran(t, "REQ-RETRY-SETTLE", "task-1")
 	rig.failed(t, "task-1", true) // the attempt is being retried; the round waits
 
-	rig.typing.OnSettled(context.Background(), bubbleSessionID(t))
+	rig.typing.OnSettled(context.Background(), bubbleSessionID(t), engine.TypingSettlement{})
 
 	if got := len(rig.conn.streamFrames(t)); got != 1 {
 		t.Fatalf("got %d stream frames, want 1 (the opening one) — a settled flush closed the "+

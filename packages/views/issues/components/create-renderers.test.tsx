@@ -127,7 +127,7 @@ describe("issue renderer create entrypoints", () => {
       <ListView issues={[]} visibleStatuses={["retired"]} statusPagination={emptyStatusPagination()}
         onCreateIssue={onCreateIssue} />
     </>);
-    expect(container.querySelector(".lucide-plus")).toBeNull();
+    expect(container.querySelector(".icon-plus")).toBeNull();
     expect(onCreateIssue).not.toHaveBeenCalled();
   });
 

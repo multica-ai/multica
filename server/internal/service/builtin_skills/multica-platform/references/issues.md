@@ -128,8 +128,8 @@ concurrent edits. There is no CLI bulk-export or `--all` mode.
 Workspaces may define custom issue properties (Severity, Environment, QA
 Status, Reviewer, ...). They are the place for durable, typed issue state:
 values are validated against the definition (select options, date format,
-http(s) URL, member reference), visible in the issue sidebar, and addressed
-by name.
+http(s) URL, member reference, free-form text/URL lists), visible in the
+issue sidebar, and addressed by name.
 
 - Read what exists before writing: `multica property list` shows the catalog;
   `multica issue property list <issue-id>` shows values set on the issue.
@@ -147,6 +147,14 @@ multica issue property unset <issue-id> --name Environment
   workspace members only. `--value` takes a member name, email, UUID, short id,
   or an explicit `member:<uuid>`; `multi_actor` takes a comma-separated list
   (duplicates dropped, order kept, max 20).
+- `multi_text` / `multi_url` properties hold free-form lists: `--value` is a
+  comma-separated list of strings / http(s) URLs (empty entries skipped,
+  duplicates dropped, order kept, max 20). They take no options. An entry that
+  itself contains a comma cannot survive that form — pass a JSON array instead:
+  `--value '["Smith, John","https://en.wikipedia.org/wiki/Washington,_D.C."]'`.
+  The array form is always safe; use it whenever any entry has a comma or the
+  input starts with `[`, for example `--value '["[draft] spec"]'`. The same
+  forms work during creation: `--property 'Aliases=["Smith, John","[draft] spec"]'`.
 - Definitions may include an optional catalog icon for visual identification;
   it does not change the property's type or value validation.
 - Agents cannot create or edit property definitions (owner/admin humans only).
@@ -159,23 +167,31 @@ multica issue property unset <issue-id> --name Environment
 ```bash
 multica issue list --property "Impact=High" --property "Impact=Medium" --output json
 multica issue list --property "QA Status=__none__" --status in_review --output json
+multica issue list --property "Effort>=3" --property "Due<2026-10-01" --output json
 multica issue list --sort property:Impact --direction desc --output json
 ```
 
 - `--property` takes one `Name=Value` per flag. Repeating the same property
-  matches ANY of its values; different properties must ALL match. Values are
+  matches ANY of its members; different properties must ALL match. Values are
   option names or ids (select types), `true`/`false` (checkbox), a member
   name/email/id (actor types), or the value itself for text, url, number,
-  and date (`YYYY-MM-DD`). The reserved value `__none__` matches
+  and date (`YYYY-MM-DD`); for `multi_text` / `multi_url` the value matches
+  any single element of the list exactly. The reserved value `__none__` matches
   issues where the property is unset (works for every type; it is not
   index-backed, so use it for targeted audits rather than as a default
-  listing filter). Only `=` is supported today; the `>=`, `<=` and `!=`
-  spellings are reserved for comparison filters and are rejected.
+  listing filter).
+- Comparisons use the same flag: `>`, `>=`, `<`, `<=` on number; `>` (after)
+  and `<` (before) on date; `~=` (contains, case-insensitive) on text and
+  url. Quote the flag so the shell does not read `<` or `>` as redirection.
+  `!=` is rejected (the server has no not-equal filter); `>=` and `<=` on a
+  date are rejected with an error naming the strict form to use. Two
+  comparisons on one property OR, so they do not form a range. Number and
+  date comparisons are not index-backed.
 - `--sort property:<name-or-id>` orders select properties by option order —
   an ordinal scale (Low < Medium < High) sorts by meaning — and number/date/
   text/url by value; issues without the property sort last either way.
   Archived properties and types without an order (multi_select, checkbox,
-  actor kinds) are rejected up front.
+  actor kinds, list types) are rejected up front.
 - `issue list` and `issue get` return `properties` as a map of definition id
   to stored value. Add `--resolve-properties` in JSON mode to get the rows
   `issue property list` prints instead (name, type, stored value, display
@@ -187,8 +203,9 @@ multica issue list --status in_progress --output json --resolve-properties
 multica issue get <issue-id> --resolve-properties
 ```
 
-  Read `display` for a single value and `display_values` for a multi_select
-  or multi_actor value; `value` keeps the stored ids.
+  Read `display` for a single value and `display_values` for a multi-value
+  property (multi_select, multi_actor, multi_text, multi_url); `value` keeps
+  the stored ids / strings.
 
 ## Status changes have server side effects
 
@@ -233,6 +250,9 @@ archived statuses remain readable via an explicit status filter.
   Squad leaders: dispatching members is not delivery — a dispatch turn
   leaves the parent `in_progress`, and it moves to `in_review` only when a
   later re-trigger confirms the overall goal is met.
+  An issue whose run carries a `[Project workflow]` block is the exception:
+  that block's statuses and commands are the whole status contract, and
+  none of the moves above apply to it.
 - **`in_review`** is an accepted issue status. Some workflows use it while a PR
   is open and awaiting review; moving to it is an explicit mutation.
 - **`done`** on a child issue can wake its parent's assignee (see Stages).
@@ -256,6 +276,9 @@ archived statuses remain readable via an explicit status filter.
 - **Failed issue-triggered tasks** may roll an issue from `in_progress` back to
   `todo` when no active task / retry remains — that is the main server-owned
   status write on the agent-run path.
+- **Project workflows** can limit which statuses an issue takes and turn a
+  status change into a handoff to another agent. When the per-turn prompt
+  carries a `[Project workflow]` block, read `references/projects.md`.
 
 ## Who else is running right now
 
@@ -371,14 +394,14 @@ Where content goes decides how it shows:
   `report.html` is a deliverable to open, not an inline chart. Use it for
   something the reader keeps or downloads.
 
-For HTML that should follow light / dark mode, style it with the page's theme
-variables: `var(--background)`, `var(--foreground)`, `var(--muted)`,
-`var(--muted-foreground)`, `var(--border)`, `var(--primary)`,
-`var(--chart-1)` … `var(--chart-5)`, `var(--font-sans)`. Using any of them opts
-the block into the app's color scheme, so also set the page background
-(`body { background: var(--background); color: var(--foreground) }`). HTML
-that uses none keeps its own look. Size to the content, not the viewport:
-`100vh` heights have no fixed viewport to fill here.
+For HTML that follows light / dark mode, style it with `var(--background)`,
+`var(--foreground)`, `var(--muted)`, `var(--muted-foreground)`, `var(--border)`,
+`var(--primary)`, `var(--chart-1)` … `var(--chart-5)`, `var(--font-sans)`. Any
+of them opts the block into the app's color scheme, so set the page background
+(`body { background: var(--background); color: var(--foreground) }`). Never put
+token text on a fixed light fill: it is near-white in dark mode, so a pastel
+`background:#fde2e4` needs a fixed dark `color`. HTML that uses no token keeps
+its own look. Size to the content: `100vh` has no fixed viewport to fill here.
 
 ````markdown
 ```html title="p95 latency, last 7 days"
@@ -421,21 +444,22 @@ current run. A wakeup persists on the issue; it is not a sleeping process.
 - `wakeup events` lists supported business facts. These work with plugins disabled.
 - `wakeup create <issue> --agent-id <target> --kind event --event task.completed,task.failed,task.cancelled --task-id <run> --instruction-file ./instruction.md` wakes once. Omit `--agent-id` only when acting as the authenticated agent. A specific run must belong to this issue; if already terminal, registration captures its matching state immediately.
 - For a continuing subscription use `--mode continuous`. For task events, use `--filter-agent-id` to match that agent's future runs; this does not replay historical runs. For comment/issue/reaction/attachment changes, use `--filter-actor-type member|agent --filter-actor-id <user-or-agent-id>` to match the actual author/editor. Mutation-only `--filter-agent-id` remains a legacy alias for actor=agent; do not combine it with actor flags.
-- A condition lets the platform check a stored fact itself and wake the target only when it holds. Pass exactly one `--until-*` flag and no `--event`, `--task-id` or actor/agent filter; the rule stays `kind=event`. The platform checks about every 30 seconds, so a condition that already holds fires on the next check, except `--until-pr checks`, which ignores results that finished before registration. A condition wakes once by default. With `--mode continuous` it fires again only after the predicate turns false or the facts behind it change (a new check result or PR head, another linked PR merging, the number of sub-issues changing).
+- A condition lets the platform check a stored fact itself and wake the target only when it holds. Pass exactly one `--until-*` flag and no `--event`, `--task-id` or actor/agent filter; the rule stays `kind=event`. The platform checks about every 30 seconds, so a condition that already holds fires on the next check, except `--until-pr checks`, which ignores results that finished before registration. A condition wakes once by default. With `--mode continuous` it fires again only after the predicate turns false or the facts behind it change (a new check result or PR head, another linked PR merging, a resolved conflict coming back, the number of sub-issues changing).
 
 ```bash
 multica issue wakeup create <issue> --until-status in_review --instruction-file ./instruction.md
 multica issue wakeup create <issue> --until-pr checks --expires-in 2h --on-timeout wake --instruction-file ./instruction.md
 multica issue wakeup create <issue> --until-pr merged --instruction-file ./instruction.md
+multica issue wakeup create <issue> --until-pr conflicts --mode continuous --instruction-file ./instruction.md
 multica issue wakeup create <issue> --until-children-done --instruction-file ./instruction.md
 multica issue wakeup create <issue> --until-children-done --stage 2 --instruction-file ./instruction.md
 multica issue wakeup create <issue> --until-issue <other-issue-id> --until-issue-state done --instruction-file ./instruction.md
 ```
 
 - `--until-status KEY` — this issue's status is that key (built-in or one of the workspace's statuses).
-- `--until-pr checks` — a linked pull request's checks finished, passing or failing, on its current head. `--until-pr merged` — a linked pull request merged. With several linked pull requests, any one satisfies it.
+- `--until-pr checks` — a linked pull request's checks finished, passing or failing, on its current head. `--until-pr merged` — a linked pull request merged. `--until-pr conflicts` — an open linked GitHub pull request has merge conflicts on its current head, for example after another PR merged into its base; with `--mode continuous` it fires again each time a resolved conflict comes back or a new head is still conflicting. With several linked pull requests, any one satisfies it. These conditions inspect only PRs linked directly to this issue; they do not inherit a parent issue's PRs. Checks and conflicts also require server-side GitHub snapshots; conflicts are not detected on Forgejo, Gitea or GitLab pull requests. A missing link or snapshot is recorded in the rule's `last_error` and retried automatically rather than rejecting the rule.
 - `--until-children-done` — every sub-issue, staged or not, is closed (`done` or `cancelled`). With `--stage N` it waits only for staged sub-issues up to stage N, and stage N must have at least one. A parent with no sub-issues never fires. The parent's assignee already gets the sub-issue wakeup described under Stages; do not add this condition for the same wake.
-- `--until-issue ISSUE` — another issue in this workspace (identifier or UUID) reaches `--until-issue-state`: `done` (default), `ended` (done or cancelled), or `in_review`.
+- `--until-issue ISSUE` — another issue in this workspace (identifier or UUID) reaches `--until-issue-state`: `done` (default), `ended` (done or cancelled), `in_review`, or `blocked`.
 - The same form also accepts `--until-assignee member|agent|squad:ID`, `--until-label LABEL_ID`, and `--until-property PROPERTY_ID=VALUE` (VALUE may be JSON). `multica issue wakeup create --help` lists them.
 - `wakeup create <issue> --kind at --after 10m --instruction-file ./instruction.md` schedules one run. Alternatively use `--at <RFC3339>`.
 - `wakeup create <issue> --kind every --every 1h --instruction-file ./instruction.md` schedules a repeating check. Or use `--kind cron --cron '0 * * * *' --timezone Asia/Shanghai`.
@@ -451,7 +475,7 @@ multica issue wakeup create <issue> --until-issue <other-issue-id> --until-issue
 
 Read current state with issue get, comment list, and run inspection before
 judging business completion. Wait for a linked pull request with `--until-pr`
-(`checks` or `merged`) rather than polling it from a timer. There is no separate
+(`checks`, `merged` or `conflicts`) rather than polling it from a timer. There is no separate
 CI event; when the woken run needs check details or logs, use the existing
 GitHub tools. A failed run does not imply its business goal is complete.
 Automatic retry chains are not followed by event filters; subscribe to a new run

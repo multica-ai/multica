@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useMemo, useRef } from "react";
+import { useCallback, useMemo } from "react";
 import { toast } from "sonner";
 import { useQuery } from "@tanstack/react-query";
 import { api } from "@multica/core/api";
@@ -28,23 +28,20 @@ import { quickActionListOptions } from "@multica/core/quick-actions";
 export function useQuickActionMenu(issueId: string) {
   const workspace = useCurrentWorkspace();
   const wsId = workspace?.id ?? "";
-  const { data = [] } = useQuery({
+  const { data } = useQuery({
     ...quickActionListOptions(wsId),
     enabled: wsId !== "",
   });
 
-  // The extension reads through a getter on every keystroke; a ref keeps that
-  // read cheap and current without re-creating the editor.
-  const actionsRef = useRef<{ id: string; name: string; description?: string }[]>([]);
-  actionsRef.current = useMemo(
+  const actions = useMemo(
     () =>
-      data
+      (data ?? [])
         .filter((a) => a.status === "active")
         .map((a) => ({ id: a.id, name: a.name, description: a.description || undefined })),
     [data],
   );
 
-  const getQuickActions = useCallback(() => actionsRef.current, []);
+  const getQuickActions = useCallback(() => actions, [actions]);
   const renderQuickAction = useCallback(
     (quickActionId: string) => api.renderQuickAction(issueId, quickActionId),
     [issueId],

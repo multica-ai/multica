@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { createAuthStore } from "../auth";
+import { setCurrentWorkspace } from "../platform/workspace-storage";
 import { configStore } from "../config";
 import type { StorageAdapter, User } from "../types";
 import { ApiClient, ApiError, CHAT_DRAFT_RESTORE_CAPABILITY, clientErrorMessage } from "./client";
@@ -1589,6 +1590,36 @@ describe("ApiClient", () => {
   });
 
   describe("getAttachment", () => {
+    it("uses the attachment-owned workspace endpoint for Markdown downloads", async () => {
+      const fetchMock = vi.fn().mockResolvedValue(
+        new Response(
+          JSON.stringify({
+            id: "att-1",
+            workspace_id: "ws-b",
+            uploader_type: "member",
+            uploader_id: "u-1",
+            filename: "report.md",
+            url: "https://static.example.test/report.md",
+            download_url: "/api/attachments/att-1/signed-download?sig=abc",
+            attachment_download_url: "/api/attachments/att-1/signed-download?sig=def&dl=1",
+            content_type: "text/markdown",
+            size_bytes: 123,
+            created_at: "2026-05-11T00:00:00Z",
+          }),
+          { status: 200, headers: { "Content-Type": "application/json" } },
+        ),
+      );
+      vi.stubGlobal("fetch", fetchMock);
+      const client = new ApiClient("https://api.example.test");
+
+      const att = await client.getAttachmentForDownload("att-1");
+
+      expect(fetchMock.mock.calls[0]?.[0]).toBe(
+        "https://api.example.test/api/attachments/att-1/download-metadata",
+      );
+      expect(att.attachment_download_url).toContain("dl=1");
+    });
+
     it("returns the parsed attachment for a well-formed response", async () => {
       vi.stubGlobal(
         "fetch",
@@ -2213,7 +2244,7 @@ describe("ApiClient model discovery response schema", () => {
   function stubJSON(body: unknown) {
     vi.stubGlobal(
       "fetch",
-      vi.fn().mockResolvedValue(
+      vi.fn().mockImplementation(() =>
         new Response(JSON.stringify(body), {
           status: 200,
           headers: { "Content-Type": "application/json" },
@@ -2221,6 +2252,39 @@ describe("ApiClient model discovery response schema", () => {
       ),
     );
   }
+
+  it.each([null, "other-workspace"])(
+    "targets onboarding workspace for discovery and polling with active route %s",
+    async (activeSlug) => {
+      setCurrentWorkspace(activeSlug, null);
+      try {
+        stubJSON(completed);
+        const client = new ApiClient("https://api.example.test");
+        await client.initiateListModels("rt-1", { force: true }, "new-workspace");
+        await client.getListModelsResult("rt-1", "req-1", "new-workspace");
+        for (const [, init] of vi.mocked(fetch).mock.calls) {
+          expect(new Headers(init?.headers).get("X-Workspace-Slug")).toBe("new-workspace");
+        }
+      } finally {
+        setCurrentWorkspace(null, null);
+      }
+    },
+  );
+
+  it("keeps the active workspace header when no override is supplied", async () => {
+    setCurrentWorkspace("existing-workspace", null);
+    try {
+      stubJSON(completed);
+      const client = new ApiClient("https://api.example.test");
+      await client.initiateListModels("rt-1");
+      await client.getListModelsResult("rt-1", "req-1");
+      for (const [, init] of vi.mocked(fetch).mock.calls) {
+        expect(new Headers(init?.headers).get("X-Workspace-Slug")).toBe("existing-workspace");
+      }
+    } finally {
+      setCurrentWorkspace(null, null);
+    }
+  });
 
   it("parses a live completed discovery", async () => {
     stubJSON(completed);

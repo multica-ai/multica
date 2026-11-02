@@ -249,7 +249,7 @@ func TestClaimTaskRejectsMismatchedAgentRuntime(t *testing.T) {
 	fixture := newRuntimeClaimAccessFixture(t, "public", false, false, "queued")
 	svc := NewTaskService(db.New(fixture.pool), fixture.pool, nil, events.New())
 
-	claimed, err := svc.claimTask(ctx, fixture.agentID, fixture.runtimeID)
+	claimed, err := svc.claimTask(ctx, fixture.agentID, fixture.runtimeID, claimScope{claimPath: claimPathRuntime})
 	if err != nil {
 		t.Fatalf("claim task: %v", err)
 	}
