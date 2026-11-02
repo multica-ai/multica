@@ -242,9 +242,10 @@ func TestRepoCheckoutSummary(t *testing.T) {
 	t.Parallel()
 	const repoURL = "https://github.com/org/repo.git"
 	for _, tc := range []struct {
-		name   string
-		result repoCheckoutResult
-		want   []string
+		name    string
+		result  repoCheckoutResult
+		want    []string
+		notWant []string
 	}{
 		{
 			name:   "new branch",
@@ -256,7 +257,7 @@ func TestRepoCheckoutSummary(t *testing.T) {
 			result: repoCheckoutResult{Path: "/work/repo", BranchName: "agent/test/old", Kept: "local_work", UncommittedFiles: 2, UnpushedCommits: 1},
 			want: []string{
 				"Kept the existing checkout of " + repoURL + " at /work/repo (branch: agent/test/old; 2 uncommitted files, 1 unpushed commit)",
-				"nothing was reset, cleaned, or switched",
+				"nothing was reset, cleaned, or switched; only remote refs were fetched.",
 				"re-run with --fresh",
 			},
 		},
@@ -280,9 +281,10 @@ func TestRepoCheckoutSummary(t *testing.T) {
 			},
 		},
 		{
-			name:   "kept after a failed fetch",
-			result: repoCheckoutResult{Path: "/work/repo", BranchName: "agent/test/task", Kept: "task_branch", FetchError: "git fetch: boom"},
-			want:   []string{"only remote refs were fetched", "Warning: fetching the remote failed", "Fetch error: git fetch: boom"},
+			name:    "kept after a failed fetch",
+			result:  repoCheckoutResult{Path: "/work/repo", BranchName: "agent/test/task", Kept: "task_branch", FetchError: "git fetch: boom"},
+			want:    []string{"nothing was reset, cleaned, or switched.\n", "Warning: fetching the remote failed", "Fetch error: git fetch: boom"},
+			notWant: []string{"only remote refs were fetched"},
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -290,6 +292,11 @@ func TestRepoCheckoutSummary(t *testing.T) {
 			for _, want := range tc.want {
 				if !strings.Contains(got, want) {
 					t.Fatalf("summary missing %q:\n%s", want, got)
+				}
+			}
+			for _, notWant := range tc.notWant {
+				if strings.Contains(got, notWant) {
+					t.Fatalf("summary contains %q:\n%s", notWant, got)
 				}
 			}
 			if kept := strings.HasPrefix(got, "Kept "); kept != (tc.result.Kept != "") {

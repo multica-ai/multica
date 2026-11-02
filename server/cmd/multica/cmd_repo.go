@@ -465,13 +465,18 @@ func repoCheckoutOutcome(repoURL string, result repoCheckoutResult) string {
 	if result.Kept == "task_branch" {
 		branch += ", this task's branch"
 	}
-	return fmt.Sprintf("Kept the existing checkout of %s at %s (branch: %s; %d uncommitted file%s, %d unpushed commit%s): "+
-		"nothing was reset, cleaned, or switched; only remote refs were fetched.\n"+
+	untouched := "nothing was reset, cleaned, or switched; only remote refs were fetched."
+	if result.FetchError != "" {
+		// The fetch warning that follows says the remote refs were not updated.
+		untouched = "nothing was reset, cleaned, or switched."
+	}
+	return fmt.Sprintf("Kept the existing checkout of %s at %s (branch: %s; %d uncommitted file%s, %d unpushed commit%s): %s\n"+
 		"To discard its uncommitted changes and untracked files and start over on a new branch from the latest default branch (or --ref), "+
 		"re-run with --fresh; commits stay on the old branch, but push any you still need first.",
 		repoURL, result.Path, branch,
 		result.UncommittedFiles, pluralS(result.UncommittedFiles),
-		result.UnpushedCommits, pluralS(result.UnpushedCommits))
+		result.UnpushedCommits, pluralS(result.UnpushedCommits),
+		untouched)
 }
 
 // repoCheckoutFetchWarning flags a checkout made from the daemon's cached copy
