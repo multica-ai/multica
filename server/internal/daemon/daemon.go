@@ -5897,6 +5897,8 @@ func (d *Daemon) handleTask(ctx context.Context, task Task, slot int) {
 	// Only the parent (daemon) context identifies shutdown. A cancelled agent
 	// with a live parent remains a deliberate cancellation; server terminal
 	// states and poll cancellation have already taken precedence above.
+	// Infrastructure interruptions carry a diagnostic, matching server-side orphan
+	// recovery; deliberate cancellation relies on its localized reason label.
 	if result.Status == "cancelled" && result.FailureReason == "" && errors.Is(ctx.Err(), context.Canceled) {
 		result.FailureReason = taskfailure.ReasonRuntimeRecovery.String()
 		result.Comment = "daemon shut down while task was in flight"
