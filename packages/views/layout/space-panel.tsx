@@ -10,7 +10,7 @@ import { AutopilotsPanel } from "./panels/autopilots-panel";
 import { ChatPeek, InboxPeek } from "./panels/list-space-peeks";
 import { NAV_COLUMN_MOTION_CLASS, NAV_PEEK_CLASS } from "./rail-styles";
 import { TeamPanel } from "./panels/team-panel";
-import { WorkPanel } from "./panels/work-panel";
+import { KeptRowsRelease, WorkPanel } from "./panels/work-panel";
 
 const PANELS: Partial<Record<AppSpaceId, () => React.ReactNode>> = {
   work: WorkPanel,
@@ -43,7 +43,8 @@ export function SpacePanel() {
   const shell = useAppShell();
   const { open, isCompact } = useSidebar();
   const panelRef = useRef<HTMLElement>(null);
-  if (!shell || isCompact) return null;
+  if (!shell) return null;
+  if (isCompact) return <KeptRowsRelease />;
 
   const { space, hasPanel, peekSpace, navCollapsed } = shell;
   // The current space's own list column floats itself (`ListColumn`).
@@ -52,6 +53,7 @@ export function SpacePanel() {
 
   return (
     <>
+      <KeptRowsRelease />
       {hasPanel && (
         <aside
           // A new space mounts at its final width; only toggling animates.

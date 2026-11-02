@@ -615,6 +615,7 @@ func main() {
 	registerSubscriberListeners(bus, pool)
 	registerActivityListeners(bus, queries)
 	registerNotificationListeners(bus, queries)
+	registerIssueUnreadListeners(bus, queries)
 
 	metricsConfig := obsmetrics.ConfigFromEnv()
 	var metricsServer *http.Server

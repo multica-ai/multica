@@ -28,6 +28,7 @@ import (
 	"github.com/multica-ai/multica/server/internal/logger"
 	obsmetrics "github.com/multica-ai/multica/server/internal/metrics"
 	"github.com/multica-ai/multica/server/internal/middleware"
+	"github.com/multica-ai/multica/server/internal/qoderruntime"
 	"github.com/multica-ai/multica/server/internal/service"
 	"github.com/multica-ai/multica/server/internal/util"
 	agentpkg "github.com/multica-ai/multica/server/pkg/agent"
@@ -2863,6 +2864,10 @@ func (h *Handler) QuickCreateIssue(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, status, payload)
 		return
 	}
+	if status, payload := h.checkQuickCreateQoderLimits(r.Context(), obsmetrics.RuntimeLookupSourceIssue, agent.RuntimeID, hasSquad, len(req.AttachmentIDs) > 0); status != 0 {
+		writeJSON(w, status, payload)
+		return
+	}
 	if priority != "" || dueDate != "" {
 		if status, payload := h.checkQuickCreateDaemonVersionAtLeast(
 			r.Context(), obsmetrics.RuntimeLookupSourceIssue, agent.RuntimeID, agentpkg.MinQuickCreateFieldsCLIVersion,
@@ -2977,6 +2982,29 @@ func (h *Handler) checkQuickCreateDaemonVersion(ctx context.Context, source stri
 	return h.checkQuickCreateDaemonVersionAtLeast(ctx, source, runtimeID, agentpkg.MinQuickCreateCLIVersion)
 }
 
+// checkQuickCreateQoderLimits rejects quick-create requests that a Qoder
+// Cloud Agents leader can create but not run afterwards. The bridge drafts and
+// creates the issue itself, but the run that the new issue's assignment
+// dispatches next fails on the bridge for a squad-leader task or an issue with
+// attachments, so the user would see "created" followed by a failed run.
+func (h *Handler) checkQuickCreateQoderLimits(ctx context.Context, source string, runtimeID pgtype.UUID, squad, attachments bool) (int, map[string]any) {
+	if !squad && !attachments {
+		return 0, nil
+	}
+	rt, err := h.getAgentRuntime(ctx, source, runtimeID)
+	if err != nil || rt.Provider != qoderruntime.Provider {
+		return 0, nil
+	}
+	reason := "Qoder Cloud Agents cannot lead a squad; pick the agent directly to create the issue"
+	if !squad {
+		reason = "Qoder Cloud Agents cannot read attachments; remove them or pick another agent"
+	}
+	return http.StatusUnprocessableEntity, map[string]any{
+		"code":   "agent_unavailable",
+		"reason": reason,
+	}
+}
+
 func (h *Handler) checkQuickCreateDaemonVersionAtLeast(ctx context.Context, source string, runtimeID pgtype.UUID, minimum string) (int, map[string]any) {
 	rt, err := h.getAgentRuntime(ctx, source, runtimeID)
 	if err != nil {
@@ -2986,6 +3014,10 @@ func (h *Handler) checkQuickCreateDaemonVersionAtLeast(ctx context.Context, sour
 			"code":   "agent_unavailable",
 			"reason": "agent's runtime is no longer registered",
 		}
+	}
+	// The Qoder bridge creates the issue itself instead of running the CLI.
+	if rt.Provider == qoderruntime.Provider {
+		return 0, nil
 	}
 	if name := cloudAgentServiceName(rt.Provider); name != "" {
 		return http.StatusUnprocessableEntity, map[string]any{
@@ -3303,6 +3335,19 @@ func (h *Handler) CreateIssue(w http.ResponseWriter, r *http.Request) {
 		slog.Error("create issue: resolve project workflow", append(logger.RequestAttrs(r), "error", err)...)
 		writeError(w, http.StatusInternalServerError, "failed to resolve project workflow")
 		return
+	}
+	// Outside any project the issue takes the Default's statuses. (MUL-8250)
+	if !workflowProjectID.Valid {
+		outside, err := issueworkflow.OutsideProject(r.Context(), h.Queries, wsUUID)
+		if err != nil {
+			slog.Error("create issue: resolve default workflow", append(logger.RequestAttrs(r), "error", err)...)
+			writeError(w, http.StatusInternalServerError, "failed to resolve project workflow")
+			return
+		}
+		if err := issueworkflow.CheckStatusOutsideProject(outside, status); err != nil {
+			writeIssueWorkflowError(w, err)
+			return
+		}
 	}
 	if createWorkflow != nil {
 		if err := issueworkflow.CheckStatus(createWorkflow, status); err != nil {

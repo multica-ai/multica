@@ -132,6 +132,9 @@ const { apiMocks, copyTextMock } = vi.hoisted(() => ({
     listIssueWorkflows: vi.fn(),
     listProjects: vi.fn(),
     getAgentTaskSnapshot: vi.fn(),
+    listIssueUnread: vi.fn(),
+    markIssueRead: vi.fn(),
+    markIssueUnread: vi.fn(),
   },
   copyTextMock: vi.fn(),
 }));
@@ -205,6 +208,12 @@ beforeEach(() => {
   apiMocks.listProjects.mockResolvedValue({ projects: [] });
   apiMocks.getAgentTaskSnapshot.mockReset();
   apiMocks.getAgentTaskSnapshot.mockResolvedValue([]);
+  apiMocks.listIssueUnread.mockReset();
+  apiMocks.listIssueUnread.mockResolvedValue([]);
+  apiMocks.markIssueRead.mockReset();
+  apiMocks.markIssueRead.mockResolvedValue({ unread: false });
+  apiMocks.markIssueUnread.mockReset();
+  apiMocks.markIssueUnread.mockResolvedValue({ unread: true });
   cancelRunMock.mockReset();
   cancelRunMock.mockResolvedValue(undefined);
   updateIssueMock.mockReset();
@@ -583,12 +592,30 @@ describe("Sidebar variant (MUL-8425)", () => {
       "AssigneeTest User",
       "Open in new tab",
       "Pin to sidebar",
+      "Mark as unread",
       "Copy link",
       "Copy identifier",
     ]);
     expect(screen.getByTestId("row")).toHaveAttribute("data-popup-open");
     // No workdir entry, so the menu has no reason to fetch the task list.
     expect(listTasksByIssueMock).not.toHaveBeenCalled();
+  });
+
+  it("marks an unread issue as read", async () => {
+    apiMocks.listIssueUnread.mockResolvedValue([
+      { issue_id: "issue-1", outcome: "completed", agent_id: "agent-1", created_at: "2026-01-01T00:00:00Z" },
+    ]);
+    openSidebarMenu();
+    fireEvent.click(await screen.findByText("Mark as read"));
+
+    await waitFor(() => expect(apiMocks.markIssueRead).toHaveBeenCalledWith("issue-1"));
+  });
+
+  it("marks a read issue as unread", async () => {
+    openSidebarMenu();
+    fireEvent.click(await screen.findByText("Mark as unread"));
+
+    await waitFor(() => expect(apiMocks.markIssueUnread).toHaveBeenCalledWith("issue-1"));
   });
 
   it("shows Unassigned when nobody owns the issue", async () => {

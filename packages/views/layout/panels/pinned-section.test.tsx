@@ -139,7 +139,7 @@ describe("PinnedSection", () => {
       error: null,
     };
     renderWithI18n(<Harness pathname="/acme/issues" />);
-    const row = (await screen.findByText("Keep this pin")).closest("a")!;
+    const row = (await screen.findByText("Keep this pin")).closest("a")!.parentElement!;
     fireEvent.contextMenu(row);
 
     expect(await screen.findByText("sidebar menu: Keep this pin")).toBeInTheDocument();

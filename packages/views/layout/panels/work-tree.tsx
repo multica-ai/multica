@@ -13,15 +13,17 @@ import { useIssueStatuses } from "@multica/core/issue-statuses/hooks";
 import { issueKeys, sidebarIssuesOptions } from "@multica/core/issues/queries";
 import {
   SIDEBAR_FIRST_PAGE,
-  projectSidebarParams,
+  projectSidebarRequest,
   projectSidebarSource,
+  type SidebarIssuesRequest,
 } from "@multica/core/issues/sidebar-list";
 import { useSidebarProjectPrefs, useUpdateSidebarProjectPrefs } from "@multica/core/issues/sidebar-project-prefs";
 import { openCreateIssueWithPreference } from "@multica/core/issues/stores/create-mode-store";
+import { useSidebarKeptStore } from "@multica/core/issues/stores/sidebar-kept-store";
 import { useSidebarTreeStore, type SidebarIssueSettings } from "@multica/core/issues/stores/sidebar-tree-store";
 import { useModalStore } from "@multica/core/modals";
 import { useWorkspacePaths } from "@multica/core/paths";
-import type { ListIssuesParams, ListIssuesResponse, Project } from "@multica/core/types";
+import type { Issue, ListIssuesResponse, Project } from "@multica/core/types";
 import { useT } from "../../i18n";
 import { PanelCount, PanelLink, PanelList, PanelSection, isPathWithin } from "../panel-nav";
 import { ProjectsSectionSettings } from "./sidebar-settings";
@@ -35,30 +37,46 @@ function useExpanded(key: string) {
   return [expanded, (next: boolean) => setExpanded(key, next)] as const;
 }
 
-function usePrefetch(wsId: string, source: string, params: ListIssuesParams | null | undefined) {
+function usePrefetch(wsId: string, source: string, request: SidebarIssuesRequest | null | undefined) {
   const qc = useQueryClient();
   return () => {
-    if (params) void qc.prefetchQuery(sidebarIssuesOptions(wsId, source, params, SIDEBAR_FIRST_PAGE));
+    if (request) void qc.prefetchQuery(sidebarIssuesOptions(wsId, source, request, SIDEBAR_FIRST_PAGE));
   };
 }
 
 /**
- * The id of the issue an expanded row lists under `ref` — its UUID, or an
- * identifier like `MUL-123` matched case-insensitively as the server does —
- * or `null` when no expanded row lists it.
+ * The id of the issue an expanded row lists or keeps under `ref` — its UUID,
+ * or an identifier like `MUL-123` matched case-insensitively as the server
+ * does — or `null` when no expanded row lists it.
  */
 export function useIssueIdInTree(wsId: string, ref: string | null): string | null {
-  const cache = useQueryClient().getQueryCache();
-  const subscribe = useCallback((onChange: () => void) => cache.subscribe(onChange), [cache]);
+  const qc = useQueryClient();
+  const cache = qc.getQueryCache();
+  const subscribe = useCallback(
+    (onChange: () => void) => {
+      const unsubscribeCache = cache.subscribe(onChange);
+      const unsubscribeKept = useSidebarKeptStore.subscribe(onChange);
+      return () => {
+        unsubscribeCache();
+        unsubscribeKept();
+      };
+    },
+    [cache],
+  );
   return useSyncExternalStore(subscribe, () => {
     if (!ref) return null;
     const identifier = ref.toUpperCase();
-    for (const query of cache.findAll({ queryKey: issueKeys.sidebarAll(wsId) })) {
-      if (query.getObserversCount() === 0) continue;
-      const issue = (query.state.data as ListIssuesResponse | undefined)?.issues?.find(
-        (issue) => issue.id === ref || issue.identifier.toUpperCase() === identifier,
-      );
+    const matches = (issue: Issue) => issue.id === ref || issue.identifier.toUpperCase() === identifier;
+    const shown = (queryKey: readonly unknown[]) =>
+      cache.findAll({ queryKey }).filter((query) => query.getObserversCount() > 0);
+    for (const query of shown(issueKeys.sidebarAll(wsId))) {
+      const issue = (query.state.data as ListIssuesResponse | undefined)?.issues?.find(matches);
       if (issue) return issue.id;
+    }
+    // A shown list keeps the open issue its query dropped (`useKeptActiveItem`).
+    for (const [list, held] of Object.entries(useSidebarKeptStore.getState().held)) {
+      const issue = qc.getQueryData<Issue>(issueKeys.detail(wsId, held.id));
+      if (issue && matches(issue) && shown([...issueKeys.sidebarAll(wsId), list]).length > 0) return issue.id;
     }
     return null;
   });
@@ -184,7 +202,7 @@ function ProjectTreeItem({
   const [expanded, setExpanded] = useExpanded(source);
   const statusCatalog = useIssueStatuses(wsId);
   const params = statusCatalog.isLoaded
-    ? projectSidebarParams(project.id, issueSettings, statusCatalog.statuses, userId)
+    ? projectSidebarRequest(project.id, issueSettings, statusCatalog.statuses, userId)
     : undefined;
   const prefetch = usePrefetch(wsId, source, params);
 

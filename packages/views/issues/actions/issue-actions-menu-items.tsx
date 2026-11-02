@@ -9,6 +9,7 @@ import {
   Calendar,
   CalendarClock,
   Check,
+  CircleDot,
   CircleEqual,
   ExternalLink,
   FolderOpen,
@@ -34,6 +35,7 @@ import {
   PRIORITY_CONFIG,
 } from "@multica/core/issues/config";
 import { useWorkspaceId } from "@multica/core/hooks";
+import { useIssueUnread, useMarkIssueRead, useMarkIssueUnread } from "@multica/core/issues/unread";
 import { useActorName } from "@multica/core/workspace/hooks";
 import { useIssueStatuses } from "@multica/core/issue-statuses/hooks";
 import { stepHandsOff, workflowAllowsStatus, workflowStep } from "@multica/core/issue-workflows";
@@ -141,6 +143,9 @@ export function IssueActionsMenuItems({
     updateField({ status });
   };
   const { categoryOf, colorOf, iconOf } = useIssueStatuses(wsId);
+  const unread = useIssueUnread(wsId, sidebar ? issue.id : "");
+  const { mutate: markRead } = useMarkIssueRead(wsId);
+  const { mutate: markUnread } = useMarkIssueUnread(wsId);
   const {
     isPinned,
     updateField,
@@ -410,6 +415,18 @@ export function IssueActionsMenuItems({
         )}
         {isPinned ? t(($) => $.actions.unpin_from_sidebar) : t(($) => $.actions.pin_to_sidebar)}
       </P.Item>
+      {sidebar &&
+        (unread ? (
+          <P.Item onClick={() => markRead(issue.id)}>
+            <Check className="h-3.5 w-3.5" />
+            {t(($) => $.actions.mark_read)}
+          </P.Item>
+        ) : (
+          <P.Item onClick={() => markUnread(issue.id)}>
+            <CircleDot className="h-3.5 w-3.5" />
+            {t(($) => $.actions.mark_unread)}
+          </P.Item>
+        ))}
       <P.Item onClick={copyLink}>
         <Link2 className="h-3.5 w-3.5" />
         {t(($) => $.actions.copy_link)}

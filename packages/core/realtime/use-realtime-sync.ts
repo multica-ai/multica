@@ -12,6 +12,7 @@ import { defaultStorage } from "../platform/storage";
 import { getCurrentWsId, getCurrentSlug } from "../platform/workspace-storage";
 import { issueKeys } from "../issues/queries";
 import { isSidebarTableRequest, type SidebarIssuesRequest } from "../issues/sidebar-list";
+import { refreshIssueUnread } from "../issues/unread";
 import { projectKeys } from "../projects/queries";
 import { pinKeys } from "../pins/queries";
 import { autopilotKeys } from "../autopilots/queries";
@@ -88,6 +89,7 @@ import type {
   IssueDeletedPayload,
   IssueAttachmentsChangedPayload,
   IssueLabelsChangedPayload,
+  IssueUnreadChangedPayload,
   IssueMetadataChangedPayload,
   IssuePropertiesChangedPayload,
   InboxNewPayload,
@@ -649,6 +651,7 @@ function invalidateWorkspaceScopedQueries(qc: QueryClient): void {
   const wsId = getCurrentWsId();
   if (wsId) {
     qc.invalidateQueries({ queryKey: issueKeys.all(wsId) });
+    void refreshIssueUnread(qc, wsId);
     // Through the inbox's own entry point, not a plain invalidate: a reconnect
     // can land during the list's first load, and a plain invalidate would be
     // answered by the request already on the wire (see refreshInboxQuery).
@@ -890,6 +893,9 @@ export function useRealtimeSync(
         const wsId = getCurrentWsId();
         if (wsId) {
           qc.invalidateQueries({ queryKey: issueStatusKeys.all(wsId) });
+          // Creating or archiving a status also adds it to, or drops it from,
+          // the stored Default workflow.
+          qc.invalidateQueries({ queryKey: issueWorkflowKeys.all(wsId) });
           // Status-group order is server-owned and depends on catalog positions.
           // Rows/facets and unrelated groupings do not change on catalog edits.
           qc.invalidateQueries({
@@ -1075,7 +1081,7 @@ export function useRealtimeSync(
     // Event types handled by specific handlers below -- skip generic refresh
     const specificEvents = new Set([
       "workspace:updated",
-      "issue:updated", "issue:created", "issue:deleted", "issue_attachments:changed", "issue_labels:changed", "issue_metadata:changed", "issue_properties:changed", "property:created", "property:updated", "inbox:new",
+      "issue:updated", "issue:created", "issue:deleted", "issue_attachments:changed", "issue_labels:changed", "issue_unread:changed", "issue_metadata:changed", "issue_properties:changed", "property:created", "property:updated", "inbox:new",
       "comment:created", "comment:updated", "comment:deleted",
       "comment:resolved", "comment:unresolved",
       "activity:created",
@@ -1160,6 +1166,12 @@ export function useRealtimeSync(
       if (!issue_id) return;
       const wsId = getCurrentWsId();
       if (wsId) onIssueLabelsChanged(qc, wsId, issue_id, labels ?? [], issue_revision);
+    });
+
+    // Personal; may belong to a workspace other than the open one.
+    const unsubIssueUnreadChanged = ws.on("issue_unread:changed", (p) => {
+      const { workspace_id } = p as IssueUnreadChangedPayload;
+      if (workspace_id) void refreshIssueUnread(qc, workspace_id);
     });
 
     const unsubIssueAttachmentsChanged = ws.on("issue_attachments:changed", (p) => {
@@ -1856,6 +1868,7 @@ export function useRealtimeSync(
       unsubIssueDeleted();
       unsubIssueAttachmentsChanged();
       unsubIssueLabelsChanged();
+      unsubIssueUnreadChanged();
       unsubIssueMetadataChanged();
       unsubIssuePropertiesChanged();
       unsubPropertyChanged.forEach((unsub) => unsub());

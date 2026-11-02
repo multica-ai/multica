@@ -76,7 +76,12 @@
     "chat": "聊天",
     "autopilots": "自動化",
     "switch_workspace": "切換工作區",
-    "invitation_from": "{{name}} 邀請你加入"
+    "invitation_from": "{{name}} 邀請你加入",
+    "open_in_new_window": "在新視窗開啟",
+    "open_in_new_window_click": "點擊",
+    "open_in_other_window": "已在其他視窗開啟",
+    "in_other_window": "其他視窗",
+    "all_workspaces_open": "所有工作區都已在視窗中開啟"
   },
   "panels": {
     "work": {
@@ -95,6 +100,7 @@
       "assignee_anyone": "所有人",
       "assignee_me": "我",
       "assignee_my_agents": "我的智慧體",
+      "assignee_me_and_my_agents": "我和我的智慧體",
       "reset": "重設",
       "load_more": "載入更多",
       "show_less": "收合",

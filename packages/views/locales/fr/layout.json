@@ -76,7 +76,12 @@
     "chat": "Chat",
     "autopilots": "Auto",
     "switch_workspace": "Changer d'espace de travail",
-    "invitation_from": "{{name}} vous a invité"
+    "invitation_from": "{{name}} vous a invité",
+    "open_in_new_window": "Ouvrir dans une nouvelle fenêtre",
+    "open_in_new_window_click": "Clic",
+    "open_in_other_window": "Déjà ouvert dans une autre fenêtre",
+    "in_other_window": "Autre fenêtre",
+    "all_workspaces_open": "Chaque espace de travail est déjà ouvert dans une fenêtre"
   },
   "panels": {
     "work": {
@@ -96,6 +101,7 @@
       "assignee_anyone": "Tout le monde",
       "assignee_me": "Moi",
       "assignee_my_agents": "Mes agents",
+      "assignee_me_and_my_agents": "Moi et mes agents",
       "reset": "Réinitialiser",
       "load_more": "Afficher plus",
       "show_less": "Afficher moins",

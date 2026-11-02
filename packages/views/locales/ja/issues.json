@@ -252,8 +252,7 @@
     "advanced_group_match_trailing": "に一致",
     "advanced_group_hint": "このグループの条件は「{{word}}」でつながります",
     "advanced_add_to_group": "グループに追加",
-    "advanced_turn_into_group": "グループに変換",
-    "advanced_summary": "条件：{{summary}}"
+    "advanced_turn_into_group": "グループに変換"
   },
   "display": {
     "tooltip": "表示設定",
@@ -739,6 +738,9 @@
     "hover_header_queued_other": "待機中のエージェント {{count}} 件",
     "status_running": "作業中",
     "status_queued": "待機中",
+    "unread_completed": "{{agent}} の実行が完了 · {{time}}",
+    "unread_failed": "{{agent}} の実行が失敗 · {{time}}",
+    "unread_manual": "未読にしました",
     "empty_hover": "現在作業中のエージェントはありません",
     "unknown_hover": "作業中のエージェント: まだ読み込まれていません",
     "filter_active_label": "エージェントが作業中のタスクを表示中",
@@ -919,6 +921,8 @@
     "open_in_new_tab": "新しいタブで開く",
     "pin_to_sidebar": "サイドバーにピン留め",
     "unpin_from_sidebar": "サイドバーのピン留めを解除",
+    "mark_read": "既読にする",
+    "mark_unread": "未読にする",
     "copy_link": "リンクをコピー",
     "copy_workdir_path": "ローカルの作業ディレクトリのパスをコピー",
     "copy_project_directory_path": "プロジェクトディレクトリのパスをコピー",
@@ -1591,8 +1595,6 @@
       "picker_more": "「設定 → ワークフロー」でワークフローを追加できます。"
     },
     "picker": {
-      "header": "{{workflow}} · プロジェクト「{{project}}」に従う",
-      "header_no_project": "{{workflow}} のステータス · プロジェクトなし",
       "footer": "このタスクのワークフローのステータスだけを表示しています。右側はそのステータスに入ったときの引き継ぎ先です。"
     },
     "confirm": {

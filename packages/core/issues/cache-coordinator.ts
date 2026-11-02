@@ -56,6 +56,7 @@ export interface IssueCacheChangeResult {
   prevLists: [QueryKey, ListIssuesCache][];
   prevFlatLists: [QueryKey, IssueFlatCache][];
   prevTableRows: [QueryKey, IssueTableRowCache][];
+  prevSidebarLists: [QueryKey, ListIssuesResponse][];
   prevDetail: Issue | undefined;
   prevInboxList: InboxItem[] | undefined;
   prevArchivedInboxCaches: [QueryKey, ArchivedInboxCache | undefined][] | undefined;
@@ -140,6 +141,20 @@ export function tableRowEntries(
         !!entry[1] &&
         typeof entry[1] === "object" &&
         Array.isArray((entry[1] as IssueTableRowCache).rows),
+    );
+}
+
+export function sidebarListEntries(
+  qc: QueryClient,
+  wsId: string,
+): [QueryKey, ListIssuesResponse][] {
+  return qc
+    .getQueriesData<unknown>({ queryKey: issueKeys.sidebarAll(wsId) })
+    .filter(
+      (entry): entry is [QueryKey, ListIssuesResponse] =>
+        !!entry[1] &&
+        typeof entry[1] === "object" &&
+        Array.isArray((entry[1] as ListIssuesResponse).issues),
     );
 }
 
@@ -315,6 +330,7 @@ export function applyIssueChange(
   const prevLists: [QueryKey, ListIssuesCache][] = [];
   const prevFlatLists: [QueryKey, IssueFlatCache][] = [];
   const prevTableRows: [QueryKey, IssueTableRowCache][] = [];
+  const prevSidebarLists: [QueryKey, ListIssuesResponse][] = [];
   const staleKeys: QueryKey[] = [];
   let prevIssue: Issue | undefined = baseIssue;
 
@@ -490,6 +506,23 @@ export function applyIssueChange(
     qc.setQueryData<IssueTableRowCache>(key, { ...data, rows });
   }
 
+  // Sidebar lists are server-filtered and sorted too; their membership and
+  // order refresh through invalidateIssueDerivatives. A loaded row's entity is
+  // patched now, so a status picked from the sidebar shows at once.
+  for (const [key, data] of sidebarListEntries(qc, wsId)) {
+    let found: Issue | undefined;
+    const issues = data.issues.map((issue) => {
+      if (issue.id !== id) return issue;
+      if (!acceptCurrent(issue)) return issue;
+      found = issue;
+      return { ...issue, ...patch };
+    });
+    if (!found) continue;
+    if (!prevIssue) prevIssue = found;
+    prevSidebarLists.push([key, data]);
+    qc.setQueryData<ListIssuesResponse>(key, { ...data, issues });
+  }
+
   const prevDetail = qc.getQueryData<Issue>(issueKeys.detail(wsId, id));
   if (prevDetail && acceptCurrent(prevDetail)) {
     qc.setQueryData<Issue>(issueKeys.detail(wsId, id), {
@@ -528,6 +561,7 @@ export function applyIssueChange(
     prevLists,
     prevFlatLists,
     prevTableRows,
+    prevSidebarLists,
     prevDetail,
     prevInboxList,
     prevArchivedInboxCaches,
@@ -547,6 +581,7 @@ export function rollbackIssueChange(
     | "prevLists"
     | "prevFlatLists"
     | "prevTableRows"
+    | "prevSidebarLists"
     | "prevDetail"
     | "prevInboxList"
     | "prevArchivedInboxCaches"
@@ -559,6 +594,9 @@ export function rollbackIssueChange(
     qc.setQueryData(key, snapshot);
   }
   for (const [key, snapshot] of result.prevTableRows) {
+    qc.setQueryData(key, snapshot);
+  }
+  for (const [key, snapshot] of result.prevSidebarLists) {
     qc.setQueryData(key, snapshot);
   }
   if (result.prevDetail !== undefined) {

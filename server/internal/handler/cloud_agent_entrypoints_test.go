@@ -11,16 +11,16 @@ import (
 	"github.com/multica-ai/multica/server/internal/testutil"
 )
 
-// Quick-create is refused for every cloud agent provider before anything is
-// persisted. Chat is refused for Claude Managed Agents, whose bridge runs
-// issue runs only; Qoder Cloud Agents runs chat turns.
-func TestCloudAgentChatAndQuickCreateRefused(t *testing.T) {
+// Claude Managed Agents refuses chat and quick-create before anything is
+// persisted: its bridge runs issue runs only. Qoder Cloud Agents runs chat
+// turns and creates quick-create issues itself.
+func TestCloudAgentChatAndQuickCreateEntrypoints(t *testing.T) {
 	if testPool == nil {
 		t.Skip("database not available")
 	}
 	for _, tc := range []struct {
 		provider, name string
-		chatRefused    bool
+		refused        bool
 	}{
 		{"claude_managed", "Claude Managed Agents", true},
 		{"qoder_cloud", "Qoder Cloud Agents", false},
@@ -34,7 +34,7 @@ func TestCloudAgentChatAndQuickCreateRefused(t *testing.T) {
 			req = withChatTestWorkspaceCtx(t, withURLParam(req, "sessionId", sessionID))
 			w := httptest.NewRecorder()
 			testHandler.SendChatMessage(w, req)
-			if tc.chatRefused {
+			if tc.refused {
 				if w.Code != http.StatusUnprocessableEntity || !strings.Contains(w.Body.String(), tc.name) {
 					t.Fatalf("SendChatMessage = %d %s, want 422 naming %s", w.Code, w.Body.String(), tc.name)
 				}
@@ -50,8 +50,12 @@ func TestCloudAgentChatAndQuickCreateRefused(t *testing.T) {
 			}
 
 			status, payload := testHandler.checkQuickCreateDaemonVersion(context.Background(), obsmetrics.RuntimeLookupSourceIssue, parseUUID(runtimeID))
-			if status != http.StatusUnprocessableEntity || !strings.Contains(payload["reason"].(string), tc.name) {
-				t.Fatalf("quick-create check = %d %v, want 422 naming %s", status, payload, tc.name)
+			if tc.refused {
+				if status != http.StatusUnprocessableEntity || !strings.Contains(payload["reason"].(string), tc.name) {
+					t.Fatalf("quick-create check = %d %v, want 422 naming %s", status, payload, tc.name)
+				}
+			} else if status != 0 {
+				t.Fatalf("quick-create check refused a run the bridge can create: %d %v", status, payload)
 			}
 		})
 	}
