@@ -57,7 +57,7 @@ func TestReportTaskResult_CompletedWithEmptyOutputPostsEmptyOutput(t *testing.T)
 	t.Cleanup(srv.Close)
 
 	d := &Daemon{client: NewClient(srv.URL), logger: slog.Default()}
-	d.reportTaskResult(context.Background(), "task-empty", TaskResult{Status: "completed", Comment: ""}, slog.Default())
+	d.reportTaskResult(context.Background(), "task-empty", "", TaskResult{Status: "completed", Comment: ""}, slog.Default())
 
 	rec.mu.Lock()
 	defer rec.mu.Unlock()
