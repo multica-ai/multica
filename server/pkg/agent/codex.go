@@ -118,6 +118,22 @@ var codexCleanupConfirmationOverride atomic.Int32
 // production never reassigns it.
 var codexCatalogRetryBackoff = 500 * time.Millisecond
 
+// Five waits total about 21 minutes. The recovery window leaves up to nine
+// minutes for resumed turns while bounding a persistent overload.
+var codexCapacityRetryBackoffs = [5]time.Duration{time.Minute, 5 * time.Minute, 5 * time.Minute, 5 * time.Minute, 5 * time.Minute}
+
+const codexCapacityRetryWindow = 30 * time.Minute
+
+// Downward jitter avoids synchronizing agents after a provider overload while
+// keeping the first wait near one minute and the later waits near five.
+func codexCapacityRetryDelay(base time.Duration) time.Duration {
+	spread := base / 10
+	if spread <= 0 {
+		return base
+	}
+	return base - time.Duration(time.Now().UnixNano()%int64(spread))
+}
+
 func sanitizeCodexDiagnostic(value string) string {
 	return sanitizeAgentDiagnostic(value)
 }
@@ -951,8 +967,10 @@ func isCodexBareTomlKey(s string) bool {
 }
 
 func (b *codexBackend) Execute(ctx context.Context, prompt string, opts ExecOptions) (*Session, error) {
-	firstSession, err := b.executeOnce(ctx, prompt, opts, 1)
+	runCtx, cancelRun := runContext(ctx, opts.Timeout)
+	firstSession, err := b.executeOnce(runCtx, prompt, opts, 1)
 	if err != nil {
+		cancelRun()
 		return nil, err
 	}
 	msgCh := make(chan Message, 256)
@@ -976,6 +994,9 @@ func (b *codexBackend) Execute(ctx context.Context, prompt string, opts ExecOpti
 	}
 
 	go func() {
+		defer cancelRun()
+		retryCtx := runCtx
+		var cancelCapacity context.CancelFunc
 		defer func() {
 			sessionMu.Lock()
 			currentSession = nil
@@ -985,12 +1006,14 @@ func (b *codexBackend) Execute(ctx context.Context, prompt string, opts ExecOpti
 		defer close(resCh)
 		session := firstSession
 		attemptOpts := opts
-		for attempt := 1; attempt <= 2; attempt++ {
+		var startupRetries, capacityRetries int
+		var priorUsage map[string]TokenUsage
+		for attempt := 1; ; attempt++ {
 			if attempt > 1 {
 				var err error
-				session, err = b.executeOnce(ctx, prompt, attemptOpts, attempt)
+				session, err = b.executeOnce(retryCtx, prompt, attemptOpts, attempt)
 				if err != nil {
-					resCh <- Result{Status: "failed", Error: err.Error()}
+					resCh <- Result{Status: "failed", Error: err.Error(), Usage: priorUsage}
 					return
 				}
 				sessionMu.Lock()
@@ -1031,16 +1054,20 @@ func (b *codexBackend) Execute(ctx context.Context, prompt string, opts ExecOpti
 			}
 			retryReason := ""
 			switch {
-			case result.codexInitializeRetrySafe:
+			case result.codexInitializeRetrySafe && startupRetries < 1:
 				retryReason = "initialize"
-			case result.codexStartupRefreshRetrySafe:
+			case result.codexStartupRefreshRetrySafe && startupRetries < 1:
 				retryReason = "model_catalog_refresh"
+			case result.codexCapacityRetrySafe && capacityRetries < len(codexCapacityRetryBackoffs) && retryCtx.Err() == nil:
+				retryReason = "selected_model_capacity"
 			}
-			if retryReason == "" || attempt == 2 {
+			if retryReason == "" {
 				flushHeldPins()
+				result.Usage = mergeCodexAttemptUsage(priorUsage, result.Usage)
 				resCh <- result
 				return
 			}
+			priorUsage = mergeCodexAttemptUsage(priorUsage, result.Usage)
 			// The model catalog refresh reaches the network, so give the
 			// transient failure a little more room than the local initialize
 			// handshake gets. Both stay well inside the task timeout, and
@@ -1062,10 +1089,39 @@ func (b *codexBackend) Execute(ctx context.Context, prompt string, opts ExecOpti
 					attemptOpts.ResumeExpected = true
 				}
 			}
+			if retryReason == "selected_model_capacity" {
+				if cancelCapacity == nil {
+					retryCtx, cancelCapacity = context.WithTimeout(runCtx, codexCapacityRetryWindow)
+					defer cancelCapacity()
+				}
+				backoff = codexCapacityRetryDelay(codexCapacityRetryBackoffs[capacityRetries])
+				if deadline, ok := retryCtx.Deadline(); ok && time.Until(deadline) <= backoff {
+					flushHeldPins()
+					result.Usage = priorUsage
+					result.Error += "; capacity retry deadline has insufficient time for next wait"
+					resCh <- result
+					return
+				}
+				capacityRetries++
+				// This failed turn emitted no item or text, so the input can be
+				// resubmitted without replaying tools. Keep the thread and model.
+				attemptOpts.ResumeSessionID = result.SessionID
+				attemptOpts.ResumeExpected = true
+			} else {
+				startupRetries++
+			}
 			b.cfg.Logger.Warn("codex retry scheduled", "reason", retryReason, "attempt", attempt, "next_attempt", attempt+1, "backoff", backoff.String())
 			select {
-			case <-ctx.Done():
+			case <-retryCtx.Done():
 				flushHeldPins()
+				result.Usage = priorUsage
+				if errors.Is(retryCtx.Err(), context.DeadlineExceeded) {
+					result.Status = "timeout"
+					result.Error += "; capacity retry deadline exceeded"
+				} else {
+					result.Status = "aborted"
+					result.Error = "execution cancelled during capacity retry wait"
+				}
 				resCh <- result
 				return
 			case <-time.After(backoff):
@@ -1074,6 +1130,29 @@ func (b *codexBackend) Execute(ctx context.Context, prompt string, opts ExecOpti
 	}()
 
 	return &Session{Supplement: supplement, SupplementReady: supplementReady, Messages: msgCh, Result: resCh}, nil
+}
+
+func mergeCodexAttemptUsage(a, b map[string]TokenUsage) map[string]TokenUsage {
+	if len(a) == 0 {
+		return b
+	}
+	if len(b) == 0 {
+		return a
+	}
+	merged := make(map[string]TokenUsage, len(a)+len(b))
+	for model, usage := range a {
+		merged[model] = usage
+	}
+	for model, usage := range b {
+		total := merged[model]
+		total.InputTokens += usage.InputTokens
+		total.OutputTokens += usage.OutputTokens
+		total.CacheReadTokens += usage.CacheReadTokens
+		total.CacheWriteTokens += usage.CacheWriteTokens
+		total.CostUSDTicks += usage.CostUSDTicks
+		merged[model] = total
+	}
+	return merged
 }
 
 func (b *codexBackend) executeOnce(ctx context.Context, prompt string, opts ExecOptions, attempt int) (*Session, error) {
@@ -1249,6 +1328,7 @@ func (b *codexBackend) executeOnce(ctx context.Context, prompt string, opts Exec
 	// only what the daemon forwards to a chat/channel reply narrows (GH #6006).
 	var output codexOutputSelection
 	var semanticObserved atomic.Bool
+	var turnEffectsObserved atomic.Bool
 	turnNotificationGate := &codexTurnNotificationGate{}
 	firstItemWait := &codexFirstItemWaitObservation{}
 
@@ -1258,6 +1338,9 @@ func (b *codexBackend) executeOnce(ctx context.Context, prompt string, opts Exec
 
 	var c *codexClient
 	observeMessage := func(msg Message) {
+		if msg.Type != MessageStatus || msg.Status != "running" {
+			turnEffectsObserved.Store(true)
+		}
 		logCodexAgentMessage(b.cfg.Logger, msg)
 		activity := describeCodexSemanticActivity(msg)
 		if activity == "status:running" {
@@ -1324,6 +1407,9 @@ func (b *codexBackend) executeOnce(ctx context.Context, prompt string, opts Exec
 			outputMu.Unlock()
 		},
 		onSemanticActivity: func(description string) {
+			if strings.HasPrefix(description, "item/") {
+				turnEffectsObserved.Store(true)
+			}
 			semanticObserved.Store(true)
 			b.cfg.Logger.Debug("codex semantic activity observed", "activity", description)
 			trySendString(semanticActivityCh, description)
@@ -1842,6 +1928,11 @@ func (b *codexBackend) executeOnce(ctx context.Context, prompt string, opts Exec
 			!firstTurnProgressObserved &&
 			strings.Contains(stderrTail, codexModelCatalogRefreshFailureSignal) &&
 			cleanupConfirmed && codexInitializeRetrySupported()
+		capacityRetrySafe := finalStatus == "failed" && threadID != "" &&
+			strings.TrimSpace(opts.Model) != "" && c.getTurnErrorInfo() == "serverOverloaded" &&
+			!turnEffectsObserved.Load() && !guardianRateLimitTripped.Load() &&
+			processExitErr == nil && timeoutDiagnostic.Kind == codexTimeoutNone &&
+			cleanupConfirmed && codexInitializeRetrySupported() && runCtx.Err() == nil
 		if startupRefreshRetrySafe {
 			b.cfg.Logger.Warn("codex startup model catalog refresh failure is retry safe",
 				"pid", cmd.Process.Pid,
@@ -1923,6 +2014,7 @@ func (b *codexBackend) executeOnce(ctx context.Context, prompt string, opts Exec
 			DurationMs:                   duration.Milliseconds(),
 			Usage:                        usageMap,
 			codexStartupRefreshRetrySafe: startupRefreshRetrySafe,
+			codexCapacityRetrySafe:       capacityRetrySafe,
 		}
 	}()
 
@@ -2469,8 +2561,10 @@ type codexClient struct {
 	usageTotal    codexRawTokenUsage
 	usageTotalSet bool
 
-	turnErrorMu sync.Mutex
-	turnError   string // captured from turn/completed status=failed or terminal error notifications
+	turnErrorMu            sync.Mutex
+	turnError              string // captured from turn/completed status=failed or terminal error notifications
+	turnErrorInfo          string // structured v2 CodexErrorInfo; empty means absent or unsupported
+	turnErrorInfoCompleted bool   // turn/completed is authoritative over earlier error notifications
 }
 
 type codexAgentMessageStream struct {
@@ -2559,6 +2653,23 @@ func (c *codexClient) getTurnError() string {
 	c.turnErrorMu.Lock()
 	defer c.turnErrorMu.Unlock()
 	return c.turnError
+}
+
+func (c *codexClient) setTurnErrorInfo(info string, completed bool) {
+	c.turnErrorMu.Lock()
+	defer c.turnErrorMu.Unlock()
+	if completed {
+		c.turnErrorInfo = info
+		c.turnErrorInfoCompleted = true
+	} else if !c.turnErrorInfoCompleted && c.turnErrorInfo == "" {
+		c.turnErrorInfo = info
+	}
+}
+
+func (c *codexClient) getTurnErrorInfo() string {
+	c.turnErrorMu.Lock()
+	defer c.turnErrorMu.Unlock()
+	return c.turnErrorInfo
 }
 
 // setThreadID publishes the thread ID resolved by thread/start or
@@ -3545,6 +3656,7 @@ func (c *codexClient) handleRawNotification(method string, params map[string]any
 				errMsg = "codex turn failed"
 			}
 			c.setTurnError(errMsg)
+			c.setTurnErrorInfo(extractNestedString(params, "turn", "error", "codexErrorInfo"), true)
 		}
 
 		// Extract usage from turn/completed if present (e.g. params.turn.usage).
@@ -3581,6 +3693,7 @@ func (c *codexClient) handleRawNotification(method string, params map[string]any
 			}
 			if !willRetry {
 				c.setTurnError(errMsg)
+				c.setTurnErrorInfo(extractNestedString(params, "error", "codexErrorInfo"), false)
 			}
 		}
 
