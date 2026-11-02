@@ -310,3 +310,20 @@ describe("market research templates", () => {
     expect(instructionsOf("critic")).toContain("You do not edit the findings or the proposal");
   });
 });
+
+describe("secretary brief", () => {
+  const secretary = AGENT_INSTRUCTION_TEMPLATES.find((template) => template.id === "secretary")
+    ?.instructions ?? "";
+
+  it("says the brief lists pending drafts with their count", () => {
+    expect(secretary).toContain('"N drafts await publishing"');
+    expect(secretary).toContain("`pending_drafts`");
+  });
+
+  it("lists stale knowledge under FYI, not as its own section", () => {
+    const fyi = secretary.slice(secretary.indexOf("6. ## FYI"));
+    expect(fyi).toContain("`knowledge.stale_published`");
+    expect(fyi).toContain("more than 90 days ago");
+    expect(secretary.match(/^\d\. ## /gm)).toHaveLength(6);
+  });
+});
