@@ -13,8 +13,10 @@ import {
   prefillSecretaryChat,
   proposalDetailOptions,
   splitBriefSections,
+  isProposalSnoozed,
   type Brief,
   type BriefSection,
+  type Proposal,
 } from "@multica/core/office";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { useWorkspacePaths } from "@multica/core/paths";
@@ -189,6 +191,11 @@ function BriefBody({
   const sections = splitBriefSections(brief.body);
 
   const proposals = useQueries({ queries: brief.proposal_ids.map((id) => proposalDetailOptions(wsId, id)) });
+  // A proposal put aside with Decide later is hidden until its date, as in "Needs your decision".
+  const now = Date.now();
+  const raised = proposals
+    .map((query) => query.data)
+    .filter((proposal): proposal is Proposal => !!proposal && !isProposalSnoozed(proposal, now));
   const squads = useQuery(squadListOptions(wsId));
   const bases = useQuery(knowledgeBasesOptions(wsId));
   const saveToKnowledge = useCreateKnowledgeDocument(wsId);
@@ -283,17 +290,15 @@ function BriefBody({
 
       <OfficeBriefFeedback briefId={brief.id} canManage={canManage} />
 
-      {proposals.length > 0 ? (
+      {raised.length > 0 ? (
         <section className="flex flex-col gap-2">
           <h4 className="text-body font-medium">{t(($) => $.office.brief_proposals)}</h4>
           <ul className="flex flex-col gap-3">
-            {proposals.map((query, index) => {
-              const proposal = query.data;
-              if (!proposal) return null;
+            {raised.map((proposal) => {
               const squadName = squads.data?.find((squad) => squad.id === proposal.squad_id)?.name ?? null;
               const handoffName = squads.data?.find((squad) => squad.id === proposal.handoff_squad_id)?.name ?? null;
               return (
-                <li key={brief.proposal_ids[index]} className={cn("rounded-lg border", proposal.state !== "pending" && "bg-muted/40")}>
+                <li key={proposal.id} className={cn("rounded-lg border", proposal.state !== "pending" && "bg-muted/40")}>
                   <div className="flex flex-col gap-2 px-4 py-3">
                     <div className="flex flex-col gap-0.5">
                       <span className="text-caption text-muted-foreground">{proposal.issue_identifier}</span>

@@ -260,7 +260,7 @@ describe("OfficeBriefDialog", () => {
     expect(mocks.decide.mock.calls[0]?.[0]).toEqual({ id: "p1", decision: "revise", note: "Add the cost" });
   });
 
-  it("shows a put-aside proposal's date, its related entries and its revision history", () => {
+  it("hides a proposal put aside with Decide later until its date, as the decision queue does", () => {
     queryClient.setQueryData(
       proposalKeys.detail("ws-1", "p4"),
       proposal("p4", {
@@ -272,9 +272,22 @@ describe("OfficeBriefDialog", () => {
     );
     setup({ briefs: [brief("b1", { proposal_ids: ["p4"] })] });
 
-    expect(screen.getByText(/Decide later until/)).toBeTruthy();
-    expect(screen.getByText("Usage pricing memo")).toBeTruthy();
-    expect(screen.getByRole("button", { name: "Revision history" })).toBeTruthy();
+    expect(screen.queryByText("Proposal p4")).toBeNull();
+    expect(screen.queryByText(/Decide later until/)).toBeNull();
+    expect(screen.queryByText("Usage pricing memo")).toBeNull();
+    expect(screen.queryByRole("button", { name: "Approve" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Revision history" })).toBeNull();
+  });
+
+  it("shows a proposal again on the brief once its snooze date has passed", () => {
+    queryClient.setQueryData(
+      proposalKeys.detail("ws-1", "p7"),
+      proposal("p7", { snoozed_until: new Date(Date.now() - 60 * 1000).toISOString() }),
+    );
+    setup({ briefs: [brief("b1", { proposal_ids: ["p7"] })] });
+
+    expect(screen.getByText("Proposal p7")).toBeTruthy();
+    expect(screen.queryByText(/Decide later until/)).toBeNull();
     expect(screen.getByRole("button", { name: "Approve" })).toBeTruthy();
   });
 
