@@ -136,6 +136,7 @@
     "zustand": "catalog:"
   },
   "devDependencies": {
+    "@typescript/native": "catalog:",
     "@multica/eslint-config": "workspace:*",
     "@multica/plugin-sdk": "workspace:*",
     "@multica/tsconfig": "workspace:*",

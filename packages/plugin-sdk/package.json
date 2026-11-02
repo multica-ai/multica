@@ -18,6 +18,7 @@
     "README.md"
   ],
   "devDependencies": {
+    "@typescript/native": "catalog:",
     "@multica/eslint-config": "workspace:*",
     "@multica/tsconfig": "workspace:*",
     "typescript": "catalog:"

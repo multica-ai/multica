@@ -29,6 +29,7 @@
     "zod": "catalog:"
   },
   "devDependencies": {
+    "@typescript/native": "catalog:",
     "@multica/eslint-config": "workspace:*",
     "@tailwindcss/postcss": "catalog:",
     "postcss": "catalog:",

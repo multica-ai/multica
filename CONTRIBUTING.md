@@ -47,6 +47,15 @@ This keeps Docker simple while still isolating schema and data.
 - Go `1.26.9`
 - Docker
 
+Outside mobile, `pnpm typecheck` uses the native TypeScript 7 compiler (`tsc`,
+provided by the `@typescript/native` npm alias). The `typescript` dependency
+aliases `@typescript/typescript6` so ESLint, Next.js builds, and repository
+scripts retain the compatible TypeScript 6 API. Use `tsc6` to check with that
+compiler explicitly. Keep both dependencies when updating the toolchain;
+replacing the API package with TypeScript 7 breaks API consumers. Editors can
+continue using TypeScript 6 or opt into their TypeScript 7 language server.
+Mobile keeps its own TypeScript dependency.
+
 ## Important Rules
 
 - The main checkout should use `.env`.

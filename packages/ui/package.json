@@ -65,6 +65,7 @@
     "react-i18next": "catalog:"
   },
   "devDependencies": {
+    "@typescript/native": "catalog:",
     "@multica/eslint-config": "workspace:*",
     "@multica/tsconfig": "workspace:*",
     "@testing-library/jest-dom": "catalog:",
