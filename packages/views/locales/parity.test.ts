@@ -3,8 +3,7 @@ import { readdirSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, resolve } from "node:path";
 import { describe, expect, it } from "vitest";
-import { RESOURCES } from "./index";
-import { mergeResources } from "@multica/core/i18n";
+import { RESOURCES, UPSTREAM_RESOURCES } from "./index";
 
 // Schema-level guard: every key in the EN bundle must have a counterpart
 // in every non-English bundle and vice-versa. Catches retrofit drift where a
@@ -18,7 +17,7 @@ import { mergeResources } from "@multica/core/i18n";
 // matches a single `{ key_other }` in zh.
 
 // Derive the canonical namespace list from disk so the test fails if a JSON
-// file ships without a matching RESOURCES entry. Without this guard the test
+// file ships without a matching resource entry. Without this guard the test
 // would still pass when EN and a non-English bundle skip a namespace (e.g. issues +
 // agents both unregistered), since the iteration happens over RESOURCES.en
 // itself — that's a tautology, not parity.
@@ -60,17 +59,21 @@ describe("locale bundle parity", () => {
     expect(Object.keys(en).sort()).toEqual(jsonNamespacesIn("en"));
   });
 
+  it("provides every EN namespace in the runtime zh-Hant bundle", () => {
+    expect(Object.keys(RESOURCES["zh-Hant"]).sort()).toEqual(
+      Object.keys(en).sort(),
+    );
+  });
+
   for (const locale of translatedLocales) {
-    const bundle = RESOURCES[locale as keyof typeof RESOURCES];
-    const effective = locale === "zh-Hant"
-      ? mergeResources(RESOURCES["zh-Hans"], bundle)
-      : bundle;
+    const bundle = UPSTREAM_RESOURCES[locale as keyof typeof UPSTREAM_RESOURCES];
+    const effective = RESOURCES[locale as keyof typeof RESOURCES];
 
     it(`declares the same namespaces in EN and ${locale}`, () => {
       expect(Object.keys(effective).sort()).toEqual(Object.keys(en).sort());
     });
 
-    it(`registers every JSON file in RESOURCES (${locale})`, () => {
+    it(`registers every JSON file in UPSTREAM_RESOURCES (${locale})`, () => {
       expect(Object.keys(bundle).sort()).toEqual(jsonNamespacesIn(locale));
     });
 
@@ -104,7 +107,7 @@ describe("dead plural-key guard", () => {
       .pluralCategories;
     if (categories.includes("one")) continue;
 
-    const bundle = RESOURCES[locale as keyof typeof RESOURCES];
+    const bundle = UPSTREAM_RESOURCES[locale as keyof typeof UPSTREAM_RESOURCES];
     it(`${locale} ships no dead _one keys (plural categories: ${categories.join("/")})`, () => {
       const offenders = Object.keys(bundle).flatMap((ns) =>
         flattenKeys(bundle[ns])

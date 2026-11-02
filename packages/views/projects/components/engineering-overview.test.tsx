@@ -1,7 +1,10 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { screen, waitFor, within } from "@testing-library/react";
+import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { I18nProvider } from "@multica/core/i18n/react";
+import type { SupportedLocale } from "@multica/core/i18n";
+import { RESOURCES } from "../../locales";
 import {
   setApiInstance,
   type BaselineChapter,
@@ -141,7 +144,7 @@ afterEach(() => {
   queryClient.clear();
 });
 
-function renderOverview(search = "") {
+function renderOverview(search = "", currentLocale?: SupportedLocale) {
   const adapter = {
     push: vi.fn(),
     replace: vi.fn(),
@@ -152,13 +155,24 @@ function renderOverview(search = "") {
     openInNewTab: vi.fn(),
     getShareableUrl: (path: string) => path,
   } as unknown as NavigationAdapter;
-  return renderWithI18n(
+  const ui = (
     <QueryClientProvider client={queryClient}>
       <NavigationProvider value={adapter}>
         <EngineeringOverview workspaceSlug="acme" projectId={PROJECT} />
       </NavigationProvider>
-    </QueryClientProvider>,
+    </QueryClientProvider>
   );
+  if (currentLocale) {
+    return render(
+      <I18nProvider
+        locale={currentLocale}
+        resources={{ [currentLocale]: RESOURCES[currentLocale] }}
+      >
+        {ui}
+      </I18nProvider>,
+    );
+  }
+  return renderWithI18n(ui);
 }
 
 describe("EngineeringOverview deep links", () => {
@@ -285,5 +299,20 @@ describe("EngineeringOverview recent decisions", () => {
     expect(within(region).getByText("Confirmed with a personal token")).toBeInTheDocument();
     expect(region.querySelector('time[datetime="2026-10-30T01:00:00Z"]')).not.toBeNull();
     expect(screen.getByText("Latest decision")).toBeInTheDocument();
+  });
+});
+
+describe("EngineeringOverview localization", () => {
+  it("renders fork copy from the effective zh-Hant bundle without raw keys", async () => {
+    histories.domain_rules = [revision(HISTORICAL, "domain_rules", 1, "Agent decision", "rejected", "2026-10-30T01:00:00Z", "agent_task")];
+    renderOverview("", "zh-Hant");
+
+    expect(await screen.findByText("待拍板")).toBeInTheDocument();
+    expect(screen.getByText("需要你拍板的事项")).toBeInTheDocument();
+    expect(await screen.findByText("智能体执行")).toBeInTheDocument();
+    expect(screen.getByText("上次看过之后，定了什么")).toBeInTheDocument();
+    for (const key of ["summary.decisions", "decisions.title", "credentials.agent_task", "recent.title"]) {
+      expect(screen.queryByText(key)).not.toBeInTheDocument();
+    }
   });
 });

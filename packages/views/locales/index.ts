@@ -4,7 +4,11 @@ import jaMessageDelivery from "./ja/message-delivery.json";
 import jaYouShouldKnow from "./ja/you-should-know.json";
 import jaEngineering from "./ja/engineering.json";
 import frEngineering from "./fr/engineering.json";
-import type { LocaleResources, SupportedLocale } from "@multica/core/i18n";
+import {
+  mergeResources,
+  type LocaleResources,
+  type SupportedLocale,
+} from "@multica/core/i18n";
 import { applyBrandOverrides } from "./brand-overrides";
 import enCommon from "./en/common.json";
 import enQuota from "./en/quota.json";
@@ -439,6 +443,15 @@ export const UPSTREAM_RESOURCES: Record<SupportedLocale, LocaleResources> = {
   },
 };
 
+const BRANDED_RESOURCES = applyBrandOverrides(UPSTREAM_RESOURCES);
+
 // Web SSR, hydration, desktop and hot resource reloads all consume this same
-// effective bundle. Keep upstream keys intact; only the fork owns the overlay.
-export const RESOURCES = applyBrandOverrides(UPSTREAM_RESOURCES);
+// effective bundle. Materialize the branded zh-Hans fallback so single-locale
+// entry points receive namespaces that have no zh-Hant translation files.
+export const RESOURCES = {
+  ...BRANDED_RESOURCES,
+  "zh-Hant": mergeResources(
+    BRANDED_RESOURCES["zh-Hans"],
+    BRANDED_RESOURCES["zh-Hant"],
+  ),
+};
