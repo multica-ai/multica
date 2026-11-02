@@ -987,7 +987,8 @@
     "remove_parent_issue_success": "Removed parent issue",
     "add_sub_issue": "Add sub-issue...",
     "delete_issue": "Delete issue",
-    "mark_duplicate": "Mark as duplicate..."
+    "mark_duplicate": "Mark as duplicate...",
+    "save_to_knowledge": "Save to knowledge"
   },
   "pickers": {
     "custom_property": {

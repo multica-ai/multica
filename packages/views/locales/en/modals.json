@@ -336,5 +336,15 @@
     "attach_kept": "Already attached",
     "toast_done": "Agent pack installed",
     "toast_failed": "Could not install the agent pack"
+  },
+  "save_issue_to_knowledge": {
+    "title": "Save to knowledge",
+    "knowledge_base": "Knowledge base",
+    "published_note": "The document is published at once, so agents can find it right away.",
+    "empty_description": "This issue has no description to save.",
+    "submit": "Save",
+    "saving": "Saving...",
+    "toast_saved": "Saved to {{knowledgeBase}}",
+    "toast_failed": "Could not save to knowledge"
   }
 }

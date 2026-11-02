@@ -6,6 +6,7 @@ import { toast } from "sonner";
 import {
   ArrowDown,
   ArrowUp,
+  BookOpen,
   Calendar,
   CalendarClock,
   Check,
@@ -159,6 +160,8 @@ export function IssueActionsMenuItems({
     openAddChild,
     openMarkDuplicate,
     openDeleteConfirm,
+    canSaveToKnowledge,
+    openSaveToKnowledge,
   } = actions;
 
   // Subscribe to the issue's task list so the cache is warm by the time the
@@ -415,6 +418,12 @@ export function IssueActionsMenuItems({
         )}
         {isPinned ? t(($) => $.actions.unpin_from_sidebar) : t(($) => $.actions.pin_to_sidebar)}
       </P.Item>
+      {canSaveToKnowledge && (
+        <P.Item onClick={openSaveToKnowledge}>
+          <BookOpen className="h-3.5 w-3.5" />
+          {t(($) => $.actions.save_to_knowledge)}
+        </P.Item>
+      )}
       {sidebar &&
         (unread ? (
           <P.Item onClick={() => markRead(issue.id)}>

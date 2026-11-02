@@ -942,7 +942,8 @@
     "remove_parent_issue_success": "親タスクを解除しました",
     "add_sub_issue": "サブタスクを追加...",
     "delete_issue": "タスクを削除",
-    "mark_duplicate": "重複としてマーク..."
+    "mark_duplicate": "重複としてマーク...",
+    "save_to_knowledge": "ナレッジに保存"
   },
   "pickers": {
     "custom_property": {

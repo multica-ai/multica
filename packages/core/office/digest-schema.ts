@@ -64,6 +64,22 @@ export interface DigestWorkspace {
   unseated_squads: DigestList<{ id: string; name: string }>;
 }
 
+export interface DigestKnowledgeDocument {
+  /** The knowledge record id. */
+  id: string;
+  title: string;
+  /** The knowledge base key, such as `market`. */
+  knowledge_base: string;
+  published_at: string;
+}
+
+export interface DigestKnowledge {
+  /** Published documents not republished for 90 days, oldest first, at most 10. */
+  stale_published: DigestList<DigestKnowledgeDocument>;
+  /** Drafts awaiting publishing across the knowledge bases. */
+  pending_drafts: number;
+}
+
 export interface Digest {
   since: string;
   until: string;
@@ -73,6 +89,7 @@ export interface Digest {
   /** Squads with news ranked below the cut. */
   omitted_squad_count: number;
   quiet: { count: number; squads: DigestQuietSquad[] };
+  knowledge: DigestKnowledge;
 }
 
 export interface DigestParams {
@@ -157,6 +174,30 @@ const emptyDigestWorkspace = {
 };
 export const EMPTY_DIGEST_WORKSPACE: DigestWorkspace = emptyDigestWorkspace;
 
+const DigestKnowledgeDocumentSchema = z
+  .object({
+    id: z.string().default(""),
+    title: z.string().default(""),
+    knowledge_base: z.string().default(""),
+    published_at: z.string().default(""),
+  })
+  .loose();
+
+// Same reason as emptyDigestWorkspace: no DigestKnowledge annotation.
+const emptyDigestKnowledge = {
+  stale_published: { count: 0, items: [] },
+  pending_drafts: 0,
+};
+export const EMPTY_DIGEST_KNOWLEDGE: DigestKnowledge = emptyDigestKnowledge;
+
+const DigestKnowledgeSchema = z
+  .object({
+    stale_published: listSchema(DigestKnowledgeDocumentSchema),
+    pending_drafts: num,
+  })
+  .loose()
+  .default(emptyDigestKnowledge);
+
 export const DigestSchema = z
   .object({
     since: z.string().default(""),
@@ -171,6 +212,7 @@ export const DigestSchema = z
       })
       .loose()
       .default({ count: 0, squads: [] }),
+    knowledge: DigestKnowledgeSchema,
   })
   .loose();
 
@@ -182,4 +224,5 @@ export const FALLBACK_DIGEST: Digest = {
   squads: [],
   omitted_squad_count: 0,
   quiet: { count: 0, squads: [] },
+  knowledge: EMPTY_DIGEST_KNOWLEDGE,
 };

@@ -987,7 +987,8 @@
     "remove_parent_issue_success": "Tâche parente retirée",
     "add_sub_issue": "Ajouter une sous-tâche...",
     "delete_issue": "Supprimer la tâche",
-    "mark_duplicate": "Marquer comme doublon..."
+    "mark_duplicate": "Marquer comme doublon...",
+    "save_to_knowledge": "Enregistrer dans les connaissances"
   },
   "pickers": {
     "custom_property": {

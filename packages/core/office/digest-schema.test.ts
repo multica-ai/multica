@@ -35,6 +35,13 @@ const full = {
   ],
   omitted_squad_count: 4,
   quiet: { count: 1, squads: [{ id: "s2", name: "Ops", in_progress: 3 }] },
+  knowledge: {
+    stale_published: {
+      count: 12,
+      items: [{ id: "k1", title: "Pricing 2024", knowledge_base: "market", published_at: "2026-06-01T00:00:00Z" }],
+    },
+    pending_drafts: 3,
+  },
 };
 
 describe("DigestSchema", () => {
@@ -45,12 +52,40 @@ describe("DigestSchema", () => {
     expect(d.workspace.reported_cost_usd).toBe(2.5);
     expect(d.omitted_squad_count).toBe(4);
     expect(d.quiet.squads[0]).toMatchObject({ name: "Ops", in_progress: 3 });
+    expect(d.knowledge.pending_drafts).toBe(3);
+    expect(d.knowledge.stale_published.count).toBe(12);
+    expect(d.knowledge.stale_published.items[0]).toMatchObject({ title: "Pricing 2024", knowledge_base: "market" });
   });
 
   it("fills defaults for everything an older server omits", () => {
     const d = parseWithFallback({ since: "x" }, DigestSchema, FALLBACK_DIGEST, { endpoint: "t" });
     expect(d).toMatchObject({ since: "x", squads: [], omitted_squad_count: 0, quiet: { count: 0, squads: [] } });
     expect(d.workspace.offline_runtimes).toEqual({ count: 0, items: [] });
+    expect(d.knowledge).toEqual({ stale_published: { count: 0, items: [] }, pending_drafts: 0 });
+  });
+
+  it("treats a null knowledge list as empty and keeps the counts", () => {
+    const d = parseWithFallback(
+      { ...full, knowledge: { stale_published: { count: 2, items: null }, pending_drafts: 1 } },
+      DigestSchema,
+      FALLBACK_DIGEST,
+      { endpoint: "t" },
+    );
+    expect(d.knowledge.stale_published).toEqual({ count: 2, items: [] });
+    expect(d.knowledge.pending_drafts).toBe(1);
+  });
+
+  it("falls back to an empty knowledge section when the section is malformed", () => {
+    const d = parseWithFallback(
+      { ...full, knowledge: { stale_published: "many", pending_drafts: 2 } },
+      DigestSchema,
+      FALLBACK_DIGEST,
+      { endpoint: "t" },
+    );
+    // A malformed section takes the whole digest to the fallback, which is an
+    // empty knowledge section, never an error.
+    expect(d.knowledge).toEqual(FALLBACK_DIGEST.knowledge);
+    expect(d.knowledge.pending_drafts).toBe(0);
   });
 
   it("treats null collections as empty", () => {

@@ -78,5 +78,9 @@
   "load_error": {
     "title": "Impossible de charger les connaissances",
     "retry": "Réessayer"
+  },
+  "ask_secretary": {
+    "button": "Demander au Secrétaire",
+    "prompt": "Réponds à ma question à partir de ces résultats de la base de connaissances. Cite chaque document que tu utilises par son titre et son lien, et indique si les résultats ne permettent pas d'y répondre.\n\nQuestion : {{question}}\n\nRésultats :\n{{results}}"
   }
 }
