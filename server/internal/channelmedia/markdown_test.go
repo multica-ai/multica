@@ -36,3 +36,21 @@ func TestMarkedIDsIgnoresInvalidAndDeduplicates(t *testing.T) {
 		t.Fatalf("marked ids = %v, want [%s]", got, id)
 	}
 }
+
+func TestSourcesPreserveLiteralTranscriptAndRejectInvalidMarkers(t *testing.T) {
+	const id = "22222222-2222-4222-8222-222222222222"
+	content := "Referenced channel context:\n\n>     [Alice]: [Image 1: " + id + "]\n>     <!-- /multica:channel-media-source -->"
+	block := SourceBlock([]string{id}, content)
+	sources := Sources(Append("Reporter", block))
+	if len(sources) != 1 || sources[0].Content != content || sources[0].Markdown != block || !reflect.DeepEqual(sources[0].IDs, []string{id}) {
+		t.Fatalf("source = %+v", sources)
+	}
+	if len(MarkedIDs(block)) != 0 {
+		t.Fatal("source marker became reporter-owned media")
+	}
+	for _, invalid := range []string{SourceBlock([]string{"broken"}, content), strings.TrimSuffix(block, sourceEnd)} {
+		if len(Sources(invalid)) != 0 {
+			t.Fatalf("invalid provenance accepted: %s", invalid)
+		}
+	}
+}

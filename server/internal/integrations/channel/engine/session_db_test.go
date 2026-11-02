@@ -1632,6 +1632,9 @@ func TestBindMediaRefs_IssueRetainsHistoricalMediaAttribution(t *testing.T) {
 			if err := pool.QueryRow(t.Context(), "SELECT description FROM issue WHERE id=$1", issueID).Scan(&description); err != nil {
 				t.Fatal(err)
 			}
+			if strings.Contains(description, "unselected history") {
+				t.Fatalf("automatic history entered issue source: %s", description)
+			}
 			if len(ids) != 3 || strings.Count(description, "[Image 1: "+ids["historical.png"]+"]") != 2 || strings.Count(description, "[File 2: "+ids["historical.txt"]+"]") != 1 {
 				t.Fatalf("historical source positions lost: %s", description)
 			}

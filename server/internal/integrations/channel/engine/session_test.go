@@ -1418,7 +1418,7 @@ func TestIssueMediaContextRetainsOnlyTheRenderedPrefix(t *testing.T) {
 	body := "<quoted_message sender=\"Alice\">\nbefore [Image 1: unavailable] after [File 2: unavailable]\n</quoted_message>\n/issue Investigate\nReporter details"
 	source := body[:len(body)-len("\n/issue Investigate\nReporter details")]
 	got := issueMediaContext(source, []inlineMediaReplacement{{placeholder: "[Image 1: unavailable]", markdown: "[Image 1: image-id]"}})
-	want := "Referenced channel context:\n\n    <quoted_message sender=\"Alice\">\n    before [Image 1: image-id] after [File 2: unavailable]\n    </quoted_message>"
+	want := "Referenced channel context:\n\n> ```\n> <quoted_message sender=\"Alice\">\n> before [Image 1: image-id] after [File 2: unavailable]\n> </quoted_message>\n> ```"
 	if got != want {
 		t.Fatalf("historical source projection = %q, want %q", got, want)
 	}
@@ -1433,7 +1433,7 @@ func TestIssueMediaContextLabelsMissingSourcesInsteadOfInventingAttribution(t *t
 			{placeholder: "[Image 1: unavailable]", index: 0, markdown: "[Image 1: image-id]"},
 			{placeholder: "[Image 1: unavailable]", index: 1, markdown: "[Image 1: image-id]"},
 		})
-		if got != "Referenced channel media (source context unavailable):\n\n    [Image 1: image-id]" {
+		if got != "Referenced channel media (source context unavailable):\n\n> ```\n> [Image 1: image-id]\n> ```" {
 			t.Fatalf("missing source = %q", got)
 		}
 	}
@@ -1458,5 +1458,23 @@ func TestBindMediaRefs_IDOnlyWithoutSourcePreservesWeComIssueContract(t *testing
 	want := channelmedia.Block(uuidString(f.attachments[0].ID), "quoted.png", true)
 	if f.issueMediaMarkdown != want || f.issueMediaDescription != "" || strings.Contains(f.issueMediaMarkdown, "Someone else") {
 		t.Fatalf("adapter without SourceContext gained a historical transcript: markdown=%q description=%q", f.issueMediaMarkdown, f.issueMediaDescription)
+	}
+}
+
+func TestIssueMediaSourceNormalizesMarkdownLineEndings(t *testing.T) {
+	for _, newline := range []string{"\n", "\r", "\r\n"} {
+		source := strings.Join([]string{"<quoted_message sender=\"Alice\">", "[Image 1: unavailable]", "!file[external](https://example.invalid/a.txt)", "![external](https://example.invalid/a.png)", "</quoted_message>"}, newline)
+		got := issueMediaContext(source, []inlineMediaReplacement{{placeholder: "[Image 1: unavailable]", markdown: "[Image 1: image-id]"}})
+		if strings.Contains(got, "\r") || !strings.Contains(got, "\n> !file[") || !strings.Contains(got, "\n> ![external]") || !strings.Contains(got, "[Image 1: image-id]") {
+			t.Fatalf("source escaped literal block: %q", got)
+		}
+	}
+}
+
+func TestLiteralMediaSourceCannotCloseItsOwnFence(t *testing.T) {
+	source := "source\n```\n![](https://example.invalid/external.png)\n````\nend"
+	got := literalMediaSource(source)
+	if !strings.HasPrefix(got, "> `````\n") || !strings.HasSuffix(got, "\n> `````") || !strings.Contains(got, "\n> ![](") {
+		t.Fatalf("source escaped fence: %q", got)
 	}
 }

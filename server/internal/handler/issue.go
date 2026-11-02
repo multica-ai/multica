@@ -3644,7 +3644,8 @@ type UpdateIssueRequest struct {
 
 func mergeIssueChannelMediaDescription(current, incoming string, base *string, attachments []db.Attachment) string {
 	currentIDs := channelmedia.MarkedIDs(current)
-	if len(currentIDs) == 0 {
+	sources := channelmedia.Sources(current)
+	if len(currentIDs) == 0 && len(sources) == 0 {
 		return incoming
 	}
 
@@ -3660,6 +3661,27 @@ func mergeIssueChannelMediaDescription(current, incoming string, base *string, a
 	}
 
 	merged := incoming
+	for _, source := range sources {
+		available := true
+		for _, id := range source.IDs {
+			if _, exists := attachmentsByID[id]; !exists {
+				available = false
+				break
+			}
+		}
+		if !available || strings.Contains(merged, source.Markdown) {
+			continue
+		}
+		if strings.Contains(merged, source.Content) {
+			// Editors omit comments. Restore provenance around the retained source,
+			// never turn historical attachment IDs into reporter-owned embeds.
+			merged = strings.Replace(merged, source.Content, source.Markdown, 1)
+		} else if base == nil || !strings.Contains(*base, source.Content) {
+			// Only restore a section that arrived after the editor's base. A client
+			// that adopted it may intentionally edit or remove the whole transcript.
+			merged = channelmedia.Append(merged, source.Markdown)
+		}
+	}
 	for _, id := range currentIDs {
 		attachment, exists := attachmentsByID[id]
 		if !exists {

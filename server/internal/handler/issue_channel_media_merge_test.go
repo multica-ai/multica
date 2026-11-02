@@ -89,6 +89,12 @@ func TestRefreshUntouchedNullableIssueParamsKeepsValidatedAssigneePair(t *testin
 }
 
 func TestUpdateIssueMergesChannelMediaAppendedAfterEditorBase(t *testing.T) {
+	for _, historical := range []bool{false, true} {
+		t.Run(map[bool]string{false: "direct", true: "historical"}[historical], func(t *testing.T) { testUpdateIssueMergesChannelMediaAppendedAfterEditorBase(t, historical) })
+	}
+}
+
+func testUpdateIssueMergesChannelMediaAppendedAfterEditorBase(t *testing.T, historical bool) {
 	if testHandler == nil || testPool == nil {
 		t.Skip("requires test database")
 	}
@@ -123,6 +129,9 @@ func TestUpdateIssueMergesChannelMediaAppendedAfterEditorBase(t *testing.T) {
 		t.Fatalf("insert channel attachment: %v", err)
 	}
 	block := channelmedia.Block(attachmentID, "diagram.png", true)
+	if historical {
+		block = channelmedia.SourceBlock([]string{attachmentID}, "Referenced channel context:\n\n>     <quoted_message sender=\"Alice\">\n>     before [Image 1: "+attachmentID+"] after\n>     </quoted_message>")
+	}
 	remoteDescription := channelmedia.Append("Original", block)
 	if _, err := testPool.Exec(ctx, `UPDATE issue SET description = $1, updated_at = now() WHERE id = $2`, remoteDescription, created.ID); err != nil {
 		t.Fatalf("append remote channel media: %v", err)
@@ -142,7 +151,7 @@ func TestUpdateIssueMergesChannelMediaAppendedAfterEditorBase(t *testing.T) {
 	if err := json.NewDecoder(update.Body).Decode(&merged); err != nil {
 		t.Fatalf("decode merged issue: %v", err)
 	}
-	if merged.Description == nil || !strings.Contains(*merged.Description, "Original with local edit") || !strings.Contains(*merged.Description, channelmedia.DownloadPath(attachmentID)) {
+	if merged.Description == nil || !strings.Contains(*merged.Description, "Original with local edit") || !strings.Contains(*merged.Description, block) {
 		t.Fatalf("merged description = %#v", merged.Description)
 	}
 
@@ -168,6 +177,12 @@ func TestUpdateIssueMergesChannelMediaAppendedAfterEditorBase(t *testing.T) {
 }
 
 func TestBatchUpdateIssuePreservesMarkedChannelMedia(t *testing.T) {
+	for _, historical := range []bool{false, true} {
+		t.Run(map[bool]string{false: "direct", true: "historical"}[historical], func(t *testing.T) { testBatchUpdateIssuePreservesMarkedChannelMedia(t, historical) })
+	}
+}
+
+func testBatchUpdateIssuePreservesMarkedChannelMedia(t *testing.T, historical bool) {
 	if testHandler == nil || testPool == nil {
 		t.Skip("requires test database")
 	}
@@ -202,6 +217,9 @@ func TestBatchUpdateIssuePreservesMarkedChannelMedia(t *testing.T) {
 		t.Fatalf("insert channel attachment: %v", err)
 	}
 	block := channelmedia.Block(attachmentID, "diagram.png", true)
+	if historical {
+		block = channelmedia.SourceBlock([]string{attachmentID}, "Referenced channel context:\n\n>     <quoted_message sender=\"Alice\">\n>     before [Image 1: "+attachmentID+"] after\n>     </quoted_message>")
+	}
 	if _, err := testPool.Exec(ctx, `UPDATE issue SET description = $1 WHERE id = $2`, channelmedia.Append("Original", block), created.ID); err != nil {
 		t.Fatalf("append channel media: %v", err)
 	}
@@ -323,5 +341,35 @@ func TestDescriptionUpdateLockSerializesLaterChannelMediaAppend(t *testing.T) {
 	want := channelmedia.Append("Local edit", block)
 	if description != want {
 		t.Fatalf("final description = %q, want %q", description, want)
+	}
+}
+
+func TestMergeIssueChannelMediaPreservesAttributedSource(t *testing.T) {
+	const id = "22222222-2222-4222-8222-222222222222"
+	content := "Referenced channel context:\n\n>     <quoted_message sender=\"Alice\">\n>     before [Image 1: " + id + "] after\n>     </quoted_message>"
+	block := channelmedia.SourceBlock([]string{id}, content)
+	current := channelmedia.Append("Original", block)
+	oldBase := "Original"
+	atts := []db.Attachment{{ID: pgtype.UUID{Bytes: uuid.MustParse(id), Valid: true}, ContentType: "image/png"}}
+	for _, tc := range []struct {
+		name, incoming string
+		base           *string
+		attachments    []db.Attachment
+		want           string
+	}{
+		{"stale-editor", "Local edit", &oldBase, atts, channelmedia.Append("Local edit", block)},
+		{"legacy-client", "Local edit", nil, atts, channelmedia.Append("Local edit", block)},
+		{"retained-without-comments", channelmedia.Append("Local edit", content), &current, atts, channelmedia.Append("Local edit", block)},
+		{"intentional-removal", "Local edit", &current, atts, "Local edit"},
+		{"intentional-source-edit", "Edited Alice source", &current, atts, "Edited Alice source"},
+		{"deleted-attachment", "Local edit", &oldBase, nil, "Local edit"},
+		{"already-retained", channelmedia.Append("Local edit", block), &oldBase, atts, channelmedia.Append("Local edit", block)},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			got := mergeIssueChannelMediaDescription(current, tc.incoming, tc.base, tc.attachments)
+			if got != tc.want || strings.Contains(got, channelmedia.DownloadPath(id)) {
+				t.Fatalf("source merge = %q; want %q", got, tc.want)
+			}
+		})
 	}
 }

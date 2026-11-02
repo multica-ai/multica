@@ -1061,9 +1061,11 @@ func (s *ChatSession) bindMediaRefs(ctx context.Context, qtx SessionQueries, in 
 		replacements := make([]inlineMediaReplacement, 0, len(created))
 		contextReplacements := make([]inlineMediaReplacement, 0, len(created))
 		contexts := make([]string, 0, 1)
+		contextIDs := make([]string, 0, len(created))
 		seenContexts := make(map[string]bool)
 		for _, media := range created {
 			if media.ref.InlineIDOnly && media.ref.SourceContext != "" {
+				contextIDs = append(contextIDs, uuid.UUID(media.id.Bytes).String())
 				if source := media.ref.SourceContext; source != "" && !seenContexts[source] {
 					contexts = append(contexts, source)
 					seenContexts[source] = true
@@ -1092,6 +1094,7 @@ func (s *ChatSession) bindMediaRefs(ctx context.Context, qtx SessionQueries, in 
 		}
 		mediaContext := issueMediaContext(strings.Join(contexts, "\n\n"), contextReplacements)
 		if mediaContext != "" {
+			mediaContext = channelmedia.SourceBlock(contextIDs, mediaContext)
 			issueMarkdown = append(issueMarkdown, mediaContext)
 		}
 
@@ -1152,20 +1155,17 @@ func (s *ChatSession) bindMediaRefs(ctx context.Context, qtx SessionQueries, in 
 		}
 	}
 	if body, changed := composeInlineMediaBody(in.Body, replacements); changed {
-		return updateResolvedMediaBody(ctx, qtx, in, body)
-	}
-	return nil
-}
-
-func updateResolvedMediaBody(ctx context.Context, q SessionQueries, in BindMediaInput, body string) error {
-	rows, err := q.UpdateChatMessageContentForChannelMedia(ctx, db.UpdateChatMessageContentForChannelMediaParams{
-		ID: in.MessageID, ChatSessionID: in.SessionID, Content: body,
-	})
-	if err != nil {
-		return fmt.Errorf("update chat message inline media: %w", err)
-	}
-	if rows != 1 {
-		return fmt.Errorf("update chat message inline media: updated %d rows", rows)
+		rows, err := qtx.UpdateChatMessageContentForChannelMedia(ctx, db.UpdateChatMessageContentForChannelMediaParams{
+			ID:            in.MessageID,
+			ChatSessionID: in.SessionID,
+			Content:       body,
+		})
+		if err != nil {
+			return fmt.Errorf("update chat message inline media: %w", err)
+		}
+		if rows != 1 {
+			return fmt.Errorf("update chat message inline media: updated %d rows", rows)
+		}
 	}
 	return nil
 }
@@ -1179,9 +1179,9 @@ func issueMediaContext(prefix string, replacements []inlineMediaReplacement) str
 	}
 	parts := make([]string, 0, 2)
 	if composed, changed := composeInlineMediaBody(prefix, replacements); changed {
-		// Indented code retains literal source markup and prevents quoted
-		// Markdown from becoming the issue reporter's prose or embeds.
-		parts = append(parts, "Referenced channel context:\n\n    "+strings.ReplaceAll(strings.TrimSpace(composed), "\n", "\n    "))
+		// A blockquote around fenced code survives file-card preprocessing,
+		// which trims individual lines before recognizing standalone files.
+		parts = append(parts, "Referenced channel context:\n\n"+literalMediaSource(composed))
 	}
 	unplaced := make([]string, 0)
 	seen := make(map[string]bool)
@@ -1192,9 +1192,27 @@ func issueMediaContext(prefix string, replacements []inlineMediaReplacement) str
 		}
 	}
 	if len(unplaced) > 0 {
-		parts = append(parts, "Referenced channel media (source context unavailable):\n\n    "+strings.Join(unplaced, "\n    "))
+		parts = append(parts, "Referenced channel media (source context unavailable):\n\n"+literalMediaSource(strings.Join(unplaced, "\n")))
 	}
 	return strings.Join(parts, "\n\n")
+}
+
+// Normalize all Markdown line endings before prefixing every literal line.
+func literalMediaSource(source string) string {
+	source = strings.TrimSpace(strings.ReplaceAll(strings.ReplaceAll(source, "\r\n", "\n"), "\r", "\n"))
+	// Use a fence longer than every literal backtick run in the source. Match
+	// the editor's normal fence form so an unchanged save retains provenance.
+	longest, run := 2, 0
+	for _, ch := range source {
+		if ch == '`' {
+			run++
+			longest = max(longest, run)
+		} else {
+			run = 0
+		}
+	}
+	fence := strings.Repeat("`", longest+1)
+	return "> " + fence + "\n> " + strings.ReplaceAll(source, "\n", "\n> ") + "\n> " + fence
 }
 
 type inlineMediaReplacement struct {

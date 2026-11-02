@@ -1,9 +1,10 @@
 package lark
 
 import (
-	"github.com/multica-ai/multica/server/internal/integrations/channel/engine"
 	"strings"
 	"testing"
+
+	"github.com/multica-ai/multica/server/internal/integrations/channel/engine"
 )
 
 func TestRecentMediaStaysPlaceholderAcrossRepeatedTurns(t *testing.T) {
@@ -45,6 +46,37 @@ func TestRecentMediaStaysPlaceholderAcrossRepeatedTurns(t *testing.T) {
 			}
 			if len(api.downloadCalls)+len(storage.uploads)+len(ledger.records) != 0 {
 				t.Fatal("automatic recent media caused storage work")
+			}
+		})
+	}
+}
+
+func TestInlineClearKeepsBareResetSeparateFromExplicitMedia(t *testing.T) {
+	for _, tc := range []struct {
+		name, command, parent, content string
+		wantMedia                      bool
+	}{
+		{name: "bare", command: "/clear"},
+		{name: "whitespace", command: "/clear\n \t"},
+		{name: "prompt", command: "/clear inspect"},
+		{name: "quote", command: "/clear", parent: "parent", wantMedia: true},
+		{name: "own-media", command: "/clear", content: `{"image_key":"own"}`, wantMedia: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			fake := newEnricherFake()
+			fake.byChat["group"] = []LarkMessage{budgetImage("recent")}
+			fake.byID["parent"] = []LarkMessage{budgetImage("parent")}
+			in := InboundMessage{MessageID: "trigger", Body: tc.command, CommandBody: tc.command, ParentID: tc.parent, MessageType: "text", Content: tc.content, ChatID: "group", ChatType: ChatTypeGroup, AddressedToBot: true}
+			if tc.content != "" {
+				in.MessageType = "image"
+			}
+			out := enrich(t, fake, in, InboundEnricherConfig{RecentContextSize: 10})
+			resolver := NewFeishuMediaResolver(nil, nil, nil, nil, newDiscardLogger())
+			if !out.ForceFreshSession || resolver.HasMedia(channelMessageFromLark(out)) != tc.wantMedia {
+				t.Fatalf("reset intent/media changed: %+v", out)
+			}
+			if (tc.name == "bare" || tc.name == "whitespace") && (out.Body != "" || len(fake.listCalls) != 0) {
+				t.Fatalf("bare reset acquired history: %+v", out)
 			}
 		})
 	}

@@ -22,7 +22,9 @@ authorization. This does not add parsing, transcription or video frame extractio
 - `/issue` retains bound historical media in an attributed literal source section,
   including speakers and source positions. Automatic recent history is excluded.
   Direct uploads and adapters without explicit source metadata keep their existing
-  issue behavior. Concurrent human description edits are preserved.
+  issue behavior. Concurrent human description edits are preserved. Source-specific merge markers
+  retain late transcripts through stale saves without re-embedding their media;
+  a client that adopted a source may explicitly edit or delete it.
 
 ## Deadlines and recovery
 
@@ -55,5 +57,6 @@ go test -race -p 2 -parallel 2 \
 Regression coverage includes explicit quotes/forwards and all four media kinds;
 automatic recent exclusion across repeated turns; resource ownership/deduplication;
 failed/omitted resources; literal marker collisions; issue source attribution;
-legacy ID-only issue behavior; concurrent reads and cancellation. Redis-backed
+legacy ID-only issue behavior; stale and batch description saves; literal source
+rendering and Tiptap roundtrips; concurrent reads and cancellation. Redis-backed
 tests additionally require `REDIS_TEST_URL`.
