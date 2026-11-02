@@ -359,3 +359,10 @@ ran; "Open" means specified here and not built. WS9 is built on the phase 2 bran
 | WS10 Phase 3 | Open | 10.1 to 10.20. |
 | WS11 Phase 4 | Open | 11.1 to 11.21. |
 | WS12 Release | Open | 12.1 to 12.5. |
+
+## Deferred follow-ups
+
+Items to pick up once every phase is done. They are recorded here so they are not lost.
+
+- **Quickstart re-run for an existing squad.** If the first quickstart run's charter save fails, a re-run skips the squad that already has the template's name, so it ends up with no charter and no operating review. The fix is to send the revision-0 charter save on the existing path too, and treat the 409 as already chartered. The cost is that a hand-made squad with the same name also gets a charter and an operating review, so it needs a decision on that first.
+- **DingTalk and WeCom chat push.** Spec 2.7 lists them with Slack and Lark, but the plan has no step for them. Decided not to build them now; Slack and Lark are the only non-Telegram adapters.
