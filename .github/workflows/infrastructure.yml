@@ -69,9 +69,15 @@ jobs:
         run: pnpm --filter @multica/infrastructure test
 
       # No AWS credentials: the app leaves account and region unset when they
-      # are absent, so the template synthesizes region-agnostic.
+      # are absent, so the templates synthesize region-agnostic. The self-host
+      # stack is behind a context flag and needs its signup allowlist, so it
+      # gets its own invocation rather than going unsynthesized.
       - name: Synth
         run: pnpm --filter @multica/infrastructure synth
+
+      - name: Synth the self-host stack
+        working-directory: infrastructure
+        run: pnpm exec cdk synth Multica-SelfHost -c selfHost=true -c allowedEmails=ci@example.com --quiet
 
   # Needs an OIDC role in the target account (secret AWS_DEPLOY_ROLE_ARN) and a
   # GitHub environment named aws-agent-runtime. Put required reviewers on that

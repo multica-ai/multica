@@ -4,8 +4,9 @@ import * as iam from 'aws-cdk-lib/aws-iam';
 import * as logs from 'aws-cdk-lib/aws-logs';
 import type { Construct } from 'constructs';
 
-import { renderBootstrap } from './bootstrap';
+import { renderScript } from './bootstrap';
 import type { AgentRuntimeConfig } from './config';
+import { resolveRetention } from './retention';
 
 export interface AgentRuntimeStackProps extends cdk.StackProps {
   config: AgentRuntimeConfig;
@@ -135,7 +136,16 @@ export class AgentRuntimeStack extends cdk.Stack {
     );
 
     const userData = ec2.UserData.custom(
-      renderBootstrap({ config, region: this.region, logGroupName: logGroup.logGroupName }),
+      renderScript('bootstrap.sh', {
+        REGION: this.region,
+        PARAM_PREFIX: config.parameterPrefix,
+        SERVER_URL: config.serverUrl,
+        CLI_VERSION: config.cliVersion,
+        NODE_MAJOR: config.nodeMajorVersion,
+        LOG_GROUP: logGroup.logGroupName,
+        MAX_CONCURRENT_TASKS: String(config.maxConcurrentTasks),
+        DAEMON_ID: config.daemonId,
+      }),
     );
 
     const instance = new ec2.Instance(this, 'Runtime', {
@@ -190,19 +200,3 @@ export class AgentRuntimeStack extends cdk.Stack {
   }
 }
 
-/**
- * Maps a day count to the RetentionDays enum CloudWatch accepts. Retention is
- * not a free-form number, and silently rounding a rejected value to something
- * else would hide the mistake until the API call failed at deploy.
- */
-function resolveRetention(days: number): logs.RetentionDays {
-  const match = Object.entries(logs.RetentionDays).find(([, value]) => value === days);
-  if (!match) {
-    const allowed = Object.values(logs.RetentionDays)
-      .filter((value): value is number => typeof value === 'number')
-      .sort((a, b) => a - b)
-      .join(', ');
-    throw new Error(`logRetentionDays ${days} is not a CloudWatch retention period; allowed: ${allowed}`);
-  }
-  return match[1] as logs.RetentionDays;
-}
