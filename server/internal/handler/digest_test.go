@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"context"
 	"fmt"
 	"net/http"
 	"strings"
@@ -10,6 +11,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/multica-ai/multica/server/internal/service"
 	"github.com/multica-ai/multica/server/internal/testutil"
+	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
 
 // digestEnv is a workspace of its own, so a test sees only the squads it makes
@@ -164,6 +166,43 @@ func TestDigest_SquadCountsAndRules(t *testing.T) {
 		if !strings.HasPrefix(ref.Mention, "[DIG-") || !strings.HasSuffix(ref.Mention, "](mention://issue/"+ref.ID+")") {
 			t.Fatalf("mention link malformed: %+v", ref)
 		}
+	}
+}
+
+// TestDigest_SnoozedProposalIsListedOnlyWhenDue: a snoozed proposal is left out of
+// the digest until its snooze date passes, while the pending cap still counts it
+// (spec 2.4: a snoozed proposal "still counts towards the pending caps").
+func TestDigest_SnoozedProposalIsListedOnlyWhenDue(t *testing.T) {
+	e := newDigestEnv(t)
+	sq := e.squad(t, "Snoozers")
+	since := time.Now().Add(-24 * time.Hour)
+
+	open := e.pendingProposal(t, sq, "Still open")
+	snoozed := e.pendingProposal(t, sq, "Snoozed for later")
+	dbfx.Exec(t, `UPDATE proposal SET snoozed_until = now() + interval '3 days' WHERE id = $1`, snoozed)
+
+	got := findDigestSquad(t, e.digest(t, since), sq)
+	if got.PendingProposalCount != 1 || len(got.PendingProposals) != 1 || got.PendingProposals[0].ID != open {
+		t.Fatalf("before the snooze date only the open proposal is listed: count=%d list=%+v",
+			got.PendingProposalCount, got.PendingProposals)
+	}
+
+	dbfx.Exec(t, `UPDATE proposal SET snoozed_until = now() - interval '1 hour' WHERE id = $1`, snoozed)
+	got = findDigestSquad(t, e.digest(t, since), sq)
+	if got.PendingProposalCount != 2 || len(got.PendingProposals) != 2 {
+		t.Fatalf("after the snooze date both proposals are listed: count=%d list=%+v",
+			got.PendingProposalCount, got.PendingProposals)
+	}
+
+	dbfx.Exec(t, `UPDATE proposal SET snoozed_until = now() + interval '3 days' WHERE id = $1`, snoozed)
+	capped, err := testHandler.Queries.CountPendingProposalsBySquad(context.Background(), db.CountPendingProposalsBySquadParams{
+		WorkspaceID: parseUUID(e.WorkspaceID), SquadID: parseUUID(sq),
+	})
+	if err != nil {
+		t.Fatalf("count pending proposals for the cap: %v", err)
+	}
+	if capped != 2 {
+		t.Fatalf("the pending cap counts the snoozed proposal too: got %d, want 2", capped)
 	}
 }
 

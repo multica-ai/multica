@@ -364,6 +364,7 @@ func (s *DigestService) Compute(ctx context.Context, workspaceID pgtype.UUID, si
 		WorkspaceID: workspaceID,
 		Since:       sinceTS,
 		StaleBefore: pgtype.Timestamptz{Time: now.Add(-DigestStaleAfter), Valid: true},
+		Now:         pgtype.Timestamptz{Time: now, Valid: true},
 	})
 	if err != nil {
 		return Digest{}, fmt.Errorf("digest squad stats: %w", err)
@@ -403,6 +404,7 @@ func (s *DigestService) Compute(ctx context.Context, workspaceID pgtype.UUID, si
 		}
 		proposals, err := s.Queries.DigestPendingProposals(ctx, db.DigestPendingProposalsParams{
 			WorkspaceID: workspaceID, SquadIds: ids, PerSquadLimit: DigestProposalListLimit,
+			Now: pgtype.Timestamptz{Time: now, Valid: true},
 		})
 		if err != nil {
 			return Digest{}, fmt.Errorf("digest pending proposals: %w", err)

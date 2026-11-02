@@ -35,8 +35,11 @@ SELECT
         AND al.action = 'squad_leader_evaluated'
         AND al.details->>'outcome' = 'no_action'
         AND al.created_at >= sqlc.arg('since')::timestamptz)::int AS leader_no_action_count,
+    -- A snoozed proposal is hidden until its snooze passes, as the list below is.
+    -- The pending caps are counted by their own queries and still include it.
     (SELECT count(*) FROM proposal p
-      WHERE p.workspace_id = s.workspace_id AND p.squad_id = s.id AND p.state = 'pending')::int AS pending_proposal_count
+      WHERE p.workspace_id = s.workspace_id AND p.squad_id = s.id AND p.state = 'pending'
+        AND (p.snoozed_until IS NULL OR p.snoozed_until <= sqlc.arg('now')::timestamptz))::int AS pending_proposal_count
 FROM squad s
 LEFT JOIN issue i
        ON i.workspace_id = s.workspace_id
@@ -50,7 +53,8 @@ GROUP BY s.id, s.name, s.floor_id;
 
 -- name: DigestPendingProposals :many
 -- Pending proposals of the given squads, newest first, up to
--- @per_squad_limit per squad. The title is the backing issue's.
+-- @per_squad_limit per squad. The title is the backing issue's. A snoozed
+-- proposal is left out until @now passes its snoozed_until (spec 2.4).
 SELECT squad_id, proposal_id, title
 FROM (
     SELECT p.squad_id, p.id AS proposal_id, i.title,
@@ -60,6 +64,7 @@ FROM (
     WHERE p.workspace_id = sqlc.arg('workspace_id')::uuid
       AND p.state = 'pending'
       AND p.squad_id = ANY(sqlc.arg('squad_ids')::uuid[])
+      AND (p.snoozed_until IS NULL OR p.snoozed_until <= sqlc.arg('now')::timestamptz)
 ) ranked
 WHERE rn <= sqlc.arg('per_squad_limit')::int
 ORDER BY squad_id, rn;
