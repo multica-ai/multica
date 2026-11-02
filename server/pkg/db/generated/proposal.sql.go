@@ -81,24 +81,27 @@ func (q *Queries) CountRecentUrgentProposalsBySquad(ctx context.Context, arg Cou
 const createProposal = `-- name: CreateProposal :one
 INSERT INTO proposal (
     id, workspace_id, squad_id, issue_id, handoff_squad_id, urgent, urgent_reason,
-    created_by_type, created_by_id
+    created_by_type, created_by_id, expires_at
 ) VALUES (
-    $1, $2, $3, $4, $5, $6, $7, $8, $9
-) RETURNING id, workspace_id, squad_id, issue_id, handoff_squad_id, urgent, urgent_reason, state, created_by_type, created_by_id, decided_by, decided_at, decision_note, created_at
+    $1, $2, $3, $4, $5, $6, $7, $8, $9, now() + $10::interval
+) RETURNING id, workspace_id, squad_id, issue_id, handoff_squad_id, urgent, urgent_reason, state, created_by_type, created_by_id, decided_by, decided_at, decision_note, created_at, revision, expires_at, snoozed_until
 `
 
 type CreateProposalParams struct {
-	ID             pgtype.UUID `json:"id"`
-	WorkspaceID    pgtype.UUID `json:"workspace_id"`
-	SquadID        pgtype.UUID `json:"squad_id"`
-	IssueID        pgtype.UUID `json:"issue_id"`
-	HandoffSquadID pgtype.UUID `json:"handoff_squad_id"`
-	Urgent         bool        `json:"urgent"`
-	UrgentReason   string      `json:"urgent_reason"`
-	CreatedByType  string      `json:"created_by_type"`
-	CreatedByID    pgtype.UUID `json:"created_by_id"`
+	ID             pgtype.UUID     `json:"id"`
+	WorkspaceID    pgtype.UUID     `json:"workspace_id"`
+	SquadID        pgtype.UUID     `json:"squad_id"`
+	IssueID        pgtype.UUID     `json:"issue_id"`
+	HandoffSquadID pgtype.UUID     `json:"handoff_squad_id"`
+	Urgent         bool            `json:"urgent"`
+	UrgentReason   string          `json:"urgent_reason"`
+	CreatedByType  string          `json:"created_by_type"`
+	CreatedByID    pgtype.UUID     `json:"created_by_id"`
+	ExpiryWindow   pgtype.Interval `json:"expiry_window"`
 }
 
+// expiry_window is the time a pending proposal waits for a decision; the
+// service passes ProposalExpiryAfter so the SQL and the Go constant cannot drift.
 func (q *Queries) CreateProposal(ctx context.Context, arg CreateProposalParams) (Proposal, error) {
 	row := q.db.QueryRow(ctx, createProposal,
 		arg.ID,
@@ -110,6 +113,7 @@ func (q *Queries) CreateProposal(ctx context.Context, arg CreateProposalParams) 
 		arg.UrgentReason,
 		arg.CreatedByType,
 		arg.CreatedByID,
+		arg.ExpiryWindow,
 	)
 	var i Proposal
 	err := row.Scan(
@@ -127,15 +131,18 @@ func (q *Queries) CreateProposal(ctx context.Context, arg CreateProposalParams) 
 		&i.DecidedAt,
 		&i.DecisionNote,
 		&i.CreatedAt,
+		&i.Revision,
+		&i.ExpiresAt,
+		&i.SnoozedUntil,
 	)
 	return i, err
 }
 
 const decideProposal = `-- name: DecideProposal :one
 UPDATE proposal
-SET state = $3, decided_by = $4, decided_at = now(), decision_note = $5
+SET state = $3, decided_by = $4, decided_at = now(), decision_note = $5, snoozed_until = NULL
 WHERE id = $1 AND workspace_id = $2 AND state = 'pending'
-RETURNING id, workspace_id, squad_id, issue_id, handoff_squad_id, urgent, urgent_reason, state, created_by_type, created_by_id, decided_by, decided_at, decision_note, created_at
+RETURNING id, workspace_id, squad_id, issue_id, handoff_squad_id, urgent, urgent_reason, state, created_by_type, created_by_id, decided_by, decided_at, decision_note, created_at, revision, expires_at, snoozed_until
 `
 
 type DecideProposalParams struct {
@@ -170,6 +177,9 @@ func (q *Queries) DecideProposal(ctx context.Context, arg DecideProposalParams) 
 		&i.DecidedAt,
 		&i.DecisionNote,
 		&i.CreatedAt,
+		&i.Revision,
+		&i.ExpiresAt,
+		&i.SnoozedUntil,
 	)
 	return i, err
 }
@@ -182,6 +192,45 @@ DELETE FROM proposal WHERE proposal.workspace_id = $1
 func (q *Queries) DeleteWorkspaceProposals(ctx context.Context, workspaceID pgtype.UUID) error {
 	_, err := q.db.Exec(ctx, deleteWorkspaceProposals, workspaceID)
 	return err
+}
+
+const expireProposal = `-- name: ExpireProposal :one
+UPDATE proposal
+SET state = 'expired', decided_at = now(), decision_note = '', snoozed_until = NULL
+WHERE id = $1 AND workspace_id = $2 AND state = 'pending' AND expires_at <= now()
+RETURNING id, workspace_id, squad_id, issue_id, handoff_squad_id, urgent, urgent_reason, state, created_by_type, created_by_id, decided_by, decided_at, decision_note, created_at, revision, expires_at, snoozed_until
+`
+
+type ExpireProposalParams struct {
+	ID          pgtype.UUID `json:"id"`
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
+}
+
+// The predicate is repeated from ListDueProposals: a decision, snooze or
+// revision that took the row first leaves nothing to expire.
+func (q *Queries) ExpireProposal(ctx context.Context, arg ExpireProposalParams) (Proposal, error) {
+	row := q.db.QueryRow(ctx, expireProposal, arg.ID, arg.WorkspaceID)
+	var i Proposal
+	err := row.Scan(
+		&i.ID,
+		&i.WorkspaceID,
+		&i.SquadID,
+		&i.IssueID,
+		&i.HandoffSquadID,
+		&i.Urgent,
+		&i.UrgentReason,
+		&i.State,
+		&i.CreatedByType,
+		&i.CreatedByID,
+		&i.DecidedBy,
+		&i.DecidedAt,
+		&i.DecisionNote,
+		&i.CreatedAt,
+		&i.Revision,
+		&i.ExpiresAt,
+		&i.SnoozedUntil,
+	)
+	return i, err
 }
 
 const getOldestWorkspaceOwnerMember = `-- name: GetOldestWorkspaceOwnerMember :one
@@ -206,7 +255,7 @@ func (q *Queries) GetOldestWorkspaceOwnerMember(ctx context.Context, workspaceID
 }
 
 const getProposalInWorkspace = `-- name: GetProposalInWorkspace :one
-SELECT id, workspace_id, squad_id, issue_id, handoff_squad_id, urgent, urgent_reason, state, created_by_type, created_by_id, decided_by, decided_at, decision_note, created_at FROM proposal WHERE id = $1 AND workspace_id = $2
+SELECT id, workspace_id, squad_id, issue_id, handoff_squad_id, urgent, urgent_reason, state, created_by_type, created_by_id, decided_by, decided_at, decision_note, created_at, revision, expires_at, snoozed_until FROM proposal WHERE id = $1 AND workspace_id = $2
 `
 
 type GetProposalInWorkspaceParams struct {
@@ -232,12 +281,15 @@ func (q *Queries) GetProposalInWorkspace(ctx context.Context, arg GetProposalInW
 		&i.DecidedAt,
 		&i.DecisionNote,
 		&i.CreatedAt,
+		&i.Revision,
+		&i.ExpiresAt,
+		&i.SnoozedUntil,
 	)
 	return i, err
 }
 
 const getProposalWithIssue = `-- name: GetProposalWithIssue :one
-SELECT p.id, p.workspace_id, p.squad_id, p.issue_id, p.handoff_squad_id, p.urgent, p.urgent_reason, p.state, p.created_by_type, p.created_by_id, p.decided_by, p.decided_at, p.decision_note, p.created_at, i.title AS issue_title, i.number AS issue_number, i.status AS issue_status
+SELECT p.id, p.workspace_id, p.squad_id, p.issue_id, p.handoff_squad_id, p.urgent, p.urgent_reason, p.state, p.created_by_type, p.created_by_id, p.decided_by, p.decided_at, p.decision_note, p.created_at, p.revision, p.expires_at, p.snoozed_until, i.title AS issue_title, i.number AS issue_number, i.status AS issue_status
 FROM proposal p
 JOIN issue i ON i.id = p.issue_id AND i.workspace_id = p.workspace_id
 WHERE p.id = $1 AND p.workspace_id = $2
@@ -273,6 +325,9 @@ func (q *Queries) GetProposalWithIssue(ctx context.Context, arg GetProposalWithI
 		&i.Proposal.DecidedAt,
 		&i.Proposal.DecisionNote,
 		&i.Proposal.CreatedAt,
+		&i.Proposal.Revision,
+		&i.Proposal.ExpiresAt,
+		&i.Proposal.SnoozedUntil,
 		&i.IssueTitle,
 		&i.IssueNumber,
 		&i.IssueStatus,
@@ -301,8 +356,41 @@ func (q *Queries) HasActiveSquadAutopilot(ctx context.Context, arg HasActiveSqua
 	return has_active, err
 }
 
+const listDueProposals = `-- name: ListDueProposals :many
+SELECT id, workspace_id FROM proposal
+WHERE state = 'pending' AND expires_at <= now()
+ORDER BY expires_at, id
+LIMIT $1
+`
+
+type ListDueProposalsRow struct {
+	ID          pgtype.UUID `json:"id"`
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
+}
+
+// Pending proposals whose decision window has passed, for the daily expiry job.
+func (q *Queries) ListDueProposals(ctx context.Context, limit int32) ([]ListDueProposalsRow, error) {
+	rows, err := q.db.Query(ctx, listDueProposals, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListDueProposalsRow{}
+	for rows.Next() {
+		var i ListDueProposalsRow
+		if err := rows.Scan(&i.ID, &i.WorkspaceID); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listProposals = `-- name: ListProposals :many
-SELECT p.id, p.workspace_id, p.squad_id, p.issue_id, p.handoff_squad_id, p.urgent, p.urgent_reason, p.state, p.created_by_type, p.created_by_id, p.decided_by, p.decided_at, p.decision_note, p.created_at, i.title AS issue_title, i.number AS issue_number, i.status AS issue_status
+SELECT p.id, p.workspace_id, p.squad_id, p.issue_id, p.handoff_squad_id, p.urgent, p.urgent_reason, p.state, p.created_by_type, p.created_by_id, p.decided_by, p.decided_at, p.decision_note, p.created_at, p.revision, p.expires_at, p.snoozed_until, i.title AS issue_title, i.number AS issue_number, i.status AS issue_status
 FROM proposal p
 JOIN issue i ON i.id = p.issue_id AND i.workspace_id = p.workspace_id
 WHERE p.workspace_id = $1
@@ -350,6 +438,9 @@ func (q *Queries) ListProposals(ctx context.Context, arg ListProposalsParams) ([
 			&i.Proposal.DecidedAt,
 			&i.Proposal.DecisionNote,
 			&i.Proposal.CreatedAt,
+			&i.Proposal.Revision,
+			&i.Proposal.ExpiresAt,
+			&i.Proposal.SnoozedUntil,
 			&i.IssueTitle,
 			&i.IssueNumber,
 			&i.IssueStatus,
@@ -364,8 +455,60 @@ func (q *Queries) ListProposals(ctx context.Context, arg ListProposalsParams) ([
 	return items, nil
 }
 
+const listRecentProposalsForPriorArt = `-- name: ListRecentProposalsForPriorArt :many
+SELECT p.id, p.squad_id, p.state, p.created_at, i.title, i.number
+FROM proposal p
+JOIN issue i ON i.id = p.issue_id AND i.workspace_id = p.workspace_id
+WHERE p.workspace_id = $1 AND p.created_at >= $2
+ORDER BY p.created_at DESC, p.id DESC
+LIMIT 500
+`
+
+type ListRecentProposalsForPriorArtParams struct {
+	WorkspaceID pgtype.UUID        `json:"workspace_id"`
+	CreatedAt   pgtype.Timestamptz `json:"created_at"`
+}
+
+type ListRecentProposalsForPriorArtRow struct {
+	ID        pgtype.UUID        `json:"id"`
+	SquadID   pgtype.UUID        `json:"squad_id"`
+	State     string             `json:"state"`
+	CreatedAt pgtype.Timestamptz `json:"created_at"`
+	Title     string             `json:"title"`
+	Number    int32              `json:"number"`
+}
+
+// Proposals of the workspace filed since the given time, whatever their state,
+// with the title of each backing issue. The service scores titles in Go.
+func (q *Queries) ListRecentProposalsForPriorArt(ctx context.Context, arg ListRecentProposalsForPriorArtParams) ([]ListRecentProposalsForPriorArtRow, error) {
+	rows, err := q.db.Query(ctx, listRecentProposalsForPriorArt, arg.WorkspaceID, arg.CreatedAt)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListRecentProposalsForPriorArtRow{}
+	for rows.Next() {
+		var i ListRecentProposalsForPriorArtRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.SquadID,
+			&i.State,
+			&i.CreatedAt,
+			&i.Title,
+			&i.Number,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const lockProposalInWorkspace = `-- name: LockProposalInWorkspace :one
-SELECT id, workspace_id, squad_id, issue_id, handoff_squad_id, urgent, urgent_reason, state, created_by_type, created_by_id, decided_by, decided_at, decision_note, created_at FROM proposal WHERE id = $1 AND workspace_id = $2 FOR UPDATE
+SELECT id, workspace_id, squad_id, issue_id, handoff_squad_id, urgent, urgent_reason, state, created_by_type, created_by_id, decided_by, decided_at, decision_note, created_at, revision, expires_at, snoozed_until FROM proposal WHERE id = $1 AND workspace_id = $2 FOR UPDATE
 `
 
 type LockProposalInWorkspaceParams struct {
@@ -393,6 +536,9 @@ func (q *Queries) LockProposalInWorkspace(ctx context.Context, arg LockProposalI
 		&i.DecidedAt,
 		&i.DecisionNote,
 		&i.CreatedAt,
+		&i.Revision,
+		&i.ExpiresAt,
+		&i.SnoozedUntil,
 	)
 	return i, err
 }
@@ -409,11 +555,100 @@ func (q *Queries) LockProposalWorkspace(ctx context.Context, workspaceID pgtype.
 	return err
 }
 
+const requestProposalRevision = `-- name: RequestProposalRevision :one
+UPDATE proposal
+SET state = 'revising', decided_by = $3, decided_at = now(), decision_note = $4, snoozed_until = NULL
+WHERE id = $1 AND workspace_id = $2 AND state = 'pending'
+RETURNING id, workspace_id, squad_id, issue_id, handoff_squad_id, urgent, urgent_reason, state, created_by_type, created_by_id, decided_by, decided_at, decision_note, created_at, revision, expires_at, snoozed_until
+`
+
+type RequestProposalRevisionParams struct {
+	ID           pgtype.UUID `json:"id"`
+	WorkspaceID  pgtype.UUID `json:"workspace_id"`
+	DecidedBy    pgtype.UUID `json:"decided_by"`
+	DecisionNote string      `json:"decision_note"`
+}
+
+// "Ask for changes": the proposal leaves the boss's queue until the squad
+// resubmits. The note is kept in decision_note while it is open.
+func (q *Queries) RequestProposalRevision(ctx context.Context, arg RequestProposalRevisionParams) (Proposal, error) {
+	row := q.db.QueryRow(ctx, requestProposalRevision,
+		arg.ID,
+		arg.WorkspaceID,
+		arg.DecidedBy,
+		arg.DecisionNote,
+	)
+	var i Proposal
+	err := row.Scan(
+		&i.ID,
+		&i.WorkspaceID,
+		&i.SquadID,
+		&i.IssueID,
+		&i.HandoffSquadID,
+		&i.Urgent,
+		&i.UrgentReason,
+		&i.State,
+		&i.CreatedByType,
+		&i.CreatedByID,
+		&i.DecidedBy,
+		&i.DecidedAt,
+		&i.DecisionNote,
+		&i.CreatedAt,
+		&i.Revision,
+		&i.ExpiresAt,
+		&i.SnoozedUntil,
+	)
+	return i, err
+}
+
+const resubmitProposal = `-- name: ResubmitProposal :one
+UPDATE proposal
+SET state = 'pending', revision = revision + 1, decided_by = NULL, decided_at = NULL,
+    decision_note = '', expires_at = now() + $3::interval
+WHERE id = $1 AND workspace_id = $2 AND state = 'revising'
+RETURNING id, workspace_id, squad_id, issue_id, handoff_squad_id, urgent, urgent_reason, state, created_by_type, created_by_id, decided_by, decided_at, decision_note, created_at, revision, expires_at, snoozed_until
+`
+
+type ResubmitProposalParams struct {
+	ID           pgtype.UUID     `json:"id"`
+	WorkspaceID  pgtype.UUID     `json:"workspace_id"`
+	ExpiryWindow pgtype.Interval `json:"expiry_window"`
+}
+
+// The squad's revised body goes back to the boss: revision increments and the
+// decision fields clear. The decision window starts again, because the boss has
+// not yet seen this body. Creation time is untouched, so a revision does not
+// count as a new proposal in the weekly cap.
+func (q *Queries) ResubmitProposal(ctx context.Context, arg ResubmitProposalParams) (Proposal, error) {
+	row := q.db.QueryRow(ctx, resubmitProposal, arg.ID, arg.WorkspaceID, arg.ExpiryWindow)
+	var i Proposal
+	err := row.Scan(
+		&i.ID,
+		&i.WorkspaceID,
+		&i.SquadID,
+		&i.IssueID,
+		&i.HandoffSquadID,
+		&i.Urgent,
+		&i.UrgentReason,
+		&i.State,
+		&i.CreatedByType,
+		&i.CreatedByID,
+		&i.DecidedBy,
+		&i.DecidedAt,
+		&i.DecisionNote,
+		&i.CreatedAt,
+		&i.Revision,
+		&i.ExpiresAt,
+		&i.SnoozedUntil,
+	)
+	return i, err
+}
+
 const revertProposalDecision = `-- name: RevertProposalDecision :one
 UPDATE proposal
 SET state = 'pending', decided_by = NULL, decided_at = NULL, decision_note = ''
 WHERE id = $1 AND workspace_id = $2 AND state <> 'pending'
-RETURNING id, workspace_id, squad_id, issue_id, handoff_squad_id, urgent, urgent_reason, state, created_by_type, created_by_id, decided_by, decided_at, decision_note, created_at
+RETURNING id, workspace_id, squad_id, issue_id, handoff_squad_id, urgent, urgent_reason, state, created_by_type, created_by_id, decided_by, decided_at, decision_note, created_at, revision, expires_at, snoozed_until
 `
 
 type RevertProposalDecisionParams struct {
@@ -441,6 +676,57 @@ func (q *Queries) RevertProposalDecision(ctx context.Context, arg RevertProposal
 		&i.DecidedAt,
 		&i.DecisionNote,
 		&i.CreatedAt,
+		&i.Revision,
+		&i.ExpiresAt,
+		&i.SnoozedUntil,
+	)
+	return i, err
+}
+
+const snoozeProposal = `-- name: SnoozeProposal :one
+UPDATE proposal
+SET snoozed_until = $3::timestamptz,
+    expires_at = GREATEST(expires_at, $3::timestamptz + $4::interval)
+WHERE id = $1 AND workspace_id = $2 AND state = 'pending'
+RETURNING id, workspace_id, squad_id, issue_id, handoff_squad_id, urgent, urgent_reason, state, created_by_type, created_by_id, decided_by, decided_at, decision_note, created_at, revision, expires_at, snoozed_until
+`
+
+type SnoozeProposalParams struct {
+	ID           pgtype.UUID        `json:"id"`
+	WorkspaceID  pgtype.UUID        `json:"workspace_id"`
+	SnoozedUntil pgtype.Timestamptz `json:"snoozed_until"`
+	ExpiryWindow pgtype.Interval    `json:"expiry_window"`
+}
+
+// "Decide later": the proposal stays pending and counts towards the caps. The
+// window does not run out while the boss has put the proposal aside: expires_at
+// moves to a full window after the snooze ends.
+func (q *Queries) SnoozeProposal(ctx context.Context, arg SnoozeProposalParams) (Proposal, error) {
+	row := q.db.QueryRow(ctx, snoozeProposal,
+		arg.ID,
+		arg.WorkspaceID,
+		arg.SnoozedUntil,
+		arg.ExpiryWindow,
+	)
+	var i Proposal
+	err := row.Scan(
+		&i.ID,
+		&i.WorkspaceID,
+		&i.SquadID,
+		&i.IssueID,
+		&i.HandoffSquadID,
+		&i.Urgent,
+		&i.UrgentReason,
+		&i.State,
+		&i.CreatedByType,
+		&i.CreatedByID,
+		&i.DecidedBy,
+		&i.DecidedAt,
+		&i.DecisionNote,
+		&i.CreatedAt,
+		&i.Revision,
+		&i.ExpiresAt,
+		&i.SnoozedUntil,
 	)
 	return i, err
 }

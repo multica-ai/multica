@@ -1468,6 +1468,9 @@ type Proposal struct {
 	DecidedAt      pgtype.Timestamptz `json:"decided_at"`
 	DecisionNote   string             `json:"decision_note"`
 	CreatedAt      pgtype.Timestamptz `json:"created_at"`
+	Revision       int32              `json:"revision"`
+	ExpiresAt      pgtype.Timestamptz `json:"expires_at"`
+	SnoozedUntil   pgtype.Timestamptz `json:"snoozed_until"`
 }
 
 type QuickAction struct {
