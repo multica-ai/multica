@@ -35,7 +35,7 @@ func (c *contextMedia) marker(res larkMediaResource) string {
 	}
 	c.items = append(c.items, ContextMedia{MessageID: res.messageID, ResourceKey: res.key,
 		Type: res.kind, FetchType: res.fetchType, Filename: res.filename, MimeType: res.mimeType,
-		SizeBytes: res.sizeBytes, Placeholder: marker, Occurrences: 1})
+		Placeholder: marker, Occurrences: 1})
 	return marker
 }
 

@@ -74,7 +74,7 @@ func TestContextMediaCollisionPreservesBindingDB(t *testing.T) {
 					media.Content = strings.Replace(media.Content, `"image_key":"good"`, `"image_key":"bad"`, 1)
 				}
 				fake.byID[in.ParentID] = []LarkMessage{media}
-				enricher := NewInboundEnricher(fake, InboundEnricherConfig{RecentContextSize: 5}).(*inboundEnricher)
+				enricher := NewInboundEnricher(fake, InboundEnricherConfig{RecentContextSize: 5})
 				out := enricher.Enrich(t.Context(), in, InstallationCredentials{})
 				session := engine.NewChatSession(q, pool, channel.TypeFeishu, engine.SessionTitles{})
 				sender, workspaceID := util.MustParseUUID(fx.UserID), util.MustParseUUID(fx.WorkspaceID)

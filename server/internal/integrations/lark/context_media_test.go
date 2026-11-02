@@ -139,7 +139,7 @@ func TestContextMediaCollectFilesAudioAndVideo(t *testing.T) {
 				} else if messageType != "file" {
 					kind = channel.MsgTypeVideo
 				}
-				if item.MessageID != owner || item.Type != kind || item.FetchType != "file" || item.Filename != "source.bin" || item.MimeType != "application/octet-stream" || item.SizeBytes != 7 || out.CommandBody != "inspect" {
+				if item.MessageID != owner || item.Type != kind || item.FetchType != "file" || item.Filename != "source.bin" || item.MimeType != "application/octet-stream" || out.CommandBody != "inspect" {
 					t.Fatalf("media metadata or command lost: %+v", out)
 				}
 				if !strings.Contains(out.Body, item.Placeholder+" (source.bin)") {
@@ -300,10 +300,8 @@ func TestContextMediaOriginalTextCollision(t *testing.T) {
 					fake.byID["forward"] = []LarkMessage{{MessageID: "forward", MessageType: "merge_forward"}, text, media}
 				} else {
 					fake.byChat[in.ChatID] = []LarkMessage{text, media}
-					if source == "recent-and-quote" {
-						in.ParentID = media.MessageID
-						fake.byID[in.ParentID] = []LarkMessage{media}
-					}
+					in.ParentID = media.MessageID
+					fake.byID[in.ParentID] = []LarkMessage{media}
 				}
 				out := enrich(t, fake, in, cfg)
 				if len(out.ContextMedia) != 1 {

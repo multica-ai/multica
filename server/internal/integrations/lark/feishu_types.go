@@ -22,7 +22,6 @@ type ContextMedia struct {
 	FetchType   string
 	Filename    string
 	MimeType    string
-	SizeBytes   int64
 	Placeholder string
 	Occurrences int
 }

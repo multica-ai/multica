@@ -68,7 +68,8 @@ func (r *feishuMediaResolver) ResolveMedia(ctx context.Context, inst engine.Reso
 		r.logMediaWarn("lark media ingest skipped: raw decode failed", InboundMessage{MessageID: msg.MessageID}, err)
 		return msg
 	}
-	if len(mediaResourcesFromMessage(lm)) == 0 {
+	resources := mediaResourcesFromMessage(lm)
+	if len(resources) == 0 {
 		return msg
 	}
 	if r.api == nil || r.creds == nil || r.storage == nil || r.ledger == nil {
@@ -85,7 +86,6 @@ func (r *feishuMediaResolver) ResolveMedia(ctx context.Context, inst engine.Reso
 		r.logMediaWarn("lark media ingest skipped: credentials unavailable", lm, err)
 		return msg
 	}
-	resources := mediaResourcesFromMessage(lm)
 	for resIndex, res := range resources {
 		key := mediaObjectKey(inst, chatMessageID, res)
 		link := r.storage.ObjectURL(key)
@@ -253,7 +253,7 @@ func mediaResourcesFromMessage(lm InboundMessage) []larkMediaResource {
 		case channel.MsgTypeImage, channel.MsgTypeFile, channel.MsgTypeAudio, channel.MsgTypeVideo:
 			out = append(out, larkMediaResource{key: media.ResourceKey, kind: media.Type,
 				fetchType: media.FetchType, messageID: media.MessageID, filename: media.Filename,
-				mimeType: media.MimeType, sizeBytes: media.SizeBytes, placeholder: media.Placeholder, occurrences: media.Occurrences})
+				mimeType: media.MimeType, placeholder: media.Placeholder, occurrences: media.Occurrences})
 		}
 	}
 	return out
