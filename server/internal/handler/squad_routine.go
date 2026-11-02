@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5"
@@ -61,8 +62,9 @@ type RoutineLastRunResponse struct {
 
 // SquadRoutineResponse is a routine as the squad panel reads it. The routine's
 // identity is its autopilot: autopilot_id is also the {routine_id} in the
-// unlink path. schedule, next_run_at and last_run are null when the autopilot
-// has no enabled schedule or has never run.
+// unlink path. state is derived on read (service.RoutineComplianceStates).
+// schedule, next_run_at and last_run are null when the autopilot has no enabled
+// schedule or has never run.
 type SquadRoutineResponse struct {
 	AutopilotID     string                   `json:"autopilot_id"`
 	SquadID         string                   `json:"squad_id"`
@@ -72,6 +74,7 @@ type SquadRoutineResponse struct {
 	ExpectedOutput  string                   `json:"expected_output"`
 	Required        bool                     `json:"required"`
 	GraceHours      int32                    `json:"grace_hours"`
+	State           string                   `json:"state"`
 	Schedule        *RoutineScheduleResponse `json:"schedule"`
 	NextRunAt       *string                  `json:"next_run_at"`
 	LastRun         *RoutineLastRunResponse  `json:"last_run"`
@@ -93,7 +96,7 @@ type CreateSquadRoutineRequest struct {
 	GraceHours     *int32  `json:"grace_hours"`
 }
 
-func routineViewFromRow(row db.ListSquadRoutinesRow) SquadRoutineResponse {
+func routineViewFromRow(row db.ListSquadRoutinesRow, state string) SquadRoutineResponse {
 	resp := SquadRoutineResponse{
 		AutopilotID:     uuidToString(row.AutopilotID),
 		SquadID:         uuidToString(row.SquadID),
@@ -103,6 +106,7 @@ func routineViewFromRow(row db.ListSquadRoutinesRow) SquadRoutineResponse {
 		ExpectedOutput:  row.ExpectedOutput,
 		Required:        row.Required,
 		GraceHours:      row.GraceHours,
+		State:           state,
 		NextRunAt:       timestampToPtr(row.ScheduleNextRunAt),
 		CreatedAt:       timestampToString(row.CreatedAt),
 	}
@@ -124,19 +128,42 @@ func routineViewFromRow(row db.ListSquadRoutinesRow) SquadRoutineResponse {
 	return resp
 }
 
-// loadSquadRoutineView reads one routine back in the list's shape, so a create
-// responds with exactly what the list would show.
-func (h *Handler) loadSquadRoutineView(r *http.Request, squad db.Squad, autopilotID pgtype.UUID) (SquadRoutineResponse, error) {
+// squadRoutineViews reads a squad's routines in the list's shape, each with its
+// derived state. The state is computed on every read.
+func (h *Handler) squadRoutineViews(r *http.Request, squad db.Squad) ([]SquadRoutineResponse, error) {
 	rows, err := h.Queries.ListSquadRoutines(r.Context(), db.ListSquadRoutinesParams{
 		WorkspaceID: squad.WorkspaceID,
 		SquadID:     squad.ID,
 	})
 	if err != nil {
+		return nil, err
+	}
+	states, err := service.RoutineComplianceStates(r.Context(), h.Queries, squad.WorkspaceID, squad.ID, time.Now())
+	if err != nil {
+		return nil, err
+	}
+	stateByAutopilot := make(map[string]string, len(states))
+	for _, s := range states {
+		stateByAutopilot[s.AutopilotID] = s.State
+	}
+	out := make([]SquadRoutineResponse, 0, len(rows))
+	for _, row := range rows {
+		id := uuidToString(row.AutopilotID)
+		out = append(out, routineViewFromRow(row, stateByAutopilot[id]))
+	}
+	return out, nil
+}
+
+// loadSquadRoutineView reads one routine back in the list's shape, so a create
+// responds with exactly what the list would show.
+func (h *Handler) loadSquadRoutineView(r *http.Request, squad db.Squad, autopilotID pgtype.UUID) (SquadRoutineResponse, error) {
+	views, err := h.squadRoutineViews(r, squad)
+	if err != nil {
 		return SquadRoutineResponse{}, err
 	}
-	for _, row := range rows {
-		if uuidToString(row.AutopilotID) == uuidToString(autopilotID) {
-			return routineViewFromRow(row), nil
+	for _, v := range views {
+		if v.AutopilotID == uuidToString(autopilotID) {
+			return v, nil
 		}
 	}
 	return SquadRoutineResponse{}, pgx.ErrNoRows
@@ -172,17 +199,10 @@ func (h *Handler) ListSquadRoutines(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	rows, err := h.Queries.ListSquadRoutines(r.Context(), db.ListSquadRoutinesParams{
-		WorkspaceID: squad.WorkspaceID,
-		SquadID:     squad.ID,
-	})
+	out, err := h.squadRoutineViews(r, squad)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to list routines")
 		return
-	}
-	out := make([]SquadRoutineResponse, 0, len(rows))
-	for _, row := range rows {
-		out = append(out, routineViewFromRow(row))
 	}
 	writeJSON(w, http.StatusOK, out)
 }
