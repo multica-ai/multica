@@ -5,7 +5,6 @@ import { useDefaultLayout } from "react-resizable-panels";
 import { useIsMobile } from "@multica/ui/hooks/use-mobile";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@multica/ui/components/ui/tabs";
 import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from "@multica/ui/components/ui/resizable";
-import { useVisualViewportKeyboard } from "../../chat/components/use-visual-viewport-keyboard";
 import { useT } from "../../i18n";
 
 export function BuilderWorkspaceLayout({ conversation, configuration, footer }: {
@@ -15,7 +14,6 @@ export function BuilderWorkspaceLayout({ conversation, configuration, footer }: 
 }) {
   const { t } = useT("agents");
   const isMobile = useIsMobile();
-  const keyboard = useVisualViewportKeyboard();
   const [mounted, setMounted] = useState(false);
   useEffect(() => setMounted(true), []);
   const { defaultLayout, onLayoutChanged } = useDefaultLayout({
@@ -29,13 +27,8 @@ export function BuilderWorkspaceLayout({ conversation, configuration, footer }: 
   if (isMobile) {
     return (
       <div
+        data-testid="agent-builder-workspace"
         className="flex min-h-0 min-w-0 flex-1 flex-col bg-background"
-        // iOS shrinks only the visual viewport. Keep the composer, switch and
-        // footer inside it, including when the browser pans to the caret.
-        style={keyboard ? {
-          position: "fixed", left: 0, right: 0, zIndex: 20,
-          bottom: keyboard.occludedBottom, height: keyboard.viewportHeight,
-        } : undefined}
       >
         <Tabs defaultValue="conversation" className="min-h-0 flex-1 gap-0">
           <TabsList className="mx-4 my-2 w-auto shrink-0">

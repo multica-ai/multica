@@ -2,14 +2,9 @@
 
 import { useState } from "react";
 import { cleanup, fireEvent, screen } from "@testing-library/react";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
 import { renderWithI18n } from "../../test/i18n";
 import { BuilderWorkspaceLayout } from "./builder-workspace-layout";
-
-const h = vi.hoisted(() => ({ keyboard: null as null | { occludedBottom: number; viewportHeight: number } }));
-vi.mock("../../chat/components/use-visual-viewport-keyboard", () => ({
-  useVisualViewportKeyboard: () => h.keyboard,
-}));
 
 function Editor({ label }: { label: string }) {
   const [value, setValue] = useState("");
@@ -24,7 +19,7 @@ function mount(width: number) {
   />);
 }
 
-afterEach(() => { cleanup(); h.keyboard = null; });
+afterEach(cleanup);
 
 describe("responsive builder workspace", () => {
   it.each([320, 390, 767])("shows one pane at %ipx and retains both editors across switches", (width) => {
@@ -51,16 +46,5 @@ describe("responsive builder workspace", () => {
     expect(screen.queryByRole("tab")).toBeNull();
     expect(screen.getAllByRole("textbox")).toHaveLength(2);
     expect(container.querySelector('[data-slot="resizable-handle"]')).not.toBeNull();
-  });
-
-  it("fits the mobile workspace to the keyboard's visible viewport and clears the style on close", () => {
-    h.keyboard = { occludedBottom: 300, viewportHeight: 420 };
-    const view = mount(390);
-    const layout = screen.getByRole("tablist").parentElement!.parentElement!;
-    expect(layout).toHaveStyle({ position: "fixed", height: "420px", bottom: "300px" });
-    h.keyboard = null;
-    view.rerender(<BuilderWorkspaceLayout conversation={null} configuration={null} footer={null} />);
-    expect(layout.style.position).toBe("");
-    expect(layout.style.height).toBe("");
   });
 });
