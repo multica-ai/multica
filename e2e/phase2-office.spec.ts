@@ -11,9 +11,6 @@ import { createTestApi } from "./helpers";
 // Ask for changes on one proposal and Decide later on another; the brief dialog's
 // Chat delivery panel with no chat linked, its empty state.
 //
-// Not run in the phase 2 pass: the local backend and the web dev server were not
-// running, and starting the web dev server here hit the memory problem noted in
-// the plan. This spec is written and type-checked, and must be run before merge.
 test("a squad's charter and routines show, decisions can be sent back or set aside, and brief delivery shows its empty state", async ({ page }) => {
   test.setTimeout(300_000);
   const api = await createTestApi();
