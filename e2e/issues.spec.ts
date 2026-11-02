@@ -60,8 +60,13 @@ test.describe("Issues", () => {
     await reloadAppPage(page);
     await expect(page.locator("text=Backlog")).toBeVisible();
 
-    // Switch to list view
-    await page.click("text=List");
+    // Switch to list view from the Display popover's View group
+    await page.getByRole("button", { name: "Display", exact: true }).click();
+    await page
+      .getByRole("group", { name: "View", exact: true })
+      .getByRole("button", { name: "List", exact: true })
+      .click();
+    await page.keyboard.press("Escape");
     await expect(page.getByText(title)).toBeVisible();
   });
 
@@ -97,11 +102,10 @@ test.describe("Issues", () => {
 
     await page.getByRole("button", { name: /1 filter/i }).click();
     const dateFilterItem = page.getByRole("menuitem", { name: /^Date\b/ });
-    await dateFilterItem.focus();
-    await page.keyboard.press("ArrowRight");
+    await dateFilterItem.hover();
     const updatedDateField = page.getByRole("menuitemradio", { name: "Updated" });
     await expect(updatedDateField).toBeVisible();
-    await updatedDateField.press("Enter");
+    await updatedDateField.click();
     await expect(page.getByText(todayTitle)).toBeVisible();
     await expect(page.getByText(updatedTodayTitle)).toBeVisible();
     await expect(page.getByText(oldTitle)).toBeHidden({ timeout: 10000 });
