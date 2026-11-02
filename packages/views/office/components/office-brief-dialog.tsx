@@ -28,6 +28,7 @@ import { ReadonlyContent } from "../../editor/readonly-content";
 import { useT } from "../../i18n";
 import { useNavigation } from "../../navigation";
 import { OfficeProposalDecision } from "./office-proposal-decision";
+import { OfficeProposalHistory, OfficeProposalRelated, OfficeProposalStatus } from "./office-proposal-details";
 
 /** The knowledge base a brief is saved into. */
 const DECISIONS_BASE = "decisions";
@@ -264,30 +265,28 @@ function BriefBody({
             {proposals.map((query, index) => {
               const proposal = query.data;
               if (!proposal) return null;
+              const squadName = squads.data?.find((squad) => squad.id === proposal.squad_id)?.name ?? null;
               const handoffName = squads.data?.find((squad) => squad.id === proposal.handoff_squad_id)?.name ?? null;
               return (
                 <li key={brief.proposal_ids[index]} className={cn("rounded-lg border", proposal.state !== "pending" && "bg-muted/40")}>
-                  <div className="flex flex-col gap-0.5 px-4 py-3">
-                    <span className="text-caption text-muted-foreground">{proposal.issue_identifier}</span>
-                    <span className="text-body font-medium">{proposal.title}</span>
-                    {proposal.state === "approved" ? (
-                      <span className="text-caption text-muted-foreground">{t(($) => $.office.brief_proposal_approved)}</span>
-                    ) : null}
-                    {proposal.state === "rejected" ? (
-                      <span className="text-caption text-muted-foreground">{t(($) => $.office.brief_proposal_rejected)}</span>
-                    ) : null}
+                  <div className="flex flex-col gap-2 px-4 py-3">
+                    <div className="flex flex-col gap-0.5">
+                      <span className="text-caption text-muted-foreground">{proposal.issue_identifier}</span>
+                      <span className="text-body font-medium">{proposal.title}</span>
+                    </div>
+                    <OfficeProposalStatus proposal={proposal} squadName={squadName} />
                     {proposal.state === "pending" && !canManage ? (
                       <span className="text-caption text-muted-foreground">{t(($) => $.office.squad_proposals)}</span>
                     ) : null}
+                    <OfficeProposalRelated related={proposal.related} />
+                    <OfficeProposalHistory proposal={proposal} />
                   </div>
-                  {proposal.state === "pending" ? (
-                    <OfficeProposalDecision
-                      proposal={proposal}
-                      handoffName={handoffName}
-                      canDecide={canManage}
-                      className="px-4 pt-2 pb-3"
-                    />
-                  ) : null}
+                  <OfficeProposalDecision
+                    proposal={proposal}
+                    handoffName={handoffName}
+                    canDecide={canManage}
+                    className="px-4 pt-2 pb-3"
+                  />
                 </li>
               );
             })}
