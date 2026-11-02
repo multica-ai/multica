@@ -355,7 +355,7 @@ function RunSparkRows({ timeline, onOpen }: { timeline: RunTimeline; onOpen: () 
                 data-spark={row.metric}
                 className={cn("flex h-14 items-end pb-2.5", i > 0 && "border-t")}
               >
-                <span className={cn("flex w-full items-end", slots > 24 ? "gap-px" : "gap-0.5")} style={{ height: BAR_HEIGHT }}>
+                <span className="flex w-full items-end gap-0.5" style={{ height: BAR_HEIGHT }}>
                   {Array.from({ length: emptySlots }, (_, k) => (
                     <span key={`empty-${k}`} className="h-0.5 flex-1 rounded-full bg-border" />
                   ))}
