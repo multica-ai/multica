@@ -54,6 +54,7 @@ import { ProviderLogo } from "./provider-logo";
 import { UsageSection } from "./usage-section";
 import { DeleteRuntimeDialog } from "./delete-runtime-dialog";
 import { RuntimeAccessEditor, RuntimeAccessReadout } from "./runtime-access-editor";
+import { RuntimeConcurrencyField } from "./runtime-concurrency-field";
 import { DeleteRuntimeProfileDialog } from "./delete-runtime-profile-dialog";
 import { runtimeRowLabel } from "./runtime-machines";
 import { useT, useTimeAgo } from "../../i18n";
@@ -191,6 +192,7 @@ export function RuntimeDetail({
             device={device}
             cliVersion={cliVersion}
             canEditVisibility={!!isRuntimeOwner}
+            canEditRuntime={!!canEditRuntime}
           />
         }
       >
@@ -306,6 +308,7 @@ function RuntimeProperties({
   device,
   cliVersion,
   canEditVisibility,
+  canEditRuntime,
 }: {
   runtime: AgentRuntime;
   health: ReturnType<typeof deriveRuntimeHealth>;
@@ -319,6 +322,8 @@ function RuntimeProperties({
    * though they may still rename or delete the runtime.
    */
   canEditVisibility: boolean;
+  /** Runtime owner or workspace admin; gates the concurrency cap. */
+  canEditRuntime: boolean;
 }) {
   const { t } = useT("runtimes");
   const { t: tLayout } = useT("layout");
@@ -381,6 +386,11 @@ function RuntimeProperties({
           ) : (
             <RuntimeAccessReadout runtime={runtime} />
           )}
+        </div>
+      </ObjectPanelSection>
+      <ObjectPanelSection title={t(($) => $.detail.concurrency_title)}>
+        <div className="pr-0.5 pt-1">
+          <RuntimeConcurrencyField runtime={runtime} canEdit={canEditRuntime} />
         </div>
       </ObjectPanelSection>
     </div>
