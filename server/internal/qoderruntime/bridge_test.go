@@ -2,6 +2,7 @@ package qoderruntime
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -87,6 +88,11 @@ type harness struct {
 	issueStatus             int
 	issueBody               string
 	issuePosts              int
+	issueGet                string
+	downloads               map[string]string
+	uploads                 map[string]string
+	sessionResources        []map[string]any
+	sentContent             []map[string]any
 }
 
 func setup(t *testing.T) *harness {
@@ -99,7 +105,7 @@ func setup(t *testing.T) *harness {
 			t.Error("missing workspace")
 		}
 		auth := "Bearer multica-secret"
-		if strings.HasPrefix(r.URL.Path, "/api/issues") {
+		if strings.HasPrefix(r.URL.Path, "/api/issues") || strings.HasPrefix(r.URL.Path, "/api/attachments/") {
 			auth = "Bearer mat_task"
 		}
 		if r.Header.Get("Authorization") != auth {
@@ -124,7 +130,18 @@ func setup(t *testing.T) *harness {
 				io.WriteString(w, `{"identifier":"MUL-7"}`)
 			}
 		case strings.HasPrefix(r.URL.Path, "/api/issues/"):
-			io.WriteString(w, `{"title":"Fix bug","description":"Use repository context"}`)
+			if h.issueGet != "" {
+				io.WriteString(w, h.issueGet)
+			} else {
+				io.WriteString(w, `{"title":"Fix bug","description":"Use repository context"}`)
+			}
+		case strings.HasPrefix(r.URL.Path, "/api/attachments/"):
+			body, ok := h.downloads[r.URL.Path]
+			if !ok {
+				http.NotFound(w, r)
+				return
+			}
+			io.WriteString(w, body)
 		case strings.HasSuffix(r.URL.Path, "/status"):
 			json.NewEncoder(w).Encode(map[string]string{"status": h.status})
 		case strings.HasSuffix(r.URL.Path, "/start"):
@@ -162,19 +179,29 @@ func setup(t *testing.T) *harness {
 		case r.URL.Path == "/sessions" && r.Method == "POST":
 			h.creates++
 			var input struct {
-				Agent string `json:"agent"`
+				Agent     string           `json:"agent"`
+				Resources []map[string]any `json:"resources"`
 			}
 			if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
 				t.Fatal(err)
 			}
 			h.sessionAgent = input.Agent
+			h.sessionResources = input.Resources
 			io.WriteString(w, `{"id":"sess_1","status":"idle"}`)
 		case r.URL.Path == "/sessions/sess_1/events" && r.Method == "POST":
 			h.sends++
+			raw, _ := io.ReadAll(r.Body)
 			var req struct {
 				Events []event `json:"events"`
 			}
-			json.NewDecoder(r.Body).Decode(&req)
+			json.Unmarshal(raw, &req)
+			var content struct {
+				Events []struct {
+					Content []map[string]any `json:"content"`
+				} `json:"events"`
+			}
+			json.Unmarshal(raw, &content)
+			h.sentContent = content.Events[0].Content
 			h.prompt = req.Events[0].text()
 			h.events = append(h.events, map[string]any{"id": "evt_user", "type": "user.message", "content": []map[string]string{{"type": "text", "text": h.prompt}}})
 			if h.lostSend {
@@ -197,6 +224,20 @@ func setup(t *testing.T) *harness {
 				}
 			}
 			json.NewEncoder(w).Encode(map[string]any{"data": events, "has_more": false})
+		case r.URL.Path == "/files" && r.Method == "POST":
+			file, header, err := r.FormFile("file")
+			if err != nil {
+				t.Fatal(err)
+			}
+			data, _ := io.ReadAll(file)
+			if r.FormValue("name") != header.Filename {
+				t.Error("upload name mismatch")
+			}
+			if h.uploads == nil {
+				h.uploads = map[string]string{}
+			}
+			h.uploads[header.Filename] = string(data)
+			fmt.Fprintf(w, `{"id":"file_%d","type":"file"}`, len(h.uploads))
 		case strings.HasSuffix(r.URL.Path, "/cancel"):
 			h.cancels++
 			io.WriteString(w, `{"status":"canceling"}`)
@@ -330,6 +371,50 @@ func TestQuickCreateAttachmentsFailBeforeExecution(t *testing.T) {
 		t.Fatalf("quick-create attachment ignored: creates=%d posts=%d failure=%#v", h.creates, h.issuePosts, h.failure)
 	}
 }
+func TestIssueAttachmentsReachSession(t *testing.T) {
+	h := setup(t)
+	h.issueGet = `{"title":"Fix bug","description":"See attachments","attachments":[
+		{"id":"a1","filename":"notes.md","content_type":"text/markdown","size_bytes":5,"download_url":"/api/attachments/a1/download"},
+		{"id":"a2","filename":"screen.png","content_type":"image/png","size_bytes":4,"download_url":"/api/attachments/a2/download"},
+		{"id":"a3","filename":"spec.pdf","content_type":"application/pdf","size_bytes":4,"download_url":"/api/attachments/a3/download"},
+		{"id":"a4","filename":"notes.md","content_type":"text/plain","size_bytes":3,"download_url":"/api/attachments/a4/download"}]}`
+	h.downloads = map[string]string{"/api/attachments/a1/download": "hello", "/api/attachments/a2/download": "\x89PNG", "/api/attachments/a4/download": "bye"}
+	if err := h.b.step(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if h.failure != nil || h.sends != 1 {
+		t.Fatalf("run failed: %#v", h.failure)
+	}
+	if h.uploads["notes.md"] != "hello" || h.uploads["notes-2.md"] != "bye" || len(h.uploads) != 2 {
+		t.Fatalf("uploads: %#v", h.uploads)
+	}
+	want := []string{"file_1 /data/attachments/notes.md", "file_2 /data/attachments/notes-2.md"}
+	var got []string
+	for _, res := range h.sessionResources {
+		if res["type"] == "file" {
+			got = append(got, fmt.Sprint(res["file_id"], " ", res["mount_path"]))
+		}
+	}
+	if fmt.Sprint(got) != fmt.Sprint(want) {
+		t.Fatalf("mounted resources: %v", h.sessionResources)
+	}
+	if len(h.sentContent) != 2 || h.sentContent[1]["type"] != "image" {
+		t.Fatalf("message content: %#v", h.sentContent)
+	}
+	source, _ := h.sentContent[1]["source"].(map[string]any)
+	if source["type"] != "base64" || source["media_type"] != "image/png" || source["data"] != base64.StdEncoding.EncodeToString([]byte("\x89PNG")) {
+		t.Fatalf("image source: %#v", source)
+	}
+	for _, s := range []string{"/data/attachments/notes.md (mounted file)", "screen.png (image attached", "spec.pdf (unsupported file type): not available"} {
+		if !strings.Contains(h.prompt, s) {
+			t.Fatalf("prompt missing %q: %s", s, h.prompt)
+		}
+	}
+	if r := h.b.state.first(); r == nil || len(r.Images) != 0 {
+		t.Fatal("sent images kept in the journal")
+	}
+}
+
 // lostCreate leaves a quick-create run whose first create request failed
 // after it was marked submitted, as when the response is lost.
 func lostCreate(t *testing.T, h *harness) {

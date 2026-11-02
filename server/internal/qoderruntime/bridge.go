@@ -375,7 +375,8 @@ func (b *Bridge) stepRun(ctx context.Context, r *run) error {
 			return b.reject(ctx, r, err.Error())
 		}
 		fingerprint := resourceFingerprint(resources)
-		if r.PriorSessionID != "" {
+		resources = append(resources, r.Files...)
+		if r.PriorSessionID != "" && len(r.Files) == 0 {
 			continued, err := b.continueSession(ctx, r, fingerprint)
 			if err != nil {
 				return err
@@ -405,7 +406,11 @@ func (b *Bridge) stepRun(ctx context.Context, r *run) error {
 		if err := b.persist(); err != nil {
 			return err
 		}
-		if err := b.qoder.call(ctx, http.MethodPost, "/sessions/"+url.PathEscape(r.SessionID)+"/events", map[string]any{"events": []map[string]any{{"type": "user.message", "content": []map[string]string{{"type": "text", "text": r.Prompt}}}}}, nil); err != nil {
+		content := []map[string]any{{"type": "text", "text": r.Prompt}}
+		for _, source := range r.Images {
+			content = append(content, map[string]any{"type": "image", "source": source})
+		}
+		if err := b.qoder.call(ctx, http.MethodPost, "/sessions/"+url.PathEscape(r.SessionID)+"/events", map[string]any{"events": []map[string]any{{"type": "user.message", "content": content}}}, nil); err != nil {
 			if rateLimited(err) {
 				r.Phase = "created"
 				r.SubmissionDeadline = time.Time{}
@@ -426,6 +431,7 @@ func (b *Bridge) stepRun(ctx context.Context, r *run) error {
 			return err
 		}
 		r.Phase = "running"
+		r.Images = nil
 		if err := b.persist(); err != nil {
 			return err
 		}
