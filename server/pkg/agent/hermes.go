@@ -2916,9 +2916,15 @@ type acpProviderErrorSniffer struct {
 	kimiStyle bool // true for kimi: enables provider.api_error line detection
 	mu        sync.Mutex
 	remains   []byte   // buffer for a partial trailing line across writes
-	lines     []string // captured error lines, bounded
+	lines     []string // Kimi error lines, bounded
 	seen      map[string]bool
 	terminal  bool // sticky: at least one line matched acpTerminalErrorRe
+	// Other ACP runtimes need only the current block's summary. Retaining it
+	// separately prevents a long sequence of diagnostics from evicting the
+	// actionable detail or the header that gives it context.
+	errorHeader string
+	errorDetail string
+	errorStatus string
 	// echoJSON tracks an incomplete structured payload from a Python
 	// INFO/DEBUG root-logger record. The JSON scanner state is persisted
 	// across Write calls so only actual payload continuations are skipped.
@@ -2936,6 +2942,10 @@ var acpErrorHeaderRe = regexp.MustCompile(`(?:⚠️|❌|\[ERROR\]).*(?:BadReque
 // Attempt headers start a new error block. Terminal summaries close that
 // block and can follow its actionable detail, so they are not block starts.
 var acpErrorAttemptRe = regexp.MustCompile(`(?:API call failed \(attempt \d+/\d+\)|Attempt \d+/\d+ failed)`)
+
+// A changed status starts a different failure even without an attempt header.
+// A same-status abort summary still belongs to the preceding detailed block.
+var acpErrorStatusRe = regexp.MustCompile(`HTTP [0-9]{3}\b`)
 
 // acpErrorDetailRe pulls the most useful single-line messages out of
 // the subsequent lines of the error block (the one whose "Error:" or
@@ -3074,17 +3084,16 @@ func (s *acpProviderErrorSniffer) Write(p []byte) (int, error) {
 			}
 		}
 		isKimiErr := s.kimiStyle && kimiProviderApiErrorRe.MatchString(line)
-		if !(acpErrorHeaderRe.MatchString(line) || acpErrorDetailRe.MatchString(line) || isKimiErr) {
+		isHeader := acpErrorHeaderRe.MatchString(line)
+		if !(isHeader || acpErrorDetailRe.MatchString(line) || isKimiErr) {
 			continue
 		}
 		if acpTerminalErrorRe.MatchString(line) || (s.kimiStyle && kimiTerminalErrorRe.MatchString(line)) {
 			s.terminal = true
 		}
-		// The same detail can recur after a different retry error. Retain it
-		// in the new attempt's block instead of deduplicating it into an old
-		// one. Kimi's provider.api_error parsing keeps its existing dedup scope.
-		if !s.kimiStyle && acpErrorAttemptRe.MatchString(line) {
-			clear(s.seen)
+		if !s.kimiStyle {
+			s.captureErrorBlock(line, isHeader)
+			continue
 		}
 		if s.seen[line] {
 			continue
@@ -3096,6 +3105,26 @@ func (s *acpProviderErrorSniffer) Write(p []byte) (int, error) {
 		}
 	}
 	return len(p), nil
+}
+
+// captureErrorBlock retains only the current header and detail for non-Kimi runtimes.
+// Caller holds s.mu. Kimi keeps its provider.api_error parsing and dedup scope.
+func (s *acpProviderErrorSniffer) captureErrorBlock(line string, isHeader bool) {
+	status := acpErrorStatusRe.FindString(line)
+	if isHeader && (s.errorHeader == "" || acpErrorAttemptRe.MatchString(line) ||
+		(status != "" && s.errorStatus != "" && status != s.errorStatus)) {
+		s.errorHeader = line
+		s.errorDetail = ""
+		s.errorStatus = status
+	}
+	if s.errorHeader != "" && status != "" {
+		s.errorStatus = status
+	}
+	if m := acpErrorDetailRe.FindStringSubmatch(line); m != nil {
+		if detail := strings.TrimSpace(m[1]); detail != "" && (s.errorHeader != "" || s.errorDetail == "") {
+			s.errorDetail = detail
+		}
+	}
 }
 
 // Finalize must be called once after the process stderr pipe has been fully
@@ -3278,7 +3307,17 @@ func (s *acpProviderErrorSniffer) messageLocked() string {
 		}
 	}
 
-	// Common path: non-kimi or kimi without a terminal provider.api_error line.
+	if !s.kimiStyle {
+		if s.errorDetail != "" {
+			return acpTruncateError(prefix + s.errorDetail)
+		}
+		if s.errorHeader != "" {
+			return acpTruncateError(prefix + s.errorHeader)
+		}
+		return ""
+	}
+
+	// Kimi without a terminal provider.api_error line.
 	// Skip startup diagnostics before the first provider header, advancing
 	// only when a new attempt starts. Hermes can emit a generic abort summary
 	// AFTER the useful detail, so a terminal marker cannot define the start.

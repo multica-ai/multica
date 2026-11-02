@@ -2144,13 +2144,17 @@ func TestHermesProviderErrorSnifferHandlesPartialLines(t *testing.T) {
 func TestHermesProviderErrorSnifferBoundedBuffer(t *testing.T) {
 	t.Parallel()
 
-	s := newACPProviderErrorSniffer("hermes")
-	for i := 0; i < 20; i++ {
-		// Each line differs so dedup doesn't merge them.
-		s.Write([]byte(`⚠️  API call failed (HTTP 400) attempt ` + string(rune('a'+i%26)) + `: Non-retryable error` + "\n"))
-	}
-	if len(s.lines) > acpMaxErrorLines {
-		t.Errorf("sniffer kept %d lines, limit is %d", len(s.lines), acpMaxErrorLines)
+	for _, provider := range []string{"hermes", "kimi"} {
+		t.Run(provider, func(t *testing.T) {
+			s := newACPProviderErrorSniffer(provider)
+			for i := 0; i < 20; i++ {
+				// Each line differs so dedup doesn't merge them.
+				s.Write([]byte(`⚠️  API call failed (HTTP 400) attempt ` + string(rune('a'+i%26)) + `: Non-retryable error` + "\n"))
+			}
+			if len(s.lines) > acpMaxErrorLines {
+				t.Errorf("sniffer kept %d lines, limit is %d", len(s.lines), acpMaxErrorLines)
+			}
+		})
 	}
 }
 
@@ -2361,6 +2365,29 @@ func TestHermesProviderErrorSnifferPreservesFailureDetails(t *testing.T) {
 			want:     "HTTP 400",
 			unwanted: "rate limit exceeded",
 		},
+		{
+			name: "standalone terminal error replaces recovered retry",
+			stderr: "⚠️ API call failed (attempt 1/3): RateLimitError [HTTP 429]\n" + rateLimitDetail +
+				"Request succeeded; continuing with the next operation\n" +
+				"❌ Non-retryable client error (HTTP 401). Aborting.\n",
+			want:     "HTTP 401",
+			unwanted: "rate limit exceeded",
+		},
+		{
+			name: "status changes without an attempt header",
+			stderr: "⚠️ API call failed (attempt 1/3): RateLimitError [HTTP 429]\n" + rateLimitDetail +
+				"⚠️ API call failed: HTTP 401\n" +
+				"❌ Non-retryable client error (HTTP 401). Aborting.\n",
+			want:     "HTTP 401",
+			unwanted: "rate limit exceeded",
+		},
+		{
+			name: "standalone terminal error does not reuse poisoned history",
+			stderr: "⚠️ API call failed (attempt 1/3): BadRequestError [HTTP 400]\n" + historyDetail +
+				"❌ Non-retryable client error (HTTP 401). Aborting.\n",
+			want:     "HTTP 401",
+			unwanted: "must not be empty",
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -2385,6 +2412,29 @@ func TestHermesProviderErrorSnifferPreservesFailureDetails(t *testing.T) {
 				})
 			}
 		})
+	}
+}
+
+func TestHermesProviderErrorSnifferDetailSurvivesDiagnosticOverflow(t *testing.T) {
+	t.Parallel()
+
+	s := newACPProviderErrorSniffer("hermes")
+	s.Write([]byte("⚠️ API call failed (attempt 3/3): BadRequestError [HTTP 400]\n" +
+		"📝 Error: HTTP 400: messages[43].content must not be empty\n"))
+	for i := 0; i < 32; i++ {
+		s.Write([]byte(fmt.Sprintf("[ERROR] API call failed: HTTP 400 diagnostic %d\n", i)))
+	}
+	status, message := promoteACPResultOnProviderError("completed", "", "", s)
+	if status != "failed" || !strings.Contains(message, "messages[43].content must not be empty") {
+		t.Fatalf("diagnostics displaced the failure detail: status=%q error=%q", status, message)
+	}
+	if !s.isPoisonedHistory() {
+		t.Fatalf("diagnostics lost the poisoned-history signal: %q", message)
+	}
+	// A new failure must still replace the pinned detail after overflow.
+	s.Write([]byte("❌ Non-retryable client error (HTTP 401). Aborting.\n"))
+	if message := s.terminalMessage(); !strings.Contains(message, "HTTP 401") || s.isPoisonedHistory() {
+		t.Fatalf("new terminal failure did not replace the old detail: %q", message)
 	}
 }
 
