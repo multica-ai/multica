@@ -724,3 +724,18 @@ SELECT pg_advisory_xact_lock(hashtextextended(sqlc.arg('runtime_id')::uuid::text
 -- idx_agent_task_queue_runtime_active (migration 606).
 SELECT count(*) FROM agent_task_queue
 WHERE runtime_id = $1 AND status IN ('dispatched', 'running', 'waiting_local_directory');
+
+-- name: SetAgentRuntimeAgentCLIProbes :exec
+-- Merges the machine's agent CLI probe snapshot into runtime metadata.
+-- Other keys, including cli_version, stay put. A no-op when the snapshot
+-- is unchanged so a heartbeat does not rewrite the row every tick.
+UPDATE agent_runtime
+SET metadata = jsonb_set(
+        COALESCE(metadata, '{}'::jsonb),
+        '{agent_cli_probes}',
+        @probes::jsonb,
+        true
+    ),
+    updated_at = now()
+WHERE id = @id
+  AND (metadata -> 'agent_cli_probes') IS DISTINCT FROM @probes::jsonb;

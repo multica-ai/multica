@@ -33,6 +33,7 @@ import (
 	"github.com/multica-ai/multica/server/internal/selfexec"
 	"github.com/multica-ai/multica/server/internal/util"
 	"github.com/multica-ai/multica/server/pkg/agent"
+	"github.com/multica-ai/multica/server/pkg/agentcli"
 	"github.com/multica-ai/multica/server/pkg/awakeclock"
 	"github.com/multica-ai/multica/server/pkg/protocol"
 	"github.com/multica-ai/multica/server/pkg/redact"
@@ -509,6 +510,12 @@ type Daemon struct {
 
 	versionsMu    sync.RWMutex      // guards agentVersions
 	agentVersions map[string]string // provider -> detected CLI version (set during registration)
+
+	// agentCLIProbes is the last codex/claude/grok snapshot forwarded on
+	// register and heartbeat. Empty means this process has not probed yet,
+	// and callers omit the field so an early beat cannot wipe server state.
+	agentCLIProbesMu sync.Mutex
+	agentCLIProbes   []agentcli.Probe
 
 	// registerSerial holds one mutex per workspace (workspace_id ->
 	// *sync.Mutex), serializing the "send Register, record what it carried"
@@ -2761,6 +2768,7 @@ func (d *Daemon) detectBuiltinRuntimes(ctx context.Context) ([]map[string]string
 		skipped     = map[string]string{}
 		demotable   = map[string]runtimeVerdict{}
 		unavailable = map[string]string{}
+		managedObs  = map[string]managedCLIObservation{}
 		g           errgroup.Group
 	)
 	g.SetLimit(runtimeVersionProbeConcurrency)
@@ -2783,6 +2791,7 @@ func (d *Daemon) detectBuiltinRuntimes(ctx context.Context) ([]map[string]string
 				return nil
 			}
 			d.clearCondemned(name)
+			d.noteManagedCLIProbe(&mu, managedObs, name, version, entry.Path)
 			mu.Lock()
 			results = append(results, detected{name: name, version: version})
 			mu.Unlock()
@@ -2792,6 +2801,7 @@ func (d *Daemon) detectBuiltinRuntimes(ctx context.Context) ([]map[string]string
 	// No probe returns a non-nil error — failures are logged and skipped above —
 	// so Wait only blocks for the in-flight probes to finish.
 	_ = g.Wait()
+	d.rememberManagedCLIProbes(managedObs)
 
 	// Publish this round's drops for /health. Replacing (not merging) keeps the
 	// diagnostic honest: a provider that registered successfully this round must
@@ -2963,6 +2973,7 @@ func (d *Daemon) registerRuntimesForWorkspaceBatchLocked(ctx context.Context, wo
 		"runtimes":          runtimes,
 		"failed_profiles":   failedProfiles,
 	}
+	d.attachManagedCLIProbes(req)
 
 	resp, err := d.client.Register(ctx, req)
 	if err != nil {
@@ -3010,6 +3021,7 @@ func (d *Daemon) registerBuiltinRuntimesForWorkspaceLocked(ctx context.Context, 
 		// report profile failures either.
 		"failed_profiles": []map[string]string{},
 	}
+	d.attachManagedCLIProbes(req)
 	resp, err := d.client.Register(ctx, req)
 	if err != nil {
 		return nil, fmt.Errorf("register builtin runtimes: %w", err)
@@ -4501,7 +4513,7 @@ func (d *Daemon) runHeartbeatTick(ctx context.Context, rid string) bool {
 		return false
 	}
 	d.logger.Debug("heartbeat: HTTP tick", "runtime_id", rid)
-	resp, err := d.client.SendHeartbeat(ctx, rid)
+	resp, err := d.client.sendHeartbeat(ctx, rid, true, d.managedCLIProbes())
 	if err != nil {
 		if ctx.Err() == nil {
 			if isRuntimeNotFoundError(err) {
@@ -4536,17 +4548,21 @@ func (d *Daemon) handleHeartbeatActions(ctx context.Context, runtimeID string, r
 	if resp == nil {
 		return
 	}
-	if resp.PendingUpdate != nil || resp.PendingModelList != nil || resp.PendingLocalSkills != nil || resp.PendingLocalSkillImport != nil {
+	if resp.PendingUpdate != nil || resp.PendingModelList != nil || resp.PendingLocalSkills != nil || resp.PendingLocalSkillImport != nil || resp.PendingAgentCLIUpgrade != nil {
 		d.logger.Debug("heartbeat: pending actions",
 			"runtime_id", runtimeID,
 			"update", resp.PendingUpdate != nil,
 			"model_list", resp.PendingModelList != nil,
 			"local_skills", resp.PendingLocalSkills != nil,
 			"local_skill_import", resp.PendingLocalSkillImport != nil,
+			"agent_cli_upgrade", resp.PendingAgentCLIUpgrade != nil,
 		)
 	}
 	if resp.PendingUpdate != nil {
 		go d.handleUpdate(ctx, runtimeID, resp.PendingUpdate)
+	}
+	if resp.PendingAgentCLIUpgrade != nil {
+		go d.handleAgentCLIUpgrade(ctx, runtimeID, resp.PendingAgentCLIUpgrade)
 	}
 	if resp.PendingModelList != nil {
 		if rt := d.findRuntime(runtimeID); rt != nil {
@@ -4646,7 +4662,7 @@ func (d *Daemon) handlePendingWorkHint(runtimeID, kind string) {
 		return
 	}
 	hbCtx, cancel := context.WithTimeout(ctx, pendingWorkHeartbeatTimeout)
-	resp, err := d.client.SendHeartbeat(hbCtx, runtimeID)
+	resp, err := d.client.sendHeartbeat(hbCtx, runtimeID, true, d.managedCLIProbes())
 	cancel()
 	if err != nil {
 		if isRuntimeNotFoundError(err) {
