@@ -87,18 +87,31 @@ func (n *Notifier) Send(ctx context.Context, b channel.Binding, msg channel.Mess
 	return classifyNotifyError(err)
 }
 
-// inlineKeyboardFor renders the buttons, one per row, in the order given. A
-// button must carry exactly one of URL or CallbackData.
+// maxCallbackDataBytes is Telegram's cap on a button's callback_data.
+const maxCallbackDataBytes = 64
+
+// inlineKeyboardFor renders the buttons in the order given. A button starts a
+// row of its own unless it sets SameRow, which puts it beside the one before. A
+// button must carry exactly one of URL or CallbackData, and callback data must
+// fit Telegram's cap.
 func inlineKeyboardFor(buttons []channel.Button) (*inlineKeyboard, error) {
 	if len(buttons) == 0 {
 		return nil, nil
 	}
 	rows := make([][]inlineKeyboardButton, 0, len(buttons))
-	for _, b := range buttons {
+	for i, b := range buttons {
 		if (b.URL == "") == (b.CallbackData == "") {
 			return nil, fmt.Errorf("telegram: button %q must set exactly one of URL or callback data", b.Label)
 		}
-		rows = append(rows, []inlineKeyboardButton{{Text: b.Label, URL: b.URL, CallbackData: b.CallbackData}})
+		if len(b.CallbackData) > maxCallbackDataBytes {
+			return nil, fmt.Errorf("telegram: button %q callback data is %d bytes; Telegram allows %d", b.Label, len(b.CallbackData), maxCallbackDataBytes)
+		}
+		button := inlineKeyboardButton{Text: b.Label, URL: b.URL, CallbackData: b.CallbackData}
+		if i > 0 && b.SameRow {
+			rows[len(rows)-1] = append(rows[len(rows)-1], button)
+			continue
+		}
+		rows = append(rows, []inlineKeyboardButton{button})
 	}
 	return &inlineKeyboard{InlineKeyboard: rows}, nil
 }

@@ -41,6 +41,8 @@ const (
 	briefPushHeadlineRunes = 280
 	// briefPushErrorRunes caps last_error, which the table also limits.
 	briefPushErrorRunes = 500
+	// briefPushButtonTitleRunes keeps a decision's title short on its buttons.
+	briefPushButtonTitleRunes = 24
 )
 
 // The delivery states, as the brief_delivery.state CHECK spells them.
@@ -74,6 +76,12 @@ type BriefPushService struct {
 	AppURL string
 	Logger *slog.Logger
 
+	// actions signs the decision buttons. buttonApps lists the chat apps that
+	// can take a button callback; a message to any other chat app carries
+	// links only, as spec 2.7 asks.
+	actions    *ActionSigner
+	buttonApps map[channel.Type]bool
+
 	now func() time.Time
 }
 
@@ -92,6 +100,17 @@ func NewBriefPushService(q *db.Queries, appURL string) *BriefPushService {
 // RegisterNotifier makes a chat app able to receive briefs.
 func (s *BriefPushService) RegisterNotifier(t channel.Type, n channel.Notifier) {
 	s.Notifiers[t] = n
+}
+
+// EnableActionButtons makes a chat app's brief push carry the decision buttons
+// (approve, reject, snooze), signed with signer. The chat app's notifier must
+// route the presses to the server (plan 9.11).
+func (s *BriefPushService) EnableActionButtons(signer *ActionSigner, t channel.Type) {
+	s.actions = signer
+	if s.buttonApps == nil {
+		s.buttonApps = map[channel.Type]bool{}
+	}
+	s.buttonApps[t] = true
 }
 
 // ChatAppSupported reports whether a chat app can receive a brief push. A nil
@@ -235,7 +254,7 @@ func (s *BriefPushService) deliver(ctx context.Context, d db.BriefDelivery) erro
 		return s.settleUnsent(ctx, d, briefStateFailed, briefPushReasonNoChannel, time.Time{})
 	}
 
-	msg, err := s.composeMessage(ctx, ws, brief)
+	msg, err := s.composeMessage(ctx, ws, brief, channel.Type(binding.ChannelType))
 	if err != nil {
 		return err
 	}
@@ -336,8 +355,9 @@ func (s *BriefPushService) memberLocation(ctx context.Context, userID pgtype.UUI
 
 // composeMessage builds the push: the headline, the pending decisions the brief
 // raises, and a link to the brief. It reads the proposals at send time, so a
-// decision answered since publish is not named.
-func (s *BriefPushService) composeMessage(ctx context.Context, ws pgtype.UUID, brief db.Brief) (channel.Message, error) {
+// decision answered since publish is not named. chat is the app the message is
+// for, which decides whether its decisions carry buttons.
+func (s *BriefPushService) composeMessage(ctx context.Context, ws pgtype.UUID, brief db.Brief, chat channel.Type) (channel.Message, error) {
 	ordered := make([]pgtype.UUID, 0, len(brief.ProposalIds))
 	seen := map[string]bool{}
 	for _, id := range brief.ProposalIds {
@@ -363,6 +383,9 @@ func (s *BriefPushService) composeMessage(ctx context.Context, ws pgtype.UUID, b
 				decisions = append(decisions, briefPushDecision{ID: util.UUIDToString(id), Title: title})
 			}
 		}
+		if s.actions != nil && s.buttonApps[chat] {
+			s.signDecisionButtons(ctx, decisions)
+		}
 	}
 
 	workspace, err := s.Queries.GetWorkspace(ctx, ws)
@@ -377,29 +400,58 @@ func (s *BriefPushService) composeMessage(ctx context.Context, ws pgtype.UUID, b
 	return renderBriefPush(headline, decisions, util.UUIDToString(brief.ID), office), nil
 }
 
-// briefPushDecision is one pending decision named in the push.
+// briefPushDecision is one pending decision named in the push. The three tokens
+// are the signed buttons for it, empty when the chat app has no buttons.
 type briefPushDecision struct {
-	ID    string
-	Title string
+	ID      string
+	Title   string
+	Approve string
+	Reject  string
+	Snooze  string
+}
+
+// signDecisionButtons signs approve, reject and snooze for the decisions the
+// message names. A signing failure leaves that decision as a link only; it never
+// fails the push.
+func (s *BriefPushService) signDecisionButtons(ctx context.Context, decisions []briefPushDecision) {
+	for i := range decisions[:min(len(decisions), briefPushDecisionLines)] {
+		d := &decisions[i]
+		id, err := util.ParseUUID(d.ID)
+		if err != nil {
+			continue
+		}
+		approve, errA := s.actions.Sign(id, ProposalDecisionApprove)
+		reject, errR := s.actions.Sign(id, ProposalDecisionReject)
+		snooze, errS := s.actions.Sign(id, ProposalDecisionSnooze)
+		if errA != nil || errR != nil || errS != nil {
+			s.Logger.WarnContext(ctx, "brief push: could not sign decision buttons", "proposal_id", d.ID)
+			continue
+		}
+		d.Approve, d.Reject, d.Snooze = approve, reject, snooze
+	}
 }
 
 // renderBriefPush lays out the message. office is the Office URL, or "" when
 // no app URL is configured, in which case the message has no links. It is pure,
 // so the format is tested without a database.
+//
+// Each shown decision with signed buttons gets two rows: Approve and Reject, then
+// Snooze for seven days and Revise. Revise is a link, because its note needs
+// typing. The brief link comes first.
 func renderBriefPush(headline string, decisions []briefPushDecision, briefID, office string) channel.Message {
 	var b strings.Builder
 	b.WriteString(cutRunes(headline, briefPushHeadlineRunes))
 
+	shown := decisions
+	if len(shown) > briefPushDecisionLines {
+		shown = shown[:briefPushDecisionLines]
+	}
 	if len(decisions) > 0 {
 		b.WriteString("\n\n")
 		if len(decisions) == 1 {
 			b.WriteString("1 decision needs you:")
 		} else {
 			fmt.Fprintf(&b, "%d decisions need you:", len(decisions))
-		}
-		shown := decisions
-		if len(shown) > briefPushDecisionLines {
-			shown = shown[:briefPushDecisionLines]
 		}
 		for _, d := range shown {
 			b.WriteString("\n- ")
@@ -420,7 +472,33 @@ func renderBriefPush(headline string, decisions []briefPushDecision, briefID, of
 		msg.Text += "\n\nBrief: " + briefURL
 		msg.Buttons = []channel.Button{{Label: "Open the brief", URL: briefURL}}
 	}
+	for _, d := range shown {
+		msg.Buttons = append(msg.Buttons, decisionButtons(d, office)...)
+	}
 	return msg
+}
+
+// decisionButtons is the button set for one decision, or none when it carries no
+// signed tokens. Each button's LinkURL is the decision's Office page, so a chat
+// app without callbacks shows the link instead.
+func decisionButtons(d briefPushDecision, office string) []channel.Button {
+	if d.Approve == "" {
+		return nil
+	}
+	link := ""
+	if office != "" {
+		link = office + "?" + url.Values{"decision": {d.ID}}.Encode()
+	}
+	short := cutRunes(oneLine(d.Title), briefPushButtonTitleRunes)
+	buttons := []channel.Button{
+		{Label: "Approve: " + short, CallbackData: d.Approve, LinkURL: link},
+		{Label: "Reject: " + short, CallbackData: d.Reject, LinkURL: link, SameRow: true},
+		{Label: fmt.Sprintf("Snooze %d days: %s", ActionSnoozeDays, short), CallbackData: d.Snooze, LinkURL: link},
+	}
+	if link != "" {
+		buttons = append(buttons, channel.Button{Label: "Revise: " + short, URL: link, SameRow: true})
+	}
+	return buttons
 }
 
 // OfficeURL is the Office page for a workspace, or "" when either part is

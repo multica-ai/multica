@@ -599,3 +599,82 @@ func TestBriefPushBackoffSchedule(t *testing.T) {
 		t.Fatalf("backoff for attempt 0 = %v", got)
 	}
 }
+
+// A chat app that takes callbacks gets the signed decision buttons; the server
+// can verify each token back to its decision. Any other chat app gets the text
+// links only, as spec 2.7 asks for platforms without buttons.
+func TestBriefPushDecisionButtonsOnlyForCallbackApps(t *testing.T) {
+	f := newBriefPushFixture(t)
+	signer := NewActionSigner([]byte("brief-push-test-secret"))
+	f.svc.EnableActionButtons(signer, briefPushTestChat)
+	p1 := f.proposal("Approve the research squad", nil)
+	briefID := f.brief("One decision needs you.", p1)
+
+	brief, err := f.q.GetBriefInWorkspace(context.Background(), db.GetBriefInWorkspaceParams{
+		ID: mustBriefUUID(t, briefID), WorkspaceID: mustBriefUUID(t, f.ws),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	msg, err := f.svc.composeMessage(context.Background(), mustBriefUUID(t, f.ws), brief, briefPushTestChat)
+	if err != nil {
+		t.Fatalf("composeMessage: %v", err)
+	}
+	var callbacks []channel.Button
+	for _, b := range msg.Buttons {
+		if b.CallbackData != "" {
+			callbacks = append(callbacks, b)
+		}
+	}
+	if len(callbacks) != 3 {
+		t.Fatalf("callback buttons = %d, want approve, reject and snooze: %+v", len(callbacks), msg.Buttons)
+	}
+	wantActions := []string{ProposalDecisionApprove, ProposalDecisionReject, ProposalDecisionSnooze}
+	for i, b := range callbacks {
+		if len(b.CallbackData) > 64 {
+			t.Fatalf("callback %q is %d bytes; Telegram allows 64", b.Label, len(b.CallbackData))
+		}
+		got, err := signer.Verify(b.CallbackData)
+		if err != nil {
+			t.Fatalf("button %q does not verify: %v", b.Label, err)
+		}
+		if got.Action != wantActions[i] || util.UUIDToString(got.ProposalID) != p1 {
+			t.Fatalf("button %q verifies as %+v, want %s on %s", b.Label, got, wantActions[i], p1)
+		}
+		if want := "https://app.example/" + f.slug + "/office?decision=" + p1; b.LinkURL != want {
+			t.Fatalf("button %q fallback link = %q, want %q", b.Label, b.LinkURL, want)
+		}
+	}
+	var revise bool
+	for _, b := range msg.Buttons {
+		if b.CallbackData == "" && strings.HasPrefix(b.Label, "Revise") && b.URL != "" {
+			revise = true
+		}
+	}
+	if !revise {
+		t.Fatalf("no Revise link: %+v", msg.Buttons)
+	}
+
+	linkOnly, err := f.svc.composeMessage(context.Background(), mustBriefUUID(t, f.ws), brief, channel.Type("slack"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, b := range linkOnly.Buttons {
+		if b.CallbackData != "" {
+			t.Fatalf("a chat app without callbacks got a callback button: %+v", b)
+		}
+	}
+	if !strings.Contains(linkOnly.Text, "- Approve the research squad") {
+		t.Fatalf("decision link line missing for the link-only app:\n%s", linkOnly.Text)
+	}
+}
+
+func mustBriefUUID(t *testing.T, s string) pgtype.UUID {
+	t.Helper()
+	id, err := util.ParseUUID(s)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return id
+}

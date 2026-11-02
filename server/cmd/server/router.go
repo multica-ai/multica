@@ -1202,6 +1202,10 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 	// the event bus. Gated by MULTICA_TELEGRAM_SECRET_KEY (the at-rest token
 	// encryption key); when unset the handlers return 503 and no Factory is
 	// registered.
+	// Chat buttons (plan 9.11) sign their tokens with a key derived from the JWT
+	// secret, and their presses are settled by the handler's decision path.
+	actionSigner := service.NewActionSigner(auth.JWTSecret())
+	channelActions := handler.NewChannelActions(h, actionSigner)
 	if telegramKey, err := secretbox.LoadKey("MULTICA_TELEGRAM_SECRET_KEY"); err == nil {
 		box, err := secretbox.New(telegramKey)
 		if err != nil {
@@ -1235,6 +1239,9 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 			telegramOutbound.Register(bus)
 			h.TelegramOutbound = telegramOutbound
 			h.BriefPush.RegisterNotifier(telegram.TypeTelegram, telegram.NewNotifier(queries, box.Open, "", nil))
+			// Decision buttons in the brief push: presses come back through the
+			// polling loop and are settled by the same decision path as the app.
+			h.BriefPush.EnableActionButtons(actionSigner, telegram.TypeTelegram)
 
 			// Per-installation inbound: the Supervisor builds + supervises one
 			// long-polling loop per active Telegram installation.
@@ -1243,6 +1250,7 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 				Logger:            slog.Default(),
 				RecentContextSize: telegram.DefaultRecentContextSize,
 				AcceptsMedia:      store != nil,
+				Actions:           channelActions,
 			})
 
 			installSvc, ierr := telegram.NewInstallService(queries, pool, box, slog.Default())

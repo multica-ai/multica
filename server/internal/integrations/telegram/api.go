@@ -188,6 +188,9 @@ type Message struct {
 	Audio     *FileRef    `json:"audio,omitempty"`
 	Voice     *FileRef    `json:"voice,omitempty"`
 	Sticker   *struct{}   `json:"sticker,omitempty"`
+	// ReplyMarkup is the inline keyboard on a bot message. A callback query's
+	// message carries it, so the adapter can remove a settled decision's buttons.
+	ReplyMarkup *inlineKeyboard `json:"reply_markup,omitempty"`
 }
 
 // PhotoSize is one rendition of a photo message.
@@ -315,11 +318,22 @@ type MessageEntity struct {
 	Length int    `json:"length"`
 }
 
-// Update is the getUpdates envelope entry. Only new messages are consumed;
-// edits, channel posts, and callback queries are ignored in v1.
+// Update is the getUpdates envelope entry. New messages and button presses
+// (callback queries) are consumed; edits and channel posts are not.
 type Update struct {
-	UpdateID int64    `json:"update_id"`
-	Message  *Message `json:"message"`
+	UpdateID      int64          `json:"update_id"`
+	Message       *Message       `json:"message"`
+	CallbackQuery *CallbackQuery `json:"callback_query,omitempty"`
+}
+
+// CallbackQuery is a press of an inline keyboard button. Data is the button's
+// callback_data; Message is the bot message the button was on, when Telegram
+// still has it.
+type CallbackQuery struct {
+	ID      string   `json:"id"`
+	From    User     `json:"from"`
+	Message *Message `json:"message,omitempty"`
+	Data    string   `json:"data"`
 }
 
 // GetMe validates the token and returns the bot's own identity.
@@ -355,9 +369,9 @@ func (a *botAPI) GetUpdates(ctx context.Context, offset int64) ([]Update, error)
 	err := a.call(ctx, "getUpdates", getUpdatesParams{
 		Offset:  offset,
 		Timeout: longPollTimeoutSecs,
-		// Restrict the stream to plain messages: fewer wakeups, and edits /
-		// reactions / channel posts never enter the pipeline.
-		AllowedUpdates: []string{"message"},
+		// Restrict the stream to messages and button presses: fewer wakeups, and
+		// edits / reactions / channel posts never enter the pipeline.
+		AllowedUpdates: []string{"message", "callback_query"},
 	}, &updates)
 	if err != nil {
 		var ae *apiError
@@ -417,6 +431,31 @@ func sendMessageWithRetryAfter(ctx context.Context, a *botAPI, p sendMessagePara
 		return a.SendMessage(ctx, p)
 	}
 	return m, err
+}
+
+// AnswerCallbackQuery acknowledges a button press, which stops the platform's
+// spinner on the button. text, when set, is a short toast shown to the presser.
+func (a *botAPI) AnswerCallbackQuery(ctx context.Context, callbackQueryID, text string) error {
+	return a.call(ctx, "answerCallbackQuery", struct {
+		CallbackQueryID string `json:"callback_query_id"`
+		Text            string `json:"text,omitempty"`
+	}{CallbackQueryID: callbackQueryID, Text: text}, nil)
+}
+
+// EditMessageReplyMarkup replaces the inline keyboard of a message. An empty
+// markup removes the keyboard. Telegram's "message is not modified" is not a
+// failure: the keyboard already has that shape.
+func (a *botAPI) EditMessageReplyMarkup(ctx context.Context, chatID, messageID int64, markup inlineKeyboard) error {
+	err := a.call(ctx, "editMessageReplyMarkup", struct {
+		ChatID      int64          `json:"chat_id"`
+		MessageID   int64          `json:"message_id"`
+		ReplyMarkup inlineKeyboard `json:"reply_markup"`
+	}{ChatID: chatID, MessageID: messageID, ReplyMarkup: markup}, nil)
+	var ae *apiError
+	if errors.As(err, &ae) && strings.Contains(strings.ToLower(ae.Description), "message is not modified") {
+		return nil
+	}
+	return err
 }
 
 type editMessageTextParams struct {

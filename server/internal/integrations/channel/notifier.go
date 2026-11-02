@@ -46,6 +46,13 @@ type Button struct {
 	Label        string
 	URL          string
 	CallbackData string
+	// LinkURL is where a callback button leads on a platform that cannot take
+	// the callback. The message then carries a link, as spec 2.7 requires for
+	// platforms without button support. Platforms with callbacks ignore it.
+	LinkURL string
+	// SameRow puts the button beside the one before it instead of on a row of its
+	// own, for platforms that lay buttons out in rows.
+	SameRow bool
 }
 
 // DeliveryError marks a failed send for the retry logic. A Permanent error

@@ -53,6 +53,8 @@ type ChannelActions struct {
 	now    func() time.Time
 }
 
+var _ channel.ActionHandler = (*ChannelActions)(nil)
+
 // NewChannelActions builds the chat-button handler over the server's handler and
 // the action signer built from the server secret.
 func NewChannelActions(h *Handler, signer *service.ActionSigner) *ChannelActions {
@@ -212,16 +214,25 @@ func (a *ChannelActions) binding(ctx context.Context, s channel.Sender) (db.Chan
 // one is named. It is empty when the app URL or the workspace is unknown, and
 // the reply then has no link rather than a broken one.
 func (a *ChannelActions) officeLink(ctx context.Context, workspaceID pgtype.UUID, decisionID string) string {
+	var query url.Values
+	if decisionID != "" {
+		query = url.Values{"decision": {decisionID}}
+	}
+	return a.officeLinkQuery(ctx, workspaceID, query)
+}
+
+// officeLinkQuery is the Office page of the workspace with the query appended.
+func (a *ChannelActions) officeLinkQuery(ctx context.Context, workspaceID pgtype.UUID, query url.Values) string {
 	ws, err := a.h.Queries.GetWorkspace(ctx, workspaceID)
 	if err != nil {
 		slog.Warn("chat link: could not load workspace", "error", err)
 		return ""
 	}
 	link := service.OfficeURL(a.h.cfg.AppURL, ws.Slug)
-	if link == "" || decisionID == "" {
+	if link == "" || len(query) == 0 {
 		return link
 	}
-	return link + "?" + url.Values{"decision": {decisionID}}.Encode()
+	return link + "?" + query.Encode()
 }
 
 // appRootLink is the app's front page, for a sender with no workspace to link to.

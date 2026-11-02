@@ -316,3 +316,63 @@ func TestClassifyNotifyErrorLeavesUnknownErrorsRetryable(t *testing.T) {
 		t.Fatal("400 not permanent")
 	}
 }
+
+// SameRow pairs a button with the one before it, so a decision's Approve and
+// Reject sit side by side; the first button always starts a row.
+func TestNotifierSameRowPairsButtons(t *testing.T) {
+	t.Parallel()
+	n, srv, _, _ := newNotifierFixture(t, http.StatusOK, notifierSuccessBody)
+	msg := channel.Message{Text: "decisions", Buttons: []channel.Button{
+		{Label: "Approve", CallbackData: "a"},
+		{Label: "Reject", CallbackData: "r", SameRow: true},
+		{Label: "Snooze", CallbackData: "s"},
+		{Label: "Open the brief", URL: "https://app.example/acme/office?brief=b1"},
+	}}
+
+	if err := n.Send(context.Background(), notifierBinding(), msg); err != nil {
+		t.Fatalf("Send: %v", err)
+	}
+	rows, _ := srv.requests[0].body["reply_markup"].(map[string]any)["inline_keyboard"].([]any)
+	if len(rows) != 3 {
+		t.Fatalf("rows = %d, want 3 ([approve reject] [snooze] [brief])", len(rows))
+	}
+	if first := rows[0].([]any); len(first) != 2 || first[1].(map[string]any)["text"] != "Reject" {
+		t.Fatalf("first row = %v, want Approve and Reject together", first)
+	}
+}
+
+// LinkURL is for platforms without callbacks; Telegram takes the callback and
+// ignores the link.
+func TestNotifierUsesCallbackAndIgnoresLinkURL(t *testing.T) {
+	t.Parallel()
+	n, srv, _, _ := newNotifierFixture(t, http.StatusOK, notifierSuccessBody)
+	msg := channel.Message{Text: "x", Buttons: []channel.Button{
+		{Label: "Approve", CallbackData: "a", LinkURL: "https://app.example/acme/office?decision=p1"},
+	}}
+
+	if err := n.Send(context.Background(), notifierBinding(), msg); err != nil {
+		t.Fatalf("Send: %v", err)
+	}
+	btn := srv.requests[0].body["reply_markup"].(map[string]any)["inline_keyboard"].([]any)[0].([]any)[0].(map[string]any)
+	if btn["callback_data"] != "a" || btn["url"] != nil {
+		t.Fatalf("button = %v, want the callback only", btn)
+	}
+}
+
+// Telegram refuses callback data over 64 bytes; the notifier says so as a
+// permanent error and never calls the API.
+func TestNotifierRefusesOversizedCallbackData(t *testing.T) {
+	t.Parallel()
+	n, srv, _, _ := newNotifierFixture(t, http.StatusOK, notifierSuccessBody)
+	msg := channel.Message{Text: "x", Buttons: []channel.Button{
+		{Label: "Approve", CallbackData: strings.Repeat("x", 65)},
+	}}
+
+	err := n.Send(context.Background(), notifierBinding(), msg)
+	if !channel.IsPermanentDeliveryError(err) {
+		t.Fatalf("err = %v, want a permanent error", err)
+	}
+	if len(srv.requests) != 0 {
+		t.Fatalf("Telegram was called %d times", len(srv.requests))
+	}
+}
