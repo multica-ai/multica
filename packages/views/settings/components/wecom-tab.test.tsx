@@ -22,9 +22,14 @@ const membersRef = vi.hoisted(() => ({
 }));
 const installationsRef = vi.hoisted(() => ({
   current: {
-    installations: [] as unknown[],
+    installations: [],
     configured: true,
     install_supported: true,
+  } as {
+    installations: unknown[];
+    configured: boolean;
+    install_supported: boolean;
+    scan_install_supported?: boolean;
   },
 }));
 const mockRegisterBYO = vi.hoisted(() => vi.fn());
@@ -98,6 +103,13 @@ vi.mock("sonner", () => ({
   toast: { success: vi.fn(), error: vi.fn(), message: vi.fn() },
 }));
 
+// The scan dialog has its own test; here it only has to be the thing that opens.
+vi.mock("./wecom-scan-install-dialog", () => ({
+  WecomScanInstallDialog: ({ agentId }: { agentId: string }) => (
+    <div data-testid="wecom-scan-dialog-stub" data-agent-id={agentId} />
+  ),
+}));
+
 import { toast } from "sonner";
 import { WecomAgentBindButton, WecomTab } from "./wecom-tab";
 
@@ -121,6 +133,29 @@ function resetFixtures() {
 
 describe("WecomAgentBindButton", () => {
   beforeEach(resetFixtures);
+
+  // Scanning needs a QR provider on top of the secret key, so the server says
+  // separately whether it works. Anything but an explicit true — an older
+  // server sends nothing — leaves only the BYO form, rather than a button that
+  // 503s.
+  it.each([undefined, false])("offers no scan option when scan_install_supported is %s", async (flag) => {
+    installationsRef.current.scan_install_supported = flag;
+    renderUI(<WecomAgentBindButton agentId="agent-1" agentName="Bot" />);
+    await userEvent.click(screen.getByTestId("wecom-agent-connect"));
+    await screen.findByTestId("wecom-byo-bot-id");
+    expect(screen.queryByTestId("wecom-scan-option")).toBeNull();
+  });
+
+  it("opens the scan dialog for this agent from the scan option", async () => {
+    installationsRef.current.scan_install_supported = true;
+    renderUI(<WecomAgentBindButton agentId="agent-1" agentName="Bot" />);
+    await userEvent.click(screen.getByTestId("wecom-agent-connect"));
+    await userEvent.click(await screen.findByTestId("wecom-scan-option"));
+    const dialog = await screen.findByTestId("wecom-scan-dialog-stub");
+    expect(dialog.getAttribute("data-agent-id")).toBe("agent-1");
+    // The BYO dialog closes behind it rather than stacking two modals.
+    expect(screen.queryByTestId("wecom-byo-bot-id")).toBeNull();
+  });
 
   it("opens the BYO dialog and submits the trimmed bot id + secret", async () => {
     mockRegisterBYO.mockResolvedValue({ id: "i1", agent_id: "agent-1", status: "active" });

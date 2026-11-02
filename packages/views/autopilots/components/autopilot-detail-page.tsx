@@ -1079,6 +1079,15 @@ export function AutopilotDetailPage({ autopilotId }: { autopilotId: string }) {
       leaf={<span className="min-w-0 truncate">{autopilot.title}</span>}
       actions={
         <>
+          {/* The dialog edits the whole autopilot (title, prompt, agent,
+              triggers, access), so Edit sits with Run now rather than on the
+              Prompt section. */}
+          {canWrite && (
+            <Button size="sm" variant="outline" onClick={() => setEditDialogOpen(true)}>
+              <Pencil className="size-3.5" />
+              {t(($) => $.detail.edit)}
+            </Button>
+          )}
           {canWrite && (
             <Button
               size="sm"
@@ -1106,12 +1115,6 @@ export function AutopilotDetailPage({ autopilotId }: { autopilotId: string }) {
               <MoreHorizontal />
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end" className="w-auto min-w-44">
-              {canWrite && (
-                <DropdownMenuItem onClick={() => setEditDialogOpen(true)}>
-                  <Pencil className="size-3.5" />
-                  {t(($) => $.detail.edit)}
-                </DropdownMenuItem>
-              )}
               <DropdownMenuItem onClick={copyLink}>
                 <Link2 className="size-3.5" />
                 {t(($) => $.detail.copy_link)}
@@ -1162,16 +1165,7 @@ export function AutopilotDetailPage({ autopilotId }: { autopilotId: string }) {
           description={summary.text}
         />
 
-        <ObjectSection
-          title={t(($) => $.detail.field_prompt)}
-          action={
-            canWrite ? (
-              <ObjectSectionAction icon={Pencil} onClick={() => setEditDialogOpen(true)}>
-                {t(($) => $.detail.edit)}
-              </ObjectSectionAction>
-            ) : undefined
-          }
-        >
+        <ObjectSection title={t(($) => $.detail.field_prompt)}>
           {autopilot.description ? (
             <ObjectSectionCard className="px-3 py-2.5">
               <ReadonlyContent content={autopilot.description} />

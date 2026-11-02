@@ -42,6 +42,7 @@ type run struct {
 	Output             string           `json:"output,omitempty"`
 	Failure            string           `json:"failure,omitempty"`
 	Outcome            string           `json:"outcome,omitempty"`
+	QuickCreate        *quickCreate     `json:"quick_create,omitempty"`
 }
 
 func save(path string, j *journal) error {

@@ -148,6 +148,7 @@
     "@types/react": "catalog:",
     "@types/react-dom": "catalog:",
     "@typescript-eslint/parser": "^8.35.0",
+    "@typescript/native": "catalog:",
     "@vitejs/plugin-react": "catalog:",
     "eslint": "^9.0.0",
     "eslint-plugin-i18next": "catalog:",
