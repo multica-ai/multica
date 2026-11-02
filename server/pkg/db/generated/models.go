@@ -1594,6 +1594,23 @@ type Squad struct {
 	OfficeSlot   pgtype.Int2        `json:"office_slot"`
 }
 
+type SquadCharter struct {
+	SquadID                pgtype.UUID        `json:"squad_id"`
+	WorkspaceID            pgtype.UUID        `json:"workspace_id"`
+	Mission                string             `json:"mission"`
+	Responsibilities       []byte             `json:"responsibilities"`
+	Outputs                []byte             `json:"outputs"`
+	Boundaries             string             `json:"boundaries"`
+	Escalation             string             `json:"escalation"`
+	Intake                 string             `json:"intake"`
+	ResponseHours          int32              `json:"response_hours"`
+	OperatingReviewEnabled bool               `json:"operating_review_enabled"`
+	Revision               int64              `json:"revision"`
+	UpdatedByType          string             `json:"updated_by_type"`
+	UpdatedByID            pgtype.UUID        `json:"updated_by_id"`
+	UpdatedAt              pgtype.Timestamptz `json:"updated_at"`
+}
+
 type SquadMember struct {
 	ID         pgtype.UUID        `json:"id"`
 	SquadID    pgtype.UUID        `json:"squad_id"`
@@ -1601,6 +1618,17 @@ type SquadMember struct {
 	MemberID   pgtype.UUID        `json:"member_id"`
 	Role       string             `json:"role"`
 	CreatedAt  pgtype.Timestamptz `json:"created_at"`
+}
+
+type SquadRoutine struct {
+	AutopilotID    pgtype.UUID        `json:"autopilot_id"`
+	WorkspaceID    pgtype.UUID        `json:"workspace_id"`
+	SquadID        pgtype.UUID        `json:"squad_id"`
+	Purpose        string             `json:"purpose"`
+	ExpectedOutput string             `json:"expected_output"`
+	Required       bool               `json:"required"`
+	GraceHours     int32              `json:"grace_hours"`
+	CreatedAt      pgtype.Timestamptz `json:"created_at"`
 }
 
 type SysCronExecution struct {
