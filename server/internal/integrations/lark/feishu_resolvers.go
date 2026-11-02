@@ -256,6 +256,7 @@ func (r *feishuSessionBinder) BindMedia(ctx context.Context, p engine.BindMediaP
 		IssueDescriptionBase: p.IssueDescriptionBase,
 		IssueCommandText:     p.IssueCommandText,
 		Body:                 p.Body,
+		BodyResolved:         p.BodyResolved,
 		MediaRefs:            p.MediaRefs,
 	}
 	if richer, ok := r.session.(interface {

@@ -104,6 +104,9 @@ type MediaRef struct {
 	// partial media failure cannot shift later attachments into the wrong place.
 	InlinePlaceholder string
 	InlineIndex       int
+	// InlineCount optionally replaces consecutive occurrences with one attachment,
+	// for example an image present in both recent and explicitly quoted context.
+	InlineCount int
 	// InlineIDOnly makes that replacement name the attachment instead of
 	// embedding it: the marker becomes itself carrying the attachment's id,
 	// "[Image: 019fe1d3-…]", rather than a Markdown link to the object.
@@ -115,6 +118,10 @@ type MediaRef struct {
 	// the agent sees in the attachment list, and what it passes to
 	// `multica attachment download`.
 	InlineIDOnly bool
+	// SourceContext is the already-selected, rendered source transcript for
+	// historical media. Keep it with the refs so /issue attribution does not
+	// depend on recovering a command boundary from sender-labelled text.
+	SourceContext string
 }
 
 // ReplyCtx describes the message an inbound message quotes / replies to.
@@ -169,6 +176,9 @@ type InboundMessage struct {
 	// arrive with this empty — adapters must not pre-populate it, because
 	// binding only attaches refs whose ledger intent it can claim.
 	MediaRefs []MediaRef
+	// BodyResolved is an output of deferred resolution: Text now contains
+	// authoritative context even when it has no downloadable attachments.
+	BodyResolved bool
 
 	// ReplyTo is the quoted/replied-to context, or nil.
 	ReplyTo *ReplyCtx

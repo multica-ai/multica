@@ -52,22 +52,18 @@ type WSConnectorConfig struct {
 	// should not tear down the entire connection.
 	FrameDecoder FrameDecoder
 
-	// Enricher optionally expands a decoded message's body with the
-	// context the user explicitly attached (quoted reply / forwarded
-	// bundle) before it is emitted to the dispatcher. It runs on the
-	// inbound read loop, so it is bounded by EnrichTimeout to protect
-	// the Lark long-conn ACK budget; on timeout / fetch failure the
-	// enricher degrades to a placeholder rather than blocking. Nil
-	// disables enrichment (the decoded body is emitted as-is).
+	// Enricher optionally expands a decoded message with selected context.
+	// Production prepares a fallback without I/O; remote reads run behind the
+	// durable media-pending fence. Other implementations run inline under
+	// EnrichTimeout. Nil disables enrichment.
 	Enricher Enricher
 
 	// InboundVerifier records receipt evidence independently of business routing.
 	// A failed write must not change dispatch or acknowledgement behavior.
 	InboundVerifier InboundVerifier
 
-	// EnrichTimeout caps a single message's enrichment (at most two
-	// GetMessage calls). It MUST stay well under Lark's ~3s long-conn
-	// ACK window, since enrichment runs before the frame is ACKed.
+	// EnrichTimeout caps inline enrichment implementations below the Lark ACK
+	// window. Deferred production reads use the media resolver's budget.
 	// Zero defaults to 2 seconds.
 	EnrichTimeout time.Duration
 
@@ -416,13 +412,13 @@ func (c *WSLongConnConnector) Run(ctx context.Context, inst Installation, emit E
 			}
 		}
 
-		// Enrich the decoded body with explicitly-attached context
-		// (quoted reply / forwarded bundle) before emitting. This runs
-		// before the frame ACK, so it is bounded by EnrichTimeout and
-		// degrades to a placeholder on failure rather than blocking the
-		// pipeline. Most messages need no enrichment and return
-		// immediately without any network call.
-		if c.cfg.Enricher != nil {
+		// Persist the fallback and media deadline before ACK; resolve remote
+		// context off this loop before the deferred task can run.
+		if deferred, ok := c.cfg.Enricher.(interface {
+			PrepareContext(InboundMessage) InboundMessage
+		}); ok {
+			msg = deferred.PrepareContext(msg)
+		} else if c.cfg.Enricher != nil {
 			enrichCtx, cancelEnrich := context.WithTimeout(ctx, c.cfg.EnrichTimeout)
 			msg = c.cfg.Enricher.Enrich(enrichCtx, msg, creds)
 			cancelEnrich()

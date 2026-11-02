@@ -628,6 +628,7 @@ type BindMediaInput struct {
 	IssueDescriptionBase pgtype.Text
 	IssueCommandText     string
 	Body                 string
+	BodyResolved         bool
 	MediaRefs            []channel.MediaRef
 }
 
@@ -919,6 +920,10 @@ func (s *ChatSession) BindMediaRefsWithResult(ctx context.Context, in BindMediaI
 			}
 			return BindMediaResult{}, err
 		}
+	} else if in.BodyResolved && !in.IssueID.Valid {
+		if err := updateResolvedMediaBody(ctx, qtx, in, in.Body); err != nil {
+			return BindMediaResult{}, err
+		}
 	}
 	if err := s.clearMediaPending(ctx, qtx, in); err != nil {
 		return BindMediaResult{}, err
@@ -1031,6 +1036,9 @@ func (s *ChatSession) bindMediaRefs(ctx context.Context, qtx SessionQueries, in 
 		created = append(created, createdMedia{id: att.ID, ref: ref, filename: filename})
 	}
 	if len(ids) == 0 {
+		if in.BodyResolved && !in.IssueID.Valid {
+			return updateResolvedMediaBody(ctx, qtx, in, in.Body)
+		}
 		return nil
 	}
 	if !in.IssueID.Valid {
@@ -1059,27 +1067,45 @@ func (s *ChatSession) bindMediaRefs(ctx context.Context, qtx SessionQueries, in 
 	if in.IssueID.Valid {
 		issueMarkdown := make([]string, 0, len(created))
 		replacements := make([]inlineMediaReplacement, 0, len(created))
+		contextReplacements := make([]inlineMediaReplacement, 0, len(created))
+		contexts := make([]string, 0, 1)
+		seenContexts := make(map[string]bool)
 		for _, media := range created {
+			if media.ref.InlineIDOnly {
+				if source := media.ref.SourceContext; source != "" && !seenContexts[source] {
+					contexts = append(contexts, source)
+					seenContexts[source] = true
+				}
+				for index := media.ref.InlineIndex; index < media.ref.InlineIndex+max(1, media.ref.InlineCount); index++ {
+					contextReplacements = append(contextReplacements, inlineMediaReplacement{
+						placeholder: media.ref.InlinePlaceholder, index: index,
+						markdown: inlineMediaMarkdown(media.ref, media.id),
+					})
+				}
+				continue
+			}
 			block := channelmedia.Block(
 				uuid.UUID(media.id.Bytes).String(),
 				media.filename,
 				media.ref.Type == channel.MsgTypeImage,
 			)
 			issueMarkdown = append(issueMarkdown, block)
-			// InlineIDOnly markers are left out on purpose. A marker that only
-			// refers to an attachment sits in the adapter's quoted context,
-			// which composeIssueCommandMediaDescription excludes from the
-			// description by contract; materializing it here would put
-			// somebody else's picture into the issue body as if the reporter
-			// had attached it. The attachment itself is still created and
-			// still listed above.
-			if media.ref.InlinePlaceholder != "" && !media.ref.InlineIDOnly {
+			if media.ref.InlinePlaceholder != "" {
 				replacements = append(replacements, inlineMediaReplacement{
 					placeholder: media.ref.InlinePlaceholder,
 					index:       media.ref.InlineIndex,
 					markdown:    block,
 				})
 			}
+		}
+		if len(contexts) == 0 {
+			if start, _, ok := issueCommandLineBounds(in.Body, in.IssueCommandText); ok {
+				contexts = append(contexts, in.Body[:start])
+			}
+		}
+		mediaContext := issueMediaContext(strings.Join(contexts, "\n\n"), contextReplacements)
+		if mediaContext != "" {
+			issueMarkdown = append(issueMarkdown, mediaContext)
 		}
 
 		base := pgtype.Text{}
@@ -1092,6 +1118,9 @@ func (s *ChatSession) bindMediaRefs(ctx context.Context, qtx SessionQueries, in 
 				in.IssueDescriptionBase.String,
 			); changed {
 				base = in.IssueDescriptionBase
+				if mediaContext != "" {
+					composed = strings.TrimSpace(composed + "\n\n" + mediaContext)
+				}
 				description = pgtype.Text{String: composed, Valid: true}
 			}
 		}
@@ -1127,26 +1156,58 @@ func (s *ChatSession) bindMediaRefs(ctx context.Context, qtx SessionQueries, in 
 		if !linked[media.id] || media.ref.InlinePlaceholder == "" {
 			continue
 		}
-		replacements = append(replacements, inlineMediaReplacement{
-			placeholder: media.ref.InlinePlaceholder,
-			index:       media.ref.InlineIndex,
-			markdown:    inlineMediaMarkdown(media.ref, media.id),
-		})
+		for index := media.ref.InlineIndex; index < media.ref.InlineIndex+max(1, media.ref.InlineCount); index++ {
+			replacements = append(replacements, inlineMediaReplacement{
+				placeholder: media.ref.InlinePlaceholder,
+				index:       index,
+				markdown:    inlineMediaMarkdown(media.ref, media.id),
+			})
+		}
 	}
-	if body, changed := composeInlineMediaBody(in.Body, replacements); changed {
-		rows, err := qtx.UpdateChatMessageContentForChannelMedia(ctx, db.UpdateChatMessageContentForChannelMediaParams{
-			ID:            in.MessageID,
-			ChatSessionID: in.SessionID,
-			Content:       body,
-		})
-		if err != nil {
-			return fmt.Errorf("update chat message inline media: %w", err)
-		}
-		if rows != 1 {
-			return fmt.Errorf("update chat message inline media: updated %d rows", rows)
-		}
+	if body, changed := composeInlineMediaBody(in.Body, replacements); changed || in.BodyResolved {
+		return updateResolvedMediaBody(ctx, qtx, in, body)
 	}
 	return nil
+}
+
+func updateResolvedMediaBody(ctx context.Context, q SessionQueries, in BindMediaInput, body string) error {
+	rows, err := q.UpdateChatMessageContentForChannelMedia(ctx, db.UpdateChatMessageContentForChannelMediaParams{
+		ID: in.MessageID, ChatSessionID: in.SessionID, Content: body,
+	})
+	if err != nil {
+		return fmt.Errorf("update chat message inline media: %w", err)
+	}
+	if rows != 1 {
+		return fmt.Errorf("update chat message inline media: updated %d rows", rows)
+	}
+	return nil
+}
+
+// Historical media belongs to the selected channel transcript, not to the
+// reporter's upload list. Preserve that already-rendered prefix with ID-only
+// markers, including its speakers, nested source wrappers and failed media.
+func issueMediaContext(prefix string, replacements []inlineMediaReplacement) string {
+	if len(replacements) == 0 {
+		return ""
+	}
+	parts := make([]string, 0, 2)
+	if composed, changed := composeInlineMediaBody(prefix, replacements); changed {
+		// Indented code retains literal source markup and prevents quoted
+		// Markdown from becoming the issue reporter's prose or embeds.
+		parts = append(parts, "Referenced channel context:\n\n    "+strings.ReplaceAll(strings.TrimSpace(composed), "\n", "\n    "))
+	}
+	unplaced := make([]string, 0)
+	seen := make(map[string]bool)
+	for _, replacement := range replacements {
+		if nthSubstringIndex(prefix, replacement.placeholder, replacement.index) < 0 && !seen[replacement.markdown] {
+			unplaced = append(unplaced, replacement.markdown)
+			seen[replacement.markdown] = true
+		}
+	}
+	if len(unplaced) > 0 {
+		parts = append(parts, "Referenced channel media (source context unavailable):\n\n    "+strings.Join(unplaced, "\n    "))
+	}
+	return strings.Join(parts, "\n\n")
 }
 
 type inlineMediaReplacement struct {

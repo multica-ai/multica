@@ -863,6 +863,7 @@ func (r *Router) resolveAndBindMedia(set ResolverSet, inst ResolvedInstallation,
 		// reconciler reclaims unreferenced objects after the settle delay.
 		dropped := resolved.MediaRefs
 		resolved.MediaRefs = nil
+		resolved.BodyResolved = false
 		r.logger.Warn("channel router: media resolution incomplete; using placeholder",
 			"channel_type", string(msg.Source.ChannelType),
 			"event_id", msg.EventID,
@@ -888,6 +889,7 @@ func (r *Router) resolveAndBindMedia(set ResolverSet, inst ResolvedInstallation,
 		IssueDescriptionBase: issueDescriptionBase,
 		IssueCommandText:     issueCommandText,
 		Body:                 resolved.Text,
+		BodyResolved:         resolved.BodyResolved,
 		MediaRefs:            resolved.MediaRefs,
 	})
 	if bindErr == nil && bindRes.InitialTitle != "" && r.lifecycle != nil {

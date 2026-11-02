@@ -51,7 +51,7 @@ func NewFeishuMediaResolver(api APIClient, creds CredentialsResolver, storage me
 }
 
 // HasMedia reports whether the message carries downloadable Feishu resources
-// (standalone image/video/file/audio or post-embedded img/media spans). Pure
+// (standalone image/video/file/audio or post-embedded img/media/file spans). Pure
 // in-memory decode of the already-received payload — it runs on the connector
 // ACK path.
 func (r *feishuMediaResolver) HasMedia(msg channel.InboundMessage) bool {
@@ -59,7 +59,7 @@ func (r *feishuMediaResolver) HasMedia(msg channel.InboundMessage) bool {
 	if err != nil {
 		return false
 	}
-	return len(mediaResourcesFromMessage(lm)) > 0
+	return lm.DeferredContext != nil || len(mediaResourcesFromMessage(lm)) > 0
 }
 
 func (r *feishuMediaResolver) ResolveMedia(ctx context.Context, inst engine.ResolvedInstallation, _ engine.ResolvedIdentity, _ pgtype.UUID, chatMessageID pgtype.UUID, msg channel.InboundMessage) channel.InboundMessage {
@@ -68,11 +68,10 @@ func (r *feishuMediaResolver) ResolveMedia(ctx context.Context, inst engine.Reso
 		r.logMediaWarn("lark media ingest skipped: raw decode failed", InboundMessage{MessageID: msg.MessageID}, err)
 		return msg
 	}
-	resources := mediaResourcesFromMessage(lm)
-	if len(resources) == 0 {
+	if lm.DeferredContext == nil && len(mediaResourcesFromMessage(lm)) == 0 {
 		return msg
 	}
-	if r.api == nil || r.creds == nil || r.storage == nil || r.ledger == nil {
+	if r.api == nil || r.creds == nil || (lm.DeferredContext == nil && (r.storage == nil || r.ledger == nil)) {
 		r.logMediaWarn("lark media ingest skipped: missing dependency", lm, nil)
 		return msg
 	}
@@ -84,6 +83,25 @@ func (r *feishuMediaResolver) ResolveMedia(ctx context.Context, inst engine.Reso
 	creds, err := installationCredentialsFor(larkInst, r.creds)
 	if err != nil {
 		r.logMediaWarn("lark media ingest skipped: credentials unavailable", lm, err)
+		return msg
+	}
+	if pending := lm.DeferredContext; pending != nil {
+		lm.Body = pending.Body
+		lm.DeferredContext = nil
+		// Metadata has its own bounded budget behind the persisted media
+		// fence. It never consumes the connector's pre-ACK deadline.
+		readCtx, cancel := context.WithTimeout(ctx, defaultRequestTimeout)
+		lm = NewInboundEnricher(r.api, InboundEnricherConfig{
+			RecentContextSize: pending.RecentContextSize, MaxForwardChildren: pending.MaxForwardChildren, Logger: r.logger,
+		}).Enrich(readCtx, lm, creds)
+		cancel()
+		msg.Text = lm.Body
+		msg.BodyResolved = true
+		msg.Raw, _ = json.Marshal(lm)
+	}
+	resources := mediaResourcesFromMessage(lm)
+	if len(resources) > 0 && (r.storage == nil || r.ledger == nil) {
+		r.logMediaWarn("lark media ingest skipped: missing storage dependency", lm, nil)
 		return msg
 	}
 	for resIndex, res := range resources {
@@ -120,7 +138,9 @@ func (r *feishuMediaResolver) ResolveMedia(ctx context.Context, inst engine.Reso
 			continue
 		}
 		contentType := mediaContentType(res, got)
-		filename := mediaFilename(lm, res, got, contentType, resIndex)
+		source := lm
+		source.MessageID = res.messageID
+		filename := mediaFilename(source, res, got, contentType, resIndex)
 		uploadedBytes, err := r.uploadResource(ctx, key, got.Body, got.SizeBytes, contentType, filename)
 		if err != nil {
 			// The store may still be processing the PUT — deleting here
@@ -134,12 +154,16 @@ func (r *feishuMediaResolver) ResolveMedia(ctx context.Context, inst engine.Reso
 			sizeBytes = uploadedBytes
 		}
 		msg.MediaRefs = append(msg.MediaRefs, channel.MediaRef{
-			Type:       res.kind,
-			StorageKey: key,
-			StorageURL: link,
-			Filename:   filename,
-			MimeType:   contentType,
-			SizeBytes:  sizeBytes,
+			Type:              res.kind,
+			StorageKey:        key,
+			StorageURL:        link,
+			Filename:          filename,
+			MimeType:          contentType,
+			SizeBytes:         sizeBytes,
+			InlinePlaceholder: res.placeholder,
+			InlineCount:       res.occurrences,
+			InlineIDOnly:      res.placeholder != "",
+			SourceContext:     lm.MediaSourceContext,
 		})
 	}
 	return msg
@@ -222,16 +246,38 @@ func (r *feishuMediaResolver) logMediaWarn(msg string, lm InboundMessage, err er
 }
 
 type larkMediaResource struct {
-	key       string
-	kind      channel.MsgType
-	fetchType string
-	filename  string
-	mimeType  string
-	sizeBytes int64
-	messageID string
+	key         string
+	kind        channel.MsgType
+	fetchType   string
+	filename    string
+	mimeType    string
+	sizeBytes   int64
+	messageID   string
+	placeholder string
+	occurrences int
 }
 
 func mediaResourcesFromMessage(lm InboundMessage) []larkMediaResource {
+	out := currentMediaResources(lm)
+	for _, media := range lm.ContextMedia {
+		if media.MessageID == "" || media.ResourceKey == "" || media.Placeholder == "" || media.Occurrences < 1 {
+			continue
+		}
+		if (media.Type == channel.MsgTypeImage && media.FetchType != "image") ||
+			((media.Type == channel.MsgTypeFile || media.Type == channel.MsgTypeAudio || media.Type == channel.MsgTypeVideo) && media.FetchType != "file") {
+			continue
+		}
+		switch media.Type {
+		case channel.MsgTypeImage, channel.MsgTypeFile, channel.MsgTypeAudio, channel.MsgTypeVideo:
+			out = append(out, larkMediaResource{key: media.ResourceKey, kind: media.Type,
+				fetchType: media.FetchType, messageID: media.MessageID, filename: media.Filename,
+				mimeType: media.MimeType, sizeBytes: media.SizeBytes, placeholder: media.Placeholder, occurrences: media.Occurrences})
+		}
+	}
+	return out
+}
+
+func currentMediaResources(lm InboundMessage) []larkMediaResource {
 	var payload struct {
 		ImageKey    string `json:"image_key"`
 		FileKey     string `json:"file_key"`
@@ -320,41 +366,36 @@ func mediaResourcesFromPost(lm InboundMessage) []larkMediaResource {
 	seen := make(map[string]bool)
 	for _, para := range doc.Content {
 		for _, span := range para {
-			switch span.Tag {
-			case "img":
-				if span.ImageKey == "" || seen["image\x00"+span.ImageKey] {
-					continue
-				}
-				seen["image\x00"+span.ImageKey] = true
-				out = append(out, larkMediaResource{
-					key:       span.ImageKey,
-					kind:      channel.MsgTypeImage,
-					fetchType: "image",
-					filename:  firstNonEmpty(span.FileName, span.Name),
-					mimeType:  span.MimeType,
-					messageID: lm.MessageID,
-				})
-			case "media", "file":
-				if span.IsFolder || span.FileKey == "" || seen["file\x00"+span.FileKey] {
-					continue
-				}
-				seen["file\x00"+span.FileKey] = true
-				kind := channel.MsgTypeVideo
-				if span.Tag == "file" {
-					kind = channel.MsgTypeFile
-				}
-				out = append(out, larkMediaResource{
-					key:       span.FileKey,
-					kind:      kind,
-					fetchType: "file",
-					filename:  firstNonEmpty(span.FileName, span.Name),
-					mimeType:  span.MimeType,
-					messageID: lm.MessageID,
-				})
+			res, ok := postSpanMediaResource(span, lm.MessageID)
+			if !ok || seen[res.fetchType+"\x00"+res.key] {
+				continue
 			}
+			seen[res.fetchType+"\x00"+res.key] = true
+			out = append(out, res)
 		}
 	}
 	return out
+}
+
+// Share the post resource contract between current-message ingestion and
+// context rendering so a rendered marker always refers to the same resource.
+func postSpanMediaResource(span larkPostSpan, messageID string) (larkMediaResource, bool) {
+	res := larkMediaResource{filename: firstNonEmpty(span.FileName, span.Name), mimeType: span.MimeType, messageID: messageID}
+	switch span.Tag {
+	case "img":
+		res.key, res.kind, res.fetchType = span.ImageKey, channel.MsgTypeImage, "image"
+	case "media", "file":
+		if span.IsFolder {
+			return larkMediaResource{}, false
+		}
+		res.key, res.kind, res.fetchType = span.FileKey, channel.MsgTypeVideo, "file"
+		if span.Tag == "file" {
+			res.kind = channel.MsgTypeFile
+		}
+	default:
+		return larkMediaResource{}, false
+	}
+	return res, res.key != ""
 }
 
 // mediaFilename picks a name for the stored object. index disambiguates the

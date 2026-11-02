@@ -812,6 +812,53 @@ func (failingLinkSessionQueries) LinkAttachmentsToChatMessage(context.Context, d
 	return nil, errors.New("injected attachment link failure")
 }
 
+func TestBindMediaRefs_RepeatedContextMediaGetsOneReadableAttachment(t *testing.T) {
+	for _, tc := range []struct {
+		kind             channel.MsgType
+		label, ext, mime string
+	}{
+		{channel.MsgTypeImage, "Image", "png", "image/png"},
+		{channel.MsgTypeFile, "File", "txt", "text/plain"},
+		{channel.MsgTypeAudio, "Audio", "wav", "audio/wav"},
+		{channel.MsgTypeVideo, "Video", "mp4", "video/mp4"},
+	} {
+		t.Run(tc.label, func(t *testing.T) {
+			pool := sessionPersistenceTestDB(t)
+			fixture := seedSessionPersistenceFixture(t, pool)
+			session := NewChatSession(db.New(pool), pool, channel.TypeFeishu, SessionTitles{})
+			body := "<quoted_message>before [" + tc.label + " 1: unavailable] after [" + tc.label + " 1: unavailable]</quoted_message>\ninspect"
+			appended, err := session.AppendUserMessage(t.Context(), AppendInput{SessionID: fixture.sessionID, Sender: fixture.userID, Body: body, MediaPendingSeconds: 60})
+			if err != nil {
+				t.Fatal(err)
+			}
+			key, link := "workspaces/ws/lark/context", "https://cdn.example.test/context"
+			seedPendingMediaObject(t, pool, fixture, appended.MessageID, key, link, "pending")
+			if err := session.BindMediaRefs(t.Context(), BindMediaInput{MessageID: appended.MessageID, SessionID: fixture.sessionID, WorkspaceID: fixture.workspaceID,
+				Sender: fixture.userID, Body: body, MediaRefs: []channel.MediaRef{{Type: tc.kind, StorageKey: key, StorageURL: link,
+					Filename: "context." + tc.ext, MimeType: tc.mime, InlinePlaceholder: "[" + tc.label + " 1: unavailable]", InlineCount: 2, InlineIDOnly: true}}}); err != nil {
+				t.Fatal(err)
+			}
+			var stored, id string
+			if err := pool.QueryRow(t.Context(), "SELECT content FROM chat_message WHERE id=$1", appended.MessageID).Scan(&stored); err != nil {
+				t.Fatal(err)
+			}
+			if err := pool.QueryRow(t.Context(), "SELECT id::text FROM attachment WHERE chat_message_id=$1 AND chat_session_id=$2", appended.MessageID, fixture.sessionID).Scan(&id); err != nil {
+				t.Fatal(err)
+			}
+			var count int
+			if err := pool.QueryRow(t.Context(), "SELECT count(*) FROM attachment WHERE chat_message_id=$1", appended.MessageID).Scan(&count); err != nil {
+				t.Fatal(err)
+			}
+			if count != 1 {
+				t.Fatalf("context resource created %d attachments, want one", count)
+			}
+			if strings.Count(stored, "["+tc.label+" 1: "+id+"]") != 2 || strings.Contains(stored, "unavailable") || strings.Contains(stored, "/download") {
+				t.Fatalf("media positions or attribution lost: %s", stored)
+			}
+		})
+	}
+}
+
 func TestBindMediaRefs_LinkFailureKeepsMessageAndRollsBackAttachment(t *testing.T) {
 	pool := sessionPersistenceTestDB(t)
 	fixture := seedSessionPersistenceFixture(t, pool)
@@ -1523,4 +1570,84 @@ func newDeliveryTaskID(t *testing.T, pool *pgxpool.Pool) pgtype.UUID {
 		_, _ = pool.Exec(context.Background(), `DELETE FROM channel_task_delivery WHERE task_id = $1`, taskID)
 	})
 	return taskID
+}
+
+func TestBindMediaRefs_IssueRetainsHistoricalMediaAttribution(t *testing.T) {
+	for _, tc := range []struct{ edited, named bool }{{false, false}, {false, true}, {true, true}} {
+		t.Run(fmt.Sprintf("edited-%v/named-%v", tc.edited, tc.named), func(t *testing.T) {
+			pool := sessionPersistenceTestDB(t)
+			fixture := seedSessionPersistenceFixture(t, pool)
+			session := NewChatSession(db.New(pool), pool, channel.TypeFeishu, SessionTitles{})
+			prefix := "<recent_context count=\"1\">\n[Alice]: before [Image 1: unavailable] after [Image 1: unavailable]\n</recent_context>\n\n" +
+				"<quoted_message message_id=\"forward-owner\" sender=\"Bob\" type=\"merge_forward\">\n<forwarded_messages count=\"1\">\n[Bob]: before [File 2: unavailable] after [Audio 3: unavailable]\n</forwarded_messages>\n</quoted_message>"
+			command := "/issue Investigate\nReporter details"
+			body := prefix + "\n\n" + command + "\n[Image]"
+			base := issueDescriptionFromCommandBody(body, command, "")
+			if tc.named {
+				body = prefix + "\n\n[Reporter]: " + command + "\n[Image]"
+			}
+			appended, err := session.AppendUserMessage(t.Context(), AppendInput{SessionID: fixture.sessionID, Sender: fixture.userID, Body: body, CommandText: command, MediaPendingSeconds: 60})
+			if err != nil {
+				t.Fatal(err)
+			}
+			initial := base
+			if tc.edited {
+				initial = "Human edit retained"
+			}
+			var issueID pgtype.UUID
+			if err := pool.QueryRow(t.Context(), `INSERT INTO issue (workspace_id,title,description,status,priority,creator_type,creator_id,number)
+				VALUES ($1,'Investigate',$2,'todo','none','member',$3,1) RETURNING id`, fixture.workspaceID, initial, fixture.userID).Scan(&issueID); err != nil {
+				t.Fatal(err)
+			}
+			refs := []channel.MediaRef{
+				{Type: channel.MsgTypeImage, Filename: "historical.png", MimeType: "image/png", InlinePlaceholder: "[Image 1: unavailable]", InlineCount: 2, InlineIDOnly: true, SourceContext: prefix},
+				{Type: channel.MsgTypeFile, Filename: "historical.txt", MimeType: "text/plain", InlinePlaceholder: "[File 2: unavailable]", InlineCount: 1, InlineIDOnly: true, SourceContext: prefix},
+				{Type: channel.MsgTypeImage, Filename: "own.png", MimeType: "image/png", InlinePlaceholder: "[Image]"},
+			}
+			for n := range refs {
+				if !tc.named {
+					refs[n].SourceContext = "" // Legacy adapters can use the unlabelled command boundary.
+				}
+				refs[n].StorageKey = fmt.Sprintf("workspaces/ws/lark/attribution-%d", n)
+				refs[n].StorageURL = fmt.Sprintf("https://cdn.example.test/attribution-%d", n)
+				seedPendingMediaObject(t, pool, fixture, appended.MessageID, refs[n].StorageKey, refs[n].StorageURL, "pending")
+			}
+			if err := session.BindMediaRefs(t.Context(), BindMediaInput{MessageID: appended.MessageID, SessionID: fixture.sessionID, WorkspaceID: fixture.workspaceID,
+				Sender: fixture.userID, IssueID: issueID, IssueDescriptionBase: pgtype.Text{String: base, Valid: true}, IssueCommandText: command, Body: body, MediaRefs: refs}); err != nil {
+				t.Fatal(err)
+			}
+			ids := map[string]string{}
+			rows, err := pool.Query(t.Context(), "SELECT filename,id::text FROM attachment WHERE issue_id=$1", issueID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			for rows.Next() {
+				var name, id string
+				if err := rows.Scan(&name, &id); err != nil {
+					t.Fatal(err)
+				}
+				ids[name] = id
+			}
+			rows.Close()
+			if err := rows.Err(); err != nil {
+				t.Fatal(err)
+			}
+			var description string
+			if err := pool.QueryRow(t.Context(), "SELECT description FROM issue WHERE id=$1", issueID).Scan(&description); err != nil {
+				t.Fatal(err)
+			}
+			if len(ids) != 3 || strings.Count(description, "[Image 1: "+ids["historical.png"]+"]") != 2 || strings.Count(description, "[File 2: "+ids["historical.txt"]+"]") != 1 {
+				t.Fatalf("historical source positions lost: %s", description)
+			}
+			for _, source := range []string{"[Alice]: before", "[Bob]: before", `message_id="forward-owner"`, "[Audio 3: unavailable]", "Referenced channel context:"} {
+				if !strings.Contains(description, source) {
+					t.Fatalf("source attribution %q lost: %s", source, description)
+				}
+			}
+			if strings.Contains(description, channelmedia.Block(ids["historical.png"], "historical.png", true)) || strings.Contains(description, channelmedia.Block(ids["historical.txt"], "historical.txt", false)) ||
+				strings.Count(description, channelmedia.Block(ids["own.png"], "own.png", true)) != 1 || !strings.Contains(description, strings.Split(initial, "\n")[0]) {
+				t.Fatalf("historical media attributed as own upload, own media duplicated, or human edit replaced: %s", description)
+			}
+		})
+	}
 }

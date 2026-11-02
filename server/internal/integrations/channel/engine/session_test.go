@@ -1412,3 +1412,28 @@ func TestAppendUserMessage_ReplyTargetSenderNullWhenAbsent(t *testing.T) {
 		t.Errorf("absent sender must be NULL; got %+v", f.lastContextReply.LastSenderID)
 	}
 }
+
+func TestIssueMediaContextRetainsOnlyTheRenderedPrefix(t *testing.T) {
+	body := "<quoted_message sender=\"Alice\">\nbefore [Image 1: unavailable] after [File 2: unavailable]\n</quoted_message>\n/issue Investigate\nReporter details"
+	source := body[:len(body)-len("\n/issue Investigate\nReporter details")]
+	got := issueMediaContext(source, []inlineMediaReplacement{{placeholder: "[Image 1: unavailable]", markdown: "[Image 1: image-id]"}})
+	want := "Referenced channel context:\n\n    <quoted_message sender=\"Alice\">\n    before [Image 1: image-id] after [File 2: unavailable]\n    </quoted_message>"
+	if got != want {
+		t.Fatalf("historical source projection = %q, want %q", got, want)
+	}
+	if got := issueMediaContext(source, nil); got != "" {
+		t.Fatalf("text-only history copied without historical attachments: %q", got)
+	}
+}
+
+func TestIssueMediaContextLabelsMissingSourcesInsteadOfInventingAttribution(t *testing.T) {
+	for _, body := range []string{"/issue Investigate\nReporter details", "unrecognized adapter layout"} {
+		got := issueMediaContext(body, []inlineMediaReplacement{
+			{placeholder: "[Image 1: unavailable]", index: 0, markdown: "[Image 1: image-id]"},
+			{placeholder: "[Image 1: unavailable]", index: 1, markdown: "[Image 1: image-id]"},
+		})
+		if got != "Referenced channel media (source context unavailable):\n\n    [Image 1: image-id]" {
+			t.Fatalf("missing source = %q", got)
+		}
+	}
+}
