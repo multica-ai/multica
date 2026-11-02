@@ -15,6 +15,13 @@ import type {
   Squad,
   SquadMember,
 } from "../types";
+import {
+  CHARTER_DEFAULT_RESPONSE_HOURS,
+  type CreateSquadRoutineRequest,
+  type SquadCharter,
+  type SquadRoutine,
+  type UpdateSquadCharterRequest,
+} from "../office/charter-schema";
 import { freeSlots } from "../office/seat-plan";
 import type {
   OfficeFloor,
@@ -23,6 +30,7 @@ import type {
 } from "../office/types";
 import {
   SQUAD_ROLES,
+  type SquadCharterTemplate,
   type SquadRoleKey,
   type SquadRoutineTemplate,
   type SquadTemplate,
@@ -43,6 +51,8 @@ export interface SquadQuickstartClient {
   createOfficeFloor(data: { name: string }): Promise<OfficeFloor>;
   setOfficeSeats(seats: OfficeSeatAssignment[]): Promise<OfficeSeatsResponse>;
   updateSquad(id: string, data: { instructions?: string }): Promise<Squad>;
+  updateSquadCharter(squadId: string, data: UpdateSquadCharterRequest): Promise<SquadCharter>;
+  createSquadRoutine(squadId: string, data: CreateSquadRoutineRequest): Promise<SquadRoutine>;
   addSquadMember(
     squadId: string,
     data: { member_type: string; member_id: string; role?: string },
@@ -83,7 +93,7 @@ export interface QuickstartOutcome {
     error?: string;
   };
   routine: {
-    /** "existing": the squad already has an autopilot with the routine's name, left as it is. */
+    /** "existing": the squad already has an autopilot with the routine's name, or the routine is already linked. */
     status: "created" | "existing" | "skipped" | "failed";
     /** A routine created without its schedule reports that here; add the schedule on the autopilot. */
     error?: string;
@@ -184,8 +194,10 @@ async function ensureOfficeFloor(
 
 /**
  * Creates the routine's autopilot for the squad, assigned to the squad so each
- * run opens an issue for its leader, and its weekly schedule. A squad that
- * already has an autopilot with the routine's name keeps it as it is.
+ * run opens an issue for its leader, and its weekly schedule. Then links it as
+ * a routine of the squad, so the charter and the digest see it. A squad that
+ * already has an autopilot with the routine's name keeps it, and it is linked
+ * when it is not a routine yet.
  */
 async function ensureRoutine(
   client: SquadQuickstartClient,
@@ -194,29 +206,66 @@ async function ensureRoutine(
   timezone: string | undefined,
 ): Promise<QuickstartOutcome["routine"]> {
   const { autopilots } = await client.listAutopilots();
-  const exists = autopilots.some(
+  const found = autopilots.find(
     (a) => a.assignee_type === "squad" && a.assignee_id === squadId && a.title === routine.title,
   );
-  if (exists) return { status: "existing" };
-
-  const autopilot = await client.createAutopilot({
-    title: routine.title,
-    description: routine.description,
-    assignee_type: "squad",
-    assignee_id: squadId,
-    execution_mode: "create_issue",
-    issue_title_template: routine.issueTitleTemplate,
-  });
+  let autopilotId: string;
+  let status: "created" | "existing" = "created";
+  if (found) {
+    autopilotId = found.id;
+    status = "existing";
+  } else {
+    const autopilot = await client.createAutopilot({
+      title: routine.title,
+      description: routine.description,
+      assignee_type: "squad",
+      assignee_id: squadId,
+      execution_mode: "create_issue",
+      issue_title_template: routine.issueTitleTemplate,
+    });
+    autopilotId = autopilot.id;
+    try {
+      await client.createAutopilotTrigger(autopilot.id, {
+        kind: "schedule",
+        cron_expression: routine.cron,
+        ...(timezone ? { timezone } : {}),
+      });
+    } catch (err) {
+      return { status: "failed", error: `schedule: ${errorMessage(err)}` };
+    }
+  }
   try {
-    await client.createAutopilotTrigger(autopilot.id, {
-      kind: "schedule",
-      cron_expression: routine.cron,
-      ...(timezone ? { timezone } : {}),
+    await client.createSquadRoutine(squadId, {
+      autopilot_id: autopilotId,
+      purpose: routine.title,
+      expected_output: "report",
+      required: true,
     });
   } catch (err) {
-    return { status: "failed", error: `schedule: ${errorMessage(err)}` };
+    // Already linked: an earlier run finished the job.
+    if (errorCode(err) === "routine_already_linked") return { status: "existing" };
+    return { status: "failed", error: `routine: ${errorMessage(err)}` };
   }
-  return { status: "created" };
+  return { status };
+}
+
+/** The charter a template saves on creation. Revision 0 is the first save; operating review stays on. */
+function charterRequest(charter: SquadCharterTemplate): UpdateSquadCharterRequest {
+  return {
+    revision: 0,
+    mission: charter.mission,
+    responsibilities: charter.responsibilities,
+    outputs: charter.outputs.map((o) => ({
+      key: o.key,
+      kind: o.kind,
+      kb_key: "",
+      cadence_hint: o.cadenceHint,
+    })),
+    boundaries: charter.boundaries,
+    escalation: charter.escalation,
+    intake: charter.intake,
+    response_hours: CHARTER_DEFAULT_RESPONSE_HOURS,
+  };
 }
 
 /**
@@ -328,6 +377,12 @@ export async function runSquadQuickstart(
         await client.updateSquad(squad.id, { instructions: template.instructions });
       } catch (err) {
         failures.push(`instructions: ${errorMessage(err)}`);
+      }
+      // The first charter save also creates the squad's operating review.
+      try {
+        await client.updateSquadCharter(squad.id, charterRequest(template.charter));
+      } catch (err) {
+        failures.push(`charter: ${errorMessage(err)}`);
       }
       for (const role of template.roles) {
         const memberId = agentIds[role];
