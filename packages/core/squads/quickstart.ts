@@ -15,6 +15,12 @@ import type {
   Squad,
   SquadMember,
 } from "../types";
+import { freeSlots } from "../office/seat-plan";
+import type {
+  OfficeFloor,
+  OfficeSeatAssignment,
+  OfficeSeatsResponse,
+} from "../office/types";
 import {
   SQUAD_ROLES,
   type SquadRoleKey,
@@ -32,8 +38,10 @@ export interface SquadQuickstartClient {
     name: string;
     description?: string;
     leader_id: string;
-    floor_name?: string;
   }): Promise<Squad>;
+  listOfficeFloors(): Promise<OfficeFloor[]>;
+  createOfficeFloor(data: { name: string }): Promise<OfficeFloor>;
+  setOfficeSeats(seats: OfficeSeatAssignment[]): Promise<OfficeSeatsResponse>;
   updateSquad(id: string, data: { instructions?: string }): Promise<Squad>;
   addSquadMember(
     squadId: string,
@@ -162,6 +170,19 @@ function workflowSteps(
 }
 
 /**
+ * The office floor with this name, created when the workspace has none. The
+ * server only applies a squad's floor name when every floor is full, so the
+ * squad is seated on this floor by a separate seat request.
+ */
+async function ensureOfficeFloor(
+  client: SquadQuickstartClient,
+  name: string,
+): Promise<OfficeFloor> {
+  const floors = await client.listOfficeFloors();
+  return floors.find((floor) => floor.name === name) ?? client.createOfficeFloor({ name });
+}
+
+/**
  * Creates the routine's autopilot for the squad, assigned to the squad so each
  * run opens an issue for its leader, and its weekly schedule. A squad that
  * already has an autopilot with the routine's name keeps it as it is.
@@ -271,14 +292,38 @@ export async function runSquadQuickstart(
     if (found) {
       outcome.squad = { id: found.id, status: "existing" };
     } else {
+      const failures: string[] = [];
+      // Set up the floor first. If that fails the squad is still created, and
+      // its error says it has no seat on the floor.
+      let floor: OfficeFloor | null = null;
+      if (template.floorName) {
+        try {
+          floor = await ensureOfficeFloor(client, template.floorName);
+        } catch (err) {
+          failures.push(`could not set up the ${template.floorName} floor: ${errorMessage(err)}`);
+        }
+      }
       const squad = await client.createSquad({
         name: template.name,
         description: template.description,
         leader_id: leaderId,
-        ...(template.floorName ? { floor_name: template.floorName } : {}),
       });
       outcome.squad = { id: squad.id, status: "created" };
-      const failures: string[] = [];
+      if (floor) {
+        // Free slots come from the squads listed before the create, so the
+        // new squad's own auto seat (if it is on this floor) shows as free.
+        // The squad is not moved when it already holds the chosen slot.
+        const slot = freeSlots(floor.id, squads)[0];
+        if (slot === undefined) {
+          failures.push(`no free seat on the ${template.floorName} floor`);
+        } else if (squad.floor_id !== floor.id || squad.office_slot !== slot) {
+          try {
+            await client.setOfficeSeats([{ squad_id: squad.id, floor_id: floor.id, slot }]);
+          } catch (err) {
+            failures.push(`seat on the ${template.floorName} floor: ${errorMessage(err)}`);
+          }
+        }
+      }
       try {
         await client.updateSquad(squad.id, { instructions: template.instructions });
       } catch (err) {
