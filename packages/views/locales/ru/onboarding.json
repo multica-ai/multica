@@ -173,8 +173,6 @@
     "scanning_lede_suffix": " и другие. Мы проверяем этот компьютер на наличие установленных инструментов.",
     "found_headline": "Где должна работать Mika?",
     "runtime_count_one": "{{count}} среда выполнения агента",
-    "runtime_count_few": "{{count}} среды выполнения агента",
-    "runtime_count_many": "{{count}} сред выполнения агента",
     "runtime_count_other": "{{count}} среды выполнения агента",
     "status_all_online": "все онлайн",
     "status_none_online": "ни одной онлайн",
@@ -194,7 +192,9 @@
     "hint_selected": "Выбрано: {{name}}",
     "hint_pick": "Выберите среду выполнения агента выше, чтобы начать с Mika.",
     "hint_waiting": "Ожидаем первый результат…",
-    "continue": "Начать с Mika"
+    "continue": "Начать с Mika",
+    "runtime_count_few": "{{count}} среды выполнения агента",
+    "runtime_count_many": "{{count}} сред выполнения агента"
   },
   "step_platform": {
     "headline": "Подключите компьютер, чтобы запускать агента.",
@@ -212,8 +212,6 @@
     "cli_dialog_title": "Подключить через терминал",
     "cli_dialog_pick_hint": "Выберите компьютер выше.",
     "runtimes_connected_one": "{{count}} компьютер подключён",
-    "runtimes_connected_few": "{{count}} компьютера подключено",
-    "runtimes_connected_many": "{{count}} компьютеров подключено",
     "runtimes_connected_other": "{{count}} компьютера подключено",
     "live_listening": "Онлайн · Ждём ваш компьютер",
     "stage_normal_prefix": "Выполните команду выше. Как только ",
@@ -224,7 +222,9 @@
     "stage_slow_suffix": ", на наличие ошибок.",
     "stage_stalled_prefix": "Пока ничего не приходит. Если вам не близка работа в терминале, ",
     "stage_stalled_term": "Desktop",
-    "stage_stalled_suffix": " — более простой путь: один клик, и этот компьютер подключён. Закройте это окно и выберите Desktop, либо нажмите «Пропустить», чтобы продолжить."
+    "stage_stalled_suffix": " — более простой путь: один клик, и этот компьютер подключён. Закройте это окно и выберите Desktop, либо нажмите «Пропустить», чтобы продолжить.",
+    "runtimes_connected_few": "{{count}} компьютера подключено",
+    "runtimes_connected_many": "{{count}} компьютеров подключено"
   },
   "errors": {
     "skip_failed": "Не удалось завершить настройку",

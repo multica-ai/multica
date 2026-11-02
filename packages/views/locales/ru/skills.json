@@ -1,12 +1,10 @@
 {
   "page": {
     "title": "Навыки",
-    "learn_more": "Узнать больше →",
     "new_skill": "Новый навык",
-    "search_placeholder": "Поиск навыков…",
     "scopes": {
       "all": {
-        "label": "Все",
+        "label": "Все skill",
         "description": "Все навыки в этом рабочем пространстве"
       },
       "used": {
@@ -18,7 +16,7 @@
         "description": "Навыки, не назначенные ни одному агенту"
       },
       "mine": {
-        "label": "Созданные мной",
+        "label": "Мои skill",
         "description": "Навыки, которые создали вы"
       }
     },
@@ -76,74 +74,57 @@
     "added_toast": "Добавлено агенту {{name}}",
     "add_failed_toast": "Не удалось добавить навык",
     "delete": "Удалить",
-    "selected": "Выбрано: {{count}}",
-    "clear_selection": "Снять выделение",
     "delete_no_permission": "В выборке есть навыки, которые может удалить только их создатель или администратор",
     "delete_dialog_title_one": "Удалить {{count}} навык?",
-    "delete_dialog_title_few": "Удалить {{count}} навыка?",
-    "delete_dialog_title_many": "Удалить {{count}} навыков?",
     "delete_dialog_title_other": "Удалить {{count}} навыка?",
     "delete_dialog_desc_one": "Выбранные навыки ({{count}}) будут безвозвратно удалены и сняты со всех агентов.",
-    "delete_dialog_desc_few": "Выбранные навыки ({{count}}) будут безвозвратно удалены и сняты со всех агентов.",
-    "delete_dialog_desc_many": "Выбранные навыки ({{count}}) будут безвозвратно удалены и сняты со всех агентов.",
     "delete_dialog_desc_other": "Выбранные навыки ({{count}}) будут безвозвратно удалены и сняты со всех агентов.",
     "deleted_toast_one": "Удалён {{count}} навык",
-    "deleted_toast_few": "Удалено навыков: {{count}}",
-    "deleted_toast_many": "Удалено навыков: {{count}}",
     "deleted_toast_other": "Удалено навыков: {{count}}",
     "delete_failed_toast": "Не удалось удалить навыки",
     "update": "Обновить",
     "update_none": "В выборке нет импортированных навыков, которые можно обновить",
     "update_dialog_title": "Обновить навыки из источника?",
     "update_summary_selected_one": "{{count}} навык будет обновлён из своего источника",
-    "update_summary_selected_few": "Навыков будет обновлено из источников: {{count}}",
-    "update_summary_selected_many": "Навыков будет обновлено из источников: {{count}}",
     "update_summary_selected_other": "Навыков будет обновлено из источников: {{count}}",
     "update_summary_skipped_one": "{{count}} нельзя обновить из источника — пропущен",
-    "update_summary_skipped_few": "Нельзя обновить из источника — пропущено: {{count}}",
-    "update_summary_skipped_many": "Нельзя обновить из источника — пропущено: {{count}}",
     "update_summary_skipped_other": "Нельзя обновить из источника — пропущено: {{count}}",
     "update_confirm": "Обновить ({{count}})",
     "update_updating": "Обновление {{done}}/{{total}}…",
     "updated_toast_one": "Обновлён {{count}} навык из источника",
-    "updated_toast_few": "Обновлено навыков из источника: {{count}}",
-    "updated_toast_many": "Обновлено навыков из источника: {{count}}",
     "updated_toast_other": "Обновлено навыков из источника: {{count}}",
     "update_partial_toast": "Обновлено: {{count}}, ошибок: {{failed}}",
     "cancel": "Отмена",
     "add_confirm": "Добавить ({{num}})",
     "adding": "Добавление...",
     "added_multi_toast_one": "Добавлено {{count}} агенту",
+    "added_multi_toast_other": "Добавлено агентам: {{count}}",
+    "delete_dialog_title_few": "Удалить {{count}} навыка?",
+    "delete_dialog_title_many": "Удалить {{count}} навыков?",
+    "delete_dialog_desc_few": "Выбранные навыки ({{count}}) будут безвозвратно удалены и сняты со всех агентов.",
+    "delete_dialog_desc_many": "Выбранные навыки ({{count}}) будут безвозвратно удалены и сняты со всех агентов.",
+    "deleted_toast_few": "Удалено навыков: {{count}}",
+    "deleted_toast_many": "Удалено навыков: {{count}}",
+    "update_summary_selected_few": "Навыков будет обновлено из источников: {{count}}",
+    "update_summary_selected_many": "Навыков будет обновлено из источников: {{count}}",
+    "update_summary_skipped_few": "Нельзя обновить из источника — пропущено: {{count}}",
+    "update_summary_skipped_many": "Нельзя обновить из источника — пропущено: {{count}}",
+    "updated_toast_few": "Обновлено навыков из источника: {{count}}",
+    "updated_toast_many": "Обновлено навыков из источника: {{count}}",
     "added_multi_toast_few": "Добавлено агентам: {{count}}",
-    "added_multi_toast_many": "Добавлено агентам: {{count}}",
-    "added_multi_toast_other": "Добавлено агентам: {{count}}"
+    "added_multi_toast_many": "Добавлено агентам: {{count}}"
   },
   "toolbar": {
-    "result_count_title": "Найдено навыков / всего навыков",
-    "filter_label": "Фильтр",
-    "filter_active_count_one": "{{count}} фильтр",
-    "filter_active_count_few": "Фильтров: {{count}}",
-    "filter_active_count_many": "Фильтров: {{count}}",
-    "filter_active_count_other": "Фильтров: {{count}}",
-    "clear_filters": "Сбросить фильтры",
     "section_usage": "Использование",
     "section_labels": "Метки",
     "filter_search_placeholder": "Фильтр...",
     "no_labels": "Пока нет меток",
     "no_results": "Ничего не найдено",
-    "display": "Отображение",
-    "sort_by": "Сортировать по",
-    "direction_asc": "По возрастанию",
-    "direction_desc": "По убыванию",
-    "section_columns": "Столбцы",
     "manage_labels": "Управление метками...",
     "manage_labels_title": "Метки навыков"
   },
   "detail": {
-    "all_skills": "Все навыки",
     "read_only": "Только для чтения",
-    "delete_aria": "Удалить навык",
-    "delete_tooltip": "Удалить навык",
     "supporting_data_warning": "Не удалось загрузить часть данных рабочего пространства. Атрибуция автора, названия сред выполнения или права на редактирование могут отображаться не полностью до следующего обновления.",
     "delete_file": "Удалить файл",
     "name_placeholder": "skill-name",
@@ -164,12 +145,12 @@
     "save_bar": {
       "changed_summary": "Изменено: {{parts}}",
       "changed_files_one": "{{count}} файл",
-      "changed_files_few": "Файлов: {{count}}",
-      "changed_files_many": "Файлов: {{count}}",
       "changed_files_other": "Файлов: {{count}}",
       "discard": "Отменить",
       "save": "Сохранить изменения",
-      "saving": "Сохранение…"
+      "saving": "Сохранение…",
+      "changed_files_few": "Файлов: {{count}}",
+      "changed_files_many": "Файлов: {{count}}"
     },
     "not_found": {
       "title": "Навык не найден",
@@ -181,8 +162,6 @@
     "toast_deleted": "Навык удалён",
     "toast_delete_failed": "Не удалось удалить навык",
     "refresh": {
-      "button": "Обновить",
-      "tooltip": "Повторно загрузить этот навык из источника",
       "source_github": "GitHub",
       "source_skills_sh": "Skills.sh",
       "source_clawhub": "ClawHub",
@@ -200,14 +179,14 @@
     "delete_dialog": {
       "title": "Удалить навык?",
       "description_with_agents_one": "«{{name}}» будет безвозвратно удалён и снят с {{count}} агента, который сейчас его использует.",
-      "description_with_agents_few": "«{{name}}» будет безвозвратно удалён и снят с агентов, которые сейчас его используют ({{count}}).",
-      "description_with_agents_many": "«{{name}}» будет безвозвратно удалён и снят с агентов, которые сейчас его используют ({{count}}).",
       "description_with_agents_other": "«{{name}}» будет безвозвратно удалён и снят с агентов, которые сейчас его используют ({{count}}).",
       "description_no_agents": "«{{name}}» будет безвозвратно удалён и снят со всех агентов.",
       "warning": "Это действие нельзя отменить.",
       "cancel": "Отмена",
       "confirm": "Удалить навсегда",
-      "deleting": "Удаление…"
+      "deleting": "Удаление…",
+      "description_with_agents_few": "«{{name}}» будет безвозвратно удалён и снят с агентов, которые сейчас его используют ({{count}}).",
+      "description_with_agents_many": "«{{name}}» будет безвозвратно удалён и снят с агентов, которые сейчас его используют ({{count}})."
     },
     "add_file": {
       "placeholder": "templates/review.md",
@@ -225,55 +204,50 @@
     },
     "header": {
       "files_one": "{{count}} файл",
-      "files_few": "Файлов: {{count}}",
-      "files_many": "Файлов: {{count}}",
       "files_other": "Файлов: {{count}}",
-      "used_by_one": "{{count}} агент",
-      "used_by_few": "Агентов: {{count}}",
-      "used_by_many": "Агентов: {{count}}",
-      "used_by_other": "Агентов: {{count}}",
-      "updated": "Обновлён {{when}}",
-      "updated_by": "Обновлён {{when}} — {{name}}"
-    },
-    "tabs": {
-      "aria": "Разделы навыка",
-      "overview": "Обзор",
-      "files_one": "Файлы {{count}}",
-      "files_few": "Файлы {{count}}",
-      "files_many": "Файлы {{count}}",
-      "files_other": "Файлы {{count}}"
+      "files_few": "Файлов: {{count}}",
+      "files_many": "Файлов: {{count}}"
     },
     "overview": {
       "properties": "Свойства",
-      "properties_hint": "Эти поля синхронизированы с frontmatter файла SKILL.md.",
       "name": "Название",
       "description": "Описание",
       "description_hint": "Агенты используют это, чтобы решить, когда загружать навык.",
       "labels": "Метки",
-      "used_by_one": "Используется {{count}} агентом",
-      "used_by_few": "Используется агентами: {{count}}",
-      "used_by_many": "Используется агентами: {{count}}",
-      "used_by_other": "Используется агентами: {{count}}",
       "used_by_empty": "Пока не назначен ни одному агенту. Чтобы назначить, откройте вкладку «Навыки» у агента.",
       "permissions_owner": "Вы можете редактировать и удалять этот навык. Изменения вступят в силу при следующем запуске агента.",
       "permissions_locked_creator": "Редактировать этот навык может только создатель ({{name}}) или администратор рабочего пространства.",
       "permissions_locked": "Редактировать этот навык может только создатель или администратор рабочего пространства.",
-      "properties_help": "О свойствах навыка",
       "character_count": "{{count}} символов"
     },
     "files": {
       "list_aria": "Файлы навыка",
       "main": "Основной файл",
       "supporting_one": "Дополнительный {{count}}",
-      "supporting_few": "Дополнительные {{count}}",
-      "supporting_many": "Дополнительные {{count}}",
       "supporting_other": "Дополнительные {{count}}",
       "supporting_empty": "Нет дополнительных файлов.",
       "add_file": "Новый файл",
       "mode_aria": "Режим просмотра файла",
       "mode_preview": "Просмотр",
       "mode_edit": "Редактирование",
-      "mode_raw": "Обычный текст"
+      "mode_raw": "Обычный текст",
+      "supporting_few": "Дополнительные {{count}}",
+      "supporting_many": "Дополнительные {{count}}"
+    },
+    "sections": {
+      "content": "Содержимое",
+      "files": "Файлы",
+      "edit": "Изменить",
+      "open": "Открыть",
+      "add": "Добавить"
+    },
+    "menu": {
+      "copy_link": "Копировать ссылку",
+      "link_copied": "Ссылка скопирована",
+      "delete": "Удалить навык"
+    },
+    "panel": {
+      "add_description": "Добавить описание"
     }
   },
   "create": {
@@ -322,8 +296,6 @@
       "folder_label": "Папка",
       "archive_label": "Архив",
       "files_one": "{{count}} файл",
-      "files_few": "Файлов: {{count}}",
-      "files_many": "Файлов: {{count}}",
       "files_other": "Файлов: {{count}}",
       "missing_skill_md": "Это не навык — в папке нет файла SKILL.md.",
       "too_large": "Этот навык слишком велик для импорта.",
@@ -334,7 +306,9 @@
       "cancel": "Отмена",
       "import": "Импортировать",
       "importing": "Импорт…",
-      "toast_imported": "Навык импортирован"
+      "toast_imported": "Навык импортирован",
+      "files_few": "Файлов: {{count}}",
+      "files_many": "Файлов: {{count}}"
     },
     "url": {
       "url_label": "URL навыка",
@@ -369,8 +343,6 @@
     "import_button": "Импортировать в рабочее пространство",
     "importing": "Импорт…",
     "skill_files_one": "{{count}} файл",
-    "skill_files_few": "Файлов: {{count}}",
-    "skill_files_many": "Файлов: {{count}}",
     "skill_files_other": "Файлов: {{count}}",
     "skill_name_label": "Название навыка в рабочем пространстве",
     "skill_description_label": "Описание",
@@ -405,7 +377,9 @@
     "conflict_footer": "Ожидают решения конфликтов: {{count}}.",
     "conflict_apply_button": "Применить решения",
     "conflict_missing_resolution": "Выберите способ разрешения этого конфликта.",
-    "conflict_name_still_exists": "Такое название уже существует. Выберите другое название или пропустите."
+    "conflict_name_still_exists": "Такое название уже существует. Выберите другое название или пропустите.",
+    "skill_files_few": "Файлов: {{count}}",
+    "skill_files_many": "Файлов: {{count}}"
   },
   "file_tree": {
     "no_files": "Нет файлов",

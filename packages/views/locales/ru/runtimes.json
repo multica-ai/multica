@@ -1,9 +1,7 @@
 {
   "page": {
     "title": "Среды выполнения",
-    "learn_more": "Подробнее →",
     "connect_remote": "Добавить машину",
-    "search_placeholder": "Поиск…",
     "scope_mine": "Мои",
     "scope_all": "Все",
     "live": "В реальном времени",
@@ -25,7 +23,7 @@
       "title": "Запуск локальной среды выполнения…",
       "hint": "Подключение к рабочему пространству…"
     },
-    "add": "Добавить",
+    "add": "Добавить среду выполнения",
     "add_menu": {
       "machines": "Машины",
       "this_computer": "Этот компьютер",
@@ -67,7 +65,7 @@
       "no_matches": "Подходящих машин или облачных сервисов нет"
     },
     "filters": {
-      "all": "Все",
+      "all": "Все среды выполнения",
       "online": "В сети",
       "offline": "Не в сети"
     }
@@ -93,13 +91,8 @@
     "this_machine": "Это устройство",
     "local_badge": "Локально · этот компьютер",
     "pending_custom_runtimes": "Ожидающие пользовательские среды выполнения",
-    "runtime_count_one": "{{count}} среда выполнения",
-    "runtime_count_few": "{{count}} среды выполнения",
-    "runtime_count_many": "{{count}} сред выполнения",
-    "runtime_count_other": "{{count}} среды выполнения",
+    "daemon_title": "Демон",
     "busy_count_one": "{{count}} занята",
-    "busy_count_few": "{{count}} заняты",
-    "busy_count_many": "{{count}} занято",
     "busy_count_other": "{{count}} заняты",
     "no_matches_title": "Машин не найдено",
     "no_matches_hint": "Нет машин, соответствующих текущему поиску или фильтру.",
@@ -112,14 +105,10 @@
     "metrics": {
       "runtimes": "Среды выполнения",
       "runtimes_hint_one": "{{count}} в сети",
-      "runtimes_hint_few": "{{count}} в сети",
-      "runtimes_hint_many": "{{count}} в сети",
       "runtimes_hint_other": "{{count}} в сети",
       "health": "Состояние",
       "health_clear": "Проблем нет",
       "health_issues_one": "{{count}} проблема",
-      "health_issues_few": "{{count}} проблемы",
-      "health_issues_many": "{{count}} проблем",
       "health_issues_other": "{{count}} проблемы",
       "workload": "Нагрузка",
       "workload_value_idle": "Простаивает",
@@ -127,7 +116,11 @@
       "workload_hint": "{{running}} выполняется · {{queued}} в очереди",
       "cli": "CLI",
       "cloud_worker": "Облачный воркер",
-      "local_daemon": "Локальный демон"
+      "local_daemon": "Локальный демон",
+      "runtimes_hint_few": "{{count}} в сети",
+      "runtimes_hint_many": "{{count}} в сети",
+      "health_issues_few": "{{count}} проблемы",
+      "health_issues_many": "{{count}} проблем"
     },
     "rename": "Переименовать машину",
     "rename_dialog": {
@@ -141,7 +134,9 @@
       "toast_saved": "Машина переименована",
       "toast_cleared": "Имя машины очищено",
       "toast_failed": "Не удалось переименовать машину"
-    }
+    },
+    "busy_count_few": "{{count}} заняты",
+    "busy_count_many": "{{count}} занято"
   },
   "health": {
     "online": {
@@ -170,18 +165,16 @@
     "fact_owner": "Владелец",
     "fact_device": "Устройство",
     "fact_runtime": "Среда выполнения",
-    "technical_details": "Технические детали",
     "fact_daemon_cli": "CLI демона",
     "fact_daemon_id": "ID демона",
-    "serving_title": "Обслуживает",
-    "serving_count_one": "{{count}} агент",
-    "serving_count_few": "{{count}} агента",
-    "serving_count_many": "{{count}} агентов",
-    "serving_count_other": "{{count}} агента",
+    "usage_title": "Использование",
     "no_agents": "К этой среде выполнения пока не привязано ни одного агента.",
-    "diagnostics_title": "Диагностика",
     "diagnostics_cli": "CLI",
     "diagnostics_visibility": "Видимость",
+    "concurrency_title": "Параллельные запуски",
+    "concurrency_none": "Без ограничений",
+    "concurrency_hint": "Максимальное число одновременных запусков всех агентов в этой среде выполнения ({{min}}–{{max}}). Оставьте поле пустым, чтобы снять ограничение.",
+    "toast_concurrency_failed": "Не удалось обновить ограничение параллельных запусков",
     "visibility_label": {
       "private": "Приватная",
       "public": "Публичная",
@@ -208,8 +201,6 @@
     "visibility_members_no_match": "Подходящих участников нет.",
     "visibility_members_edit": "Изменить",
     "visibility_members_count_one": "{{count}} участник",
-    "visibility_members_count_few": "{{count}} участника",
-    "visibility_members_count_many": "{{count}} участников",
     "visibility_members_count_other": "{{count}} участника",
     "visibility_toast_updated": "Видимость изменена на «{{visibility}}»",
     "visibility_toast_failed": "Не удалось изменить видимость",
@@ -237,21 +228,15 @@
       },
       "cascade": {
         "title_one": "Отвязать {{count}} агента и удалить среду выполнения?",
-        "title_few": "Отвязать {{count}} агентов и удалить среду выполнения?",
-        "title_many": "Отвязать {{count}} агентов и удалить среду выполнения?",
         "title_other": "Отвязать {{count}} агентов и удалить среду выполнения?",
         "description": "Удалить «{{name}}». Агенты ниже сохраняются — их инструкции, чаты и история задач останутся нетронутыми — но они будут отвязаны и не смогут работать, пока вы не привяжете их к другой среде выполнения. Их задачи в очереди или в работе будут отменены, после чего среда выполнения будет удалена.",
         "warning": "Задачи в очереди и в работе будут отменены, и этим агентам нельзя будет назначать новую работу, пока они не будут привязаны к среде выполнения.",
         "notice_runtime_has_active_agents": "С момента открытия этого диалога были добавлены активные агенты. Проверьте новый план и подтвердите.",
         "notice_runtime_delete_plan_changed": "Набор активных агентов изменился, пока этот диалог был открыт. Проверьте новый план и подтвердите.",
         "checkbox_one": "Я понимаю, что этот {{count}} агент будет отвязан и не сможет работать, пока я не привяжу его к среде выполнения, и что все задачи в очереди или в работе будут отменены.",
-        "checkbox_few": "Я понимаю, что эти {{count}} агента будут отвязаны и не смогут работать, пока я не привяжу их к среде выполнения, и что все задачи в очереди или в работе будут отменены.",
-        "checkbox_many": "Я понимаю, что эти {{count}} агентов будут отвязаны и не смогут работать, пока я не привяжу их к среде выполнения, и что все задачи в очереди или в работе будут отменены.",
         "checkbox_other": "Я понимаю, что эти {{count}} агента будут отвязаны и не смогут работать, пока я не привяжу их к среде выполнения, и что все задачи в очереди или в работе будут отменены.",
         "cancel": "Отмена",
         "confirm_one": "Отвязать {{count}} агента и удалить среду выполнения",
-        "confirm_few": "Отвязать {{count}} агентов и удалить среду выполнения",
-        "confirm_many": "Отвязать {{count}} агентов и удалить среду выполнения",
         "confirm_other": "Отвязать {{count}} агентов и удалить среду выполнения",
         "submitting": "Отвязка и удаление...",
         "delete_failed_toast": "Не удалось удалить среду выполнения",
@@ -270,31 +255,35 @@
           "workload_queued": "В очереди",
           "visibility_workspace": "Рабочее пространство",
           "visibility_private": "Приватная"
-        }
+        },
+        "title_few": "Отвязать {{count}} агентов и удалить среду выполнения?",
+        "title_many": "Отвязать {{count}} агентов и удалить среду выполнения?",
+        "checkbox_few": "Я понимаю, что эти {{count}} агента будут отвязаны и не смогут работать, пока я не привяжу их к среде выполнения, и что все задачи в очереди или в работе будут отменены.",
+        "checkbox_many": "Я понимаю, что эти {{count}} агентов будут отвязаны и не смогут работать, пока я не привяжу их к среде выполнения, и что все задачи в очереди или в работе будут отменены.",
+        "confirm_few": "Отвязать {{count}} агентов и удалить среду выполнения",
+        "confirm_many": "Отвязать {{count}} агентов и удалить среду выполнения"
       }
     },
     "toast_deleted": "Среда выполнения удалена",
     "toast_delete_failed": "Не удалось удалить среду выполнения",
     "running_chip_one": "· {{count}} выполняется",
-    "running_chip_few": "· {{count}} выполняется",
-    "running_chip_many": "· {{count}} выполняется",
     "running_chip_other": "· {{count}} выполняется",
     "queued_chip_one": "· {{count}} в очереди",
+    "queued_chip_other": "· {{count}} в очереди",
+    "visibility_members_count_few": "{{count}} участника",
+    "visibility_members_count_many": "{{count}} участников",
+    "running_chip_few": "· {{count}} выполняется",
+    "running_chip_many": "· {{count}} выполняется",
     "queued_chip_few": "· {{count}} в очереди",
-    "queued_chip_many": "· {{count}} в очереди",
-    "queued_chip_other": "· {{count}} в очереди"
+    "queued_chip_many": "· {{count}} в очереди"
   },
   "detail_page": {
     "not_found_title": "Среда выполнения не найдена",
     "not_found_hint": "Возможно, она была удалена или у вас нет доступа."
   },
   "running_one": "{{count}} выполняется",
-  "running_few": "{{count}} выполняется",
-  "running_many": "{{count}} выполняется",
   "running_other": "{{count}} выполняется",
   "queued_one": "{{count}} в очереди",
-  "queued_few": "{{count}} в очереди",
-  "queued_many": "{{count}} в очереди",
   "queued_other": "{{count}} в очереди",
   "connect": {
     "title": "Добавить машину",
@@ -391,10 +380,10 @@
     "heatmap_quietest_weekday": "Самый спокойный день недели",
     "heatmap_average": "в среднем {{value}}",
     "heatmap_window_total_one": "Итого за {{count}} день",
-    "heatmap_window_total_few": "Итого за {{count}} дня",
-    "heatmap_window_total_many": "Итого за {{count}} дней",
     "heatmap_window_total_other": "Итого за {{count}} дня",
-    "tooltip_total": "Всего"
+    "tooltip_total": "Всего",
+    "heatmap_window_total_few": "Итого за {{count}} дня",
+    "heatmap_window_total_many": "Итого за {{count}} дней"
   },
   "list": {
     "col_runtime": "Среда выполнения",
@@ -532,8 +521,6 @@
     "empty_pricing_hint": "Задайте собственный тариф, чтобы включить их в итоговую стоимость.",
     "empty_zero_cost": "Токены зафиксированы, но расчёт стоимости вернул $0.",
     "unmapped_notice_one": "Для {{count}} модели нет поддерживаемой цены — её токены исключены из итоговой стоимости.",
-    "unmapped_notice_few": "Для {{count}} моделей нет поддерживаемой цены — их токены исключены из итоговой стоимости.",
-    "unmapped_notice_many": "Для {{count}} моделей нет поддерживаемой цены — их токены исключены из итоговой стоимости.",
     "unmapped_notice_other": "Для {{count}} моделей нет поддерживаемой цены — их токены исключены из итоговой стоимости.",
     "custom_pricing": {
       "open_button": "Задать собственные цены",
@@ -556,12 +543,8 @@
     "cost_by_tab_agent": "По агентам",
     "cost_by_tab_model": "По моделям",
     "cost_by_caption_agent_one": "{{count}} агент в этой среде выполнения",
-    "cost_by_caption_agent_few": "{{count}} агента в этой среде выполнения",
-    "cost_by_caption_agent_many": "{{count}} агентов в этой среде выполнения",
     "cost_by_caption_agent_other": "{{count}} агента в этой среде выполнения",
     "cost_by_caption_model_one": "{{count}} модель использована",
-    "cost_by_caption_model_few": "{{count}} модели использовано",
-    "cost_by_caption_model_many": "{{count}} моделей использовано",
     "cost_by_caption_model_other": "{{count}} модели использовано",
     "daily_breakdown_toggle": "Таблица разбивки по дням",
     "table_date": "Дата",
@@ -570,10 +553,16 @@
     "table_output": "Выход",
     "table_cache_r": "Кэш Ч",
     "table_cache_w": "Кэш З",
-    "no_data": "Данных об использовании пока нет"
+    "no_data": "Данных об использовании пока нет",
+    "unmapped_notice_few": "Для {{count}} моделей нет поддерживаемой цены — их токены исключены из итоговой стоимости.",
+    "unmapped_notice_many": "Для {{count}} моделей нет поддерживаемой цены — их токены исключены из итоговой стоимости.",
+    "cost_by_caption_agent_few": "{{count}} агента в этой среде выполнения",
+    "cost_by_caption_agent_many": "{{count}} агентов в этой среде выполнения",
+    "cost_by_caption_model_few": "{{count}} модели использовано",
+    "cost_by_caption_model_many": "{{count}} моделей использовано"
   },
   "qoder": {
-    "title": "Среда выполнения QCA",
+    "title": "Среда выполнения Qoder Cloud Agents",
     "description": "Подключите Qoder Cloud Agents. Multica управляет выполнением и хранит учётные данные в зашифрованном виде. Администраторы рабочего пространства могут изменять эту конфигурацию.",
     "loading": "Загрузка…",
     "unavailable": "Требуется настройка сервера: задайте MULTICA_VCS_SECRET_KEY.",
@@ -604,26 +593,24 @@
     "select_environment": "Выберите окружение",
     "no_environments": "Нет доступных окружений. Создайте окружение в Qoder и обновите список.",
     "refresh_catalog": "Обновить список",
-    "agent": "Агент QCA",
-    "select_agent": "Выберите агента QCA",
-    "agent_hint": "Используйте PAT, сохранённый в удалённой среде выполнения, чтобы привязать агента QCA. Управляйте его моделью, инструментами и навыками в Qoder.",
-    "no_agents": "Нет доступных агентов QCA. Создайте агента в Qoder и обновите список.",
-    "agent_unavailable": "Привязанный агент QCA недоступен. Выберите другого агента.",
+    "agent": "Удалённый агент",
+    "select_agent": "Выберите агента из Qoder Cloud Agents",
+    "agent_hint": "Используйте сохранённый Qoder PAT, чтобы привязать удалённого агента. Управляйте его моделью, инструментами и skill в Qoder Cloud Agents.",
+    "no_agents": "Нет доступных агентов. Создайте агента в Qoder Cloud Agents и обновите список.",
+    "agent_unavailable": "Привязанный удалённый агент недоступен. Выберите другого агента.",
     "save_agent": "Сохранить привязку",
-    "agent_saved": "Привязка агента QCA сохранена",
-    "agent_save_failed": "Не удалось сохранить привязку агента QCA",
+    "agent_saved": "Привязка агента к Qoder Cloud Agents сохранена",
+    "agent_save_failed": "Не удалось сохранить привязку агента к Qoder Cloud Agents",
     "cloud_title": "Qoder Cloud Agents",
     "managed": "Управляемый сервис",
     "cloud_description": "Запускайте агентов в Qoder Cloud через общее подключение без обслуживания локальной машины.",
     "configure_credentials": "Настроить учётные данные",
     "add_agent": "Добавить агента",
-    "add_agent_description": "Создайте агента Multica, связанного с существующим агентом QCA. Он будет использовать окружение и учётные данные, настроенные для Qoder Cloud.",
+    "add_agent_description": "Создайте агента Multica, связанного с существующим агентом в Qoder Cloud Agents. Он будет использовать окружение и учётные данные, настроенные для Qoder Cloud.",
     "agent_name": "Имя агента",
     "cancel": "Отмена",
     "shared_credentials_hint": "Учётные данные общие для рабочего пространства. PAT хранятся в зашифрованном виде и не показываются после сохранения.",
     "agent_count_one": "{{count}} агент",
-    "agent_count_few": "{{count}} агента",
-    "agent_count_many": "{{count}} агентов",
     "agent_count_other": "{{count}} агента",
     "github_url": "URL GitHub",
     "github_token": "Токен GitHub",
@@ -652,20 +639,20 @@
       "verified": "Токен проверен",
       "environment_waiting": "Окружения загрузятся после проверки токена",
       "repo_count_one": "{{count}} репозиторий",
-      "repo_count_few": "{{count}} репозитория",
-      "repo_count_many": "{{count}} репозиториев",
       "repo_count_other": "{{count}} репозитория",
       "optional": "Необязательно",
-      "execution_summary": "До {{concurrency}} одновременно · тайм-аут {{timeout}} мин"
+      "execution_summary": "До {{concurrency}} одновременно · тайм-аут {{timeout}} мин",
+      "repo_count_few": "{{count}} репозитория",
+      "repo_count_many": "{{count}} репозиториев"
     },
     "stop_confirm": {
       "title": "Приостановить Qoder Cloud Agents?",
       "description": "Новые задачи не будут отправляться в Qoder до возобновления работы.",
       "cancel": "Отмена",
       "description_agents_one": "Агенты ({{count}}) сохранят инструкции и историю, но не смогут брать новые задачи до возобновления Qoder или перехода в другую среду выполнения.",
+      "description_agents_other": "Агенты ({{count}}) сохранят инструкции и историю, но не смогут брать новые задачи до возобновления Qoder или перехода в другую среду выполнения.",
       "description_agents_few": "Эти {{count}} агента сохранят инструкции и историю, но не смогут брать новые задачи до возобновления Qoder или перехода в другую среду выполнения.",
-      "description_agents_many": "Эти {{count}} агентов сохранят инструкции и историю, но не смогут брать новые задачи до возобновления Qoder или перехода в другую среду выполнения.",
-      "description_agents_other": "Агенты ({{count}}) сохранят инструкции и историю, но не смогут брать новые задачи до возобновления Qoder или перехода в другую среду выполнения."
+      "description_agents_many": "Эти {{count}} агентов сохранят инструкции и историю, но не смогут брать новые задачи до возобновления Qoder или перехода в другую среду выполнения."
     },
     "connect_title": "Подключить Qoder Cloud Agents",
     "connect_description": "Multica выполняет задачи в изолированных окружениях Qoder.",
@@ -702,22 +689,28 @@
       "run_timeout": "Тайм-аут запуска",
       "manage_title": "Управление",
       "minutes_one": "{{count}} минута",
+      "minutes_other": "{{count}} минуты",
       "minutes_few": "{{count}} минуты",
-      "minutes_many": "{{count}} минут",
-      "minutes_other": "{{count}} минуты"
+      "minutes_many": "{{count}} минут"
     },
     "disconnect_confirm": {
       "title": "Отключить Qoder Cloud Agents?",
       "description": "Сохранённые PAT, токены репозиториев и среда выполнения Qoder будут удалены. Для повторного использования Qoder потребуется подключить заново.",
       "description_agents_one": "Агенты ({{count}}) будут отвязаны. Они сохранят инструкции и историю и смогут перейти в другую среду выполнения.",
-      "description_agents_few": "Эти {{count}} агента будут отвязаны. Они сохранят инструкции и историю и смогут перейти в другую среду выполнения.",
-      "description_agents_many": "Эти {{count}} агентов будут отвязаны. Они сохранят инструкции и историю и смогут перейти в другую среду выполнения.",
       "description_agents_other": "Агенты ({{count}}) будут отвязаны. Они сохранят инструкции и историю и смогут перейти в другую среду выполнения.",
       "plan_changed": "Список агентов Qoder изменился. Проверьте его и подтвердите снова.",
       "confirm": "Отключить",
       "working": "Отключение…",
       "cancel": "Отмена",
-      "done": "Qoder отключён"
-    }
-  }
+      "done": "Qoder отключён",
+      "description_agents_few": "Эти {{count}} агента будут отвязаны. Они сохранят инструкции и историю и смогут перейти в другую среду выполнения.",
+      "description_agents_many": "Эти {{count}} агентов будут отвязаны. Они сохранят инструкции и историю и смогут перейти в другую среду выполнения."
+    },
+    "agent_count_few": "{{count}} агента",
+    "agent_count_many": "{{count}} агентов"
+  },
+  "running_few": "{{count}} выполняется",
+  "running_many": "{{count}} выполняется",
+  "queued_few": "{{count}} в очереди",
+  "queued_many": "{{count}} в очереди"
 }

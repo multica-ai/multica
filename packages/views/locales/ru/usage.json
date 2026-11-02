@@ -95,17 +95,17 @@
     "header_time": "Время",
     "header_tasks": "Задачи",
     "usage_unreported_one": "{{count}} запуск не сообщил об использовании",
-    "usage_unreported_few": "{{count}} запуска не сообщили об использовании",
-    "usage_unreported_many": "{{count}} запусков не сообщили об использовании",
     "usage_unreported_other": "{{count}} запуска не сообщили об использовании",
     "usage_unreported_pending_one": "{{count}} запуск не сообщил об использовании · итоги ещё обрабатываются",
-    "usage_unreported_pending_few": "{{count}} запуска не сообщили об использовании · итоги ещё обрабатываются",
-    "usage_unreported_pending_many": "{{count}} запусков не сообщили об использовании · итоги ещё обрабатываются",
     "usage_unreported_pending_other": "{{count}} запуска не сообщили об использовании · итоги ещё обрабатываются",
     "usage_totals_pending": "Итоги использования ещё обрабатываются",
     "show_all": "Показать все",
     "show_less": "Показать топ {{count}}",
-    "no_data": "Нет активности агентов за этот период."
+    "no_data": "Нет активности агентов за этот период.",
+    "usage_unreported_few": "{{count}} запуска не сообщили об использовании",
+    "usage_unreported_many": "{{count}} запусков не сообщили об использовании",
+    "usage_unreported_pending_few": "{{count}} запуска не сообщили об использовании · итоги ещё обрабатываются",
+    "usage_unreported_pending_many": "{{count}} запусков не сообщили об использовании · итоги ещё обрабатываются"
   },
   "empty": {
     "title": "Данных пока нет",

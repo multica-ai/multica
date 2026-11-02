@@ -241,6 +241,9 @@ WITH deleted_wakeup_receipts AS (
 deleted_child_events AS (
  DELETE FROM issue_child_event WHERE workspace_id=$1
 ),
+deleted_unread AS (
+ DELETE FROM issue_unread WHERE workspace_id=$1
+),
 deleted_issues AS (
     DELETE FROM issue WHERE issue.workspace_id = $1
 ),
@@ -476,6 +479,9 @@ deleted_channel_user_bindings AS (
 ),
 deleted_channel_binding_tokens AS (
     DELETE FROM channel_binding_token WHERE workspace_id = $1
+),
+deleted_wecom_install_sessions AS (
+    DELETE FROM wecom_install_session WHERE workspace_id = $1
 ),
 deleted_lark_chat_bindings AS (
     DELETE FROM lark_chat_session_binding

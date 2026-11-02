@@ -64,21 +64,21 @@ describe("rowMatchesFilters — labels dimension", () => {
     const unlabeled = makeRow();
     const labeled = makeRow({ labels: [makeLabel("lab-1")] });
     const empty = makeRow({ labels: [] });
-    expect(rowMatchesFilters(unlabeled, noFilters, "")).toBe(true);
-    expect(rowMatchesFilters(labeled, noFilters, "")).toBe(true);
-    expect(rowMatchesFilters(empty, noFilters, "")).toBe(true);
+    expect(rowMatchesFilters(unlabeled, noFilters)).toBe(true);
+    expect(rowMatchesFilters(labeled, noFilters)).toBe(true);
+    expect(rowMatchesFilters(empty, noFilters)).toBe(true);
   });
 
   it("missing labels fail when a labels filter is on", () => {
     const unlabeled = makeRow();
-    expect(rowMatchesFilters(unlabeled, withLabels(noFilters, "lab-1"), "")).toBe(
+    expect(rowMatchesFilters(unlabeled, withLabels(noFilters, "lab-1"))).toBe(
       false,
     );
   });
 
   it("empty labels fail when a labels filter is on", () => {
     const empty = makeRow({ labels: [] });
-    expect(rowMatchesFilters(empty, withLabels(noFilters, "lab-1"), "")).toBe(
+    expect(rowMatchesFilters(empty, withLabels(noFilters, "lab-1"))).toBe(
       false,
     );
   });
@@ -88,9 +88,9 @@ describe("rowMatchesFilters — labels dimension", () => {
     const b = makeRow({ labels: [makeLabel("lab-b")] });
     const neither = makeRow({ labels: [makeLabel("lab-c")] });
     const filters = withLabels(noFilters, "lab-a", "lab-b");
-    expect(rowMatchesFilters(a, filters, "")).toBe(true);
-    expect(rowMatchesFilters(b, filters, "")).toBe(true);
-    expect(rowMatchesFilters(neither, filters, "")).toBe(false);
+    expect(rowMatchesFilters(a, filters)).toBe(true);
+    expect(rowMatchesFilters(b, filters)).toBe(true);
+    expect(rowMatchesFilters(neither, filters)).toBe(false);
   });
 
   it("labels + usage filter: both must pass (AND)", () => {
@@ -104,21 +104,7 @@ describe("rowMatchesFilters — labels dimension", () => {
       labels: ["lab-1"],
       usage: ["used"],
     };
-    expect(rowMatchesFilters(used, filters, "")).toBe(true);
-    expect(rowMatchesFilters(unused, filters, "")).toBe(false);
-  });
-
-  it("labels + name search: both must pass (AND)", () => {
-    const match = makeRow({
-      name: "review-helper",
-      labels: [makeLabel("lab-1")],
-    });
-    const miss = makeRow({
-      name: "deploy-notes",
-      labels: [makeLabel("lab-1")],
-    });
-    const filters = withLabels(noFilters, "lab-1");
-    expect(rowMatchesFilters(match, filters, "review")).toBe(true);
-    expect(rowMatchesFilters(miss, filters, "review")).toBe(false);
+    expect(rowMatchesFilters(used, filters)).toBe(true);
+    expect(rowMatchesFilters(unused, filters)).toBe(false);
   });
 });

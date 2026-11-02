@@ -90,6 +90,8 @@ Multica 当前会检测以下命令：
 
 **安装 profile。** 把 `MULTICA_DSH_PROFILE_BUNDLE` 设为要安装的 bundle，守护进程会替你安装；也可以自己执行 `dsh plugin --profile multica add <bundle>`。`<bundle>` 可以是 `dsh plugin` 接受的任意形式：npm 包名、目录，或打包好的 tarball。Multica 自己的桥接实现在 [multica-ai/dsh-multica-runtime](https://github.com/multica-ai/dsh-multica-runtime)，目前还没有发布到公共 npm registry（[multica#6936](https://github.com/multica-ai/multica/issues/6936)）。现阶段自托管团队从该仓库自行构建，把变量指向构建产物目录；运行守护进程的机器和构建机器不是同一台时，指向 `npm pack` 产出的 tarball。桥接发布之后，直接填包名最省事。
 
+**迁移现有 profile。** 先备份 profile，按桥接仓库 README 构建与你的 DSH 版本兼容的 bundle。手动安装这个目录或 tarball，再确认 `dsh.profile.bundles` 加载了 `@multica-ai/dsh-runtime`：有 `dsh-profile-multica` 时替换它；两者都有时移除 `dsh-profile-multica`。只在依赖列表声明包名不会加载运行时。`MULTICA_DSH_PROFILE_BUNDLE` 不会迁移现有桥接配置。完成后用 `dsh --profile multica --probe` 验证。
+
 <Callout type="warning">
 优先使用你们自己发布或构建的产物。这个值会在没有二次确认的情况下装进每一台守护进程宿主的 DSH 家目录，填一个未经审查的第三方包，就是做了一次供应链决策。
 </Callout>

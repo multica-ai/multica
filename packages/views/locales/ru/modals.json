@@ -90,8 +90,6 @@
     "members_hint": "Лидер сможет делегировать подзадачи этим участникам.",
     "members_placeholder": "Добавьте агентов или участников рабочего пространства",
     "members_selected_count_one": "Выбран {{count}}",
-    "members_selected_count_few": "Выбрано {{count}}",
-    "members_selected_count_many": "Выбрано {{count}}",
     "members_selected_count_other": "Выбрано {{count}}",
     "members_more_count": "+{{count}}",
     "members_remove_aria": "Удалить {{name}}",
@@ -106,7 +104,9 @@
     "submitting": "Создание...",
     "toast_created": "Команда создана",
     "toast_failed": "Не удалось создать команду",
-    "toast_member_add_failed": "Не удалось добавить {{name}}: {{error}}"
+    "toast_member_add_failed": "Не удалось добавить {{name}}: {{error}}",
+    "members_selected_count_few": "Выбрано {{count}}",
+    "members_selected_count_many": "Выбрано {{count}}"
   },
   "create_project": {
     "title": "Новый проект",
@@ -130,8 +130,6 @@
     "toast_failed": "Не удалось создать проект",
     "repos_pill": "Репозитории",
     "repos_pill_count_one": "{{count}} репозиторий",
-    "repos_pill_count_few": "{{count}} репозитория",
-    "repos_pill_count_many": "{{count}} репозиториев",
     "repos_pill_count_other": "{{count}} репозитория",
     "repos_heading": "Подключить репозитории GitHub к этому проекту",
     "repos_empty": "Пока нет репозиториев на уровне рабочего пространства. Вставьте URL ниже, чтобы подключить один отдельно.",
@@ -154,7 +152,9 @@
     "local_pick_failed": "Не удалось открыть диалог выбора директории.",
     "local_invalid_dir": "Эта директория не может быть использована. Выберите другую.",
     "local_hint": "Агенты на других устройствах не увидят этот путь — они не смогут запуститься. Используйте репозитории для совместной работы.",
-    "repos_ref_default": "Ветка по умолчанию"
+    "repos_ref_default": "Ветка по умолчанию",
+    "repos_pill_count_few": "{{count}} репозитория",
+    "repos_pill_count_many": "{{count}} репозиториев"
   },
   "create_issue": {
     "sr_manual": "Новая задача",
@@ -256,6 +256,7 @@
       "sent_label": "Отправлено",
       "sent_count": "Отправлено: {{count}}",
       "version_blocked_tooltip": "CLI демона должен быть ≥ {{min}}",
+      "qoder_attachments_unsupported": "Агенты Qoder Cloud не могут читать вложения. Удалите их или выберите другого агента.",
       "toast_sent": "Отправлено агенту — вы получите уведомление во входящих, когда всё будет готово",
       "error_agent_unavailable_fallback": "Агент недоступен. Выберите другого агента.",
       "error_daemon_version": "Версия CLI демона этого агента ({{current}}) ниже требуемой {{min}}. Обновите демон, чтобы использовать создание с агентом.",

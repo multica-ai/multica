@@ -2279,12 +2279,15 @@ SELECT
     COALESCE($9::boolean, FALSE),
     $10,
     $11,
-    CASE
+    NULLIF(CASE
         WHEN COALESCE($12::text, '') <> ''
         THEN jsonb_build_object('head_sha', $12::text)
-        ELSE NULL
-    END,
-    $13,
+        ELSE '{}'::jsonb
+    END || CASE
+        WHEN COALESCE($13::boolean, FALSE)
+        THEN '{"fresh_rerun":true}'::jsonb
+        ELSE '{}'::jsonb
+    END, '{}'::jsonb),
     $14,
     $15,
     $16,
@@ -2294,9 +2297,10 @@ SELECT
     $20,
     $21,
     $22,
+    $23,
     -- The issue's status as this task is queued: the workflow step it works on (MUL-7420).
     (SELECT i.status FROM issue i WHERE i.id = $3),
-    COALESCE($23::uuid, gen_random_uuid())
+    COALESCE($24::uuid, gen_random_uuid())
 WHERE lock_task_owner_rows($1, $3, $2)
 RETURNING id, agent_id, issue_id, status, priority, dispatched_at, started_at, completed_at, result, error, created_at, context, runtime_id, session_id, work_dir, trigger_comment_id, chat_session_id, autopilot_run_id, attempt, max_attempts, parent_task_id, failure_reason, trigger_summary, force_fresh_session, is_leader_task, wait_reason, initiator_user_id, handoff_note, prepare_lease_expires_at, squad_id, runtime_mcp_overlay, escalation_for_task_id, fire_at, originator_user_id, runtime_connected_apps, coalesced_comment_ids, delivered_comment_ids, chat_input_task_id, chat_finalize_deferred_at, originator_source, delegated_from_task_id, retry_of_task_id, rerun_of_task_id, rule_version_id, trigger_evidence_kind, trigger_evidence_ref_id, accountable_user_id, session_rollout_missing, retired_session_id, quick_actions_disabled, regenerate_quick_actions_for, branch_name, durable_work_dir, channel_context_revision, comment_thread_id, cancelled_by_type, cancelled_by_id, cancelled_by_name, issue_snapshot, workflow_step
 `
@@ -2314,6 +2318,7 @@ type CreateAgentTaskParams struct {
 	HandoffNote          pgtype.Text   `json:"handoff_note"`
 	SquadID              pgtype.UUID   `json:"squad_id"`
 	HeadSha              pgtype.Text   `json:"head_sha"`
+	FreshRerun           pgtype.Bool   `json:"fresh_rerun"`
 	OriginatorUserID     pgtype.UUID   `json:"originator_user_id"`
 	AccountableUserID    pgtype.UUID   `json:"accountable_user_id"`
 	RuntimeMcpOverlay    []byte        `json:"runtime_mcp_overlay"`
@@ -2334,8 +2339,9 @@ type CreateAgentTaskParams struct {
 // head_sha stamps the commit under review into the task's context JSONB so the
 // reviewer-loop dedup (HasPendingTaskForIssueAndAgent) can tell a pending run
 // against an OLD head apart from a fresh request against a NEW head (TEN-356).
-// Empty/absent head_sha leaves context NULL, preserving pre-TEN-356 behavior for
-// issues with no linked PR. Issue-linked tasks never hit quick-create context
+// Empty/absent head_sha leaves context NULL unless fresh_rerun is requested.
+// fresh_rerun disables source session/workdir reuse without losing rerun lineage.
+// Issue-linked tasks never hit quick-create context
 // parsing (parseQuickCreateContext short-circuits on IssueID.Valid), so this
 // key rides harmlessly alongside.
 // id is minted by the application as a UUIDv7 (pkg/dbid) so consecutive
@@ -2359,6 +2365,7 @@ func (q *Queries) CreateAgentTask(ctx context.Context, arg CreateAgentTaskParams
 		arg.HandoffNote,
 		arg.SquadID,
 		arg.HeadSha,
+		arg.FreshRerun,
 		arg.OriginatorUserID,
 		arg.AccountableUserID,
 		arg.RuntimeMcpOverlay,
@@ -6910,8 +6917,9 @@ type MarkAgentTaskWaitingLocalDirectoryParams struct {
 // alongside the status.
 //
 // The CHECK only allows the transition from 'dispatched' so a daemon can't
-// mark an already-running or terminal task as waiting; the StartAgentTask
-// mutation handles the reverse transition once the lock is acquired.
+// mark an already-running or terminal task as waiting; the
+// StartAgentTaskWithSupplement mutation handles the reverse transition once
+// the lock is acquired.
 func (q *Queries) MarkAgentTaskWaitingLocalDirectory(ctx context.Context, arg MarkAgentTaskWaitingLocalDirectoryParams) (AgentTaskQueue, error) {
 	row := q.db.QueryRow(ctx, markAgentTaskWaitingLocalDirectory, arg.ID, arg.WaitReason, arg.PrepareLeaseSecs)
 	var i AgentTaskQueue
@@ -7103,7 +7111,7 @@ WHERE id = (
     ORDER BY t.created_at DESC
     LIMIT 1
 )
-RETURNING id, coalesced_comment_ids
+RETURNING id, agent_id, issue_id, status, priority, dispatched_at, started_at, completed_at, result, error, created_at, context, runtime_id, session_id, work_dir, trigger_comment_id, chat_session_id, autopilot_run_id, attempt, max_attempts, parent_task_id, failure_reason, trigger_summary, force_fresh_session, is_leader_task, wait_reason, initiator_user_id, handoff_note, prepare_lease_expires_at, squad_id, runtime_mcp_overlay, escalation_for_task_id, fire_at, originator_user_id, runtime_connected_apps, coalesced_comment_ids, delivered_comment_ids, chat_input_task_id, chat_finalize_deferred_at, originator_source, delegated_from_task_id, retry_of_task_id, rerun_of_task_id, rule_version_id, trigger_evidence_kind, trigger_evidence_ref_id, accountable_user_id, session_rollout_missing, retired_session_id, quick_actions_disabled, regenerate_quick_actions_for, branch_name, durable_work_dir, channel_context_revision, comment_thread_id, cancelled_by_type, cancelled_by_id, cancelled_by_name, issue_snapshot, workflow_step
 `
 
 type MergeCommentIntoPendingTaskParams struct {
@@ -7121,11 +7129,6 @@ type MergeCommentIntoPendingTaskParams struct {
 	IssueID                 pgtype.UUID `json:"issue_id"`
 	AgentID                 pgtype.UUID `json:"agent_id"`
 	HeadSha                 pgtype.Text `json:"head_sha"`
-}
-
-type MergeCommentIntoPendingTaskRow struct {
-	ID                  pgtype.UUID   `json:"id"`
-	CoalescedCommentIds []pgtype.UUID `json:"coalesced_comment_ids"`
 }
 
 // MUL-4195: fold a newly-arrived comment into an existing task for (issue,
@@ -7170,7 +7173,7 @@ type MergeCommentIntoPendingTaskRow struct {
 // dispatched/running). The caller must NOT blindly enqueue a fresh task in that
 // case — a dispatched sibling would trip the unique index — it defers to
 // completion reconciliation unless no active task exists at all.
-func (q *Queries) MergeCommentIntoPendingTask(ctx context.Context, arg MergeCommentIntoPendingTaskParams) (MergeCommentIntoPendingTaskRow, error) {
+func (q *Queries) MergeCommentIntoPendingTask(ctx context.Context, arg MergeCommentIntoPendingTaskParams) (AgentTaskQueue, error) {
 	row := q.db.QueryRow(ctx, mergeCommentIntoPendingTask,
 		arg.NewTriggerCommentID,
 		arg.NewTriggerSummary,
@@ -7187,8 +7190,69 @@ func (q *Queries) MergeCommentIntoPendingTask(ctx context.Context, arg MergeComm
 		arg.AgentID,
 		arg.HeadSha,
 	)
-	var i MergeCommentIntoPendingTaskRow
-	err := row.Scan(&i.ID, &i.CoalescedCommentIds)
+	var i AgentTaskQueue
+	err := row.Scan(
+		&i.ID,
+		&i.AgentID,
+		&i.IssueID,
+		&i.Status,
+		&i.Priority,
+		&i.DispatchedAt,
+		&i.StartedAt,
+		&i.CompletedAt,
+		&i.Result,
+		&i.Error,
+		&i.CreatedAt,
+		&i.Context,
+		&i.RuntimeID,
+		&i.SessionID,
+		&i.WorkDir,
+		&i.TriggerCommentID,
+		&i.ChatSessionID,
+		&i.AutopilotRunID,
+		&i.Attempt,
+		&i.MaxAttempts,
+		&i.ParentTaskID,
+		&i.FailureReason,
+		&i.TriggerSummary,
+		&i.ForceFreshSession,
+		&i.IsLeaderTask,
+		&i.WaitReason,
+		&i.InitiatorUserID,
+		&i.HandoffNote,
+		&i.PrepareLeaseExpiresAt,
+		&i.SquadID,
+		&i.RuntimeMcpOverlay,
+		&i.EscalationForTaskID,
+		&i.FireAt,
+		&i.OriginatorUserID,
+		&i.RuntimeConnectedApps,
+		&i.CoalescedCommentIds,
+		&i.DeliveredCommentIds,
+		&i.ChatInputTaskID,
+		&i.ChatFinalizeDeferredAt,
+		&i.OriginatorSource,
+		&i.DelegatedFromTaskID,
+		&i.RetryOfTaskID,
+		&i.RerunOfTaskID,
+		&i.RuleVersionID,
+		&i.TriggerEvidenceKind,
+		&i.TriggerEvidenceRefID,
+		&i.AccountableUserID,
+		&i.SessionRolloutMissing,
+		&i.RetiredSessionID,
+		&i.QuickActionsDisabled,
+		&i.RegenerateQuickActionsFor,
+		&i.BranchName,
+		&i.DurableWorkDir,
+		&i.ChannelContextRevision,
+		&i.CommentThreadID,
+		&i.CancelledByType,
+		&i.CancelledByID,
+		&i.CancelledByName,
+		&i.IssueSnapshot,
+		&i.WorkflowStep,
+	)
 	return i, err
 }
 
@@ -7896,10 +7960,7 @@ func (q *Queries) ReclaimStaleDispatchedTaskForRuntime(ctx context.Context, arg 
 }
 
 const reclaimStaleDispatchedTasksForRuntimes = `-- name: ReclaimStaleDispatchedTasksForRuntimes :many
-UPDATE agent_task_queue
-SET dispatched_at = now(),
-    prepare_lease_expires_at = now() + make_interval(secs => $1::double precision)
-WHERE id IN (
+WITH candidates AS MATERIALIZED (
     SELECT atq.id FROM agent_task_queue atq
     WHERE atq.runtime_id = ANY($2::uuid[])
       AND atq.status = 'dispatched'
@@ -7934,6 +7995,10 @@ WHERE id IN (
     LIMIT $5::int
     FOR UPDATE SKIP LOCKED
 )
+UPDATE agent_task_queue
+SET dispatched_at = now(),
+    prepare_lease_expires_at = now() + make_interval(secs => $1::double precision)
+WHERE id IN (SELECT id FROM candidates)
 RETURNING id, agent_id, issue_id, status, priority, dispatched_at, started_at, completed_at, result, error, created_at, context, runtime_id, session_id, work_dir, trigger_comment_id, chat_session_id, autopilot_run_id, attempt, max_attempts, parent_task_id, failure_reason, trigger_summary, force_fresh_session, is_leader_task, wait_reason, initiator_user_id, handoff_note, prepare_lease_expires_at, squad_id, runtime_mcp_overlay, escalation_for_task_id, fire_at, originator_user_id, runtime_connected_apps, coalesced_comment_ids, delivered_comment_ids, chat_input_task_id, chat_finalize_deferred_at, originator_source, delegated_from_task_id, retry_of_task_id, rerun_of_task_id, rule_version_id, trigger_evidence_kind, trigger_evidence_ref_id, accountable_user_id, session_rollout_missing, retired_session_id, quick_actions_disabled, regenerate_quick_actions_for, branch_name, durable_work_dir, channel_context_revision, comment_thread_id, cancelled_by_type, cancelled_by_id, cancelled_by_name, issue_snapshot, workflow_step
 `
 
@@ -7952,6 +8017,8 @@ type ReclaimStaleDispatchedTasksForRuntimesParams struct {
 // query (dispatched, never started, past the recovery window, expired/absent
 // prepare lease) and the same dispatched_at refresh; only the runtime filter
 // (= ANY) and the LIMIT (max_tasks instead of 1) differ.
+// MATERIALIZED pins the candidate set so nested-loop rescans cannot exceed
+// max_tasks.
 func (q *Queries) ReclaimStaleDispatchedTasksForRuntimes(ctx context.Context, arg ReclaimStaleDispatchedTasksForRuntimesParams) ([]AgentTaskQueue, error) {
 	rows, err := q.db.Query(ctx, reclaimStaleDispatchedTasksForRuntimes,
 		arg.PrepareLeaseSecs,
@@ -8698,91 +8765,6 @@ func (q *Queries) SettleDelegatedFailureRecoveryComment(ctx context.Context, com
 		return 0, err
 	}
 	return result.RowsAffected(), nil
-}
-
-const startAgentTask = `-- name: StartAgentTask :one
-UPDATE agent_task_queue
-SET status = 'running',
-    started_at = now(),
-    wait_reason = NULL,
-    prepare_lease_expires_at = NULL
-WHERE agent_task_queue.id = $1 AND agent_task_queue.status IN ('dispatched', 'waiting_local_directory')
-RETURNING id, agent_id, issue_id, status, priority, dispatched_at, started_at, completed_at, result, error, created_at, context, runtime_id, session_id, work_dir, trigger_comment_id, chat_session_id, autopilot_run_id, attempt, max_attempts, parent_task_id, failure_reason, trigger_summary, force_fresh_session, is_leader_task, wait_reason, initiator_user_id, handoff_note, prepare_lease_expires_at, squad_id, runtime_mcp_overlay, escalation_for_task_id, fire_at, originator_user_id, runtime_connected_apps, coalesced_comment_ids, delivered_comment_ids, chat_input_task_id, chat_finalize_deferred_at, originator_source, delegated_from_task_id, retry_of_task_id, rerun_of_task_id, rule_version_id, trigger_evidence_kind, trigger_evidence_ref_id, accountable_user_id, session_rollout_missing, retired_session_id, quick_actions_disabled, regenerate_quick_actions_for, branch_name, durable_work_dir, channel_context_revision, comment_thread_id, cancelled_by_type, cancelled_by_id, cancelled_by_name, issue_snapshot, workflow_step
-`
-
-// Legacy single-winner transition; generation-aware callers lock the claim first.
-// Transitions a task to running. Accepts either 'dispatched' (the normal
-// claim → run flow) or 'waiting_local_directory' (the daemon held the row in
-// a wait state while another task owned the local_directory path lock; once
-// the lock was acquired the daemon flips here). wait_reason is cleared on
-// the transition so a future read can't conflate "currently waiting" with
-// "previously waited".
-func (q *Queries) StartAgentTask(ctx context.Context, id pgtype.UUID) (AgentTaskQueue, error) {
-	row := q.db.QueryRow(ctx, startAgentTask, id)
-	var i AgentTaskQueue
-	err := row.Scan(
-		&i.ID,
-		&i.AgentID,
-		&i.IssueID,
-		&i.Status,
-		&i.Priority,
-		&i.DispatchedAt,
-		&i.StartedAt,
-		&i.CompletedAt,
-		&i.Result,
-		&i.Error,
-		&i.CreatedAt,
-		&i.Context,
-		&i.RuntimeID,
-		&i.SessionID,
-		&i.WorkDir,
-		&i.TriggerCommentID,
-		&i.ChatSessionID,
-		&i.AutopilotRunID,
-		&i.Attempt,
-		&i.MaxAttempts,
-		&i.ParentTaskID,
-		&i.FailureReason,
-		&i.TriggerSummary,
-		&i.ForceFreshSession,
-		&i.IsLeaderTask,
-		&i.WaitReason,
-		&i.InitiatorUserID,
-		&i.HandoffNote,
-		&i.PrepareLeaseExpiresAt,
-		&i.SquadID,
-		&i.RuntimeMcpOverlay,
-		&i.EscalationForTaskID,
-		&i.FireAt,
-		&i.OriginatorUserID,
-		&i.RuntimeConnectedApps,
-		&i.CoalescedCommentIds,
-		&i.DeliveredCommentIds,
-		&i.ChatInputTaskID,
-		&i.ChatFinalizeDeferredAt,
-		&i.OriginatorSource,
-		&i.DelegatedFromTaskID,
-		&i.RetryOfTaskID,
-		&i.RerunOfTaskID,
-		&i.RuleVersionID,
-		&i.TriggerEvidenceKind,
-		&i.TriggerEvidenceRefID,
-		&i.AccountableUserID,
-		&i.SessionRolloutMissing,
-		&i.RetiredSessionID,
-		&i.QuickActionsDisabled,
-		&i.RegenerateQuickActionsFor,
-		&i.BranchName,
-		&i.DurableWorkDir,
-		&i.ChannelContextRevision,
-		&i.CommentThreadID,
-		&i.CancelledByType,
-		&i.CancelledByID,
-		&i.CancelledByName,
-		&i.IssueSnapshot,
-		&i.WorkflowStep,
-	)
-	return i, err
 }
 
 const updateAgent = `-- name: UpdateAgent :one

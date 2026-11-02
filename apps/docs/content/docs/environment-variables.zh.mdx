@@ -136,6 +136,8 @@ MULTICA_PUBLIC_URL=https://api.multica.example.com
 | `ATTACHMENT_DOWNLOAD_MODE` | `auto` | `auto`、`cloudfront`、`presign` 或 `proxy` |
 | `ATTACHMENT_DOWNLOAD_URL_TTL` | `30m` | 签名下载地址的有效期 |
 
+当 `AWS_ENDPOINT_URL` 指向 Google Cloud Storage 时，会自动将 `Accept-Encoding` 排除在请求签名之外。
+
 内网 MinIO 等 endpoint 无法被浏览器直接访问时，使用 `ATTACHMENT_DOWNLOAD_MODE=proxy`。
 
 ### 本地磁盘

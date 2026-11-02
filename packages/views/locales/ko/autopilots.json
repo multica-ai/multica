@@ -1,6 +1,5 @@
 {
   "page": {
-    "title": "오토파일럿",
     "new_autopilot": "새 오토파일럿",
     "start_blank": "처음부터 시작",
     "table": {
@@ -20,7 +19,6 @@
       "title": "아직 오토파일럿이 없습니다",
       "hint": "AI 에이전트의 반복 작업을 예약하세요. 템플릿을 고르거나 처음부터 시작할 수 있습니다."
     },
-    "scope_all": "전체",
     "no_matches": "일치하는 자동화가 없습니다",
     "retry": "다시 시도"
   },
@@ -87,10 +85,8 @@
     "run_blocked_quota_exceeded": "실행되지 않음 — 이 기간의 실행 한도에 도달했습니다",
     "run_blocked_issue_limit_reached": "실행되지 않음 — 워크스페이스가 태스크 수 한도에 도달했습니다",
     "run_blocked_generic": "실행되지 않음 — 실행이 차단되었습니다",
-    "section_properties": "속성",
     "section_triggers": "트리거",
     "section_run_history": "실행 기록",
-    "section_danger": "위험 영역",
     "field_agent": "에이전트",
     "field_created_by": "생성자",
     "field_output_mode": "출력 모드",
@@ -100,6 +96,16 @@
     "field_prompt": "프롬프트",
     "field_subscribers": "구독자",
     "field_subscribers_none": "없음",
+    "no_prompt": "아직 프롬프트가 없습니다.",
+    "copy_link": "링크 복사",
+    "link_copied": "링크를 복사했습니다",
+    "link_copy_failed": "링크를 복사하지 못했습니다",
+    "open_project": "프로젝트 열기",
+    "summary": {
+      "create_issue": "{{agent}}이(가) 실행할 때마다 태스크 생성",
+      "run_only": "{{agent}}이(가) 태스크 없이 실행",
+      "with_trigger": "{{trigger}} · {{action}}"
+    },
     "add_trigger": "트리거 추가",
     "no_triggers": "설정된 트리거가 없습니다. 자동으로 실행할 일정을 추가하세요.",
     "no_runs": "아직 실행 기록이 없습니다. 수동으로 실행하려면 \"지금 실행\"을 클릭하세요.",
@@ -441,27 +447,16 @@
     "search_placeholder": "시간대 검색..."
   },
   "toolbar": {
-    "result_count_title": "일치하는 자동화 / 전체 자동화",
-    "filter_label": "필터",
-    "filter_active_count_other": "필터 {{count}}개",
-    "clear_filters": "필터 지우기",
     "section_assignee": "담당",
     "section_mode": "모드",
     "section_trigger": "트리거",
-    "section_creator": "생성자",
-    "display": "표시",
-    "sort_by": "정렬",
-    "direction_asc": "오름차순",
-    "direction_desc": "내림차순",
-    "section_columns": "열"
+    "section_creator": "생성자"
   },
   "actions": {
     "row_menu": "자동화 작업",
     "pause": "일시중지",
     "resume": "재개",
     "delete": "삭제",
-    "selected_other": "{{count}}개 선택됨",
-    "clear_selection": "선택 해제",
     "delete_dialog": {
       "title": "자동화를 삭제할까요?",
       "description_other": "자동화 {{count}}개와 실행 기록이 영구 삭제됩니다.",
@@ -473,7 +468,6 @@
   },
   "wakeups": {
     "title": "작업 깨우기",
-    "scope": "범위",
     "issue": "작업",
     "trigger": "트리거",
     "enabled": "활성화",
@@ -482,22 +476,16 @@
     "at": "일회성",
     "recurring": "반복",
     "all_agents": "모든 에이전트",
-    "search": "작업 또는 에이전트 검색",
     "running": "실행 중",
     "active_runs": "진행 중인 실행 {{count}}개",
     "issue_closed": "종료된 작업",
     "read_only": "생성자 또는 워크스페이스 관리자만 관리할 수 있습니다",
     "select_row": "{{issue}}, {{agent}} 선택",
-    "select_page": "이 페이지의 활성 항목 선택",
+    "select_page": "활성 항목 모두 선택",
     "load_error": "깨우기를 불러오지 못했습니다",
     "loading": "불러오는 중…",
     "empty": "깨우기 규칙이 없습니다",
-    "selected": "{{count}}개 선택됨",
     "disable_selected": "선택 항목 끄기",
-    "clear": "선택 해제",
-    "results": "{{page}}페이지 · {{count}}개",
-    "previous": "이전",
-    "next_page": "다음",
     "confirm_title": "깨우기 {{count}}개를 끄시겠습니까?",
     "confirm_body": "이후 깨우기를 중지하고 아직 에이전트에게 전달되지 않은 대기 중 실행을 취소합니다. 전달된 실행은 계속되며 실행 로그에서 중지할 수 있습니다.",
     "cancel": "취소",
@@ -506,7 +494,7 @@
     "batch_result": "꺼짐: {{succeeded}}개. 실패: {{failed}}개.",
     "scopes": {
       "active": "깨우기 대기 또는 실행 중",
-      "all": "전체",
+      "all": "모든 깨우기",
       "disabled": "꺼짐",
       "ended": "종료됨",
       "paused": "일시중지됨"
@@ -518,7 +506,7 @@
     "batch_partial": "{{succeeded}}개를 껐고 {{failed}}개는 실패했습니다. 실패 항목은 선택된 상태로 남아 다시 시도할 수 있습니다.",
     "source": "만든 곳",
     "sources": {
-      "all": "만든 곳: 전체",
+      "all": "모든 출처",
       "member": "멤버",
       "agent": "에이전트",
       "system": "시스템"

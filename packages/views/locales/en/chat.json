@@ -247,7 +247,7 @@
     "row_actions_aria": "Chat actions"
   },
   "header": {
-    "view_profile": "View agent profile",
+    "agent_settings": "Agent settings",
     "rename": "Rename chat",
     "archive": "Archive chat",
     "unarchive": "Unarchive chat",

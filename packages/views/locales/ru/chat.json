@@ -7,10 +7,10 @@
   "fab": {
     "running": "Multica работает...",
     "unread_one": "{{count}} непрочитанный чат",
-    "unread_few": "{{count}} непрочитанных чата",
-    "unread_many": "{{count}} непрочитанных чатов",
     "unread_other": "{{count}} непрочитанных чата",
-    "default": "Спросить Multica"
+    "default": "Спросить Multica",
+    "unread_few": "{{count}} непрочитанных чата",
+    "unread_many": "{{count}} непрочитанных чатов"
   },
   "input": {
     "placeholder_no_agent": "Создайте агента, чтобы начать общение",
@@ -38,8 +38,6 @@
   },
   "queue": {
     "title_one": "{{count}} сообщение в очереди",
-    "title_few": "{{count}} сообщения в очереди",
-    "title_many": "{{count}} сообщений в очереди",
     "title_other": "{{count}} сообщения в очереди",
     "clear": "Очистить всё",
     "steer": "Скорректировать",
@@ -50,7 +48,9 @@
     "remove": "Удалить сообщение из очереди",
     "more": "Другие действия с очередью",
     "fallback": "Сообщение в очереди",
-    "action_failed_toast": "Не удалось обновить сообщение в очереди"
+    "action_failed_toast": "Не удалось обновить сообщение в очереди",
+    "title_few": "{{count}} сообщения в очереди",
+    "title_many": "{{count}} сообщений в очереди"
   },
   "message_list": {
     "show_details": "Показать детали",
@@ -80,14 +80,10 @@
       "fallback": "Что-то пошло не так, и агент не смог завершить ответ. Попробуйте ещё раз."
     },
     "tools_one": "{{count}} инструмент",
-    "tools_few": "{{count}} инструмента",
-    "tools_many": "{{count}} инструментов",
     "tools_other": "{{count}} инструмента",
     "tool_result_named": "Результат {{tool}}: ",
     "tool_result_unnamed": "результат: ",
     "process_steps_one": "{{count}} шаг",
-    "process_steps_few": "{{count}} шага",
-    "process_steps_many": "{{count}} шагов",
     "process_steps_other": "{{count}} шага",
     "copy_action": "Копировать",
     "copied_toast": "Скопировано",
@@ -96,7 +92,11 @@
     "quick_actions_heading": "Дополнительные вопросы",
     "quick_actions_aria": "Предложенные вопросы",
     "quick_actions_regenerate": "Обновить предложения",
-    "quick_actions_regenerate_failed": "Не удалось обновить предложения. Попробуйте ещё раз."
+    "quick_actions_regenerate_failed": "Не удалось обновить предложения. Попробуйте ещё раз.",
+    "tools_few": "{{count}} инструмента",
+    "tools_many": "{{count}} инструментов",
+    "process_steps_few": "{{count}} шага",
+    "process_steps_many": "{{count}} шагов"
   },
   "session_history": {
     "untitled": "Без названия",
@@ -255,7 +255,7 @@
     "row_actions_aria": "Действия с чатом"
   },
   "header": {
-    "view_profile": "Профиль агента",
+    "agent_settings": "Настройки агента",
     "rename": "Переименовать чат",
     "archive": "Архивировать чат",
     "unarchive": "Разархивировать чат",

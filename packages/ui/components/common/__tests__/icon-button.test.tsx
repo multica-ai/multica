@@ -4,7 +4,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { IconButton } from "../icon-button";
 import { TooltipHint } from "../tooltip-hint";
 import { DeferredTooltip } from "../deferred-tooltip";
-import { TooltipProvider } from "../../ui/tooltip";
+import { TOOLTIP_OPEN_DELAY, TooltipProvider } from "../../ui/tooltip";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -177,7 +177,7 @@ describe("DeferredTooltip", () => {
 
       fireEvent.pointerEnter(trigger, { pointerType: "mouse" });
       await act(async () => {
-        vi.advanceTimersByTime(250);
+        vi.advanceTimersByTime(550);
       });
       expect(document.querySelector("[data-slot='tooltip-content']")).toHaveTextContent("Row actions");
 
@@ -190,7 +190,7 @@ describe("DeferredTooltip", () => {
       fireEvent.pointerLeave(trigger, { pointerType: "mouse" });
       fireEvent.pointerEnter(trigger, { pointerType: "mouse" });
       await act(async () => {
-        vi.advanceTimersByTime(250);
+        vi.advanceTimersByTime(550);
       });
       const popup = document.querySelector("[data-slot='tooltip-content']");
       expect(popup === null || popup.getAttribute("data-open") === null).toBe(true);
@@ -215,9 +215,60 @@ describe("DeferredTooltip", () => {
 
       fireEvent.pointerEnter(screen.getByRole("button", { name: "Collapse thread" }), { pointerType: "mouse" });
       await act(async () => {
-        vi.advanceTimersByTime(250);
+        vi.advanceTimersByTime(550);
       });
       expect(document.querySelector("[data-slot='tooltip-content']")).toHaveTextContent("Collapse thread");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("waits the shared open delay on a cold hover", async () => {
+    vi.useFakeTimers();
+    try {
+      // Move past any instant-phase window a previous test's tooltip left open.
+      vi.setSystemTime(Date.now() + 10_000);
+      renderWithTooltips(
+        <DeferredTooltip content="Copy" trigger={<button type="button" aria-label="Copy" />} />,
+      );
+
+      fireEvent.pointerEnter(screen.getByRole("button", { name: "Copy" }), { pointerType: "mouse" });
+      await act(async () => {
+        vi.advanceTimersByTime(TOOLTIP_OPEN_DELAY - 50);
+      });
+      expect(document.querySelector("[data-slot='tooltip-content']")).toBeNull();
+      await act(async () => {
+        vi.advanceTimersByTime(100);
+      });
+      expect(document.querySelector("[data-slot='tooltip-content']")).toHaveTextContent("Copy");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("opens at once when moving over from another tooltip", async () => {
+    vi.useFakeTimers();
+    try {
+      vi.setSystemTime(Date.now() + 10_000);
+      renderWithTooltips(
+        <>
+          <DeferredTooltip content="Copy" trigger={<button type="button" aria-label="Copy" />} />
+          <DeferredTooltip content="Paste" trigger={<button type="button" aria-label="Paste" />} />
+        </>,
+      );
+      const copy = screen.getByRole("button", { name: "Copy" });
+      const paste = screen.getByRole("button", { name: "Paste" });
+
+      fireEvent.pointerEnter(copy, { pointerType: "mouse" });
+      await act(async () => {
+        vi.advanceTimersByTime(TOOLTIP_OPEN_DELAY + 50);
+      });
+      fireEvent.pointerLeave(copy, { pointerType: "mouse" });
+      fireEvent.pointerEnter(paste, { pointerType: "mouse" });
+      await act(async () => {
+        vi.advanceTimersByTime(10);
+      });
+      expect(screen.getAllByText("Paste").some((el) => el.closest("[data-slot='tooltip-content']"))).toBe(true);
     } finally {
       vi.useRealTimers();
     }

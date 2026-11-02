@@ -188,7 +188,7 @@ export function ChangelogPageClient() {
             <aside className="hidden lg:block">
               <nav
                 aria-label={t.changelog.toc}
-                className="sticky top-28 max-h-[calc(100vh-8rem)] overflow-y-auto pb-8 pr-2"
+                className="sticky top-28 max-h-[calc(100vh-8rem)] overflow-y-auto pl-2 pb-8 pr-2"
               >
                 <h3 className="text-micro font-semibold uppercase tracking-[0.14em] text-[#0a0d12]/50">
                   {t.changelog.toc}

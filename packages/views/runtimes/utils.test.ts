@@ -377,20 +377,21 @@ describe("estimateCost", () => {
   });
 
   it("prices current Codex models per OpenAI's official cache-aware rates", () => {
-    // Official announcement rates. 5.6 is the first OpenAI generation to bill
+    // OpenAI's standard short-context rates. 5.6 is the first OpenAI generation to bill
     // cache writes separately: cacheRead generally = 0.1x input (GPT-6.1
-    // Sol uses 0.05x), cacheWrite = 1.25x
+    // Sol and Terra use 0.05x), cacheWrite = 1.25x
     // input. Cover every model x every token category so a wrong cache rate
     // can't hide behind an input-only assertion. `total` is 1M of each of the
     // four categories priced at its own rate.
     const cases = [
       { model: "gpt-6-astra", input: 10, cacheRead: 1, cacheWrite: 12.5, output: 50, total: 73.5 },
       { model: "gpt-6.1-sol", input: 2, cacheRead: 0.1, cacheWrite: 2.5, output: 10, total: 14.6 },
+      { model: "gpt-6.1-terra", input: 1, cacheRead: 0.05, cacheWrite: 1.25, output: 5, total: 7.3 },
       { model: "gpt-6-sol", input: 2, cacheRead: 0.2, cacheWrite: 2.5, output: 10, total: 14.7 },
       { model: "gpt-6-luna", input: 0.1, cacheRead: 0.01, cacheWrite: 0.125, output: 0.5, total: 0.735 },
       { model: "gpt-5.6-sol", input: 5, cacheRead: 0.5, cacheWrite: 6.25, output: 30, total: 41.75 },
-      { model: "gpt-5.6-terra", input: 2.5, cacheRead: 0.25, cacheWrite: 3.125, output: 15, total: 20.875 },
-      { model: "gpt-5.6-luna", input: 1, cacheRead: 0.1, cacheWrite: 1.25, output: 6, total: 8.35 },
+      { model: "gpt-5.6-terra", input: 2, cacheRead: 0.2, cacheWrite: 2.5, output: 12, total: 16.7 },
+      { model: "gpt-5.6-luna", input: 0.2, cacheRead: 0.02, cacheWrite: 0.25, output: 1.2, total: 1.67 },
     ];
     for (const c of cases) {
       const breakdown = estimateCostBreakdown({
@@ -513,18 +514,24 @@ describe("estimateCost", () => {
     }
   });
 
-  it("uses the current routed Flash rate for Cursor 3.5 and 3.6 aliases", () => {
-    for (const model of ["gemini-3.5-flash-high", "gemini-3.6-flash-high"]) {
-      expect(estimateCost({ ...zeroUsage, provider: "cursor", model,
+  it("prices Cursor's 3.5 and 3.6 Flash at Cursor's sheet, not Google's routed rate", () => {
+    const cost = (model: string) =>
+      estimateCost({ ...zeroUsage, provider: "cursor", model,
         input_tokens: 1_000_000, output_tokens: 1_000_000, cache_read_tokens: 1_000_000,
-      })).toBeCloseTo(0.75 + 3.75 + 0.075, 5);
-    }
+      });
+    expect(cost("gemini-3.5-flash")).toBeCloseTo(1.5 + 9 + 0.15, 5);
+    expect(cost("gemini-3.6-flash-high")).toBeCloseTo(1.5 + 7.5 + 0.15, 5);
+    expect(cost("gemini-3.7-flash-high")).toBeCloseTo(0.75 + 3.75 + 0.075, 5);
   });
 
   it("resolves current Codex routing prefixes and context tags", () => {
     for (const model of ["openai:gpt-6.1-sol", "openai/gpt-6.1-sol", "gpt-6.1-sol[1m]"]) {
       expect(isModelPriced(model, "codex")).toBe(true);
       expect(estimateCost({ ...zeroUsage, provider: "codex", model, cache_read_tokens: 1_000_000 })).toBeCloseTo(0.1, 5);
+    }
+    for (const model of ["openai:gpt-6.1-terra", "openai/gpt-6.1-terra", "gpt-6.1-terra[1m]"]) {
+      expect(isModelPriced(model, "codex")).toBe(true);
+      expect(estimateCost({ ...zeroUsage, provider: "codex", model, cache_read_tokens: 1_000_000 })).toBeCloseTo(0.05, 5);
     }
   });
 
@@ -558,6 +565,8 @@ describe("estimateCost", () => {
     expect(isModelPriced("gpt-6-astra-pro")).toBe(false);
     expect(isModelPriced("gpt-6.1-sol-pro")).toBe(false);
     expect(isModelPriced("gpt-6-1-sol")).toBe(false);
+    expect(isModelPriced("gpt-6.1-terra-pro")).toBe(false);
+    expect(isModelPriced("gpt-6-1-terra")).toBe(false);
     expect(isModelPriced("gpt-6-sol-high")).toBe(false);
     expect(isModelPriced("gpt-6-luna-pro")).toBe(false);
     expect(
@@ -738,7 +747,7 @@ describe("estimateCost", () => {
     // Thinking after the effort level, and the older `claude-4.6-sonnet` naming.
     expect(cost("claude-4.6-sonnet-medium-thinking")).toBeCloseTo(3 + 15 + 0.3 + 3.75, 5);
     expect(cost("gpt-5.5-extra-high")).toBeCloseTo(5 + 30 + 0.5, 5);
-    expect(cost("gpt-5.6-sol-none")).toBeCloseTo(4 + 20 + 0.4 + 5, 5);
+    expect(cost("gpt-5.6-sol-none")).toBeCloseTo(5 + 30 + 0.5 + 6.25, 5);
     expect(cost("cursor-grok-4.6-high")).toBeCloseTo(2 + 6 + 0.5, 5);
     expect(cost("grok-4.7-medium")).toBeCloseTo(2 + 6 + 0.5, 5);
     expect(cost("gemini-4-argon-medium")).toBeCloseTo(2 + 10 + 0.1, 5);
@@ -750,7 +759,7 @@ describe("estimateCost", () => {
     );
   });
 
-  it("prices Cursor Fast variants only where Cursor publishes a Fast rate", () => {
+  it("prices Cursor Fast variants only where a Fast rate is published", () => {
     const cost = (model: string) =>
       estimateCost({
         ...zeroUsage,
@@ -760,17 +769,38 @@ describe("estimateCost", () => {
         output_tokens: 1_000_000,
       });
 
-    expect(cost("gpt-5.6-sol-medium-fast")).toBeCloseTo(8 + 40, 5);
+    expect(cost("gpt-5.6-sol-medium-fast")).toBeCloseTo(10 + 60, 5);
     expect(cost("cursor-grok-4.5-high-fast")).toBeCloseTo(4 + 18, 5);
     expect(cost("claude-opus-4-7-thinking-high-fast")).toBeCloseTo(30 + 150, 5);
     expect(cost("claude-opus-4-8[effort=high,fast=true]")).toBeCloseTo(10 + 50, 5);
+    // Cursor's sheet doesn't price these Fast variants; the vendor sheet does.
+    expect(cost("claude-opus-5-5-xhigh-fast")).toBeCloseTo(8 + 40, 5);
+    expect(cost("claude-opus-5-5[fast=true]")).toBeCloseTo(8 + 40, 5);
+    expect(cost("claude-opus-5-thinking-high-fast")).toBeCloseTo(10 + 50, 5);
+    expect(cost("gpt-5.5-extra-high-fast")).toBeCloseTo(12.5 + 75, 5);
+    expect(cost("gpt-5.3-codex-xhigh-fast")).toBeCloseTo(3.5 + 28, 5);
+    expect(cost("gpt-5.2-fast")).toBeCloseTo(3.5 + 28, 5);
     // No published Fast rate: unmapped, never the cheaper standard rate.
-    expect(isModelPriced("claude-opus-5-5-high-fast", "cursor")).toBe(false);
-    expect(isModelPriced("gpt-5.5-medium-fast", "cursor")).toBe(false);
-    expect(isModelPriced("claude-opus-5-5[fast=true]", "cursor")).toBe(false);
+    expect(isModelPriced("claude-sonnet-5-5-high-fast", "cursor")).toBe(false);
+    expect(isModelPriced("kimi-k3-fast", "cursor")).toBe(false);
+    expect(isModelPriced("claude-sonnet-5[fast=true]", "cursor")).toBe(false);
     expect(collectUnmappedModels([
-      { ...zeroUsage, provider: "cursor", model: "claude-opus-5-5-high-fast", input_tokens: 1 },
-    ])).toEqual(["cursor/claude-opus-5-5-high-fast"]);
+      { ...zeroUsage, provider: "cursor", model: "claude-sonnet-5-5-high-fast", input_tokens: 1 },
+    ])).toEqual(["cursor/claude-sonnet-5-5-high-fast"]);
+  });
+
+  it("prices Cursor catalog ids missing from the base table", () => {
+    const cost = (model: string) =>
+      estimateCost({
+        ...zeroUsage,
+        provider: "cursor",
+        model,
+        input_tokens: 1_000_000,
+        output_tokens: 1_000_000,
+        cache_read_tokens: 1_000_000,
+      });
+    expect(cost("gpt-5.1-high")).toBeCloseTo(1.25 + 10 + 0.125, 5);
+    expect(cost("deepseek-v41-flash-1017-max")).toBeCloseTo(0.3 + 1.2 + 0.006, 5);
   });
 
   it("keeps Cursor variant stripping scoped to Cursor rows", () => {
@@ -807,8 +837,7 @@ describe("estimateCost", () => {
   // header comment. Pinning them in tests is what catches a future edit
   // that copies a price from a near-named neighbour by accident — the
   // mistake the previous attempt (PR #3170, closed) made.
-  it("prices deepseek-v4-flash at the official $0.14/$0.28 with ~50× cache-hit discount", () => {
-    // 1M input × $0.14 + 1M output × $0.28 + 1M cache read × $0.0028 = $0.4228.
+  it("prices the retired deepseek-v4-flash alias at the current Flash peak rate", () => {
     const cost = estimateCost({
       ...zeroUsage,
       model: "deepseek-v4-flash",
@@ -816,12 +845,11 @@ describe("estimateCost", () => {
       output_tokens: 1_000_000,
       cache_read_tokens: 1_000_000,
     });
-    expect(cost).toBeCloseTo(0.14 + 0.28 + 0.0028, 5);
+    expect(cost).toBeCloseTo(0.30 + 1.20 + 0.006, 5);
   });
 
   it("prices the deepseek-chat / deepseek-reasoner aliases at the same rate as deepseek-v4-flash", () => {
-    // The DeepSeek docs explicitly route both legacy names to v4-flash —
-    // they must hit the same numbers, not the older $0.27/$1.10 tier.
+    // Preserve the existing Flash routing for these historical aliases.
     const flash = estimateCost({
       ...zeroUsage,
       model: "deepseek-v4-flash",
@@ -841,6 +869,106 @@ describe("estimateCost", () => {
         input_tokens: 1_000_000,
       }),
     ).toBeCloseTo(flash, 5);
+  });
+
+  it("prices documented Flash aliases and the 1017 snapshot at the official peak rate", () => {
+    const want = { input: 0.30, output: 1.20, cacheRead: 0.006, cacheWrite: 0.30 };
+    for (const model of [
+      "deepseek-flash",
+      "deepseek/deepseek-flash",
+      "custom:deepseek/deepseek-flash[1m]",
+      "deepseek-v4-flash",
+      "deepseek-v4-flash-vision-exp",
+      "deepseek/deepseek-v4-flash-vision-exp",
+      "deepseek-chat",
+      "deepseek-reasoner",
+      "deepseek-v4.1-flash",
+      "deepseek/deepseek-v4.1-flash",
+      "deepseek/deepseek-v4.1-flash-1017",
+      "deepseek-v4.1-flash-1017",
+    ]) {
+      const usage = {
+        ...zeroUsage,
+        model,
+        input_tokens: 1_000_000,
+        output_tokens: 1_000_000,
+        cache_read_tokens: 1_000_000,
+        cache_write_tokens: 1_000_000,
+      };
+      expect(estimateCostBreakdown(usage), model).toEqual(want);
+      expect(estimateCost(usage), model).toBeCloseTo(1.806, 5);
+      expect(collectUnmappedModels([usage]), model).toEqual([]);
+    }
+  });
+
+  it("leaves unknown Flash variants unpriced", () => {
+    for (const model of [
+      "deepseek-v4.1-pro", "deepseek-v4.1-flash-preview",
+      "deepseek-v4-1-flash", "deepseek-v4.1-flash-1020",
+      "deepseek-v4.1-flash-1017-preview", "deepseek-flash-preview",
+      "deepseek-v4-flash-preview", "deepseek-v4-flash-vision-exp-extra",
+    ]) {
+      expect(isModelPriced(model), model).toBe(false);
+      expect(estimateCost({ ...zeroUsage, model, input_tokens: 1_000_000 }), model).toBe(0);
+    }
+  });
+
+  it("prices Bedrock-served Anthropic ids like their bare catalog SKUs", () => {
+    // Bedrock reports `us.anthropic.<id>` (region family + vendor prefix) and
+    // appends the inference-profile version to snapshots. Before the prefix
+    // strip none of these matched a table key, so a Bedrock runtime showed
+    // $0.00 for every turn while the tokens were still counted.
+    const tokens = {
+      input_tokens: 1_000_000,
+      output_tokens: 1_000_000,
+      cache_read_tokens: 1_000_000,
+      cache_write_tokens: 1_000_000,
+    };
+    const bareSonnet5 = estimateCost({
+      ...zeroUsage,
+      model: "claude-sonnet-5",
+      ...tokens,
+    });
+    for (const model of [
+      "us.anthropic.claude-sonnet-5",
+      "eu.anthropic.claude-sonnet-5",
+      "global.anthropic.claude-sonnet-5",
+      "anthropic.claude-sonnet-5",
+      "custom:bedrock/us.anthropic.claude-sonnet-5-v1:0[1m]",
+    ]) {
+      expect(estimateCost({ ...zeroUsage, provider: "claude", model, ...tokens })).toBeCloseTo(
+        bareSonnet5,
+        5,
+      );
+    }
+    // Snapshot + profile version suffix resolves to the same family tier.
+    expect(
+      estimateCost({
+        ...zeroUsage,
+        provider: "claude",
+        model: "us.anthropic.claude-sonnet-4-5-20250929-v1:0",
+        input_tokens: 1_000_000,
+      }),
+    ).toBeCloseTo(3, 5);
+    // A non-Anthropic Bedrock model must stay unmapped instead of borrowing a
+    // Claude rate.
+    expect(isModelPriced("us.amazon.nova-pro-v1:0", "amazon")).toBe(false);
+  });
+
+  it("only strips Bedrock versions from recognized Anthropic model ids", () => {
+    for (const model of [
+      "us.anthropic.claude-sonnet-6",
+      "us.anthropic.claude-sonnet-5-preview",
+      "global.anthropic.claude-opus-5-mini",
+      "us.anthropic.claude-sonnet-5-preview-v1:0",
+      "us.anthropic.claude-sonnet-5-v1:0junk",
+      "us.anthropic.claude-sonnet-5-v1:0[1m][2m]",
+      "gpt-6.1-sol-v1:0",
+      "claude-sonnet-5-v1:0",
+      "us.anthropic.gpt-6.1-sol-v1:0",
+    ]) {
+      expect(isModelPriced(model), model).toBe(false);
+    }
   });
 
   it("prices kimi-k2.6 at the official $0.95 / $4.00 tier (not the K2 tier)", () => {
@@ -1859,7 +1987,7 @@ describe("summarizeTaskUsage", () => {
     cache_read_tokens: 712_000,
     cache_write_tokens: 50_000,
   };
-  // gpt-5.6-terra: 2.50 / 15 / 0.25 / 3.125 per million.
+  // gpt-5.6-terra: 2 / 12 / 0.20 / 2.50 per million.
   const terra = {
     provider: "openai",
     model: "gpt-5.6-terra",
@@ -1878,10 +2006,10 @@ describe("summarizeTaskUsage", () => {
   });
 
   it("prices each model slice at its own rate, not the combined total", () => {
-    // Priced separately: 1.9985 (opus) + 0.331375 (terra).
+    // Priced separately: 1.9985 (opus) + 0.2651 (terra).
     // Priced as one blob at either rate, the answer would be wrong.
     const s = summarizeTaskUsage([opus, terra]);
-    expect(s?.cost).toBeCloseTo(1.9985 + 0.331375, 5);
+    expect(s?.cost).toBeCloseTo(1.9985 + 0.2651, 5);
     expect(s?.models).toEqual(["claude-opus-5", "gpt-5.6-terra"]);
   });
 

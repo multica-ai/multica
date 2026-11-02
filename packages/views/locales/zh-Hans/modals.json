@@ -250,6 +250,7 @@
       "sent_label": "已发送",
       "sent_count": "已发送 {{count}}",
       "version_blocked_tooltip": "守护进程 CLI 必须 ≥ {{min}}",
+      "qoder_attachments_unsupported": "Qoder Cloud Agents 无法读取附件。请移除附件，或换一个智能体。",
       "toast_sent": "已交给智能体——完成后会在收件箱通知你",
       "error_agent_unavailable_fallback": "智能体不可用，请换一个。",
       "error_daemon_version": "该智能体的守护进程 CLI（{{current}}）低于要求的 {{min}}。请升级守护进程后再使用通过智能体创建。",

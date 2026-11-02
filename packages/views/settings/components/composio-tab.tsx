@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { AlertTriangle, Check, Loader2, Plug, RefreshCw, Trash2 } from "lucide-react";
+import { AlertTriangle, Check, Loader2, Plug, RefreshCw, Trash2 } from "@multica/ui/icons";
 import { Button } from "@multica/ui/components/ui/button";
 import { Card, CardContent } from "@multica/ui/components/ui/card";
 import { Input } from "@multica/ui/components/ui/input";

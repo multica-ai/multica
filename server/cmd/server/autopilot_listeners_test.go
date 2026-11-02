@@ -117,9 +117,9 @@ func TestAutopilotRunOnlyTaskTerminalEventsUpdateRun(t *testing.T) {
 			); err != nil {
 				t.Fatalf("mark task dispatched: %v", err)
 			}
-			task, err := queries.StartAgentTask(ctx, run.TaskID)
+			task, err := queries.StartAgentTaskWithSupplement(ctx, db.StartAgentTaskWithSupplementParams{TaskID: run.TaskID})
 			if err != nil {
-				t.Fatalf("StartAgentTask: %v", err)
+				t.Fatalf("StartAgentTaskWithSupplement: %v", err)
 			}
 
 			tc.finalize(task)
@@ -239,8 +239,8 @@ func runTaskWithBudget(t *testing.T, queries *db.Queries, taskID pgtype.UUID, ma
 	); err != nil {
 		t.Fatalf("mark task dispatched: %v", err)
 	}
-	if _, err := queries.StartAgentTask(context.Background(), taskID); err != nil {
-		t.Fatalf("StartAgentTask: %v", err)
+	if _, err := queries.StartAgentTaskWithSupplement(context.Background(), db.StartAgentTaskWithSupplementParams{TaskID: taskID}); err != nil {
+		t.Fatalf("StartAgentTaskWithSupplement: %v", err)
 	}
 }
 

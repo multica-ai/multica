@@ -1,5 +1,5 @@
 import type { BaseLayoutProps } from "fumadocs-ui/layouts/shared";
-import { ArrowUpRight } from "lucide-react";
+import { ArrowUpRight } from "@multica/ui/icons";
 
 // Docs-local stateless Multica mark — matches @multica/ui's MulticaIcon
 // visually (same 8-pointed-asterisk clip-path), but without useState/

@@ -44,4 +44,4 @@ Use `disabled` when an action is unavailable. For pending actions, compose a spi
 
 `--button-height-*`, `--button-padding-*` and `--button-gap-*` control each size. Theme colors come from semantic tokens. Geometry changes affect every Button using that size; local class overrides can take precedence.
 
-UI Lab exports a CSS patch for `packages/ui/styles/tokens.css`. Review the original and edited previews in both themes, merge declarations into the matching blocks, then review the source diff. Saving a browser design does not apply it to product code.
+Edit these declarations in `packages/ui/styles/tokens.css`, check the result in both themes, then review the source diff.

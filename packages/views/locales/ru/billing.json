@@ -147,11 +147,11 @@
       "members": "Участники-люди",
       "members_description": "Агенты и ожидающие приглашения не учитываются как места.",
       "member_count_one": "{{count}} участник",
-      "member_count_few": "{{count}} участника",
-      "member_count_many": "{{count}} участников",
       "member_count_other": "{{count}} участника",
       "billing_interval": "Интервал оплаты",
-      "period_end": "Текущий период заканчивается"
+      "period_end": "Текущий период заканчивается",
+      "member_count_few": "{{count}} участника",
+      "member_count_many": "{{count}} участников"
     },
     "upgrade": {
       "title": "Перейти на Pro",
@@ -160,12 +160,12 @@
       "monthly": "Ежемесячно",
       "yearly": "Ежегодно",
       "pro_for_team_one": "Pro для {{count}} места (человек)",
-      "pro_for_team_few": "Pro для {{count}} мест (людей)",
-      "pro_for_team_many": "Pro для {{count}} мест (людей)",
       "pro_for_team_other": "Pro для {{count}} мест (людей)",
       "price_loading": "Загрузка цен подписки",
       "unit_price": "{{price}} за место (человека)",
-      "price_at_checkout": "Сервер пересчитывает количество участников-людей перед покупкой. Stripe Checkout показывает достоверную цену за место и итоговую сумму перед оплатой."
+      "price_at_checkout": "Сервер пересчитывает количество участников-людей перед покупкой. Stripe Checkout показывает достоверную цену за место и итоговую сумму перед оплатой.",
+      "pro_for_team_few": "Pro для {{count}} мест (людей)",
+      "pro_for_team_many": "Pro для {{count}} мест (людей)"
     },
     "management": {
       "title": "Управление подпиской",
@@ -200,12 +200,8 @@
       "pending": "Запланированное количество мест",
       "pending_description": "Вступит в силу со следующего периода оплаты.",
       "seat_count_one": "{{count}} место",
-      "seat_count_few": "{{count}} места",
-      "seat_count_many": "{{count}} мест",
       "seat_count_other": "{{count}} места",
       "pending_with_date_one": "{{count}} место с {{date}}",
-      "pending_with_date_few": "{{count}} места с {{date}}",
-      "pending_with_date_many": "{{count}} мест с {{date}}",
       "pending_with_date_other": "{{count}} места с {{date}}",
       "none_pending": "Нет запланированных изменений",
       "not_subscribed": "Нет активной подписки",
@@ -217,7 +213,11 @@
       "members_over_capacity_description": "В этом рабочем пространстве {{actual}} участников, но куплено только {{purchased}} мест. Добавьте места или удалите участников, прежде чем отправлять новые приглашения.",
       "occupancy_over_capacity_description": "Это рабочее пространство занимает {{occupied}} из {{purchased}} купленных мест ({{members}} участников и {{reserved}} ожидающих приглашений). Добавьте места, удалите участника или отзовите ожидающее приглашение, прежде чем приглашать кого-то ещё.",
       "updated": "Покупка мест отправлена",
-      "available_help": "Как рассчитывается количество доступных мест"
+      "available_help": "Как рассчитывается количество доступных мест",
+      "seat_count_few": "{{count}} места",
+      "seat_count_many": "{{count}} мест",
+      "pending_with_date_few": "{{count}} места с {{date}}",
+      "pending_with_date_many": "{{count}} мест с {{date}}"
     },
     "seat_purchase": {
       "title": "Добавить места",
@@ -238,22 +238,22 @@
       "next_invoice": "Ожидаемое следующее продление",
       "tax_notice": "Stripe определяет налоги, кредиты и итоговые детали счёта. Места станут доступны после того, как Stripe подтвердит обновление подписки.",
       "confirm_one": "Добавить {{count}} место",
-      "confirm_few": "Добавить {{count}} места",
-      "confirm_many": "Добавить {{count}} мест",
       "confirm_other": "Добавить {{count}} места",
       "pending_title": "Покупка мест обрабатывается",
       "pending_description_one": "Stripe подтверждает обновление подписки до {{count}} места.",
-      "pending_description_few": "Stripe подтверждает обновление подписки до {{count}} мест.",
-      "pending_description_many": "Stripe подтверждает обновление подписки до {{count}} мест.",
       "pending_description_other": "Stripe подтверждает обновление подписки до {{count}} мест.",
       "delayed_title": "Подтверждение мест занимает больше времени, чем ожидалось",
       "delayed_description": "Автоматическая проверка остановлена. Покупка всё ещё может завершиться; проверьте позже или обратитесь в поддержку перед новой попыткой покупки.",
       "delayed_description_with_expiry": "Автоматическая проверка остановлена. Если попытка всё ещё не завершена после {{date}}, перезагрузите страницу перед запросом новой котировки; обратитесь в поддержку, если она остаётся в ожидании.",
       "submitted_one": "Покупка {{count}} места отправлена. Новая ёмкость появится после подтверждения от Stripe.",
-      "submitted_few": "Покупка {{count}} мест отправлена. Новая ёмкость появится после подтверждения от Stripe.",
-      "submitted_many": "Покупка {{count}} мест отправлена. Новая ёмкость появится после подтверждения от Stripe.",
       "submitted_other": "Покупка {{count}} мест отправлена. Новая ёмкость появится после подтверждения от Stripe.",
-      "error_title": "Не удалось обновить оценку"
+      "error_title": "Не удалось обновить оценку",
+      "confirm_few": "Добавить {{count}} места",
+      "confirm_many": "Добавить {{count}} мест",
+      "pending_description_few": "Stripe подтверждает обновление подписки до {{count}} мест.",
+      "pending_description_many": "Stripe подтверждает обновление подписки до {{count}} мест.",
+      "submitted_few": "Покупка {{count}} мест отправлена. Новая ёмкость появится после подтверждения от Stripe.",
+      "submitted_many": "Покупка {{count}} мест отправлена. Новая ёмкость появится после подтверждения от Stripe."
     },
     "confirm": {
       "title": "Перейти к оформлению в Stripe Checkout?",

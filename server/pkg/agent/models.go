@@ -614,8 +614,9 @@ func claudeStaticModels() []Model {
 // codexStaticModels is the fallback for Codex versions older than 0.122.0
 // and for failed/malformed live and bundled discovery calls. It lists the
 // visible entries of the newest locally verified live catalog — which can run
-// ahead of the bundled one (gpt-6.1-sol was live-only on codex-cli 0.159.0)
-// — plus still-common models from older Codex releases.
+// ahead of the bundled one (gpt-6.1-sol was live-only on codex-cli 0.159.0,
+// gpt-6.1-terra on 0.164.0-alpha.11.1) — plus still-common models from older
+// Codex releases.
 // Each entry carries its own reasoning catalog so old/offline CLIs retain the
 // same model + thinking picker contract as dynamic discovery. Service tiers are
 // intentionally NOT guessed here: they are runtime/version/account-sensitive,
@@ -660,6 +661,7 @@ func codexStaticModels() []Model {
 	return []Model{
 		{ID: "gpt-6-astra", Label: "GPT-6 Astra", Provider: "openai", Default: true, Thinking: standardThinking("low", true, true)},
 		{ID: "gpt-6.1-sol", Label: "GPT-6.1 Sol", Provider: "openai", Thinking: standardThinking("low", true, true)},
+		{ID: "gpt-6.1-terra", Label: "GPT-6.1 Terra", Provider: "openai", Thinking: standardThinking("low", true, true)},
 		{ID: "gpt-6-sol", Label: "GPT-6 Sol", Provider: "openai", Thinking: standardThinking("medium", true, true)},
 		{ID: "gpt-6-luna", Label: "GPT-6 Luna", Provider: "openai", Thinking: standardThinking("medium", true, false)},
 		{ID: "gpt-5.6-sol", Label: "GPT-5.6 Sol", Provider: "openai", Thinking: standardThinking("low", true, true)},

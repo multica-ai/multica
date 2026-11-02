@@ -324,8 +324,9 @@ LIMIT @page_limit;
 -- head_sha stamps the commit under review into the task's context JSONB so the
 -- reviewer-loop dedup (HasPendingTaskForIssueAndAgent) can tell a pending run
 -- against an OLD head apart from a fresh request against a NEW head (TEN-356).
--- Empty/absent head_sha leaves context NULL, preserving pre-TEN-356 behavior for
--- issues with no linked PR. Issue-linked tasks never hit quick-create context
+-- Empty/absent head_sha leaves context NULL unless fresh_rerun is requested.
+-- fresh_rerun disables source session/workdir reuse without losing rerun lineage.
+-- Issue-linked tasks never hit quick-create context
 -- parsing (parseQuickCreateContext short-circuits on IssueID.Valid), so this
 -- key rides harmlessly alongside.
 -- id is minted by the application as a UUIDv7 (pkg/dbid) so consecutive
@@ -350,11 +351,15 @@ SELECT
     COALESCE(sqlc.narg('is_leader_task')::boolean, FALSE),
     sqlc.narg(handoff_note),
     sqlc.narg(squad_id),
-    CASE
+    NULLIF(CASE
         WHEN COALESCE(sqlc.narg('head_sha')::text, '') <> ''
         THEN jsonb_build_object('head_sha', sqlc.narg('head_sha')::text)
-        ELSE NULL
-    END,
+        ELSE '{}'::jsonb
+    END || CASE
+        WHEN COALESCE(sqlc.narg('fresh_rerun')::boolean, FALSE)
+        THEN '{"fresh_rerun":true}'::jsonb
+        ELSE '{}'::jsonb
+    END, '{}'::jsonb),
     sqlc.narg(originator_user_id),
     sqlc.narg(accountable_user_id),
     sqlc.narg(runtime_mcp_overlay),
@@ -902,10 +907,9 @@ RETURNING *;
 -- query (dispatched, never started, past the recovery window, expired/absent
 -- prepare lease) and the same dispatched_at refresh; only the runtime filter
 -- (= ANY) and the LIMIT (max_tasks instead of 1) differ.
-UPDATE agent_task_queue
-SET dispatched_at = now(),
-    prepare_lease_expires_at = now() + make_interval(secs => @prepare_lease_secs::double precision)
-WHERE id IN (
+-- MATERIALIZED pins the candidate set so nested-loop rescans cannot exceed
+-- max_tasks.
+WITH candidates AS MATERIALIZED (
     SELECT atq.id FROM agent_task_queue atq
     WHERE atq.runtime_id = ANY(@runtime_ids::uuid[])
       AND atq.status = 'dispatched'
@@ -940,6 +944,10 @@ WHERE id IN (
     LIMIT @max_tasks::int
     FOR UPDATE SKIP LOCKED
 )
+UPDATE agent_task_queue
+SET dispatched_at = now(),
+    prepare_lease_expires_at = now() + make_interval(secs => @prepare_lease_secs::double precision)
+WHERE id IN (SELECT id FROM candidates)
 RETURNING *;
 
 -- name: ExtendAgentTaskPrepareLease :one
@@ -953,22 +961,6 @@ WHERE id = $1
   AND runtime_id = $2
   AND status IN ('dispatched', 'waiting_local_directory')
   AND started_at IS NULL
-RETURNING *;
-
--- name: StartAgentTask :one
--- Legacy single-winner transition; generation-aware callers lock the claim first.
--- Transitions a task to running. Accepts either 'dispatched' (the normal
--- claim → run flow) or 'waiting_local_directory' (the daemon held the row in
--- a wait state while another task owned the local_directory path lock; once
--- the lock was acquired the daemon flips here). wait_reason is cleared on
--- the transition so a future read can't conflate "currently waiting" with
--- "previously waited".
-UPDATE agent_task_queue
-SET status = 'running',
-    started_at = now(),
-    wait_reason = NULL,
-    prepare_lease_expires_at = NULL
-WHERE agent_task_queue.id = $1 AND agent_task_queue.status IN ('dispatched', 'waiting_local_directory')
 RETURNING *;
 
 -- name: LockAgentTaskStartClaim :one
@@ -987,8 +979,9 @@ FOR UPDATE;
 -- alongside the status.
 --
 -- The CHECK only allows the transition from 'dispatched' so a daemon can't
--- mark an already-running or terminal task as waiting; the StartAgentTask
--- mutation handles the reverse transition once the lock is acquired.
+-- mark an already-running or terminal task as waiting; the
+-- StartAgentTaskWithSupplement mutation handles the reverse transition once
+-- the lock is acquired.
 UPDATE agent_task_queue
 SET status = 'waiting_local_directory',
     wait_reason = $2,
@@ -1832,7 +1825,7 @@ WHERE id = (
     ORDER BY t.created_at DESC
     LIMIT 1
 )
-RETURNING id, coalesced_comment_ids;
+RETURNING *;
 
 -- name: RegisterPlannedCommentForActiveTask :one
 -- #5914: durably register a comment that lost an enqueue race as a PLANNED

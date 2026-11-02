@@ -1,19 +1,22 @@
 {
   "page": {
     "title": "Агенты",
-    "learn_more": "Подробнее →",
     "new_agent": "Новый агент",
-    "search_placeholder": "Поиск агентов…",
+    "search": "Поиск агентов",
     "show_archived": "Показать архивные ({{count}}) →",
     "of_total": "{{visible}} из {{total}}",
     "list_load_failed": "Не удалось загрузить агентов",
     "list_load_failed_default": "Что-то пошло не так при загрузке списка агентов.",
-    "try_again": "Повторить"
+    "try_again": "Повторить",
+    "scope_title": {
+      "mine": "Мои агенты",
+      "all": "Все агенты",
+      "archived": "Архивные агенты"
+    }
   },
   "scope": {
     "mine": "Мои",
-    "all": "Все",
-    "archived": "Архивные"
+    "all": "Все"
   },
   "sort": {
     "label_recent": "Недавняя активность",
@@ -36,9 +39,9 @@
   "presence_status_aria": "Статус: {{status}}",
   "avatar_stack": {
     "overflow_aria_one": "Ещё {{count}} агент",
+    "overflow_aria_other": "Ещё {{count}} агента",
     "overflow_aria_few": "Ещё {{count}} агента",
-    "overflow_aria_many": "Ещё {{count}} агентов",
-    "overflow_aria_other": "Ещё {{count}} агента"
+    "overflow_aria_many": "Ещё {{count}} агентов"
   },
   "archived": {
     "active_link": "Активные агенты",
@@ -50,10 +53,10 @@
   },
   "no_matches": {
     "title": "Ничего не найдено",
-    "search_archived": "Ни один архивный агент не соответствует запросу «{{query}}».",
-    "no_archived": "Пока нет архивных агентов.",
     "search_active": "Ни один агент не соответствует запросу «{{query}}».",
     "search_active_filtered": "Ни один агент не соответствует запросу «{{query}}» в этом фильтре.",
+    "no_archived": "Пока нет архивных агентов.",
+    "search_archived": "Ни один архивный агент не соответствует запросу «{{query}}».",
     "no_filter_match": "Ни один агент не соответствует этому фильтру.",
     "search_runtime_filtered": "На «{{machine}}» нет агентов, соответствующих запросу «{{query}}».",
     "runtime_filtered": "На «{{machine}}» нет агентов."
@@ -64,10 +67,10 @@
     "section_remote": "Удалённые",
     "section_cloud": "Облачные",
     "agent_count_one": "{{count}} агент",
-    "agent_count_few": "{{count}} агента",
-    "agent_count_many": "{{count}} агентов",
     "agent_count_other": "{{count}} агента",
-    "empty": "Пока нет машин"
+    "empty": "Пока нет машин",
+    "agent_count_few": "{{count}} агента",
+    "agent_count_many": "{{count}} агентов"
   },
   "columns": {
     "agent": "Агент",
@@ -91,23 +94,23 @@
     "fallback_runtime_local": "Локально",
     "actions_aria": "Действия со строкой",
     "task_count_one": "{{count}} задача",
+    "task_count_other": "{{count}} задачи",
     "task_count_few": "{{count}} задачи",
-    "task_count_many": "{{count}} задач",
-    "task_count_other": "{{count}} задачи"
+    "task_count_many": "{{count}} задач"
   },
   "activity_tooltip": {
     "created_today": "Создан сегодня",
     "created_days_ago_one": "Создан {{count}} день назад",
-    "created_days_ago_few": "Создан {{count}} дня назад",
-    "created_days_ago_many": "Создан {{count}} дней назад",
     "created_days_ago_other": "Создан {{count}} дня назад",
     "last_7_days": "Последние 7 дней",
     "no_activity": "Нет активности",
     "runs_one": "{{count}} запуск",
-    "runs_few": "{{count}} запуска",
-    "runs_many": "{{count}} запусков",
     "runs_other": "{{count}} запуска",
-    "failed_suffix": " · {{count}} с ошибкой ({{percent}}%)"
+    "failed_suffix": " · {{count}} с ошибкой ({{percent}}%)",
+    "created_days_ago_few": "Создан {{count}} дня назад",
+    "created_days_ago_many": "Создан {{count}} дней назад",
+    "runs_few": "{{count}} запуска",
+    "runs_many": "{{count}} запусков"
   },
   "row_actions": {
     "cancel_all_tasks": "Отменить все задачи",
@@ -126,23 +129,15 @@
     "restore_failed_toast": "Не удалось восстановить агента",
     "no_tasks_to_cancel_toast": "Нет активных задач для отмены",
     "cancelled_tasks_toast_one": "Отменена {{count}} задача",
-    "cancelled_tasks_toast_few": "Отменено задач: {{count}}",
-    "cancelled_tasks_toast_many": "Отменено задач: {{count}}",
     "cancelled_tasks_toast_other": "Отменено задач: {{count}}",
     "cancel_failed_toast": "Не удалось отменить задачи",
     "cancel_dialog_title": "Отменить все задачи для «{{name}}»?",
     "cancel_dialog_no_tasks": "Нет активных задач для отмены.",
     "cancel_dialog_running_one": "{{count}} выполняется",
-    "cancel_dialog_running_few": "{{count}} выполняется",
-    "cancel_dialog_running_many": "{{count}} выполняется",
     "cancel_dialog_running_other": "{{count}} выполняется",
     "cancel_dialog_queued_one": "{{count}} в очереди",
-    "cancel_dialog_queued_few": "{{count}} в очереди",
-    "cancel_dialog_queued_many": "{{count}} в очереди",
     "cancel_dialog_queued_other": "{{count}} в очереди",
     "cancel_dialog_impact_one": "Будет отменена {{summary}} задача.",
-    "cancel_dialog_impact_few": "Будет отменено задач: {{summary}}.",
-    "cancel_dialog_impact_many": "Будет отменено задач: {{summary}}.",
     "cancel_dialog_impact_other": "Будет отменено задач: {{summary}}.",
     "cancel_dialog_running_note": " Выполняющимся задачам может потребоваться до 5 секунд, чтобы полностью остановиться.",
     "cancel_dialog_irreversible": " Отменённые задачи нельзя возобновить.",
@@ -151,10 +146,17 @@
     "archive_dialog_title": "Архивировать «{{name}}»?",
     "archive_dialog_description": "Агента нельзя будет назначить или упомянуть, а все активные задачи будут отменены. Вся история сохраняется, и позже вы сможете его восстановить.",
     "archive_dialog_cancel": "Отмена",
-    "archive_dialog_confirm": "Архивировать"
+    "archive_dialog_confirm": "Архивировать",
+    "cancelled_tasks_toast_few": "Отменено задач: {{count}}",
+    "cancelled_tasks_toast_many": "Отменено задач: {{count}}",
+    "cancel_dialog_running_few": "{{count}} выполняется",
+    "cancel_dialog_running_many": "{{count}} выполняется",
+    "cancel_dialog_queued_few": "{{count}} в очереди",
+    "cancel_dialog_queued_many": "{{count}} в очереди",
+    "cancel_dialog_impact_few": "Будет отменено задач: {{summary}}.",
+    "cancel_dialog_impact_many": "Будет отменено задач: {{summary}}."
   },
   "detail": {
-    "back_to_agents": "Агенты",
     "back_to_agents_full": "Назад к агентам",
     "not_found_title": "Агент не найден",
     "not_found_default": "Возможно, этот агент был архивирован или удалён.",
@@ -183,17 +185,20 @@
     "runtime_required_toast": "Привяжите среду выполнения перед запуском этого агента.",
     "assign_work": "Назначить работу",
     "more_actions_aria": "Действия с агентом",
-    "updated": "Обновлено {{when}}"
+    "settings": "Настройки",
+    "copy_link": "Копировать ссылку",
+    "copy_id": "Копировать ID агента",
+    "link_copied_toast": "Ссылка скопирована",
+    "id_copied_toast": "ID агента скопирован"
   },
   "inspector": {
     "section_profile": "Профиль",
     "section_execution": "Выполнение",
-    "qoder_execution_note": "Модель, инструменты и навыки настраиваются у агента QCA в Qoder.",
+    "qoder_execution_note": "Модель, инструменты и skill настраиваются у агента в Qoder Cloud Agents.",
     "section_access": "Доступ",
     "section_properties": "Свойства",
     "section_details": "Сведения",
     "section_details_hint": "Информация о владении и жизненном цикле только для чтения.",
-    "section_skills": "Навыки",
     "section_integrations": "Интеграции",
     "prop_runtime": "Среда выполнения",
     "prop_model": "Модель",
@@ -204,7 +209,6 @@
     "prop_owner": "Владелец",
     "prop_created": "Создан",
     "prop_updated": "Обновлён",
-    "no_description_placeholder": "Нет описания",
     "avatar_label": "Аватар",
     "name_label": "Имя",
     "description_label": "Описание",
@@ -220,13 +224,33 @@
     "cancel": "Отмена"
   },
   "overview": {
-    "agent_context": "Агент",
-    "access": "Доступ",
     "attention_title": "Задачи требуют внимания",
     "attention_queued_one": "{{count}} задача стоит в очереди, пока среда выполнения недоступна.",
+    "attention_queued_other": "{{count}} задачи стоят в очереди, пока среда выполнения недоступна.",
     "attention_queued_few": "{{count}} задачи стоят в очереди, пока среда выполнения недоступна.",
-    "attention_queued_many": "{{count}} задач стоят в очереди, пока среда выполнения недоступна.",
-    "attention_queued_other": "{{count}} задачи стоят в очереди, пока среда выполнения недоступна."
+    "attention_queued_many": "{{count}} задач стоят в очереди, пока среда выполнения недоступна."
+  },
+  "sections": {
+    "runs_count_one": "{{count}} запуск",
+    "runs_count_other": "{{count}} запуска",
+    "recent_this_week_one": "{{count}} за эту неделю",
+    "recent_this_week_other": "{{count}} за эту неделю",
+    "view_all": "Показать все",
+    "open": "Открыть",
+    "edit": "Изменить",
+    "add": "Добавить",
+    "manage": "Управление",
+    "instructions_empty": "Инструкций пока нет.",
+    "runs_count_few": "{{count}} запуска",
+    "runs_count_many": "{{count}} запусков",
+    "recent_this_week_few": "{{count}} за эту неделю",
+    "recent_this_week_many": "{{count}} за эту неделю"
+  },
+  "panel": {
+    "status": "Статус",
+    "runs_7d": "Запуски за 7 дней",
+    "edit_access_aria": "Доступ: {{value}}. Изменить доступ",
+    "all_settings": "Все настройки"
   },
   "skill_attach": {
     "trigger_aria": "Прикрепить навык рабочего пространства",
@@ -281,13 +305,11 @@
     "clear_full": "Очистить выбор (использовать значение провайдера по умолчанию)"
   },
   "tabs": {
-    "overview": "Обзор",
     "work": "Работа",
     "capabilities": "Возможности",
     "settings": "Настройки",
     "general": "Общее",
     "access": "Доступ",
-    "page_navigation_aria": "Страница агента",
     "section_navigation_aria": "Раздел агента",
     "activity": "Активность",
     "tasks": "Задачи",
@@ -299,7 +321,7 @@
     "composio_mcp": "MCP-приложения",
     "integrations": "Интеграции",
     "runtime_config": "Маршрутизация",
-    "qoder_agent": "Агент QCA",
+    "qoder_agent": "Qoder Cloud Agents",
     "discard_dialog_title": "Отменить несохранённые изменения?",
     "discard_dialog_description": "В этой вкладке есть несохранённые изменения. Если вы уйдёте сейчас, они будут потеряны.",
     "discard_keep": "Продолжить редактирование",
@@ -309,7 +331,6 @@
     "title": "Создание агента",
     "squad_title": "Создать агента для этой команды",
     "duplicate_title": "Дублировать {{name}}",
-    "back": "Назад",
     "step_ai": "Создание через диалог",
     "modes": {
       "template": {
@@ -357,6 +378,7 @@
       "switch_runtime_failed": "Не удалось переключить среду выполнения. Диалог по-прежнему выполняется на предыдущей.",
       "switch_runtime_pending": "Остановите текущий ответ, чтобы переключить среду выполнения.",
       "switch_runtime_success": "Среда выполнения переключена. Черновик сохранён, диалог продолжается на новой среде выполнения в новой сессии модели.",
+      "conversation_tab": "Диалог",
       "chat_title": "Agent Builder",
       "runtime_online": "Среда выполнения в сети",
       "runtime_offline": "Среда выполнения не в сети",
@@ -393,7 +415,8 @@
       "runtime": "Среда выполнения",
       "configure": "Настройка",
       "done": "Готово",
-      "aria": "Этапы создания агента"
+      "aria": "Этапы создания агента",
+      "progress": "Шаг {{current}} из {{total}}"
     },
     "configure_title": "Настройте агента",
     "ask_ai": "Поручить ИИ",
@@ -428,20 +451,14 @@
       "web_local_title": "Используйте инструменты этого компьютера через приложение для компьютера",
       "download_desktop": "Скачать приложение",
       "harness_count_one": "{{count}} инструмент",
-      "harness_count_few": "{{count}} инструмента",
-      "harness_count_many": "{{count}} инструментов",
       "harness_count_other": "{{count}} инструмента",
       "local_starting": "Запуск локального демона…",
       "local_empty_title": "На этой машине не найдены инструменты",
       "local_empty_hint": "Установите CLI, например Claude Code или Codex, и он появится здесь.",
       "more_harnesses_one": "Ещё {{count}}: {{names}}",
-      "more_harnesses_few": "Ещё {{count}}: {{names}}",
-      "more_harnesses_many": "Ещё {{count}}: {{names}}",
       "more_harnesses_other": "Ещё {{count}}: {{names}}",
       "add_remote": "Подключить машину",
       "hidden_remote_one": "Ещё {{count}} машина доступна только своему владельцу",
-      "hidden_remote_few": "Ещё {{count}} машины доступны только своим владельцам",
-      "hidden_remote_many": "Ещё {{count}} машин доступны только своим владельцам",
       "hidden_remote_other": "Ещё {{count}} машины доступны только своим владельцам",
       "remote_warning": "Задачи выполняются на машине пользователя {{owner}}, читают и изменяют файлы на ней и расходуют лимиты аккаунта {{owner}}.",
       "no_match": "Ничего не найдено по запросу «{{query}}»",
@@ -460,7 +477,13 @@
       "member_fix": "Обратитесь к администратору",
       "footer_selected": "Выбрано:",
       "cancel": "Отмена",
-      "next": "Далее"
+      "next": "Далее",
+      "harness_count_few": "{{count}} инструмента",
+      "harness_count_many": "{{count}} инструментов",
+      "more_harnesses_few": "Ещё {{count}}: {{names}}",
+      "more_harnesses_many": "Ещё {{count}}: {{names}}",
+      "hidden_remote_few": "Ещё {{count}} машины доступны только своим владельцам",
+      "hidden_remote_many": "Ещё {{count}} машин доступны только своим владельцам"
     }
   },
   "create_dialog": {
@@ -512,15 +535,15 @@
       "label": "Навыки",
       "placeholder": "Добавить навыки из рабочего пространства",
       "selected_one": "Выбрано: {{count}} — нажмите, чтобы изменить",
-      "selected_few": "Выбрано: {{count}} — нажмите, чтобы изменить",
-      "selected_many": "Выбрано: {{count}} — нажмите, чтобы изменить",
       "selected_other": "Выбрано: {{count}} — нажмите, чтобы изменить",
       "collapse": "Свернуть",
       "list_empty_multi": "В этом рабочем пространстве пока нет навыков. Сначала создайте или импортируйте один.",
       "list_loading": "Загрузка…",
       "list_empty_default": "Нет доступных навыков.",
       "list_no_match": "Совпадающих навыков не найдено.",
-      "search_placeholder": "Поиск навыков…"
+      "search_placeholder": "Поиск навыков…",
+      "selected_few": "Выбрано: {{count}} — нажмите, чтобы изменить",
+      "selected_many": "Выбрано: {{count}} — нажмите, чтобы изменить"
     },
     "avatar": {
       "change_aria": "Сменить аватар",
@@ -549,9 +572,9 @@
     "untitled": "Вариант без названия",
     "customize": "Настроить",
     "defaults_summary_one": "Используется {{count}} встроенный вариант",
+    "defaults_summary_other": "Используется {{count}} встроенного варианта",
     "defaults_summary_few": "Используются {{count}} встроенных варианта",
-    "defaults_summary_many": "Используются {{count}} встроенных вариантов",
-    "defaults_summary_other": "Используется {{count}} встроенного варианта"
+    "defaults_summary_many": "Используются {{count}} встроенных вариантов"
   },
   "tab_body": {
     "common": {
@@ -576,9 +599,9 @@
       "mode_preview": "Предпросмотр",
       "preview_empty": "Пока нечего показывать.",
       "char_count_one": "{{count}} символ",
+      "char_count_other": "{{count}} символа",
       "char_count_few": "{{count}} символа",
-      "char_count_many": "{{count}} символов",
-      "char_count_other": "{{count}} символа"
+      "char_count_many": "{{count}} символов"
     },
     "env": {
       "intro_readonly": "Внедряется в процесс агента при запуске. Читать или редактировать значения могут только владельцы и администраторы рабочего пространства; каждый просмотр и изменение записываются в журнал аудита рабочего пространства.",
@@ -603,15 +626,15 @@
       "saved_toast": "Переменные окружения сохранены",
       "save_failed_toast": "Не удалось сохранить переменные окружения",
       "not_revealed_title_one": "Настроена {{count}} переменная",
-      "not_revealed_title_few": "Настроено переменных: {{count}}",
-      "not_revealed_title_many": "Настроено переменных: {{count}}",
       "not_revealed_title_other": "Настроено переменных: {{count}}",
       "not_revealed_empty": "Переменные окружения не настроены.",
       "not_revealed_hint": "Значения остаются скрытыми, пока вы их не откроете. Каждый просмотр и изменение записываются в журнал аудита рабочего пространства.",
       "reveal_action": "Показать и редактировать",
       "revealing": "Показ…",
       "reveal_failed_toast": "Не удалось загрузить значения окружения",
-      "empty_editable": "Переменные окружения не настроены."
+      "empty_editable": "Переменные окружения не настроены.",
+      "not_revealed_title_few": "Настроено переменных: {{count}}",
+      "not_revealed_title_many": "Настроено переменных: {{count}}"
     },
     "custom_args": {
       "intro": "Добавьте аргументы командной строки, передаваемые при запуске этого агента.",
@@ -807,11 +830,11 @@
       "add_dialog_saving": "Добавление…",
       "add_dialog_confirm_default": "Добавить",
       "add_dialog_confirm_one": "Добавить {{count}} навык",
-      "add_dialog_confirm_few": "Добавить навыков: {{count}}",
-      "add_dialog_confirm_many": "Добавить навыков: {{count}}",
       "add_dialog_confirm_other": "Добавить навыков: {{count}}",
       "add_dialog_cancel": "Отмена",
-      "add_failed_toast": "Не удалось добавить навык"
+      "add_failed_toast": "Не удалось добавить навык",
+      "add_dialog_confirm_few": "Добавить навыков: {{count}}",
+      "add_dialog_confirm_many": "Добавить навыков: {{count}}"
     },
     "integrations": {
       "members_note": "Управлять этим подключением могут только владельцы и администраторы рабочего пространства. Просмотреть подключённых ботов можно в настройках → Интеграции."
@@ -829,31 +852,18 @@
       "section_now": "Сейчас",
       "section_last_30d": "Последние 30 дней",
       "section_recent": "Недавняя работа",
-      "subtitle_no_active": "Нет активной работы",
-      "subtitle_active_one": "{{count}} активная задача",
-      "subtitle_active_few": "{{count}} активные задачи",
-      "subtitle_active_many": "{{count}} активных задач",
-      "subtitle_active_other": "{{count}} активные задачи",
-      "subtitle_performance": "Производительность",
-      "subtitle_no_recent": "Пока ничего не завершено",
-      "subtitle_recent_progress": "{{shown}} из {{total}} запусков",
-      "subtitle_recent_latest": "Последних запусков: {{count}}",
       "empty_now": "Сейчас этот агент ничего не выполняет.",
       "empty_30d": "За последние 30 дней завершений не было.",
       "empty_recent": "Этот агент пока ничего не завершил.",
       "show_more": "Показать ещё →",
       "runs_one": "запуск",
-      "runs_few": "запуска",
-      "runs_many": "запусков",
       "runs_other": "запуска",
       "success_pct": "{{percent}}% успешных",
       "success_label": "успешно",
       "success_hint": "Успешные запуски, делённые на сумму успешных и завершившихся с ошибкой. Отменённые запуски не учитываются.",
       "success_unavailable": "За этот период нет успешных или завершившихся с ошибкой запусков, поэтому долю успешных показать нельзя.",
       "cancelled_count": "отменено: {{count}}",
-      "avg_duration": "в среднем {{value}}",
       "avg_duration_label": "средняя длительность",
-      "failed_count": "с ошибкой: {{count}}",
       "failed_label": "с ошибкой",
       "source_issue": "Задача",
       "source_chat": "Чат",
@@ -874,7 +884,9 @@
       "cancel_failed_toast": "Не удалось отменить задачу",
       "started_prefix": "Начато {{when}}",
       "dispatched_prefix": "Отправлено {{when}}",
-      "queued_prefix": "В очереди с {{when}}"
+      "queued_prefix": "В очереди с {{when}}",
+      "runs_few": "запуска",
+      "runs_many": "запусков"
     }
   },
   "char_counter": {
@@ -1002,12 +1014,8 @@
     "lane_tool": "Инструменты",
     "outcome_label": "Создано",
     "outcome_files_one": "{{count}} файл",
-    "outcome_files_few": "Файлов: {{count}}",
-    "outcome_files_many": "Файлов: {{count}}",
     "outcome_files_other": "Файлов: {{count}}",
     "outcome_commands_one": "{{count}} команда",
-    "outcome_commands_few": "Команд: {{count}}",
-    "outcome_commands_many": "Команд: {{count}}",
     "outcome_commands_other": "Команд: {{count}}",
     "search_placeholder": "Поиск по этому запуску…",
     "no_matches": "Нет шагов, соответствующих этому запросу.",
@@ -1017,8 +1025,6 @@
     "kind_thinking": "Рассуждение",
     "kind_error": "Ошибка",
     "group_calls_one": "{{count}} вызов",
-    "group_calls_few": "Вызовов: {{count}}",
-    "group_calls_many": "Вызовов: {{count}}",
     "group_calls_other": "Вызовов: {{count}}",
     "step_running": "Всё ещё выполняется",
     "step_duration_unknown": "Точная длительность недоступна.",
@@ -1028,8 +1034,6 @@
     "close_step": "Закрыть подробности",
     "image_result": "Изображение",
     "steps_count_one": "{{count}} шаг",
-    "steps_count_few": "Шагов: {{count}}",
-    "steps_count_many": "Шагов: {{count}}",
     "steps_count_other": "Шагов: {{count}}",
     "steps_filtered": "{{shown}} из {{total}} шагов",
     "timeline_zoom_in": "Увеличить",
@@ -1038,7 +1042,15 @@
     "tool_kind_write": "Правки",
     "tool_kind_read": "Чтения",
     "tool_kind_misc": "Прочее",
-    "trigger_wakeup": "Пробуждение"
+    "trigger_wakeup": "Пробуждение",
+    "outcome_files_few": "Файлов: {{count}}",
+    "outcome_files_many": "Файлов: {{count}}",
+    "outcome_commands_few": "Команд: {{count}}",
+    "outcome_commands_many": "Команд: {{count}}",
+    "group_calls_few": "Вызовов: {{count}}",
+    "group_calls_many": "Вызовов: {{count}}",
+    "steps_count_few": "Шагов: {{count}}",
+    "steps_count_many": "Шагов: {{count}}"
   },
   "task_failure": {
     "cancelled_by_system": "Отменено системой",
@@ -1086,35 +1098,16 @@
   "last_active": {
     "today": "Сегодня",
     "days_ago_one": "{{count}} день назад",
-    "days_ago_few": "{{count}} дня назад",
-    "days_ago_many": "{{count}} дней назад",
     "days_ago_other": "{{count}} дня назад",
-    "none": "Нет активности (30 дн.)"
+    "none": "Нет активности (30 дн.)",
+    "days_ago_few": "{{count}} дня назад",
+    "days_ago_many": "{{count}} дней назад"
   },
   "toolbar": {
-    "result_count_title": "Совпадающих агентов / агентов в области видимости",
-    "filter_label": "Фильтр",
-    "filter_active_count_one": "{{count}} фильтр",
-    "filter_active_count_few": "Фильтров: {{count}}",
-    "filter_active_count_many": "Фильтров: {{count}}",
-    "filter_active_count_other": "Фильтров: {{count}}",
-    "clear_filters": "Сбросить фильтры",
     "section_availability": "Доступность",
     "section_access": "Доступ",
     "section_runtime": "Среда выполнения",
-    "display": "Отображение",
-    "sort_by": "Сортировать по",
-    "direction_asc": "По возрастанию",
-    "direction_desc": "По убыванию",
-    "section_columns": "Столбцы",
     "section_owner": "Владелец",
     "section_model": "Модель"
-  },
-  "actions": {
-    "selected_one": "Выбрана {{count}}",
-    "selected_few": "Выбрано: {{count}}",
-    "selected_many": "Выбрано: {{count}}",
-    "selected_other": "Выбрано: {{count}}",
-    "clear_selection": "Снять выделение"
   }
 }

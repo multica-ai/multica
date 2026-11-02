@@ -12,8 +12,6 @@
   "filters": {
     "tooltip": "Фильтр входящих",
     "active_count_one": "{{count}} активный фильтр",
-    "active_count_few": "{{count}} активных фильтра",
-    "active_count_many": "{{count}} активных фильтров",
     "active_count_other": "{{count}} активных фильтра",
     "status": "Статус",
     "priority": "Приоритет",
@@ -21,11 +19,13 @@
     "unread_only": "Только непрочитанные",
     "no_agents_working": "Нет работающих агентов",
     "notification_count_one": "{{count}} уведомление",
-    "notification_count_few": "{{count}} уведомления",
-    "notification_count_many": "{{count}} уведомлений",
     "notification_count_other": "{{count}} уведомления",
     "clear": "Очистить фильтры",
-    "empty": "Нет уведомлений, соответствующих фильтрам"
+    "empty": "Нет уведомлений, соответствующих фильтрам",
+    "active_count_few": "{{count}} активных фильтра",
+    "active_count_many": "{{count}} активных фильтров",
+    "notification_count_few": "{{count}} уведомления",
+    "notification_count_many": "{{count}} уведомлений"
   },
   "context_menu": {
     "mark_read": "Отметить как прочитанное",

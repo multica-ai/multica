@@ -1,6 +1,6 @@
 // @vitest-environment node
 import { describe, expect, it } from "vitest";
-import { baselineFromQuery } from "./baseline";
+import { baselineFromQuery, issueViewFilterCount } from "./baseline";
 import { propertyFilterValueKey } from "../types";
 
 // The property-filter branch of baselineFromQuery: saved-view members must
@@ -83,5 +83,36 @@ describe("baselineFromQuery project status filters", () => {
       projectStatusFilters: ["in_progress", "backlog", 7, null],
     });
     expect(baseline.raw.projectStatusFilters).toEqual(["in_progress"]);
+  });
+});
+
+describe("issueViewFilterCount", () => {
+  it("counts constrained dimensions, not values", () => {
+    expect(issueViewFilterCount({})).toBe(0);
+    expect(
+      issueViewFilterCount({
+        statusFilters: ["todo", "in_progress"],
+        includeNoAssignee: true,
+        labelFilters: [],
+        propertyFilters: { p1: ["a"], p2: [] },
+      }),
+    ).toBe(3);
+  });
+
+  it("ignores values the store cannot represent", () => {
+    expect(issueViewFilterCount({ priorityFilters: ["bogus"], projectStatusFilters: ["nope"] })).toBe(0);
+  });
+});
+
+describe("baselineFromQuery agent running", () => {
+  it("fixes the filter only when the view saved it as true", () => {
+    expect(baselineFromQuery({ agentRunningFilter: true }).agentRunning).toBe(true);
+    expect(baselineFromQuery({ agentRunningFilter: true }).raw.agentRunningFilter).toBe(true);
+    expect(baselineFromQuery({ agentRunningFilter: "yes" }).agentRunning).toBe(false);
+    expect(baselineFromQuery({}).raw.agentRunningFilter).toBe(false);
+  });
+
+  it("counts as one condition in the view summary", () => {
+    expect(issueViewFilterCount({ agentRunningFilter: true, statusFilters: ["todo"] })).toBe(2);
   });
 });

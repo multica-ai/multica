@@ -20,8 +20,6 @@
     "filter_status": "Статус",
     "filter_priority": "Приоритет",
     "issue_count_one": "{{count}} задача",
-    "issue_count_few": "{{count}} задачи",
-    "issue_count_many": "{{count}} задач",
     "issue_count_other": "{{count}} задачи",
     "reset_filters": "Сбросить все фильтры",
     "display_settings": "Настройки отображения",
@@ -39,7 +37,9 @@
     "view_board_short": "Доска",
     "view_list_short": "Список",
     "view_swimlane_short": "Дорожки",
-    "sort_manual": "Вручную"
+    "sort_manual": "Вручную",
+    "issue_count_few": "{{count}} задачи",
+    "issue_count_many": "{{count}} задач"
   },
   "errors": {
     "move_failed": "Не удалось переместить задачу"
