@@ -668,6 +668,7 @@ func init() {
 	issueCreateCmd.Flags().String("priority", "", "Issue priority")
 	issueCreateCmd.Flags().String("assignee", "", "Assignee name (member, agent, or squad; fuzzy match)")
 	issueCreateCmd.Flags().String("assignee-id", "", "Assignee UUID — member, agent, or squad (mutually exclusive with --assignee)")
+	issueCreateCmd.Flags().Bool("assignee-picker", false, "Assign to the agent or squad selected in Quick Create (requires quick-create task context; mutually exclusive with --assignee and --assignee-id)")
 	issueCreateCmd.Flags().String("parent", "", "Parent issue ID")
 	issueCreateCmd.Flags().Int("stage", 0, "Stage ordinal (>=1) grouping this sub-issue into an ordered barrier group under its parent; omit for unstaged. The parent assignee is woken only when every sub-issue in a stage finishes.")
 	issueCreateCmd.Flags().String("project", "", "Project ID")
@@ -1479,6 +1480,30 @@ func quickCreateAttachmentIDsFromEnv() ([]string, error) {
 	return appendUniqueStrings(nil, ids...), nil
 }
 
+func pickIssueCreateAssignee(ctx context.Context, client *cli.APIClient, cmd *cobra.Command) (string, string, bool, error) {
+	if cmd.Flags().Changed("assignee-picker") && (cmd.Flags().Changed("assignee") || cmd.Flags().Changed("assignee-id")) {
+		return "", "", false, errors.New("--assignee-picker, --assignee, and --assignee-id are mutually exclusive")
+	}
+	picker, _ := cmd.Flags().GetBool("assignee-picker")
+	if !picker {
+		return pickAssigneeFromFlags(ctx, client, cmd, "assignee", "assignee-id", issueAssigneeKinds)
+	}
+	if strings.TrimSpace(os.Getenv("MULTICA_QUICK_CREATE_TASK_ID")) == "" {
+		return "", "", false, errors.New("--assignee-picker requires a quick-create task context")
+	}
+	aType := os.Getenv("MULTICA_QUICK_CREATE_DEFAULT_ASSIGNEE_TYPE")
+	if aType != "agent" && aType != "squad" {
+		return "", "", false, errors.New("invalid picker assignee type: MULTICA_QUICK_CREATE_DEFAULT_ASSIGNEE_TYPE must be agent or squad")
+	}
+	aID := strings.TrimSpace(os.Getenv("MULTICA_QUICK_CREATE_DEFAULT_ASSIGNEE_ID"))
+	if !uuidRegexp.MatchString(aID) {
+		return "", "", false, errors.New("MULTICA_QUICK_CREATE_DEFAULT_ASSIGNEE_ID must contain a canonical UUID")
+	}
+	// The server validates workspace membership, archive state and invocation
+	// permissions for this typed pair, just as it does for explicit assignees.
+	return aType, aID, true, nil
+}
+
 func runIssueCreate(cmd *cobra.Command, _ []string) error {
 	title, _ := cmd.Flags().GetString("title")
 	if title == "" {
@@ -1579,7 +1604,7 @@ func runIssueCreate(cmd *cobra.Command, _ []string) error {
 	if v, _ := cmd.Flags().GetBool("allow-duplicate"); v {
 		body["allow_duplicate"] = true
 	}
-	aType, aID, hasAssignee, resolveErr := pickAssigneeFromFlags(ctx, client, cmd, "assignee", "assignee-id", issueAssigneeKinds)
+	aType, aID, hasAssignee, resolveErr := pickIssueCreateAssignee(ctx, client, cmd)
 	if resolveErr != nil {
 		return fmt.Errorf("resolve assignee: %w", resolveErr)
 	}
