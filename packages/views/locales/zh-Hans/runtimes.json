@@ -162,6 +162,10 @@
     "no_agents": "还没有智能体绑定到这个运行时。",
     "diagnostics_cli": "CLI",
     "diagnostics_visibility": "可见性",
+    "concurrency_title": "并发",
+    "concurrency_none": "不限制",
+    "concurrency_hint": "此运行时上所有智能体同时进行的运行总数上限（{{min}}–{{max}}）。留空表示不限制。",
+    "toast_concurrency_failed": "更新并发上限失败",
     "visibility_label": {
       "private": "私有",
       "public": "公开",

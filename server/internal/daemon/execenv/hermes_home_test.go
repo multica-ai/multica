@@ -839,6 +839,7 @@ func TestHermesTerminalEnvPassthrough(t *testing.T) {
 		"MULTICA_AGENT_NAME", "MULTICA_AGENT_ID", "MULTICA_TASK_ID", "MULTICA_TASK_SLOT",
 		"MULTICA_AUTOPILOT_RUN_ID", "MULTICA_AUTOPILOT_ID",
 		"MULTICA_QUICK_CREATE_TASK_ID", "MULTICA_QUICK_CREATE_ATTACHMENT_IDS",
+		"MULTICA_QUICK_CREATE_DEFAULT_ASSIGNEE_TYPE", "MULTICA_QUICK_CREATE_DEFAULT_ASSIGNEE_ID",
 		"MULTICA_EXTERNAL_SESSION_ID",
 	}
 	for _, tc := range []struct {
@@ -871,12 +872,14 @@ func TestHermesTerminalEnvPassthrough(t *testing.T) {
 				Provider:         "hermes",
 				HermesSourceHome: shared,
 				HermesEnv: map[string]string{
-					"MULTICA_TOKEN":                       "mat_fixture_not_for_config",
-					"MULTICA_AUTOPILOT_RUN_ID":            "autopilot_run_fixture",
-					"MULTICA_AUTOPILOT_ID":                "autopilot_fixture",
-					"MULTICA_QUICK_CREATE_TASK_ID":        "quick_create_fixture",
-					"MULTICA_QUICK_CREATE_ATTACHMENT_IDS": `["attachment_fixture"]`,
-					"UNRELATED_SECRET":                    "unrelated_fixture",
+					"MULTICA_TOKEN":                              "mat_fixture_not_for_config",
+					"MULTICA_AUTOPILOT_RUN_ID":                   "autopilot_run_fixture",
+					"MULTICA_AUTOPILOT_ID":                       "autopilot_fixture",
+					"MULTICA_QUICK_CREATE_TASK_ID":               "quick_create_fixture",
+					"MULTICA_QUICK_CREATE_DEFAULT_ASSIGNEE_TYPE": "squad",
+					"MULTICA_QUICK_CREATE_DEFAULT_ASSIGNEE_ID":   "aaaa1111-2222-3333-4444-555555555555",
+					"MULTICA_QUICK_CREATE_ATTACHMENT_IDS":        `["attachment_fixture"]`,
+					"UNRELATED_SECRET":                           "unrelated_fixture",
 				},
 				Task: task,
 			}, testLogger())

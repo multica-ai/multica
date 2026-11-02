@@ -205,6 +205,11 @@ services:
       # as it ships; set it only behind a fake-IP proxy whose pool would
       # otherwise get every attachment refused. See .env.example.
       MULTICA_WECOM_MEDIA_ALLOW_CIDRS: ${MULTICA_WECOM_MEDIA_ALLOW_CIDRS:-}
+      # The WeCom-issued caller id the scan-code install flow sends as
+      # ?source=. Empty (the default) uses the built-in "multica"; set it only
+      # if WeCom issued your organisation its own source. Nothing but the QR
+      # install endpoints reads it.
+      MULTICA_WECOM_SOURCE_ID: ${MULTICA_WECOM_SOURCE_ID:-}
       # 1 = log every inbound and outbound WeCom frame, including the first
       # 120 runes of each message body, so a real-device session can be
       # checked against the server afterwards. Off unless set; turn it on only
