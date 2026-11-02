@@ -37,7 +37,8 @@ export interface OfficeSetupRefusal {
   docs_path: string;
 }
 
-const DEFAULT_DOCS_PATH = "/install-agent-runtime";
+/** The install guide's path on the docs site, used when a refusal omits its own. */
+export const DEFAULT_OFFICE_SETUP_DOCS_PATH = "/install-agent-runtime";
 
 export const OfficeSetupReadinessSchema = z
   .object({
@@ -68,7 +69,7 @@ const OfficeSetupRefusalSchema = z
   .object({
     code: z.string(),
     hint: z.string().default(""),
-    docs_path: z.string().default(DEFAULT_DOCS_PATH),
+    docs_path: z.string().default(DEFAULT_OFFICE_SETUP_DOCS_PATH),
   })
   .loose();
 
