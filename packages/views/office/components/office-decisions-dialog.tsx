@@ -2,17 +2,15 @@
 
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { toast } from "sonner";
 import { issueDetailOptions } from "@multica/core/issues/queries";
-import { useDecideProposal, type Proposal } from "@multica/core/office";
+import type { Proposal } from "@multica/core/office";
 import { useWorkspaceId } from "@multica/core/hooks";
 import type { Squad } from "@multica/core/types";
-import { Button } from "@multica/ui/components/ui/button";
 import { Dialog, DialogContent, DialogTitle } from "@multica/ui/components/ui/dialog";
-import { Textarea } from "@multica/ui/components/ui/textarea";
 import { cn } from "@multica/ui/lib/utils";
 import { ReadonlyContent } from "../../editor/readonly-content";
 import { useT } from "../../i18n";
+import { OfficeProposalDecision } from "./office-proposal-decision";
 
 /**
  * The proposals waiting for the boss. The list names each one; the selected
@@ -88,26 +86,10 @@ function ProposalDetail({
 }) {
   const { t } = useT("issues");
   const wsId = useWorkspaceId();
-  const decide = useDecideProposal(wsId);
-  const [note, setNote] = useState("");
   const { data: issue } = useQuery(issueDetailOptions(wsId, proposal.issue_id));
 
   const from = squads.find((squad) => squad.id === proposal.squad_id);
   const handoff = squads.find((squad) => squad.id === proposal.handoff_squad_id);
-
-  const decideWith = (decision: "approve" | "reject") =>
-    decide.mutate(
-      { id: proposal.id, decision, note: note.trim() || undefined },
-      {
-        onSuccess: () =>
-          toast.success(
-            decision === "approve"
-              ? t(($) => $.office.decision_approved, { identifier: proposal.issue_identifier })
-              : t(($) => $.office.decision_rejected, { identifier: proposal.issue_identifier }),
-          ),
-        onError: () => toast.error(t(($) => $.office.decision_failed)),
-      },
-    );
 
   return (
     <section className="flex min-h-0 min-w-0 flex-1 flex-col">
@@ -125,29 +107,11 @@ function ProposalDetail({
           </div>
         ) : null}
       </div>
-      {canDecide ? (
-        <div className="shrink-0 space-y-2 border-t px-4 py-3">
-          <label className="flex flex-col gap-1 text-caption text-muted-foreground">
-            {t(($) => $.office.decision_note)}
-            <Textarea
-              value={note}
-              onChange={(event) => setNote(event.target.value)}
-              rows={2}
-              className="text-body text-foreground"
-            />
-          </label>
-          <div className="flex flex-wrap justify-end gap-2">
-            <Button type="button" variant="outline" disabled={decide.isPending} onClick={() => decideWith("reject")}>
-              {t(($) => $.office.decision_reject)}
-            </Button>
-            <Button type="button" disabled={decide.isPending} aria-busy={decide.isPending} onClick={() => decideWith("approve")}>
-              {handoff
-                ? t(($) => $.office.decision_approve_handoff, { name: handoff.name })
-                : t(($) => $.office.decision_approve)}
-            </Button>
-          </div>
-        </div>
-      ) : null}
+      <OfficeProposalDecision
+        proposal={proposal}
+        handoffName={handoff?.name ?? null}
+        canDecide={canDecide}
+      />
     </section>
   );
 }
