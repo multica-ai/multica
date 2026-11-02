@@ -70,6 +70,14 @@ type ActionSigner struct {
 	now func() time.Time
 }
 
+// WithClock returns a signer that reads time from now. Tests use it to issue and
+// verify tokens at chosen instants; production never calls it.
+func (s *ActionSigner) WithClock(now func() time.Time) *ActionSigner {
+	c := *s
+	c.now = now
+	return &c
+}
+
 // NewActionSigner builds a signer from the server secret. An empty secret
 // yields a signer whose tokens verify only against the same empty secret, so
 // callers pass the configured secret, never a placeholder.

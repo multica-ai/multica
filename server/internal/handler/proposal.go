@@ -603,26 +603,13 @@ func (h *Handler) DecideProposal(w http.ResponseWriter, r *http.Request) {
 		until = parsed
 	}
 
-	prefix := h.getIssuePrefix(r.Context(), wsUUID)
-	fillKickoff := h.newStatusCategoryFiller(r.Context(), wsUUID)
-	res, err := h.proposalService().Decide(r.Context(), service.ProposalDecideParams{
+	resp, err := h.settleProposalDecision(r.Context(), userID, proposalDecision{
 		WorkspaceID: wsUUID,
 		ProposalID:  proposalID,
-		DeciderID:   member.UserID,
+		Member:      member.UserID,
 		Decision:    req.Decision,
 		Note:        note,
 		Until:       until,
-		Kickoff: service.IssueCreateOpts{
-			ActorID:  userID,
-			Platform: func() string { p, _, _ := middleware.ClientMetadataFromContext(r.Context()); return p }(),
-			BroadcastPayload: func(issue db.Issue, atts []db.Attachment, labels []db.IssueLabel) map[string]any {
-				payload := issueToResponse(issue, prefix)
-				fillKickoff(&payload)
-				labelResponses := labelsToResponse(labels)
-				payload.Labels = &labelResponses
-				return map[string]any{"issue": payload}
-			},
-		},
 	})
 	switch {
 	case errors.Is(err, service.ErrProposalNotFound):
@@ -653,22 +640,67 @@ func (h *Handler) DecideProposal(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "failed to decide proposal")
 		return
 	}
+	writeJSON(w, http.StatusOK, resp)
+}
 
-	// Snooze changes no issue, so it publishes only the proposal's own event.
-	if req.Decision != service.ProposalDecisionSnooze {
-		h.publishProposalDecision(r.Context(), userID, prefix, wsUUID, res)
+// proposalDecision is one decision on a pending proposal, as the app and a chat
+// button both make it. The caller has already checked that Member may decide.
+type proposalDecision struct {
+	WorkspaceID pgtype.UUID
+	ProposalID  pgtype.UUID
+	// Member is the deciding member's user id.
+	Member   pgtype.UUID
+	Decision string
+	Note     string
+	Until    time.Time
+}
+
+// settleProposalDecision applies a decision through the proposal service and
+// publishes what it changed. The app's decide endpoint and the chat buttons both
+// call it, so a decision has one path, one set of events and one wake-up of the
+// squad leader. actorUserID is the decider's user id, as the events name it. It
+// returns the proposal as the decide endpoint reports it; the error is the
+// service's, unwrapped, for the caller to map.
+func (h *Handler) settleProposalDecision(ctx context.Context, actorUserID string, in proposalDecision) (ProposalResponse, error) {
+	prefix := h.getIssuePrefix(ctx, in.WorkspaceID)
+	fillKickoff := h.newStatusCategoryFiller(ctx, in.WorkspaceID)
+	res, err := h.proposalService().Decide(ctx, service.ProposalDecideParams{
+		WorkspaceID: in.WorkspaceID,
+		ProposalID:  in.ProposalID,
+		DeciderID:   in.Member,
+		Decision:    in.Decision,
+		Note:        in.Note,
+		Until:       in.Until,
+		Kickoff: service.IssueCreateOpts{
+			ActorID:  actorUserID,
+			Platform: func() string { p, _, _ := middleware.ClientMetadataFromContext(ctx); return p }(),
+			BroadcastPayload: func(issue db.Issue, atts []db.Attachment, labels []db.IssueLabel) map[string]any {
+				payload := issueToResponse(issue, prefix)
+				fillKickoff(&payload)
+				labelResponses := labelsToResponse(labels)
+				payload.Labels = &labelResponses
+				return map[string]any{"issue": payload}
+			},
+		},
+	})
+	if err != nil {
+		return ProposalResponse{}, err
 	}
 
-	issueTitle := res.Issue.Title
-	resp := proposalToResponse(res.Proposal, issueTitle, res.Issue.Status, prefix, res.Issue.Number)
+	// Snooze changes no issue, so it publishes only the proposal's own event.
+	if in.Decision != service.ProposalDecisionSnooze {
+		h.publishProposalDecision(ctx, actorUserID, prefix, in.WorkspaceID, res)
+	}
+
+	resp := proposalToResponse(res.Proposal, res.Issue.Title, res.Issue.Status, prefix, res.Issue.Number)
 	if res.Project != nil && res.Kickoff != nil {
 		resp.Handoff = &ProposalHandoffResponse{
 			ProjectID:      uuidToString(res.Project.ID),
 			KickoffIssueID: uuidToString(res.Kickoff.ID),
 		}
 	}
-	h.publish(protocol.EventProposalDecided, workspaceID, "member", userID, map[string]any{"proposal": resp})
-	writeJSON(w, http.StatusOK, resp)
+	h.publish(protocol.EventProposalDecided, uuidToString(in.WorkspaceID), "member", actorUserID, map[string]any{"proposal": resp})
+	return resp, nil
 }
 
 // ── Resubmit ────────────────────────────────────────────────────────────────

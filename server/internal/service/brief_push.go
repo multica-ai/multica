@@ -423,6 +423,10 @@ func renderBriefPush(headline string, decisions []briefPushDecision, briefID, of
 	return msg
 }
 
+// OfficeURL is the Office page for a workspace, or "" when either part is
+// unknown. Chat links and the brief push build their URLs from it.
+func OfficeURL(appURL, slug string) string { return briefPushOfficeURL(appURL, slug) }
+
 // briefPushOfficeURL is the Office page for a workspace, or "" when either part
 // is unknown.
 func briefPushOfficeURL(appURL, slug string) string {
