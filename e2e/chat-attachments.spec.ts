@@ -113,9 +113,11 @@ test.describe("Chat attachments", () => {
     );
     createdAgentId = agentIns.rows[0].id as string;
 
+    // Sessions the member opens from Web Chat carry explicitly_created_at; without
+    // it an empty session is hidden from the public chat gate and upload 404s.
     const sessionIns = await pgc.query(
-      `INSERT INTO chat_session (workspace_id, agent_id, creator_id, title, status)
-       VALUES ($1, $2, $3, 'E2E Chat Attachment Session', 'active')
+      `INSERT INTO chat_session (workspace_id, agent_id, creator_id, title, status, explicitly_created_at)
+       VALUES ($1, $2, $3, 'E2E Chat Attachment Session', 'active', now())
        RETURNING id`,
       [ws.id, createdAgentId, userId],
     );
