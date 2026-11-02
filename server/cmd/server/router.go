@@ -2252,6 +2252,7 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 				r.Route("/{id}", func(r chi.Router) {
 					r.Get("/", h.GetProposal)
 					r.Post("/decision", h.DecideProposal)
+					r.Post("/revision", h.ReviseProposal)
 				})
 			})
 			// Digital company office: floors (owner/admin) and squad seats.

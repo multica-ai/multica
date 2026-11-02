@@ -23,7 +23,8 @@ const (
 	// ProposalMaxPendingPerSquad caps proposals one squad may have waiting.
 	ProposalMaxPendingPerSquad = 3
 	// ProposalMaxCreatedPerSquadPerWeek caps proposals one squad may file over
-	// the rolling seven days, whatever their state.
+	// the rolling seven days, whatever their state. A revision is not a new
+	// filing and does not count here.
 	ProposalMaxCreatedPerSquadPerWeek = 3
 	// ProposalMaxPendingPerWorkspace bounds the whole queue, which per-squad
 	// limits alone would let grow with the number of squads.
@@ -38,12 +39,33 @@ const (
 	ProposalStatePending  = "pending"
 	ProposalStateApproved = "approved"
 	ProposalStateRejected = "rejected"
+	// ProposalStateRevising: the boss asked for changes and the squad has not
+	// resubmitted yet. The proposal is not in the boss's queue and does not
+	// count towards the pending caps.
+	ProposalStateRevising = "revising"
+	// ProposalStateExpired: no decision within ProposalExpiryAfter. Set by the
+	// daily expiry job, which records it as a non-acceptance.
+	ProposalStateExpired = "expired"
 )
 
 // Proposal decisions, as accepted by the decision endpoint.
 const (
 	ProposalDecisionApprove = "approve"
 	ProposalDecisionReject  = "reject"
+	// ProposalDecisionRevise asks the squad to change the proposal. It needs a note.
+	ProposalDecisionRevise = "revise"
+	// ProposalDecisionSnooze keeps the proposal pending until a date.
+	ProposalDecisionSnooze = "snooze"
+)
+
+const (
+	// ProposalExpiryAfter is how long a pending proposal waits for a decision.
+	// The window restarts when the squad resubmits, and a snooze moves it to a
+	// full window after the snooze ends.
+	ProposalExpiryAfter = 14 * 24 * time.Hour
+	// ProposalMaxSnooze bounds how far ahead a snooze may put a proposal, so a
+	// snooze cannot park one indefinitely.
+	ProposalMaxSnooze = 30 * 24 * time.Hour
 )
 
 // ProposalOriginType is the issue origin_type of the issue that backs a
@@ -69,6 +91,20 @@ var (
 	ErrProposalNotFound = errors.New("proposal not found")
 	// ErrProposalAlreadyDecided: the proposal left the pending state.
 	ErrProposalAlreadyDecided = errors.New("proposal is already decided")
+	// ErrProposalRevising: the boss asked for changes and the squad has not
+	// resubmitted, so no decision can be made until it does.
+	ErrProposalRevising = errors.New("proposal is waiting for the squad's revised version")
+	// ErrProposalNotRevising: a resubmission for a proposal that did not ask
+	// for changes.
+	ErrProposalNotRevising = errors.New("proposal is not waiting for changes")
+	// ErrProposalSquadUnavailable: the proposing squad no longer exists or is
+	// archived, so a revision cannot be sent back to it.
+	ErrProposalSquadUnavailable = errors.New("proposing squad no longer exists or is archived")
+	// ErrProposalNoteRequired: asking for changes without saying what to change.
+	ErrProposalNoteRequired = errors.New("a note is required when asking for changes")
+	// ErrProposalSnoozeOutOfRange: the snooze date is not later than now, or is
+	// further away than ProposalMaxSnooze.
+	ErrProposalSnoozeOutOfRange = errors.New("until must be later than now and at most 30 days away")
 )
 
 // ProposalContent is the proposal body the squad writes. The service renders
@@ -106,7 +142,12 @@ func (c ProposalContent) RenderDescription(urgentReason string) string {
 	return b.String()
 }
 
-// ProposalService creates and decides proposals.
+// proposalExpiryInterval is ProposalExpiryAfter in the form the queries take.
+func proposalExpiryInterval() pgtype.Interval {
+	return pgtype.Interval{Microseconds: ProposalExpiryAfter.Microseconds(), Valid: true}
+}
+
+// ProposalService creates, decides and expires proposals.
 type ProposalService struct {
 	Issues *IssueService
 	// Knowledge, when set, receives a record of each decision after it
@@ -240,6 +281,7 @@ func (s *ProposalService) Create(ctx context.Context, p ProposalCreateParams) (P
 		UrgentReason:   p.UrgentReason,
 		CreatedByType:  p.CreatorType,
 		CreatedByID:    p.CreatorID,
+		ExpiryWindow:   proposalExpiryInterval(),
 	})
 	if err != nil {
 		return ProposalCreateResult{}, fmt.Errorf("create proposal: %w", err)
@@ -262,21 +304,12 @@ func liveSquad(ctx context.Context, q *db.Queries, workspaceID, squadID pgtype.U
 	return squad, nil
 }
 
-// checkLimits enforces the attention limits. It runs under the workspace
-// proposal lock. Each message tells the filing agent what to do instead.
+// checkLimits enforces the attention limits on a new filing. It runs under the
+// workspace proposal lock. Each message tells the filing agent what to do
+// instead.
 func (s *ProposalService) checkLimits(ctx context.Context, q *db.Queries, p ProposalCreateParams) error {
-	pendingInSquad, err := q.CountPendingProposalsBySquad(ctx, db.CountPendingProposalsBySquadParams{
-		WorkspaceID: p.WorkspaceID, SquadID: p.SquadID,
-	})
-	if err != nil {
-		return fmt.Errorf("count pending proposals by squad: %w", err)
-	}
-	if pendingInSquad >= ProposalMaxPendingPerSquad {
-		return &ProposalLimitError{Message: fmt.Sprintf(
-			"this squad already has %d proposals waiting for the boss's decision (the limit); "+
-				"wait until some are decided before filing another. If nothing new clears the bar, "+
-				"record that with `multica squad activity ... --reason`",
-			pendingInSquad)}
+	if err := s.checkPendingSquadCap(ctx, q, p.WorkspaceID, p.SquadID, "filing another"); err != nil {
+		return err
 	}
 
 	createdThisWeek, err := q.CountRecentProposalsBySquad(ctx, db.CountRecentProposalsBySquadParams{
@@ -293,16 +326,8 @@ func (s *ProposalService) checkLimits(ctx context.Context, q *db.Queries, p Prop
 			createdThisWeek)}
 	}
 
-	pendingInWorkspace, err := q.CountPendingProposalsByWorkspace(ctx, p.WorkspaceID)
-	if err != nil {
-		return fmt.Errorf("count pending proposals by workspace: %w", err)
-	}
-	if pendingInWorkspace >= ProposalMaxPendingPerWorkspace {
-		return &ProposalLimitError{Message: fmt.Sprintf(
-			"the boss already has %d proposals waiting across the workspace (the limit); "+
-				"decide the pending ones first, then file this again. "+
-				"Record the decision to wait with `multica squad activity ... --reason`",
-			pendingInWorkspace)}
+	if err := s.checkPendingWorkspaceCap(ctx, q, p.WorkspaceID, "file this again"); err != nil {
+		return err
 	}
 
 	if p.Urgent {
@@ -322,14 +347,56 @@ func (s *ProposalService) checkLimits(ctx context.Context, q *db.Queries, p Prop
 	return nil
 }
 
+// checkPendingSquadCap refuses when the squad already has the maximum waiting
+// for the boss. action completes "...before %s" in the message: the filing
+// agent reads it as the thing it was about to do.
+func (s *ProposalService) checkPendingSquadCap(ctx context.Context, q *db.Queries, workspaceID, squadID pgtype.UUID, action string) error {
+	pendingInSquad, err := q.CountPendingProposalsBySquad(ctx, db.CountPendingProposalsBySquadParams{
+		WorkspaceID: workspaceID, SquadID: squadID,
+	})
+	if err != nil {
+		return fmt.Errorf("count pending proposals by squad: %w", err)
+	}
+	if pendingInSquad >= ProposalMaxPendingPerSquad {
+		return &ProposalLimitError{Message: fmt.Sprintf(
+			"this squad already has %d proposals waiting for the boss's decision (the limit); "+
+				"wait until some are decided before %s. If nothing new clears the bar, "+
+				"record that with `multica squad activity ... --reason`",
+			pendingInSquad, action)}
+	}
+	return nil
+}
+
+// checkPendingWorkspaceCap refuses when the boss's queue is full. retry
+// completes "decide the pending ones first, then ...": the verb phrase the
+// caller was about to carry out.
+func (s *ProposalService) checkPendingWorkspaceCap(ctx context.Context, q *db.Queries, workspaceID pgtype.UUID, retry string) error {
+	pendingInWorkspace, err := q.CountPendingProposalsByWorkspace(ctx, workspaceID)
+	if err != nil {
+		return fmt.Errorf("count pending proposals by workspace: %w", err)
+	}
+	if pendingInWorkspace >= ProposalMaxPendingPerWorkspace {
+		return &ProposalLimitError{Message: fmt.Sprintf(
+			"the boss already has %d proposals waiting across the workspace (the limit); "+
+				"decide the pending ones first, then %s. "+
+				"Record the decision to wait with `multica squad activity ... --reason`",
+			pendingInWorkspace, retry)}
+	}
+	return nil
+}
+
 // ProposalDecideParams are the already-authorized inputs to Decide. The caller
 // has checked that the decider is an owner or admin member.
 type ProposalDecideParams struct {
 	WorkspaceID pgtype.UUID
 	ProposalID  pgtype.UUID
 	DeciderID   pgtype.UUID // the deciding member's user id
-	Decision    string      // ProposalDecisionApprove or ProposalDecisionReject
-	Note        string
+	Decision    string      // one of the ProposalDecision values
+	// Note is the rejection reason, the changes asked for, or empty for approve
+	// and snooze.
+	Note string
+	// Until is the snooze end. Only used by ProposalDecisionSnooze.
+	Until time.Time
 	// Kickoff is passed through to IssueService.Create for the handoff
 	// kickoff issue, so the handler can supply its issue:created payload.
 	Kickoff IssueCreateOpts
@@ -339,19 +406,19 @@ type ProposalDecideParams struct {
 // events after commit.
 type ProposalDecideResult struct {
 	Proposal db.Proposal
-	// Issue is the backing issue after its status change; PrevIssueStatus is
-	// its status before.
+	// Issue is the backing issue after the decision; PrevIssueStatus is its
+	// status before.
 	Issue           db.Issue
 	PrevIssueStatus string
-	// Comment is the rejection note, posted in the decision transaction. Nil
-	// on approval.
+	// Comment is the note posted on the proposal issue in the decision
+	// transaction: the rejection note or the changes asked for. Nil otherwise.
 	Comment *db.Comment
 	// Project and Kickoff are set when an approval hands off to a squad.
 	Project *db.Project
 	Kickoff *db.Issue
 }
 
-// Decide settles a pending proposal.
+// Decide settles a proposal according to the decision.
 //
 // Approve moves the backing issue to done. With a handoff squad it also
 // creates a project named after the proposal and a kickoff issue in it,
@@ -359,17 +426,47 @@ type ProposalDecideResult struct {
 //
 // Reject moves the backing issue to cancelled and posts the note as a comment
 // that mentions the proposing squad's leader, so the ordinary mention path
-// wakes the leader. The note is how the boss asks for changes.
+// wakes the leader.
 //
-// The decision, the status change, the project and the rejection comment
-// commit together. The kickoff issue goes through IssueService.Create, which
-// owns its transaction (and enqueues the handoff leader), so it follows the
-// commit; if it fails the decision is reverted and the error returned, which
-// leaves the proposal pending for a retry.
+// Revise moves the proposal to revising, assigns the backing issue to the
+// proposing squad and posts the changes asked for, which wakes the leader the
+// same way. Snooze keeps the proposal pending until a date.
+//
+// Every decision except snooze is refused while the proposal is revising.
 func (s *ProposalService) Decide(ctx context.Context, p ProposalDecideParams) (ProposalDecideResult, error) {
-	if p.Decision != ProposalDecisionApprove && p.Decision != ProposalDecisionReject {
-		return ProposalDecideResult{}, fmt.Errorf("unsupported decision %q", p.Decision)
+	switch p.Decision {
+	case ProposalDecisionApprove, ProposalDecisionReject:
+		return s.settle(ctx, p)
+	case ProposalDecisionRevise:
+		return s.askForChanges(ctx, p)
+	case ProposalDecisionSnooze:
+		return s.snooze(ctx, p)
 	}
+	return ProposalDecideResult{}, fmt.Errorf("unsupported decision %q", p.Decision)
+}
+
+// lockOpenProposal locks the proposal for a decision and refuses it unless it
+// is pending. A revising proposal has its own error so the caller can say the
+// squad has to resubmit first.
+func lockOpenProposal(ctx context.Context, q *db.Queries, workspaceID, proposalID pgtype.UUID) (db.Proposal, error) {
+	current, err := q.LockProposalInWorkspace(ctx, db.LockProposalInWorkspaceParams{ID: proposalID, WorkspaceID: workspaceID})
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return db.Proposal{}, ErrProposalNotFound
+		}
+		return db.Proposal{}, fmt.Errorf("lock proposal: %w", err)
+	}
+	switch current.State {
+	case ProposalStatePending:
+		return current, nil
+	case ProposalStateRevising:
+		return db.Proposal{}, ErrProposalRevising
+	}
+	return db.Proposal{}, ErrProposalAlreadyDecided
+}
+
+// settle approves or rejects a pending proposal.
+func (s *ProposalService) settle(ctx context.Context, p ProposalDecideParams) (ProposalDecideResult, error) {
 	tx, err := s.Issues.TxStarter.Begin(ctx)
 	if err != nil {
 		return ProposalDecideResult{}, fmt.Errorf("begin tx: %w", err)
@@ -377,15 +474,9 @@ func (s *ProposalService) Decide(ctx context.Context, p ProposalDecideParams) (P
 	defer tx.Rollback(ctx)
 	qtx := s.Issues.Queries.WithTx(tx)
 
-	current, err := qtx.LockProposalInWorkspace(ctx, db.LockProposalInWorkspaceParams{ID: p.ProposalID, WorkspaceID: p.WorkspaceID})
+	current, err := lockOpenProposal(ctx, qtx, p.WorkspaceID, p.ProposalID)
 	if err != nil {
-		if errors.Is(err, pgx.ErrNoRows) {
-			return ProposalDecideResult{}, ErrProposalNotFound
-		}
-		return ProposalDecideResult{}, fmt.Errorf("lock proposal: %w", err)
-	}
-	if current.State != ProposalStatePending {
-		return ProposalDecideResult{}, ErrProposalAlreadyDecided
+		return ProposalDecideResult{}, err
 	}
 	issue, err := qtx.GetIssueInWorkspace(ctx, db.GetIssueInWorkspaceParams{ID: current.IssueID, WorkspaceID: p.WorkspaceID})
 	if err != nil {
@@ -438,7 +529,11 @@ func (s *ProposalService) Decide(ctx context.Context, p ProposalDecideParams) (P
 	result.Issue = updated
 
 	if p.Decision == ProposalDecisionReject {
-		comment, err := s.createRejectionComment(ctx, qtx, current, issue, p)
+		note := strings.TrimSpace(p.Note)
+		if note == "" {
+			note = "The boss rejected this proposal without a note."
+		}
+		comment, err := s.postNoteToLeader(ctx, qtx, current, issue, p.WorkspaceID, p.DeciderID, note)
 		if err != nil {
 			return ProposalDecideResult{}, err
 		}
@@ -462,6 +557,228 @@ func (s *ProposalService) Decide(ctx context.Context, p ProposalDecideParams) (P
 	}
 	s.recordDecision(ctx, p, result)
 	return result, nil
+}
+
+// askForChanges moves a pending proposal back to the squad. The backing issue
+// goes to the squad, and the note goes on it mentioning the leader, so the
+// leader is woken by the ordinary mention path. The proposal stays out of the
+// boss's queue until the squad resubmits.
+func (s *ProposalService) askForChanges(ctx context.Context, p ProposalDecideParams) (ProposalDecideResult, error) {
+	note := strings.TrimSpace(p.Note)
+	if note == "" {
+		return ProposalDecideResult{}, ErrProposalNoteRequired
+	}
+	tx, err := s.Issues.TxStarter.Begin(ctx)
+	if err != nil {
+		return ProposalDecideResult{}, fmt.Errorf("begin tx: %w", err)
+	}
+	defer tx.Rollback(ctx)
+	qtx := s.Issues.Queries.WithTx(tx)
+
+	current, err := lockOpenProposal(ctx, qtx, p.WorkspaceID, p.ProposalID)
+	if err != nil {
+		return ProposalDecideResult{}, err
+	}
+	squad, err := liveSquad(ctx, qtx, p.WorkspaceID, current.SquadID)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return ProposalDecideResult{}, ErrProposalSquadUnavailable
+		}
+		return ProposalDecideResult{}, err
+	}
+	issue, err := qtx.GetIssueInWorkspace(ctx, db.GetIssueInWorkspaceParams{ID: current.IssueID, WorkspaceID: p.WorkspaceID})
+	if err != nil {
+		return ProposalDecideResult{}, fmt.Errorf("load proposal issue: %w", err)
+	}
+
+	decided, err := qtx.RequestProposalRevision(ctx, db.RequestProposalRevisionParams{
+		ID: p.ProposalID, WorkspaceID: p.WorkspaceID, DecidedBy: p.DeciderID, DecisionNote: note,
+	})
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return ProposalDecideResult{}, ErrProposalAlreadyDecided
+		}
+		return ProposalDecideResult{}, fmt.Errorf("request revision: %w", err)
+	}
+
+	updated, err := qtx.UpdateIssue(ctx, reassignIssueParams(issue, squad.ID))
+	if err != nil {
+		return ProposalDecideResult{}, fmt.Errorf("assign proposal issue to squad: %w", err)
+	}
+
+	comment, err := s.postNoteToLeader(ctx, qtx, current, issue, p.WorkspaceID, p.DeciderID, note)
+	if err != nil {
+		return ProposalDecideResult{}, err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return ProposalDecideResult{}, fmt.Errorf("commit: %w", err)
+	}
+	return ProposalDecideResult{Proposal: decided, Issue: updated, PrevIssueStatus: issue.Status, Comment: &comment}, nil
+}
+
+// reassignIssueParams changes only the assignee of an issue. Fields that the
+// UpdateIssue query writes unconditionally are carried over from the issue, so
+// they are not cleared.
+func reassignIssueParams(issue db.Issue, squadID pgtype.UUID) db.UpdateIssueParams {
+	return db.UpdateIssueParams{
+		ID:                 issue.ID,
+		AssigneeType:       pgtype.Text{String: "squad", Valid: true},
+		AssigneeID:         squadID,
+		StartDate:          issue.StartDate,
+		DueDate:            issue.DueDate,
+		ParentIssueID:      issue.ParentIssueID,
+		ProjectID:          issue.ProjectID,
+		Stage:              issue.Stage,
+		DuplicateOfIssueID: issue.DuplicateOfIssueID,
+	}
+}
+
+// snooze keeps a pending proposal pending until the given time. It counts
+// towards the caps, and its decision window moves past the snooze.
+func (s *ProposalService) snooze(ctx context.Context, p ProposalDecideParams) (ProposalDecideResult, error) {
+	now := time.Now()
+	if !p.Until.After(now) || p.Until.After(now.Add(ProposalMaxSnooze)) {
+		return ProposalDecideResult{}, ErrProposalSnoozeOutOfRange
+	}
+	tx, err := s.Issues.TxStarter.Begin(ctx)
+	if err != nil {
+		return ProposalDecideResult{}, fmt.Errorf("begin tx: %w", err)
+	}
+	defer tx.Rollback(ctx)
+	qtx := s.Issues.Queries.WithTx(tx)
+
+	current, err := lockOpenProposal(ctx, qtx, p.WorkspaceID, p.ProposalID)
+	if err != nil {
+		return ProposalDecideResult{}, err
+	}
+	issue, err := qtx.GetIssueInWorkspace(ctx, db.GetIssueInWorkspaceParams{ID: current.IssueID, WorkspaceID: p.WorkspaceID})
+	if err != nil {
+		return ProposalDecideResult{}, fmt.Errorf("load proposal issue: %w", err)
+	}
+	snoozed, err := qtx.SnoozeProposal(ctx, db.SnoozeProposalParams{
+		ID:           p.ProposalID,
+		WorkspaceID:  p.WorkspaceID,
+		SnoozedUntil: pgtype.Timestamptz{Time: p.Until, Valid: true},
+		ExpiryWindow: proposalExpiryInterval(),
+	})
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return ProposalDecideResult{}, ErrProposalAlreadyDecided
+		}
+		return ProposalDecideResult{}, fmt.Errorf("snooze proposal: %w", err)
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return ProposalDecideResult{}, fmt.Errorf("commit: %w", err)
+	}
+	return ProposalDecideResult{Proposal: snoozed, Issue: issue, PrevIssueStatus: issue.Status}, nil
+}
+
+// ProposalResubmitParams are the already-authorized inputs to Resubmit. The
+// caller has checked that the actor may act for the proposal's squad.
+type ProposalResubmitParams struct {
+	WorkspaceID pgtype.UUID
+	ProposalID  pgtype.UUID
+	Content     ProposalContent
+}
+
+// ProposalResubmitResult carries the changed rows for the caller's events.
+type ProposalResubmitResult struct {
+	Proposal        db.Proposal
+	Issue           db.Issue
+	PrevIssueStatus string
+}
+
+// Resubmit replaces a revising proposal's body and returns it to the boss's
+// queue. The revision number goes up, and the proposal's creation time stays,
+// so the weekly creation cap does not count the revision. The pending caps do
+// apply, because the proposal is going back into the queue. The urgency and the
+// handoff squad are kept as they were filed.
+func (s *ProposalService) Resubmit(ctx context.Context, p ProposalResubmitParams) (ProposalResubmitResult, error) {
+	tx, err := s.Issues.TxStarter.Begin(ctx)
+	if err != nil {
+		return ProposalResubmitResult{}, fmt.Errorf("begin tx: %w", err)
+	}
+	defer tx.Rollback(ctx)
+	qtx := s.Issues.Queries.WithTx(tx)
+
+	// The same workspace lock as Create, so the pending caps counted below
+	// cannot be passed by a concurrent filing or resubmission.
+	if err := qtx.LockProposalWorkspace(ctx, p.WorkspaceID); err != nil {
+		return ProposalResubmitResult{}, fmt.Errorf("lock proposal workspace: %w", err)
+	}
+	current, err := qtx.LockProposalInWorkspace(ctx, db.LockProposalInWorkspaceParams{ID: p.ProposalID, WorkspaceID: p.WorkspaceID})
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return ProposalResubmitResult{}, ErrProposalNotFound
+		}
+		return ProposalResubmitResult{}, fmt.Errorf("lock proposal: %w", err)
+	}
+	switch current.State {
+	case ProposalStateRevising:
+	case ProposalStatePending:
+		return ProposalResubmitResult{}, ErrProposalNotRevising
+	default:
+		return ProposalResubmitResult{}, ErrProposalAlreadyDecided
+	}
+
+	if err := s.checkPendingSquadCap(ctx, qtx, p.WorkspaceID, current.SquadID, "sending this revision back"); err != nil {
+		return ProposalResubmitResult{}, err
+	}
+	if err := s.checkPendingWorkspaceCap(ctx, qtx, p.WorkspaceID, "send this revision back again"); err != nil {
+		return ProposalResubmitResult{}, err
+	}
+
+	issue, err := qtx.GetIssueInWorkspace(ctx, db.GetIssueInWorkspaceParams{ID: current.IssueID, WorkspaceID: p.WorkspaceID})
+	if err != nil {
+		return ProposalResubmitResult{}, fmt.Errorf("load proposal issue: %w", err)
+	}
+
+	// Urgent proposals go back to the boss, as they were filed. Others are
+	// unassigned until the next brief, so the assignee is cleared.
+	var assigneeType pgtype.Text
+	var assigneeID pgtype.UUID
+	if current.Urgent {
+		boss, err := qtx.GetOldestWorkspaceOwnerMember(ctx, p.WorkspaceID)
+		if err != nil {
+			if errors.Is(err, pgx.ErrNoRows) {
+				return ProposalResubmitResult{}, ErrProposalNoBoss
+			}
+			return ProposalResubmitResult{}, fmt.Errorf("load boss: %w", err)
+		}
+		assigneeType = pgtype.Text{String: "member", Valid: true}
+		assigneeID = boss.UserID
+	}
+
+	updated, err := qtx.UpdateIssue(ctx, db.UpdateIssueParams{
+		ID:                 issue.ID,
+		Title:              pgtype.Text{String: p.Content.Title, Valid: true},
+		Description:        pgtype.Text{String: p.Content.RenderDescription(current.UrgentReason), Valid: true},
+		AssigneeType:       assigneeType,
+		AssigneeID:         assigneeID,
+		StartDate:          issue.StartDate,
+		DueDate:            issue.DueDate,
+		ParentIssueID:      issue.ParentIssueID,
+		ProjectID:          issue.ProjectID,
+		Stage:              issue.Stage,
+		DuplicateOfIssueID: issue.DuplicateOfIssueID,
+	})
+	if err != nil {
+		return ProposalResubmitResult{}, fmt.Errorf("update proposal issue: %w", err)
+	}
+
+	resubmitted, err := qtx.ResubmitProposal(ctx, db.ResubmitProposalParams{
+		ID: p.ProposalID, WorkspaceID: p.WorkspaceID, ExpiryWindow: proposalExpiryInterval(),
+	})
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return ProposalResubmitResult{}, ErrProposalNotRevising
+		}
+		return ProposalResubmitResult{}, fmt.Errorf("resubmit proposal: %w", err)
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return ProposalResubmitResult{}, fmt.Errorf("commit: %w", err)
+	}
+	return ProposalResubmitResult{Proposal: resubmitted, Issue: updated, PrevIssueStatus: issue.Status}, nil
 }
 
 // proposalKnowledgeTimeout bounds the decision record write, so a sidecar that
@@ -518,31 +835,27 @@ func markdownSection(markdown, name string) string {
 	return strings.TrimSpace(body)
 }
 
-// createRejectionComment posts the boss's note on the proposal issue,
-// mentioning the proposing squad's leader with the exact mention markdown the
-// comment trigger path parses.
-func (s *ProposalService) createRejectionComment(ctx context.Context, q *db.Queries, proposal db.Proposal, issue db.Issue, p ProposalDecideParams) (db.Comment, error) {
-	note := strings.TrimSpace(p.Note)
-	if note == "" {
-		note = "The boss rejected this proposal without a note."
-	}
+// postNoteToLeader posts a boss's note on the proposal issue, mentioning the
+// proposing squad's leader with the exact mention markdown the comment trigger
+// path parses. Rejections and requests for changes both use it.
+func (s *ProposalService) postNoteToLeader(ctx context.Context, q *db.Queries, proposal db.Proposal, issue db.Issue, workspaceID, deciderID pgtype.UUID, note string) (db.Comment, error) {
 	content := note
-	if squad, err := q.GetSquadInWorkspace(ctx, db.GetSquadInWorkspaceParams{ID: proposal.SquadID, WorkspaceID: p.WorkspaceID}); err == nil {
-		if leader, err := q.GetAgentInWorkspace(ctx, db.GetAgentInWorkspaceParams{ID: squad.LeaderID, WorkspaceID: p.WorkspaceID}); err == nil {
+	if squad, err := q.GetSquadInWorkspace(ctx, db.GetSquadInWorkspaceParams{ID: proposal.SquadID, WorkspaceID: workspaceID}); err == nil {
+		if leader, err := q.GetAgentInWorkspace(ctx, db.GetAgentInWorkspaceParams{ID: squad.LeaderID, WorkspaceID: workspaceID}); err == nil {
 			content = fmt.Sprintf("[@%s](mention://agent/%s) %s", leader.Name, util.UUIDToString(leader.ID), note)
 		}
 	}
 	row, err := q.CreateComment(ctx, db.CreateCommentParams{
 		ID:          dbid.NewV7(),
 		IssueID:     issue.ID,
-		WorkspaceID: p.WorkspaceID,
+		WorkspaceID: workspaceID,
 		AuthorType:  "member",
-		AuthorID:    p.DeciderID,
+		AuthorID:    deciderID,
 		Content:     content,
 		Type:        "comment",
 	})
 	if err != nil {
-		return db.Comment{}, fmt.Errorf("post rejection comment: %w", err)
+		return db.Comment{}, fmt.Errorf("post boss note: %w", err)
 	}
 	return row.Comment(), nil
 }

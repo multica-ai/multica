@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5/pgtype"
@@ -52,6 +53,15 @@ type ProposalResponse struct {
 	DecidedAt       *string `json:"decided_at"`
 	DecisionNote    string  `json:"decision_note"`
 	CreatedAt       string  `json:"created_at"`
+	// Revision starts at 1 and goes up each time the squad resubmits after
+	// the boss asked for changes.
+	Revision int32 `json:"revision"`
+	// ExpiresAt is when a pending proposal with no decision expires. Null
+	// once the proposal is no longer pending.
+	ExpiresAt *string `json:"expires_at"`
+	// SnoozedUntil is set while the boss has put a pending proposal aside. A
+	// time in the past means the snooze has ended.
+	SnoozedUntil *string `json:"snoozed_until"`
 	// Handoff is set only on the response to an approval that handed off to a
 	// squad. The ids are not stored on the proposal.
 	Handoff *ProposalHandoffResponse `json:"handoff,omitempty"`
@@ -76,6 +86,9 @@ func proposalToResponse(p db.Proposal, issueTitle, issueStatus, issuePrefix stri
 		DecidedAt:       timestampToPtr(p.DecidedAt),
 		DecisionNote:    p.DecisionNote,
 		CreatedAt:       timestampToString(p.CreatedAt),
+		Revision:        p.Revision,
+		ExpiresAt:       timestampToPtr(p.ExpiresAt),
+		SnoozedUntil:    timestampToPtr(p.SnoozedUntil),
 	}
 }
 
@@ -320,7 +333,8 @@ func (h *Handler) ListProposals(w http.ResponseWriter, r *http.Request) {
 	params := db.ListProposalsParams{WorkspaceID: wsUUID}
 	if state := r.URL.Query().Get("state"); state != "" {
 		switch state {
-		case service.ProposalStatePending, service.ProposalStateApproved, service.ProposalStateRejected:
+		case service.ProposalStatePending, service.ProposalStateApproved, service.ProposalStateRejected,
+			service.ProposalStateRevising, service.ProposalStateExpired:
 			params.State = pgtype.Text{String: state, Valid: true}
 		default:
 			writeError(w, http.StatusBadRequest, "invalid state")
@@ -377,11 +391,25 @@ func (h *Handler) GetProposal(w http.ResponseWriter, r *http.Request) {
 type DecideProposalRequest struct {
 	Decision string `json:"decision"`
 	Note     string `json:"note"`
+	// Until is the snooze end: a date (YYYY-MM-DD, midnight UTC) or an RFC 3339
+	// timestamp. Only used by the snooze decision.
+	Until string `json:"until"`
 }
 
-// DecideProposal approves or rejects a pending proposal. Only an owner or admin
-// member may decide: an agent actor is refused, including an agent acting with
-// a member's credentials, because a decision spends the boss's authority.
+// parseSnoozeUntil reads the snooze end the boss or the CLI sent. A bare date
+// means midnight UTC on that day.
+func parseSnoozeUntil(raw string) (time.Time, error) {
+	raw = strings.TrimSpace(raw)
+	if t, err := time.Parse(time.RFC3339, raw); err == nil {
+		return t, nil
+	}
+	return time.Parse("2006-01-02", raw)
+}
+
+// DecideProposal settles a pending proposal: approve, reject, ask for changes
+// (revise) or put it aside until a date (snooze). Only an owner or admin member
+// may decide: an agent actor is refused, including an agent acting with a
+// member's credentials, because a decision spends the boss's authority.
 func (h *Handler) DecideProposal(w http.ResponseWriter, r *http.Request) {
 	workspaceID := h.resolveWorkspaceID(r)
 	userID, ok := requireUserID(w, r)
@@ -418,14 +446,30 @@ func (h *Handler) DecideProposal(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "invalid request body")
 		return
 	}
-	if req.Decision != service.ProposalDecisionApprove && req.Decision != service.ProposalDecisionReject {
-		writeError(w, http.StatusBadRequest, "decision must be 'approve' or 'reject'")
+	switch req.Decision {
+	case service.ProposalDecisionApprove, service.ProposalDecisionReject,
+		service.ProposalDecisionRevise, service.ProposalDecisionSnooze:
+	default:
+		writeError(w, http.StatusBadRequest, "decision must be 'approve', 'reject', 'revise' or 'snooze'")
 		return
 	}
 	note := cleanProposalText(req.Note)
 	if len(note) > proposalMaxTextLen {
 		writeError(w, http.StatusBadRequest, "note must be at most "+strconv.Itoa(proposalMaxTextLen)+" characters")
 		return
+	}
+	if req.Decision == service.ProposalDecisionRevise && note == "" {
+		writeError(w, http.StatusBadRequest, "a note is required when asking for changes: say what to change")
+		return
+	}
+	var until time.Time
+	if req.Decision == service.ProposalDecisionSnooze {
+		parsed, err := parseSnoozeUntil(req.Until)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, "until must be a date (YYYY-MM-DD) or an RFC 3339 timestamp")
+			return
+		}
+		until = parsed
 	}
 
 	prefix := h.getIssuePrefix(r.Context(), wsUUID)
@@ -436,6 +480,7 @@ func (h *Handler) DecideProposal(w http.ResponseWriter, r *http.Request) {
 		DeciderID:   member.UserID,
 		Decision:    req.Decision,
 		Note:        note,
+		Until:       until,
 		Kickoff: service.IssueCreateOpts{
 			ActorID:  userID,
 			Platform: func() string { p, _, _ := middleware.ClientMetadataFromContext(r.Context()); return p }(),
@@ -452,11 +497,23 @@ func (h *Handler) DecideProposal(w http.ResponseWriter, r *http.Request) {
 	case errors.Is(err, service.ErrProposalNotFound):
 		writeError(w, http.StatusNotFound, "proposal not found")
 		return
+	case errors.Is(err, service.ErrProposalRevising):
+		writeErrorCode(w, http.StatusConflict, "proposal_revising", "the squad is revising this proposal; decide it once the revised version comes back")
+		return
 	case errors.Is(err, service.ErrProposalAlreadyDecided):
 		writeErrorCode(w, http.StatusConflict, "proposal_decided", "this proposal has already been decided")
 		return
 	case errors.Is(err, service.ErrProposalHandoffSquadNotFound):
 		writeErrorCode(w, http.StatusConflict, "handoff_squad_unavailable", "the handoff squad no longer exists or is archived; approve without it or ask the squad to refile")
+		return
+	case errors.Is(err, service.ErrProposalSquadUnavailable):
+		writeErrorCode(w, http.StatusConflict, "squad_unavailable", "the proposing squad no longer exists or is archived, so the proposal cannot go back to it; approve or reject it instead")
+		return
+	case errors.Is(err, service.ErrProposalNoteRequired):
+		writeError(w, http.StatusBadRequest, service.ErrProposalNoteRequired.Error())
+		return
+	case errors.Is(err, service.ErrProposalSnoozeOutOfRange):
+		writeErrorCode(w, http.StatusBadRequest, "snooze_out_of_range", service.ErrProposalSnoozeOutOfRange.Error())
 		return
 	case writeIssueLimitReached(w, err):
 		return
@@ -466,7 +523,10 @@ func (h *Handler) DecideProposal(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	h.publishProposalDecision(r.Context(), userID, prefix, wsUUID, res)
+	// Snooze changes no issue, so it publishes only the proposal's own event.
+	if req.Decision != service.ProposalDecisionSnooze {
+		h.publishProposalDecision(r.Context(), userID, prefix, wsUUID, res)
+	}
 
 	issueTitle := res.Issue.Title
 	resp := proposalToResponse(res.Proposal, issueTitle, res.Issue.Status, prefix, res.Issue.Number)
@@ -480,20 +540,132 @@ func (h *Handler) DecideProposal(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, resp)
 }
 
+// ── Resubmit ────────────────────────────────────────────────────────────────
+
+// ReviseProposalRequest is the whole body again: a revision replaces every
+// section, as a new proposal does. Urgency and the handoff squad stay as filed.
+type ReviseProposalRequest struct {
+	Title          string   `json:"title"`
+	Summary        string   `json:"summary"`
+	Evidence       []string `json:"evidence"`
+	Recommendation string   `json:"recommendation"`
+	Options        []string `json:"options"`
+	CostRisk       string   `json:"cost_risk"`
+	Ask            string   `json:"ask"`
+}
+
+// ReviseProposal resubmits a proposal the boss sent back for changes. It is
+// the leader's answer to a revise decision, and it returns the proposal to the
+// boss's queue with its revision number raised. The actor must be allowed to
+// file for the proposal's squad.
+func (h *Handler) ReviseProposal(w http.ResponseWriter, r *http.Request) {
+	workspaceID := h.resolveWorkspaceID(r)
+	userID, ok := requireUserID(w, r)
+	if !ok {
+		return
+	}
+	wsUUID, ok := parseUUIDOrBadRequest(w, workspaceID, "workspace_id")
+	if !ok {
+		return
+	}
+	proposalID, ok := parseUUIDOrBadRequest(w, chi.URLParam(r, "id"), "proposal id")
+	if !ok {
+		return
+	}
+
+	var req ReviseProposalRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+	existing, err := h.Queries.GetProposalInWorkspace(r.Context(), db.GetProposalInWorkspaceParams{ID: proposalID, WorkspaceID: wsUUID})
+	if err != nil {
+		if isNotFound(err) {
+			writeError(w, http.StatusNotFound, "proposal not found")
+			return
+		}
+		writeError(w, http.StatusInternalServerError, "failed to load proposal")
+		return
+	}
+
+	actorType, actorID := h.resolveActor(r, userID, workspaceID)
+	if !h.mayFileProposalForSquad(w, r, workspaceID, userID, actorType, actorID, existing.SquadID) {
+		return
+	}
+
+	// The same field checks as a new proposal, with the urgency already filed.
+	check := CreateProposalRequest{
+		Title: req.Title, Summary: req.Summary, Evidence: req.Evidence,
+		Recommendation: req.Recommendation, Options: req.Options, CostRisk: req.CostRisk, Ask: req.Ask,
+		Urgent: existing.Urgent, UrgentReason: existing.UrgentReason,
+	}
+	if msg := validateProposalRequest(&check); msg != "" {
+		writeError(w, http.StatusBadRequest, msg)
+		return
+	}
+
+	res, err := h.proposalService().Resubmit(r.Context(), service.ProposalResubmitParams{
+		WorkspaceID: wsUUID,
+		ProposalID:  proposalID,
+		Content: service.ProposalContent{
+			Title: check.Title, Summary: check.Summary, Evidence: check.Evidence,
+			Recommendation: check.Recommendation, Options: check.Options,
+			CostRisk: check.CostRisk, Ask: check.Ask,
+		},
+	})
+	var limitErr *service.ProposalLimitError
+	switch {
+	case errors.Is(err, service.ErrProposalNotFound):
+		writeError(w, http.StatusNotFound, "proposal not found")
+		return
+	case errors.Is(err, service.ErrProposalNotRevising):
+		writeErrorCode(w, http.StatusConflict, "proposal_not_revising", "this proposal is not waiting for changes, so there is nothing to resubmit")
+		return
+	case errors.Is(err, service.ErrProposalAlreadyDecided):
+		writeErrorCode(w, http.StatusConflict, "proposal_decided", "this proposal has already been decided")
+		return
+	case errors.Is(err, service.ErrProposalNoBoss):
+		writeError(w, http.StatusConflict, "this workspace has no owner to receive an urgent proposal")
+		return
+	case errors.As(err, &limitErr):
+		writeErrorCode(w, http.StatusConflict, "proposal_limit", limitErr.Message)
+		return
+	case err != nil:
+		slog.Warn("resubmit proposal failed", append(logger.RequestAttrs(r), "error", err, "proposal_id", chi.URLParam(r, "id"))...)
+		writeError(w, http.StatusInternalServerError, "failed to resubmit proposal")
+		return
+	}
+
+	prefix := h.getIssuePrefix(r.Context(), wsUUID)
+	h.publishProposalIssueUpdated(r.Context(), wsUUID, prefix, actorType, actorID, res.Issue, res.PrevIssueStatus)
+	resp := proposalToResponse(res.Proposal, res.Issue.Title, res.Issue.Status, prefix, res.Issue.Number)
+	h.publish(protocol.EventProposalUpdated, workspaceID, actorType, actorID, map[string]any{"proposal": resp})
+	slog.Info("proposal resubmitted", append(logger.RequestAttrs(r),
+		"proposal_id", resp.ID, "revision", resp.Revision)...)
+	writeJSON(w, http.StatusOK, resp)
+}
+
+// publishProposalIssueUpdated publishes the backing issue's new state. The
+// payload matches the issue:updated events the issue handlers send.
+func (h *Handler) publishProposalIssueUpdated(ctx context.Context, wsUUID pgtype.UUID, prefix, actorType, actorID string, issue db.Issue, prevStatus string) {
+	issueResp := issueToResponse(issue, prefix)
+	h.fillStatusCategory(ctx, wsUUID, &issueResp)
+	h.publish(protocol.EventIssueUpdated, uuidToString(wsUUID), actorType, actorID, map[string]any{
+		"issue":          issueResp,
+		"status_changed": prevStatus != issue.Status,
+		"prev_status":    prevStatus,
+		"creator_type":   issue.CreatorType,
+		"creator_id":     uuidToString(issue.CreatorID),
+	})
+}
+
 // publishProposalDecision publishes the events for a committed decision and
-// wakes the proposing squad's leader after a rejection.
+// wakes the proposing squad's leader when the decision left a note on the
+// issue: a rejection, or a request for changes.
 func (h *Handler) publishProposalDecision(ctx context.Context, userID, prefix string, wsUUID pgtype.UUID, res service.ProposalDecideResult) {
 	workspaceID := uuidToString(wsUUID)
 
-	issueResp := issueToResponse(res.Issue, prefix)
-	h.fillStatusCategory(ctx, wsUUID, &issueResp)
-	h.publish(protocol.EventIssueUpdated, workspaceID, "member", userID, map[string]any{
-		"issue":          issueResp,
-		"status_changed": res.PrevIssueStatus != res.Issue.Status,
-		"prev_status":    res.PrevIssueStatus,
-		"creator_type":   res.Issue.CreatorType,
-		"creator_id":     uuidToString(res.Issue.CreatorID),
-	})
+	h.publishProposalIssueUpdated(ctx, wsUUID, prefix, "member", userID, res.Issue, res.PrevIssueStatus)
 
 	if res.Project != nil {
 		h.publish(protocol.EventProjectCreated, workspaceID, "member", userID, map[string]any{"project": projectToResponse(*res.Project)})

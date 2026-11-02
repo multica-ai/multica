@@ -106,6 +106,10 @@ const (
 	// proposal and issue queries.
 	EventProposalCreated = "proposal:created"
 	EventProposalDecided = "proposal:decided"
+	// EventProposalUpdated: the squad resubmitted a revision, or the expiry job
+	// expired a proposal. Both change the proposal's state or body without a
+	// decision by the boss, so they get their own event.
+	EventProposalUpdated = "proposal:updated"
 
 	// A brief was published; the payload carries the whole brief. The inbox
 	// listener turns it into one brief_ready item per workspace owner.
