@@ -4,41 +4,17 @@ import (
 	"context"
 	"encoding/json"
 	"log/slog"
-	"strings"
 
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/multica-ai/multica/server/internal/events"
 	"github.com/multica-ai/multica/server/internal/handler"
 	"github.com/multica-ai/multica/server/internal/inbox"
+	"github.com/multica-ai/multica/server/internal/service"
 	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 	"github.com/multica-ai/multica/server/pkg/dbid"
 	"github.com/multica-ai/multica/server/pkg/protocol"
 )
-
-// briefHeadlineBody is the Headline section of a brief, cut short, for the
-// inbox row. Empty when the body has none.
-func briefHeadlineBody(body string) string {
-	var lines []string
-	in := false
-	for _, line := range strings.Split(body, "\n") {
-		if strings.HasPrefix(line, "## ") {
-			if in {
-				break
-			}
-			in = strings.EqualFold(strings.TrimSpace(line[3:]), "Headline")
-			continue
-		}
-		if in {
-			lines = append(lines, strings.TrimSpace(line))
-		}
-	}
-	text := strings.TrimSpace(strings.Join(lines, " "))
-	if r := []rune(text); len(r) > 280 {
-		text = string(r[:279]) + "…"
-	}
-	return text
-}
 
 // notifyBriefReady raises a brief_ready inbox item (severity attention) for
 // each workspace owner. Admins can publish and decide, but the brief is the
@@ -78,7 +54,7 @@ func notifyBriefReady(ctx context.Context, queries *db.Queries, bus *events.Bus,
 			Severity:      "attention",
 			IssueID:       pgtype.UUID{},
 			Title:         brief.Title,
-			Body:          util.StrToText(briefHeadlineBody(brief.Body)),
+			Body:          util.StrToText(service.BriefHeadline(brief.Body)),
 			ActorType:     util.StrToText(e.ActorType),
 			ActorID:       optionalUUID(e.ActorID),
 			Details:       details,

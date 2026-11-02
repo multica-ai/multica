@@ -383,6 +383,10 @@ type Handler struct {
 	// enqueues EventChatDone work.
 	TelegramOutbound *telegram.Outbound
 
+	// BriefPush queues and sends brief pushes to members' chat apps (plan 9.10).
+	// Always set by the router; it has no notifier until a chat app registers one.
+	BriefPush *service.BriefPushService
+
 	// channelFileDelivery names the channel types that can, IN THIS
 	// DEPLOYMENT, carry a file the agent produced the last hop into the
 	// conversation. It answers the claim response's

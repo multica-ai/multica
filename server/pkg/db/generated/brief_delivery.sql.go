@@ -69,20 +69,23 @@ const createBriefDelivery = `-- name: CreateBriefDelivery :execrows
 INSERT INTO brief_delivery (
     id, workspace_id, brief_id, member_id, binding_id, state, attempts, next_attempt_at, created_at
 ) VALUES (
-    $1, $2, $3, $4, $5, 'pending', 0, now(), now()
+    $1, $2, $3, $4, $5, 'pending', 0, $6, $6
 )
 ON CONFLICT (brief_id, member_id) DO NOTHING
 `
 
 type CreateBriefDeliveryParams struct {
-	ID          pgtype.UUID `json:"id"`
-	WorkspaceID pgtype.UUID `json:"workspace_id"`
-	BriefID     pgtype.UUID `json:"brief_id"`
-	MemberID    pgtype.UUID `json:"member_id"`
-	BindingID   pgtype.UUID `json:"binding_id"`
+	ID          pgtype.UUID        `json:"id"`
+	WorkspaceID pgtype.UUID        `json:"workspace_id"`
+	BriefID     pgtype.UUID        `json:"brief_id"`
+	MemberID    pgtype.UUID        `json:"member_id"`
+	BindingID   pgtype.UUID        `json:"binding_id"`
+	Now         pgtype.Timestamptz `json:"now"`
 }
 
-// A subscriber that runs twice for one brief inserts nothing new.
+// @now is the application clock, the same one the retry job claims against, so
+// the row's first attempt is due on the schedule the job reads. A subscriber
+// that runs twice for one brief inserts nothing new.
 func (q *Queries) CreateBriefDelivery(ctx context.Context, arg CreateBriefDeliveryParams) (int64, error) {
 	result, err := q.db.Exec(ctx, createBriefDelivery,
 		arg.ID,
@@ -90,6 +93,7 @@ func (q *Queries) CreateBriefDelivery(ctx context.Context, arg CreateBriefDelive
 		arg.BriefID,
 		arg.MemberID,
 		arg.BindingID,
+		arg.Now,
 	)
 	if err != nil {
 		return 0, err
@@ -179,12 +183,13 @@ JOIN issue i ON i.id = p.issue_id AND i.workspace_id = p.workspace_id
 WHERE p.workspace_id = $1
   AND p.id = ANY($2::uuid[])
   AND p.state = 'pending'
-  AND (p.snoozed_until IS NULL OR p.snoozed_until <= now())
+  AND (p.snoozed_until IS NULL OR p.snoozed_until <= $3)
 `
 
 type ListBriefPendingDecisionsParams struct {
-	WorkspaceID pgtype.UUID   `json:"workspace_id"`
-	ProposalIds []pgtype.UUID `json:"proposal_ids"`
+	WorkspaceID pgtype.UUID        `json:"workspace_id"`
+	ProposalIds []pgtype.UUID      `json:"proposal_ids"`
+	Now         pgtype.Timestamptz `json:"now"`
 }
 
 type ListBriefPendingDecisionsRow struct {
@@ -194,9 +199,10 @@ type ListBriefPendingDecisionsRow struct {
 
 // The pending proposals a brief raises, with their titles. A snoozed proposal
 // waits out its snooze and is left out, as the digest and the brief leave it.
-// The caller puts the rows in the order the brief lists them.
+// @now is the application clock, as in CreateBriefDelivery. The caller puts the
+// rows in the order the brief lists them.
 func (q *Queries) ListBriefPendingDecisions(ctx context.Context, arg ListBriefPendingDecisionsParams) ([]ListBriefPendingDecisionsRow, error) {
-	rows, err := q.db.Query(ctx, listBriefPendingDecisions, arg.WorkspaceID, arg.ProposalIds)
+	rows, err := q.db.Query(ctx, listBriefPendingDecisions, arg.WorkspaceID, arg.ProposalIds, arg.Now)
 	if err != nil {
 		return nil, err
 	}

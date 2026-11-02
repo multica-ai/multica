@@ -857,6 +857,12 @@ func main() {
 	if err := schedulerMgr.Register(scheduler.SquadAttentionJob(h)); err != nil {
 		slog.Error("scheduler: register squad attention", "error", err)
 	}
+	// Every 30 seconds: sends the brief pushes that are due to members' chat apps
+	// (plan 9.10). The rows are queued by the brief:created subscriber.
+	if err := schedulerMgr.Register(scheduler.BriefPushDispatchJob(h.BriefPush)); err != nil {
+		slog.Error("scheduler: register brief push dispatch", "error", err)
+	}
+	registerBriefPushListeners(bus, h.BriefPush)
 	if err := schedulerMgr.Register(scheduler.AutopilotScheduleDispatchJob(pool, queries, autopilotSvc)); err != nil {
 		slog.Warn("scheduler: failed to register autopilot_schedule_dispatch job", "error", err)
 	}

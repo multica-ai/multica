@@ -42,11 +42,13 @@ WHERE p.workspace_id = @workspace_id
 ORDER BY p.member_id;
 
 -- name: CreateBriefDelivery :execrows
--- A subscriber that runs twice for one brief inserts nothing new.
+-- @now is the application clock, the same one the retry job claims against, so
+-- the row's first attempt is due on the schedule the job reads. A subscriber
+-- that runs twice for one brief inserts nothing new.
 INSERT INTO brief_delivery (
     id, workspace_id, brief_id, member_id, binding_id, state, attempts, next_attempt_at, created_at
 ) VALUES (
-    @id, @workspace_id, @brief_id, @member_id, @binding_id, 'pending', 0, now(), now()
+    @id, @workspace_id, @brief_id, @member_id, @binding_id, 'pending', 0, @now, @now
 )
 ON CONFLICT (brief_id, member_id) DO NOTHING;
 
@@ -78,14 +80,15 @@ WHERE id = @id;
 -- name: ListBriefPendingDecisions :many
 -- The pending proposals a brief raises, with their titles. A snoozed proposal
 -- waits out its snooze and is left out, as the digest and the brief leave it.
--- The caller puts the rows in the order the brief lists them.
+-- @now is the application clock, as in CreateBriefDelivery. The caller puts the
+-- rows in the order the brief lists them.
 SELECT p.id, i.title
 FROM proposal p
 JOIN issue i ON i.id = p.issue_id AND i.workspace_id = p.workspace_id
 WHERE p.workspace_id = @workspace_id
   AND p.id = ANY(@proposal_ids::uuid[])
   AND p.state = 'pending'
-  AND (p.snoozed_until IS NULL OR p.snoozed_until <= now());
+  AND (p.snoozed_until IS NULL OR p.snoozed_until <= @now);
 
 -- name: GetChannelUserBindingInWorkspace :one
 SELECT * FROM channel_user_binding
