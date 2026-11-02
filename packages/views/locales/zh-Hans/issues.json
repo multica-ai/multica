@@ -2004,7 +2004,27 @@
     "feedback_save": "发送反馈",
     "feedback_saved": "反馈已保存",
     "feedback_save_failed": "无法保存反馈",
-    "feedback_usefulness": "最近 {{days}} 天有用率 {{percent}}%"
+    "feedback_usefulness": "最近 {{days}} 天有用率 {{percent}}%",
+    "attention_title": "关注上限",
+    "attention_pending_cap": "待处理上限",
+    "attention_weekly_cap": "每周上限",
+    "attention_acceptance": "通过率",
+    "attention_acceptance_value": "已决定的 {{count}} 项中 {{percent}}%",
+    "attention_acceptance_none": "还没有已决定的提案",
+    "attention_reason_pinned": "管理员设定了这些上限。",
+    "attention_reason_sample_too_small": "过去 60 天已决定的提案不足 {{count}} 项，因此沿用默认上限。",
+    "attention_reason_below_threshold": "通过的提案不到 20%，因此上限调低了。",
+    "attention_reason_above_threshold": "通过的提案超过 60%，因此上限调高了。",
+    "attention_reason_default": "通过率处于正常范围，因此沿用默认上限。",
+    "attention_pin_title": "管理员上限",
+    "attention_pin_pending": "待处理",
+    "attention_pin_weekly": "每周",
+    "attention_pin_range": "请输入 {{min}} 到 {{max}} 之间的整数。",
+    "attention_pin_save": "固定上限",
+    "attention_pin_clear": "取消固定",
+    "attention_pin_saved": "已固定上限",
+    "attention_pin_cleared": "已取消固定",
+    "attention_pin_failed": "无法修改上限"
   },
   "views": {
     "builtin": {

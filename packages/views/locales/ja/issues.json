@@ -2004,7 +2004,27 @@
     "feedback_save": "フィードバックを送信",
     "feedback_saved": "フィードバックを保存しました",
     "feedback_save_failed": "フィードバックを保存できませんでした",
-    "feedback_usefulness": "過去 {{days}} 日間で {{percent}}% が役に立った"
+    "feedback_usefulness": "過去 {{days}} 日間で {{percent}}% が役に立った",
+    "attention_title": "注意の上限",
+    "attention_pending_cap": "保留の上限",
+    "attention_weekly_cap": "週の上限",
+    "attention_acceptance": "承認率",
+    "attention_acceptance_value": "決定済み {{count}} 件のうち {{percent}}%",
+    "attention_acceptance_none": "決定済みの提案はまだありません",
+    "attention_reason_pinned": "管理者がこの上限を設定しました。",
+    "attention_reason_sample_too_small": "過去 60 日の決定済み提案が {{count}} 件未満のため、既定の上限が適用されています。",
+    "attention_reason_below_threshold": "承認された提案が 20% 未満のため、上限は低くなっています。",
+    "attention_reason_above_threshold": "承認された提案が 60% を超えるため、上限は高くなっています。",
+    "attention_reason_default": "承認率は標準の範囲内のため、既定の上限が適用されています。",
+    "attention_pin_title": "管理者の上限",
+    "attention_pin_pending": "保留",
+    "attention_pin_weekly": "週",
+    "attention_pin_range": "{{min}} から {{max}} までの整数。",
+    "attention_pin_save": "上限を固定",
+    "attention_pin_clear": "固定を解除",
+    "attention_pin_saved": "上限を固定しました",
+    "attention_pin_cleared": "固定を解除しました",
+    "attention_pin_failed": "上限を変更できませんでした"
   },
   "views": {
     "builtin": {

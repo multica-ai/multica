@@ -2004,7 +2004,27 @@
     "feedback_save": "傳送回饋",
     "feedback_saved": "回饋已儲存",
     "feedback_save_failed": "無法儲存回饋",
-    "feedback_usefulness": "最近 {{days}} 天有用率 {{percent}}%"
+    "feedback_usefulness": "最近 {{days}} 天有用率 {{percent}}%",
+    "attention_title": "關注上限",
+    "attention_pending_cap": "待處理上限",
+    "attention_weekly_cap": "每週上限",
+    "attention_acceptance": "通過率",
+    "attention_acceptance_value": "已決定的 {{count}} 項中 {{percent}}%",
+    "attention_acceptance_none": "還沒有已決定的提案",
+    "attention_reason_pinned": "管理員設定了這些上限。",
+    "attention_reason_sample_too_small": "過去 60 天已決定的提案不足 {{count}} 項，因此沿用預設上限。",
+    "attention_reason_below_threshold": "通過的提案不到 20%，因此上限調低了。",
+    "attention_reason_above_threshold": "通過的提案超過 60%，因此上限調高了。",
+    "attention_reason_default": "通過率處於正常範圍，因此沿用預設上限。",
+    "attention_pin_title": "管理員上限",
+    "attention_pin_pending": "待處理",
+    "attention_pin_weekly": "每週",
+    "attention_pin_range": "請輸入 {{min}} 到 {{max}} 之間的整數。",
+    "attention_pin_save": "固定上限",
+    "attention_pin_clear": "取消固定",
+    "attention_pin_saved": "已固定上限",
+    "attention_pin_cleared": "已取消固定",
+    "attention_pin_failed": "無法修改上限"
   },
   "views": {
     "builtin": {

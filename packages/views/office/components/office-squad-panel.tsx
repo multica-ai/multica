@@ -20,6 +20,7 @@ import { useT } from "../../i18n";
 import { useOfficeAdmin } from "../lib/use-office-admin";
 import { OfficeCharterTab } from "./office-charter-tab";
 import { OfficeRoutines } from "./office-routines";
+import { OfficeSquadAttention } from "./office-squad-attention";
 
 const STATUS_KEYS = {
   working: "status_working",
@@ -155,6 +156,7 @@ function PanelBody({
             );
           })}
         </section>
+        <OfficeSquadAttention squadId={squadId} canPin={isOfficeAdmin} />
         <OfficeRoutines squadId={squadId} canManage={canManage} />
         {squadAutopilots.length > 0 ? (
           <section aria-label={t(($) => $.office.squad_autopilots)} className="flex flex-col gap-1">

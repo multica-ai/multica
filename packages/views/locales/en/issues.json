@@ -2078,7 +2078,27 @@
     "feedback_save": "Send feedback",
     "feedback_saved": "Feedback saved",
     "feedback_save_failed": "Could not save feedback",
-    "feedback_usefulness": "{{percent}}% useful over the last {{days}} days"
+    "feedback_usefulness": "{{percent}}% useful over the last {{days}} days",
+    "attention_title": "Attention limits",
+    "attention_pending_cap": "Pending limit",
+    "attention_weekly_cap": "Weekly limit",
+    "attention_acceptance": "Acceptance",
+    "attention_acceptance_value": "{{percent}}% of {{count}} decided",
+    "attention_acceptance_none": "No decided proposals yet",
+    "attention_reason_pinned": "An admin set these limits.",
+    "attention_reason_sample_too_small": "Fewer than {{count}} decided proposals in the last 60 days, so the default limits apply.",
+    "attention_reason_below_threshold": "Under 20% of proposals are approved, so the limits are lower.",
+    "attention_reason_above_threshold": "Over 60% of proposals are approved, so the limits are higher.",
+    "attention_reason_default": "Approvals are in the normal range, so the default limits apply.",
+    "attention_pin_title": "Admin limits",
+    "attention_pin_pending": "Pending",
+    "attention_pin_weekly": "Weekly",
+    "attention_pin_range": "Whole numbers from {{min}} to {{max}}.",
+    "attention_pin_save": "Pin limits",
+    "attention_pin_clear": "Clear pin",
+    "attention_pin_saved": "Limits pinned",
+    "attention_pin_cleared": "Pin cleared",
+    "attention_pin_failed": "Could not change the limits"
   },
   "views": {
     "builtin": {

@@ -2004,7 +2004,27 @@
     "feedback_save": "피드백 보내기",
     "feedback_saved": "피드백이 저장되었습니다",
     "feedback_save_failed": "피드백을 저장하지 못했습니다",
-    "feedback_usefulness": "최근 {{days}}일 동안 {{percent}}%가 도움이 됨"
+    "feedback_usefulness": "최근 {{days}}일 동안 {{percent}}%가 도움이 됨",
+    "attention_title": "주의 한도",
+    "attention_pending_cap": "대기 한도",
+    "attention_weekly_cap": "주간 한도",
+    "attention_acceptance": "승인율",
+    "attention_acceptance_value": "결정된 {{count}}건 중 {{percent}}%",
+    "attention_acceptance_none": "아직 결정된 제안이 없습니다",
+    "attention_reason_pinned": "관리자가 이 한도를 고정했습니다.",
+    "attention_reason_sample_too_small": "최근 60일 동안 결정된 제안이 {{count}}건 미만이라 기본 한도가 적용됩니다.",
+    "attention_reason_below_threshold": "제안의 20% 미만이 승인되어 한도가 낮아졌습니다.",
+    "attention_reason_above_threshold": "제안의 60%를 넘게 승인되어 한도가 높아졌습니다.",
+    "attention_reason_default": "승인율이 보통 범위에 있어 기본 한도가 적용됩니다.",
+    "attention_pin_title": "관리자 한도",
+    "attention_pin_pending": "대기",
+    "attention_pin_weekly": "주간",
+    "attention_pin_range": "{{min}}부터 {{max}}까지의 정수입니다.",
+    "attention_pin_save": "한도 고정",
+    "attention_pin_clear": "고정 해제",
+    "attention_pin_saved": "한도를 고정했습니다",
+    "attention_pin_cleared": "고정을 해제했습니다",
+    "attention_pin_failed": "한도를 변경하지 못했습니다"
   },
   "views": {
     "builtin": {

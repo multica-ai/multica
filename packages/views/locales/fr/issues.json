@@ -2078,7 +2078,27 @@
     "feedback_save": "Envoyer le retour",
     "feedback_saved": "Retour enregistré",
     "feedback_save_failed": "Impossible d'enregistrer le retour",
-    "feedback_usefulness": "{{percent}} % utile sur les {{days}} derniers jours"
+    "feedback_usefulness": "{{percent}} % utile sur les {{days}} derniers jours",
+    "attention_title": "Limites d'attention",
+    "attention_pending_cap": "Limite en attente",
+    "attention_weekly_cap": "Limite hebdomadaire",
+    "attention_acceptance": "Acceptation",
+    "attention_acceptance_value": "{{percent}} % sur {{count}} décidées",
+    "attention_acceptance_none": "Aucune proposition décidée pour l'instant",
+    "attention_reason_pinned": "Un administrateur a fixé ces limites.",
+    "attention_reason_sample_too_small": "Moins de {{count}} propositions décidées sur les 60 derniers jours, donc les limites par défaut s'appliquent.",
+    "attention_reason_below_threshold": "Moins de 20 % des propositions sont approuvées, donc les limites sont plus basses.",
+    "attention_reason_above_threshold": "Plus de 60 % des propositions sont approuvées, donc les limites sont plus hautes.",
+    "attention_reason_default": "Les approbations sont dans la norme, donc les limites par défaut s'appliquent.",
+    "attention_pin_title": "Limites d'administrateur",
+    "attention_pin_pending": "En attente",
+    "attention_pin_weekly": "Hebdomadaire",
+    "attention_pin_range": "Nombres entiers de {{min}} à {{max}}.",
+    "attention_pin_save": "Fixer les limites",
+    "attention_pin_clear": "Retirer la fixation",
+    "attention_pin_saved": "Limites fixées",
+    "attention_pin_cleared": "Fixation retirée",
+    "attention_pin_failed": "Impossible de modifier les limites"
   },
   "views": {
     "builtin": {
