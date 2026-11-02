@@ -71,6 +71,12 @@ export interface CostShare {
   cost: number;
 }
 
+export interface AgentModelCost {
+  agentId: string;
+  model: string;
+  cost: number;
+}
+
 export interface RunTimeline {
   /** Oldest first. */
   runs: TimelineRun[];
@@ -100,6 +106,8 @@ export interface RunTimeline {
   costByAgent: CostShare[];
   /** Spend per model, most expensive first. */
   costByModel: CostShare[];
+  /** Spend per agent and model pair, most expensive first: the cost flow's links. */
+  costByAgentModel: AgentModelCost[];
   /** Highest single-run cost, for scaling per-run bars. */
   maxRunCost: number;
 }
@@ -180,6 +188,7 @@ export function buildRunTimeline(tasks: readonly AgentTask[], nowMs: number): Ru
   const laneMap = new Map<string, TimelineRun[]>();
   const agentCost = new Map<string, number>();
   const modelCost = new Map<string, number>();
+  const pairCost = new Map<string, AgentModelCost>();
 
   for (const run of runs) {
     if (run.usage) {
@@ -193,7 +202,12 @@ export function buildRunTimeline(tasks: readonly AgentTask[], nowMs: number): Ru
       // has a row for each, priced at its own rate.
       for (const slice of run.task.usage ?? []) {
         if (!slice.model) continue;
-        modelCost.set(slice.model, (modelCost.get(slice.model) ?? 0) + estimateCost(slice));
+        const cost = estimateCost(slice);
+        modelCost.set(slice.model, (modelCost.get(slice.model) ?? 0) + cost);
+        const pairKey = `${run.task.agent_id}\u0000${slice.model}`;
+        const pair = pairCost.get(pairKey);
+        if (pair) pair.cost += cost;
+        else pairCost.set(pairKey, { agentId: run.task.agent_id, model: slice.model, cost });
       }
     }
     if (run.durationMs != null) agentMs += run.durationMs;
@@ -245,6 +259,7 @@ export function buildRunTimeline(tasks: readonly AgentTask[], nowMs: number): Ru
     lanes: Array.from(laneMap, ([agentId, laneRuns]) => ({ agentId, runs: laneRuns })),
     costByAgent: sortedShares(agentCost),
     costByModel: sortedShares(modelCost),
+    costByAgentModel: Array.from(pairCost.values()).toSorted((a, b) => b.cost - a.cost),
     maxRunCost,
   };
 }
@@ -327,6 +342,119 @@ export function runIndexAt(
     }
   });
   return best;
+}
+
+/**
+ * The point a pointer at (`x`, `y`) is after, in pixels. Horizontal distance
+ * counts three times vertical: dots sit on a time axis, and a pointer moving
+ * along it should walk run to run rather than jump to whichever dot happens
+ * to sit at its height. -1 with no points.
+ */
+export function nearestPoint(points: readonly { x: number; y: number }[], x: number, y: number): number {
+  let best = -1;
+  let bestDistance = Infinity;
+  points.forEach((point, i) => {
+    const distance = Math.hypot(point.x - x, (point.y - y) / 3);
+    if (distance < bestDistance) {
+      best = i;
+      bestDistance = distance;
+    }
+  });
+  return best;
+}
+
+/**
+ * Vertical positions for labels that want to sit at `centers` (ascending),
+ * at least `minGap` apart and inside [minGap / 2, height - minGap / 2]: each
+ * label moves the least it can, pushed down by the one above it, then the
+ * column is pulled back up if it ran past the bottom.
+ */
+export function spreadLabels(centers: readonly number[], minGap: number, height: number): number[] {
+  const out: number[] = [];
+  centers.forEach((c, i) => {
+    out.push(Math.max(c, minGap / 2, i > 0 ? out[i - 1]! + minGap : -Infinity));
+  });
+  for (let i = out.length - 1; i >= 0; i--) {
+    const limit = i === out.length - 1 ? height - minGap / 2 : out[i + 1]! - minGap;
+    out[i] = Math.min(out[i]!, limit);
+  }
+  return out;
+}
+
+export interface FlowNode {
+  key: string;
+  cost: number;
+  /** Top edge and height, in pixels. */
+  y: number;
+  h: number;
+}
+
+export interface FlowLink {
+  from: string;
+  to: string;
+  cost: number;
+  /** Where the ribbon leaves its left node and enters its right one, and its thickness. */
+  y0: number;
+  y1: number;
+  h: number;
+}
+
+/**
+ * A two-column cost flow: left nodes (agents) and right nodes (models) stacked
+ * top to bottom in the given order, `gap` apart, both columns on one scale so
+ * the same spend is the same thickness on either side, each column centred.
+ * Links leave a node ordered by where they land, so ribbons do not cross more
+ * than the data makes them. Spend with no model on record has a left node but
+ * no ribbon.
+ */
+export function layoutCostFlow(
+  left: readonly CostShare[],
+  right: readonly CostShare[],
+  links: readonly { from: string; to: string; cost: number }[],
+  height: number,
+  gap: number,
+): { left: FlowNode[]; right: FlowNode[]; links: FlowLink[] } {
+  const sum = (shares: readonly CostShare[]) => shares.reduce((s, e) => s + e.cost, 0);
+  const room = (n: number) => Math.max(0, height - gap * Math.max(0, n - 1));
+  const scales = [left, right]
+    .filter((side) => sum(side) > 0)
+    .map((side) => room(side.length) / sum(side));
+  const scale = scales.length > 0 ? Math.min(...scales) : 0;
+  const stack = (shares: readonly CostShare[]): FlowNode[] => {
+    const used = sum(shares) * scale + gap * Math.max(0, shares.length - 1);
+    let y = (height - used) / 2;
+    return shares.map((share) => {
+      const node = { key: share.key, cost: share.cost, y, h: share.cost * scale };
+      y += node.h + gap;
+      return node;
+    });
+  };
+  const leftNodes = stack(left);
+  const rightNodes = stack(right);
+  const leftIndex = new Map(leftNodes.map((n, i) => [n.key, i]));
+  const rightIndex = new Map(rightNodes.map((n, i) => [n.key, i]));
+  const placed = links.filter((l) => l.cost > 0 && leftIndex.has(l.from) && rightIndex.has(l.to));
+  const y0 = new Map<(typeof placed)[number], number>();
+  const y1 = new Map<(typeof placed)[number], number>();
+  for (const node of leftNodes) {
+    let y = node.y;
+    for (const link of placed.filter((l) => l.from === node.key).toSorted((a, b) => rightIndex.get(a.to)! - rightIndex.get(b.to)!)) {
+      y0.set(link, y);
+      y += link.cost * scale;
+    }
+  }
+  for (const node of rightNodes) {
+    let y = node.y;
+    for (const link of placed.filter((l) => l.to === node.key).toSorted((a, b) => leftIndex.get(a.from)! - leftIndex.get(b.from)!)) {
+      y1.set(link, y);
+      y += link.cost * scale;
+    }
+  }
+  return {
+    left: leftNodes,
+    right: rightNodes,
+    links: placed.map((link) => ({ ...link, y0: y0.get(link)!, y1: y1.get(link)!, h: link.cost * scale })),
+  };
 }
 
 /** What the cumulative curve reads at `t`: the total once every run that had

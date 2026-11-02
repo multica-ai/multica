@@ -7,9 +7,12 @@ import {
   cumulativeCostAt,
   groupRunsByDay,
   idleSpanAround,
+  layoutCostFlow,
+  nearestPoint,
   niceTicks,
   runIndexAt,
   shortModelName,
+  spreadLabels,
   stepCurvePath,
   timeTicks,
 } from "./issue-run-timeline";
@@ -88,6 +91,25 @@ describe("buildRunTimeline", () => {
     expect(timeline.agentMs).toBe(30 * 60 * 1000);
     // Elapsed runs from the first start to now, while a run is still going.
     expect(timeline.elapsedMs).toBe(NOW - new Date("2026-09-24T10:00:00").getTime());
+  });
+
+  it("sums spend per agent and model pair, dearest first", () => {
+    const sonnet = (tokens: number): TaskUsage => ({ ...usage(tokens)[0]!, model: "claude-sonnet-5" });
+    const timeline = buildRunTimeline(
+      [
+        makeTask({ id: "a", agent_id: "agent-a", usage: usage(200_000) }),
+        makeTask({ id: "b", agent_id: "agent-a", usage: [...usage(200_000), sonnet(400_000)] }),
+        makeTask({ id: "c", agent_id: "agent-b", usage: usage(40_000) }),
+      ],
+      NOW,
+    );
+    expect(timeline.costByAgentModel).toEqual([
+      { agentId: "agent-a", model: "claude-opus-5", cost: 10 },
+      { agentId: "agent-a", model: "claude-sonnet-5", cost: expect.any(Number) },
+      { agentId: "agent-b", model: "claude-opus-5", cost: 1 },
+    ]);
+    const pairTotal = timeline.costByAgentModel.reduce((sum, p) => sum + p.cost, 0);
+    expect(pairTotal).toBeCloseTo(timeline.totalCost);
   });
 
   it("ignores deferred runs, which the execution log does not list", () => {
@@ -474,5 +496,64 @@ describe("shortModelName", () => {
 
   it("leaves an unfamiliar id as it is", () => {
     expect(shortModelName("kimi-k2")).toBe("kimi-k2");
+  });
+});
+
+describe("nearestPoint", () => {
+  it("picks the closest point, weighting horizontal distance over vertical", () => {
+    const points = [{ x: 0, y: 0 }, { x: 100, y: 0 }, { x: 40, y: 90 }];
+    expect(nearestPoint(points, 90, 10)).toBe(1);
+    // Vertical distance counts a third, so the pointer walks run to run along time.
+    expect(nearestPoint(points, 20, 60)).toBe(2);
+    expect(nearestPoint([], 0, 0)).toBe(-1);
+  });
+});
+
+describe("spreadLabels", () => {
+  it("leaves labels that fit where they are", () => {
+    expect(spreadLabels([20, 60, 100], 30, 120)).toEqual([20, 60, 100]);
+  });
+
+  it("pushes crowded labels apart and keeps them inside the column", () => {
+    expect(spreadLabels([5, 10], 30, 120)).toEqual([15, 45]);
+    expect(spreadLabels([100, 110, 115], 30, 120)).toEqual([45, 75, 105]);
+  });
+});
+
+describe("layoutCostFlow", () => {
+  const share = (key: string, cost: number) => ({ key, cost });
+
+  it("stacks both columns on one scale, centred, gap apart", () => {
+    const { left, right } = layoutCostFlow(
+      [share("a", 3), share("b", 1)],
+      [share("opus", 4)],
+      [{ from: "a", to: "opus", cost: 3 }, { from: "b", to: "opus", cost: 1 }],
+      108,
+      8,
+    );
+    // The left column has the gap to make room for: 100px for $4.
+    expect(left).toEqual([
+      { key: "a", cost: 3, y: 0, h: 75 },
+      { key: "b", cost: 1, y: 83, h: 25 },
+    ]);
+    expect(right).toEqual([{ key: "opus", cost: 4, y: 4, h: 100 }]);
+  });
+
+  it("orders a node's ribbons by where they land, and drops ones with no node", () => {
+    const { links } = layoutCostFlow(
+      [share("a", 4)],
+      [share("opus", 1), share("sonnet", 3)],
+      [
+        { from: "a", to: "sonnet", cost: 3 },
+        { from: "a", to: "opus", cost: 1 },
+        { from: "ghost", to: "opus", cost: 2 },
+      ],
+      100,
+      0,
+    );
+    expect(links).toEqual([
+      { from: "a", to: "sonnet", cost: 3, y0: 25, y1: 25, h: 75 },
+      { from: "a", to: "opus", cost: 1, y0: 0, y1: 0, h: 25 },
+    ]);
   });
 });
