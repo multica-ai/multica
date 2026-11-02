@@ -165,6 +165,10 @@
     "no_agents": "Aucun agent n'est encore associé à ce runtime.",
     "diagnostics_cli": "CLI",
     "diagnostics_visibility": "Visibilité",
+    "concurrency_title": "Concurrence",
+    "concurrency_none": "Aucune limite",
+    "concurrency_hint": "Nombre maximal de tâches simultanées pour tous les agents de ce runtime ({{min}}–{{max}}). Laissez vide pour ne pas limiter.",
+    "toast_concurrency_failed": "Échec de la mise à jour de la limite de concurrence",
     "visibility_label": {
       "private": "Privé",
       "public": "Public",

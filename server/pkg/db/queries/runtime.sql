@@ -686,3 +686,35 @@ SELECT * FROM agent_runtime
 WHERE workspace_id = @workspace_id AND @user_id::uuid = ANY(shared_with)
 ORDER BY id
 FOR NO KEY UPDATE;
+
+-- name: UpdateAgentRuntimeMaxConcurrentTasks :one
+-- Sets or clears (NULL) the runtime-wide concurrency cap (GitHub #9626).
+-- Kept out of the registration upserts so a daemon re-registering never
+-- clobbers it. Gated at the handler to runtime owner / workspace admin.
+UPDATE agent_runtime
+SET max_concurrent_tasks = sqlc.narg('max_concurrent_tasks'), updated_at = now()
+WHERE id = @id
+RETURNING *;
+
+-- name: GetAgentRuntimeMaxConcurrentTasks :one
+-- Claim-path read of the runtime cap. Plain read (no row lock): the claim
+-- serializes on a per-runtime advisory lock instead, see
+-- LockRuntimeClaimCapacity.
+SELECT max_concurrent_tasks FROM agent_runtime
+WHERE id = $1;
+
+-- name: LockRuntimeClaimCapacity :exec
+-- Transaction-scoped advisory lock that serializes capacity-checked claims
+-- on one runtime, so two agents claiming concurrently cannot both see
+-- running < cap and overshoot it. An advisory lock (not FOR UPDATE on the
+-- runtime row) because claimTask already holds the agent row lock, while
+-- runtime teardown / access changes lock the runtime row first and then
+-- agent rows; taking the runtime row here would invert that order and risk
+-- a deadlock. Only taken when the runtime has a cap set.
+SELECT pg_advisory_xact_lock(hashtextextended(sqlc.arg('runtime_id')::uuid::text || ':runtime_claim_capacity', 0));
+
+-- name: CountActiveTasksByRuntime :one
+-- Capacity-bearing tasks on a runtime across all agents. Same status set as
+-- CountRunningTasks (per agent). Served by idx_agent_task_queue_runtime_id.
+SELECT count(*) FROM agent_task_queue
+WHERE runtime_id = $1 AND status IN ('dispatched', 'running', 'waiting_local_directory');

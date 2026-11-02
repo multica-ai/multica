@@ -1,0 +1,15 @@
+-- Optional runtime-wide concurrency cap (GitHub #9626, #7015). An agent's
+-- max_concurrent_tasks only bounds that agent; several agents bound to the
+-- same runtime can still run at the same time. When set, the claim path also
+-- refuses work once the runtime has this many dispatched / running /
+-- waiting_local_directory tasks across all of its agents.
+--
+-- NULL means "no runtime cap", so every existing row keeps today's behavior.
+-- Range (1..50) is validated in the handler, matching the agent limit; there
+-- is no CHECK constraint so the ALTER stays a catalog-only change with no
+-- table scan. Not written by the registration / heartbeat upserts, so a daemon
+-- restart never clears it.
+--
+-- No index: the column is read by primary key only. The per-runtime running
+-- count uses the existing idx_agent_task_queue_runtime_id (migration 273).
+ALTER TABLE agent_runtime ADD COLUMN IF NOT EXISTS max_concurrent_tasks INTEGER;

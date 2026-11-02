@@ -2426,6 +2426,8 @@ export class ApiClient {
       custom_name?: string;
       /** Apply custom_name to every runtime on the same machine. */
       apply_to_machine?: boolean;
+      /** Runtime-wide concurrency cap; `null` removes it, omit to leave unchanged. */
+      max_concurrent_tasks?: number | null;
     },
   ): Promise<AgentRuntime> {
     const raw = await this.fetch<unknown>(`/api/runtimes/${runtimeId}`, {

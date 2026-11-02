@@ -162,6 +162,10 @@
     "no_agents": "まだこのランタイムに紐づいたエージェントがありません。",
     "diagnostics_cli": "CLI",
     "diagnostics_visibility": "公開範囲",
+    "concurrency_title": "同時実行数",
+    "concurrency_none": "制限なし",
+    "concurrency_hint": "このランタイム上のすべてのエージェントで同時に実行できるタスクの最大数（{{min}}–{{max}}）。空欄にすると制限なし。",
+    "toast_concurrency_failed": "同時実行数の上限を更新できませんでした",
     "visibility_label": {
       "private": "非公開",
       "public": "公開",
