@@ -929,6 +929,12 @@ func (s *claudeUsageSnapshot) appendedCostStateUsage() (map[string]TokenUsage, b
 	return readLastClaudeCostStateUsage(f, s.offset, info.Size())
 }
 
+// ClaudeConfigDir resolves Claude's config directory using the same inherited
+// environment and task overrides as the backend's child process.
+func ClaudeConfigDir(extraEnv map[string]string, cwd string) (string, error) {
+	return claudeConfigDir(buildEnv(extraEnv), cwd)
+}
+
 func claudeConfigDir(env []string, cwd string) (string, error) {
 	if value, ok := lastClaudeEnvValue(env, "CLAUDE_CONFIG_DIR"); ok && value != "" {
 		return resolveClaudeConfigPath(value, cwd)
