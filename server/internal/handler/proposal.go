@@ -75,6 +75,16 @@ type ProposalCreateResponse struct {
 	Related []ProposalRelatedResponse `json:"related"`
 }
 
+// ProposalRevisionResponse is one body the boss may have read. Revision 1 is
+// the body as filed; each later one is a resubmission after "ask for changes".
+type ProposalRevisionResponse struct {
+	Revision      int32  `json:"revision"`
+	Body          string `json:"body"`
+	CreatedByType string `json:"created_by_type"`
+	CreatedByID   string `json:"created_by_id"`
+	CreatedAt     string `json:"created_at"`
+}
+
 // ProposalRelatedResponse is an earlier proposal or decision related to a new
 // one. Kind says which: "proposal" entries carry state, issue_identifier and
 // created_at; "decision" entries (from the decisions knowledge base) carry
@@ -426,6 +436,53 @@ func (h *Handler) GetProposal(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, proposalToResponse(row.Proposal, row.IssueTitle, row.IssueStatus, prefix, row.IssueNumber))
 }
 
+// ListProposalRevisions returns the bodies a proposal has had, newest first. Any
+// workspace member who can read the proposal may read its history.
+//
+// A proposal filed before the history existed has fewer entries than its
+// revision number: those earlier bodies were overwritten before they were
+// recorded, and nothing is backfilled. The list is never null.
+//
+//	GET /api/proposals/{id}/revisions
+func (h *Handler) ListProposalRevisions(w http.ResponseWriter, r *http.Request) {
+	workspaceID := h.resolveWorkspaceID(r)
+	if _, ok := h.workspaceMember(w, r, workspaceID); !ok {
+		return
+	}
+	wsUUID, ok := parseUUIDOrBadRequest(w, workspaceID, "workspace_id")
+	if !ok {
+		return
+	}
+	id, ok := parseUUIDOrBadRequest(w, chi.URLParam(r, "id"), "proposal id")
+	if !ok {
+		return
+	}
+	if _, err := h.Queries.GetProposalInWorkspace(r.Context(), db.GetProposalInWorkspaceParams{ID: id, WorkspaceID: wsUUID}); err != nil {
+		if isNotFound(err) {
+			writeError(w, http.StatusNotFound, "proposal not found")
+			return
+		}
+		writeError(w, http.StatusInternalServerError, "failed to load proposal")
+		return
+	}
+	rows, err := h.Queries.ListProposalRevisions(r.Context(), db.ListProposalRevisionsParams{WorkspaceID: wsUUID, ProposalID: id})
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to list proposal revisions")
+		return
+	}
+	resp := make([]ProposalRevisionResponse, len(rows))
+	for i, row := range rows {
+		resp[i] = ProposalRevisionResponse{
+			Revision:      row.Revision,
+			Body:          row.Body,
+			CreatedByType: row.CreatedByType,
+			CreatedByID:   uuidToString(row.CreatedByID),
+			CreatedAt:     timestampToString(row.CreatedAt),
+		}
+	}
+	writeJSON(w, http.StatusOK, resp)
+}
+
 // ── Decide ──────────────────────────────────────────────────────────────────
 
 type DecideProposalRequest struct {
@@ -644,6 +701,10 @@ func (h *Handler) ReviseProposal(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	actorUUID, ok := parseUUIDOrBadRequest(w, actorID, "actor id")
+	if !ok {
+		return
+	}
 	res, err := h.proposalService().Resubmit(r.Context(), service.ProposalResubmitParams{
 		WorkspaceID: wsUUID,
 		ProposalID:  proposalID,
@@ -652,6 +713,8 @@ func (h *Handler) ReviseProposal(w http.ResponseWriter, r *http.Request) {
 			Recommendation: check.Recommendation, Options: check.Options,
 			CostRisk: check.CostRisk, Ask: check.Ask,
 		},
+		CreatorType: actorType,
+		CreatorID:   actorUUID,
 	})
 	var limitErr *service.ProposalLimitError
 	switch {

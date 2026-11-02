@@ -106,6 +106,7 @@ var workspaceDeletionManifest = map[string]workspaceDeleteAction{
 	"agent_mcp_server":                   workspaceDelete,
 	"brief":                              workspaceDelete,
 	"proposal":                           workspaceDelete,
+	"proposal_revision":                  workspaceDelete,
 	"workspace_mcp_server":               workspaceDelete,
 	"workspace_knowledge":                workspaceDelete, // the WeKnora tenant is not removed here
 	"knowledge_base":                     workspaceDelete,

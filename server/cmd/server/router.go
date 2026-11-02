@@ -2251,6 +2251,7 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 				r.Post("/", h.CreateProposal)
 				r.Route("/{id}", func(r chi.Router) {
 					r.Get("/", h.GetProposal)
+					r.Get("/revisions", h.ListProposalRevisions)
 					r.Post("/decision", h.DecideProposal)
 					r.Post("/revision", h.ReviseProposal)
 				})

@@ -1,0 +1,1 @@
+DROP INDEX CONCURRENTLY IF EXISTS proposal_revision_proposal_number_uidx;

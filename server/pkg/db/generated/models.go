@@ -1473,6 +1473,17 @@ type Proposal struct {
 	SnoozedUntil   pgtype.Timestamptz `json:"snoozed_until"`
 }
 
+type ProposalRevision struct {
+	ID            pgtype.UUID        `json:"id"`
+	WorkspaceID   pgtype.UUID        `json:"workspace_id"`
+	ProposalID    pgtype.UUID        `json:"proposal_id"`
+	Revision      int32              `json:"revision"`
+	Body          string             `json:"body"`
+	CreatedByType string             `json:"created_by_type"`
+	CreatedByID   pgtype.UUID        `json:"created_by_id"`
+	CreatedAt     pgtype.Timestamptz `json:"created_at"`
+}
+
 type QuickAction struct {
 	ID            pgtype.UUID        `json:"id"`
 	WorkspaceID   pgtype.UUID        `json:"workspace_id"`

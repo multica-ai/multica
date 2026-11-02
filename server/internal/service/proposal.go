@@ -292,6 +292,19 @@ func (s *ProposalService) Create(ctx context.Context, p ProposalCreateParams) (P
 	if err != nil {
 		return ProposalCreateResult{}, fmt.Errorf("create proposal: %w", err)
 	}
+	// Revision 1 is the body as filed. It is written here, not on a later read,
+	// so the history never lacks the first body.
+	if err := qtx.CreateProposalRevision(ctx, db.CreateProposalRevisionParams{
+		ID:            dbid.NewV7(),
+		WorkspaceID:   p.WorkspaceID,
+		ProposalID:    proposal.ID,
+		Revision:      proposal.Revision,
+		Body:          issue.Description.String,
+		CreatedByType: p.CreatorType,
+		CreatedByID:   p.CreatorID,
+	}); err != nil {
+		return ProposalCreateResult{}, fmt.Errorf("record proposal revision: %w", err)
+	}
 
 	if err := tx.Commit(ctx); err != nil {
 		return ProposalCreateResult{}, fmt.Errorf("commit: %w", err)
@@ -686,6 +699,10 @@ type ProposalResubmitParams struct {
 	WorkspaceID pgtype.UUID
 	ProposalID  pgtype.UUID
 	Content     ProposalContent
+	// CreatorType and CreatorID are the actor that sent the revision; the
+	// history records them with the new body.
+	CreatorType string // "agent" or "member"
+	CreatorID   pgtype.UUID
 }
 
 // ProposalResubmitResult carries the changed rows for the caller's events.
@@ -781,6 +798,18 @@ func (s *ProposalService) Resubmit(ctx context.Context, p ProposalResubmitParams
 			return ProposalResubmitResult{}, ErrProposalNotRevising
 		}
 		return ProposalResubmitResult{}, fmt.Errorf("resubmit proposal: %w", err)
+	}
+	// The new body and its history row commit together.
+	if err := qtx.CreateProposalRevision(ctx, db.CreateProposalRevisionParams{
+		ID:            dbid.NewV7(),
+		WorkspaceID:   p.WorkspaceID,
+		ProposalID:    resubmitted.ID,
+		Revision:      resubmitted.Revision,
+		Body:          updated.Description.String,
+		CreatedByType: p.CreatorType,
+		CreatedByID:   p.CreatorID,
+	}); err != nil {
+		return ProposalResubmitResult{}, fmt.Errorf("record proposal revision: %w", err)
 	}
 	if err := tx.Commit(ctx); err != nil {
 		return ProposalResubmitResult{}, fmt.Errorf("commit: %w", err)
