@@ -64,6 +64,53 @@ func (q *Queries) DigestAgentsWithFailedRuns(ctx context.Context, arg DigestAgen
 	return items, nil
 }
 
+const digestCharterActivity = `-- name: DigestCharterActivity :many
+SELECT c.squad_id,
+    GREATEST(
+        c.updated_at,
+        (SELECT max(i.updated_at) FROM issue i
+          WHERE i.workspace_id = c.workspace_id
+            AND i.assignee_type = 'squad'
+            AND i.assignee_id = c.squad_id),
+        (SELECT max(p.created_at) FROM proposal p
+          WHERE p.workspace_id = c.workspace_id
+            AND p.squad_id = c.squad_id),
+        (SELECT max(run.triggered_at) FROM autopilot_run run
+          WHERE run.squad_id = c.squad_id)
+    )::timestamptz AS last_activity_at
+FROM squad_charter c
+WHERE c.workspace_id = $1::uuid
+`
+
+type DigestCharterActivityRow struct {
+	SquadID        pgtype.UUID        `json:"squad_id"`
+	LastActivityAt pgtype.Timestamptz `json:"last_activity_at"`
+}
+
+// Each chartered squad's latest activity: a save of its charter, an issue assigned
+// to it, a proposal it filed, or a run of one of its routines. The digest reports
+// a squad as silent when this is more than seven days old. The charter's own save
+// counts, so a squad chartered yesterday is not silent.
+func (q *Queries) DigestCharterActivity(ctx context.Context, workspaceID pgtype.UUID) ([]DigestCharterActivityRow, error) {
+	rows, err := q.db.Query(ctx, digestCharterActivity, workspaceID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []DigestCharterActivityRow{}
+	for rows.Next() {
+		var i DigestCharterActivityRow
+		if err := rows.Scan(&i.SquadID, &i.LastActivityAt); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const digestKnowledgePendingDrafts = `-- name: DigestKnowledgePendingDrafts :one
 SELECT count(*)::int AS pending_drafts
 FROM knowledge_link l

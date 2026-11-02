@@ -164,3 +164,24 @@ JOIN workspace_knowledge wk ON wk.workspace_id = l.workspace_id AND wk.state = '
 WHERE l.workspace_id = sqlc.arg('workspace_id')::uuid
   AND l.state = 'draft'
   AND kb.archived_at IS NULL;
+
+-- name: DigestCharterActivity :many
+-- Each chartered squad's latest activity: a save of its charter, an issue assigned
+-- to it, a proposal it filed, or a run of one of its routines. The digest reports
+-- a squad as silent when this is more than seven days old. The charter's own save
+-- counts, so a squad chartered yesterday is not silent.
+SELECT c.squad_id,
+    GREATEST(
+        c.updated_at,
+        (SELECT max(i.updated_at) FROM issue i
+          WHERE i.workspace_id = c.workspace_id
+            AND i.assignee_type = 'squad'
+            AND i.assignee_id = c.squad_id),
+        (SELECT max(p.created_at) FROM proposal p
+          WHERE p.workspace_id = c.workspace_id
+            AND p.squad_id = c.squad_id),
+        (SELECT max(run.triggered_at) FROM autopilot_run run
+          WHERE run.squad_id = c.squad_id)
+    )::timestamptz AS last_activity_at
+FROM squad_charter c
+WHERE c.workspace_id = sqlc.arg('workspace_id')::uuid;
