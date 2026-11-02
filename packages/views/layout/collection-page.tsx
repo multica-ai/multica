@@ -61,6 +61,16 @@ interface CollectionPageHeaderProps {
 }
 
 /**
+ * Below this width of the header's left group, an open search cannot share
+ * the row with the title: title, filter, field and Reset only fit together
+ * from here up. Narrower, as on a phone, the title steps aside while the
+ * search is open so every control keeps its own box (MUL-8490). The scope
+ * stays one tap away in the nav.
+ */
+const TITLE_YIELDS_TO_SEARCH =
+  "@max-[22rem]/collection-tools:group-has-[[data-collection-search=open]]/collection-tools:hidden";
+
+/**
  * The one header row of a list page, laid out like the issues header: the
  * title names the scope and opens the scope menu, filter and search follow
  * it, and the right side holds icon controls whose names live in tooltips.
@@ -82,10 +92,10 @@ export function CollectionPageHeader({
   );
   return (
     <PageHeader className={className}>
-      <div className="flex min-w-0 flex-1 items-center gap-1">
+      <div className="group/collection-tools @container/collection-tools flex min-w-0 flex-1 items-center gap-1">
         {menu ? (
           <DropdownMenu>
-            <h1 className="flex min-w-20">
+            <h1 className={cn("flex min-w-20", TITLE_YIELDS_TO_SEARCH)}>
               <DropdownMenuTrigger
                 render={
                   <Button
@@ -104,7 +114,12 @@ export function CollectionPageHeader({
             </DropdownMenuContent>
           </DropdownMenu>
         ) : (
-          <h1 className="flex min-w-0 items-center gap-2 px-2 text-body font-medium">
+          <h1
+            className={cn(
+              "flex min-w-0 items-center gap-2 px-2 text-body font-medium",
+              TITLE_YIELDS_TO_SEARCH,
+            )}
+          >
             {label}
           </h1>
         )}
@@ -223,7 +238,8 @@ interface CollectionSearchProps {
  * List search for the header's tools: an icon until it is used, then a field.
  * "/" opens it from anywhere on the page. Esc or the clear button empties and
  * closes it; while it holds a query it stays open, so a query kept in the view
- * store is still visible after coming back to the list.
+ * store is still visible after coming back to the list. In a narrow
+ * `CollectionPageHeader` the title steps aside while it is open.
  */
 export function CollectionSearch({
   value,
@@ -275,10 +291,23 @@ export function CollectionSearch({
   };
 
   return (
-    <div ref={rootRef} className="flex min-w-0 items-center">
+    <div
+      ref={rootRef}
+      data-collection-search={expanded ? "open" : "closed"}
+      className={cn(
+        "flex items-center",
+        // The open field takes the room left after the title, up to 240px.
+        // Its size limits live on this flex item, never on a child: a child
+        // wider than its slot spills over Reset and the actions instead of
+        // making the title shrink (MUL-8490).
+        expanded
+          ? "min-w-0 max-w-60 flex-1 @min-[22rem]/collection-tools:min-w-32"
+          : "shrink-0",
+      )}
+    >
       {expanded ? (
         <InputGroup
-          className="h-7 w-60 min-w-32 shrink"
+          className="h-7 w-full"
           onFocus={() => setOpen(true)}
           onBlur={(event) => {
             if (event.currentTarget.contains(event.relatedTarget as Node | null)) return;
