@@ -67,6 +67,19 @@ type sidecarManifest struct {
 	Dirs  []string `json:"dirs,omitempty"`
 }
 
+// skillFiles returns the primary SKILL.md files we wrote directly under the
+// given skills parent. Supporting files named SKILL.md are not skill entries.
+func (m *sidecarManifest) skillFiles(skillsParent string) []string {
+	parent := filepath.Clean(skillsParent)
+	var paths []string
+	for _, path := range m.Files {
+		if filepath.Base(path) == "SKILL.md" && filepath.Dir(filepath.Dir(path)) == parent {
+			paths = append(paths, path)
+		}
+	}
+	return paths
+}
+
 // recordMkdirAll behaves like os.MkdirAll(path, perm) but additionally
 // records every parent directory it had to create (skipping any that
 // already existed) into m so CleanupSidecars can rmdir them later. The

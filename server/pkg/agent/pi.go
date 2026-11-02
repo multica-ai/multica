@@ -1176,45 +1176,22 @@ var piCustomArgModes = map[string]blockedArgMode{
 	"--offline":              blockedStandalone,
 }
 
-// buildPiArgs assembles the argv for a one-shot Pi invocation.
+// buildPiArgs assembles the argv for a Pi task invocation.
 //
 // Flags:
 //
 //	-p                          non-interactive mode (prompt arrives on stdin)
 //	--mode json                 emit one JSON event per line on stdout
+//	--mode rpc                  use RPC instead when task supplements are enabled
 //	--session <path>            session log file (created upfront, reused on resume)
 //	--model <selector>          model selector, passed through verbatim
 //	--thinking <level>          per-agent reasoning level override
 //
-// The prompt is deliberately absent from argv. Pi reads a non-TTY stdin in
-// print/JSON mode; using that supported path prevents Windows PowerShell's npm
-// shim from re-tokenising prompt content into options.
+// The prompt is deliberately absent from argv. It arrives on stdin as text
+// in print/JSON mode or a prompt command in RPC mode, preventing Windows
+// PowerShell's npm shim from re-tokenising prompt content into options.
 func buildPiArgs(sessionPath string, opts ExecOptions, logger *slog.Logger) []string {
 	return buildPiArgsFor("pi", sessionPath, opts, logger)
-}
-
-// piSkillArgs returns an explicit --skill flag for each skill found under
-// <cwd>/.pi/skills. Explicit paths let Pi load these skills even when the
-// project is untrusted, without --approve also trusting project-local
-// extensions and prompts from the checked-out branch.
-// OMP keeps its native .omp/skills discovery without additional skill flags.
-func piSkillArgs(cwd, label string) []string {
-	if cwd == "" || label != "pi" {
-		return nil
-	}
-	root := filepath.Join(cwd, ".pi", "skills")
-	entries, err := os.ReadDir(root)
-	if err != nil {
-		return nil
-	}
-	var args []string
-	for _, e := range entries {
-		dir := filepath.Join(root, e.Name())
-		if _, err := os.Stat(filepath.Join(dir, "SKILL.md")); err == nil {
-			args = append(args, "--skill", dir)
-		}
-	}
-	return args
 }
 
 func buildPiArgsFor(label, sessionPath string, opts ExecOptions, logger *slog.Logger) []string {
@@ -1241,7 +1218,14 @@ func buildPiArgsFor(label, sessionPath string, opts ExecOptions, logger *slog.Lo
 	if opts.ThinkingLevel != "" {
 		args = append(args, "--thinking", opts.ThinkingLevel)
 	}
-	args = append(args, piSkillArgs(opts.Cwd, label)...)
+	// Explicitly load only this dispatch's managed skill files. Scanning the
+	// project directory would also opt user-owned skills into untrusted runs.
+	// OMP retains its native .omp/skills discovery.
+	if label == "pi" {
+		for _, path := range opts.PiSkillPaths {
+			args = append(args, "--skill", path)
+		}
+	}
 	// Note: we intentionally do NOT pass --tools here. Omitting it lets
 	// Pi use its full tool registry, including user-installed extension
 	// tools. Passing --tools acts as a restrictive allowlist that

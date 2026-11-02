@@ -67,33 +67,56 @@ func TestBuildPiArgsPreservesProjectTrustFlags(t *testing.T) {
 }
 
 func TestBuildPiArgsLoadsMulticaSkills(t *testing.T) {
-	cwd := t.TempDir()
-	skill := filepath.Join(cwd, ".pi", "skills", "local-ci")
-	if err := os.MkdirAll(skill, 0o755); err != nil {
-		t.Fatal(err)
+	for _, mode := range []string{"json", "rpc"} {
+		t.Run(mode, func(t *testing.T) {
+			opts := ExecOptions{
+				Cwd:                  t.TempDir(),
+				EnableTaskSupplement: mode == "rpc",
+				PiSkillPaths: []string{
+					filepath.Join(t.TempDir(), "managed skills", "local-ci", "SKILL.md"),
+					filepath.Join(t.TempDir(), "review-multica", "SKILL.md"),
+				},
+				CustomArgs: []string{"--no-approve"},
+			}
+			args := buildPiArgs("/tmp/s.jsonl", opts, slog.Default())
+			if countArg(args, "--skill") != len(opts.PiSkillPaths) {
+				t.Fatalf("want one --skill per managed file: %v", args)
+			}
+			joined := strings.Join(args, "\x00")
+			for _, path := range opts.PiSkillPaths {
+				if !strings.Contains(joined, "--skill\x00"+path+"\x00") {
+					t.Errorf("managed skill %q missing from %v", path, args)
+				}
+			}
+			wantPrint := 0
+			if mode == "json" {
+				wantPrint = 1
+			}
+			if !strings.Contains(joined, "--mode\x00"+mode+"\x00") || countArg(args, "-p") != wantPrint {
+				t.Errorf("wrong invocation mode: %v", args)
+			}
+			if countArg(args, "--approve") != 0 || countArg(args, "--no-approve") != 1 {
+				t.Errorf("project trust flags changed: %v", args)
+			}
+			if got := buildOmpArgs("", "", opts, slog.Default()); countArg(got, "--skill") != 0 {
+				t.Fatalf("omp must not get managed Pi skills: %v", got)
+			}
+		})
 	}
-	if err := os.WriteFile(filepath.Join(skill, "SKILL.md"), []byte("x"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.MkdirAll(filepath.Join(cwd, ".pi", "skills", "empty"), 0o755); err != nil {
-		t.Fatal(err)
-	}
+}
 
-	args := buildPiArgs("/tmp/s.jsonl", ExecOptions{Cwd: cwd}, slog.Default())
-	found := false
-	for i, a := range args {
-		if a == "--skill" && i+1 < len(args) && args[i+1] == skill {
-			found = true
-		}
+func TestBuildPiArgsDoesNotDiscoverProjectSkills(t *testing.T) {
+	cwd := t.TempDir()
+	path := filepath.Join(cwd, ".pi", "skills", "untrusted", "SKILL.md")
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatal(err)
 	}
-	if !found || countArg(args, "--skill") != 1 {
-		t.Fatalf("want one --skill %s in %v", skill, args)
+	if err := os.WriteFile(path, []byte("repository-owned skill"), 0o644); err != nil {
+		t.Fatal(err)
 	}
-	if countArg(args, "--approve") != 0 {
-		t.Fatalf("--approve must not be injected: %v", args)
-	}
-	if got := buildOmpArgs("", "", ExecOptions{Cwd: cwd}, slog.Default()); countArg(got, "--skill") != 0 {
-		t.Fatalf("omp must not get --skill: %v", got)
+	args := buildPiArgs("", ExecOptions{Cwd: cwd}, slog.Default())
+	if countArg(args, "--skill") != 0 {
+		t.Fatalf("project skill was explicitly loaded without a managed path: %v", args)
 	}
 }
 
