@@ -119,7 +119,7 @@ func (a *api) do(ctx context.Context, method, path, contentType string, body io.
 		return fmt.Errorf("read API response failed")
 	}
 	if len(b) > 8<<20 {
-		return fmt.Errorf("API response exceeds 8 MiB")
+		return errResponseTooLarge
 	}
 	if out != nil {
 		if err := json.Unmarshal(b, out); err != nil {
@@ -174,3 +174,6 @@ func (a *api) download(ctx context.Context, rawURL string, limit int64) ([]byte,
 }
 
 var errTooLarge = errors.New("file too large")
+
+// errResponseTooLarge reports a response body larger than api.do reads.
+var errResponseTooLarge = errors.New("API response exceeds 8 MiB")

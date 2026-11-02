@@ -399,6 +399,19 @@ func (b *Bridge) stepRun(ctx context.Context, r *run) error {
 	if err := b.taskCall(ctx, r, "/session", map[string]string{"session_id": r.SessionID}, nil); err != nil {
 		return err
 	}
+	if r.Phase == "created" && r.Continued && r.Cursor == "" {
+		latest, err := b.latestEventID(ctx, r.SessionID)
+		if definitelyRejected(err) {
+			// The earlier session is gone; nothing was sent yet, so start fresh.
+			r.SessionID, r.PriorSessionID, r.Continued = "", "", false
+			r.Phase = "prepared"
+			return b.persist()
+		}
+		if err != nil {
+			return err
+		}
+		r.Cursor = latest
+	}
 	if r.Phase == "created" {
 		// Save intent before POST. After an ambiguous response/restart, never resend automatically.
 		r.Phase = "sending"
@@ -420,7 +433,7 @@ func (b *Bridge) stepRun(ctx context.Context, r *run) error {
 			if definitelyRejected(err) && r.Continued {
 				// The earlier session can no longer take messages; a definite
 				// rejection means nothing was delivered, so start a fresh session.
-				r.SessionID, r.PriorSessionID, r.Continued = "", "", false
+				r.SessionID, r.PriorSessionID, r.Continued, r.Cursor = "", "", false, ""
 				r.Phase = "prepared"
 				r.SubmissionDeadline = time.Time{}
 				return b.persist()
