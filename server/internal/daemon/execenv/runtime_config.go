@@ -170,7 +170,7 @@ func formatProjectResource(r ProjectResourceForEnv) string {
 // For DevEco Code: writes {workDir}/AGENTS.md  (skills discovered natively from .deveco/skills/)
 // For OpenClaw: writes {workDir}/AGENTS.md  (skills discovered natively from {workDir}/skills/ via per-task openclaw-config.json that pins agents.defaults.workspace)
 // For Hermes:   writes {workDir}/AGENTS.md  (skills discovered natively from a per-task HERMES_HOME/skills seeded by the daemon; see hermes_home.go)
-// For Pi:       writes {workDir}/AGENTS.md  (skills discovered natively from .pi/skills/)
+// For Pi:       writes {workDir}/AGENTS.md  (skills explicitly loaded from .pi/skills/ via --skill)
 // For Oh-My-Pi (omp): writes {workDir}/AGENTS.md  (omp is a pi fork; skills discovered from .omp/skills/)
 // For Cursor:   writes {workDir}/AGENTS.md  (skills discovered natively from .cursor/skills/)
 // For Kimi:        writes {workDir}/AGENTS.md  (Kimi Code CLI reads AGENTS.md natively; skills auto-discovered from project skills dirs)
