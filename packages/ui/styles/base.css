@@ -36,6 +36,37 @@
   bottom: calc(var(--chat-launcher-clearance) + var(--chat-launcher-inset));
 }
 
+/* Run chart marks (bars, dots, nodes). A coloured mark is its colour as a
+ * short top-lit gradient inside a 1px ring of the same colour, with a faint
+ * inner highlight — set the colour through `--mark` (default: the chart
+ * accent). A neutral mark is the hue-free grey for everything that is not the
+ * point of the chart. A hatched mark stands in for "no figure", so it never
+ * reads as a small one. */
+@utility chart-mark {
+  background: linear-gradient(
+    to bottom,
+    color-mix(in oklch, var(--mark, var(--chart-accent)) 72%, white),
+    var(--mark, var(--chart-accent)) 55%
+  );
+  box-shadow:
+    0 0 0 1px var(--mark, var(--chart-accent)),
+    inset 0 1px 1px rgb(255 255 255 / 0.25);
+}
+
+@utility chart-mark-neutral {
+  background: linear-gradient(to bottom, var(--chart-bar), var(--chart-bar-deep));
+  box-shadow: 0 0 0 1px var(--chart-bar-ring);
+}
+
+@utility chart-mark-hatch {
+  background: repeating-linear-gradient(
+    135deg,
+    var(--chart-bar-ring) 0 1.5px,
+    var(--chart-bar) 1.5px 3.5px
+  );
+  box-shadow: 0 0 0 1px var(--chart-bar-ring);
+}
+
 /* Shiki dual themes: CSS-only light/dark switching via CSS variables */
 /* @see https://shiki.style/guide/dual-themes */
 .shiki,

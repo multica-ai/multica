@@ -27,6 +27,14 @@
     --color-chart-3: var(--chart-3);
     --color-chart-2: var(--chart-2);
     --color-chart-1: var(--chart-1);
+    --color-chart-bar: var(--chart-bar);
+    --color-chart-bar-deep: var(--chart-bar-deep);
+    --color-chart-bar-ring: var(--chart-bar-ring);
+    --color-chart-accent: var(--chart-accent);
+    --color-chart-series-1: var(--chart-series-1);
+    --color-chart-series-2: var(--chart-series-2);
+    --color-chart-series-3: var(--chart-series-3);
+    --color-chart-series-4: var(--chart-series-4);
     --color-ring: var(--ring);
     --color-input: var(--input);
     --color-border: var(--border);
@@ -235,6 +243,20 @@
     --chart-3: oklch(0.76 0.10 255);
     --chart-4: oklch(0.85 0.06 255);
     --chart-5: oklch(0.92 0.03 255);
+    /* Run charts (execution log, Runs dialog) use contrast instead of a ramp:
+       everything ordinary is a hue-free grey bar (a soft top-to-bottom
+       gradient inside a 1px ring), and what matters takes one saturated
+       colour. The accent is the brand hue at full chroma. Series colours tell
+       agents apart: equal lightness and chroma, different hues, none near
+       --destructive, so a failed run never reads as an agent. */
+    --chart-bar: oklch(0.935 0 0);
+    --chart-bar-deep: oklch(0.89 0 0);
+    --chart-bar-ring: oklch(0.875 0 0);
+    --chart-accent: oklch(0.6 0.2 255);
+    --chart-series-1: oklch(0.6 0.2 255);
+    --chart-series-2: oklch(0.7 0.17 50);
+    --chart-series-3: oklch(0.6 0.22 300);
+    --chart-series-4: oklch(0.66 0.13 185);
     --radius: 0.5rem;
     --issue-row-height: 36px;
     --sidebar: oklch(0.964435 0.001327 286.375);
@@ -311,6 +333,16 @@
     --chart-3: oklch(0.52 0.10 255);
     --chart-4: oklch(0.42 0.06 255);
     --chart-5: oklch(0.32 0.03 255);
+    /* Grey bars sink toward the surface; the accent and series lift so the
+       contrast between them holds. */
+    --chart-bar: oklch(0.36 0.004 286);
+    --chart-bar-deep: oklch(0.3 0.004 286);
+    --chart-bar-ring: oklch(1 0 0 / 7%);
+    --chart-accent: oklch(0.68 0.18 255);
+    --chart-series-1: oklch(0.68 0.18 255);
+    --chart-series-2: oklch(0.74 0.16 50);
+    --chart-series-3: oklch(0.68 0.2 300);
+    --chart-series-4: oklch(0.72 0.12 185);
     --sidebar: oklch(0.21 0.006 285.885);
     --sidebar-foreground: oklch(0.985 0 0);
     --sidebar-primary: oklch(0.488 0.243 264.376);
