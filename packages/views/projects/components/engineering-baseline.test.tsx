@@ -73,4 +73,24 @@ describe("EngineeringBaseline", () => {
     expect(document.querySelector('[data-open-issues]')).toHaveTextContent("OL-92");
     expect(screen.getByText("Confirmed with a personal token")).toBeInTheDocument();
   });
+
+  it("uses neutral agent execution labels for adopted and rejected history", () => {
+    const adopted = { ...revision("adopted"), id: "rev-adopted", revisionNumber: 3, decisionCredential: "agent_task" as const, decidedByType: "agent" as const, decidedById: "agent-1" };
+    const rejected = { ...revision("rejected"), id: "rev-rejected", revisionNumber: 2, decisionCredential: "agent_task" as const, decidedByType: "agent" as const, decidedById: "agent-1" };
+    renderWithI18n(
+      <EngineeringBaseline {...baseProps} chapters={[chapter(null)]} revision={null} currentCandidate={false} history={{ revisions: [adopted, rejected], hasMore: false, nextBefore: null }} onDecision={vi.fn()} />,
+      { locale: "zh-Hans" },
+    );
+
+    const adoptedRow = screen.getByText("第 3 版").closest("li");
+    const rejectedRow = screen.getByText("第 2 版").closest("li");
+    expect(adoptedRow).toHaveTextContent("已采用");
+    expect(adoptedRow).toHaveTextContent("智能体执行");
+    expect(adoptedRow).toHaveTextContent("Actor agent-1");
+    expect(rejectedRow).toHaveTextContent("已驳回");
+    expect(rejectedRow).toHaveTextContent("智能体执行");
+    expect(rejectedRow).toHaveTextContent("Actor agent-1");
+    expect(rejectedRow).not.toHaveTextContent("采用");
+    expect(rejectedRow).not.toHaveTextContent(/confirmed/i);
+  });
 });

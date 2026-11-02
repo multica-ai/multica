@@ -79,7 +79,7 @@
   "credentials": {
     "session": "看板确认",
     "pat": "经个人令牌",
-    "agent_task": "智能体代为采用",
+    "agent_task": "智能体执行",
     "unknown": "未知凭据"
   },
   "warnings": {

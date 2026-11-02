@@ -15,7 +15,7 @@
   },
   "chapters": { "overview": "Présentation du projet", "domain_rules": "Domaine et règles obligatoires", "architecture": "Architecture et décisions techniques", "exclusions_and_risks": "Exclusions, reports et risques" },
   "status": { "candidate": "Candidat", "adopted": "Adopté", "superseded": "Remplacé", "withdrawn": "Retiré", "rejected": "Rejeté", "unknown": "État inconnu" },
-  "credentials": { "session": "Confirmé dans le tableau de bord", "pat": "Confirmé avec un jeton personnel", "agent_task": "Confirmé par un agent", "unknown": "Identifiant inconnu" },
+  "credentials": { "session": "Confirmé dans le tableau de bord", "pat": "Confirmé avec un jeton personnel", "agent_task": "Décidé par un agent", "unknown": "Identifiant inconnu" },
   "warnings": { "rule_removed": "{{anchor}} supprime une règle obligatoire", "rule_shrunk": "{{anchor}} réduit fortement une règle obligatoire", "rule_deferred": "{{anchor}} reporte une règle obligatoire", "defer_missing_pool": "{{anchor}} est reporté sans tâche du pool non bloquant", "unknown": "{{anchor}} présente une alerte de règle inconnue" },
   "history": { "title": "Historique des révisions", "revision": "Révision {{number}}", "empty": "Aucune révision dans ce chapitre", "more": "Charger les révisions précédentes" },
   "settings": {

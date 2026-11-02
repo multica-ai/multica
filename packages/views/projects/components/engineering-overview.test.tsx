@@ -261,10 +261,12 @@ describe("EngineeringOverview permissions", () => {
 });
 
 describe("EngineeringOverview recent decisions", () => {
-  it("labels task-token decisions as confirmed by an agent", async () => {
-    histories.domain_rules = [revision(HISTORICAL, "domain_rules", 1, "Agent decision", "adopted", "2026-10-30T01:00:00Z", "agent_task")];
+  it("labels agent rejections as decisions without confirmation wording", async () => {
+    histories.domain_rules = [revision(HISTORICAL, "domain_rules", 1, "Agent decision", "rejected", "2026-10-30T01:00:00Z", "agent_task")];
     renderOverview();
-    expect(await screen.findByText("Confirmed by an agent")).toBeInTheDocument();
+    expect(await screen.findByText("Decided by an agent")).toBeInTheDocument();
+    expect(screen.getByText("Rejected")).toBeInTheDocument();
+    expect(screen.queryByText(/confirmed by an agent/i)).not.toBeInTheDocument();
   });
   it("shows the latest decided revisions with their outcome, credential, and time", async () => {
     histories.domain_rules = [revision("99999999-9999-4999-8999-999999999991", "domain_rules", 2, "Earlier decision", "adopted", "2026-10-29T01:00:00Z", "session")];

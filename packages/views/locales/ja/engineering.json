@@ -15,7 +15,7 @@
   },
   "chapters": { "overview": "プロジェクト概要", "domain_rules": "領域用語と必須ルール", "architecture": "アーキテクチャと技術決定", "exclusions_and_risks": "対象外・延期・リスク" },
   "status": { "candidate": "承認待ち", "adopted": "採用済み", "superseded": "新版に置換済み", "withdrawn": "撤回済み", "rejected": "却下済み", "unknown": "不明な状態" },
-  "credentials": { "session": "ダッシュボードで承認", "pat": "個人トークンで承認", "agent_task": "エージェントが承認", "unknown": "不明な認証情報" },
+  "credentials": { "session": "ダッシュボードで承認", "pat": "個人トークンで承認", "agent_task": "エージェントが決定", "unknown": "不明な認証情報" },
   "warnings": { "rule_removed": "{{anchor}} が必須ルールを削除しています", "rule_shrunk": "{{anchor}} が必須ルールを大幅に縮小しています", "rule_deferred": "{{anchor}} が必須ルールを延期しています", "defer_missing_pool": "{{anchor}} の延期先となる非ブロッキングプールのタスクがありません", "unknown": "{{anchor}} に不明なルール警告があります" },
   "history": { "title": "改訂履歴", "revision": "第 {{number}} 版", "empty": "この章に改訂履歴はありません", "more": "以前の版を読み込む" },
   "settings": {

@@ -79,7 +79,7 @@
   "credentials": {
     "session": "Confirmed in the dashboard",
     "pat": "Confirmed with a personal token",
-    "agent_task": "Confirmed by an agent",
+    "agent_task": "Decided by an agent",
     "unknown": "Unknown credential"
   },
   "warnings": {
