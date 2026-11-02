@@ -2233,13 +2233,17 @@ func TestHermesProviderErrorSnifferHandlesPartialLines(t *testing.T) {
 func TestHermesProviderErrorSnifferBoundedBuffer(t *testing.T) {
 	t.Parallel()
 
-	s := newACPProviderErrorSniffer("hermes")
-	for i := 0; i < 20; i++ {
-		// Each line differs so dedup doesn't merge them.
-		s.Write([]byte(`⚠️  API call failed (HTTP 400) attempt ` + string(rune('a'+i%26)) + `: Non-retryable error` + "\n"))
-	}
-	if len(s.lines) > acpMaxErrorLines {
-		t.Errorf("sniffer kept %d lines, limit is %d", len(s.lines), acpMaxErrorLines)
+	for _, provider := range []string{"hermes", "kimi"} {
+		t.Run(provider, func(t *testing.T) {
+			s := newACPProviderErrorSniffer(provider)
+			for i := 0; i < 20; i++ {
+				// Each line differs so dedup doesn't merge them.
+				s.Write([]byte(`⚠️  API call failed (HTTP 400) attempt ` + string(rune('a'+i%26)) + `: Non-retryable error` + "\n"))
+			}
+			if len(s.lines) > acpMaxErrorLines {
+				t.Errorf("sniffer kept %d lines, limit is %d", len(s.lines), acpMaxErrorLines)
+			}
+		})
 	}
 }
 
@@ -2329,6 +2333,208 @@ func TestHermesProviderErrorSnifferStillCapturesErrorRootRecords(t *testing.T) {
 	msg := s.terminalMessage()
 	if !strings.Contains(msg, "HTTP 429") {
 		t.Fatalf("real error: expected genuine ERROR root record to remain terminal, got %q", msg)
+	}
+}
+
+// A fail-open startup warning is diagnostic context, not the task's causal
+// failure. If execution continues and the provider later exhausts its retries,
+// the terminal provider error must be the result surfaced to the daemon.
+func TestHermesProviderErrorSnifferTerminalErrorWinsOverRelayWarning(t *testing.T) {
+	t.Parallel()
+
+	relayWarning := "2026-09-24 14:49:35 [WARNING] agent.relay_runtime: Hermes Relay runtime initialization failed\n" +
+		"Traceback (most recent call last):\n" +
+		"ModuleNotFoundError: No module named 'nemo_relay'\n"
+	providerFailure := "⚠️  Attempt 3/3 failed: HTTP 429: rate limit exceeded\n" +
+		"❌ Rate limited after 3 retries — HTTP 429: rate limit exceeded\n" +
+		"💀 Final error: HTTP 429: rate limit exceeded\n"
+
+	s := newACPProviderErrorSniffer("hermes")
+	if _, err := s.Write([]byte(relayWarning + providerFailure)); err != nil {
+		t.Fatalf("Write: %v", err)
+	}
+
+	status, errStr := promoteACPResultOnProviderError("completed", "", "", s)
+	if status != "failed" {
+		t.Fatalf("terminal provider failure must fail the run, got %q", status)
+	}
+	if !strings.Contains(errStr, "HTTP 429") {
+		t.Fatalf("terminal provider failure must be surfaced, got %q", errStr)
+	}
+	if strings.Contains(errStr, "nemo_relay") {
+		t.Fatalf("fail-open Relay warning replaced the terminal provider failure: %q", errStr)
+	}
+}
+
+func TestHermesProviderErrorSnifferRelayWarningStaysFailOpen(t *testing.T) {
+	t.Parallel()
+
+	s := newACPProviderErrorSniffer("hermes")
+	if _, err := s.Write([]byte(
+		"2026-09-24 14:49:35 [WARNING] agent.relay_runtime: Hermes Relay runtime initialization failed\n" +
+			"ModuleNotFoundError: No module named 'nemo_relay'\n",
+	)); err != nil {
+		t.Fatalf("Write: %v", err)
+	}
+
+	status, errStr := promoteACPResultOnProviderError("completed", "", "Done.", s)
+	if status != "completed" || errStr != "" {
+		t.Fatalf("fail-open Relay warning changed a successful run: status=%q error=%q", status, errStr)
+	}
+}
+
+func TestHermesProviderErrorSnifferPreservesFailureDetails(t *testing.T) {
+	t.Parallel()
+
+	const relayWarning = "ModuleNotFoundError: No module named 'nemo_relay'\n"
+	const rateLimitDetail = "📝 Error: HTTP 429: rate limit exceeded\n"
+	const historyDetail = "📝 Error: HTTP 400: the message at position 43 with role 'assistant' must not be empty\n"
+	const abort400 = "❌ Non-retryable client error (HTTP 400). Aborting.\n"
+	const exhausted429 = "❌ API call failed after 3 retries: RateLimitError [HTTP 429]\n"
+
+	tests := []struct {
+		name     string
+		stderr   string
+		want     string
+		unwanted string
+		poisoned bool
+	}{
+		{
+			// Hermes emits the actionable detail before its generic abort summary:
+			// https://github.com/NousResearch/hermes-agent/issues/14387.
+			name: "detail before abort summary",
+			stderr: "⚠️ API call failed (attempt 1/3): TypeError\n" +
+				"📝 Error: Completions.create() got an unexpected keyword argument 'stream_options'\n" +
+				"⚠️ Non-retryable error (HTTP None) — trying fallback...\n" +
+				"❌ Non-retryable error (HTTP None): Completions.create() got an unexpected keyword argument 'stream_options'\n" +
+				"❌ Non-retryable client error (HTTP None). Aborting.\n",
+			want: "stream_options",
+		},
+		{
+			name: "poisoned history before abort summary",
+			stderr: "⚠️ API call failed (attempt 1/3): BadRequestError [HTTP 400]\n" +
+				historyDetail + abort400,
+			want:     "must not be empty",
+			poisoned: true,
+		},
+		{
+			name: "repeated retry details",
+			stderr: "⚠️ API call failed (attempt 1/3): RateLimitError [HTTP 429]\n" + rateLimitDetail +
+				"⚠️ API call failed (attempt 2/3): RateLimitError [HTTP 429]\n" + rateLimitDetail +
+				"⚠️ API call failed (attempt 3/3): RateLimitError [HTTP 429]\n" + rateLimitDetail + exhausted429,
+			want: "rate limit exceeded",
+		},
+		{
+			name: "rate limit then poisoned history",
+			stderr: "⚠️ API call failed (attempt 1/3): RateLimitError [HTTP 429]\n" + rateLimitDetail +
+				"⚠️ API call failed (attempt 2/3): BadRequestError [HTTP 400]\n" + historyDetail + abort400,
+			want:     "must not be empty",
+			unwanted: "rate limit exceeded",
+			poisoned: true,
+		},
+		{
+			name: "stale history detail does not poison final rate limit",
+			stderr: "⚠️ API call failed (attempt 1/3): BadRequestError [HTTP 400]\n" + historyDetail +
+				"⚠️ API call failed (attempt 2/3): RateLimitError [HTTP 429]\n" + rateLimitDetail + exhausted429,
+			want:     "rate limit exceeded",
+			unwanted: "must not be empty",
+		},
+		{
+			name: "final retry repeats an earlier error",
+			stderr: "⚠️ API call failed (attempt 1/3): RateLimitError [HTTP 429]\n" + rateLimitDetail +
+				"⚠️ API call failed (attempt 2/3): HTTP 503\n📝 Error: HTTP 503: service unavailable\n" +
+				"⚠️ API call failed (attempt 3/3): RateLimitError [HTTP 429]\n" + rateLimitDetail + exhausted429,
+			want:     "rate limit exceeded",
+			unwanted: "service unavailable",
+		},
+		{
+			name: "final attempt without detail uses its own header",
+			stderr: "⚠️ API call failed (attempt 1/3): RateLimitError [HTTP 429]\n" + rateLimitDetail +
+				"⚠️ API call failed (attempt 2/3): BadRequestError [HTTP 400]\n" + abort400,
+			want:     "HTTP 400",
+			unwanted: "rate limit exceeded",
+		},
+		{
+			name: "standalone terminal error replaces recovered retry",
+			stderr: "⚠️ API call failed (attempt 1/3): RateLimitError [HTTP 429]\n" + rateLimitDetail +
+				"Request succeeded; continuing with the next operation\n" +
+				"❌ Non-retryable client error (HTTP 401). Aborting.\n",
+			want:     "HTTP 401",
+			unwanted: "rate limit exceeded",
+		},
+		{
+			name: "status changes without an attempt header",
+			stderr: "⚠️ API call failed (attempt 1/3): RateLimitError [HTTP 429]\n" + rateLimitDetail +
+				"⚠️ API call failed: HTTP 401\n" +
+				"❌ Non-retryable client error (HTTP 401). Aborting.\n",
+			want:     "HTTP 401",
+			unwanted: "rate limit exceeded",
+		},
+		{
+			name: "standalone terminal error does not reuse poisoned history",
+			stderr: "⚠️ API call failed (attempt 1/3): BadRequestError [HTTP 400]\n" + historyDetail +
+				"❌ Non-retryable client error (HTTP 401). Aborting.\n",
+			want:     "HTTP 401",
+			unwanted: "must not be empty",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			for _, warning := range []string{"", relayWarning} {
+				t.Run(fmt.Sprintf("relay=%t", warning != ""), func(t *testing.T) {
+					s := newACPProviderErrorSniffer("hermes")
+					for _, line := range strings.SplitAfter(warning+tt.stderr, "\n") {
+						if _, err := s.Write([]byte(line)); err != nil {
+							t.Fatalf("Write: %v", err)
+						}
+					}
+					status, message := promoteACPResultOnProviderError("completed", "", "", s)
+					if status != "failed" || !strings.Contains(message, tt.want) {
+						t.Errorf("status=%q error=%q, want failed with %q", status, message, tt.want)
+					}
+					if strings.Contains(message, "nemo_relay") || (tt.unwanted != "" && strings.Contains(message, tt.unwanted)) {
+						t.Errorf("unrelated error detail surfaced: %q", message)
+					}
+					if got := s.isPoisonedHistory(); got != tt.poisoned {
+						t.Errorf("isPoisonedHistory()=%v, want %v; error=%q", got, tt.poisoned, message)
+					}
+				})
+			}
+		})
+	}
+}
+
+func TestHermesProviderErrorSnifferDetailSurvivesDiagnosticOverflow(t *testing.T) {
+	t.Parallel()
+
+	s := newACPProviderErrorSniffer("hermes")
+	s.Write([]byte("⚠️ API call failed (attempt 3/3): BadRequestError [HTTP 400]\n" +
+		"📝 Error: HTTP 400: messages[43].content must not be empty\n"))
+	for i := 0; i < 32; i++ {
+		s.Write([]byte(fmt.Sprintf("[ERROR] API call failed: HTTP 400 diagnostic %d\n", i)))
+	}
+	status, message := promoteACPResultOnProviderError("completed", "", "", s)
+	if status != "failed" || !strings.Contains(message, "messages[43].content must not be empty") {
+		t.Fatalf("diagnostics displaced the failure detail: status=%q error=%q", status, message)
+	}
+	if !s.isPoisonedHistory() {
+		t.Fatalf("diagnostics lost the poisoned-history signal: %q", message)
+	}
+	// A new failure must still replace the pinned detail after overflow.
+	s.Write([]byte("❌ Non-retryable client error (HTTP 401). Aborting.\n"))
+	if message := s.terminalMessage(); !strings.Contains(message, "HTTP 401") || s.isPoisonedHistory() {
+		t.Fatalf("new terminal failure did not replace the old detail: %q", message)
+	}
+}
+
+func TestHermesProviderErrorSnifferWithoutHeader(t *testing.T) {
+	t.Parallel()
+
+	s := newACPProviderErrorSniffer("hermes")
+	s.Write([]byte("RuntimeError: No LLM provider configured\n"))
+	status, message := promoteACPResultOnProviderError("completed", "", "", s)
+	if status != "failed" || !strings.Contains(message, "No LLM provider configured") {
+		t.Fatalf("bare runtime error lost: status=%q error=%q", status, message)
 	}
 }
 
@@ -3338,6 +3544,7 @@ while IFS= read -r line; do
       ;;
     *'"method":"session/prompt"'*)
       printf '%s\n' "2026-01-01 00:00:01 [ERROR] root: ❌ API call failed after 3 retries: BadRequestError the message at position 43 with role 'assistant' must not be empty" >&2
+      printf '%s\n' '❌ Non-retryable client error (HTTP 400). Aborting.' >&2
       printf '{"jsonrpc":"2.0","id":%s,"result":{"stopReason":"end_turn"}}\n' "$id"
       exit 0
       ;;
