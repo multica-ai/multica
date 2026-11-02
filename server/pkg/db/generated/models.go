@@ -341,6 +341,20 @@ type Brief struct {
 	CreatedAt         pgtype.Timestamptz `json:"created_at"`
 }
 
+type BriefDelivery struct {
+	ID            pgtype.UUID        `json:"id"`
+	WorkspaceID   pgtype.UUID        `json:"workspace_id"`
+	BriefID       pgtype.UUID        `json:"brief_id"`
+	MemberID      pgtype.UUID        `json:"member_id"`
+	BindingID     pgtype.UUID        `json:"binding_id"`
+	State         string             `json:"state"`
+	Attempts      int32              `json:"attempts"`
+	NextAttemptAt pgtype.Timestamptz `json:"next_attempt_at"`
+	LastError     string             `json:"last_error"`
+	DeliveredAt   pgtype.Timestamptz `json:"delivered_at"`
+	CreatedAt     pgtype.Timestamptz `json:"created_at"`
+}
+
 type BriefInquiry struct {
 	ID             pgtype.UUID        `json:"id"`
 	WorkspaceID    pgtype.UUID        `json:"workspace_id"`
@@ -353,6 +367,18 @@ type BriefInquiry struct {
 	AnsweredAt     pgtype.Timestamptz `json:"answered_at"`
 	AnswerExcerpt  pgtype.Text        `json:"answer_excerpt"`
 	CreatedAt      pgtype.Timestamptz `json:"created_at"`
+}
+
+type BriefPushPreference struct {
+	ID              pgtype.UUID        `json:"id"`
+	WorkspaceID     pgtype.UUID        `json:"workspace_id"`
+	MemberID        pgtype.UUID        `json:"member_id"`
+	BriefPush       bool               `json:"brief_push"`
+	BindingID       pgtype.UUID        `json:"binding_id"`
+	QuietHoursStart pgtype.Int2        `json:"quiet_hours_start"`
+	QuietHoursEnd   pgtype.Int2        `json:"quiet_hours_end"`
+	CreatedAt       pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt       pgtype.Timestamptz `json:"updated_at"`
 }
 
 type ChannelBindingToken struct {

@@ -389,6 +389,11 @@ var concurrentIndexCleanups = map[string]string{
 	"715_brief_inquiry_pkey_index":                              "brief_inquiry_id_uidx",
 	"717_brief_inquiry_workspace_day_index":                     "idx_brief_inquiry_workspace_asked",
 	"719_squad_attention_pkey_index":                            "squad_attention_squad_uidx",
+	"722_brief_push_preference_pkey_index":                      "brief_push_preference_id_uidx",
+	"724_brief_push_preference_member_index":                    "brief_push_preference_member_uidx",
+	"726_brief_delivery_pkey_index":                             "brief_delivery_id_uidx",
+	"728_brief_delivery_brief_member_index":                     "brief_delivery_brief_member_uidx",
+	"729_brief_delivery_due_index":                              "idx_brief_delivery_state_next_attempt",
 }
 
 // concurrentDownIndexCleanups covers every migration whose down direction

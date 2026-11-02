@@ -1398,6 +1398,16 @@ func (h *Handler) DeleteWorkspace(w http.ResponseWriter, r *http.Request) {
 			run:  func() error { return qtx.DeleteWorkspaceSquadsAndSkills(ctx, requester.WorkspaceID) },
 		},
 		{
+			// Brief pushes and the member preferences behind them carry no
+			// foreign keys, so they are swept explicitly (plan 9.10).
+			name: "delete brief deliveries",
+			run:  func() error { return qtx.DeleteWorkspaceBriefDeliveries(ctx, requester.WorkspaceID) },
+		},
+		{
+			name: "delete brief push preferences",
+			run:  func() error { return qtx.DeleteWorkspaceBriefPushPreferences(ctx, requester.WorkspaceID) },
+		},
+		{
 			name: "delete briefs",
 			run:  func() error { return qtx.DeleteWorkspaceBriefs(ctx, requester.WorkspaceID) },
 		},

@@ -1,0 +1,1 @@
+ALTER TABLE brief_push_preference ADD CONSTRAINT brief_push_preference_pkey PRIMARY KEY USING INDEX brief_push_preference_id_uidx;
