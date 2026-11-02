@@ -5,32 +5,109 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"slices"
+	"strings"
 	"sync"
 	"time"
 )
 
 // piSupplementSession owns one RPC run. A queued reply is not a delivery
 // receipt: steer can race agent_end and stay queued for a future run.
+//
+// Delivery is the user message_start for the exact text Pi queued for this
+// steer. Input handlers may rewrite that text, and the reply does not carry
+// it, so the queued text is attributed from queue_update: Pi appends the
+// post-handler text and announces the full queue before it replies. Pi also
+// dequeues steering by exact message text, so the same match is used here.
 type piSupplementSession struct {
-	stdin   io.WriteCloser
-	writeMu sync.Mutex
-	sendMu  sync.Mutex
-	mu      sync.Mutex
-	active  bool
-	stopped bool
-	settled bool
-	next    uint64
-	pending *piSupplementPending
-	done    chan struct{}
+	stdin    io.WriteCloser
+	writeMu  sync.Mutex
+	sendMu   sync.Mutex
+	mu       sync.Mutex
+	active   bool
+	stopped  bool
+	settled  bool
+	next     uint64
+	steering []string // last queue_update steering snapshot
+	pending  *piSupplementPending
+	done     chan struct{}
 }
 
 type piSupplementPending struct {
-	id       string
-	text     string
-	accepted bool
-	consumed bool
-	ack      chan struct{}
-	result   chan error
+	id   string
+	text string
+	// replied is set by the queued reply; target is then the queued text.
+	replied bool
+	target  string
+	// Evidence observed before the reply, kept so either order correlates.
+	queued  []string // steering entries Pi added while awaiting the reply
+	started []string // user message texts Pi started while awaiting the reply
+	ack     chan struct{}
+	result  chan error
+}
+
+// queuedText returns the text Pi queued for this steer. An unchanged copy of
+// the request is preferred. Otherwise Pi queued a transformed text, which it
+// appends immediately before replying, so the latest addition is this steer's.
+// Runtimes without queue_update fall back to the request text.
+func (p *piSupplementPending) queuedText() string {
+	for _, text := range p.queued {
+		if text == p.text {
+			return text
+		}
+	}
+	if n := len(p.queued); n > 0 {
+		return p.queued[n-1]
+	}
+	return p.text
+}
+
+func (p *piSupplementPending) resolve(err error) {
+	select {
+	case p.result <- err:
+	default:
+	}
+}
+
+// piQueueAdditions returns entries in next that prev does not account for,
+// in queue order. Pi appends new steering and removes consumed entries.
+func piQueueAdditions(prev, next []string) []string {
+	remaining := make(map[string]int, len(prev))
+	for _, text := range prev {
+		remaining[text]++
+	}
+	var added []string
+	for _, text := range next {
+		if remaining[text] > 0 {
+			remaining[text]--
+			continue
+		}
+		added = append(added, text)
+	}
+	return added
+}
+
+// piUserMessageText mirrors Pi's own steering dequeue key: text parts joined
+// without a separator. Content may be a plain string.
+func piUserMessageText(raw json.RawMessage) string {
+	var text string
+	if json.Unmarshal(raw, &text) == nil {
+		return text
+	}
+	var parts []struct {
+		Type string `json:"type"`
+		Text string `json:"text"`
+	}
+	if json.Unmarshal(raw, &parts) != nil {
+		return ""
+	}
+	var b strings.Builder
+	for _, part := range parts {
+		if part.Type == "text" {
+			b.WriteString(part.Text)
+		}
+	}
+	return b.String()
 }
 
 func newPiSupplementSession(stdin io.WriteCloser) *piSupplementSession {
@@ -135,12 +212,10 @@ func (s *piSupplementSession) observe(raw []byte) error {
 		Data    struct {
 			Disposition string `json:"disposition"`
 		} `json:"data"`
-		Message struct {
-			Role    string `json:"role"`
-			Content []struct {
-				Type string `json:"type"`
-				Text string `json:"text"`
-			} `json:"content"`
+		Steering []string `json:"steering"`
+		Message  struct {
+			Role    string          `json:"role"`
+			Content json.RawMessage `json:"content"`
 		} `json:"message"`
 	}
 	if json.Unmarshal(raw, &event) != nil {
@@ -164,57 +239,55 @@ func (s *piSupplementSession) observe(raw []byte) error {
 	if event.Type == "response" && event.ID == "initial-prompt" && event.Command == "prompt" && !event.Success {
 		return fmt.Errorf("pi prompt rejected: %s", event.Error)
 	}
+	// Track the queue even without a pending steer so additions are diffed
+	// against Pi's real state, including extension-injected steering.
+	var queued []string
+	if event.Type == "queue_update" {
+		queued = piQueueAdditions(s.steering, event.Steering)
+		s.steering = slices.Clone(event.Steering)
+	}
 	p := s.pending
 	if p == nil {
 		return nil
 	}
-	if event.Type == "response" && event.ID == p.id && event.Command == "steer" {
+	switch {
+	case event.Type == "queue_update":
+		if !p.replied {
+			p.queued = append(p.queued, queued...)
+		}
+	case event.Type == "response" && event.ID == p.id && event.Command == "steer":
 		if !event.Success {
-			select {
-			case p.result <- fmt.Errorf("pi steer rejected: %s", event.Error):
-			default:
-			}
+			p.resolve(fmt.Errorf("pi steer rejected: %s", event.Error))
 			return nil
 		}
-		if event.Data.Disposition == "handled" {
-			p.consumed = true
-		}
-		p.accepted = event.Data.Disposition == "queued" || event.Data.Disposition == "handled"
-		if p.accepted {
+		switch event.Data.Disposition {
+		case "handled":
+			// An input handler consumed the steer; nothing was queued.
+			p.resolve(nil)
+		case "queued":
+			p.replied = true
+			p.target = p.queuedText()
 			select {
 			case p.ack <- struct{}{}:
 			default:
 			}
-		}
-		if !p.accepted {
-			select {
-			case p.result <- fmt.Errorf("pi steer returned an invalid disposition"):
-			default:
+			if slices.Contains(p.started, p.target) {
+				p.resolve(nil)
 			}
-		}
-	}
-	if event.Type == "message_start" && event.Message.Role == "user" {
-		for _, part := range event.Message.Content {
-			if part.Type != "text" {
-				continue
-			}
-			// Exact text match covers the message-first race before the
-			// steer reply. After accepted (queued/handled), the next user
-			// message_start is consumption evidence even when Pi's input
-			// transform rewrites the steer text — do not require equality
-			// or substring matching. Session has one pending at a time.
-			if part.Text == p.text || p.accepted {
-				p.consumed = true
-				break
-			}
-		}
-	}
-	// A matching user event is stronger evidence than a queued RPC reply.
-	// The runtime may settle before its asynchronous command reply is flushed.
-	if p.consumed {
-		select {
-		case p.result <- nil:
 		default:
+			p.resolve(fmt.Errorf("pi steer returned an invalid disposition"))
+		}
+	case event.Type == "message_start" && event.Message.Role == "user":
+		// Only the queued text proves delivery. Other user messages, such as
+		// the initial prompt or extension-injected input, are not receipts.
+		// Before the reply, only an unchanged copy is conclusive: the latest
+		// queued entry may still be an extension's, with this steer to follow.
+		text := piUserMessageText(event.Message.Content)
+		switch {
+		case p.replied && text == p.target, !p.replied && text == p.text:
+			p.resolve(nil)
+		case !p.replied:
+			p.started = append(p.started, text)
 		}
 	}
 	return nil
