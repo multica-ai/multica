@@ -228,6 +228,30 @@ describe("specialist templates", () => {
 describe("secretary template", () => {
   const secretary = AGENT_INSTRUCTION_TEMPLATES.find((t) => t.id === "secretary")?.instructions ?? "";
 
+  it("reads the boss's feedback before anything else in every run", () => {
+    const feedback = secretary.indexOf("multica brief feedback --recent 14d --json");
+
+    expect(secretary).toContain("At the start of every run");
+    expect(feedback).toBeGreaterThan(-1);
+    expect(feedback).toBeLessThan(secretary.indexOf("multica brief digest --since 24h --json"));
+    expect(feedback).toBeLessThan(secretary.indexOf("Pull, not push:"));
+  });
+
+  it("records standing preferences from feedback in memory", () => {
+    expect(secretary).toContain('"always lead with decisions"');
+    expect(secretary).toContain('"skip floor X"');
+    expect(secretary).toContain("One unexplained \"not useful\" is not a preference");
+    expect(secretary).toContain("Save a preference only when the boss states it");
+    expect(secretary).toContain("or the feedback shows it (see Feedback first)");
+  });
+
+  it("maps each feedback tag to a change in the next brief", () => {
+    for (const tag of ["too_long", "missing_something", "wrong", "too_vague", "not_for_me"]) {
+      expect(secretary).toContain(`"${tag}"`);
+    }
+    expect(secretary).toContain("Do not invent a preference from silence");
+  });
+
   it("reads the company only through the digest, and says so first", () => {
     expect(secretary).toContain("multica brief digest --since 24h --json");
     expect(secretary).toContain("The digest is the only source of company facts");
