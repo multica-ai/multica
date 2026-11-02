@@ -59,6 +59,7 @@ oauth_config:
       - files:read
       - groups:history
       - im:history
+      - im:write
       - mpim:history
       - chat:write
       - reactions:write
@@ -86,7 +87,7 @@ Slack slash command 이름은 workspace 전체에서 공유됩니다. 설치된 
 </Callout>
 
 <Callout type="warning">
-brief 버튼이 나오기 전에 만든 Slack app이라면 **Features → Interactivity & Shortcuts**에서 **Interactivity**를 켜고 (Request URL은 비워 둡니다. Bot이 Socket Mode로 버튼 입력을 받습니다), **Features → Slash Commands**에 `/brief`와 `/decisions`를 추가한 뒤 app을 workspace에 다시 설치하세요. 이 설정이 없으면 brief는 Slack에 도착하지만 버튼이 동작하지 않습니다.
+brief 버튼이 나오기 전에 만든 Slack app이라면 **Features → Interactivity & Shortcuts**에서 **Interactivity**를 켜고 (Request URL은 비워 둡니다. Bot이 Socket Mode로 버튼 입력을 받습니다), **Features → Slash Commands**에 `/brief`와 `/decisions`를 추가하고, **OAuth & Permissions**에서 Bot scope `im:write`를 추가한 뒤 app을 workspace에 다시 설치하세요. 이 설정이 없으면 brief는 Slack에 도착하지만 버튼이 동작하지 않고, brief DM이 거부될 수 있습니다.
 </Callout>
 
 <Callout type="warning">

@@ -59,6 +59,7 @@ oauth_config:
       - files:read
       - groups:history
       - im:history
+      - im:write
       - mpim:history
       - chat:write
       - reactions:write
@@ -86,7 +87,7 @@ Slack slash-command names are workspace-global. If another installed app already
 </Callout>
 
 <Callout type="warning">
-If this Slack app was created before brief buttons were available, turn on **Interactivity** under **Features → Interactivity & Shortcuts** (leave the Request URL empty; the Bot receives button presses over Socket Mode), add the `/brief` and `/decisions` slash commands under **Features → Slash Commands**, and reinstall the app to the workspace. Without these, the brief still arrives in Slack, but its buttons do nothing.
+If this Slack app was created before brief buttons were available, turn on **Interactivity** under **Features → Interactivity & Shortcuts** (leave the Request URL empty; the Bot receives button presses over Socket Mode), add the `/brief` and `/decisions` slash commands under **Features → Slash Commands**, add the `im:write` Bot scope under **OAuth & Permissions**, and reinstall the app to the workspace. Without these, the brief still arrives in Slack, but its buttons do nothing, and a brief DM may be refused.
 </Callout>
 
 <Callout type="warning">
