@@ -394,6 +394,9 @@ var concurrentIndexCleanups = map[string]string{
 	"726_brief_delivery_pkey_index":                             "brief_delivery_id_uidx",
 	"728_brief_delivery_brief_member_index":                     "brief_delivery_brief_member_uidx",
 	"729_brief_delivery_due_index":                              "idx_brief_delivery_state_next_attempt",
+	"731_brief_feedback_pkey_index":                             "brief_feedback_id_uidx",
+	"733_brief_feedback_brief_member_index":                     "brief_feedback_brief_member_uidx",
+	"734_brief_feedback_workspace_updated_index":                "idx_brief_feedback_workspace_updated",
 }
 
 // concurrentDownIndexCleanups covers every migration whose down direction
