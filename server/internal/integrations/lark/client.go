@@ -211,6 +211,7 @@ type DownloadedResourceStream struct {
 // JSON-encoded, msg_type-specific string Lark double-encodes) so the
 // flattener — not the transport client — owns content interpretation.
 type LarkMessage struct {
+	ChatID         string
 	MessageID      string
 	MessageType    string // Lark `msg_type`: text / post / image / merge_forward / …
 	Content        string // raw body.content (a JSON-encoded string)

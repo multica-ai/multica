@@ -630,6 +630,8 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 				patcher.SetTypingIndicatorManager(typingIndicator)
 				h.LarkTyping = typingIndicator
 
+				h.LarkHistory = lark.NewHistory(queries, installSvc, larkClient)
+
 				// Inbound pipeline seams: lark_inbound_audit logger and the
 				// shared channel-agnostic chat-session service. They back the
 				// Feishu ResolverSet that the engine.Router runs through,

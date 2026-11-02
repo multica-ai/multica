@@ -31,6 +31,11 @@ type ChatChannelHistoryReader interface {
 	Thread(ctx context.Context, chatSessionID pgtype.UUID, threadID string, opts channel.HistoryOptions) (channel.HistoryPage, error)
 }
 
+// CurrentChatHistoryReader reads native context for the authenticated task only.
+type CurrentChatHistoryReader interface {
+	Current(context.Context, pgtype.UUID, int) (channel.HistoryPage, string, error)
+}
+
 // ChatChannelHistoryResponse is the unified payload for both commands — the SAME
 // shape no matter which channel backs the session, the agent never sees a
 // per-platform API.
@@ -80,8 +85,8 @@ func (h *Handler) GetChatChannelHistory(w http.ResponseWriter, r *http.Request) 
 // chatMessageHistory reads a chat session's own stored transcript (chat_message)
 // as a channel.HistoryPage, oldest-first, honoring the shared ?limit / ?before
 // paging contract. It backs `multica chat history` for sessions with no IM
-// channel (web chat, Feishu, WeCom, DingTalk), whose history lives only in
-// Multica — there is no platform to read back. It pages through the same
+// channel (web chat, Feishu, WeCom, DingTalk), using the transcript saved in Multica. Native Feishu
+// context is a separate current-scope read through GetChatThread. It pages through the same
 // (created_at, id) cursor the frontend's message list uses, so an agent can walk
 // a long session back without re-reading the recent window each time.
 func (h *Handler) chatMessageHistory(r *http.Request, scope chatHistoryScope) (channel.HistoryPage, error) {
@@ -204,6 +209,28 @@ func (h *Handler) GetChatThread(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	channelType, bindingErr := h.sessionChannelType(r.Context(), scope.sessionID)
+	if bindingErr != nil {
+		writeError(w, http.StatusInternalServerError, "failed to read chat session channel binding")
+		return
+	}
+	if channelType == "feishu" && h.LarkHistory != nil {
+		if r.URL.Query().Get("id") != "" || r.URL.Query().Get("before") != "" {
+			writeError(w, http.StatusBadRequest, "Feishu native history only supports the current conversation without a cursor")
+			return
+		}
+		page, note, err := h.LarkHistory.Current(r.Context(), scope.taskID, parseHistoryLimit(r.URL.Query().Get("limit")))
+		if err != nil {
+			h.respondChatHistory(w, r, scope.sessionID, page, err)
+			return
+		}
+		messages := page.Messages
+		if messages == nil {
+			messages = []channel.HistoryMessage{}
+		}
+		writeJSON(w, http.StatusOK, ChatChannelHistoryResponse{ChannelType: page.ChannelType, ThreadID: page.ThreadID, Messages: messages, Note: note})
+		return
+	}
 	if h.SlackHistory == nil {
 		h.writeNoChannelIntegration(w)
 		return
@@ -224,6 +251,7 @@ func (h *Handler) GetChatThread(w http.ResponseWriter, r *http.Request) {
 // the credential it requires rather than inheriting that guarantee silently
 // from a middleware two layers away.
 type chatHistoryScope struct {
+	taskID          pgtype.UUID
 	sessionID       pgtype.UUID
 	contextRevision pgtype.Int8
 	historyStart    string
@@ -278,7 +306,7 @@ func (h *Handler) chatHistorySession(w http.ResponseWriter, r *http.Request) (ch
 		writeError(w, http.StatusForbidden, "chat session does not belong to this workspace")
 		return chatHistoryScope{}, false
 	}
-	scope := chatHistoryScope{sessionID: task.ChatSessionID, contextRevision: task.ChannelContextRevision}
+	scope := chatHistoryScope{taskID: task.ID, sessionID: task.ChatSessionID, contextRevision: task.ChannelContextRevision}
 	if task.ChannelContextRevision.Valid {
 		generation, err := h.Queries.GetChannelChatContextGeneration(r.Context(), db.GetChannelChatContextGenerationParams{
 			ChatSessionID: task.ChatSessionID, Revision: task.ChannelContextRevision.Int64,
