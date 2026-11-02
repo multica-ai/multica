@@ -131,3 +131,100 @@ function contextBoolean(app: App, key: string, fallback: boolean): boolean {
   // `-c natGateway=true` arrives as the string "true".
   return value === true || value === 'true' || value === '1';
 }
+
+/**
+ * Configuration for the self-hosted Multica server.
+ *
+ * This is the stack that runs Multica itself — the Go backend, the Next.js
+ * web app and PostgreSQL — from the repository's own
+ * `docker-compose.selfhost.yml`, behind Caddy on a fixed public IP. All issue,
+ * agent and run data lives in the PostgreSQL volume this stack creates, in
+ * this AWS account.
+ */
+export interface SelfHostConfig {
+  instanceType: string;
+  /** Root volume in GiB: OS plus the three container images. */
+  rootVolumeSizeGb: number;
+  /** PostgreSQL volume in GiB. A separate volume, retained on stack delete. */
+  dataVolumeSizeGb: number;
+  /** Daily snapshots of the data volume to keep. */
+  snapshotRetentionDays: number;
+  /**
+   * Public hostname. Empty means derive it from the Elastic IP through
+   * sslip.io, which resolves <ip>.sslip.io to <ip> and so lets Caddy issue a
+   * real certificate without owning a domain.
+   */
+  domainName: string;
+  /** Multica image tag from GHCR. */
+  imageTag: string;
+  /** Who may create an account. Required: this host is on the open internet. */
+  allowedEmails: string;
+  /**
+   * First-party deployment telemetry to telemetry.multica.ai. Off by default:
+   * a self-host exists so the data stays here.
+   */
+  telemetry: boolean;
+  parameterPrefix: string;
+  logRetentionDays: number;
+  caddyVersion: string;
+  composeVersion: string;
+}
+
+const selfHostDefaults: SelfHostConfig = {
+  instanceType: 't4g.medium',
+  rootVolumeSizeGb: 30,
+  dataVolumeSizeGb: 20,
+  snapshotRetentionDays: 7,
+  domainName: '',
+  imageTag: 'latest',
+  allowedEmails: '',
+  telemetry: false,
+  parameterPrefix: '/multica/self-host',
+  logRetentionDays: 14,
+  caddyVersion: '2.10.0',
+  composeVersion: 'v2.32.4',
+};
+
+export function resolveSelfHostConfig(app: App): SelfHostConfig {
+  const config: SelfHostConfig = {
+    instanceType: contextString(app, 'selfHostInstanceType', selfHostDefaults.instanceType),
+    rootVolumeSizeGb: contextNumber(app, 'rootVolumeSizeGb', selfHostDefaults.rootVolumeSizeGb),
+    dataVolumeSizeGb: contextNumber(app, 'dataVolumeSizeGb', selfHostDefaults.dataVolumeSizeGb),
+    snapshotRetentionDays: contextNumber(app, 'snapshotRetentionDays', selfHostDefaults.snapshotRetentionDays),
+    domainName: contextString(app, 'domainName', selfHostDefaults.domainName),
+    imageTag: contextString(app, 'imageTag', selfHostDefaults.imageTag),
+    allowedEmails: contextString(app, 'allowedEmails', selfHostDefaults.allowedEmails),
+    telemetry: contextBoolean(app, 'telemetry', selfHostDefaults.telemetry),
+    parameterPrefix: contextString(app, 'selfHostParameterPrefix', selfHostDefaults.parameterPrefix),
+    logRetentionDays: contextNumber(app, 'logRetentionDays', selfHostDefaults.logRetentionDays),
+    caddyVersion: contextString(app, 'caddyVersion', selfHostDefaults.caddyVersion),
+    composeVersion: contextString(app, 'composeVersion', selfHostDefaults.composeVersion),
+  };
+
+  const family = config.instanceType.split('.')[0] ?? '';
+  if (!GRAVITON_FAMILY.test(family)) {
+    throw new Error(
+      `selfHostInstanceType ${config.instanceType} is not a Graviton (arm64) type; the machine image is arm64.`,
+    );
+  }
+  // Port 443 is open to the internet, so an open signup form would let anyone
+  // who finds the URL create an account in the workspace.
+  if (!config.allowedEmails.trim()) {
+    throw new Error(
+      'allowedEmails is required: this server is reachable from the internet, and without an allowlist anyone who finds the URL can sign up. Pass -c allowedEmails=you@example.com,teammate@example.com',
+    );
+  }
+  if (config.domainName && !/^[a-z0-9.-]+$/i.test(config.domainName)) {
+    throw new Error(`domainName ${config.domainName} is not a hostname`);
+  }
+  if (!config.parameterPrefix.startsWith('/') || config.parameterPrefix.endsWith('/')) {
+    throw new Error(`selfHostParameterPrefix must start with "/" and not end with one, got ${config.parameterPrefix}`);
+  }
+  if (config.rootVolumeSizeGb < 20) {
+    throw new Error(`rootVolumeSizeGb must be at least 20, got ${config.rootVolumeSizeGb}`);
+  }
+  if (config.dataVolumeSizeGb < 10) {
+    throw new Error(`dataVolumeSizeGb must be at least 10, got ${config.dataVolumeSizeGb}`);
+  }
+  return config;
+}
