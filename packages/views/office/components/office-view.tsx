@@ -28,6 +28,7 @@ import { OfficeCanvas, type WorkerSession } from "./office-canvas";
 import { OfficeBoardButton } from "./office-board-button";
 import { OfficeBoardDialog } from "./office-board-dialog";
 import { OfficeBriefButton } from "./office-brief-button";
+import { OfficeSetupCard } from "./office-setup-card";
 import { OfficeRoomOverlays } from "./office-room-overlays";
 import { OfficeSeatBanner, OfficeUnseatedTray } from "./office-unseated-tray";
 import { OfficeSquadPanel } from "./office-squad-panel";
@@ -200,6 +201,7 @@ function OfficeScene({ issues, visibleStatuses, projectId }: BoardViewProps) {
       {canManage && layout.unseatedSquads.length > 0 ? (
         <OfficeSeatBanner count={layout.unseatedSquads.length} pending={seating} onSeatAll={seatAll} />
       ) : null}
+      <OfficeSetupCard />
       {firstRun ? (
         <OfficeFirstRun />
       ) : (
