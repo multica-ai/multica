@@ -58,7 +58,6 @@
     "zustand": "catalog:"
   },
   "devDependencies": {
-    "@typescript/native": "catalog:",
     "@electron-toolkit/tsconfig": "^2.0.0",
     "@multica/eslint-config": "workspace:*",
     "@multica/tsconfig": "workspace:*",
@@ -68,6 +67,7 @@
     "@types/node": "catalog:",
     "@types/react": "catalog:",
     "@types/react-dom": "catalog:",
+    "@typescript/native": "catalog:",
     "@vitejs/plugin-react": "^5.1.1",
     "electron": "^44.9.3",
     "electron-builder": "^26.0.12",

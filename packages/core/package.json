@@ -194,11 +194,11 @@
     "react": "catalog:"
   },
   "devDependencies": {
-    "@typescript/native": "catalog:",
     "@multica/eslint-config": "workspace:*",
     "@multica/tsconfig": "workspace:*",
     "@testing-library/react": "catalog:",
     "@types/react": "catalog:",
+    "@typescript/native": "catalog:",
     "jsdom": "catalog:",
     "react": "catalog:",
     "react-dom": "catalog:",

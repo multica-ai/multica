@@ -65,7 +65,6 @@
     "react-i18next": "catalog:"
   },
   "devDependencies": {
-    "@typescript/native": "catalog:",
     "@multica/eslint-config": "workspace:*",
     "@multica/tsconfig": "workspace:*",
     "@testing-library/jest-dom": "catalog:",
@@ -73,6 +72,7 @@
     "@types/linkify-it": "^5.0.0",
     "@types/react": "catalog:",
     "@types/react-dom": "catalog:",
+    "@typescript/native": "catalog:",
     "@vitejs/plugin-react": "catalog:",
     "esbuild": "^0.25.12",
     "jsdom": "catalog:",

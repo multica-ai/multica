@@ -55,6 +55,9 @@ compiler explicitly. Keep both dependencies when updating the toolchain;
 replacing the API package with TypeScript 7 breaks API consumers. Editors can
 continue using TypeScript 6 or opt into their TypeScript 7 language server.
 Mobile keeps its own TypeScript dependency.
+When removing TS6 compatibility, update the `typescript` peer range in
+`packages/eslint-config/package.json` together with TypeScript API support in
+`typescript-eslint`.
 
 ## Important Rules
 
