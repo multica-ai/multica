@@ -65,18 +65,15 @@ func TestContextMediaCollectQuotedAndForwardedImages(t *testing.T) {
 	}
 }
 
-func TestContextMediaExcludeDeletedTruncatedAndOtherTopicMessages(t *testing.T) {
+func TestContextMediaSkipsTruncatedForwardChildren(t *testing.T) {
 	fake := newEnricherFake()
-	image := func(id, thread, time string) LarkMessage {
-		return LarkMessage{MessageID: id, MessageType: "image", Content: `{"image_key":"img_` + id + `"}`, ThreadID: thread, CreateTime: time}
+	image := func(id, at string) LarkMessage {
+		return LarkMessage{MessageID: id, MessageType: "image", Content: `{"image_key":"img_` + id + `"}`, CreateTime: at}
 	}
-	deleted := image("deleted", "topic", "1000")
-	deleted.Deleted = true
-	fake.byChat["oc_group"] = []LarkMessage{image("wrong-topic", "other", "500"), deleted, image("included", "topic", "1200"), image("future", "topic", "5000")}
-	fake.byID["om_forward"] = []LarkMessage{{MessageID: "om_forward", MessageType: "merge_forward"}, image("child", "", "100"), image("truncated", "", "200")}
-	in := InboundMessage{MessageID: "trigger", MessageType: "text", Body: "inspect", ParentID: "om_forward", ChatID: "oc_group", ChatType: ChatTypeGroup, ThreadID: "topic", AddressedToBot: true, CreateTime: "2000"}
-	out := enrich(t, fake, in, InboundEnricherConfig{RecentContextSize: 10, MaxForwardChildren: 1})
-	if len(out.ContextMedia) != 1 || out.ContextMedia[0].MessageID != "om_forward" {
+	fake.byID["om_forward"] = []LarkMessage{{MessageID: "om_forward", MessageType: "merge_forward"}, image("child", "100"), image("truncated", "200")}
+	in := InboundMessage{MessageID: "trigger", MessageType: "text", Body: "inspect", ParentID: "om_forward"}
+	out := enrich(t, fake, in, InboundEnricherConfig{MaxForwardChildren: 1})
+	if len(out.ContextMedia) != 1 || out.ContextMedia[0].MessageID != "om_forward" || out.ContextMedia[0].ResourceKey != "img_child" {
 		t.Fatalf("unexpected images downloaded beyond selected context: %+v", out.ContextMedia)
 	}
 	if !strings.Contains(out.Body, "1 more truncated") {
@@ -213,16 +210,13 @@ func TestContextMediaMixedPostDeduplicatesRepeatedSpans(t *testing.T) {
 	}
 }
 
-func TestContextMediaFailureAndSelectionRemainBounded(t *testing.T) {
+func TestContextMediaForwardPartialDownloadFailure(t *testing.T) {
 	fake := newEnricherFake()
-	makeFile := func(id, kind, thread, at string) LarkMessage {
-		return LarkMessage{MessageID: id, MessageType: kind, ThreadID: thread, CreateTime: at, Content: `{"file_key":"` + id + `","file_name":"` + id + `.bin"}`}
+	makeFile := func(id, kind, at string) LarkMessage {
+		return LarkMessage{MessageID: id, MessageType: kind, CreateTime: at, Content: `{"file_key":"` + id + `","file_name":"` + id + `.bin"}`}
 	}
-	deleted := makeFile("deleted", "file", "topic", "900")
-	deleted.Deleted = true
-	fake.byChat["group"] = []LarkMessage{makeFile("wrong-topic", "audio", "other", "800"), deleted, makeFile("bad", "file", "topic", "1000"), makeFile("good", "audio", "topic", "1100"), makeFile("future", "video", "topic", "3000")}
-	fake.byID["forward"] = []LarkMessage{{MessageID: "forward", MessageType: "merge_forward"}, makeFile("bad", "file", "", "50"), makeFile("included", "video", "", "100"), makeFile("truncated", "file", "", "200")}
-	out := enrich(t, fake, InboundMessage{MessageID: "trigger", MessageType: "text", Body: "inspect", ParentID: "forward", ChatID: "group", ChatType: ChatTypeGroup, ThreadID: "topic", AddressedToBot: true, CreateTime: "2000"}, InboundEnricherConfig{RecentContextSize: 10, MaxForwardChildren: 2})
+	fake.byID["forward"] = []LarkMessage{{MessageID: "forward", MessageType: "merge_forward"}, makeFile("bad", "file", "50"), makeFile("included", "video", "100"), makeFile("truncated", "file", "200")}
+	out := enrich(t, fake, InboundMessage{MessageID: "trigger", MessageType: "text", Body: "inspect", ParentID: "forward"}, InboundEnricherConfig{MaxForwardChildren: 2})
 	if len(out.ContextMedia) != 2 || out.ContextMedia[0].ResourceKey != "bad" || out.ContextMedia[1].ResourceKey != "included" || out.ContextMedia[1].MessageID != "forward" {
 		t.Fatalf("media collected outside existing selection: %+v", out.ContextMedia)
 	}

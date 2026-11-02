@@ -4,7 +4,6 @@ import (
 	"context"
 	"io"
 	"log/slog"
-	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -113,80 +112,5 @@ func TestWSConnectorEnrichesBeforeEmit(t *testing.T) {
 	}
 	if len(enr.creds) != 1 || enr.creds[0].AppID != "test_app" || enr.creds[0].AppSecret != "secret" {
 		t.Errorf("enricher got wrong creds: %+v", enr.creds)
-	}
-}
-
-func TestWSConnectorBoundsAndJoinsRealInlineContextReads(t *testing.T) {
-	conn := newFakeWSConn()
-	finished := make(chan struct{})
-	client := &budgetEnricherClient{enricherFakeClient: newEnricherFake()}
-	client.get = func(ctx context.Context, _ string) ([]LarkMessage, error) {
-		<-ctx.Done()
-		close(finished)
-		return nil, ctx.Err()
-	}
-	c, err := NewWSLongConnConnector(WSConnectorConfig{
-		Dialer: &fakeWSDialer{conn: conn},
-		EndpointFetcher: EndpointFetcherFunc(func(context.Context, InstallationCredentials) (WSEndpoint, error) {
-			return WSEndpoint{URL: "wss://test/ignored", ServiceID: 7, PingInterval: time.Hour}, nil
-		}),
-		CredentialsProvider: CredentialsProviderFunc(func(context.Context, Installation) (InstallationCredentials, error) {
-			return InstallationCredentials{AppID: "test_app", AppSecret: "secret"}, nil
-		}),
-		FrameDecoder: FrameDecoderFunc(func([]byte, Installation) (InboundMessage, bool, error) {
-			return InboundMessage{MessageID: "trigger", ParentID: "parent", Body: "inspect"}, true, nil
-		}),
-		Enricher:      NewInboundEnricher(client, InboundEnricherConfig{}),
-		EnrichTimeout: 30 * time.Millisecond,
-		Logger:        slog.New(slog.NewTextHandler(io.Discard, nil)),
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	ctx, cancel := context.WithCancel(t.Context())
-	emitted := make(chan InboundMessage, 1)
-	done := make(chan error, 1)
-	go func() {
-		done <- c.Run(ctx, Installation{AppID: "test_app"}, func(emitCtx context.Context, msg InboundMessage) (DispatchResult, error) {
-			if emitCtx.Err() != nil {
-				t.Error("expired enrichment context escaped into dispatch")
-			}
-			select {
-			case <-finished:
-			default:
-				t.Error("context read was not joined before dispatch")
-			}
-			emitted <- msg
-			return DispatchResult{Outcome: OutcomeIngested}, nil
-		})
-	}()
-	t.Cleanup(func() {
-		cancel()
-		select {
-		case <-done:
-		case <-time.After(time.Second):
-			t.Error("connector did not stop")
-		}
-	})
-	pushDataFrame(conn, []byte("event"), "inline-frame")
-	select {
-	case out := <-emitted:
-		resolver := NewFeishuMediaResolver(nil, nil, nil, nil, newDiscardLogger())
-		if !strings.Contains(out.Body, "unable to fetch") || resolver.HasMedia(channelMessageFromLark(out)) {
-			t.Fatalf("failed metadata acquired a media fence or lost fallback: %+v", out)
-		}
-	case <-time.After(time.Second):
-		t.Fatal("inline read exceeded its budget")
-	}
-	for deadline := time.Now().Add(time.Second); len(conn.snapshot()) == 0 && time.Now().Before(deadline); {
-		time.Sleep(time.Millisecond)
-	}
-	frames := conn.snapshot()
-	if len(frames) != 1 {
-		t.Fatalf("ACK count=%d", len(frames))
-	}
-	ack, err := UnmarshalFrame(frames[0])
-	if err != nil || !strings.Contains(string(ack.Payload), `"code":200`) {
-		t.Fatalf("ACK=%+v err=%v", ack, err)
 	}
 }

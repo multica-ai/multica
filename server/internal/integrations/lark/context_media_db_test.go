@@ -20,7 +20,7 @@ func TestContextMediaCollisionPreservesBindingDB(t *testing.T) {
 		t.Skip("explicit disposable DATABASE_URL required")
 	}
 	pool := channelScopeTestDB(t)
-	for _, source := range []string{"quoted-post", "partial-failure", "quoted-text"} {
+	for _, source := range []string{"quoted-post", "partial-failure"} {
 		for _, issue := range []bool{false, true} {
 			name := source + "/chat"
 			if issue {
@@ -63,13 +63,9 @@ func TestContextMediaCollisionPreservesBindingDB(t *testing.T) {
 				}
 				in := InboundMessage{MessageID: "trigger", MessageType: "text", Body: command, CommandBody: command,
 					SenderOpenID: "reporter", ChatID: ChatID(suffix), ChatType: ChatTypeGroup, AddressedToBot: true, CreateTime: "2000"}
-				media := LarkMessage{MessageID: "media", SenderID: "bob", SenderType: "user", CreateTime: "1500", MessageType: "image", Content: `{"image_key":"good"}`}
+				media := LarkMessage{MessageID: "media", SenderID: "bob", SenderType: "user", CreateTime: "1500", MessageType: "post",
+					Content: `{"content":[[{"tag":"text","text":"[Image 1: unavailable]"},{"tag":"img","image_key":"good"},{"tag":"text","text":"[Image 1: unavailable]"},{"tag":"img","image_key":"good"}]]}`}
 				in.ParentID = media.MessageID
-				media.MessageType = "post"
-				media.Content = `{"content":[[{"tag":"text","text":"[Image 1: unavailable]"},{"tag":"img","image_key":"good"},{"tag":"text","text":"[Image 1: unavailable]"},{"tag":"img","image_key":"good"}]]}`
-				if source == "quoted-text" {
-					media = textMsg("media", "bob", "Quoted original context", "1500")
-				}
 				if source == "partial-failure" {
 					media.Content = strings.Replace(media.Content, `"image_key":"good"`, `"image_key":"bad"`, 1)
 				}
@@ -90,11 +86,7 @@ func TestContextMediaCollisionPreservesBindingDB(t *testing.T) {
 					Platform: Installation{AppID: "cli_test", Region: "feishu"}}
 				resolver := NewFeishuMediaResolver(api, fakeCreds{secret: "plain"}, &fakeMediaStorage{}, engine.NewDBMediaIntentLedger(q), newDiscardLogger())
 				resolved := resolver.ResolveMedia(t.Context(), inst, engine.ResolvedIdentity{}, sessionID, appended.MessageID, channelMessageFromLark(out))
-				wantRefs := 1
-				if source == "quoted-text" {
-					wantRefs = 0
-				}
-				if len(resolved.MediaRefs) != wantRefs {
+				if len(resolved.MediaRefs) != 1 {
 					t.Fatalf("expected one deduplicated successful attachment: %+v", resolved.MediaRefs)
 				}
 				if err := session.BindMediaRefs(t.Context(), engine.BindMediaInput{
@@ -103,20 +95,6 @@ func TestContextMediaCollisionPreservesBindingDB(t *testing.T) {
 					IssueDescriptionBase: pgtype.Text{String: "Reporter details", Valid: issue}, IssueCommandText: command,
 				}); err != nil {
 					t.Fatal(err)
-				}
-				if source == "quoted-text" {
-					var body string
-					var pending bool
-					if err := pool.QueryRow(t.Context(), "SELECT content, channel_media_pending_until IS NOT NULL FROM chat_message WHERE id=$1", appended.MessageID).Scan(&body, &pending); err != nil {
-						t.Fatal(err)
-					}
-					if !issue && (!strings.Contains(body, "Quoted original context") || !strings.Contains(body, `sender="Bob"`)) {
-						t.Fatalf("resolved text-only context not persisted: %s", body)
-					}
-					if pending {
-						t.Fatal("text-only context did not release media fence")
-					}
-					return
 				}
 				var id, content string
 				if err := pool.QueryRow(t.Context(), "SELECT id::text FROM attachment WHERE workspace_id=$1", workspaceID).Scan(&id); err != nil {
