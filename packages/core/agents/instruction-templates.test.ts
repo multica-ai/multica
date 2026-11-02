@@ -261,9 +261,16 @@ describe("secretary template", () => {
     expect(secretary).toContain("the language of your autopilot's description");
   });
 
-  it("caps inquiries at three per brief and asks only through a comment mention", () => {
-    expect(secretary).toContain("At most three inquiries per brief");
-    expect(secretary).toContain("comment on the flagged issue and mention the squad leader");
+  it("asks leaders only with multica brief ask, under the daily cap", () => {
+    expect(secretary).toContain("multica brief ask --squad <squad-id> --issue <issue-id>");
+    expect(secretary).toContain("At most three inquiries per workspace per UTC day");
+    expect(secretary).toContain("inquiry_limit");
+    expect(secretary).toContain("Do not ask with a raw comment");
+  });
+
+  it("reads the answer from the digest's inquiries, not from the issue", () => {
+    expect(secretary).toContain("`inquiries`");
+    expect(secretary).toContain("`answer_excerpt`");
   });
 
   it("states the authority table: no decisions, no status or assignee changes, no deletes", () => {
