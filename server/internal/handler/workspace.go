@@ -1366,6 +1366,10 @@ func (h *Handler) DeleteWorkspace(w http.ResponseWriter, r *http.Request) {
 			},
 		},
 		{
+			name: "delete squad routines",
+			run:  func() error { return qtx.DeleteWorkspaceSquadRoutines(ctx, requester.WorkspaceID) },
+		},
+		{
 			name: "delete autopilot children",
 			run:  func() error { return qtx.DeleteWorkspaceAutopilotChildren(ctx, requester.WorkspaceID) },
 		},
@@ -1380,6 +1384,10 @@ func (h *Handler) DeleteWorkspace(w http.ResponseWriter, r *http.Request) {
 		{
 			name: "delete integrations",
 			run:  func() error { return qtx.DeleteWorkspaceConnections(ctx, requester.WorkspaceID) },
+		},
+		{
+			name: "delete squad charters",
+			run:  func() error { return qtx.DeleteWorkspaceSquadCharters(ctx, requester.WorkspaceID) },
 		},
 		{
 			name: "delete squads and skills",

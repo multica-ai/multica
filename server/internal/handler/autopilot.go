@@ -1380,6 +1380,15 @@ func (h *Handler) DeleteAutopilot(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "failed to delete autopilot")
 		return
 	}
+	// A squad routine is an autopilot plus its link row; the link is unlinked
+	// here, since squad_routine has no foreign key to cascade from.
+	if _, err := qtx.DeleteSquadRoutinesForAutopilot(r.Context(), db.DeleteSquadRoutinesForAutopilotParams{
+		AutopilotID: idUUID,
+		WorkspaceID: wsUUID,
+	}); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to delete autopilot")
+		return
+	}
 	ap.Status = "archived" // reflect the post-archive state in the version snapshot
 	if err := h.recordAutopilotRuleVersion(r.Context(), qtx, ap, "member", actor.UserID); err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to delete autopilot")
