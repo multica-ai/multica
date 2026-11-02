@@ -8972,7 +8972,7 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		}
 		freshPrompt := BuildPrompt(task, provider, promptOptions...)
 
-		retryResult, retryTools, retryErr := d.executeAndDrain(ctx, backend, freshPrompt, execOpts, taskLog, task.ID, env.CodexHome, &msgSeq)
+		retryResult, retryTools, retryErr := d.executeAndDrain(ctx, backend, freshPrompt, withPriorTaskUsage(execOpts, firstUsage), taskLog, task.ID, env.CodexHome, &msgSeq)
 		if retryErr != nil {
 			taskLog.Error("fresh session also failed to start; keeping the original poisoned result", "error", retryErr)
 		} else if retryResult.Status != "completed" && retryResult.SessionID == "" {
@@ -9422,7 +9422,7 @@ func (d *Daemon) repairWorktreeDelivery(ctx context.Context, backend agent.Backe
 	taskLog.Warn("local_directory: worktree delivery would be refused; asking the agent to repair it",
 		"branch", problem.Branch, "base", problem.BaseCommit, "tip", problem.Tip, "reason", problem.Reason)
 
-	opts := execOpts
+	opts := withPriorTaskUsage(execOpts, result.Usage)
 	// Continue the conversation when there is one, so the agent knows what it
 	// just did; the prompt is self-contained for the backends that cannot.
 	opts.ResumeSessionID = result.SessionID
@@ -9515,6 +9515,15 @@ func freshSessionMayHelp(errText string) bool {
 	}
 }
 
+// withPriorTaskUsage keeps retries and repair turns on the same task-wide total
+// as the terminal report, even though each backend execution starts at zero.
+func withPriorTaskUsage(opts agent.ExecOptions, prior map[string]agent.TokenUsage) agent.ExecOptions {
+	if report := opts.OnUsage; report != nil && len(prior) > 0 {
+		opts.OnUsage = func(usage map[string]agent.TokenUsage) { report(mergeUsage(prior, usage)) }
+	}
+	return opts
+}
+
 // taskUsageEntries converts a backend's per-model usage map into the rows the
 // server upserts. A model whose buckets are all zero is skipped rather than
 // written as 0: an unreported run keeps its cost NULL server-side, which is what
@@ -9535,6 +9544,8 @@ func taskUsageEntries(provider string, usage map[string]agent.TokenUsage) []Task
 			CostUSDTicks:     u.CostUSDTicks,
 		})
 	}
+	// Stable ordering lets the flush compare snapshots across map iterations.
+	sort.Slice(entries, func(i, j int) bool { return entries[i].Model < entries[j].Model })
 	return entries
 }
 
@@ -9553,7 +9564,9 @@ const liveUsageFlushEvery = 30 * time.Second
 // before the terminal report is made.
 func (d *Daemon) startUsageFlush(ctx context.Context, taskID string, live *atomic.Value, taskLog *slog.Logger) (stop func()) {
 	done := make(chan struct{})
+	stopped := make(chan struct{})
 	go func() {
+		defer close(stopped)
 		ticker := time.NewTicker(liveUsageFlushEvery)
 		defer ticker.Stop()
 		var reported string
@@ -9564,6 +9577,13 @@ func (d *Daemon) startUsageFlush(ctx context.Context, taskID string, live *atomi
 			case <-ctx.Done():
 				return
 			case <-ticker.C:
+				select {
+				case <-done:
+					return
+				case <-ctx.Done():
+					return
+				default:
+				}
 				entries, _ := live.Load().([]TaskUsageEntry)
 				if len(entries) == 0 {
 					continue
@@ -9574,7 +9594,9 @@ func (d *Daemon) startUsageFlush(ctx context.Context, taskID string, live *atomi
 				if key == reported {
 					continue
 				}
-				if err := d.client.ReportTaskUsageSnapshot(ctx, taskID, entries); err != nil {
+				// Preserve ordering with the terminal report even when the run is
+				// cancelled. The HTTP timeout still bounds an in-flight request.
+				if err := d.client.ReportTaskUsageSnapshot(context.WithoutCancel(ctx), taskID, entries); err != nil {
 					// Not fatal — the terminal report carries the run's usage
 					// again if a flush is lost.
 					taskLog.Warn("live usage flush failed", "error", err)
@@ -9584,7 +9606,13 @@ func (d *Daemon) startUsageFlush(ctx context.Context, taskID string, live *atomi
 			}
 		}
 	}()
-	return func() { close(done) }
+	return sync.OnceFunc(func() {
+		close(done)
+		// Let an in-flight POST finish before the terminal overwrite. Cancelling
+		// only the client request can return before the server finishes writing.
+		// The control-plane HTTP client's timeout bounds this wait.
+		<-stopped
+	})
 }
 
 // executeAndDrain runs a backend, drains its message stream (forwarding to the
