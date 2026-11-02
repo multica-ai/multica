@@ -147,6 +147,17 @@ type ExecOptions struct {
 	// EnableTaskSupplement, to accept additional messages; other providers
 	// ignore it.
 	CursorHookCommand []string
+	// OnUsage optionally receives the backend's cumulative usage snapshot while
+	// the run is still live, keyed exactly like Result.Usage so a mid-run flush
+	// and the terminal report upsert the same (task, provider, model) rows
+	// instead of adding a second row the rollup would charge twice. Backends
+	// that cannot meter mid-run never call it.
+	//
+	// The callback runs on the backend's protocol reader goroutine and MUST NOT
+	// block: a daemon that reports from here holds the agent's stdout open and
+	// can trip its idle watchdog. Take the snapshot and report on your own
+	// goroutine.
+	OnUsage func(map[string]TokenUsage)
 	// piMcpExtensionPath is set by piBackend.Execute after it writes the
 	// temporary MCP extension. The daemon does not fill it.
 	piMcpExtensionPath string
