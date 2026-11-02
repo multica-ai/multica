@@ -218,3 +218,12 @@ LEFT JOIN LATERAL (
 WHERE r.workspace_id = sqlc.arg('workspace_id')::uuid
   AND (sqlc.narg('squad_id')::uuid IS NULL OR r.squad_id = sqlc.narg('squad_id')::uuid)
 ORDER BY r.created_at ASC, r.autopilot_id ASC;
+
+-- name: GetOperatingReviewRoutine :one
+-- A squad's operating review is the routine whose purpose is the reserved review
+-- purpose. Purpose cannot be edited after a routine is created, and creating a
+-- routine with that purpose is refused, so the purpose identifies the review.
+SELECT * FROM squad_routine
+WHERE squad_id = $1 AND workspace_id = $2 AND purpose = $3
+ORDER BY created_at ASC
+LIMIT 1;

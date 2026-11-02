@@ -235,6 +235,10 @@ func (h *Handler) CreateSquadRoutine(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "purpose must be 1 to 200 characters")
 		return
 	}
+	if purpose == service.OperatingReviewPurpose {
+		writeError(w, http.StatusBadRequest, "that purpose is reserved for the squad's operating review")
+		return
+	}
 	expectedOutput := routineDefaultOutput
 	if req.ExpectedOutput != nil {
 		expectedOutput = *req.ExpectedOutput
@@ -378,37 +382,18 @@ func (h *Handler) createSquadRoutineAutopilot(w http.ResponseWriter, r *http.Req
 	if !h.validateAutopilotAssigneeForSave(w, r, qtx, "squad", squad.ID, squad.WorkspaceID, true) {
 		return
 	}
-	ap, err := qtx.CreateAutopilot(r.Context(), db.CreateAutopilotParams{
-		WorkspaceID:   squad.WorkspaceID,
-		Title:         fields.purpose,
-		AssigneeType:  "squad",
-		AssigneeID:    squad.ID,
-		Status:        "active",
-		ExecutionMode: "create_issue",
-		CreatedByType: "member",
-		CreatedByID:   actor.UserID,
-		Description:   ptrToText(req.Description),
+	ap, err := service.CreateSquadScheduledAutopilot(r.Context(), qtx, service.SquadScheduledAutopilot{
+		WorkspaceID: squad.WorkspaceID,
+		SquadID:     squad.ID,
+		ActorUserID: actor.UserID,
+		Title:       fields.purpose,
+		Description: ptrToText(req.Description),
+		Status:      "active",
+		Cron:        cron,
+		Timezone:    timezone,
+		NextRun:     nextRun,
 	})
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "failed to create routine")
-		return
-	}
-	if err := h.recordAutopilotRuleVersion(r.Context(), qtx, ap, "member", actor.UserID); err != nil {
-		writeError(w, http.StatusInternalServerError, "failed to create routine")
-		return
-	}
-	if _, err := qtx.CreateAutopilotTrigger(r.Context(), db.CreateAutopilotTriggerParams{
-		AutopilotID:     ap.ID,
-		Kind:            "schedule",
-		Enabled:         true,
-		CronExpression:  pgtype.Text{String: cron, Valid: true},
-		Timezone:        pgtype.Text{String: timezone, Valid: true},
-		NextRunAt:       pgtype.Timestamptz{Time: nextRun, Valid: true},
-		PublishedByType: pgtype.Text{String: "member", Valid: true},
-		PublishedByID:   actor.UserID,
-		CreatedByType:   pgtype.Text{String: "member", Valid: true},
-		CreatedByID:     actor.UserID,
-	}); err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to create routine")
 		return
 	}

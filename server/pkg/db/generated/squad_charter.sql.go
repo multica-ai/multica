@@ -69,6 +69,38 @@ func (q *Queries) DeleteWorkspaceSquadRoutines(ctx context.Context, workspaceID 
 	return err
 }
 
+const getOperatingReviewRoutine = `-- name: GetOperatingReviewRoutine :one
+SELECT autopilot_id, workspace_id, squad_id, purpose, expected_output, required, grace_hours, created_at FROM squad_routine
+WHERE squad_id = $1 AND workspace_id = $2 AND purpose = $3
+ORDER BY created_at ASC
+LIMIT 1
+`
+
+type GetOperatingReviewRoutineParams struct {
+	SquadID     pgtype.UUID `json:"squad_id"`
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
+	Purpose     string      `json:"purpose"`
+}
+
+// A squad's operating review is the routine whose purpose is the reserved review
+// purpose. Purpose cannot be edited after a routine is created, and creating a
+// routine with that purpose is refused, so the purpose identifies the review.
+func (q *Queries) GetOperatingReviewRoutine(ctx context.Context, arg GetOperatingReviewRoutineParams) (SquadRoutine, error) {
+	row := q.db.QueryRow(ctx, getOperatingReviewRoutine, arg.SquadID, arg.WorkspaceID, arg.Purpose)
+	var i SquadRoutine
+	err := row.Scan(
+		&i.AutopilotID,
+		&i.WorkspaceID,
+		&i.SquadID,
+		&i.Purpose,
+		&i.ExpectedOutput,
+		&i.Required,
+		&i.GraceHours,
+		&i.CreatedAt,
+	)
+	return i, err
+}
+
 const getSquadCharter = `-- name: GetSquadCharter :one
 
 SELECT squad_id, workspace_id, mission, responsibilities, outputs, boundaries, escalation, intake, response_hours, operating_review_enabled, revision, updated_by_type, updated_by_id, updated_at FROM squad_charter

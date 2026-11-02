@@ -7,7 +7,9 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
+	"github.com/multica-ai/multica/server/internal/service"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
+	"github.com/multica-ai/multica/server/pkg/protocol"
 )
 
 // Charter field limits. The briefing renders these into the leader's
@@ -281,14 +283,25 @@ func (h *Handler) UpdateSquadCharter(w http.ResponseWriter, r *http.Request) {
 		responseHours = *req.ResponseHours
 	}
 
+	// The charter, its operating review and the review's switch change together or
+	// not at all.
+	tx, err := h.TxStarter.Begin(r.Context())
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to save squad charter")
+		return
+	}
+	defer tx.Rollback(r.Context())
+	qtx := h.Queries.WithTx(tx)
+
 	var charter db.SquadCharter
+	var createdReview, changedReview *db.Autopilot
 	if *req.Revision == 0 {
 		// The first save. Operating review is on unless the request turns it off.
 		operatingReview := true
 		if req.OperatingReviewEnabled != nil {
 			operatingReview = *req.OperatingReviewEnabled
 		}
-		charter, err = h.Queries.InsertSquadCharter(r.Context(), db.InsertSquadCharterParams{
+		charter, err = qtx.InsertSquadCharter(r.Context(), db.InsertSquadCharterParams{
 			SquadID:                squad.ID,
 			WorkspaceID:            squad.WorkspaceID,
 			Mission:                req.Mission,
@@ -302,8 +315,25 @@ func (h *Handler) UpdateSquadCharter(w http.ResponseWriter, r *http.Request) {
 			UpdatedByType:          "member",
 			UpdatedByID:            member.UserID,
 		})
+		if err == nil {
+			// A conflicting first save returns no rows and creates no review.
+			review, reviewErr := h.createOperatingReview(r, qtx, squad, charter, member)
+			if reviewErr != nil {
+				writeError(w, http.StatusInternalServerError, "failed to save squad charter")
+				return
+			}
+			createdReview = &review
+		}
 	} else {
-		charter, err = h.Queries.UpdateSquadCharter(r.Context(), db.UpdateSquadCharterParams{
+		before, beforeErr := qtx.GetSquadCharter(r.Context(), db.GetSquadCharterParams{
+			SquadID:     squad.ID,
+			WorkspaceID: squad.WorkspaceID,
+		})
+		if beforeErr != nil && !errors.Is(beforeErr, pgx.ErrNoRows) {
+			writeError(w, http.StatusInternalServerError, "failed to save squad charter")
+			return
+		}
+		charter, err = qtx.UpdateSquadCharter(r.Context(), db.UpdateSquadCharterParams{
 			SquadID:                squad.ID,
 			WorkspaceID:            squad.WorkspaceID,
 			Mission:                req.Mission,
@@ -318,6 +348,16 @@ func (h *Handler) UpdateSquadCharter(w http.ResponseWriter, r *http.Request) {
 			UpdatedByID:            member.UserID,
 			Revision:               *req.Revision,
 		})
+		// Only a change of the switch moves the review. A save that leaves it alone
+		// keeps whatever state an admin gave the review by hand.
+		if err == nil && beforeErr == nil && before.OperatingReviewEnabled != charter.OperatingReviewEnabled {
+			changed, switchErr := h.setOperatingReviewActive(r, qtx, squad, member, charter.OperatingReviewEnabled)
+			if switchErr != nil {
+				writeError(w, http.StatusInternalServerError, "failed to save squad charter")
+				return
+			}
+			changedReview = changed
+		}
 	}
 	if errors.Is(err, pgx.ErrNoRows) {
 		h.writeSquadCharterRevisionConflict(w, r, squad)
@@ -327,6 +367,22 @@ func (h *Handler) UpdateSquadCharter(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "failed to save squad charter")
 		return
 	}
+	if err := tx.Commit(r.Context()); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to save squad charter")
+		return
+	}
+
+	userID := uuidToString(member.UserID)
+	if createdReview != nil {
+		h.publish(protocol.EventAutopilotCreated, uuidToString(squad.WorkspaceID), "member", userID, map[string]any{
+			"autopilot": autopilotToResponse(*createdReview, nil),
+		})
+	}
+	if changedReview != nil {
+		h.publish(protocol.EventAutopilotUpdated, uuidToString(squad.WorkspaceID), "member", userID, map[string]any{
+			"autopilot": autopilotToResponse(*changedReview, nil),
+		})
+	}
 
 	resp, err := squadCharterToResponse(charter)
 	if err != nil {
@@ -334,6 +390,96 @@ func (h *Handler) UpdateSquadCharter(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, resp)
+}
+
+// createOperatingReview makes the squad's weekly operating review, once: it runs
+// inside the first charter save, and a squad has one first save. The review is
+// assigned to the squad, required, and expected to produce a report. It starts
+// paused when the first save turns the review off.
+func (h *Handler) createOperatingReview(r *http.Request, qtx *db.Queries, squad db.Squad, charter db.SquadCharter, actor db.Member) (db.Autopilot, error) {
+	timezone, err := h.resolveRoutineTimezone(r, actor.UserID, nil)
+	if err != nil {
+		return db.Autopilot{}, err
+	}
+	nextRun, err := computeNextRun(service.OperatingReviewCadence, timezone)
+	if err != nil {
+		return db.Autopilot{}, err
+	}
+	description, err := service.OperatingReviewDescription(charter)
+	if err != nil {
+		return db.Autopilot{}, err
+	}
+	status := "active"
+	if !charter.OperatingReviewEnabled {
+		status = "paused"
+	}
+	ap, err := service.CreateSquadScheduledAutopilot(r.Context(), qtx, service.SquadScheduledAutopilot{
+		WorkspaceID: squad.WorkspaceID,
+		SquadID:     squad.ID,
+		ActorUserID: actor.UserID,
+		Title:       service.OperatingReviewTitle,
+		Description: pgtype.Text{String: description, Valid: true},
+		Status:      status,
+		Cron:        service.OperatingReviewCadence,
+		Timezone:    timezone,
+		NextRun:     nextRun,
+	})
+	if err != nil {
+		return db.Autopilot{}, err
+	}
+	if _, err := qtx.InsertSquadRoutine(r.Context(), routineFields{
+		purpose:        service.OperatingReviewPurpose,
+		expectedOutput: "report",
+		required:       true,
+		graceHours:     routineDefaultGraceHours,
+	}.params(ap.ID, squad.WorkspaceID, squad.ID)); err != nil {
+		return db.Autopilot{}, err
+	}
+	return ap, nil
+}
+
+// setOperatingReviewActive pauses or resumes the squad's operating review to match
+// the switch. It returns the review when its status changed, and nil when there is
+// nothing to change (no review, or it already matches).
+func (h *Handler) setOperatingReviewActive(r *http.Request, qtx *db.Queries, squad db.Squad, actor db.Member, enabled bool) (*db.Autopilot, error) {
+	routine, err := qtx.GetOperatingReviewRoutine(r.Context(), db.GetOperatingReviewRoutineParams{
+		SquadID:     squad.ID,
+		WorkspaceID: squad.WorkspaceID,
+		Purpose:     service.OperatingReviewPurpose,
+	})
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	ap, err := qtx.GetAutopilotInWorkspace(r.Context(), db.GetAutopilotInWorkspaceParams{
+		ID:          routine.AutopilotID,
+		WorkspaceID: squad.WorkspaceID,
+	})
+	if err != nil {
+		return nil, err
+	}
+	want := "paused"
+	if enabled {
+		want = "active"
+	}
+	if ap.Status == want || ap.Status == "archived" {
+		return nil, nil
+	}
+	updated, err := qtx.UpdateAutopilot(r.Context(), db.UpdateAutopilotParams{
+		ID:                 ap.ID,
+		Status:             pgtype.Text{String: want, Valid: true},
+		IssueTitleTemplate: ap.IssueTitleTemplate,
+		ProjectID:          ap.ProjectID,
+	})
+	if err != nil {
+		return nil, err
+	}
+	if err := h.recordAutopilotRuleVersion(r.Context(), qtx, updated, "member", actor.UserID); err != nil {
+		return nil, err
+	}
+	return &updated, nil
 }
 
 // nonNilSlice keeps an omitted list from marshalling to JSON null, which the

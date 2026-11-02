@@ -41,11 +41,13 @@ func putCharterAs(t *testing.T, userID, squadID string, body map[string]any) *te
 
 func uniqueSuffix() string { return uuid.NewString()[:8] }
 
-// cleanupSquadCharter removes a charter a test saved. The fixture removes the
-// squad row, but squad_charter has no foreign key to cascade from.
+// cleanupSquadCharter removes a charter a test saved, and the operating review
+// that the first save creates. The fixture removes the squad row, but
+// squad_charter has no foreign key to cascade from.
 func cleanupSquadCharter(t *testing.T, squadID string) {
 	t.Helper()
 	dbfx.Cleanup(t, `DELETE FROM squad_charter WHERE squad_id = $1`, squadID)
+	cleanupSquadRoutines(t, squadID)
 }
 
 // newCharterSquad creates an unseated squad owned by the workspace owner.
