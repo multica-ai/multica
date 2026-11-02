@@ -1,11 +1,13 @@
 "use client";
 
-import type { ComponentProps, ReactNode } from "react";
+import { useEffect, useRef, useState, type ComponentProps, type ReactNode } from "react";
 import {
   ChevronDown,
   Filter,
   Plus,
+  Search,
   SlidersHorizontal,
+  X,
   type IconComponent,
 } from "@multica/ui/icons";
 import { Button } from "@multica/ui/components/ui/button";
@@ -25,7 +27,20 @@ import {
   EmptyMedia,
   EmptyTitle,
 } from "@multica/ui/components/ui/empty";
+import {
+  InputGroup,
+  InputGroupAddon,
+  InputGroupInput,
+} from "@multica/ui/components/ui/input-group";
 import { cn } from "@multica/ui/lib/utils";
+import { useModalStore } from "@multica/core/modals";
+import {
+  createShortcutChord,
+  isEditableShortcutTarget,
+  isPortalLayerShortcutTarget,
+} from "@multica/core/shortcuts";
+import { isImeComposing } from "@multica/core/utils";
+import { ShortcutKeycaps } from "../common/shortcut-keycaps";
 import { useT } from "../i18n";
 import { PageHeader } from "./page-header";
 
@@ -189,6 +204,140 @@ export function CollectionResetButton({ onClick }: { onClick: () => void }) {
     >
       {t(($) => $.collection.reset)}
     </Button>
+  );
+}
+
+const SEARCH_SHORTCUT = createShortcutChord("/");
+
+interface CollectionSearchProps {
+  value: string;
+  onChange: (value: string) => void;
+  /**
+   * Names the search, e.g. "Search agents": the icon's tooltip, the field's
+   * accessible name and its placeholder.
+   */
+  label: string;
+}
+
+/**
+ * List search for the header's tools: an icon until it is used, then a field.
+ * "/" opens it from anywhere on the page. Esc or the clear button empties and
+ * closes it; while it holds a query it stays open, so a query kept in the view
+ * store is still visible after coming back to the list.
+ */
+export function CollectionSearch({
+  value,
+  onChange,
+  label,
+}: CollectionSearchProps) {
+  const { t } = useT("layout");
+  const [open, setOpen] = useState(false);
+  const rootRef = useRef<HTMLDivElement>(null);
+  const inputRef = useRef<HTMLInputElement>(null);
+  const focusTriggerOnCloseRef = useRef(false);
+  const expanded = open || value !== "";
+
+  // Only opening focuses the field: a query restored on return must not take
+  // focus from the list, whose j/k keys need it on the page.
+  useEffect(() => {
+    if (open) inputRef.current?.focus();
+  }, [open]);
+
+  // Clearing with the button removes it; hand focus to the icon that replaces
+  // the field instead of dropping it on the body.
+  useEffect(() => {
+    if (expanded || !focusTriggerOnCloseRef.current) return;
+    focusTriggerOnCloseRef.current = false;
+    rootRef.current?.querySelector("button")?.focus();
+  }, [expanded]);
+
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key !== "/" || event.defaultPrevented || event.repeat) return;
+      if (event.metaKey || event.ctrlKey || event.altKey || isImeComposing(event)) return;
+      if (isEditableShortcutTarget(event.target)) return;
+      if (isPortalLayerShortcutTarget(event.target)) return;
+      if (useModalStore.getState().modal) return;
+      // A page kept mounted in a hidden tab must not take the key.
+      const root = rootRef.current;
+      if (!root || root.getClientRects().length === 0) return;
+      event.preventDefault();
+      setOpen(true);
+      inputRef.current?.focus();
+    };
+    document.addEventListener("keydown", onKeyDown);
+    return () => document.removeEventListener("keydown", onKeyDown);
+  }, []);
+
+  const close = () => {
+    onChange("");
+    setOpen(false);
+  };
+
+  return (
+    <div ref={rootRef} className="flex min-w-0 items-center">
+      {expanded ? (
+        <InputGroup
+          className="h-7 w-60 min-w-32 shrink"
+          onFocus={() => setOpen(true)}
+          onBlur={(event) => {
+            if (event.currentTarget.contains(event.relatedTarget as Node | null)) return;
+            // Switching windows blurs too but keeps the element active; the
+            // field should still be open on return.
+            if (document.activeElement === event.target) return;
+            setOpen(false);
+          }}
+        >
+          <InputGroupAddon>
+            <Search aria-hidden="true" className="size-3.5" />
+          </InputGroupAddon>
+          <InputGroupInput
+            ref={inputRef}
+            value={value}
+            onChange={(event) => onChange(event.target.value)}
+            onKeyDown={(event) => {
+              if (event.key !== "Escape" || isImeComposing(event)) return;
+              event.preventDefault();
+              close();
+              event.currentTarget.blur();
+            }}
+            aria-label={label}
+            aria-keyshortcuts="/"
+            placeholder={label}
+            autoComplete="off"
+            spellCheck={false}
+            className="h-full"
+          />
+          {value ? (
+            <InputGroupAddon align="inline-end">
+              <IconButton
+                size="icon-xs"
+                tooltipSide="bottom"
+                label={t(($) => $.collection.clear_search)}
+                className="text-muted-foreground"
+                onClick={() => {
+                  focusTriggerOnCloseRef.current = true;
+                  close();
+                }}
+              >
+                <X />
+              </IconButton>
+            </InputGroupAddon>
+          ) : null}
+        </InputGroup>
+      ) : (
+        <IconButton
+          label={label}
+          shortcut={<ShortcutKeycaps shortcut={SEARCH_SHORTCUT} decorative />}
+          tooltipSide="bottom"
+          aria-keyshortcuts="/"
+          className="shrink-0 text-muted-foreground"
+          onClick={() => setOpen(true)}
+        >
+          <Search />
+        </IconButton>
+      )}
+    </div>
   );
 }
 

@@ -164,6 +164,7 @@
     "filter_count_one": "{{count}} filtre",
     "filter_count_other": "{{count}} filtres",
     "reset": "Réinitialiser",
+    "clear_search": "Effacer la recherche",
     "display": "Affichage",
     "selected_one": "{{count}} sélectionné",
     "selected_other": "{{count}} sélectionnés",
