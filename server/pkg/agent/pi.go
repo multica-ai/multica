@@ -1140,12 +1140,11 @@ func buildPiArgs(sessionPath string, opts ExecOptions, logger *slog.Logger) []st
 	return buildPiArgsFor("pi", sessionPath, opts, logger)
 }
 
-// piSkillArgs returns an explicit --skill flag for each skill the daemon wrote
-// to <cwd>/.pi/skills. Pi 1.x ignores project-local files unless the project
-// is trusted, so native discovery never sees them. Passing the paths loads
-// only what Multica wrote, without --approve trusting every other project-local
-// resource (extensions, prompts) that may come from the checked-out branch.
-// OMP is left alone: its --skill flag is unverified.
+// piSkillArgs returns an explicit --skill flag for each skill found under
+// <cwd>/.pi/skills. Explicit paths let Pi load these skills even when the
+// project is untrusted, without --approve also trusting project-local
+// extensions and prompts from the checked-out branch.
+// OMP keeps its native .omp/skills discovery without additional skill flags.
 func piSkillArgs(cwd, label string) []string {
 	if cwd == "" || label != "pi" {
 		return nil
