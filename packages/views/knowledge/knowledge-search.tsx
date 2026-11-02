@@ -12,29 +12,59 @@ import {
   type KnowledgeHit,
 } from "@multica/core/knowledge";
 import { useT } from "../i18n";
+import {
+  ASK_SECRETARY_RESULT_LIMIT,
+  formatSecretaryResult,
+  useAskSecretary,
+} from "./ask-secretary";
 import { isWebLink } from "./web-link";
 
 /**
  * Retrieval only: the server returns the closest passages however weak, so
  * each result shows its score and source for the reader to judge.
+ *
+ * With a Secretary in the workspace, a result set can be handed to its chat:
+ * the top results go into a prompt that asks for citations by title and link.
  */
 export function KnowledgeSearch({
   wsId,
   knowledgeBases,
+  secretaryAgentId,
 }: {
   wsId: string;
   knowledgeBases: KnowledgeBase[];
+  secretaryAgentId: string | null;
 }) {
   const { t } = useT("knowledge");
   const [draft, setDraft] = useState("");
   const [submitted, setSubmitted] = useState("");
   const search = useQuery(knowledgeSearchOptions(wsId, { q: submitted }));
+  const askSecretary = useAskSecretary();
 
   const names = new Map(knowledgeBases.map((kb) => [kb.key, kb.name]));
+  const askable =
+    !!secretaryAgentId &&
+    !!search.data &&
+    search.data.state === "ready" &&
+    search.data.hits.length > 0;
 
   const submit = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     setSubmitted(draft.trim());
+  };
+
+  const handleAskSecretary = () => {
+    if (!secretaryAgentId || !search.data) return;
+    const results = search.data.hits
+      .slice(0, ASK_SECRETARY_RESULT_LIMIT)
+      .map((hit, index) =>
+        formatSecretaryResult(hit, index, names.get(hit.knowledge_base) ?? hit.knowledge_base),
+      )
+      .join("\n\n");
+    askSecretary(
+      secretaryAgentId,
+      t(($) => $.ask_secretary.prompt, { question: submitted, results }),
+    );
   };
 
   let results: ReactNode = null;
@@ -97,9 +127,16 @@ export function KnowledgeSearch({
       </form>
       {submitted ? (
         <div className="flex flex-col gap-2">
-          <h2 className="text-caption font-medium text-muted-foreground">
-            {t(($) => $.search.results)}
-          </h2>
+          <div className="flex min-w-0 items-center justify-between gap-2">
+            <h2 className="text-caption font-medium text-muted-foreground">
+              {t(($) => $.search.results)}
+            </h2>
+            {askable ? (
+              <Button type="button" variant="outline" size="sm" onClick={handleAskSecretary}>
+                {t(($) => $.ask_secretary.button)}
+              </Button>
+            ) : null}
+          </div>
           {results}
         </div>
       ) : null}

@@ -334,5 +334,15 @@
     "attach_kept": "已全部加入",
     "toast_done": "Agent 套件已安裝",
     "toast_failed": "無法安裝 Agent 套件"
+  },
+  "save_issue_to_knowledge": {
+    "title": "儲存到知識庫",
+    "knowledge_base": "知識庫",
+    "published_note": "文件會立即發布，智能體可以馬上檢索到。",
+    "empty_description": "此任務沒有可儲存的描述。",
+    "submit": "儲存",
+    "saving": "儲存中...",
+    "toast_saved": "已儲存到{{knowledgeBase}}",
+    "toast_failed": "無法儲存到知識庫"
   }
 }

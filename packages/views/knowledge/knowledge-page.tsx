@@ -27,6 +27,7 @@ import {
   type KnowledgeState,
 } from "@multica/core/knowledge";
 import { canManageKnowledge, useCurrentMember } from "@multica/core/permissions";
+import { useCurrentWorkspace } from "@multica/core/paths";
 import { CollectionPageHeader, CollectionPageState } from "../layout/collection-page";
 import { useT } from "../i18n";
 import { KnowledgeDocuments } from "./knowledge-documents";
@@ -47,6 +48,7 @@ export function KnowledgePage() {
   const { userId, role } = useCurrentMember(wsId);
   const canManage = canManageKnowledge({ userId, role }).allowed;
   const [tab, setTab] = useState<KnowledgeTab>("library");
+  const secretaryAgentId = useCurrentWorkspace()?.secretary_agent_id ?? null;
 
   const bases = useQuery(knowledgeBasesOptions(wsId));
   // The status carries the WeKnora link and is an owner and admin read, so
@@ -186,7 +188,11 @@ export function KnowledgePage() {
             <TabsTrigger value="drafts">{t(($) => $.tabs.drafts)}</TabsTrigger>
           </TabsList>
           <TabsContent value="library" className="flex flex-col gap-6 pt-4">
-            <KnowledgeSearch wsId={wsId} knowledgeBases={knowledgeBases} />
+            <KnowledgeSearch
+              wsId={wsId}
+              knowledgeBases={knowledgeBases}
+              secretaryAgentId={secretaryAgentId}
+            />
             <KnowledgeDocuments wsId={wsId} knowledgeBases={knowledgeBases} />
           </TabsContent>
           <TabsContent value="drafts" className="pt-4">

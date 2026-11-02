@@ -334,5 +334,15 @@
     "attach_kept": "이미 연결됨",
     "toast_done": "에이전트 팩을 설치했습니다",
     "toast_failed": "에이전트 팩을 설치하지 못했습니다"
+  },
+  "save_issue_to_knowledge": {
+    "title": "지식 베이스에 저장",
+    "knowledge_base": "지식 베이스",
+    "published_note": "문서는 바로 게시되어 에이전트가 즉시 검색할 수 있습니다.",
+    "empty_description": "저장할 설명이 이 태스크에 없습니다.",
+    "submit": "저장",
+    "saving": "저장 중...",
+    "toast_saved": "{{knowledgeBase}}에 저장했습니다",
+    "toast_failed": "지식 베이스에 저장하지 못했습니다"
   }
 }

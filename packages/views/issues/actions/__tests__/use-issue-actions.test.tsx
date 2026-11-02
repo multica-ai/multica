@@ -44,6 +44,22 @@ vi.mock("@multica/core/pins", () => ({
   useDeletePin: () => ({ mutate: mockDeletePinMutate }),
 }));
 
+// The knowledge state decides whether "Save to knowledge" is offered at all.
+const knowledgeRef: { state: "disabled" | "ready" } = { state: "disabled" };
+vi.mock("@multica/core/knowledge", () => ({
+  knowledgeBasesOptions: () => ({
+    queryKey: ["knowledge", "bases", "ws-1"],
+    queryFn: () =>
+      Promise.resolve({
+        offered: true,
+        state: knowledgeRef.state,
+        knowledge_bases: [
+          { id: "kb-1", key: "engineering", name: "Engineering", visibility: "workspace", position: 3 },
+        ],
+      }),
+  }),
+}));
+
 const mockUpdateMutate = vi.fn();
 vi.mock("@multica/core/issues/mutations", () => ({
   useUpdateIssue: () => ({ mutate: mockUpdateMutate }),
@@ -489,4 +505,26 @@ describe("useIssueActions", () => {
     expect(mockOpenModal).not.toHaveBeenCalled();
   });
 
+  it("offers Save to knowledge once knowledge is ready, and opens the save modal with the issue text", async () => {
+    knowledgeRef.state = "ready";
+    const described = { ...mockIssue, description: "Pricing notes" };
+    const { result } = renderHook(() => useIssueActions(described), { wrapper });
+
+    await waitFor(() => expect(result.current.canSaveToKnowledge).toBe(true));
+    act(() => result.current.openSaveToKnowledge());
+
+    expect(mockOpenModal).toHaveBeenCalledWith("issue-save-to-knowledge", {
+      issueId: "issue-1",
+      title: "Example",
+      description: "Pricing notes",
+    });
+  });
+
+  it("hides Save to knowledge while knowledge is not ready", async () => {
+    knowledgeRef.state = "disabled";
+    const { result } = renderHook(() => useIssueActions(mockIssue), { wrapper });
+
+    await act(async () => {});
+    expect(result.current.canSaveToKnowledge).toBe(false);
+  });
 });

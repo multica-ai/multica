@@ -15,6 +15,7 @@ import { RenameIssueModal } from "./rename-issue";
 import { DeleteIssueConfirmModal } from "./delete-issue-confirm";
 import { RunConfirmModal } from "./run-confirm";
 import { WorkflowHandoffModal } from "./workflow-handoff";
+import { SaveIssueToKnowledgeModal } from "./save-issue-to-knowledge";
 import { IssueLimitUpgradeDialog } from "./issue-limit-upgrade-dialog";
 
 export function ModalRegistry() {
@@ -79,6 +80,9 @@ export function ModalRegistry() {
       break;
     case "issue-workflow-handoff":
       activeModal = <WorkflowHandoffModal onClose={close} data={data} />;
+      break;
+    case "issue-save-to-knowledge":
+      activeModal = <SaveIssueToKnowledgeModal onClose={close} data={data} />;
       break;
   }
 

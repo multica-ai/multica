@@ -78,5 +78,9 @@
   "load_error": {
     "title": "Could not load knowledge",
     "retry": "Try again"
+  },
+  "ask_secretary": {
+    "button": "Ask the Secretary",
+    "prompt": "Answer my question from these company knowledge results. Cite each document you use by its title and link, and say so if the results do not answer it.\n\nQuestion: {{question}}\n\nResults:\n{{results}}"
   }
 }

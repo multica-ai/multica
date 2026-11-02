@@ -214,7 +214,9 @@ Squads and agents:
 
 - `POST /api/squads` seats the new squad in the lowest free slot, creating
   `Floor N` when every floor is full; a squad created by a template gets the
-  template's floor name instead. The response carries `floor_id` and
+  template's floor name instead. A template that names a floor is placed there
+  by the client: it creates the floor if missing, then moves the new squad to
+  that floor's first free slot with `PUT /api/office/seats`. The response carries `floor_id` and
   `office_slot`. Squad create/update/list responses add both fields.
 - `PUT /api/agents/{id}` accepts `home_squad_id`. Agent responses add it.
 - Seat changes by someone who is not an admin require being the squad's creator,
@@ -341,10 +343,13 @@ of rooms, each with a 5 x 2 pod of desks.
   wide pages, so the cost is a slightly smaller figure on narrow ones.
 - `issue_start` already takes a room index; the page's `OFFICE_ROOMS` array in
   core is the only other place the count appears.
-- Acceptance: at a 1280 x 720 content area a worker's figure is at least 64 px
-  tall, every tag and room name is legible, workers reach their desks (the
-  walkable mask routes on a coarse grid, so rooms and desks stay snapped to it),
-  and the existing office tests and a screenshot of a full floor pass.
+- Acceptance, corrected after measurement: a worker figure is 12 layout units tall
+  (`CHARACTER_SPRITE_H`), not 24. At 1280 x 720 the 6 x 10 floor is 416 x 234 units,
+  about 3.1 px per unit, so a figure is about 37 px. The 64 px target would need a
+  floor of about 240 x 135 units, which the 3 x 2 grid cannot fit; the old 2 x 2 floor
+  gave about 50 px, so the target was never met. The 5 x 2 pod meets the 2.7 px per
+  unit floor and is kept. Tags and room names must still be legible, and every
+  worker must reach a desk (checked by the Rust layout test).
 - The wasm is rebuilt by the steps in `lib/pixtuoid/README.md`; the README and the
   patch are updated in the same commit as the rebuilt binary. This needs
   `rustup target add wasm32-unknown-unknown`.

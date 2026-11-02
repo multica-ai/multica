@@ -9,6 +9,7 @@ import { useWorkspaceId } from "@multica/core/hooks";
 import { useWorkspacePaths } from "@multica/core/paths";
 import { useModalStore } from "@multica/core/modals";
 import { useUpdateIssue } from "@multica/core/issues/mutations";
+import { knowledgeBasesOptions } from "@multica/core/knowledge";
 import { useIssueStatuses } from "@multica/core/issue-statuses/hooks";
 import { errorCode } from "@multica/core/api";
 import { pinListOptions, useCreatePin, useDeletePin } from "@multica/core/pins";
@@ -36,6 +37,9 @@ export interface UseIssueActionsResult {
   openAddChild: () => void;
   openMarkDuplicate: () => void;
   openDeleteConfirm: (opts?: { onDeletedFallbackPath?: string }) => void;
+  /** False until company knowledge is ready; the save entry is hidden then. */
+  canSaveToKnowledge: boolean;
+  openSaveToKnowledge: () => void;
 }
 
 /**
@@ -71,6 +75,12 @@ export function useIssueActions(issue: Issue | null): UseIssueActionsResult {
   const issueId = issue?.id ?? null;
   const issueIdentifier = issue?.identifier ?? null;
   const issueTitle = issue?.title ?? "";
+  const issueDescription = issue?.description ?? "";
+  const knowledgeBases = useQuery(knowledgeBasesOptions(wsId));
+  const canSaveToKnowledge =
+    !!issue &&
+    knowledgeBases.data?.state === "ready" &&
+    knowledgeBases.data.knowledge_bases.length > 0;
   const issueProjectId = issue?.project_id ?? null;
   const issueAssigneeType = issue?.assignee_type ?? null;
   const issueAssigneeId = issue?.assignee_id ?? null;
@@ -241,6 +251,15 @@ export function useIssueActions(issue: Issue | null): UseIssueActionsResult {
     openModal("issue-mark-duplicate", { issueId });
   }, [openModal, issueId]);
 
+  const openSaveToKnowledge = useCallback(() => {
+    if (!issueId) return;
+    openModal("issue-save-to-knowledge", {
+      issueId,
+      title: issueTitle,
+      description: issueDescription,
+    });
+  }, [openModal, issueId, issueTitle, issueDescription]);
+
   // Detach from the parent and promote to a standalone issue. Reversible
   // (Set parent re-links it), non-destructive, and mirrors the clear-date
   // actions — so it applies directly instead of a confirm modal. `stage`
@@ -316,5 +335,7 @@ export function useIssueActions(issue: Issue | null): UseIssueActionsResult {
     openAddChild,
     openMarkDuplicate,
     openDeleteConfirm,
+    canSaveToKnowledge,
+    openSaveToKnowledge,
   };
 }

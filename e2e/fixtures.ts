@@ -45,6 +45,68 @@ export interface TestTableIssue {
   number: number;
 }
 
+export interface TestAgent {
+  id: string;
+  name: string;
+}
+
+export interface TestSquad {
+  id: string;
+  name: string;
+  floor_id: string | null;
+  office_slot: number | null;
+}
+
+export interface TestOfficeFloor {
+  id: string;
+  name: string;
+  position: number;
+}
+
+export interface TestOfficeSeat {
+  squad_id: string;
+  floor_id: string | null;
+  slot: number | null;
+}
+
+export type TestProposalState = "pending" | "approved" | "rejected";
+
+export interface TestProposalInput {
+  squad_id: string;
+  title: string;
+  summary: string;
+  evidence: string[];
+  recommendation: string;
+  options: string[];
+  cost_risk: string;
+  ask: string;
+  handoff_squad_id?: string | null;
+}
+
+export interface TestProposal {
+  id: string;
+  squad_id: string;
+  handoff_squad_id: string | null;
+  issue_id: string;
+  title: string;
+  state: TestProposalState;
+  /** Set when an approval handed the work to a squad. */
+  handoff?: { project_id: string; kickoff_issue_id: string };
+}
+
+export interface TestOfficeIssue {
+  id: string;
+  title: string;
+  project_id: string | null;
+  assignee_type: string | null;
+  assignee_id: string | null;
+}
+
+export interface TestProject {
+  id: string;
+  title: string;
+}
+
 export class TestApiClient {
   private token: string | null = null;
   private workspaceSlug: string | null = null;
@@ -52,6 +114,8 @@ export class TestApiClient {
   private email: string | null = null;
   private createdIssueIds: string[] = [];
   private createdProjectIds: string[] = [];
+  private createdSquadIds: string[] = [];
+  private createdAgentIds: string[] = [];
   private seededIssueIds: string[] = [];
   private createdPropertyIds: string[] = [];
 
@@ -434,6 +498,117 @@ export class TestApiClient {
     return res.json();
   }
 
+  /** Create an agent on a runtime; archived on cleanup. */
+  async createAgent(name: string, runtimeId: string): Promise<TestAgent> {
+    const res = await this.authedFetch("/api/agents", {
+      method: "POST",
+      body: JSON.stringify({ name, runtime_id: runtimeId }),
+    });
+    if (!res.ok) {
+      throw new Error(`create agent failed: ${res.status} ${await res.text()}`);
+    }
+    const agent = (await res.json()) as TestAgent;
+    this.createdAgentIds.push(agent.id);
+    return agent;
+  }
+
+  /** Create a squad led by an agent; deleted on cleanup. */
+  async createSquad(name: string, leaderId: string, description = ""): Promise<TestSquad> {
+    const res = await this.authedFetch("/api/squads", {
+      method: "POST",
+      body: JSON.stringify({ name, description, leader_id: leaderId }),
+    });
+    if (!res.ok) {
+      throw new Error(`create squad failed: ${res.status} ${await res.text()}`);
+    }
+    const squad = (await res.json()) as TestSquad;
+    this.createdSquadIds.push(squad.id);
+    return squad;
+  }
+
+  /** Create an office floor. Floors are not removed on cleanup: the E2E workspace is per run. */
+  async createOfficeFloor(name: string): Promise<TestOfficeFloor> {
+    const res = await this.authedFetch("/api/office/floors", {
+      method: "POST",
+      body: JSON.stringify({ name }),
+    });
+    if (!res.ok) {
+      throw new Error(`create office floor failed: ${res.status} ${await res.text()}`);
+    }
+    return (await res.json()) as TestOfficeFloor;
+  }
+
+  /** Applies seat moves atomically; returns the squads as they stand afterwards. */
+  async seatOfficeSquads(seats: TestOfficeSeat[]): Promise<{ squads: TestSquad[] }> {
+    const res = await this.authedFetch("/api/office/seats", {
+      method: "PUT",
+      body: JSON.stringify(seats),
+    });
+    if (!res.ok) {
+      throw new Error(`seat office squads failed: ${res.status} ${await res.text()}`);
+    }
+    return (await res.json()) as { squads: TestSquad[] };
+  }
+
+  /** File a squad's proposal. Its backing issue is removed on cleanup. */
+  async fileProposal(input: TestProposalInput): Promise<TestProposal> {
+    const res = await this.authedFetch("/api/proposals", {
+      method: "POST",
+      body: JSON.stringify(input),
+    });
+    if (!res.ok) {
+      throw new Error(`file proposal failed: ${res.status} ${await res.text()}`);
+    }
+    const proposal = (await res.json()) as TestProposal;
+    this.createdIssueIds.push(proposal.issue_id);
+    return proposal;
+  }
+
+  async listProposals(state?: TestProposalState): Promise<TestProposal[]> {
+    const query = state ? `?state=${state}` : "";
+    const res = await this.authedFetch(`/api/proposals${query}`);
+    if (!res.ok) {
+      throw new Error(`list proposals failed: ${res.status} ${await res.text()}`);
+    }
+    return (await res.json()) as TestProposal[];
+  }
+
+  /**
+   * Approve or reject a pending proposal. An approval with a handoff squad also
+   * creates a project and a kickoff issue; both are removed on cleanup.
+   */
+  async decideProposal(id: string, decision: "approve" | "reject", note = ""): Promise<TestProposal> {
+    const res = await this.authedFetch(`/api/proposals/${id}/decision`, {
+      method: "POST",
+      body: JSON.stringify({ decision, note }),
+    });
+    if (!res.ok) {
+      throw new Error(`decide proposal failed: ${res.status} ${await res.text()}`);
+    }
+    const proposal = (await res.json()) as TestProposal;
+    if (proposal.handoff) {
+      this.createdProjectIds.push(proposal.handoff.project_id);
+      this.createdIssueIds.push(proposal.handoff.kickoff_issue_id);
+    }
+    return proposal;
+  }
+
+  async getIssue(id: string): Promise<TestOfficeIssue> {
+    const res = await this.authedFetch(`/api/issues/${id}`);
+    if (!res.ok) {
+      throw new Error(`get issue failed: ${res.status} ${await res.text()}`);
+    }
+    return (await res.json()) as TestOfficeIssue;
+  }
+
+  async getProject(id: string): Promise<TestProject> {
+    const res = await this.authedFetch(`/api/projects/${id}`);
+    if (!res.ok) {
+      throw new Error(`get project failed: ${res.status} ${await res.text()}`);
+    }
+    return (await res.json()) as TestProject;
+  }
+
   /** Clean up all issues created during this test. */
   async cleanup() {
     if (this.seededIssueIds.length > 0 && this.workspaceId) {
@@ -467,6 +642,23 @@ export class TestApiClient {
       }
     }
     this.createdProjectIds = [];
+    // Squads before their leader agents, so a leader still exists when its squad is removed.
+    for (const id of this.createdSquadIds) {
+      try {
+        await this.authedFetch(`/api/squads/${id}`, { method: "DELETE" });
+      } catch {
+        /* ignore — may already be deleted */
+      }
+    }
+    this.createdSquadIds = [];
+    for (const id of this.createdAgentIds) {
+      try {
+        await this.authedFetch(`/api/agents/${id}/archive`, { method: "POST" });
+      } catch {
+        /* ignore — may already be archived */
+      }
+    }
+    this.createdAgentIds = [];
     // Definitions cannot be deleted, only archived; archiving takes them out
     // of every picker so later tests see the catalog they expect.
     for (const id of this.createdPropertyIds) {

@@ -10,6 +10,22 @@ import (
 	"testing"
 )
 
+// legacyDuplicateMigrationStems are migrations 595–599 that already shipped in
+// 1.0 with a shared prefix. They are applied on live databases keyed by their
+// full name, so they cannot be renamed. Any new duplicate is still an error.
+var legacyDuplicateMigrationStems = map[string]bool{
+	"595_issue_queue_order":                      true,
+	"595_issue_view_preference_sidebar":          true,
+	"596_issue_queue_order_index":                true,
+	"596_issue_view_preference_sidebar_projects": true,
+	"597_agent_task_branch_merge":                true,
+	"597_issue_unread":                           true,
+	"598_issue_unread_unique_index":              true,
+	"598_runtime_quickstart_request":             true,
+	"599_issue_unread_primary_key":               true,
+	"599_runtime_quickstart_request_index":       true,
+}
+
 func TestMigrationNumericPrefixesAreUnique(t *testing.T) {
 	files := migrationFilesForLint(t, "*.up.sql")
 
@@ -32,6 +48,9 @@ func TestMigrationNumericPrefixesAreUnique(t *testing.T) {
 			continue
 		}
 		if previous, exists := stemByNumber[number]; exists {
+			if legacyDuplicateMigrationStems[previous] && legacyDuplicateMigrationStems[stem] {
+				continue
+			}
 			t.Errorf("migrations %s and %s share numeric prefix %s", previous, stem, prefix)
 			continue
 		}

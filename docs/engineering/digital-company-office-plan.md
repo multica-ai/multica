@@ -52,7 +52,7 @@ Touches only `packages/views/office/lib/pixtuoid/` and the office constants.
 |---|---|---|---|
 | 1.1 | Check out pixtuoid at the pinned commit (`b74dfb6`), apply the existing patch cleanly, and reproduce the committed wasm. Add `wasm32-unknown-unknown` with rustup. | scratch checkout | Rebuilt wasm matches behaviour of the committed one |
 | 1.2 | Change the studio to 6 rooms x 10 desks: `OFFICE_ROOMS`, `OFFICE_ROOM_DESKS`, `OFFICE_DESKS`, `STUDIO_DESKS`, room and pod sizes, `studio_rooms` grid 3 x 2, `studio_desks` 5 x 2 pod, `STUDIO_MIN_W/H`. Keep rooms and desks snapped to the coarse grid. | patch, `office-protocol.ts` (`MIN_UNITS_*`) | Rust tests in the checkout pass |
-| 1.3 | Screenshot a full floor at 1280 x 720 and 1920 x 1080. Acceptance: figure at least 64 px tall, tags and room names legible, every worker reaches a desk. If not met, switch the pod to 4 x 2 (8 desks) and repeat. | scratch | Screenshots reviewed |
+| 1.3 | Screenshot a full floor at 1280 x 720 and 1920 x 1080. Acceptance (corrected: figure is 12 units, about 37 px at 1280 x 720; see the spec's Engine section): figure at least 37 px tall, tags and room names legible, every worker reaches a desk. If not met, switch the pod to 4 x 2 (8 desks) and repeat. | scratch | Screenshots reviewed |
 | 1.4 | Commit the rebuilt wasm, the regenerated patch and the README, with `OFFICE_ROOMS` in core widened to 6 and `OFFICE_ROOM_CAPACITY` to the final desk count. Office tests updated. | `pixtuoid-web-issues.patch`, `README.md`, `wasm/*`, `office-protocol.ts`, `office-canvas.test.tsx` | `pnpm test` office suites |
 
 ## WS2: Floors, seats, home squad (L)
@@ -165,3 +165,34 @@ the Secretary and the knowledge base are opt-in per workspace.
   bump is its own step with the contract tests re-recorded.
 - **Embedding model choice** is fixed per knowledge base at creation; changing it later
   means re-ingesting. Decide before K1.3 creates any KB.
+
+## Implementation status
+
+Status at the completion round, measured against the code on `main`. "Done" means
+implemented and covered by tests that ran; "Partial" and "Open" are listed with the
+reason.
+
+| Area | Status | Notes |
+|---|---|---|
+| WS1 Engine: 6 rooms x 10 desks | Done | Figure is about 37 px at 1280 x 720; the spec's 64 px target was unattainable (corrected in the spec). |
+| WS2 Floors, seats, home squad | Done | Backend, core `layoutFloor`, migrations 601–607. |
+| WS3 Office on floors | Done | Floor tabs, first-run card, unseated tray, squad panel. `agent.office_room` removed (608). |
+| WS4 Proposals | Done | Backend, limits, decisions, CLI, leader briefing (in `handler/squad_briefing.go`, not `execenv`). |
+| WS4 4.5 Decisions dialog, room badge | Done | |
+| WS5 Digest and briefs | Done | Backend, CLI, inbox type. |
+| WS5 5.3 Brief dialog, Generate now | Completion round | See the completion PR. |
+| WS6 6.1–6.2 Setting, secretary template | Done | |
+| WS6 6.3 Setup | Done backend, completion round for UI | `GET/POST /api/office/setup` idempotent; UI and Chat pin in the completion round. |
+| WS6 6.4 market_research | Done | Placement on a named Research floor completed in the completion round. |
+| WS6 6.5 First-loop e2e | Completion round | Spec written; not run against a live stack on this machine. |
+| WS7 K1 Sidecar, client, provisioning | Done | Live-tested against WeKnora v0.9.0. |
+| WS7 K2–K3 Instruction block, read and write paths | Done | |
+| WS7 K4.1 Core | Done | |
+| WS7 K4.2 Knowledge page | Completion round for Save to knowledge and Ask the Secretary | Page, search, drafts, enable are done. |
+| WS7 K5.1 Automatic context | Done | Gated on readiness, score ≥ 0.5, top three, 2 s. |
+| WS7 K6.1 Freshness and pending drafts | Completion round | |
+| WS8 8.1 Docs | Done for en, fr, ja, ko, zh | No zh-Hant docs locale exists in the site; translations not reviewed by native speakers. |
+| WS8 8.2 Upgrade notes | Done | In `SELF_HOSTING.md`. |
+| WS8 8.3 Manual verification on the boss's machine | Open | Needs a Hermes model provider configured by the boss and a live knowledge profile. |
+| WS0.2 Hermes runtime online and a trivial run | Open | Hermes v0.22.5 is installed; a model provider is not configured. |
+| Full repo checks (`make check`, `pnpm test`, `make test`) | Completion round | Run before the completion PR. |
