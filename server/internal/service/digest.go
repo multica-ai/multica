@@ -36,6 +36,12 @@ const (
 	DigestMaxWindow = 35 * 24 * time.Hour
 	// DigestDefaultWindow applies when the caller gives no `since`.
 	DigestDefaultWindow = 24 * time.Hour
+	// DigestKnowledgeStaleAfter is how long a published knowledge document may
+	// go without a republish before the digest lists it for re-verification.
+	DigestKnowledgeStaleAfter = 90 * 24 * time.Hour
+	// DigestKnowledgeListLimit bounds the stale documents listed; the count
+	// carries the total.
+	DigestKnowledgeListLimit = 10
 )
 
 // ErrDigestWindow reports a `since` the digest refuses.
@@ -134,6 +140,29 @@ type DigestWorkspace struct {
 	UnseatedSquads  DigestSquadList   `json:"unseated_squads"`
 }
 
+// DigestKnowledgeDocRef is a published knowledge document the digest flags.
+type DigestKnowledgeDocRef struct {
+	ID            string `json:"id"`
+	Title         string `json:"title"`
+	KnowledgeBase string `json:"knowledge_base"`
+	PublishedAt   string `json:"published_at"`
+}
+
+type DigestKnowledgeStaleList struct {
+	Count int                     `json:"count"`
+	Items []DigestKnowledgeDocRef `json:"items"`
+}
+
+// DigestKnowledge is the company knowledge section. It is empty, and not an
+// error, when the workspace does not have ready knowledge.
+type DigestKnowledge struct {
+	// StalePublished lists published documents not republished for
+	// DigestKnowledgeStaleAfter, oldest first.
+	StalePublished DigestKnowledgeStaleList `json:"stale_published"`
+	// PendingDrafts counts drafts awaiting publishing across the bases.
+	PendingDrafts int `json:"pending_drafts"`
+}
+
 // Digest is the whole response of GET /api/office/digest.
 type Digest struct {
 	Since     string          `json:"since"`
@@ -142,8 +171,9 @@ type Digest struct {
 	// Squads are ordered by what needs attention first, at most DigestMaxSquads.
 	Squads []DigestSquad `json:"squads"`
 	// OmittedSquadCount is how many squads with news were ranked below the cut.
-	OmittedSquadCount int         `json:"omitted_squad_count"`
-	Quiet             DigestQuiet `json:"quiet"`
+	OmittedSquadCount int             `json:"omitted_squad_count"`
+	Quiet             DigestQuiet     `json:"quiet"`
+	Knowledge         DigestKnowledge `json:"knowledge"`
 }
 
 // DigestService computes the digest.
@@ -318,6 +348,10 @@ func (s *DigestService) Compute(ctx context.Context, workspaceID pgtype.UUID, si
 	if err != nil {
 		return Digest{}, err
 	}
+	know, err := s.computeKnowledge(ctx, workspaceID, now)
+	if err != nil {
+		return Digest{}, err
+	}
 
 	return Digest{
 		Since:             since.UTC().Format(time.RFC3339),
@@ -326,7 +360,38 @@ func (s *DigestService) Compute(ctx context.Context, workspaceID pgtype.UUID, si
 		Squads:            squads,
 		OmittedSquadCount: omitted,
 		Quiet:             quiet,
+		Knowledge:         know,
 	}, nil
+}
+
+// computeKnowledge reads the knowledge registry only, never the sidecar: the
+// digest is cheap and must answer while knowledge is offline. A workspace that
+// is not ready has no rows in the joins, so the section comes back empty.
+func (s *DigestService) computeKnowledge(ctx context.Context, workspaceID pgtype.UUID, now time.Time) (DigestKnowledge, error) {
+	know := DigestKnowledge{StalePublished: DigestKnowledgeStaleList{Items: []DigestKnowledgeDocRef{}}}
+
+	stale, err := s.Queries.DigestKnowledgeStale(ctx, db.DigestKnowledgeStaleParams{
+		WorkspaceID:     workspaceID,
+		PublishedBefore: pgtype.Timestamptz{Time: now.Add(-DigestKnowledgeStaleAfter), Valid: true},
+		RowLimit:        DigestKnowledgeListLimit,
+	})
+	if err != nil {
+		return know, fmt.Errorf("digest knowledge stale documents: %w", err)
+	}
+	for _, d := range stale {
+		know.StalePublished.Count = int(d.TotalCount)
+		know.StalePublished.Items = append(know.StalePublished.Items, DigestKnowledgeDocRef{
+			ID: util.UUIDToString(d.ID), Title: d.Title, KnowledgeBase: d.KnowledgeBase,
+			PublishedAt: d.PublishedAt.Time.UTC().Format(time.RFC3339),
+		})
+	}
+
+	drafts, err := s.Queries.DigestKnowledgePendingDrafts(ctx, workspaceID)
+	if err != nil {
+		return know, fmt.Errorf("digest knowledge pending drafts: %w", err)
+	}
+	know.PendingDrafts = int(drafts)
+	return know, nil
 }
 
 func digestIssueRef(prefix, id string, number int32, title string) DigestIssueRef {

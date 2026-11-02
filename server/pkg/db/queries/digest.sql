@@ -139,3 +139,28 @@ WHERE workspace_id = sqlc.arg('workspace_id')::uuid
   AND (floor_id IS NULL OR office_slot IS NULL)
 ORDER BY created_at, id
 LIMIT sqlc.arg('row_limit')::int;
+
+-- name: DigestKnowledgeStale :many
+-- Published documents in live knowledge bases of a ready workspace, published
+-- before @published_before, oldest first. total_count repeats on each row.
+SELECT l.id, l.title, kb.key AS knowledge_base, l.published_at,
+       count(*) OVER ()::int AS total_count
+FROM knowledge_link l
+JOIN knowledge_base kb ON kb.id = l.knowledge_base_id AND kb.workspace_id = l.workspace_id
+JOIN workspace_knowledge wk ON wk.workspace_id = l.workspace_id AND wk.state = 'ready'
+WHERE l.workspace_id = sqlc.arg('workspace_id')::uuid
+  AND l.state = 'published'
+  AND kb.archived_at IS NULL
+  AND l.published_at < sqlc.arg('published_before')::timestamptz
+ORDER BY l.published_at ASC, l.id
+LIMIT sqlc.arg('row_limit')::int;
+
+-- name: DigestKnowledgePendingDrafts :one
+-- Drafts awaiting publishing across live knowledge bases of a ready workspace.
+SELECT count(*)::int AS pending_drafts
+FROM knowledge_link l
+JOIN knowledge_base kb ON kb.id = l.knowledge_base_id AND kb.workspace_id = l.workspace_id
+JOIN workspace_knowledge wk ON wk.workspace_id = l.workspace_id AND wk.state = 'ready'
+WHERE l.workspace_id = sqlc.arg('workspace_id')::uuid
+  AND l.state = 'draft'
+  AND kb.archived_at IS NULL;

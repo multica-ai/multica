@@ -64,6 +64,80 @@ func (q *Queries) DigestAgentsWithFailedRuns(ctx context.Context, arg DigestAgen
 	return items, nil
 }
 
+const digestKnowledgePendingDrafts = `-- name: DigestKnowledgePendingDrafts :one
+SELECT count(*)::int AS pending_drafts
+FROM knowledge_link l
+JOIN knowledge_base kb ON kb.id = l.knowledge_base_id AND kb.workspace_id = l.workspace_id
+JOIN workspace_knowledge wk ON wk.workspace_id = l.workspace_id AND wk.state = 'ready'
+WHERE l.workspace_id = $1::uuid
+  AND l.state = 'draft'
+  AND kb.archived_at IS NULL
+`
+
+// Drafts awaiting publishing across live knowledge bases of a ready workspace.
+func (q *Queries) DigestKnowledgePendingDrafts(ctx context.Context, workspaceID pgtype.UUID) (int32, error) {
+	row := q.db.QueryRow(ctx, digestKnowledgePendingDrafts, workspaceID)
+	var pending_drafts int32
+	err := row.Scan(&pending_drafts)
+	return pending_drafts, err
+}
+
+const digestKnowledgeStale = `-- name: DigestKnowledgeStale :many
+SELECT l.id, l.title, kb.key AS knowledge_base, l.published_at,
+       count(*) OVER ()::int AS total_count
+FROM knowledge_link l
+JOIN knowledge_base kb ON kb.id = l.knowledge_base_id AND kb.workspace_id = l.workspace_id
+JOIN workspace_knowledge wk ON wk.workspace_id = l.workspace_id AND wk.state = 'ready'
+WHERE l.workspace_id = $1::uuid
+  AND l.state = 'published'
+  AND kb.archived_at IS NULL
+  AND l.published_at < $2::timestamptz
+ORDER BY l.published_at ASC, l.id
+LIMIT $3::int
+`
+
+type DigestKnowledgeStaleParams struct {
+	WorkspaceID     pgtype.UUID        `json:"workspace_id"`
+	PublishedBefore pgtype.Timestamptz `json:"published_before"`
+	RowLimit        int32              `json:"row_limit"`
+}
+
+type DigestKnowledgeStaleRow struct {
+	ID            pgtype.UUID        `json:"id"`
+	Title         string             `json:"title"`
+	KnowledgeBase string             `json:"knowledge_base"`
+	PublishedAt   pgtype.Timestamptz `json:"published_at"`
+	TotalCount    int32              `json:"total_count"`
+}
+
+// Published documents in live knowledge bases of a ready workspace, published
+// before @published_before, oldest first. total_count repeats on each row.
+func (q *Queries) DigestKnowledgeStale(ctx context.Context, arg DigestKnowledgeStaleParams) ([]DigestKnowledgeStaleRow, error) {
+	rows, err := q.db.Query(ctx, digestKnowledgeStale, arg.WorkspaceID, arg.PublishedBefore, arg.RowLimit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []DigestKnowledgeStaleRow{}
+	for rows.Next() {
+		var i DigestKnowledgeStaleRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.Title,
+			&i.KnowledgeBase,
+			&i.PublishedAt,
+			&i.TotalCount,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const digestOfflineRuntimes = `-- name: DigestOfflineRuntimes :many
 SELECT id, COALESCE(NULLIF(custom_name, ''), name)::text AS name, provider,
        count(*) OVER ()::int AS total_count
