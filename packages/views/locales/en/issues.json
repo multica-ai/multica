@@ -2064,7 +2064,21 @@
     "delivery_save": "Save",
     "delivery_saved": "Delivery settings saved",
     "delivery_save_failed": "Could not save delivery settings",
-    "delivery_load_failed": "Could not load delivery settings"
+    "delivery_load_failed": "Could not load delivery settings",
+    "feedback_question": "Was this brief useful?",
+    "feedback_useful": "Useful",
+    "feedback_not_useful": "Not useful",
+    "feedback_tags_label": "What was off?",
+    "feedback_tag_too_long": "Too long",
+    "feedback_tag_missing_something": "Missing something",
+    "feedback_tag_wrong": "Wrong",
+    "feedback_tag_too_vague": "Too vague",
+    "feedback_tag_not_for_me": "Not for me",
+    "feedback_note_label": "Note (optional)",
+    "feedback_save": "Send feedback",
+    "feedback_saved": "Feedback saved",
+    "feedback_save_failed": "Could not save feedback",
+    "feedback_usefulness": "{{percent}}% useful over the last {{days}} days"
   },
   "views": {
     "builtin": {

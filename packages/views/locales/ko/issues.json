@@ -1990,7 +1990,21 @@
     "delivery_save": "저장",
     "delivery_saved": "전달 설정이 저장되었습니다",
     "delivery_save_failed": "전달 설정을 저장하지 못했습니다",
-    "delivery_load_failed": "전달 설정을 불러오지 못했습니다"
+    "delivery_load_failed": "전달 설정을 불러오지 못했습니다",
+    "feedback_question": "이 브리프가 도움이 되었나요?",
+    "feedback_useful": "도움이 됨",
+    "feedback_not_useful": "도움이 안 됨",
+    "feedback_tags_label": "무엇이 문제였나요?",
+    "feedback_tag_too_long": "너무 길어요",
+    "feedback_tag_missing_something": "빠진 내용이 있어요",
+    "feedback_tag_wrong": "틀렸어요",
+    "feedback_tag_too_vague": "너무 모호해요",
+    "feedback_tag_not_for_me": "나와 관련 없어요",
+    "feedback_note_label": "메모(선택)",
+    "feedback_save": "피드백 보내기",
+    "feedback_saved": "피드백이 저장되었습니다",
+    "feedback_save_failed": "피드백을 저장하지 못했습니다",
+    "feedback_usefulness": "최근 {{days}}일 동안 {{percent}}%가 도움이 됨"
   },
   "views": {
     "builtin": {

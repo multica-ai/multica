@@ -1990,7 +1990,21 @@
     "delivery_save": "保存",
     "delivery_saved": "配信設定を保存しました",
     "delivery_save_failed": "配信設定を保存できませんでした",
-    "delivery_load_failed": "配信設定を読み込めませんでした"
+    "delivery_load_failed": "配信設定を読み込めませんでした",
+    "feedback_question": "このブリーフは役に立ちましたか?",
+    "feedback_useful": "役に立った",
+    "feedback_not_useful": "役に立たなかった",
+    "feedback_tags_label": "何が問題でしたか?",
+    "feedback_tag_too_long": "長すぎる",
+    "feedback_tag_missing_something": "足りないものがある",
+    "feedback_tag_wrong": "間違っている",
+    "feedback_tag_too_vague": "曖昧すぎる",
+    "feedback_tag_not_for_me": "自分向けではない",
+    "feedback_note_label": "メモ(任意)",
+    "feedback_save": "フィードバックを送信",
+    "feedback_saved": "フィードバックを保存しました",
+    "feedback_save_failed": "フィードバックを保存できませんでした",
+    "feedback_usefulness": "過去 {{days}} 日間で {{percent}}% が役に立った"
   },
   "views": {
     "builtin": {

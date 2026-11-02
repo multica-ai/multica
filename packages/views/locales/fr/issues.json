@@ -2064,7 +2064,21 @@
     "delivery_save": "Enregistrer",
     "delivery_saved": "Préférences d'envoi enregistrées",
     "delivery_save_failed": "Impossible d'enregistrer les préférences d'envoi",
-    "delivery_load_failed": "Impossible de charger les préférences d'envoi"
+    "delivery_load_failed": "Impossible de charger les préférences d'envoi",
+    "feedback_question": "Ce briefing vous a-t-il été utile ?",
+    "feedback_useful": "Utile",
+    "feedback_not_useful": "Pas utile",
+    "feedback_tags_label": "Qu'est-ce qui n'allait pas ?",
+    "feedback_tag_too_long": "Trop long",
+    "feedback_tag_missing_something": "Il manque quelque chose",
+    "feedback_tag_wrong": "Erroné",
+    "feedback_tag_too_vague": "Trop vague",
+    "feedback_tag_not_for_me": "Pas pour moi",
+    "feedback_note_label": "Note (facultatif)",
+    "feedback_save": "Envoyer le retour",
+    "feedback_saved": "Retour enregistré",
+    "feedback_save_failed": "Impossible d'enregistrer le retour",
+    "feedback_usefulness": "{{percent}} % utile sur les {{days}} derniers jours"
   },
   "views": {
     "builtin": {

@@ -1990,7 +1990,21 @@
     "delivery_save": "儲存",
     "delivery_saved": "投遞設定已儲存",
     "delivery_save_failed": "無法儲存投遞設定",
-    "delivery_load_failed": "無法載入投遞設定"
+    "delivery_load_failed": "無法載入投遞設定",
+    "feedback_question": "這份簡報有用嗎？",
+    "feedback_useful": "有用",
+    "feedback_not_useful": "沒用",
+    "feedback_tags_label": "哪裡不對？",
+    "feedback_tag_too_long": "太長",
+    "feedback_tag_missing_something": "缺少內容",
+    "feedback_tag_wrong": "有錯誤",
+    "feedback_tag_too_vague": "太籠統",
+    "feedback_tag_not_for_me": "與我無關",
+    "feedback_note_label": "備註（選填）",
+    "feedback_save": "傳送回饋",
+    "feedback_saved": "回饋已儲存",
+    "feedback_save_failed": "無法儲存回饋",
+    "feedback_usefulness": "最近 {{days}} 天有用率 {{percent}}%"
   },
   "views": {
     "builtin": {

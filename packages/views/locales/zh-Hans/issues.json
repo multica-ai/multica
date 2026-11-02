@@ -1990,7 +1990,21 @@
     "delivery_save": "保存",
     "delivery_saved": "投递设置已保存",
     "delivery_save_failed": "无法保存投递设置",
-    "delivery_load_failed": "无法加载投递设置"
+    "delivery_load_failed": "无法加载投递设置",
+    "feedback_question": "这份简报有用吗？",
+    "feedback_useful": "有用",
+    "feedback_not_useful": "没用",
+    "feedback_tags_label": "哪里不对？",
+    "feedback_tag_too_long": "太长",
+    "feedback_tag_missing_something": "缺少内容",
+    "feedback_tag_wrong": "有错误",
+    "feedback_tag_too_vague": "太笼统",
+    "feedback_tag_not_for_me": "与我无关",
+    "feedback_note_label": "备注（可选）",
+    "feedback_save": "发送反馈",
+    "feedback_saved": "反馈已保存",
+    "feedback_save_failed": "无法保存反馈",
+    "feedback_usefulness": "最近 {{days}} 天有用率 {{percent}}%"
   },
   "views": {
     "builtin": {

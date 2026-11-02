@@ -28,6 +28,7 @@ import { ReadonlyContent } from "../../editor/readonly-content";
 import { useT } from "../../i18n";
 import { useNavigation } from "../../navigation";
 import { OfficeBriefDelivery } from "./office-brief-delivery";
+import { OfficeBriefFeedback } from "./office-brief-feedback";
 import { OfficeProposalDecision } from "./office-proposal-decision";
 import { OfficeProposalHistory, OfficeProposalRelated, OfficeProposalStatus } from "./office-proposal-details";
 
@@ -273,6 +274,8 @@ function BriefBody({
       ) : (
         <ReadonlyContent content={brief.body} />
       )}
+
+      <OfficeBriefFeedback briefId={brief.id} canManage={canManage} />
 
       {proposals.length > 0 ? (
         <section className="flex flex-col gap-2">
