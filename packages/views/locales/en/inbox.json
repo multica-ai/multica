@@ -3,6 +3,13 @@
     "title": "Inbox",
     "back": "Inbox"
   },
+  "sections": {
+    "action": "Needs action",
+    "activity": "Activity",
+    "activity_hint": "Routine activity doesn't count as unread or move issues to the top. Agent results show live in the Work sidebar.",
+    "action_empty": "Nothing needs your attention",
+    "activity_empty": "No recent activity"
+  },
   "menu": {
     "mark_all_read": "Mark all as read",
     "archive_all": "Archive all",

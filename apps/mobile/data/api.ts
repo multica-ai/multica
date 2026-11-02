@@ -537,6 +537,14 @@ class ApiClient {
   // markInboxRead above and the project write endpoints): a malformed
   // archive response should surface naturally so the optimistic patch
   // rolls back.
+  // Marks every active notification on the issue read; called when an issue
+  // is opened so reading it anywhere settles the inbox too.
+  async markIssueInboxRead(issueId: string): Promise<{ count: number }> {
+    return this.fetch<{ count: number }>(`/api/inbox/issues/${issueId}/read`, {
+      method: "POST",
+    });
+  }
+
   async archiveInbox(id: string): Promise<InboxItem> {
     return this.fetch<InboxItem>(`/api/inbox/${id}/archive`, { method: "POST" });
   }

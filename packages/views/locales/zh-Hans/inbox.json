@@ -3,6 +3,13 @@
     "title": "收件箱",
     "back": "收件箱"
   },
+  "sections": {
+    "action": "需要处理",
+    "activity": "动态",
+    "activity_hint": "例行动态不计入未读，也不会把任务顶到最前。智能体的运行结果在「工作」侧栏实时显示。",
+    "action_empty": "没有需要你处理的事",
+    "activity_empty": "暂无动态"
+  },
   "menu": {
     "mark_all_read": "全部标为已读",
     "archive_all": "归档全部",

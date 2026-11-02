@@ -140,6 +140,16 @@ describe("inbox row context menu", () => {
     expect(screen.queryByText("Mark as unread")).toBeNull();
   });
 
+  it("drops the read toggle on activity, which is never unread", async () => {
+    const { row } = renderRow({ entry: item({ read: false, section: "activity" }) });
+
+    fireEvent.contextMenu(row);
+
+    expect(await screen.findByText("Archive")).toBeInTheDocument();
+    expect(screen.queryByText("Mark as read")).toBeNull();
+    expect(screen.queryByText("Mark as unread")).toBeNull();
+  });
+
   it("archives from the menu in the main view", async () => {
     const onAction = vi.fn();
     const { row } = renderRow({ entry: item({ id: "inbox-3" }), actions: { onAction } });

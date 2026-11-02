@@ -3,6 +3,13 @@
     "title": "收件箱",
     "back": "收件箱"
   },
+  "sections": {
+    "action": "需要處理",
+    "activity": "動態",
+    "activity_hint": "例行動態不計入未讀，也不會把任務頂到最前。智能體的執行結果在「工作」側欄即時顯示。",
+    "action_empty": "沒有需要你處理的事",
+    "activity_empty": "暫無動態"
+  },
   "menu": {
     "mark_all_read": "全部標為已讀",
     "archive_all": "歸檔全部",

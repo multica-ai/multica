@@ -48,6 +48,29 @@ describe("inbox list schema", () => {
     expect(parsed.success && parsed.data[0]?.details?.to).toBe("in_review");
   });
 
+  it("keeps the inbox section and tolerates a missing or unknown one", () => {
+    const row = (section?: unknown) => ({
+      id: "inbox-s",
+      recipient_type: "member",
+      type: "status_changed",
+      ...(section === undefined ? {} : { section }),
+    });
+
+    const parsed = InboxListSchema.safeParse([
+      row("activity"),
+      row("action"),
+      row(),
+      row("someday"),
+    ]);
+    expect(parsed.success).toBe(true);
+    expect(parsed.success && parsed.data.map((i) => i.section)).toEqual([
+      "activity",
+      "action",
+      undefined,
+      undefined,
+    ]);
+  });
+
   it("rejects a numeric details value", () => {
     const badRow = {
       id: "inbox-2",

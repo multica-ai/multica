@@ -700,7 +700,7 @@ func (s *IssueWakeupService) publishSystemInbox(item db.InboxItem, issueStatus s
 		Payload: map[string]any{"item": map[string]any{
 			"id": util.UUIDToString(item.ID), "workspace_id": util.UUIDToString(item.WorkspaceID),
 			"recipient_type": item.RecipientType, "recipient_id": util.UUIDToString(item.RecipientID),
-			"type": item.Type, "severity": item.Severity, "issue_id": util.UUIDToPtr(item.IssueID),
+			"type": item.Type, "severity": item.Severity, "section": inboxwriter.Section(item.Type, item.ActorType), "issue_id": util.UUIDToPtr(item.IssueID),
 			"title": item.Title, "body": util.TextToPtr(item.Body), "read": item.Read, "archived": item.Archived,
 			"created_at": util.TimestampToString(item.CreatedAt), "actor_type": util.TextToPtr(item.ActorType),
 			"actor_id": util.UUIDToPtr(item.ActorID), "details": json.RawMessage(item.Details), "issue_status": issueStatus,

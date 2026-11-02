@@ -1,7 +1,13 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import type { QueryClient } from "@tanstack/react-query";
 import { api } from "../api";
-import { inboxKeys, mapArchivedInboxCache, patchArchivedInboxCaches, type ArchivedInboxCache } from "./queries";
+import {
+  inboxItemSection,
+  inboxKeys,
+  mapArchivedInboxCache,
+  patchArchivedInboxCaches,
+  type ArchivedInboxCache,
+} from "./queries";
 import { onInboxInvalidate, onInboxSummaryInvalidate } from "./ws-updaters";
 import { useWorkspaceId } from "../hooks";
 import type { InboxItem } from "../types";
@@ -103,12 +109,15 @@ export function useArchiveInbox() {
     onMutate: async (id) => {
       await qc.cancelQueries({ queryKey: inboxKeys.list(wsId) });
       const prev = qc.getQueryData<InboxItem[]>(inboxKeys.list(wsId));
-      // Archive all items for the same issue (same behavior as store)
+      // Archive the issue's siblings like the server does: an action row takes
+      // the whole issue, an activity row only the issue's other activity.
       const target = prev?.find((i) => i.id === id);
       const issueId = target?.issue_id;
+      const activityOnly = target ? inboxItemSection(target) === "activity" : false;
       qc.setQueryData<InboxItem[]>(inboxKeys.list(wsId), (old) =>
         old?.map((item) =>
-          item.id === id || (issueId && item.issue_id === issueId)
+          item.id === id ||
+          (issueId && item.issue_id === issueId && (!activityOnly || inboxItemSection(item) === "activity"))
             ? { ...item, archived: true }
             : item,
         ),
@@ -161,6 +170,35 @@ export function useUnarchiveInbox() {
       // Both lists: the item moves from one to the other, and the unread badge
       // rises again when it was archived unread.
       refreshInboxAfterWrite(qc, wsId);
+    },
+  });
+}
+
+/**
+ * Mark every notification on an issue read — called when the issue is opened
+ * from anywhere, so reading it through the Work sidebar settles the Inbox too.
+ * Takes `wsId` because the caller (issue detail) may render outside the
+ * workspace route context. Nothing is refetched when nothing changed.
+ */
+export function useMarkIssueInboxRead(wsId: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (issueId: string) => api.markIssueInboxRead(issueId),
+    onMutate: async (issueId) => {
+      await qc.cancelQueries({ queryKey: inboxKeys.list(wsId) });
+      const prev = qc.getQueryData<InboxItem[]>(inboxKeys.list(wsId));
+      qc.setQueryData<InboxItem[]>(inboxKeys.list(wsId), (old) =>
+        old?.map((item) =>
+          item.issue_id === issueId && !item.archived && !item.read ? { ...item, read: true } : item,
+        ),
+      );
+      return { prev };
+    },
+    onError: (_err, _issueId, ctx) => {
+      if (ctx?.prev) qc.setQueryData(inboxKeys.list(wsId), ctx.prev);
+    },
+    onSuccess: (result) => {
+      if (result.count > 0) refreshInboxAfterWrite(qc, wsId);
     },
   });
 }

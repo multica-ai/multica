@@ -2812,6 +2812,9 @@ export const InboxItemListSchema = z.array(
       body: z.string().nullish(),
       issue_status: z.string().nullish(),
       issue_priority: z.string().nullish(),
+      // An unknown section from a newer server drops to undefined, which
+      // inboxItemSection reads as "action" so nothing is hidden from unread.
+      section: z.enum(["action", "activity"]).optional().catch(undefined),
       read: z.boolean(),
       archived: z.boolean(),
       created_at: z.string(),

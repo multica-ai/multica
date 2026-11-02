@@ -582,6 +582,10 @@ const InboxItemSchema: z.ZodType<InboxItem> = z.object({
   issue_status: z.string().nullable().default(null) as unknown as z.ZodType<
     InboxItem["issue_status"]
   >,
+  // Inbox section (packages/core/types/inbox.ts InboxSection). A missing or
+  // unknown value reads as "action" through inboxItemSection, the behavior
+  // before sections existed.
+  section: z.enum(["action", "activity"]).optional().catch(undefined),
   read: z.boolean().default(false),
   archived: z.boolean().default(false),
   created_at: z.string().default(""),

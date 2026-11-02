@@ -130,6 +130,29 @@ RETURNING *;
 UPDATE inbox_item SET archived = true
 WHERE workspace_id = $1 AND recipient_type = $2 AND recipient_id = $3 AND issue_id = $4 AND archived = false;
 
+-- name: ArchiveInboxActivityByIssue :execrows
+-- Section-scoped counterpart of ArchiveInboxByIssue, used when the archived row
+-- is activity: clearing routine progress must not take an unread action item
+-- on the same issue (a mention, a failed run) with it. The activity predicate
+-- mirrors inbox.Section; the caller passes inbox.ActivityTypes and
+-- inbox.AgentActivityTypes.
+UPDATE inbox_item i SET archived = true
+WHERE i.workspace_id = sqlc.arg('workspace_id')
+  AND i.recipient_type = sqlc.arg('recipient_type')
+  AND i.recipient_id = sqlc.arg('recipient_id')
+  AND i.issue_id = sqlc.arg('issue_id')
+  AND i.archived = false
+  AND (i.type = ANY(sqlc.arg('activity_types')::text[])
+           OR (COALESCE(i.actor_type, '') = 'agent' AND i.type = ANY(sqlc.arg('agent_activity_types')::text[])));
+
+-- name: MarkInboxReadByIssue :execrows
+-- Opening an issue anywhere (Work sidebar, search, a link) settles its inbox
+-- notifications, so the same event is never cleared twice. Every active row is
+-- marked, not just the newest, so no older sibling resurfaces as unread.
+UPDATE inbox_item SET read = true
+WHERE workspace_id = $1 AND recipient_type = 'member' AND recipient_id = $2 AND issue_id = $3
+  AND archived = false AND read = false;
+
 -- name: UnarchiveInboxItem :one
 -- Deliberately does not touch `read`: unarchiving restores an item to the main
 -- inbox in the exact read/unread state it was archived in, so restoring an
@@ -151,8 +174,16 @@ WHERE workspace_id = $1 AND issue_id = $2 AND type = $3 AND archived = false
 RETURNING recipient_type, recipient_id;
 
 -- name: CountUnreadInbox :one
-SELECT count(*) FROM inbox_item
-WHERE workspace_id = $1 AND recipient_type = $2 AND recipient_id = $3 AND read = false AND archived = false;
+-- Activity rows never count as unread, whatever their stored `read` flag; see
+-- inbox.Section for the rule the predicate mirrors.
+SELECT count(*) FROM inbox_item i
+WHERE i.workspace_id = sqlc.arg('workspace_id')
+  AND i.recipient_type = sqlc.arg('recipient_type')
+  AND i.recipient_id = sqlc.arg('recipient_id')
+  AND i.read = false
+  AND i.archived = false
+  AND NOT (i.type = ANY(sqlc.arg('activity_types')::text[])
+           OR (COALESCE(i.actor_type, '') = 'agent' AND i.type = ANY(sqlc.arg('agent_activity_types')::text[])));
 
 -- name: CountUnreadInboxByWorkspace :many
 -- Per-workspace unread inbox counts for a recipient member, matching the
@@ -165,6 +196,10 @@ WHERE workspace_id = $1 AND recipient_type = $2 AND recipient_id = $3 AND read =
 -- member join keeps counts scoped to workspaces the user still belongs to,
 -- so a stale item left behind in a workspace the user has since left cannot
 -- light the dot.
+--
+-- Only action rows take part (MUL-8483): activity is never unread, and it does
+-- not decide a group's state either, so a routine status change landing after
+-- an unread mention leaves the mention counted.
 SELECT newest.workspace_id, count(*) AS count
 FROM (
     SELECT DISTINCT ON (i.workspace_id, COALESCE(i.issue_id, i.id))
@@ -172,8 +207,10 @@ FROM (
     FROM inbox_item i
     JOIN member m ON m.workspace_id = i.workspace_id AND m.user_id = i.recipient_id
     WHERE i.recipient_type = 'member'
-      AND i.recipient_id = $1
+      AND i.recipient_id = sqlc.arg('recipient_id')
       AND i.archived = false
+      AND NOT (i.type = ANY(sqlc.arg('activity_types')::text[])
+           OR (COALESCE(i.actor_type, '') = 'agent' AND i.type = ANY(sqlc.arg('agent_activity_types')::text[])))
     ORDER BY i.workspace_id, COALESCE(i.issue_id, i.id), i.created_at DESC
 ) newest
 WHERE newest.read = false
@@ -188,33 +225,41 @@ UPDATE inbox_item SET archived = true
 WHERE workspace_id = $1 AND recipient_type = 'member' AND recipient_id = $2 AND archived = false;
 
 -- name: ArchiveAllReadInbox :execrows
--- "Read" is the state of the one issue row the inbox renders: the newest
--- active notification in that issue group. Archive every row in groups whose
--- newest row is read, and leave an unread group wholly untouched. Updating raw
--- read rows instead makes an older unread sibling reappear after the newest
--- row is archived (and can archive an older read sibling under an unread row).
-WITH newest_groups AS (
-    SELECT DISTINCT ON (COALESCE(i.issue_id, i.id))
+-- "Read" is the state of the one row the inbox renders per issue and section:
+-- the newest active notification in that group. Action and activity group
+-- separately (MUL-8483), and an activity group always counts as read. Archive
+-- every row in qualifying groups and leave an unread action group wholly
+-- untouched. Updating raw read rows instead makes an older unread sibling
+-- reappear after the newest row is archived (and can archive an older read
+-- sibling under an unread row).
+WITH active AS (
+    SELECT i.id,
            COALESCE(i.issue_id, i.id) AS group_id,
-           i.read
+           i.created_at,
+           i.read,
+           (i.type = ANY(sqlc.arg('activity_types')::text[])
+               OR (COALESCE(i.actor_type, '') = 'agent' AND i.type = ANY(sqlc.arg('agent_activity_types')::text[]))) AS is_activity
     FROM inbox_item i
-    WHERE i.workspace_id = $1
+    WHERE i.workspace_id = sqlc.arg('workspace_id')
       AND i.recipient_type = 'member'
-      AND i.recipient_id = $2
+      AND i.recipient_id = sqlc.arg('recipient_id')
       AND i.archived = false
-    ORDER BY COALESCE(i.issue_id, i.id), i.created_at DESC, i.id DESC
+), newest_groups AS (
+    SELECT DISTINCT ON (group_id, is_activity)
+           group_id,
+           is_activity,
+           read
+    FROM active
+    ORDER BY group_id, is_activity, created_at DESC, id DESC
 ), read_groups AS (
-    SELECT group_id
+    SELECT group_id, is_activity
     FROM newest_groups
-    WHERE read = true
+    WHERE read = true OR is_activity
 )
 UPDATE inbox_item i SET archived = true
-FROM read_groups selected
-WHERE i.workspace_id = $1
-  AND i.recipient_type = 'member'
-  AND i.recipient_id = $2
-  AND i.archived = false
-  AND COALESCE(i.issue_id, i.id) = selected.group_id;
+FROM active a
+JOIN read_groups selected USING (group_id, is_activity)
+WHERE i.id = a.id;
 
 -- name: ArchiveCompletedInbox :execrows
 UPDATE inbox_item i SET archived = true

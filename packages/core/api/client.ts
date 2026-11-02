@@ -2964,6 +2964,11 @@ export class ApiClient {
     return this.fetch(`/api/inbox/${id}/read`, { method: "POST" });
   }
 
+  /** Marks every active notification on the issue read for the caller. */
+  async markIssueInboxRead(issueId: string): Promise<{ count: number }> {
+    return this.fetch(`/api/inbox/issues/${issueId}/read`, { method: "POST" });
+  }
+
   async markInboxUnread(id: string): Promise<InboxItem> {
     return this.fetch(`/api/inbox/${id}/unread`, { method: "POST" });
   }

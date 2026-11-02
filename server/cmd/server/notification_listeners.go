@@ -1090,6 +1090,7 @@ func inboxItemToResponse(item db.InboxItem) map[string]any {
 		"recipient_id":   util.UUIDToString(item.RecipientID),
 		"type":           item.Type,
 		"severity":       item.Severity,
+		"section":        inbox.Section(item.Type, item.ActorType),
 		"issue_id":       util.UUIDToPtr(item.IssueID),
 		"title":          item.Title,
 		"body":           util.TextToPtr(item.Body),

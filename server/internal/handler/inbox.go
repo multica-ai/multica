@@ -8,6 +8,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5/pgtype"
+	"github.com/multica-ai/multica/server/internal/inbox"
 	"github.com/multica-ai/multica/server/internal/logger"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 	"github.com/multica-ai/multica/server/pkg/protocol"
@@ -20,6 +21,7 @@ type InboxItemResponse struct {
 	RecipientID   string          `json:"recipient_id"`
 	Type          string          `json:"type"`
 	Severity      string          `json:"severity"`
+	Section       string          `json:"section"`
 	IssueID       *string         `json:"issue_id"`
 	Title         string          `json:"title"`
 	Body          *string         `json:"body"`
@@ -41,6 +43,7 @@ func inboxToResponse(i db.InboxItem) InboxItemResponse {
 		RecipientID:   uuidToString(i.RecipientID),
 		Type:          i.Type,
 		Severity:      i.Severity,
+		Section:       inbox.Section(i.Type, i.ActorType),
 		IssueID:       uuidToPtr(i.IssueID),
 		Title:         i.Title,
 		Body:          textToPtr(i.Body),
@@ -117,6 +120,7 @@ func inboxRowToResponse(r db.ListInboxItemsRow) InboxItemResponse {
 		RecipientID:   uuidToString(r.RecipientID),
 		Type:          r.Type,
 		Severity:      r.Severity,
+		Section:       inbox.Section(r.Type, r.ActorType),
 		IssueID:       uuidToPtr(r.IssueID),
 		Title:         r.Title,
 		Body:          inboxListBody(r.Type, r.IssueID, r.Body),
@@ -284,14 +288,28 @@ func (h *Handler) ArchiveInboxItem(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Archive all sibling inbox items for the same issue (issue-level archive)
+	// Archive the sibling inbox items for the same issue. An action row takes
+	// the whole issue with it; an activity row only clears the issue's other
+	// activity, so an unread mention or failure on it stays in the inbox.
+	section := inbox.Section(item.Type, item.ActorType)
 	if item.IssueID.Valid {
-		h.Queries.ArchiveInboxByIssue(r.Context(), db.ArchiveInboxByIssueParams{
-			WorkspaceID:   item.WorkspaceID,
-			RecipientType: item.RecipientType,
-			RecipientID:   item.RecipientID,
-			IssueID:       item.IssueID,
-		})
+		if section == inbox.SectionActivity {
+			h.Queries.ArchiveInboxActivityByIssue(r.Context(), db.ArchiveInboxActivityByIssueParams{
+				WorkspaceID:        item.WorkspaceID,
+				RecipientType:      item.RecipientType,
+				RecipientID:        item.RecipientID,
+				IssueID:            item.IssueID,
+				ActivityTypes:      inbox.ActivityTypes,
+				AgentActivityTypes: inbox.AgentActivityTypes,
+			})
+		} else {
+			h.Queries.ArchiveInboxByIssue(r.Context(), db.ArchiveInboxByIssueParams{
+				WorkspaceID:   item.WorkspaceID,
+				RecipientType: item.RecipientType,
+				RecipientID:   item.RecipientID,
+				IssueID:       item.IssueID,
+			})
+		}
 	}
 
 	userID := requestUserID(r)
@@ -299,6 +317,7 @@ func (h *Handler) ArchiveInboxItem(w http.ResponseWriter, r *http.Request) {
 	h.publish(protocol.EventInboxArchived, workspaceID, "member", userID, map[string]any{
 		"item_id":      uuidToString(item.ID),
 		"issue_id":     uuidToPtr(item.IssueID),
+		"section":      section,
 		"recipient_id": uuidToString(item.RecipientID),
 	})
 
@@ -360,9 +379,11 @@ func (h *Handler) CountUnreadInbox(w http.ResponseWriter, r *http.Request) {
 	}
 
 	count, err := h.Queries.CountUnreadInbox(r.Context(), db.CountUnreadInboxParams{
-		WorkspaceID:   wsUUID,
-		RecipientType: "member",
-		RecipientID:   parseUUID(userID),
+		WorkspaceID:        wsUUID,
+		RecipientType:      "member",
+		RecipientID:        parseUUID(userID),
+		ActivityTypes:      inbox.ActivityTypes,
+		AgentActivityTypes: inbox.AgentActivityTypes,
 	})
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to count unread inbox")
@@ -391,7 +412,11 @@ func (h *Handler) UnreadInboxSummary(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	rows, err := h.Queries.CountUnreadInboxByWorkspace(r.Context(), parseUUID(userID))
+	rows, err := h.Queries.CountUnreadInboxByWorkspace(r.Context(), db.CountUnreadInboxByWorkspaceParams{
+		RecipientID:        parseUUID(userID),
+		ActivityTypes:      inbox.ActivityTypes,
+		AgentActivityTypes: inbox.AgentActivityTypes,
+	})
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to summarize unread inbox")
 		return
@@ -437,6 +462,39 @@ func (h *Handler) MarkAllInboxRead(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"count": count})
 }
 
+// MarkIssueInboxRead marks every active notification on one issue read for
+// the caller. Clients call it whenever an issue is opened, from any surface,
+// so reading an issue through the Work sidebar also settles its inbox rows.
+func (h *Handler) MarkIssueInboxRead(w http.ResponseWriter, r *http.Request) {
+	userID, ok := requireUserID(w, r)
+	if !ok {
+		return
+	}
+	issue, ok := h.loadIssueForUser(w, r, chi.URLParam(r, "issueId"))
+	if !ok {
+		return
+	}
+
+	count, err := h.Queries.MarkInboxReadByIssue(r.Context(), db.MarkInboxReadByIssueParams{
+		WorkspaceID: issue.WorkspaceID,
+		RecipientID: parseUUID(userID),
+		IssueID:     issue.ID,
+	})
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to mark issue inbox read")
+		return
+	}
+
+	if count > 0 {
+		h.publish(protocol.EventInboxBatchRead, uuidToString(issue.WorkspaceID), "member", userID, map[string]any{
+			"recipient_id": userID,
+			"issue_id":     uuidToString(issue.ID),
+			"count":        count,
+		})
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"count": count})
+}
+
 func (h *Handler) ArchiveAllInbox(w http.ResponseWriter, r *http.Request) {
 	userID, ok := requireUserID(w, r)
 	if !ok {
@@ -478,8 +536,10 @@ func (h *Handler) ArchiveAllReadInbox(w http.ResponseWriter, r *http.Request) {
 	}
 
 	count, err := h.Queries.ArchiveAllReadInbox(r.Context(), db.ArchiveAllReadInboxParams{
-		WorkspaceID: wsUUID,
-		RecipientID: parseUUID(userID),
+		WorkspaceID:        wsUUID,
+		RecipientID:        parseUUID(userID),
+		ActivityTypes:      inbox.ActivityTypes,
+		AgentActivityTypes: inbox.AgentActivityTypes,
 	})
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to archive all read inbox")
