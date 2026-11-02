@@ -1,5 +1,20 @@
-import type { Issue, IssueStatus, IssuePriority, IssueAssigneeGroup, PropertyFilterValue, PropertyOperatorFilter } from "@multica/core/types";
-import type { ActorFilterValue } from "@multica/core/issues/stores/view-store";
+import type { Issue, IssueStatus, IssuePriority, IssueAssigneeGroup, ProjectStatus, PropertyFilterValue, PropertyOperatorFilter } from "@multica/core/types";
+import type {
+  ActorFilterValue,
+  IssueRelationFilter,
+  NegatableFilterDimension,
+} from "@multica/core/issues/stores/view-store";
+import {
+  dueDateMatches,
+  FILTER_NONE_VALUE,
+  isPropertyCondition,
+  propertyIdOfField,
+  type AdvancedFilterCondition,
+  type AdvancedFilterGroup,
+  type DueDateFilter,
+} from "@multica/core/issues/stores/filter-tree";
+import { PROPERTY_FILTER_NONE_VALUE } from "@multica/core/issues/stores/filter-operators";
+import { todayDateOnly } from "@multica/core/issues/date";
 import type { IssueActivityState } from "../surface/activity";
 
 export interface IssueFilters {
@@ -14,7 +29,23 @@ export interface IssueFilters {
   creatorFilters: ActorFilterValue[];
   projectFilters: string[];
   includeNoProject: boolean;
+  /** Lifecycle status of the parent project. Needs
+   *  `IssueFilterContext.projectStatusById` to be evaluated — an Issue only
+   *  carries `project_id`. */
+  projectStatusFilters?: ProjectStatus[];
+  /** See IssueFilterContext.projectStatusById. Carried on the filter object
+   *  so the context-free `filterIssues` entry point can evaluate the
+   *  project-status predicate, like `runningIssueIds` does for working-only. */
+  projectStatusById?: ReadonlyMap<string, ProjectStatus>;
   labelFilters: string[];
+  relationFilters?: IssueRelationFilter[];
+  /** See IssueFilterContext.relation. */
+  relationContext?: IssueRelationContext;
+  dueDateFilters?: DueDateFilter[];
+  /** See IssueFilterContext.today. */
+  today?: string;
+  advancedFilter?: AdvancedFilterGroup | null;
+  negatedFilters?: readonly NegatableFilterDimension[];
   /** Custom-property filters: definition id → selected values (OR within
    *  a definition, AND across definitions; checkbox uses "true"/"false"). */
   propertyFilters?: Record<string, PropertyFilterValue[]>;
@@ -40,7 +71,15 @@ export interface IssueFilterState {
   creatorFilters: ActorFilterValue[];
   projectFilters: string[];
   includeNoProject: boolean;
+  /** See IssueFilters.projectStatusFilters. */
+  projectStatusFilters?: ProjectStatus[];
   labelFilters: string[];
+  relationFilters?: IssueRelationFilter[];
+  dueDateFilters?: DueDateFilter[];
+  /** A rule tree ANDed with everything else. */
+  advancedFilter?: AdvancedFilterGroup | null;
+  /** Dimensions evaluated as "is not". */
+  negatedFilters?: readonly NegatableFilterDimension[];
   propertyFilters?: Record<string, PropertyFilterValue[]>;
   workingOnly: boolean;
   /** See IssueFilters.showSubIssues — only an explicit `false` hides. */
@@ -50,6 +89,22 @@ export interface IssueFilterState {
 export interface IssueFilterContext {
   activityByIssueId?: ReadonlyMap<string, IssueActivityState>;
   runningIssueIds?: ReadonlySet<string>;
+  /** Project id → its lifecycle status, from the workspace project list.
+   *  Absent on surfaces that never load it, which makes the project-status
+   *  filter a no-op there rather than blanking the surface. */
+  projectStatusById?: ReadonlyMap<string, ProjectStatus>;
+  /** Who "me" is for the relation filter. Absent until the viewer and their
+   *  agents are known, which makes that filter a no-op. */
+  relation?: IssueRelationContext;
+  /** The viewer's calendar day ("YYYY-MM-DD") due-date buckets resolve
+   *  against; defaults to the local today. */
+  today?: string;
+}
+
+export interface IssueRelationContext {
+  userId: string;
+  /** Agents the viewer owns. */
+  myAgentIds: ReadonlySet<string>;
 }
 
 /**
@@ -58,7 +113,7 @@ export interface IssueFilterContext {
  * (`server/internal/handler/property.go`); cannot collide with a real option id
  * (select options are UUIDs, checkbox uses "true"/"false").
  */
-export const NO_PROPERTY_VALUE = "__none__";
+export const NO_PROPERTY_VALUE = PROPERTY_FILTER_NONE_VALUE;
 
 /**
  * Match one stored value against one operator filter member. Mirrors the
@@ -191,11 +246,31 @@ export function applyIssueFilters(
     assigneeFilters.length > 0 ||
     includeNoAssignee;
   const hasProjectFilter = projectFilters.length > 0 || includeNoProject;
+  const projectStatusFilters = filters.projectStatusFilters ?? [];
+  // Without the catalog the predicate cannot be answered. Treat that as
+  // "no filter" — the server-driven surfaces enforce it for real, and a
+  // silent match-none here would empty a list with no visible cause.
+  const projectStatusCatalog = context.projectStatusById;
+  const hasProjectStatusFilter =
+    projectStatusFilters.length > 0 && projectStatusCatalog !== undefined;
   // Empty set passed without `agentRunningFilter` is a no-op. When the
   // filter is on but the set is missing/empty, hide everything — the
   // user opted into "only running" and there is nothing running.
   const applyWorkingOnly = workingOnly === true;
   const hideSubIssues = filters.showSubIssues === false;
+
+  const relationFilters = filters.relationFilters ?? [];
+  // Same rule as the project-status catalog: no viewer, no answer, no filter.
+  const relationContext = context.relation;
+  const hasRelationFilter = relationFilters.length > 0 && relationContext !== undefined;
+  const dueDateFilters = filters.dueDateFilters ?? [];
+  const today = context.today ?? todayDateOnly();
+  const advancedFilter = filters.advancedFilter ?? null;
+  const negated = new Set(filters.negatedFilters ?? []);
+  // "Is not" keeps exactly what "is" drops, so an issue with no value for the
+  // dimension (unassigned, no project, no labels) survives a negated filter.
+  const passes = (dimension: NegatableFilterDimension, matched: boolean) =>
+    negated.has(dimension) ? !matched : matched;
 
   return issues.filter((issue) => {
     if (applyWorkingOnly && !issueIsWorking(issue.id, context))
@@ -203,59 +278,188 @@ export function applyIssueFilters(
 
     if (hideSubIssues && issue.parent_issue_id) return false;
 
-    if (statusFilters.length > 0 && !statusFilters.includes(issue.status))
+    if (statusFilters.length > 0 && !passes("status", statusFilters.includes(issue.status)))
       return false;
 
-    if (priorityFilters.length > 0 && !priorityFilters.includes(issue.priority))
+    if (
+      priorityFilters.length > 0 &&
+      !passes("priority", priorityFilters.includes(issue.priority))
+    )
       return false;
 
     if (hasAssigneeFilter) {
-      if (!issue.assignee_id) {
-        // Unassigned issue — show only if "No assignee" is checked
-        if (!includeNoAssignee) return false;
-      } else if (assigneeFilters.length > 0) {
-        // Assigned issue — show only if assignee is in the filter list
-        if (!assigneeFilters.some(
-          (f) => f.type === issue.assignee_type && f.id === issue.assignee_id,
-        )) return false;
-      } else {
-        // Only "No assignee" is checked, no specific assignees → hide assigned issues
-        return false;
-      }
+      // Unassigned matches only "No assignee"; assigned matches only a listed
+      // actor (an active filter with neither matches nothing).
+      const matched = !issue.assignee_id
+        ? includeNoAssignee
+        : assigneeFilters.some(
+            (f) => f.type === issue.assignee_type && f.id === issue.assignee_id,
+          );
+      if (!passes("assignee", matched)) return false;
     }
 
     if (
       creatorFilters.length > 0 &&
-      !creatorFilters.some(
-        (f) => f.type === issue.creator_type && f.id === issue.creator_id,
+      !passes(
+        "creator",
+        creatorFilters.some(
+          (f) => f.type === issue.creator_type && f.id === issue.creator_id,
+        ),
       )
     ) {
       return false;
     }
 
     if (hasProjectFilter) {
-      if (!issue.project_id) {
-        if (!includeNoProject) return false;
-      } else if (projectFilters.length > 0) {
-        if (!projectFilters.includes(issue.project_id)) return false;
-      } else {
-        // Only "No project" is checked → hide issues that have a project
-        return false;
-      }
+      const matched = !issue.project_id
+        ? includeNoProject
+        : projectFilters.includes(issue.project_id);
+      if (!passes("project", matched)) return false;
+    }
+
+    if (hasProjectStatusFilter) {
+      // An issue with no project has no status to match — same as the
+      // server's EXISTS predicate. `includeNoProject` widens the project-id
+      // dimension only.
+      const projectStatus = issue.project_id
+        ? projectStatusCatalog.get(issue.project_id)
+        : undefined;
+      const matched = !!projectStatus && projectStatusFilters.includes(projectStatus);
+      if (!passes("projectStatus", matched)) return false;
     }
 
     if (labelFilters.length > 0) {
       // OR semantics within the filter: keep issues that carry any of the
       // selected labels. Matches existing priority / project multi-select.
-      const issueLabels = issue.labels;
-      if (!issueLabels || issueLabels.length === 0) return false;
-      if (!issueLabels.some((l) => labelFilters.includes(l.id))) return false;
+      const matched = (issue.labels ?? []).some((l) => labelFilters.includes(l.id));
+      if (!passes("label", matched)) return false;
     }
+
+    if (hasRelationFilter) {
+      const matched = relationFilters.some((relation) =>
+        issueMatchesRelation(issue, relation, relationContext),
+      );
+      if (!passes("relation", matched)) return false;
+    }
+
+    if (dueDateFilters.length > 0) {
+      const matched = dueDateFilters.some((bucket) => dueDateMatches(issue.due_date, bucket, today));
+      if (!passes("dueDate", matched)) return false;
+    }
+
+    if (advancedFilter && issueMatchesFilterGroup(issue, advancedFilter, context, today) === false)
+      return false;
 
     if (!issueMatchesPropertyFilters(issue, filters.propertyFilters)) return false;
 
     return true;
   });
+}
+
+function issueMatchesRelation(
+  issue: Issue,
+  relation: IssueRelationFilter,
+  context: IssueRelationContext,
+): boolean {
+  switch (relation) {
+    case "assigned":
+      return issue.assignee_type === "member" && issue.assignee_id === context.userId;
+    case "created":
+      return issue.creator_type === "member" && issue.creator_id === context.userId;
+    case "my_agents":
+      return (
+        issue.assignee_type === "agent" &&
+        !!issue.assignee_id &&
+        context.myAgentIds.has(issue.assignee_id)
+      );
+  }
+}
+
+/**
+ * One rule-tree node against an issue, or undefined when the node cannot be
+ * answered: it is empty, or it needs a catalog the surface never loaded
+ * (project statuses, the viewer). An unanswerable member drops out of its
+ * group, mirroring the server dropping empty members.
+ */
+function issueMatchesFilterGroup(
+  issue: Issue,
+  group: AdvancedFilterGroup,
+  context: IssueFilterContext,
+  today: string,
+): boolean | undefined {
+  let answered = false;
+  for (const child of group.children) {
+    const matched =
+      child.type === "group"
+        ? issueMatchesFilterGroup(issue, child, context, today)
+        : issueMatchesFilterCondition(issue, child, context, today);
+    if (matched === undefined) continue;
+    answered = true;
+    if (group.match === "any" && matched) return true;
+    if (group.match === "all" && !matched) return false;
+  }
+  if (!answered) return undefined;
+  return group.match === "all";
+}
+
+function issueMatchesFilterCondition(
+  issue: Issue,
+  condition: AdvancedFilterCondition,
+  context: IssueFilterContext,
+  today: string,
+): boolean | undefined {
+  if (condition.values.length === 0) return undefined;
+  if (isPropertyCondition(condition)) {
+    const propertyId = propertyIdOfField(condition.field) ?? "";
+    const matched = issueMatchesPropertyFilters(issue, { [propertyId]: condition.values });
+    return condition.negated ? !matched : matched;
+  }
+  const { values } = condition;
+  const actorMatches = (type: string | null, id: string | null) =>
+    !!id && values.includes(`${type}:${id}`);
+  let matched: boolean;
+  switch (condition.field) {
+    case "status":
+      matched = values.includes(issue.status);
+      break;
+    case "priority":
+      matched = values.includes(issue.priority);
+      break;
+    case "assignee":
+      matched = issue.assignee_id
+        ? actorMatches(issue.assignee_type, issue.assignee_id)
+        : values.includes(FILTER_NONE_VALUE);
+      break;
+    case "creator":
+      matched = actorMatches(issue.creator_type, issue.creator_id);
+      break;
+    case "project":
+      matched = issue.project_id
+        ? values.includes(issue.project_id)
+        : values.includes(FILTER_NONE_VALUE);
+      break;
+    case "projectStatus": {
+      if (!context.projectStatusById) return undefined;
+      const status = issue.project_id ? context.projectStatusById.get(issue.project_id) : undefined;
+      matched = !!status && values.includes(status);
+      break;
+    }
+    case "label":
+      matched = (issue.labels ?? []).some((label) => values.includes(label.id));
+      break;
+    case "relation": {
+      const relation = context.relation;
+      if (!relation) return undefined;
+      matched = values.some((value) =>
+        issueMatchesRelation(issue, value as IssueRelationFilter, relation),
+      );
+      break;
+    }
+    case "dueDate":
+      matched = values.some((bucket) => dueDateMatches(issue.due_date, bucket as DueDateFilter, today));
+      break;
+  }
+  return condition.negated ? !matched : matched;
 }
 
 export function filterIssues(issues: Issue[], filters: IssueFilters): Issue[] {
@@ -270,12 +474,22 @@ export function filterIssues(issues: Issue[], filters: IssueFilters): Issue[] {
       creatorFilters: filters.creatorFilters,
       projectFilters: filters.projectFilters,
       includeNoProject: filters.includeNoProject,
+      projectStatusFilters: filters.projectStatusFilters,
       labelFilters: filters.labelFilters,
+      relationFilters: filters.relationFilters,
+      dueDateFilters: filters.dueDateFilters,
+      advancedFilter: filters.advancedFilter,
+      negatedFilters: filters.negatedFilters,
       propertyFilters: filters.propertyFilters,
       workingOnly: filters.agentRunningFilter === true,
       showSubIssues: filters.showSubIssues,
     },
-    { runningIssueIds: filters.runningIssueIds },
+    {
+      runningIssueIds: filters.runningIssueIds,
+      projectStatusById: filters.projectStatusById,
+      relation: filters.relationContext,
+      today: filters.today,
+    },
   );
 }
 

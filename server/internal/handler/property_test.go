@@ -15,6 +15,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
 
+	"github.com/multica-ai/multica/server/internal/issueproperty"
 	"github.com/multica-ai/multica/server/internal/testutil"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
@@ -218,6 +219,114 @@ func TestPropertyDefinitionValidation(t *testing.T) {
 	}
 }
 
+func TestPropertySelectOptionLimit(t *testing.T) {
+	for _, propertyType := range []string{"select", "multi_select"} {
+		t.Run(propertyType, func(t *testing.T) {
+			options := make([]PropertyOption, 201)
+			for i := range options {
+				options[i] = PropertyOption{Name: fmt.Sprintf("Service %03d", i), Color: "#3b82f6"}
+			}
+			body := map[string]any{
+				"name": "Services" + uuid.NewString()[:8], "type": propertyType,
+				"config": PropertyConfig{Options: options[:51]},
+			}
+			created := createTestProperty(t, body)
+			if len(created.Config.Options) != 51 {
+				t.Fatalf("created option count = %d, want 51", len(created.Config.Options))
+			}
+			copy(options, created.Config.Options)
+			var updated PropertyResponse
+			testutil.Call(t, testHandler.UpdateProperty,
+				withURLParam(newRequest(http.MethodPatch, "/api/properties/"+created.ID, map[string]any{
+					"config": PropertyConfig{Options: options[:200]},
+				}), "id", created.ID),
+			).Want(http.StatusOK).JSON(&updated)
+			if len(updated.Config.Options) != 200 || updated.Config.Options[0].ID != created.Config.Options[0].ID {
+				t.Fatalf("expanding to 200 did not preserve options: %+v", updated.Config)
+			}
+
+			body["name"] = "OverLimit" + uuid.NewString()[:8]
+			body["config"] = PropertyConfig{Options: options}
+			response := testutil.Call(t, testHandler.CreateProperty,
+				newRequest(http.MethodPost, "/api/properties", body),
+			).Want(http.StatusBadRequest)
+			if !strings.Contains(response.Body.String(), "more than 200 options") {
+				t.Fatalf("unexpected create limit error: %s", response.Body.String())
+			}
+			response = testutil.Call(t, testHandler.UpdateProperty,
+				withURLParam(newRequest(http.MethodPatch, "/api/properties/"+created.ID, map[string]any{
+					"config": PropertyConfig{Options: options},
+				}), "id", created.ID),
+			).Want(http.StatusBadRequest)
+			if !strings.Contains(response.Body.String(), "more than 200 options") {
+				t.Fatalf("unexpected update limit error: %s", response.Body.String())
+			}
+
+			issueID := dbfx.Issue(t, "large select option list")
+			lastID := updated.Config.Options[199].ID
+			var value any = lastID
+			if propertyType == "multi_select" {
+				value = []string{lastID}
+			}
+			if response := setIssuePropertyRaw(t, issueID, created.ID, value); response.Code != http.StatusOK {
+				t.Fatalf("selecting option 200: %d: %s", response.Code, response.Body.String())
+			}
+			filter, _ := json.Marshal(map[string][]string{created.ID: {lastID}})
+			var listed struct {
+				Issues []IssueResponse `json:"issues"`
+			}
+			testutil.Call(t, testHandler.ListIssues,
+				newRequest(http.MethodGet, "/api/issues?properties="+url.QueryEscape(string(filter)), nil),
+			).Want(http.StatusOK).JSON(&listed)
+			if len(listed.Issues) != 1 || listed.Issues[0].ID != issueID {
+				t.Fatalf("filtering by option 200 did not return the issue: %+v", listed.Issues)
+			}
+		})
+	}
+}
+
+func TestIssuePropertyMultiSelectValueLimit(t *testing.T) {
+	options := make([]PropertyOption, 200)
+	for i := range options {
+		options[i] = PropertyOption{Name: fmt.Sprintf("Service %03d", i), Color: "#3b82f6"}
+	}
+	property := createTestProperty(t, map[string]any{
+		"name": "SelectionLimit" + uuid.NewString()[:8], "type": "multi_select",
+		"config": PropertyConfig{Options: options},
+	})
+	ids := make([]string, 51)
+	for i := range ids {
+		ids[i] = property.Config.Options[149+i].ID
+	}
+	title := "selection limit " + uuid.NewString()
+	body := map[string]any{"title": title, "properties": map[string]any{property.ID: ids}}
+	response := testutil.Call(t, testHandler.CreateIssue,
+		newRequest(http.MethodPost, "/api/issues", body),
+	).Want(http.StatusBadRequest)
+	if !strings.Contains(response.Body.String(), "more than 50 options") || countIssuesWithAtomicPropertyTitle(t, title) != 0 {
+		t.Fatalf("over-limit create should fail atomically: %s", response.Body.String())
+	}
+	body["properties"] = map[string]any{property.ID: ids[:50]}
+	created := createIssueWithPropertyBody(t, body)
+	if values, ok := created.Properties[property.ID].([]any); !ok || len(values) != 50 {
+		t.Fatalf("50 selections not preserved on create: %#v", created.Properties)
+	}
+	if response := setIssuePropertyRaw(t, created.ID, property.ID, ids[:50]); response.Code != http.StatusOK {
+		t.Fatalf("50 selections rejected: %d: %s", response.Code, response.Body.String())
+	}
+	if response := setIssuePropertyRaw(t, created.ID, property.ID, ids); response.Code != http.StatusBadRequest || !strings.Contains(response.Body.String(), "more than 50 options") {
+		t.Fatalf("51 selections should fail: %d: %s", response.Code, response.Body.String())
+	}
+	var stored []byte
+	if err := testPool.QueryRow(context.Background(), `SELECT properties -> $2 FROM issue WHERE id = $1`, created.ID, property.ID).Scan(&stored); err != nil {
+		t.Fatal(err)
+	}
+	var values []string
+	if err := json.Unmarshal(stored, &values); err != nil || len(values) != 50 {
+		t.Fatalf("rejected write changed saved values: %s, %v", stored, err)
+	}
+}
+
 // TestPropertyAdminGate verifies the two definition-management gates: agent
 // actors are rejected outright (even though the fixture user is the workspace
 // owner), while value writes from the same agent context succeed.
@@ -313,6 +422,30 @@ func TestIssuePropertyValues(t *testing.T) {
 		t.Fatalf("good number: expected 200, got %d: %s", w.Code, w.Body.String())
 	}
 
+	// multi_text: duplicates dropped, caller order kept.
+	listText := createTestProperty(t, map[string]any{"name": "Aliases" + uuid.NewString()[:8], "type": "multi_text"})
+	wl := setIssuePropertyRaw(t, issueID, listText.ID, []string{"beta", "alpha", "beta"})
+	if wl.Code != http.StatusOK {
+		t.Fatalf("multi_text set: expected 200, got %d: %s", wl.Code, wl.Body.String())
+	}
+	var listResp struct {
+		Properties map[string]any `json:"properties"`
+	}
+	json.NewDecoder(wl.Body).Decode(&listResp)
+	storedList, _ := listResp.Properties[listText.ID].([]any)
+	if len(storedList) != 2 || storedList[0] != "beta" || storedList[1] != "alpha" {
+		t.Fatalf("multi_text not stored in caller order: %v", storedList)
+	}
+
+	// multi_url: entry-level http(s) validation.
+	listURL := createTestProperty(t, map[string]any{"name": "Links" + uuid.NewString()[:8], "type": "multi_url"})
+	if w := setIssuePropertyRaw(t, issueID, listURL.ID, []string{"https://example.com/a", "https://example.com/b"}); w.Code != http.StatusOK {
+		t.Fatalf("good multi_url: expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	if w := setIssuePropertyRaw(t, issueID, listURL.ID, []string{"https://example.com/a", "ftp://example.com"}); w.Code != http.StatusBadRequest {
+		t.Fatalf("non-http(s) multi_url entry: expected 400, got %d", w.Code)
+	}
+
 	// Archived definitions reject new values but allow unset.
 	warch := httptest.NewRecorder()
 	req := newRequest("PATCH", "/api/properties/"+sel.ID, map[string]any{"archived": true})
@@ -359,6 +492,52 @@ func TestValidatePropertyValueUnit(t *testing.T) {
 	}
 	if _, err := validatePropertyValue(boolDef, json.RawMessage(`false`)); err != nil {
 		t.Fatalf("false rejected: %v", err)
+	}
+}
+
+func TestValidatePropertyListValuesUnit(t *testing.T) {
+	validate := func(def db.IssueProperty, raw string) ([]byte, error) {
+		return issueproperty.ValidateValue(def, json.RawMessage(raw))
+	}
+	textList := makePropertyDef("multi_text", nil)
+	if _, err := validate(textList, `[]`); err == nil {
+		t.Fatalf("empty multi_text array accepted")
+	}
+	if _, err := validate(textList, `"alpha"`); err == nil {
+		t.Fatalf("bare string into multi_text accepted")
+	}
+	if _, err := validate(textList, `["alpha", 3]`); err == nil {
+		t.Fatalf("non-string multi_text entry accepted")
+	}
+	if _, err := validate(textList, `["alpha", "  "]`); err == nil {
+		t.Fatalf("blank multi_text entry accepted")
+	}
+	stored, err := validate(textList, `["alpha", "beta", "alpha"]`)
+	if err != nil {
+		t.Fatalf("valid multi_text rejected: %v", err)
+	}
+	if string(stored) != `["alpha","beta"]` {
+		t.Fatalf("multi_text not deduped in caller order: %s", stored)
+	}
+	over := make([]string, issueproperty.MaxListValues+1)
+	for i := range over {
+		over[i] = fmt.Sprintf("v%d", i)
+	}
+	overRaw, _ := json.Marshal(over)
+	if _, err := validate(textList, string(overRaw)); err == nil {
+		t.Fatalf("over-cap multi_text accepted")
+	}
+
+	urlList := makePropertyDef("multi_url", nil)
+	if _, err := validate(urlList, `["https://a.example", "javascript:alert(1)"]`); err == nil {
+		t.Fatalf("non-http(s) multi_url entry accepted")
+	}
+	stored, err = validate(urlList, `["  https://a.example/x ", "https://b.example", "https://a.example/x"]`)
+	if err != nil {
+		t.Fatalf("valid multi_url rejected: %v", err)
+	}
+	if string(stored) != `["https://a.example/x","https://b.example"]` {
+		t.Fatalf("multi_url not trimmed and deduped: %s", stored)
 	}
 }
 

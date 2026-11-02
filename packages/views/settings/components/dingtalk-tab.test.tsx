@@ -306,9 +306,6 @@ describe("DingTalkTab", () => {
       expect(screen.queryByText(/staff-role-matrix/)).toBeNull();
       expect(screen.getByText("Role matrix bot")).toBeTruthy();
       expect(screen.getByText("Role matrix group")).toBeTruthy();
-      expect(
-        screen.getByText(enSettings.dingtalk.groups_overview_description),
-      ).toBeTruthy();
       expect(screen.getByTestId("dingtalk-installation-metadata").textContent).toContain(
         "Installed",
       );
@@ -390,10 +387,6 @@ describe("DingTalkTab", () => {
     expect(screen.queryByText(/staff-must-stay-private/)).toBeNull();
     expect(screen.queryByText(/Linked staff ID:/i)).toBeNull();
     expect(screen.getByRole("heading", { name: "Connections", level: 2 })).toBeTruthy();
-    const overviewDescription = screen.getByText(
-      enSettings.dingtalk.groups_overview_description,
-    );
-    expect(overviewDescription.classList).toContain("text-caption");
   });
 
   it("shows every observed Agent → Bot → Group relationship to an admin", async () => {
@@ -461,12 +454,6 @@ describe("DingTalkTab", () => {
     expect(
       screen.getByRole("heading", { name: "Recent groups", level: 4 }),
     ).toBeTruthy();
-    const overviewDescriptions = screen.getAllByText(
-      enSettings.dingtalk.groups_overview_description,
-    );
-    expect(overviewDescriptions).toHaveLength(1);
-    expect(overviewDescriptions[0]?.classList).toContain("text-caption");
-    expect(overviewDescriptions[0]?.classList).not.toContain("text-micro");
     expect(screen.getByTestId("dingtalk-bot-groups").parentElement).toBe(
       screen.getByTestId("dingtalk-installation-row"),
     );
@@ -616,9 +603,6 @@ describe("DingTalkTab", () => {
     expect(screen.getByText("Connected bot:")).toBeTruthy();
     expect(screen.queryByText("Identity unavailable")).toBeNull();
     expect(screen.queryByTestId("dingtalk-bot-groups")).toBeNull();
-    expect(
-      screen.queryByText(enSettings.dingtalk.groups_overview_description),
-    ).toBeNull();
   });
 
   it("keeps loading and retryable error states visible before capability data arrives", async () => {

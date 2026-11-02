@@ -2,6 +2,7 @@
 import { describe, expect, it } from "vitest";
 import type { TimelineEntry } from "@multica/core/types";
 import {
+  collectThreadParticipants,
   collectThreadReplies,
   resolvedThreadRootIds,
   rootCommentIds,
@@ -126,5 +127,21 @@ describe("resolvedThreadRootIds", () => {
     };
 
     expect(resolvedThreadRootIds([root, reply, nested])).toEqual(["root"]);
+  });
+});
+
+describe("collectThreadParticipants", () => {
+  it("includes nested member and agent authors once, preserving identity and first-seen order", () => {
+    const root = {
+      ...comment("root", "2026-06-11T09:00:00Z", null),
+      actor_name: "Alice",
+      actor_avatar_url: "https://example.com/alice.png",
+    };
+    const repeat = comment("repeat", "2026-06-11T10:00:00Z", "root");
+    const agent = { ...comment("agent", "2026-06-11T10:01:00Z", "repeat"), actor_type: "agent" };
+    const member = { ...comment("member", "2026-06-11T10:02:00Z", "agent"), actor_id: "user-2" };
+    const system = { ...comment("system", "2026-06-11T10:03:00Z", "root"), actor_type: "system" };
+    const replies = collectThreadReplies("root", bucketByParent([repeat, agent, member, system]));
+    expect(collectThreadParticipants(root, replies)).toEqual([root, agent, member]);
   });
 });

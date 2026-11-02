@@ -6,13 +6,11 @@ import {
   ChevronRight,
   ExternalLink,
   Loader2,
-  MoreHorizontal,
   Plus,
   RotateCw,
   Search,
   Trash2,
-  X,
-} from "lucide-react";
+} from "@multica/ui/icons";
 import { useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import type { Agent, SkillSummary } from "@multica/core/types";
@@ -37,11 +35,8 @@ import {
   DialogTitle,
 } from "@multica/ui/components/ui/dialog";
 import {
-  DropdownMenu,
-  DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuSeparator,
-  DropdownMenuTrigger,
 } from "@multica/ui/components/ui/dropdown-menu";
 import {
   Tooltip,
@@ -52,9 +47,13 @@ import { ActorAvatar } from "@multica/ui/components/common/actor-avatar";
 import { cn } from "@multica/ui/lib/utils";
 import { useT } from "../../i18n";
 import { useIntentNavigate } from "../../navigation";
+import {
+  CollectionBatchBar,
+  CollectionRowMenu,
+} from "../../layout/collection-list";
 import { isRefreshableOrigin, readOrigin } from "../lib/origin";
 import { RefreshSkillDialog } from "./refresh-skill-dialog";
-import type { SkillRow } from "./skills-page";
+import type { SkillRow } from "./skill-list-filter";
 
 // Shared context the row kebab and the batch toolbar both need. Assembled
 // once at the page level.
@@ -66,9 +65,7 @@ export interface SkillActionsContext {
   isAdmin: boolean;
 }
 
-// ---------------------------------------------------------------------------
 // Add-to-agent dialog (multi-select; shared by row kebab and batch toolbar)
-// ---------------------------------------------------------------------------
 
 // Attaching is permission-gated by the TARGET agent (its owner, or a
 // workspace owner/admin — server/internal/handler/agent.go canManageAgent).
@@ -155,7 +152,7 @@ function SkillChips({ skills }: { skills: SkillSummary[] }) {
   const visible = skills.slice(0, MAX_SKILL_CHIPS);
   const overflow = skills.slice(MAX_SKILL_CHIPS);
   const chipClass =
-    "max-w-[10rem] truncate rounded bg-muted px-1.5 py-0.5 text-caption text-muted-foreground";
+    "max-w-[10rem] truncate rounded-xs bg-muted px-1.5 py-0.5 text-caption text-muted-foreground";
   return (
     <div className="flex flex-wrap items-center gap-1">
       {visible.map((s) => (
@@ -321,9 +318,6 @@ export function AddToAgentDialog({
           <DialogTitle className="text-body">
             {t(($) => $.actions.add_to_agent)}
           </DialogTitle>
-          <DialogDescription className="text-caption">
-            {t(($) => $.actions.add_dialog_description)}
-          </DialogDescription>
         </DialogHeader>
 
         <SkillChips skills={skills} />
@@ -402,9 +396,7 @@ export function AddToAgentDialog({
   );
 }
 
-// ---------------------------------------------------------------------------
 // Delete confirmation (single row and batch share one dialog)
-// ---------------------------------------------------------------------------
 
 export function DeleteSkillsDialog({
   rows,
@@ -510,9 +502,7 @@ export function DeleteSkillsDialog({
   );
 }
 
-// ---------------------------------------------------------------------------
 // Bulk update-from-source (batch toolbar)
-// ---------------------------------------------------------------------------
 
 /**
  * Confirm-and-run dialog for updating several imported skills from their
@@ -645,14 +635,8 @@ export function UpdateSkillsDialog({
   );
 }
 
-// ---------------------------------------------------------------------------
 // Row kebab
-// ---------------------------------------------------------------------------
 
-// The row is a plain `<div>` whose whole-row navigation is a mouse `onClick`
-// (see `useRowLink`), not an ancestor `<a>`. The wrapper span stops click
-// propagation so opening this menu never navigates the row — just
-// stopPropagation, no preventDefault (there is no native anchor to cancel).
 export function SkillRowActions({
   row,
   ctx,
@@ -672,60 +656,44 @@ export function SkillRowActions({
   const canRefresh = row.canEdit && isRefreshableOrigin(origin);
 
   return (
-    <span
-      onClick={(e) => e.stopPropagation()}
-      className="flex items-center"
-    >
-      <DropdownMenu>
-        <DropdownMenuTrigger
-          render={
-            <button
-              type="button"
-              aria-label={t(($) => $.actions.row_menu)}
-              className="flex size-7 items-center justify-center rounded-md text-muted-foreground opacity-0 transition-opacity hover:bg-accent hover:text-accent-foreground group-hover/row:opacity-100 data-popup-open:bg-accent data-popup-open:opacity-100 data-popup-open:text-accent-foreground"
-            >
-              <MoreHorizontal className="size-4" />
-            </button>
+    <>
+      <CollectionRowMenu label={t(($) => $.actions.row_menu)} contentClassName="w-52">
+        <DropdownMenuItem
+          onClick={() =>
+            intentNavigate(
+              paths.skillDetail(row.skill.id),
+              "foreground-tab",
+              row.skill.name,
+            )
           }
-        />
-        <DropdownMenuContent align="end" className="w-52">
-          <DropdownMenuItem
-            onClick={() =>
-              intentNavigate(
-                paths.skillDetail(row.skill.id),
-                "foreground-tab",
-                row.skill.name,
-              )
-            }
-          >
-            <ExternalLink className="size-3.5" />
-            {tCommon(($) => $.navigation.open_in_new_tab)}
+        >
+          <ExternalLink className="size-3.5" />
+          {tCommon(($) => $.navigation.open_in_new_tab)}
+        </DropdownMenuItem>
+        <DropdownMenuSeparator />
+        <DropdownMenuItem onClick={() => setAddOpen(true)}>
+          <Plus className="size-3.5" />
+          {t(($) => $.actions.add_to_agent)}
+        </DropdownMenuItem>
+        {canRefresh && (
+          <DropdownMenuItem onClick={() => setRefreshOpen(true)}>
+            <RotateCw className="size-3.5" />
+            {t(($) => $.actions.refresh)}
           </DropdownMenuItem>
-          <DropdownMenuSeparator />
-          <DropdownMenuItem onClick={() => setAddOpen(true)}>
-            <Plus className="size-3.5" />
-            {t(($) => $.actions.add_to_agent)}
-          </DropdownMenuItem>
-          {canRefresh && (
-            <DropdownMenuItem onClick={() => setRefreshOpen(true)}>
-              <RotateCw className="size-3.5" />
-              {t(($) => $.actions.refresh)}
+        )}
+        {row.canEdit && (
+          <>
+            <DropdownMenuSeparator />
+            <DropdownMenuItem
+              variant="destructive"
+              onClick={() => setDeleteOpen(true)}
+            >
+              <Trash2 className="size-3.5" />
+              {t(($) => $.actions.delete)}
             </DropdownMenuItem>
-          )}
-          {row.canEdit && (
-            <>
-              <DropdownMenuSeparator />
-              <DropdownMenuItem
-                variant="destructive"
-                onClick={() => setDeleteOpen(true)}
-              >
-                <Trash2 className="size-3.5" />
-                {t(($) => $.actions.delete)}
-              </DropdownMenuItem>
-            </>
-          )}
-        </DropdownMenuContent>
-      </DropdownMenu>
+          </>
+        )}
+      </CollectionRowMenu>
       <AddToAgentDialog
         skills={[row.skill]}
         ctx={ctx}
@@ -747,13 +715,11 @@ export function SkillRowActions({
         open={deleteOpen}
         onOpenChange={setDeleteOpen}
       />
-    </span>
+    </>
   );
 }
 
-// ---------------------------------------------------------------------------
 // Batch toolbar (floating bottom bar, same shape as the issues batch bar)
-// ---------------------------------------------------------------------------
 
 export function SkillBatchToolbar({
   rows,
@@ -768,8 +734,6 @@ export function SkillBatchToolbar({
   const [addOpen, setAddOpen] = useState(false);
   const [updateOpen, setUpdateOpen] = useState(false);
   const [deleteOpen, setDeleteOpen] = useState(false);
-
-  if (rows.length === 0) return null;
 
   const allDeletable = rows.every((r) => r.canEdit);
   const updatable = rows.filter(
@@ -807,25 +771,7 @@ export function SkillBatchToolbar({
 
   return (
     <>
-      {/* Anchored to the page root (relative), NOT the viewport: with a
-          sidebar/split pane open, viewport-centering sits visibly off the
-          list's own center. Same rule for every future list page's batch
-          toolbar. */}
-      <div className="absolute bottom-6 left-1/2 z-50 flex -translate-x-1/2 items-center gap-1 rounded-lg border bg-background px-2 py-1.5 shadow-lg max-md:above-chat-launcher">
-        <div className="mr-1 flex items-center gap-1.5 border-r pl-1 pr-2">
-          <span className="text-body font-medium">
-            {t(($) => $.actions.selected, { count: rows.length })}
-          </span>
-          <button
-            type="button"
-            aria-label={t(($) => $.actions.clear_selection)}
-            onClick={onClear}
-            className="rounded p-0.5 transition-colors hover:bg-accent"
-          >
-            <X className="size-3.5 text-muted-foreground" />
-          </button>
-        </div>
-
+      <CollectionBatchBar count={rows.length} onClear={onClear}>
         <Button variant="ghost" size="sm" onClick={() => setAddOpen(true)}>
           <Plus className="mr-1 size-3.5" />
           {t(($) => $.actions.add_to_agent)}
@@ -856,7 +802,7 @@ export function SkillBatchToolbar({
             </TooltipContent>
           </Tooltip>
         )}
-      </div>
+      </CollectionBatchBar>
 
       <AddToAgentDialog
         skills={rows.map((r) => r.skill)}

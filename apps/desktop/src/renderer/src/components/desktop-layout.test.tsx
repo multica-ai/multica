@@ -1,6 +1,6 @@
 import type { ReactNode } from "react";
-import { describe, expect, it, vi } from "vitest";
-import { render } from "@testing-library/react";
+import { beforeEach, describe, expect, it, vi } from "vitest";
+import { fireEvent, render } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { I18nProvider } from "@multica/core/i18n/react";
 import { useSidebar } from "@multica/ui/components/ui/sidebar";
@@ -8,20 +8,24 @@ import { RESOURCES } from "@multica/views/locales";
 
 // The shell resolves the mocked `getCurrentSlug()` against the workspace list
 // before mounting workspace-scoped chrome, so the list has to contain it or
-// the sidebar under test never renders. Gating behaviour itself is covered by
+// the rail under test never renders. Gating behaviour itself is covered by
 // desktop-layout.workspace-gate.test.tsx.
 const WORKSPACES = [{ id: "ws-1", slug: "acme" }];
 
 // The shell is the only thing under test here, so everything it mounts around
-// the sidebar is stubbed out. What survives is the pair that has to agree:
+// the rail is stubbed out. What survives is the pair that has to agree:
 // `WindowToolbar`'s own trigger, and the `hasExternalTrigger` the provider
 // publishes to every page header inside the canvas.
 vi.mock("@/hooks/use-tab-history", () => ({
   useTabHistory: () => ({
     canGoBack: false,
     canGoForward: false,
+    historyEntries: [],
+    historyIndex: 0,
+    browsingHistory: [],
     goBack: vi.fn(),
     goForward: vi.fn(),
+    goToHistoryIndex: vi.fn(),
   }),
   useNavigationInputBindings: () => {},
 }));
@@ -62,15 +66,24 @@ vi.mock("@multica/views/platform", () => ({
 }));
 
 vi.mock("@multica/views/layout", () => ({
-  AppSidebar: () => null,
+  AppRail: () => null,
+  AppShellProvider: ({ children }: { children: ReactNode }) => <>{children}</>,
+  CompactNavSheet: () => null,
   GlobalShortcuts: () => null,
   NavigationProgress: () => null,
+  NewIssueButton: () => null,
+  SearchButton: () => null,
+  ShellRouteDataPrefetch: ({ children }: { children: ReactNode }) => <>{children}</>,
+  SpacePanel: () => null,
+  // In a panel space the shell's toggleNav is the sidebar toggle.
+  useAppShell: () => ({ toggleNav: useSidebar().toggleSidebar }),
+  useTabPresentation: () => ({ visual: { kind: "icon", icon: "Inbox" }, title: "" }),
+  ResourceLeadingVisual: () => null,
 }));
 
 vi.mock("@multica/views/modals/registry", () => ({ ModalRegistry: () => null }));
 vi.mock("@multica/views/search", () => ({
   SearchCommand: () => null,
-  SearchTrigger: () => null,
 }));
 vi.mock("@multica/views/chat", () => ({ FloatingChat: () => null }));
 vi.mock("./tab-bar", () => ({ TabBar: () => null }));
@@ -80,9 +93,21 @@ vi.mock("./window-overlay", () => ({ WindowOverlay: () => null }));
 // a `PageHeader` reads before deciding to render its own fallback trigger.
 vi.mock("./tab-content", () => ({
   TabContent: () => {
-    const { hasExternalTrigger } = useSidebar();
+    const { hasExternalTrigger, isCompact, setOpen, state } = useSidebar();
     return (
-      <div data-testid="page-content" data-external-trigger={hasExternalTrigger} />
+      <div
+        data-compact={isCompact}
+        data-external-trigger={hasExternalTrigger}
+        data-sidebar-state={state}
+        data-testid="page-content"
+      >
+        <button type="button" onClick={() => setOpen(false)}>
+          Collapse sidebar
+        </button>
+        <button type="button" onClick={() => setOpen(true)}>
+          Expand sidebar
+        </button>
+      </div>
     );
   },
 }));
@@ -111,20 +136,73 @@ function renderShell() {
   );
 }
 
+beforeEach(() => {
+  Object.defineProperty(window, "innerWidth", {
+    configurable: true,
+    value: 1280,
+  });
+  localStorage.clear();
+});
+
 describe("DesktopShell sidebar trigger", () => {
   // The window toolbar parks a trigger beside the traffic lights that never
   // scrolls away, so nothing inside the canvas may add a second one. Desktop
-  // windows sit below `xl`, exactly the band where `PageHeader`'s fallback
-  // trigger renders, so every page used to stack an identical icon 50px under
+  // windows often sit in the band where `PageHeader`'s fallback trigger
+  // renders, so every page used to stack an identical icon 50px under
   // this one — and a third when a list/detail surface brought its own header
   // along (MUL-6218).
   it("keeps exactly one trigger and tells page headers not to add another", () => {
-    const { container, getByTestId } = renderShell();
+    const { container, getByTestId, queryByRole } = renderShell();
 
     expect(container.querySelectorAll("[data-slot='sidebar-trigger']")).toHaveLength(1);
     expect(getByTestId("page-content")).toHaveAttribute(
       "data-external-trigger",
       "true",
     );
+    // The toolbar floats over the 64px rail; the tabs start past the rest
+    // of it whether or not the panel inside the card is open.
+    const mainTopBar = container.querySelector('[data-slot="main-top-bar"]');
+    expect(mainTopBar).toHaveStyle({ paddingLeft: "136px" });
+
+    fireEvent.click(
+      container.querySelector('[data-slot="sidebar-trigger"]')!,
+    );
+    expect(getByTestId("page-content")).toHaveAttribute(
+      "data-sidebar-state",
+      "collapsed",
+    );
+    expect(mainTopBar).toHaveStyle({ paddingLeft: "136px" });
+    expect(queryByRole("status", { name: /loading workspace/i })).toBeNull();
+  });
+
+  it("keeps full clearance for compact layouts in either sidebar state", () => {
+    Object.defineProperty(window, "innerWidth", {
+      configurable: true,
+      value: 700,
+    });
+
+    const { container, getByRole, getByTestId } = renderShell();
+    const mainTopBar = container.querySelector('[data-slot="main-top-bar"]');
+
+    expect(getByTestId("page-content")).toHaveAttribute("data-compact", "true");
+    expect(getByTestId("page-content")).toHaveAttribute(
+      "data-sidebar-state",
+      "expanded",
+    );
+    expect(mainTopBar).toHaveStyle({ paddingLeft: "200px" });
+
+    fireEvent.click(getByRole("button", { name: "Collapse sidebar" }));
+    expect(getByTestId("page-content")).toHaveAttribute(
+      "data-sidebar-state",
+      "collapsed",
+    );
+    expect(mainTopBar).toHaveStyle({ paddingLeft: "200px" });
+
+    fireEvent.click(getByRole("button", { name: "Expand sidebar" }));
+    expect(getByTestId("page-content")).toHaveAttribute(
+      "data-sidebar-state",
+      "expanded",
+    );
+    expect(mainTopBar).toHaveStyle({ paddingLeft: "200px" });
   });
 });

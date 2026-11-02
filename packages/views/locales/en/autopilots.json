@@ -1,6 +1,5 @@
 {
   "page": {
-    "title": "Autopilot",
     "new_autopilot": "New autopilot",
     "start_blank": "Start from scratch",
     "table": {
@@ -20,7 +19,6 @@
       "title": "No autopilots yet",
       "hint": "Schedule recurring work for your AI agents. Pick a template or start from scratch."
     },
-    "scope_all": "All",
     "no_matches": "No automations match",
     "retry": "Retry"
   },
@@ -80,25 +78,34 @@
     "run_blocked_invocation_not_allowed": "Not triggered — you don't have permission to use this autopilot's agent",
     "run_blocked_runtime_offline": "Not triggered — the agent's runtime is offline",
     "run_blocked_agent_runtime_required": "Not triggered — the agent has no runtime; bind one to run it",
+    "run_blocked_runtime_access_denied": "Not triggered — the agent can't run on its private runtime; make it public or rebind/copy the agent",
     "run_blocked_target_unavailable": "Not triggered — the agent is unavailable",
     "run_blocked_attribution": "Not triggered — the run couldn't be attributed to a responsible member",
     "run_blocked_already_active": "Not triggered — a recent run already covers this",
     "run_blocked_quota_exceeded": "Not triggered — the run limit for this period has been reached",
     "run_blocked_issue_limit_reached": "Not triggered — the workspace has reached its issue limit",
     "run_blocked_generic": "Not triggered — the run was blocked",
-    "section_properties": "Properties",
     "section_triggers": "Triggers",
-    "section_run_history": "Run History",
-    "section_danger": "Danger Zone",
+    "section_run_history": "Run history",
     "field_agent": "Agent",
     "field_created_by": "Created by",
-    "field_output_mode": "Output Mode",
+    "field_output_mode": "Output mode",
     "field_project": "Project",
     "no_project": "No project",
     "project_unavailable": "Project unavailable",
     "field_prompt": "Prompt",
     "field_subscribers": "Subscribers",
     "field_subscribers_none": "None",
+    "no_prompt": "No prompt yet.",
+    "copy_link": "Copy link",
+    "link_copied": "Link copied",
+    "link_copy_failed": "Couldn't copy the link",
+    "open_project": "Open project",
+    "summary": {
+      "create_issue": "{{agent}} creates an issue each run",
+      "run_only": "{{agent}} runs it without creating an issue",
+      "with_trigger": "{{trigger}} · {{action}}"
+    },
     "add_trigger": "Add trigger",
     "no_triggers": "No triggers configured. Add a schedule to run automatically.",
     "no_runs": "No runs yet. Click \"Run now\" to trigger manually.",
@@ -175,6 +182,7 @@
     "copy_url": "Copy URL",
     "url_copied": "Webhook URL copied",
     "url_copy_failed": "Failed to copy",
+    "edit_schedule": "Edit schedule",
     "rotate_url": "Rotate URL",
     "rotate_confirm_title": "Rotate webhook URL",
     "rotate_confirm_description": "The current URL will stop working immediately. Any external systems calling it must be updated with the new URL. Continue?",
@@ -194,7 +202,7 @@
     }
   },
   "deliveries": {
-    "section_title": "Webhook Deliveries",
+    "section_title": "Webhook deliveries",
     "empty": "No webhook deliveries yet. Send a POST to the webhook URL to see entries here.",
     "row": {
       "attempts": "{{count}}× attempts",
@@ -253,6 +261,16 @@
     "toast_added_schedule": "Schedule trigger added",
     "toast_added_webhook": "Webhook trigger added",
     "toast_add_failed": "Failed to add trigger"
+  },
+  "edit_trigger_dialog": {
+    "title": "Edit schedule",
+    "label_field": "Label (optional)",
+    "label_placeholder": "e.g. Weekday morning",
+    "enabled_label": "Enabled",
+    "submit": "Save",
+    "submitting": "Saving...",
+    "toast_updated": "Schedule updated",
+    "toast_update_failed": "Failed to update schedule"
   },
   "dialog": {
     "sr_create": "New Autopilot",
@@ -314,7 +332,7 @@
     "event_filter_add": "Add",
     "event_filter_remove_label": "Remove filter",
     "event_filter_hint": "Only process webhooks matching these events. Leave empty to accept all.",
-    "schedule_disabled_reason": "This autopilot has multiple schedules — edit them in the detail page.",
+    "schedule_multiple_notice": "This autopilot has {{count}} schedules. Close this dialog and edit each one under Triggers below.",
     "schedule_empty": "No schedule — this autopilot only runs when triggered manually.",
     "schedule_add": "Add schedule",
     "error_title_required": "Enter a name for this autopilot.",
@@ -429,29 +447,16 @@
     "search_placeholder": "Search timezone..."
   },
   "toolbar": {
-    "result_count_title": "Matching automations / all automations",
-    "filter_label": "Filter",
-    "filter_active_count_one": "{{count}} filter",
-    "filter_active_count_other": "{{count}} filters",
-    "clear_filters": "Clear filters",
     "section_assignee": "Assignee",
     "section_mode": "Mode",
     "section_trigger": "Trigger",
-    "section_creator": "Created by",
-    "display": "Display",
-    "sort_by": "Sort by",
-    "direction_asc": "Ascending",
-    "direction_desc": "Descending",
-    "section_columns": "Columns"
+    "section_creator": "Created by"
   },
   "actions": {
     "row_menu": "Automation actions",
     "pause": "Pause",
     "resume": "Resume",
     "delete": "Delete",
-    "selected_one": "{{count}} selected",
-    "selected_other": "{{count}} selected",
-    "clear_selection": "Clear selection",
     "delete_dialog": {
       "title": "Delete automation?",
       "description_one": "This will permanently delete \"{{name}}\" and its run history.",
@@ -461,5 +466,63 @@
       "confirm": "Delete permanently",
       "deleting": "Deleting…"
     }
+  },
+  "wakeups": {
+    "title": "Issue wakeups",
+    "issue": "Issue",
+    "trigger": "Trigger",
+    "enabled": "Enabled",
+    "all_triggers": "All triggers",
+    "event": "Event",
+    "at": "One-time",
+    "recurring": "Recurring",
+    "all_agents": "All agents",
+    "running": "Running",
+    "active_runs": "{{count}} active runs",
+    "issue_closed": "Issue closed",
+    "read_only": "Only the creator or a workspace admin can manage this wakeup",
+    "select_row": "Select {{issue}}, {{agent}}",
+    "select_page": "Select all enabled wakeups",
+    "load_error": "Could not load wakeups",
+    "loading": "Loading wakeups…",
+    "empty": "No wakeup rules yet",
+    "disable_selected": "Turn off selected",
+    "confirm_title": "Turn off {{count}} wakeups?",
+    "confirm_body": "Future wakeups will stop. Runs still queued and not handed to an agent will be withdrawn. Dispatched runs will continue; stop them from the execution log.",
+    "cancel": "Cancel",
+    "confirm": "Turn off",
+    "disabling": "Turning off…",
+    "batch_result": "Turned off: {{succeeded}}. Failed: {{failed}}.",
+    "scopes": {
+      "active": "Waiting or executing",
+      "all": "All wakeups",
+      "disabled": "Turned off",
+      "ended": "Ended",
+      "paused": "Paused"
+    },
+    "target_agent": "Wake agent",
+    "empty_filtered": "No matching wakeups",
+    "clear_filters": "Clear filters",
+    "batch_success": "Turned off {{count}} wakeup rules",
+    "batch_partial": "Turned off {{succeeded}}; {{failed}} failed. Failed items remain selected for retry.",
+    "source": "Source",
+    "sources": {
+      "all": "All sources",
+      "member": "Members",
+      "agent": "Agents",
+      "system": "System"
+    },
+    "runs_7d": "Runs (7 days)",
+    "ends": "Ends",
+    "until_issue_ends": "Until the issue ends",
+    "fires_once": "Triggers once",
+    "assignee_target": "Assignee · {{name}}",
+    "no_target": "No agent assignee",
+    "banner_one": "{{count}} wakeup was paused automatically: {{issue}} “{{condition}}” — {{reason}}",
+    "banner_other": "{{count}} wakeups were paused automatically. Latest: {{issue}} “{{condition}}” — {{reason}}",
+    "banner_view": "View",
+    "create": "New wakeup",
+    "create_pick_issue": "Choose the issue to add a wakeup to",
+    "create_pick_issue_description": "The wakeup belongs to this issue and ends with it."
   }
 }

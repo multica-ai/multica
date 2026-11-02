@@ -10,7 +10,7 @@
  *   - a workspace slug + id (workspace-store, validated against
  *     workspace list)
  *
- * Workspace switch → unmount/remount → fresh client with the new slug.
+ * Workspace switch → replace the connection, preserving the navigation tree.
  *
  * Lifecycle signals:
  *   AppState 'background'  → pause socket (iOS will kill it anyway; clean
@@ -39,6 +39,7 @@ import NetInfo from "@react-native-community/netinfo";
 import { useAuthStore } from "@/data/auth-store";
 import { useWorkspaceStore } from "@/data/workspace-store";
 import { getToken } from "@/data/secure-storage";
+import { api } from "@/data/api";
 import { WSClient } from "./ws-client";
 
 const API_URL = process.env.EXPO_PUBLIC_API_URL;
@@ -64,7 +65,17 @@ export function useWSClient(): WSClient | null {
 export function RealtimeProvider({ children }: { children: React.ReactNode }) {
   const userId = useAuthStore((s) => s.user?.id ?? null);
   const wsSlug = useWorkspaceStore((s) => s.currentWorkspaceSlug);
-  const [client, setClient] = useState<WSClient | null>(null);
+  const [connection, setConnection] = useState<{
+    userId: string;
+    wsSlug: string;
+    client: WSClient;
+  } | null>(null);
+  // A previous workspace's client must never reach the new workspace's
+  // subscribers while its token is loading. Keep the provider unkeyed so
+  // navigation state and drafts survive the workspace store update.
+  const client = connection?.userId === userId && connection?.wsSlug === wsSlug
+    ? connection.client
+    : null;
 
   // Track NetInfo's last known state so we only force-reconnect on the
   // offline → online EDGE, not on every change event (NetInfo fires for
@@ -72,10 +83,7 @@ export function RealtimeProvider({ children }: { children: React.ReactNode }) {
   const lastConnectedRef = useRef<boolean | null>(null);
 
   useEffect(() => {
-    if (!userId || !wsSlug) {
-      setClient(null);
-      return;
-    }
+    if (!userId || !wsSlug) return;
 
     let cancelled = false;
     let ws: WSClient | null = null;
@@ -89,12 +97,16 @@ export function RealtimeProvider({ children }: { children: React.ReactNode }) {
       ws = new WSClient({
         url: WS_URL,
         token,
+        // Re-read per connection rather than reusing the token captured
+        // above: a session renewed since this effect ran would otherwise keep
+        // reconnecting with a credential on its way to expiring.
+        getToken: () => api.getToken(),
         workspaceSlug: wsSlug,
         clientVersion: "0.1.0",
         logger: console,
       });
       ws.connect();
-      setClient(ws);
+      setConnection({ userId, wsSlug, client: ws });
 
       // ── AppState ────────────────────────────────────────────────
       appStateSub = AppState.addEventListener(
@@ -103,9 +115,8 @@ export function RealtimeProvider({ children }: { children: React.ReactNode }) {
           if (status === "active") {
             // Foreground. The socket may have been paused (we put it
             // there on background) or it may be a zombie (iOS killed
-            // it silently). Either way: resume / force-reconnect.
+            // it silently). resume() handles both with one fresh socket.
             ws?.resume();
-            ws?.forceReconnect();
           } else if (status === "background") {
             ws?.pause();
           }
@@ -134,7 +145,7 @@ export function RealtimeProvider({ children }: { children: React.ReactNode }) {
       appStateSub?.remove();
       netInfoUnsub?.();
       ws?.disconnect();
-      setClient(null);
+      setConnection(null);
     };
   }, [userId, wsSlug]);
 

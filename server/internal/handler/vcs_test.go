@@ -2,13 +2,18 @@ package handler
 
 import (
 	"context"
+	"crypto/tls"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/multica-ai/multica/server/internal/testutil"
 )
 
 func vcsHandlerRequest(method, path string, body any, connectionID string) *http.Request {
@@ -171,5 +176,91 @@ func TestRotateVCSConnectionWebhookHonorsDeploymentSwitch(t *testing.T) {
 	}
 	if got := loadSecret(); got == originalSecret {
 		t.Fatal("enabled RotateVCSConnectionWebhook must replace the stored secret")
+	}
+}
+
+// TestConnectVCSReportsUntrustedCertificate covers a Gitea behind a private or
+// self-signed CA: the connect must fail as a certificate problem, not as an
+// unreachable instance, and must not store a connection.
+func TestConnectVCSReportsUntrustedCertificate(t *testing.T) {
+	var reached atomic.Int32
+	provider := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		reached.Add(1)
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"login":"vcs-test-user"}`))
+	}))
+	defer provider.Close()
+
+	withVCSBox(t)
+	t.Cleanup(func() { cleanupVCS(context.Background(), "") })
+	req := vcsHandlerRequest(http.MethodPost, "/api/workspaces/"+testWorkspaceID+"/vcs/connections", map[string]any{
+		"provider":     "gitea",
+		"instance_url": provider.URL,
+		"access_token": "test-token",
+	}, "")
+	var resp struct {
+		Error string `json:"error"`
+	}
+	testutil.Call(t, testHandler.ConnectVCS, req).Want(http.StatusBadGateway).JSON(&resp)
+	if !strings.Contains(resp.Error, "certificate authority") {
+		t.Fatalf("expected an untrusted-certificate message, got %q", resp.Error)
+	}
+	if got := reached.Load(); got != 0 {
+		t.Fatalf("the TLS handshake must fail before any request is served, got %d", got)
+	}
+	var count int
+	if err := testPool.QueryRow(context.Background(),
+		`SELECT count(*) FROM vcs_connection WHERE workspace_id = $1 AND instance_url = $2`,
+		testWorkspaceID, provider.URL,
+	).Scan(&count); err != nil {
+		t.Fatalf("count VCS connections: %v", err)
+	}
+	if count != 0 {
+		t.Fatalf("a failed connect must not store a connection, got %d rows", count)
+	}
+}
+
+// TestVCSValidationFailureMessage drives real handshakes so each case matches
+// the error shape crypto/tls actually returns, wrapped the way providers wrap
+// it.
+func TestVCSValidationFailureMessage(t *testing.T) {
+	srv := httptest.NewTLSServer(http.NotFoundHandler())
+	defer srv.Close()
+	// srv.Client() trusts the test certificate, which covers 127.0.0.1 and
+	// example.com and is valid until 2084.
+	trusting := func(adjust func(*tls.Config)) *http.Client {
+		transport := srv.Client().Transport.(*http.Transport).Clone()
+		adjust(transport.TLSClientConfig)
+		return &http.Client{Transport: transport}
+	}
+	closed := httptest.NewServer(http.NotFoundHandler())
+	closedURL := closed.URL
+	closed.Close()
+
+	cases := []struct {
+		name   string
+		client *http.Client
+		url    string
+		want   string
+	}{
+		{"untrusted CA", &http.Client{}, srv.URL, "certificate authority this server does not trust"},
+		{"hostname mismatch", trusting(func(c *tls.Config) { c.ServerName = "gitea.internal.test" }), srv.URL, "does not match"},
+		{"expired", trusting(func(c *tls.Config) {
+			c.Time = func() time.Time { return time.Date(2100, 1, 1, 0, 0, 0, 0, time.UTC) }
+		}), srv.URL, "failed verification"},
+		{"unreachable", &http.Client{}, closedURL, "could not reach the provider instance"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			resp, err := tc.client.Get(tc.url)
+			if err == nil {
+				resp.Body.Close()
+				t.Fatal("expected the request to fail")
+			}
+			got := vcsValidationFailureMessage(fmt.Errorf("gitea: request: %w", err))
+			if !strings.Contains(got, tc.want) {
+				t.Fatalf("error %v: got message %q, want it to contain %q", err, got, tc.want)
+			}
+		})
 	}
 }

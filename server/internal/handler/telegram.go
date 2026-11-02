@@ -90,7 +90,7 @@ type RegisterTelegramRequest struct {
 // router. Mirrors RegisterSlackBYO.
 func (h *Handler) RegisterTelegramBot(w http.ResponseWriter, r *http.Request) {
 	if h.TelegramInstall == nil {
-		writeError(w, http.StatusServiceUnavailable, "telegram integration not enabled")
+		writeFeatureDisabled(w, "telegram_not_configured", "telegram integration not enabled")
 		return
 	}
 	userID, ok := requireUserID(w, r)
@@ -168,7 +168,7 @@ func (h *Handler) RegisterTelegramBot(w http.ResponseWriter, r *http.Request) {
 // bot's token) flips status back to 'active'.
 func (h *Handler) RevokeTelegramInstallation(w http.ResponseWriter, r *http.Request) {
 	if h.TelegramInstall == nil {
-		writeError(w, http.StatusServiceUnavailable, "telegram integration not configured")
+		writeFeatureDisabled(w, "telegram_not_configured", "telegram integration not configured")
 		return
 	}
 	userID, ok := requireUserID(w, r)
@@ -223,7 +223,7 @@ type RedeemTelegramBindingTokenResponse struct {
 // mirror the Slack redeem handler.
 func (h *Handler) RedeemTelegramBindingToken(w http.ResponseWriter, r *http.Request) {
 	if h.TelegramBindingTokens == nil {
-		writeError(w, http.StatusServiceUnavailable, "telegram integration not configured")
+		writeFeatureDisabled(w, "telegram_not_configured", "telegram integration not configured")
 		return
 	}
 	userID, ok := requireUserID(w, r)

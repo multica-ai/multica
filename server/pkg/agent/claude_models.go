@@ -10,46 +10,13 @@ import (
 	"time"
 )
 
-// ── Claude model discovery ───────────────────────────────────────────
+// Discover Claude models through the installed CLI's stream-json list_models
+// control request, including account-specific disabled entries. Cache unsupported
+// subtype responses so older CLIs fall back without repeating the round trip.
 //
-// Claude Code has no `--list-models` flag and no models subcommand, which is
-// why this package carried a hand-maintained claudeStaticModels() for so long.
-// It does have a discovery hook, just not on the command line: the stream-json
-// control protocol answers a `list_models` control request with the same
-// ModelInfo rows the interactive /model picker renders.
-//
-// That distinction is the whole point of MUL-6961. A static catalog cannot know
-// what the CLI in front of it can actually run, so every new Anthropic model
-// opened a window where Multica offered a model that 400s ("Claude Code 2.1.246
-// does not support this model; version 2.1.251 or newer is required"). The
-// control protocol closes the window at the source: the answer is computed by
-// the installed binary, against the logged-in account, so a model the local CLI
-// cannot run is either absent or explicitly flagged disabled. Verified against
-// 2.1.223 / 2.1.228 / 2.1.246 / 2.1.258 — the three older builds return Fable
-// 5.1 as a disabled row carrying "Update to 2.1.255+ to use Fable 5.1", and
-// 2.1.258 returns it as a normal selectable entry.
-//
-// This governs SELECTION, and only selection. An agent already configured with
-// a model, whose CLI is downgraded afterwards, still starts and still gets the
-// upstream 400 — discovery cannot reach a value already persisted. That is the
-// accepted boundary, decided on MUL-6961 rather than assumed: the downgrade is
-// a rare case, the upstream error is accurate, and a run that fails loudly at
-// the moment it starts is a fine way to report it. Do not "improve" this by
-// clearing the configured model or substituting a runnable one when the catalog
-// no longer offers it. Clearing turns a legible error into a silent config
-// change the user did not make, and substituting is worse — it succeeds, using
-// a model nobody chose.
-//
-// No version gate guards the request, unlike codexSupportsDebugModels. It would
-// buy nothing: an unsupported subtype is answered, not ignored — every build
-// tested replies `Unsupported control request subtype: ...` in about two
-// seconds and exits 0 — so an old CLI costs one cheap round trip and falls back,
-// with no risk of hanging until the timeout. Gating instead on a version floor
-// would mean hand-maintaining exactly the kind of number this change exists to
-// stop hand-maintaining.
-//
-// "One round trip" is only true because that specific answer is remembered; see
-// claudeListModelsUnsupported below for why it has to be.
+// Discovery governs selection, not stored configuration: never clear or replace a
+// configured model just because the current catalog omits it. A downgraded CLI
+// may reject that model at launch; the error preserves the user's explicit choice.
 
 // claudeListModelsArgs is the argv for a discovery-only Claude session.
 //
@@ -241,8 +208,8 @@ func discoverClaudeCatalog(ctx context.Context, runtimeCmd Command) Catalog {
 
 func claudeStaticCatalog(ctx context.Context, runtimeCmd Command) Catalog {
 	static := claudeStaticModels()
-	annotateClaudeThinking(ctx, static, runtimeCmd)
-	return Catalog{Models: static, Fallback: true}
+	cliLevels := annotateClaudeThinking(ctx, static, runtimeCmd)
+	return Catalog{Models: static, Fallback: true, CLIThinkingLevels: cliLevels}
 }
 
 // discoverClaudeModels enumerates the local Claude Code catalog over the
@@ -425,9 +392,8 @@ func claudeModelLabel(info claudeModelInfo, id string) string {
 
 // claudeThinkingFromInfo builds the per-model effort catalog from the row's own
 // advertisement. This is the discovery path's clearest win over the static one:
-// loadClaudeThinkingByModel has to scrape `claude --help` for a global superset
-// and then narrow it through claudeModelEffortAllow, a hand-kept table of which
-// models really take xhigh. Here each model states its own levels.
+// annotateClaudeThinking can only scrape `claude --help` for a global superset
+// and offer it on every model. Here each model states its own levels.
 //
 // DefaultLevel is deliberately left empty. The rows carry no default-effort
 // field, and empty already means "the runtime picks, we don't know" — a more

@@ -17,7 +17,7 @@
  * without coupling the policy to the hook (comment-composer does rollback;
  * new-issue prefers Alert and no rollback — both are fine).
  */
-import { useCallback, useMemo, useRef, useState, type Dispatch, type SetStateAction } from "react";
+import { useCallback, useLayoutEffect, useMemo, useRef, useState, type Dispatch, type SetStateAction } from "react";
 import type {
   NativeSyntheticEvent,
   TextInputSelectionChangeEventData,
@@ -28,6 +28,7 @@ import {
   tokenAtCursor,
   type MentionMarker,
 } from "@/lib/mention-serialize";
+import { isMentionBoundaryAfter } from "@multica/core/markdown";
 
 export interface MentioningState {
   start: number;
@@ -95,12 +96,14 @@ export function useMentionInput(): UseMentionInputReturn {
   // applied value. Reading from React state via closures races with React's
   // batching: in the same native tick the first event would see stale text or
   // stale selection, and `tokenAtCursor` would miss the first `@` (cursor=0).
-  // Refs sidestep that — every render syncs them, and every mutator below
+  // Refs sidestep that — every commit syncs them, and every mutator below
   // writes through so handlers running in the same tick stay consistent.
   const textRef = useRef(text);
   const selectionRef = useRef(selection);
-  textRef.current = text;
-  selectionRef.current = selection;
+  useLayoutEffect(() => {
+    textRef.current = text;
+    selectionRef.current = selection;
+  }, [text, selection]);
 
   const recomputeMentioning = useCallback(
     (nextText: string, cursor: number) => {
@@ -139,10 +142,10 @@ export function useMentionInput(): UseMentionInputReturn {
     const s = selectionRef.current;
     const before = t.slice(0, s.start);
     const after = t.slice(s.end);
-    // Mention tokens require a word boundary before `@`. If the prior char
-    // isn't whitespace (or start-of-text), pad with a space — otherwise the
-    // suggestion bar won't trigger.
-    const needsPad = before.length > 0 && !/\s$/.test(before);
+    // A mention token needs a token boundary before `@`. Pad with a space when
+    // the character before the caret is one the `@` would glue onto; CJK text
+    // needs no pad, because there the `@` already starts a token.
+    const needsPad = !isMentionBoundaryAfter(before.slice(-2));
     const inserted = (needsPad ? " " : "") + "@";
     const next = before + inserted + after;
     const cursor = before.length + inserted.length;

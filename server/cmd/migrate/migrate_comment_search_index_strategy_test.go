@@ -11,13 +11,14 @@ import (
 )
 
 func TestCommentSearchIndexStrategyChoosesOneUsableIndexPerEnvironment(t *testing.T) {
+	t.Parallel()
 	adminPool := openTestPool(t)
 	ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
-	defer cancel()
+	// A cleanup, not a defer: the cases below are parallel, so they run after
+	// this function has returned.
+	t.Cleanup(cancel)
 
-	if _, err := adminPool.Exec(ctx, "CREATE EXTENSION IF NOT EXISTS pg_trgm"); err != nil {
-		t.Fatalf("install pg_trgm test dependency: %v", err)
-	}
+	createTestExtension(t, ctx, adminPool, "pg_trgm")
 
 	tests := []struct {
 		name              string
@@ -55,6 +56,7 @@ func TestCommentSearchIndexStrategyChoosesOneUsableIndexPerEnvironment(t *testin
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			suffix := fmt.Sprintf("%d_%d", time.Now().UnixNano(), rand.Uint32())
 			schema := "migrate_comment_search_" + suffix
 			schemaIdent := pgx.Identifier{schema}.Sanitize()
@@ -138,6 +140,7 @@ func TestCommentSearchIndexStrategyChoosesOneUsableIndexPerEnvironment(t *testin
 }
 
 func TestCommentContentBigramRequirementMatchesRealPGBigm(t *testing.T) {
+	t.Parallel()
 	adminPool := openTestPool(t)
 	ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
 	defer cancel()
@@ -155,9 +158,7 @@ func TestCommentContentBigramRequirementMatchesRealPGBigm(t *testing.T) {
 	if !available {
 		t.Skip("Postgres does not provide pg_bigm; install it to run the real-opclass integration test")
 	}
-	if _, err := adminPool.Exec(ctx, "CREATE EXTENSION IF NOT EXISTS pg_bigm"); err != nil {
-		t.Fatalf("install pg_bigm test dependency: %v", err)
-	}
+	createTestExtension(t, ctx, adminPool, "pg_bigm")
 
 	suffix := fmt.Sprintf("%d_%d", time.Now().UnixNano(), rand.Uint32())
 	schema := "migrate_comment_bigm_" + suffix

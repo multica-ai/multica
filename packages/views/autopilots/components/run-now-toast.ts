@@ -33,6 +33,7 @@ export type RunNowBlockedKey =
   | "run_blocked_invocation_not_allowed"
   | "run_blocked_runtime_offline"
   | "run_blocked_agent_runtime_required"
+  | "run_blocked_runtime_access_denied"
   | "run_blocked_target_unavailable"
   | "run_blocked_attribution"
   | "run_blocked_already_active"
@@ -50,6 +51,10 @@ export function runNowBlockedKey(reasonCode: string | undefined): RunNowBlockedK
     // to a runtime (MUL-5559).
     case "agent_runtime_required":
       return "run_blocked_agent_runtime_required";
+    // Bound but not permitted there: the agent's owner cannot execute it on
+    // the selected private runtime. Retrying never fixes this.
+    case "runtime_access_denied":
+      return "run_blocked_runtime_access_denied";
     case "target_unavailable":
       return "run_blocked_target_unavailable";
     case "attribution_blocked":

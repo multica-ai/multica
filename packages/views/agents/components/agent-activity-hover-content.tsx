@@ -1,13 +1,14 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { Bell } from "@multica/ui/icons";
 import { useQuery } from "@tanstack/react-query";
 import { ActorAvatar as ActorAvatarBase } from "@multica/ui/components/common/actor-avatar";
 import { useActorName } from "@multica/core/workspace/hooks";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { runtimeListOptions } from "@multica/core/runtimes/queries";
 import { agentListOptions } from "@multica/core/workspace/queries";
-import { deriveAgentAvailability } from "@multica/core/agents";
+import { deriveAgentPresenceDetail } from "@multica/core/agents/derive-presence";
 import type { AgentTask, Issue } from "@multica/core/types";
 import { workloadConfig } from "../presence";
 import { useT } from "../../i18n";
@@ -73,7 +74,10 @@ function AgentActivityTaskRow({
 
   const agent = agentById.get(task.agent_id);
   const runtime = runtimeFrom(agent?.runtime_id, runtimeById);
-  const availability = deriveAgentAvailability(runtime, now);
+  const availability = agent
+    ? deriveAgentPresenceDetail({ agent, runtime, tasks: [], now })
+        .availability
+    : "offline";
   const isRunning = task.status === "running";
   // queued/dispatched both read as "queued" in the user-facing copy —
   // `dispatched` is the daemon-acked sub-state of queued and not
@@ -108,6 +112,7 @@ function AgentActivityTaskRow({
       <span className="flex-1 truncate font-medium">
         {getActorName("agent", task.agent_id)}
       </span>
+      {task.wakeup_id && <Bell className="size-3 shrink-0 text-muted-foreground" aria-label={t(($) => $.wakeups.triggered_by_wakeup)} />}
       <span className="flex shrink-0 items-center gap-1.5">
         <span className={`h-1.5 w-1.5 rounded-full ${dotClass}`} />
         <span className={labelClass}>

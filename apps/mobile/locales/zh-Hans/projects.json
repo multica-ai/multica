@@ -1,0 +1,78 @@
+{
+  "list": {
+    "title": "项目",
+    "empty": "还没有项目",
+    "search_placeholder": "搜索项目..."
+  },
+  "status": {
+    "planned": "计划中",
+    "in_progress": "进行中",
+    "paused": "已暂停",
+    "completed": "已完成",
+    "cancelled": "已取消"
+  },
+  "priority": {
+    "urgent": "紧急",
+    "high": "高",
+    "medium": "中",
+    "low": "低",
+    "none": "无优先级"
+  },
+  "detail": {
+    "properties": "属性",
+    "related_issues": "相关任务",
+    "resources": "资源",
+    "lead": "负责人",
+    "no_resources": "尚未添加资源。",
+    "add_resource": "添加资源"
+  },
+  "form": {
+    "icon_emoji": "图标（emoji）",
+    "title": "标题",
+    "title_placeholder": "项目标题",
+    "description": "描述",
+    "description_placeholder": "这个项目是做什么的？",
+    "discard_title": "放弃项目？",
+    "discard_message": "草稿将会丢失。",
+    "keep_editing": "继续编辑",
+    "save_failed": "创建项目失败",
+    "save_failed_edit": "保存失败"
+  },
+  "errors": {
+    "load_failed": "项目加载失败：{{message}}"
+  },
+  "actions": {
+    "creating": "创建中...",
+    "saving": "保存中..."
+  },
+  "menu": {
+    "pin": "固定",
+    "unpin": "取消固定",
+    "edit_details": "编辑详情",
+    "open_web": "在网页打开",
+    "project_actions": "项目操作"
+  },
+  "delete": {
+    "title": "删除项目？",
+    "message": "此操作无法撤销。该项目中的任务将不再关联任何项目。"
+  },
+  "properties": {
+    "status": "状态",
+    "priority": "优先级",
+    "lead": "负责人",
+    "unassigned": "未分配"
+  },
+  "resources": {
+    "title": "资源",
+    "add": "添加",
+    "detach_title": "移除资源？",
+    "detach": "移除",
+    "empty": "尚未添加资源。"
+  },
+  "runs": {
+    "working": "处理中",
+    "count": "运行 · {{count}}"
+  },
+  "status.planned": "计划中",
+  "form.description_placeholder": "这个项目是做什么的？"
+}

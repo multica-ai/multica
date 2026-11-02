@@ -163,6 +163,65 @@ describe("AppLink", () => {
     expect(push).not.toHaveBeenCalled();
   });
 
+  describe("onNavigateInPlace", () => {
+    function renderWithInPlace(adapter: NavigationAdapter, extra: Partial<React.ComponentProps<typeof AppLink>> = {}) {
+      const onNavigateInPlace = vi.fn();
+      renderLink(adapter, { href: "/issues", onNavigateInPlace, ...extra });
+      return onNavigateInPlace;
+    }
+
+    it("runs right before an in-place push, after the caller's onClick", () => {
+      const order: string[] = [];
+      const adapter = makeAdapter({ push: vi.fn(() => order.push("push")) });
+      renderLink(adapter, {
+        href: "/issues",
+        onClick: () => order.push("onClick"),
+        onNavigateInPlace: () => order.push("inPlace"),
+      });
+      fireEvent.click(screen.getByText("go"));
+      expect(order).toEqual(["onClick", "inPlace", "push"]);
+    });
+
+    it("runs for a desktop shift-click, which pushes in place", () => {
+      const onNavigateInPlace = renderWithInPlace(makeAdapter({ openInNewTab: vi.fn() }));
+      fireEvent.click(screen.getByText("go"), { shiftKey: true });
+      expect(onNavigateInPlace).toHaveBeenCalledTimes(1);
+    });
+
+    it("skips a web shift-click, which the browser opens in a new window", () => {
+      const onNavigateInPlace = renderWithInPlace(makeAdapter());
+      fireEvent.click(screen.getByText("go"), { shiftKey: true });
+      expect(onNavigateInPlace).not.toHaveBeenCalled();
+    });
+
+    it.each([
+      ["desktop", { openInNewTab: vi.fn() }],
+      ["web", {}],
+    ])("skips modifier and middle clicks on %s", (_platform, overrides) => {
+      const onNavigateInPlace = renderWithInPlace(makeAdapter(overrides));
+      const link = screen.getByText("go");
+      fireEvent.click(link, { metaKey: true });
+      fireEvent.click(link, { ctrlKey: true });
+      fireEvent.click(link, { metaKey: true, shiftKey: true });
+      fireEvent(link, new MouseEvent("auxclick", { bubbles: true, cancelable: true, button: 1 }));
+      expect(onNavigateInPlace).not.toHaveBeenCalled();
+    });
+
+    it("skips a target=_blank link, which opens a tab", () => {
+      const blank = renderWithInPlace(makeAdapter({ openInNewTab: vi.fn() }), { target: "_blank" });
+      fireEvent.click(screen.getByText("go"));
+      expect(blank).not.toHaveBeenCalled();
+    });
+
+    it("skips a click whose onClick called preventDefault", () => {
+      const push = vi.fn();
+      const onNavigateInPlace = renderWithInPlace(makeAdapter({ push }), { onClick: (e) => e.preventDefault() });
+      fireEvent.click(screen.getByText("go"));
+      expect(onNavigateInPlace).not.toHaveBeenCalled();
+      expect(push).not.toHaveBeenCalled();
+    });
+  });
+
   describe("target=_blank (open-in-new-tab links)", () => {
     it("plain click opens a foreground new tab via the adapter (desktop) and does NOT push", () => {
       const push = vi.fn();

@@ -18,6 +18,8 @@
  * lose user input, never claim a mention we can't prove.
  */
 
+import { isMentionBoundaryAfter } from "@multica/core/markdown";
+
 const SENTINEL = "⁣";
 
 export type MentionType = "member" | "agent" | "squad" | "all" | "issue";
@@ -38,8 +40,10 @@ export interface MentionMarker {
  * Returns the start offset of the `@` and the query (text between `@` and
  * the cursor), or null when not in a mention token.
  *
- * Word boundary uses `/\s/` so non-ASCII names (中文 / 日本語) work — the
- * token ends at whitespace, not at ASCII word boundary.
+ * The token ends at whitespace, not at an ASCII word boundary, so non-ASCII
+ * names (中文 / 日本語) work. Whether the `@` itself starts a token is decided
+ * by the rule shared with the web/desktop editor — see
+ * `isMentionBoundaryAfter` in packages/core/markdown.
  *
  * Skips runs that begin with the sentinel — those are completed mentions
  * inserted by the bar, not in-progress queries.
@@ -63,12 +67,12 @@ export function tokenAtCursor(
   // Skip if the @ is preceded by the sentinel (= a completed mention chip).
   if (i > 0 && text[i - 1] === SENTINEL) return null;
 
-  // The character before @ must be whitespace or start-of-string. This
-  // prevents random in-word @ (e.g. "user@example.com") from triggering.
-  if (i > 0) {
-    const prev = text[i - 1];
-    if (prev !== undefined && !/\s/.test(prev)) return null;
-  }
+  // The @ must start a token rather than continue the word before it. The rule
+  // is shared with the web/desktop editor (packages/core/markdown), so both
+  // clients offer the picker over the same text: an in-word @ such as
+  // "user@example.com" stays inert, while CJK — written without a separator —
+  // opens it.
+  if (i > 0 && !isMentionBoundaryAfter(text.slice(Math.max(0, i - 2), i))) return null;
 
   const query = text.slice(i + 1, cursor);
   // If the query already contains whitespace, the user has moved past the

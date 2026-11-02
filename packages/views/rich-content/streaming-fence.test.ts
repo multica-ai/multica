@@ -1,11 +1,11 @@
 // @vitest-environment node
 import { describe, expect, it } from "vitest";
-import { computeClosedFenceOffsets } from "./streaming-fence";
+import { computeClosedFences, parseFenceTitle } from "./streaming-fence";
 
 const isClosed = (src: string, offset = 0): boolean =>
-  computeClosedFenceOffsets(src).has(offset);
+  computeClosedFences(src).has(offset);
 
-describe("computeClosedFenceOffsets", () => {
+describe("computeClosedFences", () => {
   it("treats a closed backtick fence as closed", () => {
     expect(isClosed("```mermaid\ngraph TD\n```\n")).toBe(true);
   });
@@ -51,7 +51,7 @@ describe("computeClosedFenceOffsets", () => {
 
   it("handles a fence inside a list item", () => {
     const src = "- item\n\n  ```mermaid\n  graph TD\n  ```\n";
-    expect(computeClosedFenceOffsets(src).size).toBe(1);
+    expect(computeClosedFences(src).size).toBe(1);
     expect(isClosed(src, src.indexOf("```"))).toBe(true);
   });
 
@@ -59,14 +59,14 @@ describe("computeClosedFenceOffsets", () => {
   // node, not two — the inner fence must not register as its own block.
   it("does not report an inner fence of a nested block", () => {
     const src = "````md\n```mermaid\ngraph TD\n```\n````\n";
-    const offsets = computeClosedFenceOffsets(src);
+    const offsets = computeClosedFences(src);
     expect(offsets.size).toBe(1);
     expect(offsets.has(0)).toBe(true);
   });
 
   it("reports each block independently when several are present", () => {
     const src = "```mermaid\ngraph TD\n```\n\ntext\n\n```html\n<b>x</b>\n";
-    const offsets = computeClosedFenceOffsets(src);
+    const offsets = computeClosedFences(src);
     expect(offsets.has(0)).toBe(true);
     expect(offsets.has(src.lastIndexOf("```html"))).toBe(false);
   });
@@ -90,14 +90,34 @@ describe("computeClosedFenceOffsets", () => {
     // Four-space indented code has no fence to dangle; it carries no info
     // string so it can never dispatch to a rich block.
     const src = "    const a = 1\n";
-    expect(computeClosedFenceOffsets(src).size).toBe(1);
+    expect(computeClosedFences(src).size).toBe(1);
   });
 
-  it("returns an empty set for empty input", () => {
-    expect(computeClosedFenceOffsets("").size).toBe(0);
+  it("returns an empty map for empty input", () => {
+    expect(computeClosedFences("").size).toBe(0);
   });
 
-  it("returns an empty set for prose with no code", () => {
-    expect(computeClosedFenceOffsets("just some **text**\n").size).toBe(0);
+  it("returns an empty map for prose with no code", () => {
+    expect(computeClosedFences("just some **text**\n").size).toBe(0);
+  });
+});
+
+describe("fence titles", () => {
+  it("reads the title attribute from a closed fence's info string", () => {
+    const src = '```html title="Weekly p95"\n<b>x</b>\n```\n';
+    expect(computeClosedFences(src).get(0)).toEqual({ title: "Weekly p95" });
+  });
+
+  it("has no title when the info string carries none", () => {
+    expect(computeClosedFences("```html\n<b>x</b>\n```\n").get(0)).toEqual({ title: null });
+  });
+
+  it("accepts double, single and bare values", () => {
+    expect(parseFenceTitle('title="Weekly p95" theme=dark')).toBe("Weekly p95");
+    expect(parseFenceTitle("title='Sign-up funnel'")).toBe("Sign-up funnel");
+    expect(parseFenceTitle("title=Funnel")).toBe("Funnel");
+    expect(parseFenceTitle('subtitle="nope"')).toBeNull();
+    expect(parseFenceTitle('title="  "')).toBeNull();
+    expect(parseFenceTitle(null)).toBeNull();
   });
 });

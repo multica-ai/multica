@@ -24,6 +24,13 @@ describe("resolveTabPresentation — pages", () => {
       title: { kind: "nav", navKey: "projects" },
     });
   });
+
+  it("titles My agents' work as its own page rather than My issues", () => {
+    expect(present("/acme/my-issues?scope=agents")).toEqual({
+      visual: { kind: "icon", icon: "Bot" },
+      title: { kind: "tab", tabKey: "my_agents" },
+    });
+  });
 });
 
 describe("resolveTabPresentation — direct resources", () => {
@@ -39,7 +46,7 @@ describe("resolveTabPresentation — direct resources", () => {
     ).toEqual({
       // `category` travels with the visual so the tab strip never has to guess
       // the glyph for a custom status key. (MUL-6243)
-      visual: { kind: "issue-status", status: "in_progress", category: "in_progress" },
+      visual: { kind: "issue-status", status: "in_progress", category: "started" },
       title: { kind: "text", text: "MUL-1: Fix" },
     });
   });

@@ -1,23 +1,23 @@
 import {
-  RUNTIME_PROFILE_PROTOCOL_FAMILIES,
+  RUNTIME_PROFILE_RUNTIME_TYPES,
   type RuntimeProfile,
-  type RuntimeProtocolFamily,
+  type RuntimeProfileType,
 } from "@multica/core/types";
 
 // A single row in the runtimes catalog the management dialog renders: the
-// built-in protocol families ship as read-only reference rows, while custom
+// built-in runtime targets ship as read-only reference rows, while custom
 // profiles are the user's editable assets.
 export type RuntimeCatalogEntry =
   | {
       kind: "builtin";
       // Stable row id — the protocol family doubles as the key for built-ins.
       id: string;
-      protocolFamily: RuntimeProtocolFamily;
+      protocolFamily: RuntimeProfileType;
     }
   | {
       kind: "custom";
       id: string;
-      protocolFamily: RuntimeProtocolFamily;
+      protocolFamily: RuntimeProfileType;
       profile: RuntimeProfile;
     };
 
@@ -28,16 +28,36 @@ export interface RuntimeCatalogSections {
 
 // Re-export the whitelist as a typed array so callers (the family picker,
 // the catalog builder) share the single source of truth.
-export const PROTOCOL_FAMILIES: readonly RuntimeProtocolFamily[] =
-  RUNTIME_PROFILE_PROTOCOL_FAMILIES;
+export const RUNTIME_TYPES = RUNTIME_PROFILE_RUNTIME_TYPES;
+
+// A runtime id is its own label for every target whose product name is just
+// the id — `capitalize` at the render site turns "claude" into "Claude". Only
+// targets whose product name differs from the stored id need an entry here.
+const RUNTIME_TYPE_LABELS: Partial<Record<RuntimeProfileType, string>> = {
+  omp: "Oh-My-Pi",
+};
+
+// runtimeTypeLabel is what the user should read for a runtime target. Every
+// surface that shows one goes through it, so the picker and the profile it
+// creates cannot disagree about what the target is called.
+export function runtimeTypeLabel(runtimeType: string): string {
+  return RUNTIME_TYPE_LABELS[runtimeType as RuntimeProfileType] ?? runtimeType;
+}
+
+// profileRuntimeType is the target a profile was created against. Profiles
+// written before the server stored an identity carry only a protocol family,
+// which was their target (see RuntimeProfileSchema).
+export function profileRuntimeType(profile: RuntimeProfile): RuntimeProfileType {
+  return profile.runtime_type ?? profile.protocol_family;
+}
 
 // buildRuntimeCatalog keeps user-owned custom profiles separate from built-in
-// protocol families. The dialog renders customs as the primary management
+// runtime targets. The dialog renders customs as the primary management
 // surface and built-ins as a collapsed reference section.
 export function buildRuntimeCatalog(
   profiles: RuntimeProfile[],
 ): RuntimeCatalogSections {
-  const builtins: RuntimeCatalogEntry[] = PROTOCOL_FAMILIES.map((family) => ({
+  const builtins: RuntimeCatalogEntry[] = RUNTIME_TYPES.map((family) => ({
     kind: "builtin" as const,
     id: `builtin:${family}`,
     protocolFamily: family,
@@ -56,7 +76,7 @@ export function buildRuntimeCatalog(
     .map((profile) => ({
       kind: "custom" as const,
       id: profile.id,
-      protocolFamily: profile.protocol_family,
+      protocolFamily: profileRuntimeType(profile),
       profile,
     }));
 
@@ -168,7 +188,10 @@ export function parseCommandLine(input: string): ParsedCommandLine {
   return { ok: true, commandName: tokens[0], fixedArgs: tokens.slice(1) };
 }
 
-export function formatCommandLine(commandName: string, fixedArgs: string[]): string {
+export function formatCommandLine(
+  commandName: string,
+  fixedArgs: string[],
+): string {
   return [commandName, ...fixedArgs].filter(Boolean).map(quoteArg).join(" ");
 }
 

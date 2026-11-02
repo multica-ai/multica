@@ -71,6 +71,107 @@ EOF
 
 out="$tmp_dir/out"
 
+assert_listener_ownership() {
+  local case_name=$1 expected=$2 launcher=$3 listener=$4 listener_pgid=$5 recorded=${6:-}
+  (
+    # shellcheck disable=SC1090
+    source "$root_dir/scripts/dev-env.sh"
+    STATE_DIR="$tmp_dir/ownership-$case_name"
+    mkdir -p "$STATE_DIR"
+    [ -z "$recorded" ] || printf '%s\n' "$recorded" > "$(listener_pid_file web)"
+    TEST_LAUNCHER=$launcher
+    TEST_LISTENER=$listener
+    TEST_LISTENER_PGID=$listener_pgid
+    TEST_CASE=$case_name
+
+    component_pid() { printf '%s' "$TEST_LAUNCHER"; }
+    port_listener_pid() { printf '%s' "$TEST_LISTENER"; }
+    process_group_id() { printf '%s' "$TEST_LISTENER_PGID"; }
+    process_parent_id() {
+      case "$TEST_CASE:$1" in
+        nested:420) printf '310' ;;
+        nested:310) printf '200' ;;
+        nested:200) printf '%s' "$TEST_LAUNCHER" ;;
+        *) printf '1' ;;
+      esac
+    }
+
+    local actual=external
+    if listener_belongs_to_component web 13000; then actual=owned; fi
+    [ "$actual" = "$expected" ] \
+      || fail "$case_name listener ownership = $actual, want $expected"
+  )
+}
+
+assert_nested_listener_is_recorded() (
+  # shellcheck disable=SC1090
+  source "$root_dir/scripts/dev-env.sh"
+  STATE_DIR="$tmp_dir/ownership-record"
+  mkdir -p "$STATE_DIR"
+
+  component_pid() { printf '100'; }
+  port_listener_pid() { printf '420'; }
+  process_group_id() { printf '310'; }
+  process_parent_id() {
+    case "$1" in
+      420) printf '310' ;;
+      310) printf '200' ;;
+      200) printf '100' ;;
+      *) printf '1' ;;
+    esac
+  }
+
+  local claimed
+  claimed="$(record_component_listener web 13000)" \
+    || fail "nested listener was not claimed"
+  [ "$claimed" = 420 ] || fail "claimed listener = $claimed, want 420"
+  [ "$(cat "$(listener_pid_file web)")" = 420 ] \
+    || fail "nested listener pid was not recorded"
+)
+
+assert_stop_handles_listener() {
+  local case_name=$1 listener=$2 listener_pgid=$3 listener_parent=$4 recorded=${5:-}
+  local expected_target=${6:-}
+  (
+    # shellcheck disable=SC1090
+    source "$root_dir/scripts/dev-env.sh"
+    STATE_DIR="$tmp_dir/stop-$case_name"
+    mkdir -p "$STATE_DIR"
+    BACKEND_PORT=18080
+    FRONTEND_PORT=13000
+    DESKTOP_RENDERER_PORT=5174
+    local signals="$STATE_DIR/signals"
+    [ -z "$recorded" ] || printf '%s\n' "$recorded" > "$(listener_pid_file web)"
+    TEST_CASE=$case_name
+    TEST_LISTENER=$listener
+    TEST_LISTENER_PGID=$listener_pgid
+    TEST_LISTENER_PARENT=$listener_parent
+
+    component_pid() { [ "$TEST_CASE" = nested ] && printf '100'; }
+    port_listener_pid() { printf '%s' "$TEST_LISTENER"; }
+    process_group_id() { printf '%s' "$TEST_LISTENER_PGID"; }
+    process_parent_id() {
+      case "$1" in
+        "$TEST_LISTENER") printf '%s' "$TEST_LISTENER_PARENT" ;;
+        "$TEST_LISTENER_PARENT") printf '100' ;;
+        *) printf '1' ;;
+      esac
+    }
+    sleep() { :; }
+    kill() {
+      [ "$1" != -0 ] || return 1
+      printf 'signal=%s target=%s\n' "$1" "${2:-}" >> "$signals"
+    }
+
+    stop_component web > "$out" 2>&1 || fail "$case_name stop failed"
+    if [ -n "$expected_target" ]; then
+      require_contains "$signals" "target=$expected_target"
+    elif [ -s "$signals" ]; then
+      fail "$case_name stop signalled an external listener: $(cat "$signals")"
+    fi
+  )
+}
+
 # ---------------------------------------------------------------------------
 # An empty registry is a normal state, not an error.
 # ---------------------------------------------------------------------------
@@ -173,6 +274,20 @@ MULTICA_WORKSPACES_ROOT=/owner/workspaces \
 if bash -c 'source "$1"; api_started_after '\''{"status":"ok"}'\'' 1' _ "$root_dir/scripts/dev-env.sh"; then
   fail "legacy /health without started_at was accepted as current"
 fi
+
+# Listener ownership follows the process tree, not only the launcher's process
+# group. Turbo/pnpm can create a nested process group for Next while keeping the
+# listener below the launcher in the PPID chain.
+assert_listener_ownership same-pgid owned 100 200 100
+assert_listener_ownership nested owned 100 420 310
+assert_listener_ownership recorded owned 100 200 200 200
+assert_listener_ownership external external 100 999 999
+assert_nested_listener_is_recorded
+
+# Stopping first records an owned nested listener before killing the launcher's
+# process group. An unrelated port occupant never receives a signal.
+assert_stop_handles_listener nested 420 310 200 "" 420
+assert_stop_handles_listener external 999 999 1 888
 
 # ---------------------------------------------------------------------------
 # Unknown names and components fail loudly instead of doing something else.

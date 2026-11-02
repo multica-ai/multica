@@ -196,6 +196,51 @@ describe("UsageSection — Viewing timezone wiring", () => {
   });
 });
 
+describe("UsageSection — cache hit rate", () => {
+  beforeEach(() => {
+    usageOverride.rows = null;
+  });
+
+  it("includes cache writes in the denominator", () => {
+    usageOverride.rows = [
+      {
+        runtime_id: "r-1",
+        date: new Date().toISOString().slice(0, 10),
+        provider: "anthropic",
+        model: "claude-sonnet-4-6",
+        input_tokens: 0,
+        output_tokens: 0,
+        cache_read_tokens: 72_000,
+        cache_write_tokens: 28_000,
+      },
+    ];
+
+    render(<UsageSection runtime={RUNTIME} />, { wrapper: Wrapper });
+
+    expect(screen.getByText(/72% hit/)).toBeInTheDocument();
+  });
+
+  it("shows an unavailable rate when no input-side tokens were reported", () => {
+    usageOverride.rows = [
+      {
+        runtime_id: "r-1",
+        date: new Date().toISOString().slice(0, 10),
+        provider: "anthropic",
+        model: "claude-sonnet-4-6",
+        input_tokens: 0,
+        output_tokens: 1_000,
+        cache_read_tokens: 0,
+        cache_write_tokens: 0,
+      },
+    ];
+
+    render(<UsageSection runtime={RUNTIME} />, { wrapper: Wrapper });
+
+    expect(screen.getByText("—")).toBeInTheDocument();
+    expect(screen.queryByText(/0% hit/)).not.toBeInTheDocument();
+  });
+});
+
 describe("UsageSection — custom-pricing entry point", () => {
   // A model that no maintained row prices, so it lands in the unmapped
   // diagnostic. `collectUnmappedModels` keys it by provider, so the saved
@@ -257,5 +302,38 @@ describe("UsageSection — custom-pricing entry point", () => {
     expect(
       screen.getByRole("button", { name: "Edit custom prices" }),
     ).toBeInTheDocument();
+  });
+});
+
+describe("UsageSection — KPI row layout", () => {
+  // Regression (#7836): the KPI row was a hard `grid-cols-3`. At a 390px
+  // viewport each column is ~110px, and `KpiCard`'s p-5 leaves ~70px for a
+  // 36px `text-display` value. A compact token total ("960.1M") is a single
+  // unbreakable token, so it painted past the card's right edge rather than
+  // wrapping. The Analytics Usage/Errors tabs already stack their identical
+  // KPI rows below `sm`; this row is the one that never got it.
+  it("stacks below sm instead of forcing three columns", () => {
+    const { container } = render(<UsageSection runtime={RUNTIME} />, {
+      wrapper: Wrapper,
+    });
+
+    // Walk up from a KPI value to the row that lays the three cards out.
+    const row = container
+      .querySelector("number-flow-react")
+      ?.closest("div.grid");
+    expect(row).not.toBeNull();
+
+    const classes = row!.className;
+    expect(classes).toContain("grid-cols-1");
+    expect(classes).toContain("sm:grid-cols-3");
+    // The unprefixed `grid-cols-3` is the defect itself: it applies at every
+    // width. `sm:grid-cols-3` must not be mistaken for it.
+    expect(classes.split(/\s+/)).not.toContain("grid-cols-3");
+    // The separator has to follow the orientation, or the stacked cards run
+    // together with a vertical rule floating between columns that no longer
+    // exist.
+    expect(classes).toContain("divide-y");
+    expect(classes).toContain("sm:divide-x");
+    expect(classes).toContain("sm:divide-y-0");
   });
 });

@@ -127,7 +127,13 @@ func (sort resolvedIssueTableSort) cursorPredicate(w http.ResponseWriter, cursor
 	return predicate, true
 }
 
-func (h *Handler) issueTableOrderBy(w http.ResponseWriter, r *http.Request, workspaceID string, sortRequest issueTableSortRequest) (resolvedIssueTableSort, bool) {
+func (h *Handler) issueTableOrderBy(
+	w http.ResponseWriter,
+	r *http.Request,
+	workspaceID pgtype.UUID,
+	sortRequest issueTableSortRequest,
+	addArg func(any) string,
+) (resolvedIssueTableSort, bool) {
 	sortField := strings.TrimSpace(sortRequest.Field)
 	if sortField == "" {
 		sortField = "position"
@@ -155,13 +161,19 @@ func (h *Handler) issueTableOrderBy(w http.ResponseWriter, r *http.Request, work
 		resolved.castType = "date"
 		resolved.nullsLast = true
 	case "status":
-		resolved.expression = "CASE i.status WHEN 'backlog' THEN 0 WHEN 'todo' THEN 1 WHEN 'in_progress' THEN 2 WHEN 'in_review' THEN 3 WHEN 'done' THEN 4 WHEN 'blocked' THEN 5 WHEN 'cancelled' THEN 6 ELSE 7 END"
+		expr, err := h.issueStatusSortExpression(r.Context(), workspaceID, addArg)
+		if err != nil {
+			slog.Warn("resolve table status sort failed", append(logger.RequestAttrs(r), "error", err)...)
+			writeIssueTableQueryFailure(w, r, "failed to resolve table sort")
+			return resolvedIssueTableSort{}, false
+		}
+		resolved.expression = expr
 		resolved.castType = "integer"
 	case "priority":
 		resolved.expression = "CASE i.priority WHEN 'urgent' THEN 0 WHEN 'high' THEN 1 WHEN 'medium' THEN 2 WHEN 'low' THEN 3 ELSE 4 END"
 		resolved.castType = "integer"
 	default:
-		expr, handled, err := h.propertySortExpr(r, workspaceID, sortField)
+		expr, handled, err := h.propertySortExpr(r, util.UUIDToString(workspaceID), sortField)
 		if !handled {
 			writeError(w, http.StatusBadRequest, "invalid query.sort.field")
 			return resolvedIssueTableSort{}, false
@@ -274,15 +286,20 @@ func (h *Handler) ListIssueTableRows(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	resolvedSort, ok := h.issueTableOrderBy(w, r, util.UUIDToString(compiled.workspaceID), request.Query.Sort)
-	if !ok {
-		return
-	}
-
 	args := append([]any(nil), compiled.args...)
 	addArg := func(value any) string {
 		args = append(args, value)
 		return "$" + strconv.Itoa(len(args))
+	}
+	resolvedSort, ok := h.issueTableOrderBy(
+		w,
+		r,
+		compiled.workspaceID,
+		request.Query.Sort,
+		addArg,
+	)
+	if !ok {
+		return
 	}
 	predicateKey := ""
 	if groupKey != nil {
@@ -335,7 +352,14 @@ func (h *Handler) ListIssueTableRows(w http.ResponseWriter, r *http.Request) {
 		group.primary != nil &&
 		group.primary.kind == "parent" &&
 		group.secondaryFiltered {
-		visibleRef := addArg(group.secondaryValues)
+		visibleKeys := group.secondaryValues
+		if group.secondaryCategory {
+			visibleKeys = nil
+			for _, category := range group.secondaryValues {
+				visibleKeys = append(visibleKeys, group.categoryKeysFor(category)...)
+			}
+		}
+		visibleRef := addArg(visibleKeys)
 		ctePrefix += fmt.Sprintf(`membership AS NOT MATERIALIZED (
   SELECT i.*
   FROM issue i
@@ -369,7 +393,7 @@ SELECT i.id, i.workspace_id, i.title, i.description, i.status, i.priority,
        i.assignee_type, i.assignee_id, i.creator_type, i.creator_id,
        i.parent_issue_id, i.position, i.start_date, i.due_date, i.created_at,
 	       i.updated_at, i.last_activity_at, i.number, i.project_id, i.metadata, i.stage, i.properties,
-	       i.revision,
+	       i.revision, i.duplicate_of_issue_id,
 	       %s AS direct_child_count, i.table_sort_key
 	FROM page i
 	ORDER BY %s`, cte, childCountExpr, resolvedSort.orderBy())
@@ -414,6 +438,7 @@ SELECT i.id, i.workspace_id, i.title, i.description, i.status, i.priority,
 			&row.issue.Stage,
 			&row.issue.Properties,
 			&row.issue.Revision,
+			&row.issue.DuplicateOfIssueID,
 			&row.childCount,
 			&row.sortKey,
 		); err != nil {
@@ -476,12 +501,15 @@ SELECT i.id, i.workspace_id, i.title, i.description, i.status, i.priority,
 
 	prefix := baseHandler.getIssuePrefix(r.Context(), compiled.workspaceID)
 	issueIDs := make([]pgtype.UUID, len(scanned))
+	var originals []pgtype.UUID
 	for index, row := range scanned {
 		issueIDs[index] = row.issue.ID
+		originals = appendDuplicateOriginal(originals, row.issue.Status, row.issue.DuplicateOfIssueID)
 	}
 	labelsByIssue := baseHandler.labelsByIssue(r.Context(), compiled.workspaceID, issueIDs)
-	// One Resolver for the page — see newStatusCategoryFiller. (MUL-6243)
-	fillTableRow := baseHandler.newStatusCategoryFiller(r.Context(), compiled.workspaceID)
+	// One Resolver and one originals read for the page — see
+	// newStatusCategoryFiller. (MUL-6243, MUL-7349)
+	fillTableRow := baseHandler.newStatusCategoryFiller(r.Context(), compiled.workspaceID, originals...)
 	responseRows := make([]issueTableRowResponse, len(scanned))
 	for index, row := range scanned {
 		issue := issueListRowToResponse(row.issue, prefix)

@@ -2,8 +2,13 @@
 
 import { cleanup, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import type { AgentTask, Issue } from "@multica/core/types";
+import type { Agent, AgentRuntime, AgentTask, Issue } from "@multica/core/types";
 import { renderWithI18n } from "../../test/i18n";
+
+const activityQueryData = vi.hoisted(() => ({
+  agents: [] as Agent[],
+  runtimes: [] as AgentRuntime[],
+}));
 
 // The hover card renders one row per internal task record and counts product
 // runs, so its header must describe runs — not agents. A single agent can have
@@ -37,10 +42,6 @@ vi.mock("@multica/core/workspace/queries", () => ({
   agentListOptions: () => ({ queryKey: ["agents"] }),
 }));
 
-vi.mock("@multica/core/agents", () => ({
-  deriveAgentAvailability: () => "online",
-}));
-
 vi.mock("@multica/ui/components/common/actor-avatar", () => ({
   ActorAvatar: ({ name }: { name: string }) => (
     <span data-testid="actor-avatar">{name}</span>
@@ -52,7 +53,15 @@ vi.mock("@tanstack/react-query", async () => {
     await vi.importActual<typeof import("@tanstack/react-query")>(
       "@tanstack/react-query",
     );
-  return { ...actual, useQuery: () => ({ data: [] }) };
+  return {
+    ...actual,
+    useQuery: (options: { queryKey?: readonly unknown[] }) => ({
+      data:
+        options.queryKey?.[0] === "agents"
+          ? activityQueryData.agents
+          : activityQueryData.runtimes,
+    }),
+  };
 });
 
 import {
@@ -105,7 +114,11 @@ function makeTask(overrides: Partial<AgentTask>): AgentTask {
   };
 }
 
-afterEach(cleanup);
+afterEach(() => {
+  cleanup();
+  activityQueryData.agents = [];
+  activityQueryData.runtimes = [];
+});
 
 describe("AgentActivityHoverContent", () => {
   // Two agents, three active runs (Niko has two at once). The header must
@@ -128,6 +141,27 @@ describe("AgentActivityHoverContent", () => {
     renderWithI18n(<AgentActivityHoverContent tasks={[makeTask({})]} />);
 
     expect(screen.getByText("1 active run")).toBeInTheDocument();
+  });
+
+  it("uses an online agent projection when its runtime row is hidden", () => {
+    activityQueryData.agents = [
+      {
+        id: "agent-1",
+        runtime_id: "private-runtime",
+        runtime_availability: "online",
+      } as Agent,
+    ];
+
+    const { container } = renderWithI18n(
+      <AgentActivityHoverContent tasks={[makeTask({ status: "queued" })]} />,
+    );
+
+    expect(
+      container.querySelector('[class*="bg-muted-foreground/40"]'),
+    ).toBeInTheDocument();
+    expect(
+      container.querySelector('[class*="bg-warning"]'),
+    ).not.toBeInTheDocument();
   });
 
   it("renders the Chinese run copy", () => {

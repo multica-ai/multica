@@ -1,0 +1,38 @@
+{
+  "title": "Select a workspace",
+  "members": "Members",
+  "agents": "Agents",
+  "select": "Select workspace",
+  "switch": {
+    "title": "Switch workspace",
+    "message": "Switch to {{name}}?",
+    "confirm": "Switch",
+    "current_a11y": "{{name}} is the current workspace",
+    "switch_a11y": "Switch to {{name}}"
+  },
+  "empty": "You don't belong to any workspaces yet. Contact your workspace admin to be invited.",
+  "agent": {
+    "coming_soon": "Agents coming soon.",
+    "title": "Agents",
+    "empty": "No agents yet",
+    "search_placeholder": "Search agents..."
+  },
+  "actions": {
+    "retry": "Retry",
+    "sign_out": "Sign out"
+  },
+  "auth": {
+    "signed_in_as": "Signed in as"
+  },
+  "errors": {
+    "load_failed": "Failed to load workspaces: {{message}}"
+  },
+  "pins": {
+    "errors": {
+      "load_failed": "Failed to load pins: {{message}}"
+    },
+    "empty": "No pinned items yet.",
+    "unavailable_issue": "This pinned issue is unavailable.",
+    "unavailable_project": "This pinned project is unavailable."
+  }
+}

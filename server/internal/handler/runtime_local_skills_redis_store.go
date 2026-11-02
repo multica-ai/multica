@@ -72,10 +72,10 @@ func localSkillImportPendingKey(runtimeID string) string {
 // RedisLocalSkillListStore stores pending / running / completed list requests
 // in Redis so every API node agrees on the same state.
 type RedisLocalSkillListStore struct {
-	rdb *redis.Client
+	rdb redis.UniversalClient
 }
 
-func NewRedisLocalSkillListStore(rdb *redis.Client) *RedisLocalSkillListStore {
+func NewRedisLocalSkillListStore(rdb redis.UniversalClient) *RedisLocalSkillListStore {
 	return &RedisLocalSkillListStore{rdb: rdb}
 }
 
@@ -266,10 +266,10 @@ func (s *RedisLocalSkillListStore) Fail(ctx context.Context, id string, errMsg s
 // request shape carries import-specific fields (skill_key, optional rename,
 // creator id) and Go generics don't buy us much for two concrete impls.
 type RedisLocalSkillImportStore struct {
-	rdb *redis.Client
+	rdb redis.UniversalClient
 }
 
-func NewRedisLocalSkillImportStore(rdb *redis.Client) *RedisLocalSkillImportStore {
+func NewRedisLocalSkillImportStore(rdb redis.UniversalClient) *RedisLocalSkillImportStore {
 	return &RedisLocalSkillImportStore{rdb: rdb}
 }
 

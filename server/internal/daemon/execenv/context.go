@@ -137,7 +137,7 @@ func writeWorkspacesRootMarkerAtomic(path string, data []byte) error {
 // Copilot:     skills → {workDir}/.github/skills/{name}/SKILL.md  (native project-level discovery)
 // OpenCode:    skills → {workDir}/.opencode/skills/{name}/SKILL.md  (native discovery)
 // OpenClaw:    skills → {workDir}/skills/{name}/SKILL.md  (native discovery — paired with a per-task synthesized openclaw-config.json that pins agents.defaults.workspace to workDir; see openclaw_config.go)
-// Pi:          skills → {workDir}/.pi/skills/{name}/SKILL.md  (native discovery)
+// Pi:          skills → {workDir}/.pi/skills/{name}/SKILL.md  (explicit --skill loading)
 // Cursor:      skills → {workDir}/.cursor/skills/{name}/SKILL.md  (native discovery)
 // Kimi:        skills → {workDir}/.kimi/skills/{name}/SKILL.md  (native discovery)
 // Reasonix:    skills → {workDir}/.reasonix/skills/{name}/SKILL.md  (native discovery)
@@ -148,6 +148,7 @@ func writeWorkspacesRootMarkerAtomic(path string, data []byte) error {
 // QwenPaw:      sidecar → {workDir}/.qwenpaw/skills/{name}/SKILL.md;
 // actual discovery uses per-task qwenpaw-workspace/skills passed via --workspace
 // MiniMax Code: skills → {workDir}/.minimax/skills/{name}/SKILL.md  (native project-level discovery)
+// Muse Code:   skills → {workDir}/.agents/skills/{name}/SKILL.md  (native project-level discovery)
 // Antigravity: skills → {workDir}/.agents/skills/{name}/SKILL.md  (native discovery — see https://antigravity.google/docs/gcli-migration "Workspace skills")
 // Default:     skills → {workDir}/.agent_context/skills/{name}/SKILL.md
 //
@@ -379,7 +380,7 @@ func skillsDirPath(workDir, provider string) string {
 		// no openclaw scan path ever inspected.
 		return filepath.Join(workDir, "skills")
 	case "pi":
-		// Pi natively discovers skills from .pi/skills/ in the workdir.
+		// The Pi backend explicitly loads skills from .pi/skills/ via --skill.
 		return filepath.Join(workDir, ".pi", "skills")
 	case "cursor":
 		// Cursor natively discovers skills from .cursor/skills/ in the workdir.
@@ -415,6 +416,11 @@ func skillsDirPath(workDir, provider string) string {
 	case "mcode":
 		// MiniMax Code discovers project-level skills from .minimax/skills/.
 		return filepath.Join(workDir, ".minimax", "skills")
+	case "devin":
+		return filepath.Join(workDir, ".devin", "skills")
+	case "muse":
+		// Muse's native project root: https://meta-models.github.io/muse-code-sdk/next/guides/extend/skills/
+		return filepath.Join(workDir, ".agents", "skills")
 	case "traecli":
 		// Official TRAE CLI discovers project-level skills from .traecli/skills/
 		// in the workdir (global skills live in ~/.traecli/skills). See

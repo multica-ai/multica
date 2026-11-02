@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"os/exec"
 	"strconv"
 	"strings"
 	"testing"
@@ -380,8 +381,8 @@ func TestRegisterRuntimes_SkipsUnsupportedProfileFamily(t *testing.T) {
 		t.Errorf("failure command_name = %v, want gemini", failure["command_name"])
 	}
 	reason, _ := failure["reason"].(string)
-	if !strings.Contains(reason, "unsupported protocol_family: gemini") {
-		t.Errorf("failure reason = %q, want unsupported protocol_family: gemini", reason)
+	if !strings.Contains(reason, "unsupported runtime_type: gemini") {
+		t.Errorf("failure reason = %q, want unsupported runtime_type: gemini", reason)
 	}
 }
 
@@ -416,7 +417,7 @@ func TestRegisterRuntimes_PrefersCommandPathOverride(t *testing.T) {
 	t.Cleanup(stubAgentVersion(t))
 	// PATH would resolve to a *different* binary; the override must win.
 	stubLookPath(t, map[string]string{"company-codex": "/usr/bin/company-codex"})
-	stubProfilePathExecutable(t, map[string]bool{"/opt/custom/company-codex": true})
+	stubResolveProfileOverridePath(t, map[string]string{"/opt/custom/company-codex": "/opt/custom/company-codex"})
 
 	profiles := []RuntimeProfile{{
 		ID:             "prof-1",
@@ -449,8 +450,8 @@ func TestRegisterRuntimes_PrefersCommandPathOverride(t *testing.T) {
 func TestRegisterRuntimes_OverrideNotExecutableFallsBackToPath(t *testing.T) {
 	t.Cleanup(stubAgentVersion(t))
 	stubLookPath(t, map[string]string{"company-codex": "/usr/bin/company-codex"})
-	// Override path reports NOT executable -> must fall back to PATH.
-	stubProfilePathExecutable(t, map[string]bool{})
+	// Override path does not resolve -> must fall back to PATH.
+	stubResolveProfileOverridePath(t, map[string]string{})
 
 	profiles := []RuntimeProfile{{
 		ID:             "prof-1",
@@ -474,14 +475,20 @@ func TestRegisterRuntimes_OverrideNotExecutableFallsBackToPath(t *testing.T) {
 	}
 }
 
-// stubProfilePathExecutable swaps the package-level profilePathExecutable
-// indirection so override-preference tests can decide which paths are
-// "executable" without staging real files. An absent path reports false.
-func stubProfilePathExecutable(t *testing.T, executable map[string]bool) {
+// stubResolveProfileOverridePath swaps the package-level
+// resolveProfileOverridePath indirection so override-preference tests can
+// decide which paths resolve without staging real files. An absent path
+// reports exec.ErrNotFound.
+func stubResolveProfileOverridePath(t *testing.T, resolved map[string]string) {
 	t.Helper()
-	orig := profilePathExecutable
-	profilePathExecutable = func(path string) bool { return executable[path] }
-	t.Cleanup(func() { profilePathExecutable = orig })
+	orig := resolveProfileOverridePath
+	resolveProfileOverridePath = func(path string) (string, error) {
+		if p, ok := resolved[path]; ok {
+			return p, nil
+		}
+		return "", exec.ErrNotFound
+	}
+	t.Cleanup(func() { resolveProfileOverridePath = orig })
 }
 
 // bookkeeping that runTask relies on to override the launch path.
@@ -510,5 +517,28 @@ func TestCustomCommandPathForRuntime(t *testing.T) {
 	d.runtimeIndex["rt-unresolved"] = Runtime{ID: "rt-unresolved", Provider: "codex", ProfileID: "prof-missing"}
 	if spec, ok := d.customProfileLaunchForRuntime("rt-unresolved"); ok || spec.path != "" {
 		t.Errorf("unresolved profile: got (%+v, %v), want empty false", spec, ok)
+	}
+}
+
+func TestRegisterRuntimes_ProfileCompatibilityTarget(t *testing.T) {
+	t.Cleanup(stubAgentVersion(t))
+	stubLookPath(t, map[string]string{"wrapper": "/opt/bin/wrapper"})
+	for _, target := range []string{"", "pi", "omp"} {
+		t.Run("target="+target, func(t *testing.T) {
+			fx := newProfileRegisterFixture(t, []RuntimeProfile{{ID: "prof-1", ProtocolFamily: "pi", RuntimeType: target, CommandName: "wrapper", FixedArgs: []string{"launch"}, Enabled: true}}, http.StatusOK)
+			fx.daemon.cfg.Agents = map[string]AgentEntry{}
+			resp, _, _, err := fx.daemon.registerRuntimesForWorkspaceLocked(context.Background(), "ws-1")
+			want := target
+			if want == "" {
+				want = "pi"
+			}
+			if err != nil || len(resp.Runtimes) != 1 || resp.Runtimes[0].Provider != want || resp.Runtimes[0].ProfileID != "prof-1" {
+				t.Fatalf("lost compatibility target or provenance: %+v, %v", resp, err)
+			}
+			spec := fx.daemon.profileLaunchSpecs["prof-1"]
+			if spec.path != "/opt/bin/wrapper" || strings.Join(spec.fixedArgs, " ") != "launch" {
+				t.Fatalf("lost custom command: %+v", spec)
+			}
+		})
 	}
 }

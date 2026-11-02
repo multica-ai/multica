@@ -18,9 +18,7 @@ import (
 	"github.com/multica-ai/multica/server/pkg/protocol"
 )
 
-// ---------------------------------------------------------------------------
 // Types
-// ---------------------------------------------------------------------------
 
 type LabelResponse struct {
 	ID           string `json:"id"`
@@ -137,9 +135,7 @@ func validateLabelName(raw string) (string, error) {
 	return name, nil
 }
 
-// ---------------------------------------------------------------------------
 // Handlers — label CRUD
-// ---------------------------------------------------------------------------
 
 func (h *Handler) ListLabels(w http.ResponseWriter, r *http.Request) {
 	workspaceID := h.resolveWorkspaceID(r)
@@ -307,6 +303,7 @@ func (h *Handler) UpdateLabel(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) DeleteLabel(w http.ResponseWriter, r *http.Request) {
+	r = h.withWakeupActor(r)
 	id := chi.URLParam(r, "id")
 	workspaceID := h.resolveWorkspaceID(r)
 	userID, ok := requireUserID(w, r)
@@ -321,7 +318,7 @@ func (h *Handler) DeleteLabel(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	tx, err := h.TxStarter.Begin(r.Context())
+	tx, err := h.beginWakeupWrite(r.Context())
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to start transaction")
 		return
@@ -364,9 +361,7 @@ func (h *Handler) DeleteLabel(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
-// ---------------------------------------------------------------------------
 // Handlers — issue↔label attach/detach
-// ---------------------------------------------------------------------------
 
 type AttachLabelRequest struct {
 	LabelID string `json:"label_id"`
@@ -416,6 +411,7 @@ func (h *Handler) ListLabelsForIssue(w http.ResponseWriter, r *http.Request) {
 
 // AttachLabel attaches a label to an issue.
 func (h *Handler) AttachLabel(w http.ResponseWriter, r *http.Request) {
+	r = h.withWakeupActor(r)
 	issueID := chi.URLParam(r, "id")
 	userID, ok := requireUserID(w, r)
 	if !ok {
@@ -458,10 +454,12 @@ func (h *Handler) AttachLabel(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	attached, err := h.Queries.AttachLabelToIssue(r.Context(), db.AttachLabelToIssueParams{
-		IssueID:     issue.ID,
-		LabelID:     labelID,
-		WorkspaceID: issue.WorkspaceID,
+	attached, err := wakeupWrite(h, r, func(q *db.Queries) (db.AttachLabelToIssueRow, error) {
+		return q.AttachLabelToIssue(r.Context(), db.AttachLabelToIssueParams{
+			IssueID:     issue.ID,
+			LabelID:     labelID,
+			WorkspaceID: issue.WorkspaceID,
+		})
 	})
 	if err != nil {
 		slog.Warn("AttachLabelToIssue failed", append(logger.RequestAttrs(r), "error", err)...)
@@ -495,6 +493,7 @@ func (h *Handler) AttachLabel(w http.ResponseWriter, r *http.Request) {
 
 // DetachLabel removes a label from an issue.
 func (h *Handler) DetachLabel(w http.ResponseWriter, r *http.Request) {
+	r = h.withWakeupActor(r)
 	issueID := chi.URLParam(r, "id")
 	labelID := chi.URLParam(r, "labelId")
 	userID, ok := requireUserID(w, r)
@@ -531,10 +530,12 @@ func (h *Handler) DetachLabel(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	detached, err := h.Queries.DetachLabelFromIssue(r.Context(), db.DetachLabelFromIssueParams{
-		IssueID:     issue.ID,
-		LabelID:     labelUUID,
-		WorkspaceID: issue.WorkspaceID,
+	detached, err := wakeupWrite(h, r, func(q *db.Queries) (db.DetachLabelFromIssueRow, error) {
+		return q.DetachLabelFromIssue(r.Context(), db.DetachLabelFromIssueParams{
+			IssueID:     issue.ID,
+			LabelID:     labelUUID,
+			WorkspaceID: issue.WorkspaceID,
+		})
 	})
 	if err != nil {
 		slog.Warn("DetachLabelFromIssue failed", append(logger.RequestAttrs(r), "error", err)...)
@@ -562,9 +563,7 @@ func (h *Handler) DetachLabel(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, payload)
 }
 
-// ---------------------------------------------------------------------------
 // Handlers — agent/skill↔label attach/detach
-// ---------------------------------------------------------------------------
 
 func (h *Handler) ListLabelsForAgent(w http.ResponseWriter, r *http.Request) {
 	agent, ok := h.loadAgentForUser(w, r, chi.URLParam(r, "id"))

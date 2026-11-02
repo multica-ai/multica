@@ -3,7 +3,6 @@ import { useQueryClient } from "@tanstack/react-query";
 import { CoreProvider } from "@multica/core/platform";
 import { pickLocale, type SupportedLocale } from "@multica/core/i18n";
 import { useAuthStore } from "@multica/core/auth";
-import { useWelcomeStore } from "@multica/core/onboarding";
 import { workspaceKeys } from "@multica/core/workspace/queries";
 import { useWorkspaceList } from "@multica/core/workspace";
 import { api } from "@multica/core/api";
@@ -30,6 +29,17 @@ import { DesktopClientUsageReporter } from "./platform/client-usage-reporter";
 import { DiagnosticRouteReporter } from "./platform/diagnostic-route-reporter";
 import { flushFreezeBreadcrumb } from "./freeze-flush";
 import { DesktopAuthSessionBridge } from "./platform/auth-session-bridge";
+import { WorkspaceWindowBridge } from "./platform/workspace-window-bridge";
+import {
+  launchWorkspaceSlug,
+  otherWindowWorkspaces,
+  resolveWindowWorkspace,
+} from "./platform/workspace-windows";
+import {
+  tearDownOnLogout,
+  tearDownOnSessionExpiry,
+  type SessionTeardown,
+} from "./platform/session-teardown";
 
 // BCP-47 region tags for the <html lang> attribute, mirroring
 // apps/web/app/layout.tsx HTML_LANG. index.html ships a static lang="en";
@@ -39,8 +49,10 @@ import { DesktopAuthSessionBridge } from "./platform/auth-session-bridge";
 const HTML_LANG: Record<SupportedLocale, string> = {
   en: "en",
   "zh-Hans": "zh-CN",
+  "zh-Hant": "zh-TW",
   ko: "ko-KR",
   ja: "ja-JP",
+  fr: "fr-FR",
 };
 
 
@@ -281,12 +293,17 @@ function AppContent() {
   // while a failed background refetch retains the last successful list.
   useLayoutEffect(() => {
     if (!workspaceListReady) return;
-    const validSlugs = new Set(workspaces.map((w) => w.slug));
-    useTabStore.getState().validateWorkspaceSlugs(validSlugs);
+    const slugs = workspaces.map((w) => w.slug);
+    useTabStore.getState().validateWorkspaceSlugs(new Set(slugs));
     const { activeWorkspaceSlug, switchWorkspace } = useTabStore.getState();
-    if (!activeWorkspaceSlug && workspaces.length > 0) {
-      switchWorkspace(workspaces[0].slug);
-    }
+    if (slugs.length === 0) return;
+    const target = resolveWindowWorkspace(
+      slugs,
+      activeWorkspaceSlug,
+      launchWorkspaceSlug(),
+      otherWindowWorkspaces(),
+    );
+    if (target && target !== activeWorkspaceSlug) switchWorkspace(target);
   }, [workspaces, workspaceListReady]);
 
   // null = undecided (pre-login or list hasn't settled yet)
@@ -350,30 +367,24 @@ function BlockingRuntimeConfigError({ message }: { message: string }) {
   );
 }
 
-// On logout, wipe desktop-only in-memory state and stop the daemon so that
-// a subsequent login as a different user never inherits the previous user's
-// tabs, overlay, or credentials. Zustand persist only writes to localStorage;
-// useLogout clears the storage key, but the live stores stay populated until
-// we explicitly reset them here.
-async function handleDaemonLogout() {
-  // Report synchronously before async daemon cleanup so a rapidly closed main
-  // window cannot leave authenticated issue renderers behind.
-  window.desktopAPI.reportAuthSession?.(null);
-  useTabStore.getState().reset();
-  useWindowOverlayStore.getState().close();
-  // Drop any post-onboarding welcome signal so user B logging in next
-  // doesn't inherit user A's pending modal state.
-  useWelcomeStore.getState().reset();
-  try {
-    await window.daemonAPI.clearToken();
-  } catch {
-    // Best-effort — clearing is followed by stop which also hardens state.
-  }
-  try {
-    await window.daemonAPI.stop();
-  } catch {
-    // Daemon may already be stopped.
-  }
+// Binds the teardown steps to this renderer's real stores and IPC. Which of
+// them each path runs — and why logout stops the daemon while an expiry
+// leaves it running — lives in platform/session-teardown.
+const sessionTeardown: SessionTeardown = {
+  reportAuthSession: (userId) =>
+    window.desktopAPI.reportAuthSession?.(userId),
+  resetTabs: () => useTabStore.getState().reset(),
+  closeOverlay: () => useWindowOverlayStore.getState().close(),
+  clearDaemonToken: () => window.daemonAPI.clearToken(),
+  stopDaemon: () => window.daemonAPI.stop(),
+};
+
+function handleDaemonLogout() {
+  return tearDownOnLogout(sessionTeardown);
+}
+
+function handleSessionExpired() {
+  tearDownOnSessionExpiry(sessionTeardown);
 }
 
 export default function App() {
@@ -461,6 +472,9 @@ export default function App() {
           onLogout={
             windowContext.kind === "main" ? handleDaemonLogout : undefined
           }
+          onSessionExpired={
+            windowContext.kind === "main" ? handleSessionExpired : undefined
+          }
           identity={identity}
           locale={locale}
           resources={resources}
@@ -468,6 +482,7 @@ export default function App() {
         >
           <DesktopAuthSessionBridge />
           {windowContext.kind === "main" && <DiagnosticRouteReporter />}
+          {windowContext.kind === "main" && <WorkspaceWindowBridge />}
           {windowContext.kind === "main" && (
             <DesktopClientUsageReporter
               apiUrl={runtimeConfigResult.config.apiUrl}

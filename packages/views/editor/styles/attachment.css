@@ -29,6 +29,21 @@
   border-radius: var(--radius);
 }
 
+/* An image in a list of standalone attachments (the "card" layout): full
+   size, so it reads without opening, but capped in height — a phone
+   screenshot keeps its shape instead of running the length of the page.
+   The list spaces its images itself. */
+.image-figure.image-standalone {
+  margin: 0;
+}
+
+.image-figure.image-standalone .image-content {
+  width: auto;
+  max-width: 100%;
+  max-height: 36rem;
+  box-shadow: 0 0 0 1px var(--border);
+}
+
 .image-uploading {
   opacity: 0.5;
   animation: rte-upload-pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;

@@ -34,6 +34,19 @@ func TestGitEnv(t *testing.T) {
 		t.Error("gitEnv() must include GIT_TERMINAL_PROMPT=0")
 	}
 
+	// Must contain GCM_INTERACTIVE=never so the Windows Git Credential
+	// Manager cannot spray login dialogs from background sync.
+	found = false
+	for _, entry := range env {
+		if entry == "GCM_INTERACTIVE=never" {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Error("gitEnv() must include GCM_INTERACTIVE=never")
+	}
+
 	// Must contain HOME from the current environment.
 	home := os.Getenv("HOME")
 	if home == "" {
@@ -762,6 +775,72 @@ func TestCreateWorktree(t *testing.T) {
 	}
 }
 
+func TestCreateWorktreeReportsFailedFetch(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct {
+		name     string
+		isolated bool
+	}{
+		{name: "shared worktree"},
+		{name: "isolated checkout", isolated: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			sourceRepo := createTestRepo(t)
+			cache := New(t.TempDir(), testLogger())
+			if err := cache.Sync("ws-1", []RepoInfo{{URL: sourceRepo}}); err != nil {
+				t.Fatalf("sync failed: %v", err)
+			}
+			params := WorktreeParams{
+				WorkspaceID:         "ws-1",
+				RepoURL:             sourceRepo,
+				WorkDir:             t.TempDir(),
+				AgentName:           "QA",
+				TaskID:              "b2c3d4e5-f6a7-8901-bcde-f12345678901",
+				IsolatedGitMetadata: tc.isolated,
+			}
+
+			result, err := cache.CreateWorktree(params)
+			if err != nil {
+				t.Fatalf("CreateWorktree failed: %v", err)
+			}
+			if result.FetchError != "" {
+				t.Fatalf("FetchError = %q after a successful fetch, want empty", result.FetchError)
+			}
+			if got := isIsolatedCheckout(result.Path); got != tc.isolated {
+				t.Fatalf("isolated checkout = %v, want %v", got, tc.isolated)
+			}
+
+			if err := os.RemoveAll(sourceRepo); err != nil {
+				t.Fatalf("remove origin: %v", err)
+			}
+
+			// The reused checkout and a new one for another task both come from the
+			// cached copy and must say so instead of reading as current.
+			result, err = cache.CreateWorktree(params)
+			if err != nil {
+				t.Fatalf("CreateWorktree on the existing checkout failed: %v", err)
+			}
+			if !strings.Contains(result.FetchError, "git fetch") {
+				t.Fatalf("existing checkout FetchError = %q, want the git fetch error", result.FetchError)
+			}
+
+			params.WorkDir = t.TempDir()
+			params.TaskID = "c3d4e5f6-a7b8-9012-cdef-123456789012"
+			result, err = cache.CreateWorktree(params)
+			if err != nil {
+				t.Fatalf("CreateWorktree with an unreachable origin failed: %v", err)
+			}
+			if !strings.Contains(result.FetchError, "git fetch") {
+				t.Fatalf("new checkout FetchError = %q, want the git fetch error", result.FetchError)
+			}
+			if _, err := os.Stat(result.Path); err != nil {
+				t.Fatalf("checkout from the cached copy is missing: %v", err)
+			}
+		})
+	}
+}
+
 func TestCreateWorktreeWithIsolatedGitMetadata(t *testing.T) {
 	t.Parallel()
 	sourceRepo := createTestRepo(t)
@@ -827,6 +906,82 @@ func TestCreateWorktreeWithIsolatedGitMetadata(t *testing.T) {
 	}
 }
 
+func TestCreateIsolatedCheckoutImportsFetchedTipFromShallowCache(t *testing.T) {
+	t.Parallel()
+	root := t.TempDir()
+	originPath := filepath.Join(root, "origin.git")
+	workPath := filepath.Join(root, "work")
+	cachePath := filepath.Join(root, "cache.git")
+	checkoutPath := filepath.Join(root, "checkout")
+
+	if err := runGit("init", "--bare", originPath); err != nil {
+		t.Fatalf("init bare origin: %v", err)
+	}
+	if err := os.Mkdir(workPath, 0o755); err != nil {
+		t.Fatalf("create work repo directory: %v", err)
+	}
+	createTestRepoAt(t, workPath)
+	branch := currentBranchName(t, workPath)
+	runGitAuthored(t, workPath, "remote", "add", "origin", originPath)
+	runGitAuthored(t, workPath, "push", "-u", "origin", branch)
+	if err := runGit("-C", originPath, "symbolic-ref", "HEAD", "refs/heads/"+branch); err != nil {
+		t.Fatalf("set origin HEAD: %v", err)
+	}
+
+	originURL := "file://" + originPath
+	if out, err := runGitCombinedOutput("clone", "--bare", "--depth=1", originURL, cachePath); err != nil {
+		t.Fatalf("create shallow cache: %s: %v", strings.TrimSpace(string(out)), err)
+	}
+	if out, err := runGitOutput("-C", cachePath, "rev-parse", "--is-shallow-repository"); err != nil {
+		t.Fatalf("inspect shallow cache: %v", err)
+	} else if got := strings.TrimSpace(string(out)); got != "true" {
+		t.Fatalf("test cache is shallow = %q, want true", got)
+	}
+
+	oldTip := gitHead(t, workPath)
+	if err := runGit("-C", cachePath, "config", "remote.origin.fetch", modernFetchRefspec); err != nil {
+		t.Fatalf("set cache fetch refspec: %v", err)
+	}
+
+	addEmptyCommit(t, workPath, "advance origin")
+	newTip := gitHead(t, workPath)
+	runGitAuthored(t, workPath, "push", "origin", branch)
+	if err := runGitFetch(cachePath); err != nil {
+		t.Fatalf("fetch updated origin into shallow cache: %v", err)
+	}
+
+	baseRef := "refs/remotes/origin/" + branch
+	if got := gitRefCommit(t, cachePath, "refs/heads/"+branch); got != oldTip {
+		t.Fatalf("cache local head = %s, want stale tip %s", got, oldTip)
+	}
+	if got := gitRefCommit(t, cachePath, baseRef); got != newTip {
+		t.Fatalf("cache remote-tracking head = %s, want fetched tip %s", got, newTip)
+	}
+	if err := runGit("-C", cachePath, "cat-file", "-e", newTip+"^{commit}"); err != nil {
+		t.Fatalf("fetched tip is missing from shallow cache: %v", err)
+	}
+
+	const taskBranch = "agent/test/shallow-cache"
+	actualBranch, err := createIsolatedCheckout(
+		cachePath,
+		originURL,
+		checkoutPath,
+		taskBranch,
+		baseRef,
+		newTip,
+		"",
+	)
+	if err != nil {
+		t.Fatalf("create isolated checkout from shallow cache: %v", err)
+	}
+	if actualBranch != taskBranch {
+		t.Fatalf("isolated branch = %q, want %q", actualBranch, taskBranch)
+	}
+	if got := gitHead(t, checkoutPath); got != newTip {
+		t.Fatalf("isolated checkout HEAD = %s, want fetched tip %s", got, newTip)
+	}
+}
+
 func TestCreateWorktreeReusesIsolatedGitMetadata(t *testing.T) {
 	t.Parallel()
 	sourceRepo := createTestRepo(t)
@@ -836,17 +991,33 @@ func TestCreateWorktreeReusesIsolatedGitMetadata(t *testing.T) {
 	}
 
 	workDir := t.TempDir()
-	first, err := cache.CreateWorktree(WorktreeParams{
-		WorkspaceID:         "ws-1",
-		RepoURL:             sourceRepo,
-		WorkDir:             workDir,
-		AgentName:           "Linux Codex",
-		TaskID:              "11111111-1111-1111-1111-111111111111",
-		IsolatedGitMetadata: true,
-	})
-	if err != nil {
-		t.Fatalf("first CreateWorktree failed: %v", err)
+	checkout := func(taskID string, fresh bool) *WorktreeResult {
+		t.Helper()
+		result, err := cache.CreateWorktree(WorktreeParams{
+			WorkspaceID:         "ws-1",
+			RepoURL:             sourceRepo,
+			WorkDir:             workDir,
+			AgentName:           "Linux Codex",
+			TaskID:              taskID,
+			IsolatedGitMetadata: true,
+			Fresh:               fresh,
+		})
+		if err != nil {
+			t.Fatalf("CreateWorktree(task %s, fresh=%v) failed: %v", taskID, fresh, err)
+		}
+		return result
 	}
+	localHeads := func(path string) string {
+		t.Helper()
+		heads, err := runGitOutput("-C", path, "for-each-ref", "--format=%(refname)", "refs/heads/")
+		if err != nil {
+			t.Fatalf("list local heads: %v", err)
+		}
+		return strings.TrimSpace(string(heads))
+	}
+
+	first := checkout("11111111-1111-1111-1111-111111111111", false)
+	addEmptyCommit(t, first.Path, "unpublished agent work")
 	const userBranch = "feature/keep-me"
 	runGitAuthored(t, first.Path, "checkout", "-b", userBranch)
 	addEmptyCommit(t, first.Path, "unpublished feature work")
@@ -858,17 +1029,18 @@ func TestCreateWorktreeReusesIsolatedGitMetadata(t *testing.T) {
 		t.Fatalf("refresh sync failed: %v", err)
 	}
 
-	second, err := cache.CreateWorktree(WorktreeParams{
-		WorkspaceID:         "ws-1",
-		RepoURL:             sourceRepo,
-		WorkDir:             workDir,
-		AgentName:           "Linux Codex",
-		TaskID:              "22222222-2222-2222-2222-222222222222",
-		IsolatedGitMetadata: true,
-	})
-	if err != nil {
-		t.Fatalf("second CreateWorktree failed: %v", err)
+	// Unpushed commits on HEAD keep the checkout exactly as it is.
+	kept := checkout("22222222-2222-2222-2222-222222222222", false)
+	if kept.Kept != KeptLocalWork || kept.BranchName != userBranch || kept.UnpushedCommits != 2 {
+		t.Fatalf("result = %+v, want %s kept with its 2 unpushed commits", kept, userBranch)
 	}
+	if got := gitHead(t, kept.Path); got != userCommit {
+		t.Fatalf("kept checkout HEAD = %s, want %s", got, userCommit)
+	}
+
+	// Fresh moves it to a new branch from the refreshed upstream, but an
+	// earlier task's agent/* branch holding unpushed commits is not pruned.
+	second := checkout("22222222-2222-2222-2222-222222222222", true)
 	if second.Path != first.Path {
 		t.Fatalf("reused checkout path = %q, want %q", second.Path, first.Path)
 	}
@@ -878,22 +1050,25 @@ func TestCreateWorktreeReusesIsolatedGitMetadata(t *testing.T) {
 	if got := gitHead(t, second.Path); got != wantHead {
 		t.Fatalf("reused checkout HEAD = %s, want refreshed upstream %s", got, wantHead)
 	}
-
-	// Reuse must not accumulate earlier tasks' agent/* branches, but it must
-	// preserve user-created branches and commits that may not exist remotely.
-	if err := runGit("-C", second.Path, "show-ref", "--verify", "refs/heads/"+first.BranchName); err == nil {
-		t.Fatalf("stale branch %s survived reuse", first.BranchName)
-	}
-	if got := gitRefCommit(t, second.Path, "refs/heads/"+userBranch); got != userCommit {
-		t.Fatalf("preserved user branch commit = %s, want %s", got, userCommit)
-	}
-	heads, err := runGitOutput("-C", second.Path, "for-each-ref", "--format=%(refname)", "refs/heads/")
-	if err != nil {
-		t.Fatalf("list local heads: %v", err)
-	}
-	wantHeads := "refs/heads/" + second.BranchName + "\nrefs/heads/" + userBranch
-	if got := strings.TrimSpace(string(heads)); got != wantHeads {
+	wantHeads := "refs/heads/" + first.BranchName + "\nrefs/heads/" + second.BranchName + "\nrefs/heads/" + userBranch
+	if got := localHeads(second.Path); got != wantHeads {
 		t.Fatalf("reused checkout local heads = %q, want %q", got, wantHeads)
+	}
+
+	// Once pushed, the earlier task's branch is pruned like the second task's,
+	// which never left upstream: reuse must not accumulate agent/* branches.
+	// User-created branches are never pruned.
+	runGitAuthored(t, second.Path, "push", "origin", first.BranchName)
+	third := checkout("33333333-3333-3333-3333-333333333333", false)
+	if third.Kept != "" || third.BranchName == second.BranchName {
+		t.Fatalf("result = %+v, want the clean checkout moved to a new branch", third)
+	}
+	wantHeads = "refs/heads/" + third.BranchName + "\nrefs/heads/" + userBranch
+	if got := localHeads(third.Path); got != wantHeads {
+		t.Fatalf("reused checkout local heads = %q, want %q", got, wantHeads)
+	}
+	if got := gitRefCommit(t, third.Path, "refs/heads/"+userBranch); got != userCommit {
+		t.Fatalf("preserved user branch commit = %s, want %s", got, userCommit)
 	}
 }
 
@@ -936,6 +1111,14 @@ func TestCreateWorktreeMigratesLinkedWorktreeToIsolatedMetadata(t *testing.T) {
 	}
 	if !isIsolatedCheckout(isolated.Path) {
 		t.Fatal("linked worktree was not migrated to isolated metadata")
+	}
+	// The linked branch held nothing unpushed, so nothing is carried over.
+	heads, err := runGitOutput("-C", isolated.Path, "for-each-ref", "--format=%(refname)", "refs/heads/")
+	if err != nil {
+		t.Fatalf("list local heads: %v", err)
+	}
+	if got := strings.TrimSpace(string(heads)); got != "refs/heads/"+isolated.BranchName {
+		t.Fatalf("migrated checkout local heads = %q, want only %s", got, isolated.BranchName)
 	}
 
 	barePath := cache.Lookup("ws-1", sourceRepo)

@@ -1,30 +1,23 @@
 "use client";
 
-import { useStore } from "zustand";
-import { ListTodo } from "lucide-react";
+import { ListTodo } from "@multica/ui/icons";
 import { useAuthStore } from "@multica/core/auth";
-import {
-  myIssuesRelationFromScope,
-  myIssuesViewStore,
-} from "@multica/core/issues/stores/my-issues-view-store";
+import { myIssuesRelationFromScope } from "@multica/core/issues/stores/my-issues-view-store";
 import { PageHeader } from "../../layout/page-header";
 import { IssueSurface } from "../../issues/surface/issue-surface";
+import { IssueViewHeader } from "../../issue-views/view-header";
 import { useT } from "../../i18n";
-import { MyIssuesHeader } from "./my-issues-header";
+import { useMyIssuesScope } from "../use-my-issues-scope";
+
+const MY_BASE = { kind: "my" } as const;
 
 export function MyIssuesPage() {
   const { t } = useT("my-issues");
   const user = useAuthStore((s) => s.user);
-  const scope = useStore(myIssuesViewStore, (s) => s.scope);
-  const setScope = useStore(myIssuesViewStore, (s) => s.setScope);
+  const scope = useMyIssuesScope();
 
   return (
     <div className="flex flex-1 min-h-0 flex-col">
-      <PageHeader>
-        <ListTodo className="h-4 w-4 text-muted-foreground" />
-        <h1 className="text-body font-medium">{t(($) => $.page.breadcrumb)}</h1>
-      </PageHeader>
-
       {user ? (
         <IssueSurface
           scope={{
@@ -34,18 +27,7 @@ export function MyIssuesPage() {
           }}
           modes={["board", "list", "table", "swimlane"]}
           batchToolbar="list"
-          renderHeader={({ controller }) => (
-            <MyIssuesHeader
-              allIssues={controller.surfaceIssues}
-              workingAgents={controller.workingAgents}
-              scope={scope}
-              onScopeChange={setScope}
-              isRefreshing={controller.isRefreshing}
-              facetCountsExact={controller.facetCountsExact}
-              tableFacetCounts={controller.tableFacetCounts}
-              onTableFacetChange={controller.setActiveTableFacet}
-            />
-          )}
+          renderHeader={({ controller }) => <IssueViewHeader controller={controller} base={MY_BASE} />}
           renderEmpty={() => (
             <div className="flex flex-1 min-h-0 flex-col items-center justify-center gap-2 text-muted-foreground">
               <ListTodo className="h-10 w-10 text-faint-foreground" />
@@ -54,7 +36,12 @@ export function MyIssuesPage() {
             </div>
           )}
         />
-      ) : null}
+      ) : (
+        <PageHeader>
+          <ListTodo className="size-4 text-muted-foreground" />
+          <h1 className="text-body font-medium">{t(($) => $.page.breadcrumb)}</h1>
+        </PageHeader>
+      )}
     </div>
   );
 }

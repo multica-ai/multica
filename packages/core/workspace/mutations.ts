@@ -1,4 +1,5 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { forgetLocalSearchIndex } from "../search-index/instance";
 import type { Workspace } from "../types";
 import { api } from "../api";
 import { defaultStorage } from "../platform/storage";
@@ -44,6 +45,9 @@ export function useLeaveWorkspace() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: (workspaceId: string) => api.leaveWorkspace(workspaceId),
+    onSuccess: (_data, workspaceId) => {
+      void forgetLocalSearchIndex(workspaceId);
+    },
     onSettled: () => {
       qc.invalidateQueries({ queryKey: workspaceKeys.list() });
     },
@@ -74,8 +78,9 @@ export function useDeleteWorkspace() {
     // `${key}:${slug}` namespace — a failed DELETE means the workspace still
     // exists and its drafts/view state must survive. The realtime handler
     // skips self-initiated deletes, so cleanup has to happen here.
-    onSuccess: (_data, _workspaceId, ctx) => {
+    onSuccess: (_data, workspaceId, ctx) => {
       if (ctx?.slug) clearWorkspaceStorage(defaultStorage, ctx.slug);
+      void forgetLocalSearchIndex(workspaceId);
     },
     // The workspace still exists after a failed DELETE, so a later external
     // delete of the same ID must be handled by the realtime handler again.
@@ -111,7 +116,12 @@ export function useUpdateWorkspaceMcpServer(wsId: string) {
       config?: Record<string, unknown>;
     }) => api.updateWorkspaceMcpServer(wsId, serverId, update),
     onSettled: () =>
-      queryClient.invalidateQueries({ queryKey: workspaceKeys.mcpServers(wsId) }),
+      Promise.all([
+        queryClient.invalidateQueries({ queryKey: workspaceKeys.mcpServers(wsId) }),
+        // Assignments include the library entry's name and transport, so every
+        // agent's cached projection may change when the entry is updated.
+        queryClient.invalidateQueries({ queryKey: ["agents"] }),
+      ]),
   });
 }
 

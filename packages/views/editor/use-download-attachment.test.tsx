@@ -4,13 +4,18 @@ import { act, renderHook, waitFor } from "@testing-library/react";
 // Hoisted mock for the API singleton: vi.mock factories cannot reference
 // outside-of-scope vars, but vi.hoisted runs before the import graph.
 const getAttachmentMock = vi.hoisted(() => vi.fn());
+const getAttachmentForDownloadMock = vi.hoisted(() => vi.fn());
 const getBaseUrlMock = vi.hoisted(() => vi.fn(() => ""));
 const useWorkspaceSlugMock = vi.hoisted(() =>
   vi.fn<() => string | null>(() => "acme"),
 );
 
 vi.mock("@multica/core/api", () => ({
-  api: { getAttachment: getAttachmentMock, getBaseUrl: getBaseUrlMock },
+  api: {
+    getAttachment: getAttachmentMock,
+    getAttachmentForDownload: getAttachmentForDownloadMock,
+    getBaseUrl: getBaseUrlMock,
+  },
 }));
 
 vi.mock("@multica/core/paths", () => ({
@@ -47,6 +52,24 @@ afterEach(() => {
 });
 
 describe("useDownloadAttachment (web)", () => {
+  it("resolves a Markdown link without using the current workspace metadata route", async () => {
+    getAttachmentForDownloadMock.mockResolvedValueOnce({
+      attachment_download_url: "/api/attachments/att-1/signed-download?sig=member",
+    });
+    const clickSpy = vi
+      .spyOn(HTMLAnchorElement.prototype, "click")
+      .mockImplementation(() => {});
+    const { result } = renderHook(() => useDownloadAttachment("markdown-link"));
+
+    await act(async () => {
+      await result.current("att-1");
+    });
+
+    expect(getAttachmentForDownloadMock).toHaveBeenCalledWith("att-1");
+    expect(getAttachmentMock).not.toHaveBeenCalled();
+    expect(clickSpy).toHaveBeenCalledOnce();
+  });
+
   it("clicks the unified download endpoint without opening a blank tab or buffering a Blob", async () => {
     getAttachmentMock.mockResolvedValueOnce({
       id: "att-1",

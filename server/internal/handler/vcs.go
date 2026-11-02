@@ -2,10 +2,13 @@ package handler
 
 import (
 	"crypto/rand"
+	"crypto/tls"
+	"crypto/x509"
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"log/slog"
 	"net/http"
 	"net/url"
 	"strings"
@@ -165,7 +168,7 @@ func (h *Handler) ConnectVCS(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if !h.isVCSConfigured() {
-		writeError(w, http.StatusServiceUnavailable, "vcs integration not configured (MULTICA_VCS_SECRET_KEY unset)")
+		writeFeatureDisabled(w, "vcs_not_configured", "vcs integration not configured (MULTICA_VCS_SECRET_KEY unset)")
 		return
 	}
 
@@ -197,7 +200,12 @@ func (h *Handler) ConnectVCS(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusBadRequest, "the provider rejected the access token")
 			return
 		}
-		writeError(w, http.StatusBadGateway, "could not reach the provider instance")
+		slog.Warn("vcs: connect validation failed",
+			"workspace_id", workspaceID,
+			"provider", provider.Kind(),
+			"host", parsed.Host,
+			"err", err)
+		writeError(w, http.StatusBadGateway, vcsValidationFailureMessage(err))
 		return
 	}
 
@@ -244,6 +252,28 @@ func (h *Handler) ConnectVCS(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// vcsValidationFailureMessage explains a ValidateToken failure other than a
+// rejected token. A certificate failure means the instance answered but this
+// server did not trust its TLS certificate, so it gets its own message instead
+// of "could not reach", which sends the admin chasing the network. An
+// untrusted CA is fixable by trusting the CA; a hostname or expiry failure
+// means the certificate itself needs fixing.
+func vcsValidationFailureMessage(err error) string {
+	var unknownCA x509.UnknownAuthorityError
+	var hostname x509.HostnameError
+	var verification *tls.CertificateVerificationError
+	switch {
+	case errors.As(err, &unknownCA):
+		return "the provider's TLS certificate is signed by a certificate authority this server does not trust; add that CA to the Multica server's trust store"
+	case errors.As(err, &hostname):
+		return "the provider's TLS certificate does not match the instance URL's host name"
+	case errors.As(err, &verification):
+		return "the provider's TLS certificate failed verification (for example, it has expired)"
+	default:
+		return "could not reach the provider instance"
+	}
+}
+
 // DeleteVCSConnection (DELETE /workspaces/{id}/vcs/connections/{connectionId}).
 func (h *Handler) DeleteVCSConnection(w http.ResponseWriter, r *http.Request) {
 	workspaceID := chi.URLParam(r, "id")
@@ -287,7 +317,7 @@ func (h *Handler) RotateVCSConnectionWebhook(w http.ResponseWriter, r *http.Requ
 		return
 	}
 	if !h.isVCSConfigured() {
-		writeError(w, http.StatusServiceUnavailable, "vcs integration not configured (MULTICA_VCS_SECRET_KEY unset)")
+		writeFeatureDisabled(w, "vcs_not_configured", "vcs integration not configured (MULTICA_VCS_SECRET_KEY unset)")
 		return
 	}
 

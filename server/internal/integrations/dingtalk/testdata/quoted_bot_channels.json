@@ -1,0 +1,122 @@
+[
+  {
+    "name": "ant/1",
+    "callback": {
+      "senderStaffId": "sender",
+      "conversationId": "chat",
+      "conversationType": "1",
+      "isInAtList": true,
+      "msgId": "current",
+      "originalMsgId": "selected",
+      "msgtype": "text",
+      "text": {
+        "content": "引用测试",
+        "isReplyMsg": true,
+        "repliedMsg": {
+          "msgType": "text",
+          "content": {
+            "text": "DingTalk source probe 001."
+          },
+          "msgId": "selected"
+        }
+      }
+    }
+  },
+  {
+    "name": "ant/2",
+    "callback": {
+      "senderStaffId": "sender",
+      "conversationId": "chat",
+      "conversationType": "2",
+      "isInAtList": true,
+      "msgId": "current",
+      "originalMsgId": "selected",
+      "msgtype": "text",
+      "text": {
+        "content": "引用测试",
+        "isReplyMsg": true,
+        "repliedMsg": {
+          "msgType": "text",
+          "content": {
+            "text": "DingTalk source probe 001."
+          },
+          "msgId": "selected"
+        }
+      }
+    }
+  },
+  {
+    "name": "community/1",
+    "callback": {
+      "senderStaffId": "sender",
+      "conversationId": "chat",
+      "conversationType": "1",
+      "isInAtList": true,
+      "msgId": "current",
+      "originalMsgId": "selected",
+      "msgtype": "text",
+      "text": {
+        "content": "引用测试",
+        "isReplyMsg": true,
+        "repliedMsg": {
+          "msgType": "interactiveCard",
+          "content": {
+            "cardContent": [
+              {
+                "elementType": "RICHTEXT",
+                "children": [
+                  {
+                    "elementType": "TEXT",
+                    "value": "DingTalk source probe 001."
+                  }
+                ]
+              }
+            ]
+          },
+          "msgId": "selected"
+        }
+      }
+    }
+  },
+  {
+    "name": "community/2",
+    "callback": {
+      "senderStaffId": "sender",
+      "conversationId": "chat",
+      "conversationType": "2",
+      "isInAtList": true,
+      "msgId": "current",
+      "originalMsgId": "selected",
+      "msgtype": "text",
+      "text": {
+        "content": "引用测试",
+        "isReplyMsg": true,
+        "repliedMsg": {
+          "msgType": "interactiveCard",
+          "content": {
+            "cardContent": [
+              {
+                "elementType": "RICHTEXT",
+                "children": [
+                  {
+                    "elementType": "UNKNOWN",
+                    "value": "{\"content\": [{\"type\": \"text\", \"data\": {\"text\": \"直接回复“DingTalk source probe 001.”\"}}]}"
+                  },
+                  {
+                    "elementType": "UNKNOWN",
+                    "value": "{}"
+                  },
+                  {
+                    "elementType": "TEXT",
+                    "value": "DingTalk source probe 001."
+                  }
+                ]
+              }
+            ]
+          },
+          "msgId": "selected"
+        }
+      }
+    }
+  }
+]

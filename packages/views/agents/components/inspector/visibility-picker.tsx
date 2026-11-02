@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { Globe, Lock } from "lucide-react";
+import { Globe, Lock } from "@multica/ui/icons";
 import {
   VISIBILITY_DESCRIPTION,
   VISIBILITY_LABEL,

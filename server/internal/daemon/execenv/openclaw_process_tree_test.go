@@ -44,9 +44,7 @@ while [ ! -s "` + pidFile + `" ]; do sleep 0.01; done
 echo '{}'
 exit 0
 `
-	if err := os.WriteFile(bin, []byte(body), 0o755); err != nil {
-		t.Fatalf("write fake openclaw: %v", err)
-	}
+	writeTestExecutable(t, bin, []byte(body))
 	return bin
 }
 
@@ -80,6 +78,7 @@ func helperGone(pid int, within time.Duration) bool {
 // makes openclawCLITimeout meaningful: the call must come back on the direct
 // child's exit, not on the helper's lifetime and not on the deadline.
 func TestExecOpenclawCLIReturnsDespitePipeHoldingHelper(t *testing.T) {
+	t.Parallel()
 	pidFile := filepath.Join(t.TempDir(), "helper.pid")
 	bin := writeHelperForkingOpenclaw(t, pidFile)
 
@@ -108,10 +107,11 @@ func TestExecOpenclawCLIReturnsDespitePipeHoldingHelper(t *testing.T) {
 // runs per task, and this is where the orphan `openclaw-config` processes came
 // from. It is also what the reverted cmd.WaitDelay backstop could not do.
 func TestExecOpenclawCLIReapsForkedHelper(t *testing.T) {
+	t.Parallel()
 	pidFile := filepath.Join(t.TempDir(), "helper.pid")
 	bin := writeHelperForkingOpenclaw(t, pidFile)
 
-	if _, err := execOpenclawCLI(context.Background(), bin, "config", "file"); err != nil {
+	if _, err := execOpenclawCLI(context.Background(), bin, "config", "get", "--json"); err != nil {
 		t.Fatalf("execOpenclawCLI: %v", err)
 	}
 
@@ -126,13 +126,12 @@ func TestExecOpenclawCLIReapsForkedHelper(t *testing.T) {
 // TestExecOpenclawCLIDoesNotSalvagePartialJSON pins that a `--json` subcommand
 // still streaming when the deadline arrives is an error, not a truncated success.
 func TestExecOpenclawCLIDoesNotSalvagePartialJSON(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	bin := filepath.Join(dir, "openclaw")
 	body := "#!/bin/sh\nprintf '{\"agents\":['\n" +
 		"while :; do printf '{\"id\":\"a\"},'; sleep 0.12; done\n"
-	if err := os.WriteFile(bin, []byte(body), 0o755); err != nil {
-		t.Fatalf("write fake openclaw: %v", err)
-	}
+	writeTestExecutable(t, bin, []byte(body))
 
 	ctx, cancel := context.WithTimeout(context.Background(), 300*time.Millisecond)
 	defer cancel()
@@ -220,14 +219,13 @@ func TestOpenclawOutputCompleteRules(t *testing.T) {
 // TestOpenclawActiveConfigPathFailsClosedWhenConfigFileNeverExits for what it
 // does instead.
 func TestExecOpenclawCLIToleratesNonExitingCLI(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	bin := filepath.Join(dir, "openclaw")
 	body := "#!/bin/sh\n" +
 		"printf '{\"mcp\":{}}\\n'\n" +
 		"sleep 300\n"
-	if err := os.WriteFile(bin, []byte(body), 0o755); err != nil {
-		t.Fatalf("write fake openclaw: %v", err)
-	}
+	writeTestExecutable(t, bin, []byte(body))
 
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()
@@ -272,9 +270,7 @@ func writeOpenclawConfigStub(t *testing.T, validateOut string, validateExit int,
 		"  exit 0\n" +
 		"fi\n" +
 		"exit 9\n"
-	if err := os.WriteFile(bin, []byte(body), 0o755); err != nil {
-		t.Fatalf("write fake openclaw: %v", err)
-	}
+	writeTestExecutable(t, bin, []byte(body))
 	return bin
 }
 
@@ -293,6 +289,7 @@ func writeOpenclawConfigStub(t *testing.T, validateOut string, validateExit int,
 // hostile `config file` branch in the stub precisely so that a future change that
 // reinstates shape-based parsing as the primary path fails here.
 func TestOpenclawActiveConfigPathIgnoresAPathShapedWarning(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	realPath := filepath.Join(dir, "openclaw.json")
 	warnPath := filepath.Join(dir, "plugin-cache.json")
@@ -331,6 +328,7 @@ func TestOpenclawActiveConfigPathIgnoresAPathShapedWarning(t *testing.T) {
 // CLI whose `config validate --json` is unusable (too old, or a shape we do not
 // recognise) must still resolve through `config file`.
 func TestOpenclawActiveConfigPathFallsBackToConfigFile(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	realPath := filepath.Join(dir, "openclaw.json")
 	if err := os.WriteFile(realPath, []byte("{}\n"), 0o600); err != nil {
@@ -347,7 +345,9 @@ func TestOpenclawActiveConfigPathFallsBackToConfigFile(t *testing.T) {
 		{"validate omits the path field", "  printf '{\"valid\":true}\\n'\n", 0},
 		{"validate reports a relative path", "  printf '{\"valid\":false,\"path\":\"openclaw.json\"}\\n'\n", 1},
 	} {
+		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
 			bin := writeOpenclawConfigStub(t, tc.validateOut, tc.validateExit,
 				"  printf '%s\\n' '"+realPath+"'\n", "")
 			got, exists, err := openclawActiveConfigPath(bin, 30*time.Second)
@@ -370,6 +370,7 @@ func TestOpenclawActiveConfigPathFallsBackToConfigFile(t *testing.T) {
 // answer" would break the most common first-run path. Both payloads below are the
 // real shapes measured on OpenClaw 2026.7.1-2, with stderr empty in both.
 func TestOpenclawActiveConfigPathReadsThePathFromANonZeroExit(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	presentPath := filepath.Join(dir, "openclaw.json")
 	if err := os.WriteFile(presentPath, []byte("{}\n"), 0o600); err != nil {
@@ -409,7 +410,9 @@ func TestOpenclawActiveConfigPathReadsThePathFromANonZeroExit(t *testing.T) {
 			wantExists: true,
 		},
 	} {
+		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
 			exit := 1
 			if strings.Contains(tc.payload, `"valid":true`) {
 				exit = 0
@@ -442,6 +445,7 @@ func TestOpenclawActiveConfigPathReadsThePathFromANonZeroExit(t *testing.T) {
 // alternative was demonstrated to return a wrong path. The deadline is what makes
 // it bounded, and MULTICA_OPENCLAW_CLI_TIMEOUT (#7142) is what makes it tunable.
 func TestOpenclawActiveConfigPathFailsClosedWhenConfigFileNeverExits(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	realPath := filepath.Join(dir, "openclaw.json")
 	bin := writeOpenclawConfigStub(t,
@@ -450,13 +454,13 @@ func TestOpenclawActiveConfigPathFailsClosedWhenConfigFileNeverExits(t *testing.
 		"  sleep 300\n")
 
 	start := time.Now()
-	_, _, err := openclawActiveConfigPath(bin, 3*time.Second)
+	_, _, err := openclawActiveConfigPath(bin, 500*time.Millisecond)
 	elapsed := time.Since(start)
 	if err == nil {
 		t.Fatal("a `config file` that never exits must fail closed, not have its " +
 			"stdout accepted on shape")
 	}
-	if elapsed > 20*time.Second {
+	if elapsed > 3*time.Second {
 		t.Errorf("took %v — the deadline did not bound the call", elapsed)
 	}
 }

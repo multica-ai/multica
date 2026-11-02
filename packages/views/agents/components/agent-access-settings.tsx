@@ -26,7 +26,6 @@ export function AgentAccessSettings({
   return (
     <SettingsSection
       title={t(($) => $.access.section_title)}
-      description={t(($) => $.inspector.section_access_hint)}
     >
       <SettingsCard>
         <AccessPicker

@@ -2,11 +2,15 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"testing"
+	"time"
 
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/multica-ai/multica/server/internal/events"
 	"github.com/multica-ai/multica/server/internal/handler"
+	"github.com/multica-ai/multica/server/internal/issuestatus"
+	"github.com/multica-ai/multica/server/internal/testutil"
 	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 	"github.com/multica-ai/multica/server/pkg/protocol"
@@ -29,24 +33,36 @@ func firstFixtureAgent(t *testing.T) (agentID, runtimeID string) {
 }
 
 // createAgentTaskWithOriginator inserts a queued task attributed to the given
-// human, standing in for the run an agent is executing when it files an issue.
-// An invalid originator models an unattributed / autopilot-rooted chain.
+// human by that human's own action, standing in for the run an agent is
+// executing when it files an issue. An invalid originator models an
+// unattributed chain.
 func createAgentTaskWithOriginator(t *testing.T, agentID, runtimeID string, originator pgtype.UUID) pgtype.UUID {
 	t.Helper()
-	ctx := context.Background()
-	var taskID pgtype.UUID
-	err := testPool.QueryRow(ctx, `
-		INSERT INTO agent_task_queue (agent_id, runtime_id, status, priority, originator_user_id, accountable_user_id)
-		VALUES ($1, $2, 'queued', 0, $3, $3)
-		RETURNING id
-	`, agentID, runtimeID, originator).Scan(&taskID)
-	if err != nil {
-		t.Fatalf("create agent task: %v", err)
-	}
-	t.Cleanup(func() {
-		testPool.Exec(context.Background(), `DELETE FROM agent_task_queue WHERE id = $1`, taskID)
-	})
-	return taskID
+	return createAgentTaskInChain(t, agentID, runtimeID, originator, "direct_human", pgtype.UUID{})
+}
+
+// createAgentTaskInChain is the same insert with the attribution lineage spelled
+// out: the waterfall level that resolved the human, and the parent run the human
+// was copied from on a delegation hop. Both matter to the delegated rule since
+// MUL-7051 — the originator alone no longer says whether a human asked for the
+// work, only that the run carries one.
+func createAgentTaskInChain(t *testing.T, agentID, runtimeID string, originator pgtype.UUID, source string, delegatedFrom pgtype.UUID) pgtype.UUID {
+	t.Helper()
+	return util.MustParseUUID(workspaceFixture(t).Task(t, agentID, testutil.Cols{
+		"runtime_id":             runtimeID,
+		"originator_user_id":     originator,
+		"accountable_user_id":    originator,
+		"originator_source":      source,
+		"delegated_from_task_id": delegatedFrom,
+	}))
+}
+
+// workspaceFixture builds rows in the suite's own workspace. Every row it
+// inserts is removed when the test that asked for it ends, which is why the
+// helpers above no longer pair an INSERT with a hand-written cleanup.
+func workspaceFixture(t *testing.T) *testutil.Fixture {
+	t.Helper()
+	return testutil.New(testPool, testWorkspaceID, testUserID)
 }
 
 // createAgentOriginIssue inserts an issue whose creator is an agent and whose
@@ -171,6 +187,179 @@ func TestDelegatedSubscribe_UnattributedOriginSubscribesNobody(t *testing.T) {
 	}
 }
 
+// TestDelegatedSubscribe_ArmedTriggerRunSubscribesNobody is MUL-7051 as the user
+// met it: an autopilot fires on its schedule, its agent files issues all day,
+// and the member who armed the trigger months ago is subscribed to every one.
+//
+// The task row here is the shape MUL-6951 introduced and the reason a unit test
+// of the rule is not enough — a real trigger_owner run carries a real member as
+// originator, so nothing about the row it hands the listener looks degraded.
+func TestDelegatedSubscribe_ArmedTriggerRunSubscribesNobody(t *testing.T) {
+	queries := db.New(testPool)
+	bus := events.New()
+	registerSubscriberListeners(bus, testPool)
+
+	agentID, runtimeID := firstFixtureAgent(t)
+	task := createAgentTaskInChain(t, agentID, runtimeID, util.MustParseUUID(testUserID), "trigger_owner", pgtype.UUID{})
+	issueID := createAgentOriginIssue(t, agentID, "agent_create", task, pgtype.UUID{})
+
+	publishAgentIssueCreated(bus, issueID, agentID)
+
+	if isSubscribed(t, queries, issueID, "member", testUserID) {
+		t.Fatal("an issue filed inside an autopilot run must not subscribe the member who armed the trigger")
+	}
+}
+
+// TestDelegatedSubscribe_ChainRootDecidesBelowTheFirstHop: the fix cannot read
+// the origin run's own label, because a hop overwrites it with 'delegation'. One
+// agent handing work to another is the ordinary way an autopilot run grows, and
+// at that depth the delegated run is indistinguishable from a human-triggered
+// one by anything except the chain it came from.
+//
+// Both directions are asserted together: the same shape, differing only in what
+// started the chain, must reach opposite answers — otherwise a fix that simply
+// stopped subscribing below the first hop would pass.
+func TestDelegatedSubscribe_ChainRootDecidesBelowTheFirstHop(t *testing.T) {
+	queries := db.New(testPool)
+	bus := events.New()
+	registerSubscriberListeners(bus, testPool)
+
+	agentID, runtimeID := firstFixtureAgent(t)
+	human := util.MustParseUUID(testUserID)
+
+	for _, tc := range []struct {
+		name string
+		root string
+		want bool
+	}{
+		{"member asked, two agents deep", "direct_human", true},
+		{"schedule fired, two agents deep", "trigger_owner", false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			// The originator is copied, not chained, so it is the SAME member on
+			// both runs either way (MUL-4302 §3.2).
+			root := createAgentTaskInChain(t, agentID, runtimeID, human, tc.root, pgtype.UUID{})
+			hop := createAgentTaskInChain(t, agentID, runtimeID, human, "delegation", root)
+			issueID := createAgentOriginIssue(t, agentID, "agent_create", hop, pgtype.UUID{})
+
+			publishAgentIssueCreated(bus, issueID, agentID)
+
+			if got := isSubscribed(t, queries, issueID, "member", testUserID); got != tc.want {
+				t.Fatalf("subscribed = %v, want %v for a chain rooted at %s", got, tc.want, tc.root)
+			}
+		})
+	}
+}
+
+// TestDelegatedSubscribe_LineageWalkStopsAt32Hops pins the one place the fix is
+// not exact. Resolving WHO the human is has no depth limit — the originator is
+// copied onto every run — but proving the chain BEGAN with them means walking to
+// the root, and that walk stops after 32 hops. A member-rooted chain longer than
+// that loses its subscription.
+//
+// The limit is accepted (MUL-7051), so it is written down as behaviour rather
+// than left as an implementation detail of the query: an accepted limit nothing
+// asserts is one that moves by accident. Both sides are pinned, because a test
+// for the truncation alone would still pass if the walk stopped at hop 3.
+func TestDelegatedSubscribe_LineageWalkStopsAt32Hops(t *testing.T) {
+	queries := db.New(testPool)
+	bus := events.New()
+	registerSubscriberListeners(bus, testPool)
+
+	agentID, runtimeID := firstFixtureAgent(t)
+	human := util.MustParseUUID(testUserID)
+
+	// hops is the distance from the run that files the issue up to the root.
+	buildChain := func(t *testing.T, hops int) pgtype.UUID {
+		t.Helper()
+		run := createAgentTaskInChain(t, agentID, runtimeID, human, "direct_human", pgtype.UUID{})
+		for i := 0; i < hops; i++ {
+			run = createAgentTaskInChain(t, agentID, runtimeID, human, "delegation", run)
+		}
+		return run
+	}
+
+	for _, tc := range []struct {
+		name string
+		hops int
+		want bool
+	}{
+		{"the deepest chain still proven", 32, true},
+		{"one hop past the limit", 33, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			issueID := createAgentOriginIssue(t, agentID, "agent_create", buildChain(t, tc.hops), pgtype.UUID{})
+
+			publishAgentIssueCreated(bus, issueID, agentID)
+
+			if got := isSubscribed(t, queries, issueID, "member", testUserID); got != tc.want {
+				t.Fatalf("subscribed = %v, want %v at %d hops from the root", got, tc.want, tc.hops)
+			}
+		})
+	}
+}
+
+// TestDelegatedSubscribe_ForeignLineageResolvesNobody pins the tenant guard
+// (MUL-4252) across the read that now performs it. origin_id and
+// delegated_from_task_id are both bare UUIDs with nothing scoping them, so an id
+// belonging to another workspace's run must resolve no human at all — not the
+// one that run carries.
+//
+// Both hops are covered because they are separate predicates in the recursive
+// query, and only the anchor's is exercised by an issue pointing straight at a
+// foreign run. A chain that starts here and STEPS OUT one hop up is what proves
+// the recursive branch carries the guard too: with it, the lineage stops at the
+// local hop and reports 'delegation' — unproven, so nobody is subscribed; without
+// it, the walk reads a foreign root, sees direct_human, and subscribes.
+func TestDelegatedSubscribe_ForeignLineageResolvesNobody(t *testing.T) {
+	queries := db.New(testPool)
+	bus := events.New()
+	registerSubscriberListeners(bus, testPool)
+
+	// A whole run in a workspace this issue has nothing to do with, attributed
+	// to a member of THIS one — the shape a foreign id would exploit.
+	slug := fmt.Sprintf("mul7051-foreign-%d", time.Now().UnixNano())
+	unbound := testutil.New(testPool, "", testUserID)
+	foreign := testutil.New(testPool, unbound.Workspace(t, "MUL-7051 foreign", slug), testUserID)
+	foreignRuntime := foreign.Runtime(t, slug+"-runtime")
+	foreignAgent := foreign.Agent(t, slug+"-agent", foreignRuntime)
+	foreignRoot := util.MustParseUUID(foreign.Task(t, foreignAgent, testutil.Cols{
+		"runtime_id":          foreignRuntime,
+		"originator_user_id":  testUserID,
+		"accountable_user_id": testUserID,
+		"originator_source":   "direct_human",
+	}))
+
+	agentID, runtimeID := firstFixtureAgent(t)
+
+	for _, tc := range []struct {
+		name   string
+		origin func() pgtype.UUID
+	}{
+		{
+			name:   "the issue points straight at a foreign run",
+			origin: func() pgtype.UUID { return foreignRoot },
+		},
+		{
+			name: "a local run claims a foreign parent",
+			origin: func() pgtype.UUID {
+				return createAgentTaskInChain(t, agentID, runtimeID,
+					util.MustParseUUID(testUserID), "delegation", foreignRoot)
+			},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			issueID := createAgentOriginIssue(t, agentID, "agent_create", tc.origin(), pgtype.UUID{})
+
+			publishAgentIssueCreated(bus, issueID, agentID)
+
+			if isSubscribed(t, queries, issueID, "member", testUserID) {
+				t.Fatal("a lineage that leaves the workspace must not resolve a subscriber")
+			}
+		})
+	}
+}
+
 // TestDelegatedSubscribe_RespectsSubtreeOptOut is the reason the tombstone
 // exists. Without it "stop watching this tree" is undone by the very next child
 // the agent files under it: the rule fires per issue, and an agent-built tree
@@ -266,42 +455,118 @@ func TestUnsubscribeIsDurableAgainstAutoRules(t *testing.T) {
 // synthesized "whole batch finished" roll-up; that machinery is gone (see the
 // MUL-5483 thread), and the tree-level signal comes from the parent's own status
 // transition, which this same rule delivers.
+//
+// Which statuses ARE handoffs is issueStatusIsHandoff's job and is covered by
+// TestIssueStatusIsHandoff; this table covers the routing on top of that answer.
 func TestDeliverToSubscriber_DelegatedTier(t *testing.T) {
 	cases := []struct {
-		name        string
-		reason      string
-		notifType   string
-		issueStatus string
-		want        bool
+		name      string
+		reason    string
+		notifType string
+		handoff   bool
+		want      bool
 	}{
-		{"direct subscriber keeps every event", "creator", "status_changed", "in_progress", true},
-		{"direct subscriber keeps comments", "assignee", "new_comment", "todo", true},
+		{"direct subscriber keeps every event", "creator", "status_changed", false, true},
+		{"direct subscriber keeps comments", "assignee", "new_comment", false, true},
 
-		{"delegated skips routine progress", "delegated", "status_changed", "in_progress", false},
-		{"delegated skips backlog parking", "delegated", "status_changed", "backlog", false},
-		{"delegated skips todo", "delegated", "status_changed", "todo", false},
-		{"delegated skips comment churn", "delegated", "new_comment", "in_progress", false},
-		{"delegated skips assignee churn", "delegated", "assignee_changed", "in_progress", false},
-		{"delegated skips date churn", "delegated", "due_date_changed", "in_progress", false},
+		{"delegated skips routine progress", "delegated", "status_changed", false, false},
+		{"delegated skips comment churn", "delegated", "new_comment", false, false},
+		{"delegated skips assignee churn", "delegated", "assignee_changed", false, false},
+		{"delegated skips date churn", "delegated", "due_date_changed", false, false},
+		{"delegated skips non-status events even on a handoff", "delegated", "due_date_changed", true, false},
 
-		{"delegated gets the review handoff", "delegated", "status_changed", "in_review", true},
-		{"delegated gets completion", "delegated", "status_changed", "done", true},
-		{"delegated gets cancellation", "delegated", "status_changed", "cancelled", true},
-		{"delegated gets blocked", "delegated", "status_changed", "blocked", true},
+		{"delegated gets the handoff", "delegated", "status_changed", true, true},
 
-		{"delegated always gets direct mentions", "delegated", "mentioned", "in_progress", true},
-		{"delegated always gets failures", "delegated", "task_failed", "in_progress", true},
-		{"delegated always gets agent_blocked", "delegated", "agent_blocked", "in_progress", true},
+		{"delegated always gets direct mentions", "delegated", "mentioned", false, true},
+		{"delegated always gets failures", "delegated", "task_failed", false, true},
+		{"delegated always gets agent_blocked", "delegated", "agent_blocked", false, true},
 	}
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			if got := deliverToSubscriber(tc.reason, tc.notifType, tc.issueStatus); got != tc.want {
-				t.Fatalf("deliverToSubscriber(%q, %q, %q) = %v, want %v",
-					tc.reason, tc.notifType, tc.issueStatus, got, tc.want)
+			if got := deliverToSubscriber(tc.reason, tc.notifType, tc.handoff); got != tc.want {
+				t.Fatalf("deliverToSubscriber(%q, %q, %v) = %v, want %v",
+					tc.reason, tc.notifType, tc.handoff, got, tc.want)
 			}
 		})
 	}
+}
+
+// TestIssueStatusIsHandoff pins the predicate behind BOTH the delegated tier and
+// the stale task_failed dismissal (MUL-7379).
+//
+// The built-in rows reproduce, exactly, the two hand-kept allowlists this
+// replaced. The custom rows are the regression: before MUL-7240 every custom
+// status projected onto a built-in key, so a custom review gate notified
+// because it "was" in_review; collapsing to four categories left those keys raw
+// and silently stopped them.
+func TestIssueStatusIsHandoff(t *testing.T) {
+	ctx := context.Background()
+	queries := db.New(testPool)
+	workspaceID := util.MustParseUUID(testWorkspaceID)
+
+	custom := func(key, category string) string {
+		t.Helper()
+		suffixed := fmt.Sprintf("%s_%d", key, time.Now().UnixNano()%1_000_000)
+		entry, err := queries.CreateIssueStatusEntry(ctx, db.CreateIssueStatusEntryParams{
+			WorkspaceID: workspaceID,
+			Key:         suffixed,
+			Name:        suffixed,
+			Description: "",
+			Category:    category,
+			Color:       "#123456",
+		})
+		if err != nil {
+			t.Fatalf("create custom status %q in %q: %v", suffixed, category, err)
+		}
+		t.Cleanup(func() {
+			testPool.Exec(context.Background(), `DELETE FROM issue_status WHERE id = $1`, entry.ID)
+		})
+		return entry.Key
+	}
+
+	cases := []struct {
+		name   string
+		status string
+		want   bool
+	}{
+		// The seven built-ins: identical to the pre-MUL-7379 allowlists.
+		{"backlog is parked, nobody waits", issuestatus.Backlog, false},
+		{"todo is queued, nobody waits", issuestatus.Todo, false},
+		{"in_progress is the platform's own 'working' key", issuestatus.InProgress, false},
+		{"in_review hands over", issuestatus.InReview, true},
+		{"blocked hands over", issuestatus.Blocked, true},
+		{"done is terminal", issuestatus.Done, true},
+		{"cancelled is terminal", issuestatus.Cancelled, true},
+
+		// One custom status per lifecycle category.
+		{"custom unstarted is queued work", custom("later", issuestatus.CategoryUnstarted), false},
+		{"custom started is a review gate", custom("awaiting_response", issuestatus.CategoryStarted), true},
+		{"custom done is terminal", custom("shipped", issuestatus.CategoryDone), true},
+		{"custom closed is terminal", custom("wont_do", issuestatus.CategoryClosed), true},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got, err := issueStatusIsHandoff(ctx, queries, workspaceID, tc.status)
+			if err != nil {
+				t.Fatalf("issueStatusIsHandoff(%q): unexpected error: %v", tc.status, err)
+			}
+			if got != tc.want {
+				t.Fatalf("issueStatusIsHandoff(%q) = %v, want %v", tc.status, got, tc.want)
+			}
+		})
+	}
+
+	t.Run("a catalog miss is reported, never guessed", func(t *testing.T) {
+		got, err := issueStatusIsHandoff(ctx, queries, workspaceID, "status_that_was_never_created")
+		if err == nil {
+			t.Fatal("an unresolvable custom key must return an error so each caller picks its own failure direction")
+		}
+		if got {
+			t.Fatal("the error return must not also claim a handoff")
+		}
+	})
 }
 
 // TestDelegatedTier_ChildCompletionDeliversExactlyOnce is the case a unit test of
@@ -383,7 +648,7 @@ func TestDelegatedTier_ChildCompletionDeliversExactlyOnce(t *testing.T) {
 // unrecognized reason must fall back to FULL delivery — silently dropping a
 // user's notifications is the worse failure.
 func TestDeliverToSubscriber_UnknownReasonIsDirect(t *testing.T) {
-	if !deliverToSubscriber("some_future_reason", "new_comment", "in_progress") {
+	if !deliverToSubscriber("some_future_reason", "new_comment", false) {
 		t.Fatal("an unrecognized subscription reason must default to full delivery")
 	}
 }

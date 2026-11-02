@@ -58,11 +58,12 @@ export function IssueChip({
   className,
 }: IssueChipProps) {
   const wsId = useWorkspaceId();
-  const { colorOf: statusColorOf } = useIssueStatuses(wsId);
+  const { colorOf: statusColorOf, iconOf: statusIconOf } = useIssueStatuses(wsId);
   const { data: issues = [] } = useQuery(issueListOptions(wsId));
   const listIssue = issues.find((i) => i.id === issueId);
 
-  // Fallback fetch for issues outside the first page of the list (e.g. Done).
+  // Fallback fetch for issues outside the list's first page (the first
+  // ISSUE_PAGE_SIZE issues across all categories).
   const { data: detailIssue } = useQuery({
     ...issueDetailOptions(wsId, issueId),
     enabled: !listIssue,
@@ -91,6 +92,7 @@ export function IssueChip({
         status={issue.status}
         category={issueStatusCategory(issue) ?? undefined}
         color={statusColorOf(issue.status)}
+        icon={statusIconOf(issue.status)}
         className="h-3.5 w-3.5 shrink-0"
       />
       <span className="font-medium text-muted-foreground shrink-0">

@@ -1,29 +1,9 @@
 /**
- * Mobile-owned WS cache patchers for the issue domain. These are pure
- * functions over `QueryClient` — no React, no WS plumbing. The hooks in
- * `use-issue-realtime.ts` and `use-my-issues-realtime.ts` translate WS
- * events into calls into this module.
- *
- * Why mobile-owned (and not importing from packages/core/issues/ws-updaters):
- *   - Web's updaters reference `issueKeys` from `packages/core/issues/queries`,
- *     a different runtime instance than mobile's `data/queries/issue-keys.ts`.
- *     TanStack Query keys are compared structurally so this would *appear*
- *     to work, but binding cache mutation to a foreign key factory invites
- *     drift the moment either side adjusts its key shape.
- *   - Mobile cache shapes are simpler: no status-bucketed list, no children
- *     subtree, no childProgress, no label-byIssue cache. A direct mirror
- *     would be ~120 lines of conditional dead-code paths.
- *
- * Cache shapes (the design contract here):
- *   - Issue detail:    Issue                                  (keyed by detail(wsId, id))
- *   - Issue timeline:  TimelineEntry[]                        (keyed by timeline(wsId, id))
- *                      ASC oldest-first; new entries inserted at sorted position.
- *   - My Issues list:  Issue[]                                (keyed by myList(wsId, scope, filter))
- *                      Multiple list caches per wsId (one per scope/filter combo).
- *                      Patch ALL of them via setQueriesData on myAll(wsId).
- *   - Workspace list:  Issue[]                                (keyed by list(wsId))
- *                      Single cache per wsId (no scope/filter in the key —
- *                      filtering happens client-side off the same list).
+ * Mobile-owned issue cache patchers, called by record and listing subscriptions.
+ * Use mobile's key factories and cache shapes rather than web's bucketed caches.
+ * Detail stores an Issue; timelines store chronological TimelineEntry arrays;
+ * My Issues stores one Issue array per scope/filter and patches all matching keys;
+ * the workspace list stores a single client-filtered Issue array.
  */
 import type { QueryClient } from "@tanstack/react-query";
 import type {
@@ -122,9 +102,7 @@ function acceptsRevision(current: number | undefined, incoming: number | undefin
   return incoming !== undefined && incoming >= current;
 }
 
-// =====================================================
 // Issue detail cache (single Issue per id)
-// =====================================================
 
 export function patchIssueDetail(
   qc: QueryClient,
@@ -154,32 +132,62 @@ export function onIssueAuxiliaryRevision(
   invalidateStaleIssueOwnerProjections(qc, wsId, issueId, revision);
 }
 
+function invalidateIssueOwnerProjectionsWhere(
+  qc: QueryClient,
+  wsId: string,
+  issueId: string,
+  shouldInvalidate: (issue: Issue | undefined) => boolean,
+) {
+  const detailKey = issueKeys.detail(wsId, issueId);
+  if (shouldInvalidate(qc.getQueryData<Issue>(detailKey))) {
+    qc.invalidateQueries({ queryKey: detailKey, exact: true });
+  }
+  for (const [key, data] of qc.getQueriesData<Issue[]>({
+    queryKey: issueKeys.myAll(wsId),
+  })) {
+    if (data?.some((issue) => issue.id === issueId && shouldInvalidate(issue))) {
+      qc.invalidateQueries({ queryKey: key, exact: true });
+    }
+  }
+  const listKey = issueKeys.list(wsId);
+  if (qc.getQueryData<Issue[]>(listKey)?.some(
+    (issue) => issue.id === issueId && shouldInvalidate(issue),
+  )) {
+    qc.invalidateQueries({ queryKey: listKey, exact: true });
+  }
+}
+
 function invalidateStaleIssueOwnerProjections(
   qc: QueryClient,
   wsId: string,
   issueId: string,
   revision: number,
 ) {
-  const isStale = (issue: Issue | undefined) =>
-    issue !== undefined &&
-    (issue.revision === undefined || issue.revision < revision);
-  const detailKey = issueKeys.detail(wsId, issueId);
-  if (isStale(qc.getQueryData<Issue>(detailKey))) {
-    qc.invalidateQueries({ queryKey: detailKey, exact: true });
-  }
-  for (const [key, data] of qc.getQueriesData<Issue[]>({
-    queryKey: issueKeys.myAll(wsId),
-  })) {
-    if (data?.some((issue) => issue.id === issueId && isStale(issue))) {
-      qc.invalidateQueries({ queryKey: key, exact: true });
-    }
-  }
-  const listKey = issueKeys.list(wsId);
-  if (qc.getQueryData<Issue[]>(listKey)?.some(
-    (issue) => issue.id === issueId && isStale(issue),
-  )) {
-    qc.invalidateQueries({ queryKey: listKey, exact: true });
-  }
+  invalidateIssueOwnerProjectionsWhere(
+    qc,
+    wsId,
+    issueId,
+    (issue) =>
+      issue !== undefined &&
+      (issue.revision === undefined || issue.revision < revision),
+  );
+}
+
+/** Fallback when an owner change arrives without its revision (the 204
+ * comment delete response, or an older server's comment event). Mirrors
+ * web's `invalidateIssueOwnerProjections`: only loaded projections that
+ * contain the issue are refetched. */
+export function invalidateIssueOwnerProjections(
+  qc: QueryClient,
+  wsId: string,
+  issueId: string,
+) {
+  invalidateIssueOwnerProjectionsWhere(
+    qc,
+    wsId,
+    issueId,
+    (issue) => issue !== undefined,
+  );
 }
 
 export function clearIssueDetail(
@@ -203,9 +211,7 @@ export function invalidateIssueAfterReconnect(
   qc.invalidateQueries({ queryKey: issueKeys.tasks(wsId, issueId) });
 }
 
-// =====================================================
 // Issue timeline (flat TimelineEntry[], ASC oldest-first)
-// =====================================================
 
 export function appendTimelineEntry(
   qc: QueryClient,
@@ -303,12 +309,14 @@ export function removeTimelineEntry(
 }
 
 /**
- * Cascade-delete a comment and every descendant reply (reply-to-reply
- * chains included). Mirrors the server's cascade in `comment.go:DeleteComment`
- * and web's `comment:deleted` handler at
- * `packages/views/issues/hooks/use-issue-timeline.ts:164-194`.
+ * Remove a deleted comment and every cached descendant reply (reply-to-reply
+ * chains included). Mirrors web's `comment:deleted` handler in
+ * `packages/views/issues/hooks/use-issue-timeline.ts`. The server never
+ * removes a comment that still has replies — it tombstones it and sends
+ * comment:updated (#8296) — so a cached descendant of a removed comment is
+ * stale: older servers cascaded the delete to every reply.
  *
- * Without this, removing only the root entry leaves the replies as
+ * Without the sweep, removing only the root entry would leave the replies as
  * "orphans" — `buildTimelineRows` then promotes them to top-level rows
  * (its orphan-rescue branch), so the user would see ghost replies after a
  * thread delete on another client. Same-N rule violation.
@@ -353,9 +361,7 @@ export function removeCommentCascade(
   );
 }
 
-// =====================================================
 // My Issues list (flat Issue[] across many keys)
-// =====================================================
 
 export function patchMyIssuesList(
   qc: QueryClient,
@@ -388,9 +394,7 @@ export function removeFromMyIssuesList(
   );
 }
 
-// =====================================================
 // Workspace Issues list (flat Issue[] under list(wsId))
-// =====================================================
 
 export function patchIssuesList(
   qc: QueryClient,
@@ -432,9 +436,7 @@ export function removeFromIssuesList(
   );
 }
 
-// =====================================================
 // Reactions
-// =====================================================
 
 export function addCommentReaction(
   qc: QueryClient,
@@ -567,9 +569,7 @@ export function removeIssueReaction(
   );
 }
 
-// =====================================================
 // Labels
-// =====================================================
 
 export function patchIssueLabels(
   qc: QueryClient,
@@ -605,9 +605,7 @@ export function patchIssueLabels(
   onIssueAuxiliaryRevision(qc, wsId, issueId, issueRevision, "labels");
 }
 
-// =====================================================
 // Helpers — payload normalization
-// =====================================================
 
 /**
  * Convert a Comment WS payload into a TimelineEntry. The two types share
@@ -637,5 +635,8 @@ export function commentToTimelineEntry(comment: Comment): TimelineEntry {
     resolved_by_id: comment.resolved_by_id,
     source_task_id: comment.source_task_id,
     revision: comment.revision,
+    // A delete tombstones a comment that has replies and announces it as
+    // comment:updated; dropping this would render it as an empty comment.
+    deleted_at: comment.deleted_at,
   };
 }

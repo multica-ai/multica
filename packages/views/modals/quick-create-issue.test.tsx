@@ -126,6 +126,16 @@ const mockSquadsData = vi.hoisted(
   () => ({ list: [] as Array<{ id: string; name: string; leader_id: string; archived_at: string | null }> }),
 );
 
+// Per-test override for the runtimes list. Non-admin members receive a
+// filtered list (ListVisibleAgentRuntimes) that omits other members' private
+// machines, so a selected agent can point at a runtime_id that is simply not
+// present here — the case that used to be misreported as "daemon has no CLI
+// version" (#7633). Tests flip this to drop the row and prove the panel no
+// longer blocks on it.
+const mockRuntimesData = vi.hoisted(
+  () => ({ list: [{ id: "runtime-1", metadata: { cli_version: "1.2.3" } }] as Array<{ id: string; provider?: string; metadata: Record<string, unknown> }> }),
+);
+
 // The real handle mints an id when it inserts the placeholder and hands it to
 // the uploader, which adopts it as the draft `clientUploadId`. Mocks must do
 // the same or the two records drift apart only in tests.
@@ -146,7 +156,7 @@ vi.mock("@tanstack/react-query", () => ({
           data: [{ id: "agent-1", name: "Bohan", archived_at: null, runtime_id: "runtime-1" }],
         };
       case "runtimes":
-        return { data: [{ id: "runtime-1", metadata: { cli_version: "1.2.3" } }] };
+        return { data: mockRuntimesData.list };
       case "projects":
         return mockProjectsQuery;
       default:
@@ -242,12 +252,13 @@ vi.mock("@multica/core/auth", () => ({
     (selector ? selector({ user: { id: "user-1" } }) : { user: { id: "user-1" } }),
 }));
 
-vi.mock("@multica/core/runtimes", () => ({
+// Use the REAL version-check helpers (not stubs): the fix hinges on how the
+// panel reacts when the selected runtime is absent vs. present-but-old, and a
+// constant-"ok" stub would mask exactly that. Only runtimeListOptions is
+// overridden so the query key routes to our mocked useQuery above.
+vi.mock("@multica/core/runtimes", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@multica/core/runtimes")>()),
   runtimeListOptions: () => ({ queryKey: ["runtimes"] }),
-  checkQuickCreateCliVersion: () => ({ state: "ok", min: "1.0.0" }),
-  checkQuickCreateFieldsCliVersion: () => ({ state: "ok", min: "1.0.0" }),
-  readRuntimeCliVersion: () => "1.2.3",
-  MIN_QUICK_CREATE_CLI_VERSION: "1.0.0",
 }));
 
 
@@ -444,14 +455,6 @@ vi.mock("../issues/components/pickers/property-picker", () => ({
   PickerEmpty: () => <div data-testid="picker-empty" />,
 }));
 
-vi.mock("@multica/ui/components/ui/button", () => ({
-  Button: ({ children, disabled, onClick }: { children: ReactNode; disabled?: boolean; onClick?: () => void }) => (
-    <button type="button" disabled={disabled} onClick={onClick}>
-      {children}
-    </button>
-  ),
-}));
-
 vi.mock("@multica/ui/components/ui/switch", () => ({
   Switch: ({ checked, onCheckedChange }: { checked: boolean; onCheckedChange: (v: boolean) => void }) => (
     <input
@@ -497,6 +500,36 @@ function renderPanel(props: React.ComponentProps<typeof AgentCreatePanel>) {
 }
 
 describe("AgentCreatePanel", () => {
+  it("selects Qoder agents without the daemon CLI version gate", () => {
+    mockRuntimesData.list = [{ id: "runtime-1", provider: "qoder_cloud", metadata: {} }];
+    mockQuickCreateStore.lastActorType = "agent";
+    mockQuickCreateStore.lastActorId = "agent-1";
+    mockSquadsData.list = [{ id: "squad-1", name: "Cloud Squad", leader_id: "agent-1", archived_at: null }];
+    renderPanel({ onClose: vi.fn(), isExpanded: false, setIsExpanded: vi.fn() });
+    expect(screen.getByRole("button", { name: /^Create$/i })).toBeEnabled();
+    expect(screen.queryByText(/daemon.*version/i)).not.toBeInTheDocument();
+    expect(screen.getAllByText("Bohan").length).toBeGreaterThan(0);
+    // The Qoder bridge cannot run squad-leader tasks, so its squads stay hidden.
+    expect(screen.queryByText("Cloud Squad")).not.toBeInTheDocument();
+  });
+
+  it("blocks Qoder agents when the prompt references an attachment", () => {
+    mockRuntimesData.list = [{ id: "runtime-1", provider: "qoder_cloud", metadata: {} }];
+    mockQuickCreateStore.lastActorType = "agent";
+    mockQuickCreateStore.lastActorId = "agent-1";
+    const attachmentId = "019ec09d-6222-722b-bdfa-427b105d80be";
+    mockIssueDraftStore.draft.agent.prompt = `See ![shot](/api/attachments/${attachmentId}/download)`;
+    mockIssueDraftStore.draft.shared.attachments = [{
+      clientUploadId: attachmentId,
+      status: "uploaded",
+      filename: "shot.png",
+      attachment: { id: attachmentId, url: "https://cdn.example/shot.png", filename: "shot.png" },
+    } as never];
+    renderPanel({ onClose: vi.fn(), isExpanded: false, setIsExpanded: vi.fn() });
+    expect(screen.getByRole("button", { name: /^Create$/i })).toBeDisabled();
+    expect(screen.getByText(/can't read attachments/i)).toBeInTheDocument();
+  });
+
   beforeEach(() => {
     vi.clearAllMocks();
     mockQuickCreateStore.lastActorType = null;
@@ -522,6 +555,7 @@ describe("AgentCreatePanel", () => {
     mockProjectsQuery.data = [];
     mockProjectsQuery.isSuccess = true;
     mockSquadsData.list = [];
+    mockRuntimesData.list = [{ id: "runtime-1", metadata: { cli_version: "1.2.3" } }];
     mockQuickCreateIssue.mockResolvedValue(undefined);
     mockCreateCommentSubIssue.mockResolvedValue({ task_id: "task-source-child" });
     mockApiUploadFile.mockResolvedValue({
@@ -671,7 +705,7 @@ describe("AgentCreatePanel", () => {
     });
   });
 
-  it("routes Customize fields to Settings → Issue, keeping the typed prompt", async () => {
+  it("routes Customize fields to Settings → Preferences → Issue creation, keeping the typed prompt", async () => {
     const user = userEvent.setup();
     const onClose = vi.fn();
 
@@ -685,10 +719,10 @@ describe("AgentCreatePanel", () => {
 
     expect(mockSetAgent).toHaveBeenLastCalledWith({ prompt: "Half-typed request" });
     expect(onClose).toHaveBeenCalled();
-    expect(mockNavigationPush).toHaveBeenCalledWith("/ws-test/settings?tab=issue");
+    expect(mockNavigationPush).toHaveBeenCalledWith("/ws-test/settings?tab=preferences&section=issue");
   });
 
-  it("respects fields enabled in Settings → Issue by rendering them inline", () => {
+  it("respects fields enabled in Settings → Preferences → Issue creation by rendering them inline", () => {
     mockCreateSettingsStore.quickCreateFields = ["project", "priority", "due_date"];
 
     renderPanel({ onClose: vi.fn(), isExpanded: false, setIsExpanded: vi.fn() });
@@ -1141,9 +1175,70 @@ describe("AgentCreatePanel", () => {
     });
   });
 
-  // MUL-4931 — this path files a real issue, so a double-fire is a duplicate
-  // issue, not a cosmetic glitch. `submitting` is state: two chords landing in
-  // one tick both read the pre-update value, so only a synchronously-flipped
+  // #7633 — a non-admin member's runtime list (ListVisibleAgentRuntimes) omits
+  // other members' private machines, so a selected agent can point at a
+  // runtime_id that is simply absent from the list the panel sees. That absence
+  // used to collapse into "daemon reported no CLI version" and wall the member
+  // off with a bogus upgrade prompt — even though the runtime is new enough and
+  // the same create succeeds the instant the user is promoted to admin (which
+  // only widens the list). The panel must NOT pre-block when it cannot see the
+  // runtime at all; the server's version gate (which reads the row by id,
+  // regardless of role) stays the trust boundary.
+  describe("version pre-check with an unlisted runtime (#7633)", () => {
+    it("does not block Create when the selected agent's runtime is not in the visible list", async () => {
+      const user = userEvent.setup();
+      // Member view: the agent's runtime-1 is a private machine they don't own,
+      // so it never appears in their list.
+      mockRuntimesData.list = [];
+
+      renderPanel({ onClose: vi.fn(), isExpanded: false, setIsExpanded: vi.fn() });
+
+      await user.click(screen.getByRole("button", { name: /Bohan/ }));
+
+      // No misleading "daemon has no CLI version" wall...
+      expect(
+        screen.queryByText(/doesn't report a CLI version/i),
+      ).not.toBeInTheDocument();
+      // ...and Create is reachable (gated only by prompt content, as usual).
+      await user.type(
+        screen.getByPlaceholderText(
+          'Tell the agent what to do, e.g. "let Bohan fix the inbox loading slowness in the Web project"',
+        ),
+        "Ship it",
+      );
+      const create = screen.getByRole("button", { name: /^Create$/i });
+      expect(create).not.toBeDisabled();
+
+      await user.click(create);
+      await waitFor(() => expect(mockQuickCreateIssue).toHaveBeenCalledTimes(1));
+    });
+
+    it("still blocks a runtime that is visible but genuinely too old", async () => {
+      const user = userEvent.setup();
+      // The runtime IS in the list and reports a real, below-minimum version —
+      // the case the gate exists for. We must keep failing closed here.
+      mockRuntimesData.list = [{ id: "runtime-1", metadata: { cli_version: "0.0.1" } }];
+
+      renderPanel({ onClose: vi.fn(), isExpanded: false, setIsExpanded: vi.fn() });
+
+      await user.click(screen.getByRole("button", { name: /Bohan/ }));
+
+      expect(screen.getByText(/Create with agent needs ≥/i)).toBeInTheDocument();
+      await user.type(
+        screen.getByPlaceholderText(
+          'Tell the agent what to do, e.g. "let Bohan fix the inbox loading slowness in the Web project"',
+        ),
+        "Ship it",
+      );
+      // Blocked but still hoverable so its tooltip can explain why.
+      const create = screen.getByRole("button", { name: /^Create$/i });
+      expect(create).toHaveAttribute("aria-disabled", "true");
+      await user.click(create);
+      expect(mockQuickCreateIssue).not.toHaveBeenCalled();
+    });
+  });
+
+
   // ref can gate it. Mirrors the manual-create regression.
   describe("send shortcut single-flight", () => {
     it("creates once when the send chord fires twice in the same tick", async () => {

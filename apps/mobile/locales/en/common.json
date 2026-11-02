@@ -1,0 +1,53 @@
+{
+  "actions": {
+    "add": "Add",
+    "back": "Back",
+    "cancel": "Cancel",
+    "close": "Close",
+    "confirm": "Confirm",
+    "continue": "Continue",
+    "copy": "Copy",
+    "create": "Create",
+    "delete": "Delete",
+    "discard": "Discard",
+    "done": "Done",
+    "download": "Download",
+    "edit": "Edit",
+    "more": "More",
+    "open": "Open",
+    "remove": "Remove",
+    "retry": "Retry",
+    "save": "Save",
+    "search": "Search",
+    "send": "Send",
+    "share": "Share",
+    "upload": "Upload"
+  },
+  "fields": {
+    "assignee": "Assignee",
+    "description": "Description",
+    "due_date": "Due date",
+    "email": "Email",
+    "label": "Label",
+    "name": "Name",
+    "priority": "Priority",
+    "project": "Project",
+    "status": "Status",
+    "title": "Title"
+  },
+  "states": {
+    "loading": "Loading...",
+    "saving": "Saving...",
+    "sending": "Sending...",
+    "offline": "Offline",
+    "empty": "Nothing here yet",
+    "error": "Something went wrong"
+  },
+  "time": {
+    "just_now": "Just now",
+    "minutes_ago_other": "{{count}}m ago",
+    "hours_ago_other": "{{count}}h ago",
+    "days_ago_other": "{{count}}d ago",
+    "weeks_ago_other": "{{count}}w ago"
+  }
+}

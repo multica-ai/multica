@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState, type RefObject } from "react";
 
 /**
  * Owns the floating window's composer-focus nonce.
@@ -20,12 +20,22 @@ import { useCallback, useEffect, useRef, useState } from "react";
  * restored from storage, so treating mount as an open event would let a
  * persisted "open" preference steal focus from whatever page the user loaded.
  */
-export function useChatInputFocus(isOpen: boolean): {
+export function useChatInputFocus(isOpen: boolean, windowRef?: RefObject<HTMLElement | null>): {
   focusRequest: number;
   requestInputFocus: () => void;
 } {
   const [focusRequest, setFocusRequest] = useState(0);
   const requestInputFocus = useCallback(() => setFocusRequest((n) => n + 1), []);
+
+  // The window stays mounted to preserve drafts and its closing animation.
+  // Release its focus before the next keystroke can enter a hidden composer.
+  // Do not blur a dialog or page control the user has already moved to.
+  useLayoutEffect(() => {
+    if (isOpen) return;
+    const container = windowRef?.current;
+    const active = container?.ownerDocument.activeElement;
+    if (active instanceof HTMLElement && container?.contains(active)) active.blur();
+  }, [isOpen, windowRef]);
 
   const wasOpenRef = useRef(isOpen);
   useEffect(() => {

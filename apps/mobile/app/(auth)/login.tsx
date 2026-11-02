@@ -8,9 +8,11 @@ import { TextField } from "@/components/ui/text-field";
 import { Button } from "@/components/ui/button";
 import { MulticaLogo } from "@/components/brand/multica-logo";
 import { useAuthStore } from "@/data/auth-store";
+import { i18n, useT } from "@/lib/i18n";
 import { mapAuthError } from "@/lib/auth-error";
 
 export default function Login() {
+  const { t } = useT("auth");
   const sendCode = useAuthStore((s) => s.sendCode);
   const [email, setEmail] = useState("");
   const [submitting, setSubmitting] = useState(false);
@@ -27,7 +29,7 @@ export default function Login() {
       router.push({ pathname: "/verify", params: { email: trimmed } });
     } catch (err) {
       void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
-      setError(mapAuthError(err, "Couldn't send the code. Try again."));
+      setError(mapAuthError(err, t("login.send_failed"), (key) => i18n.t(`auth:${key}`)));
     } finally {
       setSubmitting(false);
     }
@@ -44,10 +46,10 @@ export default function Login() {
             <MulticaLogo size={32} />
             <View className="gap-1 items-center">
               <Text className="text-2xl font-semibold text-foreground">
-                Sign in to Multica
+                {t("login.title")}
               </Text>
               <Text className="text-sm text-muted-foreground text-center">
-                Enter your email and we&apos;ll send you a verification code.
+                {t("login.subtitle")}
               </Text>
             </View>
           </View>
@@ -58,7 +60,7 @@ export default function Login() {
               autoComplete="email"
               autoFocus
               keyboardType="email-address"
-              placeholder="you@example.com"
+              placeholder={t("login.email_placeholder")}
               value={email}
               onChangeText={setEmail}
               onSubmitEditing={onSubmit}
@@ -76,7 +78,7 @@ export default function Login() {
             disabled={submitting || !email.trim()}
             onPress={onSubmit}
           >
-            <Text>{submitting ? "Sending..." : "Send code"}</Text>
+            <Text>{submitting ? t("login.sending") : t("login.send_code")}</Text>
           </Button>
         </View>
       </KeyboardAvoidingView>

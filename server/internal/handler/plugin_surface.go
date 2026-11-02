@@ -153,13 +153,17 @@ func (h *Handler) GetPluginSurfaceLaunch(w http.ResponseWriter, r *http.Request)
 	if !h.requirePluginsV1(w, r) {
 		return
 	}
+	if strings.TrimSpace(h.cfg.PluginSurfaceOrigin) == "" || h.PluginSurfaceTokens == nil {
+		writeFeatureDisabled(w, "plugin_surfaces_not_configured", "Plugin surfaces are unavailable: MULTICA_PLUGIN_SURFACE_ORIGIN and MULTICA_PLUGIN_SECRET_KEY must be configured")
+		return
+	}
 	origin, err := parsePluginSurfaceOrigin(h.cfg.PluginSurfaceOrigin)
-	if err != nil || h.PluginSurfaceTokens == nil {
-		writeError(w, http.StatusServiceUnavailable, "Plugin surfaces are unavailable: MULTICA_PLUGIN_SURFACE_ORIGIN and MULTICA_PLUGIN_SECRET_KEY must be configured")
+	if err != nil {
+		writeErrorCode(w, http.StatusInternalServerError, "plugin_surfaces_misconfigured", "Plugin surfaces require a valid MULTICA_PLUGIN_SURFACE_ORIGIN")
 		return
 	}
 	if !h.pluginSurfaceOriginIsDedicated(origin) {
-		writeError(w, http.StatusServiceUnavailable, "Plugin surfaces require a dedicated content origin separate from the app and API origins")
+		writeErrorCode(w, http.StatusInternalServerError, "plugin_surfaces_misconfigured", "Plugin surfaces require a dedicated content origin separate from the app and API origins")
 		return
 	}
 

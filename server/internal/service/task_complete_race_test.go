@@ -110,9 +110,12 @@ func TestCompleteTask_AlreadyFinalized(t *testing.T) {
 				Bus:     events.New(),
 			}
 
-			got, err := svc.CompleteTask(context.Background(), taskID, nil, "", "", "", false, "", "")
+			got, transitioned, err := svc.CompleteTaskWithTransition(context.Background(), taskID, nil, "", "", "", false, "", "")
 			if err != nil {
 				t.Fatalf("expected no error, got %v", err)
+			}
+			if transitioned {
+				t.Fatal("already-finalized task reported a new completion transition")
 			}
 			if got == nil {
 				t.Fatal("expected task, got nil")
@@ -152,9 +155,12 @@ func TestFailTask_AlreadyFinalized(t *testing.T) {
 				Bus:     events.New(),
 			}
 
-			got, err := svc.FailTask(context.Background(), taskID, "agent crashed", "", "", "", "", false, "", "")
+			got, transitioned, err := svc.FailTaskWithTransition(context.Background(), taskID, "agent crashed", "", "", "", "", false, "", "")
 			if err != nil {
 				t.Fatalf("expected no error, got %v", err)
+			}
+			if transitioned {
+				t.Fatal("already-finalized task reported a new failure transition")
 			}
 			if got == nil {
 				t.Fatal("expected task, got nil")
@@ -257,6 +263,9 @@ func TestTaskFailureClassifiers(t *testing.T) {
 		// Transient mid-stream provider disconnect (MUL-4910): retryable, and
 		// resume-safe so the retry continues the truncated conversation.
 		{reason: "agent_error.provider_network", wantType: "agent_error", wantResumeOK: true, wantRetry: true},
+		// Capacity/rate-limit failures keep their existing user-retry posture.
+		// Correcting a misleading auth label must not enable an automatic resend.
+		{reason: "agent_error.provider_capacity_or_rate_limit", wantType: "agent_error", wantResumeOK: true, wantRetry: false},
 		{reason: "runtime_recovery", wantType: "runtime", wantResumeOK: true, wantRetry: true},
 		{reason: "iteration_limit", wantType: "agent_output", wantResumeOK: false, wantRetry: false},
 		{reason: "api_invalid_request", wantType: "agent_error", wantResumeOK: false, wantRetry: false},

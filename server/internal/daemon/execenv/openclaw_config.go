@@ -47,57 +47,14 @@ const openclawMcpResetFile = "openclaw-mcp-reset.json"
 // literal is the form a reader can check against the design in one glance.
 const openclawMcpResetBody = "{\n  \"mcp\": {\n    \"servers\": null\n  }\n}\n"
 
-// openclawCLITimeout is the default context deadline set on each
-// `openclaw config ...` invocation during task setup.
+// openclawCLITimeout bounds each setup CLI call with headroom for slower hosts;
+// MULTICA_OPENCLAW_CLI_TIMEOUT overrides it. The serial call budget must fit the
+// outer preparation deadline.
 //
-// It used to be 5s, on the assumption that the CLI answers in <200ms and 5s is
-// pure cold-start headroom. Field data (#7112) retired that assumption: on a
-// 2020 Intel MacBook Pro, `openclaw config file` takes 8.4–10.9s and
-// `config get agents.list --json` 4.3s, every time — so the runtime was
-// unusable on that host, with no user-side way to raise the limit. For scale,
-// the same commands take 0.7s / 0.3s on an M-series Mac, i.e. the real spread
-// across supported hardware is wider than the old margin.
-//
-// 30s is ~3x the slowest measured call, and even the worst case
-// (openclawMaxCLIDeadlinesPerPreparation serial steps at that budget) fits
-// inside the outer 5-minute task preparation deadline, so a genuinely hung CLI
-// fails with this specific, actionable reason instead of the generic prepare
-// timeout. Hosts outside that envelope can override with
-// MULTICA_OPENCLAW_CLI_TIMEOUT (or backends.openclaw.cli_timeout in the CLI
-// config, which the daemon translates into the same env var).
-//
-// The gap that used to be documented here — that this was a deadline and not a
-// cap — is closed as of MUL-5467. Keeping the measurements, because they are
-// what the fix has to hold against: CommandContext kills only the direct child,
-// and cmd.Output() blocks in Wait() until the stdout pipe closes, so a CLI that
-// leaves a descendant holding stdout ran for the descendant's lifetime.
-// Measured on linux/dash: a shim whose backgrounded child slept 6s took 6.01s
-// against a 150ms deadline. An npm shim is that shape on Windows (cmd.exe →
-// node). A cmd.WaitDelay backstop bounded the call but left the descendant
-// running (measured: returns in 2.17s with the grandchild still in state S),
-// trading a hang for a process leak, and on Unix nothing reaped it because
-// preparationProcessController.finish() is a no-op there.
-//
-// execOpenclawCLI goes through agent.RunCollectQuiet, which owns the pipes and
-// the process tree (Unix process group, Windows Job Object). Owning the pipes is
-// what makes the deadline enforceable: os/exec's own Wait cannot return while a
-// descendant holds an output pipe, so the bound has to come from somewhere else,
-// and a caller-side bound that reports failure would fail a call whose answer
-// arrived. Owning the tree is what stops the descendant becoming an orphan.
-//
-// Two limits on that claim, both deliberate:
-//
-//   - "Enforceable", not "nothing survives": `openclaw-config` was measured with
-//     its own PGID and SID, so on Unix no group signal reaches it. The deadline
-//     holds anyway, because it is pipe ownership rather than the kill that makes
-//     the call return.
-//   - Returning before the CLI exits requires a completeness rule that the CLI's
-//     pre-answer output cannot satisfy, which in practice means `--json` (see
-//     openclawOutputComplete). Without one — `config file` as the fallback — this
-//     deadline is what the call is bounded by, and reaching it is a failure. That
-//     is a deliberate trade: an earlier revision judged `config file`'s stdout by
-//     shape and review showed it returning a path-shaped *warning* line as the
-//     answer.
+// RunCollectQuiet owns pipes and process cleanup so descendants retaining stdout
+// cannot extend the call indefinitely. Unix descendants that leave the process
+// group may survive, but cannot extend the return bound. Early success requires
+// an unambiguous completeness rule; path-shaped warning output is insufficient.
 const openclawCLITimeout = 30 * time.Second
 
 // OpenclawCLITimeoutEnv overrides openclawCLITimeout. Accepts a Go duration
@@ -135,9 +92,14 @@ const (
 //     if that did not answer. Two invocations, one deadline: they ask the same
 //     question and openclawActiveConfigPath shares a context between them
 //     precisely so the fallback cannot add a fourth budget.
-//  2. `config get agents.list --json`   — pre-2026.6 agents schema
+//  2. read the per-agent config the schema is willing to show —
+//     `config get agents.list --json` (pre-2026.6 `agents.list[]`), then
+//     `config get agents.entries --json` (2026.8+ `agents.entries.<id>`) when
+//     the first path is gone. Two invocations, one deadline, for the same
+//     reason as (1): both ask what the config schema carries per agent, and
+//     the second is only reached when the first reported no such path.
 //  3. `agents list --json`              — 2026.6+ registry fallback, only
-//     reached when (2) reports the config path is missing
+//     reached when (2) reports that neither config path exists
 //
 // It was four until managed MCP stopped reading the user's config: the reset
 // stage is a file this package writes, so a managed-MCP agent now costs the same
@@ -306,63 +268,18 @@ type OpenclawConfigResult struct {
 	IncludeRoot string
 }
 
-// prepareOpenclawConfig writes a per-task OpenClaw config to envRoot and
-// returns its absolute path along with the include root the daemon must
-// grant. The daemon sets OPENCLAW_CONFIG_PATH to the path on the spawned
-// openclaw subprocess so the CLI resolves its `agents.defaults.workspace`
-// (and every `agents.list[].workspace`) to the task workdir — which is
-// what makes OpenClaw's native skill scanner pick up the per-task skills
-// we write under `<workDir>/skills/`.
+// prepareOpenclawConfig writes a per-task wrapper and returns its config path
+// and include root. OpenClaw's loader resolves JSON5, includes, and environment
+// substitution; the original config is not rewritten.
 //
-// Strategy: delegate JSON5 / $include / env-substitution / state-dir
-// resolution to the openclaw CLI itself rather than re-implementing the
-// spec. We:
+// Override both the default and every agent-specific workspace so native skill
+// discovery stays in the task workdir. Host-workspace SOUL.md and MEMORY.md are
+// therefore excluded. Grant the active config's parent through OPENCLAW_INCLUDE_ROOTS
+// because OpenClaw confines cross-directory includes.
 //
-//  1. Run `openclaw config file` to find the user's active config path.
-//     For OpenClaw releases whose `config` command rejects the `file`
-//     subcommand shape, fall back to resolving OpenClaw's active-config
-//     candidates, including legacy Clawdbot/Moltbot/Moldbot locations.
-//  2. Run `openclaw config get agents.list --json` to enumerate every
-//     registered agent ID with its resolved fields. The CLI parses JSON5,
-//     follows $include, and substitutes ${VAR} for us.
-//  3. Write a wrapper config to envRoot/openclaw-config.json that
-//     `$include`s the active path and overrides
-//     `agents.defaults.workspace` plus every `agents.list[].workspace` to
-//     workDir. The original config bytes are not mutated — they are loaded
-//     by openclaw's own loader through the $include link, which preserves
-//     comments, secrets, and nested $include chains verbatim.
-//
-// **Cross-directory $include confinement.** OpenClaw confines `$include`
-// resolution to the directory containing the wrapper file unless the
-// target's parent is listed in `OPENCLAW_INCLUDE_ROOTS`. Our wrapper lives
-// in envRoot but $includes the user's active config (typically
-// `~/.openclaw/openclaw.json`) — a cross-directory hop. We surface
-// `filepath.Dir(activePath)` as IncludeRoot so the daemon can prepend it
-// to whatever the user already has in OPENCLAW_INCLUDE_ROOTS; without
-// this, OpenClaw refuses to follow the link and the wrapper boots with no
-// user config. Fresh install emits no $include, so IncludeRoot is "".
-//
-// **Intentional task isolation.** The override of every per-agent workspace
-// is deliberate. OpenClaw's resolution order is
-// `agents.list[id].workspace → agents.defaults.workspace → ~/.openclaw/
-// workspace`. Pinning only the default would let a per-agent workspace the
-// user configured at host scope silently re-route the scanner back to the
-// shared workspace, defeating the per-task skill discovery this whole flow
-// exists for. The cost is that any per-agent SOUL.md / MEMORY.md / standing
-// orders the user laid in `<host-agent-workspace>/` are NOT visible to the
-// in-task openclaw run — task isolation wins over host carry-over. The
-// user's on-disk config is untouched; this only affects the wrapper used
-// for this single task.
-//
-// **Fail closed.** Missing openclaw binary, CLI errors, malformed CLI
-// output, or any IO error during write surfaces as an error to the caller
-// rather than degrading to a minimal config. An earlier version silently
-// synthesized a minimal config on parse failure; that masked broken user
-// configs by starting OpenClaw without the registered agents / model
-// providers / API keys it expects, which led to tasks routing to the wrong
-// agent or failing to authenticate. The only "synthesize minimal" case
-// kept is a fresh install where the CLI reports a path but no file exists
-// — there is no user data to lose in that case.
+// CLI, parse, and write failures abort preparation instead of silently losing user
+// configuration. Only a confirmed missing config permits a minimal fresh-install
+// wrapper.
 func prepareOpenclawConfig(envRoot, workDir string, opts OpenclawConfigPrep) (OpenclawConfigResult, error) {
 	bin := opts.OpenclawBin
 	if bin == "" {
@@ -370,7 +287,7 @@ func prepareOpenclawConfig(envRoot, workDir string, opts OpenclawConfigPrep) (Op
 	}
 	timeout := resolveOpenclawCLITimeout(opts.Timeout, opts.Logger)
 
-	activePath, exists, resolvedList, agentsFromRegistry, cached, err := discoverOpenclawConfig(bin, timeout, opts)
+	activePath, exists, resolvedList, agentsSource, cached, err := discoverOpenclawConfig(bin, timeout, opts)
 	if err != nil {
 		return OpenclawConfigResult{}, err
 	}
@@ -395,50 +312,13 @@ func prepareOpenclawConfig(envRoot, workDir string, opts OpenclawConfigPrep) (Op
 		return OpenclawConfigResult{}, fmt.Errorf("render openclaw mcp_config: %w", err)
 	}
 
-	// **Strict replace for managed mcp_config.** When the agent has a managed
-	// set, deep-merging the wrapper's `mcp.servers` against the user's active
-	// config via `$include` would let user-only entries leak in (and an empty
-	// managed set would not actually clear inherited servers).
+	// Replace managed MCP servers through ordered includes:
+	// live config -> mcp.servers: null -> managed servers.
 	//
-	// What this used to do instead was read the user's whole resolved config
-	// through `config get --json` (no key path), strip `mcp.servers`, and write
-	// the remainder into the task directory as a snapshot the wrapper included.
-	// Two things were wrong with it, and only the first is why the task failed:
-	//
-	//   - The read is not a valid invocation. `config get` requires a path, and
-	//     every channel measured on 2026-08-26 rejects the pathless form:
-	//     2026.6.34 (extended-stable) exit 1 in 2.9s with
-	//     `Missing required argument "path".`, 2026.7.1-2 (latest) the same in
-	//     3.0s, 2026.8.1-beta.3 (beta) the same as a JSON envelope in 4.4s. So
-	//     preparation failed for every managed-MCP task on every current channel.
-	//     (2026.5.27 instead wrote zero bytes and never exited within 60s;
-	//     #6275 made that shape fail predictably rather than hang, which is why
-	//     it is adjacent to this fix and not a substitute for it.)
-	//   - Even answered, the result is display data rather than a lossless
-	//     round-trip: `runConfigGet` applies `redactConfigObject`, so a sensitive
-	//     value comes back as the literal `__OPENCLAW_REDACTED__`. OpenClaw can
-	//     restore that sentinel from the original file when it writes; this daemon
-	//     cannot. Writing the remainder back would eventually overwrite a working
-	//     value with a placeholder.
-	//
-	// Both disappear by not reading the config at all. The wrapper includes the
-	// user's live config and then a reset stage carrying exactly
-	// `{"mcp":{"servers":null}}`, and its own `mcp.servers` merges over the
-	// result:
-	//
-	//	live config  ->  mcp.servers: null  ->  managed servers
-	//
-	// The user's `mcp` siblings arrive from the live config and are never
-	// observed by this process, so nothing can be lost in transit and no key this
-	// daemon does not know about can be dropped or invented. OpenClaw's own
-	// loader still resolves JSON5, nested includes and env substitution behind
-	// the include, and no user config bytes, API keys or provider tokens are
-	// written into the task directory.
-	//
-	// Verified against the real loader on 2026.6.34, 2026.7.1-2 and
-	// 2026.8.1-beta.3: objects merge recursively, a null source replaces, and
-	// sibling keys on the includer win over the include result. See
-	// openclaw_mcp_real_integration_test.go.
+	// Deep merge alone would retain user-only servers, including for an empty managed
+	// set. Include the live config rather than snapshotting config-get output, which
+	// redacts secrets and cannot be round-tripped losslessly. OpenClaw's loader keeps
+	// MCP siblings, nested includes, environment substitution, and user config intact.
 	resetPath := ""
 	if hasManagedMcp && exists {
 		resetPath = filepath.Join(envRoot, openclawMcpResetFile)
@@ -447,7 +327,7 @@ func prepareOpenclawConfig(envRoot, workDir string, opts OpenclawConfigPrep) (Op
 		}
 	}
 
-	cfg := buildPerTaskOpenclawConfig(activePath, exists, resetPath, resolvedList, agentsFromRegistry, workDir, managedMcp, hasManagedMcp, opts.Gateway)
+	cfg := buildPerTaskOpenclawConfig(activePath, exists, resetPath, resolvedList, agentsSource, workDir, managedMcp, hasManagedMcp, opts.Gateway)
 
 	data, err := json.MarshalIndent(cfg, "", "  ")
 	if err != nil {
@@ -479,16 +359,17 @@ func prepareOpenclawConfig(envRoot, workDir string, opts OpenclawConfigPrep) (Op
 			"active_config_exists", exists,
 			"include_target", includeTarget,
 			"include_root", result.IncludeRoot,
-			"agents_from_registry", agentsFromRegistry,
+			"agents_source", string(agentsSource),
 			"discovery_cached", cached,
 			"managed_mcp", hasManagedMcp)
 	}
 	return result, nil
 }
 
-// discoverOpenclawConfig resolves the user's active config path and resolved
-// agents.list, serving both from the shared per-profile cache when the cached
-// evidence still matches the host (see openclaw_config_cache.go).
+// discoverOpenclawConfig resolves the user's active config path, the resolved
+// per-agent rows and the schema they came from, serving all three from the
+// shared per-profile cache when the cached evidence still matches the host (see
+// openclaw_config_cache.go).
 //
 // The two are cached as one unit because they are read as one unit: a hit that
 // covered only the path would still pay the second CLI call, which on the host
@@ -498,12 +379,12 @@ func prepareOpenclawConfig(envRoot, workDir string, opts OpenclawConfigPrep) (Op
 // only costs the CLI round-trips this call was going to make anyway, so
 // discovery keeps its existing fail-closed contract: only a real CLI failure
 // fails the task.
-func discoverOpenclawConfig(bin string, timeout time.Duration, opts OpenclawConfigPrep) (activePath string, exists bool, resolvedList []any, agentsFromRegistry bool, cached bool, err error) {
+func discoverOpenclawConfig(bin string, timeout time.Duration, opts OpenclawConfigPrep) (activePath string, exists bool, resolvedList []any, agentsSource openclawAgentsSource, cached bool, err error) {
 	cachePath := openclawDiscoveryCachePath(opts.CacheDir)
 	if entry, ok := loadOpenclawDiscoveryCache(cachePath, bin, time.Now()); ok {
 		list, decodeErr := decodeOpenclawCachedAgentsList(entry.AgentsList)
 		if decodeErr == nil {
-			return entry.ActiveConfigPath, true, list, entry.AgentsFromRegistry, true, nil
+			return entry.ActiveConfigPath, true, list, openclawAgentsSource(entry.AgentsSource), true, nil
 		}
 		if opts.Logger != nil {
 			opts.Logger.Warn("execenv: openclaw discovery cache entry unusable; rediscovering",
@@ -513,74 +394,83 @@ func discoverOpenclawConfig(bin string, timeout time.Duration, opts OpenclawConf
 
 	activePath, exists, err = openclawActiveConfigPath(bin, timeout)
 	if err != nil {
-		return "", false, nil, false, false, fmt.Errorf("locate openclaw active config: %w", err)
+		return "", false, nil, "", false, fmt.Errorf("locate openclaw active config: %w", err)
 	}
 	if !exists {
 		// Deliberately not cached: "no config on disk" is the one state that
 		// flips the moment the user runs OpenClaw's own setup, and caching it
 		// would keep a freshly configured host running without its models and
 		// auth profiles for the rest of the TTL.
-		return activePath, false, nil, false, false, nil
+		return activePath, false, nil, "", false, nil
 	}
 
-	resolvedList, agentsFromRegistry, err = openclawResolvedAgentsList(bin, timeout)
+	resolvedList, agentsSource, err = openclawResolvedAgentsList(bin, timeout)
 	if err != nil {
-		return "", false, nil, false, false, fmt.Errorf("read openclaw agents.list: %w", err)
+		return "", false, nil, "", false, fmt.Errorf("read openclaw agents.list: %w", err)
 	}
-	if storeErr := storeOpenclawDiscoveryCache(cachePath, bin, activePath, resolvedList, agentsFromRegistry, time.Now()); storeErr != nil && opts.Logger != nil {
+	if storeErr := storeOpenclawDiscoveryCache(cachePath, bin, activePath, resolvedList, agentsSource, time.Now()); storeErr != nil && opts.Logger != nil {
 		opts.Logger.Warn("execenv: could not cache openclaw discovery; next task will rerun the CLI",
 			"cache", cachePath, "error", storeErr)
 	}
-	return activePath, exists, resolvedList, agentsFromRegistry, false, nil
+	return activePath, exists, resolvedList, agentsSource, false, nil
 }
 
-// buildPerTaskOpenclawConfig assembles the wrapper map that goes on disk.
+// openclawAgentsSource names the OpenClaw surface the resolved per-agent rows
+// were read from. It is what decides how — and whether — they may be written
+// back into the per-task wrapper, so it is carried explicitly rather than
+// inferred from a boolean: `agents.list[]` and `agents.entries.<id>` are config
+// schemas this daemon can pin a per-agent `workspace` in, while registry rows
+// (`agents list --json`) are read-only and must never be emitted as config.
+type openclawAgentsSource string
+
+const (
+	// openclawAgentsSourceList — pre-2026.6 config: `agents.list[]`.
+	openclawAgentsSourceList openclawAgentsSource = "list"
+	// openclawAgentsSourceEntries — 2026.8+ config: `agents.entries.<id>`.
+	openclawAgentsSourceEntries openclawAgentsSource = "entries"
+	// openclawAgentsSourceRegistry — the sqlite-backed registry, via
+	// `openclaw agents list --json`. Read-only.
+	openclawAgentsSourceRegistry openclawAgentsSource = "registry"
+)
+
+// buildPerTaskOpenclawConfig includes the active config and pins task workspaces.
+// agents.list is replaced with resolved entries retaining every field except
+// workspace. agents.entries overrides only workspace: config-get redacts sensitive
+// fields, so copying whole entries would overwrite secrets with placeholders.
 //
-// Exists=true: emit a $include link to the user's active config plus the
-// workspace overrides as siblings. OpenClaw deep-merges sibling object keys
-// after includes, so agents.defaults.workspace lands correctly. The
-// agents.list override is emitted as a full replacement carrying every
-// field of every resolved entry (id, model, prompts, tools, …) verbatim
-// with only `workspace` rewritten — this is robust regardless of whether
-// the runtime merges the sibling array or replaces it, because either way
-// the resulting list is shape-equivalent to the user's minus workspace.
-//
-// Exists=false: a fresh install with no on-disk config. Emit a minimal
-// config containing only the workspace override. There is no user data to
-// $include here, so this is not the silent-fallback case the reviewer
-// flagged.
-//
-// resetPath, when non-empty, names the `{"mcp":{"servers":null}}` stage in
-// envRoot and is appended to the include list after the user's active config.
-// Include order is the mechanism: the user's servers are nulled after arriving
-// and before the wrapper's own `mcp.servers` merges over the result, so the
-// managed set is what resolves while every `mcp` sibling still comes straight
-// from the user's file. Empty means no managed set, in which case there is
-// nothing to enforce strictness against and the wrapper includes the active
-// path alone.
-//
-// hasManagedMcp distinguishes "agent has a managed mcp_config (possibly an
-// empty set)" from "agent inherits the user's global mcp.servers". When
-// true we pin `mcp.servers` to managedMcp on the wrapper. Because the reset
-// stage has already nulled the user's server map, the resulting view of
-// `mcp.servers` is exactly the managed set — including `{}` for "admin saved
-// no servers" (mirrors `hasManagedCodexMcpConfig`).
-func buildPerTaskOpenclawConfig(activePath string, exists bool, resetPath string, resolvedList []any, agentsFromRegistry bool, workDir string, managedMcp map[string]any, hasManagedMcp bool, gateway OpenclawGatewayPin) map[string]any {
+// For a confirmed missing config, emit only the task defaults. resetPath inserts
+// an MCP-null stage after the active config; managed servers then merge over it.
+// hasManagedMcp distinguishes an explicitly empty managed set from inheritance.
+func buildPerTaskOpenclawConfig(activePath string, exists bool, resetPath string, resolvedList []any, agentsSource openclawAgentsSource, workDir string, managedMcp map[string]any, hasManagedMcp bool, gateway OpenclawGatewayPin) map[string]any {
 	agents := map[string]any{
 		"defaults": map[string]any{"workspace": workDir},
 	}
-	// Only write per-agent overrides back to the wrapper when they came from
-	// the config-schema `agents.list` path (pre-2026.6). A registry-sourced
-	// list (OpenClaw 2026.6.x+) is NOT valid `agents.list[]` config — the
-	// schema validator rejects it ("agents.list.0: Invalid input") and fails
-	// closed before the agent runs. 2026.6.x has no in-config path for per-
-	// agent workspace pinning, so `agents.defaults.workspace` (set above) is
-	// the only knob, and it is sufficient: OpenClaw applies it to the agent it
-	// selects from the registry (see upstream #3028, write-side half).
-	if !agentsFromRegistry {
+	// Per-agent overrides are written back only into the schema the rows were
+	// actually read from (see openclawAgentsSource). A registry-sourced list
+	// (OpenClaw 2026.6.x/2026.7.x, `agents list --json`) is *not* config — the
+	// schema validator rejects its CLI-only fields ("agents.list.0: Invalid
+	// input") and fails closed before the agent runs — so those hosts get
+	// `agents.defaults.workspace` (set above) as their only per-task knob, which
+	// is sufficient there: OpenClaw applies it to the agent it selects from the
+	// registry (see upstream #3028, write-side half).
+	//
+	// 2026.8+ moved the agents out of `agents.list` into `agents.entries.<id>`,
+	// and that schema *is* writable: a host that pins an absolute per-agent
+	// `workspace` there outranks `agents.defaults.workspace` verbatim, so
+	// without this write-back every task on such a host runs in the gateway's
+	// own workspace instead of its prepared workdir (skills/ never loads).
+	switch agentsSource {
+	case openclawAgentsSourceList:
 		if rewritten := rewriteAgentsListWorkspaces(resolvedList, workDir); rewritten != nil {
 			agents["list"] = rewritten
 		}
+	case openclawAgentsSourceEntries:
+		if rewritten := rewriteAgentsEntriesWorkspaces(resolvedList, workDir); rewritten != nil {
+			agents["entries"] = rewritten
+		}
+	case openclawAgentsSourceRegistry, "":
+		// Read-only source (or nothing discovered): `agents.defaults.workspace`
+		// above is the whole per-task override.
 	}
 	cfg := map[string]any{
 		"agents": agents,
@@ -683,54 +573,68 @@ func rewriteAgentsListWorkspaces(list []any, workDir string) []any {
 	return out
 }
 
-// openclawActiveConfigPath discovers the path the openclaw CLI considers active.
-// Returns (absolutePath, exists, error).
+// The resolved `agents.entries` map is carried through this package as a
+// `[]any` because that is the shape the discovery cache stores and re-reads for
+// every schema (see openclaw_config_cache.go) and because a list is what the
+// rest of the resolver contract speaks. The map key — the agent id — has no
+// field of its own inside the entry object, so it rides along out of band on
+// each row and is stripped again on the way into the wrapper: writing this key
+// into the user's config would be a schema change we have no business making.
 //
-// The CLI handles the full resolution chain — explicit config path, state
-// directory, OPENCLAW_HOME / default home, legacy locations, migration, and `~`
-// expansion — so we prefer it when the installed CLI supports the command.
+// Nothing else about an entry is carried: `config get` hands back redacted
+// values (see rewriteAgentsEntriesWorkspaces), so keeping the payload around
+// would only create copies — in the row, in the cache file — of data that must
+// never be written back anyway.
+const openclawEntriesKeyField = "__multica_entries_key"
+
+// rewriteAgentsEntriesWorkspaces rebuilds the `agents.entries.<id>` map from a
+// resolved entries list, pinning every entry's `workspace` to workDir.
 //
-// `config validate --json` is asked first, and `config file` is only the
-// fallback, because the two differ in whether the answer can be recognised:
+// **Each entry carries `workspace` and nothing else.** The resolved entries
+// cannot be copied through: `config get` redacts the config before extracting
+// the path it was asked for, so any sensitive per-agent field (memory search
+// API key, web fetch headers, sandbox SSH credentials, …) comes back as the
+// literal `__OPENCLAW_REDACTED__` sentinel. `$include` resolves as
+// deepMerge(included, siblings) with the wrapper's siblings winning, so copying
+// the entry would write that sentinel over the user's real secret for every
+// task, and nothing on OpenClaw's load path restores it. Emitting one key per id
+// is both sufficient — objects merge recursively, so every other field still
+// arrives from the user's own config verbatim — and safe.
 //
-//   - `config validate --json` puts the path in a named `path` field of a JSON
-//     document, and its stdout is that document and nothing else. Measured on
-//     OpenClaw 2026.7.1-2 with a warning-producing config: 715 bytes, one line,
-//     parseable whole. The Doctor and plugin warnings do not disappear — they
-//     arrive as a `warnings` array *inside* the payload, which is what keeps the
-//     stream parseable rather than merely quieter. (Upstream also has a
-//     console-log reroute for `--json` argv, `withConsoleLogsRoutedToStderrForJson`,
-//     but the structured payload is what was observed doing the work here.)
-//   - `config file` prints the path as its *last line*, after any Doctor and
-//     plugin warnings, on stdout. Deciding "is the answer in yet" then means
-//     asking whether the last line looks like a path — and a warning line that
-//     names one is indistinguishable. Review demonstrated it: a stub printing an
-//     existing `plugin-cache.json` path, then pausing, then printing the real
-//     path had the warning accepted as the answer.
+// Returns nil unless *every* element carries the entries-probe key, so a list
+// from any other source never reaches the wrapper as `agents.entries`: rows
+// from the registry carry CLI-only fields OpenClaw's validator rejects
+// ("agents.entries.main: Invalid input"), and on the generations that have a
+// registry fallback the `agents.entries` path does not exist at all. An empty
+// map is nil too, so the caller omits the key entirely rather than replacing
+// whatever the $include carries with `entries: {}`.
+func rewriteAgentsEntriesWorkspaces(list []any, workDir string) map[string]any {
+	entries := make(map[string]any, len(list))
+	for _, item := range list {
+		entry, ok := item.(map[string]any)
+		if !ok {
+			return nil
+		}
+		id, ok := entry[openclawEntriesKeyField].(string)
+		if !ok || id == "" {
+			return nil
+		}
+		entries[id] = map[string]any{"workspace": workDir}
+	}
+	if len(entries) == 0 {
+		return nil
+	}
+	return entries
+}
+
+// openclawActiveConfigPath returns the active absolute path and its existence.
+// Prefer config validate --json: its named path field is distinguishable from
+// warnings, unlike the last-line output of config file. Missing or invalid configs
+// may still return a usable structured path with a nonzero exit status.
 //
-// Both commands perform the same `readConfigFileSnapshot()` read upstream
-// (checked at `v2026.7.1`: `runConfigFile` prints `shortenHomePath(snapshot.path)`
-// and `runConfigValidate` reports `snapshot.path`, `snapshot.exists` and
-// `snapshot.valid` from that same snapshot), so validation is already part of the
-// read `config file` does. Measured, the JSON form is not merely no worse but
-// meaningfully cheaper: 1.65/1.66/1.65s against 6.36/4.16/4.06s for `config file`
-// over three runs each on the same host and config, which tracks the output it
-// does not have to render — 715 bytes of JSON against 2663 bytes and 28 lines of
-// warning UI.
-//
-// `config validate --json` has carried the `path` field on every branch since
-// `v2026.5.5`, which is minOpenclawVersion. Two of those branches exit non-zero —
-// a missing file and an invalid config, both with the path in the payload and
-// stderr empty — so the exit status must not be read as "no answer"; see
-// openclawValidatedConfigPath.
-//
-// OpenClaw 2026.2.x briefly rejected `openclaw config file` with the generic
-// "too many arguments for 'config'" error. For that command-shape failure only,
-// fall back to the same active-config candidate shape so task prep can still
-// continue without losing upgraded users' legacy config files.
-//
-// A reported path may use `~` or `$OPENCLAW_HOME` shorthand; we expand it so the
-// $include reference we write is unambiguously absolute.
+// Delegate config/state/home and legacy-location resolution to the CLI. Fall back
+// to active-config candidates only when the installed command shape is unsupported.
+// Expand reported home shorthand before writing an absolute include reference.
 func openclawActiveConfigPath(bin string, timeout time.Duration) (string, bool, error) {
 	// One deadline for the question, not one per attempt. Both invocations answer
 	// "where is the active config", so they are a single step of preparation with
@@ -1109,56 +1013,146 @@ func isOpenclawConfigFileUnsupported(err error) bool {
 		(strings.Contains(msg, "unknown") && strings.Contains(msg, "config") && strings.Contains(msg, "file"))
 }
 
-// openclawResolvedAgentsList fetches the user's resolved per-agent list and
-// reports which schema produced it. The schema matters downstream: a config-
-// sourced list is itself valid `agents.list[]` config and may be written back
-// into the wrapper to pin per-agent workspaces, whereas a registry-sourced
-// list MUST NOT be written back — see openclawRegistryAgentsList.
+// openclawResolvedAgentsList fetches the user's resolved per-agent rows and
+// reports which surface produced them (see openclawAgentsSource). The source
+// matters downstream: rows that came from a config schema may be written back
+// into the wrapper to pin per-agent workspaces, whereas registry rows MUST NOT
+// be written back at all — see openclawRegistryAgentsList.
 //
-// Two schemas are supported:
+// Three schemas are supported:
 //
 //   - Pre-2026.6: agents live in the config under `agents.list`. We read them
 //     via `openclaw config get agents.list --json`, which returns the post-
-//     include, post-env-substitution array. fromRegistry=false.
-//   - 2026.6.x and later: `agents.list` is no longer a config path — agents
-//     live in a sqlite registry. `config get agents.list` exits non-zero with
-//     "Config path not found: agents.list". We fall back to the
-//     `openclaw agents list --json` *subcommand*. fromRegistry=true.
+//     include, post-env-substitution array. openclawAgentsSourceList.
+//   - 2026.8+: the same CLI reports `Unknown config path: agents.list` and
+//     carries the agents under `agents.entries.<id>` instead. That path *is*
+//     writable, so it is read through the same deadline as the attempt above
+//     and returned with only the id carried out of band; see
+//     openclawResolvedAgentsEntriesOrRegistry. openclawAgentsSourceEntries —
+//     a keyed entries payload is not `agents.list[]` config.
+//   - 2026.6.x/2026.7.x: neither config path exists — agents live in a sqlite
+//     registry. `config get agents.list` exits non-zero with "Config path not
+//     found: agents.list". We fall back to the `openclaw agents list --json`
+//     *subcommand*, whose rows must never be written back.
+//     openclawAgentsSourceRegistry.
 //
-// Returns (nil, false, nil) when neither source yields any agents.
-func openclawResolvedAgentsList(bin string, timeout time.Duration) ([]any, bool, error) {
+// Returns a nil list when a source answered with no agents; the source still
+// names what answered.
+func openclawResolvedAgentsList(bin string, timeout time.Duration) ([]any, openclawAgentsSource, error) {
+	// One deadline for both config-schema probes. They ask the same question —
+	// what does the config schema carry per agent? — and the second is only
+	// reached when the first answers "no such path", exactly like
+	// `config validate --json` and its `config file` fallback in
+	// openclawActiveConfigPath. Giving the entries probe its own budget would
+	// take the worst case from three CLI deadlines to four (see
+	// openclawMaxCLIDeadlinesPerPreparation) without widening what the CLI can
+	// answer in total.
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
+	return openclawResolvedAgentsListWithinDeadline(ctx, bin, timeout)
+}
+
+// openclawResolvedAgentsListWithinDeadline is the shared-deadline half of
+// openclawResolvedAgentsList: every config-schema probe it makes runs under the
+// ctx it is handed, and only the registry fallback starts a budget of its own.
+func openclawResolvedAgentsListWithinDeadline(ctx context.Context, bin string, timeout time.Duration) ([]any, openclawAgentsSource, error) {
 	out, err := openclawExec(ctx, bin, "config", "get", "agents.list", "--json")
 	if err != nil {
 		if isOpenclawKeyMissingResult(out, err, "agents.list") {
-			// New schema: the config path is gone; the agents live in the
-			// sqlite registry. Resolve them via the subcommand instead.
+			// The config path is gone. On 2026.8+ the keyed replacement exists;
+			// below that the agents live in the sqlite registry.
+			if openclawUnknownConfigPath(out, err, "agents.list") {
+				return openclawResolvedAgentsEntriesOrRegistry(ctx, bin, timeout)
+			}
 			list, rerr := openclawRegistryAgentsList(bin, timeout)
-			return list, true, rerr
+			return list, openclawAgentsSourceRegistry, rerr
 		}
-		return nil, false, annotateOpenclawJSONError(err, out)
+		return nil, "", annotateOpenclawJSONError(err, out)
 	}
 	trimmed := strings.TrimSpace(out)
 	if trimmed == "" || trimmed == "null" {
-		return nil, false, nil
+		return nil, openclawAgentsSourceList, nil
 	}
 	// An envelope that arrived without a non-zero exit must reach the same
 	// verdict as one that did; see openclawStdoutEnvelopeError. Missing the
 	// key here is what selects the registry, so letting the envelope through
 	// as data would turn a graceful fallback into a failed preparation.
 	if message, isEnvelope := openclawJSONErrorMessage(trimmed); isEnvelope {
-		if strings.Contains(strings.ToLower(message), "agents.list") && isOpenclawKeyMissingMessage(message) {
+		// Matched on the path, not on the mere mention of "agents.list": the
+		// path-aware matcher knows every wording the CLI has used for "this key
+		// is not there" ("Path not found", "Config path not found",
+		// "Config path is valid but unset", "Unknown config path"), and it is
+		// what keeps an envelope about some *other* key fail-closed instead of
+		// silently downgrading this host to the registry.
+		if openclawKeyMissingMessageForPath(message, "agents.list") {
+			if openclawUnknownConfigPathMessage(message, "agents.list") {
+				return openclawResolvedAgentsEntriesOrRegistry(ctx, bin, timeout)
+			}
 			list, rerr := openclawRegistryAgentsList(bin, timeout)
-			return list, true, rerr
+			return list, openclawAgentsSourceRegistry, rerr
 		}
-		return nil, false, openclawStdoutEnvelopeError("config get agents.list --json", message)
+		return nil, "", openclawStdoutEnvelopeError("config get agents.list --json", message)
 	}
 	var list []any
 	if err := json.Unmarshal([]byte(trimmed), &list); err != nil {
-		return nil, false, fmt.Errorf("parse `openclaw config get agents.list --json` output: %w", err)
+		return nil, "", fmt.Errorf("parse `openclaw config get agents.list --json` output: %w", err)
 	}
-	return list, false, nil
+	return list, openclawAgentsSourceList, nil
+}
+
+// openclawResolvedAgentsEntriesOrRegistry runs the config-schema read that
+// 2026.8+ replaced `agents.list` with, then falls back to the registry for the
+// generations that have neither.
+//
+// `agents.entries` is a map keyed by agent id, and that key is the only place
+// the id exists — the entry object itself may carry no `id` field at all (a
+// minimal `{"workspace": "..."}` is a valid entry). Each resolved row therefore
+// carries the key out of band, and nothing else: the payload is redacted and is
+// never written back (see rewriteAgentsEntriesWorkspaces). That marker is also
+// how the write-back tells these rows apart from registry rows, which must
+// never reach the wrapper.
+//
+// Reports openclawAgentsSourceEntries when this path answered, and
+// openclawAgentsSourceRegistry when it fell back to the sqlite registry — the
+// generations where that fallback fires are exactly the ones where
+// `agents.entries` is not a valid config path, so the caller must not write the
+// rows back under that key.
+func openclawResolvedAgentsEntriesOrRegistry(ctx context.Context, bin string, timeout time.Duration) ([]any, openclawAgentsSource, error) {
+	out, err := openclawExec(ctx, bin, "config", "get", "agents.entries", "--json")
+	if err != nil {
+		if isOpenclawKeyMissingResult(out, err, "agents.entries") {
+			list, rerr := openclawRegistryAgentsList(bin, timeout)
+			return list, openclawAgentsSourceRegistry, rerr
+		}
+		return nil, "", annotateOpenclawJSONError(err, out)
+	}
+	trimmed := strings.TrimSpace(out)
+	if trimmed == "" || trimmed == "null" {
+		return nil, openclawAgentsSourceEntries, nil
+	}
+	// Same envelope rule as the `agents.list` probe above: on the generations
+	// where this path is valid but the user has not written it, the CLI reports
+	// "Config path is valid but unset: agents.entries" — which means the host has
+	// no in-config agents, and the registry is still the only place they can be.
+	if message, isEnvelope := openclawJSONErrorMessage(trimmed); isEnvelope {
+		if openclawKeyMissingMessageForPath(message, "agents.entries") {
+			list, rerr := openclawRegistryAgentsList(bin, timeout)
+			return list, openclawAgentsSourceRegistry, rerr
+		}
+		return nil, "", openclawStdoutEnvelopeError("config get agents.entries --json", message)
+	}
+	var entries map[string]any
+	if err := json.Unmarshal([]byte(trimmed), &entries); err != nil {
+		return nil, "", fmt.Errorf("parse `openclaw config get agents.entries --json` output: %w", err)
+	}
+	list := make([]any, 0, len(entries))
+	for id, raw := range entries {
+		if _, ok := raw.(map[string]any); !ok {
+			return nil, "", fmt.Errorf("parse `openclaw config get agents.entries --json` output: entry %q is not an object", id)
+		}
+		list = append(list, map[string]any{openclawEntriesKeyField: id})
+	}
+	return list, openclawAgentsSourceEntries, nil
 }
 
 // openclawRegistryAgentsList resolves agents from the sqlite-backed registry
@@ -1169,13 +1163,19 @@ func openclawResolvedAgentsList(bin string, timeout time.Duration) ([]any, bool,
 // (identityName, identitySource, agentDir, bindings, isDefault) that are NOT
 // part of the 2026.6.x config schema's `agents.list[]` shape; OpenClaw's
 // validator rejects them ("agents.list.0: Invalid input") and fails closed
-// before the agent runs. Worse, `agents.list` is no longer a valid config
-// path at all in 2026.6.x — there is no in-config way to pin a per-agent
-// workspace. The per-task workspace is instead pinned via
+// before the agent runs. Worse, `agents.list` is no longer a valid config path
+// at all in 2026.6.x. On these generations there is no in-config way to pin a
+// per-agent workspace, so the per-task workspace is pinned via
 // `agents.defaults.workspace` alone, which the wrapper always sets and which
 // OpenClaw applies to the agent it selects from the registry (verified on
-// 2026.6.8). Callers gate the write-back on fromRegistry from
-// openclawResolvedAgentsList.
+// 2026.6.8). 2026.8+ hosts do have a writable per-agent path again —
+// `agents.entries.<id>` — and reach it through openclawResolvedAgentsEntriesOrRegistry
+// without ever consulting this function.
+//
+// Callers gate the write-back on the source
+// openclawResolvedAgentsList reports (openclawAgentsSourceRegistry here, which
+// no write-back branch accepts); rows from this subcommand are therefore never
+// written to the wrapper by any route.
 //
 // Returns nil (not an error) when the registry is empty or the subcommand
 // reports no agents.
@@ -1524,6 +1524,27 @@ func isOpenclawKeyMissingResult(stdout string, err error, keyPath string) bool {
 		return false
 	}
 	return openclawKeyMissingMessageForPath(message, keyPath)
+}
+
+// openclawUnknownConfigPath recognizes the one missing-path wording that also
+// tells us *which* generation of the schema we are talking to: 2026.8+ reports
+// `Unknown config path: agents.list` for the path it retired and carries the
+// agents under `agents.entries` instead. The older generations say "Config path
+// not found" / "Config path is valid but unset" for paths they know nothing
+// about and have no keyed replacement, so those keep the registry fallback —
+// probing `agents.entries` there would only spend a probe to be told about a
+// path that generation never had.
+func openclawUnknownConfigPath(stdout string, err error, keyPath string) bool {
+	if message, ok := openclawJSONErrorMessage(stdout); ok {
+		return openclawUnknownConfigPathMessage(message, keyPath)
+	}
+	return err != nil && openclawUnknownConfigPathMessage(err.Error(), keyPath)
+}
+
+func openclawUnknownConfigPathMessage(message, keyPath string) bool {
+	message = strings.ToLower(strings.Join(strings.Fields(message), " "))
+	keyPath = strings.ToLower(strings.TrimSpace(keyPath))
+	return keyPath != "" && openclawMessageNamesPathAfter(message, "unknown config path: ", keyPath)
 }
 
 func openclawKeyMissingMessageForPath(message, keyPath string) bool {

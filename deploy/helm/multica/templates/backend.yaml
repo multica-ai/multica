@@ -1,4 +1,6 @@
 {{- $backendImageTag := default .Chart.AppVersion .Values.images.backend.tag -}}
+{{- /* `helm upgrade --reuse-values` from a chart without extraCACerts carries no such key. */ -}}
+{{- $extraCACerts := (default dict .Values.backend.extraCACerts).configMap -}}
 {{- if .Values.backend.uploads.persistence.enabled -}}
 apiVersion: v1
 kind: PersistentVolumeClaim
@@ -52,6 +54,10 @@ spec:
         # rendered value there is a placeholder; on a real install/upgrade it
         # reflects the actual Secret and rolls pods on rotation.
         checksum/secret: {{ (lookup "v1" "Secret" .Release.Namespace .Values.existingSecret).data | toYaml | sha256sum }}
+        {{- if $extraCACerts }}
+        # Same lookup pattern: the backend reads extra CAs only at startup.
+        checksum/extra-ca-certs: {{ (lookup "v1" "ConfigMap" .Release.Namespace $extraCACerts).data | toYaml | sha256sum }}
+        {{- end }}
       labels:
         {{- include "multica.labels" . | nindent 8 }}
         app.kubernetes.io/component: backend
@@ -68,15 +74,31 @@ spec:
                 name: {{ .Release.Name }}-config
             - secretRef:
                 name: {{ .Values.existingSecret }}
-          {{- if not .Values.postgres.external.enabled }}
+          {{- if or (not .Values.postgres.external.enabled) $extraCACerts }}
           env:
+            {{- if not .Values.postgres.external.enabled }}
             - name: DATABASE_URL
               value: {{ include "multica.databaseUrl" . | quote }}
+            {{- end }}
+            {{- if $extraCACerts }}
+            # Go loads the system bundle file plus every file in these
+            # directories. SSL_CERT_DIR replaces the default directory list,
+            # so the system directory stays in it alongside the extra CAs.
+            - name: SSL_CERT_DIR
+              value: /etc/ssl/certs:/etc/multica/ca-certs
+            {{- end }}
           {{- end }}
-          {{- if .Values.backend.uploads.persistence.enabled }}
+          {{- if or .Values.backend.uploads.persistence.enabled $extraCACerts }}
           volumeMounts:
+            {{- if .Values.backend.uploads.persistence.enabled }}
             - name: uploads
               mountPath: /app/data/uploads
+            {{- end }}
+            {{- if $extraCACerts }}
+            - name: extra-ca-certs
+              mountPath: /etc/multica/ca-certs
+              readOnly: true
+            {{- end }}
           {{- end }}
           # The entrypoint runs `./migrate up` before serving traffic. On a
           # cold cluster (Postgres still coming up) this can take minutes. The
@@ -114,11 +136,18 @@ spec:
       tolerations:
         {{- toYaml . | nindent 8 }}
       {{- end }}
-      {{- if .Values.backend.uploads.persistence.enabled }}
+      {{- if or .Values.backend.uploads.persistence.enabled $extraCACerts }}
       volumes:
+        {{- if .Values.backend.uploads.persistence.enabled }}
         - name: uploads
           persistentVolumeClaim:
             claimName: {{ include "multica.backend.fullname" . }}-uploads
+        {{- end }}
+        {{- if $extraCACerts }}
+        - name: extra-ca-certs
+          configMap:
+            name: {{ $extraCACerts }}
+        {{- end }}
       {{- end }}
 ---
 apiVersion: v1

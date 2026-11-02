@@ -2032,6 +2032,29 @@ func TestUpdateAgentMcpConfigObjectUpdatesValue(t *testing.T) {
 	assertJSONEqual(t, fetchAgentMcpConfig(t, agentID), `{"preset":"new"}`)
 }
 
+func TestUpdateAgentMcpConfigPreservesBoundaryEmptyArguments(t *testing.T) {
+	agentID := createHandlerTestAgent(t, "Handler Mcp Empty Args", nil)
+	want := `{"mcpServers":{"fetch":{"command":"uvx","args":["","2222","","333",""]}}}`
+
+	req := newRequest("PUT", "/api/agents/"+agentID, map[string]any{
+		"mcp_config": map[string]any{
+			"mcpServers": map[string]any{
+				"fetch": map[string]any{
+					"command": "uvx",
+					"args":    []string{"", "2222", "", "333", ""},
+				},
+			},
+		},
+	})
+	req = withURLParam(req, "id", agentID)
+	w := testutil.Call(t, testHandler.UpdateAgent, req).Want(http.StatusOK)
+
+	var updated AgentResponse
+	w.JSON(&updated)
+	assertJSONEqual(t, updated.McpConfig, want)
+	assertJSONEqual(t, fetchAgentMcpConfig(t, agentID), want)
+}
+
 func TestCreateAgentMcpConfigNullStoresSQLNull(t *testing.T) {
 	req := newRequest("POST", "/api/agents", map[string]any{
 		"name":        "Handler Mcp Create Null",

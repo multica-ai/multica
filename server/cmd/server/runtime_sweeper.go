@@ -53,7 +53,10 @@ const (
 	reconnectRetryExpireBatchSize = 500
 	// offlineRuntimeTTLSeconds deletes offline runtimes with no active agents
 	// after this duration. 7 days gives users plenty of time to restart daemons.
-	offlineRuntimeTTLSeconds = 7 * 24 * 3600.0
+	// Shared with the delete handlers, which quote the same window when they
+	// refuse to remove a profile-backed instance the user could otherwise only
+	// wait out.
+	offlineRuntimeTTLSeconds = service.OfflineRuntimeTTLSeconds
 	// runtimeGCBatchSize bounds both the candidate scan and the number of
 	// per-runtime transactions one sweeper tick may open. At the hourly cadence,
 	// 500 preserves a theoretical capacity of 12,000 candidates per day; the
@@ -706,12 +709,15 @@ func broadcastFailedTasks(ctx context.Context, queries *db.Queries, taskSvc *ser
 				workspaceID = util.UUIDToString(issue.WorkspaceID)
 				issueKey := util.UUIDToString(t.IssueID)
 				// Only issues whose status means "an agent is actively working"
-				// get reset. in_review and blocked are deliberately excluded —
-				// they mean a human or an external dependency owns the issue
-				// now, and resetting those to todo would re-trigger an agent on
-				// work someone else is holding. A custom status resolves to the
-				// canonical status it inherits, so a custom review gate is
-				// excluded for the same reason In Review is. (MUL-6243)
+				// get reset, which since MUL-7240 is the fixed in_progress key
+				// alone. in_review and blocked are deliberately excluded — they
+				// mean a human or an external dependency owns the issue now,
+				// and resetting those to todo would re-trigger an agent on work
+				// someone else is holding. A CUSTOM started status is excluded
+				// because custom statuses inherit lifecycle only, not the
+				// active-status recovery rule; Effective() no longer projects a
+				// nonterminal custom key onto a built-in, so this is a key
+				// comparison on purpose. (MUL-6243, MUL-7240)
 				effectiveStatus := issuestatus.Effective(ctx, queries, issue.WorkspaceID, issue.Status)
 				if effectiveStatus == "in_progress" && !processedIssues[issueKey] {
 					processedIssues[issueKey] = true

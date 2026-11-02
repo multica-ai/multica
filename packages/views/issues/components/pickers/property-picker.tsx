@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useCallback, useRef, useEffect } from "react";
-import { Check } from "lucide-react";
+import { Check } from "@multica/ui/icons";
 import {
   Popover,
   PopoverTrigger,
@@ -12,6 +12,7 @@ import {
   TooltipContent,
   TooltipTrigger,
 } from "@multica/ui/components/ui/tooltip";
+import { TruncatedTooltip } from "@multica/ui/components/common/truncated-tooltip";
 import { isImeComposing } from "@multica/core/utils";
 import { useT } from "../../../i18n";
 
@@ -33,17 +34,16 @@ const isEmptyItem = (el: HTMLButtonElement | undefined) =>
  * first interaction is pixel-identical.
  */
 export const PICKER_TRIGGER_CLASS =
-  "flex items-center gap-1.5 cursor-pointer rounded px-1 -mx-1 hover:bg-accent/30 transition-colors overflow-hidden";
+  "flex items-center gap-1.5 cursor-pointer rounded-xs px-1 -mx-1 hover:bg-accent/30 transition-colors overflow-hidden";
 
-// ---------------------------------------------------------------------------
 // PropertyPicker — generic Popover shell with optional search
-// ---------------------------------------------------------------------------
 
 export function PropertyPicker({
   open,
   onOpenChange,
   trigger,
   triggerRender,
+  nativeButton = true,
   width = "w-48",
   align = "end",
   side = "bottom",
@@ -59,6 +59,8 @@ export function PropertyPicker({
   onOpenChange: (v: boolean) => void;
   trigger: React.ReactNode;
   triggerRender?: React.ReactElement;
+  /** False when a compound trigger renders a non-button element. */
+  nativeButton?: boolean;
   width?: string;
   align?: "start" | "center" | "end";
   side?: React.ComponentProps<typeof PopoverContent>["side"];
@@ -83,17 +85,79 @@ export function PropertyPicker({
    */
   footer?: React.ReactNode;
 }) {
+  const [tooltipHover, setTooltipHover] = useState(false);
+  // Show the tooltip only while the trigger is hovered AND the popover is
+  // closed — avoids the awkward state where the tooltip floats next to (or
+  // on top of) the popover that just opened on click.
+  const tooltipOpen = !!tooltip && tooltipHover && !open;
+
+  const popoverTrigger = (
+    <PopoverTrigger
+      nativeButton={nativeButton}
+      className={triggerRender ? undefined : PICKER_TRIGGER_CLASS}
+      render={triggerRender}
+    >
+      {trigger}
+    </PopoverTrigger>
+  );
+
+  return (
+    <Popover open={open} onOpenChange={onOpenChange}>
+      {tooltip ? (
+        <Tooltip open={tooltipOpen} onOpenChange={setTooltipHover}>
+          <TooltipTrigger render={popoverTrigger} />
+          <TooltipContent side="top">{tooltip}</TooltipContent>
+        </Tooltip>
+      ) : (
+        popoverTrigger
+      )}
+      <PopoverContent align={align} side={side} className={`${width} gap-0 p-0`}>
+        <PickerPanel
+          open={open}
+          searchable={searchable}
+          searchPlaceholder={searchPlaceholder}
+          onSearchChange={onSearchChange}
+          header={header}
+          footer={footer}
+        >
+          {children}
+        </PickerPanel>
+      </PopoverContent>
+    </Popover>
+  );
+}
+
+// PickerPanel — a picker's search box and keyboard-navigable list, without
+// the popover. PropertyPicker wraps it; menus host it in a submenu.
+
+export function PickerPanel({
+  open = true,
+  searchable = false,
+  searchPlaceholder,
+  onSearchChange,
+  autoFocusSearch = false,
+  header,
+  children,
+  footer,
+}: {
+  /** The surrounding surface's open state; closing it resets the search. */
+  open?: boolean;
+  searchable?: boolean;
+  searchPlaceholder?: string | undefined;
+  onSearchChange?: (query: string) => void;
+  /** Focus the search box on mount. A popover moves focus in by itself; a
+   *  submenu does not. */
+  autoFocusSearch?: boolean;
+  header?: React.ReactNode;
+  children: React.ReactNode;
+  footer?: React.ReactNode;
+}) {
   const { t } = useT("issues");
   const placeholder = searchPlaceholder ?? t(($) => $.filters.placeholder);
   const filterAria = t(($) => $.pickers.filter_options_aria);
   const [query, setQuery] = useState("");
   const [highlightedIndex, setHighlightedIndex] = useState(-1);
-  const [tooltipHover, setTooltipHover] = useState(false);
   const listRef = useRef<HTMLDivElement>(null);
-  // Show the tooltip only while the trigger is hovered AND the popover is
-  // closed — avoids the awkward state where the tooltip floats next to (or
-  // on top of) the popover that just opened on click.
-  const tooltipOpen = !!tooltip && tooltipHover && !open;
 
   const getItems = useCallback(() => {
     if (!listRef.current) return [];
@@ -180,54 +244,34 @@ export function PropertyPicker({
     [getItems, highlightedIndex],
   );
 
-  const popoverTrigger = (
-    <PopoverTrigger
-      className={triggerRender ? undefined : PICKER_TRIGGER_CLASS}
-      render={triggerRender}
-    >
-      {trigger}
-    </PopoverTrigger>
-  );
-
   return (
-    <Popover open={open} onOpenChange={onOpenChange}>
-      {tooltip ? (
-        <Tooltip open={tooltipOpen} onOpenChange={setTooltipHover}>
-          <TooltipTrigger render={popoverTrigger} />
-          <TooltipContent side="top">{tooltip}</TooltipContent>
-        </Tooltip>
-      ) : (
-        popoverTrigger
+    <>
+      {searchable && (
+        <div className="px-2 py-1.5 border-b">
+          <input
+            type="text"
+            value={query}
+            onChange={(e) => {
+              setQuery(e.target.value);
+              pendingSearchHighlight.current = true;
+              onSearchChange?.(e.target.value);
+            }}
+            onKeyDown={handleKeyDown}
+            placeholder={placeholder}
+            aria-label={filterAria}
+            autoFocus={autoFocusSearch}
+            className="w-full bg-transparent text-body placeholder:text-muted-foreground outline-none"
+          />
+        </div>
       )}
-      <PopoverContent align={align} side={side} className={`${width} gap-0 p-0`}>
-        {searchable && (
-          <div className="px-2 py-1.5 border-b">
-            <input
-              type="text"
-              value={query}
-              onChange={(e) => {
-                setQuery(e.target.value);
-                pendingSearchHighlight.current = true;
-                onSearchChange?.(e.target.value);
-              }}
-              onKeyDown={handleKeyDown}
-              placeholder={placeholder}
-              aria-label={filterAria}
-              className="w-full bg-transparent text-body placeholder:text-muted-foreground outline-none"
-            />
-          </div>
-        )}
-        {header && <div className="border-b">{header}</div>}
-        <div ref={listRef} className="p-1 max-h-72 overflow-y-auto">{children}</div>
-        {footer && <div className="border-t p-1">{footer}</div>}
-      </PopoverContent>
-    </Popover>
+      {header && <div className="border-b">{header}</div>}
+      <div ref={listRef} className="p-1 max-h-72 overflow-y-auto">{children}</div>
+      {footer && <div className="border-t p-1">{footer}</div>}
+    </>
   );
 }
 
-// ---------------------------------------------------------------------------
 // PickerItem — single selectable row
-// ---------------------------------------------------------------------------
 
 export function PickerItem({
   selected,
@@ -235,6 +279,7 @@ export function PickerItem({
   onClick,
   hoverClassName,
   tooltip,
+  truncationTooltip,
   emptyValue = false,
   children,
 }: {
@@ -254,9 +299,13 @@ export function PickerItem({
   emptyValue?: boolean;
   /** Design-system tooltip for the row — useful when truncated content needs
    *  the full string, or when the row carries metadata that doesn't fit on
-   *  a single line. Wrapped in a real Tooltip component (200ms delay,
+   *  a single line. Wrapped in a real Tooltip component (shared delay,
    *  styled), not a native `title` attribute. */
   tooltip?: React.ReactNode;
+  /** Full text of a row label that may be cut off. Unlike `tooltip`, it only
+   *  opens when the row's content is actually truncated, so short labels
+   *  don't pop a bubble that repeats them. Ignored when `tooltip` is set. */
+  truncationTooltip?: React.ReactNode;
   children: React.ReactNode;
 }) {
   const button = (
@@ -283,7 +332,10 @@ export function PickerItem({
     </button>
   );
 
-  if (!tooltip) return button;
+  if (!tooltip) {
+    if (!truncationTooltip) return button;
+    return <TruncatedTooltip content={truncationTooltip}>{button}</TruncatedTooltip>;
+  }
 
   return (
     <Tooltip>
@@ -293,9 +345,7 @@ export function PickerItem({
   );
 }
 
-// ---------------------------------------------------------------------------
 // PickerSection — group header
-// ---------------------------------------------------------------------------
 
 export function PickerSection({
   label,
@@ -314,9 +364,7 @@ export function PickerSection({
   );
 }
 
-// ---------------------------------------------------------------------------
 // PickerEmpty — no results state
-// ---------------------------------------------------------------------------
 
 export function PickerEmpty() {
   const { t } = useT("issues");

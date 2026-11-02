@@ -37,6 +37,13 @@ require_rendered_value "$default_config" 'MULTICA_CLOUD_URL: ""'
 require_rendered_value "$default_config" 'MULTICA_DATABASE_STARTUP_TIMEOUT: "3m"'
 require_rendered_value "$default_config" 'MULTICA_DATABASE_CONNECT_TIMEOUT: "5s"'
 
+require_rendered_value "$default_config" 'MAINTENANCE_PORT: ""'
+maintenance_config="$(helm template multica "$CHART_DIR" --show-only templates/configmap.yaml --set-string backend.config.maintenancePort=6061)"
+require_rendered_value "$maintenance_config" 'MAINTENANCE_PORT: "6061"'
+maintenance_backend="$(helm template multica "$CHART_DIR" --show-only templates/backend.yaml --set-string backend.config.maintenancePort=6061)"
+reject_rendered_value "$maintenance_backend" 'containerPort: 6061'
+reject_rendered_value "$maintenance_backend" 'port: 6061'
+
 default_backend="$(
   helm template multica "$CHART_DIR" \
     --show-only templates/backend.yaml
@@ -45,6 +52,27 @@ require_rendered_value "$default_backend" 'failureThreshold: 60'
 liveness_block="$(sed -n '/livenessProbe:/,/resources:/p' <<<"$default_backend")"
 require_rendered_value "$liveness_block" 'path: /health'
 reject_rendered_value "$liveness_block" 'path: /healthz'
+reject_rendered_value "$default_backend" 'SSL_CERT_DIR'
+reject_rendered_value "$default_backend" 'extra-ca-certs'
+
+# `helm upgrade --reuse-values` from a chart that predates extraCACerts renders
+# without the key at all; that must still render, with no extra trust.
+legacy_backend="$(
+  helm template multica "$CHART_DIR" \
+    --show-only templates/backend.yaml \
+    --set backend.extraCACerts=null
+)"
+reject_rendered_value "$legacy_backend" 'SSL_CERT_DIR'
+
+extra_ca_backend="$(
+  helm template multica "$CHART_DIR" \
+    --show-only templates/backend.yaml \
+    --set backend.extraCACerts.configMap=internal-ca
+)"
+require_rendered_value "$extra_ca_backend" 'value: /etc/ssl/certs:/etc/multica/ca-certs'
+require_rendered_value "$extra_ca_backend" 'mountPath: /etc/multica/ca-certs'
+require_rendered_value "$extra_ca_backend" 'name: internal-ca'
+require_rendered_value "$extra_ca_backend" 'mountPath: /app/data/uploads'
 
 disabled_config="$(
   helm template multica "$CHART_DIR" \

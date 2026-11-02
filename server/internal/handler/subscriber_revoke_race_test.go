@@ -72,6 +72,7 @@ func TestSubtreeUnsubscribe_LosesToConcurrentRevoke(t *testing.T) {
 		t.Fatalf("begin revoke tx: %v", err)
 	}
 	defer revokeTx.Rollback(context.Background())
+	holderPID := holderBackendPID(t, ctx, revokeTx)
 	rq := testHandler.Queries.WithTx(revokeTx)
 
 	if err := rq.LockSubscriberWrites(ctx, db.LockSubscriberWritesParams{
@@ -107,10 +108,14 @@ func TestSubtreeUnsubscribe_LosesToConcurrentRevoke(t *testing.T) {
 		done <- w.Code
 	}()
 
-	select {
-	case code := <-done:
-		t.Fatalf("subtree unsubscribe completed (status %d) while the revoke still held the lock", code)
-	case <-time.After(400 * time.Millisecond):
+	// Parked on the revoke transaction itself, not merely slow.
+	if !waitForWaiterBlockedBy(t, holderPID, 10*time.Second) {
+		select {
+		case code := <-done:
+			t.Fatalf("subtree unsubscribe completed (status %d) while the revoke still held the lock", code)
+		default:
+			t.Fatalf("subtree unsubscribe never blocked on the revoke's subscriber lock (pid %d)", holderPID)
+		}
 	}
 
 	if err := revokeTx.Commit(context.Background()); err != nil {

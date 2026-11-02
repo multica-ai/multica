@@ -1,6 +1,8 @@
 "use client";
 
 import { useState, useRef, useCallback, useEffect, useLayoutEffect, useMemo, forwardRef } from "react";
+import { useWorkspaceId } from "@multica/core/hooks";
+import { useTraceIssueLabels } from "./use-trace-issue-labels";
 import { Virtuoso, type VirtuosoHandle, type Components } from "react-virtuoso";
 import {
   Bot,
@@ -10,7 +12,6 @@ import {
   XCircle,
   X,
   Loader2,
-  Clock,
   Copy,
   Check,
   ChevronRight,
@@ -26,10 +27,11 @@ import {
   Info,
   Coins,
   GitBranch,
-} from "lucide-react";
+} from "@multica/ui/icons";
 import { cn } from "@multica/ui/lib/utils";
 import { copyText } from "@multica/ui/lib/clipboard";
 import { Button } from "@multica/ui/components/ui/button";
+import { IconButton } from "@multica/ui/components/common/icon-button";
 import { Dialog, DialogContent, DialogTitle } from "@multica/ui/components/ui/dialog";
 import { Popover, PopoverContent, PopoverTrigger } from "@multica/ui/components/ui/popover";
 import {
@@ -42,7 +44,8 @@ import {
 } from "@multica/ui/components/ui/dropdown-menu";
 import { ActorAvatar } from "../actor-avatar";
 import { AttributionBadge } from "../../issues/components/attribution-badge";
-import { cancelReasonLabel, failureReasonLabel } from "../../agents/components/tabs/task-failure";
+import { plainTriggerSummary } from "../../issues/components/task-run-labels";
+import { cancellationActorLabel, cancelReasonLabel, failureReasonLabel } from "../../agents/components/tabs/task-failure";
 import { RichContent } from "../../rich-content";
 import { api } from "@multica/core/api";
 import {
@@ -60,7 +63,7 @@ import {
   FOLLOW_EDGE_THRESHOLD,
   LINE_SCROLL_PX,
 } from "./transcript-follow";
-import type { TimelineItem } from "./build-timeline";
+import { isOutputTruncated, type TimelineItem } from "./build-timeline";
 import {
   buildLanes,
   buildSteps,
@@ -68,7 +71,6 @@ import {
   isCallStep,
   isGroupRow,
   rowCalls,
-  shouldShowTimeline,
   toolKindTotals,
   type TraceCallStep,
   type TraceGroupRow,
@@ -101,8 +103,10 @@ import {
   formatUsd,
   summarizeTaskUsage,
 } from "../../runtimes/utils";
+import { formatBytes } from "../format-bytes";
 import "../../editor/styles/code.css";
 import "./task-transcript.css";
+import { TooltipHint } from "@multica/ui/components/common/tooltip-hint";
 
 // The run surface, read in four layers: what happened (header), what it
 // produced (outcome), where the time went (timeline), and the evidence (steps).
@@ -116,6 +120,16 @@ interface AgentTranscriptDialogProps {
   items: TimelineItem[];
   agentName: string;
   isLive?: boolean;
+  /**
+   * Whether focus returns to the trigger when the dialog closes. Pass `true`
+   * only for a keyboard open, where the reader has no other way back. After a
+   * pointer open, returning focus is what leaves the trigger wearing a focus
+   * ring and its tooltip once Esc closes the log — and, on the hover-revealed
+   * comment action row, holds the whole row visible with the pointer long gone.
+   */
+  finalFocus?: boolean;
+  /** Loading/error content while the caller retrieves the transcript. */
+  contentState?: React.ReactNode;
   /**
    * Optional content rendered between the header chips and the event list.
    * Used by autopilot run rows to surface the inbound webhook trigger
@@ -142,6 +156,8 @@ function formatElapsedMs(ms: number): string {
 
 /** A step's own duration, in the compact form the right column carries. */
 function formatStepDuration(ms: number): string {
+  if (ms <= 0) return "—";
+  if (ms < 100) return "<0.1s";
   if (ms < 1000) return `${(ms / 1000).toFixed(1)}s`;
   if (ms < 60_000) return `${(ms / 1000).toFixed(ms < 10_000 ? 1 : 0)}s`;
   const minutes = Math.floor(ms / 60_000);
@@ -229,22 +245,23 @@ function RunDetailRow({
   const valueClass = cn("min-w-0 select-text break-all text-foreground", mono && "font-mono");
   if (onCopy) {
     return (
-      <button
-        type="button"
-        onClick={onCopy}
-        title={copyTitle}
-        className="group -mx-1 grid w-[calc(100%+0.5rem)] grid-cols-[4.5rem_minmax(0,1fr)] items-start gap-3 rounded px-1 py-0.5 text-left transition-colors hover:bg-accent/60"
-      >
-        <span className="text-muted-foreground">{label}</span>
-        <span className="flex min-w-0 items-start gap-1.5">
-          <span className={cn(valueClass, "flex-1")}>{value}</span>
-          {copied ? (
-            <Check className="mt-0.5 h-3 w-3 shrink-0 text-success" />
-          ) : (
-            <Copy className="mt-0.5 h-3 w-3 shrink-0 opacity-0 transition-opacity group-hover:opacity-100" />
-          )}
-        </span>
-      </button>
+      <TooltipHint label={copyTitle}>
+        <button
+          type="button"
+          onClick={onCopy}
+          className="group -mx-1 grid w-[calc(100%+0.5rem)] grid-cols-[4.5rem_minmax(0,1fr)] items-start gap-3 rounded-xs px-1 py-0.5 text-left transition-colors hover:bg-accent/60"
+        >
+          <span className="text-muted-foreground">{label}</span>
+          <span className="flex min-w-0 items-start gap-1.5">
+            <span className={cn(valueClass, "flex-1")}>{value}</span>
+            {copied ? (
+              <Check className="mt-0.5 h-3 w-3 shrink-0 text-success" />
+            ) : (
+              <Copy className="mt-0.5 h-3 w-3 shrink-0 opacity-0 transition-opacity group-hover:opacity-100" />
+            )}
+          </span>
+        </button>
+      </TooltipHint>
     );
   }
   return (
@@ -304,10 +321,13 @@ export function AgentTranscriptDialog({
   items,
   agentName,
   isLive = false,
+  finalFocus = false,
   headerSlot,
+  contentState,
 }: AgentTranscriptDialogProps) {
   const { t } = useT("agents");
   const locale = useLocale();
+  const formatText = useTraceIssueLabels(useWorkspaceId(), task.issue_id, items, open);
   const [selectedSeq, setSelectedSeq] = useState<number | null>(null);
   const [expandedGroups, setExpandedGroups] = useState<Set<number>>(() => new Set());
   const [query, setQuery] = useState("");
@@ -494,10 +514,13 @@ export function AgentTranscriptDialog({
     if (activeFilterSet.size === 0 && trimmedQuery.length === 0) return steps;
     return steps.filter((step) => {
       if (activeFilterSet.size > 0 && !activeFilterSet.has(stepFilterKey(step))) return false;
-      if (trimmedQuery.length > 0 && !stepHaystack(step).includes(trimmedQuery)) return false;
+      if (trimmedQuery.length > 0) {
+        const raw = stepHaystack(step);
+        if (!raw.includes(trimmedQuery) && !formatText(raw).toLowerCase().includes(trimmedQuery)) return false;
+      }
       return true;
     });
-  }, [steps, activeFilterSet, trimmedQuery]);
+  }, [steps, activeFilterSet, trimmedQuery, formatText]);
 
   // Grouping runs on what the reader is looking at: filtering breaks adjacency,
   // and a group that spans a hidden step would be a lie about what ran.
@@ -523,9 +546,6 @@ export function AgentTranscriptDialog({
   const runEnd = task.completed_at ?? lastStamp;
 
   const lanes = useMemo(() => buildLanes(steps, runStart, runEnd), [steps, runStart, runEnd]);
-  // A short run's timeline says less than the durations already on each row,
-  // so it does not render at all.
-  const showTimeline = shouldShowTimeline(steps, lanes);
   const toolKinds = useMemo(() => toolKindTotals(steps), [steps]);
   const outcome = useMemo(() => buildRunOutcome(steps), [steps]);
 
@@ -538,11 +558,6 @@ export function AgentTranscriptDialog({
     selectedStep && runStartMs !== undefined
       ? Math.max(0, (timeMs(selectedStep.startedAt) ?? runStartMs) - runStartMs)
       : undefined;
-
-  // Keyed on the run having produced nothing at all, not on the filtered view
-  // being empty — a filter that hides every step is not a runtime limitation.
-  const isAntigravityLiveEmpty =
-    isLive && steps.length === 0 && runtimeInfo?.provider === "antigravity";
 
   // Newest-first shows live events as PREPENDS, and Virtuoso items opt out of
   // native scroll anchoring (`overflow-anchor: none`), so without compensation
@@ -748,17 +763,21 @@ export function AgentTranscriptDialog({
         // A server-cancelled run (worktree claim gate, preserved-work
         // delivery) carries a persisted reason the user must act on; surface
         // it on the badge instead of a bare "Cancelled". User-initiated
-        // cancels have no reason and keep the plain label. The badge carries
-        // no `title`: the raw `task.error` behind it is untranslated
-        // operator prose (#7411) and belongs in Run details, not in hover
-        // text on a status pill.
+        // cancels have no reason, but carry actor provenance when it was
+        // recorded. The title contains only this localized status — never the
+        // raw `task.error`, which is operator prose reserved for Run details.
         const cancelReason = cancelReasonLabel(task, t);
+        const cancelledBy = cancellationActorLabel(task, t);
+        const cancelStatus = cancelReason
+          ? `${cancelledBy ?? t(($) => $.transcript.status_cancelled)} · ${cancelReason}`
+          : cancelledBy ?? t(($) => $.transcript.status_cancelled);
         return (
-          <span className={cn(base, "bg-muted text-muted-foreground")}>
-            <XCircle className="h-3 w-3" />
-            {cancelReason
-              ? `${t(($) => $.transcript.status_cancelled)} · ${cancelReason}`
-              : t(($) => $.transcript.status_cancelled)}
+          <span
+            className={cn(base, "min-w-0 max-w-[45%] bg-muted text-muted-foreground")}
+            title={cancelStatus}
+          >
+            <XCircle className="h-3 w-3 shrink-0" />
+            <span className="truncate">{cancelStatus}</span>
           </span>
         );
       }
@@ -793,7 +812,9 @@ export function AgentTranscriptDialog({
   // up front than the runtime/provider diagnostics, which live in the ⓘ popover.
   const triggerLabel = task.parent_task_id
     ? t(($) => $.transcript.trigger_retry)
-    : task.kind === "comment" || task.trigger_comment_id
+    : task.wakeup_id
+      ? t(($) => $.transcript.trigger_wakeup)
+      : task.kind === "comment" || task.trigger_comment_id
       ? t(($) => $.transcript.trigger_comment)
       : task.kind === "autopilot" || task.autopilot_run_id
         ? t(($) => $.transcript.trigger_autopilot)
@@ -849,6 +870,7 @@ export function AgentTranscriptDialog({
       <DialogContent
         className="!max-w-5xl !w-[calc(100vw-4rem)] !max-h-[calc(100vh-4rem)] !h-[calc(100vh-4rem)] flex flex-col !p-0 !gap-0 overflow-hidden"
         showCloseButton={false}
+        finalFocus={finalFocus}
       >
         <DialogTitle className="sr-only">{t(($) => $.transcript.dialog_title)}</DialogTitle>
 
@@ -921,11 +943,11 @@ export function AgentTranscriptDialog({
                 <Popover>
                   <PopoverTrigger
                     render={
-                      <Button
+                      <IconButton
                         variant="ghost"
                         size="icon-sm"
-                        aria-label={t(($) => $.transcript.run_info)}
-                        title={t(($) => $.transcript.run_info)}
+                        label={t(($) => $.transcript.run_info)}
+                        tooltipSide="bottom"
                         className="text-muted-foreground"
                       />
                     }
@@ -1053,24 +1075,28 @@ export function AgentTranscriptDialog({
                   </PopoverContent>
                 </Popover>
               )}
-              <Button
+              <IconButton
                 variant="ghost"
                 size="icon-sm"
                 onClick={() => onOpenChange(false)}
-                aria-label={t(($) => $.transcript.close)}
+                label={t(($) => $.transcript.close)}
+                tooltipSide="bottom"
                 className="text-muted-foreground"
               >
                 <X className="h-4 w-4" />
-              </Button>
+              </IconButton>
             </div>
           </div>
         </div>
+
+        {/* ── What was asked ─────────────────────────────────────────── */}
+        <RunTriggerRow task={task} />
 
         {/* ── What the run produced ──────────────────────────────────── */}
         <RunOutcomeRow outcome={outcome} branch={task.branch_name} />
 
         {/* ── Where the time went ────────────────────────────────────── */}
-        {showTimeline && lanes && (
+        {lanes && (
           <RunTimeline
             lanes={lanes}
             toolKinds={toolKinds}
@@ -1159,10 +1185,10 @@ export function AgentTranscriptDialog({
           <DropdownMenu>
             <DropdownMenuTrigger
               render={
-                <Button
+                <IconButton
                   variant="ghost"
                   size="icon-sm"
-                  aria-label={t(($) => $.transcript.more_actions)}
+                  label={t(($) => $.transcript.more_actions)}
                   className="text-muted-foreground"
                 />
               }
@@ -1197,14 +1223,9 @@ export function AgentTranscriptDialog({
         {/* ── Steps, and the inspector when one is selected ───────────── */}
         <div className="flex min-h-0 flex-1">
           <div className="flex min-w-0 flex-1 flex-col">
-            {displayRows.length === 0 ? (
+            {contentState ? <div className="flex h-full items-center justify-center p-4">{contentState}</div> : displayRows.length === 0 ? (
               <div className="flex h-full items-center justify-center text-body text-muted-foreground">
-                {isAntigravityLiveEmpty ? (
-                  <div className="flex max-w-md items-center gap-2 px-4 text-center">
-                    <Clock className="h-4 w-4 shrink-0" />
-                    {t(($) => $.transcript.antigravity_live_unavailable)}
-                  </div>
-                ) : isLive && steps.length === 0 ? (
+                {isLive && steps.length === 0 ? (
                   <div className="flex items-center gap-2">
                     <Loader2 className="h-4 w-4 animate-spin" />
                     {t(($) => $.transcript.waiting_events)}
@@ -1244,6 +1265,7 @@ export function AgentTranscriptDialog({
                 itemContent={(_, row) => (
                   <TranscriptRow
                     row={row}
+                    formatText={formatText}
                     runStartMs={runStartMs}
                     isLive={isLive}
                     selectedSeq={selectedSeq}
@@ -1304,6 +1326,32 @@ function FactDot() {
  * Renders nothing when the run produced nothing nameable; a row of zeroes
  * would read as "it did nothing" rather than "we have nothing to summarize".
  */
+/**
+ * What the person asked for, in full. The header names only how the run was
+ * triggered ("Comment"), and the lists that open this dialog show the ask on
+ * one truncated line — so this is where a long request is read whole. The
+ * snapshot itself is capped at ~200 runes by the server; it is shown as it
+ * was captured, wrapping rather than truncating.
+ */
+function RunTriggerRow({ task }: { task: AgentTask }) {
+  const { t } = useT("agents");
+  const { t: tIssues } = useT("issues");
+  if (!task.trigger_summary) return null;
+  const text = plainTriggerSummary(
+    task.trigger_summary,
+    tIssues(($) => $.execution_log.trigger_image),
+  );
+  if (!text) return null;
+  return (
+    <div className="flex shrink-0 items-baseline gap-2 border-b px-4 py-2">
+      <span className="shrink-0 text-micro text-muted-foreground">
+        {t(($) => $.transcript.trigger_text)}
+      </span>
+      <p className="min-w-0 whitespace-pre-wrap break-words text-caption text-foreground">{text}</p>
+    </div>
+  );
+}
+
 function RunOutcomeRow({
   outcome,
   branch,
@@ -1355,6 +1403,7 @@ function RunOutcomeRow({
 // ─── Rows ───────────────────────────────────────────────────────────────────
 
 interface TranscriptRowProps {
+  formatText: (text: string) => string;
   row: TraceRow;
   runStartMs?: number;
   isLive: boolean;
@@ -1398,8 +1447,28 @@ function DurationCell({ ms, pending }: { ms?: number; pending?: boolean }) {
   }
   if (ms === undefined) return <span className="w-12 shrink-0" />;
   return (
-    <span className="w-12 shrink-0 pt-0.5 text-right font-mono text-micro tabular-nums text-faint-foreground">
-      {formatStepDuration(ms)}
+    <StepDuration
+      ms={ms}
+      unknownLabel={t(($) => $.transcript.step_duration_unknown)}
+      className="w-12 shrink-0 pt-0.5 text-right font-mono text-micro tabular-nums text-faint-foreground"
+    />
+  );
+}
+
+function StepDuration({
+  ms,
+  unknownLabel,
+  className,
+}: {
+  ms: number;
+  unknownLabel: string;
+  className?: string;
+}) {
+  const unknown = ms <= 0;
+  return (
+    <span className={className} title={unknown ? unknownLabel : undefined}>
+      <span aria-hidden={unknown || undefined}>{formatStepDuration(ms)}</span>
+      {unknown && <span className="sr-only">{unknownLabel}</span>}
     </span>
   );
 }
@@ -1444,6 +1513,7 @@ function ProseRow({ row, runStartMs }: TranscriptRowProps & { row: TraceMessageS
  *  click away in the inspector. */
 function StepRow({
   row,
+  formatText,
   runStartMs,
   isLive,
   selectedSeq,
@@ -1452,10 +1522,11 @@ function StepRow({
   const { t } = useT("agents");
   const summaryLabels = useMemo<TraceSummaryLabels>(
     () => ({
+      formatText,
       morePaths: (path, extraCount) =>
         t(($) => $.transcript.patch_summary_more, { path, extra: extraCount }),
     }),
-    [t],
+    [t, formatText],
   );
 
   const call = isCallStep(row) ? row : null;
@@ -1522,6 +1593,7 @@ function StepRow({
 /** Consecutive same-tool calls, folded to one line until asked. */
 function GroupRow({
   row,
+  formatText,
   runStartMs,
   selectedSeq,
   expanded,
@@ -1531,10 +1603,11 @@ function GroupRow({
   const { t } = useT("agents");
   const summaryLabels = useMemo<TraceSummaryLabels>(
     () => ({
+      formatText,
       morePaths: (path, extraCount) =>
         t(($) => $.transcript.patch_summary_more, { path, extra: extraCount }),
     }),
-    [t],
+    [t, formatText],
   );
 
   return (
@@ -1575,16 +1648,22 @@ function GroupRow({
               type="button"
               onClick={() => onSelect(step.seq)}
               className={cn(
-                "flex w-full items-baseline gap-2 rounded px-2 py-1 text-left text-micro transition-colors",
+                "flex w-full items-baseline gap-2 rounded-xs px-2 py-1 text-left text-micro transition-colors",
                 selectedSeq === step.seq ? "bg-brand/10" : "hover:bg-accent/40",
               )}
             >
               <span className="truncate font-mono text-muted-foreground">
                 {callSummary(step, summaryLabels) || step.tool}
               </span>
-              <span className="ml-auto shrink-0 font-mono tabular-nums text-faint-foreground">
-                {step.durationMs === undefined ? "" : formatStepDuration(step.durationMs)}
-              </span>
+              {step.durationMs === undefined ? (
+                <span className="ml-auto shrink-0" />
+              ) : (
+                <StepDuration
+                  ms={step.durationMs}
+                  unknownLabel={t(($) => $.transcript.step_duration_unknown)}
+                  className="ml-auto shrink-0 font-mono tabular-nums text-faint-foreground"
+                />
+              )}
             </button>
           ))}
         </div>
@@ -1607,7 +1686,7 @@ function callSummary(step: TraceCallStep, labels: TraceSummaryLabels): string {
   }
   if (!step.result) return "";
   if (readImageResult(step.result.output)) return "";
-  return traceEventSummary({ type: "tool_result", output: step.result.output });
+  return traceEventSummary({ type: "tool_result", output: step.result.output }, labels);
 }
 
 function firstLineOf(value: string | undefined): string {
@@ -1659,10 +1738,15 @@ function StepInspector({
       ? call.tool || t(($) => $.transcript.kind_tool)
       : step.kind === "thinking"
         ? t(($) => $.transcript.kind_thinking)
-        : t(($) => $.transcript.kind_error);
+        : step.kind === "text"
+          ? t(($) => $.transcript.kind_text)
+          : t(($) => $.transcript.kind_error);
 
   return (
-    <aside className="flex w-[26rem] shrink-0 flex-col border-l bg-muted/25">
+    // Full width below md: on a phone the dialog is narrower than this pane, and
+    // a fixed 26rem pushed the header's close button past the clipped edge —
+    // the reader had no way back to the step list.
+    <aside className="flex w-full shrink-0 flex-col border-l-0 bg-muted/25 md:w-[26rem] md:border-l">
       <div className="flex items-center gap-2 border-b px-3 py-2">
         <StepIcon step={step} className="h-4 w-4 shrink-0 text-muted-foreground" />
         <span className="shrink-0 text-label font-semibold">{title}</span>
@@ -1671,29 +1755,34 @@ function StepInspector({
           {call?.durationMs !== undefined && (
             <>
               <FactDot />
-              <span className="font-mono tabular-nums">{formatStepDuration(call.durationMs)}</span>
+              <StepDuration
+                ms={call.durationMs}
+                unknownLabel={t(($) => $.transcript.step_duration_unknown)}
+                className="font-mono tabular-nums"
+              />
             </>
           )}
         </span>
-        <Button
+        <IconButton
           variant="ghost"
           size="icon-sm"
           onClick={handleCopy}
-          aria-label={t(($) => $.transcript.copy_step)}
-          title={t(($) => $.transcript.copy_step)}
+          label={t(($) => $.transcript.copy_step)}
+          tooltipSide="bottom"
           className="shrink-0 text-muted-foreground"
         >
           {copied ? <Check className="h-3.5 w-3.5" /> : <Copy className="h-3.5 w-3.5" />}
-        </Button>
-        <Button
+        </IconButton>
+        <IconButton
           variant="ghost"
           size="icon-sm"
           onClick={onClose}
-          aria-label={t(($) => $.transcript.close_step)}
+          label={t(($) => $.transcript.close_step)}
+          tooltipSide="bottom"
           className="shrink-0 text-muted-foreground"
         >
           <X className="h-3.5 w-3.5" />
-        </Button>
+        </IconButton>
       </div>
       <div className="min-h-0 flex-1 overflow-y-auto">
         {call ? (
@@ -1731,10 +1820,17 @@ function InspectorSection({ label, children }: { label: string; children: React.
 }
 
 /** One payload, rendered as what it is. */
-function StepBody({ item }: { item: TimelineItem }) {
+/** Pre-existing render ceiling for a body with no server-side budget. */
+const DISPLAY_CLIP_CHARS = 8000;
+
+export function StepBody({ item }: { item: TimelineItem }) {
   const { t } = useT("agents");
   const detail = useMemo(() => traceEventDetail(item), [item]);
   const image = useMemo(() => readImageResult(item.output), [item.output]);
+  // Stated where the output actually ends, for a reader who has just reached
+  // the bottom and is wondering whether that was all of it. A header badge said
+  // the same thing louder, before anyone had asked the question.
+  const note = isOutputTruncated(item) ? t(($) => $.transcript.output_truncated_note) : undefined;
 
   // A screenshot is a picture, not a 200KB base64 string in a <pre>.
   if (image) {
@@ -1748,6 +1844,7 @@ function StepBody({ item }: { item: TimelineItem }) {
         <figcaption className="pt-1 text-micro text-faint-foreground">
           {t(($) => $.transcript.image_result)} · {formatBytes(base64ByteLength(image.base64))}
         </figcaption>
+        {note && <span className="block pt-1 text-micro text-faint-foreground">{note}</span>}
       </figure>
     );
   }
@@ -1758,15 +1855,27 @@ function StepBody({ item }: { item: TimelineItem }) {
     case "patch":
       return <PatchDetailSurface files={detail.files} truncated={detail.truncated} />;
     case "file":
-      return (
-        <FileWriteSurface text={detail.text} lineCount={detail.lineCount} path={detail.path} />
-      );
+      return <FileWriteSurface text={detail.text} lineCount={detail.lineCount} path={detail.path} />;
     default: {
       const text = detail.text;
+      // A stored tool result is already capped at 8192 bytes by the daemon, so
+      // clipping it again could only shave a couple of hundred more characters
+      // — under a note that already reports the same loss. Tool input has no
+      // server-side budget and keeps the clip at its existing length; nothing
+      // about how long an input renders is this change's business.
+      const clip = item.type === "tool_result" ? null : DISPLAY_CLIP_CHARS;
       const clipped =
-        text.length > 8000 ? `${redactSecrets(text.slice(0, 8000))}\n... (truncated)` : redactSecrets(text);
+        clip !== null && text.length > clip
+          ? `${redactSecrets(text.slice(0, clip))}\n${t(($) => $.transcript.display_clipped)}`
+          : redactSecrets(text);
       const path = item.type === "tool_use" ? readPathFromInput(item.input) : undefined;
-      return <ToolDetailSurface text={clipped} language={path ? languageForPath(path) : undefined} />;
+      return (
+        <ToolDetailSurface
+          text={clipped}
+          language={path ? languageForPath(path) : undefined}
+          note={note}
+        />
+      );
     }
   }
 }
@@ -1777,8 +1886,3 @@ function readPathFromInput(input: Record<string, unknown> | undefined): string |
   return typeof path === "string" ? path : undefined;
 }
 
-function formatBytes(bytes: number): string {
-  if (bytes < 1024) return `${bytes} B`;
-  if (bytes < 1024 * 1024) return `${Math.round(bytes / 1024)} KB`;
-  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
-}

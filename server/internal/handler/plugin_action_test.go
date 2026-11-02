@@ -79,6 +79,27 @@ func pluginInstallTokenRequest(method, path, token string, body any, params map[
 	return request
 }
 
+func TestPluginActionRequiresTheFeatureFlag(t *testing.T) {
+	withPluginsV1Flag(t, testHandler, false)
+	recorder := httptest.NewRecorder()
+
+	testHandler.GetPluginContext(recorder, pluginInstallTokenRequest(http.MethodGet, "/v1/context", "mpi_invalid", nil, nil))
+
+	if recorder.Code != http.StatusForbidden {
+		t.Fatalf("status=%d body=%s, want 403", recorder.Code, recorder.Body.String())
+	}
+	if got := recorder.Header().Get("Retry-After"); got != "" {
+		t.Fatalf("Retry-After=%q, want empty for a non-retryable feature gate", got)
+	}
+	var problem publicapiv1.Problem
+	if err := json.Unmarshal(recorder.Body.Bytes(), &problem); err != nil {
+		t.Fatalf("decode feature flag problem: %v", err)
+	}
+	if problem.Status != http.StatusForbidden || problem.Code != "plugin_api_disabled" || problem.Title != "Forbidden" {
+		t.Fatalf("unexpected feature flag problem: %+v", problem)
+	}
+}
+
 func TestPluginInstallTokenRunsIssueCommentWorkflow(t *testing.T) {
 	installationID := installPluginForAction(t, []string{"issues:read", "issues:write", "comments:read", "comments:write"})
 	token, err := testHandler.PluginService.IssueInstallToken(context.Background(), parseUUID(installationID))

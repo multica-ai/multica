@@ -24,9 +24,9 @@ import { issueBehavesAs } from "../issues/status-category";
 
 /**
  * Mirrors the server's identifier pattern (parseQueryNumber in
- * server/internal/handler/issue.go): "MUL-123" or a bare "123".
+ * server/internal/handler/issue.go): "MUL-123", "V2-12", or a bare "123".
  */
-const IDENTIFIER_NUMBER_RE = /^[a-z]+-(\d+)$/i;
+const IDENTIFIER_NUMBER_RE = /^[a-z][a-z0-9]*-(\d+)$/i;
 
 /** Extracts the issue number a query targets, or null when it targets none. */
 export function parseSearchQueryNumber(query: string): number | null {
@@ -156,7 +156,7 @@ export function partitionAggregatedSearchResults({
     issues,
     // By CATEGORY: a custom status in the cancelled category is cancelled
     // work and has to sink the same way. (MUL-6243)
-    (issue) => issueBehavesAs(issue, "cancelled") && !isIssueDirectHit(issue, query),
+    (issue) => issueBehavesAs(issue, "closed") && !isIssueDirectHit(issue, query),
   );
   const projectParts = partitionStable(
     projects,

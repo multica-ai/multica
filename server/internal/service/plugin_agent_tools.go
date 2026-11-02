@@ -63,9 +63,10 @@ var toolNameUnsafe = regexp.MustCompile(`[^a-zA-Z0-9_]+`)
 // lossy transliteration of it. The readable part is the last segment, which is
 // what a person recognises; the digest is what makes it unique.
 //
-// The `__` separator is safe because a hook key cannot contain one: its pattern
-// requires an alphanumeric after every underscore, so a doubled underscore is
-// unrepresentable.
+// Hook keys allow both hyphens and underscores. Encode a hyphen as `__` rather
+// than collapsing both separators to `_`. Valid hook keys cannot contain
+// adjacent separators, so this preserves their identity while leaving keys
+// without hyphens unchanged.
 func PluginToolName(pluginKey, hookKey string) string {
 	clean := func(value string) string {
 		return strings.Trim(toolNameUnsafe.ReplaceAllString(value, "_"), "_")
@@ -76,7 +77,8 @@ func PluginToolName(pluginKey, hookKey string) string {
 		readable = "plugin"
 	}
 	digest := sha256.Sum256([]byte(pluginKey))
-	return readable + "_" + hex.EncodeToString(digest[:])[:6] + "__" + clean(hookKey)
+	encodedHook := clean(strings.ReplaceAll(hookKey, "-", "__"))
+	return readable + "_" + hex.EncodeToString(digest[:])[:6] + "__" + encodedHook
 }
 
 // AgentHookTools lists the hooks an agent running in this workspace may call.

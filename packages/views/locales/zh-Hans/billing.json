@@ -89,7 +89,7 @@
     },
     "load_failed": {
       "title": "账单服务暂时不可用",
-      "description": "暂时无法读取可信的订阅快照。你的套餐没有发生变化。"
+      "description": "无法加载订阅信息，请重试。"
     },
     "actions": {
       "retry": "重试",
@@ -103,6 +103,7 @@
     "errors": {
       "action_title": "账单操作失败",
       "temporarily_unavailable": "账单服务暂时不可用，请稍后重试。",
+      "not_enabled": "此部署未启用工作区订阅，请联系管理员。",
       "permission_changed": "你的工作区角色已不允许执行此操作。刷新页面可查看当前权限。",
       "checkout_response": "服务端响应无法读取，无法打开 Checkout。请保留当前周期并重试。",
       "already_subscribed": "这个工作区已经有订阅，当前套餐已刷新。",
@@ -115,7 +116,6 @@
       "cancel_title": "已取消 Checkout",
       "cancel_description": "套餐没有发生变化。",
       "portal_title": "账单信息已刷新",
-      "portal_description": "下方显示最新的订阅快照。",
       "syncing_title": "正在启用订阅",
       "syncing_description": "付款已完成，正在等待 Stripe 确认套餐变化。",
       "timeout_description": "付款已收到，但订阅仍在同步。请稍后刷新页面。",
@@ -124,12 +124,12 @@
     },
     "past_due": {
       "title": "付款信息需要处理",
-      "description": "打开 Billing Portal 更新付款方式。上方的套餐徽章显示当前可用权限。",
+      "description": "请前往账单管理更新付款方式。",
       "grace_description": "请在 {{date}} 前更新付款方式，以继续使用 Pro。"
     },
     "subscription_notice": {
       "canceling_title": "订阅已安排取消",
-      "canceling_description": "此订阅计划于 {{date}} 取消。上方的套餐徽章显示当前实际生效的权限。",
+      "canceling_description": "订阅将于 {{date}} 取消。",
       "canceling_description_without_date": "这个订阅将在当前周期结束时取消。",
       "incomplete_title": "订阅开通尚未完成",
       "incomplete_description": "打开账单管理，完成或检查付款设置。",
@@ -139,20 +139,16 @@
       "paused_description": "打开账单管理，查看暂停原因和可用的恢复方式。",
       "unpaid_title": "订阅款项尚未支付",
       "unpaid_description": "打开账单管理处理未支付款项。",
-      "canceled_title": "订阅已取消",
-      "canceled_description": "上方套餐徽标显示这个工作区当前实际生效的套餐。"
+      "canceled_title": "订阅已取消"
     },
     "current": {
       "title": "当前套餐",
       "plan": "工作区套餐",
-      "plan_description": "这个工作区当前生效的 entitlement。",
       "members": "成员席位",
       "members_description": "智能体和待接受的邀请不计入席位。",
       "member_count_other": "{{count}} 位成员",
       "billing_interval": "付款周期",
-      "billing_interval_description": "当前订阅保存的付款周期。",
-      "period_end": "当前周期结束时间",
-      "period_end_description": "当前订阅快照报告的日期。"
+      "period_end": "当前周期结束时间"
     },
     "upgrade": {
       "title": "升级到 Pro",
@@ -167,18 +163,14 @@
     },
     "management": {
       "title": "订阅管理",
-      "description": "Stripe 会安全地管理付款方式、发票和取消订阅。",
+      "description": "付款方式、发票和取消订阅。",
       "portal": "Stripe Billing Portal",
-      "portal_description": "前往 Stripe 管理这个工作区的订阅。",
       "portal_unavailable": "这个工作区暂时没有可用的 Stripe Billing Portal。"
     },
     "limits": {
       "title": "用量与限额",
-      "description": "限额和用量来自服务端当前 entitlement 与额度统计。",
       "issues": "任务数量",
-      "issues_description": "当前任务用量和服务端返回的生效限额。",
       "autopilots": "自动化执行",
-      "autopilots_description": "当前自动化用量和服务端返回的重置时间。",
       "unlimited": "不限",
       "per_month": "每月 {{count}} 次",
       "usage_loading": "正在加载自动化用量",
@@ -194,15 +186,13 @@
       "title": "席位",
       "description": "已购席位用于当前成员和待接受邀请，智能体不占席位。",
       "human_members": "已用席位",
-      "human_members_description": "已确认占用已购容量的工作区成员。成员变化后可刷新对账。",
       "billed": "已购席位",
-      "billed_description": "当前通过 Stripe 购买的席位数量。",
       "pending_invitations": "待接受邀请",
       "pending_invitations_description": "有效邀请在接受或过期前会预留已购席位。",
       "available": "可用席位",
-      "available_description": "未被成员使用、也未被邀请预留的已购席位。",
+      "available_description": "已购席位减去成员和预留邀请。",
       "pending": "待生效席位",
-      "pending_description": "Cloud Billing 报告的下一周期较低席位数量。",
+      "pending_description": "下个付款周期生效。",
       "seat_count_other": "{{count}} 个席位",
       "pending_with_date_other": "{{date}} 起 {{count}} 个席位",
       "none_pending": "没有待生效变更",
@@ -214,7 +204,8 @@
       "members_over_capacity_title": "成员数超过已购席位",
       "members_over_capacity_description": "当前工作区有 {{actual}} 名成员，但只购买了 {{purchased}} 个席位。继续邀请前，请补足席位或移除成员。",
       "occupancy_over_capacity_description": "当前工作区已占用 {{occupied}} 个席位，但只购买了 {{purchased}} 个（{{members}} 名成员和 {{reserved}} 个待接受邀请）。继续邀请前，请补足席位、移除成员或撤销待接受邀请。",
-      "updated": "席位购买已提交"
+      "updated": "席位购买已提交",
+      "available_help": "可用席位如何计算"
     },
     "seat_purchase": {
       "title": "添加席位",

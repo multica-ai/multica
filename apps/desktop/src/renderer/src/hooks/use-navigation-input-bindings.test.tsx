@@ -31,6 +31,8 @@ function seedHistory() {
         ],
         activeTabId: "t1",
         recentTabIds: ["t1"],
+        browsingHistory: ["/acme/issues/abc", "/acme/issues"],
+        browsingHistoryTitles: {},
       },
     },
   });

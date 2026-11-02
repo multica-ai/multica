@@ -7,12 +7,13 @@
  * web for the same item. When the web version changes, sync this file.
  */
 import type { InboxItem } from "@multica/core/types";
+import { i18n } from "@/lib/i18n/singleton";
 
 function formatResetAt(value: string | undefined): string {
   if (!value) return "";
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return "";
-  return new Intl.DateTimeFormat(undefined, {
+  return new Intl.DateTimeFormat(i18n.resolvedLanguage ?? i18n.language, {
     dateStyle: "medium",
     timeStyle: "short",
   }).format(date);
@@ -23,10 +24,18 @@ export function getAutopilotQuotaBody(item: InboxItem): string | null {
   const details = item.details ?? {};
   const resetAt = formatResetAt(details.reset_at);
   if (!details.limit || !resetAt) return item.body;
+  const t = i18n.t.bind(i18n);
   if (details.autopilot_title) {
-    return `Autopilot “${details.autopilot_title}” was not started because this workspace has reached its limit of ${details.limit} runs for the current period. The allowance resets ${resetAt}.`;
+    return t("inbox:body.autopilot_title_limit", {
+      title: details.autopilot_title,
+      limit: details.limit,
+      resetAt,
+    });
   }
-  return `This workspace has reached its limit of ${details.limit} autopilot runs for the current period. This execution was not started. The allowance resets ${resetAt}.`;
+  return t("inbox:body.autopilot_limit", {
+    limit: details.limit,
+    resetAt,
+  });
 }
 
 function singleLine(value: string | null | undefined): string {
@@ -56,11 +65,11 @@ export function stripQuickCreatePrefix(
 
 export function getInboxDisplayTitle(item: InboxItem): string {
   const details = item.details ?? {};
-  // Mobile is English-only today. Mirror web's localized system-notice titles
+  // Resolve system-notice titles through the selected UI locale. Mirror
   // rather than exposing backend fallback copy that can include raw counts.
   switch (item.type) {
     case "autopilot_quota_exceeded":
-      return "Autopilot run limit reached";
+      return i18n.t("inbox:type.autopilot_quota_exceeded");
   }
   if (item.type === "quick_create_done") {
     const cleanedTitle = stripQuickCreatePrefix(item.title, details.identifier);

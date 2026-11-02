@@ -3,12 +3,15 @@ package agent
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"log/slog"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/multica-ai/multica/server/pkg/taskfailure"
 )
 
 // fakeGrokACPScript impersonates `grok agent --always-approve stdio` for unit
@@ -88,6 +91,39 @@ while IFS= read -r line; do
       esac
       ;;
     *'"method":"session/prompt"'*)
+      if [ -n "$GROK_WAIT_FOR_INTERJECT" ]; then
+        prompt_id=$id
+        if [ -z "$GROK_NO_OUTPUT_BEFORE_INTERJECT" ]; then
+          printf '{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"ses_new","update":{"sessionUpdate":"agent_thought_chunk","content":{"type":"text","text":"working"}}}}\n'
+        fi
+        while IFS= read -r followup; do
+          if [ -n "$GROK_REQUESTS_FILE" ]; then
+            printf '%s\n' "$followup" >> "$GROK_REQUESTS_FILE"
+          fi
+          followup_id=$(printf '%s' "$followup" | sed -n 's/.*"id":\([0-9]*\).*/\1/p')
+          case "$followup" in
+            *'"method":"_x.ai/interject"'*)
+              if [ -n "$GROK_INTERJECT_NO_FIRST_RESPONSE" ] && [ -z "$ignored_first_interject" ]; then
+                ignored_first_interject=1
+                continue
+              fi
+              if [ -n "$GROK_INTERJECT_UNSUPPORTED" ]; then
+                printf '{"jsonrpc":"2.0","id":%s,"error":{"code":-32601,"message":"method not found"}}\n' "$followup_id"
+              elif [ -n "$GROK_INTERJECT_EXTENSION_ERROR" ]; then
+                printf '{"jsonrpc":"2.0","id":%s,"result":{"result":null,"error":"delivery failed"}}\n' "$followup_id"
+              else
+                printf '{"jsonrpc":"2.0","id":%s,"result":{"result":{"status":"%s"}}}\n' "$followup_id" "${GROK_INTERJECT_NESTED_STATUS:-queued}"
+              fi
+              if [ -n "$GROK_NO_OUTPUT_BEFORE_INTERJECT" ]; then
+                printf '{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"ses_new","update":{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"111"}}}}\n'
+              fi
+              printf '{"jsonrpc":"2.0","id":%s,"result":{"stopReason":"end_turn"}}\n' "$prompt_id"
+              break
+              ;;
+          esac
+        done
+        exit 0
+      fi
       if [ -n "$GROK_HANG_PROMPT" ]; then
         while :; do sleep 1; done
       fi
@@ -111,6 +147,261 @@ while IFS= read -r line; do
   esac
 done
 `
+}
+
+func TestGrokSupplementTargetsActivePrompt(t *testing.T) {
+	t.Parallel()
+	fakePath := filepath.Join(t.TempDir(), "grok")
+	requestsPath := filepath.Join(t.TempDir(), "requests.jsonl")
+	writeTestExecutable(t, fakePath, []byte(fakeGrokACPScript()))
+	backend, err := New("grok", Config{
+		ExecutablePath: fakePath,
+		Env: map[string]string{
+			"GROK_WAIT_FOR_INTERJECT":         "1",
+			"GROK_NO_OUTPUT_BEFORE_INTERJECT": "1",
+			"GROK_REQUESTS_FILE":              requestsPath,
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	session, err := backend.Execute(ctx, "continue working", ExecOptions{Timeout: 5 * time.Second, EnableTaskSupplement: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if session.Supplement == nil || session.SupplementReady == nil {
+		t.Fatal("negotiated Grok session did not expose supplement callbacks")
+	}
+	if session.SupplementReady() {
+		t.Fatal("supplement became ready before session/prompt started")
+	}
+	deadline := time.Now().Add(3 * time.Second)
+	for !session.SupplementReady() && time.Now().Before(deadline) {
+		time.Sleep(5 * time.Millisecond)
+	}
+	if !session.SupplementReady() {
+		t.Fatal("supplement never became ready during active prompt")
+	}
+	for len(session.Messages) > 0 {
+		msg := <-session.Messages
+		if msg.Type != MessageStatus {
+			t.Fatalf("agent emitted output before interjection: %+v", msg)
+		}
+	}
+	var messages []Message
+	drained := make(chan struct{})
+	go func() {
+		defer close(drained)
+		for msg := range session.Messages {
+			messages = append(messages, msg)
+		}
+	}()
+	if err := session.Supplement(ctx, "Reply with 111 instead of continuing the task."); err != nil {
+		t.Fatalf("send interjection: %v", err)
+	}
+	result := <-session.Result
+	<-drained
+	if result.Status != "completed" {
+		t.Fatalf("turn status=%q error=%q", result.Status, result.Error)
+	}
+	if result.Output != "111" {
+		t.Fatalf("turn output=%q, want steering response 111", result.Output)
+	}
+	if len(messages) != 1 || messages[0].Type != MessageText || messages[0].Content != "111" {
+		t.Fatalf("agent messages=%+v, want only steering response 111", messages)
+	}
+	if session.SupplementReady() {
+		t.Fatal("supplement remained ready after session/prompt completed")
+	}
+	requests, err := os.ReadFile(requestsPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{`"method":"_x.ai/interject"`, `"sessionId":"ses_new"`, `"text":"Reply with 111 instead of continuing the task."`} {
+		if !strings.Contains(string(requests), want) {
+			t.Errorf("ACP requests missing %s:\n%s", want, requests)
+		}
+	}
+}
+
+func TestGrokSupplementTimesOutIndependentlyAndAllowsNextMessage(t *testing.T) {
+	fakePath := filepath.Join(t.TempDir(), "grok")
+	writeTestExecutable(t, fakePath, []byte(fakeGrokACPScript()))
+	backend, err := New("grok", Config{
+		ExecutablePath: fakePath,
+		Env: map[string]string{
+			"GROK_WAIT_FOR_INTERJECT":          "1",
+			"GROK_INTERJECT_NO_FIRST_RESPONSE": "1",
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	previousTimeout := grokSupplementTimeout
+	grokSupplementTimeout = 50 * time.Millisecond
+	defer func() { grokSupplementTimeout = previousTimeout }()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	session, err := backend.Execute(ctx, "continue working", ExecOptions{Timeout: time.Minute, EnableTaskSupplement: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	deadline := time.Now().Add(3 * time.Second)
+	for !session.SupplementReady() && time.Now().Before(deadline) {
+		time.Sleep(5 * time.Millisecond)
+	}
+	if !session.SupplementReady() {
+		cancel()
+		t.Fatal("supplement never became ready during active prompt")
+	}
+
+	started := time.Now()
+	firstSupplement := make(chan error, 1)
+	go func() {
+		firstSupplement <- session.Supplement(ctx, "The first interjection will not be acknowledged.")
+	}()
+	select {
+	case err = <-firstSupplement:
+	case <-time.After(time.Second):
+		cancel()
+		select {
+		case <-session.Result:
+		case <-time.After(3 * time.Second):
+			t.Fatal("Grok run did not stop after its parent context was canceled")
+		}
+		t.Fatal("supplement did not return within its independent timeout")
+	}
+	if !errors.Is(err, context.DeadlineExceeded) {
+		cancel()
+		t.Fatalf("first supplement error=%v, want context deadline exceeded", err)
+	}
+	if elapsed := time.Since(started); elapsed > time.Second {
+		cancel()
+		t.Fatalf("first supplement took %s to time out, want under 1s", elapsed)
+	}
+	if !session.SupplementReady() {
+		cancel()
+		t.Fatal("an interject timeout ended the active Grok prompt")
+	}
+
+	if err := session.Supplement(ctx, "The next interjection should still be delivered."); err != nil {
+		cancel()
+		t.Fatalf("second supplement after timeout: %v", err)
+	}
+	select {
+	case result := <-session.Result:
+		if result.Status != "completed" {
+			t.Fatalf("turn status=%q error=%q", result.Status, result.Error)
+		}
+	case <-time.After(3 * time.Second):
+		cancel()
+		t.Fatal("Grok prompt did not complete after the second interjection")
+	}
+}
+
+func TestGrokSupplementReportsACPRejection(t *testing.T) {
+	t.Parallel()
+	fakePath := filepath.Join(t.TempDir(), "grok")
+	writeTestExecutable(t, fakePath, []byte(fakeGrokACPScript()))
+	backend, err := New("grok", Config{
+		ExecutablePath: fakePath,
+		Env: map[string]string{
+			"GROK_WAIT_FOR_INTERJECT":    "1",
+			"GROK_INTERJECT_UNSUPPORTED": "1",
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	session, err := backend.Execute(ctx, "continue working", ExecOptions{Timeout: 5 * time.Second, EnableTaskSupplement: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	drained := make(chan struct{})
+	go func() {
+		defer close(drained)
+		for range session.Messages {
+		}
+	}()
+	deadline := time.Now().Add(3 * time.Second)
+	for !session.SupplementReady() && time.Now().Before(deadline) {
+		time.Sleep(5 * time.Millisecond)
+	}
+	if !session.SupplementReady() {
+		t.Fatal("supplement never became ready during active prompt")
+	}
+	err = session.Supplement(ctx, "A test message")
+	if err == nil || !strings.Contains(err.Error(), "method not found") {
+		t.Fatalf("supplement error=%v, want ACP method-not-found error", err)
+	}
+	result := <-session.Result
+	<-drained
+	if result.Status != "completed" {
+		t.Fatalf("turn status=%q error=%q", result.Status, result.Error)
+	}
+}
+
+func TestGrokSupplementHandlesObservedNestedResultStatus(t *testing.T) {
+	for _, tc := range []struct {
+		status  string
+		wantErr string
+	}{
+		{status: "queued"},
+		{status: "rejected", wantErr: "rejected"},
+		{status: "in_band_error", wantErr: "delivery failed"},
+	} {
+		t.Run(tc.status, func(t *testing.T) {
+			fakePath := filepath.Join(t.TempDir(), "grok")
+			writeTestExecutable(t, fakePath, []byte(fakeGrokACPScript()))
+			env := map[string]string{"GROK_WAIT_FOR_INTERJECT": "1"}
+			if tc.status == "in_band_error" {
+				env["GROK_INTERJECT_EXTENSION_ERROR"] = "1"
+			} else {
+				env["GROK_INTERJECT_NESTED_STATUS"] = tc.status
+			}
+			backend, err := New("grok", Config{
+				ExecutablePath: fakePath,
+				Env:            env,
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+			defer cancel()
+			session, err := backend.Execute(ctx, "continue working", ExecOptions{Timeout: 5 * time.Second, EnableTaskSupplement: true})
+			if err != nil {
+				t.Fatal(err)
+			}
+			go func() {
+				for range session.Messages {
+				}
+			}()
+			deadline := time.Now().Add(3 * time.Second)
+			for !session.SupplementReady() && time.Now().Before(deadline) {
+				time.Sleep(5 * time.Millisecond)
+			}
+			if !session.SupplementReady() {
+				t.Fatal("supplement never became ready during active prompt")
+			}
+			err = session.Supplement(ctx, "A test message")
+			if tc.wantErr != "" {
+				if err == nil || !strings.Contains(err.Error(), tc.wantErr) {
+					t.Fatalf("supplement error=%v, want %q", err, tc.wantErr)
+				}
+			} else if err != nil {
+				t.Fatalf("nested queued status was rejected: %v", err)
+			}
+			if result := <-session.Result; result.Status != "completed" {
+				t.Fatalf("turn status=%q error=%q", result.Status, result.Error)
+			}
+		})
+	}
 }
 
 func TestGrokBackendStreamsAndCompletes(t *testing.T) {
@@ -163,6 +454,69 @@ func TestGrokBackendStreamsAndCompletes(t *testing.T) {
 	}
 	if !sawToolUse {
 		t.Errorf("expected the Shell tool_call to normalize to 'terminal'; messages=%+v", messages)
+	}
+}
+
+// Protocol limits end the RPC successfully, but do not mean the task completed.
+func TestGrokPromptStopReasons(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct {
+		reason     string
+		wantStatus string
+		wantError  string
+	}{
+		{"end_turn", "completed", ""},
+		{"max_tokens", "failed", "grok reached its maximum generated tokens (max_tokens)"},
+		{"max_turn_requests", "failed", "grok reached its maximum turn requests (max_turn_requests)"},
+		{"cancelled", "aborted", "grok cancelled the prompt"},
+		{"refusal", "completed", ""},
+	} {
+		t.Run(tc.reason, func(t *testing.T) {
+			t.Parallel()
+			fakePath := filepath.Join(t.TempDir(), "grok")
+			script := strings.ReplaceAll(fakeGrokACPScript(), `"stopReason":"end_turn"`, `"stopReason":"`+tc.reason+`"`)
+			writeTestExecutable(t, fakePath, []byte(script))
+			backend, err := New("grok", Config{
+				ExecutablePath: fakePath,
+				Env:            map[string]string{"GROK_USAGE": "1"},
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+			defer cancel()
+			session, err := backend.Execute(ctx, "say pong", ExecOptions{Timeout: 5 * time.Second})
+			if err != nil {
+				t.Fatal(err)
+			}
+			drained := make(chan struct{})
+			go func() {
+				defer close(drained)
+				for range session.Messages {
+				}
+			}()
+			result := <-session.Result
+			<-drained
+			if result.Status != tc.wantStatus || result.Error != tc.wantError {
+				t.Errorf("status=%q error=%q, want status=%q error=%q", result.Status, result.Error, tc.wantStatus, tc.wantError)
+			}
+			if tc.reason == "max_tokens" || tc.reason == "max_turn_requests" {
+				// A turn budget is not evidence of a broken or oversized history.
+				if reason := taskfailure.Classify(result.Error); reason != taskfailure.ReasonAgentUnknown {
+					t.Errorf("failure reason=%q, want generic agent failure", reason)
+				}
+			}
+			if result.Output != "pong" {
+				t.Errorf("output=%q, want partial output preserved", result.Output)
+			}
+			if result.SessionID != "ses_new" || result.ResumeRejected {
+				t.Errorf("session=%q resumeRejected=%v, want resumable session preserved", result.SessionID, result.ResumeRejected)
+			}
+			usage := result.Usage["grok-4.6"]
+			if usage.InputTokens != 100 || usage.OutputTokens != 30 || usage.CacheReadTokens != 20 || usage.CacheWriteTokens != 5 || usage.CostUSDTicks != 98765 {
+				t.Errorf("usage not preserved: %+v", result.Usage)
+			}
+		})
 	}
 }
 
@@ -664,65 +1018,51 @@ func TestGrokAttributesUsageOnResumeWithoutConfiguredModel(t *testing.T) {
 	}
 }
 
-func TestGrokTimeoutAndCancellation(t *testing.T) {
-	for _, tc := range []struct {
-		name       string
-		timeout    time.Duration
-		cancelSoon bool
-		wantStatus string
-	}{
-		{name: "timeout", timeout: time.Second, wantStatus: "timeout"},
-		{name: "cancel", timeout: 5 * time.Second, cancelSoon: true, wantStatus: "aborted"},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			tempDir := t.TempDir()
-			fakePath := filepath.Join(tempDir, "grok")
-			requestsFile := filepath.Join(tempDir, "requests.jsonl")
-			writeTestExecutable(t, fakePath, []byte(fakeGrokACPScript()))
-			backend, err := New("grok", Config{
-				ExecutablePath: fakePath,
-				Logger:         slog.Default(),
-				Env: map[string]string{
-					"GROK_HANG_PROMPT":   "1",
-					"GROK_REQUESTS_FILE": requestsFile,
-				},
-			})
-			if err != nil {
-				t.Fatalf("new grok backend: %v", err)
-			}
-			ctx, cancel := context.WithCancel(context.Background())
-			defer cancel()
-			session, err := backend.Execute(ctx, "task", ExecOptions{Timeout: tc.timeout})
-			if err != nil {
-				t.Fatalf("execute: %v", err)
-			}
-			go func() {
-				for range session.Messages {
-				}
-			}()
-			if tc.cancelSoon {
-				deadline := time.Now().Add(3 * time.Second)
-				for {
-					raw, _ := os.ReadFile(requestsFile)
-					if strings.Contains(string(raw), `"method":"session/prompt"`) {
-						cancel()
-						break
-					}
-					if time.Now().After(deadline) {
-						t.Fatal("fake never reached session/prompt before cancellation")
-					}
-					time.Sleep(10 * time.Millisecond)
-				}
-			}
-			select {
-			case result := <-session.Result:
-				if result.Status != tc.wantStatus {
-					t.Fatalf("status=%q error=%q, want %q", result.Status, result.Error, tc.wantStatus)
-				}
-			case <-time.After(4 * time.Second):
-				t.Fatal("grok child was not terminated and reaped")
-			}
-		})
+func TestGrokCancellation(t *testing.T) {
+	tempDir := t.TempDir()
+	fakePath := filepath.Join(tempDir, "grok")
+	requestsFile := filepath.Join(tempDir, "requests.jsonl")
+	writeTestExecutable(t, fakePath, []byte(fakeGrokACPScript()))
+	backend, err := New("grok", Config{
+		ExecutablePath: fakePath,
+		Logger:         slog.Default(),
+		Env: map[string]string{
+			"GROK_HANG_PROMPT":   "1",
+			"GROK_REQUESTS_FILE": requestsFile,
+		},
+	})
+	if err != nil {
+		t.Fatalf("new grok backend: %v", err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	session, err := backend.Execute(ctx, "task", ExecOptions{Timeout: 5 * time.Second})
+	if err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+	go func() {
+		for range session.Messages {
+		}
+	}()
+	deadline := time.Now().Add(3 * time.Second)
+	for {
+		raw, _ := os.ReadFile(requestsFile)
+		if strings.Contains(string(raw), `"method":"session/prompt"`) {
+			cancel()
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("fake never reached session/prompt before cancellation")
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	select {
+	case result := <-session.Result:
+		if result.Status != "aborted" {
+			t.Fatalf("status=%q error=%q, want aborted", result.Status, result.Error)
+		}
+	case <-time.After(4 * time.Second):
+		t.Fatal("grok child was not terminated and reaped")
 	}
 }
 
@@ -852,27 +1192,20 @@ func TestGrokThinkingCatalogIsPerModel(t *testing.T) {
 	}
 }
 
-func TestGrokValidateThinkingLevelUsesPerModelCatalog(t *testing.T) {
-	for _, tc := range []struct {
-		model string
-		level string
-		want  bool
-	}{
-		{model: "grok-4.6", level: "high", want: true},
-		{model: "grok-4.6", level: "low", want: true},
-		{model: "grok-4.6", level: "xhigh", want: true},
-		{model: "grok-4.5", level: "low", want: true},
-		{model: "grok-4.5", level: "none", want: false},
-		{model: "grok-4.5", level: "xhigh", want: false},
-		{model: "grok-composer-2.5-fast", level: "low", want: false},
-		{model: "future-grok", level: "high", want: false},
+// The static Grok list only shapes the fallback picker. A saved level is never
+// judged against it — not even where it disagrees with the list — because a
+// stand-in cannot say what the installed CLI accepts (MUL-7691).
+func TestGrokFallbackCatalogPassesThinkingLevelThrough(t *testing.T) {
+	for _, tc := range []struct{ model, level string }{
+		{model: "grok-4.6", level: "high"},
+		{model: "grok-4.5", level: "xhigh"},
+		{model: "grok-composer-2.5-fast", level: "low"},
+		{model: "future-grok", level: "high"},
+		{model: "", level: "high"},
 	} {
 		got, err := ValidateThinkingLevel(context.Background(), "grok", Command{Path: "/nonexistent/grok"}, tc.model, tc.level)
-		if err != nil {
-			t.Fatalf("ValidateThinkingLevel(%q, %q): %v", tc.model, tc.level, err)
-		}
-		if got != tc.want {
-			t.Errorf("ValidateThinkingLevel(%q, %q) = %v, want %v", tc.model, tc.level, got, tc.want)
+		if got || !errors.Is(err, errUnverifiedCatalog) {
+			t.Errorf("ValidateThinkingLevel(%q, %q) = (%v, %v), want errUnverifiedCatalog", tc.model, tc.level, got, err)
 		}
 	}
 }

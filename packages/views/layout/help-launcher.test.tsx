@@ -13,10 +13,14 @@ vi.mock("../platform/local-directory", () => ({
   isDesktopShell: vi.fn(() => false),
 }));
 
+// The UI language the mocked i18n instance reports; drives locale-aware links.
+const i18nState = vi.hoisted(() => ({ language: "en" }));
+
 // react-i18next isn't initialised in the views test env, so resolve the
 // selector against the real en/layout.json to assert on actual copy.
 vi.mock("../i18n", () => ({
   useT: () => ({
+    i18n: i18nState,
     t: (
       sel: (r: typeof enLayout) => string,
       vars?: Record<string, string>,
@@ -75,6 +79,7 @@ vi.mock("@multica/ui/components/ui/dropdown-menu", async () => {
 
 beforeEach(() => {
   vi.mocked(isDesktopShell).mockReturnValue(false);
+  i18nState.language = "en";
 });
 
 afterEach(() => {
@@ -100,6 +105,19 @@ describe("HelpLauncher", () => {
     render(<HelpLauncher />);
     const link = screen.getByRole("link", { name: /Desktop app/ });
     expect(link).toHaveAttribute("href", "https://multica.ai/download");
+  });
+
+  it.each([
+    ["en", "https://multica.ai/docs"],
+    ["zh-Hans", "https://multica.ai/docs/zh"],
+    ["fr", "https://multica.ai/docs/fr"],
+  ])("links Docs to the %s docs", (language, href) => {
+    i18nState.language = language;
+    render(<HelpLauncher />);
+    expect(screen.getByRole("link", { name: /Docs/ })).toHaveAttribute(
+      "href",
+      href,
+    );
   });
 
   // AppSidebar is shared: apps/desktop renders the same component tree. Without

@@ -40,6 +40,7 @@ interface ReactionBarProps {
   onToggle: (emoji: string) => void;
   getActorName: (type: string, id: string) => string;
   className?: string;
+  showPicker?: boolean;
 }
 
 function ReactionBar({
@@ -48,8 +49,10 @@ function ReactionBar({
   onToggle,
   getActorName,
   className,
+  showPicker = true,
 }: ReactionBarProps) {
   const grouped = groupReactions(reactions, currentUserId);
+  if (!showPicker && grouped.length === 0) return null;
 
   return (
     <div className={`flex flex-wrap items-center gap-1.5 ${className ?? ""}`}>
@@ -76,7 +79,7 @@ function ReactionBar({
           </TooltipContent>
         </Tooltip>
       ))}
-      <QuickEmojiPicker onSelect={onToggle} />
+      {showPicker && <QuickEmojiPicker onSelect={onToggle} />}
     </div>
   );
 }

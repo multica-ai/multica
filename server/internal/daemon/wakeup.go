@@ -115,8 +115,8 @@ func (d *Daemon) runTaskWakeupConnection(ctx context.Context, runtimeIDs []strin
 	if d.client.os != "" {
 		headers.Set("X-Client-OS", d.client.os)
 	}
-	// Advertise the same capabilities as the HTTP path so a claim built over
-	// this WS connection gets identical capability gating (MUL-4257).
+	// WS claims use the common capabilities plus scheduling hints that only the
+	// healthy-connection poller can consume.
 	headers.Set("X-Client-Capabilities", daemonClientCapabilities())
 
 	// A hand-built websocket.Dialer has Proxy == nil, which gorilla reads as
@@ -144,6 +144,10 @@ func (d *Daemon) runTaskWakeupConnection(ctx context.Context, runtimeIDs []strin
 
 	d.logger.Info("task wakeup websocket connected", "runtimes", len(runtimeIDs))
 	signalTaskWakeup(taskWakeups, "")
+	// A healthy reconnect is the strongest signal that a terminal callback
+	// stranded during an outage may now succeed. The buffered wakeup also
+	// preserves a connect that races replay-loop startup.
+	d.signalTerminalReportReplay()
 	// signalTaskWakeup only wakes idle ClaimTask pollers. In-flight tasks and
 	// the workspace sync loop park on coarse tickers (5s and 30s) that do not
 	// observe the wakeup channel, so anything the server changed during the
@@ -232,6 +236,10 @@ func (d *Daemon) runTaskWakeupConnection(ctx context.Context, runtimeIDs []strin
 		// frame will be dropped), and flip the send-closed flag under sendMu so
 		// any in-flight guarded send finishes before we close writes.
 		d.wsRPC.attach(nil)
+		// A healthy WS connection lets the claim poller use a longer fallback
+		// interval. Wake it as soon as the connection drops so it immediately
+		// observes the detach and resumes the configured HTTP cadence.
+		signalTaskWakeup(taskWakeups, "")
 		sendMu.Lock()
 		sendClosed = true
 		sendMu.Unlock()
@@ -399,6 +407,17 @@ func (d *Daemon) readTaskWakeupMessagesForConnection(conn *websocket.Conn, taskW
 				d.logger.Debug("task wakeup received", "runtime_id", payload.RuntimeID, "task_id", payload.TaskID)
 			}
 			signalTaskWakeup(taskWakeups, payload.RuntimeID)
+		case protocol.EventDaemonTaskSupplementAvailable:
+			var payload protocol.TaskAvailablePayload
+			if err := json.Unmarshal(msg.Payload, &payload); err != nil {
+				d.logger.Debug("task supplement websocket invalid payload", "error", err)
+				continue
+			}
+			if payload.TaskID == "" {
+				d.logger.Debug("task supplement websocket missing task_id")
+				continue
+			}
+			d.taskSupplementSignals.notify(payload.TaskID)
 		case protocol.EventDaemonRuntimeProfilesChanged:
 			var payload protocol.RuntimeProfilesChangedPayload
 			if err := json.Unmarshal(msg.Payload, &payload); err != nil {

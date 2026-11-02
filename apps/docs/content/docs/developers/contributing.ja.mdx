@@ -89,7 +89,7 @@ pnpm lint
 pnpm test
 ```
 
-ルートコマンドはデフォルトで Mobile を除外します。Mobile には独自のスクリプトと CI があるため、変更前に `apps/mobile/CLAUDE.md` を読んでください。
+ルートコマンドはデフォルトで Mobile を除外します。Mobile には独自のスクリプトと CI があるため、変更前に `apps/mobile/AGENTS.md` を読んでください。
 
 ### バックエンド
 
@@ -118,7 +118,7 @@ Web と Desktop の両方で必要な機能は、責務に応じて配置しま�
 4. Next.js、Electron、ルーティングアダプターは対応する app に残します。
 5. 共有ページは Web と Desktop の両方へ接続します。
 
-サーバーデータは TanStack Query、フィルター、下書き、レイアウトなどのクライアント状態は Zustand が管理します。具体的な境界は[プロジェクトアーキテクチャ](/developers/architecture)とルートの `CLAUDE.md` を参照してください。
+サーバーデータは TanStack Query、フィルター、下書き、レイアウトなどのクライアント状態は Zustand が管理します。具体的な境界は[プロジェクトアーキテクチャ](/developers/architecture)とルートの `AGENTS.md` を参照してください。
 
 API を追加または変更するときは `packages/core/api/` の zod schema も更新し、欠落フィールド、未知の enum、形式不正に対する解析テストを追加します。
 
@@ -186,7 +186,7 @@ make start
 
 ## 提出前の確認
 
-- ルートの `CLAUDE.md` と関連するサブディレクトリの説明を読みます。
+- ルートの `AGENTS.md` と関連するサブディレクトリの説明を読みます。
 - 現在の作業に必要な範囲だけを変更します。
 - コードコメントは英語で記述します。
 - `.env`、トークン、ビルド成果物、ローカルパスをコミットしません。

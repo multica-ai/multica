@@ -148,9 +148,11 @@ func TestPreparedSkillNamesMatchPrivateDiscoveryDirectories(t *testing.T) {
 			// No provider config or skills may be read from the developer's home.
 			sharedHome := t.TempDir()
 			t.Setenv("CODEX_HOME", sharedHome)
-			const userSkill = "User-owned skill must stay unchanged."
+			userSkill := func(name string) string {
+				return "---\nname: " + name + "\ndescription: Personal review instructions.\n---\n\nUser-owned skill must stay unchanged.\n"
+			}
 			for _, name := range []string{"review", "review-multica"} {
-				mustWrite(t, filepath.Join(sharedHome, "skills", name, "SKILL.md"), userSkill)
+				mustWrite(t, filepath.Join(sharedHome, "skills", name, "SKILL.md"), userSkill(name))
 			}
 			params := PrepareParams{
 				WorkspacesRoot: t.TempDir(), WorkspaceID: "workspace-private-skills",
@@ -194,7 +196,7 @@ func TestPreparedSkillNamesMatchPrivateDiscoveryDirectories(t *testing.T) {
 				if provider == "codex" {
 					// Batch suffixes must not claim a user skill's name during seeding.
 					want[1] = "review-multica-multica"
-					if got, err := os.ReadFile(filepath.Join(discoveryRoot, "skills", "review-multica", "SKILL.md")); err != nil || string(got) != userSkill {
+					if got, err := os.ReadFile(filepath.Join(discoveryRoot, "skills", "review-multica", "SKILL.md")); err != nil || string(got) != userSkill("review-multica") {
 						t.Errorf("%s: user skill is no longer discoverable: %q, %v", phase, got, err)
 					}
 				}
@@ -233,7 +235,7 @@ func TestPreparedSkillNamesMatchPrivateDiscoveryDirectories(t *testing.T) {
 					}
 				}
 				for _, name := range []string{"review", "review-multica"} {
-					if got, err := os.ReadFile(filepath.Join(sharedHome, "skills", name, "SKILL.md")); err != nil || string(got) != userSkill {
+					if got, err := os.ReadFile(filepath.Join(sharedHome, "skills", name, "SKILL.md")); err != nil || string(got) != userSkill(name) {
 						t.Fatalf("%s: source user skill changed: %q, %v", phase, got, err)
 					}
 				}
@@ -484,7 +486,7 @@ func TestReuseKeepsProjectResourceWriteFailureBestEffort(t *testing.T) {
 	}
 }
 
-func TestReuseFallsBackWhenClaudeSkillPolicyCannotBeWritten(t *testing.T) {
+func TestReuseKeepsClaudeSkillPolicyFailureBestEffort(t *testing.T) {
 	params := PrepareParams{
 		WorkspacesRoot: t.TempDir(), WorkspaceID: "workspace-claude-policy-error",
 		TaskID: "task-claude-policy-error", Provider: "claude",
@@ -508,52 +510,22 @@ func TestReuseFallsBackWhenClaudeSkillPolicyCannotBeWritten(t *testing.T) {
 			{Root: "provider", Key: "review", Name: "review"},
 		},
 	}
-	if reused := Reuse(ReuseParams{
+	reused := Reuse(ReuseParams{
 		WorkspacesRoot: params.WorkspacesRoot, WorkDir: env.WorkDir,
 		Provider: params.Provider, Task: task,
-	}, testLogger()); reused != nil {
-		t.Fatalf("Reuse continued without the required Claude skill policy: %#v", reused)
+	}, testLogger())
+	if reused == nil || !reflect.DeepEqual(reused.PreparedSkillNames, []string{"review-multica"}) {
+		t.Fatalf("best-effort Claude policy failure lost the allocated skill names: %#v", reused)
 	}
-	for _, path := range []string{
-		filepath.Join(env.WorkDir, TaskContextMarkerRelPath),
-		filepath.Join(env.WorkDir, ".claude", "skills", "review-multica"),
-	} {
-		if _, err := os.Stat(path); !os.IsNotExist(err) {
-			t.Errorf("failed Claude policy refresh left %q behind: %v", path, err)
-		}
+	brief := buildMetaSkillContent(params.Provider, ApplyPreparedSkillNames(task, reused.PreparedSkillNames))
+	if !strings.Contains(brief, "**review-multica**") || strings.Contains(brief, "**review**") {
+		t.Error("Claude policy failure changed the assigned skill's advertised identity")
+	}
+	data, err := os.ReadFile(filepath.Join(env.WorkDir, ".claude", "skills", "review-multica", "SKILL.md"))
+	if err != nil || !strings.Contains(string(data), "Assigned review.") {
+		t.Fatalf("materialized workspace skill unavailable: %q, %v", data, err)
 	}
 	if got, err := os.ReadFile(userSkill); err != nil || string(got) != "User-owned skill." {
 		t.Fatalf("failed Claude policy refresh changed the user skill: %q, %v", got, err)
-	}
-}
-
-func TestReuseFallsBackWhenCodexHomeRefreshFails(t *testing.T) {
-	t.Setenv("CODEX_HOME", t.TempDir())
-	params := PrepareParams{
-		WorkspacesRoot: t.TempDir(), WorkspaceID: "workspace-codex-home-error",
-		TaskID: "task-codex-home-error", Provider: "codex",
-		Task: TaskContextForEnv{IssueID: "issue-codex-home-error"},
-	}
-	env, err := Prepare(params, testLogger())
-	if err != nil {
-		t.Fatalf("Prepare: %v", err)
-	}
-	defer env.Cleanup(true)
-
-	codexHome := filepath.Join(env.RootDir, codexHomeDirName)
-	if err := os.RemoveAll(codexHome); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(codexHome, []byte("not a directory"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	if reused := Reuse(ReuseParams{
-		WorkspacesRoot: params.WorkspacesRoot, WorkDir: env.WorkDir,
-		Provider: params.Provider, Task: params.Task,
-	}, testLogger()); reused != nil {
-		t.Fatalf("Reuse continued after Codex home refresh failed: %#v", reused)
-	}
-	if _, err := os.Stat(filepath.Join(env.WorkDir, TaskContextMarkerRelPath)); !os.IsNotExist(err) {
-		t.Errorf("failed Codex home refresh left the task marker behind: %v", err)
 	}
 }

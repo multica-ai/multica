@@ -11,7 +11,7 @@ In day-to-day use of Multica you mainly deal with two kinds of credentials: brow
 
 After signing in with an email verification code or Google, Multica stores a JWT in an HttpOnly cookie named `multica_auth`. The browser sends it automatically; JavaScript cannot read it directly.
 
-Sessions last 30 days by default. Self-hosting admins can adjust the lifetime of sessions issued from then on with `AUTH_TOKEN_TTL`; see [Sign-in and signup configuration](/auth-setup#session-lifetime). Logging out clears the auth and CSRF cookies in the current browser.
+By default a session lasts 30 days, but that is not a countdown from sign-in: a session in continuous use is re-issued before it expires, so staying signed in does not require signing in again on a schedule. It is only re-issued once it is past the halfway point of its lifetime, so a session left unused can end sooner than 30 days after its last use. Self-hosting admins can adjust the lifetime with `AUTH_TOKEN_TTL`; see [Sign-in and signup configuration](/auth-setup#session-lifetime). Logging out clears the auth and CSRF cookies in the current browser.
 
 Browser cookies are not meant to be copied into scripts or the CLI; use a personal access token to access Multica from a terminal.
 

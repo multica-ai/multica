@@ -37,6 +37,7 @@ export function useTypeLabels(): Record<InboxItemType, string> {
     quick_create_unconfirmed: t(($) => $.types.quick_create_unconfirmed),
     autopilot_paused: t(($) => $.types.autopilot_paused),
     autopilot_quota_exceeded: t(($) => $.types.autopilot_quota_exceeded),
+    children_done: t(($) => $.types.children_done),
   };
 }
 
@@ -54,7 +55,7 @@ export function InboxDetailLabel({ item }: { item: InboxItem }) {
   const { getActorName } = useActorName();
   // Inbox is a cross-workspace surface, so the catalog is read per item's own
   // workspace rather than from the route. (MUL-6243)
-  const { categoryOf, colorOf } = useIssueStatuses(item.workspace_id);
+  const { categoryOf, colorOf, iconOf } = useIssueStatuses(item.workspace_id);
   const statusLabelOf = useStatusLabel(item.workspace_id);
   const details = item.details ?? {};
 
@@ -68,6 +69,7 @@ export function InboxDetailLabel({ item }: { item: InboxItem }) {
             status={details.to as IssueStatus}
             category={categoryOf(details.to)}
             color={colorOf(details.to)}
+            icon={iconOf(details.to)}
             className="h-3 w-3"
           />
           {statusLabelOf(details.to)}
@@ -135,6 +137,12 @@ export function InboxDetailLabel({ item }: { item: InboxItem }) {
     }
     case "autopilot_quota_exceeded":
       return <span>{t(($) => $.labels.autopilot_quota_blocked)}</span>;
+    case "children_done": {
+      // The stage arrives as a JSON number; details are typed as strings.
+      const stage = details.stage != null ? String(details.stage) : "";
+      if (stage) return <span>{t(($) => $.labels.children_done_stage, { stage })}</span>;
+      return <span>{typeLabels[item.type]}</span>;
+    }
     default:
       return <span>{typeLabels[item.type] ?? item.type}</span>;
   }

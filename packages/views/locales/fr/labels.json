@@ -1,0 +1,10 @@
+{
+  "remove_label": "Retirer l'étiquette {{name}}",
+  "resource_picker": {
+    "empty": "Aucune étiquette",
+    "add": "Ajouter des étiquettes",
+    "search": "Rechercher des étiquettes...",
+    "no_labels": "Créez d'abord des étiquettes dans les Paramètres",
+    "no_results": "Aucune étiquette correspondante"
+  }
+}

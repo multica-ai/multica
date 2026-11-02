@@ -89,7 +89,7 @@
     },
     "load_failed": {
       "title": "請求サービスは一時的に利用できません",
-      "description": "信頼できるサブスクリプション情報を取得できませんでした。プランは変更されていません。"
+      "description": "サブスクリプション情報を読み込めません。再試行してください。"
     },
     "actions": {
       "retry": "再試行",
@@ -103,6 +103,7 @@
     "errors": {
       "action_title": "請求操作に失敗しました",
       "temporarily_unavailable": "請求サービスは一時的に利用できません。しばらくしてから再試行してください。",
+      "not_enabled": "この環境ではワークスペースのサブスクリプションが有効になっていません。管理者にお問い合わせください。",
       "permission_changed": "現在のワークスペース権限ではこの操作を実行できません。ページを更新して権限を確認してください。",
       "checkout_response": "サーバー応答を読み取れないため Checkout を開けませんでした。選択した期間を変えずに再試行してください。",
       "already_subscribed": "このワークスペースにはすでにサブスクリプションがあります。現在のプランを更新しました。",
@@ -115,7 +116,6 @@
       "cancel_title": "Checkout をキャンセルしました",
       "cancel_description": "プランは変更されていません。",
       "portal_title": "請求情報を更新しました",
-      "portal_description": "最新のサブスクリプション情報を下に表示しています。",
       "syncing_title": "サブスクリプションを有効化しています",
       "syncing_description": "支払いが完了しました。Stripe によるプラン変更の確認を待っています。",
       "timeout_description": "支払いは受領済みですが、サブスクリプションは同期中です。しばらくしてからページを更新してください。",
@@ -124,12 +124,12 @@
     },
     "past_due": {
       "title": "お支払い方法の確認が必要です",
-      "description": "Billing Portal でお支払い方法を更新してください。上のプランバッジには現在利用できるアクセス権が表示されます。",
+      "description": "請求管理で支払い方法を更新してください。",
       "grace_description": "Pro を継続するには {{date}} までにお支払い方法を更新してください。"
     },
     "subscription_notice": {
       "canceling_title": "キャンセルが予定されています",
-      "canceling_description": "このサブスクリプションは {{date}} にキャンセルされる予定です。上のプランバッジには現在適用中のアクセス権が表示されます。",
+      "canceling_description": "サブスクリプションは {{date}} に解約されます。",
       "canceling_description_without_date": "このサブスクリプションは現在の期間終了時にキャンセルされる予定です。",
       "incomplete_title": "サブスクリプション設定が未完了です",
       "incomplete_description": "請求管理を開き、お支払い設定を完了または確認してください。",
@@ -139,20 +139,16 @@
       "paused_description": "請求管理を開き、一時停止と再開方法を確認してください。",
       "unpaid_title": "サブスクリプションは未払いです",
       "unpaid_description": "請求管理を開き、未払い残高を解消してください。",
-      "canceled_title": "サブスクリプションはキャンセル済みです",
-      "canceled_description": "上のプランバッジは、このワークスペースに現在適用されているプランを示します。"
+      "canceled_title": "サブスクリプションはキャンセル済みです"
     },
     "current": {
       "title": "現在のプラン",
       "plan": "ワークスペースプラン",
-      "plan_description": "このワークスペースに現在適用されている entitlement です。",
       "members": "ユーザー席",
       "members_description": "エージェントと保留中の招待は席数に含まれません。",
       "member_count_other": "{{count}}名",
       "billing_interval": "請求期間",
-      "billing_interval_description": "有効なサブスクリプションに保存されている請求期間です。",
-      "period_end": "現在の期間終了日",
-      "period_end_description": "現在のサブスクリプション情報で報告された日付です。"
+      "period_end": "現在の期間終了日"
     },
     "upgrade": {
       "title": "Pro にアップグレード",
@@ -167,18 +163,14 @@
     },
     "management": {
       "title": "サブスクリプション管理",
-      "description": "お支払い方法、請求書、キャンセルは Stripe で安全に管理されます。",
+      "description": "支払い方法、請求書、解約。",
       "portal": "Stripe Billing Portal",
-      "portal_description": "Stripe でこのワークスペースのサブスクリプションを管理します。",
       "portal_unavailable": "このワークスペースで利用できる Stripe Billing Portal はありません。"
     },
     "limits": {
       "title": "使用量と上限",
-      "description": "上限と使用量は、サーバーの現在の entitlement とクォータ集計に基づきます。",
       "issues": "タスク数",
-      "issues_description": "現在のタスク使用量とサーバーから返された有効な上限です。",
       "autopilots": "自動化の実行",
-      "autopilots_description": "現在の自動化使用量とサーバーから返されたリセット時刻です。",
       "unlimited": "無制限",
       "per_month": "月 {{count}} 回",
       "usage_loading": "自動化の使用量を読み込み中",
@@ -194,15 +186,13 @@
       "title": "席数",
       "description": "購入済みの席は現在のユーザーメンバーと保留中の招待に使われます。エージェントは席を使用しません。",
       "human_members": "使用中の席",
-      "human_members_description": "購入済みの容量を使用している確認済みユーザーメンバーです。メンバー変更後に更新できます。",
       "billed": "購入済みの席",
-      "billed_description": "Stripe で現在購入済みの席数です。",
       "pending_invitations": "保留中の招待",
       "pending_invitations_description": "有効な招待は、承認または期限切れまで購入済みの席を予約します。",
       "available": "利用可能な席",
-      "available_description": "メンバーが使用せず、招待にも予約されていない購入済みの席です。",
+      "available_description": "購入済みシート数からメンバーと招待予約分を引いた数です。",
       "pending": "変更予定の席数",
-      "pending_description": "Cloud Billing が次の期間に対して報告した、より少ない席数です。",
+      "pending_description": "次の請求期間から適用されます。",
       "seat_count_other": "{{count}}席",
       "pending_with_date_other": "{{date}} から {{count}}席",
       "none_pending": "予定された変更はありません",
@@ -214,7 +204,8 @@
       "members_over_capacity_title": "メンバー数が購入済みの席数を超えています",
       "members_over_capacity_description": "このワークスペースには {{actual}} 人のメンバーがいますが、購入済みの席は {{purchased}} 席です。さらに招待する前に席を追加するか、メンバーを削除してください。",
       "occupancy_over_capacity_description": "このワークスペースは購入済み {{purchased}} 席に対して {{occupied}} 席を占有しています（メンバー {{members}} 人、保留中の招待 {{reserved}} 件）。さらに招待する前に席を追加する、メンバーを削除する、または保留中の招待を取り消してください。",
-      "updated": "席数の購入を送信しました"
+      "updated": "席数の購入を送信しました",
+      "available_help": "利用可能なシート数の計算方法"
     },
     "seat_purchase": {
       "title": "席を追加",

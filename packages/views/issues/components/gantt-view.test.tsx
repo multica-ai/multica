@@ -1,4 +1,9 @@
 import { createStore } from "zustand/vanilla";
+import { buildIssueStatusCatalog } from "@multica/core/issue-statuses/queries";
+
+vi.mock("@multica/core/issue-statuses/hooks", () => ({
+  useIssueStatuses: () => buildIssueStatusCatalog([]),
+}));
 import { describe, expect, it, vi, beforeAll, afterAll } from "vitest";
 import { screen } from "@testing-library/react";
 import {

@@ -5,7 +5,9 @@
   "type": "module",
   "scripts": {
     "typecheck": "tsc --noEmit",
-    "lint": "eslint ."
+    "icons": "node icons/drawings/generate.mjs",
+    "lint": "eslint .",
+    "test": "vitest run"
   },
   "exports": {
     "./components/ui/*": "./components/ui/*.tsx",
@@ -22,6 +24,7 @@
     "./lib/code-style": "./lib/code-style.ts",
     "./lib/clipboard": "./lib/clipboard.ts",
     "./lib/motion": "./lib/motion.ts",
+    "./icons": "./icons/index.ts",
     "./i18n-types": "./types/i18next.ts",
     "./styles/tokens.css": "./styles/tokens.css",
     "./styles/base.css": "./styles/base.css"
@@ -39,7 +42,6 @@
     "input-otp": "^1.4.2",
     "linkify-it": "^5.0.0",
     "katex": "catalog:",
-    "lucide-react": "catalog:",
     "next-themes": "^0.4.6",
     "react-day-picker": "^9.14.0",
     "react-markdown": "^10.1.0",
@@ -65,9 +67,15 @@
   "devDependencies": {
     "@multica/eslint-config": "workspace:*",
     "@multica/tsconfig": "workspace:*",
+    "@testing-library/jest-dom": "catalog:",
+    "@testing-library/react": "catalog:",
     "@types/linkify-it": "^5.0.0",
     "@types/react": "catalog:",
     "@types/react-dom": "catalog:",
-    "typescript": "catalog:"
+    "@vitejs/plugin-react": "catalog:",
+    "esbuild": "^0.25.12",
+    "jsdom": "catalog:",
+    "typescript": "catalog:",
+    "vitest": "catalog:"
   }
 }

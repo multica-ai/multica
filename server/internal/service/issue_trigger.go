@@ -55,6 +55,11 @@ type IssueTriggerInput struct {
 	IsCreate        bool
 	AssigneeChanged bool
 	StatusChanged   bool
+	// EnteredHandoffStep marks a write that moved the issue into a project
+	// workflow column with a handler (MUL-7420). The step is new work even
+	// when its handler is the agent whose run made the move, so the
+	// self-assignment suppression does not apply.
+	EnteredHandoffStep bool
 }
 
 // IssueRunTrigger is the resolved decision shared by preview and the write
@@ -104,21 +109,24 @@ func (s *IssueService) WillEnqueueRun(ctx context.Context, in IssueTriggerInput,
 		canAccess = allowAllAgents
 	}
 
-	// The status source also requires LEAVING the backlog category, not merely
-	// changing the status key. Before custom statuses a key change out of
-	// `backlog` was always a category change, so the two were the same
-	// condition; now `backlog` → a custom status in the `backlog` category is a
-	// move within the parking lot, and starting a run on it would break the one
-	// promise backlog makes. (MUL-6463)
-	//
-	// Both sides of the transition are normalized to the canonical status they
-	// inherit, so a custom status in the `backlog` category parks exactly like
-	// Backlog and a custom status in the `todo` category starts a run exactly
-	// like Todo. Built-in keys resolve to themselves without a query, leaving
-	// this decision bit-identical for workspaces with no custom statuses —
-	// which is the whole set of them until an admin defines one. (MUL-6243)
+	// Only the fixed backlog key parks work. Leaving it for another unstarted
+	// or started status can enqueue a run; custom statuses do not inherit parking.
+	// Effective preserves built-in behavior and resolves custom terminal categories
+	// so moving to done/closed cannot start work.
 	currentStatus := issuestatus.Effective(ctx, s.Queries, issue.WorkspaceID, issue.Status)
 	prevStatus := issuestatus.Effective(ctx, s.Queries, issue.WorkspaceID, in.PrevStatus)
+
+	// Triage is stricter than the backlog parking lot: backlog defers a run,
+	// Triage refuses one outright (MUL-7189 §2.3). Deciding it here is what
+	// keeps the trigger PREVIEW honest — the queue door would refuse the insert
+	// either way, but silently, and the preview would have promised a run.
+	//
+	// Leaving Triage needs no case of its own. Triage is not a status, so accept
+	// clears this field and then takes the ordinary create / assign path; there
+	// is no "was in triage" transition for this predicate to recognise.
+	if issue.TriageState.Valid {
+		return IssueRunTrigger{}, false
+	}
 
 	var source RunEnqueueSource
 	switch {
@@ -148,11 +156,13 @@ func (s *IssueService) WillEnqueueRun(ctx context.Context, in IssueTriggerInput,
 		if !canAccess(agent) {
 			return IssueRunTrigger{}, false
 		}
-		if source == RunSourceAssign && !in.IsCreate && probe.SuppressActiveSelfAssignment != nil &&
+		if source == RunSourceAssign && !in.IsCreate && !in.EnteredHandoffStep && probe.SuppressActiveSelfAssignment != nil &&
 			probe.SuppressActiveSelfAssignment(issue.AssigneeID) {
 			return IssueRunTrigger{}, false
 		}
-		if source == RunSourceStatus && s.hasPendingRun(ctx, issue.ID, issue.AssigneeID) {
+		// A step entered under the agent's own run queues behind it; one
+		// already queued covers the new step too.
+		if (source == RunSourceStatus || in.EnteredHandoffStep) && s.hasPendingRun(ctx, issue.ID, issue.AssigneeID) {
 			return IssueRunTrigger{}, false
 		}
 		return IssueRunTrigger{

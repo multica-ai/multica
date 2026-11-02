@@ -37,7 +37,9 @@ const (
 // collectDrainGrace expired waiting for one. What this cap cuts short is a
 // descendant that inherited the pipe and holds it open, whose trailing output is
 // not the answer. EOF short-circuits the wait, so the normal case pays nothing.
-const collectSettleGrace = 400 * time.Millisecond
+// Package tests shorten it together with their process fixtures; production
+// never reassigns it.
+var collectSettleGrace = 400 * time.Millisecond
 
 // collectDrainGrace bounds the wait for pipe EOF *after* the direct child has
 // exited, before the tree is reaped.
@@ -60,7 +62,9 @@ const collectSettleGrace = 400 * time.Millisecond
 // buffer there is nothing left to wait for, so the normal case — a CLI that
 // prints its answer and exits, with or without a lingering helper — pays
 // nothing.
-const collectDrainGrace = 2 * time.Second
+// Package tests shorten it together with their delayed-output fixtures;
+// production never reassigns it.
+var collectDrainGrace = 2 * time.Second
 
 // collectStdoutLimit caps the answer this package will accumulate, and
 // collectStderrTail caps the diagnostic sample kept from stderr.

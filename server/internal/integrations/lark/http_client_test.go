@@ -234,6 +234,13 @@ func testCreds() InstallationCredentials {
 	return InstallationCredentials{AppID: "cli_app_xx", AppSecret: "secret_xx"}
 }
 
+func TestHTTPClient_IsConfigured(t *testing.T) {
+	c := NewHTTPAPIClient(HTTPClientConfig{})
+	if !c.IsConfigured() {
+		t.Fatalf("real client must report IsConfigured()=true")
+	}
+}
+
 func TestHTTPClient_DownloadMessageResource(t *testing.T) {
 	fake := newLarkFake(t)
 	fake.stubToken("tok_resource", 7200)
@@ -426,6 +433,16 @@ func TestHTTPClient_DownloadMessageResourceBusinessError(t *testing.T) {
 	})
 	if err == nil || !strings.Contains(err.Error(), "234003") {
 		t.Fatalf("expected APIError with code, got %v", err)
+	}
+}
+
+// TestHTTPClient_StubReportsNotConfigured pins that the stub never
+// claims wired outbound — handlers gate install / management UI on
+// this signal.
+func TestHTTPClient_StubReportsNotConfigured(t *testing.T) {
+	s := NewStubAPIClient(nil)
+	if s.IsConfigured() {
+		t.Errorf("stub IsConfigured must be false")
 	}
 }
 
@@ -1090,6 +1107,36 @@ func TestHTTPClient_SendBindingPromptCard_HappyPath(t *testing.T) {
 	}
 }
 
+func TestHTTPClient_SendBindingPromptCard_NoAvailabilityReturnsAPIError(t *testing.T) {
+	fake := newLarkFake(t)
+	fake.stubToken("tok_bind_no_avail", 7200)
+
+	fake.mux.HandleFunc("/open-apis/im/v1/messages", func(w http.ResponseWriter, r *http.Request) {
+		fake.bindN.Add(1)
+		writeJSON(w, map[string]any{"code": 230013, "msg": "Bot has NO availability to this user.", "data": map[string]any{}})
+	})
+
+	c := newTestClient(fake, time.Now)
+	err := c.SendBindingPromptCard(context.Background(), BindingPromptParams{
+		InstallationID: testCreds(),
+		OpenID:         OpenID("ou_user_1"),
+		BindURL:        "https://multica.test/lark/bind?token=abc",
+	})
+	if err == nil {
+		t.Fatal("expected SendBindingPromptCard to fail")
+	}
+	apiErr, ok := err.(*APIError)
+	if !ok {
+		t.Fatalf("expected APIError, got %T", err)
+	}
+	if apiErr.Code != 230013 {
+		t.Fatalf("expected code=230013, got %d", apiErr.Code)
+	}
+	if apiErr.Msg != "Bot has NO availability to this user." {
+		t.Fatalf("unexpected msg: %q", apiErr.Msg)
+	}
+}
+
 func TestHTTPClient_TokenEndpointError(t *testing.T) {
 	fake := newLarkFake(t)
 	fake.stubTokenError(10003, "invalid app_id or app_secret")
@@ -1478,6 +1525,106 @@ func TestBindingPromptTemplate_Shape(t *testing.T) {
 	btn, _ := actions[0].(map[string]any)
 	if btn["url"] != "https://multica.test/bind?token=abc" {
 		t.Errorf("button url: got %v", btn["url"])
+	}
+}
+
+// ListMessageReactions backs the typing-indicator sweep: it must filter
+// server-side by emoji type, follow every page Lark offers (a badge beyond the
+// first window must still be found), and carry each item's operator and emoji
+// fields through so the caller can tell the bot's own reactions from a human's.
+func TestHTTPClient_ListMessageReactions_FollowsPages(t *testing.T) {
+	fake := newLarkFake(t)
+	fake.stubToken("tok", 7200)
+
+	requests := 0
+	fake.mux.HandleFunc("/open-apis/im/v1/messages/", func(w http.ResponseWriter, r *http.Request) {
+		requests++
+		if r.Method != http.MethodGet {
+			t.Errorf("list reactions: want GET, got %s", r.Method)
+		}
+		if !strings.HasSuffix(r.URL.Path, "/om_trigger/reactions") {
+			t.Errorf("list reactions: unexpected path %q", r.URL.Path)
+		}
+		q := r.URL.Query()
+		if got := q.Get("reaction_type"); got != "Typing" {
+			t.Errorf("list reactions: reaction_type = %q, want Typing", got)
+		}
+		if got := q.Get("page_size"); got != "50" {
+			t.Errorf("list reactions: page_size = %q, want 50", got)
+		}
+		switch q.Get("page_token") {
+		case "":
+			writeJSON(w, map[string]any{
+				"code": 0,
+				"msg":  "ok",
+				"data": map[string]any{
+					"items": []map[string]any{{
+						"reaction_id":   "r-page1",
+						"operator":      map[string]any{"operator_type": "app", "operator_id": "cli_app_xx"},
+						"reaction_type": map[string]any{"emoji_type": "Typing"},
+					}},
+					"has_more":   true,
+					"page_token": "cursor-2",
+				},
+			})
+		case "cursor-2":
+			writeJSON(w, map[string]any{
+				"code": 0,
+				"msg":  "ok",
+				"data": map[string]any{
+					"items": []map[string]any{{
+						"reaction_id":   "r-page2",
+						"operator":      map[string]any{"operator_type": "user", "operator_id": "ou_human"},
+						"reaction_type": map[string]any{"emoji_type": "Typing"},
+					}},
+					"has_more": false,
+				},
+			})
+		default:
+			t.Errorf("list reactions: unexpected page_token %q", q.Get("page_token"))
+		}
+	})
+
+	c := newTestClient(fake, time.Now)
+	got, err := c.ListMessageReactions(context.Background(), ListMessageReactionsParams{
+		InstallationID: testCreds(),
+		MessageID:      "om_trigger",
+		EmojiType:      "Typing",
+	})
+	if err != nil {
+		t.Fatalf("list message reactions: %v", err)
+	}
+	if requests != 2 {
+		t.Errorf("expected both pages to be fetched, got %d requests", requests)
+	}
+	if len(got) != 2 || got[0].ReactionID != "r-page1" || got[1].ReactionID != "r-page2" {
+		t.Fatalf("unexpected reactions: %+v", got)
+	}
+	if got[0].OperatorType != "app" || got[0].OperatorID != "cli_app_xx" || got[0].EmojiType != "Typing" {
+		t.Errorf("page-1 item fields not carried through: %+v", got[0])
+	}
+	if got[1].OperatorType != "user" {
+		t.Errorf("page-2 operator_type not carried through: %+v", got[1])
+	}
+}
+
+func TestHTTPClient_ListMessageReactions_BusinessError(t *testing.T) {
+	fake := newLarkFake(t)
+	fake.stubToken("tok", 7200)
+	fake.mux.HandleFunc("/open-apis/im/v1/messages/", func(w http.ResponseWriter, r *http.Request) {
+		writeJSON(w, map[string]any{"code": 230013, "msg": "invalid message id"})
+	})
+
+	c := newTestClient(fake, time.Now)
+	_, err := c.ListMessageReactions(context.Background(), ListMessageReactionsParams{
+		InstallationID: testCreds(),
+		MessageID:      "om_bad",
+	})
+	if err == nil {
+		t.Fatal("expected error on non-zero Lark code")
+	}
+	if !strings.Contains(err.Error(), "230013") {
+		t.Errorf("error should surface the Lark code; got %v", err)
 	}
 }
 

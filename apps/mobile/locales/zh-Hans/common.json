@@ -1,0 +1,55 @@
+{
+  "actions": {
+    "add": "添加",
+    "back": "返回",
+    "cancel": "取消",
+    "close": "关闭",
+    "confirm": "确认",
+    "continue": "继续",
+    "copy": "复制",
+    "create": "创建",
+    "delete": "删除",
+    "discard": "放弃",
+    "done": "完成",
+    "download": "下载",
+    "edit": "编辑",
+    "more": "更多",
+    "open": "打开",
+    "remove": "移除",
+    "retry": "重试",
+    "save": "保存",
+    "search": "搜索",
+    "send": "发送",
+    "share": "分享",
+    "upload": "上传"
+  },
+  "fields": {
+    "assignee": "负责人",
+    "description": "描述",
+    "due_date": "截止日期",
+    "email": "邮箱",
+    "label": "标签",
+    "name": "名称",
+    "priority": "优先级",
+    "project": "项目",
+    "status": "状态",
+    "title": "标题"
+  },
+  "states": {
+    "loading": "加载中...",
+    "saving": "保存中...",
+    "sending": "发送中...",
+    "offline": "离线",
+    "empty": "暂无内容",
+    "error": "出现错误"
+  },
+  "time": {
+    "just_now": "刚刚",
+    "minutes_ago_other": "{{count}} 分钟前",
+    "hours_ago_other": "{{count}} 小时前",
+    "days_ago_other": "{{count}} 天前",
+    "weeks_ago_other": "{{count}} 周前"
+  },
+  "states.empty": "暂无内容",
+  "states.error": "出现错误"
+}

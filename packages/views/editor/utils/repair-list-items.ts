@@ -47,12 +47,11 @@ function repairListItems(node: JsonNode): { node: JsonNode; changed: boolean } {
  *
  * The document left after typing `1.` (or `- `) in a comment is persisted as the
  * draft `"1. \n\n"`. On remount `@tiptap/markdown` parses that empty item into a
- * schema-invalid, childless `listItem` (see {@link repairListItems}); the
- * document is then left with an `AllSelection` instead of a cursor, so the
- * browser paints the caret on the following block — the reported bug: "type
- * `1.`, switch issues, come back, the caret jumps off the list item and can't be
- * moved back." Note this only affects the round-trip of an *empty* item;
- * non-empty items (`"1. buy milk"`) round-trip byte-identically.
+ * schema-invalid, childless `listItem` (see {@link repairListItems}), which
+ * cannot hold a caret, so the caret lands on the following block instead — the
+ * reported bug: "type `1.`, switch issues, come back, the caret jumps off the
+ * list item and can't be moved back." Note this only affects the round-trip of
+ * an *empty* item; non-empty items (`"1. buy milk"`) round-trip byte-identically.
  *
  * `preferredSelection` (the caret captured before an external re-parse) is
  * restored when given, snapped to a valid text position; otherwise the caret
@@ -72,9 +71,9 @@ export function repairEmptyListItems(
   );
   if (!changed) return false;
 
-  // The corrupt parse leaves an `AllSelection`. Re-setting content while that
-  // selection is live makes ProseMirror's replace collapse the whole list into
-  // bare paragraphs, so first pin the selection to a real position.
+  // Re-setting content while an `AllSelection` is live makes ProseMirror's
+  // replace collapse the whole list into bare paragraphs, so first pin the
+  // selection to a real position.
   editor.view.dispatch(
     editor.state.tr
       .setSelection(TextSelection.near(editor.state.doc.resolve(0)))

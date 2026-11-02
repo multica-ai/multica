@@ -23,12 +23,12 @@ function entry(key: string, category: string): IssueStatusEntry {
   };
 }
 
-// `later` parks like Backlog, `rework` starts work like Todo, `qa` sits in
-// in_review — the three custom shapes a raw key comparison gets wrong.
+// `later` parks like Backlog, while `rework` and `qa` start work — the custom
+// shapes a raw key comparison gets wrong.
 const CATALOG = buildIssueStatusCatalog([
   entry("later", "backlog"),
-  entry("rework", "todo"),
-  entry("qa", "in_review"),
+  entry("rework", "unstarted"),
+  entry("qa", "started"),
 ]);
 // A catalog that has not loaded: every custom key is unresolvable.
 const COLD = buildIssueStatusCatalog(undefined);
@@ -45,21 +45,21 @@ function issue(overrides: Partial<GateIssue> = {}): GateIssue {
 
 describe("resolveStatusCategory", () => {
   it("prefers the category the payload carries", () => {
-    expect(resolveStatusCategory("qa", "in_review", COLD)).toBe("in_review");
+    expect(resolveStatusCategory("qa", "started", COLD)).toBe("started");
   });
 
   it("resolves a built-in key without a catalog", () => {
-    expect(resolveStatusCategory("backlog", undefined, COLD)).toBe("backlog");
+    expect(resolveStatusCategory("backlog", undefined, COLD)).toBe("unstarted");
   });
 
   it("resolves a custom key through the catalog", () => {
-    expect(resolveStatusCategory("later", undefined, CATALOG)).toBe("backlog");
+    expect(resolveStatusCategory("later", undefined, CATALOG)).toBe("unstarted");
   });
 
   it("answers null — never a guess — for a custom key nothing can resolve", () => {
-    // catalog.categoryOf would say `todo` here, which is the guess this gate
+    // catalog.categoryOf would say `unstarted` here, which is the guess this gate
     // exists to avoid: it decides whether a write may start an agent.
-    expect(CATALOG.categoryOf("unknown")).toBe("todo");
+    expect(CATALOG.categoryOf("unknown")).toBe("unstarted");
     expect(resolveStatusCategory("unknown", undefined, CATALOG)).toBeNull();
     expect(resolveStatusCategory("later", undefined, COLD)).toBeNull();
   });
@@ -74,8 +74,6 @@ describe("runConfirmIntent — assign", () => {
 
   it.each([
     ["built-in backlog", "backlog", undefined],
-    ["custom backlog-category status", "later", undefined],
-    ["custom key resolved by the payload", "anything", "backlog" as const],
   ])("applies directly for a parked issue (%s) — assigning there never starts a run", (_label, status, carried) => {
     expect(
       runConfirmIntent(
@@ -105,7 +103,7 @@ describe("runConfirmIntent — promote", () => {
   it.each([
     ["built-in todo", "backlog", "todo"],
     ["custom Todo-category status", "backlog", "rework"],
-    ["custom backlog-category origin", "later", "rework"],
+    ["custom unstarted target is not parked", "backlog", "later"],
     ["a non-todo target that still starts a run", "backlog", "in_progress"],
     ["a custom in_review target", "backlog", "qa"],
   ])("confirms the promotion (%s)", (_label, from, to) => {
@@ -131,7 +129,7 @@ describe("runConfirmIntent — promote", () => {
     ["already active", { status: "todo" }, "in_progress"],
     ["closing the issue", { status: "backlog" }, "done"],
     ["cancelling the issue", { status: "backlog" }, "cancelled"],
-    ["re-parking inside backlog", { status: "backlog" }, "later"],
+    ["custom unstarted origin has no promotion trigger", { status: "later" }, "rework"],
     ["the same status again", { status: "backlog" }, "backlog"],
   ])("applies directly when no run starts (%s)", (_label, from, to) => {
     expect(runConfirmIntent(issue(from as Partial<GateIssue>), { status: to }, CATALOG)).toBeNull();

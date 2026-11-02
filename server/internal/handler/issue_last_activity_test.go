@@ -70,7 +70,7 @@ func TestIssueActivityTimestampIsMonotonic(t *testing.T) {
 	if _, err := testPool.Exec(context.Background(), `UPDATE issue SET last_activity_at = $2 WHERE id = $1`, created.ID, future); err != nil {
 		t.Fatalf("seed future last_activity_at: %v", err)
 	}
-	updated, err := testHandler.Queries.SetIssueMetadataKey(context.Background(), db.SetIssueMetadataKeyParams{
+	_, err := testHandler.Queries.SetIssueMetadataKey(context.Background(), db.SetIssueMetadataKeyParams{
 		Key:         "activity_test",
 		Value:       []byte(`"changed"`),
 		ID:          parseUUID(created.ID),
@@ -79,8 +79,12 @@ func TestIssueActivityTimestampIsMonotonic(t *testing.T) {
 	if err != nil {
 		t.Fatalf("SetIssueMetadataKey: %v", err)
 	}
-	if !updated.LastActivityAt.Valid || !updated.LastActivityAt.Time.Equal(future) {
-		t.Fatalf("activity timestamp regressed: got=%v want=%s", updated.LastActivityAt, future)
+	var updatedActivity time.Time
+	if err := testPool.QueryRow(context.Background(), `SELECT last_activity_at FROM issue WHERE id = $1`, created.ID).Scan(&updatedActivity); err != nil {
+		t.Fatalf("read updated last_activity_at: %v", err)
+	}
+	if !updatedActivity.Equal(future) {
+		t.Fatalf("activity timestamp regressed: got=%v want=%s", updatedActivity, future)
 	}
 }
 

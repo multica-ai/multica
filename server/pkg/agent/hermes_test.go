@@ -4285,6 +4285,7 @@ func TestParseHermesProfileArgs(t *testing.T) {
 		{"amid other args", []string{"--yolo", "--profile", "coder", "-x"}, "coder", true, false, 1, 2},
 		{"space-form invalid value ignored", []string{"-p", "no:xdist"}, "", false, false, -1, 0},
 		{"value-flag hides a following -p", []string{"-m", "-p", "research"}, "", false, false, -1, 0},
+		{"parser-derived value flags hide a following -p", []string{"--reasoning", "-p", "research", "--in", "-p", "coder"}, "", false, false, -1, 0},
 		{"double-dash sentinel stops scan", []string{"--", "-p", "research"}, "", false, false, -1, 0},
 		{"mcp add --args passthrough stops scan", []string{"mcp", "add", "srv", "--args", "-p", "research"}, "", false, false, -1, 0},
 		{"only the first occurrence is selected", []string{"-p", "research", "--profile", "coder"}, "research", true, false, 0, 2},

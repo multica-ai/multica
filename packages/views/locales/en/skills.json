@@ -1,13 +1,10 @@
 {
   "page": {
     "title": "Skills",
-    "tagline": "Instructions any agent in this workspace can use.",
-    "learn_more": "Learn more →",
     "new_skill": "New skill",
-    "search_placeholder": "Search skills…",
     "scopes": {
       "all": {
-        "label": "All",
+        "label": "All skills",
         "description": "All skills in this workspace"
       },
       "used": {
@@ -19,13 +16,13 @@
         "description": "Skills not assigned to any agent"
       },
       "mine": {
-        "label": "Created by me",
+        "label": "My skills",
         "description": "Skills you created"
       }
     },
     "empty": {
       "title": "No skills yet",
-      "description": "Create your first skill, import one from a URL or a local folder, or copy one from a connected runtime — and every agent in the workspace can use it."
+      "description": "Create or import a skill."
     },
     "no_matches": {
       "title": "No matches",
@@ -77,8 +74,6 @@
     "added_toast": "Added to {{name}}",
     "add_failed_toast": "Failed to add skill",
     "delete": "Delete",
-    "selected": "{{count}} selected",
-    "clear_selection": "Clear selection",
     "delete_no_permission": "Selection includes skills only their creator or an admin can delete",
     "delete_dialog_title_one": "Delete {{count}} skill?",
     "delete_dialog_title_other": "Delete {{count}} skills?",
@@ -99,7 +94,6 @@
     "updated_toast_one": "Updated {{count}} skill from source",
     "updated_toast_other": "Updated {{count}} skills from source",
     "update_partial_toast": "Updated {{count}}, {{failed}} failed",
-    "add_dialog_description": "Select the agents that should get the selected skills.",
     "cancel": "Cancel",
     "add_confirm": "Add ({{num}})",
     "adding": "Adding...",
@@ -107,23 +101,16 @@
     "added_multi_toast_other": "Added to {{count}} agents"
   },
   "toolbar": {
-    "result_count_title": "Matching skills / all skills",
-    "filter_label": "Filter",
-    "filter_active_count_one": "{{count}} filter",
-    "filter_active_count_other": "{{count}} filters",
-    "clear_filters": "Clear filters",
     "section_usage": "Usage",
-    "display": "Display",
-    "sort_by": "Sort by",
-    "direction_asc": "Ascending",
-    "direction_desc": "Descending",
-    "section_columns": "Columns"
+    "section_labels": "Labels",
+    "filter_search_placeholder": "Filter...",
+    "no_labels": "No labels yet",
+    "no_results": "No results",
+    "manage_labels": "Manage labels...",
+    "manage_labels_title": "Skill labels"
   },
   "detail": {
-    "all_skills": "All skills",
     "read_only": "Read-only",
-    "delete_aria": "Delete skill",
-    "delete_tooltip": "Delete skill",
     "supporting_data_warning": "Some workspace data failed to load. Creator attribution, runtime names, or edit permissions may appear incomplete until the next refresh.",
     "delete_file": "Delete file",
     "name_placeholder": "skill-name",
@@ -159,8 +146,6 @@
     "toast_deleted": "Skill deleted",
     "toast_delete_failed": "Failed to delete skill",
     "refresh": {
-      "button": "Update",
-      "tooltip": "Re-download this skill from its source",
       "source_github": "GitHub",
       "source_skills_sh": "Skills.sh",
       "source_clawhub": "ClawHub",
@@ -201,31 +186,19 @@
     },
     "header": {
       "files_one": "{{count}} file",
-      "files_other": "{{count}} files",
-      "used_by_one": "{{count}} agent",
-      "used_by_other": "{{count}} agents",
-      "updated": "Updated {{when}}",
-      "updated_by": "Updated {{when}} by {{name}}"
-    },
-    "tabs": {
-      "aria": "Skill sections",
-      "overview": "Overview",
-      "files_one": "Files {{count}}",
-      "files_other": "Files {{count}}"
+      "files_other": "{{count}} files"
     },
     "overview": {
       "properties": "Properties",
-      "properties_hint": "These fields stay in sync with the SKILL.md frontmatter.",
       "name": "Name",
       "description": "Description",
-      "description_hint": "{{count}} characters. Agents read this to decide whether to load the skill.",
+      "description_hint": "Agents use this to decide when to load the skill.",
       "labels": "Labels",
-      "used_by_one": "Used by {{count}} agent",
-      "used_by_other": "Used by {{count}} agents",
       "used_by_empty": "Not assigned to any agent yet. Open an agent's Skills tab to assign.",
       "permissions_owner": "You can edit and delete this skill. Changes take effect on the next agent run.",
       "permissions_locked_creator": "Only the creator ({{name}}) or a workspace admin can edit this skill.",
-      "permissions_locked": "Only the creator or a workspace admin can edit this skill."
+      "permissions_locked": "Only the creator or a workspace admin can edit this skill.",
+      "character_count": "{{count}} characters"
     },
     "files": {
       "list_aria": "Skill files",
@@ -238,6 +211,21 @@
       "mode_preview": "Preview",
       "mode_edit": "Edit",
       "mode_raw": "Plain text"
+    },
+    "sections": {
+      "content": "Content",
+      "files": "Files",
+      "edit": "Edit",
+      "open": "Open",
+      "add": "Add"
+    },
+    "menu": {
+      "copy_link": "Copy link",
+      "link_copied": "Link copied",
+      "delete": "Delete skill"
+    },
+    "panel": {
+      "add_description": "Add description"
     }
   },
   "create": {
@@ -322,9 +310,7 @@
     "load_failed": "Failed to load runtime local skills",
     "not_supported": "This runtime provider does not expose local skill inventory yet.",
     "no_skills_title": "No local skills found",
-    "no_skills_hint": "This runtime does not have any discoverable local skills yet.",
     "search_placeholder": "Search local skills",
-    "no_search_results_title": "No matching local skills",
     "no_search_results_hint": "No local skills match \"{{query}}\".",
     "ignored_files_hint": "Symlinks, unreadable files, oversized files, and very large bundles are ignored during import.",
     "ready": "Ready to import",

@@ -79,13 +79,20 @@ vi.mock("./execution-log-section", () => ({
   ActiveTaskRow: ({
     task,
     onTranscriptOpenChange,
+    onJump,
   }: {
     task: AgentTask;
     transcriptOpen?: boolean;
     onTranscriptOpenChange?: (open: boolean) => void;
+    onJump?: () => void;
   }) => (
     <div data-testid="active-task-row">
       <span>{task.id}</span>
+      {onJump && (
+        <button type="button" aria-label={`jump to ${task.id}`} onClick={onJump}>
+          Jump
+        </button>
+      )}
       <button
         type="button"
         aria-label={`open transcript ${task.id}`}
@@ -189,6 +196,18 @@ beforeEach(() => {
 });
 
 describe("IssueAgentHeaderChip", () => {
+  it("lists pending threads oldest first after the running task, even after coalescing", () => {
+    // ListTasksByIssue returns newest first, as in DEV-24.
+    mockState.tasks = [
+      makeTask({ id: "dlc", status: "queued", created_at: "2026-09-08T11:44:52+08:00" }),
+      makeTask({ id: "beginner", status: "queued", created_at: "2026-09-08T11:44:34+08:00", trigger_comment_id: "new-supplement", coalesced_comment_ids: ["original"] }),
+      makeTask({ id: "running", created_at: "2026-09-08T11:44:26+08:00" }),
+    ];
+    renderWithI18n(<IssueAgentHeaderChip issueId="issue-1" />);
+    expect(screen.getAllByTestId("active-task-row").map((row) => row.querySelector("span")?.textContent))
+      .toEqual(["running", "beginner", "dlc"]);
+  });
+
   it("shows the active agent name without event count or elapsed time", () => {
     mockState.tasks = [makeTask({})];
 
@@ -203,6 +222,24 @@ describe("IssueAgentHeaderChip", () => {
     expect(mockState.taskMessagesOptions).not.toHaveBeenCalled();
   });
 
+  it("wears the decorative border beam only while an agent is running", () => {
+    mockState.tasks = [makeTask({})];
+    const { unmount } = renderWithI18n(<IssueAgentHeaderChip issueId="issue-1" />);
+
+    const running = screen.getByRole("button", { name: "Walt is working" });
+    const ring = running.querySelector(".border-beam-ring");
+    expect(running).toHaveClass("relative");
+    expect(ring).toHaveAttribute("aria-hidden", "true");
+    expect(ring?.querySelector(".border-beam-light")).not.toBeNull();
+    unmount();
+
+    mockState.tasks = [makeTask({ status: "queued" })];
+    renderWithI18n(<IssueAgentHeaderChip issueId="issue-1" />);
+
+    const queued = screen.getByRole("button", { name: "Walt is queued" });
+    expect(queued.querySelector(".border-beam-ring")).toBeNull();
+  });
+
   it("keeps the header popover card with active task rows", () => {
     mockState.tasks = [makeTask({ id: "task-running" })];
 
@@ -213,6 +250,24 @@ describe("IssueAgentHeaderChip", () => {
       "task-running",
     );
     expect(mockState.taskMessagesOptions).not.toHaveBeenCalled();
+  });
+
+  it("hands the clicked row's task to the jump handler", () => {
+    mockState.tasks = [makeTask({ id: "task-1" }), makeTask({ id: "task-2", status: "queued" })];
+    const onJumpToRun = vi.fn();
+
+    renderWithI18n(<IssueAgentHeaderChip issueId="issue-1" onJumpToRun={onJumpToRun} />);
+    fireEvent.click(screen.getByRole("button", { name: "jump to task-2" }));
+
+    expect(onJumpToRun).toHaveBeenCalledExactlyOnceWith("task-2");
+  });
+
+  it("leaves rows without a jump target when the host has no timeline", () => {
+    mockState.tasks = [makeTask({ id: "task-1" })];
+
+    renderWithI18n(<IssueAgentHeaderChip issueId="issue-1" />);
+
+    expect(screen.queryByRole("button", { name: "jump to task-1" })).not.toBeInTheDocument();
   });
 
   it("keeps the live transcript open after the clicked task row disappears from the active list", async () => {

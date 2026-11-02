@@ -13,6 +13,7 @@ import (
 )
 
 func TestRunMigrationsRepairsInvalidConcurrentIndexBeforeRetry(t *testing.T) {
+	t.Parallel()
 	pool := openTestPool(t)
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()
@@ -97,6 +98,7 @@ func TestRunMigrationsRepairsInvalidConcurrentIndexBeforeRetry(t *testing.T) {
 }
 
 func TestRunMigrationsRepairsDingTalkGroupRouteIndexesBeforeRetry(t *testing.T) {
+	t.Parallel()
 	pool := openTestPool(t)
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()
@@ -245,6 +247,7 @@ func TestRunMigrationsRepairsDingTalkGroupRouteIndexesBeforeRetry(t *testing.T) 
 // relation that IF NOT EXISTS accepts on retry, and the migration version is
 // removed even though the restored index remains unusable.
 func TestRunMigrationsRepairsInvalidConcurrentIndexDuringRollback(t *testing.T) {
+	t.Parallel()
 	pool := openTestPool(t)
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()
@@ -373,6 +376,7 @@ func TestRunMigrationsRepairsInvalidConcurrentIndexDuringRollback(t *testing.T) 
 // concurrent open transaction blocks the wait phase until statement_timeout
 // cancels it, which is exactly what leaves indisvalid = false behind.
 func TestRunMigrationsRepairsInvalidTerminalCompletedAtIndex(t *testing.T) {
+	t.Parallel()
 	pool := openTestPool(t)
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()
@@ -538,6 +542,7 @@ func TestRunMigrationsRepairsInvalidTerminalCompletedAtIndex(t *testing.T) {
 //     IF NOT EXISTS, the retry failed on "already exists" every single time,
 //     which wedges the release rather than degrading it.
 func TestRunMigrationsRepairsShareLinkIndexesBeforeRetry(t *testing.T) {
+	t.Parallel()
 	adminPool := openTestPool(t)
 	ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
 	defer cancel()

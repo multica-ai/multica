@@ -12,7 +12,7 @@ import {
   Copy,
   Check,
   Webhook,
-} from "lucide-react";
+} from "@multica/ui/icons";
 import { useQuery } from "@tanstack/react-query";
 import {
   autopilotDeliveriesOptions,
@@ -30,8 +30,10 @@ import {
 } from "@multica/ui/components/ui/dialog";
 import { cn } from "@multica/ui/lib/utils";
 import { copyText } from "@multica/ui/lib/clipboard";
+import { TruncatedTooltip } from "@multica/ui/components/common/truncated-tooltip";
 import { toast } from "sonner";
 import { useLocale, useT } from "../../i18n";
+import { ObjectSection, ObjectSectionCard } from "../../layout/object-page";
 import type {
   WebhookDelivery,
   WebhookDeliveryStatus,
@@ -50,8 +52,8 @@ type StatusVisual = {
 };
 
 const STATUS_VISUAL: Record<WebhookDeliveryStatus, StatusVisual> = {
-  queued: { color: "text-blue-500", icon: Loader2, spin: true },
-  dispatched: { color: "text-emerald-500", icon: CheckCircle2 },
+  queued: { color: "text-info", icon: Loader2, spin: true },
+  dispatched: { color: "text-success", icon: CheckCircle2 },
   // Signature failures and pre-flight bouncebacks land here. Read as a
   // failure visually, the dialog footer explains the reason.
   rejected: { color: "text-destructive", icon: ShieldOff },
@@ -119,10 +121,10 @@ export function WebhookDeliveriesSection({
   if (!hasWebhookTrigger) return null;
 
   return (
-    <section className="space-y-3">
-      <h2 className="text-body font-medium text-muted-foreground uppercase tracking-wider">
-        {t(($) => $.deliveries.section_title)}
-      </h2>
+    <ObjectSection
+      title={t(($) => $.deliveries.section_title)}
+      count={isLoading ? undefined : deliveries.length}
+    >
       {isLoading ? (
         <div className="space-y-1">
           {Array.from({ length: 3 }).map((_, i) => (
@@ -130,11 +132,11 @@ export function WebhookDeliveriesSection({
           ))}
         </div>
       ) : deliveries.length === 0 ? (
-        <div className="rounded-md border border-dashed p-4 text-center text-body text-muted-foreground">
+        <div className="rounded-lg border border-dashed p-4 text-center text-body text-muted-foreground">
           {t(($) => $.deliveries.empty)}
         </div>
       ) : (
-        <div className="rounded-md border overflow-hidden">
+        <ObjectSectionCard>
           {deliveries.map((delivery) => (
             <DeliveryRow
               key={delivery.id}
@@ -142,9 +144,9 @@ export function WebhookDeliveriesSection({
               autopilotId={autopilotId}
             />
           ))}
-        </div>
+        </ObjectSectionCard>
       )}
-    </section>
+    </ObjectSection>
   );
 }
 
@@ -173,7 +175,7 @@ function DeliveryRow({
       <button
         type="button"
         onClick={() => setOpen(true)}
-        className="flex w-full items-center gap-3 px-4 py-2.5 text-left text-body hover:bg-accent/30 transition-colors"
+        className="flex min-h-10 w-full items-center gap-3 px-3 py-2 text-left text-body hover:bg-accent/30 transition-colors"
       >
         <StatusIcon
           className={cn(
@@ -275,7 +277,7 @@ function DeliveryDetailDialog({
               </span>
             </div>
             <Badge variant="outline">{full.provider || "—"}</Badge>
-            <code className="rounded bg-muted px-2 py-0.5 text-caption font-mono">
+            <code className="rounded-xs bg-muted px-2 py-0.5 text-caption font-mono">
               {full.event || t(($) => $.webhook_payload.unknown_event)}
             </code>
             <SignatureBadge status={full.signature_status as WebhookSignatureStatus} />
@@ -373,15 +375,16 @@ function MetaRow({
   return (
     <div className="flex flex-col">
       <dt className="text-muted-foreground">{label}</dt>
-      <dd
-        className={cn(
-          "truncate text-foreground",
-          mono && "font-mono",
-        )}
-        title={value}
-      >
-        {value}
-      </dd>
+      <TruncatedTooltip content={value}>
+        <dd
+          className={cn(
+            "truncate text-foreground",
+            mono && "font-mono",
+          )}
+        >
+          {value}
+        </dd>
+      </TruncatedTooltip>
     </div>
   );
 }
@@ -471,7 +474,7 @@ function CodeBlock({ label, value }: { label: string; value: string }) {
         <button
           type="button"
           onClick={handleCopy}
-          className="flex items-center gap-1 rounded px-2 py-0.5 hover:bg-accent transition-colors"
+          className="flex items-center gap-1 rounded-xs px-2 py-0.5 hover:bg-accent transition-colors"
         >
           {copied ? (
             <Check className="h-3 w-3 text-emerald-500" />

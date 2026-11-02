@@ -52,6 +52,11 @@ export interface WSClientOptions {
   url: string;
   /** Bearer token sent as the first frame. */
   token: string;
+  /** Reads the CURRENT token at auth-frame time. A reconnect can happen long
+   *  after this client was built — long enough for a sliding session to have
+   *  been renewed in between — so `token` above is only the value to fall
+   *  back on when no reader is supplied (MUL-7436). */
+  getToken?: () => string | null;
   /** Workspace slug — server resolves to UUID and gates membership. */
   workspaceSlug: string;
   /** Mobile app version, surfaced to server logs for debuggability. */
@@ -131,12 +136,12 @@ export class WSClient {
     this.teardownSocket();
   }
 
-  /** Paused → active. Used by the provider when AppState=active. */
+  /** Return to the foreground with one fresh socket. An active socket may
+   *  also need replacing after iOS silently drops the connection. */
   resume() {
-    if (this.state !== "paused") return;
+    if (this.state === "idle") return;
     this.state = "active";
-    this.reconnectAttempt = 0;
-    this.openSocket();
+    this.forceReconnect();
   }
 
   /** Force a fresh socket without going through paused. Used when NetInfo
@@ -211,7 +216,10 @@ export class WSClient {
     ws.onopen = () => {
       this.logger.info("[ws] socket open, sending auth frame");
       ws.send(
-        JSON.stringify({ type: "auth", payload: { token: this.opts.token } }),
+        JSON.stringify({
+          type: "auth",
+          payload: { token: this.opts.getToken?.() ?? this.opts.token },
+        }),
       );
     };
 
@@ -224,7 +232,16 @@ export class WSClient {
         return;
       }
 
-      const type = (msg as { type?: string }).type;
+      // Validate the envelope before transport frames or business dispatch.
+      // JSON primitives (including null) and non-string types are not events.
+      const type = (msg as { type?: unknown } | null)?.type;
+      if (typeof type !== "string" || !type) {
+        // Server-side error frames have shape {error: "..."}; log and drop.
+        // Reconnect loop is bounded by auth-store's 401 handler eventually
+        // tearing this client down via disconnect().
+        this.logger.warn("[ws] frame without a string type", event.data);
+        return;
+      }
       if (type === "auth_ack") {
         this.onAuthenticated();
         return;
@@ -233,14 +250,6 @@ export class WSClient {
         this.onPong();
         return;
       }
-      if (!type) {
-        // Server-side error frames have shape {error: "..."}; log and drop.
-        // Reconnect loop is bounded by auth-store's 401 handler eventually
-        // tearing this client down via disconnect().
-        this.logger.warn("[ws] frame without type", event.data);
-        return;
-      }
-
       this.logger.debug("[ws] event", type);
       const set = this.handlers.get(msg.type);
       if (set) {

@@ -3,9 +3,9 @@ import { useT } from "../../i18n";
 import { stripMentionMarkdown } from "../utils/strip-mention-markdown";
 
 // Display labels shared by every surface that lists an issue's agent runs:
-// the execution log rows and the usage-detail dialog. They live here rather
-// than in either component so the two can't drift — a run must read the same
-// in the sidebar and in the table it opens.
+// the execution log rows and the Runs dialog. They live here rather than in
+// either component so the two can't drift — a run must read the same in the
+// sidebar and in the timeline it opens.
 
 /**
  * Human label for what caused this run.
@@ -33,8 +33,16 @@ export function useTriggerText(task: AgentTask): string {
       ? t(($) => $.execution_log.trigger_retry_attempt_prefix, { attempt: task.attempt })
       : t(($) => $.execution_log.trigger_retry_prefix)
     : "";
+  // A wakeup run's stored summary is the rule's instruction; it reads as
+  // the wakeup instead. WakeupRunLabel adds the rule's condition.
+  if (task.wakeup_id) return retryPrefix + t(($) => $.wakeups.triggered_by_wakeup);
 
-  if (task.trigger_summary) return retryPrefix + stripMentionMarkdown(task.trigger_summary);
+  if (task.trigger_summary) {
+    return (
+      retryPrefix +
+      plainTriggerSummary(task.trigger_summary, t(($) => $.execution_log.trigger_image))
+    );
+  }
   if (isRetry) {
     return task.attempt && task.attempt > 1
       ? t(($) => $.execution_log.trigger_retry_attempt, { attempt: task.attempt })
@@ -43,6 +51,38 @@ export function useTriggerText(task: AgentTask): string {
   if (task.autopilot_run_id) return t(($) => $.execution_log.trigger_autopilot);
   if (task.trigger_comment_id) return t(($) => $.execution_log.trigger_comment);
   return t(($) => $.execution_log.trigger_initial);
+}
+
+const HTML_ENTITIES: Record<string, string> = {
+  amp: "&",
+  lt: "<",
+  gt: ">",
+  quot: '"',
+  "#39": "'",
+  "#x27": "'",
+  nbsp: " ",
+};
+
+/**
+ * One-line plain text for a trigger snapshot.
+ *
+ * The snapshot is the comment's raw Markdown cut at ~200 runes (with a
+ * trailing "…"), so a list row rendering it verbatim showed `&amp;` for an
+ * ampersand the editor escaped, and a comment that opens with a screenshot as
+ * `![CleanShot 2026-…` — the cut usually lands inside the image's URL. Images
+ * become `imageLabel` (whole or cut), links become their text, mentions their
+ * name, entities their character. Decoding is a single pass, so `&amp;lt;`
+ * reads `&lt;` exactly as the author typed it.
+ */
+export function plainTriggerSummary(raw: string, imageLabel: string): string {
+  return stripMentionMarkdown(raw)
+    .replace(/!\[[^\]]*\]\([^)]*\)/g, imageLabel)
+    .replace(/!\[[^\]]*(?:\]\([^)]*)?…?$/, imageLabel)
+    .replace(/\[([^\]]*)\]\([^)]*\)/g, "$1")
+    .replace(/\[([^\]]*)\]\([^)]*…$/, "$1…")
+    .replace(/&(amp|lt|gt|quot|#39|#x27|nbsp);/g, (_, name: string) => HTML_ENTITIES[name] ?? "")
+    .replace(/\s+/g, " ")
+    .trim();
 }
 
 export function useStatusLabel(status: AgentTask["status"]): string {

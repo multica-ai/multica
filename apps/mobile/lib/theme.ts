@@ -7,9 +7,9 @@
  *   in app/_layout.tsx so headers, modals, and the back button match.
  *
  * If you change a variable in global.css, update the matching key here.
- * See apps/mobile/docs/rnr-migration.md §5 for the sync rule.
+ * See apps/mobile/AGENTS.md, "Theming model", for the sync rule.
  */
-import { DarkTheme, DefaultTheme, type Theme } from "@react-navigation/native";
+import { DarkTheme, DefaultTheme, type Theme } from "expo-router";
 
 export const THEME = {
   light: {

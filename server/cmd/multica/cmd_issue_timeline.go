@@ -71,7 +71,7 @@ Examples:
 func init() {
 	issueTimelineCmd.Flags().String("output", "table", "Output format: table or json")
 	issueTimelineCmd.Flags().Bool("activity-only", false, "Drop comments and return every activity record — including the task_completed / task_failed entries the server already writes, not just field changes. Much cheaper to read than the full timeline; use --action when you want only state transitions.")
-	issueTimelineCmd.Flags().StringSlice("action", nil, "Only return activities with these actions (repeatable or comma-separated). Implies --activity-only, since comments carry no action. Known actions: created, status_changed, priority_changed, assignee_changed, title_changed, description_updated, start_date_changed, due_date_changed, task_completed, task_failed, squad_leader_evaluated.")
+	issueTimelineCmd.Flags().StringSlice("action", nil, "Only return activities with these actions (repeatable or comma-separated). Implies --activity-only, since comments carry no action. Known actions: created, status_changed, priority_changed, assignee_changed, title_changed, description_updated, start_date_changed, due_date_changed, task_completed, task_failed, squad_leader_evaluated, duplicate_marked, duplicate_unmarked, duplicate_added, duplicate_removed.")
 	issueTimelineCmd.Flags().String("since", "", "Only return entries created after this timestamp (RFC3339)")
 	issueTimelineCmd.Flags().Int("tail", 0, "Only return the N most recent entries (applied after every other filter)")
 	issueTimelineCmd.Flags().Bool("full-id", false, "Show full UUIDs in table output")
@@ -275,6 +275,9 @@ func timelineActor(actorType, actorID, actorName string, actors actorDisplayLook
 // rather than being dropped.
 func timelineDetail(entry map[string]any, actors actorDisplayLookup, fullID bool) string {
 	if strVal(entry, "type") == "comment" {
+		if strVal(entry, "deleted_at") != "" {
+			return "(deleted)"
+		}
 		return clipTimelineText(singleLineText(strVal(entry, "content")), 60)
 	}
 

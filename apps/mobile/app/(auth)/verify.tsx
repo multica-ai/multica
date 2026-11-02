@@ -8,6 +8,7 @@ import { OtpInput, type OtpInputRef } from "@/components/ui/otp-input";
 import { Button } from "@/components/ui/button";
 import { MulticaLogo } from "@/components/brand/multica-logo";
 import { useAuthStore } from "@/data/auth-store";
+import { i18n, useT } from "@/lib/i18n";
 import { mapAuthError } from "@/lib/auth-error";
 
 const CODE_LENGTH = 6;
@@ -23,6 +24,7 @@ export default function Verify() {
   const [cooldown, setCooldown] = useState(RESEND_COOLDOWN_SECONDS);
   const [resending, setResending] = useState(false);
   const otpRef = useRef<OtpInputRef>(null);
+  const { t } = useT("auth");
 
   useEffect(() => {
     if (cooldown <= 0) return;
@@ -43,7 +45,7 @@ export default function Verify() {
       router.replace("/");
     } catch (err) {
       void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
-      setError(mapAuthError(err, "Couldn't verify the code. Try again."));
+      setError(mapAuthError(err, t("verify.verify_failed"), (key) => i18n.t(`auth:${key}`)));
       setSubmitting(false);
       otpRef.current?.clear();
       setCode("");
@@ -62,7 +64,7 @@ export default function Verify() {
       setCode("");
     } catch (err) {
       void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
-      setError(mapAuthError(err, "Couldn't resend the code. Try again."));
+      setError(mapAuthError(err, t("verify.resend_failed"), (key) => i18n.t(`auth:${key}`)));
     } finally {
       setResending(false);
     }
@@ -79,10 +81,10 @@ export default function Verify() {
             <MulticaLogo size={32} />
             <View className="gap-1 items-center">
               <Text className="text-2xl font-semibold text-foreground">
-                Enter verification code
+                {t("verify.enter_title")}
               </Text>
               <Text className="text-sm text-muted-foreground text-center">
-                We sent a 6-digit code to {email}
+                {t("verify.sent_to", { email })}
               </Text>
             </View>
           </View>
@@ -108,7 +110,7 @@ export default function Verify() {
               disabled={submitting || code.length < CODE_LENGTH}
               onPress={() => submit(code)}
             >
-              <Text>{submitting ? "Verifying..." : "Verify"}</Text>
+              <Text>{submitting ? t("verify.verifying") : t("verify.verify")}</Text>
             </Button>
 
             <Pressable
@@ -124,10 +126,10 @@ export default function Verify() {
                 }
               >
                 {resending
-                  ? "Sending..."
+                  ? t("login.sending")
                   : cooldown > 0
-                    ? `Resend code in ${cooldown}s`
-                    : "Resend code"}
+                    ? t("verify.resend_in", { count: cooldown })
+                    : t("verify.resend")}
               </Text>
             </Pressable>
 
@@ -136,7 +138,7 @@ export default function Verify() {
               disabled={submitting}
               onPress={() => router.back()}
             >
-              <Text>Use a different email</Text>
+              <Text>{t("verify.change_email")}</Text>
             </Button>
           </View>
         </View>

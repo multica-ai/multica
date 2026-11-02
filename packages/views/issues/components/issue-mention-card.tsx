@@ -6,6 +6,18 @@ import { IssueChip } from "./issue-chip";
 import { IssueHoverCard } from "./issue-hover-card";
 import { useT } from "../../i18n";
 import { useCurrentIssueRenderContext } from "../current-issue-render-context";
+import { useIssuePeekActions } from "../surface/peek-context";
+
+/** Shift+Click with the primary button and no other modifier. */
+function isPeekClick(event: React.MouseEvent) {
+  return (
+    event.button === 0 &&
+    event.shiftKey &&
+    !event.metaKey &&
+    !event.ctrlKey &&
+    !event.altKey
+  );
+}
 
 interface IssueMentionCardProps {
   issueId: string;
@@ -32,7 +44,10 @@ function CurrentIssueChipContent({ identifier }: { identifier: string }) {
  *
  * AppLink owns the click semantics: plain click navigates in place, modifier
  * and middle clicks open tabs. There is deliberately no per-surface or
- * per-preference override.
+ * per-preference override. The one exception is Shift+Click inside a peek
+ * host (an issue list surface, the issue page, the inbox detail): it opens
+ * the mentioned issue in the floating side peek, the same gesture board cards
+ * and list rows use. Outside a host, Shift+Click keeps AppLink's behavior.
  *
  * Hovering opens IssueHoverCard, which shows the detail the chip has no room
  * for. No `delay` is passed, so it opens on Base UI's default dwell. The same
@@ -42,6 +57,7 @@ function CurrentIssueChipContent({ identifier }: { identifier: string }) {
 export function IssueMentionCard({ issueId, fallbackLabel }: IssueMentionCardProps) {
   const p = useWorkspacePaths();
   const currentIssue = useCurrentIssueRenderContext();
+  const peek = useIssuePeekActions();
   const currentIdentifier =
     currentIssue && issueId === currentIssue.id
       ? currentIssue.identifier
@@ -52,6 +68,23 @@ export function IssueMentionCard({ issueId, fallbackLabel }: IssueMentionCardPro
         href={p.issueDetail(issueId)}
         newTabTitle={fallbackLabel}
         className="issue-mention align-middle"
+        onMouseDown={
+          peek
+            ? (event) => {
+                // Keep the shift-click from extending the text selection.
+                if (isPeekClick(event)) event.preventDefault();
+              }
+            : undefined
+        }
+        onClick={
+          peek
+            ? (event) => {
+                if (!isPeekClick(event)) return;
+                event.preventDefault();
+                peek.toggle(issueId);
+              }
+            : undefined
+        }
       >
         <IssueChip
           issueId={issueId}

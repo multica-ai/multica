@@ -41,7 +41,8 @@ export function upsertIntoProjectsList(
   project: Project,
 ) {
   qc.setQueryData<Project[]>(projectKeys.list(wsId), (old) => {
-    if (!old) return [project];
+    // A single event cannot seed the full list before its first fetch.
+    if (!old) return old;
     const idx = old.findIndex((p) => p.id === project.id);
     if (idx === -1) return [project, ...old];
     const copy = old.slice();

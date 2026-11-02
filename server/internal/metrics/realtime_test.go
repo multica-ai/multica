@@ -23,7 +23,7 @@ func TestRealtimeCollectorExposesCounters(t *testing.T) {
 	m.RedisUsedMemoryBytes.Store(4096)
 	m.RedisMaxMemoryBytes.Store(8192)
 	m.RedisEvictedKeys.Store(3)
-	m.ObserveRedisStream("ws:relay:shard:0", 23, 2048, 60000)
+	m.ObserveRedisStream("ws:relay:shard:0", 23, 60000)
 
 	registry := NewRegistry(RegistryOptions{Realtime: m})
 	rec := httptest.NewRecorder()
@@ -44,7 +44,6 @@ func TestRealtimeCollectorExposesCounters(t *testing.T) {
 		"multica_realtime_redis_maxmemory_bytes 8192",
 		"multica_realtime_redis_evicted_keys 3",
 		`multica_realtime_redis_stream_entries{stream="ws:relay:shard:0"} 23`,
-		`multica_realtime_redis_stream_memory_bytes{stream="ws:relay:shard:0"} 2048`,
 		`multica_realtime_redis_stream_pttl_milliseconds{stream="ws:relay:shard:0"} 60000`,
 	} {
 		if !strings.Contains(body, want) {

@@ -11,7 +11,10 @@ const FIVE_MINUTES_MS = 5 * 60 * 1000;
 // not promise when or whether server-side cleanup will happen.
 const LONG_OFFLINE_THRESHOLD_MS = 6 * 24 * 3600 * 1000; // 6 days
 
-export function deriveRuntimeHealth(runtime: AgentRuntime, now: number): RuntimeHealth {
+export function deriveRuntimeHealth(
+  runtime: Pick<AgentRuntime, "status" | "last_seen_at">,
+  now: number,
+): RuntimeHealth {
   if (runtime.status === "online") return "online";
 
   // No last_seen timestamp ever recorded — treat as long-offline. This is

@@ -60,10 +60,6 @@ vi.mock("@multica/views/workspace/no-access-page", () => ({
   NoAccessPage: () => <div data-testid="no-access" />,
 }));
 
-vi.mock("@multica/views/workspace/welcome-after-onboarding", () => ({
-  WelcomeAfterOnboarding: () => null,
-}));
-
 vi.mock("@multica/views/workspace/use-workspace-seen", () => ({
   useWorkspaceSeen: () => state.hasBeenSeen,
 }));

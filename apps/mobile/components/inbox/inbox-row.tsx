@@ -28,7 +28,7 @@ interface Props {
 
 export function InboxRow({ item, onPress }: Props) {
   const isUnread = !item.read;
-  const { categoryOf, colorOf } = useIssueStatuses();
+  const { categoryOf, colorOf, iconOf } = useIssueStatuses();
   const displayTitle = getInboxDisplayTitle(item);
   const actorType = item.actor_type ?? item.recipient_type;
   const actorId = item.actor_id ?? item.recipient_id;
@@ -66,7 +66,7 @@ export function InboxRow({ item, onPress }: Props) {
               <StatusIcon
                 status={item.issue_status}
                 category={categoryOf(item.issue_status)}
-                color={colorOf(item.issue_status)}
+                icon={iconOf(item.issue_status)} color={colorOf(item.issue_status)}
                 size={14}
               />
             ) : null}

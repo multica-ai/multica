@@ -35,6 +35,8 @@ const mockApiSetToken = vi.hoisted(() => vi.fn());
 const mockApiGetMe = vi.hoisted(() => vi.fn());
 const mockApiIssueCliToken = vi.hoisted(() => vi.fn());
 const mockSetQueryData = vi.hoisted(() => vi.fn());
+// Mutable slice of auth state the component subscribes to.
+const mockAuthState = vi.hoisted(() => ({ expired: false }));
 
 vi.mock("@tanstack/react-query", async () => {
   const actual = await vi.importActual<typeof import("@tanstack/react-query")>(
@@ -47,7 +49,11 @@ vi.mock("@multica/core/auth", () => ({
   useAuthStore: Object.assign(
     // Zustand hook form — component may call useAuthStore(selector)
     (selector?: (s: unknown) => unknown) => {
-      const state = { sendCode: mockSendCode, verifyCode: mockVerifyCode };
+      const state = {
+        sendCode: mockSendCode,
+        verifyCode: mockVerifyCode,
+        expired: mockAuthState.expired,
+      };
       return selector ? selector(state) : state;
     },
     {
@@ -96,6 +102,7 @@ describe("LoginPage", () => {
   beforeEach(() => {
     vi.useFakeTimers({ shouldAdvanceTime: true });
     vi.clearAllMocks();
+    mockAuthState.expired = false;
     // Default: no existing session (getMe rejects when no auth)
     mockApiGetMe.mockRejectedValue(new Error("unauthorized"));
     localStorage.clear();
@@ -113,6 +120,19 @@ describe("LoginPage", () => {
   // -------------------------------------------------------------------------
   // Email step rendering
   // -------------------------------------------------------------------------
+
+  it("says the session expired when that is why the user is here", () => {
+    mockAuthState.expired = true;
+    renderWithI18n(<LoginPage onSuccess={onSuccess} />);
+    expect(
+      screen.getByText(/your session expired/i),
+    ).toBeInTheDocument();
+  });
+
+  it("stays quiet on an ordinary visit to the login page", () => {
+    renderWithI18n(<LoginPage onSuccess={onSuccess} />);
+    expect(screen.queryByText(/your session expired/i)).not.toBeInTheDocument();
+  });
 
   it("renders email form with 'Sign in to Multica' title", () => {
     renderWithI18n(<LoginPage onSuccess={onSuccess} />);
@@ -424,6 +444,37 @@ describe("LoginPage", () => {
     expect(
       screen.getByRole("button", { name: /use a different account/i }),
     ).toBeInTheDocument();
+  });
+
+  it("still finds the stored token after the cookie probe's 401 clears it", async () => {
+    localStorage.setItem("multica_token", "existing-jwt");
+    // The cookie probe 401s, and a 401 ends the session — which wipes the very
+    // key the localStorage fallback is about to look for. The component has to
+    // have read it before probing, or token-mode users can never authorize a
+    // CLI (they land on the email step instead).
+    mockApiGetMe
+      .mockImplementationOnce(() => {
+        localStorage.removeItem("multica_token");
+        return Promise.reject(new Error("no cookie"));
+      })
+      .mockResolvedValueOnce({
+        id: "u-1",
+        email: "user@example.com",
+        name: "Test User",
+      });
+
+    render(
+      <LoginPage
+        onSuccess={onSuccess}
+        cliCallback={{ url: "http://localhost:9876/callback", state: "abc" }}
+      />,
+    );
+
+    await waitFor(() => {
+      expect(screen.getByText(/authorize cli/i)).toBeInTheDocument();
+    });
+    expect(mockApiSetToken).toHaveBeenCalledWith("existing-jwt");
+    expect(localStorage.getItem("multica_token")).toBe("existing-jwt");
   });
 
   it("CLI authorize button redirects to callback URL", async () => {

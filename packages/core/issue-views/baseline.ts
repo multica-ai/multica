@@ -1,7 +1,20 @@
-import type { ActorFilterValue, FilterSnapshot } from "../issues/stores/view-store";
-import type { IssuePriority, IssueStatus, PropertyFilterValue } from "../types";
+import type {
+  ActorFilterValue,
+  FilterSnapshot,
+  IssueRelationFilter,
+  NegatableFilterDimension,
+} from "../issues/stores/view-store";
+import {
+  DUE_DATE_FILTERS,
+  ISSUE_RELATION_FILTERS,
+  NEGATABLE_FILTER_DIMENSIONS,
+  type DueDateFilter,
+} from "../issues/stores/view-store";
+import { countAdvancedConditions, sanitizeAdvancedFilter } from "../issues/stores/filter-tree";
+import type { IssuePriority, IssueStatus, ProjectStatus, PropertyFilterValue } from "../types";
 import { isKnownPropertyFilterOp, isPropertyOperatorFilter, propertyFilterValueKey } from "../types";
 import { PRIORITY_DISPLAY_ORDER } from "../issues/config";
+import { PROJECT_STATUS_ORDER } from "../projects/config";
 
 /**
  * The open saved view's query, normalized for two jobs:
@@ -21,7 +34,13 @@ export interface IssueViewBaseline {
   creator: Set<string>;
   project: Set<string>;
   includeNoProject: boolean;
+  projectStatus: Set<string>;
   label: Set<string>;
+  relation: Set<string>;
+  dueDate: Set<string>;
+  /** Dimensions the view saved as "is not". */
+  negated: Set<NegatableFilterDimension>;
+  agentRunning: boolean;
   /** Property definition id → fixed member keys (`propertyFilterValueKey`). */
   property: Map<string, Set<string>>;
   /** Enum-sanitized snapshot, safe to hand straight to `resetFiltersTo`. */
@@ -78,9 +97,34 @@ export function baselineFromQuery(query: Record<string, unknown>): IssueViewBase
   const assigneeFilters = actorArray(query.assigneeFilters);
   const creatorFilters = actorArray(query.creatorFilters);
   const projectFilters = stringArray(query.projectFilters);
+  // A saved view predating this dimension has no key at all, and an unknown
+  // member cannot be represented in the store — both collapse to "no filter".
+  const projectStatusFilters = stringArray(query.projectStatusFilters).filter(
+    (s): s is ProjectStatus => (PROJECT_STATUS_ORDER as readonly string[]).includes(s),
+  );
   const labelFilters = stringArray(query.labelFilters);
+  const relationFilters = stringArray(query.relationFilters).filter(
+    (r): r is IssueRelationFilter => (ISSUE_RELATION_FILTERS as readonly string[]).includes(r),
+  );
+  const dueDateFilters = [
+    ...new Set(
+      stringArray(query.dueDateFilters).filter((d): d is DueDateFilter =>
+        (DUE_DATE_FILTERS as readonly string[]).includes(d),
+      ),
+    ),
+  ];
+  const advancedFilter = sanitizeAdvancedFilter(query.advancedFilter);
+  const negatedFilters = [
+    ...new Set(
+      stringArray(query.negatedFilters).filter(
+        (d): d is NegatableFilterDimension =>
+          (NEGATABLE_FILTER_DIMENSIONS as readonly string[]).includes(d),
+      ),
+    ),
+  ];
   const includeNoAssignee = query.includeNoAssignee === true;
   const includeNoProject = query.includeNoProject === true;
+  const agentRunningFilter = query.agentRunningFilter === true;
 
   const propertyFilters: Record<string, PropertyFilterValue[]> = {};
   const property = new Map<string, Set<string>>();
@@ -104,7 +148,12 @@ export function baselineFromQuery(query: Record<string, unknown>): IssueViewBase
     creator: new Set(creatorFilters.map(actorFilterKey)),
     project: new Set(projectFilters),
     includeNoProject,
+    projectStatus: new Set(projectStatusFilters),
     label: new Set(labelFilters),
+    relation: new Set(relationFilters),
+    dueDate: new Set(dueDateFilters),
+    negated: new Set(negatedFilters),
+    agentRunning: agentRunningFilter,
     property,
     raw: {
       statusFilters,
@@ -114,8 +163,35 @@ export function baselineFromQuery(query: Record<string, unknown>): IssueViewBase
       creatorFilters,
       projectFilters,
       includeNoProject,
+      projectStatusFilters,
       labelFilters,
+      relationFilters,
+      dueDateFilters,
+      negatedFilters,
       propertyFilters,
+      advancedFilter,
+      agentRunningFilter,
     },
   };
+}
+
+/** How many filter dimensions a saved query constrains, for summaries. */
+export function issueViewFilterCount(query: Record<string, unknown>): number {
+  const { raw } = baselineFromQuery(query);
+  return (
+    [
+      raw.statusFilters.length,
+      raw.priorityFilters.length,
+      raw.assigneeFilters.length || raw.includeNoAssignee,
+      raw.creatorFilters.length,
+      raw.projectFilters.length || raw.includeNoProject,
+      raw.projectStatusFilters.length,
+      raw.labelFilters.length,
+      raw.relationFilters.length,
+      raw.dueDateFilters.length,
+      raw.agentRunningFilter,
+    ].filter(Boolean).length +
+    Object.keys(raw.propertyFilters).length +
+    countAdvancedConditions(raw.advancedFilter)
+  );
 }

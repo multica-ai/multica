@@ -24,6 +24,7 @@ import { useNewIssueDraftStore } from "@/data/stores/new-issue-draft-store";
 import { useWorkspaceStore } from "@/data/workspace-store";
 import { PRIORITY_LABEL } from "@/lib/issue-status";
 import { useIssueStatuses } from "@/lib/use-issue-statuses";
+import { useT } from "@/lib/i18n";
 
 /**
  * Picker fields the new-issue draft form can open. Bound to a typed map
@@ -46,6 +47,7 @@ const NEW_ISSUE_PICKER_PATHNAMES = {
 } as const satisfies Record<NewIssuePickerField, string>;
 
 export function CreateFormAttributeRow() {
+  const { t } = useT("issues");
   const wsSlug = useWorkspaceStore((s) => s.currentWorkspaceSlug);
   const status = useNewIssueDraftStore((s) => s.status);
   const priority = useNewIssueDraftStore((s) => s.priority);
@@ -55,12 +57,12 @@ export function CreateFormAttributeRow() {
 
   const { getName } = useActorLookup();
   // The draft can hold a custom status the user picked in the sheet. (MUL-6243)
-  const { categoryOf, colorOf, labelOf } = useIssueStatuses();
+  const { categoryOf, colorOf, labelOf, iconOf } = useIssueStatuses();
   const assigneeLabel = assignee
     ? getName(assignee.type, assignee.id)
-    : "Assignee";
-  const priorityLabel =
-    priority === "none" ? "Priority" : PRIORITY_LABEL[priority];
+    : t("filters.assignee");
+  const priorityLabel: string =
+    priority === "none" ? t("filters.priority") : t(PRIORITY_LABEL[priority]);
 
   const open = (field: NewIssuePickerField) => {
     if (!wsSlug) return;
@@ -78,11 +80,11 @@ export function CreateFormAttributeRow() {
             <StatusIcon
               status={status}
               category={categoryOf(status)}
-              color={colorOf(status)}
+              icon={iconOf(status)} color={colorOf(status)}
               size={12}
             />
           }
-          label={labelOf(status)}
+          label={String(labelOf(status))}
           variant="filled"
           onPress={() => open("status")}
         />
@@ -121,7 +123,11 @@ export function CreateFormAttributeRow() {
               color={dueDate ? undefined : "#a1a1aa"}
             />
           }
-          label={dueDate ? formatDueDate(dueDate) : "Due date"}
+          label={
+            dueDate
+              ? formatDueDate(dueDate) || t("common:fields.due_date")
+              : t("common:fields.due_date")
+          }
           variant={dueDate ? "filled" : "dimmed"}
           onPress={() => open("due-date")}
         />
@@ -133,7 +139,7 @@ export function CreateFormAttributeRow() {
               <Ionicons name="folder-outline" size={14} color="#a1a1aa" />
             )
           }
-          label={project?.title ?? "Project"}
+          label={project?.title ?? t("common:fields.project")}
           variant={project ? "filled" : "dimmed"}
           onPress={() => open("project")}
         />
@@ -143,6 +149,7 @@ export function CreateFormAttributeRow() {
 }
 
 // due_date is a calendar day — format timezone-safely (no offset day shift).
+// An unparseable value falls back to the caller's localized chip label.
 function formatDueDate(iso: string): string {
-  return formatDateOnly(iso, { month: "short", day: "numeric" }) || "Due date";
+  return formatDateOnly(iso, { month: "short", day: "numeric" });
 }

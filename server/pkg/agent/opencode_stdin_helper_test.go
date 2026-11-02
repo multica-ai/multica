@@ -12,9 +12,10 @@ import (
 // (the Chocolatey shim in #6538 is a real PE binary, not a .cmd wrapper), so
 // the backend's argv reaches CreateProcess unmediated.
 const (
-	opencodeStdinHelperEnv      = "MULTICA_OPENCODE_STDIN_HELPER"
-	opencodeStdinHelperArgvFile = "MULTICA_OPENCODE_STDIN_HELPER_ARGV_FILE"
-	opencodeStdinHelperInFile   = "MULTICA_OPENCODE_STDIN_HELPER_STDIN_FILE"
+	opencodeStdinHelperEnv       = "MULTICA_OPENCODE_STDIN_HELPER"
+	opencodeStdinHelperArgvFile  = "MULTICA_OPENCODE_STDIN_HELPER_ARGV_FILE"
+	opencodeStdinHelperInFile    = "MULTICA_OPENCODE_STDIN_HELPER_STDIN_FILE"
+	opencodeStdinHelperUsageOnly = "MULTICA_OPENCODE_STDIN_HELPER_USAGE_ONLY"
 )
 
 const (
@@ -69,6 +70,10 @@ func runFakeOpencodeStdinHelper() {
 	}
 
 	fmt.Println(`{"type":"step_start","timestamp":1,"sessionID":"ses_fake","part":{"type":"step-start"}}`)
+	if os.Getenv(opencodeStdinHelperUsageOnly) == "1" {
+		fmt.Println(`{"type":"step_finish","timestamp":2,"sessionID":"ses_fake","part":{"type":"step-finish","reason":"stop","tokens":{"input":0,"output":0,"reasoning":20}}}`)
+		return
+	}
 	fmt.Println(`{"type":"text","timestamp":2,"sessionID":"ses_fake","part":{"type":"text","text":"ok"}}`)
 	fmt.Println(`{"type":"step_finish","timestamp":3,"sessionID":"ses_fake","part":{"type":"step-finish"}}`)
 }

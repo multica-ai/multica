@@ -1,0 +1,38 @@
+{
+  "title": "选择工作区",
+  "members": "成员",
+  "agents": "智能体",
+  "select": "选择工作区",
+  "switch": {
+    "title": "切换工作区",
+    "message": "切换到 {{name}}？",
+    "confirm": "切换",
+    "current_a11y": "{{name}} 是当前工作区",
+    "switch_a11y": "切换到 {{name}}"
+  },
+  "empty": "你还没有加入任何工作区。请联系工作区管理员以获取邀请。",
+  "agent": {
+    "title": "智能体",
+    "empty": "还没有智能体",
+    "search_placeholder": "搜索智能体...",
+    "coming_soon": "智能体功能即将上线。"
+  },
+  "actions": {
+    "retry": "重试",
+    "sign_out": "退出登录"
+  },
+  "auth": {
+    "signed_in_as": "当前登录账号"
+  },
+  "errors": {
+    "load_failed": "工作区加载失败：{{message}}"
+  },
+  "pins": {
+    "errors": {
+      "load_failed": "固定项加载失败：{{message}}"
+    },
+    "empty": "还没有固定项。",
+    "unavailable_issue": "该固定任务不可用。",
+    "unavailable_project": "该固定项目不可用。"
+  }
+}

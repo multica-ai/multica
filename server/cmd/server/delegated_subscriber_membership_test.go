@@ -43,8 +43,8 @@ func addWorkspaceMember(t *testing.T, userID string) (revoke func()) {
 // round 6 finding 2.
 //
 // originator_user_id is stamped when the task is QUEUED and never revisited.
-// GetAgentTaskInWorkspace proves the task's agent still belongs to the
-// workspace, which is a different claim from "the human does". A member can be
+// The lineage read proves the task's agent still belongs to the workspace,
+// which is a different claim from "the human does". A member can be
 // revoked while their tasks keep running on a shared runtime, and every child
 // those tasks file afterwards would write a subscriber row for a non-member:
 // a ghost watcher accumulating inbox rows, and restored history if they ever

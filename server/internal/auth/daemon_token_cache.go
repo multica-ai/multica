@@ -13,7 +13,10 @@ import (
 // daemonTokenCachePrefix namespaces daemon-token cache keys separately
 // from PAT (mul:auth:pat:*) so the two key spaces can't collide and an
 // invalidation on one kind of token doesn't accidentally hit the other.
-const daemonTokenCachePrefix = "mul:auth:daemon:"
+//
+// v2 (MUL-8154) added OwnerID; entries written before it are never read, so a
+// pre-upgrade entry cannot authorize a token without its owner binding.
+const daemonTokenCachePrefix = "mul:auth:daemon:v2:"
 
 // DaemonTokenIdentity is what DaemonAuth needs from the cached lookup —
 // the workspace_id and daemon_id that the middleware injects into the
@@ -22,6 +25,9 @@ const daemonTokenCachePrefix = "mul:auth:daemon:"
 type DaemonTokenIdentity struct {
 	WorkspaceID string `json:"w"`
 	DaemonID    string `json:"d"`
+	// OwnerID is the runtime owner the token was issued for ("" for
+	// Qoder-managed tokens). MUL-8154.
+	OwnerID string `json:"o,omitempty"`
 }
 
 // DaemonTokenCache caches resolved daemon-token (mdt_) lookups in Redis.
@@ -29,13 +35,13 @@ type DaemonTokenIdentity struct {
 // or reports a cache miss, so single-node dev / tests with no REDIS_URL
 // degrade cleanly to direct DB lookups.
 type DaemonTokenCache struct {
-	rdb *redis.Client
+	rdb redis.UniversalClient
 }
 
 // NewDaemonTokenCache returns a cache backed by rdb. Pass nil to disable
 // caching; the returned *DaemonTokenCache is safe to call but never hits
 // Redis.
-func NewDaemonTokenCache(rdb *redis.Client) *DaemonTokenCache {
+func NewDaemonTokenCache(rdb redis.UniversalClient) *DaemonTokenCache {
 	if rdb == nil {
 		return nil
 	}

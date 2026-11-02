@@ -8,6 +8,8 @@
  * the column defs' render closures — flexRender treats those as component
  * TYPES, so React remounted every cell and the just-opened picker closed.
  */
+import { useIssueOpeningStore } from "@multica/core/issues/stores/issue-opening-store";
+import { IssuePeekActionsContext } from "../surface/peek-context";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   act,
@@ -278,6 +280,7 @@ describe("TableView cell editors under data refresh", () => {
   let queryClient: QueryClient;
 
   beforeEach(() => {
+    useIssueOpeningStore.setState({ openMode: "page" });
     navigationMocks.push.mockReset();
     navigationMocks.openInNewTab.mockReset();
     navigationMocks.getShareableUrl.mockReset();
@@ -429,6 +432,33 @@ describe("TableView cell editors under data refresh", () => {
       parent_issue_identifier: "MUL-a",
       project_id: "project-1",
     });
+  });
+
+  it("uses the preferred peek for both titles and row space; Shift opens the full page instead", async () => {
+    useIssueOpeningStore.getState().setOpenMode("peek");
+    serverIssues = [makeIssue("a", "Alpha task", "todo")];
+    const peek = { open: vi.fn(), toggle: vi.fn(), close: vi.fn(), publishColumns: vi.fn() };
+    renderWithI18n(
+      <QueryClientProvider client={queryClient}>
+        <IssuePeekActionsContext.Provider value={peek}>
+          <Harness childProgressMap={new Map()} surfaceKey="test-preferred-peek" />
+        </IssuePeekActionsContext.Provider>
+      </QueryClientProvider>,
+    );
+    const row = (await screen.findByText("MUL-a")).closest("tr")!;
+    const title = within(row).getByRole("button", { name: "Alpha task" });
+    fireEvent.click(title);
+    fireEvent.click(row);
+    expect(peek.open).toHaveBeenCalledTimes(2);
+    expect(peek.open).toHaveBeenCalledWith("a");
+    expect(navigationMocks.push).not.toHaveBeenCalled();
+    // In preview mode Shift+Click opens the other target: the full page, in place.
+    fireEvent.click(title, { shiftKey: true });
+    expect(navigationMocks.push).toHaveBeenCalledWith("/test/issues/a");
+    expect(peek.toggle).not.toHaveBeenCalled();
+    fireEvent.click(row, { metaKey: true });
+    expect(navigationMocks.openInNewTab).toHaveBeenCalledWith("/test/issues/a", "MUL-a");
+    expect(peek.open).toHaveBeenCalledTimes(2);
   });
 
   it("navigates in place on plain title and row clicks; modifiers open tabs", async () => {

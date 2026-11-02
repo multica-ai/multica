@@ -299,9 +299,13 @@ func TestDeleteWorkspace_RollsBackResourceLabelCleanup(t *testing.T) {
 		t.Skip("database not available")
 	}
 	ctx := context.Background()
+	// The teardown also waits on rollup lock 4246 under the same budget. With
+	// internal/scheduler holding it in parallel, that wait would time out first
+	// and the 503 below would arrive before the label sweep ever ran.
+	lockRollupSingleton(t)
 	// The teardown transaction sets its own lock_timeout (MUL-5983); shorten
 	// it so the blocked administration step fails while the test is young.
-	setWorkspaceDeleteLockTimeoutForTest(t, 100*time.Millisecond)
+	setWorkspaceDeleteLockTimeoutForTest(t, 50*time.Millisecond)
 	wsID, agentID, skillID := seedWorkspaceResourceLabelFixture(t, ctx, "handler-tests-delete-labels-rollback")
 
 	blocker, err := testPool.Begin(ctx)

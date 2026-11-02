@@ -145,6 +145,20 @@ type TokenCacheInvalidator interface {
 	InvalidateTokenCache(appID string)
 }
 
+// ReactionLister is implemented by an APIClient that can list the reactions
+// already sitting on a message (GET /im/v1/messages/{message_id}/reactions).
+// The typing-indicator sweep uses it to find and delete the bot's own Typing
+// reactions without consulting any in-process state, which is what keeps the
+// badge removable after a restart or on another replica.
+//
+// It is deliberately separate from APIClient rather than a method on it,
+// mirroring TokenCacheInvalidator: only clients that can read Lark implement
+// it, and fakes that only exercise the add/delete pair are not forced to grow
+// list plumbing. Callers type-assert and skip the sweep when it is absent.
+type ReactionLister interface {
+	ListMessageReactions(ctx context.Context, p ListMessageReactionsParams) ([]MessageReaction, error)
+}
+
 // ListMessagesParams selects a bounded, recent window of messages in a
 // single Lark chat for the group-context prefetch. Only the fields the
 // enricher needs today are exposed (ChatID, ThreadID, PageSize, EndTime);
@@ -342,6 +356,26 @@ type DeleteReactionParams struct {
 	InstallationID InstallationCredentials
 	MessageID      string
 	ReactionID     string
+}
+
+// ListMessageReactionsParams is the input shape for listing the reactions
+// already on a message. EmojiType filters server-side (Lark's
+// reaction_type query parameter); empty lists every reaction.
+type ListMessageReactionsParams struct {
+	InstallationID InstallationCredentials
+	MessageID      string
+	EmojiType      string
+}
+
+// MessageReaction is one reaction on a message as Lark lists it. OperatorType
+// is "app" when the installed bot added it and "user" when a human did — the
+// distinction that lets the typing-indicator sweep delete only the badges the
+// bot itself put on.
+type MessageReaction struct {
+	ReactionID   string
+	OperatorType string
+	OperatorID   string
+	EmojiType    string
 }
 
 // InstallationCredentials is the per-installation transport context the

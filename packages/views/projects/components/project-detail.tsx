@@ -1,13 +1,14 @@
 "use client";
 
 import { useMemo, useState, useCallback, useRef, useEffect } from "react";
+import { useRegisterCommandBarContext } from "../../search/register-context";
 import { useDefaultLayout, usePanelRef } from "react-resizable-panels";
-import { Check, ChevronRight, Link2, MoreHorizontal, PanelRight, Pin, PinOff, Trash2, UserMinus } from "lucide-react";
+import { Check, ChevronRight, Link2, PanelRight, Pin, PinOff, Trash2, UserMinus } from "@multica/ui/icons";
 import { useQuery } from "@tanstack/react-query";
 import { cn } from "@multica/ui/lib/utils";
 import { copyText } from "@multica/ui/lib/clipboard";
 import { toast } from "sonner";
-import type { ProjectStatus, ProjectPriority } from "@multica/core/types";
+import type { Project, ProjectStatus, ProjectPriority } from "@multica/core/types";
 import { useAuthStore } from "@multica/core/auth";
 import { projectDetailOptions } from "@multica/core/projects/queries";
 import { useUpdateProject, useDeleteProject } from "@multica/core/projects/mutations";
@@ -28,9 +29,12 @@ import { PriorityIcon } from "../../issues/components/priority-icon";
 import { ProjectResourcesSection } from "./project-resources-section";
 import { ProjectStartDatePicker } from "./project-start-date-picker";
 import { ProjectDueDatePicker } from "./project-due-date-picker";
+import { ProjectWorkflowControl } from "../../workflows/project-workflow-row";
+import { ProjectWorkflowMenuHost } from "../../workflows/project-workflow-menu";
 import { IssueSurface } from "../../issues/surface/issue-surface";
 import { Skeleton } from "@multica/ui/components/ui/skeleton";
 import { Button } from "@multica/ui/components/ui/button";
+import { TooltipHint } from "@multica/ui/components/common/tooltip-hint";
 import { ResizablePanelGroup, ResizablePanel, ResizableHandle } from "@multica/ui/components/ui/resizable";
 import { Sheet, SheetContent } from "@multica/ui/components/ui/sheet";
 import { useIsMobile } from "@multica/ui/hooks/use-mobile";
@@ -52,7 +56,7 @@ import {
   TooltipContent,
 } from "@multica/ui/components/ui/tooltip";
 import { EmojiPicker } from "@multica/ui/components/common/emoji-picker";
-import { BreadcrumbHeader } from "../../layout/breadcrumb-header";
+import { IssueViewHeader } from "../../issue-views/view-header";
 import {
   AnimatedRightSidebar,
   getAnimatedRightSidebarInitialOpen,
@@ -74,9 +78,7 @@ import { useT } from "../../i18n";
 import { useProjectStatusLabels, useProjectPriorityLabels } from "./labels";
 import { matchesPinyin } from "../../editor/extensions/pinyin-match";
 
-// ---------------------------------------------------------------------------
 // Property row — sidebar property display
-// ---------------------------------------------------------------------------
 
 function PropRow({
   label,
@@ -95,9 +97,17 @@ function PropRow({
   );
 }
 
-// ---------------------------------------------------------------------------
+// The project's workflow (MUL-7420).
+function ProjectWorkflowPropRow({ project }: { project: Project }) {
+  const { t } = useT("issues");
+  return (
+    <PropRow label={t(($) => $.workflows.project.label)}>
+      <ProjectWorkflowControl project={project} />
+    </PropRow>
+  );
+}
+
 // ProjectDetail
-// ---------------------------------------------------------------------------
 
 export function ProjectDetail({ projectId }: { projectId: string }) {
   const { t } = useT("projects");
@@ -108,6 +118,9 @@ export function ProjectDetail({ projectId }: { projectId: string }) {
   const router = useNavigation();
   const userId = useAuthStore((s) => s.user?.id);
   const { data: project, isLoading } = useQuery(projectDetailOptions(wsId, projectId));
+  useRegisterCommandBarContext(
+    useMemo(() => (project ? { kind: "project", project } : null), [project]),
+  );
   const recordRecentContext = useRecentContextStore((s) => s.recordVisit);
   useEffect(() => {
     if (project) {
@@ -247,17 +260,19 @@ export function ProjectDetail({ projectId }: { projectId: string }) {
       {/* Icon + Title */}
       <div>
         <Popover open={iconPickerOpen} onOpenChange={setIconPickerOpen}>
-          <PopoverTrigger
-            render={
-              <button
-                type="button"
-                className="text-display-sm cursor-pointer rounded-lg p-1 -ml-1 hover:bg-accent/60 transition-colors"
-                title={t(($) => $.detail.icon_tooltip)}
-              >
-                {project.icon || "📁"}
-              </button>
-            }
-          />
+          <TooltipHint label={t(($) => $.detail.icon_tooltip)}>
+            <PopoverTrigger
+              render={
+                <button
+                  type="button"
+                  className="text-display-sm cursor-pointer rounded-lg p-1 -ml-1 hover:bg-accent/60 transition-colors"
+                  aria-label={t(($) => $.detail.icon_tooltip)}
+                >
+                  {project.icon || "📁"}
+                </button>
+              }
+            />
+          </TooltipHint>
           <PopoverContent align="start" className="w-auto p-0">
             <EmojiPicker
               onSelect={(emoji) => {
@@ -412,6 +427,7 @@ export function ProjectDetail({ projectId }: { projectId: string }) {
           <PropRow label={t(($) => $.detail.prop_due_date)}>
             <ProjectDueDatePicker dueDate={project.due_date} onUpdate={handleUpdateField} />
           </PropRow>
+          <ProjectWorkflowPropRow project={project} />
         </div>}
       </div>
 
@@ -478,79 +494,77 @@ export function ProjectDetail({ projectId }: { projectId: string }) {
     <ResizablePanelGroup orientation="horizontal" className="flex-1 min-h-0" defaultLayout={defaultLayout} onLayoutChanged={onLayoutChanged}>
       <ResizablePanel id="content" minSize="50%">
         <div ref={rightSidebarShortcutTargetRef} className="flex h-full flex-col">
-          <BreadcrumbHeader
-            segments={[{ href: wsPaths.projects(), label: t(($) => $.detail.breadcrumb_fallback) }]}
-            leaf={<span className="truncate font-medium text-foreground">{project.title}</span>}
-            actions={
-              <>
-              <Button
-                variant="ghost"
-                size="icon-sm"
-                className={cn("text-muted-foreground", isPinned && "text-foreground")}
-                title={isPinned ? t(($) => $.detail.unpin_tooltip) : t(($) => $.detail.pin_tooltip)}
-                onClick={() => {
-                  if (isPinned) {
-                    deletePinMut.mutate({ itemType: "project", itemId: projectId });
-                  } else {
-                    createPin.mutate({ item_type: "project", item_id: projectId });
-                  }
-                }}
-              >
-                {isPinned ? <PinOff /> : <Pin />}
-              </Button>
-              <DropdownMenu>
-                <DropdownMenuTrigger
-                  render={
-                    <Button variant="ghost" size="icon-sm" className="text-muted-foreground">
-                      <MoreHorizontal />
-                    </Button>
-                  }
-                />
-                <DropdownMenuContent align="end" className="w-auto">
-                  <DropdownMenuItem onClick={() => {
-                    void copyText(router.getShareableUrl(currentPath(router))).then((ok) => {
-                      if (ok) toast.success(t(($) => $.detail.toast_link_copied));
-                    });
-                  }}>
-                    <Link2 className="h-3.5 w-3.5" />
-                    {t(($) => $.detail.copy_link)}
-                  </DropdownMenuItem>
-                  {isWorkspaceAdmin && (
-                    <>
-                      <DropdownMenuSeparator />
-                      <DropdownMenuItem
-                        variant="destructive"
-                        onClick={() => setDeleteDialogOpen(true)}
-                      >
-                        <Trash2 className="h-3.5 w-3.5" />
-                        {t(($) => $.detail.delete_action)}
-                      </DropdownMenuItem>
-                    </>
-                  )}
-                </DropdownMenuContent>
-              </DropdownMenu>
-              <Tooltip>
-                <TooltipTrigger
-                  render={
-                    <Button
-                      variant={sidebarOpen ? "secondary" : "ghost"}
-                      size="icon-sm"
-                      className={sidebarOpen ? "" : "text-muted-foreground"}
-                      onClick={handleToggleSidebar}
-                    >
-                      <PanelRight />
-                    </Button>
-                  }
-                />
-                <TooltipContent side="bottom">{t(($) => $.detail.sidebar_tooltip)}</TooltipContent>
-              </Tooltip>
-              </>
-            }
-          />
-
           <IssueSurface
             scope={issueScope}
             modes={["board", "list", "table", "swimlane", "gantt"]}
+            renderHeader={({ controller }) => (
+              <ProjectWorkflowMenuHost project={project}>
+                {(workflowSubmenu) => (
+                  <IssueViewHeader
+                    controller={controller}
+                    base={{ kind: "project", project }}
+                    baseMenu={
+                      <>
+                        <DropdownMenuItem onClick={() => {
+                          void copyText(router.getShareableUrl(currentPath(router))).then((ok) => {
+                            if (ok) toast.success(t(($) => $.detail.toast_link_copied));
+                          });
+                        }}>
+                          <Link2 className="h-3.5 w-3.5" />
+                          {t(($) => $.detail.copy_link)}
+                        </DropdownMenuItem>
+                        <DropdownMenuItem onClick={() => {
+                          if (isPinned) {
+                            deletePinMut.mutate({ itemType: "project", itemId: projectId });
+                          } else {
+                            createPin.mutate({ item_type: "project", item_id: projectId });
+                          }
+                        }}>
+                          {isPinned ? <PinOff className="h-3.5 w-3.5" /> : <Pin className="h-3.5 w-3.5" />}
+                          {isPinned ? t(($) => $.detail.unpin_tooltip) : t(($) => $.detail.pin_tooltip)}
+                        </DropdownMenuItem>
+                        {workflowSubmenu && (
+                          <>
+                            <DropdownMenuSeparator />
+                            {workflowSubmenu}
+                          </>
+                        )}
+                        {isWorkspaceAdmin && (
+                          <>
+                            <DropdownMenuSeparator />
+                            <DropdownMenuItem
+                              variant="destructive"
+                              onClick={() => setDeleteDialogOpen(true)}
+                            >
+                              <Trash2 className="h-3.5 w-3.5" />
+                              {t(($) => $.detail.delete_action)}
+                            </DropdownMenuItem>
+                          </>
+                        )}
+                      </>
+                    }
+                    trailing={
+                      <Tooltip>
+                        <TooltipTrigger
+                          render={
+                            <Button
+                              variant={sidebarOpen ? "secondary" : "ghost"}
+                              size="icon-sm"
+                              className={sidebarOpen ? "" : "text-muted-foreground"}
+                              aria-label={t(($) => $.detail.sidebar_tooltip)}
+                              onClick={handleToggleSidebar}
+                            >
+                              <PanelRight />
+                            </Button>
+                          }
+                        />
+                        <TooltipContent side="bottom">{t(($) => $.detail.sidebar_tooltip)}</TooltipContent>
+                      </Tooltip>
+                    }
+                  />
+                )}
+              </ProjectWorkflowMenuHost>
+            )}
           />
           </div>
         </ResizablePanel>

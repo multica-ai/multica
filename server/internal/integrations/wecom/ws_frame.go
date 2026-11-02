@@ -11,10 +11,15 @@ package wecom
 // The wire is documented at https://developer.work.weixin.qq.com/document/path/101463 .
 
 import (
+	cryptorand "crypto/rand"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"strings"
+	"time"
 	"unicode"
+	"unicode/utf8"
 
 	"github.com/multica-ai/multica/server/internal/integrations/channel"
 	"github.com/multica-ai/multica/server/internal/integrations/channel/engine"
@@ -104,6 +109,60 @@ type aibotMsgCallback struct {
 	Mixed struct {
 		MsgItem []mixedItem `json:"msg_item"`
 	} `json:"mixed"`
+	// Quote is the message the sender was replying to (引用), present only
+	// when they replied to one.
+	Quote quotedMessage `json:"quote"`
+}
+
+// quotedMessage is the message a sender replied to. WeCom mirrors only its
+// CONTENT — a msgtype and that type's body, the same shape a 图文混排 run
+// has — so the fields come off mixedItem. What it does NOT carry is any
+// identity: no msgid, no userid of whoever wrote it. That is the whole reason
+// the quote is rendered into the body rather than resolved: there is nothing
+// to resolve it against, on our side or WeCom's.
+//
+// A quoted 图文混排 nests one more level than a run does, hence the extra
+// Mixed field and the render override below.
+type quotedMessage struct {
+	mixedItem
+	Mixed struct {
+		MsgItem []mixedItem `json:"msg_item"`
+	} `json:"mixed"`
+}
+
+// quoteRun is one line the quoted message contributes: words somebody typed or
+// said, or the marker standing in for an attachment together with the
+// attachment it stands for.
+//
+// The marker and its attachment are one value on purpose. They used to be two
+// lists, rendered by one function and collected by another, and anything that
+// changed the rendered text in between (a sentence that spells the marker out,
+// a cut that removes it) left the second list describing a body the agent never
+// saw. A run that has an attachment cannot be laid out without its marker, and
+// a run that is laid out cannot lose its attachment, so fitQuote below decides
+// what survives once and both follow.
+type quoteRun struct {
+	text  string
+	media *InboundMedia
+}
+
+// runs lays the quoted message out as the lines it contributes, in order. A
+// kind this adapter does not know contributes nothing, the same way a mixed
+// run does.
+func (q quotedMessage) runs() []quoteRun {
+	if !strings.EqualFold(q.MsgType, "mixed") {
+		if run, ok := q.mixedItem.quoteRun(); ok {
+			return []quoteRun{run}
+		}
+		return nil
+	}
+	var out []quoteRun
+	for _, item := range q.Mixed.MsgItem {
+		if run, ok := item.quoteRun(); ok {
+			out = append(out, run)
+		}
+	}
+	return out
 }
 
 // mediaBody is the {url, aeskey} pair every downloadable kind carries. In
@@ -161,6 +220,26 @@ func (item mixedItem) render() string {
 	return mediaPlaceholder(kind)
 }
 
+// quoteRun is render for a run inside a QUOTED message: an attachment comes
+// back as a marker with room in it to be named (quotedMediaPlaceholder) along
+// with the attachment that marker stands for.
+func (item mixedItem) quoteRun() (quoteRun, bool) {
+	if s := item.words(); s != "" {
+		return quoteRun{text: s}, true
+	}
+	body, kind, ok := mediaFor(item.MsgType, item.Image, item.File, item.Video)
+	if !ok || strings.TrimSpace(body.URL) == "" {
+		return quoteRun{}, false
+	}
+	marker := quotedMediaPlaceholder(kind)
+	return quoteRun{text: marker, media: &InboundMedia{
+		Kind:              kind,
+		URL:               body.URL,
+		AESKey:            body.AESKey,
+		InlinePlaceholder: marker,
+	}}, true
+}
+
 // mediaPlaceholder is the marker that stands in for an attachment in the
 // stored message body, so the agent can see that something was attached
 // before (or instead of) the bytes arriving on the detached media path.
@@ -182,6 +261,38 @@ func mediaPlaceholder(kind channel.MsgType) string {
 	}
 }
 
+// mediaUnavailable is what a quoted attachment's marker says before anything
+// has been fetched for it, and what it keeps saying if the fetch never
+// succeeds. A marker that is never rewritten still reads as a sentence.
+const mediaUnavailable = "unavailable"
+
+// quotedMediaPlaceholder is the marker a QUOTED attachment renders as. It
+// carries a word inside the brackets where the sender's own "[Image]" carries
+// nothing, because the quote's marker is the one that has to be joined to an
+// attachment.
+//
+// Fetching the quoted picture puts it in the attachment list and stops there.
+// The list is a separate block of text from the body, so with one attachment
+// the reader infers the join and with two it cannot — and a quote is exactly
+// the case where a message carries somebody else's picture beside its own.
+// The marker is what the engine rewrites into the attachment's id.
+//
+// The sender's OWN attachments keep the bare "[Image]" they have always had.
+// It is already unambiguous, being the attachment on the message the reader is
+// looking at, and changing it would change what every existing wecom message
+// body says.
+func quotedMediaPlaceholder(kind channel.MsgType) string {
+	return namedMediaPlaceholder(kind, mediaUnavailable)
+}
+
+// namedMediaPlaceholder writes a name inside the bracketed marker: "[Image]"
+// becomes "[Image: <name>]". engine.inlineAttachmentIDMarker rewrites the same
+// shape and keeps the label ahead of the colon, so the two spellings cannot
+// drift apart.
+func namedMediaPlaceholder(kind channel.MsgType, name string) string {
+	return strings.TrimSuffix(mediaPlaceholder(kind), "]") + ": " + name + "]"
+}
+
 // mediaFor returns the body and normalized kind for a raw wecom msgtype, and
 // whether that type is one we download at all.
 func mediaFor(msgType string, image, file, video mediaBody) (mediaBody, channel.MsgType, bool) {
@@ -201,7 +312,15 @@ func mediaFor(msgType string, image, file, video mediaBody) (mediaBody, channel.
 // user sent it. A body with no url is skipped: there is nothing to fetch, and
 // carrying it forward would only produce an intent-ledger row for an object
 // that can never exist.
+// The quoted message's attachments come FIRST, because the quote block renders
+// above the sender's own words and the two lists have to agree on order — the
+// engine binds a marker by its occurrence number in the body.
 func (mc aibotMsgCallback) attachments() []InboundMedia {
+	_, quotedMedia := mc.quotedBlock()
+	return append(quotedMedia, mc.ownAttachments()...)
+}
+
+func (mc aibotMsgCallback) ownAttachments() []InboundMedia {
 	var out []InboundMedia
 	add := func(body mediaBody, kind channel.MsgType) {
 		if strings.TrimSpace(body.URL) == "" {
@@ -267,6 +386,159 @@ func (mc aibotMsgCallback) ownText() (string, bool) {
 	default:
 		return "", false
 	}
+}
+
+// quotePrefix labels the quoted block so an agent reading the body as plain
+// text can tell it apart from the sender's own words. It sits inside a
+// markdown blockquote rather than replacing it: the quote can be several
+// lines, and only the blockquote keeps the later ones attached to it.
+//
+// Spelled like the media placeholders (mediaPlaceholder above) so an agent
+// reading every channel through one prompt meets one vocabulary.
+const quotePrefix = "[Quote]"
+
+// maxQuotedRunes bounds the quoted block. Runes, not bytes: the quoted text is
+// usually Chinese, where a byte bound would cut roughly a third as many
+// characters and could split one in half.
+const maxQuotedRunes = 500
+
+// quotedContext renders the message the sender was replying to, to be shown
+// AHEAD of their own words.
+//
+// Without it a reply is unanswerable: "这个怎么处理" quoting an alert is a
+// complete question in the chat and an empty one to the agent, which sees the
+// three words and none of what they point at. WeCom sends the quoted content
+// on every such message and this adapter was dropping it.
+//
+// It is deliberately kept out of ownCommandSource: the command parsers read
+// the first non-empty line, and a quoted line is not one the sender typed
+// here. Prefixing it would let a quote of somebody else's "/issue …" file an
+// issue nobody asked for.
+func (mc aibotMsgCallback) quotedContext() string {
+	block, _ := mc.quotedBlock()
+	return block
+}
+
+// quotedBlock is the quote block and the attachments whose markers are in it.
+//
+// FETCHING THE ATTACHMENTS IS THE WHOLE OF THE FIX. "[Image]" is all a quote
+// of a picture could be rendered as — the payload carries no sender, no
+// message id and no timestamp to say WHICH picture — so an agent reading that
+// line cannot tell a screenshot it read a minute ago from one it has never
+// seen, and answers "左下角那块看不清" about a picture it does not have. The
+// url and aeskey on the quote are the only thing that resolves it, and the
+// callback hands them over exactly the way it hands over an attachment the
+// sender just made.
+//
+// The marker closes the other half. Fetching the bytes puts the picture in the
+// attachment list; the marker's occurrence number is what says WHICH entry of
+// that list the quote's marker is, and without it a message carrying two
+// attachments — one quoted, one just sent — hands the agent two markers and
+// two ids with nothing joining them.
+//
+// The rule the pair obeys: an attachment is returned only if its marker is in
+// the block, and its InlineIndex counts occurrences in the block as returned.
+// The engine binds by searching the stored body for the Nth occurrence of the
+// marker string, so the number has to be taken from the text the agent will
+// read — not from how many attachments came before it — and the text is
+// whatever is left after the cut. Both come out of fitQuote in one pass, so
+// neither can describe a block the other did not produce.
+func (mc aibotMsgCallback) quotedBlock() (string, []InboundMedia) {
+	rendered, media := fitQuote(mc.Quote.runs(), maxQuotedRunes)
+	if rendered == "" {
+		return "", nil
+	}
+	var b strings.Builder
+	for i, line := range strings.Split(rendered, "\n") {
+		if i > 0 {
+			b.WriteString("\n")
+		}
+		b.WriteString("> ")
+		if i == 0 {
+			b.WriteString(quotePrefix)
+			b.WriteString(" ")
+		}
+		b.WriteString(line)
+	}
+	return b.String(), media
+}
+
+// fitQuote lays the quote's runs out within maxRunes and returns the text with
+// the attachments that survived in it, each stamped with which occurrence of
+// its marker it is.
+//
+// A quoted document would otherwise become the body. The sender quoted it to
+// point at it, not to resend it, and the words that carry their question are
+// their own — which follow the block and must not be pushed out of the agent's
+// reach by it. So TEXT is cut at maxRunes, markers counting toward that budget
+// while they fall inside it, and the cut is marked with "…".
+//
+// A marker is never cut, and never dropped. Past the budget, runs of words are
+// dropped and runs that carry an attachment are still laid out whole, one line
+// each; a marker that starts inside the budget and ends past it is kept to the
+// end. So the block can run past maxRunes by at most the markers it carries
+// (about twenty runes each), and every attachment the caller will fetch is
+// one the agent can find in the text. #7980 left the same constraint in its
+// discussion: a truncated block must not drop a placeholder it still counts.
+//
+// InlineIndex is counted on the text as laid out, markers and words alike. A
+// quoted sentence that spells "[Image: unavailable]" out is an occurrence of
+// that marker as far as the engine's search is concerned, so it moves the real
+// marker's number up by one.
+func fitQuote(runs []quoteRun, maxRunes int) (string, []InboundMedia) {
+	var (
+		lines  []string
+		owners []*InboundMedia // owners[i] is the attachment lines[i] is the marker of, or nil
+		used   int
+		cut    bool
+	)
+	for _, run := range runs {
+		width := utf8.RuneCountInString(run.text)
+		if len(lines) > 0 {
+			width++ // the newline ahead of it
+		}
+		switch {
+		case run.media != nil:
+			lines = append(lines, run.text)
+			owners = append(owners, run.media)
+			used += width
+		case cut:
+			// The budget ran out earlier; only markers still get through.
+		case used+width <= maxRunes:
+			lines = append(lines, run.text)
+			owners = append(owners, nil)
+			used += width
+		default:
+			cut = true
+			room := maxRunes - used
+			if len(lines) > 0 {
+				room-- // the newline ahead of it
+			}
+			if room > 0 {
+				kept := strings.TrimRight(string([]rune(run.text)[:room]), " \t\n")
+				if kept != "" {
+					lines = append(lines, kept)
+					owners = append(owners, nil)
+				}
+			}
+			if len(lines) == 0 {
+				lines = append(lines, "")
+				owners = append(owners, nil)
+			}
+			lines[len(lines)-1] = strings.TrimRight(lines[len(lines)-1], " \t\n") + "…"
+		}
+	}
+
+	var media []InboundMedia
+	for i, owner := range owners {
+		if owner == nil {
+			continue
+		}
+		m := *owner
+		m.InlineIndex = strings.Count(strings.Join(lines[:i], "\n"), m.InlinePlaceholder)
+		media = append(media, m)
+	}
+	return strings.Join(lines, "\n"), media
 }
 
 // ownCommandSource is what the slash-command parsers read: the sender's own
@@ -386,6 +658,31 @@ type InboundMedia struct {
 	// AESKey unlocks what comes back from URL. Long-connection mode mints one
 	// per url; see media_crypt.go.
 	AESKey string `json:"aeskey"`
+	// InlinePlaceholder is the exact marker in the stored body this attachment
+	// stands for, and InlineIndex is which occurrence of that marker it is.
+	// They travel onto channel.MediaRef, and the binder rewrites that one
+	// occurrence to name the attachment once a row exists (engine/session.go).
+	//
+	// Set for a QUOTED attachment only — see quotedMediaPlaceholder for why the
+	// sender's own marker stays bare.
+	InlinePlaceholder string `json:"inline_placeholder,omitempty"`
+	InlineIndex       int    `json:"inline_index,omitempty"`
+}
+
+// inline copies the marker this attachment stands for onto the ref the binder
+// will rewrite. A ref with no marker is left exactly as it was, which is what
+// keeps the sender's own attachments on the path they were already on.
+func (m InboundMedia) inline(ref channel.MediaRef) channel.MediaRef {
+	if m.InlinePlaceholder == "" {
+		return ref
+	}
+	ref.InlinePlaceholder = m.InlinePlaceholder
+	ref.InlineIndex = m.InlineIndex
+	// The marker REFERS to the attachment, it does not carry it: the picture
+	// belongs to a message somebody else sent, and replacing the marker with an
+	// inline image would state this sender attached it again.
+	ref.InlineIDOnly = true
+	return ref
 }
 
 // channelMessageFromCallback converts a wecom-side aibot_msg_callback into
@@ -444,16 +741,57 @@ func channelMessageFromCallback(botID, botDisplayName string, mc aibotMsgCallbac
 		command = stripLeadingMentions(command, botDisplayName)
 	}
 	media := mc.attachments()
+	// A quote counts as content here for the same reason media does: it is why
+	// the directive-only layouts below are not the empty pending sentinel.
+	// Rendering it happens further down — this only needs to know it exists.
+	quoted := mc.quotedContext()
 	normalizedText, control, controlNormalized := normalizeWeComControlLayout(
-		mc, text, command, chatType, botDisplayName, len(media) > 0,
+		mc, text, command, chatType, botDisplayName, len(media) > 0 || quoted != "",
 	)
 	if controlNormalized {
 		text = normalizedText
-		// A media-bearing bare /clear is a real turn, not the shared pending
-		// sentinel. ForceFresh below carries the already-consumed directive.
-		if control.Kind == engine.ControlCommandFreshSession && control.Body == "" {
-			command = text
+	}
+
+	// The quoted message goes on last, so everything above — the control-layout
+	// rewrite and the command source it may hand back — still reads the body
+	// the sender actually composed. Only the stored, agent-visible text grows.
+	ownBody := text
+	if quoted != "" {
+		if text == "" {
+			text = quoted
+		} else {
+			text = quoted + "\n\n" + text
 		}
+	}
+
+	// A bare /clear that still carries content — media, a quote, or both — is a
+	// real turn, not the shared pending sentinel, so it must not reach Router
+	// with the directive still in the command source. ForceFresh below carries
+	// the already-consumed directive; the command source becomes whatever body
+	// is left, which is never a command (a quote opens with "> ", a placeholder
+	// with "["), so nothing downstream re-parses it.
+	//
+	// This runs after the quote is prepended, not before: leaving it above would
+	// hand Router an empty CommandText, which it fills from Text — reaching the
+	// same place by a route that only works while the quote happens not to parse
+	// as a command.
+	if controlNormalized && control.Kind == engine.ControlCommandFreshSession && control.Body == "" {
+		command = text
+	}
+
+	// An enriching adapter owes Router a command source (router.go:200-208).
+	// ownCommandSource answers "" for a standalone photo, file or video on
+	// purpose — a placeholder is not words the sender typed — but once a quote
+	// is prepended, Router's empty-CommandText fallback assigns the ALREADY
+	// enriched Text, and the quote becomes the Chat title (#8058's shape).
+	//
+	// So hand over the body as it stood before enrichment: still no words the
+	// sender did not type, and the placeholder is dropped again downstream by
+	// deriveFirstMessageTitle, which lands the title back on the media path it
+	// takes when the same screenshot arrives without a quote. lark snapshots
+	// its own body for this reason (ws_frame_decoder.go:113).
+	if command == "" && quoted != "" {
+		command = ownBody
 	}
 
 	wm := InboundMessage{
@@ -484,7 +822,13 @@ func channelMessageFromCallback(botID, botDisplayName string, mc aibotMsgCallbac
 		// (feishu_channel.go:139) and Slack from its cleaned text
 		// (slack/inbound.go:131); WeCom was the one adapter leaving it empty.
 		CommandText: command,
-		ForceFresh:  controlNormalized && control.Kind == engine.ControlCommandFreshSession,
+		// The quote is context the sender picked by replying to it, which is
+		// what channel.InboundMessage.HasSelectedContext names: it is input
+		// even when a control command has no body of its own. Without it a
+		// bare directive behind a quote reads as an empty message to Router,
+		// which persists nothing and answers nobody.
+		HasSelectedContext: quoted != "",
+		ForceFresh:         controlNormalized && control.Kind == engine.ControlCommandFreshSession,
 		// A pure /issue command in WeCom should NOT trigger the
 		// agent — the engine already creates the issue and the
 		// OutboundReplier already sends "✅ 已创建 #N". Letting the agent
@@ -516,16 +860,22 @@ func channelMessageFromCallback(botID, botDisplayName string, mc aibotMsgCallbac
 // body while retaining media placeholders in their original mixed-message
 // positions. CommandText remains the sender-authored, placeholder-free source
 // so Router alone applies the semantic difference between the directives.
+//
+// hasOtherContent says the message carries something besides the directive —
+// an attachment, a quoted message, or both. A directive with nothing else is
+// the shared pending sentinel and is left intact for Router to recognise; one
+// that arrives alongside content is a real turn, and leaving the directive in
+// the body would persist it as prompt text.
 func normalizeWeComControlLayout(
 	mc aibotMsgCallback,
 	visible string,
 	command string,
 	chatType channel.ChatType,
 	botDisplayName string,
-	hasMedia bool,
+	hasOtherContent bool,
 ) (string, engine.ControlCommand, bool) {
 	control, ok := engine.ParseControlCommand(command)
-	if !ok || (control.Body == "" && !hasMedia) {
+	if !ok || (control.Body == "" && !hasOtherContent) {
 		return visible, engine.ControlCommand{}, false
 	}
 
@@ -719,4 +1069,324 @@ func aibotChatTypeFromChannel(t channel.ChatType) int {
 		return chatTypeGroupInt
 	}
 	return chatTypeSingleInt
+}
+
+// ---- streaming replies ----
+
+// streamContentLimit is aibot's cap on stream.content: 20480 bytes of utf8
+// (https://developer.work.weixin.qq.com/document/path/101031). Content is a
+// FULL replacement of the bubble's body on every frame, never a delta, so this
+// bounds the whole answer rather than one chunk of it.
+const streamContentLimit = 20480
+
+// streamThinkingPlaceholder is what the opening frame says. Per 101031 a
+// content carrying <think></think> renders as the client's own thinking
+// affordance — the animated dots — which is exactly the "working on it" bubble
+// we want and costs no copy in any language. Tencent's own OpenClaw plugin
+// opens its streams with the same literal.
+const streamThinkingPlaceholder = "<think></think>"
+
+// aibot errcodes worth branching on.
+//
+// A wrong guess about either degrades rather than breaks — an errcode this file
+// does not recognise falls through to the plain-message fallback, which is
+// where a refused frame ends up anyway.
+const (
+	// errcodeStreamExpired — the stream ran past its window and the server
+	// will not take another frame for it.
+	//
+	// Measured on 2026-08-09 against the live tenant, not inferred: a stream
+	// framed every thirty seconds was refused with exactly this code, and the
+	// server's own errmsg named the reason — "stream message update expired
+	// (>10 minutes), cannot update". The published global errcode table
+	// defines it the same way. The window it implies is streamMaxAge; see
+	// stream_store.go for the numbers and what else the probe settled.
+	errcodeStreamExpired = 846608
+
+	// errcodeStreamBadReqID — this req_id may not carry a stream.
+	//
+	// ASSUMPTION, unconfirmed by the vendor and unmeasured: this number is
+	// read off Tencent's OpenClaw plugin source, with no version pinned, and
+	// it does not appear in WeCom's published error tables the way 846608
+	// does. What would settle it: the code appearing in the published tables,
+	// a support answer naming it, or a probe that opens a stream on an event
+	// callback's req_id and reads back what the server says.
+	//
+	// An event callback's req_id looks usable and is not; only a message
+	// callback's works, so the event path has to use aibot_send_msg.
+	errcodeStreamBadReqID = 846605
+)
+
+// streamError is a server rejection of a stream frame, carrying the errcode so
+// callers can tell "this bubble is beyond saving" from "that frame did not
+// land".
+type streamError struct {
+	Code int
+	Msg  string
+}
+
+func (e *streamError) Error() string {
+	return fmt.Sprintf("wecom: stream frame rejected errcode=%d errmsg=%s", e.Code, e.Msg)
+}
+
+// Unusable reports whether the rejection means this stream can never be
+// written to again — the caller must fall back to a plain message rather than
+// retry.
+func (e *streamError) Unusable() bool {
+	return e.Code == errcodeStreamExpired || e.Code == errcodeStreamBadReqID
+}
+
+// streamUnusable is the package-level predicate over any error, so callers do
+// not each re-implement the type assertion.
+//
+// Only a verdict from the server counts. A write that failed, an ack that
+// never came, errNoLiveConnection from a registry holding no socket for the
+// installation — none of those is in here, because none of them says anything
+// about the stream. A req_id belongs to the turn and not to the connection it
+// arrived on (measured 2026-08-09; sendersRegistry.stream), so a missing socket
+// is a fact about this moment rather than about the bubble.
+func streamUnusable(err error) bool {
+	var se *streamError
+	if errors.As(err, &se) {
+		return se.Unusable()
+	}
+	return false
+}
+
+// respondStreamBody builds an aibot_respond_msg body carrying one frame of a
+// streaming reply. finish=false paints or updates the bubble; finish=true
+// seals it, after which the message is immutable.
+//
+// The blank-closing-frame check is the one rule that is not obvious from the
+// wire format: WeCom ignores content with nothing visible in it, so a closing
+// frame of spaces closes nothing and leaves the user with a bubble that spins
+// forever. Refusing here means every caller inherits the check.
+func respondStreamBody(streamID, content string, finish bool) (map[string]any, error) {
+	if streamID == "" {
+		return nil, errors.New("wecom: stream frame requires a stream id")
+	}
+	if finish {
+		content = defuseThinkTags(content)
+	}
+	content = truncateStreamContent(content)
+	if finish && !hasVisibleChar(content) {
+		return nil, errors.New("wecom: closing stream frame needs visible content")
+	}
+	return map[string]any{
+		"msgtype": "stream",
+		"stream": map[string]any{
+			"id":      streamID,
+			"finish":  finish,
+			"content": content,
+		},
+	}, nil
+}
+
+// defuseThinkTags stops an answer that talks about <think> from being read as
+// one.
+//
+// The tag is the client's, not ours: per 101031 a stream body wrapped in
+// <think></think> renders as WeCom's own collapsed thinking affordance, which
+// is what the opening frame is built from. An answer that happens to contain
+// the literal — quoting a prompt, explaining this very feature, pasting XML —
+// gets the same treatment, and half the reply disappears into a fold with no
+// edit and no unsend to undo it with.
+//
+// A zero-width space after the angle bracket is enough: the scanner no longer
+// matches, and the reader sees the same characters they would have seen. Only
+// the tag's own opening is touched, so comparisons, generics and HTML samples
+// in the rest of the answer come through as written. Callers apply this to
+// closing frames only — the opening frame IS the affordance.
+func defuseThinkTags(s string) string {
+	if !strings.Contains(s, "<") {
+		return s
+	}
+	const zwsp = "​"
+	var b strings.Builder
+	last := 0
+	// Indexing s directly, never a case-folded copy of it. Walking s while
+	// reading strings.ToLower(s) at the same offsets looks equivalent and is
+	// not: case folding does not preserve length. U+212A KELVIN SIGN is three
+	// bytes and lowercases to a one-byte "k", so the folded copy can be
+	// SHORTER than the original and an offset taken from s can be past its
+	// end. "KK<x" — two Kelvin signs and an angle bracket — is enough to slice
+	// out of range, and the string being scanned is the agent's own answer, so
+	// any text a user can talk the agent into echoing would take the backend
+	// down with it.
+	for i := 0; i < len(s); i++ {
+		if s[i] != '<' {
+			continue
+		}
+		j := i + 1
+		if j < len(s) && s[j] == '/' {
+			j++
+		}
+		if j+len("think") > len(s) || !strings.EqualFold(s[j:j+len("think")], "think") {
+			continue
+		}
+		b.WriteString(s[last : i+1])
+		b.WriteString(zwsp)
+		last = i + 1
+	}
+	if last == 0 {
+		return s
+	}
+	b.WriteString(s[last:])
+	return b.String()
+}
+
+// truncateStreamContent cuts content to the protocol's byte limit on a
+// character boundary. An answer that arrives clipped still answers; one the
+// server rejects for length does not.
+func truncateStreamContent(s string) string {
+	if len(s) <= streamContentLimit {
+		return s
+	}
+	const ellipsis = "…"
+	cut := streamContentLimit - len(ellipsis)
+	for cut > 0 && !utf8.RuneStart(s[cut]) {
+		cut--
+	}
+	return s[:cut] + ellipsis
+}
+
+// hasVisibleChar reports whether s contains a rune that is neither whitespace
+// nor a control character. That is the test a completion has to pass before it
+// becomes a message: a body the client renders as nothing still occupies a
+// bubble in the chat, and a completion of newlines is one.
+//
+// Not the same as "the client will render something", and deliberately not.
+// Format runes — U+200B zero width space, U+FEFF, a soft hyphen — are neither
+// space nor control, so a body made only of those passes here and still shows
+// as nothing. Nothing upstream rejects such a body either: it reaches the chat
+// as an empty bubble, and this predicate is not what stops it. The line is
+// drawn here to keep a Unicode category table out of the adapter — moving it
+// is a separate decision, and that table is its cost.
+func hasVisibleChar(s string) bool {
+	for _, r := range s {
+		if !unicode.IsSpace(r) && !unicode.IsControl(r) {
+			return true
+		}
+	}
+	return false
+}
+
+// newStreamID mints the developer-chosen id that names one streaming message.
+// Reusing an id replaces that message's body; a fresh one opens another
+// bubble, which is why this must never collide across concurrent turns.
+func newStreamID() string {
+	var buf [12]byte
+	if _, err := cryptorand.Read(buf[:]); err != nil {
+		return fmt.Sprintf("wecom-stream-%d", time.Now().UnixNano())
+	}
+	return "s" + hex.EncodeToString(buf[:])
+}
+
+// sendMsgContentLimit is the cap on one aibot_send_msg markdown body: the same
+// 20480 utf8 bytes the stream frame gets
+// (https://developer.work.weixin.qq.com/document/path/101138). A body past it
+// is refused WHOLE — the server does not clip it — and the refusal arrives as
+// errcode 45002 on the ack, so before splitForWire a long answer simply never
+// appeared in the chat.
+const sendMsgContentLimit = 20480
+
+// splitForWire cuts a reply into pieces the platform will accept, and returns
+// the input untouched when it already fits — which is nearly always, so the
+// common path allocates nothing.
+//
+// Splitting rather than truncating is the point. A long answer is a code
+// review, a pasted log, a document draft: the tail is not filler, and neither
+// a reply the server refuses whole nor one that stops at an ellipsis with no
+// way to read the rest is an answer. The cut prefers a line boundary, then a
+// rune boundary, so a piece never ends mid-character and rarely ends mid-line.
+//
+// Each piece carries a marker so the reader knows the answer continues. This
+// is the one place the adapter adds words to an agent's own text, which is why
+// the marker is a bare counter rather than a sentence: it belongs to no
+// language, so it needs no translation and cannot contradict an answer written
+// in one.
+func splitForWire(content string) []string {
+	if len(content) <= sendMsgContentLimit {
+		return []string{content}
+	}
+
+	var pieces []string
+	remaining := content
+	for len(remaining) > 0 {
+		// Reserve room for the widest marker this piece could end up with.
+		// The total is not known until the split is done, so the placeholder
+		// stands in for it: "…" is three bytes, which covers a total up to
+		// three digits — far past any answer that reaches this function.
+		marker := fmt.Sprintf("\n\n(%d/…)", len(pieces)+1)
+		budget := sendMsgContentLimit - len(marker)
+		if len(remaining) <= sendMsgContentLimit {
+			pieces = append(pieces, remaining)
+			break
+		}
+		cut := wireCutPoint(remaining, budget)
+		// Nothing is dropped at the seam. The cut is an index into remaining
+		// and both sides of it are kept: a line break the cut point chose ends
+		// the piece it belongs to, so concatenating the pieces with their
+		// markers stripped gives the answer back byte for byte. An earlier
+		// version trimmed leading newlines here, which silently ate a
+		// paragraph break out of every log and code block long enough to
+		// split.
+		pieces = append(pieces, remaining[:cut])
+		remaining = remaining[cut:]
+	}
+
+	// A piece with nothing visible in it is not sent. A long answer that ends
+	// in a run of blank lines puts that run in a piece of its own — the last
+	// piece carries no marker, so nothing else makes it visible — and that
+	// piece reaches the chat as an empty bubble, which is the thing
+	// hasVisibleChar exists at the call sites to prevent. Dropping it costs
+	// the reader nothing: what is dropped is whitespace that would have
+	// occupied a whole message on its own.
+	//
+	// Filtered before the markers go on, so the numbering counts the pieces
+	// the person actually receives.
+	kept := pieces[:0]
+	for _, p := range pieces {
+		if hasVisibleChar(p) {
+			kept = append(kept, p)
+		}
+	}
+	pieces = kept
+
+	// The count is only knowable once the split is done, so the markers go on
+	// afterwards. The last piece gets none: there is nothing after it to
+	// promise, and the reader can see that for themselves.
+	total := len(pieces)
+	for i := range pieces {
+		if i == total-1 {
+			continue
+		}
+		pieces[i] += fmt.Sprintf("\n\n(%d/%d)", i+1, total)
+	}
+	return pieces
+}
+
+// wireCutPoint picks where to end a piece: the last line break inside the
+// budget when there is one worth using, otherwise the last rune boundary.
+func wireCutPoint(s string, budget int) int {
+	if budget >= len(s) {
+		return len(s)
+	}
+	// A line break in the last quarter of the budget is worth taking; one
+	// near the start would waste most of a frame. The cut goes AFTER it, so
+	// the break stays at the end of the piece it terminated rather than
+	// falling into the gap between two frames.
+	if nl := strings.LastIndexByte(s[:budget], '\n'); nl > budget*3/4 {
+		return nl + 1
+	}
+	cut := budget
+	for cut > 0 && !utf8.RuneStart(s[cut]) {
+		cut--
+	}
+	if cut == 0 {
+		// A single rune wider than the budget cannot happen at this size, but
+		// returning 0 would loop forever, so fall back to the raw cut.
+		return budget
+	}
+	return cut
 }

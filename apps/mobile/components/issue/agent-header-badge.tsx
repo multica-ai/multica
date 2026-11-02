@@ -21,6 +21,7 @@ import { AvatarStack, type StackActor } from "@/components/ui/avatar-stack";
 import { PulseDot } from "@/components/ui/pulse-dot";
 import { issueActiveTasksOptions } from "@/data/queries/issues";
 import { useWorkspaceStore } from "@/data/workspace-store";
+import { useT } from "@/lib/i18n";
 
 interface Props {
   issueId: string;
@@ -28,6 +29,7 @@ interface Props {
 
 export function AgentHeaderBadge({ issueId }: Props) {
   const wsId = useWorkspaceStore((s) => s.currentWorkspaceId);
+  const { t } = useT("issues");
   const wsSlug = useWorkspaceStore((s) => s.currentWorkspaceSlug);
   const { data: active = [] } = useQuery(
     issueActiveTasksOptions(wsId, issueId),
@@ -50,7 +52,7 @@ export function AgentHeaderBadge({ issueId }: Props) {
         });
       }}
       hitSlop={8}
-      accessibilityLabel="Agent working — open runs"
+      accessibilityLabel={t("a11y.agent_working")}
       className="flex-row items-center gap-1.5 px-2 py-1 active:opacity-60"
     >
       <AvatarStack actors={actors} max={2} size={20} />

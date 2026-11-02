@@ -1,13 +1,10 @@
 {
   "page": {
     "title": "스킬",
-    "tagline": "이 워크스페이스의 모든 에이전트가 사용할 수 있는 지침입니다.",
-    "learn_more": "자세히 보기 →",
     "new_skill": "새 스킬",
-    "search_placeholder": "스킬 검색...",
     "scopes": {
       "all": {
-        "label": "전체",
+        "label": "모든 스킬",
         "description": "이 워크스페이스의 모든 스킬"
       },
       "used": {
@@ -19,13 +16,13 @@
         "description": "어떤 에이전트에도 할당되지 않은 스킬"
       },
       "mine": {
-        "label": "내가 만든 스킬",
+        "label": "내 스킬",
         "description": "내가 생성한 스킬"
       }
     },
     "empty": {
       "title": "아직 스킬이 없습니다",
-      "description": "첫 스킬을 만들거나, URL이나 로컬 폴더에서 가져오거나, 연결된 런타임에서 복사하세요. 워크스페이스의 모든 에이전트가 사용할 수 있습니다."
+      "description": "skill을 만들거나 가져오세요."
     },
     "no_matches": {
       "title": "일치하는 결과 없음",
@@ -77,8 +74,6 @@
     "added_toast": "{{name}}에 추가했습니다",
     "add_failed_toast": "스킬 추가에 실패했습니다",
     "delete": "삭제",
-    "selected": "{{count}}개 선택됨",
-    "clear_selection": "선택 해제",
     "delete_no_permission": "작성자 또는 관리자만 삭제할 수 있는 스킬이 포함되어 있습니다",
     "delete_dialog_title_other": "스킬 {{count}}개를 삭제할까요?",
     "delete_dialog_desc_other": "선택한 스킬 {{count}}개를 영구 삭제하고 모든 에이전트에서 제거합니다.",
@@ -93,29 +88,22 @@
     "update_updating": "업데이트하는 중 {{done}}/{{total}}...",
     "updated_toast_other": "소스에서 스킬 {{count}}개를 업데이트했습니다",
     "update_partial_toast": "{{count}}개 업데이트, {{failed}}개 실패",
-    "add_dialog_description": "선택한 스킬을 추가할 에이전트를 선택하세요.",
     "cancel": "취소",
     "add_confirm": "추가 ({{num}})",
     "adding": "추가 중...",
     "added_multi_toast_other": "에이전트 {{count}}개에 추가했습니다"
   },
   "toolbar": {
-    "result_count_title": "일치하는 스킬 / 전체 스킬",
-    "filter_label": "필터",
-    "filter_active_count_other": "필터 {{count}}개",
-    "clear_filters": "필터 해제",
     "section_usage": "사용 상태",
-    "display": "표시",
-    "sort_by": "정렬",
-    "direction_asc": "오름차순",
-    "direction_desc": "내림차순",
-    "section_columns": "표시 열"
+    "section_labels": "라벨",
+    "filter_search_placeholder": "필터...",
+    "no_labels": "아직 라벨이 없습니다",
+    "no_results": "결과 없음",
+    "manage_labels": "라벨 관리...",
+    "manage_labels_title": "스킬 라벨"
   },
   "detail": {
-    "all_skills": "모든 스킬",
     "read_only": "읽기 전용",
-    "delete_aria": "스킬 삭제",
-    "delete_tooltip": "스킬 삭제",
     "supporting_data_warning": "일부 워크스페이스 데이터를 불러오지 못했습니다. 다음 새로고침 전까지 생성자 표시, 런타임 이름, 수정 권한이 불완전하게 보일 수 있습니다.",
     "delete_file": "파일 삭제",
     "name_placeholder": "skill-name",
@@ -150,8 +138,6 @@
     "toast_deleted": "스킬을 삭제했습니다",
     "toast_delete_failed": "스킬을 삭제하지 못했습니다",
     "refresh": {
-      "button": "업데이트",
-      "tooltip": "소스에서 스킬을 다시 다운로드합니다",
       "source_github": "GitHub",
       "source_skills_sh": "Skills.sh",
       "source_clawhub": "ClawHub",
@@ -190,28 +176,19 @@
       }
     },
     "header": {
-      "files_other": "파일 {{count}}개",
-      "used_by_other": "에이전트 {{count}}개가 사용 중",
-      "updated": "{{when}} 업데이트",
-      "updated_by": "{{name}}이(가) {{when}} 업데이트"
-    },
-    "tabs": {
-      "aria": "스킬 섹션",
-      "overview": "개요",
-      "files_other": "파일 {{count}}"
+      "files_other": "파일 {{count}}개"
     },
     "overview": {
       "properties": "속성",
-      "properties_hint": "이 필드는 SKILL.md 프런트매터와 동기화됩니다.",
       "name": "이름",
       "description": "설명",
-      "description_hint": "{{count}}자. 에이전트는 이 설명을 읽고 스킬을 불러올지 판단합니다.",
+      "description_hint": "에이전트가 이를 보고 skill을 불러올 시점을 판단합니다.",
       "labels": "라벨",
-      "used_by_other": "에이전트 {{count}}개가 사용 중",
       "used_by_empty": "아직 어떤 에이전트에도 할당되지 않았습니다. 에이전트의 스킬 탭에서 할당하세요.",
       "permissions_owner": "이 스킬을 편집하고 삭제할 수 있습니다. 변경 사항은 다음 에이전트 실행부터 적용됩니다.",
       "permissions_locked_creator": "작성자({{name}}) 또는 워크스페이스 관리자만 이 스킬을 편집할 수 있습니다.",
-      "permissions_locked": "작성자 또는 워크스페이스 관리자만 이 스킬을 편집할 수 있습니다."
+      "permissions_locked": "작성자 또는 워크스페이스 관리자만 이 스킬을 편집할 수 있습니다.",
+      "character_count": "{{count}}자"
     },
     "files": {
       "list_aria": "스킬 파일",
@@ -223,6 +200,21 @@
       "mode_preview": "미리보기",
       "mode_edit": "편집",
       "mode_raw": "일반 텍스트"
+    },
+    "sections": {
+      "content": "내용",
+      "files": "파일",
+      "edit": "편집",
+      "open": "열기",
+      "add": "추가"
+    },
+    "menu": {
+      "copy_link": "링크 복사",
+      "link_copied": "링크를 복사했습니다",
+      "delete": "스킬 삭제"
+    },
+    "panel": {
+      "add_description": "설명 추가"
     }
   },
   "create": {
@@ -306,9 +298,7 @@
     "load_failed": "런타임의 로컬 스킬을 불러오지 못했습니다",
     "not_supported": "이 런타임 제공자는 아직 로컬 스킬 목록 조회를 지원하지 않습니다.",
     "no_skills_title": "로컬 스킬을 찾을 수 없습니다",
-    "no_skills_hint": "이 런타임에는 아직 검색 가능한 로컬 스킬이 없습니다.",
     "search_placeholder": "로컬 스킬 검색",
-    "no_search_results_title": "일치하는 로컬 스킬이 없습니다",
     "no_search_results_hint": "\"{{query}}\"와 일치하는 로컬 스킬이 없습니다.",
     "ignored_files_hint": "심볼릭 링크, 읽을 수 없는 파일, 너무 큰 파일과 번들은 가져오기에서 제외됩니다.",
     "ready": "가져올 준비 완료",

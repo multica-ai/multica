@@ -2,11 +2,31 @@ package handler
 
 import (
 	"bytes"
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"strconv"
 	"testing"
 )
+
+func TestWriteFeatureDisabledIsNonRetryable(t *testing.T) {
+	rec := httptest.NewRecorder()
+	writeFeatureDisabled(rec, "feature_disabled", "feature is disabled")
+
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("status = %d, want %d", rec.Code, http.StatusForbidden)
+	}
+	if retryAfter := rec.Header().Get("Retry-After"); retryAfter != "" {
+		t.Fatalf("Retry-After = %q, want empty", retryAfter)
+	}
+	var body map[string]string
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if body["code"] != "feature_disabled" {
+		t.Fatalf("code = %q, want feature_disabled", body["code"])
+	}
+}
 
 // TestWriteMeasuredJSONByteIdenticalToWriteJSON locks the load-bearing assumption
 // behind the F2 claim-observability patch: swapping writeJSON for writeMeasuredJSON
@@ -49,8 +69,8 @@ func TestWriteMeasuredJSONByteIdenticalToWriteJSON(t *testing.T) {
 			ID:   "11111111-2222-3333-4444-555555555555",
 			Name: "agent <CC> & friends",
 			Skills: []skill{
-				{Name: "multica-working-on-issues", Description: "do work <safely> & well", Files: map[string]string{"SKILL.md": "# Title\n<b>x</b> & y"}},
-				{Name: "multica-mentioning", Description: "ping people", Files: map[string]string{"SKILL.md": "line1\nline2"}},
+				{Name: "multica-platform", Description: "do work <safely> & well", Files: map[string]string{"SKILL.md": "# Title\n<b>x</b> & y"}},
+				{Name: "team-conventions", Description: "ping people", Files: map[string]string{"SKILL.md": "line1\nline2"}},
 			},
 			Args: []string{"--flag", "a<b", "c&d"},
 		}}},

@@ -10,8 +10,12 @@ describe("pickContentLang", () => {
   });
 
   it("falls back to English for unsupported or missing languages", () => {
-    expect(pickContentLang("fr-FR")).toBe("en");
+    expect(pickContentLang("es-ES")).toBe("en");
     expect(pickContentLang(null)).toBe("en");
     expect(pickContentLang(undefined)).toBe("en");
+  });
+
+  it("uses English authored content for the supported French UI locale", () => {
+    expect(pickContentLang("fr-FR")).toBe("en");
   });
 });

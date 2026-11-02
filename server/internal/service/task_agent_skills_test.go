@@ -35,6 +35,7 @@ func (r *sliceRows) FieldDescriptions() []pgconn.FieldDescription { return nil }
 func (r *sliceRows) Values() ([]any, error)                       { return nil, nil }
 func (r *sliceRows) RawValues() [][]byte                          { return nil }
 func (r *sliceRows) Conn() *pgx.Conn                              { return nil }
+func (r *sliceRows) TypeMap() *pgtype.Map                         { return nil }
 
 func (r *sliceRows) Next() bool {
 	if r.i >= len(r.rows) {
@@ -229,7 +230,7 @@ func TestLoadAgentSkillBundles_FailsClosedOnReadFailure(t *testing.T) {
 	}
 	svc := &TaskService{Queries: db.New(fake)}
 
-	bundles, refs, err := svc.LoadAgentSkillBundles(context.Background(), testUUID(9))
+	bundles, refs, err := svc.LoadAgentSkillBundles(context.Background(), testUUID(9), "", false)
 	if err == nil {
 		t.Fatalf("LoadAgentSkillBundles returned nil error with %d bundles / %d refs", len(bundles), len(refs))
 	}
