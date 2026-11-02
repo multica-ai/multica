@@ -15,13 +15,14 @@ import (
 	"strings"
 	"time"
 
+	"github.com/multica-ai/multica/server/pkg/agent"
 	"github.com/multica-ai/multica/server/pkg/protocol"
 )
 
 const (
 	antigravityQuotaProvider  = "antigravity"
 	antigravityQuotaURL       = "https://daily-cloudcode-pa.googleapis.com/v1internal:retrieveUserQuotaSummary"
-	antigravityOAuthTokenFile = ".gemini/antigravity-cli/antigravity-oauth-token"
+	antigravityOAuthTokenFile = agent.AntigravityOAuthTokenPath
 )
 
 var (

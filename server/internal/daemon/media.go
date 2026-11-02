@@ -47,32 +47,44 @@ func builtinMediaFromPayload(entries []map[string]string) map[string]string {
 // reader. Only built-in identities are eligible; a protocol-compatible custom
 // profile does not establish native provider support or subscription identity.
 func (d *Daemon) probeNativeMedia(ctx context.Context, provider string, entry AgentEntry) string {
-	if !d.cfg.DiscoverNativeMedia || d.cfg.MediaExecutor != nil || provider != "codex" {
+	if !d.cfg.DiscoverNativeMedia || d.cfg.MediaExecutor != nil || (provider != "codex" && provider != "antigravity") {
 		return ""
 	}
 	// Publish only complete probe results to workers.
 	d.nativeMediaMu.Lock()
 	defer d.nativeMediaMu.Unlock()
 	resolved, _ := d.resolveAgentEntry(ctx, provider, entry)
+	if d.nativeMediaExecutors == nil {
+		d.nativeMediaExecutors = map[string]media.Executor{}
+	}
+	delete(d.nativeMediaExecutors, provider)
+	command := agent.NewCommand(resolved.Path, nil)
+	if provider == "antigravity" {
+		home, err := os.UserHomeDir()
+		if err != nil {
+			return ""
+		}
+		executor := &media.Antigravity{Command: command, Home: home}
+		if executor.Probe(ctx) != nil {
+			return ""
+		}
+		d.nativeMediaExecutors[provider] = executor
+		return "media-image-agy-v1"
+	}
 	home := os.Getenv("CODEX_HOME")
 	if home == "" {
 		if userHome, err := os.UserHomeDir(); err == nil {
 			home = filepath.Join(userHome, ".codex")
 		}
 	}
-	if d.nativeMediaExecutors == nil {
-		d.nativeMediaExecutors = map[string]media.Executor{}
+	if home != "" {
+		executor := &media.Codex{Command: command, Home: home}
+		if executor.Probe(ctx) == nil {
+			d.nativeMediaExecutors[provider] = executor
+			return "media-image-codex-v1"
+		}
 	}
-	delete(d.nativeMediaExecutors, provider)
-	if home == "" {
-		return ""
-	}
-	executor := &media.Codex{Command: agent.NewCommand(resolved.Path, nil), Home: home}
-	if executor.Probe(ctx) != nil {
-		return ""
-	}
-	d.nativeMediaExecutors[provider] = executor
-	return "media-image-codex-v1"
+	return ""
 }
 
 func (d *Daemon) withMediaCapabilities(entries []map[string]string) []map[string]any {

@@ -1,0 +1,86 @@
+{
+  "source": "OL-1163 agy 1.4.12 host capture, 2026-11-02; irrelevant text and tool arguments omitted",
+  "parent": "cc218d35-012d-40c5-8c94-1d5ac9ad500c",
+  "child": "3a158fd6-159e-48b4-b396-c2667e16bdc2",
+  "file": "solid_green_square_1793587522790.jpg",
+  "events": [
+    {
+      "event": "init",
+      "conversation_id": "cc218d35-012d-40c5-8c94-1d5ac9ad500c"
+    },
+    {
+      "event": "step_update",
+      "step_update": {
+        "conversation_id": "cc218d35-012d-40c5-8c94-1d5ac9ad500c",
+        "step_index": 2,
+        "state": "DONE",
+        "step_type": "subagent",
+        "tool_name": "invoke_subagent",
+        "subagent_info": {
+          "subagents": [
+            {
+              "type_name": "image-generator",
+              "conversation_id": "3a158fd6-159e-48b4-b396-c2667e16bdc2",
+              "log_uri": "file://__APP_DATA__/brain/3a158fd6-159e-48b4-b396-c2667e16bdc2/.system_generated/logs/transcript.jsonl"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "event": "result",
+      "result": {
+        "conversation_id": "cc218d35-012d-40c5-8c94-1d5ac9ad500c",
+        "status": "SUCCESS"
+      }
+    }
+  ],
+  "transcript": [
+    {
+      "step_index": 1,
+      "source": "MODEL",
+      "type": "PLANNER_RESPONSE",
+      "status": "DONE",
+      "created_at": "2026-11-02T02:45:08Z",
+      "tool_calls": [
+        {
+          "name": "generate_image"
+        }
+      ]
+    },
+    {
+      "step_index": 2,
+      "source": "MODEL",
+      "type": "GENERIC",
+      "status": "DONE",
+      "created_at": "2026-11-02T02:45:13Z",
+      "content": "Created At: 2026-11-02T02:45:13Z\nCompleted At: 2026-11-02T02:45:22Z\nGenerated image is saved at __APP_DATA__/brain/cc218d35-012d-40c5-8c94-1d5ac9ad500c/solid_green_square_1793587522790.jpg.",
+      "media": [
+        {
+          "mime_type": "image/jpeg",
+          "uri": "file://__APP_DATA__/brain/cc218d35-012d-40c5-8c94-1d5ac9ad500c/solid_green_square_1793587522790.jpg"
+        }
+      ]
+    },
+    {
+      "step_index": 3,
+      "source": "MODEL",
+      "type": "PLANNER_RESPONSE",
+      "status": "DONE",
+      "created_at": "2026-11-02T02:45:22Z",
+      "tool_calls": [
+        {
+          "name": "send_message"
+        }
+      ]
+    },
+    {
+      "step_index": 4,
+      "source": "MODEL",
+      "type": "GENERIC",
+      "status": "DONE",
+      "created_at": "2026-11-02T02:45:27Z",
+      "content": "Created At: 2026-11-02T02:45:27Z\nCompleted At: 2026-11-02T02:45:28Z\nMessage sent to \"cc218d35-012d-40c5-8c94-1d5ac9ad500c\"."
+    }
+  ]
+}
