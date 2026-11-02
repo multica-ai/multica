@@ -1276,6 +1276,7 @@ func (c *httpAPIClient) doJSON(ctx context.Context, baseURL, method, path, token
 			Code:       code,
 			Msg:        msg,
 			Raw:        truncate(string(rawBody), 512),
+			RetryAfter: parseRetryAfter(resp.Header.Get("Retry-After")),
 		}
 	}
 	if out != nil && len(rawBody) > 0 {
@@ -1319,6 +1320,8 @@ type larkAPIStatusError struct {
 	Code       int
 	Msg        string
 	Raw        string
+	// RetryAfter is the Retry-After the reply asked for, or zero.
+	RetryAfter time.Duration
 }
 
 func (e *larkAPIStatusError) Error() string {

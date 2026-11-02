@@ -129,6 +129,11 @@ type APIClient interface {
 	// DeleteMessageReaction removes a previously-added reaction from a
 	// message. This is the cleanup half of the typing-indicator lifecycle.
 	DeleteMessageReaction(ctx context.Context, p DeleteReactionParams) error
+
+	// SendUserMessage posts a message to a user's direct message with the bot,
+	// addressed by open_id, and returns Lark's message_id. The brief push uses
+	// it; chat replies keep to the chat-level paths above.
+	SendUserMessage(ctx context.Context, creds InstallationCredentials, p SendUserMessageParams) (string, error)
 }
 
 // TokenCacheInvalidator is implemented by an APIClient that caches
@@ -492,4 +497,9 @@ func (s *stubAPIClient) AddMessageReaction(ctx context.Context, p AddReactionPar
 func (s *stubAPIClient) DeleteMessageReaction(ctx context.Context, p DeleteReactionParams) error {
 	s.log.Warn("lark stub client: DeleteMessageReaction called", "message_id", p.MessageID, "reaction_id", p.ReactionID)
 	return ErrAPIClientNotConfigured
+}
+
+func (s *stubAPIClient) SendUserMessage(ctx context.Context, creds InstallationCredentials, p SendUserMessageParams) (string, error) {
+	s.log.Warn("lark stub client: SendUserMessage called", "open_id", p.OpenID)
+	return "", ErrAPIClientNotConfigured
 }

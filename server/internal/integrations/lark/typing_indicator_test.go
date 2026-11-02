@@ -51,6 +51,10 @@ func (f *fakeTypingAPIClient) SendTextMessage(context.Context, SendTextParams) (
 func (f *fakeTypingAPIClient) SendMarkdownCard(context.Context, SendMarkdownCardParams) (string, error) {
 	return "", nil
 }
+func (f *fakeTypingAPIClient) SendUserMessage(context.Context, InstallationCredentials, SendUserMessageParams) (string, error) {
+	panic("SendUserMessage is not expected in this test")
+}
+
 func (f *fakeTypingAPIClient) SendBindingPromptCard(context.Context, BindingPromptParams) error {
 	return nil
 }

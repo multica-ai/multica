@@ -197,6 +197,10 @@ func (f *fakeAPIClient) SendMarkdownCard(ctx context.Context, p SendMarkdownCard
 	}
 	return f.mdCardReturn, f.mdCardErr
 }
+func (f *fakeAPIClient) SendUserMessage(context.Context, InstallationCredentials, SendUserMessageParams) (string, error) {
+	panic("SendUserMessage is not expected in this test")
+}
+
 func (f *fakeAPIClient) SendBindingPromptCard(ctx context.Context, p BindingPromptParams) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()

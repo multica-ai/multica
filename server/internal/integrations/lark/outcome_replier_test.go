@@ -70,6 +70,10 @@ func (s *stubAPIClientWithRecorder) SendMarkdownCard(ctx context.Context, p Send
 	return "lark-md-msg-id", nil
 }
 
+func (s *stubAPIClientWithRecorder) SendUserMessage(context.Context, InstallationCredentials, SendUserMessageParams) (string, error) {
+	panic("SendUserMessage is not expected in this test")
+}
+
 func (s *stubAPIClientWithRecorder) SendBindingPromptCard(ctx context.Context, p BindingPromptParams) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
