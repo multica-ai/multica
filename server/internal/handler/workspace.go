@@ -1390,6 +1390,10 @@ func (h *Handler) DeleteWorkspace(w http.ResponseWriter, r *http.Request) {
 			run:  func() error { return qtx.DeleteWorkspaceSquadCharters(ctx, requester.WorkspaceID) },
 		},
 		{
+			name: "delete squad attention",
+			run:  func() error { return qtx.DeleteWorkspaceSquadAttention(ctx, requester.WorkspaceID) },
+		},
+		{
 			name: "delete squads and skills",
 			run:  func() error { return qtx.DeleteWorkspaceSquadsAndSkills(ctx, requester.WorkspaceID) },
 		},

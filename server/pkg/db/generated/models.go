@@ -1622,6 +1622,19 @@ type Squad struct {
 	OfficeSlot   pgtype.Int2        `json:"office_slot"`
 }
 
+type SquadAttention struct {
+	SquadID          pgtype.UUID        `json:"squad_id"`
+	WorkspaceID      pgtype.UUID        `json:"workspace_id"`
+	PendingCap       int32              `json:"pending_cap"`
+	WeeklyCap        int32              `json:"weekly_cap"`
+	AcceptanceRate   pgtype.Numeric     `json:"acceptance_rate"`
+	SampleSize       int32              `json:"sample_size"`
+	Pinned           bool               `json:"pinned"`
+	PinnedPendingCap pgtype.Int4        `json:"pinned_pending_cap"`
+	PinnedWeeklyCap  pgtype.Int4        `json:"pinned_weekly_cap"`
+	ComputedAt       pgtype.Timestamptz `json:"computed_at"`
+}
+
 type SquadCharter struct {
 	SquadID                pgtype.UUID        `json:"squad_id"`
 	WorkspaceID            pgtype.UUID        `json:"workspace_id"`

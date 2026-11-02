@@ -227,12 +227,13 @@ const squadSteerRule = `- A worker already running on this issue gets a new comm
 // squadProposingBriefing is the system-managed "Proposing to the boss" block.
 // It is sent only to leaders of squads that work on a schedule (an active
 // autopilot assigned to the squad), the squads whose runs can end with
-// something the boss must decide. The limits are rendered from the service
-// constants so the text cannot drift from what the server enforces.
+// something the boss must decide. The per-squad limits are the squad's effective
+// caps (pinned, computed or default), so the text matches what the server
+// enforces for this squad.
 //
 // It repeats nothing from the Operating Protocol; it only points at the
 // protocol's own recording rule for the "nothing to propose" outcome.
-func squadProposingBriefing(squad db.Squad) string {
+func squadProposingBriefing(squad db.Squad, caps service.SquadCaps) string {
 	return fmt.Sprintf(`## Proposing to the boss
 
 Your squad works on a schedule, so a run can surface something only the boss
@@ -267,8 +268,8 @@ post it as a comment on the boss or the Secretary.
   bar your task states. When nothing does, file nothing and record that with
   `+"`"+`multica squad activity <issue-id> no_action --reason "..."`+"`"+`.`,
 		util.UUIDToString(squad.ID),
-		service.ProposalMaxPendingPerSquad,
-		service.ProposalMaxCreatedPerSquadPerWeek,
+		caps.Pending,
+		caps.Weekly,
 		service.ProposalMaxPendingPerWorkspace,
 		service.ProposalMaxUrgentPerSquadPerWeek,
 	)
@@ -417,8 +418,14 @@ func buildSquadLeaderBriefing(ctx context.Context, q *db.Queries, squad db.Squad
 	if scheduled, err := q.HasActiveSquadAutopilot(ctx, db.HasActiveSquadAutopilotParams{
 		WorkspaceID: squad.WorkspaceID, AssigneeID: squad.ID,
 	}); err == nil && scheduled {
+		// A failed lookup shows the defaults, which is what a squad with no
+		// attention row is held to.
+		caps, err := service.EffectiveSquadCaps(ctx, q, squad.WorkspaceID, squad.ID)
+		if err != nil {
+			caps = service.DefaultSquadCaps()
+		}
 		sb.WriteString("\n\n")
-		sb.WriteString(squadProposingBriefing(squad))
+		sb.WriteString(squadProposingBriefing(squad, caps))
 	}
 
 	if trimmed := strings.TrimSpace(squad.Instructions); trimmed != "" {

@@ -852,6 +852,11 @@ func main() {
 	if err := schedulerMgr.Register(scheduler.ProposalExpiryJob(h)); err != nil {
 		slog.Error("scheduler: register proposal expiry", "error", err)
 	}
+	// Daily: each squad's proposal caps follow its acceptance rate over the last
+	// 60 days (plan 9.9). Pins are kept.
+	if err := schedulerMgr.Register(scheduler.SquadAttentionJob(h)); err != nil {
+		slog.Error("scheduler: register squad attention", "error", err)
+	}
 	if err := schedulerMgr.Register(scheduler.AutopilotScheduleDispatchJob(pool, queries, autopilotSvc)); err != nil {
 		slog.Warn("scheduler: failed to register autopilot_schedule_dispatch job", "error", err)
 	}

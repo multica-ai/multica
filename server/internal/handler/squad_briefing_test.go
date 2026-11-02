@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/jackc/pgx/v5/pgtype"
+	"github.com/multica-ai/multica/server/internal/service"
 	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
@@ -573,7 +574,7 @@ func TestBuildSquadLeaderBriefing_ProposingToTheBossOnlyForScheduledSquads(t *te
 	if !(roster >= 0 && roster < proposing && proposing < instructions) {
 		t.Errorf("block order wrong: roster=%d proposing=%d instructions=%d", roster, proposing, instructions)
 	}
-	if got := util.ParseMentions(squadProposingBriefing(squad)); len(got) != 0 {
+	if got := util.ParseMentions(squadProposingBriefing(squad, service.DefaultSquadCaps())); len(got) != 0 {
 		t.Errorf("the proposing block must not contain mention syntax, found %v", got)
 	}
 }

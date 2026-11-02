@@ -17,15 +17,16 @@ import (
 )
 
 // The boss's attention is the scarce resource, so the server enforces these
-// limits instead of trusting prompts. They are constants until real use shows
-// they need to be workspace settings.
+// limits instead of trusting prompts. The per-squad pair are defaults: a squad's
+// effective caps move with its acceptance rate and can be pinned (see
+// attention.go). The workspace cap and the urgent rule never move.
 const (
-	// ProposalMaxPendingPerSquad caps proposals one squad may have waiting.
-	ProposalMaxPendingPerSquad = 3
-	// ProposalMaxCreatedPerSquadPerWeek caps proposals one squad may file over
-	// the rolling seven days, whatever their state. A revision is not a new
+	// ProposalDefaultPendingPerSquad is a squad's default cap on proposals waiting.
+	ProposalDefaultPendingPerSquad = 3
+	// ProposalDefaultWeeklyPerSquad is a squad's default cap on proposals filed
+	// over the rolling seven days, whatever their state. A revision is not a new
 	// filing and does not count here.
-	ProposalMaxCreatedPerSquadPerWeek = 3
+	ProposalDefaultWeeklyPerSquad = 3
 	// ProposalMaxPendingPerWorkspace bounds the whole queue, which per-squad
 	// limits alone would let grow with the number of squads.
 	ProposalMaxPendingPerWorkspace = 10
@@ -228,7 +229,11 @@ func (s *ProposalService) Create(ctx context.Context, p ProposalCreateParams) (P
 		}
 	}
 
-	if err := s.checkLimits(ctx, qtx, p); err != nil {
+	caps, err := EffectiveSquadCaps(ctx, qtx, p.WorkspaceID, p.SquadID)
+	if err != nil {
+		return ProposalCreateResult{}, err
+	}
+	if err := s.checkLimits(ctx, qtx, p, caps); err != nil {
 		return ProposalCreateResult{}, err
 	}
 
@@ -327,8 +332,8 @@ func liveSquad(ctx context.Context, q *db.Queries, workspaceID, squadID pgtype.U
 // checkLimits enforces the attention limits on a new filing. It runs under the
 // workspace proposal lock. Each message tells the filing agent what to do
 // instead.
-func (s *ProposalService) checkLimits(ctx context.Context, q *db.Queries, p ProposalCreateParams) error {
-	if err := s.checkPendingSquadCap(ctx, q, p.WorkspaceID, p.SquadID, "filing another"); err != nil {
+func (s *ProposalService) checkLimits(ctx context.Context, q *db.Queries, p ProposalCreateParams, caps SquadCaps) error {
+	if err := s.checkPendingSquadCap(ctx, q, p.WorkspaceID, p.SquadID, caps.Pending, "filing another"); err != nil {
 		return err
 	}
 
@@ -338,7 +343,7 @@ func (s *ProposalService) checkLimits(ctx context.Context, q *db.Queries, p Prop
 	if err != nil {
 		return fmt.Errorf("count recent proposals by squad: %w", err)
 	}
-	if createdThisWeek >= ProposalMaxCreatedPerSquadPerWeek {
+	if createdThisWeek >= int64(caps.Weekly) {
 		return &ProposalLimitError{Message: fmt.Sprintf(
 			"this squad has already filed %d proposals in the last 7 days (the limit); "+
 				"hold this one for next week, or fold it into a pending proposal. "+
@@ -370,14 +375,14 @@ func (s *ProposalService) checkLimits(ctx context.Context, q *db.Queries, p Prop
 // checkPendingSquadCap refuses when the squad already has the maximum waiting
 // for the boss. action completes "...before %s" in the message: the filing
 // agent reads it as the thing it was about to do.
-func (s *ProposalService) checkPendingSquadCap(ctx context.Context, q *db.Queries, workspaceID, squadID pgtype.UUID, action string) error {
+func (s *ProposalService) checkPendingSquadCap(ctx context.Context, q *db.Queries, workspaceID, squadID pgtype.UUID, limit int, action string) error {
 	pendingInSquad, err := q.CountPendingProposalsBySquad(ctx, db.CountPendingProposalsBySquadParams{
 		WorkspaceID: workspaceID, SquadID: squadID,
 	})
 	if err != nil {
 		return fmt.Errorf("count pending proposals by squad: %w", err)
 	}
-	if pendingInSquad >= ProposalMaxPendingPerSquad {
+	if pendingInSquad >= int64(limit) {
 		return &ProposalLimitError{Message: fmt.Sprintf(
 			"this squad already has %d proposals waiting for the boss's decision (the limit); "+
 				"wait until some are decided before %s. If nothing new clears the bar, "+
@@ -745,7 +750,11 @@ func (s *ProposalService) Resubmit(ctx context.Context, p ProposalResubmitParams
 		return ProposalResubmitResult{}, ErrProposalAlreadyDecided
 	}
 
-	if err := s.checkPendingSquadCap(ctx, qtx, p.WorkspaceID, current.SquadID, "sending this revision back"); err != nil {
+	caps, err := EffectiveSquadCaps(ctx, qtx, p.WorkspaceID, current.SquadID)
+	if err != nil {
+		return ProposalResubmitResult{}, err
+	}
+	if err := s.checkPendingSquadCap(ctx, qtx, p.WorkspaceID, current.SquadID, caps.Pending, "sending this revision back"); err != nil {
 		return ProposalResubmitResult{}, err
 	}
 	if err := s.checkPendingWorkspaceCap(ctx, qtx, p.WorkspaceID, "send this revision back again"); err != nil {

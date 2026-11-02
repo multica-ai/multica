@@ -388,6 +388,7 @@ var concurrentIndexCleanups = map[string]string{
 	"713_proposal_revision_workspace_index":                     "idx_proposal_revision_workspace_proposal",
 	"715_brief_inquiry_pkey_index":                              "brief_inquiry_id_uidx",
 	"717_brief_inquiry_workspace_day_index":                     "idx_brief_inquiry_workspace_asked",
+	"719_squad_attention_pkey_index":                            "squad_attention_squad_uidx",
 }
 
 // concurrentDownIndexCleanups covers every migration whose down direction
