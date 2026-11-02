@@ -2,13 +2,17 @@ package handler
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"sync"
 	"testing"
 	"time"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/multica-ai/multica/server/internal/events"
+	"github.com/multica-ai/multica/server/internal/testutil"
+	db "github.com/multica-ai/multica/server/pkg/db/generated"
 	"github.com/multica-ai/multica/server/pkg/protocol"
 )
 
@@ -94,5 +98,91 @@ func TestSkillFileWritesPublishSkillUpdated(t *testing.T) {
 	}
 	if !updatedAt().After(afterUpsert) {
 		t.Fatal("delete did not bump skill.updated_at")
+	}
+}
+
+func TestTouchSkillWorkspaceScope(t *testing.T) {
+	ctx := context.Background()
+	skillID := dbfx.Insert(t, "skill", testutil.Cols{
+		"workspace_id": testWorkspaceID,
+		"created_by":   testUserID,
+		"name":         "touch-skill-workspace-scope",
+		"updated_at":   testutil.Raw("now() - interval '1 hour'"),
+	})
+	otherWorkspaceID := dbfx.Workspace(t, "Other skill workspace", "touch-skill-other-"+skillID)
+	original, err := testHandler.Queries.GetSkill(ctx, parseUUID(skillID))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	_, err = testHandler.Queries.TouchSkill(ctx, db.TouchSkillParams{
+		ID:          original.ID,
+		WorkspaceID: parseUUID(otherWorkspaceID),
+	})
+	if !errors.Is(err, pgx.ErrNoRows) {
+		t.Fatalf("touch from another workspace: got %v, want no rows", err)
+	}
+	unchanged, err := testHandler.Queries.GetSkill(ctx, original.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !unchanged.UpdatedAt.Time.Equal(original.UpdatedAt.Time) {
+		t.Fatal("touch from another workspace changed the skill timestamp")
+	}
+
+	updated, err := testHandler.Queries.TouchSkill(ctx, db.TouchSkillParams{
+		ID:          original.ID,
+		WorkspaceID: original.WorkspaceID,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !updated.UpdatedAt.Time.After(original.UpdatedAt.Time) {
+		t.Fatal("touch from the owning workspace did not update the skill timestamp")
+	}
+}
+
+func TestSkillFileWritesReturnNotFoundAfterSkillDeleted(t *testing.T) {
+	for _, method := range []string{http.MethodPut, http.MethodDelete} {
+		t.Run(method, func(t *testing.T) {
+			skillID := dbfx.Insert(t, "skill", testutil.Cols{
+				"workspace_id": testWorkspaceID,
+				"created_by":   testUserID,
+				"name":         "deleted-before-file-write-" + method,
+			})
+			fileID := dbfx.Insert(t, "skill_file", testutil.Cols{
+				"skill_id": skillID,
+				"path":     "notes.md",
+				"content":  "original",
+			})
+
+			h := *testHandler
+			h.Bus = events.New()
+			updates := 0
+			h.Bus.Subscribe(protocol.EventSkillUpdated, func(events.Event) { updates++ })
+			deleted := false
+			h.TxStarter = hookedTxStarter{base: testHandler.TxStarter, hook: func() error {
+				dbfx.Exec(t, `DELETE FROM skill_file WHERE skill_id = $1`, skillID)
+				dbfx.Exec(t, `DELETE FROM skill WHERE id = $1 AND workspace_id = $2`, skillID, testWorkspaceID)
+				deleted = true
+				return nil
+			}}
+
+			handler := h.UpsertSkillFile
+			path := "/api/skills/" + skillID + "/files"
+			if method == http.MethodDelete {
+				handler = h.DeleteSkillFile
+				path += "/" + fileID
+			}
+			req := newRequest(method, path, map[string]any{"path": "notes.md", "content": "changed"})
+			req = testutil.WithURLParams(req, "id", skillID, "fileId", fileID)
+			testutil.Call(t, handler, req).Want(http.StatusNotFound)
+			if !deleted {
+				t.Fatal("request did not reach the post-authorization deletion hook")
+			}
+			if updates != 0 {
+				t.Fatalf("deleted skill published %d updates, want none", updates)
+			}
+		})
 	}
 }

@@ -2526,7 +2526,14 @@ func (h *Handler) UpsertSkillFile(w http.ResponseWriter, r *http.Request) {
 
 	// Touch the parent first so its row lock is taken before the file write,
 	// in the same order UpdateSkill takes them.
-	skill, err = qtx.TouchSkill(r.Context(), skill.ID)
+	skill, err = qtx.TouchSkill(r.Context(), db.TouchSkillParams{
+		ID:          skill.ID,
+		WorkspaceID: skill.WorkspaceID,
+	})
+	if errors.Is(err, pgx.ErrNoRows) {
+		writeError(w, http.StatusNotFound, "skill not found")
+		return
+	}
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to update skill")
 		return
@@ -2586,7 +2593,14 @@ func (h *Handler) DeleteSkillFile(w http.ResponseWriter, r *http.Request) {
 	defer tx.Rollback(r.Context())
 	qtx := h.Queries.WithTx(tx)
 
-	skill, err = qtx.TouchSkill(r.Context(), skill.ID)
+	skill, err = qtx.TouchSkill(r.Context(), db.TouchSkillParams{
+		ID:          skill.ID,
+		WorkspaceID: skill.WorkspaceID,
+	})
+	if errors.Is(err, pgx.ErrNoRows) {
+		writeError(w, http.StatusNotFound, "skill not found")
+		return
+	}
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to update skill")
 		return

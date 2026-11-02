@@ -49,7 +49,7 @@ RETURNING *;
 -- updated_at in the same transaction. Updating the row also takes its lock,
 -- which serializes concurrent file writes on one skill with UpdateSkill.
 UPDATE skill SET updated_at = now()
-WHERE id = $1
+WHERE id = $1 AND workspace_id = $2
 RETURNING *;
 
 -- name: DeleteSkill :exec
