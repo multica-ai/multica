@@ -256,6 +256,7 @@ describe("OfficeView", () => {
     queryClient.setQueryData(officeKeys.floors("ws-1"), options.floors ?? FLOORS);
     queryClient.setQueryData(workspaceKeys.members("ws-1"), [{ user_id: "viewer-1", role: options.role ?? "owner" }]);
     queryClient.setQueryData(proposalKeys.listFiltered("ws-1", { state: "pending" }), options.proposals ?? []);
+    queryClient.setQueryData(proposalKeys.listFiltered("ws-1", { state: "revising" }), []);
     for (const squad of options.squads ?? SQUADS) {
       queryClient.setQueryData(
         officeKeys.squadMembers("ws-1", squad.id),
@@ -358,6 +359,14 @@ describe("OfficeView", () => {
 
     expect(await screen.findByRole("button", { name: "Needs you" })).toBeTruthy();
     expect(screen.queryByRole("button", { name: "In Progress" })).toBeNull();
+  });
+
+  it("leaves the Needs you tag off a leader whose only proposal is put aside until a later date", async () => {
+    const putAside = { ...pendingProposal("s1"), snoozed_until: new Date(Date.now() + 3 * 24 * 60 * 60 * 1000).toISOString() };
+    setup([makeIssue("c", "in_progress", "agent-1")], { proposals: [putAside] });
+
+    expect(await screen.findByRole("button", { name: "In Progress" })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Needs you" })).toBeNull();
   });
 
   it("counts the pending proposals over the room of the squad that filed them", async () => {

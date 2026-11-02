@@ -36,6 +36,7 @@ import { OfficeDecisionsDialog } from "./office-decisions-dialog";
 import { OfficeFirstRun } from "./office-first-run";
 import { OfficeFloorTabs } from "./office-floor-tabs";
 import { useOfficeAdmin } from "../lib/use-office-admin";
+import { useDecisionQueue } from "../lib/decision-queue";
 import { useSeatAll } from "../lib/use-seat-all";
 
 const EMPTY_TASKS: AgentTask[] = [];
@@ -92,7 +93,12 @@ function OfficeScene({ issues, visibleStatuses, projectId }: BoardViewProps) {
   const selectFloor = useOfficeFloorStore((s) => s.setLastFloorId);
   const canManage = useOfficeAdmin();
   const userId = useAuthStore((s) => s.user?.id);
-  const { data: pending = EMPTY_PROPOSALS } = useQuery(proposalListOptions(wsId, { state: "pending" }));
+  const { data: pendingAll = EMPTY_PROPOSALS } = useQuery(proposalListOptions(wsId, { state: "pending" }));
+  const { data: revisingAll = EMPTY_PROPOSALS } = useQuery(proposalListOptions(wsId, { state: "revising" }));
+  // The queue leaves out proposals put aside with Decide later until their date.
+  const { needsDecision: pending } = useDecisionQueue(pendingAll);
+  // The dialog lists the whole decision book: the queue, the put aside and the revising.
+  const decisionBook = useMemo(() => [...pendingAll, ...revisingAll], [pendingAll, revisingAll]);
 
   // The floor on show: the one last viewed, else the first.
   const floor = floors.find((candidate) => candidate.id === lastFloorId) ?? floors[0] ?? null;
@@ -191,10 +197,10 @@ function OfficeScene({ issues, visibleStatuses, projectId }: BoardViewProps) {
         onSelect={selectFloor}
       >
         <OfficeBriefButton />
-        {pending.length > 0 ? (
+        {pendingAll.length > 0 ? (
           <Button type="button" variant="outline" size="sm" onClick={() => setDecisionsOpen(true)}>
             {t(($) => $.office.decisions_open)}
-            <span className="tabular-nums text-muted-foreground">{pending.length}</span>
+            {pending.length > 0 ? <span className="tabular-nums text-muted-foreground">{pending.length}</span> : null}
           </Button>
         ) : null}
       </OfficeFloorTabs>
@@ -252,7 +258,7 @@ function OfficeScene({ issues, visibleStatuses, projectId }: BoardViewProps) {
       />
       <OfficeDecisionsDialog
         open={decisionsOpen}
-        proposals={pending}
+        proposals={decisionBook}
         squads={squads}
         canDecide={canManage}
         onClose={() => setDecisionsOpen(false)}
