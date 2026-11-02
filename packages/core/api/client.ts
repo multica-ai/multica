@@ -331,11 +331,13 @@ import type {
 import {
   FALLBACK_PROPOSAL,
   ProposalListSchema,
+  ProposalRevisionListSchema,
   ProposalSchema,
   type CreateProposalRequest,
   type DecideProposalRequest,
   type ListProposalsParams,
   type Proposal,
+  type ProposalRevision,
 } from "../office/proposal-schema";
 import {
   RuntimeProfileSchema,
@@ -5856,6 +5858,13 @@ export class ApiClient {
     });
     return parseWithFallback(raw, ProposalSchema, FALLBACK_PROPOSAL, {
       endpoint: "POST /api/proposals/:id/decision",
+    });
+  }
+
+  async listProposalRevisions(id: string): Promise<ProposalRevision[]> {
+    const raw = await this.fetch<unknown>(`/api/proposals/${id}/revisions`);
+    return parseWithFallback<ProposalRevision[]>(raw, ProposalRevisionListSchema, [], {
+      endpoint: "GET /api/proposals/:id/revisions",
     });
   }
 }

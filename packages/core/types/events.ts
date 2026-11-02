@@ -71,6 +71,9 @@ export type WSEventType =
   | "squad:created"
   | "squad:updated"
   | "squad:deleted"
+  | "proposal:created"
+  | "proposal:updated"
+  | "proposal:decided"
   | "office_floor:created"
   | "office_floor:updated"
   | "office_floor:deleted"
@@ -692,6 +695,10 @@ export interface WSEventPayloadMap {
   "squad:created": unknown;
   "squad:updated": unknown;
   "squad:deleted": unknown;
+  // The payloads are proposals; the realtime layer refetches rather than reads them.
+  "proposal:created": unknown;
+  "proposal:updated": unknown;
+  "proposal:decided": unknown;
   "office_floor:created": unknown;
   "office_floor:updated": unknown;
   "office_floor:deleted": unknown;
