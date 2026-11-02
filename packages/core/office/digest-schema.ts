@@ -117,6 +117,14 @@ export interface DigestKnowledge {
   pending_drafts: number;
 }
 
+/** A question the Secretary put to a squad leader (`multica brief ask`). */
+export interface DigestInquiry {
+  question: string;
+  answered: boolean;
+  /** The first characters of the leader's reply, once answered. */
+  answer_excerpt: string | null;
+}
+
 export interface Digest {
   since: string;
   until: string;
@@ -127,6 +135,8 @@ export interface Digest {
   omitted_squad_count: number;
   quiet: { count: number; squads: DigestQuietSquad[] };
   knowledge: DigestKnowledge;
+  /** The Secretary's questions asked today or yesterday, newest first. */
+  inquiries: DigestInquiry[];
 }
 
 export interface DigestParams {
@@ -244,6 +254,15 @@ const emptyDigestWorkspace = {
 };
 export const EMPTY_DIGEST_WORKSPACE: DigestWorkspace = emptyDigestWorkspace;
 
+// An unreadable inquiry is dropped alone; the other inquiries and the digest still load.
+const DigestInquirySchema = z
+  .object({
+    question: z.string().default(""),
+    answered: z.boolean().catch(false).default(false),
+    answer_excerpt: z.string().nullable().catch(null).default(null),
+  })
+  .loose();
+
 const DigestKnowledgeDocumentSchema = z
   .object({
     id: z.string().default(""),
@@ -283,6 +302,15 @@ export const DigestSchema = z
       .loose()
       .default({ count: 0, squads: [] }),
     knowledge: DigestKnowledgeSchema,
+    // Not a list (or missing) reads as none; the rest of the digest still loads.
+    inquiries: z.unknown().transform((value) =>
+      Array.isArray(value)
+        ? value.flatMap((item) => {
+            const parsed = DigestInquirySchema.safeParse(item);
+            return parsed.success ? [parsed.data] : [];
+          })
+        : [],
+    ),
   })
   .loose();
 
@@ -295,4 +323,5 @@ export const FALLBACK_DIGEST: Digest = {
   omitted_squad_count: 0,
   quiet: { count: 0, squads: [] },
   knowledge: EMPTY_DIGEST_KNOWLEDGE,
+  inquiries: [],
 };

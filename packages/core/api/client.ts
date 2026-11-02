@@ -290,6 +290,24 @@ import {
   type DigestParams,
 } from "../office/digest-schema";
 import {
+  BriefPushPreferenceSchema,
+  EMPTY_BRIEF_PUSH,
+  type BriefPushPreference,
+  type UpdateBriefPushRequest,
+} from "../office/brief-push-schema";
+import {
+  BriefFeedbackOrNoneSchema,
+  BriefFeedbackSummarySchema,
+  type BriefFeedback,
+  type BriefFeedbackSummary,
+  type SubmitBriefFeedbackRequest,
+} from "../office/brief-feedback-schema";
+import {
+  SquadAttentionSchema,
+  type PinSquadAttentionRequest,
+  type SquadAttention,
+} from "../office/squad-attention-schema";
+import {
   EMPTY_SQUAD_ROUTINE,
   SquadCharterSchema,
   SquadRoutineListSchema,
@@ -4954,6 +4972,72 @@ export class ApiClient {
     return parseWithFallback(raw, OfficeSeatsResponseSchema, EMPTY_OFFICE_SEATS_RESPONSE, {
       endpoint: "PUT /api/office/seats",
     }) as OfficeSeatsResponse;
+  }
+
+  // The caller's chat push for the daily brief (spec 2.7). Member-only: an agent
+  // is refused by the server.
+  async getBriefPushPreference(): Promise<BriefPushPreference> {
+    const raw = await this.fetch<unknown>("/api/office/brief-push");
+    return parseWithFallback(raw, BriefPushPreferenceSchema, EMPTY_BRIEF_PUSH, {
+      endpoint: "GET /api/office/brief-push",
+    });
+  }
+
+  async updateBriefPushPreference(data: UpdateBriefPushRequest): Promise<BriefPushPreference> {
+    const raw = await this.fetch<unknown>("/api/office/brief-push", {
+      method: "PUT",
+      body: JSON.stringify(data),
+    });
+    return parseWithFallback(raw, BriefPushPreferenceSchema, EMPTY_BRIEF_PUSH, {
+      endpoint: "PUT /api/office/brief-push",
+    });
+  }
+
+  // A member rates a brief; a second rating replaces the first. The read returns
+  // the caller's own rating, or null when there is none.
+  async submitBriefFeedback(briefId: string, data: SubmitBriefFeedbackRequest): Promise<BriefFeedback | null> {
+    const raw = await this.fetch<unknown>(`/api/briefs/${encodeURIComponent(briefId)}/feedback`, {
+      method: "POST",
+      body: JSON.stringify(data),
+    });
+    return parseWithFallback<BriefFeedback | null>(raw, BriefFeedbackOrNoneSchema, null, {
+      endpoint: "POST /api/briefs/:id/feedback",
+    });
+  }
+
+  async getMyBriefFeedback(briefId: string): Promise<BriefFeedback | null> {
+    const raw = await this.fetch<unknown>(`/api/briefs/${encodeURIComponent(briefId)}/feedback`);
+    return parseWithFallback<BriefFeedback | null>(raw, BriefFeedbackOrNoneSchema, null, {
+      endpoint: "GET /api/briefs/:id/feedback",
+    });
+  }
+
+  // The workspace's usefulness figure. Owners and admins only; other callers get
+  // a 403 ApiError, which the caller treats as "not shown".
+  async getBriefFeedbackSummary(): Promise<BriefFeedbackSummary | null> {
+    const raw = await this.fetch<unknown>("/api/briefs/feedback/summary");
+    return parseWithFallback<BriefFeedbackSummary | null>(raw, BriefFeedbackSummarySchema, null, {
+      endpoint: "GET /api/briefs/feedback/summary",
+    });
+  }
+
+  // A squad's adaptive limits and the reason they are what they are (spec 2.6).
+  async getSquadAttention(squadId: string): Promise<SquadAttention | null> {
+    const raw = await this.fetch<unknown>(`/api/squads/${squadId}/attention`);
+    return parseWithFallback<SquadAttention | null>(raw, SquadAttentionSchema, null, {
+      endpoint: "GET /api/squads/:id/attention",
+    });
+  }
+
+  // Pins or clears a squad's limits (owner or admin).
+  async setSquadAttentionPin(squadId: string, data: PinSquadAttentionRequest): Promise<SquadAttention | null> {
+    const raw = await this.fetch<unknown>(`/api/squads/${squadId}/attention/pin`, {
+      method: "PUT",
+      body: JSON.stringify(data),
+    });
+    return parseWithFallback<SquadAttention | null>(raw, SquadAttentionSchema, null, {
+      endpoint: "PUT /api/squads/:id/attention/pin",
+    });
   }
 
   // Squad charter and routines. A refused charter save is a 409 whose body

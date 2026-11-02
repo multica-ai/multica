@@ -21,7 +21,7 @@ export type AutopilotRunStatus =
   | "failed"
   | "skipped";
 
-export type AutopilotRunSource = "schedule" | "manual" | "webhook" | "api";
+export type AutopilotRunSource = "schedule" | "manual" | "webhook" | "api" | "catchup";
 
 export interface Autopilot {
   id: string;

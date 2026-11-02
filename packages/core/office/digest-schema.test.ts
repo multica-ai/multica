@@ -227,6 +227,65 @@ describe("DigestSchema charter and routines", () => {
   });
 });
 
+describe("DigestSchema inquiries", () => {
+  it("reads the Secretary's inquiries with their answers", () => {
+    const d = parseWithFallback(
+      {
+        ...full,
+        inquiries: [
+          { question: "Is the pricing test live?", answered: true, answer_excerpt: "Yes, since Monday." },
+          { question: "Who owns churn?", answered: false, answer_excerpt: null },
+        ],
+      },
+      DigestSchema,
+      FALLBACK_DIGEST,
+      { endpoint: "t" },
+    );
+    expect(d.inquiries).toEqual([
+      { question: "Is the pricing test live?", answered: true, answer_excerpt: "Yes, since Monday." },
+      { question: "Who owns churn?", answered: false, answer_excerpt: null },
+    ]);
+  });
+
+  it("defaults inquiries to an empty list for an older server", () => {
+    const d = parseWithFallback({ since: "x" }, DigestSchema, FALLBACK_DIGEST, { endpoint: "t" });
+    expect(d.inquiries).toEqual([]);
+    expect(FALLBACK_DIGEST.inquiries).toEqual([]);
+  });
+
+  it("treats a null inquiry list as empty", () => {
+    const d = parseWithFallback({ ...full, inquiries: null }, DigestSchema, FALLBACK_DIGEST, { endpoint: "t" });
+    expect(d.inquiries).toEqual([]);
+  });
+
+  it("drops a malformed inquiry alone and keeps the rest of the digest", () => {
+    const d = parseWithFallback(
+      {
+        ...full,
+        inquiries: [
+          { question: "Kept", answered: false, answer_excerpt: null },
+          "not an inquiry",
+          { question: "Also kept", answered: "maybe", answer_excerpt: 7 },
+        ],
+      },
+      DigestSchema,
+      FALLBACK_DIGEST,
+      { endpoint: "t" },
+    );
+    expect(d.inquiries).toEqual([
+      { question: "Kept", answered: false, answer_excerpt: null },
+      { question: "Also kept", answered: false, answer_excerpt: null },
+    ]);
+    expect(d.squads[0]).toMatchObject({ name: "Research" });
+  });
+
+  it("falls back to an empty list when the field is not a list", () => {
+    const d = parseWithFallback({ ...full, inquiries: "many" }, DigestSchema, FALLBACK_DIGEST, { endpoint: "t" });
+    expect(d.inquiries).toEqual([]);
+    expect(d.squads[0]).toMatchObject({ name: "Research" });
+  });
+});
+
 describe("digestKeys", () => {
   it("scopes by workspace and by since", () => {
     expect(digestKeys.since("w1", { since: "2026-11-01T00:00:00Z" })).toEqual([
