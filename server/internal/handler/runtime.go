@@ -649,10 +649,7 @@ func (h *Handler) UpdateAgentRuntime(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if req.MaxConcurrentTasks != nil {
-		updated, err := h.Queries.UpdateAgentRuntimeMaxConcurrentTasks(r.Context(), db.UpdateAgentRuntimeMaxConcurrentTasksParams{
-			MaxConcurrentTasks: req.maxConcurrentTasks,
-			ID:                 runtimeUUID,
-		})
+		updated, err := h.updateRuntimeMaxConcurrentTasks(r.Context(), runtimeUUID, req.maxConcurrentTasks)
 		if err != nil {
 			slog.Error("UpdateAgentRuntimeMaxConcurrentTasks failed", "error", err, "runtime_id", runtimeID)
 			writeError(w, http.StatusInternalServerError, "failed to update runtime")
@@ -678,6 +675,35 @@ func (h *Handler) UpdateAgentRuntime(w http.ResponseWriter, r *http.Request) {
 	}
 
 	writeJSON(w, http.StatusOK, runtimeToResponse(rt))
+}
+
+// updateRuntimeMaxConcurrentTasks writes the runtime-wide cap and then waits
+// on the runtime claim lock before committing. Claims read the cap only after
+// taking that lock, so once this returns no claim can still commit against
+// the old value (a claim queued behind the lock reads the new one). The row
+// is updated before the lock is taken; see LockRuntimeClaimCapacity for why
+// that order cannot deadlock with claims or runtime teardown.
+func (h *Handler) updateRuntimeMaxConcurrentTasks(ctx context.Context, runtimeID pgtype.UUID, limit pgtype.Int4) (db.AgentRuntime, error) {
+	tx, err := h.TxStarter.Begin(ctx)
+	if err != nil {
+		return db.AgentRuntime{}, fmt.Errorf("begin transaction: %w", err)
+	}
+	defer tx.Rollback(ctx)
+	qtx := h.Queries.WithTx(tx)
+	updated, err := qtx.UpdateAgentRuntimeMaxConcurrentTasks(ctx, db.UpdateAgentRuntimeMaxConcurrentTasksParams{
+		MaxConcurrentTasks: limit,
+		ID:                 runtimeID,
+	})
+	if err != nil {
+		return db.AgentRuntime{}, err
+	}
+	if err := qtx.LockRuntimeClaimCapacity(ctx, runtimeID); err != nil {
+		return db.AgentRuntime{}, fmt.Errorf("lock runtime claim capacity: %w", err)
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return db.AgentRuntime{}, fmt.Errorf("commit: %w", err)
+	}
+	return updated, nil
 }
 
 func canEditRuntime(member db.Member, rt db.AgentRuntime) bool {

@@ -1,9 +1,16 @@
 package handler
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"testing"
+	"time"
+
+	"github.com/jackc/pgx/v5/pgtype"
+
+	"github.com/multica-ai/multica/server/internal/util"
+	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
 
 // TestUpdateAgentRuntime_MaxConcurrentTasks covers the runtime-wide cap
@@ -69,5 +76,58 @@ func TestUpdateAgentRuntime_MaxConcurrentTasks(t *testing.T) {
 	}
 	if resp := decode(t, w.Body.Bytes()); resp.MaxConcurrentTasks != nil {
 		t.Fatalf("cap after clear: got %d, want null", *resp.MaxConcurrentTasks)
+	}
+}
+
+// TestUpdateAgentRuntime_MaxConcurrentTasksWaitsForInFlightClaim: the cap
+// update must not commit while a claim on the same runtime holds the claim
+// lock, so once PATCH returns no claim can still commit against the old cap.
+func TestUpdateAgentRuntime_MaxConcurrentTasksWaitsForInFlightClaim(t *testing.T) {
+	if testHandler == nil || testPool == nil {
+		t.Skip("database not available")
+	}
+	runtimeID, _, _ := runtimeVisibilityFixture(t)
+	rtUUID := util.MustParseUUID(runtimeID)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	claimTx, err := testPool.Begin(ctx)
+	if err != nil {
+		t.Fatalf("begin: %v", err)
+	}
+	defer claimTx.Rollback(context.Background())
+	if err := db.New(claimTx).LockRuntimeClaimCapacity(ctx, rtUUID); err != nil {
+		t.Fatalf("lock: %v", err)
+	}
+
+	done := make(chan error, 1)
+	go func() {
+		_, err := testHandler.updateRuntimeMaxConcurrentTasks(ctx, rtUUID, pgtype.Int4{Int32: 1, Valid: true})
+		done <- err
+	}()
+
+	select {
+	case err := <-done:
+		t.Fatalf("cap update returned (err=%v) while a claim held the runtime lock", err)
+	case <-time.After(300 * time.Millisecond):
+	}
+	var visible pgtype.Int4
+	if err := testPool.QueryRow(ctx, `SELECT max_concurrent_tasks FROM agent_runtime WHERE id = $1`, rtUUID).Scan(&visible); err != nil {
+		t.Fatalf("read cap: %v", err)
+	}
+	if visible.Valid {
+		t.Fatalf("cap %d visible before the in-flight claim finished", visible.Int32)
+	}
+
+	if err := claimTx.Commit(ctx); err != nil {
+		t.Fatalf("commit claim tx: %v", err)
+	}
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatalf("cap update: %v", err)
+		}
+	case <-ctx.Done():
+		t.Fatal("cap update did not finish after the claim committed")
 	}
 }

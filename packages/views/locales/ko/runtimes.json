@@ -164,7 +164,7 @@
     "diagnostics_visibility": "공개 범위",
     "concurrency_title": "동시 실행",
     "concurrency_none": "제한 없음",
-    "concurrency_hint": "이 런타임의 모든 에이전트가 동시에 실행할 수 있는 최대 작업 수({{min}}-{{max}}). 비워 두면 제한이 없습니다.",
+    "concurrency_hint": "이 런타임의 모든 에이전트가 동시에 진행할 수 있는 최대 실행 수({{min}}-{{max}}). 비워 두면 제한이 없습니다.",
     "toast_concurrency_failed": "동시 실행 제한을 업데이트하지 못했습니다",
     "visibility_label": {
       "private": "비공개",

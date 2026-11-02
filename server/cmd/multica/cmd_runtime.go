@@ -62,7 +62,7 @@ var runtimeRenameCmd = &cobra.Command{
 var runtimeConcurrencyCmd = &cobra.Command{
 	Use:   "concurrency <runtime-id> <limit|none>",
 	Short: "Set or clear a runtime-wide concurrency limit",
-	Long: "Limit how many tasks may run at once across every agent bound to this runtime.\n\n" +
+	Long: "Limit how many runs may be in progress at once across every agent bound to this runtime.\n\n" +
 		"Each agent's own limit still applies; this caps their combined work, e.g. when several " +
 		"agents share one local GPU. Pass \"none\" to remove the limit.",
 	Args: exactArgs(2),

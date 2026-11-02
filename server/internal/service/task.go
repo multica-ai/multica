@@ -3662,18 +3662,27 @@ func (s *TaskService) claimTask(ctx context.Context, agentID, runtimeID pgtype.U
 
 		// Runtime-wide cap (GitHub #9626): several agents can share one
 		// runtime (e.g. one local GPU), so the per-agent cap alone cannot
-		// keep their combined work bounded. NULL keeps the old behavior and
-		// skips the lock entirely.
+		// keep their combined work bounded.
+		//
+		// The lock is taken before the cap is read, on every claim. The cap
+		// update (UpdateAgentRuntimeMaxConcurrentTasks in the handler) takes
+		// the same lock before committing, so once a PATCH returns, no claim
+		// can still commit against the old value: a claim either finished
+		// before the update got the lock, or reads the new value after it.
+		// Reading the cap first and locking only when it is set would let a
+		// claim that waited on the lock (or read NULL) dispatch against a
+		// stale cap. Claims on one runtime are already short and nearly
+		// serial (one daemon per runtime), so the extra lock is cheap.
+		if err := qtx.LockRuntimeClaimCapacity(ctx, claimRuntimeID); err != nil {
+			outcome = claimOutcomeErrorCountRunning
+			return fmt.Errorf("lock runtime claim capacity: %w", err)
+		}
 		runtimeCap, err := qtx.GetAgentRuntimeMaxConcurrentTasks(ctx, claimRuntimeID)
 		if err != nil && !errors.Is(err, pgx.ErrNoRows) {
 			outcome = claimOutcomeErrorCountRunning
 			return fmt.Errorf("get runtime concurrency cap: %w", err)
 		}
 		if err == nil && runtimeCap.Valid {
-			if err := qtx.LockRuntimeClaimCapacity(ctx, claimRuntimeID); err != nil {
-				outcome = claimOutcomeErrorCountRunning
-				return fmt.Errorf("lock runtime claim capacity: %w", err)
-			}
 			runtimeRunning, err := qtx.CountActiveTasksByRuntime(ctx, claimRuntimeID)
 			if err != nil {
 				outcome = claimOutcomeErrorCountRunning

@@ -164,7 +164,7 @@
     "diagnostics_visibility": "可見性",
     "concurrency_title": "並行",
     "concurrency_none": "不限制",
-    "concurrency_hint": "此執行時上所有 AI 代理同時執行的任務總數上限（{{min}}–{{max}}）。留空表示不限制。",
+    "concurrency_hint": "此執行時上所有 AI 代理同時進行的執行總數上限（{{min}}–{{max}}）。留空表示不限制。",
     "toast_concurrency_failed": "更新並行上限失敗",
     "visibility_label": {
       "private": "私有",

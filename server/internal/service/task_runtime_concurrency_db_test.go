@@ -169,6 +169,89 @@ func TestRuntimeConcurrencyCapClaimWaitsForLockHolder(t *testing.T) {
 	}
 }
 
+// Regression for review on #9795: a claim queued behind the runtime lock
+// must use the cap that is current when it gets the lock, not the value it
+// would have read before waiting. Cap 2 with one task running; a claim waits
+// on the lock; the cap is lowered to 1 and saved; the claim must then refuse.
+func TestRuntimeConcurrencyCapLoweredWhileClaimWaits(t *testing.T) {
+	f := newClaimDecisionFixture(t, 5)
+	f.insertTask(t, "running")
+	otherTaskID := f.addRuntimeAgentWithTask(t, "runtime-lowered-agent")
+	f.setRuntimeCap(t, int32Ptr(2))
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	var otherAgentID pgtype.UUID
+	if err := f.pool.QueryRow(ctx, `SELECT agent_id FROM agent_task_queue WHERE id = $1`, otherTaskID).Scan(&otherAgentID); err != nil {
+		t.Fatalf("load other agent: %v", err)
+	}
+
+	tx, err := f.pool.Begin(ctx)
+	if err != nil {
+		t.Fatalf("begin: %v", err)
+	}
+	defer tx.Rollback(context.Background())
+	if err := db.New(tx).LockRuntimeClaimCapacity(ctx, f.runtimeID); err != nil {
+		t.Fatalf("lock: %v", err)
+	}
+
+	type result struct {
+		task *db.AgentTaskQueue
+		err  error
+	}
+	done := make(chan result, 1)
+	go func() {
+		task, err := f.svc.ClaimTask(ctx, otherAgentID)
+		done <- result{task, err}
+	}()
+	waitForAdvisoryLockWaiter(ctx, t, f)
+
+	// Same query PATCH uses; the save completes while the claim is queued.
+	if _, err := db.New(f.pool).UpdateAgentRuntimeMaxConcurrentTasks(ctx, db.UpdateAgentRuntimeMaxConcurrentTasksParams{
+		ID: f.runtimeID, MaxConcurrentTasks: pgtype.Int4{Int32: 1, Valid: true},
+	}); err != nil {
+		t.Fatalf("lower cap: %v", err)
+	}
+	if err := tx.Commit(ctx); err != nil {
+		t.Fatalf("commit: %v", err)
+	}
+
+	select {
+	case r := <-done:
+		if r.err != nil {
+			t.Fatalf("ClaimTask: %v", r.err)
+		}
+		if r.task != nil {
+			t.Fatal("dispatched a second task after cap=1 was saved while one task was running")
+		}
+	case <-ctx.Done():
+		t.Fatal(ctx.Err())
+	}
+}
+
+// waitForAdvisoryLockWaiter blocks until some session in this database is
+// waiting on an advisory lock, i.e. the claim under test is queued.
+func waitForAdvisoryLockWaiter(ctx context.Context, t *testing.T, f *claimDecisionFixture) {
+	t.Helper()
+	for {
+		var waiting bool
+		if err := f.pool.QueryRow(ctx, `SELECT EXISTS (
+			SELECT 1 FROM pg_locks
+			WHERE locktype = 'advisory' AND NOT granted
+			  AND database = (SELECT oid FROM pg_database WHERE datname = current_database()))`).Scan(&waiting); err != nil {
+			t.Fatalf("poll pg_locks: %v", err)
+		}
+		if waiting {
+			return
+		}
+		select {
+		case <-ctx.Done():
+			t.Fatal("claim did not wait on the runtime lock")
+		case <-time.After(10 * time.Millisecond):
+		}
+	}
+}
+
 // Concurrent claims from different agents must not overshoot the cap.
 func TestRuntimeConcurrencyCapConcurrentClaims(t *testing.T) {
 	f := newClaimDecisionFixture(t, 5)

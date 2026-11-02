@@ -683,9 +683,8 @@ SELECT max_concurrent_tasks FROM agent_runtime
 WHERE id = $1
 `
 
-// Claim-path read of the runtime cap. Plain read (no row lock): the claim
-// serializes on a per-runtime advisory lock instead, see
-// LockRuntimeClaimCapacity.
+// Claim-path read of the runtime cap. Plain read (no row lock), always made
+// after LockRuntimeClaimCapacity so it sees the latest committed value.
 func (q *Queries) GetAgentRuntimeMaxConcurrentTasks(ctx context.Context, id pgtype.UUID) (pgtype.Int4, error) {
 	row := q.db.QueryRow(ctx, getAgentRuntimeMaxConcurrentTasks, id)
 	var max_concurrent_tasks pgtype.Int4
@@ -1419,13 +1418,16 @@ const lockRuntimeClaimCapacity = `-- name: LockRuntimeClaimCapacity :exec
 SELECT pg_advisory_xact_lock(hashtextextended($1::uuid::text || ':runtime_claim_capacity', 0))
 `
 
-// Transaction-scoped advisory lock that serializes capacity-checked claims
-// on one runtime, so two agents claiming concurrently cannot both see
-// running < cap and overshoot it. An advisory lock (not FOR UPDATE on the
+// Transaction-scoped advisory lock that serializes claims on one runtime
+// with each other and with cap updates, so two agents claiming concurrently
+// cannot both see running < cap, and no claim commits against a cap that a
+// finished update already replaced. An advisory lock (not FOR UPDATE on the
 // runtime row) because claimTask already holds the agent row lock, while
 // runtime teardown / access changes lock the runtime row first and then
 // agent rows; taking the runtime row here would invert that order and risk
-// a deadlock. Only taken when the runtime has a cap set.
+// a deadlock. Lock order: claims take agent row -> this lock; cap updates
+// take runtime row (FOR NO KEY UPDATE) -> this lock. A claim never waits on
+// the runtime row, so the two cannot form a cycle.
 func (q *Queries) LockRuntimeClaimCapacity(ctx context.Context, runtimeID pgtype.UUID) error {
 	_, err := q.db.Exec(ctx, lockRuntimeClaimCapacity, runtimeID)
 	return err
@@ -2227,6 +2229,9 @@ type UpdateAgentRuntimeMaxConcurrentTasksParams struct {
 // Sets or clears (NULL) the runtime-wide concurrency cap (GitHub #9626).
 // Kept out of the registration upserts so a daemon re-registering never
 // clobbers it. Gated at the handler to runtime owner / workspace admin.
+// The handler runs this and then LockRuntimeClaimCapacity in one
+// transaction, so the new value commits only after every in-flight claim
+// on the runtime has finished.
 func (q *Queries) UpdateAgentRuntimeMaxConcurrentTasks(ctx context.Context, arg UpdateAgentRuntimeMaxConcurrentTasksParams) (AgentRuntime, error) {
 	row := q.db.QueryRow(ctx, updateAgentRuntimeMaxConcurrentTasks, arg.MaxConcurrentTasks, arg.ID)
 	var i AgentRuntime
