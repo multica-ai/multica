@@ -260,7 +260,8 @@ WHERE runtime_id = $1 AND status IN ('dispatched', 'running', 'waiting_local_dir
 `
 
 // Capacity-bearing tasks on a runtime across all agents. Same status set as
-// CountRunningTasks (per agent). Served by idx_agent_task_queue_runtime_id.
+// CountRunningTasks (per agent). Served by the partial index
+// idx_agent_task_queue_runtime_active (migration 606).
 func (q *Queries) CountActiveTasksByRuntime(ctx context.Context, runtimeID pgtype.UUID) (int64, error) {
 	row := q.db.QueryRow(ctx, countActiveTasksByRuntime, runtimeID)
 	var count int64

@@ -720,6 +720,7 @@ SELECT pg_advisory_xact_lock(hashtextextended(sqlc.arg('runtime_id')::uuid::text
 
 -- name: CountActiveTasksByRuntime :one
 -- Capacity-bearing tasks on a runtime across all agents. Same status set as
--- CountRunningTasks (per agent). Served by idx_agent_task_queue_runtime_id.
+-- CountRunningTasks (per agent). Served by the partial index
+-- idx_agent_task_queue_runtime_active (migration 606).
 SELECT count(*) FROM agent_task_queue
 WHERE runtime_id = $1 AND status IN ('dispatched', 'running', 'waiting_local_directory');

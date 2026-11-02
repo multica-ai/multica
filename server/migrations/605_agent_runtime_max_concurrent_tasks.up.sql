@@ -10,6 +10,6 @@
 -- table scan. Not written by the registration / heartbeat upserts, so a daemon
 -- restart never clears it.
 --
--- No index: the column is read by primary key only. The per-runtime running
--- count uses the existing idx_agent_task_queue_runtime_id (migration 273).
+-- No index on this column: it is read by primary key only. The per-runtime
+-- running count is served by idx_agent_task_queue_runtime_active (606).
 ALTER TABLE agent_runtime ADD COLUMN IF NOT EXISTS max_concurrent_tasks INTEGER;
