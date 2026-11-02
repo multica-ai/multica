@@ -1,11 +1,22 @@
-# Agent runtime infrastructure
+# Infrastructure
+
+Two independent stacks. Deploy either on its own.
+
+| Stack | What it is | Deploy with |
+| --- | --- | --- |
+| `Multica-AgentRuntime` | One machine running the Multica daemon and the Claude Code runtimes agents execute on | `./scripts/deploy.sh` |
+| `Multica-SelfHost` | Multica itself — web, API and PostgreSQL — on a fixed public IP, with every row of data in this AWS account | `./scripts/selfhost-deploy.sh` |
+
+Nothing in CloudFormation ties them together. Run the agent runtime against
+hosted multica.ai, or point it at your own server with
+`-c serverUrl=https://<your-host>`.
+
+---
+
+# Agent runtime
 
 One EC2 machine that runs the Multica daemon and the Claude Code runtimes our
-agents execute on. That is the whole stack.
-
-Multica itself is used as a hosted service, so nothing here deploys the web
-app, the Go server, Postgres, Redis or a CDN. What the team needs from AWS is
-somewhere for agents to run, and that is what this provisions.
+agents execute on.
 
 ## What gets created
 
@@ -171,23 +182,153 @@ leave the running box behind.
 - One instance, one AZ. If it is replaced, in-flight runs are lost; the issues
   stay in Multica and can be reassigned.
 
+---
+
+# Self-hosted Multica
+
+Multica running on your own infrastructure: the Go backend, the Next.js web
+app and PostgreSQL, from this repository's own `docker-compose.selfhost.yml`,
+behind Caddy on a fixed public IP. Every issue, comment, agent and run lives in
+the PostgreSQL volume this stack creates, in this AWS account. Nothing is sent
+to multica.ai — the backend's first-party deployment telemetry is off unless
+`-c telemetry=true` turns it back on.
+
+## What gets created
+
+| Resource | Why |
+| --- | --- |
+| VPC, one AZ, `10.30.0.0/24` | Somewhere to put the instance. |
+| Elastic IP | A fixed address the team can bookmark, and the hostname the certificate is issued for. |
+| Security group | 443 for the app, 80 for the ACME challenge and the HTTPS redirect. Nothing else — PostgreSQL is never published, and the app's own ports stay on loopback inside the instance. |
+| EC2 instance, `t4g.medium` | Runs Compose and Caddy. |
+| EBS data volume, encrypted | PostgreSQL's data directory and uploaded attachments. Separate from the instance and **retained when the stack is deleted**. |
+| Daily snapshots | Data Lifecycle Manager, 7 kept by default. |
+| CloudWatch log group | Bootstrap output. |
+
+About **$33/month** in `ap-south-1`: `t4g.medium` ~$24, 30 GiB root + 20 GiB
+data ~$5, Elastic IP ~$4, snapshots and logs under $1.
+
+## HTTPS without owning a domain
+
+A bare IP cannot have a trusted certificate, so by default the server answers
+on `https://<your-ip>.sslip.io`. sslip.io is public wildcard DNS that resolves
+any `1.2.3.4.sslip.io` to `1.2.3.4`, which gives Caddy a real hostname to get a
+Let's Encrypt certificate for. You still reach the box at its own public IP;
+only the name in the URL comes from elsewhere.
+
+To use your own name instead, point an A record at the Elastic IP and redeploy
+with `-c domainName=multica.example.com`.
+
+## Deploying
+
+```bash
+cd infrastructure
+./scripts/selfhost-setup.sh                                   # CDK bootstrap, and an optional Resend key
+./scripts/selfhost-deploy.sh you@example.com,teammate@example.com
+```
+
+Two stores, one rule: **what CloudFormation generates lives in Secrets Manager,
+what a human supplies lives in Parameter Store.** The JWT secret and the
+database password are never read or typed by anyone, so the stack generates
+them — a first deploy needs nothing created by hand, and neither value passes
+through a shell history on its way in. The only human-supplied value is the
+optional `resend-api-key` parameter. The database password is retained when
+the stack is deleted, alongside the volume it opens.
+
+The allowlist argument is required. Port 443 is open to the internet, so
+without `ALLOWED_EMAILS` anyone who found the URL could sign up; synth refuses
+to build the stack without it.
+
+First boot pulls three images and completes an ACME challenge, so give it a few
+minutes. The stack's `Url` output is where to go.
+
+### Logging in
+
+Multica authenticates with emailed verification codes.
+
+- With a Resend API key stored by `selfhost-setup.sh`, codes are emailed.
+- Without one, the backend prints each code to its own log:
+  `./scripts/selfhost-apply.sh --code`.
+
+The guide's `MULTICA_DEV_VERIFICATION_CODE` shortcut is deliberately never set
+here — a fixed code on an internet-facing host means anyone who knows an email
+address can log in as its owner.
+
+## Operating it
+
+```bash
+./scripts/selfhost-apply.sh --status      # containers and proxy
+./scripts/selfhost-apply.sh --logs        # bootstrap log
+./scripts/selfhost-apply.sh --code        # latest login code
+./scripts/selfhost-apply.sh               # re-run the bootstrap in place
+MULTICA_STACK=Multica-SelfHost ./scripts/connect.sh   # a shell on the box
+```
+
+Unlike the agent runtime, this stack does **not** replace the instance when the
+bootstrap script changes: the database volume is attached to it, and replacing
+an instance out from under an attached volume is how people lose databases.
+`cdk deploy` updates the launch template, and `selfhost-apply.sh` runs the new
+script on the live machine.
+
+### Pointing agents at it
+
+```bash
+./scripts/deploy.sh -c serverUrl=https://<your-host>
+```
+
+The daemon then registers its runtimes against your server instead of
+multica.ai, and the PAT in `/multica/agent-runtime/multica-token` has to come
+from your server's settings page.
+
+### Context overrides
+
+| Context key | Default | Notes |
+| --- | --- | --- |
+| `allowedEmails` | — | **Required.** Comma-separated addresses that may sign up. |
+| `domainName` | sslip.io on the Elastic IP | Your own hostname; point an A record at the Elastic IP first. |
+| `selfHostInstanceType` | `t4g.medium` | Graviton only. |
+| `dataVolumeSizeGb` | `20` | PostgreSQL plus attachments. |
+| `rootVolumeSizeGb` | `30` | OS and the three container images. |
+| `snapshotRetentionDays` | `7` | Daily snapshots kept. |
+| `imageTag` | `latest` | GHCR tag; pin a release for a reproducible deploy. |
+| `telemetry` | `false` | `true` re-enables the first-party deployment telemetry. |
+
+## If you delete the stack
+
+The data volume is retained, so `cdk destroy` leaves the database behind along
+with its snapshots and the SSM parameters. Attach the volume to a new instance,
+or snapshot and delete it by hand once you are sure.
+
 ## Layout
 
 ```
 infrastructure/
 ├── RUNBOOK.md                        Deployed state, access, operations
-├── bin/app.ts                        CDK app: one stack
+├── bin/app.ts                        CDK app: both stacks
 ├── lib/config.ts                     Context parsing and validation
-├── lib/agent-runtime-stack.ts        VPC, security group, role, instance, logs
-├── lib/bootstrap.ts                  Renders the bootstrap script
-├── assets/bootstrap.sh               What the machine does on first boot
-├── test/agent-runtime-stack.test.ts  Assertions on the synthesized template
-└── scripts/                          bootstrap, deploy, connect, destroy
+├── lib/agent-runtime-stack.ts        Agent runtime: VPC, SG, role, instance, logs
+├── lib/self-host-stack.ts            Self-host: EIP, SG, instance, data volume, snapshots
+├── lib/bootstrap.ts                  Renders a script from assets/
+├── lib/retention.ts                  CloudWatch retention mapping
+├── assets/bootstrap.sh               Agent runtime first boot
+├── assets/selfhost-bootstrap.sh      Self-host first boot
+├── test/                             Assertions on the synthesized templates
+└── scripts/
+    ├── bootstrap.sh deploy.sh connect.sh destroy.sh        agent runtime
+    └── selfhost-setup.sh selfhost-deploy.sh selfhost-apply.sh
 ```
 
 `pnpm --filter @multica/infrastructure test` runs the template assertions —
 no AWS credentials, no deploy. They cover the claims that are easy to get wrong
-by hand: no inbound rules, no key pair, one security group, an instance role
-that reaches only Bedrock, Parameter Store and its own log group, an encrypted
-root volume, IMDSv2, and a bootstrap script that starts the daemon as a
+by hand.
+
+For the agent runtime: no inbound rules, no key pair, one security group, an
+instance role that reaches only Bedrock, Parameter Store and its own log group,
+an encrypted root volume, IMDSv2, and a bootstrap that starts the daemon as a
 non-root user without writing a credential to disk.
+
+For the self-host: only 80 and 443 open and never 5432, 3000, 8080 or 22; a
+database volume that is encrypted, separate from the instance and retained on
+delete; daily snapshots; telemetry off; the signup allowlist reaching the
+backend; the WebSocket route ahead of the catch-all; and no fixed development
+verification code.
