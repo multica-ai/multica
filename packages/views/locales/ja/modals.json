@@ -334,5 +334,15 @@
     "attach_kept": "追加済み",
     "toast_done": "エージェントパックをインストールしました",
     "toast_failed": "エージェントパックをインストールできませんでした"
+  },
+  "save_issue_to_knowledge": {
+    "title": "ナレッジに保存",
+    "knowledge_base": "ナレッジベース",
+    "published_note": "ドキュメントは直ちに公開され、エージェントがすぐに検索できます。",
+    "empty_description": "保存するための説明がこのタスクにはありません。",
+    "submit": "保存",
+    "saving": "保存中...",
+    "toast_saved": "{{knowledgeBase}} に保存しました",
+    "toast_failed": "ナレッジに保存できませんでした"
   }
 }

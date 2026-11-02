@@ -334,5 +334,15 @@
     "attach_kept": "已全部添加",
     "toast_done": "Agent 包已安装",
     "toast_failed": "无法安装 Agent 包"
+  },
+  "save_issue_to_knowledge": {
+    "title": "保存到知识库",
+    "knowledge_base": "知识库",
+    "published_note": "文档会立即发布，智能体可以马上检索到。",
+    "empty_description": "此任务没有可保存的描述。",
+    "submit": "保存",
+    "saving": "保存中...",
+    "toast_saved": "已保存到{{knowledgeBase}}",
+    "toast_failed": "无法保存到知识库"
   }
 }

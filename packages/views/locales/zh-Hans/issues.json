@@ -942,7 +942,8 @@
     "remove_parent_issue_success": "已移除父任务",
     "add_sub_issue": "添加子任务...",
     "delete_issue": "删除任务",
-    "mark_duplicate": "标记为重复..."
+    "mark_duplicate": "标记为重复...",
+    "save_to_knowledge": "保存到知识库"
   },
   "pickers": {
     "custom_property": {

@@ -336,5 +336,15 @@
     "attach_kept": "Déjà rattachées",
     "toast_done": "Pack d’agent installé",
     "toast_failed": "Impossible d’installer le pack d’agent"
+  },
+  "save_issue_to_knowledge": {
+    "title": "Enregistrer dans les connaissances",
+    "knowledge_base": "Base de connaissances",
+    "published_note": "Le document est publié immédiatement, pour que les agents puissent le trouver tout de suite.",
+    "empty_description": "Cette tâche n'a pas de description à enregistrer.",
+    "submit": "Enregistrer",
+    "saving": "Enregistrement...",
+    "toast_saved": "Enregistré dans {{knowledgeBase}}",
+    "toast_failed": "Impossible d'enregistrer dans les connaissances"
   }
 }

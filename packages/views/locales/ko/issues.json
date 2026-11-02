@@ -942,7 +942,8 @@
     "remove_parent_issue_success": "상위 태스크를 제거했습니다",
     "add_sub_issue": "하위 태스크 추가...",
     "delete_issue": "태스크 삭제",
-    "mark_duplicate": "중복으로 표시..."
+    "mark_duplicate": "중복으로 표시...",
+    "save_to_knowledge": "지식 베이스에 저장"
   },
   "pickers": {
     "custom_property": {
