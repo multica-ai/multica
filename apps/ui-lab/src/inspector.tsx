@@ -7,7 +7,7 @@ import {
   Component,
   RotateCcw,
   X,
-} from "lucide-react";
+} from "@multica/ui/icons";
 import { Button } from "@multica/ui/components/ui/button";
 import {
   Popover,

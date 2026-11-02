@@ -6,7 +6,7 @@
 
 import { useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
-import { Folder, Inbox, Loader2 } from "lucide-react";
+import { Folder, Inbox, Loader2 } from "@multica/ui/icons";
 import { toast } from "sonner";
 import { api, errorCode } from "@multica/core/api";
 import { invalidateAgentFolderQueries } from "@multica/core/agents/folder-queries";

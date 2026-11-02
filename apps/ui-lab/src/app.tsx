@@ -3,7 +3,12 @@ import { resolveCatalogRoute, pageHref } from "./catalog";
 import { CatalogNavigation } from "./catalog-navigation";
 import { CatalogContent } from "./catalog-content";
 import { LabI18nProvider } from "./lab-i18n";
-import { loadLocale, LOCALE_STORAGE_KEY, type LabLocale } from "./locale";
+import {
+  loadLocale,
+  LOCALE_STORAGE_KEY,
+  productLocale,
+  type LabLocale,
+} from "./locale";
 import { useTranslation } from "react-i18next";
 import { useCallback, useEffect, useReducer, useRef, useState } from "react";
 import {
@@ -25,7 +30,7 @@ import {
   Trash2,
   Undo2,
   X,
-} from "lucide-react";
+} from "@multica/ui/icons";
 import { Button } from "@multica/ui/components/ui/button";
 import { MulticaIcon } from "@multica/ui/components/common/multica-icon";
 import { Input } from "@multica/ui/components/ui/input";
@@ -84,7 +89,12 @@ function PreviewFrame({
   onColorSelect: (token: string) => void;
 }) {
   const { t, i18n } = useTranslation("uiLab");
-  const locale: LabLocale = i18n.language === "zh-Hans" ? "zh" : "en";
+  const locale: LabLocale =
+    i18n.language === "zh-Hans"
+      ? "zh"
+      : i18n.language === "zh-Hant"
+        ? "zh-Hant"
+        : "en";
   const ref = useRef<HTMLIFrameElement>(null);
   const [playbackSpeed, setPlaybackSpeed] = useState(1);
   const send = useCallback(() => {
@@ -440,16 +450,16 @@ function Workbench({
             role="group"
             aria-label={t(($) => $.lab.language.label)}
           >
-            {(["en", "zh"] as const).map((value) => (
+            {(["en", "zh", "zh-Hant"] as const).map((value) => (
               <Button
                 key={value}
                 size="sm"
                 variant={locale === value ? "secondary" : "ghost"}
                 aria-pressed={locale === value}
-                lang={value === "zh" ? "zh-Hans" : "en"}
+                lang={productLocale(value)}
                 onClick={() => onLocaleChange(value)}
               >
-                {value === "en" ? "EN" : "中文"}
+                {value === "en" ? "EN" : value === "zh" ? "简体" : "繁體"}
               </Button>
             ))}
           </div>

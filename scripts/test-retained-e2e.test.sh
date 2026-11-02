@@ -6,7 +6,7 @@ fixture="$(mktemp -d)"
 trap 'rm -rf "$fixture"' EXIT
 mkdir -p "$fixture/checkout/scripts" "$fixture/checkout/server" "$fixture/checkout/apps/web" "$fixture/bin"
 mkdir -p "$fixture/checkout/e2e"
-touch "$fixture/checkout/e2e/onboarding-smoke.spec.ts" "$fixture/checkout/e2e/dag-task-lines.spec.ts" "$fixture/checkout/e2e/issue-dependencies.spec.ts"
+touch "$fixture/checkout/e2e/onboarding-smoke.spec.ts" "$fixture/checkout/e2e/dag-task-lines.spec.ts" "$fixture/checkout/e2e/issue-dependencies.spec.ts" "$fixture/checkout/e2e/comments.spec.ts"
 cp "$repo_root/scripts/test-retained-e2e.sh" "$fixture/checkout/scripts/"
 export RETAINED_TEST_CALLS="$fixture/calls"
 
@@ -56,7 +56,7 @@ for failure in 'go build' 'go run' 'web build' 'playwright test'; do
 done
 unset RETAINED_TEST_FAIL
 
-for spec in onboarding-smoke.spec.ts dag-task-lines.spec.ts issue-dependencies.spec.ts; do
+for spec in onboarding-smoke.spec.ts dag-task-lines.spec.ts issue-dependencies.spec.ts comments.spec.ts; do
   : > "$RETAINED_TEST_CALLS"
   rm "$fixture/checkout/e2e/$spec"
   if bash "$runner" > "$fixture/result" 2>&1; then

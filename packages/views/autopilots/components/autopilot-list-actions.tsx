@@ -9,7 +9,7 @@ import {
   Play,
   Trash2,
   X,
-} from "lucide-react";
+} from "@multica/ui/icons";
 import { toast } from "sonner";
 import type { Autopilot } from "@multica/core/types";
 import {

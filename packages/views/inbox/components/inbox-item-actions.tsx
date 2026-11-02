@@ -1,6 +1,6 @@
 "use client";
 
-import { Archive, ArchiveRestore, Check, CircleDot, ExternalLink } from "lucide-react";
+import { Archive, ArchiveRestore, Check, CircleDot, ExternalLink } from "@multica/ui/icons";
 import { paths, useWorkspaceSlug } from "@multica/core/paths";
 import type { InboxItem } from "@multica/core/types";
 import type { RowActionItem } from "../../common/row-actions-menu";

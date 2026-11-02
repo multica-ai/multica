@@ -59,6 +59,7 @@ let mockUploadIdSeq = 0;
 
 vi.mock("@multica/core/api", () => ({
   api: {
+    getBaseUrl: () => "https://api.example.test",
     uploadFile: apiUploadFile,
     listWorkspaces: apiListWorkspaces,
     listQuickActions: apiListQuickActions,

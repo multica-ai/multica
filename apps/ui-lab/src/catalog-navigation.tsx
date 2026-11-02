@@ -9,7 +9,7 @@ import {
   History,
   LayoutDashboard,
   Palette,
-} from "lucide-react";
+} from "@multica/ui/icons";
 import {
   catalog,
   availableCount,

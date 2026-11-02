@@ -85,29 +85,27 @@ func TestBuildRunOnlyContent(t *testing.T) {
 }
 
 func TestBuildCreateIssueContent(t *testing.T) {
-	done := buildCreateIssueContent("Fix bugs", "completed", "ENG-12", "in_review", "https://app.example.com", "eng")
-	want := "Fix bugs — task ENG-12 reached its first terminal state as in_review"
-	if done.Text != want {
-		t.Fatalf("text = %q, want %q", done.Text, want)
-	}
-	if done.Link != "https://app.example.com/eng/issues/ENG-12" {
-		t.Fatalf("link = %q, want the workspace-scoped path", done.Link)
-	}
-	// A known status is never dropped silently, but an unrecoverable
-	// first-terminal status degrades instead of presenting a later one.
-	degraded := buildCreateIssueContent("Fix bugs", "completed", "ENG-12", "", "https://app.example.com", "eng")
-	if strings.Contains(degraded.Text, " as ") {
-		t.Fatalf("degraded card must not name a status: %q", degraded.Text)
-	}
-	if !strings.Contains(degraded.Text, "ENG-12") || !strings.Contains(degraded.Text, "see the task page") {
-		t.Fatalf("degraded card = %q", degraded.Text)
-	}
-	failed := buildCreateIssueContent("Fix bugs", "failed", "ENG-12", "cancelled", "https://app.example.com", "eng")
-	if !strings.Contains(failed.Text, "task ENG-12") {
-		t.Fatalf("failed create_issue text = %q", failed.Text)
-	}
-	if failed.Link != "https://app.example.com/eng/issues/ENG-12" {
-		t.Fatalf("failed link = %q", failed.Link)
+	for _, tc := range []struct{ runStatus, issueIdent, issueStatus, want string }{
+		{"completed", "ENG-12", "in_review", "Fix bugs — run completed; task ENG-12 status at settlement: in_review"},
+		{"failed", "ENG-12", "done", "Fix bugs — run failed; task ENG-12 status at settlement: done"},
+		{"completed", "ENG-12", "in_progress", "Fix bugs — run completed; task ENG-12 status at settlement: in_progress"},
+		{"failed", "ENG-12", "", "Fix bugs — run failed; task ENG-12 status at settlement unavailable (see the task page)"},
+		{"completed", "ENG-12", "", "Fix bugs — run completed; task ENG-12 status at settlement unavailable (see the task page)"},
+		{"failed", "", "", "Fix bugs — run failed"},
+	} {
+		t.Run(tc.runStatus+"/"+tc.issueStatus+"/"+tc.issueIdent, func(t *testing.T) {
+			got := buildCreateIssueContent("Fix bugs", tc.runStatus, tc.issueIdent, tc.issueStatus, "https://app.example.com", "eng")
+			if got.Text != tc.want || got.Summary != tc.want || got.RunStatus != tc.runStatus {
+				t.Fatalf("content = %+v, want %q with run status %s", got, tc.want, tc.runStatus)
+			}
+			wantLink := ""
+			if tc.issueIdent != "" {
+				wantLink = "https://app.example.com/eng/issues/ENG-12"
+			}
+			if got.Link != wantLink {
+				t.Fatalf("link = %q, want %q", got.Link, wantLink)
+			}
+		})
 	}
 	noSlug := buildCreateIssueContent("Fix bugs", "completed", "ENG-12", "done", "https://app.example.com", "")
 	if noSlug.Link != "" {

@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/multica-ai/multica/server/internal/analytics"
+	"github.com/multica-ai/multica/server/internal/cli"
 	"github.com/multica-ai/multica/server/internal/featureflags"
 )
 
@@ -39,6 +40,9 @@ type AppConfig struct {
 	// with the operator's own domains instead of Multica Cloud defaults.
 	DaemonServerURL string `json:"daemon_server_url,omitempty"`
 	DaemonAppURL    string `json:"daemon_app_url,omitempty"`
+	// Explicit even when URLs are omitted, so clients never infer Cloud from
+	// missing self-host configuration. Older clients ignore this additive field.
+	DaemonSetupTarget string `json:"daemon_setup_target"`
 
 	// VCSIntegrationAvailable mirrors the MULTICA_VCS_INTEGRATION_ENABLED
 	// deployment switch so the Settings UI can hide the whole self-hosted Git
@@ -127,6 +131,7 @@ func (h *Handler) GetConfig(w http.ResponseWriter, r *http.Request) {
 	config.AttachmentPublicURL = h.cfg.PublicURL
 	config.CdnSigned = h.CFSigner != nil
 	config.DaemonServerURL, config.DaemonAppURL = daemonSetupURLsFromEnv()
+	config.DaemonSetupTarget = "self_host"
 	config.VCSIntegrationAvailable = h.cfg.VCSIntegrationEnabled
 	config.FeatureFlags = featureflags.EvaluateFrontendPublicFlags(r.Context(), h.FeatureFlags)
 	// Only surface the build version on self-hosted deployments. The managed
@@ -134,6 +139,8 @@ func (h *Handler) GetConfig(w http.ResponseWriter, r *http.Request) {
 	// the Help popover's version row would just be noise there (MUL-4108).
 	if !isOfficialCloudDeployment() {
 		config.ServerVersion = h.cfg.ServerVersion
+	} else {
+		config.DaemonSetupTarget = "cloud"
 	}
 
 	// Re-read from env on every request so operators can rotate keys via
@@ -185,8 +192,8 @@ func normalizePublicURL(raw string) string {
 	return strings.TrimRight(strings.TrimSpace(raw), "/")
 }
 
-// isOfficialCloudDaemonConfig reports whether this deployment is the official
-// Multica Cloud, identified by its frontend host alone (multica.ai). The
+// isOfficialCloudDaemonConfig recognizes the fork deployment by its frontend
+// host, matching the CLI setup default. The
 // daemon setup for the managed cloud is always
 // `multica setup` (which hardcodes its cloud default), so the per-deployment URLs
 // must be omitted from /api/config even when MULTICA_PUBLIC_URL is unset or
@@ -195,7 +202,7 @@ func normalizePublicURL(raw string) string {
 // `setup self-host --server-url https://multica.ai` command — pointing the
 // daemon's backend at the frontend (no /health, no WebSocket proxy).
 func isOfficialCloudDaemonConfig(appURL string) bool {
-	return urlHostEquals(appURL, "multica.ai")
+	return urlHostEquals(appURL, cli.DefaultCloudHost)
 }
 
 // isOfficialCloudDeployment reports whether this server is the official Multica

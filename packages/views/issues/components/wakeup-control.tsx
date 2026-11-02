@@ -22,11 +22,13 @@ export function WakeupControl({
   closed,
   onDisable,
   onEnable,
+  size = "default",
 }: {
   wakeup: Omit<IssueWakeup, "instruction">;
   task?: AgentTask;
   pending: boolean;
   closed: boolean;
+  size?: "sm" | "default";
   onDisable: () => void;
   onEnable: (input?: { at?: string; rearm?: boolean }) => Promise<void>;
 }) {
@@ -49,9 +51,10 @@ export function WakeupControl({
   const needsRearm = !wakeup.enabled && (consumed || expired);
   const canEnable = !closed && (!activeRun || wakeup.mode === "continuous");
   return (
-    <div className="flex min-h-11 shrink-0 items-center px-2">
+    <div className={`flex shrink-0 items-center px-2 ${size === "sm" ? "min-h-10 [&>button]:text-caption [&>button]:font-normal" : "min-h-11"}`}>
       {wakeup.enabled || (!needsRearm && !canDisable) ? (
         <Switch
+          size={size}
           checked={wakeup.enabled}
           disabled={pending || (!wakeup.enabled && !canEnable)}
           aria-label={t(($) => $.wakeups.toggle, {

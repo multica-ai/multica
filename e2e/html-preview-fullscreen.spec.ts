@@ -7,6 +7,13 @@ const html = `<style>html,body{margin:0;padding:0}</style>
 ${"<!-- long source -->\n".repeat(100)}`;
 const content = `${"Paragraph before the preview.\n\n".repeat(60)}\`\`\`html\n${html}\n\`\`\``;
 
+// Taller than the 480px collapse point, so the block sits collapsed behind
+// "Show all" — enlarging it must not re-expand the inline layout.
+const tallHtml = `<style>html,body{margin:0;padding:0}</style>
+<div style="height:3000px"><input aria-label="Retained input" value="initial"></div>
+${"<!-- long source -->\n".repeat(100)}`;
+const tallContent = `${"Paragraph before the preview.\n\n".repeat(60)}\`\`\`html\n${tallHtml}\n\`\`\``;
+
 function readScroll(element: HTMLElement) {
   return { top: element.scrollTop, height: element.scrollHeight };
 }
@@ -163,6 +170,87 @@ test.describe("HTML preview fullscreen", () => {
       }
     });
   }
+
+  // Regression: enlarging a collapsed tall block used to drop the inline clip
+  // and reserve the document's full height in place, so the page re-expanded
+  // for as long as the dialog was open (518px block growing to 3038px and
+  // back) — the same total-height jump the collapse clamp exists to prevent.
+  test("enlarging a collapsed reply block keeps its inline footprint at the clamp", async ({
+    page,
+  }, testInfo) => {
+    const issue = await api.createIssue("Collapsed HTML preview fullscreen");
+    const comment = await api.createComment(issue.id, tallContent);
+    await page.goto(`/${workspaceSlug}/issues/${issue.identifier}`, {
+      waitUntil: "domcontentloaded",
+    });
+    const outer = await scrollContainer(
+      page.getByText("Paragraph before the preview.", { exact: true }).first(),
+    );
+    await outer.evaluate((element) => {
+      element.scrollTop = element.scrollHeight - element.clientHeight;
+    });
+    const block = page.locator(
+      `[data-comment-content="${comment.id}"] [data-dynamic-block="html"]`,
+    );
+    await block.scrollIntoViewIfNeeded();
+    const iframe = block.locator("iframe");
+    await expect(iframe).toBeVisible();
+    // Collapsed, not expanded: the 480px clamp plus the frame chrome.
+    await expect.poll(async () => (await block.boundingBox())?.height).toBe(518);
+    const blockHeight = (await block.boundingBox())!.height;
+    const frameElement = await iframe.elementHandle();
+    const frame = (await frameElement!.contentFrame())!;
+    const input = iframe.contentFrame().getByRole("textbox", { name: "Retained input" });
+    await expect(input).toBeVisible();
+    await input.fill("Keep this document");
+    const timeOrigin = await frame.evaluate(() => performance.timeOrigin);
+    const scroller = await scrollContainer(block);
+    await scroller.evaluate((element) => {
+      element.scrollTop = element.scrollHeight - element.clientHeight;
+    });
+    const before = await scroller.evaluate(readScroll);
+    expect(before.top).toBeGreaterThan(480);
+    const opener = block.getByRole("button", { name: "Fullscreen" });
+    await block.hover();
+    await testInfo.attach("collapsed-inline", {
+      body: await page.screenshot(),
+      contentType: "image/png",
+    });
+    await expect(opener).toBeInViewport();
+
+    await opener.click();
+    const dialog = page.getByRole("dialog");
+    await expect(dialog).toBeVisible();
+    await testInfo.attach("collapsed-enlarged", {
+      body: await page.screenshot(),
+      contentType: "image/png",
+    });
+    expect(
+      await dialog.locator("iframe").evaluate((element, original) => element === original, frameElement),
+    ).toBe(true);
+    expect((await dialog.boundingBox())!.height).toBe(972);
+    // The in-place footprint keeps holding the clamp while enlarged.
+    await expect(block.locator("[data-collapsed]")).toHaveCount(1);
+    expect((await block.boundingBox())!.height).toBe(blockHeight);
+    await expect.poll(async () => scroller.evaluate(readScroll)).toEqual(before);
+    await expect(input).toHaveValue("Keep this document");
+    expect(await frame.evaluate(() => performance.timeOrigin)).toBe(timeOrigin);
+
+    await page.getByRole("button", { name: "Close", exact: true }).click();
+    await expect(page.getByRole("dialog")).toHaveCount(0);
+    await expect(block.locator("[data-collapsed]")).toHaveCount(1);
+    expect((await block.boundingBox())!.height).toBe(blockHeight);
+    await expect.poll(async () => scroller.evaluate(readScroll)).toEqual(before);
+    expect(
+      await iframe.evaluate((element, original) => element === original, frameElement),
+    ).toBe(true);
+    expect(await frame.evaluate(() => performance.timeOrigin)).toBe(timeOrigin);
+    await expect(opener).toBeFocused();
+    await testInfo.attach("collapsed-restored", {
+      body: await page.screenshot(),
+      contentType: "image/png",
+    });
+  });
 
   test("reply remeasures content changed while enlarged, including from source", async ({ page }) => {
     const interactiveHtml = `<style>html,body{margin:0;padding:0}</style>

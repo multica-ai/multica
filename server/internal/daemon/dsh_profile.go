@@ -56,16 +56,18 @@ const (
 	// the install command so the two cannot drift.
 	dshMulticaProfileName = "multica"
 
-	// dshMulticaRuntimePackage is the bridge a multica profile has to name
+	// dshMulticaRuntimePackage is the bridge a multica profile has to load
 	// before this daemon will treat the profile as installed. `dsh plugin add`
 	// records that name in dependencies and, when the package is a bundle, in
 	// dsh.profile.bundles — including installs from git, a directory, or a tarball.
 	dshMulticaRuntimePackage = "@multica-ai/dsh-runtime"
+	dshLegacyRuntimePackage  = "dsh-profile-multica"
+	dshBaseProfileBundle     = "@deepseek-ai/dsh-base"
 )
 
 // dshProfileManifest is the slice of a profile package.json this daemon reads.
-// Dependency values are left raw: a string version and an object spec are both
-// a named dependency, and a stricter type would make a real install look absent.
+// Dependency values are left raw; only their presence matters when separating
+// an existing configuration from an empty install skeleton.
 type dshProfileManifest struct {
 	Dependencies map[string]json.RawMessage `json:"dependencies"`
 	DSH          struct {
@@ -80,13 +82,33 @@ type dshProfileManifest struct {
 const dshProvisionTimeout = 3 * time.Minute
 
 // dshProfileNamesRuntime reports whether the manifest lists the Multica runtime
-// as a dependency or as a profile bundle.
+// as a loaded profile bundle, without the legacy bridge.
 func dshProfileNamesRuntime(manifest dshProfileManifest) bool {
-	if _, ok := manifest.Dependencies[dshMulticaRuntimePackage]; ok {
-		return true
+	for _, bundle := range manifest.DSH.Profile.Bundles {
+		if bundle == dshLegacyRuntimePackage {
+			return false
+		}
 	}
 	for _, bundle := range manifest.DSH.Profile.Bundles {
 		if bundle == dshMulticaRuntimePackage {
+			return true
+		}
+	}
+	return false
+}
+
+// dshMulticaProfileNeedsMigration separates an existing bridge configuration
+// from a missing profile or the empty template left by a refused install.
+// Never provision over an existing bridge just because it is not usable.
+func dshMulticaProfileNeedsMigration(manifest dshProfileManifest) bool {
+	if dshProfileNamesRuntime(manifest) {
+		return false
+	}
+	if len(manifest.Dependencies) > 0 {
+		return true
+	}
+	for _, bundle := range manifest.DSH.Profile.Bundles {
+		if bundle != dshBaseProfileBundle {
 			return true
 		}
 	}
@@ -273,6 +295,9 @@ func dshProvisionCommand(dshPath, spec string) *exec.Cmd {
 // best-effort either way, and the missing-profile verdict stands until a probe
 // succeeds.
 func provisionDshMulticaProfile(ctx context.Context, dshPath string, logger *slog.Logger) error {
+	if dshMulticaProfileState(dshPath) == dshProfileNeedsMigration {
+		return fmt.Errorf("%s", dshProfileMigrationReason)
+	}
 	specs := dshProfileBundleSpecs()
 	if len(specs) == 0 {
 		return nil
@@ -283,8 +308,11 @@ func provisionDshMulticaProfile(ctx context.Context, dshPath string, logger *slo
 	var lastErr error
 	for i, spec := range specs {
 		output, err := processtree.CombinedOutput(ctx, dshProvisionCommand(dshPath, spec), 5*time.Second)
+		state := dshMulticaProfileState(dshPath)
 		switch {
-		case err == nil && dshMulticaProfileState(dshPath) != dshProfileMissing:
+		case state == dshProfileNeedsMigration:
+			return fmt.Errorf("%s", dshProfileMigrationReason)
+		case err == nil && state != dshProfileMissing:
 			logger.Info("DSH runtime profile install command completed; discovery will verify the profile",
 				"bundle_candidate", i+1, "candidates", len(specs),
 				"path", dshPath, "profile", dshMulticaProfileName)
@@ -300,8 +328,8 @@ func provisionDshMulticaProfile(ctx context.Context, dshPath string, logger *slo
 		}
 		// Leave the directory. A refused add can write a skeleton, and a failure
 		// can also land on a profile the user already had. dshMulticaProfileState
-		// treats a manifest that does not name the runtime as missing, so the
-		// next restart retries over it and --probe is not started.
+		// retries only an empty skeleton; existing bridge configurations require
+		// manual migration before another candidate can modify them.
 		logger.Warn("DSH runtime profile install failed",
 			"bundle_candidate", i+1, "candidates", len(specs), "error", lastErr)
 	}
@@ -317,7 +345,7 @@ func provisionDshMulticaProfile(ctx context.Context, dshPath string, logger *slo
 // otherwise be retried every discovery interval forever. A restart is the
 // retry.
 func (d *Daemon) startDshProfileProvision(dshPath string) bool {
-	if len(dshProfileBundleSpecs()) == 0 {
+	if len(dshProfileBundleSpecs()) == 0 || dshMulticaProfileState(dshPath) == dshProfileNeedsMigration {
 		return false
 	}
 	// The daemon's own context, not the caller's: a probe round is scoped to one

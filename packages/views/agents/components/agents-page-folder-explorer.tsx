@@ -16,7 +16,7 @@ import {
   MoreHorizontal,
   Pencil,
   Trash2,
-} from "lucide-react";
+} from "@multica/ui/icons";
 import { useQuery } from "@tanstack/react-query";
 import type { AgentSquadFolder } from "@multica/core/api/schemas";
 import type { Agent } from "@multica/core/types";

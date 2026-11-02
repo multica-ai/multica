@@ -15,6 +15,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/multica-ai/multica/server/internal/issuestatus"
+	"github.com/multica-ai/multica/server/internal/issueworkflow"
 	"github.com/multica-ai/multica/server/internal/service"
 	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
@@ -49,6 +50,7 @@ const (
 	prAutoCompleteIssueDisabled     = "issue_disabled"     // turned off for this issue
 	prAutoCompleteTerminal          = "terminal"           // already done / cancelled
 	prAutoCompleteTriage            = "triage"             // not accepted yet
+	prAutoCompleteNotInWorkflow     = "not_in_workflow"    // project workflow does not list the target
 	prAutoCompleteAtTarget          = "at_target"          // already in the target status
 	prAutoCompleteWaiting           = "waiting"            // some PRs still open / draft
 	prAutoCompleteNotMerged         = "not_merged"         // some PRs closed without merging
@@ -201,6 +203,19 @@ func (h *Handler) decidePRAutoComplete(ctx context.Context, ws db.Workspace, iss
 		return d, nil
 	case disabled:
 		d.State = prAutoCompleteIssueDisabled
+		return d, nil
+	}
+	// A merge writes only a status the issue's project workflow lists, the same
+	// rule a manual status change follows (applyIssueWorkflow). Default and
+	// issues outside any project accept every status. The issue page shows
+	// nothing for this state: the issue just stays where it is.
+	def, _, err := issueworkflow.ForProject(ctx, h.Queries, issue.WorkspaceID, issue.ProjectID)
+	if err != nil {
+		return prAutoCompleteDecision{}, err
+	}
+	switch {
+	case issueworkflow.CheckStatus(def, d.Target) != nil:
+		d.State = prAutoCompleteNotInWorkflow
 		return d, nil
 	case issue.Status == d.Target:
 		d.State = prAutoCompleteAtTarget

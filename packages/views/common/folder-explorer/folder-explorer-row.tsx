@@ -1,7 +1,7 @@
 "use client";
 
 import type { ReactNode } from "react";
-import { ChevronRight, Folder } from "lucide-react";
+import { ChevronRight, Folder } from "@multica/ui/icons";
 import { ListGridCell, ListGridRow } from "@multica/ui/components/ui/list-grid";
 import { cn } from "@multica/ui/lib/utils";
 

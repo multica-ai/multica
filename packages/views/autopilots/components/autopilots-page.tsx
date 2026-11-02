@@ -15,7 +15,7 @@ import {
   Shield,
   Webhook,
   Zap,
-} from "lucide-react";
+} from "@multica/ui/icons";
 import { useQuery } from "@tanstack/react-query";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { autopilotListOptions } from "@multica/core/autopilots/queries";
@@ -854,10 +854,6 @@ export function AutopilotsPage() {
               </Button>
             }
           />
-        ) : isLoading ? (
-          <div className="flex-1 overflow-y-auto @container">
-            <LoadingSkeleton />
-          </div>
         ) : showEmpty ? (
           <div className="flex flex-col items-center px-5 py-16">
             <Zap className="mb-3 h-10 w-10 text-faint-foreground" />
@@ -902,6 +898,8 @@ export function AutopilotsPage() {
           </div>
         ) : (
           <>
+            {/* Mounted through loading so the rows don't drop by a toolbar's
+                height when the list lands. */}
             <AutopilotListToolbar
               scope={scope}
               onScopeChange={setScope}
@@ -918,6 +916,11 @@ export function AutopilotsPage() {
               allRows={scopeRows}
               visibleCount={rows.length}
             />
+            {isLoading ? (
+              <div className="flex-1 overflow-y-auto @container">
+                <LoadingSkeleton />
+              </div>
+            ) : (
             <div
               ref={listScrollRef}
               className="min-h-0 flex-1 overflow-auto @container"
@@ -1014,6 +1017,7 @@ export function AutopilotsPage() {
                 </ListGridBody>
               </ListGrid>
             </div>
+            )}
           </>
         )}
 

@@ -9,7 +9,7 @@ import {
   Lock,
   Pencil,
   Plus,
-} from "lucide-react";
+} from "@multica/ui/icons";
 import { SkillIcon } from "../lib/skill-icon";
 import type {
   Agent,
@@ -832,16 +832,14 @@ export default function SkillsPage() {
       )}
       {skillFolders.notice}
 
-      {isLoading || skillFolders.treeLoading ? (
-        <div className="flex-1 overflow-y-auto @container">
-          <LoadingSkeleton />
-        </div>
-      ) : showEmpty ? (
+      {showEmpty ? (
         <div className="flex flex-1 items-center justify-center">
           <EmptyState onCreate={() => setCreateOpen(true)} />
         </div>
       ) : (
-        <div className="flex min-h-0 flex-1 flex-col">
+        <>
+          {/* Mounted through loading so the rows don't drop by a toolbar's
+              height when the list lands. */}
           <SkillListToolbar
             search={search}
             onSearchChange={setSearch}
@@ -858,6 +856,11 @@ export default function SkillsPage() {
             visibleCount={rows.length}
             folderActions={skillFolders.folderActions}
           />
+          {isLoading || skillFolders.treeLoading ? (
+            <div className="flex-1 overflow-y-auto @container">
+              <LoadingSkeleton />
+            </div>
+          ) : (
           <div
             ref={listScrollRef}
             className="min-h-0 flex-1 overflow-auto @container"
@@ -943,7 +946,8 @@ export default function SkillsPage() {
             </ListGridBody>
           </ListGrid>
           </div>
-        </div>
+          )}
+        </>
       )}
 
       <SkillBatchToolbar

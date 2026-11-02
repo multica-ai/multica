@@ -1,4 +1,4 @@
-import { readFileSync, readdirSync } from "node:fs";
+import { readFileSync, readdirSync, existsSync } from "node:fs";
 import { dirname, relative, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import ts from "typescript";
@@ -46,7 +46,7 @@ export function checkSources(sourceRoot = root) {
       if (policy.sourceExceptions.some((entry) => entry.path === name)) continue;
       // Raw upstream JSON is deliberately unchanged; effective bundles are
       // checked through real i18next in the views/mobile locale tests.
-      if (/\/locales\/(?:en|zh-Hans|ja|ko|fr)\//.test(name)) continue;
+      if (/\/locales\/(?:en|zh-Hans|zh-Hant|ja|ko|fr)\//.test(name)) continue;
       const content = readFileSync(path, "utf8");
       if (name.endsWith("/package.json")) {
         const { author: _author, contributors: _contributors, ...metadata } = JSON.parse(content);
@@ -62,8 +62,33 @@ export function checkSources(sourceRoot = root) {
   return violations;
 }
 
+// Deployment inputs must not activate the dormant upstream analytics code.
+export function checkAnalyticsDeployment(sourceRoot = root) {
+  const violations = [];
+  function inspect(path) {
+    if (!existsSync(path)) return;
+    for (const entry of readdirSync(path, { withFileTypes: true })) {
+      if (["node_modules", ".git"].includes(entry.name)) continue;
+      const child = resolve(path, entry.name);
+      if (entry.isDirectory()) inspect(child);
+      else checkFile(child);
+    }
+  }
+  function checkFile(path) {
+    const content = readFileSync(path, "utf8");
+    if (/GOOGLE_ANALYTICS_ID|googleAnalyticsId/.test(content)) {
+      violations.push(`${relative(sourceRoot, path)}: Google Analytics deployment configuration is forbidden`);
+    }
+  }
+  for (const entry of readdirSync(sourceRoot, { withFileTypes: true })) {
+    if (entry.isFile() && /^(?:docker-compose.*\.ya?ml|\.env(?:\..*)?)$/.test(entry.name)) checkFile(resolve(sourceRoot, entry.name));
+  }
+  for (const name of ["deploy", ".github/workflows", ".github/actions"]) inspect(resolve(sourceRoot, name));
+  return violations;
+}
+
 if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href) {
-  const violations = checkSources(process.argv[2]);
+  const violations = [...checkSources(process.argv[2]), ...checkAnalyticsDeployment(process.argv[2])];
   if (violations.length) {
     console.error(`Retired product branding:\n${violations.join("\n")}`);
     process.exitCode = 1;

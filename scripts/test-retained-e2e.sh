@@ -15,7 +15,7 @@ done
 
 # A renamed or removed spec must fail before building, rather than silently
 # reducing Playwright's testMatch to the remaining file.
-for spec in e2e/onboarding-smoke.spec.ts e2e/dag-task-lines.spec.ts e2e/issue-dependencies.spec.ts; do
+for spec in e2e/onboarding-smoke.spec.ts e2e/dag-task-lines.spec.ts e2e/issue-dependencies.spec.ts e2e/comments.spec.ts; do
   if [[ ! -f "$spec" ]]; then
     printf 'Required retained E2E spec is missing: %s\n' "$spec" >&2
     exit 1

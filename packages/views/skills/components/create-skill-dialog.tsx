@@ -13,7 +13,7 @@ import {
   Pencil,
   Plus,
   X as XIcon,
-} from "lucide-react";
+} from "@multica/ui/icons";
 import { toast } from "sonner";
 import { useQueryClient } from "@tanstack/react-query";
 import { api } from "@multica/core/api";

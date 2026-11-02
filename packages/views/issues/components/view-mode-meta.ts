@@ -4,8 +4,8 @@ import {
   List,
   Table2,
   Waves,
-  Waypoints,
-} from "lucide-react";
+  Network as Waypoints,
+} from "@multica/ui/icons";
 import type { ViewMode } from "@multica/core/issues/surface/view-mode";
 import { useT } from "../../i18n";
 

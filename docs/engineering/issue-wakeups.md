@@ -580,7 +580,7 @@ the scheduler evaluates:
 | `issue_field` | `field=property`, `property_id`, `value` | the property's stored value equals `value` |
 | `children_done` | optional `stage` | every sub-issue (or every one up to that stage) is closed |
 | `pull_request` | `event=checks_finished`, `merged` or `conflicts` | a linked PR's checks finished on its current head, it merged, or an open GitHub PR is `CONFLICTING` on its current head |
-| `other_issue` | `issue_id`, `state=done`, `ended` or `in_review` | another issue in the workspace reaches that state |
+| `other_issue` | `issue_id`, `state=done`, `ended`, `in_review` or `blocked` | another issue in the workspace reaches that state |
 
 A condition rule stays `kind=event`. Validation derives the same-issue events
 that can change the fact (for example `issue.status_changed`) as hints: the

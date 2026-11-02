@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { QrCode, X } from "lucide-react";
+import { MessagesSquare as QrCode, X } from "@multica/ui/icons";
 import { useAuthStore } from "@multica/core/auth";
 import { FeishuQrDialog } from "./feishu-group-qr-dialog";
 import { TooltipHint } from "@multica/ui/components/common/tooltip-hint";

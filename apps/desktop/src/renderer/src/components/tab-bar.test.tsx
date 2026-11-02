@@ -244,7 +244,7 @@ describe("TabBar hover action buttons", () => {
     // The leading slot is the resource visual (size-3.5), not a Pin glyph. The
     // only Pin lives in the size-2.5 hover action button.
     expect(pinnedTab.querySelector('[data-testid="tab-leading"]')).toBeTruthy();
-    expect(pinnedTab.querySelector(".lucide-pin.size-3\\.5")).toBeNull();
+    expect(pinnedTab.querySelector(".icon-pin.size-3\\.5")).toBeNull();
   });
 });
 
@@ -615,6 +615,15 @@ describe("TabBar locale", () => {
       closeOthers: "关闭其他标签页",
       openWindow: "在新窗口打开",
       newTab: "新建标签页",
+      pinned: "Issues（已固定）",
+    },
+    "zh-Hant": {
+      pin: "固定標籤頁",
+      unpin: "取消固定標籤頁",
+      close: "關閉標籤頁",
+      closeOthers: "關閉其他標籤頁",
+      openWindow: "在新視窗開啟",
+      newTab: "新建標籤頁",
       pinned: "Issues（已固定）",
     },
     ja: {

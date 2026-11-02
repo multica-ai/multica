@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import Cropper, { type Area, type Point } from "react-easy-crop";
-import { Loader2, Minus, Plus, RotateCw } from "lucide-react";
+import { Loader2, Minus, Plus, RotateCw } from "@multica/ui/icons";
 import { Button } from "@multica/ui/components/ui/button";
 import { Slider } from "@multica/ui/components/ui/slider";
 import { TooltipHint } from "@multica/ui/components/common/tooltip-hint";

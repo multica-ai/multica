@@ -55,14 +55,14 @@ Placez le PAT dans l'en-tête `Authorization` :
 ```bash
 export MULTICA_TOKEN='mul_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx'
 
-curl https://api.multica.ai/api/me \
+curl https://multica.outlune.com/api/me \
   -H "Authorization: Bearer $MULTICA_TOKEN"
 ```
 
 Les appels d'API au niveau de l'espace de travail nécessitent aussi l'espace de travail, selon ce qu'exige le point de terminaison :
 
 ```bash
-curl https://api.multica.ai/api/issues \
+curl https://multica.outlune.com/api/issues \
   -H "Authorization: Bearer $MULTICA_TOKEN" \
   -H "X-Workspace-ID: $MULTICA_WORKSPACE_ID"
 ```

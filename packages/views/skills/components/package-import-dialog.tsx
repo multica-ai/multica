@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { Loader2 } from "lucide-react";
+import { Loader2 } from "@multica/ui/icons";
 import type { SkillPackagePreview } from "@multica/core/api/schemas";
 import { api } from "@multica/core/api";
 import { Button } from "@multica/ui/components/ui/button";

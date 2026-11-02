@@ -4,17 +4,19 @@ description: 为每个工作区连接自托管的 Forgejo、Gitea 或 GitLab 实
 ---
 
 import { Callout } from "fumadocs-ui/components/callout";
+import { Step, Steps } from "fumadocs-ui/components/steps";
+import { Tab, Tabs } from "fumadocs-ui/components/tabs";
 
 <Callout type="warn">
-**仅适用于自部署的 Multica。** 此集成只在你**自己部署 Multica** 时可用，Multica 云端不提供。这里的「自托管」指的是 **Multica 本身自部署**——通常是为了让它能访问你自己网络内的 Git 实例。需要服务端运维开启（`MULTICA_VCS_INTEGRATION_ENABLED=true`）并设置 `MULTICA_VCS_SECRET_KEY`；在此之前，设置 → 代码里不会出现该行。
+**仅适用于自部署的 Multica。** 此集成只在你自己部署 Multica 时可用，Multica 云端不提供；自部署通常是为了让 Multica 能访问你内网里的 Git 实例。服务端需要开启 `MULTICA_VCS_INTEGRATION_ENABLED=true` 并设置 `MULTICA_VCS_SECRET_KEY`，否则 **设置 → 代码** 里不会出现这一行。
 </Callout>
 
-Multica 按工作区连接自托管的 Git 代码托管：**Forgejo**、**Gitea** 或 **GitLab**。连接后，任何在分支名或标题中包含任务编号（例如 `MUL-123`）、或在正文的关闭关键字后写出该编号（`Closes MUL-123`）的 Pull Request（GitLab 为 Merge Request）都会**自动关联**到对应的 [任务](/issues)，出现在任务侧栏的 **Pull requests** 中；任务的所有关联 PR 都合并后，任务会改为工作区选定的状态（默认「完成」）。head commit 的 CI 会以检查条的形式显示在卡片上。
+Multica 按工作区连接自托管的 Git 代码托管：Forgejo、Gitea 或 GitLab。连接后，分支名或标题中包含任务编号（例如 `MUL-123`）、或正文中在关闭关键字后写出该编号（`Closes MUL-123`）的 Pull Request（GitLab 为 Merge Request）会自动关联到对应的[任务](/issues)，出现在任务侧栏的 **Pull requests** 中。任务的所有关联 PR 都合并后，任务改为工作区选定的状态（默认为"已完成"）。head commit 的 CI 以检查条的形式显示在卡片上。
 
-这些代码托管与 GitHub 并行工作：一个工作区可任意组合使用。
+这些代码托管与 GitHub 并行工作，一个工作区可以同时连接多个。
 
 <Callout type="info">
-与 GitHub 不同，这些代码托管没有「App」模型。每个工作区保存自己的实例地址和访问令牌，并在其仓库或组织上注册 Webhook。令牌和 Webhook 密钥均加密存储。
+与 GitHub 不同，这些代码托管没有 App 模型。每个工作区保存自己的实例地址和访问令牌，并在其仓库或组织上注册 Webhook。令牌和 Webhook 密钥均加密存储。
 </Callout>
 
 ## 前置条件（服务端）
@@ -25,7 +27,7 @@ Multica 按工作区连接自托管的 Git 代码托管：**Forgejo**、**Gitea*
 MULTICA_VCS_INTEGRATION_ENABLED=true
 ```
 
-官方自部署 `docker compose` 文件（`docker-compose.selfhost.yml`）已为你设置好。
+官方自部署 `docker compose` 文件（`docker-compose.selfhost.yml`）已经设置了这一项。
 
 再设置一个 base64 编码的 32 字节密钥，供服务端加密存储的凭据。未设置时，连接表单将不可用。
 
@@ -43,12 +45,23 @@ MULTICA_VCS_SECRET_KEY=<base64 32 字节密钥>
 
 ## 连接工作区
 
-1. 在代码托管中创建具备仓库读取权限的访问令牌：
- - **Forgejo / Gitea**：设置 → 应用。
- - **GitLab**：具备 `read_api` 权限的个人（或群组/项目）访问令牌。
-2. 在 Multica 中打开 **设置 → 代码**，在 **自托管 Git** 一行点击 **连接**。
-3. 选择**提供方**，填写实例地址（例如 `https://forgejo.example.com`）和访问令牌，点击 **连接**。Multica 会先用该令牌访问实例进行校验，再保存。
-4. 复制连接后显示的 **Webhook 地址** 与 **Webhook 密钥**。
+<Steps>
+<Step>
+在代码托管中创建具备仓库读取权限的访问令牌：
+
+- **Forgejo / Gitea**：设置 → 应用。
+- **GitLab**：具备 `read_api` 权限的个人（或群组/项目）访问令牌。
+</Step>
+<Step>
+在 Multica 中打开 **设置 → 代码**，在 **自托管 Git** 一行点击 **连接**。
+</Step>
+<Step>
+选择**提供方**，填写实例地址（例如 `https://forgejo.example.com`）和访问令牌，点击 **连接**。Multica 会先用该令牌访问实例进行校验，再保存。
+</Step>
+<Step>
+复制连接后显示的 **Webhook 地址** 与 **Webhook 密钥**。
+</Step>
+</Steps>
 
 <Callout type="warn">
 Webhook 密钥只显示一次，请在离开页面前复制。重新连接同一实例会轮换令牌与密钥。
@@ -62,20 +75,29 @@ Multica 不提供跳过证书校验的选项，因为连接请求会携带你的
 
 ## 注册 Webhook
 
-在仓库（或组织/群组，以覆盖所有仓库）：
+在仓库上注册；要覆盖所有仓库，就注册在组织或群组上。
 
-**Forgejo / Gitea** —— 设置 → Webhook → 添加 Webhook → Forgejo/Gitea：
+<Tabs items={["Forgejo / Gitea", "GitLab"]}>
+<Tab value="Forgejo / Gitea" id="forgejo-gitea">
+
+设置 → Webhook → 添加 Webhook → Forgejo/Gitea：
 
 - **目标 URL**：上一步的 Webhook 地址。
 - **HTTP 方法** `POST`，**内容类型** `application/json`。
 - **密钥**：Webhook 密钥（用于校验 `X-Gitea-Signature` HMAC）。
 - **触发事件**：勾选 **Pull Request**，并勾选 **Commit Status** 以镜像 CI。
 
-**GitLab** —— 设置 → Webhooks：
+</Tab>
+<Tab value="GitLab" id="gitlab">
+
+设置 → Webhooks：
 
 - **URL**：Webhook 地址。
 - **Secret token**：Webhook 密钥（作为 `X-Gitlab-Token` 发送并逐字比对）。
 - **触发器**：启用 **Merge request events**，并启用 **Pipeline events** 以镜像 CI。
+
+</Tab>
+</Tabs>
 
 Multica 会用存储的密钥校验每次投递，因此没有匹配密钥的 Webhook 会被拒绝。
 
@@ -87,4 +109,4 @@ Multica 会用存储的密钥校验每次投递，因此没有匹配密钥的 We
 
 ## 智能体创建 Pull Request
 
-创建 PR 无需在 Multica 中进行任何代码托管配置。智能体在运行时中检出仓库，并使用运行时主机自身的 Git 凭据推送分支和创建 PR。要让智能体在某个代码托管上工作，确保 daemon 主机能对其完成认证即可——例如 SSH 部署密钥，或主机 Git 凭据助手中的令牌——再像往常一样添加仓库地址。仓库检出支持任意 Git URL，因此无需提供方专属配置。
+智能体创建 PR 不需要在 Multica 中做任何代码托管配置。智能体在运行时中检出仓库，用运行时主机自己的 Git 凭据推送分支和创建 PR。要让智能体在某个代码托管上工作，只要守护进程所在的主机能通过它的认证（例如 SSH 部署密钥，或主机 Git 凭据助手里的令牌），再像往常一样添加仓库地址。仓库检出支持任意 Git URL，不需要按提供方单独配置。

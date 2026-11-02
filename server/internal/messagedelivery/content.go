@@ -112,14 +112,13 @@ func buildRunOnlyContent(autopilotTitle, runStatus, reasonCode, failureReason, o
 	return snap
 }
 
-// buildCreateIssueContent renders a create_issue status card. The first
-// terminal state ships the status and the task link; the report body is
-// never attached because this module has no verified delivery-comment
+// buildCreateIssueContent renders a create_issue status card with the run
+// outcome, the issue status frozen at settlement and the task link. The report
+// body is never attached because this module has no verified delivery-comment
 // anchor for the issue yet (OL-23: "只有明确的交付评论锚点才能附正文").
 //
-// issueStatus may be empty when the first terminal status is unrecoverable
-// (review R6); the wording then states completion without naming a possibly
-// later status.
+// issueStatus may be empty when the settlement snapshot is unrecoverable;
+// never substitute the issue's current, possibly later status.
 //
 // The link carries the SOURCE WORKSPACE slug (conventions: app routes
 // always live under /{slug}/{section}) — a multi-workspace recipient must
@@ -128,14 +127,14 @@ func buildRunOnlyContent(autopilotTitle, runStatus, reasonCode, failureReason, o
 func buildCreateIssueContent(autopilotTitle, runStatus, issueIdent, issueStatus, appURL, workspaceSlug string) contentSnapshot {
 	snap := contentSnapshot{RunStatus: runStatus}
 	var b strings.Builder
-	b.WriteString(autopilotTitle)
-	switch {
-	case issueIdent == "":
-		b.WriteString(" — task reached its first terminal state")
-	case issueStatus != "":
-		b.WriteString(" — task " + issueIdent + " reached its first terminal state as " + issueStatus)
-	default:
-		b.WriteString(" — task " + issueIdent + " reached its first terminal state (current status: see the task page)")
+	b.WriteString(autopilotTitle + " — run " + runStatus)
+	if issueIdent != "" {
+		b.WriteString("; task " + issueIdent + " status at settlement")
+		if issueStatus != "" {
+			b.WriteString(": " + issueStatus)
+		} else {
+			b.WriteString(" unavailable (see the task page)")
+		}
 	}
 	snap.Summary = b.String()
 	if appURL != "" && workspaceSlug != "" && issueIdent != "" {

@@ -29,8 +29,8 @@ func fakeDsh(t *testing.T) (path, record string) {
 }
 
 // installedDshProfileManifest is a profile whose dependencies and bundle list
-// both name the runtime. Either place is enough for the daemon to call it
-// installed; writing both matches what a finished `dsh plugin add` leaves.
+// both name the runtime. The bundle list decides what DSH loads;
+// writing both matches what a finished `dsh plugin add` leaves.
 func installedDshProfileManifest() string {
 	return "{\"dependencies\":{\"@multica-ai/dsh-runtime\":\"1.0.0\"},\"dsh\":{\"profile\":{\"bundles\":[\"@multica-ai/dsh-runtime\"]}}}\n"
 }
@@ -567,7 +567,6 @@ func TestDshMulticaProfileState(t *testing.T) {
 		{name: "empty object", manifest: "{}\n"},
 		{name: "empty dependencies", manifest: "{\"dependencies\":{}}\n"},
 		{name: "refused-install skeleton", manifest: dshSkeletonProfileManifest()},
-		{name: "similar package name", manifest: "{\"dependencies\":{\"@multica-ai/dsh-runtime-extra\":\"1.0.0\"}}\n"},
 	}
 	for _, tc := range absent {
 		t.Run(tc.name, func(t *testing.T) {
@@ -582,8 +581,6 @@ func TestDshMulticaProfileState(t *testing.T) {
 		name     string
 		manifest string
 	}{
-		{name: "dependency names the runtime", manifest: "{\"dependencies\":{\"@multica-ai/dsh-runtime\":\"1.0.0\"}}\n"},
-		{name: "dependency value is an object", manifest: "{\"dependencies\":{\"@multica-ai/dsh-runtime\":{\"version\":\"1.0.0\"}}}\n"},
 		{name: "bundle names the runtime", manifest: "{\"dsh\":{\"profile\":{\"bundles\":[\"@multica-ai/dsh-runtime\"]}}}\n"},
 	}
 	for _, tc := range present {
@@ -806,5 +803,58 @@ func TestProvisionDshMulticaProfile_CancellationKillsTheWholeTree(t *testing.T) 
 	}
 	if data, err := os.ReadFile(record); err == nil {
 		t.Fatalf("a grandchild outlived cancellation and wrote: %s", data)
+	}
+}
+
+func TestDshMulticaProfileUnreadableManifest(t *testing.T) {
+	home := t.TempDir()
+	launcher := filepath.Join(t.TempDir(), "dsh")
+	if err := os.WriteFile(launcher, []byte("#!/bin/sh\nexport DSH_HOME='"+home+"'\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	// A directory produces a read error even when tests run with elevated permissions.
+	if err := os.MkdirAll(filepath.Join(home, "profiles", dshMulticaProfileName, "package.json"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if dshMulticaProfileState(launcher) != dshProfileUnknown {
+		t.Fatal("an unreadable manifest must remain unknown, not missing or requiring migration")
+	}
+}
+
+func TestDshProfileMigrationUsesLauncherHomeAndRefusesInstall(t *testing.T) {
+	for _, manifest := range []string{
+		`{"dependencies":{"@multica-ai/dsh-runtime":"1.0.0"}}`,
+		`{"dependencies":{"@multica-ai/dsh-runtime":{"version":"1.0.0"}}}`,
+		`{"dependencies":{"@multica-ai/dsh-runtime-extra":"1.0.0"}}`,
+		`{"dsh":{"profile":{"bundles":["dsh-profile-multica"]}}}`,
+		`{"dsh":{"profile":{"bundles":["@multica-ai/dsh-runtime","dsh-profile-multica"]}}}`,
+	} {
+		t.Run(manifest, func(t *testing.T) {
+			launcher, record := fakeDsh(t)
+			home := dshLauncherHome(launcher)
+			writeDshProfileManifest(t, home, manifest)
+			// The daemon's inherited home is unrelated to the selected launcher.
+			t.Setenv("DSH_HOME", t.TempDir())
+			t.Setenv(dshProfileBundleEnv, "@multica-ai/dsh-runtime")
+			if got := dshMulticaProfileState(launcher); got != dshProfileNeedsMigration {
+				t.Fatalf("state = %v, want needs migration", got)
+			}
+			if got := probeDshMulticaProfile(t.Context(), launcher); got != dshProbeNeedsMigration {
+				t.Fatalf("probe = %v, want needs migration", got)
+			}
+			if (&Daemon{}).startDshProfileProvision(launcher) {
+				t.Fatal("automatic install started over an existing bridge")
+			}
+			if err := provisionDshMulticaProfile(t.Context(), launcher, slog.New(slog.NewTextHandler(io.Discard, nil))); err == nil || !strings.Contains(err.Error(), dshProfileMigrationReason) {
+				t.Fatalf("provision error = %v, want migration refusal", err)
+			}
+			if got := readRecord(t, record); got != "" {
+				t.Fatalf("launcher executed before migration: %s", got)
+			}
+			got, err := os.ReadFile(filepath.Join(home, "profiles", dshMulticaProfileName, "package.json"))
+			if err != nil || string(got) != manifest {
+				t.Fatalf("existing bridge changed: %q, %v", got, err)
+			}
+		})
 	}
 }

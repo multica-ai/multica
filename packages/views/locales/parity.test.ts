@@ -4,11 +4,13 @@ import { fileURLToPath } from "node:url";
 import { dirname, resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 import { RESOURCES } from "./index";
+import { mergeResources } from "@multica/core/i18n";
 
 // Schema-level guard: every key in the EN bundle must have a counterpart
 // in every non-English bundle and vice-versa. Catches retrofit drift where a
 // new EN key lands without a translated key, which would silently fall back
-// to the English string in production.
+// to the English string in production. Traditional Chinese intentionally
+// falls back to Simplified Chinese for fork copy; check that effective bundle.
 //
 // i18next plural rule: EN uses `_one` + `_other`; zh only uses `_other`
 // because Chinese has no grammatical number. Normalize both forms to
@@ -60,9 +62,12 @@ describe("locale bundle parity", () => {
 
   for (const locale of translatedLocales) {
     const bundle = RESOURCES[locale as keyof typeof RESOURCES];
+    const effective = locale === "zh-Hant"
+      ? mergeResources(RESOURCES["zh-Hans"], bundle)
+      : bundle;
 
     it(`declares the same namespaces in EN and ${locale}`, () => {
-      expect(Object.keys(bundle).sort()).toEqual(Object.keys(en).sort());
+      expect(Object.keys(effective).sort()).toEqual(Object.keys(en).sort());
     });
 
     it(`registers every JSON file in RESOURCES (${locale})`, () => {
@@ -72,7 +77,7 @@ describe("locale bundle parity", () => {
     for (const ns of Object.keys(en)) {
       it(`${ns}: ${locale} covers every EN key`, () => {
         const enKeys = keySet(en[ns] ?? {});
-        const translatedKeys = keySet(bundle[ns] ?? {});
+        const translatedKeys = keySet(effective[ns] ?? {});
         const missing = [...enKeys].filter((k) => !translatedKeys.has(k));
         expect(missing).toEqual([]);
       });

@@ -59,7 +59,7 @@ func TestDshIndirectShimProfileLifecycle(t *testing.T) {
 			launcher := filepath.Join(dir, "dsh")
 			body := `
 case "$*" in
-  plugin*) mkdir -p "$DSH_HOME/profiles/multica"; printf '%s' '{"dependencies":{"@multica-ai/dsh-runtime":"1.0.0"}}' > "$DSH_HOME/profiles/multica/package.json" ;;
+  plugin*) mkdir -p "$DSH_HOME/profiles/multica"; printf '%s' '{"dependencies":{"@multica-ai/dsh-runtime":"1.0.0"},"dsh":{"profile":{"bundles":["@multica-ai/dsh-runtime"]}}}' > "$DSH_HOME/profiles/multica/package.json" ;;
   *--probe*) if [ -f "$DSH_HOME/profiles/multica/package.json" ] && [ -z "$DSH_TEST_PROBE_FAIL" ]; then
     printf '%s\n' '{"v":1,"type":"probe","runtime":"dsh","protocol_version":1}'
     else exit 1; fi ;;
@@ -130,7 +130,7 @@ func TestDshShimProfileLifecycle(t *testing.T) {
 	launcher := filepath.Join(t.TempDir(), "dsh")
 	script := "#!/bin/sh\nexport DSH_HOME='" + selected + "'\n" + `
 case "$*" in
-  plugin*) mkdir -p "$DSH_HOME/profiles/multica"; printf '%s' '{"dependencies":{"@multica-ai/dsh-runtime":"1.0.0"}}' > "$DSH_HOME/profiles/multica/package.json" ;;
+  plugin*) mkdir -p "$DSH_HOME/profiles/multica"; printf '%s' '{"dependencies":{"@multica-ai/dsh-runtime":"1.0.0"},"dsh":{"profile":{"bundles":["@multica-ai/dsh-runtime"]}}}' > "$DSH_HOME/profiles/multica/package.json" ;;
   *--probe*) if [ -f "$DSH_HOME/profiles/multica/package.json" ]; then
     printf '%s\n' '{"v":1,"type":"probe","runtime":"dsh","protocol_version":1}'
     else exit 1; fi ;;
@@ -141,7 +141,7 @@ esac
 	}
 	// An unrelated manifest in the daemon home must not hide the missing
 	// profile in the home selected by the launcher.
-	installMulticaProfile(t, inherited)
+	writeDshProfileManifest(t, inherited, `{"dsh":{"profile":{"bundles":["dsh-profile-multica"]}}}`)
 	if got := probeDshMulticaProfile(context.Background(), launcher); got != dshProbeMissingProfile {
 		t.Fatalf("before install: %v, want missing", got)
 	}
@@ -177,7 +177,7 @@ func TestDshDynamicShimHomeStaysUnknown(t *testing.T) {
 	launcher, _ := fakeDshScript(t, `DSH_HOME="$DSH_TEST_SHIM_HOME"
 export DSH_HOME
 case "$*" in
-  plugin*) mkdir -p "$DSH_HOME/profiles/multica"; printf '%s' '{"dependencies":{"@multica-ai/dsh-runtime":"1.0.0"}}' > "$DSH_HOME/profiles/multica/package.json" ;;
+  plugin*) mkdir -p "$DSH_HOME/profiles/multica"; printf '%s' '{"dependencies":{"@multica-ai/dsh-runtime":"1.0.0"},"dsh":{"profile":{"bundles":["@multica-ai/dsh-runtime"]}}}' > "$DSH_HOME/profiles/multica/package.json" ;;
   *) exit 1 ;;
 esac`)
 	t.Setenv(dshProfileBundleEnv, "fixture-bundle")

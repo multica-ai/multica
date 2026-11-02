@@ -1,6 +1,6 @@
 "use client";
 
-import { ArrowDown, ArrowUp } from "lucide-react";
+import { ArrowDown, ArrowUp } from "@multica/ui/icons";
 
 import { cn } from "../../lib/utils";
 

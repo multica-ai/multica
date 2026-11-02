@@ -298,7 +298,7 @@ func TestAttributionForIssueTask_SystemCommentFallsThroughToIssueProvenance(t *t
 		WorkspaceID: util.MustParseUUID(workspaceIDStr),
 	}
 
-	got := svc.attributionForIssueTask(ctx, issue, systemCommentID, attribution.SourceDelegation, pgtype.UUID{})
+	got := svc.attributionForIssueTask(ctx, issue, systemCommentID, attribution.SourceDelegation, pgtype.UUID{}, pgtype.UUID{})
 	if got.Source != attribution.SourceDelegation {
 		t.Fatalf("source = %q, want delegation (system comment must fall through to issue provenance, not owner_fallback)", got.Source)
 	}

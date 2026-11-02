@@ -69,7 +69,7 @@ const IN_REVIEW = entry({
 
 const QA = entry({ id: "qa", key: "qa", name: "QA", color: "#ec7a2d" });
 
-/** StatusIcon's own glyph, told apart from the lucide check mark beside it. */
+/** StatusIcon's own glyph, told apart from the check mark beside it. */
 const STATUS_ICON = 'svg[viewBox="0 0 14 14"]';
 
 function iconOf(row: Element | null): SVGElement | null {

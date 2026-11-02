@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { UserMinus } from "lucide-react";
+import { UserMinus } from "@multica/ui/icons";
 import { useQuery } from "@tanstack/react-query";
 import { memberListOptions, agentListOptions } from "@multica/core/workspace/queries";
 import { useWorkspaceId } from "@multica/core/hooks";

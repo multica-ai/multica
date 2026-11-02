@@ -252,6 +252,7 @@ func TestRereviewFailedTaskRawReasonStaysOutOfStatusCard(t *testing.T) {
 	taskID := testFx.Insert(t, "agent_task_queue", testutil.Cols{
 		"agent_id": testAgent, "issue_id": issue, "status": "failed", "error": rawReason, "completed_at": testutil.Raw("now()"), "priority": 0,
 	})
+	testFx.Exec(t, `UPDATE autopilot_run SET task_id=$1 WHERE id=$2`, taskID, run)
 	q := db.New(testPool)
 	task, err := q.GetAgentTask(ctx, uuidOf(t, taskID))
 	if err != nil {
@@ -291,6 +292,7 @@ func TestRereviewScannerRecoversLinkedIssueTaskFailure(t *testing.T) {
 	taskID := testFx.Insert(t, "agent_task_queue", testutil.Cols{
 		"agent_id": testAgent, "issue_id": issue, "status": "failed", "error": "synthetic terminal task failure", "completed_at": testutil.Raw("now()"), "priority": 0,
 	})
+	testFx.Exec(t, `UPDATE autopilot_run SET task_id=$1 WHERE id=$2`, taskID, run)
 	q := db.New(testPool)
 	apSvc := service.NewAutopilotService(q, testPool, events.New(), nil)
 	svc := newTestService(nil, apSvc)
@@ -342,7 +344,7 @@ func (g *rereviewGateDB) QueryRow(ctx context.Context, query string, args ...any
 // R6: the terminal boundary's first-write-wins guard — two concurrent real
 // syncers cannot overwrite the first terminal's structured status.
 func TestRereviewFirstTerminalStatusCannotBeOverwrittenConcurrently(t *testing.T) {
-	for _, secondStatus := range []string{"done", "blocked"} {
+	for _, secondStatus := range []string{"done", "cancelled"} {
 		t.Run(secondStatus, func(t *testing.T) {
 			rereviewFirstTerminalRace(t, secondStatus)
 		})

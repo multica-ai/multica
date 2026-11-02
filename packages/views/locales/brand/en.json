@@ -86,7 +86,7 @@
     },
     "qoder": {
       "description": "Connect Qoder Cloud Agents. Labrastro manages execution and stores credentials encrypted. Workspace administrators can change this configuration.",
-      "add_agent_description": "Create a Labrastro agent linked to an existing QCA Agent. It will use the environment and credentials configured for Qoder Cloud.",
+      "add_agent_description": "Create a Labrastro agent linked to an existing agent in Qoder Cloud Agents. It will use the environment and credentials configured for Qoder Cloud.",
       "data_disclosure_title": "What Labrastro sends to Qoder",
       "connect_description": "Labrastro runs tasks in Qoder's sandboxes."
     }

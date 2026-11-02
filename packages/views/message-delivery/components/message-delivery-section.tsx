@@ -11,7 +11,7 @@ import {
   Trash2,
   User,
   Users,
-} from "lucide-react";
+} from "@multica/ui/icons";
 import { useQuery } from "@tanstack/react-query";
 import {
   messageApprovedTargetsOptions,

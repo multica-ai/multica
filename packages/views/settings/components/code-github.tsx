@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { ChevronDown, LoaderCircle, MoreHorizontal, Unplug } from "lucide-react";
+import { ChevronDown, LoaderCircle, MoreHorizontal, Unplug } from "@multica/ui/icons";
 import { Button } from "@multica/ui/components/ui/button";
 import {
   AlertDialog,

@@ -12,7 +12,7 @@ import {
   Copy,
   Check,
   Webhook,
-} from "lucide-react";
+} from "@multica/ui/icons";
 import { useQuery } from "@tanstack/react-query";
 import {
   autopilotDeliveriesOptions,
@@ -30,6 +30,7 @@ import {
 } from "@multica/ui/components/ui/dialog";
 import { cn } from "@multica/ui/lib/utils";
 import { copyText } from "@multica/ui/lib/clipboard";
+import { TruncatedTooltip } from "@multica/ui/components/common/truncated-tooltip";
 import { toast } from "sonner";
 import { useLocale, useT } from "../../i18n";
 import type {
@@ -373,15 +374,16 @@ function MetaRow({
   return (
     <div className="flex flex-col">
       <dt className="text-muted-foreground">{label}</dt>
-      <dd
-        className={cn(
-          "truncate text-foreground",
-          mono && "font-mono",
-        )}
-        title={value}
-      >
-        {value}
-      </dd>
+      <TruncatedTooltip content={value}>
+        <dd
+          className={cn(
+            "truncate text-foreground",
+            mono && "font-mono",
+          )}
+        >
+          {value}
+        </dd>
+      </TruncatedTooltip>
     </div>
   );
 }

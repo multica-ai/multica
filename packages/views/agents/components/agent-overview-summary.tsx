@@ -1,6 +1,6 @@
 "use client";
 
-import { Bot, Server } from "lucide-react";
+import { Bot, Server } from "@multica/ui/icons";
 import type {
   Agent,
   AgentRuntime,

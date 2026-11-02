@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
@@ -219,6 +220,7 @@ func TestV1ReviewScannerDoesNotReplayFailureAfterSuccessfulRetry(t *testing.T) {
 		"runtime_id": f.runtime, "issue_id": f.issueID, "status": "running",
 		"created_at": testutil.Raw("now() - interval '2 minutes'"),
 	})
+	f.fx.Exec(t, `UPDATE autopilot_run SET task_id=$1 WHERE id=$2`, failedID, f.run.ID)
 	failed, err := f.q.FailAgentTask(ctx, db.FailAgentTaskParams{
 		ID:            util.MustParseUUID(failedID),
 		Error:         pgtype.Text{String: "synthetic first-attempt timeout", Valid: true},
@@ -233,7 +235,7 @@ func TestV1ReviewScannerDoesNotReplayFailureAfterSuccessfulRetry(t *testing.T) {
 		"created_at": testutil.Raw("now() - interval '1 minute'"),
 	})
 	// At the original failure event, the retry is active and the existing
-	// state machine correctly leaves the create_issue run awaiting its issue.
+	// state machine correctly waits for the dispatch chain's next attempt.
 	f.syncer().SyncRunFromLinkedIssueTask(ctx, failed)
 	whileRetryActive, err := f.q.GetAutopilotRun(ctx, f.run.ID)
 	if err != nil {
@@ -259,8 +261,8 @@ func TestV1ReviewScannerDoesNotReplayFailureAfterSuccessfulRetry(t *testing.T) {
 	}
 	t.Logf("active_retry_guard=%s successor=%s no_active=%t scan=%s reason=%q",
 		whileRetryActive.Status, completed.Status, !active, afterScan.Status, afterScan.FailureReason.String)
-	if afterScan.Status != "issue_created" {
-		t.Fatalf("scanner replayed historical failure after successful retry: status=%s reason=%q",
+	if afterScan.Status != "completed" || afterScan.FailureReason.Valid {
+		t.Fatalf("scanner did not settle the successful retry: status=%s reason=%q",
 			afterScan.Status, afterScan.FailureReason.String)
 	}
 }
@@ -277,9 +279,10 @@ func TestContractScannerRecoversRunSideOnlyTaskLink(t *testing.T) {
 	}
 }
 
-func TestContractHistoricalFailureCannotOutrunTerminalIssue(t *testing.T) {
+func TestContractDispatchFailureWinsOverTerminalIssue(t *testing.T) {
 	f := v1ReviewScanSetup(t, "create_issue")
 	taskID := f.fx.Task(t, f.agentID, testutil.Cols{"runtime_id": f.runtime, "issue_id": f.issueID, "status": "failed", "completed_at": testutil.Raw("now()")})
+	f.fx.Exec(t, `UPDATE autopilot_run SET task_id=$1 WHERE id=$2`, taskID, f.run.ID)
 	f.fx.Exec(t, `UPDATE issue SET status='done' WHERE id=$1`, f.issueID)
 	task, err := f.q.GetAgentTask(context.Background(), util.MustParseUUID(taskID))
 	if err != nil {
@@ -287,7 +290,69 @@ func TestContractHistoricalFailureCannotOutrunTerminalIssue(t *testing.T) {
 	}
 	f.syncer().SyncRunFromLinkedIssueTask(context.Background(), task)
 	run, err := f.q.GetAutopilotRun(context.Background(), f.run.ID)
-	if err != nil || run.Status != "completed" || !strings.Contains(string(run.Result), `"first_terminal_status": "done"`) {
-		t.Fatalf("historical failure replaced issue outcome: %s %s %v", run.Status, run.Result, err)
+	if err != nil || run.Status != "failed" || !strings.Contains(string(run.Result), `"first_terminal_status": "done"`) {
+		t.Fatalf("dispatch failure did not preserve the issue status: %s %s %v", run.Status, run.Result, err)
+	}
+}
+
+func TestContractScannerRecoversCompletedDispatchAtNonterminalIssueStatus(t *testing.T) {
+	for _, status := range []string{"blocked", "in_progress"} {
+		t.Run(status, func(t *testing.T) {
+			f := v1ReviewScanSetup(t, "create_issue")
+			ctx := context.Background()
+			f.fx.Exec(t, `UPDATE issue SET status=$1 WHERE id=$2`, status, f.issueID)
+			taskID := f.fx.Task(t, f.agentID, testutil.Cols{
+				"runtime_id": f.runtime, "issue_id": f.issueID, "status": "completed",
+				"completed_at": testutil.Raw("now()"),
+			})
+			f.fx.Exec(t, `UPDATE autopilot_run SET task_id=$1 WHERE id=$2`, taskID, f.run.ID)
+			// No terminal event is delivered; issue status alone cannot settle this run.
+			f.scan(t, ctx)
+			run, err := f.q.GetAutopilotRun(ctx, f.run.ID)
+			if err != nil || run.Status != "completed" {
+				t.Fatalf("lost dispatch completion was not recovered: status=%s error=%v", run.Status, err)
+			}
+			var result struct {
+				FirstTerminalStatus string `json:"first_terminal_status"`
+			}
+			if err := json.Unmarshal(run.Result, &result); err != nil || result.FirstTerminalStatus != status {
+				t.Fatalf("settlement did not freeze issue status: %s, %v", run.Result, err)
+			}
+			f.fx.Exec(t, `UPDATE issue SET status='done' WHERE id=$1`, f.issueID)
+			f.scan(t, ctx)
+			after, err := f.q.GetAutopilotRun(ctx, f.run.ID)
+			if err != nil || after.Status != "completed" || string(after.Result) != string(run.Result) || after.CompletedAt != run.CompletedAt {
+				t.Fatalf("later issue status changed settled run: %+v, %v", after, err)
+			}
+		})
+	}
+}
+
+func TestContractScannerIgnoresUnrelatedTaskWhenSettlingDispatchFailure(t *testing.T) {
+	f := v1ReviewScanSetup(t, "create_issue")
+	ctx := context.Background()
+	dispatchID := f.fx.Task(t, f.agentID, testutil.Cols{
+		"runtime_id": f.runtime, "issue_id": f.issueID, "status": "running",
+		"created_at": testutil.Raw("now() - interval '1 minute'"),
+	})
+	f.fx.Exec(t, `UPDATE autopilot_run SET task_id=$1 WHERE id=$2`, dispatchID, f.run.ID)
+	f.fx.Task(t, f.agentID, testutil.Cols{
+		"runtime_id": f.runtime, "issue_id": f.issueID, "status": "completed",
+		"completed_at": testutil.Raw("now()"),
+	})
+	f.scan(t, ctx)
+	run, err := f.q.GetAutopilotRun(ctx, f.run.ID)
+	if err != nil || run.Status != "issue_created" {
+		t.Fatalf("unrelated completion settled the dispatch: status=%s error=%v", run.Status, err)
+	}
+	if _, err := f.q.FailAgentTask(ctx, db.FailAgentTaskParams{
+		ID: util.MustParseUUID(dispatchID), Error: pgtype.Text{String: "dispatch failed", Valid: true},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	f.scan(t, ctx)
+	run, err = f.q.GetAutopilotRun(ctx, f.run.ID)
+	if err != nil || run.Status != "failed" || run.FailureReason.String != "dispatch failed" {
+		t.Fatalf("unrelated newer task masked dispatch failure: status=%s reason=%s error=%v", run.Status, run.FailureReason.String, err)
 	}
 }

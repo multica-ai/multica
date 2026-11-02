@@ -159,7 +159,7 @@ test("closing floating chat releases its list and preserves the live composer", 
     element.dispatchEvent(new ClipboardEvent("paste", { bubbles: true, cancelable: true, clipboardData: files }));
   });
   await expect.poll(() => uploadStarted).toBe(true);
-  await shell.locator('button:has(svg.lucide-minus)').evaluate(button => (button as HTMLButtonElement).click());
+  await shell.locator('button:has(svg.icon-minus)').evaluate(button => (button as HTMLButtonElement).click());
   await expect(page.locator('[data-tab-scroll-root]').filter({ hasText: "Latest fixture message" })).toHaveCount(0);
   expect(await composer?.evaluate(element => element.isConnected)).toBe(true);
   expect(await composer?.textContent()).toContain("Last edit before closing");
@@ -186,7 +186,7 @@ test("closing floating chat releases its list and preserves the live composer", 
   await expect(reopened).toHaveCSS("transform", "none");
 
   // Reopening inside the exit animation must cancel removal of the same list.
-  await reopened.locator('button:has(svg.lucide-minus)').evaluate(button => (button as HTMLButtonElement).click());
+  await reopened.locator('button:has(svg.icon-minus)').evaluate(button => (button as HTMLButtonElement).click());
   await page.getByRole("button", { name: "Multica is working...", exact: true }).evaluate(button => (button as HTMLButtonElement).click());
   // Let the interrupted 150ms exit finish before checking that it cannot remove the reopened list.
   await page.waitForTimeout(250);

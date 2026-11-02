@@ -39,7 +39,7 @@ func registerAutopilotListeners(bus *events.Bus, svc *service.AutopilotService) 
 		// SyncRunFromIssue normalize once it has the issue. (MUL-6243)
 		if issuestatus.IsBuiltIn(issue.Status) &&
 			issue.Status != "done" && issue.Status != "in_review" &&
-			issue.Status != "cancelled" && issue.Status != "blocked" {
+			issue.Status != "cancelled" {
 			return
 		}
 		// Load the full issue from DB to check origin_type.
@@ -80,7 +80,9 @@ func syncRunFromTaskEvent(ctx context.Context, svc *service.AutopilotService, e 
 		svc.SyncRunFromTask(ctx, task)
 		return
 	}
-	if e.Type == protocol.EventTaskFailed {
+	// create_issue tasks link to their run only through issue_id. Completion
+	// settles the run as success; terminal failure settles it as failed.
+	if e.Type == protocol.EventTaskCompleted || e.Type == protocol.EventTaskFailed {
 		svc.SyncRunFromLinkedIssueTask(ctx, task)
 	}
 }

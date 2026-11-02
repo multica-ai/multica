@@ -43,5 +43,16 @@ html[lang|="ja"] {
     "Noto Sans CJK KR", sans-serif;
 }
 
+/* Traditional Chinese: the default stack is Simplified-first, which hands zh-TW
+   users Simplified glyph shapes for every ideograph the two share a code point
+   for. Promote the Traditional families for that locale only (layout.tsx emits
+   `zh-TW` for zh-Hant). Kept in sync with the desktop stack. */
+html[lang="zh-TW"] {
+  --font-sans: var(--font-inter), -apple-system, BlinkMacSystemFont, "Segoe UI",
+    "PingFang TC", "Microsoft JhengHei", "Noto Sans CJK TC", "PingFang SC",
+    "Microsoft YaHei", "Noto Sans CJK SC", "Apple SD Gothic Neo", "Malgun Gothic",
+    "Noto Sans CJK KR", sans-serif;
+}
+
 /* The landing tree used to override `--font-serif` with its own Instrument
    Serif + per-locale CJK chain; that surface and its CSS are gone. */
