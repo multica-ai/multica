@@ -288,7 +288,7 @@ describe("TeamSubscriptionsSection", () => {
     roleLoadingRef.current = true;
     renderSection();
     expect(screen.getByText("Team event subscriptions")).toBeInTheDocument();
-    expect(document.querySelectorAll(".animate-pulse").length).toBeGreaterThan(0);
+    expect(document.querySelectorAll('[data-slot="skeleton"]').length).toBeGreaterThan(0);
     expect(screen.queryByText(/configured by workspace owners\/admins/i)).not.toBeInTheDocument();
   });
 

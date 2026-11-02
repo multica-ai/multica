@@ -86,7 +86,7 @@
     },
     "qoder": {
       "description": "Connectez Qoder Cloud Agents. Labrastro gère l’exécution et chiffre les identifiants. Les administrateurs de l’espace de travail peuvent modifier cette configuration.",
-      "add_agent_description": "Créez un agent Labrastro associé à un agent QCA existant. Il utilisera l’environnement et les identifiants configurés pour Qoder Cloud.",
+      "add_agent_description": "Créez un agent Labrastro associé à un agent Qoder Cloud Agents existant. Il utilisera l’environnement et les identifiants configurés pour Qoder Cloud.",
       "data_disclosure_title": "Ce que Labrastro envoie à Qoder",
       "connect_description": "Labrastro exécute les tâches dans les sandboxes Qoder."
     }

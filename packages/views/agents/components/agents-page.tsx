@@ -6,7 +6,7 @@ import {
   Bot,
   Lock,
   Plus,
-} from "lucide-react";
+} from "@multica/ui/icons";
 import { useQuery } from "@tanstack/react-query";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import type {
@@ -59,6 +59,7 @@ import {
   TooltipContent,
   TooltipTrigger,
 } from "@multica/ui/components/ui/tooltip";
+import { TruncatedTooltip } from "@multica/ui/components/common/truncated-tooltip";
 import { useNavigation, useRowLink } from "../../navigation";
 import { ActorAvatar } from "../../common/actor-avatar";
 import { docsLocalePrefix } from "../../common/docs-locale";
@@ -76,6 +77,7 @@ import {
 } from "./agent-list-toolbar";
 import { useLocale, useT } from "../../i18n";
 import { matchesPinyin } from "../../editor/extensions/pinyin-match";
+import { FolderExplorerDepth } from "../../common/folder-explorer";
 
 // Column template — single source of truth for header, rows, and skeletons.
 // Same conventions as the skills/autopilots lists (see list-grid.tsx):
@@ -105,7 +107,8 @@ const COLUMN_WIDTHS: Record<AgentColumnKey, number> = {
   runtime: 144,
   lastActive: 120,
   runs: 88,
-  model: 120,
+  // Shown by default; wide enough for common ids like "claude-sonnet-4-5".
+  model: 160,
   created: 104,
 };
 
@@ -372,10 +375,12 @@ function NameCell({
   row,
   pathHints,
   leaderLabel,
+  depth = 0,
 }: {
   row: AgentListRow;
   pathHints?: string[];
   leaderLabel?: string;
+  depth?: number;
 }) {
   const { t } = useT("agents");
   const { agent, isOwnedByMe } = row;
@@ -383,6 +388,7 @@ function NameCell({
   const isPrivate = agent.visibility === "private";
   return (
     <ListGridCell className="gap-3">
+      <FolderExplorerDepth depth={depth} />
       <ActorAvatar
         actorType="agent"
         actorId={agent.id}
@@ -844,7 +850,10 @@ export function AgentsPage(_props: AgentsPageProps = {}) {
   const [selectedIds, setSelectedIds] = useState<ReadonlySet<string>>(
     new Set(),
   );
-  const [search, setSearch] = useState("");
+  // Search lives in the view store (session-only) so it survives opening an
+  // agent and navigating back to the list.
+  const search = useAgentsViewStore((s) => s.search);
+  const setSearch = useAgentsViewStore((s) => s.setSearch);
 
   const rawScope = useAgentsViewStore((s) => s.scope);
   const scope = AGENT_SCOPES.includes(rawScope) ? rawScope : "mine";
@@ -903,6 +912,7 @@ export function AgentsPage(_props: AgentsPageProps = {}) {
     scope,
     search,
     filters,
+    isColVisible,
     onMoved: () => setSelectedIds(new Set()),
   });
 
@@ -995,9 +1005,8 @@ export function AgentsPage(_props: AgentsPageProps = {}) {
     return filtered;
   }, [scopeRows, search, filters, sortField, sortDirection]);
 
-  // Labrastro fork (OL-1030): wrap the sorted rows with the current folder's
-  // direct folders / path hints; in hierarchy mode this also scopes the
-  // entries to the current location.
+  // Labrastro fork (OL-1030, OL-1170): wrap the sorted rows with the visible
+  // in-place tree, or with every matching entry and its folder path hints.
   const { organizeRows } = agentFolders;
   const listModel = useMemo(() => organizeRows(rows), [rows, organizeRows]);
 
@@ -1032,10 +1041,7 @@ export function AgentsPage(_props: AgentsPageProps = {}) {
     count: listModel.rows.length,
     getScrollElement: () => listScrollRef.current,
     estimateSize: (index) => listModel.rows[index]?.kind === "folder" ? 56 : ROW_HEIGHT,
-    getItemKey: (index) => {
-      const row = listModel.rows[index]!;
-      return row.kind === "folder" ? `folder-${row.folder.id}` : `agent-${row.row.agent.id}`;
-    },
+    getItemKey: (index) => listModel.rows[index]!.key,
     overscan: 10,
   });
 
@@ -1084,7 +1090,7 @@ export function AgentsPage(_props: AgentsPageProps = {}) {
 
   const totalCount = agents.filter((a) => !a.archived_at).length;
   const showEmpty =
-    !isLoading && agents.length === 0 && !agentFolders.hasFolders;
+    !isLoading && !agentFolders.treeLoading && agents.length === 0 && !agentFolders.hasFolders;
 
   // The active sort field / availability filter reads columns that arrive in
   // separate queries from the main agent list (activity → lastActiveDays,
@@ -1118,17 +1124,14 @@ export function AgentsPage(_props: AgentsPageProps = {}) {
 
       {agentFolders.notice}
 
-      {isLoading || agentFolders.treeLoading || (!showEmpty && !listReady) ? (
-        <div className="flex-1 overflow-y-auto @container">
-          <LoadingSkeleton directoryLoading={agentFolders.treeLoading} />
-        </div>
-      ) : showEmpty ? (
+      {showEmpty ? (
         <div className="flex flex-1 items-center justify-center">
           <EmptyState onCreate={() => navigation.push(paths.newAgent())} />
         </div>
       ) : (
         <>
-          {agentFolders.navigationBar}
+          {/* Mounted through loading so the rows don't drop by a toolbar's
+              height when the list lands. */}
           <AgentListToolbar
             scope={scope}
             onScopeChange={setScope}
@@ -1146,8 +1149,14 @@ export function AgentsPage(_props: AgentsPageProps = {}) {
             onToggleColumn={toggleColumn}
             allRows={scopeRows}
             members={members}
-            visibleCount={listModel.agentRows.length}
+            visibleCount={rows.length}
+            folderActions={agentFolders.toolbarActions}
           />
+          {isLoading || agentFolders.treeLoading || !listReady ? (
+            <div className="flex-1 overflow-y-auto @container">
+              <LoadingSkeleton directoryLoading={agentFolders.treeLoading} />
+            </div>
+          ) : (
           <div
             ref={listScrollRef}
             className="min-h-0 flex-1 overflow-auto @container"
@@ -1188,11 +1197,11 @@ export function AgentsPage(_props: AgentsPageProps = {}) {
                   const row = listRow.row;
                   return (
                     <ListGridRow
-                      key={row.agent.id}
+                      key={listRow.key}
                       className={`h-16 cursor-pointer ${
                         selectedIds.has(row.agent.id) ? "bg-accent/30" : ""
                       }`}
-                      {...rowLink(agentFolders.withCurrentFolder(paths.agentDetail(row.agent.id)), row.agent.name)}
+                      {...rowLink(paths.agentDetail(row.agent.id), row.agent.name)}
                     >
                       <CheckboxCell
                         checked={selectedIds.has(row.agent.id)}
@@ -1202,6 +1211,7 @@ export function AgentsPage(_props: AgentsPageProps = {}) {
                         row={row}
                         pathHints={listRow.pathHints}
                         leaderLabel={listRow.leaderLabel}
+                        depth={listRow.depth}
                       />
                       {isColVisible("status") ? (
                         <StatusCell row={row} />
@@ -1237,9 +1247,13 @@ export function AgentsPage(_props: AgentsPageProps = {}) {
                       )}
                       {isColVisible("model") ? (
                         <ListGridCell className="hidden @2xl:flex">
-                          <span className="min-w-0 truncate text-caption text-muted-foreground">
-                            {row.agent.model || "—"}
-                          </span>
+                          <TruncatedTooltip content={row.agent.model || undefined}>
+                            <span
+                              className="min-w-0 truncate text-caption text-muted-foreground"
+                            >
+                              {row.agent.model || "—"}
+                            </span>
+                          </TruncatedTooltip>
                         </ListGridCell>
                       ) : (
                         <ListGridCell className="hidden px-0 @2xl:flex" />
@@ -1264,6 +1278,7 @@ export function AgentsPage(_props: AgentsPageProps = {}) {
                             canManage={row.canManage}
                             duplicateHref={duplicateHref(row.agent)}
                             treeActions={agentFolders.treeActions}
+                            parentFolderId={listRow.parentFolderId}
                           />
                         </span>
                       </ListGridCell>
@@ -1273,6 +1288,7 @@ export function AgentsPage(_props: AgentsPageProps = {}) {
               </ListGridBody>
             </ListGrid>
           </div>
+          )}
         </>
       )}
 

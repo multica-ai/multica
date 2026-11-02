@@ -1,5 +1,5 @@
 import { useTranslation } from "react-i18next";
-import { Check, RotateCcw } from "lucide-react";
+import { Check, RotateCcw } from "@multica/ui/icons";
 import { Button } from "@multica/ui/components/ui/button";
 import {
   baseline,

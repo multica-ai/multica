@@ -17,7 +17,7 @@ import {
 } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
 import { restrictToVerticalAxis } from "@dnd-kit/modifiers";
-import { GripVertical, Layers, Pencil, Trash2 } from "lucide-react";
+import { GripVertical, Layers, Pencil, Trash2 } from "@multica/ui/icons";
 import { IconButton } from "@multica/ui/components/common/icon-button";
 import { TooltipHint } from "@multica/ui/components/common/tooltip-hint";
 import { Switch } from "@multica/ui/components/ui/switch";

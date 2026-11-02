@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { Bell, Clock3, AlertCircle, ListChecks, Search, TriangleAlert } from "lucide-react";
+import { Bell, Clock3, AlertCircle, ListChecks, Search, TriangleAlert } from "@multica/ui/icons";
 import { toast } from "sonner";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { useWorkspacePaths } from "@multica/core/paths";

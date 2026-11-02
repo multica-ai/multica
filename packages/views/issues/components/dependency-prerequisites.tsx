@@ -2,7 +2,7 @@
 
 import { useMemo } from "react";
 import { useQueries, useQuery } from "@tanstack/react-query";
-import { Unlink } from "lucide-react";
+import { Unlink } from "@multica/ui/icons";
 import { isIssueStatusCategory } from "@multica/core/issue-statuses";
 import { issueDetailOptions } from "@multica/core/issues/queries";
 import { projectListOptions } from "@multica/core/projects/queries";

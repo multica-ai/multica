@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { Plus, ShieldCheck, Trash2 } from "lucide-react";
+import { Plus, ShieldCheck, Trash2 } from "@multica/ui/icons";
 import { useQuery } from "@tanstack/react-query";
 import {
   messageEventCatalogOptions,

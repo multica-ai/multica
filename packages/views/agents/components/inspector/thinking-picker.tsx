@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { Brain, ChevronDown } from "lucide-react";
+import { Brain, ChevronDown } from "@multica/ui/icons";
 import {
   hasAdaptThinkingCandidates,
   THINKING_LEVEL_ADAPT,

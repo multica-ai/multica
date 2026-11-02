@@ -10,7 +10,7 @@ import {
   Inbox,
   Package,
   Search,
-} from "lucide-react";
+} from "@multica/ui/icons";
 import { SkillIcon } from "../lib/skill-icon";
 import type { SkillSummary } from "@multica/core/types";
 import { useWorkspaceId } from "@multica/core/hooks";

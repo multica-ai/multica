@@ -50,6 +50,8 @@ for (const [name, files, selected] of [
   ["cleanup script", ["scripts/drop-database.sh"], ["scripts"]],
   ["check script regression tests", ["scripts/check.test.sh"], ["scripts"]],
   ["performance harness", ["scripts/perf-compare.test.sh"], ["scripts"]],
+  ["attachment preview source", ["server/internal/handler/attachment_text_preview.json"], ["backend", "runtime", "scripts", "e2e"]],
+  ["attachment preview output", ["packages/views/editor/utils/text-preview-whitelist.generated.ts"], ["frontend", "quality", "scripts", "e2e"]],
   ["reserved slug source", ["server/internal/handler/reserved_slugs.json"], ["backend", "runtime", "scripts", "e2e"]],
   ["reserved slug output", ["packages/core/paths/reserved-slugs.ts"], ["frontend", "quality", "scripts", "e2e"]],
   ["integration key gates", ["server/cmd/server/router.go"], ["backend", "runtime", "scripts", "e2e"]],

@@ -2,7 +2,7 @@
 
 import { memo } from "react";
 import type { NodeProps } from "@xyflow/react";
-import { AlertTriangle, CircleHelp, Loader2 } from "lucide-react";
+import { AlertTriangle, CircleHelp, Loader2 } from "@multica/ui/icons";
 import { cn } from "@multica/ui/lib/utils";
 import { issueGraphReadiness } from "@multica/core/api";
 import type { IssueStatusCategory } from "@multica/core/types";

@@ -144,9 +144,9 @@ beforeEach(() => {
 
 describe("AgentProfileCard — Runtime row", () => {
   it.each([
-    ["online", "svg.lucide-wifi"],
-    ["unstable", "svg.lucide-wifi-high"],
-    ["offline", "svg.lucide-wifi-off"],
+    ["online", "svg.icon-wifi"],
+    ["unstable", "svg.icon-wifi-high"],
+    ["offline", "svg.icon-wifi-off"],
   ] as const)(
     "uses projected %s availability when the private runtime row is hidden",
     (runtimeAvailability, iconSelector) => {

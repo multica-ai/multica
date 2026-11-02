@@ -36,6 +36,8 @@ while IFS= read -r line; do
         sleep 0.3
       fi
       printf '\033[31mThe application panicked (crashed).\033[0m\n' >&2
+      if [ -n "$KIRO_PANIC_DETAIL_DELAY" ]; then sleep "$KIRO_PANIC_DETAIL_DELAY"; fi
+      if [ -n "$KIRO_PANIC_HEADER_ONLY" ]; then continue; fi
       printf 'Message:  first agent loop request should never fail: AgentLoopResponse(Custom("invalid conversation history received"))\n' >&2
       printf 'Location: crates/agent/src/agent/mod.rs:3744\n' >&2
       if [ -n "$KIRO_PANIC_EXIT" ]; then
@@ -133,6 +135,29 @@ func TestKiroPanicThenExitIsStillClassifiedAsPanic(t *testing.T) {
 	}
 	if !result.ResumeRejected {
 		t.Fatalf("ResumeRejected = false, want true (error=%q)", result.Error)
+	}
+}
+
+func TestKiroPanicDetailsMayFollowHeaderInLaterWrites(t *testing.T) {
+	for _, exit := range []bool{false, true} {
+		t.Run(map[bool]string{false: "live-process", true: "exiting-process"}[exit], func(t *testing.T) {
+			env := map[string]string{"KIRO_PANIC_DETAIL_DELAY": "0.05"}
+			if exit {
+				env["KIRO_PANIC_EXIT"] = "1"
+			}
+			result, _ := runKiroPanicScript(t, env, ExecOptions{ResumeSessionID: "ses_broken"})
+			if result.Status != "failed" || !result.ResumeRejected || !taskfailure.UnresumableHistory(result.Error) ||
+				!strings.Contains(result.Error, "Location: crates/agent/src/agent/mod.rs:3744") {
+				t.Fatalf("panic details were lost before process termination: %+v", result)
+			}
+		})
+	}
+}
+
+func TestKiroPanicHeaderWithoutDetailsStillFailsFast(t *testing.T) {
+	result, elapsed := runKiroPanicScript(t, map[string]string{"KIRO_PANIC_HEADER_ONLY": "1"}, ExecOptions{})
+	if result.Status != "failed" || result.ResumeRejected || !strings.Contains(result.Error, "The application panicked") || elapsed > 10*time.Second {
+		t.Fatalf("waiting for panic details did not stay bounded: result=%+v elapsed=%s", result, elapsed)
 	}
 }
 

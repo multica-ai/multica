@@ -125,35 +125,65 @@ export function folderEntryIds(
   return subtreeEntries;
 }
 
-export function resolveFolderLocation(
-  requestedFolderId: string | null,
-  folders: readonly FolderExplorerFolder[],
-  previousFolders: readonly FolderExplorerFolder[] = [],
-): string | null {
-  if (requestedFolderId === null) return null;
-  const currentById = folderExplorerMap(folders);
-  if (currentById.has(requestedFolderId)) return requestedFolderId;
+export type FlattenedFolderExplorerRow<F, E> =
+  | {
+      kind: "folder";
+      key: string;
+      folder: F;
+      parentFolderId: string | null;
+      depth: number;
+    }
+  | {
+      kind: "entry";
+      key: string;
+      entry: E;
+      parentFolderId: string | null;
+      depth: number;
+    };
 
-  const previousById = folderExplorerMap(previousFolders);
-  const visited = new Set<string>([requestedFolderId]);
-  let current = previousById.get(requestedFolderId);
-  while (current?.parentId && !visited.has(current.parentId)) {
-    if (currentById.has(current.parentId)) return current.parentId;
-    visited.add(current.parentId);
-    current = previousById.get(current.parentId);
-  }
-  return null;
-}
+export function flattenFolderExplorerRows<
+  F extends FolderExplorerFolder,
+  E extends FolderExplorerEntry,
+>({
+  folders,
+  entries,
+  expandedFolderIds,
+  entryKey = (entry) => entry.id,
+  entryKeyPrefix = "entry",
+}: {
+  folders: readonly F[];
+  entries: readonly E[];
+  expandedFolderIds: ReadonlySet<string>;
+  entryKey?: (entry: E) => string;
+  entryKeyPrefix?: string;
+}): FlattenedFolderExplorerRow<F, E>[] {
+  const rows: FlattenedFolderExplorerRow<F, E>[] = [];
 
-export function folderLocationPath(
-  pathname: string,
-  searchParams: URLSearchParams,
-  folderId: string | null,
-  hash = "",
-): string {
-  const params = new URLSearchParams(searchParams);
-  if (folderId === null) params.delete("folder");
-  else params.set("folder", folderId);
-  const query = params.toString();
-  return `${pathname}${query ? `?${query}` : ""}${hash}`;
+  const visit = (parentFolderId: string | null, depth: number, ancestors: ReadonlySet<string>) => {
+    for (const folder of directChildFolders(folders, parentFolderId)) {
+      if (ancestors.has(folder.id)) continue;
+      rows.push({
+        kind: "folder",
+        key: `folder-${folder.id}`,
+        folder,
+        parentFolderId,
+        depth,
+      });
+      if (expandedFolderIds.has(folder.id)) {
+        visit(folder.id, depth + 1, new Set([...ancestors, folder.id]));
+      }
+    }
+    for (const entry of directEntries(entries, parentFolderId, folders)) {
+      rows.push({
+        kind: "entry",
+        key: `${entryKeyPrefix}-${parentFolderId ?? "root"}-${entryKey(entry)}`,
+        entry,
+        parentFolderId,
+        depth,
+      });
+    }
+  };
+
+  visit(null, 0, new Set());
+  return rows;
 }

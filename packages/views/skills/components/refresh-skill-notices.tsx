@@ -7,7 +7,7 @@
 // here so upstream changes to those dialogs merge without touching them.
 
 import { useRef, useState, type ReactNode } from "react";
-import { AlertTriangle } from "lucide-react";
+import { AlertTriangle } from "@multica/ui/icons";
 import type { Skill, SkillImportDiagnostic, SkillSummary } from "@multica/core/types";
 import { Button } from "@multica/ui/components/ui/button";
 import {

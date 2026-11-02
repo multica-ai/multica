@@ -19,6 +19,12 @@ WHERE id = $1;
 SELECT * FROM chat_session
 WHERE id = $1 AND workspace_id = $2;
 
+-- name: ListChatSessionCreators :many
+-- Owners of a page of chat tasks, so task lists can hide the content of chat
+-- tasks the viewer did not start.
+SELECT id, creator_id FROM chat_session
+WHERE id = ANY(@ids::uuid[]);
+
 -- name: GetPublicChatSessionInWorkspace :one
 -- A channel command is a durable control-plane record, not a public chat turn.
 -- Channel-created sessions therefore become public only after they contain a

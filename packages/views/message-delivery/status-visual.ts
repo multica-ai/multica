@@ -7,7 +7,7 @@ import {
   Loader2,
   ShieldOff,
   XCircle,
-} from "lucide-react";
+} from "@multica/ui/icons";
 import { messageDeliveryStatusKey, type MessageDeliveryStatusKey } from "./copy";
 
 export type DeliveryStatusVisual = {

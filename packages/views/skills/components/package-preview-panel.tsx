@@ -1,6 +1,6 @@
 "use client";
 
-import { AlertTriangle, CheckCircle2, Package } from "lucide-react";
+import { AlertTriangle, CheckCircle2, Package } from "@multica/ui/icons";
 import type {
   SkillPackageApplyResult,
   SkillPackageCandidate,

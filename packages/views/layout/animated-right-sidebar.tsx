@@ -124,11 +124,13 @@ export function AnimatedRightSidebar({
   motionEnabled,
   children,
   className,
+  contentClassName = "p-4",
 }: {
   open: boolean;
   motionEnabled?: boolean;
   children: ReactNode;
   className?: string;
+  contentClassName?: string;
 }) {
   return (
     <motion.div
@@ -140,14 +142,14 @@ export function AnimatedRightSidebar({
       // so wheeling past the end of the comments scrolled the whole issue
       // detail up and left a blank band at the bottom (MUL-8100).
       className={cn(
-        "relative h-full overflow-x-hidden overflow-y-auto border-l",
+        "relative h-full overflow-x-hidden overflow-y-auto [scrollbar-gutter:stable] border-l",
         !open && "pointer-events-none",
         className,
       )}
       initial={false}
       transition={motionEnabled ? rightSidebarTransition : { duration: 0 }}
     >
-      <div className="p-4">{children}</div>
+      <div className={contentClassName}>{children}</div>
     </motion.div>
   );
 }

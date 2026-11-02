@@ -9,7 +9,7 @@ import {
   Lock,
   Pencil,
   Plus,
-} from "lucide-react";
+} from "@multica/ui/icons";
 import { SkillIcon } from "../lib/skill-icon";
 import type {
   Agent,
@@ -50,6 +50,7 @@ import {
   TooltipTrigger,
 } from "@multica/ui/components/ui/tooltip";
 import { ActorAvatar } from "@multica/ui/components/common/actor-avatar";
+import { FolderExplorerDepth } from "../../common/folder-explorer";
 import {
   rowLinkInteractiveProps,
   useNavigation,
@@ -235,11 +236,12 @@ function CheckboxCell({
   );
 }
 
-function NameCell({ row, pathHint }: { row: SkillRow; pathHint?: string }) {
+function NameCell({ row, pathHint, depth }: { row: SkillRow; pathHint?: string; depth: number }) {
   const { t } = useT("skills");
   const { skill, canEdit } = row;
   return (
     <ListGridCell className="gap-1.5">
+      <FolderExplorerDepth depth={depth} />
       {pathHint ? (
         <div className="min-w-0 flex flex-col">
           <span className="min-w-0 truncate text-body font-medium">
@@ -745,11 +747,12 @@ export default function SkillsPage() {
     count: listModel.rows.length,
     getScrollElement: () => listScrollRef.current,
     estimateSize: () => ROW_HEIGHT,
+    getItemKey: (index) => listModel.rows[index]?.key ?? index,
     overscan: 10,
   });
 
   const handleCreated = (skill: Skill) => {
-    navigation.push(skillFolders.withCurrentFolder(paths.skillDetail(skill.id)));
+    navigation.push(paths.skillDetail(skill.id));
   };
 
   const selectedRows = listModel.skillRows.filter((row) => selectedIds.has(row.skill.id));
@@ -829,17 +832,14 @@ export default function SkillsPage() {
       )}
       {skillFolders.notice}
 
-      {isLoading || skillFolders.treeLoading ? (
-        <div className="flex-1 overflow-y-auto @container">
-          <LoadingSkeleton />
-        </div>
-      ) : showEmpty ? (
+      {showEmpty ? (
         <div className="flex flex-1 items-center justify-center">
           <EmptyState onCreate={() => setCreateOpen(true)} />
         </div>
       ) : (
-        <div className="flex min-h-0 flex-1 flex-col">
-          {skillFolders.navigationBar}
+        <>
+          {/* Mounted through loading so the rows don't drop by a toolbar's
+              height when the list lands. */}
           <SkillListToolbar
             search={search}
             onSearchChange={setSearch}
@@ -853,10 +853,14 @@ export default function SkillsPage() {
             hiddenColumns={hiddenColumns}
             onToggleColumn={toggleColumn}
             allRows={allRows}
-            visibleCount={listModel.skillRows.length}
-            countLabel={skillFolders.countLabel(listModel.skillRows.length, allRows.length)}
-            countTitle={skillFolders.countTitle()}
+            visibleCount={rows.length}
+            folderActions={skillFolders.folderActions}
           />
+          {isLoading || skillFolders.treeLoading ? (
+            <div className="flex-1 overflow-y-auto @container">
+              <LoadingSkeleton />
+            </div>
+          ) : (
           <div
             ref={listScrollRef}
             className="min-h-0 flex-1 overflow-auto @container"
@@ -893,20 +897,17 @@ export default function SkillsPage() {
                 const row = listRow.row;
                 return (
               <ListGridRow
-                key={row.skill.id}
+                key={listRow.key}
                 className={`cursor-pointer ${
                   selectedIds.has(row.skill.id) ? "bg-accent/30" : ""
                 }`}
-                {...rowLink(
-                  skillFolders.withCurrentFolder(paths.skillDetail(row.skill.id)),
-                  row.skill.name,
-                )}
+                {...rowLink(paths.skillDetail(row.skill.id), row.skill.name)}
               >
                 <CheckboxCell
                   checked={selectedIds.has(row.skill.id)}
                   onToggle={() => toggleSelected(row.skill.id)}
                 />
-                <NameCell row={row} pathHint={listRow.pathHint} />
+                <NameCell row={row} pathHint={listRow.pathHint} depth={listRow.depth} />
                 {isColVisible("usedBy") ? (
                   <UsedByCell agents={row.agents} />
                 ) : (
@@ -945,7 +946,8 @@ export default function SkillsPage() {
             </ListGridBody>
           </ListGrid>
           </div>
-        </div>
+          )}
+        </>
       )}
 
       <SkillBatchToolbar

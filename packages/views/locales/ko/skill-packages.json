@@ -1,5 +1,8 @@
 {
   "tree": {
+    "new_subfolder": "하위 \ud3f4\ub354 만들기",
+    "expand_all": "모두 펼치기",
+    "collapse_all": "모두 접기",
     "new_folder": "새 폴더",
     "rename_folder": "이름 변경",
     "move_folder": "이동",

@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { RefreshCw } from "lucide-react";
+import { RefreshCw } from "@multica/ui/icons";
 import { useConfirmLarkPrivateChats } from "@multica/core/lark";
 import type { LarkPrivateChatCandidate } from "@multica/core/types";
 import { Alert, AlertDescription } from "@multica/ui/components/ui/alert";

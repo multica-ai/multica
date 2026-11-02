@@ -1254,33 +1254,6 @@ func (q *Queries) IsAutopilotCollaborator(ctx context.Context, arg IsAutopilotCo
 	return is_collaborator, err
 }
 
-const isLatestFailedAutopilotIssueTask = `-- name: IsLatestFailedAutopilotIssueTask :one
-SELECT EXISTS (
-    SELECT 1 FROM agent_task_queue t
-    WHERE t.id = $1 AND t.issue_id = $2 AND t.status = 'failed'
-      AND NOT EXISTS (
-          SELECT 1 FROM agent_task_queue successor
-          WHERE successor.issue_id = t.issue_id
-            AND ((successor.created_at, successor.id) > (t.created_at, t.id)
-                 OR successor.retry_of_task_id = t.id)
-      )
-)::boolean AS is_latest
-`
-
-type IsLatestFailedAutopilotIssueTaskParams struct {
-	ID      pgtype.UUID `json:"id"`
-	IssueID pgtype.UUID `json:"issue_id"`
-}
-
-// A historical failure is not a new terminal event after a later attempt.
-// Re-read the durable task rather than trusting an old event payload.
-func (q *Queries) IsLatestFailedAutopilotIssueTask(ctx context.Context, arg IsLatestFailedAutopilotIssueTaskParams) (bool, error) {
-	row := q.db.QueryRow(ctx, isLatestFailedAutopilotIssueTask, arg.ID, arg.IssueID)
-	var is_latest bool
-	err := row.Scan(&is_latest)
-	return is_latest, err
-}
-
 const listAutopilotCollaborators = `-- name: ListAutopilotCollaborators :many
 
 SELECT autopilot_id, user_type, user_id, granted_by, created_at FROM autopilot_collaborator
@@ -2057,6 +2030,29 @@ func (q *Queries) SelectAutopilotsExceedingFailureThreshold(ctx context.Context,
 	return items, nil
 }
 
+const setAutopilotRunDispatchTask = `-- name: SetAutopilotRunDispatchTask :execrows
+UPDATE autopilot_run
+SET task_id = $2
+WHERE id = $1 AND status = 'issue_created' AND task_id IS NULL
+`
+
+type SetAutopilotRunDispatchTaskParams struct {
+	ID     pgtype.UUID `json:"id"`
+	TaskID pgtype.UUID `json:"task_id"`
+}
+
+// Records the agent task a create_issue run actually enqueued, so lifecycle
+// sync can tell the run's own dispatch apart from mention/comment tasks on
+// the same issue. Status stays issue_created; only an unlinked active run is
+// written. (MUL-8200)
+func (q *Queries) SetAutopilotRunDispatchTask(ctx context.Context, arg SetAutopilotRunDispatchTaskParams) (int64, error) {
+	result, err := q.db.Exec(ctx, setAutopilotRunDispatchTask, arg.ID, arg.TaskID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
 const setAutopilotTriggerPublisher = `-- name: SetAutopilotTriggerPublisher :exec
 UPDATE autopilot_trigger
 SET published_by_type = $2, published_by_id = $3, updated_at = now()
@@ -2322,88 +2318,6 @@ func (q *Queries) UpdateAutopilotLastRunAt(ctx context.Context, id pgtype.UUID) 
 	return err
 }
 
-const updateAutopilotRunCompleted = `-- name: UpdateAutopilotRunCompleted :one
-UPDATE autopilot_run
-SET status = 'completed', completed_at = now(), result = $2
-WHERE id = $1
-RETURNING id, autopilot_id, trigger_id, source, status, issue_id, task_id, triggered_at, completed_at, failure_reason, trigger_payload, result, created_at, squad_id, planned_at, webhook_delivery_id, quota_reservation_id, reason_code
-`
-
-type UpdateAutopilotRunCompletedParams struct {
-	ID     pgtype.UUID `json:"id"`
-	Result []byte      `json:"result"`
-}
-
-// Quota safety: only use for a run known to have no reservation. Normal
-// terminal paths must call UpdateAutopilotRunTerminalWithQuota instead.
-func (q *Queries) UpdateAutopilotRunCompleted(ctx context.Context, arg UpdateAutopilotRunCompletedParams) (AutopilotRun, error) {
-	row := q.db.QueryRow(ctx, updateAutopilotRunCompleted, arg.ID, arg.Result)
-	var i AutopilotRun
-	err := row.Scan(
-		&i.ID,
-		&i.AutopilotID,
-		&i.TriggerID,
-		&i.Source,
-		&i.Status,
-		&i.IssueID,
-		&i.TaskID,
-		&i.TriggeredAt,
-		&i.CompletedAt,
-		&i.FailureReason,
-		&i.TriggerPayload,
-		&i.Result,
-		&i.CreatedAt,
-		&i.SquadID,
-		&i.PlannedAt,
-		&i.WebhookDeliveryID,
-		&i.QuotaReservationID,
-		&i.ReasonCode,
-	)
-	return i, err
-}
-
-const updateAutopilotRunFailed = `-- name: UpdateAutopilotRunFailed :one
-UPDATE autopilot_run
-SET status = 'failed', completed_at = now(), failure_reason = $2,
-    reason_code = $3
-WHERE id = $1
-RETURNING id, autopilot_id, trigger_id, source, status, issue_id, task_id, triggered_at, completed_at, failure_reason, trigger_payload, result, created_at, squad_id, planned_at, webhook_delivery_id, quota_reservation_id, reason_code
-`
-
-type UpdateAutopilotRunFailedParams struct {
-	ID            pgtype.UUID `json:"id"`
-	FailureReason pgtype.Text `json:"failure_reason"`
-	ReasonCode    pgtype.Text `json:"reason_code"`
-}
-
-// Quota safety: only use for a run known to have no reservation. Normal
-// terminal paths must call UpdateAutopilotRunTerminalWithQuota instead.
-func (q *Queries) UpdateAutopilotRunFailed(ctx context.Context, arg UpdateAutopilotRunFailedParams) (AutopilotRun, error) {
-	row := q.db.QueryRow(ctx, updateAutopilotRunFailed, arg.ID, arg.FailureReason, arg.ReasonCode)
-	var i AutopilotRun
-	err := row.Scan(
-		&i.ID,
-		&i.AutopilotID,
-		&i.TriggerID,
-		&i.Source,
-		&i.Status,
-		&i.IssueID,
-		&i.TaskID,
-		&i.TriggeredAt,
-		&i.CompletedAt,
-		&i.FailureReason,
-		&i.TriggerPayload,
-		&i.Result,
-		&i.CreatedAt,
-		&i.SquadID,
-		&i.PlannedAt,
-		&i.WebhookDeliveryID,
-		&i.QuotaReservationID,
-		&i.ReasonCode,
-	)
-	return i, err
-}
-
 const updateAutopilotRunIssueCreated = `-- name: UpdateAutopilotRunIssueCreated :one
 UPDATE autopilot_run
 SET status = 'issue_created', issue_id = $2
@@ -2528,56 +2442,14 @@ func (q *Queries) UpdateAutopilotRunSkipped(ctx context.Context, arg UpdateAutop
 	return i, err
 }
 
-const updateAutopilotRunSkippedWithResult = `-- name: UpdateAutopilotRunSkippedWithResult :one
-UPDATE autopilot_run
-SET status = 'skipped',
-    completed_at = now(),
-    failure_reason = $2,
-    result = $3
-WHERE id = $1
-RETURNING id, autopilot_id, trigger_id, source, status, issue_id, task_id, triggered_at, completed_at, failure_reason, trigger_payload, result, created_at, squad_id, planned_at, webhook_delivery_id, quota_reservation_id, reason_code
-`
-
-type UpdateAutopilotRunSkippedWithResultParams struct {
-	ID            pgtype.UUID `json:"id"`
-	FailureReason pgtype.Text `json:"failure_reason"`
-	Result        []byte      `json:"result"`
-}
-
-// Quota safety: legacy no-reservation helper. New terminal paths must call
-// UpdateAutopilotRunTerminalWithQuota instead.
-func (q *Queries) UpdateAutopilotRunSkippedWithResult(ctx context.Context, arg UpdateAutopilotRunSkippedWithResultParams) (AutopilotRun, error) {
-	row := q.db.QueryRow(ctx, updateAutopilotRunSkippedWithResult, arg.ID, arg.FailureReason, arg.Result)
-	var i AutopilotRun
-	err := row.Scan(
-		&i.ID,
-		&i.AutopilotID,
-		&i.TriggerID,
-		&i.Source,
-		&i.Status,
-		&i.IssueID,
-		&i.TaskID,
-		&i.TriggeredAt,
-		&i.CompletedAt,
-		&i.FailureReason,
-		&i.TriggerPayload,
-		&i.Result,
-		&i.CreatedAt,
-		&i.SquadID,
-		&i.PlannedAt,
-		&i.WebhookDeliveryID,
-		&i.QuotaReservationID,
-		&i.ReasonCode,
-	)
-	return i, err
-}
-
 const updateAutopilotRunTerminalWithQuota = `-- name: UpdateAutopilotRunTerminalWithQuota :one
 WITH updated_run AS (
     UPDATE autopilot_run AS ar
     SET status = $1::text,
         completed_at = now(),
         result = CASE
+            WHEN ar.issue_id IS NOT NULL AND $1::text IN ('completed', 'failed') THEN
+                (SELECT jsonb_build_object('first_terminal_status', i.status) FROM issue i WHERE i.id = ar.issue_id)
             WHEN $1::text = 'completed' THEN $2::jsonb
             WHEN $1::text = 'failed' THEN COALESCE($2::jsonb, ar.result)
             ELSE ar.result
@@ -2659,8 +2531,8 @@ type UpdateAutopilotRunTerminalWithQuotaRow struct {
 // Finalizes a run and its still-reserved quota slot in one statement. Runs
 // created while the entitlement gate is off have a NULL reservation ID, so
 // the quota CTEs become empty without an extra BEGIN/COMMIT round trip.
-// Consumed slots are deliberately immutable: create_issue is chargeable once
-// the issue exists, even if that issue is later blocked, cancelled, or deleted.
+// Consumed slots are immutable. A create_issue run consumes its reservation
+// when its dispatch succeeds; later issue status changes cannot refund it.
 // The CTE sequence is: update the run, lock a still-reserved slot, finalize
 // that slot exactly once, then move one unit from reserved_count to either
 // used_count (consume) or nowhere (release). used_count never decreases.
@@ -2671,8 +2543,8 @@ type UpdateAutopilotRunTerminalWithQuotaRow struct {
 // updates zero rows and the caller treats that as an idempotent no-op — it
 // must not re-publish run-done, re-settle quota, or overwrite the FIRST
 // terminal's structured result with a later one. The result column now
-// records the structured first-terminal payload for BOTH completed and
-// failed runs; skipped keeps whatever the row already held.
+// snapshots the linked issue status at settlement for completed and failed
+// create_issue runs; run_only keeps task output and skipped keeps prior data.
 func (q *Queries) UpdateAutopilotRunTerminalWithQuota(ctx context.Context, arg UpdateAutopilotRunTerminalWithQuotaParams) (UpdateAutopilotRunTerminalWithQuotaRow, error) {
 	row := q.db.QueryRow(ctx, updateAutopilotRunTerminalWithQuota,
 		arg.TerminalStatus,

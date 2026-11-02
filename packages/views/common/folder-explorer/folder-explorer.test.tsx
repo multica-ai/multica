@@ -51,6 +51,26 @@ describe("folder explorer components", () => {
     expect(button.closest(".h-12")).toBeTruthy();
   });
 
+  it("exposes expansion state and renders 20px depth guides", () => {
+    render(
+      <ListGrid>
+        <FolderExplorerRow
+          name="Nested"
+          countLabel="1 skill"
+          openLabel="Collapse Nested"
+          onOpen={vi.fn()}
+          expanded
+          depth={2}
+        />
+      </ListGrid>,
+    );
+    const button = screen.getByRole("button", { name: "Collapse Nested" });
+    expect(button.getAttribute("aria-expanded")).toBe("true");
+    expect(button.querySelector("svg")?.getAttribute("class")).toContain("rotate-90");
+    expect(button.querySelectorAll(".bg-border")).toHaveLength(2);
+    expect(button.querySelector('[style*="width: 40px"]')).not.toBeNull();
+  });
+
   it("opens a full-width directory with Enter and isolates its action button", async () => {
     const onOpen = vi.fn();
     const onAction = vi.fn();

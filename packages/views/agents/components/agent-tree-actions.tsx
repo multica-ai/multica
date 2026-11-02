@@ -4,7 +4,7 @@
 // list. Upstream `agent-row-actions.tsx` and `agent-batch-toolbar.tsx` mount
 // these with one line each and carry only the optional `treeActions` prop.
 
-import { FolderInput } from "lucide-react";
+import { FolderInput } from "@multica/ui/icons";
 import type { Agent } from "@multica/core/types";
 import { Button } from "@multica/ui/components/ui/button";
 import { DropdownMenuItem } from "@multica/ui/components/ui/dropdown-menu";
@@ -21,10 +21,10 @@ import type { AgentListRow } from "./agents-page";
  *  when the workspace folder tree loaded; absent callers keep the pre-tree
  *  flat behavior. */
 export interface AgentTreeActions {
-  /** "place" inside a squad folder in the hierarchy view (the member keeps
-   *  its squad folder and additionally gets a custom placement); "move"
-   *  everywhere else, including flat search/filter results. */
+  /** Fallback for flat rows and mixed visible batch selections. Row menus
+   *  override this to "place" for a direct squad-folder parent. */
   defaultVariant: "move" | "place";
+  squadFolderIds?: ReadonlySet<string>;
   /** Open the move dialog for the given agents. */
   onMove: (agents: Agent[], variant: "move" | "place") => void;
 }
@@ -36,14 +36,18 @@ export function AgentTreeRowMenuItems({
   agent,
   canManage,
   treeActions,
+  parentFolderId,
 }: {
   agent: Agent;
   canManage: boolean;
   treeActions: AgentTreeActions | undefined;
+  parentFolderId?: string | null;
 }) {
   const { t } = useT("agent-folders");
   if (!treeActions || !canManage || agent.archived_at) return null;
-  const variant = treeActions.defaultVariant;
+  const variant = parentFolderId && treeActions.squadFolderIds?.has(parentFolderId)
+    ? "place"
+    : treeActions.defaultVariant;
   return (
     <DropdownMenuItem onClick={() => treeActions.onMove([agent], variant)}>
       <FolderInput className="size-3.5" />
@@ -55,9 +59,8 @@ export function AgentTreeRowMenuItems({
 }
 
 /** Batch toolbar move button; disabled with a reason tooltip when the
- *  selection contains agents the caller may not move. Inside a squad folder
- *  the whole flow uses the "place" wording — members never leave the squad
- *  folder, they only gain a custom placement. */
+ *  selection contains agents the caller may not move. Visible selections can
+ *  span several folders, so batch operations always use the move wording. */
 export function AgentTreeBatchMoveAction({
   rows,
   treeActions,

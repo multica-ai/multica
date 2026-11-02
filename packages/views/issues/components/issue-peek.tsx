@@ -2,7 +2,7 @@
 
 import { memo, useEffect, useMemo, useRef, useState, type ReactNode, type RefObject } from "react";
 import { AnimatePresence, motion, useIsPresent, useReducedMotion } from "motion/react";
-import { ChevronDown, ChevronUp, Maximize2, X } from "lucide-react";
+import { ChevronDown, ChevronUp, Maximize2, X } from "@multica/ui/icons";
 import { Button, buttonVariants } from "@multica/ui/components/ui/button";
 import {
   Tooltip,

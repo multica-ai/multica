@@ -94,7 +94,7 @@ func TestAutopilotIssueAttributionUsesLatestMatchingRun(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	got := fx.svc.TaskSvc.attributionForIssueTask(ctx, issue, pgtype.UUID{}, attribution.SourceCommentSource, pgtype.UUID{})
+	got := fx.svc.TaskSvc.attributionForIssueTask(ctx, issue, pgtype.UUID{}, attribution.SourceCommentSource, pgtype.UUID{}, pgtype.UUID{})
 	if got.Source != attribution.SourceTriggerOwner || util.UUIDToString(got.UserID) != triggerOwner {
 		t.Fatalf("attribution = %+v, want latest matching trigger owner %s", got, triggerOwner)
 	}
@@ -106,7 +106,7 @@ func TestAutopilotIssueAttributionUsesLatestMatchingRun(t *testing.T) {
 		t.Fatalf("foreign workspace lookup = %v, want no rows", err)
 	}
 	fx.Exec(t, `DELETE FROM member WHERE workspace_id = $1 AND user_id = $2`, fx.WorkspaceID, triggerOwner)
-	got = fx.svc.TaskSvc.attributionForIssueTask(ctx, issue, pgtype.UUID{}, attribution.SourceCommentSource, pgtype.UUID{})
+	got = fx.svc.TaskSvc.attributionForIssueTask(ctx, issue, pgtype.UUID{}, attribution.SourceCommentSource, pgtype.UUID{}, pgtype.UUID{})
 	if got.UserID.Valid {
 		t.Fatalf("removed trigger creator still authorizes handoff: %+v", got)
 	}

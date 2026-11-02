@@ -15,6 +15,8 @@ interface SuggestionPopupRenderOptions<
   pluginKey: PluginKey;
   component: ComponentType<TComponentProps>;
   getProps: (props: SuggestionProps<TItem, TSelected>) => TComponentProps;
+  /** Refresh an active popup when its externally supplied catalog changes. */
+  subscribe?: (refresh: () => void) => () => void;
   onKeyDown?: (
     ref: TRef | null | undefined,
     props: SuggestionKeyDownProps,
@@ -30,6 +32,7 @@ export function createSuggestionPopupRender<
   pluginKey,
   component,
   getProps,
+  subscribe,
   onKeyDown,
 }: SuggestionPopupRenderOptions<TItem, TSelected, TRef, TComponentProps>) {
   return () => {
@@ -37,8 +40,13 @@ export function createSuggestionPopupRender<
     let popup: HTMLDivElement | null = null;
     let removeOutsideListeners: (() => void) | null = null;
     let removeAutoUpdate: (() => void) | null = null;
+    let unsubscribe: (() => void) | undefined;
+    let currentProps: SuggestionProps<TItem, TSelected> | null = null;
 
     const cleanup = () => {
+      unsubscribe?.();
+      unsubscribe = undefined;
+      currentProps = null;
       removeOutsideListeners?.();
       removeOutsideListeners = null;
       removeAutoUpdate?.();
@@ -164,6 +172,7 @@ export function createSuggestionPopupRender<
 
     return {
       onStart: (props: SuggestionProps<TItem, TSelected>) => {
+        currentProps = props;
         renderer = new ReactRenderer(component, {
           props: getProps(props),
           editor: props.editor,
@@ -179,9 +188,15 @@ export function createSuggestionPopupRender<
         installOutsideListeners(props);
         trackPosition(popup, props.clientRect);
         updatePosition(popup, props.clientRect);
+        unsubscribe = subscribe?.(() => {
+          if (!currentProps || !renderer) return;
+          renderer.updateProps(getProps(currentProps));
+          if (popup) updatePosition(popup, currentProps.clientRect);
+        });
       },
 
       onUpdate: (props: SuggestionProps<TItem, TSelected>) => {
+        currentProps = props;
         renderer?.updateProps(getProps(props));
         if (popup) {
           trackPosition(popup, props.clientRect);

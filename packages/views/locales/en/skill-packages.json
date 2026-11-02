@@ -1,6 +1,9 @@
 {
   "tree": {
     "new_folder": "New folder",
+    "new_subfolder": "New subfolder",
+    "expand_all": "Expand all",
+    "collapse_all": "Collapse all",
     "rename_folder": "Rename",
     "move_folder": "Move",
     "delete_folder": "Delete",

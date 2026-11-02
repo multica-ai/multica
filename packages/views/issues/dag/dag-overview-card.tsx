@@ -2,7 +2,7 @@
 
 import { memo } from "react";
 import type { NodeProps } from "@xyflow/react";
-import { CirclePause, CirclePlay, Eye, OctagonAlert } from "lucide-react";
+import { CirclePause, Play as CirclePlay, Eye, CircleAlert as OctagonAlert } from "@multica/ui/icons";
 import { cn } from "@multica/ui/lib/utils";
 import { useT } from "../../i18n";
 import { useTheme } from "@multica/ui/components/common/theme-provider";

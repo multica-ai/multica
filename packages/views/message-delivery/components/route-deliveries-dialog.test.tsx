@@ -235,7 +235,7 @@ describe("RouteDeliveriesDialog", () => {
     };
     // Dialog content portals out of the render container — query the document.
     renderList();
-    expect(document.querySelectorAll(".animate-pulse").length).toBeGreaterThan(0);
+    expect(document.querySelectorAll('[data-slot="skeleton"]').length).toBeGreaterThan(0);
     expect(screen.queryByText("No delivery records yet.")).not.toBeInTheDocument();
   });
 

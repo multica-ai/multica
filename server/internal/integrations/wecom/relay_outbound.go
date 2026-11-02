@@ -1553,7 +1553,18 @@ func (o *Outbound) deliverRelayed(ctx context.Context, f relayFrame) relayResult
 	// that was going to close the bubble is what the room gets instead — the
 	// same substitution the local path makes (outbound.go).
 	if hasVisibleChar(text) && !spoke {
-		if err := sender.sendTextCtx(ctx, f.ChatID, f.ChatType, text); err != nil {
+		if err := sender.sendTextCtx(guardReply(ctx, o.q, instID), f.ChatID, f.ChatType, text); err != nil {
+			if f.Kind == relayKindReply && errors.Is(err, errInstallationGone) && !errors.Is(err, errPartiallySent) {
+				// Revoked while the reply waited. Final, unlike the other
+				// refusals that precede the write: no replica may write it, so
+				// another offer would only walk the retry chain and come back
+				// as no_live_connection. An inbox push takes the ordinary
+				// route below — the publisher offers a proven miss to the
+				// member's other bot, which is still the right place for it.
+				return relayResult{outcome: outcomeDone, record: func() {
+					o.skippedFor(ctx, f.SessionID, skipInstallationInactive)
+				}}
+			}
 			// WHETHER THIS FRAME IS FINISHED IS SETTLED BEFORE ANY COUNTER
 			// MOVES. A frame that is owed another offer is still in flight,
 			// and counting it here counts it once per attempt: the dispatcher

@@ -8,8 +8,8 @@ import {
   CircleHelp,
   Download,
   MessageCircle,
-  QrCode,
-} from "lucide-react";
+  MessagesSquare as QrCode,
+} from "@multica/ui/icons";
 import {
   DropdownMenu,
   DropdownMenuContent,

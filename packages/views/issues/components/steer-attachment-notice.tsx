@@ -1,6 +1,6 @@
 "use client";
 
-import { Info } from "lucide-react";
+import { Info } from "@multica/ui/icons";
 import { useT } from "../../i18n";
 
 /** Why a message with files starts after the run instead of joining it. */

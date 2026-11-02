@@ -2,7 +2,7 @@
 
 import { useMemo, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
-import { Folder, Inbox, Loader2 } from "lucide-react";
+import { Folder, Inbox, Loader2 } from "@multica/ui/icons";
 import { toast } from "sonner";
 import type { SkillFolderTree } from "@multica/core/api/schemas";
 import { api } from "@multica/core/api";

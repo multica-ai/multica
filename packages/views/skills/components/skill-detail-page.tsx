@@ -17,7 +17,7 @@ import {
   Trash2,
   UserPlus,
   Users,
-} from "lucide-react";
+} from "@multica/ui/icons";
 import { SkillIcon } from "../lib/skill-icon";
 import type {
   Agent,
@@ -67,7 +67,6 @@ import {
 import { cn } from "@multica/ui/lib/utils";
 import { AppLink, useNavigation } from "../../navigation";
 import { BreadcrumbHeader } from "../../layout/breadcrumb-header";
-import { folderLocationPath } from "../../common/folder-explorer";
 import { PAGE_GUTTER, PAGE_RAIL } from "../../layout/page-header";
 import { useCanEditSkill } from "../hooks/use-can-edit-skill";
 import { useSkillPermissions } from "@multica/core/permissions";
@@ -757,11 +756,6 @@ export function SkillDetailPage({ skillId }: { skillId: string }) {
   const qc = useQueryClient();
   const paths = useWorkspacePaths();
   const navigation = useNavigation();
-  const skillsPath = folderLocationPath(
-    paths.skills(),
-    new URLSearchParams(),
-    navigation.searchParams.get("folder"),
-  );
   const currentUserId = useAuthStore((s) => s.user?.id ?? null);
 
   const {
@@ -1021,7 +1015,7 @@ export function SkillDetailPage({ skillId }: { skillId: string }) {
     setDeleting(true);
     try {
       await api.deleteSkill(skill.id);
-      navigation.replace(skillsPath);
+      navigation.replace(paths.skills());
       qc.removeQueries({
         queryKey: skillDetailOptions(wsId, skill.id).queryKey,
       });
@@ -1116,10 +1110,10 @@ export function SkillDetailPage({ skillId }: { skillId: string }) {
           <Button
             variant="ghost"
             size="xs"
-            render={<AppLink href={skillsPath} />}
+            render={<AppLink href={paths.skills()} />}
             nativeButton={false}
           >
-            {t(($) => $.detail.not_found.back)}
+            {t(($) => $.detail.all_skills)}
           </Button>
         </div>
         <div className="flex flex-1 flex-col items-center justify-center gap-2 text-center">
@@ -1129,7 +1123,7 @@ export function SkillDetailPage({ skillId }: { skillId: string }) {
             {error instanceof Error ? error.message : t(($) => $.detail.not_found.fallback)}
           </p>
           <AppLink
-            href={skillsPath}
+            href={paths.skills()}
             className={`${buttonVariants({ variant: "outline", size: "xs" })} mt-2`}
           >
             {t(($) => $.detail.not_found.back)}
@@ -1164,7 +1158,7 @@ export function SkillDetailPage({ skillId }: { skillId: string }) {
     // same rule as the skills list batch toolbar).
     <div className="relative flex flex-1 min-h-0 flex-col">
       <BreadcrumbHeader
-        segments={[{ href: skillsPath, label: t(($) => $.page.title) }]}
+        segments={[{ href: paths.skills(), label: t(($) => $.page.title) }]}
         leaf={
           <span className="truncate font-mono text-caption text-foreground">
             {skill.name}

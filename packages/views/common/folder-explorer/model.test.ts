@@ -5,12 +5,11 @@ import {
   directChildFolders,
   directEntries,
   entryPathHints,
+  flattenFolderExplorerRows,
   folderEntryCounts,
-  folderLocationPath,
   folderPath,
   folderPathLabel,
   isManagedLocation,
-  resolveFolderLocation,
   type FolderExplorerEntry,
   type FolderExplorerFolder,
 } from "./model";
@@ -101,31 +100,56 @@ describe("subtree entry counts", () => {
   });
 });
 
-describe("URL folder locations", () => {
-  it("keeps unrelated query parameters and the hash", () => {
-    expect(
-      folderLocationPath("/acme/skills", new URLSearchParams("view=all&folder=old"), "new", "#list"),
-    ).toBe("/acme/skills?view=all&folder=new#list");
-    expect(folderLocationPath("/acme/skills", new URLSearchParams("folder=old&view=all"), null)).toBe(
-      "/acme/skills?view=all",
-    );
+describe("in-place folder explorer rows", () => {
+  const entries = [
+    entry("loose"),
+    entry("one", "a"),
+    entry("many", "a", "managed"),
+    entry("beta", "b"),
+  ];
+
+  it("starts collapsed and keeps root folders before root entries", () => {
+    const rows = flattenFolderExplorerRows({
+      folders,
+      entries,
+      expandedFolderIds: new Set(),
+    });
+    expect(rows.map((row) => row.kind === "folder" ? row.folder.id : row.entry.id)).toEqual([
+      "a", "managed", "z", "loose",
+    ]);
+    expect(rows.every((row) => row.depth === 0)).toBe(true);
   });
 
-  it("keeps a valid requested folder", () => {
-    expect(resolveFolderLocation("b", folders)).toBe("b");
-    expect(resolveFolderLocation(null, folders)).toBeNull();
+  it("flattens expanded descendants depth-first with parent-scoped keys", () => {
+    const rows = flattenFolderExplorerRows({
+      folders,
+      entries,
+      expandedFolderIds: new Set(["a", "b", "managed"]),
+      entryKeyPrefix: "agent",
+    });
+    expect(rows.map((row) => [row.kind, row.kind === "folder" ? row.folder.id : row.entry.id, row.depth])).toEqual([
+      ["folder", "a", 0],
+      ["folder", "b", 1],
+      ["entry", "beta", 2],
+      ["entry", "one", 1],
+      ["entry", "many", 1],
+      ["folder", "managed", 0],
+      ["folder", "inside", 1],
+      ["entry", "many", 1],
+      ["folder", "z", 0],
+      ["entry", "loose", 0],
+    ]);
+    const repeated = rows.filter((row) => row.kind === "entry" && row.entry.id === "many");
+    expect(repeated.map((row) => row.key)).toEqual(["agent-a-many", "agent-managed-many"]);
+    expect(new Set(rows.map((row) => row.key)).size).toBe(rows.length);
   });
 
-  it("falls back to the nearest surviving ancestor from the previous tree", () => {
-    const previous = [
-      folder("root"),
-      folder("parent", "Parent", "root"),
-      folder("deleted", "Deleted", "parent"),
-    ];
-    expect(resolveFolderLocation("deleted", [folder("root"), folder("parent", "Parent", "root")], previous)).toBe(
-      "parent",
-    );
-    expect(resolveFolderLocation("deleted", [folder("root")], previous)).toBe("root");
-    expect(resolveFolderLocation("deleted", [], previous)).toBeNull();
+  it("surfaces orphan folders and ignores unreachable cycles", () => {
+    const rows = flattenFolderExplorerRows({
+      folders: [folder("orphan", "Orphan", "missing"), folder("cycle", "Cycle", "cycle")],
+      entries: [],
+      expandedFolderIds: new Set(["orphan", "cycle"]),
+    });
+    expect(rows.map((row) => row.kind === "folder" && row.folder.id)).toEqual(["orphan"]);
   });
 });

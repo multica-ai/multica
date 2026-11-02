@@ -19,7 +19,6 @@
     "@tanstack/react-query": "catalog:",
     "colorjs.io": "^0.7.1",
     "i18next": "catalog:",
-    "lucide-react": "catalog:",
     "react": "catalog:",
     "react-colorful": "^5.8.1",
     "react-dom": "catalog:",

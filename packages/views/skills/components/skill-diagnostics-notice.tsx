@@ -1,6 +1,6 @@
 "use client";
 
-import { AlertTriangle } from "lucide-react";
+import { AlertTriangle } from "@multica/ui/icons";
 import type { SkillImportDiagnostic } from "@multica/core/types";
 import { cn } from "@multica/ui/lib/utils";
 

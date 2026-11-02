@@ -6,25 +6,16 @@ import pg from "pg";
 import { createTestApi } from "./helpers";
 import type { TestApiClient } from "./fixtures";
 
-// OL-1030: agents page folder explorer end-to-end. Covers the acceptance
-// flow: create a folder in the current location, move an agent into it, a
-// newly created squad's folder shows up at the root without a refresh, the
-// squad folder moves into a custom folder, a squad member is additionally
-// placed into another custom folder and appears in both, then breadcrumbs
-// navigate back to the root.
+// OL-1170: in-place multi-level folders, aggregate presence, composite keys,
+// subfolder creation and workspace-scoped expansion persistence.
 
 const DATABASE_URL =
   process.env.DATABASE_URL ??
   "postgres://multica:multica@localhost:5432/multica?sslmode=disable";
-
-// Optional screenshot evidence (same convention as QUICK_ACTIONS_SCREENSHOT_PATH).
 const SHOT_DIR = process.env.AGENT_FOLDERS_SCREENSHOT_DIR;
-
 const AGENTS = ["Alpha", "Beta", "Gamma"] as const;
 
-test("agents page folder explorer: folders, squad folders, and placements", async ({
-  page,
-}) => {
+test("agents page folder explorer: in-place tree, presence, and placements", async ({ page }) => {
   test.setTimeout(120000);
   const api: TestApiClient = await createTestApi();
   const db = new pg.Client(DATABASE_URL);
@@ -71,9 +62,11 @@ test("agents page folder explorer: folders, squad folders, and placements", asyn
       agentIds.push(agent.rows[0]!.id);
     }
     const [alphaId, betaId, gammaId] = agentIds as [string, string, string];
-
-    // The second custom folder exists up front; the first one is created
-    // through the UI as part of the flow.
+    await db.query(
+      `INSERT INTO agent_task_queue (agent_id, runtime_id, status, priority)
+       VALUES ($1, $2, 'running', 0)`,
+      [alphaId, runtimeId],
+    );
     await api.postJson("/api/agent-folders", { name: "Research", parent_id: "" });
 
     const token = api.getToken();
@@ -82,44 +75,26 @@ test("agents page folder explorer: folders, squad folders, and placements", asyn
       localStorage.setItem("multica_token", authToken);
       localStorage.setItem("multica:chat:isOpen", "false");
     }, token);
-
     await page.setViewportSize({ width: 1600, height: 1000 });
     await page.goto(`/${workspace.slug}/agents`, { waitUntil: "domcontentloaded" });
 
-    // Root: the three agents and the pre-made Research folder, nothing else.
-    const rootBreadcrumb = page.getByRole("button", {
-      name: "Agents",
-      exact: true,
-    });
-    await expect(rootBreadcrumb).toBeVisible({ timeout: 30000 });
-    await expect(page.getByRole("button", { name: "Open Research" })).toBeVisible();
+    await expect(page.getByRole("button", { name: "Expand Research" })).toBeVisible({ timeout: 30000 });
     for (const name of AGENTS) {
-      await expect(
-        page.locator('[role="row"]', { hasText: name }).first(),
-      ).toBeVisible();
+      await expect(page.locator('[role="row"]', { hasText: name }).first()).toBeVisible();
     }
 
-    // 1. Create a folder at the current location (the root).
     await page.getByRole("button", { name: "New folder" }).click();
     await page.getByLabel("Name").fill("Design");
     await page.getByRole("button", { name: "Create" }).click();
-    await expect(page.getByRole("button", { name: "Open Design" })).toBeVisible();
+    await expect(page.getByRole("button", { name: "Expand Design" })).toBeVisible();
 
-    if (SHOT_DIR) await page.screenshot({ path: `${SHOT_DIR}/01-root.png` });
-
-    // 2. Move Alpha into Design from its row menu.
     const alphaRow = page.locator('[role="row"]', { hasText: "Alpha" });
     await alphaRow.getByRole("button", { name: "Row actions" }).click();
     await page.getByRole("menuitem", { name: "Move to..." }).click();
     await page.getByRole("button", { name: "Design", exact: true }).click();
     await page.getByRole("button", { name: "Move", exact: true }).click();
-    // Alpha left the root.
-    await expect(
-      page.locator('[role="row"]', { hasText: "Alpha" }),
-    ).toHaveCount(0);
+    await expect(page.locator('[role="row"]', { hasText: "Alpha" })).toHaveCount(0);
 
-    // 3. Create a squad via the API: its squad folder appears at the root
-    //    without a manual refresh (realtime invalidation).
     const squad = await api.postJson<{ id: string }>("/api/squads", {
       name: "Game design",
       leader_id: betaId,
@@ -130,81 +105,119 @@ test("agents page folder explorer: folders, squad folders, and placements", asyn
       member_id: gammaId,
       role: "member",
     });
-    await expect(
-      page.getByRole("button", { name: "Open Game design" }),
-    ).toBeVisible({ timeout: 30000 });
+    await expect(page.getByRole("button", { name: "Expand Game design" })).toBeVisible({ timeout: 30000 });
 
-    // 4. Move the squad folder into Design.
     await page.getByRole("button", { name: "Actions for Game design" }).click();
     await page.getByRole("menuitem", { name: "Move to..." }).click();
     await page.getByRole("button", { name: "Design", exact: true }).click();
     await page.getByRole("button", { name: "Move", exact: true }).click();
-    // The squad folder left the root.
-    await expect(
-      page.getByRole("button", { name: "Open Game design" }),
-    ).toHaveCount(0);
+    await expect(page.getByRole("button", { name: "Expand Game design" })).toHaveCount(0);
 
-    if (SHOT_DIR) await page.screenshot({ path: `${SHOT_DIR}/02-squad-folder-at-root.png` });
+    await page.getByRole("button", { name: "Actions for Design" }).click();
+    await page.getByRole("menuitem", { name: "New subfolder" }).click();
+    await page.getByLabel("Name").fill("Nested");
+    await page.getByRole("button", { name: "Create" }).click();
+    await expect(page.getByRole("button", { name: "Collapse Design" })).toBeVisible();
+    await expect(page.getByRole("button", { name: "Expand Nested" })).toBeVisible();
+    await expect(page.getByRole("button", { name: "Expand Game design" })).toBeVisible();
+    await expect(page.locator('[role="row"]', { hasText: "Alpha" })).toBeVisible();
 
-    // 5. Inside Design: the squad folder and Alpha.
-    await page.getByRole("button", { name: "Open Design" }).click();
-    await expect(page.getByRole("button", { name: "Open Game design" })).toBeVisible();
-    await expect(
-      page.locator('[role="row"]', { hasText: "Alpha" }),
-    ).toBeVisible();
-
-    // 6. Inside the squad folder: Beta (leader) and Gamma. Additionally place
-    //    Gamma into Research — it must stay listed here.
-    await page.getByRole("button", { name: "Open Game design" }).click();
-    await expect(
-      page.locator('[role="row"]', { hasText: "Beta" }),
-    ).toBeVisible();
+    await page.getByRole("button", { name: "Expand Game design" }).click();
+    await expect(page.locator('[role="row"]', { hasText: "Beta" })).toBeVisible();
     const gammaRow = page.locator('[role="row"]', { hasText: "Gamma" });
     await expect(gammaRow).toBeVisible();
-    if (SHOT_DIR) await page.screenshot({ path: `${SHOT_DIR}/03-squad-folder.png` });
+
+    const designRow = page.locator('[role="row"]').filter({
+      has: page.getByRole("button", { name: "Collapse Design", exact: true }),
+    });
+    await expect(designRow).toContainText("1 running");
+    await expect(designRow).toContainText("3 online");
+    if (SHOT_DIR) await page.screenshot({ path: `${SHOT_DIR}/01-in-place-status.png`, fullPage: true });
+
     await gammaRow.getByRole("button", { name: "Row actions" }).click();
-    await page
-      .getByRole("menuitem", { name: "Also place in folder..." })
-      .click();
+    await page.getByRole("menuitem", { name: "Also place in folder..." }).click();
     await page.getByRole("button", { name: "Research", exact: true }).click();
-    if (SHOT_DIR) {
-      await page.waitForTimeout(200);
-      await page.screenshot({ path: `${SHOT_DIR}/04-place-dialog.png` });
-    }
     await page.getByRole("button", { name: "Place", exact: true }).click();
-    // Gamma remains in the squad folder…
-    await expect(
-      page.locator('[role="row"]', { hasText: "Gamma" }),
-    ).toBeVisible();
+    await page.getByRole("button", { name: "Expand Research" }).click();
+    await expect(page.locator('[role="row"]', { hasText: "Gamma" })).toHaveCount(2);
+    expect(page.url()).not.toContain("folder=");
+    if (SHOT_DIR) await page.screenshot({ path: `${SHOT_DIR}/02-multi-location.png`, fullPage: true });
 
-    // …and also appears inside Research.
-    await page.getByRole("button", { name: "Design", exact: true }).click();
-    await page.getByRole("button", { name: "Agents", exact: true }).click();
-    await page.getByRole("button", { name: "Open Research" }).click();
-    await expect(
-      page.locator('[role="row"]', { hasText: "Gamma" }),
-    ).toBeVisible();
+    await page.reload({ waitUntil: "domcontentloaded" });
+    await expect(page.getByRole("button", { name: "Collapse Design" })).toBeVisible({ timeout: 30000 });
+    await expect(page.getByRole("button", { name: "Collapse Game design" })).toBeVisible();
+    await expect(page.getByRole("button", { name: "Collapse Research" })).toBeVisible();
+    await expect(page.locator('[role="row"]', { hasText: "Gamma" })).toHaveCount(2);
 
-    // 7. Breadcrumb back to the root: both custom folders, no squad folder
-    //    (it lives inside Design), and only the uncategorized agents (none
-    //    left — Alpha is placed, Beta/Gamma are squad members).
-    await page.getByRole("button", { name: "Agents", exact: true }).click();
-    await expect(page.getByRole("button", { name: "Open Design" })).toBeVisible();
-    await expect(page.getByRole("button", { name: "Open Research" })).toBeVisible();
-    await expect(
-      page.getByRole("button", { name: "Open Game design" }),
-    ).toHaveCount(0);
-    if (SHOT_DIR) await page.screenshot({ path: `${SHOT_DIR}/05-back-at-root.png` });
+    await page.getByRole("button", { name: "Collapse all" }).click();
     for (const name of AGENTS) {
-      await expect(
-        page.locator('[role="row"]', { hasText: name }),
-      ).toHaveCount(0);
+      await expect(page.locator('[role="row"]', { hasText: name })).toHaveCount(0);
     }
+    await page.getByRole("button", { name: "Expand all" }).click();
+    await expect(page.locator('[role="row"]', { hasText: "Gamma" })).toHaveCount(2);
+
+    const search = page.getByRole("textbox", { name: "Search agents…" });
+    await search.fill("Gamma");
+    await expect(page.getByText("Design / Game design", { exact: true })).toBeVisible();
+    await expect(page.getByRole("button", { name: "+1", exact: true })).toBeVisible();
+    await expect(page.getByRole("button", { name: "Collapse Design" })).toHaveCount(0);
+    await search.fill("");
+    await expect(page.getByRole("button", { name: "Collapse Design" })).toBeVisible();
+    await expect(page.locator('[role="row"]', { hasText: "Gamma" })).toHaveCount(2);
+    if (SHOT_DIR) await page.screenshot({ path: `${SHOT_DIR}/03-reload-persisted.png`, fullPage: true });
+
+    await page.setViewportSize({ width: 1366, height: 900 });
+    const designNameBox = await designRow.getByText("Design", { exact: true }).boundingBox();
+    if (!designNameBox) throw new Error("Design folder name is not visible at 1366px");
+    expect(designNameBox.width).toBeGreaterThan(40);
+    const squadNameBox = await page.getByText("Game design", { exact: true }).boundingBox();
+    if (!squadNameBox) throw new Error("Squad folder name is not visible at 1366px");
+    expect(squadNameBox.width).toBeGreaterThan(40);
+    if (SHOT_DIR) await page.screenshot({ path: `${SHOT_DIR}/04-laptop-1366.png`, fullPage: true });
+
+    await page.getByRole("button", { name: "Last active", exact: true }).first().click();
+    await page.getByRole("switch", { name: "Model", exact: true }).click();
+    await page.getByRole("switch", { name: "Created", exact: true }).click();
+    await page.keyboard.press("Escape");
+    await page.setViewportSize({ width: 1440, height: 900 });
+    const allColumnsNameBox = await page.getByText("Game design", { exact: true }).boundingBox();
+    if (!allColumnsNameBox) throw new Error("Squad folder name is not visible with all columns at 1440px");
+    expect(allColumnsNameBox.width).toBeGreaterThan(60);
+    const nameCellBox = await designRow
+      .getByRole("button", { name: "Collapse Design", exact: true })
+      .locator("..")
+      .boundingBox();
+    if (!nameCellBox) throw new Error("Folder name track missing with all columns");
+    const countLabel = designRow.getByText("3 agents", { exact: true });
+    const squadLabel = page.getByText("Squad", { exact: true });
+    if (nameCellBox.width <= 22 * 16) {
+      await expect(countLabel).toBeHidden();
+      await expect(squadLabel).toBeHidden();
+    } else {
+      await expect(countLabel).toBeVisible();
+      await expect(squadLabel).toBeVisible();
+    }
+    if (SHOT_DIR) await page.screenshot({ path: `${SHOT_DIR}/05-all-columns-1440.png`, fullPage: true });
+
+    await page.setViewportSize({ width: 600, height: 900 });
+    const alphaRowForLayout = page.locator('[role="row"]', { hasText: "Alpha" });
+    const visibleCellCount = (row: typeof designRow) => row.evaluate((element) =>
+      Array.from(element.querySelectorAll<HTMLElement>('[role="cell"]'))
+        .filter((cell) => getComputedStyle(cell).display !== "none")
+        .length,
+    );
+    expect(await visibleCellCount(designRow)).toBe(await visibleCellCount(alphaRowForLayout));
+    const folderStatusBox = await designRow.getByRole("cell").filter({ hasText: "1 running" }).boundingBox();
+    const agentStatusBox = await alphaRowForLayout.getByRole("cell").filter({ hasText: "Online" }).boundingBox();
+    if (!folderStatusBox || !agentStatusBox) throw new Error("Status cells missing at 600px");
+    expect(Math.abs(folderStatusBox.x - agentStatusBox.x)).toBeLessThanOrEqual(1);
+    if (SHOT_DIR) await page.screenshot({ path: `${SHOT_DIR}/06-narrow-600.png`, fullPage: true });
   } finally {
     if (squadId) {
       await db.query(`DELETE FROM squad_member WHERE squad_id = $1`, [squadId]);
       await db.query(`DELETE FROM squad WHERE id = $1`, [squadId]);
     }
+    await db.query(`DELETE FROM agent_task_queue WHERE agent_id = ANY($1::uuid[])`, [agentIds]);
     await db.query(
       `DELETE FROM labrastro_agent_placement WHERE workspace_id = (SELECT workspace_id FROM agent_runtime WHERE id = $1)`,
       [runtimeId],

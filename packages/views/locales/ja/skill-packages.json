@@ -1,6 +1,9 @@
 {
   "tree": {
     "new_folder": "新規フォルダ",
+    "new_subfolder": "サブフォルダを作成",
+    "expand_all": "すべて展開",
+    "collapse_all": "すべて折りたたむ",
     "rename_folder": "名前を変更",
     "move_folder": "移動",
     "delete_folder": "削除",

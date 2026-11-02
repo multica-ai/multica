@@ -1,7 +1,7 @@
 "use client";
 
 import type { ComponentProps, ReactNode } from "react";
-import type { LucideIcon } from "lucide-react";
+import type { IconComponent } from "@multica/ui/icons";
 import { Button } from "@multica/ui/components/ui/button";
 import {
   Empty,
@@ -15,7 +15,7 @@ import { cn } from "@multica/ui/lib/utils";
 import { PageHeader } from "./page-header";
 
 interface CollectionPageHeaderProps {
-  icon: LucideIcon;
+  icon: IconComponent;
   title: ReactNode;
   count?: number;
   description?: ReactNode;
@@ -83,7 +83,7 @@ export function CollectionPageHeader({
 
 interface CollectionPageHeaderActionProps
   extends Omit<ComponentProps<typeof Button>, "children"> {
-  icon: LucideIcon;
+  icon: IconComponent;
   label: string;
 }
 
@@ -117,7 +117,7 @@ export function CollectionPageHeaderAction({
 type PageStateTone = "muted" | "destructive" | "warning";
 
 interface CollectionPageStateProps {
-  icon: LucideIcon;
+  icon: IconComponent;
   title: ReactNode;
   description?: ReactNode;
   actions?: ReactNode;

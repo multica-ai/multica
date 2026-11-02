@@ -1,10 +1,10 @@
 // @vitest-environment jsdom
 
-// OL-1030: agents-page folder explorer — hierarchy view with custom + squad
-// folders, flat view on search/filter/archived scope, URL location, move
-// permission gates, and squad-change reflection.
+// Agents-page folder explorer — custom + squad folders with persistent
+// in-place expansion, flat search/filter/archived views, move permission
+// gates, and squad-change reflection.
 
-import React, { useMemo, useState } from "react";
+import React, { useMemo, useState, useSyncExternalStore } from "react";
 import { beforeEach, describe, expect, it, vi, type Mock } from "vitest";
 import { act, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
@@ -25,6 +25,7 @@ const apiMock = vi.hoisted(() => ({
 }));
 
 const mocks = vi.hoisted(() => ({
+  searchListeners: new Set<() => void>(),
   agents: [] as Agent[],
   folderTree: null as AgentFolderTree | null | undefined,
   folderTreeError: false,
@@ -33,9 +34,12 @@ const mocks = vi.hoisted(() => ({
   currentUserId: "user-1",
   members: [] as { user_id: string; role: string }[],
   virtualizerCount: 0,
+  virtualizerKeys: [] as (string | number)[],
   rowSizes: [] as number[],
   viewState: {
     scope: "all",
+    search: "",
+    setSearch: vi.fn(),
     sortField: "name",
     sortDirection: "asc" as string,
     hiddenColumns: [] as string[],
@@ -83,14 +87,23 @@ vi.mock("@tanstack/react-query", () => ({
 }));
 
 vi.mock("@tanstack/react-virtual", () => ({
-  useVirtualizer: ({ count, estimateSize }: { count: number; estimateSize: (index: number) => number }) => {
+  useVirtualizer: ({
+    count,
+    estimateSize,
+    getItemKey,
+  }: {
+    count: number;
+    estimateSize: (index: number) => number;
+    getItemKey: (index: number) => string | number;
+  }) => {
     mocks.rowSizes = Array.from({ length: count }, (_, index) => estimateSize(index));
     mocks.virtualizerCount = count;
+    mocks.virtualizerKeys = Array.from({ length: count }, (_, index) => getItemKey(index));
     return {
       getVirtualItems: () =>
         Array.from({ length: count }, (_, index) => ({
           index,
-          key: index,
+          key: getItemKey(index),
           start: index * 64,
           end: (index + 1) * 64,
           size: 64,
@@ -145,7 +158,13 @@ vi.mock("@multica/core/agents", () => ({
 }));
 vi.mock("@multica/core/agents/stores", () => ({
   useAgentsViewStore: (selector: (state: unknown) => unknown) =>
-    selector(mocks.viewState),
+    useSyncExternalStore(
+      (listener) => {
+        mocks.searchListeners.add(listener);
+        return () => { mocks.searchListeners.delete(listener); };
+      },
+      () => selector(mocks.viewState),
+    ),
   AGENT_DEFAULT_HIDDEN_COLUMNS: [],
   AGENT_SCOPES: ["mine", "all", "archived"],
 }));
@@ -158,7 +177,8 @@ vi.mock("@multica/ui/components/common/actor-avatar", () => ({
     <span data-testid="folder-avatar">{name.slice(0, 2).toUpperCase()}</span>
   ),
 }));
-vi.mock("@multica/ui/components/ui/tooltip", () => ({
+vi.mock("@multica/ui/components/ui/tooltip", async (importOriginal) => ({
+  ...await importOriginal<typeof import("@multica/ui/components/ui/tooltip")>(),
   Tooltip: ({ children }: { children: React.ReactNode }) => <>{children}</>,
   TooltipTrigger: ({ render }: { render: React.ReactNode }) => <>{render}</>,
   TooltipContent: ({ children }: { children: React.ReactNode }) => (
@@ -172,9 +192,7 @@ vi.mock("@multica/ui/components/ui/skeleton", () => ({
 }));
 vi.mock("../presence", () => ({ availabilityConfig: {} }));
 
-// The upstream toolbar is stubbed with the controls the page contract needs:
-// search input, scope switcher (wired through the mocked view store), and
-// filter toggles. Filter state is preset per test through mocks.viewState.
+// Filter state is preset per test through mocks.viewState.
 vi.mock("./agent-list-toolbar", () => ({
   countActiveFilterDimensions: (filters: Record<string, string[]>) =>
     Object.values(filters).filter((values) => values.length > 0).length,
@@ -183,11 +201,13 @@ vi.mock("./agent-list-toolbar", () => ({
     onScopeChange,
     search,
     onSearchChange,
+    folderActions,
   }: {
     scope: string;
     onScopeChange: (scope: string) => void;
     search: string;
     onSearchChange: (value: string) => void;
+    folderActions?: React.ReactNode;
   }) => (
     <div>
       <input
@@ -205,6 +225,7 @@ vi.mock("./agent-list-toolbar", () => ({
           {value === "mine" ? "Mine" : value === "all" ? "All" : "Archived"}
         </button>
       ))}
+      {folderActions}
     </div>
   ),
 }));
@@ -396,8 +417,15 @@ function renderPage(initialPath = "/acme/agents", locale?: SupportedLocale) {
   return { ...result, controller };
 }
 
+const EXPANSION_STORAGE_KEY = "multica.folder_explorer.expanded.agents.ws-1";
+
+async function expandFolder(name: string) {
+  await userEvent.click(await screen.findByRole("button", { name: `Expand ${name}` }));
+}
+
 beforeEach(() => {
   vi.clearAllMocks();
+  window.localStorage.clear();
   mocks.agents = [LOOSE, PLACED, LEADER, MEMBER, BOTH, OTHER, ARCHIVED];
   mocks.folderTree = folderTree;
   mocks.folderTreeError = false;
@@ -406,7 +434,14 @@ beforeEach(() => {
   mocks.currentUserId = "user-1";
   mocks.members = [{ user_id: "user-1", role: "member" }];
   mocks.virtualizerCount = 0;
+  mocks.virtualizerKeys = [];
   mocks.viewState.scope = "all";
+  mocks.viewState.search = "";
+  mocks.viewState.setSearch.mockImplementation((value: string) => {
+    mocks.viewState.search = value;
+    mocks.searchListeners.forEach((listener) => listener());
+  });
+  mocks.viewState.hiddenColumns = [];
   for (const key of Object.keys(mocks.viewState.filters) as (keyof typeof mocks.viewState.filters)[]) {
     mocks.viewState.filters[key] = [];
   }
@@ -418,35 +453,33 @@ beforeEach(() => {
 });
 
 describe("AgentsPage folder hierarchy", () => {
-  it("lists squad folders and custom folders above uncategorized agents at the root", async () => {
+  it("starts with every folder collapsed above uncategorized root agents", async () => {
     renderPage();
     expect(await screen.findByText("loose-agent")).toBeTruthy();
     expect(screen.getByText("other-agent")).toBeTruthy();
-    // Squad folder: name, Squad badge, avatar, member count.
-    const squadOpen = screen.getByRole("button", { name: "Open Game design" });
-    expect(squadOpen.textContent).toContain("Squad");
-    expect(squadOpen.textContent).toContain("3 agents");
-    expect(within(squadOpen).getAllByTestId("folder-avatar")[0]).toBeTruthy();
+    const squadToggle = screen.getByRole("button", { name: "Expand Game design" });
+    expect(squadToggle.getAttribute("aria-expanded")).toBe("false");
+    expect(squadToggle.textContent).toContain("Squad");
+    expect(squadToggle.textContent).toContain("3 agents");
+    expect(within(squadToggle).getAllByTestId("folder-avatar")[0]).toBeTruthy();
     expect(mocks.rowSizes.slice(0, 5)).toEqual([56, 56, 56, 56, 56]);
     expect(mocks.rowSizes.slice(5)).toEqual([64, 64]);
-    const directory = squadOpen.closest('[role="row"]') as HTMLElement;
-    expect(within(directory).getAllByRole("cell")).toHaveLength(1);
-    expect([...squadOpen.querySelectorAll("[title]")].map((node) => node.getAttribute("title")))
+    const directory = squadToggle.closest('[role="row"]') as HTMLElement;
+    expect(within(directory).getAllByRole("cell")).toHaveLength(11);
+    expect([...squadToggle.querySelectorAll("[title]")].map((node) => node.getAttribute("title")))
       .toEqual(["squad-leader", "squad-member", "dual-agent"]);
-    // Empty squad still shows, with zero members.
-    expect(screen.getByRole("button", { name: "Open Ops" }).textContent).toContain("0 agents");
-    expect(screen.getByRole("button", { name: "Open Design" })).toBeTruthy();
-    // Placed agents and squad members are not at the root.
+    expect(screen.getByRole("button", { name: "Expand Ops" }).textContent).toContain("0 agents");
+    for (const name of ["Design", "Engineering", "Game design", "Ops", "Growth"]) {
+      expect(screen.getByRole("button", { name: `Expand ${name}` }).getAttribute("aria-expanded"))
+        .toBe("false");
+    }
+    expect(screen.queryByRole("button", { name: "Expand Research" })).toBeNull();
     for (const name of ["placed-agent", "squad-leader", "squad-member", "dual-agent"]) {
       expect(screen.queryByText(name)).toBeNull();
     }
-    // Archived agents never appear in the active scopes.
     expect(screen.queryByText("archived-agent")).toBeNull();
-    // Breadcrumb root is the page name.
-    expect(screen.getByRole("button", { name: "Agents" })).toBeTruthy();
-    // Folder rows sort above the agent rows (M07).
     const folderRow = screen
-      .getByRole("button", { name: "Open Design" })
+      .getByRole("button", { name: "Expand Design" })
       .closest("[role='row']") as HTMLElement;
     const agentRow = screen
       .getByText("loose-agent")
@@ -455,9 +488,27 @@ describe("AgentsPage folder hierarchy", () => {
       folderRow.compareDocumentPosition(agentRow) &
         Node.DOCUMENT_POSITION_FOLLOWING,
     ).toBeTruthy();
+    const folderCells = within(folderRow).getAllByRole("cell");
+    const agentCells = within(agentRow).getAllByRole("cell");
+    expect(folderCells).toHaveLength(agentCells.length);
+    expect(folderCells[0]!.className).toBe(agentCells[0]!.className);
   });
 
-  it("renders four preview avatars and responsive overflow for a seven-member squad", async () => {
+  it("hides folder aggregation when the status column is hidden", async () => {
+    const first = renderPage();
+    const toggle = await screen.findByRole("button", { name: "Expand Design" });
+    const directory = toggle.closest('[role="row"]') as HTMLElement;
+    expect(within(directory).getByText("Offline")).toBeTruthy();
+    first.unmount();
+
+    mocks.viewState.hiddenColumns = ["status"];
+    renderPage();
+    const hiddenToggle = await screen.findByRole("button", { name: "Expand Design" });
+    const hiddenDirectory = hiddenToggle.closest('[role="row"]') as HTMLElement;
+    expect(within(hiddenDirectory).queryByText("Offline")).toBeNull();
+  });
+
+  it("renders four preview avatars and one overflow badge for a seven-member squad", async () => {
     const extra = Array.from({ length: 4 }, (_, index) => makeAgent(`extra-${index}`, `Extra ${index}`));
     mocks.agents = [...mocks.agents, ...extra];
     mocks.folderTree = {
@@ -467,94 +518,142 @@ describe("AgentsPage folder hierarchy", () => {
         : squad),
     };
     renderPage();
-    const directory = await screen.findByRole("button", { name: "Open Game design" });
+    const directory = await screen.findByRole("button", { name: "Expand Game design" });
     expect([...directory.querySelectorAll("[title]")].map((node) => node.getAttribute("title")))
       .toEqual(["squad-leader", "squad-member", "dual-agent", "Extra 0"]);
-    expect(within(directory).getByText("+3").className).toContain("hidden @2xl:inline-flex");
-    expect(within(directory).getByText("+4").className).toContain("@2xl:hidden");
+    expect(within(directory).getByText("+3").className).toContain("inline-flex");
+    expect(within(directory).queryByText("+4")).toBeNull();
     expect(directory.textContent).toContain("7 agents");
   });
 
-  it("shows an agent belonging to two squads in each squad folder (M20)", async () => {
-    renderPage("/acme/agents?folder=sq-growth");
+  it("uses composite keys and deduplicates agents visible in multiple squads (M20)", async () => {
+    renderPage();
+    await expandFolder("Growth");
     expect(await screen.findByText("dual-agent")).toBeTruthy();
     expect(screen.queryByText("squad-leader")).toBeNull();
+
+    await expandFolder("Game design");
+    expect(screen.getAllByText("dual-agent")).toHaveLength(2);
+    expect(mocks.virtualizerKeys).toEqual(expect.arrayContaining([
+      "agent-sq-game-a-both",
+      "agent-sq-growth-a-both",
+    ]));
+    const header = screen.getAllByRole("row")[0]!;
+    await userEvent.click(within(header).getAllByRole("button")[0]!);
+    expect(await screen.findByText("5 selected")).toBeTruthy();
   });
 
-  it("enters a squad folder: members, leader badge, disabled new-folder with reason", async () => {
+  it("expands a squad in place without navigation and keeps toolbar folder actions", async () => {
     const { controller } = renderPage();
-    await userEvent.click(await screen.findByRole("button", { name: "Open Game design" }));
-    expect(controller.path).toBe("/acme/agents?folder=sq-game");
+    await expandFolder("Game design");
+    expect(controller.path).toBe("/acme/agents");
+    expect(controller.push).not.toHaveBeenCalled();
+    expect(controller.replace).not.toHaveBeenCalled();
     expect(await screen.findByText("squad-leader")).toBeTruthy();
     expect(screen.getByText("squad-member")).toBeTruthy();
     expect(screen.getByText("dual-agent")).toBeTruthy();
     expect(screen.getByText("Leader")).toBeTruthy();
-    expect(screen.queryByText("loose-agent")).toBeNull();
-
-    const newFolder = screen.getByRole("button", { name: "New folder" });
-    expect(newFolder.hasAttribute("disabled")).toBe(true);
-    expect(
-      screen.getByText("Squad folders list the squad's members. Manage members on the Squads page."),
-    ).toBeTruthy();
+    expect(screen.getByText("loose-agent")).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Expand all" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Collapse all" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "New folder" }).hasAttribute("disabled")).toBe(false);
   });
 
-  it("scopes squad-folder contents and counts to the current scope", async () => {
+  it("scopes expanded squad contents and counts to the current scope", async () => {
     mocks.viewState.scope = "mine";
-    renderPage("/acme/agents?folder=sq-game");
-    // MEMBER is owned by user-2: hidden in "mine", and the leader badge
-    // still lands on the visible leader row.
+    renderPage();
+    await expandFolder("Game design");
     expect(await screen.findByText("squad-leader")).toBeTruthy();
     expect(screen.getByText("dual-agent")).toBeTruthy();
     expect(screen.queryByText("squad-member")).toBeNull();
     expect(screen.getByText("Leader")).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Collapse Game design" }).textContent)
+      .toContain("2 agents");
   });
 
   it("shows a placed squad member in both its squad folder and its custom folder", async () => {
-    renderPage("/acme/agents?folder=f-research");
-    expect(await screen.findByText("dual-agent")).toBeTruthy();
-    expect(screen.queryByText("squad-leader")).toBeNull();
+    renderPage();
+    await expandFolder("Game design");
+    await expandFolder("Design");
+    await expandFolder("Research");
+    expect(await screen.findAllByText("dual-agent")).toHaveLength(2);
+    expect(screen.getByText("squad-leader")).toBeTruthy();
   });
 
-  it("keeps detail navigation tied to the current folder", async () => {
-    const { controller } = renderPage("/acme/agents?folder=sq-game");
-    await userEvent.click(await screen.findByText("squad-leader"));
-    expect(controller.path).toBe("/acme/agents/a-leader?folder=sq-game");
-  });
-
-  it("navigates with breadcrumbs, Up, and browser Back", async () => {
+  it("keeps folder state out of agent detail navigation", async () => {
     const { controller } = renderPage();
-    await userEvent.click(await screen.findByRole("button", { name: "Open Design" }));
-    expect(controller.path).toBe("/acme/agents?folder=f-design");
+    await expandFolder("Game design");
+    await userEvent.click(await screen.findByText("squad-leader"));
+    expect(controller.path).toBe("/acme/agents/a-leader");
+  });
+
+  it("expands and collapses nested folders in place while keeping parent and root rows visible", async () => {
+    const { controller } = renderPage();
+    await expandFolder("Design");
     expect(await screen.findByText("placed-agent")).toBeTruthy();
     expect(screen.queryByText("dual-agent")).toBeNull();
 
-    await userEvent.click(screen.getByRole("button", { name: "Open Research" }));
-    expect(controller.path).toBe("/acme/agents?folder=f-research");
+    await expandFolder("Research");
     expect(await screen.findByText("dual-agent")).toBeTruthy();
-
-    await userEvent.click(screen.getByRole("button", { name: "Design" }));
-    expect(controller.path).toBe("/acme/agents?folder=f-design");
-    await userEvent.click(screen.getByRole("button", { name: "Up one level" }));
+    expect(screen.getByRole("button", { name: "Collapse Design" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Collapse Research" })).toBeTruthy();
+    expect(screen.getByText("loose-agent")).toBeTruthy();
     expect(controller.path).toBe("/acme/agents");
 
-    await userEvent.click(screen.getByRole("button", { name: "Open Design" }));
-    await act(async () => controller.back());
-    expect(controller.path).toBe("/acme/agents");
-    expect(await screen.findByText("loose-agent")).toBeTruthy();
+    await userEvent.click(screen.getByRole("button", { name: "Collapse Research" }));
+    expect(screen.queryByText("dual-agent")).toBeNull();
+    expect(screen.getByRole("button", { name: "Expand Research" })).toBeTruthy();
+    expect(screen.getByText("placed-agent")).toBeTruthy();
+
+    await userEvent.click(screen.getByRole("button", { name: "Collapse Design" }));
+    expect(screen.queryByRole("button", { name: "Expand Research" })).toBeNull();
+    expect(screen.queryByText("placed-agent")).toBeNull();
+    expect(screen.getByRole("button", { name: "Expand Design" })).toBeTruthy();
+    expect(screen.getByText("loose-agent")).toBeTruthy();
+    expect(controller.push).not.toHaveBeenCalled();
+    expect(controller.replace).not.toHaveBeenCalled();
   });
 
-  it("moves Up from a nested folder to its direct parent (M11)", async () => {
-    const { controller } = renderPage("/acme/agents?folder=f-research");
-    await userEvent.click(await screen.findByRole("button", { name: "Up one level" }));
-    expect(controller.path).toBe("/acme/agents?folder=f-design");
+  it("expands and collapses the whole tree from the toolbar", async () => {
+    renderPage();
+    await userEvent.click(await screen.findByRole("button", { name: "Expand all" }));
     expect(await screen.findByText("placed-agent")).toBeTruthy();
+    expect(screen.getByText("squad-leader")).toBeTruthy();
+    expect(screen.getAllByText("dual-agent")).toHaveLength(3);
+    expect(screen.getByRole("button", { name: "Collapse Research" })).toBeTruthy();
+
+    await userEvent.click(screen.getByRole("button", { name: "Collapse all" }));
+    expect(screen.queryByText("placed-agent")).toBeNull();
+    expect(screen.queryByText("squad-leader")).toBeNull();
+    expect(screen.queryByText("dual-agent")).toBeNull();
+    expect(screen.queryByRole("button", { name: "Expand Research" })).toBeNull();
+    expect(screen.getByText("loose-agent")).toBeTruthy();
+    expect(window.localStorage.getItem(EXPANSION_STORAGE_KEY)).toBe("[]");
+  });
+
+  it("restores expanded folders from localStorage after a remount", async () => {
+    const first = renderPage();
+    await expandFolder("Design");
+    await expandFolder("Research");
+    expect(JSON.parse(window.localStorage.getItem(EXPANSION_STORAGE_KEY)!)).toEqual([
+      "f-design",
+      "f-research",
+    ]);
+    first.unmount();
+
+    renderPage();
+    expect(await screen.findByRole("button", { name: "Collapse Design" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Collapse Research" })).toBeTruthy();
+    expect(screen.getByText("placed-agent")).toBeTruthy();
+    expect(screen.getByText("dual-agent")).toBeTruthy();
   });
 });
 
 describe("AgentsPage folder actions", () => {
-  it("creates a folder at the current custom location", async () => {
-    renderPage("/acme/agents?folder=f-design");
-    await userEvent.click(await screen.findByRole("button", { name: "New folder" }));
+  it("creates a subfolder from a custom folder row menu", async () => {
+    renderPage();
+    await userEvent.click(await screen.findByRole("button", { name: "Actions for Design" }));
+    await userEvent.click(await screen.findByText("New subfolder"));
     await userEvent.type(screen.getByLabelText("Name"), "Research 2");
     await userEvent.click(screen.getByRole("button", { name: "Create" }));
     await waitFor(() =>
@@ -562,6 +661,10 @@ describe("AgentsPage folder actions", () => {
         name: "Research 2",
         parentId: "f-design",
       }),
+    );
+    expect(await screen.findByRole("button", { name: "Collapse Design" })).toHaveAttribute(
+      "aria-expanded",
+      "true",
     );
   });
 
@@ -622,7 +725,8 @@ describe("AgentsPage folder actions", () => {
       ),
     };
     mocks.folderTree = tree;
-    renderPage("/acme/agents?folder=f-design");
+    renderPage();
+    await expandFolder("Design");
     await userEvent.click(await screen.findByRole("button", { name: "Actions for Game design" }));
     await userEvent.click(await screen.findByText("Move to..."));
     await userEvent.click(await screen.findByRole("button", { name: "Root" }));
@@ -633,7 +737,8 @@ describe("AgentsPage folder actions", () => {
   });
 
   it("moves a custom folder to the chosen destination (M22)", async () => {
-    renderPage("/acme/agents?folder=f-design");
+    renderPage();
+    await expandFolder("Design");
     await userEvent.click(await screen.findByRole("button", { name: "Actions for Research" }));
     await userEvent.click(await screen.findByText("Move"));
     // Both the root and other custom folders are valid destinations; the
@@ -693,7 +798,8 @@ describe("AgentsPage move agents", () => {
   });
 
   it("uses \"also place\" wording inside squad folders and keeps squad membership", async () => {
-    renderPage("/acme/agents?folder=sq-game");
+    renderPage();
+    await expandFolder("Game design");
     const row = (await screen.findByText("squad-leader")).closest("[role='row']") as HTMLElement;
     await userEvent.click(within(row).getByRole("button", { name: "Row actions" }));
     expect(await screen.findByText("Also place in folder...")).toBeTruthy();
@@ -710,7 +816,9 @@ describe("AgentsPage move agents", () => {
   });
 
   it("explains that clearing a squad member's placement hides it from the root", async () => {
-    renderPage("/acme/agents?folder=f-research");
+    renderPage();
+    await expandFolder("Design");
+    await expandFolder("Research");
     const row = (await screen.findByText("dual-agent")).closest("[role='row']") as HTMLElement;
     await userEvent.click(within(row).getByRole("button", { name: "Row actions" }));
     await userEvent.click(await screen.findByText("Move to..."));
@@ -780,39 +888,40 @@ describe("AgentsPage move agents", () => {
 });
 
 describe("AgentsPage move/place wording", () => {
-  it("uses the place wording for the batch action inside a squad folder", async () => {
+  it("defaults the batch action to move even inside an expanded squad", async () => {
     const { toast } = await import("sonner");
-    renderPage("/acme/agents?folder=sq-game");
+    renderPage();
+    await expandFolder("Game design");
     const leaderRow = (await screen.findByText("squad-leader")).closest("[role='row']") as HTMLElement;
     await userEvent.click(within(leaderRow).getAllByRole("button")[0]!);
     const bothRow = screen.getByText("dual-agent").closest("[role='row']") as HTMLElement;
     await userEvent.click(within(bothRow).getAllByRole("button")[0]!);
 
-    const button = screen.getByRole("button", { name: "Place in folder" });
+    const button = screen.getByRole("button", { name: "Move to folder" });
     expect(button).toBeTruthy();
     await userEvent.click(button);
-    // The dialog follows the place wording: confirm says "Place", not "Move".
-    expect(await screen.findByRole("button", { name: "Place" })).toBeTruthy();
-    expect(screen.queryByRole("button", { name: "Move" })).toBeNull();
+    expect(await screen.findByRole("button", { name: "Move" })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Place" })).toBeNull();
     await userEvent.click(await screen.findByRole("button", { name: "Design" }));
     expect(
       screen.getByText("Squad members stay in their squad folders; this only sets their custom folder placement."),
     ).toBeTruthy();
-    await userEvent.click(screen.getByRole("button", { name: "Place" }));
+    await userEvent.click(screen.getByRole("button", { name: "Move" }));
     await waitFor(() => {
       expect(apiMock.setAgentPlacement).toHaveBeenCalledWith("ws-1", "a-leader", "f-design");
       expect(apiMock.setAgentPlacement).toHaveBeenCalledWith("ws-1", "a-both", "f-design");
     });
     await waitFor(() =>
-      expect(toast.success).toHaveBeenCalledWith("2 agents placed."),
+      expect(toast.success).toHaveBeenCalledWith("2 agents moved."),
     );
   });
 
   it("keeps the move wording in flat results reached from a squad folder", async () => {
-    renderPage("/acme/agents?folder=sq-game");
+    renderPage();
+    await expandFolder("Game design");
     const search = await screen.findByRole("textbox", { name: "Search agents" });
     await userEvent.type(search, "squad");
-    expect(await screen.findByText("Results from all folders")).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Collapse Game design" })).toBeNull();
     const row = screen.getByText("squad-leader").closest("[role='row']") as HTMLElement;
     await userEvent.click(within(row).getByRole("button", { name: "Row actions" }));
     expect(await screen.findByText("Move to...")).toBeTruthy();
@@ -871,37 +980,40 @@ describe("AgentsPage flat view", () => {
   it("uses a flat list with paths for the archived scope", async () => {
     renderPage();
     await userEvent.click(await screen.findByRole("button", { name: "Archived" }));
-    expect(await screen.findByText("Archived agents from all folders")).toBeTruthy();
     expect(await screen.findByText("archived-agent")).toBeTruthy();
     expect(screen.getByText("Design")).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Expand Design" })).toBeNull();
     expect(screen.queryByText("loose-agent")).toBeNull();
   });
 
-  it("searches across folders with path hints and returns to the original folder when cleared", async () => {
-    const { controller } = renderPage("/acme/agents?folder=f-design");
+  it("searches across folders with path hints and restores the expanded tree when cleared", async () => {
+    const { controller } = renderPage();
+    await expandFolder("Design");
     const search = await screen.findByRole("textbox", { name: "Search agents" });
     await userEvent.type(search, "agent");
-    expect(await screen.findByText("Results from all folders")).toBeTruthy();
-    expect(screen.getByText("dual-agent")).toBeTruthy();
-    // dual-agent is in a squad AND placed: both paths, first + "+1" hover.
+    expect(await screen.findByText("dual-agent")).toBeTruthy();
     expect(screen.getAllByText("Design / Research").length).toBeGreaterThan(0);
     expect(screen.getAllByText("Game design").length).toBeGreaterThan(0);
     expect(screen.getAllByText("Growth").length).toBeGreaterThan(0);
     expect(screen.getByText("+2")).toBeTruthy();
-    expect(controller.path).toBe("/acme/agents?folder=f-design");
-    expect(screen.queryByRole("button", { name: "Open Design" })).toBeNull();
+    expect(controller.path).toBe("/acme/agents");
+    expect(screen.queryByRole("button", { name: "Collapse Design" })).toBeNull();
 
     await userEvent.clear(search);
     expect(await screen.findByText("placed-agent")).toBeTruthy();
     expect(screen.queryByText("dual-agent")).toBeNull();
-    expect(controller.path).toBe("/acme/agents?folder=f-design");
+    expect(screen.getByRole("button", { name: "Collapse Design" })).toBeTruthy();
+    expect(controller.path).toBe("/acme/agents");
   });
 
   it("enters flat view immediately when a toolbar filter is active", async () => {
     mocks.viewState.filters.models = ["claude"];
-    renderPage("/acme/agents?folder=f-design");
-    expect(await screen.findByText("Results from all folders")).toBeTruthy();
+    renderPage();
+    expect(await screen.findByText("placed-agent")).toBeTruthy();
+    expect(screen.getByText("squad-leader")).toBeTruthy();
     expect(screen.getByText("loose-agent")).toBeTruthy();
+    expect(screen.getByText("Design")).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Expand Design" })).toBeNull();
   });
 
   it("keeps every agent visible with a retry when the tree cannot load", async () => {
@@ -919,37 +1031,10 @@ describe("AgentsPage flat view", () => {
   });
 });
 
-describe("AgentsPage URL fallback and squad changes", () => {
-  it("falls back to the root for an unknown URL folder", async () => {
-    const { controller } = renderPage("/acme/agents?folder=missing");
-    await waitFor(() => expect(controller.path).toBe("/acme/agents"));
-    expect(await screen.findByText("loose-agent")).toBeTruthy();
-  });
-
-  it("falls back to the nearest surviving ancestor when the current folder is deleted", async () => {
-    const { controller, rerender } = renderPage("/acme/agents?folder=f-research");
-    expect(await screen.findByText("dual-agent")).toBeTruthy();
-    mocks.folderTree = {
-      ...folderTree,
-      folders: folderTree.folders.filter((folder) => folder.id !== "f-research"),
-      placements: folderTree.placements.map((placement) =>
-        placement.folderId === "f-research"
-          ? { ...placement, folderId: "f-design" }
-          : placement,
-      ),
-    };
-    rerender(
-      <NavigationHarness controller={controller} initialPath="/acme/agents?folder=f-research">
-        <AgentsPage />
-      </NavigationHarness>,
-    );
-    await waitFor(() => expect(controller.path).toBe("/acme/agents?folder=f-design"));
-    expect(await screen.findByText("dual-agent")).toBeTruthy();
-  });
-
+describe("AgentsPage squad changes", () => {
   it("reflects squad renames and membership changes without a manual refresh", async () => {
     const { controller, rerender } = renderPage();
-    expect(await screen.findByRole("button", { name: "Open Game design" })).toBeTruthy();
+    expect(await screen.findByRole("button", { name: "Expand Game design" })).toBeTruthy();
     mocks.folderTree = {
       ...folderTree,
       squads: folderTree.squads.map((squad) =>
@@ -963,14 +1048,14 @@ describe("AgentsPage URL fallback and squad changes", () => {
         <AgentsPage />
       </NavigationHarness>,
     );
-    expect(await screen.findByRole("button", { name: "Open Game design v2" })).toBeTruthy();
+    expect(await screen.findByRole("button", { name: "Expand Game design v2" })).toBeTruthy();
     // loose-agent joined the squad: it leaves the root list.
     expect(screen.queryByText("loose-agent")).toBeNull();
   });
 
   it("returns squad members without a placement to the root when the squad is archived", async () => {
     const { controller, rerender } = renderPage();
-    expect(await screen.findByRole("button", { name: "Open Game design" })).toBeTruthy();
+    expect(await screen.findByRole("button", { name: "Expand Game design" })).toBeTruthy();
     mocks.folderTree = {
       ...folderTree,
       squads: folderTree.squads.filter((squad) => squad.squadId !== "sq-game"),
@@ -989,17 +1074,17 @@ describe("AgentsPage URL fallback and squad changes", () => {
 });
 
 describe("AgentsPage folder regressions", () => {
-  it("localizes the breadcrumb root with the page title", async () => {
+  it("localizes the in-place expansion controls", async () => {
     renderPage("/acme/agents", "ja");
-    const nav = await screen.findByRole("navigation", { name: "フォルダの場所" });
-    expect(within(nav).getByRole("button", { name: "エージェント" })).toBeTruthy();
+    await userEvent.click(await screen.findByRole("button", { name: "「Design」を展開" }));
+    expect(await screen.findByRole("button", { name: "「Design」を折りたたむ" })).toBeTruthy();
   });
 
   it("shows a skeleton instead of flashing the flat list while the tree loads", () => {
     mocks.folderTree = undefined;
-    renderPage("/acme/agents?folder=sq-game");
+    renderPage();
     expect(screen.queryByText("squad-leader")).toBeNull();
-    expect(screen.queryByRole("button", { name: "Open Game design" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Expand Game design" })).toBeNull();
     expect(screen.getAllByTestId("skeleton").length).toBeGreaterThan(0);
   });
 
@@ -1010,16 +1095,14 @@ describe("AgentsPage folder regressions", () => {
     expect(await screen.findByText("No agents yet")).toBeTruthy();
   });
 
-  it("limits selection and select-all to agent rows in the current folder view", async () => {
-    renderPage("/acme/agents?folder=sq-game");
+  it("limits selection and select-all to visible agent rows", async () => {
+    renderPage();
+    await expandFolder("Game design");
     const header = screen.getAllByRole("row")[0]!;
     await userEvent.click(within(header).getAllByRole("button")[0]!);
-    // All three members selected; folder rows are never selectable.
-    expect(await screen.findByText("3 selected")).toBeTruthy();
-    await userEvent.click(screen.getByRole("button", { name: "Agents" }));
-    const rootHeader = screen.getAllByRole("row")[0]!;
-    await userEvent.click(within(rootHeader).getAllByRole("button")[0]!);
-    // At the root only the uncategorized agents are selectable.
+    expect(await screen.findByText("5 selected")).toBeTruthy();
+
+    await userEvent.click(screen.getByRole("button", { name: "Collapse Game design" }));
     expect(await screen.findByText("2 selected")).toBeTruthy();
   });
 });
@@ -1030,7 +1113,8 @@ describe("AgentsPage unreadable folder move/delete responses", () => {
       "@multica/core/agents/folder-queries"
     );
     apiMock.updateAgentFolder.mockResolvedValue(null);
-    renderPage("/acme/agents?folder=f-design");
+    renderPage();
+    await expandFolder("Design");
     await userEvent.click(await screen.findByRole("button", { name: "Actions for Research" }));
     await userEvent.click(await screen.findByText("Move"));
     await userEvent.click(await screen.findByRole("button", { name: "Engineering" }));
@@ -1069,55 +1153,56 @@ describe("AgentsPage unreadable folder move/delete responses", () => {
   });
 });
 
-describe("AgentsPage place-variant result toasts", () => {
+describe("AgentsPage move-variant result toasts", () => {
   async function selectTwoSquadMembers() {
-    renderPage("/acme/agents?folder=sq-game");
+    renderPage();
+    await expandFolder("Game design");
     const leaderRow = (await screen.findByText("squad-leader")).closest("[role='row']") as HTMLElement;
     await userEvent.click(within(leaderRow).getAllByRole("button")[0]!);
     const bothRow = screen.getByText("dual-agent").closest("[role='row']") as HTMLElement;
     await userEvent.click(within(bothRow).getAllByRole("button")[0]!);
-    await userEvent.click(screen.getByRole("button", { name: "Place in folder" }));
+    await userEvent.click(screen.getByRole("button", { name: "Move to folder" }));
     await userEvent.click(await screen.findByRole("button", { name: "Design" }));
   }
 
-  it("uses the place wording for an unconfirmed result", async () => {
+  it("uses the move wording for an unconfirmed result", async () => {
     const { toast } = await import("sonner");
     apiMock.setAgentPlacement.mockReset();
     apiMock.setAgentPlacement
       .mockResolvedValueOnce({ updated: true })
       .mockResolvedValueOnce(null);
     await selectTwoSquadMembers();
-    await userEvent.click(screen.getByRole("button", { name: "Place" }));
+    await userEvent.click(screen.getByRole("button", { name: "Move" }));
     await waitFor(() =>
       expect(toast.error).toHaveBeenCalledWith(
-        "Placed 1 of 2; 1 couldn't be confirmed. The list was refreshed — check it before retrying.",
+        "Moved 1 of 2; 1 couldn't be confirmed. The list was refreshed — check it before retrying.",
       ),
     );
     expect(toast.success).not.toHaveBeenCalled();
   });
 
-  it("uses the place wording for a partial failure", async () => {
+  it("uses the move wording for a partial failure", async () => {
     const { toast } = await import("sonner");
     apiMock.setAgentPlacement.mockReset();
     apiMock.setAgentPlacement
       .mockResolvedValueOnce({ updated: true })
       .mockRejectedValueOnce(new Error("boom"));
     await selectTwoSquadMembers();
-    await userEvent.click(screen.getByRole("button", { name: "Place" }));
+    await userEvent.click(screen.getByRole("button", { name: "Move" }));
     await waitFor(() =>
-      expect(toast.error).toHaveBeenCalledWith("Placed 1 of 2; the rest failed."),
+      expect(toast.error).toHaveBeenCalledWith("Moved 1 of 2; the rest failed."),
     );
     expect(toast.success).not.toHaveBeenCalled();
   });
 
-  it("uses the place wording when every placement fails", async () => {
+  it("uses the move wording when every move fails", async () => {
     const { toast } = await import("sonner");
     apiMock.setAgentPlacement.mockReset();
     apiMock.setAgentPlacement.mockRejectedValue(new Error("boom"));
     await selectTwoSquadMembers();
-    await userEvent.click(screen.getByRole("button", { name: "Place" }));
+    await userEvent.click(screen.getByRole("button", { name: "Move" }));
     await waitFor(() =>
-      expect(toast.error).toHaveBeenCalledWith("Couldn't place the agents. Try again."),
+      expect(toast.error).toHaveBeenCalledWith("Couldn't move the agents. Try again."),
     );
     expect(toast.success).not.toHaveBeenCalled();
   });
@@ -1181,7 +1266,8 @@ describe("AgentsPage localized folder errors", () => {
         error: "folder move would create a cycle",
       }),
     );
-    renderPage("/acme/agents?folder=f-design");
+    renderPage();
+    await expandFolder("Design");
     await userEvent.click(await screen.findByRole("button", { name: "Actions for Research" }));
     await userEvent.click(await screen.findByText("Move"));
     await userEvent.click(await screen.findByRole("button", { name: "Engineering" }));
@@ -1228,14 +1314,15 @@ describe("AgentsPage localized folder errors", () => {
 });
 
 describe("AgentsPage tree wait fallback", () => {
-  it("keeps the hierarchy when a background tree refresh fails once with cached data", () => {
+  it("keeps the hierarchy when a background tree refresh fails once with cached data", async () => {
     // Cached tree + first failed background attempt (retry still pending):
     // the hierarchy must not flip to flat for a transient failure.
     mocks.folderTreeFailures = 1;
-    renderPage("/acme/agents?folder=f-design");
-    expect(screen.getByRole("button", { name: "Open Research" })).toBeTruthy();
+    renderPage();
+    await expandFolder("Design");
+    expect(screen.getByRole("button", { name: "Expand Research" })).toBeTruthy();
     expect(screen.getByText("placed-agent")).toBeTruthy();
-    expect(screen.queryByText("loose-agent")).toBeNull();
+    expect(screen.getByText("loose-agent")).toBeTruthy();
     expect(
       screen.queryByText("Folders are unavailable. Showing agents in a flat list."),
     ).toBeNull();
@@ -1252,15 +1339,15 @@ describe("AgentsPage tree wait fallback", () => {
       screen.getByText("Folders are unavailable. Showing agents in a flat list."),
     ).toBeTruthy();
     expect(screen.queryByTestId("skeleton")).toBeNull();
-    expect(screen.queryByRole("button", { name: "Open Design" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Expand Design" })).toBeNull();
   });
 
-  it("falls back to the flat list after 5s without tree data, then restores the hierarchy when it arrives", async () => {
+  it("falls back to the flat list after 5s without tree data, then restores the expanded hierarchy", async () => {
     vi.useFakeTimers();
     try {
       mocks.folderTree = undefined;
-      const { controller, rerender } = renderPage("/acme/agents?folder=sq-game");
-      // Inside the grace window the skeleton shows; nothing flat flashes.
+      window.localStorage.setItem(EXPANSION_STORAGE_KEY, JSON.stringify(["sq-game"]));
+      const { controller, rerender } = renderPage();
       expect(screen.getAllByTestId("skeleton").length).toBeGreaterThan(0);
       expect(screen.queryByText("squad-leader")).toBeNull();
 
@@ -1285,17 +1372,17 @@ describe("AgentsPage tree wait fallback", () => {
         screen.getByText("Folders are unavailable. Showing agents in a flat list."),
       ).toBeTruthy();
 
-      // Late data restores the hierarchy at the requested squad folder.
       mocks.folderTree = folderTree;
       rerender(
-        <NavigationHarness controller={controller} initialPath="/acme/agents?folder=sq-game">
+        <NavigationHarness controller={controller} initialPath="/acme/agents">
           <AgentsPage />
         </NavigationHarness>,
       );
       expect(screen.queryByText("Folders are unavailable. Showing agents in a flat list.")).toBeNull();
+      expect(screen.getByRole("button", { name: "Collapse Game design" })).toBeTruthy();
       expect(screen.getByText("squad-leader")).toBeTruthy();
       expect(screen.getByText("squad-member")).toBeTruthy();
-      expect(screen.queryByText("loose-agent")).toBeNull();
+      expect(screen.getByText("loose-agent")).toBeTruthy();
     } finally {
       vi.useRealTimers();
     }

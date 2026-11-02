@@ -15,6 +15,7 @@ const (
 	dshProfileUnknown dshProfileState = iota
 	dshProfileMissing
 	dshProfilePresent
+	dshProfileNeedsMigration
 )
 
 // The discovery tick only reads the selected launcher's manifest; it never
@@ -39,6 +40,9 @@ func dshMulticaProfileState(executablePath string) dshProfileState {
 	var manifest dshProfileManifest
 	if json.Unmarshal(data, &manifest) != nil {
 		return dshProfileUnknown
+	}
+	if dshMulticaProfileNeedsMigration(manifest) {
+		return dshProfileNeedsMigration
 	}
 	if !dshProfileNamesRuntime(manifest) {
 		return dshProfileMissing

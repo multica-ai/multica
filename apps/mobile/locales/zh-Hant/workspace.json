@@ -1,0 +1,38 @@
+{
+  "title": "選擇工作區",
+  "members": "成員",
+  "agents": "智慧體",
+  "select": "選擇工作區",
+  "switch": {
+    "title": "切換工作區",
+    "message": "切換到 {{name}}？",
+    "confirm": "切換",
+    "current_a11y": "{{name}} 是當前工作區",
+    "switch_a11y": "切換到 {{name}}"
+  },
+  "empty": "你還沒有加入任何工作區。請聯絡工作區管理員以獲取邀請。",
+  "agent": {
+    "title": "智慧體",
+    "empty": "還沒有智慧體",
+    "search_placeholder": "搜尋智慧體...",
+    "coming_soon": "智慧體功能即將上線。"
+  },
+  "actions": {
+    "retry": "重試",
+    "sign_out": "退出登入"
+  },
+  "auth": {
+    "signed_in_as": "當前登入帳號"
+  },
+  "errors": {
+    "load_failed": "工作區載入失敗：{{message}}"
+  },
+  "pins": {
+    "errors": {
+      "load_failed": "固定項載入失敗：{{message}}"
+    },
+    "empty": "還沒有固定項。",
+    "unavailable_issue": "該固定任務不可用。",
+    "unavailable_project": "該固定專案不可用。"
+  }
+}

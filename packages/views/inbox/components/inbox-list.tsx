@@ -10,7 +10,7 @@ import {
   type ReactNode,
 } from "react";
 import { Virtuoso, type VirtuosoHandle } from "react-virtuoso";
-import { Archive, ChevronRight, Inbox } from "lucide-react";
+import { Archive, ChevronRight, Inbox } from "@multica/ui/icons";
 import { isEditableShortcutTarget } from "@multica/core/shortcuts";
 import { isImeComposing } from "@multica/core/utils";
 import type { InboxItem } from "@multica/core/types";

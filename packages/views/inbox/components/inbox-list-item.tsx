@@ -7,7 +7,7 @@ import {
 } from "../../issues/components/issue-agent-activity-indicator";
 import { ActorAvatar } from "../../common/actor-avatar";
 import { DeferredTooltip } from "../../common/deferred-tooltip";
-import { Archive, ArchiveRestore } from "lucide-react";
+import { Archive, ArchiveRestore } from "@multica/ui/icons";
 import type { InboxItem } from "@multica/core/types";
 import type { InboxView } from "./inbox-view";
 import { InboxDetailLabel, useTypeLabels } from "./inbox-detail-label";

@@ -17,7 +17,7 @@ const CLI_VERSIONED = (v: string, f: string) =>
 type OSKind = "windows" | "macos" | "linux" | null;
 
 const COPY: Record<
-  SupportedLocale,
+  Exclude<SupportedLocale, "zh-Hant">,
   {
     title: string;
     subtitle: string;
@@ -155,7 +155,7 @@ export function DownloadClient({
   desktopVersion: string | null;
   desktopPath: string | null;
 }) {
-  const copy = COPY[locale];
+  const copy = COPY[locale === "zh-Hant" ? "zh-Hans" : locale];
   const [os, setOs] = useState<OSKind>(null);
   const [copied, setCopied] = useState(false);
 

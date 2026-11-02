@@ -1,6 +1,9 @@
 {
   "tree": {
     "new_folder": "Nouveau dossier",
+    "new_subfolder": "Nouveau sous-dossier",
+    "expand_all": "Tout déplier",
+    "collapse_all": "Tout replier",
     "rename_folder": "Renommer",
     "move_folder": "Déplacer",
     "delete_folder": "Supprimer",

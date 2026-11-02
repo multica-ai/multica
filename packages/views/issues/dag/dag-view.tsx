@@ -1,7 +1,7 @@
 "use client";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { hashKey } from "@tanstack/react-query";
-import { AlertTriangle, FilterX, Loader2 } from "lucide-react";
+import { AlertTriangle, FilterX, Loader2 } from "@multica/ui/icons";
 import { Button } from "@multica/ui/components/ui/button";
 import { Skeleton } from "@multica/ui/components/ui/skeleton";
 import type { IssueTableQuerySpec } from "@multica/core/types";

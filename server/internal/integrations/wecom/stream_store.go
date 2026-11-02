@@ -948,7 +948,15 @@ func (s *streamStore) seal(ctx context.Context, senders *sendersRegistry, h stre
 		if attempt == 0 {
 			err = senders.stream(ctx, h, text, true)
 		} else {
-			err = senders.streamRewrite(ctx, h, text, true)
+			retryErr := senders.streamRewrite(ctx, h, text, true)
+			if provablyNotSent(retryErr) {
+				// A retry that wrote nothing says nothing about the frame before
+				// it, which reached the socket and was never answered. Keep that
+				// reading: taking the retry's would call the bubble provably
+				// empty and send its words again as a message.
+				break
+			}
+			err = retryErr
 		}
 		if !errors.Is(err, errStreamAckTimeout) || attempt >= streamCloseRetries {
 			break

@@ -130,8 +130,8 @@ WHERE workspace_id = sqlc.arg(workspace_id)
 RETURNING storage_key;
 
 -- name: ClaimSourceContextObjectIntentForCleanup :one
--- Materialize the claim so a nested-loop plan cannot re-evaluate LIMIT 1
--- for each target row and lease several intents to a single caller.
+-- MATERIALIZED pins the single candidate so nested-loop rescans cannot lease
+-- extra objects.
 WITH due AS MATERIALIZED (
     SELECT candidate.storage_key
     FROM issue_source_context_object_intent candidate

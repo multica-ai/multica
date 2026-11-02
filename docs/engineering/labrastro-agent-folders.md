@@ -186,71 +186,86 @@ The API installer and migration registrations use existing fork modules.
 Generated sqlc models/queries are derived output. The server does not change
 upstream agent/squad write paths or add WebSocket events. Page mounts follow.
 
-## Front-end page (OL-1030)
+## Front-end page (OL-1030, OL-1170)
 
-The agents page mounts the folder explorer. Logic lives in fork modules under
-`packages/views/agents/`: `lib/agent-folder-tree.ts` (pure tree model: squad
-folders derived with squad id = folder id, move destinations),
-`components/agents-page-folder-explorer.tsx` (page hook: URL location,
-hierarchy/flat organization, folder rows and menus, dialogs),
-`components/agent-folder-dialogs.tsx` (create/rename/move/delete folder, move
-agents) and `components/agent-tree-actions.tsx` (row-menu and batch-toolbar
-mounts). Copy lives in the `agent-folders` locale namespace. The shared
-`packages/views/common/folder-explorer/` components carry the agents-page
-usage (icon slot and row class on `FolderExplorerRow`); the skills page is
-unchanged.
+The agents and Skills pages share the in-place folder explorer. Logic lives in
+fork modules under `packages/views/agents/`: `lib/agent-folder-tree.ts` (pure
+tree model: squad folders derived with squad id = folder id, move destinations),
+`components/agents-page-folder-explorer.tsx` (page hook: hierarchy/flat
+organization, folder rows and menus, dialogs), `components/agent-folder-dialogs.tsx`
+(create/rename/move/delete folder, move agents) and
+`components/agent-tree-actions.tsx` (row-menu and batch-toolbar mounts). Copy
+lives in the `agent-folders` locale namespace.
+
+`packages/views/common/folder-explorer/` owns the depth-first visible-row model,
+parent-context composite keys, depth guides and expansion persistence. Expanded
+folder IDs are stored in `localStorage` by page namespace and workspace ID,
+default to collapsed, and never appear in the URL. Search/filter/archived views
+remain flat with path hints and restore the previous expansion state when
+cleared. The 5-second tree failure fallback is unchanged. The former breadcrumb
+bar, `?folder=` navigation and detail-page return-path mounts are removed.
 
 | Upstream file | Retained addition |
 | --- | --- |
-| `packages/views/agents/components/agents-page.tsx` | `useAgentsPageFolderExplorer` call, `listModel` / `organizeRows` and the `renderRow` aux-row branch, `navigationBar` / `notice` / `dialogs` slots, `withCurrentFolder` around detail links, `treeActions` props on the row kebab and batch toolbar. Modified upstream lines: the `NameCell` signature and its optional leader-badge / path-hint branches (the no-hint description branch keeps its text), virtualizer `count`, selection and select-all inputs, `visibleCount`, the empty-list condition and message, `showEmpty` (the upstream empty workspace remains; folders keep their rows), and the loading condition (includes the folder-tree request). The row JSX retains its original indentation; `git diff` and `git diff -w` agree |
-| `packages/views/agents/components/agent-row-actions.tsx` | Modified upstream lines: the props interface, the destructured signature, and one `AgentTreeRowMenuItems` mount after the duplicate item (fork `agent-tree-actions.tsx`) |
-| `packages/views/agents/components/agent-batch-toolbar.tsx` | Modified upstream lines: the props interface, the destructured signature, and one `AgentTreeBatchMoveAction` mount between set-access and archive (fork `agent-tree-actions.tsx`) |
-| `packages/views/agents/components/agent-detail-page.tsx` | `agentsPath` derived by `folderLocationPath` from the incoming `folder` query. Modified upstream lines: both error-state `BackHeader` paths and `AppLink` destinations, the `DetailHeader` `backHref`, and the archive-confirm `navigation.push` |
+| `packages/views/agents/components/agents-page.tsx` | `useAgentsPageFolderExplorer` call with the existing `isColVisible` predicate, `listModel` / `organizeRows` and the `renderRow` aux-row branch, `toolbarActions` / `notice` / `dialogs` slots, and `treeActions` props with the row's parent-folder context. Modified upstream lines: the `NameCell` signature and its optional leader-badge / path-hint / depth branches (the no-hint description branch keeps its text), virtualizer `count` and composite `getItemKey`, selection and select-all inputs over deduplicated visible agents, filtered `visibleCount`, the empty-list condition and message, `showEmpty` (the upstream empty workspace remains; folders keep their rows), and the loading condition (includes the folder-tree request). Detail links use `paths.agentDetail` directly. The row JSX retains its original indentation; `git diff` and `git diff -w` agree |
+| `packages/views/agents/components/agent-list-toolbar.tsx` | Optional `folderActions` mount on the right for root creation and expand/collapse-all controls |
+| `packages/views/agents/components/agent-row-actions.tsx` | Modified upstream lines: the props interface, the destructured signature, and one `AgentTreeRowMenuItems` mount after the duplicate item (fork `agent-tree-actions.tsx`); the row's parent folder selects move versus also-place wording |
+| `packages/views/agents/components/agent-batch-toolbar.tsx` | Modified upstream lines: the props interface, the destructured signature, and one `AgentTreeBatchMoveAction` mount between set-access and archive (fork `agent-tree-actions.tsx`). Mixed visible selections always use move wording |
 | `packages/views/agents/components/agents-page.test.tsx` | Folder-tree query mock returning an empty tree (two added mock branches) |
-| `packages/views/agents/components/agent-detail-page.test.tsx` | `renderPage` accepts a search string; one back-link folder-param test |
 | `packages/views/locales/index.ts`, `packages/views/i18n/resources-types.ts` | `agent-folders` namespace registration |
+
+Neither `agent-detail-page.tsx` nor `agent-detail-page.test.tsx` retains a folder
+mount or folder-query test. Their original upstream return destinations are
+restored without formatting changes.
 
 E2E: `e2e/agent-folders.spec.ts` drives the acceptance flow (create folder in
 place → move agent → squad folder appears on squad creation → move squad
-folder into a custom folder → place a squad member additionally → breadcrumb
-back to root) with `TestApiClient` plus direct DB seeding for runtimes and
-agents.
+folder into a custom folder → place a squad member additionally → expand and
+collapse in place → reload with expansion preserved) with `TestApiClient` plus
+direct DB seeding for runtimes and agents.
 
-## Directory rows and member previews (OL-1110)
+## Directory rows, presence and member previews (OL-1110, OL-1170)
 
-The agents explorer opts into `FolderExplorerRow layout="container"`. Its single
-flex cell spans the table, with no data-column placeholders. When data columns
-overflow horizontally, the directory row keeps its previews, counts, menus and
-chevrons visible throughout scrolling. Directory icons align with the name-column avatars
-at the initial scroll position. Directory rows are
-56px; agent rows remain 64px. The virtualizer uses the matching per-kind estimate
-and stable folder/agent keys so scope changes and navigation do not reuse the
-wrong height. Initial tree loading uses matching 56px directory skeletons.
-Skills keeps the default grid row and its existing slots.
+Agent directory rows use the same `ListGridRow` / `ListGridCell` tracks as agent
+rows, including checkbox, responsive placeholders and kebab cells. The aggregate
+presence cell occupies the existing status track and follows the toolbar's
+status-column visibility switch. It summarizes deduplicated subtree members as
+working (with online count), queued, online, offline or empty; its tooltip lists
+active members and their running/queued task counts.
 
-Directory colors use shared muted, background, border and warning tokens.
-The row fill is `bg-muted/40`, becoming `/70` on hover, with a 2px warning-color
-edge and an entering chevron. A 32px custom-folder tile or 32px squad avatar
-with a 16px folder badge preserves directory identity even on avatar failure.
-Badge and member rings use an opaque composite of the row and background tokens,
-including hover and dark mode. The open button supports keyboard navigation;
-the separate menu prevents its clicks from opening the directory.
+Directory rows are 56px and agent rows remain 64px. Folder and entry keys include
+parent context so a multi-location agent can appear under several expanded
+folders without virtualizer or React key collisions. Only the name cell indents
+by 20px per depth and renders vertical guides. Initial tree loading uses matching
+56px directory skeletons. Skills uses the same grid row, depth model and
+persistence with its existing trailing cells.
 
-`folderEntryIds` is the shared deduplicated subtree-membership source for both
-counts and previews. Only agents already present in the page's current scope
+Directory colors use shared muted, background, border, warning, info and success
+tokens. The row fill is `bg-muted/40`, becoming `/70` on hover. A 32px
+custom-folder tile or 32px squad avatar with a 16px folder badge preserves
+identity on avatar failure. Badge and member rings use an opaque composite of
+row/background tokens, including hover and dark mode. The expand/collapse button
+exposes `aria-expanded` and supports keyboard navigation; the separate menu does
+not toggle the row. Custom folder menus offer subfolder creation and expand the
+parent only after a confirmed create; managed folders do not offer it.
+
+`folderEntryIds` is the shared deduplicated subtree-membership source for counts,
+presence and previews. Only agents already present in the page's current scope
 are eligible. Custom folders include descendant custom/squad folders and keep
-the page's agent order, deduplicating agents with multiple placements. Squad
-previews use server member order, moving the leader first only when present in
-that scoped membership. Human members never enter the collection.
+the page's agent order, deduplicating agents with multiple placements. Working
+members appear first in previews; squad leaders follow working members, then
+online members, with stable order within each group. Every preview avatar uses
+the page's existing presence data for its status dot. Human members never enter
+the collection.
 
 Each preview shows 24px image, emoji or fallback avatars with name titles and
-inline-flex wrappers so all rings stay circular and vertically aligned. The avatar
-component owns truncation; the page passes its full scoped membership. At
-container widths >= `@2xl`, four avatars precede overflow and a right-aligned
-count; below that breakpoint, three precede recalculated overflow and the count
-moves under the name. Empty folders show a dashed localized badge and zero count.
-Search/filter/archived flat views, selection, placement permissions, breadcrumbs
-and detail return paths retain their existing behavior.
+inline-flex wrappers so all rings stay circular and vertically aligned. The name
+cell is a named `folder-name` size container: at 22rem or below, previews, type
+labels and counts stay hidden so folder names remain readable; above that track
+width, four avatars precede one overflow badge. Empty folders show a dashed
+localized badge and zero count when metadata is visible. Search/filter/archived
+flat views, selection, placement permissions and detail navigation retain their
+non-folder-query behavior.
 
 Squad detail mutations invalidate `agentFolderKeys.tree(wsId)` after successful
 updates (including avatar/name and the separate leader action), member add/remove
@@ -258,9 +273,11 @@ and archive, in addition to existing squad queries. Invalidation stays scoped
 to that workspace and complements realtime/focus refreshes.
 
 Regression coverage: handler avatar signing/null/external cases; core signed URL
-parsing; shared membership and Skills tests; scoped/deduplicated/leader-first
-previews; responsive overflow and avatar fallback; directory Enter/menu behavior;
-and real QueryClient invalidation driven by squad detail controls.
+parsing; shared membership, expansion and Skills tests; scoped/deduplicated
+previews with working/leader/online ordering and status dots; aggregate presence
+and status-track visibility; responsive overflow and avatar fallback; directory
+Enter/menu behavior; and real QueryClient invalidation driven by squad detail
+controls.
 
 ## Rollback
 

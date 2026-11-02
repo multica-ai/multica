@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Check, LoaderCircle } from "lucide-react";
+import { Check, LoaderCircle } from "@multica/ui/icons";
 import { Button } from "@multica/ui/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@multica/ui/components/ui/card";
 import { Textarea } from "@multica/ui/components/ui/textarea";

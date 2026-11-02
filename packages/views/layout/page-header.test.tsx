@@ -1,4 +1,4 @@
-import { ListTodo, Plus, Zap } from "lucide-react";
+import { ListTodo, Plus, Zap } from "@multica/ui/icons";
 import { within } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 

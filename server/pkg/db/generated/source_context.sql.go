@@ -99,8 +99,8 @@ WHERE intent.storage_key = due.storage_key
 RETURNING intent.storage_key, intent.workspace_id, intent.source_context_id, intent.attachment_id, intent.object_url, intent.state, intent.lease_token, intent.lease_expires_at, intent.next_attempt_at, intent.last_error, intent.created_at
 `
 
-// Materialize the claim so a nested-loop plan cannot re-evaluate LIMIT 1
-// for each target row and lease several intents to a single caller.
+// MATERIALIZED pins the single candidate so nested-loop rescans cannot lease
+// extra objects.
 func (q *Queries) ClaimSourceContextObjectIntentForCleanup(ctx context.Context, leaseToken pgtype.UUID) (IssueSourceContextObjectIntent, error) {
 	row := q.db.QueryRow(ctx, claimSourceContextObjectIntentForCleanup, leaseToken)
 	var i IssueSourceContextObjectIntent

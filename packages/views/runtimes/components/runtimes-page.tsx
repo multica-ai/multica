@@ -14,7 +14,7 @@ import {
   Search,
   Server,
   SquareTerminal,
-} from "lucide-react";
+} from "@multica/ui/icons";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { DOWNLOAD_PAGE_URL } from "@multica/core/deployment";
@@ -72,7 +72,7 @@ import {
 } from "./mika-runtime-choice";
 import { Skeleton } from "@multica/ui/components/ui/skeleton";
 import { CollectionPageHeader } from "../../layout/collection-page";
-import { PAGE_GUTTER, PAGE_RAIL, PageHeader } from "../../layout/page-header";
+import { PAGE_GUTTER, PAGE_RAIL } from "../../layout/page-header";
 import { cn } from "@multica/ui/lib/utils";
 import {
   AppLink,
@@ -232,12 +232,12 @@ export function RuntimesPage({
     });
   }, [machines, runtimeProfiles]);
 
-  if (isAuthLoading || runtimesLoading || profilesLoading) {
-    return <RuntimesPageSkeleton />;
-  }
+  // The header, toolbar and column headers render through loading; only the
+  // rows wait, so nothing above them moves when the list lands.
+  const listLoading = isAuthLoading || runtimesLoading || profilesLoading;
 
   const isDesktop = hasLocalMachine === true;
-  const qoder = qoderConnection?.available === true ? qoderConnection : null;
+  const qoder = qoderConnection ?? null;
   const qoderHref = paths.runtimeDetail(QODER_RUNTIME_LOCATOR);
   // Qoder's runtime registers like a machine, but it is listed once, as a
   // cloud service — never as a machine, even when this server cannot run
@@ -350,7 +350,9 @@ export function RuntimesPage({
                 <ListGridHeaderCell aria-hidden="true" />
               </ListGridHeader>
 
-              {nothingMatches ? (
+              {listLoading ? (
+                <RuntimeRowsSkeleton />
+              ) : nothingMatches ? (
                 <div
                   role="row"
                   className="col-span-full px-4 py-10 text-center text-caption text-muted-foreground"
@@ -1218,31 +1220,46 @@ function ProviderIconStack({ providers }: { providers: string[] }) {
   );
 }
 
-function RuntimesPageSkeleton() {
+function RuntimeRowsSkeleton() {
   return (
-    <div className="flex min-h-0 flex-1 flex-col">
-      <PageHeader>
-        <Skeleton className="h-4 w-24" />
-      </PageHeader>
-      <div className={cn(PAGE_RAIL, PAGE_GUTTER, "py-6", "2xl:max-w-[1920px]")}>
-        <div className="overflow-hidden rounded-lg border">
-          {Array.from({ length: 5 }).map((_, index) => (
-            <div
-              key={index}
-              className="flex h-[76px] items-center gap-3 border-b px-4 last:border-b-0"
-            >
-              <Skeleton className="h-10 w-10 rounded-lg" />
-              <div className="flex-1">
-                <Skeleton className="h-4 w-44" />
-                <Skeleton className="mt-2 h-3 w-28" />
-              </div>
-              <Skeleton className="hidden h-4 w-24 md:block" />
-              <Skeleton className="hidden h-4 w-28 lg:block" />
-            </div>
-          ))}
-        </div>
+    <>
+      <div
+        role="row"
+        className="col-span-full flex h-9 items-center border-b bg-muted/40 px-4"
+      >
+        <Skeleton className="h-3 w-20" />
       </div>
-    </div>
+      {Array.from({ length: 3 }).map((_, index) => (
+        <ListGridRow key={index} className="h-auto min-h-14 border-b hover:bg-transparent">
+          <ListGridCell className="gap-3">
+            <Skeleton className="size-8 shrink-0 rounded-lg" />
+            <div className="min-w-0 flex-1">
+              <Skeleton className="h-3.5 w-36 max-w-full" />
+              <Skeleton className="mt-1.5 h-3 w-24 max-w-full" />
+            </div>
+          </ListGridCell>
+          <ListGridCell className={OPTIONAL_CELL}>
+            <Skeleton className="size-4 rounded-sm" />
+          </ListGridCell>
+          <ListGridCell className={OPTIONAL_CELL}>
+            <Skeleton className="h-3 w-6" />
+          </ListGridCell>
+          <ListGridCell className={OPTIONAL_CELL}>
+            <Skeleton className="h-3 w-10" />
+          </ListGridCell>
+          <ListGridCell className={METRICS_CELL}>
+            <Skeleton className="h-3 w-12" />
+          </ListGridCell>
+          <ListGridCell className={METRICS_CELL}>
+            <Skeleton className="h-3 w-12" />
+          </ListGridCell>
+          <ListGridCell>
+            <Skeleton className="h-3 w-16" />
+          </ListGridCell>
+          <ListGridCell aria-hidden="true" />
+        </ListGridRow>
+      ))}
+    </>
   );
 }
 

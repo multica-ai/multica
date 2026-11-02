@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
-import { checkSources, hasRetiredBrand, sourceViolations } from "./check-branding.mjs";
+import { checkAnalyticsDeployment, checkSources, hasRetiredBrand, sourceViolations } from "./check-branding.mjs";
 import policy from "./branding-policy.json" with { type: "json" };
 
 test("rejects old copy, including CJK suffixes and template/JSX text", () => {
@@ -52,7 +52,7 @@ test("walks every product source root and checks JSX, templates, metadata, HTML 
 
 test("skips declared source exceptions, upstream locales, attribution and non-production files", (t) => {
   const files = Object.fromEntries(policy.sourceExceptions.map(({ path }) => [path, 'export const title = "Multica";']));
-  for (const locale of ["en", "zh-Hans", "ja", "ko", "fr"]) {
+  for (const locale of ["en", "zh-Hans", "zh-Hant", "ja", "ko", "fr"]) {
     files[`packages/views/locales/${locale}/onboarding.json`] = '{"title":"Start with Mika"}';
   }
   for (const locale of ["en", "zh-Hans"]) {
@@ -97,4 +97,17 @@ test("preserves technical identities without exempting surrounding copy", () => 
   for (const group of Object.values(policy)) {
     for (const entry of group) assert.ok(entry.reason.trim(), JSON.stringify(entry));
   }
+});
+
+
+test("deployment analytics is forbidden even through empty compose or Helm passthrough", (t) => {
+  for (const [path, value] of [
+    ["docker-compose.selfhost.yml", "GOOGLE_ANALYTICS_ID: ${GOOGLE_ANALYTICS_ID:-}"],
+    ["deploy/helm/multica/values.yaml", "googleAnalyticsId: \"\""],
+    [".env.example", "GOOGLE_ANALYTICS_ID="],
+    [".github/workflows/deploy.yml", "GOOGLE_ANALYTICS_ID: G-123"],
+  ]) {
+    assert.equal(checkAnalyticsDeployment(fixture(t, { [path]: value })).length, 1, path);
+  }
+  assert.deepEqual(checkAnalyticsDeployment(fixture(t, { "docker-compose.selfhost.yml": "ANALYTICS_DISABLED: true" })), []);
 });

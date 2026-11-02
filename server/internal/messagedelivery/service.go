@@ -634,18 +634,12 @@ func (s *Service) buildDecisionPayload(ctx context.Context, ap db.Autopilot, in 
 	return target, content, ref, len(shards), nil
 }
 
-// issueRef resolves the linked issue's human-facing identifier, its FIRST
-// terminal status, and the workspace slug for a create_issue card.
-//
-// The first-terminal status is the one the run completed against, read from
-// what the terminal-sync boundary persisted into run.result
-// (first_terminal_status — see service.SyncRunFromIssue). When that signal
-// is absent (runs completed before it existed) the CURRENT issue status is
-// used ONLY if the issue has provably not been touched since the run
-// completed; otherwise the status is reported as empty and the card wording
-// degrades instead of presenting a later status as the first terminal one
-// (review R6). A deleted issue degrades to no identifier — the run still
-// delivers, just without a link, instead of failing the decision.
+// issueRef resolves the linked issue identifier, its status at the run's first
+// settlement, and the workspace slug for a create_issue card. The atomic
+// terminal write freezes first_terminal_status alongside the run and quota;
+// later issue changes cannot rewrite it. Older runs without that structured
+// signal display an unnamed status. A deleted issue removes the link without
+// preventing delivery.
 func (s *Service) issueRef(ctx context.Context, workspaceID pgtype.UUID, in decisionInput) (string, string, string) {
 	if !in.Run.IssueIDValid {
 		return "", "", ""

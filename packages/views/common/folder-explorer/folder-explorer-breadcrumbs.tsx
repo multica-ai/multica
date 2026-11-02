@@ -1,6 +1,6 @@
 "use client";
 
-import { ChevronRight } from "lucide-react";
+import { ChevronRight } from "@multica/ui/icons";
 import { cn } from "@multica/ui/lib/utils";
 import type { FolderExplorerFolder } from "./model";
 

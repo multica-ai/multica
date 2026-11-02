@@ -77,7 +77,7 @@ func (h *Handler) readQoderSettings(ctx context.Context, ws string) (qoderSettin
 	}
 	raw, err := h.openVCSSecret(encrypted)
 	if err != nil {
-		return qoderSettings{}, false, "", "", fmt.Errorf("cannot decrypt QCA configuration")
+		return qoderSettings{}, false, "", "", fmt.Errorf("cannot decrypt Qoder Cloud Agents configuration")
 	}
 	var cfg qoderSettings
 	err = json.Unmarshal([]byte(raw), &cfg)
@@ -100,7 +100,7 @@ func (h *Handler) GetQoderConnection(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err != nil {
-		writeError(w, 500, "cannot read QCA configuration")
+		writeError(w, 500, "cannot read Qoder Cloud Agents configuration")
 		return
 	}
 	var online bool
@@ -129,7 +129,7 @@ func (h *Handler) GetQoderConnection(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) qoderInput(w http.ResponseWriter, r *http.Request, ws string) (qoderSettings, bool) {
 	var cfg qoderSettings
 	if h.VCSSecretBox == nil {
-		writeError(w, 503, "QCA requires MULTICA_VCS_SECRET_KEY on the server")
+		writeError(w, 503, "Qoder Cloud Agents requires MULTICA_VCS_SECRET_KEY on the server")
 		return cfg, false
 	}
 	var req struct {
@@ -144,7 +144,7 @@ func (h *Handler) qoderInput(w http.ResponseWriter, r *http.Request, ws string) 
 	decoder := json.NewDecoder(http.MaxBytesReader(w, r.Body, 64<<10))
 	decoder.DisallowUnknownFields()
 	if err := decoder.Decode(&req); err != nil {
-		writeError(w, 400, "invalid QCA configuration")
+		writeError(w, 400, "invalid Qoder Cloud Agents configuration")
 		return cfg, false
 	}
 	var extra any
@@ -154,7 +154,7 @@ func (h *Handler) qoderInput(w http.ResponseWriter, r *http.Request, ws string) 
 	}
 	cfg, _, _, _, err := h.readQoderSettings(r.Context(), ws)
 	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
-		writeError(w, 500, "cannot read QCA configuration")
+		writeError(w, 500, "cannot read Qoder Cloud Agents configuration")
 		return cfg, false
 	}
 	cfg.Name = strings.TrimSpace(req.Name)
@@ -183,7 +183,7 @@ func (h *Handler) qoderInput(w http.ResponseWriter, r *http.Request, ws string) 
 		cfg.QoderToken = strings.TrimSpace(req.QoderToken)
 	}
 	if cfg.QoderToken == "" || strings.ContainsAny(cfg.QoderToken, "\r\n\t ") {
-		writeError(w, 400, "QCA token is required")
+		writeError(w, 400, "Qoder PAT is required")
 		return cfg, false
 	}
 	if req.GitHubTokens != nil {
@@ -225,18 +225,18 @@ func (h *Handler) CheckQoderConnection(w http.ResponseWriter, r *http.Request) {
 	for path, expectedID := range map[string]string{"/environments/" + url.PathEscape(cfg.EnvironmentID): cfg.EnvironmentID} {
 		req, err := http.NewRequestWithContext(r.Context(), "GET", cfg.BaseURL+path, nil)
 		if err != nil {
-			writeError(w, 400, "invalid QCA resource")
+			writeError(w, 400, "invalid Qoder Cloud Agents resource")
 			return
 		}
 		req.Header.Set("Authorization", "Bearer "+cfg.QoderToken)
 		res, err := client.Do(req)
 		if err != nil {
-			writeError(w, 502, "QCA connection failed")
+			writeError(w, 502, "Qoder Cloud Agents connection failed")
 			return
 		}
 		if res.StatusCode != 200 {
 			res.Body.Close()
-			writeError(w, 400, fmt.Sprintf("QCA access check returned HTTP %d", res.StatusCode))
+			writeError(w, 400, fmt.Sprintf("Qoder Cloud Agents access check returned HTTP %d", res.StatusCode))
 			return
 		}
 		var resource struct {
@@ -245,7 +245,7 @@ func (h *Handler) CheckQoderConnection(w http.ResponseWriter, r *http.Request) {
 		err = json.NewDecoder(io.LimitReader(res.Body, 1<<20)).Decode(&resource)
 		res.Body.Close()
 		if err != nil || resource.ID != expectedID {
-			writeError(w, 502, "invalid QCA resource response")
+			writeError(w, 502, "invalid Qoder Cloud Agents resource response")
 			return
 		}
 	}
@@ -277,22 +277,22 @@ func (h *Handler) saveQoderConnection(w http.ResponseWriter, r *http.Request, re
 	}
 	tx, err := h.TxStarter.Begin(r.Context())
 	if err != nil {
-		writeError(w, 500, "cannot save QCA configuration")
+		writeError(w, 500, "cannot save Qoder Cloud Agents configuration")
 		return
 	}
 	defer tx.Rollback(r.Context())
 	// Serialize writes even before a connection exists.
 	if _, err = tx.Exec(r.Context(), `SELECT pg_advisory_xact_lock(hashtextextended($1, 19))`, uuidToString(ws)); err != nil {
-		writeError(w, 500, "cannot lock QCA configuration")
+		writeError(w, 500, "cannot lock Qoder Cloud Agents configuration")
 		return
 	}
 	var busy bool
 	if err := tx.QueryRow(r.Context(), `SELECT EXISTS(SELECT 1 FROM cloud_agent_connection WHERE provider='qoder_cloud' AND workspace_id=$1 AND busy_until>now())`, ws).Scan(&busy); err != nil {
-		writeError(w, 500, "cannot check QCA connection")
+		writeError(w, 500, "cannot check Qoder Cloud Agents connection")
 		return
 	}
 	if busy {
-		writeError(w, 409, "QCA is synchronizing; retry shortly")
+		writeError(w, 409, "Qoder Cloud Agents is synchronizing; retry shortly")
 		return
 	}
 
@@ -317,7 +317,7 @@ func (h *Handler) saveQoderConnection(w http.ResponseWriter, r *http.Request, re
 			return
 		}
 		if len(state.Cleanup) > 0 || len(state.Runs) > 0 || (len(state.Run) > 0 && string(state.Run) != "null") {
-			writeError(w, 409, "wait for QCA execution cleanup before changing configuration")
+			writeError(w, 409, "wait for Qoder Cloud Agents execution cleanup before changing configuration")
 			return
 		}
 	}
@@ -326,11 +326,11 @@ func (h *Handler) saveQoderConnection(w http.ResponseWriter, r *http.Request, re
 	var active bool
 	err = tx.QueryRow(r.Context(), `SELECT EXISTS(SELECT 1 FROM agent_task_queue t JOIN agent_runtime rt ON rt.id=t.runtime_id WHERE rt.workspace_id=$1 AND rt.provider='qoder_cloud' AND t.status IN ('running','dispatched'))`, ws).Scan(&active)
 	if err != nil {
-		writeError(w, 500, "cannot check active QCA tasks")
+		writeError(w, 500, "cannot check active Qoder Cloud Agents tasks")
 		return
 	}
 	if active {
-		writeError(w, 409, "wait for active QCA tasks to finish before changing configuration")
+		writeError(w, 409, "wait for active Qoder Cloud Agents tasks to finish before changing configuration")
 		return
 	}
 	rawToken, err := auth.GenerateDaemonToken()
@@ -348,7 +348,7 @@ func (h *Handler) saveQoderConnection(w http.ResponseWriter, r *http.Request, re
 	raw, _ := json.Marshal(cfg)
 	encrypted, err := h.sealVCSSecret(string(raw))
 	if err != nil {
-		writeError(w, 500, "cannot encrypt QCA configuration")
+		writeError(w, 500, "cannot encrypt Qoder Cloud Agents configuration")
 		return
 	}
 	_, err = tx.Exec(r.Context(), `DELETE FROM daemon_token WHERE id IN (SELECT token_id FROM cloud_agent_connection WHERE provider='qoder_cloud' AND workspace_id=$1)`, ws)
@@ -356,7 +356,7 @@ func (h *Handler) saveQoderConnection(w http.ResponseWriter, r *http.Request, re
 		_, err = tx.Exec(r.Context(), `INSERT INTO cloud_agent_connection(workspace_id,provider,owner_id,token_id,config_encrypted) VALUES($1,'qoder_cloud',$2,$3,$4) ON CONFLICT(workspace_id,provider) DO UPDATE SET owner_id=excluded.owner_id,token_id=excluded.token_id,config_encrypted=excluded.config_encrypted,enabled=($5 OR cloud_agent_connection.enabled),journal_encrypted='',revision=cloud_agent_connection.revision+1,status=CASE WHEN $5 OR cloud_agent_connection.enabled THEN 'starting' ELSE cloud_agent_connection.status END,last_error='',updated_at=now()`, ws, parseUUID(user), pat.ID, encrypted, resume)
 	}
 	if err != nil || tx.Commit(r.Context()) != nil {
-		writeError(w, 500, "cannot save QCA configuration")
+		writeError(w, 500, "cannot save Qoder Cloud Agents configuration")
 		return
 	}
 	h.DaemonTokenCache.Invalidate(r.Context(), revokedHash)
@@ -538,22 +538,22 @@ func (h *Handler) StopQoderConnection(w http.ResponseWriter, r *http.Request) {
 	}
 	tx, err := h.TxStarter.Begin(r.Context())
 	if err != nil {
-		writeError(w, 500, "cannot stop QCA runtime")
+		writeError(w, 500, "cannot stop Qoder Cloud Agents runtime")
 		return
 	}
 	defer tx.Rollback(r.Context())
 	_, err = tx.Exec(r.Context(), `SELECT pg_advisory_xact_lock(hashtextextended($1,19))`, uuidToString(ws))
 	if err != nil {
-		writeError(w, 500, "cannot lock QCA configuration")
+		writeError(w, 500, "cannot lock Qoder Cloud Agents configuration")
 		return
 	}
 	var busy bool
 	if err := tx.QueryRow(r.Context(), `SELECT EXISTS(SELECT 1 FROM cloud_agent_connection WHERE provider='qoder_cloud' AND workspace_id=$1 AND busy_until>now())`, ws).Scan(&busy); err != nil {
-		writeError(w, 500, "cannot check QCA connection")
+		writeError(w, 500, "cannot check Qoder Cloud Agents connection")
 		return
 	}
 	if busy {
-		writeError(w, 409, "QCA is synchronizing; retry shortly")
+		writeError(w, 409, "Qoder Cloud Agents is synchronizing; retry shortly")
 		return
 	}
 	var revokedHash string
@@ -561,11 +561,11 @@ func (h *Handler) StopQoderConnection(w http.ResponseWriter, r *http.Request) {
 	var active bool
 	err = tx.QueryRow(r.Context(), `SELECT EXISTS(SELECT 1 FROM agent_task_queue t JOIN agent_runtime rt ON rt.id=t.runtime_id WHERE rt.workspace_id=$1 AND rt.provider='qoder_cloud' AND t.status IN ('running','dispatched'))`, ws).Scan(&active)
 	if err != nil {
-		writeError(w, 500, "cannot check active QCA tasks")
+		writeError(w, 500, "cannot check active Qoder Cloud Agents tasks")
 		return
 	}
 	if active {
-		writeError(w, 409, "wait for or cancel active QCA tasks before stopping")
+		writeError(w, 409, "wait for or cancel active Qoder Cloud Agents tasks before stopping")
 		return
 	}
 	_, err = tx.Exec(r.Context(), `DELETE FROM daemon_token WHERE id IN (SELECT token_id FROM cloud_agent_connection WHERE provider='qoder_cloud' AND workspace_id=$1)`, ws)
@@ -575,7 +575,7 @@ func (h *Handler) StopQoderConnection(w http.ResponseWriter, r *http.Request) {
 	}
 	_, err = tx.Exec(r.Context(), `UPDATE cloud_agent_connection SET enabled=false,revision=revision+1,status='stopped',last_error='' WHERE provider='qoder_cloud' AND workspace_id=$1`, ws)
 	if err != nil || tx.Commit(r.Context()) != nil {
-		writeError(w, 500, "cannot stop QCA runtime")
+		writeError(w, 500, "cannot stop Qoder Cloud Agents runtime")
 		return
 	}
 	h.DaemonTokenCache.Invalidate(r.Context(), revokedHash)

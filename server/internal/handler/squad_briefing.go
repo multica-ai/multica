@@ -18,8 +18,9 @@ import (
 //
 // Keep this text English-only (matches existing agent-harness conventions)
 // and keep the mention syntax exactly aligned with util.MentionRe — the
-// "Squad Roster" block below renders concrete examples that round-trip
-// through util.ParseMentions, and the protocol text refers to that format.
+// "Squad Roster" block below renders copyable examples as inline code so the
+// briefing itself does not trigger, and the pasted syntax round-trips
+// through util.ParseMentions. The protocol text refers to that format.
 //
 // Responsibility 5 is the single statement of the no_action rule (MUL-6984).
 // The runtime brief's workflow step 4 and ## Output, and the per-turn reply
@@ -121,6 +122,48 @@ const squadParentStatusOwned = `6. **Own the parent issue status.** This issue i
    when no comment asked you to. Leave ` + "`" + `done` + "`" + ` to a human reviewer or
    existing integrations (for example a PR with close intent that merges).`
 
+// leaderWorkflow says whether an owning leader's issue follows a project
+// workflow that came with the claim, and whether the daemon's runtime brief
+// still states the built-in in_progress / in_review rules (MUL-8145).
+type leaderWorkflow int
+
+const (
+	leaderNoWorkflow leaderWorkflow = iota
+	// leaderWorkflowCurrentDaemon: the runtime brief points at
+	// [Project workflow] and states no built-in moves.
+	leaderWorkflowCurrentDaemon
+	// leaderWorkflowLegacyDaemon: the runtime brief still says to set
+	// in_progress first and in_review on delivery, so responsibility 6 has
+	// to rule those moves out for this issue.
+	leaderWorkflowLegacyDaemon
+)
+
+// squadParentStatusOwnedInWorkflow is responsibility 6 for an owning leader
+// whose issue follows a project workflow that came with the claim (MUL-8145).
+// The workflow may list neither in_progress nor in_review — the server rejects
+// a status outside it — and entering a step with a handler reassigns the
+// issue, so squadParentStatusOwned's "move to in_progress, then in_review"
+// would be refused or hand the parent away mid-dispatch. The ownership
+// boundary and the standing wrap-up authorization stay; the moves become the
+// [Project workflow] commands the runtime brief points at.
+const squadParentStatusOwnedInWorkflow = `6. **Own the parent issue status — through its project workflow.** This issue
+   is assigned to your squad and follows its project workflow, so its status
+   is yours to move (unless Agent Identity forbids status changes), using only
+   the commands in ` + "`" + `[Project workflow]` + "`" + `. The parent stays at its
+   current step while members work — a successful dispatch is not completion.
+   On later turns, do not move it for routine progress updates. When you
+   confirm the overall goal is met, run that block's Step done command — this
+   responsibility is itself the standing instruction that authorizes that
+   change, so do it even when no comment asked you to.`
+
+// squadParentStatusWorkflowOverridesRuntime follows
+// squadParentStatusOwnedInWorkflow for a daemon whose runtime brief still
+// states the built-in moves.
+const squadParentStatusWorkflowOverridesRuntime = `
+   This overrides the in_progress / in_review rules in your runtime
+   instructions: never set either on this issue just to mark progress or
+   delivery.`
+
 // squadParentStatusNotOwned is responsibility 6 for every other leader path:
 // an @squad mention on an issue owned by someone else (MUL-3724), and
 // quick-create, where no issue exists yet on this turn. Granting status
@@ -165,11 +208,30 @@ const squadOperatingProtocolHardRules = `Hard rules:
   @mention on this issue, or create a ` + "`" + `todo` + "`" + ` child issue assigned to
   them. Never both for the same work.`
 
+// squadSteerRule is added to the hard rules only for a daemon that ships a
+// CLI with --steer (protocol.DaemonCapabilityCLICommentSteerV1): an older CLI
+// rejects the flag and the comment is never posted.
+const squadSteerRule = `- A worker already running on this issue gets a new comment only after its
+  run ends. To correct it mid-run (wrong direction, a missing fact, a
+  narrower scope), steer that run instead: add the comment with
+  ` + "`" + `--steer <run-id>` + "`" + ` (run ids from ` + "`" + `multica issue runs <issue-id> --active` + "`" + `), or
+  ` + "`" + `--steer-active` + "`" + ` for every running worker you may steer. Only a run that
+  accepts additional messages (` + "`" + `can_supplement: true` + "`" + ` in
+  ` + "`" + `multica issue runs <issue-id> --active --output json` + "`" + `) can be steered, and
+  the command reports per run whether it was. New work is still a normal
+  delegation.`
+
 // squadOperatingProtocolFor assembles the protocol, selecting the parent-status
-// responsibility that matches this leader's actual authority over the issue.
-func squadOperatingProtocolFor(ownsIssueStatus bool) string {
+// responsibility that matches this leader's actual authority over the issue
+// and, for an owner, whether the issue's project workflow governs its moves.
+func squadOperatingProtocolFor(ownsIssueStatus bool, workflow leaderWorkflow) string {
 	status := squadParentStatusNotOwned
-	if ownsIssueStatus {
+	switch {
+	case ownsIssueStatus && workflow == leaderWorkflowCurrentDaemon:
+		status = squadParentStatusOwnedInWorkflow
+	case ownsIssueStatus && workflow == leaderWorkflowLegacyDaemon:
+		status = squadParentStatusOwnedInWorkflow + squadParentStatusWorkflowOverridesRuntime
+	case ownsIssueStatus:
 		status = squadParentStatusOwned
 	}
 	return squadOperatingProtocolHeader + "\n" + status + "\n\n" + squadOperatingProtocolHardRules
@@ -190,12 +252,22 @@ func squadOperatingProtocolFor(ownsIssueStatus bool) string {
 // including ones where the squad is a guest on someone else's issue, so this
 // flag is what keeps status authority from leaking along with the roster.
 //
+// workflow says whether the claim carries a [Project workflow] block for the
+// issue; an owning leader then moves the parent with that block's commands
+// instead of in_progress / in_review (MUL-8145).
+//
 // Archived agent members are skipped — there's no point asking the leader
 // to delegate to a retired agent. Members whose underlying record can't be
 // loaded (deleted user/agent races, FK weirdness) are also skipped silently.
-func buildSquadLeaderBriefing(ctx context.Context, q *db.Queries, squad db.Squad, ownsIssueStatus bool) string {
+//
+// steer adds the rule for steering a running worker; see squadSteerRule.
+func buildSquadLeaderBriefing(ctx context.Context, q *db.Queries, squad db.Squad, ownsIssueStatus bool, workflow leaderWorkflow, steer bool) string {
 	var sb strings.Builder
-	sb.WriteString(squadOperatingProtocolFor(ownsIssueStatus))
+	sb.WriteString(squadOperatingProtocolFor(ownsIssueStatus, workflow))
+	if steer {
+		sb.WriteString("\n")
+		sb.WriteString(squadSteerRule)
+	}
 	sb.WriteString("\n\n")
 	sb.WriteString(buildSquadRoster(ctx, q, squad))
 

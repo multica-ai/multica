@@ -4,8 +4,9 @@ description: Connectez un agent à Feishu et confiez-lui du travail directement 
 ---
 
 import { Callout } from "fumadocs-ui/components/callout";
+import { Step, Steps } from "fumadocs-ui/components/steps";
 
-Connectez un agent Multica en tant que bot Feishu : les membres de l'équipe peuvent lui envoyer des messages directs dans Feishu, le @mentionner dans un groupe ou utiliser `/issue` pour créer des tâches. Les conversations et les historiques d'exécution restent enregistrés dans l'espace de travail Multica.
+Connectez un agent Multica comme bot Feishu pour discuter dans les conversations privées ou de groupe autorisées, y compris avec des participants sans compte Labrastro. L'agent clarifie et résume leurs demandes, puis utilise ses outils habituels pour publier sous sa propre identité. Les conversations et les exécutions restent dans l'espace de travail.
 
 Chaque bot correspond à un seul agent. Pour utiliser plusieurs agents dans Feishu, connectez un bot pour chacun d'eux.
 
@@ -13,27 +14,32 @@ Chaque bot correspond à un seul agent. Pour utiliser plusieurs agents dans Feis
 
 Le propriétaire de l'agent ainsi que les propriétaires et administrateurs de l'espace de travail peuvent lancer une connexion :
 
-1. Ouvrez **Agents** et sélectionnez l'agent à connecter à Feishu.
-2. Accédez à **Intégrations** et cliquez sur **Associer à Feishu**.
-3. Scannez le QR code avec Feishu et confirmez l'autorisation.
-4. Revenez dans Multica. Lorsque la page affiche **Connecté à Feishu**, le bot est prêt.
+<Steps>
+<Step>
+Ouvrez **Agents** et sélectionnez l'agent à connecter à Feishu.
+</Step>
+<Step>
+Accédez à **Intégrations** et cliquez sur **Associer à Feishu**.
+</Step>
+<Step>
+Scannez le QR code avec Feishu et confirmez l'autorisation. Le QR code ne sert qu'une fois ; s'il expire, générez-en un nouveau.
+</Step>
+<Step>
+Revenez dans Multica. Lorsque la page affiche **Connecté à Feishu**, autorisez ensuite les conversations ci-dessous.
+</Step>
+</Steps>
 
-
-Le QR code est un identifiant à usage unique ; s'il expire, générez-en un nouveau. Un agent déjà connecté n'affiche plus le point d'entrée de scan ; pour renommer le bot ou ajuster ses permissions, cliquez sur **Gérer dans Feishu**.
+Un agent déjà connecté n'affiche plus le point d'entrée de scan ; pour renommer le bot ou ajuster ses permissions, cliquez sur **Gérer dans Feishu**.
 
 <Callout type="info">
 Les nouvelles connexions ne sont actuellement ouvertes qu'à Feishu en Chine continentale. Les connexions Lark internationales existantes continuent de fonctionner et peuvent toujours être gérées.
 </Callout>
 
-## Première utilisation
+## Autoriser les conversations
 
-La première fois qu'un membre écrit au bot, il reçoit un lien d'association de compte :
+Après la connexion du bot, ouvrez **Agent → Intégrations** ou **Paramètres → Intégrations**. Développez **Conversations avec l'agent**, indiquez les identifiants des groupes et messages directs autorisés, puis choisissez **Autoriser les conversations**. La personne qui autorise doit pouvoir gérer et invoquer l'agent. L'autorisation couvre ses outils habituels dans tout l'espace de travail actuel ; tous les participants aux conversations autorisées peuvent fournir des instructions.
 
-1. Ouvrez le lien et connectez-vous à Multica.
-2. Confirmez le compte de l'espace de travail à associer.
-3. Revenez dans Feishu et renvoyez le message.
-
-Ce n'est qu'après l'association que Multica peut confirmer de quel membre de l'espace de travail provient un message. Les non-membres ne peuvent pas utiliser le bot.
+Les participants n'ont pas besoin d'associer un compte de plateforme. L'association d'un membre sert toujours à retrouver ses destinataires de notifications personnelles. Les conversations non configurées sont refusées. Modifier ou révoquer l'autorisation invalide les anciennes exécutions externes ; l'envoi de notifications nécessite une autorisation distincte.
 
 ## Confier du travail à l'agent dans Feishu
 
@@ -43,18 +49,19 @@ Ce n'est qu'après l'association que Multica peut confirmer de quel membre de l'
 
 ### Conversations de groupe
 
-Ajoutez d'abord le bot au groupe, puis mentionnez-le avec `@Bot` et décrivez votre besoin. Le bot ne répond qu'aux messages qui le @mentionnent explicitement ; lorsqu'il s'exécute, il s'appuie sur le contexte récent qu'il peut lire dans la session en cours.
+Ajoutez d'abord le bot au groupe, puis mentionnez-le avec `@Bot` et décrivez votre besoin. Le bot ne répond qu'aux messages qui le @mentionnent explicitement, et chaque exécution reçoit les derniers messages du groupe comme contexte.
 
-### Créer une tâche
+### Discuter d'une tâche
 
-Envoyez :
+Indiquez la tâche ou citez une notification du bot, puis donnez votre avis. L'agent peut demander des précisions avant de publier un résumé dans le fil approprié sous sa propre identité. Les messages ne deviennent pas automatiquement des commentaires verbatim.
 
-```text
-/issue Corriger la redirection après la connexion
-Safari reste sur la page de connexion après une connexion réussie.
-```
+`/issue` est du texte de conversation, pas une commande directe de membre. Une question sur un rapport ne relance pas automatiquement l'automatisation et ne crée pas de tâche. Un simple « oui » ou « continue » n'autorise pas plusieurs changements. `/new` ouvre une nouvelle discussion et `/clear` un nouveau contexte ; envoyées seules, ces commandes ne démarrent pas l'agent.
 
-La première ligne devient le titre et le reste la description. Envoyer `/issue` seul ne crée rien ; le bot répond alors en indiquant le format attendu.
+## Images et fichiers produits par l’agent
+
+Les conversations externes autorisées n'envoient ni images ni fichiers générés et ne convertissent pas les références de tâches en liens vers l'espace de travail. L'envoi décrit ci-dessous concerne seulement les conversations associées à un membre. L'autorisation est vérifiée à nouveau à la livraison ; sa révocation empêche l'envoi des pièces jointes en attente.
+
+Lorsque l’envoi de pièces jointes est activé, le texte et les images prises en charge d’une réponse apparaissent dans un même message Feishu. Les images mettent ce message à jour une fois importées ; les fichiers arrivent séparément dans la même conversation. Une réponse composée uniquement d’images peut utiliser un message image. La limite est de 10 Mo par image ; les formats non pris en charge, les images plus grandes ou explicitement refusées sont envoyés comme fichiers, dans la limite de 30 Mo. Le stockage objet et l’autorisation d’importer des ressources de l’application sont nécessaires. En cas d’échec ou de livraison incertaine, les pièces jointes restent disponibles dans la réponse Multica. Vérifiez la conversation avant de demander un nouvel envoi.
 
 ## Gérer les connexions
 
@@ -84,12 +91,12 @@ Redémarrez le serveur API, puis connectez le bot depuis la page **Intégrations
 
 - **Aucun bouton d'association** : vérifiez que le compte actuel est le propriétaire de l'agent ou un propriétaire ou administrateur de l'espace de travail, et que la clé d'auto-hébergement est configurée.
 - **QR code expiré** : fermez la boîte de dialogue et relancez la connexion.
-- **Le bot demande d'associer le compte** : ouvrez le lien d'association et connectez-vous avec le compte Multica de cet espace de travail.
+- **Conversation non autorisée** : vérifiez son identifiant, l'autorisation enregistrée, ainsi que l'appartenance actuelle et les droits d'invocation de la personne qui l'a autorisée.
 - **Le bot ne s'exécute pas** : vérifiez si l'agent est archivé et si le [runtime](/daemon-runtimes) qu'il utilise est en ligne.
-- **Le bot ne répond jamais** : l'application doit transmettre les événements via une connexion longue — Multica n'a pas de point de terminaison webhook. Dans la console développeur Feishu/Lark, ouvrez **Events & Callbacks → Event Configuration** et vérifiez que la méthode d'abonnement est la connexion longue et non une URL de requête, que `im.message.receive_v1` est bien souscrit, et que la version de l'application qui porte cette configuration est publiée (et approuvée, si le tenant fait valider les publications). Une application configurée avec une URL de requête s'associe quand même, affiche toujours l'état Connecté, mais ne reçoit silencieusement rien.
+- **Le bot ne répond jamais** : l'application doit transmettre les événements via une connexion longue ; Multica n'a pas de point de terminaison webhook. Dans la console développeur Feishu/Lark, ouvrez **Events & Callbacks → Event Configuration** et vérifiez que la méthode d'abonnement est la connexion longue et non une URL de requête, que `im.message.receive_v1` est bien souscrit, et que la version de l'application qui porte cette configuration est publiée (et approuvée, si le tenant fait valider les publications). Une application configurée avec une URL de requête s'associe quand même, affiche toujours l'état Connecté, mais ne reçoit silencieusement rien.
 
 ## Étapes suivantes
 
 - [Intégrations de messagerie](/channels) — comparaison des plateformes, isolation des sessions et fonctionnement de l'association de compte.
 - [Discussion](/chat) — le modèle de conversation et d'exécution derrière le bot.
-- [Tâches](/issues) — l'unité de travail que crée `/issue`.
+- [Tâches](/issues) — le travail suivi et discuté par l'agent.

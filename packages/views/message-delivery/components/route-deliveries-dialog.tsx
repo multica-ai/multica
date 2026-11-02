@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { RotateCw, Send } from "lucide-react";
+import { RotateCw, Send } from "@multica/ui/icons";
 import { useInfiniteQuery, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   messageRouteDeliveriesInfiniteOptions,

@@ -643,17 +643,17 @@ SELECT statement_timestamp()::timestamptz AS scan_through,
 -- name: ListStaleLinkedIssueTaskFailures :many
 -- create_issue tasks reach the run through the ISSUE link (their own
 -- autopilot_run_id is NULL), and SyncRunFromLinkedIssueTask is the existing
--- state machine that fails the run when the task's terminal failure has no
--- active retry left. The scan feeds terminal linked-task failures whose run
--- is still active — the compensation for a lost task-failed event (repair
--- contract §4, review R12). Tasks not linked to any issue, and unrelated
--- chat tasks, never enter this scan.
+-- state machine that settles the run from its own dispatch chain. The
+-- historical query name is retained, but both completed and failed tasks
+-- compensate lost terminal events while the run is active. The syncer checks
+-- dispatch ancestry and the latest attempt; unrelated mention tasks cannot
+-- settle the run. Tasks without an issue never enter this scan.
 SELECT t.* FROM agent_task_queue t
 JOIN issue i ON i.id = t.issue_id
 JOIN autopilot_run r ON r.issue_id = i.id
 WHERE t.autopilot_run_id IS NULL
   AND t.issue_id IS NOT NULL
-  AND t.status = 'failed'
+  AND t.status IN ('completed', 'failed')
   AND r.status IN ('pending', 'issue_created', 'running')
   AND t.id > sqlc.arg('after_id')::uuid
   AND t.id <= sqlc.arg('upper_id')::uuid

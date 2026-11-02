@@ -94,3 +94,27 @@ func TestMediaCLIReceiptAndExplicitDownload(t *testing.T) {
 		t.Fatal("invalid arguments submitted work")
 	}
 }
+
+func TestMediaCLIRetiredOptionsDoNotUploadOrSubmit(t *testing.T) {
+	var requests atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { requests.Add(1); w.WriteHeader(500) }))
+	defer server.Close()
+	setCLITestServerEnv(t, server.URL)
+	t.Setenv("MULTICA_TOKEN", "mat_fixture")
+	input := filepath.Join(t.TempDir(), "reference.png")
+	if err := os.WriteFile(input, []byte("reference"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	for _, flags := range [][]string{{"--provider", "flow"}, {"--provider", "whisk"}, {"--capability", "video-generate"}, {"--capability", "image-remix"}, {"--duration", "8"}} {
+		cmd := newMediaCmd()
+		cmd.SetOut(&bytes.Buffer{})
+		cmd.SetErr(&bytes.Buffer{})
+		cmd.SetArgs(append([]string{"generate", "--prompt", "image", "--input", input}, flags...))
+		if cmd.Execute() == nil {
+			t.Fatalf("retired option accepted: %v", flags)
+		}
+	}
+	if requests.Load() != 0 {
+		t.Fatal("retired options uploaded or submitted work")
+	}
+}

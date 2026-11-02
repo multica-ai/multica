@@ -164,7 +164,7 @@ func (s *IssueWakeupService) wakeupRunAuthority(ctx context.Context, q *db.Queri
 	}
 	base := attribution.Result{UserID: w.CreatedBy, AccountableUserID: w.CreatedBy, Source: attribution.SourceTriggerOwner, DelegatedFromTaskID: w.SourceTaskID}
 	if w.SystemRule.Valid {
-		base = s.Tasks.attributionForIssueTask(ctx, issue, pgtype.UUID{}, attribution.SourceDelegation, pgtype.UUID{})
+		base = s.Tasks.attributionForIssueTask(ctx, issue, pgtype.UUID{}, attribution.SourceDelegation, pgtype.UUID{}, pgtype.UUID{})
 		result, external, err = conversationAttributionFromSources(ctx, q, w.WorkspaceID, agent.ID, []wakeupSourceTask{{ID: base.DelegatedFromTaskID}})
 		if err != nil || external {
 			return result, err

@@ -1,6 +1,7 @@
 import { mergeResources } from "@multica/core/i18n";
 import enBrand from "@/locales/brand/en.json";
 import zhBrand from "@/locales/brand/zh-Hans.json";
+import zhHantBrand from "@/locales/brand/zh-Hant.json";
 import authEn from "@/locales/en/auth.json";
 import chatEn from "@/locales/en/chat.json";
 import commonEn from "@/locales/en/common.json";
@@ -21,6 +22,16 @@ import navigationZh from "@/locales/zh-Hans/navigation.json";
 import projectsZh from "@/locales/zh-Hans/projects.json";
 import settingsZh from "@/locales/zh-Hans/settings.json";
 import workspaceZh from "@/locales/zh-Hans/workspace.json";
+import authZhHant from "@/locales/zh-Hant/auth.json";
+import chatZhHant from "@/locales/zh-Hant/chat.json";
+import commonZhHant from "@/locales/zh-Hant/common.json";
+import editorZhHant from "@/locales/zh-Hant/editor.json";
+import inboxZhHant from "@/locales/zh-Hant/inbox.json";
+import issuesZhHant from "@/locales/zh-Hant/issues.json";
+import navigationZhHant from "@/locales/zh-Hant/navigation.json";
+import projectsZhHant from "@/locales/zh-Hant/projects.json";
+import settingsZhHant from "@/locales/zh-Hant/settings.json";
+import workspaceZhHant from "@/locales/zh-Hant/workspace.json";
 
 const upstreamResources = {
   en: {
@@ -47,9 +58,22 @@ const upstreamResources = {
     settings: settingsZh,
     workspace: workspaceZh,
   },
+  "zh-Hant": {
+    auth: authZhHant,
+    chat: chatZhHant,
+    common: commonZhHant,
+    editor: editorZhHant,
+    inbox: inboxZhHant,
+    issues: issuesZhHant,
+    navigation: navigationZhHant,
+    projects: projectsZhHant,
+    settings: settingsZhHant,
+    workspace: workspaceZhHant,
+  },
 } as const;
 
 export const resources = mergeResources(upstreamResources, {
   en: enBrand,
   "zh-Hans": zhBrand,
+  "zh-Hant": zhHantBrand,
 });

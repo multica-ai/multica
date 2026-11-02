@@ -52,16 +52,72 @@ MULTICA_RUN_REAL_AGENT_SMOKE=1 go test -tags=agentintegration ./pkg/agent \
 Ordinary tests use test-owned CLI processes and synthetic credentials. They
 cover native receipts, login/capability gating, cancellation, explicit quota
 failures, registration refresh/retry, and three HTTP upload attempts with one
-native generation. The live test verifies the native CLI; the cross-container
-acceptance additionally requires deploying the daemon and running the commands
-below from a separate caller without provider credentials.
+native generation. The live test verifies the native CLI. Credential-separated
+CLI tests verify the caller/host boundary against a test Server; production
+deployment is not a prerequisite for this acceptance baseline.
 
-Antigravity native execution is not implemented by this adapter. In the
-inspected `agy 1.4.12`, `image-generator` is a built-in subagent invoked from a
-normal conversation; `--agent image-generator` is rejected as an unknown custom
-agent. An authenticated host trace is still required to establish its artifact
-receipt and image-edit contract. Merely finding `agy` does not advertise
-`media-image-agy-v1`.
+## Native Antigravity images
+
+The built-in `antigravity` runtime advertises `media-image-agy-v1` only when its
+host has a readable `.gemini/antigravity-cli/antigravity-oauth-token` under
+`HOME`, containing a nonempty `token.access_token` and either absent or
+`consumer` `auth_method`, and `agy models` exits successfully with a nonempty
+catalog within 15 seconds. The file may be a symlink to a regular file. Custom
+profiles do not inherit this capability. Login or catalog changes refresh the
+runtime registration even when the CLI version stays the same.
+
+Each assignment starts one `agy --output-format stream-json` invocation with
+`HOME=<job-directory>/agy-home`. Only the host authentication file is linked
+into its private `.gemini/antigravity-cli` directory; credentials are not copied
+into requests, inputs, receipts or uploads. The normal child environment filter
+also removes inherited Labrastro task/account variables. Sessions, transcripts,
+logs and images remain under the job directory and are removed after transfer.
+`ANTIGRAVITY_APP_DATA_DIR` is insufficient for this isolation in `agy 1.4.12`.
+Local symbolic-link support is required. The CLI owns token refresh.
+
+The prompt invokes the built-in `image-generator` subagent and asks it to accept
+the first successful image without refinement. This is a normal print-mode
+conversation, not `--agent image-generator`. References are supplied through
+native `generate_image` `ImagePaths`. The adapter associates the stream's
+conversation and image-generator child with their native `transcript.jsonl`
+records. It accepts only the `GENERIC` result immediately following a
+`generate_image` call, using its image media URI or native saved-path line.
+An assistant response or a `view_file` image is not a generation receipt.
+If the child retries internally, the last successful native receipt is used.
+The artifact must resolve to a nonempty regular file inside the **parent**
+conversation's `brain/<conversation-id>/` directory. Foreign conversations,
+ambiguous producers and escaping paths fail closed.
+
+A valid image takes precedence over a trailing quota error, so it is uploaded
+without another generation. Without an image, explicit quota/rate-limit errors
+in the terminal result, native generation transcript or native error log map
+to `media.RateLimitError` and the existing cooldown/reassignment path. Other
+failures do not replay generation. Cancellation kills the owned process tree.
+Like ordinary native Antigravity tasks, execution uses
+`--dangerously-skip-permissions`; private `HOME` isolates session state, not OS
+access. It does not provide the Codex adapter's protocol-level tool allowlist.
+
+`image-generate` and `image-edit` use Antigravity's native image model;
+`--model` and `--duration` are rejected. `--size` and `--aspect` are prompt
+instructions, not exact pixel guarantees. Ordinary tests replay the captured
+`agy 1.4.12` generate/edit contracts and use test-owned subprocesses with
+synthetic credentials. The DB-backed `TestMediaAntigravityCredentialSeparatedCLI`
+runs an actual caller CLI in an empty home against an `httptest` Server and a
+separate host Executor. It covers `agy`/`auto`, generation/editing, idempotent
+upload retry, quota cooldown/reassignment and image attachment receipts without
+provider credentials on the caller. This verifies the cross-container protocol
+boundary without deploying a production daemon.
+
+An explicitly authorized host smoke test exercises the installed native CLI:
+
+```sh
+cd server
+MULTICA_RUN_REAL_AGENT_SMOKE=1 go test -tags=agentintegration ./pkg/agent \
+  -run '^TestAntigravityNativeImageLive$' -count=1 -v
+```
+
+Set `MULTICA_MEDIA_SMOKE_OUTPUT_DIR` to an empty directory to retain the
+generated and edited images for inspection. Existing files are not overwritten.
 
 ## Request and receipt
 
@@ -70,16 +126,17 @@ multica media generate --capability image-generate --provider auto \
   --prompt 'A red lighthouse at dusk' --output json
 multica media generate --capability image-edit --provider codex \
   --prompt-file ./prompt.txt --input subject=./photo.png --out ./result.png
-multica media generate --capability video-generate --provider flow \
-  --prompt 'Clouds over a mountain' --duration 8 --aspect 16:9 --async
+multica media generate --capability image-generate --provider agy \
+  --prompt 'Clouds over a mountain' --aspect 16:9 --async
 multica media job get <job-id> --output json
-multica media job wait <job-id> --out ./result.mp4
+multica media job wait <job-id> --out ./result.png
 multica media job cancel <job-id>
 ```
 
 `--input` and `--input-attachment` are repeatable; optional roles are `input`,
-`subject`, `scene`, and `style`. `--model`, `--size`, `--aspect` and `--duration`
-are passed to the adapter, which validates native combinations. `--issue`
+`subject`, `scene`, and `style`. `--size` and `--aspect` are image instructions.
+Both native adapters require an empty `--model`. Video duration is not a CLI
+option; nonzero `duration` in API requests is rejected. `--issue`
 binds a member-created job to an issue. Inside a task, the server derives and
 locks the producing task, issue, chat session and actor from the task token.
 A task cannot override this binding.
@@ -109,14 +166,12 @@ cooling. Header-level `media-*` capabilities are discarded.
 | --- | --- | --- |
 | codex | media-image-codex-v1 | image-generate, image-edit |
 | antigravity (`--provider agy`) | media-image-agy-v1 | image-generate, image-edit |
-| Any verified existing runtime (e.g. antigravity) | media-video-flow-v1 / flow | video-generate |
-| Same Flow host | media-image-whisk-v1 / whisk | image-remix |
 
-Media source comes from the advertised tag, independently of the host's runtime
-type. Codex/agy tags retain their native host restriction; Flow and Whisk can
-share an existing antigravity runtime with a verified browser executor. The
-matched `capability_tag` is stored per assignment and supplies the cooldown key,
-even if registration changes its tags before the result arrives.
+Only these native tags are registered and routed, each restricted to its own
+runtime provider. Retired browser tags in old metadata cannot be scheduled and
+are removed on re-registration. The matched `capability_tag` is stored per
+assignment and supplies the cooldown key, even if registration changes its tags
+before the result arrives.
 
 Rank uses the minimum remaining percentage across applicable active quota
 windows. Exhausted windows are excluded; agy uses the Gemini pool, not the
@@ -173,9 +228,39 @@ and Local storage. It streams a 110 MiB output, injects an upload failure and a
 lost committed-upload response, checks one Submit / three uploads / one output
 attachment, observes heartbeat acknowledgements during transfer, and verifies
 receipt-only versus explicit streamed download behavior. Separate tests cover
-quota selection, Flow/Whisk registration and routing on an existing antigravity
-runtime, lost dispatch/receipt settlement, shutdown receipts, permission
+quota selection, rejection of retired media requests/tags, per-runtime native
+registration, lost dispatch/receipt settlement, shutdown receipts, permission
 revocation, input scope, private-chat isolation, artifact path/symlink boundaries,
 content-type and retry limits, stale receipts, cancellation, task/issue binding,
 CLI validation, migrations/rollback and S3's streaming contract.
 No real provider login or generation is needed for these checks.
+
+## Workspace image-studio skill
+
+The importable skill is [image-studio](../.agents/skills/image-studio/SKILL.md).
+It only calls `multica media generate` and `multica media job`; it stores no
+credentials, host addresses or state. Import that directory as a `.skill`/`.zip`
+archive using `multica skill import --file`, then bind the returned workspace
+skill ID with `multica agent skills add`. Read bindings back with `skills list`;
+`skills set` would replace unrelated skills. This is a workspace skill, not a
+universal server built-in.
+
+`TestMediaCodexCredentialSeparatedCLI` and
+`TestMediaAntigravityCredentialSeparatedCLI` compile the actual CLI and run it
+with an empty home and only platform authentication against real `httptest`
+Server handlers, PostgreSQL and Local storage. Native provider processes use
+test-owned fixtures. Each covers explicit and automatic provider selection,
+generation and reference editing, prompt files, local and existing-attachment
+inputs, issue binding, receipt-only delivery and explicit `--out`, upload failure
+and lost upload receipts without model replay, and native quota failover to a
+second host. These tests do not call paid providers or prove live container
+networking; pair them with the separately gated native live tests when verifying
+a provider integration.
+
+```sh
+cd server
+# DATABASE_URL must point to this checkout's migrated test database.
+go test -race ./pkg/protocol ./cmd/multica ./internal/service ./internal/handler \
+  ./internal/daemon -run 'TestMedia' -count=1 -v
+go test -race ./internal/daemon/media -count=1
+```

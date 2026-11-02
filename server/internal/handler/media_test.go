@@ -158,7 +158,7 @@ func TestMediaCapabilitiesArePerRuntime(t *testing.T) {
 	if got := runtimeMediaCapabilities(req, "claude", []string{"media-image-codex-v1"}); !slices.Equal(got, []string{"rpc-v1"}) {
 		t.Fatalf("broadcast leaked: %v", got)
 	}
-	if got := runtimeMediaCapabilities(req, "codex", []string{"media-image-codex-v1", "media-video-flow-v1"}); !slices.Equal(got, []string{"rpc-v1", "media-image-codex-v1", "media-video-flow-v1"}) {
+	if got := runtimeMediaCapabilities(req, "codex", []string{"media-image-codex-v1", "media-video-flow-v1"}); !slices.Equal(got, []string{"rpc-v1", "media-image-codex-v1"}) {
 		t.Fatalf("wrong capabilities: %v", got)
 	}
 }
@@ -174,13 +174,13 @@ func TestMediaRPCRejectsRuntimeOutsideConnection(t *testing.T) {
 
 func TestMediaQueueDoesNotStarveOtherOperations(t *testing.T) {
 	for i := 0; i < 51; i++ {
-		createTestMediaJob(t, testHandler, protocol.MediaRequest{Provider: "flow", Capability: "video-generate", Prompt: "waiting for video host"})
+		createTestMediaJob(t, testHandler, protocol.MediaRequest{Provider: "agy", Capability: "image-generate", Prompt: "waiting for agy host"})
 	}
 	runtimeID := mediaTestRuntime(t, "codex", 0)
 	job := createTestMediaJob(t, testHandler, protocol.MediaRequest{Provider: "codex", Capability: "image-generate", Prompt: "ready"})
 	claim := claimTestMediaJob(t, testHandler, runtimeID)
 	if claim == nil || claim.Job.ID != job.ID {
-		t.Fatal("unavailable video queue starved image runtime")
+		t.Fatal("unavailable agy queue starved codex runtime")
 	}
 }
 

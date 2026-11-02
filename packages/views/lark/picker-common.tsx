@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { ChevronDown, ChevronUp, RefreshCw, X } from "lucide-react";
+import { ChevronDown, ChevronUp, RefreshCw, X } from "@multica/ui/icons";
 import { Alert, AlertDescription } from "@multica/ui/components/ui/alert";
 import { Avatar, AvatarFallback, AvatarImage } from "@multica/ui/components/ui/avatar";
 import { Button } from "@multica/ui/components/ui/button";

@@ -27,13 +27,13 @@ type MediaRequest struct {
 }
 
 func (r MediaRequest) Validate() error {
-	if !slices.Contains([]string{"image-generate", "image-edit", "image-remix", "video-generate"}, r.Capability) {
+	if !slices.Contains([]string{"image-generate", "image-edit"}, r.Capability) {
 		return fmt.Errorf("unsupported capability")
 	}
-	if !slices.Contains([]string{"auto", "codex", "agy", "flow", "whisk"}, r.Provider) {
+	if !slices.Contains([]string{"auto", "codex", "agy"}, r.Provider) {
 		return fmt.Errorf("unsupported provider")
 	}
-	if len(r.Prompt) == 0 || len(r.Prompt) > 32000 || len(r.Inputs) > 16 || len(r.Model) > 128 || len(r.Size) > 64 || len(r.Aspect) > 32 || r.Duration < 0 || r.Duration > 600 {
+	if len(r.Prompt) == 0 || len(r.Prompt) > 32000 || len(r.Inputs) > 16 || len(r.Model) > 128 || len(r.Size) > 64 || len(r.Aspect) > 32 || r.Duration != 0 {
 		return fmt.Errorf("invalid media parameters")
 	}
 	for _, in := range r.Inputs {
@@ -41,7 +41,7 @@ func (r MediaRequest) Validate() error {
 			return fmt.Errorf("invalid input role")
 		}
 	}
-	if r.Capability != "image-generate" && r.Capability != "video-generate" && len(r.Inputs) == 0 {
+	if r.Capability == "image-edit" && len(r.Inputs) == 0 {
 		return fmt.Errorf("this capability requires input")
 	}
 	if r.Provider != "auto" && MediaCapabilityTag(r.Provider, r.Capability) == "" {
@@ -55,14 +55,6 @@ func MediaCapabilityTag(provider, capability string) string {
 	case "codex", "agy":
 		if capability == "image-generate" || capability == "image-edit" {
 			return "media-image-" + provider + "-v1"
-		}
-	case "flow":
-		if capability == "video-generate" {
-			return "media-video-flow-v1"
-		}
-	case "whisk":
-		if capability == "image-remix" {
-			return "media-image-whisk-v1"
 		}
 	}
 	return ""
@@ -82,10 +74,6 @@ func MediaTagProvider(tag string) string {
 		return "codex"
 	case "media-image-agy-v1":
 		return "agy"
-	case "media-video-flow-v1":
-		return "flow"
-	case "media-image-whisk-v1":
-		return "whisk"
 	}
 	return ""
 }
@@ -94,9 +82,6 @@ func ValidMediaTag(runtimeProvider, tag string) bool {
 	switch source := MediaTagProvider(tag); source {
 	case "codex", "agy":
 		return source == MediaProvider(runtimeProvider)
-	case "flow", "whisk":
-		// A verified browser executor can run on any existing runtime host.
-		return true
 	}
 	return false
 }

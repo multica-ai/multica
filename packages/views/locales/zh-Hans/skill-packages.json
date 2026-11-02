@@ -1,6 +1,9 @@
 {
   "tree": {
     "new_folder": "新建文件夹",
+    "new_subfolder": "新建子文件夹",
+    "expand_all": "全部展开",
+    "collapse_all": "全部收起",
     "rename_folder": "重命名",
     "move_folder": "移动",
     "delete_folder": "删除",

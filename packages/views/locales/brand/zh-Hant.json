@@ -1,0 +1,214 @@
+{
+  "settings": {
+    "notifications": {
+      "system": {
+        "label": "Labrastro 在背景時顯示系統通知"
+      }
+    },
+    "github": {
+      "disconnect_confirm_description": "Labrastro 將不再接收該安裝的 webhook。已有的 PR 映象與關聯會保留，再次連線即可恢復同步。"
+    },
+    "lark": {
+      "install_error_bot_info": "授權完成，但 Labrastro 無法獲取 Bot 身份資訊，請重試。"
+    },
+    "slack": {
+      "byo_docs_link": "Step-by-step：把你的 Labrastro 智慧體連線到 Slack"
+    },
+    "dingtalk": {
+      "group_forget_description": "該群會從 Labrastro 的群列表中移除，對話和訊息記錄不會刪除。以後再次 @ 機器人時，群會重新出現。",
+      "byo_docs_link": "Step-by-step：把你的 Labrastro 智慧體連線到釘釘"
+    },
+    "wecom": {
+      "byo_bot_name_placeholder": "例如 Labrastro Bot",
+      "byo_conflict_other_workspace": "該機器人已連線到另一個 Labrastro 工作區。請先在那邊斷開，再連線到這裡。"
+    },
+    "telegram": {
+      "disconnect_confirm_description": "機器人將停止接收本工作區的 Telegram 訊息。Labrastro 中的會話記錄會保留；之後可在同一智慧體上重新連線。",
+      "connect_docs_link": "分步指南：將 Labrastro 智慧體連線到 Telegram"
+    }
+  },
+  "common": {
+    "lark_bind": {
+      "needs_auth_description": "需要登入 Labrastro 才能完成繫結。連結中的 token 會將你的飛書帳號繫結到當前登入的 Labrastro 使用者。",
+      "error_already_bound": "該飛書帳號已繫結到其他 Labrastro 使用者。帳戶轉移需要先顯式解綁。",
+      "error_not_member": "你登入的 Labrastro 帳號不是當前工作區成員。"
+    },
+    "slack_bind": {
+      "needs_auth_description": "需要登入 Labrastro 才能完成關聯。連結中的 token 會將你的 Slack 帳號繫結到當前登入的 Labrastro 使用者。",
+      "error_already_bound": "該 Slack 帳號已關聯到其他 Labrastro 使用者。帳戶轉移需要先顯式解綁。",
+      "error_not_member": "你登入的 Labrastro 帳號不是當前工作區成員。"
+    },
+    "dingtalk_bind": {
+      "needs_auth_description": "需要登入 Labrastro 才能完成關聯。連結中的 token 會將你的釘釘帳號繫結到當前登入的 Labrastro 使用者。",
+      "error_already_bound": "該釘釘帳號已關聯到其他 Labrastro 使用者。帳戶轉移需要先顯式解綁。",
+      "error_not_member": "你登入的 Labrastro 帳號不是當前工作區成員。"
+    },
+    "telegram_bind": {
+      "needs_auth_description": "請先登入 Labrastro 完成繫結。連結中的 token 會把你的 Telegram 帳號繫結到當前登入的 Labrastro 使用者，因此需要先登入。",
+      "error_already_bound": "該 Telegram 帳號已繫結到另一個 Labrastro 使用者。如需轉移帳號，請先顯式解綁。",
+      "error_not_member": "當前登入的 Labrastro 帳號不是該工作區的成員。"
+    },
+    "wecom_bind": {
+      "page_title": "關聯 Labrastro 帳號",
+      "needs_auth_description": "需要登入 Labrastro 才能完成關聯。連結中的 token 會將你在企業微信的身份繫結到當前登入的 Labrastro 使用者。",
+      "error_already_bound": "該企業微信身份已關聯到其他 Labrastro 使用者。帳戶轉移需要先顯式解綁。",
+      "error_not_member": "你登入的 Labrastro 帳號不是當前工作區成員。"
+    },
+    "not_found": {
+      "back_to_multica": "返回 Labrastro"
+    }
+  },
+  "runtimes": {
+    "page": {
+      "add_menu": {
+        "cloud_runtime_hint": "建立一臺 Labrastro 託管的雲節點"
+      }
+    },
+    "mika_setup": {
+      "title": "執行時已準備好，和 Mizuki 開始。",
+      "description": "讓 Mizuki 幫你安排任務和協調智慧體。",
+      "action": "和 Mizuki 開始",
+      "failed": "無法啟動 Mizuki",
+      "dialog_title": "讓 Mizuki 在哪臺機器上執行？"
+    },
+    "connect": {
+      "step1_label": "安裝 Labrastro CLI"
+    },
+    "update": {
+      "managed_by_desktop_title": "CLI 二進位制由 Labrastro 桌面端管理——升級桌面端即可升級 CLI。",
+      "local_build_title": "該執行時報告的不是釋出版本，Labrastro 無法判斷是否有可升級的版本。請在這臺機器上自行更新。"
+    },
+    "profiles": {
+      "empty_description": "選擇一個基礎協議族，然後指定 Labrastro 要執行的命令。"
+    },
+    "qoder": {
+      "description": "連線 Qoder Cloud Agents，由 Labrastro 管理執行並加密儲存憑證。工作區管理員可修改配置。",
+      "add_agent_description": "建立 Labrastro 智慧體並關聯已有的 Qoder Cloud Agents 智慧體，使用 Qoder 雲端已配置的環境和憑證。",
+      "data_disclosure_title": "Labrastro 會傳送給 Qoder 的內容",
+      "connect_description": "Labrastro 會在 Qoder 的沙箱裡執行任務。"
+    }
+  },
+  "workspace": {
+    "new_page": {
+      "title": "歡迎使用 Labrastro"
+    },
+    "creation_disabled": {
+      "description": "該 Labrastro 例項不允許建立新的工作區，請聯絡管理員邀請你加入已有工作區。"
+    }
+  },
+  "autopilots": {
+    "add_trigger_dialog": {
+      "webhook_help": "儲存後 Labrastro 會生成一個 Webhook URL。向它 POST 任意 JSON 即可觸發本自動化。"
+    },
+    "dialog": {
+      "webhook_help_create": "自動化建立後 Labrastro 會生成一個 Webhook URL。向它 POST 任意 JSON 即可觸發。"
+    }
+  },
+  "issues": {
+    "pickers": {
+      "custom_property": {
+        "unknown_value_hint": "該值由更新版本的 Labrastro 設定，當前版本無法編輯——請更新應用，或清除該值"
+      }
+    },
+    "pr_automation": {
+      "link_not_found": "Labrastro 還沒有收到這個 PR。請確認它所在的倉庫已連線。"
+    }
+  },
+  "billing": {
+    "return_page": {
+      "go_to_app": "前往 Labrastro"
+    }
+  },
+  "auth": {
+    "signin": {
+      "title": "登入 Labrastro"
+    },
+    "cli": {
+      "description": "允許 CLI 以 {{email}} 身份訪問 Labrastro"
+    },
+    "web": {
+      "desktop_handoff": {
+        "opening_title": "正在開啟 Labrastro",
+        "opening_description": "沒有自動開啟？點選“開啟 Labrastro Desktop”。",
+        "open_button": "開啟 Labrastro 桌面應用"
+      }
+    },
+    "desktop": {
+      "recovery": {
+        "title": "正在重新連線 Labrastro"
+      }
+    }
+  },
+  "chat": {
+    "fab": {
+      "running": "Labrastro 正在工作...",
+      "default": "問 Labrastro"
+    },
+    "empty_state": {
+      "returning_title_default": "歡迎使用 Labrastro"
+    }
+  },
+  "onboarding": {
+    "step_nav": {
+      "wordmark": "Labrastro",
+      "runtime": {
+        "label": "認識 Mizuki"
+      }
+    },
+    "welcome": {
+      "wordmark": "歡迎使用 Labrastro"
+    },
+    "source_backfill": {
+      "lede": "幫助我們瞭解你從哪裡知道 Labrastro。"
+    },
+    "questions": {
+      "source": {
+        "question": "你是從哪裡瞭解到 Labrastro 的？"
+      },
+      "use_case": {
+        "question": "你打算用 Labrastro 做什麼？"
+      }
+    },
+    "cli_install": {
+      "step1_label": "安裝 Labrastro CLI"
+    },
+    "step_workspace": {
+      "creation_disabled_lede": "該 Labrastro 例項不允許建立新的工作區。等管理員把你邀請到某個工作區後，接受邀請並重新整理即可繼續。"
+    },
+    "step_runtime": {
+      "found_headline": "讓 Mizuki 在哪臺電腦上執行？",
+      "hint_pick": "在上方選擇一個智慧體執行時，就可以開始使用 Mizuki。",
+      "continue": "開始使用 Mizuki"
+    },
+    "step_platform": {
+      "lede": "連線一臺電腦，讓 Mizuki 開始工作。"
+    },
+    "errors": {
+      "mika_setup_failed": "無法啟動 Mizuki 工作區"
+    },
+    "mika_intro": {
+      "headline": "認識一下 Mizuki，你的第一個智慧體隊友。",
+      "name": "Mizuki",
+      "blurb": "把你想做的事告訴 Mizuki，它會變成一個任務，並交給合適的智慧體處理。"
+    }
+  },
+  "projects": {
+    "resources": {
+      "mode_worktree_needs_server_upgrade": "當前 Labrastro 服務端版本過舊，無法支援並行執行——它會直接在這個資料夾裡執行。升級服務端後即可開啟。"
+    }
+  },
+  "agents": {
+    "tab_body": {
+      "instructions": {
+        "system_layer_label": "由 Labrastro 維護",
+        "system_layer_hint": "隨 Labrastro 版本更新。你無法編輯這部分，你在下面寫的內容也永遠不會被覆蓋。",
+        "workspace_notes_intro": "在下面補充你們團隊的上下文和偏好，它們會疊加在 Labrastro 為這個智慧體維護的指令之上。支援 Markdown。"
+      },
+      "mcp_config": {
+        "managed_title": "由 Labrastro 管理",
+        "managed_empty": "暫無由 Labrastro 管理的 MCP Server。",
+        "runtime_overridden_badge": "已由 Labrastro 覆蓋"
+      }
+    }
+  }
+}

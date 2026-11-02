@@ -1,18 +1,20 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
 import {
   AlertTriangle,
-  ArrowUp,
   Folder,
+  FolderPlus,
   Inbox,
   Layers,
+  ListChevronsDownUp,
+  ListChevronsUpDown,
   MoreHorizontal,
   Package,
-  PackagePlus,
+  Package as PackagePlus,
   Pencil,
   Trash2,
-} from "lucide-react";
+} from "@multica/ui/icons";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import type { SkillFolder, SkillPackage } from "@multica/core/api/schemas";
@@ -37,23 +39,18 @@ import {
   TooltipTrigger,
 } from "@multica/ui/components/ui/tooltip";
 import {
-  FolderExplorerBreadcrumbs,
+  FolderExplorerDepth,
   FolderExplorerRow,
   NewFolderButton,
-  directChildFolders,
-  directEntries,
+  flattenFolderExplorerRows,
   folderEntryCounts,
-  folderLocationPath,
-  folderPath,
   folderPathLabel,
-  isManagedLocation,
-  resolveFolderLocation,
+  useFolderExplorerExpansion,
   type FolderExplorerEntry,
   type FolderExplorerFolder,
 } from "../../common/folder-explorer";
 import { useT } from "../../i18n";
 import { CollectionPageHeaderAction } from "../../layout/collection-page";
-import { useNavigation } from "../../navigation";
 import {
   grayCandidates,
   isCustomFolder,
@@ -75,10 +72,20 @@ import {
 import type { SkillRow } from "./skill-list-filter";
 import type { SkillTreeActions } from "./skill-tree-actions";
 
+interface SkillExplorerRowBase {
+  key: string;
+  parentFolderId: string | null;
+  depth: number;
+}
+
 export type SkillExplorerListRow =
-  | { kind: "skill"; row: SkillRow; pathHint?: string }
-  | { kind: "folder"; folder: SkillFolder; entryCount: number }
-  | { kind: "candidate"; candidate: GrayCandidate };
+  | (SkillExplorerRowBase & { kind: "skill"; row: SkillRow; pathHint?: string })
+  | (SkillExplorerRowBase & {
+      kind: "folder";
+      folder: SkillFolder;
+      entryCount: number;
+    })
+  | (SkillExplorerRowBase & { kind: "candidate"; candidate: GrayCandidate });
 
 export type SkillExplorerAuxRow = Exclude<
   SkillExplorerListRow,
@@ -94,14 +101,11 @@ export interface SkillsPageListModel {
 export interface SkillsPageFolderExplorer {
   treeActions: SkillTreeActions | undefined;
   openImport: () => void;
-  navigationBar: ReactNode;
+  folderActions: ReactNode;
   notice: ReactNode;
   dialogs: ReactNode;
   organizeRows: (rows: SkillRow[]) => SkillsPageListModel;
   renderRow: (row: SkillExplorerAuxRow) => ReactNode;
-  countLabel: (visible: number, total: number) => string | undefined;
-  countTitle: () => string | undefined;
-  withCurrentFolder: (path: string) => string;
   treeLoading: boolean;
   treeReady: boolean;
   hasFolders: boolean;
@@ -123,6 +127,7 @@ function SkillFolderRowMenu({
   folder,
   pkg,
   canManagePackage,
+  onCreateSubfolder,
   onRename,
   onMove,
   onDelete,
@@ -132,6 +137,7 @@ function SkillFolderRowMenu({
   folder: SkillFolder;
   pkg: SkillPackage | null;
   canManagePackage: boolean;
+  onCreateSubfolder: () => void;
   onRename: () => void;
   onMove: () => void;
   onDelete: () => void;
@@ -159,6 +165,10 @@ function SkillFolderRowMenu({
       <DropdownMenuContent align="end" className="w-44">
         {custom && (
           <>
+            <DropdownMenuItem onClick={onCreateSubfolder}>
+              <FolderPlus />
+              {t(($) => $.tree.new_subfolder)}
+            </DropdownMenuItem>
             <DropdownMenuItem onClick={onRename}>
               <Pencil />
               {t(($) => $.tree.rename_folder)}
@@ -213,7 +223,7 @@ function SkillFolderRowMenu({
   );
 }
 
-function UnimportedSkillRow({ candidate }: { candidate: GrayCandidate }) {
+function UnimportedSkillRow({ candidate, depth }: { candidate: GrayCandidate; depth: number }) {
   const { t } = useT("skill-packages");
   return (
     <Tooltip>
@@ -226,6 +236,7 @@ function UnimportedSkillRow({ candidate }: { candidate: GrayCandidate }) {
           >
             <ListGridCell className="px-0" />
             <ListGridCell className="gap-1.5">
+              <FolderExplorerDepth depth={depth} />
               <Package aria-hidden="true" className="size-4 shrink-0" />
               <span className="min-w-0 truncate text-body">{candidate.name}</span>
               <span className="shrink-0 rounded-xs bg-muted px-1 py-0.5 text-caption">
@@ -257,9 +268,7 @@ export function useSkillsPageFolderExplorer({
   filters: SkillListFilters;
   onMoved: () => void;
 }): SkillsPageFolderExplorer {
-  const { t } = useT("skills");
   const { t: tPkg } = useT("skill-packages");
-  const navigation = useNavigation();
   const qc = useQueryClient();
   const {
     data: folderTree,
@@ -277,7 +286,13 @@ export function useSkillsPageFolderExplorer({
     pkg: SkillPackage;
     mode: "dissolve" | "delete";
   } | null>(null);
-  const previousFoldersRef = useRef<readonly FolderExplorerFolder[]>([]);
+  const {
+    expandedFolderIds,
+    toggleFolder,
+    expandFolder,
+    expandAll,
+    collapseAll,
+  } = useFolderExplorerExpansion("skills", wsId);
 
   // Never hide entries behind an unreachable tree: after the first failed
   // attempt with no data yet (even with the retry still pending) or 5s
@@ -324,46 +339,6 @@ export function useSkillsPageFolderExplorer({
       ),
     [explorerFolders],
   );
-  const rawFolderId = navigation.searchParams.get("folder");
-  const requestedFolderId = rawFolderId ? rawFolderId : null;
-  const resolvedFolderId = useMemo(
-    () =>
-      treeReady
-        ? resolveFolderLocation(requestedFolderId, explorerFolders, previousFoldersRef.current)
-        : requestedFolderId,
-    [treeReady, requestedFolderId, explorerFolders],
-  );
-
-  useEffect(() => {
-    if (!treeReady || rawFolderId === resolvedFolderId) return;
-    navigation.replace(
-      folderLocationPath(
-        navigation.pathname,
-        navigation.searchParams,
-        resolvedFolderId,
-        navigation.hash,
-      ),
-    );
-  }, [treeReady, rawFolderId, resolvedFolderId, navigation]);
-
-  useEffect(() => {
-    if (treeReady) previousFoldersRef.current = explorerFolders;
-  }, [treeReady, explorerFolders]);
-
-  const navigateFolder = useCallback(
-    (folderId: string | null, mode: "push" | "replace" = "push") => {
-      const path = folderLocationPath(
-        navigation.pathname,
-        navigation.searchParams,
-        folderId,
-        navigation.hash,
-      );
-      if (mode === "replace") navigation.replace(path);
-      else navigation.push(path);
-    },
-    [navigation],
-  );
-
   const placementsBySkill = useMemo(
     () => (treeReady && folderTree ? placementBySkillId(folderTree.placements) : null),
     [treeReady, folderTree],
@@ -422,47 +397,83 @@ export function useSkillsPageFolderExplorer({
           rows: rows.map((row) => {
             const placement = placementsBySkill?.get(row.skill.id);
             const pathHint = placement ? pathLabels.get(placement.folder_id) : undefined;
-            return { kind: "skill", row, pathHint };
+            return {
+              kind: "skill" as const,
+              key: `skill-root-${row.skill.id}`,
+              parentFolderId: null,
+              depth: 0,
+              row,
+              pathHint,
+            };
           }),
-          skillRows: rows,
+          skillRows: [...new Map(rows.map((row) => [row.skill.id, row])).values()],
           emptyMessage: null,
         };
       }
 
-      const entries: FolderExplorerEntry[] = rows.map((row) => {
+      const skillEntries = rows.map((row) => {
         const folderId = placementsBySkill?.get(row.skill.id)?.folder_id;
-        return { id: row.skill.id, folderIds: folderId ? [folderId] : [] };
+        return {
+          id: row.skill.id,
+          folderIds: folderId ? [folderId] : [],
+          kind: "skill" as const,
+          row,
+        };
       });
-      const directIds = new Set(
-        directEntries(entries, resolvedFolderId, explorerFolders).map((entry) => entry.id),
-      );
-      const skillRows = rows.filter((row) => directIds.has(row.skill.id));
-      const folderRows: SkillExplorerListRow[] = directChildFolders(
-        explorerFolders,
-        resolvedFolderId,
-      ).flatMap((folder) => {
-        const skillFolder = skillFolderById.get(folder.id);
-        return skillFolder
-          ? [{ kind: "folder", folder: skillFolder, entryCount: entryCounts.get(folder.id) ?? 0 }]
-          : [];
-      });
-      const skillListRows: SkillExplorerListRow[] = skillRows.map((row) => ({
-        kind: "skill",
-        row,
+      const candidateEntries = [...grayByFolder.values()].flat().map((candidate) => ({
+        id: `${candidate.packageId}-${candidate.path}`,
+        folderIds: [candidate.folderId],
+        kind: "candidate" as const,
+        candidate,
       }));
-      const candidateRows: SkillExplorerListRow[] = resolvedFolderId
-        ? (grayByFolder.get(resolvedFolderId) ?? []).map((candidate) => ({
+      const flattened = flattenFolderExplorerRows({
+        folders: explorerFolders,
+        entries: [...skillEntries, ...candidateEntries],
+        expandedFolderIds,
+        entryKey: (entry) =>
+          entry.kind === "skill"
+            ? `skill-${entry.id}`
+            : `candidate-${entry.candidate.packageId}-${entry.candidate.path}`,
+      });
+      const organized: SkillExplorerListRow[] = [];
+      const visibleSkillRows = new Map<string, SkillRow>();
+      for (const flatRow of flattened) {
+        if (flatRow.kind === "folder") {
+          const folder = skillFolderById.get(flatRow.folder.id);
+          if (!folder) continue;
+          organized.push({
+            kind: "folder",
+            key: flatRow.key,
+            parentFolderId: flatRow.parentFolderId,
+            depth: flatRow.depth,
+            folder,
+            entryCount: entryCounts.get(folder.id) ?? 0,
+          });
+          continue;
+        }
+        if (flatRow.entry.kind === "candidate") {
+          organized.push({
             kind: "candidate",
-            candidate,
-          }))
-        : [];
+            key: flatRow.key,
+            parentFolderId: flatRow.parentFolderId,
+            depth: flatRow.depth,
+            candidate: flatRow.entry.candidate,
+          });
+          continue;
+        }
+        visibleSkillRows.set(flatRow.entry.row.skill.id, flatRow.entry.row);
+        organized.push({
+          kind: "skill",
+          key: flatRow.key,
+          parentFolderId: flatRow.parentFolderId,
+          depth: flatRow.depth,
+          row: flatRow.entry.row,
+        });
+      }
       return {
-        rows: [...folderRows, ...skillListRows, ...candidateRows],
-        skillRows,
-        emptyMessage:
-          resolvedFolderId && folderRows.length + skillRows.length + candidateRows.length === 0
-            ? tPkg(($) => $.tree.empty_folder)
-            : null,
+        rows: organized,
+        skillRows: [...visibleSkillRows.values()],
+        emptyMessage: null,
       };
     },
     [
@@ -471,18 +482,17 @@ export function useSkillsPageFolderExplorer({
       placementsBySkill,
       pathLabels,
       explorerFolders,
-      resolvedFolderId,
+      expandedFolderIds,
       skillFolderById,
       entryCounts,
       grayByFolder,
-      tPkg,
     ],
   );
 
   const renderRow = useCallback(
     (row: SkillExplorerAuxRow): ReactNode => {
       if (row.kind === "candidate") {
-        return <UnimportedSkillRow key={`candidate-${row.candidate.packageId}-${row.candidate.path}`} candidate={row.candidate} />;
+        return <UnimportedSkillRow key={row.key} candidate={row.candidate} depth={row.depth} />;
       }
       const folder = row.folder;
       const pkg =
@@ -492,14 +502,20 @@ export function useSkillsPageFolderExplorer({
       const canManagePackage =
         pkg !== null &&
         (isAdmin || (currentUserId !== null && pkg.created_by === currentUserId));
+      const expanded = expandedFolderIds.has(folder.id);
       return (
         <FolderExplorerRow
-          key={`folder-${folder.id}`}
+          key={row.key}
           name={folder.name}
           typeLabel={folder.package_id !== null ? tPkg(($) => $.tree.package_label) : undefined}
           countLabel={tPkg(($) => $.tree.folder_skill_count, { count: row.entryCount })}
-          openLabel={tPkg(($) => $.tree.open_folder, { name: folder.name })}
-          onOpen={() => navigateFolder(folder.id)}
+          openLabel={tPkg(
+            expanded ? ($) => $.tree.collapse_folder : ($) => $.tree.expand_folder,
+            { name: folder.name },
+          )}
+          onOpen={() => toggleFolder(folder.id)}
+          expanded={expanded}
+          depth={row.depth}
           leading={<ListGridCell className="px-0" />}
           trailing={<SkillGridTrailingCells />}
           actions={
@@ -507,6 +523,7 @@ export function useSkillsPageFolderExplorer({
               folder={folder}
               pkg={pkg}
               canManagePackage={canManagePackage}
+              onCreateSubfolder={() => setFolderForm({ mode: "create", parentId: folder.id })}
               onRename={() => setFolderForm({ mode: "rename", folder })}
               onMove={() => setFolderMove(folder)}
               onDelete={() => setFolderDelete(folder)}
@@ -517,49 +534,46 @@ export function useSkillsPageFolderExplorer({
         />
       );
     },
-    [treeReady, folderTree, isAdmin, currentUserId, tPkg, navigateFolder],
+    [treeReady, folderTree, isAdmin, currentUserId, tPkg, expandedFolderIds, toggleFolder],
   );
 
-  const currentPath = resolvedFolderId ? folderPath(explorerFolders, resolvedFolderId) : [];
-  const currentFolder = resolvedFolderId ? skillFolderById.get(resolvedFolderId) : undefined;
-  const managedLocation = treeReady && isManagedLocation(explorerFolders, resolvedFolderId);
-  const navigationBar = (
-    <div className="flex min-h-10 shrink-0 flex-wrap items-center gap-x-3 gap-y-1 border-b px-6 py-1.5">
-      {flatRequested ? (
-        <div className="flex min-w-0 flex-1 items-center gap-1.5 text-caption text-muted-foreground">
-          <Layers aria-hidden="true" className="size-3.5 shrink-0" />
-          <span>{tPkg(($) => $.tree.flat_results)}</span>
-        </div>
-      ) : (
+  const folderActions = flatRequested && !treeUnavailable ? (
+    <div className="flex items-center gap-1.5 text-caption text-muted-foreground">
+      <Layers aria-hidden="true" className="size-3.5 shrink-0" />
+      <span>{tPkg(($) => $.tree.flat_results)}</span>
+    </div>
+  ) : treeReady && !isFlatView ? (
+    <>
+      {explorerFolders.length > 0 && (
         <>
-          <div className="min-w-0 flex-1">
-            <FolderExplorerBreadcrumbs
-              ariaLabel={tPkg(($) => $.tree.breadcrumb_aria)}
-              rootLabel={t(($) => $.page.title)}
-              path={treeReady ? currentPath : []}
-              onNavigate={navigateFolder}
-            />
-          </div>
           <Button
             type="button"
             variant="ghost"
             size="sm"
-            disabled={!treeReady || !currentFolder}
-            onClick={() => navigateFolder(currentFolder?.parent_id ?? null)}
+            aria-label={tPkg(($) => $.tree.expand_all)}
+            onClick={() => expandAll(explorerFolders.map((folder) => folder.id))}
           >
-            <ArrowUp aria-hidden="true" className="size-3.5" />
-            {tPkg(($) => $.tree.up)}
+            <ListChevronsUpDown aria-hidden="true" className="size-3.5" />
+            <span className="hidden md:inline">{tPkg(($) => $.tree.expand_all)}</span>
           </Button>
-          <NewFolderButton
-            label={tPkg(($) => $.tree.new_folder)}
-            disabled={!treeReady || managedLocation}
-            disabledReason={managedLocation ? tPkg(($) => $.tree.managed_new_folder) : undefined}
-            onClick={() => setFolderForm({ mode: "create", parentId: resolvedFolderId })}
-          />
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            aria-label={tPkg(($) => $.tree.collapse_all)}
+            onClick={collapseAll}
+          >
+            <ListChevronsDownUp aria-hidden="true" className="size-3.5" />
+            <span className="hidden md:inline">{tPkg(($) => $.tree.collapse_all)}</span>
+          </Button>
         </>
       )}
-    </div>
-  );
+      <NewFolderButton
+        label={tPkg(($) => $.tree.new_folder)}
+        onClick={() => setFolderForm({ mode: "create", parentId: null })}
+      />
+    </>
+  ) : null;
 
   const notice = treeUnavailable ? (
     <div
@@ -594,7 +608,14 @@ export function useSkillsPageFolderExplorer({
         />
       )}
       {folderForm && (
-        <SkillFolderFormDialog wsId={wsId} state={folderForm} onClose={() => setFolderForm(null)} />
+        <SkillFolderFormDialog
+          wsId={wsId}
+          state={folderForm}
+          onCreated={(parentId) => {
+            if (parentId) expandFolder(parentId);
+          }}
+          onClose={() => setFolderForm(null)}
+        />
       )}
       {folderMove && folderTree && treeReady && (
         <SkillFolderMoveDialog
@@ -608,11 +629,7 @@ export function useSkillsPageFolderExplorer({
         <SkillFolderDeleteDialog
           wsId={wsId}
           folder={folderDelete}
-          onDeleted={() => {
-            if (resolvedFolderId === folderDelete.id) {
-              navigateFolder(folderDelete.parent_id, "replace");
-            }
-          }}
+          onDeleted={() => {}}
           onClose={() => setFolderDelete(null)}
         />
       )}
@@ -639,15 +656,11 @@ export function useSkillsPageFolderExplorer({
   return {
     treeActions,
     openImport: () => setImportOpen(true),
-    navigationBar,
+    folderActions,
     notice,
     dialogs,
     organizeRows,
     renderRow,
-    countLabel: (visible, total) =>
-      isFlatView ? undefined : tPkg(($) => $.tree.folder_count, { visible, total }),
-    countTitle: () => (isFlatView ? undefined : tPkg(($) => $.tree.folder_count_title)),
-    withCurrentFolder: (path) => folderLocationPath(path, new URLSearchParams(), resolvedFolderId),
     treeLoading,
     treeReady,
     hasFolders: (folderTree?.folders.length ?? 0) > 0,

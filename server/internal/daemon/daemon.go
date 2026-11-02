@@ -687,6 +687,9 @@ type Daemon struct {
 	// It deliberately includes preparation and local-directory waiters because
 	// restart/update barriers must not kill any claimed task.
 	activeTasks atomic.Int64
+	// Sticky for this process: a finished task can leave independent processes
+	// behind even after activeTasks reaches zero.
+	cleanupUnconfirmed atomic.Bool
 	// runningTasks counts live provider execution sessions, beginning only after
 	// backend.Execute returns. It can briefly lag the server-side running state,
 	// which starts during preparation before provider launch. resourceWaitTasks
@@ -2550,6 +2553,8 @@ const (
 	// Deterministic like the two above — the same binary keeps refusing until
 	// someone installs the profile — and the reason carries that repair.
 	builtinProbeMissingProfile
+	// A bridge is configured but cannot safely serve work; manual migration only.
+	builtinProbeProfileMigration
 	// builtinProbeIncompatibleProfile: something answered `--probe`, with a
 	// protocol version this daemon does not drive — a bundle older than the
 	// check, or a newer one this build has yet to catch up with. Reported, and
@@ -2580,7 +2585,7 @@ const (
 // learned this round.
 func demotableBuiltinProbeVerdict(verdict builtinProbeVerdict) bool {
 	switch verdict {
-	case builtinProbeBelowMinimum, builtinProbeNotExecutable, builtinProbeMissingProfile:
+	case builtinProbeBelowMinimum, builtinProbeNotExecutable, builtinProbeMissingProfile, builtinProbeProfileMigration:
 		return true
 	}
 	return false
@@ -2591,7 +2596,7 @@ func demotableBuiltinProbeVerdict(verdict builtinProbeVerdict) bool {
 //
 // Only builtinProbeBelowMinimum does not: it is a pure function of a version
 // string this round already parsed, so a second look reaches the same
-// conclusion. The other two are deterministic about the state they describe but
+// conclusion. The other demotable verdicts describe deterministic states but
 // rest on an observation that is not — an installer overwriting the bin entry in
 // place (the very repair we tell users to run) or a DSH upgrade moving the
 // profile under a probe. Requiring a second sighting a window later makes those
@@ -2600,6 +2605,8 @@ func demotableBuiltinProbeVerdict(verdict builtinProbeVerdict) bool {
 func builtinProbeNeedsConfirmation(verdict builtinProbeVerdict) bool {
 	return verdict != builtinProbeBelowMinimum
 }
+
+const dshProfileMigrationReason = "the multica DSH profile needs manual migration; back up the profile, build a compatible " + dshMulticaRuntimePackage + " bundle from https://github.com/multica-ai/dsh-multica-runtime following its README, install the directory or tarball with dsh plugin, and update dsh.profile.bundles to load " + dshMulticaRuntimePackage + " instead of " + dshLegacyRuntimePackage + "; a dependencies entry alone does not load the runtime"
 
 // dshMissingProfileReason is the user-facing explanation for a
 // builtinProbeMissingProfile drop. It names the repair because nothing else in
@@ -2661,7 +2668,7 @@ func newRuntimeVerdict(verdict builtinProbeVerdict, reason, execPath string, ins
 			offline.Repair = &repair
 		}
 		return runtimeVerdict{reason: reason, offline: offline}
-	case builtinProbeMissingProfile:
+	case builtinProbeMissingProfile, builtinProbeProfileMigration:
 		// The same class of finding as an unrunnable file: the machine is
 		// reachable and the CLI cannot serve work, so the server must refuse
 		// the trigger and say what is missing rather than queue behind a wait
@@ -2672,7 +2679,7 @@ func newRuntimeVerdict(verdict builtinProbeVerdict, reason, execPath string, ins
 		offline := &RuntimeOfflineReason{
 			Code:       RuntimeOfflineCodeDshProfile,
 			Detail:     reason,
-			Installing: installing,
+			Installing: installing && verdict != builtinProbeProfileMigration,
 		}
 		repair := dshProfileRepair()
 		offline.Repair = &repair
@@ -2822,14 +2829,19 @@ probeLoop:
 		// above.
 		if name == "dsh" {
 			// What the probe said decides what may happen next. Only a
-			// confirmed-absent profile may install a bundle or condemn the
-			// runtime. An incompatible one is reported and neither installed
+			// confirmed-absent profile may install a bundle. A configuration
+			// needing migration may demote the runtime but is never overwritten.
+			// A protocol-incompatible profile is reported and neither installed
 			// over nor demoted — the profile is deliberately there, and this
 			// daemon may be the stale side of the skew. A probe that merely
 			// failed is transient, on the same rule every other provider's
 			// version probe gets.
 			switch probeDshMulticaProfile(ctx, resolved.Path) {
 			case dshProbeOK:
+			case dshProbeNeedsMigration:
+				d.logger.Warn("skip registering runtime: DSH Labrastro runtime profile needs manual migration",
+					"name", name, "path", resolved.Path)
+				return "", dshProfileMigrationReason, builtinProbeProfileMigration
 			case dshProbeMissingProfile:
 				d.logger.Warn("skip registering runtime: DSH Labrastro runtime profile is not installed",
 					"name", name, "path", resolved.Path)
@@ -4999,7 +5011,7 @@ func (d *Daemon) handleModelList(ctx context.Context, rt Runtime, requestID stri
 func (d *Daemon) handleLocalSkillList(ctx context.Context, rt Runtime, requestID string) {
 	d.logger.Info("runtime local skills requested", "runtime_id", rt.ID, "request_id", requestID, "provider", rt.Provider)
 
-	skills, supported, err := listRuntimeLocalSkills(rt.Provider)
+	skills, supported, err := d.listLocalSkills(ctx, rt)
 	if err != nil {
 		d.reportLocalSkillListResult(ctx, rt, requestID, map[string]any{
 			"status": "failed",
@@ -5026,7 +5038,7 @@ func (d *Daemon) handleLocalSkillList(ctx context.Context, rt Runtime, requestID
 func (d *Daemon) handleLocalSkillImport(ctx context.Context, rt Runtime, pending PendingLocalSkillImport) {
 	d.logger.Info("runtime local skill import requested", "runtime_id", rt.ID, "request_id", pending.ID, "provider", rt.Provider, "skill_key", pending.SkillKey)
 
-	skill, supported, err := loadRuntimeLocalSkillBundle(rt.Provider, pending.SkillKey)
+	skill, supported, err := d.loadLocalSkillBundle(ctx, rt, pending.SkillKey)
 	if err != nil {
 		d.reportLocalSkillImportResult(ctx, rt, pending.ID, map[string]any{
 			"status": "failed",
@@ -5503,13 +5515,7 @@ func (d *Daemon) pollLoop(ctx context.Context, taskWakeups <-chan taskWakeup) er
 			// poller between ClaimTasksWSFirst and taskWG.Add(1) cannot race
 			// taskWG.Wait at a zero counter.
 			<-pollerDone
-			waitDone := make(chan struct{})
-			go func() { taskWG.Wait(); close(waitDone) }()
-			select {
-			case <-waitDone:
-			case <-time.After(30 * time.Second):
-				d.logger.Warn("timed out waiting for in-flight tasks")
-			}
+			d.waitForTaskCleanup(&taskWG, 30*time.Second)
 			return ctx.Err()
 		case <-runtimeSetCh:
 			// The batch poller re-derives allRuntimeIDs() each cycle; nudge it to
@@ -6003,6 +6009,10 @@ func (d *Daemon) handleTask(ctx context.Context, task Task, slot int) {
 		taskLog.Info("discarding rejected start claim", "error", err)
 		return
 	}
+	if result.FailureReason == taskfailure.ReasonProcessCleanupUnconfirmed.String() && err != nil {
+		result.Comment += "; " + err.Error()
+		err = nil // Cleanup uncertainty must outrank worktree-finalization errors.
+	}
 
 	// Report usage before any early return — the agent accumulates tokens
 	// whether the task completes, errors, or is cancelled mid-run by the poll
@@ -6033,12 +6043,7 @@ func (d *Daemon) handleTask(ctx context.Context, task Task, slot int) {
 		// RetiredSessionID rides along too: a resumed session the run never
 		// got a single message out of must not stay this issue's resume
 		// pointer (MUL-8188).
-		ack := TaskCancelAck{BranchName: result.BranchName, DurableWorkDir: result.DurableWorkDir, RetiredSessionID: result.RetiredSessionID}
-		var preserved *worktreePreservedError
-		if errors.As(err, &preserved) {
-			ack.ErrorMessage = preserved.Error()
-			ack.FailureReason = "local_directory_error"
-		}
+		ack := taskCancelAcknowledgement(result, err, provider)
 		if ackErr := d.client.AckTaskCancelled(ctx, task.ID, ack); ackErr != nil {
 			taskLog.Warn("cancel ack failed; server sweeper will finalize", "error", ackErr)
 		}
@@ -6092,7 +6097,7 @@ func (d *Daemon) handleTask(ctx context.Context, task Task, slot int) {
 		// completed/failed rows the complete/fail callback is the
 		// authoritative channel and a stale run's late ack must not touch
 		// them.
-		if ackErr := d.client.AckTaskCancelled(ctx, task.ID, TaskCancelAck{BranchName: result.BranchName, DurableWorkDir: result.DurableWorkDir, RetiredSessionID: result.RetiredSessionID}); ackErr != nil {
+		if ackErr := d.client.AckTaskCancelled(ctx, task.ID, taskCancelAcknowledgement(result, nil, provider)); ackErr != nil {
 			taskLog.Warn("cancel ack failed; server sweeper will finalize", "error", ackErr)
 		}
 		return
@@ -6169,6 +6174,27 @@ func (e *environmentSetupError) Unwrap() error { return e.err }
 // failure. The message is untouched, so the wrapper is invisible to everything
 // except taskRunFailureReason.
 func asEnvironmentSetupFailure(err error) error { return &environmentSetupError{err: err} }
+
+func taskCancelAcknowledgement(result TaskResult, runErr error, provider string) TaskCancelAck {
+	ack := TaskCancelAck{BranchName: result.BranchName, DurableWorkDir: result.DurableWorkDir, RetiredSessionID: result.RetiredSessionID}
+	var preserved *worktreePreservedError
+	if errors.As(runErr, &preserved) {
+		ack.ErrorMessage = preserved.Error()
+		ack.FailureReason = "local_directory_error"
+	}
+	confirmed := result.FailureReason != taskfailure.ReasonProcessCleanupUnconfirmed.String()
+	if provider == "pi" || provider == "omp" {
+		ack.ProcessCleanupConfirmed = &confirmed
+	}
+	if !confirmed {
+		ack.ErrorMessage = result.Comment
+		if preserved != nil {
+			ack.ErrorMessage += "; " + preserved.Error()
+		}
+		ack.FailureReason = result.FailureReason
+	}
+	return ack
+}
 
 func taskRunFailureReason(err error) string {
 	if errors.Is(err, errInvalidTaskIdentity) {
@@ -8057,6 +8083,7 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		WorkspaceContext:                 task.WorkspaceContext,
 		IssueStatuses:                    convertIssueStatusesForEnv(task.IssueStatuses),
 		IssueStatusesOmitted:             task.IssueStatusesOmitted,
+		HasProjectWorkflow:               taskHasProjectWorkflow(task),
 		ConnectedApps:                    task.ConnectedApps,
 	}
 
@@ -8234,8 +8261,12 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 	// task dispatch.
 	var openclawMode string
 	var openclawGateway execenv.OpenclawGatewayPin
+	var openclawModelOverride string
 	if task.Agent != nil && provider == "openclaw" {
 		openclawMode, openclawGateway = decodeOpenclawRuntimeConfig(task.Agent.RuntimeConfig, d.logger)
+		// Use the server's claim-time snapshot of the agent's persistent model
+		// override throughout preparation and execution.
+		openclawModelOverride = strings.TrimSpace(task.ModelOverride)
 	}
 	var agentEnvOverrides map[string]string
 	var agentCustomArgs []string
@@ -8319,7 +8350,7 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 			d.markActiveStore(store)
 			defer d.unmarkActiveStore(store)
 		}
-		// The overlay links state.db here so the conversation transcript
+		// The conversation store is the isolated home, so its ordinary state.db
 		// survives the task and a follow-up turn can actually resume it
 		// (GH #6806). Keyed on (agent, resolved source home, conversation):
 		// tasks of one conversation are serial, so the shard has a single
@@ -8601,6 +8632,9 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 	// in place, leave them behind in the user's tree.
 	if env.LocalDirectory || env.LocalWorktree != nil {
 		defer func() {
+			if taskResult.FailureReason == taskfailure.ReasonProcessCleanupUnconfirmed.String() {
+				return // Preserve files that an unconfirmed process may still use.
+			}
 			var cleanupErr error
 			if cerr := execenv.CleanupRuntimeConfig(env.WorkDir, provider); cerr != nil {
 				cleanupErr = cerr
@@ -8668,6 +8702,9 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 	// "start task failed: <…>" string and the same failure_reason
 	// taxonomy as before — see MUL-2946 for the classifier contract.
 	var taskCapabilities []string
+	if provider == "pi" || provider == "omp" {
+		taskCapabilities = append(taskCapabilities, protocol.DaemonCapabilityPiProcessCleanupV1)
+	}
 	var cursorHookCommand []string
 	supplementSupported := agent.SupportsTaskSupplement(provider, resolvedVersion) && task.IssueID != ""
 	if supplementSupported && provider == "cursor" {
@@ -8886,6 +8923,18 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		CodexVersion:   codexVersion,
 		BuiltinRuntime: !usesCustomProfileCommand,
 	}
+	if hermesOverlayActive {
+		// Retire an owner left by a crashed/interrupted daemon before it can
+		// execute tools with the preceding task's frozen environment.
+		if err := agent.StopHermesTaskGateway(backendConfig, env.HermesHome); err != nil {
+			return TaskResult{}, err
+		}
+		defer func() {
+			if err := agent.StopHermesTaskGateway(backendConfig, env.HermesHome); err != nil {
+				d.logger.Warn("failed to stop task Hermes gateway", "home", env.HermesHome, "error", err)
+			}
+		}()
+	}
 	// Register retirement before any fresh-session launch can fail. The check
 	// uses the backend's final binary, environment, working directory and MCP
 	// configuration, rather than the daemon's ambient OpenCode store.
@@ -9035,6 +9084,7 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		ThinkingLevel:          thinkingLevel,
 		ServiceTier:            serviceTier,
 		OpenclawMode:           openclawMode,
+		OpenclawModelOverride:  openclawModelOverride,
 		ClaudeSettingsPath:     env.ClaudeSettingsPath,
 		QwenpawWorkspace:       env.QwenpawWorkspace,
 	}
@@ -9124,6 +9174,11 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 	result, tools, err := d.executeAndDrain(ctx, backend, prompt, execOpts, taskLog, task.ID, env.CodexHome, &msgSeq)
 	if err != nil {
 		return TaskResult{}, err
+	}
+	if result.Status == "cleanup_unconfirmed" {
+		if env.LocalWorktree != nil {
+			env.LocalWorktree.AbortWithReason(errors.New(result.Error))
+		}
 	}
 
 	if shouldRetryWithFreshSession(result, task.PriorSessionID, tools, provider) {
@@ -9275,6 +9330,12 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 	defer func() { taskResult.SessionRolloutMissing = sessionRolloutMissing }()
 
 	switch result.Status {
+	case "cleanup_unconfirmed":
+		return TaskResult{
+			Status: "blocked", Comment: result.Error, SessionID: result.SessionID,
+			WorkDir: env.WorkDir, EnvRoot: env.RootDir, Usage: usageEntries,
+			FailureReason: taskfailure.ReasonProcessCleanupUnconfirmed.String(),
+		}, nil
 	case "completed":
 		if result.Output == "" {
 			// The agent completed successfully but produced no text output.
@@ -9737,7 +9798,12 @@ func freshSessionMayHelp(errText string) bool {
 // messages and is owned by the caller so a same-task retry continues the
 // sequence instead of restarting at 1 — the server orders the transcript by
 // seq alone, and duplicate seqs would interleave the two attempts' rows.
-func (d *Daemon) executeAndDrain(ctx context.Context, backend agent.Backend, prompt string, opts agent.ExecOptions, taskLog *slog.Logger, taskID, codexHome string, msgSeq *atomic.Int32) (agent.Result, int32, error) {
+func (d *Daemon) executeAndDrain(ctx context.Context, backend agent.Backend, prompt string, opts agent.ExecOptions, taskLog *slog.Logger, taskID, codexHome string, msgSeq *atomic.Int32) (finalResult agent.Result, finalTools int32, finalErr error) {
+	defer func() {
+		if finalResult.Status == "cleanup_unconfirmed" {
+			d.cleanupUnconfirmed.Store(true)
+		}
+	}()
 	phaseRecorder := taskPhaseRecorderFromContext(ctx)
 	// Wrap the caller's ctx so the idle watchdog (below) can interrupt both
 	// the agent subprocess (via the ctx passed to backend.Execute) AND the
@@ -10209,15 +10275,24 @@ func (d *Daemon) executeAndDrain(ctx context.Context, backend agent.Backend, pro
 			return agent.Result{}, false, false
 		}
 	}
+	cleanupUnconfirmed := func() (agent.Result, int32, error) {
+		return agent.Result{
+			Status: "cleanup_unconfirmed",
+			Error:  "Runtime did not confirm process cleanup; background processes may still be running. Check them before manually rerunning this task.",
+		}, toolCount.Load(), nil
+	}
 
 	select {
-	case result := <-session.Result:
+	case result, ok := <-session.Result:
 		stopWatchdog()
 		waitForDrain()
+		if !ok && session.CleanupRequired {
+			return cleanupUnconfirmed()
+		}
 		// terminalObserved outranks a watchdog that fired anyway: if the backend
 		// had already read its authoritative result, this is the real outcome and
 		// re-tagging it would report a completed run as a hang.
-		if idleWatchdogFired.Load() && !terminalObserved() {
+		if idleWatchdogFired.Load() && !terminalObserved() && result.Status != "cleanup_unconfirmed" {
 			// The backend's wait goroutine (e.g. claude.go) translates the
 			// SIGKILL we delivered via agentCancel into Status="aborted".
 			// Re-tag it as "idle_watchdog" so runTask routes the
@@ -10257,6 +10332,9 @@ func (d *Daemon) executeAndDrain(ctx context.Context, backend agent.Backend, pro
 				// this is the real outcome, not a hang.
 				return result, toolCount.Load(), nil
 			} else if delivered {
+				if result.Status == "cleanup_unconfirmed" {
+					return result, toolCount.Load(), nil
+				}
 				// The backend's wait goroutine (e.g. claude.go) translates the
 				// SIGKILL we delivered via agentCancel into Status="aborted".
 				// Re-tag it so runTask routes the disposition through the
@@ -10266,6 +10344,9 @@ func (d *Daemon) executeAndDrain(ctx context.Context, backend agent.Backend, pro
 					result.Error = idleWatchdogReason(time.Duration(idleWatchdogThreshold.Load()))
 				}
 				return result, toolCount.Load(), nil
+			}
+			if session.CleanupRequired {
+				return cleanupUnconfirmed()
 			}
 			return agent.Result{
 				Status: "idle_watchdog",
@@ -10278,13 +10359,22 @@ func (d *Daemon) executeAndDrain(ctx context.Context, backend agent.Backend, pro
 		// upstream runCtx fired runCancel(); context.DeadlineExceeded is the
 		// drain deadline expiring on its own.
 		if errors.Is(drainCtx.Err(), context.Canceled) {
-			if result, _, authoritative := awaitTerminalResult("upstream_context"); authoritative {
+			if result, delivered, authoritative := awaitTerminalResult("upstream_context"); authoritative || (delivered && result.Status == "cleanup_unconfirmed") {
 				return result, toolCount.Load(), nil
+			} else if session.CleanupRequired && !delivered {
+				return cleanupUnconfirmed()
 			}
 			return agent.Result{
 				Status: "cancelled",
 				Error:  "task cancelled by upstream context (server cancel or daemon shutdown)",
 			}, toolCount.Load(), nil
+		}
+		if session.CleanupRequired {
+			agentCancel()
+			if result, delivered, _ := awaitTerminalResult("drain_timeout"); delivered {
+				return result, toolCount.Load(), nil
+			}
+			return cleanupUnconfirmed()
 		}
 		return agent.Result{
 			Status: "timeout",

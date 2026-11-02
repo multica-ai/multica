@@ -12,6 +12,7 @@
 // div declare role="combobox" instead of receiving role="button" over nested
 // remove buttons.
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { forwardRef } from "react";
 import { cleanup } from "@testing-library/react";
 import { renderWithI18n } from "../../../test/i18n";
 import { PillButton } from "../../../common/pill-button";
@@ -33,6 +34,20 @@ function expectNoBaseUiErrors(renderUi: () => void) {
 }
 
 describe("PropertyPicker trigger nativeButton routing", () => {
+  it("honors explicit non-native semantics for a component trigger", () => {
+    const NonNativeTrigger = forwardRef<HTMLDivElement, React.ComponentProps<"div">>(
+      (props, ref) => <div {...props} ref={ref} />,
+    );
+    NonNativeTrigger.displayName = "NonNativeTrigger";
+    expectNoBaseUiErrors(() =>
+      renderWithI18n(
+        <PropertyPicker open onOpenChange={() => {}} triggerRender={<NonNativeTrigger />} nativeButton={false} trigger="Choose">
+          <button type="button" data-picker-item>row</button>
+        </PropertyPicker>,
+      ),
+    );
+  });
+
   it("renders a non-button host-element anchor without Base UI errors", () => {
     expectNoBaseUiErrors(() =>
       renderWithI18n(

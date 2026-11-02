@@ -446,6 +446,7 @@ GET	/api/system-wakeups	user-auth	deny
 PUT	/api/system-wakeups/{rule}	user-auth	deny
 POST	/api/tasks/{taskId}/cancel	user-auth	deny
 GET	/api/tasks/{taskId}/messages	user-auth	allow
+POST	/api/tasks/{taskId}/rerun	user-auth	deny
 POST	/api/tasks/{taskId}/retry-source-context	user-auth	deny
 POST	/api/telegram/binding/redeem	user-auth	deny
 GET	/api/tips/active	user-auth	deny

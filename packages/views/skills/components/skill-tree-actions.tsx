@@ -4,7 +4,7 @@
 // list. Upstream `skill-list-actions.tsx` mounts these with one line each and
 // carries only the optional `treeActions` field on its shared context.
 
-import { FolderInput, PackageX } from "lucide-react";
+import { FolderInput, Unlink as PackageX } from "@multica/ui/icons";
 import { Button } from "@multica/ui/components/ui/button";
 import { DropdownMenuItem } from "@multica/ui/components/ui/dropdown-menu";
 import {

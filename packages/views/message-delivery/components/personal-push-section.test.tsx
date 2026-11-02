@@ -252,7 +252,7 @@ describe("PersonalFeishuPushSection", () => {
   it("renders a loading skeleton, not a phantom empty state", () => {
     routesRef.current = { data: undefined, isLoading: true, isError: false, isSuccess: false };
     renderSection();
-    expect(document.querySelectorAll(".animate-pulse").length).toBeGreaterThan(0);
+    expect(document.querySelectorAll('[data-slot="skeleton"]').length).toBeGreaterThan(0);
     expect(screen.queryByText(/isn't set up yet/i)).not.toBeInTheDocument();
   });
 

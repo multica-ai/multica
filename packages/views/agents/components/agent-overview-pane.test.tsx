@@ -301,10 +301,10 @@ describe("AgentOverviewPane on a Qoder Cloud Agents runtime", () => {
     expect(tabNames()).toEqual(["Instructions"]);
   });
 
-  it("drops Environment and Custom Args and names the QCA agent tab", () => {
+  it("drops Environment and Custom Args and names the Qoder Cloud Agents tab", () => {
     renderPane([makeRuntime("qoder_cloud")]);
     openSettings();
-    expect(tabNames()).toEqual(["General", "Access", "QCA Agent"]);
+    expect(tabNames()).toEqual(["General", "Access", "Qoder Cloud Agents"]);
   });
 
   it("keeps Routing off for other runtimes", () => {
