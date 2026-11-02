@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log/slog"
 	"sort"
 	"strings"
@@ -235,4 +236,62 @@ func (s *ProposalService) relatedDecisionsFor(ctx context.Context, workspaceID, 
 		return nil
 	}
 	return relatedDecisions(res.Hits)
+}
+
+// ProposalPriorArtSubject is a proposal a read reports related proposals for.
+type ProposalPriorArtSubject struct {
+	ID        pgtype.UUID
+	Title     string
+	CreatedAt time.Time
+}
+
+// RelatedProposalsByTitle returns, for each subject, the earlier proposals of
+// the workspace that look related by title. "Earlier" means filed within
+// priorArtWindow before the subject, the same window a new filing is compared
+// against, so a read gives the same answer whenever it is made. Reads never
+// search the decisions base: that costs a knowledge call per proposal.
+//
+// The map is keyed by proposal id. A subject with no matches has no entry. The
+// lookup is bounded by the newest 500 proposals in the window (the query's
+// limit), so a subject older than that may see fewer matches.
+func (s *ProposalService) RelatedProposalsByTitle(ctx context.Context, workspaceID pgtype.UUID, subjects []ProposalPriorArtSubject, prefix string) (map[string][]ProposalRelated, error) {
+	out := map[string][]ProposalRelated{}
+	if len(subjects) == 0 {
+		return out, nil
+	}
+	oldest := subjects[0].CreatedAt
+	for _, sub := range subjects {
+		if sub.CreatedAt.Before(oldest) {
+			oldest = sub.CreatedAt
+		}
+	}
+	rows, err := s.Issues.Queries.ListRecentProposalsForPriorArt(ctx, db.ListRecentProposalsForPriorArtParams{
+		WorkspaceID: workspaceID,
+		CreatedAt:   pgtype.Timestamptz{Time: oldest.Add(-priorArtWindow), Valid: true},
+	})
+	if err != nil {
+		return nil, fmt.Errorf("list proposals for prior art: %w", err)
+	}
+	candidates := make([]relatedCandidate, 0, len(rows))
+	for _, r := range rows {
+		candidates = append(candidates, relatedCandidate{
+			ID:         r.ID,
+			State:      r.State,
+			Title:      r.Title,
+			CreatedAt:  r.CreatedAt.Time,
+			Identifier: IssueIdentifier(prefix, r.Number),
+		})
+	}
+	for _, sub := range subjects {
+		var earlier []relatedCandidate
+		for _, c := range candidates {
+			if c.CreatedAt.Before(sub.CreatedAt) && !c.CreatedAt.Before(sub.CreatedAt.Add(-priorArtWindow)) {
+				earlier = append(earlier, c)
+			}
+		}
+		if related := relatedByTitle(earlier, sub.ID, sub.Title); len(related) > 0 {
+			out[util.UUIDToString(sub.ID)] = related
+		}
+	}
+	return out, nil
 }

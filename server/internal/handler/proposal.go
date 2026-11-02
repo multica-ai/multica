@@ -66,13 +66,16 @@ type ProposalResponse struct {
 	// Handoff is set only on the response to an approval that handed off to a
 	// squad. The ids are not stored on the proposal.
 	Handoff *ProposalHandoffResponse `json:"handoff,omitempty"`
+	// Related lists earlier proposals that look related by title (plan 9.6),
+	// most similar first. It is always an array. The create response fills it
+	// with decisions too; reads report proposals only.
+	Related []ProposalRelatedResponse `json:"related"`
 }
 
-// ProposalCreateResponse is the response to filing a proposal: the proposal,
-// and the earlier proposals and decisions that look related to it.
+// ProposalCreateResponse is the response to filing a proposal: the proposal
+// and the related proposals and decisions (in ProposalResponse.Related).
 type ProposalCreateResponse struct {
 	ProposalResponse
-	Related []ProposalRelatedResponse `json:"related"`
 }
 
 // ProposalRevisionResponse is one body the boss may have read. Revision 1 is
@@ -122,7 +125,27 @@ func proposalToResponse(p db.Proposal, issueTitle, issueStatus, issuePrefix stri
 		Revision:        p.Revision,
 		ExpiresAt:       timestampToPtr(p.ExpiresAt),
 		SnoozedUntil:    timestampToPtr(p.SnoozedUntil),
+		// Reads and events fill Related themselves; this default keeps it an array.
+		Related: []ProposalRelatedResponse{},
 	}
+}
+
+// proposalPriorArtSubject is the subject a read looks up related proposals for.
+func proposalPriorArtSubject(p db.Proposal, title string) service.ProposalPriorArtSubject {
+	return service.ProposalPriorArtSubject{ID: p.ID, Title: title, CreatedAt: p.CreatedAt.Time}
+}
+
+// relatedProposalsForRead looks up the title-related proposals for the given
+// subjects. A failed lookup is logged and reads go out with empty lists, so a
+// read never fails on it.
+func (h *Handler) relatedProposalsForRead(ctx context.Context, wsUUID pgtype.UUID, subjects []service.ProposalPriorArtSubject, prefix string) map[string][]service.ProposalRelated {
+	related, err := h.proposalService().RelatedProposalsByTitle(ctx, wsUUID, subjects, prefix)
+	if err != nil {
+		slog.Warn("proposal read: related lookup failed; reported without it",
+			"workspace_id", uuidToString(wsUUID), "error", err)
+		return map[string][]service.ProposalRelated{}
+	}
+	return related
 }
 
 // relatedToResponse maps the prior-art entries to their response shape. The
@@ -358,6 +381,7 @@ func (h *Handler) CreateProposal(w http.ResponseWriter, r *http.Request) {
 	issueResp := issueToResponse(res.Issue, prefix)
 	h.fillStatusCategory(r.Context(), wsUUID, &issueResp)
 	resp := proposalToResponse(res.Proposal, res.Issue.Title, res.Issue.Status, prefix, res.Issue.Number)
+	resp.Related = relatedToResponse(res.Related)
 
 	// The ordinary issue:created event is what raises the boss's issue_assigned
 	// inbox item for an urgent proposal; an unassigned one raises nothing.
@@ -365,7 +389,7 @@ func (h *Handler) CreateProposal(w http.ResponseWriter, r *http.Request) {
 	h.publish(protocol.EventProposalCreated, workspaceID, actorType, actorID, map[string]any{"proposal": resp})
 	slog.Info("proposal created", append(logger.RequestAttrs(r),
 		"proposal_id", resp.ID, "squad_id", resp.SquadID, "urgent", resp.Urgent, "related", len(res.Related))...)
-	writeJSON(w, http.StatusCreated, ProposalCreateResponse{ProposalResponse: resp, Related: relatedToResponse(res.Related)})
+	writeJSON(w, http.StatusCreated, ProposalCreateResponse{ProposalResponse: resp})
 }
 
 // ── Read ────────────────────────────────────────────────────────────────────
@@ -403,8 +427,14 @@ func (h *Handler) ListProposals(w http.ResponseWriter, r *http.Request) {
 	}
 	prefix := h.getIssuePrefix(r.Context(), wsUUID)
 	resp := make([]ProposalResponse, len(rows))
+	subjects := make([]service.ProposalPriorArtSubject, len(rows))
 	for i, row := range rows {
 		resp[i] = proposalToResponse(row.Proposal, row.IssueTitle, row.IssueStatus, prefix, row.IssueNumber)
+		subjects[i] = proposalPriorArtSubject(row.Proposal, row.IssueTitle)
+	}
+	related := h.relatedProposalsForRead(r.Context(), wsUUID, subjects, prefix)
+	for i := range resp {
+		resp[i].Related = relatedToResponse(related[resp[i].ID])
 	}
 	writeJSON(w, http.StatusOK, resp)
 }
@@ -433,7 +463,11 @@ func (h *Handler) GetProposal(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	prefix := h.getIssuePrefix(r.Context(), wsUUID)
-	writeJSON(w, http.StatusOK, proposalToResponse(row.Proposal, row.IssueTitle, row.IssueStatus, prefix, row.IssueNumber))
+	resp := proposalToResponse(row.Proposal, row.IssueTitle, row.IssueStatus, prefix, row.IssueNumber)
+	related := h.relatedProposalsForRead(r.Context(), wsUUID,
+		[]service.ProposalPriorArtSubject{proposalPriorArtSubject(row.Proposal, row.IssueTitle)}, prefix)
+	resp.Related = relatedToResponse(related[resp.ID])
+	writeJSON(w, http.StatusOK, resp)
 }
 
 // ListProposalRevisions returns the bodies a proposal has had, newest first. Any
