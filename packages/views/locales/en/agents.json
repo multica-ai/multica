@@ -167,7 +167,7 @@
     "runtime_required_toast": "Bind a runtime before running this agent.",
     "assign_work": "Assign work",
     "more_actions_aria": "Agent actions",
-    "advanced_settings": "Advanced settings",
+    "settings": "Settings",
     "copy_link": "Copy link",
     "copy_id": "Copy agent ID",
     "link_copied_toast": "Link copied",
@@ -225,7 +225,8 @@
   "panel": {
     "status": "Status",
     "runs_7d": "Runs (7d)",
-    "edit_access_aria": "Access: {{value}}. Change access"
+    "edit_access_aria": "Access: {{value}}. Change access",
+    "all_settings": "All settings"
   },
   "skill_attach": {
     "trigger_aria": "Attach a workspace skill",

@@ -74,7 +74,8 @@
     "assign_issue": "把任務指派給 {{name}}...",
     "new_issue": "新建任務給 {{name}}",
     "pin_in_chat": "在聊天裡固定",
-    "unpin_in_chat": "從聊天裡取消固定"
+    "unpin_in_chat": "從聊天裡取消固定",
+    "settings": "開啟 AI 代理設定"
   },
   "autopilot": {
     "run_now": "立即執行一次",

@@ -74,7 +74,8 @@
     "assign_issue": "タスクを {{name}} に割り当て...",
     "new_issue": "{{name}} 用の新規タスク",
     "pin_in_chat": "チャットにピン留め",
-    "unpin_in_chat": "チャットのピン留めを解除"
+    "unpin_in_chat": "チャットのピン留めを解除",
+    "settings": "エージェント設定を開く"
   },
   "autopilot": {
     "run_now": "今すぐ 1 回実行",
