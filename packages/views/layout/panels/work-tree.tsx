@@ -251,7 +251,7 @@ function ProjectTreeItem({
             <IconButton
               label={t(($) => $.panels.work.new_issue_in_project, { name: project.title })}
               size="icon-xs"
-              className="absolute -right-1 z-10 text-muted-foreground opacity-0 transition-opacity group-focus-within/row:opacity-100 group-hover/row:opacity-100 focus-visible:opacity-100 [@media(pointer:coarse)]:opacity-100"
+              className="absolute -right-2 z-10 text-muted-foreground opacity-0 transition-opacity group-focus-within/row:opacity-100 group-hover/row:opacity-100 focus-visible:opacity-100 [@media(pointer:coarse)]:opacity-100"
               onPointerDown={(event) => event.stopPropagation()}
               onClick={() => openCreateIssueWithPreference({ project_id: project.id })}
             >
