@@ -12,8 +12,10 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/slack-go/slack"
+	"github.com/slack-go/slack/socketmode"
 
 	"github.com/multica-ai/multica/server/internal/integrations/channel"
 )
@@ -372,4 +374,37 @@ func mustJSON(t *testing.T, v any) string {
 		t.Fatal(err)
 	}
 	return string(raw)
+}
+
+// The Socket Mode loop routes an interactive envelope to the press path. The
+// press runs on its own goroutine, so the test waits for it to land.
+func TestSlackSocketInteractiveEnvelopeReachesThePress(t *testing.T) {
+	t.Parallel()
+	server, ts := newPressServer(t)
+	actions := &fakeSlackActions{result: channel.PressResult{Reply: "Approved: Hire.", Settled: false}}
+	c := pressChannel(t, actions, ts, "UBOT")
+	sm := socketmode.New(slack.New("", slack.OptionAppLevelToken("xapp-test")))
+
+	evt := socketmode.Event{
+		Type: socketmode.EventTypeInteractive,
+		Data: pressPayload(t, ts.URL+"/response", "UMEMBER1", "p1:approve"),
+	}
+	if err := c.handleSocketEvent(context.Background(), sm, evt, nil); err != nil {
+		t.Fatalf("handleSocketEvent: %v", err)
+	}
+
+	deadline := time.Now().Add(5 * time.Second)
+	for len(actions.pressed()) == 0 && time.Now().Before(deadline) {
+		time.Sleep(10 * time.Millisecond)
+	}
+	if n := len(actions.pressed()); n != 1 {
+		t.Fatalf("presses = %d, want the envelope to reach the press once", n)
+	}
+	deadline = time.Now().Add(5 * time.Second)
+	for len(server.callsTo("/response")) == 0 && time.Now().Before(deadline) {
+		time.Sleep(10 * time.Millisecond)
+	}
+	if n := len(server.callsTo("/response")); n != 1 {
+		t.Fatalf("replies = %d, want 1", n)
+	}
 }
