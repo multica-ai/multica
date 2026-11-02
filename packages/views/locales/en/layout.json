@@ -164,6 +164,7 @@
     "filter_count_one": "{{count}} filter",
     "filter_count_other": "{{count}} filters",
     "reset": "Reset",
+    "clear_search": "Clear search",
     "display": "Display settings",
     "selected_one": "{{count}} selected",
     "selected_other": "{{count}} selected",

@@ -2,6 +2,7 @@
   "page": {
     "title": "エージェント",
     "new_agent": "新規エージェント",
+    "search": "エージェントを検索",
     "show_archived": "アーカイブ済みを表示 ({{count}}) →",
     "of_total": "{{total}} 件中 {{visible}} 件",
     "list_load_failed": "エージェントを読み込めませんでした",
@@ -49,7 +50,10 @@
   },
   "no_matches": {
     "title": "一致する結果なし",
+    "search_active": "\"{{query}}\" に一致するエージェントがありません。",
+    "search_active_filtered": "このフィルターで \"{{query}}\" に一致するエージェントがありません。",
     "no_archived": "まだアーカイブ済みのエージェントはありません。",
+    "search_archived": "\"{{query}}\" に一致するアーカイブ済みエージェントがありません。",
     "no_filter_match": "このフィルターに一致するエージェントがありません。",
     "search_runtime_filtered": "\"{{machine}}\" 上に \"{{query}}\" に一致するエージェントがありません。",
     "runtime_filtered": "\"{{machine}}\" 上にエージェントがありません。"

@@ -23,7 +23,7 @@ const (
 	// Kept in lockstep with the server-side importer's maxImportFileCount so a
 	// skill that imports from a URL/archive also imports from a runtime-local
 	// directory. The 8 MiB bundle cap is the real guard on skill size.
-	maxLocalSkillFileCount = 256
+	maxLocalSkillFileCount = 512
 	// Cap how deep skill discovery descends below a runtime root. opencode
 	// stores skills two levels deep (e.g. `release/reporter/SKILL.md`); a
 	// few extra levels covers any realistic future layout while bounding

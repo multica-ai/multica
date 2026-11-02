@@ -2,6 +2,7 @@
   "page": {
     "title": "AI 代理",
     "new_agent": "新建 AI 代理",
+    "search": "搜尋 AI 代理",
     "show_archived": "顯示已歸檔（{{count}}）→",
     "of_total": "{{visible}} / {{total}}",
     "list_load_failed": "無法載入 AI 代理列表",
@@ -49,7 +50,10 @@
   },
   "no_matches": {
     "title": "無匹配項",
+    "search_active": "沒有 AI 代理匹配\"{{query}}\"。",
+    "search_active_filtered": "在該篩選下沒有 AI 代理匹配\"{{query}}\"。",
     "no_archived": "還沒有已歸檔 AI 代理。",
+    "search_archived": "沒有已歸檔 AI 代理匹配\"{{query}}\"。",
     "no_filter_match": "該篩選下沒有匹配的 AI 代理。",
     "search_runtime_filtered": "\"{{machine}}\"上沒有匹配\"{{query}}\"的 AI 代理。",
     "runtime_filtered": "\"{{machine}}\"上還沒有 AI 代理。"
