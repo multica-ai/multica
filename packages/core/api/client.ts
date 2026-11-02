@@ -290,6 +290,17 @@ import {
   type DigestParams,
 } from "../office/digest-schema";
 import {
+  EMPTY_SQUAD_ROUTINE,
+  SquadCharterSchema,
+  SquadRoutineListSchema,
+  SquadRoutineSchema,
+  emptySquadCharter,
+  type CreateSquadRoutineRequest,
+  type SquadCharter,
+  type SquadRoutine,
+  type UpdateSquadCharterRequest,
+} from "../office/charter-schema";
+import {
   FALLBACK_OFFICE_SETUP_READINESS,
   OfficeSetupReadinessSchema,
   type OfficeSetupReadiness,
@@ -4941,6 +4952,48 @@ export class ApiClient {
     return parseWithFallback(raw, OfficeSeatsResponseSchema, EMPTY_OFFICE_SEATS_RESPONSE, {
       endpoint: "PUT /api/office/seats",
     }) as OfficeSeatsResponse;
+  }
+
+  // Squad charter and routines. A refused charter save is a 409 whose body
+  // carries the current revision; see `parseCharterRevisionConflict`.
+  async getSquadCharter(squadId: string): Promise<SquadCharter> {
+    const raw = await this.fetch<unknown>(`/api/squads/${squadId}/charter`);
+    return parseWithFallback(raw, SquadCharterSchema, emptySquadCharter(squadId), {
+      endpoint: "GET /api/squads/:id/charter",
+    });
+  }
+
+  async updateSquadCharter(squadId: string, data: UpdateSquadCharterRequest): Promise<SquadCharter> {
+    const raw = await this.fetch<unknown>(`/api/squads/${squadId}/charter`, {
+      method: "PUT",
+      body: JSON.stringify(data),
+    });
+    return parseWithFallback(raw, SquadCharterSchema, emptySquadCharter(squadId), {
+      endpoint: "PUT /api/squads/:id/charter",
+    });
+  }
+
+  async listSquadRoutines(squadId: string): Promise<SquadRoutine[]> {
+    const raw = await this.fetch<unknown>(`/api/squads/${squadId}/routines`);
+    return parseWithFallback(raw, SquadRoutineListSchema, [] as SquadRoutine[], {
+      endpoint: "GET /api/squads/:id/routines",
+    });
+  }
+
+  async createSquadRoutine(squadId: string, data: CreateSquadRoutineRequest): Promise<SquadRoutine> {
+    const raw = await this.fetch<unknown>(`/api/squads/${squadId}/routines`, {
+      method: "POST",
+      body: JSON.stringify(data),
+    });
+    return parseWithFallback(raw, SquadRoutineSchema, EMPTY_SQUAD_ROUTINE, {
+      endpoint: "POST /api/squads/:id/routines",
+    });
+  }
+
+  /** Unlinks a routine; `pause` also pauses its autopilot. `autopilotId` is the routine id. */
+  async deleteSquadRoutine(squadId: string, autopilotId: string, options: { pause: boolean }): Promise<void> {
+    const query = options.pause ? "?pause=true" : "";
+    await this.fetch(`/api/squads/${squadId}/routines/${autopilotId}${query}`, { method: "DELETE" });
   }
 
   // Per-squad members status snapshot: one row per member with derived
