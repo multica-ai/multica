@@ -1408,6 +1408,12 @@ func (h *Handler) DeleteWorkspace(w http.ResponseWriter, r *http.Request) {
 			run:  func() error { return qtx.DeleteWorkspaceBriefPushPreferences(ctx, requester.WorkspaceID) },
 		},
 		{
+			// Ratings of briefs have no foreign keys either, and rate the briefs
+			// swept next, so they go first (plan 9.12).
+			name: "delete brief feedback",
+			run:  func() error { return qtx.DeleteWorkspaceBriefFeedback(ctx, requester.WorkspaceID) },
+		},
+		{
 			name: "delete briefs",
 			run:  func() error { return qtx.DeleteWorkspaceBriefs(ctx, requester.WorkspaceID) },
 		},

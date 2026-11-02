@@ -36,6 +36,17 @@ func (q *Queries) CountBriefFeedbackSince(ctx context.Context, arg CountBriefFee
 	return i, err
 }
 
+const deleteWorkspaceBriefFeedback = `-- name: DeleteWorkspaceBriefFeedback :exec
+DELETE FROM brief_feedback WHERE workspace_id = $1
+`
+
+// Workspace teardown: the ratings have no foreign keys, so they are swept
+// explicitly, before the briefs they rate.
+func (q *Queries) DeleteWorkspaceBriefFeedback(ctx context.Context, workspaceID pgtype.UUID) error {
+	_, err := q.db.Exec(ctx, deleteWorkspaceBriefFeedback, workspaceID)
+	return err
+}
+
 const getBriefFeedbackForMember = `-- name: GetBriefFeedbackForMember :one
 SELECT id, workspace_id, brief_id, member_id, rating, tags, note, created_at, updated_at FROM brief_feedback
 WHERE workspace_id = $1 AND brief_id = $2 AND member_id = $3

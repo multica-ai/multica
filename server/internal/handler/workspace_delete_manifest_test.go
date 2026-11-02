@@ -105,6 +105,7 @@ var workspaceDeletionManifest = map[string]workspaceDeleteAction{
 	"member_delegation_day":              workspaceDeleteKeep, // user-scoped telemetry ledger, no workspace_id
 	"agent_mcp_server":                   workspaceDelete,
 	"brief":                              workspaceDelete,
+	"brief_feedback":                     workspaceDelete,
 	"brief_delivery":                     workspaceDelete,
 	"brief_inquiry":                      workspaceDelete,
 	"brief_push_preference":              workspaceDelete,

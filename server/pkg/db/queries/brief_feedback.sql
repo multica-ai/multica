@@ -37,3 +37,8 @@ SELECT count(*)::bigint AS ratings,
        (count(*) FILTER (WHERE rating = 'useful'))::bigint AS useful
 FROM brief_feedback
 WHERE workspace_id = @workspace_id AND updated_at >= @since;
+
+-- name: DeleteWorkspaceBriefFeedback :exec
+-- Workspace teardown: the ratings have no foreign keys, so they are swept
+-- explicitly, before the briefs they rate.
+DELETE FROM brief_feedback WHERE workspace_id = $1;
