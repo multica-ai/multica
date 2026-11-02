@@ -1,6 +1,6 @@
 "use client";
 
-import { Suspense, useEffect, useState } from "react";
+import { Suspense, useEffect, useRef, useState } from "react";
 import { useSearchParams, useRouter } from "next/navigation";
 import { useQueryClient } from "@tanstack/react-query";
 import { sanitizeNextUrl, useAuthStore } from "@multica/core/auth";
@@ -31,6 +31,7 @@ function CallbackContent() {
   const loginWithGoogle = useAuthStore((s) => s.loginWithGoogle);
   const [error, setError] = useState<CallbackError | null>(null);
   const [desktopToken, setDesktopToken] = useState<string | null>(null);
+  const exchangedCodeRef = useRef<string | null>(null);
 
   useEffect(() => {
     const code = searchParams.get("code");
@@ -49,6 +50,11 @@ function CallbackContent() {
       setError({ kind: "missing_code" });
       return;
     }
+
+    // The Google code is single-use. Strict Mode re-runs this effect with the
+    // same code, and a second exchange would always fail with "already used".
+    if (exchangedCodeRef.current === code) return;
+    exchangedCodeRef.current = code;
 
     const state = searchParams.get("state") || "";
     const stateParts = state.split(",");

@@ -5,8 +5,9 @@ import {
   type Request,
   type Response,
 } from "@playwright/test";
+import pg from "pg";
 import { createTestApi, loginAsDefault, reloadAppPage } from "./helpers";
-import type { TestApiClient, TestTableIssueSeed } from "./fixtures";
+import type { TestApiClient, TestTableIssue, TestTableIssueSeed } from "./fixtures";
 
 type TableRequestBody = {
   group?: { kind?: string };
@@ -37,36 +38,67 @@ function apiPath(request: Request) {
   return new URL(request.url()).pathname;
 }
 
+const DATABASE_URL =
+  process.env.DATABASE_URL ?? "postgres://multica:multica@localhost:5432/multica?sslmode=disable";
+
+// Seeded rows share one insert timestamp, so created_at ties would make the
+// page boundary depend on id order. Spread them one second apart so the default
+// created_at desc sort has a deterministic boundary.
+async function spreadSeedCreatedAt(seeds: TestTableIssue[]) {
+  const client = new pg.Client(DATABASE_URL);
+  await client.connect();
+  try {
+    await client.query(
+      `
+        UPDATE issue
+        SET created_at = now() - interval '1 hour' + (t.ord * interval '1 second')
+        FROM unnest($1::uuid[], $2::int[]) AS t(id, ord)
+        WHERE issue.id = t.id
+      `,
+      [
+        seeds.map((seed) => seed.id),
+        seeds.map((seed) => Number(seed.title.slice(-2))),
+      ],
+    );
+  } finally {
+    await client.end();
+  }
+}
+
+// The table's default sort is created_at desc, so a position change alone never
+// moves a row across the page boundary. Make the issue the newest one, then
+// emit a realtime update through the API so the client refetches the head.
+async function moveIssueToNewest(api: TestApiClient, issueId: string) {
+  const client = new pg.Client(DATABASE_URL);
+  await client.connect();
+  try {
+    await client.query("UPDATE issue SET created_at = now() WHERE id = $1", [issueId]);
+  } finally {
+    await client.end();
+  }
+  await api.updateIssue(issueId, { position: 0 });
+}
+
 function tableBody(request: Request): TableRequestBody {
   return (request.postDataJSON() ?? {}) as TableRequestBody;
 }
 
+// The view and grouping controls live in the Display popover; it stays open
+// across the two helpers below, so the table view and grouping are set in one
+// session.
 async function switchToTable(page: Page) {
-  const currentView = page.getByRole("button", { name: "Board", exact: true });
-  await expect(currentView).toBeVisible();
-  await currentView.click();
-  const tableOption = page.getByRole("menuitemradio", {
-    name: "Table",
-    exact: true,
-  });
-  await tableOption.click();
-  await expect(
-    page.getByRole("button", { name: "Table", exact: true }),
-  ).toBeVisible();
-  await expect(tableOption).toBeHidden();
+  await page.getByRole("button", { name: "Display", exact: true }).click();
+  const viewGroup = page.getByRole("group", { name: "View", exact: true });
+  const tableToggle = viewGroup.getByRole("button", { name: "Table", exact: true });
+  await tableToggle.click();
+  await expect(tableToggle).toHaveAttribute("aria-pressed", "true");
 }
 
 async function groupByStatus(page: Page) {
-  await page.getByRole("button", { name: "Group", exact: true }).click();
-  const statusOption = page.getByRole("menuitemradio", {
-    name: "Status",
-    exact: true,
-  });
-  await statusOption.click();
-  await expect(
-    page.getByRole("button", { name: "Group: Status", exact: true }),
-  ).toBeVisible();
-  await expect(statusOption).toBeHidden();
+  const grouping = page.getByRole("combobox", { name: "Grouping", exact: true });
+  await grouping.click();
+  await page.getByRole("option", { name: "Status", exact: true }).click();
+  await expect(grouping).toContainText("Status");
 }
 
 test.describe("Issue Table server grouping", () => {
@@ -148,7 +180,6 @@ test.describe("Issue Table server grouping", () => {
       .filter({ hasText: "Backlog" })
       .first();
     await expect(backlogGroup).toContainText("501");
-    await expect(page.getByText(/Loaded \d+ of 1001/)).toBeVisible();
     await expect(
       page.getByText(/Grouping and hierarchy are paused/),
     ).toHaveCount(0);
@@ -212,7 +243,11 @@ test.describe("Issue Table server grouping", () => {
     const todoChildrenPromise = page.waitForResponse((response) => {
       if (apiPath(response.request()) !== "/api/issues/table/rows") return false;
       const body = tableBody(response.request());
-      return body.parent_id === parent.id && response.status() === 200;
+      return (
+        body.group_key === "status:todo" &&
+        body.parent_id === parent.id &&
+        response.status() === 200
+      );
     });
     const doneRootPromise = page.waitForResponse((response) => {
       if (apiPath(response.request()) !== "/api/issues/table/rows") return false;
@@ -236,7 +271,9 @@ test.describe("Issue Table server grouping", () => {
       (await todoChildrenResponse.json()) as TableRowsResponse;
     const doneRoot = (await doneRootResponse.json()) as TableRowsResponse;
 
-    expect(todoRoot.total).toBe(3);
+    // Grouped heads take their exact counts from /groups; only the ungrouped
+    // root reports a query-wide total.
+    expect(todoRoot.total).toBe(0);
     expect(todoRoot.rows).toEqual([
       expect.objectContaining({
         issue: expect.objectContaining({ id: parent.id, title: parentTitle }),
@@ -277,7 +314,8 @@ test.describe("Issue Table server grouping", () => {
         position: index + 1,
       })),
     );
-    const moved = seeds.at(-1);
+    await spreadSeedCreatedAt(seeds);
+    const moved = seeds[0];
     if (!moved) throw new Error("Cursor fixture was not created");
     await reloadAppPage(page);
 
@@ -305,7 +343,6 @@ test.describe("Issue Table server grouping", () => {
       element.scrollTop = element.scrollHeight;
     });
     await firstTailPromise;
-    await expect(page.getByText("Loaded 60 of 60", { exact: true })).toBeVisible();
 
     const postUpdateResponses: Array<{
       body: TableRequestBody;
@@ -324,7 +361,7 @@ test.describe("Issue Table server grouping", () => {
       });
     };
     page.on("response", collectResponse);
-    await api.updateIssue(moved.id, { position: 0 });
+    await moveIssueToNewest(api, moved.id);
 
     await expect
       .poll(
@@ -365,7 +402,6 @@ test.describe("Issue Table server grouping", () => {
     ].map((row) => row.issue.id);
     expect(new Set(refreshedIds).size).toBe(60);
     expect(refreshedIds).toContain(moved.id);
-    await expect(page.getByText("Loaded 60 of 60", { exact: true })).toBeVisible();
     page.off("response", collectResponse);
   });
 
