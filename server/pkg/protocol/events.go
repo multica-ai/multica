@@ -8,6 +8,8 @@ const (
 	EventIssueDeleted            = "issue:deleted"
 	EventIssueMetadataChanged    = "issue_metadata:changed"
 	EventIssueAttachmentsChanged = "issue_attachments:changed"
+	// Personal: one member's unread mark on an issue changed (MUL-8438).
+	EventIssueUnreadChanged = "issue_unread:changed"
 
 	// Comment events
 	EventCommentCreated       = "comment:created"
@@ -125,6 +127,15 @@ const (
 	// way — re-read it. A project switching workflows publishes
 	// project:updated instead.
 	EventIssueWorkflowChanged = "issue_workflow:changed"
+
+	// Saved issue views. One event for create, edit and delete: every client
+	// answers by re-reading the views it can see. A view that is private on
+	// both sides of the write reaches its owner only.
+	EventIssueViewChanged = "issue_view:changed"
+
+	// A member's own view and sidebar preferences. Always private to that
+	// member: it exists so their other devices follow along.
+	EventIssueViewPreferenceChanged = "issue_view_preference:changed"
 
 	// Pin events
 	EventPinCreated   = "pin:created"

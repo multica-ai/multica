@@ -69,6 +69,7 @@ import { removeChatMessageFromCaches } from "@multica/core/realtime";
 import { useChatDraftRestore } from "./use-chat-draft-restore";
 import { useChatTaskActions } from "./use-chat-task-actions";
 import { useChatInputFocus } from "./use-chat-input-focus";
+import { useChatOpenReveal } from "./use-chat-open-reveal";
 import { ChatWindowMessages } from "./chat-window-messages";
 import { ChatInput } from "./chat-input";
 import { ChatQueue } from "./chat-queue";
@@ -731,8 +732,9 @@ export function ChatWindow() {
   const isExpanded = useChatStore((s) => s.isExpanded);
 
   const { renderWidth, renderHeight, isAtMax, boundsReady, isDragging, toggleExpand, startDrag } = useChatResize(windowRef);
+  const { contentReady, markContentReady } = useChatOpenReveal(isOpen);
 
-  const isVisible = isOpen && (isExpanded || boundsReady);
+  const isVisible = isOpen && (isExpanded || boundsReady) && contentReady;
 
   // Small screens drop the floating-card form entirely — a 90%-of-375px
   // "window" is all chrome and no content, so the panel goes full-screen
@@ -902,6 +904,7 @@ export function ChatWindow() {
               noAgent
             }
             quickActionsPendingMessageId={quickActionsPending?.message_id ?? null}
+            onReady={markContentReady}
           >
             <EmptyState
               agent={activeAgent}

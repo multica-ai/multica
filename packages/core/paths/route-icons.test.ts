@@ -30,7 +30,7 @@ describe("workspace page coverage", () => {
     for (const [method, fn] of Object.entries(ws)) {
       if (typeof fn !== "function" || fn.length !== 0) continue;
       if (EXCLUDED_METHODS.has(method)) continue;
-      const segment = fn().split("/").filter(Boolean)[1] ?? "";
+      const segment = fn().split(/[?#]/)[0]!.split("/").filter(Boolean)[1] ?? "";
       if (!KNOWN_SEGMENTS.has(segment)) missing.push(`${method} → "${segment}"`);
     }
 

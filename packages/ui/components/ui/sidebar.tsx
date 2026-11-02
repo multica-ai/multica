@@ -26,17 +26,17 @@ import {
 } from "@multica/ui/components/ui/tooltip"
 import { PanelLeftIcon } from "@multica/ui/icons"
 
-const SIDEBAR_WIDTH_DEFAULT = 256
+const SIDEBAR_WIDTH_DEFAULT = 240
 const SIDEBAR_WIDTH_MIN = 200
-const SIDEBAR_WIDTH_MAX = 360
+const SIDEBAR_WIDTH_MAX = 320
 const SIDEBAR_WIDTH_STORAGE_KEY = "sidebar_width"
 const SIDEBAR_WIDTH_MOBILE = "18rem"
 const SIDEBAR_WIDTH_ICON = "3rem"
 const SIDEBAR_DRAG_THRESHOLD = 2
-// Tailwind `md`–`xl`: wide enough to keep a two-pane list/detail surface, too
-// narrow to also spend 256px on the nav by default. The nav starts collapsed
-// here and the header's trigger docks it back.
-const SIDEBAR_AUTO_COLLAPSE_QUERY = "(min-width: 768px) and (max-width: 1279px)"
+// Tailwind `md`–`lg`: wide enough to keep a two-pane list/detail surface, too
+// narrow to also spend the panel's width on the nav by default. The nav starts
+// collapsed here and the header's trigger docks it back.
+const SIDEBAR_AUTO_COLLAPSE_QUERY = "(min-width: 768px) and (max-width: 1023px)"
 
 /**
  * Paints an element with whatever the sidebar wrapper is currently filled with.
@@ -165,7 +165,7 @@ function SidebarProvider({
   // because nothing ever read it, and restoring the pair would be a bug rather
   // than a feature: the auto-collapse below drives `setOpen(false)` from the
   // viewport, so persisting its result would carry a collapse the user never
-  // asked for out of the `md`–`xl` band and into their next session on a wider
+  // asked for out of the `md`–`lg` band and into their next session on a wider
   // display. Persisting this needs a source that distinguishes a user toggle
   // from an automated one — not a cookie on this callback.
   const [_open, _setOpen] = React.useState(defaultOpen)
@@ -182,7 +182,7 @@ function SidebarProvider({
     [setOpenProp, open]
   )
 
-  // Auto-collapse across the `md`–`xl` band. Only the two crossings are
+  // Auto-collapse across the `md`–`lg` band. Only the two crossings are
   // automated: entering it parks the state we came in with and closes the nav,
   // leaving it restores that state. Anything the user does in between — most
   // of all re-opening the nav — is left alone until the next crossing.
@@ -417,7 +417,8 @@ function SidebarTrigger({
       className={cn(className)}
       onClick={(event) => {
         onClick?.(event)
-        toggleSidebar()
+        // A host that routes the toggle elsewhere prevents the default.
+        if (!event.defaultPrevented) toggleSidebar()
       }}
       {...props}
     >
@@ -1006,6 +1007,8 @@ export {
   SidebarRail,
   SidebarSeparator,
   SidebarTrigger,
+  clampSidebarWidth,
   useSidebar,
+  useSidebarResize,
   useSidebarSafe,
 }

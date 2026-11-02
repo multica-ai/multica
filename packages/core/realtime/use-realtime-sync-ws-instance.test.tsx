@@ -6,6 +6,7 @@ import { cleanup, renderHook, waitFor } from "@testing-library/react";
 import type { ReactNode } from "react";
 import { describe, expect, it, vi, beforeEach, afterEach } from "vitest";
 import type { WSClient } from "../api/ws-client";
+import { EMPTY_ISSUE_VIEW_PREFERENCE } from "../api/schemas";
 import { defaultStorage } from "../platform/storage";
 import { issueKeys } from "../issues/queries";
 import { chatKeys } from "../chat/queries";
@@ -14,6 +15,8 @@ import { workspaceWorkingAgentsKeys } from "../agents/queries";
 import { workspaceKeys } from "../workspace/queries";
 import { issueStatusKeys } from "../issue-statuses/queries";
 import { issueWorkflowKeys } from "../issue-workflows/queries";
+import { issueViewKeys } from "../issue-views/queries";
+import { issueViewPrefKeys } from "../issue-views/preferences";
 import {
   markWorkspaceDeletePending,
   unmarkWorkspaceDeletePending,
@@ -127,15 +130,16 @@ describe("useRealtimeSync — ws instance change", () => {
     rerender({ ws: ws2 });
 
     // Should have called invalidateQueries for all workspace-scoped keys
-    // (17 workspace-scoped [incl. property definitions and workflows] + 6
-    // per-issue prefixes + the workspace working-agents projection + 5
-    // per-chat prefixes + 1 workspaceKeys.list() + 1 cross-workspace inbox
-    // unread summary = 32 calls).
+    // (19 workspace-scoped [incl. property definitions, workflows, saved views
+    // and view preferences] + 6 per-issue prefixes + the workspace
+    // working-agents projection + 5 per-chat prefixes + 1 workspaceKeys.list()
+    // + 1 cross-workspace inbox unread summary + 1 issue unread marks = 35
+    // calls).
     //
     // Awaited rather than counted synchronously: the inbox unread summary
     // refresh cancels any in-flight request before invalidating (see
     // onInboxSummaryInvalidate), so that one lands after the synchronous ones.
-    await waitFor(() => expect(invalidateSpy).toHaveBeenCalledTimes(32));
+    await waitFor(() => expect(invalidateSpy).toHaveBeenCalledTimes(35));
   });
 
   it("does not re-invalidate when rerendered with the same ws instance", () => {
@@ -172,6 +176,39 @@ describe("useRealtimeSync — ws instance change", () => {
     // A catalog edit made while this client was disconnected is otherwise
     // invisible for the query's whole 5-minute staleTime.
     expect(calls).toContainEqual(issueStatusKeys.all("ws-1"));
+    expect(calls).toContainEqual(issueViewKeys.all("ws-1"));
+    expect(calls).toContainEqual(issueViewPrefKeys.all("ws-1"));
+  });
+
+  it("follows saved views and the member's own preferences changed elsewhere", async () => {
+    const ws = createMockWs();
+    renderHook(() => useRealtimeSync(ws, stores), { wrapper: createWrapper(qc) });
+    const onAny = vi.mocked(ws.onAny).mock.calls[0]![0];
+
+    onAny({ type: "issue_view:changed", payload: { view_id: "v1", action: "created" } } as never);
+    onAny({ type: "issue_view_preference:changed", payload: { scope_type: "sidebar_projects", scope_id: "u1" } } as never);
+    await new Promise((resolve) => setTimeout(resolve, 120));
+
+    expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: issueViewKeys.all("ws-1") });
+    expect(invalidateSpy).toHaveBeenCalledWith(expect.objectContaining({ queryKey: issueViewPrefKeys.all("ws-1") }));
+  });
+
+  it("refreshes every preference document except one with a write still in flight here", async () => {
+    const projectsKey = issueViewPrefKeys.scope("ws-1", { scope_type: "sidebar_projects" });
+    const sidebarKey = issueViewPrefKeys.scope("ws-1", { scope_type: "sidebar" });
+    qc.setQueryData(projectsKey, EMPTY_ISSUE_VIEW_PREFERENCE);
+    qc.setQueryData(sidebarKey, EMPTY_ISSUE_VIEW_PREFERENCE);
+    const write = qc.getMutationCache().build(qc, { mutationKey: projectsKey, mutationFn: () => new Promise(() => {}) });
+    void write.execute(undefined);
+    const ws = createMockWs();
+    renderHook(() => useRealtimeSync(ws, stores), { wrapper: createWrapper(qc) });
+    const onAny = vi.mocked(ws.onAny).mock.calls[0]![0];
+
+    onAny({ type: "issue_view_preference:changed", payload: { scope_type: "sidebar", scope_id: "u1" } } as never);
+    await new Promise((resolve) => setTimeout(resolve, 120));
+
+    expect(qc.getQueryState(sidebarKey)?.isInvalidated).toBe(true);
+    expect(qc.getQueryState(projectsKey)?.isInvalidated).toBe(false);
   });
 
   it.each(["project:created", "project:updated", "project:deleted"])("refreshes workflow usage after %s", (type) => {
@@ -187,6 +224,8 @@ describe("useRealtimeSync — ws instance change", () => {
 
       expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: issueWorkflowKeys.all("ws-1") });
       expect(invalidateSpy).not.toHaveBeenCalledWith({ queryKey: issueWorkflowKeys.all("ws-2") });
+      // A deleted project takes its scoped saved views with it.
+      expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: issueViewKeys.all("ws-1") });
     } finally {
       vi.useRealTimers();
     }
@@ -470,6 +509,10 @@ describe("useRealtimeSync — Table server membership invalidation", () => {
       ];
       (filters.working_only || filters.working_issue_ids ? affected : untouched).push(...keys);
     }
+    // A saved view's sidebar preview filters on working_only server-side.
+    affected.push(issueKeys.sidebar("ws-1", "view:v1", { table: { ...spec, filters: { working_only: true } } }, 5));
+    untouched.push(issueKeys.sidebar("ws-1", "view:v2", { table: spec }, 5));
+    untouched.push(issueKeys.sidebar("ws-1", "project:p1", { project_id: "p1" }, 5));
     for (const key of [...untouched, ...affected]) qc.setQueryData(key, []);
     emit("task:completed");
     await vi.advanceTimersByTimeAsync(1_000);

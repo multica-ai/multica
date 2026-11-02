@@ -20,7 +20,6 @@ import {
   seedIssueSurfaceViewState,
 } from "@multica/core/issues/stores/surface-view-store";
 import { useActiveIssueView } from "@multica/core/issue-views/use-active-view";
-import { baselineFromQuery } from "@multica/core/issue-views/baseline";
 import { ViewBaselineProvider, useViewBaseline } from "./view-baseline-context";
 import type { IssueViewScope } from "@multica/core/issue-views/queries";
 import {
@@ -34,7 +33,6 @@ import { BoardView } from "../components/board-view";
 import { BOARD_COL_WIDTH } from "../components/board-column";
 import { BatchActionToolbar } from "../components/batch-action-toolbar";
 import { GanttView } from "../components/gantt-view";
-import { IssuesHeader } from "../components/issues-header";
 import { ListView } from "../components/list-view";
 import { SwimLaneView } from "../components/swimlane-view";
 import { TableView } from "../components/table-view";
@@ -113,10 +111,6 @@ export function IssueSurface({
   const seedDefinition = activeView
     ? { ...activeView.query, ...activeView.display }
     : null;
-  const viewBaseline = useMemo(
-    () => (activeView ? baselineFromQuery(activeView.query) : null),
-    [activeView],
-  );
   // While a view is open, the scope axis the view captured belongs to the
   // VIEW, not to whichever tab the user stood on: workspace/project views
   // carry an assignee-type variant, my views a relation variant. The user's
@@ -155,7 +149,6 @@ export function IssueSurface({
 
   return (
     <ViewStoreProvider store={store}>
-      <ViewBaselineProvider baseline={viewBaseline}>
       {/* Remount on data-window change: the list queries keep the previous
           key's data as a placeholder (keepPreviousData) so sort/filter
           changes within ONE surface never flash a skeleton — but reusing the
@@ -181,7 +174,6 @@ export function IssueSurface({
         batchToolbar={batchToolbar}
         contentClassName={contentClassName}
       />
-      </ViewBaselineProvider>
     </ViewStoreProvider>
   );
 }
@@ -264,28 +256,7 @@ function IssueSurfaceContent({
       <IssueContextMenuProvider>
       <IssueSurfaceSelectionProvider selection={controller.selection}>
       <ColumnStatusesProvider statuses={controller.columnStatuses}>
-        {renderHeader ? (
-          renderHeader(renderContext)
-        ) : (
-          <IssuesHeader
-            scopedIssues={controller.surfaceIssues}
-            workingAgents={controller.workingAgents}
-            allowGantt={controller.allowGantt}
-            isRefreshing={controller.isRefreshing}
-            facetCountsExact={
-              controller.facetCountsExact
-            }
-            tableFacetCounts={controller.tableFacetCounts}
-            onTableFacetChange={controller.setActiveTableFacet}
-            saveViewScope={
-              scope.type === "project"
-                ? { kind: "project", projectId: scope.projectId }
-                : scope.type === "workspace"
-                  ? { kind: "workspace" }
-                  : null
-            }
-          />
-        )}
+        {renderHeader?.(renderContext)}
         {/* Every view opens the side peek on Shift+Click. The host wraps the
             loading and empty states too, so a view switch that briefly shows
             a skeleton keeps the peek open. */}

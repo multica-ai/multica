@@ -2,11 +2,13 @@
   "page": {
     "title": "專案",
     "new_project": "新建專案",
+    "scope_all": "全部專案",
+    "scope_active": "進行中的專案",
+    "scope_closed": "已結束的專案",
     "empty": "還沒有專案",
     "create_first": "建立第一個專案",
     "view_compact": "緊湊檢視",
     "view_comfortable": "舒適檢視",
-    "search_placeholder": "搜尋專案...",
     "no_search_results": "未找到匹配的專案",
     "view_table": "表格",
     "view_cards": "卡片",
@@ -14,9 +16,7 @@
     "pin": "固定到側邊欄",
     "unpin": "取消釘選",
     "delete": "刪除",
-    "no_matches": "沒有匹配的專案",
-    "selected_other": "已選 {{count}} 項",
-    "clear_selection": "清除選擇"
+    "no_matches": "沒有匹配的專案"
   },
   "table": {
     "name": "名稱",
@@ -167,18 +167,9 @@
     "fallback_label": "專案"
   },
   "toolbar": {
-    "result_count_title": "當前結果 / 全部專案",
-    "filter_label": "篩選",
-    "filter_active_count_other": "{{count}} 項篩選",
-    "clear_filters": "清除篩選",
     "section_status": "狀態",
     "section_priority": "優先順序",
     "section_lead": "負責人",
-    "display": "顯示",
-    "sort_by": "排序",
-    "direction_asc": "升序",
-    "direction_desc": "降序",
-    "section_columns": "列",
     "view": "檢視"
   }
 }
