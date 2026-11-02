@@ -46,6 +46,7 @@ type V2 struct {
 	profileDir string
 	upgrader   websocket.Upgrader
 	hosts      hosts
+	computer   computerHost
 	tickets    tickets
 	// serverOrigin is the API origin this daemon signs in to; requests
 	// for another one are refused instead of opening a scope that cannot
@@ -76,6 +77,7 @@ func NewV2(svc *service.Service, token, profileDir string) *V2 {
 		tickets: tickets{items: map[string]ticket{}, now: time.Now}, origins: map[string]string{}, presence: map[int64]map[string]map[string]RemotePeer{}}
 	v.hosts.origin = v.origin
 	svc.SetHost(v.hosts.request)
+	svc.SetComputerHost(v.computer.request)
 	svc.OnTurnEnd(v.turnEnded)
 	return v
 }
@@ -164,6 +166,10 @@ func (v *V2) serve(w http.ResponseWriter, r *http.Request, c caller) {
 	}
 	kind := c.kind
 	r = r.WithContext(withCaller(r.Context(), c))
+	if path == "/computer-host" && r.Method == http.MethodGet {
+		v.serveComputerHost(w, r)
+		return
+	}
 	if path == "/hello" && r.Method == http.MethodGet {
 		capabilities := []string{"claude", "codex", "device-link"}
 		if v.servicePreview != nil {

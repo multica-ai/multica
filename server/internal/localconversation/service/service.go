@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/multica-ai/multica/server/internal/localconversation/catalog"
+	"github.com/multica-ai/multica/server/internal/localconversation/computer"
 	"github.com/multica-ai/multica/server/internal/localconversation/contextmcp"
 	"github.com/multica-ai/multica/server/internal/localconversation/settings"
 	"github.com/multica-ai/multica/server/internal/localconversation/store"
@@ -67,9 +68,10 @@ type runner interface {
 
 // Options configures Open.
 type Options struct {
-	Path   string
-	Claude ClaudeLauncher
-	Codex  CodexLauncher
+	Path     string
+	Computer computer.Command
+	Claude   ClaudeLauncher
+	Codex    CodexLauncher
 	// Cloud, when set, gives the context tools official Multica data for a
 	// scope. dir is private to one provider process and removed after it.
 	Cloud func(scope store.Scope, dir string) contextmcp.Cloud
@@ -84,13 +86,15 @@ type Options struct {
 // writer, one batcher, one subscription hub, and one runner per active
 // conversation.
 type Service struct {
-	store   *store.Store
-	writer  *store.Writer
-	batcher *Batcher
-	hub     *Hub
-	limiter *Limiter
-	context *contextmcp.Server
-	opts    Options
+	store     *store.Store
+	writer    *store.Writer
+	batcher   *Batcher
+	hub       *Hub
+	limiter   *Limiter
+	context   *contextmcp.Server
+	opts      Options
+	computer  *computer.Manager
+	computers computerUse
 
 	// metaMu serializes metadata read-modify-write updates.
 	metaMu    sync.Mutex
@@ -160,6 +164,8 @@ func Open(ctx context.Context, opts Options) (*Service, error) {
 		side:      sideWorkspaces{entries: map[string]SideWorkspace{}},
 		imports:   imports{busy: map[int64]context.CancelFunc{}},
 		closed:    make(chan struct{})}
+	s.computer = &computer.Manager{Command: opts.Computer}
+	s.computers.active = map[string]*computerExecution{}
 	s.batcher = NewBatcher(writer, BatcherOptions{
 		Published: s.hub.Publish,
 		Failed: func(id string, err error) {
@@ -197,6 +203,16 @@ func (s *Service) Close(ctx context.Context) error {
 	s.titles.mu.Unlock()
 	s.runners = map[string]runner{}
 	s.mu.Unlock()
+	s.computers.mu.Lock()
+	ids := make([]string, 0, len(s.computers.active))
+	for id := range s.computers.active {
+		ids = append(ids, id)
+	}
+	s.computers.mu.Unlock()
+	for _, id := range ids {
+		s.endComputer(id)
+	}
+	s.computer.Close()
 	var errs []error
 	for _, r := range runners {
 		closeCtx, cancel := context.WithTimeout(ctx, closeTimeout)
@@ -429,6 +445,8 @@ func (s *Service) Interrupt(ctx context.Context, scopeID int64, conversationID s
 	if r == nil {
 		return nil
 	}
+	s.endComputer(conversationID)
+	s.computer.Reset(fmt.Sprintf("%d/%s", scopeID, conversationID))
 	return r.Interrupt(ctx)
 }
 
@@ -684,6 +702,7 @@ func (s *Service) contextBinder(conv sqlitedb.Conversation) ContextBinder {
 		}
 		tools = append(tools, s.sideToolsFor(conv, current, readContext)...)
 		tools = append(tools, s.developerLogTool(conv))
+		tools = append(tools, s.computerToolsFor(conv, current)...)
 		if agents, ok := cloud.(cloudAgents); ok && agents != nil {
 			tools = append(tools, s.avatarTool(conv, agents))
 		}
@@ -711,6 +730,8 @@ func (s *Service) contextBinder(conv sqlitedb.Conversation) ContextBinder {
 			return BoundContext{}, nil, err
 		}
 		return BoundContext{Binding: binding, SystemPrompt: systemPrompt(scope.WorkspaceID, cloud != nil)}, func() {
+			s.endComputer(conv.ID)
+			s.computer.Reset(fmt.Sprintf("%d/%s", conv.ScopeID, conv.ID))
 			s.context.Release(binding)
 			_ = os.RemoveAll(dir)
 		}, nil

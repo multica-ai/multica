@@ -1,6 +1,6 @@
 {
   "extends": "@electron-toolkit/tsconfig/tsconfig.node.json",
-  "include": ["electron.vite.config.*", "src/main/**/*", "src/claude-host/**/*", "src/preload/**/*"],
+  "include": ["electron.vite.config.*", "src/main/**/*", "src/claude-host/**/*", "src/computer-host/**/*", "src/preload/**/*"],
   "compilerOptions": {
     "composite": true,
     "allowImportingTsExtensions": true,

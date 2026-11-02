@@ -60,6 +60,7 @@ function run(command, args, { shell = false, env = devEnv } = {}) {
 const node = process.execPath;
 run(node, [join(here, "bundle-cli.mjs"), "--require-build"]);
 run(node, [join(here, "brand-dev-electron.mjs")]);
+run(node, [join(here, "build-computer-use.mjs")]);
 
 const isWin = process.platform === "win32";
 // electron-vite's bin lands in apps/desktop/node_modules/.bin under the

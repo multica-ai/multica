@@ -177,7 +177,7 @@ func allowed(k callerKind, method, path, command string) bool {
 	case path == "/preview/services" || strings.HasPrefix(path, "/preview/services/"):
 		return k == callerMain || k == callerRemote
 	// Updates of this device stop its own providers.
-	case path == "/drain" || path == "/undrain" || path == "/stop-providers":
+	case path == "/computer-host" || path == "/drain" || path == "/undrain" || path == "/stop-providers":
 		return k == callerMain
 	// Tickets are for this device's renderer; a remote device's daemon
 	// issues its own.

@@ -1,0 +1,8 @@
+{
+  "name": "@multica/computer-use",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": { ".": "./sdk.mjs", "./runtime": { "types": "./runtime.d.ts", "default": "./runtime.mjs" } },
+  "scripts": { "test": "node --test *.test.mjs" }
+}

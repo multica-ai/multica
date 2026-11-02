@@ -255,6 +255,9 @@ importers:
       '@modelcontextprotocol/sdk':
         specifier: 1.27.1
         version: 1.27.1(zod@4.3.6)
+      '@multica/computer-use':
+        specifier: workspace:*
+        version: link:../../packages/computer-use
       '@multica/core':
         specifier: workspace:*
         version: link:../../packages/core
@@ -809,6 +812,8 @@ importers:
       vitest:
         specifier: 'catalog:'
         version: 4.1.0(@opentelemetry/api@1.9.1)(@types/node@25.5.0)(jsdom@29.0.1(@noble/hashes@1.8.0))(msw@2.12.14(@types/node@25.5.0)(typescript@5.9.3))(vite@8.0.1(@emnapi/core@1.11.2)(@emnapi/runtime@1.11.3)(@types/node@25.5.0)(esbuild@0.25.12)(jiti@2.7.0)(terser@5.47.1)(yaml@2.9.1))
+
+  packages/computer-use: {}
 
   packages/core:
     dependencies:

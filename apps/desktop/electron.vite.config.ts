@@ -8,7 +8,7 @@ import tailwindcss from "@tailwindcss/vite";
 
 // Custom chunking replaces the externals electron-vite would otherwise add, so list them here:
 // Electron, Node built-ins and runtime dependencies, except workspace packages that ship raw TypeScript.
-const bundledDeps = new Set(["@multica/tutti-agent-gui-host", "@multica/core", "@tutti-os/browser-node"]);
+const bundledDeps = new Set(["@multica/tutti-agent-gui-host", "@multica/core", "@tutti-os/browser-node", "@multica/computer-use"]);
 const runtimeDeps = Object.keys(JSON.parse(readFileSync(resolve("package.json"), "utf8")).dependencies ?? {}).filter((dep) => !bundledDeps.has(dep));
 const mainExternal = (id: string) => id === "electron" || id.startsWith("electron/") || id.startsWith("node:") || builtinModules.includes(id)
   || runtimeDeps.some((dep) => id === dep || id.startsWith(`${dep}/`));
@@ -25,11 +25,13 @@ export default defineConfig({
           "developer-logs-mcp": resolve("src/main/developer-logs-mcp.ts"),
           // One-conversation Claude Agent SDK adapter the daemon runs with ELECTRON_RUN_AS_NODE=1.
           "claude-host": resolve("src/claude-host/entry.ts"),
+          "computer-host": resolve("src/computer-host/entry.ts"),
         },
       },
       rolldownOptions: {
         external: mainExternal,
         output: {
+          entryFileNames: (chunk) => chunk.name === "computer-host" ? "computer-host.cjs" : "[name].js",
           // Keep everything the entries share out of index.js: the standalone
           // MCP and the Claude adapter must never load (and so boot) the desktop app.
           advancedChunks: { groups: [

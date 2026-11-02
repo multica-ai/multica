@@ -87,6 +87,7 @@ Workspace-scoped queries filter by `workspace_id`; membership gates access and `
 
 ## Desktop Rules
 
+- Computer Use JavaScript runs only in daemon-managed sandboxed processes; native actions go through the executing device's main-process broker. Read [computer-use.md](docs/engineering/computer-use.md) before changing its runtime, authorization, device routing, or packaging. Default tests use fake desktop actions; do not capture or control the user's apps or launch real models.
 - Workspace session routes are tab destinations. Pre-workspace one-shot flows (create workspace, accept invite) use `WindowOverlay` in `apps/desktop/src/renderer/src/stores/window-overlay-store.ts`, not new routes. Stale workspace tabs heal by dropping stale tab groups.
 - Workspace route layouts own `setCurrentWorkspace(slug, uuid)` from `@multica/core/platform`; leaving workspace context calls `setCurrentWorkspace(null, null)`.
 - Cross-workspace navigation uses the adapter's `switchWorkspace(slug, targetPath)` flow; do not bypass it with direct router navigation.

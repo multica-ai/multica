@@ -1,3 +1,4 @@
+import { createComputerDesktop } from "./computer-use/desktop";
 import { SideWorkspaceControl, parseSideWorkspaceResponse } from "./side-workspace-control";
 import { LocalTimingLog } from "./local-timing-log";
 import { WebDiagnosticLog, snapshotDaemonLog } from "./developer-runtime-logs";
@@ -178,6 +179,7 @@ const notificationGate = new NotificationGate();
 const mainRendererMessages = new MainRendererMessageQueue();
 let desktopInitialized = false;
 let authSessionGeneration = 0;
+let computerDesktop: ReturnType<typeof createComputerDesktop> | undefined;
 let settingsUserId: string | null | undefined;
 let publishDeveloperLogsManifest: (() => void) | undefined;
 const webDiagnosticLogs = new Map<string, WebDiagnosticLog>();
@@ -688,6 +690,8 @@ if (!gotTheLock) {
       });
       localTimingLog = new LocalTimingLog(join(app.getPath("userData"), "local-conversations", "diagnostics"));
       localV2 = new LocalV2Client({ apiUrl: localApiUrl, endpoint: () => desktopRuntimeRegistry().endpoint(localApiUrl) });
+      computerDesktop = createComputerDesktop({ endpoint: () => desktopRuntimeRegistry().endpoint(localApiUrl), currentUser: () => settingsUserId, generation: () => authSessionGeneration, window: () => mainWindow });
+      mainWindow?.once("closed", () => computerDesktop?.revoke());
       localV2Host = localV2HostHandler({
         currentUser: () => settingsUserId,
         side: (request, signal) => sideWorkspaceControl.handle(request, signal),
@@ -982,6 +986,7 @@ if (!gotTheLock) {
         publishDeveloperLogsManifest?.();
         const accountInvalidated = authSessionCoordinator.reportMain(userId);
         if (accountInvalidated) {
+          computerDesktop?.revoke();
           sideWorkspaceControl.dispose();
           resourcePreview?.dispose();
           resourcePreview = undefined;
@@ -1108,6 +1113,7 @@ if (!gotTheLock) {
     });
     let localShutdown = false;
     app.on("before-quit", (event) => {
+      computerDesktop?.close();
       if (event.defaultPrevented || localShutdown) return;
       event.preventDefault(); localShutdown = true;
       // Local conversations keep running in the daemon; only flush Desktop's own logs.

@@ -194,6 +194,7 @@ func settledAnswer(row sqlitedb.InteractionRequest, answer []byte) (bool, error)
 
 // turnEnded cancels the turn's questions that are still waiting.
 func (s *Service) turnEnded(conversationID, turnID string) {
+	s.endComputer(conversationID)
 	s.questions.mu.Lock()
 	var ids []string
 	for id, w := range s.questions.waiting {
