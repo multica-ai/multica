@@ -31,7 +31,8 @@ class Clients(McpCase):
                          {'MULTICA_TOKEN', 'MULTICA_SERVER_URL', 'MULTICA_WORKSPACE_ID', 'HOME', 'PATH'})
         self.assertEqual(call['env']['MULTICA_SERVER_URL'], 'http://127.0.0.1:8080')
         self.assertEqual(call['env']['MULTICA_WORKSPACE_ID'], WS)
-        self.assertEqual(call['env']['HOME'], call['cwd'])
+        # macOS resolves /var to /private/var in the child's getcwd().
+        self.assertEqual(os.path.realpath(call['env']['HOME']), os.path.realpath(call['cwd']))
         self.assertEqual(call['listing'], [])
         self.assertEqual(call['stdin'], 'text')
         self.assertFalse(os.path.exists(call['cwd']), 'the run directory is removed after the call')
