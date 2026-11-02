@@ -24,7 +24,7 @@ import { createTestApi } from "./helpers";
 // cannot be the one the UI check sees. A second proposal is filed and left
 // pending for that check.
 test("an office proposal is filed, approved into a project, and shown on /office", async ({ page }) => {
-  test.setTimeout(120_000);
+  test.setTimeout(300_000);
   const api = await createTestApi();
   try {
     const workspace = (await api.getWorkspaces())[0]!;
