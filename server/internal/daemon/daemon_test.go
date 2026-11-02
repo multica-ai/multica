@@ -2172,11 +2172,7 @@ func TestGateCodexResumeAcrossLocalWorktrees(t *testing.T) {
 // encoded projects directory first; a missing transcript still drops it,
 // fail-closed like the cwd-keyed default.
 func TestGateClaudeResumeAcrossLocalWorktrees(t *testing.T) {
-	priorDir, workDir, home := t.TempDir(), t.TempDir(), t.TempDir()
-	origUserHome := daemonUserHome
-	daemonUserHome = func() (string, error) { return home, nil }
-	t.Cleanup(func() { daemonUserHome = origUserHome })
-
+	t.Parallel()
 	for _, tt := range []struct {
 		name        string
 		continued   bool
@@ -2190,25 +2186,25 @@ func TestGateClaudeResumeAcrossLocalWorktrees(t *testing.T) {
 		{name: "in-place same workdir", sameWorkdir: true, transcript: true, wantResume: true},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
-			prior, work := priorDir, workDir
+			t.Parallel()
+			prior, work, configDir := t.TempDir(), t.TempDir(), t.TempDir()
 			if tt.sameWorkdir {
 				work = prior
 			}
 			if tt.transcript {
-				projectDir := filepath.Join(home, ".claude", "projects", encodeClaudeCwd(prior))
+				projectDir := filepath.Join(configDir, "projects", encodeClaudeCwd(prior))
 				if err := os.MkdirAll(projectDir, 0o755); err != nil {
 					t.Fatal(err)
 				}
 				if err := os.WriteFile(filepath.Join(projectDir, "session-1.jsonl"), []byte("{}"), 0o600); err != nil {
 					t.Fatal(err)
 				}
-				t.Cleanup(func() { os.RemoveAll(filepath.Join(home, ".claude")) })
 			}
 			task := Task{PriorSessionID: "session-1", PriorWorkDir: prior}
 			taskCtx := execenv.TaskContextForEnv{AgentID: "agent-1", PriorSessionResumed: true}
 			env := &execenv.Environment{WorkDir: work, LocalWorktree: &execenv.LocalWorktree{Continued: tt.continued}}
 
-			ready := migrateClaudeWorktreeTranscript(env, task.PriorSessionID, env.WorkDir, task.PriorWorkDir, slog.Default())
+			ready := migrateClaudeWorktreeTranscript(env, task.PriorSessionID, env.WorkDir, task.PriorWorkDir, map[string]string{"CLAUDE_CONFIG_DIR": configDir}, slog.Default())
 			reachable := gateResumeToReachableSession(&task, &taskCtx, "claude", env.WorkDir, true, false, false, ready, slog.Default())
 
 			if reachable != tt.wantResume {
