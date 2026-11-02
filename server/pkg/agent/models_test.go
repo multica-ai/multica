@@ -2,6 +2,7 @@ package agent
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"path/filepath"
 	"reflect"
@@ -130,6 +131,143 @@ func TestParseKimiProviderThinking(t *testing.T) {
 	}
 	if k3Short.DefaultLevel != "" {
 		t.Errorf("unsupported default = %q, want empty", k3Short.DefaultLevel)
+	}
+}
+
+func TestParseKimiProviderThinkingCapabilities(t *testing.T) {
+	t.Parallel()
+	type fixture struct {
+		capabilities  any
+		efforts       []string
+		defaultEffort string
+	}
+	cases := []struct {
+		name        string
+		fixture     fixture
+		wantLevels  []string
+		wantLabels  []string
+		wantDefault string
+		wantNoEntry bool
+	}{
+		{
+			name: "thinking and always_thinking keeps efforts and rejects off",
+			fixture: fixture{
+				capabilities:  []string{"thinking", "always_thinking"},
+				efforts:       []string{"low", "high", "max"},
+				defaultEffort: "high",
+			},
+			wantLevels:  []string{"low", "high", "max"},
+			wantLabels:  []string{"Low", "High", "Max"},
+			wantDefault: "high",
+		},
+		{
+			name: "thinking only offers off leading the set",
+			fixture: fixture{
+				capabilities:  []string{"thinking"},
+				efforts:       []string{"low", "high", "max"},
+				defaultEffort: "max",
+			},
+			wantLevels:  []string{"off", "low", "high", "max"},
+			wantLabels:  []string{"Off", "Low", "High", "Max"},
+			wantDefault: "max",
+		},
+		{
+			name: "always_thinking with no efforts renders bare on",
+			fixture: fixture{
+				capabilities: []string{"thinking", "always_thinking"},
+				efforts:      nil,
+			},
+			wantLevels: []string{"on"},
+			wantLabels: []string{"On"},
+		},
+		{
+			name: "thinking with no efforts renders off and on",
+			fixture: fixture{
+				capabilities: []string{"thinking"},
+				efforts:      nil,
+			},
+			wantLevels: []string{"off", "on"},
+			wantLabels: []string{"Off", "On"},
+		},
+		{
+			name: "missing capabilities falls back to efforts only",
+			fixture: fixture{
+				capabilities:  nil,
+				efforts:       []string{"low", "high", "max"},
+				defaultEffort: "high",
+			},
+			wantLevels:  []string{"low", "high", "max"},
+			wantLabels:  []string{"Low", "High", "Max"},
+			wantDefault: "high",
+		},
+		{
+			name: "explicit empty capabilities hides the control",
+			fixture: fixture{
+				capabilities: []string{},
+				efforts:      []string{"low", "high", "max"},
+			},
+			wantNoEntry: true,
+		},
+		{
+			name: "capabilities without thinking hides the control",
+			fixture: fixture{
+				capabilities: []string{"tools", "vision"},
+				efforts:      []string{"low", "high", "max"},
+			},
+			wantNoEntry: true,
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			var fixtureMap map[string]any
+			if tc.fixture.capabilities == nil {
+				fixtureMap = map[string]any{
+					"supportEfforts": tc.fixture.efforts,
+				}
+			} else {
+				fixtureMap = map[string]any{
+					"supportEfforts": tc.fixture.efforts,
+					"capabilities":   tc.fixture.capabilities,
+				}
+			}
+			if tc.fixture.defaultEffort != "" {
+				fixtureMap["defaultEffort"] = tc.fixture.defaultEffort
+			}
+			raw, err := json.Marshal(map[string]any{"models": map[string]any{"kimi-code/k3": fixtureMap}})
+			if err != nil {
+				t.Fatalf("marshal fixture: %v", err)
+			}
+
+			got, err := parseKimiProviderThinking(raw)
+			if err != nil {
+				t.Fatalf("parseKimiProviderThinking: %v", err)
+			}
+			entry, ok := got["kimi-code/k3"]
+			if tc.wantNoEntry {
+				if ok {
+					t.Fatalf("entry = %+v, want no entry at all", entry)
+				}
+				return
+			}
+			if !ok {
+				t.Fatal("k3 thinking catalog is nil")
+			}
+			if values := thinkingValues(entry); !reflect.DeepEqual(values, tc.wantLevels) {
+				t.Errorf("levels = %v, want %v", values, tc.wantLevels)
+			}
+			labels := make([]string, 0, len(entry.SupportedLevels))
+			for _, level := range entry.SupportedLevels {
+				labels = append(labels, level.Label)
+			}
+			if !reflect.DeepEqual(labels, tc.wantLabels) {
+				t.Errorf("labels = %v, want %v", labels, tc.wantLabels)
+			}
+			if entry.DefaultLevel != tc.wantDefault {
+				t.Errorf("default = %q, want %q", entry.DefaultLevel, tc.wantDefault)
+			}
+		})
 	}
 }
 

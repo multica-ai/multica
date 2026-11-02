@@ -1735,6 +1735,9 @@ func discoverKimiModels(ctx context.Context, runtimeCmd Command) ([]Model, error
 // released 2026-07-22). Below it, `session/set_config_option` accepts
 // "low"/"high"/"max" without error and leaves the session on "on", so
 // advertising those levels would promise something the runtime cannot deliver.
+// The gate deliberately also covers the off/on levels synthesized from the
+// capability table: an older ACP might honour them, but that has not been
+// verified against a real 0.28.1, so relaxing the gate stays a separate change.
 const kimiMinThinkingEffortVersion = "0.29.0"
 
 // kimiSupportsThinkingEfforts reports whether an ACP-reported Kimi version can
@@ -1798,6 +1801,56 @@ type kimiProviderModel struct {
 	SupportEffortsSnake []string `json:"support_efforts"`
 	DefaultEffort       string   `json:"defaultEffort"`
 	DefaultEffortSnake  string   `json:"default_effort"`
+	Capabilities        []string `json:"capabilities"`
+}
+
+// deriveKimiThinkingTokens mirrors the level set Kimi broadcasts for a model
+// (verified against Kimi Code CLI 0.34.0 by varying a model's
+// capabilities/support_efforts in an isolated config and reading both what
+// session/new offers for the `thinking` config id and whether
+// set_config_option("off") is accepted):
+//
+//	capabilities = thinking + always_thinking, efforts low/high/max
+//	    -> [low high max]           (off is not accepted)
+//	capabilities = thinking, efforts low/high/max
+//	    -> [off low high max]       (off is accepted, and leads the set)
+//	capabilities = thinking + always_thinking, no efforts
+//	    -> [on]                     (off is not accepted)
+//	capabilities = thinking, no efforts
+//	    -> [off on]                 (off is accepted)
+//	no thinking capability
+//	    -> no thinking option at all
+//
+// A missing/null capabilities field falls back to the efforts-only behavior
+// (older CLIs and forks never declared the field). An explicit empty list is a
+// statement of no capabilities and hides the control entirely.
+func deriveKimiThinkingTokens(efforts []string, capabilities []string) []string {
+	if capabilities == nil {
+		return efforts
+	}
+	hasThinking := false
+	hasAlwaysThinking := false
+	for _, capability := range capabilities {
+		switch capability {
+		case "thinking":
+			hasThinking = true
+		case "always_thinking":
+			hasAlwaysThinking = true
+		}
+	}
+	if !hasThinking && !hasAlwaysThinking {
+		return nil
+	}
+	if hasAlwaysThinking {
+		if len(efforts) == 0 {
+			return []string{"on"}
+		}
+		return efforts
+	}
+	if len(efforts) == 0 {
+		return []string{"off", "on"}
+	}
+	return append([]string{"off"}, efforts...)
 }
 
 func parseKimiProviderThinking(raw []byte) (map[string]*ModelThinking, error) {
@@ -1817,13 +1870,19 @@ func parseKimiProviderThinking(raw []byte) (map[string]*ModelThinking, error) {
 		if modelID == "" {
 			continue
 		}
+		// An explicit empty capabilities list is a statement of no
+		// capabilities at all — hide the control for this model.
+		if model.Capabilities != nil && len(model.Capabilities) == 0 {
+			continue
+		}
 		efforts := model.SupportEfforts
 		if len(efforts) == 0 {
 			efforts = model.SupportEffortsSnake
 		}
-		seen := make(map[string]bool, len(efforts))
-		levels := make([]ThinkingLevel, 0, len(efforts))
-		for _, rawEffort := range efforts {
+		tokens := deriveKimiThinkingTokens(efforts, model.Capabilities)
+		seen := make(map[string]bool, len(tokens))
+		levels := make([]ThinkingLevel, 0, len(tokens))
+		for _, rawEffort := range tokens {
 			effort := strings.TrimSpace(rawEffort)
 			if effort == "" || seen[effort] || !isValidDynamicThinkingValue(effort) {
 				continue

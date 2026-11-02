@@ -278,6 +278,26 @@ func (b *kimiBackend) Execute(ctx context.Context, prompt string, opts ExecOptio
 					"actual", sessionID,
 				)
 			}
+
+			// On a resumed session with no configured thinking level, read
+			// the level the resume response reports and log it as a snapshot
+			// (taken before the optional session/set_model, so worded as
+			// "reported", not as the final prompt-time value). Empty-level
+			// semantics are pinned here: Multica imposes nothing — on a fresh
+			// session that resolves to the CLI's own config; on a resumed
+			// session it means the session keeps whatever level it already
+			// has, possibly one an earlier turn set explicitly, because ACP
+			// has no unset semantics (verified on 0.34.0: null, "", "default",
+			// "unset", and a missing value are all rejected with -32602).
+			if opts.ThinkingLevel == "" {
+				if reportedLevel, reported := acpConfigOptionCurrentValue(result, "thinking"); reported {
+					b.cfg.Logger.Info("kimi resume reported thinking level",
+						"backend", "kimi",
+						"session_id", sessionID,
+						"level", reportedLevel,
+					)
+				}
+			}
 		} else {
 			result, err := c.request(runCtx, "session/new", map[string]any{
 				"cwd":        cwd,
