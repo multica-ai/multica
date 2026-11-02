@@ -94,6 +94,17 @@ export interface TestProposal {
   handoff?: { project_id: string; kickoff_issue_id: string };
 }
 
+export interface TestSquadCharterInput {
+  mission: string;
+  responsibilities: { key: string; text: string }[];
+}
+
+export interface TestSquadRoutine {
+  autopilot_id: string;
+  purpose: string;
+  state: string;
+}
+
 export interface TestOfficeIssue {
   id: string;
   title: string;
@@ -591,6 +602,48 @@ export class TestApiClient {
       this.createdIssueIds.push(proposal.handoff.kickoff_issue_id);
     }
     return proposal;
+  }
+
+  /**
+   * Save a squad's charter on its first save (revision 0). That save also creates
+   * the squad's weekly operating review. The workspace is per run, so the charter
+   * row needs no cleanup of its own.
+   */
+  async saveSquadCharter(squadId: string, charter: TestSquadCharterInput): Promise<void> {
+    const res = await this.authedFetch(`/api/squads/${squadId}/charter`, {
+      method: "PUT",
+      body: JSON.stringify({
+        revision: 0,
+        mission: charter.mission,
+        responsibilities: charter.responsibilities,
+        outputs: [],
+        boundaries: "",
+        escalation: "",
+        intake: "",
+        response_hours: 48,
+      }),
+    });
+    if (!res.ok) {
+      throw new Error(`save squad charter failed: ${res.status} ${await res.text()}`);
+    }
+  }
+
+  /** Make a weekly-or-other cadence routine of a squad: creates its autopilot and the routine. */
+  async createSquadRoutine(squadId: string, input: { purpose: string; cadence: string }): Promise<TestSquadRoutine> {
+    const res = await this.authedFetch(`/api/squads/${squadId}/routines`, {
+      method: "POST",
+      body: JSON.stringify({
+        purpose: input.purpose,
+        cadence: input.cadence,
+        timezone: "UTC",
+        expected_output: "report",
+        required: true,
+      }),
+    });
+    if (!res.ok) {
+      throw new Error(`create squad routine failed: ${res.status} ${await res.text()}`);
+    }
+    return (await res.json()) as TestSquadRoutine;
   }
 
   async getIssue(id: string): Promise<TestOfficeIssue> {
