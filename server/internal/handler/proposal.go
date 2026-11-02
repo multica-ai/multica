@@ -56,8 +56,9 @@ type ProposalResponse struct {
 	// Revision starts at 1 and goes up each time the squad resubmits after
 	// the boss asked for changes.
 	Revision int32 `json:"revision"`
-	// ExpiresAt is when a pending proposal with no decision expires. Null
-	// once the proposal is no longer pending.
+	// ExpiresAt is the end of the decision window: a pending proposal with no
+	// decision by then expires. It is kept after a decision, as the record of
+	// the window.
 	ExpiresAt *string `json:"expires_at"`
 	// SnoozedUntil is set while the boss has put a pending proposal aside. A
 	// time in the past means the snooze has ended.
@@ -643,6 +644,36 @@ func (h *Handler) ReviseProposal(w http.ResponseWriter, r *http.Request) {
 	slog.Info("proposal resubmitted", append(logger.RequestAttrs(r),
 		"proposal_id", resp.ID, "revision", resp.Revision)...)
 	writeJSON(w, http.StatusOK, resp)
+}
+
+// ── Expiry ──────────────────────────────────────────────────────────────────
+
+// systemActorID is the author id of events the server raises itself, such as
+// an expiry. It is the zero UUID, as the system's comments use.
+const systemActorID = "00000000-0000-0000-0000-000000000000"
+
+// ExpireDueProposals is the work of the daily expiry job: it expires the
+// pending proposals whose decision window has passed, and publishes what
+// changed. It returns how many proposals it expired.
+func (h *Handler) ExpireDueProposals(ctx context.Context) (int, error) {
+	results, err := h.proposalService().ExpireDue(ctx)
+	for _, res := range results {
+		wsUUID := res.Proposal.WorkspaceID
+		workspaceID := uuidToString(wsUUID)
+		prefix := h.getIssuePrefix(ctx, wsUUID)
+		h.publishProposalIssueUpdated(ctx, wsUUID, prefix, "system", systemActorID, res.Issue, res.PrevIssueStatus)
+		h.publish(protocol.EventCommentCreated, workspaceID, "system", systemActorID, map[string]any{
+			"comment":             commentToResponse(res.Comment, nil, nil),
+			"issue_title":         res.Issue.Title,
+			"issue_assignee_type": textToPtr(res.Issue.AssigneeType),
+			"issue_assignee_id":   uuidToPtr(res.Issue.AssigneeID),
+			"issue_status":        res.Issue.Status,
+			"issue_revision":      res.Issue.Revision,
+		})
+		resp := proposalToResponse(res.Proposal, res.Issue.Title, res.Issue.Status, prefix, res.Issue.Number)
+		h.publish(protocol.EventProposalUpdated, workspaceID, "system", systemActorID, map[string]any{"proposal": resp})
+	}
+	return len(results), err
 }
 
 // publishProposalIssueUpdated publishes the backing issue's new state. The

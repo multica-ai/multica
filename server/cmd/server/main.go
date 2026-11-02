@@ -847,6 +847,11 @@ func main() {
 	if err := schedulerMgr.Register(scheduler.IssueQueueSweepJob(h)); err != nil {
 		slog.Error("scheduler: register issue queue sweep", "error", err)
 	}
+	// Daily: proposals the boss did not decide within their window expire, and
+	// their leaders are woken once (plan 9.6).
+	if err := schedulerMgr.Register(scheduler.ProposalExpiryJob(h)); err != nil {
+		slog.Error("scheduler: register proposal expiry", "error", err)
+	}
 	if err := schedulerMgr.Register(scheduler.AutopilotScheduleDispatchJob(pool, queries, autopilotSvc)); err != nil {
 		slog.Warn("scheduler: failed to register autopilot_schedule_dispatch job", "error", err)
 	}
