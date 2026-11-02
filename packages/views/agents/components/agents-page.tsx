@@ -55,6 +55,7 @@ import {
   CollectionPageState,
   CollectionResetButton,
   CollectionScopeItems,
+  CollectionSearch,
 } from "../../layout/collection-page";
 import {
   CollectionDisplayMenu,
@@ -72,6 +73,7 @@ import {
   countActiveFilterDimensions,
 } from "./agent-list-toolbar";
 import { useLocale, useT } from "../../i18n";
+import { matchesPinyin } from "../../editor/extensions/pinyin-match";
 
 export interface AgentListRow {
   agent: Agent;
@@ -96,6 +98,23 @@ function lastActiveDaysAgo(activity: AgentActivity | null): number | null {
     if (bucket && bucket.total > 0) return activity.buckets.length - 1 - i;
   }
   return null;
+}
+
+/**
+ * List search: the query, trimmed and case-folded, matches the name or the
+ * description, directly or by pinyin. An empty query matches every row.
+ */
+export function matchesAgentSearch(row: AgentListRow, search: string): boolean {
+  const query = search.trim().toLowerCase();
+  if (!query) return true;
+  const { name, description } = row.agent;
+  return (
+    name.toLowerCase().includes(query) ||
+    matchesPinyin(name, query) ||
+    (!!description &&
+      (description.toLowerCase().includes(query) ||
+        matchesPinyin(description, query)))
+  );
 }
 
 /**
@@ -409,6 +428,9 @@ export function AgentsPage(_props: AgentsPageProps = {}) {
   const toggleColumn = useAgentsViewStore((s) => s.toggleColumn);
   const toggleFilter = useAgentsViewStore((s) => s.toggleFilter);
   const clearFilters = useAgentsViewStore((s) => s.clearFilters);
+  // Session-only, so the query survives opening an agent and coming back.
+  const search = useAgentsViewStore((s) => s.search);
+  const setSearch = useAgentsViewStore((s) => s.setSearch);
 
   const runtimesById = useMemo(() => {
     const m = new Map<string, AgentRuntime>();
@@ -490,9 +512,11 @@ export function AgentsPage(_props: AgentsPageProps = {}) {
     isWorkspaceAdmin,
   ]);
 
-  // Visible rows: filters, then sort.
+  // Visible rows: search and filters, then sort.
   const rows = useMemo<AgentListRow[]>(() => {
-    const filtered = scopeRows.filter((row) => rowMatchesFilters(row, filters));
+    const filtered = scopeRows.filter(
+      (row) => matchesAgentSearch(row, search) && rowMatchesFilters(row, filters),
+    );
 
     const dir = sortDirection === "asc" ? 1 : -1;
     filtered.sort((a, b) => {
@@ -521,15 +545,25 @@ export function AgentsPage(_props: AgentsPageProps = {}) {
       );
     });
     return filtered;
-  }, [scopeRows, filters, sortField, sortDirection]);
+  }, [scopeRows, search, filters, sortField, sortDirection]);
 
   const noMatchText = useMemo(() => {
+    const query = search.trim();
+    if (query) {
+      if (scope === "archived") {
+        return t(($) => $.no_matches.search_archived, { query });
+      }
+      if (countActiveFilterDimensions(filters) > 0) {
+        return t(($) => $.no_matches.search_active_filtered, { query });
+      }
+      return t(($) => $.no_matches.search_active, { query });
+    }
     if (scope === "archived") return t(($) => $.no_matches.no_archived);
     if (countActiveFilterDimensions(filters) > 0) {
       return t(($) => $.no_matches.no_filter_match);
     }
     return t(($) => $.no_matches.title);
-  }, [filters, scope, t]);
+  }, [filters, scope, search, t]);
 
   // Straight to the manual form: a duplicate already has every field decided,
   // so the method chooser would be a step with nothing to choose.
@@ -633,7 +667,12 @@ export function AgentsPage(_props: AgentsPageProps = {}) {
   };
 
   const showEmpty = !listError && !isLoading && agents.length === 0;
-  const hasNarrowing = countActiveFilterDimensions(filters) > 0;
+  const hasNarrowing =
+    countActiveFilterDimensions(filters) > 0 || search.trim() !== "";
+  const resetNarrowing = () => {
+    clearFilters();
+    setSearch("");
+  };
   const scopeTitles: Record<AgentsScope, string> = {
     mine: t(($) => $.page.scope_title.mine),
     all: t(($) => $.page.scope_title.all),
@@ -688,7 +727,12 @@ export function AgentsPage(_props: AgentsPageProps = {}) {
               allRows={scopeRows}
               members={members}
             />
-            {hasNarrowing ? <CollectionResetButton onClick={clearFilters} /> : null}
+            <CollectionSearch
+              value={search}
+              onChange={setSearch}
+              label={t(($) => $.page.search)}
+            />
+            {hasNarrowing ? <CollectionResetButton onClick={resetNarrowing} /> : null}
           </>
         }
         actions={
