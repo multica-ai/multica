@@ -25,6 +25,15 @@ on:
         type: choice
         default: diff
         options: [diff, deploy]
+      stack:
+        description: "Which stack to act on"
+        type: choice
+        default: Multica-AgentRuntime
+        options: [Multica-AgentRuntime, Multica-SelfHost]
+      allowed_emails:
+        description: "Multica-SelfHost only: comma-separated addresses allowed to sign up"
+        type: string
+        default: ""
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
@@ -79,10 +88,16 @@ jobs:
         working-directory: infrastructure
         run: pnpm exec cdk synth Multica-SelfHost -c selfHost=true -c allowedEmails=ci@example.com --quiet
 
-  # Needs an OIDC role in the target account (secret AWS_DEPLOY_ROLE_ARN) and a
-  # GitHub environment named aws-agent-runtime. Put required reviewers on that
-  # environment: a deploy replaces the instance whenever the bootstrap script
-  # changed, which kills any run in flight on it.
+  # Needs, in repository settings:
+  #   secret AWS_DEPLOY_ROLE_ARN  an OIDC role allowed to assume cdk-hnb659fds-*
+  #   variable AWS_REGION         the target region
+  #   variable MULTICA_DAEMON_ID  the deployed runtime's daemon id, which names
+  #                               its runtime rows and so is not committed
+  #   environment aws-agent-runtime
+  #
+  # Put required reviewers on that environment. An agent-runtime deploy replaces
+  # the instance whenever the bootstrap script changed, which kills any run in
+  # flight on it; a self-host deploy restarts the server.
   deploy:
     if: github.event_name == 'workflow_dispatch'
     needs: validate
@@ -114,11 +129,37 @@ jobs:
           aws-region: ${{ vars.AWS_REGION }}
           role-session-name: multica-infrastructure-${{ github.run_id }}
 
+      # Each stack needs a value that is deliberately not committed: the agent
+      # runtime's daemon id names this installation's runtime rows, and the
+      # self-host signup allowlist is what keeps an internet-facing server from
+      # letting strangers create accounts. Both live outside the repository and
+      # arrive here instead.
+      - name: Resolve stack context
+        id: context
+        env:
+          STACK: ${{ inputs.stack }}
+          ALLOWED_EMAILS: ${{ inputs.allowed_emails }}
+          DAEMON_ID: ${{ vars.MULTICA_DAEMON_ID }}
+        run: |
+          if [ "$STACK" = "Multica-SelfHost" ]; then
+            if [ -z "$ALLOWED_EMAILS" ]; then
+              echo "::error::allowed_emails is required for Multica-SelfHost: port 443 is open to the internet, so without an allowlist anyone who finds the URL can sign up."
+              exit 1
+            fi
+            echo "args=-c selfHost=true -c allowedEmails=$ALLOWED_EMAILS" >> "$GITHUB_OUTPUT"
+          else
+            if [ -z "$DAEMON_ID" ]; then
+              echo "::error::Repository variable MULTICA_DAEMON_ID is unset. Deploying the agent runtime without it mints a new daemon id, and the existing runtimes lose their agent bindings and public visibility."
+              exit 1
+            fi
+            echo "args=-c daemonId=$DAEMON_ID" >> "$GITHUB_OUTPUT"
+          fi
+
       # Only for a diff run: `cdk deploy` prints the same change set itself.
       - name: Diff
         if: inputs.action == 'diff'
         working-directory: infrastructure
-        run: pnpm exec cdk diff
+        run: pnpm exec cdk diff ${{ inputs.stack }} ${{ steps.context.outputs.args }}
 
       # --require-approval broadening, not never: a change that widens a
       # security group or an IAM policy fails the job instead of applying
@@ -127,4 +168,4 @@ jobs:
       - name: Deploy
         if: inputs.action == 'deploy'
         working-directory: infrastructure
-        run: pnpm exec cdk deploy --require-approval broadening --progress events
+        run: pnpm exec cdk deploy ${{ inputs.stack }} ${{ steps.context.outputs.args }} --require-approval broadening --progress events

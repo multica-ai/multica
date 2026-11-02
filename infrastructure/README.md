@@ -118,7 +118,7 @@ on the machine, or read the `bootstrap` log stream in CloudWatch.
 | `nodeMajorVersion` | `22` | Node.js major Claude Code runs on. |
 | `logRetentionDays` | `14` | Must be a CloudWatch retention period. |
 | `maxConcurrentTasks` | `4` | `MULTICA_DAEMON_MAX_CONCURRENT_TASKS`. Parallel runs share this machine's CPU, disk and the same subscription quota. |
-| `daemonId` | empty | `MULTICA_DAEMON_ID`. Multica keys runtimes by it, so pinning it lets a replacement instance take over the same runtimes, with their visibility and agent bindings. Empty lets the daemon mint its own on first boot. |
+| `daemonId` | empty, supplied at deploy | `MULTICA_DAEMON_ID`. Multica keys runtimes by it, so pinning it lets a replacement instance take over the same runtimes, with their visibility and agent bindings. Empty lets the daemon mint its own on first boot. |
 
 ### Public subnet or NAT gateway
 
