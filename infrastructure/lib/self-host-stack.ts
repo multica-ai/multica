@@ -6,6 +6,7 @@ import * as ec2 from 'aws-cdk-lib/aws-ec2';
 import * as iam from 'aws-cdk-lib/aws-iam';
 import * as logs from 'aws-cdk-lib/aws-logs';
 import * as s3assets from 'aws-cdk-lib/aws-s3-assets';
+import * as secretsmanager from 'aws-cdk-lib/aws-secretsmanager';
 import type { Construct } from 'constructs';
 
 import { renderScript } from './bootstrap';
@@ -68,6 +69,31 @@ export class SelfHostStack extends cdk.Stack {
       description: 'Multica self-host: own SSM parameters and own log group',
       managedPolicies: [iam.ManagedPolicy.fromAwsManagedPolicyName('AmazonSSMManagedInstanceCore')],
     });
+    // Two stores, one rule: what CloudFormation generates lives in Secrets
+    // Manager, what a human supplies lives in Parameter Store.
+    //
+    // Nobody ever reads or types these two, so generating them removes the
+    // step most likely to be skipped or fumbled on a first deploy, and keeps
+    // the values out of every shell history and terminal scrollback on the way
+    // in. Punctuation is excluded because the password is interpolated into a
+    // postgres:// URL, where an unescaped @ or / would silently point the
+    // backend at the wrong host.
+    const jwtSecret = new secretsmanager.Secret(this, 'JwtSecret', {
+      description: 'Multica self-host: signs session tokens',
+      generateSecretString: { excludePunctuation: true, passwordLength: 64 },
+      removalPolicy: cdk.RemovalPolicy.DESTROY,
+    });
+    const databasePassword = new secretsmanager.Secret(this, 'DatabasePassword', {
+      description: 'Multica self-host: PostgreSQL password',
+      generateSecretString: { excludePunctuation: true, passwordLength: 32 },
+      // Retained with the volume it belongs to: a database kept without its
+      // password is a database nobody can open.
+      removalPolicy: cdk.RemovalPolicy.RETAIN,
+    });
+    jwtSecret.grantRead(role);
+    databasePassword.grantRead(role);
+
+    // Human-supplied configuration, optional: the Resend API key.
     role.addToPolicy(
       new iam.PolicyStatement({
         sid: 'ReadServerConfiguration',
@@ -109,6 +135,8 @@ export class SelfHostStack extends cdk.Stack {
       renderScript('selfhost-bootstrap.sh', {
         REGION: this.region,
         PARAM_PREFIX: config.parameterPrefix,
+        JWT_SECRET_ID: jwtSecret.secretArn,
+        DB_PASSWORD_ID: databasePassword.secretArn,
         COMPOSE_URL: composeFile.s3ObjectUrl,
         DOMAIN_NAME: config.domainName,
         PUBLIC_IP: address.ref,
