@@ -57,6 +57,12 @@ func TestPreparePiSkillPaths(t *testing.T) {
 			if !slices.Equal(env.PiSkillPaths, want) {
 				t.Fatalf("PiSkillPaths = %v, want only %v", env.PiSkillPaths, want)
 			}
+			if tc.provider == "pi" && tc.bound {
+				visible := modelVisibleSkills(ApplyPreparedSkillNames(task, env.PreparedSkillNames).AgentSkills)
+				if len(visible) != 1 || visible[0].Name != tc.managed {
+					t.Fatalf("brief skill names do not match Pi's explicit discovery paths: %+v", visible)
+				}
+			}
 			if existingPath != "" {
 				if data, err := os.ReadFile(existingPath); err != nil || string(data) != "user skill" {
 					t.Fatalf("user skill changed: %q, %v", data, err)
@@ -107,11 +113,21 @@ func TestReusePiSkillPathsRefresh(t *testing.T) {
 			}
 		}
 		reused := Reuse(ReuseParams{WorkDir: env.WorkDir, Provider: "pi", Task: task}, testLogger())
-		if reused == nil {
-			t.Fatal("Reuse returned nil")
-		}
-		if !slices.Equal(reused.PiSkillPaths, want) {
-			t.Fatalf("refreshed PiSkillPaths = %v, want %v", reused.PiSkillPaths, want)
+		if tc.invalid {
+			// Without complete materialization there is no name to advertise.
+			if reused != nil {
+				t.Fatal("Reuse accepted a partial skill bundle")
+			}
+			if _, err := os.Stat(filepath.Join(skillsDir, tc.name)); !os.IsNotExist(err) {
+				t.Fatalf("partial skill survived reuse rollback: %v", err)
+			}
+		} else {
+			if reused == nil {
+				t.Fatal("Reuse returned nil")
+			}
+			if !slices.Equal(reused.PiSkillPaths, want) {
+				t.Fatalf("refreshed PiSkillPaths = %v, want %v", reused.PiSkillPaths, want)
+			}
 		}
 		if data, err := os.ReadFile(userPath); err != nil || string(data) != "user skill" {
 			t.Fatalf("user skill changed on reuse: %q, %v", data, err)
