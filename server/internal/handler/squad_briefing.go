@@ -2,6 +2,7 @@ package handler
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"strings"
 
@@ -267,6 +268,79 @@ post it as a comment on the boss or the Secretary.
 	)
 }
 
+// squadCharterStandingRules are the rules every charter squad runs under. They
+// follow the charter's own text, so they say what the charter cannot: where to
+// look first, what is the boss's to decide, and how to stop when there is nothing
+// to do. The no_action command itself lives in the Operating Protocol and is only
+// pointed at here.
+const squadCharterStandingRules = `- Search the company knowledge before you start, so you build on what already exists.
+- File a proposal instead of acting when the work involves money, an effect outside the company, or a change to how the company is organized. The boss decides those.
+- When a run has nothing worth doing, record ` + "`no action`" + ` with a reason, as the Operating Protocol describes, instead of producing filler.
+- Respect the attention limits. The server refuses proposals past a squad's caps; a refused proposal is the answer for that run, so do not retry or work around it.`
+
+// squadCharterBriefing renders the system-managed "Your charter" block from a
+// squad's charter, then the standing rules. Sections with no content are left
+// out. It returns "" when the stored lists cannot be read, so the leader gets
+// no charter rather than a wrong one.
+func squadCharterBriefing(charter db.SquadCharter) string {
+	var responsibilities []SquadCharterResponsibility
+	if err := json.Unmarshal(charter.Responsibilities, &responsibilities); err != nil {
+		return ""
+	}
+	var outputs []SquadCharterOutput
+	if err := json.Unmarshal(charter.Outputs, &outputs); err != nil {
+		return ""
+	}
+
+	var sb strings.Builder
+	sb.WriteString("## Your charter\n\n")
+	sb.WriteString("This is the squad's standing job. Work within it.\n")
+	if mission := strings.TrimSpace(charter.Mission); mission != "" {
+		sb.WriteString("\nMission: ")
+		sb.WriteString(mission)
+		sb.WriteString("\n")
+	}
+	if len(responsibilities) > 0 {
+		sb.WriteString("\nResponsibilities:\n")
+		for _, r := range responsibilities {
+			sb.WriteString("- ")
+			sb.WriteString(strings.TrimSpace(r.Text))
+			sb.WriteString("\n")
+		}
+	}
+	if len(outputs) > 0 {
+		sb.WriteString("\nOutputs:\n")
+		for _, o := range outputs {
+			sb.WriteString("- ")
+			sb.WriteString(o.Key)
+			sb.WriteString(": ")
+			sb.WriteString(o.Kind)
+			if cadence := strings.TrimSpace(o.CadenceHint); cadence != "" {
+				sb.WriteString(", cadence ")
+				sb.WriteString(cadence)
+			}
+			if kb := strings.TrimSpace(o.KBKey); kb != "" {
+				sb.WriteString(", knowledge base ")
+				sb.WriteString(kb)
+			}
+			sb.WriteString("\n")
+		}
+	}
+	if boundaries := strings.TrimSpace(charter.Boundaries); boundaries != "" {
+		sb.WriteString("\nBoundaries:\n")
+		sb.WriteString(boundaries)
+		sb.WriteString("\n")
+	}
+	if escalation := strings.TrimSpace(charter.Escalation); escalation != "" {
+		sb.WriteString("\nEscalation:\n")
+		sb.WriteString(escalation)
+		sb.WriteString("\n")
+	}
+	sb.WriteString("\nStanding rules:\n")
+	sb.WriteString(squadCharterStandingRules)
+	return sb.String()
+}
+
 // squadOperatingProtocolFor assembles the protocol, selecting the parent-status
 // responsibility that matches this leader's actual authority over the issue
 // and, for an owner, whether the issue's project workflow governs its moves.
@@ -293,8 +367,9 @@ func squadOperatingProtocolFor(ownsIssueStatus bool, workflow leaderWorkflow) st
 //  3. Squad Instructions (user-defined `squad.instructions`, omitted when
 //     empty so we don't leave a dangling heading).
 //
-// Between the roster and the instructions, a squad with an active autopilot
-// also gets "Proposing to the boss" (see squadProposingBriefing).
+// Between the roster and the instructions, a squad with a charter gets "Your
+// charter" (see squadCharterBriefing), and a squad with an active autopilot also
+// gets "Proposing to the boss" (see squadProposingBriefing).
 //
 // ownsIssueStatus must be true only when the issue this task is bound to is
 // assigned to this very squad. The briefing is injected on every leader path,
@@ -319,6 +394,17 @@ func buildSquadLeaderBriefing(ctx context.Context, q *db.Queries, squad db.Squad
 	}
 	sb.WriteString("\n\n")
 	sb.WriteString(buildSquadRoster(ctx, q, squad))
+
+	// A failed lookup leaves the charter out: the leader works as before, with
+	// its protocol and roster, and no charter is a narrower job, not a wrong one.
+	if charter, err := q.GetSquadCharter(ctx, db.GetSquadCharterParams{
+		SquadID: squad.ID, WorkspaceID: squad.WorkspaceID,
+	}); err == nil {
+		if block := squadCharterBriefing(charter); block != "" {
+			sb.WriteString("\n\n")
+			sb.WriteString(block)
+		}
+	}
 
 	// A failed lookup leaves the block out: the leader works as before, and a
 	// squad that proposes less is the safe direction to fail in.
