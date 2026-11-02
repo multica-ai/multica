@@ -1,6 +1,6 @@
 {
   "title": "命令列",
-  "description": "搜尋、執行命令，或把工作交給智慧體",
+  "description": "搜尋、執行命令，或把工作交給 AI 代理",
   "placeholder": "搜尋，或輸入要做的事...",
   "page_placeholder": "篩選...",
   "breadcrumb_aria": "目前選單",
@@ -8,7 +8,7 @@
     "pages": "頁面",
     "commands": "命令",
     "members": "成員",
-    "agents": "智慧體",
+    "agents": "AI 代理",
     "squads": "小隊",
     "projects": "專案",
     "issues": "任務",
@@ -26,7 +26,7 @@
     "current_issue": "目前任務",
     "selected_issues_other": "已選 {{count}} 個任務",
     "current_project": "目前專案",
-    "current_agent": "目前智慧體",
+    "current_agent": "目前 AI 代理",
     "current_autopilot": "目前自動化",
     "inbox": "收件箱",
     "current_chat": "目前對話"
@@ -36,7 +36,7 @@
     "new_issue": "新建任務",
     "new_project": "新建專案",
     "new_autopilot": "新建自動化",
-    "chat_with_agent": "和智慧體對話",
+    "chat_with_agent": "和 AI 代理對話",
     "change_theme": "切換主題...",
     "send_feedback": "傳送意見回饋",
     "copy_issue_link": "複製任務連結",
@@ -129,16 +129,16 @@
     "no_results": "未找到結果。",
     "no_labels": "沒有標籤",
     "type_to_find_issue": "輸入關鍵詞查找任務",
-    "type_to_find_people": "輸入關鍵詞查找成員和智慧體"
+    "type_to_find_people": "輸入關鍵詞查找成員和 AI 代理"
   },
   "delegate": {
-    "heading": "交給智慧體",
+    "heading": "交給 AI 代理",
     "create_and_assign": "新建任務並指派給 {{name}}",
     "squad": "小隊",
     "context_aria": "附帶上下文",
     "parent": "掛在 {{identifier}} 下",
     "pick_crumb": "選擇",
-    "pick_another": "換一個智慧體或小隊...",
+    "pick_another": "換一個 AI 代理或小隊...",
     "detected": "識別為指令"
   },
   "best": {
@@ -149,7 +149,7 @@
   "types": {
     "issue": "任務",
     "project": "專案",
-    "agent": "智慧體",
+    "agent": "AI 代理",
     "autopilot": "自動化",
     "squad": "小隊",
     "member": "成員"
@@ -163,7 +163,7 @@
     "back": "返回",
     "prefix_commands": "命令",
     "prefix_issues": "任務",
-    "prefix_people": "人和智慧體"
+    "prefix_people": "人和 AI 代理"
   },
   "trigger": {
     "label": "搜尋..."
