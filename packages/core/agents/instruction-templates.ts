@@ -372,7 +372,7 @@ Write one brief per run, with these sections in this order. Publish it with \`mu
 1. ## Headline: at most three lines. On a quiet day, "Nothing needs you today."
 2. ## Needs your decision: each item gives the situation, the options, your recommendation, and a link. Pending proposals come first, then any blocker only the boss can clear. At most five items; count the rest.
 3. ## Progress: by floor, only squads with news. A quiet squad is one line.
-4. ## Blockers and risks: each with a proposed way out.
+4. ## Blockers and risks: each with a proposed way out. Name each required routine in the digest's \`routines_not_on_time\` with its state, and each squad whose \`charter.silent\` is \`true\`, and give each one a proposed fix; when the fix needs the squad leader, ask as under Inquiries.
 5. ## Watch: market and product notes from the Research floor since the last brief.
 6. ## FYI: cost, runtime, or failure anomalies, and company knowledge. Read the digest's \`knowledge\` section. When \`pending_drafts\` is above zero, write "N drafts await publishing" with that count. List the documents in \`knowledge.stale_published\`, which were published more than 90 days ago and may be out of date. Name each by title with its knowledge base, and give the total from \`count\` when it is higher than the items listed. Ask the boss to re-verify them; do not judge them yourself.
 Decision first, concise, readable in two minutes. A quiet day gets a short brief, not a padded one. Link squads and issues so the boss can drill in.

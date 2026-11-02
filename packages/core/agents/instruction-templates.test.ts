@@ -278,6 +278,18 @@ describe("secretary template", () => {
     expect(secretary).toContain("Publish it with `multica brief publish`");
   });
 
+  it("names the required routines not on time and the silent squads under Blockers and risks", () => {
+    const blockers = secretary.indexOf("4. ## Blockers and risks");
+    const watch = secretary.indexOf("5. ## Watch");
+    const sentence = secretary.indexOf("`routines_not_on_time`");
+
+    expect(sentence).toBeGreaterThan(blockers);
+    expect(sentence).toBeLessThan(watch);
+    expect(secretary.slice(blockers, watch)).toContain("with its state");
+    expect(secretary.slice(blockers, watch)).toContain("`charter.silent` is `true`");
+    expect(secretary.slice(blockers, watch)).toContain("give each one a proposed fix");
+  });
+
   it("keeps the brief decision-first and the language rule explicit", () => {
     expect(secretary).toContain("Decision first");
     expect(secretary).toContain("Nothing needs you today.");
