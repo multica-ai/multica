@@ -3,6 +3,7 @@ package execenv
 import (
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -953,12 +954,28 @@ features . multi_agent_v2 . max_concurrent_threads_per_session = 4
 multi_agent_v2 . enabled = true
 multi_agent_v2 . max_concurrent_threads_per_session = 4
 `,
+		"features_inline": `[features]
+multi_agent_v2 = { enabled = true, max_concurrent_threads_per_session = 4, default_wait_timeout_ms = 5000 }
+`,
+		"root_inline": `features.multi_agent_v2 = { enabled = true, max_concurrent_threads_per_session = 4, root_agent_usage_hint_text = "Keep {x,y} and quotes: \"yes\"" } # keep this comment
+`,
+		"inline_without_enabled": `[features]
+multi_agent_v2 = { max_concurrent_threads_per_session = 4 }
+`,
+		"inline_multiline_value": `[features]
+multi_agent_v2 = { enabled = true, max_concurrent_threads_per_session = 4, root_agent_usage_hint_text = """first line
+second line""" }
+`,
 	} {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 			configPath := filepath.Join(t.TempDir(), "config.toml")
 			original += "\n[agents.researcher]\ndescription = \"Research role\"\nenabled = true\n"
-			parseTOML(t, original)
+			original += "\n[profiles.custom.features]\nmulti_agent_v2 = { enabled = true, max_concurrent_threads_per_session = 8 }\n"
+			originalConfig := parseTOML(t, original)
+			originalFeatures := originalConfig["features"].(map[string]any)
+			originalV2 := originalFeatures["multi_agent_v2"].(map[string]any)
+			delete(originalV2, "enabled")
 			if err := os.WriteFile(configPath, []byte(original), 0o644); err != nil {
 				t.Fatal(err)
 			}
@@ -990,10 +1007,22 @@ multi_agent_v2 . max_concurrent_threads_per_session = 4
 				if v2["max_concurrent_threads_per_session"] != int64(4) {
 					t.Errorf("lost custom V2 option: %#v", v2)
 				}
+				for key, want := range originalV2 {
+					if !reflect.DeepEqual(v2[key], want) {
+						t.Errorf("changed V2 option %s: got %#v, want %#v", key, v2[key], want)
+					}
+				}
 				agents := parsed["agents"].(map[string]any)
 				role := agents["researcher"].(map[string]any)
 				if role["description"] != "Research role" || role["enabled"] != true {
 					t.Errorf("changed unrelated role: %#v", role)
+				}
+				profiles := parsed["profiles"].(map[string]any)
+				if !reflect.DeepEqual(profiles, originalConfig["profiles"]) {
+					t.Errorf("changed unrelated profile: %#v", profiles)
+				}
+				if strings.Contains(original, "# keep this comment") && !strings.Contains(string(data), "# keep this comment") {
+					t.Error("lost inline table comment")
 				}
 				if err := ensureCodexMultiAgentConfig(configPath, version, nil); err != nil {
 					t.Fatal(err)
@@ -1007,5 +1036,24 @@ multi_agent_v2 . max_concurrent_threads_per_session = 4
 				}
 			}
 		})
+	}
+}
+
+func TestEnsureCodexMultiAgentConfigInvalidInlineIsNotRewritten(t *testing.T) {
+	t.Parallel()
+	configPath := filepath.Join(t.TempDir(), "config.toml")
+	original := "[features]\nmulti_agent_v2 = { enabled = true,\n"
+	if err := os.WriteFile(configPath, []byte(original), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := ensureCodexMultiAgentConfig(configPath, "0.162.1", nil); err == nil {
+		t.Fatal("expected malformed inline table to return an error")
+	}
+	data, err := os.ReadFile(configPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(data) != original {
+		t.Error("malformed config was partially rewritten")
 	}
 }

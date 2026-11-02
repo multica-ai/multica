@@ -5,7 +5,11 @@ import (
 	"log/slog"
 	"os"
 	"regexp"
+	"sort"
 	"strings"
+
+	"github.com/pelletier/go-toml/v2"
+	"github.com/pelletier/go-toml/v2/unstable"
 )
 
 // Background
@@ -176,6 +180,59 @@ func renderMulticaAgentsBlock(inAgentsTable bool) string {
 	return b.String()
 }
 
+// Inline tables cannot be extended by the managed enabled key. Expand only
+// their V2 options into dotted assignments, preserving unrelated expressions.
+func expandInlineMultiAgentV2(content string) (string, error) {
+	var parser unstable.Parser
+	parser.Reset([]byte(content))
+	var currentTable []string
+	var out strings.Builder
+	previous := 0
+	for parser.NextExpression() {
+		expr := parser.Expression()
+		keys := tomlNodeKeys(expr)
+		if expr.Kind == unstable.Table || expr.Kind == unstable.ArrayTable {
+			currentTable = keys
+			continue
+		}
+		if expr.Kind != unstable.KeyValue || expr.Value().Kind != unstable.InlineTable {
+			continue
+		}
+		fullKey := append(append([]string(nil), currentTable...), keys...)
+		if len(fullKey) != 2 || fullKey[0] != "features" || fullKey[1] != "multi_agent_v2" {
+			continue
+		}
+		start := int(expr.Raw.Offset)
+		end := start + int(expr.Raw.Length)
+		var settings map[string]any
+		if err := toml.Unmarshal([]byte(content[start:end]), &settings); err != nil {
+			return "", fmt.Errorf("parse inline multi-agent V2 settings: %w", err)
+		}
+		for _, key := range keys {
+			settings = settings[key].(map[string]any)
+		}
+		delete(settings, "enabled")
+		optionKeys := make([]string, 0, len(settings))
+		for key := range settings {
+			optionKeys = append(optionKeys, key)
+		}
+		sort.Strings(optionKeys)
+		out.WriteString(content[previous:start])
+		for _, key := range optionKeys {
+			out.WriteString(strings.Join(keys, ".") + ".")
+			if err := toml.NewEncoder(&out).SetTablesInline(true).Encode(map[string]any{key: settings[key]}); err != nil {
+				return "", fmt.Errorf("encode multi-agent V2 option %q: %w", key, err)
+			}
+		}
+		previous = end
+	}
+	if err := parser.Error(); err != nil {
+		return "", fmt.Errorf("parse multi-agent V2 expressions: %w", err)
+	}
+	out.WriteString(content[previous:])
+	return out.String(), nil
+}
+
 // stripUserMultiAgentDirectives removes user-written directives that would
 // conflict with the managed blocks:
 //
@@ -307,6 +364,10 @@ func ensureCodexMultiAgentConfig(configPath, detectedVersion string, logger *slo
 	existing = multiAgentBlockRe.ReplaceAllString(existing, "")
 	existing = agentsBlockRe.ReplaceAllString(existing, "")
 	existing = multiAgentV2BlockRe.ReplaceAllString(existing, "")
+	existing, err = expandInlineMultiAgentV2(existing)
+	if err != nil {
+		return err
+	}
 	// Strip user-set directives in every encoding; the managed blocks re-add
 	// the canonical forms below.
 	existing = stripUserMultiAgentDirectives(existing)
