@@ -43,7 +43,7 @@ func TestMediaJobMigrationFreshUpgradeRollback(t *testing.T) {
 		if err := conn.QueryRow(ctx, "SELECT count(*) FROM pg_constraint WHERE conrelid='media_job'::regclass AND contype='f'").Scan(&constraints); err != nil || constraints != 0 {
 			t.Fatal("unexpected foreign keys", err)
 		}
-		_, err = conn.Exec(ctx, `INSERT INTO media_job(workspace_id,caller_id,uploader_type,uploader_id,request,capability_tag) VALUES (gen_random_uuid(),gen_random_uuid(),'member',gen_random_uuid(),'{}','media-video-flow-v1')`)
+		_, err = conn.Exec(ctx, `INSERT INTO media_job(workspace_id,caller_id,uploader_type,uploader_id,request,capability_tag) VALUES (gen_random_uuid(),gen_random_uuid(),'member',gen_random_uuid(),'{}','media-image-codex-v1')`)
 		if err != nil {
 			t.Fatal(err)
 		}

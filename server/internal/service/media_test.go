@@ -18,12 +18,6 @@ func TestMediaRouting(t *testing.T) {
 	runtime := func(provider string, used float64) db.AgentRuntime {
 		quota, _ := json.Marshal(protocol.RuntimePlanQuota{Status: "ok", Windows: []protocol.RuntimePlanQuotaWindow{{Name: "primary", UsedPercent: &used}}})
 		capability := "image-generate"
-		if provider == "flow" {
-			capability = "video-generate"
-		}
-		if provider == "whisk" {
-			capability = "image-remix"
-		}
 		metadata, _ := json.Marshal(map[string]any{"capabilities": []string{protocol.MediaCapabilityTag(protocol.MediaProvider(provider), capability)}})
 		return db.AgentRuntime{ID: pgtype.UUID{Bytes: uuid.New(), Valid: true}, OwnerID: user, Provider: provider, Status: "online", Metadata: metadata, PlanQuota: quota}
 	}
@@ -92,48 +86,14 @@ func TestMediaRouting(t *testing.T) {
 	}
 }
 
-func TestMediaBrowserSourcesIgnoreHostQuota(t *testing.T) {
-	now := time.Unix(1800000000, 0)
+func TestMediaRetiredSourcesCannotRoute(t *testing.T) {
 	user := pgtype.UUID{Bytes: uuid.New(), Valid: true}
-	for _, source := range []string{"flow", "whisk"} {
-		capability := "video-generate"
-		if source == "whisk" {
-			capability = "image-remix"
-		}
-		tag := protocol.MediaCapabilityTag(source, capability)
-		metadata, _ := json.Marshal(map[string]any{"capabilities": []string{tag}})
-		for _, snapshot := range []struct{ name, quota string }{
-			{"claude full", `{"status":"limited","windows":[{"group":"claude_gpt","used_percent":100,"resets_at":1800018000},{"group":"gemini","used_percent":25,"resets_at":1800018000}]}`},
-			{"gemini full", `{"status":"limited","windows":[{"group":"gemini","used_percent":100,"resets_at":1800018000},{"group":"claude_gpt","used_percent":25,"resets_at":1800018000}]}`},
-			{"host quota available", `{"status":"ok","windows":[{"group":"gemini","used_percent":0,"resets_at":1800018000}]}`},
-			{"limited without windows", `{"status":"limited","windows":[]}`},
-		} {
-			t.Run(source+"/"+snapshot.name, func(t *testing.T) {
-				rt := db.AgentRuntime{ID: pgtype.UUID{Bytes: uuid.New(), Valid: true}, OwnerID: user, Provider: "antigravity", Status: "online", Metadata: metadata, PlanQuota: []byte(snapshot.quota)}
-				var quota protocol.RuntimePlanQuota
-				if err := json.Unmarshal(rt.PlanQuota, &quota); err != nil {
-					t.Fatal(err)
-				}
-				if score, usable := mediaQuotaScore(quota, source, now); score != -1 || !usable {
-					t.Errorf("host quota must be unknown for %s: score=%v usable=%v", source, score, usable)
-				}
-				for _, provider := range []string{source, "auto"} {
-					selected := SelectMediaRuntime([]db.AgentRuntime{rt}, user, protocol.MediaRequest{Provider: provider, Capability: capability}, now)
-					if selected == nil || selected.ID != rt.ID || selected.Tag != tag {
-						t.Errorf("%s/%s rejected because of host model quota", provider, capability)
-					}
-				}
-				if until := MediaCooldown(rt, tag, 0, now); !until.Equal(now.Add(time.Minute)) {
-					t.Errorf("host reset leaked into cooldown: %v", until.Sub(now))
-				}
-				if until := MediaCooldown(rt, tag, 90, now); !until.Equal(now.Add(90 * time.Second)) {
-					t.Errorf("Retry-After ignored: %v", until.Sub(now))
-				}
-				rt.Metadata = []byte(fmt.Sprintf(`{"capabilities":[%q],"media_cooldowns":{%q:%d}}`, tag, tag, now.Add(time.Minute).Unix()))
-				if SelectMediaRuntime([]db.AgentRuntime{rt}, user, protocol.MediaRequest{Provider: source, Capability: capability}, now) != nil {
-					t.Fatal("unknown quota bypassed explicit media cooldown")
-				}
-			})
+	rt := db.AgentRuntime{ID: pgtype.UUID{Bytes: uuid.New(), Valid: true}, OwnerID: user, Provider: "antigravity", Status: "online", Metadata: []byte(`{"capabilities":["media-video-flow-v1","media-image-whisk-v1"]}`)}
+	for _, provider := range []string{"auto", "flow", "whisk", "agy"} {
+		for _, capability := range []string{"image-generate", "image-edit", "video-generate", "image-remix"} {
+			if SelectMediaRuntime([]db.AgentRuntime{rt}, user, protocol.MediaRequest{Provider: provider, Capability: capability}, time.Now()) != nil {
+				t.Fatalf("retired capability routed: %s/%s", provider, capability)
+			}
 		}
 	}
 }

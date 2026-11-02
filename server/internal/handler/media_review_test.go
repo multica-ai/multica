@@ -38,60 +38,47 @@ func mediaTransferRequest(a *protocol.MediaAssignment, method string, data []byt
 	return r
 }
 
-func TestMediaFlowAndWhiskShareExistingRuntime(t *testing.T) {
-	h := *testHandler
-	t.Setenv("LOCAL_UPLOAD_DIR", t.TempDir())
-	h.Storage = storage.NewLocalStorageFromEnv()
+func TestMediaRegistrationDropsRetiredSources(t *testing.T) {
 	daemonID := uuid.NewString()
-	rt := dbfx.Runtime(t, "browser media", testutil.Cols{"provider": "antigravity", "daemon_id": daemonID})
-	tags := []string{"media-video-flow-v1", "media-image-whisk-v1"}
-	req := newRequest("POST", "/api/daemon/register", map[string]any{"workspace_id": testWorkspaceID, "daemon_id": daemonID, "runtimes": []map[string]any{{"name": "browser media", "type": "antigravity", "status": "online", "media_capabilities": tags}}})
+	tags := []string{"media-video-flow-v1", "media-image-whisk-v1", "media-image-agy-v1"}
+	rt := dbfx.Runtime(t, "image host", testutil.Cols{"provider": "antigravity", "daemon_id": daemonID, "metadata": `{"capabilities":["media-video-flow-v1","media-image-whisk-v1"]}`})
+	req := newRequest("POST", "/api/daemon/register", map[string]any{"workspace_id": testWorkspaceID, "daemon_id": daemonID, "runtimes": []map[string]any{{"name": "image host", "type": "antigravity", "status": "online", "media_capabilities": tags}}})
 	req.Header.Set("X-Client-Capabilities", "rpc-v1,media-image-codex-v1")
-	testutil.Call(t, h.DaemonRegister, req).Want(200)
+	testutil.Call(t, testHandler.DaemonRegister, req).Want(200)
 	var meta struct {
-		Capabilities []string         `json:"capabilities"`
-		Cooldowns    map[string]int64 `json:"media_cooldowns"`
+		Capabilities []string `json:"capabilities"`
 	}
 	if err := json.Unmarshal(loadRuntime(t, rt).Metadata, &meta); err != nil {
 		t.Fatal(err)
 	}
-	if !slices.Contains(meta.Capabilities, tags[0]) || !slices.Contains(meta.Capabilities, tags[1]) || slices.Contains(meta.Capabilities, "media-image-codex-v1") {
-		t.Fatal("registration lost browser tags or broadcast native tag", meta)
+	if !slices.Equal(meta.Capabilities, []string{"rpc-v1", "media-image-agy-v1"}) {
+		t.Fatal("retired or foreign capabilities persisted", meta)
 	}
-	input := mediaInputFixture(t, &h, nil)
-	for _, provider := range []string{"flow", "auto", "whisk"} {
-		capability, tag := "video-generate", tags[0]
-		if provider == "whisk" {
-			capability, tag = "image-remix", tags[1]
+	for _, provider := range []string{"auto", "flow", "whisk"} {
+		for _, capability := range []string{"video-generate", "image-remix"} {
+			testutil.Call(t, testHandler.CreateMediaJob, newRequest("POST", "/", protocol.MediaRequest{Provider: provider, Capability: capability, Prompt: "unsupported"})).Want(400)
 		}
-		job := createTestMediaJob(t, &h, protocol.MediaRequest{Provider: provider, Capability: capability, Prompt: "media", Inputs: []protocol.MediaInput{{AttachmentID: input}}})
-		a := claimTestMediaJob(t, &h, rt)
-		if a == nil || a.Job.ID != job.ID {
-			t.Fatalf("%s could not claim on antigravity", provider)
-		}
-		var selectedTag string
-		dbfx.QueryRow(t, "SELECT capability_tag FROM media_job WHERE id=$1", job.ID).Scan(&selectedTag)
-		if selectedTag != tag {
-			t.Fatalf("source = %s, want %s", selectedTag, tag)
-		}
-		if provider == "auto" {
-			// Registration can change while a receipt is in flight. Cool the tag
-			// actually assigned, rather than the host provider or latest tag list.
-			dbfx.Exec(t, `UPDATE agent_runtime SET metadata=jsonb_set(metadata,'{capabilities}','["media-image-whisk-v1"]') WHERE id=$1`, rt)
-		}
-		var result protocol.MediaJob
-		testutil.Call(t, h.ReportMediaJob, newRequest("POST", "/", protocol.MediaResult{RuntimeID: rt, JobID: job.ID, Attempt: a.Attempt, Error: "fixture", RateLimited: provider == "auto", RetryAfter: 60})).Want(200).JSON(&result)
-		if provider == "auto" {
-			if result.State != "queued" {
-				t.Fatal("429 did not requeue")
-			}
-			if err := json.Unmarshal(loadRuntime(t, rt).Metadata, &meta); err != nil {
-				t.Fatal(err)
-			}
-			if meta.Cooldowns[tags[0]] <= time.Now().Unix() || meta.Cooldowns[tags[1]] != 0 || meta.Cooldowns["media-image-agy-v1"] != 0 {
-				t.Fatal("cooled host or unrelated media source", meta)
-			}
-		}
+	}
+}
+
+func TestMediaQuotaReceiptCoolsAssignedTagAfterRegistrationChanges(t *testing.T) {
+	rt := mediaTestRuntime(t, "codex", 0)
+	job := createTestMediaJob(t, testHandler, protocol.MediaRequest{Provider: "auto", Capability: "image-generate", Prompt: "image"})
+	a := claimTestMediaJob(t, testHandler, rt)
+	if a == nil || a.Job.ID != job.ID {
+		t.Fatal("missing assignment")
+	}
+	dbfx.Exec(t, `UPDATE agent_runtime SET metadata=jsonb_set(metadata,'{capabilities}','[]') WHERE id=$1`, rt)
+	var result protocol.MediaJob
+	testutil.Call(t, testHandler.ReportMediaJob, newRequest("POST", "/", protocol.MediaResult{RuntimeID: rt, JobID: job.ID, Attempt: a.Attempt, RateLimited: true, RetryAfter: 60})).Want(200).JSON(&result)
+	var meta struct {
+		Cooldowns map[string]int64 `json:"media_cooldowns"`
+	}
+	if err := json.Unmarshal(loadRuntime(t, rt).Metadata, &meta); err != nil {
+		t.Fatal(err)
+	}
+	if result.State != "queued" || meta.Cooldowns["media-image-codex-v1"] <= time.Now().Unix() || meta.Cooldowns["media-image-agy-v1"] != 0 {
+		t.Fatal("lost assigned cooldown", meta, result)
 	}
 }
 
