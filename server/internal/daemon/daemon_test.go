@@ -602,7 +602,7 @@ func TestHermesTaskEnvPassthroughCoversTaskEnvironment(t *testing.T) {
 		}
 		seen[name] = true
 	}
-	env := taskMulticaEnvironment(Task{ID: "task-test", AgentID: "agent-test", WorkspaceID: "workspace-test"},
+	env := taskMulticaEnvironment(Task{ID: "task-test", AgentID: "agent-test", WorkspaceID: "workspace-test", QuickCreatePrompt: "create work"},
 		"hermes", "agent-name", "mat_fixture", "/task/config", "/task/workspaces", "https://task.example", 19514, 3, "/task/tmp")
 	for name := range env {
 		if strings.HasPrefix(name, "MULTICA_") && !seen[name] {

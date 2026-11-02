@@ -192,6 +192,14 @@ func taskMulticaEnvironment(task Task, provider, agentName, token, configRoot, w
 		"TMP":                  tempDir,
 		"TEMP":                 tempDir,
 	}
+	if task.QuickCreatePrompt != "" {
+		assigneeType, assigneeID := "agent", task.AgentID
+		if task.SquadID != "" {
+			assigneeType, assigneeID = "squad", task.SquadID
+		}
+		env["MULTICA_QUICK_CREATE_DEFAULT_ASSIGNEE_TYPE"] = assigneeType
+		env["MULTICA_QUICK_CREATE_DEFAULT_ASSIGNEE_ID"] = assigneeID
+	}
 	if runtime.GOOS != "windows" {
 		return env
 	}
