@@ -342,6 +342,31 @@
       "timeout": "시간 초과"
     }
   },
+  "agent_cli": {
+    "title": "에이전트 CLI",
+    "loading": "CLI 상태를 불러오는 중…",
+    "load_failed": "CLI 상태를 불러오지 못했습니다.",
+    "not_installed": "설치되지 않음",
+    "manual_install": "수동으로 설치하거나 업그레이드",
+    "latest": "최신",
+    "update": "업데이트",
+    "retry": "다시 시도",
+    "unknown_error": "알 수 없는 오류",
+    "initiate_failed": "업그레이드를 시작하지 못했습니다",
+    "status": {
+      "up_to_date": "최신 버전",
+      "outdated": "업데이트 가능",
+      "missing": "설치되지 않음",
+      "unknown": "버전을 알 수 없음"
+    },
+    "stage": {
+      "queued": "대기 중",
+      "draining": "작업이 끝날 때까지 대기 중",
+      "upgrading": "업그레이드 중",
+      "succeeded": "업데이트됨",
+      "failed": "업데이트 실패"
+    }
+  },
   "charts": {
     "heatmap_less": "적음",
     "heatmap_more": "많음",

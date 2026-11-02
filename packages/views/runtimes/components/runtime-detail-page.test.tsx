@@ -5,7 +5,10 @@ import { describe, expect, it, vi } from "vitest";
 import { I18nProvider } from "@multica/core/i18n/react";
 import { agentTaskSnapshotOptions } from "@multica/core/agents";
 import { runtimeProfileListOptions } from "@multica/core/runtimes";
-import { runtimeListOptions } from "@multica/core/runtimes/queries";
+import {
+  runtimeCLIStatusOptions,
+  runtimeListOptions,
+} from "@multica/core/runtimes/queries";
 import type { AgentRuntime } from "@multica/core/types";
 import {
   agentListOptions,
@@ -104,7 +107,15 @@ function renderPage({
   const qc = new QueryClient({
     defaultOptions: { queries: { retry: false, staleTime: Infinity } },
   });
-  if (runtimes) qc.setQueryData(runtimeListOptions(WS).queryKey, runtimes);
+  if (runtimes) {
+    qc.setQueryData(runtimeListOptions(WS).queryKey, runtimes);
+    for (const runtime of runtimes) {
+      qc.setQueryData(runtimeCLIStatusOptions(runtime.id).queryKey, {
+        runtime_id: runtime.id,
+        clis: [],
+      });
+    }
+  }
   qc.setQueryData(runtimeProfileListOptions(WS).queryKey, []);
   qc.setQueryData(agentListOptions(WS).queryKey, []);
   qc.setQueryData(agentTaskSnapshotOptions(WS).queryKey, []);
@@ -157,6 +168,8 @@ describe("RuntimeDetailPage", () => {
     expect(within(header).queryByRole("button", { name: "Start" })).not.toBeInTheDocument();
     expect(screen.getByRole("heading", { level: 1, name: "Studio Mac" })).toBeInTheDocument();
     expect(screen.getByText("This device")).toBeInTheDocument();
+
+    expect(screen.getByRole("heading", { level: 2, name: "Agent CLIs" })).toBeInTheDocument();
 
     const daemon = screen.getByRole("heading", { level: 2, name: "Daemon" }).closest("section")!;
     expect(within(daemon).getByRole("button", { name: "Start" })).toBeInTheDocument();

@@ -18,7 +18,7 @@ vi.mock("./update-section", () => ({
   },
 }));
 
-import { MachineCliSection } from "./machine-cli-section";
+import { MachineCliSection, machineAgentCLIRuntime } from "./machine-cli-section";
 
 function runtime(overrides: Partial<AgentRuntime> = {}): AgentRuntime {
   return {
@@ -215,5 +215,50 @@ describe("MachineCliSection", () => {
       isOnline: false,
       launchedBy: "desktop",
     });
+  });
+});
+
+describe("machineAgentCLIRuntime", () => {
+  it("prefers the viewer's online runtime", () => {
+    const offlineOwned = runtime({ id: "offline-owned", status: "offline" });
+    const onlineOwned = runtime({ id: "online-owned", status: "online" });
+    const picked = machineAgentCLIRuntime(
+      machine([offlineOwned, onlineOwned]),
+      "user-1",
+      false,
+    );
+    expect(picked?.id).toBe("online-owned");
+  });
+
+  it("lets a workspace admin read a runtime they do not own", () => {
+    const other = runtime({ id: "other", owner_id: "user-2", visibility: "private" });
+    expect(
+      machineAgentCLIRuntime(machine([other]), "user-1", true)?.id,
+    ).toBe("other");
+    expect(
+      machineAgentCLIRuntime(machine([other]), "user-1", false),
+    ).toBeNull();
+  });
+
+  it("shows a public runtime to a member who does not own it", () => {
+    const shared = runtime({
+      id: "shared",
+      owner_id: "user-2",
+      visibility: "public",
+    });
+    expect(
+      machineAgentCLIRuntime(machine([shared]), "user-1", false)?.id,
+    ).toBe("shared");
+  });
+
+  it("works for a cloud machine", () => {
+    const cloud = runtime({
+      id: "cloud-rt",
+      runtime_mode: "cloud",
+      owner_id: "user-2",
+      visibility: "private",
+    });
+    const host = { ...machine([cloud]), mode: "cloud" as const };
+    expect(machineAgentCLIRuntime(host, "user-1", true)?.id).toBe("cloud-rt");
   });
 });

@@ -86,6 +86,11 @@ vi.mock("@multica/core/runtimes", async () => ({
       "@multica/core/runtimes",
     )
   ).isRuntimeUsableForUser,
+  canUpgradeAgentCLI: (
+    await vi.importActual<typeof import("@multica/core/runtimes")>(
+      "@multica/core/runtimes",
+    )
+  ).canUpgradeAgentCLI,
   deriveRuntimeHealth: () => "online",
   runtimeDisplayName: (rt: { name: string; custom_name?: string | null }) =>
     rt.custom_name?.trim() || rt.name,
@@ -285,6 +290,7 @@ describe("RuntimeDetail visibility section", () => {
     );
     expect(screen.getByRole("heading", { level: 1 })).toBeInTheDocument();
     expect(screen.getByRole("heading", { level: 2, name: /Agents/ })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { level: 2, name: "Agent CLIs" })).toBeInTheDocument();
     expect(screen.getByRole("heading", { level: 2, name: "Usage" })).toBeInTheDocument();
     expect(screen.getByText("No agents are bound to this runtime yet.")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Properties" })).toBeInTheDocument();

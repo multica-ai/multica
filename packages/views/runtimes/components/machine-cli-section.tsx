@@ -30,6 +30,33 @@ export function machineUpdateRuntime(
 }
 
 /**
+ * Pick the runtime whose agent CLI status this machine page should show.
+ * The viewer's own runtime wins so a local owner can upgrade. A workspace
+ * admin otherwise sees any runtime on the machine. Everyone else sees a
+ * public runtime. An online runtime wins so a command can be delivered.
+ */
+export function machineAgentCLIRuntime(
+  machine: RuntimeMachine,
+  currentUserId: string | undefined,
+  isWorkspaceAdmin: boolean,
+): AgentRuntime | null {
+  const real = machine.runtimes.filter((runtime) => runtime.id);
+  if (real.length === 0) return null;
+
+  const owned = currentUserId
+    ? real.filter((runtime) => runtime.owner_id === currentUserId)
+    : [];
+  const pool =
+    owned.length > 0
+      ? owned
+      : isWorkspaceAdmin
+        ? real
+        : real.filter((runtime) => runtime.visibility === "public");
+  if (pool.length === 0) return null;
+  return pool.find((runtime) => runtime.status === "online") ?? pool[0] ?? null;
+}
+
+/**
  * Whether the machine has a CLI version or update channel to show.
  * A viewer's ability to send an update command must not gate the
  * machine-level version and manager information. The only local machine

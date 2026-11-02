@@ -1,4 +1,5 @@
 export * from "./access";
+export * from "./agent-cli";
 export * from "./queries";
 export * from "./profiles";
 export * from "./mutations";

@@ -20,6 +20,7 @@ import { useAuthStore } from "@multica/core/auth";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { memberListOptions, agentListOptions } from "@multica/core/workspace/queries";
 import {
+  canUpgradeAgentCLI,
   deriveRuntimeHealth,
   isRuntimeUsableForUser,
   runtimeDisplayName,
@@ -54,6 +55,7 @@ import { availabilityConfig, workloadConfig } from "../../agents/presence";
 import { HealthBadge, HealthIcon, shortDaemonId, useHealthLabel } from "./shared";
 import { ProviderLogo } from "./provider-logo";
 import { UsageSection } from "./usage-section";
+import { AgentCliSection } from "./agent-cli-section";
 import { DeleteRuntimeDialog } from "./delete-runtime-dialog";
 import { RuntimeAccessEditor, RuntimeAccessReadout } from "./runtime-access-editor";
 import { RuntimeConcurrencyField } from "./runtime-concurrency-field";
@@ -127,6 +129,11 @@ export function RuntimeDetail({
     : false;
   const isRuntimeOwner = user && runtime.owner_id === user.id;
   const canEditRuntime = isAdmin || isRuntimeOwner;
+  const canUpgradeCLI = canUpgradeAgentCLI({
+    runtimeMode: runtime.runtime_mode,
+    isRuntimeOwner: !!isRuntimeOwner,
+    isWorkspaceAdmin: !!isAdmin,
+  });
   const canReadRuntime = isRuntimeUsableForUser(runtime, user?.id ?? null);
   const runtimeProfile: RuntimeProfile | null = runtime.profile_id
     ? profiles.find((p) => p.id === runtime.profile_id) ?? null
@@ -219,6 +226,14 @@ export function RuntimeDetail({
             }
             description={summary}
           />
+
+          <ObjectSection title={t(($) => $.agent_cli.title)}>
+            <AgentCliSection
+              runtimeId={runtime.id}
+              isOnline={runtime.status === "online"}
+              canUpgrade={canUpgradeCLI}
+            />
+          </ObjectSection>
 
           <ObjectSection
             title={t(($) => $.page.columns.agents)}
