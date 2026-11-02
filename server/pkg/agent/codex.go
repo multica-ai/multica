@@ -1008,12 +1008,21 @@ func (b *codexBackend) Execute(ctx context.Context, prompt string, opts ExecOpti
 		attemptOpts := opts
 		var startupRetries, capacityRetries int
 		var priorUsage map[string]TokenUsage
+		var lastResult Result
 		for attempt := 1; ; attempt++ {
 			if attempt > 1 {
+				if err := retryCtx.Err(); err != nil {
+					resCh <- codexRetryInterruptedResult(lastResult, priorUsage, err)
+					return
+				}
 				var err error
 				session, err = b.executeOnce(retryCtx, prompt, attemptOpts, attempt)
 				if err != nil {
-					resCh <- Result{Status: "failed", Error: err.Error(), Usage: priorUsage}
+					if ctxErr := retryCtx.Err(); ctxErr != nil {
+						resCh <- codexRetryInterruptedResult(lastResult, priorUsage, ctxErr)
+					} else {
+						resCh <- Result{Status: "failed", Error: err.Error(), Usage: priorUsage}
+					}
 					return
 				}
 				sessionMu.Lock()
@@ -1052,6 +1061,7 @@ func (b *codexBackend) Execute(ctx context.Context, prompt string, opts ExecOpti
 				resCh <- Result{Status: "failed", Error: "codex attempt closed without result"}
 				return
 			}
+			lastResult = result
 			retryReason := ""
 			switch {
 			case result.codexInitializeRetrySafe && startupRetries < 1:
@@ -1064,6 +1074,10 @@ func (b *codexBackend) Execute(ctx context.Context, prompt string, opts ExecOpti
 			if retryReason == "" {
 				flushHeldPins()
 				result.Usage = mergeCodexAttemptUsage(priorUsage, result.Usage)
+				if result.codexCapacityRetrySafe && capacityRetries == len(codexCapacityRetryBackoffs) {
+					result.Error += fmt.Sprintf("; capacity retry limit exhausted after %d retries", capacityRetries)
+					b.cfg.Logger.Warn("codex capacity retry limit exhausted", "task_id", b.cfg.TaskID, "retries", capacityRetries)
+				}
 				resCh <- result
 				return
 			}
@@ -1111,25 +1125,41 @@ func (b *codexBackend) Execute(ctx context.Context, prompt string, opts ExecOpti
 				startupRetries++
 			}
 			b.cfg.Logger.Warn("codex retry scheduled", "reason", retryReason, "attempt", attempt, "next_attempt", attempt+1, "backoff", backoff.String())
-			select {
-			case <-retryCtx.Done():
+			if err := waitCodexRetry(retryCtx, backoff); err != nil {
 				flushHeldPins()
-				result.Usage = priorUsage
-				if errors.Is(retryCtx.Err(), context.DeadlineExceeded) {
-					result.Status = "timeout"
-					result.Error += "; capacity retry deadline exceeded"
-				} else {
-					result.Status = "aborted"
-					result.Error = "execution cancelled during capacity retry wait"
-				}
-				resCh <- result
+				resCh <- codexRetryInterruptedResult(result, priorUsage, err)
 				return
-			case <-time.After(backoff):
 			}
 		}
 	}()
 
 	return &Session{Supplement: supplement, SupplementReady: supplementReady, Messages: msgCh, Result: resCh}, nil
+}
+
+func waitCodexRetry(ctx context.Context, delay time.Duration) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	timer := time.NewTimer(delay)
+	defer timer.Stop()
+	select {
+	case <-ctx.Done():
+	case <-timer.C:
+	}
+	// If cancellation and the timer fire together, cancellation wins.
+	return ctx.Err()
+}
+
+func codexRetryInterruptedResult(result Result, usage map[string]TokenUsage, err error) Result {
+	result.Usage = usage
+	if errors.Is(err, context.DeadlineExceeded) {
+		result.Status = "timeout"
+		result.Error += "; capacity retry deadline exceeded"
+	} else {
+		result.Status = "aborted"
+		result.Error = "execution cancelled during retry wait"
+	}
+	return result
 }
 
 func mergeCodexAttemptUsage(a, b map[string]TokenUsage) map[string]TokenUsage {
@@ -1156,6 +1186,9 @@ func mergeCodexAttemptUsage(a, b map[string]TokenUsage) map[string]TokenUsage {
 }
 
 func (b *codexBackend) executeOnce(ctx context.Context, prompt string, opts ExecOptions, attempt int) (*Session, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	execPath := b.cfg.ExecutablePath
 	if execPath == "" {
 		execPath = "codex"
