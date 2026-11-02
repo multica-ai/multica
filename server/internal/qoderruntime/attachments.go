@@ -1,10 +1,16 @@
 package qoderruntime
 
 import (
+	"bytes"
 	"context"
 	"encoding/base64"
+	"encoding/binary"
 	"errors"
 	"fmt"
+	"image"
+	_ "image/gif"
+	_ "image/jpeg"
+	_ "image/png"
 	"path"
 	"strings"
 )
@@ -20,11 +26,14 @@ type issueAttachment struct {
 const (
 	// Qoder's file upload accepts about 5 MB of text.
 	maxAttachmentFileBytes = 5 << 20
-	// Base64 image blocks are limited to 10 MiB of encoded text.
-	maxAttachmentImageBytes = 7 << 20
-	// Images are kept in the journal until the message is sent.
-	maxAttachmentImageTotal = 20 << 20
-	attachmentMountDir      = "/data/attachments/"
+	// Qoder echoes the submitted message in the send response and in the event
+	// list, and the bridge reads at most 8 MiB per response. Keep the encoded
+	// images of one message well below that so the echo stays readable.
+	maxAttachmentImageEncoded = 6 << 20
+	maxAttachmentImageBytes   = maxAttachmentImageEncoded / 4 * 3
+	// Qoder rejects base64 images with a side longer than this.
+	maxAttachmentImageSide = 8000
+	attachmentMountDir     = "/data/attachments/"
 )
 
 var imageMediaTypes = map[string]bool{"image/png": true, "image/jpeg": true, "image/webp": true, "image/gif": true}
@@ -55,22 +64,32 @@ func (b *Bridge) attachIssueFiles(ctx context.Context, taskAPI *api, attachments
 	}
 	var mounted, images, skipped []string
 	used := map[string]bool{}
-	imageBytes := 0
+	imageEncoded := 0
 	for _, a := range attachments {
 		name := attachmentName(a, used)
 		mediaType := strings.ToLower(strings.TrimSpace(strings.Split(a.ContentType, ";")[0]))
 		switch {
 		case imageMediaTypes[mediaType]:
 			data, err := b.downloadAttachment(ctx, taskAPI, a, maxAttachmentImageBytes)
-			if errors.Is(err, errTooLarge) || err == nil && imageBytes+len(data) > maxAttachmentImageTotal {
+			if errors.Is(err, errTooLarge) || err == nil && imageEncoded+base64.StdEncoding.EncodedLen(len(data)) > maxAttachmentImageEncoded {
 				skipped = append(skipped, name+" (image too large)")
 				continue
 			}
 			if err != nil {
 				return err
 			}
-			imageBytes += len(data)
-			r.Images = append(r.Images, map[string]string{"type": "base64", "media_type": mediaType, "data": base64.StdEncoding.EncodeToString(data)})
+			width, height, ok := imageSize(mediaType, data)
+			if !ok {
+				skipped = append(skipped, name+" (unreadable image)")
+				continue
+			}
+			if width > maxAttachmentImageSide || height > maxAttachmentImageSide {
+				skipped = append(skipped, fmt.Sprintf("%s (image larger than %d px per side)", name, maxAttachmentImageSide))
+				continue
+			}
+			encoded := base64.StdEncoding.EncodeToString(data)
+			imageEncoded += len(encoded)
+			r.Images = append(r.Images, map[string]string{"type": "base64", "media_type": mediaType, "data": encoded})
 			images = append(images, name)
 		case isTextAttachment(a):
 			data, err := b.downloadAttachment(ctx, taskAPI, a, maxAttachmentFileBytes)
@@ -150,4 +169,34 @@ func attachmentName(a issueAttachment, used map[string]bool) string {
 	}
 	used[unique] = true
 	return unique
+}
+
+// imageSize reads the pixel dimensions from the image header. The standard
+// library has no WebP decoder, so WebP headers are parsed directly.
+func imageSize(mediaType string, data []byte) (int, int, bool) {
+	if mediaType != "image/webp" {
+		cfg, _, err := image.DecodeConfig(bytes.NewReader(data))
+		return cfg.Width, cfg.Height, err == nil
+	}
+	if len(data) < 30 || string(data[0:4]) != "RIFF" || string(data[8:12]) != "WEBP" {
+		return 0, 0, false
+	}
+	switch string(data[12:16]) {
+	case "VP8 ":
+		if data[23] != 0x9d || data[24] != 0x01 || data[25] != 0x2a {
+			return 0, 0, false
+		}
+		return int(binary.LittleEndian.Uint16(data[26:28]) & 0x3fff), int(binary.LittleEndian.Uint16(data[28:30]) & 0x3fff), true
+	case "VP8L":
+		if data[20] != 0x2f {
+			return 0, 0, false
+		}
+		bits := binary.LittleEndian.Uint32(data[21:25])
+		return int(bits&0x3fff) + 1, int(bits>>14&0x3fff) + 1, true
+	case "VP8X":
+		width := int(data[24]) | int(data[25])<<8 | int(data[26])<<16
+		height := int(data[27]) | int(data[28])<<8 | int(data[29])<<16
+		return width + 1, height + 1, true
+	}
+	return 0, 0, false
 }

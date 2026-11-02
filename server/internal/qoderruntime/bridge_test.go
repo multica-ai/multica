@@ -1,11 +1,15 @@
 package qoderruntime
 
 import (
+	"bytes"
 	"context"
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"image"
+	"image/png"
 	"io"
+	"math/rand"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -203,12 +207,14 @@ func setup(t *testing.T) *harness {
 			json.Unmarshal(raw, &content)
 			h.sentContent = content.Events[0].Content
 			h.prompt = req.Events[0].text()
-			h.events = append(h.events, map[string]any{"id": "evt_user", "type": "user.message", "content": []map[string]string{{"type": "text", "text": h.prompt}}})
+			// Like Qoder, echo the full submitted content on send and in the event list.
+			userEvent := map[string]any{"id": "evt_user", "type": "user.message", "content": h.sentContent}
+			h.events = append(h.events, userEvent)
 			if h.lostSend {
 				http.Error(w, "unknown", 502)
 				return
 			}
-			io.WriteString(w, `{"data":[]}`)
+			json.NewEncoder(w).Encode(map[string]any{"data": []map[string]any{userEvent}})
 		case r.URL.Path == "/sessions/sess_1/events" && r.Method == "GET":
 			if r.URL.Query().Get("page") != "" {
 				t.Error("event ID used as page cursor")
@@ -371,15 +377,44 @@ func TestQuickCreateAttachmentsFailBeforeExecution(t *testing.T) {
 		t.Fatalf("quick-create attachment ignored: creates=%d posts=%d failure=%#v", h.creates, h.issuePosts, h.failure)
 	}
 }
+func testPNG(t *testing.T, width, height int, noise bool) string {
+	t.Helper()
+	img := image.NewNRGBA(image.Rect(0, 0, width, height))
+	if noise {
+		rand.New(rand.NewSource(1)).Read(img.Pix)
+	}
+	var buf bytes.Buffer
+	if err := png.Encode(&buf, img); err != nil {
+		t.Fatal(err)
+	}
+	return buf.String()
+}
+
+func (h *harness) attach(t *testing.T, files ...[3]string) {
+	t.Helper()
+	var atts []map[string]any
+	h.downloads = map[string]string{}
+	for i, f := range files {
+		u := fmt.Sprintf("/api/attachments/a%d/download", i)
+		atts = append(atts, map[string]any{"id": fmt.Sprint("a", i), "filename": f[0], "content_type": f[1], "size_bytes": len(f[2]), "download_url": u})
+		h.downloads[u] = f[2]
+	}
+	raw, _ := json.Marshal(map[string]any{"title": "Fix bug", "description": "See attachments", "attachments": atts})
+	h.issueGet = string(raw)
+}
+
 func TestIssueAttachmentsReachSession(t *testing.T) {
 	h := setup(t)
-	h.issueGet = `{"title":"Fix bug","description":"See attachments","attachments":[
-		{"id":"a1","filename":"notes.md","content_type":"text/markdown","size_bytes":5,"download_url":"/api/attachments/a1/download"},
-		{"id":"a2","filename":"screen.png","content_type":"image/png","size_bytes":4,"download_url":"/api/attachments/a2/download"},
-		{"id":"a3","filename":"spec.pdf","content_type":"application/pdf","size_bytes":4,"download_url":"/api/attachments/a3/download"},
-		{"id":"a4","filename":"notes.md","content_type":"text/plain","size_bytes":3,"download_url":"/api/attachments/a4/download"}]}`
-	h.downloads = map[string]string{"/api/attachments/a1/download": "hello", "/api/attachments/a2/download": "\x89PNG", "/api/attachments/a4/download": "bye"}
-	if err := h.b.step(context.Background()); err != nil {
+	screen := testPNG(t, 4, 4, false)
+	h.attach(t,
+		[3]string{"notes.md", "text/markdown", "hello"},
+		[3]string{"screen.png", "image/png", screen},
+		[3]string{"spec.pdf", "application/pdf", "%PDF"},
+		[3]string{"notes.md", "text/plain", "bye"},
+		[3]string{"page.png", "image/png", testPNG(t, 400, 9000, false)},
+		[3]string{"broken.png", "image/png", "\x89PNG"})
+	ctx := context.Background()
+	if err := h.b.step(ctx); err != nil {
 		t.Fatal(err)
 	}
 	if h.failure != nil || h.sends != 1 {
@@ -402,16 +437,69 @@ func TestIssueAttachmentsReachSession(t *testing.T) {
 		t.Fatalf("message content: %#v", h.sentContent)
 	}
 	source, _ := h.sentContent[1]["source"].(map[string]any)
-	if source["type"] != "base64" || source["media_type"] != "image/png" || source["data"] != base64.StdEncoding.EncodeToString([]byte("\x89PNG")) {
+	if source["type"] != "base64" || source["media_type"] != "image/png" || source["data"] != base64.StdEncoding.EncodeToString([]byte(screen)) {
 		t.Fatalf("image source: %#v", source)
 	}
-	for _, s := range []string{"/data/attachments/notes.md (mounted file)", "screen.png (image attached", "spec.pdf (unsupported file type): not available"} {
+	for _, s := range []string{"/data/attachments/notes.md (mounted file)", "screen.png (image attached", "spec.pdf (unsupported file type): not available", "page.png (image larger than 8000 px per side): not available", "broken.png (unreadable image): not available"} {
 		if !strings.Contains(h.prompt, s) {
 			t.Fatalf("prompt missing %q: %s", s, h.prompt)
 		}
 	}
 	if r := h.b.state.first(); r == nil || len(r.Images) != 0 {
 		t.Fatal("sent images kept in the journal")
+	}
+	h.finish("end_turn")
+	if err := h.b.step(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if h.complete == nil {
+		t.Fatalf("run did not complete: %#v", h.failure)
+	}
+}
+
+// The submitted images come back in the send response and the event list;
+// both must stay readable for the run to be confirmed and completed.
+func TestIssueImagesFitEchoedEvents(t *testing.T) {
+	h := setup(t)
+	img := testPNG(t, 700, 700, true)
+	h.attach(t, [3]string{"a.png", "image/png", img}, [3]string{"b.png", "image/png", img}, [3]string{"c.png", "image/png", img})
+	ctx := context.Background()
+	if err := h.b.step(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if r := h.b.state.first(); r == nil || r.Phase != "running" {
+		t.Fatalf("send not confirmed: %#v", r)
+	}
+	if len(h.sentContent) != 3 || !strings.Contains(h.prompt, "c.png (image too large): not available") {
+		t.Fatalf("image budget not applied: %d blocks, prompt %s", len(h.sentContent), h.prompt)
+	}
+	h.finish("end_turn")
+	if err := h.b.step(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if h.complete == nil {
+		t.Fatalf("run did not complete: %#v", h.failure)
+	}
+}
+
+func TestWebPImageSize(t *testing.T) {
+	header := func(chunk string, body ...byte) []byte {
+		b := append([]byte("RIFF\x00\x00\x00\x00WEBP"+chunk+"\x00\x00\x00\x00"), body...)
+		return append(b, make([]byte, 32)...)
+	}
+	cases := map[string][]byte{
+		"VP8":  header("VP8 ", 0, 0, 0, 0x9d, 0x01, 0x2a, 0x90, 0x01, 0x28, 0x23), // 400x9000
+		"VP8L": header("VP8L", 0x2f, 0x8f, 0xc1, 0xc9, 0x08),                      // 400x9000
+		"VP8X": header("VP8X", 0, 0, 0, 0, 0x8f, 0x01, 0x00, 0x27, 0x23, 0x00),    // 400x9000
+	}
+	for name, data := range cases {
+		w, hgt, ok := imageSize("image/webp", data)
+		if !ok || w != 400 || hgt != 9000 {
+			t.Errorf("%s: got %dx%d ok=%v", name, w, hgt, ok)
+		}
+	}
+	if _, _, ok := imageSize("image/webp", []byte("RIFF")); ok {
+		t.Error("truncated WebP accepted")
 	}
 }
 

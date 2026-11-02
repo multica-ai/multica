@@ -108,8 +108,9 @@ GitHub integration links the pull request back to the issue.
   directly to a bridge-owned session while its run is active.
 - Issue attachments: text files (Qoder Files' accepted types, up to 5 MB) are
   uploaded through Qoder Files and mounted under `/data/attachments/`, which
-  always starts a fresh session. PNG, JPEG, WebP and GIF images (up to 7 MB
-  each, 20 MB per run) are sent as base64 image blocks in the task message;
+  always starts a fresh session. PNG, JPEG, WebP and GIF images (at most 8000 px
+  per side, about 4.5 MB in total per run so Qoder's echo of the message stays
+  readable) are sent as base64 image blocks in the task message;
   use a Qoder Agent model with image input. Other files are listed in the prompt
   as unavailable. Uploaded Qoder files are not deleted by the bridge.
 - Progress uses cursor-paginated persisted events, polled every three seconds.
