@@ -5,8 +5,9 @@ import {
   type Request,
   type Response,
 } from "@playwright/test";
+import pg from "pg";
 import { createTestApi, loginAsDefault, reloadAppPage } from "./helpers";
-import type { TestApiClient, TestTableIssueSeed } from "./fixtures";
+import type { TestApiClient, TestTableIssue, TestTableIssueSeed } from "./fixtures";
 
 type TableRequestBody = {
   group?: { kind?: string };
@@ -35,6 +36,47 @@ type TableRowsResponse = {
 
 function apiPath(request: Request) {
   return new URL(request.url()).pathname;
+}
+
+const DATABASE_URL =
+  process.env.DATABASE_URL ?? "postgres://multica:multica@localhost:5432/multica?sslmode=disable";
+
+// Seeded rows share one insert timestamp, so created_at ties would make the
+// page boundary depend on id order. Spread them one second apart so the default
+// created_at desc sort has a deterministic boundary.
+async function spreadSeedCreatedAt(seeds: TestTableIssue[]) {
+  const client = new pg.Client(DATABASE_URL);
+  await client.connect();
+  try {
+    await client.query(
+      `
+        UPDATE issue
+        SET created_at = now() - interval '1 hour' + (t.ord * interval '1 second')
+        FROM unnest($1::uuid[], $2::int[]) AS t(id, ord)
+        WHERE issue.id = t.id
+      `,
+      [
+        seeds.map((seed) => seed.id),
+        seeds.map((seed) => Number(seed.title.slice(-2))),
+      ],
+    );
+  } finally {
+    await client.end();
+  }
+}
+
+// The table's default sort is created_at desc, so a position change alone never
+// moves a row across the page boundary. Make the issue the newest one, then
+// emit a realtime update through the API so the client refetches the head.
+async function moveIssueToNewest(api: TestApiClient, issueId: string) {
+  const client = new pg.Client(DATABASE_URL);
+  await client.connect();
+  try {
+    await client.query("UPDATE issue SET created_at = now() WHERE id = $1", [issueId]);
+  } finally {
+    await client.end();
+  }
+  await api.updateIssue(issueId, { position: 0 });
 }
 
 function tableBody(request: Request): TableRequestBody {
@@ -272,7 +314,8 @@ test.describe("Issue Table server grouping", () => {
         position: index + 1,
       })),
     );
-    const moved = seeds.at(-1);
+    await spreadSeedCreatedAt(seeds);
+    const moved = seeds[0];
     if (!moved) throw new Error("Cursor fixture was not created");
     await reloadAppPage(page);
 
@@ -318,7 +361,7 @@ test.describe("Issue Table server grouping", () => {
       });
     };
     page.on("response", collectResponse);
-    await api.updateIssue(moved.id, { position: 0 });
+    await moveIssueToNewest(api, moved.id);
 
     await expect
       .poll(
