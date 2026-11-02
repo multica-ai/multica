@@ -511,6 +511,43 @@ describe("runSquadQuickstart for market research", () => {
   });
 });
 
+// Spec 2.10: every squad created from a template has a charter and its routines.
+// The charter's first save creates the operating review, which is the SDLC squads' routine.
+describe("runSquadQuickstart for every template", () => {
+  it.each(SQUAD_TEMPLATES.map((template) => [template.id, template] as const))(
+    "%s saves its charter on the squad it creates",
+    async (_id, template) => {
+      const client = fakeClient();
+
+      const out = await runSquadQuickstart(client, template, options);
+
+      expect(out.squad.status).toBe("created");
+      expect(out.squad.error).toBeUndefined();
+      expect(client.updateSquadCharter).toHaveBeenCalledTimes(1);
+      const [squadId, request] = client.updateSquadCharter.mock.calls[0]!;
+      expect(squadId).toBe("squad-1");
+      expect(request).toMatchObject({ revision: 0, mission: template.charter.mission });
+    },
+  );
+
+  it.each(SQUAD_TEMPLATES.map((template) => [template.id, template] as const))(
+    "%s has the routine its template names, and no other",
+    async (_id, template) => {
+      const client = fakeClient();
+
+      const out = await runSquadQuickstart(client, template, options);
+
+      if (template.routine) {
+        expect(out.routine.status).toBe("created");
+        expect(client.createAutopilot).toHaveBeenCalledTimes(1);
+      } else {
+        expect(out.routine.status).toBe("skipped");
+        expect(client.createAutopilot).not.toHaveBeenCalled();
+      }
+    },
+  );
+});
+
 describe("planQuickstartAgents", () => {
   it("marks which agents will be reused", () => {
     const plan = planQuickstartAgents(greenfield, [
