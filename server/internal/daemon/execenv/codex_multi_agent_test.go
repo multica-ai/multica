@@ -30,14 +30,12 @@ func requireMultiAgentDisabled(t *testing.T, parsed map[string]any) {
 	if !ok {
 		t.Fatalf("expected `features` table in parsed config, got: %#v", parsed["features"])
 	}
-	for _, key := range []string{"multi_agent", "multi_agent_v2"} {
-		v, ok := features[key].(bool)
-		if !ok {
-			t.Fatalf("expected features.%s to be a bool, got: %#v", key, features[key])
-		}
-		if v {
-			t.Errorf("expected features.%s = false, got true", key)
-		}
+	if features["multi_agent"] != false {
+		t.Errorf("expected features.multi_agent = false, got: %#v", features["multi_agent"])
+	}
+	v2, ok := features["multi_agent_v2"].(map[string]any)
+	if !ok || v2["enabled"] != false {
+		t.Errorf("expected features.multi_agent_v2.enabled = false, got: %#v", features["multi_agent_v2"])
 	}
 }
 
@@ -916,5 +914,98 @@ description = "Research-focused role."
 				requireMultiAgentDisabled(t, parseTOML(t, string(upgraded)))
 			})
 		}
+	}
+}
+
+func TestEnsureCodexMultiAgentConfigStructuredV2(t *testing.T) {
+	t.Parallel()
+
+	for name, original := range map[string]string{
+		"v2_table": `[features.multi_agent_v2]
+enabled = true
+max_concurrent_threads_per_session = 4
+`,
+		"v2_table_with_features": `[features]
+multi_agent = true
+
+[features.multi_agent_v2]
+enabled = true
+max_concurrent_threads_per_session = 4
+`,
+		"root_dotted": `features.multi_agent_v2.enabled = true
+features.multi_agent_v2.max_concurrent_threads_per_session = 4
+`,
+		"features_dotted": `[features]
+multi_agent_v2.enabled = true
+multi_agent_v2.max_concurrent_threads_per_session = 4
+`,
+		"spaced_header": `[ features . multi_agent_v2 ] # collaboration settings
+enabled = false
+max_concurrent_threads_per_session = 4
+`,
+		"implicit_enabled": `[features.multi_agent_v2]
+max_concurrent_threads_per_session = 4
+`,
+		"root_dotted_spaces": `features . multi_agent_v2 . enabled = true
+features . multi_agent_v2 . max_concurrent_threads_per_session = 4
+`,
+		"features_dotted_spaces": `[features]
+multi_agent_v2 . enabled = true
+multi_agent_v2 . max_concurrent_threads_per_session = 4
+`,
+	} {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			configPath := filepath.Join(t.TempDir(), "config.toml")
+			original += "\n[agents.researcher]\ndescription = \"Research role\"\nenabled = true\n"
+			parseTOML(t, original)
+			if err := os.WriteFile(configPath, []byte(original), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			for _, version := range []string{"0.145.0", "0.144.0", "", "0.162.1"} {
+				if err := ensureCodexMultiAgentConfig(configPath, version, nil); err != nil {
+					t.Fatal(err)
+				}
+				data, err := os.ReadFile(configPath)
+				if err != nil {
+					t.Fatal(err)
+				}
+				parsed := parseTOML(t, string(data))
+				features := parsed["features"].(map[string]any)
+				if features["multi_agent"] != false {
+					t.Errorf("legacy feature not disabled: %#v", features)
+				}
+				v2, ok := features["multi_agent_v2"].(map[string]any)
+				if !ok {
+					t.Fatalf("lost structured V2 config: %#v", features)
+				}
+				if version == "0.145.0" || version == "0.162.1" {
+					if v2["enabled"] != false {
+						t.Errorf("V2 not disabled: %#v", v2)
+					}
+					requireAgentsDisabled(t, parsed)
+				} else if _, exists := v2["enabled"]; exists {
+					t.Error("managed V2 setting survived downgrade")
+				}
+				if v2["max_concurrent_threads_per_session"] != int64(4) {
+					t.Errorf("lost custom V2 option: %#v", v2)
+				}
+				agents := parsed["agents"].(map[string]any)
+				role := agents["researcher"].(map[string]any)
+				if role["description"] != "Research role" || role["enabled"] != true {
+					t.Errorf("changed unrelated role: %#v", role)
+				}
+				if err := ensureCodexMultiAgentConfig(configPath, version, nil); err != nil {
+					t.Fatal(err)
+				}
+				repeated, err := os.ReadFile(configPath)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if string(repeated) != string(data) {
+					t.Errorf("config is not idempotent for version %q", version)
+				}
+			}
+		})
 	}
 }
