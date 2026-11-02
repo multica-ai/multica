@@ -285,7 +285,7 @@ describe("WecomScanInstallDialog", () => {
     const realCrypto = globalThis.crypto;
     // A non-secure context keeps getRandomValues and loses randomUUID.
     vi.stubGlobal("crypto", {
-      getRandomValues: (b: Uint8Array) => realCrypto.getRandomValues(b),
+      getRandomValues: (b: Uint8Array<ArrayBuffer>) => realCrypto.getRandomValues(b),
     });
     try {
       mockBegin.mockResolvedValue({
