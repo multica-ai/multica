@@ -29,6 +29,7 @@ export type WSEventType =
   | "task:running"
   | "task:waiting_local_directory"
   | "task:progress"
+  | "task:usage"
   | "task:completed"
   | "task:failed"
   | "task:message"
@@ -383,6 +384,10 @@ export interface TaskRunningPayload {
   status: string;
 }
 
+export interface TaskUsageUpdatedPayload {
+  task_id: string;
+}
+
 // task:waiting_local_directory fires when the daemon dequeues a task but
 // can't immediately acquire the on-disk path lock — another task on this
 // daemon is already executing in the same local_directory. `wait_reason` names
@@ -649,6 +654,7 @@ export interface WSEventPayloadMap {
   "task:message": TaskMessagePayload;
   "task:cancelled": TaskCancelledPayload;
   "task:progress": unknown;
+  "task:usage": TaskUsageUpdatedPayload;
   "inbox:new": InboxNewPayload;
   "inbox:read": InboxReadPayload;
   "inbox:unread": InboxUnreadPayload;

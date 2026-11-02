@@ -343,6 +343,12 @@ CLI 配置文件包含可代表你访问 Multica 的令牌。不要提交到仓�
 
 下表覆盖当前全部顶层命令，按 CLI 自身的分组排列。所有命令都接受全局 flag `--server-url`、`--workspace-id`、`--profile` 和 `--debug`。`--output` 是逐命令注册的 flag，默认格式因命令而异：`list` 类默认表格，`get`、`create` 类多默认 JSON。完整参数以 `multica <command> --help` 为准。
 
+### 任务附件
+
+`issue create`、`issue update` 和 `issue comment add` 的每个 `--attachment` 接受一个完整文件路径，保留文件名中的逗号和双引号。多个文件须重复 flag，例如 `--attachment 'report,final.csv' --attachment notes.txt`。省略 flag 时不添加附件；显式传入空路径会报错。所有本地路径都通过检查后才开始上传。
+
+从旧 CSV 解析方式迁移：要添加两个文件，将 `--attachment a,b` 改为 `--attachment a --attachment b`。前一种写法现在只选择名为 `a,b` 的单个文件。旧用法 `--attachment '"report,final.csv"'` 中额外的 CSV 双引号也须移除，改用 `--attachment 'report,final.csv'`；只有文件名本身包含双引号时才保留。
+
 ### Core
 
 | 命令 | 子命令 | 用途 | 关键 flag |

@@ -276,6 +276,9 @@ type Environment struct {
 	// ({RootDir}/workdir/); when the task is bound to a local_directory
 	// project_resource, it is the user's path instead. See LocalDirectory.
 	WorkDir string
+	// PiSkillPaths lists the daemon-written SKILL.md files from this dispatch's
+	// sidecar manifest, including any collision-free directory names.
+	PiSkillPaths []string
 	// LocalDirectory is true when WorkDir points at a user-supplied path
 	// outside RootDir (the local_directory flow). Callers that key behavior
 	// on "may I remove WorkDir as scratch?" must check this — for example
@@ -608,6 +611,9 @@ func Prepare(params PrepareParams, logger *slog.Logger) (*Environment, error) {
 	if err := writeContextFiles(workDir, params.Provider, params.Task, manifest); err != nil {
 		return nil, fmt.Errorf("execenv: write context files: %w", err)
 	}
+	if params.Provider == "pi" {
+		env.PiSkillPaths = manifest.skillFiles(skillsDirPath(workDir, params.Provider))
+	}
 	if err := prepareOmpMcpConfig(workDir, params.Provider, params.McpConfig, manifest); err != nil {
 		return nil, fmt.Errorf("execenv: prepare omp mcp config: %w", err)
 	}
@@ -906,6 +912,8 @@ func Reuse(params ReuseParams, logger *slog.Logger) *Environment {
 	manifest := &sidecarManifest{}
 	if err := writeContextFiles(params.WorkDir, params.Provider, params.Task, manifest); err != nil {
 		logger.Warn("execenv: refresh context files failed", "error", err)
+	} else if params.Provider == "pi" {
+		env.PiSkillPaths = manifest.skillFiles(skillsDirPath(params.WorkDir, params.Provider))
 	}
 	if err := prepareOmpMcpConfig(params.WorkDir, params.Provider, params.McpConfig, manifest); err != nil {
 		logger.Warn("execenv: refresh omp mcp config failed; forcing fresh prepare", "error", err)

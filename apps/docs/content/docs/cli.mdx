@@ -366,6 +366,12 @@ CLI configuration files contain tokens that can access Multica as you. Don't com
 
 The tables below cover every current top-level command, grouped the way the CLI itself groups them. All commands accept the global flags `--server-url`, `--workspace-id`, `--profile`, and `--debug`. `--output` is registered per command, and the default format varies: `list` commands default to a table, while `get` and `create` commands mostly default to JSON. Full flags are defined by `multica <command> --help`.
 
+### Issue attachments
+
+For `issue create`, `issue update`, and `issue comment add`, each `--attachment` takes one literal file path, including any commas or double quotes in the filename. Repeat the flag for multiple files: `--attachment 'report,final.csv' --attachment notes.txt`. Omitting the flag attaches no files; an explicitly empty path is an error. All local paths are checked before any file is uploaded.
+
+Migration from CSV parsing: replace `--attachment a,b` with `--attachment a --attachment b` to attach two files. The former now selects a single file named `a,b`. Remove extra CSV quotes from the old workaround `--attachment '"report,final.csv"'`; use `--attachment 'report,final.csv'` unless the filename itself contains those double quotes.
+
 ### Core
 
 | Command | Subcommand | Purpose | Key flags |

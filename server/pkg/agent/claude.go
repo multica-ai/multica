@@ -953,6 +953,12 @@ func (s *claudeUsageSnapshot) appendedCostStateUsage() (map[string]TokenUsage, b
 	return readLastClaudeCostStateUsage(f, s.offset, info.Size())
 }
 
+// ClaudeConfigDir resolves Claude's config directory using the same inherited
+// environment and task overrides as the backend's child process.
+func ClaudeConfigDir(extraEnv map[string]string, cwd string) (string, error) {
+	return claudeConfigDir(buildEnv(extraEnv), cwd, "")
+}
+
 // claudeConfigDir returns the directory the CLI keys sessions and cost state
 // under. configHomeDir is the runtime's config directory relative to $HOME
 // (".langcli" for langcli, empty for the claude family default); a non-empty
