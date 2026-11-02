@@ -352,7 +352,8 @@ func (b *claudeBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 					}
 				}
 				// Keep draining stdout while accepted control replies finish writing.
-				// shortcut: requests arriving after the drain still need a run-end signal.
+				// Once those replies drain, stdin closes; requests arriving after that
+				// cannot be answered.
 				closeAfterControls()
 				if resultIsError || terminalReasonError != "" {
 					stopAfterErrorResultOnce.Do(func() { go stopAfterErrorResult() })
