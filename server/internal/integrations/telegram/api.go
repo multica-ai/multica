@@ -375,6 +375,19 @@ type sendMessageParams struct {
 	ParseMode       string           `json:"parse_mode,omitempty"`
 	MessageThreadID int64            `json:"message_thread_id,omitempty"`
 	ReplyParameters *replyParameters `json:"reply_parameters,omitempty"`
+	ReplyMarkup     *inlineKeyboard  `json:"reply_markup,omitempty"`
+}
+
+// inlineKeyboard is Telegram's InlineKeyboardMarkup: rows of buttons attached
+// to a message.
+type inlineKeyboard struct {
+	InlineKeyboard [][]inlineKeyboardButton `json:"inline_keyboard"`
+}
+
+type inlineKeyboardButton struct {
+	Text         string `json:"text"`
+	URL          string `json:"url,omitempty"`
+	CallbackData string `json:"callback_data,omitempty"`
 }
 
 // replyParameters is Telegram's current quote-reply shape. The legacy
