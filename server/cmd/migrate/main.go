@@ -189,6 +189,7 @@ var concurrentIndexCleanups = map[string]string{
 	"488_maintenance_job_active_index":                          "idx_maintenance_job_active",
 	"587_cloud_agent_connection_provider_index":                 "cloud_agent_connection_provider_index",
 	"590_member_delegation_day_unique_index":                    "member_delegation_day_user_date_uidx",
+	"595_channel_issue_comment_notification_issue_index":        "idx_channel_issue_comment_notification_issue_id",
 	"035_task_queue_issue_id_index":                             "idx_agent_task_queue_issue_id",
 	"067_task_queue_claim_candidate_index":                      "idx_agent_task_queue_claim_candidates",
 	"074_task_usage_updated_at_index":                           "idx_task_usage_updated_at",
@@ -390,6 +391,7 @@ var concurrentDownIndexCleanups = map[string]string{
 	"463_drop_issue_description_bigm_index":                 "idx_issue_description_bigm",
 	"464_drop_issue_description_trgm_index":                 "idx_issue_description_trgm",
 	"473_drop_agent_task_queue_chat_with_session_index":     "idx_agent_task_queue_chat_with_session_created_at",
+	"595_channel_issue_comment_notification_issue_index":    "idx_channel_issue_comment_notification_issue_id",
 }
 
 var preMigrationHooks = func() map[string]preMigrationHook {

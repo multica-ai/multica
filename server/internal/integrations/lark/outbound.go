@@ -400,7 +400,7 @@ func (p *Patcher) processEvent(ctx context.Context, e events.Event) error {
 }
 
 func (p *Patcher) processIssueComment(ctx context.Context, e events.Event) error {
-	issueID, commentID, title, content, authorType, commentType, ok := issueCommentFromEvent(e.Payload)
+	issueID, commentID, title, content, authorType, commentType, authorID, ok := issueCommentFromEvent(e.Payload)
 	if !ok || authorType != "agent" || commentType != "comment" || content == "" {
 		return nil
 	}
@@ -413,6 +413,16 @@ func (p *Patcher) processIssueComment(ctx context.Context, e events.Event) error
 		return fmt.Errorf("lookup lark issue delivery: %w", err)
 	}
 	if delivery.ChannelType != channelTypeFeishu {
+		return nil
+	}
+	inst, err := p.queries.GetLarkInstallation(ctx, delivery.InstallationID)
+	if err != nil {
+		return fmt.Errorf("load installation for issue comment: %w", err)
+	}
+	if InstallationStatus(inst.Status) != InstallationActive {
+		return nil
+	}
+	if authorID != inst.AgentID {
 		return nil
 	}
 	if _, err := p.queries.ClaimChannelIssueCommentNotification(ctx, db.ClaimChannelIssueCommentNotificationParams{
@@ -433,13 +443,6 @@ func (p *Patcher) processIssueComment(ctx context.Context, e events.Event) error
 		}
 	}()
 
-	inst, err := p.queries.GetLarkInstallation(ctx, delivery.InstallationID)
-	if err != nil {
-		return fmt.Errorf("load installation for issue comment: %w", err)
-	}
-	if InstallationStatus(inst.Status) != InstallationActive {
-		return nil
-	}
 	creds, err := p.installationCredentials(inst)
 	if err != nil {
 		return err
@@ -485,27 +488,29 @@ func (p *Patcher) processIssueComment(ctx context.Context, e events.Event) error
 	return nil
 }
 
-func issueCommentFromEvent(payload any) (issueID, commentID pgtype.UUID, title, content, authorType, commentType string, ok bool) {
+func issueCommentFromEvent(payload any) (issueID, commentID pgtype.UUID, title, content, authorType, commentType string, authorID pgtype.UUID, ok bool) {
 	var event struct {
 		IssueTitle string `json:"issue_title"`
 		Comment    struct {
 			ID         string `json:"id"`
 			IssueID    string `json:"issue_id"`
 			AuthorType string `json:"author_type"`
+			AuthorID   string `json:"author_id"`
 			Type       string `json:"type"`
 			Content    string `json:"content"`
 		} `json:"comment"`
 	}
 	raw, err := json.Marshal(payload)
 	if err != nil || json.Unmarshal(raw, &event) != nil {
-		return pgtype.UUID{}, pgtype.UUID{}, "", "", "", "", false
+		return pgtype.UUID{}, pgtype.UUID{}, "", "", "", "", pgtype.UUID{}, false
 	}
 	issueID, issueOK := parseEventUUID(event.Comment.IssueID)
 	commentID, commentOK := parseEventUUID(event.Comment.ID)
-	if !issueOK || !commentOK {
-		return pgtype.UUID{}, pgtype.UUID{}, "", "", "", "", false
+	authorID, authorOK := parseEventUUID(event.Comment.AuthorID)
+	if !issueOK || !commentOK || (event.Comment.AuthorType == "agent" && !authorOK) {
+		return pgtype.UUID{}, pgtype.UUID{}, "", "", "", "", pgtype.UUID{}, false
 	}
-	return issueID, commentID, event.IssueTitle, event.Comment.Content, event.Comment.AuthorType, event.Comment.Type, true
+	return issueID, commentID, event.IssueTitle, event.Comment.Content, event.Comment.AuthorType, event.Comment.Type, authorID, true
 }
 
 func parseEventUUID(value any) (pgtype.UUID, bool) {

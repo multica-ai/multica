@@ -298,18 +298,14 @@ func (q *Queries) ClaimChannelInboundDedup(ctx context.Context, arg ClaimChannel
 }
 
 const claimChannelIssueCommentNotification = `-- name: ClaimChannelIssueCommentNotification :one
-WITH inserted AS (
-    INSERT INTO channel_issue_comment_notification (comment_id, issue_id)
-    VALUES ($1, $2)
-    ON CONFLICT (comment_id) DO NOTHING
-)
-UPDATE channel_issue_comment_notification AS notification
+INSERT INTO channel_issue_comment_notification (comment_id, issue_id, claimed_at)
+VALUES ($1, $2, now())
+ON CONFLICT (comment_id) DO UPDATE
 SET claimed_at = now()
-WHERE notification.comment_id = $1
-  AND notification.sent_at IS NULL
+WHERE channel_issue_comment_notification.sent_at IS NULL
   AND (
-      notification.claimed_at IS NULL
-      OR notification.claimed_at < now() - INTERVAL '5 minutes'
+      channel_issue_comment_notification.claimed_at IS NULL
+      OR channel_issue_comment_notification.claimed_at < now() - INTERVAL '5 minutes'
   )
 RETURNING comment_id, issue_id, claimed_at, sent_at, created_at
 `

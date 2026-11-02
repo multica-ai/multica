@@ -391,6 +391,7 @@ func TestPatcherSendsAgentIssueCommentToFrozenTrigger(t *testing.T) {
 				"id":          "dddddddd-dddd-dddd-dddd-dddddddddddd",
 				"issue_id":    "eeeeeeee-eeee-eeee-eeee-eeeeeeeeeeee",
 				"author_type": "agent",
+				"author_id":   "aaaa1111-aaaa-aaaa-aaaa-aaaaaaaaaaaa",
 				"type":        "comment",
 				"content":     "Task finished",
 			},
@@ -436,6 +437,7 @@ func TestPatcherSendsAgentIssueCommentToFrozenTopic(t *testing.T) {
 				"id":          "dddddddd-dddd-dddd-dddd-dddddddddddd",
 				"issue_id":    "eeeeeeee-eeee-eeee-eeee-eeeeeeeeeeee",
 				"author_type": "agent",
+				"author_id":   "aaaa1111-aaaa-aaaa-aaaa-aaaaaaaaaaaa",
 				"type":        "comment",
 				"content":     "Topic update",
 			},
@@ -452,6 +454,33 @@ func TestPatcherSendsAgentIssueCommentToFrozenTopic(t *testing.T) {
 	}
 	if got, want := api.textSent[0].ReplyTarget, (ReplyTarget{MessageID: "om_topic_trigger", InThread: true}); got != want {
 		t.Errorf("reply target = %+v, want topic reply %+v", got, want)
+	}
+}
+
+func TestPatcherSkipsIssueCommentFromDifferentAgent(t *testing.T) {
+	p, q, api := newTestPatcher(t)
+	q.issueDelivery = validIssueDelivery(t, q)
+	p.handleEvent(events.Event{
+		Type: protocol.EventCommentCreated,
+		Payload: map[string]any{
+			"comment": map[string]any{
+				"id":          "dddddddd-dddd-dddd-dddd-dddddddddddd",
+				"issue_id":    "eeeeeeee-eeee-eeee-eeee-eeeeeeeeeeee",
+				"author_type": "agent",
+				"author_id":   "bbbb2222-bbbb-bbbb-bbbb-bbbbbbbbbbbb",
+				"type":        "comment",
+				"content":     "Other agent update",
+			},
+		},
+	})
+
+	api.mu.Lock()
+	defer api.mu.Unlock()
+	if len(api.textSent) != 0 || len(api.mdCardSent) != 0 {
+		t.Fatalf("comment from a different agent was forwarded: text=%d markdown=%d", len(api.textSent), len(api.mdCardSent))
+	}
+	if q.commentClaimCount != 0 {
+		t.Fatalf("comment from a different agent must not be claimed: claims=%d", q.commentClaimCount)
 	}
 }
 
@@ -537,6 +566,7 @@ func publishIssueComment(p *Patcher) {
 				"id":          "dddddddd-dddd-dddd-dddd-dddddddddddd",
 				"issue_id":    "eeeeeeee-eeee-eeee-eeee-eeeeeeeeeeee",
 				"author_type": "agent",
+				"author_id":   "aaaa1111-aaaa-aaaa-aaaa-aaaaaaaaaaaa",
 				"type":        "comment",
 				"content":     "Task finished",
 			},

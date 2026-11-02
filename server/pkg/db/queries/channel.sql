@@ -980,18 +980,14 @@ RETURNING *;
 SELECT * FROM channel_issue_delivery WHERE issue_id = $1;
 
 -- name: ClaimChannelIssueCommentNotification :one
-WITH inserted AS (
-    INSERT INTO channel_issue_comment_notification (comment_id, issue_id)
-    VALUES (@comment_id, @issue_id)
-    ON CONFLICT (comment_id) DO NOTHING
-)
-UPDATE channel_issue_comment_notification AS notification
+INSERT INTO channel_issue_comment_notification (comment_id, issue_id, claimed_at)
+VALUES (@comment_id, @issue_id, now())
+ON CONFLICT (comment_id) DO UPDATE
 SET claimed_at = now()
-WHERE notification.comment_id = @comment_id
-  AND notification.sent_at IS NULL
+WHERE channel_issue_comment_notification.sent_at IS NULL
   AND (
-      notification.claimed_at IS NULL
-      OR notification.claimed_at < now() - INTERVAL '5 minutes'
+      channel_issue_comment_notification.claimed_at IS NULL
+      OR channel_issue_comment_notification.claimed_at < now() - INTERVAL '5 minutes'
   )
 RETURNING *;
 
