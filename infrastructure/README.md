@@ -223,9 +223,17 @@ with `-c domainName=multica.example.com`.
 
 ```bash
 cd infrastructure
-./scripts/selfhost-setup.sh                                   # CDK bootstrap + generated secrets
+./scripts/selfhost-setup.sh                                   # CDK bootstrap, and an optional Resend key
 ./scripts/selfhost-deploy.sh you@example.com,teammate@example.com
 ```
+
+Two stores, one rule: **what CloudFormation generates lives in Secrets Manager,
+what a human supplies lives in Parameter Store.** The JWT secret and the
+database password are never read or typed by anyone, so the stack generates
+them — a first deploy needs nothing created by hand, and neither value passes
+through a shell history on its way in. The only human-supplied value is the
+optional `resend-api-key` parameter. The database password is retained when
+the stack is deleted, alongside the volume it opens.
 
 The allowlist argument is required. Port 443 is open to the internet, so
 without `ALLOWED_EMAILS` anyone who found the URL could sign up; synth refuses

@@ -18,6 +18,8 @@ set -euo pipefail
 
 REGION="@@REGION@@"
 PARAM_PREFIX="@@PARAM_PREFIX@@"
+JWT_SECRET_ID="@@JWT_SECRET_ID@@"
+DB_PASSWORD_ID="@@DB_PASSWORD_ID@@"
 COMPOSE_URL="@@COMPOSE_URL@@"
 DOMAIN_NAME="@@DOMAIN_NAME@@"
 PUBLIC_IP="@@PUBLIC_IP@@"
@@ -102,14 +104,18 @@ install -d -m 0755 "${DATA_DIR}/uploads"
 # ---------------------------------------------------------------------------
 # Configuration
 # ---------------------------------------------------------------------------
-log "Reading configuration from SSM Parameter Store"
-read_parameter() {
-  aws ssm get-parameter --region "${REGION}" --name "${PARAM_PREFIX}/$1" \
-    --with-decryption --query Parameter.Value --output text
+# Two stores, one rule: what CloudFormation generates lives in Secrets Manager,
+# what a human supplies lives in Parameter Store. Nobody ever sees or types the
+# JWT secret or the database password, so the stack generates them and a first
+# deploy needs nothing created by hand.
+log "Reading the generated secrets"
+read_secret() {
+  aws secretsmanager get-secret-value --region "${REGION}" --secret-id "$1" \
+    --query SecretString --output text
 }
 
-jwt_secret="$(read_parameter jwt-secret)"
-postgres_password="$(read_parameter postgres-password)"
+jwt_secret="$(read_secret "${JWT_SECRET_ID}")"
+postgres_password="$(read_secret "${DB_PASSWORD_ID}")"
 
 # Email is genuinely optional: without it the backend prints each login code to
 # its own log, which scripts/selfhost-login-code.sh reads. get-parameters (not

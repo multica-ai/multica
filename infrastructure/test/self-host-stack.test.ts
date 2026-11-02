@@ -178,8 +178,39 @@ describe('bootstrap', () => {
   });
 });
 
+describe('generated secrets', () => {
+  it('generates both secrets rather than carrying a value in the template', () => {
+    const { template } = synth();
+    const secrets = Object.values(template.findResources('AWS::SecretsManager::Secret'));
+    expect(secrets).toHaveLength(2);
+    for (const secret of secrets) {
+      // A literal SecretString here would put the value in the template, the
+      // change set and every CloudFormation console that can read the stack.
+      expect(secret.Properties?.SecretString).toBeUndefined();
+      expect(secret.Properties?.GenerateSecretString).toBeDefined();
+    }
+  });
+
+  it('excludes punctuation, since the password is interpolated into a postgres:// URL', () => {
+    const { template } = synth();
+    template.hasResourceProperties('AWS::SecretsManager::Secret', {
+      Description: 'Multica self-host: PostgreSQL password',
+      GenerateSecretString: Match.objectLike({ ExcludePunctuation: true, PasswordLength: 32 }),
+    });
+  });
+
+  it('keeps the database password when the stack is deleted, with the volume', () => {
+    const { template } = synth();
+    const [id] = Object.entries(template.findResources('AWS::SecretsManager::Secret')).find(
+      ([, r]) => r.Properties?.Description === 'Multica self-host: PostgreSQL password',
+    )!;
+    const secret = template.findResources('AWS::SecretsManager::Secret')[id]!;
+    expect(secret.DeletionPolicy).toBe('Retain');
+  });
+});
+
 describe('instance role', () => {
-  it('reaches no service beyond Parameter Store, its log group and the asset bucket', () => {
+  it('reaches no service beyond its secrets, Parameter Store, its log group and the asset bucket', () => {
     const { template } = synth();
     const inline = Object.entries(template.findResources('AWS::IAM::Policy')).filter(([id]) =>
       id.startsWith('ServerRoleDefaultPolicy'),
@@ -194,6 +225,6 @@ describe('instance role', () => {
         }
       }
     }
-    expect([...services].sort()).toEqual(['kms', 'logs', 's3', 'ssm']);
+    expect([...services].sort()).toEqual(['kms', 'logs', 's3', 'secretsmanager', 'ssm']);
   });
 });
