@@ -2,9 +2,11 @@ package handler
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"log/slog"
 	"net/http"
+	"strconv"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -105,5 +107,84 @@ func (h *Handler) GetSquadAttention(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "failed to load squad attention")
 		return
 	}
+	writeJSON(w, http.StatusOK, squadAttentionToResponse(uuidToString(squad.ID), view))
+}
+
+// PinSquadAttentionRequest sets or clears a squad's pinned caps. A pin needs
+// both caps; clearing it (pinned false) ignores them.
+type PinSquadAttentionRequest struct {
+	Pinned     bool `json:"pinned"`
+	PendingCap *int `json:"pending_cap"`
+	WeeklyCap  *int `json:"weekly_cap"`
+}
+
+// PinSquadAttention sets or clears a squad's pinned caps. The pin wins over the
+// computed caps from the next filing on, and survives the nightly recompute. Only
+// an owner or admin member may pin: an agent actor is refused, as it is for
+// decisions. The workspace cap is not part of a pin.
+//
+//	PUT /api/squads/{id}/attention/pin {pinned, pending_cap?, weekly_cap?}
+func (h *Handler) PinSquadAttention(w http.ResponseWriter, r *http.Request) {
+	workspaceID := h.resolveWorkspaceID(r)
+	userID, ok := requireUserID(w, r)
+	if !ok {
+		return
+	}
+	if isMachineCredentialActor(r) {
+		writeError(w, http.StatusForbidden, "only a workspace owner or admin may pin a squad's limits")
+		return
+	}
+	if actorType, _ := h.resolveActor(r, userID, workspaceID); actorType != "member" {
+		writeError(w, http.StatusForbidden, "only a workspace owner or admin may pin a squad's limits")
+		return
+	}
+	member, ok := h.workspaceMember(w, r, workspaceID)
+	if !ok {
+		return
+	}
+	if !roleAllowed(member.Role, "owner", "admin") {
+		writeError(w, http.StatusForbidden, "only a workspace owner or admin may pin a squad's limits")
+		return
+	}
+	wsUUID, ok := parseUUIDOrBadRequest(w, workspaceID, "workspace_id")
+	if !ok {
+		return
+	}
+	squad, ok := h.loadSquadForAttention(w, r, wsUUID)
+	if !ok {
+		return
+	}
+
+	var req PinSquadAttentionRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+	pin := db.UpsertSquadAttentionPinParams{SquadID: squad.ID, WorkspaceID: wsUUID, Pinned: req.Pinned}
+	if req.Pinned {
+		if req.PendingCap == nil || req.WeeklyCap == nil {
+			writeError(w, http.StatusBadRequest, "pending_cap and weekly_cap are required to pin a squad's limits")
+			return
+		}
+		if *req.PendingCap < 1 || *req.PendingCap > service.AttentionMaxCap ||
+			*req.WeeklyCap < 1 || *req.WeeklyCap > service.AttentionMaxCap {
+			writeError(w, http.StatusBadRequest, "pending_cap and weekly_cap must each be between 1 and "+strconv.Itoa(service.AttentionMaxCap))
+			return
+		}
+		pin.PinnedPendingCap = pgtype.Int4{Int32: int32(*req.PendingCap), Valid: true}
+		pin.PinnedWeeklyCap = pgtype.Int4{Int32: int32(*req.WeeklyCap), Valid: true}
+	}
+	if _, err := h.Queries.UpsertSquadAttentionPin(r.Context(), pin); err != nil {
+		slog.Warn("pin squad attention failed", append(logger.RequestAttrs(r), "error", err, "squad_id", uuidToString(squad.ID))...)
+		writeError(w, http.StatusInternalServerError, "failed to save the squad's limits")
+		return
+	}
+	view, err := service.SquadAttentionFor(r.Context(), h.Queries, wsUUID, squad.ID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to load squad attention")
+		return
+	}
+	slog.Info("squad attention pin changed", append(logger.RequestAttrs(r),
+		"squad_id", uuidToString(squad.ID), "pinned", req.Pinned)...)
 	writeJSON(w, http.StatusOK, squadAttentionToResponse(uuidToString(squad.ID), view))
 }
