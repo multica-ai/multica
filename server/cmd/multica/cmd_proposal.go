@@ -18,7 +18,7 @@ import (
 
 var proposalCmd = &cobra.Command{
 	Use:   "proposal",
-	Short: "File and list proposals for the boss's decision",
+	Short: "File, revise and list proposals for the boss's decision",
 	Long: `A proposal is a squad's structured request for a decision by the boss.
 It waits in a queue and reaches the boss through the Secretary's brief; it does
 not notify anyone by itself.
@@ -49,6 +49,25 @@ If the server refuses because a limit is reached, its message is printed as is.`
 	RunE: runProposalCreate,
 }
 
+var proposalReviseCmd = &cobra.Command{
+	Use:   "revise <proposal-id>",
+	Short: "Resubmit a proposal the boss sent back for changes",
+	Long: `The boss asked for changes to a proposal, so it is back with your squad. Find
+it with "multica proposal list --state revising", then resubmit the whole body.
+Every section is required, as for a new proposal:
+
+  multica proposal revise <proposal-id> --title "..." \
+    --summary "..." --evidence <url> [--evidence <url> ...] \
+    --recommendation "..." --option "..." [--option "..."] \
+    --cost-risk "..." --ask "..."
+
+The revised proposal goes back into the boss's queue with its revision number
+raised. A revision is not a new proposal, so the weekly limit does not count it,
+but the pending limits do.`,
+	Args: cobra.ExactArgs(1),
+	RunE: runProposalRevise,
+}
+
 var proposalListCmd = &cobra.Command{
 	Use:   "list",
 	Short: "List proposals, newest first",
@@ -58,8 +77,11 @@ var proposalListCmd = &cobra.Command{
 
 var uuidPattern = regexp.MustCompile(`^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$`)
 
-// proposalInput is what the create flags carry, before squads are resolved to
-// ids.
+// proposalStates are the values --state accepts, in the order the help lists them.
+var proposalStates = []string{"pending", "approved", "rejected", "revising", "expired"}
+
+// proposalInput is what the create and revise flags carry, before squads are
+// resolved to ids.
 type proposalInput struct {
 	Squad          string
 	Title          string
@@ -84,22 +106,22 @@ func trimmedAll(in []string) []string {
 	return out
 }
 
-// validate fails on the first missing piece, naming the flag, so the filing
-// agent can fix the command without a round trip to the server.
-func (in *proposalInput) validate() error {
-	in.Squad = strings.TrimSpace(in.Squad)
+// normalizeBody trims the fields that make up the proposal body.
+func (in *proposalInput) normalizeBody() {
 	in.Title = strings.TrimSpace(in.Title)
 	in.Summary = strings.TrimSpace(in.Summary)
 	in.Recommendation = strings.TrimSpace(in.Recommendation)
 	in.CostRisk = strings.TrimSpace(in.CostRisk)
 	in.Ask = strings.TrimSpace(in.Ask)
-	in.HandoffSquad = strings.TrimSpace(in.HandoffSquad)
-	in.UrgentReason = strings.TrimSpace(in.UrgentReason)
 	in.Evidence = trimmedAll(in.Evidence)
 	in.Options = trimmedAll(in.Options)
+}
 
+// validateBody fails on the first missing section, naming the flag, so the
+// filing agent can fix the command without a round trip to the server.
+func (in *proposalInput) validateBody() error {
+	in.normalizeBody()
 	for _, f := range []struct{ flag, value string }{
-		{"--squad", in.Squad},
 		{"--title", in.Title},
 		{"--summary", in.Summary},
 		{"--recommendation", in.Recommendation},
@@ -116,6 +138,21 @@ func (in *proposalInput) validate() error {
 	if len(in.Options) == 0 {
 		return fmt.Errorf("--option is required: name at least one option you considered (repeat the flag for more)")
 	}
+	return nil
+}
+
+// validate is validateBody plus what only a new filing has: the squad, and the
+// urgency rules.
+func (in *proposalInput) validate() error {
+	in.Squad = strings.TrimSpace(in.Squad)
+	in.HandoffSquad = strings.TrimSpace(in.HandoffSquad)
+	in.UrgentReason = strings.TrimSpace(in.UrgentReason)
+	if in.Squad == "" {
+		return fmt.Errorf("--squad is required")
+	}
+	if err := in.validateBody(); err != nil {
+		return err
+	}
 	if in.Urgent && in.UrgentReason == "" {
 		return fmt.Errorf("--urgent-reason is required with --urgent")
 	}
@@ -125,11 +162,9 @@ func (in *proposalInput) validate() error {
 	return nil
 }
 
-// body renders the request body. squadID and handoffSquadID are already
-// resolved.
-func (in proposalInput) body(squadID, handoffSquadID string) map[string]any {
-	body := map[string]any{
-		"squad_id":       squadID,
+// bodyFields is the proposal body both create and revise send.
+func (in proposalInput) bodyFields() map[string]any {
+	return map[string]any{
 		"title":          in.Title,
 		"summary":        in.Summary,
 		"evidence":       in.Evidence,
@@ -138,6 +173,13 @@ func (in proposalInput) body(squadID, handoffSquadID string) map[string]any {
 		"cost_risk":      in.CostRisk,
 		"ask":            in.Ask,
 	}
+}
+
+// body renders the create request body. squadID and handoffSquadID are already
+// resolved.
+func (in proposalInput) body(squadID, handoffSquadID string) map[string]any {
+	body := in.bodyFields()
+	body["squad_id"] = squadID
 	if handoffSquadID != "" {
 		body["handoff_squad_id"] = handoffSquadID
 	}
@@ -191,9 +233,9 @@ func proposalLimitError(err error) error {
 	return cli.WithUserMessage(body.Error, err)
 }
 
-func runProposalCreate(cmd *cobra.Command, _ []string) error {
+// readProposalBody reads the body flags shared by create and revise.
+func readProposalBody(cmd *cobra.Command) proposalInput {
 	in := proposalInput{}
-	in.Squad, _ = cmd.Flags().GetString("squad")
 	in.Title, _ = cmd.Flags().GetString("title")
 	in.Summary, _ = cmd.Flags().GetString("summary")
 	in.Evidence, _ = cmd.Flags().GetStringArray("evidence")
@@ -201,6 +243,12 @@ func runProposalCreate(cmd *cobra.Command, _ []string) error {
 	in.Options, _ = cmd.Flags().GetStringArray("option")
 	in.CostRisk, _ = cmd.Flags().GetString("cost-risk")
 	in.Ask, _ = cmd.Flags().GetString("ask")
+	return in
+}
+
+func runProposalCreate(cmd *cobra.Command, _ []string) error {
+	in := readProposalBody(cmd)
+	in.Squad, _ = cmd.Flags().GetString("squad")
 	in.HandoffSquad, _ = cmd.Flags().GetString("handoff-squad")
 	in.Urgent, _ = cmd.Flags().GetBool("urgent")
 	in.UrgentReason, _ = cmd.Flags().GetString("urgent-reason")
@@ -235,7 +283,34 @@ func runProposalCreate(cmd *cobra.Command, _ []string) error {
 		return cli.PrintJSON(os.Stdout, result)
 	}
 	fmt.Printf("Proposal filed: %s (issue %s, %s)\n", strVal(result, "id"), strVal(result, "issue_identifier"), proposalDeliveryNote(result))
+	if related := proposalRelatedLines(result); len(related) > 0 {
+		fmt.Println("Related earlier work (cite it in the summary where it bears on the decision):")
+		for _, line := range related {
+			fmt.Println("  " + line)
+		}
+	}
 	return nil
+}
+
+// proposalRelatedLines describes the related entries the server returned, one
+// line each. Proposals show their identifier and state; decisions show their
+// title.
+func proposalRelatedLines(p map[string]any) []string {
+	items, _ := p["related"].([]any)
+	var lines []string
+	for _, item := range items {
+		r, ok := item.(map[string]any)
+		if !ok {
+			continue
+		}
+		switch strVal(r, "kind") {
+		case "decision":
+			lines = append(lines, fmt.Sprintf("decision: %s", strVal(r, "title")))
+		default:
+			lines = append(lines, fmt.Sprintf("proposal %s (%s): %s", strVal(r, "issue_identifier"), strVal(r, "state"), strVal(r, "title")))
+		}
+	}
+	return lines
 }
 
 func proposalDeliveryNote(p map[string]any) string {
@@ -245,15 +320,42 @@ func proposalDeliveryNote(p map[string]any) string {
 	return "queued for the next brief"
 }
 
+func runProposalRevise(cmd *cobra.Command, args []string) error {
+	id := strings.TrimSpace(args[0])
+	if !uuidPattern.MatchString(id) {
+		return fmt.Errorf("proposal id must be a UUID; find it with `multica proposal list --state revising`")
+	}
+	in := readProposalBody(cmd)
+	if err := in.validateBody(); err != nil {
+		return err
+	}
+
+	client, err := newAPIClient(cmd)
+	if err != nil {
+		return err
+	}
+	ctx, cancel := cli.APIContext(context.Background())
+	defer cancel()
+
+	var result map[string]any
+	if err := client.PostJSON(ctx, "/api/proposals/"+url.PathEscape(id)+"/revision", in.bodyFields(), &result); err != nil {
+		return proposalLimitError(err)
+	}
+
+	if output, _ := cmd.Flags().GetString("output"); output == "json" {
+		return cli.PrintJSON(os.Stdout, result)
+	}
+	fmt.Printf("Proposal revised: %s (revision %v, %s)\n", strVal(result, "id"), result["revision"], "back in the boss's queue")
+	return nil
+}
+
 func runProposalList(cmd *cobra.Command, _ []string) error {
 	query := url.Values{}
 	if state, _ := cmd.Flags().GetString("state"); state != "" {
-		switch state {
-		case "pending", "approved", "rejected":
-			query.Set("state", state)
-		default:
-			return fmt.Errorf("invalid --state %q; valid values: pending, approved, rejected", state)
+		if !containsString(proposalStates, state) {
+			return fmt.Errorf("invalid --state %q; valid values: %s", state, strings.Join(proposalStates, ", "))
 		}
+		query.Set("state", state)
 	}
 
 	client, err := newAPIClient(cmd)
@@ -304,10 +406,18 @@ func runProposalList(cmd *cobra.Command, _ []string) error {
 	return w.Flush()
 }
 
-// The flag sets are built by functions so tests can run the real flags on a
-// fresh command instead of sharing the package-level command's flag state.
-func addProposalCreateFlags(cmd *cobra.Command) {
-	cmd.Flags().String("squad", "", "Proposing squad (id or name) — required")
+func containsString(values []string, want string) bool {
+	for _, v := range values {
+		if v == want {
+			return true
+		}
+	}
+	return false
+}
+
+// addProposalBodyFlags registers the flags of a proposal body, which create and
+// revise share.
+func addProposalBodyFlags(cmd *cobra.Command) {
 	cmd.Flags().String("title", "", "Short title of the proposal — required")
 	cmd.Flags().String("summary", "", "What you propose and why now — required")
 	cmd.Flags().StringArray("evidence", nil, "A link supporting the proposal; repeat for more — at least one required")
@@ -315,14 +425,25 @@ func addProposalCreateFlags(cmd *cobra.Command) {
 	cmd.Flags().StringArray("option", nil, "An option you considered; repeat for more — at least one required")
 	cmd.Flags().String("cost-risk", "", "Cost and risk of the recommendation — required")
 	cmd.Flags().String("ask", "", "The decision you are asking for — required")
-	cmd.Flags().String("handoff-squad", "", "Squad (id or name) that starts the work if the boss approves")
-	cmd.Flags().Bool("urgent", false, "Only for a decision that cannot wait a day; assigns the boss at once")
-	cmd.Flags().String("urgent-reason", "", "Why this cannot wait a day — required with --urgent")
 	cmd.Flags().String("output", "table", "Output format: table or json")
 }
 
+// The flag sets are built by functions so tests can run the real flags on a
+// fresh command instead of sharing the package-level command's flag state.
+func addProposalCreateFlags(cmd *cobra.Command) {
+	cmd.Flags().String("squad", "", "Proposing squad (id or name) — required")
+	addProposalBodyFlags(cmd)
+	cmd.Flags().String("handoff-squad", "", "Squad (id or name) that starts the work if the boss approves")
+	cmd.Flags().Bool("urgent", false, "Only for a decision that cannot wait a day; assigns the boss at once")
+	cmd.Flags().String("urgent-reason", "", "Why this cannot wait a day — required with --urgent")
+}
+
+func addProposalReviseFlags(cmd *cobra.Command) {
+	addProposalBodyFlags(cmd)
+}
+
 func addProposalListFlags(cmd *cobra.Command) {
-	cmd.Flags().String("state", "", "Only proposals in this state: pending, approved or rejected")
+	cmd.Flags().String("state", "", "Only proposals in this state: pending, approved, rejected, revising or expired")
 	cmd.Flags().String("squad", "", "Only proposals from this squad (id or name)")
 	cmd.Flags().Bool("json", false, "Print JSON (same as --output json)")
 	cmd.Flags().String("output", "table", "Output format: table or json")
@@ -330,8 +451,10 @@ func addProposalListFlags(cmd *cobra.Command) {
 
 func init() {
 	addProposalCreateFlags(proposalCreateCmd)
+	addProposalReviseFlags(proposalReviseCmd)
 	addProposalListFlags(proposalListCmd)
 
 	proposalCmd.AddCommand(proposalCreateCmd)
+	proposalCmd.AddCommand(proposalReviseCmd)
 	proposalCmd.AddCommand(proposalListCmd)
 }

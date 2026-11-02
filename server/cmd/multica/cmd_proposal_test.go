@@ -305,8 +305,182 @@ func TestProposalCommandIsRegistered(t *testing.T) {
 	if err != nil || found != proposalCreateCmd {
 		t.Fatalf("proposal create is not reachable from the root command: %v", err)
 	}
+	found, _, err = rootCmd.Find([]string{"proposal", "revise"})
+	if err != nil || found != proposalReviseCmd {
+		t.Fatalf("proposal revise is not reachable from the root command: %v", err)
+	}
 	found, _, err = rootCmd.Find([]string{"proposal", "list"})
 	if err != nil || found != proposalListCmd {
 		t.Fatalf("proposal list is not reachable from the root command: %v", err)
+	}
+}
+
+const testProposalRevisionID = "33333333-3333-3333-3333-333333333333"
+
+func newProposalReviseTestCmd(t *testing.T, args ...string) *cobra.Command {
+	t.Helper()
+	cmd := &cobra.Command{Use: "revise"}
+	addProposalReviseFlags(cmd)
+	if err := cmd.ParseFlags(args); err != nil {
+		t.Fatalf("parse flags: %v", err)
+	}
+	return cmd
+}
+
+// validReviseArgs is a complete set of revise flags: the body and no squad.
+func validReviseArgs(extra ...string) []string {
+	args := []string{
+		"--title", "Pilot usage pricing, new accounts",
+		"--summary", "Pilot usage pricing on new accounts only.",
+		"--evidence", "https://example.com/a",
+		"--recommendation", "Pilot it for new accounts.",
+		"--option", "Keep seat pricing",
+		"--cost-risk", "Two weeks of work; churn risk.",
+		"--ask", "Approve a six-week pilot.",
+	}
+	return append(args, extra...)
+}
+
+func TestProposalReviseSendsTheWholeBody(t *testing.T) {
+	var got map[string]any
+	var path string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		path = r.Method + " " + r.URL.Path
+		_ = json.NewDecoder(r.Body).Decode(&got)
+		_ = json.NewEncoder(w).Encode(map[string]any{"id": testProposalRevisionID, "revision": 2, "state": "pending"})
+	}))
+	defer srv.Close()
+	setCLITestServerEnv(t, srv.URL)
+
+	out, err := captureStdout(t, func() error {
+		return runProposalRevise(newProposalReviseTestCmd(t, validReviseArgs()...), []string{testProposalRevisionID})
+	})
+	if err != nil {
+		t.Fatalf("runProposalRevise: %v", err)
+	}
+	if path != "POST /api/proposals/"+testProposalRevisionID+"/revision" {
+		t.Fatalf("request = %s", path)
+	}
+	want := map[string]any{
+		"title":          "Pilot usage pricing, new accounts",
+		"summary":        "Pilot usage pricing on new accounts only.",
+		"evidence":       []any{"https://example.com/a"},
+		"recommendation": "Pilot it for new accounts.",
+		"options":        []any{"Keep seat pricing"},
+		"cost_risk":      "Two weeks of work; churn risk.",
+		"ask":            "Approve a six-week pilot.",
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("body = %#v\nwant  %#v", got, want)
+	}
+	if !strings.Contains(out, "revision 2") || !strings.Contains(out, testProposalRevisionID) {
+		t.Errorf("output should name the proposal and its revision:\n%s", out)
+	}
+}
+
+func TestProposalReviseValidatesClientSide(t *testing.T) {
+	cases := []struct {
+		name string
+		args []string
+		want string
+	}{
+		{"missing title", withoutFlag(validReviseArgs(), "--title"), "--title is required"},
+		{"missing ask", withoutFlag(validReviseArgs(), "--ask"), "--ask is required"},
+		{"missing evidence", withoutFlag(validReviseArgs(), "--evidence"), "--evidence is required"},
+		{"missing option", withoutFlag(validReviseArgs(), "--option"), "--option is required"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			err := runProposalRevise(newProposalReviseTestCmd(t, tc.args...), []string{testProposalRevisionID})
+			if err == nil || !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("error = %v, want %q", err, tc.want)
+			}
+		})
+	}
+}
+
+func TestProposalReviseRejectsANonUUIDId(t *testing.T) {
+	err := runProposalRevise(newProposalReviseTestCmd(t, validReviseArgs()...), []string{"pilot-pricing"})
+	if err == nil || !strings.Contains(err.Error(), "proposal id must be a UUID") {
+		t.Fatalf("error = %v, want a UUID complaint", err)
+	}
+}
+
+func TestProposalReviseRefusalsKeepTheirMessages(t *testing.T) {
+	t.Run("a limit is printed as the server wrote it", func(t *testing.T) {
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.WriteHeader(http.StatusConflict)
+			_ = json.NewEncoder(w).Encode(map[string]string{"code": "proposal_limit", "error": "the boss already has 3 proposals waiting"})
+		}))
+		defer srv.Close()
+		setCLITestServerEnv(t, srv.URL)
+		err := runProposalRevise(newProposalReviseTestCmd(t, validReviseArgs()...), []string{testProposalRevisionID})
+		if err == nil || cli.FormatError(err, false) != "the boss already has 3 proposals waiting" {
+			t.Fatalf("error = %v", err)
+		}
+	})
+	t.Run("another conflict keeps the usual formatting", func(t *testing.T) {
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.WriteHeader(http.StatusConflict)
+			_ = json.NewEncoder(w).Encode(map[string]string{"code": "proposal_not_revising", "error": "not waiting for changes"})
+		}))
+		defer srv.Close()
+		setCLITestServerEnv(t, srv.URL)
+		err := runProposalRevise(newProposalReviseTestCmd(t, validReviseArgs()...), []string{testProposalRevisionID})
+		if err == nil || !strings.Contains(cli.FormatError(err, false), "not waiting for changes") {
+			t.Fatalf("error = %v", err)
+		}
+	})
+}
+
+func TestProposalCreatePrintsRelatedWork(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusCreated)
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"id": "p-1", "issue_identifier": "MUL-7", "urgent": false,
+			"related": []any{
+				map[string]any{"kind": "proposal", "issue_identifier": "MUL-3", "state": "approved", "title": "Pilot usage pricing"},
+				map[string]any{"kind": "decision", "title": "Decision: usage pricing pilot"},
+			},
+		})
+	}))
+	defer srv.Close()
+	setCLITestServerEnv(t, srv.URL)
+
+	out, err := captureStdout(t, func() error {
+		return runProposalCreate(newProposalCreateTestCmd(t, validProposalArgs()...), nil)
+	})
+	if err != nil {
+		t.Fatalf("runProposalCreate: %v", err)
+	}
+	for _, want := range []string{"proposal MUL-3 (approved): Pilot usage pricing", "decision: Decision: usage pricing pilot"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("output should list the related work %q:\n%s", want, out)
+		}
+	}
+}
+
+func TestProposalListAcceptsTheLifecycleStates(t *testing.T) {
+	var query map[string][]string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		query = r.URL.Query()
+		_ = json.NewEncoder(w).Encode([]map[string]any{})
+	}))
+	defer srv.Close()
+	setCLITestServerEnv(t, srv.URL)
+
+	for _, state := range []string{"revising", "expired"} {
+		if _, err := captureStdout(t, func() error {
+			return runProposalList(newProposalListTestCmd(t, "--state", state), nil)
+		}); err != nil {
+			t.Fatalf("--state %s: %v", state, err)
+		}
+		if query["state"][0] != state {
+			t.Fatalf("--state %s sent %v", state, query)
+		}
+	}
+	err := runProposalList(newProposalListTestCmd(t, "--state", "snoozed"), nil)
+	if err == nil || !strings.Contains(err.Error(), "revising, expired") {
+		t.Fatalf("error = %v, want the valid states listed", err)
 	}
 }

@@ -257,6 +257,12 @@ post it as a comment on the boss or the Secretary.
 - `+"`"+`--urgent --urgent-reason "..."`+"`"+` is only for a decision that cannot wait a
   day. It assigns the proposal to the boss at once, and a squad gets %d urgent
   proposal in any rolling 7 days. When in doubt, file without it.
+- A new proposal reports `+"`"+`related`+"`"+` earlier proposals and decisions. Where one bears on
+  the decision, cite it in the summary rather than arguing it again.
+- When the boss asks for changes, the note arrives on the proposal's issue and
+  wakes you. Resubmit the whole proposal with `+"`"+`multica proposal revise <proposal-id>`+"`"+`
+  (find the id with `+"`"+`multica proposal list --state revising`+"`"+`). A revision goes back
+  into the boss's queue and is not a new filing.
 - No proposal is a valid result. File one only when the evidence clears the
   bar your task states. When nothing does, file nothing and record that with
   `+"`"+`multica squad activity <issue-id> no_action --reason "..."`+"`"+`.`,
