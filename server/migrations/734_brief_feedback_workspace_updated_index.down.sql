@@ -1,0 +1,1 @@
+DROP INDEX CONCURRENTLY IF EXISTS idx_brief_feedback_workspace_updated;

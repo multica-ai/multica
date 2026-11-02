@@ -2286,7 +2286,13 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 				r.Post("/", h.CreateBrief)
 				// The Secretary's accounted questions to squad leaders (daily cap).
 				r.Post("/inquiries", h.AskBriefInquiry)
+				// The boss's ratings of briefs (plan 9.12). The reads are the Secretary's
+				// and an admin's; the rating itself is the caller's own.
+				r.Get("/feedback/recent", h.ListBriefFeedbackRecent)
+				r.Get("/feedback/summary", h.GetBriefFeedbackSummary)
 				r.Get("/{id}", h.GetBrief)
+				r.Get("/{id}/feedback", h.GetMyBriefFeedback)
+				r.Post("/{id}/feedback", h.SubmitBriefFeedback)
 			})
 
 			// Squad leader evaluation (writes to activity_log)

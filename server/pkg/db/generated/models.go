@@ -355,6 +355,18 @@ type BriefDelivery struct {
 	CreatedAt     pgtype.Timestamptz `json:"created_at"`
 }
 
+type BriefFeedback struct {
+	ID          pgtype.UUID        `json:"id"`
+	WorkspaceID pgtype.UUID        `json:"workspace_id"`
+	BriefID     pgtype.UUID        `json:"brief_id"`
+	MemberID    pgtype.UUID        `json:"member_id"`
+	Rating      string             `json:"rating"`
+	Tags        []string           `json:"tags"`
+	Note        string             `json:"note"`
+	CreatedAt   pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt   pgtype.Timestamptz `json:"updated_at"`
+}
+
 type BriefInquiry struct {
 	ID             pgtype.UUID        `json:"id"`
 	WorkspaceID    pgtype.UUID        `json:"workspace_id"`
