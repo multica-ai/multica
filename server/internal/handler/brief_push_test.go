@@ -10,6 +10,7 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/multica-ai/multica/server/internal/integrations/channel"
+	"github.com/multica-ai/multica/server/internal/integrations/slack"
 	"github.com/multica-ai/multica/server/internal/service"
 	"github.com/multica-ai/multica/server/internal/testutil"
 )
@@ -408,4 +409,70 @@ func TestBriefPushBindings_NoServiceListsNothing(t *testing.T) {
 	if got := strings.TrimSpace(res.Text()); got != "[]" {
 		t.Fatalf("list without a chat app = %s, want []", got)
 	}
+}
+
+// registerSlackNotifier makes Slack a chat app that can take a brief on the
+// test handler's service. The service is restored with the rest of the env.
+func registerSlackNotifier(t *testing.T) {
+	t.Helper()
+	testHandler.BriefPush.RegisterNotifier(slack.TypeSlack, slack.NewNotifier(testHandler.Queries, nil, "", nil))
+}
+
+// A Slack chat is offered in the list only once its notifier is registered, the
+// same gate every chat app passes.
+func TestBriefPushBindings_SlackAppearsOnceItsNotifierIsRegistered(t *testing.T) {
+	env := newBriefPushEnv(t)
+	chat := briefPushBinding(t, env.WorkspaceID, env.Alice, string(slack.TypeSlack))
+
+	var before []BriefPushBinding
+	env.listBindings(t, env.Alice).Want(http.StatusOK).JSON(&before)
+	for _, b := range before {
+		if b.ID == chat {
+			t.Fatalf("Slack chat listed before its notifier is registered: %+v", before)
+		}
+	}
+
+	registerSlackNotifier(t)
+
+	var after []BriefPushBinding
+	env.listBindings(t, env.Alice).Want(http.StatusOK).JSON(&after)
+	for _, b := range after {
+		if b.ID == chat {
+			if b.Channel != "slack" {
+				t.Fatalf("channel = %q, want slack", b.Channel)
+			}
+			return
+		}
+	}
+	t.Fatalf("Slack chat %s missing once its notifier is registered: %+v", chat, after)
+}
+
+// A Slack binding is labelled by its stored display name, and falls back to the
+// platform name when none is stored.
+func TestBriefPushBindings_SlackLabelUsesTheStoredDisplayNameThenThePlatform(t *testing.T) {
+	env := newBriefPushEnv(t)
+	registerSlackNotifier(t)
+	named := briefPushBindingOn(t, env.WorkspaceID, env.Alice, "slack",
+		briefPushInstallation(t, env.WorkspaceID, "slack", "active", `{}`), "UALICE1", `{"display_name":"Ada on Slack"}`)
+	plain := briefPushBindingOn(t, env.WorkspaceID, env.Alice, "slack",
+		briefPushInstallation(t, env.WorkspaceID, "slack", "active", `{}`), "UALICE2", `{}`)
+
+	var got []BriefPushBinding
+	env.listBindings(t, env.Alice).Want(http.StatusOK).JSON(&got)
+	labels := map[string]string{}
+	for _, b := range got {
+		labels[b.ID] = b.Label
+	}
+	if labels[named] != "Ada on Slack" || labels[plain] != "slack" {
+		t.Fatalf("labels = %+v, want the stored name Ada on Slack and the platform name slack", labels)
+	}
+}
+
+// Once the notifier is registered, the preference accepts a Slack chat.
+func TestBriefPushPreference_SlackChatIsAcceptedOnceRegistered(t *testing.T) {
+	env := newBriefPushEnv(t)
+	registerSlackNotifier(t)
+	chat := briefPushBinding(t, env.WorkspaceID, env.Alice, string(slack.TypeSlack))
+
+	env.put(t, env.Alice, map[string]any{"brief_push": true, "binding_id": chat}).Want(http.StatusOK)
 }

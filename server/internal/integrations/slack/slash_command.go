@@ -11,6 +11,7 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/slack-go/slack"
 
+	"github.com/multica-ai/multica/server/internal/integrations/channel"
 	"github.com/multica-ai/multica/server/internal/integrations/channel/engine"
 	"github.com/multica-ai/multica/server/internal/service"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
@@ -44,6 +45,18 @@ import (
 const issueSlashCommand = "/issue"
 const newSlashCommand = "/new"
 const clearSlashCommand = "/clear"
+
+// /brief and /decisions answer with the same text the Telegram commands give
+// (plan 9.11a). They are slash commands for the same reason /issue is: Slack
+// does not deliver a message that starts with "/" to the app.
+const briefSlashCommand = "/brief"
+const decisionsSlashCommand = "/decisions"
+
+// slashChatCommands maps a slash command to the chat command it answers.
+var slashChatCommands = map[string]string{
+	briefSlashCommand:     channel.CommandBrief,
+	decisionsSlashCommand: channel.CommandDecisions,
+}
 
 // User-facing ephemeral replies. Kept terse; only the invoker sees them.
 const (
@@ -94,6 +107,8 @@ type SlashCommandProcessor struct {
 	// respond posts an ephemeral reply to the command's response_url. Injected
 	// so tests can capture the reply without hitting Slack.
 	respond func(ctx context.Context, responseURL, text string) error
+	// actions answers /brief and /decisions. Nil leaves those two unanswered.
+	actions channel.ActionHandler
 }
 
 // SlashCommandConfig configures the processor. Binding + AppURL are required for
@@ -108,6 +123,8 @@ type SlashCommandConfig struct {
 	AppURL      string
 	BindingPath string // default "/slack/bind"
 	Logger      *slog.Logger
+	// Actions answers /brief and /decisions (plan 9.11a). Nil leaves them off.
+	Actions channel.ActionHandler
 }
 
 // NewSlashCommandProcessor builds the processor. The default responder POSTs an
@@ -133,6 +150,7 @@ func NewSlashCommandProcessor(cfg SlashCommandConfig) *SlashCommandProcessor {
 		appURL:      strings.TrimRight(cfg.AppURL, "/"),
 		bindingPath: bindingPath,
 		logger:      logger,
+		actions:     cfg.Actions,
 	}
 	p.respond = func(ctx context.Context, responseURL, text string) error {
 		return slack.PostWebhookContext(ctx, responseURL, &slack.WebhookMessage{
@@ -153,6 +171,17 @@ func (p *SlashCommandProcessor) Handle(ctx context.Context, cmd slack.SlashComma
 // HandleEnvelope preserves Socket Mode's durable envelope id for control-command dedup.
 func (p *SlashCommandProcessor) HandleEnvelope(ctx context.Context, cmd slack.SlashCommand, envelopeID string) {
 	command := strings.TrimSpace(cmd.Command)
+	if name, ok := slashChatCommands[command]; ok {
+		text := p.chatCommand(ctx, cmd, name)
+		if cmd.ResponseURL == "" {
+			return
+		}
+		if err := p.respond(ctx, cmd.ResponseURL, text); err != nil {
+			p.logger.WarnContext(ctx, "slack slash command: response_url reply failed",
+				"app_id", cmd.APIAppID, "error", err)
+		}
+		return
+	}
 	if !strings.EqualFold(command, issueSlashCommand) && command != newSlashCommand && command != clearSlashCommand {
 		return
 	}
@@ -169,6 +198,53 @@ func (p *SlashCommandProcessor) HandleEnvelope(ctx context.Context, cmd slack.Sl
 		p.logger.WarnContext(ctx, "slack slash command: response_url reply failed",
 			"app_id", cmd.APIAppID, "error", err)
 	}
+}
+
+// chatCommand answers /brief or /decisions for a member. The sender resolves as
+// it does for the other commands: installation, binding, then membership. An
+// answer is the chat command's text, escaped as mrkdwn, and its links are the
+// Office links the chat command builds.
+func (p *SlashCommandProcessor) chatCommand(ctx context.Context, cmd slack.SlashCommand, name string) string {
+	if p.actions == nil {
+		return slashInternalErrorText
+	}
+	inst, err := p.resolveInstallation(ctx, cmd.APIAppID, cmd.TeamID)
+	if err != nil {
+		if errors.Is(err, engine.ErrInstallationNotFound) {
+			return slashDisabledText
+		}
+		p.logger.WarnContext(ctx, "slack slash command: resolve installation failed",
+			"app_id", cmd.APIAppID, "error", err)
+		return slashInternalErrorText
+	}
+	if !inst.Active {
+		return slashDisabledText
+	}
+	if _, err := p.resolveUser(ctx, inst, cmd.UserID); err != nil {
+		switch {
+		case errors.Is(err, engine.ErrSenderUnbound):
+			return p.bindingText(ctx, inst, cmd.UserID)
+		case errors.Is(err, engine.ErrSenderNotMember):
+			return slashNotMemberText
+		default:
+			p.logger.WarnContext(ctx, "slack slash command: resolve user failed",
+				"app_id", cmd.APIAppID, "error", err)
+			return slashInternalErrorText
+		}
+	}
+	reply, handled, err := p.actions.Command(ctx, channel.Command{
+		Sender: channel.Sender{ChannelType: TypeSlack, InstallationID: inst.ID, ChannelUserID: cmd.UserID},
+		Name:   name,
+	})
+	if err != nil {
+		p.logger.WarnContext(ctx, "slack slash command: chat command failed",
+			"app_id", cmd.APIAppID, "command", cmd.Command, "error", err)
+		return slashInternalErrorText
+	}
+	if !handled {
+		return p.bindingText(ctx, inst, cmd.UserID)
+	}
+	return escapeMrkdwn(reply.Text)
 }
 
 func (p *SlashCommandProcessor) processControl(ctx context.Context, cmd slack.SlashCommand, envelopeID string) string {

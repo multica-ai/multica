@@ -772,6 +772,12 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 		slog.Info("lark integration disabled (MULTICA_LARK_SECRET_KEY not set)")
 	}
 
+	// Chat buttons (plan 9.11) sign their tokens with a key derived from the JWT
+	// secret, and their presses are settled by the handler's decision path. Slack
+	// and Telegram share the signer and the handler.
+	actionSigner := service.NewActionSigner(auth.JWTSecret())
+	channelActions := handler.NewChannelActions(h, actionSigner)
+
 	// Slack integration. Multi-tenant B2 model (MUL-3666): Multica hosts ONE
 	// Slack app, workspaces self-install via OAuth, and inbound runs on a single
 	// deployment-level Socket Mode connection routed by team_id — replacing the
@@ -856,13 +862,19 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 				Binding: slackBindingSvc,
 				AppURL:  appURLFromEnv(),
 				Logger:  slog.Default(),
+				// /brief and /decisions answer from the same chat commands Telegram uses (plan 9.11a).
+				Actions: channelActions,
 			})
 
 			// Per-installation inbound: the Supervisor builds + supervises one
 			// Socket Mode connection per active Slack installation, authenticated
 			// with that installation's OWN app-level token (xapp-, pasted at BYO
 			// install) — no deployment-level app token, no single connection.
-			slack.RegisterSlack(channelRegistry, slack.ChannelDeps{Decrypt: box.Open, Logger: slog.Default(), Slash: slackSlash})
+			slack.RegisterSlack(channelRegistry, slack.ChannelDeps{Decrypt: box.Open, Logger: slog.Default(), Slash: slackSlash, Actions: channelActions})
+			// Brief push to Slack (plan 9.11a): the notifier sends the member's direct
+			// message, and presses come back over the same Socket Mode connection.
+			h.BriefPush.RegisterNotifier(slack.TypeSlack, slack.NewNotifier(queries, box.Open, "", nil))
+			h.BriefPush.EnableActionButtons(actionSigner, slack.TypeSlack)
 
 			// BYO self-serve install (paste bot token + app-level token). The
 			// InstallService needs only the at-rest encryption key — there is no
@@ -1202,10 +1214,6 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 	// the event bus. Gated by MULTICA_TELEGRAM_SECRET_KEY (the at-rest token
 	// encryption key); when unset the handlers return 503 and no Factory is
 	// registered.
-	// Chat buttons (plan 9.11) sign their tokens with a key derived from the JWT
-	// secret, and their presses are settled by the handler's decision path.
-	actionSigner := service.NewActionSigner(auth.JWTSecret())
-	channelActions := handler.NewChannelActions(h, actionSigner)
 	if telegramKey, err := secretbox.LoadKey("MULTICA_TELEGRAM_SECRET_KEY"); err == nil {
 		box, err := secretbox.New(telegramKey)
 		if err != nil {
