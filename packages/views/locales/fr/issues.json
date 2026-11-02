@@ -2055,6 +2055,8 @@
     "delivery_title": "Envoi dans le chat",
     "delivery_push": "Envoyer le briefing dans mon chat",
     "delivery_no_chat": "Liez d'abord votre chat Telegram. Les briefings ne sont envoyés qu'à un chat lié.",
+    "delivery_chat": "Chat",
+    "delivery_chat_placeholder": "Choisissez un chat",
     "delivery_quiet": "Heures calmes",
     "delivery_quiet_from": "De",
     "delivery_quiet_to": "Jusqu'à",

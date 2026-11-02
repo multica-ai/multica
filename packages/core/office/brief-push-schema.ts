@@ -41,3 +41,28 @@ export const BriefPushPreferenceSchema = z
     quiet_hours: QuietHoursSchema.nullable().catch(null).default(null),
   })
   .loose();
+
+/** A chat the caller can send briefs to (`GET /api/office/brief-push/bindings`). */
+export interface BriefPushBinding {
+  id: string;
+  /** The chat app, lowercase: "telegram". */
+  channel: string;
+  /** The chat's name as the server shows it. */
+  label: string;
+}
+
+const BriefPushBindingSchema = z
+  .object({
+    id: z.string().min(1),
+    channel: z.string().min(1),
+    label: z.string().catch(""),
+  })
+  .loose();
+
+// Each entry is checked alone: one malformed row is dropped and the rest still list.
+export const BriefPushBindingListSchema = z.array(z.unknown()).transform((items) =>
+  items.flatMap((item) => {
+    const parsed = BriefPushBindingSchema.safeParse(item);
+    return parsed.success ? [parsed.data] : [];
+  }),
+);

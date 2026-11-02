@@ -47,6 +47,31 @@ describe("ApiClient brief push preference", () => {
   });
 });
 
+describe("ApiClient brief push bindings", () => {
+  it("GET /api/office/brief-push/bindings reads the caller's chats", async () => {
+    const fetchMock = respond([{ id: "b1", channel: "telegram", label: "Ops room" }]);
+    expect(await client().listBriefPushBindings()).toEqual([
+      { id: "b1", channel: "telegram", label: "Ops room" },
+    ]);
+    expect(fetchMock.mock.calls[0]?.[0]).toBe("https://api.test/api/office/brief-push/bindings");
+  });
+
+  it("reads an empty list when no chat is linked", async () => {
+    respond([]);
+    expect(await client().listBriefPushBindings()).toEqual([]);
+  });
+
+  it("falls back to an empty list when the body is malformed", async () => {
+    respond({ bindings: "telegram" });
+    expect(await client().listBriefPushBindings()).toEqual([]);
+  });
+
+  it("drops a malformed entry and keeps the valid ones", async () => {
+    respond([{ channel: "telegram", label: "No id" }, { id: "b2", channel: "telegram", label: "Kept" }]);
+    expect(await client().listBriefPushBindings()).toEqual([{ id: "b2", channel: "telegram", label: "Kept" }]);
+  });
+});
+
 describe("ApiClient brief feedback", () => {
   it("POST /api/briefs/:id/feedback sends the rating, tags and note", async () => {
     const fetchMock = respond({

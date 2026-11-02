@@ -1981,6 +1981,8 @@
     "delivery_title": "채팅 전달",
     "delivery_push": "브리프를 내 채팅으로 보내기",
     "delivery_no_chat": "먼저 Telegram 채팅을 연결하세요. 브리프는 연결된 채팅으로만 전달됩니다.",
+    "delivery_chat": "채팅",
+    "delivery_chat_placeholder": "채팅 선택",
     "delivery_quiet": "조용한 시간",
     "delivery_quiet_from": "시작",
     "delivery_quiet_to": "종료",

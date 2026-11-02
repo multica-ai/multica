@@ -290,8 +290,10 @@ import {
   type DigestParams,
 } from "../office/digest-schema";
 import {
+  BriefPushBindingListSchema,
   BriefPushPreferenceSchema,
   EMPTY_BRIEF_PUSH,
+  type BriefPushBinding,
   type BriefPushPreference,
   type UpdateBriefPushRequest,
 } from "../office/brief-push-schema";
@@ -4990,6 +4992,15 @@ export class ApiClient {
     });
     return parseWithFallback(raw, BriefPushPreferenceSchema, EMPTY_BRIEF_PUSH, {
       endpoint: "PUT /api/office/brief-push",
+    });
+  }
+
+  // The caller's own chats in this workspace that can take brief pushes. Empty
+  // until a chat is linked.
+  async listBriefPushBindings(): Promise<BriefPushBinding[]> {
+    const raw = await this.fetch<unknown>("/api/office/brief-push/bindings");
+    return parseWithFallback<BriefPushBinding[]>(raw, BriefPushBindingListSchema, [], {
+      endpoint: "GET /api/office/brief-push/bindings",
     });
   }
 

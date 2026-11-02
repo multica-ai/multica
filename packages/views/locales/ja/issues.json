@@ -1981,6 +1981,8 @@
     "delivery_title": "チャットへの配信",
     "delivery_push": "ブリーフを自分のチャットに送る",
     "delivery_no_chat": "先に Telegram のチャットを連携してください。ブリーフは連携済みのチャットにのみ届きます。",
+    "delivery_chat": "チャット",
+    "delivery_chat_placeholder": "チャットを選択",
     "delivery_quiet": "通知を控える時間",
     "delivery_quiet_from": "開始",
     "delivery_quiet_to": "終了",

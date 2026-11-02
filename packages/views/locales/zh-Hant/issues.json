@@ -1981,6 +1981,8 @@
     "delivery_title": "聊天投遞",
     "delivery_push": "把簡報傳送到我的聊天",
     "delivery_no_chat": "請先綁定你的 Telegram 聊天。簡報只會傳送到已綁定的聊天。",
+    "delivery_chat": "聊天",
+    "delivery_chat_placeholder": "選擇聊天",
     "delivery_quiet": "勿擾時段",
     "delivery_quiet_from": "開始",
     "delivery_quiet_to": "結束",

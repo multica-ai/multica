@@ -2055,6 +2055,8 @@
     "delivery_title": "Chat delivery",
     "delivery_push": "Send the brief to my chat",
     "delivery_no_chat": "Link your Telegram chat first. Briefs go only to a linked chat.",
+    "delivery_chat": "Chat",
+    "delivery_chat_placeholder": "Choose a chat",
     "delivery_quiet": "Quiet hours",
     "delivery_quiet_from": "From",
     "delivery_quiet_to": "Until",
