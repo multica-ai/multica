@@ -204,6 +204,19 @@ func (r *LarkOutcomeReplier) Reply(ctx context.Context, inst Installation, msg I
 				"err", err.Error(),
 			)
 		}
+	case OutcomeChatCommand:
+		// /brief or /decisions, answered in the chat it came from. A bot's
+		// command has no reply text and is consumed silently.
+		if res.CommandReply == "" {
+			break
+		}
+		if err := r.sendChatNotice(ctx, inst, msg, res.CommandReply); err != nil {
+			r.log.Warn("lark outcome replier: chat command reply failed",
+				"installation_id", uuidString(inst.ID),
+				"chat_id", string(msg.ChatID),
+				"err", err.Error(),
+			)
+		}
 	case OutcomeIngested:
 		// The agent's chat reply itself goes through the Patcher. An /issue
 		// command gets an immediate product result: either the newly created

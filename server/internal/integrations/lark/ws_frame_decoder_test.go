@@ -636,3 +636,38 @@ func TestPeekEventType(t *testing.T) {
 		})
 	}
 }
+
+// A bot or application sender (sender_type "app") reaches the channel message as
+// a bot, so a chat command it sends gets no reply. A person ("user") does not.
+func TestLarkJSONFrameDecoderMarksAppSendersAsBots(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct {
+		senderType string
+		wantBot    bool
+	}{
+		{"app", true},
+		{"user", false},
+	} {
+		raw := []byte(`{
+			"type":"event_callback",
+			"header":{"event_id":"evt-bot","event_type":"im.message.receive_v1","app_id":"cli_app_x"},
+			"event":{
+				"sender":{"sender_id":{"open_id":"ou_sender"},"sender_type":"` + tc.senderType + `"},
+				"message":{"message_id":"om_bot","chat_id":"oc_1","chat_type":"p2p","message_type":"text","content":"{\"text\":\"/brief\"}"}
+			}
+		}`)
+		d := NewLarkJSONFrameDecoder()
+		msg, ok, err := d.Decode(raw, Installation{BotOpenID: "ou_bot"})
+		if err != nil || !ok {
+			t.Fatalf("%s: Decode ok=%v err=%v", tc.senderType, ok, err)
+		}
+		if got := channelMessageFromLark(msg).Source.SenderIsBot; got != tc.wantBot {
+			t.Errorf("sender_type %q: SenderIsBot = %v, want %v", tc.senderType, got, tc.wantBot)
+		}
+		// The Raw envelope the Router reads back must keep the sender type too.
+		back, err := larkMsgFromRaw(channelMessageFromLark(msg))
+		if err != nil || back.SenderType != tc.senderType {
+			t.Errorf("sender_type %q: raw round trip = %q, %v", tc.senderType, back.SenderType, err)
+		}
+	}
+}

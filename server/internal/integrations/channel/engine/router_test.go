@@ -2271,3 +2271,208 @@ func TestRouter_MediaDeadlineStartsBeforeAppend(t *testing.T) {
 		t.Fatal("resolver did not run")
 	}
 }
+
+// ---- chat commands (spec 2.7) ----
+
+// fakeCommander answers /brief and /decisions the way the server's chat action
+// handler does, and records each command it was asked.
+type fakeCommander struct {
+	mu      sync.Mutex
+	reply   channel.Message
+	handled bool
+	err     error
+	seen    []channel.Command
+}
+
+func (f *fakeCommander) Command(_ context.Context, c channel.Command) (channel.Message, bool, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.seen = append(f.seen, c)
+	return f.reply, f.handled, f.err
+}
+
+func (f *fakeCommander) calls() []channel.Command {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([]channel.Command(nil), f.seen...)
+}
+
+// setCommander registers the feishu resolver set again with cmd wired in.
+func (h *harness) setCommander(cmd ChatCommander) {
+	h.router.Register(channel.TypeFeishu, ResolverSet{
+		Installation: h.inst,
+		Identity:     h.ident,
+		Dedup:        h.dedup,
+		Session:      h.binder,
+		Audit:        h.audit,
+		Replier:      h.replier,
+		Typing:       h.typing,
+		Media:        h.media,
+		Commands:     cmd,
+		OriginType:   "lark_chat",
+	})
+}
+
+// commandMessage is a direct message whose whole text is the command.
+func commandMessage(t *testing.T, text string) channel.InboundMessage {
+	t.Helper()
+	msg := p2pMessage(t)
+	msg.Text = text
+	msg.CommandText = text
+	return msg
+}
+
+// drain waits for the detached replies the router started.
+func (h *harness) drain(t *testing.T) {
+	t.Helper()
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if !h.router.Drain(ctx) {
+		t.Fatal("router did not drain")
+	}
+}
+
+// commandReplies returns the replies that carried a chat command outcome.
+func commandReplies(h *harness) []Result {
+	var out []Result
+	for _, r := range h.replier.calls() {
+		if r.Outcome == OutcomeChatCommand {
+			out = append(out, r)
+		}
+	}
+	return out
+}
+
+// A linked member's /brief is answered once, in the chat it came from, and never
+// becomes a chat message or an agent turn. A redelivery of the same event is a
+// duplicate and is not answered again.
+func TestRouter_ChatCommand_AnsweredOnceAndNeverReachesTheAgent(t *testing.T) {
+	h := newHarness(t)
+	cmd := &fakeCommander{reply: channel.Message{Text: "Nothing needs you today."}, handled: true}
+	h.setCommander(cmd)
+
+	msg := commandMessage(t, "/brief")
+	if err := h.router.Handle(context.Background(), msg); err != nil {
+		t.Fatalf("Handle: %v", err)
+	}
+	h.drain(t)
+	replies := commandReplies(h)
+	if len(replies) != 1 || replies[0].CommandReply != "Nothing needs you today." {
+		t.Fatalf("command replies = %+v, want one reply with the brief text", replies)
+	}
+	if h.binder.ensureCalls != 0 || h.binder.lastAppend.Message.MessageID != "" || h.tasks.calls() != 0 {
+		t.Fatal("a chat command must not open a session, persist a message or enqueue an agent run")
+	}
+
+	got := cmd.calls()
+	if len(got) != 1 {
+		t.Fatalf("commander asked %d times, want 1", len(got))
+	}
+	want := channel.Command{
+		Sender: channel.Sender{
+			ChannelType:    channel.TypeFeishu,
+			InstallationID: activeResolved(t).ID,
+			ChannelUserID:  "ou_user_a",
+		},
+		Name: channel.CommandBrief,
+	}
+	if got[0] != want {
+		t.Fatalf("command = %+v, want %+v", got[0], want)
+	}
+
+	// The platform redelivers the same event: the dedup claim drops it, so the
+	// command is not answered a second time.
+	h.dedup.claimErr = ErrDuplicate
+	if err := h.router.Handle(context.Background(), msg); err != nil {
+		t.Fatalf("redelivery: %v", err)
+	}
+	h.drain(t)
+	if n := len(commandReplies(h)); n != 1 {
+		t.Fatalf("a redelivered command was answered %d times in total, want 1", n)
+	}
+	if n := len(cmd.calls()); n != 1 {
+		t.Fatalf("a redelivered command reached the commander %d times in total, want 1", n)
+	}
+}
+
+// A sender with no binding gets the ordinary path: the commander declines, and
+// the engine gives the binding prompt, not the command's data.
+func TestRouter_ChatCommand_UnboundSenderGetsTheBindingPrompt(t *testing.T) {
+	h := newHarness(t)
+	h.ident.err = ErrSenderUnbound
+	cmd := &fakeCommander{reply: channel.Message{Text: "should not be sent"}, handled: false}
+	h.setCommander(cmd)
+
+	if err := h.router.Handle(context.Background(), commandMessage(t, "/decisions")); err != nil {
+		t.Fatalf("Handle: %v", err)
+	}
+	h.drain(t)
+	if n := len(cmd.calls()); n != 1 {
+		t.Fatalf("commander asked %d times, want 1", n)
+	}
+	results := h.replier.calls()
+	if len(results) != 1 || results[0].Outcome != OutcomeNeedsBinding {
+		t.Fatalf("results = %+v, want one needs_binding", results)
+	}
+	if len(commandReplies(h)) != 0 {
+		t.Fatal("an unbound sender was answered with command data")
+	}
+}
+
+// A bot's command is consumed without a reply, and it does not get the binding
+// prompt either.
+func TestRouter_ChatCommand_BotSenderGetsNoReply(t *testing.T) {
+	h := newHarness(t)
+	h.ident.err = ErrSenderUnbound
+	cmd := &fakeCommander{handled: true}
+	h.setCommander(cmd)
+
+	msg := commandMessage(t, "/brief")
+	msg.Source.SenderIsBot = true
+	if err := h.router.Handle(context.Background(), msg); err != nil {
+		t.Fatalf("Handle: %v", err)
+	}
+	h.drain(t)
+	if got := cmd.calls(); len(got) != 1 || !got[0].IsBot {
+		t.Fatalf("commander calls = %+v, want one from a bot sender", got)
+	}
+	replies := commandReplies(h)
+	if len(replies) != 1 || replies[0].CommandReply != "" {
+		t.Fatalf("bot command replies = %+v, want one consumed outcome with no text", replies)
+	}
+	if n := len(h.replier.calls()); n != 1 {
+		t.Fatalf("a bot command produced %d outcomes, want only the consumed one", n)
+	}
+}
+
+// Only a whole-line command is a command: a word that starts with one, or a
+// message that mentions one, is ordinary text.
+func TestRouter_ChatCommand_OnlyTheWholeLineIsACommand(t *testing.T) {
+	h := newHarness(t)
+	cmd := &fakeCommander{handled: true}
+	h.setCommander(cmd)
+
+	if err := h.router.Handle(context.Background(), commandMessage(t, "/briefing please")); err != nil {
+		t.Fatalf("Handle: %v", err)
+	}
+	if n := len(cmd.calls()); n != 0 {
+		t.Fatalf("a word starting with a command reached the commander %d times", n)
+	}
+}
+
+// A failed command lookup is an infrastructure failure: the claim is released so
+// the platform's redelivery can try again, and nothing is answered.
+func TestRouter_ChatCommand_FailureReleasesTheClaim(t *testing.T) {
+	h := newHarness(t)
+	h.setCommander(&fakeCommander{err: errors.New("database unavailable")})
+
+	if err := h.router.Handle(context.Background(), commandMessage(t, "/brief")); err == nil {
+		t.Fatal("a failed command lookup must be an error")
+	}
+	if h.dedup.relCalls != 1 {
+		t.Fatalf("claim releases = %d, want 1", h.dedup.relCalls)
+	}
+	if n := len(h.replier.calls()); n != 0 {
+		t.Fatalf("a failed command produced %d outcomes", n)
+	}
+}

@@ -699,7 +699,7 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 				})
 				mediaResolver := lark.NewFeishuMediaResolver(larkClient, installSvc, store, engine.NewDBMediaIntentLedger(queries), slog.Default())
 				channelRouter.Register(channel.TypeFeishu, lark.NewFeishuResolverSet(
-					cs, feishuSession, auditLogger, resolverReplier, typingIndicator, mediaResolver,
+					cs, feishuSession, auditLogger, resolverReplier, typingIndicator, mediaResolver, channelActions,
 				))
 				slog.Info("lark inbound pipeline wired", "connector", connectorLabel)
 

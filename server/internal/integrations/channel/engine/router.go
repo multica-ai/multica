@@ -366,6 +366,37 @@ func (r *Router) processClaimed(ctx context.Context, set ResolverSet, msg channe
 		return r.drop(ctx, set, msg, inst.ID, DropReasonNotAddressedInGroup), finalizeMark, nil
 	}
 
+	// 3b. Chat commands (spec 2.7): /brief and /decisions are answered from the
+	//     sender's binding and never become a chat message or an agent turn. The
+	//     step runs after the dedup claim, so a redelivered command is answered
+	//     once, and before identity, so a bot's command is consumed without the
+	//     binding prompt. An unlinked sender is not handled here and takes the
+	//     ordinary path, which gives the binding prompt.
+	if set.Commands != nil {
+		if name, ok := channel.ParseChatCommand(msg.CommandText); ok {
+			reply, handled, err := set.Commands.Command(ctx, channel.Command{
+				Sender: channel.Sender{
+					ChannelType:    msg.Source.ChannelType,
+					InstallationID: inst.ID,
+					ChannelUserID:  msg.Source.SenderID,
+					IsBot:          msg.Source.SenderIsBot,
+				},
+				Name: name,
+			})
+			if err != nil {
+				return Result{}, finalizeRelease, fmt.Errorf("answer chat command %s: %w", name, err)
+			}
+			if handled {
+				return Result{
+					Outcome:        OutcomeChatCommand,
+					InstallationID: inst.ID,
+					Sender:         msg.Source.SenderID,
+					CommandReply:   reply.Text,
+				}, finalizeMark, nil
+			}
+		}
+	}
+
 	// 4. Identity check: map the platform sender to a Multica user and
 	//    re-verify workspace membership (no binding->member FK; MUL-3515 §4).
 	identity, err := set.Identity.ResolveSender(ctx, inst, msg)

@@ -146,6 +146,8 @@ func channelMessageFromLark(lm InboundMessage) channel.InboundMessage {
 			ChatID:      string(lm.ChatID),
 			ChatType:    channel.ChatType(string(lm.ChatType)),
 			SenderID:    string(lm.SenderOpenID),
+			// Lark marks a bot or application sender with sender_type "app".
+			SenderIsBot: lm.SenderType == larkSenderTypeApp,
 			ThreadID:    lm.ThreadID,
 		},
 		Raw: raw,

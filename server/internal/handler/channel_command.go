@@ -29,6 +29,11 @@ const (
 // is false when the sender is not a member of a workspace, so the message takes
 // the ordinary path and the binding prompt.
 func (a *ChannelActions) Command(ctx context.Context, c channel.Command) (channel.Message, bool, error) {
+	// A bot or agent sender is consumed without a reply: its command is never
+	// answered, and it does not fall through to the binding prompt either.
+	if c.IsBot {
+		return channel.Message{}, true, nil
+	}
 	binding, ok, err := a.binding(ctx, c.Sender)
 	if err != nil || !ok {
 		return channel.Message{}, false, err

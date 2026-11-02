@@ -92,6 +92,7 @@ func (d *LarkJSONFrameDecoder) Decode(payload []byte, inst Installation) (Inboun
 		ChatType:     normalizeChatType(evt.Message.ChatType),
 		MessageID:    evt.Message.MessageID,
 		SenderOpenID: OpenID(evt.Sender.SenderID.OpenID),
+		SenderType:   evt.Sender.SenderType,
 		MessageType:  evt.Message.MessageType,
 		Content:      evt.Message.Content,
 		CreateTime:   evt.Message.CreateTime,
@@ -154,6 +155,10 @@ type larkEventHeader struct {
 	AppID      string `json:"app_id"`
 	TenantKey  string `json:"tenant_key"`
 }
+
+// larkSenderTypeApp is the sender.sender_type of a message a bot or application
+// sent, as opposed to a person ("user").
+const larkSenderTypeApp = "app"
 
 // larkMessageReceiveEvent is the documented payload of
 // im.message.receive_v1.

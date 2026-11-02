@@ -979,3 +979,33 @@ func TestLarkOutcomeReplierSendsToChatWithoutTriggerMessage(t *testing.T) {
 		t.Errorf("no trigger message id means chat-level send; got %+v", stub.textOut[0].ReplyTarget)
 	}
 }
+
+// A chat command's answer goes out as a notice card in the chat it came from,
+// through the same send path as the other chat notices. A bot's command has no
+// text, so it sends nothing.
+func TestLarkOutcomeReplierChatCommandSendsTheAnswer(t *testing.T) {
+	log := slog.New(slog.NewTextHandler(io.Discard, nil))
+	newReplier := func(stub *stubAPIClientWithRecorder) OutcomeReplier {
+		return NewLarkOutcomeReplier(OutcomeReplierConfig{
+			APIClient: stub, BindingSvc: &BindingTokenService{}, Credentials: stubCredentialsResolver{secret: "s"},
+			Queries: stubReplierQueries{}, AppURL: "https://multica.test", Logger: log,
+		})
+	}
+
+	stub := &stubAPIClientWithRecorder{configured: true}
+	newReplier(stub).Reply(context.Background(), Installation{}, InboundMessage{ChatID: "oc_chat"},
+		DispatchResult{Outcome: OutcomeChatCommand, CommandReply: "Nothing needs you today."})
+	if len(stub.interactiveOut) != 1 {
+		t.Fatalf("expected one command card, got %d", len(stub.interactiveOut))
+	}
+	if stub.interactiveOut[0].ChatID != "oc_chat" || !contains(stub.interactiveOut[0].CardJSON, "Nothing needs you today.") {
+		t.Fatalf("command card = %+v, want the answer in the chat it came from", stub.interactiveOut[0])
+	}
+
+	silent := &stubAPIClientWithRecorder{configured: true}
+	newReplier(silent).Reply(context.Background(), Installation{}, InboundMessage{ChatID: "oc_chat"},
+		DispatchResult{Outcome: OutcomeChatCommand})
+	if len(silent.interactiveOut) != 0 || len(silent.textOut) != 0 {
+		t.Fatal("a bot's command with no answer sent a message")
+	}
+}

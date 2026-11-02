@@ -35,6 +35,9 @@ const (
 	// refuses the same person at the same point; this is that verdict on the
 	// channel side.
 	OutcomeInvokeDenied Outcome = "invoke_denied"
+	// OutcomeChatCommand — /brief or /decisions was answered for a linked
+	// member. The command is not a chat message and never reaches the agent.
+	OutcomeChatCommand Outcome = "chat_command"
 )
 
 // DropReason enumerates the drop-audit categories. Values match the legacy
@@ -79,6 +82,9 @@ type Result struct {
 	// message also carried downloadable media. Repliers use it to tell the
 	// sender to include that media again with the corrected command.
 	IssueUsageHadMedia bool
+	// CommandReply is the text of a chat command's answer, for OutcomeChatCommand.
+	// Empty means the command was consumed without a reply (a bot's command).
+	CommandReply string
 	// runScheduled reports whether this ingest scheduled a normal chat run.
 	// It is Router-internal state: repliers must continue to use Outcome.
 	runScheduled bool
@@ -448,9 +454,16 @@ type TypingNotifier interface {
 	OnSettled(ctx context.Context, sessionID pgtype.UUID, scope TypingSettlement)
 }
 
+// ChatCommander answers a chat command (/brief, /decisions) for a sender. It is
+// channel.ActionHandler's Command: handled is false when the sender has no
+// binding to a workspace member, and the message then takes the ordinary path.
+type ChatCommander interface {
+	Command(ctx context.Context, c channel.Command) (reply channel.Message, handled bool, err error)
+}
+
 // ResolverSet is the per-platform bundle the Router runs the pipeline through.
-// Installation/Identity/Dedup/Session/Audit are required; Replier/Typing are
-// optional. OriginType is the issue.origin_type label written for /issue
+// Installation/Identity/Dedup/Session/Audit are required; Replier/Typing/Commands
+// are optional. OriginType is the issue.origin_type label written for /issue
 // commands from this channel (Feishu: "lark_chat").
 type ResolverSet struct {
 	Installation InstallationResolver
@@ -461,7 +474,9 @@ type ResolverSet struct {
 	Audit        Auditor
 	Replier      OutboundReplier
 	Typing       TypingNotifier
-	OriginType   string
+	// Commands answers /brief and /decisions. Nil leaves them as ordinary text.
+	Commands   ChatCommander
+	OriginType string
 }
 
 // IssueCreator is the narrow subset of service.IssueService the Router needs

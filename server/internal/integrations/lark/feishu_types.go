@@ -21,7 +21,11 @@ type InboundMessage struct {
 	ChatType     ChatType
 	MessageID    string
 	SenderOpenID OpenID
-	Body         string
+	// SenderType is Lark's sender.sender_type: "user", "app" (a bot or
+	// application) or "anonymous". It travels in Raw so the Router can tell a
+	// bot's command from a person's.
+	SenderType string
+	Body       string
 	// Content is the raw msg_type-specific JSON string Lark sends in
 	// event.message.content. Text/post decoding consumes it immediately; media
 	// ingestion keeps it so the adapter can extract image_key/file_key before
@@ -85,6 +89,8 @@ const (
 	OutcomeAgentOffline Outcome = "agent_offline"
 	// OutcomeAgentArchived — landed, but the agent is archived.
 	OutcomeAgentArchived Outcome = "agent_archived"
+	// OutcomeChatCommand — /brief or /decisions was answered; the reply is CommandReply.
+	OutcomeChatCommand Outcome = "chat_command"
 )
 
 // DispatchResult is the Feishu-side verdict the OutcomeReplier consumes to
@@ -112,4 +118,6 @@ type DispatchResult struct {
 	// IssueUsageHadMedia asks the usage reply to tell the sender to include the
 	// current message's media again with the corrected command.
 	IssueUsageHadMedia bool
+	// CommandReply is the answer to /brief or /decisions, for OutcomeChatCommand.
+	CommandReply string
 }

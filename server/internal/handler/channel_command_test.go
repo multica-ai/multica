@@ -146,3 +146,60 @@ func decisionLines(text string) []string {
 	}
 	return out
 }
+
+// A bot or agent sender is consumed without a reply, even when its binding is
+// a member's: an agent never reads the brief or the decisions through a chat.
+func TestChannelCommand_BotSenderIsConsumedWithoutAReply(t *testing.T) {
+	chatCommandAppURL(t)
+	env := newDigestEnv(t)
+	var brief BriefResponse
+	env.publish(t, "", "", briefRequestBody(nil)).Want(http.StatusCreated).JSON(&brief)
+
+	member := dbfx.User(t, "Bot caller", fmt.Sprintf("chat-bot-%s@example.com", uuid.NewString()))
+	dbfx.Member(t, env.WorkspaceID, member, "member")
+	installs := uuid.NewString()
+	sender := bindChatSender(t, installs, env.WorkspaceID, member)
+
+	msg, handled, err := NewChannelActions(testHandler, service.NewActionSigner([]byte(chatActionTestSecret))).Command(
+		context.Background(),
+		channel.Command{
+			Sender: channel.Sender{ChannelType: "telegram", InstallationID: chatUUID(t, installs), ChannelUserID: sender, IsBot: true},
+			Name:   channel.CommandBrief,
+		},
+	)
+	if err != nil {
+		t.Fatalf("Command: %v", err)
+	}
+	if !handled || msg.Text != "" {
+		t.Fatalf("a bot's /brief = %q (handled %v), want consumed with no reply", msg.Text, handled)
+	}
+}
+
+// A Lark member's /brief is answered with the same text as the other platforms:
+// the binding is a feishu binding, and the sender is that member.
+func TestChannelCommandLark_BriefRepliesToABoundLarkMember(t *testing.T) {
+	chatCommandAppURL(t)
+	env := newDigestEnv(t)
+	var brief BriefResponse
+	env.publish(t, "", "", briefRequestBody(nil)).Want(http.StatusCreated).JSON(&brief)
+
+	member := dbfx.User(t, "Lark reader", fmt.Sprintf("chat-lark-%s@example.com", uuid.NewString()))
+	dbfx.Member(t, env.WorkspaceID, member, "member")
+	installs := uuid.NewString()
+	openID := bindLarkSender(t, installs, env.WorkspaceID, member)
+
+	msg, handled, err := NewChannelActions(testHandler, service.NewActionSigner([]byte(chatActionTestSecret))).Command(
+		context.Background(),
+		channel.Command{
+			Sender: channel.Sender{ChannelType: channel.TypeFeishu, InstallationID: chatUUID(t, installs), ChannelUserID: openID},
+			Name:   channel.CommandBrief,
+		},
+	)
+	if err != nil {
+		t.Fatalf("Command: %v", err)
+	}
+	want := "Nothing needs you today.\n\nBrief: https://app.example/" + workspaceSlug(t, env.WorkspaceID) + "/office?brief=" + brief.ID
+	if !handled || msg.Text != want {
+		t.Fatalf("Lark /brief = %q (handled %v), want %q", msg.Text, handled, want)
+	}
+}
