@@ -25,6 +25,15 @@ on:
         type: choice
         default: diff
         options: [diff, deploy]
+      stack:
+        description: "Which stack to act on"
+        type: choice
+        default: Multica-AgentRuntime
+        options: [Multica-AgentRuntime, Multica-SelfHost]
+      allowed_emails:
+        description: "Multica-SelfHost only: comma-separated addresses allowed to sign up"
+        type: string
+        default: ""
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
@@ -79,10 +88,11 @@ jobs:
         working-directory: infrastructure
         run: pnpm exec cdk synth Multica-SelfHost -c selfHost=true -c allowedEmails=ci@example.com --quiet
 
-  # Needs an OIDC role in the target account (secret AWS_DEPLOY_ROLE_ARN) and a
-  # GitHub environment named aws-agent-runtime. Put required reviewers on that
-  # environment: a deploy replaces the instance whenever the bootstrap script
-  # changed, which kills any run in flight on it.
+  # Needs an OIDC role in the target account (secret AWS_DEPLOY_ROLE_ARN), the
+  # AWS_REGION variable, and a GitHub environment named aws-agent-runtime. Put
+  # required reviewers on that environment: an agent-runtime deploy replaces the
+  # instance whenever the bootstrap script changed, which kills any run in flight
+  # on it, and a self-host deploy restarts the server.
   deploy:
     if: github.event_name == 'workflow_dispatch'
     needs: validate
@@ -114,11 +124,31 @@ jobs:
           aws-region: ${{ vars.AWS_REGION }}
           role-session-name: multica-infrastructure-${{ github.run_id }}
 
+      # Multica-SelfHost needs its signup allowlist, which is not committed: port
+      # 443 is open to the internet, so an empty allowlist would let anyone who
+      # finds the URL create an account. The agent runtime's daemon id is pinned
+      # in cdk.json and needs nothing here.
+      - name: Resolve stack context
+        id: context
+        env:
+          STACK: ${{ inputs.stack }}
+          ALLOWED_EMAILS: ${{ inputs.allowed_emails }}
+        run: |
+          if [ "$STACK" = "Multica-SelfHost" ]; then
+            if [ -z "$ALLOWED_EMAILS" ]; then
+              echo "::error::allowed_emails is required for Multica-SelfHost: port 443 is open to the internet, so without an allowlist anyone who finds the URL can sign up."
+              exit 1
+            fi
+            echo "args=-c selfHost=true -c allowedEmails=$ALLOWED_EMAILS" >> "$GITHUB_OUTPUT"
+          else
+            echo "args=" >> "$GITHUB_OUTPUT"
+          fi
+
       # Only for a diff run: `cdk deploy` prints the same change set itself.
       - name: Diff
         if: inputs.action == 'diff'
         working-directory: infrastructure
-        run: pnpm exec cdk diff
+        run: pnpm exec cdk diff ${{ inputs.stack }} ${{ steps.context.outputs.args }}
 
       # --require-approval broadening, not never: a change that widens a
       # security group or an IAM policy fails the job instead of applying
@@ -127,4 +157,4 @@ jobs:
       - name: Deploy
         if: inputs.action == 'deploy'
         working-directory: infrastructure
-        run: pnpm exec cdk deploy --require-approval broadening --progress events
+        run: pnpm exec cdk deploy ${{ inputs.stack }} ${{ steps.context.outputs.args }} --require-approval broadening --progress events
