@@ -56,12 +56,68 @@ native generation. The live test verifies the native CLI; the cross-container
 acceptance additionally requires deploying the daemon and running the commands
 below from a separate caller without provider credentials.
 
-Antigravity native execution is not implemented by this adapter. In the
-inspected `agy 1.4.12`, `image-generator` is a built-in subagent invoked from a
-normal conversation; `--agent image-generator` is rejected as an unknown custom
-agent. An authenticated host trace is still required to establish its artifact
-receipt and image-edit contract. Merely finding `agy` does not advertise
-`media-image-agy-v1`.
+## Native Antigravity images
+
+The built-in `antigravity` runtime advertises `media-image-agy-v1` only when its
+host has a readable `.gemini/antigravity-cli/antigravity-oauth-token` under
+`HOME`, containing a nonempty `token.access_token` and either absent or
+`consumer` `auth_method`, and `agy models` exits successfully with a nonempty
+catalog within 15 seconds. The file may be a symlink to a regular file. Custom
+profiles do not inherit this capability. Login or catalog changes refresh the
+runtime registration even when the CLI version stays the same.
+
+Each assignment starts one `agy --output-format stream-json` invocation with
+`HOME=<job-directory>/agy-home`. Only the host authentication file is linked
+into its private `.gemini/antigravity-cli` directory; credentials are not copied
+into requests, inputs, receipts or uploads. The normal child environment filter
+also removes inherited Labrastro task/account variables. Sessions, transcripts,
+logs and images remain under the job directory and are removed after transfer.
+`ANTIGRAVITY_APP_DATA_DIR` is insufficient for this isolation in `agy 1.4.12`.
+Local symbolic-link support is required. The CLI owns token refresh.
+
+The prompt invokes the built-in `image-generator` subagent and asks it to accept
+the first successful image without refinement. This is a normal print-mode
+conversation, not `--agent image-generator`. References are supplied through
+native `generate_image` `ImagePaths`. The adapter associates the stream's
+conversation and image-generator child with their native `transcript.jsonl`
+records. It accepts only the `GENERIC` result immediately following a
+`generate_image` call, using its image media URI or native saved-path line.
+An assistant response or a `view_file` image is not a generation receipt.
+If the child retries internally, the last successful native receipt is used.
+The artifact must resolve to a nonempty regular file inside the **parent**
+conversation's `brain/<conversation-id>/` directory. Foreign conversations,
+ambiguous producers and escaping paths fail closed.
+
+A valid image takes precedence over a trailing quota error, so it is uploaded
+without another generation. Without an image, explicit quota/rate-limit errors
+in the terminal result, native generation transcript or native error log map
+to `media.RateLimitError` and the existing cooldown/reassignment path. Other
+failures do not replay generation. Cancellation kills the owned process tree.
+Like ordinary native Antigravity tasks, execution uses
+`--dangerously-skip-permissions`; private `HOME` isolates session state, not OS
+access. It does not provide the Codex adapter's protocol-level tool allowlist.
+
+`image-generate` and `image-edit` use Antigravity's native image model;
+`--model` and `--duration` are rejected. `--size` and `--aspect` are prompt
+instructions, not exact pixel guarantees. Ordinary tests replay the captured
+`agy 1.4.12` generate/edit contracts and use test-owned subprocesses with
+synthetic credentials. The DB-backed `TestMediaAntigravityCredentialSeparatedCLI`
+runs an actual caller CLI in an empty home against an `httptest` Server and a
+separate host Executor. It covers `agy`/`auto`, generation/editing, idempotent
+upload retry, quota cooldown/reassignment and image attachment receipts without
+provider credentials on the caller. This verifies the cross-container protocol
+boundary without deploying a production daemon.
+
+An explicitly authorized host smoke test exercises the installed native CLI:
+
+```sh
+cd server
+MULTICA_RUN_REAL_AGENT_SMOKE=1 go test -tags=agentintegration ./pkg/agent \
+  -run '^TestAntigravityNativeImageLive$' -count=1 -v
+```
+
+Set `MULTICA_MEDIA_SMOKE_OUTPUT_DIR` to an empty directory to retain the
+generated and edited images for inspection. Existing files are not overwritten.
 
 ## Request and receipt
 

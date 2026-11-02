@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/multica-ai/multica/server/internal/testutil"
+	"github.com/multica-ai/multica/server/internal/testutil/agyimage"
 )
 
 // TestMain redirects the home environment variables to one scratch directory
@@ -17,6 +18,10 @@ import (
 // LOCALAPPDATA on Windows. Process-wide redirection isolates tests that forget
 // their own redirect; per-test t.Setenv overrides still take precedence.
 func TestMain(m *testing.M) {
+	if os.Getenv(agyimage.ModeEnv) != "" {
+		agyimage.Run()
+		os.Exit(0)
+	}
 	// Native discovery accepts an executable path without test flags. Handle
 	// its test-owned CLI before testing parses the provider's arguments.
 	if os.Getenv("MULTICA_TEST_MEDIA_PROBE") != "" {
