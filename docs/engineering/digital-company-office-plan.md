@@ -142,6 +142,159 @@ K5 and K6.
 | 8.2 | Release note and upgrade notes: `office_room` removed, new env vars, optional sidecar. |
 | 8.3 | Manual verification script on the boss's machine: Hermes online, daily brief generated, a proposal approved from a brief, a document saved, drafted, published and found by an agent. |
 
+## Phases 2 to 4: how the remaining work is organised
+
+The first part of this plan (WS0 to WS8) delivered phase 1 and the first slices of phases
+2 and 3. The workstreams below implement the rest of the spec: **WS9** completes phase 2,
+**WS10** is phase 3, **WS11** is phase 4 and **WS12** is release. The conventions of
+"How to read this plan" apply unchanged. Migration numbers: WS9 700 to 729, WS10 730 to
+779, WS11 780 to 849.
+
+Two rules added for this stage:
+
+- **A spike before a hot path.** Steps marked *spike* are timeboxed experiments whose
+  result is written into the step's commit message before the dependent step starts
+  (the budget gate in the claim path, the Telegram notifier). If a spike fails its check,
+  the dependent step uses the stated fallback.
+- **Every table ships with its writer, its reader and its delete path.** Workspace
+  deletion (`workspace_delete_manifest_test.go`) lists each new table; the append-only
+  tables are the only ones allowed no delete query inside the application, and are removed
+  only by workspace teardown.
+
+### Dependency map for WS9 to WS12
+
+```
+WS9  Phase 2 completion
+  9.1-9.3 charters ───────────────┬─> 9.4 compliance ─> 9.5 operating review
+  9.6-9.7 proposal lifecycle ─────┤                         │
+  9.8 inquiries, 9.9 attention    │                         │
+  9.10-9.11 chat delivery, 9.12 feedback, 9.13 catch-up     │
+                                  v                         v
+WS10 Phase 3 ─ 10.1 proposal kinds ─> 10.2-10.5 pipeline ─> 10.15 pipeline UI
+  10.6-10.14 knowledge system (parallel with the pipeline) ─┤
+  10.16 directory ──────────────────────────────────────────┤
+  10.17 operate/learn ─> 10.18 starter company ─> 10.19 secretary updates ─> 10.20
+                                                          │
+WS11 Phase 4 ─ 11.1-11.3 metrics + goals ─> 11.5 controls ─> 11.6-11.8 budgets
+  11.4 governance log (needed by 11.5, 11.8, 11.10, 11.14)
+  11.9 autonomy ─> 11.10 standing approvals
+  11.11 scorecards ─> 11.12 reviews ─> 11.13 revisions ─> 11.14 org changes ─> 11.15
+  11.16 retros, 11.17 scale, 11.18 export, 11.19 health, 11.20 security
+                                                          │
+WS12 Release ─ docs, company-day scenarios, drills, performance, upgrade notes
+```
+
+What can run in parallel: within WS9 the charter track (9.1 to 9.5), the proposal track
+(9.6 to 9.7), delivery (9.10 to 9.11) and the small items (9.8, 9.9, 9.12, 9.13) touch
+different files. WS10's knowledge system (10.6 to 10.14) is independent of its pipeline
+(10.1 to 10.5, 10.15). WS11's goals track and its budget track are independent; the
+governance log (11.4) comes first because the others write to it.
+
+## WS9: Phase 2 completion (L)
+
+| Step | Work | Files | Check |
+|---|---|---|---|
+| 9.1 | Migrations 700 to 704: `squad_charter`, `squad_routine` (primary keys by the concurrent pattern, indexes). Queries and sqlc. Handlers `GET/PUT /api/squads/{id}/charter` with revision conflict, routines list/link/unlink, cadence presets creating autopilots through the autopilot service. Workspace deletion entries. | `server/migrations/*`, `queries/squad_charter.sql`, `handler/squad_charter.go`, router | Go: permissions (admin, creator, member read), revision 409, preset schedules, isolation |
+| 9.2 | Core types, zod and queries for charter and routines. System-managed "Your charter" briefing block (and "Your goals" placeholder for 11.2) in `squad_briefing.go`. | `packages/core/office/charter-*.ts`, `handler/squad_briefing.go` | Schema tests; briefing text test; block absent without a charter |
+| 9.3 | Squad panel: Charter tab (view/edit, intake, response hours) and Routines list with state chips, Run now, Pause, Add routine. Six locales. | `packages/views/office/components/office-squad-panel*`, new `office-charter-tab.tsx`, `office-routines.tsx` | View tests; locale parity |
+| 9.4 | Compliance derivation service (states in spec 2.2, expected output per kind), `charter` section in the digest, `silent` flag, workspace counts; digest schema in core. | `service/routine_compliance.go`, `service/digest.go`, `core/office/digest-schema.ts` | Go: one test per state and output kind; `late` with grace; `silent`; isolation |
+| 9.5 | Operating review: on first charter save create the weekly "Operating review" autopilot assigned to the squad with the system-built description; setting to disable; compliance covers it. | `service/operating_review.go`, charter handler | Go: created once, description contains charter and goals, disabling pauses it |
+| 9.6 | Proposal lifecycle: migration (states `revising`, `expired`, `revision`, `expires_at`, `snoozed_until`); decision values `revise` and `snooze`; `multica proposal revise`; daily expiry job with one leader wake-up; related-prior-art notes on create (title similarity and decisions-base search at 0.75, never blocking). | `migrations`, `service/proposal.go`, `handler/proposal.go`, `cmd/multica/cmd_proposal.go`, scheduler job | Go: each transition, cap effects (snooze counts, revise does not count as new), expiry frees the cap, notes; CLI tests |
+| 9.7 | Decisions dialog and brief card: Ask for changes, Decide later, revision history, related prior decisions. Digest and brief show snoozed items only when due. | `office-decisions-dialog.tsx`, `office-brief-dialog.tsx`, core proposals | View tests |
+| 9.8 | `brief_inquiry` migration, `multica brief ask`, daily cap with `inquiry_limit`, answer capture on the leader's reply, digest `inquiries`; Secretary template updated to use the command instead of raw comments. | `migrations`, `handler/brief_inquiry.go`, `cmd_brief.go`, `instruction-templates.ts` | Go: cap, answered detection, isolation; template test |
+| 9.9 | Adaptive attention: `squad_attention` migration, nightly recompute job, caps read by the proposal limits, pin by admin, squad panel display with the reason. | `migrations`, `service/attention.go`, `service/proposal.go` | Go: each band, minimum sample, pin, workspace cap fixed |
+| 9.10 | **Spike** then build the notifier: `channel.Notifier` interface and the Telegram adapter (`sendMessage` with inline keyboard) using the installation credentials and the member binding; `brief_delivery` table and retry job; preferences API and UI; subscriber on `brief:created`; quiet hours. Spike check: a real message reaches a real Telegram chat from a test bot within ten seconds of publish. Fallback if the binding does not hold a chat id for a member: store `chat_id` on the preference at the first inbound message. | `integrations/channel/notifier.go`, `integrations/telegram/*`, `migrations`, `handler/brief_delivery.go`, `core/office/delivery-*.ts`, settings UI | Go: adapter against recorded responses, retry/backoff, quiet hours, failure never fails the brief; manual: real Telegram |
+| 9.11 | Signed action buttons: token format (proposal id, action, expiry, HMAC with the server key), callback endpoint resolving the external user to a member through the binding, owner/admin check, same decision service; `/brief` and `/decisions` commands in the chat integration. Adapters for Slack and Lark behind the interface as 9.11a and 9.11b (own commits; platforms without button support fall back to links). | `integrations/channel/*`, `handler/channel_action.go` | Go: expired, tampered, wrong action, non-owner binding, agent actor, replay |
+| 9.12 | Feedback: `brief_feedback` migration, API, dialog controls, `multica brief feedback --recent`, Secretary template reads it first and records standing preferences; `brief.usefulness` figure. | `migrations`, `handler/brief_feedback.go`, `office-brief-dialog.tsx`, template | Go and view tests; template test |
+| 9.13 | Catch-up job and the workspace setting (`brief_catchup_enabled`, hour). | `service/brief_catchup.go`, scheduler | Go: fires once, skips when a brief exists, skips with the runtime offline, honours the setting |
+| 9.14 | Phase 2 acceptance: scripted scenarios for 2.10 over the API; the Hermes run through Multica's daemon (WS0.2) executed with the boss present; the Telegram run. | `e2e/phase2-*.spec.ts`, runbook in `docs/engineering/runbooks/phase2.md` | Playwright run; manual sign-off recorded in the PR |
+
+PRs: charter track (9.1 to 9.5), lifecycle (9.6 to 9.7), small items (9.8, 9.9, 9.12,
+9.13), delivery (9.10 to 9.11), acceptance (9.14).
+
+## WS10: Phase 3, the company operating system (XL)
+
+| Step | Work | Files | Check |
+|---|---|---|---|
+| 10.1 | Proposal kinds: migration (`kind`, `payload`), the handler registry (`Validate`, `Apply`, `Summarize`), `decision` moved onto it with no behaviour change, `--kind` and kind flags in the CLI, per-kind rendering hooks in views. | `migrations`, `service/proposal_kinds/*.go`, `cmd_proposal.go`, `core/office/proposal-schema.ts` | Go: existing phase 1 tests pass unchanged; unknown kind refused; payload validation per kind |
+| 10.2 | Pipeline and initiative schema (migrations 730 to 739), install service for the default pipeline (custom statuses per stage, workflow with squad handlers, board project, stage metadata), idempotent. | `migrations`, `service/pipeline_install.go`, queries | Go: install twice changes nothing; workflow steps hand to squads; statuses created once |
+| 10.3 | Initiative service and API: create, artifacts rows, advance, attest, send-back, shelve, resume, close, force; stage events; events published; permissions as 3.1. CLI `multica initiative list/show/attest/advance/shelve`. | `service/initiative.go`, `handler/initiative.go`, `cmd_initiative.go` | Go: every transition and refusal; backing issue status follows; handoff assigns the owner squad |
+| 10.4 | Kind handlers `opportunity` (creates the initiative) and `stage_gate` (advances; rejection sends back and wakes the leader); the system files gate proposals when a gate stage is ready; the build stage creates the SDLC build project and kickoff. | `service/proposal_kinds/{opportunity,stage_gate}.go`, `service/initiative_gate.go` | Go: end to end from opportunity to Validate, gate approve and reject, build project created |
+| 10.5 | SLA and flags in the digest: `pipeline` section, `stalled`, artifact progress; the optional brief headings and the relaxed validator (spec 3.7 order) with core schema update. | `service/digest.go`, `handler/brief.go`, core | Go: validator accepts the new order and rejects a wrong one; `Watch` optional |
+| 10.6 | Knowledge taxonomy: `knowledge_kind` migration and seed, `knowledge_link` columns, CLI flags and `template`, required-heading validation, supersession, tags pushed to WeKnora, search filters by kind. | `migrations`, `service/knowledge_kind.go`, `cmd_knowledge.go`, knowledge client | Go with the Fake and recorded WeKnora responses; reject missing headings; supersede hides the old document |
+| 10.7 | `ventures` base and folder-per-initiative: provisioning update, a backfill that adds the base to workspaces already provisioned, resumable. | `service/knowledge_provision.go` | Go: existing workspace gains the base once |
+| 10.8 | Publish policies: migration, resolution (kind over base), `auto_after_review` with `multica knowledge review`, L2 check (stubbed to true until 11.9 and then enforced), governance event writer interface (real in 11.4). | `service/knowledge_policy.go`, handler, CLI | Go: each mode; critic from another squad required; audit call made |
+| 10.9 | The Librarian: instruction template and `knowledge-curator` role, the daily/weekly/monthly routines as charter routines, jobs for freshness, taxonomy audit and link repair; added to the Executive Office squad on setup and by a backfill. | `core/agents/instruction-templates.ts`, `service/knowledge_audit.go`, setup service | Go: freshness creates review requests, audit finds orphans and repairs links; template test |
+| 10.10 | Retrieval eval: `knowledge_eval_case`, runner, hit rate stored and reported in the digest, "add as eval case" action in search results. | `migrations`, `service/knowledge_eval.go`, views | Go: hit-rate arithmetic; a wrong expectation lowers it |
+| 10.11 | WeKnora models step: chat/summary, rerank and vision models from `KNOWLEDGE_LLM_*`, connection test with per-model errors, Wiki on three bases at `focused`, per-base off switch; env and SSRF notes in the self-host docs. Live check against the 9router endpoint on the development machine. | `knowledge/` client, `service/knowledge_provision.go`, `SELF_HOSTING.md` | Contract tests; live: a document yields a Wiki page and a summary |
+| 10.12 | Upload and sources: multipart upload endpoint and drag-and-drop, URL import, Sources panel reading WeKnora data sources, the optional repo-docs sync routine. | `handler/knowledge_upload.go`, `packages/views/knowledge/*` | Go: size limit, kind required, member publish rule; view tests |
+| 10.13 | `knowledge_acl` and per-subject MCP endpoints; agent endpoint assignment recomputed on membership and ACL change; `list_knowledge_bases` hides restricted bases. | `migrations`, `service/knowledge_acl.go` | Go: a restricted base is visible only to listed subjects; a removed member loses access |
+| 10.14 | Deprovisioning job with the seven-day hold, and the per-owner WeKnora account provisioning with one-time password reveal. | `service/knowledge_deprovision.go`, handler | Go: not before the hold; recoverable within it |
+| 10.15 | Pipeline UI: `/pipeline` route (reserved slug), board, initiative panel (overview, artifacts with Waive, thread, gates, timeline), admin Force, Office room badges, nav and desktop wiring, six locales. | `packages/views/pipeline/*`, `apps/web`, `apps/desktop`, `core/paths` | View tests; route and path consistency tests |
+| 10.16 | Directory: endpoint, CLI, briefing text, `squad_request` origin, digest `overdue_requests`. | `handler/squad_directory.go`, migration for the origin check | Go: overdue arithmetic, isolation |
+| 10.17 | Operate and Learn mechanics: the weekly `metrics_report` routine, 30/90-day review gates scheduled by the launch event, the three outcomes (continue, scale, sunset) with their handlers. | `service/initiative_operate.go`, kind handler | Go: gates created on launch, scale creates an initiative at Define, sunset triggers a retro (11.16) |
+| 10.18 | **Starter company.** 10.18a: the squad card schema, apply service (`POST /api/office/company-template/apply`), resumable report, the wizard (runtime choice, selection, estimate, start options) and the idempotency tests. 10.18b to 10.18e: the squad cards and instruction templates by floor: Research (Opportunity Lab, Competitor Intelligence, Customer Voice, plus the existing Market Research); Product (Discovery, Analysis, Planning); Launch (Release & Ops, Growth & GTM, Support); Governance (Finance & Risk, People & Performance with phase 4 fields stubbed). Shared instruction blocks first. | `packages/core/squads/company-template.ts`, `packages/core/agents/instruction-templates.ts`, `service/company_template.go`, `packages/views/office/components/office-company-wizard.tsx` | Core: card schema and every card validates; Go: apply on empty workspace, twice, and interrupted at each step; view: wizard states |
+| 10.19 | Secretary and leader updates: pipeline vocabulary and commands in the Secretary template, Pipeline section guidance, brief validator changes live, leader briefing mentions initiatives owned. | `instruction-templates.ts`, `squad_briefing.go` | Template and briefing tests |
+| 10.20 | Phase 3 acceptance: the scenario of 3.8 over the API with scripted leaders, and the UI checks; runbook for the boss's machine (starter company on a clean workspace). | `e2e/phase3-*.spec.ts`, runbook | Playwright; manual sign-off |
+
+PRs: kinds (10.1), pipeline back end (10.2 to 10.5), knowledge system (10.6 to 10.14 in
+three PRs), pipeline UI (10.15), directory and operate (10.16, 10.17), starter company
+(10.18 in five PRs), secretary updates and acceptance (10.19, 10.20).
+
+## WS11: Phase 4, governance (XL)
+
+| Step | Work | Files | Check |
+|---|---|---|---|
+| 11.1 | Metrics: migrations 780 to 789 (`metric`, `metric_reading`), built-in metric jobs (nightly) for every metric in 4.1, readings API and CLI, the webhook endpoint (token auth, rate limit, scope check), downsampling job. | `migrations`, `service/metrics*.go`, `handler/metrics.go`, `cmd_metric.go` | Go: each built-in metric against fixtures; webhook auth and limits; downsample keeps daily values |
+| 11.2 | Goals and key results: migrations, progress and confidence derivation, API and CLI, planning-cycle job (opens a planning issue per charter squad), proposal kind `goal`, leader briefing "Your goals", operating review reports progress. | `migrations`, `service/goals.go`, `service/proposal_kinds/goal.go`, scheduler | Go: progress and confidence arithmetic including direction and override; planning job idempotent per period |
+| 11.3 | Governance route (reserved slug) and the Goals tab: tree, detail, readings, add reading; brief Goals section guidance. | `packages/views/governance/*`, apps wiring | View tests |
+| 11.4 | `governance_event` migration and writer used by every later step; Log tab with filters and CSV export; the append-only database test (no update or delete statement exists in the queries for this table). | `migrations`, `service/governance_log.go`, views | Go: writer; test asserting the generated queries expose no update or delete for the table |
+| 11.5 | Company controls: `company_state` and quiet-hours settings, enforcement at autopilot dispatch, wakeups, auto-publish and pipeline auto-advance, the held-run state at the claim (shared with 11.7), "pause and stop running work", Office header control, `multica company` commands. | `service/company_state.go`, `service/autopilot.go`, `service/issue_wakeup*.go`, views, CLI | Go: each enforcement point; human and Secretary runs exempt; resume restores; quiet defers |
+| 11.6 | **Spike** then budget accounting: `budget`, `budget_period`, `budget_hold` migrations; attribution (task to squad, floor, initiative), cost source unification with Analytics, incremental job with cursor, counters cache. Spike check: admission cost at the claim stays under 2 ms at p99 with 50 budgets and 10,000 queued tasks. | `migrations`, `service/budget_accounting.go`, shared cost function | Go: attribution cases; estimate equals the Analytics figure; benchmark in the commit message |
+| 11.7 | The gate: `BudgetGate.Admit` in `claimTask` and the batch claim, run classes from the task's originator and source, reservation from the trailing p90, holds recorded once per task, release paths (extend, raise, period roll, cancel), autopilot dispatch check with reason code `budget_hold`. Fallback if the claim query cannot be gated cheaply: gate at the daemon claim handler before calling the service, with the same interface. | `service/task.go`, `service/budget_gate.go`, `service/autopilot.go` | Go: held vs admitted per class and mode; reservation arithmetic; a human run is never held; release makes the task claimable again |
+| 11.8 | Budgets: API, Budgets tab (tree, burn, projected overrun, holds, Extend and Release), `budget` proposal kind, brief Budget section, defaults and `warn` start. | `handler/budget.go`, `service/proposal_kinds/budget.go`, views | Go and view tests; log entries written |
+| 11.9 | Autonomy: `squad.autonomy_level`, the enforcement table of 4.3 (L0 routines held, publish policy checks, standing-approval eligibility), Autonomy tab, squad panel and room tag, changes logged. | `migrations`, `service/autonomy.go`, views | Go: each cell of the table; default level 1 for existing squads |
+| 11.10 | Standing approvals: `approval_policy`, the engine hooked into proposal filing, forbidden classes in code, weekly cap, revoke, `standing_approval` kind, Policies list, "Auto-approved by policy" in the brief, the weekly review flag for reversed approvals. | `service/approval_policy.go`, hook in `service/proposal.go`, views | Go: matches, each refusal reason, every forbidden class, cap, revoke, system actor recorded; an agent cannot edit a policy |
+| 11.11 | Scorecards: `scorecard` migration, nightly job, metric definitions (failure causes split), `insufficient` rule, API for owners and admins and the subject leader. | `service/scorecard.go`, handler | Go: each metric on fixtures; runtime-offline failures not charged to the agent |
+| 11.12 | Reviews: `review` migration, the People & Performance squad card and reviewer template, monthly routine, `multica review publish`, API and Reviews tab, brief People section. | `migrations`, template, `handler/review.go`, views | Go: review must cite a scorecard; visibility rules; recommendation count |
+| 11.13 | Instruction revisions: `agent_instruction_revision` migration, one hook in the agent update service covering every path (API, CLI, templates, imports), rollback endpoint, diff rendering component shared with charter changes. | `migrations`, `service/agent.go`, `packages/views/common/diff-view.tsx` | Go: each update path writes a revision; rollback restores; views test the diff |
+| 11.14 | `org_change` kind with the eight handlers of 4.6 (instruction, skill, charter, autonomy, hire, retire, move, merge), filing permissions, attention accounting, the Decisions rendering per type, governance events. | `service/proposal_kinds/org_change/*.go`, views | Go: each type applies and reverts; hire creates the agent with the squad as home; retire cancels queued tasks and keeps knowledge; merge moves members and routines |
+| 11.15 | Probation: the 14-day job, before/after scorecard comparison, outcome stored, rollback proposal when worse. | `service/probation.go` | Go: improved, neutral, worse; insufficient data defers |
+| 11.16 | Retrospectives: `retro_trigger`, trigger evaluation job for the five triggers, dedupe window, retro issue templates, the `postmortem` and `retrospective` kinds wired, instruction block "search postmortems first". | `service/retro.go`, templates | Go: each trigger fires once per window; issue assigned to the right leader |
+| 11.17 | Scale: `floor_chief`, brief `scope_type`/`scope_id` and the floor heading subset, floor-scoped digest, `digest_mode`, the floor chief template and routine, the pulse endpoint and the Office strip. | `migrations`, `handler/digest.go`, `handler/pulse.go`, template, views | Go: floor digest filters; auto mode switches above 30 squads; pulse cache; view test of the strip |
+| 11.18 | Company as code: export and import endpoints, `multica company export/import`, schema version, idempotent import with a dry-run report. | `service/company_export.go`, CLI | Go: round trip into an empty workspace reproduces structure; secrets and runtimes excluded |
+| 11.19 | System health tab: job status registry (last success, lag), delivery failures, WeKnora health, gate cache age, risk line in the digest for a stuck job. | `service/job_status.go`, views | Go: registry updates from each job; stuck threshold |
+| 11.20 | Security review and retention: tests for the points in 4.9 (signed tokens, policy edit by agents refused, inert Markdown, rate limits), `metric_reading` downsample, review of the service account scope. | tests across packages | Findings recorded in the PR; all fixed or accepted in writing |
+| 11.21 | Phase 4 acceptance: the scenarios of 4.10 over the API (budget hold and extend, policy approve and refuse, pause, review to org change to rollback, retro) and UI checks. | `e2e/phase4-*.spec.ts`, runbook | Playwright; manual sign-off |
+
+PRs: log and controls (11.4, 11.5), metrics and goals (11.1 to 11.3), budgets (11.6 to
+11.8, with the spike result first), autonomy and policies (11.9, 11.10), reviews and org
+changes (11.11 to 11.15), retros and scale (11.16, 11.17), operations (11.18 to 11.20),
+acceptance (11.21).
+
+## WS12: Release (M)
+
+| Step | Work | Check |
+|---|---|---|
+| 12.1 | `apps/docs`: charters and routines, proposals in full, the pipeline and initiatives, knowledge taxonomy and the Librarian, the starter company, goals and metrics, budgets, autonomy and standing approvals, controls and the log, reviews and org changes, delivery to chat apps, company as code. English first, then fr, ja, ko and zh following `conventions.mdx`; update the Secretary and knowledge-base pages. | Link, frontmatter and navigation check; no screenshots invented |
+| 12.2 | The six "company day" scenarios of the roadmap as one scripted run (API, with scripted leaders and a fake clock for schedules) plus the manual runbook for the boss's machine: Hermes through the daemon, Telegram, WeKnora with the LLM, the starter company on a clean workspace. | The script passes on CI-class hardware; the runbook is executed once and signed off |
+| 12.3 | Backup and restore drill: Postgres tables and WeKnora volumes, restore order, company export/import for the structure. | Drill performed on a copy; time and steps recorded |
+| 12.4 | Performance checks: digest with 50 squads and 200 initiatives, claim gate microbenchmark, board with 200 cards, brief length stays within target with the new sections. | Numbers recorded; thresholds in the spec met or the spec updated |
+| 12.5 | Release notes and upgrade notes (new tables, env vars, optional components, migration list), version bump per `.github/RELEASING.md`. | Release checklist complete |
+
+## Traceability: requirement to workstream
+
+| Requirement | Workstreams |
+|---|---|
+| R1 office with many agents and squads | WS1 to WS3, WS10.18 |
+| R2 scales to many squads | WS1, WS2, WS11.17 |
+| R3 full value chain | WS10 (pipeline, starter company), WS6 (`market_research`), build via SDLC squads |
+| R4 boss orchestrates and works with agents | WS3, WS4, WS9.6 to 9.7, WS11.5 |
+| R5 proactive agents | WS4, WS9.1 to 9.9, WS10.4 |
+| R6 Hermes Secretary, daily report, boss decides | WS5, WS6, WS9.10 to 9.13, WS10.19 |
+| R7 company knowledge base | WS7, WS10.6 to 10.14 |
+| R8 boss accountable, nothing runs away | WS4 limits, WS9.9, WS11 |
+
 ## Delivery order
 
 1. WS0.
@@ -154,6 +307,13 @@ K5 and K6.
 Each PR leaves the product working, and nothing is exposed that cannot be turned off:
 the Secretary and the knowledge base are opt-in per workspace.
 
+For the remaining work the order is: WS9 (charters, lifecycle, delivery in parallel),
+then WS10 (kinds first, pipeline and knowledge system in parallel, starter company
+last), then WS11 (log, controls and goals first; budgets after the spike; autonomy and
+policies; reviews and org changes; scale), then WS12. The starter company (10.18) is
+built before WS11 but its phase 4 fields (goals scaffold, budget shares, autonomy
+defaults) are stubbed and completed in 11.2, 11.8 and 11.9.
+
 ## Risks that change the plan
 
 - **Engine rebuild (WS1)** is the largest unknown. If the 3 x 2 grid cannot meet the
@@ -165,34 +325,37 @@ the Secretary and the knowledge base are opt-in per workspace.
   bump is its own step with the contract tests re-recorded.
 - **Embedding model choice** is fixed per knowledge base at creation; changing it later
   means re-ingesting. Decide before K1.3 creates any KB.
+- **The budget gate (11.6, 11.7)** is the riskiest step of phase 4: it sits in the claim
+  path. The spike result decides between the service claim and the daemon handler as the
+  gate's home; nothing else in WS11 depends on which.
+- **The Telegram notifier (9.10)** depends on the binding holding a chat id. The
+  fallback stores it at the first inbound message.
+- **Forty instruction templates (10.18)** are the largest content task. Shared blocks
+  are written first, floors land one PR at a time, and the weekly reviews and boss
+  feedback are the long-run quality loop.
+- **Order inside WS10** matters: proposal kinds (10.1) before anything files a gate or an
+  opportunity; the Librarian (10.9) needs the Executive Office squad from setup.
+- **Hermes on the boss's machine** gates the acceptance of WS9, WS10 and WS11. Scripted
+  leaders prove the platform; the runbook proves the Secretary.
 
 ## Implementation status
 
-Status at the completion round, measured against the code on `main`. "Done" means
-implemented and covered by tests that ran; "Partial" and "Open" are listed with the
-reason.
+Measured against the code on `main`. "Done" means implemented and covered by tests that
+ran; "Open" means specified here and not built. Rows for WS9 to WS12 are all open.
 
 | Area | Status | Notes |
 |---|---|---|
-| WS1 Engine: 6 rooms x 10 desks | Done | Figure is about 37 px at 1280 x 720; the spec's 64 px target was unattainable (corrected in the spec). |
-| WS2 Floors, seats, home squad | Done | Backend, core `layoutFloor`, migrations 601–607. |
-| WS3 Office on floors | Done | Floor tabs, first-run card, unseated tray, squad panel. `agent.office_room` removed (608). |
-| WS4 Proposals | Done | Backend, limits, decisions, CLI, leader briefing (in `handler/squad_briefing.go`, not `execenv`). |
-| WS4 4.5 Decisions dialog, room badge | Done | |
-| WS5 Digest and briefs | Done | Backend, CLI, inbox type. |
-| WS5 5.3 Brief dialog, Generate now | Completion round | See the completion PR. |
-| WS6 6.1–6.2 Setting, secretary template | Done | |
-| WS6 6.3 Setup | Done backend, completion round for UI | `GET/POST /api/office/setup` idempotent; UI and Chat pin in the completion round. |
-| WS6 6.4 market_research | Done | Placement on a named Research floor completed in the completion round. |
-| WS6 6.5 First-loop e2e | Completion round | Spec written; not run against a live stack on this machine. |
-| WS7 K1 Sidecar, client, provisioning | Done | Live-tested against WeKnora v0.9.0. |
-| WS7 K2–K3 Instruction block, read and write paths | Done | |
-| WS7 K4.1 Core | Done | |
-| WS7 K4.2 Knowledge page | Completion round for Save to knowledge and Ask the Secretary | Page, search, drafts, enable are done. |
-| WS7 K5.1 Automatic context | Done | Gated on readiness, score ≥ 0.5, top three, 2 s. |
-| WS7 K6.1 Freshness and pending drafts | Completion round | |
-| WS8 8.1 Docs | Done for en, fr, ja, ko, zh | No zh-Hant docs locale exists in the site; translations not reviewed by native speakers. |
-| WS8 8.2 Upgrade notes | Done | In `SELF_HOSTING.md`. |
-| WS8 8.3 Manual verification on the boss's machine | Open | Needs a Hermes model provider configured by the boss and a live knowledge profile. |
-| WS0.2 Hermes runtime online and a trivial run | Open | Hermes v0.22.5 is installed; a model provider is not configured. |
-| Full repo checks (`make check`, `pnpm test`, `make test`) | Completion round | Run before the completion PR. |
+| WS0 Preflight | Partly done | Hermes is installed and answers through 9router; a run through Multica's daemon is open (9.14). |
+| WS1 Engine: 6 rooms x 10 desks | Done | Figure is about 37 px at 1280 x 720; the 64 px target was unattainable. |
+| WS2 Floors, seats, home squad | Done | |
+| WS3 Office on floors | Done | `agent.office_room` removed. |
+| WS4 Proposals | Done | Leader briefing lives in `handler/squad_briefing.go`. |
+| WS5 Digest and briefs | Done | |
+| WS6 Secretary | Done | Setup is an API call from the client; `market_research` is placed on a Research floor by the client. |
+| WS7 Knowledge base | Done except upload and sources | K1 to K6; upload, sources panel and freshness reviews are in 10.12 and 10.9. |
+| WS8 Docs | Done for phase 1 | en, fr, ja, ko, zh; the new phases are in 12.1. |
+| Phase 1 acceptance in a browser | Partly done | `office-first-loop` passes; the full Playwright suite is slow here and unclassified. |
+| WS9 Phase 2 completion | Open | 9.1 to 9.14. |
+| WS10 Phase 3 | Open | 10.1 to 10.20. |
+| WS11 Phase 4 | Open | 11.1 to 11.21. |
+| WS12 Release | Open | 12.1 to 12.5. |
