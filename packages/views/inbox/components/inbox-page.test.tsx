@@ -1136,6 +1136,8 @@ describe("InboxPage sections", () => {
     render(<InboxPage />);
 
     expect(rows()).toEqual(["mention"]);
+    // Activity is never unread, so its tab carries no count.
+    expect(screen.getAllByRole("tab")[1]!.textContent).not.toMatch(/\d/);
     fireEvent.click(screen.getAllByRole("tab")[1]!);
 
     expect(replace).toHaveBeenLastCalledWith("/acme/inbox?section=activity");

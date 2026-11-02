@@ -143,11 +143,6 @@ export default function Inbox() {
             </TabsTrigger>
             <TabsTrigger value="activity" className="flex-1">
               <Text>{t("sections.activity")}</Text>
-              {sections.activity.length > 0 ? (
-                <Text className="text-xs text-muted-foreground">
-                  {sections.activity.length}
-                </Text>
-              ) : null}
             </TabsTrigger>
           </TabsList>
         </Tabs>

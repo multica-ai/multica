@@ -798,14 +798,7 @@ export function InboxPage() {
             <span className="text-caption tabular-nums text-brand">{unreadCount}</span>
           )}
         </TabsTrigger>
-        <TabsTrigger value="activity">
-          {t(($) => $.sections.activity)}
-          {sections.activity.length > 0 && (
-            <span className="text-caption tabular-nums text-muted-foreground">
-              {sections.activity.length}
-            </span>
-          )}
-        </TabsTrigger>
+        <TabsTrigger value="activity">{t(($) => $.sections.activity)}</TabsTrigger>
       </TabsList>
     </Tabs>
   );
