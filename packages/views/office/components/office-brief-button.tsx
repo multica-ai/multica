@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { briefListOptions, hasUnreadBrief, useOfficeBriefStore } from "@multica/core/office";
 import { useWorkspaceId } from "@multica/core/hooks";
@@ -16,7 +16,10 @@ const EMPTY_BRIEFS: never[] = [];
  * The Brief button in the office header. A dot marks a brief newer than the one
  * the viewer last opened; opening the dialog marks the newest one as read.
  */
-export function OfficeBriefButton() {
+export function OfficeBriefButton({ focusBriefId = null }: {
+  /** A brief the page was linked to (`?brief=`); the dialog opens on it. */
+  focusBriefId?: string | null;
+}) {
   const { t } = useT("issues");
   const wsId = useWorkspaceId();
   const canManage = useOfficeAdmin();
@@ -24,6 +27,10 @@ export function OfficeBriefButton() {
   const lastSeenBriefId = useOfficeBriefStore((s) => s.lastSeenBriefId);
   const markBriefSeen = useOfficeBriefStore((s) => s.markBriefSeen);
   const [open, setOpen] = useState(false);
+
+  useEffect(() => {
+    if (focusBriefId) setOpen(true);
+  }, [focusBriefId]);
 
   const latest = briefs[0];
   const unread = hasUnreadBrief(latest?.id, lastSeenBriefId);
@@ -45,7 +52,13 @@ export function OfficeBriefButton() {
           </>
         ) : null}
       </Button>
-      <OfficeBriefDialog open={open} briefs={briefs} canManage={canManage} onClose={() => setOpen(false)} />
+      <OfficeBriefDialog
+        open={open}
+        briefs={briefs}
+        canManage={canManage}
+        focusBriefId={focusBriefId}
+        onClose={() => setOpen(false)}
+      />
     </>
   );
 }

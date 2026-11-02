@@ -145,7 +145,8 @@
     "schedule": "일정",
     "manual": "수동",
     "webhook": "Webhook",
-    "api": "API"
+    "api": "API",
+    "catchup": "나중 작성"
   },
   "run": {
     "issue_linked": "태스크 연결됨",

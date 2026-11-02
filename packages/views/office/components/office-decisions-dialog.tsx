@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { issueDetailOptions } from "@multica/core/issues/queries";
 import type { Proposal } from "@multica/core/office";
@@ -26,20 +26,34 @@ export function OfficeDecisionsDialog({
   proposals,
   squads,
   canDecide,
+  focusId = null,
   onClose,
 }: {
   open: boolean;
-  /** Pending proposals, including those put aside, and proposals revising. */
+  /**
+   * Pending proposals, including those put aside, and proposals revising. A
+   * proposal linked from the chat app may also be here in any state.
+   */
   proposals: readonly Proposal[];
   squads: readonly Squad[];
   canDecide: boolean;
+  /** A proposal to select when the dialog opens from a link. */
+  focusId?: string | null;
   onClose: () => void;
 }) {
   const { t } = useT("issues");
   const { needsDecision, decidedLater, waiting } = useDecisionQueue(proposals);
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  useEffect(() => {
+    if (focusId) setSelectedId(focusId);
+  }, [focusId]);
   const listed = [...needsDecision, ...decidedLater, ...waiting];
-  const selected = listed.find((proposal) => proposal.id === selectedId) ?? listed[0] ?? null;
+  // A linked proposal outside the queue (decided since) is still shown, with its state.
+  const selected =
+    listed.find((proposal) => proposal.id === selectedId) ??
+    proposals.find((proposal) => proposal.id === selectedId) ??
+    listed[0] ??
+    null;
 
   const renderItem = (proposal: Proposal) => {
     const current = proposal.id === selected?.id;

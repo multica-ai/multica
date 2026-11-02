@@ -205,7 +205,7 @@ function RunRow({ run, agentId, agentName }: { run: AutopilotRun; agentId: strin
           : run.failure_reason || statusLabel}
       </span>
       <span className="shrink-0 text-caption text-muted-foreground">
-        {t(($) => $.run_source[run.source as "schedule" | "manual" | "webhook" | "api"]) ?? run.source}
+        {t(($) => $.run_source[run.source as "schedule" | "manual" | "webhook" | "api" | "catchup"]) ?? run.source}
       </span>
       {syntheticTask && !run.issue_id && (
         <TranscriptButton

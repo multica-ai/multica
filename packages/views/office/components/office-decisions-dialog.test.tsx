@@ -127,6 +127,20 @@ describe("OfficeDecisionsDialog", () => {
     expect(screen.getByText("Hands off to Build")).toBeTruthy();
   });
 
+  it("selects the proposal a link names, from the queue", async () => {
+    setup({ focusId: "b" });
+
+    expect(await screen.findByText("Launch body")).toBeTruthy();
+    expect(screen.queryByText("Market body")).toBeNull();
+  });
+
+  it("shows a linked proposal that has left the queue, with its state", async () => {
+    setup({ focusId: "c", proposals: [proposal("a"), proposal("c", { state: "approved", issue_status: "done" })] });
+
+    expect(await screen.findByText("Proposal c")).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Approve" })).toBeNull();
+  });
+
   it("says what an approval with a handoff will start", async () => {
     setup({ proposals: [proposal("b", { squad_id: "product", handoff_squad_id: "product" })] });
 

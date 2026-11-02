@@ -179,6 +179,13 @@ describe("OfficeBriefDialog", () => {
     return { onClose };
   }
 
+  it("opens on the brief a link names instead of the latest one", async () => {
+    const earlier = brief("b0", { title: "Earlier brief", body: "## Headline\nThe old news." });
+    setup({ briefs: [brief("b1"), earlier], focusBriefId: "b0" });
+
+    expect(await screen.findByText("The old news.")).toBeTruthy();
+  });
+
   it("renders the latest brief's body by section, with an Ask on each", () => {
     setup();
     expect(screen.getByRole("heading", { name: "Brief b1" })).toBeTruthy();

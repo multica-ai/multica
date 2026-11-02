@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useQueries, useQuery } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { useChatStore } from "@multica/core/chat";
@@ -45,6 +45,7 @@ export function OfficeBriefDialog({
   open,
   briefs,
   canManage,
+  focusBriefId = null,
   onClose,
 }: {
   open: boolean;
@@ -52,11 +53,16 @@ export function OfficeBriefDialog({
   briefs: readonly Brief[];
   /** Owners and admins may decide proposals and save a brief to knowledge. */
   canManage: boolean;
+  /** A brief to show instead of today's (a link from the chat app). */
+  focusBriefId?: string | null;
   onClose: () => void;
 }) {
   const { t } = useT("issues");
   const wsId = useWorkspaceId();
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  useEffect(() => {
+    if (focusBriefId) setSelectedId(focusBriefId);
+  }, [focusBriefId]);
   const [delivery, setDelivery] = useState(false);
   const setup = useQuery(officeSetupOptions(wsId));
   const autopilots = useQuery(autopilotListOptions(wsId));

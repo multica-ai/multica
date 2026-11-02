@@ -778,7 +778,14 @@
     "prefix_new_label": "새 접두사",
     "prefix_rule": "영문자와 숫자만, 최대 10자까지 사용할 수 있습니다.",
     "prefix_confirm_action": "{{prefix}}(으)로 변경",
-    "prefix_external_warning": "PR 제목, 브랜치 이름, 문서, 채팅에 있는 이전 키({{oldExample}} 등)는 업데이트되지 않으므로 해당 링크가 작동하지 않습니다."
+    "prefix_external_warning": "PR 제목, 브랜치 이름, 문서, 채팅에 있는 이전 키({{oldExample}} 등)는 업데이트되지 않으므로 해당 링크가 작동하지 않습니다.",
+    "brief_catchup_section": "일일 브리프",
+    "brief_catchup_label": "놓친 브리프 나중에 작성",
+    "brief_catchup_description": "일일 브리프가 실행되지 않았다면, 아래 시각이 지난 뒤 비서가 작성합니다.",
+    "brief_catchup_hour_label": "나중 작성 시각",
+    "brief_catchup_hour_option": "{{hour}}:00",
+    "brief_catchup_saved": "일일 브리프 설정이 저장되었습니다",
+    "brief_catchup_failed": "일일 브리프 설정을 저장하지 못했습니다"
   },
   "delete_workspace_dialog": {
     "title": "워크스페이스 삭제",

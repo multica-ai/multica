@@ -778,7 +778,14 @@
     "prefix_new_label": "新前缀",
     "prefix_rule": "只能使用字母和数字，最多 10 个字符。",
     "prefix_confirm_action": "修改为 {{prefix}}",
-    "prefix_external_warning": "PR 标题、分支名、文档和聊天里的旧编号（如 {{oldExample}}）不会自动更新，这些链接会失效。"
+    "prefix_external_warning": "PR 标题、分支名、文档和聊天里的旧编号（如 {{oldExample}}）不会自动更新，这些链接会失效。",
+    "brief_catchup_section": "每日简报",
+    "brief_catchup_label": "补写漏掉的简报",
+    "brief_catchup_description": "如果每日简报没有运行，秘书会在下面的时间过后补写。",
+    "brief_catchup_hour_label": "补写时间",
+    "brief_catchup_hour_option": "{{hour}}:00",
+    "brief_catchup_saved": "每日简报设置已保存",
+    "brief_catchup_failed": "无法保存每日简报设置"
   },
   "delete_workspace_dialog": {
     "title": "删除工作区",

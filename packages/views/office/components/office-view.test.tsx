@@ -74,8 +74,14 @@ class FakeWorker {
 
 vi.mock("@multica/core/hooks", () => ({ useWorkspaceId: () => "ws-1" }));
 
-// The brief and the setup card have their own tests; here they are not under test.
-vi.mock("./office-brief-button", () => ({ OfficeBriefButton: () => null }));
+// The location the links are read from. Each test sets `search` before it renders.
+const nav = vi.hoisted(() => ({ search: "", replace: vi.fn() }));
+
+// The brief button has its own tests; here it only reports the brief a link opened it on.
+vi.mock("./office-brief-button", () => ({
+  OfficeBriefButton: ({ focusBriefId }: { focusBriefId?: string | null }) =>
+    focusBriefId ? <div role="dialog" aria-label="Brief">{`brief ${focusBriefId}`}</div> : null,
+}));
 vi.mock("./office-setup-card", () => ({ OfficeSetupCard: () => null }));
 
 // The panel has its own tests; here it only reports who it was opened for.
@@ -93,8 +99,18 @@ vi.mock("./office-agent-panel", () => ({
 
 // The decisions dialog has its own tests; here it only reports what it was given.
 vi.mock("./office-decisions-dialog", () => ({
-  OfficeDecisionsDialog: ({ open, proposals }: { open: boolean; proposals: { id: string }[] }) =>
-    open ? <div role="dialog" aria-label="Decisions">{`decisions ${proposals.length}`}</div> : null,
+  OfficeDecisionsDialog: ({
+    open,
+    proposals,
+    focusId,
+  }: {
+    open: boolean;
+    proposals: { id: string }[];
+    focusId?: string | null;
+  }) =>
+    open ? (
+      <div role="dialog" aria-label="Decisions">{`decisions ${proposals.length} focus ${focusId ?? "none"}`}</div>
+    ) : null,
 }));
 
 // The board dialog has its own tests; here it only reports that it is open.
@@ -140,9 +156,12 @@ vi.mock("../../navigation", () => ({
   AppLink: ({ children, ...props }: React.ComponentProps<"a">) => <a {...props}>{children}</a>,
   useNavigation: () => ({
     push: () => {},
+    replace: nav.replace,
     openInNewTab: () => {},
     getShareableUrl: (path: string) => `https://app.example${path}`,
-    pathname: "/",
+    pathname: "/acme/office",
+    hash: "",
+    searchParams: new URLSearchParams(nav.search),
   }),
   resolveClickIntent: () => "push",
   useIntentNavigate: () => () => {},
@@ -213,6 +232,11 @@ function pendingProposal(squadId: string, id = "p1"): Proposal {
 
 const SQUADS = [makeSquad("s1", "agent-1", { floor: "f1", slot: 0 }), makeSquad("s2", "agent-3", { floor: "f2", slot: 2 })];
 const AGENTS = [makeAgent("agent-1", "s1"), makeAgent("agent-2", "s1"), makeAgent("agent-3", "s2"), makeAgent("agent-4", null)];
+
+afterEach(() => {
+  nav.search = "";
+  nav.replace.mockReset();
+});
 
 describe("OfficeView", () => {
   let queryClient: QueryClient;
@@ -376,7 +400,7 @@ describe("OfficeView", () => {
     fireEvent.click(badge);
 
     expect(await screen.findByRole("dialog", { name: "Decisions" })).toBeTruthy();
-    expect(screen.getByText("decisions 2")).toBeTruthy();
+    expect(screen.getByText("decisions 2 focus none")).toBeTruthy();
   });
 
   it("shows waiting for work over an agent with no open issue", async () => {
@@ -485,5 +509,59 @@ describe("OfficeView", () => {
     fireEvent.click(screen.getByRole("button", { name: "Group by Status" }));
 
     expect(store.getState().grouping).toBe("status");
+  });
+
+  describe("links from the chat app", () => {
+    it("opens the decisions dialog on the proposal named by ?decision= and removes the parameter", async () => {
+      nav.search = "decision=p2";
+      setup([], { proposals: [pendingProposal("s1", "p1"), pendingProposal("s1", "p2")] });
+
+      expect(await screen.findByRole("dialog", { name: "Decisions" })).toBeTruthy();
+      expect(screen.getByText("decisions 2 focus p2")).toBeTruthy();
+      expect(nav.replace).toHaveBeenCalledWith("/acme/office");
+    });
+
+    it("opens the brief dialog on the brief named by ?brief=", async () => {
+      nav.search = "brief=b7";
+      setup([]);
+
+      expect(await screen.findByRole("dialog", { name: "Brief" })).toBeTruthy();
+      expect(screen.getByText("brief b7")).toBeTruthy();
+      expect(nav.replace).toHaveBeenCalledWith("/acme/office");
+    });
+
+    it("keeps the other parameters when it removes the link's", async () => {
+      nav.search = "brief=b7&view=board";
+      setup([]);
+
+      await screen.findByRole("dialog", { name: "Brief" });
+      expect(nav.replace).toHaveBeenCalledWith("/acme/office?view=board");
+    });
+
+    it("shows a linked proposal that is no longer pending, with its state", async () => {
+      queryClient.setQueryData(proposalKeys.detail("ws-1", "p9"), {
+        ...pendingProposal("s1", "p9"),
+        state: "approved",
+      });
+      nav.search = "decision=p9";
+      setup([], { proposals: [] });
+
+      expect(await screen.findByText("decisions 1 focus p9")).toBeTruthy();
+    });
+
+    it("does not reopen the dialog once the link's parameter is gone", async () => {
+      nav.search = "decision=p2";
+      const first = setup([], { proposals: [pendingProposal("s1", "p2")] });
+      expect(await screen.findByRole("dialog", { name: "Decisions" })).toBeTruthy();
+      first.rerender([]);
+      cleanup();
+
+      nav.search = "";
+      nav.replace.mockClear();
+      setup([], { proposals: [pendingProposal("s1", "p2")] });
+      await vi.waitFor(() => expect(engine.starts).toContain("agent-1"));
+      expect(screen.queryByRole("dialog", { name: "Decisions" })).toBeNull();
+      expect(nav.replace).not.toHaveBeenCalled();
+    });
   });
 });
