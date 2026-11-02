@@ -100,9 +100,13 @@ test.describe("Issues", () => {
     await expect(page.getByText(oldTitle)).toBeHidden({ timeout: 10000 });
     await expect(page.getByText(updatedTodayTitle)).toBeHidden({ timeout: 10000 });
 
-    await page.getByRole("button", { name: /1 filter/i }).click();
+    // Presets keep the menu open, so the Date item is still there. Clicking the
+    // filter button again would close it.
+    // Reopening the menu re-mounts the Date sub-trigger, so wait for it to settle
+    // before opening the sub-menu with a click.
     const dateFilterItem = page.getByRole("menuitem", { name: /^Date\b/ });
-    await dateFilterItem.hover();
+    await expect(dateFilterItem).toBeVisible();
+    await dateFilterItem.click();
     const updatedDateField = page.getByRole("menuitemradio", { name: "Updated" });
     await expect(updatedDateField).toBeVisible();
     await updatedDateField.click();
