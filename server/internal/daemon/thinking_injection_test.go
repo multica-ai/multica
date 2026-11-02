@@ -17,12 +17,15 @@ import (
 // launch channels. No installed CLI or provider account participates.
 const thinkingInjectionScript = `#!/bin/sh
 printf 'ARGV %s\n' "$*" >> "$THINKING_WIRE"
-case "$THINKING_PROVIDER" in
-  opencode)
+case "$*" in
+  *export*) printf '%s\n' '{"messages":[]}'; exit 0;;
+esac
+case "$THINKING_PROVIDER:$1" in
+  opencode:run)
     cat >/dev/null
     printf '%s\n' '{"type":"text","sessionID":"fixture","part":{"type":"text","text":"done"}}' '{"type":"step_finish","sessionID":"fixture","part":{"type":"step-finish","reason":"stop"}}'
     exit 0;;
-  pi|omp)
+  pi:*|omp:*)
     if [ "$THINKING_PROVIDER" = omp ]; then
       while [ "$#" -gt 0 ]; do
         case "$1" in --session-dir) dir="$2"; shift ;; esac
@@ -34,6 +37,7 @@ case "$THINKING_PROVIDER" in
     printf '%s\n' '{"type":"agent_start"}' '{"type":"turn_end","message":{"role":"assistant","content":[{"type":"text","text":"done"}],"model":"test/model","stopReason":"stop"}}' '{"type":"agent_end","messages":[],"willRetry":false}'
     exit 0;;
 esac
+opencode_config='[{"type":"select","id":"model","category":"model","currentValue":"test/model","options":[{"value":"test/model","name":"Test"}]},{"type":"select","id":"effort","category":"thought_level","currentValue":"low","options":[{"value":"low","name":"Low"},{"value":"high","name":"High"}]}]'
 while IFS= read -r line; do
   printf '%s\n' "$line" >> "$THINKING_WIRE"
   id=$(printf '%s' "$line" | sed -n 's/.*"id":\([0-9]*\).*/\1/p')
@@ -51,7 +55,13 @@ while IFS= read -r line; do
       printf '%s\n' '{"jsonrpc":"2.0","method":"turn/started","params":{"threadId":"fixture-thread","turn":{"id":"fixture-turn"}}}' '{"jsonrpc":"2.0","method":"item/completed","params":{"threadId":"fixture-thread","item":{"type":"agentMessage","id":"msg","text":"done"}}}' '{"jsonrpc":"2.0","method":"turn/completed","params":{"threadId":"fixture-thread","turn":{"id":"fixture-turn","status":"completed"}}}'
       exit 0;;
     *'"method":"session/new"'*|*'"method":"session/load"'*|*'"method":"session/set_model"'*)
+      if [ "$THINKING_PROVIDER" = opencode ]; then
+        printf '{"jsonrpc":"2.0","id":%s,"result":{"sessionId":"fixture","configOptions":%s}}\n' "$id" "$opencode_config"
+        continue
+      fi
       printf '{"jsonrpc":"2.0","id":%s,"result":{"sessionId":"fixture","models":{"currentModelId":"test/model","availableModels":[{"modelId":"test/model","name":"Test"}]},"configOptions":[{"type":"select","id":"effort","name":"Effort","category":"thought_level","currentValue":"low","options":[{"value":"low","name":"Low"},{"value":"high","name":"High"},{"value":"max","name":"Max"}]}]}}\n' "$id";;
+    *'"method":"session/set_config_option"'*'"configId":"model"'*)
+      printf '{"jsonrpc":"2.0","id":%s,"result":{"configOptions":%s}}\n' "$id" "$opencode_config";;
     *'"method":"session/set_config_option"'*)
       printf '{"jsonrpc":"2.0","id":%s,"result":{"configOptions":[{"id":"effort","currentValue":"high","options":[{"value":"low"},{"value":"high"},{"value":"max"}]}]}}\n' "$id";;
     *'"method":"session/prompt"'*)
@@ -76,6 +86,7 @@ func TestAdaptiveThinkingInjectionChannels(t *testing.T) {
 		{"codex-retry", "codex", "", "test/model", `"model_reasoning_effort":"high"`, true},
 		{"opencode-v1", "opencode", "1.2.0", "test/model", "--variant high", false},
 		{"opencode-v2", "opencode", "opencode v2.0.10", "test/model", "test/model#high", false},
+		{"opencode-acp", "opencode", "opencode v2.0.10", "test/model", `"value":"high"`, false},
 		{"pi", "pi", "", "test/model", "--thinking high", false},
 		{"omp", "omp", "", "test/model", "--thinking high", false},
 		{"kimi", "kimi", "", "test/model", `"value":"high"`, false},
@@ -100,6 +111,12 @@ func TestAdaptiveThinkingInjectionChannels(t *testing.T) {
 				fake := filepath.Join(dir, "fixture")
 				writeTestExecutable(t, fake, []byte(thinkingInjectionScript))
 				env := map[string]string{"THINKING_WIRE": wire, "THINKING_PROVIDER": tc.provider}
+				if tc.provider == "opencode" {
+					env["MULTICA_OPENCODE_TRANSPORT"] = ""
+				}
+				if tc.name == "opencode-v2" {
+					env["MULTICA_OPENCODE_TRANSPORT"] = "run"
+				}
 				if tc.retry {
 					env["THINKING_RETRY"] = "1"
 				}

@@ -1,15 +1,14 @@
 "use client";
 
 import { useMemo, useState, useCallback, useRef, useEffect } from "react";
+import { useRegisterCommandBarContext } from "../../search/register-context";
 import { useDefaultLayout, usePanelRef } from "react-resizable-panels";
-import { Check, ChevronRight, Link2, MoreHorizontal, PanelRight, Pin, PinOff, Trash2, UserMinus } from "lucide-react";
+import { Check, ChevronRight, Link2, MoreHorizontal, PanelRight, Pin, PinOff, Trash2, UserMinus } from "@multica/ui/icons";
 import { useQuery } from "@tanstack/react-query";
 import { cn } from "@multica/ui/lib/utils";
 import { copyText } from "@multica/ui/lib/clipboard";
 import { toast } from "sonner";
 import type { Project, ProjectStatus, ProjectPriority } from "@multica/core/types";
-import { useFeatureEnabled } from "@multica/core/config";
-import { PROJECT_WORKFLOWS_V1_FLAG } from "@multica/core/feature-flags";
 import { useAuthStore } from "@multica/core/auth";
 import { projectEngineeringOptions, projectDetailOptions } from "@multica/core/projects/queries";
 import { useUpdateProject, useDeleteProject } from "@multica/core/projects/mutations";
@@ -99,12 +98,9 @@ function PropRow({
   );
 }
 
-// The project's workflow (MUL-7420). Hidden while workflows are off, unless the
-// project already uses one — it can always switch back to Default.
+// The project's workflow (MUL-7420).
 function ProjectWorkflowPropRow({ project }: { project: Project }) {
   const { t } = useT("issues");
-  const enabled = useFeatureEnabled(PROJECT_WORKFLOWS_V1_FLAG, false);
-  if (!enabled && !project.workflow_id) return null;
   return (
     <PropRow label={t(($) => $.workflows.project.label)}>
       <ProjectWorkflowControl project={project} />
@@ -126,6 +122,9 @@ export function ProjectDetail({ projectId }: { projectId: string }) {
   const userId = useAuthStore((s) => s.user?.id);
   const { data: project, isLoading } = useQuery(projectDetailOptions(wsId, projectId));
   const { data: engineeringOverview } = useQuery(projectEngineeringOptions(wsId, projectId));
+  useRegisterCommandBarContext(
+    useMemo(() => (project ? { kind: "project", project } : null), [project]),
+  );
   const recordRecentContext = useRecentContextStore((s) => s.recordVisit);
   useEffect(() => {
     if (project) {

@@ -4,7 +4,7 @@ import { defineConfig } from "@playwright/test";
 // Do not inherit playwright.config.ts's dotenv loading or development servers.
 export default defineConfig({
   testDir: "./e2e",
-  testMatch: ["onboarding-smoke.spec.ts", "dag-task-lines.spec.ts", "issue-dependencies.spec.ts"],
+  testMatch: ["onboarding-smoke.spec.ts", "dag-task-lines.spec.ts", "issue-dependencies.spec.ts", "comments.spec.ts"],
   forbidOnly: true,
   workers: 1,
   retries: 0,

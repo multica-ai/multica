@@ -3,6 +3,7 @@
 import { forwardRef } from "react";
 import { resolveClickIntent } from "./click-intent";
 import { useNavigation } from "./context";
+import { useRouteDataPrefetch } from "./route-data-prefetch";
 
 interface AppLinkProps extends React.AnchorHTMLAttributes<HTMLAnchorElement> {
   href: string;
@@ -30,6 +31,7 @@ export const AppLink = forwardRef<HTMLAnchorElement, AppLinkProps>(
     ref,
   ) {
     const { push, openInNewTab, getShareableUrl, prefetch } = useNavigation();
+    const prefetchData = useRouteDataPrefetch();
     // A packaged Electron renderer runs at file://.../index.html. Keeping a
     // route-relative href there makes native affordances such as right-click
     // "Copy Link Address" expose (or reject) a local file URL. Desktop is
@@ -117,11 +119,13 @@ export const AppLink = forwardRef<HTMLAnchorElement, AppLinkProps>(
 
     const handleMouseEnter = (e: React.MouseEvent<HTMLAnchorElement>) => {
       prefetch?.(href);
+      prefetchData?.(href);
       onMouseEnter?.(e);
     };
 
     const handleFocus = (e: React.FocusEvent<HTMLAnchorElement>) => {
       prefetch?.(href);
+      prefetchData?.(href);
       onFocus?.(e);
     };
 

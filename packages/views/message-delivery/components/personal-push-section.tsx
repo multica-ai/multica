@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { Plus } from "lucide-react";
+import { Plus } from "@multica/ui/icons";
 import { useQuery } from "@tanstack/react-query";
 import {
   messageEventCatalogOptions,

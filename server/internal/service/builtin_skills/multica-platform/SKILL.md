@@ -22,7 +22,7 @@ Read the invariants below, then open the reference(s) your task actually needs
 | `references/pull-requests.md` | Pull requests: issue linking, code-change handoff, merge status, and reading a linked PR's state |
 | `references/issues.md` | Issues: custom properties, status side effects, sub-issues and stages, who else is running, wakeups (events, conditions, timers, check-ins), charts vs attached files in a comment |
 | `references/issue-dependencies.md` | Informational prerequisites, relation editing and complete dependency graphs; these do not gate execution |
-| `references/mentions.md` | Writing a `mention://` link: which types enqueue a run, which are inert, why one silently did nothing |
+| `references/mentions.md` | Writing a `mention://` link: which types enqueue a run, which are inert, why one silently did nothing; steering another agent's running turn (`comment add --steer`) |
 | `references/agents.md` | Creating, copying or debugging an agent definition: fields, secrets, MCP config, skill binding |
 | `references/squads.md` | Squads: leader routing, roster, recording leader activity, why a squad did or did not run |
 | `references/autopilots.md` | Autopilots: schedule / webhook / manual triggers, `create_issue` vs `run_only`, why one did not fire |

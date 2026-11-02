@@ -2,7 +2,7 @@
 
 import { useMemo, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { ChevronDown, Cpu, Loader2, Plus } from "lucide-react";
+import { ChevronDown, Cpu, Loader2, Plus } from "@multica/ui/icons";
 import {
   refreshRuntimeModels,
   runtimeModelsOptions,

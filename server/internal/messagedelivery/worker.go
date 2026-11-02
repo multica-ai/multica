@@ -607,10 +607,10 @@ func (s *Service) syncStaleCreateIssueIssues(ctx context.Context, cur scanCursor
 }
 
 // syncStaleLinkedTaskFailures covers the third persisted source class
-// (review R12): create_issue tasks that reached terminal failure through
-// their ISSUE link while the run stayed active. SyncRunFromLinkedIssueTask
-// is the existing state machine — including its HasActiveTaskForIssue guard,
-// so an in-flight retry is never declared failed early.
+// (review R12): create_issue tasks that reached a completed or failed state
+// through their ISSUE link while the run stayed active. The historical name
+// and cursor key stay stable. SyncRunFromLinkedIssueTask checks the dispatch
+// chain, so unrelated tasks and earlier retry attempts cannot settle the run.
 func (s *Service) syncStaleLinkedTaskFailures(ctx context.Context, cur scanCursor) (scanCursor, error) {
 	tasks, err := s.Queries.ListStaleLinkedIssueTaskFailures(ctx, db.ListStaleLinkedIssueTaskFailuresParams{
 		AfterID: cur.id,

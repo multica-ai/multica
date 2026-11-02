@@ -222,6 +222,25 @@ describe("IssueActionsDropdown", () => {
     expect(screen.queryByText("Add sub-issue...")).not.toBeInTheDocument();
   });
 
+  it("lists Create sub-issue directly below Rename issue", async () => {
+    render(
+      wrap(
+        <IssueActionsDropdown
+          issue={mockIssue}
+          trigger={<button data-testid="trigger">Menu</button>}
+        />,
+      ),
+    );
+
+    fireEvent.click(screen.getByTestId("trigger"));
+    await screen.findByText("Rename issue");
+
+    const labels = screen
+      .getAllByRole("menuitem")
+      .map((item) => item.textContent?.trim());
+    expect(labels.slice(0, 3)).toEqual(["Rename issue", "Create sub-issue", "Status"]);
+  });
+
   it("clicking the Assignee item opens the shared AssigneePicker popover", async () => {
     render(
       wrap(

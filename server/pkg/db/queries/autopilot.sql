@@ -426,26 +426,18 @@ SET status = 'issue_created', issue_id = $2
 WHERE id = $1
 RETURNING *;
 
+-- name: SetAutopilotRunDispatchTask :execrows
+-- Records the agent task a create_issue run actually enqueued, so lifecycle
+-- sync can tell the run's own dispatch apart from mention/comment tasks on
+-- the same issue. Status stays issue_created; only an unlinked active run is
+-- written. (MUL-8200)
+UPDATE autopilot_run
+SET task_id = $2
+WHERE id = $1 AND status = 'issue_created' AND task_id IS NULL;
+
 -- name: UpdateAutopilotRunRunning :one
 UPDATE autopilot_run
 SET status = 'running', task_id = $2
-WHERE id = $1
-RETURNING *;
-
--- name: UpdateAutopilotRunCompleted :one
--- Quota safety: only use for a run known to have no reservation. Normal
--- terminal paths must call UpdateAutopilotRunTerminalWithQuota instead.
-UPDATE autopilot_run
-SET status = 'completed', completed_at = now(), result = sqlc.narg('result')
-WHERE id = $1
-RETURNING *;
-
--- name: UpdateAutopilotRunFailed :one
--- Quota safety: only use for a run known to have no reservation. Normal
--- terminal paths must call UpdateAutopilotRunTerminalWithQuota instead.
-UPDATE autopilot_run
-SET status = 'failed', completed_at = now(), failure_reason = $2,
-    reason_code = sqlc.narg('reason_code')
 WHERE id = $1
 RETURNING *;
 
@@ -468,8 +460,8 @@ RETURNING *;
 -- Finalizes a run and its still-reserved quota slot in one statement. Runs
 -- created while the entitlement gate is off have a NULL reservation ID, so
 -- the quota CTEs become empty without an extra BEGIN/COMMIT round trip.
--- Consumed slots are deliberately immutable: create_issue is chargeable once
--- the issue exists, even if that issue is later blocked, cancelled, or deleted.
+-- Consumed slots are immutable. A create_issue run consumes its reservation
+-- when its dispatch succeeds; later issue status changes cannot refund it.
 -- The CTE sequence is: update the run, lock a still-reserved slot, finalize
 -- that slot exactly once, then move one unit from reserved_count to either
 -- used_count (consume) or nowhere (release). used_count never decreases.
@@ -480,13 +472,15 @@ RETURNING *;
 -- updates zero rows and the caller treats that as an idempotent no-op — it
 -- must not re-publish run-done, re-settle quota, or overwrite the FIRST
 -- terminal's structured result with a later one. The result column now
--- records the structured first-terminal payload for BOTH completed and
--- failed runs; skipped keeps whatever the row already held.
+-- snapshots the linked issue status at settlement for completed and failed
+-- create_issue runs; run_only keeps task output and skipped keeps prior data.
 WITH updated_run AS (
     UPDATE autopilot_run AS ar
     SET status = @terminal_status::text,
         completed_at = now(),
         result = CASE
+            WHEN ar.issue_id IS NOT NULL AND @terminal_status::text IN ('completed', 'failed') THEN
+                (SELECT jsonb_build_object('first_terminal_status', i.status) FROM issue i WHERE i.id = ar.issue_id)
             WHEN @terminal_status::text = 'completed' THEN sqlc.narg('result')::jsonb
             WHEN @terminal_status::text = 'failed' THEN COALESCE(sqlc.narg('result')::jsonb, ar.result)
             ELSE ar.result
@@ -533,17 +527,6 @@ WITH updated_run AS (
     RETURNING p.workspace_id
 )
 SELECT * FROM updated_run;
-
--- name: UpdateAutopilotRunSkippedWithResult :one
--- Quota safety: legacy no-reservation helper. New terminal paths must call
--- UpdateAutopilotRunTerminalWithQuota instead.
-UPDATE autopilot_run
-SET status = 'skipped',
-    completed_at = now(),
-    failure_reason = $2,
-    result = sqlc.narg('result')
-WHERE id = $1
-RETURNING *;
 
 -- =====================
 -- Scheduler Queries
@@ -837,17 +820,3 @@ SELECT * FROM autopilot_run WHERE task_id = $1 AND issue_id IS NULL LIMIT 1;
 -- Repair a one-sided committed dispatch link before persisting its terminal result.
 UPDATE autopilot_run SET task_id = $2
 WHERE id = $1 AND task_id IS NULL AND issue_id IS NULL;
-
--- name: IsLatestFailedAutopilotIssueTask :one
--- A historical failure is not a new terminal event after a later attempt.
--- Re-read the durable task rather than trusting an old event payload.
-SELECT EXISTS (
-    SELECT 1 FROM agent_task_queue t
-    WHERE t.id = $1 AND t.issue_id = $2 AND t.status = 'failed'
-      AND NOT EXISTS (
-          SELECT 1 FROM agent_task_queue successor
-          WHERE successor.issue_id = t.issue_id
-            AND ((successor.created_at, successor.id) > (t.created_at, t.id)
-                 OR successor.retry_of_task_id = t.id)
-      )
-)::boolean AS is_latest;

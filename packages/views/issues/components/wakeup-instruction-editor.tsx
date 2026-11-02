@@ -2,7 +2,7 @@
 
 import { useId, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { Pencil } from "lucide-react";
+import { Pencil } from "@multica/ui/icons";
 import {
   issueWakeupsOptions,
   useEditWakeupInstruction,

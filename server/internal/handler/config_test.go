@@ -130,6 +130,32 @@ func TestGetConfigUsesDaemonServerURLOverride(t *testing.T) {
 	}
 }
 
+func TestGetConfigDeclaresDaemonSetupTarget(t *testing.T) {
+	for _, tt := range []struct {
+		name, appURL, wantTarget, wantServerURL string
+	}{
+		{"official Cloud", "https://multica.outlune.com", "cloud", ""},
+		{"configured self-host", "https://app.example.com", "self_host", "https://api.example.com"},
+		{"incomplete self-host", "", "self_host", ""},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Setenv("MULTICA_APP_URL", tt.appURL)
+			t.Setenv("FRONTEND_ORIGIN", "")
+			t.Setenv("MULTICA_PUBLIC_URL", "https://api.example.com")
+			t.Setenv("MULTICA_DAEMON_SERVER_URL", "")
+			var cfg AppConfig
+			req := httptest.NewRequest(http.MethodGet, "/api/config", nil)
+			testutil.Call(t, testHandler.GetConfig, req).Want(http.StatusOK).JSON(&cfg)
+			if cfg.DaemonSetupTarget != tt.wantTarget {
+				t.Fatalf("daemon_setup_target = %q, want %q", cfg.DaemonSetupTarget, tt.wantTarget)
+			}
+			if cfg.DaemonServerURL != tt.wantServerURL {
+				t.Fatalf("daemon_server_url = %q, want %q", cfg.DaemonServerURL, tt.wantServerURL)
+			}
+		})
+	}
+}
+
 func TestGetConfigHonorsVCSIntegrationSwitch(t *testing.T) {
 	origCfg := testHandler.cfg
 	t.Cleanup(func() { testHandler.cfg = origCfg })
@@ -218,7 +244,7 @@ func TestGetConfigUsesFrontendOriginForSameOriginDaemonSetup(t *testing.T) {
 func TestGetConfigOmitsOfficialCloudDaemonSetup(t *testing.T) {
 	t.Setenv("MULTICA_PUBLIC_URL", "https://api.multica.ai")
 	t.Setenv("MULTICA_APP_URL", "")
-	t.Setenv("FRONTEND_ORIGIN", "https://multica.ai")
+	t.Setenv("FRONTEND_ORIGIN", "https://multica.outlune.com")
 
 	req := httptest.NewRequest(http.MethodGet, "/api/config", nil)
 	w := httptest.NewRecorder()
@@ -244,15 +270,15 @@ func TestGetConfigOmitsOfficialCloudDaemonSetup(t *testing.T) {
 // regression behind the broken "Add a computer" command: the official cloud
 // frontend is multica.ai, but the deployment does not set MULTICA_PUBLIC_URL to
 // the api host. Previously this fell through to the same-origin branch and
-// emitted daemon_server_url=https://multica.ai, which the dialog turned into
-// `multica setup self-host --server-url https://multica.ai` — pointing the
+// emitted daemon_server_url=https://multica.outlune.com, which the dialog turned into
+// `multica setup self-host --server-url https://multica.outlune.com` — pointing the
 // daemon's backend at the frontend (no /health, no WebSocket proxy). The
 // official cloud must be recognised by its frontend host alone so the daemon
 // setup URLs are omitted and the dialog falls back to `multica setup`.
 func TestGetConfigOmitsCloudDaemonSetupWithoutPublicURL(t *testing.T) {
 	t.Setenv("MULTICA_PUBLIC_URL", "")
 	t.Setenv("MULTICA_APP_URL", "")
-	t.Setenv("FRONTEND_ORIGIN", "https://multica.ai")
+	t.Setenv("FRONTEND_ORIGIN", "https://multica.outlune.com")
 
 	req := httptest.NewRequest(http.MethodGet, "/api/config", nil)
 	w := httptest.NewRecorder()
@@ -278,7 +304,7 @@ func TestGetConfigOmitsCloudDaemonSetupWithoutPublicURL(t *testing.T) {
 // cloud frontend when it is configured through MULTICA_APP_URL.
 func TestGetConfigOmitsCloudDaemonSetupForConfiguredAppURL(t *testing.T) {
 	t.Setenv("MULTICA_PUBLIC_URL", "")
-	t.Setenv("MULTICA_APP_URL", "https://multica.ai")
+	t.Setenv("MULTICA_APP_URL", "https://multica.outlune.com")
 	t.Setenv("FRONTEND_ORIGIN", "")
 
 	req := httptest.NewRequest(http.MethodGet, "/api/config", nil)
@@ -390,7 +416,7 @@ func TestGetConfigExposesServerVersion(t *testing.T) {
 }
 
 // TestGetConfigOmitsServerVersionOnOfficialCloud verifies the build version is
-// suppressed on the managed cloud (frontend host multica.ai) even when the
+// suppressed on the managed cloud (frontend host multica.outlune.com) even when the
 // binary is stamped, while a self-hosted frontend origin still reports it. The
 // managed cloud is continuously deployed, so its users don't need the row.
 func TestGetConfigOmitsServerVersionOnOfficialCloud(t *testing.T) {
@@ -400,8 +426,8 @@ func TestGetConfigOmitsServerVersionOnOfficialCloud(t *testing.T) {
 
 	req := httptest.NewRequest(http.MethodGet, "/api/config", nil)
 
-	// Official cloud: frontend host multica.ai -> version omitted.
-	t.Setenv("MULTICA_APP_URL", "https://multica.ai")
+	// Official cloud: frontend host multica.outlune.com -> version omitted.
+	t.Setenv("MULTICA_APP_URL", "https://multica.outlune.com")
 	t.Setenv("FRONTEND_ORIGIN", "")
 	w := httptest.NewRecorder()
 	testHandler.GetConfig(w, req)
@@ -457,6 +483,9 @@ func TestGetConfigExposesFrontendFeatureFlags(t *testing.T) {
 	if !cfg.FeatureFlags["settings_resource_labels"] {
 		t.Fatalf("settings_resource_labels: want true for installed clients, got false")
 	}
+	if !cfg.FeatureFlags["project_workflows_v1"] {
+		t.Fatal("project_workflows_v1: want true for installed clients")
+	}
 	if !cfg.FeatureFlags["agents_agent_builder"] {
 		t.Fatalf("agents_agent_builder: want true for installed clients, got false")
 	}
@@ -505,6 +534,24 @@ func TestGetConfigExposesEnabledPluginsV1Flag(t *testing.T) {
 	}
 	if !cfg.FeatureFlags["plugins_v1"] {
 		t.Fatal("plugins_v1: want true with flag enabled, got false")
+	}
+}
+
+func TestGetConfigKeepsProjectWorkflowsEnabledForInstalledClients(t *testing.T) {
+	h := &Handler{}
+	withFeatureFlag(t, h, "project_workflows_v1", false)
+
+	w := httptest.NewRecorder()
+	h.GetConfig(w, httptest.NewRequest(http.MethodGet, "/api/config", nil))
+	if w.Code != http.StatusOK {
+		t.Fatalf("GetConfig: expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	var cfg AppConfig
+	if err := json.Unmarshal(w.Body.Bytes(), &cfg); err != nil {
+		t.Fatalf("decode config: %v", err)
+	}
+	if !cfg.FeatureFlags["project_workflows_v1"] {
+		t.Fatal("retired project_workflows_v1 overrides must not hide workflows in installed clients")
 	}
 }
 

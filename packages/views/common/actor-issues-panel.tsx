@@ -2,7 +2,7 @@
 
 import { useMemo, useState } from "react";
 import { useStore } from "zustand";
-import { ListTodo, Search } from "lucide-react";
+import { ListTodo, Search } from "@multica/ui/icons";
 import type {
   Issue,
   IssueTableFacetSpec,

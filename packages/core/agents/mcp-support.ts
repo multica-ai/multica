@@ -25,6 +25,7 @@ const MCP_SUPPORTED_PROVIDERS = new Set([
   "qwen",
   "qwenpaw",
   "mcode",
+  "devin",
   "traecli",
   "dim",
   "omp",

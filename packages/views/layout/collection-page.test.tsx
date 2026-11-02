@@ -1,5 +1,5 @@
 import { render, screen } from "@testing-library/react";
-import { Plus, Users } from "lucide-react";
+import { Plus, Users } from "@multica/ui/icons";
 import { describe, expect, it, vi } from "vitest";
 import {
   CollectionPageHeader,

@@ -2,7 +2,7 @@
 
 import { Fragment, useEffect, useState, type ReactNode } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { ArrowRight, ChevronDown, ChevronRight, TriangleAlert } from "lucide-react";
+import { ArrowRight, ChevronDown, ChevronRight, TriangleAlert } from "@multica/ui/icons";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { useIssueStatuses } from "@multica/core/issue-statuses/hooks";
 import { workflowHandoffPreviewOptions } from "@multica/core/issue-workflows";

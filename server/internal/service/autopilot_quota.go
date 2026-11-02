@@ -245,6 +245,20 @@ func settleAutopilotQuota(ctx context.Context, q *db.Queries, reservationID pgty
 	return err == nil, err
 }
 
+// autopilotRunCompletion and autopilotRunFailure carry the terminal inputs
+// that UpdateAutopilotRunTerminalWithQuota settles atomically with the run's
+// quota reservation.
+type autopilotRunCompletion struct {
+	ID     pgtype.UUID
+	Result []byte
+}
+
+type autopilotRunFailure struct {
+	ID            pgtype.UUID
+	FailureReason pgtype.Text
+	ReasonCode    pgtype.Text
+}
+
 // errRunAlreadyTerminal: another syncer won the first-terminal race — the
 // terminal query's non-terminal guard updated zero rows (OL-25 repair
 // contract §3, review R6). Callers must treat this as an idempotent no-op:
@@ -267,7 +281,7 @@ func (s *AutopilotService) settleAutopilotRunTerminal(ctx context.Context, param
 	return autopilotRunFromTerminalRow(row), err
 }
 
-func (s *AutopilotService) completeAutopilotRun(ctx context.Context, params db.UpdateAutopilotRunCompletedParams) (db.AutopilotRun, error) {
+func (s *AutopilotService) completeAutopilotRun(ctx context.Context, params autopilotRunCompletion) (db.AutopilotRun, error) {
 	return s.settleAutopilotRunTerminal(ctx, db.UpdateAutopilotRunTerminalWithQuotaParams{
 		TerminalStatus: "completed",
 		Result:         params.Result,
@@ -276,7 +290,7 @@ func (s *AutopilotService) completeAutopilotRun(ctx context.Context, params db.U
 	})
 }
 
-func (s *AutopilotService) failAutopilotRun(ctx context.Context, params db.UpdateAutopilotRunFailedParams) (db.AutopilotRun, error) {
+func (s *AutopilotService) failAutopilotRun(ctx context.Context, params autopilotRunFailure) (db.AutopilotRun, error) {
 	return s.failAutopilotRunWithResult(ctx, params, nil)
 }
 
@@ -285,7 +299,7 @@ func (s *AutopilotService) failAutopilotRun(ctx context.Context, params db.Updat
 // boundary persists the status it observed; the shared SQL only overwrites
 // result when a non-null value arrives, so ordinary task failures without a
 // structured payload never erase existing evidence).
-func (s *AutopilotService) failAutopilotRunWithResult(ctx context.Context, params db.UpdateAutopilotRunFailedParams, result []byte) (db.AutopilotRun, error) {
+func (s *AutopilotService) failAutopilotRunWithResult(ctx context.Context, params autopilotRunFailure, result []byte) (db.AutopilotRun, error) {
 	return s.settleAutopilotRunTerminal(ctx, db.UpdateAutopilotRunTerminalWithQuotaParams{
 		TerminalStatus: "failed",
 		FailureReason:  params.FailureReason,

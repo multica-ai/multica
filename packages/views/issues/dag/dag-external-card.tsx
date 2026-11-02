@@ -2,7 +2,7 @@
 
 import { memo } from "react";
 import type { NodeProps } from "@xyflow/react";
-import { ArrowRightFromLine, ArrowRightToLine } from "lucide-react";
+import { LogOut as ArrowRightFromLine, ArrowRightToLine } from "@multica/ui/icons";
 import { cn } from "@multica/ui/lib/utils";
 import { useT } from "../../i18n";
 import { DAG_EXTERNAL_SIZE } from "./dag-constants";

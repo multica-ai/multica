@@ -43,7 +43,7 @@ const placeholders = (text: string) => [...text.matchAll(/{{\s*([^}]+)\s*}}/g)]
   .map((match) => match[1]?.trim()).sort();
 
 describe("mobile i18n resources", () => {
-  it.each(["en", "zh-Hans"])("%s: overlays retain live upstream keys, interpolation and sentence meaning", (locale) => {
+  it.each(["en", "zh-Hans", "zh-Hant"])("%s: overlays retain live upstream keys, interpolation and sentence meaning", (locale) => {
     const upstream = Object.fromEntries(readLocale(locale).map(([file, value]) => [file.replace(/\.json$/, ""), value]));
     const original = new Map(strings(upstream));
     const overlay = JSON.parse(fs.readFileSync(path.join(LOCALES_ROOT, "brand", `${locale}.json`), "utf8"));
@@ -64,43 +64,45 @@ describe("mobile i18n resources", () => {
     }
   });
 
-  it("has an English resource for every supported namespace and locale", () => {
-    const enNamespaces = fs
-      .readdirSync(path.join(LOCALES_ROOT, "en"))
-      .filter((file) => file.endsWith(".json"))
-      .sort();
-    const zhNamespaces = fs
-      .readdirSync(path.join(LOCALES_ROOT, "zh-Hans"))
-      .filter((file) => file.endsWith(".json"))
-      .sort();
-    expect(zhNamespaces).toEqual(enNamespaces);
-  });
+  describe.each(["zh-Hans", "zh-Hant"])("%s", (locale) => {
+    it("has the same namespaces as English", () => {
+      const enNamespaces = fs
+        .readdirSync(path.join(LOCALES_ROOT, "en"))
+        .filter((file) => file.endsWith(".json"))
+        .sort();
+      const zhNamespaces = fs
+        .readdirSync(path.join(LOCALES_ROOT, locale))
+        .filter((file) => file.endsWith(".json"))
+        .sort();
+      expect(zhNamespaces).toEqual(enNamespaces);
+    });
 
-  it("keeps Simplified Chinese keys aligned with English", () => {
-    const enResources = readLocale("en");
-    const zhResources = new Map(readLocale("zh-Hans"));
+    it("keeps keys aligned with English", () => {
+      const enResources = readLocale("en");
+      const zhResources = new Map(readLocale(locale));
 
-    for (const [namespace, value] of enResources) {
-      const zhValue = zhResources.get(namespace);
-      expect(zhValue, `missing zh-Hans namespace: ${namespace}`).toBeDefined();
-      const enKeys = flatten(value);
-      const zhKeys = flatten(zhValue);
-      // i18next plural rules use `_one` / `_other`; Chinese has only `_other`.
-      const missing = [...enKeys].filter((key) => {
-        if (zhKeys.has(key)) return false;
-        if (key.endsWith("_one") && zhKeys.has(`${key.slice(0, -4)}_other`)) {
-          return false;
-        }
-        return true;
-      });
-      expect(
-        missing,
-        `missing zh-Hans keys in ${namespace}`,
-      ).toEqual([]);
-      expect(
-        [...zhKeys].filter((key) => !enKeys.has(key)),
-        `extra zh-Hans keys in ${namespace}`,
-      ).toEqual([]);
-    }
+      for (const [namespace, value] of enResources) {
+        const zhValue = zhResources.get(namespace);
+        expect(zhValue, `missing ${locale} namespace: ${namespace}`).toBeDefined();
+        const enKeys = flatten(value);
+        const zhKeys = flatten(zhValue);
+        // i18next plural rules use `_one` / `_other`; Chinese has only `_other`.
+        const missing = [...enKeys].filter((key) => {
+          if (zhKeys.has(key)) return false;
+          if (key.endsWith("_one") && zhKeys.has(`${key.slice(0, -4)}_other`)) {
+            return false;
+          }
+          return true;
+        });
+        expect(
+          missing,
+          `missing ${locale} keys in ${namespace}`,
+        ).toEqual([]);
+        expect(
+          [...zhKeys].filter((key) => !enKeys.has(key)),
+          `extra ${locale} keys in ${namespace}`,
+        ).toEqual([]);
+      }
+    });
   });
 });

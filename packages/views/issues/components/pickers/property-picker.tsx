@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useCallback, useRef, useEffect } from "react";
-import { Check } from "lucide-react";
+import { Check } from "@multica/ui/icons";
 import {
   Popover,
   PopoverTrigger,
@@ -12,6 +12,7 @@ import {
   TooltipContent,
   TooltipTrigger,
 } from "@multica/ui/components/ui/tooltip";
+import { TruncatedTooltip } from "@multica/ui/components/common/truncated-tooltip";
 import { isImeComposing } from "@multica/core/utils";
 import { useT } from "../../../i18n";
 
@@ -42,6 +43,7 @@ export function PropertyPicker({
   onOpenChange,
   trigger,
   triggerRender,
+  nativeButton: nativeButtonProp,
   width = "w-48",
   align = "end",
   side = "bottom",
@@ -57,6 +59,8 @@ export function PropertyPicker({
   onOpenChange: (v: boolean) => void;
   trigger: React.ReactNode;
   triggerRender?: React.ReactElement;
+  /** False when a compound trigger renders a non-button element. */
+  nativeButton?: boolean;
   width?: string;
   align?: "start" | "center" | "end";
   side?: React.ComponentProps<typeof PopoverContent>["side"];
@@ -187,15 +191,16 @@ export function PropertyPicker({
   // <button> takes the non-native path. Component triggers (PillButton,
   // Button, ClearablePillButton) forward the merged props onto a real
   // <button> and keep the default.
-  const nativeButton =
+  const nativeButton = nativeButtonProp ?? (
     typeof triggerRender?.type === "string" && triggerRender.type !== "button"
       ? false
-      : undefined;
+      : true
+  );
   const popoverTrigger = (
     <PopoverTrigger
+      nativeButton={nativeButton}
       className={triggerRender ? undefined : PICKER_TRIGGER_CLASS}
       render={triggerRender}
-      nativeButton={nativeButton}
     >
       {trigger}
     </PopoverTrigger>
@@ -245,6 +250,7 @@ export function PickerItem({
   onClick,
   hoverClassName,
   tooltip,
+  truncationTooltip,
   emptyValue = false,
   children,
 }: {
@@ -264,9 +270,13 @@ export function PickerItem({
   emptyValue?: boolean;
   /** Design-system tooltip for the row — useful when truncated content needs
    *  the full string, or when the row carries metadata that doesn't fit on
-   *  a single line. Wrapped in a real Tooltip component (200ms delay,
+   *  a single line. Wrapped in a real Tooltip component (shared delay,
    *  styled), not a native `title` attribute. */
   tooltip?: React.ReactNode;
+  /** Full text of a row label that may be cut off. Unlike `tooltip`, it only
+   *  opens when the row's content is actually truncated, so short labels
+   *  don't pop a bubble that repeats them. Ignored when `tooltip` is set. */
+  truncationTooltip?: React.ReactNode;
   children: React.ReactNode;
 }) {
   const button = (
@@ -293,7 +303,10 @@ export function PickerItem({
     </button>
   );
 
-  if (!tooltip) return button;
+  if (!tooltip) {
+    if (!truncationTooltip) return button;
+    return <TruncatedTooltip content={truncationTooltip}>{button}</TruncatedTooltip>;
+  }
 
   return (
     <Tooltip>

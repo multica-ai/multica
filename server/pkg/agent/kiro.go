@@ -563,6 +563,20 @@ func (b *kiroBackend) Execute(ctx context.Context, prompt string, opts ExecOptio
 		duration := time.Since(startTime)
 		b.cfg.Logger.Info("kiro finished", "pid", cmd.Process.Pid, "status", finalStatus, "duration", duration.Round(time.Millisecond).String())
 
+		// Detecting the header cancels the RPC, not the panic reporter. Give
+		// trailing Message/Location writes a bounded chance to reach stderr
+		// before closing stdin or killing the process. A live or silent panic
+		// may never close stderr; task cancellation must still interrupt this.
+		if runtimePanic.Fired() && runCtx.Err() == nil {
+			drainTimer := time.NewTimer(kiroReaderDrainGrace)
+			select {
+			case <-stderrDone:
+			case <-runCtx.Done():
+			case <-drainTimer.C:
+			}
+			drainTimer.Stop()
+		}
+
 		stdin.Close()
 		cancel()
 

@@ -4,6 +4,7 @@ description: Connect an agent to Feishu and hand it work directly from a DM or a
 ---
 
 import { Callout } from "fumadocs-ui/components/callout";
+import { Step, Steps } from "fumadocs-ui/components/steps";
 
 Connect a Multica agent as a Feishu Bot so participants can converse in authorized DMs or groups, including people without a Labrastro account. The agent clarifies and summarizes feedback, then uses normal tools to comment in its own name. Conversations and runs remain in the workspace.
 
@@ -13,13 +14,22 @@ Each Bot maps to exactly one agent. To use several agents in Feishu, connect a B
 
 The agent's owner and workspace owners and admins can start a connection:
 
-1. Open **Agents** and select the agent to connect to Feishu.
-2. Go to **Integrations** and click **Bind to Feishu**.
-3. Scan the QR code with Feishu and confirm the authorization.
-4. Return to Multica. Once the page shows **Connected to Feishu**, authorize conversations below.
+<Steps>
+<Step>
+Open **Agents** and select the agent to connect to Feishu.
+</Step>
+<Step>
+Go to **Integrations** and click **Bind to Feishu**.
+</Step>
+<Step>
+Scan the QR code with Feishu and confirm the authorization. The QR code works only once; if it expires, generate a new one.
+</Step>
+<Step>
+Return to Multica. Once the page shows **Connected to Feishu**, authorize conversations below.
+</Step>
+</Steps>
 
-
-The QR code is a one-time credential; if it expires, generate a new one. An agent that is already connected no longer shows the scan entry point; to rename the Bot or adjust its permissions, click **Manage in Feishu**.
+An agent that is already connected no longer shows the scan entry point; to rename the Bot or adjust its permissions, click **Manage in Feishu**.
 
 <Callout type="info">
 New connections are currently open only for mainland-China Feishu. Existing international Lark connections keep working and can still be managed.
@@ -39,13 +49,19 @@ Message the Bot directly. Consecutive messages stay in the same Multica conversa
 
 ### Group chats
 
-Add the Bot to the group first, then `@Bot` and describe what you need. The Bot only responds to messages that explicitly @-mention it; when it runs, it draws on the recent context it can read in the current session.
+Add the Bot to the group first, then `@Bot` and describe what you need. The Bot only responds to messages that explicitly @-mention it, and each run includes the group's most recent messages as context.
 
 ### Discuss a task
 
 Name the task or quote a notification sent by the Bot, then describe your feedback. The agent may ask for clarification before posting a summary to the appropriate discussion under its own identity. Messages are not immediately copied verbatim into comments.
 
 `/issue` is conversation text, not a direct member command. A report question stays in this conversation; it does not automatically rerun the automation or create an issue. A bare “yes” or “continue” does not approve multiple changes. `/new` starts a new Chat and `/clear` starts fresh context; bare controls do not run the agent.
+
+## Images and files from the agent
+
+External authorized conversations do not send generated images or files and do not rewrite issue references as workspace links. The attachment behavior below applies only to member-bound conversations. Delivery rechecks conversation authorization; revoked consent prevents queued media from being sent.
+
+When file delivery is enabled, text and supported images attached to an agent’s reply appear together in one Feishu message. Images update that message as they finish uploading; files arrive separately in the same conversation. An image-only reply can use an image message. Supported images are limited to 10 MB; unsupported, larger, or explicitly rejected images are sent as files, up to 30 MB. This requires object storage and the application’s resource upload permission. If delivery fails or cannot be confirmed, the attachments remain available on the reply in Multica. Check the conversation before requesting a resend.
 
 ## Manage connections
 
@@ -77,7 +93,7 @@ Restart the API server, then connect the Bot from the agent's **Integrations** p
 - **QR code expired**: close the dialog and start the connection again.
 - **Conversation not authorized**: check its chat ID, saved consent, and the authorizer’s current membership and agent invocation rights.
 - **The Bot doesn't run**: check whether the agent is archived and whether the [runtime](/daemon-runtimes) it uses is online.
-- **The Bot never replies at all**: the app must push events over a long connection — Multica has no webhook endpoint. In the Feishu/Lark developer console, open **Events & Callbacks → Event Configuration** and confirm that the subscription method is the long connection rather than a request URL, that `im.message.receive_v1` is subscribed, and that the app version carrying that configuration is published (and approved, where the tenant reviews releases). An app set to a request URL still binds, still shows Connected, and silently receives nothing.
+- **The Bot never replies at all**: the app must push events over a long connection; Multica has no webhook endpoint. In the Feishu/Lark developer console, open **Events & Callbacks → Event Configuration** and confirm that the subscription method is the long connection rather than a request URL, that `im.message.receive_v1` is subscribed, and that the app version carrying that configuration is published (and approved, where the tenant reviews releases). An app set to a request URL still binds, still shows Connected, and silently receives nothing.
 
 ## Next steps
 

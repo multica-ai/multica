@@ -5,7 +5,7 @@ import {
   useParams,
   useRouteError,
 } from "react-router-dom";
-import { AlertTriangle, RotateCw, X } from "lucide-react";
+import { AlertTriangle, RotateCw, X } from "@multica/ui/icons";
 import { useAuthStore } from "@multica/core/auth";
 import { setCurrentWorkspace } from "@multica/core/platform";
 import { WorkspaceSlugProvider } from "@multica/core/paths";

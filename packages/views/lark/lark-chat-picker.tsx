@@ -1,6 +1,6 @@
 "use client";
 
-import { Check, Search, X } from "lucide-react";
+import { Check, Search, X } from "@multica/ui/icons";
 import type { LarkDiscoveredChat } from "@multica/core/types";
 import { Badge } from "@multica/ui/components/ui/badge";
 import { Button } from "@multica/ui/components/ui/button";

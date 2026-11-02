@@ -30,7 +30,8 @@ import { propertyListOptions, useSetIssueProperty, useUnsetIssueProperty } from 
 import { useWorkspaceId } from "@multica/core/hooks";
 import type { IssueGrouping } from "@multica/core/issues/stores/view-store";
 import { useActorName } from "@multica/core/workspace/hooks";
-import { BoardColumn, BOARD_CARD_WIDTH, type BoardColumnGroup } from "./board-column";
+import { BoardColumn, type BoardColumnGroup } from "./board-column";
+import { BOARD_CARD_WIDTH } from "./board-layout";
 import { BoardWorkflowContext, type BoardWorkflowContextValue } from "./board-workflow-context";
 import {
   resolveProjectWorkflow,

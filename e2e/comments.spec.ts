@@ -64,7 +64,7 @@ test.describe("Comments", () => {
     const shell = page.getByTestId("comment-composer-shell");
     await expect(shell).toBeVisible();
     const composer = shell.locator("xpath=ancestor::div[contains(@class, 'rounded-lg')][1]");
-    const submitBtn = composer.locator("button:has(svg.lucide-arrow-up)").last();
+    const submitBtn = composer.locator("button:has(svg.icon-arrow-up)").last();
     await expect(submitBtn).toBeDisabled();
   });
 
@@ -144,12 +144,12 @@ test.describe("Comments", () => {
     expect(toolbarBlank).not.toBeNull();
     expect(["auto", "default"], `toolbar blank cursor=${toolbarBlank!.cursor}`).toContain(toolbarBlank!.cursor);
     expect(toolbarBlank!.editable).toBe(false);
-    const attachBtn = mainCard.locator("button:has(svg.lucide-paperclip)").first();
+    const attachBtn = mainCard.locator("button:has(svg.icon-paperclip)").first();
     const attachBox = await boxOf(attachBtn);
     expect((await probe(attachBox.x + attachBox.width / 2, attachBox.y + attachBox.height / 2))!.cursor).toBe("pointer");
     // Disabled send keeps the Button's pointer-events-none passthrough: the hit
     // lands below the button and shows the arrow.
-    const sendBtn = mainCard.locator("button:has(svg.lucide-arrow-up)").first();
+    const sendBtn = mainCard.locator("button:has(svg.icon-arrow-up)").first();
     const sendBox = await boxOf(sendBtn);
     const disabledSend = await probe(sendBox.x + sendBox.width / 2, sendBox.y + sendBox.height / 2);
     expect(disabledSend!.tag, "disabled send should be hit-transparent").not.toBe("button");
@@ -233,9 +233,9 @@ test.describe("Comments", () => {
       ["auto", "default"],
       `reply toolbar blank hit <${stripBlank!.tag} class="${stripBlank!.cls}"> cursor=${stripBlank!.cursor}`,
     ).toContain(stripBlank!.cursor);
-    const replyAttachBox = await boxOf(replyColumn.locator("button:has(svg.lucide-paperclip)").first());
+    const replyAttachBox = await boxOf(replyColumn.locator("button:has(svg.icon-paperclip)").first());
     expect((await probe(replyAttachBox.x + replyAttachBox.width / 2, replyAttachBox.y + replyAttachBox.height / 2))!.cursor).toBe("pointer");
-    const replySendBtn = replyColumn.locator("button:has(svg.lucide-arrow-up)").first();
+    const replySendBtn = replyColumn.locator("button:has(svg.icon-arrow-up)").first();
     // `disabled` lifts on the debounced onUpdate (100ms) — wait, don't race it.
     await expect(replySendBtn).toBeEnabled();
     const replySendBox = await boxOf(replySendBtn);
@@ -268,7 +268,7 @@ test.describe("Comments", () => {
     await expect(pm).toBeVisible();
     await pm.pressSequentially("first reply body", { delay: 5 });
 
-    const sendBtn = page.getByTestId("reply-text-surface").locator("button:has(svg.lucide-arrow-up)").first();
+    const sendBtn = page.getByTestId("reply-text-surface").locator("button:has(svg.icon-arrow-up)").first();
     await expect(sendBtn).toBeEnabled();
     await sendBtn.click();
 

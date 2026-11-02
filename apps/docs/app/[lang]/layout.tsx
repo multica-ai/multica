@@ -1,5 +1,5 @@
 import "../global.css";
-import { RootProvider } from "fumadocs-ui/provider";
+import { RootProvider } from "fumadocs-ui/provider/next";
 import { DocsFrameworkProvider } from "@/components/i18n-frame-provider";
 import { DocsLayout } from "fumadocs-ui/layouts/docs";
 import { Inter, Geist_Mono, Source_Serif_4 } from "next/font/google";
@@ -11,6 +11,7 @@ import { source } from "@/lib/source";
 import { i18n, type Lang } from "@/lib/i18n";
 import { uiTranslations, localeLabels } from "@/lib/translations";
 import { DocsSettings } from "@/components/docs-settings";
+import { DocsSearchDialog } from "@/components/search-dialog";
 
 // Inter (Latin UI face) is exposed under `--font-inter`. The full `--font-sans`
 // stack — Inter + the per-locale CJK fallback chain, including the Japanese-first
@@ -92,17 +93,17 @@ export default async function Layout({
             locales,
             translations: uiTranslations[lang],
           }}
-          search={{ options: { api: "/docs/api/search" } }}
+          search={{ SearchDialog: DocsSearchDialog, options: { api: "/docs/api/search" } }}
         >
           <DocsFrameworkProvider>
             <DocsLayout
             tree={source.getPageTree(lang)}
-            // Suppress Fumadocs's default sidebar-footer icons (theme +
-            // language + search). Our custom <DocsSettings> is mounted as
-            // the sidebar footer instead — two labelled buttons, not three
-            // icons.
+            // Theme and language live in our <DocsSettings> sidebar footer
+            // (two labelled buttons), so Fumadocs's own controls for them are
+            // off. Its search toggle stays: the search bar atop the sidebar
+            // and the icon in the mobile header open the ⌘K dialog.
             themeSwitch={{ enabled: false }}
-            searchToggle={{ enabled: false }}
+            slots={{ languageSelect: false }}
             sidebar={{ footer: <DocsSettings locale={lang} /> }}
             {...baseOptions}
           >

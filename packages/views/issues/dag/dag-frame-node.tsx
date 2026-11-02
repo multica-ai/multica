@@ -2,7 +2,7 @@
 
 import { memo } from "react";
 import type { NodeProps } from "@xyflow/react";
-import { ArrowRight } from "lucide-react";
+import { ArrowRight } from "@multica/ui/icons";
 import { cn } from "@multica/ui/lib/utils";
 import type { IssueStatusCategory } from "@multica/core/types";
 import { useViewStoreApi } from "@multica/core/issues/stores/view-store-context";

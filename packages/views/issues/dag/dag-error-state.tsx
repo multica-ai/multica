@@ -1,5 +1,5 @@
 import { ApiError } from "@multica/core/api";
-import { AlertTriangle } from "lucide-react";
+import { AlertTriangle } from "@multica/ui/icons";
 import { Button } from "@multica/ui/components/ui/button";
 import { useT } from "../../i18n";
 

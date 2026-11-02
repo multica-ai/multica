@@ -1,7 +1,7 @@
 import { LabI18nProvider } from "./lab-i18n";
 import { useTranslation } from "react-i18next";
 import { useEffect, useState, type ReactNode } from "react";
-import { ArrowUpRight, Check, Inbox, Plus } from "lucide-react";
+import { ArrowUpRight, Check, Inbox, Plus } from "@multica/ui/icons";
 import { Button } from "@multica/ui/components/ui/button";
 import { Badge } from "@multica/ui/components/ui/badge";
 import { Input } from "@multica/ui/components/ui/input";

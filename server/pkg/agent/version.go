@@ -18,14 +18,15 @@ import (
 var MinVersions = map[string]string{
 	"antigravity": "1.1.10", // stream-json usage plus reliable headless --model selection
 	"claude":      "2.0.0",
-	"codex":       "0.100.0", // app-server --listen stdio:// added in 0.100.0
-	"copilot":     "1.0.0",   // --output-format json envelope stable from 1.0.x
-	"grok":        "0.2.89",  // ACP + authenticate/session-load/set_model/MCP and --effort thinking flag
-	"qwen":        "0.20.0",  // stream-json protocol captured and verified against Qwen Code 0.20.0
-	"dim":         "0.3.10",  // cross-run session/load: per-process lock releases on graceful exit
-	"mcode":       "0.1.2",   // ACP v1 session/new, prompt, MCP capability forwarding
-	"muse":        "1.4.10",  // MSP stable surface: session/start, turn/start, item stream
-	"zeroclaw":    "0.8.0",   // persistent ACP sessions and session/resume were added in 0.8.0
+	"codex":       "0.100.0",   // app-server --listen stdio:// added in 0.100.0
+	"copilot":     "1.0.0",     // --output-format json envelope stable from 1.0.x
+	"grok":        "0.2.89",    // ACP + authenticate/session-load/set_model/MCP and --effort thinking flag
+	"qwen":        "0.20.0",    // stream-json protocol captured and verified against Qwen Code 0.20.0
+	"dim":         "0.3.10",    // cross-run session/load: per-process lock releases on graceful exit
+	"mcode":       "0.1.2",     // ACP v1 session/new, prompt, MCP capability forwarding
+	"muse":        "1.4.10",    // MSP stable surface: session/start, turn/start, item stream
+	"devin":       "3000.3.22", // devin acp --model was introduced in 3000.3.22
+	"zeroclaw":    "0.8.0",     // persistent ACP sessions and session/resume were added in 0.8.0
 	// opencode: honors TMPDIR/TMP/TEMP from 1.1.54. Earlier builds ignore all
 	// three when their embedded Bun runtime extracts a native module, writing
 	// into the shared system temp dir whatever the daemon exports — one 4-8 MB

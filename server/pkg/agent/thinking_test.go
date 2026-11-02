@@ -362,9 +362,9 @@ func TestNormalizeCodexModelLabelMatchesStaticGPT6Family(t *testing.T) {
 	static := map[string]string{}
 	for _, m := range codexStaticModels() {
 		static[m.ID] = m.Label
-		if m.ID == "gpt-6.1-sol" {
+		if m.ID == "gpt-6.1-sol" || m.ID == "gpt-6.1-terra" {
 			if m.Thinking == nil || m.Thinking.DefaultLevel != "low" || len(m.Thinking.SupportedLevels) != 6 || !hasThinkingLevel(m.Thinking, "max") || !hasThinkingLevel(m.Thinking, "ultra") {
-				t.Errorf("GPT-6.1 Sol fallback must match the observed live efforts: %+v", m.Thinking)
+				t.Errorf("%s fallback must match the observed live efforts: %+v", m.ID, m.Thinking)
 			}
 			if m.Default || len(m.ServiceTiers) != 0 {
 				t.Errorf("new fallback must not change the default or guess service tiers: %+v", m)
@@ -372,10 +372,11 @@ func TestNormalizeCodexModelLabelMatchesStaticGPT6Family(t *testing.T) {
 		}
 	}
 	for id, reported := range map[string]string{
-		"gpt-6-astra": "GPT-6-Astra",
-		"gpt-6.1-sol": "GPT-6.1-Sol",
-		"gpt-6-sol":   "GPT-6-Sol",
-		"gpt-6-luna":  "GPT-6-Luna",
+		"gpt-6-astra":   "GPT-6-Astra",
+		"gpt-6.1-sol":   "GPT-6.1-Sol",
+		"gpt-6.1-terra": "GPT-6.1 Terra",
+		"gpt-6-sol":     "GPT-6-Sol",
+		"gpt-6-luna":    "GPT-6-Luna",
 	} {
 		if static[id] == "" {
 			t.Errorf("%s missing from the static Codex catalog", id)

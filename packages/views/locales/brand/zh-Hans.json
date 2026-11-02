@@ -86,7 +86,7 @@
     },
     "qoder": {
       "description": "连接 Qoder Cloud Agents，由 Labrastro 管理执行并加密保存凭证。工作区管理员可修改配置。",
-      "add_agent_description": "创建 Labrastro 智能体并关联已有的 QCA 智能体，使用 Qoder 云端已配置的环境和凭证。",
+      "add_agent_description": "创建 Labrastro 智能体并关联已有的 Qoder Cloud Agents 智能体，使用 Qoder 云端已配置的环境和凭证。",
       "data_disclosure_title": "Labrastro 会发送给 Qoder 的内容",
       "connect_description": "Labrastro 会在 Qoder 的沙箱里执行任务。"
     }

@@ -2,7 +2,7 @@
 
 import { memo, useCallback, useMemo, useState, type ReactNode } from "react";
 import { Virtuoso } from "react-virtuoso";
-import { Ban, EyeOff, FolderMinus, MoreHorizontal, Plus, UserMinus } from "lucide-react";
+import { Ban, EyeOff, FolderMinus, MoreHorizontal, Plus, UserMinus } from "@multica/ui/icons";
 import { useDroppable } from "@dnd-kit/core";
 import { SortableContext, verticalListSortingStrategy } from "@dnd-kit/sortable";
 import type {
@@ -18,6 +18,7 @@ import {
   DropdownMenuContent,
   DropdownMenuItem,
 } from "@multica/ui/components/ui/dropdown-menu";
+import { TruncatedTooltip } from "@multica/ui/components/common/truncated-tooltip";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { useIssueStatuses } from "@multica/core/issue-statuses/hooks";
 import { useViewStoreApi } from "@multica/core/issues/stores/view-store-context";
@@ -41,8 +42,7 @@ import type { IssueCreateDefaults } from "../surface/types";
 // cannot be faithfully replicated in JavaScript (ICU/V8). Showing an
 // inaccurate indicator is worse than showing none.
 
-export const BOARD_COL_WIDTH = 280;
-export const BOARD_CARD_WIDTH = BOARD_COL_WIDTH - 16 - 8; // col(280) - col p-2(16) - droppable p-1(8)
+import { BOARD_COL_WIDTH } from "./board-layout";
 
 // Board cards are ~90-140px tall, so ~10 fill a column viewport — unlike the
 // generic VIRTUOSO_SEED_COUNT (30, sized for 36px list rows). The seed mounts
@@ -418,9 +418,11 @@ function BoardGroupHeading({
           className="size-2.5 shrink-0 rounded-full bg-muted-foreground/30"
           style={group.propertyOptionColor ? { backgroundColor: group.propertyOptionColor } : undefined}
         />
-        <span className="truncate text-body font-medium" title={group.title}>
-          {group.title}
-        </span>
+        <TruncatedTooltip content={group.title}>
+          <span className="truncate text-body font-medium">
+            {group.title}
+          </span>
+        </TruncatedTooltip>
         <span className="shrink-0 rounded-full bg-background px-1.5 py-0.5 text-micro font-medium tabular-nums text-muted-foreground">
           {count}
         </span>
@@ -438,9 +440,11 @@ function BoardGroupHeading({
             <FolderMinus className="size-3.5" />
           </span>
         )}
-        <span className="truncate text-body font-medium" title={group.title}>
-          {group.title}
-        </span>
+        <TruncatedTooltip content={group.title}>
+          <span className="truncate text-body font-medium">
+            {group.title}
+          </span>
+        </TruncatedTooltip>
         <span className="shrink-0 rounded-full bg-background px-1.5 py-0.5 text-micro font-medium tabular-nums text-muted-foreground">
           {count}
         </span>
@@ -465,9 +469,11 @@ function BoardGroupHeading({
   return (
     <div className="flex min-w-0 items-center gap-2">
       {actorIcon}
-      <span className="truncate text-body font-medium" title={group.title}>
-        {group.title}
-      </span>
+      <TruncatedTooltip content={group.title}>
+        <span className="truncate text-body font-medium">
+          {group.title}
+        </span>
+      </TruncatedTooltip>
       <span className="shrink-0 rounded-full bg-background px-1.5 py-0.5 text-micro font-medium tabular-nums text-muted-foreground">
         {count}
       </span>

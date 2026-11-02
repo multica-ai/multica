@@ -1,6 +1,6 @@
 "use client";
 
-import { CalendarDays, ChevronDown, FolderKanban } from "lucide-react";
+import { CalendarDays, ChevronDown, FolderKanban } from "@multica/ui/icons";
 import { Button } from "@multica/ui/components/ui/button";
 import {
   DropdownMenu,

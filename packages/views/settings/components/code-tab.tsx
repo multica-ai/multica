@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { MoreHorizontal, Pause, Play } from "lucide-react";
+import { MoreHorizontal, Pause, Play } from "@multica/ui/icons";
 import { IconButton } from "@multica/ui/components/common/icon-button";
 import { Switch } from "@multica/ui/components/ui/switch";
 import {

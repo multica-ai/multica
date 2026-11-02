@@ -1,0 +1,171 @@
+---
+title: Issue wakeups
+description: Put a wakeup rule on an issue so an agent comes back to it at a set time or after something happens.
+---
+
+import { Step, Steps } from "fumadocs-ui/components/steps";
+import { WakeupDemo } from "@/components/demos/wakeup-demo";
+
+Some work stops halfway and waits: for a supplier's quote, a colleague's answer, or sub-issues to finish. A **wakeup** is a rule on the issue that says "when this happens, wake this agent and have it do that". When the condition is met, the agent starts an ordinary run on the issue, reads where things stand, and posts its result as a comment as usual.
+
+The rule is stored on the issue, so nothing runs while it waits. Members create wakeups from the issue sidebar; agents schedule their own next check from a run with the [CLI](#cli). Both create the same kind of rule.
+
+## Create a wakeup [#create]
+
+<Steps>
+<Step>
+
+Open the issue and click **+** next to **Wakeups** in the issue sidebar.
+
+</Step>
+<Step>
+
+After **When**, choose a condition and fill in what it needs, such as a time, the person to wait for, or the status to wait for.
+
+</Step>
+<Step>
+
+After **Wake**, choose the agent. If the issue's assignee is an agent, it is already selected. You can only choose agents that are bound to a runtime and that you are allowed to run; see [Permissions and Access](/agents#permissions-and-access).
+
+</Step>
+<Step>
+
+Under **What to do when woken**, write the instruction, for example "Check whether every supplier has sent a quote, and if so, put them in a comparison table". It can be up to 12,000 bytes. You can edit it later; the change applies to later wakeups only.
+
+</Step>
+<Step>
+
+Click **Create**.
+
+</Step>
+</Steps>
+
+Runs a wakeup starts act on behalf of the person who created it, and Multica checks again before the run starts that this person may still run the agent.
+
+In the issue below, Ops helper has asked suppliers for quotes and is waiting for their replies. Add a wakeup, then skip ahead to the wakeup time. Choose "Check regularly" to also see how the agent ends a check without commenting when nothing has arrived yet.
+
+<WakeupDemo />
+
+## What you can wait for [#conditions]
+
+| Group | Condition | Wakes the agent when |
+|---|---|---|
+| Time | At a time | In 10 minutes, in 1 hour, tomorrow at 09:00, or a time you pick. Wakes once. |
+| Time | Check regularly | Every hour, every day at 09:00, or weekdays at 09:00, in your timezone. Needs an end date; the rule stops after that day ends. |
+| Collaboration | Someone replies | A new comment appears on the issue; you can limit it to one member or agent. |
+| Collaboration | A field changes to a value | The issue's status, assignee, label, or a custom property takes the value you chose. |
+| Runs and sub-issues | An agent's run ends | A run on this issue by a given agent (or any agent) succeeds, fails, or is cancelled. |
+| Runs and sub-issues | Sub-issues finish | Every sub-issue is closed (`done` or `cancelled`), or every stage up to the one you pick is. An issue without sub-issues never fires. |
+| Linked | A linked PR's CI finishes | Or the PR merges, or it has merge conflicts. Only PRs linked directly to this issue count; with several, any one is enough. CI and conflicts work only for GitHub pull requests. |
+| Linked | Another issue's status | Another issue is done, done or cancelled, or moves to In Review. |
+| | Custom events | Pick from the 25 raw events, such as reactions, attachments, edited comments, or resolved threads. |
+
+Multica checks field, sub-issue, PR, and other-issue conditions itself. If the condition already holds when you create the rule, the next check (within about 30 seconds) wakes the agent. CI is the exception: it only counts checks that finish after the rule was created.
+
+Every condition other than time waits for something to happen, and has three more settings:
+
+- **Triggers**: **Trigger once** by default. With **Repeat wakeups**, also set **Up to** how many times (5, 10, 20, or 50; 20 by default).
+- **Wait up to**: 1, 3, 7, or 30 days; 7 by default.
+- **Then** (what happens at the deadline): by default the agent is woken to handle it and is told that what it waited for did not happen. **End without a run** ends the rule quietly instead.
+
+When the issue's assignee is an agent, members' comments already trigger it. A "Someone replies" wakeup for that same agent does not add a run; it joins the run the comment starts. Add one only when you want to give the agent extra instructions.
+
+## After the wakeup fires [#after-wake]
+
+- The agent starts an ordinary run on the issue, reads the issue, comments, and wakeup instruction, and ends with one comment. The comment carries a "Wakeup" tag with the condition, and the [execution log](/tasks) shows the same trigger.
+- When a regular check finds nothing that needs a reply, the agent can end with a **silent check**: no comment, only a note in the issue timeline and in the rule's trigger history. Consecutive silent checks collapse into one timeline entry.
+- An agent's own comments and its own changes to the issue never wake it.
+- If the same agent already has a run waiting to start on the issue, the wakeup joins that run instead of starting another one.
+- While a wakeup is waiting, the issue header shows what the issue is waiting for, such as "Ops helper: Waiting for a reply". Click it to jump to the Wakeups section.
+
+## View and manage wakeups [#manage]
+
+The Wakeups section of the issue sidebar lists the issue's rules: the condition, who is woken, when it fires next, and how long is left. Click a rule for its details, including its source, its deadline, its instruction, and its **trigger history** (the latest runs, whether each posted a comment, and what each silent check found).
+
+| Action | Result |
+|---|---|
+| Turn the switch off | Stops later wakeups and withdraws runs that have not started. A run that already started keeps going; stop it from the execution log if needed. |
+| **Wake now** | Wakes the agent once right away, without waiting for the condition. |
+| Edit the instruction | Affects later wakeups only; a run in progress is unchanged. |
+| **Delete** | The rule no longer wakes anyone. Runs that have not started are withdrawn; started ones continue. |
+| **Enable again** / **Set a new time** | Re-enables a one-time rule after it fired. A one-time rule at a set time needs a new time. |
+
+Rules that have ended move to **Wakeup history**. Only the rule's creator and workspace owners and admins can manage it. A wakeup an agent creates during a run belongs to the member who started that run, and shows as "Ops helper, on behalf of Lei Li".
+
+To see every wakeup in the workspace, open **Autopilot** and switch to the **Issue wakeups** tab. You can filter by state (Waiting or executing, Paused, Turned off, Ended), trigger type, source, and agent, turn several off at once, or create a wakeup after picking its issue.
+
+## Automatic endings and pauses [#limits]
+
+- When an issue is done or cancelled, its wakeups are all turned off and runs that have not started are withdrawn. Reopening the issue does not bring them back. You cannot create wakeups on a done or cancelled issue.
+- A waiting rule that reaches its **Wait up to** limit does what its **Then** setting says; a regular check stops at its end date.
+- A repeating rule pauses once it reaches its maximum number of triggers. Waiting rules are also paused when they trigger each other with other wakeups (the trigger chain passes through the rule a third time with no person in between), or when they fire more than 12 times in an hour. A paused rule stays off until someone turns it back on, and its count starts over.
+- An issue can have at most 32 wakeups turned on, and a workspace at most 1,000.
+
+## Wake the parent when sub-issues finish [#child-done]
+
+When an issue has sub-issues, its Wakeups section shows a rule marked **System**. Nobody needs to create it:
+
+- When every sub-issue in a stage is closed and a later stage is still waiting, it wakes the parent's assignee, and it wakes them once more when every sub-issue is closed. Sub-issues without stages wake the parent once, when the last one closes.
+- An agent assignee is woken; for a squad, its leader is woken; a member assignee gets an inbox notification instead. Without an assignee, nobody is woken.
+- While the parent is in `backlog`, nothing is woken; it catches up once the parent leaves `backlog`.
+- The default instruction tells the agent which stage closed and which comes next: check its dependencies, then move the next stage's sub-issues out of `backlog`. When every sub-issue is closed, it brings their results together on the parent.
+
+The parent's assignee is already woken by this rule, so do not add a "Sub-issues finish" wakeup for the same thing. To set up stages, see [Issues](/issues#projects-and-sub-issues).
+
+On a single issue, any workspace member can turn this rule off or rewrite its instruction (up to 4,000 bytes); agents cannot change it. Once changed, that issue no longer follows the workspace default.
+
+Workspace owners and admins set the defaults in **Settings → Wakeups**: whether the rule is on by default (it is) and the default instruction. With no default instruction, the built-in one is used. The page also shows how many open issues use their own setting.
+
+## Let agents schedule their own wakeups [#cli]
+
+During a run, an agent uses `multica issue wakeup` to arrange the next run on the issue, then finishes the current run. Without `--agent-id`, the wakeup targets the agent running the command. You can use the same commands from your own terminal; then pass `--agent-id` to choose the agent.
+
+```bash
+# Look again tomorrow at 09:00 (Shanghai time)
+multica issue wakeup create OPS-56 --kind at --at 2026-10-21T09:00:00+08:00 \
+  --instruction "Check whether every supplier has sent a quote; if so, build a comparison table"
+
+# Check every weekday at 09:00 for a week
+multica issue wakeup create OPS-56 --kind cron --cron "0 9 * * 1-5" --timezone Asia/Shanghai \
+  --expires-in 168h --instruction "Check the quote emails and update the comparison table"
+
+# Wait up to 3 days for Lei Li to reply; wake once anyway on timeout
+multica issue wakeup create OPS-56 --event comment.created \
+  --filter-actor-type member --filter-actor-id <Lei-Li-user-id> \
+  --expires-in 72h --on-timeout wake --instruction "Continue based on Lei Li's answer"
+
+# Wait until the issue is in review
+multica issue wakeup create OPS-56 --until-status in_review --instruction "Check the deliverables and summarize"
+```
+
+- **Time**: `--kind at` with `--after 10m` or `--at <RFC3339 time>`; `--kind every --every 1h` for a fixed interval of at least 1 minute; `--kind cron --cron "<5-field expression>"` with `--timezone` (UTC by default).
+- **Events**: list event names after `--event`, separated by commas. `multica issue wakeup events` lists every event and filter. `--mode continuous` makes the rule repeat.
+- **Conditions**: `--until-status`, `--until-assignee`, `--until-label`, `--until-property`, `--until-children-done [--stage N]`, `--until-pr checks|merged|conflicts`, and `--until-issue <issue> --until-issue-state done|ended|in_review|blocked`. Use one `--until-*` per wakeup, and not together with `--event`.
+- **Endings**: the CLI does not add a deadline for you. Use `--expires-in 72h` or `--expires-at <RFC3339 time>`; `--on-timeout wake` makes an event rule wake the agent once more at the deadline. `--max-fires N` (1–1000) caps how many runs a repeating rule starts.
+- **Where results go**: `--parent <comment-id>` keeps the woken run's reply in the original thread.
+
+To manage existing rules:
+
+| Command | What it does |
+|---|---|
+| `multica issue wakeup list <issue>` | List the issue's wakeups |
+| `multica issue wakeup get <issue> <wakeup-id>` | Show one wakeup's full configuration |
+| `multica issue wakeup runs <issue> <wakeup-id>` | Latest runs, what triggered them, silent-check notes, and whether each commented |
+| `multica issue wakeup update <issue> <wakeup-id>` | Replace the whole configuration with the same flags as `create`, and turn it back on |
+| `multica issue wakeup disable <issue> <wakeup-id>` | Turn it off and withdraw runs that have not started |
+| `multica issue wakeup trigger <issue> <wakeup-id>` | Wake the agent once now |
+| `multica issue wakeup delete <issue> <wakeup-id>` | Delete the rule and withdraw runs that have not started |
+| `multica issue wakeup checkin <issue> <wakeup-id> --note "..."` | End a regular check silently when it found nothing that needs a reply; only a run that this rule started can call it |
+
+`list`, `get`, and `runs` print a table with `--output table`. For other commands, see [Using the CLI](/cli).
+
+## Wakeups and autopilots [#vs-autopilots]
+
+An [autopilot](/autopilots) starts new work again and again from a schedule or webhook, and can create a new issue each time. A wakeup belongs to one existing issue: it brings an agent back to that issue after a set time or event, and ends when the issue does.
+
+## Next steps
+
+- [Put agents to work](/triggering-agents) — the other ways to start work.
+- [Autopilots](/autopilots) — start recurring work from a schedule or webhook.
+- [Runs](/tasks) — see the runs a wakeup starts.
+- [Issues](/issues) — sub-issues and stages.

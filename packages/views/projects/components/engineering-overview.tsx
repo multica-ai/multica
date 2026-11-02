@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { useInfiniteQuery, useQueries, useQuery } from "@tanstack/react-query";
-import { AlertCircle, CheckCircle2, LoaderCircle, Settings2 } from "lucide-react";
+import { AlertCircle, CheckCircle2, LoaderCircle, Settings2 } from "@multica/ui/icons";
 import { toast } from "sonner";
 import { Alert, AlertDescription, AlertTitle } from "@multica/ui/components/ui/alert";
 import { Button } from "@multica/ui/components/ui/button";

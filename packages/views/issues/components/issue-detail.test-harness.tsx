@@ -99,7 +99,7 @@ vi.mock("@multica/core/workspace/queries", () => ({
   }),
   agentListOptions: () => ({
     queryKey: ["workspaces", "ws-1", "agents"],
-    queryFn: () => Promise.resolve([]),
+    queryFn: () => mockApiObj.listAgents(),
   }),
   squadListOptions: () => ({
     queryKey: ["workspaces", "ws-1", "squads"],

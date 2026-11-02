@@ -2,7 +2,7 @@
 
 import { useMemo, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
-import { Folder, Layers, Loader2 } from "lucide-react";
+import { Folder, Layers, Loader2 } from "@multica/ui/icons";
 import type { SkillFolder, SkillFolderTree } from "@multica/core/api/schemas";
 import { api, errorCode } from "@multica/core/api";
 import { invalidateSkillPackageQueries } from "@multica/core/skills/package-queries";

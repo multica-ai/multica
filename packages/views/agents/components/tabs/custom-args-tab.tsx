@@ -8,7 +8,7 @@ import {
   Save,
   Terminal,
   Trash2,
-} from "lucide-react";
+} from "@multica/ui/icons";
 import type { Agent, RuntimeDevice } from "@multica/core/types";
 import { createSafeId } from "@multica/core/utils";
 import { Button } from "@multica/ui/components/ui/button";

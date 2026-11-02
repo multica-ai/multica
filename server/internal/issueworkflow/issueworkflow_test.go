@@ -264,11 +264,44 @@ func TestBriefNamesStepCommandsAndHandlers(t *testing.T) {
 		"- `code_review` Code review — hands off to Lin (project lead)   ← current\n",
 		"- `done` Done\n",
 		"Step done      → multica issue status MUL-7 done\n",
-		"Needs changes  → multica issue status MUL-7 implement\n",
+		// Each move names who the target step hands off to.
+		"Needs changes  → multica issue status MUL-7 implement — hands off to Forge\n",
+		"\nYour moves:\n",
 		"Can't proceed  → multica issue status MUL-7 blocked",
 	} {
 		if !strings.Contains(brief, want) {
 			t.Fatalf("brief is missing %q:\n%s", want, brief)
+		}
+	}
+}
+
+// A current daemon's runtime brief states no built-in status rules and owns
+// the exit check, so the brief neither overrides nor repeats them; an older
+// daemon's still states them, so its brief keeps the override lines (MUL-8145).
+func TestBriefOverridesRuntimeRulesOnlyForLegacyDaemons(t *testing.T) {
+	legacyOnly := []string{
+		"replaces the status rules in your runtime instructions",
+		"These commands are the only status moves for your step",
+		"Before your run ends, either run one of them",
+		"The system does not advance the status when your run ends.",
+	}
+	for _, observer := range []bool{false, true} {
+		current := Brief(BriefInput{Workflow: devDefinition(), StatusKey: "code_review", IssueIdentifier: "MUL-7", Observer: observer})
+		for _, line := range legacyOnly {
+			if strings.Contains(current, line) {
+				t.Errorf("observer=%v: current-daemon brief carries %q:\n%s", observer, line, current)
+			}
+		}
+		for _, word := range []string{"`in_progress`", "`in_review`"} {
+			if strings.Contains(current, word) {
+				t.Errorf("observer=%v: current-daemon brief names %s outside the workflow", observer, word)
+			}
+		}
+	}
+	legacy := Brief(BriefInput{Workflow: devDefinition(), StatusKey: "code_review", IssueIdentifier: "MUL-7", LegacyRuntimeRules: true})
+	for _, line := range legacyOnly {
+		if !strings.Contains(legacy, line) {
+			t.Errorf("legacy-daemon brief is missing %q:\n%s", line, legacy)
 		}
 	}
 }
@@ -296,12 +329,12 @@ func TestBriefForObserverLeavesTheStepToItsAssignee(t *testing.T) {
 }
 
 func TestBriefReplacesInReviewOnlyWhenTheWorkflowLacksIt(t *testing.T) {
-	without := Brief(BriefInput{Workflow: devDefinition(), StatusKey: "code_review", IssueIdentifier: "MUL-7"})
+	without := Brief(BriefInput{Workflow: devDefinition(), StatusKey: "code_review", IssueIdentifier: "MUL-7", LegacyRuntimeRules: true})
 	if !strings.Contains(without, "replaces the status rules in your runtime instructions: use only the status keys below, never `in_review`.\n") {
 		t.Fatalf("a workflow without in_review must rule it out:\n%s", without)
 	}
 	def := Definition{Name: DefaultName, IsDefault: true, Steps: stepsFor(BuiltInDefaultKeys())}
-	with := Brief(BriefInput{Workflow: def, StatusKey: "in_progress", IssueIdentifier: "MUL-7"})
+	with := Brief(BriefInput{Workflow: def, StatusKey: "in_progress", IssueIdentifier: "MUL-7", LegacyRuntimeRules: true})
 	if strings.Contains(with, "never `in_review`") {
 		t.Fatalf("a workflow that lists in_review must not rule it out:\n%s", with)
 	}
@@ -353,7 +386,152 @@ func TestBriefWithoutBlockedPointsAtTheBackStatus(t *testing.T) {
 	def := withHandoffs(Definition{Name: "Lean", Steps: stepsFor(ArrangeKeys([]string{"implement", "code_review"}))},
 		[]Step{{StatusKey: "code_review", Handler: Handler{Type: HandlerProjectLead}, BackStatusKey: "implement"}})
 	brief := Brief(BriefInput{Workflow: def, StatusKey: "code_review", IssueIdentifier: "MUL-2"})
-	if strings.Contains(brief, "MUL-2 blocked") || !strings.Contains(brief, "no blocked status") || !strings.Contains(brief, "Needs changes") {
+	if strings.Contains(brief, "MUL-2 blocked") || !strings.Contains(brief, "Can't proceed  → comment why, then run Needs changes\n") || !strings.Contains(brief, "Needs changes  → multica issue status MUL-2 implement\n") {
 		t.Fatalf("a workflow without blocked should not suggest it:\n%s", brief)
 	}
+}
+
+// A step without a handler is a progress marker: the assignee owns the issue's
+// whole job until it reaches a step that hands off, so the brief must not
+// frame the column as a stage of its own (MUL-8231).
+func TestBriefTreatsHandlerlessStepsAsOneSpan(t *testing.T) {
+	leadName := func(step Step) string {
+		if step.Handler.Type == HandlerProjectLead {
+			return "Lin (project lead)"
+		}
+		return ""
+	}
+	reviewedDefault := withHandoffs(Definition{Name: DefaultName, IsDefault: true, Steps: stepsFor(BuiltInDefaultKeys())},
+		[]Step{{StatusKey: "in_review", Handler: Handler{Type: HandlerProjectLead}}})
+	plain := Definition{Name: "Plain", Steps: stepsFor(ArrangeKeys([]string{"in_progress", "in_review"}))}
+	short := Definition{Name: "Short", Steps: stepsFor(ArrangeKeys([]string{"in_progress"}))}
+
+	cases := []struct {
+		name    string
+		def     Definition
+		status  string
+		want    []string
+		wantNot []string
+	}{
+		{
+			name:   "todo before a reviewed in_review",
+			def:    reviewedDefault,
+			status: "todo",
+			want: []string{
+				`You are handling MUL-7. Its "todo" step has no handler, so the work the issue asks for is yours until it reaches the "in_review" step — hands off to Lin (project lead).`,
+				"Starting work  → multica issue status MUL-7 in_progress\n",
+				"Step done      → multica issue status MUL-7 in_review — hands off to Lin (project lead)\n",
+				"finish all of the issue's work in this run before Step done",
+			},
+			wantNot: []string{"You are handling the", "MUL-7 done"},
+		},
+		{
+			name:   "already in_progress",
+			def:    reviewedDefault,
+			status: "in_progress",
+			want: []string{
+				"Step done      → multica issue status MUL-7 in_review — hands off to Lin (project lead)\n",
+			},
+			wantNot: []string{"Starting work", "You are handling the"},
+		},
+		{
+			name:   "no handoff ahead leaves done to a human",
+			def:    plain,
+			status: "todo",
+			want: []string{
+				`Its "todo" step has no handler, so the work the issue asks for is yours to finish.`,
+				"Starting work  → multica issue status MUL-7 in_progress\n",
+				"Step done      → multica issue status MUL-7 in_review\n",
+			},
+			wantNot: []string{"MUL-7 done"},
+		},
+		{
+			name:   "only in_progress before done",
+			def:    short,
+			status: "todo",
+			want: []string{
+				"Starting work  → multica issue status MUL-7 in_progress\n",
+				"Step done      → multica issue status MUL-7 done\n",
+			},
+		},
+		{
+			name:   "no in_progress in the workflow",
+			def:    devDefinition(),
+			status: "todo",
+			want: []string{
+				`until it reaches the "implement" step.`,
+				"Step done      → multica issue status MUL-7 implement\n",
+			},
+			wantNot: []string{"Starting work", "in_progress"},
+		},
+		{
+			// Default with a handoff elsewhere: the unconfigured columns keep
+			// the built-in arc — start in_progress, deliver in_review, and a
+			// re-run at in_review leaves done to a human.
+			name:   "Default handoff elsewhere, from todo",
+			def:    blockedOnlyDefault(),
+			status: "todo",
+			want: []string{
+				"Starting work  → multica issue status MUL-7 in_progress\n",
+				"Step done      → multica issue status MUL-7 in_review\n",
+			},
+			wantNot: []string{"MUL-7 done"},
+		},
+		{
+			name:   "Default handoff elsewhere, at in_review",
+			def:    blockedOnlyDefault(),
+			status: "in_review",
+			want: []string{
+				"Step done      → leave the issue at `in_review`; `done` is set by a human\n",
+			},
+			wantNot: []string{"MUL-7 done", "Starting work"},
+		},
+		{
+			name:   "a step that hands off keeps its stage wording",
+			def:    reviewedDefault,
+			status: "in_review",
+			want: []string{
+				`You are handling the "in_review" step of MUL-7.`,
+				"Step done      → multica issue status MUL-7 done\n",
+			},
+			wantNot: []string{"Starting work", "Steps without a handler"},
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			brief := Brief(BriefInput{Workflow: tc.def, StatusKey: tc.status, IssueIdentifier: "MUL-7", HandlerName: leadName})
+			for _, want := range tc.want {
+				if !strings.Contains(brief, want) {
+					t.Errorf("brief is missing %q:\n%s", want, brief)
+				}
+			}
+			for _, not := range tc.wantNot {
+				if strings.Contains(brief, not) {
+					t.Errorf("brief carries %q:\n%s", not, brief)
+				}
+			}
+		})
+	}
+}
+
+// An older daemon's runtime brief states its own in_progress rule, and an
+// observer leaves the status alone: neither gets the span wording.
+func TestBriefKeepsStepWordingForLegacyDaemonsAndObservers(t *testing.T) {
+	def := Definition{Name: "Plain", Steps: stepsFor(ArrangeKeys([]string{"in_progress", "in_review"}))}
+	legacy := Brief(BriefInput{Workflow: def, StatusKey: "todo", IssueIdentifier: "MUL-7", LegacyRuntimeRules: true})
+	if !strings.Contains(legacy, `You are handling the "todo" step of MUL-7.`) || strings.Contains(legacy, "Starting work") ||
+		!strings.Contains(legacy, "Step done      → multica issue status MUL-7 in_progress\n") {
+		t.Fatalf("legacy brief must keep the per-step wording:\n%s", legacy)
+	}
+	observer := Brief(BriefInput{Workflow: def, StatusKey: "todo", IssueIdentifier: "MUL-7", Observer: true})
+	if strings.Contains(observer, "Starting work") || strings.Contains(observer, "has no handler") {
+		t.Fatalf("observer brief must not carry the span wording:\n%s", observer)
+	}
+}
+
+// blockedOnlyDefault is the Default workflow with a handoff only on blocked,
+// so every other column is unconfigured.
+func blockedOnlyDefault() Definition {
+	return withHandoffs(Definition{Name: DefaultName, IsDefault: true, Steps: stepsFor(BuiltInDefaultKeys())},
+		[]Step{{StatusKey: "blocked", Handler: Handler{Type: HandlerProjectLead}}})
 }

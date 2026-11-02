@@ -27,6 +27,7 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 
 	"github.com/multica-ai/multica/server/internal/util"
+	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
 
 // ---------------------------------------------------------------------------
@@ -177,7 +178,10 @@ func newRelaySendRigWithConfig(t *testing.T, failOn func(n int) bool, dedupe Ded
 	reg.set(instID, conn.newSender())
 
 	mx := newCountingMetrics()
-	o := NewOutbound(&fakeOutboundQueries{}, reg, nil, testLogger(), WithOutboundMetrics(mx))
+	// The bot the frame names was live when the publisher addressed it, and
+	// still is: the write guard asks.
+	q := &fakeOutboundQueries{installation: db.ChannelInstallation{ID: instID, Status: string(InstallationActive)}}
+	o := NewOutbound(q, reg, nil, testLogger(), WithOutboundMetrics(mx))
 	o.spawn = func(f func()) { f() }
 
 	// No dedupe store: that is the single-replica claim gate, and it leaves the

@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import {
+  Check,
   Copy,
   Crown,
   Link,
@@ -15,7 +16,7 @@ import {
   User,
   UserMinus,
   X,
-} from "lucide-react";
+} from "@multica/ui/icons";
 import { ActorAvatar } from "../../common/actor-avatar";
 import { AppLink, useOptionalNavigation } from "../../navigation";
 import type {
@@ -66,6 +67,7 @@ import {
   DropdownMenuSubTrigger,
   DropdownMenuSubContent,
 } from "@multica/ui/components/ui/dropdown-menu";
+import { TruncatedTooltip } from "@multica/ui/components/common/truncated-tooltip";
 import { toast } from "sonner";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useAuthStore } from "@multica/core/auth";
@@ -273,7 +275,7 @@ function MemberRow({
                             </span>
                           </div>
                           {member.role === role && (
-                            <span className="ml-auto text-caption text-muted-foreground">{"✓"}</span>
+                            <Check className="ml-auto size-3.5 text-muted-foreground" />
                           )}
                         </DropdownMenuItem>
                       );
@@ -375,12 +377,13 @@ function ShareLinkRow({
           <span>{t(($) => $.members.share_link_uses, { used: link.use_count, max: link.max_uses ?? "∞" })}</span>
           {link.expires_at && <span>· {t(($) => $.members.share_link_expires, { date: new Date(link.expires_at).toLocaleDateString(locale) })}</span>}
         </div>
-        <div
-          className="truncate font-mono text-caption text-muted-foreground"
-          title={joinUrl}
-        >
-          {joinUrl}
-        </div>
+        <TruncatedTooltip content={joinUrl}>
+          <div
+            className="truncate font-mono text-caption text-muted-foreground"
+          >
+            {joinUrl}
+          </div>
+        </TruncatedTooltip>
       </div>
       <span className="w-24 shrink-0 text-body">{rc.label}</span>
       <IconButton

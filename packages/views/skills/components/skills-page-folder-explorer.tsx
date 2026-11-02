@@ -11,10 +11,10 @@ import {
   ListChevronsUpDown,
   MoreHorizontal,
   Package,
-  PackagePlus,
+  Package as PackagePlus,
   Pencil,
   Trash2,
-} from "lucide-react";
+} from "@multica/ui/icons";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import type { SkillFolder, SkillPackage } from "@multica/core/api/schemas";

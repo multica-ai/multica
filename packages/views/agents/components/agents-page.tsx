@@ -6,7 +6,7 @@ import {
   Bot,
   Lock,
   Plus,
-} from "lucide-react";
+} from "@multica/ui/icons";
 import { useQuery } from "@tanstack/react-query";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import type {
@@ -59,6 +59,7 @@ import {
   TooltipContent,
   TooltipTrigger,
 } from "@multica/ui/components/ui/tooltip";
+import { TruncatedTooltip } from "@multica/ui/components/common/truncated-tooltip";
 import { useNavigation, useRowLink } from "../../navigation";
 import { ActorAvatar } from "../../common/actor-avatar";
 import { docsLocalePrefix } from "../../common/docs-locale";
@@ -106,7 +107,8 @@ const COLUMN_WIDTHS: Record<AgentColumnKey, number> = {
   runtime: 144,
   lastActive: 120,
   runs: 88,
-  model: 120,
+  // Shown by default; wide enough for common ids like "claude-sonnet-4-5".
+  model: 160,
   created: 104,
 };
 
@@ -848,7 +850,10 @@ export function AgentsPage(_props: AgentsPageProps = {}) {
   const [selectedIds, setSelectedIds] = useState<ReadonlySet<string>>(
     new Set(),
   );
-  const [search, setSearch] = useState("");
+  // Search lives in the view store (session-only) so it survives opening an
+  // agent and navigating back to the list.
+  const search = useAgentsViewStore((s) => s.search);
+  const setSearch = useAgentsViewStore((s) => s.setSearch);
 
   const rawScope = useAgentsViewStore((s) => s.scope);
   const scope = AGENT_SCOPES.includes(rawScope) ? rawScope : "mine";
@@ -1085,7 +1090,7 @@ export function AgentsPage(_props: AgentsPageProps = {}) {
 
   const totalCount = agents.filter((a) => !a.archived_at).length;
   const showEmpty =
-    !isLoading && agents.length === 0 && !agentFolders.hasFolders;
+    !isLoading && !agentFolders.treeLoading && agents.length === 0 && !agentFolders.hasFolders;
 
   // The active sort field / availability filter reads columns that arrive in
   // separate queries from the main agent list (activity → lastActiveDays,
@@ -1119,16 +1124,14 @@ export function AgentsPage(_props: AgentsPageProps = {}) {
 
       {agentFolders.notice}
 
-      {isLoading || agentFolders.treeLoading || (!showEmpty && !listReady) ? (
-        <div className="flex-1 overflow-y-auto @container">
-          <LoadingSkeleton directoryLoading={agentFolders.treeLoading} />
-        </div>
-      ) : showEmpty ? (
+      {showEmpty ? (
         <div className="flex flex-1 items-center justify-center">
           <EmptyState onCreate={() => navigation.push(paths.newAgent())} />
         </div>
       ) : (
         <>
+          {/* Mounted through loading so the rows don't drop by a toolbar's
+              height when the list lands. */}
           <AgentListToolbar
             scope={scope}
             onScopeChange={setScope}
@@ -1149,6 +1152,11 @@ export function AgentsPage(_props: AgentsPageProps = {}) {
             visibleCount={rows.length}
             folderActions={agentFolders.toolbarActions}
           />
+          {isLoading || agentFolders.treeLoading || !listReady ? (
+            <div className="flex-1 overflow-y-auto @container">
+              <LoadingSkeleton directoryLoading={agentFolders.treeLoading} />
+            </div>
+          ) : (
           <div
             ref={listScrollRef}
             className="min-h-0 flex-1 overflow-auto @container"
@@ -1239,9 +1247,13 @@ export function AgentsPage(_props: AgentsPageProps = {}) {
                       )}
                       {isColVisible("model") ? (
                         <ListGridCell className="hidden @2xl:flex">
-                          <span className="min-w-0 truncate text-caption text-muted-foreground">
-                            {row.agent.model || "—"}
-                          </span>
+                          <TruncatedTooltip content={row.agent.model || undefined}>
+                            <span
+                              className="min-w-0 truncate text-caption text-muted-foreground"
+                            >
+                              {row.agent.model || "—"}
+                            </span>
+                          </TruncatedTooltip>
                         </ListGridCell>
                       ) : (
                         <ListGridCell className="hidden px-0 @2xl:flex" />
@@ -1276,6 +1288,7 @@ export function AgentsPage(_props: AgentsPageProps = {}) {
               </ListGridBody>
             </ListGrid>
           </div>
+          )}
         </>
       )}
 

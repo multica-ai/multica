@@ -1,7 +1,7 @@
 "use client";
 
 import type { ReactNode } from "react";
-import { ArrowRight, AtSign, CircleCheck, ListPlus, Users } from "lucide-react";
+import { ArrowRight, AtSign, CircleCheck, ListPlus, Users } from "@multica/ui/icons";
 import { useQuery } from "@tanstack/react-query";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { useModalStore } from "@multica/core/modals";

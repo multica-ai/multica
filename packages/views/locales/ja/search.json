@@ -1,36 +1,169 @@
 {
-  "title": "検索",
-  "description": "ページ、タスク、プロジェクト、メンバーを検索します",
-  "placeholder": "コマンドを入力するか検索...",
+  "title": "コマンドバー",
+  "description": "検索、コマンドの実行、またはエージェントへの依頼",
+  "placeholder": "検索するか、やりたいことを入力...",
+  "page_placeholder": "絞り込み...",
+  "breadcrumb_aria": "現在のメニュー",
   "groups": {
     "pages": "ページ",
     "commands": "コマンド",
     "members": "メンバー",
+    "agents": "エージェント",
+    "squads": "スクワッド",
     "projects": "プロジェクト",
     "issues": "タスク",
+    "autopilots": "オートパイロット",
+    "chats": "チャット",
+    "skills": "スキル",
     "cancelled": "キャンセル済み",
     "recent": "最近の項目",
-    "workspaces": "ワークスペース"
+    "workspaces": "ワークスペース",
+    "new": "新規作成",
+    "best_match": "最も一致",
+    "actions": "操作"
+  },
+  "context": {
+    "current_issue": "現在のタスク",
+    "selected_issues_other": "選択中のタスク {{count}} 件",
+    "current_project": "現在のプロジェクト",
+    "current_agent": "現在のエージェント",
+    "current_autopilot": "現在のオートパイロット",
+    "inbox": "インボックス",
+    "current_chat": "現在のチャット"
   },
   "commands": {
     "current_theme_aria": "現在のテーマ",
     "new_issue": "新規タスク",
     "new_project": "新規プロジェクト",
+    "new_autopilot": "新規オートパイロット",
+    "chat_with_agent": "エージェントとチャット",
+    "change_theme": "テーマを切り替え...",
+    "send_feedback": "フィードバックを送信",
     "copy_issue_link": "タスクのリンクをコピー",
     "copy_identifier": "識別子をコピー ({{identifier}})",
     "fold_all_comments": "すべてのコメントを折りたたむ",
-    "unfold_all_comments": "すべてのコメントを展開",
-    "switch_to_light": "ライトテーマに切り替え",
-    "switch_to_dark": "ダークテーマに切り替え",
-    "use_system_theme": "システムテーマを使用"
+    "unfold_all_comments": "すべてのコメントを展開"
+  },
+  "issue": {
+    "change_status": "ステータスを変更...",
+    "assign_to": "担当者を設定...",
+    "set_priority": "優先度を設定...",
+    "run_quick_action": "クイックアクションを実行...",
+    "quick_actions_available_other": "{{count}} 件利用可能",
+    "add_label": "ラベルを追加...",
+    "set_due_date": "期限を設定...",
+    "move_to_project": "プロジェクトに移動...",
+    "set_parent": "親タスクを設定...",
+    "cancel_run": "現在の実行をキャンセル",
+    "retry_run": "前回の実行を再試行",
+    "create_sub_issue": "新規サブタスク",
+    "subscribe": "購読",
+    "unsubscribe": "購読を解除",
+    "delete": "タスクを削除",
+    "delete_selected_other": "タスク {{count}} 件を削除"
+  },
+  "project": {
+    "change_status": "プロジェクトのステータスを変更...",
+    "new_issue": "このプロジェクトにタスクを作成",
+    "pin": "サイドバーにピン留め",
+    "unpin": "サイドバーのピン留めを解除",
+    "copy_link": "プロジェクトのリンクをコピー"
+  },
+  "agent": {
+    "chat": "{{name}} とチャット",
+    "assign_issue": "タスクを {{name}} に割り当て...",
+    "new_issue": "{{name}} 用の新規タスク",
+    "pin_in_chat": "チャットにピン留め",
+    "unpin_in_chat": "チャットのピン留めを解除"
+  },
+  "autopilot": {
+    "run_now": "今すぐ 1 回実行",
+    "pause": "一時停止",
+    "resume": "再開"
+  },
+  "inbox": {
+    "archive": "アーカイブ",
+    "mark_unread": "未読にする",
+    "mark_all_read": "インボックスをすべて既読にする",
+    "archive_all_read": "既読のインボックス項目をすべてアーカイブ"
+  },
+  "chat": {
+    "link_project": "プロジェクトに関連付け...",
+    "pin": "チャットをピン留め",
+    "unpin": "チャットのピン留めを解除",
+    "archive": "チャットをアーカイブ"
+  },
+  "pages": {
+    "status": "ステータス",
+    "priority": "優先度",
+    "assignee": "担当者",
+    "labels": "ラベル",
+    "due_date": "期限",
+    "project": "プロジェクト",
+    "parent": "親タスク",
+    "quick_actions": "クイックアクション",
+    "theme": "テーマ",
+    "project_status": "プロジェクトのステータス",
+    "no_project": "プロジェクトなし",
+    "current": "現在"
+  },
+  "theme": {
+    "light": "ライト",
+    "dark": "ダーク",
+    "system": "システム"
   },
   "toast": {
     "link_copied": "リンクをコピーしました",
-    "copied_identifier": "{{identifier}}をコピーしました"
+    "copied_identifier": "{{identifier}} をコピーしました",
+    "run_retried": "実行を再開しました",
+    "run_cancelled": "実行をキャンセルしました",
+    "subscribed": "購読しました",
+    "unsubscribed": "購読を解除しました",
+    "label_added": "ラベル {{name}} を追加しました",
+    "label_removed": "ラベル {{name}} を削除しました",
+    "label_failed": "一部のタスクにラベル {{name}} を追加できませんでした",
+    "update_failed": "更新に失敗しました",
+    "assigned": "{{identifier}} を {{name}} に割り当てました"
   },
   "empty": {
-    "no_results": "結果が見つかりませんでした。",
-    "type_to_search": "タスクやプロジェクトを検索するには入力してください"
+    "no_results": "結果が見つかりません。",
+    "no_labels": "ラベルがありません",
+    "type_to_find_issue": "入力してタスクを検索",
+    "type_to_find_people": "入力してメンバーとエージェントを検索"
+  },
+  "delegate": {
+    "heading": "エージェントに依頼",
+    "create_and_assign": "タスクを作成して {{name}} に割り当て",
+    "squad": "スクワッド",
+    "context_aria": "添付するコンテキスト",
+    "parent": "{{identifier}} の配下",
+    "pick_crumb": "選択",
+    "pick_another": "別のエージェントやスクワッドに依頼...",
+    "detected": "指示として認識"
+  },
+  "best": {
+    "assign": "{{subject}} を {{name}} に割り当て",
+    "chat": "{{name}} とチャット",
+    "new_issue_in": "{{name}} にタスクを作成"
+  },
+  "types": {
+    "issue": "タスク",
+    "project": "プロジェクト",
+    "agent": "エージェント",
+    "autopilot": "オートパイロット",
+    "squad": "スクワッド",
+    "member": "メンバー"
+  },
+  "footer": {
+    "navigate": "選択",
+    "select": "実行",
+    "open_in_new_tab": "新しいタブで開く",
+    "delegate": "作成して {{name}} に依頼",
+    "search_instead": "キーワードとして検索",
+    "back": "戻る",
+    "prefix_commands": "コマンド",
+    "prefix_issues": "タスク",
+    "prefix_people": "メンバーとエージェント"
   },
   "trigger": {
     "label": "検索..."

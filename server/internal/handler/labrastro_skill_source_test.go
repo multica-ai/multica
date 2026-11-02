@@ -92,6 +92,44 @@ func (tr labrastroFixtureTransport) RoundTrip(r *http.Request) (*http.Response, 
 		}
 		b, _ := json.Marshal(githubTreeResponse{Tree: entries, Truncated: f.truncated && dir == ""})
 		body = string(b)
+	case r.URL.Host == "api.github.com" && (r.URL.Path == base+"/contents" || strings.HasPrefix(r.URL.Path, base+"/contents/")):
+		ref := r.URL.Query().Get("ref")
+		if ref != "main" && ref != "v2" && ref != f.Commit {
+			status = 404
+			break
+		}
+		dir := strings.TrimPrefix(strings.TrimPrefix(r.URL.Path, base+"/contents"), "/")
+		found := dir == ""
+		entries := []githubContentEntry{}
+		for _, e := range f.Tree {
+			if e.Type == "tree" && e.Path == dir {
+				found = true
+			}
+			parent := path.Dir(e.Path)
+			if parent == "." {
+				parent = ""
+			}
+			if parent != dir {
+				continue
+			}
+			entry := githubContentEntry{Name: path.Base(e.Path), Path: e.Path, URL: buildGitHubContentsURL(f.Owner, f.Repo, e.Path, ref)}
+			switch e.Type {
+			case "tree":
+				entry.Type = "dir"
+			case "blob":
+				entry.Type = "file"
+				entry.DownloadURL = buildRawGitHubURL("https://raw.githubusercontent.com/"+f.Owner+"/"+f.Repo+"/"+ref, e.Path)
+			default:
+				continue
+			}
+			entries = append(entries, entry)
+		}
+		if !found {
+			status = 404
+			break
+		}
+		b, _ := json.Marshal(entries)
+		body = string(b)
 	case r.URL.Host == "raw.githubusercontent.com":
 		prefix := "/" + f.Owner + "/" + f.Repo + "/"
 		p := strings.TrimPrefix(r.URL.Path, prefix)

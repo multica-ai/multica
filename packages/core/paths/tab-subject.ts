@@ -5,7 +5,7 @@
  * resource, a container with a selected item, a creation flow, or something
  * unrecognized — is what decides how it should look (icon + title). This module
  * turns a URL into that semantic {@link TabSubject}. It is pure: no React, no
- * Lucide, no query — only URL parsing. The visual/title mapping lives in
+ * icons, no query — only URL parsing. The visual/title mapping lives in
  * `tab-presentation.ts`; the React glue lives in `@multica/views`.
  *
  * Workspace URLs are `/{slug}/{segment}/...`. The slug is index 0, the route

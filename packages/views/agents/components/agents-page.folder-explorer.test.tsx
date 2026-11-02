@@ -4,7 +4,7 @@
 // in-place expansion, flat search/filter/archived views, move permission
 // gates, and squad-change reflection.
 
-import React, { useMemo, useState } from "react";
+import React, { useMemo, useState, useSyncExternalStore } from "react";
 import { beforeEach, describe, expect, it, vi, type Mock } from "vitest";
 import { act, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
@@ -25,6 +25,7 @@ const apiMock = vi.hoisted(() => ({
 }));
 
 const mocks = vi.hoisted(() => ({
+  searchListeners: new Set<() => void>(),
   agents: [] as Agent[],
   folderTree: null as AgentFolderTree | null | undefined,
   folderTreeError: false,
@@ -37,6 +38,8 @@ const mocks = vi.hoisted(() => ({
   rowSizes: [] as number[],
   viewState: {
     scope: "all",
+    search: "",
+    setSearch: vi.fn(),
     sortField: "name",
     sortDirection: "asc" as string,
     hiddenColumns: [] as string[],
@@ -155,7 +158,13 @@ vi.mock("@multica/core/agents", () => ({
 }));
 vi.mock("@multica/core/agents/stores", () => ({
   useAgentsViewStore: (selector: (state: unknown) => unknown) =>
-    selector(mocks.viewState),
+    useSyncExternalStore(
+      (listener) => {
+        mocks.searchListeners.add(listener);
+        return () => { mocks.searchListeners.delete(listener); };
+      },
+      () => selector(mocks.viewState),
+    ),
   AGENT_DEFAULT_HIDDEN_COLUMNS: [],
   AGENT_SCOPES: ["mine", "all", "archived"],
 }));
@@ -168,7 +177,8 @@ vi.mock("@multica/ui/components/common/actor-avatar", () => ({
     <span data-testid="folder-avatar">{name.slice(0, 2).toUpperCase()}</span>
   ),
 }));
-vi.mock("@multica/ui/components/ui/tooltip", () => ({
+vi.mock("@multica/ui/components/ui/tooltip", async (importOriginal) => ({
+  ...await importOriginal<typeof import("@multica/ui/components/ui/tooltip")>(),
   Tooltip: ({ children }: { children: React.ReactNode }) => <>{children}</>,
   TooltipTrigger: ({ render }: { render: React.ReactNode }) => <>{render}</>,
   TooltipContent: ({ children }: { children: React.ReactNode }) => (
@@ -426,6 +436,11 @@ beforeEach(() => {
   mocks.virtualizerCount = 0;
   mocks.virtualizerKeys = [];
   mocks.viewState.scope = "all";
+  mocks.viewState.search = "";
+  mocks.viewState.setSearch.mockImplementation((value: string) => {
+    mocks.viewState.search = value;
+    mocks.searchListeners.forEach((listener) => listener());
+  });
   mocks.viewState.hiddenColumns = [];
   for (const key of Object.keys(mocks.viewState.filters) as (keyof typeof mocks.viewState.filters)[]) {
     mocks.viewState.filters[key] = [];

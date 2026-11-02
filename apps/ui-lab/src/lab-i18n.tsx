@@ -2,8 +2,10 @@ import { useEffect, type ReactNode } from "react";
 import { I18nProvider } from "@multica/core/i18n/react";
 import enUi from "@multica/views/locales/en/ui.json";
 import zhUi from "@multica/views/locales/zh-Hans/ui.json";
+import zhHantUi from "@multica/views/locales/zh-Hant/ui.json";
 import en from "./locales/en.json";
 import zh from "./locales/zh.json";
+import zhHant from "./locales/zh-Hant.json";
 import { productLocale, type LabLocale } from "./locale";
 
 declare global {
@@ -15,6 +17,7 @@ declare global {
 const resources = {
   en: { uiLab: en, ui: enUi },
   "zh-Hans": { uiLab: zh, ui: zhUi },
+  "zh-Hant": { uiLab: zhHant, ui: zhHantUi },
 };
 
 export function LabI18nProvider({

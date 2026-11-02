@@ -1,0 +1,20 @@
+{
+  "settings": {
+    "account": {
+      "sign_out_message": "你需要重新登入才能在此裝置上使用 Labrastro。"
+    }
+  },
+  "auth": {
+    "login": {
+      "title": "登入 Labrastro"
+    },
+    "verify": {
+      "network": "無法連線 Labrastro，請檢查網路後重試。"
+    }
+  },
+  "inbox": {
+    "detail": {
+      "review_billing_web": "在網頁端開啟 Labrastro 檢視帳單選項。"
+    }
+  }
+}

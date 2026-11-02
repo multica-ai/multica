@@ -1,7 +1,7 @@
 "use client";
 
 import { useId } from "react";
-import { FolderPlus } from "lucide-react";
+import { FolderPlus } from "@multica/ui/icons";
 import { Button } from "@multica/ui/components/ui/button";
 
 export function NewFolderButton({

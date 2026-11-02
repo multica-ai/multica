@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { ChevronDown } from "lucide-react";
+import { ChevronDown } from "@multica/ui/icons";
 import { Button } from "@multica/ui/components/ui/button";
 import {
   DropdownMenu,

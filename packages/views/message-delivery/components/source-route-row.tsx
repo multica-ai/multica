@@ -10,7 +10,7 @@ import {
   Trash2,
   User,
   Users,
-} from "lucide-react";
+} from "@multica/ui/icons";
 import {
   useDeleteMessageSourceRoute,
   useSetMessageSourceRouteEnabled,

@@ -1,6 +1,6 @@
 "use client";
 
-import { LoaderCircle } from "lucide-react";
+import { LoaderCircle } from "@multica/ui/icons";
 import { Card, CardContent, CardHeader, CardTitle } from "@multica/ui/components/ui/card";
 import { Switch } from "@multica/ui/components/ui/switch";
 import type { EngineeringConfig } from "@multica/core/api";

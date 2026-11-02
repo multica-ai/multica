@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { ChevronRight, Pencil, TriangleAlert } from "lucide-react";
+import { ChevronRight, Pencil, TriangleAlert } from "@multica/ui/icons";
 import { dependencyErrorDetails } from "@multica/core/api";
 import type { IssuePrerequisite } from "@multica/core/api";
 import { issueDependenciesOptions } from "@multica/core/issues/queries";

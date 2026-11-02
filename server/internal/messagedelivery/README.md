@@ -65,11 +65,13 @@ statuses or error codes. Code lives in:
   work dirs, branch names and the raw result JSON are never sent, logged, or
   returned. Empty output renders `(no report body)`. Failed runs show a
   curated `reason_code` when one exists, never the raw error text.
-- `create_issue` (`source_kind="create_issue"`): delivers the FIRST terminal
-  state and a task link (`{appURL}/{workspaceSlug}/issues/{IDENTIFIER}` —
-  workspace-scoped per the frontend conventions). The first-terminal status
-  is frozen by the run terminal sync (`SyncRunFromIssue` persists it on the
-  run); a run without that frozen signal — completed before it existed —
+- `create_issue` (`source_kind="create_issue"`): delivers the run outcome,
+  the issue status frozen at settlement, and a task link
+  (`{appURL}/{workspaceSlug}/issues/{IDENTIFIER}` — workspace-scoped per the
+  frontend conventions). The run's own dispatch chain determines success or
+  failure; a completed dispatch succeeds even when the issue is `blocked`.
+  The atomic terminal write freezes `first_terminal_status` on the run;
+  a run without that frozen signal — completed before it existed —
   degrades to wording that does NOT name a possibly-later status. Later
   issue status changes are not re-delivered by this module. The source kind
   comes from the run's persisted links, never the autopilot's current

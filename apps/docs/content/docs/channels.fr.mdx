@@ -4,10 +4,11 @@ description: Connectez les agents Multica à Feishu, Lark, Slack, DingTalk, WeCo
 ---
 
 import { Callout } from "fumadocs-ui/components/callout";
+import { ChannelChatDemo } from "@/components/demos/channel-chat-demo";
 
-Les intégrations de messagerie permettent à l'équipe de poser des questions à un agent, de le @mentionner dans une conversation de groupe ou de créer des tâches depuis la fenêtre de conversation, sans ouvrir Multica.
+Les intégrations de messagerie permettent à l'équipe de poser des questions à un agent en message direct, de le @mentionner dans une conversation de groupe ou de créer des tâches depuis la fenêtre de conversation, sans ouvrir Multica.
 
-Feishu/Lark, Slack, DingTalk, WeCom et Telegram sont pris en charge aujourd'hui. Ils partagent les mêmes mécanismes de session, d'identité et d'exécution, mais s'installent différemment.
+Feishu/Lark, Slack, DingTalk, WeCom et Telegram sont pris en charge aujourd'hui. Ils partagent le fonctionnement des discussions et des exécutions. Feishu/Lark exige une autorisation explicite par conversation ; les autres canaux conservent l'association à un membre.
 
 ## Choisir une plateforme
 
@@ -16,7 +17,7 @@ Feishu/Lark, Slack, DingTalk, WeCom et Telegram sont pris en charge aujourd'hui.
 | Installation | Générez un QR code dans Multica et autorisez-le en le scannant avec Feishu | Créez une application dans Slack, puis collez deux jetons dans Multica | Créez une application interne et un robot en mode Stream, puis collez son AppKey et son AppSecret dans Multica | Créez un bot intelligent avec la connexion longue activée dans la console d'administration WeCom, puis collez son ID de bot et son secret dans Multica | Créez un bot avec @BotFather, puis collez son jeton dans Multica |
 | Messages directs à l'agent | Pris en charge | Pris en charge | Pris en charge | Pris en charge | Pris en charge |
 | Groupes ou canaux | Déclenché en @mentionnant le bot | Déclenché en @mentionnant le bot | Déclenché en @mentionnant le bot | Déclenché en @mentionnant le bot | Déclenché en @mentionnant le bot ou en lui répondant |
-| Créer des tâches | Commande de message `/issue` ; crée la tâche à partir de votre saisie telle quelle | Commande slash `/issue` ; l'agent rédige la description avant de créer la tâche | Commande de message `/issue` ; crée la tâche à partir de votre saisie telle quelle | Commande de message `/issue` ; crée la tâche à partir de votre saisie telle quelle | Commande de message `/issue` ; crée la tâche à partir de votre saisie telle quelle |
+| Créer des tâches | Demandez à l’agent de clarifier la demande et d’utiliser ses outils habituels | Commande slash `/issue` ; l'agent rédige la description avant de créer la tâche | Commande de message `/issue` ; crée la tâche à partir de votre saisie telle quelle | Commande de message `/issue` ; crée la tâche à partir de votre saisie telle quelle | Commande de message `/issue` ; crée la tâche à partir de votre saisie telle quelle |
 | Démarrer une nouvelle discussion | `/new [message]` | Message direct : `/new [message]` ; canal/fil : `@Multica /new [message]` | `/new [message]` | `/new [message]` | `/new [message]` |
 | Effacer le contexte de la discussion en cours | `/clear [message]` | Message direct : `/clear [message]` ; canal/fil : `@Multica /clear [message]` | `/clear [message]` | `/clear [message]` | `/clear [message]` |
 | Connexion | Connexion longue de la plateforme | Socket Mode | Mode Stream | Connexion longue de la plateforme | Long polling `getUpdates` |
@@ -42,13 +43,15 @@ Guides pas à pas :
 
 1. Multica identifie l'espace de travail et l'agent auxquels le bot est rattaché.
 2. Dans un groupe ou un canal, seuls les messages qui @mentionnent explicitement le bot sont traités ; les messages directs ne nécessitent aucune mention.
-3. Multica vérifie l'association du compte de l'expéditeur et son appartenance à l'espace de travail.
+3. Feishu/Lark vérifie l'autorisation de la conversation et les droits d'invocation de son auteur ; les autres canaux vérifient l'association du compte et son appartenance à l'espace de travail.
 4. Le message rejoint une session de [discussion avec l'agent](/chat), et une exécution est créée.
 5. La réponse de l'agent est renvoyée dans le message direct ou le fil d'origine.
 
-Les messages de canal qui ne @mentionnent pas le bot ne déclenchent jamais l'agent et ne sont pas ajoutés au contexte de sa conversation.
+Les messages de canal qui ne @mentionnent pas le bot ne déclenchent jamais l'agent et ne deviennent jamais un tour à eux seuls. Feishu/Lark et Telegram joignent toutefois les messages récents du groupe, en lecture seule, devant le tour lorsque quelqu'un s'adresse au bot ; la page de chaque plateforme donne le détail.
 
-Les messages ordinaires suivent ce flux. `/issue` est une commande, pas un tour de discussion : Multica publie le résultat sur la plateforme d'origine, mais n'ajoute pas la commande aux discussions Multica. La commande slash native de Slack passe toujours par son propre flux asynchrone de création de tâche.
+Sur Feishu/Lark, `/issue` est un tour de conversation traité par l'agent. Sur les autres canaux, `/issue` est une commande, pas un tour de discussion : Multica crée la tâche à partir du message, l'assigne à l'agent lié au bot et publie le résultat dans la conversation d'origine. La commande elle-même n'apparaît pas dans les discussions Multica. La commande slash native de Slack passe par un flux asynchrone distinct de création de tâche.
+
+<ChannelChatDemo />
 
 ## Contrôle des conversations
 
@@ -60,15 +63,17 @@ Sur Slack, `/new` et `/clear` sont des commandes slash natives dans un message d
 
 ## Isolation des sessions
 
-- Feishu/Lark sépare les sessions par conversation ; les messages suivants d'une même conversation poursuivent la même session.
+- Feishu/Lark isole les sujets de groupe, groupes et messages directs selon l'installation et la portée de l'autorisation.
 - Slack sépare les messages directs par canal ; dans un canal, chaque fil a sa propre session.
 - DingTalk sépare les sessions par conversation ; chaque message direct ou groupe poursuit sa propre session.
 - WeCom sépare les sessions par conversation ; chaque message direct ou conversation de groupe poursuit sa propre session.
 - Telegram sépare les sessions par conversation ; les sujets de forum sont isolés par sujet.
 
-Dans un canal, chaque relance nécessite toujours une nouvelle @mention. L'agent ne reçoit que les messages qui lui sont adressés : il ne lit jamais automatiquement tout l'historique du canal.
+Dans un canal, chaque relance nécessite toujours une nouvelle @mention. En dehors du contexte récent décrit plus haut, l'agent ne lit jamais automatiquement l'historique du canal.
 
 ## Association de compte
+
+Les participants Feishu/Lark n'ont pas besoin d'un compte de plateforme : configurez plutôt l'[autorisation de conversation](/lark-bot-integration). Les règles suivantes concernent les autres canaux. Les adresses de notification personnelles restent distinctes.
 
 La première fois qu'un membre écrit au bot, il reçoit un lien d'association de compte. Une fois qu'il s'est connecté à Multica, son compte sur la plateforme est associé à son appartenance à l'espace de travail actuel.
 
@@ -98,12 +103,12 @@ MULTICA_TELEGRAM_SECRET_KEY=<base64-encoded 32-byte key>
 
 Ces clés chiffrent les identifiants de bot stockés. Consultez [Variables d'environnement](/environment-variables) pour savoir comment les générer, les stocker et les renouveler. Multica Cloud est déjà configuré.
 
-Le seul chemin sortant de WeCom est le WebSocket détenu par un processus ; ce qu'il advient d'une réponse produite sur une *autre* réplique dépend donc du relais temps réel :
+WeCom ne peut envoyer ses réponses que par le WebSocket détenu par un processus. Ce qu'il advient d'une réponse produite sur une autre réplique dépend du mode du relais temps réel :
 
-- **Mode de relais sharded ou dual** (`REDIS_URL` défini — le mode par défaut avec Redis) : la réponse est transmise à la réplique qui détient la connexion, puis livrée. WeCom sur plusieurs répliques est pris en charge.
+- **Mode de relais sharded ou dual** (`REDIS_URL` défini — le mode par défaut avec Redis) : la réponse est transmise à la réplique qui détient la connexion, puis livrée ; WeCom peut donc tourner sur plusieurs répliques.
 - **Mode de relais legacy, ou sans Redis** : la réponse est abandonnée. Dans cette configuration, exécutez le backend avec WeCom activé sur une seule réplique.
 
-Quel que soit le mode, une réponse produite alors qu'*aucune* réplique ne détient de connexion active (toutes en cours de reconnexion) n'est pas livrée. Elle est comptabilisée dans `multica_wecom_outbound_dropped_total{reason="no_live_connection"}` par la réplique qui l'a routée, ce qui permet de mesurer l'ampleur de cette fenêtre ; si cette perte est inacceptable, une réplique unique reste le déploiement le plus prudent.
+Quel que soit le mode, une réponse produite alors qu'aucune réplique ne détient de connexion active (toutes en cours de reconnexion) n'est pas livrée. La réplique qui l'a routée vérifie ensuite si une réplique a pris en charge la livraison et, sinon, incrémente `multica_wecom_outbound_dropped_total{reason="no_live_connection"}` : cette métrique indique la fréquence de ces pertes. Si elles sont inacceptables, une réplique unique reste le déploiement le plus prudent.
 
 ## Étapes suivantes
 

@@ -12,7 +12,7 @@ import {
   Search,
   Tags,
   X,
-} from "lucide-react";
+} from "@multica/ui/icons";
 import { useQuery } from "@tanstack/react-query";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { labelListOptions } from "@multica/core/labels/queries";

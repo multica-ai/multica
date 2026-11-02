@@ -4,7 +4,7 @@
 // list. Upstream `agent-row-actions.tsx` and `agent-batch-toolbar.tsx` mount
 // these with one line each and carry only the optional `treeActions` prop.
 
-import { FolderInput } from "lucide-react";
+import { FolderInput } from "@multica/ui/icons";
 import type { Agent } from "@multica/core/types";
 import { Button } from "@multica/ui/components/ui/button";
 import { DropdownMenuItem } from "@multica/ui/components/ui/dropdown-menu";

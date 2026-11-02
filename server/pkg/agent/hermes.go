@@ -1204,6 +1204,31 @@ type hermesClient struct {
 	// so for it the start frame is genuinely incomplete.
 	toolStartCarriesFinalInput bool
 
+	// toolInputArrivesInProgress marks a dialect (OpenCode) whose tool_call
+	// start frame is sent while the model is still producing the call, with a
+	// placeholder rawInput (`{}` or just the shell cwd), and whose first
+	// in_progress tool_call_update carries the final input (possibly empty)
+	// at the moment the tool starts executing. MessageToolUse is emitted at that update: early
+	// enough for the daemon to charge a long tool to AgentToolWatchdog, and
+	// late enough to record the actual invocation. Unset keeps the existing
+	// start-frame handling for every other backend.
+	toolInputArrivesInProgress bool
+	// toolName optionally replaces the hermes title-based tool naming for a
+	// dialect that reports its own tool ids. name is the update's `name`
+	// field (absent on some dialects), title its `title`. Nil keeps
+	// hermesToolNameFromTitle.
+	toolName func(name, title, kind string) string
+	// toolOutputFromContent prefers a completed tool call's display content
+	// over its rawOutput. OpenCode's rawOutput is a metadata envelope (on 2.x
+	// it carries no output text at all); the content blocks hold what the tool
+	// printed.
+	toolOutputFromContent bool
+	// acceptUpdate can drop an individual session/update after the
+	// lifecycle gate above, with the update payload in hand. OpenCode 2.x
+	// uses it to keep a subagent's own text out of the parent's transcript.
+	// Nil accepts every update.
+	acceptUpdate func(updateType string, update json.RawMessage) bool
+
 	// pendingTools buffers the args for tool calls whose input streams in
 	// across multiple ACP tool_call_update messages (kimi does this —
 	// tokens from the LLM arrive one at a time, and each update carries
@@ -1872,6 +1897,9 @@ func (c *hermesClient) handleNotification(raw map[string]json.RawMessage) {
 	if c.acceptNotification != nil && !c.acceptNotification(updateType) {
 		return
 	}
+	if c.acceptUpdate != nil && !c.acceptUpdate(updateType, updateData) {
+		return
+	}
 	if c.onActivity != nil {
 		c.onActivity()
 	}
@@ -1986,12 +2014,23 @@ func (c *hermesClient) handleToolCallStart(data json.RawMessage) {
 	if toolName == "" {
 		toolName = msg.Name
 	}
+	if c.toolName != nil {
+		toolName = c.toolName(msg.Name, msg.Title, msg.Kind)
+	}
 	rawInput := msg.RawInput
 	if rawInput == nil {
 		rawInput = msg.Input
 	}
 	if rawInput == nil {
 		rawInput = msg.Parameters
+	}
+
+	// The start frame's rawInput is a placeholder on this dialect; buffer
+	// the call and emit it from the first in_progress update instead (see
+	// toolInputArrivesInProgress).
+	if c.toolInputArrivesInProgress {
+		c.trackTool(msg.ToolCallID, &pendingToolCall{toolName: toolName})
+		return
 	}
 
 	// Hermes pre-populates rawInput on the initial tool_call — emit
@@ -2118,6 +2157,23 @@ func (c *hermesClient) handleToolCallUpdate(data json.RawMessage) {
 	// tool call, each carrying the cumulative args JSON so far.
 	if msg.Status != "completed" && msg.Status != "failed" {
 		if pending := c.getPendingTool(msg.ToolCallID); pending != nil && !pending.emitted {
+			if c.toolInputArrivesInProgress {
+				// in_progress means the tool is executing, so its input is
+				// final even when empty (a tool that takes no arguments).
+				if msg.Status == "in_progress" {
+					pending.input = rawInput
+					pending.emitted = true
+					if c.onMessage != nil {
+						c.onMessage(Message{
+							Type:   MessageToolUse,
+							Tool:   pending.toolName,
+							CallID: msg.ToolCallID,
+							Input:  rawInput,
+						})
+					}
+				}
+				return
+			}
 			if text := extractACPToolCallText(msg.Content); text != "" {
 				// kimi streams the full cumulative args on every frame;
 				// overwrite rather than concatenate.
@@ -2131,7 +2187,13 @@ func (c *hermesClient) handleToolCallUpdate(data json.RawMessage) {
 	pending := c.takePendingTool(msg.ToolCallID)
 	c.emitDeferredToolUse(pending, msg.ToolCallID, title, msg.Kind, rawInput)
 
-	output := acpRawText(msg.RawOutput)
+	var output string
+	if c.toolOutputFromContent {
+		output = extractACPToolCallText(msg.Content)
+	}
+	if output == "" {
+		output = acpRawText(msg.RawOutput)
+	}
 	if output == "" {
 		output = acpRawText(msg.Output)
 	}
@@ -2225,6 +2287,9 @@ func (c *hermesClient) emitDeferredToolUse(
 		// No record of the start frame — fall back to the update's own
 		// title/kind/rawInput so the UI at least sees the tool name.
 		toolName = hermesToolNameFromTitle(updateTitle, updateKind)
+		if c.toolName != nil {
+			toolName = c.toolName("", updateTitle, updateKind)
+		}
 		input = updateRawInput
 	}
 

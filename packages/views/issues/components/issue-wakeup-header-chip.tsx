@@ -2,7 +2,7 @@
 
 import { memo } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { Bell, TriangleAlert } from "lucide-react";
+import { Bell, TriangleAlert } from "@multica/ui/icons";
 import { issueSystemWakeupsOptions, issueWakeupsOptions } from "@multica/core/issues";
 import type { IssueWakeup, SystemWakeup } from "@multica/core/types";
 import { useWorkspaceId } from "@multica/core/hooks";

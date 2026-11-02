@@ -28,6 +28,12 @@ type Event struct {
 	TaskID                string
 	ChatSessionID         string
 	ChannelReactionTarget *ChannelReactionTarget `json:"-"`
+
+	// ChatSessionOwnerID is the creator of the chat session the event belongs
+	// to. A chat session is creator-private, so the realtime layer delivers
+	// chat events and chat-task transcript events only to this user, and drops
+	// them when it is empty rather than falling back to workspace fanout.
+	ChatSessionOwnerID string
 }
 
 // Handler is a function that processes an event.

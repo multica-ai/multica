@@ -11,11 +11,12 @@ import { isPreviewSettings } from "./protocol";
 import { emptyDraft } from "./tokens";
 import en from "./locales/en.json";
 import zh from "./locales/zh.json";
+import zhHant from "./locales/zh-Hant.json";
 
 afterEach(() => vi.unstubAllGlobals());
 
 describe("UI Lab language preference", () => {
-  it("defaults to English regardless of browser language and accepts only en or zh", () => {
+  it("defaults to English regardless of browser language and accepts only en, zh or zh-Hant", () => {
     vi.stubGlobal("navigator", { language: "zh-CN" });
     for (const saved of [null, "", "ja", "zh-Hans", "garbage"]) {
       vi.stubGlobal("localStorage", {
@@ -23,7 +24,7 @@ describe("UI Lab language preference", () => {
       });
       expect(loadLocale()).toBe("en");
     }
-    for (const saved of ["en", "zh"]) {
+    for (const saved of ["en", "zh", "zh-Hant"]) {
       const getItem = vi.fn().mockReturnValue(saved);
       vi.stubGlobal("localStorage", { getItem });
       expect(loadLocale()).toBe(saved);
@@ -37,7 +38,7 @@ describe("UI Lab language preference", () => {
     expect(loadLocale()).toBe("en");
   });
 
-  it("validates iframe locales and maps zh to the production locale", () => {
+  it("validates iframe locales and maps zh and zh-Hant to production locales", () => {
     const message = {
       type: "multica-ui-lab:preview",
       selectedColor: "--brand",
@@ -56,6 +57,7 @@ describe("UI Lab language preference", () => {
       {},
       "en",
       "zh",
+      "zh-Hant",
     ]) {
       expect(isPreviewSettings({ ...message, locale })).toBe(
         isLabLocale(locale),
@@ -63,6 +65,7 @@ describe("UI Lab language preference", () => {
     }
     expect(productLocale("en")).toBe("en");
     expect(productLocale("zh")).toBe("zh-Hans");
+    expect(productLocale("zh-Hant")).toBe("zh-Hant");
   });
 
   it("provides both catalogs with matching keys and working counts and interpolation", () => {
@@ -73,6 +76,7 @@ describe("UI Lab language preference", () => {
           : [`${prefix}${key}`],
       );
     expect(keys(zh).sort()).toEqual(keys(en).sort());
+    expect(keys(zhHant).sort()).toEqual(keys(en).sort());
     const i18n = i18next.createInstance();
     void i18n.init({
       lng: "en",

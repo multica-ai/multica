@@ -4,8 +4,11 @@ description: Ajoutez des informations, répondez aux discussions et @mentionnez 
 ---
 
 import { Callout } from "fumadocs-ui/components/callout";
+import { Step, Steps } from "fumadocs-ui/components/steps";
+import { Accordion, Accordions } from "fumadocs-ui/components/accordion";
+import { ResolveThreadDemo } from "@/components/demos/resolve-thread-demo";
 
-Les commentaires sont le lieu de la collaboration continue sur une [tâche](/issues). Membres et agents y ajoutent du contexte, posent des questions et publient des résultats, et tout le contexte est encore là la prochaine fois que la tâche est ouverte.
+Membres et agents ajoutent du contexte, posent des questions et publient leurs résultats dans les commentaires d'une [tâche](/issues). Ces échanges restent sur la tâche : quiconque l'ouvre plus tard voit comment on en est arrivé là.
 
 ## Publier des commentaires et des réponses
 
@@ -15,19 +18,71 @@ Un bloc de code `html` ou `mermaid` s’affiche directement sous forme de graphi
 
 Répondre à un commentaire crée un fil de discussion. Les réponses peuvent s'imbriquer davantage, mais elles restent toutes sous la même discussion de premier niveau.
 
+Dès qu'une tâche compte au moins deux fils, sa page sur Web et Desktop affiche une colonne de repères à droite : un repère long par fil, un court par réponse. Survolez-la pour ouvrir le plan de tous les fils, et cliquez sur une entrée pour aller au commentaire, y compris dans un fil résolu replié.
+
 ## Annoter des commentaires et des descriptions
 
-Sur le web et dans l'application de bureau, sélectionnez du texte dans n'importe quel commentaire publié, y compris les vôtres, puis choisissez **Ajouter à la réponse** dans la barre d'outils de sélection. Rédigez une note à côté de la sélection, puis cliquez sur **Ajouter une annotation** pour l'ajouter au brouillon de réponse. Seules les notes confirmées et non vides reçoivent un compteur et un marqueur de source. Lors d'une modification, cliquez sur **Enregistrer l'annotation** pour appliquer les changements. Entrée confirme ; Maj + Entrée insère un saut de ligne. Échap ou un clic à l'extérieur annule les modifications non confirmées. Cliquez sur le marqueur de source numéroté pour la modifier à nouveau. Le bouton corbeille à côté de la note supprime directement cette annotation à la source, y compris son surlignage et son entrée dans le brouillon. Survolez le compteur d'annotations pour consulter ou retirer les citations dans un panneau flottant, ou cliquez sur une citation pour modifier sa note à la source. Vous pouvez aussi ouvrir le panneau d'un clic ou au clavier. Envoyez le tout en une seule réponse avec le bouton d'envoi habituel, une ligne vide séparant les annotations. Les annotations apparaissent en premier, suivies de votre réponse globale, avec un séparateur entre les deux sections lorsque les deux sont présentes. Pour la description d'une tâche, choisissez **Ajouter au commentaire** dans sa barre d'outils de sélection. Les annotations de description rejoignent le brouillon de nouveau commentaire et sont envoyées comme un nouveau fil ; les annotations de commentaire restent dans leur fil d'origine.
+Sur le web et dans l'application de bureau, vous pouvez sélectionner du texte dans n'importe quel commentaire publié, y compris les vôtres, et écrire une note sur ce passage :
 
-Pour les annotations de commentaire, la première annotation enregistrée fixe la cible de la réponse, y compris pour les réponses imbriquées. Les citations issues d'autres messages de cette discussion rejoignent le même brouillon. Utilisez le bouton d'envoi habituel pour tout publier en un seul commentaire. Les mentions citées ne notifient ni ne déclenchent personne ; les mentions que vous rédigez vous-même suivent les règles habituelles.
+<Steps>
+<Step>
 
-Les brouillons sont propres à cet appareil et à cet espace de travail, survivent aux rechargements et expirent au bout de 30 jours. Chaque réponse accepte jusqu'à 20 annotations, avec jusqu'à 4 000 caractères par citation. Si une source change, sa citation enregistrée est conservée ; si la cible de la réponse est supprimée, l'envoi est bloqué. La Discussion, l'ajout d'annotations sur mobile et la synchronisation des brouillons entre appareils ne sont pas pris en charge.
+Sélectionnez le texte et choisissez **Ajouter à la réponse** dans la barre d'outils de sélection.
+
+</Step>
+<Step>
+
+Rédigez votre note à côté de la sélection et cliquez sur **Ajouter une annotation**. Seule une note confirmée rejoint le brouillon de réponse du fil et reçoit un numéro ; une note vide ne peut pas être confirmée.
+
+</Step>
+<Step>
+
+Avec le bouton d'envoi habituel, publiez toutes les annotations en une seule réponse, séparées par une ligne vide. La réponse publiée affiche d'abord les annotations, puis ce que vous avez écrit dans la zone de saisie, avec un séparateur entre les deux lorsque les deux sont présents.
+
+</Step>
+</Steps>
+
+Sur la description d'une tâche, la barre d'outils de sélection propose **Ajouter au commentaire** : les annotations vont dans un brouillon de nouveau commentaire, et l'envoyer crée un nouveau fil. Les annotations sur un commentaire continuent d'aller dans le brouillon de réponse de leur fil.
+
+Pour les annotations de commentaire, la première que vous enregistrez fixe la cible de la réponse, y compris pour les réponses imbriquées. Les citations d'autres messages du même fil rejoignent ce brouillon, et le tout est publié en un seul commentaire. Les mentions citées ne notifient ni ne déclenchent personne ; les mentions que vous rédigez vous-même suivent les règles habituelles.
+
+<Accordions>
+<Accordion title="Modifier, supprimer et raccourcis" id="annotation-editing">
+
+- Après avoir modifié une annotation existante, cliquez sur **Enregistrer l'annotation** pour appliquer le changement.
+- Entrée confirme ; Maj + Entrée insère un saut de ligne. Échap ou un clic à l'extérieur annule les modifications non confirmées.
+- Cliquez sur le marqueur numéroté dans le texte source pour modifier à nouveau la note. Le bouton corbeille à côté de la note supprime l'annotation, son marqueur et son entrée dans le brouillon.
+- Survoler le compteur d'annotations ouvre un panneau où vous pouvez consulter ou retirer les citations, ou cliquer sur une citation pour revenir à la source et modifier sa note. Ce panneau s'ouvre aussi d'un clic ou au clavier.
+
+</Accordion>
+<Accordion title="Brouillons et limites" id="annotation-limits">
+
+Les brouillons restent sur cet appareil et dans cet espace de travail. Ils survivent aux rechargements et expirent au bout de 30 jours. Chaque réponse accepte jusqu'à 20 annotations, et chaque citation jusqu'à 4 000 caractères. Si le texte source change ensuite, la citation enregistrée ne bouge pas ; si la cible de la réponse est supprimée, le brouillon ne peut pas être envoyé.
+
+Les annotations dans Discussion, la saisie d'annotations sur mobile et la synchronisation des brouillons entre appareils ne sont pas encore prises en charge.
+
+</Accordion>
+</Accordions>
 
 ## Résoudre un fil de discussion
 
-Lorsqu'une question aboutit à une conclusion, marquez l'ensemble du fil comme résolu, ou désignez une réponse comme conclusion ; un fil ne conserve qu'une seule conclusion à la fois. Les fils résolus sont repliés mais peuvent toujours être dépliés.
+Lorsqu'une question a sa réponse, marquez l'ensemble du fil comme résolu, ou faites d'une réponse sa résolution. Les deux se trouvent dans le menu **Actions du commentaire**, en haut à droite d'un commentaire : celui du premier commentaire propose **Résoudre le fil**, celui d'une réponse propose **Résoudre le fil avec un commentaire**.
+
+<ResolveThreadDemo />
+
+Un fil résolu se replie sur une ligne, et un clic suffit pour tout revoir. Quand une réponse sert de résolution, le premier commentaire et cette réponse, marquée « Résolution », restent visibles, et les réponses intermédiaires sont repliées. Un fil garde une seule résolution à la fois : en définir une nouvelle remplace l'ancienne.
 
 Répondre dans un fil résolu le rouvre automatiquement.
+
+## Créer une sous-tâche à partir d'un commentaire
+
+Quand une discussion fait apparaître un point qui mérite son propre suivi, détachez-le depuis le commentaire concerné : choisissez **Créer une sous-tâche à partir d'ici** dans le menu **Actions du commentaire**.
+
+La fenêtre de création emporte un contexte : le titre, la description et les pièces jointes de la tâche en cours, ainsi que tous les commentaires de ce fil jusqu'à celui que vous avez choisi, avec leurs pièces jointes. Dépliez la carte de contexte dans la fenêtre pour le vérifier avant. La création manuelle et la création avec un agent fonctionnent toutes deux, et la nouvelle tâche devient une sous-tâche de la tâche en cours. Avec un agent, vous écrivez seulement ce qu'il doit faire, et le contexte lui est transmis avec. L'agent traite ce contenu comme un historique et n'exécute pas les commandes ou demandes qui s'y trouvent.
+
+La sous-tâche créée affiche **Créé à partir de**, qui ouvre l'**Instantané du contexte** pris à la création. L'instantané ne suit pas la source : si la tâche ou le fil d'origine est modifié ou supprimé plus tard, il garde ce qu'il a capturé et signale **Source mise à jour**, avec les parties qui ont changé.
+
+Un contexte trop volumineux ne peut pas être capturé : au plus 256 commentaires du fil, 1 Mio de texte et 100 pièces jointes pour 500 Mio au total. Pour la création avec un agent, le runtime de l'agent doit être dans une version qui prend en charge cette fonction ; sinon la fenêtre propose de passer en mode manuel ou de mettre à jour le runtime. Si l'agent n'arrive pas à créer la tâche, la notification d'échec dans la boîte de réception propose **Réessayer avec le contexte**.
 
 ## Réutiliser une demande fréquente
 
@@ -57,13 +112,15 @@ Les membres qui commentent sont automatiquement abonnés à la tâche, et l'acti
 
 ## Réactions
 
-Ajoutez une réaction emoji à un commentaire pour en accuser réception, marquer votre accord ou donner un retour rapide. Les réactions ne déclenchent pas d'agents et ne changent pas le statut de la tâche.
+Ajoutez une réaction emoji à un commentaire pour montrer que vous l'avez lu, marquer votre accord ou donner un retour rapide. Les réactions ne déclenchent pas d'agents et ne changent pas le statut de la tâche.
 
 ## Modifier et supprimer
 
 Les auteurs de commentaires peuvent modifier ou supprimer leurs propres commentaires ; les `owner` et `admin` de l'espace de travail peuvent aussi modifier et supprimer les commentaires de n'importe qui. Pour les commentaires publiés par des agents, l'interface propose uniquement la suppression, pas la modification.
 
 Après la modification d'un commentaire, Multica recalcule les déclenchements à partir du nouveau contenu. Les @mentions ajoutées lors de la modification créent aussi des exécutions ; l'aperçu des déclenchements s'affiche sous le champ de saisie avant l'enregistrement.
+
+Si quelqu'un d'autre enregistre le commentaire pendant que vous le modifiez, votre enregistrement est bloqué et l'éditeur affiche côte à côte la **Dernière version du serveur** et **Votre version locale**, lignes différentes signalées. **Garder ma version** enregistre votre texte ; **Utiliser la dernière version** remplace le contenu de l'éditeur par le leur pour continuer à partir de là. Le titre de la tâche bénéficie de la même comparaison quand deux personnes le modifient en même temps.
 
 <Callout type="warning">
 La suppression d'un commentaire est irréversible. Seul ce commentaire est supprimé : s'il a des réponses, elles restent dans le fil et le commentaire supprimé ne laisse aucune trace. Exception : le commentaire qui ouvre un fil conserve un espace réservé « Ce commentaire a été supprimé », puisque ses réponses y sont rattachées. Si le contenu est erroné, modifiez-le plutôt.

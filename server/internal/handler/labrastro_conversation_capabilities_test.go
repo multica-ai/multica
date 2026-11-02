@@ -80,6 +80,43 @@ func TestConversationClaimOmitsIntegrationCapabilities(t *testing.T) {
 	}
 }
 
+func TestConversationClaimOmitsFileDeliveryCapability(t *testing.T) {
+	for _, external := range []bool{true, false} {
+		name := "external"
+		if !external {
+			name = "first-party"
+		}
+		t.Run(name, func(t *testing.T) {
+			f := newConversationFixture(t)
+			f.msg.ReplyTo = nil
+			f.ingest(t)
+			task := f.task(t)
+			if !external {
+				id := dbfx.Task(t, f.agent, testutil.Cols{"runtime_id": f.runtime, "chat_session_id": task.ChatSessionID, "status": "running",
+					"originator_source": "direct_human", "originator_user_id": testUserID, "accountable_user_id": testUserID})
+				dbfx.InsertNoID(t, "channel_task_delivery", testutil.Cols{"task_id": id, "binding_id": f.binding, "installation_id": f.install,
+					"channel_type": "feishu", "channel_chat_id": "oc_feedback", "chat_type": "p2p", "route_revision": 1, "config": `{}`}, "task_id=$1", id)
+				var err error
+				task, err = f.h.Queries.GetAgentTask(context.Background(), parseUUID(id))
+				if err != nil {
+					t.Fatal(err)
+				}
+			}
+			// A default-off adapter must not mask a missing external-task guard.
+			f.h.channelFileDelivery = nil
+			f.h.DeclareChannelFileDelivery("feishu")
+			runtime, err := f.h.Queries.GetAgentRuntime(context.Background(), task.RuntimeID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			resp, _, _, _, _, failure := f.h.buildClaimedTaskResponse(httptest.NewRequest("POST", "/claim", nil), &task, runtime, f.runtime, testWorkspaceID)
+			if failure != nil || resp.ChatChannelType != "feishu" || resp.ChatChannelDeliversFiles == external {
+				t.Fatalf("claim file capability: external=%t type=%s files=%t failure=%+v", external, resp.ChatChannelType, resp.ChatChannelDeliversFiles, failure)
+			}
+		})
+	}
+}
+
 func TestConversationDaemonPluginRoutesDenyExternalTasks(t *testing.T) {
 	f := newConversationFixture(t)
 	dbfx.Exec(t, "UPDATE agent_runtime SET daemon_id='conversation-capabilities' WHERE id=$1", f.runtime)

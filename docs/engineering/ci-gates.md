@@ -56,7 +56,7 @@ bash scripts/test-retained-e2e.sh
 The script builds the actual Go server and production Web app, applies all
 migrations to the job's disposable PostgreSQL 17 service, and runs exactly
 `onboarding-smoke.spec.ts`, `dag-task-lines.spec.ts` and
-`issue-dependencies.spec.ts`. Before any build or
+`issue-dependencies.spec.ts` and `comments.spec.ts`. Before any build or
 migration, it verifies that all required spec files exist; a rename or deletion
 fails the gate instead of silently running fewer files. It uses local test
 credentials, API `127.0.0.1:18080`, Web `127.0.0.1:13000` and database
