@@ -72,7 +72,8 @@ test("a squad's charter and routines show, decisions can be sent back or set asi
     await page.getByRole("tab", { name: "Overview" }).click();
     await expect(page.getByText("Routines", { exact: true })).toBeVisible();
     await expect(page.getByText("Weekly market scan", { exact: true })).toBeVisible();
-    await expect(page.getByText("Operating review", { exact: true })).toBeVisible();
+    const routinesRegion = page.getByRole("region", { name: "Routines" });
+    await expect(routinesRegion.getByText("Operating review", { exact: true })).toBeVisible();
     await page.keyboard.press("Escape");
 
     // Decisions: ask for changes on one, decide later on the other.
