@@ -1976,7 +1976,21 @@
     "decision_state_revising": "修改中",
     "decision_state_expired": "已過期",
     "decisions_later_title": "稍後決定",
-    "decisions_waiting_title": "等待小組修改"
+    "decisions_waiting_title": "等待小組修改",
+    "delivery_toggle": "聊天投遞",
+    "delivery_title": "聊天投遞",
+    "delivery_push": "把簡報傳送到我的聊天",
+    "delivery_no_chat": "請先綁定你的 Telegram 聊天。簡報只會傳送到已綁定的聊天。",
+    "delivery_quiet": "勿擾時段",
+    "delivery_quiet_from": "開始",
+    "delivery_quiet_to": "結束",
+    "delivery_quiet_hint": "依你的本地時間。時段可以跨過午夜。",
+    "delivery_hour": "{{hour}}:00",
+    "delivery_same_hours": "請選擇兩個不同的小時。",
+    "delivery_save": "儲存",
+    "delivery_saved": "投遞設定已儲存",
+    "delivery_save_failed": "無法儲存投遞設定",
+    "delivery_load_failed": "無法載入投遞設定"
   },
   "views": {
     "builtin": {

@@ -1976,7 +1976,21 @@
     "decision_state_revising": "修改中",
     "decision_state_expired": "已过期",
     "decisions_later_title": "稍后决定",
-    "decisions_waiting_title": "等待小组修改"
+    "decisions_waiting_title": "等待小组修改",
+    "delivery_toggle": "聊天投递",
+    "delivery_title": "聊天投递",
+    "delivery_push": "把简报发送到我的聊天",
+    "delivery_no_chat": "请先绑定你的 Telegram 聊天。简报只会发送到已绑定的聊天。",
+    "delivery_quiet": "免打扰时段",
+    "delivery_quiet_from": "开始",
+    "delivery_quiet_to": "结束",
+    "delivery_quiet_hint": "按你的本地时间。时段可以跨过午夜。",
+    "delivery_hour": "{{hour}}:00",
+    "delivery_same_hours": "请选择两个不同的小时。",
+    "delivery_save": "保存",
+    "delivery_saved": "投递设置已保存",
+    "delivery_save_failed": "无法保存投递设置",
+    "delivery_load_failed": "无法加载投递设置"
   },
   "views": {
     "builtin": {

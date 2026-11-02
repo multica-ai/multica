@@ -2050,7 +2050,21 @@
     "decision_state_revising": "Revising",
     "decision_state_expired": "Expired",
     "decisions_later_title": "Decide later",
-    "decisions_waiting_title": "Waiting on the squad"
+    "decisions_waiting_title": "Waiting on the squad",
+    "delivery_toggle": "Chat delivery",
+    "delivery_title": "Chat delivery",
+    "delivery_push": "Send the brief to my chat",
+    "delivery_no_chat": "Link your Telegram chat first. Briefs go only to a linked chat.",
+    "delivery_quiet": "Quiet hours",
+    "delivery_quiet_from": "From",
+    "delivery_quiet_to": "Until",
+    "delivery_quiet_hint": "Your local hours. A window can run past midnight.",
+    "delivery_hour": "{{hour}}:00",
+    "delivery_same_hours": "Pick two different hours.",
+    "delivery_save": "Save",
+    "delivery_saved": "Delivery settings saved",
+    "delivery_save_failed": "Could not save delivery settings",
+    "delivery_load_failed": "Could not load delivery settings"
   },
   "views": {
     "builtin": {

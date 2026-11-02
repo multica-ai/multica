@@ -1976,7 +1976,21 @@
     "decision_state_revising": "修正中",
     "decision_state_expired": "期限切れ",
     "decisions_later_title": "後で判断",
-    "decisions_waiting_title": "チームの修正待ち"
+    "decisions_waiting_title": "チームの修正待ち",
+    "delivery_toggle": "チャットへの配信",
+    "delivery_title": "チャットへの配信",
+    "delivery_push": "ブリーフを自分のチャットに送る",
+    "delivery_no_chat": "先に Telegram のチャットを連携してください。ブリーフは連携済みのチャットにのみ届きます。",
+    "delivery_quiet": "通知を控える時間",
+    "delivery_quiet_from": "開始",
+    "delivery_quiet_to": "終了",
+    "delivery_quiet_hint": "ローカル時間。深夜をまたぐ時間帯も設定できます。",
+    "delivery_hour": "{{hour}}:00",
+    "delivery_same_hours": "異なる 2 つの時刻を選んでください。",
+    "delivery_save": "保存",
+    "delivery_saved": "配信設定を保存しました",
+    "delivery_save_failed": "配信設定を保存できませんでした",
+    "delivery_load_failed": "配信設定を読み込めませんでした"
   },
   "views": {
     "builtin": {

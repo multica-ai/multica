@@ -1976,7 +1976,21 @@
     "decision_state_revising": "수정 중",
     "decision_state_expired": "만료됨",
     "decisions_later_title": "나중에 결정",
-    "decisions_waiting_title": "팀 수정 대기 중"
+    "decisions_waiting_title": "팀 수정 대기 중",
+    "delivery_toggle": "채팅 전달",
+    "delivery_title": "채팅 전달",
+    "delivery_push": "브리프를 내 채팅으로 보내기",
+    "delivery_no_chat": "먼저 Telegram 채팅을 연결하세요. 브리프는 연결된 채팅으로만 전달됩니다.",
+    "delivery_quiet": "조용한 시간",
+    "delivery_quiet_from": "시작",
+    "delivery_quiet_to": "종료",
+    "delivery_quiet_hint": "현지 시간 기준입니다. 자정을 넘는 시간대도 가능합니다.",
+    "delivery_hour": "{{hour}}:00",
+    "delivery_same_hours": "서로 다른 두 시간을 선택하세요.",
+    "delivery_save": "저장",
+    "delivery_saved": "전달 설정이 저장되었습니다",
+    "delivery_save_failed": "전달 설정을 저장하지 못했습니다",
+    "delivery_load_failed": "전달 설정을 불러오지 못했습니다"
   },
   "views": {
     "builtin": {

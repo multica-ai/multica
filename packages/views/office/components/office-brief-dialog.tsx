@@ -27,6 +27,7 @@ import { isFloatingChatRouteSuppressed } from "../../chat/floating-chat-visibili
 import { ReadonlyContent } from "../../editor/readonly-content";
 import { useT } from "../../i18n";
 import { useNavigation } from "../../navigation";
+import { OfficeBriefDelivery } from "./office-brief-delivery";
 import { OfficeProposalDecision } from "./office-proposal-decision";
 import { OfficeProposalHistory, OfficeProposalRelated, OfficeProposalStatus } from "./office-proposal-details";
 
@@ -55,6 +56,7 @@ export function OfficeBriefDialog({
   const { t } = useT("issues");
   const wsId = useWorkspaceId();
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [delivery, setDelivery] = useState(false);
   const setup = useQuery(officeSetupOptions(wsId));
   const autopilots = useQuery(autopilotListOptions(wsId));
   const trigger = useTriggerAutopilot();
@@ -84,9 +86,23 @@ export function OfficeBriefDialog({
   return (
     <Dialog open={open} onOpenChange={(next) => !next && onClose()}>
       <DialogContent className="flex max-h-[min(88dvh,48rem)] flex-col gap-0 overflow-hidden p-0 sm:max-w-3xl">
-        <header className="shrink-0 border-b px-4 py-3 pr-12">
+        <header className="flex shrink-0 items-center justify-between gap-3 border-b px-4 py-3 pr-12">
           <DialogTitle className="text-heading">{t(($) => $.office.brief_open)}</DialogTitle>
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            aria-expanded={delivery}
+            onClick={() => setDelivery((open) => !open)}
+          >
+            {t(($) => $.office.delivery_toggle)}
+          </Button>
         </header>
+        {delivery ? (
+          <div className="shrink-0 border-b px-4 py-3">
+            <OfficeBriefDelivery />
+          </div>
+        ) : null}
         <div className="flex min-h-0 flex-1 flex-col md:flex-row">
           <div className="min-h-0 flex-1 overflow-y-auto px-4 py-3">
             {shown ? (
