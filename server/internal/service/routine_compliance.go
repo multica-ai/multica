@@ -44,6 +44,10 @@ type routineFacts struct {
 	timezone         string
 	scheduleBaseline time.Time
 
+	// operatingReview marks the squad's weekly review, whose steps file a proposal
+	// or record no action rather than post a report (spec 2.3, step 4).
+	operatingReview bool
+
 	hasDecider    bool
 	deciderStatus string
 	hasIssue      bool
@@ -81,6 +85,7 @@ func RoutineComplianceStates(ctx context.Context, q *db.Queries, workspaceID, sq
 			hasKBDocument:    row.HasKbDocument,
 			hasReport:        row.HasReport,
 			hasNoAction:      row.HasNoAction,
+			operatingReview:  row.Purpose == OperatingReviewPurpose,
 		}
 		out = append(out, RoutineCompliance{
 			AutopilotID:    util.UUIDToString(row.AutopilotID),
@@ -131,8 +136,15 @@ func (f routineFacts) late(now time.Time) bool {
 }
 
 // produced reports whether the decider's run made the output the routine
-// expects. A "none" routine never reaches this check.
+// expects. A "none" routine never reaches this check. The operating review's
+// expected output is a report, but a proposal it files is its output too: its
+// steps file a proposal or record no action, and a no action is already a
+// delivered routine for any kind (see deriveRoutineState). Other routines do not
+// count a proposal in place of their own output.
 func (f routineFacts) produced() bool {
+	if f.operatingReview && f.hasProposal {
+		return true
+	}
 	switch f.expectedOutput {
 	case "issue":
 		return f.hasIssue

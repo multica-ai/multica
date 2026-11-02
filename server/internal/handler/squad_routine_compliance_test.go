@@ -302,3 +302,70 @@ func TestRoutineStateNoActionNeedsAReason(t *testing.T) {
 		t.Fatalf("no action with a reason: state = %s, want on_time", got)
 	}
 }
+
+// TestOperatingReviewCountsAProposalOrANoAction: the weekly review is delivered by a
+// proposal it files or a no action with a reason, with or without a comment. A
+// routine with another purpose still needs its own report.
+func TestOperatingReviewCountsAProposalOrANoAction(t *testing.T) {
+	// reviewRun creates a squad with its operating review and one completed run of
+	// the review, on an issue the run created.
+	reviewRun := func(t *testing.T) (squadID, reviewID, issue string) {
+		t.Helper()
+		leaderID := createHandlerTestAgent(t, "review-output-leader-"+uniqueSuffix(), nil)
+		squadID = newCharterSquad(t, "Review Output Squad", leaderID)
+		saveCharterWithSwitch(t, squadID, 0, true)
+		reviewID = operatingReviewOf(t, squadID)
+		issue = dbfx.Issue(t, "review run", testutil.Cols{"workspace_id": dbfx.WorkspaceID})
+		insertRoutineRun(t, squadID, reviewID, testutil.Cols{"issue_id": issue})
+		return squadID, reviewID, issue
+	}
+
+	fileProposal := func(t *testing.T, squadID string) {
+		t.Helper()
+		leader := squadLeaderID(t, squadID)
+		proposalIssue := dbfx.Issue(t, "review proposal", testutil.Cols{"workspace_id": dbfx.WorkspaceID})
+		dbfx.Insert(t, "proposal", testutil.Cols{
+			"workspace_id": dbfx.WorkspaceID, "squad_id": squadID, "issue_id": proposalIssue,
+			"created_by_type": "agent", "created_by_id": leader,
+		})
+	}
+
+	t.Run("nothing filed is no_output", func(t *testing.T) {
+		squadID, reviewID, _ := reviewRun(t)
+		if got := routineStateOf(t, squadID, reviewID); got != "no_output" {
+			t.Fatalf("review with nothing recorded: state = %s, want no_output", got)
+		}
+	})
+
+	t.Run("proposal filed without a comment is on_time", func(t *testing.T) {
+		squadID, reviewID, _ := reviewRun(t)
+		fileProposal(t, squadID)
+		if got := routineStateOf(t, squadID, reviewID); got != "on_time" {
+			t.Fatalf("review that filed a proposal and posted no comment: state = %s, want on_time", got)
+		}
+	})
+
+	t.Run("no action with a reason without a comment is on_time", func(t *testing.T) {
+		squadID, reviewID, issue := reviewRun(t)
+		dbfx.Insert(t, "activity_log", testutil.Cols{
+			"workspace_id": dbfx.WorkspaceID,
+			"issue_id":     issue,
+			"actor_type":   "agent",
+			"actor_id":     squadLeaderID(t, squadID),
+			"action":       "squad_leader_evaluated",
+			"details":      `{"outcome":"no_action","reason":"nothing new this week"}`,
+		})
+		if got := routineStateOf(t, squadID, reviewID); got != "on_time" {
+			t.Fatalf("review that recorded no action with a reason: state = %s, want on_time", got)
+		}
+	})
+
+	t.Run("another routine with only a proposal is no_output", func(t *testing.T) {
+		squadID, autopilotID := complianceRoutine(t, "report")
+		insertRoutineRun(t, squadID, autopilotID)
+		fileProposal(t, squadID)
+		if got := routineStateOf(t, squadID, autopilotID); got != "no_output" {
+			t.Fatalf("report routine with only a proposal: state = %s, want no_output", got)
+		}
+	})
+}

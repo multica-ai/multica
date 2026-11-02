@@ -217,3 +217,37 @@ func TestRoutineStateWithoutSchedule(t *testing.T) {
 		t.Fatalf("no schedule, completed run: state = %s, want on_time", got)
 	}
 }
+
+// TestRoutineStateOperatingReviewOutput: the review's expected output is a report,
+// but a proposal the squad filed during its run is the review's output too. A
+// no action with a reason is on_time for any kind. Another routine with only a
+// proposal still needs its own report.
+func TestRoutineStateOperatingReviewOutput(t *testing.T) {
+	review := func() routineFacts {
+		f := completedDecider(onTimeRoutine("report"))
+		f.operatingReview = true
+		return f
+	}
+
+	if got := deriveRoutineState(review(), complianceNow); got != RoutineStateNoOutput {
+		t.Fatalf("review that filed nothing: state = %s, want no_output", got)
+	}
+
+	withProposal := review()
+	withProposal.hasProposal = true
+	if got := deriveRoutineState(withProposal, complianceNow); got != RoutineStateOnTime {
+		t.Fatalf("review that filed a proposal and no comment: state = %s, want on_time", got)
+	}
+
+	withNoAction := review()
+	withNoAction.hasNoAction = true
+	if got := deriveRoutineState(withNoAction, complianceNow); got != RoutineStateOnTime {
+		t.Fatalf("review that recorded no action with a reason: state = %s, want on_time", got)
+	}
+
+	other := completedDecider(onTimeRoutine("report"))
+	other.hasProposal = true
+	if got := deriveRoutineState(other, complianceNow); got != RoutineStateNoOutput {
+		t.Fatalf("non-review report routine with only a proposal: state = %s, want no_output", got)
+	}
+}
