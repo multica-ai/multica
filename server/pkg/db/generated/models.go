@@ -341,6 +341,20 @@ type Brief struct {
 	CreatedAt         pgtype.Timestamptz `json:"created_at"`
 }
 
+type BriefInquiry struct {
+	ID             pgtype.UUID        `json:"id"`
+	WorkspaceID    pgtype.UUID        `json:"workspace_id"`
+	AskedByAgentID pgtype.UUID        `json:"asked_by_agent_id"`
+	SquadID        pgtype.UUID        `json:"squad_id"`
+	IssueID        pgtype.UUID        `json:"issue_id"`
+	CommentID      pgtype.UUID        `json:"comment_id"`
+	Question       string             `json:"question"`
+	AskedOn        pgtype.Date        `json:"asked_on"`
+	AnsweredAt     pgtype.Timestamptz `json:"answered_at"`
+	AnswerExcerpt  pgtype.Text        `json:"answer_excerpt"`
+	CreatedAt      pgtype.Timestamptz `json:"created_at"`
+}
+
 type ChannelBindingToken struct {
 	TokenHash      string             `json:"token_hash"`
 	WorkspaceID    pgtype.UUID        `json:"workspace_id"`

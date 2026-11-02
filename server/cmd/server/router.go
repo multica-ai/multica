@@ -2276,6 +2276,8 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 			r.Route("/api/briefs", func(r chi.Router) {
 				r.Get("/", h.ListBriefs)
 				r.Post("/", h.CreateBrief)
+				// The Secretary's accounted questions to squad leaders (daily cap).
+				r.Post("/inquiries", h.AskBriefInquiry)
 				r.Get("/{id}", h.GetBrief)
 			})
 

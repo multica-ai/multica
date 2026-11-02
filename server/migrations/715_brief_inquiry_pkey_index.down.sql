@@ -1,0 +1,1 @@
+DROP INDEX CONCURRENTLY IF EXISTS brief_inquiry_id_uidx;

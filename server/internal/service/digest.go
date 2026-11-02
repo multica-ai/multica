@@ -69,6 +69,17 @@ type DigestProposalRef struct {
 	Title string `json:"title"`
 }
 
+// DigestInquiry is a question the Secretary put to a squad leader on the day or
+// the day before (UTC). Answered is set when the squad has replied on the issue,
+// and AnswerExcerpt then carries the first characters of the reply. The JSON keys
+// are question, answered and answer_excerpt; the Secretary reads them without
+// searching.
+type DigestInquiry struct {
+	Question      string  `json:"question"`
+	Answered      bool    `json:"answered"`
+	AnswerExcerpt *string `json:"answer_excerpt"`
+}
+
 // DigestRoutine is one of a chartered squad's routines with its derived state.
 type DigestRoutine struct {
 	AutopilotID    string `json:"autopilot_id"`
@@ -224,6 +235,9 @@ type Digest struct {
 	OmittedSquadCount int             `json:"omitted_squad_count"`
 	Quiet             DigestQuiet     `json:"quiet"`
 	Knowledge         DigestKnowledge `json:"knowledge"`
+	// Inquiries are the Secretary's questions to squad leaders asked today or
+	// yesterday (UTC), newest first. The daily cap keeps the list short.
+	Inquiries []DigestInquiry `json:"inquiries"`
 }
 
 // DigestService computes the digest.
@@ -420,6 +434,10 @@ func (s *DigestService) Compute(ctx context.Context, workspaceID pgtype.UUID, si
 	if err != nil {
 		return Digest{}, err
 	}
+	inquiries, err := s.computeInquiries(ctx, workspaceID, now)
+	if err != nil {
+		return Digest{}, err
+	}
 
 	return Digest{
 		Since:             since.UTC().Format(time.RFC3339),
@@ -429,7 +447,31 @@ func (s *DigestService) Compute(ctx context.Context, workspaceID pgtype.UUID, si
 		OmittedSquadCount: omitted,
 		Quiet:             quiet,
 		Knowledge:         know,
+		Inquiries:         inquiries,
 	}, nil
+}
+
+// computeInquiries lists the inquiries asked today or yesterday (UTC). The
+// window is the day, not the digest's since: the Secretary reads an answer in the
+// next digest after it arrives, whatever period that digest covers.
+func (s *DigestService) computeInquiries(ctx context.Context, workspaceID pgtype.UUID, now time.Time) ([]DigestInquiry, error) {
+	yesterday := briefInquiryDay(now).AddDate(0, 0, -1)
+	rows, err := s.Queries.ListBriefInquiriesForDigest(ctx, db.ListBriefInquiriesForDigestParams{
+		WorkspaceID: workspaceID, AskedOn: pgtype.Date{Time: yesterday, Valid: true},
+	})
+	if err != nil {
+		return nil, fmt.Errorf("digest inquiries: %w", err)
+	}
+	out := make([]DigestInquiry, 0, len(rows))
+	for _, row := range rows {
+		item := DigestInquiry{Question: row.Question, Answered: row.AnsweredAt.Valid}
+		if item.Answered && row.AnswerExcerpt.Valid {
+			excerpt := row.AnswerExcerpt.String
+			item.AnswerExcerpt = &excerpt
+		}
+		out = append(out, item)
+	}
+	return out, nil
 }
 
 // attachRoutines derives every routine's state, gives each chartered squad its

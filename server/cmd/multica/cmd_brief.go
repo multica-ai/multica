@@ -27,8 +27,27 @@ report the boss reads.
 
   multica brief digest --since 24h --json
   multica brief publish --kind daily --title "Daily brief" --file brief.md
+  multica brief ask --squad <id> --issue <id> "Why did the pilot slip?"
   multica brief list
   multica brief show <id>`,
+}
+
+var briefAskCmd = &cobra.Command{
+	Use:   "ask",
+	Short: "Ask a squad leader a question about an issue",
+	Long: `Ask the leader of a squad a question. The question is a comment on the issue,
+mentioning the leader, so the leader is woken as for any mention. The answer is
+the leader's next comment on that issue; the next digest carries it.
+
+--issue is required: the question is a comment, and a comment needs an issue to
+live on. Pick the issue the digest flagged.
+
+At most three questions per workspace per UTC day. A fourth is refused with
+inquiry_limit; put that question in the next brief instead.
+
+  multica brief ask --squad <squad-id> --issue <issue-id> "What changed on the pilot?"`,
+	Args: cobra.ExactArgs(1),
+	RunE: runBriefAsk,
 }
 
 var briefPublishCmd = &cobra.Command{
@@ -68,6 +87,45 @@ var briefShowCmd = &cobra.Command{
 	Short: "Print one brief",
 	Args:  cobra.ExactArgs(1),
 	RunE:  runBriefShow,
+}
+
+func runBriefAsk(cmd *cobra.Command, args []string) error {
+	squad, _ := cmd.Flags().GetString("squad")
+	issue, _ := cmd.Flags().GetString("issue")
+	question := strings.TrimSpace(args[0])
+
+	squad = strings.TrimSpace(squad)
+	if !uuidPattern.MatchString(squad) {
+		return fmt.Errorf("--squad is required and must be a squad id; run `multica squad list`")
+	}
+	issue = strings.TrimSpace(issue)
+	if issue == "" {
+		return fmt.Errorf("--issue is required: a question is a comment on the issue it asks about")
+	}
+	if !uuidPattern.MatchString(issue) {
+		return fmt.Errorf("--issue %q is not an issue id", issue)
+	}
+	if question == "" {
+		return fmt.Errorf("the question is empty")
+	}
+
+	client, err := newAPIClient(cmd)
+	if err != nil {
+		return err
+	}
+	ctx, cancel := cli.APIContext(context.Background())
+	defer cancel()
+
+	req := map[string]any{"squad_id": squad, "issue_id": issue, "question": question}
+	var result map[string]any
+	if err := client.PostJSON(ctx, "/api/briefs/inquiries", req, &result); err != nil {
+		return briefRefusalError(err)
+	}
+	if output, _ := cmd.Flags().GetString("output"); output == "json" {
+		return cli.PrintJSON(os.Stdout, result)
+	}
+	fmt.Printf("Question asked: %s\n", strVal(result, "id"))
+	return nil
 }
 
 var briefDigestCmd = &cobra.Command{
@@ -189,6 +247,14 @@ func printDigest(w *os.File, d map[string]any) {
 	if q := mapVal(d, "quiet"); intVal(q, "count") > 0 {
 		fmt.Fprintf(w, "\nQuiet (%d): %s\n", intVal(q, "count"), joinNames(sliceVal(q, "squads")))
 	}
+	for _, item := range sliceVal(d, "inquiries") {
+		im, _ := item.(map[string]any)
+		state := "no answer yet"
+		if b, _ := im["answered"].(bool); b {
+			state = "answered: " + strVal(im, "answer_excerpt")
+		}
+		fmt.Fprintf(w, "\nQuestion to a leader (%s): %s\n", state, strVal(im, "question"))
+	}
 }
 
 func joinNames(items []any) string {
@@ -200,12 +266,12 @@ func joinNames(items []any) string {
 	return strings.Join(names, ", ")
 }
 
-// briefRefusalError prints the server's own message for a refused brief
-// (a validation or permission error written for the publishing agent),
+// briefRefusalError prints the server's own message for a refused brief or
+// question (a validation, permission or daily-limit error written for the agent),
 // unchanged and without a status prefix.
 func briefRefusalError(err error) error {
 	var httpErr *cli.HTTPError
-	if !errors.As(err, &httpErr) || (httpErr.StatusCode != 400 && httpErr.StatusCode != 403) {
+	if !errors.As(err, &httpErr) || (httpErr.StatusCode != 400 && httpErr.StatusCode != 403 && httpErr.StatusCode != 404 && httpErr.StatusCode != 429) {
 		return err
 	}
 	var body struct {
@@ -358,6 +424,12 @@ func addBriefListFlags(cmd *cobra.Command) {
 	cmd.Flags().String("output", "table", "Output format: table or json")
 }
 
+func addBriefAskFlags(cmd *cobra.Command) {
+	cmd.Flags().String("squad", "", "Id of the squad whose leader is asked — required")
+	cmd.Flags().String("issue", "", "Id of the issue the question is about — required")
+	cmd.Flags().String("output", "table", "Output format: table or json")
+}
+
 func addBriefShowFlags(cmd *cobra.Command) {
 	cmd.Flags().Bool("json", false, "Print JSON (same as --output json)")
 	cmd.Flags().String("output", "table", "Output format: table or json")
@@ -374,8 +446,10 @@ func init() {
 	addBriefPublishFlags(briefPublishCmd)
 	addBriefListFlags(briefListCmd)
 	addBriefShowFlags(briefShowCmd)
+	addBriefAskFlags(briefAskCmd)
 	briefCmd.AddCommand(briefDigestCmd)
 	briefCmd.AddCommand(briefPublishCmd)
+	briefCmd.AddCommand(briefAskCmd)
 	briefCmd.AddCommand(briefListCmd)
 	briefCmd.AddCommand(briefShowCmd)
 }
