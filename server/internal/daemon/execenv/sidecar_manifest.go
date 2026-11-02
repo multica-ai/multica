@@ -86,10 +86,9 @@ func (m *sidecarManifest) skillFiles(skillsParent string) []string {
 // recorded paths are appended in root-first order; Cleanup iterates in
 // reverse so the deepest directory is removed first.
 //
-// When m is nil this is identical to os.MkdirAll — the Reuse path uses
-// the nil mode because Reuse runs on cloud workdirs that the GC loop
-// wipes wholesale, so per-file cleanup is irrelevant and tracking the
-// dirs would just leave stale manifest bytes around.
+// When m is nil this is identical to os.MkdirAll. Callers operating only
+// inside a task-owned directory may skip bookkeeping because that directory
+// can be removed as a unit.
 func recordMkdirAll(path string, perm os.FileMode, m *sidecarManifest) error {
 	if path == "" {
 		return os.MkdirAll(path, perm)
@@ -142,10 +141,9 @@ func recordMkdirAll(path string, perm os.FileMode, m *sidecarManifest) error {
 // once by leaving the corrupted bytes in place at exit. Refusing to
 // overwrite removes both halves of that failure mode.
 //
-// When m is nil this collapses to a plain os.WriteFile — the Reuse
-// path uses the nil mode because Reuse runs on cloud workdirs that
-// the GC loop wipes wholesale, so per-file collision avoidance is
-// irrelevant.
+// When m is nil this collapses to a plain os.WriteFile. Callers operating only
+// inside a task-owned directory may skip collision bookkeeping because that
+// directory can be removed as a unit.
 func recordWriteFile(path string, data []byte, perm os.FileMode, m *sidecarManifest) error {
 	if m == nil {
 		return os.WriteFile(path, data, perm)
