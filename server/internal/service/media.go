@@ -55,8 +55,6 @@ func applicableMediaWindow(w protocol.RuntimePlanQuotaWindow, provider string) b
 	case "agy":
 		return w.Group == "gemini"
 	default:
-		// Flow/Whisk have no dedicated quota windows yet. Host model pools
-		// describe neither their remaining capacity nor their reset time.
 		return false
 	}
 }

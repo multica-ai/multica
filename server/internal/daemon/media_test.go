@@ -55,7 +55,7 @@ type artifactMediaExecutor struct {
 }
 
 func (e artifactMediaExecutor) Capabilities() []string {
-	return []string{"media-video-flow-v1", "media-image-whisk-v1"}
+	return []string{"media-image-agy-v1"}
 }
 func (e artifactMediaExecutor) Submit(_ context.Context, _ protocol.MediaRequest, _ []media.Input, dir string) (media.Artifact, error) {
 	path, err := e.path(dir)
@@ -92,7 +92,7 @@ func TestMediaOutputCannotEscapeJobDirectory(t *testing.T) {
 	}
 }
 
-func TestMediaBrowserCapabilitiesUseExistingRuntime(t *testing.T) {
+func TestMediaEmbeddedCapabilitiesUseExistingRuntime(t *testing.T) {
 	executor := artifactMediaExecutor{}
 	d := &Daemon{cfg: Config{MediaExecutor: func(provider, profile string) media.Executor {
 		if provider == "antigravity" && profile == "verified" {
@@ -104,7 +104,7 @@ func TestMediaBrowserCapabilitiesUseExistingRuntime(t *testing.T) {
 	for i, entry := range entries {
 		got := entry["media_capabilities"].([]string)
 		if i == 0 && !slices.Equal(got, executor.Capabilities()) || i != 0 && len(got) != 0 {
-			t.Fatalf("verified browser capabilities: %v", entries)
+			t.Fatalf("verified embedded capabilities: %v", entries)
 		}
 	}
 }

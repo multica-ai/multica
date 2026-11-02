@@ -52,9 +52,9 @@ MULTICA_RUN_REAL_AGENT_SMOKE=1 go test -tags=agentintegration ./pkg/agent \
 Ordinary tests use test-owned CLI processes and synthetic credentials. They
 cover native receipts, login/capability gating, cancellation, explicit quota
 failures, registration refresh/retry, and three HTTP upload attempts with one
-native generation. The live test verifies the native CLI; the cross-container
-acceptance additionally requires deploying the daemon and running the commands
-below from a separate caller without provider credentials.
+native generation. The live test verifies the native CLI. Credential-separated
+CLI tests verify the caller/host boundary against a test Server; production
+deployment is not a prerequisite for this acceptance baseline.
 
 ## Native Antigravity images
 
@@ -126,16 +126,17 @@ multica media generate --capability image-generate --provider auto \
   --prompt 'A red lighthouse at dusk' --output json
 multica media generate --capability image-edit --provider codex \
   --prompt-file ./prompt.txt --input subject=./photo.png --out ./result.png
-multica media generate --capability video-generate --provider flow \
-  --prompt 'Clouds over a mountain' --duration 8 --aspect 16:9 --async
+multica media generate --capability image-generate --provider agy \
+  --prompt 'Clouds over a mountain' --aspect 16:9 --async
 multica media job get <job-id> --output json
-multica media job wait <job-id> --out ./result.mp4
+multica media job wait <job-id> --out ./result.png
 multica media job cancel <job-id>
 ```
 
 `--input` and `--input-attachment` are repeatable; optional roles are `input`,
-`subject`, `scene`, and `style`. `--model`, `--size`, `--aspect` and `--duration`
-are passed to the adapter, which validates native combinations. `--issue`
+`subject`, `scene`, and `style`. `--size` and `--aspect` are image instructions.
+Both native adapters require an empty `--model`. Video duration is not a CLI
+option; nonzero `duration` in API requests is rejected. `--issue`
 binds a member-created job to an issue. Inside a task, the server derives and
 locks the producing task, issue, chat session and actor from the task token.
 A task cannot override this binding.
@@ -165,14 +166,12 @@ cooling. Header-level `media-*` capabilities are discarded.
 | --- | --- | --- |
 | codex | media-image-codex-v1 | image-generate, image-edit |
 | antigravity (`--provider agy`) | media-image-agy-v1 | image-generate, image-edit |
-| Any verified existing runtime (e.g. antigravity) | media-video-flow-v1 / flow | video-generate |
-| Same Flow host | media-image-whisk-v1 / whisk | image-remix |
 
-Media source comes from the advertised tag, independently of the host's runtime
-type. Codex/agy tags retain their native host restriction; Flow and Whisk can
-share an existing antigravity runtime with a verified browser executor. The
-matched `capability_tag` is stored per assignment and supplies the cooldown key,
-even if registration changes its tags before the result arrives.
+Only these native tags are registered and routed, each restricted to its own
+runtime provider. Retired browser tags in old metadata cannot be scheduled and
+are removed on re-registration. The matched `capability_tag` is stored per
+assignment and supplies the cooldown key, even if registration changes its tags
+before the result arrives.
 
 Rank uses the minimum remaining percentage across applicable active quota
 windows. Exhausted windows are excluded; agy uses the Gemini pool, not the
@@ -229,9 +228,39 @@ and Local storage. It streams a 110 MiB output, injects an upload failure and a
 lost committed-upload response, checks one Submit / three uploads / one output
 attachment, observes heartbeat acknowledgements during transfer, and verifies
 receipt-only versus explicit streamed download behavior. Separate tests cover
-quota selection, Flow/Whisk registration and routing on an existing antigravity
-runtime, lost dispatch/receipt settlement, shutdown receipts, permission
+quota selection, rejection of retired media requests/tags, per-runtime native
+registration, lost dispatch/receipt settlement, shutdown receipts, permission
 revocation, input scope, private-chat isolation, artifact path/symlink boundaries,
 content-type and retry limits, stale receipts, cancellation, task/issue binding,
 CLI validation, migrations/rollback and S3's streaming contract.
 No real provider login or generation is needed for these checks.
+
+## Workspace image-studio skill
+
+The importable skill is [image-studio](../.agents/skills/image-studio/SKILL.md).
+It only calls `multica media generate` and `multica media job`; it stores no
+credentials, host addresses or state. Import that directory as a `.skill`/`.zip`
+archive using `multica skill import --file`, then bind the returned workspace
+skill ID with `multica agent skills add`. Read bindings back with `skills list`;
+`skills set` would replace unrelated skills. This is a workspace skill, not a
+universal server built-in.
+
+`TestMediaCodexCredentialSeparatedCLI` and
+`TestMediaAntigravityCredentialSeparatedCLI` compile the actual CLI and run it
+with an empty home and only platform authentication against real `httptest`
+Server handlers, PostgreSQL and Local storage. Native provider processes use
+test-owned fixtures. Each covers explicit and automatic provider selection,
+generation and reference editing, prompt files, local and existing-attachment
+inputs, issue binding, receipt-only delivery and explicit `--out`, upload failure
+and lost upload receipts without model replay, and native quota failover to a
+second host. These tests do not call paid providers or prove live container
+networking; pair them with the separately gated native live tests when verifying
+a provider integration.
+
+```sh
+cd server
+# DATABASE_URL must point to this checkout's migrated test database.
+go test -race ./pkg/protocol ./cmd/multica ./internal/service ./internal/handler \
+  ./internal/daemon -run 'TestMedia' -count=1 -v
+go test -race ./internal/daemon/media -count=1
+```

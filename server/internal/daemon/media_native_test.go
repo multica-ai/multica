@@ -45,6 +45,12 @@ func runMediaNativeProcess() {
 		var req struct {
 			ID     int    `json:"id"`
 			Method string `json:"method"`
+			Params struct {
+				Input []struct {
+					Type string `json:"type"`
+					Path string `json:"path"`
+				} `json:"input"`
+			} `json:"params"`
 		}
 		_ = json.Unmarshal(scanner.Bytes(), &req)
 		result := map[string]any{}
@@ -76,6 +82,21 @@ func runMediaNativeProcess() {
 			result["thread"] = map[string]string{"id": "native"}
 		}
 		if req.Method == "turn/start" {
+			if mode == "edit" {
+				references := 0
+				for _, input := range req.Params.Input {
+					if input.Type == "localImage" {
+						data, err := os.ReadFile(input.Path)
+						if err != nil || http.DetectContentType(data) != "image/png" {
+							os.Exit(2)
+						}
+						references++
+					}
+				}
+				if references != 1 {
+					os.Exit(3)
+				}
+			}
 			f, _ := os.OpenFile(counter, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0600)
 			_, _ = f.WriteString("submit\n")
 			_ = f.Close()

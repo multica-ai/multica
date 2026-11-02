@@ -230,7 +230,7 @@ func (h *Handler) ClaimMediaJob(w http.ResponseWriter, r *http.Request) {
 	// Filter unroutable operations and callers before the bounded queue scan,
 	// so an unavailable provider's backlog cannot starve another provider.
 	routes := make([]map[string]string, 0, 4)
-	for _, capability := range []string{"image-generate", "image-edit", "image-remix", "video-generate"} {
+	for _, capability := range []string{"image-generate", "image-edit"} {
 		request := protocol.MediaRequest{Provider: "auto", Capability: capability}
 		if selected := service.SelectMediaRuntime([]db.AgentRuntime{rt}, rt.OwnerID, request, time.Now()); selected != nil {
 			routes = append(routes, map[string]string{"provider": protocol.MediaTagProvider(selected.Tag), "capability": capability})

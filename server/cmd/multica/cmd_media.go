@@ -21,16 +21,15 @@ func newMediaCmd() *cobra.Command {
 	generate := &cobra.Command{Use: "generate", Short: "Generate media and return its attachment receipt", Args: exactArgs(0), RunE: runMediaGenerate}
 	f := generate.Flags()
 	f.String("output", "table", "Output format: table or json")
-	f.String("capability", "image-generate", "image-generate, image-edit, image-remix, or video-generate")
-	f.String("provider", "auto", "auto, codex, agy, flow, or whisk")
+	f.String("capability", "image-generate", "image-generate or image-edit")
+	f.String("provider", "auto", "auto, codex, or agy")
 	f.String("prompt", "", "Generation prompt")
 	f.String("prompt-file", "", "Read the prompt from a UTF-8 file")
 	f.StringArray("input", nil, "Input file, optionally role=path (repeatable)")
 	f.StringArray("input-attachment", nil, "Existing attachment, optionally role=id (repeatable)")
-	f.String("model", "", "Native model identifier")
+	f.String("model", "", "Reserved; native image adapters require an empty value")
 	f.String("size", "", "Requested output size")
 	f.String("aspect", "", "Requested aspect ratio")
-	f.Int("duration", 0, "Video duration in seconds")
 	f.String("issue", "", "Issue to receive the output (inferred inside an issue task)")
 	f.String("out", "", "Stream completed output to this file; omitted means no binary download")
 	f.Bool("async", false, "Return the queued job immediately")
@@ -68,7 +67,6 @@ func runMediaGenerate(cmd *cobra.Command, _ []string) error {
 	}
 	flag := func(name string) string { v, _ := cmd.Flags().GetString(name); return v }
 	req := protocol.MediaRequest{Capability: flag("capability"), Provider: flag("provider"), Prompt: flag("prompt"), Model: flag("model"), Size: flag("size"), Aspect: flag("aspect"), IssueID: flag("issue")}
-	req.Duration, _ = cmd.Flags().GetInt("duration")
 	if filename := flag("prompt-file"); filename != "" {
 		f, err := os.Open(filename)
 		if err != nil {
