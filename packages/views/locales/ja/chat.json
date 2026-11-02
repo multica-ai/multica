@@ -243,7 +243,6 @@
     "row_actions_aria": "チャットの操作"
   },
   "header": {
-    "view_profile": "Agent のプロフィール",
     "rename": "名前を変更",
     "delete": "チャットを削除",
     "archive": "チャットをアーカイブ",

@@ -11,7 +11,8 @@
     "usage": "統計",
     "runtimes": "執行時",
     "skills": "Skills",
-    "settings": "設定"
+    "settings": "設定",
+    "views": "檢視"
   },
   "tab": {
     "issue": "任務",
@@ -25,6 +26,7 @@
     "runtime": "執行時",
     "attachment": "附件",
     "create_agent": "建立智慧體",
+    "my_agents": "我的智慧體在做",
     "unknown": "未知頁面"
   },
   "help": {
@@ -57,16 +59,120 @@
     "invitation_decline": "拒絕",
     "log_out": "退出登入",
     "new_issue": "新建任務",
-    "new_issue_shortcut": "C",
     "pinned_label": "固定",
-    "work_group": "工作",
-    "ai_team_group": "AI 團隊",
     "show_more_pins": "再顯示 {{count}} 項...",
-    "show_fewer_pins": "收起",
-    "unread_overflow": "99+",
-    "discord_card": {
-      "title": "加入 Discord",
-      "dismiss": "關閉"
+    "show_fewer_pins": "收起"
+  },
+  "spaces": {
+    "work": "工作",
+    "team": "團隊"
+  },
+  "rail": {
+    "label": "應用導覽",
+    "sheet_description": "切換空間和工作區。",
+    "inbox": "收件箱",
+    "work": "工作",
+    "team": "團隊",
+    "chat": "聊天",
+    "autopilots": "自動化",
+    "switch_workspace": "切換工作區",
+    "invitation_from": "{{name}} 邀請你加入",
+    "open_in_new_window": "在新視窗開啟",
+    "open_in_new_window_click": "點擊",
+    "open_in_other_window": "已在其他視窗開啟",
+    "in_other_window": "其他視窗",
+    "all_workspaces_open": "所有工作區都已在視窗中開啟"
+  },
+  "panels": {
+    "work": {
+      "my_agents": "我的智慧體在做",
+      "all_issues": "全部任務",
+      "views": "檢視",
+      "new_project": "新建專案",
+      "new_issue_in_project": "在 {{name}} 中新建任務",
+      "all_projects_other": "全部 {{count}} 個專案",
+      "project_issues": "{{name}} 的任務",
+      "project_issues_empty": "沒有任務",
+      "project_issues_error": "無法載入任務",
+      "project_issues_settings": "專案中的任務",
+      "settings_status": "狀態",
+      "settings_assignee": "負責人",
+      "assignee_anyone": "所有人",
+      "assignee_me": "我",
+      "assignee_my_agents": "我的智慧體",
+      "assignee_me_and_my_agents": "我和我的智慧體",
+      "reset": "重設",
+      "load_more": "載入更多",
+      "show_less": "收合",
+      "projects_settings": "專案顯示",
+      "projects_ordering": "排序",
+      "projects_order_manual": "手動",
+      "projects_order_name": "名稱",
+      "projects_order_updated": "最近更新",
+      "projects_order_created": "最近建立",
+      "projects_show": "顯示",
+      "projects_only_mine": "只看我負責的專案",
+      "projects_show_count": "未完成任務數",
+      "new_view": "新增檢視",
+      "all_views": "全部檢視",
+      "view_actions": "{{name}} 的操作",
+      "view_copy_link": "複製連結",
+      "view_remove": "從側欄移除",
+      "view_rename": "重新命名",
+      "view_duplicate": "建立副本",
+      "view_delete": "刪除檢視"
+    },
+    "team": {
+      "new_agent": "新建智慧體",
+      "needs_attention": "需要處理",
+      "stuck_other": "{{count}} 個任務在等待離線的執行時",
+      "working_now": "正在工作",
+      "running_tasks_other": "{{count}} 個任務執行中",
+      "all_agents": "全部智慧體",
+      "my_agents": "我的智慧體",
+      "squads_and_members": "小隊與成員",
+      "members_other": "{{count}} 位成員",
+      "resources": "資源",
+      "runtimes_offline_other": "{{count}} 個離線",
+      "invite_member": "邀請成員"
+    },
+    "autopilots": {
+      "all": "全部自動化",
+      "list": "自動化",
+      "templates": "從範本開始"
     }
+  },
+  "account": {
+    "trigger": "帳戶",
+    "profile": "個人資料",
+    "theme": "主題",
+    "themes": {
+      "light": "淺色",
+      "dark": "深色",
+      "system": "跟隨系統"
+    },
+    "language": "語言",
+    "shortcuts": "快捷鍵"
+  },
+  "collection": {
+    "filter": "篩選",
+    "filter_count_other": "{{count}} 個篩選",
+    "reset": "重設",
+    "display": "顯示設定",
+    "selected_other": "已選 {{count}} 項",
+    "clear_selection": "清除選擇",
+    "select_all": "全選",
+    "select_row": "選擇此列",
+    "row_actions": "更多操作",
+    "sort_by": "排序",
+    "direction_asc": "升序",
+    "direction_desc": "降序",
+    "section_columns": "欄",
+    "load_more": "載入更多",
+    "loading_more": "載入中…"
+  },
+  "object_page": {
+    "toggle_panel": "切換右側邊欄",
+    "properties": "屬性"
   }
 }

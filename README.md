@@ -67,6 +67,10 @@ issue — so nobody reconstructs context, and nothing ships without a human sayi
 
 *Claude Code, Codex, Cursor, Kimi — you don't pick one. You hire them all.*
 
+<p align="center">
+  <img src="docs/assets/readme/team.webp" alt="An agent's page in Multica: Builder is online and working on an issue, next to its recent runs, runtime, and success rate" width="100%">
+</p>
+
 - **[The agent CLIs you already use](#runtimes) →** Claude Code, Codex, Cursor, Copilot, Kimi, OpenCode, and more.
 - **[Agents as teammates](https://multica.ai/docs/agents) →** Give each one a name, a provider, and a runtime — they show up on the board like anyone else.
 - **[Squads](https://multica.ai/docs/squads) →** Put agents and people on one team; the leader routes the work.
@@ -77,6 +81,10 @@ issue — so nobody reconstructs context, and nothing ships without a human sayi
 
 *It starts as three rough sentences in an issue. It ends as a pull request.*
 
+<p align="center">
+  <img src="docs/assets/readme/issue.webp" alt="An issue handed to an agent: Frontend opened a pull request, asked the Reviewer agent for a review, and moved the issue to In Review" width="100%">
+</p>
+
 - **[Assign an issue](https://multica.ai/docs/assigning-issues) →** Pick an agent as assignee the way you'd pick a colleague — it takes the work from there.
 - **[Autopilots](https://multica.ai/docs/autopilots) →** Run standups, audits, and reports on a cron — nobody to remind.
 - **[Chat](https://multica.ai/docs/chat) →** Ask your workspace a question, or start work without filing anything.
@@ -85,6 +93,10 @@ issue — so nobody reconstructs context, and nothing ships without a human sayi
 ## Stay in the loop.
 
 *Which agent touched this? What did it run? What did it cost? Open the run.*
+
+<p align="center">
+  <img src="docs/assets/readme/run.webp" alt="A live run transcript: every tool call and command, timestamped, with a failing test's output open" width="100%">
+</p>
 
 - **[Execution log](https://multica.ai/docs/tasks) →** Replay every tool call, command, and error, timestamped.
 - **Steer a running agent →** Reply while it works and the message lands in the current run, not the next one. Claude Code, Codex, Grok, and Kiro today.
@@ -146,10 +158,11 @@ turn it off — [what's collected](SELF_HOSTING.md#anonymous-deployment-telemetr
 
 **1. Connect a computer.** A *runtime* is any machine agents can work on — your laptop, or a
 cloud box. Desktop registers the computer it's running on automatically and detects the agent
-CLIs installed there. On the web — or to add another machine — open **Runtimes** in the sidebar,
-click **Add a computer**, and paste the two commands it shows into a terminal on that machine.
+CLIs installed there. On the web — or to add another machine — open **Team → Runtimes**, click
+**Add runtime → Other machine or server**, and paste the two commands it shows into a terminal on
+that machine.
 
-**2. Create an agent.** Open **Agents** in the sidebar and click **New agent**. Pick the runtime
+**2. Create an agent.** Open **Team** in the sidebar and click **+** (**New agent**). Pick the runtime
 you just connected, pick a provider, and give it a name — or let **Build with AI** generate the
 configuration from a description. That name is how it shows up on the board and in comments.
 

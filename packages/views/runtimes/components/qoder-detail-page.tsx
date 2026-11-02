@@ -36,7 +36,13 @@ import {
   AlertDialogTitle,
 } from "@multica/ui/components/ui/alert-dialog";
 import { cn } from "@multica/ui/lib/utils";
-import { PAGE_GUTTER, PAGE_RAIL } from "../../layout/page-header";
+import { CollectionPageState } from "../../layout/collection-page";
+import {
+  OBJECT_PAGE_BODY,
+  ObjectIdentity,
+  ObjectPage,
+  ObjectSection,
+} from "../../layout/object-page";
 import { AppLink, useNavigation } from "../../navigation";
 import { createPathWithParams } from "../../agents/create/squad-param";
 import { useT } from "../../i18n";
@@ -50,12 +56,14 @@ import {
   savedQoderInput,
 } from "./qoder-connection-cards";
 import { QoderStatusBadge } from "./qoder-status-badge";
-import { ServingAgentsCard } from "./runtime-detail";
+import { ServingAgentList } from "./runtime-detail";
 import { UsageSection } from "./usage-section";
 import { parseActiveAgentsConflict } from "./delete-runtime-dialog";
 
 /** Route locator of the workspace's Qoder Cloud Agents page. */
 export const QODER_RUNTIME_LOCATOR = "qoder";
+
+const LAYOUT_ID = "multica_runtime_detail_layout";
 
 /**
  * Whether a runtimes route locator names Qoder: its own locator, the machine
@@ -92,25 +100,46 @@ export function QoderDetailPage() {
   const { data: members = [] } = useQuery(memberListOptions(wsId));
   const { byAgent: presenceMap } = useWorkspacePresenceMap(wsId);
 
-  if (connection.isPending || runtimesLoading) return <QoderPageSkeleton />;
+  const title = t(($) => $.qoder.cloud_title);
+  const segments = [{ href: paths.runtimes(), label: t(($) => $.page.title) }];
+  const leaf = (
+    <span className="flex min-w-0 items-center gap-1.5">
+      <ProviderLogo provider="qoder_cloud" className="size-3.5 shrink-0" />
+      <span className="truncate">{title}</span>
+    </span>
+  );
+
+  if (connection.isPending || runtimesLoading) {
+    return (
+      <ObjectPage layoutId={LAYOUT_ID} segments={segments} leaf={leaf}>
+        <QoderBodySkeleton />
+      </ObjectPage>
+    );
+  }
   const data = connection.data;
   if (connection.isError || data?.available !== true) {
     return (
-      <div className="flex flex-1 flex-col items-center justify-center gap-3 px-6 py-16 text-center">
-        <AlertCircle aria-hidden="true" className="size-8 text-destructive" />
-        <p className="max-w-md text-body">
-          {connection.isError
-            ? connection.error.message
-            : t(($) => $.qoder.unavailable)}
-        </p>
-        <Button
-          size="sm"
-          render={<AppLink href={paths.runtimes()} />}
-          nativeButton={false}
-        >
-          {t(($) => $.detail.all_runtimes)}
-        </Button>
-      </div>
+      <ObjectPage layoutId={LAYOUT_ID} segments={segments} leaf={leaf}>
+        <CollectionPageState
+          icon={AlertCircle}
+          tone="destructive"
+          title={
+            connection.isError
+              ? connection.error.message
+              : t(($) => $.qoder.unavailable)
+          }
+          actions={
+            <Button
+              size="sm"
+              variant="outline"
+              render={<AppLink href={paths.runtimes()} />}
+              nativeButton={false}
+            >
+              {t(($) => $.detail.all_runtimes)}
+            </Button>
+          }
+        />
+      </ObjectPage>
     );
   }
 
@@ -134,172 +163,144 @@ export function QoderDetailPage() {
     data.status === "online" &&
     runtime?.status === "online";
 
+  const failing = data.enabled && data.status === "error" && !!data.lastError;
+
   return (
-    <div className="flex min-h-0 flex-1 flex-col">
-      <QoderHeader
-        data={data}
-        agentCount={boundAgents.length}
-        action={
-          ready && runtime ? (
-            <Button
-              size="sm"
-              onClick={() =>
-                navigation.push(
-                  createPathWithParams(paths.newAgentManual(), {
-                    runtime: runtime.id,
-                  }),
-                )
-              }
+    <ObjectPage
+      layoutId={LAYOUT_ID}
+      segments={segments}
+      leaf={leaf}
+      actions={
+        ready && runtime ? (
+          <Button
+            size="sm"
+            onClick={() =>
+              navigation.push(
+                createPathWithParams(paths.newAgentManual(), {
+                  runtime: runtime.id,
+                }),
+              )
+            }
+          >
+            <Plus aria-hidden="true" className="size-3.5" />
+            {t(($) => $.qoder.create_agent)}
+          </Button>
+        ) : undefined
+      }
+    >
+      <div className={cn(OBJECT_PAGE_BODY, "space-y-8")}>
+        <div className="space-y-3">
+          <ObjectIdentity
+            media={
+              <div className="flex size-12 items-center justify-center rounded-xl border bg-muted/50">
+                <ProviderLogo provider="qoder_cloud" className="size-6" />
+              </div>
+            }
+            title={title}
+            trailing={<QoderStatusBadge connection={data} />}
+            description={
+              data.configured ? (
+                <QoderSummary data={data} agentCount={boundAgents.length} />
+              ) : undefined
+            }
+          />
+          {failing && (
+            <p
+              role="alert"
+              className="rounded-lg border border-destructive/20 bg-destructive/5 px-3 py-2 text-caption text-destructive"
             >
-              <Plus aria-hidden="true" className="size-3.5" />
-              {t(($) => $.qoder.create_agent)}
-            </Button>
-          ) : null
-        }
-      />
-      <div className="min-h-0 flex-1 overflow-y-auto bg-background">
-        <div
-          className={cn(
-            PAGE_RAIL,
-            PAGE_GUTTER,
-            "grid grid-cols-1 gap-4 py-4 sm:py-6 lg:grid-cols-[minmax(0,1fr)_320px]",
+              {data.lastError}
+            </p>
           )}
-        >
-          <div className="min-w-0 space-y-4">
-            {data.configured ? (
-              <>
-                <QoderConnectionCard wsId={wsId} data={data} canManage={isAdmin} />
-                <QoderRepositoriesCard
-                  wsId={wsId}
-                  data={data}
-                  canManage={isAdmin}
-                />
-              </>
-            ) : (
-              <QoderSection title={t(($) => $.qoder.page.configuration)}>
-                <div className="p-4">
-                  {isAdmin ? (
-                    <QoderConfiguration />
-                  ) : (
-                    <div className="py-6 text-center">
-                      <p className="text-body font-medium">
-                        {t(($) => $.qoder.page.not_connected_title)}
-                      </p>
-                      <p className="mt-1 text-caption text-muted-foreground">
-                        {t(($) => $.qoder.page.not_connected_hint)}
-                      </p>
-                    </div>
-                  )}
-                </div>
-              </QoderSection>
-            )}
-            {runtime && isRuntimeUsableForUser(runtime, userId) && (
-              <UsageSection runtime={runtime} />
-            )}
-          </div>
-          <div className="space-y-4">
-            <ServingAgentsCard
-              agents={boundAgents}
-              presenceMap={presenceMap}
-              agentHref={(id) => paths.agentDetail(id)}
-            />
-            {data.configured && (
-              <QoderLimitsCard wsId={wsId} data={data} canManage={isAdmin} />
-            )}
-            {isAdmin && data.configured && (
-              <ManageCard
-                wsId={wsId}
-                data={data}
-                boundAgents={boundAgents}
-                onDisconnected={() => {
-                  navigation.replace(paths.runtimes());
-                  toast.success(t(($) => $.qoder.disconnect_confirm.done));
-                }}
-              />
-            )}
-          </div>
         </div>
+
+        {data.configured ? (
+          <>
+            <QoderConnectionCard wsId={wsId} data={data} canManage={isAdmin} />
+            <QoderRepositoriesCard wsId={wsId} data={data} canManage={isAdmin} />
+          </>
+        ) : (
+          <QoderSection title={t(($) => $.qoder.page.configuration)}>
+            <div className="p-4">
+              {isAdmin ? (
+                <QoderConfiguration />
+              ) : (
+                <div className="py-6 text-center">
+                  <p className="text-body font-medium">
+                    {t(($) => $.qoder.page.not_connected_title)}
+                  </p>
+                  <p className="mt-1 text-caption text-muted-foreground">
+                    {t(($) => $.qoder.page.not_connected_hint)}
+                  </p>
+                </div>
+              )}
+            </div>
+          </QoderSection>
+        )}
+
+        <ObjectSection
+          title={t(($) => $.page.columns.agents)}
+          count={boundAgents.length}
+        >
+          <ServingAgentList
+            agents={boundAgents}
+            presenceMap={presenceMap}
+            agentHref={(id) => paths.agentDetail(id)}
+          />
+        </ObjectSection>
+
+        {data.configured && (
+          <QoderLimitsCard wsId={wsId} data={data} canManage={isAdmin} />
+        )}
+        {runtime && isRuntimeUsableForUser(runtime, userId) && (
+          <ObjectSection title={t(($) => $.detail.usage_title)}>
+            <UsageSection runtime={runtime} />
+          </ObjectSection>
+        )}
+        {isAdmin && data.configured && (
+          <ManageCard
+            wsId={wsId}
+            data={data}
+            boundAgents={boundAgents}
+            onDisconnected={() => {
+              navigation.replace(paths.runtimes());
+              toast.success(t(($) => $.qoder.disconnect_confirm.done));
+            }}
+          />
+        )}
       </div>
-    </div>
+    </ObjectPage>
   );
 }
 
-function QoderHeader({
+function QoderSummary({
   data,
   agentCount,
-  action,
 }: {
   data: QoderConnection;
   agentCount: number;
-  action: React.ReactNode;
 }) {
   const { t } = useT("runtimes");
-  const paths = useWorkspacePaths();
-  const title = t(($) => $.qoder.cloud_title);
   const region =
     data.baseUrl === QODER_REGIONS.cn
       ? t(($) => $.qoder.region_cn)
       : t(($) => $.qoder.region_global);
-  const failing = data.enabled && data.status === "error" && !!data.lastError;
   return (
-    <header className="shrink-0 border-b bg-background pb-5 pt-3">
-      <div className={cn(PAGE_RAIL, PAGE_GUTTER)}>
-        <div className="flex min-w-0 items-center gap-1.5 text-caption text-muted-foreground">
-          <AppLink
-            href={paths.runtimes()}
-            className="rounded-sm transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-          >
-            {t(($) => $.page.title)}
-          </AppLink>
-          <span aria-hidden="true">/</span>
-          <span className="truncate text-foreground">{title}</span>
-        </div>
-        <div className="mt-4 flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
-          <div className="flex min-w-0 items-start gap-4">
-            <div className="flex size-12 shrink-0 items-center justify-center rounded-xl border bg-card sm:size-14">
-              <ProviderLogo provider="qoder_cloud" className="size-6" />
-            </div>
-            <div className="min-w-0 pt-0.5">
-              <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5">
-                <h1 className="min-w-0 text-balance text-title-lg font-semibold tracking-tight sm:text-display-sm">
-                  {title}
-                </h1>
-                <QoderStatusBadge connection={data} />
-              </div>
-              {failing && (
-                <p role="alert" className="mt-1 text-body text-destructive">
-                  {data.lastError}
-                </p>
-              )}
-              {data.configured ? (
-                <div className="mt-1.5 flex flex-wrap items-center gap-x-1.5 gap-y-1 text-caption text-muted-foreground">
-                  <span>{region}</span>
-                  <span aria-hidden="true">·</span>
-                  <span>
-                    {t(($) => $.qoder.agent_count, { count: agentCount })}
-                  </span>
-                  <span aria-hidden="true">·</span>
-                  <span className="tabular-nums">
-                    {data.enabled && data.status === "online"
-                      ? t(($) => $.qoder.usage, {
-                          active: data.activeRuns,
-                          limit: data.maxConcurrency,
-                          queued: data.queuedRuns,
-                        })
-                      : t(($) => $.qoder.page.workload_idle)}
-                  </span>
-                </div>
-              ) : null}
-            </div>
-          </div>
-          {action && (
-            <div className="flex shrink-0 items-center gap-2 self-end lg:self-start">
-              {action}
-            </div>
-          )}
-        </div>
-      </div>
-    </header>
+    <span className="flex flex-wrap items-center gap-x-1.5">
+      <span>{region}</span>
+      <span aria-hidden="true">·</span>
+      <span>{t(($) => $.qoder.agent_count, { count: agentCount })}</span>
+      <span aria-hidden="true">·</span>
+      <span className="tabular-nums">
+        {data.enabled && data.status === "online"
+          ? t(($) => $.qoder.usage, {
+              active: data.activeRuns,
+              limit: data.maxConcurrency,
+              queued: data.queuedRuns,
+            })
+          : t(($) => $.qoder.page.workload_idle)}
+      </span>
+    </span>
   );
 }
 
@@ -556,24 +557,17 @@ export function DisconnectQoderDialog({
   );
 }
 
-function QoderPageSkeleton() {
+function QoderBodySkeleton() {
   return (
-    <div className="flex min-h-0 flex-1 flex-col">
-      <div className="border-b pb-5 pt-3">
-        <div className={cn(PAGE_RAIL, PAGE_GUTTER)}>
-          <Skeleton className="h-3 w-36" />
-          <div className="mt-4 flex items-start gap-4">
-            <Skeleton className="size-14 rounded-xl" />
-            <div className="flex-1">
-              <Skeleton className="h-7 w-64" />
-              <Skeleton className="mt-2 h-4 w-40" />
-            </div>
-          </div>
+    <div className={cn(OBJECT_PAGE_BODY, "space-y-8")}>
+      <div className="flex items-center gap-3">
+        <Skeleton className="size-12 rounded-xl" />
+        <div className="flex-1 space-y-2">
+          <Skeleton className="h-5 w-56" />
+          <Skeleton className="h-4 w-40" />
         </div>
       </div>
-      <div className={cn(PAGE_RAIL, PAGE_GUTTER, "py-6")}>
-        <Skeleton className="h-64 w-full rounded-lg" />
-      </div>
+      <Skeleton className="h-64 w-full rounded-lg" />
     </div>
   );
 }

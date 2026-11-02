@@ -14,8 +14,10 @@ import (
 	"context"
 	"errors"
 	"log/slog"
+	"strings"
 	"time"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 
 	"github.com/multica-ai/multica/server/internal/events"
@@ -41,6 +43,7 @@ var (
 	streamCopyNotStarted = copyFor(DefaultLocale).StreamNotStarted
 	streamCopyFailed     = copyFor(DefaultLocale).StreamFailed
 	streamCopyCancelled  = copyFor(DefaultLocale).StreamCancelled
+	streamCopyContinued  = copyFor(DefaultLocale).StreamContinued
 )
 
 // streamCloseTimeout bounds a closing frame written from a bus subscriber,
@@ -66,10 +69,20 @@ type taskLookup interface {
 // decide whether a failed run's notice belongs in the WeCom room at all.
 // outbound.go asks the same stamp about an answer, through its own
 // outboundQueries. Kept apart from taskLookup because the round matcher only
-// ever needs the row. *db.Queries satisfies it.
+// ever needs the row. It also reads a run's transcript for the bubble that
+// shows it (progress_route.go). *db.Queries satisfies it.
 type taskOrigin interface {
 	taskLookup
 	engine.ChannelProvenanceQueries
+	transcriptLookup
+}
+
+// identityLookup resolves the WeCom sender on an inbound message to the
+// Multica user behind them. It answers the only question the step list's
+// audience gate asks — is this person the bot's principal — and *db.Queries
+// satisfies it with the row the identity resolver already reads.
+type identityLookup interface {
+	GetChannelUserBindingByUserID(ctx context.Context, arg db.GetChannelUserBindingByUserIDParams) (db.ChannelUserBinding, error)
 }
 
 // TypingIndicatorManager opens a streaming bubble per round when messages are
@@ -90,6 +103,30 @@ type TypingIndicatorManager struct {
 	// in (language.go). nil closes every bubble in the deployment's.
 	languages languageLookup
 	log       *slog.Logger
+
+	// identities resolves the asker to a Multica user, which is what decides
+	// how much of a run a bubble may show. Nil puts every bubble on the
+	// closed tier, which shows no steps at all.
+	identities identityLookup
+
+	// taskSessions remembers which chat and which round a task belongs to, so
+	// a transcript arriving twice a second does not re-read the same row.
+	taskSessions *taskSessionCache
+
+	// progress carries every progress report — from this replica's bus or
+	// relayed from another — off the goroutine that delivered it, one run at
+	// a time (progress_route.go).
+	progress *progressLane
+
+	// guardAfter is when the manager hands a bubble over before the server's
+	// window strands it (streamGuardAfter). Zero or less disables the guard,
+	// which only tests that fire it themselves do.
+	guardAfter time.Duration
+
+	// trailAfter schedules the trailing refresh for steps the throttle held
+	// back (armTrailing). time.AfterFunc in production; nil disables it, and
+	// tests that drive it themselves swap in their own.
+	trailAfter func(time.Duration, func())
 }
 
 // TypingIndicatorConfig wires the manager. Senders and Streams are the same
@@ -120,6 +157,12 @@ type TypingIndicatorConfig struct {
 	// closed in: a 1:1 reads the asker's own Multica profile, a room the
 	// deployment's. Nil puts every bubble on the deployment's.
 	Languages languageLookup
+
+	// Identities resolves the WeCom sender to a Multica user, which is how the
+	// bubble decides whether the person reading it is the one who owns the
+	// run. Nil shows no steps to anyone — the bubble still opens and the
+	// answer still closes it, there is just nothing in between.
+	Identities identityLookup
 }
 
 var _ engine.TypingNotifier = (*TypingIndicatorManager)(nil)
@@ -130,14 +173,23 @@ func NewTypingIndicator(cfg TypingIndicatorConfig) *TypingIndicatorManager {
 	if logger == nil {
 		logger = slog.Default()
 	}
-	return &TypingIndicatorManager{
-		senders:    cfg.Senders,
-		streams:    cfg.Streams,
-		tasks:      cfg.Tasks,
-		deliveries: cfg.Deliveries,
-		languages:  cfg.Languages,
-		log:        logger,
+	if cfg.Identities == nil {
+		logger.Warn("wecom typing: no identity lookup wired; every bubble opens and closes with no steps shown in between")
 	}
+	m := &TypingIndicatorManager{
+		senders:      cfg.Senders,
+		streams:      cfg.Streams,
+		tasks:        cfg.Tasks,
+		deliveries:   cfg.Deliveries,
+		languages:    cfg.Languages,
+		identities:   cfg.Identities,
+		taskSessions: newTaskSessionCache(),
+		log:          logger,
+		guardAfter:   streamGuardAfter,
+		trailAfter:   func(d time.Duration, f func()) { time.AfterFunc(d, f) },
+	}
+	m.progress = newProgressLane(m.processProgress)
+	return m
 }
 
 // OnIngested paints a "working on it" bubble for the round this message
@@ -194,6 +246,10 @@ func (m *TypingIndicatorManager) OnIngested(ctx context.Context, inst engine.Res
 		// later, from an event that names a task and nobody else, long after
 		// this goroutine is gone.
 		Locale: localeFor(ctx, m.languages, inst.ID, chatType, msg.Source.SenderID),
+		// Same reason, and settled for THIS round only. Every later refresh
+		// reads it back off the handle rather than asking again, and the next
+		// round asks from scratch (levelFor).
+		Level: m.levelFor(ctx, inst, msg),
 	}
 	seq, verdict := m.streams.open(sessionID, h)
 	if verdict != roundOpened {
@@ -245,6 +301,71 @@ func (m *TypingIndicatorManager) OnIngested(ctx context.Context, inst engine.Res
 	// will be when its stream id is next written, and from here something owes
 	// it an ending — see RecordStreamOpened.
 	m.senders.recordOpened()
+	m.armGuard(sessionID, seq)
+}
+
+// levelFor decides how much of the run a new bubble may show, while the facts
+// it needs are still in hand: who asked, and where.
+//
+// One condition, stated two ways. The chat has to be a one-to-one, and the
+// person on the other end of it has to be the principal — on this branch, the
+// person who installed the bot. A group fails the first: the WeCom session key
+// for a room is the room, so every member reads the same bubble, and the person
+// who asked is one of several. A colleague's own chat fails the second:
+// private, but not to the principal.
+//
+// Everything unknown resolves to the closed tier. No lookup configured, no
+// sender id, a binding that is not there, a database that did not answer —
+// none of those prove the reader is the principal, and this is the side to be
+// wrong on. The cost of being wrong the other way is a file path in a chat
+// that cannot unsend it.
+//
+// ASKED AGAIN FOR EVERY ROUND, never once per session. Every input can change
+// between two questions in the same chat: a binding is revoked, or re-pointed
+// at a different person, and re-installing the bot moves InstallerUserID. An
+// answer cached for the session would keep showing one person's file paths and
+// search terms to whoever inherited the chat, for as long as the session
+// lasted.
+//
+// The cost is one indexed read per ingested message, beside the locale's,
+// which OnIngested already pays on the same row for the same reason. A message
+// that joins a round already waiting for its run pays it for nothing — this
+// runs before open() says which of the two happened — and that is the price of
+// deciding while the asker is still in hand, against a feature that writes a
+// frame every 1.5s once it starts.
+func (m *TypingIndicatorManager) levelFor(ctx context.Context, inst engine.ResolvedInstallation, msg channel.InboundMessage) progressLevel {
+	// Positively a one-to-one, not merely "not a group". aibotChatTypeFromChannel
+	// answers single for anything it does not recognise, which is the right
+	// default for ADDRESSING a frame — a wire field has to be one or the other
+	// — and the wrong one for deciding who may read a run's step detail. An
+	// unrecognised chat type (a kind WeCom adds later, a field that did not
+	// survive a decode) would be treated as private, and the cost of being
+	// wrong here is a file path or a search term in a room.
+	if msg.Source.ChatType != channel.ChatTypeP2P {
+		return progressLevelNone
+	}
+	if !inst.InstallerUserID.Valid || m.identities == nil {
+		return progressLevelNone
+	}
+	senderID := strings.TrimSpace(msg.Source.SenderID)
+	if senderID == "" {
+		return progressLevelNone
+	}
+	binding, err := m.identities.GetChannelUserBindingByUserID(ctx, db.GetChannelUserBindingByUserIDParams{
+		InstallationID: inst.ID,
+		ChannelUserID:  senderID,
+	})
+	if err != nil {
+		if !errors.Is(err, pgx.ErrNoRows) {
+			m.log.WarnContext(ctx, "wecom typing: cannot tell who is asking, showing no steps",
+				"installation_id", util.UUIDToString(inst.ID), "error", err)
+		}
+		return progressLevelNone
+	}
+	if binding.MulticaUserID != inst.InstallerUserID {
+		return progressLevelNone
+	}
+	return progressLevelDetail
 }
 
 // OnSettled closes the bubble of a round that never became a run — agent
@@ -288,6 +409,13 @@ func (m *TypingIndicatorManager) Register(bus *events.Bus) {
 	bus.Subscribe(protocol.EventTaskQueued, m.handleTaskQueued)
 	bus.Subscribe(protocol.EventTaskFailed, m.handleTaskFailed)
 	bus.Subscribe(protocol.EventTaskCancelled, m.handleTaskCancelled)
+	// Both lookups, because a report names a task and nothing else: the task
+	// row says which chat and which round, and the delivery row says whether
+	// the run is WeCom's at all (progressTarget).
+	if m.tasks != nil && m.deliveries != nil {
+		bus.Subscribe(protocol.EventTaskProgress, m.handleTaskProgress)
+		bus.Subscribe(protocol.EventTaskMessage, m.handleTaskMessage)
+	}
 }
 
 // handleTaskQueued binds a run to the bubble that is waiting for one. It is
@@ -717,8 +845,15 @@ type noticeRouter interface {
 // that is a coin toss on every multi-replica deployment, not an edge. main
 // routed the notice as an ordinary relayKindReply for exactly this reason; the
 // bubble took the notice off the answer's path and left the routing behind.
+//
+// It also makes this manager the one the relay hands progress frames to: a
+// report published by a replica that has no round for it reaches the replica
+// that does through the same relay, and is shown there (progress_route.go).
 func (m *TypingIndicatorManager) WithRelay(r noticeRouter) *TypingIndicatorManager {
 	m.relay = r
+	if a, ok := r.(progressAttacher); ok {
+		a.attachProgress(m)
+	}
 	return m
 }
 
@@ -884,11 +1019,126 @@ func taskIDFromEvent(e events.Event) string {
 	switch p := e.Payload.(type) {
 	case protocol.ChatDonePayload:
 		return p.TaskID
+	case protocol.TaskProgressPayload:
+		return p.TaskID
+	case protocol.TaskMessagePayload:
+		return p.TaskID
 	case map[string]any:
 		s, _ := p["task_id"].(string)
 		return s
 	}
 	return ""
+}
+
+// armGuard schedules the rotation that keeps a long run's bubble alive. WeCom
+// stops accepting frames for a stream past streamMaxAge, so a bubble that
+// outlives the window — a long run, or a round stuck in the queue behind one
+// — would otherwise become a spinner we can no longer touch. The guard acts on
+// exactly the round it was armed for, by the store's own sequence number: with
+// several bubbles open in one session, a timer that took the head could seal a
+// newer round's bubble with an older round's words. The sequence number is the
+// one name that is stable for the life of a round — the task bound to it
+// arrives later, and is given up again while an auto-retry clone replaces it.
+func (m *TypingIndicatorManager) armGuard(sessionID pgtype.UUID, seq roundSeq) {
+	if m.guardAfter <= 0 {
+		return
+	}
+	t := time.AfterFunc(m.guardAfter, func() {
+		ctx, cancel := context.WithTimeout(context.Background(), streamCloseTimeout)
+		defer cancel()
+		m.fireGuard(ctx, sessionID, seq)
+	})
+	m.streams.arm(sessionID, seq, t)
+}
+
+// fireGuard is what the timer does, kept apart from the timer so the guard's
+// behaviour has one definition and a test can run it without waiting out the
+// nine minutes.
+//
+// It ROTATES the round rather than ending it. The stream's ten-minute window
+// belongs to the stream, not to the req_id that carried it (streamMaxAge):
+// sealing this stream and opening a fresh one on the same req_id puts a second,
+// live bubble right under the first, and the run carries on into that one — a
+// run of any length keeps a bubble on screen, with nothing promised and
+// nothing owed. Sequential on purpose: the seal is written and acked before
+// the opener goes out, because two frames of one req_id in flight are answered
+// in whatever order the server likes (ws_sender.go).
+//
+// The store swaps the handle before either frame is written, so an answer that
+// arrives mid-rotation is addressed to the new stream — see streamStore.rotate
+// for why that order is the safe one.
+//
+// A verdict from the server on either frame ends the rotating: the round is
+// marked unusable and its answer goes out as a plain message. A round that was
+// never painted has nothing to seal and is left alone; the window bounds it.
+func (m *TypingIndicatorManager) fireGuard(ctx context.Context, sessionID pgtype.UUID, seq roundSeq) {
+	if m.senders == nil || m.streams == nil {
+		return
+	}
+	old, next, ok := m.streams.rotate(sessionID, seq, newStreamID())
+	if !ok {
+		return
+	}
+	// Both frames of the hand-over are frames of a reply, and each asks again
+	// whether the installation may still be written to (guardReply).
+	ctx = guardReply(ctx, m.deliveries, old.InstallationID)
+	if err := m.streams.seal(ctx, m.senders, old, copyFor(old.Locale).StreamContinued); err != nil {
+		switch {
+		case errors.Is(err, errNotAttempted):
+			// Refused before anything was written: the installation was
+			// revoked, its permission could not be read, or the chat's turn
+			// never came. The round keeps its new stream id, for the same
+			// reason as the case below, and no new bubble is opened under a
+			// hand-over that never happened.
+			m.log.InfoContext(ctx, "wecom typing: hand-over frame not written, leaving the round",
+				"chat_session_id", util.UUIDToString(sessionID), "error", err)
+			return
+		case streamUnusable(err):
+			m.streams.markUnusable(sessionID, next.StreamID)
+			m.log.WarnContext(ctx, "wecom typing: the server refused the hand-over frame, answering as a new message",
+				"chat_session_id", util.UUIDToString(sessionID), "error", err)
+			return
+		case errors.Is(err, errNoLiveConnection), errors.Is(err, context.Canceled), errors.Is(err, context.DeadlineExceeded):
+			// Nothing can be written right now. The round keeps the new
+			// stream id it was just given: a closing frame on a stream the
+			// server never saw opened still creates the message, so the
+			// answer lands either way, and the old bubble runs out on its
+			// own window.
+			m.log.DebugContext(ctx, "wecom typing: hand-over frame not written, leaving the round",
+				"chat_session_id", util.UUIDToString(sessionID), "error", err)
+			return
+		default:
+			// An ack that never came after every retry, or a transport error
+			// past the write: the old bubble may or may not be sealed, and
+			// either way the run goes on in the new one.
+			m.log.WarnContext(ctx, "wecom typing: hand-over frame unconfirmed, opening the next bubble anyway",
+				"chat_session_id", util.UUIDToString(sessionID), "error", err)
+		}
+	}
+	if err := m.senders.stream(ctx, next, streamThinkingPlaceholder, false); err != nil {
+		switch {
+		case errors.Is(err, errStreamAckTimeout):
+			// Same reading as OnIngested: the frame may have landed, and the
+			// closing frame creates the message if it did not.
+			m.log.DebugContext(ctx, "wecom typing: next bubble's opening frame did not land, keeping the handle",
+				"chat_session_id", util.UUIDToString(sessionID), "error", err)
+		case errors.Is(err, errStreamBusy), errors.Is(err, errStreamSuperseded):
+			// The answer got there first and sealed the new stream itself.
+			// Nothing left to open.
+			return
+		case errors.Is(err, errNoLiveConnection), errors.Is(err, errNotAttempted):
+			// Nothing written, and nothing the server said: the closing frame
+			// creates the message if this one never lands.
+			m.log.DebugContext(ctx, "wecom typing: next bubble's opening frame not written",
+				"chat_session_id", util.UUIDToString(sessionID), "error", err)
+		default:
+			m.streams.markUnusable(sessionID, next.StreamID)
+			m.log.WarnContext(ctx, "wecom typing: the server refused the next bubble, answering as a new message",
+				"chat_session_id", util.UUIDToString(sessionID), "error", err)
+			return
+		}
+	}
+	m.armGuard(sessionID, seq)
 }
 
 // writeClosing seals one bubble with text. Which bubble was decided by the

@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { I18nProvider } from "@multica/core/i18n/react";
-import type { ChatSession } from "@multica/core/types";
+import type { Agent, ChatSession } from "@multica/core/types";
 import enChat from "../../locales/en/chat.json";
 
 const updateMutate = vi.hoisted(() => vi.fn());
@@ -26,7 +26,9 @@ vi.mock("../../common/actor-avatar", () => ({
 }));
 
 vi.mock("../../navigation", () => ({
-  AppLink: ({ children }: { children: React.ReactNode }) => <a>{children}</a>,
+  AppLink: ({ children, href }: { children: React.ReactNode; href: string }) => (
+    <a href={href}>{children}</a>
+  ),
 }));
 
 import { ChatSessionHeader } from "./chat-session-header";
@@ -49,6 +51,38 @@ const session: ChatSession = {
   created_at: new Date(0).toISOString(),
   updated_at: new Date(0).toISOString(),
 };
+
+describe("ChatSessionHeader breadcrumb", () => {
+  it("leads with the agent as a link to its page, then the chat title", () => {
+    const agent = { id: "agent-1", name: "Lambda" } as Agent;
+    render(
+      <I18nProvider locale="en" resources={TEST_RESOURCES}>
+        <ChatSessionHeader session={session} agent={agent} />
+      </I18nProvider>,
+    );
+
+    const header = within(screen.getByRole("banner"));
+    const agentLink = header.getByRole("link", { name: "Lambda" });
+    expect(agentLink).toHaveAttribute("href", "/agents/agent-1");
+    const title = header.getByRole("button", { name: "Original title" });
+    expect(agentLink).not.toContainElement(title);
+    expect(
+      agentLink.compareDocumentPosition(title) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+  });
+
+  it("shows only the title when the chat's agent is unavailable", () => {
+    render(
+      <I18nProvider locale="en" resources={TEST_RESOURCES}>
+        <ChatSessionHeader session={session} agent={null} />
+      </I18nProvider>,
+    );
+
+    const header = within(screen.getByRole("banner"));
+    expect(header.queryByRole("link")).not.toBeInTheDocument();
+    expect(header.getByRole("button", { name: "Original title" })).toBeInTheDocument();
+  });
+});
 
 function startRename(): HTMLInputElement {
   render(

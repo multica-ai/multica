@@ -877,7 +877,7 @@
     "not_enabled_self_host_hint": "セルフホスト運用者の方は、詳細はプロジェクトの README を参照してください。",
     "preview_title": "Lark ボットの設置はまもなく利用可能になります",
     "preview_description": "この環境では Lark 接続が有効ではありません。管理者に連絡してください。",
-    "connected_bots": "接続済みのボット",
+    "connected_bots": "ボット",
     "loading": "読み込み中…",
     "empty_title": "まだボットが接続されていません",
     "empty_description_prefix": "このワークスペースのエージェントを開いて",
@@ -924,7 +924,7 @@
     "install_starting": "QR コードを準備しています…",
     "install_scan_hint": "Lark → スキャン → 新しい PersonalAgent を承認してください。",
     "install_open_link_fallback": "ここをタップして Lark で開く",
-    "install_success": "設置が完了しました — ボットはオンラインです。",
+    "install_success": "ボットを連携しました。Feishu/Lark でメッセージを送り、受信を確認してください。",
     "install_success_toast": "Lark ボットを設置しました",
     "install_open_link_fallback_feishu": "ここをタップして Feishu で開く",
     "install_open_link_fallback_lark": "ここをタップして Lark で開く",
@@ -941,7 +941,12 @@
     "install_error_installer_bind": "ボットは設置されましたが、Lark の身元情報を連携できませんでした。もう一度お試しいただくか、サポートにお問い合わせください。",
     "install_error_session_lost": "設置セッションが期限切れまたは失われました。もう一度スキャンしてやり直してください。",
     "install_error_forbidden": "このワークスペースに Lark ボットを設置する権限がなくなりました。ワークスペース管理者にお問い合わせください。",
-    "install_error_generic": "設置に失敗しました。もう一度お試しください。"
+    "install_error_generic": "設置に失敗しました。もう一度お試しください。",
+    "bound_label": "連携済み",
+    "inbound_pending": "連携済み・メッセージ確認待ち",
+    "inbound_verified": "メッセージ受信確認済み",
+    "inbound_pending_hint": "Feishu/Lark でこのボットにメッセージを送り、受信を確認してください。届かない場合は長時間接続、im.message.receive_v1 の購読、アプリの公開・承認状態を確認してください。既存の連携には確認記録がない場合があります。",
+    "inbound_verified_hint": "今回の連携で有効なメッセージを受信しました。継続的な接続、エージェントの実行、返信の成功を保証するものではありません。"
   },
   "composio": {
     "page_description": "エージェントが使えるアプリに接続します。",

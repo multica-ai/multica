@@ -1,36 +1,37 @@
 "use client";
 
 import { Fragment, type ReactNode } from "react";
-import { ArrowLeft, Check, X } from "@multica/ui/icons";
+import { Check, X } from "@multica/ui/icons";
 import { IconButton } from "@multica/ui/components/common/icon-button";
+import { Separator } from "@multica/ui/components/ui/separator";
 import { cn } from "@multica/ui/lib/utils";
+import { PageHeader } from "../../layout/page-header";
 import { useT } from "../../i18n";
 
 export type AgentCreateStep = 1 | 2 | 3;
 
+export const AGENT_CREATE_STEP_COUNT = 3;
+
 /**
- * Chrome shared by every agent-creation route: the back control, the flow
- * title, and the current step. Each route owns what "back" means, so the shell
- * takes a handler rather than deriving it.
+ * Chrome shared by every agent-creation route: the close control, the flow
+ * title, and where the route sits in runtime → configure → done. Each route
+ * owns what leaving means, so the shell takes a handler rather than deriving
+ * it.
  */
 export function AgentCreateShell({
   title,
   step,
   stepIndex,
-  onBack,
-  backDisabled = false,
-  closeIcon = false,
+  onClose,
   chips,
   children,
 }: {
   title: string;
+  /** Names the screen where there is no step position to show. */
   step: string;
   /** Position in runtime → configure → done. Omitted by off-path routes. */
   stepIndex?: AgentCreateStep;
-  onBack: () => void;
-  backDisabled?: boolean;
-  /** The flow is finished, so the control leaves it instead of going back. */
-  closeIcon?: boolean;
+  onClose: () => void;
   /** Right-aligned context badges (method, runtime). Hidden on small screens. */
   chips?: ReactNode;
   children: ReactNode;
@@ -38,37 +39,36 @@ export function AgentCreateShell({
   const { t } = useT("agents");
   return (
     <div className="flex min-h-0 flex-1 flex-col bg-background">
-      <header className="flex h-14 shrink-0 items-center gap-3 border-b px-5">
-        <IconButton
-          type="button"
-          variant="ghost"
-          size="icon"
-          onClick={onBack}
-          disabled={backDisabled}
-          label={
-            closeIcon
-              ? t(($) => $.creation_studio.close)
-              : t(($) => $.creation_studio.back)
-          }
-          tooltipSide="bottom"
-        >
-          {closeIcon ? (
-            <X className="size-4" aria-hidden="true" />
+      <PageHeader
+        leading={
+          <IconButton
+            label={t(($) => $.creation_studio.close)}
+            tooltipSide="bottom"
+            className="text-muted-foreground"
+            onClick={onClose}
+          >
+            <X />
+          </IconButton>
+        }
+      >
+        <div className="flex min-w-0 flex-1 items-center gap-3">
+          <h1 className="min-w-0 truncate text-body font-medium">{title}</h1>
+          <Separator
+            orientation="vertical"
+            className="data-vertical:h-4 data-vertical:self-center"
+          />
+          {stepIndex ? (
+            <CreateStepper active={stepIndex} />
           ) : (
-            <ArrowLeft className="size-4" aria-hidden="true" />
+            <p className="min-w-0 truncate text-body text-muted-foreground">{step}</p>
           )}
-        </IconButton>
-        <div className="min-w-0">
-          <h1 className="truncate text-body font-semibold">{title}</h1>
-          <p className="truncate text-caption text-muted-foreground">{step}</p>
         </div>
-        {chips || stepIndex ? (
-          <div className="ml-auto hidden items-center gap-4 text-caption text-muted-foreground sm:flex">
-            {chips ? <div className="flex items-center gap-2">{chips}</div> : null}
-            {stepIndex ? <CreateStepper active={stepIndex} /> : null}
+        {chips ? (
+          <div className="hidden shrink-0 items-center gap-2 text-caption text-muted-foreground sm:flex">
+            {chips}
           </div>
         ) : null}
-      </header>
+      </PageHeader>
       {children}
     </div>
   );
@@ -91,7 +91,7 @@ function CreateStepper({ active }: { active: AgentCreateStep }) {
   ];
   return (
     <ol
-      className="hidden items-center gap-2 lg:flex"
+      className="flex min-w-0 items-center gap-2 text-body text-muted-foreground"
       aria-label={t(($) => $.creation_studio.steps.aria)}
     >
       {labels.map((label, index) => {
@@ -101,25 +101,25 @@ function CreateStepper({ active }: { active: AgentCreateStep }) {
         return (
           <Fragment key={label}>
             {index > 0 ? (
-              <li aria-hidden="true" className="h-px w-5 bg-border" />
+              <li aria-hidden="true" className="hidden h-px w-8 bg-border md:block" />
             ) : null}
             <li
               aria-current={current ? "step" : undefined}
               className={cn(
-                "flex items-center gap-1.5",
-                current && "font-medium text-foreground",
+                "flex min-w-0 items-center gap-1.5",
+                current ? "font-medium text-foreground" : "hidden md:flex",
               )}
             >
               <span
                 className={cn(
-                  "flex size-[18px] items-center justify-center rounded-full border text-micro tabular-nums",
+                  "flex size-[18px] shrink-0 items-center justify-center rounded-full border text-micro tabular-nums",
                   current && "border-primary bg-primary text-primary-foreground",
                   done && "border-success/30 bg-success/10 text-success",
                 )}
               >
                 {done ? <Check className="size-3" aria-hidden="true" /> : number}
               </span>
-              {label}
+              <span className="truncate">{label}</span>
             </li>
           </Fragment>
         );
