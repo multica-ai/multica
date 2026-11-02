@@ -101,6 +101,7 @@
       "assignee_anyone": "Tout le monde",
       "assignee_me": "Moi",
       "assignee_my_agents": "Mes agents",
+      "assignee_me_and_my_agents": "Moi et mes agents",
       "reset": "Réinitialiser",
       "load_more": "Afficher plus",
       "show_less": "Afficher moins",

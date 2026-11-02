@@ -10,6 +10,7 @@ import (
 
 	"github.com/multica-ai/multica/server/internal/auth"
 	"github.com/multica-ai/multica/server/internal/testutil"
+	agentpkg "github.com/multica-ai/multica/server/pkg/agent"
 )
 
 func TestQoderConnectionSecrets(t *testing.T) {
@@ -284,18 +285,41 @@ func TestQoderStepLeaseReleasesDatabaseConnection(t *testing.T) {
 	testutil.Call(t, testHandler.StopQoderConnection, vcsHandlerRequest("POST", "/qoder/stop", nil, "")).Want(200)
 }
 
-func TestQoderQuickCreateUnsupported(t *testing.T) {
+func TestQoderQuickCreateLimits(t *testing.T) {
 	if testHandler == nil {
 		t.Skip("database not available")
 	}
-	for _, metadata := range []string{`{}`, `{"cli_version":"99.0.0"}`} {
-		runtimeID := dbfx.Runtime(t, "Qoder issue-only runtime", testutil.Cols{"provider": "qoder_cloud", "runtime_mode": "cloud", "metadata": metadata})
-		status, payload := testHandler.checkQuickCreateDaemonVersion(context.Background(), "issue", parseUUID(runtimeID))
-		if status != http.StatusUnprocessableEntity || payload["code"] != "agent_unavailable" {
-			t.Fatalf("Qoder quick-create should be unavailable, got %d: %v", status, payload)
+	ctx := context.Background()
+	qoderID := parseUUID(dbfx.Runtime(t, "Qoder quick-create limits runtime", testutil.Cols{"provider": "qoder_cloud", "runtime_mode": "cloud", "metadata": `{}`}))
+	for _, tc := range []struct {
+		name               string
+		squad, attachments bool
+		want               string
+	}{
+		{"squad", true, false, "lead a squad"},
+		{"attachments", false, true, "attachments"},
+	} {
+		status, payload := testHandler.checkQuickCreateQoderLimits(ctx, "issue", qoderID, tc.squad, tc.attachments)
+		if status != http.StatusUnprocessableEntity || payload["code"] != "agent_unavailable" || !strings.Contains(payload["reason"].(string), tc.want) {
+			t.Fatalf("%s: Qoder quick-create should be rejected, got %d: %v", tc.name, status, payload)
 		}
-		if !strings.Contains(payload["reason"].(string), "create the issue manually") {
-			t.Fatalf("missing actionable issue-only explanation: %v", payload)
+	}
+	if status, payload := testHandler.checkQuickCreateQoderLimits(ctx, "issue", qoderID, false, false); status != 0 {
+		t.Fatalf("plain Qoder quick-create should be accepted, got %d: %v", status, payload)
+	}
+	if status, payload := testHandler.checkQuickCreateQoderLimits(ctx, "issue", parseUUID(testRuntimeID), true, true); status != 0 {
+		t.Fatalf("daemon runtime should be accepted, got %d: %v", status, payload)
+	}
+}
+
+func TestQoderQuickCreateSkipsCLIVersionGate(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+	runtimeID := dbfx.Runtime(t, "Qoder quick-create runtime", testutil.Cols{"provider": "qoder_cloud", "runtime_mode": "cloud", "metadata": `{}`})
+	for _, minimum := range []string{agentpkg.MinQuickCreateCLIVersion, agentpkg.MinQuickCreateFieldsCLIVersion} {
+		if status, payload := testHandler.checkQuickCreateDaemonVersionAtLeast(context.Background(), "issue", parseUUID(runtimeID), minimum); status != 0 {
+			t.Fatalf("Qoder quick-create should not require a CLI version, got %d: %v", status, payload)
 		}
 	}
 }

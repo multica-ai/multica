@@ -83,6 +83,10 @@ type harness struct {
 	messages                []map[string]any
 	prompt                  string
 	sessionAgent            string
+	issue                   map[string]any
+	issueStatus             int
+	issueBody               string
+	issuePosts              int
 }
 
 func setup(t *testing.T) *harness {
@@ -95,7 +99,7 @@ func setup(t *testing.T) *harness {
 			t.Error("missing workspace")
 		}
 		auth := "Bearer multica-secret"
-		if strings.HasPrefix(r.URL.Path, "/api/issues/") {
+		if strings.HasPrefix(r.URL.Path, "/api/issues") {
 			auth = "Bearer mat_task"
 		}
 		if r.Header.Get("Authorization") != auth {
@@ -108,6 +112,17 @@ func setup(t *testing.T) *harness {
 		case strings.HasSuffix(r.URL.Path, "/tasks/claim"):
 			json.NewEncoder(w).Encode(map[string]any{"task": h.task})
 			h.task = nil
+		case r.URL.Path == "/api/issues" && r.Method == http.MethodPost:
+			h.issuePosts++
+			json.NewDecoder(r.Body).Decode(&h.issue)
+			if h.issueStatus != 0 {
+				w.WriteHeader(h.issueStatus)
+			}
+			if h.issueBody != "" {
+				io.WriteString(w, h.issueBody)
+			} else {
+				io.WriteString(w, `{"identifier":"MUL-7"}`)
+			}
 		case strings.HasPrefix(r.URL.Path, "/api/issues/"):
 			io.WriteString(w, `{"title":"Fix bug","description":"Use repository context"}`)
 		case strings.HasSuffix(r.URL.Path, "/status"):
@@ -233,6 +248,142 @@ func TestIssueRun(t *testing.T) {
 	}
 	if strings.Contains(string(data), "secret") {
 		t.Fatal("credential persisted")
+	}
+}
+func quickCreateTask(h *harness) {
+	h.task.IssueID = ""
+	h.task.QuickCreatePrompt = "fix the slow inbox"
+	h.task.QuickCreateDueDate = "2026-11-01"
+	h.task.ProjectID = "project-1"
+	h.task.Agent.ID = "agent-uuid"
+}
+func (h *harness) draft(text string) {
+	h.events = append(h.events, map[string]any{"id": "evt_reply", "type": "agent.message", "content": []map[string]string{{"type": "text", "text": text}}}, map[string]any{"id": "evt_idle", "type": "session.status_idle", "stop_reason": map[string]string{"type": "end_turn"}})
+}
+func TestQuickCreateRunCreatesIssue(t *testing.T) {
+	h := setup(t)
+	quickCreateTask(h)
+	ctx := context.Background()
+	if err := h.b.step(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if h.failure != nil || !strings.Contains(h.prompt, "fix the slow inbox") {
+		t.Fatalf("incorrect quick-create prompt: %s (failure %#v)", h.prompt, h.failure)
+	}
+	h.draft("```json\n{\"title\":\"Speed up inbox\",\"description\":\"Inbox loads slowly\",\"priority\":\"high\"}\n```")
+	if err := h.b.step(ctx); err != nil {
+		t.Fatal(err)
+	}
+	want := map[string]any{"title": "Speed up inbox", "description": "Inbox loads slowly", "priority": "high", "due_date": "2026-11-01", "project_id": "project-1", "assignee_type": "agent", "assignee_id": "agent-uuid", "origin_type": "quick_create", "origin_id": "task-1"}
+	for k, v := range want {
+		if h.issue[k] != v {
+			t.Fatalf("issue %s = %v, want %v (%#v)", k, h.issue[k], v, h.issue)
+		}
+	}
+	if !strings.Contains(fmt.Sprint(h.complete["output"]), "MUL-7") {
+		t.Fatalf("result: %#v", h.complete)
+	}
+}
+func TestQuickCreateWithoutDraftFails(t *testing.T) {
+	h := setup(t)
+	quickCreateTask(h)
+	ctx := context.Background()
+	if err := h.b.step(ctx); err != nil {
+		t.Fatal(err)
+	}
+	h.draft("I could not do it")
+	if err := h.b.step(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if h.issue != nil || h.complete != nil || !strings.Contains(fmt.Sprint(h.failure["error"]), "issue draft") {
+		t.Fatalf("unexpected report: %#v", h.failure)
+	}
+}
+func TestQuickCreateCredentialIsNotPersisted(t *testing.T) {
+	h := setup(t)
+	quickCreateTask(h)
+	ctx := context.Background()
+	if err := h.b.step(ctx); err != nil {
+		t.Fatal(err)
+	}
+	j, err := readJournal(h.b.path, "test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	h.b.state = j
+	h.draft(`{"title":"Speed up inbox"}`)
+	if err := h.b.step(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if h.issue != nil || !strings.Contains(fmt.Sprint(h.failure["error"]), "restarted") {
+		t.Fatalf("unexpected report: %#v", h.failure)
+	}
+}
+func TestQuickCreateAttachmentsFailBeforeExecution(t *testing.T) {
+	h := setup(t)
+	quickCreateTask(h)
+	h.task.QuickCreateAttachmentIDs = []string{"attachment-1"}
+	if err := h.b.step(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if h.creates != 0 || h.issuePosts != 0 || !strings.Contains(fmt.Sprint(h.failure["error"]), "attachments") {
+		t.Fatalf("quick-create attachment ignored: creates=%d posts=%d failure=%#v", h.creates, h.issuePosts, h.failure)
+	}
+}
+// lostCreate leaves a quick-create run whose first create request failed
+// after it was marked submitted, as when the response is lost.
+func lostCreate(t *testing.T, h *harness) {
+	t.Helper()
+	quickCreateTask(h)
+	ctx := context.Background()
+	if err := h.b.step(ctx); err != nil {
+		t.Fatal(err)
+	}
+	h.issueStatus = http.StatusBadGateway
+	h.draft(`{"title":"Speed up inbox"}`)
+	h.b.step(ctx)
+	if h.issuePosts != 1 || h.complete != nil || h.failure != nil {
+		t.Fatalf("first create should be retried: posts=%d complete=%#v failure=%#v", h.issuePosts, h.complete, h.failure)
+	}
+}
+func TestQuickCreateRetryAcceptsOwnDuplicate(t *testing.T) {
+	h := setup(t)
+	lostCreate(t, h)
+	h.issueStatus = http.StatusConflict
+	h.issueBody = `{"code":"active_duplicate_issue","error":"duplicate"}`
+	if err := h.b.step(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if h.failure != nil || !strings.Contains(fmt.Sprint(h.complete["output"]), "Speed up inbox") {
+		t.Fatalf("retry should complete: complete=%#v failure=%#v", h.complete, h.failure)
+	}
+}
+func TestQuickCreateRetryRejectsOtherConflict(t *testing.T) {
+	h := setup(t)
+	lostCreate(t, h)
+	h.issueStatus = http.StatusConflict
+	h.issueBody = `{"error":"the target status was archived"}`
+	if err := h.b.step(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if h.complete != nil || !strings.Contains(fmt.Sprint(h.failure["error"]), "rejected") {
+		t.Fatalf("non-duplicate conflict should fail: complete=%#v failure=%#v", h.complete, h.failure)
+	}
+}
+func TestQuickCreateRestartAfterSubmitAsksToCheck(t *testing.T) {
+	h := setup(t)
+	lostCreate(t, h)
+	j, err := readJournal(h.b.path, "test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	h.b.state = j
+	h.issueStatus = 0
+	if err := h.b.step(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if h.issuePosts != 1 || !strings.Contains(fmt.Sprint(h.failure["error"]), "check whether it was created") {
+		t.Fatalf("unexpected report: posts=%d failure=%#v", h.issuePosts, h.failure)
 	}
 }
 func TestChatRun(t *testing.T) {
