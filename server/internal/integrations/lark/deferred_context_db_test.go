@@ -39,6 +39,7 @@ func TestDeferredContextCrashRecoveryKeepsFallbackDB(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
+	fx.Cleanup(t, "DELETE FROM channel_task_delivery WHERE installation_id=$1", installationID)
 	fx.Cleanup(t, "DELETE FROM channel_chat_session_binding WHERE chat_session_id=$1", sessionID)
 	fx.Cleanup(t, "DELETE FROM channel_chat_context_generation WHERE chat_session_id=$1", sessionID)
 	fx.Cleanup(t, "DELETE FROM chat_message WHERE chat_session_id=$1", sessionID)
@@ -128,6 +129,10 @@ func TestDeferredClearPersistsFreshUntilNextTurnDB(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
+	fx.Cleanup(t, "DELETE FROM channel_task_delivery WHERE installation_id=$1", installationID)
+	fx.Cleanup(t, "DELETE FROM channel_chat_context_generation WHERE chat_session_id IN (SELECT id FROM chat_session WHERE agent_id=$1)", agentID)
+	fx.Cleanup(t, "DELETE FROM chat_message WHERE chat_session_id IN (SELECT id FROM chat_session WHERE agent_id=$1)", agentID)
+	fx.Cleanup(t, "DELETE FROM agent_task_queue WHERE agent_id=$1", agentID)
 	fx.Cleanup(t, "DELETE FROM channel_user_binding WHERE installation_id=$1", installationID)
 	fx.Cleanup(t, "DELETE FROM channel_chat_session_binding WHERE installation_id=$1", installationID)
 	fx.Cleanup(t, "DELETE FROM channel_inbound_dedup WHERE installation_id=$1", installationID)

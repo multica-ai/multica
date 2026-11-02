@@ -39,7 +39,8 @@ start after that context has expired. The enclosing media deadline bounds both
 metadata and resource work; cancellation propagates to the reads. A resolved
 text-only body is also persisted before the media fence is released.
 
-On timeout or shutdown, incomplete results cannot overwrite the durable fallback
+On expiration of the enclosing media deadline or shutdown, incomplete results
+cannot overwrite the durable fallback
 or bind partial references. Existing upload intents retain cleanup responsibility
 for unbound objects. If the process stops before finalization, the existing
 deferred-task scheduler resumes the accepted task at its stored deadline with
