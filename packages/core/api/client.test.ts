@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { createAuthStore } from "../auth";
 import { configStore } from "../config";
 import type { StorageAdapter, User } from "../types";
-import { ApiClient, ApiError, CHAT_DRAFT_RESTORE_CAPABILITY, clientErrorMessage } from "./client";
+import { ApiClient, ApiError, CHAT_DRAFT_RESTORE_CAPABILITY, clientErrorMessage, errorAllowedEmails } from "./client";
 import { EMPTY_PLUGIN_PACKAGE_LIST, EMPTY_PLUGIN_PREVIEW, EMPTY_PLUGIN_SURFACE_LAUNCH } from "./schemas";
 
 afterEach(() => {
@@ -2770,6 +2770,28 @@ describe("importSkillArchive", () => {
       message: "a skill with this name already exists",
       status: 409,
     });
+  });
+});
+
+describe("errorAllowedEmails", () => {
+  it("reads the allowlist a create-workspace refusal carries", () => {
+    const refusal = new ApiError(
+      "workspace creation is restricted",
+      403,
+      "Forbidden",
+      { code: "workspace_creation_restricted", allowed_emails: ["alice@example.com", "bob@example.com"] },
+    );
+    expect(errorAllowedEmails(refusal)).toEqual(["alice@example.com", "bob@example.com"]);
+  });
+
+  it("returns an empty list when the server did not send one", () => {
+    // Older servers only sent the sentence, and 5xx bodies carry internal detail.
+    expect(errorAllowedEmails(new ApiError("forbidden", 403, "Forbidden"))).toEqual([]);
+    expect(
+      errorAllowedEmails(new ApiError("forbidden", 403, "Forbidden", { allowed_emails: "nope" })),
+    ).toEqual([]);
+    expect(errorAllowedEmails(new TypeError("Failed to fetch"))).toEqual([]);
+    expect(errorAllowedEmails(undefined)).toEqual([]);
   });
 });
 

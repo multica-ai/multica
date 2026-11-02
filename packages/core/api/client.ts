@@ -624,6 +624,22 @@ export function errorCode(err: unknown): string | undefined {
   return undefined;
 }
 
+// errorAllowedEmails reads the allowlist a "workspace_creation_restricted"
+// refusal carries, so the create-workspace UI can name who can act in the
+// caller's place instead of leaving them to guess. Returns an empty array for
+// a non-ApiError, a body without the field, or an older server that sent only
+// the human-readable sentence.
+export function errorAllowedEmails(err: unknown): string[] {
+  if (!(err instanceof ApiError) || !err.body || typeof err.body !== "object") {
+    return [];
+  }
+  const emails = (err.body as { allowed_emails?: unknown }).allowed_emails;
+  if (!Array.isArray(emails)) return [];
+  return emails.filter(
+    (email): email is string => typeof email === "string" && email.length > 0,
+  );
+}
+
 // dispatchReasonCode extracts the stable, machine-readable admission reason
 // (MUL-4525) from a blocked-trigger error's structured body, when present. UI
 // callers localize a blocked/partial trigger from this code instead of pattern

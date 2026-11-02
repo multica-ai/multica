@@ -3,6 +3,7 @@ export {
   ApiError,
   clientErrorMessage,
   dispatchReasonCode,
+  errorAllowedEmails,
   errorCode,
   PreviewTooLargeError,
   PreviewUnsupportedError,
