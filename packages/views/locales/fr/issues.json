@@ -565,7 +565,8 @@
   },
   "timeline": {
     "loading": "Chargement...",
-    "jump_to_latest": "Aller au plus récent"
+    "jump_to_latest": "Aller au plus récent",
+    "back_to_top": "Revenir en haut"
   },
   "activity": {
     "created": "a créé cette tâche",

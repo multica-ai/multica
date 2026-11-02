@@ -34,6 +34,7 @@ import {
   Unlink,
   Users,
   ArrowDown,
+  ArrowUp,
 } from "@multica/ui/icons";
 import { BreadcrumbHeader, type BreadcrumbSegment } from "../../layout/breadcrumb-header";
 import { Skeleton } from "@multica/ui/components/ui/skeleton";
@@ -185,6 +186,7 @@ import { IssueSidebarSectionHeader, IssueSidebarStack, IssueSidebarPropertyGrid 
 import { useT } from "../../i18n";
 import { useIssueDetailScrollRestore } from "../hooks/use-issue-detail-scroll-restore";
 import { useJumpToLatest } from "../hooks/use-jump-to-latest";
+import { useBackToTop } from "../hooks/use-back-to-top";
 import { useInPageFind } from "../hooks/use-in-page-find";
 import { useStickyComposer } from "../hooks/use-sticky-composer";
 import { FindBar } from "./find-bar";
@@ -584,11 +586,40 @@ function JumpToLatestButton({ onClick, label }: { onClick: () => void; label: st
       variant="outline"
       size="sm"
       onClick={onClick}
-      className="absolute bottom-full left-1/2 mb-6 -translate-x-1/2 rounded-full bg-background shadow-md dark:bg-background dark:hover:bg-muted"
+      className="rounded-full bg-background shadow-md dark:bg-background dark:hover:bg-muted"
     >
       <ArrowDown />
       {label}
     </Button>
+  );
+}
+
+function BackToTopButton({ onClick, label }: { onClick: () => void; label: string }) {
+  return (
+    <Button
+      type="button"
+      variant="outline"
+      size="sm"
+      onClick={onClick}
+      className="rounded-full bg-background shadow-md dark:bg-background dark:hover:bg-muted"
+    >
+      <ArrowUp />
+      {label}
+    </Button>
+  );
+}
+
+// The centered stack of timeline-jump pills floating just above the
+// composer's top edge (MUL-8324). "Back to top" and "Jump to latest" are the
+// two ends of the same gesture, so they share the slot: their visibility
+// zones are complementary — back to top appears a viewport deep, jump to
+// latest only while still near the top — and on pages longer than five
+// viewports the narrow band where both apply stacks them with a gap.
+function TimelineJumpPills({ children }: { children: ReactNode }) {
+  return (
+    <div className="absolute bottom-full left-1/2 mb-6 flex -translate-x-1/2 flex-col items-center gap-2">
+      {children}
+    </div>
   );
 }
 
@@ -1461,6 +1492,9 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
   // ThreadMinimap rail, which is not rendered below `md`. Passing null keeps
   // the hook's scroll and resize listeners off on desktop.
   const jumpToLatest = useJumpToLatest(isMobile ? scrollContainerEl : null);
+  // All platforms: unlike "Jump to latest", the ThreadMinimap rail has no
+  // tick for the top of the document, and it is not rendered on mobile.
+  const backToTop = useBackToTop(scrollContainerEl);
 
   // Per-session: which resolved threads the user has temporarily expanded.
   // Not persisted (matches Linear) — reload collapses everything back to bars.
@@ -3940,13 +3974,22 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
               page background and is invisible), and pb-4 so the card floats
               off the viewport edge — with -mb-4 giving the padding back to
               the column's py-8 so the at-rest layout doesn't shift. */}
-          {/* "Jump to latest" (MUL-8324, mobile only) floats centered just above the
-              composer's top edge. With the sticky composer it rides the
+          {/* Timeline-jump pills (MUL-8324 and its mirror) float centered
+              just above the composer's top edge. "Jump to latest" is mobile
+              only (desktop reaches threads through the minimap rail); "Back
+              to top" runs everywhere. With the sticky composer they ride the
               composer itself; without it, a zero-height sticky anchor pins
-              it to the viewport bottom until the composer scrolls in. */}
-          {!stickyComposer && jumpToLatest.visible && (
+              them to the viewport bottom until the composer scrolls in. */}
+          {!stickyComposer && (jumpToLatest.visible || backToTop.visible) && (
             <div className="sticky bottom-0 z-10 h-0">
-              <JumpToLatestButton onClick={jumpToLatest.jump} label={t(($) => $.timeline.jump_to_latest)} />
+              <TimelineJumpPills>
+                {backToTop.visible && (
+                  <BackToTopButton onClick={backToTop.toTop} label={t(($) => $.timeline.back_to_top)} />
+                )}
+                {jumpToLatest.visible && (
+                  <JumpToLatestButton onClick={jumpToLatest.jump} label={t(($) => $.timeline.jump_to_latest)} />
+                )}
+              </TimelineJumpPills>
             </div>
           )}
           <div
@@ -3962,8 +4005,15 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
                 keeps the previous issue's in-memory content and the
                 next keystroke would flush it into the new issue's
                 draft key. */}
-            {stickyComposer && jumpToLatest.visible && (
-              <JumpToLatestButton onClick={jumpToLatest.jump} label={t(($) => $.timeline.jump_to_latest)} />
+            {stickyComposer && (jumpToLatest.visible || backToTop.visible) && (
+              <TimelineJumpPills>
+                {backToTop.visible && (
+                  <BackToTopButton onClick={backToTop.toTop} label={t(($) => $.timeline.back_to_top)} />
+                )}
+                {jumpToLatest.visible && (
+                  <JumpToLatestButton onClick={jumpToLatest.jump} label={t(($) => $.timeline.jump_to_latest)} />
+                )}
+              </TimelineJumpPills>
             )}
             <CommentInput
               key={id}

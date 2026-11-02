@@ -557,7 +557,8 @@
   },
   "timeline": {
     "loading": "載入中…",
-    "jump_to_latest": "跳到最新"
+    "jump_to_latest": "跳到最新",
+    "back_to_top": "回到頂部"
   },
   "activity": {
     "created": "建立了這個任務",
