@@ -27,6 +27,7 @@ import { OfficeAgentPanel, type OfficeAgentTarget } from "./office-agent-panel";
 import { OfficeCanvas, type WorkerSession } from "./office-canvas";
 import { OfficeBoardButton } from "./office-board-button";
 import { OfficeBoardDialog } from "./office-board-dialog";
+import { OfficeBriefButton } from "./office-brief-button";
 import { OfficeRoomOverlays } from "./office-room-overlays";
 import { OfficeSeatBanner, OfficeUnseatedTray } from "./office-unseated-tray";
 import { OfficeSquadPanel } from "./office-squad-panel";
@@ -188,6 +189,7 @@ function OfficeScene({ issues, visibleStatuses, projectId }: BoardViewProps) {
         canManage={canManage}
         onSelect={selectFloor}
       >
+        <OfficeBriefButton />
         {pending.length > 0 ? (
           <Button type="button" variant="outline" size="sm" onClick={() => setDecisionsOpen(true)}>
             {t(($) => $.office.decisions_open)}

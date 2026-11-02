@@ -74,6 +74,9 @@ class FakeWorker {
 
 vi.mock("@multica/core/hooks", () => ({ useWorkspaceId: () => "ws-1" }));
 
+// The brief has its own tests; here it is not under test.
+vi.mock("./office-brief-button", () => ({ OfficeBriefButton: () => null }));
+
 // The panel has its own tests; here it only reports who it was opened for.
 vi.mock("./office-agent-panel", () => ({
   OfficeAgentPanel: ({ target, onClose }: { target: { agentId: string; issueId?: string } | null; onClose: () => void }) =>
