@@ -137,3 +137,27 @@ func TestNativeHistoryOutputBudget(t *testing.T) {
 		t.Fatalf("bytes=%d note=%q err=%v", total, note, err)
 	}
 }
+
+// The official list contract allows topic roots in a normal group's chat
+// container. Such rows must not suppress the independent main conversation.
+func TestNativeHistoryLinearMixedTopicRoots(t *testing.T) {
+	trigger := nativeMessage("trigger", "4000")
+	trigger.ThreadID = ""
+	plain := nativeMessage("plain", "2000")
+	plain.ThreadID = ""
+	start := nativeMessage("start", "1000")
+	start.ThreadID = ""
+	root := nativeMessage("topic-root", "3000")
+	root.Content = `{"text":"private topic text"}`
+	f := &nativePages{pages: []NativeHistoryPage{{Messages: []LarkMessage{trigger, root, plain, start}}}}
+	p, note, err := readNativeWindow(context.Background(), f, InstallationCredentials{}, nativeHistoryTarget{chatID: "oc_chat", trigger: "trigger", start: "start"}, 10)
+	if err != nil || len(p.Messages) != 3 || p.Messages[1].ID != "plain" || strings.Contains(fmt.Sprint(p.Messages), "private topic text") || !strings.Contains(strings.ToLower(note), "topic roots") {
+		t.Fatalf("page=%+v note=%q err=%v", p, note, err)
+	}
+	// Filtering topic roots cannot mask a real cross-chat response.
+	f.calls = 0
+	f.pages[0].Messages[1].ChatID = "oc_other"
+	if p, _, err = readNativeWindow(context.Background(), f, InstallationCredentials{}, nativeHistoryTarget{chatID: "oc_chat", trigger: "trigger", start: "start"}, 10); err == nil || len(p.Messages) != 0 {
+		t.Fatalf("cross-chat root accepted: %+v %v", p, err)
+	}
+}

@@ -44,9 +44,6 @@ func (c *httpAPIClient) ListNativeHistoryPage(ctx context.Context, creds Install
 	if err != nil || len(body) > maxBody {
 		return NativeHistoryPage{}, errors.New("native history response exceeds read budget")
 	}
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return NativeHistoryPage{}, errors.New("native history HTTP status " + strconv.Itoa(resp.StatusCode))
-	}
 	var envelope struct {
 		Code *int `json:"code"`
 		Data struct {
@@ -55,7 +52,16 @@ func (c *httpAPIClient) ListNativeHistoryPage(ctx context.Context, creds Install
 			PageToken string                `json:"page_token"`
 		} `json:"data"`
 	}
-	if json.Unmarshal(body, &envelope) != nil || envelope.Code == nil || *envelope.Code != 0 {
+	decodeErr := json.Unmarshal(body, &envelope)
+	// Only documented access refusals on successful/business-error responses
+	// establish unavailability. Unknown codes and 5xx remain read failures.
+	if decodeErr == nil && envelope.Code != nil && (resp.StatusCode >= 200 && resp.StatusCode < 300 || resp.StatusCode == 400 || resp.StatusCode == 403) && nativeHistoryAccessRefused(*envelope.Code) {
+		return NativeHistoryPage{}, ErrNativeHistoryUnavailable
+	}
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return NativeHistoryPage{}, errors.New("native history HTTP status " + strconv.Itoa(resp.StatusCode))
+	}
+	if decodeErr != nil || envelope.Code == nil || *envelope.Code != 0 {
 		return NativeHistoryPage{}, errors.New("native history refused or malformed response")
 	}
 	d := envelope.Data
@@ -67,4 +73,15 @@ func (c *httpAPIClient) ListNativeHistoryPage(ctx context.Context, creds Install
 		out.Messages = append(out.Messages, item.normalize())
 	}
 	return out, nil
+}
+
+// These access/visibility restrictions are documented at:
+// https://open.feishu.cn/document/server-docs/im-v1/message/list
+func nativeHistoryAccessRefused(code int) bool {
+	switch code {
+	case 230002, 230006, 230013, 230027, 230073, 230110, 231203, 231204:
+		return true
+	default:
+		return false
+	}
 }

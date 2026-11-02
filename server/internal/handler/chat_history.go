@@ -14,6 +14,7 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 
 	"github.com/multica-ai/multica/server/internal/integrations/channel"
+	"github.com/multica-ai/multica/server/internal/integrations/lark"
 	"github.com/multica-ai/multica/server/internal/integrations/slack"
 	"github.com/multica-ai/multica/server/internal/logger"
 	"github.com/multica-ai/multica/server/internal/util"
@@ -220,6 +221,11 @@ func (h *Handler) GetChatThread(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		page, note, err := h.LarkHistory.Current(r.Context(), scope.taskID, parseHistoryLimit(r.URL.Query().Get("limit")))
+
+		if errors.Is(err, lark.ErrNativeHistoryUnavailable) {
+			writeJSON(w, http.StatusOK, ChatChannelHistoryResponse{ChannelType: "feishu", Messages: []channel.HistoryMessage{}, Note: "Native Feishu history is unavailable to this application for the current conversation/topic. Do not retry this read in this task. Use chat history for the saved transcript or ask for the missing context."})
+			return
+		}
 		if err != nil {
 			h.respondChatHistory(w, r, scope.sessionID, page, err)
 			return

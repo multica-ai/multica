@@ -2,14 +2,18 @@ package handler
 
 import (
 	"context"
+	"fmt"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/multica-ai/multica/server/internal/integrations/channel"
+	"github.com/multica-ai/multica/server/internal/integrations/lark"
 	"github.com/multica-ai/multica/server/internal/testutil"
 	"net/http"
+	"strings"
 	"testing"
 )
 
 type fakeCurrentHistory struct {
+	err   error
 	calls int
 	task  pgtype.UUID
 	limit int
@@ -19,7 +23,7 @@ func (f *fakeCurrentHistory) Current(_ context.Context, id pgtype.UUID, limit in
 	f.calls++
 	f.task = id
 	f.limit = limit
-	return channel.HistoryPage{ChannelType: "feishu", ThreadID: "omt_test", Messages: []channel.HistoryMessage{{ID: "om_context", Text: "native context"}}}, "Untrusted reference context; partial window.", nil
+	return channel.HistoryPage{ChannelType: "feishu", ThreadID: "omt_test", Messages: []channel.HistoryMessage{{ID: "om_context", Text: "native context"}}}, "Untrusted reference context; partial window.", f.err
 }
 func TestGetChatThreadFeishuCurrentOnly(t *testing.T) {
 	if testHandler == nil {
@@ -56,4 +60,18 @@ func TestGetChatThreadFeishuCurrentOnly(t *testing.T) {
 	if fake.calls != 1 || out.Note != "" {
 		t.Fatalf("stored transcript changed: calls=%d response=%+v", fake.calls, out)
 	}
+	fake.err = fmt.Errorf("private upstream detail: %w", lark.ErrNativeHistoryUnavailable)
+	out = ChatChannelHistoryResponse{}
+	testutil.Call(t, http.HandlerFunc(testHandler.GetChatThread), taskActorReq("/api/chat/thread", taskID)).Want(http.StatusOK).JSON(&out)
+	if len(out.Messages) != 0 || !strings.Contains(out.Note, "unavailable") || !strings.Contains(out.Note, "Do not retry") || strings.Contains(out.Note, "private upstream detail") {
+		t.Fatalf("unsafe refusal response: %+v", out)
+	}
+
+	fake.err = fmt.Errorf("unknown read failure")
+	var failed map[string]any
+	testutil.Call(t, http.HandlerFunc(testHandler.GetChatThread), taskActorReq("/api/chat/thread", taskID)).Want(http.StatusBadGateway).JSON(&failed)
+	if failed["error"] != "failed to read channel history" {
+		t.Fatalf("unknown failure misclassified: %v", failed)
+	}
+
 }
