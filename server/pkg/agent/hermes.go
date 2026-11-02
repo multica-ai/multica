@@ -600,6 +600,7 @@ func (b *hermesBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 			default:
 			}
 		},
+		onUsage: opts.OnUsage,
 	}
 
 	// Start reading stdout in background.
@@ -772,6 +773,14 @@ func (b *hermesBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 		}
 
 		c.sessionID = sessionID
+		// Fix the usage key for the whole run here, once the handshake has
+		// settled on the model the session actually runs on: the mid-run
+		// snapshots below and the terminal usage map must land on the same
+		// (provider, model) row, or the server's per-model upsert would count
+		// the run twice.
+		c.usageMu.Lock()
+		c.usageModel = effectiveModel
+		c.usageMu.Unlock()
 		b.cfg.Logger.Info("hermes session created", "session_id", sessionID)
 		// 3. If the caller picked a model (via agent.model from the
 		// UI dropdown), ask hermes to switch the session to it
@@ -1167,6 +1176,13 @@ type hermesClient struct {
 	sessionID    string
 	onMessage    func(Message)
 	onPromptDone func(hermesPromptResult)
+	// onUsage mirrors the run's cumulative usage to the daemon while the turn is
+	// live (agent.ExecOptions.OnUsage). Nil means the caller does not meter live.
+	onUsage func(map[string]TokenUsage)
+	// usageModel is the model id the terminal usage map is keyed by, captured
+	// once the session handshake settles so a mid-run snapshot lands on the same
+	// (provider, model) row the terminal report writes instead of a second one.
+	usageModel string
 	// selectPermission lets an ACP dialect narrow the generic headless
 	// permission policy. Reasonix uses this to reject user questions and
 	// fresh-human approvals that also happen to carry allow_once options.
@@ -2433,11 +2449,18 @@ func extractACPToolCallText(blocks []json.RawMessage) string {
 func (c *hermesClient) handleUsageUpdate(data json.RawMessage) {
 	var msg struct {
 		Usage json.RawMessage `json:"usage"`
+		// Hermes' cumulative per-run counters arrive on the ACP extensibility
+		// key: the standard `usage_update` carries only `size`/`used`, so
+		// `_meta.usage` is the only place those counters can reach the daemon
+		// mid-run. Same `_meta`-aware shape extractPromptResult already uses.
+		Meta json.RawMessage `json:"_meta"`
 	}
 	if err := json.Unmarshal(data, &msg); err != nil {
 		return
 	}
-	c.mergeUsage(parseACPTokenUsageSnapshot(msg.Usage))
+	c.mergeUsage(parseACPTokenUsageSnapshot(msg.Usage).
+		withFallback(parseACPTokenUsageSnapshotFromMeta(msg.Meta)))
+	c.notifyUsage()
 }
 
 func (c *hermesClient) mergeUsage(usage acpUsageSnapshot) {
@@ -2450,6 +2473,35 @@ func (c *hermesClient) accumulatedUsage() TokenUsage {
 	c.usageMu.Lock()
 	defer c.usageMu.Unlock()
 	return c.usage.TokenUsage
+}
+
+// liveUsage is the mid-run view of the accumulator the terminal Result.Usage is
+// built from, keyed the same way so both reports upsert one (provider, model)
+// row. Nil means nothing is known yet: a run that has not completed a provider
+// call has to stay unknown on the board, not a reported zero.
+func (c *hermesClient) liveUsage() map[string]TokenUsage {
+	c.usageMu.Lock()
+	usage, model := c.usage.TokenUsage, c.usageModel
+	c.usageMu.Unlock()
+	if !acpUsagePresent(usage) {
+		return nil
+	}
+	if model == "" {
+		model = "unknown"
+	}
+	return map[string]TokenUsage{model: usage}
+}
+
+// notifyUsage passes the current snapshot to the daemon's live metering sink.
+// This runs on the stdout reader goroutine, so the callback is the daemon's own
+// non-blocking recorder — see agent.ExecOptions.OnUsage.
+func (c *hermesClient) notifyUsage() {
+	if c.onUsage == nil {
+		return
+	}
+	if usage := c.liveUsage(); usage != nil {
+		c.onUsage(usage)
+	}
 }
 
 // ── Helpers ──

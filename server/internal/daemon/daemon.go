@@ -8907,6 +8907,19 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 	d.reportThinkingLevelWarning(ctx, task.ID, selection.ThinkingLevelWarning, &msgSeq, taskLog)
 	outputObserver := &taskOutputObserver{}
 	ctx = withTaskOutputObserver(ctx, outputObserver)
+	// STOE-30: mirror the agent's cumulative token counters into task_usage
+	// while the run is live, so a long run's cost moves on the board instead of
+	// appearing only after it ends. The backend calls OnUsage from its protocol
+	// reader goroutine, so this records the latest snapshot only; the flush
+	// goroutine owns the HTTP call and its cadence.
+	var liveUsage atomic.Value // []TaskUsageEntry
+	execOpts.OnUsage = func(usage map[string]agent.TokenUsage) {
+		if entries := taskUsageEntries(provider, usage); len(entries) > 0 {
+			liveUsage.Store(entries)
+		}
+	}
+	stopUsageFlush := d.startUsageFlush(ctx, task.ID, &liveUsage, taskLog)
+	defer stopUsageFlush()
 	result, tools, err := d.executeAndDrain(ctx, backend, prompt, execOpts, taskLog, task.ID, env.CodexHome, &msgSeq)
 	if err != nil {
 		return TaskResult{}, err
@@ -9018,22 +9031,9 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		"agent_error", result.Error,
 	)
 
-	// Convert agent usage map to task usage entries.
-	var usageEntries []TaskUsageEntry
-	for model, u := range result.Usage {
-		if u.InputTokens == 0 && u.OutputTokens == 0 && u.CacheReadTokens == 0 && u.CacheWriteTokens == 0 && u.CostUSDTicks <= 0 {
-			continue
-		}
-		usageEntries = append(usageEntries, TaskUsageEntry{
-			Provider:         provider,
-			Model:            model,
-			InputTokens:      u.InputTokens,
-			OutputTokens:     u.OutputTokens,
-			CacheReadTokens:  u.CacheReadTokens,
-			CacheWriteTokens: u.CacheWriteTokens,
-			CostUSDTicks:     u.CostUSDTicks,
-		})
-	}
+	// Convert agent usage map to task usage entries. Same conversion the live
+	// flush above uses, so both reports write the same rows.
+	usageEntries := taskUsageEntries(provider, result.Usage)
 
 	// MUL-5305: withhold a Codex session whose rollout never reached the per-issue
 	// store, for ANY terminal state — including `completed`, since a completed
@@ -9513,6 +9513,78 @@ func freshSessionMayHelp(errText string) bool {
 	default:
 		return true
 	}
+}
+
+// taskUsageEntries converts a backend's per-model usage map into the rows the
+// server upserts. A model whose buckets are all zero is skipped rather than
+// written as 0: an unreported run keeps its cost NULL server-side, which is what
+// makes the board render it as unknown instead of $0.
+func taskUsageEntries(provider string, usage map[string]agent.TokenUsage) []TaskUsageEntry {
+	var entries []TaskUsageEntry
+	for model, u := range usage {
+		if u.InputTokens == 0 && u.OutputTokens == 0 && u.CacheReadTokens == 0 && u.CacheWriteTokens == 0 && u.CostUSDTicks <= 0 {
+			continue
+		}
+		entries = append(entries, TaskUsageEntry{
+			Provider:         provider,
+			Model:            model,
+			InputTokens:      u.InputTokens,
+			OutputTokens:     u.OutputTokens,
+			CacheReadTokens:  u.CacheReadTokens,
+			CacheWriteTokens: u.CacheWriteTokens,
+			CostUSDTicks:     u.CostUSDTicks,
+		})
+	}
+	return entries
+}
+
+// liveUsageFlushEvery bounds how often a running task's cumulative counters are
+// POSTed. The agent emits them per model call; this only bounds the traffic.
+const liveUsageFlushEvery = 30 * time.Second
+
+// startUsageFlush POSTs the newest snapshot held in `live` until the returned
+// stop func runs, so a long run's cost is visible before it ends (STOE-30).
+// Repeating it is safe by construction: UpsertTaskUsage overwrites absolutely
+// per (task_id, provider, model) and bumps updated_at, which is what makes the
+// hourly rollup re-aggregate those rows, so cumulative snapshots cannot add up
+// twice. It is sent as a snapshot so the server keeps its additive metrics
+// counter on the terminal report (see Client.ReportTaskUsageSnapshot). That
+// report stays the authoritative final value, so the caller stops this flush
+// before the terminal report is made.
+func (d *Daemon) startUsageFlush(ctx context.Context, taskID string, live *atomic.Value, taskLog *slog.Logger) (stop func()) {
+	done := make(chan struct{})
+	go func() {
+		ticker := time.NewTicker(liveUsageFlushEvery)
+		defer ticker.Stop()
+		var reported string
+		for {
+			select {
+			case <-done:
+				return
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				entries, _ := live.Load().([]TaskUsageEntry)
+				if len(entries) == 0 {
+					continue
+				}
+				// An idle agent costs nothing: re-posting the numbers the server
+				// already has is traffic, not information.
+				key := fmt.Sprintf("%v", entries)
+				if key == reported {
+					continue
+				}
+				if err := d.client.ReportTaskUsageSnapshot(ctx, taskID, entries); err != nil {
+					// Not fatal — the terminal report carries the run's usage
+					// again if a flush is lost.
+					taskLog.Warn("live usage flush failed", "error", err)
+					continue
+				}
+				reported = key
+			}
+		}
+	}()
+	return func() { close(done) }
 }
 
 // executeAndDrain runs a backend, drains its message stream (forwarding to the

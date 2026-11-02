@@ -1780,6 +1780,95 @@ func TestHermesClientHandleUsageUpdateCumulative(t *testing.T) {
 	}
 }
 
+// Hermes' adapter carries no token fields on the standard usage_update frame —
+// only `size`/`used` — so its cumulative per-run counters ride on the ACP
+// extensibility key (STOE-30).
+func TestHermesClientHandleUsageUpdateFromMeta(t *testing.T) {
+	t.Parallel()
+
+	c := &hermesClient{pending: make(map[int]*pendingRPC)}
+
+	c.handleLine(`{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"ses_1","update":{"sessionUpdate":"usage_update","size":131072,"used":4096,"_meta":{"usage":{"inputTokens":73752,"outputTokens":7511,"cachedReadTokens":685384,"cachedWriteTokens":0}}}}}`)
+
+	c.usageMu.Lock()
+	defer c.usageMu.Unlock()
+
+	if c.usage.InputTokens != 73752 {
+		t.Errorf("inputTokens: got %d, want 73752", c.usage.InputTokens)
+	}
+	if c.usage.OutputTokens != 7511 {
+		t.Errorf("outputTokens: got %d, want 7511", c.usage.OutputTokens)
+	}
+	if c.usage.CacheReadTokens != 685384 {
+		t.Errorf("cacheReadTokens: got %d, want 685384", c.usage.CacheReadTokens)
+	}
+}
+
+// The standard top-level usage stays authoritative when a runtime reports both
+// representations, matching withFallback's precedence.
+func TestHermesClientHandleUsageUpdatePrefersTopLevelUsage(t *testing.T) {
+	t.Parallel()
+
+	c := &hermesClient{pending: make(map[int]*pendingRPC)}
+
+	c.handleLine(`{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"ses_1","update":{"sessionUpdate":"usage_update","usage":{"inputTokens":100,"outputTokens":50},"_meta":{"usage":{"inputTokens":900,"outputTokens":900}}}}}`)
+
+	c.usageMu.Lock()
+	defer c.usageMu.Unlock()
+
+	if c.usage.InputTokens != 100 {
+		t.Errorf("inputTokens: got %d, want 100", c.usage.InputTokens)
+	}
+	if c.usage.OutputTokens != 50 {
+		t.Errorf("outputTokens: got %d, want 50", c.usage.OutputTokens)
+	}
+}
+
+// The daemon's live metering sink (ExecOptions.OnUsage) has to see the same
+// cumulative totals, keyed by the model the terminal usage map will use.
+func TestHermesClientLiveUsageMidRun(t *testing.T) {
+	t.Parallel()
+
+	var got []map[string]TokenUsage
+	c := &hermesClient{
+		pending:    make(map[int]*pendingRPC),
+		usageModel: "nous:moonshotai/kimi-k2.6",
+		onUsage:    func(usage map[string]TokenUsage) { got = append(got, usage) },
+	}
+
+	// Before any usage frame the run is unknown, not zero.
+	if u := c.liveUsage(); u != nil {
+		t.Errorf("liveUsage with no usage frame: got %v, want nil", u)
+	}
+
+	c.handleLine(`{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"ses_1","update":{"sessionUpdate":"usage_update","_meta":{"usage":{"inputTokens":100,"outputTokens":50}}}}}`)
+	c.handleLine(`{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"ses_1","update":{"sessionUpdate":"usage_update","_meta":{"usage":{"inputTokens":300,"outputTokens":120,"cachedReadTokens":80}}}}}`)
+
+	if len(got) != 2 {
+		t.Fatalf("onUsage calls: got %d, want 2", len(got))
+	}
+	u := got[1]["nous:moonshotai/kimi-k2.6"]
+	if u.InputTokens != 300 || u.OutputTokens != 120 || u.CacheReadTokens != 80 {
+		t.Errorf("live snapshot: got %+v", u)
+	}
+	if terminal := c.liveUsage(); terminal["nous:moonshotai/kimi-k2.6"].InputTokens != 300 {
+		t.Errorf("terminal snapshot key/values: got %+v", terminal)
+	}
+}
+
+// A backend that is not metered live must not pay for the snapshot.
+func TestHermesClientLiveUsageWithoutSink(t *testing.T) {
+	t.Parallel()
+
+	c := &hermesClient{pending: make(map[int]*pendingRPC)}
+	c.handleLine(`{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"ses_1","update":{"sessionUpdate":"usage_update","_meta":{"usage":{"inputTokens":100,"outputTokens":50}}}}}`)
+
+	if c.usage.InputTokens != 100 {
+		t.Errorf("inputTokens: got %d, want 100", c.usage.InputTokens)
+	}
+	c.notifyUsage() // nil onUsage must be a no-op, not a panic
+}
+
 // ── extractPromptResult ──
 
 func TestHermesClientExtractPromptResult(t *testing.T) {
