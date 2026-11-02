@@ -1,7 +1,7 @@
 "use client";
 
 import { useMemo, useState, type CSSProperties } from "react";
-import { EyeOff, Trash2 } from "lucide-react";
+import { EyeOff, Trash2 } from "@multica/ui/icons";
 import { ActorAvatar } from "../../common/actor-avatar";
 import { formatTokens } from "../../runtimes/utils";
 import { useT } from "../../i18n";

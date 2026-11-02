@@ -1,7 +1,7 @@
 "use client";
 
 import { useMemo, useRef, useState } from "react";
-import { ArrowRight, Ban, ChevronRight, XCircle } from "lucide-react";
+import { ArrowRight, Ban, ChevronRight, XCircle } from "@multica/ui/icons";
 import type { AgentTask } from "@multica/core/types";
 import { cn } from "@multica/ui/lib/utils";
 import {

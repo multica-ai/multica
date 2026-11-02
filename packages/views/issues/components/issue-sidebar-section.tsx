@@ -1,7 +1,7 @@
 "use client";
 
 import type { ReactNode } from "react";
-import { ChevronRight } from "lucide-react";
+import { ChevronRight } from "@multica/ui/icons";
 import { Button, buttonVariants } from "@multica/ui/components/ui/button";
 import { cn } from "@multica/ui/lib/utils";
 
@@ -27,7 +27,7 @@ export function IssueSidebarSectionHeader({
         size="sm"
         aria-expanded={open}
         onClick={() => onOpenChange(!open)}
-        className={cn("min-w-0 flex-1 shrink justify-start text-caption font-medium aria-expanded:bg-transparent active:not-aria-[haspopup]:translate-y-0", !open && "text-muted-foreground")}
+        className={cn("min-w-0 flex-1 shrink justify-start font-medium aria-expanded:bg-transparent active:not-aria-[haspopup]:translate-y-0", !open && "text-muted-foreground")}
       >
         <span className="truncate">{title}</span>
         <ChevronRight aria-hidden="true" className={cn("!size-3 shrink-0 text-faint-foreground transition-transform motion-reduce:transition-none", open && "rotate-90")} />
@@ -38,7 +38,7 @@ export function IssueSidebarSectionHeader({
           </>
         )}
       </Button> : (
-        <div id={id} className={cn(buttonVariants({ variant: "ghost", size: "sm" }), "min-w-0 flex-1 shrink justify-start text-caption font-medium hover:bg-transparent dark:hover:bg-transparent")}>
+        <div id={id} className={cn(buttonVariants({ variant: "ghost", size: "sm" }), "min-w-0 flex-1 shrink justify-start font-medium hover:bg-transparent dark:hover:bg-transparent")}>
           <span className="truncate">{title}</span>
         </div>
       )}

@@ -2967,6 +2967,11 @@ func (h *Handler) ListAgentTasks(w http.ResponseWriter, r *http.Request) {
 			taskIDs[i] = t.ID
 		}
 	}
+	if err := h.redactForeignChatTaskContent(r.Context(), requestUserID(r), tasks, resp); err != nil {
+		slog.Warn("list agent tasks: resolve chat owners failed", append(logger.RequestAttrs(r), "error", err, "agent_id", id)...)
+		writeError(w, http.StatusInternalServerError, "failed to list agent tasks")
+		return
+	}
 	h.hydrateTaskSupplementMetadata(r.Context(), r, agent.WorkspaceID, tasks, resp)
 	h.hydrateTaskAttributions(r.Context(), attributionsOf(resp))
 	if includeUsage {
@@ -3256,11 +3261,18 @@ func (h *Handler) ListWorkspaceAgentTaskSnapshot(w http.ResponseWriter, r *http.
 	}
 
 	resp := make([]AgentTaskResponse, 0, len(tasks))
+	kept := make([]db.AgentTaskQueue, 0, len(tasks))
 	for _, t := range tasks {
 		if _, ok := allowed[uuidToString(t.AgentID)]; !ok {
 			continue
 		}
 		resp = append(resp, taskToResponse(t, workspaceID))
+		kept = append(kept, t)
+	}
+	if err := h.redactForeignChatTaskContent(r.Context(), requestUserID(r), kept, resp); err != nil {
+		slog.Warn("agent task snapshot: resolve chat owners failed", append(logger.RequestAttrs(r), "error", err)...)
+		writeError(w, http.StatusInternalServerError, "failed to list agent task snapshot")
+		return
 	}
 	h.hydrateTaskAttributions(r.Context(), attributionsOf(resp))
 

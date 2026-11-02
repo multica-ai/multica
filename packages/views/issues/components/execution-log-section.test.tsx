@@ -28,7 +28,11 @@ vi.mock("./terminate-task-confirm-dialog", () => ({
 }));
 
 vi.mock("@multica/core/workspace/hooks", () => ({
-  useActorName: () => ({ getActorName: () => "Lambda" }),
+  useActorName: () => ({
+    getActorName: () => "Lambda",
+    getActorInitials: () => "L",
+    getActorAvatarUrl: () => null,
+  }),
 }));
 
 import {
@@ -332,8 +336,31 @@ describe("execution log header geometry", () => {
       makeTask({ id: "old", status: "queued", trigger_summary: "Order: first", created_at: "2026-09-08T03:01:00Z" }),
       makeTask({ id: "running", status: "running", trigger_summary: "Order: running", created_at: "2026-09-08T03:00:00Z" }),
     ]);
+    fireEvent.click(screen.getByRole("button", { name: /2 queued/ }));
     expect(screen.getAllByText(/^Order:/).map((el) => el.textContent))
       .toEqual(["Order: running", "Order: first", "Order: second"]);
+  });
+
+  it("folds several queued runs into one expandable row, but not a lone one", () => {
+    const { unmount } = renderSection([
+      makeTask({ id: "running", status: "running", trigger_summary: "Live run" }),
+      makeTask({ id: "q1", status: "queued", trigger_summary: "Queued one" }),
+      makeTask({ id: "q2", status: "queued", trigger_summary: "Queued two" }),
+    ]);
+    const group = screen.getByRole("button", { name: /2 queued/ });
+    expect(group).toHaveAttribute("aria-expanded", "false");
+    expect(group).toHaveTextContent("Lambda");
+    expect(screen.getByText("Live run")).toBeInTheDocument();
+    expect(screen.queryByText("Queued one")).not.toBeInTheDocument();
+    fireEvent.click(group);
+    expect(group).toHaveAttribute("aria-expanded", "true");
+    expect(screen.getByText("Queued one")).toBeInTheDocument();
+    expect(screen.getByText("Queued two")).toBeInTheDocument();
+    unmount();
+
+    renderSection([makeTask({ id: "q1", status: "queued", trigger_summary: "Queued one" })]);
+    expect(screen.queryByRole("button", { name: /queued/ })).not.toBeInTheDocument();
+    expect(screen.getByText("Queued one")).toBeInTheDocument();
   });
 
   function headerOf(): HTMLElement {
@@ -415,16 +442,40 @@ describe("execution log past runs", () => {
     expect(screen.getByText("MUL-1 · Wakeups")).toBeInTheDocument();
   });
 
-  it("keeps cost and agent duration visible with usage details in the tooltip", () => {
+  it("lets active runs take the three rows first and fills the rest with past runs", () => {
+    const active = [
+      makeTask({ id: "running", status: "running", trigger_summary: "Live run" }),
+      makeTask({ id: "q1", status: "queued", trigger_summary: "Queued one" }),
+      makeTask({ id: "q2", status: "queued", trigger_summary: "Queued two" }),
+    ];
+    const { unmount } = renderSection([...active, past(1), past(2), past(3), past(4)]);
+    // One running row + one folded queued row leave a single past slot.
+    expect(screen.getAllByText(/^Past run \d$/).map((el) => el.textContent)).toEqual(["Past run 4"]);
+    expect(screen.getByRole("button", { name: "Open timeline · Show 3 more" })).toBeInTheDocument();
+    unmount();
+
+    renderSection([
+      ...active,
+      makeTask({ id: "running-2", status: "running", trigger_summary: "Second live run" }),
+      makeTask({ id: "running-3", status: "running", trigger_summary: "Third live run" }),
+      past(1),
+    ]);
+    expect(screen.queryByText("Past run 1")).not.toBeInTheDocument();
+    expect(screen.getByText("Third live run")).toBeInTheDocument();
+  });
+
+  it("keeps a finished run to one line, with agent, duration and usage in the tooltip", () => {
     renderSection([past(1)]);
 
     const row = screen.getByText("Past run 1").closest("[title]") as HTMLElement;
     expect(within(row).getByText("$2.00")).toBeInTheDocument();
-    expect(row).toHaveTextContent("Lambda · 10m");
-    // Detailed usage remains available without crowding the summary row.
+    expect(row).not.toHaveTextContent("Lambda");
+    expect(row).not.toHaveTextContent("10m");
     expect(row).not.toHaveTextContent("892K tokens");
-    expect(row.getAttribute("title")).toContain("892K tokens");
-    expect(row.getAttribute("title")).toContain("claude-opus-5");
+    const title = row.getAttribute("title");
+    expect(title).toContain("Lambda · 10m");
+    expect(title).toContain("892K tokens");
+    expect(title).toContain("claude-opus-5");
   });
 
   it("puts a failed run's reason where its duration would be", () => {
@@ -463,13 +514,15 @@ describe("execution log past runs", () => {
     expect(chart.querySelectorAll("[data-run]")[29]).toHaveAttribute("data-run", "past-35");
     expect(screen.getByText("Spent", { selector: "dt" }).parentElement).toHaveTextContent("$70.00");
     expect(screen.getAllByText(/^Past run \d+$/)).toHaveLength(3);
-    fireEvent.click(screen.getByRole("button", { name: "Show 32 more" }));
+    expect(screen.queryByText("Latest")).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Open timeline · Show 32 more" }));
     expect(screen.getByRole("heading", { name: "Runs" })).toBeInTheDocument();
   });
 
   it("keeps all active tasks reachable in a separate scrolling region", () => {
     renderSection(Array.from({ length: 8 }, (_, i) => makeTask({ id: `active-${i}`, status: "queued", trigger_summary: `Queued ${i}`, usage: [] })));
     const active = screen.getByRole("region", { name: "8 active" });
+    fireEvent.click(within(active).getByRole("button", { name: /8 queued/ }));
     expect(within(active).getAllByText(/^Queued \d$/)).toHaveLength(8);
     expect(active).toHaveAttribute("tabindex", "0");
   });
@@ -480,8 +533,8 @@ describe("execution log past runs", () => {
       past(2, { usage: [usageSlice({ input_tokens: 1000, output_tokens: 0, cache_read_tokens: 0, cache_write_tokens: 0, cost_usd_ticks: 10_000_000_000 })] }),
     ]);
     const bars = screen.getByRole("button", { name: /Cost per run/ }).querySelectorAll("[data-run]");
-    expect((bars[0] as HTMLElement).style.height).toBe("40px");
-    expect((bars[1] as HTMLElement).style.height).toBe("4px");
+    expect((bars[0] as HTMLElement).style.height).toBe("24px");
+    expect(parseFloat((bars[1] as HTMLElement).style.height)).toBeCloseTo(2.4);
   });
 
   it.each([1, 8, 15, 30])("preserves upstream slots for %i runs", (count) => {
@@ -491,7 +544,7 @@ describe("execution log past runs", () => {
     })));
     const chart = screen.getByRole("button", { name: /Cost per run/ });
     const plot = chart.querySelector("[aria-hidden]") as HTMLElement;
-    expect(plot.style.height).toBe("40px");
+    expect(plot.style.height).toBe("24px");
     expect(plot.children).toHaveLength(Math.max(20, count));
     expect(chart.querySelectorAll("[data-run]")).toHaveLength(count);
     expect(plot.children[plot.children.length - count]).toHaveAttribute("data-run");
@@ -512,7 +565,6 @@ describe("execution log past runs", () => {
     expect(chart.querySelector('[data-run="past-2"]')).toHaveClass("bg-faint-foreground");
     expect(chart.querySelector('[data-run="past-3"]')).toHaveClass("border-dashed");
     expect(chart.querySelector('[data-run="active"]')).toHaveClass("bg-info");
-    expect(chart).toHaveTextContent("Now");
   });
 
   it("makes full details reachable from the first priced run", () => {

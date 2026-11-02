@@ -1,7 +1,7 @@
 "use client";
 
 import { Suspense, lazy, useRef, useState } from "react";
-import { Bot, Camera, ImagePlus, Loader2, Users, X } from "lucide-react";
+import { Bot, Camera, ImagePlus, Loader2, Users, X } from "@multica/ui/icons";
 import { toast } from "sonner";
 import { api } from "@multica/core/api";
 import { useFileUpload } from "@multica/core/hooks/use-file-upload";

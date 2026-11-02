@@ -10,7 +10,7 @@ import {
   Plus,
   Search,
   Trash2,
-} from "lucide-react";
+} from "@multica/ui/icons";
 import { Input } from "@multica/ui/components/ui/input";
 import { Label } from "@multica/ui/components/ui/label";
 import { Button } from "@multica/ui/components/ui/button";

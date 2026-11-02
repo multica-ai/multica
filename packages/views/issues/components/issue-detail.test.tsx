@@ -825,7 +825,7 @@ describe("IssueDetail (shared)", () => {
 
     fireEvent.click(menuButton("source-root")!);
     const branchAction = await screen.findByText("Create sub-issue from here");
-    expect(branchAction.closest('[role="menuitem"]')?.querySelector(".lucide-message-square-plus")).toBeInTheDocument();
+    expect(branchAction.closest('[role="menuitem"]')?.querySelector(".icon-message-square-plus")).toBeInTheDocument();
     fireEvent.click(branchAction);
     expect(mockOpenModal).toHaveBeenLastCalledWith("quick-create-issue", expect.objectContaining({
       anchor_comment_id: "source-root",

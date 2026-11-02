@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useId, useMemo, useState, type ReactNode } from "react";
-import { AlertCircle, Brain, Check, ChevronRight, CirclePause, Clock3, CornerDownRight, ExternalLink, Loader2, MessageSquare, RotateCcw, ScrollText, Square, Terminal } from "lucide-react";
+import { AlertCircle, Brain, Check, ChevronRight, CirclePause, Clock3, CornerDownRight, Loader2, MessageSquare, RotateCcw, ScrollText, Square, Terminal } from "@multica/ui/icons";
 import { useQuery } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { useWorkspaceId } from "@multica/core/hooks";
@@ -158,17 +158,20 @@ export function InlineCommentRun({ run, className, viewState, showIdentity = fal
   const stopDialog = <TerminateTaskConfirmDialog open={confirmStop} onOpenChange={setConfirmStop}
     showRunningNote={task.status !== "queued"}
     onConfirm={() => cancel.mutate(task.id, { onError: () => toast.error(t(($) => $.execution_log.cancel_failed)) })} />;
+  const fullLogButton = <Tooltip>
+    <TooltipTrigger render={<Button type="button" size="icon-sm" variant="ghost"
+      className="text-muted-foreground aria-expanded:bg-transparent aria-expanded:hover:bg-muted dark:aria-expanded:hover:bg-muted/50"
+      aria-label={t(($) => $.inline_run.full_log)} aria-haspopup="dialog" aria-expanded={fullLogOpen}
+      onClick={openFullLog}>
+      <ScrollText aria-hidden className="size-3.5" />
+    </Button>} />
+    <TooltipContent>{t(($) => $.inline_run.full_log)}</TooltipContent>
+  </Tooltip>;
+  // Before the agent session starts there is no transcript to open.
+  const hasTranscript = !PRE_RUN_STATUSES.includes(task.status);
   if (presentation === "header" && showCommentRunInHeader(run)) {
     return <span className="inline-flex shrink-0" data-comment-actions data-run-id={task.id}>
-      <Tooltip>
-        <TooltipTrigger render={<Button type="button" size="icon-sm" variant="ghost"
-          className="text-muted-foreground aria-expanded:bg-transparent aria-expanded:hover:bg-muted dark:aria-expanded:hover:bg-muted/50"
-          aria-label={t(($) => $.inline_run.full_log)} aria-haspopup="dialog" aria-expanded={fullLogOpen}
-          onClick={openFullLog}>
-          <ScrollText aria-hidden className="size-3.5" />
-        </Button>} />
-        <TooltipContent>{t(($) => $.inline_run.full_log)}</TooltipContent>
-      </Tooltip>
+      {fullLogButton}
       {transcript}
     </span>;
   }
@@ -182,14 +185,14 @@ export function InlineCommentRun({ run, className, viewState, showIdentity = fal
             <span className="max-w-[30%] shrink-0 truncate text-body font-medium">{name}</span>
           </TruncatedTooltip>
           {!active && task.completed_at && <Tooltip>
-            <TooltipTrigger render={<span className="shrink-0 cursor-default text-caption text-muted-foreground @max-[32rem]/run:hidden">
+            <TooltipTrigger render={<span className="shrink-0 cursor-default text-label text-muted-foreground @max-[32rem]/run:hidden">
               {timeAgo(task.completed_at)}
             </span>} />
             <TooltipContent side="top">{new Date(task.completed_at).toLocaleString(locale)}</TooltipContent>
           </Tooltip>}
         </>}
         <span className={cn("flex min-w-0 items-center gap-1.5 whitespace-nowrap",
-          outcomeIsContent ? "text-body text-foreground" : "max-w-[50%] shrink-0 text-caption text-muted-foreground",
+          outcomeIsContent ? "text-body text-foreground" : "max-w-[50%] shrink-0 text-label text-muted-foreground",
           showProgress && "sr-only")}
           role="status" data-run-status>
           <TaskStatusIcon status={cancelled ? "cancelled" : task.status} />
@@ -204,7 +207,7 @@ export function InlineCommentRun({ run, className, viewState, showIdentity = fal
           </TruncatedTooltip>}
         </span>
         <button type="button"
-          className={cn("flex min-w-0 items-center gap-1.5 rounded-xs py-1 text-left text-caption text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+          className={cn("flex min-w-0 items-center gap-1.5 rounded-xs py-1 text-left text-label text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
             showProgress ? "flex-1 text-body" : "ml-auto shrink-0",
             showIdentity && !showProgress && "@max-[32rem]/run:min-w-7 @max-[32rem]/run:justify-center")}
           aria-label={stepLabel ? `${activityLabel} · ${stepLabel}` : activityLabel}
@@ -217,7 +220,8 @@ export function InlineCommentRun({ run, className, viewState, showIdentity = fal
           {!showProgress && stepLabel && <span className="text-faint-foreground @max-[32rem]/run:hidden">· {stepLabel}</span>}
           <ChevronRight ref={state.disclosure.chevronRef} aria-hidden className={cn("size-3.5 shrink-0", expanded && "rotate-90")} />
         </button>
-        <span className={cn("shrink-0 whitespace-nowrap text-caption tabular-nums text-muted-foreground", showIdentity && !active && "@max-[32rem]/run:hidden")}>{elapsed}</span>
+        <span className={cn("shrink-0 whitespace-nowrap text-label tabular-nums text-muted-foreground", showIdentity && !active && "@max-[32rem]/run:hidden")}>{elapsed}</span>
+        {hasTranscript && fullLogButton}
         {stopButton}
         {(!hasReply || replacesFailureNotice) && ended && <Button
           size="xs" variant="outline" className={cn(showIdentity && "@max-[32rem]/run:size-6 @max-[32rem]/run:p-0")} disabled={retry.isPending || retry.isSuccess}
@@ -246,8 +250,6 @@ export function InlineCommentRun({ run, className, viewState, showIdentity = fal
           {interleaveSteers(rows.slice(-visibleCount), steers, rows.length > visibleCount).map((item) => "steer" in item
             ? <InlineSteer key={`steer:${item.steer.id}`} steer={item.steer} />
             : <InlineStep key={item.row.seq} row={item.row} live={active} formatText={formatText} />)}
-          <button type="button" className="flex items-center gap-1.5 rounded-xs py-2 text-caption text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-            onClick={openFullLog}>{t(($) => $.inline_run.full_log)}<ExternalLink className="size-3" /></button>
         </div>}
       </div>
       {transcript}
@@ -255,6 +257,8 @@ export function InlineCommentRun({ run, className, viewState, showIdentity = fal
     </section>
   );
 }
+
+const PRE_RUN_STATUSES: AgentTask["status"][] = ["queued", "dispatched", "waiting_local_directory"];
 
 interface DeliveredSteer {
   id: string;

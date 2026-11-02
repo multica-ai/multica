@@ -164,6 +164,10 @@ Un cache n'est supprimé que si les trois conditions sont réunies : aucun espac
 | Mémoire Hermes (une par agent) | `hermes-state/` dans le même répertoire | Supprimée après 90 jours sans usage |
 | Répertoire temporaire privé de chaque exécution (`TMPDIR`) | `multica-task-*` dans le répertoire temporaire du système | Supprimé à la fin de l'exécution ; si le daemon a été tué, un nettoyage ultérieur s'en charge |
 
+Les exécutions Hermes liées à une tâche ou à un chat utilisent le répertoire persistant de leur conversation comme `HERMES_HOME` isolé, avec un fichier `state.db` ordinaire et ses journaux SQLite à l’intérieur. Cette disposition fonctionne aussi bien avec l’ACP exécuté dans le processus qu’avec l’ACP passant par la Gateway. Les historiques existants sont réutilisés et les historiques locaux sont migrés avant l’exécution suivante.
+
+Multica actualise les skills et la configuration dérivée à chaque exécution. L’authentification du fournisseur de modèles est conservée ; les adaptateurs de messagerie et les points d’entrée HTTP sont désactivés pour les exécutions gérées. L’état de la Gateway, les journaux, les sessions et les tâches cron de l’hôte sont isolés. Toute Gateway propre à une exécution est arrêtée à la fin de celle-ci afin que les exécutions suivantes utilisent leur propre environnement.
+
 ### Mémoire native et sous-agents de Codex [#codex-memory]
 
 Dans les exécutions Codex gérées par le daemon, la mémoire native de Codex est désactivée par défaut, pour que les souvenirs de cette machine ou d'une exécution précédente ne passent pas dans un autre espace de travail. Le réglage est écrit uniquement dans le `CODEX_HOME/config.toml` propre à l'exécution (`features.memories`, `memories.generate_memories` et `memories.use_memories` à `false`) ; votre `~/.codex/config.toml` n'est pas modifié. Pour garder la mémoire native, définissez `MULTICA_CODEX_MEMORY=1` dans l'environnement du daemon.

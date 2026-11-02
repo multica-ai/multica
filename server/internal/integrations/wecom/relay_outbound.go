@@ -259,7 +259,7 @@ func (c RelayConfig) retryPlan() []time.Duration {
 // read for itself, so an attachment is fetched by the replica that will send
 // it rather than shipped through Redis.
 type relayFrame struct {
-	Kind           string `json:"kind"` // relayKindReply | relayKindInbox | relayKindSeal
+	Kind           string `json:"kind"` // relayKindReply | relayKindInbox | relayKindSeal | relayKindProgress
 	InstallationID string `json:"installation_id"`
 	ChatID         string `json:"chat_id"`
 	ChatType       int    `json:"chat_type"`
@@ -274,6 +274,15 @@ type relayFrame struct {
 	WorkspaceID  string `json:"workspace_id,omitempty"`
 	SessionID    string `json:"session_id,omitempty"`
 	CarriesFiles bool   `json:"carries_files,omitempty"`
+
+	// RoundID, Seq and Milestone are a relayKindProgress frame's whole
+	// content: which round (chat_input_task_id, for an auto-retry clone), how
+	// far the reporting run's transcript had got (task_message.seq), and
+	// whether this is the "starting the agent" milestone instead. No text: the
+	// round's holder reads the rows itself (see relayKindProgress).
+	RoundID   string `json:"round_id,omitempty"`
+	Seq       int32  `json:"seq,omitempty"`
+	Milestone bool   `json:"milestone,omitempty"`
 }
 
 const (
@@ -291,8 +300,53 @@ const (
 	// reply whose round is gone falls through to an ordinary push; one
 	// cancel-all click would then put 这次处理已取消 into every chat in the
 	// deployment. A seal frame with no round does NOTHING AT ALL.
+	//
+	// And it is for whoever holds the ROUND, which is not a question the
+	// socket or the claim can answer, so it takes neither: it is published
+	// under its task id, since it carries no installation and the stream
+	// reader drops a frame with no scope id, and perform hands it to every
+	// replica's deliverRelayed without the ownership gate or the claim. Gated
+	// on the socket it reached nobody; claimed once for the deployment, the
+	// replica that won could be one without the round, and the holder would
+	// lose the race and never close the bubble. Every replica but the holder
+	// finds no round and returns, and a copy that reaches the holder twice
+	// finds the round already taken.
 	relayKindSeal = "seal"
+
+	// relayKindProgress says a run has new progress — a tool call, reasoning,
+	// the starting milestone — to the replica holding that run's bubble. It
+	// is a nudge, not a delivery, and none of the machinery above applies to
+	// it:
+	//
+	//   - It never enters the dispatcher's shard queues. DeliverWecomOutbound
+	//     hands it straight to the progress sink, so a burst of progress takes
+	//     no queue space from an answer and never waits in line ahead of one.
+	//   - It takes no claim. Its dedupe is the round's own record of how far
+	//     the run's transcript is already shown (roundEntry.folded), on the
+	//     one replica that holds the round, so a copy, a replay or an
+	//     out-of-order frame is a no-op there, and the terminal claim key is
+	//     never touched.
+	//   - It carries no text. The holder reads the rows the daemon's request
+	//     already committed to task_message, and redacts them itself; reasoning
+	//     cannot be redacted before it is joined (safeThinking), and this
+	//     relay keeps every frame in a Redis stream for its replay window.
+	//   - Like a seal it is for whoever holds the ROUND, not the socket: a
+	//     replica with no round for it does nothing.
+	relayKindProgress = "progress"
 )
+
+// progressSink is the half of the typing indicator the relay hands progress
+// frames to. It must not block: it is called on the shard read loop.
+type progressSink interface {
+	acceptRelayedProgress(f relayFrame)
+}
+
+// progressAttacher is how the typing indicator registers as that sink.
+// *RelayOutbound satisfies it; a test relay that does not is simply never
+// handed progress.
+type progressAttacher interface {
+	attachProgress(s progressSink)
+}
 
 // relayHandler performs a delivery on the replica that holds the socket.
 // *Outbound implements it; the indirection is what lets this object be
@@ -482,6 +536,13 @@ type RelayOutbound struct {
 	ready   chan struct{}
 	handler relayHandler
 
+	// progress is where relayKindProgress frames go. Set during boot by the
+	// typing indicator (attachProgress) while the shard readers may already
+	// be running, hence atomic. Without one, a progress frame is dropped and
+	// that is said once (warnNoProgress).
+	progress       atomic.Value // progressSink
+	warnNoProgress sync.Once
+
 	queues []chan queued
 	wg     sync.WaitGroup
 }
@@ -528,6 +589,27 @@ func (r *RelayOutbound) mx() Metrics {
 		return v.(Metrics)
 	}
 	return nopMetrics{}
+}
+
+// attachProgress makes s the receiver of progress frames.
+func (r *RelayOutbound) attachProgress(s progressSink) {
+	if r != nil && s != nil {
+		r.progress.Store(s)
+	}
+}
+
+// deliverProgress hands a progress frame to the sink, on the shard reader's
+// goroutine, and never to the dispatcher's queues (see relayKindProgress).
+func (r *RelayOutbound) deliverProgress(f relayFrame) {
+	if s, ok := r.progress.Load().(progressSink); ok {
+		s.acceptRelayedProgress(f)
+		return
+	}
+	r.warnNoProgress.Do(func() {
+		r.logger.Warn("wecom relay: progress frames are arriving and nothing here shows them; " +
+			"a run whose reports reach another replica shows no steps in its bubble, and a long run's " +
+			"bubble is not handed over before the stream window ends")
+	})
 }
 
 // Attach supplies the handler that performs deliveries. Called once, after the
@@ -846,7 +928,11 @@ func (r *RelayOutbound) publishFrame(ctx context.Context, f relayFrame, eventID 
 		r.logger.Warn("wecom relay: marshal outbound frame", "error", err)
 		return relayNotWired
 	}
-	if err := r.publisher.PublishWithID(realtime.ScopeWecomOutbound, f.InstallationID, "", body, eventID); err != nil {
+	scope := f.InstallationID
+	if f.Kind == relayKindSeal {
+		scope = f.TaskID // see relayKindSeal
+	}
+	if err := r.publisher.PublishWithID(realtime.ScopeWecomOutbound, scope, "", body, eventID); err != nil {
 		r.logger.Warn("wecom relay: publish failed",
 			"error", err, "installation_id", f.InstallationID, "task_id", f.TaskID)
 		// The bus call failed, but a publish whose RESPONSE was lost may still
@@ -987,13 +1073,30 @@ func (r *RelayOutbound) DeliverWecomOutbound(scopeID string, frame []byte, event
 		r.logger.Warn("wecom relay: undecodable frame", "error", err, "installation_id", scopeID)
 		return
 	}
+	if f.Kind == relayKindProgress {
+		r.deliverProgress(f)
+		return
+	}
 	select {
-	case r.queues[r.shardFor(f.InstallationID)] <- queued{frame: f, eventID: eventID}:
+	case r.queues[r.shardFor(dispatchKey(f))] <- queued{frame: f, eventID: eventID}:
 	default:
 		// Shed rather than stall the shard. Counted, because a reply nobody
 		// gets is exactly what this whole path exists to stop being silent.
 		r.shed(queued{frame: f, eventID: eventID}, "dispatch queue full")
 	}
+}
+
+// dispatchKey picks the shard queue a frame waits on. Replies and inbox pushes
+// go by installation, which is what keeps one bot's frames in order. A seal
+// carries no installation, so keying it the same way would put every seal in
+// the deployment on one queue behind one worker, and a cancel-all burst past
+// QueueDepth would be shed: those bubbles would keep spinning. A seal needs no
+// ordering against anything but its own round, so it goes by task id.
+func dispatchKey(f relayFrame) string {
+	if f.Kind == relayKindSeal {
+		return f.TaskID
+	}
+	return f.InstallationID
 }
 
 func (r *RelayOutbound) shardFor(installationID string) int {
@@ -1007,6 +1110,13 @@ func (r *RelayOutbound) shardFor(installationID string) int {
 // False means it is owed another offer, which the caller schedules at the head
 // of the installation's line.
 func (r *RelayOutbound) perform(ctx context.Context, item queued) bool {
+	if item.frame.Kind == relayKindSeal {
+		// Neither gate below applies: see relayKindSeal.
+		dctx, cancel := context.WithTimeout(ctx, r.cfg.deliveryBudget())
+		r.handler.deliverRelayed(dctx, item.frame)
+		cancel()
+		return true
+	}
 	// Ownership FIRST, the global claim second. The claim is a cross-replica
 	// SET NX: every replica reads every frame, and if one that cannot send
 	// were allowed to win it, the replica that can send would lose the race,
@@ -1529,11 +1639,17 @@ func (o *Outbound) deliverRelayed(ctx context.Context, f relayFrame) relayResult
 				if !hasVisibleChar(text) {
 					text = wordlessSealCopy(t.Handle.Locale, f.CarriesFiles)
 				}
-				sealErr := o.finishStream(ctx, t.Handle, text)
+				// The same split the local path makes (outbound.go): a closing
+				// frame is clipped to 20480 bytes, so the rest follows as
+				// messages under the bubble.
+				head, rest := splitForBubble(text)
+				sealErr := o.finishStream(ctx, t.Handle, head)
 				switch classifySeal(sealErr) {
 				case sealOnScreen:
+					o.sendRest(ctx, t.Handle, rest)
 					record, spoke = o.delivered, true
 				case sealUnknown:
+					o.sendRest(ctx, t.Handle, rest)
 					se := sealErr
 					record = func() {
 						o.unconfirmedFor(ctx, f.SessionID, f.Kind, unconfirmedSealReason(se), se)
@@ -1553,7 +1669,18 @@ func (o *Outbound) deliverRelayed(ctx context.Context, f relayFrame) relayResult
 	// that was going to close the bubble is what the room gets instead — the
 	// same substitution the local path makes (outbound.go).
 	if hasVisibleChar(text) && !spoke {
-		if err := sender.sendTextCtx(ctx, f.ChatID, f.ChatType, text); err != nil {
+		if err := sender.sendTextCtx(guardReply(ctx, o.q, instID), f.ChatID, f.ChatType, text); err != nil {
+			if f.Kind == relayKindReply && errors.Is(err, errInstallationGone) && !errors.Is(err, errPartiallySent) {
+				// Revoked while the reply waited. Final, unlike the other
+				// refusals that precede the write: no replica may write it, so
+				// another offer would only walk the retry chain and come back
+				// as no_live_connection. An inbox push takes the ordinary
+				// route below — the publisher offers a proven miss to the
+				// member's other bot, which is still the right place for it.
+				return relayResult{outcome: outcomeDone, record: func() {
+					o.skippedFor(ctx, f.SessionID, skipInstallationInactive)
+				}}
+			}
 			// WHETHER THIS FRAME IS FINISHED IS SETTLED BEFORE ANY COUNTER
 			// MOVES. A frame that is owed another offer is still in flight,
 			// and counting it here counts it once per attempt: the dispatcher

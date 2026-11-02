@@ -91,6 +91,8 @@ Install Node.js 20+ and run `npm install -g @deepseek-ai/dsh`, then give it the 
 
 **Installing the profile.** Set `MULTICA_DSH_PROFILE_BUNDLE` to the bundle to install and the daemon adds it for you, or add it yourself with `dsh plugin --profile multica add <bundle>`. `<bundle>` is anything `dsh plugin` accepts — an npm package name, a directory, or a packed tarball — and Multica's own bridge lives at [multica-ai/dsh-multica-runtime](https://github.com/multica-ai/dsh-multica-runtime). It is not on a public npm registry yet ([multica#6936](https://github.com/multica-ai/multica/issues/6936)), so today a self-hosted team builds it from that repository and points the variable at the build directory, or at the tarball `npm pack` produces — the latter if the machine running the daemon is not the machine that built it. A package name becomes the simplest option once the bridge is published.
 
+**Migrating an existing profile.** Back up the profile and follow the bridge repository's README to build a bundle compatible with your DSH version. Install that directory or tarball manually, then ensure `dsh.profile.bundles` loads `@multica-ai/dsh-runtime`: replace `dsh-profile-multica` if present, or remove it if both bridges are listed. A dependency entry alone does not load the runtime. `MULTICA_DSH_PROFILE_BUNDLE` will not migrate an existing bridge configuration. Verify the result with `dsh --profile multica --probe`.
+
 <Callout type="warning">
 Prefer a bundle your own team publishes or builds: this value is installed into every daemon host's DSH home without further confirmation, so an unvetted third-party package is a supply-chain decision, not a convenience.
 </Callout>

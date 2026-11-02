@@ -33,6 +33,24 @@ func claudeTerminateGrace() time.Duration {
 	return 5 * time.Second
 }
 
+// claudeErrorResultGraceNanos optionally overrides, in nanoseconds, how long
+// claude may keep running after it reported an error result. Set via atomic
+// store in tests; zero keeps the default.
+var claudeErrorResultGraceNanos atomic.Int64
+
+// claudeErrorResultGrace bounds the wait for claude to exit after an error
+// result. With stdin closed the CLI still stays alive while any background
+// task it started is running, then opens a new turn when the task ends. After
+// an error result (a spent session limit, an API failure) that turn cannot
+// change the outcome, so the daemon stops waiting instead of holding the run
+// open for the task's lifetime.
+func claudeErrorResultGrace() time.Duration {
+	if n := claudeErrorResultGraceNanos.Load(); n > 0 {
+		return time.Duration(n)
+	}
+	return 10 * time.Second
+}
+
 // claudeBackend implements Backend by spawning the Claude Code CLI
 // with --output-format stream-json.
 type claudeBackend struct {
@@ -210,6 +228,36 @@ func (b *claudeBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 		unreadableAssistantCount := 0
 		controlErrors := make(chan error, 1)
 		var controlWrites sync.WaitGroup
+		var controlMu sync.Mutex
+		pendingControls := 0
+		closeRequested := false
+		closeAfterControls := func() {
+			if supplements != nil {
+				supplements.end()
+			}
+			controlMu.Lock()
+			defer controlMu.Unlock()
+			closeRequested = true
+			if pendingControls == 0 {
+				closeStdin()
+			}
+		}
+		var stopAfterErrorResultOnce sync.Once
+		// stopAfterErrorResult terminates a claude that outlives its error
+		// result past the grace period, the same way cancellation does.
+		stopAfterErrorResult := func() {
+			select {
+			case <-procDone:
+				return
+			case <-time.After(claudeErrorResultGrace()):
+			}
+			b.cfg.Logger.Warn("claude still running after an error result; terminating process group", "pid", cmd.Process.Pid)
+			signalProcessGroup(cmd, syscall.SIGTERM)
+			if !waitProcessGroupGone(cmd, claudeTerminateGrace()) {
+				signalProcessGroup(cmd, syscall.SIGKILL)
+			}
+			_ = stdout.Close()
+		}
 
 		// On cancellation / timeout, terminate claude (and every MCP server and
 		// tool subprocess it spawned) BEFORE unblocking the scanner. EOF stdin
@@ -303,7 +351,13 @@ func (b *claudeBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 						usage = resultUsage
 					}
 				}
-				closeStdin()
+				// Keep draining stdout while accepted control replies finish writing.
+				// Once those replies drain, stdin closes; requests arriving after that
+				// cannot be answered.
+				closeAfterControls()
+				if resultIsError || terminalReasonError != "" {
+					stopAfterErrorResultOnce.Do(func() { go stopAfterErrorResult() })
+				}
 			case "log":
 				if msg.Log != nil {
 					trySend(msgCh, Message{
@@ -317,9 +371,20 @@ func (b *claudeBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 				if supplements != nil {
 					reply, _ = supplements.prepareHook(msg)
 				}
+				controlMu.Lock()
+				pendingControls++
+				controlMu.Unlock()
 				controlWrites.Add(1)
 				go func(msg claudeSDKMessage, reply func(io.Writer) error) {
 					defer controlWrites.Done()
+					defer func() {
+						controlMu.Lock()
+						defer controlMu.Unlock()
+						pendingControls--
+						if closeRequested && pendingControls == 0 {
+							closeStdin()
+						}
+					}()
 					if reply == nil {
 						b.handleControlRequest(msg, inputWriter)
 						return
@@ -890,6 +955,12 @@ func (s *claudeUsageSnapshot) appendedCostStateUsage() (map[string]TokenUsage, b
 		return nil, false, errors.New("Claude session file shrank during execution")
 	}
 	return readLastClaudeCostStateUsage(f, s.offset, info.Size())
+}
+
+// ClaudeConfigDir resolves Claude's config directory using the same inherited
+// environment and task overrides as the backend's child process.
+func ClaudeConfigDir(extraEnv map[string]string, cwd string) (string, error) {
+	return claudeConfigDir(buildEnv(extraEnv), cwd)
 }
 
 func claudeConfigDir(env []string, cwd string) (string, error) {

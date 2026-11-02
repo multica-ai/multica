@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { Check, Cpu, History, Plug } from "lucide-react";
+import { Check, Cpu, History, Plug } from "@multica/ui/icons";
 import { cn } from "@multica/ui/lib/utils";
 import { CoachMark, DemoFrame, useDemoCopy, useStartWhenVisible } from "./demo-kit";
 

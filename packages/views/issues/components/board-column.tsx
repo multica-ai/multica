@@ -11,7 +11,7 @@ import {
   MoreHorizontal,
   Plus,
   UserMinus,
-} from "lucide-react";
+} from "@multica/ui/icons";
 import { useDroppable } from "@dnd-kit/core";
 import {
   SortableContext,
@@ -241,6 +241,7 @@ export const BoardColumn = memo(function BoardColumn({
         depth={0}
         childProgressMap={childProgressMap}
         projectMap={projectMap}
+        projectId={projectId}
         sortLabel={sortLabel}
         hierarchy={hierarchy}
       />
@@ -454,6 +455,7 @@ function BoardTreeItem({
   depth,
   childProgressMap,
   projectMap,
+  projectId,
   sortLabel,
   hierarchy,
 }: {
@@ -461,6 +463,7 @@ function BoardTreeItem({
   depth: number;
   childProgressMap?: Map<string, ChildProgress>;
   projectMap?: Map<string, Project>;
+  projectId?: string;
   sortLabel?: string | null;
   hierarchy?: BoardColumnHierarchy;
 }) {
@@ -489,6 +492,7 @@ function BoardTreeItem({
             depth={depth + 1}
             childProgressMap={childProgressMap}
             projectMap={projectMap}
+            projectId={projectId}
             sortLabel={sortLabel}
             hierarchy={hierarchy}
           />
@@ -534,7 +538,11 @@ function BoardTreeItem({
     <DraggableBoardCard
       issue={issue}
       childProgress={childProgressMap?.get(issue.id)}
-      project={issue.project_id ? projectMap?.get(issue.project_id) : undefined}
+      project={
+        issue.project_id && issue.project_id !== projectId
+          ? projectMap?.get(issue.project_id)
+          : undefined
+      }
       disableSorting={!!sortLabel}
       nested={
         hasChildren ? (

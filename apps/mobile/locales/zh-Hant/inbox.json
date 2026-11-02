@@ -2,7 +2,7 @@
   "title": "收件箱",
   "empty": {
     "title": "已處理全部通知",
-    "body": "通知和智慧體更新會顯示在這裡。"
+    "body": "通知和 AI 代理更新會顯示在這裡。"
   },
   "actions": {
     "mark_read": "標記已讀",
@@ -57,8 +57,8 @@
     "review_requested": "請求審查",
     "task_completed": "執行完成",
     "task_failed": "執行失敗",
-    "agent_blocked": "智慧體受阻",
-    "agent_completed": "智慧體已完成",
+    "agent_blocked": "AI 代理受阻",
+    "agent_completed": "AI 代理已完成",
     "reaction_added": "新增了表情",
     "quick_create_done": "快速建立完成",
     "quick_create_failed": "快速建立失敗",
@@ -73,7 +73,7 @@
     "set_due_date": "截止日期設為 {{date}}",
     "removed_due_date": "移除了截止日期",
     "reacted_with": "回應了 {{emoji}}",
-    "created_with_agent": "由智慧體建立：{{identifier}}",
+    "created_with_agent": "由 AI 代理建立：{{identifier}}",
     "failed_with_detail": "失敗：{{detail}}",
     "run_limit_blocked": "已達到上限，本次執行被阻止"
   },

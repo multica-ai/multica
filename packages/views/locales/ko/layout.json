@@ -11,7 +11,8 @@
     "usage": "분석",
     "runtimes": "런타임",
     "skills": "스킬",
-    "settings": "설정"
+    "settings": "설정",
+    "views": "뷰"
   },
   "tab": {
     "issue": "태스크",
@@ -25,6 +26,7 @@
     "runtime": "런타임",
     "attachment": "첨부파일",
     "create_agent": "에이전트 만들기",
+    "my_agents": "내 에이전트의 작업",
     "unknown": "알 수 없는 페이지"
   },
   "help": {
@@ -57,16 +59,120 @@
     "invitation_decline": "거절",
     "log_out": "로그아웃",
     "new_issue": "새 태스크",
-    "new_issue_shortcut": "C",
     "pinned_label": "고정됨",
-    "work_group": "업무",
-    "ai_team_group": "AI 팀",
     "show_more_pins": "{{count}}개 더 보기…",
-    "show_fewer_pins": "접기",
-    "unread_overflow": "99+",
-    "discord_card": {
-      "title": "Discord 참여하기",
-      "dismiss": "닫기"
+    "show_fewer_pins": "접기"
+  },
+  "spaces": {
+    "work": "작업",
+    "team": "팀"
+  },
+  "rail": {
+    "label": "앱 탐색",
+    "sheet_description": "스페이스와 워크스페이스를 전환합니다.",
+    "inbox": "인박스",
+    "work": "작업",
+    "team": "팀",
+    "chat": "채팅",
+    "autopilots": "자동화",
+    "switch_workspace": "워크스페이스 전환",
+    "invitation_from": "{{name}} 님이 초대했습니다",
+    "open_in_new_window": "새 창에서 열기",
+    "open_in_new_window_click": "클릭",
+    "open_in_other_window": "다른 창에서 열려 있음",
+    "in_other_window": "다른 창",
+    "all_workspaces_open": "모든 워크스페이스가 이미 창에 열려 있습니다"
+  },
+  "panels": {
+    "work": {
+      "my_agents": "내 에이전트의 작업",
+      "all_issues": "전체 태스크",
+      "views": "뷰",
+      "new_project": "새 프로젝트",
+      "new_issue_in_project": "{{name}}에 새 태스크",
+      "all_projects_other": "전체 프로젝트 {{count}}개",
+      "project_issues": "{{name}}의 태스크",
+      "project_issues_empty": "태스크가 없습니다",
+      "project_issues_error": "태스크를 불러오지 못했습니다",
+      "project_issues_settings": "프로젝트 태스크",
+      "settings_status": "상태",
+      "settings_assignee": "담당자",
+      "assignee_anyone": "모두",
+      "assignee_me": "나",
+      "assignee_my_agents": "내 에이전트",
+      "assignee_me_and_my_agents": "나와 내 에이전트",
+      "reset": "초기화",
+      "load_more": "더 보기",
+      "show_less": "간단히 보기",
+      "projects_settings": "프로젝트 표시",
+      "projects_ordering": "정렬",
+      "projects_order_manual": "수동",
+      "projects_order_name": "이름",
+      "projects_order_updated": "최근 업데이트",
+      "projects_order_created": "최근 생성",
+      "projects_show": "표시",
+      "projects_only_mine": "내가 리드하는 프로젝트만",
+      "projects_show_count": "미완료 태스크 수",
+      "new_view": "새 뷰",
+      "all_views": "모든 뷰",
+      "view_actions": "{{name}} 작업",
+      "view_copy_link": "링크 복사",
+      "view_remove": "사이드바에서 제거",
+      "view_rename": "이름 변경",
+      "view_duplicate": "복제",
+      "view_delete": "뷰 삭제"
+    },
+    "team": {
+      "new_agent": "새 에이전트",
+      "needs_attention": "확인 필요",
+      "stuck_other": "태스크 {{count}}개가 오프라인 런타임을 기다리는 중",
+      "working_now": "작업 중",
+      "running_tasks_other": "태스크 {{count}}개 실행 중",
+      "all_agents": "전체 에이전트",
+      "my_agents": "내 에이전트",
+      "squads_and_members": "스쿼드 및 멤버",
+      "members_other": "멤버 {{count}}명",
+      "resources": "리소스",
+      "runtimes_offline_other": "{{count}}개 오프라인",
+      "invite_member": "멤버 초대"
+    },
+    "autopilots": {
+      "all": "전체 오토파일럿",
+      "list": "오토파일럿",
+      "templates": "템플릿으로 시작"
     }
+  },
+  "account": {
+    "trigger": "계정",
+    "profile": "프로필",
+    "theme": "테마",
+    "themes": {
+      "light": "라이트",
+      "dark": "다크",
+      "system": "시스템"
+    },
+    "language": "언어",
+    "shortcuts": "키보드 단축키"
+  },
+  "collection": {
+    "filter": "필터",
+    "filter_count_other": "필터 {{count}}개",
+    "reset": "초기화",
+    "display": "표시 설정",
+    "selected_other": "{{count}}개 선택됨",
+    "clear_selection": "선택 해제",
+    "select_all": "모두 선택",
+    "select_row": "행 선택",
+    "row_actions": "행 작업",
+    "sort_by": "정렬",
+    "direction_asc": "오름차순",
+    "direction_desc": "내림차순",
+    "section_columns": "열",
+    "load_more": "더 불러오기",
+    "loading_more": "불러오는 중…"
+  },
+  "object_page": {
+    "toggle_panel": "오른쪽 사이드바 전환",
+    "properties": "속성"
   }
 }

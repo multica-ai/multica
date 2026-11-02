@@ -205,12 +205,23 @@ services:
       # as it ships; set it only behind a fake-IP proxy whose pool would
       # otherwise get every attachment refused. See .env.example.
       MULTICA_WECOM_MEDIA_ALLOW_CIDRS: ${MULTICA_WECOM_MEDIA_ALLOW_CIDRS:-}
+      # The WeCom-issued caller id the scan-code install flow sends as
+      # ?source=. Empty (the default) uses the built-in "multica"; set it only
+      # if WeCom issued your organisation its own source. Nothing but the QR
+      # install endpoints reads it.
+      MULTICA_WECOM_SOURCE_ID: ${MULTICA_WECOM_SOURCE_ID:-}
       # 1 = log every inbound and outbound WeCom frame, including the first
       # 120 runes of each message body, so a real-device session can be
       # checked against the server afterwards. Off unless set; turn it on only
       # for a debugging session and unset it when that session ends, because
       # what it records is user message content.
       MULTICA_WECOM_TRACE: ${MULTICA_WECOM_TRACE:-}
+      # Which language the bot's own copy is written in for readers whose
+      # language cannot be looked up — a group chat, or anyone not linked to a
+      # Multica account yet. A linked person reads their own profile language
+      # instead. zh-Hans (default) or en; an unrecognised value leaves the
+      # default in place and the resolved one is logged at boot.
+      MULTICA_WECOM_DEFAULT_LOCALE: ${MULTICA_WECOM_DEFAULT_LOCALE:-}
       # Telegram bot integration. MULTICA_TELEGRAM_SECRET_KEY is the
       # opt-in: unset = integration disabled. It decrypts the
       # per-installation bot token stored in channel_installation.config

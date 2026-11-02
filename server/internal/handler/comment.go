@@ -353,14 +353,11 @@ func (h *Handler) ListComments(w http.ResponseWriter, r *http.Request) {
 
 	var sinceTime pgtype.Timestamptz
 	if v := q.Get("since"); v != "" {
+		// RFC3339Nano parsing also accepts timestamps without fractional seconds.
 		t, err := time.Parse(time.RFC3339Nano, v)
 		if err != nil {
-			// Fall back to RFC3339 for backwards-compat with the original CLI.
-			t, err = time.Parse(time.RFC3339, v)
-			if err != nil {
-				writeError(w, http.StatusBadRequest, "invalid since parameter; expected RFC3339 format")
-				return
-			}
+			writeError(w, http.StatusBadRequest, "invalid since parameter; expected RFC3339 format")
+			return
 		}
 		sinceTime = pgtype.Timestamptz{Time: t, Valid: true}
 	}
@@ -489,11 +486,8 @@ func (h *Handler) ListComments(w http.ResponseWriter, r *http.Request) {
 	if beforeTimeStr != "" {
 		t, err := time.Parse(time.RFC3339Nano, beforeTimeStr)
 		if err != nil {
-			t, err = time.Parse(time.RFC3339, beforeTimeStr)
-			if err != nil {
-				writeError(w, http.StatusBadRequest, "invalid before parameter; expected RFC3339 format")
-				return
-			}
+			writeError(w, http.StatusBadRequest, "invalid before parameter; expected RFC3339 format")
+			return
 		}
 		beforeCursor = pgtype.Timestamptz{Time: t, Valid: true}
 		uuid, perr := util.ParseUUID(beforeIDStr)
@@ -2456,6 +2450,9 @@ func (h *Handler) mergeCommentIntoPendingTask(ctx context.Context, issue db.Issu
 	// The fold re-attributes the queued run to this comment's author; record that
 	// human's action now, since the run row keeps no history of who acted.
 	h.TaskService.RecordHumanDelegation(ctx, attr)
+	// The run's status is unchanged, so no lifecycle event tells clients that it
+	// now answers this comment.
+	h.TaskService.BroadcastTaskCoalesced(ctx, row)
 	return commentMergeSucceeded
 }
 

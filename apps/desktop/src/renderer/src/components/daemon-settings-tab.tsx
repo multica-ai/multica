@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, type ReactNode } from "react";
-import { AlertCircle, Info, LogIn } from "lucide-react";
+import { AlertCircle, Info, LogIn } from "@multica/ui/icons";
 import { Button } from "@multica/ui/components/ui/button";
 import { Switch } from "@multica/ui/components/ui/switch";
 import { cn } from "@multica/ui/lib/utils";

@@ -229,6 +229,37 @@ func TestListComments_RootsOnlyWithSinceReturnsNewTopLevelComments(t *testing.T)
 	}
 }
 
+// TestListComments_TimestampParamsAcceptSecondPrecision pins that RFC3339
+// timestamps without fractional seconds still parse after the single
+// RFC3339Nano parse, and that malformed values keep their 400 responses.
+func TestListComments_TimestampParamsAcceptSecondPrecision(t *testing.T) {
+	if testHandler == nil || testPool == nil {
+		t.Skip("database not available")
+	}
+	fx := newCommentListFixture(t)
+
+	v := url.Values{}
+	v.Set("roots_only", "true")
+	v.Set("since", fx.Base.Add(5*time.Minute).UTC().Format(time.RFC3339))
+	w, rows := listComments(t, fx.IssueID, v.Encode())
+	if w.Code != http.StatusOK {
+		t.Fatalf("second-precision since: status %d body %s", w.Code, w.Body.String())
+	}
+	eqIDs(t, ids(rows), []string{fx.Root2}, "second-precision since")
+
+	for _, tc := range []struct {
+		name, query, wantMessage string
+	}{
+		{"since", "since=2026-01-02+03:04:05", "invalid since parameter"},
+		{"before", cursorQuery(1, "2026-01-02T03:04", fx.Root1), "invalid before parameter"},
+	} {
+		w, _ := listComments(t, fx.IssueID, tc.query)
+		if w.Code != http.StatusBadRequest || !strings.Contains(w.Body.String(), tc.wantMessage) {
+			t.Fatalf("invalid %s: status %d body %s", tc.name, w.Code, w.Body.String())
+		}
+	}
+}
+
 // TestListComments_RootsOnlyReturnsThreadStats pins the orientation metadata:
 // each root returned by roots_only carries reply_count (recursive descendant
 // count) and last_activity_at (MAX created_at over the subtree), so an agent

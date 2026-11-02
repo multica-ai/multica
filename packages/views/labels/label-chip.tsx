@@ -1,7 +1,7 @@
 "use client";
 
 import type { Label } from "@multica/core/types";
-import { X } from "lucide-react";
+import { X } from "@multica/ui/icons";
 import { TooltipHint } from "@multica/ui/components/common/tooltip-hint";
 import { useT } from "../i18n";
 import { TruncatedTooltip } from "@multica/ui/components/common/truncated-tooltip";
