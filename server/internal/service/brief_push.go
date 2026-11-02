@@ -94,8 +94,12 @@ func (s *BriefPushService) RegisterNotifier(t channel.Type, n channel.Notifier) 
 	s.Notifiers[t] = n
 }
 
-// ChatAppSupported reports whether a chat app can receive a brief push.
+// ChatAppSupported reports whether a chat app can receive a brief push. A nil
+// service supports nothing, so a deployment that never wired it refuses cleanly.
 func (s *BriefPushService) ChatAppSupported(t channel.Type) bool {
+	if s == nil {
+		return false
+	}
 	_, ok := s.Notifiers[t]
 	return ok
 }

@@ -2275,6 +2275,10 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 			// Setup is idempotent: a second POST changes nothing.
 			r.Get("/api/office/setup", h.GetOfficeSetup)
 			r.Post("/api/office/setup", h.SetupOffice)
+			// The caller's brief push to a chat app (plan 9.10). Member scope only:
+			// the handler reads and writes the caller's own row and refuses agents.
+			r.Get("/api/office/brief-push", h.GetBriefPushPreference)
+			r.Put("/api/office/brief-push", h.UpdateBriefPushPreference)
 			// Briefs: the Secretary's reports to the boss. Who may publish is
 			// decided in the handler (secretary agent or admin member).
 			r.Route("/api/briefs", func(r chi.Router) {
