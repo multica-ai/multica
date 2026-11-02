@@ -87,6 +87,7 @@ var (
 		"schedule": "schedule",
 		"webhook":  "webhook",
 		"manual":   "manual",
+		"catchup":  "catchup",
 		"unknown":  "unknown",
 	}
 

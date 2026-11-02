@@ -852,6 +852,11 @@ func main() {
 	if err := schedulerMgr.Register(scheduler.ProposalExpiryJob(h)); err != nil {
 		slog.Error("scheduler: register proposal expiry", "error", err)
 	}
+	// Hourly: a daily brief the schedule missed is caught up once the workspace's
+	// catch-up hour has passed and the Secretary can run (plan 9.13).
+	if err := schedulerMgr.Register(scheduler.BriefCatchupJob(service.NewBriefCatchupService(queries, autopilotSvc))); err != nil {
+		slog.Error("scheduler: register brief catch-up", "error", err)
+	}
 	// Daily: each squad's proposal caps follow its acceptance rate over the last
 	// 60 days (plan 9.9). Pins are kept.
 	if err := schedulerMgr.Register(scheduler.SquadAttentionJob(h)); err != nil {
