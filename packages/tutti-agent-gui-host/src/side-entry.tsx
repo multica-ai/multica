@@ -47,7 +47,7 @@ export function SideEntryProvider({ children, ...entry }: Entry & { children: Re
     const contextMenu = (event: MouseEvent) => {
       if (event.defaultPrevented || !current.current.sessionId || !(event.target instanceof Element) || event.target.closest('input,textarea,[contenteditable="true"],img')) return;
       const link = event.target.closest("a[href]");
-      const url = link?.getAttribute("href");
+      const url = link?.getAttribute("data-agent-link-href") ?? link?.getAttribute("href");
       if (!url || !localResourceTarget(url)) return;
       event.preventDefault(); event.stopPropagation();
       void current.current.client.request("host.showFileContextMenu", {

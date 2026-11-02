@@ -3,6 +3,7 @@ import { act, type ButtonHTMLAttributes } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { SideEntryProvider } from "./side-entry";
+import { ResourceLinkProvider, ResourceMarkdownLink } from "./resource-link";
 import type { AgentGuiRpcClient } from "./protocol";
 
 vi.mock("@tutti-os/ui-system", () => ({ DropdownMenuItem: () => null }));
@@ -145,6 +146,31 @@ it.each(["https://example.com/download", "mention://issue/abc"])("leaves non-loc
   await act(async () => { link.dispatchEvent(event); });
   expect(event.defaultPrevented).toBe(false);
   expect(request).not.toHaveBeenCalled();
+});
+
+it.each(["issue", "agent", "project", "squad", "skill", "autopilot", "runtime"])("preserves the context menu of a rendered %s reference", async (kind) => {
+  const id = "01a186cf-49de-7308-b61e-7201c9849b94";
+  await act(async () => root.render(
+    <ResourceLinkProvider client={client} scope={{ workspaceId: "workspace", workspaceSlug: "chovy-multica" }} agents={[]}>
+      <SideEntryProvider client={client} handle={handle} sessionId="session-a" chinese enabled>
+        <ResourceMarkdownLink href={`mention://${kind}/${id}`} fallback={null}>CHOV-50</ResourceMarkdownLink>
+      </SideEntryProvider>
+    </ResourceLinkProvider>,
+  ));
+  const link = container.querySelector("a")!;
+  expect(link.getAttribute("href")).toMatch(/^\/chovy-multica\//);
+  const target = link.querySelector("span")!;
+  expect(target).not.toBeNull();
+  const event = new MouseEvent("contextmenu", { bubbles: true, cancelable: true });
+  await act(async () => { target.dispatchEvent(event); });
+  expect(request).not.toHaveBeenCalled();
+  expect(event.defaultPrevented).toBe(false);
+
+  await act(async () => { target.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true })); });
+  expect(request).toHaveBeenCalledExactlyOnceWith("host.openInternalResource", { href: link.getAttribute("href"), background: false });
+  request.mockClear();
+  await act(async () => { target.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true })); });
+  expect(request).toHaveBeenCalledExactlyOnceWith("host.openInternalResource", { href: link.getAttribute("href"), background: false });
 });
 
 it("shows file actions without a selection and reports lookup failures", async () => {
