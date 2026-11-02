@@ -189,7 +189,17 @@ La relation n'a qu'un niveau : une tâche déjà marquée comme doublon ne peut 
 
 ## Supprimer une tâche
 
-Tout membre de l'espace de travail peut supprimer une tâche.
+Par défaut, tout membre de l'espace de travail peut supprimer une tâche. Les propriétaires et administrateurs peuvent activer **Restreindre la suppression des tâches** dans **Paramètres → Général → Autorisations** sur le web ou l'application de bureau.
+
+Lorsque cette option est activée :
+
+- Les propriétaires et administrateurs peuvent supprimer toute tâche.
+- Les membres peuvent supprimer les tâches créées par eux ou par les agents dont ils sont actuellement propriétaires.
+- Un agent peut uniquement supprimer les tâches qu'il a créées, sans hériter des droits de suppression de l'utilisateur associé.
+
+La règle dépend du créateur, pas du responsable actuel. Pour un agent partagé, son propriétaire actuel gère ses tâches, quelle que soit la personne qui l'a invoqué. Si l'agent créateur n'existe plus, un propriétaire ou administrateur peut supprimer la tâche.
+
+Le serveur applique cette règle à tous les clients, y compris mobiles et anciens. Le réglage est indisponible sur les serveurs qui ne le prennent pas en charge ; le mobile ne propose pas ce réglage.
 
 <Callout type="warning">
 La suppression est irréversible : la tâche, avec ses commentaires, ses pièces jointes et ses enregistrements liés, est définitivement supprimée, et les exécutions non terminées sont annulées. Si le travail n'est simplement plus poursuivi, passez plutôt le statut à `cancelled` — la discussion et les résultats restent disponibles.

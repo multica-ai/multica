@@ -735,6 +735,10 @@
     "usage_help": "使用方法"
   },
   "workspace": {
+    "permissions_title": "權限",
+    "issue_deletion_policy_unsupported": "目前服務端尚不支援設定任務刪除權限。",
+    "restrict_issue_deletion": "限制任務刪除權限",
+    "restrict_issue_deletion_hint": "成員可刪除本人或本人擁有的智慧體建立的任務。owner 和 admin 可刪除任意任務。智慧體僅可刪除自己建立的任務。",
     "section_general": "工作區資訊",
     "logo_label": "工作區圖示",
     "change_logo_aria": "更換工作區圖示",

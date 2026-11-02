@@ -3912,3 +3912,25 @@ export const EMPTY_LIST_LARK_INSTALLATIONS_RESPONSE: ListLarkInstallationsRespon
   installations: [],
   configured: false,
 };
+
+// Policy fields are separate from replaceable settings and absent on older servers.
+export const WorkspaceSchema = z.object({
+  id: z.string(),
+  name: z.string(),
+  slug: z.string(),
+  description: z.string().nullable().default(null),
+  context: z.string().nullable().default(null),
+  settings: z.record(z.string(), z.unknown()).default({}),
+  restrict_issue_deletion: z.boolean().catch(true).optional(),
+  issue_deletion_policy_supported: z.boolean().catch(false).optional(),
+  repos: z.array(z.object({ url: z.string(), description: z.string().optional() })).default([]),
+  issue_prefix: z.string().default(""),
+  avatar_url: z.string().nullable().default(null),
+  created_at: z.string().default(""),
+  updated_at: z.string().default(""),
+});
+
+export const WorkspaceIssueDeletionPolicySchema = WorkspaceSchema.extend({
+  restrict_issue_deletion: z.boolean(),
+  issue_deletion_policy_supported: z.literal(true),
+});

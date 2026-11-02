@@ -96,17 +96,19 @@ func normalizeIssuePrefix(raw string) (string, bool) {
 const issuePrefixFormatError = "issue prefix must be 1-10 uppercase letters or digits"
 
 type WorkspaceResponse struct {
-	ID          string  `json:"id"`
-	Name        string  `json:"name"`
-	Slug        string  `json:"slug"`
-	Description *string `json:"description"`
-	Context     *string `json:"context"`
-	Settings    any     `json:"settings"`
-	Repos       any     `json:"repos"`
-	IssuePrefix string  `json:"issue_prefix"`
-	AvatarURL   *string `json:"avatar_url"`
-	CreatedAt   string  `json:"created_at"`
-	UpdatedAt   string  `json:"updated_at"`
+	ID                           string  `json:"id"`
+	Name                         string  `json:"name"`
+	Slug                         string  `json:"slug"`
+	Description                  *string `json:"description"`
+	Context                      *string `json:"context"`
+	Settings                     any     `json:"settings"`
+	RestrictIssueDeletion        bool    `json:"restrict_issue_deletion"`
+	IssueDeletionPolicySupported bool    `json:"issue_deletion_policy_supported"`
+	Repos                        any     `json:"repos"`
+	IssuePrefix                  string  `json:"issue_prefix"`
+	AvatarURL                    *string `json:"avatar_url"`
+	CreatedAt                    string  `json:"created_at"`
+	UpdatedAt                    string  `json:"updated_at"`
 }
 
 func (h *Handler) workspaceToResponse(w db.Workspace) WorkspaceResponse {
@@ -125,17 +127,19 @@ func (h *Handler) workspaceToResponse(w db.Workspace) WorkspaceResponse {
 		repos = []any{}
 	}
 	return WorkspaceResponse{
-		ID:          uuidToString(w.ID),
-		Name:        w.Name,
-		Slug:        w.Slug,
-		Description: textToPtr(w.Description),
-		Context:     textToPtr(w.Context),
-		Settings:    settings,
-		Repos:       repos,
-		IssuePrefix: w.IssuePrefix,
-		AvatarURL:   h.resolveAvatarURLPtr(textToPtr(w.AvatarUrl)),
-		CreatedAt:   timestampToString(w.CreatedAt),
-		UpdatedAt:   timestampToString(w.UpdatedAt),
+		ID:                           uuidToString(w.ID),
+		Name:                         w.Name,
+		Slug:                         w.Slug,
+		Description:                  textToPtr(w.Description),
+		Context:                      textToPtr(w.Context),
+		Settings:                     settings,
+		RestrictIssueDeletion:        w.RestrictIssueDeletion,
+		IssueDeletionPolicySupported: true,
+		Repos:                        repos,
+		IssuePrefix:                  w.IssuePrefix,
+		AvatarURL:                    h.resolveAvatarURLPtr(textToPtr(w.AvatarUrl)),
+		CreatedAt:                    timestampToString(w.CreatedAt),
+		UpdatedAt:                    timestampToString(w.UpdatedAt),
 	}
 }
 

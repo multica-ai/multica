@@ -735,6 +735,10 @@
     "usage_help": "使い方"
   },
   "workspace": {
+    "permissions_title": "権限",
+    "issue_deletion_policy_unsupported": "このサーバーはタスク削除権限の設定に対応していません。",
+    "restrict_issue_deletion": "タスクの削除を制限",
+    "restrict_issue_deletion_hint": "メンバーは自分または所有するエージェントが作成したタスクを削除できます。owner と admin はすべてのタスクを削除できます。エージェントは自分が作成したタスクのみ削除できます。",
     "section_general": "ワークスペース情報",
     "logo_label": "ワークスペースのアイコン",
     "name_label": "名前",

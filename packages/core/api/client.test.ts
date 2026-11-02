@@ -3171,3 +3171,51 @@ describe("ApiClient shared credential across windows", () => {
     expect(onUnauthorized).toHaveBeenCalledTimes(1);
   });
 });
+
+describe("workspace deletion policy responses", () => {
+  it("reads the separate policy and saves it through the dedicated endpoint", async () => {
+    const workspace = {
+      id: "ws-1", name: "Example", slug: "example", settings: { unrelated: "kept" },
+      restrict_issue_deletion: true, issue_deletion_policy_supported: true,
+    };
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(new Response(JSON.stringify([workspace]), { status: 200 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify(workspace), { status: 200 }));
+    vi.stubGlobal("fetch", fetchMock);
+    const client = new ApiClient("https://api.example.test");
+    expect((await client.listWorkspaces())[0]?.restrict_issue_deletion).toBe(true);
+    expect((await client.updateWorkspaceIssueDeletionPolicy("ws-1", true)).settings).toEqual(workspace.settings);
+    expect(fetchMock.mock.calls[1]?.[0]).toBe("https://api.example.test/api/workspaces/ws-1/issue-deletion-policy");
+    expect(fetchMock.mock.calls[1]?.[1]?.method).toBe("PATCH");
+    expect(JSON.parse(fetchMock.mock.calls[1]?.[1]?.body)).toEqual({ restrict_issue_deletion: true });
+  });
+  it("leaves support absent on older servers instead of inferring it from settings", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(JSON.stringify([
+      { id: "old", name: "Old", slug: "old", settings: { restrict_issue_deletion: true } },
+      { id: "bad", name: "Bad", slug: "bad", restrict_issue_deletion: "false", issue_deletion_policy_supported: "true" },
+    ]), { status: 200 })));
+    const list = await new ApiClient("https://api.example.test").listWorkspaces();
+    expect(list[0]?.restrict_issue_deletion).toBeUndefined();
+    expect(list[0]?.issue_deletion_policy_supported).toBeUndefined();
+    expect(list[1]?.restrict_issue_deletion).toBe(true);
+    expect(list[1]?.issue_deletion_policy_supported).toBe(false);
+  });
+  it.each([
+    {},
+    { restrict_issue_deletion: true },
+    { restrict_issue_deletion: "true", issue_deletion_policy_supported: true },
+    { restrict_issue_deletion: false, issue_deletion_policy_supported: true },
+  ])("rejects an unconfirmed or malformed policy save: %j", async (fields) => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(JSON.stringify({
+      id: "ws-1", name: "Example", slug: "example", ...fields,
+    }), { status: 200 })));
+    await expect(new ApiClient("https://api.example.test").updateWorkspaceIssueDeletionPolicy("ws-1", true)).rejects.toThrow("Invalid issue deletion policy response");
+  });
+  it("does not fall back to generic settings when an old server rejects the endpoint", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({error: "not found"}), { status: 404 }));
+    vi.stubGlobal("fetch", fetchMock);
+    await expect(new ApiClient("https://api.example.test").updateWorkspaceIssueDeletionPolicy("ws-1", true)).rejects.toBeInstanceOf(ApiError);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(fetchMock.mock.calls[0]?.[0]).toBe("https://api.example.test/api/workspaces/ws-1/issue-deletion-policy");
+  });
+});

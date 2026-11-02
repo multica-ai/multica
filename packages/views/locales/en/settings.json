@@ -740,6 +740,10 @@
     "usage_help": "Usage"
   },
   "workspace": {
+    "permissions_title": "Permissions",
+    "issue_deletion_policy_unsupported": "This server does not support configuring issue deletion permissions.",
+    "restrict_issue_deletion": "Restrict issue deletion",
+    "restrict_issue_deletion_hint": "Members can delete issues they created or that their agents created. Owners and admins can delete any issue. Agents can delete only issues they created.",
     "section_general": "Workspace details",
     "logo_label": "Workspace logo",
     "change_logo_aria": "Change workspace logo",
