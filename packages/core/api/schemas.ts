@@ -55,6 +55,7 @@ import type {
   IssuePullRequestsResponse,
   InboxItem,
   InboxWorkspaceUnread,
+  IssueUnread,
   Label,
   MemberWithUser,
   IssueProperty,
@@ -718,6 +719,30 @@ export const EMPTY_ISSUE_VIEW_PREFERENCE: IssueViewPreference = {
   prefs: { hidden: [], order: [] },
   updated_at: "",
 };
+
+/**
+ * The `sidebar_projects` preference document. Another client version may have
+ * saved values this one does not know; every field that does not parse comes
+ * out undefined so the caller's default stands in for it.
+ */
+export const SidebarProjectPrefsDocSchema = z.object({
+  projects: z.object({
+    ordering: z.enum(["manual", "name", "updated", "created"]).optional().catch(undefined),
+    statuses: z.array(z.string()).optional().catch(undefined),
+    onlyMine: z.boolean().optional().catch(undefined),
+    showCount: z.boolean().optional().catch(undefined),
+  }).catch({}),
+  issues: z.object({
+    sortBy: z.enum(["updated_at", "created_at", "priority", "status", "title", "due_date"]).optional().catch(undefined),
+    sortDirection: z.enum(["asc", "desc"]).optional().catch(undefined),
+    hiddenStatuses: z.array(z.string()).nullable().optional().catch(undefined),
+    assignee: z.enum(["anyone", "me", "my_agents", "me_and_my_agents"]).optional().catch(undefined),
+    showSubIssues: z.boolean().optional().catch(undefined),
+  }).catch({}),
+  order: z.array(z.unknown()).catch([]).transform((ids) => ids.filter((id): id is string => typeof id === "string")),
+});
+
+export type SidebarProjectPrefsDoc = z.infer<typeof SidebarProjectPrefsDocSchema>;
 
 export interface CreateIssueViewRequest {
   name: string;
@@ -2735,6 +2760,31 @@ export const InboxUnreadSummarySchema = z.array(
 );
 
 export const EMPTY_INBOX_UNREAD_SUMMARY: InboxWorkspaceUnread[] = [];
+
+// The viewer's unread issues (`/api/issues/unread` GET), behind the sidebar's
+// unread dot. `outcome` stays a string so a future kind still lights the dot;
+// on malformed JSON parseWithFallback returns the empty list, which hides it.
+
+export const IssueUnreadPageSchema = z
+  .object({
+    items: z.array(
+      z
+        .object({
+          issue_id: z.string(),
+          outcome: z.string(),
+          agent_id: z.string().nullish().transform((v) => v ?? null),
+          created_at: z.string(),
+        })
+        .loose(),
+    ),
+    next_cursor: z.string().nullish().transform((v) => v ?? null),
+  })
+  .loose();
+
+export const EMPTY_ISSUE_UNREAD_PAGE: { items: IssueUnread[]; next_cursor: string | null } = {
+  items: [],
+  next_cursor: null,
+};
 
 // Inbox items (`/api/inbox` and `/api/inbox/archived` GET).
 // Lenient per the usual rules: `severity` / `type` / `recipient_type` stay

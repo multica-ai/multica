@@ -42,10 +42,10 @@ export function TimeRangeFilter({
       <DropdownMenuTrigger
         render={
           <Button
-            variant="outline"
+            variant="ghost"
             size="sm"
             aria-label={t(($) => $.filter.period_label)}
-            className="gap-1 px-2.5"
+            className="h-7 gap-1.5 px-2 text-body"
           >
             <CalendarDays className="size-3.5 text-muted-foreground" />
             <span className="tabular-nums">{current.label}</span>
@@ -79,10 +79,10 @@ export function TimeRangeFilter({
  * A single-level dropdown, deliberately not a generic "Filter" menu: with one
  * dimension, a wrapper menu only hides what is filterable behind an extra
  * hover. The trigger states the current value like `TimeRangeFilter` does:
- * a neutral outline throughout, showing the selected project's own icon and
- * name once narrowed — the named value is the active-state signal, no filled
- * tier. If a second dimension ships (agent, model, runtime), fold this back
- * into a combined menu in the `IssueDisplayControls` grammar.
+ * a quiet ghost control throughout, showing the selected project's own icon
+ * and name once narrowed — the named value is the active-state signal, no
+ * filled tier. If a second dimension ships (agent, model, runtime), fold this
+ * back into a combined menu in the `IssueDisplayControls` grammar.
  */
 export function ProjectFilter({
   projects,
@@ -106,15 +106,15 @@ export function ProjectFilter({
       <DropdownMenuTrigger
         render={
           <Button
-            variant="outline"
+            variant="ghost"
             size="sm"
             aria-label={t(($) => $.filter.project_label)}
-            className={selected ? "gap-1 px-2.5" : "gap-1 px-2.5 text-muted-foreground"}
+            className="h-7 gap-1.5 px-2 text-body"
           >
             {selected ? (
               <ProjectIcon project={selected} size="sm" />
             ) : (
-              <FolderKanban className="size-3.5" />
+              <FolderKanban className="size-3.5 text-muted-foreground" />
             )}
             <span className="max-w-40 truncate">
               {selected ? selected.title : allLabel}

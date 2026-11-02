@@ -13,6 +13,7 @@
  * Chat) rides in the query string, so it is parsed too — the URL is the single
  * source of truth for what a tab has open, including which item.
  */
+import { isMyAgentsSearch } from "./paths";
 import { pageForSegment, type WorkspacePageKey } from "./route-icons";
 
 export type TabActorType = "agent" | "member" | "squad";
@@ -20,6 +21,8 @@ export type TabActorType = "agent" | "member" | "squad";
 export type TabSubject =
   /** A collection or tool page with no specific resource. */
   | { kind: "page"; page: WorkspacePageKey }
+  /** My agents' work: the My issues route's `?scope=agents`. */
+  | { kind: "myAgents" }
   /** A single issue detail. */
   | { kind: "issue"; id: string }
   /** A single project detail. */
@@ -79,7 +82,9 @@ export function parseTabSubject(url: string): TabSubject {
     case "issues":
       return id ? { kind: "issue", id } : { kind: "page", page: "issues" };
     case "my-issues":
-      return { kind: "page", page: "myIssues" };
+      return isMyAgentsSearch(query) ? { kind: "myAgents" } : { kind: "page", page: "myIssues" };
+    case "views":
+      return { kind: "page", page: "views" };
     case "projects":
       return id ? { kind: "project", id } : { kind: "page", page: "projects" };
     case "autopilots":
@@ -141,6 +146,8 @@ export function tabSubjectKey(subject: TabSubject): string {
   switch (subject.kind) {
     case "page":
       return `page:${subject.page}`;
+    case "myAgents":
+      return "my-agents";
     case "issue":
       return `issue:${subject.id}`;
     case "project":

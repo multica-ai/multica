@@ -3,15 +3,16 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import type { ComponentProps, ReactNode } from "react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { render, screen, fireEvent, waitFor } from "@testing-library/react";
+import { render, screen, fireEvent, waitFor, within } from "@testing-library/react";
 import type { AgentRuntime, RuntimeProfile } from "@multica/core/types";
 import { I18nProvider } from "@multica/core/i18n/react";
 import enCommon from "../../locales/en/common.json";
+import enLayout from "../../locales/en/layout.json";
 import enRuntimes from "../../locales/en/runtimes.json";
 import enAgents from "../../locales/en/agents.json";
 
 const TEST_RESOURCES = {
-  en: { common: enCommon, runtimes: enRuntimes, agents: enAgents },
+  en: { common: enCommon, layout: enLayout, runtimes: enRuntimes, agents: enAgents },
 };
 
 const mockUpdateRuntime = vi.hoisted(() => vi.fn());
@@ -145,14 +146,19 @@ vi.mock("./provider-logo", () => ({ ProviderLogo: () => null }));
 vi.mock("./usage-section", () => ({
   UsageSection: () => <div data-testid="usage-section" />,
 }));
-vi.mock("./shared", () => ({ HealthBadge: () => null }));
+vi.mock("./shared", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("./shared")>()),
+  HealthBadge: () => null,
+}));
 vi.mock("../../agents/presence", () => ({
   availabilityConfig: { offline: { dotClass: "", textClass: "" } },
   workloadConfig: { idle: { icon: () => null, textClass: "" } },
 }));
 vi.mock("../../common/actor-avatar", () => ({ ActorAvatar: () => null }));
 vi.mock("../../navigation", () => ({
-  AppLink: ({ children }: { children: ReactNode }) => <>{children}</>,
+  AppLink: ({ href, children }: { href: string; children: ReactNode }) => (
+    <a href={href}>{children}</a>
+  ),
   useNavigation: () => ({ push: vi.fn(), replace: vi.fn() }),
 }));
 
@@ -256,14 +262,33 @@ describe("RuntimeDetail visibility section", () => {
       }),
     );
 
-    fireEvent.click(
-      screen.getByRole("button", { name: "Technical details" }),
-    );
-
+    expect(screen.getByText("Daemon CLI")).toBeInTheDocument();
     expect(screen.getByText("0.3.17")).toBeInTheDocument();
     expect(
       screen.queryByRole("button", { name: "Update" }),
     ).not.toBeInTheDocument();
+  });
+
+  it("lays the runtime out as one header, body sections and a properties panel", () => {
+    renderDetail(
+      makeRuntime({ device_info: "host.local · 2.1.121 (Claude Code)" }),
+      { machineHref: "/runtimes/local:daemon-1", machineLabel: "Studio Mac" },
+    );
+
+    expect(screen.getAllByRole("banner")).toHaveLength(1);
+    expect(screen.getByRole("link", { name: "Runtimes" })).toHaveAttribute("href", "/runtimes");
+    expect(screen.getByRole("link", { name: "Studio Mac" })).toHaveAttribute(
+      "href",
+      "/runtimes/local:daemon-1",
+    );
+    expect(screen.getByRole("heading", { level: 1 })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { level: 2, name: /Agents/ })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { level: 2, name: "Usage" })).toBeInTheDocument();
+    expect(screen.getByText("No agents are bound to this runtime yet.")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Properties" })).toBeInTheDocument();
+    expect(screen.getByText("host.local")).toBeInTheDocument();
+    expect(screen.getByText("2.1.121 (Claude Code)")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Toggle right sidebar" })).toBeInTheDocument();
   });
 
   it("uses the provider name when the runtime alias is the machine name", () => {
@@ -399,7 +424,7 @@ describe("RuntimeDetail visibility section", () => {
     expect(screen.queryByText("Public")).not.toBeInTheDocument();
   });
 
-  it("hides usage from a workspace admin viewing another member's private runtime", () => {
+  it("hides usage from a workspace admin viewing another member's private runtime", async () => {
     mockQueryData.members = [
       { user_id: "user-me", role: "admin" },
       { user_id: "someone-else", role: "member" },
@@ -410,9 +435,7 @@ describe("RuntimeDetail visibility section", () => {
     );
 
     expect(screen.queryByTestId("usage-section")).not.toBeInTheDocument();
-    expect(
-      screen.getByRole("button", { name: /Delete runtime/i }),
-    ).toBeInTheDocument();
+    expect(await openDeleteItem()).toBeInTheDocument();
   });
 
   it("shows usage to a workspace admin viewing another member's public runtime", () => {
@@ -441,9 +464,9 @@ describe("RuntimeDetail visibility section", () => {
 
   // MUL-3352: an owner viewing an online local (self-healing) runtime
   // used to see a disabled Delete button with only a hover tooltip
-  // explaining why. The new contract: the button is always clickable
+  // explaining why. The new contract: the action is always clickable
   // for owner/admin; the dialog now carries the self-heal warning.
-  it("renders an enabled Delete runtime button for an owner on a self-healing local runtime", () => {
+  it("offers an enabled Delete runtime action for an owner on a self-healing local runtime", async () => {
     renderDetail(
       makeRuntime({
         owner_id: "user-me",
@@ -451,13 +474,10 @@ describe("RuntimeDetail visibility section", () => {
         status: "online",
       }),
     );
-    const btn = screen.getByRole("button", {
-      name: /Delete runtime/i,
-    }) as HTMLButtonElement;
-    expect(btn.disabled).toBe(false);
+    expect(await openDeleteItem()).not.toHaveAttribute("aria-disabled", "true");
   });
 
-  it("hides the Delete runtime button entirely for callers who cannot edit", () => {
+  it("hides the Delete runtime action entirely for callers who cannot edit", () => {
     renderDetail(
       makeRuntime({
         owner_id: "someone-else",
@@ -466,8 +486,10 @@ describe("RuntimeDetail visibility section", () => {
       }),
     );
     expect(
-      screen.queryByRole("button", { name: /Delete runtime/i }),
+      within(screen.getByRole("banner")).queryByRole("button", { name: "More actions" }),
     ).not.toBeInTheDocument();
+    expect(screen.queryByText("Delete runtime")).not.toBeInTheDocument();
+    expect(screen.getByText("Read-only")).toBeInTheDocument();
   });
 
   it("routes custom runtime deletion through the profile delete dialog for admins", async () => {
@@ -484,9 +506,9 @@ describe("RuntimeDetail visibility section", () => {
       }),
     );
 
-    fireEvent.click(screen.getByRole("button", { name: /Delete runtime/i }));
+    fireEvent.click(await openDeleteItem());
     expect(
-      screen.getByText("Delete custom runtime from workspace?"),
+      await screen.findByText("Delete custom runtime from workspace?"),
     ).toBeInTheDocument();
     expect(
       screen.getByRole("alertdialog", {
@@ -514,7 +536,14 @@ describe("RuntimeDetail visibility section", () => {
     );
 
     expect(
-      screen.queryByRole("button", { name: /Delete runtime/i }),
+      within(screen.getByRole("banner")).queryByRole("button", { name: "More actions" }),
     ).not.toBeInTheDocument();
   });
 });
+
+async function openDeleteItem() {
+  fireEvent.click(
+    within(screen.getByRole("banner")).getByRole("button", { name: "More actions" }),
+  );
+  return screen.findByRole("menuitem", { name: /Delete runtime/i });
+}

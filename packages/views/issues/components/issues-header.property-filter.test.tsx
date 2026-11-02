@@ -79,12 +79,21 @@ function renderFilterMenu(props: IssueProperty[], propertyFilters: IssueViewStat
   return { store, ...view };
 }
 
+/** The submenu's value input, not the menu's own search box. */
+function valueInput() {
+  const [input] = screen
+    .getAllByRole("textbox")
+    .filter((element) => !element.closest("[data-filter-search]"));
+  if (!input) throw new Error("value input not found");
+  return input;
+}
+
 async function openPropertySubmenu(name: string) {
   fireEvent.click(screen.getByRole("button", { name: "Filter" }));
   const trigger = await screen.findByRole("menuitem", { name: new RegExp(name) });
   fireEvent.click(trigger);
   await waitFor(() =>
-    expect(screen.getByRole("textbox")).toBeInTheDocument(),
+    expect(valueInput()).toBeInTheDocument(),
   );
 }
 
@@ -142,7 +151,7 @@ describe("IssueFilterMenu scalar property filter", () => {
     const { store } = renderFilterMenu([textProperty(PROP, "Note")]);
     await openPropertySubmenu("Note");
 
-    const input = screen.getByRole("textbox");
+    const input = valueInput();
     await userEvent.type(input, "hello");
 
     // The regression: Base UI's menu popup stops every printable key, so the
@@ -156,7 +165,7 @@ describe("IssueFilterMenu scalar property filter", () => {
     const { store } = renderFilterMenu([textProperty(PROP, "Note")]);
     await openPropertySubmenu("Note");
 
-    await userEvent.type(screen.getByRole("textbox"), "hello{Enter}");
+    await userEvent.type(valueInput(), "hello{Enter}");
 
     expect(store.getState().propertyFilters).toEqual({ [PROP]: ["hello"] });
   });
@@ -165,7 +174,7 @@ describe("IssueFilterMenu scalar property filter", () => {
     const { store } = renderFilterMenu([textProperty(PROP, "Note")]);
     await openPropertySubmenu("Note");
 
-    const input = screen.getByRole("textbox");
+    const input = valueInput();
     await userEvent.type(input, "hello");
     fireEvent.blur(input);
 
@@ -178,7 +187,7 @@ describe("IssueFilterMenu scalar property filter", () => {
     const { store } = renderFilterMenu([textProperty(PROP, "Note")]);
     await openPropertySubmenu("Note");
 
-    const input = screen.getByRole("textbox");
+    const input = valueInput();
     await userEvent.type(input, "hello{Enter}");
     expect(store.getState().propertyFilters).toEqual({ [PROP]: ["hello"] });
 
@@ -199,7 +208,7 @@ describe("IssueFilterMenu scalar property filter", () => {
     await userEvent.click(screen.getByRole("menuitemcheckbox", { name: /No value/ }));
     expect(store.getState().propertyFilters).toEqual({ [PROP]: ["__none__"] });
 
-    await userEvent.type(screen.getByRole("textbox"), "abc{Enter}");
+    await userEvent.type(valueInput(), "abc{Enter}");
     expect(store.getState().propertyFilters).toEqual({ [PROP]: ["abc", "__none__"] });
   });
 
@@ -207,16 +216,16 @@ describe("IssueFilterMenu scalar property filter", () => {
     const { store } = renderFilterMenu([textProperty(PROP, "Note")]);
     await openPropertySubmenu("Note");
 
-    await userEvent.type(screen.getByRole("textbox"), "abc");
+    await userEvent.type(valueInput(), "abc");
     // Clicking the checkbox blurs the input first; the blur guard must skip the
     // premature commit so the checkbox reads the pre-blur state and the draft
     // stays uncommitted in the input.
     await userEvent.click(screen.getByRole("menuitemcheckbox", { name: /No value/ }));
     expect(store.getState().propertyFilters).toEqual({ [PROP]: ["__none__"] });
-    expect(screen.getByRole("textbox")).toHaveValue("abc");
+    expect(valueInput()).toHaveValue("abc");
 
     // Enter commits the draft as another member of the OR-set.
-    await userEvent.type(screen.getByRole("textbox"), "{Enter}");
+    await userEvent.type(valueInput(), "{Enter}");
     expect(store.getState().propertyFilters).toEqual({ [PROP]: ["abc", "__none__"] });
   });
 
@@ -231,7 +240,7 @@ describe("IssueFilterMenu scalar property filter", () => {
     const contains = screen.getByRole("radio", { name: "contains" });
     await userEvent.click(contains);
     expect(contains).toBeChecked();
-    await userEvent.type(screen.getByRole("textbox"), "hello{Enter}");
+    await userEvent.type(valueInput(), "hello{Enter}");
 
     expect(store.getState().propertyFilters).toEqual({
       [PROP]: [{ op: "contains", value: "hello" }],
@@ -242,7 +251,7 @@ describe("IssueFilterMenu scalar property filter", () => {
     const { store } = renderFilterMenu([textProperty(PROP, "Note")]);
     await openPropertySubmenu("Note");
 
-    await userEvent.type(screen.getByRole("textbox"), "hello");
+    await userEvent.type(valueInput(), "hello");
     await userEvent.click(screen.getByRole("radio", { name: "contains" }));
 
     expect(store.getState().propertyFilters).toEqual({
@@ -254,7 +263,7 @@ describe("IssueFilterMenu scalar property filter", () => {
     const { store } = renderFilterMenu([textProperty(PROP, "Note")]);
     await openPropertySubmenu("Note");
 
-    await userEvent.type(screen.getByRole("textbox"), "hello");
+    await userEvent.type(valueInput(), "hello");
     await userEvent.click(screen.getByRole("radio", { name: "contains" }));
     expect(store.getState().propertyFilters).toEqual({
       [PROP]: [{ op: "contains", value: "hello" }],

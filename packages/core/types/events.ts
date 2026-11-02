@@ -75,12 +75,15 @@ export type WSEventType =
   | "label:updated"
   | "label:deleted"
   | "issue_labels:changed"
+  | "issue_unread:changed"
   | "issue_metadata:changed"
   | "issue_properties:changed"
   | "property:created"
   | "property:updated"
   | "issue_status:changed"
   | "issue_workflow:changed"
+  | "issue_view:changed"
+  | "issue_view_preference:changed"
   | "pin:created"
   | "pin:deleted"
   | "pin:reordered"
@@ -176,6 +179,21 @@ export interface IssueWorkflowChangedPayload {
   action?: "created" | "updated" | "deleted";
 }
 
+/**
+ * A saved view was created, edited or deleted. Clients re-read their views;
+ * the payload names the view only, so a view going private carries nothing out.
+ */
+export interface IssueViewChangedPayload {
+  view_id: string;
+  action?: "created" | "updated" | "deleted";
+}
+
+/** One of this member's own preference documents was saved, on any device. */
+export interface IssueViewPreferenceChangedPayload {
+  scope_type: string;
+  scope_id: string | null;
+}
+
 export interface AgentStatusPayload {
   agent: Agent;
 }
@@ -216,6 +234,15 @@ export interface InboxUnarchivedPayload {
   item_id: string;
   issue_id: string | null;
   recipient_id: string;
+}
+
+/** Personal: the recipient's unread mark on an issue changed. Workspace-tagged
+ *  because personal events reach every connection the user has. */
+export interface IssueUnreadChangedPayload {
+  workspace_id: string;
+  recipient_id: string;
+  issue_id: string;
+  unread: boolean;
 }
 
 export interface InboxBatchReadPayload {
@@ -591,11 +618,14 @@ export interface WSEventPayloadMap {
   "issue:deleted": IssueDeletedPayload;
   "issue_attachments:changed": IssueAttachmentsChangedPayload;
   "issue_labels:changed": IssueLabelsChangedPayload;
+  "issue_unread:changed": IssueUnreadChangedPayload;
   "issue_properties:changed": IssuePropertiesChangedPayload;
   "property:created": PropertyChangedPayload;
   "property:updated": PropertyChangedPayload;
   "issue_status:changed": IssueStatusChangedPayload;
   "issue_workflow:changed": IssueWorkflowChangedPayload;
+  "issue_view:changed": IssueViewChangedPayload;
+  "issue_view_preference:changed": IssueViewPreferenceChangedPayload;
   "issue_reaction:added": IssueReactionAddedPayload;
   "issue_reaction:removed": IssueReactionRemovedPayload;
   "comment:created": CommentCreatedPayload;
