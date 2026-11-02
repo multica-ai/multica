@@ -154,7 +154,7 @@
     "runtime_required_toast": "請先繫結執行時，再執行該 AI 代理。",
     "assign_work": "分配工作",
     "more_actions_aria": "AI 代理操作",
-    "advanced_settings": "進階設定",
+    "settings": "設定",
     "copy_link": "複製連結",
     "copy_id": "複製 AI 代理 ID",
     "link_copied_toast": "連結已複製",
@@ -209,7 +209,8 @@
   "panel": {
     "status": "狀態",
     "runs_7d": "執行（7 天）",
-    "edit_access_aria": "訪問權限：{{value}}。變更訪問權限"
+    "edit_access_aria": "訪問權限：{{value}}。變更訪問權限",
+    "all_settings": "全部設定"
   },
   "skill_attach": {
     "trigger_aria": "附加工作區 skill",

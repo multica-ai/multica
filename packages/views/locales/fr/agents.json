@@ -163,7 +163,7 @@
     "runtime_required_toast": "Associez un runtime avant d'exécuter cet agent.",
     "assign_work": "Assigner du travail",
     "more_actions_aria": "Actions de l'agent",
-    "advanced_settings": "Paramètres avancés",
+    "settings": "Paramètres",
     "copy_link": "Copier le lien",
     "copy_id": "Copier l'ID de l'agent",
     "link_copied_toast": "Lien copié",
@@ -221,7 +221,8 @@
   "panel": {
     "status": "Statut",
     "runs_7d": "Exécutions (7 j)",
-    "edit_access_aria": "Accès : {{value}}. Modifier l'accès"
+    "edit_access_aria": "Accès : {{value}}. Modifier l'accès",
+    "all_settings": "Tous les paramètres"
   },
   "skill_attach": {
     "trigger_aria": "Rattacher un skill de l'espace de travail",

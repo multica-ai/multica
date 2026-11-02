@@ -146,7 +146,7 @@
     "runtime_required_toast": "このエージェントを実行する前にランタイムを設定してください。",
     "assign_work": "作業を割り当てる",
     "more_actions_aria": "エージェントの操作",
-    "advanced_settings": "詳細設定",
+    "settings": "設定",
     "copy_link": "リンクをコピー",
     "copy_id": "エージェント ID をコピー",
     "link_copied_toast": "リンクをコピーしました",
@@ -201,7 +201,8 @@
   "panel": {
     "status": "ステータス",
     "runs_7d": "実行 (7日)",
-    "edit_access_aria": "アクセス: {{value}}。アクセスを変更"
+    "edit_access_aria": "アクセス: {{value}}。アクセスを変更",
+    "all_settings": "すべての設定"
   },
   "skill_attach": {
     "trigger_aria": "ワークスペースのスキルを追加",

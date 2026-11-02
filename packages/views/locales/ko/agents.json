@@ -154,7 +154,7 @@
     "runtime_required_toast": "이 에이전트를 실행하기 전에 런타임을 연결하세요.",
     "assign_work": "작업 할당",
     "more_actions_aria": "에이전트 작업",
-    "advanced_settings": "고급 설정",
+    "settings": "설정",
     "copy_link": "링크 복사",
     "copy_id": "에이전트 ID 복사",
     "link_copied_toast": "링크를 복사했습니다",
@@ -209,7 +209,8 @@
   "panel": {
     "status": "상태",
     "runs_7d": "실행 (7일)",
-    "edit_access_aria": "접근 권한: {{value}}. 접근 권한 변경"
+    "edit_access_aria": "접근 권한: {{value}}. 접근 권한 변경",
+    "all_settings": "모든 설정"
   },
   "skill_attach": {
     "trigger_aria": "워크스페이스 스킬 연결",
