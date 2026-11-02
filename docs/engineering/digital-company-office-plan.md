@@ -341,7 +341,7 @@ defaults) are stubbed and completed in 11.2, 11.8 and 11.9.
 ## Implementation status
 
 Measured against the code on `main`. "Done" means implemented and covered by tests that
-ran; "Open" means specified here and not built. Rows for WS9 to WS12 are all open.
+ran; "Open" means specified here and not built. WS9 is built on the phase 2 branch; WS10 to WS12 are open.
 
 | Area | Status | Notes |
 |---|---|---|
@@ -355,7 +355,7 @@ ran; "Open" means specified here and not built. Rows for WS9 to WS12 are all ope
 | WS7 Knowledge base | Done except upload and sources | K1 to K6; upload, sources panel and freshness reviews are in 10.12 and 10.9. |
 | WS8 Docs | Done for phase 1 | en, fr, ja, ko, zh; the new phases are in 12.1. |
 | Phase 1 acceptance in a browser | Partly done | `office-first-loop` passes; the full Playwright suite is slow here and unclassified. |
-| WS9 Phase 2 completion | Built on `feat/digital-company-office-phase2`, not merged | 9.1 to 9.14 built except 9.11a Slack and 9.11b Lark (skipped; those chat apps get text links). The Playwright spec `e2e/phase2-office.spec.ts` is written but not run. Manual sign-off is in `docs/engineering/runbooks/phase2.md`. |
+| WS9 Phase 2 completion | Built on `feat/digital-company-office-phase2`, not yet merged | Steps 9.1 to 9.14 are built; Slack and Lark (9.11a, 9.11b) are built, and DingTalk and WeCom are not built. Playwright spec `e2e/phase2-office.spec.ts`: not yet run. Manual sign-off is in `docs/engineering/runbooks/phase2.md`. |
 | WS10 Phase 3 | Open | 10.1 to 10.20. |
 | WS11 Phase 4 | Open | 11.1 to 11.21. |
 | WS12 Release | Open | 12.1 to 12.5. |
