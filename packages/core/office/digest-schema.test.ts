@@ -116,6 +116,117 @@ describe("DigestSchema", () => {
   });
 });
 
+describe("DigestSchema charter and routines", () => {
+  const routine = {
+    autopilot_id: "ap1",
+    title: "Weekly scan",
+    purpose: "Weekly market scan",
+    expected_output: "report",
+    required: true,
+    state: "late",
+  };
+
+  it("reads a chartered squad's routines and a null charter for an uncharted one", () => {
+    const d = parseWithFallback(
+      {
+        ...full,
+        squads: [
+          {
+            ...full.squads[0],
+            charter: { silent: true, routine_count: 12, routines: [routine] },
+          },
+          { id: "s2", name: "Ops", charter: null },
+        ],
+      },
+      DigestSchema,
+      FALLBACK_DIGEST,
+      { endpoint: "t" },
+    );
+    expect(d.squads[0]!.charter).toEqual({ silent: true, routine_count: 12, routines: [routine] });
+    expect(d.squads[1]!.charter).toBeNull();
+  });
+
+  it("defaults a squad that omits the charter field to no charter", () => {
+    const d = parseWithFallback(full, DigestSchema, FALLBACK_DIGEST, { endpoint: "t" });
+    expect(d.squads[0]!.charter).toBeNull();
+  });
+
+  it("reads the workspace routines not on time with their squad", () => {
+    const d = parseWithFallback(
+      {
+        ...full,
+        workspace: {
+          ...full.workspace,
+          routines_not_on_time: {
+            count: 13,
+            items: [{ autopilot_id: "ap1", squad_id: "s1", squad_name: "Research", title: "Scan", state: "failed" }],
+          },
+        },
+      },
+      DigestSchema,
+      FALLBACK_DIGEST,
+      { endpoint: "t" },
+    );
+    expect(d.workspace.routines_not_on_time).toEqual({
+      count: 13,
+      items: [{ autopilot_id: "ap1", squad_id: "s1", squad_name: "Research", title: "Scan", state: "failed" }],
+    });
+  });
+
+  it("defaults the workspace routines section for an older server", () => {
+    const d = parseWithFallback({ since: "x" }, DigestSchema, FALLBACK_DIGEST, { endpoint: "t" });
+    expect(d.workspace.routines_not_on_time).toEqual({ count: 0, items: [] });
+  });
+
+  it("reads an unknown routine state or expected output as unknown", () => {
+    const d = parseWithFallback(
+      {
+        ...full,
+        squads: [
+          {
+            id: "s1",
+            charter: {
+              silent: false,
+              routine_count: 1,
+              routines: [{ ...routine, state: "held", expected_output: "decision" }],
+            },
+          },
+        ],
+      },
+      DigestSchema,
+      FALLBACK_DIGEST,
+      { endpoint: "t" },
+    );
+    expect(d.squads[0]!.charter!.routines[0]).toMatchObject({ state: "unknown", expected_output: "unknown" });
+  });
+
+  it("treats null routine lists as empty", () => {
+    const d = parseWithFallback(
+      {
+        ...full,
+        squads: [{ id: "s1", charter: { silent: false, routine_count: 0, routines: null } }],
+        workspace: { ...full.workspace, routines_not_on_time: { count: 0, items: null } },
+      },
+      DigestSchema,
+      FALLBACK_DIGEST,
+      { endpoint: "t" },
+    );
+    expect(d.squads[0]!.charter!.routines).toEqual([]);
+    expect(d.workspace.routines_not_on_time.items).toEqual([]);
+  });
+
+  it("drops only a malformed charter section, keeping the squad and the digest", () => {
+    const d = parseWithFallback(
+      { ...full, squads: [{ ...full.squads[0], charter: { silent: "no", routines: [] } }] },
+      DigestSchema,
+      FALLBACK_DIGEST,
+      { endpoint: "t" },
+    );
+    expect(d.squads[0]).toMatchObject({ name: "Research", charter: null });
+    expect(d.workspace.runs).toBe(12);
+  });
+});
+
 describe("digestKeys", () => {
   it("scopes by workspace and by since", () => {
     expect(digestKeys.since("w1", { since: "2026-11-01T00:00:00Z" })).toEqual([
