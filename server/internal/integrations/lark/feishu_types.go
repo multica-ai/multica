@@ -14,7 +14,7 @@ import (
 // which the MUL-3620 Router cutover removed.)
 
 // ContextMedia is collected only from a message rendered into this turn.
-// Occurrences lets overlapping recent/quoted context share one attachment.
+// Occurrences lets repeated explicit source positions share one attachment.
 type ContextMedia struct {
 	MessageID   string
 	ResourceKey string
@@ -25,14 +25,6 @@ type ContextMedia struct {
 	SizeBytes   int64
 	Placeholder string
 	Occurrences int
-}
-
-// DeferredContext pins the original body and selection limits before the
-// connector emits. Remote context reads run behind the durable media fence.
-type DeferredContext struct {
-	Body               string
-	RecentContextSize  int
-	MaxForwardChildren int
 }
 
 // InboundMessage is the Feishu connector's decoded, enriched event. It is the
@@ -52,9 +44,8 @@ type InboundMessage struct {
 	// event.message.content. Text/post decoding consumes it immediately; media
 	// ingestion keeps it so the adapter can extract image_key/file_key before
 	// translating to channel.InboundMessage.
-	Content         string
-	ContextMedia    []ContextMedia
-	DeferredContext *DeferredContext
+	Content      string
+	ContextMedia []ContextMedia
 	// MediaSourceContext is rendered before the current sender's own body.
 	// It crosses the adapter boundary through Raw and then MediaRef.SourceContext.
 	MediaSourceContext string
@@ -115,9 +106,7 @@ const (
 	// OutcomeAgentOffline — landed, but the agent has no runtime bound.
 	OutcomeAgentOffline Outcome = "agent_offline"
 	// OutcomeAgentArchived — landed, but the agent is archived.
-	OutcomeAgentArchived     Outcome = "agent_archived"
-	OutcomeInvokeDenied      Outcome = "invoke_denied"
-	OutcomeIssueCreateDenied Outcome = "issue_create_denied"
+	OutcomeAgentArchived Outcome = "agent_archived"
 )
 
 // DispatchResult is the Feishu-side verdict the OutcomeReplier consumes to

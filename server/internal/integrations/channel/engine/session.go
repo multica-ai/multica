@@ -628,7 +628,6 @@ type BindMediaInput struct {
 	IssueDescriptionBase pgtype.Text
 	IssueCommandText     string
 	Body                 string
-	BodyResolved         bool
 	MediaRefs            []channel.MediaRef
 }
 
@@ -920,10 +919,6 @@ func (s *ChatSession) BindMediaRefsWithResult(ctx context.Context, in BindMediaI
 			}
 			return BindMediaResult{}, err
 		}
-	} else if in.BodyResolved && !in.IssueID.Valid {
-		if err := updateResolvedMediaBody(ctx, qtx, in, in.Body); err != nil {
-			return BindMediaResult{}, err
-		}
 	}
 	if err := s.clearMediaPending(ctx, qtx, in); err != nil {
 		return BindMediaResult{}, err
@@ -1036,9 +1031,6 @@ func (s *ChatSession) bindMediaRefs(ctx context.Context, qtx SessionQueries, in 
 		created = append(created, createdMedia{id: att.ID, ref: ref, filename: filename})
 	}
 	if len(ids) == 0 {
-		if in.BodyResolved && !in.IssueID.Valid {
-			return updateResolvedMediaBody(ctx, qtx, in, in.Body)
-		}
 		return nil
 	}
 	if !in.IssueID.Valid {
@@ -1071,7 +1063,7 @@ func (s *ChatSession) bindMediaRefs(ctx context.Context, qtx SessionQueries, in 
 		contexts := make([]string, 0, 1)
 		seenContexts := make(map[string]bool)
 		for _, media := range created {
-			if media.ref.InlineIDOnly {
+			if media.ref.InlineIDOnly && media.ref.SourceContext != "" {
 				if source := media.ref.SourceContext; source != "" && !seenContexts[source] {
 					contexts = append(contexts, source)
 					seenContexts[source] = true
@@ -1090,17 +1082,12 @@ func (s *ChatSession) bindMediaRefs(ctx context.Context, qtx SessionQueries, in 
 				media.ref.Type == channel.MsgTypeImage,
 			)
 			issueMarkdown = append(issueMarkdown, block)
-			if media.ref.InlinePlaceholder != "" {
+			if media.ref.InlinePlaceholder != "" && !media.ref.InlineIDOnly {
 				replacements = append(replacements, inlineMediaReplacement{
 					placeholder: media.ref.InlinePlaceholder,
 					index:       media.ref.InlineIndex,
 					markdown:    block,
 				})
-			}
-		}
-		if len(contexts) == 0 {
-			if start, _, ok := issueCommandLineBounds(in.Body, in.IssueCommandText); ok {
-				contexts = append(contexts, in.Body[:start])
 			}
 		}
 		mediaContext := issueMediaContext(strings.Join(contexts, "\n\n"), contextReplacements)
@@ -1164,7 +1151,7 @@ func (s *ChatSession) bindMediaRefs(ctx context.Context, qtx SessionQueries, in 
 			})
 		}
 	}
-	if body, changed := composeInlineMediaBody(in.Body, replacements); changed || in.BodyResolved {
+	if body, changed := composeInlineMediaBody(in.Body, replacements); changed {
 		return updateResolvedMediaBody(ctx, qtx, in, body)
 	}
 	return nil

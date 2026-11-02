@@ -55,8 +55,7 @@ var errRecentContextChannelUnbound = errors.New("lark enricher: missing chat_id 
 
 // Enricher expands an inbound message's body with context the user
 // EXPLICITLY attached — a quoted reply or a merged-and-forwarded bundle
-// — by calling back into Lark's IM API. Production prepares selection
-// without I/O, then enriches behind the durable media fence, turning a bare
+// — by calling back into Lark's IM API. It runs inline under the connector's enrichment deadline, turning a bare
 // "@bot 总结一下" into a body that already carries the referenced
 // conversation inline.
 //
@@ -175,29 +174,6 @@ func (e *inboundEnricher) selectContext(msg InboundMessage) (InboundMessage, boo
 	return msg, wantRecent
 }
 
-// PrepareContext performs no I/O. Persist explicit unavailable fallbacks first;
-// the media resolver replaces them after bounded context reads, before the
-// deferred task can run. A crash therefore never presents a missing image as read.
-func (e *inboundEnricher) PrepareContext(msg InboundMessage) InboundMessage {
-	msg, wantRecent := e.selectContext(msg)
-	isForward := msg.MessageType == larkMsgTypeMergeForward
-	if (msg.ParentID == "" && !isForward && !wantRecent) || e.client == nil || !e.client.IsConfigured() {
-		return msg
-	}
-	msg.DeferredContext = &DeferredContext{Body: msg.Body, RecentContextSize: e.recentContextSize, MaxForwardChildren: e.maxForwardChildren}
-	if isForward {
-		msg.Body = forwardedErrorBlock()
-	}
-	if msg.ParentID != "" {
-		msg.Body = quotedErrorBlock(msg.ParentID) + "\n\n" + msg.Body
-	}
-	if wantRecent {
-		msg.Body = recentContextUnavailableLine(recentContextFailureUnknown) + "\n\n" + msg.Body
-	}
-	msg.HasSelectedContext = msg.ParentID != "" || isForward
-	return msg
-}
-
 func (e *inboundEnricher) Enrich(ctx context.Context, msg InboundMessage, creds InstallationCredentials) InboundMessage {
 	msg, wantRecent := e.selectContext(msg)
 	isForward := msg.MessageType == larkMsgTypeMergeForward
@@ -277,17 +253,18 @@ func (e *inboundEnricher) Enrich(ctx context.Context, msg InboundMessage, creds 
 			if recentErr != nil {
 				b.WriteString(recentContextUnavailableLine(classifyRecentContextFetchError(recentErr).category))
 			} else if len(recentItems) > 0 {
-				b.WriteString(e.renderRecentContextBlock(recentItems, names, media))
+				b.WriteString(e.renderRecentContextBlock(recentItems, names))
 			}
 		}
+		source := ""
 		if msg.ParentID != "" {
 			if b.Len() > 0 {
 				b.WriteString("\n\n")
 			}
-			b.WriteString(e.renderQuotedBlock(msg.ParentID, quotedItems, quotedErr, names, media))
+			source = e.renderQuotedBlock(msg.ParentID, quotedItems, quotedErr, names, media)
+			b.WriteString(source)
 		}
 
-		source := b.String()
 		var core string
 		if isForward {
 			if forwardErr != nil {
@@ -505,7 +482,7 @@ func (e *inboundEnricher) logRecentContextFetchFailure(msg InboundMessage, err e
 // <recent_context> block: one "[<speaker>]: <text>" line per message,
 // oldest-first, speakers labeled with real names from `names` (falling
 // back to positional "User N"). Callers pass a non-empty `kept`.
-func (e *inboundEnricher) renderRecentContextBlock(kept []LarkMessage, names map[string]string, media *contextMedia) string {
+func (e *inboundEnricher) renderRecentContextBlock(kept []LarkMessage, names map[string]string) string {
 	labeler := newSpeakerLabeler(names)
 	lines := make([]string, 0, len(kept))
 	for _, m := range kept {
@@ -515,7 +492,7 @@ func (e *inboundEnricher) renderRecentContextBlock(kept []LarkMessage, names map
 		case m.MessageType == larkMsgTypeMergeForward:
 			text = "[merge_forward, expand manually]"
 		default:
-			text = e.flattenContextMessage(m, media, "")
+			text = e.flattenMessage(m)
 			if text == "" {
 				text = "[empty message]"
 			}
@@ -656,7 +633,7 @@ func (e *inboundEnricher) renderQuotedBlock(parentID string, items []LarkMessage
 // record id is forwardID. Children are time-ordered, capped, and each
 // rendered as "[<speaker>]: <text>"; a child that is itself a forward is
 // not recursed into (it gets a manual-expand placeholder) so the HTTP
-// fan-out within the deferred context-read budget stays bounded.
+// fan-out within the inbound enrichment budget stays bounded.
 func (e *inboundEnricher) renderForwardedItems(items []LarkMessage, forwardID string, names map[string]string, media *contextMedia) string {
 	// The verified contract is that GetMessage(forward_id) returns one
 	// level of bundling: [sentinel, direct-children…]. We therefore

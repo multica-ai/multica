@@ -1,61 +1,50 @@
 # Lark inbound context media
 
-Lark/Feishu chat turns retain attachments from the context already selected for
-that turn: explicit quotes, direct children of merged forwards, and the existing
-recent group window. Images, files, audio and video use the same resource
-download, upload-intent ledger, attachment binding and authorization as direct
-message attachments. This does not add document parsing, transcription or video
-frame extraction.
+Lark/Feishu chat turns retain attachments from the trigger message, explicit
+quotes, and direct children of merged forwards. Images, files, audio and video
+reuse direct-message resource downloads, upload intents, attachment binding and
+authorization. This does not add parsing, transcription or video frame extraction.
 
 ## Selection and attribution
 
+- Automatic recent group context keeps its existing text and media placeholders.
+  It never collects, downloads, stores or binds historical media. Repeated group
+  mentions do not reupload that history.
 - Existing topic boundaries, recent-window limits, deleted-message handling and
   forward-child limits still apply. Nested forwards are not expanded.
-- A resource is collected while its message is rendered, so omitted messages do
-  not cause downloads. Forwarded resources use the containing forward's message
-  ID, as required by the Lark download API.
-- Repeated appearances of the same resource and source message share one
-  attachment. Each source position receives an attachment ID in its marker.
-- Markers are chosen to avoid collisions with the rendered original text,
-  including rich-text spans, sender names, filenames and source wrappers.
-- Failed downloads retain an explicit unavailable marker at their source
-  position. A successful neighboring attachment cannot replace that marker.
-- `/issue` keeps successfully bound historical media in an attributed,
-  code-formatted source transcript. It does not present those resources as the
-  reporter's own embedded uploads. Direct uploads retain their existing format,
-  and concurrent human edits to the description are preserved.
+- Resources are collected only while explicitly selected messages are rendered.
+  Forward children use the containing forward's message ID for resource reads.
+- Repeated appearances of one resource and source message share one attachment;
+  each selected position receives the attachment ID. Different owners stay distinct.
+- Markers avoid collisions with the full rendered original text, including
+  rich-text spans, sender names, filenames and source wrappers.
+- Failed reads keep unavailable markers at their original positions.
+- `/issue` retains bound historical media in an attributed literal source section,
+  including speakers and source positions. Automatic recent history is excluded.
+  Direct uploads and adapters without explicit source metadata keep their existing
+  issue behavior. Concurrent human description edits are preserved.
 
-## Preparation, deadlines and recovery
+## Deadlines and recovery
 
-The production WebSocket connector prepares context without remote I/O. It emits
-a fallback body and a deferred-context descriptor. The router durably appends
-that body with the existing media-pending deadline before acknowledging the
-event. Context reads and downloads then run behind that fence, outside the
-connector's ACK budget.
+Context metadata enrichment stays inline under the existing connector
+`EnrichTimeout` (two seconds by default). Independent recent, quoted and forwarded
+reads start together, share that deadline, and are joined before rendering.
+Cancellation reaches every read; name lookup does not start after expiration.
+Timeouts retain explicit unavailable context. This PR does not extend that budget
+or introduce asynchronous metadata preparation.
 
-Independent recent, quoted and forwarded metadata reads start together, share a
-bounded request context, and are joined before rendering. Name lookup does not
-start after that context has expired. The enclosing media deadline bounds both
-metadata and resource work; cancellation propagates to the reads. A resolved
-text-only body is also persisted before the media fence is released.
+Only actual downloadable resources enter the existing durable media-pending
+workflow. Downloads, uploads, cancellation, upload-intent cleanup and task recovery
+retain their existing limits and lifecycle; text-only context does not acquire a
+media fence. Attachment bytes and ordinary CLI output limits are unchanged.
 
-On expiration of the enclosing media deadline or shutdown, incomplete results
-cannot overwrite the durable fallback
-or bind partial references. Existing upload intents retain cleanup responsibility
-for unbound objects. If the process stops before finalization, the existing
-deferred-task scheduler resumes the accepted task at its stored deadline with
-the saved fallback; it does not repeat the lost context job or create a second
-task.
+A bare `/clear` records fresh-session intent without automatic context creating a
+model turn. Explicit quotes, current media or a prompt still follow the ordinary
+path. `/new` skips automatic recent context while allowing explicit selections.
 
-A bare `/clear` only records fresh-session intent for the next turn. Automatic
-recent context must not turn it into a model task. Explicitly quoted context,
-direct media, or a prompt after `/clear` still follows the ordinary media path.
-`/new` continues to exclude automatic recent context while accepting explicit
-quotes and forwards.
+## Verification
 
-## Regression coverage
-
-Run against a disposable, migrated database:
+With an explicit disposable, migrated `DATABASE_URL`:
 
 ```sh
 cd server
@@ -63,8 +52,8 @@ go test -race -p 2 -parallel 2 \
   ./internal/integrations/lark ./internal/integrations/channel/engine
 ```
 
-The suites cover all three context sources and four media kinds; source ownership
-and deduplication; omitted and failed media; literal marker collisions in chat
-and `/issue`; edited issue descriptions; slow reads after ACK; cancellation and
-joining; resolved text persistence; bare control commands; and fallback recovery
-without duplicate tasks. Redis-backed tests additionally require `REDIS_TEST_URL`.
+Regression coverage includes explicit quotes/forwards and all four media kinds;
+automatic recent exclusion across repeated turns; resource ownership/deduplication;
+failed/omitted resources; literal marker collisions; issue source attribution;
+legacy ID-only issue behavior; concurrent reads and cancellation. Redis-backed
+tests additionally require `REDIS_TEST_URL`.

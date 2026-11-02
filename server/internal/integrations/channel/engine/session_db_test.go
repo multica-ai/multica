@@ -1578,10 +1578,9 @@ func TestBindMediaRefs_IssueRetainsHistoricalMediaAttribution(t *testing.T) {
 			pool := sessionPersistenceTestDB(t)
 			fixture := seedSessionPersistenceFixture(t, pool)
 			session := NewChatSession(db.New(pool), pool, channel.TypeFeishu, SessionTitles{})
-			prefix := "<recent_context count=\"1\">\n[Alice]: before [Image 1: unavailable] after [Image 1: unavailable]\n</recent_context>\n\n" +
-				"<quoted_message message_id=\"forward-owner\" sender=\"Bob\" type=\"merge_forward\">\n<forwarded_messages count=\"1\">\n[Bob]: before [File 2: unavailable] after [Audio 3: unavailable]\n</forwarded_messages>\n</quoted_message>"
+			prefix := "<quoted_message message_id=\"forward-owner\" sender=\"Bob\" type=\"merge_forward\">\n<forwarded_messages count=\"1\">\n[Alice]: before [Image 1: unavailable] after [Image 1: unavailable]\n[Bob]: before [File 2: unavailable] after [Audio 3: unavailable]\n</forwarded_messages>\n</quoted_message>"
 			command := "/issue Investigate\nReporter details"
-			body := prefix + "\n\n" + command + "\n[Image]"
+			body := "<recent_context>unselected history</recent_context>\n\n" + prefix + "\n\n" + command + "\n[Image]"
 			base := issueDescriptionFromCommandBody(body, command, "")
 			if tc.named {
 				body = prefix + "\n\n[Reporter]: " + command + "\n[Image]"
@@ -1605,9 +1604,6 @@ func TestBindMediaRefs_IssueRetainsHistoricalMediaAttribution(t *testing.T) {
 				{Type: channel.MsgTypeImage, Filename: "own.png", MimeType: "image/png", InlinePlaceholder: "[Image]"},
 			}
 			for n := range refs {
-				if !tc.named {
-					refs[n].SourceContext = "" // Legacy adapters can use the unlabelled command boundary.
-				}
 				refs[n].StorageKey = fmt.Sprintf("workspaces/ws/lark/attribution-%d", n)
 				refs[n].StorageURL = fmt.Sprintf("https://cdn.example.test/attribution-%d", n)
 				seedPendingMediaObject(t, pool, fixture, appended.MessageID, refs[n].StorageKey, refs[n].StorageURL, "pending")

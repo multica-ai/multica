@@ -222,7 +222,6 @@ type BindMediaParams struct {
 	IssueDescriptionBase pgtype.Text
 	IssueCommandText     string
 	Body                 string
-	BodyResolved         bool
 	MediaRefs            []channel.MediaRef
 }
 

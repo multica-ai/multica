@@ -59,7 +59,7 @@ func (r *feishuMediaResolver) HasMedia(msg channel.InboundMessage) bool {
 	if err != nil {
 		return false
 	}
-	return lm.DeferredContext != nil || len(mediaResourcesFromMessage(lm)) > 0
+	return len(mediaResourcesFromMessage(lm)) > 0
 }
 
 func (r *feishuMediaResolver) ResolveMedia(ctx context.Context, inst engine.ResolvedInstallation, _ engine.ResolvedIdentity, _ pgtype.UUID, chatMessageID pgtype.UUID, msg channel.InboundMessage) channel.InboundMessage {
@@ -68,10 +68,10 @@ func (r *feishuMediaResolver) ResolveMedia(ctx context.Context, inst engine.Reso
 		r.logMediaWarn("lark media ingest skipped: raw decode failed", InboundMessage{MessageID: msg.MessageID}, err)
 		return msg
 	}
-	if lm.DeferredContext == nil && len(mediaResourcesFromMessage(lm)) == 0 {
+	if len(mediaResourcesFromMessage(lm)) == 0 {
 		return msg
 	}
-	if r.api == nil || r.creds == nil || (lm.DeferredContext == nil && (r.storage == nil || r.ledger == nil)) {
+	if r.api == nil || r.creds == nil || r.storage == nil || r.ledger == nil {
 		r.logMediaWarn("lark media ingest skipped: missing dependency", lm, nil)
 		return msg
 	}
@@ -85,25 +85,7 @@ func (r *feishuMediaResolver) ResolveMedia(ctx context.Context, inst engine.Reso
 		r.logMediaWarn("lark media ingest skipped: credentials unavailable", lm, err)
 		return msg
 	}
-	if pending := lm.DeferredContext; pending != nil {
-		lm.Body = pending.Body
-		lm.DeferredContext = nil
-		// Metadata has its own bounded budget behind the persisted media
-		// fence. It never consumes the connector's pre-ACK deadline.
-		readCtx, cancel := context.WithTimeout(ctx, defaultRequestTimeout)
-		lm = NewInboundEnricher(r.api, InboundEnricherConfig{
-			RecentContextSize: pending.RecentContextSize, MaxForwardChildren: pending.MaxForwardChildren, Logger: r.logger,
-		}).Enrich(readCtx, lm, creds)
-		cancel()
-		msg.Text = lm.Body
-		msg.BodyResolved = true
-		msg.Raw, _ = json.Marshal(lm)
-	}
 	resources := mediaResourcesFromMessage(lm)
-	if len(resources) > 0 && (r.storage == nil || r.ledger == nil) {
-		r.logMediaWarn("lark media ingest skipped: missing storage dependency", lm, nil)
-		return msg
-	}
 	for resIndex, res := range resources {
 		key := mediaObjectKey(inst, chatMessageID, res)
 		link := r.storage.ObjectURL(key)

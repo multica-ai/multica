@@ -105,7 +105,7 @@ type MediaRef struct {
 	InlinePlaceholder string
 	InlineIndex       int
 	// InlineCount optionally replaces consecutive occurrences with one attachment,
-	// for example an image present in both recent and explicitly quoted context.
+	// for example an image repeated within explicitly quoted context.
 	InlineCount int
 	// InlineIDOnly makes that replacement name the attachment instead of
 	// embedding it: the marker becomes itself carrying the attachment's id,
@@ -176,9 +176,6 @@ type InboundMessage struct {
 	// arrive with this empty — adapters must not pre-populate it, because
 	// binding only attaches refs whose ledger intent it can claim.
 	MediaRefs []MediaRef
-	// BodyResolved is an output of deferred resolution: Text now contains
-	// authoritative context even when it has no downloadable attachments.
-	BodyResolved bool
 
 	// ReplyTo is the quoted/replied-to context, or nil.
 	ReplyTo *ReplyCtx

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"testing"
 
 	"github.com/google/uuid"
@@ -1435,5 +1436,27 @@ func TestIssueMediaContextLabelsMissingSourcesInsteadOfInventingAttribution(t *t
 		if got != "Referenced channel media (source context unavailable):\n\n    [Image 1: image-id]" {
 			t.Fatalf("missing source = %q", got)
 		}
+	}
+}
+
+func TestBindMediaRefs_IDOnlyWithoutSourcePreservesWeComIssueContract(t *testing.T) {
+	f := newFake()
+	s := newTestSession(f)
+	source := "<quoted_message sender=\"Someone else\">before [Image: unavailable] after</quoted_message>"
+	command := "/issue Investigate\nReporter details"
+	err := s.BindMediaRefs(t.Context(), BindMediaInput{
+		MessageID: uid(42), SessionID: uid(1), WorkspaceID: uid(9), Sender: uid(7), IssueID: uid(8),
+		Body: source + "\n\n" + command, IssueCommandText: command, IssueDescriptionBase: pgtype.Text{String: "Reporter details", Valid: true},
+		MediaRefs: []channel.MediaRef{{Type: channel.MsgTypeImage, StorageKey: "wecom/quoted", StorageURL: "https://cdn.example.test/quoted", Filename: "quoted.png", MimeType: "image/png", InlinePlaceholder: "[Image: unavailable]", InlineIDOnly: true}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(f.attachments) != 1 {
+		t.Fatalf("attachments = %d", len(f.attachments))
+	}
+	want := channelmedia.Block(uuidString(f.attachments[0].ID), "quoted.png", true)
+	if f.issueMediaMarkdown != want || f.issueMediaDescription != "" || strings.Contains(f.issueMediaMarkdown, "Someone else") {
+		t.Fatalf("adapter without SourceContext gained a historical transcript: markdown=%q description=%q", f.issueMediaMarkdown, f.issueMediaDescription)
 	}
 }

@@ -89,7 +89,7 @@ func TestEnrichSlowRecentDoesNotStarveAttachedContext(t *testing.T) {
 	}
 }
 
-func TestEnrichSlowQuoteRetainsRecentMedia(t *testing.T) {
+func TestEnrichSlowQuoteRetainsRecentPlaceholder(t *testing.T) {
 	t.Parallel()
 	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
 	defer cancel()
@@ -109,8 +109,8 @@ func TestEnrichSlowQuoteRetainsRecentMedia(t *testing.T) {
 		return []LarkMessage{budgetImage("recent")}, ctx.Err()
 	}
 	out := NewInboundEnricher(client, InboundEnricherConfig{RecentContextSize: 10}).Enrich(ctx, InboundMessage{MessageID: "trigger", ParentID: "parent", Body: "inspect", ChatID: "group", ChatType: ChatTypeGroup, AddressedToBot: true}, InstallationCredentials{})
-	if len(out.ContextMedia) != 1 || out.ContextMedia[0].MessageID != "recent" || !strings.Contains(out.Body, "quoted_message") || !strings.Contains(out.Body, "unavailable") {
-		t.Fatalf("successful recent image lost or quote failure hidden: %+v", out)
+	if len(out.ContextMedia) != 0 || !strings.Contains(out.Body, "[Image]") || !strings.Contains(out.Body, "quoted_message") || !strings.Contains(out.Body, "unable to fetch") {
+		t.Fatalf("recent placeholder lost, downloaded, or quote failure hidden: %+v", out)
 	}
 }
 

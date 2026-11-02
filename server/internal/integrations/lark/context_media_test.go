@@ -13,8 +13,8 @@ import (
 	"github.com/multica-ai/multica/server/internal/integrations/channel/engine"
 )
 
-func TestContextMediaCollectQuotedRecentAndForwardedImages(t *testing.T) {
-	for _, kind := range []string{"quote", "recent", "forward", "quoted-forward"} {
+func TestContextMediaCollectQuotedAndForwardedImages(t *testing.T) {
+	for _, kind := range []string{"quote", "forward", "quoted-forward"} {
 		t.Run(kind, func(t *testing.T) {
 			fake := newEnricherFake()
 			image := LarkMessage{MessageID: "om_picture", MessageType: "post", SenderID: "ou_other", SenderType: "user", CreateTime: "1000",
@@ -26,9 +26,6 @@ func TestContextMediaCollectQuotedRecentAndForwardedImages(t *testing.T) {
 			case "quote":
 				in.ParentID = image.MessageID
 				fake.byID[in.ParentID] = []LarkMessage{image}
-			case "recent":
-				cfg.RecentContextSize = 5
-				fake.byChat[in.ChatID] = []LarkMessage{image}
 			case "forward", "quoted-forward":
 				owner = "om_forward"
 				fake.byID[owner] = []LarkMessage{{MessageID: owner, MessageType: "merge_forward"}, image}
@@ -79,7 +76,7 @@ func TestContextMediaExcludeDeletedTruncatedAndOtherTopicMessages(t *testing.T) 
 	fake.byID["om_forward"] = []LarkMessage{{MessageID: "om_forward", MessageType: "merge_forward"}, image("child", "", "100"), image("truncated", "", "200")}
 	in := InboundMessage{MessageID: "trigger", MessageType: "text", Body: "inspect", ParentID: "om_forward", ChatID: "oc_group", ChatType: ChatTypeGroup, ThreadID: "topic", AddressedToBot: true, CreateTime: "2000"}
 	out := enrich(t, fake, in, InboundEnricherConfig{RecentContextSize: 10, MaxForwardChildren: 1})
-	if len(out.ContextMedia) != 2 || out.ContextMedia[0].MessageID != "included" || out.ContextMedia[1].MessageID != "om_forward" {
+	if len(out.ContextMedia) != 1 || out.ContextMedia[0].MessageID != "om_forward" {
 		t.Fatalf("unexpected images downloaded beyond selected context: %+v", out.ContextMedia)
 	}
 	if !strings.Contains(out.Body, "1 more truncated") {
@@ -109,7 +106,7 @@ func TestContextMediaOneFailedDownloadKeepsOtherImageAndSourcePositions(t *testi
 }
 
 func TestContextMediaCollectFilesAudioAndVideo(t *testing.T) {
-	for _, source := range []string{"quote", "recent", "forward", "quoted-forward"} {
+	for _, source := range []string{"quote", "forward", "quoted-forward"} {
 		for _, messageType := range []string{"file", "audio", "media", "video"} {
 			t.Run(source+"/"+messageType, func(t *testing.T) {
 				fake := newEnricherFake()
@@ -122,9 +119,6 @@ func TestContextMediaCollectFilesAudioAndVideo(t *testing.T) {
 				case "quote":
 					in.ParentID = owner
 					fake.byID[owner] = []LarkMessage{parent}
-				case "recent":
-					cfg.RecentContextSize = 5
-					fake.byChat[in.ChatID] = []LarkMessage{parent}
 				default:
 					owner = "outer_forward"
 					fake.byID[owner] = []LarkMessage{{MessageID: owner, MessageType: "merge_forward"}, parent}
@@ -227,15 +221,15 @@ func TestContextMediaFailureAndSelectionRemainBounded(t *testing.T) {
 	deleted := makeFile("deleted", "file", "topic", "900")
 	deleted.Deleted = true
 	fake.byChat["group"] = []LarkMessage{makeFile("wrong-topic", "audio", "other", "800"), deleted, makeFile("bad", "file", "topic", "1000"), makeFile("good", "audio", "topic", "1100"), makeFile("future", "video", "topic", "3000")}
-	fake.byID["forward"] = []LarkMessage{{MessageID: "forward", MessageType: "merge_forward"}, makeFile("included", "video", "", "100"), makeFile("truncated", "file", "", "200")}
-	out := enrich(t, fake, InboundMessage{MessageID: "trigger", MessageType: "text", Body: "inspect", ParentID: "forward", ChatID: "group", ChatType: ChatTypeGroup, ThreadID: "topic", AddressedToBot: true, CreateTime: "2000"}, InboundEnricherConfig{RecentContextSize: 10, MaxForwardChildren: 1})
-	if len(out.ContextMedia) != 3 || out.ContextMedia[0].ResourceKey != "bad" || out.ContextMedia[1].ResourceKey != "good" || out.ContextMedia[2].ResourceKey != "included" || out.ContextMedia[2].MessageID != "forward" {
+	fake.byID["forward"] = []LarkMessage{{MessageID: "forward", MessageType: "merge_forward"}, makeFile("bad", "file", "", "50"), makeFile("included", "video", "", "100"), makeFile("truncated", "file", "", "200")}
+	out := enrich(t, fake, InboundMessage{MessageID: "trigger", MessageType: "text", Body: "inspect", ParentID: "forward", ChatID: "group", ChatType: ChatTypeGroup, ThreadID: "topic", AddressedToBot: true, CreateTime: "2000"}, InboundEnricherConfig{RecentContextSize: 10, MaxForwardChildren: 2})
+	if len(out.ContextMedia) != 2 || out.ContextMedia[0].ResourceKey != "bad" || out.ContextMedia[1].ResourceKey != "included" || out.ContextMedia[1].MessageID != "forward" {
 		t.Fatalf("media collected outside existing selection: %+v", out.ContextMedia)
 	}
 	api := &fakeSender{downloadErrByKey: map[string]error{"bad": errors.New("denied")}, downloaded: DownloadedResource{Data: []byte{0, 255}}}
 	storage := &fakeMediaStorage{}
 	got := resolveContextMedia(t, out, api, storage, &fakeMediaLedger{})
-	if len(api.downloadCalls) != 3 || len(got.MediaRefs) != 2 || got.MediaRefs[0].InlinePlaceholder != out.ContextMedia[1].Placeholder || got.MediaRefs[1].InlinePlaceholder != out.ContextMedia[2].Placeholder || got.Text != out.Body || !strings.Contains(got.Text, out.ContextMedia[0].Placeholder+" (bad.bin)") {
+	if len(api.downloadCalls) != 2 || len(got.MediaRefs) != 1 || got.MediaRefs[0].InlinePlaceholder != out.ContextMedia[1].Placeholder || got.Text != out.Body || !strings.Contains(got.Text, out.ContextMedia[0].Placeholder+" (bad.bin)") {
 		t.Fatalf("partial failure shifted successful media: %+v", got)
 	}
 }
@@ -245,9 +239,9 @@ func TestContextMediaResourceOwnership(t *testing.T) {
 	file := func(id string) LarkMessage {
 		return LarkMessage{MessageID: id, MessageType: "file", CreateTime: "1000", Content: `{"file_key":"same_key"}`}
 	}
-	fake.byChat["group"] = []LarkMessage{file("first"), file("second")}
-	out := enrich(t, fake, InboundMessage{MessageID: "trigger", MessageType: "text", Body: "inspect", ChatID: "group", ChatType: ChatTypeGroup, AddressedToBot: true, CreateTime: "2000"}, InboundEnricherConfig{RecentContextSize: 5})
-	if len(out.ContextMedia) != 2 || out.ContextMedia[0].Placeholder == out.ContextMedia[1].Placeholder {
+	fake.byID["first"] = []LarkMessage{file("first")}
+	out := enrich(t, fake, InboundMessage{MessageID: "trigger", ParentID: "first", MessageType: "file", Content: `{"file_key":"same_key"}`, Body: "inspect", ChatID: "group", ChatType: ChatTypeGroup, AddressedToBot: true, CreateTime: "2000"}, InboundEnricherConfig{RecentContextSize: 5})
+	if len(out.ContextMedia) != 1 {
 		t.Fatalf("same key from different owners collapsed: %+v", out.ContextMedia)
 	}
 	storage := &fakeMediaStorage{}
@@ -289,7 +283,7 @@ func TestContextMediaPassesAttributionBeforeSenderLabelledIssueCommand(t *testin
 
 func TestContextMediaOriginalTextCollision(t *testing.T) {
 	for _, kind := range []string{"image", "file", "audio", "video"} {
-		for _, source := range []string{"recent", "forward", "recent-and-quote"} {
+		for _, source := range []string{"forward", "recent-and-quote"} {
 			t.Run(kind+"/"+source, func(t *testing.T) {
 				label := map[string]string{"image": "Image", "file": "File", "audio": "Audio", "video": "Video"}[kind]
 				literal := fmt.Sprintf("Literal [%s 1: unavailable] and [%s 2: unavailable]", label, label)
