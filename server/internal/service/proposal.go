@@ -153,6 +153,9 @@ type ProposalService struct {
 	// Knowledge, when set, receives a record of each decision after it
 	// commits. A failure to record never fails the decision.
 	Knowledge DecisionRecorder
+	// DecisionSearch, when set, finds decisions related to a new proposal. A
+	// failure never fails the filing.
+	DecisionSearch DecisionSearcher
 	// AppURL is the web app origin, for the link in the decision record.
 	AppURL string
 }
@@ -179,6 +182,9 @@ type ProposalCreateParams struct {
 type ProposalCreateResult struct {
 	Proposal db.Proposal
 	Issue    db.Issue
+	// Related lists earlier proposals and decisions that look related. It is
+	// computed after the commit and is empty when the lookup fails.
+	Related []ProposalRelated
 }
 
 // Create writes the proposal and its backing issue in one transaction.
@@ -290,7 +296,8 @@ func (s *ProposalService) Create(ctx context.Context, p ProposalCreateParams) (P
 	if err := tx.Commit(ctx); err != nil {
 		return ProposalCreateResult{}, fmt.Errorf("commit: %w", err)
 	}
-	return ProposalCreateResult{Proposal: proposal, Issue: issue}, nil
+	related := s.findPriorArt(ctx, p.WorkspaceID, proposal.ID, p.Content.Title, p.Content.Summary)
+	return ProposalCreateResult{Proposal: proposal, Issue: issue, Related: related}, nil
 }
 
 func liveSquad(ctx context.Context, q *db.Queries, workspaceID, squadID pgtype.UUID) (db.Squad, error) {

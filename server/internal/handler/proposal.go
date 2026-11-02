@@ -68,6 +68,28 @@ type ProposalResponse struct {
 	Handoff *ProposalHandoffResponse `json:"handoff,omitempty"`
 }
 
+// ProposalCreateResponse is the response to filing a proposal: the proposal,
+// and the earlier proposals and decisions that look related to it.
+type ProposalCreateResponse struct {
+	ProposalResponse
+	Related []ProposalRelatedResponse `json:"related"`
+}
+
+// ProposalRelatedResponse is an earlier proposal or decision related to a new
+// one. Kind says which: "proposal" entries carry state, issue_identifier and
+// created_at; "decision" entries (from the decisions knowledge base) carry
+// null for those. Score is the title overlap for a proposal and the
+// retrieval score for a decision.
+type ProposalRelatedResponse struct {
+	Kind            string  `json:"kind"`
+	ID              string  `json:"id"`
+	Title           string  `json:"title"`
+	Score           float64 `json:"score"`
+	State           *string `json:"state"`
+	IssueIdentifier *string `json:"issue_identifier"`
+	CreatedAt       *string `json:"created_at"`
+}
+
 func proposalToResponse(p db.Proposal, issueTitle, issueStatus, issuePrefix string, issueNumber int32) ProposalResponse {
 	return ProposalResponse{
 		ID:              uuidToString(p.ID),
@@ -91,6 +113,22 @@ func proposalToResponse(p db.Proposal, issueTitle, issueStatus, issuePrefix stri
 		ExpiresAt:       timestampToPtr(p.ExpiresAt),
 		SnoozedUntil:    timestampToPtr(p.SnoozedUntil),
 	}
+}
+
+// relatedToResponse maps the prior-art entries to their response shape. The
+// result is never nil, so the field is always a JSON array.
+func relatedToResponse(in []service.ProposalRelated) []ProposalRelatedResponse {
+	out := make([]ProposalRelatedResponse, 0, len(in))
+	for _, r := range in {
+		entry := ProposalRelatedResponse{Kind: r.Kind, ID: r.ID, Title: r.Title, Score: r.Score}
+		if r.Kind == service.RelatedKindProposal {
+			state, identifier := r.State, r.IssueIdentifier
+			created := timestampToString(pgtype.Timestamptz{Time: r.CreatedAt, Valid: true})
+			entry.State, entry.IssueIdentifier, entry.CreatedAt = &state, &identifier, &created
+		}
+		out = append(out, entry)
+	}
+	return out
 }
 
 // ── Create ──────────────────────────────────────────────────────────────────
@@ -223,6 +261,7 @@ func (h *Handler) proposalService() *service.ProposalService {
 	// Typed nil would make the interface non-nil, so only set it when offered.
 	if h.Knowledge != nil {
 		svc.Knowledge = h.Knowledge
+		svc.DecisionSearch = h.Knowledge
 	}
 	svc.AppURL = h.cfg.AppURL
 	return svc
@@ -315,8 +354,8 @@ func (h *Handler) CreateProposal(w http.ResponseWriter, r *http.Request) {
 	h.publish(protocol.EventIssueCreated, workspaceID, actorType, actorID, map[string]any{"issue": issueResp})
 	h.publish(protocol.EventProposalCreated, workspaceID, actorType, actorID, map[string]any{"proposal": resp})
 	slog.Info("proposal created", append(logger.RequestAttrs(r),
-		"proposal_id", resp.ID, "squad_id", resp.SquadID, "urgent", resp.Urgent)...)
-	writeJSON(w, http.StatusCreated, resp)
+		"proposal_id", resp.ID, "squad_id", resp.SquadID, "urgent", resp.Urgent, "related", len(res.Related))...)
+	writeJSON(w, http.StatusCreated, ProposalCreateResponse{ProposalResponse: resp, Related: relatedToResponse(res.Related)})
 }
 
 // ── Read ────────────────────────────────────────────────────────────────────
