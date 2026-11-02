@@ -1,6 +1,7 @@
 "use client";
 
-import { useMemo, useRef, useState } from "react";
+import { useId, useMemo, useRef, useState } from "react";
+import { motion, useReducedMotion } from "motion/react";
 import { ArrowRight, Ban, ChevronRight, XCircle } from "@multica/ui/icons";
 import type { AgentTask } from "@multica/core/types";
 import { cn } from "@multica/ui/lib/utils";
@@ -32,24 +33,32 @@ import {
   buildRunTimeline,
   cacheHitRate,
   groupRunsByDay,
+  layoutCostFlow,
+  nearestPoint,
   niceTicks,
   shortModelName,
+  spreadLabels,
+  timeTicks,
   type CostShare,
+  type FlowLink,
   type RunTimeline,
+  type TimeTick,
   type TimelineRun,
 } from "./issue-run-timeline";
 import { RunCumulativeChart } from "./issue-runs-cumulative-chart";
 import { canRetryRun, RetryRunButton } from "./retry-run-button";
 import { RunTriggerLabel } from "./run-trigger-label";
+import { agentColorMap, markStyle, OTHERS_KEY, SERIES_COLORS } from "./run-chart-colors";
 import { useStatusLabel, useTriggerText } from "./task-run-labels";
 
 // The issue's runs laid out in time — the surface the execution log's header
-// and cost bars open.
+// and per-run bars open.
 //
 // The sidebar answers "what is running and what just ran"; this answers "how
 // did this issue get here": what it spent and on what, when, who asked for
-// each run, and which ones were expensive. The chart on top is one bar per
-// run (cost, tokens or agent time); the list below is the same runs as rows,
+// each run, and which ones were expensive. The chart on top is one dot per
+// run on the issue's time axis (cost, tokens or agent time), then where the
+// spend went from agents to models; the list below is the same runs as rows,
 // newest first — it is also the chart's accessible, exact-value view. The
 // cumulative cost curve over time is the chart's second view.
 //
@@ -67,13 +76,6 @@ const COST_PARTS = [
 ] as const satisfies readonly { key: keyof CostBreakdown; swatch: string }[];
 
 type CostPartKey = (typeof COST_PARTS)[number]["key"];
-
-// Agents and models stack in the chart palette's order, most expensive first.
-// The palette is one hue in steps of lightness, so past four the steps stop
-// being tellable apart; the rest share the last step as "Others".
-const SERIES_SWATCHES = ["bg-chart-1", "bg-chart-2", "bg-chart-3", "bg-chart-4"] as const;
-const OTHERS_SWATCH = "bg-chart-5";
-const OTHERS_KEY = "__others__";
 
 // Flex grow factors that sum below 1 fill only that fraction of the free
 // space (CSS Flexbox §7.1), so splitting a bar by raw dollar amounts under $1
@@ -129,7 +131,7 @@ export function IssueRunsDialog({
   // reason the runtime usage page subscribes in usage-section.tsx.
   const pricings = useCustomPricingStore((s) => s.pricings);
   // Active runs stretch to "now". The clock is re-read when the task list
-  // changes or the dialog reopens rather than ticking: the bars move by
+  // changes or the dialog reopens rather than ticking: the dots move by
   // minutes, and a live timer already runs in the sidebar row.
   const timeline = useMemo(
     () => buildRunTimeline(tasks, Date.now()),
@@ -162,7 +164,7 @@ export function IssueRunsDialog({
           <>
             <RunStats timeline={timeline} />
             <RunCharts timeline={timeline} />
-            {timeline.pricedCount > 0 && <CostSplit timeline={timeline} />}
+            {timeline.pricedCount > 0 && <CostFlow timeline={timeline} />}
             {/* `min-h-0`: the dialog is a flex column; without it this flex
                 item sizes to its content and the list never scrolls. */}
             <div className="min-h-0 flex-1 overflow-y-auto px-6 pb-5">
@@ -292,34 +294,26 @@ function RunCharts({ timeline }: { timeline: RunTimeline }) {
 
 type Metric = "cost" | "tokens" | "time";
 
-interface Series {
-  key: string;
-  label: string;
-  swatch: string;
-}
-
-const PLOT_HEIGHT = 128;
-// A run that reported nothing for the metric still gets a mark, short enough
-// to never read as a small figure.
-const STUB_HEIGHT = 4;
-// The hover card's `max-w-72` plus its gap from the bar. With less room than
+const PLOT_HEIGHT = 168;
+// Dot diameter follows the run's duration (area-true: by square root), so a
+// long cheap run and a short cheap run stay distinguishable at a glance.
+const DOT_MIN = 8;
+const DOT_MAX = 22;
+// For agent time the y axis already is the duration; every dot is this size.
+const DOT_FIXED = 12;
+// A run that reported nothing for the metric sits on the baseline at this
+// size, hatched, so it never reads as a small figure.
+const DOT_NO_FIGURE = 7;
+// The hover card's `max-w-72` plus its gap from the dot. With less room than
 // this to the right, the card opens on its left.
 const HOVER_CARD_ROOM_PX = 298;
-// Day labels closer than this share of the plot would collide; the later
-// day keeps its divider but drops its label.
-const MIN_DAY_LABEL_GAP = 0.1;
 const HOUR_MS = 60 * 60 * 1000;
 
-function swatchFor(index: number): string {
-  return SERIES_SWATCHES[index] ?? OTHERS_SWATCH;
-}
-
-// One bar per run, oldest on the left, the same reading as the sidebar's
-// strip: the height is what the run cost, used or took, the colour who ran it
-// (or, for tokens, what kind they were), and a tick under the bar marks a run
-// that failed or was cancelled. Days are dividers rather than an axis — runs
-// cluster in bursts, and a time axis spends most of its width on the hours in
-// between where nothing ran.
+// One dot per run on the issue's time axis — where it sits across is when it
+// ran, how high is what it cost, used or took, its size how long it ran, its
+// colour who ran it. Bursts read as clusters, an expensive run stands clear
+// of them, and the average line says where "normal" is. Failed runs are red
+// wherever they land.
 function RunActivityChart({
   timeline,
   viewSwitch,
@@ -331,42 +325,28 @@ function RunActivityChart({
   const { t } = useT("issues");
   const locale = useLocale();
   const { getActorName } = useActorName();
-  const partLabel = useCostPartLabel();
+  const reduceMotion = useReducedMotion();
   const [metric, setMetric] = useState<Metric>("cost");
   const runs = timeline.runs;
-  const n = runs.length;
+  const [d0, d1] = timeline.domain;
+  const xPct = (ms: number) => ((ms - d0) / (d1 - d0)) * 100;
 
-  // Agents in cost order, then any that ran without reporting usage.
-  const agentSwatch = useMemo(() => {
-    const keys = timeline.costByAgent.map((s) => s.key);
-    for (const lane of timeline.lanes) {
-      if (!keys.includes(lane.agentId)) keys.push(lane.agentId);
-    }
-    return new Map(keys.map((key, i) => [key, swatchFor(i)]));
-  }, [timeline]);
-
-  const series: Series[] = useMemo(() => {
-    if (metric === "tokens") {
-      return COST_PARTS.map((part) => ({ key: part.key, label: partLabel(part.key), swatch: part.swatch }));
-    }
-    const list: Series[] = [];
+  const colors = useMemo(() => agentColorMap(timeline), [timeline]);
+  const legend = useMemo(() => {
+    const list: { key: string; label: string; color: string | null }[] = [];
     let others = false;
-    for (const [agentId, swatch] of agentSwatch) {
-      if (swatch === OTHERS_SWATCH) others = true;
-      else list.push({ key: agentId, label: getActorName("agent", agentId), swatch });
+    for (const [agentId, color] of colors) {
+      if (color == null) others = true;
+      else list.push({ key: agentId, label: getActorName("agent", agentId), color });
     }
-    if (others) list.push({ key: OTHERS_KEY, label: t(($) => $.runs_timeline.others), swatch: OTHERS_SWATCH });
+    if (others) list.push({ key: OTHERS_KEY, label: t(($) => $.runs_timeline.others), color: null });
     return list;
-  }, [metric, agentSwatch, getActorName, partLabel, t]);
+  }, [colors, getActorName, t]);
 
-  const valueOf = (run: TimelineRun) =>
-    metric === "cost" ? (run.usage?.cost ?? 0) : metric === "tokens" ? (run.usage?.tokens ?? 0) : (run.durationMs ?? 0);
-  const segmentsOf = (run: TimelineRun) =>
-    metric === "tokens"
-      ? COST_PARTS.map((part) => ({ key: part.key, swatch: part.swatch, value: run.usage?.[part.key] ?? 0 }))
-      : [{ key: "run", swatch: agentSwatch.get(run.task.agent_id) ?? OTHERS_SWATCH, value: valueOf(run) }];
-
-  const maxValue = Math.max(0, ...runs.map(valueOf));
+  const valueOf = (run: TimelineRun): number | null =>
+    run.active ? null : metric === "cost" ? (run.usage?.cost ?? null) : metric === "tokens" ? (run.usage?.tokens ?? null) : run.durationMs;
+  const measuredValues = runs.map(valueOf).filter((v): v is number => v != null && v > 0);
+  const maxValue = Math.max(0, ...measuredValues);
   // Agent time ticks in whole hours once a run takes an hour, else minutes.
   const timeUnitMs = metric === "time" && maxValue < HOUR_MS ? 60_000 : HOUR_MS;
   const yTicks =
@@ -374,49 +354,66 @@ function RunActivityChart({
       ? niceTicks(maxValue / timeUnitMs).map((v) => v * timeUnitMs)
       : niceTicks(maxValue);
   const yMax = yTicks[yTicks.length - 1] ?? 1;
+  const yPct = (v: number) => (1 - v / yMax) * 100;
   const formatValue = (v: number) =>
     metric === "cost"
       ? formatTick(v)
       : metric === "tokens"
         ? formatTokens(v)
         : `${Number((v / timeUnitMs).toPrecision(3))}${timeUnitMs === HOUR_MS ? "h" : "m"}`;
+  const average = measuredValues.length >= 2 ? sumOf(measuredValues) / measuredValues.length : null;
+  const averageLabel =
+    average == null ? "" : metric === "cost" ? formatUsd(average) : metric === "tokens" ? formatTokens(average) : formatDuration(average / 1000, UNDER_A_SECOND);
 
-  // Where each local day starts in the run sequence.
-  const dayMarks = useMemo(() => {
+  const maxDuration = Math.max(0, ...runs.map((run) => run.durationMs ?? 0));
+  const dots = runs.map((run) => {
+    const value = valueOf(run);
+    const measured = value != null && value > 0;
+    return {
+      run,
+      measured,
+      x: xPct((run.startMs + run.endMs) / 2),
+      y: measured ? yPct(value) : 100,
+      size: !measured
+        ? DOT_NO_FIGURE
+        : metric === "time"
+          ? DOT_FIXED
+          : DOT_MIN + (DOT_MAX - DOT_MIN) * Math.sqrt(maxDuration > 0 ? (run.durationMs ?? 0) / maxDuration : 0),
+    };
+  });
+
+  const ticks = timeTicks(timeline.domain);
+  const tickFormat = useMemo(() => {
+    const day = new Intl.DateTimeFormat(locale, { month: "short", day: "numeric" });
+    const hour = new Intl.DateTimeFormat(locale, { hour: "2-digit", minute: "2-digit", hour12: false });
     const today = new Date().toDateString();
-    const fmt = new Intl.DateTimeFormat(locale, { month: "short", day: "numeric" });
-    const marks: { index: number; label: string | null }[] = [];
-    let lastLabelled = -Infinity;
-    runs.forEach((run, i) => {
-      const day = new Date(run.startMs).toDateString();
-      if (i > 0 && day === new Date(runs[i - 1]!.startMs).toDateString()) return;
-      const labelled = (i - lastLabelled) / runs.length >= MIN_DAY_LABEL_GAP;
-      if (labelled) lastLabelled = i;
-      marks.push({
-        index: i,
-        label: labelled ? (day === today ? t(($) => $.runs_timeline.day_today) : fmt.format(run.startMs)) : null,
-      });
-    });
-    return marks;
-  }, [runs, locale, t]);
+    // An hour tick on midnight names the day instead, so a short span still
+    // says which side of it is today.
+    return (tick: TimeTick) =>
+      tick.kind === "hour" && new Date(tick.t).getHours() !== 0
+        ? hour.format(tick.t)
+        : new Date(tick.t).toDateString() === today
+          ? t(($) => $.runs_timeline.day_today)
+          : day.format(tick.t);
+  }, [locale, t]);
 
-  // Hover layer: the pointer picks the run whose slot it is over, anywhere in
-  // the chart row, so a run with no bar to aim at is still reachable. The
-  // list below carries the same figures for keyboard and screen-reader users.
+  // Hover layer: the pointer picks the nearest dot anywhere in the chart row,
+  // walking run to run along the time axis. The list below carries the same
+  // figures for keyboard and screen-reader users.
   const plotRef = useRef<HTMLDivElement>(null);
   const [hover, setHover] = useState<{ index: number; width: number } | null>(null);
   const trackPointer = (event: React.PointerEvent<HTMLDivElement>) => {
     const rect = plotRef.current?.getBoundingClientRect();
     if (!rect || rect.width <= 0) return;
-    const index = Math.floor(((event.clientX - rect.left) / rect.width) * n);
-    setHover({ index: Math.min(Math.max(index, 0), n - 1), width: rect.width });
+    const index = nearestPoint(
+      dots.map((dot) => ({ x: (dot.x / 100) * rect.width, y: (dot.y / 100) * PLOT_HEIGHT })),
+      event.clientX - rect.left,
+      event.clientY - rect.top,
+    );
+    setHover(index >= 0 ? { index, width: rect.width } : null);
   };
-  const hovered = hover ? runs[hover.index] : undefined;
-  const cardOnLeft = hover ? ((hover.index + 1) / n) * hover.width + HOVER_CARD_ROOM_PX > hover.width : false;
-  const slot = (i: number) => ({ left: `${(i / n) * 100}%`, width: `${100 / n}%` });
-
-  const stackLabel =
-    metric === "tokens" ? t(($) => $.runs_timeline.stack_type) : t(($) => $.runs_timeline.stack_agent);
+  const hoveredDot = hover ? dots[hover.index] : undefined;
+  const cardOnLeft = hover && hoveredDot ? (hoveredDot.x / 100) * hover.width + HOVER_CARD_ROOM_PX > hover.width : false;
 
   return (
     <div className="mt-5 border-b px-6 pb-3">
@@ -432,23 +429,25 @@ function RunActivityChart({
             { value: "time", label: t(($) => $.runs_timeline.metric_time) },
           ]}
         />
-        <span className="text-caption text-muted-foreground">
-          {t(($) => $.runs_timeline.unit_run)} · {stackLabel}
-        </span>
         <div className="ml-auto flex flex-wrap items-center gap-x-3 gap-y-1 text-caption text-muted-foreground">
-          {series.map((s) => (
-            <span key={s.key} className="flex items-center gap-1.5">
-              <span aria-hidden className={cn("size-2 rounded-xs", s.swatch)} />
-              {s.label}
+          {legend.map((entry) => (
+            <span key={entry.key} className="flex items-center gap-1.5">
+              <span
+                aria-hidden
+                className={cn("size-2.5 rounded-full", entry.color ? "chart-mark" : "chart-mark-neutral")}
+                style={entry.color ? markStyle(entry.color) : undefined}
+              />
+              {entry.label}
             </span>
           ))}
+          {metric !== "time" && <span>{t(($) => $.runs_timeline.size_is_duration)}</span>}
         </div>
       </div>
 
       <div
         role="img"
         aria-label={t(($) => $.runs_timeline.chart_aria, {
-          count: n,
+          count: runs.length,
           cost: formatUsd(timeline.totalCost),
         })}
         className="flex gap-3"
@@ -457,126 +456,115 @@ function RunActivityChart({
         onPointerLeave={() => setHover(null)}
       >
         <div ref={plotRef} className="relative min-w-0 flex-1">
-          {/* Day dividers run through the bars and the status ticks alike. */}
-          {dayMarks
-            .filter((mark) => mark.index > 0)
-            .map((mark) => (
+          <div
+            className="relative rounded-md bg-[radial-gradient(circle,var(--chart-bar-ring)_1px,transparent_1.25px)] bg-[length:14px_14px] bg-center"
+            style={{ height: PLOT_HEIGHT }}
+            aria-hidden
+          >
+            <span className="absolute inset-x-0 bottom-0 h-px bg-border" />
+            {average != null && (
               <span
-                key={mark.index}
-                aria-hidden
-                className="absolute top-0 bottom-5 w-px bg-border"
-                style={{ left: `${(mark.index / n) * 100}%` }}
+                className="absolute inset-x-0 border-t border-dashed border-muted-foreground/50"
+                style={{ top: `${yPct(average)}%` }}
               />
-            ))}
-
-          <div className="relative" style={{ height: PLOT_HEIGHT }} aria-hidden>
-            {yTicks.map((v) => (
+            )}
+            {hoveredDot && (
               <span
-                key={v}
-                className="absolute inset-x-0 h-px bg-border"
-                style={{ top: `${(1 - v / yMax) * 100}%` }}
+                className="absolute top-0 bottom-0 border-l border-dashed border-foreground/30"
+                style={{ left: `${hoveredDot.x}%` }}
               />
-            ))}
-            {runs.map((run, i) => {
-              const total = valueOf(run);
-              const dimmed = hovered && hovered !== run;
+            )}
+            {dots.map((dot, i) => {
+              const color = colors.get(dot.run.task.agent_id) ?? null;
+              const failed = dot.run.task.status === "failed";
+              const tone =
+                dot.run.active && !dot.measured
+                  ? "bg-info motion-safe:animate-pulse"
+                  : failed
+                    ? "chart-mark"
+                    : !dot.measured
+                      ? "chart-mark-hatch"
+                      : color
+                        ? "chart-mark"
+                        : "chart-mark-neutral";
               return (
-                <span key={run.task.id} className="absolute inset-y-0 flex items-end justify-center" style={slot(i)}>
-                  {total > 0 ? (
-                    <span
-                      data-run={run.task.id}
-                      className={cn(
-                        "flex w-[70%] max-w-10 min-w-px flex-col-reverse gap-px overflow-hidden rounded-t-xs transition-opacity",
-                        dimmed && "opacity-35",
-                      )}
-                      style={{ height: Math.max(2, (total / yMax) * PLOT_HEIGHT) }}
-                    >
-                      {segmentsOf(run).map((s, _, all) =>
-                        s.value > 0 ? (
-                          <span
-                            key={s.key}
-                            className={cn("min-h-px", s.swatch)}
-                            style={shareStyle(s.value, sumOf(all.map((x) => x.value)))}
-                          />
-                        ) : null,
-                      )}
-                    </span>
-                  ) : (
-                    <span
-                      data-run={run.task.id}
-                      className={cn(
-                        "w-[70%] max-w-10 min-w-px rounded-t-xs transition-opacity",
-                        run.active
-                          ? "bg-info animate-pulse"
-                          : "border border-b-0 border-dashed border-faint-foreground",
-                        dimmed && "opacity-35",
-                      )}
-                      style={{ height: STUB_HEIGHT }}
-                    />
+                <motion.span
+                  key={dot.run.task.id}
+                  data-run={dot.run.task.id}
+                  initial={reduceMotion ? false : { scale: 0 }}
+                  animate={{ scale: 1 }}
+                  transition={{ duration: 0.4, delay: Math.min(i, 40) * 0.015, ease: [0.22, 1, 0.36, 1] }}
+                  className={cn(
+                    "absolute rounded-full transition-opacity",
+                    tone,
+                    hoveredDot && hoveredDot !== dot && "opacity-35",
+                    hoveredDot === dot && "z-10",
                   )}
-                </span>
+                  style={{
+                    left: `calc(${dot.x}% - ${dot.size / 2}px)`,
+                    top: `calc(${dot.y}% - ${dot.size / 2}px)`,
+                    width: dot.size,
+                    height: dot.size,
+                    ...(tone === "chart-mark" ? markStyle(failed ? "var(--destructive)" : color!) : null),
+                  }}
+                />
               );
             })}
           </div>
 
-          {/* How a run ended, under its bar: the bar itself carries who ran it. */}
-          <div className="relative mt-1 h-1" aria-hidden>
-            {runs.map((run, i) =>
-              run.task.status === "failed" || run.task.status === "cancelled" ? (
-                <span key={run.task.id} className="absolute inset-y-0 flex justify-center" style={slot(i)}>
-                  <span
-                    className={cn(
-                      "h-full w-[70%] max-w-10 min-w-px rounded-full",
-                      run.task.status === "failed" ? "bg-destructive" : "bg-faint-foreground",
-                    )}
-                  />
-                </span>
-              ) : null,
-            )}
-          </div>
-
-          {hovered && hover && (
+          {hoveredDot && hover && (
             <div
               aria-hidden
               data-hover-card
-              className="pointer-events-none absolute top-0 z-20 w-max max-w-72 rounded-lg border bg-popover px-2.5 py-1.5 text-caption text-popover-foreground shadow-[var(--menu-shadow)]"
+              className="pointer-events-none absolute z-20 w-max max-w-72 rounded-lg border bg-popover px-2.5 py-1.5 text-caption text-popover-foreground shadow-[var(--menu-shadow)]"
               style={{
-                left: `${((cardOnLeft ? hover.index : hover.index + 1) / n) * 100}%`,
-                transform: cardOnLeft ? "translateX(calc(-100% - 8px))" : "translateX(8px)",
+                left: `${hoveredDot.x}%`,
+                top: hoveredDot.y > 50 ? 0 : Math.round(PLOT_HEIGHT * 0.45),
+                transform: cardOnLeft ? "translateX(calc(-100% - 14px))" : "translateX(14px)",
               }}
             >
-              <RunHoverCard run={hovered} parts={metric === "tokens"} />
+              <RunHoverCard run={hoveredDot.run} parts={metric === "tokens"} />
             </div>
           )}
 
           <div className="relative mt-px h-5" aria-hidden>
-            {dayMarks.map((mark) =>
-              mark.label ? (
+            {ticks.map((tick) => {
+              const x = xPct(tick.t);
+              return (
                 <span
-                  key={mark.index}
+                  key={tick.t}
                   className="absolute top-1 whitespace-nowrap px-1 text-micro text-muted-foreground"
-                  style={{
-                    left: `${(mark.index / n) * 100}%`,
-                    transform: mark.index / n > 0.9 ? "translateX(-100%)" : undefined,
-                  }}
+                  style={{ left: `${x}%`, transform: x > 92 ? "translateX(-100%)" : undefined }}
                 >
-                  {mark.label}
+                  {tickFormat(tick)}
                 </span>
-              ) : null,
-            )}
+              );
+            })}
           </div>
         </div>
 
-        <div className="relative w-12 shrink-0 text-micro tabular-nums" style={{ height: PLOT_HEIGHT }} aria-hidden>
-          {yTicks.map((v) => (
+        {/* Y scale on the right; the average takes the scale where it falls,
+            so it never sits on the dots. */}
+        <div className="relative w-16 shrink-0 text-micro tabular-nums" style={{ height: PLOT_HEIGHT }} aria-hidden>
+          {yTicks.map((v) =>
+            average != null && Math.abs(yPct(v) - yPct(average)) < 10 ? null : (
+              <span
+                key={v}
+                className="absolute left-1 -translate-y-1/2 text-muted-foreground"
+                style={{ top: `${yPct(v)}%` }}
+              >
+                {formatValue(v)}
+              </span>
+            ),
+          )}
+          {average != null && (
             <span
-              key={v}
-              className="absolute left-1 -translate-y-1/2 text-muted-foreground"
-              style={{ top: `${(1 - v / yMax) * 100}%` }}
+              className="absolute left-0 -translate-y-1/2 whitespace-nowrap rounded-full bg-foreground px-1.5 font-medium text-background"
+              style={{ top: `${yPct(average)}%` }}
             >
-              {formatValue(v)}
+              {t(($) => $.runs_timeline.average, { value: averageLabel })}
             </span>
-          ))}
+          )}
         </div>
       </div>
     </div>
@@ -645,82 +633,145 @@ function RunHoverCard({ run, parts }: { run: TimelineRun; parts: boolean }) {
   );
 }
 
-// ─── Cost split ────────────────────────────────────────────────────────────
+// ─── Cost flow ─────────────────────────────────────────────────────────────
 
-function CostSplit({ timeline }: { timeline: RunTimeline }) {
-  const { t } = useT("issues");
-  const { getActorName } = useActorName();
-  return (
-    <div className="grid grid-cols-1 gap-x-8 gap-y-3 border-b px-6 py-3 sm:grid-cols-2">
-      <ShareBand
-        title={t(($) => $.runs_timeline.by_agent)}
-        shares={timeline.costByAgent}
-        total={timeline.totalCost}
-        label={(key) => getActorName("agent", key)}
-      />
-      <ShareBand
-        title={t(($) => $.runs_timeline.by_model)}
-        shares={timeline.costByModel}
-        total={timeline.totalCost}
-        label={shortModelName}
-        hint={(key) => key}
-      />
-    </div>
-  );
+// Room each label needs (name over figures), and the flow's floor height.
+const FLOW_ROW_PX = 38;
+const FLOW_MIN_HEIGHT = 72;
+const FLOW_GAP_PX = 8;
+// Models past this many share an "Others" node, like agents past the series.
+const FLOW_MAX_MODELS = SERIES_COLORS.length;
+
+function foldShares(shares: readonly CostShare[], keep: (key: string) => boolean): CostShare[] {
+  const kept = shares.filter((s) => keep(s.key) && s.cost > 0);
+  const rest = shares.filter((s) => !keep(s.key)).reduce((sum, s) => sum + s.cost, 0);
+  return rest > 0 ? [...kept, { key: OTHERS_KEY, cost: rest }] : kept;
 }
 
-function ShareBand({
-  title,
-  shares,
-  total,
-  label,
-  hint,
-}: {
-  title: string;
-  shares: CostShare[];
-  total: number;
-  label: (key: string) => string;
-  /** Native tooltip for an entry, when its label shortens the key. */
-  hint?: (key: string) => string;
-}) {
+// Where the money went, as a flow: who spent it on the left, on which model on
+// the right, a ribbon per pair as thick as its spend. It answers what two
+// separate splits could not — which agent's spend went to which model, e.g.
+// one agent switching models mid-issue.
+function CostFlow({ timeline }: { timeline: RunTimeline }) {
   const { t } = useT("issues");
+  const { getActorName } = useActorName();
   const percent = usePercent();
-  const named = shares.slice(0, SERIES_SWATCHES.length);
-  const rest = shares.slice(SERIES_SWATCHES.length);
-  const entries = [
-    ...named.map((s, i) => ({ key: s.key, name: label(s.key), hint: hint?.(s.key), cost: s.cost, swatch: swatchFor(i) })),
-    ...(rest.length > 0
-      ? [{
-          key: OTHERS_KEY,
-          name: t(($) => $.runs_timeline.others),
-          hint: undefined,
-          cost: rest.reduce((sum, s) => sum + s.cost, 0),
-          swatch: OTHERS_SWATCH,
-        }]
-      : []),
-  ].filter((e) => e.cost > 0);
-  if (entries.length === 0) return null;
-  const entriesTotal = sumOf(entries.map((e) => e.cost));
+  const gradientId = useId();
+  const [focus, setFocus] = useState<{ side: "agent" | "model"; key: string } | null>(null);
+  const colors = useMemo(() => agentColorMap(timeline), [timeline]);
+
+  const flow = useMemo(() => {
+    const topModels = new Set(timeline.costByModel.slice(0, FLOW_MAX_MODELS).map((s) => s.key));
+    const agentKey = (id: string) => (colors.get(id) != null ? id : OTHERS_KEY);
+    const modelKey = (model: string) => (topModels.has(model) ? model : OTHERS_KEY);
+    const agents = foldShares(timeline.costByAgent, (key) => colors.get(key) != null);
+    const models = foldShares(timeline.costByModel, (key) => topModels.has(key));
+    const pairs = new Map<string, { from: string; to: string; cost: number }>();
+    for (const pair of timeline.costByAgentModel) {
+      const from = agentKey(pair.agentId);
+      const to = modelKey(pair.model);
+      const key = `${from}\u0000${to}`;
+      const link = pairs.get(key);
+      if (link) link.cost += pair.cost;
+      else pairs.set(key, { from, to, cost: pair.cost });
+    }
+    const height = Math.max(FLOW_MIN_HEIGHT, Math.max(agents.length, models.length) * FLOW_ROW_PX);
+    const layout = layoutCostFlow(agents, models, [...pairs.values()], height, FLOW_GAP_PX);
+    return {
+      height,
+      ...layout,
+      leftLabels: spreadLabels(layout.left.map((n) => n.y + n.h / 2), FLOW_ROW_PX, height),
+      rightLabels: spreadLabels(layout.right.map((n) => n.y + n.h / 2), FLOW_ROW_PX, height),
+    };
+  }, [timeline, colors]);
+
+  if (flow.left.length === 0) return null;
+
+  const colorOf = (agentKey: string) => colors.get(agentKey) ?? "var(--chart-bar-deep)";
+  const agentName = (key: string) => (key === OTHERS_KEY ? t(($) => $.runs_timeline.others) : getActorName("agent", key));
+  const modelName = (key: string) => (key === OTHERS_KEY ? t(($) => $.runs_timeline.others) : shortModelName(key));
+  const lit = (side: "agent" | "model", key: string) => !focus || (focus.side === side && focus.key === key);
+  const linkLit = (link: FlowLink) => !focus || (focus.side === "agent" ? link.from === focus.key : link.to === focus.key);
+  const figures = (cost: number) => `${formatUsd(cost)} · ${percent(timeline.totalCost > 0 ? cost / timeline.totalCost : 0)}`;
 
   return (
-    <section aria-label={title} className="min-w-0">
-      <div className="text-micro font-medium uppercase tracking-wider text-muted-foreground">{title}</div>
-      <div aria-hidden className="mt-1.5 mb-1.5 flex h-1.5 gap-0.5 overflow-hidden rounded-full">
-        {entries.map((e) => (
-          <span key={e.key} className={e.swatch} style={shareStyle(e.cost, entriesTotal)} />
-        ))}
+    <div className="border-b px-6 pt-3 pb-4" onPointerLeave={() => setFocus(null)}>
+      <div aria-hidden className="mb-2 flex justify-between text-micro font-medium uppercase tracking-wider text-muted-foreground">
+        <span>{t(($) => $.runs_timeline.by_agent)}</span>
+        <span>{t(($) => $.runs_timeline.by_model)}</span>
       </div>
-      <div className="flex flex-wrap gap-x-3 gap-y-0.5 text-caption tabular-nums text-muted-foreground">
-        {entries.map((e) => (
-          <span key={e.key} className="flex min-w-0 items-center gap-1.5" title={e.hint}>
-            <span aria-hidden className={cn("size-2 shrink-0 rounded-xs", e.swatch)} />
-            <span className="truncate text-foreground">{e.name}</span>
-            <span>{formatUsd(e.cost)}</span>
-            <span className="text-faint-foreground">{percent(total > 0 ? e.cost / total : 0)}</span>
-          </span>
-        ))}
+      <div className="flex" style={{ height: flow.height }}>
+        <section aria-label={t(($) => $.runs_timeline.by_agent)} className="relative w-40 shrink-0">
+          {flow.left.map((node, i) => (
+            <div
+              key={node.key}
+              data-flow-node={node.key}
+              onPointerEnter={() => setFocus({ side: "agent", key: node.key })}
+              className={cn("absolute right-3 left-0 -translate-y-1/2 text-right transition-opacity", !lit("agent", node.key) && "opacity-40")}
+              style={{ top: flow.leftLabels[i] }}
+            >
+              <div className="truncate text-caption font-medium">{agentName(node.key)}</div>
+              <div className="truncate text-micro tabular-nums text-muted-foreground">{figures(node.cost)}</div>
+            </div>
+          ))}
+        </section>
+        <div aria-hidden className="relative min-w-0 flex-1">
+          {flow.left.map((node) => (
+            <span
+              key={node.key}
+              className={cn("absolute left-0 w-2 rounded-xs chart-mark transition-opacity", !lit("agent", node.key) && "opacity-40")}
+              style={{ top: node.y, height: Math.max(2, node.h), ...markStyle(colorOf(node.key)) }}
+            />
+          ))}
+          <svg
+            className="absolute inset-y-0 right-2.5 left-2.5 h-full w-[calc(100%-1.25rem)] overflow-visible"
+            viewBox={`0 0 100 ${flow.height}`}
+            preserveAspectRatio="none"
+          >
+            <defs>
+              {flow.links.map((link, i) => (
+                <linearGradient key={i} id={`${gradientId}-${i}`} x1="0" x2="1" y1="0" y2="0">
+                  <stop offset="0" style={{ stopColor: colorOf(link.from), stopOpacity: 0.45 }} />
+                  <stop offset="1" style={{ stopColor: colorOf(link.from), stopOpacity: 0.16 }} />
+                </linearGradient>
+              ))}
+            </defs>
+            {flow.links.map((link, i) => (
+              <path
+                key={i}
+                d={`M0 ${link.y0} C50 ${link.y0} 50 ${link.y1} 100 ${link.y1} L100 ${link.y1 + link.h} C50 ${link.y1 + link.h} 50 ${link.y0 + link.h} 0 ${link.y0 + link.h} Z`}
+                fill={`url(#${CSS.escape(gradientId)}-${i})`}
+                className="transition-opacity"
+                opacity={linkLit(link) ? 1 : 0.25}
+                onPointerEnter={() => setFocus({ side: "agent", key: link.from })}
+              />
+            ))}
+          </svg>
+          {flow.right.map((node) => (
+            <span
+              key={node.key}
+              className={cn("absolute right-0 w-2 rounded-xs chart-mark-neutral transition-opacity", !lit("model", node.key) && "opacity-40")}
+              style={{ top: node.y, height: Math.max(2, node.h) }}
+            />
+          ))}
+        </div>
+        <section aria-label={t(($) => $.runs_timeline.by_model)} className="relative w-44 shrink-0">
+          {flow.right.map((node, i) => (
+            <div
+              key={node.key}
+              data-flow-node={node.key}
+              title={node.key === OTHERS_KEY ? undefined : node.key}
+              onPointerEnter={() => setFocus({ side: "model", key: node.key })}
+              className={cn("absolute right-0 left-3 -translate-y-1/2 transition-opacity", !lit("model", node.key) && "opacity-40")}
+              style={{ top: flow.rightLabels[i] }}
+            >
+              <div className="truncate text-caption font-medium">{modelName(node.key)}</div>
+              <div className="truncate text-micro tabular-nums text-muted-foreground">{figures(node.cost)}</div>
+            </div>
+          ))}
+        </section>
       </div>
-    </section>
+    </div>
   );
 }
 

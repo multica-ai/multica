@@ -495,9 +495,9 @@ describe("execution log past runs", () => {
     expect(term("Agent time")).toHaveTextContent("30m");
   });
 
-  it("opens the full history from the compact cost chart", () => {
+  it("opens the full history from the per-run bars", () => {
     renderSection([past(1), past(2), past(3, { status: "failed", usage: [] })]);
-    fireEvent.click(screen.getByRole("button", { name: /Cost per run/ }));
+    fireEvent.click(screen.getByRole("button", { name: /per run/ }));
     expect(screen.getByRole("heading", { name: "Runs" })).toBeInTheDocument();
   });
 
@@ -508,10 +508,12 @@ describe("execution log past runs", () => {
       usage: [usageSlice({ cost_usd_ticks: 20_000_000_000 })],
     }));
     renderSection(tasks);
-    const chart = screen.getByRole("button", { name: /Cost per run/ });
-    expect(chart.querySelectorAll("[data-run]")).toHaveLength(30);
-    expect(chart.querySelector("[data-run]")).toHaveAttribute("data-run", "past-6");
-    expect(chart.querySelectorAll("[data-run]")[29]).toHaveAttribute("data-run", "past-35");
+    const chart = screen.getByRole("button", { name: /per run/ });
+    const costBars = chart.querySelectorAll('[data-metric="cost"]');
+    expect(costBars).toHaveLength(30);
+    expect(costBars[0]).toHaveAttribute("data-run", "past-6");
+    expect(costBars[29]).toHaveAttribute("data-run", "past-35");
+    expect(chart.querySelectorAll("[data-run]")).toHaveLength(90);
     expect(screen.getByText("Spent", { selector: "dt" }).parentElement).toHaveTextContent("$70.00");
     expect(screen.getAllByText(/^Past run \d+$/)).toHaveLength(3);
     expect(screen.queryByText("Latest")).not.toBeInTheDocument();
@@ -527,14 +529,20 @@ describe("execution log past runs", () => {
     expect(active).toHaveAttribute("tabindex", "0");
   });
 
-  it("scales sidebar bars by cost to match the default run history", () => {
+  it("scales each row's bars by its own figure", () => {
     renderSection([
       past(1, { usage: [usageSlice({ input_tokens: 100, output_tokens: 0, cache_read_tokens: 0, cache_write_tokens: 0, cost_usd_ticks: 100_000_000_000 })] }),
       past(2, { usage: [usageSlice({ input_tokens: 1000, output_tokens: 0, cache_read_tokens: 0, cache_write_tokens: 0, cost_usd_ticks: 10_000_000_000 })] }),
     ]);
-    const bars = screen.getByRole("button", { name: /Cost per run/ }).querySelectorAll("[data-run]");
-    expect((bars[0] as HTMLElement).style.height).toBe("24px");
-    expect(parseFloat((bars[1] as HTMLElement).style.height)).toBeCloseTo(2.4);
+    const chart = screen.getByRole("button", { name: /per run/ });
+    const height = (metric: string, run: string) =>
+      parseFloat((chart.querySelector(`[data-metric="${metric}"][data-run="${run}"]`) as HTMLElement).style.height);
+    expect(height("cost", "past-1")).toBe(32);
+    expect(height("cost", "past-2")).toBeCloseTo(3.2);
+    expect(height("tokens", "past-1")).toBeCloseTo(3.2);
+    expect(height("tokens", "past-2")).toBe(32);
+    expect(height("time", "past-1")).toBe(32);
+    expect(height("time", "past-2")).toBe(32);
   });
 
   it.each([1, 8, 15, 30])("preserves upstream slots for %i runs", (count) => {
@@ -542,15 +550,41 @@ describe("execution log past runs", () => {
       started_at: new Date(Date.UTC(2026, 5, i + 1, 8)).toISOString(),
       completed_at: new Date(Date.UTC(2026, 5, i + 1, 8, 10)).toISOString(),
     })));
-    const chart = screen.getByRole("button", { name: /Cost per run/ });
-    const plot = chart.querySelector("[aria-hidden]") as HTMLElement;
-    expect(plot.style.height).toBe("24px");
-    expect(plot.children).toHaveLength(Math.max(20, count));
-    expect(chart.querySelectorAll("[data-run]")).toHaveLength(count);
-    expect(plot.children[plot.children.length - count]).toHaveAttribute("data-run");
+    const chart = screen.getByRole("button", { name: /per run/ });
+    const rows = chart.querySelectorAll("[data-spark]");
+    expect(Array.from(rows, (row) => row.getAttribute("data-spark"))).toEqual(["cost", "tokens", "time"]);
+    for (const row of rows) {
+      const plot = row.firstElementChild as HTMLElement;
+      expect(plot.style.height).toBe("32px");
+      expect(plot.children).toHaveLength(Math.max(20, count));
+      expect(plot.querySelectorAll("[data-run]")).toHaveLength(count);
+      expect(plot.children[plot.children.length - count]).toHaveAttribute("data-run");
+    }
     expect(chart).not.toHaveTextContent("Latest");
-    expect(chart).not.toHaveTextContent("Cost per run");
     expect(chart).not.toHaveTextContent("#1");
+  });
+
+  it("colours today's runs fully and washes earlier ones", () => {
+    const now = Date.now();
+    renderSection([
+      past(1),
+      past(2, {
+        started_at: new Date(now - 60_000).toISOString(),
+        completed_at: new Date(now).toISOString(),
+      }),
+    ]);
+    const chart = screen.getByRole("button", { name: /per run/ });
+    expect(chart.querySelector('[data-metric="cost"][data-run="past-2"]')).toHaveClass("chart-mark");
+    const earlier = chart.querySelector('[data-metric="cost"][data-run="past-1"]') as HTMLElement;
+    expect(earlier).not.toHaveClass("chart-mark");
+    expect(earlier.style.backgroundColor).toContain("color-mix");
+    expect(screen.getByText("Spent", { selector: "dt" }).parentElement).toHaveTextContent("Today +$2.00");
+  });
+
+  it("leaves out today's delta when every run is from today", () => {
+    const now = Date.now();
+    renderSection([past(1, { started_at: new Date(now - 60_000).toISOString(), completed_at: new Date(now).toISOString() })]);
+    expect(screen.queryByText(/^Today \+/)).not.toBeInTheDocument();
   });
 
   it("preserves run status colors and marks missing usage", () => {
@@ -560,11 +594,14 @@ describe("execution log past runs", () => {
       past(3, { usage: [] }),
       makeTask({ id: "active", status: "running", usage: [] }),
     ]);
-    const chart = screen.getByRole("button", { name: /Cost per run/ });
-    expect(chart.querySelector('[data-run="past-1"]')).toHaveClass("bg-destructive");
-    expect(chart.querySelector('[data-run="past-2"]')).toHaveClass("bg-faint-foreground");
-    expect(chart.querySelector('[data-run="past-3"]')).toHaveClass("border-dashed");
-    expect(chart.querySelector('[data-run="active"]')).toHaveClass("bg-info");
+    const chart = screen.getByRole("button", { name: /per run/ });
+    const cost = (run: string) => chart.querySelector(`[data-metric="cost"][data-run="${run}"]`) as HTMLElement;
+    expect(cost("past-1")).toHaveClass("bg-destructive");
+    expect(cost("past-2")).toHaveClass("chart-mark-hatch");
+    expect(cost("past-2").style.height).toBe("32px");
+    expect(cost("past-3")).toHaveClass("chart-mark-hatch");
+    expect(cost("past-3").style.height).toBe("3px");
+    expect(cost("active")).toHaveClass("bg-info");
   });
 
   it("makes full details reachable from the first priced run", () => {
@@ -575,7 +612,7 @@ describe("execution log past runs", () => {
 
   it("skips the bars when no run recorded usage — there are no costs to compare", () => {
     renderSection([past(1, { usage: [] }), past(2, { usage: [] })]);
-    expect(screen.queryByRole("button", { name: /Cost per run/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /per run/ })).not.toBeInTheDocument();
   });
 });
 

@@ -1,6 +1,7 @@
 "use client";
 
-import { useMemo, useRef, useState } from "react";
+import { useId, useMemo, useRef, useState } from "react";
+import { motion, useReducedMotion } from "motion/react";
 import { cn } from "@multica/ui/lib/utils";
 import { useActorName } from "@multica/core/workspace/hooks";
 import { ActorAvatar } from "../../common/actor-avatar";
@@ -17,11 +18,12 @@ import {
   type RunTimeline,
   type TimelineRun,
 } from "./issue-run-timeline";
+import { agentColorMap, markStyle } from "./run-chart-colors";
 import { RunTriggerLabel } from "./run-trigger-label";
 import { useStatusLabel, useTriggerText } from "./task-run-labels";
 
 // The Runs dialog's "over time" view: the issue's cumulative cost as a step
-// curve over per-agent run lanes, on one time axis. Where the per-run bars
+// curve over per-agent run lanes, on one time axis. Where the per-run dots
 // answer "which run was expensive", this answers "when did the money go" —
 // the bursts, the quiet stretches between them, and the run that moved the
 // total most.
@@ -41,11 +43,13 @@ const HOVER_CARD_ROOM_PX = 298;
 // and tick labels this close to it step aside.
 const TIME_TAG_HALF_PX = 48;
 
-function laneTone(run: TimelineRun, isPeak: boolean): string {
-  if (run.active) return "bg-info animate-pulse";
-  if (run.task.status === "failed") return "bg-destructive";
-  if (run.task.status === "cancelled") return "bg-faint-foreground";
-  return isPeak ? "bg-chart-1" : "bg-chart-2";
+// Lane bars wear their agent's series colour, the one the per-run scatter
+// uses, so an agent reads the same in both views.
+function laneTone(run: TimelineRun, color: string | null): { className: string; style?: React.CSSProperties } {
+  if (run.active) return { className: "bg-info motion-safe:animate-pulse" };
+  if (run.task.status === "failed") return { className: "chart-mark", style: markStyle("var(--destructive)") };
+  if (run.task.status === "cancelled") return { className: "chart-mark-hatch" };
+  return color ? { className: "chart-mark", style: markStyle(color) } : { className: "chart-mark-neutral" };
 }
 
 interface ChartHover {
@@ -68,6 +72,9 @@ export function RunCumulativeChart({
   const { t } = useT("issues");
   const locale = useLocale();
   const { getActorName } = useActorName();
+  const reduceMotion = useReducedMotion();
+  const areaId = useId();
+  const colors = useMemo(() => agentColorMap(timeline), [timeline]);
   const [d0, d1] = timeline.domain;
   // Without any usage there is no curve to draw; the lanes still show when
   // each run happened.
@@ -168,12 +175,12 @@ export function RunCumulativeChart({
         <div className="ml-auto flex items-center gap-4 text-caption text-muted-foreground">
           {timeline.pricedCount > 0 && (
             <span className="flex items-center gap-1.5">
-              <span aria-hidden className="h-0.5 w-3.5 rounded-full bg-chart-1" />
+              <span aria-hidden className="h-0.5 w-3.5 rounded-full bg-chart-accent" />
               {t(($) => $.runs_timeline.legend_cumulative)}
             </span>
           )}
           <span className="flex items-center gap-1.5">
-            <span aria-hidden className="h-2 w-3 rounded-xs bg-chart-2" />
+            <span aria-hidden className="h-2 w-3 rounded-xs chart-mark-neutral" />
             {t(($) => $.runs_timeline.legend_run)}
           </span>
         </div>
@@ -219,36 +226,54 @@ export function RunCumulativeChart({
             {yTicks.map((v) => (
               <span
                 key={v}
-                className="absolute inset-x-0 h-px bg-border"
+                className="absolute inset-x-0 border-t border-dashed border-border"
                 style={{ top: `${yPct(v)}%` }}
               />
             ))}
             {steps.length > 0 && (
-              <svg
-                className="absolute inset-0 size-full overflow-visible"
-                viewBox="0 0 1000 100"
-                preserveAspectRatio="none"
+              // Wipes in left to right, the way the money went out. The glow
+              // sits on the line's own svg: a filter inside the stretched
+              // viewBox would stretch with it.
+              <motion.div
+                className="absolute inset-0"
+                initial={reduceMotion ? false : { clipPath: "inset(-8px 100% -8px 0)" }}
+                animate={{ clipPath: "inset(-8px 0% -8px 0)" }}
+                transition={{ duration: 0.7, ease: [0.22, 1, 0.36, 1] }}
               >
-                <path d={area} fill="var(--chart-1)" fillOpacity={0.1} />
-                <path
-                  d={line}
-                  fill="none"
-                  stroke="var(--chart-1)"
-                  strokeWidth={2}
-                  strokeLinejoin="round"
-                  vectorEffect="non-scaling-stroke"
-                />
-              </svg>
+                <svg className="absolute inset-0 size-full" viewBox="0 0 1000 100" preserveAspectRatio="none">
+                  <defs>
+                    <linearGradient id={areaId} x1="0" x2="0" y1="0" y2="1">
+                      <stop offset="0" style={{ stopColor: "var(--chart-accent)", stopOpacity: 0.24 }} />
+                      <stop offset="1" style={{ stopColor: "var(--chart-accent)", stopOpacity: 0 }} />
+                    </linearGradient>
+                  </defs>
+                  <path d={area} fill={`url(#${CSS.escape(areaId)})`} />
+                </svg>
+                <svg
+                  className="absolute inset-0 size-full overflow-visible drop-shadow-[0_2px_4px_color-mix(in_oklch,var(--chart-accent)_45%,transparent)]"
+                  viewBox="0 0 1000 100"
+                  preserveAspectRatio="none"
+                >
+                  <path
+                    d={line}
+                    fill="none"
+                    stroke="var(--chart-accent)"
+                    strokeWidth={2}
+                    strokeLinejoin="round"
+                    vectorEffect="non-scaling-stroke"
+                  />
+                </svg>
+              </motion.div>
             )}
             {last && (
               <span
-                className="absolute size-2 -translate-x-1/2 -translate-y-1/2 rounded-full bg-chart-1 ring-2 ring-popover"
+                className="absolute size-2.5 -translate-x-1/2 -translate-y-1/2 rounded-full bg-background ring-2 ring-chart-accent"
                 style={{ left: `${xPct(last.t)}%`, top: `${yPct(last.cost)}%` }}
               />
             )}
             {dot && (
               <span
-                className="pointer-events-none absolute z-10 size-2.5 -translate-x-1/2 -translate-y-1/2 rounded-full bg-chart-1 ring-2 ring-popover"
+                className="pointer-events-none absolute z-10 size-3 -translate-x-1/2 -translate-y-1/2 rounded-full bg-background ring-[3px] ring-chart-accent"
                 style={{ left: `${dot.x}%`, top: `${yPct(dot.cost)}%` }}
               />
             )}
@@ -277,20 +302,24 @@ export function RunCumulativeChart({
             {timeline.lanes.map((lane) => (
               <div key={lane.agentId} data-lane={lane.agentId} className="py-[3px]">
                 <div className="relative h-3.5 rounded-xs bg-muted/60">
-                  {lane.runs.map((run) => (
-                    <span
-                      key={run.task.id}
-                      className={cn(
-                        "absolute inset-y-0.5 min-w-[3px] rounded-xs transition-opacity",
-                        laneTone(run, run === peak),
-                        hovered && run !== hovered && "opacity-35",
-                      )}
-                      style={{
-                        left: `${xPct(run.startMs)}%`,
-                        width: `${xPct(run.endMs) - xPct(run.startMs)}%`,
-                      }}
-                    />
-                  ))}
+                  {lane.runs.map((run) => {
+                    const tone = laneTone(run, colors.get(lane.agentId) ?? null);
+                    return (
+                      <span
+                        key={run.task.id}
+                        className={cn(
+                          "absolute inset-y-0.5 min-w-[3px] rounded-xs transition-opacity",
+                          tone.className,
+                          hovered && run !== hovered && "opacity-35",
+                        )}
+                        style={{
+                          left: `${xPct(run.startMs)}%`,
+                          width: `${xPct(run.endMs) - xPct(run.startMs)}%`,
+                          ...tone.style,
+                        }}
+                      />
+                    );
+                  })}
                 </div>
               </div>
             ))}

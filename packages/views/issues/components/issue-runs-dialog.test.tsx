@@ -211,7 +211,7 @@ describe("IssueRunsDialog", () => {
     makeTask({ id: "late", trigger_summary: "Late run", started_at: "2026-09-27T15:00:00", completed_at: "2026-09-27T15:10:00", usage: [usage({ output_tokens: 200_000 })] }),
   ];
 
-  it("draws one bar per run, oldest first, with days as dividers", () => {
+  it("draws one dot per run: height is cost, size is duration, failed runs in red", () => {
     open([
       ...twoRuns(),
       makeTask({ id: "failed", status: "failed", started_at: "2026-09-27T16:00:00", completed_at: "2026-09-27T16:05:00" }),
@@ -223,12 +223,29 @@ describe("IssueRunsDialog", () => {
       "late",
       "failed",
     ]);
-    // $25 against $5: heights follow cost, and a run with no usage is a stub.
-    const height = (id: string) => (plot.querySelector(`[data-run="${id}"]`) as HTMLElement).style.height;
-    expect(parseFloat(height("early"))).toBeGreaterThan(parseFloat(height("late")));
-    expect(height("failed")).toBe("4px");
-    expect(within(plot).getByText("Sep 26")).toBeInTheDocument();
+    const dot = (id: string) => plot.querySelector(`[data-run="${id}"]`) as HTMLElement;
+    // $25 against $5: the dearer run sits higher; 30m against 10m: it is larger.
+    expect(parseFloat(dot("early").style.width)).toBeGreaterThan(parseFloat(dot("late").style.width));
+    // On a $0–30 scale: $25 is a sixth from the top, $5 five sixths down.
+    const top = (id: string) => parseFloat(dot(id).style.top.slice("calc(".length));
+    expect(top("early")).toBeCloseTo(100 / 6);
+    expect(top("late")).toBeCloseTo(500 / 6);
+    // No usage: a small dot on the baseline, still red for failing.
+    expect(dot("failed").style.width).toBe("7px");
+    expect(dot("failed").style.top).toMatch(/^calc\(100%/);
+    expect(dot("failed")).toHaveClass("chart-mark");
+    expect(dot("failed").style.getPropertyValue("--mark")).toBe("var(--destructive)");
+    expect(within(screen.getByRole("img")).getByText("Avg $15.00")).toBeInTheDocument();
     expect(within(plot).getByText("Today")).toBeInTheDocument();
+  });
+
+  it("labels days on an axis longer than a day and a half", () => {
+    open([
+      makeTask({ id: "first", started_at: "2026-09-25T09:00:00", completed_at: "2026-09-25T09:30:00", usage: [usage()] }),
+      makeTask({ id: "last", usage: [usage()] }),
+    ]);
+    expect(within(plotOf()).getByText("Sep 26")).toBeInTheDocument();
+    expect(within(plotOf()).getByText("Today")).toBeInTheDocument();
   });
 
   it("names the run under the pointer, anywhere in the chart row", () => {
@@ -259,34 +276,59 @@ describe("IssueRunsDialog", () => {
 
     expect(screen.getByRole("button", { name: "Cost" })).toHaveAttribute("aria-pressed", "true");
     expect(screen.getByRole("button", { name: "Tokens" })).toHaveAttribute("aria-pressed", "false");
+    expect(screen.getByText("Dot size is duration")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Tokens" }));
-    expect(screen.getByText("per run · by token type")).toBeInTheDocument();
+    expect(within(screen.getByRole("img")).getByText("Avg 600K")).toBeInTheDocument();
     // In the token view the hover splits the run's tokens by type.
     fireEvent.pointerMove(plot, { clientX: 750 });
     expect(within(hoverCard(plot)!).getByText("Output")).toBeInTheDocument();
     expect(within(hoverCard(plot)!).getByText("200K")).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole("button", { name: "Agent time" }));
-    expect(screen.getByText("per run · by agent")).toBeInTheDocument();
+    // Height already is the duration, so every dot is one size.
+    const sizes = Array.from(plot.querySelectorAll<HTMLElement>("[data-run]"), (el) => el.style.width);
+    expect(new Set(sizes).size).toBe(1);
+    expect(screen.queryByText("Dot size is duration")).not.toBeInTheDocument();
+    expect(within(screen.getByRole("img")).getByText("Avg 20m")).toBeInTheDocument();
+  });
+
+  it("gives each agent its own colour on its dots", () => {
+    open([
+      makeTask({ id: "a", agent_id: "agent-a", usage: [usage()] }),
+      makeTask({ id: "b", agent_id: "agent-b", started_at: "2026-09-27T11:00:00", usage: [usage({ output_tokens: 200_000 })] }),
+    ]);
+    const dot = (id: string) => plotOf().querySelector(`[data-run="${id}"]`) as HTMLElement;
+    expect(dot("a").style.getPropertyValue("--mark")).toBe("var(--chart-series-1)");
+    expect(dot("b").style.getPropertyValue("--mark")).toBe("var(--chart-series-2)");
+  });
+
+  it("draws where each agent's spend went as a flow to the models", () => {
+    open([
+      makeTask({ id: "a", agent_id: "agent-a", usage: [usage({ output_tokens: 4_000 })] }),
+      makeTask({
+        id: "b",
+        agent_id: "agent-b",
+        started_at: "2026-09-27T11:00:00",
+        usage: [usage({ output_tokens: 8_000 }), usage({ model: "claude-sonnet-5", output_tokens: 8_000 })],
+      }),
+    ]);
+    const byAgent = screen.getByRole("region", { name: "By agent" });
+    const byModel = screen.getByRole("region", { name: "By model" });
+    expect(byAgent.querySelectorAll("[data-flow-node]")).toHaveLength(2);
+    expect(Array.from(byModel.querySelectorAll("[data-flow-node]"), (el) => el.getAttribute("data-flow-node"))).toEqual([
+      "claude-opus-5",
+      "claude-sonnet-5",
+    ]);
+    // One ribbon per agent–model pair that spent anything.
+    expect(byAgent.nextElementSibling!.querySelectorAll("path")).toHaveLength(3);
   });
 
   // Review repro (PR #9288): segments used dollar amounts as flex-grow, and
-  // grow factors summing below 1 leave free space unfilled — a $0.10 bar drew
-  // a tenth of its height. jsdom does not lay out, so pin the factors instead.
-  it("splits bars by share, so costs under $1 still fill them", () => {
-    open([
-      makeTask({ id: "a", agent_id: "agent-a", usage: [usage({ output_tokens: 4_000 })] }),
-      makeTask({ id: "b", agent_id: "agent-b", started_at: "2026-09-27T11:00:00", usage: [usage({ output_tokens: 16_000 })] }),
-    ]);
+  // grow factors summing below 1 leave free space unfilled. jsdom does not lay
+  // out, so pin the factors instead.
+  it("splits a run's details by share, so costs under $1 still fill them", () => {
+    open([makeTask({ id: "a", usage: [usage({ output_tokens: 4_000 })] })]);
     const grow = (el: Element) => Number((el as HTMLElement).style.flexGrow);
-
-    const bar = screen.getByRole("img").querySelector('[data-run="a"]')!;
-    expect(Array.from(bar.children, grow)).toEqual([1]);
-
-    // $0.40 and $0.10 of $0.50.
-    const band = within(screen.getByRole("region", { name: "By agent" })).getByText("By agent").nextElementSibling!;
-    expect(Array.from(band.children, grow)).toEqual([0.8, 0.2]);
-
     const toggle = screen.getAllByRole("button", { name: "Run details" })[0]!;
     fireEvent.click(toggle);
     const details = document.getElementById(toggle.getAttribute("aria-controls")!)!;

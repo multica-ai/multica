@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import { motion, useReducedMotion } from "motion/react";
 import { useQuery } from "@tanstack/react-query";
 import { ChevronRight, Loader2, Maximize2, Square } from "@multica/ui/icons";
 import { toast } from "sonner";
@@ -41,6 +42,7 @@ import {
   type RunTimeline,
 } from "./issue-run-timeline";
 import { canRetryRun, RetryRunButton } from "./retry-run-button";
+import { markStyle } from "./run-chart-colors";
 import { TaskStatusIcon } from "./task-status-icon";
 import { useStatusLabel, useTriggerText } from "./task-run-labels";
 import { WakeupRunLabel } from "./wakeup-source-chip";
@@ -169,9 +171,8 @@ export function ExecutionLogSection({ issueId, identifier, issueTitle }: Executi
       {open && (
         <div className="space-y-2 px-2">
           {(timeline.pricedCount > 0 || timeline.agentMs > 0) && (
-            <div className="space-y-0.5 pt-2">
-              <RunTotals timeline={timeline} />
-              {timeline.pricedCount > 0 && <RunCostBars timeline={timeline} onOpen={openRuns} />}
+            <div className="pt-1">
+              <RunSparkRows timeline={timeline} onOpen={openRuns} />
             </div>
           )}
           {activeTasks.length > 0 && (
@@ -203,61 +204,77 @@ export function ExecutionLogSection({ issueId, identifier, issueTitle }: Executi
 
 // ─── Totals ────────────────────────────────────────────────────────────────
 
-// The issue's spend, tokens and agent time at a glance. "—" for a figure no
-// run reported, never 0.
-function RunTotals({ timeline }: { timeline: RunTimeline }) {
-  const { t } = useT("issues");
-  const priced = timeline.pricedCount > 0;
-  const stats = [
-    [t(($) => $.runs_timeline.stat_spent), priced ? formatUsd(timeline.totalCost) : "—"],
-    [t(($) => $.runs_timeline.stat_tokens), priced ? formatTokens(timeline.tokens.total) : "—"],
-    [t(($) => $.runs_timeline.stat_agent_time), formatAgentTime(timeline.agentMs / 1000, "0s")],
-  ] as const;
-  return (
-    <dl className="grid grid-cols-3 gap-2 px-1 pb-1.5">
-      {stats.map(([label, value]) => (
-        <div key={label} className="flex min-w-0 flex-col-reverse">
-          <dt className="truncate text-micro text-muted-foreground">{label}</dt>
-          <dd className="truncate text-label font-medium tabular-nums">{value}</dd>
-        </div>
-      ))}
-    </dl>
-  );
-}
-
-// ─── Cost bars ─────────────────────────────────────────────────────────────
-
-// How many runs the strip holds. A short history leaves the older slots
-// empty, so it sits at the "Now" end instead of stretching two runs into
+// How many runs each row of bars holds. A short history leaves the older
+// slots empty, so it sits at the "now" end instead of stretching two runs into
 // slabs; past the minimum the slots narrow to fit, up to the maximum.
 const MIN_BAR_SLOTS = 20;
 const MAX_BAR_SLOTS = 30;
-const BAR_HEIGHT = 24;
-// A run that reported no cost still gets a mark, short enough to never read
+const BAR_HEIGHT = 32;
+// A run that reported no figure still gets a mark, short enough to never read
 // as a cheap run.
 const STUB_HEIGHT = 3;
 
-function costBarTone(run: TimelineRun): string {
-  if (run.active) return "bg-info animate-pulse";
-  if (run.task.status === "failed") return "bg-destructive";
-  if (run.task.status === "cancelled") return "bg-faint-foreground";
-  if (!run.usage) return "border border-b-0 border-dashed border-faint-foreground";
-  return "bg-chart-2";
+type SparkMetric = "cost" | "tokens" | "time";
+
+// One hue per figure, so the three rows read as three charts, not one.
+const SPARK_COLOR: Record<SparkMetric, string> = {
+  cost: "var(--chart-series-1)",
+  tokens: "var(--chart-series-3)",
+  time: "var(--chart-series-2)",
+};
+const SPARK_METRICS = ["cost", "tokens", "time"] as const satisfies readonly SparkMetric[];
+
+function sparkValue(run: TimelineRun, metric: SparkMetric): number | null {
+  if (metric === "cost") return run.usage?.cost ?? null;
+  if (metric === "tokens") return run.usage?.tokens ?? null;
+  return run.durationMs;
 }
 
-// One bar per recent run, oldest on the left: height is what the run cost
-// against the most expensive one shown, colour is how it ended. It answers
-// "which run was expensive, and which failed" at a glance; when it happened
-// is the Runs dialog's job, which clicking the strip opens — so the strip
-// carries no time axis.
-function RunCostBars({ timeline, onOpen }: { timeline: RunTimeline; onOpen: () => void }) {
+function startOfToday(): number {
+  const day = new Date();
+  day.setHours(0, 0, 0, 0);
+  return day.getTime();
+}
+
+// The issue's spend, tokens and agent time, each beside one bar per recent
+// run (oldest on the left) for that figure. "—" for a figure no run reported,
+// never 0. Today's runs carry the row's colour at full strength and earlier
+// runs a wash of it, and each figure says what today added — so the rows
+// answer "what has this cost, and is it still climbing" without a time axis;
+// when each run happened is the Runs dialog's job, which the bars open.
+function RunSparkRows({ timeline, onOpen }: { timeline: RunTimeline; onOpen: () => void }) {
   const { t } = useT("issues");
+  const reduceMotion = useReducedMotion();
   const [hoverSlot, setHoverSlot] = useState<number | null>(null);
+  const priced = timeline.pricedCount > 0;
   const shown = timeline.runs.slice(-MAX_BAR_SLOTS);
   const slots = Math.max(MIN_BAR_SLOTS, shown.length);
   const emptySlots = slots - shown.length;
-  const maxCost = Math.max(0, ...shown.map((run) => run.usage?.cost ?? 0));
   const hovered = hoverSlot != null && hoverSlot >= emptySlots ? shown[hoverSlot - emptySlots] : undefined;
+  const today = startOfToday();
+  // "Today +…" only means something next to a total that started earlier.
+  const spansDays = timeline.runs.some((run) => run.startMs < today);
+  const todayTotal = (metric: SparkMetric) =>
+    timeline.runs.filter((run) => run.startMs >= today).reduce((sum, run) => sum + (sparkValue(run, metric) ?? 0), 0);
+  const format = (metric: SparkMetric, value: number) =>
+    metric === "cost" ? formatUsd(value) : metric === "tokens" ? formatTokens(value) : formatAgentTime(value / 1000, "0s");
+  const rows = SPARK_METRICS.map((metric) => {
+    const total = metric === "cost" ? timeline.totalCost : metric === "tokens" ? timeline.tokens.total : timeline.agentMs;
+    const reported = metric === "time" || priced;
+    const added = spansDays && reported ? todayTotal(metric) : 0;
+    return {
+      metric,
+      label:
+        metric === "cost"
+          ? t(($) => $.runs_timeline.stat_spent)
+          : metric === "tokens"
+            ? t(($) => $.runs_timeline.stat_tokens)
+            : t(($) => $.runs_timeline.stat_agent_time),
+      value: reported ? format(metric, total) : "—",
+      delta: added > 0 ? t(($) => $.execution_log.today_delta, { value: format(metric, added) }) : null,
+      max: Math.max(0, ...shown.map((run) => sparkValue(run, metric) ?? 0)),
+    };
+  });
 
   const trackPointer = (event: React.PointerEvent<HTMLElement>) => {
     const rect = event.currentTarget.getBoundingClientRect();
@@ -266,49 +283,92 @@ function RunCostBars({ timeline, onOpen }: { timeline: RunTimeline; onOpen: () =
     setHoverSlot(Math.min(Math.max(slot, 0), slots - 1));
   };
 
+  const bar = (run: TimelineRun, metric: SparkMetric, max: number, order: number) => {
+    const value = sparkValue(run, metric);
+    const color = SPARK_COLOR[metric];
+    const measured = !run.active && value != null && value > 0 && max > 0;
+    const tone = run.active
+      ? "bg-info motion-safe:animate-pulse"
+      : run.task.status === "failed"
+        ? "bg-destructive"
+        : run.task.status === "cancelled" || !measured
+          ? "chart-mark-hatch"
+          : run.startMs >= today
+            ? "chart-mark"
+            : undefined;
+    return (
+      <motion.span
+        key={run.task.id}
+        data-run={run.task.id}
+        data-metric={metric}
+        initial={reduceMotion ? false : { scaleY: 0 }}
+        animate={{ scaleY: 1 }}
+        transition={{ duration: 0.5, delay: order * 0.012, ease: [0.22, 1, 0.36, 1] }}
+        className={cn(
+          "flex-1 origin-bottom rounded-t-[2px] transition-opacity",
+          tone,
+          hovered && run !== hovered && "opacity-35",
+        )}
+        style={{
+          height: measured ? Math.max(2, (value / max) * BAR_HEIGHT) : STUB_HEIGHT,
+          ...(tone === "chart-mark" ? markStyle(color) : null),
+          ...(tone === undefined ? { backgroundColor: `color-mix(in oklch, ${color} 35%, transparent)` } : null),
+        }}
+      />
+    );
+  };
+
   return (
-    <div className="px-1">
-      <Tooltip trackCursorAxis="x">
-        <TooltipTrigger
-          render={
-            <button
-              type="button"
-              onClick={onOpen}
-              onPointerMove={trackPointer}
-              onPointerDown={trackPointer}
-              onPointerLeave={() => setHoverSlot(null)}
-              aria-label={t(($) => $.execution_log.strip_aria)}
-            />
-          }
-          className="relative block w-full rounded-xs text-left"
-        >
-          <span aria-hidden className="flex items-end gap-0.5" style={{ height: BAR_HEIGHT }}>
-            {Array.from({ length: emptySlots }, (_, i) => (
-              <span key={`empty-${i}`} className="h-0.5 flex-1 rounded-full bg-border" />
+    <div className="flex px-1">
+      <dl className={priced ? "w-24 shrink-0" : "min-w-0 flex-1"}>
+        {rows.map((row, i) => (
+          <div key={row.metric} className={cn("flex h-14 min-w-0 flex-col justify-center pr-3", i > 0 && "border-t")}>
+            <dt className="truncate text-micro text-muted-foreground">{row.label}</dt>
+            <dd className="truncate text-label font-semibold tabular-nums">{row.value}</dd>
+            {row.delta && (
+              <dd className="truncate text-micro tabular-nums" style={{ color: SPARK_COLOR[row.metric] }}>
+                {row.delta}
+              </dd>
+            )}
+          </div>
+        ))}
+      </dl>
+      {priced && (
+        <Tooltip trackCursorAxis="x">
+          <TooltipTrigger
+            render={
+              <button
+                type="button"
+                onClick={onOpen}
+                onPointerMove={trackPointer}
+                onPointerDown={trackPointer}
+                onPointerLeave={() => setHoverSlot(null)}
+                aria-label={t(($) => $.execution_log.strip_aria)}
+              />
+            }
+            className="relative block min-w-0 flex-1 rounded-xs text-left"
+          >
+            {rows.map((row, i) => (
+              <span
+                key={row.metric}
+                aria-hidden
+                data-spark={row.metric}
+                className={cn("flex h-14 items-end pb-2.5", i > 0 && "border-t")}
+              >
+                <span className={cn("flex w-full items-end", slots > 24 ? "gap-px" : "gap-0.5")} style={{ height: BAR_HEIGHT }}>
+                  {Array.from({ length: emptySlots }, (_, k) => (
+                    <span key={`empty-${k}`} className="h-0.5 flex-1 rounded-full bg-border" />
+                  ))}
+                  {shown.map((run, k) => bar(run, row.metric, row.max, k + i * 4))}
+                </span>
+              </span>
             ))}
-            {shown.map((run) => {
-              const height = run.usage && maxCost > 0
-                ? Math.max(2, (run.usage.cost / maxCost) * BAR_HEIGHT)
-                : STUB_HEIGHT;
-              return (
-                <span
-                  key={run.task.id}
-                  data-run={run.task.id}
-                  className={cn(
-                    "flex-1 rounded-t-xs transition-opacity",
-                    costBarTone(run),
-                    hovered && run !== hovered && "opacity-35",
-                  )}
-                  style={{ height }}
-                />
-              );
-            })}
-          </span>
-        </TooltipTrigger>
-        <TooltipContent className="max-w-64 flex-col items-start gap-0">
-          {hovered ? <RunBarSummary run={hovered} /> : t(($) => $.execution_log.usage_total_tooltip)}
-        </TooltipContent>
-      </Tooltip>
+          </TooltipTrigger>
+          <TooltipContent className="max-w-64 flex-col items-start gap-0">
+            {hovered ? <RunBarSummary run={hovered} /> : t(($) => $.execution_log.usage_total_tooltip)}
+          </TooltipContent>
+        </Tooltip>
+      )}
     </div>
   );
 }
