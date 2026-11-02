@@ -581,13 +581,13 @@ func Prepare(params PrepareParams, logger *slog.Logger) (*Environment, error) {
 	// local_directory detection logic ever drifts.
 	manifest := &sidecarManifest{}
 
-	// Arm the rollback BEFORE the first write, not after
-	// writeContextFilesWithSkillNames returns. That function puts the daemon
-	// task marker down as its very first act and can then fail on any later
-	// step — skill files or project resources. A defer registered after it
-	// returns would miss exactly the failures that strand a marker with nothing
-	// else around it. Rolling back an empty manifest is a no-op, which is what
-	// makes it safe to arm this early.
+	// Arm the rollback BEFORE the first write, not after writeContextFiles
+	// returns. writeContextFiles puts the daemon task marker down as its very
+	// first act and can then fail on any later step — .agent_context, skill
+	// files, project resources — so a defer registered after it returns would
+	// miss exactly the failures that strand a marker with nothing else around
+	// it. Rolling back an empty manifest is a no-op, which is what makes it
+	// safe to arm this early.
 	//
 	// The manifest that records these writes is not persisted until the end of
 	// Prepare, and the caller receives no Environment on any failure path, so
@@ -611,7 +611,7 @@ func Prepare(params PrepareParams, logger *slog.Logger) (*Environment, error) {
 		}()
 	}
 
-	preparedSkillNames, err := writeContextFilesWithSkillNames(workDir, params.Provider, params.Task, manifest)
+	preparedSkillNames, err := writeContextFiles(workDir, params.Provider, params.Task, manifest)
 	if err != nil {
 		return nil, fmt.Errorf("execenv: write context files: %w", err)
 	}
@@ -736,7 +736,7 @@ func Prepare(params PrepareParams, logger *slog.Logger) (*Environment, error) {
 
 	// For OpenClaw, synthesize a per-task config that pins workspace to
 	// workDir. The skill scanner then reads {workDir}/skills/ (written by
-	// writeContextFilesWithSkillNames above). Fail closed on errors: a malformed user
+	// writeContextFiles above). Fail closed on errors: a malformed user
 	// config that the openclaw CLI can't read is a real problem and
 	// silently degrading to a minimal config would mask it by booting
 	// OpenClaw without the agents / providers / API keys it expects.
@@ -923,7 +923,7 @@ func Reuse(params ReuseParams, logger *slog.Logger) *Environment {
 			logger.Warn("execenv: roll back incomplete reused sidecars failed", "error", rollbackErr)
 		}
 	}
-	preparedSkillNames, err := writeContextFilesWithSkillNames(params.WorkDir, params.Provider, params.Task, manifest)
+	preparedSkillNames, err := writeContextFiles(params.WorkDir, params.Provider, params.Task, manifest)
 	if err != nil {
 		if preparedSkillNames == nil {
 			logger.Warn("execenv: refresh context files failed before skill materialization completed; forcing fresh prepare", "error", err)
@@ -933,7 +933,7 @@ func Reuse(params ReuseParams, logger *slog.Logger) *Environment {
 		logger.Warn("execenv: refresh project resources failed (non-fatal)", "error", err)
 	}
 	env.PreparedSkillNames = preparedSkillNames
-	if err == nil && params.Provider == "pi" {
+	if params.Provider == "pi" {
 		env.PiSkillPaths = manifest.skillFiles(skillsDirPath(params.WorkDir, params.Provider))
 	}
 	if err := prepareOmpMcpConfig(params.WorkDir, params.Provider, params.McpConfig, manifest); err != nil {

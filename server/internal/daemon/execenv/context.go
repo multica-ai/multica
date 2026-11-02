@@ -118,9 +118,9 @@ func writeWorkspacesRootMarkerAtomic(path string, data []byte) error {
 	return nil
 }
 
-// writeContextFilesWithSkillNames writes the task's sidecar files: the
-// task-context marker, agent skills in the appropriate provider-native
-// location, and project resources.
+// writeContextFiles writes the task's sidecar files: the task-context marker,
+// agent skills in the appropriate provider-native location, and project
+// resources.
 //
 // It deliberately writes no per-task Markdown brief. There used to be an
 // .agent_context/issue_context.md carrying the issue id, trigger comment id,
@@ -158,7 +158,7 @@ func writeWorkspacesRootMarkerAtomic(path string, data []byte) error {
 // state for local_directory tasks. Callers that don't need cleanup —
 // cloud-mode tasks whose envRoot is wiped wholesale by the GC loop — may
 // pass nil to skip the bookkeeping entirely.
-func writeContextFilesWithSkillNames(workDir, provider string, ctx TaskContextForEnv, manifest *sidecarManifest) ([]string, error) {
+func writeContextFiles(workDir, provider string, ctx TaskContextForEnv, manifest *sidecarManifest) ([]string, error) {
 	if err := writeTaskContextMarker(workDir, ctx, manifest); err != nil {
 		return nil, err
 	}

@@ -36,10 +36,10 @@ const sidecarManifestFile = ".multica_sidecar_manifest.json"
 //     file, so missing-from-disk is degraded behavior, not failure.
 var errPathPreExists = errors.New("execenv: refuse to overwrite pre-existing path")
 
-// sidecarManifest records the filesystem mutations made by
-// writeContextFilesWithSkillNames and its callees inside the agent's WorkDir
-// for a single task. The manifest is the second half of the contract that
-// makes local_directory runs byte-exactly reversible:
+// sidecarManifest records the filesystem mutations writeContextFiles and
+// its callees make inside the agent's WorkDir for a single task. The
+// manifest is the second half of the contract that makes local_directory
+// runs byte-exactly reversible:
 //
 //   - Files lists absolute paths of regular files we created. Files are
 //     recorded only after recordWriteFile has verified the target did

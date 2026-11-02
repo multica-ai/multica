@@ -12,12 +12,6 @@ import (
 	"time"
 )
 
-// Existing context-file tests only need the write error, not allocated names.
-func writeContextFiles(workDir, provider string, task TaskContextForEnv, manifest *sidecarManifest) error {
-	_, err := writeContextFilesWithSkillNames(workDir, provider, task, manifest)
-	return err
-}
-
 func TestPreparationHelperReturnsAllocatedSkillNames(t *testing.T) {
 	t.Parallel()
 	for _, mode := range []string{"prepare", "reuse"} {
@@ -454,35 +448,53 @@ func TestReuseFailsClosedWhenSkillNamesAreUnavailable(t *testing.T) {
 }
 
 func TestReuseKeepsProjectResourceWriteFailureBestEffort(t *testing.T) {
-	params := PrepareParams{
-		WorkspacesRoot: t.TempDir(), WorkspaceID: "workspace-resource-collision",
-		TaskID: "task-resource-collision", Provider: "claude",
-		Task: TaskContextForEnv{IssueID: "issue-resource-collision"},
-	}
-	env, err := Prepare(params, testLogger())
-	if err != nil {
-		t.Fatalf("Prepare: %v", err)
-	}
-	defer env.Cleanup(true)
+	for _, provider := range []string{"claude", "pi"} {
+		t.Run(provider, func(t *testing.T) {
+			params := PrepareParams{
+				WorkspacesRoot: t.TempDir(), WorkspaceID: "workspace-resource-collision",
+				TaskID: "task-resource-collision", Provider: provider,
+				Task: TaskContextForEnv{IssueID: "issue-resource-collision"},
+			}
+			env, err := Prepare(params, testLogger())
+			if err != nil {
+				t.Fatalf("Prepare: %v", err)
+			}
+			defer env.Cleanup(true)
 
-	task := TaskContextForEnv{
-		IssueID:     "issue-resource-collision",
-		AgentSkills: []SkillContextForEnv{{Name: "Review", Content: "Assigned review."}},
-		ProjectID:   "project-resource-collision",
-		ProjectResources: []ProjectResourceForEnv{{
-			ID: "resource-collision", ResourceType: "github_repo",
-			ResourceRef: []byte(`{`),
-		}},
-	}
-	reused := Reuse(ReuseParams{
-		WorkspacesRoot: params.WorkspacesRoot, WorkDir: env.WorkDir,
-		Provider: params.Provider, Task: task,
-	}, testLogger())
-	if reused == nil || !reflect.DeepEqual(reused.PreparedSkillNames, []string{"review"}) {
-		t.Fatalf("best-effort project resource failure prevented reuse: %#v", reused)
-	}
-	if _, err := os.Stat(filepath.Join(env.WorkDir, ".multica", "project", "resources.json")); !os.IsNotExist(err) {
-		t.Fatalf("invalid project resource unexpectedly produced a sidecar: %v", err)
+			task := TaskContextForEnv{
+				IssueID:     "issue-resource-collision",
+				AgentSkills: []SkillContextForEnv{{Name: "Review", Content: "Assigned review."}},
+				ProjectID:   "project-resource-collision",
+				ProjectResources: []ProjectResourceForEnv{{
+					ID: "resource-collision", ResourceType: "github_repo",
+					ResourceRef: []byte(`{`),
+				}},
+			}
+			reused := Reuse(ReuseParams{
+				WorkspacesRoot: params.WorkspacesRoot, WorkDir: env.WorkDir,
+				Provider: params.Provider, Task: task,
+			}, testLogger())
+			if reused == nil || !reflect.DeepEqual(reused.PreparedSkillNames, []string{"review"}) {
+				t.Fatalf("best-effort project resource failure prevented reuse: %#v", reused)
+			}
+			if _, err := os.Stat(filepath.Join(env.WorkDir, ".multica", "project", "resources.json")); !os.IsNotExist(err) {
+				t.Fatalf("invalid project resource unexpectedly produced a sidecar: %v", err)
+			}
+			if provider == "pi" {
+				want := filepath.Join(reused.WorkDir, ".pi", "skills", "review", "SKILL.md")
+				if !reflect.DeepEqual(reused.PiSkillPaths, []string{want}) {
+					t.Errorf("project resource failure lost the materialized Pi skill: paths = %v, want [%s]", reused.PiSkillPaths, want)
+				}
+				data, err := os.ReadFile(want)
+				if err != nil || !strings.Contains(string(data), "Assigned review.") {
+					t.Fatalf("assigned Pi skill unavailable: %q, %v", data, err)
+				}
+				brief := buildMetaSkillContent(provider, ApplyPreparedSkillNames(task, reused.PreparedSkillNames))
+				if !strings.Contains(brief, "**review**") {
+					t.Error("brief does not advertise the loaded Pi skill")
+				}
+			}
+		})
 	}
 }
 
