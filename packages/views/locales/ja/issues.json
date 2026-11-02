@@ -252,8 +252,7 @@
     "advanced_group_match_trailing": "に一致",
     "advanced_group_hint": "このグループの条件は「{{word}}」でつながります",
     "advanced_add_to_group": "グループに追加",
-    "advanced_turn_into_group": "グループに変換",
-    "advanced_summary": "条件：{{summary}}"
+    "advanced_turn_into_group": "グループに変換"
   },
   "display": {
     "tooltip": "表示設定",
