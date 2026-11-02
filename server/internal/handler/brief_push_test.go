@@ -187,6 +187,25 @@ func TestBriefPushPreference_RefusesAnotherMembersBinding(t *testing.T) {
 	env.put(t, env.Alice, map[string]any{"brief_push": false, "binding_id": env.BobChat}).Want(http.StatusBadRequest)
 }
 
+// A binding on a revoked installation is refused with a stable code, and the
+// preference is not saved.
+func TestBriefPushPreference_RefusesABindingOnARevokedInstallation(t *testing.T) {
+	env := newBriefPushEnv(t)
+	revoked := briefPushInstallation(t, env.WorkspaceID, "telegram", "revoked", `{}`)
+	chat := briefPushBindingOn(t, env.WorkspaceID, env.Alice, "telegram", revoked, uuid.NewString(), `{}`)
+
+	res := env.put(t, env.Alice, map[string]any{"brief_push": true, "binding_id": chat}).Want(http.StatusBadRequest)
+	if got := res.Map()["code"]; got != "brief_push_chat_inactive" {
+		t.Fatalf("code = %v, want brief_push_chat_inactive: %s", got, res.Text())
+	}
+
+	var read BriefPushPreference
+	env.get(t, env.Alice).Want(http.StatusOK).JSON(&read)
+	if read.BriefPush || read.BindingID != nil {
+		t.Fatalf("preference saved despite the refusal: %+v", read)
+	}
+}
+
 func TestBriefPushPreference_RefusesABindingFromAnotherWorkspace(t *testing.T) {
 	env := newBriefPushEnv(t)
 	other := dbfx.Workspace(t, "Other "+uuid.NewString(), "brief-push-other-"+uuid.NewString())

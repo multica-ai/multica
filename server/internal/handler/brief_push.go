@@ -202,6 +202,20 @@ func (h *Handler) UpdateBriefPushPreference(w http.ResponseWriter, r *http.Reque
 			writeError(w, http.StatusBadRequest, "that chat app cannot receive briefs yet")
 			return
 		}
+		// A binding on a revoked installation can never deliver: the notifier
+		// refuses it permanently. Refuse it here, with a code the UI can show.
+		installation, err := h.Queries.GetChannelInstallationInWorkspace(r.Context(), db.GetChannelInstallationInWorkspaceParams{
+			ID: binding.InstallationID, WorkspaceID: wsUUID, ChannelType: binding.ChannelType,
+		})
+		if err != nil && !isNotFound(err) {
+			writeError(w, http.StatusInternalServerError, "failed to check the chat connection")
+			return
+		}
+		if isNotFound(err) || installation.Status != "active" {
+			writeErrorCode(w, http.StatusBadRequest, "brief_push_chat_inactive",
+				"that chat's connection is no longer active; choose another chat or link this one again")
+			return
+		}
 		params.BindingID = bindingUUID
 	}
 
