@@ -15,7 +15,6 @@
     ]
   },
   "context": {
-    "daemonId": "01a13e1e-9022-7072-9048-37b170b74b68",
     "@aws-cdk/aws-lambda:recognizeLayerVersion": true,
     "@aws-cdk/core:checkSecretUsage": true,
     "@aws-cdk/core:target-partitions": ["aws", "aws-cn"],

@@ -232,9 +232,16 @@ describe('bootstrap', () => {
   });
 
   it('pins the daemon id, so a replacement instance keeps the same runtimes', () => {
-    expect(userData(synth().template)).toContain(
-      `Environment=MULTICA_DAEMON_ID=${cdkJson.context.daemonId}`,
+    // A deployment passes its own id with -c daemonId=<uuid>; the value is not
+    // committed, because it names one particular installation's runtimes.
+    const daemonId = '3f1b4f4e-8b2a-4a1e-9f3c-2d5e6a7b8c9d';
+    expect(userData(synth({ daemonId }).template)).toContain(
+      `Environment=MULTICA_DAEMON_ID=${daemonId}`,
     );
+  });
+
+  it('leaves the daemon id empty when none is given, so the daemon mints one', () => {
+    expect(userData(synth().template)).toMatch(/^Environment=MULTICA_DAEMON_ID=$/m);
   });
 
   it('substitutes every placeholder', () => {
