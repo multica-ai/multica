@@ -176,6 +176,8 @@ type CredentialsResolver interface {
 type PatcherConfig struct {
 	// AppURL is the deployment's web URL for verified outbound reference links.
 	AppURL string
+	// SendObserver records only actual ChatDone text/card API calls.
+	SendObserver SendObserver
 	// Renderer drives the error card template used on the EventTaskFailed
 	// path. The success path (EventChatDone) bypasses the renderer
 	// and sends a text message or Markdown card.
@@ -386,6 +388,11 @@ func (p *Patcher) processEvent(ctx context.Context, e events.Event) error {
 
 	switch e.Type {
 	case protocol.EventChatDone:
+		if p.cfg.SendObserver != nil {
+			batch := &sendObservationBatch{installation: inst}
+			ctx = context.WithValue(ctx, sendObservationBatchKey{}, batch)
+			defer p.recordSendObservations(ctx, batch)
+		}
 		return p.sendChatReply(ctx, creds, binding, mentionOpenID(binding), inst.WorkspaceID, e.Payload)
 	case protocol.EventTaskFailed:
 		return p.fail(ctx, creds, binding, taskID, agentName, e.Payload)
@@ -569,19 +576,23 @@ func (p *Patcher) sendChatReply(ctx context.Context, creds InstallationCredentia
 		used = t
 		if markdown {
 			var err error
-			cardID, err = p.client.SendMarkdownCard(ctx, SendMarkdownCardParams{
-				InstallationID: creds,
-				ChatID:         outboundChatID(binding),
-				Markdown:       prependMarkdownMention(mentionOpenID, content),
-				ReplyTarget:    t,
+			cardID, err = p.observeSend(ctx, func() (string, error) {
+				return p.client.SendMarkdownCard(ctx, SendMarkdownCardParams{
+					InstallationID: creds,
+					ChatID:         outboundChatID(binding),
+					Markdown:       prependMarkdownMention(mentionOpenID, content),
+					ReplyTarget:    t,
+				})
 			})
 			return err
 		}
-		_, err := p.client.SendTextMessage(ctx, SendTextParams{
-			InstallationID: creds,
-			ChatID:         outboundChatID(binding),
-			Text:           prependTextMention(mentionOpenID, content),
-			ReplyTarget:    t,
+		_, err := p.observeSend(ctx, func() (string, error) {
+			return p.client.SendTextMessage(ctx, SendTextParams{
+				InstallationID: creds,
+				ChatID:         outboundChatID(binding),
+				Text:           prependTextMention(mentionOpenID, content),
+				ReplyTarget:    t,
+			})
 		})
 		return err
 	}

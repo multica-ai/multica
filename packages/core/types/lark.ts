@@ -42,6 +42,16 @@ export interface ListLarkInstallationsResponse {
   install_supported?: boolean;
 }
 
+export interface LarkSendObservationResponse {
+  /** False only for an unparseable response; absence of evidence is observation=null. */
+  available: boolean;
+  observation: {
+    observed_at: string;
+    result: "api_confirmed" | "rejected" | "uncertain";
+    reason: "none" | "bot_not_in_chat" | "bot_disabled" | "app_unavailable" | "missing_permission" | "chat_permission" | "unconfirmed";
+  } | null;
+}
+
 /** First half of the device-flow install: the server has opened a
  * registration session against accounts.feishu.cn and returned the QR
  * URL. The frontend renders `qr_code_url` as a QR (and as a clickable

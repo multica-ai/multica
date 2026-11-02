@@ -238,6 +238,7 @@ export type {
 export type {
   LarkInstallation,
   ListLarkInstallationsResponse,
+  LarkSendObservationResponse,
   BeginLarkInstallResponse,
   LarkInstallStatusResponse,
   RedeemLarkBindingTokenResponse,

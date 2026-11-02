@@ -1,5 +1,7 @@
 "use client";
 
+import { LarkSendObservation } from "./lark-send-observation";
+
 import { useEffect, useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
@@ -245,6 +247,7 @@ function InstallationRow({
   const { getAgentName } = useActorName();
   const isActive = installation.status === "active";
   const agentName = getAgentName(installation.agent_id);
+  const wsId = useWorkspaceId();
   return (
     <div className="flex items-start justify-between gap-4 py-3 first:pt-0 last:pb-0">
       <div className="flex items-start gap-3">
@@ -270,6 +273,7 @@ function InstallationRow({
             )}
           </p>
           {isActive && <LarkReceiptGuidance installation={installation} />}
+          {canManage && isActive && <LarkSendObservation wsId={wsId} installationId={installation.id} revision={installation.installed_at} />}
           <p className="text-micro text-muted-foreground">
             {t(($) => $.lark.installed_at_label, {
               when: new Date(installation.installed_at).toLocaleString(locale),

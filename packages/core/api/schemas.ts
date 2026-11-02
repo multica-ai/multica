@@ -3949,3 +3949,11 @@ export const EMPTY_LIST_LARK_INSTALLATIONS_RESPONSE: ListLarkInstallationsRespon
   installations: [],
   configured: false,
 };
+
+export const LarkSendObservationResponseSchema = z.object({
+  observation: z.object({
+    observed_at: z.iso.datetime({ offset: true }),
+    result: z.enum(["api_confirmed", "rejected", "uncertain"]).catch("uncertain"),
+    reason: z.enum(["none", "bot_not_in_chat", "bot_disabled", "app_unavailable", "missing_permission", "chat_permission", "unconfirmed"]).catch("unconfirmed"),
+  }).nullable(),
+}).transform((data) => ({ ...data, available: true }));

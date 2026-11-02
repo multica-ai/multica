@@ -108,6 +108,44 @@ func (h *Handler) ListLarkInstallations(w http.ResponseWriter, r *http.Request) 
 	})
 }
 
+// GetLarkSendObservation exposes only historical API-call evidence to human
+// workspace owners/admins. The member-visible installation list stays unchanged.
+func (h *Handler) GetLarkSendObservation(w http.ResponseWriter, r *http.Request) {
+	if isMachineCredentialActor(r) {
+		writeError(w, http.StatusForbidden, "this endpoint is only available to human actors")
+		return
+	}
+	if _, ok := requireUserID(w, r); !ok {
+		return
+	}
+	wsID, ok := parseUUIDOrBadRequest(w, chi.URLParam(r, "id"), "workspace id")
+	if !ok {
+		return
+	}
+	if _, ok := h.requireWorkspaceRole(w, r, uuidToString(wsID), "workspace not found", "owner", "admin"); !ok {
+		return
+	}
+	instID, ok := parseUUIDOrBadRequest(w, chi.URLParam(r, "installationId"), "installation id")
+	if !ok {
+		return
+	}
+	if h.LarkInstallations == nil {
+		writeFeatureDisabled(w, "lark_not_configured", "lark integration not configured")
+		return
+	}
+	inst, err := h.LarkInstallations.GetInWorkspace(r.Context(), instID, wsID)
+	if errors.Is(err, lark.ErrInstallationNotFound) {
+		writeError(w, http.StatusNotFound, "lark installation not found")
+		return
+	}
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to load send observation")
+		return
+	}
+	w.Header().Set("Cache-Control", "no-store")
+	writeJSON(w, http.StatusOK, map[string]any{"observation": inst.LastSendObservation})
+}
+
 // RevokeLarkInstallation (DELETE /api/workspaces/{id}/lark/installations/{installationId})
 // flips status to 'revoked' so the WS hub drops the connection on its
 // next sweep. The row itself is preserved for audit; a re-install via

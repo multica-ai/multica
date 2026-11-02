@@ -190,6 +190,7 @@ import type {
   ConnectVCSRequest,
   ConnectVCSResponse,
   ListLarkInstallationsResponse,
+  LarkSendObservationResponse,
   BeginLarkInstallResponse,
   LarkInstallStatusResponse,
   RedeemLarkBindingTokenResponse,
@@ -393,6 +394,7 @@ import {
   EMPTY_WECOM_INSTALLATION,
   EMPTY_LIST_WECOM_INSTALLATIONS_RESPONSE,
   ListLarkInstallationsResponseSchema,
+  LarkSendObservationResponseSchema,
   EMPTY_LIST_LARK_INSTALLATIONS_RESPONSE,
   EMPTY_REDEEM_WECOM_BINDING_TOKEN_RESPONSE,
   TelegramInstallationSchema,
@@ -5142,6 +5144,16 @@ export class ApiClient {
       await this.fetch(endpoint),
       ListLarkInstallationsResponseSchema,
       EMPTY_LIST_LARK_INSTALLATIONS_RESPONSE,
+      { endpoint },
+    );
+  }
+
+  async getLarkSendObservation(workspaceId: string, installationId: string): Promise<LarkSendObservationResponse> {
+    const endpoint = `/api/workspaces/${workspaceId}/lark/installations/${installationId}/send-observation`;
+    return parseWithFallback(
+      await this.fetch(endpoint),
+      LarkSendObservationResponseSchema,
+      { available: false, observation: null },
       { endpoint },
     );
   }

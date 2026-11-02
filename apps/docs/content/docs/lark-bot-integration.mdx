@@ -104,6 +104,10 @@ Restart the API server, then connect the Bot from the agent's **Integrations** p
 
 ## Troubleshooting
 
+Workspace owners and admins can expand **Last text/card send observation** for an active Bot in **Settings → Channels → Feishu**. It records the most recently completed ordinary chat-reply API call for the current binding, including a fallback call when one occurs. A confirmed request is not proof of delivery, reading, attachment delivery, or current connectivity. Missing evidence means no saved observation, not that the Bot has never sent a reply. Rebinding clears it. Failed task notices, account-binding messages, attachments and typing reactions are outside this observation.
+
+Known API refusals show a targeted check for group membership, bot capability, app availability or reply permissions. A missing message ID, timeout, “message is being sent” response or unclassified error stays uncertain: check the original conversation before sending again. Opening this section only reads the saved observation; it does not send a test message, execute an agent, change permissions or retry a reply.
+
 - **No bind button**: confirm the current account is the agent's owner or a workspace owner or admin, and check that the self-hosting key is configured.
 - **QR code expired**: close the dialog and start the connection again.
 - **The Bot asks for account binding**: open the binding link and sign in with the Multica account for that workspace.
