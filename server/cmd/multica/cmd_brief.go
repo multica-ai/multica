@@ -8,6 +8,7 @@ import (
 	"io"
 	"net/url"
 	"os"
+	"regexp"
 	"strconv"
 	"strings"
 	"text/tabwriter"
@@ -28,6 +29,7 @@ report the boss reads.
   multica brief digest --since 24h --json
   multica brief publish --kind daily --title "Daily brief" --file brief.md
   multica brief ask --squad <id> --issue <id> "Why did the pilot slip?"
+  multica brief feedback --recent 14d --json
   multica brief list
   multica brief show <id>`,
 }
@@ -87,6 +89,41 @@ var briefShowCmd = &cobra.Command{
 	Short: "Print one brief",
 	Args:  cobra.ExactArgs(1),
 	RunE:  runBriefShow,
+}
+
+var briefFeedbackCmd = &cobra.Command{
+	Use:   "feedback",
+	Short: "Print the boss's recent ratings of briefs",
+	Long: `Print the ratings the boss gave briefs in the last N days, newest first: the
+rating, its tags and note, and the brief's kind and date. The Secretary reads
+this at the start of every run and keeps standing preferences from it.
+
+--recent is a whole number of days with a d suffix, from 1d to 35d. Only the
+workspace's secretary agent or an admin member may read it.
+
+  multica brief feedback --recent 14d --json`,
+	Args: cobra.NoArgs,
+	RunE: runBriefFeedback,
+}
+
+// briefRecentPattern admits only a whole number of days with a d suffix, so the
+// window is never read two ways.
+var briefRecentPattern = regexp.MustCompile(`^[1-9][0-9]*d$`)
+
+const briefRecentMaxDays = 35
+
+// parseBriefRecentDays reads --recent as a day count. It refuses hours, weeks,
+// fractions and leading zeros, and a count above the server's 35-day limit.
+func parseBriefRecentDays(raw string) (int, error) {
+	raw = strings.TrimSpace(raw)
+	if !briefRecentPattern.MatchString(raw) {
+		return 0, fmt.Errorf("invalid --recent %q: use a whole number of days with a d suffix, such as 14d", raw)
+	}
+	n, err := strconv.Atoi(strings.TrimSuffix(raw, "d"))
+	if err != nil || n > briefRecentMaxDays {
+		return 0, fmt.Errorf("invalid --recent %q: at most %dd", raw, briefRecentMaxDays)
+	}
+	return n, nil
 }
 
 func runBriefAsk(cmd *cobra.Command, args []string) error {
@@ -384,6 +421,50 @@ func runBriefList(cmd *cobra.Command, _ []string) error {
 	return w.Flush()
 }
 
+func runBriefFeedback(cmd *cobra.Command, _ []string) error {
+	raw, _ := cmd.Flags().GetString("recent")
+	days, err := parseBriefRecentDays(raw)
+	if err != nil {
+		return err
+	}
+
+	client, err := newAPIClient(cmd)
+	if err != nil {
+		return err
+	}
+	ctx, cancel := cli.APIContext(context.Background())
+	defer cancel()
+
+	var entries []map[string]any
+	path := "/api/briefs/feedback/recent?" + url.Values{"days": {strconv.Itoa(days)}}.Encode()
+	if err := client.GetJSON(ctx, path, &entries); err != nil {
+		return briefRefusalError(fmt.Errorf("get brief feedback: %w", err))
+	}
+	asJSON, _ := cmd.Flags().GetBool("json")
+	if output, _ := cmd.Flags().GetString("output"); asJSON || output == "json" {
+		if entries == nil {
+			entries = []map[string]any{}
+		}
+		return cli.PrintJSON(os.Stdout, entries)
+	}
+	if len(entries) == 0 {
+		fmt.Fprintf(os.Stderr, "No brief feedback in the last %d days.\n", days)
+		return nil
+	}
+	w := tabwriter.NewWriter(os.Stdout, 0, 4, 2, ' ', 0)
+	fmt.Fprintln(w, "BRIEF\tRATING\tTAGS\tNOTE")
+	for _, e := range entries {
+		tags := make([]string, 0)
+		for _, t := range sliceVal(e, "tags") {
+			tag, _ := t.(string)
+			tags = append(tags, tag)
+		}
+		fmt.Fprintf(w, "%s %s\t%s\t%s\t%s\n", strVal(e, "brief_kind"), strVal(e, "brief_created_at"),
+			strVal(e, "rating"), strings.Join(tags, ","), strVal(e, "note"))
+	}
+	return w.Flush()
+}
+
 func runBriefShow(cmd *cobra.Command, args []string) error {
 	id := strings.TrimSpace(args[0])
 	if !uuidPattern.MatchString(id) {
@@ -435,6 +516,12 @@ func addBriefShowFlags(cmd *cobra.Command) {
 	cmd.Flags().String("output", "table", "Output format: table or json")
 }
 
+func addBriefFeedbackFlags(cmd *cobra.Command) {
+	cmd.Flags().String("recent", "14d", "Ratings given in this many days: a whole number with a d suffix, 1d to 35d")
+	cmd.Flags().Bool("json", false, "Print JSON (same as --output json)")
+	cmd.Flags().String("output", "table", "Output format: table or json")
+}
+
 func addBriefDigestFlags(cmd *cobra.Command) {
 	cmd.Flags().String("since", "24h", "Look back this far: a duration (30m, 24h, 7d) or an RFC 3339 timestamp")
 	cmd.Flags().Bool("json", false, "Print JSON (same as --output json)")
@@ -447,6 +534,8 @@ func init() {
 	addBriefListFlags(briefListCmd)
 	addBriefShowFlags(briefShowCmd)
 	addBriefAskFlags(briefAskCmd)
+	addBriefFeedbackFlags(briefFeedbackCmd)
+	briefCmd.AddCommand(briefFeedbackCmd)
 	briefCmd.AddCommand(briefDigestCmd)
 	briefCmd.AddCommand(briefPublishCmd)
 	briefCmd.AddCommand(briefAskCmd)
