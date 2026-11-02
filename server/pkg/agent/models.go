@@ -1801,30 +1801,31 @@ type kimiProviderModel struct {
 	SupportEffortsSnake []string `json:"support_efforts"`
 	DefaultEffort       string   `json:"defaultEffort"`
 	DefaultEffortSnake  string   `json:"default_effort"`
-	Capabilities        []string `json:"capabilities"`
+	// Model is the runtime registry ID, which can differ from the provider's
+	// qualified map key. Kimi's name-based capability heuristics use this field.
+	Model        string   `json:"model"`
+	Capabilities []string `json:"capabilities"`
 }
 
-// deriveKimiThinkingTokens mirrors the level set Kimi broadcasts for a model
-// (verified against Kimi Code CLI 0.34.0 by varying a model's
-// capabilities/support_efforts in an isolated config and reading both what
-// session/new offers for the `thinking` config id and whether
-// set_config_option("off") is accepted):
+// deriveKimiThinkingTokens mirrors Kimi Code ACP's model-catalog projection.
+// Thinking support is broader than a declared capability: the CLI also infers
+// it from the registry model ID and an ACP-specific toggleable allow-list.
+// Otherwise a custom reasoning model would lose its efforts, including a level
+// already saved on an agent. See kimi-code packages/acp-server/src/model-catalog.ts.
 //
 //	capabilities = thinking + always_thinking, efforts low/high/max
 //	    -> [low high max]           (off is not accepted)
-//	capabilities = thinking, efforts low/high/max
-//	    -> [off low high max]       (off is accepted, and leads the set)
-//	capabilities = thinking + always_thinking, no efforts
-//	    -> [on]                     (off is not accepted)
-//	capabilities = thinking, no efforts
-//	    -> [off on]                 (off is accepted)
-//	no thinking capability
-//	    -> no thinking option at all
+//	thinking inferred by capabilities, name, or allow-list, with efforts
+//	    -> [off low high max] when declared "thinking" makes it toggleable;
+//	    -> [low high max] when name/allow-list inference omits "always_thinking"
+//	thinking without efforts
+//	    -> [off on]
+//	no inferred thinking support, or always_thinking without efforts
+//	    -> no levels; there is no useful choice to present
 //
 // A missing/null capabilities field falls back to the efforts-only behavior
-// (older CLIs and forks never declared the field). An explicit empty list is a
-// statement of no capabilities and hides the control entirely.
-func deriveKimiThinkingTokens(efforts []string, capabilities []string) []string {
+// (older CLIs and forks never declared the field).
+func deriveKimiThinkingTokens(registryModelID string, efforts []string, capabilities []string) []string {
 	if capabilities == nil {
 		return efforts
 	}
@@ -1838,17 +1839,25 @@ func deriveKimiThinkingTokens(efforts []string, capabilities []string) []string 
 			hasAlwaysThinking = true
 		}
 	}
+	nameInferredThinking := false
+	if !hasThinking && !hasAlwaysThinking {
+		lowerModelID := strings.ToLower(registryModelID)
+		nameInferredThinking = strings.Contains(lowerModelID, "thinking") ||
+			strings.Contains(lowerModelID, "reason") ||
+			registryModelID == "kimi-for-coding" || registryModelID == "kimi-code"
+		hasThinking = nameInferredThinking
+	}
 	if !hasThinking && !hasAlwaysThinking {
 		return nil
 	}
-	if hasAlwaysThinking {
-		if len(efforts) == 0 {
-			return []string{"on"}
-		}
-		return efforts
-	}
 	if len(efforts) == 0 {
+		if hasAlwaysThinking {
+			return nil
+		}
 		return []string{"off", "on"}
+	}
+	if hasAlwaysThinking || nameInferredThinking {
+		return efforts
 	}
 	return append([]string{"off"}, efforts...)
 }
@@ -1870,16 +1879,11 @@ func parseKimiProviderThinking(raw []byte) (map[string]*ModelThinking, error) {
 		if modelID == "" {
 			continue
 		}
-		// An explicit empty capabilities list is a statement of no
-		// capabilities at all — hide the control for this model.
-		if model.Capabilities != nil && len(model.Capabilities) == 0 {
-			continue
-		}
 		efforts := model.SupportEfforts
 		if len(efforts) == 0 {
 			efforts = model.SupportEffortsSnake
 		}
-		tokens := deriveKimiThinkingTokens(efforts, model.Capabilities)
+		tokens := deriveKimiThinkingTokens(model.Model, efforts, model.Capabilities)
 		seen := make(map[string]bool, len(tokens))
 		levels := make([]ThinkingLevel, 0, len(tokens))
 		for _, rawEffort := range tokens {
