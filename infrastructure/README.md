@@ -227,6 +227,13 @@ cd infrastructure
 ./scripts/selfhost-deploy.sh you@example.com,teammate@example.com
 ```
 
+From CI instead: **Actions → Infrastructure → Run workflow**, stack
+`Multica-SelfHost`, with the signup allowlist. Run it as `diff` first, read the
+IAM and security-group tables it prints, then run it as `deploy` with
+**confirm_security_changes** ticked — CDK's own prompt needs a terminal, which
+a runner does not have, so that checkbox is where a human accepts those
+changes.
+
 Two stores, one rule: **what CloudFormation generates lives in Secrets Manager,
 what a human supplies lives in Parameter Store.** The JWT secret and the
 database password are never read or typed by anyone, so the stack generates

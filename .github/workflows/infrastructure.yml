@@ -34,6 +34,10 @@ on:
         description: "Multica-SelfHost only: comma-separated addresses allowed to sign up"
         type: string
         default: ""
+      confirm_security_changes:
+        description: "I have read the diff and accept its IAM and security group changes (every first deploy of a stack has them)"
+        type: boolean
+        default: false
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
@@ -150,11 +154,20 @@ jobs:
         working-directory: infrastructure
         run: pnpm exec cdk diff ${{ inputs.stack }} ${{ steps.context.outputs.args }}
 
-      # --require-approval broadening, not never: a change that widens a
-      # security group or an IAM policy fails the job instead of applying
-      # itself, and then goes through ./scripts/deploy.sh with someone reading
-      # the diff.
+      # CDK's own approval prompt cannot work here: it wants a TTY, and a runner
+      # has none, so `broadening` turns every IAM or security-group change into
+      # a failed job rather than a question. That is not a gate, because the
+      # first deploy of any stack creates both — it simply means the stack can
+      # never be created from CI.
+      #
+      # The confirmation moves to the dispatch form instead. Run `diff` first,
+      # read the IAM and security-group tables it prints, then dispatch
+      # `deploy` with the box ticked. Unticked, CDK still refuses anything
+      # security-sensitive, so a careless deploy of a changed policy stops.
       - name: Deploy
         if: inputs.action == 'deploy'
         working-directory: infrastructure
-        run: pnpm exec cdk deploy ${{ inputs.stack }} ${{ steps.context.outputs.args }} --require-approval broadening --progress events
+        run: |
+          pnpm exec cdk deploy ${{ inputs.stack }} ${{ steps.context.outputs.args }} \
+            --require-approval ${{ inputs.confirm_security_changes && 'never' || 'broadening' }} \
+            --progress events
