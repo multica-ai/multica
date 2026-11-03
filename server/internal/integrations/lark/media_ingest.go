@@ -145,7 +145,6 @@ func (r *feishuMediaResolver) ResolveMedia(ctx context.Context, inst engine.Reso
 			InlinePlaceholder: res.placeholder,
 			InlineCount:       res.occurrences,
 			InlineIDOnly:      res.placeholder != "",
-			SourceContext:     lm.MediaSourceContext,
 		})
 	}
 	return msg

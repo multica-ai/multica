@@ -1059,31 +1059,20 @@ func (s *ChatSession) bindMediaRefs(ctx context.Context, qtx SessionQueries, in 
 	if in.IssueID.Valid {
 		issueMarkdown := make([]string, 0, len(created))
 		replacements := make([]inlineMediaReplacement, 0, len(created))
-		contextReplacements := make([]inlineMediaReplacement, 0, len(created))
-		contexts := make([]string, 0, 1)
-		contextIDs := make([]string, 0, len(created))
-		seenContexts := make(map[string]bool)
 		for _, media := range created {
-			if media.ref.InlineIDOnly && media.ref.SourceContext != "" {
-				contextIDs = append(contextIDs, uuid.UUID(media.id.Bytes).String())
-				if source := media.ref.SourceContext; source != "" && !seenContexts[source] {
-					contexts = append(contexts, source)
-					seenContexts[source] = true
-				}
-				for index := media.ref.InlineIndex; index < media.ref.InlineIndex+max(1, media.ref.InlineCount); index++ {
-					contextReplacements = append(contextReplacements, inlineMediaReplacement{
-						placeholder: media.ref.InlinePlaceholder, index: index,
-						markdown: inlineMediaMarkdown(media.ref, media.id),
-					})
-				}
-				continue
-			}
 			block := channelmedia.Block(
 				uuid.UUID(media.id.Bytes).String(),
 				media.filename,
 				media.ref.Type == channel.MsgTypeImage,
 			)
 			issueMarkdown = append(issueMarkdown, block)
+			// InlineIDOnly markers are left out on purpose. A marker that only
+			// refers to an attachment sits in the adapter's quoted context,
+			// which composeIssueCommandMediaDescription excludes from the
+			// description by contract; materializing it here would put
+			// somebody else's picture into the issue body as if the reporter
+			// had attached it. The attachment itself is still created and
+			// still listed above.
 			if media.ref.InlinePlaceholder != "" && !media.ref.InlineIDOnly {
 				replacements = append(replacements, inlineMediaReplacement{
 					placeholder: media.ref.InlinePlaceholder,
@@ -1091,11 +1080,6 @@ func (s *ChatSession) bindMediaRefs(ctx context.Context, qtx SessionQueries, in 
 					markdown:    block,
 				})
 			}
-		}
-		mediaContext := issueMediaContext(strings.Join(contexts, "\n\n"), contextReplacements)
-		if mediaContext != "" {
-			mediaContext = channelmedia.SourceBlock(contextIDs, mediaContext)
-			issueMarkdown = append(issueMarkdown, mediaContext)
 		}
 
 		base := pgtype.Text{}
@@ -1108,9 +1092,6 @@ func (s *ChatSession) bindMediaRefs(ctx context.Context, qtx SessionQueries, in 
 				in.IssueDescriptionBase.String,
 			); changed {
 				base = in.IssueDescriptionBase
-				if mediaContext != "" {
-					composed = strings.TrimSpace(composed + "\n\n" + mediaContext)
-				}
 				description = pgtype.Text{String: composed, Valid: true}
 			}
 		}
@@ -1168,51 +1149,6 @@ func (s *ChatSession) bindMediaRefs(ctx context.Context, qtx SessionQueries, in 
 		}
 	}
 	return nil
-}
-
-// Historical media belongs to the selected channel transcript, not to the
-// reporter's upload list. Preserve that already-rendered prefix with ID-only
-// markers, including its speakers, nested source wrappers and failed media.
-func issueMediaContext(prefix string, replacements []inlineMediaReplacement) string {
-	if len(replacements) == 0 {
-		return ""
-	}
-	parts := make([]string, 0, 2)
-	if composed, changed := composeInlineMediaBody(prefix, replacements); changed {
-		// A blockquote around fenced code survives file-card preprocessing,
-		// which trims individual lines before recognizing standalone files.
-		parts = append(parts, "Referenced channel context:\n\n"+literalMediaSource(composed))
-	}
-	unplaced := make([]string, 0)
-	seen := make(map[string]bool)
-	for _, replacement := range replacements {
-		if nthSubstringIndex(prefix, replacement.placeholder, replacement.index) < 0 && !seen[replacement.markdown] {
-			unplaced = append(unplaced, replacement.markdown)
-			seen[replacement.markdown] = true
-		}
-	}
-	if len(unplaced) > 0 {
-		parts = append(parts, "Referenced channel media (source context unavailable):\n\n"+literalMediaSource(strings.Join(unplaced, "\n")))
-	}
-	return strings.Join(parts, "\n\n")
-}
-
-// Normalize all Markdown line endings before prefixing every literal line.
-func literalMediaSource(source string) string {
-	source = strings.TrimSpace(strings.ReplaceAll(strings.ReplaceAll(source, "\r\n", "\n"), "\r", "\n"))
-	// Use a fence longer than every literal backtick run in the source. Match
-	// the editor's normal fence form so an unchanged save retains provenance.
-	longest, run := 2, 0
-	for _, ch := range source {
-		if ch == '`' {
-			run++
-			longest = max(longest, run)
-		} else {
-			run = 0
-		}
-	}
-	fence := strings.Repeat("`", longest+1)
-	return "> " + fence + "\n> " + strings.ReplaceAll(source, "\n", "\n> ") + "\n> " + fence
 }
 
 type inlineMediaReplacement struct {

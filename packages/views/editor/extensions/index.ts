@@ -21,7 +21,7 @@
  */
 import type { RefObject } from "react";
 import StarterKit from "@tiptap/starter-kit";
-import { CodeBlockExtension } from "./code-block";
+import CodeBlockLowlight from "@tiptap/extension-code-block-lowlight";
 import Placeholder from "@tiptap/extension-placeholder";
 import Link from "@tiptap/extension-link";
 import Typography from "@tiptap/extension-typography";
@@ -231,7 +231,7 @@ export function createEditorExtensions(
     // `- ` still falls through to PatchedListItem's bullet list.
     TaskList,
     PatchedTaskItem,
-    CodeBlockExtension.extend({
+    CodeBlockLowlight.extend({
       addNodeView() {
         return ReactNodeViewRenderer(CodeBlockView);
       },

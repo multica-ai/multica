@@ -118,10 +118,6 @@ type MediaRef struct {
 	// the agent sees in the attachment list, and what it passes to
 	// `multica attachment download`.
 	InlineIDOnly bool
-	// SourceContext is the already-selected, rendered source transcript for
-	// historical media. Keep it with the refs so /issue attribution does not
-	// depend on recovering a command boundary from sender-labelled text.
-	SourceContext string
 }
 
 // ReplyCtx describes the message an inbound message quotes / replies to.

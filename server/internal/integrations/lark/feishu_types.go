@@ -45,9 +45,6 @@ type InboundMessage struct {
 	// translating to channel.InboundMessage.
 	Content      string
 	ContextMedia []ContextMedia
-	// MediaSourceContext is rendered before the current sender's own body.
-	// It crosses the adapter boundary through Raw and then MediaRef.SourceContext.
-	MediaSourceContext string
 	// ForceFreshSession marks this dispatch as a one-off fresh start: the
 	// daemon should skip prior session resume when it claims the resulting
 	// chat task.

@@ -8,6 +8,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgtype"
+	"github.com/multica-ai/multica/server/internal/channelmedia"
 	"github.com/multica-ai/multica/server/internal/integrations/channel"
 	"github.com/multica-ai/multica/server/internal/integrations/channel/engine"
 	"github.com/multica-ai/multica/server/internal/testutil"
@@ -20,7 +21,7 @@ func TestContextMediaCollisionPreservesBindingDB(t *testing.T) {
 		t.Skip("explicit disposable DATABASE_URL required")
 	}
 	pool := channelScopeTestDB(t)
-	for _, source := range []string{"quoted-post", "partial-failure"} {
+	for _, source := range []string{"quoted-post", "quoted-forward", "partial-failure"} {
 		for _, issue := range []bool{false, true} {
 			name := source + "/chat"
 			if issue {
@@ -70,6 +71,10 @@ func TestContextMediaCollisionPreservesBindingDB(t *testing.T) {
 					media.Content = strings.Replace(media.Content, `"image_key":"good"`, `"image_key":"bad"`, 1)
 				}
 				fake.byID[in.ParentID] = []LarkMessage{media}
+				if source == "quoted-forward" {
+					in.ParentID = "forward-owner"
+					fake.byID[in.ParentID] = []LarkMessage{{MessageID: in.ParentID, MessageType: "merge_forward", SenderID: "bob", SenderType: "user"}, media}
+				}
 				enricher := NewInboundEnricher(fake, InboundEnricherConfig{RecentContextSize: 5})
 				out := enricher.Enrich(t.Context(), in, InstallationCredentials{})
 				session := engine.NewChatSession(q, pool, channel.TypeFeishu, engine.SessionTitles{})
@@ -109,12 +114,16 @@ func TestContextMediaCollisionPreservesBindingDB(t *testing.T) {
 					t.Fatal(err)
 				}
 				ref := resolved.MediaRefs[0]
-				bound := strings.TrimSuffix(ref.InlinePlaceholder, "unavailable]") + id + "]"
-				if (!issue && !strings.Contains(content, "[Alice]: "+literal)) || strings.Count(content, bound) != ref.InlineCount || strings.Contains(content, ref.InlinePlaceholder) {
-					t.Fatalf("attachment replaced original text or lost its source position: %s", content)
+				if issue {
+					want := channelmedia.Append("Reporter details", channelmedia.Block(id, ref.Filename, true))
+					if content != want {
+						t.Fatalf("issue must append one attachment block without quoted text: got %q, want %q", content, want)
+					}
+					return
 				}
-				if issue && (!strings.Contains(content, "Referenced channel context:") || !strings.Contains(content, "Reporter details")) {
-					t.Fatalf("issue lost source context or reporter text: %s", content)
+				bound := strings.TrimSuffix(ref.InlinePlaceholder, "unavailable]") + id + "]"
+				if !strings.Contains(content, "[Alice]: "+literal) || strings.Count(content, bound) != ref.InlineCount || strings.Contains(content, ref.InlinePlaceholder) {
+					t.Fatalf("attachment replaced original text or lost its source position: %s", content)
 				}
 				if !strings.Contains(content, `sender="Bob"`) || !strings.Contains(content, "[Image 1: unavailable] "+bound) {
 					t.Fatalf("rich-text literal or source attribution changed: %s", content)

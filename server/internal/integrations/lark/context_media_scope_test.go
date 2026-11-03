@@ -31,9 +31,7 @@ func TestRecentMediaStaysPlaceholderAcrossRepeatedTurns(t *testing.T) {
 				if !strings.Contains(out.Body, "recent text") || !strings.Contains(out.Body, "[Image]") {
 					t.Fatalf("recent text/placeholders lost: %s", out.Body)
 				}
-				if strings.Contains(out.MediaSourceContext, "recent_context") {
-					t.Fatalf("automatic history acquired issue provenance: %s", out.MediaSourceContext)
-				}
+
 				if quote && out.ContextMedia[0].MessageID != "parent" {
 					t.Fatal("wrong explicit resource")
 				}

@@ -247,7 +247,7 @@ func (e *inboundEnricher) Enrich(ctx context.Context, msg InboundMessage, creds 
 	if msg.ParentID != "" || isForward {
 		msg.HasSelectedContext = true
 	}
-	render := func(media *contextMedia) (string, string) {
+	render := func(media *contextMedia) string {
 		var b strings.Builder
 		if wantRecent {
 			if recentErr != nil {
@@ -256,13 +256,11 @@ func (e *inboundEnricher) Enrich(ctx context.Context, msg InboundMessage, creds 
 				b.WriteString(e.renderRecentContextBlock(recentItems, names))
 			}
 		}
-		source := ""
 		if msg.ParentID != "" {
 			if b.Len() > 0 {
 				b.WriteString("\n\n")
 			}
-			source = e.renderQuotedBlock(msg.ParentID, quotedItems, quotedErr, names, media)
-			b.WriteString(source)
+			b.WriteString(e.renderQuotedBlock(msg.ParentID, quotedItems, quotedErr, names, media))
 		}
 
 		var core string
@@ -286,20 +284,19 @@ func (e *inboundEnricher) Enrich(ctx context.Context, msg InboundMessage, creds 
 			b.WriteString("\n\n")
 		}
 		b.WriteString(core)
-		return b.String(), source
+		return b.String()
 	}
 	media := &contextMedia{}
-	body, source := render(media)
+	body := render(media)
 	if media.collides(body) {
 		// Include the complete rendered text: original bodies, rich-text spans,
 		// names, filenames and wrappers. Choose markers absent from that text,
 		// then render the same selected messages without another API fetch.
 		media = &contextMedia{occupied: body}
-		body, source = render(media)
+		body = render(media)
 	}
 
 	msg.Body = body
-	msg.MediaSourceContext = source
 	msg.ContextMedia = media.items
 	return msg
 }

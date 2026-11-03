@@ -155,11 +155,3 @@ describe("contentReferencesAttachment", () => {
     expect(contentReferencesAttachment(md, att)).toBe(true);
   });
 });
-
-describe("historical channel media provenance", () => {
-  it("hides source delimiters while retaining attributed literal content", () => {
-    const source = ">     [Alice]: before [Image 1: 22222222-2222-4222-8222-222222222222] after";
-    const markdown = `<!-- multica:channel-media-source:22222222-2222-4222-8222-222222222222 -->\n\n${source}\n\n<!-- /multica:channel-media-source -->`;
-    expect(stripChannelMediaMarkers(markdown).trim()).toBe(source);
-  });
-});

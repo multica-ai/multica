@@ -259,22 +259,6 @@ func TestContextMediaMissingKeysDoNotQueueDownloads(t *testing.T) {
 	}
 }
 
-func TestContextMediaPassesAttributionBeforeSenderLabelledIssueCommand(t *testing.T) {
-	fake := newEnricherFake()
-	fake.userNames = map[string]string{"ou_sender": "Reporter", "ou_source": "Alice"}
-	fake.byID["parent"] = []LarkMessage{{MessageID: "parent", MessageType: "file", SenderID: "ou_source", SenderType: "user", Content: `{"file_key":"original-file","file_name":"source.txt"}`}}
-	command := "/issue Investigate\nDetails"
-	out := enrich(t, fake, InboundMessage{MessageID: "trigger", MessageType: "text", Body: command, CommandBody: command, SenderOpenID: "ou_sender", ParentID: "parent", ChatID: "group", ChatType: ChatTypeGroup, AddressedToBot: true}, InboundEnricherConfig{})
-	if !strings.Contains(out.Body, "[Reporter]: /issue Investigate") || strings.Contains(out.MediaSourceContext, "/issue Investigate") || !strings.Contains(out.MediaSourceContext, `sender="Alice"`) {
-		t.Fatalf("source context mixed with the current command: %+v", out)
-	}
-	api := &fakeSender{downloaded: DownloadedResource{Data: []byte("source text"), ContentType: "text/plain"}}
-	resolved := resolveContextMedia(t, out, api, &fakeMediaStorage{}, &fakeMediaLedger{})
-	if len(resolved.MediaRefs) != 1 || resolved.MediaRefs[0].SourceContext != out.MediaSourceContext {
-		t.Fatalf("attribution lost across Raw or media resolution: %+v", resolved.MediaRefs)
-	}
-}
-
 func TestContextMediaOriginalTextCollision(t *testing.T) {
 	for _, kind := range []string{"image", "file", "audio", "video"} {
 		for _, source := range []string{"forward", "recent-and-quote"} {
@@ -340,11 +324,11 @@ func TestContextMediaRichTextCollision(t *testing.T) {
 		t.Fatalf("repeated rich-text image lost: %+v", out.ContextMedia)
 	}
 	marker := out.ContextMedia[0].Placeholder
-	if marker == literal || strings.Count(out.Body, marker) != 2 || strings.Count(out.MediaSourceContext, marker) != 2 ||
+	if marker == literal || strings.Count(out.Body, marker) != 2 ||
 		!strings.Contains(out.Body, literal+" "+marker+" "+literal+" "+marker+" "+literal) {
 		t.Fatalf("rich-text source positions collided: %s", out.Body)
 	}
-	if !strings.Contains(out.MediaSourceContext, `sender="Alice `+literal+`"`) || len(fake.calls) != 1 || len(fake.userCalls) != 1 {
+	if !strings.Contains(out.Body, `sender="Alice `+literal+`"`) || len(fake.calls) != 1 || len(fake.userCalls) != 1 {
 		t.Fatalf("source attribution or fetch scope changed: %+v", out)
 	}
 }

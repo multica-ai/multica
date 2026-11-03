@@ -65,9 +65,7 @@ func ParseIssueCommand(body string) (*IssueCommand, bool) {
 //
 // Content before the directive is deliberately excluded. Some adapters enrich
 // Body with quoted context while keeping CommandText as the user's own command;
-// copying that prefix into the initial description would change the command
-// contract. A successful historical-media bind retains its attributed source
-// separately through issueMediaContext.
+// copying that prefix into the issue would change the existing command contract.
 func issueDescriptionFromCommandBody(body, commandText, fallback string) string {
 	_, end, ok := issueCommandLineBounds(body, commandText)
 	if !ok {

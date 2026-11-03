@@ -1572,7 +1572,7 @@ func newDeliveryTaskID(t *testing.T, pool *pgxpool.Pool) pgtype.UUID {
 	return taskID
 }
 
-func TestBindMediaRefs_IssueRetainsHistoricalMediaAttribution(t *testing.T) {
+func TestBindMediaRefs_IssueAppendsSelectedMediaWithoutTranscript(t *testing.T) {
 	for _, tc := range []struct{ edited, named bool }{{false, false}, {false, true}, {true, true}} {
 		t.Run(fmt.Sprintf("edited-%v/named-%v", tc.edited, tc.named), func(t *testing.T) {
 			pool := sessionPersistenceTestDB(t)
@@ -1580,10 +1580,10 @@ func TestBindMediaRefs_IssueRetainsHistoricalMediaAttribution(t *testing.T) {
 			session := NewChatSession(db.New(pool), pool, channel.TypeFeishu, SessionTitles{})
 			prefix := "<quoted_message message_id=\"forward-owner\" sender=\"Bob\" type=\"merge_forward\">\n<forwarded_messages count=\"1\">\n[Alice]: before [Image 1: unavailable] after [Image 1: unavailable]\n[Bob]: before [File 2: unavailable] after [Audio 3: unavailable]\n</forwarded_messages>\n</quoted_message>"
 			command := "/issue Investigate\nReporter details"
-			body := "<recent_context>unselected history</recent_context>\n\n" + prefix + "\n\n" + command + "\n[Image]"
+			body := "<recent_context>unselected history</recent_context>\n\n" + prefix + "\n\n" + command
 			base := issueDescriptionFromCommandBody(body, command, "")
 			if tc.named {
-				body = prefix + "\n\n[Reporter]: " + command + "\n[Image]"
+				body = prefix + "\n\n[Reporter]: " + command
 			}
 			appended, err := session.AppendUserMessage(t.Context(), AppendInput{SessionID: fixture.sessionID, Sender: fixture.userID, Body: body, CommandText: command, MediaPendingSeconds: 60})
 			if err != nil {
@@ -1599,9 +1599,8 @@ func TestBindMediaRefs_IssueRetainsHistoricalMediaAttribution(t *testing.T) {
 				t.Fatal(err)
 			}
 			refs := []channel.MediaRef{
-				{Type: channel.MsgTypeImage, Filename: "historical.png", MimeType: "image/png", InlinePlaceholder: "[Image 1: unavailable]", InlineCount: 2, InlineIDOnly: true, SourceContext: prefix},
-				{Type: channel.MsgTypeFile, Filename: "historical.txt", MimeType: "text/plain", InlinePlaceholder: "[File 2: unavailable]", InlineCount: 1, InlineIDOnly: true, SourceContext: prefix},
-				{Type: channel.MsgTypeImage, Filename: "own.png", MimeType: "image/png", InlinePlaceholder: "[Image]"},
+				{Type: channel.MsgTypeImage, Filename: "historical.png", MimeType: "image/png", InlinePlaceholder: "[Image 1: unavailable]", InlineCount: 2, InlineIDOnly: true},
+				{Type: channel.MsgTypeFile, Filename: "historical.txt", MimeType: "text/plain", InlinePlaceholder: "[File 2: unavailable]", InlineCount: 1, InlineIDOnly: true},
 			}
 			for n := range refs {
 				refs[n].StorageKey = fmt.Sprintf("workspaces/ws/lark/attribution-%d", n)
@@ -1632,20 +1631,19 @@ func TestBindMediaRefs_IssueRetainsHistoricalMediaAttribution(t *testing.T) {
 			if err := pool.QueryRow(t.Context(), "SELECT description FROM issue WHERE id=$1", issueID).Scan(&description); err != nil {
 				t.Fatal(err)
 			}
-			if strings.Contains(description, "unselected history") {
-				t.Fatalf("automatic history entered issue source: %s", description)
+			if len(ids) != 2 || !strings.Contains(description, strings.Split(initial, "\n")[0]) {
+				t.Fatalf("issue lost an attachment or reporter edit: ids=%v description=%q", ids, description)
 			}
-			if len(ids) != 3 || strings.Count(description, "[Image 1: "+ids["historical.png"]+"]") != 2 || strings.Count(description, "[File 2: "+ids["historical.txt"]+"]") != 1 {
-				t.Fatalf("historical source positions lost: %s", description)
-			}
-			for _, source := range []string{"[Alice]: before", "[Bob]: before", `message_id="forward-owner"`, "[Audio 3: unavailable]", "Referenced channel context:"} {
-				if !strings.Contains(description, source) {
-					t.Fatalf("source attribution %q lost: %s", source, description)
+			for _, name := range []string{"historical.png", "historical.txt"} {
+				block := channelmedia.Block(ids[name], name, name != "historical.txt")
+				if strings.Count(description, block) != 1 {
+					t.Fatalf("attachment %q must appear once as an issue block: %s", name, description)
 				}
 			}
-			if strings.Contains(description, channelmedia.Block(ids["historical.png"], "historical.png", true)) || strings.Contains(description, channelmedia.Block(ids["historical.txt"], "historical.txt", false)) ||
-				strings.Count(description, channelmedia.Block(ids["own.png"], "own.png", true)) != 1 || !strings.Contains(description, strings.Split(initial, "\n")[0]) {
-				t.Fatalf("historical media attributed as own upload, own media duplicated, or human edit replaced: %s", description)
+			for _, excluded := range []string{"unselected history", "[Alice]: before", "[Bob]: before", "<quoted_message", "<forwarded_messages", "unavailable]", "channel-media-source:", "Referenced channel context:"} {
+				if strings.Contains(description, excluded) {
+					t.Fatalf("quoted transcript or source protocol %q entered issue description: %s", excluded, description)
+				}
 			}
 		})
 	}
