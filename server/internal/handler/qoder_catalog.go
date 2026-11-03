@@ -36,6 +36,76 @@ func qoderBaseURL(raw string) (string, bool) {
 type qoderCatalogItem struct {
 	ID   string `json:"id"`
 	Name string `json:"name"`
+	// ApprovalTools pause a run until a member approves them; CustomTools are
+	// client-executed tools Multica cannot run. Only tool names are exposed.
+	ApprovalTools []string `json:"approval_tools,omitempty"`
+	CustomTools   []string `json:"custom_tools,omitempty"`
+}
+
+type qoderToolPolicy struct {
+	PermissionPolicy *struct {
+		Type string `json:"type"`
+	} `json:"permission_policy"`
+}
+
+func (p *qoderToolPolicy) asks() bool {
+	return p != nil && p.PermissionPolicy != nil && p.PermissionPolicy.Type == "always_ask"
+}
+
+// qoderAgentToolWarnings lists tools that make a Qoder session stop with
+// requires_action. Unknown or malformed tool entries are ignored.
+func qoderAgentToolWarnings(tools []json.RawMessage) (approval, custom []string) {
+	for _, raw := range tools {
+		var tool struct {
+			Type          string           `json:"type"`
+			Name          string           `json:"name"`
+			McpServerName string           `json:"mcp_server_name"`
+			DefaultConfig *qoderToolPolicy `json:"default_config"`
+			Configs       []struct {
+				Name    string `json:"name"`
+				Enabled *bool  `json:"enabled"`
+				qoderToolPolicy
+			} `json:"configs"`
+		}
+		if json.Unmarshal(raw, &tool) != nil {
+			continue
+		}
+		prefix := ""
+		switch {
+		case tool.Type == "custom":
+			if name := strings.TrimSpace(tool.Name); name != "" {
+				custom = append(custom, name)
+			}
+			continue
+		case tool.Type == "mcp_toolset":
+			prefix = strings.TrimSpace(tool.McpServerName)
+			if prefix == "" {
+				prefix = "mcp"
+			}
+		case strings.HasPrefix(tool.Type, "agent_toolset"):
+		default:
+			continue
+		}
+		if tool.DefaultConfig.asks() {
+			if prefix != "" {
+				approval = append(approval, prefix+"/*")
+			} else {
+				approval = append(approval, "*")
+			}
+			continue
+		}
+		for _, c := range tool.Configs {
+			if c.Name == "" || (c.Enabled != nil && !*c.Enabled) || !c.asks() {
+				continue
+			}
+			if prefix != "" {
+				approval = append(approval, prefix+"/"+c.Name)
+			} else {
+				approval = append(approval, c.Name)
+			}
+		}
+	}
+	return approval, custom
 }
 
 // Only names and identifiers leave the server. Provider configurations may contain secrets.
@@ -66,9 +136,10 @@ func fetchQoderCatalog(ctx context.Context, baseURL, token, kind string) ([]qode
 		}
 		var result struct {
 			Data []struct {
-				ID         string  `json:"id"`
-				Name       string  `json:"name"`
-				ArchivedAt *string `json:"archived_at"`
+				ID         string            `json:"id"`
+				Name       string            `json:"name"`
+				ArchivedAt *string           `json:"archived_at"`
+				Tools      []json.RawMessage `json:"tools"`
 			} `json:"data"`
 			HasMore bool   `json:"has_more"`
 			LastID  string `json:"last_id"`
@@ -94,7 +165,11 @@ func fetchQoderCatalog(ctx context.Context, baseURL, token, kind string) ([]qode
 			if name == "" {
 				name = item.ID
 			}
-			items = append(items, qoderCatalogItem{ID: item.ID, Name: name})
+			entry := qoderCatalogItem{ID: item.ID, Name: name}
+			if kind == "agents" {
+				entry.ApprovalTools, entry.CustomTools = qoderAgentToolWarnings(item.Tools)
+			}
+			items = append(items, entry)
 		}
 		if !result.HasMore {
 			return items, nil

@@ -55,6 +55,38 @@ func TestQoderCatalogRejectsMalformedAndRedactsErrors(t *testing.T) {
 	}
 }
 
+func TestQoderCatalogFlagsToolsThatPause(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(`{"data":[
+			{"id":"agent_plain","name":"Plain","tools":[{"type":"agent_toolset_20260401"}]},
+			{"id":"agent_ask","name":"Ask","tools":[
+				{"type":"agent_toolset_20260401","configs":[{"name":"bash","permission_policy":{"type":"always_ask"}},{"name":"web_fetch","enabled":false,"permission_policy":{"type":"always_ask"}},{"name":"read","permission_policy":{"type":"always_allow"}}]},
+				{"type":"mcp_toolset","mcp_server_name":"github","default_config":{"permission_policy":{"type":"always_ask"}}},
+				{"type":"custom","name":"lookup_order","input_schema":{"secret":"x"}},
+				"malformed"
+			]}
+		],"has_more":false}`))
+	}))
+	defer server.Close()
+	items, err := fetchQoderCatalog(context.Background(), server.URL, "private-token", "agents")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(items) != 2 || items[0].ApprovalTools != nil || items[0].CustomTools != nil {
+		t.Fatalf("plain agent flagged: %+v", items)
+	}
+	if got := strings.Join(items[1].ApprovalTools, ","); got != "bash,github/*" {
+		t.Fatalf("approval tools = %q", got)
+	}
+	if got := strings.Join(items[1].CustomTools, ","); got != "lookup_order" {
+		t.Fatalf("custom tools = %q", got)
+	}
+	raw, _ := json.Marshal(items)
+	if strings.Contains(string(raw), "secret") {
+		t.Fatal("tool schema leaked")
+	}
+}
+
 func TestQoderOverridesRejectedAtSave(t *testing.T) {
 	if err := (qoderOverrides{mcpConfig: json.RawMessage(`{}`)}).validate(); err != nil {
 		t.Fatalf("empty overrides rejected: %v", err)
