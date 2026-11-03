@@ -113,6 +113,16 @@ GitHub integration links the pull request back to the issue.
   readable) are sent as base64 image blocks in the task message;
   use a Qoder Agent model with image input. Other files are listed in the prompt
   as unavailable. Uploaded Qoder files are not deleted by the bridge.
+- Files returned in chat: files the agent delivers with `DeliverArtifacts`
+  during a chat turn (up to 10 MB each) are downloaded from Qoder Files and
+  uploaded to Multica with the task credential, which attaches them to the
+  agent's reply. Only files Qoder scopes to the run's session are passed on.
+  One file is transferred per poll, before the reply is completed. Larger
+  files, files of another session, files Qoder does not offer for download,
+  files Multica refuses, and files not yet attached when the bridge restarts
+  are logged and skipped; the reply still completes. The chat prompt states
+  the limit, so the agent tells the user when a file is too large instead of
+  saying it was sent. Issue runs do not return delivered files.
 - Progress uses cursor-paginated persisted events, polled every three seconds.
   Event IDs and opaque page cursors are tracked separately. A turn is successful
   only after its user message and `session.status_idle` with `end_turn`, without
@@ -147,7 +157,7 @@ GitHub integration links the pull request back to the issue.
 This is a PoC for issue runs and chat turns. Squad coordination, local
 directories, chat message attachments, binary non-image issue attachments, arbitrary Git hosts,
 tag/commit checkout, full comment-history hydration, interactive tool approval, custom client-side tools, terminal access,
-file transfer and billing/usage conversion are not implemented. Set up a Qoder
+files delivered by issue runs and billing/usage conversion are not implemented. Set up a Qoder
 Agent that can execute autonomously with its configured tools. `requires_action`
 ends the Multica run as failed with the stop reason; approvals are not granted
 implicitly.
